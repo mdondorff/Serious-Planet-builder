@@ -1,6 +1,6 @@
 ## 1. The network in the chunk raster (GEN-047), about a day
-- [ ] 1.1 Tests first (tier A, `generators`): two neighbouring chunks find the same corridor path through their shared border; the path starts and ends at the coarse cell centres and is zero-meander there; the inflow at the ring equals the coarse area crossing it; a chunk with no river has no corridor (spec: GEN-047)
-- [ ] 1.2 `generators::anet::Network`: the coarse receivers, area and heights of a `CoupledState` by chunk, the corridor polyline with the position-only meander, the initial fine heights (coarse upsampled plus the base field's detail)
+- [x] 1.1 Tests first (tier A, `generators`): two neighbouring chunks find the same corridor path through their shared border; the path starts and ends at the coarse cell centres and is zero-meander there; the inflow at the ring equals the coarse area crossing it; a chunk with no river has no corridor (spec: GEN-047)
+- [x] 1.2 `generators::anet::Network`: the coarse receivers, area and heights of a `CoupledState` by chunk, the corridor polyline with the position-only meander, the initial fine heights (coarse upsampled plus the base field's detail)
 - [ ] 1.3 numerics-reviewer; verifier; PR
 
 ## 2. A-net incision (GEN-048, GEN-049, GEN-050), about two days

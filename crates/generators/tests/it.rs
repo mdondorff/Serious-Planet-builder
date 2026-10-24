@@ -1,3 +1,5 @@
+#[path = "anet_network.rs"]
+mod anet_network;
 #[path = "block_order.rs"]
 mod block_order;
 #[path = "body_keys.rs"]
