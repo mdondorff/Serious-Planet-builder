@@ -1764,6 +1764,7 @@ mod tests {
             fine: 0,
             quadrants: 0b1111,
             state,
+            chunk_weight: 1.0,
         };
         let nodes: Vec<_> =
             [TileState::Exact, TileState::Exact, TileState::Stale, TileState::StandIn, TileState::Previewed, TileState::Exact]

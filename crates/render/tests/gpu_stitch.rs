@@ -38,6 +38,7 @@ fn draw(tile: TileId, data: &planet_generators::compact::CompactTile, camera: &C
         fine,
         quadrants: 0b1111,
         state: planet_frame::TileState::default(),
+        chunk_weight: 1.0,
     }
 }
 

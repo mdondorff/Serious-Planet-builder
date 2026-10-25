@@ -177,6 +177,7 @@ fn draw_of(req: &TerrainRequest, tile: TileId, r: ResidentTile) -> TerrainDraw {
         fine: 0,
         quadrants: ALL_QUADRANTS,
         state: TileState::Exact,
+        chunk_weight: 1.0,
     }
 }
 

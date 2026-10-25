@@ -71,6 +71,20 @@ impl WorldTerrain {
         }
         put_i32(&mut f, &[(entries.len() / 4) as i32]);
         put_i32(&mut f, &entries);
+        // The ring of base heights just outside the core (the halo rows the symmetric gate rule reads): west (i0-1), east (i0+per), north (j0-1), south (j0+per), each `per` values along the edge.
+        let ring = |di: i64, dj: i64, along_i: bool| -> Vec<f64> {
+            (0..per as i64)
+                .map(|t| {
+                    let (i, j) = if along_i { (c0.i as i64 + t, c0.j as i64 + dj) } else { (c0.i as i64 + di, c0.j as i64 + t) };
+                    let cell = planet_generators::chunkfield::Cell { face: c0.face, i: i as u32, j: j as u32 };
+                    reg.index_of(cell).map_or(f64::NAN, |x| net.base_z[x])
+                })
+                .collect()
+        };
+        put_f64(&mut f, &ring(-1, 0, false));
+        put_f64(&mut f, &ring(per as i64, 0, false));
+        put_f64(&mut f, &ring(0, -1, true));
+        put_f64(&mut f, &ring(0, per as i64, true));
         let ncorr = net.corridor[..core].iter().filter(|b| **b).count();
         let mut line = format!(
             "chunk {tag} lat {lat_deg} lon {lon_deg}: origin face {} i {} j {}, corridor cells in core {ncorr}, exits {}, entries {}",

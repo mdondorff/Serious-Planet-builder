@@ -4,8 +4,8 @@
 - [x] 1.3 The compact builder stores the change plane (tile flag, plane of f32); numerics-reviewer
 
 ## 2. The node weight (STRM-047), about half a day
-- [ ] 2.1 Tests first: the node record carries `chunk_weight`; a tile near a chunk border takes the minimum of the weights of the chunks it reads; `node_bytes` grows by 4 (spec: STRM-047)
-- [ ] 2.2 `ChunkFade::tile_weight` into the plan's node record; `FrameCounts` follows
+- [x] 2.1 Tests first: the draw plan's node carries `chunk_weight`; a tile near a chunk border takes the minimum of the weights of the chunks it reads (spec: STRM-047). The byte record (`NODE_RECORD_BYTES`, `node_bytes`) grows by 4 with the shader in step 3, where its layout is read
+- [x] 2.2 `ChunkFade::tile_weight` (minimum rule, default fade 1,500 ms) into `TerrainDraw::chunk_weight` through `ManagedLoop::set_chunk_fade`; the window turns it on with the chunk view
 
 ## 3. The shader and its mirrors (REND-039), about a day
 - [ ] 3.1 Tests first: with `w = 1` or no change plane the CPU mirror equals the old arithmetic bit for bit; at `w = 0` the drawn height is the base's; the shader scan finds the new binding and word offsets (spec: REND-039)

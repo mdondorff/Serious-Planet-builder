@@ -48,7 +48,36 @@ Closed: 2026-10-25
 - The band is measured from the coarse polyline of this run; when the run changes (rho 1 rebuild) the route changes with it, and the polyline's own 1 km meander (a function of position) is part of what A removes.
 - Timing is Dijkstra on a band in one thread without the base read (about 2 s of the chunk's 4 s) and without the solve.
 
+## Addendum: the rebuilt store (bake v5, new run; 2026-10-25)
+Same method, same code on main's current key; tables `table_rebuilt.md`, raw `new_<site>.txt`. Sites: lowland (-11.1657, 23.0493), site 2 (10.4575, -19.1001), and, because the old hills site (-37.6958, 3.1397) holds no corridor in the new run, the two steepest rivers of the new run in its place: `hillsA` (37.7175, 134.0294; river 6.0e9 m2, ground 4.6 to 5.5 km) and `hillsB` (8.972, -16.2378; 5.1e9 m2, ground 3.6 to 4.0 km). `lowN` and `s2W` are the chunks across the exit border of `low` and `s2`, dumped for the border check. Today's H1 bed on all corridor links, effective bed (lower of anchor and ground) climbing: low 334 of 970, lowN 311 of 889, s2 0 of 965, s2W 0 of 985, hillsA 773 of 1436, hillsB 316 of 1071.
+
+| Site | Cut max under the running-minimum bed, m: B coarse / A W 1 km / A2sym G 0.5 km | Cut length over 5 m, m: B / A / A2sym | Links rising downstream: B / A | Sinuosity 1 km, 4 km (median): B / A | Capped bed (10 m) climbs: B / A |
+|---|---|---|---|---|---|
+| low | 9.9 / 4.7 / 5.0 | 2316 / 0 / 0 | 334 / 123 | 1.29, 1.43 / 1.08, 1.08 | 0 / 0 |
+| lowN | 11.7 / 9.1 / 9.4 | 6308 / 4277 / 4197 | 311 / 164 | 1.25, 1.35 / 1.03, 1.05 | 11 / 0 |
+| s2 | 9.1 / 3.6 / 2.5 | 2741 / 0 / 0 | 309 / 66 | 1.29, 1.45 / 1.08, 1.08 | 0 / 0 |
+| s2W | 32.0 / 4.4 / 3.6 | 4825 / 0 / 0 | 347 / 112 | 1.24, 1.47 / 1.03, 1.04 | 124 / 0 |
+| hillsA | 854 / 779 / 603 | 10581 / 3425 / 3387 | 790 / 417 | 1.28, 2.05 / 1.11, 1.33 | 578 / 294 |
+| hillsB | 169 / 88 / 25 | 4090 / 1248 / 1170 | 424 / 155 | 1.38, 1.60 / 1.08, 1.12 | 234 / 98 |
+
+- **A holds on the new run.** At the two lowland-type chunks and site 2 it removes the cut over 5 m or most of it (low, s2, s2W: 0 m over 5 m against 2.3 to 4.8 km), cuts the rising links by 2 to 5 times, and costs 16 to 120 ms in the band (A2sym 80 to 530 ms with the gates and the band round both ends) against about 4 s per chunk today.
+- **Endpoints dominate the steep chunks.** `hillsA`: the coarse river enters at 4760 m and leaves at 5490 m (730 m uphill over 12.6 km), so every path needs a cut of 760 to 850 m; local routing within the band cannot change that. Letting the entry and exit move 1 km along their borders (gate, the lower of this chunk's and the neighbour's ground) cuts it to 209 m (mean 27 m against 158 m); the symmetric gate at 0.5 km gives 603 m, at 1 km 209 m. `hillsB`: 169 m to 25 m with a 0.5 km gate (mean 19 m to 4 m). The coarse network of this run climbs over ground that the base has; a path inside any band round it inherits the climb. This is the argument for a tolerance of the border point and, above it, for routing the coarse run on the base.
+- **The symmetric gate has a price.** Taking the lower of the two rows' ground at a position can leave this chunk's own cell higher than its best: at G 1 km the lowland-type chunks get worse than at 0.5 km (low 5.0 to 6.7 m, lowN 9.4 to 12.0 m, s2W 3.6 to 9.6 m cut max); at 0.5 km they are as good as the unsymmetric gate or better. A tolerance of 0.5 km is the better choice on these data, 1 km only on the steep chunks (hillsA 603 to 209 m).
+- **Sinuosity.** The coarse path: 1.24 to 1.38 at 1 km, 1.35 to 2.05 at 4 km. A: 1.03 to 1.11 at 1 km, 1.04 to 1.33 at 4 km. The local route is nearly straight on the lowland-type chunks (1.03 to 1.08), which the SPIKE-40 target (1.3 to 2 for lowland rivers) would not accept; a bend term or a narrow band is needed (W 0.5 km did not change it: 1.06 to 1.08).
+- **Moved-gate border check (symmetric rule).** The rule: along the shared edge, within +-G cells of the lower of the two coarse cells' tangential positions (the two cells of a diagonal link differ by one along the edge; the first version centred on this chunk's own cell and disagreed by 6 cells at G 1 km at the lowland border), pick the position with the lowest of min(this row's ground, the neighbour's row's ground); ties to the lower position; each chunk reads the other's row from its halo. Result on two shared borders, both directions, all four pairs agree:
+
+| Border | G | Chunk 1's exit cell (global i, j) | Chunk 2's entry cell | Same position along the edge, cells adjacent across it |
+|---|---|---|---|---|
+| low to lowN (face 0) | 0.5 km | (941523, 454784) | (941523, 454783) | yes |
+| low to lowN | 1 km | (941618, 454784) | (941618, 454783) | yes |
+| s2 to s2W (face 0) | 0.5 km | (358112, 775503) | (358111, 775503) | yes |
+| s2 to s2W | 1 km | (358112, 775407) | (358111, 775407) | yes |
+
+  The gate moved the exit 24 cells (0.5 km window) to 119 cells along the edge at the lowland border and 29 to 125 cells at site 2's. The bed value at the moved cell is the unchanged ground-based rule; a neighbour's bed at the border is not compared (the bed is not part of the router).
+- **Not covered.** Corners (a gate window that reaches the end of an edge or another face), a river that enters and leaves on the same edge, junctions, and the second coarse river. The determinism hash was only run at one worker for these sites (the earlier check at 1 and 8 workers still holds by construction).
+
 ## Visuals
+- `images/rebuilt_s2.png` and `images/rebuilt_hillsA.png`: the rebuilt-store chunks, coarse path (red), local route (cyan) and A2sym G 0.5 km (green); site 2 is a gentle gain, `hillsA` shows the 730 m uphill coarse river.
 - `images/h2.png`: hillshade of the hilly chunk with the coarse path (red) and two local routes (cyan, blue), and the ground and running-minimum bed along each. The coarse path wanders and holds a dam 3 km long near 3524 m; the local route descends monotonically.
 - `images/low.png`: the lowland chunk; the ground between the head and the exit rises 13 m whichever path is taken.
 - `images/h1.png`: the corner chunk.

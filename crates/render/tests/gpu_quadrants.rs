@@ -109,6 +109,7 @@ fn a_node_drawn_over_some_quadrants_covers_exactly_those_quadrants_of_its_tile()
         fine: 0,
         quadrants,
         state: planet_frame::TileState::default(),
+        chunk_weight: 1.0,
     };
     let plan = |quadrants: u8| TerrainPlan {
         size: SIZE,
