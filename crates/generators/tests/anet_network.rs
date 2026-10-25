@@ -289,7 +289,7 @@ fn routed_law() -> planet_generators::anet::AnchorLaw {
     }
 }
 
-// spec: GEN-066
+// spec: GEN-066, GEN-067
 #[test]
 fn neighbouring_chunks_find_the_same_routed_corridor_and_beds_through_their_shared_border() {
     let lat = ChunkLattice::new(32).unwrap();
@@ -444,4 +444,46 @@ fn a_tributary_hangs_above_the_stem_at_a_confluence_with_no_climb_and_never_over
         // Where the ground is smooth no link climbs; in a hollow the bed is held at the ground, a flat or a short rise out of it at worst.
         assert!(climbs_allowed || worst_climb <= 0.05, "depth {depth}: a link climbs by {worst_climb} m");
     }
+}
+
+// spec: GEN-067
+#[test]
+fn the_routed_corridor_beds_and_links_of_a_fork_do_not_depend_on_the_halo_or_on_the_thread() {
+    let lat = ChunkLattice::new(32).unwrap();
+    let mut law = routed_law();
+    law.slide_m = 400.0;
+    law.slide_steep_m = 400.0;
+    law.head_m = 400.0;
+    // The same chunk at two halos: every shared cell has the same corridor flag, bed bits and next cell, across the confluence.
+    let (small, wide) = (region(&lat, chunk(1002), 20), region(&lat, chunk(1002), 40));
+    let (ns, nw) =
+        (Network::build_with(&Fork, &Hollow(0.0), &lat, &small, R, &law), Network::build_with(&Fork, &Hollow(0.0), &lat, &wide, R, &law));
+    let mut compared = 0;
+    for (i, &cell) in small.cells.iter().enumerate() {
+        let j = wide.index_of(cell).expect("the small region lies in the wide one");
+        assert_eq!(ns.corridor[i], nw.corridor[j], "corridor at {cell:?}");
+        if ns.corridor[i] {
+            assert_eq!(ns.anchor_z[i].to_bits(), nw.anchor_z[j].to_bits(), "bed at {cell:?}");
+            if ns.next[i] != NO_NEXT && nw.next[j] != NO_NEXT {
+                assert_eq!(small.cells[ns.next[i] as usize], wide.cells[nw.next[j] as usize], "next cell at {cell:?}");
+            }
+            compared += 1;
+        }
+    }
+    assert!(compared > 30, "{compared} corridor cells compared");
+    // The same network built on four threads at once is the same bits: the router holds no shared state.
+    let reference: Vec<u64> = wide.cells.iter().enumerate().map(|(i, _)| nw.anchor_z[i].to_bits()).collect();
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..4)
+            .map(|_| {
+                scope.spawn(|| {
+                    let n = Network::build_with(&Fork, &Hollow(0.0), &lat, &wide, R, &law);
+                    n.anchor_z.iter().map(|z| z.to_bits()).collect::<Vec<u64>>()
+                })
+            })
+            .collect();
+        for h in handles {
+            assert_eq!(h.join().expect("a thread"), reference, "a build on another thread differs");
+        }
+    });
 }

@@ -11,7 +11,7 @@ ADR 0081 (accepted, owner 2026-10-25): the corridor follows the coupled run's 4.
 The ADR slides the point where the path crosses a chunk border. Here the node (the coarse cell's centre in the path) slides, whatever the chunk borders: a chunk is a whole coarse cell (level-11 tile), so the border points are the nodes' neighbours and need no rule about two chunks' edge rows; both neighbours read the same node because it is a function of the coarse cell alone. Same tolerance (0.5 km, 1 km steep).
 
 ## Tests
-- Tier A: neighbouring chunks find the same routed corridor, beds and links; the routed path goes round a ridge the coarse path crosses; all segments through a cell share its node, which lies on ground no higher than the centre within the radius; the bed lies under the ground, never climbs downstream, and stays within the cut cap under a forcing ridge.
+- Tier A: neighbouring chunks, and one chunk at two halos across a fork, on four threads, find the same routed corridor, beds and links (GEN-067); the routed path goes round a ridge the coarse path crosses; all segments through a cell share its node, which lies on ground no higher than the centre within the radius; the bed lies under the ground, never climbs downstream, and stays within the cut cap under a forcing ridge.
 - Known answer of the synthetic chunk re-pinned (declared).
 
 ## Limits
