@@ -293,6 +293,8 @@ struct Running {
     coupled_shown: Option<planet_generators::coupled::CoupledLens>,
     /// Whether the frame loop counts the world's chunk stage (STRM-039): set once the world has one.
     chunks_on: bool,
+    /// The slots, versions and uploads of the horizon shadows (REND-038).
+    horizon: crate::horizonworld::HorizonRig,
     coupled_standing: Standing,
     /// The item markers of the globe overview, the ones the overview shows this frame (window pixels) and the one under the cursor.
     markers: Vec<Marker>,
@@ -499,6 +501,7 @@ impl App<'_> {
             coupled_asked: None,
             coupled_shown: None,
             chunks_on: false,
+            horizon: Default::default(),
             coupled_standing: Standing::Idle,
             markers: cfg.markers.clone(),
             screen_markers: Vec::new(),
@@ -897,6 +900,11 @@ impl App<'_> {
                 };
             }
             st.rig.renderer.set_scale_refs(&st.scale_refs);
+            // The horizon shadows (REND-038): the chunk maps in their slots and the coarse map, for the lit frames over a world with a chunk stage.
+            if let Some(lit) = plan.lit.as_ref().filter(|_| st.chunks_on) {
+                let tiles: Vec<TileId> = plan.nodes.iter().map(|n| n.tile).collect();
+                st.horizon.frame(self.world, ctx, &mut st.rig.renderer, &tiles, plan.camera.position, lit.sun_dir);
+            }
             // The regions overlay (VIEW-030): the region items of the editor's definition nearest the camera, decided here, drawn by the renderer.
             if plan.lit.is_some_and(|l| l.overlay == planet_frame::look::Overlay::Regions) {
                 let list = st.edit.as_ref().map(|e| e.region_list(plan.camera.position.0)).unwrap_or_default();

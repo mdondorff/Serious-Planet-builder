@@ -4,6 +4,8 @@ mod gpu_edit_perf;
 mod gpu_envelope_perf;
 #[path = "gpu_flight.rs"]
 mod gpu_flight;
+#[path = "gpu_horizon_rig.rs"]
+mod gpu_horizon_rig;
 #[path = "gpu_modes.rs"]
 mod gpu_modes;
 #[path = "gpu_preflight.rs"]
