@@ -4,7 +4,6 @@
 pub mod anetworld;
 pub mod coupledworld;
 pub mod crash;
-pub mod stall;
 pub mod editperf;
 pub mod editscale;
 pub mod editwin;
@@ -23,6 +22,7 @@ pub mod preflightperf;
 pub mod reproworld;
 pub mod sheet;
 pub mod skeleton;
+pub mod stall;
 pub mod stills;
 pub mod streamperf;
 pub mod sweep;

@@ -847,13 +847,14 @@ impl WorldTerrain {
     pub fn field(&self) -> Result<Box<dyn HeightField + '_>, String> {
         let started = std::time::Instant::now();
         let def = self.definition();
-        let layer = crate::stall::read(&self.chunks, "chunk stage lock (read)").as_ref().map(|c| planet_generators::chunkfield::ChunkLayer {
-            lat: c.lat,
-            radius_m: self.radius_m,
-            top: c.top,
-            stage: c.stage.clone(),
-            ready: c.manager.snapshot(),
-        });
+        let layer =
+            crate::stall::read(&self.chunks, "chunk stage lock (read)").as_ref().map(|c| planet_generators::chunkfield::ChunkLayer {
+                lat: c.lat,
+                radius_m: self.radius_m,
+                top: c.top,
+                stage: c.stage.clone(),
+                ready: c.manager.snapshot(),
+            });
         let built = field_chain_with(self.kind, &def, self.src.as_ref(), self.bake_key, self.bound_water, layer.as_ref());
         // The lens over the whole chain (GEN-043); while the run is not ready the field is the plain one.
         let built = match (self.coupled_lens(), self.coupled.standing()) {
