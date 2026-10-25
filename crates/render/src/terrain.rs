@@ -81,6 +81,7 @@ struct Node {
     // The fourth lanes of the first six phases carry the ground detail anchor (LOOK-009), so the record does not grow: lanes 0 to 2 the integer
     // cell of the tile origin at 1/32 m (floor of origin * 32, from f64 on the CPU) as bits of an i32, lanes 3 to 5 the fraction of origin * 32 in cells. The
     // noise octaves are anchored to the world by it; the cell is an exact integer used only for shifts and hashing, no planet-radius float is formed (CON-11).
+    // The fourth lane of phase 6 is the fade of the tile's chunk change, `1 - w` (REND-039), read only for a tile whose reference points at a plane.
     phase: array<vec4<f32>, 9>,
     // The unit up vector of the tile origin (planet-fixed axes) and the inverse of the origin's distance from the planet centre:
     // up at a point `local` metres from the origin is normalize(xyz + local * w), formed from tile-local numbers only (CON-11).
@@ -1307,7 +1308,9 @@ impl TerrainRenderer {
         // The share's node-record bytes bound the ring: per node a record, an argument record and a tile reference in each of the
         // RING sets.
         let per_node = NODE_BYTES + DRAW_RECORD_BYTES + REF_BYTES;
-        let max_nodes = (pool.node_record_bytes.saturating_sub(RING as u64 * GLOBALS_BYTES) / (RING as u64 * per_node)) as usize;
+        // Each set also holds the fade planes (REND-039), a fixed size.
+        let fixed = RING as u64 * (GLOBALS_BYTES + REF_BYTES * (FADE_PLANES * fade_plane_vec4s(cells)) as u64);
+        let max_nodes = (pool.node_record_bytes.saturating_sub(fixed) / (RING as u64 * per_node)) as usize;
         let node_capacity = 256.min(max_nodes.max(1));
         let entry = |binding, ty| wgpu::BindGroupLayoutEntry {
             binding,
@@ -1918,6 +1921,13 @@ impl TerrainRenderer {
         if id.level() < planet_generators::compact::COMPACT_MIN_LEVEL {
             return Err(ExecError::CompactUnsupported { tile: id });
         }
+        // A change plane has one value per texel: a short or long one would be padded or cut on its way to the GPU (REND-039).
+        if let Some(change) = &tile.change {
+            let want = (cells as usize + 1) * (cells as usize + 1);
+            if change.len() != want {
+                return Err(ExecError::BadResource { id, expected: want, got: change.len() });
+            }
+        }
         let slot = match at {
             Some(slot) => slot,
             None => self.pools.acquire(PoolKind::Main, self.frame).ok_or(ExecError::PoolFull { tile: id, pool: PoolKind::Main })?,
@@ -2101,6 +2111,7 @@ impl TerrainRenderer {
     pub fn evict(&mut self, tile: planet_core::TileId) -> bool {
         let Some(r) = self.tiles.remove(&tile) else { return false };
         self.owners.remove(&r.slot);
+        self.planes.remove(&r.slot.index);
         self.pools.release(r.slot, self.frame);
         true
     }
@@ -2109,6 +2120,7 @@ impl TerrainRenderer {
     pub fn forget(&mut self, tile: planet_core::TileId) -> bool {
         let Some(r) = self.tiles.remove(&tile) else { return false };
         self.owners.remove(&r.slot);
+        self.planes.remove(&r.slot.index);
         true
     }
 
@@ -2332,24 +2344,31 @@ impl TerrainRenderer {
             // The fade planes of the nodes whose change is still coming in (REND-039): after the references, `fade_plane_vec4s` entries each; the
             // node's reference holds the entry index of its plane plus one (0: none), the node record the fade.
             let stride = fade_plane_vec4s(self.cells);
-            let mut planes: Vec<u8> = Vec::new();
+            // The nodes whose change is still coming in and that have a plane, ordered by tile id so that the ones past `FADE_PLANES` are the same
+            // from one frame to the next whatever the order of the plan: a node never flips between faded and final for want of room.
+            let mut fading: Vec<(u64, usize)> = plan
+                .nodes
+                .iter()
+                .enumerate()
+                .filter(|(_, d)| d.chunk_weight < 1.0 && self.planes.contains_key(&self.tiles[&d.tile].slot.index))
+                .map(|(i, d)| (d.tile.raw(), i))
+                .collect();
+            fading.sort_unstable();
+            stats.fade_overflow += fading.len().saturating_sub(FADE_PLANES) as u32;
+            fading.truncate(FADE_PLANES);
+            stats.faded_tiles += fading.len() as u32;
+            let mut planes = vec![0u8; fading.len() * REF_BYTES as usize * stride];
+            let mut position = vec![0u32; plan.nodes.len()];
+            for (p, &(_, i)) in fading.iter().enumerate() {
+                let plane = &self.planes[&self.tiles[&plan.nodes[i].tile].slot.index];
+                let start = p * REF_BYTES as usize * stride;
+                planes[start..start + 4 * plane.len()].copy_from_slice(&f32_bytes(plane));
+                position[i] = (self.node_capacity + p * stride + 1) as u32;
+            }
             for (i, d) in plan.nodes.iter().enumerate() {
                 let r = &self.tiles[&d.tile];
                 let local = r.slot.index % self.pool.block_slots;
-                let mut plane_ref = 0u32;
-                if d.chunk_weight < 1.0 {
-                    if let Some(plane) = self.planes.get(&r.slot.index) {
-                        if (planes.len() / (REF_BYTES as usize * stride)) < FADE_PLANES {
-                            plane_ref = (self.node_capacity + planes.len() / REF_BYTES as usize + 1) as u32;
-                            let start = planes.len();
-                            planes.extend(f32_bytes(plane));
-                            planes.resize(start + REF_BYTES as usize * stride, 0);
-                            stats.faded_tiles += 1;
-                        } else {
-                            stats.fade_overflow += 1;
-                        }
-                    }
-                }
+                let plane_ref = position[i];
                 let words = [local * slot_words, plane_ref, r.slot.index, 0u32];
                 for (k, v) in words.iter().enumerate() {
                     bytes[i * REF_BYTES as usize + 4 * k..i * REF_BYTES as usize + 4 * k + 4].copy_from_slice(&v.to_le_bytes());

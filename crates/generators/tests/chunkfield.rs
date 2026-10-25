@@ -498,6 +498,11 @@ fn the_mirror_of_the_vertex_stage_draws_the_final_height_at_weight_one_the_base_
             let k = j * w + i;
             let (fin, base0, half) =
                 (with.shade_vertex(k).height, with.shade_vertex_faded(k, 1.0).height, with.shade_vertex_faded(k, 0.5).height);
+            // The mirror's own arithmetic, exactly: the origin height plus the texel's tile-relative height less fade times change, in f32.
+            for (fade, got) in [(1.0f32, base0), (0.5, half), (0.0, fin)] {
+                let want = with.h_origin + (with.rel_height(i, j) - fade * plane[k]);
+                assert_eq!(got.to_bits(), want.to_bits(), "vertex ({i}, {j}) at fade {fade}");
+            }
             worst0 = worst0.max((f64::from(fin) - f64::from(plane[k]) - f64::from(base0)).abs());
             worst_half = worst_half.max((f64::from(fin) - 0.5 * f64::from(plane[k]) - f64::from(half)).abs());
         }

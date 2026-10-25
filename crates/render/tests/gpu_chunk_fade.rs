@@ -204,3 +204,107 @@ fn a_tile_with_a_change_plane_is_drawn_at_the_base_at_weight_zero_final_at_one_a
     assert!(moved > 0.02, "the fade changes the picture ({moved}): the change is tens of metres on a tile of 300 m");
     assert_eq!(fades[2].rgba, at_one.rgba, "the weight-1 frame of the loop is the same frame");
 }
+
+/// Two neighbouring tiles of the chunk, both with planes, drawn in one plan: the second plane sits after the first in the frame's buffer.
+fn two_tiles(s: &Scene) -> (Vec<CompactTile>, TerrainPlan) {
+    let ids = [s.id, TileId::new(Face(2), 15, 16 * 1000 + 6, 16 * 1000 + 7).unwrap()];
+    let tiles: Vec<CompactTile> = ids.iter().map(|id| compact_tile_field(&s.chunk, &TangentWarp, *id, CELLS, R)).collect();
+    assert!(tiles.iter().all(|t| t.change.is_some()), "both read a change");
+    let mid = (ids[0].center_direction(&TangentWarp) + ids[1].center_direction(&TangentWarp)).normalized();
+    let aspect = f64::from(SIZE.0) / f64::from(SIZE.1);
+    let camera = Camera::looking_at_centre(
+        PlanetFixed(mid * (R + f64::from(tiles[0].h_origin) + 700.0)),
+        Vec3::new(0.0, 0.0, 1.0),
+        0.9,
+        aspect,
+        1.0,
+    );
+    let mut plan = s.plan.clone();
+    plan.camera = camera;
+    plan.view_projection = camera.view_projection();
+    plan.nodes = tiles
+        .iter()
+        .zip(ids)
+        .map(|(t, id)| {
+            let rel = t.origin.0 - camera.position.0;
+            TerrainDraw {
+                tile: id,
+                origin: t.origin,
+                camera_relative_origin: [rel.x as f32, rel.y as f32, rel.z as f32],
+                mesh_key: t.key,
+                ..s.plan.nodes[0].clone()
+            }
+        })
+        .collect();
+    (tiles, plan)
+}
+
+// spec: REND-039
+#[test]
+fn two_faded_tiles_each_read_their_own_plane_and_a_plan_over_the_limit_fades_the_same_nodes_whatever_its_order() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let s = scene();
+    let (tiles, plan) = two_tiles(&s);
+    let block_slots = 8 * 8;
+    let pool = || {
+        compact_format_pool_with(
+            (128 << 20) + 40 * u64::from(block_slots) * planet_generators::compact::slot_bytes(CELLS),
+            CELLS,
+            block_slots,
+            1,
+        )
+        .unwrap()
+    };
+    // Weight 0.25 for both: the second tile's plane is the second in the frame's buffer; the image equals the reference of both blended meshes.
+    let mut faded = plan.clone();
+    faded.nodes.iter_mut().for_each(|n| n.chunk_weight = 0.25);
+    let mut r = TerrainRenderer::with_pools(&ctx, SIZE, CELLS, pool());
+    for t in &tiles {
+        r.upload_tile(&ctx, t).unwrap();
+    }
+    let (_, stats) = r.render(&ctx, &faded, false).unwrap();
+    assert_eq!((stats.faded_tiles, stats.fade_overflow), (2, 0));
+    let image = r.read_color(&ctx);
+    let blend = |w: f64| Blend { base: Reference(3), chunk: &s.chunk, level: 15, w };
+    let meshes: Vec<_> = faded.nodes.iter().map(|n| tile_mesh_field(&blend(0.25), &TangentWarp, n.tile, CELLS, R)).collect();
+    let mut ref_plan = faded.clone();
+    for (n, m) in ref_plan.nodes.iter_mut().zip(&meshes) {
+        let rel = m.origin.0 - faded.camera.position.0;
+        n.mesh_key = m.key;
+        n.origin = m.origin;
+        n.camera_relative_origin = [rel.x as f32, rel.y as f32, rel.z as f32];
+    }
+    let reference = execute_reference(&ctx, &ref_plan, &[&meshes[0], &meshes[1]]).unwrap();
+    let wrong = differing(&reference, &image, 12) as f64 / (SIZE.0 * SIZE.1) as f64;
+    println!("two faded tiles: {wrong:.5} of the pixels differ from the reference");
+    assert!(wrong <= 0.004, "{wrong}");
+    // The order of the plan does not change who gets a plane: the same two nodes are faded and the image is the same.
+    let mut swapped = faded.clone();
+    swapped.nodes.reverse();
+    let (_, stats2) = r.render(&ctx, &swapped, false).unwrap();
+    assert_eq!((stats2.faded_tiles, stats2.fade_overflow), (2, 0));
+    assert_eq!(r.read_color(&ctx).rgba, image.rgba, "the same picture whatever the order of the nodes");
+}
+
+// spec: REND-039
+#[test]
+fn a_change_plane_that_does_not_hold_one_value_per_texel_is_refused() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let s = scene();
+    let mut short = s.final_tile.clone();
+    short.change.as_mut().unwrap().pop();
+    let block_slots = 8 * 8;
+    let pool = compact_format_pool_with(
+        (128 << 20) + 40 * u64::from(block_slots) * planet_generators::compact::slot_bytes(CELLS),
+        CELLS,
+        block_slots,
+        1,
+    )
+    .unwrap();
+    let mut r = TerrainRenderer::with_pools(&ctx, SIZE, CELLS, pool);
+    let want = ((CELLS + 1) * (CELLS + 1)) as usize;
+    match r.upload_tile(&ctx, &short) {
+        Err(planet_render::ExecError::BadResource { expected, got, .. }) => assert_eq!((expected, got), (want, want - 1)),
+        other => panic!("a short plane must be refused: {other:?}"),
+    }
+}
