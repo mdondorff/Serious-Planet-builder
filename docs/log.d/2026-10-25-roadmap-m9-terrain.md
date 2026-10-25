@@ -1,0 +1,1 @@
+- 2026-10-25 **roadmap** (owner; opus-planner): realistic terrain becomes M9's likely main focus (hydrology and relief together were too much for one milestone); living surface, water and sky, settled world and quality move to M10 to M13; SPIKE-40 (hydrology targets) serves M8
