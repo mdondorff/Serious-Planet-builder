@@ -84,3 +84,11 @@ Scope: project (streaming cache, LOD, authored items; STRM-027, STRM-034)
 - SPIKE-29 assumed the post-edit plan cost was the stamp stage's bounds queries; a timer showed the selection walk re-hashing the reads of every tile it visits when the item revision moves, and a coarse tile's cover is about 20,000 summary nodes (about 10 ms each); the per-tile cost sums over threads, so wall time needs a stage timer, not a call counter.
 - An edit announced with where the items changed lets the cache keep every tile the change cannot reach (`SelectionCache::note_item_change`); the content keys stay the guarantee for anything not announced. Test the reach rule against the real tile hashes, on small bodies too: the touch test's relative margin is a millionth of `reach / R`.
 - Obsolete when the read set of a coarse tile stops listing its cover nodes one by one.
+
+## 2026-10-25 The chunk stage's 300 m depth is a clamp of a runaway: its corridor anchors lie far under the base ground
+Scope: generators::anet, app::anetworld (GEN-047, GEN-051; look review 1, `docs/milestones/M8/look-review-1-hills/`)
+- The unclamped solve of the chunk under the steepest-site channel cuts to -2659 m (16,125 of 369,664 core cells deeper than 250 m, 15,318 at the 300 m clamp); the second site cuts to -1322 m. Every cut channel is the same depth because `ANet::compute` clamps to `bound_m`, with vertical walls, which ADR 0074 caps at coarse tiles (121 to 129 of about 1750 plan nodes) and draws as spikes.
+- The corridor beds are anchored at the lower of the coupled run's height and the base; the run's heights lie 1.2 to 2.7 km under the base at those channels (anchor minus base, median -2596 m and -1221 m).
+- The coupled run compresses relief against the base: its height minus the base's at cell centres, median over river cells, is +111 m at 0 to 500 m ground, -164 m at 500 to 1000, -933 m at 1000 to 2500, -2686 m at 2500 to 5000, -4649 m over 5000. Anchors above the base are ignored (the minimum takes the base), so only the low band cuts mildly.
+- Tools: `chunk_incision_report` and `run_against_base_report` (`cargo run --release -p planet --example chunk_incision -- --store DIR --lat DEG --lon DEG | --run-vs-base`), `capped_nodes` in `stills.txt`.
+- Obsolete when the chunk stage's anchors are made consistent with the base field.

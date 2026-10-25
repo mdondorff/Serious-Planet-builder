@@ -205,3 +205,146 @@ impl WorldTerrain {
         Ok(true)
     }
 }
+
+impl WorldTerrain {
+    /// A diagnostic, not part of the viewer: the unclamped change of the A-net solve over the chunk holding `lat_deg`, `lon_deg` (the stage clamps its
+    /// change to `bound_m`): the distribution of the change, how many cells sit at the bound, and the change of the cut cells by drainage area.
+    pub fn chunk_incision_report(self: &Arc<Self>, lat_deg: f64, lon_deg: f64) -> Result<String, String> {
+        use planet_core::cube::TangentWarp;
+        use planet_core::{TileId, Vec3};
+        use planet_generators::chunkfield::{region, ChunkLattice};
+        let run = crate::coupledworld::load_stored(
+            &self.definition(),
+            self.store_dir(),
+            self.lattice_source(),
+            run_cells(self.res()),
+            COUPLED_STEPS,
+        )?
+        .ok_or("no stored coupled run")?;
+        let radius = self.radius_m();
+        let per = cells_per_chunk_for(radius, ANET_CELL_M);
+        let clat = ChunkLattice::new(per).ok_or("no chunk lattice")?;
+        let params = ANetParams::spike(ANET_HALO_M, clat.cell_m(radius));
+        let halo = params.halo_rings;
+        let stage = ANet { run: run.maps, base: Arc::new(WorldBase::new(self)), radius_m: radius, params };
+        let dir = Vec3::from_lat_lon(lat_deg.to_radians(), lon_deg.to_radians());
+        let tile = TileId::from_direction(&TangentWarp, dir, planet_generators::chunk::CHUNK_GRID_LEVEL);
+        let reg = region(&clat, tile, halo);
+        let s = stage.solve(&clat, &reg);
+        let net = planet_generators::anet::Network::build(&*stage.run, &*stage.base, &clat, &reg, radius);
+        let core = reg.core;
+        let mut anchors: Vec<f64> =
+            (0..reg.cells.len()).filter(|&c| !net.anchor_z[c].is_nan()).map(|c| net.anchor_z[c] - net.base_z[c]).collect();
+        anchors.sort_by(f64::total_cmp);
+        let mut change: Vec<f64> = (0..core).map(|c| s.z[c] - s.z_base[c]).collect();
+        let n = change.len();
+        let count = |f: &dyn Fn(f64) -> bool| change.iter().filter(|d| f(**d)).count();
+        let (pinned, deep, cut) = (count(&|d| d <= -299.999), count(&|d| d <= -250.0), count(&|d| d < -20.0));
+        let mut by_area: Vec<(f64, f64)> =
+            (0..core).filter(|&c| s.z[c] - s.z_base[c] < -20.0).map(|c| (s.area_m2[c], s.z[c] - s.z_base[c])).collect();
+        by_area.sort_by(|a, b| a.0.total_cmp(&b.0));
+        change.sort_by(f64::total_cmp);
+        let na = anchors.len();
+        let corridor = net.corridor.iter().filter(|c| **c).count();
+        let mut out = format!(
+            "corridor cells {corridor}, anchored cells {na}: anchor minus base: min {:.1} m, p10 {:.1}, p50 {:.1}, p90 {:.1}, max {:.1}
+",
+            anchors.first().copied().unwrap_or(f64::NAN),
+            anchors.get(na / 10).copied().unwrap_or(f64::NAN),
+            anchors.get(na / 2).copied().unwrap_or(f64::NAN),
+            anchors.get(na * 9 / 10).copied().unwrap_or(f64::NAN),
+            anchors.last().copied().unwrap_or(f64::NAN)
+        );
+        out += &format!(
+            "tile {tile:?}: {n} core cells of {:.1} m, halo {halo} rings
+",
+            clat.cell_m(radius)
+        );
+        out += &format!(
+            "change: min {:.1} m, p0.1% {:.1}, p1% {:.1}, p50 {:.2}, max {:.1}
+",
+            change[0],
+            change[n / 1000],
+            change[n / 100],
+            change[n / 2],
+            change[n - 1]
+        );
+        out += &format!(
+            "cells under -20 m: {cut}, under -250 m: {deep}, pinned at -300 m: {pinned}
+"
+        );
+        for q in [0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0] {
+            let i = (by_area.len().saturating_sub(1) as f64 * q) as usize;
+            if let Some((a, d)) = by_area.get(i) {
+                out += &format!(
+                    "  cut cells by area, quantile {q:.2}: area {a:.3e} m2, change {d:.1} m
+"
+                );
+            }
+        }
+        Ok(out)
+    }
+}
+
+impl WorldTerrain {
+    /// A diagnostic, not part of the viewer: the coupled run's height minus the base field's at the centre of its cells, by ground band of the base:
+    /// over the river cells (drainage area of at least `min_area_m2`) and over every `stride`th land cell. The chunk stage anchors its corridor beds
+    /// to the run's heights, so this is how far below the base ground an anchor lies.
+    pub fn run_against_base_report(self: &Arc<Self>, stride: usize, min_area_m2: f64) -> Result<String, String> {
+        let run = crate::coupledworld::load_stored(
+            &self.definition(),
+            self.store_dir(),
+            self.lattice_source(),
+            run_cells(self.res()),
+            COUPLED_STEPS,
+        )?
+        .ok_or("no stored coupled run")?;
+        let maps = run.maps;
+        let lat = maps.lattice();
+        let (n, stride) = (lat.n(), stride.max(1));
+        let base = WorldBase::new(self);
+        let rec = maps.receivers();
+        let rivers: Vec<usize> = (0..lat.len())
+            .filter(|&c| rec[c] != planet_generators::coupled::NONE && f64::from(maps.network_area_m2(c)) >= min_area_m2)
+            .collect();
+        let land: Vec<usize> = (0..6)
+            .flat_map(|f| {
+                (stride / 2..n).step_by(stride).flat_map(move |j| (stride / 2..n).step_by(stride).map(move |i| f * n * n + j * n + i))
+            })
+            .collect();
+        let measure = |cells: &[usize]| -> Vec<(f64, f64)> {
+            let dirs: Vec<Vec3> = cells.iter().map(|&c| lat.direction(c)).collect();
+            let h = base.base_heights(&dirs);
+            cells.iter().zip(h).filter(|(_, h)| *h > 0.0).map(|(&c, h)| (h, f64::from(maps.z(c)) - h)).collect()
+        };
+        let (land, rivers) = (measure(&land), measure(&rivers));
+        let bands = [(0.0, 500.0), (500.0, 1000.0), (1000.0, 2500.0), (2500.0, 5000.0), (5000.0, f64::INFINITY)];
+        let pct = |v: &mut Vec<f64>, q: f64| {
+            v.sort_by(f64::total_cmp);
+            v.get(((v.len() as f64 - 1.0) * q).round() as usize).copied().unwrap_or(f64::NAN)
+        };
+        let mut out = String::from(
+            "# coupled run height minus base height (m) at cell centres, by base ground band
+# band_m cells_land p10 p50 p90 cells_river p10 p50 p90
+",
+        );
+        for (lo, hi) in bands {
+            let pick = |all: &[(f64, f64)]| -> Vec<f64> { all.iter().filter(|(h, _)| *h >= lo && *h < hi).map(|(_, d)| *d).collect() };
+            let (mut l, mut r) = (pick(&land), pick(&rivers));
+            let name = if hi.is_finite() { format!("{lo:.0}-{hi:.0}") } else { format!(">{lo:.0}") };
+            out += &format!(
+                "{name} {} {:.0} {:.0} {:.0} {} {:.0} {:.0} {:.0}
+",
+                l.len(),
+                pct(&mut l, 0.1),
+                pct(&mut l, 0.5),
+                pct(&mut l, 0.9),
+                r.len(),
+                pct(&mut r, 0.1),
+                pct(&mut r, 0.5),
+                pct(&mut r, 0.9)
+            );
+        }
+        Ok(out)
+    }
+}

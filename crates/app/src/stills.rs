@@ -834,7 +834,7 @@ pub fn capture_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
     }
     std::fs::create_dir_all(&dir).map_err(err)?;
     let mut index =
-        notes + "# pose width height eye_lat_deg eye_lon_deg eye_height_m heading_deg pitch_deg sun_local_hours chunks waited_s\n";
+        notes + "# pose width height eye_lat_deg eye_lon_deg eye_height_m heading_deg pitch_deg sun_local_hours chunks waited_s nodes capped_nodes\n";
     for pose in &config.poses {
         let pose = &Pose { heading_deg: (pose.heading_deg + heading_base).rem_euclid(360.0), ..pose.clone() };
         let started = Instant::now();
@@ -934,7 +934,7 @@ pub fn capture_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         )
         .map_err(err)?;
         index += &format!(
-            "{} {} {} {:.5} {:.5} {:.1} {} {} {} {} {:.1}\n",
+            "{} {} {} {:.5} {:.5} {:.1} {} {} {} {} {:.1} {} {}\n",
             pose.name,
             size.0,
             size.1,
@@ -945,7 +945,9 @@ pub fn capture_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
             pose.pitch_deg,
             pose.sun_local_hours,
             settled.chunks,
-            settled.waited_s
+            settled.waited_s,
+            plan.nodes.len(),
+            plan.nodes.iter().filter(|n| n.capped).count()
         );
     }
     std::fs::write(dir.join("stills.txt"), index).map_err(err)?;
