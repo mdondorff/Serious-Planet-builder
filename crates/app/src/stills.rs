@@ -367,7 +367,12 @@ fn anchor_direction(anchor: Anchor, maps: &planet_generators::coupled::CoupledMa
                     best = Some((c, a));
                 }
             }
-            let (cell, _) = best.ok_or_else(|| format!("the coupled run has no land river at least {min_height_m} m high{}", if relief.is_some() { " in that relief" } else { "" }))?;
+            let (cell, _) = best.ok_or_else(|| {
+                format!(
+                    "the coupled run has no land river at least {min_height_m} m high{}",
+                    if relief.is_some() { " in that relief" } else { "" }
+                )
+            })?;
             let lat = maps.lattice();
             let here = lat.direction(cell);
             let there = lat.direction(rec[cell] as usize);
@@ -570,13 +575,25 @@ sun_declination_deg = 10
         // A radius under one cell sees the cell alone; one cell and a half sees the edge neighbours and the 1000 m range.
         assert_eq!(local_relief_m(&maps, c, 0.5 * cell_m), 0.0);
         assert_eq!(local_relief_m(&maps, c, 1.5 * cell_m), 1000.0);
-        let c = parse_config(&GOOD.replace("anchor = \"largest-river\"", "anchor = \"largest-river\"
+        let c = parse_config(&GOOD.replace(
+            "anchor = \"largest-river\"",
+            "anchor = \"largest-river\"
 relief_radius_m = 10000
 relief_min_m = 1000
-relief_max_m = 2500")).unwrap();
-        assert_eq!(c.anchor, Anchor::LargestRiver { min_height_m: 0.0, relief: Some(Relief { radius_m: 10000.0, min_m: 1000.0, max_m: 2500.0 }) });
-        assert!(parse_config(&GOOD.replace("anchor = \"largest-river\"", "anchor = \"largest-river\"
-relief_min_m = 5")).unwrap_err().contains("go together"));
+relief_max_m = 2500",
+        ))
+        .unwrap();
+        assert_eq!(
+            c.anchor,
+            Anchor::LargestRiver { min_height_m: 0.0, relief: Some(Relief { radius_m: 10000.0, min_m: 1000.0, max_m: 2500.0 }) }
+        );
+        assert!(parse_config(&GOOD.replace(
+            "anchor = \"largest-river\"",
+            "anchor = \"largest-river\"
+relief_min_m = 5"
+        ))
+        .unwrap_err()
+        .contains("go together"));
     }
 
     // spec: TEST-050
