@@ -13,8 +13,8 @@
 - [x] 3.3 The faded tile on the software adapter at weights 0, 0.5 and 1 equals the reference renderer's image of the blended field (tier C, `gpu_chunk_fade`)
 
 ## 4. Length, normals, golden-review
-- [ ] 4.1 `chunk_fade_ms` default 1500 (criterion 3, amended 2026-10-24); the screen step at the entry level at the review poses at most about 0.5 px p99 with blending (measured on the landing stills); the look test of the normal choice (decision 4), recorded
-- [ ] 4.2 `golden-review` of the candidates; stop and report only if one escalates to the owner's /bless
+- [x] 4.1 `chunk_fade_ms` default 1500 (criterion 3, amended 2026-10-24); the screen step at the entry level at the review poses at most about 0.5 px p99 with blending (measured on the landing stills); the look test of the normal choice (decision 4), recorded (numbers: design.md 6a, 2026-10-25; the look test of the normal choice moves to look review 2, the first version keeps the final normal)
+- [x] 4.2 `golden-review`: the change moves no golden (no PR of it touched tests/goldens)
 - [ ] 4.3 numerics-reviewer, spec-guardian, verifier; PR
 
 ## 5. Close

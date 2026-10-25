@@ -239,10 +239,21 @@ fn anet_scene(
     use crate::coupledworld::Standing;
     use crate::worldfield::WorldTerrain;
     use std::sync::Arc;
-    let def = planet_world_def::WorldDefinition::single_planet(planet_core::EARTH_RADIUS_M, seed);
-    let world = Arc::new(WorldTerrain::open(def, res)?);
-    writeln!(out, "A-net chunk scene: bake {res} cells per face edge, coupled run {} steps", crate::coupledworld::COUPLED_STEPS)
-        .map_err(err)?;
+    // `PLANET_ANET_STORE=DIR` reads the bake and the stored coupled run of a production store (seed 1, the viewer's default) instead of baking
+    // in memory: the measurements of the exit criteria are made on the shared store.
+    let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
+    let def = planet_world_def::WorldDefinition::single_planet(planet_core::EARTH_RADIUS_M, if store.is_some() { 1 } else { seed });
+    let world = Arc::new(match &store {
+        Some(dir) => WorldTerrain::open_store(def, dir, res)?,
+        None => WorldTerrain::open(def, res)?,
+    });
+    writeln!(
+        out,
+        "A-net chunk scene: bake {res} cells per face edge{}, coupled run {} steps",
+        store.as_ref().map_or(String::new(), |d| format!(" of the store {}", d.display())),
+        crate::coupledworld::COUPLED_STEPS
+    )
+    .map_err(err)?;
     world.request_coupled();
     let maps = loop {
         match world.coupled_standing() {
@@ -251,12 +262,14 @@ fn anet_scene(
             _ => std::thread::sleep(std::time::Duration::from_millis(50)),
         }
     };
+    // `PLANET_ANET_MIN_HEIGHT_M` keeps the river inland (the look review's anchor takes 150 m: the largest river over the sea is a river mouth).
+    let min_height_m: f32 = std::env::var("PLANET_ANET_MIN_HEIGHT_M").ok().and_then(|r| r.parse().ok()).unwrap_or(0.0);
     let lat_c = maps.lattice();
     let rec = maps.receivers();
     let mut best: Option<(usize, f32)> = None;
     for (c, &r) in rec.iter().enumerate() {
         let a = maps.network_area_m2(c);
-        if maps.z(c) > 0.0 && r != planet_generators::coupled::NONE && best.is_none_or(|(_, b)| a > b) {
+        if maps.z(c) > min_height_m && r != planet_generators::coupled::NONE && best.is_none_or(|(_, b)| a > b) {
             best = Some((c, a));
         }
     }
@@ -332,13 +345,30 @@ fn anet_steps(
         tiles = tiles.iter().flat_map(|t| t.children().expect("children")).collect();
     }
     let mut d: Vec<f64> = Vec::new();
+    let mut signed: Vec<f64> = Vec::new();
     for t in &tiles {
         for l in 0..=res {
             for k in 0..=res {
-                d.push(field.change_at_level(t.sample_direction(map, res, k, l), entry).abs());
+                let c = field.change_at_level(t.sample_direction(map, res, k, l), entry);
+                signed.push(c);
+                d.push(c.abs());
             }
         }
     }
+    signed.sort_by(f64::total_cmp);
+    let q = |f: usize| signed[(signed.len() - 1) * f / 100];
+    writeln!(
+        out,
+        "the change at the entry level, signed: p0 {:.2}, p1 {:.2}, p10 {:.2}, p50 {:.2}, p90 {:.2}, p99 {:.2}, p100 {:.2} m",
+        q(0),
+        q(1),
+        q(10),
+        q(50),
+        q(90),
+        q(99),
+        q(100)
+    )
+    .map_err(err)?;
     d.sort_by(f64::total_cmp);
     writeln!(
         out,
@@ -375,7 +405,8 @@ mod tests {
     #[ignore = "a measurement: it prints the steps of one real chunk"]
     fn anet_steps_report() {
         let mut out = std::io::stdout();
-        let (world, maps, tile) = anet_scene(256, 11, &mut out).unwrap();
+        let res = std::env::var("PLANET_ANET_RES").ok().and_then(|r| r.parse().ok()).unwrap_or(256);
+        let (world, maps, tile) = anet_scene(res, 11, &mut out).unwrap();
         let radius = world.radius_m();
         let lat = planet_generators::chunkfield::ChunkLattice::new(crate::anetworld::cells_per_chunk_for(radius, 8.0)).unwrap();
         let stage = planet_generators::anet::ANet {

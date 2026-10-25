@@ -26,6 +26,23 @@ The texel normal is the normal of the final surface. During the fade the drawn s
 ### 6. Length
 `chunk_fade_ms` default 1500 (owner, 2026-10-24, criterion 3 amended): the change of a landing chunk fades in over 1.5 s. The entry step of the A-net pyramid (top level 15) was measured in `m8-anet-chunk` section 16: p99 3.90 m, max 17.55 m against the base at the level-14 vertices. The step per frame of the fade is `max |change| / (fade s x fps)` = 17.55 / 90 = 0.19 m at 60 fps (p99 0.04 m), below the 0.25 m of criterion 3; the screen step that criterion names is at most about 0.5 px p99 with blending, which the landing stills (task 3.3) measure at the review poses. The stand-in chunk of the tests (30 m) needs 2 s for 0.25 m per frame, so its tests state their own fade length.
 
+### 6a. Criterion 3 measured on the shared store (2026-10-25)
+Scene: the store `C:/DEV/SeriousPlanetData/global16384` (bake 16384 cells with the hill band, stored coupled run 2048 cells, 80 steps, fill only), the chunk of the largest river of the run at least 150 m high (the look review's anchor rule; face 0, 14.1 million km2 at its coarse cell), 8 m cells, 3 km halo, top level 15. `PLANET_ANET_MIN_HEIGHT_M=150 PLANET_ANET_STORE=C:/DEV/SeriousPlanetData/global16384 PLANET_ANET_RES=16384 cargo test -p planet --release --lib anet_steps_report -- --ignored --nocapture` (read only, 23 s).
+
+| Quantity | Value |
+|---|---|
+| Change at the entry level (signed, 69,696 vertices) | p0 -58.34, p10 -49.64, p50 -25.93, p90 -0.44, p99 0.00, max +0.15 m (an incised valley, not an offset) |
+| Entry step against the base | p99 56.91 m, max 58.34 m |
+| Fade step per frame, 1.5 s at 60 fps (90 frames) | p99 0.63 m, max 0.65 m |
+| Same on screen at the entry distance | about 4 km (level 14 spacing 19.1 m at tau 6 px, 1440p, 60 degrees: 3.2 m a pixel): max 0.20 px a frame, median 0.09 px |
+| Step between level 15 and level 14 (parent) inside the range | p99 0.126 m, max 0.636 m |
+| Step between level 16 and level 15 | p99 0.030 m, max 0.185 m |
+| Step between level 14 and 13 / 13 and 12 (below the top, not drawn with the A-net's top at 15) | p99 0.317 / 0.719 m |
+
+- The 256-bake figures of section 6 (p99 3.90 m, max 17.55 m, 0.19 m a frame) were for a smaller river; on the real run the largest inland river incises up to 58 m, so the 0.25 m a frame of the first statement needs a fade of 3.9 s at 60 fps (58.34 / 0.25 / 60), not 1.5 s.
+- Criterion 3 as the owner amended it is a screen quantity: at 1.5 s a vertex of the deepest valley moves at most 0.20 px a frame at the distance where the chunk enters, inside the 0.5 px; p99 of the steps between pyramid levels (level 15 against 14: 0.126 m, 16 against 15: 0.030 m) is inside 0.25 m. These are computed from the field and the camera geometry, not read from rendered frames; the rendered agreement of the faded tile with the blended field is `gpu_chunk_fade` (REND-039).
+- No frame waits for a chunk: the chunk path is asynchronous (CON-22, STRM-047: a tile reads only chunks that are ready, else the base); the editor smoke run on this store with the RTX (90 frames, edits placed, dragged, undone) had no frame over 1 s (VIEW-056 probe).
+
 ### 7. Golden-review
 The candidates are produced by `cargo xtask test gpu` (the lit and terrain views with no chunk ready) and the new landing stills. A change the policy classifies as rounding noise or a declared change of a debug or shaded view is blessed by the skill; anything the policy escalates (first goldens of a class, lit, sky and water views) stops the work and goes to the owner.
 
