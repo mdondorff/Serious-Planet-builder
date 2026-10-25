@@ -92,3 +92,11 @@ Scope: generators::anet, app::anetworld (GEN-047, GEN-051; look review 1, `docs/
 - The coupled run compresses relief against the base: its height minus the base's at cell centres, median over river cells, is +111 m at 0 to 500 m ground, -164 m at 500 to 1000, -933 m at 1000 to 2500, -2686 m at 2500 to 5000, -4649 m over 5000. Anchors above the base are ignored (the minimum takes the base), so only the low band cuts mildly.
 - Tools: `chunk_incision_report` and `run_against_base_report` (`cargo run --release -p planet --example chunk_incision -- --store DIR --lat DEG --lon DEG | --run-vs-base`), `capped_nodes` in `stills.txt`.
 - Obsolete when the chunk stage's anchors are made consistent with the base field.
+
+## 2026-10-25 The horizon bake is cheaper than the spike measured; the shadow engine has three declared limits
+Scope: M8-5 (horizon shadows), `generators::horizon`, `coarsehorizon`, the lit shader
+- The bake costs 21 us per texel (16 azimuths, 5 km, 4 m texels, release, one thread): about 5 s on 6 threads for a 24 km2 chunk, against SPIKE-32's 0.7 s per km2 (17 s). The coarse horizon at 512 observer cells per face edge over the 2048-cell run takes 7.7 s on 8 threads.
+- Limits stated in the specs (GEN-044, GEN-045, REND-038): the tangent warp makes a texel up to 1.41 times as long along `i` as along `j` near a face edge, so the bake's distances (and the horizon angle) are off by up to that factor there; the coarse azimuths use each cell's own geographic frame, which differs from the fragment's near a pole; the shader reads 16 azimuths exactly.
+- On the look-review stills the shadow edge along canyon rims is scalloped (16 azimuths fan near an occluder); the far-field outline at sunset could not be judged on flat sites.
+- Obsolete when the bake marches in metres, the coarse map gets a pole-free frame and the azimuth count is decided from stills.
+

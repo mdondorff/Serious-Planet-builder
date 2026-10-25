@@ -1,4 +1,4 @@
-# Change: m8-horizon-shadows (proposal, drafted 2026-10-24; not started)
+# Change: m8-horizon-shadows (proposal, drafted 2026-10-24; done 2026-10-25)
 
 ## Why
 - M8-5 (`docs/briefings/m8-plan.md`; exit criterion 5: shadows and the material map together at most 1.5 ms of terrain-pass GPU time at 1440p). SPIKE-32 step 2 measured a terrain horizon map at +0.06 ms GPU for long ridge shadows at 3.5 degrees sun elevation (`spikes/realism/results/results.md`, section 2), and concluded the map is a block-level product with a kilometre range, not a per-tile one.
