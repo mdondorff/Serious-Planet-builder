@@ -389,7 +389,7 @@ impl Default for AnchorLaw {
             cap_low_m: 30.0,
             side_low: 0.15,
             side_high: 0.9,
-            band_cap_m: 2400.0,
+            band_cap_m: 1600.0,
         }
     }
 }
@@ -442,11 +442,14 @@ type SegmentBed = (Vec<(f64, f64)>, f64);
 /// A segment and the chain of segments from it on down the river (itself included).
 type Chain = ((usize, usize), Vec<(usize, usize)>);
 
-/// The channel and the valley round the corridor (GEN-060): every cell within the reach of a corridor cell is held at the profile of its nearest corridor
-/// cell (the lower where it lies under the ground): the channel (`bankfull_m`: a depth `d` under the bed at the axis, the parabola `d (1 - (2x / w)^2)`
-/// across the width `w`), the valley floor at the bed out to half the floor width, and the valley sides rising at the side slope up to the ground. A band
-/// cell is fixed like a corridor cell (its height is `anchor_z`). The reach is `band_cap_m` at most, so a core cell reads sources within that distance
-/// only: a halo of the stated size holds them all.
+/// The channel and the valley round the corridor (GEN-060): every cell within the reach of a corridor cell is held at the profile of a corridor cell (the
+/// lower where it lies under the ground): the channel (`bankfull_m`: a depth `d` under the valley floor at the axis, the parabola `d (1 - (2x / w)^2)`
+/// across the width `w`), the valley floor at the bed out to half the floor width, and the valley sides rising at the side slope up to the ground. The corridor
+/// cells themselves are lowered to the channel floor (`bed - d`), so the axis is the lowest point of the cross-section. The sources are taken in four tiers
+/// by reach (80 m, 400 m, 1.2 km, more), each tier relaxed on its own with the nearest source of the tier, and a cell takes the lowest profile of the tiers:
+/// the valley of a great river is not walled in by the narrower valley of a tributary that is nearer. A band cell is fixed like a corridor cell (its height
+/// is `anchor_z`). The reach is `band_cap_m` at most (0 paints nothing): a core cell reads sources within that distance only, so the halo must hold
+/// `band_cap_m / cell`, the drainage-area window and the settle's reach (`ANetParams::spike` derives the cap from the halo).
 #[allow(clippy::too_many_arguments)]
 fn paint_band(
     corridor: &[bool],
@@ -461,79 +464,98 @@ fn paint_band(
 ) {
     let len = corridor.len();
     let key = |x: usize| region.cells[x].key();
-    // What each corridor cell asks of the cells round it: (bed, bankfull width, depth, floor half width, side slope, reach in metres).
-    let spec = |c: usize| -> BandSpec {
-        let rf = relief[c];
-        let (w, d) = law.bankfull_m(area[c]);
-        let half_floor = 0.5 * law.floor_width_m(area[c], rf).max(w);
-        let side = law.side_slope(rf).max(1e-3);
-        let rise = (ground[c] - anchor_z[c]).max(0.0) + d;
-        let extent = rise / side;
-        let reach = (half_floor + extent).min(law.band_cap_m);
-        // The sides reach the ground inside the cap: a floor wider than the cap allows is cut back (the valley floor of a great lowland river is wider
-        // than the halo of a chunk reads, so it is provisional, GEN-060).
-        let half_floor = (reach - extent).max(0.5 * w).min(half_floor);
-        (anchor_z[c], w, d, half_floor, side, reach.max(half_floor))
-    };
+    let sources: Vec<usize> = (0..len).filter(|&c| corridor[c] && !anchor_z[c].is_nan()).collect();
+    if sources.is_empty() || law.band_cap_m <= 0.0 {
+        // No band; the corridor cells keep the bed (the channel floor of a river is only drawn with a band round it).
+        return;
+    }
+    let specs: Vec<BandSpec> = sources
+        .iter()
+        .map(|&c| {
+            let rf = relief[c];
+            let (w, d) = law.bankfull_m(area[c]);
+            let half_floor = 0.5 * law.floor_width_m(area[c], rf).max(w);
+            let side = law.side_slope(rf).max(1e-3);
+            let extent = ((ground[c] - anchor_z[c]).max(0.0) + d) / side;
+            let reach = (half_floor + extent).min(law.band_cap_m);
+            // The sides reach the ground inside the cap: a floor wider than the cap allows is cut back (the valley floor of a great lowland river is
+            // wider than the halo of a chunk reads, so it is provisional, GEN-060).
+            let half_floor = (reach - extent).max(0.5 * w).min(half_floor).min(reach);
+            (anchor_z[c], w, d, half_floor, side, reach)
+        })
+        .collect();
+    let tier_of = |reach: f64| usize::from(reach > 80.0) + usize::from(reach > 400.0) + usize::from(reach > 1200.0);
+    let mut painted = vec![f64::NAN; len];
     let mut best = vec![f64::INFINITY; len];
     let mut from = vec![u32::MAX; len];
-    let mut changed: Vec<usize> = Vec::new();
-    let mut specs: Vec<Option<BandSpec>> = vec![None; len];
-    for c in 0..len {
-        if corridor[c] && !anchor_z[c].is_nan() {
-            best[c] = 0.0;
-            from[c] = c as u32;
-            specs[c] = Some(spec(c));
-            changed.push(c);
-        }
-    }
     let mut stamp = vec![usize::MAX; len];
-    for round in 0..100_000usize {
-        if changed.is_empty() {
-            break;
+    for tier in 0..4 {
+        best.fill(f64::INFINITY);
+        from.fill(u32::MAX);
+        stamp.fill(usize::MAX);
+        let mut changed: Vec<usize> = Vec::new();
+        for (k, &c) in sources.iter().enumerate() {
+            if tier_of(specs[k].5) == tier {
+                best[c] = 0.0;
+                from[c] = k as u32;
+                changed.push(c);
+            }
         }
-        let mut next: Vec<usize> = Vec::new();
-        for &c in &changed {
-            let src = from[c] as usize;
-            let reach = specs[src].map_or(0.0, |s| s.5);
-            for k in 0..8 {
-                let q = region.neighbours[c][k] as usize;
-                if q >= len {
-                    continue;
-                }
-                let d = best[c] + (dirs[c] - dirs[q]).length() * radius_m;
-                if d > reach || corridor[q] {
-                    continue;
-                }
-                let take = d < best[q] || (d == best[q] && from[q] as usize != src && key(src) < key(from[q] as usize));
-                if take {
-                    best[q] = d;
-                    from[q] = src as u32;
-                    if stamp[q] != round {
-                        stamp[q] = round;
-                        next.push(q);
+        let mut round = 0usize;
+        while !changed.is_empty() {
+            let mut next: Vec<usize> = Vec::new();
+            for &c in &changed {
+                let src = from[c] as usize;
+                let reach = specs[src].5;
+                for k in 0..8 {
+                    let q = region.neighbours[c][k] as usize;
+                    if q >= len {
+                        continue;
+                    }
+                    let d = best[c] + (dirs[c] - dirs[q]).length() * radius_m;
+                    if d > reach || corridor[q] {
+                        continue;
+                    }
+                    let take = d < best[q] || (d == best[q] && from[q] != src as u32 && key(sources[src]) < key(sources[from[q] as usize]));
+                    if take {
+                        best[q] = d;
+                        from[q] = src as u32;
+                        if stamp[q] != round {
+                            stamp[q] = round;
+                            next.push(q);
+                        }
                     }
                 }
             }
+            changed = next;
+            round += 1;
+            debug_assert!(round < 1_000_000, "the band relaxation did not settle");
         }
-        changed = next;
+        for c in 0..len {
+            if corridor[c] || from[c] == u32::MAX {
+                continue;
+            }
+            let (bed, w, d, half_floor, side, _) = specs[from[c] as usize];
+            let x = best[c];
+            let z = if x <= 0.5 * w {
+                let u = 2.0 * x / w.max(1e-9);
+                bed - d * (1.0 - u * u)
+            } else if x <= half_floor {
+                bed
+            } else {
+                bed + side * (x - half_floor)
+            };
+            if z < ground[c] && (painted[c].is_nan() || z < painted[c]) {
+                painted[c] = z;
+            }
+        }
+    }
+    for (k, &c) in sources.iter().enumerate() {
+        anchor_z[c] = specs[k].0 - specs[k].2;
     }
     for c in 0..len {
-        if corridor[c] || from[c] == u32::MAX {
-            continue;
-        }
-        let (bed, w, d, half_floor, side, _) = specs[from[c] as usize].expect("a source");
-        let x = best[c];
-        let z = if x <= 0.5 * w {
-            let u = 2.0 * x / w.max(1e-9);
-            bed - d * (1.0 - u * u)
-        } else if x <= half_floor {
-            bed
-        } else {
-            bed + side * (x - half_floor)
-        };
-        if z < ground[c] && (anchor_z[c].is_nan() || z < anchor_z[c]) {
-            anchor_z[c] = z;
+        if !painted[c].is_nan() && (anchor_z[c].is_nan() || painted[c] < anchor_z[c]) {
+            anchor_z[c] = painted[c];
         }
     }
 }
@@ -693,7 +715,7 @@ pub struct ANetParams {
 impl ANetParams {
     /// The values of SPIKE-33 and SPIKE-35 with a halo of `halo_m` metres at cells of `cell_m` metres.
     pub fn spike(halo_m: f64, cell_m: f64) -> ANetParams {
-        ANetParams {
+        let mut params = ANetParams {
             k: 2.0e-5,
             m: 0.45,
             dt_years: 1.0e4,
@@ -711,7 +733,12 @@ impl ANetParams {
             slump_rate: 0.09,
             bank_rounds: ((300.0 / (0.9 * cell_m)).ceil() + 6.0).clamp(1.0, 96.0) as u16,
             anchor: AnchorLaw::default(),
-        }
+        };
+        // The valley band reads sources within `band_cap_m` and the solve reads `area_window + 1` rings further: the band reaches at most what the halo
+        // holds besides that (GEN-049, GEN-060).
+        let spare_rings = f64::from(params.halo_rings) - f64::from(params.area_window) - 2.0;
+        params.anchor.band_cap_m = params.anchor.band_cap_m.min(spare_rings.max(0.0) * cell_m);
+        params
     }
 }
 

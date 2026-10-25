@@ -733,7 +733,9 @@ impl CoarseRun for WideRiver {
 fn a_great_river_has_a_channel_as_wide_and_as_deep_as_its_discharge_says_in_a_valley_floor_wider_than_the_channel() {
     use planet_generators::chunkfield::Cell;
     let lat = ChunkLattice::new(PER).unwrap();
-    let params = stage_over(Arc::new(HighBase), 30).params;
+    let mut params = stage_over(Arc::new(HighBase), 30).params;
+    // The test halo of 30 rings of 153 m holds a band of 2.4 km and the area window of 18.
+    params.anchor.band_cap_m = 2400.0;
     let a = ANet { run: Arc::new(WideRiver), base: Arc::new(HighBase), radius_m: R, params };
     let r = region(&lat, chunk(1003), 30);
     let s = a.solve(&lat, &r);
@@ -748,11 +750,12 @@ fn a_great_river_has_a_channel_as_wide_and_as_deep_as_its_discharge_says_in_a_va
         })
         .collect();
     let floor = section.iter().map(|p| p.1).fold(f64::INFINITY, f64::min);
-    // The bed of the valley floor: the corridor's own, read from the network (the median over the corridor cells of the core).
+    // The valley floor: the ground of the corridor (the median over its cells of the core) less the valley law's depth (the relief factor of the smooth
+    // ground is about 0); the corridor cells themselves stand at the channel floor under it.
     let net = planet_generators::anet::Network::build_with(&WideRiver, &HighBase, &lat, &r, R, &a.params.anchor);
-    let mut beds: Vec<f64> = (0..r.core).filter(|&c| net.corridor[c]).map(|c| net.anchor_z[c]).collect();
-    beds.sort_by(f64::total_cmp);
-    let bed = beds[beds.len() / 2];
+    let mut grounds: Vec<f64> = (0..r.core).filter(|&c| net.corridor[c]).map(|c| net.base_z[c]).collect();
+    grounds.sort_by(f64::total_cmp);
+    let bed = grounds[grounds.len() / 2] - a.params.anchor.valley_depth_m(9.5e12, 0.0);
     let depth = bed - floor;
     assert!(depth > d / 1.5 && depth < d * 1.5, "the channel is {depth} m under the valley floor, the law says {d} m");
     let cell_m = lat.cell_m(R);
@@ -765,7 +768,32 @@ fn a_great_river_has_a_channel_as_wide_and_as_deep_as_its_discharge_says_in_a_va
         width_at(bed + 1.0) - measured
     );
     assert!(measured > 0.5 * 0.71 * w && measured < 2.0 * 0.71 * w, "channel {measured} m wide at half depth, the law says {} m", 0.71 * w);
+    // The axis is the lowest point of the cross-section: every corridor cell of the core stands at most 1 mm over the lowest of its neighbours off the corridor (the corridor itself falls downstream).
+    for c in (0..r.core).filter(|&c| net.corridor[c]) {
+        let lowest = r.neighbours[c]
+            .iter()
+            .filter(|&&q| (q as usize) < r.cells.len() && !net.corridor[q as usize])
+            .map(|&q| s.z[q as usize])
+            .fold(f64::INFINITY, f64::min);
+        assert!(s.z[c] <= lowest + 1e-3, "the corridor cell {:?} stands {} m over its lowest neighbour", r.cells[c], s.z[c] - lowest);
+    }
     // The valley floor (within 1 m of the bed) is wider than the channel it holds.
     let floor_width = section.iter().filter(|p| (p.1 - bed).abs() <= 1.0).count() as f64 * cell_m;
     assert!(floor_width >= 0.5 * w, "the valley floor is {floor_width} m wide beside a channel of {w} m");
+}
+
+// spec: GEN-060
+#[test]
+fn a_band_cap_of_zero_paints_no_band_and_the_default_cap_follows_the_halo() {
+    let lat = ChunkLattice::new(PER).unwrap();
+    let mut params = stage_over(Arc::new(HighBase), 30).params;
+    params.anchor.band_cap_m = 0.0;
+    let r = region(&lat, chunk(1003), 30);
+    let net = planet_generators::anet::Network::build_with(&WideRiver, &HighBase, &lat, &r, R, &params.anchor);
+    let band = (0..r.cells.len()).filter(|&c| !net.corridor[c] && !net.anchor_z[c].is_nan()).count();
+    assert_eq!(band, 0, "{band} band cells with a cap of 0");
+    // At 8 m cells and the 3 km halo (375 rings, the area window 128): the band reaches at most the rings the halo holds besides the window.
+    let p = ANetParams::spike(3_000.0, 8.0);
+    assert_eq!((p.halo_rings, p.area_window), (375, 128));
+    assert!(p.anchor.band_cap_m <= (375.0 - 128.0 - 2.0) * 8.0 && p.anchor.band_cap_m >= 1000.0, "{}", p.anchor.band_cap_m);
 }

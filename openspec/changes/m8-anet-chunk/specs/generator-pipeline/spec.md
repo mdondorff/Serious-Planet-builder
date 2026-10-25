@@ -100,7 +100,7 @@ Source: SPIKE-40 (bed profile), planner decision 2026-10-25 (H1), GEN-057
 - **THEN** the longest flat reach is at most 400 m, the largest drop between linked cells is under 5 m, no link climbs and no corridor cell loses its receiver
 
 ### Requirement: GEN-060 The channel from discharge, the valley from relief
-Round every corridor cell an A-net chunk SHALL hold the cells within `band_cap_m` of the river at a channel and valley profile: a channel of width `w_coef Q^w_exp` and depth `d_coef Q^d_exp` under the valley floor, discharge `Q = q_per_km2 A` (km2); a valley floor `lerp(floor_low, floor_high, rf)` channel widths wide at the bed of the corridor, capped at `band_cap_m`; sides rising at `lerp(side_low, side_high, rf)` to the ground; `rf` the base's relief over the river's coarse cell and the eight round it over `relief_full_m`. The constants are part of the stage's definition hash.
+Round every corridor cell an A-net chunk SHALL hold the cells within `band_cap_m` of the river at a channel and valley profile: a channel of width `w_coef Q^w_exp` and depth `d_coef Q^d_exp` under the valley floor, discharge `Q = q_per_km2 A` (km2); a valley floor `lerp(floor_low, floor_high, rf)` channel widths wide at the bed of the corridor, no wider than `band_cap_m` allows (the cap follows the halo: `(halo_rings - area_window - 2)` cells at most, and 0 paints no band); the corridor cells at the channel floor, the lowest point of the cross-section; sides rising at `lerp(side_low, side_high, rf)` to the ground; `rf` the base's relief over the river's coarse cell and the eight round it over `relief_full_m`. The constants are part of the stage's definition hash.
 
 Verify: A
 Status: planned
