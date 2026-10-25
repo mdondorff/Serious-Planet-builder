@@ -16,7 +16,7 @@ fn main() {
     let seed = planet::parse_args(&["test-render".to_string(), "--scene".to_string(), "lit".to_string()]).unwrap().seed;
     let def = WorldDefinition::single_planet(6_371_000.0, seed);
     let world = Arc::new(WorldTerrain::open_store(def, &store, 16384).unwrap());
-    if arg("--run-vs-base").is_some() {
+    if std::env::args().any(|x| x == "--run-vs-base") {
         println!("{}", world.run_against_base_report(8, 1e10).unwrap());
         return;
     }
