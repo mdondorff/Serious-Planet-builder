@@ -73,7 +73,7 @@ fn stage(jitter: f64, halo_rings: u16) -> ANet {
     let mut params = ANetParams::spike(3_000.0, lat.cell_m(R));
     params.jitter = jitter;
     params.halo_rings = halo_rings;
-    ANet { run: Arc::new(River), base: Arc::new(Hills), radius_m: R, params }
+    ANet { run: Arc::new(River), base: Arc::new(Hills), radius_m: R, params, memo: Default::default() }
 }
 
 fn chunk(x: u32) -> TileId {
@@ -197,7 +197,7 @@ fn the_cost_of_a_chunk_at_8_m_cells_and_a_3_km_halo() {
     let lat = ChunkLattice::new(608).unwrap();
     let mut params = ANetParams::spike(3_000.0, lat.cell_m(R));
     params.jitter = 0.4;
-    let a = ANet { run: Arc::new(River), base: Arc::new(Hills), radius_m: R, params };
+    let a = ANet { run: Arc::new(River), base: Arc::new(Hills), radius_m: R, params, memo: Default::default() };
     let t = Instant::now();
     let r = region(&lat, chunk(1003), a.halo_rings());
     let t_region = t.elapsed();
@@ -289,7 +289,7 @@ fn stage_over(base: Arc<dyn BaseDetail>, halo_rings: u16) -> ANet {
     let lat = ChunkLattice::new(PER).unwrap();
     let mut params = ANetParams::spike(3_000.0, lat.cell_m(R));
     params.halo_rings = halo_rings;
-    ANet { run: Arc::new(River), base, radius_m: R, params }
+    ANet { run: Arc::new(River), base, radius_m: R, params, memo: Default::default() }
 }
 
 fn max_difference(a: &ANet, b: &ANet, x: u32, ha: u16, hb: u16) -> f64 {
@@ -739,7 +739,7 @@ fn a_great_river_has_a_channel_as_wide_and_as_deep_as_its_discharge_says_in_a_va
     let mut params = stage_over(Arc::new(HighBase), 30).params;
     // The test halo of 30 rings of 153 m holds a band of 2.4 km and the area window of 18.
     params.anchor.band_cap_m = 2400.0;
-    let a = ANet { run: Arc::new(WideRiver), base: Arc::new(HighBase), radius_m: R, params };
+    let a = ANet { run: Arc::new(WideRiver), base: Arc::new(HighBase), radius_m: R, params, memo: Default::default() };
     let r = region(&lat, chunk(1003), 30);
     let s = a.solve(&lat, &r);
     let (w, d) = a.params.anchor.bankfull_m(9.5e12);

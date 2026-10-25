@@ -135,6 +135,7 @@ impl WorldTerrain {
             base: Arc::new(WorldBase::new(self)),
             radius_m: self.radius_m(),
             params: ANetParams::spike(ANET_HALO_M, lat.cell_m(self.radius_m())),
+            memo: Default::default(),
         });
         let disk: Option<Arc<dyn ChunkDisk>> = self.store_dir().map(|dir| {
             let spec = ChunkSpec {
@@ -216,6 +217,7 @@ impl WorldTerrain {
         slump_rate: Option<f64>,
         steps: Option<u32>,
         route_off: bool,
+        river_area_m2: Option<f64>,
     ) -> Result<String, String> {
         use planet_core::cube::TangentWarp;
         use planet_core::{TileId, Vec3};
@@ -239,6 +241,9 @@ impl WorldTerrain {
         if let Some(v) = steps {
             params.steps = v;
         }
+        if let Some(a) = river_area_m2 {
+            params.anchor.river_area_m2 = a;
+        }
         // The coarse path of before local routing (GEN-066), for the comparison of the report.
         if route_off {
             params.anchor.route_band_m = 0.0;
@@ -247,11 +252,13 @@ impl WorldTerrain {
             params.anchor.head_m = 0.0;
         }
         let halo = params.halo_rings;
-        let stage = ANet { run: run.maps, base: Arc::new(WorldBase::new(self)), radius_m: radius, params };
+        let stage = ANet { run: run.maps, base: Arc::new(WorldBase::new(self)), radius_m: radius, params, memo: Default::default() };
         let dir = Vec3::from_lat_lon(lat_deg.to_radians(), lon_deg.to_radians());
         let tile = TileId::from_direction(&TangentWarp, dir, planet_generators::chunk::CHUNK_GRID_LEVEL);
         let reg = region(&clat, tile, halo);
+        let solve_started = std::time::Instant::now();
         let s = stage.solve(&clat, &reg);
+        let solve_s = solve_started.elapsed().as_secs_f64();
         let started = std::time::Instant::now();
         let net = planet_generators::anet::Network::build_with(&*stage.run, &*stage.base, &clat, &reg, radius, &stage.params.anchor);
         let network_s = started.elapsed().as_secs_f64();
@@ -279,7 +286,7 @@ impl WorldTerrain {
             anchors.last().copied().unwrap_or(f64::NAN)
         );
         out += &format!(
-            "network build (corridor, routing, beds, band) {network_s:.2} s
+            "chunk solve incl. network {solve_s:.2} s; network build (corridor, routing, beds, band) {network_s:.2} s
 "
         );
         out += &format!(
@@ -355,6 +362,24 @@ impl WorldTerrain {
 ",
                 window_slopes.get(window_slopes.len() / 2).copied().unwrap_or(f64::NAN)
             );
+        }
+        // The tributary census (ADR 0081 point 3): off the corridor, the cells of the core whose drainage area reaches each threshold are channel cells; their
+        // length per km2 of core is the drainage density, and those that drain into a corridor cell are the entries into the stem, per km of stem.
+        {
+            let cell_m = clat.cell_m(radius);
+            let core_km2 = core as f64 * cell_m * cell_m / 1.0e6;
+            let stem_km = (0..core).filter(|&c| net.corridor[c]).count() as f64 * cell_m / 1000.0;
+            for threshold in [1.0e5, 1.0e6, 1.0e7] {
+                let channel: Vec<usize> = (0..core).filter(|&c| !net.corridor[c] && s.area_m2[c] >= threshold).collect();
+                let entries = channel.iter().filter(|&&c| s.receiver[c] != u32::MAX && net.corridor[s.receiver[c] as usize]).count();
+                out += &format!(
+                    "tributaries over {threshold:.0e} m2: {} channel cells off the corridor, {:.2} km per km2 of core, {entries} entries into the stem, {:.2} per km of stem
+",
+                    channel.len(),
+                    channel.len() as f64 * cell_m / 1000.0 / core_km2,
+                    entries as f64 / stem_km.max(1e-9)
+                );
+            }
         }
         // Cross-sections of the solved chunk (GEN-060): at corridor cells of the core every 200 cells along the river, the heights across the river on
         // its local normal every cell out to 2.4 km each side: the drainage area, the bankfull law's width and depth, the measured depth of the channel
