@@ -13,7 +13,6 @@
 use planet_core::cube::{face_to_direction, FaceMapping};
 use planet_core::{Face, TileId, Vec3};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
 use std::sync::Mutex;
 
 use planet_world_def::{BodyId, GenContext, MissingNode, ReadRecord};
@@ -213,7 +212,8 @@ pub struct LandformLattice {
 }
 
 impl LandformLattice {
-    fn build(seed: u64) -> LandformLattice {
+    /// The lattice of `seed` (about 0.5 s on six threads, 1.6 MB): the field holds its own, so no state outlives it (CON-06).
+    pub fn new(seed: u64) -> LandformLattice {
         let n = LANDFORM_LATTICE_N;
         let map = planet_core::cube::TangentWarp;
         // One thread per face: every value is independent of the others, so the lattice does not depend on the thread count (CON-14).
@@ -291,21 +291,6 @@ impl LandformLattice {
         }
         ((lo - 1e-12).max(0.0), (hi + 1e-12).min(1.0))
     }
-}
-
-/// The landform lattice of `seed`, built once and shared (the few seeds of a run: the cache holds the last four).
-pub fn landform_lattice(seed: u64) -> Arc<LandformLattice> {
-    static CACHE: Mutex<Vec<(u64, Arc<LandformLattice>)>> = Mutex::new(Vec::new());
-    let mut cache = CACHE.lock().expect("landform lattice cache");
-    if let Some((_, lattice)) = cache.iter().find(|(k, _)| *k == seed) {
-        return Arc::clone(lattice);
-    }
-    let lattice = Arc::new(LandformLattice::build(seed));
-    if cache.len() >= 4 {
-        cache.remove(0);
-    }
-    cache.push((seed, Arc::clone(&lattice)));
-    lattice
 }
 
 /// The largest amplitude of the hill band in metres (GEN-064); the elevation clamp has room for it above the highest base and range

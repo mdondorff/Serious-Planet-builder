@@ -11,7 +11,7 @@
 //! slope stencil can read ([`crate::terrain::scan_base`]), the slope interval from the gradient at the centre and its
 //! variation over the cap, the per-octave noise bounds ([`layer_noise_bounds`]), and the product of the intervals.
 
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock};
 
 use planet_core::cube::TangentWarp;
 use planet_core::hash::hash_u64s;
@@ -148,8 +148,8 @@ pub struct ErosionField<'a> {
     relief: f64,
     /// The first read error of the bake, if any (see [`crate::terrain::TerrainField`]): a failed read gives NaN.
     error: Mutex<Option<String>>,
-    /// The landform lattice of the seed (GEN-062), taken from the shared cache on first use.
-    landform: OnceLock<Arc<crate::global::LandformLattice>>,
+    /// The landform lattice of the seed (GEN-062), built on first use and owned by the field.
+    landform: OnceLock<crate::global::LandformLattice>,
 }
 
 impl ErosionField<'_> {
@@ -159,7 +159,7 @@ impl ErosionField<'_> {
     }
 
     fn landform(&self) -> &crate::global::LandformLattice {
-        self.landform.get_or_init(|| crate::global::landform_lattice(self.seed))
+        self.landform.get_or_init(|| crate::global::LandformLattice::new(self.seed))
     }
 
     fn fail(&self, e: &crate::global::ReadError) {
@@ -510,7 +510,7 @@ mod tests {
     // spec: GEN-062
     #[test]
     fn the_landform_lattice_is_continuous_bounded_and_close_to_the_driver() {
-        let lat = crate::global::landform_lattice(7);
+        let lat = crate::global::LandformLattice::new(7);
         let mut rng = SplitMix64(9);
         let (mut worst, mut worst_step, mut inside) = (0.0f64, 0.0f64, 0);
         for _ in 0..20_000 {
