@@ -201,18 +201,21 @@ mod tests {
         // A quick acquire records nothing.
         drop(lock(&m, "quick"));
         // A held lock makes the main thread wait for it: another thread holds it for 40 ms.
+        let (held, is_held) = std::sync::mpsc::channel();
         let holder = {
             let m = std::sync::Arc::clone(&m);
             std::thread::Builder::new()
                 .name("test-holder".into())
                 .spawn(move || {
                     let g = m.lock().unwrap();
+                    held.send(()).unwrap();
                     std::thread::sleep(Duration::from_millis(40));
                     drop(g);
                 })
                 .unwrap()
         };
-        std::thread::sleep(Duration::from_millis(10));
+        // The main thread asks for the lock only once the other holds it, whatever the load of the machine.
+        is_held.recv().unwrap();
         drop(lock(&m, "the held lock"));
         holder.join().unwrap();
         let s = p.end().expect("a stall");
