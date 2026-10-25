@@ -19,3 +19,10 @@
 
 ## 5. Close
 - [ ] 5.1 All requirements pass: statuses `planned` to `active`, archive, one line in `docs/status.md` via the planner
+
+## Notes from step 1's numerics review (for steps 2 and 3)
+- The stamp stage recomputes the change (a plateau or flatten absorbs part of it); every other forwarder is additive.
+- A faded vertex `h_q - (1 - w) change` can lie below the tile's stated minimum (`min_height_m`, ATMO-020) and outside the culling and skirt bounds when `change > 0`: step 3 widens them by the largest change of the tile or takes the plane into the exact minimum.
+- `TileSink::upload_bytes` defaults to `resident_bytes()`, which leaves the plane out: step 3 counts `4 (cells + 1)^2` bytes when a plane is uploaded.
+- The texel normals include the change and the fade does not touch them (design decision 4).
+- `compact_tile_field` evaluates the change twice per lattice point (in `heights_and_climate` and in `level_change`); measure before step 3 and fold into one pass if it shows.

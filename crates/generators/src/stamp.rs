@@ -512,8 +512,19 @@ impl HeightField for StampStage<'_> {
     fn level_aware(&self) -> bool {
         self.base.level_aware()
     }
+    /// The change that reaches the heights this stage returns: a stage that is additive in its input height (hills, craters, ridges, channels,
+    /// raise and lower strokes, smooth) passes the chunk change on, but a plateau or a flatten stroke clamps toward a target and takes part or all
+    /// of it, so the change is the difference of the stamped heights with and without the chunk's change (STRM-047).
     fn level_change(&self, dirs: &[Vec3], level: u8) -> Option<Vec<f64>> {
-        self.base.level_change(dirs, level)
+        let change = self.base.level_change(dirs, level)?;
+        if self.items_for(dirs).is_empty() {
+            return Some(change);
+        }
+        let with: Vec<f64> = dirs.iter().map(|&d| self.base.height_at_level(d, level)).collect();
+        let without: Vec<f64> = with.iter().zip(&change).map(|(h, c)| h - c).collect();
+        let with = self.add_stamps(dirs, with, &|| false);
+        let without = self.add_stamps(dirs, without, &|| false);
+        Some(with.iter().zip(&without).map(|(a, b)| a - b).collect())
     }
 
     fn heights_until(&self, dirs: &[Vec3], stop: &dyn Fn() -> bool) -> Vec<f64> {

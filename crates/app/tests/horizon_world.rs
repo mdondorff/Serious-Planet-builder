@@ -229,3 +229,44 @@ fn the_worlds_field_chain_hands_the_chunk_change_to_the_tile_builder() {
     let by_difference = field.height_at_level(dirs[0], 17) - field.height_at_level(dirs[0], 5);
     assert!((got[0] - by_difference).abs() < 1e-6, "{} against {by_difference}", got[0]);
 }
+
+// spec: STRM-047
+#[test]
+fn a_plateau_that_absorbs_the_chunk_change_leaves_none_of_it_in_the_plane() {
+    use planet_generators::height::HeightField;
+    let r = rig();
+    let d = tile().center_direction(&TangentWarp);
+    for _ in 0..40 {
+        r.world.chunk_frame(&[tile()], camera(), &[]);
+        r.chunk_jobs.run(64);
+        r.clock.advance(100);
+    }
+    let bare = r.world.field().unwrap();
+    let plain = bare.level_change(&[d], 17).expect("a chunk landed")[0];
+    assert!(plain.abs() > 1.0, "the stand-in changes the ground by metres here: {plain}");
+    // A plateau at the height the ground has before the chunk, strong enough to take the whole change: the stamp stage holds the final height at
+    // the target, so the change that reaches the texel is the difference of the stamped heights, not the chunk's change.
+    let target = bare.height_at_level(d, 5);
+    let mut def = (*r.world.definition()).clone();
+    let item = ItemSpec {
+        id: 2,
+        layer: DEFAULT_ITEM_LAYER.into(),
+        priority: 0,
+        dir: d,
+        content_hash: 0,
+        reach_m: 20_000.0,
+        max_delta_m: 500.0,
+        stamp: None,
+    }
+    .with_stamp(Stamp::new(StampKind::Plateau, [target, 0.0, 0.0]));
+    def.put_item_spec(BodyId::PLANET, item).unwrap();
+    r.world.set_definition(Arc::new(def)).unwrap();
+    let field = r.world.field().unwrap();
+    let got = field.level_change(&[d], 17).expect("a chunk landed")[0];
+    let by_difference = field.height_at_level(d, 17) - field.height_at_level(d, 5);
+    assert!((got - by_difference).abs() < 1e-6, "plane {got} against the stamped difference {by_difference}");
+    assert!(
+        got.abs() < 1e-6 && by_difference.abs() < 1e-6,
+        "the plateau absorbs the change: {got}, {by_difference} (the chunk's own {plain})"
+    );
+}

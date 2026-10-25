@@ -248,7 +248,9 @@ pub trait HeightField: Send + Sync {
     }
     /// The chunk change at `dirs` as tile level `level` reads it, in metres: `height_at_level` less the height of the field below the chunk stage
     /// (STRM-047). `None` for every field without chunk detail and for a chunk field with no chunk ready, so a world without chunks builds the
-    /// tiles it always built. A wrapper forwards it with `height_at_level`, or the change is lost on its way to the compact builder.
+    /// tiles it always built. A wrapper forwards it with `height_at_level`, or the change is lost on its way to the compact builder; a wrapper that
+    /// is not additive in its input height (a stage that clamps toward a target) recomputes it as the difference of its own heights with and
+    /// without the chunk change, because the change that reaches the texel is that difference.
     fn level_change(&self, _dirs: &[Vec3], _level: u8) -> Option<Vec<f64>> {
         None
     }
