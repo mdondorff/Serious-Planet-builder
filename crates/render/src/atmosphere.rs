@@ -818,6 +818,9 @@ fn fs_lit_atmo_view(in: VsOut) -> vec4<f32> {
     if (gloss > 0.0) {
         rgb = min(rgb + atm_sun_direct(up, in.height, sun) * (gloss * g.range.z * sun_vis), vec3<f32>(60000.0));
     }
+    if (g.mode.x >= 5u) {
+        rgb = horizon_view_colour(g.mode.x, in.node_index, in.aux, up, sun) * g.range.z;
+    }
     if (g.extra.y > 3.5) {
         rgb = stale_tint(in, rgb, g.range.z);
     } else if (g.extra.y > 2.5) {

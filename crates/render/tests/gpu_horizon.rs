@@ -307,3 +307,50 @@ fn the_shader_azimuth_frame_agrees_with_the_reference_at_a_pole_and_with_the_sun
         assert!((f64::from(g.factor) - e).abs() < 1e-2, "query {i}: gpu {} cpu {e}", g.factor);
     }
 }
+
+// spec: REND-038, CON-18
+#[test]
+fn the_horizon_and_shadow_views_show_the_ridge_that_casts_the_shadow_and_match_the_adapters_goldens() {
+    use planet_frame::look::shading::ShadeView;
+    use planet_testkit::{GoldenChecks, Tolerance};
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let mut goldens = GoldenChecks::new(&ctx.adapter_key(), &ctx.driver_string());
+    let p = plan(3);
+    let mut r = renderer(&ctx, &p);
+    // A synthetic chunk map shared by every node: the horizon climbs from 0 to 90 degrees across the chunk's i axis in every azimuth, so each
+    // tile shows a ridge line where the horizon passes the sun's elevation. One slot, the whole chunk per tile.
+    let n = 256usize;
+    let map: Vec<u8> = (0..n * n * AZ).map(|c| ((c / AZ) % n) as u8).collect();
+    let nodes = vec![HorizonNode { slot: 0, sun_azimuth: 0.0, sun_elevation: 0.0, fade: 1.0, rect: [0.0, 0.0, 1.0, 1.0] }; p.nodes.len()];
+    let set = HorizonFrame { capacity: 1, nodes, update: SlotUpdate::default() };
+    r.set_horizon(&ctx, &set, &[(0, pack_map(&map, n, AZ).unwrap())]);
+    let mut grey = Vec::new();
+    for (view, golden) in
+        [(ShadeView::Horizon, "lit_ground_horizon_synthetic_ev15"), (ShadeView::Shadow, "lit_ground_shadow_synthetic_ev15")]
+    {
+        let mut q = p.clone();
+        let mut l = LitPlan::fixed(EV);
+        l.view = view;
+        q.lit = Some(l);
+        r.render(&ctx, &q, false).unwrap();
+        let f = r.read_color(&ctx);
+        let img = Image::new(f.width, f.height, f.rgba);
+        let covered: Vec<bool> = r.lit_path().unwrap().read_hdr(&ctx).iter().map(|px| px[3] > 0.0).collect();
+        assert!(covered.iter().filter(|c| **c).count() > 100, "{golden}: the terrain is there");
+        // The view is grey: red, green and blue agree on the terrain pixels.
+        let values: Vec<u8> = img.pixels().zip(&covered).filter(|(_, c)| **c).map(|(px, _)| px[0]).collect();
+        for (px, c) in img.pixels().zip(&covered) {
+            if *c {
+                assert!(px[0].abs_diff(px[1]) <= 1 && px[1].abs_diff(px[2]) <= 1, "{golden}: {px:?} is not grey");
+            }
+        }
+        grey.push(values);
+        goldens.check(golden, &img, Tolerance::Exact);
+    }
+    // The horizon view climbs across the tile (several greys); the shadow view has both lit and shadowed terrain.
+    let distinct: std::collections::BTreeSet<u8> = grey[0].iter().copied().collect();
+    assert!(distinct.len() >= 8, "the horizon view shows a gradient ({} greys)", distinct.len());
+    let (lit, dark) = (grey[1].iter().filter(|&&v| v > 200).count(), grey[1].iter().filter(|&&v| v < 20).count());
+    assert!(lit > 50 && dark > 50, "the shadow view shows lit ({lit}) and shadowed ({dark}) terrain");
+    goldens.finish();
+}

@@ -393,11 +393,22 @@ pub enum ShadeView {
     Lighting,
     Temperature,
     Precipitation,
+    /// The horizon elevation at the sun's azimuth as grey (0 at the horizon, white at 30 degrees; REND-038).
+    Horizon,
+    /// The horizon shadow's factor as grey (1 lit, 0 in shadow; REND-038).
+    Shadow,
 }
 
 impl ShadeView {
-    pub const ALL: [ShadeView; 5] =
-        [ShadeView::Lit, ShadeView::Albedo, ShadeView::Lighting, ShadeView::Temperature, ShadeView::Precipitation];
+    pub const ALL: [ShadeView; 7] = [
+        ShadeView::Lit,
+        ShadeView::Albedo,
+        ShadeView::Lighting,
+        ShadeView::Temperature,
+        ShadeView::Precipitation,
+        ShadeView::Horizon,
+        ShadeView::Shadow,
+    ];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -406,6 +417,8 @@ impl ShadeView {
             ShadeView::Lighting => "lighting",
             ShadeView::Temperature => "temperature",
             ShadeView::Precipitation => "precipitation",
+            ShadeView::Horizon => "horizon",
+            ShadeView::Shadow => "shadow",
         }
     }
 
@@ -486,6 +499,9 @@ pub fn terrain_radiance_with_ramp(
         }
         ShadeView::Lighting => [ndl / pi; 3],
         ShadeView::Temperature | ShadeView::Precipitation => climate_view_colour(view, temperature_c, precipitation_mm).map(|c| c / pi),
+        // With no horizon map the horizon is the sky's own (0) and the sun is never shadowed (1); the maps come from `horizon_lookup` (REND-038).
+        ShadeView::Horizon => [0.0; 3],
+        ShadeView::Shadow => [1.0 / pi; 3],
     }
 }
 

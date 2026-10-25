@@ -1,1 +1,3 @@
 # Goldens that are waiting for the owner's /bless (one name per line). /bless removes a line when it promotes the golden.
+lit_ground_horizon_synthetic_ev15
+lit_ground_shadow_synthetic_ev15

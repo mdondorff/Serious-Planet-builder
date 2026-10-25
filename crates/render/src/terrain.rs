@@ -605,7 +605,7 @@ fn climate_colour(view: u32, t: f32, p: f32) -> vec3<f32> {
 }
 
 // The lit terrain's radiance before the pre-exposure (ADR 0039 point 4, REND-026): Lambert diffuse `albedo * max(n . sun, 0) / pi`
-// for the sun's illuminance of one unit, in the view `view` (0 lit, 1 albedo, 2 lighting, 3 temperature, 4 precipitation). `up` is
+// for the sun's illuminance of one unit, in the view `view` (0 lit, 1 albedo, 2 lighting, 3 temperature, 4 precipitation, 5 horizon, 6 shadow). `up` is
 // the unit up vector at the point; the climate comes from the tile's field. No ambient, no shadows, no specular.
 fn terrain_radiance(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32, ramp_min: f32, sun: vec3<f32>) -> vec3<f32> {
     let n = normalize(normal);
@@ -659,6 +659,9 @@ fn fs_lit_view(in: VsOut) -> vec4<f32> {
     var rgb = sun_vis * shade_lit(g.mode.x, g.albedo, gd.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), sun, g.range.z) * detail_mul(gd, g.mode.x, g.albedo, climate.x, climate.y, clamp(dot(normalize(gd.normal), up), 0.0, 1.0), in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)));
     // The sum is clamped like the rest of the lit radiance: the scene target is f16.
     rgb = min(rgb + vec3<f32>(ground_gloss(in.node_index, in.local, gd, sun) * (g.range.z * sun_vis)), vec3<f32>(60000.0));
+    if (g.mode.x >= 5u) {
+        rgb = horizon_view_colour(g.mode.x, in.node_index, in.aux, up, sun) * g.range.z;
+    }
     if (g.extra.y > 3.5) {
         rgb = stale_tint(in, rgb, g.range.z);
     } else if (g.extra.y > 2.5) {
