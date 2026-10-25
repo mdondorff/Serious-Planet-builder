@@ -75,14 +75,16 @@ fn measure(world: &WorldTerrain, max_level: u8) -> Vec<(String, usize, usize, us
 /// Re-pinned 2026-10-18 by `render-floor-3` (LOD-011, ADR 0062 point 3, declared): R and D hold no tile above the render floor (level 3),
 /// so the levels 0-2 ancestors drop out of every view (-4 to -34 slots), and orbit-20000km is the 182 level-3 tiles of the visible
 /// hemisphere (73 before: 52 level-2 tiles and their ancestors) in both R and D.
+/// Re-pinned 2026-10-25 by `m8-relief-band` (GEN-064, declared): the hill band changes the heights the plans read, so a few views plan up to
+/// 0.3 % more tiles (ground-1m R 11,489 to 11,496, D 3,333 to 3,337; aerial-200km, low-2km and ground-200m by 1 to 7 slots); the others hold.
 const PINS: [(&str, usize, usize); 10] = [
     ("orbit-20000km", 182, 182),
     ("high-2000km", 911, 574),
-    ("aerial-200km", 2640, 886),
+    ("aerial-200km", 2642, 886),
     ("aerial-20km", 4246, 1249),
-    ("low-2km", 6358, 1804),
-    ("ground-200m", 8673, 2381),
-    ("ground-1m", 11489, 3333),
+    ("low-2km", 6359, 1805),
+    ("ground-200m", 8675, 2385),
+    ("ground-1m", 11496, 3337),
     ("north-pole-1km", 5624, 1598),
     ("cube-corner-1km", 7890, 2182),
     ("face-edge-1km", 7812, 2127),
@@ -90,7 +92,7 @@ const PINS: [(&str, usize, usize); 10] = [
 
 /// The same at the reference finest level 26 (the cap before ADR 0033 point 6, `--finest-level 26`), where it differs: only ground-1m.
 /// (14,325 and 4,063 before render-floor-3, which drops the 4 and 3 ancestors above the floor.)
-const PINS_L26_GROUND_1M: (usize, usize) = (14321, 4060);
+const PINS_L26_GROUND_1M: (usize, usize) = (14328, 4064);
 
 fn check_pins(measured: &[(String, usize, usize, usize)], pins: &[(&str, usize, usize)]) -> Vec<String> {
     let mut failures = Vec::new();
