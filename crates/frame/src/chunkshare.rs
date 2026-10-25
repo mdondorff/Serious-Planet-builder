@@ -66,8 +66,9 @@ pub struct ChunkFade {
 }
 
 impl ChunkFade {
-    /// `chunk_fade_ms` is 500 by default.
-    pub const DEFAULT_FADE_MS: u64 = 500;
+    /// `chunk_fade_ms` is 1,500 by default (M8 criterion 3, amended by the owner 2026-10-24): the change of a landing chunk fades in over about
+    /// 1.5 s. The largest entry step measured (17.55 m, `m8-anet-chunk` section 16) then moves a vertex by 0.2 m per frame at 60 fps.
+    pub const DEFAULT_FADE_MS: u64 = 1_500;
 
     pub fn new(fade_ms: u64) -> ChunkFade {
         ChunkFade { fade_ms, landed_ms: HashMap::new() }
@@ -98,9 +99,11 @@ impl ChunkFade {
         }
     }
 
-    /// The weight of a tile: that of its own chunk (a tile above the top level reads none and weighs 0, it draws the base).
+    /// The weight of a tile (STRM-047): the minimum of the weights of the chunks it reads, so the tiles on either side of a chunk border rise
+    /// together (the cells a tile reads cross borders). A tile that reads none (above the top level) has no change plane, and weighs 1: its draw
+    /// is the final height, bit for bit.
     pub fn tile_weight(&self, view: &dyn ChunkView, tile: TileId, now_ms: u64) -> f32 {
-        view.reads(tile).first().map_or(0.0, |&k| self.weight(k, view.is_ready(k), now_ms))
+        view.reads(tile).into_iter().map(|k| self.weight(k, view.is_ready(k), now_ms)).fold(1.0, f32::min)
     }
 }
 

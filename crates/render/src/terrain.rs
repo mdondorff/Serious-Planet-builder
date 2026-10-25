@@ -2704,6 +2704,7 @@ mod one_shot_tests {
             fine: 0,
             quadrants: 0b1111,
             state: planet_frame::TileState::default(),
+            chunk_weight: 1.0,
         };
         let (coarse, fine) = (TileId::new(planet_core::Face(0), 17, 1, 1).unwrap(), TileId::new(planet_core::Face(0), 20, 8, 8).unwrap());
         let mut plan = planet_frame::viewer::lit_warm_plan(
@@ -2754,6 +2755,7 @@ mod one_shot_tests {
             fine: 0,
             quadrants: 0b1111,
             state: planet_frame::TileState::default(),
+            chunk_weight: 1.0,
         };
         let mut plan = planet_frame::viewer::lit_warm_plan(
             planet_frame::camera::Camera::looking_at_centre(
@@ -2817,6 +2819,7 @@ mod one_shot_tests {
             fine,
             quadrants: 0b1111,
             state,
+            chunk_weight: 1.0,
         };
         let mut plan = planet_frame::viewer::lit_warm_plan(
             planet_frame::camera::Camera::looking_at_centre(
