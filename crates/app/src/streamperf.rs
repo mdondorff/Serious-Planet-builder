@@ -458,18 +458,21 @@ fn run_case(
         let stop = Arc::new(AtomicBool::new(false));
         let samples: Arc<Mutex<Vec<planet_perf::ClockSample>>> = Arc::default();
         let (s2, v2) = (Arc::clone(&stop), Arc::clone(&samples));
-        let handle = std::thread::spawn(move || {
-            let mut last = Instant::now();
-            while !s2.load(Ordering::Relaxed) {
-                std::thread::sleep(Duration::from_millis(200));
-                if last.elapsed().as_secs() >= CLOCK_SAMPLE_PERIOD_S {
-                    last = Instant::now();
-                    if let Some(c) = planet_perf::query_nvidia_smi() {
-                        v2.lock().expect("clock samples").push(c);
+        let handle = std::thread::Builder::new()
+            .name("clock-sampler".into())
+            .spawn(move || {
+                let mut last = Instant::now();
+                while !s2.load(Ordering::Relaxed) {
+                    std::thread::sleep(Duration::from_millis(200));
+                    if last.elapsed().as_secs() >= CLOCK_SAMPLE_PERIOD_S {
+                        last = Instant::now();
+                        if let Some(c) = planet_perf::query_nvidia_smi() {
+                            v2.lock().expect("clock samples").push(c);
+                        }
                     }
                 }
-            }
-        });
+            })
+            .expect("start the clock sampler");
         (stop, samples, handle)
     });
     // The host's load beside the measured part, on its own thread like the clock sampler (TEST-023).

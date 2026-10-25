@@ -22,6 +22,7 @@ pub mod preflightperf;
 pub mod reproworld;
 pub mod sheet;
 pub mod skeleton;
+pub mod stall;
 pub mod stills;
 pub mod streamperf;
 pub mod sweep;

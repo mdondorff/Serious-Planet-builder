@@ -112,7 +112,7 @@ pub fn coarse_horizon(run: &Lattice, z: &[f32], m: usize, p: &CoarseParams, thre
     std::thread::scope(|s| {
         for (c, part) in out.chunks_mut(per * a).enumerate() {
             let (obs, height, observer_height) = (&obs, &height, &observer_height);
-            s.spawn(move || {
+            planet_core::thread::spawn_named(s, "coarse-horizon", move || {
                 for (r, bytes) in part.chunks_mut(a).enumerate() {
                     let d0 = obs.direction(c * per + r);
                     let h0 = observer_height(c * per + r);

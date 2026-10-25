@@ -165,7 +165,7 @@ pub fn bake_horizon(
     std::thread::scope(|s| {
         for (c, part) in data.chunks_mut(rows_per * row_len).enumerate() {
             let dirs = &dirs;
-            s.spawn(move || {
+            planet_core::thread::spawn_named(s, "horizon-bake", move || {
                 for (r, row) in part.chunks_mut(row_len).enumerate() {
                     let y = y0 + c * rows_per + r;
                     for i in 0..w {

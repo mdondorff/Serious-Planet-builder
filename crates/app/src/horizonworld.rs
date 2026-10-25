@@ -152,7 +152,7 @@ impl WorldTerrain {
     /// One frame of the horizon jobs: the chunks the plan's `tiles` read, nearest to `camera` first. Returns what landed and what was dropped
     /// (the tiles of a landed map want their horizon texture refreshed); without the jobs nothing happens. Never waits for a job.
     pub fn horizon_frame(&self, tiles: &[TileId], camera: PlanetFixed) -> HorizonUpdate {
-        let (Some(jobs), Some(m)) = (self.horizon.read().expect("horizon jobs").clone(), self.chunk_manager()) else {
+        let (Some(jobs), Some(m)) = (crate::stall::read(&self.horizon, "horizon jobs lock (read)").clone(), self.chunk_manager()) else {
             return Default::default();
         };
         let mut wanted: Vec<(ChunkKey, f64)> = Vec::new();
@@ -172,12 +172,12 @@ impl WorldTerrain {
 
     /// The horizon map of a chunk, if one has landed (`None`: the tile reads the coarse horizon alone).
     pub fn horizon_map(&self, key: ChunkKey) -> Option<Arc<Vec<u8>>> {
-        self.horizon.read().expect("horizon jobs").as_ref()?.horizon(key)
+        crate::stall::read(&self.horizon, "horizon jobs lock (read)").as_ref()?.horizon(key)
     }
 
     /// What the horizon jobs did so far, `None` without them.
     pub fn horizon_stats(&self) -> Option<HorizonStats> {
-        self.horizon.read().expect("horizon jobs").as_ref().map(|j| j.stats())
+        crate::stall::read(&self.horizon, "horizon jobs lock (read)").as_ref().map(|j| j.stats())
     }
 }
 
@@ -220,13 +220,13 @@ impl Default for CoarseSlot {
 
 impl CoarseSlot {
     pub fn standing(&self) -> CoarseStanding {
-        self.inner.lock().expect("coarse slot").clone()
+        crate::stall::lock(&self.inner, "coarse horizon slot").clone()
     }
 
     /// Run `job` on a thread, once: a later call while it works or after it ended does nothing.
     pub fn request(&self, job: impl FnOnce() -> CoarseStanding + Send + 'static) {
         {
-            let mut s = self.inner.lock().expect("coarse slot");
+            let mut s = crate::stall::lock(&self.inner, "coarse horizon slot");
             if !matches!(*s, CoarseStanding::Idle) {
                 return;
             }

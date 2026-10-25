@@ -231,7 +231,7 @@ impl WaterBook {
         let priority = planet_streaming::priority::current();
         std::thread::scope(|scope| {
             for chunk in dirs.chunks(dirs.len().div_ceil(8)) {
-                scope.spawn(move || {
+                planet_core::thread::spawn_named(scope, "water-heights", move || {
                     if let Some(p) = priority {
                         planet_streaming::priority::set_current(p);
                     }

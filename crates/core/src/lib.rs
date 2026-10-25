@@ -7,6 +7,7 @@ pub mod frames;
 pub mod hash;
 pub mod math;
 pub mod surface;
+pub mod thread;
 pub mod tile;
 pub mod vec3;
 

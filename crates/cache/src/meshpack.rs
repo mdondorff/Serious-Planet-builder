@@ -468,7 +468,7 @@ pub fn prefill(
     let in_level: Vec<usize> = (0..=levels).map(|l| missing.iter().filter(|t| t.level() == l).count()).collect();
     std::thread::scope(|s| {
         for _ in 0..threads.max(1) {
-            s.spawn(|| loop {
+            planet_core::thread::spawn_named(s, "prefill-worker", || loop {
                 let i = next.fetch_add(1, Ordering::SeqCst);
                 let Some(tile) = missing.get(i) else { break };
                 let made = spec.record(&spec.generate(*tile));
