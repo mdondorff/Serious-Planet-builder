@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: STRM-047 The change and its weight reach the draw
-The compact tile builder SHALL store the chunk change of a tile at the tile's own level beside its heights (`HeightField::level_change`, forwarded by every wrapper that forwards `height_at_level`), and the plan's node (`TerrainDraw::chunk_weight`) SHALL carry the tile's fade weight, the minimum of the weights of the chunks the tile reads, so two tiles on either side of a chunk border rise together; the node record holds it as the fade `1 - w` (REND-039).
+The compact tile builder SHALL store the chunk change of a tile at the tile's own level beside its heights (`HeightField::level_change`, forwarded by every wrapper that forwards `height_at_level`), and the plan's node (`TerrainDraw::chunk_weight`) SHALL carry the tile's fade weight, the minimum of the weights of the chunks the tile reads, so two tiles on either side of a chunk border rise together; the node record holds it as the fade `1 - w` (REND-039). The clock of a chunk SHALL start when its change is first drawn, that is when the first tile reading it is uploaded (or found to be the tile the sink holds) after the chunk landed, not at the landing: until then the chunk weighs 0 like a chunk that is not ready, so a rebuild slower than `chunk_fade_ms` still fades; every tile of the chunk shares that one clock; a chunk that lands again without having left RAM (a new version) keeps its state, so the tiles under it neither drop to the base nor fade again.
 
 Verify: A
 Status: active
@@ -10,6 +10,10 @@ Source: STRM-039 (the weight), STRM-038 (the chunks a tile reads), REND-039
 #### Scenario: Change and weight
 - **WHEN** a tile at the pyramid top over a ready chunk and a tile near its border with a chunk that landed later are built and planned
 - **THEN** the stored change equals the field's height at the tile's level minus the base's, the node weights follow the fade of each chunk, and the border tile takes the smaller weight of the two chunks it reads
+
+#### Scenario: A slow rebuild and a new version
+- **WHEN** a chunk lands and its rebuilt tiles reach the renderer 2 s later (the fade is 1.5 s), and later the chunk and a neighbour land again
+- **THEN** the tiles under the chunk weigh 0 until the rebuilt tiles arrive, 0.5 at 750 ms after, and 1 after 1.5 s, and the later landings leave the weights at 1
 
 ## MODIFIED Requirements
 

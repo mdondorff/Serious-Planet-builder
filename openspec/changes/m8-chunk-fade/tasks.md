@@ -28,10 +28,9 @@
 - `compact_tile_field` evaluates the change twice per lattice point (in `heights_and_climate` and in `level_change`); measure before step 3 and fold into one pass if it shows.
 
 ## 6. Fade stability (numerics-reviewer, 2026-10-25; owner of the plan: opus-planner, decision B)
-- [ ] 6.1 A tile is weighed over the chunks it was built with (its read records), not the current ready set: a neighbour chunk landing under a tile that already shows its change leaves its weight; test: build A with X ready at w = 1, land Y without rebuilding A, A's drawn heights one millisecond later equal those before (spec: STRM-047)
-- [ ] 6.2 The fade clock starts per tile when the rebuilt tile is uploaded, not at the chunk's landing: a rebuild slower than the fade length still fades; test: land a chunk on an injected clock, deliver the rebuilt tile 2 s later, the first frame drawing it is not at w = 1 (spec: STRM-047)
-- [ ] 6.3 Sticky plane assignment past `FADE_PLANES`: a node that overflowed stays final until its fade ends, a node holding a plane keeps it; test: more than 512 fading nodes, the lowest id finishes, no node's drawn height moves by more than its own per-frame step (spec: REND-039)
-- [ ] 6.4 A plane with a non-finite value is refused at the upload with an actionable error, and `place` forms no `0 x NaN` at fade 0 (the mirror is bit for bit the old arithmetic there); test: a NaN plane at fade 0 equals `shade_vertex` (spec: REND-039)
-- [ ] 6.5 Tiles decoded from a mesh pack carry no change plane (`from_slot_data`): fix if small, else a tracked limit (prefill levels lie above the chunk top level)
+- [x] 6.1 A chunk landing again without having left RAM (a new version) keeps its fade state; a neighbour landing leaves the tiles under a faded chunk alone (the reviewer's first scenario needs a re-landing, since a tile that reads an unready chunk already weighs 0); test `a_rebuild_slower_than_the_fade_still_fades_and_neither_a_neighbour_nor_a_new_version_drops_the_tiles_under_a_faded_chunk` (spec: STRM-047)
+- [x] 6.2 The clock of a chunk starts when its change is first drawn (the first upload of a tile reading it after the landing), one clock for all its tiles (the shared edges stay closed); a rebuild slower than the fade still fades; tests in `chunk_share.rs` and `managed.rs` (spec: STRM-047)
+- [x] 6.3 Sticky plane assignment past `FADE_PLANES` (`FadePlaneGrants`); test `a_node_is_never_switched_between_faded_and_final_mid_fade_whatever_finishes_or_starts_around_it` (spec: REND-039)
+- [x] 6.4 A plane with a non-finite value is refused (`ExecError::NonFiniteChange`), `place` forms no `0 x NaN` at fade 0; tests in `chunkfield.rs` and `gpu_chunk_fade.rs` (spec: REND-039)
+- [x] 6.5 Tiles decoded from a mesh pack carry no change plane (`from_slot_data`): a tracked limit, the pack holds the prefill levels 3 to 4 which lie above the chunk top level
 - [ ] 6.6 numerics-reviewer again, spec-guardian, verifier; then 5.1 (archive)
-
