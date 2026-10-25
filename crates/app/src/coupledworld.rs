@@ -95,8 +95,8 @@ struct Prepared {
 
 /// The key of the run: `n` and the bake's resolution (`src.res()`, never a number the caller states) are in the spec, the bake's stage key is
 /// the source of every block's key, and the inputs enter by their declared identity (STRM-043), so the key is made without reading the bake.
-/// `src` must be the unscaled bake of `def` at its own resolution: the key names that bake, it does not check what `src` holds (a source with
-/// the relief scale of WDEF-017 applied would be stored under the key of the unscaled one).
+/// `src` is the bake of `def` at its own resolution: the key names that bake, and the relief scale the source carries over it
+/// (`LatticeSource::relief_scale`, WDEF-017) enters the inputs' identity, so a scaled source is never stored under the key of the unscaled one.
 fn prepare(def: &WorldDefinition, src: &dyn LatticeSource, n: u32, steps: u32) -> Result<Prepared, String> {
     let bake_res = src.res();
     if n == 0 || bake_res < n || !bake_res.is_multiple_of(n) || !(bake_res / n).is_power_of_two() {
@@ -111,7 +111,7 @@ fn prepare(def: &WorldDefinition, src: &dyn LatticeSource, n: u32, steps: u32) -
         steps,
         bake_res,
         params: CoupledParams::default(),
-        inputs: declared_inputs_hash(radius_m, UPLIFT_M_PER_YEAR, ERODIBILITY),
+        inputs: declared_inputs_hash(radius_m, UPLIFT_M_PER_YEAR, ERODIBILITY, src.relief_scale()),
     };
     let world = GlobalWorld::from_definition(def).map_err(|e| format!("the definition cannot be generated: {e}"))?.with_coupled(spec);
     let (level, cells) = world.layout(n).map_err(|e| format!("a coupled run of {n} cells: {e:?}"))?;
@@ -322,6 +322,19 @@ mod tests {
         fn at(&self, _: Face, _: u32, _: u32) -> Result<planet_generators::global::GlobalSample, planet_generators::global::ReadError> {
             panic!("a stored run is found without reading the bake");
         }
+    }
+
+    // spec: GEN-056
+    #[test]
+    fn a_source_with_a_relief_scale_has_its_own_key_and_a_scale_of_one_keeps_the_key() {
+        use planet_generators::global::ScaledLattice;
+        let d = def();
+        let plain = Unread(4 * RES);
+        let id = |s: &dyn LatticeSource| prepare(&d, s, RES / 2, 3).unwrap().id;
+        assert_eq!(id(&ScaledLattice::new(&plain, 1.0)), id(&plain), "a scale of 1 is the bake");
+        let (two, three) = (id(&ScaledLattice::new(&plain, 2.0)), id(&ScaledLattice::new(&plain, 3.0)));
+        assert!(two != id(&plain) && three != id(&plain) && two != three, "each scale has its own run");
+        assert_eq!(id(&ScaledLattice::new(&ScaledLattice::new(&plain, 2.0), 1.5)), three, "scales multiply");
     }
 
     // spec: GEN-056

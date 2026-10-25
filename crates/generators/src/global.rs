@@ -504,6 +504,11 @@ pub trait LatticeSource: Sync {
     fn block_cells(&self) -> u32 {
         0
     }
+    /// The factor the source's elevations carry over the bake's own (WDEF-017): 1 for a bake, the body's relief scale for a [`ScaledLattice`].
+    /// A stored result made from the source (the coupled run) names it in its key, so a scaled source never reads an unscaled run.
+    fn relief_scale(&self) -> f64 {
+        1.0
+    }
 }
 
 /// A lattice source with the elevation of every sample multiplied by the body's relief scale (WDEF-017): the exaggeration is part of the
@@ -535,6 +540,10 @@ impl LatticeSource for ScaledLattice<'_> {
 
     fn block_cells(&self) -> u32 {
         self.inner.block_cells()
+    }
+
+    fn relief_scale(&self) -> f64 {
+        self.scale * self.inner.relief_scale()
     }
 }
 

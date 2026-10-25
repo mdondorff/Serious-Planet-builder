@@ -68,6 +68,10 @@ impl LatticeSource for SharedStore {
     fn block_cells(&self) -> u32 {
         self.0.block_cells()
     }
+
+    fn relief_scale(&self) -> f64 {
+        self.0.relief_scale()
+    }
 }
 
 /// What the world's tile source did so far, recorded only (STRM-022): the block cache of the stored bake, the pack's lookups and the

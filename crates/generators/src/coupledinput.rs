@@ -103,11 +103,16 @@ fn band(src: &dyn LatticeSource, face: Face, j0: usize, j1: usize, n: usize, r: 
 
 /// The identity of the run's inputs when they are declared and not stored: the reduction, the planet radius, and the constant uplift (m per
 /// year) and erodibility. The heights themselves are a function of the bake (whose stage key is in the key of the stored run) and of the
-/// reduction, so a stored run is found without reading the bake. Per-cell driver maps (ADR 0076) will carry their own identity.
-pub fn declared_inputs_hash(radius_m: f64, uplift: f32, erodibility: f32) -> u64 {
+/// reduction, so a stored run is found without reading the bake. The relief scale the source carries over the bake (`LatticeSource::relief_scale`)
+/// enters only when it is not 1, so the keys of runs from an unscaled bake are those they always were. Per-cell driver maps (ADR 0076) will
+/// carry their own identity.
+pub fn declared_inputs_hash(radius_m: f64, uplift: f32, erodibility: f32, relief_scale: f64) -> u64 {
     let mut h = mix64(0x626b_5f72_6564_7563 ^ u64::from(REDUCTION_VERSION));
     for bits in [radius_m.to_bits(), u64::from(uplift.to_bits()), u64::from(erodibility.to_bits())] {
         h = mix64(h ^ bits);
+    }
+    if relief_scale != 1.0 {
+        h = mix64(h ^ relief_scale.to_bits() ^ 0x7265_6c69_6566_5f73);
     }
     h
 }
@@ -341,12 +346,14 @@ mod tests {
     // spec: GEN-056
     #[test]
     fn the_declared_identity_of_the_inputs_changes_with_each_part() {
-        let base = declared_inputs_hash(6.4e6, 1.0e-3, 2.0e-5);
-        assert_eq!(base, declared_inputs_hash(6.4e6, 1.0e-3, 2.0e-5));
+        let base = declared_inputs_hash(6.4e6, 1.0e-3, 2.0e-5, 1.0);
+        assert_eq!(base, declared_inputs_hash(6.4e6, 1.0e-3, 2.0e-5, 1.0));
         for other in [
-            declared_inputs_hash(6.5e6, 1.0e-3, 2.0e-5),
-            declared_inputs_hash(6.4e6, 2.0e-3, 2.0e-5),
-            declared_inputs_hash(6.4e6, 1.0e-3, 3.0e-5),
+            declared_inputs_hash(6.5e6, 1.0e-3, 2.0e-5, 1.0),
+            declared_inputs_hash(6.4e6, 2.0e-3, 2.0e-5, 1.0),
+            declared_inputs_hash(6.4e6, 1.0e-3, 3.0e-5, 1.0),
+            declared_inputs_hash(6.4e6, 1.0e-3, 2.0e-5, 2.0),
+            declared_inputs_hash(6.4e6, 1.0e-3, 2.0e-5, 2.5),
         ] {
             assert_ne!(base, other);
         }
