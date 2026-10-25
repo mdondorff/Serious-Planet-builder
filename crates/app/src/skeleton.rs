@@ -1066,7 +1066,7 @@ pub(crate) fn upload_missing_meshes(
         let handles: Vec<_> = missing
             .chunks(chunk)
             .map(|part| {
-                s.spawn(move || {
+                planet_core::thread::spawn_named(s, "skeleton-tile", move || {
                     part.iter()
                         .map(|&t| {
                             let made = tile_for(field, t, cells, radius_m);

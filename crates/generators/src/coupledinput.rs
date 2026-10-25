@@ -34,7 +34,7 @@ pub fn reduce_bake(src: &dyn LatticeSource, n: u32, threads: usize) -> Result<Ve
     let done: Mutex<Vec<Band>> = Mutex::new(Vec::with_capacity(bands));
     std::thread::scope(|s| {
         for _ in 0..threads.clamp(1, bands) {
-            s.spawn(|| loop {
+            planet_core::thread::spawn_named(s, "reduce-bake", || loop {
                 let b = next.fetch_add(1, Ordering::Relaxed);
                 if b >= bands {
                     break;

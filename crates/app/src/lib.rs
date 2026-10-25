@@ -4,6 +4,7 @@
 pub mod anetworld;
 pub mod coupledworld;
 pub mod crash;
+pub mod stall;
 pub mod editperf;
 pub mod editscale;
 pub mod editwin;

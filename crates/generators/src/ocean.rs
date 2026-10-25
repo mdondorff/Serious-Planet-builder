@@ -899,7 +899,7 @@ pub fn parallel_map<T: Sync, R: Send>(items: &[T], threads: usize, f: &(dyn Fn(&
     let parts: Vec<Vec<(usize, R)>> = std::thread::scope(|s| {
         let handles: Vec<_> = (0..threads)
             .map(|_| {
-                s.spawn(|| {
+                planet_core::thread::spawn_named(s, "ocean-pass", || {
                     let mut mine = Vec::new();
                     loop {
                         let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

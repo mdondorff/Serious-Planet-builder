@@ -601,7 +601,7 @@ fn par_rows<F: Fn(usize, &mut [[f64; 3]]) + Sync>(out: &mut [[f64; 3]], row_len:
     std::thread::scope(|s| {
         for (chunk_index, chunk) in out.chunks_mut(per * row_len).enumerate() {
             let f = &f;
-            s.spawn(move || {
+            planet_core::thread::spawn_named(s, "atmosphere-rows", move || {
                 for (k, row) in chunk.chunks_mut(row_len).enumerate() {
                     f(chunk_index * per + k, row);
                 }

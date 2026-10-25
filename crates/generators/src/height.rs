@@ -220,7 +220,7 @@ pub fn eval_chunked(dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), threads: us
     } else {
         std::thread::scope(|s| {
             for (d, o) in dirs.chunks(chunk).zip(out.chunks_mut(chunk)) {
-                s.spawn(move || run(d, o));
+                planet_core::thread::spawn_named(s, "heights-worker", move || run(d, o));
             }
         });
     }
@@ -514,7 +514,7 @@ pub fn generate_region(seed: u64, map: &(dyn FaceMapping + Sync), ids: &[TileId]
     std::thread::scope(|scope| {
         let handles: Vec<_> = ids
             .chunks(chunk)
-            .map(|part| scope.spawn(move || part.iter().map(|&id| generate_tile(seed, map, id, res)).collect::<Vec<_>>()))
+            .map(|part| planet_core::thread::spawn_named(scope, "tile-worker", move || part.iter().map(|&id| generate_tile(seed, map, id, res)).collect::<Vec<_>>()))
             .collect();
         for h in handles {
             out.extend(h.join().expect("generator thread panicked"));

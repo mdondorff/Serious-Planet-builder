@@ -267,6 +267,10 @@ struct Running {
     rig: Rig,
     viewer: ViewerState,
     stats: FrameStats,
+    /// The phases of the frame and the lock waits of the main thread (VIEW-056).
+    stall: crate::stall::StallProbe,
+    /// What the scheduler counted in the last frame, for a stall report.
+    last_counts: planet_frame::managed::FrameCounts,
     last_ms: Option<u64>,
     last_gpu_sample: Instant,
     gpu_ms: Option<f64>,
@@ -487,6 +491,8 @@ impl App<'_> {
             rig,
             viewer,
             stats: FrameStats::new(now, if cfg.smoke { SMOKE_TITLE_PERIOD_MS } else { TITLE_PERIOD_MS }),
+            stall: Default::default(),
+            last_counts: Default::default(),
             last_ms: None,
             last_gpu_sample: Instant::now(),
             gpu_ms: None,
@@ -594,6 +600,9 @@ impl App<'_> {
         let cfg = self.cfg;
         let began = Instant::now();
         let now_ms = self.clock.now_ms();
+        if let Some(st) = self.state.as_mut() {
+            st.stall.begin();
+        }
         // A changed definition goes to the generator before the frame plans: the definition first, then the tiles it changed (STRM-028); the
         // field the window picks and reads the ground from is then built again from the new definition.
         let mut republished = false;
@@ -611,6 +620,9 @@ impl App<'_> {
                 let resident: Vec<_> = st.rig.managed.resident().keys().copied().collect();
                 st.rig.managed.edit(&resident);
             }
+        }
+        if let Some(st) = self.state.as_mut() {
+            st.stall.mark("coupled lens and plan refusals");
         }
         if let Some(st) = self.state.as_mut() {
             if let Some(e) = st.edit.as_mut() {
@@ -644,6 +656,9 @@ impl App<'_> {
                 }
             }
         }
+        if let Some(st) = self.state.as_mut() {
+            st.stall.mark("edit republish (set_definition, field, tile refresh)");
+        }
         // The brush stroke under the pointer is previewed as it is painted (VIEW-036); when it ends the put stroke's delta takes over.
         if let Some(st) = self.state.as_mut() {
             if let Some(stamps) = st.edit.as_mut().and_then(|e| e.transient_preview()) {
@@ -659,6 +674,9 @@ impl App<'_> {
             // The stamps and the chunk stage lift the field: the plan's bound for the horizon, the frustum and the morph follows the field's
             // maximum, and is never below the configured one (a run with no edits and no chunk stage plans as it did).
             self.lod.max_height_m = cfg.lod.max_height_m.max(self.field.max_abs_height_m());
+        }
+        if let Some(st) = self.state.as_mut() {
+            st.stall.mark("field rebuild (a new stage or lens)");
         }
         let lod_max_height_m = self.lod.max_height_m;
         let (field, radius) = (self.field.as_ref(), cfg.radius_m);
@@ -697,6 +715,7 @@ impl App<'_> {
             }
             // A command of this frame (C back to the flight, restart) may have released the mouse.
             apply_grab(&mut st);
+            st.stall.mark("input, commands and the smoke script");
             let ground = |p: planet_core::PlanetFixed| radius + field.height(p.0.normalized());
             let height = |p: planet_core::PlanetFixed| p.0.length() - ground(p);
             let had_globe = st.viewer.globe.is_some();
@@ -732,6 +751,7 @@ impl App<'_> {
                 st.marker_labels.clear();
                 st.hover = None;
             }
+            st.stall.mark("camera, ground heights and the globe overview");
             st.altitude_m = height(camera.position);
             st.camera_position = camera.position.0;
             st.path.record(now_ms, &camera, st.altitude_m, dt * 1000.0);
@@ -745,6 +765,8 @@ impl App<'_> {
                     st.rig.managed.begin_frame(&req, &mut RendererSink { ctx, renderer: &mut st.rig.renderer })
                 })?;
             st.counts.coarse_lod_frames += u64::from(st.viewer.coarse_lod);
+            st.last_counts = frame.counts;
+            st.stall.mark("plan and residency (begin_frame)");
             // The chunks the plan's tiles read, nearest first; the tiles that read a landed one are refreshed (STRM-039, STRM-040).
             if !st.chunks_on && self.world.chunk_manager().is_some() {
                 st.chunks_on = true;
@@ -843,6 +865,7 @@ impl App<'_> {
                 );
                 e.update(&camera, viewport, &wanted, field, &limits, Pointer { cursor: st.cursor, over_ui });
             }
+            st.stall.mark("chunk frame, refusals and editor update");
             st.rig.fi.retire_to(st.rig.renderer.retired_frames(ctx));
             while st.rig.fi.is_full() {
                 st.rig.fi.note_wait();
@@ -907,6 +930,7 @@ impl App<'_> {
             } else {
                 None
             };
+            st.stall.mark("wait for the GPU (frames in flight) and the lit plan with the water");
             let plan = lit_plan.as_ref().unwrap_or(&draw.plan);
             st.rig.renderer.set_preview_of(draw);
             // The scale references (VIEW-050): dropped on the ground in front of the camera when the key turns them on, taken away when it turns
@@ -920,16 +944,19 @@ impl App<'_> {
                 };
             }
             st.rig.renderer.set_scale_refs(&st.scale_refs);
+            st.stall.mark("scale references");
             // The horizon shadows (REND-038): the chunk maps in their slots and the coarse map, for the lit frames over a world with a chunk stage.
             if let Some(lit) = plan.lit.as_ref().filter(|_| st.chunks_on) {
                 let tiles: Vec<TileId> = plan.nodes.iter().map(|n| n.tile).collect();
                 st.horizon.frame(self.world, ctx, &mut st.rig.renderer, &tiles, plan.camera.position, lit.sun_dir);
             }
+            st.stall.mark("horizon frame and upload");
             // The regions overlay (VIEW-030): the region items of the editor's definition nearest the camera, decided here, drawn by the renderer.
             if plan.lit.is_some_and(|l| l.overlay == planet_frame::look::Overlay::Regions) {
                 let list = st.edit.as_ref().map(|e| e.region_list(plan.camera.position.0)).unwrap_or_default();
                 st.rig.renderer.set_regions(&list);
             }
+            st.stall.mark("regions overlay");
             // One frame a second is timed on the GPU, which waits for it: the title's GPU time (meaningful with vsync off).
             let timed = ctx.timestamps_supported() && st.last_gpu_sample.elapsed() >= GPU_SAMPLE_PERIOD;
             let (timing, _) = if timed {
@@ -942,6 +969,7 @@ impl App<'_> {
             if timed {
                 st.gpu_ms = timing.gpu_ms;
             }
+            st.stall.mark("render submit");
             let drew_lit = lit_plan.is_some();
             if drew_lit {
                 st.counts.lit_frames += 1;
@@ -978,6 +1006,7 @@ impl App<'_> {
                 st.window.set_title(&text);
                 st.last_title = text;
             }
+            st.stall.mark("title, exposure readback");
             let mut panel_events: Vec<crate::panels::Event> = Vec::new();
             let presented = if let Some(ui) = st.ui.as_mut() {
                 let factor = if st.viewer.coarse_lod { cfg.lod.coarse_factor() } else { 1.0 };
@@ -1002,6 +1031,7 @@ impl App<'_> {
             } else {
                 st.surface.present(ctx, &st.rig.renderer).map_err(|e| e.to_string())?
             };
+            st.stall.mark("editor panels (egui) and present");
             // What the panels asked for, and the camera flight to an edit.
             if let Some(e) = st.edit.as_mut() {
                 e.apply(panel_events);
@@ -1056,7 +1086,38 @@ impl App<'_> {
             Ok(quit)
         })();
         self.state = Some(st);
+        self.note_stall();
         result
+    }
+
+    /// A frame that took a second or more (VIEW-056): the phases, the locks the main thread waited on and the jobs in flight go to a report
+    /// (at most one in ten seconds, the others to the log) and the title says so.
+    fn note_stall(&mut self) {
+        let Some(st) = self.state.as_mut() else { return };
+        st.stall.mark("the rest of the frame");
+        let Some(stall) = st.stall.end() else { return };
+        let c = st.last_counts;
+        let mut extra = format!(
+            "jobs in flight in the tile streamer: {} in flight, {} queued, {} dispatched this frame, {} blocked; resident {}, slots in use {}\n",
+            c.in_flight, c.queued, c.dispatched, c.blocked, c.resident, c.slots_in_use
+        );
+        if let Some(m) = self.world.chunk_manager() {
+            extra += &format!("chunk jobs: {:?}\n", m.stats());
+        }
+        if let Some(h) = self.world.horizon_stats() {
+            extra += &format!("horizon jobs: {h:?}\n");
+        }
+        extra += &format!("stalls so far: {}\n", st.stall.stalls);
+        let text = stall.text(&extra);
+        let now_ms = self.clock.now_ms();
+        if st.stall.report_due() {
+            crate::crash::set_path_text(st.path.to_text());
+            let report = crate::crash::snapshot("stall (the window went on)", &text);
+            let shown = report.map_or_else(|| stall.notice(), |p| format!("{}, report {}", stall.notice(), p.display()));
+            st.notice = Some((shown, now_ms + NOTICE_MS));
+        } else {
+            crate::crash::note(&format!("warning: {}", stall.notice()));
+        }
     }
 
     /// The editor mode is on.

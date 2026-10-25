@@ -537,7 +537,7 @@ impl WorldTerrain {
 
     /// The current definition (a snapshot: a later [`WorldTerrain::set_definition`] does not change it).
     pub fn definition(&self) -> Arc<WorldDefinition> {
-        Arc::clone(&self.def.read().expect("definition lock"))
+        Arc::clone(&crate::stall::read(&self.def, "definition lock (read)"))
     }
 
     /// Replace the definition the fields are built from, for an edit of its items (the editor's definition after a command). The base
@@ -545,7 +545,7 @@ impl WorldTerrain {
     /// built before the call keep the definition they were built from; the next `field()` reads the new one. After this call, in the
     /// caller: `ManagedLoop::edit(tiles)`, so the replan sees the new definition.
     pub fn set_definition(&self, def: Arc<WorldDefinition>) -> Result<(), String> {
-        let mut current = self.def.write().expect("definition lock");
+        let mut current = crate::stall::write(&self.def, "definition lock (write)");
         if def.base_hash() != current.base_hash() {
             return Err(format!(
                 "the new definition has another base (hash {:016x}, the bake was made from {:016x}): only the items may change",
@@ -805,12 +805,12 @@ impl WorldTerrain {
 
     /// The lattice of this world's chunks, if it has a chunk stage.
     pub fn chunk_lattice(&self) -> Option<planet_generators::chunkfield::ChunkLattice> {
-        self.chunks.read().expect("chunk stage").as_ref().map(|c| c.lat)
+        crate::stall::read(&self.chunks, "chunk stage lock (read)").as_ref().map(|c| c.lat)
     }
 
     /// The manager of this world's chunks, if it has a chunk stage.
     pub fn chunk_manager(&self) -> Option<Arc<planet_streaming::chunks::ChunkManager>> {
-        self.chunks.read().expect("chunk stage").as_ref().map(|c| c.manager.clone())
+        crate::stall::read(&self.chunks, "chunk stage lock (read)").as_ref().map(|c| c.manager.clone())
     }
 
     /// The view a frame counts its stand-in share against (STRM-039): the world's chunks, `None` without a chunk stage.
@@ -847,7 +847,7 @@ impl WorldTerrain {
     pub fn field(&self) -> Result<Box<dyn HeightField + '_>, String> {
         let started = std::time::Instant::now();
         let def = self.definition();
-        let layer = self.chunks.read().expect("chunk stage").as_ref().map(|c| planet_generators::chunkfield::ChunkLayer {
+        let layer = crate::stall::read(&self.chunks, "chunk stage lock (read)").as_ref().map(|c| planet_generators::chunkfield::ChunkLayer {
             lat: c.lat,
             radius_m: self.radius_m,
             top: c.top,

@@ -362,7 +362,7 @@ pub fn bake(seed: u64, map: &(dyn FaceMapping + Sync), res: u32, threads: usize)
             let handles: Vec<_> = rows
                 .chunks(chunk)
                 .map(|rs| {
-                    scope.spawn(move || {
+                    planet_core::thread::spawn_named(scope, "bake-rows", move || {
                         let mut v = Vec::with_capacity(rs.len() * n as usize);
                         for &l in rs {
                             let t = face_coord(l, res);
@@ -518,7 +518,7 @@ pub fn bake_blocks_with<A: Send>(
             let handles: Vec<_> = batch
                 .iter()
                 .map(|t| {
-                    scope.spawn(move || {
+                    planet_core::thread::spawn_named(scope, "bake-block", move || {
                         let block = bake_block(seed, map, *t, cells);
                         peak.fetch_max(live.fetch_add(1, Ordering::SeqCst) + 1, Ordering::SeqCst);
                         let a = analyse(*t, &block);
@@ -1029,7 +1029,7 @@ pub fn eval_gathered_threads(
     let parts: Vec<Vec<(u64, Result<GlobalSample, ReadError>)>> = std::thread::scope(|s| {
         let handles: Vec<_> = (0..threads.min(groups.len()))
             .map(|_| {
-                s.spawn(|| {
+                planet_core::thread::spawn_named(s, "lattice-gather", || {
                     let mut mine = Vec::new();
                     loop {
                         let g = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

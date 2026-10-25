@@ -193,13 +193,13 @@ impl Default for CoupledSlot {
 
 impl CoupledSlot {
     pub fn standing(&self) -> Standing {
-        self.inner.lock().expect("coupled slot").clone()
+        crate::stall::lock(&self.inner, "coupled run slot").clone()
     }
 
     /// Start the load or run on a thread, once: a later call while it works or after it ended does nothing.
     pub fn request(&self, job: impl FnOnce() -> Result<CoupledRun, String> + Send + 'static) {
         {
-            let mut s = self.inner.lock().expect("coupled slot");
+            let mut s = crate::stall::lock(&self.inner, "coupled run slot");
             if !matches!(*s, Standing::Idle) {
                 return;
             }

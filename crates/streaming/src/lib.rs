@@ -216,9 +216,9 @@ impl ThreadPool {
         let (tx, rx) = channel::<Job>();
         let rx = Arc::new(Mutex::new(rx));
         let workers = (0..threads.max(1))
-            .map(|_| {
+            .map(|n| {
                 let rx = Arc::clone(&rx);
-                std::thread::spawn(move || {
+                std::thread::Builder::new().name(format!("pool-worker-{n}")).spawn(move || {
                     if priority != Priority::Normal {
                         priority::set_current(priority);
                     }
@@ -230,6 +230,7 @@ impl ThreadPool {
                         }
                     }
                 })
+                .expect("start a pool worker")
             })
             .collect();
         Self { tx: Mutex::new(Some(tx)), workers: Mutex::new(workers) }
