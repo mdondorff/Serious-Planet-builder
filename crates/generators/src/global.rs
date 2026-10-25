@@ -242,11 +242,11 @@ pub fn hill_band_m(seed: u64, d: Vec3) -> f64 {
 /// The global-coarse field at the unit direction `d`. Pure: the same `(seed, d)` gives the same bits everywhere.
 pub fn sample(seed: u64, d: Vec3) -> GlobalSample {
     let t = terrain(seed, d);
-    let (continent, land_depth, inland, zone) = (t.continent, t.land_depth, t.inland, t.zone);
+    let (continent, inland, zone) = (t.continent, t.inland, t.zone);
 
     // Elevation: ocean basins and shelves from the continent value, mountain ranges from ridged noise inside range
     // zones, rising inland.
-    let land_depth = continent - SEA_LEVEL_C;
+    let land_depth = t.land_depth;
     let base = if land_depth < 0.0 {
         // Sea level at the coast, down to -4500 m far from it (the field is continuous across the coast).
         -4500.0 * smoothstep(0.0, 0.9, -land_depth)

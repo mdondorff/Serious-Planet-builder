@@ -4,3 +4,4 @@
 3. The field side gets the driver from the public pure function `global::landform(seed, direction)`; no new stored channel (ADR 0026 keeps four).
 4. The band only lifts (a ridged term in `[0, 1]` times the amplitude), so no inland cell falls below the sea and no lake appears from it; it is 0 at the coast by a ramp over the first 0.1 of land depth.
 5. The bounds need no raising: the base reaches 1000 m and the ranges 5200 m, the largest band is 1000 m and the bake clamp is 9000 m; a test pins that.
+6. Resolution: at the 16384 bake a cell is about 0.6 km, so the 2 km octave has about 3 samples per wavelength and the creases of the ridged term alias somewhat in the grid and in its slopes (numerics review). The rebuild's slope table shows whether it matters; dropping the 2 km octave or smoothing the ridge is a parameter change.

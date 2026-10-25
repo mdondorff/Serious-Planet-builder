@@ -421,7 +421,7 @@ fn spread(n: usize) -> Vec<Vec3> {
             let (z, lon) =
                 (2.0 * a as f64 / 9_007_199_254_740_992.0 - 1.0, 2.0 * std::f64::consts::PI * b as f64 / 9_007_199_254_740_992.0);
             let r = (1.0 - z * z).sqrt();
-            Vec3::new(r * lon.cos(), r * lon.sin(), z)
+            Vec3::new(r * libm::cos(lon), r * libm::sin(lon), z)
         })
         .collect()
 }
@@ -444,7 +444,8 @@ fn the_hill_band_only_lifts_land_stays_within_its_largest_amplitude_and_is_zero_
     }
     assert!(land > 5_000 && lifted > land / 4, "the band lifts the land: {lifted} of {land}");
     // The bounds: the base and the ranges reach 1000 + 5200 m and the band adds its largest amplitude below the clamp.
-    assert!(1000.0 + 5200.0 + HILL_BAND_MAX_M <= MAX_ELEVATION_M, "the clamp needs no raising");
+    let highest = 1000.0 + 5200.0 + HILL_BAND_MAX_M;
+    assert!(std::hint::black_box(highest) <= MAX_ELEVATION_M, "the clamp needs no raising");
 }
 
 // spec: GEN-064
@@ -476,10 +477,10 @@ fn the_hill_band_is_larger_in_mountain_country_than_on_the_plains() {
 
 // spec: GEN-064
 #[test]
-fn the_hill_band_has_no_wavelength_under_two_kilometres() {
-    // Each octave's gradient is at most 2 (ridge) x 3 sqrt 3 (noise) per unit of its argument, so along a great circle step of `ds` metres on
-    // a planet of radius `R` the band moves by at most max_amplitude x sum of weights x 2 x 5.2 x freq x ds / R, with freq in units of the
-    // unit direction. At 100 m steps (a 2 km octave is 20 steps long) that bound is a small share of the amplitude.
+fn the_hill_band_moves_gently_over_a_hundred_metres_which_a_finer_octave_would_not() {
+    // A regression guard, not a bound: along 300 great circles at 100 m steps the largest step of the band was 58 m when the three octaves
+    // (wavelengths 8, 4 and 2 km, on the warped direction, which stretches them locally) were recorded; a 1 km octave at this amplitude or a
+    // doubled frequency moves it by far more. Re-record with the band.
     let (r, ds) = (6_371_000.0f64, 100.0f64);
     let step = ds / r;
     let mut worst = 0.0f64;
@@ -490,15 +491,13 @@ fn the_hill_band_has_no_wavelength_under_two_kilometres() {
         } else {
             Vec3::new(1.0, 0.0, 0.0).cross(start).normalized()
         };
-        let at = |k: f64| (start * (k * step).cos() + t * (k * step).sin()).normalized();
+        let at = |k: f64| (start * libm::cos(k * step) + t * libm::sin(k * step)).normalized();
         for k in 0..200 {
             worst = worst.max((hill_band_m(SEED, at(f64::from(k + 1))) - hill_band_m(SEED, at(f64::from(k)))).abs());
         }
     }
-    // Largest weighted frequency: (1 x 796 + 0.5 x 1592 + 0.25 x 3184) / 1.75 = 1365; 2 x 5.2 x 1365 x 1.57e-5 = 0.22 of the amplitude per
-    // 100 m, the unit-sphere frequencies being 8, 4 and 2 km at this radius.
     eprintln!("largest band step over 100 m: {worst:.1} m");
-    assert!(worst <= 0.23 * HILL_BAND_MAX_M, "band step {worst} m over {ds} m");
+    assert!(worst <= 90.0, "band step {worst} m over {ds} m (58 m recorded)");
 }
 
 // spec: GEN-064
