@@ -207,7 +207,6 @@ pub fn landform(seed: u64, d: Vec3) -> f64 {
 /// [`terrain`] that is not carried here fails there. The continent is rounded to f32 before use (a step of at most one ulp, 3e-8 over the inland
 /// ramp, times the ramp's slope 4.55): the landform can jump by [`LANDFORM_F32_STEP`] between two directions as close as you like, which the constant
 /// does not cover, so a bound over a cap adds it.
-
 pub fn landform_lipschitz() -> f64 {
     let g = crate::height::NOISE_GRADIENT_BOUND;
     let fbm_lip = |freq: f64, octaves: f64| g * freq * octaves / (2.0 - libm::pow(2.0, 1.0 - octaves));
