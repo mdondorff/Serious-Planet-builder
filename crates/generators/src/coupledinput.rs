@@ -101,11 +101,11 @@ fn band(src: &dyn LatticeSource, face: Face, j0: usize, j1: usize, n: usize, r: 
     Ok(out)
 }
 
-/// Version of the stationary uplift field (GEN-059) in the identity of the run's inputs; a change to its law must bump it.
+/// Version of the stationary uplift field (GEN-063) in the identity of the run's inputs; a change to its law must bump it.
 pub const UPLIFT_FIELD_VERSION: u32 = 1;
 
 /// The identity of the run's inputs when they are declared and not stored: the reduction, the planet radius, the factor `rho` of the
-/// stationary uplift (GEN-059, the uplift itself is a function of the heights, the erodibility and the run's parameters) and the erodibility. The heights themselves are a function of the bake (whose stage key is in the key of the stored run) and of the
+/// stationary uplift (GEN-063, the uplift itself is a function of the heights, the erodibility and the run's parameters) and the erodibility. The heights themselves are a function of the bake (whose stage key is in the key of the stored run) and of the
 /// reduction, so a stored run is found without reading the bake. The relief scale the source carries over the bake (`LatticeSource::relief_scale`)
 /// enters only when it is not 1. Per-cell driver maps (ADR 0076) will
 /// carry their own identity.

@@ -19,7 +19,7 @@ pub const COUPLED_STEPS: u32 = 80;
 /// Cells per face edge of the run on a bake that has at least that many (see [`run_cells`]).
 pub const COUPLED_CELLS: u32 = 2048;
 
-/// The factor of the stationary uplift (GEN-059): 1 makes the bake a steady state of the stream power law, so the run keeps its relief; lower
+/// The factor of the stationary uplift (GEN-063): 1 makes the bake a steady state of the stream power law, so the run keeps its relief; lower
 /// values let it keep eroding. A declared parameter of the run, part of its key.
 pub const UPLIFT_RHO: f64 = 1.0;
 
@@ -56,7 +56,7 @@ fn reduce_threads() -> usize {
 }
 
 /// The input of the run on the lattice `lat` from the bake `src` (a finer lattice whose cells nest in the run's): the bake's elevation reduced
-/// by the box filter of GEN-056, the constant erodibility and the stationary uplift of those heights (`UPLIFT_RHO`, GEN-059). A read error
+/// by the box filter of GEN-056, the constant erodibility and the stationary uplift of those heights (`UPLIFT_RHO`, GEN-063). A read error
 /// names the vertex.
 pub fn bake_input(src: &dyn LatticeSource, lat: &Lattice, params: &CoupledParams) -> Result<CoupledInput, String> {
     let z = reduce_bake(src, lat.n() as u32, reduce_threads()).map_err(|e| e.to_string())?;

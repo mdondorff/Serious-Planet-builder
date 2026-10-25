@@ -466,7 +466,7 @@ fn step_with(
     (rec, a, StepStat { mean_dz_m: sum / order.len().max(1) as f64, max_dz_m: max })
 }
 
-/// The stationary uplift of the input heights `z` (GEN-059): the uplift in m/year at which the implicit update leaves each land cell where it
+/// The stationary uplift of the input heights `z` (GEN-063): the uplift in m/year at which the implicit update leaves each land cell where it
 /// is, `rho K A^m S` with the area `A` and the slope `S` to the receiver taken from `z` itself (the flood, the jittered receivers and the
 /// accumulation of a step). `rho` 1 makes the input a steady state of the law, so the run keeps its relief and changes what the flood fills
 /// and the breaches open; lower values let it keep eroding. Sea cells, outlets and cells that sit in a pit (no drop to the receiver) get 0.
@@ -727,7 +727,7 @@ mod tests {
         CoupledInput { uplift: vec![1.0e-3; z.len()], erodibility: vec![2.0e-5; z.len()], z }
     }
 
-    // spec: GEN-059
+    // spec: GEN-063
     #[test]
     fn a_run_on_the_stationary_uplift_keeps_the_relief_of_its_input_and_a_constant_uplift_does_not() {
         let lat = Lattice::new(24, R);
@@ -782,7 +782,7 @@ mod tests {
         assert!(checked > lat.len() / 5, "the check covers the land: {checked} cells");
     }
 
-    // spec: GEN-059
+    // spec: GEN-063
     #[test]
     fn a_world_without_sea_has_one_outlet_and_it_and_the_pits_get_no_uplift() {
         let lat = Lattice::new(12, R);
@@ -806,7 +806,7 @@ mod tests {
         }
     }
 
-    // spec: GEN-059
+    // spec: GEN-063
     #[test]
     fn the_stationary_uplift_is_deterministic_and_zero_at_sea_and_outlets() {
         let lat = Lattice::new(12, R);
