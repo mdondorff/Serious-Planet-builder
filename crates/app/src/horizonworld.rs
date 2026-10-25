@@ -423,6 +423,51 @@ impl Default for HorizonRig {
 }
 
 impl HorizonRig {
+    /// The decisions of a frame, GPU-free (tier A): the maps that `landed` bump their versions; the chunks of `tiles` that `has_map` takes slots; the
+    /// table of the frame, in which a node whose map is not uploaded yet reads slot -1 (the stand-in is the coarse horizon, CON-22); and the one
+    /// upload of this frame, `(chunk, slot)`: the oldest still valid (the chunk keeps that slot and its map is still there).
+    pub fn decide(
+        &mut self,
+        tiles: &[TileId],
+        landed: &[ChunkKey],
+        has_map: &dyn Fn(ChunkKey) -> bool,
+        sun: [f32; 3],
+    ) -> (planet_frame::horizonview::HorizonFrame, Option<(ChunkKey, u32)>) {
+        use planet_frame::horizonview::{tile_in_chunk, HorizonFrame};
+        self.frame += 1;
+        for key in landed {
+            *self.versions.entry(*key).or_insert(0) += 1;
+        }
+        // The chunks of the plan tiles that have a map, in the plan order.
+        let mut wanted: Vec<(ChunkKey, u64)> = Vec::new();
+        for &t in tiles {
+            let Some((key, _)) = tile_in_chunk(t) else { continue };
+            if wanted.iter().all(|(k, _)| *k != key) && has_map(key) {
+                wanted.push((key, self.versions.get(&key).copied().unwrap_or(0)));
+            }
+        }
+        let slot_update = self.slots.update(&wanted, self.frame);
+        self.pending.extend(slot_update.uploads.iter().copied());
+        let mut upload = None;
+        while let Some((key, slot)) = self.pending.pop_front() {
+            if self.slots.slot_of(key) != Some(slot) || !has_map(key) {
+                continue;
+            }
+            upload = Some((key, slot));
+            break;
+        }
+        let sun3 = planet_core::Vec3::new(f64::from(sun[0]), f64::from(sun[1]), f64::from(sun[2]));
+        let mut frame = HorizonFrame::build(&self.slots, slot_update, tiles, sun3, &planet_core::cube::TangentWarp);
+        let waiting: std::collections::HashSet<ChunkKey> =
+            self.pending.iter().filter(|(k, s)| self.slots.slot_of(*k) == Some(*s)).map(|(k, _)| *k).collect();
+        for (node, &t) in frame.nodes.iter_mut().zip(tiles) {
+            if tile_in_chunk(t).is_some_and(|(k, _)| waiting.contains(&k)) {
+                node.slot = -1;
+            }
+        }
+        (frame, upload)
+    }
+
     /// One frame: run the horizon jobs of the world for the plan tiles `tiles`, hand the renderer the table of the frame, the next map to upload and
     /// (once) the coarse map. `sun` is the lit plan sun direction. Does nothing without the chunk stage of the world.
     pub fn frame(
@@ -434,53 +479,26 @@ impl HorizonRig {
         camera: PlanetFixed,
         sun: [f32; 3],
     ) {
-        use planet_frame::horizonview::{pack_map, tile_in_chunk, HorizonFrame, MAX_SLOT_AZIMUTHS};
+        use planet_frame::horizonview::{pack_map, MAX_SLOT_AZIMUTHS};
         let (Some(lat), true) = (world.chunk_lattice(), world.chunk_manager().is_some()) else { return };
-        self.frame += 1;
         let update = world.horizon_frame(tiles, camera);
-        for key in &update.landed {
-            *self.versions.entry(*key).or_insert(0) += 1;
-        }
-        // The chunks of the plan tiles that have a map, in the plan order.
-        let mut wanted: Vec<(ChunkKey, u64)> = Vec::new();
-        for &t in tiles {
-            let Some((key, _)) = tile_in_chunk(t) else { continue };
-            if wanted.iter().all(|(k, _)| *k != key) && world.horizon_map(key).is_some() {
-                wanted.push((key, self.versions.get(&key).copied().unwrap_or(0)));
-            }
-        }
-        let slot_update = self.slots.update(&wanted, self.frame);
-        self.pending.extend(slot_update.uploads.iter().copied());
-        // One upload a frame: the oldest still valid (the chunk keeps that slot and the map is still there).
+        let (frame, upload) = self.decide(tiles, &update.landed, &|k| world.horizon_map(k).is_some(), sun);
         let mut packed: Vec<(u32, Vec<u8>)> = Vec::new();
-        while let Some((key, slot)) = self.pending.pop_front() {
-            if self.slots.slot_of(key) != Some(slot) {
-                continue;
-            }
-            let Some(map) = world.horizon_map(key) else { continue };
-            let n = lat.cells_per_chunk() as usize;
-            match pack_map(&map, n, map.len() / (n * n).max(1)) {
-                Some(bytes) => packed.push((slot, bytes)),
-                None => {
-                    if !self.warned_azimuths {
-                        self.warned_azimuths = true;
-                        eprintln!(
-                            "horizon: a chunk map of {} bytes over {n} cells is not {MAX_SLOT_AZIMUTHS} azimuths: no shadow from it",
-                            map.len()
-                        );
+        if let Some((key, slot)) = upload {
+            if let Some(map) = world.horizon_map(key) {
+                let n = lat.cells_per_chunk() as usize;
+                match pack_map(&map, n, map.len() / (n * n).max(1)) {
+                    Some(bytes) => packed.push((slot, bytes)),
+                    None => {
+                        if !self.warned_azimuths {
+                            self.warned_azimuths = true;
+                            eprintln!(
+                                "horizon: a chunk map of {} bytes over {n} cells is not {MAX_SLOT_AZIMUTHS} azimuths: no shadow from it",
+                                map.len()
+                            );
+                        }
                     }
                 }
-            }
-            break;
-        }
-        let sun3 = planet_core::Vec3::new(f64::from(sun[0]), f64::from(sun[1]), f64::from(sun[2]));
-        let mut frame = HorizonFrame::build(&self.slots, slot_update, tiles, sun3, &planet_core::cube::TangentWarp);
-        // A node whose map has not been uploaded yet reads no map (slot -1): the stand-in is the coarse horizon (CON-22).
-        let waiting: std::collections::HashSet<ChunkKey> =
-            self.pending.iter().filter(|(k, s)| self.slots.slot_of(*k) == Some(*s)).map(|(k, _)| *k).collect();
-        for (node, &t) in frame.nodes.iter_mut().zip(tiles) {
-            if tile_in_chunk(t).is_some_and(|(k, _)| waiting.contains(&k)) {
-                node.slot = -1;
             }
         }
         renderer.set_horizon(ctx, &frame, &packed);
@@ -497,5 +515,72 @@ impl HorizonRig {
                 CoarseStanding::Idle | CoarseStanding::Working => {}
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod rig_tests {
+    use super::*;
+    use planet_generators::chunk::CHUNK_GRID_LEVEL;
+
+    fn tile_of(x: u32) -> TileId {
+        TileId::new(Face(2), CHUNK_GRID_LEVEL, 1000 + x, 1000).unwrap()
+    }
+
+    fn slot_of(frame: &planet_frame::horizonview::HorizonFrame, i: usize) -> i32 {
+        frame.nodes[i].slot
+    }
+
+    // spec: REND-038
+    #[test]
+    fn a_tile_drawn_before_its_map_has_uploaded_reads_slot_minus_one_and_after_the_upload_its_slot() {
+        let mut rig = HorizonRig::default();
+        let tiles = [tile_of(0), tile_of(1)];
+        let key = |i: usize| (2u8, 1000 + i as u32, 1000u32);
+        // Both maps landed this frame: one upload a frame, so the second chunk is still waiting and its node reads no map.
+        let (f1, up1) = rig.decide(&tiles, &[key(0), key(1)], &|_| true, [0.0, 0.0, 1.0]);
+        assert_eq!(up1.map(|u| u.0), Some(key(0)), "the first in the plan order uploads first");
+        assert_eq!((slot_of(&f1, 0), slot_of(&f1, 1)), (0, -1), "the uploaded chunk reads its slot, the waiting one reads none");
+        let (f2, up2) = rig.decide(&tiles, &[], &|_| true, [0.0, 0.0, 1.0]);
+        assert_eq!(up2.map(|u| u.0), Some(key(1)));
+        assert_eq!((slot_of(&f2, 0), slot_of(&f2, 1)), (0, 1));
+        // Nothing left to upload.
+        let (_, up3) = rig.decide(&tiles, &[], &|_| true, [0.0, 0.0, 1.0]);
+        assert_eq!(up3, None);
+        // A re-bake (landed again) uploads again under the same slot, in the frame it is drawn (the upload is written before the draw); a chunk
+        // whose map is gone keeps its slot, and the texels in it, until the slot is needed.
+        let (f4, up4) = rig.decide(&tiles, &[key(0)], &|k| k == key(0), [0.0, 0.0, 1.0]);
+        assert_eq!(up4, Some((key(0), 0)));
+        assert_eq!((slot_of(&f4, 0), slot_of(&f4, 1)), (0, 1));
+    }
+
+    // spec: REND-038
+    #[test]
+    fn with_every_slot_full_a_new_chunk_takes_the_slot_of_the_one_wanted_longest_ago() {
+        let mut rig = HorizonRig::default();
+        let n = VIEWER_HORIZON_SLOTS as usize;
+        let tiles: Vec<TileId> = (0..n as u32).map(tile_of).collect();
+        let key = |i: usize| (2u8, 1000 + i as u32, 1000u32);
+        // Fill every slot: one upload a frame, so n frames and then every node reads its own slot.
+        let mut landed: Vec<ChunkKey> = (0..n).map(key).collect();
+        for _ in 0..n {
+            rig.decide(&tiles, &landed, &|_| true, [0.0, 0.0, 1.0]);
+            landed.clear();
+        }
+        let (full, none) = rig.decide(&tiles, &[], &|_| true, [0.0, 0.0, 1.0]);
+        assert_eq!(none, None);
+        let mut slots: Vec<i32> = full.nodes.iter().map(|x| x.slot).collect();
+        slots.sort_unstable();
+        assert_eq!(slots, (0..n as i32).collect::<Vec<_>>(), "64 chunks, 64 distinct slots");
+        // A 65th chunk is wanted and the first 32 are not: it takes a slot of the ones wanted longest ago and reads it after its upload.
+        let fresh = tile_of(n as u32);
+        let mut view: Vec<TileId> = tiles[n / 2..].to_vec();
+        view.push(fresh);
+        let (f, up) = rig.decide(&view, &[(2, 1000 + n as u32, 1000)], &|_| true, [0.0, 0.0, 1.0]);
+        let (ukey, uslot) = up.expect("the new map uploads");
+        assert_eq!(ukey, (2, 1000 + n as u32, 1000));
+        assert_eq!(slot_of(&f, view.len() - 1), uslot as i32, "the new chunk reads the slot it uploaded to");
+        assert!(rig.slots.slot_of(key(0)).is_none() || rig.slots.slot_of(key(n / 2)).is_some(), "a chunk still wanted keeps its slot");
+        assert!((0..n / 2).any(|i| rig.slots.slot_of(key(i)).is_none()), "one of the chunks not wanted gave its slot up");
     }
 }
