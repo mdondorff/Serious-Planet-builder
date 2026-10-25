@@ -67,30 +67,14 @@ pub fn key_press_counts(down: bool, synthetic: bool) -> bool {
     !(down && synthetic)
 }
 
-/// The command a key press asks for, if any.
+/// The name the key table knows a key by: the `Debug` name of its `KeyCode` (VIEW-055).
+pub fn key_name(code: KeyCode) -> String {
+    format!("{code:?}")
+}
+
+/// The command a key press asks for, if any (from the key table, VIEW-055).
 pub fn key_command(code: KeyCode) -> Option<Command> {
-    Some(match code {
-        KeyCode::KeyP | KeyCode::Space => Command::TogglePause,
-        KeyCode::KeyR => Command::Restart,
-        KeyCode::KeyV => Command::NextView,
-        KeyCode::KeyT => Command::ToggleVsync,
-        KeyCode::KeyC => Command::ToggleCamera,
-        KeyCode::KeyL => Command::ToggleLit,
-        KeyCode::KeyG => Command::ToggleGlobe,
-        KeyCode::F3 => Command::CycleOverlay,
-        KeyCode::F4 => Command::ToggleCoarseLod,
-        KeyCode::F6 => Command::CycleGroundDetail,
-        KeyCode::F7 => Command::ToggleScaleRefs,
-        KeyCode::KeyH => Command::ToggleEditingLight,
-        KeyCode::KeyJ => Command::CycleShadeView,
-        KeyCode::BracketLeft => Command::SunEarlier,
-        KeyCode::BracketRight => Command::SunLater,
-        KeyCode::Backslash => Command::SunReset,
-        KeyCode::KeyK => Command::CycleCoupledLens,
-        KeyCode::F9 => Command::SaveRepro,
-        KeyCode::Escape => Command::Quit,
-        _ => return None,
-    })
+    planet_frame::keytable::command_for(&key_name(code))
 }
 
 /// What a mouse button does in the editor mode (VIEW-022).
@@ -152,46 +136,18 @@ pub fn edit_key(code: KeyCode, logical: Option<&str>, ctrl: bool, shift: bool) -
     if logical == Some("?") {
         return Some(EditKey::Help);
     }
-    Some(match code {
-        KeyCode::Digit1 => EditKey::Tool(1),
-        KeyCode::Digit2 => EditKey::Tool(2),
-        KeyCode::Digit3 => EditKey::Tool(3),
-        KeyCode::Digit4 => EditKey::Tool(4),
-        KeyCode::Digit5 => EditKey::Tool(5),
-        KeyCode::Digit6 => EditKey::Tool(6),
-        KeyCode::Digit7 => EditKey::Tool(7),
-        // The brushes: raise, lower, smooth, flatten (VIEW-035).
-        KeyCode::Digit8 => EditKey::Tool(8),
-        KeyCode::Digit9 => EditKey::Tool(9),
-        KeyCode::Digit0 => EditKey::Tool(10),
-        KeyCode::Minus => EditKey::Tool(11),
-        KeyCode::Delete => EditKey::Delete,
-        KeyCode::Backspace => EditKey::Back,
-        KeyCode::Enter | KeyCode::NumpadEnter => EditKey::Finish,
-        KeyCode::F1 => EditKey::Help,
-        KeyCode::Escape => EditKey::Escape,
-        _ => return None,
-    })
+    planet_frame::keytable::edit_key_for(&key_name(code))
 }
 
 /// Set or clear the held key `code` stands for; `false` when the key is not a held key.
 pub fn set_held(held: &mut Held, code: KeyCode, down: bool) -> bool {
-    let slot = match code {
-        KeyCode::KeyW => &mut held.forward,
-        KeyCode::KeyS => &mut held.back,
-        KeyCode::KeyA => &mut held.left,
-        KeyCode::KeyD => &mut held.right,
-        KeyCode::KeyQ => &mut held.down,
-        KeyCode::KeyE => &mut held.up,
-        KeyCode::ArrowLeft => &mut held.look_left,
-        KeyCode::ArrowRight => &mut held.look_right,
-        KeyCode::ArrowUp => &mut held.look_up,
-        KeyCode::ArrowDown => &mut held.look_down,
-        KeyCode::ShiftLeft | KeyCode::ShiftRight => &mut held.boost,
-        _ => return false,
-    };
-    *slot = down;
-    true
+    match planet_frame::keytable::held_for(&key_name(code)) {
+        Some(slot) => {
+            *slot.slot(held) = down;
+            true
+        }
+        None => false,
+    }
 }
 
 /// What the run needs besides the window.
@@ -1729,9 +1685,9 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         markers: parse_markers(&o.markers)?,
     };
     writeln!(out, "planet editor: {} ({})", if o.smoke { "smoke test" } else { "viewer" }, world.describe()).map_err(err)?;
-    writeln!(out, "keys: {KEYS_HELP}").map_err(err)?;
+    writeln!(out, "keys: {}", *KEYS_HELP).map_err(err)?;
     if !o.no_ui {
-        writeln!(out, "{EDIT_KEYS_HELP}").map_err(err)?;
+        writeln!(out, "{}", *EDIT_KEYS_HELP).map_err(err)?;
     }
     writeln!(
         out,
@@ -1899,7 +1855,7 @@ mod tests {
         }
         for (code, label) in labels {
             assert!(bound(*code), "{code:?} is labelled {label} but the window does not bind it");
-            assert!(names_key(EDIT_KEYS_HELP, label), "EDIT_KEYS_HELP does not name {label} ({code:?}): {EDIT_KEYS_HELP}");
+            assert!(names_key(&EDIT_KEYS_HELP, label), "EDIT_KEYS_HELP does not name {label} ({code:?}): {}", *EDIT_KEYS_HELP);
         }
         // The chords and the mouse, which have no key code of their own.
         for word in [
@@ -1967,7 +1923,7 @@ mod tests {
             "shade view",
             "local solar time",
         ] {
-            assert!(KEYS_HELP.to_lowercase().contains(&ch.to_lowercase()), "the help names {ch}: {KEYS_HELP}");
+            assert!(KEYS_HELP.to_lowercase().contains(&ch.to_lowercase()), "the help names {ch}: {}", *KEYS_HELP);
         }
     }
 
@@ -1987,6 +1943,136 @@ mod tests {
         assert!(text.contains("shade view horizon") && text.contains("sun 18:00 local solar time"), "{text}");
         v.editing_light = true;
         assert!(!lit_extras_text(&v, true, moved, at).contains("sun 18:00"), "the editing light wins, the title does not claim the time");
+    }
+
+    /// The keys a person can press that the window might bind: the letters, digits, function keys, arrows and the punctuation and editing keys.
+    fn candidate_codes() -> Vec<KeyCode> {
+        use KeyCode::*;
+        vec![
+            KeyA,
+            KeyB,
+            KeyC,
+            KeyD,
+            KeyE,
+            KeyF,
+            KeyG,
+            KeyH,
+            KeyI,
+            KeyJ,
+            KeyK,
+            KeyL,
+            KeyM,
+            KeyN,
+            KeyO,
+            KeyP,
+            KeyQ,
+            KeyR,
+            KeyS,
+            KeyT,
+            KeyU,
+            KeyV,
+            KeyW,
+            KeyX,
+            KeyY,
+            KeyZ,
+            Digit0,
+            Digit1,
+            Digit2,
+            Digit3,
+            Digit4,
+            Digit5,
+            Digit6,
+            Digit7,
+            Digit8,
+            Digit9,
+            F1,
+            F2,
+            F3,
+            F4,
+            F5,
+            F6,
+            F7,
+            F8,
+            F9,
+            F10,
+            F11,
+            F12,
+            ArrowLeft,
+            ArrowRight,
+            ArrowUp,
+            ArrowDown,
+            Space,
+            Tab,
+            Enter,
+            NumpadEnter,
+            Escape,
+            Backspace,
+            Delete,
+            Insert,
+            Home,
+            End,
+            PageUp,
+            PageDown,
+            Minus,
+            Equal,
+            Slash,
+            Backslash,
+            BracketLeft,
+            BracketRight,
+            Comma,
+            Period,
+            Semicolon,
+            Quote,
+            Backquote,
+            ShiftLeft,
+            ShiftRight,
+            ControlLeft,
+            ControlRight,
+            AltLeft,
+            AltRight,
+        ]
+    }
+
+    // spec: VIEW-055
+    #[test]
+    fn a_key_the_window_handles_is_in_the_key_table_and_a_key_the_table_lists_is_handled() {
+        use planet_frame::keytable::{Action, KEYS};
+        let handled = |code: KeyCode| {
+            key_command(code).is_some()
+                || edit_key(code, None, false, false).is_some()
+                || set_held(&mut Held::default(), code, true)
+                || code == KeyCode::Tab
+        };
+        let names: Vec<String> = candidate_codes().iter().map(|c| key_name(*c)).collect();
+        for code in candidate_codes() {
+            let name = key_name(code);
+            let listed = KEYS.iter().any(|d| d.codes.contains(&name.as_str()));
+            assert_eq!(
+                handled(code),
+                listed,
+                "{name}: handled {} but listed {listed} (add it to or take it out of the key table)",
+                handled(code)
+            );
+        }
+        // Every name the table lists is a key the window can bind (a misspelt name is caught), and the keys of a command are the ones the lookup finds.
+        for d in KEYS {
+            for code in d.codes {
+                assert!(names.iter().any(|n| n == code), "the table lists {code}, which is no key of the candidate list: a misspelt name?");
+            }
+            if let Action::View(c) = d.action {
+                for code in d.codes {
+                    let key = candidate_codes().into_iter().find(|k| key_name(*k) == *code).unwrap();
+                    assert_eq!(key_command(key), Some(c), "{code}");
+                }
+            }
+        }
+        // The chords and `?` are the editor's, taken by the character of the key: they are listed as entries without a code.
+        assert_eq!(edit_key(KeyCode::KeyZ, Some("z"), true, false), Some(EditKey::Undo));
+        assert_eq!(edit_key(KeyCode::KeyY, Some("y"), true, false), Some(EditKey::Redo));
+        assert_eq!(edit_key(KeyCode::Slash, Some("?"), false, true), Some(EditKey::Help));
+        for label in ["Ctrl+Z", "Ctrl+Y or Ctrl+Shift+Z", "F1 or ?"] {
+            assert!(KEYS.iter().any(|d| d.label == label), "{label}");
+        }
     }
 
     // spec: VIEW-004
