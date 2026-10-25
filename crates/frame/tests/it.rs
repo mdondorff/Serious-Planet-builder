@@ -104,6 +104,8 @@ mod terrain_field;
 mod upload_budget;
 #[path = "upload_bytes.rs"]
 mod upload_bytes;
+#[path = "wall_repose.rs"]
+mod wall_repose;
 #[path = "water.rs"]
 mod water;
 #[path = "water_band.rs"]
