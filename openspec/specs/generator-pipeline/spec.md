@@ -717,3 +717,171 @@ Source: owner (2026-10-22, via opus-planner), WDEF-017, CON-11, GEN-016, GEN-017
 #### Scenario: Bounds and keys
 - **WHEN** both fields at no scale, 1.5 and 4 are asked the bounds of random caps and the heights inside them
 - **THEN** every height lies in its cap's bounds and under the field's largest, the largest at 4 exceeds 36 km, the three keys differ and a world without the node keeps the default key
+
+### Requirement: GEN-040 The global coupled run
+`generators::coupled` SHALL run stream-power landscape evolution on the cube-sphere bake lattice (ADR 0077 point 1): per step a priority flood fills the depressions, each land cell takes the steepest receiver down the filled surface with a jitter `1 + j (2 h - 1)` (`h` a hash of seed, cell and direction), the drainage area is accumulated downstream, and the heights take the implicit update `z = (z + dt U + f z_r) / (1 + f)`. The run SHALL be single-threaded in a fixed order with `libm`, so its results are bit-identical across runs and platforms (CON-14); every receiver is lower on the filled surface; the outlets drain the land area.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-23, M8-1), ADR 0077, SPIKE-33, SPIKE-35
+
+#### Scenario: Network, area and determinism
+- **WHEN** a 12-cell lattice with a 60 % land world runs 30 steps twice, with jitter 0 and 0.8
+- **THEN** no receiver drains uphill and no chain cycles, the outlets' area equals the land area, both runs agree bit for bit, the mean change per step falls, and the jitter changes the receivers
+
+### Requirement: GEN-041 The coupled run's debug maps
+`generators::coupled` SHALL draw the heights and the drainage area of a face of the coupled run as images: heights as the grey of the height debug view (sea at or below 0 in blue), the area on a log scale from the area of one cell (dark) to the largest area on the face (bright), so the river network reads as the bright lines. The maps are a pure function of the arrays.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-23, M8-1 part c), ADR 0077
+
+#### Scenario: What the maps show
+- **WHEN** the maps of a run on a small lattice are drawn
+- **THEN** a sea cell is blue, a land cell is grey by height, the cell with the largest area is the brightest and a cell with one cell's area the darkest, and two draws are equal
+
+### Requirement: GEN-034 Chunk scope and key
+`Scope` SHALL have a `Chunk(ChunkId)` variant, distinct from `Global` and `Tile` in the key (its own scope word), where a `ChunkId` is a face and the (i, j) of a tile of the chunk grid's level. A chunk field's stage key (STRM-011) SHALL cover the grid level, the halo in metres and the step cap, so changing any of them re-keys every chunk of the field; a regional stage with `Chunk` scope SHALL fit, and one with `Global` scope SHALL not.
+
+Verify: A
+Status: active
+Source: ADR 0077 points 2 and 4, ADR 0022, STRM-011, CON-08, CON-14
+
+#### Scenario: Re-keying
+- **WHEN** a chunk field's grid level, halo (bits) or step cap changes, or a tile and a chunk have the same raw numeric id
+- **THEN** exactly the keys of that field's chunks change, and the tile and the chunk never share a key
+
+### Requirement: GEN-035 Chunk grid and apply level
+Chunks SHALL lie on a fixed grid of the tiles of level 11 (whole coarse cells, about 5 km), and a chunk field SHALL state its raster cell size; its apply level SHALL be the coarsest tile level whose vertex spacing is at most twice that cell size (level 15 for 8 m cells, level 16 for 4 m), computed from the raster and never set by hand. The raster is read unfiltered from the apply level down (GEN-053).
+
+Verify: A
+Status: active
+Source: ADR 0077 point 5, SPIKE-34 (conditions 1 and 3), STRM-029
+
+#### Scenario: Apply level
+- **WHEN** a chunk field has 8 m cells, then 4 m cells
+- **THEN** its apply level is 15, then 16
+
+### Requirement: GEN-036 Level-aware height
+The height capabilities of a field SHALL include `height_at_level(dir, level)`; for a field without chunk detail it SHALL equal `height(dir)` at every level, and for a chunk field it SHALL be the base plus the chunk change read from the pyramid at `level` for a level at or finer than the pyramid's top level (GEN-035), and the base for a coarser level. `height` SHALL remain position-only and SHALL equal `height_at_level` at the field's finest level. Tile generation SHALL read `height_at_level` with its own level.
+
+Verify: A
+Status: active
+Source: SPIKE-34 section 3, ADR 0077 point 5, GEN-020
+
+#### Scenario: Default
+- **WHEN** every existing field is sampled with `height_at_level` at levels 0 to 22
+- **THEN** each value equals `height(dir)` bit for bit
+
+#### Scenario: Chunk field
+- **WHEN** a chunk field with a ready chunk is sampled over the chunk at levels 13, 14 and 15, and at a level that reads the raster (finer than the apply level), with the top level at its default 14
+- **THEN** level 13 equals the base bit for bit, levels 14 and 15 read the box-filtered pyramid (base plus change), and the finest level equals the base plus the chunk's stored change at the cell centres
+
+### Requirement: GEN-037 Chunk pyramid steps
+A chunk's change SHALL be stored with a pyramid down to the apply level, each level box-filtered from the level below it (never from a coarser run). A tile at the apply level SHALL differ from its parent, at the parent's vertices, by at most 0.25 m at p99 for the stand-in compute; the steps between the coarser levels up to the pyramid's top are measured and recorded (design.md), not bounded.
+
+Verify: A
+Status: active
+Source: SPIKE-34 section 3, M8 plan criterion 3
+
+#### Scenario: Step against the parent
+- **WHEN** the stand-in chunk (30 m amplitude, 8 m cells) is ready and every tile of levels 14 and 15 over it is generated
+- **THEN** the height difference between a level-15 tile and its level-14 parent at the parent's vertices has p99 at most 0.25 m, and the test prints the p99, the maximum and the tile ids of the worst vertex on failure
+
+### Requirement: GEN-038 Chunk border agreement and determinism
+Neighbouring chunks SHALL agree on every shared border sample, across cube-face edges and at corners, and a chunk's result SHALL be bit-identical for 1, 2 and 8 threads and on Windows and Linux (fixed order, `libm`). A chunk field SHALL state its halo in metres as at least its step cap times its reach per step.
+
+Verify: A
+Status: active
+Source: ADR 0077 points 3 and 4, GEN-004, GEN-002, GEN-003, CON-14, M8 plan criterion 2
+
+#### Scenario: Borders
+- **WHEN** two neighbouring stand-in chunks are computed with the stated halo, in the middle of a face, across a face edge and at a cube corner
+- **THEN** their border rows agree to the bit, and with a halo below the rule the test reports the largest difference in metres and the chunk ids
+
+#### Scenario: Threads and systems
+- **WHEN** a chunk is computed on 1, 2 and 8 threads
+- **THEN** its hash is identical and equals the recorded known answer, which CI checks on Windows and Linux
+
+### Requirement: GEN-039 The chunk stage's position per layer
+A layer SHALL have a `chunk_stage` setting, `OnTop` by default: the chain is base, chunk, stamps, so an edit never invalidates a chunk. `Under` (base, stamps, chunk) SHALL be representable in the key but refused with an error naming the layer until the editor supports it (M8-7, after the owner's confirmation of D3).
+
+Verify: A
+Status: active
+Source: M8 plan D3 (provisional), ADR 0077 point 7
+
+#### Scenario: Default and refusal
+- **WHEN** a world has a layer without the setting and one set to `Under`
+- **THEN** the first builds with `OnTop`, and the second is refused with an error naming the layer
+
+### Requirement: GEN-053 The chunk pyramid's top level
+The chunk pyramid SHALL reach from the apply level up to a top level, by default tile level 14 (a parameter of the chunk field: level 11 needs about 285 chunks per view, level 14 about 5). A tile coarser than the top level SHALL be identity on the base field and key as the base (STRM-029). A tile at or finer than it SHALL read the pyramid at the continuous level of its vertex spacing over the cell size (GEN-037), the raster itself where that is 0.
+
+Verify: A
+Status: active
+Source: planner decision (option a, 2026-10-24), ADR 0077 point 5, SPIKE-34 section 3
+
+#### Scenario: Top level
+- **WHEN** a chunk field with its top level at 14 and a ready chunk is sampled at levels 13, 14 and 15, then with the top at 11
+- **THEN** level 13 equals the base bit for bit and levels 14 and 15 read the pyramid; with the top at 11, levels 11 to 13 read it too
+
+### Requirement: GEN-054 Heights of a field with chunk detail
+For a field with chunk detail the single-height rules (GEN-016, GEN-020) SHALL hold at each tile's own level: `height_at_level` of a tile's level is the value its tile, its batch (`heights_and_climate`, `heights_threaded_at_level`) and its origin carry, bit for bit, and the same point differs between a tile and its parent by the pyramid step of GEN-037. `height` SHALL be the value at the finest level. A field without chunk detail SHALL keep its one batch and its single height at every level.
+
+Verify: A
+Status: active
+Source: GEN-036, GEN-016, GEN-020, LOD-009
+
+#### Scenario: Tile, batch and origin
+- **WHEN** a chunk field's tile, its batch heights and its plan origin are compared with `height_at_level` at the tile's level
+- **THEN** they are equal bit for bit, and a field without chunk detail gives the same values at every level
+
+### Requirement: GEN-055 A field with a chunk stage names it
+The field built for a world with a chunk stage in its chain (GEN-039) SHALL report the implementation id `chunk-stage` (as a stamp stage reports its own, CON-07); tiles at or finer than the pyramid's top level SHALL be keyed by the chain (STRM-038), and a world without a chunk stage SHALL build the field GEN-018 describes.
+
+Verify: A
+Status: active
+Source: GEN-018, CON-07, STRM-038
+
+#### Scenario: Id
+- **WHEN** a world's field is built without and with a chunk stage
+- **THEN** the first reports the resolved id and the second `chunk-stage`
+
+### Requirement: GEN-044 The chunk horizon map
+`generators` SHALL bake, for a raster of heights with its halo, the horizon map of the chunk: per texel and per azimuth `k` of `A` evenly spaced azimuths from north, the elevation angle of the highest terrain along that azimuth out to the range, found by marching with steps that grow 4.5 % plus 2 m. The bake SHALL be a pure function of the raster, the halo and the parameters, independent of the thread count (CON-14).
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-24, M8-5), SPIKE-32 step 2, ADR 0077
+
+Detail: The defaults are 4 m texels, `A` = 16, a range of 5 km and steps of 2 m plus 4.5 % of the distance; each is a parameter. Terrain at distance `d` SHALL count `d^2 / (2 R)` lower for a body of radius `R`. The angle is stored as a byte, 90 degrees over 255 steps, 0 at or below the horizon. Azimuths are in the raster's frame (`i` east, `j` north, azimuth 0 along `j`); the raster of a chunk on another cube face is rotated against its neighbour's, so GEN-046 maps the sun's azimuth into the chunk's frame and a texel shared across a face edge is compared after that mapping. A block with less than `ceil(range / texel) + 2` texels of raster on any side, a raster whose size does not match, and parameters that are not finite and positive SHALL be refused with the cause named. The bake SHALL be a pure function of the raster, the halo and the parameters, single-threaded per texel row set in a fixed order or independent of the thread count (CON-14), with `libm`, and texels shared by neighbouring chunks SHALL be identical. Stated limits: the march steps `texel_m` metres per texel along `i` and along `j`, but under the tangent warp a texel of a face-coordinate raster is up to 1.41 times as long along `i` as along `j` near the middle of a face edge (1.0 at the face centre), so the marched distances, and with them the horizon angle, are off by up to that factor along one axis there (a bias of a few degrees at the worst chunks; the direction of the lookup is exact, GEN-046); fixing it means marching in metres through the true tangent vectors. A map that the renderer reads (REND-038) SHALL have exactly 16 azimuths: the packers refuse any other count.
+
+#### Scenario: Known horizons
+- **WHEN** the map is baked on a flat raster with one ridge of known height and distance
+- **THEN** texels looking toward the ridge have the angle `atan(height / distance)` within the step and texel error, texels looking away from it have horizon 0, the result is equal for every thread count, a block baked from a raster that holds its halo equals the same block of a larger raster, and a raster without the halo changes the edge texels
+
+### Requirement: GEN-045 The coarse horizon from the global run
+`generators::coarsehorizon` SHALL compute, from the stored heights of the coupled run (STRM-043), the coarse horizon of the cells of an observer lattice of `m` cells per face edge: per cell and per azimuth the elevation angle of the highest sample of the run along the great circle in that azimuth, out to the far range (default 50 km, 16 azimuths). The result SHALL be a pure function of the stored heights and the parameters, independent of the thread count, and stored as a global channel (STRM-045).
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-24, M8-5), SPIKE-32 architecture finding 2
+
+Detail: `generators::coarsehorizon` SHALL compute, from the stored heights of the coupled run (STRM-043), the coarse horizon of the cells of an observer lattice of `m` cells per face edge (a divisor of the run's): per cell and per azimuth the elevation angle (the chord above the observer's horizontal plane, on the sphere) of the highest sample of the run along the great circle in that azimuth, out to the far range (default 50 km, 16 azimuths, samples one cell of the run apart, at most 256 azimuths, a range of at most a quarter of the way round the body), where each sample is the run's height at the sample's direction (so a march crosses a cube face edge without face coordinates) and sea at or below 0 counts as 0; the observer's own height is the mean over the run cells its cell covers. The angle is the byte of GEN-044. Azimuths are in the geographic frame (0 toward the pole axis, a quarter turn east), unlike GEN-044's raster frame; GEN-046 rotates the sun's azimuth into each. The result is independent of the thread count, and a wrong size, a bad `m` or parameters that are not finite and positive are refused with the cause named. The result SHALL be a pure function of the stored heights and the parameters and be stored as a global channel beside the others (STRM-045). Stated limit: each cell is baked in the geographic frame of its own centre while the lookup (GEN-046) uses the fragment's own geographic frame, so within about 5 coarse cells of a pole (about 100 km at 512 cells) the frames differ by up to the longitude difference and the horizon read at an azimuth can come from another bearing; the fix is a pole-free frame such as the face raster frame.
+
+#### Scenario: A far peak
+- **WHEN** the coarse horizon is computed on a small body with one wide plateau on a cube edge, and on a lattice of varied heights with sea
+- **THEN** cells within range see the plateau toward it at its elevation angle (between the angles of its far and near edges), cells on the other face see it across the edge, cells beyond the range see nothing, a flat body has no horizon, the result is the same for every thread count, and deeper sea changes nothing
+
+### Requirement: GEN-046 The horizon of a point
+`generators::horizon_lookup` SHALL be the CPU reference of the shader's shadow (CON-07). The horizon at an azimuth is read by linear interpolation between the two nearest stored azimuths (wrapping from the last to the first); the horizon of a point is the larger of the chunk map's and the coarse map's, a map that is not there (the chunk's has not landed) leaving the other alone and neither giving 0; the lit factor is 0 when the sun's elevation is 0.35 degrees or more below the horizon, 1 when 0.9 degrees or more above it, and a smoothstep between.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-24, M8-5), CON-07
+
+Detail: The sun's azimuth SHALL be formed in each map's own frame: the geographic frame for the coarse map, the cube face's raster frame (`i` east, `j` north, which the warp shears by up to 30 degrees and of which `i` is up to 1.41 times as long as `j` near an edge) for the chunk's, where the sun's horizontal part is solved for its components along the two axes at their true lengths and the azimuth is taken in index space, the space the bake marches in. The shader SHALL equal this within the bounds stated in REND-038 (its numbers, at texel centres).
+
+#### Scenario: Combination
+- **WHEN** a point has a chunk horizon of 3 degrees and a coarse horizon of 5 degrees at an azimuth, and the sun is 4 degrees and then 6 degrees high there
+- **THEN** the point is in shadow at 4 degrees and lit at 6 degrees, and with the coarse horizon absent the chunk map decides alone (and the coarse map alone before the chunk's lands), the ramp is monotone between its ends, the interpolation is exact at the stored azimuths and wraps, and the sun's azimuth is 0 toward north, a quarter turn toward east in both frames and differs between the two frames on a turned face

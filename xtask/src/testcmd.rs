@@ -623,38 +623,38 @@ fn perf_m5(root: &Path, args: &[String]) -> Res {
     }
 }
 
-/// The `cargo` arguments of `capture flights` (TEST-027) and the directory the frames go to: the flight capture of `test-render`
-/// (a tool beside the harness, never a measurement). `--smoke` runs it on the software adapter.
+/// The `cargo` arguments of `capture flights` (TEST-027) and `capture stills` (TEST-048) and the directory the images go to: the
+/// captures of `test-render` (tools beside the harness, never a measurement). `--smoke` runs it on the software adapter.
 fn capture_args(args: &[String]) -> Result<(Vec<String>, String), String> {
     let mut it = args.iter();
-    match it.next().map(String::as_str) {
-        Some("flights") => {}
-        other => return Err(format!("usage: cargo xtask capture flights [--store DIR | --allow-memory-bake --global-res N] [--out-dir DIR] [--size WxH] [--flight-frames N] [--views A,B] [--smoke] (got {other:?})")),
-    }
+    let (scene, mut out_dir) = match it.next().map(String::as_str) {
+        Some("flights") => ("capture-flights", "target/review/m5-flights".to_string()),
+        Some("stills") => ("capture-stills", "target/review/m8-stills".to_string()),
+        other => return Err(format!("usage: cargo xtask capture flights [--store DIR | --allow-memory-bake --global-res N] [--out-dir DIR] [--size WxH] [--flight-frames N] [--views A,B] [--smoke], or capture stills --poses FILE [the same options but --flight-frames] (got {other:?})")),
+    };
     let mut smoke = false;
-    let mut out_dir = "target/review/m5-flights".to_string();
     let mut tail: Vec<String> = Vec::new();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--smoke" => smoke = true,
             "--allow-memory-bake" => tail.push(a.clone()),
             "--out-dir" => out_dir = it.next().ok_or("--out-dir needs a directory")?.clone(),
-            "--store" | "--global-res" | "--size" | "--flight-frames" | "--views" | "--look" | "--world" | "--prefill-levels" => {
+            "--store" | "--global-res" | "--size" | "--flight-frames" | "--poses" | "--views" | "--look" | "--world" | "--prefill-levels" => {
                 let value = it.next().ok_or_else(|| format!("{a} needs a value"))?;
                 tail.push(a.clone());
                 tail.push(value.clone());
             }
             other => {
                 return Err(format!(
-                    "unknown capture option '{other}' (known: --store DIR, --allow-memory-bake, --global-res, --out-dir DIR, --size WxH, --flight-frames N, --views A,B, --look F, --world F, --smoke)"
+                    "unknown capture option '{other}' (known: --store DIR, --allow-memory-bake, --global-res, --out-dir DIR, --size WxH, --flight-frames N, --poses FILE, --views A,B, --look F, --world F, --smoke)"
                 ))
             }
         }
     }
     let mut v: Vec<String> = if smoke {
-        ["run", "-q", "-p", "planet", "--", "test-render", "--scene", "capture-flights", "--adapter", "software"]
+        ["run", "-q", "-p", "planet", "--", "test-render", "--scene", scene, "--adapter", "software"]
     } else {
-        ["run", "--release", "-p", "planet", "--", "test-render", "--scene", "capture-flights", "--adapter", "hardware"]
+        ["run", "--release", "-p", "planet", "--", "test-render", "--scene", scene, "--adapter", "hardware"]
     }
     .iter()
     .map(|s| s.to_string())
@@ -694,6 +694,10 @@ pub fn capture_cmd(root: &Path, args: &[String]) -> Res {
     let (cargo_args, out_dir) = capture_args(args)?;
     let refs: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
     run(root, "cargo", &refs, &[])?;
+    // Stills are PNGs as they are: no video.
+    if cargo_args.iter().any(|a| a == "capture-stills") {
+        return Ok(());
+    }
     let dir = if Path::new(&out_dir).is_absolute() { Path::new(&out_dir).to_path_buf() } else { root.join(&out_dir) };
     let index = std::fs::read_to_string(dir.join("capture.txt")).map_err(|e| format!("{}: {e}", dir.join("capture.txt").display()))?;
     let have_ffmpeg = std::process::Command::new("ffmpeg").arg("-version").output().is_ok_and(|o| o.status.success());
@@ -746,9 +750,40 @@ fn perf_global_bake_args(args: &[String]) -> Result<Vec<String>, String> {
     Ok(v)
 }
 
+/// The `cargo` arguments of `perf coupled` (GEN-042): the coupled-run scene under the readiness gate; the grid defaults to 2048 cells per face edge.
+fn perf_coupled_args(args: &[String]) -> Result<Vec<String>, String> {
+    perf_bake_scene_args("coupled", args)
+}
+
+/// The `cargo` arguments of a perf scene that takes only `--global-res` and `--machine-ready` (`coupled`, `anet-chunk`).
+fn perf_bake_scene_args(scene: &str, args: &[String]) -> Result<Vec<String>, String> {
+    let mut v: Vec<String> = ["run", "--release", "-p", "planet", "--", "test-render", "--perf", "--scene", scene, "--adapter", "hardware"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--machine-ready" => v.push(a.clone()),
+            "--global-res" => {
+                v.push(a.clone());
+                v.push(it.next().ok_or_else(|| format!("{a} needs a value"))?.clone());
+            }
+            other => {
+                return Err(format!(
+                    "unknown perf coupled option '{other}' (known: --global-res, --machine-ready, the owner's override of a failed readiness gate)"
+                ))
+            }
+        }
+    }
+    Ok(v)
+}
+
 /// The streaming scenes of `perf stream` (ADR 0032 point 8 and `dive-cold`, ADR 0045 point 3); `all` runs the seven, one child process each.
 /// The edit-to-visible scene (SPIKE-13, M6 exit): run by name under the same gate and options, never part of `all`.
 const EDIT_SCENE: &str = "edit-latency";
+/// The speed-envelope scene (TEST-047): run by name (`perf envelope`), not part of `perf stream all`.
+const ENVELOPE_SCENE: &str = "envelope";
 
 const STREAM_SCENES: [&str; 7] = ["dive", "dive-fast", "teleport-1m", "teleport-2km", "look-1m", "look-2km", "dive-cold"];
 
@@ -761,10 +796,13 @@ fn perf_stream_args(args: &[String]) -> Result<Vec<String>, String> {
     if let Some(first) = args.first().filter(|a| !a.starts_with("--")) {
         if first == "all" {
             scene = "streaming".into();
-        } else if STREAM_SCENES.contains(&first.as_str()) || first == EDIT_SCENE {
+        } else if STREAM_SCENES.contains(&first.as_str()) || first == EDIT_SCENE || first == ENVELOPE_SCENE {
             scene = first.clone();
         } else {
-            return Err(format!("unknown streaming scene '{first}' (known: {}, {EDIT_SCENE}, all)", STREAM_SCENES.join(", ")));
+            return Err(format!(
+                "unknown streaming scene '{first}' (known: {}, {EDIT_SCENE}, {ENVELOPE_SCENE}, all)",
+                STREAM_SCENES.join(", ")
+            ));
         }
         rest = &args[1..];
     }
@@ -775,7 +813,7 @@ fn perf_stream_args(args: &[String]) -> Result<Vec<String>, String> {
         match a.as_str() {
             "--smoke" => smoke = true,
             "--machine-ready" | "--allow-memory-bake" | "--lit" => tail.push(a.clone()),
-            "--store" | "--global-res" | "--out" | "--upload" | "--prefill-levels" | "--gen-workers" | "--gen-ahead" | "--gen-reserve" | "--gen-priority" | "--settle-ms" => {
+            "--store" | "--global-res" | "--out" | "--upload" | "--prefill-levels" | "--gen-workers" | "--gen-ahead" | "--gen-reserve" | "--gen-priority" | "--settle-ms" | "--share-bound" => {
                 let value = it.next().ok_or_else(|| format!("{a} needs a value"))?;
                 tail.push(a.clone());
                 tail.push(value.clone());
@@ -972,6 +1010,21 @@ pub fn perf(root: &Path, args: &[String]) -> Res {
         let refs: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
         return run(root, "cargo", &refs, &[]);
     }
+    if args.first().map(String::as_str) == Some(ENVELOPE_SCENE) {
+        let cargo_args = perf_stream_args(args)?;
+        let refs: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
+        return run(root, "cargo", &refs, &[]);
+    }
+    if args.first().map(String::as_str) == Some("coupled") {
+        let cargo_args = perf_coupled_args(&args[1..])?;
+        let refs: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
+        return run(root, "cargo", &refs, &[]);
+    }
+    if args.first().map(String::as_str) == Some("anet-chunk") {
+        let cargo_args = perf_bake_scene_args("anet-chunk", &args[1..])?;
+        let refs: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
+        return run(root, "cargo", &refs, &[]);
+    }
     let cargo_args = perf_cargo_args(args)?;
     run(root, "cargo", &cargo_args, &[])
 }
@@ -1009,6 +1062,22 @@ mod tests {
         let smoke = perf_stream_args(&s(&["edit-latency", "--smoke"])).unwrap();
         assert!(smoke.contains(&"--perf-smoke".to_string()) && smoke.contains(&"software".to_string()));
         assert!(!STREAM_SCENES.contains(&EDIT_SCENE), "`perf stream all` does not run it");
+    }
+
+    // spec: TEST-047
+    #[test]
+    fn the_envelope_scene_runs_by_name_with_the_stream_options_and_its_bound_and_is_not_part_of_all() {
+        let a =
+            perf_stream_args(&s(&["envelope", "--store", "D:/bake", "--share-bound", "0.02", "--out", "perf/logs/envelope.json"])).unwrap();
+        let at = a.iter().position(|x| x == "--scene").unwrap();
+        assert_eq!(a[at + 1], "envelope");
+        let at = a.iter().position(|x| x == "--share-bound").unwrap();
+        assert_eq!(a[at + 1], "0.02");
+        assert!(a.contains(&"--perf".to_string()) && a.contains(&"hardware".to_string()) && a.contains(&"D:/bake".to_string()));
+        let smoke = perf_stream_args(&s(&["envelope", "--smoke"])).unwrap();
+        assert!(smoke.contains(&"--perf-smoke".to_string()) && smoke.contains(&"software".to_string()));
+        assert!(!STREAM_SCENES.contains(&ENVELOPE_SCENE), "`perf stream all` does not run it");
+        assert!(perf_stream_args(&s(&["envelope", "--share-bound"])).unwrap_err().contains("needs a value"));
     }
 
     // spec: TEST-040
@@ -1404,6 +1473,16 @@ mod tests {
         assert!(e.contains("--force") && e.contains("override"), "{e}");
     }
 
+    // spec: TEST-048
+    #[test]
+    fn the_stills_capture_forwards_the_poses_and_writes_to_its_own_directory() {
+        let (a, dir) = capture_args(&s(&["stills", "--poses", "p.toml", "--store", "C:/bake", "--views", "300m-sunset"])).unwrap();
+        assert_eq!(dir, "target/review/m8-stills");
+        assert!(a.contains(&"capture-stills".to_string()) && a.contains(&"hardware".to_string()), "{a:?}");
+        assert_eq!(a[a.iter().position(|x| x == "--poses").unwrap() + 1], "p.toml");
+        assert!(!a.contains(&"--perf".to_string()), "a tool, not a measurement: {a:?}");
+    }
+
     // spec: TEST-027
     #[test]
     fn the_capture_builds_its_command_line_encodes_at_60_fps_and_refuses_what_it_does_not_know() {
@@ -1495,6 +1574,18 @@ mod tests {
         assert!(cache_compact_args(&s(&["d", "--cap-bytes"])).unwrap_err().contains("needs a value"));
         let e = cache_compact_args(&s(&["d", "--force"])).unwrap_err();
         assert!(e.contains("--force") && e.contains("known"), "{e}");
+    }
+
+    // spec: GEN-042
+    #[test]
+    fn perf_coupled_runs_the_scene_under_the_gate_and_takes_the_grid_size() {
+        let a = perf_coupled_args(&s(&["--global-res", "64", "--machine-ready"])).unwrap();
+        assert!(a.contains(&"coupled".to_string()) && a.contains(&"hardware".to_string()) && a.contains(&"--machine-ready".to_string()));
+        assert!(perf_coupled_args(&s(&["--global-res"])).unwrap_err().contains("needs a value"));
+        assert!(perf_coupled_args(&s(&["--force"])).unwrap_err().contains("unknown perf coupled option"));
+        let chunk = perf_bake_scene_args("anet-chunk", &s(&["--global-res", "64"])).unwrap();
+        assert!(chunk.contains(&"anet-chunk".to_string()) && chunk.contains(&"hardware".to_string()) && chunk.contains(&"64".to_string()));
+        assert!(!chunk.contains(&"--machine-ready".to_string()), "the owner's override is never added by default");
     }
 
     // spec: GEN-014, BUILD-002

@@ -42,7 +42,8 @@ pub fn grid_phases(origin: [f64; 3]) -> [[f32; 3]; 9] {
 
 /// The product shader up to the vertex stage: the globals, the node record, the vertex output and the declarations the stages share.
 /// The vertex stage itself is the compact tile's (`compact_terrain_shader`, REND-016) or the reference renderer's.
-pub(crate) const SHADER_HEAD: &str = r#"
+pub(crate) const SHADER_HEAD: &str = concat!(
+    r#"
 struct Globals {
     view_proj: mat4x4<f32>,
     range: vec4<f32>,
@@ -89,7 +90,9 @@ struct Node {
 @group(0) @binding(0) var<uniform> g: Globals;
 // One record per planned node, read with the draw's instance index (`first_instance` = the node's index in the plan, REND-015).
 @group(0) @binding(1) var<storage, read> nodes: array<Node>;
-
+"#,
+    horizon_decls!(),
+    r#"
 struct VsOut {
     @builtin(position) pos: vec4<f32>,
     @location(0) normal: vec3<f32>,
@@ -103,11 +106,13 @@ struct VsOut {
     // writes zeros: it draws no lit view).
     @location(6) aux: vec2<f32>,
 };
-"#;
+"#
+);
 
 /// The product shader after the vertex stage (the helpers, the debug fragment stage and the lit fragment stages), shared by the compact
 /// vertex stage (`compact_terrain_shader`) and the test-only reference renderer.
-pub(crate) const SHADER_TAIL: &str = r#"
+pub(crate) const SHADER_TAIL: &str = concat!(
+    r#"
 // Distance in pixels to the nearest integer of `x`, so lines stay about one pixel wide at any scale.
 fn line(x: f32, w: f32) -> f32 {
     let d = abs(fract(x + 0.5) - 0.5);
@@ -600,7 +605,7 @@ fn climate_colour(view: u32, t: f32, p: f32) -> vec3<f32> {
 }
 
 // The lit terrain's radiance before the pre-exposure (ADR 0039 point 4, REND-026): Lambert diffuse `albedo * max(n . sun, 0) / pi`
-// for the sun's illuminance of one unit, in the view `view` (0 lit, 1 albedo, 2 lighting, 3 temperature, 4 precipitation). `up` is
+// for the sun's illuminance of one unit, in the view `view` (0 lit, 1 albedo, 2 lighting, 3 temperature, 4 precipitation, 5 horizon, 6 shadow). `up` is
 // the unit up vector at the point; the climate comes from the tile's field. No ambient, no shadows, no specular.
 fn terrain_radiance(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32, ramp_min: f32, sun: vec3<f32>) -> vec3<f32> {
     let n = normalize(normal);
@@ -649,9 +654,14 @@ fn fs_lit_view(in: VsOut) -> vec4<f32> {
     let up = up_at(nodes[in.node_index].up, in.local);
     let climate = tile_climate(in);
     let gd = ground_detail(in.node_index, in.local, in.normal, up, climate.x, climate.y, in.height - g.extra.x);
-    var rgb = shade_lit(g.mode.x, g.albedo, gd.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), sun, g.range.z) * detail_mul(gd, g.mode.x, g.albedo, climate.x, climate.y, clamp(dot(normalize(gd.normal), up), 0.0, 1.0), in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)));
+    // The horizon shadow multiplies the direct sun term of the views that have one (Lit, Lighting; REND-038): 1.0 where no horizon map is there.
+    let sun_vis = select(1.0, shadow_factor(in.node_index, in.aux, up, sun), g.mode.x == 0u || g.mode.x == 2u);
+    var rgb = sun_vis * shade_lit(g.mode.x, g.albedo, gd.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), sun, g.range.z) * detail_mul(gd, g.mode.x, g.albedo, climate.x, climate.y, clamp(dot(normalize(gd.normal), up), 0.0, 1.0), in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)));
     // The sum is clamped like the rest of the lit radiance: the scene target is f16.
-    rgb = min(rgb + vec3<f32>(ground_gloss(in.node_index, in.local, gd, sun) * g.range.z), vec3<f32>(60000.0));
+    rgb = min(rgb + vec3<f32>(ground_gloss(in.node_index, in.local, gd, sun) * (g.range.z * sun_vis)), vec3<f32>(60000.0));
+    if (g.mode.x >= 5u) {
+        rgb = horizon_view_colour(g.mode.x, in.node_index, in.aux, up, sun) * g.range.z;
+    }
     if (g.extra.y > 3.5) {
         rgb = stale_tint(in, rgb, g.range.z);
     } else if (g.extra.y > 2.5) {
@@ -706,7 +716,9 @@ fn region_tint(rel: vec3<f32>, rgb: vec3<f32>, factor: f32) -> vec3<f32> {
     }
     return rgb;
 }
-"#;
+"#,
+    horizon_fns!()
+);
 
 /// Depth target format and test: reversed-Z `Depth32Float` with the clear value 0 (CON-12, ADR 0002), for the debug and lit paths alike.
 pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -889,6 +901,8 @@ struct FrameSet {
     /// The water pass's per-node records and globals (bindings 2 and 3 of the group `bind`; written only by frames with water).
     water_nodes: wgpu::Buffer,
     water_globals: wgpu::Buffer,
+    /// The horizon table, one entry per node (binding 4, REND-038).
+    horizon_nodes: wgpu::Buffer,
 }
 
 /// A resident tile: its mesh key and the slot of the pool it sits in.
@@ -1017,6 +1031,10 @@ pub struct TerrainRenderer {
     bgl: wgpu::BindGroupLayout,
     /// The per-frame buffers, used round robin: `ring[frame % RING]`.
     ring: Vec<FrameSet>,
+    /// The horizon shadows' textures (REND-038), dummies until [`set_horizon`](TerrainRenderer::set_horizon) gives a capacity.
+    horizon: crate::horizon::HorizonGpu,
+    /// The frame's horizon table (REND-041), written beside the node records; `None`: every node has slot -1.
+    horizon_frame: Option<planet_frame::horizonview::HorizonFrame>,
     node_capacity: usize,
     draw_mode: DrawMode,
     indices: wgpu::Buffer,
@@ -1170,6 +1188,54 @@ impl TerrainRenderer {
         }
     }
 
+    /// Set the horizon shadows' data of the next frames (REND-038, REND-041; `planet_frame::horizonview::HorizonFrame`, decided by the app):
+    /// the slot capacity, the per-node table for the plan's nodes in order, and the slots to write. `packed` holds the texels of each slot to
+    /// upload as `pack_map` lays them out, by slot. A change of capacity makes a new, empty array (the app then uploads every wanted map).
+    /// Without a call, or after [`clear_horizon`](TerrainRenderer::clear_horizon), every node has slot -1 and the term is the identity.
+    pub fn set_horizon(&mut self, ctx: &GpuContext, frame: &planet_frame::horizonview::HorizonFrame, packed: &[(u32, Vec<u8>)]) {
+        if self.horizon.set_capacity(&ctx.device, frame.capacity) {
+            self.rebind(&ctx.device);
+        }
+        for (slot, bytes) in packed {
+            self.horizon.write_slot(ctx, *slot, bytes);
+        }
+        self.horizon_frame = Some(frame.clone());
+    }
+
+    /// Give the shader the coarse horizon map (`planet_frame::horizonview::pack_coarse`, `m` cells a face), or take it away with `None`. The
+    /// shadow then also comes from the far terrain where a chunk has no map of its own (GEN-045).
+    pub fn set_horizon_coarse(&mut self, ctx: &GpuContext, coarse: Option<(u32, &[u8])>) {
+        self.horizon.set_coarse(ctx, coarse);
+        self.rebind(&ctx.device);
+    }
+
+    /// End the horizon shadows: every node reads slot -1 again (the frame is then the frame of a build without the term).
+    pub fn clear_horizon(&mut self) {
+        self.horizon_frame = None;
+    }
+
+    /// Bytes the horizon array holds (0 before a capacity is set).
+    pub fn horizon_bytes(&self) -> u64 {
+        self.horizon.bytes()
+    }
+
+    /// The texels of a horizon slot as the GPU holds them (tests).
+    pub fn read_horizon_slot(&self, ctx: &GpuContext, slot: u32) -> Vec<u8> {
+        self.horizon.read_slot(ctx, slot)
+    }
+
+    /// Make the bind groups again over the current horizon textures (the buffers are kept; frames in flight keep their old groups alive).
+    fn rebind(&mut self, device: &wgpu::Device) {
+        for set in &mut self.ring {
+            set.bind = Self::make_bind(
+                device,
+                &self.bgl,
+                [&set.globals, &set.nodes, &set.water_nodes, &set.water_globals, &set.horizon_nodes],
+                &self.horizon,
+            );
+        }
+    }
+
     /// A renderer with the mid tier's terrain share (ADR 0033: 2 GiB, a ceiling counted in slots: 15 blocks, 219,585 slots at cells
     /// 32). Slots are reusable one frame after their release (the renderer finishes a frame before it returns).
     pub fn new(ctx: &GpuContext, size: (u32, u32), cells: u32) -> Self {
@@ -1231,6 +1297,7 @@ impl TerrainRenderer {
             ty: wgpu::BindingType::Buffer { ty, has_dynamic_offset: false, min_binding_size: None },
             count: None,
         };
+        let horizon_entries = crate::horizon::layout_entries(wgpu::ShaderStages::empty());
         let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("terrain-bgl"),
             entries: &[
@@ -1238,10 +1305,15 @@ impl TerrainRenderer {
                 entry(1, wgpu::BufferBindingType::Storage { read_only: true }),
                 entry(2, wgpu::BufferBindingType::Storage { read_only: true }),
                 entry(3, wgpu::BufferBindingType::Uniform),
+                horizon_entries[0],
+                horizon_entries[1],
+                horizon_entries[2],
+                horizon_entries[3],
             ],
         });
+        let horizon = crate::horizon::HorizonGpu::new(device);
         let compact_gpu = Self::make_compact(ctx, &bgl, format, cells, &pool);
-        let ring = Self::make_ring(device, &bgl, node_capacity, &compact_gpu);
+        let ring = Self::make_ring(device, &bgl, node_capacity, &compact_gpu, &horizon);
         let index_data = grid_indices(cells);
         let indices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("terrain-indices"),
@@ -1276,6 +1348,8 @@ impl TerrainRenderer {
             cells,
             bgl,
             ring,
+            horizon,
+            horizon_frame: None,
             node_capacity,
             draw_mode: ctx.default_draw_mode(),
             indices,
@@ -1388,8 +1462,38 @@ impl TerrainRenderer {
         }
     }
 
+    /// The bind group of the terrain pass (group 0) over a ring set's buffers and the horizon textures.
+    fn make_bind(
+        device: &wgpu::Device,
+        bgl: &wgpu::BindGroupLayout,
+        buffers: [&wgpu::Buffer; 5],
+        horizon: &crate::horizon::HorizonGpu,
+    ) -> wgpu::BindGroup {
+        let [globals, nodes, water_nodes, water_globals, horizon_nodes] = buffers;
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("terrain-bind"),
+            layout: bgl,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: globals.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: nodes.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: water_nodes.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: water_globals.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 4, resource: horizon_nodes.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(&horizon.chunk_view) },
+                wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&horizon.coarse_view) },
+                wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::Sampler(&horizon.sampler) },
+            ],
+        })
+    }
+
     /// The ring of per-frame buffers for plans of up to `capacity` nodes.
-    fn make_ring(device: &wgpu::Device, bgl: &wgpu::BindGroupLayout, capacity: usize, compact: &CompactGpu) -> Vec<FrameSet> {
+    fn make_ring(
+        device: &wgpu::Device,
+        bgl: &wgpu::BindGroupLayout,
+        capacity: usize,
+        compact: &CompactGpu,
+        horizon: &crate::horizon::HorizonGpu,
+    ) -> Vec<FrameSet> {
         (0..RING)
             .map(|_| {
                 let buffer = |label, size, usage| {
@@ -1409,23 +1513,23 @@ impl TerrainRenderer {
                     planet_frame::look::water::GLOBALS_BYTES,
                     wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 );
-                let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("terrain-bind"),
-                    layout: bgl,
-                    entries: &[
-                        wgpu::BindGroupEntry { binding: 0, resource: globals.as_entire_binding() },
-                        wgpu::BindGroupEntry { binding: 1, resource: nodes.as_entire_binding() },
-                        wgpu::BindGroupEntry { binding: 2, resource: water_nodes.as_entire_binding() },
-                        wgpu::BindGroupEntry { binding: 3, resource: water_globals.as_entire_binding() },
-                    ],
-                });
+                // Every node starts with slot -1 (no map), so a frame that never sets a horizon reads the identity.
+                let horizon_nodes = wgpu::util::DeviceExt::create_buffer_init(
+                    device,
+                    &wgpu::util::BufferInitDescriptor {
+                        label: Some("horizon-nodes"),
+                        contents: &crate::horizon::empty_table(capacity),
+                        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    },
+                );
+                let bind = Self::make_bind(device, bgl, [&globals, &nodes, &water_nodes, &water_globals, &horizon_nodes], horizon);
                 let refs = buffer("tile-refs", REF_BYTES * capacity as u64, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST);
                 let frame_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("compact-frame-bind"),
                     layout: &compact.bgl_frame,
                     entries: &[wgpu::BindGroupEntry { binding: 0, resource: refs.as_entire_binding() }],
                 });
-                FrameSet { globals, nodes, args, bind, refs, frame_bind, water_nodes, water_globals }
+                FrameSet { globals, nodes, args, bind, refs, frame_bind, water_nodes, water_globals, horizon_nodes }
             })
             .collect()
     }
@@ -1626,7 +1730,7 @@ impl TerrainRenderer {
         let warm_nodes = WARM_NODES.min(self.max_nodes);
         if warm_nodes > self.node_capacity {
             self.node_capacity = warm_nodes;
-            self.ring = Self::make_ring(device, &self.bgl, self.node_capacity, &self.compact);
+            self.ring = Self::make_ring(device, &self.bgl, self.node_capacity, &self.compact, &self.horizon);
             self.init.ring_builds += 1;
         }
         self.compact.block(device, 0, &mut self.init);
@@ -2124,7 +2228,7 @@ impl TerrainRenderer {
         if plan.nodes.len() > self.node_capacity {
             self.node_capacity = plan.nodes.len().next_power_of_two().min(self.max_nodes);
             // Frames in flight keep the buffers they use alive; the new ring serves the frames from here on.
-            self.ring = Self::make_ring(device, &self.bgl, self.node_capacity, &self.compact);
+            self.ring = Self::make_ring(device, &self.bgl, self.node_capacity, &self.compact, &self.horizon);
             self.init.ring_builds += 1;
             self.used.ring = 0;
         }
@@ -2188,6 +2292,7 @@ impl TerrainRenderer {
         }
         let nodes = node_record_bytes(plan);
         ctx.queue.write_buffer(&set.nodes, 0, &nodes);
+        ctx.queue.write_buffer(&set.horizon_nodes, 0, &crate::horizon::table_bytes(self.horizon_frame.as_ref(), plan.nodes.len()));
         let mut stats = TerrainStats { node_record_bytes: nodes.len() as u64, ..Default::default() };
         // The argument records come from the plan and the slots alone (CON-03: the GPU culls and decides nothing).
         let block_of = |r: &Resident| buffer_of(r.slot, self.pool.block_slots);

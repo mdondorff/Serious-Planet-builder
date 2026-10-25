@@ -187,7 +187,7 @@ impl Sweep {
     pub fn camera(&self, height: &dyn Fn(Vec3) -> f64, radius_m: f64, aspect: f64) -> Camera {
         let (item, alt) = self.item_of(self.stop.min(self.records.len() - 1));
         let (la, lo) = (item.lat_deg.to_radians(), item.lon_deg.to_radians());
-        let dir = Vec3::new(libm::cos(la) * libm::cos(lo), libm::cos(la) * libm::sin(lo), libm::sin(la));
+        let dir = Vec3::from_lat_lon(la, lo);
         let north = {
             let n = Vec3::new(0.0, 0.0, 1.0);
             (n - dir * n.dot(dir)).normalized()
@@ -346,7 +346,7 @@ mod tests {
         let alt = cam.position.0.length() - 6_371_000.0;
         assert!((alt - 200.0).abs() < 0.5, "{alt}");
         let (la, lo) = (20f64.to_radians(), 30f64.to_radians());
-        let anchor = Vec3::new(libm::cos(la) * libm::cos(lo), libm::cos(la) * libm::sin(lo), libm::sin(la)) * 6_371_000.0;
+        let anchor = Vec3::from_lat_lon(la, lo) * 6_371_000.0;
         let to = (anchor - cam.position.0).normalized();
         assert!(to.dot(cam.forward.normalized()) > 0.999, "the anchor is straight ahead");
         assert!((anchor - cam.position.0).length() > 300.0 && (anchor - cam.position.0).length() < 400.0);

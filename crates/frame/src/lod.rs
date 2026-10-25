@@ -165,7 +165,7 @@ pub fn production_finest_level(cells: u32) -> u8 {
 impl LodParams {
     pub fn earth_1080p() -> LodParams {
         LodParams {
-            radius_m: 6_371_000.0,
+            radius_m: planet_core::EARTH_RADIUS_M,
             max_height_m: 9_000.0,
             fov_y_rad: 60f64.to_radians(),
             viewport_h_px: 1080.0,
@@ -318,6 +318,37 @@ pub struct NodeSelection {
     pub ceiling: std::sync::Arc<Ceiling>,
 }
 
+impl NodeSelection {
+    /// The chunks under the selected nodes at or finer than tile level `top` (LOD-013), each once, in the order of the nodes: the chunk of the
+    /// grid (level 11) that holds the node. Sampling heights never asks for a chunk; this is the only request a plan makes.
+    pub fn chunk_requests(&self, top: u8) -> Vec<TileId> {
+        self.chunk_requests_with(|tile| {
+            let (level, shift) = (tile.level(), tile.level().saturating_sub(planet_generators::chunk::CHUNK_GRID_LEVEL));
+            if level < top.max(planet_generators::chunk::CHUNK_GRID_LEVEL) {
+                return Vec::new();
+            }
+            vec![(tile.face().0, tile.x() >> shift, tile.y() >> shift)]
+        })
+    }
+
+    /// [`NodeSelection::chunk_requests`] with the chunks each node reads decided by `reads` (a chunk field's `chunks_read_by`, which adds the
+    /// neighbours a node near a border reads): the union in the order of the nodes, each chunk once.
+    pub fn chunk_requests_with(&self, reads: impl Fn(TileId) -> Vec<(u8, u32, u32)>) -> Vec<TileId> {
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for node in &self.nodes {
+            for key in reads(node.tile) {
+                if seen.insert(key) {
+                    out.push(
+                        TileId::new(planet_core::Face(key.0), planet_generators::chunk::CHUNK_GRID_LEVEL, key.1, key.2)
+                            .expect("a chunk of the grid is a tile"),
+                    );
+                }
+            }
+        }
+        out
+    }
+}
 /// The test a morph interval `[start, end]` must pass to leave a crack-free morph (LOD-008): finite, and starting within `0.95 - margin` of
 /// its end. One predicate for [`LodParams::validate`], the selection's morphable test and the plan's backstop.
 pub fn morph_room(start: f64, end: f64, margin: f64) -> bool {
@@ -407,7 +438,7 @@ fn tile_geom(map: &dyn FaceMapping, tile: TileId, p: &LodParams) -> TileGeom {
     for (s, t) in [(s0, t0), (s1, t0), (s0, t1), (s1, t1), (sm, t0), (sm, t1), (s0, tm), (s1, tm)] {
         let d = planet_core::cube::face_to_direction(map, tile.face(), s, t);
         radius = radius.max((d * p.radius_m - centre).length());
-        worst = worst.max(libm::atan2(centre_dir.cross(d).length(), centre_dir.dot(d)));
+        worst = worst.max(centre_dir.angle_to(d));
     }
     TileGeom { dir: centre_dir, centre, radius, angular_radius: worst * 1.001 }
 }
@@ -485,7 +516,7 @@ fn widened(angle: f64) -> f64 {
 /// the angle from the tile's centre to the change is within eight radii of the tile and the change's reach (an item changes bounds over a cap only
 /// when its reach touches it, so no more is needed).
 fn change_reaches_bounds(geom: &TileGeom, change: &ItemChange, radius_m: f64) -> bool {
-    let angle = libm::atan2(geom.dir.cross(change.dir).length(), geom.dir.dot(change.dir));
+    let angle = geom.dir.angle_to(change.dir);
     let limit = widened(8.0 * geom.angular_radius + change.reach_m / radius_m);
     // Not a number counts as reached (the safe side).
     angle.is_nan() || limit.is_nan() || angle <= limit
@@ -513,7 +544,7 @@ fn tile_reads_reach(tile: TileId, geom: &TileGeom, radius_m: f64) -> f64 {
 
 /// Whether a change can alter what the tile reads, given the angle `reach` from [`tile_reads_reach`].
 fn change_reaches_reads(geom: &TileGeom, change: &ItemChange, reach: f64, radius_m: f64) -> bool {
-    let angle = libm::atan2(geom.dir.cross(change.dir).length(), geom.dir.dot(change.dir));
+    let angle = geom.dir.angle_to(change.dir);
     let limit = widened(reach + change.reach_m / radius_m);
     angle.is_nan() || limit.is_nan() || angle <= limit
 }
@@ -603,6 +634,16 @@ impl SelectionCache {
             self.caps.clear();
         }
         dropped
+    }
+
+    /// Forget what is cached of the tiles a chunk that has just landed can change (STRM-040): those whose reads, decided by `reads` (a chunk
+    /// field's `chunks_read_by`), include it. Returns how many origin heights were dropped.
+    pub fn invalidate_chunk(&mut self, landed: (u8, u32, u32), reads: impl Fn(TileId) -> Vec<(u8, u32, u32)>) -> usize {
+        let mut tiles: Vec<TileId> = self.origin_heights.keys().chain(self.mesh_keys.keys()).chain(self.volumes.keys()).copied().collect();
+        tiles.sort_unstable_by_key(|t| t.raw());
+        tiles.dedup();
+        tiles.retain(|&t| reads(t).contains(&landed));
+        self.invalidate_tiles(&tiles)
     }
 
     pub fn clear(&mut self) {
@@ -709,6 +750,12 @@ impl SelectionCache {
             self.origin_heights.remove(&t);
             self.mesh_keys.remove(&t);
         }
+    }
+
+    /// Store an origin height as the plan builder does; for tests of what a landing drops.
+    #[doc(hidden)]
+    pub fn origin_height_for_test(&mut self, tile: TileId, height_m: f64) {
+        self.origin_heights.insert(tile, height_m);
     }
 
     /// Field height at the centre of `tile` (the plan's tile origin): `compute` runs only the first time a tile is asked
@@ -1472,7 +1519,7 @@ fn certify(geoms: &mut GeomCache<'_>, a: TileId) -> bool {
     let mut pad = 3.0 * ga.angular_radius;
     for side in Side::ALL {
         let gs = geoms.get(a.neighbor(map, side));
-        let between = libm::atan2(ga.dir.cross(gs.dir).length(), ga.dir.dot(gs.dir));
+        let between = ga.dir.angle_to(gs.dir);
         pad = pad.max(between + 3.0 * gs.angular_radius);
     }
     let pad = pad * 1.05 + 1e-9;
@@ -1531,7 +1578,7 @@ fn none_steep(geoms: &mut GeomCache<'_>, camera: PlanetFixed) -> bool {
     if !(norm.is_finite() && m > 0.0) {
         return false;
     }
-    let angle_to = |v: Vec3| libm::atan2(dir.cross(v).length(), dir.dot(v));
+    let angle_to = |v: Vec3| dir.angle_to(v);
     // The half range and the upper bound the previous level's covering caps allowed (the volumes of its tiles, the parents of this level's,
     // lie inside them), or the field's global bound where that level read no bounds.
     let mut previous: Option<(f64, f64)> = None;
@@ -1925,7 +1972,7 @@ fn below_horizon_at(centre: Vec3, angular_radius: f64, camera: PlanetFixed, p: &
     // A camera at or below the reference sphere is treated as sitting on it: the terrain horizon still applies.
     let d = camera.0.length().max(p.radius_m * (1.0 + 1e-12));
     let (c_hat, n_hat) = (camera.0.normalized(), centre.normalized());
-    let theta = libm::atan2(c_hat.cross(n_hat).length(), c_hat.dot(n_hat));
+    let theta = c_hat.angle_to(n_hat);
     let alpha_camera = libm::acos(p.radius_m / d);
     let alpha_terrain = libm::acos(p.radius_m / (p.radius_m + p.max_height_m));
     theta - angular_radius > alpha_camera + alpha_terrain
@@ -1940,7 +1987,7 @@ pub fn angular_radius(map: &dyn FaceMapping, tile: TileId) -> f64 {
     let mut worst = 0.0f64;
     for (s, t) in [(s0, t0), (s1, t0), (s0, t1), (s1, t1), (sm, t0), (sm, t1), (s0, tm), (s1, tm)] {
         let d = planet_core::cube::face_to_direction(map, tile.face(), s, t);
-        worst = worst.max(libm::atan2(c.cross(d).length(), c.dot(d)));
+        worst = worst.max(c.angle_to(d));
     }
     // Margin for the sampled boundary: the maximum is attained at a corner for these tiles; keep a small relative safety.
     worst * 1.001

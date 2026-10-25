@@ -235,6 +235,26 @@ pub fn eval_chunked(dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), threads: us
 pub trait HeightField: Send + Sync {
     /// Height in metres at a unit direction.
     fn height(&self, dir: Vec3) -> f64;
+    /// Height in metres at a unit direction as drawn at tile level `level` (GEN-036): a field with level-dependent detail (a chunk field,
+    /// ADR 0077) reads the pyramid level of that tile level; every other field is level-independent, which is this default. A wrapper
+    /// forwards it to the field it wraps (a stage adds its own change on top), or the detail is lost.
+    fn height_at_level(&self, dir: Vec3, _level: u8) -> f64 {
+        self.height(dir)
+    }
+    /// Whether [`height_at_level`](HeightField::height_at_level) can differ from `height`: false for every field without chunk detail, so the
+    /// batch forms that ignore the level stay the fast path for them. A wrapper forwards it with `height_at_level`.
+    fn level_aware(&self) -> bool {
+        false
+    }
+    /// [`heights_threaded`](HeightField::heights_threaded) as drawn at tile level `level` (the plan's origin heights, GEN-036): the same values as
+    /// `height_at_level` per direction in the caller's order for every `threads`; a field that is not level-aware takes its batch path.
+    fn heights_threaded_at_level(&self, dirs: &[Vec3], level: u8, threads: usize) -> Vec<f64> {
+        if self.level_aware() {
+            eval_chunked(dirs, &|| false, threads, &|d| self.height_at_level(d, level))
+        } else {
+            self.heights_threaded(dirs, threads)
+        }
+    }
     /// The heights of `dirs`, in the caller's order: element `k` is bit for bit `self.height(dirs[k])` (GEN-020). A field is free to
     /// evaluate the directions in any other order internally (one that reads a block store groups them by block) because every
     /// height is a pure function of its direction. `stop` is polled during the batch (at least every 64 samples); once it
@@ -471,7 +491,7 @@ pub fn generate_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: T
     let mut heights = Vec::with_capacity(((res + 1) * (res + 1)) as usize);
     for l in 0..=res {
         for k in 0..=res {
-            heights.push(field.height(id.sample_direction(map, res, k, l)) as f32);
+            heights.push(field.height_at_level(id.sample_direction(map, res, k, l), id.level()) as f32);
         }
     }
     TileData { id, res, heights }
@@ -563,6 +583,12 @@ impl<F: HeightField> HeightField for Bound<F> {
     fn height(&self, dir: Vec3) -> f64 {
         self.field.height(dir)
     }
+    fn height_at_level(&self, dir: Vec3, level: u8) -> f64 {
+        self.field.height_at_level(dir, level)
+    }
+    fn level_aware(&self) -> bool {
+        self.field.level_aware()
+    }
     fn heights_until(&self, dirs: &[Vec3], stop: &dyn Fn() -> bool) -> Vec<f64> {
         self.field.heights_until(dirs, stop)
     }
@@ -628,6 +654,106 @@ impl<F: HeightField> HeightField for Bound<F> {
     }
 }
 
+/// A boxed field is the field it holds: every method forwards, so a stage that wraps a field generically (the chunk stage) can wrap the
+/// chain a world builds.
+impl<T: HeightField + ?Sized> HeightField for Box<T> {
+    fn height(&self, dir: Vec3) -> f64 {
+        (**self).height(dir)
+    }
+    fn height_at_level(&self, dir: Vec3, level: u8) -> f64 {
+        (**self).height_at_level(dir, level)
+    }
+    fn level_aware(&self) -> bool {
+        (**self).level_aware()
+    }
+    fn heights_threaded_at_level(&self, dirs: &[Vec3], level: u8, threads: usize) -> Vec<f64> {
+        (**self).heights_threaded_at_level(dirs, level, threads)
+    }
+    fn heights_until(&self, dirs: &[Vec3], stop: &dyn Fn() -> bool) -> Vec<f64> {
+        (**self).heights_until(dirs, stop)
+    }
+    fn heights(&self, dirs: &[Vec3]) -> Vec<f64> {
+        (**self).heights(dirs)
+    }
+    fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), threads: usize) -> Vec<f64> {
+        (**self).heights_threaded_until(dirs, stop, threads)
+    }
+    fn heights_threaded(&self, dirs: &[Vec3], threads: usize) -> Vec<f64> {
+        (**self).heights_threaded(dirs, threads)
+    }
+    fn seed(&self) -> u64 {
+        (**self).seed()
+    }
+    fn implementation_id(&self) -> &'static str {
+        (**self).implementation_id()
+    }
+    fn version(&self) -> u32 {
+        (**self).version()
+    }
+    fn max_abs_height_m(&self) -> f64 {
+        (**self).max_abs_height_m()
+    }
+    fn inputs_hash(&self) -> u64 {
+        (**self).inputs_hash()
+    }
+    fn read_records(&self) -> Vec<ReadRecord> {
+        (**self).read_records()
+    }
+    fn read_records_for(&self, tile: TileId, map: &dyn FaceMapping) -> Vec<ReadRecord> {
+        (**self).read_records_for(tile, map)
+    }
+    fn reads_cells(&self) -> bool {
+        (**self).reads_cells()
+    }
+    fn inputs_hash_for(&self, tile: TileId, map: &dyn FaceMapping) -> u64 {
+        (**self).inputs_hash_for(tile, map)
+    }
+    fn body(&self) -> BodyId {
+        (**self).body()
+    }
+    fn source_key(&self) -> Option<[u8; 16]> {
+        (**self).source_key()
+    }
+    fn upstream(&self) -> Option<&dyn HeightField> {
+        (**self).upstream()
+    }
+    fn stage_params(&self) -> Option<(&str, u32)> {
+        (**self).stage_params()
+    }
+    fn passes_through(&self, tile: TileId, map: &dyn FaceMapping) -> bool {
+        (**self).passes_through(tile, map)
+    }
+    fn item_revision(&self) -> u64 {
+        (**self).item_revision()
+    }
+    fn surface_id(&self) -> &'static str {
+        (**self).surface_id()
+    }
+    fn climate(&self, map: &dyn FaceMapping, id: TileId) -> crate::climate::ClimateTexture {
+        (**self).climate(map, id)
+    }
+    fn heights_and_climate(
+        &self,
+        map: &dyn FaceMapping,
+        id: TileId,
+        dirs: &[Vec3],
+        stop: &dyn Fn() -> bool,
+    ) -> (Vec<f64>, crate::climate::ClimateTexture) {
+        (**self).heights_and_climate(map, id, dirs, stop)
+    }
+    fn climate_version_word(&self) -> u64 {
+        (**self).climate_version_word()
+    }
+    fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
+        (**self).height_bounds(centre, angular_radius)
+    }
+    fn bounds_monotone(&self) -> bool {
+        (**self).bounds_monotone()
+    }
+    fn water_cull_level(&self) -> Option<f64> {
+        (**self).water_cull_level()
+    }
+}
 /// A height generator (CON-06): it reads the definition only through a [`GenContext`] and returns the pure field it
 /// describes. Open a fresh context per field: the field's key covers everything that context recorded, so a reused
 /// context would key a field by what was read before it. The inner loops
@@ -652,5 +778,43 @@ impl HeightGenerator for ReferenceGenerator {
     fn field(&self, ctx: &GenContext, body: BodyId) -> Result<Box<dyn HeightField>, MissingNode> {
         let seed = ctx.body_seed(body)?;
         Ok(Box::new(Bound::new(Reference(seed), ctx, body)))
+    }
+}
+
+#[cfg(test)]
+mod level_tests {
+    use super::*;
+
+    struct Leveled;
+
+    impl HeightField for Leveled {
+        fn height(&self, _: Vec3) -> f64 {
+            1.0
+        }
+        fn height_at_level(&self, _: Vec3, level: u8) -> f64 {
+            1.0 + f64::from(level)
+        }
+        fn seed(&self) -> u64 {
+            1
+        }
+        fn implementation_id(&self) -> &'static str {
+            "leveled-test"
+        }
+        fn version(&self) -> u32 {
+            1
+        }
+        fn max_abs_height_m(&self) -> f64 {
+            100.0
+        }
+    }
+
+    // spec: GEN-036
+    #[test]
+    fn the_bound_wrapper_answers_the_level_as_its_inner_field_does() {
+        let def = planet_world_def::WorldDefinition::single_planet(6_371_000.0, 7);
+        let bound = Bound::new(Leveled, &GenContext::new(&def), BodyId::PLANET);
+        for level in [0u8, 11, 15, 22] {
+            assert_eq!(bound.height_at_level(Vec3::new(1.0, 0.0, 0.0), level), 1.0 + f64::from(level));
+        }
     }
 }

@@ -7,6 +7,7 @@
 | What a term means (tile, patch, field, stage...) and the pictures of the model | `docs/domain.md` |
 | What is happening now, what waits for the owner | `docs/status.md` |
 | The current milestone's plan and this week's start brief | `docs/briefings/` |
+| Where the milestones may go after the current one (non-binding) | `docs/roadmap.md` |
 | What was done, newest first | `cargo xtask log` (current milestone: `docs/log.md` and `docs/log.d/`) |
 | Why something was decided | `docs/adr/` (index: `docs/adr/README.md`) |
 | The current rules, numbers and budgets per subsystem | `openspec/specs/<subsystem>/spec.md` |

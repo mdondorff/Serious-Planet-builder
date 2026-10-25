@@ -39,6 +39,32 @@ impl Vec3 {
     pub fn distance(self, o: Vec3) -> f64 {
         (self - o).length()
     }
+
+    /// The angle in radians between two directions, in `[0, pi]`. The `atan2` of the cross and dot products keeps its precision for tiny
+    /// angles and for angles near pi, where `acos` of the dot product loses it.
+    pub fn angle_to(self, o: Vec3) -> f64 {
+        libm::atan2(self.cross(o).length(), self.dot(o))
+    }
+
+    /// The unit direction of a latitude and a longitude in radians (x towards lat 0 lon 0, z towards the north pole).
+    pub fn from_lat_lon(lat_rad: f64, lon_rad: f64) -> Vec3 {
+        Vec3::new(libm::cos(lat_rad) * libm::cos(lon_rad), libm::cos(lat_rad) * libm::sin(lon_rad), libm::sin(lat_rad))
+    }
+
+    /// Latitude and longitude in radians of a direction (it need not be a unit vector): the latitude from `atan2` of the height over the
+    /// distance from the axis, which keeps its precision at the poles where `asin` loses it; the longitude is `atan2(y, x)` in `(-pi, pi]`
+    /// and 0 on the axis. The inverse of [`Vec3::from_lat_lon`] away from the poles.
+    pub fn lat_lon(self) -> (f64, f64) {
+        (libm::atan2(self.z, libm::hypot(self.x, self.y)), libm::atan2(self.y, self.x))
+    }
+
+    /// An orthonormal pair `(e1, e2)` of the tangent plane at the unit vector `self`, right-handed with it (`e1 x e2 = self`). The helper
+    /// axis is z, or x within 0.9 of a pole, so the pair is a fixed function of the direction.
+    pub fn tangent_basis(self) -> (Vec3, Vec3) {
+        let helper = if self.z.abs() < 0.9 { Vec3::new(0.0, 0.0, 1.0) } else { Vec3::new(1.0, 0.0, 0.0) };
+        let e1 = helper.cross(self).normalized();
+        (e1, self.cross(e1))
+    }
 }
 
 impl Add for Vec3 {

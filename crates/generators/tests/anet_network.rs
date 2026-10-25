@@ -1,0 +1,244 @@
+//! GEN-047: the global network in the chunk raster: one corridor path for neighbouring chunks, zero meander at the coarse cell centres,
+//! inflow where a river enters the region, and initial heights from the run plus the base's detail.
+
+use std::sync::OnceLock;
+
+use planet_core::cube::TangentWarp;
+use planet_core::{Face, TileId, Vec3};
+use planet_generators::anet::{coarse_z_at, meander_m, segment_points, BaseDetail, CoarseRun, Network, MEANDER_M, NO_NEXT};
+use planet_generators::chunk::CHUNK_GRID_LEVEL;
+use planet_generators::chunkfield::{region, ChunkLattice};
+use planet_generators::coupled::{Lattice, NONE};
+
+const R: f64 = 6_371_000.0;
+const N: usize = 2048;
+
+fn lattice() -> &'static Lattice {
+    static L: OnceLock<Lattice> = OnceLock::new();
+    L.get_or_init(|| Lattice::new(N, R))
+}
+
+/// A run with one river on face 2, row 1000, flowing towards +i from column 995 to 1010 with a growing area; heights rise with `i`.
+struct River(usize);
+
+const FACE: usize = 2;
+
+fn on_river(row: usize, c: usize) -> Option<usize> {
+    let (f, r) = (c / (N * N), c % (N * N));
+    let (i, j) = (r % N, r / N);
+    (f == FACE && j == row && (995..=1010).contains(&i)).then_some(i)
+}
+
+impl CoarseRun for River {
+    fn lattice(&self) -> &Lattice {
+        lattice()
+    }
+    fn z(&self, c: usize) -> f32 {
+        50.0 + 0.01 * (c % N) as f32
+    }
+    fn area_m2(&self, c: usize) -> f32 {
+        on_river(self.0, c).map_or(1.0e6, |i| 2.0e8 * (1 + i - 995) as f32)
+    }
+    fn identity(&self) -> u64 {
+        7
+    }
+    fn receiver(&self, c: usize) -> u32 {
+        match on_river(self.0, c) {
+            Some(i) if i < 1010 => (c + 1) as u32,
+            _ => NONE,
+        }
+    }
+}
+
+/// The base is the run's input plus a constant detail of 7 m, so the initial heights are the run's plus 7.
+struct Detail(f64);
+
+impl BaseDetail for Detail {
+    fn base_height(&self, dir: Vec3) -> f64 {
+        self.coarse_input(dir) + self.0
+    }
+    fn identity(&self) -> u64 {
+        11
+    }
+    fn coarse_input(&self, dir: Vec3) -> f64 {
+        100.0 + 3.0 * dir.x
+    }
+}
+
+fn chunk(x: u32) -> TileId {
+    TileId::new(Face(FACE as u8), CHUNK_GRID_LEVEL, x, 1000).unwrap()
+}
+
+// spec: GEN-047
+#[test]
+fn neighbouring_chunks_find_the_same_corridor_and_the_same_initial_heights_through_their_shared_border() {
+    let lat = ChunkLattice::new(32).unwrap();
+    let (ra, rb) = (region(&lat, chunk(1000), 40), region(&lat, chunk(1001), 40));
+    let (na, nb) = (Network::build(&River(1000), &Detail(7.0), &lat, &ra, R), Network::build(&River(1000), &Detail(7.0), &lat, &rb, R));
+    let (mut shared, mut on_path, mut next_checked) = (0, 0, 0);
+    for (ia, &cell) in ra.cells.iter().enumerate() {
+        let Some(ib) = rb.index_of(cell) else { continue };
+        shared += 1;
+        assert_eq!(na.corridor[ia], nb.corridor[ib], "corridor at {cell:?}");
+        assert_eq!(na.z0[ia].to_bits(), nb.z0[ib].to_bits(), "initial height at {cell:?}");
+        on_path += usize::from(na.corridor[ia]);
+        if na.next[ia] != NO_NEXT && nb.next[ib] != NO_NEXT {
+            assert_eq!(ra.cells[na.next[ia] as usize], rb.cells[nb.next[ib] as usize], "next cell at {cell:?}");
+            next_checked += 1;
+        }
+    }
+    assert!(shared > 1000, "the regions overlap ({shared} cells)");
+    assert!(on_path >= 20, "the river crosses the overlap ({on_path} corridor cells)");
+    assert!(next_checked >= 20);
+    // The river runs across both chunks: the corridor cells of the first region reach the shared border.
+    let border = ra.cells.iter().enumerate().filter(|(i, c)| na.corridor[*i] && c.i >= 1001 * 32 - 1).count();
+    assert!(border > 0, "the corridor of the first chunk reaches the border");
+}
+
+// spec: GEN-047
+#[test]
+fn a_segment_starts_and_ends_at_the_coarse_cell_centres_and_its_meander_stays_within_the_bound() {
+    let l = lattice();
+    let (c0, c1) = (FACE * N * N + 1000 * N + 1000, FACE * N * N + 1000 * N + 1001);
+    let (a, b) = (l.direction(c0), l.direction(c1));
+    let pts = segment_points(a, b, c0 as u64, R);
+    assert!((pts[0] - a).length() < 1e-12 && (pts[pts.len() - 1] - b).length() < 1e-12, "the ends are the cell centres");
+    // One point every 40 m of the chord (the meander moves each sideways, so the steps along the path are longer).
+    let chord_m = (b - a).length() * R;
+    assert_eq!(pts.len(), (chord_m / 40.0).ceil() as usize + 1, "a point every 40 m of the chord");
+    // Distance of every point from the chord line a-b, in metres: at most the meander.
+    let along = (b - a).normalized();
+    let worst = pts.iter().map(|&p| ((p - a) - along * (p - a).dot(along)).length() * R).fold(0.0, f64::max);
+    assert!(worst <= MEANDER_M + 25.0, "the path stays within {worst} m of the chord");
+    assert!(worst > 50.0, "and it does wander ({worst} m)");
+    assert_eq!(meander_m(7, 0.0, 5000.0), 0.0);
+    assert!(meander_m(7, 1.0, 5000.0).abs() < 1e-9);
+    // A function of the segment alone: the same call gives the same points.
+    assert_eq!(pts, segment_points(a, b, c0 as u64, R));
+    assert_ne!(pts[10], segment_points(a, b, c0 as u64 + 1, R)[10], "another segment, another meander");
+}
+
+// spec: GEN-047
+#[test]
+fn a_river_that_enters_the_region_from_outside_brings_its_coarse_area_and_a_chunk_without_one_has_no_corridor() {
+    let lat = ChunkLattice::new(32).unwrap();
+    // Chunk 1005 with a small halo: the river from column 995 to 1010 passes through it; the region starts inside the river's reach.
+    let r = region(&lat, chunk(1005), 6);
+    let net = Network::build(&River(1000), &Detail(0.0), &lat, &r, R);
+    let entered: f64 = net.inflow_m2.iter().sum();
+    assert!(entered > 0.0, "the river enters the region from outside");
+    // Every entry carries the coarse area of a cell upstream of the region: one of the areas of the river's cells.
+    for &a in net.inflow_m2.iter().filter(|a| **a > 0.0) {
+        assert!((995..=1010).any(|i| (a - 2.0e8 * (1 + i - 995) as f64).abs() < 1.0), "inflow {a} m2 is the coarse area of a river cell");
+    }
+    // A chunk far from the river has no corridor, no inflow and no links.
+    let away = region(&lat, TileId::new(Face(FACE as u8), CHUNK_GRID_LEVEL, 1005, 1500).unwrap(), 6);
+    let none = Network::build(&River(1000), &Detail(0.0), &lat, &away, R);
+    assert!(none.corridor.iter().all(|c| !c) && none.inflow_m2.iter().all(|a| *a == 0.0) && none.next.iter().all(|n| *n == NO_NEXT));
+}
+
+// spec: GEN-047
+#[test]
+fn the_initial_heights_are_the_runs_upsampled_plus_the_base_detail() {
+    let lat = ChunkLattice::new(32).unwrap();
+    let r = region(&lat, chunk(1003), 4);
+    let net = Network::build(&River(1000), &Detail(7.0), &lat, &r, R);
+    for k in [0usize, 100, 500, r.cells.len() - 1] {
+        let d = lat.direction(r.cells[k]);
+        let expected = coarse_z_at(&River(1000), d) + 7.0;
+        assert!((f64::from(net.z0[k]) - expected).abs() < 1e-3, "cell {k}: {} against {expected}", net.z0[k]);
+    }
+    // At a coarse cell centre the upsampled height is the run's own.
+    let c = FACE * N * N + 1000 * N + 1003;
+    let d = lattice().direction(c);
+    assert!((coarse_z_at(&River(1000), d) - f64::from(River(1000).z(c))).abs() < 1e-4);
+    let _ = TangentWarp;
+}
+
+/// A run whose height is smooth in three dimensions (`1000 y` of the cell's direction), no river.
+struct Smooth;
+
+impl CoarseRun for Smooth {
+    fn identity(&self) -> u64 {
+        5
+    }
+    fn lattice(&self) -> &Lattice {
+        lattice()
+    }
+    fn z(&self, c: usize) -> f32 {
+        (1000.0 * lattice().direction(c).y) as f32
+    }
+    fn area_m2(&self, _: usize) -> f32 {
+        1.0e6
+    }
+    fn receiver(&self, _: usize) -> u32 {
+        NONE
+    }
+}
+
+// spec: GEN-047
+#[test]
+fn the_links_of_the_corridor_end_at_an_outlet_join_neighbouring_cells_and_do_not_depend_on_the_region() {
+    let lat = ChunkLattice::new(32).unwrap();
+    // The links of every corridor cell lead to an outlet: no loop, whatever way the meander turns back inside a cell.
+    for (row, x) in [(1000usize, 1000u32), (1000, 1004), (1001, 1000)] {
+        let r = region(&lat, chunk(x).tile_at_row(row), 40);
+        let net = Network::build(&River(row), &Detail(0.0), &lat, &r, R);
+        let mut links = 0;
+        for start in 0..r.cells.len() {
+            let (mut at, mut steps) = (start, 0);
+            while net.next[at] != NO_NEXT {
+                let to = net.next[at] as usize;
+                assert!(lat.neighbours(r.cells[at]).contains(&r.cells[to]), "a link joins neighbouring cells");
+                at = to;
+                steps += 1;
+                assert!(steps <= r.cells.len(), "the links from {:?} do not end", r.cells[start]);
+                links += 1;
+            }
+        }
+        assert!(links > 50, "row {row}: {links} links followed");
+    }
+    // A river along the next coarse row (2.4 km beyond the chunk's edge) is cut by the region's outer boundary; the links of the cells whose
+    // neighbours are all in both regions are the same in both.
+    let halo = 20;
+    let (a, b) =
+        (region(&lat, chunk(1000), halo), region(&lat, TileId::new(Face(FACE as u8), CHUNK_GRID_LEVEL, 1000, 1001).unwrap(), halo));
+    let (na, nb) = (Network::build(&River(1001), &Detail(0.0), &lat, &a, R), Network::build(&River(1001), &Detail(0.0), &lat, &b, R));
+    let mut compared = 0;
+    for (ia, &cell) in a.cells.iter().enumerate() {
+        let Some(ib) = b.index_of(cell) else { continue };
+        if a.depth[ia] >= halo || b.depth[ib] >= halo {
+            continue;
+        }
+        let to = |net: &Network, r: &planet_generators::chunkfield::Region, i: usize| {
+            (net.next[i] != NO_NEXT).then(|| r.cells[net.next[i] as usize])
+        };
+        assert_eq!(to(&na, &a, ia), to(&nb, &b, ib), "the link out of {cell:?}");
+        assert_eq!(na.corridor[ia], nb.corridor[ib]);
+        compared += usize::from(na.corridor[ia]);
+    }
+    assert!(compared > 10, "{compared} corridor cells compared");
+}
+
+trait AtRow {
+    fn tile_at_row(self, row: usize) -> TileId;
+}
+
+impl AtRow for TileId {
+    fn tile_at_row(self, row: usize) -> TileId {
+        TileId::new(self.face(), CHUNK_GRID_LEVEL, self.x(), row as u32).unwrap()
+    }
+}
+
+// spec: GEN-047
+#[test]
+fn the_upsampled_run_has_no_step_across_a_face_edge_or_at_a_cube_corner() {
+    use planet_core::cube::face_to_direction;
+    let at = |s: f64, t: f64, face: u8| face_to_direction(&TangentWarp, Face(face), s, t);
+    // Across the +s edge of face 2 and at the corner where three faces meet: 1.2 m apart, a smooth surface differs by a little.
+    let pairs = [(at(1.0 - 1e-7, 0.3, 2), at(1.0 + 1e-7, 0.3, 2)), (at(1.0 - 1e-7, 1.0 - 1e-7, 2), at(1.0 + 1e-7, 1.0 + 1e-7, 2))];
+    for (a, b) in pairs {
+        let step = (coarse_z_at(&Smooth, a) - coarse_z_at(&Smooth, b)).abs();
+        assert!(step < 3.0, "a {step} m step between points {} m apart", (a - b).length() * R);
+    }
+}

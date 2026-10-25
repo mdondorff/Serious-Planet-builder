@@ -1,0 +1,1 @@
+- 2026-10-24 **m8-perf-coupled** (#602): `cargo xtask perf coupled` times the global coupled run (GEN-042); first measurement at 2048, 100 steps: 848.6 s, 8.49 s per step, 1 thread (budget 600 s, M8 criterion 4)

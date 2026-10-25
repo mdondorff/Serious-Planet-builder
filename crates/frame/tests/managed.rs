@@ -1769,3 +1769,73 @@ fn a_run_without_a_refusal_is_not_invalid() {
         rig.finish();
     }
 }
+
+/// A chunk view whose tiles of level 6 and finer read one chunk each (their ancestor at level 6), ready all at once when `ready` is set.
+struct StubView {
+    ready: std::sync::atomic::AtomicBool,
+}
+
+impl planet_frame::chunkshare::ChunkView for StubView {
+    fn top_level(&self) -> u8 {
+        6
+    }
+    fn reads(&self, tile: TileId) -> Vec<planet_generators::chunkfield::ChunkKey> {
+        if tile.level() < 6 {
+            return Vec::new();
+        }
+        let shift = tile.level() - 6;
+        vec![(tile.face().0, tile.x() >> shift, tile.y() >> shift)]
+    }
+    fn is_ready(&self, _key: planet_generators::chunkfield::ChunkKey) -> bool {
+        self.ready.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+// spec: STRM-039
+#[test]
+fn the_loops_frame_counts_carry_the_stand_in_share_of_its_plan() {
+    let mut rig = Rig::new(1_000_000);
+    let req = request(here(), 0.0, -0.4);
+    rig.settle(&req);
+    assert_eq!(rig.step(&req).counts.chunk, planet_frame::chunkshare::ChunkShare::default(), "without a chunk view nothing is counted");
+    let view = Arc::new(StubView { ready: std::sync::atomic::AtomicBool::new(false) });
+    rig.lp.set_chunk_view(Some(view.clone()));
+    let f = rig.step(&req);
+    let fine = f.pipeline.draw.plan.nodes.iter().filter(|n| n.tile.level() >= 6).count();
+    assert!(fine > 0, "the view sees nodes that read chunk detail");
+    assert_eq!((f.counts.chunk.chunk_nodes, f.counts.chunk.chunk_stand_in), (fine, fine), "nothing ready: all of them are the stand-in");
+    view.ready.store(true, std::sync::atomic::Ordering::SeqCst);
+    let f = rig.step(&req);
+    assert_eq!((f.counts.chunk.chunk_nodes, f.counts.chunk.chunk_stand_in), (fine, 0));
+    assert_eq!(f.counts.chunk.values(), [fine as u64, 0]);
+}
+
+// spec: STRM-040
+#[test]
+fn a_landed_chunk_refreshes_exactly_the_resident_tiles_that_read_it() {
+    let mut rig = Rig::new(1_000_000);
+    let req = request(here(), 0.0, -0.4);
+    rig.settle(&req);
+    let view = Arc::new(StubView { ready: std::sync::atomic::AtomicBool::new(true) });
+    assert_eq!(rig.lp.chunk_landed(&[(0, 0, 0)]), 0, "without a view nothing is refreshed");
+    rig.lp.set_chunk_view(Some(view));
+    assert_eq!(rig.lp.chunk_landed(&[]), 0);
+    let resident: Vec<TileId> = rig.lp.resident().keys().copied().collect();
+    // The chunk (face, x, y at level 6) of some resident tile of level 6 or finer: its readers are all the resident tiles under it.
+    let target = resident.iter().find(|t| t.level() >= 6).map(|t| {
+        let s = t.level() - 6;
+        (t.face().0, t.x() >> s, t.y() >> s)
+    });
+    let target = target.expect("the settled view has fine tiles");
+    let readers = rig
+        .lp
+        .resident()
+        .keys()
+        .copied()
+        .filter(|t| t.level() >= 6 && (t.face().0, t.x() >> (t.level() - 6), t.y() >> (t.level() - 6)) == target)
+        .count();
+    assert!(readers > 0);
+    let queued = rig.lp.chunk_landed(&[target]);
+    assert_eq!(queued, readers, "exactly the resident tiles that read the chunk are queued for a refresh");
+    assert_eq!(rig.lp.chunk_landed(&[(5, 63, 63)]), 0, "a chunk nobody resident reads refreshes nothing");
+}

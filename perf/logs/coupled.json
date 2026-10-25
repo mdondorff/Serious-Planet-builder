@@ -1,0 +1,11 @@
+{
+  "scene": "coupled",
+  "adapter": "NVIDIA GeForce RTX 3080 Ti Laptop GPU",
+  "owner_override": [],
+  "res": 2048,
+  "steps": 100,
+  "threads": 1,
+  "seconds": 545.059,
+  "seconds_per_step": 5.4506,
+  "budget_failures": []
+}

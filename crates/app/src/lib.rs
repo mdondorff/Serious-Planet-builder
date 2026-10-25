@@ -1,11 +1,15 @@
 //! The single binary's run modes (CON-01): `editor` (interactive viewer), `generate` (headless CLI)
-//! and `test-render` (headless harness). M0 only wires them up; real work arrives with M1+.
+//! and `test-render` (headless harness). It wires the other crates together: the window and the editor mode (`window`, `editwin`, `panels`), the world's field chain (`worldfield`), the stores and bakes, and the perf and stress scenes.
 
+pub mod anetworld;
+pub mod coupledworld;
 pub mod crash;
 pub mod editperf;
 pub mod editscale;
 pub mod editwin;
+pub mod envelopeperf;
 pub mod globalperf;
+pub mod horizonworld;
 pub mod litperf;
 pub mod lookload;
 pub mod manifest;
@@ -18,6 +22,7 @@ pub mod preflightperf;
 pub mod reproworld;
 pub mod sheet;
 pub mod skeleton;
+pub mod stills;
 pub mod streamperf;
 pub mod sweep;
 pub mod ui;
@@ -34,7 +39,7 @@ use planet_render::{AdapterPolicy, GpuContext};
 pub const USAGE: &str = "usage: planet <mode> [options]
 modes:
   editor        the viewer window (VIEW-001..VIEW-007): the scripted orbit-to-1 m flight on the pipelined loop; keys P/Space pause, R restart, L lit (with the atmosphere) or debug path, V debug view, T vsync, C flight or free camera (WASD move, Q/E down/up, arrows look, Shift boost), Esc quit; the window opens on the lit path with the atmosphere, the look file drawn (sun, adaptive exposure); the title shows frame rate, CPU and GPU time, the path (or the debug view), on the lit path the exposure, and the readiness report; runs on a discrete GPU only (an integrated GPU, a software adapter or an adapter missing a feature or limit is refused with the reason); [--world F --global-res N | --store DIR] [--look F] [--size WxH] [--view NAME] [--cells N --tau PX --finest-level N] [--no-vsync] [--no-ui] (the editor UI, an egui layer drawn after the tone map, VIEW-011) [--edit] (start in the editor mode, VIEW-022: Tab toggles it; the panels, stamps by 2-4 and a click, handles on the planet, Ctrl+Z / Ctrl+Y) [--items DIR] (the edits as one TOML file each in DIR, loaded at the start) [--editor-layout F] (the panel layout, VIEW-018) [--marker LAT,LON[,RADIUS_M]]... (item markers of the globe overview, G, VIEW-013); --smoke opens the window, drives the keys for a few dozen frames and closes it (test mode: PLANET_ADAPTER or --adapter, software by default; exits with `no display` where there is none); --no-window starts and exits without a window; --offscreen runs the skeleton without a window
-  generate      headless generator CLI: --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --manifest <file> writes the determinism manifest (GEN-003); --cache-dir <dir> --region F,L [--res N] writes a tile face region into a tile store; --verify-cache <dir> [--sample N] regenerates stored tiles and compares (both take --world <definition.toml> or --seed N; --verify-cache fails when nothing could be compared, --allow-stale accepts that); --global-dir <dir> [--global-res N, default 256] bakes the global-coarse field (continents, elevation, climate) of N cells per face edge into a tile store as blocks in the canonical layout (blocks of min(N, 1024) cells) together with its ocean-connectivity channel (one bit per vertex; the area threshold is the definition's `body.0.sea.min_area_fraction`) and prints the time per sample and the channel's cost; --verify-global <dir> [--sample N] regenerates stored blocks and compares; --global-products <dir> [--global-res N] writes cube nets and maps of an in-memory bake (these take --world or --seed and --threads N); --plan-check <dir> --global-res N (required) plans the standard flight at cells 32 and viewport / tau 240 over the stored bake with the terrain and the eroded field and fails if a view is rejected (M3 acceptance); --prefill-dir <dir> --global-res N [--prefill-levels L] [--floor-level F] writes the coarse tiles of levels F..=L (F the render floor, default 3; L default 4; an L below F writes nothing and says so; the tiles of cells 32, finest level 22, compact form, as the streamer generates them) of the stored bake into its tile pack, skipping what is there; --global-dir pre-fills the same way after the bake (--prefill-levels 0 disables; --floor-level takes both); --smoke starts and exits
+  generate      headless generator CLI: --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --manifest <file> writes the determinism manifest (GEN-003); --cache-dir <dir> --region F,L [--res N] writes a tile face region into a tile store; --verify-cache <dir> [--sample N] regenerates stored tiles and compares (both take --world <definition.toml> or --seed N; --verify-cache fails when nothing could be compared, --allow-stale accepts that); --global-dir <dir> [--global-res N, default 256] bakes the global-coarse field (continents, elevation, climate) of N cells per face edge into a tile store as blocks in the canonical layout (blocks of min(N, 1024) cells) together with its ocean-connectivity channel (one bit per vertex; the area threshold is the definition's `body.0.sea.min_area_fraction`) and prints the time per sample and the channel's cost; --verify-global <dir> [--sample N] regenerates stored blocks and compares; --global-products <dir> [--global-res N] writes cube nets and maps of an in-memory bake (these take --world or --seed and --threads N); --coarse-horizon <dir> --global-res N (required) [--threads N] makes the coarse horizon (far-field shadows, STRM-045) from the coupled run stored beside the bake in <dir> and stores it there, with a progress line and the wall time (the coupled run is made and stored by the viewer or `test-render --scene coupled`); --plan-check <dir> --global-res N (required) plans the standard flight at cells 32 and viewport / tau 240 over the stored bake with the terrain and the eroded field and fails if a view is rejected (M3 acceptance); --prefill-dir <dir> --global-res N [--prefill-levels L] [--floor-level F] writes the coarse tiles of levels F..=L (F the render floor, default 3; L default 4; an L below F writes nothing and says so; the tiles of cells 32, finest level 22, compact form, as the streamer generates them) of the stored bake into its tile pack, skipping what is there; --global-dir pre-fills the same way after the bake (--prefill-levels 0 disables; --floor-level takes both); --smoke starts and exits
   test-render   headless render harness
     --scene hello-triangle|tiles|terrain   render a scene (default hello-triangle)
     --script N|name          scripted terrain camera 0..9 or its name (default 3 = aerial-20km)
@@ -69,6 +74,7 @@ modes:
     --gen-priority below-normal|normal   OS priority of the generation workers (STRM-020, ADR 0046; default below-normal: the frame thread wins a core both want; no result depends on it)
     --lit                    the streaming perf scenes on the lit path with the atmosphere and water (TEST-025): same scripts, same verdicts, logs named <scene>-lit
     --views a,b,c            only these views of the lit perf scenes (ground-1m, aerial-20km, coast-2km, coast-3m, orbit, coast-glide, coast-descent); a partial log is not a window
+    --scene capture-stills   one PNG per pose of --poses FILE (TEST-048) in --out-dir, over a world with its A-net chunk stage, every tile of the image with its chunk landed; needs --store DIR or --allow-memory-bake, takes --size WxH and --views (pose names); never a measurement
     --scene capture-flights  the two coastal flights as 1440p PNG sequences (shore_filter at the look default, 0, and then 1) in --out-dir, never a measurement (TEST-027; `cargo xtask capture flights` also makes the videos); needs --store DIR or --allow-memory-bake, takes --size WxH, --flight-frames N
     --flight-frames N        frames of each coastal flight of the lit perf scenes (default 240; --scene lit, TEST-025)
     --perf                   performance-harness skeleton (needs --adapter hardware; the readiness gate decides, ADR 0020)
@@ -138,6 +144,8 @@ pub struct Options {
     pub verify_global: Option<PathBuf>,
     /// `generate`: plan the standard flight at production parameters over the stored global bake in this directory.
     pub plan_check: Option<PathBuf>,
+    /// `generate --coarse-horizon DIR`: make the coarse horizon of the store `DIR`'s stored coupled run (STRM-045).
+    pub coarse_horizon: Option<PathBuf>,
     /// `generate`: write the coarse tiles (levels `F..=--prefill-levels`, F the render floor) into the pack of the stored bake in this directory (STRM-021).
     pub prefill_dir: Option<PathBuf>,
     /// `--global-dir` and `--prefill-dir`: how many levels of coarse tiles the pre-fill writes, 0 for none (default 4, ADR 0045 point 3).
@@ -168,12 +176,16 @@ pub struct Options {
     pub perf_smoke: bool,
     /// `--settle-ms N`: the refresh settle window of the `edit-latency` scene in milliseconds (ADR 0072, STRM-031); the default is the editor's.
     pub settle_ms: u64,
+    /// `--share-bound F`: the coarse share of the screen over a window the `envelope` scene accepts (TEST-047); 1 % by default.
+    pub share_bound: f64,
     /// `--lit`: the streaming perf scenes draw the lit path with the atmosphere and the water (TEST-025).
     pub lit: bool,
     /// `--flight-frames N`: frames of each coastal flight of the lit perf scenes.
     pub flight_frames: usize,
     /// `--views a,b,c`: only these views of the lit perf scenes.
     pub views: Option<Vec<String>>,
+    /// `--poses FILE`: the poses of the scene `capture-stills` (TEST-048).
+    pub poses: Option<PathBuf>,
     /// `--no-ui`: the editor window without the UI (VIEW-011).
     pub no_ui: bool,
     /// `editor --edit`: start in the editor mode (VIEW-022); Tab toggles it in the window.
@@ -289,6 +301,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         global_dir: None,
         verify_global: None,
         plan_check: None,
+        coarse_horizon: None,
         prefill_dir: None,
         prefill_levels: None,
         global_products: None,
@@ -307,9 +320,11 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         frames: 300,
         perf_smoke: false,
         settle_ms: editwin::REFRESH_SETTLE_MS,
+        share_bound: envelopeperf::DEFAULT_BOUND,
         lit: false,
         flight_frames: 240,
         views: None,
+        poses: None,
         no_ui: false,
         edit: false,
         items: None,
@@ -341,6 +356,9 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--settle-ms" => {
                 o.settle_ms = it.next().ok_or("--settle-ms needs a value")?.parse().map_err(|e| format!("--settle-ms: {e}"))?
             }
+            "--share-bound" => {
+                o.share_bound = it.next().ok_or("--share-bound needs a value")?.parse().map_err(|e| format!("--share-bound: {e}"))?
+            }
             "--lit" => o.lit = true,
             "--no-ui" => o.no_ui = true,
             "--edit" => o.edit = true,
@@ -348,6 +366,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--editor-layout" => o.editor_layout = Some(PathBuf::from(it.next().ok_or("--editor-layout needs a file")?)),
             "--marker" => o.markers.push(it.next().ok_or("--marker needs LAT,LON[,RADIUS_M]")?.clone()),
             "--calibrate" => o.calibrate = true,
+            "--poses" => o.poses = Some(PathBuf::from(it.next().ok_or("--poses needs a poses file")?)),
             "--views" => {
                 o.views = Some(it.next().ok_or("--views needs a comma-separated list")?.split(',').map(|v| v.trim().to_string()).collect())
             }
@@ -405,6 +424,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             }
             "--allow-stale" => o.allow_stale = true,
             "--global-dir" => o.global_dir = Some(PathBuf::from(it.next().ok_or("--global-dir needs a directory")?)),
+            "--coarse-horizon" => o.coarse_horizon = Some(PathBuf::from(it.next().ok_or("--coarse-horizon needs a store directory")?)),
             "--plan-check" => o.plan_check = Some(PathBuf::from(it.next().ok_or("--plan-check needs a directory")?)),
             "--prefill-dir" => o.prefill_dir = Some(PathBuf::from(it.next().ok_or("--prefill-dir needs a directory")?)),
             "--prefill-levels" => {
@@ -482,7 +502,8 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
 use planet_cache::tiles::MAX_REGION_LEVEL;
 
 /// Options that only the tile store commands of `generate` understand.
-pub(crate) const STORE_OPTIONS: [&str; 16] = [
+pub(crate) const STORE_OPTIONS: [&str; 17] = [
+    "--coarse-horizon",
     "--prefill-dir",
     "--prefill-levels",
     "--plan-check",
@@ -610,7 +631,8 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
     check_floor_option(&o)?;
     if !matches!(o.mode, Mode::Generate) {
         // The global-bake perf scene takes the definition, grid size and thread count of the global commands.
-        let bake_scene = matches!(o.mode, Mode::TestRender) && o.perf && o.scene == "global-bake";
+        let bake_scene =
+            matches!(o.mode, Mode::TestRender) && o.perf && matches!(o.scene.as_str(), "global-bake" | "coupled" | "anet-chunk");
         let stream_scene = matches!(o.mode, Mode::TestRender)
             && (o.perf || o.perf_smoke || litperf::is_capture_scene(&o.scene))
             && (streamperf::is_stream_scene(&o.scene) || litperf::is_lit_scene(&o.scene) || litperf::is_capture_scene(&o.scene));
@@ -769,9 +791,19 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     {
         return Err("--views applies to the scenes `lit` and `capture-flights`, --flight-frames to those".into());
     }
+    if o.given.contains("--poses") && !stills::is_stills_scene(&o.scene) {
+        return Err("--poses applies to the scene `capture-stills`".into());
+    }
+    if stills::is_stills_scene(&o.scene) && o.given.contains("--flight-frames") {
+        return Err("--flight-frames does not apply to `capture-stills` (one frame per pose)".into());
+    }
     streamperf::check_options(o)?;
     if litperf::is_capture_scene(&o.scene) {
-        return litperf::capture_flights(o, &ctx, out);
+        return if stills::is_stills_scene(&o.scene) {
+            stills::capture_stills(o, &ctx, out)
+        } else {
+            litperf::capture_flights(o, &ctx, out)
+        };
     }
     if o.flight.is_some() {
         return skeleton::render_flight(&ctx, o, out);
@@ -780,6 +812,9 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         return match o.scene.as_str() {
             "terrain" => skeleton::perf_terrain(o, &ctx, out),
             "global-bake" => globalperf::perf_global_bake(o, &ctx, out),
+            "coupled" => globalperf::perf_coupled(o, &ctx, out),
+            "anet-chunk" => globalperf::perf_anet_chunk(o, &ctx, out),
+            s if envelopeperf::is_envelope_scene(s) => envelopeperf::perf_envelope(o, &ctx, out),
             s if preflightperf::is_preflight_scene(s) => preflightperf::perf_preflight(o, &ctx, out),
             s if editperf::is_edit_scene(s) => editperf::perf_edit_latency(o, &ctx, out),
             s if streamperf::is_stream_scene(s) => streamperf::perf_streaming(o, &ctx, out),

@@ -309,7 +309,7 @@ fn camera_over(at: Vec3, ground: &dyn Fn(Vec3) -> f64, radius_m: f64, altitude_m
 fn empty_place(centre: Vec3) -> Vec3 {
     let _ = centre;
     let (la, lo) = (-40f64.to_radians(), 100f64.to_radians());
-    Vec3::new(libm::cos(la) * libm::cos(lo), libm::cos(la) * libm::sin(lo), libm::sin(la))
+    Vec3::from_lat_lon(la, lo)
 }
 
 /// A field that counts and times the calls the plan makes into the field under it: the attribution of a plan job (SPIKE-29).
@@ -363,6 +363,21 @@ impl<'a> Timed<'a> {
 impl HeightField for Timed<'_> {
     fn height(&self, d: Vec3) -> f64 {
         self.timed(0, || self.inner.height(d))
+    }
+    fn height_at_level(&self, d: Vec3, level: u8) -> f64 {
+        self.timed(0, || self.inner.height_at_level(d, level))
+    }
+    fn level_aware(&self) -> bool {
+        self.inner.level_aware()
+    }
+    fn heights_and_climate(
+        &self,
+        map: &dyn FaceMapping,
+        id: TileId,
+        dirs: &[Vec3],
+        stop: &dyn Fn() -> bool,
+    ) -> (Vec<f64>, planet_generators::climate::ClimateTexture) {
+        self.inner.heights_and_climate(map, id, dirs, stop)
     }
     fn seed(&self) -> u64 {
         self.inner.seed()

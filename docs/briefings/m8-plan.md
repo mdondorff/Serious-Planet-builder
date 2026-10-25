@@ -3,14 +3,18 @@
 Status: decisions D1 to D7 taken (owner, 2026-10-23); the M8 GO follows the owner's confirmation in `docs/status.md`. Inputs: SPIKE-28 to 39 (the architecture and process review with refactors R1 to R6: `docs/briefings/m8-review.md`), ADR 0076 (driver maps), ADR 0077 (stage model), `docs/briefings/m8-driver-maps.md`, terms: `docs/domain.md` (chunk: ADR 0077's regional square).
 
 ## Goal
-The base layer, without instances, reaches the owner's Outerra reference image at sunset and midday from 300 m, 30 m and 1.8 m (owner, 2026-10-22).
+The base layer, without instances, reaches the owner's look reference (photoreal renders of current planet-scale terrain engines, kept outside the repository) at sunset and midday from 300 m, 30 m and 1.8 m (owner, 2026-10-22).
+
+Scope (owner, 2026-10-25): M8 delivers plausible relief, hydrology and horizon shadows; full realism of hill terrain is a later milestone (`docs/roadmap.md`).
+- Plausible relief is `openspec/changes/m8-relief/` (#658): a hill band in the bake by landform, an uplift that keeps the input's relief in the coupled run, then one rebuild of bake, run, coarse horizon and chunks.
+- Evidence: the base field's 2 km slope is at most 2.4 degrees p99 in every elevation band; the coupled run lowered high ground by up to half (`docs/learnings.md`, 2026-10-25).
 
 ## Exit criteria (owner, 2026-10-23, D4)
 | # | Criterion | Tier |
 |---|---|---|
-| 1 | Owner's look review against the Outerra image at fixed poses (300 m, 30 m, 1.8 m; sunset, midday) on the 16384 store | D |
+| 1 | Owner's look review against the owner's look reference at fixed poses (300 m, 30 m, 1.8 m; sunset, midday) on the 16384 store; judges river and valley forms on plausible relief, with horizon shadows; realism of hill terrain is out of M8's scope (owner, 2026-10-25) | D |
 | 2 | Chunk fields: identical values at chunk borders; CPU results bit-exact across threads and operating systems | A |
-| 3 | No frame waits for a chunk (CON-22); a chunk lands within 10 s at a 300 m pan; the switch fades in, with no step over 0.25 m p99 between LOD levels | A, C |
+| 3 | No frame waits for a chunk (CON-22); a chunk lands within 10 s at a 300 m pan; a landing chunk's change fades in over about 1.5 s; at the level where the chunk change enters (base to base + change) the step is at most about 0.5 px p99 on screen, with blending; between levels inside the chunk range no step over 0.25 m p99 (amended by the owner, 2026-10-24: the entry step is metres at every top level, `openspec/changes/m8-anet-chunk/design.md` section 16) | A, C |
 | 4 | Global coupled run at most 10 min on Rasierklinge per world version | perf |
 | 5 | Shadows and the material map together at most 1.5 ms of terrain-pass GPU time at 1440p | perf |
 | 6 | An edit over a chunk shows within the M6 budgets, and its eroded result within 10 s | A, perf |
@@ -30,6 +34,7 @@ The base layer, without instances, reaches the owner's Outerra reference image a
 | M8-6 | Driver maps per chunk (wetness from drainage area, soil depth) to material weights (ADR 0076; SPIKE-32 step 3) | M8-3 | explorer |
 | M8-7 | Edits over chunks (D3), with R3 first | M8-3 | crusader |
 | M8-V | The speed-envelope scene (criterion 7) | M8-2 | crusader |
+| M8-R | Plausible relief (`m8-relief`): hill band and landform driver in the bake, uplift that keeps relief in the coupled run, one rebuild; the chunk bank rule (owner, 2026-10-25) | M8-3 | explorer, crusader |
 | M8-8 | Look review 2, perf window for criteria 4 to 7, acceptance | all | owner, planner |
 
 ## Lanes and files (to avoid merge conflicts)

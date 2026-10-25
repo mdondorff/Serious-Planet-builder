@@ -7,6 +7,7 @@
 //! `--smoke` is the test mode: it opens the window, drives the keys through the same command path for a few dozen frames and
 //! closes it. Where there is no display it stops with an error that starts with [`NO_DISPLAY`], which a test reports as a skip.
 
+use crate::coupledworld::Standing;
 use crate::editwin::{EditKey, EditRuntime, Pointer, EDIT_KEYS_HELP, SMOKE_EDIT_FRAMES};
 use crate::pipelined::{RendererSink, Rig};
 use crate::worldfield::WorldTerrain;
@@ -52,8 +53,6 @@ const TITLE_PERIOD_MS: u64 = 500;
 /// The smoke run reports sooner, so that its short run shows a title.
 const SMOKE_TITLE_PERIOD_MS: u64 = 100;
 const GPU_SAMPLE_PERIOD: Duration = Duration::from_secs(1);
-/// The pre-fill levels the readiness report counts (ADR 0045 point 3 default).
-const READINESS_PREFILL_LEVELS: u8 = 4;
 
 /// Whether a key press is the camera's and the commands': it is when the world gets it (no text field has the focus), and always while the
 /// pointer is captured (looking around: the cursor is hidden and cannot have clicked into a field, so a focus left over from before the
@@ -83,6 +82,7 @@ pub fn key_command(code: KeyCode) -> Option<Command> {
         KeyCode::F6 => Command::CycleGroundDetail,
         KeyCode::F7 => Command::ToggleScaleRefs,
         KeyCode::KeyH => Command::ToggleEditingLight,
+        KeyCode::KeyK => Command::CycleCoupledLens,
         KeyCode::F9 => Command::SaveRepro,
         KeyCode::Escape => Command::Quit,
         _ => return None,
@@ -288,6 +288,14 @@ struct Running {
     /// The scale references in the world (VIEW-050) and whether they are dropped.
     scale_refs: Vec<planet_frame::scalerefs::RefBox>,
     scale_refs_on: bool,
+    /// The lens the world was asked for and the one the resident tiles were last refreshed with (VIEW-053).
+    coupled_asked: Option<planet_generators::coupled::CoupledLens>,
+    coupled_shown: Option<planet_generators::coupled::CoupledLens>,
+    /// Whether the frame loop counts the world's chunk stage (STRM-039): set once the world has one.
+    chunks_on: bool,
+    /// The slots, versions and uploads of the horizon shadows (REND-038).
+    horizon: crate::horizonworld::HorizonRig,
+    coupled_standing: Standing,
     /// The item markers of the globe overview, the ones the overview shows this frame (window pixels) and the one under the cursor.
     markers: Vec<Marker>,
     screen_markers: Vec<ScreenMarker>,
@@ -321,6 +329,8 @@ struct App<'w> {
     world: &'w Arc<WorldTerrain>,
     /// The height field the window picks and reads the ground from; rebuilt when the edits change the definition.
     field: Box<dyn HeightField + 'w>,
+    /// What the world's field was built from ([`WorldTerrain::field_stage`]); a change builds `field` and the plan's height bound again.
+    field_stage: (bool, Option<planet_generators::coupled::CoupledLens>),
     /// The plan parameters: the configured ones, with the height bound raised to the field's maximum when the stamps lift it (VIEW-022).
     lod: LodParams,
     cameras: &'w [Camera],
@@ -417,6 +427,12 @@ impl App<'_> {
         let mut rig = Rig::new_with_progress(&ctx, self.world, &first, cfg.gen, &mut |done, total| {
             window.set_title(&planet_frame::viewer::roots_title(done, total));
         })?;
+        // A world with a stored coupled channel gets the A-net chunk stage on a thread (STRM-046); the jobs run on a pool of half the generation workers' size.
+        if self.world.has_bake() && !cfg.smoke {
+            let workers = (cfg.gen.workers / 2).max(1);
+            let pool = planet_streaming::GenWorkers::new(workers).with_priority(cfg.gen.priority).pool();
+            self.world.request_anet(pool, self.clock.clone(), planet_streaming::chunks::ChunkConfig { workers, ..Default::default() });
+        }
         // `enable_lit` is not part of `warm_up`: the lit and atmosphere passes are enabled and used once per ring set here, before the
         // first measured frame, whether the window starts lit or on the debug path (REND-017, VIEW-007).
         let warm_lit = viewer_lit_plan(&cfg.look, cfg.radius_m, 0.0, true, cfg.atmosphere)?.with_water_level(cfg.water_level_m);
@@ -482,6 +498,11 @@ impl App<'_> {
             water_cache: WaterTileCache::with_book(self.world.water_book()),
             scale_refs: Vec::new(),
             scale_refs_on: false,
+            coupled_asked: None,
+            coupled_shown: None,
+            chunks_on: false,
+            horizon: Default::default(),
+            coupled_standing: Standing::Idle,
             markers: cfg.markers.clone(),
             screen_markers: Vec::new(),
             hover: None,
@@ -566,6 +587,21 @@ impl App<'_> {
         // A changed definition goes to the generator before the frame plans: the definition first, then the tiles it changed (STRM-028); the
         // field the window picks and reads the ground from is then built again from the new definition.
         let mut republished = false;
+        // The coupled lens (VIEW-053): K hands it to the world, which loads or runs the global run on a thread; the resident tiles are refreshed
+        // (re-keyed, drawn from their old version until the new one is up, STRM-026) once the run is ready, or at once when the lens goes off.
+        if let Some(st) = self.state.as_mut() {
+            if st.viewer.coupled_lens != st.coupled_asked {
+                st.coupled_asked = st.viewer.coupled_lens;
+                self.world.set_coupled_lens(st.coupled_asked);
+            }
+            let standing = self.world.coupled_standing();
+            st.coupled_standing = standing.clone();
+            if st.coupled_shown != st.coupled_asked && (st.coupled_asked.is_none() || matches!(standing, Standing::Ready(..))) {
+                st.coupled_shown = st.coupled_asked;
+                let resident: Vec<_> = st.rig.managed.resident().keys().copied().collect();
+                st.rig.managed.edit(&resident);
+            }
+        }
         if let Some(st) = self.state.as_mut() {
             if let Some(e) = st.edit.as_mut() {
                 if let Some(def) = e.take_changed_definition() {
@@ -604,11 +640,14 @@ impl App<'_> {
                 st.rig.managed.set_transient_preview(stamps);
             }
         }
-        if republished {
+        // The chunk stage arriving (STRM-046) and the coupled lens change what the world's field reads, as an edit does.
+        let stage = self.world.field_stage();
+        if republished || stage != self.field_stage {
+            self.field_stage = stage;
             let world = self.world;
             self.field = world.field()?;
-            // The stamps lift the field: the plan's bound for the horizon, the frustum and the morph follows the field's maximum, and is never
-            // below the configured one (a run with no edits plans as it did).
+            // The stamps and the chunk stage lift the field: the plan's bound for the horizon, the frustum and the morph follows the field's
+            // maximum, and is never below the configured one (a run with no edits and no chunk stage plans as it did).
             self.lod.max_height_m = cfg.lod.max_height_m.max(self.field.max_abs_height_m());
         }
         let lod_max_height_m = self.lod.max_height_m;
@@ -695,6 +734,16 @@ impl App<'_> {
                     st.rig.managed.begin_frame(&req, &mut RendererSink { ctx, renderer: &mut st.rig.renderer })
                 })?;
             st.counts.coarse_lod_frames += u64::from(st.viewer.coarse_lod);
+            // The chunks the plan's tiles read, nearest first; the tiles that read a landed one are refreshed (STRM-039, STRM-040).
+            if !st.chunks_on && self.world.chunk_manager().is_some() {
+                st.chunks_on = true;
+                st.rig.managed.set_chunk_view(self.world.chunk_view());
+            }
+            if st.chunks_on {
+                let tiles: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
+                let update = self.world.chunk_frame(&tiles, camera.position, &[]);
+                st.rig.managed.chunk_landed(&update.landed);
+            }
             // A refusal of the plan for the base parameters degrades the frame (it draws the newest plan in hand); it is said once, never fatal.
             // One line, one report file and one title notice per cause (kind and level) in 5 s; the title counts all of them.
             let refusal = st.rig.managed.take_plan_refusal();
@@ -794,6 +843,12 @@ impl App<'_> {
                     .with_water_level(cfg.water_level_m)
                     .with_overlay(st.viewer.overlay)
                     .with_ground_detail(st.viewer.ground_detail.strength());
+                // The coupled lens shows through the climate views (VIEW-053).
+                lit.view = match st.viewer.coupled_lens {
+                    Some(planet_generators::coupled::CoupledLens::Height) => planet_frame::look::shading::ShadeView::Temperature,
+                    Some(planet_generators::coupled::CoupledLens::Area) => planet_frame::look::shading::ShadeView::Precipitation,
+                    None => lit.view,
+                };
                 // The editing light (VIEW-042): one sun for the terrain shading, the atmosphere and the sky, fixed in camera space.
                 if st.viewer.editing_light {
                     lit.sun_dir = planet_frame::viewer::editing_sun_dir(&draw.plan.camera);
@@ -809,7 +864,7 @@ impl App<'_> {
                 // The water of the frame (ADR 0041, ADR 0051 point 6): the nodes that carry water, decided by one query of the field W
                 // per new tile; the renderer draws what the plan says.
                 let time_s = now_ms as f64 / 1000.0;
-                let coarse_lod = planet_frame::viewer::effective_lod(&cfg.lod, st.viewer.coarse_lod);
+                let coarse_lod = planet_frame::viewer::effective_lod(&self.lod, st.viewer.coarse_lod);
                 let (look, liquids, lod) = (&cfg.look.water, &cfg.liquids, &coarse_lod);
                 let cache = &mut st.water_cache;
                 let water = self.world.with_water(|wf| {
@@ -845,6 +900,11 @@ impl App<'_> {
                 };
             }
             st.rig.renderer.set_scale_refs(&st.scale_refs);
+            // The horizon shadows (REND-038): the chunk maps in their slots and the coarse map, for the lit frames over a world with a chunk stage.
+            if let Some(lit) = plan.lit.as_ref().filter(|_| st.chunks_on) {
+                let tiles: Vec<TileId> = plan.nodes.iter().map(|n| n.tile).collect();
+                st.horizon.frame(self.world, ctx, &mut st.rig.renderer, &tiles, plan.camera.position, lit.sun_dir);
+            }
             // The regions overlay (VIEW-030): the region items of the editor's definition nearest the camera, decided here, drawn by the renderer.
             if plan.lit.is_some_and(|l| l.overlay == planet_frame::look::Overlay::Regions) {
                 let list = st.edit.as_ref().map(|e| e.region_list(plan.camera.position.0)).unwrap_or_default();
@@ -1064,7 +1124,7 @@ pub fn parse_markers(texts: &[String]) -> Result<Vec<Marker>, String> {
                 return Err(format!("--marker '{text}': the radius {radius_m} m must be positive"));
             }
             let (la, lo) = (lat.to_radians(), lon.to_radians());
-            let dir = planet_core::Vec3::new(libm::cos(la) * libm::cos(lo), libm::cos(la) * libm::sin(lo), libm::sin(la));
+            let dir = planet_core::Vec3::from_lat_lon(la, lo);
             Ok(Marker { id: i as u64 + 1, dir, radius_m })
         })
         .collect()
@@ -1125,6 +1185,9 @@ fn title_text(st: &Running, now_ms: u64) -> String {
     input += &format!(" | {}", st.world_label);
     if st.viewer.scale_refs {
         input += " | scale references";
+    }
+    if let Some(lens) = st.viewer.coupled_lens {
+        input += &format!(" | {}", crate::coupledworld::lens_status(lens, &st.coupled_standing));
     }
     // The hover hint of the overview: only where a click acts (VIEW-045).
     if let Some(hint) = st.click_target.and_then(planet_frame::globe::ClickTarget::hint) {
@@ -1578,7 +1641,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         .ok_or_else(|| format!("--view must be one of {}, got '{view_name}'", views.join(", ")))?;
     let (bake_done, bake_total) = world.bake_blocks();
     let (prefill_done, prefill_total) = if store.is_some() {
-        let levels = o.prefill_levels.unwrap_or(READINESS_PREFILL_LEVELS);
+        let levels = o.prefill_levels.unwrap_or(planet_cache::meshpack::DEFAULT_PREFILL_LEVELS);
         world.prefill_present(o.floor_for(o.cells), levels, o.cells, o.finest_level_for(o.cells)).map(|(p, t)| (p as u64, t as u64))?
     } else {
         (0, 0)
@@ -1643,6 +1706,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         cfg: &cfg,
         world: &world,
         field,
+        field_stage: world.field_stage(),
         lod: cfg.lod.clone(),
         cameras: &script.cameras,
         clock: Arc::new(SystemClock::new()),
@@ -1738,6 +1802,7 @@ mod tests {
             (KeyCode::KeyL, "L"),
             (KeyCode::KeyG, "G"),
             (KeyCode::KeyH, "H"),
+            (KeyCode::KeyK, "K"),
             (KeyCode::KeyW, "WASD"),
             (KeyCode::KeyA, "WASD"),
             (KeyCode::KeyS, "WASD"),
@@ -1757,7 +1822,6 @@ mod tests {
             KeyCode::KeyF,
             KeyCode::KeyI,
             KeyCode::KeyJ,
-            KeyCode::KeyK,
             KeyCode::KeyM,
             KeyCode::KeyN,
             KeyCode::KeyO,

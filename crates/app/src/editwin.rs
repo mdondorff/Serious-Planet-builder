@@ -862,7 +862,7 @@ pub const EDIT_KEYS_HELP: &str = "editor mode: Tab on/off (the panels, the outli
      Up and Down step the value, Shift ten times as much), Shift+click on a line or \
      region adds a point, Ctrl+click on a point removes it, Ctrl+Z undo, Ctrl+Y or Ctrl+Shift+Z redo, Delete deletes, F1 or ? lists the keys, Esc steps back \
      (drag, draft, tool, selection) and does not quit; hold the right mouse button to look around, WASD/QE move, Shift boosts, arrows look; \
-     the viewer's keys work too: G globe overview, F3 cycles the overlay (off, tiles, mesh, regions, stale tiles), F4 coarse LOD, F6 ground detail (natural, full, off), F7 scale references (a chair, a house, a boat, a tower and a block of boxes of known size on the ground in front of you; again takes them away), F9 writes a repro bundle, H editing light (a sun over your shoulder, so no slope is black), L lit or debug path, V next debug view, \
+     the viewer's keys work too: G globe overview, F3 cycles the overlay (off, tiles, mesh, regions, stale tiles), F4 coarse LOD, F6 ground detail (natural, full, off), F7 scale references (a chair, a house, a boat, a tower and a block of boxes of known size on the ground in front of you; again takes them away), F9 writes a repro bundle, K coupled run lens (the climate, the heights of the global run, its drainage area; lit path), H editing light (a sun over your shoulder, so no slope is black), L lit or debug path, V next debug view, \
      T vsync, P or Space pause, R restart (C, flight or free camera, does nothing while the editor is on)";
 
 /// The first frame of the smoke run's editing script.
@@ -930,7 +930,7 @@ impl EditRuntime {
                         self.shown.len(),
                         self.overlay.len(),
                         sel,
-                        camera.position.0.length() - 6_371_000.0,
+                        camera.position.0.length() - planet_core::EARTH_RADIUS_M,
                         self.session.selected()
                     )
                 };
@@ -1066,7 +1066,7 @@ mod tests {
 
     fn unit(lat_deg: f64, lon_deg: f64) -> Vec3 {
         let (lat, lon) = (lat_deg.to_radians(), lon_deg.to_radians());
-        Vec3::new(libm::cos(lat) * libm::cos(lon), libm::cos(lat) * libm::sin(lon), libm::sin(lat))
+        Vec3::from_lat_lon(lat, lon)
     }
 
     fn above(dir: Vec3, altitude_m: f64) -> Camera {
@@ -1539,7 +1539,7 @@ mod tests {
         e.release();
         assert_eq!((e.stats.dragged, e.session.editor().undo_depth()), (1, depth + 1));
         let after = e.session.item(id).unwrap().direction();
-        let moved_m = R * libm::atan2(before.cross(after).length(), before.dot(after));
+        let moved_m = R * before.angle_to(after);
         let want = 60.0 * 3_000.0 * 2.0 * libm::tan(std::f64::consts::FRAC_PI_6) / 1000.0;
         assert!((moved_m - want).abs() < 0.03 * want, "60 px at 3 km up is {want} m, moved {moved_m}");
         assert!(!e.take_affected().is_empty());

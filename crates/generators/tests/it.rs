@@ -1,3 +1,7 @@
+#[path = "anet_incision.rs"]
+mod anet_incision;
+#[path = "anet_network.rs"]
+mod anet_network;
 #[path = "block_order.rs"]
 mod block_order;
 #[path = "body_keys.rs"]
@@ -10,10 +14,18 @@ mod bounds_monotone;
 mod brush_stage;
 #[path = "cell_keys.rs"]
 mod cell_keys;
+#[path = "chain.rs"]
+mod chain;
+#[path = "chunk.rs"]
+mod chunk;
+#[path = "chunkfield.rs"]
+mod chunkfield;
 #[path = "climate.rs"]
 mod climate;
 #[path = "compact.rs"]
 mod compact;
+#[path = "coupled_lens.rs"]
+mod coupled_lens;
 #[path = "erosion.rs"]
 mod erosion;
 #[path = "generator_contract.rs"]
@@ -28,6 +40,8 @@ mod global_reader;
 mod height_fields;
 #[path = "lattice_normals.rs"]
 mod lattice_normals;
+#[path = "level_height.rs"]
+mod level_height;
 #[path = "line_stage.rs"]
 mod line_stage;
 #[path = "manifest.rs"]

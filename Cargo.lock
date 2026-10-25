@@ -1430,6 +1430,7 @@ dependencies = [
  "planet-streaming",
  "planet-testkit",
  "planet-world-def",
+ "toml",
  "winit",
 ]
 
@@ -1458,7 +1459,6 @@ dependencies = [
  "libm",
  "planet-core",
  "planet-frame",
- "planet-render",
  "planet-world-def",
  "toml",
 ]
@@ -1518,6 +1518,7 @@ dependencies = [
  "libc",
  "planet-cache",
  "planet-core",
+ "planet-generators",
  "windows",
 ]
 

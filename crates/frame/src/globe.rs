@@ -240,7 +240,7 @@ impl GlobeFlight {
     /// The flight between two views (made valid by [`GlobeView::new`]) on a planet of radius `radius_m`.
     pub fn new(from: GlobeView, to: GlobeView, radius_m: f64) -> GlobeFlight {
         let (from, to) = (GlobeView::new(from.center, from.altitude_m), GlobeView::new(to.center, to.altitude_m));
-        let angle_rad = libm::atan2(from.center.cross(to.center).length(), from.center.dot(to.center));
+        let angle_rad = from.center.angle_to(to.center);
         let radius_m = if radius_m.is_finite() && radius_m > 0.0 { radius_m } else { 0.0 };
         GlobeFlight { from, to, angle_rad, duration_s: MIN_FLIGHT_S + SECONDS_PER_RADIAN * angle_rad, radius_m }
     }

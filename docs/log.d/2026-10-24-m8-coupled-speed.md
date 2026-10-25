@@ -1,0 +1,1 @@
+- 2026-10-24 **m8-coupled-speed**: the coupled run about 22% faster and bit-exact (radix queue for the flood, sqrt-area and leaf-pow tables, 32-bit index maths, prefetch); 2048 x 10-step hash and a 100-step checksum unchanged; the perf window follows

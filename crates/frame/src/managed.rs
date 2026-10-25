@@ -105,6 +105,9 @@ pub struct FrameCounts {
     /// among the logged columns of [`FrameCounts::NAMES`].
     pub prefetch: usize,
     pub cancelled_prefetch: u64,
+    /// The plan's nodes that read chunk detail and those still on the base because their chunk is not ready (STRM-039); all zero without a
+    /// chunk view. Logged under [`crate::chunkshare::CHUNK_COLUMNS`], not among [`FrameCounts::NAMES`] (the scheduler digests keep their width).
+    pub chunk: crate::chunkshare::ChunkShare,
 }
 
 impl FrameCounts {
@@ -190,6 +193,8 @@ pub struct ManagedLoop {
     class_rebuilds: u64,
     prefetch_rebuilds: u64,
     last_node_bytes: u64,
+    /// What the frame knows of the chunk field (STRM-039): set by the window that has one.
+    chunk_view: Option<Arc<dyn crate::chunkshare::ChunkView>>,
     /// The lists of `wants` that changed since the manager was last given them.
     draw_changed: bool,
     residency_changed: bool,
@@ -276,6 +281,7 @@ impl ManagedLoop {
             class_rebuilds: 0,
             prefetch_rebuilds: 0,
             last_node_bytes: 0,
+            chunk_view: None,
             draw_changed: false,
             residency_changed: false,
             prefetch_changed: false,
@@ -363,6 +369,31 @@ impl ManagedLoop {
         self.classes_stale = true;
         self.prefetch_closure_stale = true;
         queued
+    }
+
+    /// The chunk field the frame counts its stand-in share against (STRM-039); `None` counts nothing.
+    pub fn set_chunk_view(&mut self, view: Option<Arc<dyn crate::chunkshare::ChunkView>>) {
+        self.chunk_view = view;
+    }
+
+    /// Chunks landed (STRM-040): the resident tiles that read one of them are refreshed through the stale-tile machinery (the old tile keeps
+    /// drawing while the new one is made, REND-032) and their cached origins dropped. Returns the tiles queued; 0 without a chunk view.
+    pub fn chunk_landed(&mut self, landed: &[planet_generators::chunkfield::ChunkKey]) -> usize {
+        let Some(view) = self.chunk_view.clone() else { return 0 };
+        if landed.is_empty() {
+            return 0;
+        }
+        let mut tiles: Vec<TileId> = self.resident.keys().copied().filter(|t| view.reads(*t).iter().any(|k| landed.contains(k))).collect();
+        tiles.sort_unstable_by_key(|t| t.raw());
+        // The plan cache holds origins and mesh keys of tiles that are not resident too (the plan's nodes before their tiles arrive): drop those.
+        for &k in landed {
+            self.pipe.worker().invalidate_chunk(k, |t| view.reads(t));
+        }
+        if tiles.is_empty() {
+            0
+        } else {
+            self.edit(&tiles)
+        }
     }
 
     /// Set the settle window of the refresh pre-emption in milliseconds of the injected clock (STRM-031, ADR 0072): a tile that edits keep
@@ -593,6 +624,11 @@ impl ManagedLoop {
             budget_failure,
             prefetch: self.wants.prefetch.len(),
             cancelled_prefetch: stats.cancelled_prefetch - self.last.cancelled_prefetch,
+            chunk: self
+                .chunk_view
+                .as_deref()
+                .map(|v| crate::chunkshare::ChunkShare::of(pipeline.draw.plan.nodes.iter().map(|n| n.tile), v))
+                .unwrap_or_default(),
         };
         self.last = stats;
         Ok(ManagedFrame { pipeline, counts, scheduler_ms, upload_ms })

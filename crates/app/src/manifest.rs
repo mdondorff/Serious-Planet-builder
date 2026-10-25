@@ -16,7 +16,7 @@ use planet_core::{Face, TileId};
 use planet_generators::height::Reference;
 use planet_world_def::{BodyId, NodeValue, WorldDefinition};
 
-const R: f64 = 6_371_000.0;
+const R: f64 = planet_core::EARTH_RADIUS_M;
 
 fn hex(b: [u8; 16]) -> String {
     CacheKey(b).to_hex()

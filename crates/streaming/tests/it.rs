@@ -1,13 +1,19 @@
+#[path = "chunks.rs"]
+mod chunks;
 #[path = "dispatch_throughput.rs"]
 mod dispatch_throughput;
 #[path = "floor_roots.rs"]
 mod floor_roots;
+#[path = "horizon_jobs.rs"]
+mod horizon_jobs;
 #[path = "job_log.rs"]
 mod job_log;
 #[path = "manager.rs"]
 mod manager;
 #[path = "priority.rs"]
 mod priority;
+#[path = "queue_class_move.rs"]
+mod queue_class_move;
 #[path = "refresh.rs"]
 mod refresh;
 #[path = "refresh_preempt.rs"]

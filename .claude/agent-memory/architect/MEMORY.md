@@ -1,22 +1,25 @@
 # Architect memory
 
-Refreshed 2026-10-21 at the M6 close (session `opus-planner`, worktree `.claude/worktrees/opus-planner`). Confirm against `main` and `docs/status.md` before acting. The repo records decisions (ADRs, specs, log); this file keeps only what it does not.
+Refreshed 2026-10-24 during M8 (session `opus-planner`, worktree `.claude/worktrees/opus-planner`). Confirm against `main` and `docs/status.md` before acting. The repo records decisions (ADRs, specs, log); this file keeps only what it does not. Next week's start, loop lines and the coordination protocol: `docs/briefings/week-2026-10-25.md`.
 
 ## Sessions
-- **sonnet-explorer** (worktree `sonnet-m4`): main lane; runs perf windows on the planner's go (native UI; the planner's VS Code session measures about 1.4x slower).
-- **sonnet-crusader:** support lane, parallel side work; moves no goldens without golden-review.
-- **sonnet-spikes:** spikes and diagnosis only; idle unless a spike blocks.
-- Cleared sessions wake on an incoming message; no loop line or paste needed. Check `ListAgents` for exact names.
+- **sonnet-explorer** (Desktop session, worktree `start-879e4b` since 2026-10-18; crusader `sonnet-crusader-c1a4f2`, spikes `sonnet-spikes-36fc88`): main lane; runs perf windows for its own work on the planner's go.
+- **sonnet-crusader:** support lane; runs perf windows for its scenes on the planner's go; cleared 2026-10-24, so the next briefing must be self-contained.
+- **sonnet-spikes:** scouts the next milestone's questions (owner, 2026-10-24); unreachable on 2026-10-24.
+- Claude Desktop sessions, cleared or idle, wake on an incoming message; no paste needed. Check `ListAgents` for exact names.
+- 2026-10-25: this planner session is `opus-planner [fa3069]`; a stale Remote Control row `opus-planner [d8d159]` shares the name, so coders address `[fa3069]`. After an app restart the sonnet-* Desktop sessions were missing from `ListAgents` until opened.
 
-## State (2026-10-21)
-- M6 closed by the owner (GO, `docs/milestones/M6-report.md`); M7 "ground detail and world authoring 2" queued in `docs/status.md`, plan `docs/archive/M7/m7-planning.md`.
-- Weekly quota is tight (owner reports the share; reset on Sunday): one coder lane, gate-critical work only, until the reset.
-- Hot files are capped by ADR 0075; housekeeping at every milestone close keeps them there.
+## State (2026-10-24 evening)
+- M8 natural landscape: M8-2 archived (#621); M8-3 steps 1 to 4 merged (A-net in the viewer, 8 m cells, top level 15, chunk 4.2 s indicative); M8-5 to frame data (#628), render design #629; M8-V tile-streaming curve (#619); global run 545 s for 100 steps (criterion 4 met, synthetic input).
+- Criterion 3 amended by the owner (#634). Open owner item: D3 (edits on top of or under erosion) before M8-7.
+- Look review 1 (M8-4) is next after explorer's step 5 renders.
+
+- Shared store (owner, 2026-10-25): `C:/DEV/SeriousPlanetData/global16384`; worktrees link to it; one writer at a time via writer.lock. Owner idea for later: stores behind a local or remote data server (roadmap, not M8).
 
 ## Practice
 - Owner decisions are committed in the planner session; coders merge them.
-- Mass deletions and archive steps run from the planner's session after the owner's go (classifier refusals in coder sessions, M6).
-- Repro hunts are time-boxed to about 1 h, then park on a crash report or the owner's F9.
-- Notify the owner (push) only to unblock: decisions, /bless, clearing a session.
-- M7 closed 2026-10-23 (owner GO). M8 "Natural landscape": the Outerra image is the minimum bar; stage model in ADR 0077 (proposed; blocks of a fixed grid, a coupled process is one field), decided from SPIKE-33 and SPIKE-34.
-- Coder sessions run the loop line that names only docs/status.md; the queue header links the current week's brief.
+- Estimates for the owner: PR count, calendar dates, quota share. Observed rate: two lanes about 1 % per hour, about 0.25 % per PR.
+- Escalate only exit criteria, constitution and open trade-offs (push notification); decide reversible design questions yourself and say so.
+- Check a coder's headline number against what the criterion actually measures (2026-10-24: a "0.19 m step" was measured against the pyramid, not against the base; the real entry step was metres).
+- Mass deletions and archive steps run from the planner's session after the owner's go.
+- Repro hunts are time-boxed to about 1 h.

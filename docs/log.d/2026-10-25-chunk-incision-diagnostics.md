@@ -1,0 +1,1 @@
+- 2026-10-25 **chunk-incision-diagnostics**: tools showing the chunk stage's 300 m depth is a clamp of a runaway (anchors 1.2-2.7 km under the base), capped-node counts in stills.txt; no behaviour change

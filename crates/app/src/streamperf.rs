@@ -31,7 +31,10 @@ const SMOKE_FRAMES: usize = 24;
 
 /// Whether `--scene NAME` names a streaming scene (one of the six, or `streaming` for all of them).
 pub fn is_stream_scene(name: &str) -> bool {
-    name == "streaming" || StreamScene::parse(name).is_some() || crate::editperf::is_edit_scene(name)
+    name == "streaming"
+        || StreamScene::parse(name).is_some()
+        || crate::editperf::is_edit_scene(name)
+        || crate::envelopeperf::is_envelope_scene(name)
 }
 
 /// The scenes a `--scene` value runs.
@@ -177,15 +180,17 @@ pub(crate) fn print_store_check(world: &WorldTerrain, o: &Options, out: &mut dyn
 }
 
 /// What one frame of the loop produced, besides its [`FrameRecord`].
-struct Tick {
-    record: FrameRecord,
-    settled: bool,
+pub(crate) struct Tick {
+    pub(crate) record: FrameRecord,
+    pub(crate) settled: bool,
     /// The tiles of the plan this frame drew (resident and drawn): what the lag post-pass needs besides the camera.
-    drawn: Vec<TileId>,
+    pub(crate) drawn: Vec<TileId>,
+    /// The frame's chunk stand-in share (STRM-039): all zero without a chunk view.
+    pub(crate) chunk: planet_frame::chunkshare::ChunkShare,
 }
 
 /// The rig and the pacing of one case.
-struct Driver<'a> {
+pub(crate) struct Driver<'a> {
     ctx: &'a GpuContext,
     rig: Rig,
     next_deadline: Instant,
@@ -197,10 +202,27 @@ struct Driver<'a> {
     ticks: u64,
 }
 
+impl<'a> Driver<'a> {
+    /// A driver of the debug path (no lit plan) over `rig`, paced from now.
+    pub(crate) fn plain(ctx: &'a GpuContext, rig: Rig) -> Driver<'a> {
+        Driver { ctx, rig, next_deadline: Instant::now(), lit: None, cut_field: None, ticks: 0 }
+    }
+
+    /// The chunk field the frames count their stand-in share against (STRM-039); `None` counts nothing.
+    pub(crate) fn set_chunk_view(&mut self, view: Option<Arc<dyn planet_frame::chunkshare::ChunkView>>) {
+        self.rig.managed.set_chunk_view(view);
+    }
+
+    /// Restart the pacing: the next iteration is due now.
+    pub(crate) fn restart_pacing(&mut self) {
+        self.next_deadline = Instant::now();
+    }
+}
+
 impl Driver<'_> {
     /// One iteration of the loop for `req`: never waits for a plan; waits for the GPU only at the frames-in-flight bound.
     /// The time of the iteration is `wall_ms` (the pacing sleep and the lag bookkeeping, which follow it, are not in it).
-    fn tick(&mut self, req: &TerrainRequest) -> Result<Tick, String> {
+    pub(crate) fn tick(&mut self, req: &TerrainRequest) -> Result<Tick, String> {
         let started = Instant::now();
         let ctx = self.ctx;
         let frame = self.rig.managed.begin_frame_strict(req, &mut RendererSink { ctx, renderer: &mut self.rig.renderer })?;
@@ -276,7 +298,7 @@ impl Driver<'_> {
             lit_plan_ms,
         };
         self.pace();
-        Ok(Tick { record, settled, drawn })
+        Ok(Tick { record, settled, drawn, chunk: c.chunk })
     }
 
     /// Hold the loop to the frame step of script time: the next iteration starts one step after this one was due (a late frame
@@ -1073,8 +1095,8 @@ mod tests {
         };
         let mut frames = vec![frame(), frame()];
         let lags = vec![
-            FrameLag { mean: 0.5, worst: 2, uncovered: vec![] },
-            FrameLag { mean: 0.0, worst: 0, uncovered: vec![TileId::new(planet_core::Face(0), 1, 0, 0).unwrap()] },
+            FrameLag { mean: 0.5, worst: 2, coarse_share: 0.0, uncovered: vec![] },
+            FrameLag { mean: 0.0, worst: 0, coarse_share: 1.0, uncovered: vec![TileId::new(planet_core::Face(0), 1, 0, 0).unwrap()] },
         ];
         apply_lags(&mut frames, &lags).unwrap();
         assert_eq!((frames[0].lag, frames[1].lag, frames[0].uncovered_nodes, frames[1].uncovered_nodes), (Some(0.5), Some(0.0), 0, 1));

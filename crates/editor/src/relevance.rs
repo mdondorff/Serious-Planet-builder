@@ -106,7 +106,7 @@ pub fn in_view(view: &ViewState, dir: Vec3, reach_m: f64, margin_m: f64) -> bool
     let aspect = view.viewport.width_px / view.viewport.height_px;
     let half_diagonal = libm::atan(libm::tan(0.5 * view.camera.fov_y_rad) * libm::sqrt(1.0 + aspect * aspect));
     let forward = view.camera.forward.normalized();
-    let angle = libm::atan2(forward.cross(to).length(), forward.dot(to));
+    let angle = forward.angle_to(to);
     angle - libm::asin(rho / d) <= half_diagonal
 }
 

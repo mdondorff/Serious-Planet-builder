@@ -61,7 +61,7 @@ pub struct PreviewList {
 
 /// The unit direction `t` (0 to 1) of the way from `a` to `b` along the great circle.
 fn slerp(a: Vec3, b: Vec3, t: f64) -> Vec3 {
-    let omega = libm::atan2(a.cross(b).length(), a.dot(b));
+    let omega = a.angle_to(b);
     if omega < 1e-12 {
         return a;
     }
@@ -90,7 +90,7 @@ pub fn brush_chain(stroke: &Stroke, sign: i8, planet_radius_m: f64) -> Vec<Previ
     let points = &stroke.points;
     let Some(first) = points.first() else { return Vec::new() };
     let (radius, strength) = (stroke.radius_m, stroke.strength_m);
-    let lengths: Vec<f64> = points.windows(2).map(|w| planet_radius_m * libm::atan2(w[0].cross(w[1]).length(), w[0].dot(w[1]))).collect();
+    let lengths: Vec<f64> = points.windows(2).map(|w| planet_radius_m * w[0].angle_to(w[1])).collect();
     let total: f64 = lengths.iter().sum();
     let at = |d: f64| -> Vec3 {
         let mut left = d;
@@ -136,7 +136,7 @@ pub fn brush_chain(stroke: &Stroke, sign: i8, planet_radius_m: f64) -> Vec<Previ
         let sum_at = |p: Vec3| -> f64 {
             out.iter()
                 .map(|s| {
-                    let x = planet_radius_m * libm::atan2(s.dir.cross(p).length(), s.dir.dot(p)) / s.reach_m;
+                    let x = planet_radius_m * s.dir.angle_to(p) / s.reach_m;
                     if x >= 1.0 {
                         0.0
                     } else {

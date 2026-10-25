@@ -84,3 +84,19 @@ Scope: project (streaming cache, LOD, authored items; STRM-027, STRM-034)
 - SPIKE-29 assumed the post-edit plan cost was the stamp stage's bounds queries; a timer showed the selection walk re-hashing the reads of every tile it visits when the item revision moves, and a coarse tile's cover is about 20,000 summary nodes (about 10 ms each); the per-tile cost sums over threads, so wall time needs a stage timer, not a call counter.
 - An edit announced with where the items changed lets the cache keep every tile the change cannot reach (`SelectionCache::note_item_change`); the content keys stay the guarantee for anything not announced. Test the reach rule against the real tile hashes, on small bodies too: the touch test's relative margin is a millionth of `reach / R`.
 - Obsolete when the read set of a coarse tile stops listing its cover nodes one by one.
+
+## 2026-10-25 The chunk stage's 300 m depth is a clamp of a runaway: its corridor anchors lie far under the base ground
+Scope: generators::anet, app::anetworld (GEN-047, GEN-051; look review 1, `docs/milestones/M8/look-review-1-hills/`)
+- The unclamped solve of the chunk under the steepest-site channel cuts to -2659 m (16,125 of 369,664 core cells deeper than 250 m, 15,318 at the 300 m clamp); the second site cuts to -1322 m. Every cut channel is the same depth because `ANet::compute` clamps to `bound_m`, with vertical walls, which ADR 0074 caps at coarse tiles (121 to 129 of about 1750 plan nodes) and draws as spikes.
+- The corridor beds are anchored at the lower of the coupled run's height and the base; the run's heights lie 1.2 to 2.7 km under the base at those channels (anchor minus base, median -2596 m and -1221 m).
+- The coupled run compresses relief against the base: its height minus the base's at cell centres, median over river cells, is +111 m at 0 to 500 m ground, -164 m at 500 to 1000, -933 m at 1000 to 2500, -2686 m at 2500 to 5000, -4649 m over 5000. Anchors above the base are ignored (the minimum takes the base), so only the low band cuts mildly.
+- Tools: `chunk_incision_report` and `run_against_base_report` (`cargo run --release -p planet --example chunk_incision -- --store DIR --lat DEG --lon DEG | --run-vs-base`), `capped_nodes` in `stills.txt`.
+- Obsolete when the chunk stage's anchors are made consistent with the base field.
+
+## 2026-10-25 The horizon bake is cheaper than the spike measured; the shadow engine has three declared limits
+Scope: M8-5 (horizon shadows), `generators::horizon`, `coarsehorizon`, the lit shader
+- The bake costs 21 us per texel (16 azimuths, 5 km, 4 m texels, release, one thread): about 5 s on 6 threads for a 24 km2 chunk, against SPIKE-32's 0.7 s per km2 (17 s). The coarse horizon at 512 observer cells per face edge over the 2048-cell run takes 7.7 s on 8 threads.
+- Limits stated in the specs (GEN-044, GEN-045, REND-038): the tangent warp makes a texel up to 1.41 times as long along `i` as along `j` near a face edge, so the bake's distances (and the horizon angle) are off by up to that factor there; the coarse azimuths use each cell's own geographic frame, which differs from the fragment's near a pole; the shader reads 16 azimuths exactly.
+- On the look-review stills the shadow edge along canyon rims is scalloped (16 azimuths fan near an occluder); the far-field outline at sunset could not be judged on flat sites.
+- Obsolete when the bake marches in metres, the coarse map gets a pole-free frame and the azimuth count is decided from stills.
+

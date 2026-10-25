@@ -21,7 +21,7 @@ use planet_world_def::{BodyId, GenContext, WorldDefinition};
 /// Seed, grid size and radius of every manifest entry.
 pub const MANIFEST_SEED: u64 = 1;
 pub const MANIFEST_RES: u32 = 16;
-pub const MANIFEST_RADIUS_M: f64 = 6_371_000.0;
+pub const MANIFEST_RADIUS_M: f64 = planet_core::EARTH_RADIUS_M;
 
 /// Tiles in the manifest: every face at level 0, the four corner tiles of every face at level 3 (cube edges and
 /// corners), and deep tiles up to level 28.

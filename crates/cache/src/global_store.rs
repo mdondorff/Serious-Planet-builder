@@ -21,6 +21,8 @@ use std::time::Instant;
 use planet_core::cube::TangentWarp;
 use planet_core::hash::HASH_VERSION;
 use planet_core::{Face, FaceMapping, TileId};
+use planet_generators::coarsehorizon::{CoarseParams, COARSE_HORIZON_VERSION, MAX_AZIMUTHS};
+use planet_generators::coupled::{CoupledParams, CoupledState, COUPLED_VERSION, NONE as COUPLED_NONE};
 use planet_generators::global::{
     bake_block, bake_blocks_with, check_tiled, BakeError, GlobalCoarseGenerator, GlobalSample, LatticeSource, ReadError, GLOBAL_VERSION,
     IMPLEMENTATION_ID, MAX_BATCH_BYTES, MAX_BLOCK_CELLS, MAX_TILED_RES,
@@ -40,8 +42,8 @@ use planet_world_def::{
 
 use crate::codec::shuffle;
 use crate::key::{
-    body_params_hash128, cache_key, read_entry, CacheKey, KeyInputs, Kind, ReadEntry, PARAM_GRID_RES, PARAM_OCEAN_AREA_FRACTION,
-    PARAM_RESOLUTION,
+    body_params_hash128, cache_key, read_entry, CacheKey, KeyInputs, Kind, ReadEntry, PARAM_COUPLED, PARAM_GRID_RES, PARAM_HORIZON,
+    PARAM_OCEAN_AREA_FRACTION, PARAM_RESOLUTION,
 };
 use crate::pack::{PackError, PackWriter, Record, StoreParams, TileStore};
 use crate::stage_key::{stage_key, StageKeyContext};
@@ -71,6 +73,19 @@ pub const KIND_GLOBAL_WATER_SUMMARY: u8 = Kind::GlobalWaterSummary as u8;
 /// Version of the summary payload layout. History: 1 = one flag byte per cell, then the band elevations as a byte-shuffled `f32`
 /// plane, LZ4 block. 2 (ADR 0071) = the same, then the lowest wet floor of each cell as a low-byte plane and a high-byte plane.
 pub const SUMMARY_CODEC_VERSION: u8 = 2;
+
+/// The kind byte of a block of the coupled-run channel (STRM-043).
+pub const KIND_GLOBAL_COUPLED: u8 = Kind::GlobalCoupled as u8;
+
+/// Version of the coupled block payload layout. History: 1 = height, area (m2) and receiver (cell index) as three byte-shuffled 32-bit
+/// planes of `B x B` cells, row-major, as an LZ4 block.
+pub const COUPLED_CODEC_VERSION: u8 = 1;
+
+/// The implementation id of the coupled channel's keys.
+pub const COUPLED_IMPLEMENTATION_ID: &str = "coupled-v1";
+
+/// The implementation id of the coarse-horizon channel's keys.
+pub const HORIZON_IMPLEMENTATION_ID: &str = "horizon-v1";
 
 const HEADER_LEN: usize = 9;
 /// `codec version (u8) | resolution (u32 LE) | cells per block edge (u32 LE) | raw length (u32 LE)`.
@@ -107,6 +122,12 @@ pub enum BlockCodecError {
     OceanVersion(u8),
     /// A floor block of another codec version.
     FloorVersion(u8),
+    /// A coupled block of another codec version.
+    CoupledVersion(u8),
+    /// A coarse-horizon block of another codec version.
+    HorizonVersion(u8),
+    /// A coarse-horizon block whose azimuth count is zero or above the limit.
+    HorizonAzimuths(u32),
     /// A water summary of another codec version.
     SummaryVersion(u8),
     /// A water summary that makes no grid, or whose cells are not what this version writes.
@@ -129,6 +150,11 @@ impl std::fmt::Display for BlockCodecError {
             BlockCodecError::OceanBits => write!(f, "the ocean block has a bit set beyond its last vertex"),
             BlockCodecError::OceanVersion(v) => write!(f, "ocean block codec version {v}, this build reads {OCEAN_CODEC_VERSION}"),
             BlockCodecError::FloorVersion(v) => write!(f, "floor block codec version {v}, this build reads {FLOOR_CODEC_VERSION}"),
+            BlockCodecError::CoupledVersion(v) => write!(f, "coupled block codec version {v}, this build reads {COUPLED_CODEC_VERSION}"),
+            BlockCodecError::HorizonVersion(v) => {
+                write!(f, "coarse horizon block codec version {v}, this build reads {}", crate::horizon_store::HORIZON_CODEC_VERSION)
+            }
+            BlockCodecError::HorizonAzimuths(a) => write!(f, "{a} azimuths in a coarse horizon block: 1 to {MAX_AZIMUTHS}"),
             BlockCodecError::SummaryVersion(v) => write!(f, "water summary codec version {v}, this build reads {SUMMARY_CODEC_VERSION}"),
             BlockCodecError::Summary(why) => write!(f, "the water summary is not valid: {why}"),
         }
@@ -388,6 +414,277 @@ impl From<SummaryError> for BlockCodecError {
     }
 }
 
+/// One per-tile channel of the global bake (R5, the architecture review): the kind byte, the key, the payload codec and the label its
+/// errors use. A channel added later is one `impl`; the record, the stored read and the "is it already stored" test below are generic over it.
+pub trait TileChannel {
+    /// The kind byte of the channel's records.
+    const KIND: u8;
+    /// What an error calls a block of the channel.
+    const LABEL: &'static str;
+    /// The decoded block.
+    type Payload;
+    /// The content key of the block of `tile` under `world`.
+    fn key(world: &GlobalWorld, tile: TileId, cells: u32) -> CacheKey;
+    /// The payload bytes of a block of `cells` per edge.
+    fn encode(cells: u32, payload: &Self::Payload) -> Result<Vec<u8>, BlockCodecError>;
+    /// The block and the cells per edge its payload says.
+    fn decode(bytes: &[u8]) -> Result<(u32, Self::Payload), BlockCodecError>;
+}
+
+/// The bake's samples: elevation, climate and continent per vertex.
+pub struct BlockChannel;
+/// The ocean-connectivity bits (ADR 0041).
+pub struct OceanChannel;
+/// The wet-floor codes (ADR 0071).
+pub struct FloorChannel;
+
+impl TileChannel for BlockChannel {
+    const KIND: u8 = KIND_GLOBAL_BLOCK;
+    const LABEL: &'static str = "block";
+    type Payload = Vec<GlobalSample>;
+    fn key(world: &GlobalWorld, tile: TileId, cells: u32) -> CacheKey {
+        world.block_key(tile, cells)
+    }
+    fn encode(cells: u32, payload: &Self::Payload) -> Result<Vec<u8>, BlockCodecError> {
+        encode_block(cells, payload)
+    }
+    fn decode(bytes: &[u8]) -> Result<(u32, Self::Payload), BlockCodecError> {
+        decode_block(bytes)
+    }
+}
+
+impl TileChannel for OceanChannel {
+    const KIND: u8 = KIND_GLOBAL_OCEAN;
+    const LABEL: &'static str = "ocean block";
+    type Payload = OceanBits;
+    fn key(world: &GlobalWorld, tile: TileId, cells: u32) -> CacheKey {
+        world.ocean_key(tile, cells)
+    }
+    fn encode(_cells: u32, payload: &Self::Payload) -> Result<Vec<u8>, BlockCodecError> {
+        encode_ocean_block(payload)
+    }
+    fn decode(bytes: &[u8]) -> Result<(u32, Self::Payload), BlockCodecError> {
+        decode_ocean_block(bytes).map(|b| (b.cells, b))
+    }
+}
+
+impl TileChannel for FloorChannel {
+    const KIND: u8 = KIND_GLOBAL_WET_FLOOR;
+    const LABEL: &'static str = "wet-floor block";
+    type Payload = Vec<u16>;
+    fn key(world: &GlobalWorld, tile: TileId, cells: u32) -> CacheKey {
+        world.floor_key(tile, cells)
+    }
+    fn encode(cells: u32, payload: &Self::Payload) -> Result<Vec<u8>, BlockCodecError> {
+        encode_floor_block(cells, payload)
+    }
+    fn decode(bytes: &[u8]) -> Result<(u32, Self::Payload), BlockCodecError> {
+        decode_floor_block(bytes)
+    }
+}
+
+/// The record of a block of channel `C`: refused when `cells` is not the canonical layout of the tile's grid (ADR 0027 point 1).
+pub fn channel_record<C: TileChannel>(
+    world: &GlobalWorld,
+    tile: TileId,
+    cells: u32,
+    payload: &C::Payload,
+) -> Result<Record, BlockCodecError> {
+    let res = grid_res(tile, cells).ok_or(BlockCodecError::Grid { level: tile.level(), cells })?;
+    if world.layout(res).ok() != Some((tile.level(), cells)) {
+        return Err(BlockCodecError::Grid { level: tile.level(), cells });
+    }
+    Ok(Record {
+        key: C::key(world, tile, cells),
+        kind: C::KIND,
+        tile,
+        generator_version: GLOBAL_VERSION,
+        hash_version: HASH_VERSION,
+        node_set_id: world.node_set_id,
+        payload: C::encode(cells, payload)?,
+    })
+}
+
+/// Whether `store` holds the block of `tile` under the current key, decoding with `cells` per edge: a payload of another `B` under the key
+/// is a wrongly written record and counts as absent.
+pub fn has_channel<C: TileChannel>(store: &TileStore, world: &GlobalWorld, tile: TileId, cells: u32) -> bool {
+    matches!(store.get(C::KIND, tile, C::key(world, tile, cells)), Ok(Some(r)) if matches!(C::decode(&r.payload), Ok((c, _)) if c == cells))
+}
+
+/// The stored block of `tile` decoded: an error naming the block when it is missing, damaged or of other cells.
+pub fn stored_channel<C: TileChannel>(
+    store: &TileStore,
+    world: &GlobalWorld,
+    tile: TileId,
+    cells: u32,
+) -> Result<C::Payload, GlobalBuildError> {
+    let key = C::key(world, tile, cells);
+    let what = |why: String| GlobalBuildError::MissingBlock(format!("{} {:#018x} key {key}: {why}", C::LABEL, tile.raw()));
+    let rec =
+        store.get(C::KIND, tile, key).map_err(|e| what(e.to_string()))?.ok_or_else(|| what("not stored under the current key".into()))?;
+    let (c, payload) = C::decode(&rec.payload).map_err(|e| what(e.to_string()))?;
+    if c != cells {
+        return Err(what(format!("its payload has {c} cells per edge, the layout says {cells}")));
+    }
+    Ok(payload)
+}
+
+/// The run a coupled channel stores (STRM-043): everything its result depends on besides the definition (the parameters, and a hash of the
+/// inputs). All of it is in every block's key.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CoupledSpec {
+    /// Cells per face edge of the run's lattice.
+    pub n: u32,
+    pub steps: u32,
+    /// Cells per face edge of the bake the run starts from.
+    pub bake_res: u32,
+    pub params: CoupledParams,
+    /// [`planet_generators::coupledinput::declared_inputs_hash`]: the declared identity of the run's inputs.
+    pub inputs: u64,
+}
+
+impl Default for CoupledSpec {
+    fn default() -> Self {
+        CoupledSpec { n: 2048, steps: 80, bake_res: 2048, params: CoupledParams::default(), inputs: 0 }
+    }
+}
+
+impl CoupledSpec {
+    /// The canonical bytes of the spec: the integers, then the bits of the parameters, little-endian.
+    fn bytes(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(64);
+        for v in [self.n, self.steps, self.bake_res] {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        for v in [self.params.area_exp, self.params.dt_years, self.params.jitter, self.params.min_height_m] {
+            out.extend_from_slice(&v.to_bits().to_le_bytes());
+        }
+        out.extend_from_slice(&self.params.seed.to_le_bytes());
+        out.extend_from_slice(&self.inputs.to_le_bytes());
+        out.extend_from_slice(&COUPLED_VERSION.to_le_bytes());
+        out
+    }
+}
+
+/// The coarse horizon a channel stores (STRM-045): the observer lattice and the march. All of it is in every block's key.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HorizonSpec {
+    /// Observer cells per face edge (a divisor of the coupled run's lattice).
+    pub m: u32,
+    pub params: CoarseParams,
+}
+
+impl Default for HorizonSpec {
+    fn default() -> Self {
+        HorizonSpec { m: 512, params: CoarseParams::for_lattice(2048, planet_core::EARTH_RADIUS_M) }
+    }
+}
+
+impl HorizonSpec {
+    /// The canonical bytes of the spec: the integers, then the bits of the parameters, little-endian, then the version of the march.
+    fn bytes(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(48);
+        out.extend_from_slice(&self.m.to_le_bytes());
+        out.extend_from_slice(&self.params.azimuths.to_le_bytes());
+        for v in [self.params.range_m, self.params.step_m, self.params.radius_m] {
+            out.extend_from_slice(&v.to_bits().to_le_bytes());
+        }
+        out.extend_from_slice(&COARSE_HORIZON_VERSION.to_le_bytes());
+        out
+    }
+}
+
+/// A block of the coupled run: `cells x cells` values of each field, row-major (x fastest).
+#[derive(Clone, Debug, PartialEq)]
+pub struct CoupledBlock {
+    pub cells: u32,
+    pub z: Vec<f32>,
+    pub area_m2: Vec<f32>,
+    pub receiver: Vec<u32>,
+}
+
+fn coupled_raw_len(cells: u32) -> u64 {
+    12 * u64::from(cells) * u64::from(cells)
+}
+
+/// Encode a coupled block: `codec version (u8) | B (u32 LE) | raw length (u32 LE) | LZ4 block` of the three byte-shuffled planes.
+pub fn encode_coupled_block(block: &CoupledBlock) -> Result<Vec<u8>, BlockCodecError> {
+    if !valid_cells(block.cells) {
+        return Err(BlockCodecError::Cells(block.cells));
+    }
+    let n = u64::from(block.cells) * u64::from(block.cells);
+    for len in [block.z.len(), block.area_m2.len(), block.receiver.len()] {
+        if len as u64 != n {
+            return Err(BlockCodecError::Samples { got: len, expected: n });
+        }
+    }
+    let mut raw = shuffle(&block.z);
+    raw.extend(shuffle(&block.area_m2));
+    raw.extend(shuffle(&block.receiver.iter().map(|r| f32::from_bits(*r)).collect::<Vec<f32>>()));
+    let mut out = Vec::with_capacity(HEADER_LEN + raw.len() / 2);
+    out.push(COUPLED_CODEC_VERSION);
+    out.extend_from_slice(&block.cells.to_le_bytes());
+    out.extend_from_slice(&u32::try_from(raw.len()).expect("at most 12 * 1024^2 bytes").to_le_bytes());
+    out.extend_from_slice(&lz4_flex::compress(&raw));
+    Ok(out)
+}
+
+/// Decode a coupled block payload. It refuses what [`encode_coupled_block`] would not write, without allocating more than `B` allows.
+pub fn decode_coupled_block(bytes: &[u8]) -> Result<CoupledBlock, BlockCodecError> {
+    if bytes.len() < HEADER_LEN {
+        return Err(BlockCodecError::Short);
+    }
+    if bytes[0] != COUPLED_CODEC_VERSION {
+        return Err(BlockCodecError::CoupledVersion(bytes[0]));
+    }
+    let cells = u32::from_le_bytes(bytes[1..5].try_into().expect("4 bytes"));
+    if !valid_cells(cells) {
+        return Err(BlockCodecError::Cells(cells));
+    }
+    let claimed = u32::from_le_bytes(bytes[5..9].try_into().expect("4 bytes"));
+    let expected = coupled_raw_len(cells);
+    if u64::from(claimed) != expected {
+        return Err(BlockCodecError::RawLength { claimed, expected });
+    }
+    let raw = lz4_flex::decompress(&bytes[HEADER_LEN..], claimed as usize).map_err(|e| BlockCodecError::Lz4(e.to_string()))?;
+    if raw.len() as u64 != expected {
+        return Err(BlockCodecError::Truncated { got: raw.len(), expected });
+    }
+    let plane = raw.len() / 3;
+    Ok(CoupledBlock {
+        cells,
+        z: crate::codec::unshuffle(&raw[..plane]),
+        area_m2: crate::codec::unshuffle(&raw[plane..2 * plane]),
+        receiver: crate::codec::unshuffle(&raw[2 * plane..]).into_iter().map(f32::to_bits).collect(),
+    })
+}
+
+/// The coupled-run channel (STRM-043).
+pub struct CoupledChannel;
+
+impl TileChannel for CoupledChannel {
+    const KIND: u8 = KIND_GLOBAL_COUPLED;
+    const LABEL: &'static str = "coupled block";
+    type Payload = CoupledBlock;
+    fn key(world: &GlobalWorld, tile: TileId, cells: u32) -> CacheKey {
+        world.coupled_key(tile, cells)
+    }
+    fn encode(_cells: u32, payload: &Self::Payload) -> Result<Vec<u8>, BlockCodecError> {
+        encode_coupled_block(payload)
+    }
+    fn decode(bytes: &[u8]) -> Result<(u32, Self::Payload), BlockCodecError> {
+        decode_coupled_block(bytes).map(|b| (b.cells, b))
+    }
+}
+
+/// The fields of a stored coupled run, reassembled over the whole lattice.
+pub struct StoredCoupled {
+    pub n: u32,
+    pub z: Vec<f32>,
+    pub area_m2: Vec<f32>,
+    pub receiver: Vec<u32>,
+}
+
 /// The global-coarse bake of one body of a definition as the store sees it: its seed (through the recording context), radius,
 /// the entries of its read set and what identifies its store and its blocks.
 pub struct GlobalWorld {
@@ -402,6 +699,10 @@ pub struct GlobalWorld {
     /// The sea of the body (ADR 0041): its level and liquid for the water field, and the area threshold of the ocean channel,
     /// which is part of every ocean block's key (not of the bake's, which it does not change).
     sea: SeaParams,
+    /// The coupled run its channel stores (STRM-043).
+    coupled: CoupledSpec,
+    /// The coarse horizon its channel stores (STRM-045): observer lattice and march, over the coupled run above.
+    horizon: HorizonSpec,
 }
 
 impl GlobalWorld {
@@ -430,6 +731,99 @@ impl GlobalWorld {
         let level = (res / cells).trailing_zeros() as u8;
         check_tiled(level, cells)?;
         Ok((level, cells))
+    }
+
+    /// The coupled run this world's channel stores.
+    pub fn with_coupled(mut self, spec: CoupledSpec) -> GlobalWorld {
+        self.coupled = spec;
+        self
+    }
+
+    /// The coupled run this world's channel stores.
+    pub fn coupled_spec(&self) -> CoupledSpec {
+        self.coupled
+    }
+
+    /// The inputs of the content key of one coupled block: kind 7, the tile, the bake's stage key at the run's base resolution as the
+    /// source, `B` under tag 1, the lattice size under tag 4 and the whole run under tag 10.
+    pub fn coupled_key_inputs(&self, tile: TileId, cells: u32) -> KeyInputs {
+        let mut output_params = BTreeMap::new();
+        output_params.insert(PARAM_RESOLUTION, cells.to_le_bytes().to_vec());
+        output_params.insert(PARAM_GRID_RES, self.coupled.n.to_le_bytes().to_vec());
+        output_params.insert(PARAM_COUPLED, self.coupled.bytes());
+        KeyInputs {
+            kind: Kind::GlobalCoupled,
+            hash_version: HASH_VERSION,
+            generator_version: GLOBAL_VERSION,
+            implementation_id: COUPLED_IMPLEMENTATION_ID.to_string(),
+            face_mapping_id: TangentWarp.id().to_string(),
+            body: self.body,
+            body_params: self.body_params(),
+            tile,
+            source: Some(self.stage_key(self.coupled.bake_res)),
+            output_params,
+            reads: Vec::new(),
+        }
+    }
+
+    pub fn coupled_key(&self, tile: TileId, cells: u32) -> CacheKey {
+        cache_key(&self.coupled_key_inputs(tile, cells))
+    }
+
+    /// The coarse horizon this world's channel stores.
+    pub fn with_horizon(mut self, spec: HorizonSpec) -> GlobalWorld {
+        self.horizon = spec;
+        self
+    }
+
+    pub fn horizon_spec(&self) -> HorizonSpec {
+        self.horizon
+    }
+
+    /// The inputs of the content key of one coarse-horizon block: kind 9, the tile of the observer lattice's layout, the bake's stage key at the
+    /// run's base resolution as the source, `B` under tag 1, the observer lattice size under tag 4, the whole coupled run under tag 10 (the
+    /// horizon is a function of its heights) and the march under tag 12.
+    pub fn horizon_key_inputs(&self, tile: TileId, cells: u32) -> KeyInputs {
+        let mut inputs = self.coupled_key_inputs(tile, cells);
+        inputs.kind = Kind::GlobalHorizon;
+        inputs.implementation_id = HORIZON_IMPLEMENTATION_ID.to_string();
+        inputs.output_params.insert(PARAM_GRID_RES, self.horizon.m.to_le_bytes().to_vec());
+        inputs.output_params.insert(PARAM_HORIZON, self.horizon.bytes());
+        inputs
+    }
+
+    pub fn horizon_key(&self, tile: TileId, cells: u32) -> CacheKey {
+        cache_key(&self.horizon_key_inputs(tile, cells))
+    }
+
+    /// The records of a finished run: one per tile of the canonical layout of the run's lattice. The state must be the spec's lattice.
+    pub fn coupled_records(&self, state: &CoupledState) -> Result<Vec<Record>, BlockCodecError> {
+        let n = self.coupled.n as usize;
+        let (level, cells) = self.layout(self.coupled.n).map_err(|_| BlockCodecError::Grid { level: 0, cells: self.coupled.n })?;
+        for len in [state.z.len(), state.area_m2.len(), state.receiver.len()] {
+            if len != 6 * n * n {
+                return Err(BlockCodecError::Samples { got: len, expected: 6 * (n as u64) * (n as u64) });
+            }
+        }
+        let per_edge = 1u32 << level;
+        let b = cells as usize;
+        let mut out = Vec::new();
+        for face in 0..6u8 {
+            for ty in 0..per_edge {
+                for tx in 0..per_edge {
+                    let tile = TileId::new(Face(face), level, tx, ty).expect("a tile of the layout");
+                    let mut block = CoupledBlock { cells, z: Vec::new(), area_m2: Vec::new(), receiver: Vec::new() };
+                    for j in 0..b {
+                        let row = usize::from(face) * n * n + (ty as usize * b + j) * n + tx as usize * b;
+                        block.z.extend_from_slice(&state.z[row..row + b]);
+                        block.area_m2.extend_from_slice(&state.area_m2[row..row + b]);
+                        block.receiver.extend_from_slice(&state.receiver[row..row + b]);
+                    }
+                    out.push(channel_record::<CoupledChannel>(self, tile, cells, &block)?);
+                }
+            }
+        }
+        Ok(out)
     }
 
     /// Build the world of body 0. The seed is read through a fresh [`GenContext`] (CON-06); the radius is part of the body
@@ -478,7 +872,18 @@ impl GlobalWorld {
                 sea.liquid.0
             )));
         }
-        Ok(GlobalWorld { seed: field.seed(), body, radius_m, reads, node_set_id, graph, block_limit: MAX_BLOCK_CELLS, sea })
+        Ok(GlobalWorld {
+            seed: field.seed(),
+            body,
+            radius_m,
+            reads,
+            node_set_id,
+            graph,
+            block_limit: MAX_BLOCK_CELLS,
+            sea,
+            coupled: CoupledSpec::default(),
+            horizon: HorizonSpec { params: CoarseParams::for_lattice(2048, radius_m), ..HorizonSpec::default() },
+        })
     }
 
     /// The sea of this body as the definition gives it (Earth defaults for what it does not set).
@@ -594,19 +999,7 @@ impl GlobalWorld {
 
     /// The record of a block of floor codes.
     pub fn floor_record(&self, tile: TileId, cells: u32, codes: &[u16]) -> Result<Record, BlockCodecError> {
-        let res = grid_res(tile, cells).ok_or(BlockCodecError::Grid { level: tile.level(), cells })?;
-        if self.layout(res).ok() != Some((tile.level(), cells)) {
-            return Err(BlockCodecError::Grid { level: tile.level(), cells });
-        }
-        Ok(Record {
-            key: self.floor_key(tile, cells),
-            kind: KIND_GLOBAL_WET_FLOOR,
-            tile,
-            generator_version: GLOBAL_VERSION,
-            hash_version: HASH_VERSION,
-            node_set_id: self.node_set_id,
-            payload: encode_floor_block(cells, codes)?,
-        })
+        channel_record::<FloorChannel>(self, tile, cells, &codes.to_vec())
     }
 
     /// The tile the summary record is filed under (the record covers the whole bake): face 0 at level 0.
@@ -663,20 +1056,7 @@ impl GlobalWorld {
 
     /// The record of a block of ocean bits.
     pub fn ocean_record(&self, tile: TileId, bits: &OceanBits) -> Result<Record, BlockCodecError> {
-        let cells = bits.cells;
-        let res = grid_res(tile, cells).ok_or(BlockCodecError::Grid { level: tile.level(), cells })?;
-        if self.layout(res).ok() != Some((tile.level(), cells)) {
-            return Err(BlockCodecError::Grid { level: tile.level(), cells });
-        }
-        Ok(Record {
-            key: self.ocean_key(tile, cells),
-            kind: KIND_GLOBAL_OCEAN,
-            tile,
-            generator_version: GLOBAL_VERSION,
-            hash_version: HASH_VERSION,
-            node_set_id: self.node_set_id,
-            payload: encode_ocean_block(bits)?,
-        })
+        channel_record::<OceanChannel>(self, tile, bits.cells, bits)
     }
 
     /// Whether a stored global block (of the bake or of its ocean channel) is still current for this world: its generator version,
@@ -691,19 +1071,7 @@ impl GlobalWorld {
 
     /// The record of a block of samples.
     pub fn block_record(&self, tile: TileId, cells: u32, samples: &[GlobalSample]) -> Result<Record, BlockCodecError> {
-        let res = grid_res(tile, cells).ok_or(BlockCodecError::Grid { level: tile.level(), cells })?;
-        if self.layout(res).ok() != Some((tile.level(), cells)) {
-            return Err(BlockCodecError::Grid { level: tile.level(), cells });
-        }
-        Ok(Record {
-            key: self.block_key(tile, cells),
-            kind: KIND_GLOBAL_BLOCK,
-            tile,
-            generator_version: GLOBAL_VERSION,
-            hash_version: HASH_VERSION,
-            node_set_id: self.node_set_id,
-            payload: encode_block(cells, samples)?,
-        })
+        channel_record::<BlockChannel>(self, tile, cells, &samples.to_vec())
     }
 }
 
@@ -1095,17 +1463,7 @@ fn tile_at(level: u8, index: usize) -> TileId {
 
 /// The stored sample block of `tile`, decoded: an error naming the block when it is missing, damaged or of other cells.
 fn stored_block(store: &TileStore, world: &GlobalWorld, tile: TileId, cells: u32) -> Result<Vec<GlobalSample>, GlobalBuildError> {
-    let key = world.block_key(tile, cells);
-    let what = |why: String| GlobalBuildError::MissingBlock(format!("block {:#018x} key {key}: {why}", tile.raw()));
-    let rec = store
-        .get(KIND_GLOBAL_BLOCK, tile, key)
-        .map_err(|e| what(e.to_string()))?
-        .ok_or_else(|| what("not stored under the current key".into()))?;
-    let (c, samples) = decode_block(&rec.payload).map_err(|e| what(e.to_string()))?;
-    if c != cells {
-        return Err(what(format!("its payload has {c} cells per edge, the layout says {cells}")));
-    }
-    Ok(samples)
+    stored_channel::<BlockChannel>(store, world, tile, cells)
 }
 
 /// The reports of `tiles` (stored blocks) for the ocean merger, a batch at a time on up to `threads` threads: at most
@@ -1169,8 +1527,8 @@ pub fn build_global(
     let existing = TileStore::open(dir, world.params())?;
     // A block is kept only if it decodes with the cells the key says: a payload of another `B` under this key is a
     // wrongly written record and is written again.
-    let have = |tile: TileId| matches!(existing.get(KIND_GLOBAL_BLOCK, tile, world.block_key(tile, cells)), Ok(Some(r)) if matches!(decode_block(&r.payload), Ok((c, _)) if c == cells));
-    let have_ocean = |tile: TileId| matches!(existing.get(KIND_GLOBAL_OCEAN, tile, world.ocean_key(tile, cells)), Ok(Some(r)) if matches!(decode_ocean_block(&r.payload), Ok(b) if b.cells == cells));
+    let have = |tile: TileId| has_channel::<BlockChannel>(&existing, world, tile, cells);
+    let have_ocean = |tile: TileId| has_channel::<OceanChannel>(&existing, world, tile, cells);
     let total = 6usize << (2 * u32::from(level));
     let need_ocean = (0..total).any(|i| !have_ocean(tile_at(level, i)));
     let mut merger = if need_ocean { Some(OceanMerger::new(res, world.sea.min_area_fraction)?) } else { None };
@@ -1284,32 +1642,12 @@ pub fn build_global(
 
 /// The stored ocean block of `tile`, decoded: an error naming the block when it is missing, damaged or of other cells.
 fn stored_ocean(store: &TileStore, world: &GlobalWorld, tile: TileId, cells: u32) -> Result<OceanBits, GlobalBuildError> {
-    let key = world.ocean_key(tile, cells);
-    let what = |why: String| GlobalBuildError::MissingBlock(format!("ocean block {:#018x} key {key}: {why}", tile.raw()));
-    let rec = store
-        .get(KIND_GLOBAL_OCEAN, tile, key)
-        .map_err(|e| what(e.to_string()))?
-        .ok_or_else(|| what("not stored under the current key".into()))?;
-    let bits = decode_ocean_block(&rec.payload).map_err(|e| what(e.to_string()))?;
-    if bits.cells != cells {
-        return Err(what(format!("its payload has {} cells per edge, the layout says {cells}", bits.cells)));
-    }
-    Ok(bits)
+    stored_channel::<OceanChannel>(store, world, tile, cells)
 }
 
 /// The stored wet-floor block of `tile`, decoded: an error naming the block when it is missing, damaged or of other cells.
 fn stored_floor_codes(store: &TileStore, world: &GlobalWorld, tile: TileId, cells: u32) -> Result<Vec<u16>, GlobalBuildError> {
-    let key = world.floor_key(tile, cells);
-    let what = |why: String| GlobalBuildError::MissingBlock(format!("wet-floor block {:#018x} key {key}: {why}", tile.raw()));
-    let rec = store
-        .get(KIND_GLOBAL_WET_FLOOR, tile, key)
-        .map_err(|e| what(e.to_string()))?
-        .ok_or_else(|| what("not stored under the current key".into()))?;
-    let (c, codes) = decode_floor_block(&rec.payload).map_err(|e| what(e.to_string()))?;
-    if c != cells {
-        return Err(what(format!("its payload has {c} cells per edge, the layout says {cells}")));
-    }
-    Ok(codes)
+    stored_channel::<FloorChannel>(store, world, tile, cells)
 }
 
 /// The codes of the stored block `tile` (the ocean vertices 0, the others their elevation's code), read from the stored sample and
@@ -2056,4 +2394,43 @@ pub fn verify_global(store: &TileStore, world: &GlobalWorld, sample: usize) -> V
         }
     }
     report
+}
+
+/// Write the records of a finished coupled run (STRM-043) and flush the store.
+pub fn store_coupled(dir: &Path, world: &GlobalWorld, state: &CoupledState, max_pack_bytes: u64) -> Result<usize, GlobalBuildError> {
+    let records = world.coupled_records(state)?;
+    let mut writer = PackWriter::open(dir, world.params(), max_pack_bytes)?;
+    for r in &records {
+        writer.append(r)?;
+    }
+    writer.finish()?;
+    Ok(records.len())
+}
+
+/// The stored coupled run reassembled over its lattice: an error naming the block when one is missing, damaged or of another `B`.
+pub fn load_coupled(store: &TileStore, world: &GlobalWorld) -> Result<StoredCoupled, GlobalBuildError> {
+    let n = world.coupled.n as usize;
+    let (level, cells) = world.layout(world.coupled.n)?;
+    let (per_edge, b) = (1u32 << level, cells as usize);
+    let mut out = StoredCoupled {
+        n: world.coupled.n,
+        z: vec![0.0; 6 * n * n],
+        area_m2: vec![0.0; 6 * n * n],
+        receiver: vec![COUPLED_NONE; 6 * n * n],
+    };
+    for face in 0..6u8 {
+        for ty in 0..per_edge {
+            for tx in 0..per_edge {
+                let tile = TileId::new(Face(face), level, tx, ty).expect("a tile of the layout");
+                let block = stored_channel::<CoupledChannel>(store, world, tile, cells)?;
+                for j in 0..b {
+                    let row = usize::from(face) * n * n + (ty as usize * b + j) * n + tx as usize * b;
+                    out.z[row..row + b].copy_from_slice(&block.z[j * b..(j + 1) * b]);
+                    out.area_m2[row..row + b].copy_from_slice(&block.area_m2[j * b..(j + 1) * b]);
+                    out.receiver[row..row + b].copy_from_slice(&block.receiver[j * b..(j + 1) * b]);
+                }
+            }
+        }
+    }
+    Ok(out)
 }

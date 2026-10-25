@@ -1,21 +1,23 @@
-//! `render`: executes a FramePlan and makes no decisions (CON-03). M0 holds only the headless GPU
-//! context and the "hello triangle" used to prove the golden harness on software adapters.
+//! `render`: executes a FramePlan and makes no decisions (CON-03). It holds the GPU context and the passes
+//! that draw the plan: compact terrain, atmosphere, lit post, water, the window and the egui layer, with the render graph and the GPU timing.
 
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
+#[macro_use]
+mod horizon_wgsl;
 pub mod atmosphere;
 pub mod compact;
 pub mod exec;
 pub mod gate;
 pub mod gpu_timing;
 pub mod graph;
+pub mod horizon;
+pub use horizon::{probe_horizon, HorizonAnswer, HorizonQuery};
 pub mod lit;
 #[cfg(feature = "reference-renderer")]
 pub mod reference;
 pub(crate) mod refs;
-#[cfg(feature = "spike07")]
-pub mod spike_detail;
 pub mod terrain;
 pub mod ui;
 pub mod water;

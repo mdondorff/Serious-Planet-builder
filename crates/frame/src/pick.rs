@@ -181,7 +181,7 @@ pub struct Footprint {
 /// The great-circle distance between two unit directions, metres on a sphere of `radius_m`. `atan2` of the cross and dot products
 /// keeps the precision at the small angles of a footprint (an `acos` of the dot product loses it below about 1e-4 rad).
 pub fn surface_distance_m(a: Vec3, b: Vec3, radius_m: f64) -> f64 {
-    radius_m * libm::atan2(a.cross(b).length(), a.dot(b))
+    radius_m * a.angle_to(b)
 }
 
 /// The item under a surface hit: of the footprints that contain it, the one whose centre is nearest in units of its own radius (so a

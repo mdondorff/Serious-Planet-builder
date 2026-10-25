@@ -1014,3 +1014,73 @@ Source: opus-planner (2026-10-22, SPIKE-29: the owner asked how far authored edi
 #### Scenario: The counting field
 - **WHEN** a field is wrapped by the scene's counting field and asked for heights, bounds and hashes
 - **THEN** the values are those of the field and the counts and times of each kind of call are reported
+
+### Requirement: TEST-048 Pose stills
+`test-render --scene capture-stills --poses FILE --out-dir DIR` (a world source as in TEST-027; `--size WxH` default 2560x1440; `--views A,B` selects poses by name) SHALL draw each pose on the lit path over a world with its A-net chunk stage on and write `DIR/<pose>.png` and `DIR/stills.txt` (pose, size, eye latitude, longitude and height, heading, pitch, sun hours, chunks read, seconds waited). A bad file or call SHALL be refused before it draws. The tool is not a measurement: no gate, no timestamp query, no perf log.
+
+Verify: A, C
+Status: active
+Source: opus-planner (2026-10-24), M8-4 and M8-8 look reviews, TEST-027, STRM-046
+
+#### Scenario: Two poses
+- **WHEN** the scene runs on the software adapter over a small store with two poses on the ground
+- **THEN** it writes one PNG of the requested size per pose and `stills.txt` with at least one chunk read per pose, and the two images differ in their sun
+
+#### Scenario: A bad call
+- **WHEN** `--poses` is missing, `--views` names no pose, or `--poses` is given to another scene
+- **THEN** the run is refused before it draws
+
+### Requirement: TEST-050 Poses file
+The poses file (TOML) SHALL hold the keys of the table; a bad value SHALL be refused naming the key and the value.
+
+| Key | Meaning | Default |
+|---|---|---|
+| `[place]` `anchor = "largest-river"` | largest river, at least `min_height_m` high (0) | or `lat`, `lon` |
+| `chunk_timeout_s` | wait per pose, seconds | 900 |
+| `chunk_cell_m` | chunk cell, metres | 8 |
+| `[[pose]]` `name` | names the PNG | required |
+| `altitude_m`, `back_m` | eye over the ground; behind the anchor | required |
+| `heading_deg`, `pitch_deg` | clockwise from north; down | required |
+| `sun_local_hours` | local solar time | required |
+| `sun_declination_deg` | degrees | 0 |
+
+Verify: A
+Status: active
+Source: TEST-048
+
+#### Scenario: A bad value
+- **WHEN** `heading_deg` is a string, or `pitch_deg` is missing, or a name is given twice
+- **THEN** the file is refused naming the key and the value
+
+### Requirement: TEST-051 Anchor relief
+The `[place]` table of the poses file MAY give `relief_radius_m` and `relief_min_m` (together) and `relief_max_m` (default unbounded); the `largest-river` anchor SHALL then be the largest river among the cells whose coupled-run heights within the radius span `relief_min_m` to `relief_max_m`. Giving one of the pair alone SHALL be refused.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-25), look review 1 second site, TEST-050
+
+### Requirement: TEST-052 Anchor on the steepest river and the chunk channel
+`[place] anchor = "steepest-river"` (`slope_radius_m`; optional `ground_min_m`, `ground_max_m`, `min_area_m2`) SHALL anchor on the coupled run's river cell of at least that drainage area, with ground on the base field in the range, whose surroundings within the radius have the steepest slope; it prints the slope. `snap_to_channel_m` SHALL, once the first pose's chunks have landed, move the anchor to the lowest chunk ground within that distance (refused when it lies under 50 m below the median) and make every `heading_deg` relative to the channel's downstream bearing. `sections.txt` SHALL list sections across the channel every 100 m. `slope_table_stride` SHALL write `slopes.txt`: per ground band, the land share and the slope percentiles of land and river cells.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-25), look review 1 second site, TEST-050
+
+#### Scenario: A trench off the anchor
+- **WHEN** the ground has a trench 300 m deep 600 m from the anchor
+- **THEN** the snap lands in the trench and reads its bearing, and a flat ground is refused
+
+### Requirement: TEST-049 Stills wait for their chunks
+A still SHALL be drawn only when every chunk read by the tiles of its plan is ready and the plan was made over the field that includes those chunks, so that no tile of the image is a stand-in (STRM-039); the eye SHALL be placed over the ground of that field. When the chunks are not ready within `chunk_timeout_s` the run SHALL fail naming the pose, the number of chunks missing and the first missing keys.
+
+Verify: A, C
+Status: active
+Source: TEST-048, STRM-039
+
+#### Scenario: Chunks that do not land
+- **WHEN** a pose's chunks are not ready within `chunk_timeout_s`
+- **THEN** the run fails naming the pose, the count of chunks missing and the first missing keys
+
+#### Scenario: Landed chunks
+- **WHEN** a pose is drawn
+- **THEN** the chunk share of its plan has no stand-in node and the eye is `altitude_m` over the ground of the field with the chunks

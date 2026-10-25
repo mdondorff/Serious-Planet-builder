@@ -727,7 +727,7 @@ fn read_buffer(ctx: &GpuContext, buffer: &wgpu::Buffer, bytes: u64) -> Vec<u8> {
 /// One input of [`probe_lit_radiance`]: the arguments of the terrain shader's lit pixel (`shade_lit`).
 #[derive(Clone, Copy, Debug)]
 pub struct LitProbe {
-    /// 0 lit, 1 albedo, 2 lighting, 3 temperature, 4 precipitation (`ShadeView::index`).
+    /// 0 lit, 1 albedo, 2 lighting, 3 temperature, 4 precipitation, 5 horizon, 6 shadow (`ShadeView::index`).
     pub view: u32,
     pub normal: [f32; 3],
     pub up: [f32; 3],

@@ -105,7 +105,7 @@ mod tests {
 
     fn camera_at(lat_deg: f64, lon_deg: f64, alt_m: f64) -> PlanetFixed {
         let (la, lo) = (lat_deg.to_radians(), lon_deg.to_radians());
-        PlanetFixed(Vec3::new(libm::cos(la) * libm::cos(lo), libm::cos(la) * libm::sin(lo), libm::sin(la)) * (R + alt_m))
+        PlanetFixed(Vec3::from_lat_lon(la, lo) * (R + alt_m))
     }
 
     fn east(cam: PlanetFixed) -> Vec3 {

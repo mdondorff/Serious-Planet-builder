@@ -1,12 +1,14 @@
 //! `frame`: GPU-free construction of the `FramePlan` (CON-03, ADR 0009). Everything that decides *what* is
-//! drawn lives here; `render` only executes the plan. M1 plans a row of tiles shown through a debug view.
+//! drawn lives here; `render` only executes the plan. It selects the tiles (height-aware LOD with morphing), plans the frame, runs the streaming loop (pool, residency, prefetch, upload) and holds the cameras, the picking, the look and the scenes.
 
 pub mod adapter;
 pub mod camera;
+pub mod chunkshare;
 pub mod controller;
 pub mod draw;
 pub mod freecam;
 pub mod globe;
+pub mod horizonview;
 pub mod instances;
 pub mod litscenes;
 pub mod lod;
