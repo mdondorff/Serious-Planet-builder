@@ -37,7 +37,7 @@ Same six poses as look review 1 (eye 300 m, 1500 m back, pitch 15; 30 m, 400 m, 
 As look review 1; in addition the depth against the width of the cut, the wall shape, the spikes on the walls, and the plain around the canyon (at 3200 m, snow-white in the lit view).
 
 ## First look (coder's read, not a review)
-- A slot canyon about 300 m deep with vertical walls and a sharp rim, winding across the view at 300 m; the plain around it is rough (small ridges and hollows, visible in `300m-sunset.png`) and not hilly.
-- Uniform depth along the course and vertical walls: no talus, no valley sides.
-- The walls carry stretched triangle spikes in the near views (`30m-midday.png`, `1.8m-midday.png`): a rendering artifact, not terrain.
+- A slot canyon about 300 m deep with vertical walls and a sharp rim, winding across the view at 300 m; the plain around it carries fine ridges and hollows (`300m-sunset.png`; relief 126 m within 2 km).
+- Uniform depth along the course (292 to 302 m, `sections.txt`) and vertical walls: no talus, no valley sides (from the images).
+- The walls carry stretched triangle spikes in the near views (`30m-midday.png`, `1.8m-midday.png`): not found in the 8 m heights, cause open.
 - The 1.8 m eye stands on the canyon floor in a flat white strip, walls filling the frame.
