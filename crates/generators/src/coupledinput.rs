@@ -58,35 +58,45 @@ pub fn reduce_bake(src: &dyn LatticeSource, n: u32, threads: usize) -> Result<Ve
 /// The rows of one band, or why they could not be read, with the band's index.
 type Band = (usize, Result<Vec<f32>, ReadError>);
 
-/// Rows `j0..j1` of one face, each row `n` cells.
+/// Rows `j0..j1` of one face, each row `n` cells. The band is walked one block column at a time (`cw` run cells wide), so a thread keeps to
+/// the one block under its feet and the next, and a cache that holds a few blocks decodes each block about once (a walk along whole rows
+/// needed every block of the row at once, and a store source's cache of a few dozen blocks was decoded again for every vertex row). Each
+/// cell is still summed in the same order, so the result does not change.
 fn band(src: &dyn LatticeSource, face: Face, j0: usize, j1: usize, n: usize, r: usize) -> Result<Vec<f32>, ReadError> {
     let weight = |k: usize| if k == 0 || k == r { 1.0 } else { 2.0 };
     let norm = 4.0 * (r * r) as f64;
-    let mut out = Vec::with_capacity((j1 - j0) * n);
-    let mut row_sum = vec![0.0f64; n];
-    let mut acc = vec![0.0f64; n];
-    for j in j0..j1 {
-        acc.iter_mut().for_each(|a| *a = 0.0);
-        for vj in 0..=r {
-            // One vertex row of the bake, read once for the whole width; each cell sums its own `r + 1` vertices with the end weights.
-            let mut v = Vec::with_capacity(n * r + 1);
-            for vi in 0..=n * r {
-                let z = src.at(face, vi as u32, (j * r + vj) as u32).map_err(|e| ReadError::Source(format!("face {}: {e}", face.0)))?;
-                v.push(f64::from(z.elevation_m));
-            }
-            for i in 0..n {
-                let mut s = 0.0;
-                for k in 0..=r {
-                    s += weight(k) * v[i * r + k];
+    let cw = if src.block_cells() > 0 { (src.block_cells() as usize / r).max(1) } else { n }.min(n);
+    let mut out = vec![0.0f32; (j1 - j0) * n];
+    let mut v = Vec::with_capacity(cw * r + 1);
+    let mut row_sum = vec![0.0f64; cw];
+    let mut acc = vec![0.0f64; cw];
+    for i0 in (0..n).step_by(cw) {
+        let i1 = (i0 + cw).min(n);
+        for j in j0..j1 {
+            acc[..i1 - i0].iter_mut().for_each(|a| *a = 0.0);
+            for vj in 0..=r {
+                // One vertex row of the bake across the chunk, read once; each cell sums its own `r + 1` vertices with the end weights.
+                v.clear();
+                for vi in i0 * r..=i1 * r {
+                    let z = src.at(face, vi as u32, (j * r + vj) as u32).map_err(|e| ReadError::Source(format!("face {}: {e}", face.0)))?;
+                    v.push(f64::from(z.elevation_m));
                 }
-                row_sum[i] = s;
+                for i in 0..i1 - i0 {
+                    let mut s = 0.0;
+                    for k in 0..=r {
+                        s += weight(k) * v[i * r + k];
+                    }
+                    row_sum[i] = s;
+                }
+                let wj = weight(vj);
+                for i in 0..i1 - i0 {
+                    acc[i] += wj * row_sum[i];
+                }
             }
-            let wj = weight(vj);
-            for i in 0..n {
-                acc[i] += wj * row_sum[i];
+            for i in 0..i1 - i0 {
+                out[(j - j0) * n + i0 + i] = (acc[i] / norm) as f32;
             }
         }
-        out.extend(acc.iter().map(|a| (a / norm) as f32));
     }
     Ok(out)
 }
@@ -169,6 +179,52 @@ mod tests {
             let got = reduce_bake(&Synthetic { res, block: 0, fail_at: None }, n, 2).unwrap();
             assert_eq!(got, pre_reduced(res, n), "bake {res} to run {n}");
         }
+    }
+
+    /// A source that counts how often a block is not among the `capacity` most recently used blocks of one shared cache (what a real store
+    /// source decodes again), so the order a reduction walks the bake in shows.
+    struct Lru {
+        res: u32,
+        block: u32,
+        capacity: usize,
+        cache: Mutex<Vec<(u8, u32, u32)>>,
+        misses: AtomicUsize,
+    }
+
+    impl LatticeSource for Lru {
+        fn res(&self) -> u32 {
+            self.res
+        }
+        fn at(&self, face: Face, i: u32, j: u32) -> Result<GlobalSample, ReadError> {
+            let side = self.res / self.block;
+            let id = (face.0, (i / self.block).min(side - 1), (j / self.block).min(side - 1));
+            let mut c = self.cache.lock().unwrap();
+            if let Some(at) = c.iter().position(|b| *b == id) {
+                let b = c.remove(at);
+                c.push(b);
+            } else {
+                self.misses.fetch_add(1, Ordering::Relaxed);
+                c.push(id);
+                if c.len() > self.capacity {
+                    c.remove(0);
+                }
+            }
+            Ok(GlobalSample { continent: 0.0, elevation_m: height(face.0, i, j), temperature_c: 0.0, precipitation_mm: 0.0 })
+        }
+        fn block_cells(&self) -> u32 {
+            self.block
+        }
+    }
+
+    // spec: GEN-056
+    #[test]
+    fn a_reduction_decodes_each_block_a_few_times_at_most_when_the_cache_holds_only_a_few_blocks() {
+        // 4 x 4 blocks a face; two threads each work on one block row, so a walk along whole rows needs 8 blocks and the cache holds 6.
+        let src = Lru { res: 64, block: 16, capacity: 6, cache: Mutex::new(Vec::new()), misses: AtomicUsize::new(0) };
+        let z = reduce_bake(&src, 16, 2).unwrap();
+        assert_eq!(z, reduce_bake(&Synthetic { res: 64, block: 16, fail_at: None }, 16, 1).unwrap());
+        let (misses, blocks) = (src.misses.load(Ordering::Relaxed), 6 * 16);
+        assert!(misses <= 3 * blocks, "{misses} block reads for {blocks} blocks");
     }
 
     // spec: GEN-056
