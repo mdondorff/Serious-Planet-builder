@@ -62,6 +62,9 @@ impl HeightField for Counting<'_> {
     fn level_aware(&self) -> bool {
         self.f().level_aware()
     }
+    fn level_change(&self, dirs: &[Vec3], level: u8) -> Option<Vec<f64>> {
+        self.f().level_change(dirs, level)
+    }
     fn heights_and_climate(
         &self,
         map: &dyn FaceMapping,

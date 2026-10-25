@@ -24,6 +24,8 @@ mod chunkfield;
 mod climate;
 #[path = "compact.rs"]
 mod compact;
+#[path = "coupled_fill.rs"]
+mod coupled_fill;
 #[path = "coupled_lens.rs"]
 mod coupled_lens;
 #[path = "erosion.rs"]
