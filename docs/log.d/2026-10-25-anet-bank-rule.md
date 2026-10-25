@@ -1,0 +1,1 @@
+- 2026-10-25 **anet-bank-rule**: banks settled to the repose slope round channel, corridor and anchor cells (GEN-058, ANET_VERSION 3): pairs over 0.9 with a protected cell 2,516 to 228 and 4,474 to 386 at the two review sites; capped plan nodes 126-131 to 122-126

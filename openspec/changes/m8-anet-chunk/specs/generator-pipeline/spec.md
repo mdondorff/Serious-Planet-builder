@@ -76,3 +76,14 @@ Source: owner decision 2026-10-25 (terrain relief into M8, part 1), GEN-047, lea
 #### Scenario: High ground over a low run
 - **WHEN** a chunk of a base 2,600 m above the coupled run runs its incision
 - **THEN** every anchor lies at most `cap_m` under the base, no core cell is cut by half the bound or more, and the depth of the law rises with the drainage area up to the cap
+
+### Requirement: GEN-058 The banks settle to the angle of repose
+After the incision steps an A-net chunk SHALL lower every free cell within `bank_rounds` (`ceil(bound_m / (talus cell_m)) + 6`, 48 at 8 m) rings of the core to at most `z(s) + talus x distance` of every protected cell `s` that is not in the outer ring (a channel, the corridor, an anchor), but not under a protected neighbour by more than `talus x distance`, and SHALL not move any protected cell. A cell SHALL only be lowered, and the core SHALL be the same for every halo of at least the stated one.
+
+Verify: A
+Status: planned
+Source: planner decision 2026-10-25, GEN-051, learnings 2026-10-25 (walls), ADR 0074
+
+#### Scenario: A breach cut through a ridge
+- **WHEN** a chunk of a river that crosses a 600 m ridge runs with and without the settle
+- **THEN** without it more than ten bank pairs stand over the repose slope, with it at most one in twenty, no protected cell differs, and no cell is higher with it than without
