@@ -26,3 +26,12 @@
 - `TileSink::upload_bytes` defaults to `resident_bytes()`, which leaves the plane out: step 3 counts `4 (cells + 1)^2` bytes when a plane is uploaded.
 - The texel normals include the change and the fade does not touch them (design decision 4).
 - `compact_tile_field` evaluates the change twice per lattice point (in `heights_and_climate` and in `level_change`); measure before step 3 and fold into one pass if it shows.
+
+## 6. Fade stability (numerics-reviewer, 2026-10-25; owner of the plan: opus-planner, decision B)
+- [ ] 6.1 A tile is weighed over the chunks it was built with (its read records), not the current ready set: a neighbour chunk landing under a tile that already shows its change leaves its weight; test: build A with X ready at w = 1, land Y without rebuilding A, A's drawn heights one millisecond later equal those before (spec: STRM-047)
+- [ ] 6.2 The fade clock starts per tile when the rebuilt tile is uploaded, not at the chunk's landing: a rebuild slower than the fade length still fades; test: land a chunk on an injected clock, deliver the rebuilt tile 2 s later, the first frame drawing it is not at w = 1 (spec: STRM-047)
+- [ ] 6.3 Sticky plane assignment past `FADE_PLANES`: a node that overflowed stays final until its fade ends, a node holding a plane keeps it; test: more than 512 fading nodes, the lowest id finishes, no node's drawn height moves by more than its own per-frame step (spec: REND-039)
+- [ ] 6.4 A plane with a non-finite value is refused at the upload with an actionable error, and `place` forms no `0 x NaN` at fade 0 (the mirror is bit for bit the old arithmetic there); test: a NaN plane at fade 0 equals `shade_vertex` (spec: REND-039)
+- [ ] 6.5 Tiles decoded from a mesh pack carry no change plane (`from_slot_data`): fix if small, else a tracked limit (prefill levels lie above the chunk top level)
+- [ ] 6.6 numerics-reviewer again, spec-guardian, verifier; then 5.1 (archive)
+
