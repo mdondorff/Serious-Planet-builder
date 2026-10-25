@@ -347,8 +347,8 @@ pub fn probe_horizon(
     slice.map_async(wgpu::MapMode::Read, |r| r.expect("map"));
     let _ = ctx.device.poll(wgpu::PollType::wait_indefinitely());
     let data = slice.get_mapped_range().expect("range");
-    let v: Vec<f32> = data.chunks_exact(4).map(|c| f32::from_le_bytes(c.try_into().unwrap())).collect();
-    v.chunks_exact(4).map(|r| HorizonAnswer { factor: r[0], horizon: r[1], present: r[2] > 0.5 }).collect()
+    let v: Vec<f32> = data.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
+    v.as_chunks::<4>().0.iter().map(|r| HorizonAnswer { factor: r[0], horizon: r[1], present: r[2] > 0.5 }).collect()
 }
 
 #[cfg(test)]
