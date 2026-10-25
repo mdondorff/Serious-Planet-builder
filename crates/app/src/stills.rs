@@ -559,7 +559,7 @@ sun_local_hours = 12
 sun_declination_deg = 10
 "#;
 
-    // spec: TEST-050
+    // spec: TEST-051
     #[test]
     fn the_relief_of_an_anchor_is_the_height_range_around_it_and_the_poses_file_asks_for_it() {
         use planet_generators::coupled::{CoupledMaps, Lattice};

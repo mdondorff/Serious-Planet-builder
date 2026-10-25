@@ -1036,7 +1036,6 @@ The poses file (TOML) SHALL hold the keys of the table; a bad value SHALL be ref
 | Key | Meaning | Default |
 |---|---|---|
 | `[place]` `anchor = "largest-river"` | largest river, at least `min_height_m` high (0) | or `lat`, `lon` |
-| `[place]` `relief_radius_m`, `relief_min_m`, `relief_max_m` | only cells whose coupled-run heights within the radius span min to max | none; radius and min go together; max unbounded |
 | `chunk_timeout_s` | wait per pose, seconds | 900 |
 | `chunk_cell_m` | chunk cell, metres | 8 |
 | `[[pose]]` `name` | names the PNG | required |
@@ -1048,6 +1047,13 @@ The poses file (TOML) SHALL hold the keys of the table; a bad value SHALL be ref
 Verify: A
 Status: active
 Source: TEST-048
+
+### Requirement: TEST-051 Anchor relief
+The `[place]` table of the poses file MAY give `relief_radius_m` and `relief_min_m` (together) and `relief_max_m` (default unbounded); the `largest-river` anchor SHALL then be the largest river among the cells whose coupled-run heights within the radius span `relief_min_m` to `relief_max_m`. Giving one of the pair alone SHALL be refused.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-25), look review 1 second site, TEST-050
 
 #### Scenario: A bad value
 - **WHEN** `heading_deg` is a string, or `pitch_deg` is missing, or a name is given twice
