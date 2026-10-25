@@ -82,6 +82,10 @@ pub fn key_command(code: KeyCode) -> Option<Command> {
         KeyCode::F6 => Command::CycleGroundDetail,
         KeyCode::F7 => Command::ToggleScaleRefs,
         KeyCode::KeyH => Command::ToggleEditingLight,
+        KeyCode::KeyJ => Command::CycleShadeView,
+        KeyCode::BracketLeft => Command::SunEarlier,
+        KeyCode::BracketRight => Command::SunLater,
+        KeyCode::Backslash => Command::SunReset,
         KeyCode::KeyK => Command::CycleCoupledLens,
         KeyCode::F9 => Command::SaveRepro,
         KeyCode::Escape => Command::Quit,
@@ -293,6 +297,10 @@ struct Running {
     coupled_shown: Option<planet_generators::coupled::CoupledLens>,
     /// Whether the frame loop counts the world's chunk stage (STRM-039): set once the world has one.
     chunks_on: bool,
+    /// The sun of the last lit plan before the editing light, for the title's local solar time (VIEW-054).
+    sun_dir: [f32; 3],
+    /// Where the camera was on the last frame, planet-fixed.
+    camera_position: planet_core::Vec3,
     /// The slots, versions and uploads of the horizon shadows (REND-038).
     horizon: crate::horizonworld::HorizonRig,
     coupled_standing: Standing,
@@ -501,6 +509,8 @@ impl App<'_> {
             coupled_asked: None,
             coupled_shown: None,
             chunks_on: false,
+            sun_dir: [0.0, 0.0, 1.0],
+            camera_position: planet_core::Vec3::new(1.0, 0.0, 0.0),
             horizon: Default::default(),
             coupled_standing: Standing::Idle,
             markers: cfg.markers.clone(),
@@ -723,6 +733,7 @@ impl App<'_> {
                 st.hover = None;
             }
             st.altitude_m = height(camera.position);
+            st.camera_position = camera.position.0;
             st.path.record(now_ms, &camera, st.altitude_m, dt * 1000.0);
             let view = TerrainView::ALL[st.viewer.view_index];
             let ctx = &st.ctx;
@@ -847,8 +858,14 @@ impl App<'_> {
                 lit.view = match st.viewer.coupled_lens {
                     Some(planet_generators::coupled::CoupledLens::Height) => planet_frame::look::shading::ShadeView::Temperature,
                     Some(planet_generators::coupled::CoupledLens::Area) => planet_frame::look::shading::ShadeView::Precipitation,
-                    None => lit.view,
+                    None => match st.viewer.shade_view {
+                        planet_frame::look::shading::ShadeView::Lit => lit.view,
+                        picked => picked,
+                    },
                 };
+                // The sun moved in local solar time (VIEW-054); the editing light below wins over it.
+                lit.sun_dir = planet_frame::viewer::sun_with_offset(lit.sun_dir, st.viewer.sun_offset_h);
+                st.sun_dir = lit.sun_dir;
                 // The editing light (VIEW-042): one sun for the terrain shading, the atmosphere and the sky, fixed in camera space.
                 if st.viewer.editing_light {
                     lit.sun_dir = planet_frame::viewer::editing_sun_dir(&draw.plan.camera);
@@ -1156,6 +1173,23 @@ fn smoke_globe(st: &mut Running, camera: &Camera, viewport: Viewport, radius_m: 
     }
 }
 
+/// What the title adds for the shade view, the moved sun and a world without a chunk stage (VIEW-054): empty at the start.
+pub fn lit_extras_text(v: &ViewerState, chunks_on: bool, sun: [f32; 3], camera: planet_core::Vec3) -> String {
+    let mut out = String::new();
+    if v.shade_view != planet_frame::look::shading::ShadeView::Lit {
+        out += &format!(" | shade view {}", v.shade_view.name());
+    }
+    if v.sun_offset_h != 0.0 && !v.editing_light {
+        let t = planet_frame::viewer::local_solar_hours(sun, camera);
+        let minutes = (t * 60.0).round() as u32 % 1440;
+        out += &format!(" | sun {:02}:{:02} local solar time", minutes / 60, minutes % 60);
+    }
+    if !chunks_on {
+        out += " | no chunk stage: no horizon shadows (open a store with a coupled run)";
+    }
+    out
+}
+
 /// The text of the window title now.
 fn title_text(st: &Running, now_ms: u64) -> String {
     let Some(r) = st.report else { return String::new() };
@@ -1180,6 +1214,9 @@ fn title_text(st: &Running, now_ms: u64) -> String {
     }
     if st.viewer.editing_light {
         input += " | editing light";
+    }
+    if st.viewer.lit {
+        input += &lit_extras_text(&st.viewer, st.chunks_on, st.sun_dir, st.camera_position);
     }
     input += &format!(" | detail {}", st.viewer.ground_detail.name());
     input += &format!(" | {}", st.world_label);
@@ -1803,6 +1840,10 @@ mod tests {
             (KeyCode::KeyG, "G"),
             (KeyCode::KeyH, "H"),
             (KeyCode::KeyK, "K"),
+            (KeyCode::KeyJ, "J"),
+            (KeyCode::BracketLeft, "["),
+            (KeyCode::BracketRight, "]"),
+            (KeyCode::Backslash, "Backslash"),
             (KeyCode::KeyW, "WASD"),
             (KeyCode::KeyA, "WASD"),
             (KeyCode::KeyS, "WASD"),
@@ -1821,7 +1862,6 @@ mod tests {
             KeyCode::KeyB,
             KeyCode::KeyF,
             KeyCode::KeyI,
-            KeyCode::KeyJ,
             KeyCode::KeyM,
             KeyCode::KeyN,
             KeyCode::KeyO,
@@ -1842,8 +1882,6 @@ mod tests {
             KeyCode::End,
             KeyCode::PageUp,
             KeyCode::PageDown,
-            KeyCode::BracketLeft,
-            KeyCode::BracketRight,
             KeyCode::Comma,
             KeyCode::Period,
         ];
@@ -1896,6 +1934,10 @@ mod tests {
             (KeyCode::F6, Command::CycleGroundDetail),
             (KeyCode::F7, Command::ToggleScaleRefs),
             (KeyCode::KeyH, Command::ToggleEditingLight),
+            (KeyCode::KeyJ, Command::CycleShadeView),
+            (KeyCode::BracketLeft, Command::SunEarlier),
+            (KeyCode::BracketRight, Command::SunLater),
+            (KeyCode::Backslash, Command::SunReset),
             (KeyCode::F9, Command::SaveRepro),
             (KeyCode::KeyG, Command::ToggleGlobe),
             (KeyCode::Escape, Command::Quit),
@@ -1919,9 +1961,29 @@ mod tests {
             "coarse LOD",
             "ground detail",
             "globe overview",
+            "shade view",
+            "local solar time",
         ] {
             assert!(KEYS_HELP.to_lowercase().contains(&ch.to_lowercase()), "the help names {ch}: {KEYS_HELP}");
         }
+    }
+
+    // spec: VIEW-054
+    #[test]
+    fn the_title_names_the_shade_view_the_moved_sun_and_a_world_without_a_chunk_stage() {
+        use planet_frame::look::shading::{sun_direction, ShadeView};
+        let at = planet_core::Vec3::new(6_371_000.0, 0.0, 0.0);
+        let sun = sun_direction(12.0, 0.0);
+        let mut v = ViewerState::new(0, 3, 0, false);
+        assert_eq!(lit_extras_text(&v, true, sun, at), "", "nothing at the start over a world with a chunk stage");
+        assert!(lit_extras_text(&v, false, sun, at).contains("no chunk stage: no horizon shadows (open a store with a coupled run)"));
+        v.shade_view = ShadeView::Horizon;
+        v.sun_offset_h = 6.0;
+        let moved = planet_frame::viewer::sun_with_offset(sun, v.sun_offset_h);
+        let text = lit_extras_text(&v, true, moved, at);
+        assert!(text.contains("shade view horizon") && text.contains("sun 18:00 local solar time"), "{text}");
+        v.editing_light = true;
+        assert!(!lit_extras_text(&v, true, moved, at).contains("sun 18:00"), "the editing light wins, the title does not claim the time");
     }
 
     // spec: VIEW-004
@@ -2059,6 +2121,10 @@ mod tests {
             Command::CycleGroundDetail,
             Command::ToggleScaleRefs,
             Command::ToggleEditingLight,
+            Command::CycleShadeView,
+            Command::SunEarlier,
+            Command::SunLater,
+            Command::SunReset,
             Command::SaveRepro,
         ] {
             assert!(!editor_mode_blocks(cmd), "{cmd:?}");
