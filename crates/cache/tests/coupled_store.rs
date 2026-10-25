@@ -95,6 +95,7 @@ fn a_changed_run_parameter_the_steps_or_the_base_resolution_changes_every_key() 
         CoupledSpec { params: CoupledParams { area_exp: 0.5, ..spec().params }, ..spec() },
         CoupledSpec { params: CoupledParams { dt_years: 2.0e5, ..spec().params }, ..spec() },
         CoupledSpec { params: CoupledParams { seed: 1, ..spec().params }, ..spec() },
+        CoupledSpec { params: CoupledParams { erode: false, ..spec().params }, ..spec() },
         CoupledSpec { params: CoupledParams { min_height_m: 1.0, ..spec().params }, ..spec() },
         CoupledSpec { n: N * 2, ..spec() },
         CoupledSpec { inputs: 1, ..spec() },

@@ -23,6 +23,16 @@ pub const COUPLED_CELLS: u32 = 2048;
 /// values let it keep eroding. A declared parameter of the run, part of its key.
 pub const UPLIFT_RHO: f64 = 1.0;
 
+/// Whether a world's coupled run erodes (GEN-065): off for M8, so the run keeps the relief of its input (the stream-power steps did not hold the
+/// input at their steady state on the real bake: ADR 0080 point 4) and gives the river network and the areas; the stream power code stays for
+/// M9's calibration. Part of the key of the stored run.
+pub const COUPLED_ERODE: bool = false;
+
+/// The parameters of a world's run.
+pub fn run_params() -> CoupledParams {
+    CoupledParams { erode: COUPLED_ERODE, ..CoupledParams::default() }
+}
+
 /// The erodibility of the stream power law: a placeholder until the lithology driver exists (ADR 0076). An input, so the hash in the key
 /// covers it.
 pub const ERODIBILITY: f32 = 2.0e-5;
@@ -61,7 +71,8 @@ fn reduce_threads() -> usize {
 pub fn bake_input(src: &dyn LatticeSource, lat: &Lattice, params: &CoupledParams) -> Result<CoupledInput, String> {
     let z = reduce_bake(src, lat.n() as u32, reduce_threads()).map_err(|e| e.to_string())?;
     let erodibility = vec![ERODIBILITY; z.len()];
-    let uplift = stationary_uplift(lat, &z, &erodibility, params, UPLIFT_RHO);
+    // The uplift is read only by the stream-power steps; a run that only fills does not make it.
+    let uplift = if params.erode { stationary_uplift(lat, &z, &erodibility, params, UPLIFT_RHO) } else { vec![0.0; z.len()] };
     Ok(CoupledInput { uplift, erodibility, z })
 }
 
@@ -116,7 +127,7 @@ fn prepare(def: &WorldDefinition, src: &dyn LatticeSource, n: u32, steps: u32) -
         n,
         steps,
         bake_res,
-        params: CoupledParams::default(),
+        params: run_params(),
         inputs: declared_inputs_hash(radius_m, UPLIFT_RHO, ERODIBILITY, src.relief_scale()),
     };
     let world = GlobalWorld::from_definition(def).map_err(|e| format!("the definition cannot be generated: {e}"))?.with_coupled(spec);

@@ -109,3 +109,12 @@ Scope: generators::anet (GEN-051), app::stills, app::anetworld; look review 1 se
 - A slump rate of 0.5 (from 0.09) and 90 steps (from 30) cut the pairs of two unprotected cells from 3,494 to about 820 and leave the protected ones at 2,200 to 2,700: rate-limited and structural, in that order.
 - Tools: `capped.txt` of the stills tool (first pose), the pair census of `chunk_incision_report`, whose `--slump-rate` and `--steps` arguments replace the stage's defaults for the report only.
 - Obsolete when the hillslope steps relax the bank next to a channel cell.
+
+
+## 2026-10-25 The coupled run's steady state does not hold on the real bake (mechanism not found)
+Scope: generators::coupled (GEN-040, GEN-063), app::coupledworld; M8 rebuild at the 16384 bake, run at 2048 cells
+- The stationary uplift `rho K A^m S` computed from the input holds it at 0.00 m median drift over 20 steps on the smooth synthetic test world, and not on the reduced real bake: run minus input after N steps, median by input band (0-500, 500-1000, 1000-2500, 2500-5000, over 5000 m): N=2 about 0 (p10 to p90 up to -80 to +180 m); N=8 -50, -208, -445, -899, -1010; N=24 -99, -640, -1088, -2432, -4056; N=80 -104, -675, -1186, -2630, -4471 (saturating near step 24).
+- Step 1 alone: no land cell goes down by more than 1 m, 4.24 million of 7.37 million land cells go up by more than 1 m (the flood's fill raises pit and lake cells and their donors follow; the other effects are not separated).
+- Not found: why the run then relaxes to a much lower surface. Candidates: receiver and area changes after step 1, the fill, ties on the 2048 flats. The planner decided not to spend more time (2026-10-25): the run keeps the input and only fills (GEN-065); the erosion option stays for M9.
+- Tool: a scratch diagnostic (run minus input by band after N steps) was not committed; the stored-run report is `chunk_incision --run-vs-base`.
+- Obsolete when the stream-power run is calibrated so that its steady state holds on a real bake.
