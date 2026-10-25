@@ -3,12 +3,12 @@
 Status: decisions D1 to D7 taken (owner, 2026-10-23); the M8 GO follows the owner's confirmation in `docs/status.md`. Inputs: SPIKE-28 to 39 (the architecture and process review with refactors R1 to R6: `docs/briefings/m8-review.md`), ADR 0076 (driver maps), ADR 0077 (stage model), `docs/briefings/m8-driver-maps.md`, terms: `docs/domain.md` (chunk: ADR 0077's regional square).
 
 ## Goal
-The base layer, without instances, reaches the owner's Outerra reference image at sunset and midday from 300 m, 30 m and 1.8 m (owner, 2026-10-22).
+The base layer, without instances, reaches the owner's look reference (photoreal renders of current planet-scale terrain engines, kept outside the repository) at sunset and midday from 300 m, 30 m and 1.8 m (owner, 2026-10-22).
 
 ## Exit criteria (owner, 2026-10-23, D4)
 | # | Criterion | Tier |
 |---|---|---|
-| 1 | Owner's look review against the Outerra image at fixed poses (300 m, 30 m, 1.8 m; sunset, midday) on the 16384 store | D |
+| 1 | Owner's look review against the owner's look reference at fixed poses (300 m, 30 m, 1.8 m; sunset, midday) on the 16384 store | D |
 | 2 | Chunk fields: identical values at chunk borders; CPU results bit-exact across threads and operating systems | A |
 | 3 | No frame waits for a chunk (CON-22); a chunk lands within 10 s at a 300 m pan; a landing chunk's change fades in over about 1.5 s; at the level where the chunk change enters (base to base + change) the step is at most about 0.5 px p99 on screen, with blending; between levels inside the chunk range no step over 0.25 m p99 (amended by the owner, 2026-10-24: the entry step is metres at every top level, `openspec/changes/m8-anet-chunk/design.md` section 16) | A, C |
 | 4 | Global coupled run at most 10 min on Rasierklinge per world version | perf |
