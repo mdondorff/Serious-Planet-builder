@@ -342,6 +342,54 @@ impl WorldTerrain {
                 window_slopes.get(window_slopes.len() / 2).copied().unwrap_or(f64::NAN)
             );
         }
+        // Cross-sections of the solved chunk (GEN-060): at corridor cells of the core every 200 cells along the river, the heights across the river on
+        // its local normal every cell out to 2.4 km each side: the drainage area, the bankfull law's width and depth, the measured depth of the channel
+        // under the valley floor, the width at half that depth, the width of the valley floor (within 1 m of the bed), and the ground.
+        {
+            use planet_generators::anet::NO_NEXT;
+            let cell_m = clat.cell_m(radius);
+            let steps = (2400.0 / cell_m) as i64;
+            let mut rows = String::from(
+                "# area_m2 law_width_m law_depth_m depth_m half_depth_width_m floor_width_m ground_m bed_m
+",
+            );
+            let mut shown = 0usize;
+            for c in (0..core).filter(|&c| net.corridor[c] && net.next[c] != NO_NEXT).step_by(200) {
+                if shown >= 6 {
+                    break;
+                }
+                let n = net.next[c] as usize;
+                let (here, there) = (net.dirs[c], net.dirs[n]);
+                let along = (there - here).normalized();
+                let normal = here.cross(along).normalized();
+                let mut zs: Vec<f64> = Vec::new();
+                for k in -steps..=steps {
+                    let d = (here * radius + normal * (k as f64 * cell_m)).normalized();
+                    let cell = clat.cell_at(d);
+                    if let Some(i) = reg.index_of(cell) {
+                        zs.push(s.z[i]);
+                    }
+                }
+                if zs.len() < 3 {
+                    continue;
+                }
+                let floor = zs.iter().copied().fold(f64::INFINITY, f64::min);
+                let bed = net.anchor_z[c];
+                let depth = (bed - floor).max(0.0);
+                let width_under = |z: f64| zs.iter().filter(|&&h| h < z).count() as f64 * cell_m;
+                let (lw, ld) = stage.params.anchor.bankfull_m(net.river_area_m2[c]);
+                rows += &format!(
+                    "{:.3e} {lw:.0} {ld:.1} {depth:.1} {:.0} {:.0} {:.1} {bed:.1}
+",
+                    net.river_area_m2[c],
+                    width_under(bed - 0.5 * depth),
+                    zs.iter().filter(|&&h| (h - bed).abs() <= 1.0).count() as f64 * cell_m,
+                    net.base_z[c]
+                );
+                shown += 1;
+            }
+            out += &rows;
+        }
         // The steep pairs of neighbouring core cells of the solved surface: how many are over the angle of repose and over the slope the plan can draw,
         // and whether a protected cell (a channel, the corridor, an anchor: the hillslope steps skip every pair with one) is one of the two.
         let cell_m = clat.cell_m(radius);
