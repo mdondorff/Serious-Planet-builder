@@ -487,3 +487,22 @@ fn the_routed_corridor_beds_and_links_of_a_fork_do_not_depend_on_the_halo_or_on_
         }
     });
 }
+
+// spec: GEN-068
+#[test]
+fn a_tributary_of_the_coarse_run_is_routed_like_a_stem_only_above_the_river_threshold() {
+    let lat = ChunkLattice::new(32).unwrap();
+    let r = region(&lat, chunk(1002), 40);
+    // 12 cells (1.8 km) north of the main river's row (the middle of coarse row 1000), only the tributary can have a corridor.
+    let north = |law: &planet_generators::anet::AnchorLaw| {
+        let net = Network::build_with(&Fork, &Hollow(0.0), &lat, &r, R, law);
+        (0..r.cells.len()).filter(|&c| net.corridor[c] && r.cells[c].j + 12 < 1000 * 32 + 16).count()
+    };
+    let mut law = routed_law();
+    law.river_area_m2 = 1.0e8;
+    let with = north(&law);
+    law.river_area_m2 = 5.0e8;
+    let without = north(&law);
+    assert!(with > 20, "the tributary of 3e8 m2 has {with} corridor cells above a threshold of 1e8");
+    assert_eq!(without, 0, "and none above a threshold of 5e8");
+}

@@ -11,7 +11,7 @@
 //!
 //! `route_band_m` zero and no slide is the coarse path of before (`segment_points` between the cell centres).
 
-use crate::anet::{segment_points, AnchorLaw, BaseDetail, CoarseRun, RIVER_AREA_M2};
+use crate::anet::{segment_points, AnchorLaw, BaseDetail, CoarseRun};
 use crate::chunkfield::ChunkLattice;
 use crate::coupled::NONE as COARSE_NONE;
 use planet_core::Face;
@@ -57,7 +57,7 @@ impl<'a> Router<'a> {
     }
 
     fn is_river(&self, c: usize) -> bool {
-        f64::from(self.run.area_m2(c)) > RIVER_AREA_M2 && self.run.receiver(c) != COARSE_NONE
+        f64::from(self.run.area_m2(c)) > self.law.river_area_m2 && self.run.receiver(c) != COARSE_NONE
     }
 
     fn is_head(&self, c: usize) -> bool {

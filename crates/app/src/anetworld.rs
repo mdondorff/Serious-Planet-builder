@@ -216,6 +216,7 @@ impl WorldTerrain {
         slump_rate: Option<f64>,
         steps: Option<u32>,
         route_off: bool,
+        river_area_m2: Option<f64>,
     ) -> Result<String, String> {
         use planet_core::cube::TangentWarp;
         use planet_core::{TileId, Vec3};
@@ -238,6 +239,9 @@ impl WorldTerrain {
         }
         if let Some(v) = steps {
             params.steps = v;
+        }
+        if let Some(a) = river_area_m2 {
+            params.anchor.river_area_m2 = a;
         }
         // The coarse path of before local routing (GEN-066), for the comparison of the report.
         if route_off {

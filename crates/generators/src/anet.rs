@@ -218,7 +218,7 @@ impl Network {
         // One coarse ring more than the region touches: a meander of 700 m takes a segment of the next cell into the region's outer cells.
         let touch: BTreeSet<usize> =
             inside.iter().flat_map(|&c| core::iter::once(c).chain(coarse.neighbours(c).into_iter().map(|x| x as usize))).collect();
-        let is_river = |c: usize| f64::from(run.area_m2(c)) > RIVER_AREA_M2 && run.receiver(c) != COARSE_NONE;
+        let is_river = |c: usize| f64::from(run.area_m2(c)) > law.river_area_m2 && run.receiver(c) != COARSE_NONE;
         let mut segments: BTreeSet<(usize, usize)> = BTreeSet::new();
         for &c in &touch {
             if is_river(c) {
@@ -372,6 +372,9 @@ pub struct AnchorLaw {
     /// The most a bed lies under the ground (GEN-059): a rise the river's path forces it through is cut at most this deep (a dam beyond), under the stage's
     /// bound on the change.
     pub cut_cap_m: f64,
+    /// The drainage area in m2 above which a coarse cell is a river of the network and is routed like a main stem (GEN-068): the tributaries of the coarse run
+    /// join the stems above it. [`RIVER_AREA_M2`] (100 km2) is the main stems alone.
+    pub river_area_m2: f64,
     /// Local main-stem routing (GEN-066, ADR 0081; `crate::route`): the band in metres round the coarse guide within which the least-cost path runs (0: the
     /// coarse path), the weight of the length in the cost (metres of rise per metre), the raster stride in cells, the radius in metres within which a node
     /// slides to the lowest ground (on flat ground and on steep ground, by the relief factor) and the radius within which a head moves to the highest.
@@ -407,6 +410,7 @@ impl Default for AnchorLaw {
             side_high: 0.9,
             band_cap_m: 1600.0,
             cut_cap_m: 200.0,
+            river_area_m2: RIVER_AREA_M2,
             route_band_m: 0.0,
             route_lambda: 0.02,
             route_stride: 4,
@@ -824,6 +828,8 @@ impl ANetParams {
         params.anchor.slide_m = 500.0;
         params.anchor.slide_steep_m = 1000.0;
         params.anchor.head_m = 1000.0;
+        // The tributaries of the coarse run (GEN-068): every coarse link of two cells' area and over is routed like a stem.
+        params.anchor.river_area_m2 = 5.0e7;
         params
     }
 }
@@ -1259,6 +1265,7 @@ impl crate::chunkfield::ChunkStage for ANet {
                 p.anchor.side_high.to_bits(),
                 p.anchor.band_cap_m.to_bits(),
                 p.anchor.cut_cap_m.to_bits(),
+                p.anchor.river_area_m2.to_bits(),
                 p.anchor.route_band_m.to_bits(),
                 p.anchor.route_lambda.to_bits(),
                 u64::from(p.anchor.route_stride),
@@ -1275,7 +1282,7 @@ impl crate::chunkfield::ChunkStage for ANet {
 }
 
 /// Version of the stage's algorithm: part of its definition hash, so a change that changes results re-keys every chunk.
-pub const ANET_VERSION: u32 = 6;
+pub const ANET_VERSION: u32 = 7;
 
 /// The change of height each cell takes in one pass of thermal slumping (GEN-051): a cell steeper than `talus` over a neighbour gives that
 /// neighbour `rate x (slope - talus) x distance`. `dist[c][k]` is the distance to the `k`-th neighbour of `c` (the order of the region's neighbour

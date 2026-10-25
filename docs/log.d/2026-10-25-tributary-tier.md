@@ -1,0 +1,1 @@
+- 2026-10-25 **tributary-tier** (ADR 0081 point 3, GEN-068): the coarse run's links over 5e7 m2 are routed like stems (river_area_m2); the census shows little change (the fine first-order tier is M9; the region-extent border problem recorded); ANET_VERSION 7
