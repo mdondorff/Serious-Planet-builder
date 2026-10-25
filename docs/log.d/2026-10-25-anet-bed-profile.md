@@ -1,0 +1,1 @@
+- 2026-10-25 **anet-bed-profile** (H1): a bed on every corridor cell (samples every 200 m, running maximum from downstream with a least fall): longest flat reach 0 m (was 400-1500 m / 517 m), largest drop between linked cells 0.63 m (was 19-35 m), no climbing link; GEN-059, ANET_VERSION 4

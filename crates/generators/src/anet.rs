@@ -238,7 +238,7 @@ impl Network {
         let mut river_area_m2 = vec![f64::NAN; len];
         let half_cell_m = 0.5 * lat.cell_m(radius_m);
         let key = |x: usize| region.cells[x].key();
-        let anchors = anchor_heights(run, base, &segments, radius_m, law, is_river);
+        let anchors = anchor_profiles(run, base, &segments, radius_m, law, is_river);
         for (from, to) in segments {
             let points = segment_points(coarse.direction(from), coarse.direction(to), from as u64, radius_m);
             // The cells along the polyline in runs: a run ends where the polyline leaves the region, and a cell is visited once per run (a
@@ -251,6 +251,14 @@ impl Network {
                     let a = area_from + (area_to - area_from) * t;
                     if river_area_m2[i].is_nan() || a > river_area_m2[i] {
                         river_area_m2[i] = a;
+                    }
+                    // The bed of a corridor cell: the anchors of the segment interpolated along it (GEN-059), the lower where two rivers meet.
+                    let profile = &anchors[&(from, to)];
+                    let k = profile.partition_point(|&(pt, _)| pt <= t).clamp(1, profile.len() - 1);
+                    let ((t0, h0), (t1, h1)) = (profile[k - 1], profile[k]);
+                    let bed = if t1 > t0 { h0 + (h1 - h0) * ((t - t0) / (t1 - t0)).clamp(0.0, 1.0) } else { h0 };
+                    if anchor_z[i].is_nan() || bed < anchor_z[i] {
+                        anchor_z[i] = bed;
                     }
                     let run = runs.last_mut().expect("a run");
                     if run.last() != Some(&i) && !run.contains(&i) {
@@ -272,16 +280,6 @@ impl Network {
             }
             if let Some(&last) = points.last() {
                 visit(last, 1.0, &mut runs);
-            }
-            // The anchors: the quarter points of the segment, held a depth under the ground there (`anchor_heights`).
-            for (q, &h) in anchors[&(from, to)].iter().enumerate() {
-                let t = q as f64 / 4.0;
-                let p = points[(t * (points.len() - 1) as f64).round() as usize];
-                if let Some(i) = region.index_of(lat.cell_at(p)) {
-                    if anchor_z[i].is_nan() || h < anchor_z[i] {
-                        anchor_z[i] = h;
-                    }
-                }
             }
             // A river whose polyline starts outside the region enters it at its first cell in the region, carrying the coarse area it started with.
             if points.first().is_some_and(|&p| region.index_of(lat.cell_at(p)).is_none()) {
@@ -339,38 +337,58 @@ pub struct AnchorLaw {
     pub exponent: f64,
     pub cap_m: f64,
     pub window: u16,
+    /// The least fall of the bed downstream (GEN-059): `slope_ks A^-slope_theta` per metre for a river of area `A` m2 (the law of the channel slope),
+    /// at most `slope_cap` (a floor against flat reaches that does not lift a bed over the ground it runs on).
+    pub slope_ks: f64,
+    pub slope_theta: f64,
+    pub slope_cap: f64,
 }
 
 impl Default for AnchorLaw {
     fn default() -> AnchorLaw {
-        AnchorLaw { depth_m: 3.0, area_ref_m2: RIVER_AREA_M2, exponent: 0.5, cap_m: 100.0, window: 8 }
+        AnchorLaw {
+            depth_m: 3.0,
+            area_ref_m2: RIVER_AREA_M2,
+            exponent: 0.5,
+            cap_m: 100.0,
+            window: 8,
+            slope_ks: 40.0,
+            slope_theta: 0.45,
+            slope_cap: 1.0e-4,
+        }
     }
 }
 
 impl AnchorLaw {
+    /// The least slope of the bed of a river of drainage area `area_m2` (rise over run, positive downhill).
+    pub fn min_slope(&self, area_m2: f64) -> f64 {
+        (self.slope_ks * libm::pow(area_m2.max(1.0), -self.slope_theta)).min(self.slope_cap)
+    }
+
     /// The depth in metres of a river of drainage area `area_m2` (never negative, never over `cap_m`).
     pub fn depth_m(&self, area_m2: f64) -> f64 {
         (self.depth_m * libm::pow((area_m2 / self.area_ref_m2).max(0.0), self.exponent)).min(self.cap_m)
     }
 }
 
-/// A segment and the chain of segments from it on down the river (itself included).
-type Chain = ((usize, usize), Vec<(usize, usize)>);
-
-/// The anchor heights of every segment of `segments` at its five quarter points (GEN-047): the base height at the point minus the law's depth for the
-/// river's area there, then the running maximum from downstream along the river for up to `law.window` further segments, so no anchor lies under the
-/// bed downstream of it (the bed profile is non-increasing downstream). A function of the run and the base at positions alone: the same in every chunk.
-fn anchor_heights(
+/// The bed of every segment of `segments` (GEN-059), sampled every `PROFILE_SAMPLES` polyline points: `(t, height)` along the segment, the height of
+/// the bed `t` of the way along it. The raw bed at a point is the base height there minus the law's depth for the river's area; the bed is the
+/// running maximum from downstream of the raw beds along the river for up to `law.window` further segments, each point at least the least fall of its
+/// river above the point below it: the bed never rises downstream within the window and has no flat reach. Where the ground downstream is higher the
+/// bed lies above the ground (a river held up behind a ridge: the stage takes the lower of bed and base), not under it: a minimum from upstream would
+/// carry every low of the river's ground down its whole course and cut every rise in its way. A function of the run and the base at positions alone:
+/// the same in every chunk.
+fn anchor_profiles(
     run: &dyn CoarseRun,
     base: &dyn BaseDetail,
     segments: &BTreeSet<(usize, usize)>,
     radius_m: f64,
     law: &AnchorLaw,
     is_river: impl Fn(usize) -> bool,
-) -> BTreeMap<(usize, usize), [f64; 5]> {
+) -> BTreeMap<(usize, usize), Vec<(f64, f64)>> {
     let coarse = run.lattice();
     // The chain of segments from each segment on down the river (itself included).
-    let mut chains: Vec<Chain> = Vec::new();
+    let mut chains: Vec<((usize, usize), Vec<(usize, usize)>)> = Vec::new();
     let mut needed: BTreeSet<(usize, usize)> = BTreeSet::new();
     for &(from, to) in segments {
         let mut chain = vec![(from, to)];
@@ -386,49 +404,67 @@ fn anchor_heights(
         needed.extend(chain.iter().copied());
         chains.push(((from, to), chain));
     }
-    // The five quarter points and the river's area at each, per needed segment, and one batch of base heights for all of them.
-    let mut areas: BTreeMap<(usize, usize), [f64; 5]> = BTreeMap::new();
+    // The sample points of every needed segment, and one batch of base heights for all of them.
+    struct Samples {
+        ts: Vec<f64>,
+        spots: Vec<Vec3>,
+        areas: Vec<f64>,
+    }
+    let mut samples: BTreeMap<(usize, usize), Samples> = BTreeMap::new();
     let mut dirs: Vec<Vec3> = Vec::new();
     for &(from, to) in &needed {
         let line = segment_points(coarse.direction(from), coarse.direction(to), from as u64, radius_m);
-        let (area_from, area_to) = (f64::from(run.area_m2(from)), f64::from(run.area_m2(to)));
-        let mut five_area = [0.0; 5];
-        for (q, a) in five_area.iter_mut().enumerate() {
-            let t = q as f64 / 4.0;
-            dirs.push(line[(t * (line.len() - 1) as f64).round() as usize]);
-            *a = area_from + (area_to - area_from) * t;
+        let mut idx: Vec<usize> = (0..line.len()).step_by(PROFILE_SAMPLES).collect();
+        if idx.last() != Some(&(line.len() - 1)) {
+            idx.push(line.len() - 1);
         }
-        areas.insert((from, to), five_area);
+        let last = idx[idx.len() - 1].max(1) as f64;
+        let (area_from, area_to) = (f64::from(run.area_m2(from)), f64::from(run.area_m2(to)));
+        let ts: Vec<f64> = idx.iter().map(|&i| i as f64 / last).collect();
+        let spots: Vec<Vec3> = idx.iter().map(|&i| line[i]).collect();
+        let areas: Vec<f64> = ts.iter().map(|&t| area_from + (area_to - area_from) * t).collect();
+        dirs.extend(spots.iter().copied());
+        samples.insert((from, to), Samples { ts, spots, areas });
     }
     let heights = base.base_heights(&dirs);
-    let raw: BTreeMap<(usize, usize), [f64; 5]> = needed
-        .iter()
-        .enumerate()
-        .map(|(k, seg)| {
-            let mut out = [0.0; 5];
-            for (q, o) in out.iter_mut().enumerate() {
-                *o = heights[k * 5 + q] - law.depth_m(areas[seg][q]);
-            }
-            (*seg, out)
-        })
-        .collect();
+    let mut raw: BTreeMap<(usize, usize), Vec<f64>> = BTreeMap::new();
+    let mut at = 0;
+    for (seg, smp) in &samples {
+        raw.insert(*seg, (0..smp.spots.len()).map(|k| heights[at + k] - law.depth_m(smp.areas[k])).collect());
+        at += smp.spots.len();
+    }
     let mut out = BTreeMap::new();
     for (seg, chain) in chains {
-        // Along the chain the points run downstream; the running maximum from the downstream end.
-        let along: Vec<f64> = chain.iter().flat_map(|s| raw[s]).collect();
+        // Along the chain the samples run downstream; the running maximum from the downstream end with the least fall.
+        let mut along: Vec<(f64, f64, Vec3)> = Vec::new(); // raw bed, area, position
+        for s in &chain {
+            for k in 0..samples[s].spots.len() {
+                along.push((raw[s][k], samples[s].areas[k], samples[s].spots[k]));
+            }
+        }
         let mut suffix = vec![0.0; along.len()];
-        let mut best = *along.last().expect("a chain has points");
-        for (k, &h) in along.iter().enumerate().rev() {
-            debug_assert!(h.is_finite(), "a base height that is not a number");
-            best = best.max(h);
+        let mut best = along[along.len() - 1].0;
+        for k in (0..along.len()).rev() {
+            debug_assert!(along[k].0.is_finite(), "a base height that is not a number");
+            if k + 1 < along.len() {
+                let run_m = (along[k + 1].2 - along[k].2).length() * radius_m;
+                best += law.min_slope(along[k].1) * run_m;
+            }
+            best = best.max(along[k].0);
             suffix[k] = best;
         }
-        let mut five = [0.0; 5];
-        five.copy_from_slice(&suffix[..5]);
-        out.insert(seg, five);
+        let own = &samples[&seg];
+        out.insert(seg, own.ts.iter().copied().zip(suffix.iter().copied()).collect());
     }
     out
 }
+
+/// Polyline points between two samples of a segment's bed (about 200 m at the point spacing).
+const PROFILE_SAMPLES: usize = 5;
+
+/// A link between two fixed cells that climbs by no more than this is a flat, not a reason to make the donor an outlet (the beds of two linked cells
+/// are interpolated along the polyline in an order that can differ from the link order by millimetres).
+const BED_TOLERANCE_M: f64 = 0.05;
 
 /// The parameters of the incision (SPIKE-33, SPIKE-35): stream power `K A^m S` with the implicit step, N steps along the frozen network.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -771,7 +807,7 @@ pub fn solve(
     }
     for &c in &order {
         let r = rec[c];
-        if r == NONE || !channel(c, &area) || z[r as usize] <= z[c] {
+        if r == NONE || !channel(c, &area) || z[r as usize] <= z[c] + BED_TOLERANCE_M {
             continue;
         }
         if !fixed(r as usize) {
@@ -907,6 +943,9 @@ impl crate::chunkfield::ChunkStage for ANet {
                 p.anchor.exponent.to_bits(),
                 p.anchor.cap_m.to_bits(),
                 u64::from(p.anchor.window),
+                p.anchor.slope_ks.to_bits(),
+                p.anchor.slope_theta.to_bits(),
+                p.anchor.slope_cap.to_bits(),
                 self.run.identity(),
                 self.base.identity(),
                 self.radius_m.to_bits(),
@@ -917,7 +956,7 @@ impl crate::chunkfield::ChunkStage for ANet {
 }
 
 /// Version of the stage's algorithm: part of its definition hash, so a change that changes results re-keys every chunk.
-pub const ANET_VERSION: u32 = 3;
+pub const ANET_VERSION: u32 = 4;
 
 /// The change of height each cell takes in one pass of thermal slumping (GEN-051): a cell steeper than `talus` over a neighbour gives that
 /// neighbour `rate x (slope - talus) x distance`. `dist[c][k]` is the distance to the `k`-th neighbour of `c` (the order of the region's neighbour
