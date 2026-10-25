@@ -100,3 +100,12 @@ Scope: M8-5 (horizon shadows), `generators::horizon`, `coarsehorizon`, the lit s
 - On the look-review stills the shadow edge along canyon rims is scalloped (16 azimuths fan near an occluder); the far-field outline at sunset could not be judged on flat sites.
 - Obsolete when the bake marches in metres, the coarse map gets a pole-free frame and the azimuth count is decided from stills.
 
+
+## 2026-10-25 The chunk stage's walls exceed the angle of repose because the hillslope steps skip every pair with a channel cell
+Scope: generators::anet (GEN-051), app::stills, app::anetworld; look review 1 second site after R-a
+- At the steepest site the 131 capped plan nodes (30 m pose) are all level 16 (153 m): 10 are over the drawable slope 3.42 on the 8 m heights, 12 are between 0.9 and 3.42, 109 are flat (median steepest slope 0.10) and held by ADR 0074's ceiling next to a steep tile.
+- The base alone has no neighbour pair over 0.12. In the solved chunks 6,010 of 1.48 million edge pairs (site 1) and 20,612 (site 2) are over 0.9, the steepest 5.72 and 9.39.
+- 42 % (site 1) and 22 % (site 2) of the steep pairs have a protected cell (channel, corridor, anchor); `slump_deltas` and `diffuse` skip those pairs, so the bank-to-bed step is never relaxed.
+- A slump rate of 0.5 (from 0.09) and 90 steps (from 30) cut the pairs of two unprotected cells from 3,494 to about 820 and leave the protected ones at 2,200 to 2,700: rate-limited and structural, in that order.
+- Tools: `capped.txt` of the stills tool (first pose), the pair census of `chunk_incision_report` with `PLANET_SLUMP_RATE` and `PLANET_STEPS` overrides (diagnostic only).
+- Obsolete when the hillslope steps relax the bank next to a channel cell.
