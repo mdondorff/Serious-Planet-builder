@@ -466,6 +466,32 @@ fn step_with(
     (rec, a, StepStat { mean_dz_m: sum / order.len().max(1) as f64, max_dz_m: max })
 }
 
+/// The stationary uplift of the input heights `z` (GEN-059): the uplift in m/year at which the implicit update leaves each land cell where it
+/// is, `rho K A^m S` with the area `A` and the slope `S` to the receiver taken from `z` itself (the flood, the jittered receivers and the
+/// accumulation of a step). `rho` 1 makes the input a steady state of the law, so the run keeps its relief and changes what the flood fills
+/// and the breaches open; lower values let it keep eroding. Sea cells, outlets and cells that sit in a pit (no drop to the receiver) get 0.
+/// A pure function of its arguments, in the fixed order of the run (CON-14).
+pub fn stationary_uplift(lat: &Lattice, z: &[f32], erodibility: &[f32], p: &CoupledParams, rho: f64) -> Vec<f32> {
+    assert!(z.len() == lat.len() && erodibility.len() == lat.len(), "the inputs must have one value per cell");
+    assert!(rho.is_finite() && rho >= 0.0, "rho {rho} is not a factor of zero or more");
+    let (filled, order) = priority_flood(lat, z);
+    let (rec, dir) = receivers(lat, &filled, &order, p);
+    let a = accumulate(lat, z, &order, &rec);
+    let mut leaf_pow = vec![f64::NAN; lat.n * lat.n];
+    let mut u = vec![0.0f32; lat.len()];
+    for &c in &order {
+        let c = c as usize;
+        let r = rec[c];
+        if z[c] <= 0.0 || r == NONE {
+            continue;
+        }
+        let dist = lat.spacing_m(c, usize::from(dir[c]), r as usize);
+        let drop = (f64::from(z[c]) - f64::from(z[r as usize]).max(0.0)).max(0.0);
+        u[c] = (rho * f64::from(erodibility[c]) * area_pow(lat, &mut leaf_pow, c, a[c], p.area_exp) * (drop / dist)) as f32;
+    }
+    u
+}
+
 /// The run: `steps` steps from the input heights.
 pub fn run(lat: &Lattice, input: &CoupledInput, p: &CoupledParams, steps: usize) -> CoupledState {
     run_with(lat, input, p, steps, |_, _| {})
@@ -694,6 +720,52 @@ mod tests {
             })
             .collect();
         CoupledInput { uplift: vec![1.0e-3; z.len()], erodibility: vec![2.0e-5; z.len()], z }
+    }
+
+    // spec: GEN-059
+    #[test]
+    fn a_run_on_the_stationary_uplift_keeps_the_relief_of_its_input_and_a_constant_uplift_does_not() {
+        let lat = Lattice::new(24, R);
+        let mut input = world(&lat);
+        let p = CoupledParams::default();
+        // Rho 1: the input is a steady state of the update, so its relief survives 20 steps (the pits the flood fills and the cells without a
+        // receiver are the run's to change).
+        input.uplift = stationary_uplift(&lat, &input.z, &input.erodibility, &p, 1.0);
+        assert!(input.uplift.iter().all(|u| u.is_finite() && *u >= 0.0), "an uplift is never negative");
+        assert!(input.uplift.iter().any(|&u| u > 0.0));
+        let kept = run(&lat, &input, &p, 20);
+        let drift = |z: &[f32]| {
+            let mut d: Vec<f64> =
+                (0..lat.len()).filter(|&c| input.z[c] > 0.0).map(|c| (f64::from(z[c]) - f64::from(input.z[c])).abs()).collect();
+            d.sort_by(f64::total_cmp);
+            d[d.len() / 2]
+        };
+        // The constant uplift of 1e-3 m/year, as before, drives the same input far from itself.
+        let constant = CoupledInput { z: input.z.clone(), uplift: vec![1.0e-3; lat.len()], erodibility: input.erodibility.clone() };
+        let moved = run(&lat, &constant, &p, 20);
+        let (d1, d0) = (drift(&kept.z), drift(&moved.z));
+        eprintln!("median drift over land: stationary {d1:.2} m, constant {d0:.2} m");
+        assert!(d1 < 0.1 * d0 && d1 < 20.0, "the stationary uplift keeps the relief: {d1} m against {d0} m");
+        // Rho 0 is no uplift: the heights only fall; rho 2 holds the relief higher than rho 1.
+        let none = stationary_uplift(&lat, &input.z, &input.erodibility, &p, 0.0);
+        assert!(none.iter().all(|&u| u == 0.0));
+        let double = stationary_uplift(&lat, &input.z, &input.erodibility, &p, 2.0);
+        assert!(double.iter().zip(&input.uplift).all(|(d, u)| (*d - 2.0 * u).abs() <= 1e-9 * d.abs().max(1.0)), "linear in rho");
+    }
+
+    // spec: GEN-059
+    #[test]
+    fn the_stationary_uplift_is_deterministic_and_zero_at_sea_and_outlets() {
+        let lat = Lattice::new(12, R);
+        let input = world(&lat);
+        let p = CoupledParams::default();
+        let a = stationary_uplift(&lat, &input.z, &input.erodibility, &p, 1.0);
+        assert_eq!(a, stationary_uplift(&lat, &input.z, &input.erodibility, &p, 1.0));
+        for c in 0..lat.len() {
+            if input.z[c] <= 0.0 {
+                assert_eq!(a[c], 0.0, "cell {c} is sea");
+            }
+        }
     }
 
     // spec: GEN-040
