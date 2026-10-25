@@ -334,9 +334,10 @@ impl WorldTerrain {
                     window_slopes.push((w[0] - w[8]) / (8.0 * cell_m));
                 }
             }
+            let outlets = (0..core).filter(|&c| net.corridor[c] && net.next[c] != NO_NEXT && s.receiver[c] == u32::MAX).count();
             window_slopes.sort_by(f64::total_cmp);
             out += &format!(
-                "bed: {links} links in the core; longest flat reach {longest_flat:.0} m; largest drop between linked cells {max_drop:.2} m; links that climb over 5 cm {climbs}; median slope over 8 links {:.2e}
+                "bed: {links} links in the core; longest flat reach {longest_flat:.0} m; largest drop between linked cells {max_drop:.2} m; links that climb over 5 cm {climbs}; linked corridor cells left without a receiver {outlets}; median slope over 8 links {:.2e}
 ",
                 window_slopes.get(window_slopes.len() / 2).copied().unwrap_or(f64::NAN)
             );

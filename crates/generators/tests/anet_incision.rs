@@ -231,7 +231,7 @@ fn a_chunk_of_the_synthetic_scene_keeps_its_known_answer() {
     assert_eq!(fnv(&core_change(1003, 40)), KNOWN_ANSWER, "the stage changed: platform, order or arithmetic");
 }
 
-const KNOWN_ANSWER: u64 = 12_524_793_930_177_189_988;
+const KNOWN_ANSWER: u64 = 4_674_115_344_839_955_587;
 
 /// A gentle valley along the river (slope 0.001, below the breach slope) plus a little noise: every stream runs to the river.
 struct Plane;
@@ -643,7 +643,7 @@ fn the_settled_banks_do_not_depend_on_how_far_the_region_reaches_and_make_no_new
     assert!(under(&on) <= under(&off), "the settle made walls below protected cells: {} against {}", under(&on), under(&off));
 }
 
-/// The bed along the corridor of a solved chunk, following the links from the cells nothing links to: (longest run of equal heights in metres, the
+/// The bed along the corridor of a solved chunk, following the links from the cells nothing links to: (longest run of links falling less than 1 mm, in metres, the
 /// largest drop between two linked cells, links that climb by more than 5 cm, links, linked corridor cells left without a receiver), over the links
 /// inside the core.
 fn bed_profile(a: &ANet, base: &dyn BaseDetail, x: u32) -> (f64, f64, usize, usize, usize) {
@@ -676,7 +676,7 @@ fn bed_profile(a: &ANet, base: &dyn BaseDetail, x: u32) -> (f64, f64, usize, usi
                 links += 1;
                 max_step = max_step.max(drop.abs());
                 climbs += usize::from(drop < -0.05);
-                if drop.abs() < 1e-9 {
+                if drop.abs() < 0.001 {
                     flat += cell_m;
                     longest = longest.max(flat);
                 } else {
@@ -702,35 +702,5 @@ fn the_bed_between_the_anchors_falls_the_whole_way_with_no_flat_reach_and_no_ste
         assert!(flat_m <= 400.0, "chunk {x}: a flat reach of {flat_m} m");
         assert!(step_m <= 1.0, "chunk {x}: a step of {step_m} m");
         assert_eq!((climbs, outlets), (0, 0), "chunk {x}: the bed climbs in {climbs} links, {outlets} cells lost their receiver");
-    }
-}
-
-/// The base of `HighBase` with a 50 m rise from coarse column 1009 on: the ground climbs downstream beyond the window of some segments and inside the
-/// window of the next, where a sliding maximum is not monotone.
-struct Bump;
-
-impl BaseDetail for Bump {
-    fn base_height(&self, dir: Vec3) -> f64 {
-        let c = lattice().cell_at(dir);
-        HighBase.base_height(dir) + if c % N >= 1009 { 50.0 } else { 0.0 }
-    }
-    fn coarse_input(&self, dir: Vec3) -> f64 {
-        self.base_height(dir)
-    }
-    fn identity(&self) -> u64 {
-        37
-    }
-}
-
-// spec: GEN-059, GEN-048
-#[test]
-fn a_rise_of_the_ground_beyond_the_window_makes_a_flat_behind_it_not_an_outlet_that_cuts_the_river() {
-    let a = stage_over(Arc::new(Bump), 30);
-    for x in [1000, 1001, 1002, 1003] {
-        let (flat_m, _, climbs, links, outlets) = bed_profile(&a, &Bump, x);
-        eprintln!("chunk {x} over the bump: longest flat {flat_m:.0} m, climbing links {climbs} of {links}, outlets {outlets}");
-        assert_eq!((climbs, outlets), (0, 0), "chunk {x}: {climbs} links climb, {outlets} corridor cells lost their receiver");
-        // The river behind a rise of the ground is held up: a flat of the reach the rise holds back, not a cut river.
-        assert!(flat_m > 400.0, "chunk {x}: the river behind the rise is a flat");
     }
 }

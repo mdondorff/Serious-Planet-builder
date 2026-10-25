@@ -353,7 +353,7 @@ impl Default for AnchorLaw {
             area_ref_m2: RIVER_AREA_M2,
             exponent: 0.5,
             cap_m: 100.0,
-            window: 8,
+            window: 64,
             slope_ks: 40.0,
             slope_theta: 0.45,
             slope_cap: 1.0e-4,
@@ -460,6 +460,12 @@ fn anchor_profiles(
     }
     out
 }
+
+/// A link between two fixed cells that climbs by no more than this is a flat, not a reason to make the donor an outlet (the beds of two linked cells are
+/// interpolated along the polyline in an order that can differ from the link order by millimetres). A larger climb (the ground rises beyond the window of
+/// the bed profile: a step of the profile at a segment boundary) cuts the river there, locally: lifting the donors instead would raise the river over
+/// the whole region and leave a seam at the next chunk, which does not see the step.
+const BED_TOLERANCE_M: f64 = 0.05;
 
 /// Polyline points between two samples of a segment's bed (about 200 m at the point spacing).
 const PROFILE_SAMPLES: usize = 5;
@@ -789,15 +795,13 @@ pub fn solve(
             }
         }
     }
-    // No channel cell drains uphill (GEN-048). A corridor donor below its receiver is lifted to it, fixed (an anchor, a bed) or not: a flat, the bed behind a
-    // dam fills up to it (where the bed lies over the ground, or the window of the bed profile ended at a rise, GEN-059), receivers first so that the lift
-    // reaches the donors above it;
+    // No channel cell drains uphill (GEN-048). A free corridor donor below a fixed receiver is lifted to it, a flat (the bed behind a dam fills up to it),
     // receivers first; a free corridor receiver above its donor is cut down to the donor, donors first (it ends at the next anchor); a link that
     // joins two fixed cells the wrong way, or a donor off the corridor, becomes an outlet. Each rule reaches the cell and the corridor next to it.
     let channel = |c: usize, area: &[f64]| area[c] > p.channel_area_m2;
     for &c in order.iter().rev() {
         let r = rec[c];
-        if r != NONE && !ring(c) && channel(c, &area) && z[c] < z[r as usize] {
+        if r != NONE && !fixed(c) && channel(c, &area) && z[c] < z[r as usize] {
             if is_link[c] {
                 z[c] = z[r as usize];
             } else {
@@ -812,7 +816,7 @@ pub fn solve(
         }
         if !fixed(r as usize) {
             z[r as usize] = z[c];
-        } else {
+        } else if z[r as usize] > z[c] + BED_TOLERANCE_M {
             rec[c] = NONE;
         }
     }
