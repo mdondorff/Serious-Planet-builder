@@ -91,14 +91,14 @@ mod tests {
         // The literals of crates/cache/tests/keys.rs and global_store.rs: one pin, two places.
         assert_eq!(get("base"), "b00fa2b4b0f9accc87be74b4dd9d40ca");
         assert_eq!(get("height"), "340480159ae2ca791db08d1cae1232ce");
-        assert_eq!(get("mesh"), "6fd0a34f830ec27942c76fef014f2cdb");
+        assert_eq!(get("mesh"), "4843c471858a5aff0c6741d4cd9a60c0");
         assert_eq!(get("node"), "dd934e9e858a828bb73c45e8a4eb4d45");
         assert_eq!(get("body"), "91f0cebc78907779e2f87196650d468e");
         assert_eq!(get("emptyquery"), "a97668a9d9614a3f4a73f2fceae97219");
-        assert_eq!(get("stagekey32"), "9a64d68a38a57d47c0762bdbec4cb95c");
-        assert_eq!(get("blockkey"), "995ef36e9bddc3cd742437e94a726785");
+        assert_eq!(get("stagekey32"), "9f1fce5d0a4efe935a8fda701db5318a");
+        assert_eq!(get("blockkey"), "bc2026919007000277f1e34774425262");
         assert_eq!(get("nodesetid"), "92572f1974620d913454c89a22aca7be");
-        assert_eq!(get("oceankey"), "e652f9786c2ec96f65747583c43390a9");
+        assert_eq!(get("oceankey"), "a36a2a536f7b47f4b734fb245a1b8c7e");
         assert_eq!(m.lines().filter(|l| l.starts_with("persistent ")).count(), 10);
         assert!(m.starts_with(&planet_generators::manifest::determinism_manifest()), "the generators' manifest comes first, unchanged");
         let mut keys: Vec<&str> = m.lines().map(|l| l.rsplit_once(' ').unwrap().0).collect();

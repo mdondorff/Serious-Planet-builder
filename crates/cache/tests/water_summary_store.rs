@@ -100,7 +100,7 @@ fn the_summary_payload_round_trips_and_a_hostile_payload_is_refused_without_allo
     assert!(matches!(decode_summary(&forged).unwrap_err(), BlockCodecError::Summary(m) if m.contains("flag")));
 }
 
-const KNOWN_SUMMARY_KEY: &str = "ee33f67f1a06c2e8f9ebaf6b20f05d90";
+const KNOWN_SUMMARY_KEY: &str = "e88313f4a7bd9044e251fdb67bc8f7ce";
 
 // spec: STRM-025
 #[test]

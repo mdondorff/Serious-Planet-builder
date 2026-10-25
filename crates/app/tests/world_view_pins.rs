@@ -17,21 +17,23 @@ const PIN_BAKE_RES: u32 = 256;
 /// Re-pinned 2026-10-15 by `finest-level-cap` (LOD-010, declared: finest level 22): the views are planned at the production finest
 /// level 22 (cells 32); only ground-1m reaches it: 2,936 to 2,409 nodes (-17.9 %), every other view is unchanged. The level-26
 /// reference is `REFERENCE_L26_GROUND_1M` below.
+/// Re-pinned 2026-10-25 by `m8-relief-band` (GEN-064, declared): the hill band changes the heights the plans read; low-2km 1,299 to 1,300,
+/// ground-200m 1,719 to 1,722, ground-1m 2,409 to 2,412 (at most +0.2 %); the other views hold.
 const EROSION_VIEW_NODE_PINS: [(&str, u32); 10] = [
     ("orbit-20000km", 182), // 52 until render-floor-3 (LOD-011): the 182 level-3 tiles of the visible hemisphere (181 over the reference field)
     ("high-2000km", 430),
     ("aerial-200km", 634),
     ("aerial-20km", 900),
-    ("low-2km", 1299),
-    ("ground-200m", 1719),
-    ("ground-1m", 2409),
+    ("low-2km", 1300),
+    ("ground-200m", 1722),
+    ("ground-1m", 2412),
     ("north-pole-1km", 1128),
     ("cube-corner-1km", 1594),
     ("face-edge-1km", 1551),
 ];
 
 /// The ground-1m node count of the default world at the reference finest level 26 (the cap before ADR 0033 point 6).
-const REFERENCE_L26_GROUND_1M: usize = 2936;
+const REFERENCE_L26_GROUND_1M: usize = 2939;
 
 // spec: TEST-011, LOD-010
 #[test]

@@ -21,8 +21,9 @@ use crate::height::layer_noise;
 
 /// Bump whenever any output of this module changes (ADR 0006). History: 2 = the climate's pole axis moved to COORD's +z (3);
 /// 4 = the global stage gains the ocean-connectivity channel (`crate::ocean`, ADR 0041 point 2); the four sample channels are
-/// unchanged, but every key under this version is new, so stored blocks of version 3 are unreachable.
-pub const GLOBAL_VERSION: u32 = 4;
+/// unchanged, but every key under this version is new, so stored blocks of version 3 are unreachable; 5 = the hill band joins the elevation
+/// (GEN-064, ADR 0080).
+pub const GLOBAL_VERSION: u32 = 5;
 /// Names this implementation in cache keys (CON-07).
 pub const IMPLEMENTATION_ID: &str = "cpu-global-coarse-v1";
 
@@ -33,6 +34,7 @@ const LAYER_RIDGE: u64 = 0x474c_0003;
 const LAYER_RANGE_MASK: u64 = 0x474c_0004;
 const LAYER_TEMPERATURE: u64 = 0x474c_0005;
 const LAYER_RAIN: u64 = 0x474c_0006;
+const LAYER_HILL: u64 = 0x474c_0007;
 
 /// The continentalness value above which a point is land: tuned so about three tenths of a sphere is land.
 pub const SEA_LEVEL_F32: f32 = 0.1;
@@ -157,8 +159,16 @@ pub fn sin_latitude(d: Vec3) -> f64 {
     d.z.clamp(-1.0, 1.0)
 }
 
-/// The global-coarse field at the unit direction `d`. Pure: the same `(seed, d)` gives the same bits everywhere.
-pub fn sample(seed: u64, d: Vec3) -> GlobalSample {
+/// The terms of the elevation that the landform driver and the hill band share: the warped direction, the continent value and the range zone.
+struct Terrain {
+    warped: Vec3,
+    continent: f64,
+    land_depth: f64,
+    zone: f64,
+    inland: f64,
+}
+
+fn terrain(seed: u64, d: Vec3) -> Terrain {
     // Continents: low-frequency fBm of a domain-warped direction, so coastlines are not round blobs.
     let warp = Vec3::new(
         fbm(seed, LAYER_WARP, d + Vec3::new(0.0, 0.0, 0.0), 1.3, 3),
@@ -168,10 +178,75 @@ pub fn sample(seed: u64, d: Vec3) -> GlobalSample {
     let warped = d + warp * 0.45;
     // Rounded to the stored f32 first, so land and the sign of the elevation are decided from the same number.
     let continent = f64::from((fbm(seed, LAYER_CONTINENT, warped, 1.1, 5) * 1.7) as f32);
+    let land_depth = continent - SEA_LEVEL_C;
+    let zone = smoothstep(0.1, 0.6, fbm(seed, LAYER_RANGE_MASK, warped, 1.7, 3) + 0.2);
+    let inland = smoothstep(0.02, 0.35, land_depth);
+    Terrain { warped, continent, land_depth, zone, inland }
+}
+
+/// The ridge term of the mountain ranges at the warped direction, in `[0, 1]`.
+fn ridge_at(seed: u64, warped: Vec3) -> f64 {
+    let n = fbm(seed, LAYER_RIDGE, warped, 3.0, 5);
+    let r = 1.0 - libm::fabs(n) * 2.0;
+    r.max(0.0) * r.max(0.0)
+}
+
+/// The landform driver in `[0, 1]` at the unit direction `d` (GEN-064, ADR 0080 point 3): the range-zone strength times the distance from the
+/// coast, 0 over the sea, on the plains and at the coast, 1 deep inland in the middle of a range zone. A pure function of `(seed, d)` that does
+/// not read the hill band, so the band's amplitude does not feed back into the driver that sets it, and the same bits at any bake resolution.
+pub fn landform(seed: u64, d: Vec3) -> f64 {
+    let t = terrain(seed, d);
+    t.zone * t.inland
+}
+
+/// The largest amplitude of the hill band in metres (GEN-064); the elevation clamp has room for it above the highest base and range
+/// (`1000 + 5200` m), so the clamp is not raised.
+pub const HILL_BAND_MAX_M: f64 = 1000.0;
+
+/// Frequencies of the three octaves of the hill band in units of the unit direction: wavelengths of 8, 4 and 2 km on a body of Earth's radius
+/// (they scale with the radius of the body).
+const HILL_BAND_FREQ: f64 = 796.0;
+const HILL_BAND_OCTAVES: u32 = 3;
+
+/// The amplitude of the hill band in metres for the mountain strength `m` in `[0, 1]`: plains 30 m, hills up to 175 m by `m` 0.25, then up to
+/// the mountains' 1000 m.
+fn hill_amplitude_m(m: f64) -> f64 {
+    30.0 + 145.0 * smoothstep(0.0, 0.25, m) + (HILL_BAND_MAX_M - 175.0) * smoothstep(0.25, 0.7, m)
+}
+
+/// The hill band at a point of land: a ridged multifractal of three octaves (wavelengths 8, 4 and 2 km) on the warped direction, in `[0, 1]`,
+/// times the amplitude of the landform and a ramp from the coast (so the band is 0 at the coast and over the sea, and only lifts).
+fn hill_band(seed: u64, t: &Terrain, ridge: f64) -> f64 {
+    if t.land_depth <= 0.0 {
+        return 0.0;
+    }
+    let m = t.zone * t.inland * (0.25 + 0.75 * ridge);
+    let (mut sum, mut amp, mut norm, mut freq) = (0.0, 1.0, 0.0, HILL_BAND_FREQ);
+    for o in 0..HILL_BAND_OCTAVES {
+        let n = layer_noise(seed, LAYER_HILL, o, t.warped * freq);
+        let r = 1.0 - libm::fabs(n);
+        sum += amp * r * r;
+        norm += amp;
+        amp *= 0.5;
+        freq *= 2.0;
+    }
+    hill_amplitude_m(m) * (sum / norm) * smoothstep(0.0, 0.1, t.land_depth)
+}
+
+/// The hill band in metres at the unit direction `d` (GEN-064): what the bake adds to the elevation for wavelengths of 2 to 8 km.
+pub fn hill_band_m(seed: u64, d: Vec3) -> f64 {
+    let t = terrain(seed, d);
+    hill_band(seed, &t, ridge_at(seed, t.warped))
+}
+
+/// The global-coarse field at the unit direction `d`. Pure: the same `(seed, d)` gives the same bits everywhere.
+pub fn sample(seed: u64, d: Vec3) -> GlobalSample {
+    let t = terrain(seed, d);
+    let (continent, inland, zone) = (t.continent, t.inland, t.zone);
 
     // Elevation: ocean basins and shelves from the continent value, mountain ranges from ridged noise inside range
     // zones, rising inland.
-    let land_depth = continent - SEA_LEVEL_C;
+    let land_depth = t.land_depth;
     let base = if land_depth < 0.0 {
         // Sea level at the coast, down to -4500 m far from it (the field is continuous across the coast).
         -4500.0 * smoothstep(0.0, 0.9, -land_depth)
@@ -179,14 +254,8 @@ pub fn sample(seed: u64, d: Vec3) -> GlobalSample {
         // Sea level at the coast, rising slowly to plateaus.
         1000.0 * smoothstep(0.0, 0.9, land_depth)
     };
-    let ridge = {
-        let n = fbm(seed, LAYER_RIDGE, warped, 3.0, 5);
-        let r = 1.0 - libm::fabs(n) * 2.0;
-        r.max(0.0) * r.max(0.0)
-    };
-    let zone = smoothstep(0.1, 0.6, fbm(seed, LAYER_RANGE_MASK, warped, 1.7, 3) + 0.2);
-    let inland = smoothstep(0.02, 0.35, land_depth);
-    let elevation = (base + 5200.0 * ridge * zone * inland).clamp(MIN_ELEVATION_M, MAX_ELEVATION_M);
+    let ridge = ridge_at(seed, t.warped);
+    let elevation = (base + 5200.0 * ridge * zone * inland + hill_band(seed, &t, ridge)).clamp(MIN_ELEVATION_M, MAX_ELEVATION_M);
 
     // Climate (latitude from COORD's +z pole, see [`sin_latitude`]): temperature falls with latitude and, over land, with height; rain follows the latitude bands.
     let sin_lat = sin_latitude(d);
