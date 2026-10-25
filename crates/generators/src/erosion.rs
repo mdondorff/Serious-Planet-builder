@@ -11,7 +11,7 @@
 //! slope stencil can read ([`crate::terrain::scan_base`]), the slope interval from the gradient at the centre and its
 //! variation over the cap, the per-octave noise bounds ([`layer_noise_bounds`]), and the product of the intervals.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use planet_core::cube::TangentWarp;
 use planet_core::hash::hash_u64s;
@@ -23,7 +23,7 @@ use crate::height::{layer_noise, layer_noise_bounds, HeightField};
 use crate::terrain::scan_base;
 
 /// Bump whenever any output of this module changes (ADR 0006); it also covers [`GLOBAL_VERSION`] through the bake key.
-pub const EROSION_VERSION: u32 = 1;
+pub const EROSION_VERSION: u32 = 2;
 /// Names this implementation in cache keys (CON-07).
 pub const EROSION_IMPLEMENTATION_ID: &str = "cpu-erosion-v1";
 
@@ -42,6 +42,9 @@ const SLOPE_CELLS: f64 = 3.0;
 const CARVE_FLOOR: f64 = 0.15;
 const CARVE_FROM: f64 = 0.01;
 const CARVE_TO: f64 = 0.2;
+/// The octave the creases are split at (GEN-061): octaves below it (wavelengths over 1.6 km at 25 km spacing halving) keep the amplitude of the bake's
+/// slope; the fine ones (under 1.6 km) lift it towards the full amplitude by the landform driver.
+const CREASE_SPLIT: u32 = 4;
 /// The crease sum lies in [-0.75, 0.25], so the detail lies in [-0.75, 0.25] times the largest amplitude.
 const AMPLITUDE_MAX_M: f64 = AMPLITUDE_OCEAN_M + AMPLITUDE_LAND_M;
 /// The lower bound of the crease sum.
@@ -102,16 +105,34 @@ fn crease_range(nlo: f64, nhi: f64) -> (f64, f64) {
     (crease(a), crease(b))
 }
 
-/// The normalised crease sum in [-0.75, 0.25] at a direction.
-fn crease_sum(seed: u64, dir: Vec3) -> f64 {
-    let (mut sum, mut amp, mut norm, mut freq) = (0.0, 1.0, 0.0, BASE_FREQUENCY);
+/// The normalised crease sum at a direction in two parts, the coarse octaves (below [`CREASE_SPLIT`]) and the fine ones: their sum lies in [-0.75, 0.25].
+fn crease_parts(seed: u64, dir: Vec3) -> (f64, f64) {
+    let (mut coarse, mut fine, mut amp, mut norm, mut freq) = (0.0, 0.0, 1.0, 0.0, BASE_FREQUENCY);
     for o in 0..OCTAVES {
-        sum += amp * crease(layer_noise(seed, LAYER_CREASE, o, dir * freq));
+        let term = amp * crease(layer_noise(seed, LAYER_CREASE, o, dir * freq));
+        if o < CREASE_SPLIT {
+            coarse += term;
+        } else {
+            fine += term;
+        }
         norm += amp;
         amp *= PERSISTENCE;
         freq *= 2.0;
     }
-    sum / norm
+    (coarse / norm, fine / norm)
+}
+
+/// The slope factor of the fine creases (GEN-061): the factor of the bake's slope lifted towards 1 by the landform driver `l` in `[0, 1]`
+/// (`l` 0 on a plain or at the coast: the factor of the slope alone; `l` 1 deep inland in a range zone: the full amplitude whatever the slope).
+fn fine_carve(carve: f64, landform: f64) -> f64 {
+    carve + (1.0 - carve) * landform
+}
+
+/// The detail in metres at a point of ground elevation `e`, bake slope factor `carve` and landform `landform`: the coarse creases at the amplitude of the
+/// slope, the fine ones at the amplitude lifted by the landform.
+fn detail_m(seed: u64, dir: Vec3, e: f64, carve: f64, landform: f64) -> f64 {
+    let (coarse, fine) = crease_parts(seed, dir);
+    amplitude_m(e, carve) * coarse + amplitude_m(e, fine_carve(carve, landform)) * fine
 }
 
 /// The eroded terrain field of one body over a baked global-coarse grid.
@@ -127,12 +148,18 @@ pub struct ErosionField<'a> {
     relief: f64,
     /// The first read error of the bake, if any (see [`crate::terrain::TerrainField`]): a failed read gives NaN.
     error: Mutex<Option<String>>,
+    /// The landform lattice of the seed (GEN-062), taken from the shared cache on first use.
+    landform: OnceLock<Arc<crate::global::LandformLattice>>,
 }
 
 impl ErosionField<'_> {
     /// The first error reading the bake since the field was built, if any.
     pub fn error(&self) -> Option<String> {
         self.error.lock().expect("erosion error mutex").clone()
+    }
+
+    fn landform(&self) -> &crate::global::LandformLattice {
+        self.landform.get_or_init(|| crate::global::landform_lattice(self.seed))
     }
 
     fn fail(&self, e: &crate::global::ReadError) {
@@ -191,7 +218,20 @@ impl ErosionField<'_> {
     fn height_via(&self, src: &dyn LatticeSource, dir: Vec3) -> f64 {
         let e = self.base_via(src, dir);
         let slope = self.gradient_via(src, dir) / self.radius_m;
-        e + amplitude_m(e, carve(slope)) * crease_sum(self.seed, dir)
+        let c = carve(slope);
+        // Where the slope factor is 1 the landform changes nothing (`fine_carve(1, L)` is 1), so it is not evaluated.
+        let l = if c >= 1.0 { 0.0 } else { self.landform().at(dir) };
+        e + detail_m(self.seed, dir, e, c, l)
+    }
+}
+
+impl ErosionField<'_> {
+    /// The height as version 1 made it (the landform taken as 0): for the cost comparison of the landform term (`examples/erosion_cost.rs`), not a field.
+    #[doc(hidden)]
+    pub fn height_without_landform(&self, dir: Vec3) -> f64 {
+        let e = self.base_via(&self.src, dir);
+        let slope = self.gradient_via(&self.src, dir) / self.radius_m;
+        e + detail_m(self.seed, dir, e, carve(slope), 0.0)
     }
 }
 
@@ -344,20 +384,35 @@ impl HeightField for ErosionField<'_> {
         } else {
             (carve(0.0), 1.0)
         };
+        // The landform over the cap: the range of the lattice cells it touches (GEN-062).
+        let (l_lo, l_hi) = self.landform().bounds(centre, angular_radius);
+        let (f_lo, f_hi) = (fine_carve(carve_lo, l_lo), fine_carve(carve_hi, l_hi));
         let (a_lo, a_hi) = (amplitude_m(blo, carve_lo), amplitude_m(bhi, carve_hi));
-        let (mut slo, mut shi, mut amp, mut norm, mut freq) = (0.0, 0.0, 1.0, 0.0, BASE_FREQUENCY);
+        let (fa_lo, fa_hi) = (amplitude_m(blo, f_lo), amplitude_m(bhi, f_hi));
+        // The two parts of the crease sum, each from its octaves' noise bounds.
+        let (mut clo_sum, mut chi_sum, mut flo_sum, mut fhi_sum, mut amp, mut norm, mut freq) =
+            (0.0, 0.0, 0.0, 0.0, 1.0, 0.0, BASE_FREQUENCY);
         for o in 0..OCTAVES {
             let (nlo, nhi) = layer_noise_bounds(self.seed, LAYER_CREASE, o, centre, angular_radius, freq);
             let (clo, chi) = crease_range(nlo.max(-1.0), nhi.min(1.0));
-            slo += amp * clo;
-            shi += amp * chi;
+            if o < CREASE_SPLIT {
+                clo_sum += amp * clo;
+                chi_sum += amp * chi;
+            } else {
+                flo_sum += amp * clo;
+                fhi_sum += amp * chi;
+            }
             norm += amp;
             amp *= PERSISTENCE;
             freq *= 2.0;
         }
-        let (slo, shi) = ((slo / norm - 1e-9).max(-0.75), (shi / norm + 1e-9).min(0.25));
-        let dlo = if slo >= 0.0 { a_lo * slo } else { a_hi * slo };
-        let dhi = if shi >= 0.0 { a_hi * shi } else { a_lo * shi };
+        let (clo, chi) = (clo_sum / norm - 1e-9, chi_sum / norm + 1e-9);
+        let (flo, fhi) = (flo_sum / norm - 1e-9, fhi_sum / norm + 1e-9);
+        let part = |amp_lo: f64, amp_hi: f64, lo: f64, hi: f64| {
+            (if lo >= 0.0 { amp_lo * lo } else { amp_hi * lo }, if hi >= 0.0 { amp_hi * hi } else { amp_lo * hi })
+        };
+        let ((c1, c2), (f1, f2)) = (part(a_lo, a_hi, clo, chi), part(fa_lo, fa_hi, flo, fhi));
+        let (dlo, dhi) = ((c1 + f1).max(-0.75 * AMPLITUDE_MAX_M), (c2 + f2).min(0.25 * AMPLITUDE_MAX_M));
         let pad = |x: f64| 1e-6 + x.abs() * 1.2e-7;
         let (l, h) = (blo + dlo, bhi + dhi);
         ((l - pad(l)).max(global.0), (h + pad(h)).min(global.1))
@@ -407,6 +462,84 @@ impl ErosionGenerator {
             src: crate::global::ScaledLattice::new(bake, relief),
             relief,
             error: Mutex::new(None),
+            landform: OnceLock::new(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use planet_core::hash::SplitMix64;
+
+    fn random_dir(rng: &mut SplitMix64) -> Vec3 {
+        Vec3::new(rng.next_f64() * 2.0 - 1.0, rng.next_f64() * 2.0 - 1.0, rng.next_f64() * 2.0 - 1.0).normalized()
+    }
+
+    // spec: GEN-061
+    #[test]
+    fn without_the_landform_the_detail_is_the_old_one_and_with_it_only_the_fine_creases_are_lifted() {
+        let mut rng = SplitMix64(5);
+        let (mut lifted, mut full) = (0, 0);
+        for _ in 0..400 {
+            let dir = random_dir(&mut rng);
+            let e = rng.next_f64() * 3000.0 - 200.0;
+            let c = carve(rng.next_f64() * 0.3);
+            let (coarse, fine) = crease_parts(7, dir);
+            // The two parts are the old normalised sum.
+            let old = amplitude_m(e, c) * (coarse + fine);
+            assert!((detail_m(7, dir, e, c, 0.0) - old).abs() < 1e-9 * (1.0 + old.abs()), "landform 0 is the old detail");
+            // Landform 1: the fine creases at the full factor, the coarse ones unchanged.
+            let full_fine = amplitude_m(e, c) * coarse + amplitude_m(e, 1.0) * fine;
+            assert!((detail_m(7, dir, e, c, 1.0) - full_fine).abs() < 1e-9 * (1.0 + full_fine.abs()));
+            if (detail_m(7, dir, e, c, 1.0) - old).abs() > 1.0 {
+                lifted += 1;
+            }
+            if c >= 1.0 - 1e-12 {
+                full += 1;
+                assert!(
+                    (detail_m(7, dir, e, c, 1.0) - old).abs() < 1e-9 * (1.0 + old.abs()),
+                    "on the steepest ground the landform adds nothing"
+                );
+            }
+        }
+        assert!(lifted > 100, "{lifted} of 400 points change by over a metre");
+        assert!(full > 20, "{full} of 400 points stand on the steepest ground");
+    }
+
+    // spec: GEN-062
+    #[test]
+    fn the_landform_lattice_is_continuous_bounded_and_close_to_the_driver() {
+        let lat = crate::global::landform_lattice(7);
+        let mut rng = SplitMix64(9);
+        let (mut worst, mut worst_step, mut inside) = (0.0f64, 0.0f64, 0);
+        for _ in 0..20_000 {
+            let a = random_dir(&mut rng);
+            let la = lat.at(a);
+            assert!((0.0..=1.0).contains(&la));
+            worst = worst.max((la - crate::global::landform(7, a)).abs());
+            // Continuous: a pair 1e-6 apart differs by far less than a lattice step does (cube edges and corners included in the random sample).
+            let b = (a + random_dir(&mut rng) * 1e-6).normalized();
+            worst_step = worst_step.max((la - lat.at(b)).abs());
+            // The bounds of a cap hold its centre and a point on its rim.
+            let rho = [1e-6, 1e-4, 1e-3, 3e-3, 1e-2][(rng.next_f64() * 5.0) as usize % 5];
+            let rim = (a + random_dir(&mut rng) * rho).normalized();
+            let ang = libm::acos(a.dot(rim).clamp(-1.0, 1.0));
+            let (lo, hi) = lat.bounds(a, ang * (1.0 + 1e-9));
+            let lr = lat.at(rim);
+            assert!(lo <= la && la <= hi && lo <= lr && lr <= hi, "cap of {ang} rad: [{lo}, {hi}] misses {la} or {lr}");
+            inside += usize::from(hi - lo < 1.0);
+        }
+        assert!(worst < 0.03, "the lattice differs from the driver by {worst}");
+        assert!(worst_step < 1e-3, "a pair 1e-6 apart differs by {worst_step}");
+        // The seams: two points 1e-12 either side of a cube edge (x = y) and of a corner agree.
+        for k in 0..200 {
+            let w = -0.9 + 1.8 * f64::from(k) / 199.0;
+            let (a, b) = (Vec3::new(1.0, 1.0 - 1e-12, w).normalized(), Vec3::new(1.0 - 1e-12, 1.0, w).normalized());
+            assert!((lat.at(a) - lat.at(b)).abs() < 1e-9, "seam at z {w}");
+        }
+        let (c1, c2) = (Vec3::new(1.0, 1.0, 1.0 - 1e-12).normalized(), Vec3::new(1.0 - 1e-12, 1.0, 1.0).normalized());
+        assert!((lat.at(c1) - lat.at(c2)).abs() < 1e-9, "corner seam");
+        assert!(inside > 10_000, "{inside} caps with a range under [0, 1]");
     }
 }

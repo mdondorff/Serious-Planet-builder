@@ -61,7 +61,7 @@ pub(crate) fn layer_noise(seed: u64, layer: u64, octave: u32, p: Vec3) -> f64 {
 
 /// Largest gradient magnitude of [`layer_noise`] per unit of its argument: each partial derivative is a lattice
 /// difference (at most 2) times the derivative of `smooth` (at most 1.5), so at most 3, and three axes give 3 sqrt(3).
-const NOISE_GRADIENT_BOUND: f64 = 5.196_152_422_706_632;
+pub(crate) const NOISE_GRADIENT_BOUND: f64 = 5.196_152_422_706_632;
 
 /// Lipschitz constant of the gradient of [`layer_noise`] (the gradient is continuous across cell borders because the
 /// derivative of `smooth` vanishes there): the Frobenius norm of the Hessian is at most sqrt(3 * 12^2 + 6 * 9^2) = 30.3 (rounded up), with

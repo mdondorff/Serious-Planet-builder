@@ -251,6 +251,7 @@ fn creases_cut_deeper_on_steep_ground_than_on_flat_ground() {
     assert!(steep > 3.0 * flat, "mean incision on the ramp {steep} m, on flat ground {flat} m");
 }
 
+// Re-pinned 2026-10-25 by `m8-relief-creases` (GEN-061, GEN-062, declared): the second probe lies where the landform is active; its bits moved with the fine creases (4654631722428695292 to 4654644490283343484, landform read from the lattice).
 // spec: GEN-017
 #[test]
 fn known_answers() {
@@ -259,5 +260,31 @@ fn known_answers() {
     let f = field(&src);
     let probes = [Vec3::new(0.3, -0.5, 0.8).normalized(), Vec3::new(1.0, 0.2, -0.1).normalized(), Vec3::new(-0.6, -0.6, -0.5).normalized()];
     let got: Vec<u64> = probes.iter().map(|&d| f.height(d).to_bits()).collect();
-    assert_eq!(got, [13866102441991740545, 4654631722428695292, 4640568334212959128]);
+    assert_eq!(got, [13866102441991740545, 4654644490283343484, 4640568334212959128]);
+}
+
+// spec: GEN-062
+#[test]
+fn bounds_hold_over_small_caps_where_the_landform_is_neither_0_nor_1() {
+    let g = grid(256);
+    let src = GridSource(&g);
+    let f = field(&src);
+    let seed = GenContext::new(&WorldDefinition::single_planet(R, SEED)).body_seed(BodyId::PLANET).unwrap();
+    let mut rng = SplitMix64(23);
+    let mut checked = 0;
+    for _ in 0..4000 {
+        let c = random_dir(&mut rng);
+        let l = planet_generators::global::landform(seed, c);
+        if !(0.05..0.95).contains(&l) {
+            continue;
+        }
+        for theta in [1e-6, 1e-5, 1e-4] {
+            check_cap(&f, c, theta, true);
+        }
+        checked += 1;
+        if checked >= 40 {
+            break;
+        }
+    }
+    assert!(checked >= 10, "{checked} centres with a landform between 0.05 and 0.95");
 }

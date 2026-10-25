@@ -1,0 +1,1 @@
+- 2026-10-25 **relief-creases** (m8-relief part 3, field side; GEN-061/062): the fine crease octaves (wavelengths under 1.6 km) take the bake slope's factor lifted towards 1 by the landform, read from a 256-cell lattice per face (bilinear, +3-4 % per height against +58 % evaluated directly), bounded over a cap by the range of its cells; EROSION_VERSION 2
