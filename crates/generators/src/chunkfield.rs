@@ -279,6 +279,9 @@ pub struct ChunkResult {
     tile: TileId,
     n: usize,
     levels: Vec<Vec<f32>>,
+    /// The hash of the pyramid, made once (it is read every frame by the horizon jobs' state word, STRM-048) and how many times it was made.
+    hash_cache: std::sync::OnceLock<u64>,
+    hash_runs: std::sync::atomic::AtomicU32,
 }
 
 impl ChunkResult {
@@ -301,7 +304,7 @@ impl ChunkResult {
             }
             levels.push(level);
         }
-        Some(ChunkResult { tile, n, levels })
+        Some(ChunkResult { tile, n, levels, hash_cache: Default::default(), hash_runs: Default::default() })
     }
 
     /// Bytes of the raster and its levels: `n (u32) | levels above the raster (u32) | every level's values, f32 little endian`.
@@ -336,7 +339,7 @@ impl ChunkResult {
             levels.push((0..m).map(|i| f32::from_le_bytes(bytes[at + 4 * i..at + 4 * i + 4].try_into().expect("4 bytes"))).collect());
             at += 4 * m;
         }
-        Some(ChunkResult { tile, n, levels })
+        Some(ChunkResult { tile, n, levels, hash_cache: Default::default(), hash_runs: Default::default() })
     }
 
     /// The bytes the result holds in memory (counted toward the chunk pool of the RAM caps, STRM-041).
@@ -364,6 +367,18 @@ impl ChunkResult {
     }
 
     pub fn hash(&self) -> u64 {
+        *self.hash_cache.get_or_init(|| {
+            self.hash_runs.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.compute_hash()
+        })
+    }
+
+    /// How many times the hash of the pyramid was made (1 once it has been asked for: a test aid, recorded only).
+    pub fn hash_runs(&self) -> u32 {
+        self.hash_runs.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn compute_hash(&self) -> u64 {
         let mut h = 0xcbf2_9ce4_8422_2325u64;
         for level in &self.levels {
             for v in level {

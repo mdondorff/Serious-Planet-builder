@@ -3,6 +3,11 @@ Inputs: `openspec/changes/m8-chunk-field/design.md` sections 6 and 14 (the weigh
 
 ## Decisions
 
+### Built (step 3, 2026-10-25): where the plane lives on the GPU
+The plane is not a second pool: the renderer keeps the planes of its resident tiles on the CPU (by slot) and, each frame, copies the plane of every node whose change is still fading in (`1 - w` above 0) into the frame's tile-reference buffer after the references (`FADE_PLANES` = 512 planes of `(cells + 1)^2` f32 padded to whole 16-byte entries); the node's reference holds the entry of its plane plus one, the node record the fade in the fourth lane of grid phase 6 (zero at weight 1, so the record does not grow and `NODE_RECORD_BYTES` stays). Why: a second pool binding would be a fifth storage buffer of the vertex stage (the adapter gate requires four, VIEW-001), a settled view reads and uploads nothing, and the bind groups of the pool blocks do not change when a chunk lands. The cost is that a fade moves up to 512 planes (2.2 MB at 32 cells) a frame for its 1.5 s; the overflow draws the final height.
+
+**Known limit (seams, numerics review of step 3):** the plane is a tile's total change and the weight the minimum over the chunks it reads. Two tiles that share a border but read different sets of chunks (one reads C1 and C2, the other only C1, with C2 just landed) get different weights, so along their border the first draws the base where the second draws the final height: a crack of C1's change along the border, covered by the skirt, for 1.5 s. It needs a chunk to land while its neighbour's change is already in; the look review of the landing decides whether it matters (the remedy is a plane per chunk read, or the minimum over the chunks of the border cells only).
+
 ### 1. Where the change lives
 A second plane of `(cells + 1)^2` f32 values per tile (metres, relative to the tile like the texel heights), in its own pool buffer indexed by the same slot index as the main pool. It exists only when the app has chunks on: without chunks the pool is a 4-byte dummy binding and the shader's branch is off, so the slot bytes, the pack payloads, the hashes of GEN-025 and the goldens of a world without chunks do not move (the pipeline layout gains one binding, which the golden run shows as pixel-identical). A tile without chunk detail writes zeros there (or is flagged off, see 3).
 

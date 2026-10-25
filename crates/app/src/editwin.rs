@@ -101,23 +101,8 @@ pub struct EditStats {
     pub previewed_max: usize,
 }
 
-/// A key the editor mode takes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum EditKey {
-    /// A tool by number: 1 select, 2 and on the stamp kinds in order.
-    Tool(usize),
-    Undo,
-    Redo,
-    Delete,
-    /// Esc: abandon a drag, else drop the draft of a line or region, else leave the tool, else deselect.
-    Escape,
-    /// Enter: finish the line or region being drawn.
-    Finish,
-    /// Backspace: take back the last point of the draft. It never deletes an edit (Delete does, opus-planner 2026-10-20, easy to reverse).
-    Back,
-    /// F1 or `?`: show or hide the list of keys.
-    Help,
-}
+/// A key the editor mode takes (the key table's, VIEW-055).
+pub use planet_frame::keytable::EditKey;
 
 /// The modifier keys held at a press: Shift adds a point on the outline of the selected line or region, Ctrl removes the point whose
 /// handle is under the cursor.
@@ -852,18 +837,8 @@ impl EditRuntime {
     }
 }
 
-/// The keys of the editor mode, for the usage text and the log.
-pub const EDIT_KEYS_HELP: &str = "editor mode: Tab on/off (the panels, the outlines of the edits the camera shows, the planet is for editing: the pointer is free), \
-     1 select, 2 crater, 3 hill, 4 plateau then click the planet to place it, 5 ridge, 6 channel, 7 region then click the planet to add points (Enter finishes, \
-     Backspace takes the last point back), 8 raise, 9 lower, 0 smooth, - flatten: a brush, drag on the planet to paint a stroke (the release puts it, one undo \
-     takes it back; the mouse wheel sets the brush radius and Shift+wheel its strength, both are also in the inspector), click an edit to select it (click again \
-     at the same spot to go through the edits under the cursor, smallest first; double-click in a list to fly there), drag its handles \
-     (circle: move, square: radius, light circle: height, amber dots: the points of a line or region) or type values in the inspector (Enter keeps the field, \
-     Up and Down step the value, Shift ten times as much), Shift+click on a line or \
-     region adds a point, Ctrl+click on a point removes it, Ctrl+Z undo, Ctrl+Y or Ctrl+Shift+Z redo, Delete deletes, F1 or ? lists the keys, Esc steps back \
-     (drag, draft, tool, selection) and does not quit; hold the right mouse button to look around, WASD/QE move, Shift boosts, arrows look; \
-     the viewer's keys work too: G globe overview, F3 cycles the overlay (off, tiles, mesh, regions, stale tiles), F4 coarse LOD, F6 ground detail (natural, full, off), F7 scale references (a chair, a house, a boat, a tower and a block of boxes of known size on the ground in front of you; again takes them away), F9 writes a repro bundle, J shade view (normal, horizon, shadow), [ and ] the sun half an hour earlier or later in local solar time, Backslash back to the look's sun, K coupled run lens (the climate, the heights of the global run, its drainage area; lit path), H editing light (a sun over your shoulder, so no slope is black), L lit or debug path, V next debug view, \
-     T vsync, P or Space pause, R restart (C, flight or free camera, does nothing while the editor is on)";
+/// The keys of the editor mode, for the usage text and the log: made from the key table (VIEW-055).
+pub use planet_frame::keytable::EDIT_KEYS_HELP;
 
 /// The first frame of the smoke run's editing script.
 pub const SMOKE_FIRST_FRAME: u64 = 60;

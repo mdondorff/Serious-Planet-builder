@@ -81,6 +81,7 @@ struct Node {
     // The fourth lanes of the first six phases carry the ground detail anchor (LOOK-009), so the record does not grow: lanes 0 to 2 the integer
     // cell of the tile origin at 1/32 m (floor of origin * 32, from f64 on the CPU) as bits of an i32, lanes 3 to 5 the fraction of origin * 32 in cells. The
     // noise octaves are anchored to the world by it; the cell is an exact integer used only for shifts and hashing, no planet-radius float is formed (CON-11).
+    // The fourth lane of phase 6 is the fade of the tile's chunk change, `1 - w` (REND-039), read only for a tile whose reference points at a plane.
     phase: array<vec4<f32>, 9>,
     // The unit up vector of the tile origin (planet-fixed axes) and the inverse of the origin's distance from the planet centre:
     // up at a point `local` metres from the origin is normalize(xyz + local * w), formed from tile-local numbers only (CON-11).
@@ -769,6 +770,9 @@ pub(crate) fn node_record_bytes(plan: &TerrainPlan) -> Vec<u8> {
             let lane = match k {
                 0..=2 => f32::from_bits(cell[k] as u32),
                 3..=5 => frac[k - 3],
+                // The fade of the chunk change, `1 - w` (REND-039): 0 for a node at weight 1, so the record of every node that has no chunk
+                // detail, or whose change is in, is what it was. Read only for a tile with a fade plane (its tile reference says so).
+                6 => (1.0 - d.chunk_weight).clamp(0.0, 1.0),
                 _ => 0.0,
             };
             floats.extend([p[0], p[1], p[2], lane]);
@@ -800,6 +804,9 @@ pub struct TerrainStats {
     pub argument_bytes: u64,
     /// Bytes of tile references written this frame (compact renderer only: 16 per node).
     pub tile_ref_bytes: u64,
+    /// Tiles whose chunk change is fading in this frame and whose plane went to the GPU, and those that had to draw the final height for want of room (REND-039).
+    pub faded_tiles: u32,
+    pub fade_overflow: u32,
     /// Draws of the water pass (one per water node, per-draw submission).
     pub water_draws: u32,
 }
@@ -903,6 +910,15 @@ struct FrameSet {
     water_globals: wgpu::Buffer,
     /// The horizon table, one entry per node (binding 4, REND-038).
     horizon_nodes: wgpu::Buffer,
+}
+
+/// Most tiles of one frame whose chunk change is still fading in and so carry a plane in the frame's buffer (REND-039); a node past this draws
+/// its final height (counted in [`TerrainStats::fade_overflow`]).
+pub const FADE_PLANES: usize = 512;
+
+/// 16-byte entries one fade plane takes in the frame's tile-reference buffer: `(cells + 1)^2` f32, padded to whole entries.
+pub fn fade_plane_vec4s(cells: u32) -> usize {
+    ((cells as usize + 1) * (cells as usize + 1)).div_ceil(4)
 }
 
 /// A resident tile: its mesh key and the slot of the pool it sits in.
@@ -1050,6 +1066,9 @@ pub struct TerrainRenderer {
     compact: CompactGpu,
     /// The tile each occupied slot holds.
     owners: HashMap<SlotRef, planet_core::TileId>,
+    /// The chunk change plane of the tile in each slot that has one (REND-039), by slot index: kept on the CPU and written into the frame's
+    /// buffer only for the nodes whose change is still fading in, so a settled view reads no plane.
+    planes: HashMap<u32, std::sync::Arc<Vec<f32>>>,
     /// Most nodes the node record buffer may hold.
     max_nodes: usize,
     /// Frames rendered; the clock of the slot retirement.
@@ -1289,7 +1308,9 @@ impl TerrainRenderer {
         // The share's node-record bytes bound the ring: per node a record, an argument record and a tile reference in each of the
         // RING sets.
         let per_node = NODE_BYTES + DRAW_RECORD_BYTES + REF_BYTES;
-        let max_nodes = (pool.node_record_bytes.saturating_sub(RING as u64 * GLOBALS_BYTES) / (RING as u64 * per_node)) as usize;
+        // Each set also holds the fade planes (REND-039), a fixed size.
+        let fixed = RING as u64 * (GLOBALS_BYTES + REF_BYTES * (FADE_PLANES * fade_plane_vec4s(cells)) as u64);
+        let max_nodes = (pool.node_record_bytes.saturating_sub(fixed) / (RING as u64 * per_node)) as usize;
         let node_capacity = 256.min(max_nodes.max(1));
         let entry = |binding, ty| wgpu::BindGroupLayoutEntry {
             binding,
@@ -1313,7 +1334,7 @@ impl TerrainRenderer {
         });
         let horizon = crate::horizon::HorizonGpu::new(device);
         let compact_gpu = Self::make_compact(ctx, &bgl, format, cells, &pool);
-        let ring = Self::make_ring(device, &bgl, node_capacity, &compact_gpu, &horizon);
+        let ring = Self::make_ring(device, &bgl, cells, node_capacity, &compact_gpu, &horizon);
         let index_data = grid_indices(cells);
         let indices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("terrain-indices"),
@@ -1358,6 +1379,7 @@ impl TerrainRenderer {
             tiles: HashMap::new(),
             compact: compact_gpu,
             owners: HashMap::new(),
+            planes: HashMap::new(),
             max_nodes,
             frame: 0,
             pool,
@@ -1490,6 +1512,7 @@ impl TerrainRenderer {
     fn make_ring(
         device: &wgpu::Device,
         bgl: &wgpu::BindGroupLayout,
+        cells: u32,
         capacity: usize,
         compact: &CompactGpu,
         horizon: &crate::horizon::HorizonGpu,
@@ -1523,7 +1546,12 @@ impl TerrainRenderer {
                     },
                 );
                 let bind = Self::make_bind(device, bgl, [&globals, &nodes, &water_nodes, &water_globals, &horizon_nodes], horizon);
-                let refs = buffer("tile-refs", REF_BYTES * capacity as u64, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST);
+                // The tile references, then the fade planes of the frame (REND-039): `FADE_PLANES` planes of `fade_plane_vec4s(cells)` 16-byte entries each.
+                let refs = buffer(
+                    "tile-refs",
+                    REF_BYTES * (capacity + FADE_PLANES * fade_plane_vec4s(cells)) as u64,
+                    wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                );
                 let frame_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("compact-frame-bind"),
                     layout: &compact.bgl_frame,
@@ -1730,7 +1758,7 @@ impl TerrainRenderer {
         let warm_nodes = WARM_NODES.min(self.max_nodes);
         if warm_nodes > self.node_capacity {
             self.node_capacity = warm_nodes;
-            self.ring = Self::make_ring(device, &self.bgl, self.node_capacity, &self.compact, &self.horizon);
+            self.ring = Self::make_ring(device, &self.bgl, self.cells, self.node_capacity, &self.compact, &self.horizon);
             self.init.ring_builds += 1;
         }
         self.compact.block(device, 0, &mut self.init);
@@ -1893,6 +1921,13 @@ impl TerrainRenderer {
         if id.level() < planet_generators::compact::COMPACT_MIN_LEVEL {
             return Err(ExecError::CompactUnsupported { tile: id });
         }
+        // A change plane has one value per texel: a short or long one would be padded or cut on its way to the GPU (REND-039).
+        if let Some(change) = &tile.change {
+            let want = (cells as usize + 1) * (cells as usize + 1);
+            if change.len() != want {
+                return Err(ExecError::BadResource { id, expected: want, got: change.len() });
+            }
+        }
         let slot = match at {
             Some(slot) => slot,
             None => self.pools.acquire(PoolKind::Main, self.frame).ok_or(ExecError::PoolFull { tile: id, pool: PoolKind::Main })?,
@@ -1915,6 +1950,10 @@ impl TerrainRenderer {
                 self.tiles.remove(&previous);
             }
         }
+        match &tile.change {
+            Some(change) => self.planes.insert(slot.index, std::sync::Arc::new(change.clone())),
+            None => self.planes.remove(&slot.index),
+        };
         if let Some(old) = self.tiles.insert(id, Resident { key, slot }) {
             if old.slot != slot {
                 self.owners.remove(&old.slot);
@@ -2072,6 +2111,7 @@ impl TerrainRenderer {
     pub fn evict(&mut self, tile: planet_core::TileId) -> bool {
         let Some(r) = self.tiles.remove(&tile) else { return false };
         self.owners.remove(&r.slot);
+        self.planes.remove(&r.slot.index);
         self.pools.release(r.slot, self.frame);
         true
     }
@@ -2080,6 +2120,7 @@ impl TerrainRenderer {
     pub fn forget(&mut self, tile: planet_core::TileId) -> bool {
         let Some(r) = self.tiles.remove(&tile) else { return false };
         self.owners.remove(&r.slot);
+        self.planes.remove(&r.slot.index);
         true
     }
 
@@ -2228,7 +2269,7 @@ impl TerrainRenderer {
         if plan.nodes.len() > self.node_capacity {
             self.node_capacity = plan.nodes.len().next_power_of_two().min(self.max_nodes);
             // Frames in flight keep the buffers they use alive; the new ring serves the frames from here on.
-            self.ring = Self::make_ring(device, &self.bgl, self.node_capacity, &self.compact, &self.horizon);
+            self.ring = Self::make_ring(device, &self.bgl, self.cells, self.node_capacity, &self.compact, &self.horizon);
             self.init.ring_builds += 1;
             self.used.ring = 0;
         }
@@ -2300,16 +2341,45 @@ impl TerrainRenderer {
             // One tile reference per node (the first word of its slot in its block and the slot index); unused entries stay zero.
             let slot_words = (planet_generators::compact::slot_bytes(self.cells) / 4) as u32;
             let mut bytes = vec![0u8; REF_BYTES as usize * plan.nodes.len().max(1)];
+            // The fade planes of the nodes whose change is still coming in (REND-039): after the references, `fade_plane_vec4s` entries each; the
+            // node's reference holds the entry index of its plane plus one (0: none), the node record the fade.
+            let stride = fade_plane_vec4s(self.cells);
+            // The nodes whose change is still coming in and that have a plane, ordered by tile id so that the ones past `FADE_PLANES` are the same
+            // from one frame to the next whatever the order of the plan: a node never flips between faded and final for want of room.
+            let mut fading: Vec<(u64, usize)> = plan
+                .nodes
+                .iter()
+                .enumerate()
+                .filter(|(_, d)| d.chunk_weight < 1.0 && self.planes.contains_key(&self.tiles[&d.tile].slot.index))
+                .map(|(i, d)| (d.tile.raw(), i))
+                .collect();
+            fading.sort_unstable();
+            stats.fade_overflow += fading.len().saturating_sub(FADE_PLANES) as u32;
+            fading.truncate(FADE_PLANES);
+            stats.faded_tiles += fading.len() as u32;
+            let mut planes = vec![0u8; fading.len() * REF_BYTES as usize * stride];
+            let mut position = vec![0u32; plan.nodes.len()];
+            for (p, &(_, i)) in fading.iter().enumerate() {
+                let plane = &self.planes[&self.tiles[&plan.nodes[i].tile].slot.index];
+                let start = p * REF_BYTES as usize * stride;
+                planes[start..start + 4 * plane.len()].copy_from_slice(&f32_bytes(plane));
+                position[i] = (self.node_capacity + p * stride + 1) as u32;
+            }
             for (i, d) in plan.nodes.iter().enumerate() {
                 let r = &self.tiles[&d.tile];
                 let local = r.slot.index % self.pool.block_slots;
-                let words = [local * slot_words, 0, r.slot.index, 0u32];
+                let plane_ref = position[i];
+                let words = [local * slot_words, plane_ref, r.slot.index, 0u32];
                 for (k, v) in words.iter().enumerate() {
                     bytes[i * REF_BYTES as usize + 4 * k..i * REF_BYTES as usize + 4 * k + 4].copy_from_slice(&v.to_le_bytes());
                 }
             }
             ctx.queue.write_buffer(&set.refs, 0, &bytes);
             stats.tile_ref_bytes = bytes.len() as u64;
+            if !planes.is_empty() {
+                ctx.queue.write_buffer(&set.refs, REF_BYTES * self.node_capacity as u64, &planes);
+                stats.tile_ref_bytes += planes.len() as u64;
+            }
         }
         let indirect = (self.draw_mode == DrawMode::Indirect)
             .then(|| build_draw_list_placed(plan.nodes.iter().map(|d| block_of(&self.tiles[&d.tile])), self.index_count));
@@ -2731,6 +2801,58 @@ mod one_shot_tests {
             assert_eq!(word(record, 11), [17.0, 20.0][record], "record {record}: word 11 is the tile's level (the overlay's)");
             assert_eq!((word(record, 8), word(record, 9)), (10.0, 20.0), "the morph interval is still there");
         }
+    }
+
+    // spec: REND-039
+    #[test]
+    fn the_node_record_carries_the_fade_of_the_chunk_change_in_a_lane_that_was_zero_so_a_settled_record_is_what_it_was() {
+        use planet_core::{PlanetFixed, TileId, Vec3};
+        let tile = TileId::new(planet_core::Face(0), 17, 1, 1).unwrap();
+        let node = |w: f32| planet_frame::TerrainDraw {
+            tile,
+            level: tile.level(),
+            origin: PlanetFixed(Vec3::new(6_371_000.5, 0.25, -3.0)),
+            camera_relative_origin: [1.0, 2.0, 3.0],
+            morph: 0.5,
+            morph_start_m: 10.0,
+            morph_end_m: 20.0,
+            color: [1, 2, 3, 255],
+            mesh_key: 7,
+            preview: false,
+            transient_only: false,
+            capped: false,
+            stitch: 0,
+            fine: 0,
+            quadrants: 0b1111,
+            state: planet_frame::TileState::default(),
+            chunk_weight: w,
+        };
+        let mut plan = planet_frame::viewer::lit_warm_plan(
+            planet_frame::camera::Camera::looking_at_centre(
+                PlanetFixed(Vec3::new(0.0, 0.0, 7.0e6)),
+                Vec3::new(0.0, 1.0, 0.0),
+                1.0,
+                1.0,
+                1.0,
+            ),
+            (64, 64),
+            32,
+            planet_frame::look::LitPlan::fixed(0.0),
+        );
+        plan.nodes = vec![node(1.0), node(0.25), node(0.0), node(2.0), node(-1.0)];
+        let bytes = node_record_bytes(&plan);
+        let record = |r: usize| &bytes[r * NODE_BYTES as usize..(r + 1) * NODE_BYTES as usize];
+        // The fourth lane of grid phase 6: bytes 48 + 16 x 6 + 12.
+        let at = 48 + 16 * 6 + 12;
+        let lane = |r: usize| f32::from_le_bytes(record(r)[at..at + 4].try_into().unwrap());
+        assert_eq!(record(0)[at..at + 4], [0u8; 4], "weight 1: the lane is the zero it was");
+        assert_eq!([lane(1), lane(2), lane(3), lane(4)], [0.75, 1.0, 0.0, 1.0], "the fade is 1 - w, kept in 0 to 1");
+        // Nothing else of the record moves with the weight.
+        for r in 1..5 {
+            let same = |a: &[u8], b: &[u8]| a[..at] == b[..at] && a[at + 4..] == b[at + 4..];
+            assert!(same(record(0), record(r)), "record {r} differs from the settled one only in the fade lane");
+        }
+        assert_eq!(NODE_BYTES, planet_frame::draw::NODE_RECORD_BYTES, "the record did not grow");
     }
 
     // spec: REND-034
