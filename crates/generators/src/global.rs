@@ -13,6 +13,7 @@
 use planet_core::cube::{face_to_direction, FaceMapping};
 use planet_core::{Face, TileId, Vec3};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::sync::Mutex;
 
 use planet_world_def::{BodyId, GenContext, MissingNode, ReadRecord};
@@ -199,25 +200,112 @@ pub fn landform(seed: u64, d: Vec3) -> f64 {
     t.zone * t.inland
 }
 
-/// A Lipschitz constant of [`landform`] in the unit direction (per unit of chord): `|landform(a) - landform(b)| <= K |a - b|` (GEN-062). From the
-/// noise's gradient bound `G` (`height::NOISE_GRADIENT_BOUND`): an fBm of base frequency `f` and `n` octaves of halving amplitudes is `G f n / (2 - 2^(1-n))`
-/// Lipschitz; the warped direction `d + 0.45 warp(d)` (three such fBms, a vector: a factor of the square root of 3) is `1 + 0.45 sqrt(3) L_warp`; the range
-/// zone is a smoothstep (slope at most 3) of one fBm of the warped direction, the inland ramp a smoothstep (slope at most 4.55) of 1.7 times another, and
-/// the landform their product of two values in `[0, 1]`, so the sum of the two. A test checks it against random pairs, so a change of the terms of
-/// [`terrain`] that is not carried here fails there. The continent is rounded to f32 before use (a step of at most one ulp, 3e-8 over the inland
-/// ramp, times the ramp's slope 4.55): the landform can jump by [`LANDFORM_F32_STEP`] between two directions as close as you like, which the constant
-/// does not cover, so a bound over a cap adds it.
-pub fn landform_lipschitz() -> f64 {
-    let g = crate::height::NOISE_GRADIENT_BOUND;
-    let fbm_lip = |freq: f64, octaves: f64| g * freq * octaves / (2.0 - libm::pow(2.0, 1.0 - octaves));
-    let warped = 1.0 + 0.45 * libm::sqrt(3.0) * fbm_lip(1.3, 3.0);
-    let zone = 3.0 * fbm_lip(1.7, 3.0) * warped;
-    let inland = (1.5 / 0.33) * 1.7 * fbm_lip(1.1, 5.0) * warped;
-    (zone + inland) * 1.05
+/// Cells per face edge of the [`LandformLattice`]: 256 cells of 2/256 in the face coordinate, about 39 km at the face centre.
+const LANDFORM_LATTICE_N: usize = 256;
+
+/// The landform driver on a fixed lattice over the cube faces, read by bilinear interpolation (GEN-062): the field of the erosion creases reads the landform
+/// at every height, and the 17 noise evaluations of [`landform`] cost 58 % of the height; the lattice costs a few multiplications. The lattice is a pure
+/// function of the seed: `N + 1` points per face edge at the face coordinates `2 i / N - 1` of the tangent warp, the value there [`landform`] rounded to
+/// f32, so a tile of any size and any bake reads the same bits. The interpolant is continuous across face edges (the edge points of two faces are the same
+/// directions) and, being a convex combination of the samples, stays in `[0, 1]`.
+pub struct LandformLattice {
+    faces: Vec<Vec<f32>>,
 }
 
-/// The most the landform jumps at the f32 rounding step of the continent (GEN-062): 4.55 times one f32 ulp (2.98e-8) of a value in `[0.12, 0.45]`, rounded up.
-pub const LANDFORM_F32_STEP: f64 = 2.0e-7;
+impl LandformLattice {
+    fn build(seed: u64) -> LandformLattice {
+        let n = LANDFORM_LATTICE_N;
+        let map = planet_core::cube::TangentWarp;
+        // One thread per face: every value is independent of the others, so the lattice does not depend on the thread count (CON-14).
+        let faces = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..6u8)
+                .map(|f| {
+                    scope.spawn(move || {
+                        let mut values = Vec::with_capacity((n + 1) * (n + 1));
+                        for j in 0..=n {
+                            for i in 0..=n {
+                                let (s, t) = (2.0 * i as f64 / n as f64 - 1.0, 2.0 * j as f64 / n as f64 - 1.0);
+                                values.push(landform(seed, face_to_direction(&map, Face(f), s, t)) as f32);
+                            }
+                        }
+                        values
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().expect("a landform lattice thread")).collect()
+        });
+        LandformLattice { faces }
+    }
+
+    fn sample(&self, face: Face, i: usize, j: usize) -> f64 {
+        f64::from(self.faces[face.0 as usize][j * (LANDFORM_LATTICE_N + 1) + i])
+    }
+
+    /// The lattice position of a face coordinate in `[-1, 1]`: the cell index and the fraction within it.
+    fn locate(s: f64) -> (usize, f64) {
+        let x = ((s + 1.0) * 0.5 * LANDFORM_LATTICE_N as f64).clamp(0.0, LANDFORM_LATTICE_N as f64);
+        let i = (x as usize).min(LANDFORM_LATTICE_N - 1);
+        (i, x - i as f64)
+    }
+
+    /// The landform at the unit direction `d`: the bilinear interpolant of the samples, in `[0, 1]`.
+    pub fn at(&self, d: Vec3) -> f64 {
+        let (face, s, t) = planet_core::cube::direction_to_face(&planet_core::cube::TangentWarp, d);
+        let ((i, fx), (j, fy)) = (Self::locate(s), Self::locate(t));
+        let (v00, v10) = (self.sample(face, i, j), self.sample(face, i + 1, j));
+        let (v01, v11) = (self.sample(face, i, j + 1), self.sample(face, i + 1, j + 1));
+        let (a, b) = (v00 + (v10 - v00) * fx, v01 + (v11 - v01) * fx);
+        (a + (b - a) * fy).clamp(0.0, 1.0)
+    }
+
+    /// The range of [`LandformLattice::at`] over the cap of angular radius `angular_radius` (radians) round the unit direction `centre` (GEN-062): the
+    /// least and the greatest sample of the cells the cap touches, which the interpolant of a cell cannot leave. A cap that may leave its face (it reaches
+    /// the edge, or is over 0.05 rad) or touches over 16 cells an axis gets `[0, 1]`. On a face a cap point is within `4 / (pi / 4)` face units of the centre
+    /// per radian (the plane coordinate `a / w` has a gradient of at most `sqrt(1 + u^2) / w` per radian with `w >= cos(0.955 + 0.05)` and `|u| <= 1 / w`,
+    /// and the tangent warp stretches by at least `pi / 4`).
+    pub fn bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
+        if angular_radius.is_nan() || angular_radius > 0.05 {
+            return (0.0, 1.0);
+        }
+        let (face, s, t) = planet_core::cube::direction_to_face(&planet_core::cube::TangentWarp, centre);
+        let reach = 5.2 * angular_radius + 1e-9;
+        if s - reach <= -1.0 || s + reach >= 1.0 || t - reach <= -1.0 || t + reach >= 1.0 {
+            return (0.0, 1.0);
+        }
+        let (i0, _) = Self::locate(s - reach);
+        let (i1, _) = Self::locate(s + reach);
+        let (j0, _) = Self::locate(t - reach);
+        let (j1, _) = Self::locate(t + reach);
+        let (i1, j1) = (i1 + 1, j1 + 1);
+        if i1 - i0 > 16 || j1 - j0 > 16 {
+            return (0.0, 1.0);
+        }
+        let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+        for j in j0..=j1 {
+            for i in i0..=i1 {
+                let v = self.sample(face, i, j);
+                lo = lo.min(v);
+                hi = hi.max(v);
+            }
+        }
+        ((lo - 1e-12).max(0.0), (hi + 1e-12).min(1.0))
+    }
+}
+
+/// The landform lattice of `seed`, built once and shared (the few seeds of a run: the cache holds the last four).
+pub fn landform_lattice(seed: u64) -> Arc<LandformLattice> {
+    static CACHE: Mutex<Vec<(u64, Arc<LandformLattice>)>> = Mutex::new(Vec::new());
+    let mut cache = CACHE.lock().expect("landform lattice cache");
+    if let Some((_, lattice)) = cache.iter().find(|(k, _)| *k == seed) {
+        return Arc::clone(lattice);
+    }
+    let lattice = Arc::new(LandformLattice::build(seed));
+    if cache.len() >= 4 {
+        cache.remove(0);
+    }
+    cache.push((seed, Arc::clone(&lattice)));
+    lattice
+}
 
 /// The largest amplitude of the hill band in metres (GEN-064); the elevation clamp has room for it above the highest base and range
 /// (`1000 + 5200` m), so the clamp is not raised.

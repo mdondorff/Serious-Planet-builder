@@ -94,8 +94,8 @@ const PINS: [(&str, usize, usize); 10] = [
 
 /// The same at the reference finest level 26 (the cap before ADR 0033 point 6, `--finest-level 26`), where it differs: only ground-1m.
 /// (14,325 and 4,063 before render-floor-3, which drops the 4 and 3 ancestors above the floor.)
-/// Re-pinned 2026-10-25 by `m8-relief-creases` (declared, as `PINS`): R 14,328 to 14,336, D 4,064 to 4,073 (+0.06 and +0.2 %).
-const PINS_L26_GROUND_1M: (usize, usize) = (14336, 4073);
+/// Re-pinned 2026-10-25 by `m8-relief-creases` (declared, as `PINS`): R 14,328 to 14,340, D 4,064 to 4,077 (+0.08 and +0.3 %).
+const PINS_L26_GROUND_1M: (usize, usize) = (14340, 4077);
 
 fn check_pins(measured: &[(String, usize, usize, usize)], pins: &[(&str, usize, usize)]) -> Vec<String> {
     let mut failures = Vec::new();

@@ -35,8 +35,8 @@ const EROSION_VIEW_NODE_PINS: [(&str, u32); 10] = [
 ];
 
 /// The ground-1m node count of the default world at the reference finest level 26 (the cap before ADR 0033 point 6).
-/// Re-pinned 2026-10-25 by `m8-relief-creases` (declared, as the pins above): 2,939 to 2,946 (+0.24 %).
-const REFERENCE_L26_GROUND_1M: usize = 2946;
+/// Re-pinned 2026-10-25 by `m8-relief-creases` (declared, as the pins above): 2,939 to 2,949 (+0.34 %).
+const REFERENCE_L26_GROUND_1M: usize = 2949;
 
 // spec: TEST-011, LOD-010
 #[test]

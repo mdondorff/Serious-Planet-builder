@@ -11,7 +11,7 @@
 //! slope stencil can read ([`crate::terrain::scan_base`]), the slope interval from the gradient at the centre and its
 //! variation over the cap, the per-octave noise bounds ([`layer_noise_bounds`]), and the product of the intervals.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use planet_core::cube::TangentWarp;
 use planet_core::hash::hash_u64s;
@@ -148,12 +148,18 @@ pub struct ErosionField<'a> {
     relief: f64,
     /// The first read error of the bake, if any (see [`crate::terrain::TerrainField`]): a failed read gives NaN.
     error: Mutex<Option<String>>,
+    /// The landform lattice of the seed (GEN-062), taken from the shared cache on first use.
+    landform: OnceLock<Arc<crate::global::LandformLattice>>,
 }
 
 impl ErosionField<'_> {
     /// The first error reading the bake since the field was built, if any.
     pub fn error(&self) -> Option<String> {
         self.error.lock().expect("erosion error mutex").clone()
+    }
+
+    fn landform(&self) -> &crate::global::LandformLattice {
+        self.landform.get_or_init(|| crate::global::landform_lattice(self.seed))
     }
 
     fn fail(&self, e: &crate::global::ReadError) {
@@ -214,8 +220,18 @@ impl ErosionField<'_> {
         let slope = self.gradient_via(src, dir) / self.radius_m;
         let c = carve(slope);
         // Where the slope factor is 1 the landform changes nothing (`fine_carve(1, L)` is 1), so it is not evaluated.
-        let l = if c >= 1.0 { 0.0 } else { crate::global::landform(self.seed, dir) };
+        let l = if c >= 1.0 { 0.0 } else { self.landform().at(dir) };
         e + detail_m(self.seed, dir, e, c, l)
+    }
+}
+
+impl ErosionField<'_> {
+    /// The height as version 1 made it (the landform taken as 0): for the cost comparison of the landform term (`examples/erosion_cost.rs`), not a field.
+    #[doc(hidden)]
+    pub fn height_without_landform(&self, dir: Vec3) -> f64 {
+        let e = self.base_via(&self.src, dir);
+        let slope = self.gradient_via(&self.src, dir) / self.radius_m;
+        e + detail_m(self.seed, dir, e, carve(slope), 0.0)
     }
 }
 
@@ -368,11 +384,8 @@ impl HeightField for ErosionField<'_> {
         } else {
             (carve(0.0), 1.0)
         };
-        // The landform over the cap: its value at the centre within the Lipschitz constant times the chord (GEN-062).
-        let l_centre = crate::global::landform(self.seed, centre);
-        // Plus `LANDFORM_F32_STEP`: the continent is rounded to f32 before use, a step the Lipschitz constant does not cover.
-        let l_reach = crate::global::landform_lipschitz() * angular_radius * (1.0 + 1e-9) + crate::global::LANDFORM_F32_STEP;
-        let (l_lo, l_hi) = ((l_centre - l_reach).max(0.0), (l_centre + l_reach).min(1.0));
+        // The landform over the cap: the range of the lattice cells it touches (GEN-062).
+        let (l_lo, l_hi) = self.landform().bounds(centre, angular_radius);
         let (f_lo, f_hi) = (fine_carve(carve_lo, l_lo), fine_carve(carve_hi, l_hi));
         let (a_lo, a_hi) = (amplitude_m(blo, carve_lo), amplitude_m(bhi, carve_hi));
         let (fa_lo, fa_hi) = (amplitude_m(blo, f_lo), amplitude_m(bhi, f_hi));
@@ -449,6 +462,7 @@ impl ErosionGenerator {
             src: crate::global::ScaledLattice::new(bake, relief),
             relief,
             error: Mutex::new(None),
+            landform: OnceLock::new(),
         })
     }
 }
@@ -495,28 +509,29 @@ mod tests {
 
     // spec: GEN-062
     #[test]
-    fn the_landform_constant_holds_for_random_pairs() {
-        let k = crate::global::landform_lipschitz();
+    fn the_landform_lattice_is_continuous_bounded_and_close_to_the_driver() {
+        let lat = crate::global::landform_lattice(7);
         let mut rng = SplitMix64(9);
-        let (mut worst, mut moved) = (0.0f64, 0);
+        let (mut worst, mut worst_step, mut inside) = (0.0f64, 0.0f64, 0);
         for _ in 0..20_000 {
             let a = random_dir(&mut rng);
-            let dist = [1e-5, 1e-4, 1e-3, 1e-2, 1e-1][(rng.next_f64() * 5.0) as usize % 5];
-            let b = (a + random_dir(&mut rng) * dist).normalized();
-            let (la, lb) = (crate::global::landform(7, a), crate::global::landform(7, b));
-            let chord = (a - b).length();
-            assert!(
-                (la - lb).abs() <= k * chord + crate::global::LANDFORM_F32_STEP,
-                "a pair changes by {} over a chord of {chord}",
-                (la - lb).abs()
-            );
-            let ratio = (la - lb).abs() / chord.max(1e-300);
-            worst = worst.max(ratio);
-            moved += usize::from((la - lb).abs() > 0.0);
-            assert!((0.0..=1.0).contains(&la) && (0.0..=1.0).contains(&lb));
+            let la = lat.at(a);
+            assert!((0.0..=1.0).contains(&la));
+            worst = worst.max((la - crate::global::landform(7, a)).abs());
+            // Continuous: a pair 1e-6 apart differs by far less than a lattice step does (cube edges and corners included in the random sample).
+            let b = (a + random_dir(&mut rng) * 1e-6).normalized();
+            worst_step = worst_step.max((la - lat.at(b)).abs());
+            // The bounds of a cap hold its centre and a point on its rim.
+            let rho = [1e-6, 1e-4, 1e-3, 1e-2, 0.04][(rng.next_f64() * 5.0) as usize % 5];
+            let rim = (a + random_dir(&mut rng) * rho).normalized();
+            let ang = libm::acos(a.dot(rim).clamp(-1.0, 1.0));
+            let (lo, hi) = lat.bounds(a, ang * (1.0 + 1e-9));
+            let lr = lat.at(rim);
+            assert!(lo <= la && la <= hi && lo <= lr && lr <= hi, "cap of {ang} rad: [{lo}, {hi}] misses {la} or {lr}");
+            inside += usize::from(hi - lo < 1.0);
         }
-        assert!(moved > 1000, "{moved} pairs differ");
-        assert!(worst <= k + crate::global::LANDFORM_F32_STEP / 1e-5, "a pair changes by {worst} per unit of chord, the constant is {k}");
-        assert!(worst > 0.0);
+        assert!(worst < 0.1, "the lattice differs from the driver by {worst}");
+        assert!(worst_step < 1e-3, "a pair 1e-6 apart differs by {worst_step}");
+        assert!(inside > 10_000, "{inside} caps with a range under [0, 1]");
     }
 }

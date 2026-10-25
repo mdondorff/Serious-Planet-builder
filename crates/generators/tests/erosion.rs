@@ -259,7 +259,7 @@ fn known_answers() {
     let f = field(&src);
     let probes = [Vec3::new(0.3, -0.5, 0.8).normalized(), Vec3::new(1.0, 0.2, -0.1).normalized(), Vec3::new(-0.6, -0.6, -0.5).normalized()];
     let got: Vec<u64> = probes.iter().map(|&d| f.height(d).to_bits()).collect();
-    assert_eq!(got, [13866102441991740545, 4654644485409279484, 4640568334212959128]);
+    assert_eq!(got, [13866102441991740545, 4654644490283343484, 4640568334212959128]);
 }
 
 // spec: GEN-062
