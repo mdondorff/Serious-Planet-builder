@@ -79,6 +79,8 @@ fn the_stills_scene_draws_each_pose_with_its_chunks_landed_and_refuses_a_bad_cal
     let out = call(&[]).unwrap();
     assert!(out.contains("capture-stills: NOT a measurement (no gate, no timestamps, no log)"), "{out}");
     assert!(out.contains("anchor: latitude"), "{out}");
+    // spec: REND-038 — every pose waited for the horizon maps of the chunks near the eye and says so.
+    assert!(out.contains("horizon maps in"), "{out}");
     let index = std::fs::read_to_string(dir.join("stills.txt")).unwrap();
     let names: Vec<&str> = index.lines().filter(|l| !l.starts_with('#')).map(|l| l.split_whitespace().next().unwrap()).collect();
     assert_eq!(names, ["ground-sunset", "ground-midday"], "{index}");
