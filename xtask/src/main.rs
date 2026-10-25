@@ -4,6 +4,7 @@ mod accept;
 mod blesscmd;
 mod cistats;
 mod detdiff;
+mod heavy;
 mod layering;
 mod logcmd;
 mod prepush;
@@ -45,6 +46,8 @@ const USAGE: &str = "cargo xtask <command>
   cache-verify <dir> [--world <file>|--seed N] [--sample N] [--allow-stale]   regenerate a sample of a tile store from the definition and compare (STRM-004)
   cache-compact <dir> [--world <file>|--seed N] [--cap-bytes N]   rewrite a tile store keeping the records the definition still produces, evicting the oldest packs first under a cap (STRM-013)
   ci-stats [--runs N] | --record --since YYYY-MM-DD [--until YYYY-MM-DD]   median and p90 of each CI job over the last N (default 20) completed main runs, read with gh; a median over 16 min is flagged (BUILD-014)
+  heavy <command> [args]   run any command (a diagnostic example, a replay) under the machine-wide heavy-run lock
+  quiet on|off|status   the owner's flag file: while it is up every heavy command (test, prepush, perf, capture, accept, store, heavy) waits (BUILD-026)
   det-diff <a> <b>    compare two determinism manifests (GEN-003; CI diffs Windows against Linux)
   golden-review [--proposal <file>] [--extra <dir>]... [--tests <junit.xml>]... [--apply]   classify golden candidates under ADR 0017, and ADR 0037 for first goldens of M5 classes (auto-bless or escalate)
   bless [--extra <dir>]... [--apply <name>[,<name>]... --approved-by <who>]   list candidate goldens of every adapter (agents promote under ADR 0017 via golden-review; the rest is the owner's /bless, which applies what the owner approved with --apply; --apply runs only after the owner's /bless approval in the same session and --approved-by names the owner, never on an agent's own judgement)
@@ -55,17 +58,19 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let root = util::repo_root();
     let result = match args.first().map(String::as_str) {
-        Some("test") => testcmd::test(&root, &args[1..]),
+        Some("test") => heavy::with(&format!("test {}", args[1..].join(" ")), || testcmd::test(&root, &args[1..])),
         Some("check") => testcmd::check(&root),
-        Some("prepush") => prepush::run(&root),
+        Some("prepush") => heavy::with("prepush", || prepush::run(&root)),
         Some("layering") => layering::run(&root),
         Some("spec-lint") => speclint::run(&root),
         Some("log") => logcmd::run(&root, &args[1..]),
-        Some("accept") => accept::run(&root, &args[1..]),
+        Some("accept") => heavy::with(&format!("accept {}", args[1..].join(" ")), || accept::run(&root, &args[1..])),
         Some("repro") => testcmd::repro(&root, &args[1..]),
-        Some("store") => storecmd::run_store(&root, &args[1..]),
-        Some("perf") => testcmd::perf(&root, &args[1..]),
-        Some("capture") => testcmd::capture_cmd(&root, &args[1..]),
+        Some("store") => heavy::with("store", || storecmd::run_store(&root, &args[1..])),
+        Some("perf") => heavy::with(&format!("perf {}", args[1..].join(" ")), || testcmd::perf(&root, &args[1..])),
+        Some("capture") => heavy::with(&format!("capture {}", args[1..].join(" ")), || testcmd::capture_cmd(&root, &args[1..])),
+        Some("heavy") => heavy::run_wrapped(&root, &args[1..]),
+        Some("quiet") => heavy::quiet(&args[1..]),
         Some("cache-verify") => testcmd::cache_verify(&root, &args[1..]),
         Some("cache-compact") => testcmd::cache_compact(&root, &args[1..]),
         Some("ci-stats") => cistats::run(&root, &args[1..]),
