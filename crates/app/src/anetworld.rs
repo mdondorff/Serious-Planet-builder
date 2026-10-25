@@ -207,9 +207,15 @@ impl WorldTerrain {
 }
 
 impl WorldTerrain {
-    /// A diagnostic, not part of the viewer: the unclamped change of the A-net solve over the chunk holding `lat_deg`, `lon_deg` (the stage clamps its
+    /// A diagnostic, not part of the viewer (`slump_rate` and `steps` replace the stage's defaults for the report only): the unclamped change of the A-net solve over the chunk holding `lat_deg`, `lon_deg` (the stage clamps its
     /// change to `bound_m`): the distribution of the change, how many cells sit at the bound, and the change of the cut cells by drainage area.
-    pub fn chunk_incision_report(self: &Arc<Self>, lat_deg: f64, lon_deg: f64) -> Result<String, String> {
+    pub fn chunk_incision_report(
+        self: &Arc<Self>,
+        lat_deg: f64,
+        lon_deg: f64,
+        slump_rate: Option<f64>,
+        steps: Option<u32>,
+    ) -> Result<String, String> {
         use planet_core::cube::TangentWarp;
         use planet_core::{TileId, Vec3};
         use planet_generators::chunkfield::{region, ChunkLattice};
@@ -225,11 +231,11 @@ impl WorldTerrain {
         let per = cells_per_chunk_for(radius, ANET_CELL_M);
         let clat = ChunkLattice::new(per).ok_or("no chunk lattice")?;
         let mut params = ANetParams::spike(ANET_HALO_M, clat.cell_m(radius));
-        // Diagnostic overrides: what the census says when the hillslope step is stronger or the run longer (never a production value).
-        if let Some(v) = std::env::var("PLANET_SLUMP_RATE").ok().and_then(|v| v.parse().ok()) {
+        // What the census says when the hillslope step is stronger or the run longer than the defaults (an argument of the report, never a production value).
+        if let Some(v) = slump_rate {
             params.slump_rate = v;
         }
-        if let Some(v) = std::env::var("PLANET_STEPS").ok().and_then(|v| v.parse().ok()) {
+        if let Some(v) = steps {
             params.steps = v;
         }
         let halo = params.halo_rings;

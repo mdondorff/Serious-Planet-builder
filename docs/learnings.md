@@ -107,5 +107,5 @@ Scope: generators::anet (GEN-051), app::stills, app::anetworld; look review 1 se
 - The base alone has no neighbour pair over 0.12. In the solved chunks 6,010 of 1.48 million edge pairs (site 1) and 20,612 (site 2) are over 0.9, the steepest 5.72 and 9.39.
 - 42 % (site 1) and 22 % (site 2) of the steep pairs have a protected cell (channel, corridor, anchor); `slump_deltas` and `diffuse` skip those pairs, so the bank-to-bed step is never relaxed.
 - A slump rate of 0.5 (from 0.09) and 90 steps (from 30) cut the pairs of two unprotected cells from 3,494 to about 820 and leave the protected ones at 2,200 to 2,700: rate-limited and structural, in that order.
-- Tools: `capped.txt` of the stills tool (first pose), the pair census of `chunk_incision_report` with `PLANET_SLUMP_RATE` and `PLANET_STEPS` overrides (diagnostic only).
+- Tools: `capped.txt` of the stills tool (first pose), the pair census of `chunk_incision_report`, whose `--slump-rate` and `--steps` arguments replace the stage's defaults for the report only.
 - Obsolete when the hillslope steps relax the bank next to a channel cell.
