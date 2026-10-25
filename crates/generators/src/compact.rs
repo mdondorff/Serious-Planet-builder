@@ -493,17 +493,27 @@ impl CompactTile {
         }
     }
 
-    /// Position (tile-local) and tile-relative height of lattice vertex `(i, j)`.
-    fn place(&self, i: i64, j: i64) -> (V, f32) {
+    /// Position (tile-local) and tile-relative height of lattice vertex `(i, j)` with `fade` of the chunk change taken off (REND-039): the shader's
+    /// `h_q - fade x change`, `fade` being `1 - w` for the tile's weight `w`. Without a plane, or at fade 0, it is the texel's height bit for bit.
+    fn place(&self, i: i64, j: i64, fade: f32) -> (V, f32) {
         let c = self.cells as f32;
         let (u, v) = (i as f32 / c, j as f32 / c);
-        let hr = self.rel_height(i as usize, j as usize);
+        let mut hr = self.rel_height(i as usize, j as usize);
+        if let Some(change) = &self.change {
+            hr -= fade * change[j as usize * (self.cells as usize + 1) + i as usize];
+        }
         (add(self.base_point(u, v), scale(self.base_normal(u, v), hr)), hr)
     }
 
     /// What the vertex shader computes for vertex `vi` of the shared grid (grid vertices, then the four skirt runs): position,
     /// morph target, normal and heights, in the vertex format's terms.
     pub fn shade_vertex(&self, vi: usize) -> MeshVertex {
+        self.shade_vertex_faded(vi, 0.0)
+    }
+
+    /// [`shade_vertex`](CompactTile::shade_vertex) with `fade` (`1 - w`) of the chunk change taken off every height the vertex reads, its morph
+    /// target included (REND-039). The normals are the final surface's (the first version, `design.md` decision 4).
+    pub fn shade_vertex_faded(&self, vi: usize, fade: f32) -> MeshVertex {
         let cells = self.cells as i64;
         let w = cells + 1;
         let grid = (w * w) as usize;
@@ -521,10 +531,10 @@ impl CompactTile {
         };
         let c = self.cells as f32;
         let n_own = self.base_normal(i as f32 / c, j as f32 / c);
-        let (own_p, own_h) = self.place(i, j);
+        let (own_p, own_h) = self.place(i, j, fade);
         let avg = |a: (i64, i64), b: (i64, i64)| {
-            let (pa, ha) = self.place(a.0, a.1);
-            let (pb, hb) = self.place(b.0, b.1);
+            let (pa, ha) = self.place(a.0, a.1, fade);
+            let (pb, hb) = self.place(b.0, b.1, fade);
             (scale(add(pa, pb), 0.5), (ha + hb) * 0.5)
         };
         let (cp, ch) = match (i & 1, j & 1) {
@@ -546,6 +556,11 @@ impl CompactTile {
 
     /// Every vertex as the shader computes it, in the vertex format's order.
     pub fn shade_all(&self) -> Vec<MeshVertex> {
-        (0..vertex_count(self.cells)).map(|vi| self.shade_vertex(vi)).collect()
+        self.shade_all_faded(0.0)
+    }
+
+    /// [`shade_all`](CompactTile::shade_all) with `fade` of the chunk change taken off (REND-039).
+    pub fn shade_all_faded(&self, fade: f32) -> Vec<MeshVertex> {
+        (0..vertex_count(self.cells)).map(|vi| self.shade_vertex_faded(vi, fade)).collect()
     }
 }
