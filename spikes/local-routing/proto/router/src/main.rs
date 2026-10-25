@@ -456,6 +456,45 @@ fn main() {
             rows.push(r);
         }
     }
+    // A2: free head and a gate on the exit together.
+    if !on_edge_s && (ei == 0 || ej == 0 || ei == per - 1 || ej == per - 1) {
+        let along_i = ej == 0 || ej == per - 1;
+        for (rw, gate_m) in [(1000.0, 500.0), (1000.0, 1000.0), (2000.0, 1000.0)] {
+            let r_cells = (rw / ch.cell_m) as i64;
+            let g = (gate_m / ch.cell_m) as i64;
+            let mut best = s;
+            for dj in -r_cells..=r_cells {
+                for di in -r_cells..=r_cells {
+                    let (i, j) = (si + di, sj + dj);
+                    if i < 0 || j < 0 || i >= per as i64 || j >= per as i64 || di * di + dj * dj > r_cells * r_cells {
+                        continue;
+                    }
+                    let c = j as usize * per + i as usize;
+                    if ch.z[c] > ch.z[best] || (ch.z[c] == ch.z[best] && c < best) {
+                        best = c;
+                    }
+                }
+            }
+            let cands: Vec<usize> = (-g..=g)
+                .filter_map(|d| {
+                    let (i, j) = if along_i { (ei as i64 + d, ej as i64) } else { (ei as i64, ej as i64 + d) };
+                    (i >= 0 && j >= 0 && (i as usize) < per && (j as usize) < per).then_some(j as usize * per + i as usize)
+                })
+                .collect();
+            let e2 = *cands.iter().min_by(|&&x, &&y| ch.z[x].total_cmp(&ch.z[y]).then(x.cmp(&y))).unwrap();
+            let t1 = Instant::now();
+            let mut guide = stem.clone();
+            guide.push(best);
+            guide.extend(cands.iter().cloned());
+            let b = band(per, &guide, (1000.0 / ch.cell_m * 1000.0) as i64);
+            let p = route(&ch, &b, best, e2, 0.02);
+            let name = format!("A2 head R={rw:.0} gate G={gate_m:.0}");
+            let mut r = analyse(&ch, &name, &p, t1);
+            r.ms = t1.elapsed().as_secs_f64() * 1000.0;
+            paths.push((name, p));
+            rows.push(r);
+        }
+    }
     for r in &rows {
         print_row(r);
     }
