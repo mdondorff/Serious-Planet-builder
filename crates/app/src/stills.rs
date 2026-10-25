@@ -77,6 +77,8 @@ pub struct StillsConfig {
     /// `[place] snap_to_channel_m`: the anchor moves to the lowest ground of the landed chunks within this distance of it (the channel the
     /// chunk stage cut), and a pose's `heading_deg` is then relative to the channel's downstream bearing (0: downstream).
     pub snap_to_channel_m: Option<f64>,
+    /// `[place] slope_table_stride`: write `slopes.txt` ([`slope_table`]) over every this-many-th cell of the coupled lattice before the poses.
+    pub slope_table_stride: Option<usize>,
     pub poses: Vec<Pose>,
 }
 
@@ -121,7 +123,8 @@ pub fn parse_config(text: &str) -> Result<StillsConfig, String> {
             Anchor::LargestRiver { min_height_m: number(place, "min_height_m", "[place]")?.unwrap_or(0.0), relief }
         }
         (Some(a), None, None) if a.as_str() == Some("steepest-river") => {
-            let (ground_min_m, ground_max_m) = (required(place, "ground_min_m", "[place]")?, required(place, "ground_max_m", "[place]")?);
+            let ground_min_m = number(place, "ground_min_m", "[place]")?.unwrap_or(0.0);
+            let ground_max_m = number(place, "ground_max_m", "[place]")?.unwrap_or(f64::INFINITY);
             let (radius_m, min_area_m2) =
                 (required(place, "slope_radius_m", "[place]")?, number(place, "min_area_m2", "[place]")?.unwrap_or(0.0));
             if radius_m <= 0.0 || ground_max_m < ground_min_m || min_area_m2 < 0.0 {
@@ -191,7 +194,12 @@ pub fn parse_config(text: &str) -> Result<StillsConfig, String> {
     if snap_to_channel_m.is_some_and(|m| m <= 0.0) {
         return Err(format!("[place]: snap_to_channel_m {} must be positive", snap_to_channel_m.unwrap_or(0.0)));
     }
-    Ok(StillsConfig { anchor, chunk_timeout_s, chunk_cell_m, snap_to_channel_m, poses })
+    let slope_table_stride = match number(place, "slope_table_stride", "[place]")? {
+        None => None,
+        Some(k) if k >= 1.0 && k.fract() == 0.0 => Some(k as usize),
+        Some(k) => return Err(format!("[place]: slope_table_stride {k} must be a whole number of at least 1")),
+    };
+    Ok(StillsConfig { anchor, chunk_timeout_s, chunk_cell_m, snap_to_channel_m, slope_table_stride, poses })
 }
 
 /// The unit vector towards the sun when it stands at `local_hours` of local solar time (12 is noon) at longitude `lon_deg`, with
@@ -474,10 +482,22 @@ pub fn snap_to_channel(
 /// `step_m` and read along the grid's lines and diagonals.
 pub fn local_slope(ground: &dyn Fn(Vec3) -> f64, dir: Vec3, radius_m: f64, step_m: f64, planet_radius_m: f64) -> (f64, f64) {
     let n = (radius_m / step_m).floor() as i64;
+    let side = (2 * n + 1) as usize;
     let (north, east) = (heading_vector(dir, 0.0), heading_vector(dir, 90.0));
+    // Every sample inside the circle, read once.
+    let mut grid: Vec<Option<f64>> = vec![None; side * side];
+    for j in -n..=n {
+        for i in -n..=n {
+            let (x, y) = (i as f64 * step_m, j as f64 * step_m);
+            if x * x + y * y <= radius_m * radius_m {
+                grid[(j + n) as usize * side + (i + n) as usize] =
+                    Some(ground((dir * planet_radius_m + east * x + north * y).normalized()));
+            }
+        }
+    }
     let at = |i: i64, j: i64| -> Option<f64> {
-        let (x, y) = (i as f64 * step_m, j as f64 * step_m);
-        (x * x + y * y <= radius_m * radius_m).then(|| ground((dir * planet_radius_m + east * x + north * y).normalized()))
+        let (u, v) = (i + n, j + n);
+        (u >= 0 && v >= 0 && u < side as i64 && v < side as i64).then(|| grid[v as usize * side + u as usize]).flatten()
     };
     let (mut slope, mut lo, mut hi) = (0.0f64, f64::INFINITY, f64::NEG_INFINITY);
     for j in -n..=n {
@@ -494,6 +514,92 @@ pub fn local_slope(ground: &dyn Fn(Vec3) -> f64, dir: Vec3, radius_m: f64, step_
         }
     }
     (slope, hi - lo)
+}
+
+/// Ground bands of the slope table, in metres: lower bound inclusive, upper exclusive.
+const BANDS: [(f64, f64); 5] = [(0.0, 500.0), (500.0, 1000.0), (1000.0, 2500.0), (2500.0, 5000.0), (5000.0, f64::INFINITY)];
+
+/// The 2 km slope on the base field by ground band: over the land cells of the coupled lattice taken every `stride` cells (offset by half a
+/// stride) and over its river cells (drainage area at least `min_area_m2`, every cell). Per band: the share of the land (or of the rivers) and
+/// the 50th, 90th and 99th percentile of the steepest slope in degrees within `radius_m` (sampled every `step_m`, see [`local_slope`]).
+/// Land is ground over `sea_m`. The result does not depend on the thread count.
+pub fn slope_table(
+    maps: &planet_generators::coupled::CoupledMaps,
+    ground: &(dyn Fn(Vec3) -> f64 + Sync),
+    sea_m: f64,
+    radius_m: f64,
+    step_m: f64,
+    stride: usize,
+    min_area_m2: f64,
+) -> String {
+    let lat = maps.lattice();
+    let (n, planet) = (lat.n(), lat.radius_m());
+    let stride = stride.max(1);
+    let land: Vec<usize> = (0..6)
+        .flat_map(|f| {
+            (stride / 2..n).step_by(stride).flat_map(move |j| (stride / 2..n).step_by(stride).map(move |i| f * n * n + j * n + i))
+        })
+        .collect();
+    let rec = maps.receivers();
+    let rivers: Vec<usize> = (0..lat.len())
+        .filter(|&c| rec[c] != planet_generators::coupled::NONE && f64::from(maps.network_area_m2(c)) >= min_area_m2)
+        .collect();
+    // (ground, slope in degrees) of every cell that stands over the sea, computed on all threads, kept in cell order.
+    let measure = |cells: &[usize]| -> Vec<(f64, f64)> {
+        let threads = std::thread::available_parallelism().map_or(4, |t| t.get());
+        let chunk = cells.len().div_ceil(threads).max(1);
+        let parts: Vec<Vec<(f64, f64)>> = std::thread::scope(|sc| {
+            let jobs: Vec<_> = cells
+                .chunks(chunk)
+                .map(|part| {
+                    sc.spawn(move || {
+                        part.iter()
+                            .filter_map(|&c| {
+                                let d = lat.direction(c);
+                                let h = ground(d);
+                                (h > sea_m).then(|| (h, libm::atan(local_slope(ground, d, radius_m, step_m, planet).0).to_degrees()))
+                            })
+                            .collect()
+                    })
+                })
+                .collect();
+            jobs.into_iter().map(|j| j.join().expect("a slope worker")).collect()
+        });
+        parts.concat()
+    };
+    let percentile = |v: &mut Vec<f64>, q: f64| -> f64 {
+        v.sort_by(f64::total_cmp);
+        v.get(((v.len() as f64 - 1.0) * q).round() as usize).copied().unwrap_or(f64::NAN)
+    };
+    let mut out = format!(
+        "# the steepest slope in degrees within {radius_m:.0} m (grid {step_m:.0} m) of the base field by ground band; land: every {stride}th lattice cell over the sea; rivers: every cell of at least {min_area_m2:e} m2
+"
+    );
+    out.push_str(
+        "# band_m land_share_pct land_cells land_p50 land_p90 land_p99 river_share_pct river_cells river_p50 river_p90 river_p99
+",
+    );
+    let (land, rivers) = (measure(&land), measure(&rivers));
+    for (lo, hi) in BANDS {
+        let pick = |all: &[(f64, f64)]| -> Vec<f64> { all.iter().filter(|(h, _)| *h >= lo && *h < hi).map(|(_, s)| *s).collect() };
+        let (mut l, mut r) = (pick(&land), pick(&rivers));
+        let share = |k: usize, of: usize| 100.0 * k as f64 / of.max(1) as f64;
+        let name = if hi.is_finite() { format!("{lo:.0}-{hi:.0}") } else { format!(">{lo:.0}") };
+        let (ln, rn) = (l.len(), r.len());
+        out.push_str(&format!(
+            "{name} {:.1} {ln} {:.2} {:.2} {:.2} {:.1} {rn} {:.2} {:.2} {:.2}
+",
+            share(ln, land.len()),
+            percentile(&mut l, 0.5),
+            percentile(&mut l, 0.9),
+            percentile(&mut l, 0.99),
+            share(rn, rivers.len()),
+            percentile(&mut r, 0.5),
+            percentile(&mut r, 0.9),
+            percentile(&mut r, 0.99),
+        ));
+    }
+    out
 }
 
 fn anchor_cell(
@@ -601,15 +707,31 @@ pub fn capture_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
     let (mut anchor, flow, measured) = anchor_direction(config.anchor, &maps, &|d| base.height(d), step_m)?;
     let (lat, lon) = anchor.lat_lon();
     let ground = base.height(anchor);
-    writeln!(
-        out,
+    let anchor_line = format!(
         "anchor: latitude {:.4} longitude {:.4} degrees, ground {ground:.1} m{}",
         lat.to_degrees(),
         lon.to_degrees(),
         flow.map_or(String::new(), |b| format!(", the river flows towards bearing {b:.0} degrees{measured}"))
-    )
-    .map_err(err)?;
+    );
+    writeln!(out, "{anchor_line}").map_err(err)?;
+    let mut notes = format!(
+        "# {anchor_line}
+"
+    );
     let level_m = world.definition().sea(planet_world_def::BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;
+    if let Some(stride) = config.slope_table_stride {
+        let min_area = match config.anchor {
+            Anchor::SteepestRiver { min_area_m2, .. } => min_area_m2,
+            _ => 1e10,
+        };
+        let sea_m =
+            world.definition().sea(planet_world_def::BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;
+        let started = Instant::now();
+        let table = slope_table(&maps, &|d| base.height(d), sea_m, 2000.0, step_m, stride, min_area);
+        std::fs::create_dir_all(&dir).map_err(err)?;
+        std::fs::write(dir.join("slopes.txt"), &table).map_err(err)?;
+        writeln!(out, "slopes.txt written in {:.0} s", started.elapsed().as_secs_f64()).map_err(err)?;
+    }
     // The chunk stage cuts its channel within a cell of the coupled run's anchor, not through it: with `snap_to_channel_m` the anchor moves onto the
     // channel once the chunks under the first pose have landed, and the headings are read from the channel's downstream bearing.
     let mut heading_base = 0.0;
@@ -625,20 +747,23 @@ pub fn capture_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         let level = crate::anetworld::ANET_TOP_LEVEL;
         let (at, bearing) = snap_to_channel(&|d| f.height_at_level(d, level), anchor, flow, snap_m, 16.0, radius_m)?;
         let (lat, lon) = at.lat_lon();
-        writeln!(
-            out,
+        let snap_line = format!(
             "snapped to the channel, {:.0} m from the anchor: latitude {:.4} longitude {:.4} degrees, ground {:.1} m, downstream bearing {bearing:.0} degrees",
             libm::acos(anchor.dot(at).clamp(-1.0, 1.0)) * radius_m,
             lat.to_degrees(),
             lon.to_degrees(),
             f.height_at_level(at, level)
-        )
-        .map_err(err)?;
+        );
+        writeln!(out, "{snap_line}").map_err(err)?;
+        notes += &format!(
+            "# {snap_line}
+"
+        );
         (anchor, heading_base) = (at, bearing);
     }
     std::fs::create_dir_all(&dir).map_err(err)?;
     let mut index =
-        String::from("# pose width height eye_lat_deg eye_lon_deg eye_height_m heading_deg pitch_deg sun_local_hours chunks waited_s\n");
+        notes + "# pose width height eye_lat_deg eye_lon_deg eye_height_m heading_deg pitch_deg sun_local_hours chunks waited_s\n";
     for pose in &config.poses {
         let pose = &Pose { heading_deg: (pose.heading_deg + heading_base).rem_euclid(360.0), ..pose.clone() };
         let started = Instant::now();
@@ -836,7 +961,7 @@ min_area_m2 = 1e9",
         );
         assert!(parse_config(&GOOD.replace("anchor = \"largest-river\"", "anchor = \"steepest-river\""))
             .unwrap_err()
-            .contains("'ground_min_m' is missing"));
+            .contains("'slope_radius_m' is missing"));
     }
 
     // spec: TEST-052
@@ -883,6 +1008,27 @@ snap_to_channel_m = 0"
         ))
         .unwrap_err()
         .contains("must be positive"));
+    }
+
+    // spec: TEST-052
+    #[test]
+    fn the_slope_table_counts_the_land_by_band_and_leaves_out_the_sea() {
+        use planet_generators::coupled::{CoupledMaps, Lattice};
+        let radius = 6.0e6;
+        let lat = Lattice::new(8, radius);
+        let n = lat.len();
+        let maps = CoupledMaps::new(lat, vec![1.0; n], vec![1.0; n], 0);
+        // The northern half is a plateau of 600 m, the southern half sea.
+        let ground = |d: Vec3| if d.z > 0.0 { 600.0 } else { -10.0 };
+        let table = slope_table(&maps, &ground, 0.0, 2000.0, 500.0, 2, 0.0);
+        let rows: Vec<Vec<&str>> = table.lines().filter(|l| !l.starts_with('#')).map(|l| l.split(' ').collect()).collect();
+        assert_eq!(rows.len(), 5, "{table}");
+        assert_eq!(rows[0][0], "0-500");
+        assert_eq!((rows[1][0], rows[1][1]), ("500-1000", "100.0"), "all the land is in the band of 600 m: {table}");
+        assert_eq!((rows[1][3], rows[1][5]), ("0.00", "0.00"), "a plateau has no slope");
+        assert_eq!((rows[0][2], rows[2][2], rows[4][2]), ("0", "0", "0"));
+        assert!(rows[1][2].parse::<usize>().unwrap() > 0);
+        assert_eq!(table, slope_table(&maps, &ground, 0.0, 2000.0, 500.0, 2, 0.0), "the same table every time");
     }
 
     // spec: TEST-050

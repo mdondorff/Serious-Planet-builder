@@ -1,16 +1,15 @@
-# The poses of look review 1, second site (M8-3 hills): the six poses of look-review-1 over a river in hilly ground.
-# The anchor is the land river cell of the coupled run with a drainage area of at least 1e10 m2 (10,000 km2), ground 1000 to 2500 m high on the
-# base field (the 16384 bake), whose surroundings within 2 km have the steepest slope on the base field sampled at the bake's cell spacing.
-# The anchor then snaps to the lowest ground of the landed chunks within 1200 m (the channel the chunk stage cut, which lies up to a cell
-# of the coupled run from the anchor cell); heading_deg is relative to the channel's downstream bearing (0: looking downstream).
+# The poses of look review 1, second site (M8-3 hills): the six poses of look-review-1 over the steepest river of the coupled run.
+# The anchor is the land river cell of the coupled run with a drainage area of at least 1e10 m2 (10,000 km2) whose surroundings within 2 km have
+# the steepest slope on the base field (the 16384 bake, a grid of its cell spacing), anywhere on the planet. The anchor then snaps to the lowest
+# ground of the landed chunks within 1200 m (the channel the chunk stage cut, which lies up to a cell of the coupled run from the anchor cell);
+# heading_deg is relative to the channel's downstream bearing (0: looking downstream).
 # Run: cargo xtask capture stills --poses docs/milestones/M8/look-review-1-hills/poses.toml --store DIR
+# slopes.txt (the slope table) is made by adding `slope_table_stride = 8` to [place] (about 8 minutes).
 
 chunk_timeout_s = 3600
 
 [place]
 anchor = "steepest-river"
-ground_min_m = 1000
-ground_max_m = 2500
 slope_radius_m = 2000
 min_area_m2 = 1e10
 snap_to_channel_m = 1200
