@@ -4,6 +4,8 @@
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
+#[macro_use]
+mod horizon_wgsl;
 pub mod atmosphere;
 pub mod compact;
 pub mod exec;
@@ -11,6 +13,7 @@ pub mod gate;
 pub mod gpu_timing;
 pub mod graph;
 pub mod horizon;
+pub use horizon::{probe_horizon, HorizonAnswer, HorizonQuery};
 pub mod lit;
 #[cfg(feature = "reference-renderer")]
 pub mod reference;

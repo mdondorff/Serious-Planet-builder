@@ -42,7 +42,8 @@ pub fn grid_phases(origin: [f64; 3]) -> [[f32; 3]; 9] {
 
 /// The product shader up to the vertex stage: the globals, the node record, the vertex output and the declarations the stages share.
 /// The vertex stage itself is the compact tile's (`compact_terrain_shader`, REND-016) or the reference renderer's.
-pub(crate) const SHADER_HEAD: &str = r#"
+pub(crate) const SHADER_HEAD: &str = concat!(
+    r#"
 struct Globals {
     view_proj: mat4x4<f32>,
     range: vec4<f32>,
@@ -89,13 +90,9 @@ struct Node {
 @group(0) @binding(0) var<uniform> g: Globals;
 // One record per planned node, read with the draw's instance index (`first_instance` = the node's index in the plan, REND-015).
 @group(0) @binding(1) var<storage, read> nodes: array<Node>;
-// The horizon shadows (REND-038, M8-5): per node two vec4, [slot (-1: none), sun azimuth, sun elevation, fade] and [u0, v0, du, dv] (the plan's node
-// index, as `nodes`); the chunk horizon maps (four layers a slot, four azimuths a texel); the coarse map (six faces, four layers each); a sampler.
-@group(0) @binding(4) var<storage, read> horizon_nodes: array<vec4<f32>>;
-@group(0) @binding(5) var horizon_chunks: texture_2d_array<f32>;
-@group(0) @binding(6) var horizon_coarse: texture_2d_array<f32>;
-@group(0) @binding(7) var horizon_sampler: sampler;
-
+"#,
+    horizon_decls!(),
+    r#"
 struct VsOut {
     @builtin(position) pos: vec4<f32>,
     @location(0) normal: vec3<f32>,
@@ -109,11 +106,13 @@ struct VsOut {
     // writes zeros: it draws no lit view).
     @location(6) aux: vec2<f32>,
 };
-"#;
+"#
+);
 
 /// The product shader after the vertex stage (the helpers, the debug fragment stage and the lit fragment stages), shared by the compact
 /// vertex stage (`compact_terrain_shader`) and the test-only reference renderer.
-pub(crate) const SHADER_TAIL: &str = r#"
+pub(crate) const SHADER_TAIL: &str = concat!(
+    r#"
 // Distance in pixels to the nearest integer of `x`, so lines stay about one pixel wide at any scale.
 fn line(x: f32, w: f32) -> f32 {
     let d = abs(fract(x + 0.5) - 0.5);
@@ -655,9 +654,11 @@ fn fs_lit_view(in: VsOut) -> vec4<f32> {
     let up = up_at(nodes[in.node_index].up, in.local);
     let climate = tile_climate(in);
     let gd = ground_detail(in.node_index, in.local, in.normal, up, climate.x, climate.y, in.height - g.extra.x);
-    var rgb = shade_lit(g.mode.x, g.albedo, gd.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), sun, g.range.z) * detail_mul(gd, g.mode.x, g.albedo, climate.x, climate.y, clamp(dot(normalize(gd.normal), up), 0.0, 1.0), in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)));
+    // The horizon shadow multiplies the direct sun term of the views that have one (Lit, Lighting; REND-038): 1.0 where no horizon map is there.
+    let sun_vis = select(1.0, shadow_factor(in.node_index, in.aux, up, sun), g.mode.x == 0u || g.mode.x == 2u);
+    var rgb = sun_vis * shade_lit(g.mode.x, g.albedo, gd.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), sun, g.range.z) * detail_mul(gd, g.mode.x, g.albedo, climate.x, climate.y, clamp(dot(normalize(gd.normal), up), 0.0, 1.0), in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)));
     // The sum is clamped like the rest of the lit radiance: the scene target is f16.
-    rgb = min(rgb + vec3<f32>(ground_gloss(in.node_index, in.local, gd, sun) * g.range.z), vec3<f32>(60000.0));
+    rgb = min(rgb + vec3<f32>(ground_gloss(in.node_index, in.local, gd, sun) * (g.range.z * sun_vis)), vec3<f32>(60000.0));
     if (g.extra.y > 3.5) {
         rgb = stale_tint(in, rgb, g.range.z);
     } else if (g.extra.y > 2.5) {
@@ -712,7 +713,9 @@ fn region_tint(rel: vec3<f32>, rgb: vec3<f32>, factor: f32) -> vec3<f32> {
     }
     return rgb;
 }
-"#;
+"#,
+    horizon_fns!()
+);
 
 /// Depth target format and test: reversed-Z `Depth32Float` with the clear value 0 (CON-12, ADR 0002), for the debug and lit paths alike.
 pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -1196,6 +1199,13 @@ impl TerrainRenderer {
         self.horizon_frame = Some(frame.clone());
     }
 
+    /// Give the shader the coarse horizon map (`planet_frame::horizonview::pack_coarse`, `m` cells a face), or take it away with `None`. The
+    /// shadow then also comes from the far terrain where a chunk has no map of its own (GEN-045).
+    pub fn set_horizon_coarse(&mut self, ctx: &GpuContext, coarse: Option<(u32, &[u8])>) {
+        self.horizon.set_coarse(ctx, coarse);
+        self.rebind(&ctx.device);
+    }
+
     /// End the horizon shadows: every node reads slot -1 again (the frame is then the frame of a build without the term).
     pub fn clear_horizon(&mut self) {
         self.horizon_frame = None;
@@ -1284,7 +1294,7 @@ impl TerrainRenderer {
             ty: wgpu::BindingType::Buffer { ty, has_dynamic_offset: false, min_binding_size: None },
             count: None,
         };
-        let horizon_entries = crate::horizon::layout_entries();
+        let horizon_entries = crate::horizon::layout_entries(wgpu::ShaderStages::empty());
         let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("terrain-bgl"),
             entries: &[

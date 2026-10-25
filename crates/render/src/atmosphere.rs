@@ -747,6 +747,11 @@ const LIGHTING: &str = r#"
 // The sun's light on a surface with the given normal at altitude `h_alt` above the reference surface (up and sun in planet-fixed
 // axes): transmitted direct light on Lambert's cosine plus the multiple-scattering ambient on the sky hemisphere.
 fn atm_terrain_lighting(normal: vec3<f32>, up: vec3<f32>, h_alt: f32, sun: vec3<f32>) -> vec3<f32> {
+    return atm_terrain_lighting_vis(normal, up, h_alt, sun, 1.0);
+}
+
+// The same with the direct term multiplied by `vis`, the horizon shadow's factor (REND-038); the ambient is not shadowed.
+fn atm_terrain_lighting_vis(normal: vec3<f32>, up: vec3<f32>, h_alt: f32, sun: vec3<f32>, vis: f32) -> vec3<f32> {
     let n = normalize(normal);
     let ndl = max(dot(n, sun), 0.0);
     let mu_s = clamp(dot(up, sun), -1.0, 1.0);
@@ -755,7 +760,7 @@ fn atm_terrain_lighting(normal: vec3<f32>, up: vec3<f32>, h_alt: f32, sun: vec3<
     let shadow = atm_planet_shadow(h, mu_s);
     let ms = atm_multiscatter(h, mu_s);
     let hemi = 0.5 + 0.5 * clamp(dot(n, up), -1.0, 1.0);
-    return t * (shadow * ndl * 0.31830988618) + ms * hemi;
+    return t * (shadow * ndl * 0.31830988618 * vis) + ms * hemi;
 }
 
 // The sun's illuminance that reaches the surface (the transmittance and the planet's shadow, one unit outside the atmosphere): what the
@@ -769,14 +774,14 @@ fn atm_sun_direct(up: vec3<f32>, h_alt: f32, sun: vec3<f32>) -> vec3<f32> {
 
 const TERRAIN_MAIN: &str = r#"
 
-fn atm_terrain_radiance(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32, ramp_min: f32, h_alt: f32, sun: vec3<f32>) -> vec3<f32> {
+fn atm_terrain_radiance(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32, ramp_min: f32, h_alt: f32, sun: vec3<f32>, vis: f32) -> vec3<f32> {
     let n = normalize(normal);
     let cs = clamp(dot(n, up), 0.0, 1.0);
     let inv_pi = 0.31830988618;
     if (view >= 3u) {
         return climate_colour(view, t, p) * inv_pi;
     }
-    let light = atm_terrain_lighting(normal, up, h_alt, sun);
+    let light = atm_terrain_lighting_vis(normal, up, h_alt, sun, vis);
     if (view == 2u) {
         return light;
     }
@@ -787,8 +792,8 @@ fn atm_terrain_radiance(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>,
     return a * light;
 }
 
-fn atm_shade_lit(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32, ramp_min: f32, h_alt: f32, sun: vec3<f32>, factor: f32) -> vec3<f32> {
-    return clamp(atm_terrain_radiance(view, tab, normal, up, t, p, h, ramp_min, h_alt, sun) * factor, vec3<f32>(0.0), vec3<f32>(60000.0));
+fn atm_shade_lit(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32, ramp_min: f32, h_alt: f32, sun: vec3<f32>, vis: f32, factor: f32) -> vec3<f32> {
+    return clamp(atm_terrain_radiance(view, tab, normal, up, t, p, h, ramp_min, h_alt, sun, vis) * factor, vec3<f32>(0.0), vec3<f32>(60000.0));
 }
 
 @fragment
@@ -806,10 +811,12 @@ fn fs_lit_atmo_view(in: VsOut) -> vec4<f32> {
     let up = up_at(nodes[in.node_index].up, in.local);
     let climate = tile_climate(in);
     let gd = ground_detail(in.node_index, in.local, in.normal, up, climate.x, climate.y, in.height - g.extra.x);
-    var rgb = atm_shade_lit(g.mode.x, g.albedo, gd.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), in.height, sun, g.range.z) * detail_mul(gd, g.mode.x, g.albedo, climate.x, climate.y, clamp(dot(normalize(gd.normal), up), 0.0, 1.0), in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)));
+    // The horizon shadow multiplies the direct sun term (REND-038): 1.0 where no horizon map is there.
+    let sun_vis = select(1.0, shadow_factor(in.node_index, in.aux, up, sun), g.mode.x == 0u || g.mode.x == 2u);
+    var rgb = atm_shade_lit(g.mode.x, g.albedo, gd.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), in.height, sun, sun_vis, g.range.z) * detail_mul(gd, g.mode.x, g.albedo, climate.x, climate.y, clamp(dot(normalize(gd.normal), up), 0.0, 1.0), in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)));
     let gloss = ground_gloss(in.node_index, in.local, gd, sun);
     if (gloss > 0.0) {
-        rgb = min(rgb + atm_sun_direct(up, in.height, sun) * (gloss * g.range.z), vec3<f32>(60000.0));
+        rgb = min(rgb + atm_sun_direct(up, in.height, sun) * (gloss * g.range.z * sun_vis), vec3<f32>(60000.0));
     }
     if (g.extra.y > 3.5) {
         rgb = stale_tint(in, rgb, g.range.z);
