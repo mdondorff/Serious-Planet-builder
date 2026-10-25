@@ -231,7 +231,8 @@ fn a_chunk_of_the_synthetic_scene_keeps_its_known_answer() {
     assert_eq!(fnv(&core_change(1003, 40)), KNOWN_ANSWER, "the stage changed: platform, order or arithmetic");
 }
 
-const KNOWN_ANSWER: u64 = 4_674_115_344_839_955_587;
+// Re-pinned 2026-10-25 by `m8-local-routing` (GEN-066, GEN-059, declared): the stage routes the corridor over the ground and the bed follows the ground; ANET_VERSION 6.
+const KNOWN_ANSWER: u64 = 12_151_146_585_865_702_238;
 
 /// A gentle valley along the river (slope 0.001, below the breach slope) plus a little noise: every stream runs to the river.
 struct Plane;
@@ -313,7 +314,7 @@ fn a_river_over_a_smooth_base_keeps_its_links_and_its_area_flows_on_past_the_anc
     let lat = ChunkLattice::new(PER).unwrap();
     let a = stage_over(Arc::new(AboveRun), 40);
     let r = region(&lat, chunk(1003), 40);
-    let net = planet_generators::anet::Network::build(&River, &AboveRun, &lat, &r, R);
+    let net = planet_generators::anet::Network::build_with(&River, &AboveRun, &lat, &r, R, &a.params.anchor);
     let s = a.solve(&lat, &r);
     let mut with_link = 0;
     for (c, &on) in net.corridor.iter().enumerate() {
@@ -399,7 +400,7 @@ fn channels_the_corridor_and_fixed_cells_are_untouched_by_the_hillslope_processe
     off.params.diffusion = 0.0;
     off.params.slump_rate = 0.0;
     let (a, b) = (with.solve(&lat, &r), off.solve(&lat, &r));
-    let net = planet_generators::anet::Network::build(&River, &Hills, &lat, &r, R);
+    let net = planet_generators::anet::Network::build_with(&River, &Hills, &lat, &r, R, &with.params.anchor);
     let (mut changed, mut kept) = (0, 0);
     for c in 0..r.cells.len() {
         if r.depth[c] > 30 {
@@ -522,7 +523,9 @@ fn the_anchors_of_a_cell_are_the_same_whatever_the_halo_over_ground_that_is_not_
     let lat = ChunkLattice::new(PER).unwrap();
     for x in [1000, 1003, 1008] {
         let (ra, rb) = (region(&lat, chunk(x), 10), region(&lat, chunk(x), 30));
-        let (na, nb) = (Network::build(&River, &Hills, &lat, &ra, R), Network::build(&River, &Hills, &lat, &rb, R));
+        // The band reaches what the halo holds besides the solve's window (GEN-060): the law of the stage for the smaller halo, whose cap is the least.
+        let law = ANetParams::spike(80.0, lat.cell_m(R)).anchor;
+        let (na, nb) = (Network::build_with(&River, &Hills, &lat, &ra, R, &law), Network::build_with(&River, &Hills, &lat, &rb, R, &law));
         let mut shared = 0;
         for (i, cell) in ra.cells.iter().enumerate() {
             let Some(j) = rb.index_of(*cell) else { continue };

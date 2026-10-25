@@ -242,3 +242,132 @@ fn the_upsampled_run_has_no_step_across_a_face_edge_or_at_a_cube_corner() {
         assert!(step < 3.0, "a {step} m step between points {} m apart", (a - b).length() * R);
     }
 }
+
+/// A base with a narrow ridge across the river between the coarse cells 1002 and 1003 (80 m high, 500 m across), on the 7 m plateau of `Detail`.
+struct Ridge;
+
+fn ridge_centre() -> Vec3 {
+    let l = lattice();
+    let (a, b) = (l.direction(FACE * N * N + 1000 * N + 1002), l.direction(FACE * N * N + 1000 * N + 1003));
+    ((a + b) * 0.5).normalized()
+}
+
+impl BaseDetail for Ridge {
+    fn base_height(&self, dir: Vec3) -> f64 {
+        // The ridge is a wall along the line through its centre across the river, so the way round it is to the side, not through it.
+        let along =
+            (lattice().direction(FACE * N * N + 1000 * N + 1003) - lattice().direction(FACE * N * N + 1000 * N + 1002)).normalized();
+        let across = ridge_centre().cross(along).normalized();
+        let (d_along, d_across) = ((dir - ridge_centre()).dot(along) * R, (dir - ridge_centre()).dot(across) * R);
+        let wall = 80.0 * libm::exp(-(d_along / 250.0) * (d_along / 250.0)) * (1.0 - 0.9 * smooth(d_across.abs() / 1200.0));
+        self.coarse_input(dir) + 7.0 + wall
+    }
+    fn identity(&self) -> u64 {
+        13
+    }
+    fn coarse_input(&self, dir: Vec3) -> f64 {
+        100.0 + 3.0 * dir.x
+    }
+}
+
+/// 0 at 0, 1 at 1 and beyond.
+fn smooth(x: f64) -> f64 {
+    let t = x.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+fn routed_law() -> planet_generators::anet::AnchorLaw {
+    planet_generators::anet::AnchorLaw {
+        route_band_m: 1500.0,
+        route_lambda: 0.02,
+        route_stride: 1,
+        slide_m: 0.0,
+        slide_steep_m: 0.0,
+        head_m: 0.0,
+        band_cap_m: 0.0,
+        ..planet_generators::anet::AnchorLaw::default()
+    }
+}
+
+// spec: GEN-066
+#[test]
+fn neighbouring_chunks_find_the_same_routed_corridor_and_beds_through_their_shared_border() {
+    let lat = ChunkLattice::new(32).unwrap();
+    let mut law = routed_law();
+    law.slide_m = 400.0;
+    law.slide_steep_m = 400.0;
+    law.head_m = 400.0;
+    let (ra, rb) = (region(&lat, chunk(1002), 40), region(&lat, chunk(1003), 40));
+    let (na, nb) =
+        (Network::build_with(&River(1000), &Ridge, &lat, &ra, R, &law), Network::build_with(&River(1000), &Ridge, &lat, &rb, R, &law));
+    let (mut shared, mut on_path) = (0, 0);
+    for (ia, &cell) in ra.cells.iter().enumerate() {
+        let Some(ib) = rb.index_of(cell) else { continue };
+        shared += 1;
+        assert_eq!(na.corridor[ia], nb.corridor[ib], "corridor at {cell:?}");
+        assert_eq!(na.anchor_z[ia].to_bits(), nb.anchor_z[ib].to_bits(), "bed at {cell:?}");
+        if na.next[ia] != NO_NEXT && nb.next[ib] != NO_NEXT {
+            assert_eq!(ra.cells[na.next[ia] as usize], rb.cells[nb.next[ib] as usize], "next cell at {cell:?}");
+        }
+        on_path += usize::from(na.corridor[ia]);
+    }
+    assert!(shared > 1000 && on_path >= 15, "{shared} shared cells, {on_path} on the corridor");
+}
+
+// spec: GEN-066
+#[test]
+fn the_routed_path_goes_round_a_ridge_the_coarse_path_crosses_and_the_nodes_of_all_segments_through_a_cell_agree() {
+    use planet_generators::route::Router;
+    let lat = ChunkLattice::new(32).unwrap();
+    let region_ = region(&lat, chunk(1002), 40);
+    let top = |net: &Network, region: &planet_generators::chunkfield::Region| {
+        (0..region.cells.len())
+            .filter(|&c| net.corridor[c])
+            .map(|c| Ridge.base_height(lat.direction(region.cells[c])))
+            .fold(f64::NEG_INFINITY, f64::max)
+    };
+    let coarse = Network::build_with(&River(1000), &Ridge, &lat, &region_, R, &planet_generators::anet::AnchorLaw::default());
+    let routed = Network::build_with(&River(1000), &Ridge, &lat, &region_, R, &routed_law());
+    let (high, low) = (top(&coarse, &region_), top(&routed, &region_));
+    assert!(high > 160.0, "the coarse path crosses the ridge ({high} m)");
+    assert!(low < high - 30.0, "the routed path keeps lower: {low} m against {high} m");
+    // The node of a cell is one direction for every segment that meets there (a function of the cell alone).
+    let mut law = routed_law();
+    law.slide_m = 600.0;
+    law.slide_steep_m = 600.0;
+    let run = River(1000);
+    let router = Router::new(&run, &Ridge, &lat, R, &law);
+    let c = FACE * N * N + 1000 * N + 1002;
+    let (up, down) = (router.polyline(c - 1, c), router.polyline(c, c + 1));
+    assert_eq!(up[up.len() - 1], down[0], "the segments meet at the same node");
+    assert_eq!(router.node(c), down[0]);
+    // The node slid to ground no higher than the cell's centre, within the radius.
+    let centre = lattice().direction(c);
+    assert!(Ridge.base_height(router.node(c)) <= Ridge.base_height(centre) + 1e-9);
+    assert!((router.node(c) - centre).length() * R <= 600.0 + 1.0);
+}
+
+// spec: GEN-059
+#[test]
+fn the_bed_never_lies_over_the_ground_and_never_climbs_downstream_even_where_a_ridge_forces_a_cut() {
+    let lat = ChunkLattice::new(32).unwrap();
+    let r = region(&lat, chunk(1002), 40);
+    let mut law = routed_law();
+    law.cut_cap_m = 200.0;
+    let net = Network::build_with(&River(1000), &Ridge, &lat, &r, R, &law);
+    let (mut checked, mut cut) = (0, 0.0f64);
+    for c in 0..r.cells.len() {
+        if !net.corridor[c] {
+            continue;
+        }
+        assert!(net.anchor_z[c] <= net.base_z[c] + 1e-6, "the bed of {:?} is over the ground", r.cells[c]);
+        cut = cut.max(net.base_z[c] - net.anchor_z[c]);
+        let n = net.next[c];
+        if n != NO_NEXT {
+            assert!(net.anchor_z[n as usize] <= net.anchor_z[c] + 0.05, "the bed climbs from {:?}", r.cells[c]);
+            checked += 1;
+        }
+    }
+    assert!(checked > 30, "{checked} links checked");
+    assert!(cut <= 200.0 + 100.0, "the cut stays within the cap and the valley depth ({cut} m)");
+}
