@@ -4,7 +4,7 @@
 The erosion field (`cpu-erosion-v1`) SHALL split its crease octaves at wavelength 1.6 km (octave 4 of 25 km spacing halving): the coarse octaves SHALL keep the amplitude `A(E) carve(slope)`, the fine octaves the amplitude `A(E) (carve + (1 - carve) L)` with `L` the landform driver in `[0, 1]` read from the landform lattice (GEN-062, the interpolant of `global::landform(seed, direction)`). With `L` 0 the detail SHALL be the detail of version 1; with `L` 1 only the fine creases differ, and on ground where `carve` is 1 nothing differs. The field's version SHALL be 2.
 
 Verify: A
-Status: planned
+Status: active
 Source: ADR 0080 point 2, owner decision 2026-10-25 (terrain relief into M8), GEN-064
 
 #### Scenario: Plain and range zone
@@ -15,7 +15,7 @@ Source: ADR 0080 point 2, owner decision 2026-10-25 (terrain relief into M8), GE
 The erosion field SHALL read the landform from `global::LandformLattice`: the samples of `global::landform` (rounded to f32) at the face coordinates `2 i / 256 - 1` of the tangent warp on each cube face, interpolated bilinearly, a pure function of `(seed, direction)` that gives the same bits to every tile and is continuous across face edges. Its range over a cap SHALL be the least and greatest sample of the cells the cap touches (`LandformLattice::bounds`), `[0, 1]` for a cap over 0.05 rad (negative or not a number included), over 16 cells an axis (about 0.03 rad) or whose box of face coordinates (2 per radian) reaches a face edge, and the erosion field's height bounds SHALL take the landform in that range.
 
 Verify: A
-Status: planned
+Status: active
 Source: GEN-017, GEN-061, ADR 0074 (bounds must be sound)
 
 #### Scenario: Random caps

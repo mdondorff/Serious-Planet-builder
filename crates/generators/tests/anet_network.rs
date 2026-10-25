@@ -421,7 +421,7 @@ impl BaseDetail for Hollow {
     }
 }
 
-// spec: GEN-059
+// spec: GEN-059, GEN-069
 #[test]
 fn a_tributary_hangs_above_the_stem_at_a_confluence_with_no_climb_and_never_over_the_ground() {
     let lat = ChunkLattice::new(32).unwrap();
@@ -531,4 +531,53 @@ fn a_stage_memo_of_routed_segments_gives_the_bits_of_a_fresh_build_and_empties_w
     let changed = Network::build_with_memo(&Fork, &Ridge, &lat, &ra, R, &other, &memo);
     assert_eq!(bits(&changed), bits(&Network::build_with(&Fork, &Ridge, &lat, &ra, R, &other)));
     assert_ne!(bits(&changed), bits(&first), "the law changes the beds");
+}
+
+// spec: GEN-066
+#[test]
+fn without_a_band_or_a_slide_the_polyline_is_the_coarse_path_and_a_head_moves_to_the_highest_ground() {
+    use planet_generators::route::{RouteMemo, Router};
+    let lat = ChunkLattice::new(32).unwrap();
+    let c0 = FACE * N * N + 1000 * N + 1001;
+    let run = River(1000);
+    let memo = RouteMemo::default();
+    let off = planet_generators::anet::AnchorLaw::default();
+    let router = Router::new(&run, &Ridge, &lat, R, &off, &memo);
+    let coarse = segment_points(lattice().direction(c0), lattice().direction(c0 + 1), c0 as u64, R);
+    assert_eq!(*router.polyline(c0, c0 + 1), coarse, "no band and no slide is the coarse path");
+    // The first cell of the river (995) is a head: with head_m set, its node is the highest ground within the radius, not lower than the centre.
+    let head = FACE * N * N + 1000 * N + 995;
+    let mut law = routed_law();
+    law.head_m = 500.0;
+    let memo = RouteMemo::default();
+    let router = Router::new(&run, &Ridge, &lat, R, &law, &memo);
+    let centre = lattice().direction(head);
+    assert!(Ridge.base_height(router.node(head)) >= Ridge.base_height(centre) - 1e-9);
+    assert!((router.node(head) - centre).length() * R <= 500.0 + 1.0);
+}
+
+// spec: GEN-067
+#[test]
+fn chunks_built_at_once_on_several_threads_through_one_stage_memo_equal_fresh_builds() {
+    use planet_generators::route::RouteMemo;
+    let lat = ChunkLattice::new(32).unwrap();
+    let mut law = routed_law();
+    law.slide_m = 400.0;
+    law.slide_steep_m = 400.0;
+    let memo = RouteMemo::default();
+    let chunks = [1001u32, 1002, 1003, 1004];
+    let bits = |n: &Network| n.anchor_z.iter().map(|z| z.to_bits()).collect::<Vec<u64>>();
+    let fresh: Vec<Vec<u64>> =
+        chunks.iter().map(|&x| bits(&Network::build_with(&Fork, &Ridge, &lat, &region(&lat, chunk(x), 40), R, &law))).collect();
+    let shared: Vec<Vec<u64>> = std::thread::scope(|scope| {
+        let handles: Vec<_> = chunks
+            .iter()
+            .map(|&x| {
+                let (lat, law, memo) = (&lat, &law, &memo);
+                scope.spawn(move || bits(&Network::build_with_memo(&Fork, &Ridge, lat, &region(lat, chunk(x), 40), R, law, memo)))
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().expect("a thread")).collect()
+    });
+    assert_eq!(shared, fresh, "chunks built concurrently through one memo differ from fresh builds");
 }
