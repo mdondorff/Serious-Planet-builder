@@ -231,7 +231,7 @@ impl WorldTerrain {
         let tile = TileId::from_direction(&TangentWarp, dir, planet_generators::chunk::CHUNK_GRID_LEVEL);
         let reg = region(&clat, tile, halo);
         let s = stage.solve(&clat, &reg);
-        let net = planet_generators::anet::Network::build(&*stage.run, &*stage.base, &clat, &reg, radius);
+        let net = planet_generators::anet::Network::build_with(&*stage.run, &*stage.base, &clat, &reg, radius, &stage.params.anchor);
         let core = reg.core;
         let mut anchors: Vec<f64> =
             (0..reg.cells.len()).filter(|&c| !net.anchor_z[c].is_nan()).map(|c| net.anchor_z[c] - net.base_z[c]).collect();
