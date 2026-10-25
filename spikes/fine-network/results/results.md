@@ -146,6 +146,23 @@ Bounded chunk against the bounded scheme run on the whole 1824-cell window (marg
 - It costs 0.4 to 0.9 s a chunk against 0.18 s for the fill, and moves cells (not density) away from the fill's network; it removes the flood-routed flats and their straight lines.
 - Not measured: the stems inside the fine network (the carved valley floor of the main stem shows as channel cells along the stem in the images), junctions with the coarse-link tributaries, carved depth and sinuosity, a flat rule for the lake cells.
 
+## Open for M9 (opus-planner, 2026-10-26)
+1. **The scheme reads solved ground in its halo.** The step 2 runs took that ground from the neighbours' own A-net solves (3x3). In the stage a chunk solves its own region. Measured read-only at two sites (`halo_diff.txt`, `proto/halospike.rs`): the centre chunk's own solve of its east halo against the east neighbour's solve of its core (base heights identical):
+   | Distance from the border (cells) | lowland, mean / max (m) | hillsA, mean / max (m) |
+   |---|---|---|
+   | 0 (the border cell) | 0.000 / 0.008 | 0.028 / 0.507 |
+   | 1 to 9 | 0.035 / 0.47 | 1.76 / 30.9 |
+   | 10 to 49 | 0.17 / 1.19 | 7.70 / 67.6 |
+   | 50 to 149 | 0.26 / 1.73 | 10.0 / 62.7 |
+   | 150 to 374 | 0.13 / 6.67 | 8.10 / 67.1 |
+   - `ChunkStage::compute` promises only the chunk's own cells and one ring of apron; the measurement agrees: beyond the border cell the halo heights differ from the neighbour's core, by centimetres to 1.7 m at lowland (6.7 m at the far edge) and by metres to 68 m at hillsA (98 % of cells over 1 cm).
+   - A fine tier that runs on the chunk's own solved halo would therefore not agree with its neighbour's: the border agreement of the bounded scheme holds for equal input heights, not for two separate solves.
+   - Options: the fine tier takes the neighbours' solves as inputs (a dependency on 8 chunks, each about 4 s: a chunk's fine network waits for 9 solves); or it runs on a ground that is a function of the base and the coarse run alone within the halo (the base heights are identical; the stem carve and incision are what differ); or the A-net's own halo is raised until the solve is exact over 375 rings (SPIKE-35 found 3 km for heights at one site, not for the whole solve).
+2. **Stem overlap.** The fine network is computed on all cells; the carved main-stem valley floor appears as channel cells along the stem. The fine tier needs a rule for the corridor: exclude, or merge with the stem's own cells.
+3. **Junctions with the coarse-link tributaries** (#699) and with the stems: where a fine channel meets a routed link, the receiver and the area must continue the routed one.
+4. Carved depth and cross-section of the fine channels, sinuosity, and the flat rule for the lake cells (sinks) the bound leaves.
+5. Tuning of `Rb`, the carve limit and `L` against the halo (`Rd` = `L` + 2 `Rb` + 2): a wider reach needs a wider halo.
+
 ## Visuals
 ![Channel mask of the centre chunk (A_t 0.3 km2) against the reference by halo H: green both, red missed, blue false. Top: lowland at H 0, 100, 375. Bottom: hillsA at H 0, 375, 600. CPU run, hillshade of the base heights](images/halo_masks.png)
 ![Step 2 on solved ground: left, the unbounded fill chunk at H 200 against its reference; middle, the fill reference (straight runs across flats); right, the bounded chunk at H 375 against the bounded reference (identical). Top hillsA, bottom lowland; green both, red missed, blue false; CPU run, hillshade of the solved ground](images/bounded_masks.png)
