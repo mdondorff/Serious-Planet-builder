@@ -470,10 +470,13 @@ fn step_with(
 /// is, `rho K A^m S` with the area `A` and the slope `S` to the receiver taken from `z` itself (the flood, the jittered receivers and the
 /// accumulation of a step). `rho` 1 makes the input a steady state of the law, so the run keeps its relief and changes what the flood fills
 /// and the breaches open; lower values let it keep eroding. Sea cells, outlets and cells that sit in a pit (no drop to the receiver) get 0.
+/// What it does not hold fixed: the cells in a depression (the flood raises them) and land cells under `min_height_m` (the step lifts them to it).
 /// A pure function of its arguments, in the fixed order of the run (CON-14).
 pub fn stationary_uplift(lat: &Lattice, z: &[f32], erodibility: &[f32], p: &CoupledParams, rho: f64) -> Vec<f32> {
     assert!(z.len() == lat.len() && erodibility.len() == lat.len(), "the inputs must have one value per cell");
     assert!(rho.is_finite() && rho >= 0.0, "rho {rho} is not a factor of zero or more");
+    assert!(z.iter().all(|v| v.is_finite()), "the heights must be finite");
+    assert!(erodibility.iter().all(|k| k.is_finite() && *k >= 0.0), "the erodibility must be finite and not negative");
     let (filled, order) = priority_flood(lat, z);
     let (rec, dir) = receivers(lat, &filled, &order, p);
     let a = accumulate(lat, z, &order, &rec);
@@ -487,7 +490,9 @@ pub fn stationary_uplift(lat: &Lattice, z: &[f32], erodibility: &[f32], p: &Coup
         }
         let dist = lat.spacing_m(c, usize::from(dir[c]), r as usize);
         let drop = (f64::from(z[c]) - f64::from(z[r as usize]).max(0.0)).max(0.0);
-        u[c] = (rho * f64::from(erodibility[c]) * area_pow(lat, &mut leaf_pow, c, a[c], p.area_exp) * (drop / dist)) as f32;
+        let v = (rho * f64::from(erodibility[c]) * area_pow(lat, &mut leaf_pow, c, a[c], p.area_exp) * (drop / dist)) as f32;
+        assert!(v.is_finite(), "the uplift of cell {c} is {v}: rho {rho} is too large for this input");
+        u[c] = v;
     }
     u
 }
@@ -750,7 +755,55 @@ mod tests {
         let none = stationary_uplift(&lat, &input.z, &input.erodibility, &p, 0.0);
         assert!(none.iter().all(|&u| u == 0.0));
         let double = stationary_uplift(&lat, &input.z, &input.erodibility, &p, 2.0);
-        assert!(double.iter().zip(&input.uplift).all(|(d, u)| (*d - 2.0 * u).abs() <= 1e-9 * d.abs().max(1.0)), "linear in rho");
+        assert!(double.iter().zip(&input.uplift).all(|(d, u)| *d == 2.0 * *u), "linear in rho, exactly (doubling is exact)");
+        // One step from the stationary uplift moves every land cell that is not in a depression and not under the height floor by at most a
+        // few f32 ulps, the coastal cells with a sea receiver included.
+        let (filled, order) = priority_flood(&lat, &input.z);
+        let (rec, _) = receivers(&lat, &filled, &order, &p);
+        // A cell is disturbed when it sits in a depression or under the height floor, or drains to a disturbed cell (its receiver moves, and
+        // the step reads the moved height); the receivers come first in the pop order.
+        let mut disturbed = vec![false; lat.len()];
+        for &c in &order {
+            let c = c as usize;
+            let r = rec[c];
+            disturbed[c] =
+                filled[c] != input.z[c] || (input.z[c] > 0.0 && input.z[c] < p.min_height_m as f32) || (r != NONE && disturbed[r as usize]);
+        }
+        let mut z = input.z.clone();
+        let _ = step(&lat, &input, &mut z, &p);
+        let mut checked = 0;
+        for c in 0..lat.len() {
+            if input.z[c] > 0.0 && !disturbed[c] {
+                let (a, b) = (f64::from(input.z[c]), f64::from(z[c]));
+                assert!((a - b).abs() <= 4.0 * f64::from(f32::EPSILON) * a.abs(), "cell {c}: {a} became {b}");
+                checked += 1;
+            }
+        }
+        assert!(checked > lat.len() / 5, "the check covers the land: {checked} cells");
+    }
+
+    // spec: GEN-059
+    #[test]
+    fn a_world_without_sea_has_one_outlet_and_it_and_the_pits_get_no_uplift() {
+        let lat = Lattice::new(12, R);
+        let mut input = world(&lat);
+        for z in &mut input.z {
+            *z = z.max(1.0) + 500.0;
+        }
+        let p = CoupledParams::default();
+        let u = stationary_uplift(&lat, &input.z, &input.erodibility, &p, 1.0);
+        let (filled, order) = priority_flood(&lat, &input.z);
+        let (rec, _) = receivers(&lat, &filled, &order, &p);
+        let outlets: Vec<usize> = (0..lat.len()).filter(|&c| rec[c] == NONE).collect();
+        assert!(!outlets.is_empty());
+        for c in outlets {
+            assert_eq!(u[c], 0.0, "outlet {c}");
+        }
+        for c in 0..lat.len() {
+            if rec[c] != NONE && input.z[c] <= input.z[rec[c] as usize] {
+                assert_eq!(u[c], 0.0, "cell {c} sits in a pit");
+            }
+        }
     }
 
     // spec: GEN-059
