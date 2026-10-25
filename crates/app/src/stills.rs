@@ -30,12 +30,22 @@ const MAX_CAMERA_ROUNDS: usize = 4;
 /// Seconds a pose may wait for its chunks when the file gives no `chunk_timeout_s`.
 pub const DEFAULT_CHUNK_TIMEOUT_S: f64 = 900.0;
 
+/// The local relief an anchor must stand in: the highest minus the lowest coupled-run height within `radius_m` of the cell.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Relief {
+    pub radius_m: f64,
+    pub min_m: f64,
+    pub max_m: f64,
+}
+
 /// Where the poses look: the largest river of the world's coupled run, or a point.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Anchor {
     /// The land cell of the coupled run at least this many metres high with the largest drainage area that drains on (0: the cell of the
     /// chunk scenes, which can be a river mouth over the sea; a higher bound puts the anchor inland on the river).
-    LargestRiver { min_height_m: f64 },
+    /// With `relief`, only cells whose surrounding ground (`radius_m` around, by lattice steps) spans a height range inside `min_m..=max_m`
+    /// (hilly ground); the river is the largest drainage area among those.
+    LargestRiver { min_height_m: f64, relief: Option<Relief> },
     /// Latitude and longitude in degrees.
     LatLon(f64, f64),
 }
@@ -90,7 +100,18 @@ pub fn parse_config(text: &str) -> Result<StillsConfig, String> {
     let place = root.get("place").and_then(|v| v.as_table()).ok_or("the poses file: [place] is missing")?;
     let anchor = match (place.get("anchor"), place.get("lat"), place.get("lon")) {
         (Some(a), None, None) if a.as_str() == Some("largest-river") => {
-            Anchor::LargestRiver { min_height_m: number(place, "min_height_m", "[place]")?.unwrap_or(0.0) }
+            let relief = match (number(place, "relief_radius_m", "[place]")?, number(place, "relief_min_m", "[place]")?) {
+                (Some(radius_m), Some(min_m)) => {
+                    let max_m = number(place, "relief_max_m", "[place]")?.unwrap_or(f64::INFINITY);
+                    if radius_m <= 0.0 || min_m < 0.0 || max_m < min_m {
+                        return Err(format!("[place]: relief_radius_m {radius_m}, relief_min_m {min_m}, relief_max_m {max_m} must be positive, non-negative and ordered"));
+                    }
+                    Some(Relief { radius_m, min_m, max_m })
+                }
+                (None, None) => None,
+                _ => return Err("[place]: relief_radius_m and relief_min_m go together".into()),
+            };
+            Anchor::LargestRiver { min_height_m: number(place, "min_height_m", "[place]")?.unwrap_or(0.0), relief }
         }
         (Some(a), None, None) => {
             return Err(format!("[place]: anchor {} is unknown (known: \"largest-river\"; or give lat and lon)", show(a)))
@@ -296,22 +317,57 @@ fn enable_chunks(
     Ok(maps)
 }
 
+/// The highest minus the lowest height of the coupled run over the cells within `radius_m` of cell `c` (flood over the eight neighbours, by
+/// the great-circle distance of the cell centres).
+pub fn local_relief_m(maps: &planet_generators::coupled::CoupledMaps, c: usize, radius_m: f64) -> f64 {
+    let lat = maps.lattice();
+    let centre = lat.direction(c);
+    let sphere_m = lat.radius_m();
+    let mut seen = std::collections::HashSet::new();
+    let mut stack = vec![c];
+    seen.insert(c);
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    while let Some(k) = stack.pop() {
+        let z = f64::from(maps.z(k));
+        lo = lo.min(z);
+        hi = hi.max(z);
+        for n in lat.neighbours(k) {
+            let n = n as usize;
+            if n as u32 == planet_generators::coupled::NONE || seen.contains(&n) {
+                continue;
+            }
+            let arc = libm::acos(centre.dot(lat.direction(n)).clamp(-1.0, 1.0)) * sphere_m;
+            if arc <= radius_m {
+                seen.insert(n);
+                stack.push(n);
+            }
+        }
+    }
+    hi - lo
+}
+
 /// The direction of the anchor and, for a river cell, the bearing of the river's flow there (degrees clockwise from north), so the poses can
 /// be given along the river.
 fn anchor_direction(anchor: Anchor, maps: &planet_generators::coupled::CoupledMaps) -> Result<(Vec3, Option<f64>), String> {
     match anchor {
         Anchor::LatLon(lat, lon) => Ok((direction_of(lat, lon), None)),
-        Anchor::LargestRiver { min_height_m } => {
+        Anchor::LargestRiver { min_height_m, relief } => {
             let rec = maps.receivers();
             let mut best: Option<(usize, f32)> = None;
             for (c, &r) in rec.iter().enumerate() {
                 let a = maps.network_area_m2(c);
-                if f64::from(maps.z(c)) > min_height_m.max(0.0) && r != planet_generators::coupled::NONE && best.is_none_or(|(_, b)| a > b)
+                if f64::from(maps.z(c)) > min_height_m.max(0.0)
+                    && r != planet_generators::coupled::NONE
+                    && best.is_none_or(|(_, b)| a > b)
+                    && relief.is_none_or(|rl| {
+                        let r = local_relief_m(maps, c, rl.radius_m);
+                        (rl.min_m..=rl.max_m).contains(&r)
+                    })
                 {
                     best = Some((c, a));
                 }
             }
-            let (cell, _) = best.ok_or_else(|| format!("the coupled run has no land river at least {min_height_m} m high"))?;
+            let (cell, _) = best.ok_or_else(|| format!("the coupled run has no land river at least {min_height_m} m high{}", if relief.is_some() { " in that relief" } else { "" }))?;
             let lat = maps.lattice();
             let here = lat.direction(cell);
             let there = lat.direction(rec[cell] as usize);
@@ -500,9 +556,34 @@ sun_declination_deg = 10
 
     // spec: TEST-050
     #[test]
+    fn the_relief_of_an_anchor_is_the_height_range_around_it_and_the_poses_file_asks_for_it() {
+        use planet_generators::coupled::{CoupledMaps, Lattice};
+        let radius = 6.0e6;
+        let lat = Lattice::new(8, radius);
+        let cell_m = lat.area_m2(0).sqrt();
+        let mut z = vec![100.0f32; lat.len()];
+        let c = lat.cell_at(direction_of(10.0, 10.0));
+        z[c] = 900.0;
+        let near = lat.neighbours(c)[0] as usize;
+        z[near] = -100.0;
+        let maps = CoupledMaps::new(lat, z, vec![1.0; 6 * 64], 0);
+        // A radius under one cell sees the cell alone; one cell and a half sees the edge neighbours and the 1000 m range.
+        assert_eq!(local_relief_m(&maps, c, 0.5 * cell_m), 0.0);
+        assert_eq!(local_relief_m(&maps, c, 1.5 * cell_m), 1000.0);
+        let c = parse_config(&GOOD.replace("anchor = \"largest-river\"", "anchor = \"largest-river\"
+relief_radius_m = 10000
+relief_min_m = 1000
+relief_max_m = 2500")).unwrap();
+        assert_eq!(c.anchor, Anchor::LargestRiver { min_height_m: 0.0, relief: Some(Relief { radius_m: 10000.0, min_m: 1000.0, max_m: 2500.0 }) });
+        assert!(parse_config(&GOOD.replace("anchor = \"largest-river\"", "anchor = \"largest-river\"
+relief_min_m = 5")).unwrap_err().contains("go together"));
+    }
+
+    // spec: TEST-050
+    #[test]
     fn the_poses_file_is_read_with_its_defaults_and_a_bad_one_names_the_key() {
         let c = parse_config(GOOD).unwrap();
-        assert_eq!(c.anchor, Anchor::LargestRiver { min_height_m: 0.0 });
+        assert_eq!(c.anchor, Anchor::LargestRiver { min_height_m: 0.0, relief: None });
         assert_eq!(c.chunk_timeout_s, DEFAULT_CHUNK_TIMEOUT_S);
         assert_eq!(c.chunk_cell_m, 8.0);
         assert_eq!(c.poses.len(), 2);

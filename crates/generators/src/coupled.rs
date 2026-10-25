@@ -26,6 +26,7 @@ const OFFS: [(i64, i64); 8] = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -
 /// The cube sphere of `n` cells per face edge (cell-centred, tangent warp), neighbours across the face edges through the direction.
 pub struct Lattice {
     n: usize,
+    radius_m: f64,
     /// Area of a cell of one face in m2 (all faces are equal).
     area_m2: Vec<f64>,
     /// The square root of `area_m2`, per cell of one face (the spacing of two cells reads it eight times per cell and step).
@@ -48,7 +49,12 @@ impl Lattice {
             }
         }
         let sqrt_area_m = area_m2.iter().map(|&a| libm::sqrt(a)).collect();
-        Lattice { n, area_m2, sqrt_area_m }
+        Lattice { n, radius_m, area_m2, sqrt_area_m }
+    }
+
+    /// The planet radius the lattice was made for.
+    pub fn radius_m(&self) -> f64 {
+        self.radius_m
     }
 
     /// Cells per face edge.

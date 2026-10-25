@@ -1,0 +1,1 @@
+- 2026-10-25 **m8-look-review-1-hills** (M8-3): six stills at a second site in hilly ground, `docs/milestones/M8/look-review-1-hills/`; the poses file takes a relief filter (`relief_radius_m`, `relief_min_m`, `relief_max_m`) for the anchor

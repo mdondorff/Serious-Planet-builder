@@ -1036,6 +1036,7 @@ The poses file (TOML) SHALL hold the keys of the table; a bad value SHALL be ref
 | Key | Meaning | Default |
 |---|---|---|
 | `[place]` `anchor = "largest-river"` | largest river, at least `min_height_m` high (0) | or `lat`, `lon` |
+| `[place]` `relief_radius_m`, `relief_min_m`, `relief_max_m` | only cells whose coupled-run heights within the radius span min to max | none; radius and min go together; max unbounded |
 | `chunk_timeout_s` | wait per pose, seconds | 900 |
 | `chunk_cell_m` | chunk cell, metres | 8 |
 | `[[pose]]` `name` | names the PNG | required |
