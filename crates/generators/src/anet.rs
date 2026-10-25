@@ -461,6 +461,8 @@ pub struct ANetParams {
     pub diffusion: f64,
     pub talus: f64,
     pub slump_rate: f64,
+    /// How many rings the banks settle to the repose slope round the channel cells (0: off, GEN-058).
+    pub bank_rounds: u16,
     /// How far under the drawn ground the corridor beds are anchored.
     pub anchor: AnchorLaw,
 }
@@ -484,6 +486,7 @@ impl ANetParams {
             diffusion: 0.005,
             talus: 0.9,
             slump_rate: 0.09,
+            bank_rounds: 48,
             anchor: AnchorLaw::default(),
         }
     }
@@ -721,6 +724,8 @@ pub fn solve(
     let nd: Vec<[f64; 8]> =
         if hill { (0..inner).map(|c| core::array::from_fn(|k| dist(c, region.neighbours[c][k] as usize))).collect() } else { Vec::new() };
     let protected = |c: usize| fixed(c) || net.corridor[c] || area[c] > p.channel_area_m2;
+    // The cells a bank slumps towards: the protected cells inside the region's core reach, not the outer ring (GEN-058).
+    let sink = |c: usize| protected(c) && !ring(c);
     let cf = (p.diffusion * p.dt_years / (lat.cell_m(radius_m) * lat.cell_m(radius_m))).min(0.12);
     // The cells the sweep moves, receivers first, as arrays read in sequence (the cell, its receiver, the coefficient and its divisor).
     let (mut sw_cell, mut sw_rec, mut sw_f, mut sw_den) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
@@ -773,6 +778,52 @@ pub fn solve(
             z[r as usize] = z[c];
         } else {
             rec[c] = NONE;
+        }
+    }
+    // The banks settle (GEN-058): a free cell stands at most the angle of repose over the protected cells near it, as the distance allows: the lower
+    // cone of slope `talus` from every sink (a channel, the corridor, an anchor; they do not move), `bank_rounds` rings far (the cut walls are at most
+    // `bound_m` deep, so 48 rings of 8 m at the repose slope reach any wall), seeded from the sinks twice that far out so that a cell's cone does not
+    // depend on where the region ends.
+    if p.bank_rounds > 0 {
+        let rounds = usize::from(p.bank_rounds).min(usize::from(region.halo.saturating_sub(2)) / 2);
+        let cover = region.depth.partition_point(|&d| usize::from(d) <= rounds);
+        let seeds = region.depth.partition_point(|&d| usize::from(d) <= 2 * rounds);
+        let mut env = vec![f64::INFINITY; len];
+        let mut changed: Vec<usize> = Vec::new();
+        for c in 0..seeds {
+            if sink(c) {
+                env[c] = z[c];
+                changed.push(c);
+            }
+        }
+        let mut stamp = vec![usize::MAX; len];
+        for round in 0..rounds {
+            let mut next: Vec<usize> = Vec::new();
+            for &s in &changed {
+                for k in 0..8 {
+                    let q = region.neighbours[s][k] as usize;
+                    if q >= cover || protected(q) {
+                        continue;
+                    }
+                    let candidate = env[s] + p.talus * dist(s, q);
+                    if candidate < env[q] {
+                        env[q] = candidate;
+                        if stamp[q] != round {
+                            stamp[q] = round;
+                            next.push(q);
+                        }
+                    }
+                }
+            }
+            if next.is_empty() {
+                break;
+            }
+            changed = next;
+        }
+        for c in 0..cover {
+            if !protected(c) && env[c] < z[c] {
+                z[c] = env[c];
+            }
         }
     }
     Solution { receiver: rec, z, area_m2: area, z_base }
@@ -842,6 +893,7 @@ impl crate::chunkfield::ChunkStage for ANet {
                 p.diffusion.to_bits(),
                 p.talus.to_bits(),
                 p.slump_rate.to_bits(),
+                u64::from(p.bank_rounds),
                 p.anchor.depth_m.to_bits(),
                 p.anchor.area_ref_m2.to_bits(),
                 p.anchor.exponent.to_bits(),
@@ -857,7 +909,7 @@ impl crate::chunkfield::ChunkStage for ANet {
 }
 
 /// Version of the stage's algorithm: part of its definition hash, so a change that changes results re-keys every chunk.
-pub const ANET_VERSION: u32 = 2;
+pub const ANET_VERSION: u32 = 3;
 
 /// The change of height each cell takes in one pass of thermal slumping (GEN-051): a cell steeper than `talus` over a neighbour gives that
 /// neighbour `rate x (slope - talus) x distance`. `dist[c][k]` is the distance to the `k`-th neighbour of `c` (the order of the region's neighbour
