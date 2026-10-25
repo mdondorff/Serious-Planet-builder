@@ -644,8 +644,9 @@ fn anchor_profiles(
     // For every requested segment: its own chain, and the confluence where its river meets a main stem as a tributary within the window downstream.
     let mut chains: Vec<SegmentChains> = Vec::new();
     let mut needed: BTreeSet<(usize, usize)> = BTreeSet::new();
-    let length_m =
-        |seg: (usize, usize)| -> f64 { router.polyline(seg.0, seg.1).windows(2).map(|w| (w[1] - w[0]).length() * radius_m).sum() };
+    // The length of a segment on the way to a confluence: the distance between the two coarse centres (the lift is a floor, a rough distance serves, and
+    // the segments downstream are not routed for it).
+    let length_m = |seg: (usize, usize)| -> f64 { (coarse.direction(seg.0) - coarse.direction(seg.1)).length() * radius_m };
     for &(from, to) in segments {
         let own = upstream((from, to));
         let (mut at, mut last, mut run_m, mut confluence) = (to, (from, to), 0.0, None);
