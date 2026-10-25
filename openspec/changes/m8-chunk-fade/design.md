@@ -43,6 +43,11 @@ Scene: the store `C:/DEV/SeriousPlanetData/global16384` (bake 16384 cells with t
 - Criterion 3 as the owner amended it is a screen quantity: at 1.5 s a vertex of the deepest valley moves at most 0.20 px a frame at the distance where the chunk enters, inside the 0.5 px; p99 of the steps between pyramid levels (level 15 against 14: 0.126 m, 16 against 15: 0.030 m) is inside 0.25 m. These are computed from the field and the camera geometry, not read from rendered frames; the rendered agreement of the faded tile with the blended field is `gpu_chunk_fade` (REND-039).
 - No frame waits for a chunk: the chunk path is asynchronous (CON-22, STRM-047: a tile reads only chunks that are ready, else the base; `managed.rs` and `horizon_world.rs` test it). Run on the shared store with the chunk stage on (windowed editor, the scripted flight from orbit to 1 m three times, about 4 minutes, RTX 3080 Ti, the title showing the stage on) the stall probe (VIEW-056) reported 0 frames over 1 s. Edits were not driven in that run (a background process cannot take the foreground to click), and the chunk counts are not in the title: the run shows that no frame stalled, not how many chunks landed.
 
+### 6b. Known limits of the fade clock (2026-10-26)
+- The clock of a chunk starts on the first drawn tile whose mesh key is the key the plan expects (`ChunkFade::drawn`): a plan made just before a landing can match the old tile for the frames the plan lags (about 30 ms of a 1.5 s fade, 2 % of the change).
+- `upload_roots` starts no clock: the floor tiles it uploads lie above the chunk reads.
+- A new version of a faded chunk keeps its weight and shows its difference at the swap; the increment plane is revisited at M8-7 (docs/status.md, Tracked).
+
 ### 7. Golden-review
 The candidates are produced by `cargo xtask test gpu` (the lit and terrain views with no chunk ready) and the new landing stills. A change the policy classifies as rounding noise or a declared change of a debug or shaded view is blessed by the skill; anything the policy escalates (first goldens of a class, lit, sky and water views) stops the work and goes to the owner.
 
