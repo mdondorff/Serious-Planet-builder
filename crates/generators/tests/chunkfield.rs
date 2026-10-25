@@ -490,6 +490,13 @@ fn the_mirror_of_the_vertex_stage_draws_the_final_height_at_weight_one_the_base_
         let (a, b) = (with.shade_vertex(vi), with.shade_vertex_faded(vi, 0.0));
         assert_eq!((a.height.to_bits(), a.pos.map(f32::to_bits)), (b.height.to_bits(), b.pos.map(f32::to_bits)), "vertex {vi}");
     }
+    // A plane with a value that is not finite changes nothing at weight 1: the mirror forms no `0 x NaN` (the shader returns the texel's height).
+    let mut poisoned = with.clone();
+    poisoned.change.as_mut().unwrap()[0] = f32::NAN;
+    for vi in 0..bare.shade_all().len() {
+        let (a, b) = (with.shade_vertex(vi), poisoned.shade_vertex_faded(vi, 0.0));
+        assert_eq!((a.height.to_bits(), a.pos.map(f32::to_bits)), (b.height.to_bits(), b.pos.map(f32::to_bits)), "vertex {vi}");
+    }
     // Weight 0 (fade 1): the grid vertices sit at the base's height, final less the change; weight 0.5 halfway.
     let w = (cells + 1) as usize;
     let (mut worst0, mut worst_half) = (0.0f64, 0.0f64);

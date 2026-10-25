@@ -13,8 +13,8 @@
 - [x] 3.3 The faded tile on the software adapter at weights 0, 0.5 and 1 equals the reference renderer's image of the blended field (tier C, `gpu_chunk_fade`)
 
 ## 4. Length, normals, golden-review
-- [ ] 4.1 `chunk_fade_ms` default 1500 (criterion 3, amended 2026-10-24); the screen step at the entry level at the review poses at most about 0.5 px p99 with blending (measured on the landing stills); the look test of the normal choice (decision 4), recorded
-- [ ] 4.2 `golden-review` of the candidates; stop and report only if one escalates to the owner's /bless
+- [x] 4.1 `chunk_fade_ms` default 1500 (criterion 3, amended 2026-10-24); the screen step at the entry level at the review poses at most about 0.5 px p99 with blending (computed from the field and the camera geometry; `gpu_chunk_fade` covers the draw agreement, not the pixel step); the look test of the normal choice (decision 4), recorded (numbers: design.md 6a, 2026-10-25; the look test of the normal choice moves to look review 2, the first version keeps the final normal)
+- [x] 4.2 `golden-review`: the change moves no golden (no PR of it touched tests/goldens)
 - [ ] 4.3 numerics-reviewer, spec-guardian, verifier; PR
 
 ## 5. Close
@@ -26,3 +26,11 @@
 - `TileSink::upload_bytes` defaults to `resident_bytes()`, which leaves the plane out: step 3 counts `4 (cells + 1)^2` bytes when a plane is uploaded.
 - The texel normals include the change and the fade does not touch them (design decision 4).
 - `compact_tile_field` evaluates the change twice per lattice point (in `heights_and_climate` and in `level_change`); measure before step 3 and fold into one pass if it shows.
+
+## 6. Fade stability (numerics-reviewer, 2026-10-25; owner of the plan: opus-planner, decision B)
+- [x] 6.1 A chunk landing again without having left RAM (a new version) keeps its fade state; a neighbour landing leaves the tiles under a faded chunk alone (the reviewer's first scenario needs a re-landing, since a tile that reads an unready chunk already weighs 0); test `a_rebuild_slower_than_the_fade_still_fades_and_neither_a_neighbour_nor_a_new_version_drops_the_tiles_under_a_faded_chunk` (spec: STRM-047)
+- [x] 6.2 The clock of a chunk starts when its change is first drawn (the first upload of a tile reading it after the landing), one clock for all its tiles (the shared edges stay closed); a rebuild slower than the fade still fades; tests in `chunk_share.rs` and `managed.rs` (spec: STRM-047)
+- [x] 6.3 Sticky plane assignment past `FADE_PLANES` (`FadePlaneGrants`); test `a_node_is_never_switched_between_faded_and_final_mid_fade_whatever_finishes_or_starts_around_it` (spec: REND-039)
+- [x] 6.4 A plane with a non-finite value is refused (`ExecError::NonFiniteChange`), `place` forms no `0 x NaN` at fade 0; tests in `chunkfield.rs` and `gpu_chunk_fade.rs` (spec: REND-039)
+- [x] 6.5 Tiles decoded from a mesh pack carry no change plane (`from_slot_data`): a tracked limit, the pack holds the prefill levels 3 to 4 which lie above the chunk top level
+- [ ] 6.6 numerics-reviewer again, spec-guardian, verifier; then 5.1 (archive)

@@ -72,6 +72,9 @@ fn a_landed_chunks_change_fades_in_linearly_over_the_fade_time_with_a_bounded_st
     let mut fade = ChunkFade::new(500);
     assert_eq!(fade.weight(key, false, 0), 0.0, "not ready: the base");
     fade.landed(key, 1_000);
+    assert_eq!(fade.weight(key, true, 1_000), 0.0, "landed but not drawn yet: the base");
+    assert_eq!(fade.weight(key, true, 9_999), 0.0, "the clock does not start at the landing");
+    fade.shown(key, 1_000);
     // 60 frames per second from the landing: monotone, 0 to 1 over 500 ms, never above 1.
     let weights: Vec<f32> = (0..=40u64).map(|f| fade.weight(key, true, 1_000 + f * 1000 / 60)).collect();
     assert_eq!(weights[0], 0.0);
@@ -92,6 +95,7 @@ fn a_landed_chunks_change_fades_in_linearly_over_the_fade_time_with_a_bounded_st
     // A chunk that left RAM fades in again when it lands again.
     fade.evicted(key);
     fade.landed(key, 5_000);
+    fade.shown(key, 5_000);
     assert_eq!(fade.weight(key, true, 5_000), 0.0);
     assert!((fade.weight(key, true, 5_250) - 0.5).abs() < 1e-6);
     assert_eq!(ChunkFade::new(0).weight(key, true, 0), 1.0, "no fade: the change is there at once");
@@ -201,13 +205,60 @@ impl ChunkView for Fixed {
 
 // spec: STRM-047
 #[test]
+fn the_fade_starts_when_the_change_is_first_drawn_so_a_slow_rebuild_still_fades_and_a_new_version_keeps_the_state() {
+    let key = (2u8, 1000u32, 1000u32);
+    let mut fade = ChunkFade::new(ChunkFade::DEFAULT_FADE_MS);
+    // The chunk lands at 0 and the rebuilt tile reaches the renderer 2 s later (longer than the fade): the change is not there in one frame.
+    fade.landed(key, 0);
+    assert_eq!(fade.weight(key, true, 2_000), 0.0, "2 s after the landing and still not drawn: the base");
+    fade.shown(key, 2_000);
+    assert_eq!(fade.weight(key, true, 2_000), 0.0, "the first frame that draws it starts at the base");
+    assert!((fade.weight(key, true, 2_750) - 0.5).abs() < 1e-6);
+    assert_eq!(fade.weight(key, true, 3_500), 1.0);
+    // Later tiles of the same chunk do not restart the clock: one clock for the chunk, so the tiles on either side of a shared edge agree.
+    fade.shown(key, 2_900);
+    assert!((fade.weight(key, true, 2_750) - 0.5).abs() < 1e-6);
+    // The chunk lands again as a new version without having left RAM: the tiles under it keep their weight (no drop to the base, no new fade).
+    fade.landed(key, 5_000);
+    assert_eq!(fade.weight(key, true, 5_000), 1.0);
+    fade.shown(key, 5_100);
+    assert_eq!(fade.weight(key, true, 5_100), 1.0);
+    // Left RAM and landed again: it fades in again from its first drawing.
+    fade.evicted(key);
+    fade.landed(key, 6_000);
+    assert_eq!(fade.weight(key, true, 6_000), 0.0);
+}
+
+// spec: STRM-047
+#[test]
+fn a_tile_built_before_the_landing_starts_no_clock_and_the_rebuilt_one_starts_it_at_weight_zero() {
+    let tile = TileId::new(Face(2), CHUNK_GRID_LEVEL + 3, 8 * 1000 + 7, 8 * 1000 + 3).unwrap();
+    let a = (2u8, 1000u32, 1000u32);
+    let view = Fixed { reads: vec![a], ready: vec![a] };
+    let mut fade = ChunkFade::new(ChunkFade::DEFAULT_FADE_MS);
+    fade.landed(a, 0);
+    // The tile that was waiting for its upload when the chunk landed reaches the renderer with the key it was built with, not the key the plan
+    // expects now: it is drawn, but its change is not the landed one, so nothing starts.
+    fade.drawn(&view, tile, 111, 222, 400);
+    assert_eq!(fade.tile_weight(&view, tile, 400), 0.0);
+    assert_eq!(fade.tile_weight(&view, tile, 5_000), 0.0, "still the base: the clock has not started");
+    // The rebuilt tile carries the key the plan expects: the clock starts at its first drawn frame, at weight 0.
+    fade.drawn(&view, tile, 222, 222, 6_000);
+    assert_eq!(fade.tile_weight(&view, tile, 6_000), 0.0);
+    assert!((fade.tile_weight(&view, tile, 6_750) - 0.5).abs() < 1e-6);
+}
+
+// spec: STRM-047
+#[test]
 fn a_tiles_weight_is_the_minimum_over_the_chunks_it_reads_and_the_default_fade_is_one_and_a_half_seconds() {
     assert_eq!(ChunkFade::DEFAULT_FADE_MS, 1_500, "criterion 3 as amended: the change fades in over about 1.5 s");
     let tile = TileId::new(Face(2), CHUNK_GRID_LEVEL + 3, 8 * 1000 + 7, 8 * 1000 + 3).unwrap();
     let (a, b) = ((2u8, 1000u32, 1000u32), (2u8, 1001u32, 1000u32));
     let mut fade = ChunkFade::new(ChunkFade::DEFAULT_FADE_MS);
     fade.landed(a, 0);
+    fade.shown(a, 0);
     fade.landed(b, 1_000);
+    fade.shown(b, 1_000);
     let both = Fixed { reads: vec![a, b], ready: vec![a, b] };
     let own = Fixed { reads: vec![a], ready: vec![a, b] };
     // Own chunk alone: its own weight. Across the border: the smaller of the two, so the tiles on either side of the border rise together.
@@ -222,7 +273,7 @@ fn a_tiles_weight_is_the_minimum_over_the_chunks_it_reads_and_the_default_fade_i
     let none = Fixed { reads: vec![], ready: vec![] };
     assert_eq!(fade.tile_weight(&none, tile, 0), 1.0);
     // The step of the weight per frame at 60 fps over the default fade: a change of 17.55 m (the largest entry step of m8-anet-chunk) moves a
-    // vertex by 0.195 m per frame, inside the 0.25 m of criterion 3.
+    // vertex by 0.195 m per frame (the 256 bake's figure; the shared store's 58.3 m is 0.65 m a frame and the criterion that counts is the screen step, m8-chunk-fade design.md 6a).
     let step = f64::from(fade.weight(a, true, 1_000 / 60) - fade.weight(a, true, 0));
     assert!(step * 17.55 <= 0.25, "{} m per frame", step * 17.55);
 }

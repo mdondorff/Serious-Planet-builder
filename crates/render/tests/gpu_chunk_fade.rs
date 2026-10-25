@@ -288,6 +288,30 @@ fn two_faded_tiles_each_read_their_own_plane_and_a_plan_over_the_limit_fades_the
 
 // spec: REND-039
 #[test]
+fn a_change_plane_with_a_value_that_is_not_finite_is_refused_and_names_the_texel() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let s = scene();
+    let block_slots = 8 * 8;
+    let pool = compact_format_pool_with(
+        (128 << 20) + 40 * u64::from(block_slots) * planet_generators::compact::slot_bytes(CELLS),
+        CELLS,
+        block_slots,
+        1,
+    )
+    .unwrap();
+    let mut r = TerrainRenderer::with_pools(&ctx, SIZE, CELLS, pool);
+    for (bad, name) in [(f32::NAN, "NaN"), (f32::INFINITY, "inf"), (f32::NEG_INFINITY, "-inf")] {
+        let mut tile = s.final_tile.clone();
+        tile.change.as_mut().unwrap()[7] = bad;
+        match r.upload_tile(&ctx, &tile) {
+            Err(planet_render::ExecError::NonFiniteChange { index, .. }) => assert_eq!(index, 7, "{name}"),
+            other => panic!("a plane with {name} must be refused: {other:?}"),
+        }
+    }
+}
+
+// spec: REND-039
+#[test]
 fn a_change_plane_that_does_not_hold_one_value_per_texel_is_refused() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let s = scene();

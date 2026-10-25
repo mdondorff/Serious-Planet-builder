@@ -1,0 +1,20 @@
+use planet::worldfield::WorldTerrain;
+use planet_world_def::WorldDefinition;
+use std::sync::Arc;
+
+fn arg(name: &str) -> Option<String> {
+    let a: Vec<String> = std::env::args().collect();
+    a.iter().position(|x| x == name).and_then(|i| a.get(i + 1).cloned())
+}
+
+fn main() {
+    let store = std::path::PathBuf::from(arg("--store").expect("--store"));
+    let seed = planet::parse_args(&["test-render".to_string(), "--scene".to_string(), "lit".to_string()]).unwrap().seed;
+    let def = WorldDefinition::single_planet(6_371_000.0, seed);
+    let world = Arc::new(WorldTerrain::open_store(def, &store, 16384).unwrap());
+    for site in arg("--sites").expect("--sites tag:lat,lon;...").split(';') {
+        let (tag, ll) = site.split_once(':').unwrap();
+        let (a, b) = ll.split_once(',').unwrap();
+        println!("== {tag}\n{}", world.halo_diff(a.trim().parse().unwrap(), b.trim().parse().unwrap()).unwrap());
+    }
+}

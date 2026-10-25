@@ -625,9 +625,14 @@ impl ManagedLoop {
         });
         let mut pipeline = self.pipe.begin_frame_predicted(req, predicted, &self.resident)?;
         // The weights of the landed chunks' fade (STRM-047): each node takes the minimum over the chunks it reads; 1 without a fade or a view.
-        if let (Some(view), Some((fade, clock))) = (self.chunk_view.as_deref(), self.chunk_fade.as_ref()) {
+        if let (Some(view), Some((fade, clock))) = (self.chunk_view.as_deref(), self.chunk_fade.as_mut()) {
             let now = clock.now_ms();
             for n in &mut pipeline.draw.plan.nodes {
+                // A drawn tile that is the one the plan expects was built against the chunks' current versions: the first such tile of a
+                // landed chunk starts its fade (STRM-047), and a tile built before the landing starts nothing.
+                if let Some(r) = self.resident.get(&n.tile) {
+                    fade.drawn(view, n.tile, r.mesh_key, n.mesh_key, now);
+                }
                 n.chunk_weight = fade.tile_weight(view, n.tile, now);
             }
         }

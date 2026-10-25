@@ -56,32 +56,57 @@ impl ChunkShare {
     }
 }
 
-/// The fade-in of landed chunks (STRM-039): a chunk's change enters a tile with a weight that rises from 0 to 1 over `fade_ms` of the injected
-/// clock after the chunk landed, as a plain f32 (CON-11). A chunk that is not ready weighs 0; a chunk the fade has not seen land, but that is
-/// ready, weighs 1 (it was there before the view looked).
+/// The fade-in of landed chunks (STRM-039, STRM-047): a chunk's change enters a tile with a weight that rises from 0 to 1 over `fade_ms` of the
+/// injected clock, as a plain f32 (CON-11). The clock of a chunk starts when its change is first drawn, that is when the first tile reading it
+/// is uploaded after the chunk landed ([`ChunkFade::shown`]), not when it landed: a rebuild that takes longer than the fade would otherwise
+/// show the whole change in one frame, and every tile of the chunk shares the one clock so their shared edges stay closed. Until then the
+/// chunk weighs 0, like a chunk that is not ready; a chunk the fade has not seen land, but that is ready, weighs 1 (it was there before the
+/// view looked). A chunk that lands again without having left (a new version) keeps its state: the tiles under it do not drop to the base.
 #[derive(Clone, Debug)]
 pub struct ChunkFade {
     fade_ms: u64,
-    landed_ms: HashMap<ChunkKey, u64>,
+    /// The chunks that landed and since when their change is drawn (`None`: not drawn yet).
+    shown_ms: HashMap<ChunkKey, Option<u64>>,
 }
 
 impl ChunkFade {
     /// `chunk_fade_ms` is 1,500 by default (M8 criterion 3, amended by the owner 2026-10-24): the change of a landing chunk fades in over about
-    /// 1.5 s. The largest entry step measured (17.55 m, `m8-anet-chunk` section 16) then moves a vertex by 0.2 m per frame at 60 fps.
+    /// 1.5 s. The largest entry step measured on the shared store (58.3 m, `m8-chunk-fade` design 6a) then moves a vertex by 0.65 m per frame at
+    /// 60 fps, which is 0.20 px on screen at the distance where it enters; the criterion is the screen step.
     pub const DEFAULT_FADE_MS: u64 = 1_500;
 
     pub fn new(fade_ms: u64) -> ChunkFade {
-        ChunkFade { fade_ms, landed_ms: HashMap::new() }
+        ChunkFade { fade_ms, shown_ms: HashMap::new() }
     }
 
-    /// A chunk landed at `now_ms`.
-    pub fn landed(&mut self, key: ChunkKey, now_ms: u64) {
-        self.landed_ms.insert(key, now_ms);
+    /// A chunk landed: its change weighs 0 until a tile that reads it is uploaded ([`ChunkFade::shown`]). One that is known already (it landed
+    /// again as a new version) keeps its state.
+    pub fn landed(&mut self, key: ChunkKey, _now_ms: u64) {
+        self.shown_ms.entry(key).or_insert(None);
+    }
+
+    /// A tile that reads `key` was uploaded at `now_ms`: the first such upload after the chunk landed starts the fade of its change.
+    pub fn shown(&mut self, key: ChunkKey, now_ms: u64) {
+        if let Some(slot @ None) = self.shown_ms.get_mut(&key) {
+            *slot = Some(now_ms);
+        }
+    }
+
+    /// The tile `tile` is drawn at `now_ms` with the mesh `resident_key`, the plan expecting `planned_key` (the key a tile has when it was built
+    /// against the chunks' current versions, STRM-038): when they are the same the change of every chunk it reads is being drawn, and the fade of
+    /// those that landed starts. A tile that is still the one built before a landing (its key is the old one) starts nothing, so the clock never
+    /// runs for a change that is not on screen.
+    pub fn drawn(&mut self, view: &dyn ChunkView, tile: TileId, resident_key: u64, planned_key: u64, now_ms: u64) {
+        if resident_key == planned_key {
+            for k in view.reads(tile) {
+                self.shown(k, now_ms);
+            }
+        }
     }
 
     /// A chunk left RAM: it fades in again if it lands again.
     pub fn evicted(&mut self, key: ChunkKey) {
-        self.landed_ms.remove(&key);
+        self.shown_ms.remove(&key);
     }
 
     /// The weight of the change of `key` at `now_ms`: linear from the landing, 1 once `fade_ms` have passed.
@@ -89,13 +114,11 @@ impl ChunkFade {
         if !ready {
             return 0.0;
         }
-        match self.landed_ms.get(&key) {
+        match self.shown_ms.get(&key) {
             None => 1.0,
-            Some(&at) if self.fade_ms == 0 => {
-                let _ = at;
-                1.0
-            }
-            Some(&at) => (now_ms.saturating_sub(at) as f64 / self.fade_ms as f64).min(1.0) as f32,
+            Some(_) if self.fade_ms == 0 => 1.0,
+            Some(None) => 0.0,
+            Some(&Some(at)) => (now_ms.saturating_sub(at) as f64 / self.fade_ms as f64).min(1.0) as f32,
         }
     }
 
