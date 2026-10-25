@@ -219,7 +219,9 @@ fn the_stored_coarse_horizon_is_read_on_a_thread_and_a_world_without_one_says_ho
     // Nothing stored: absent, with the line that says how to make it, and the frame path was never asked to wait.
     let world = open(&store);
     match wait(&world) {
-        CoarseStanding::Absent(text) => assert!(text.contains("make_coarse_horizon") && text.contains("chunk horizon alone"), "{text}"),
+        CoarseStanding::Absent(text) => {
+            assert!(text.contains("generate --coarse-horizon") && text.contains("chunk horizon alone"), "{text}")
+        }
         s => panic!("expected Absent, got {s:?}"),
     }
     // Making it needs the stored coupled run: without one the step names it.
@@ -236,5 +238,41 @@ fn the_stored_coarse_horizon_is_read_on_a_thread_and_a_world_without_one_says_ho
             assert_eq!(h.bytes.len(), 6 * (RES as usize) * (RES as usize) * 16);
         }
         s => panic!("expected Ready, got {s:?}"),
+    }
+}
+
+// spec: STRM-045
+#[test]
+fn generate_coarse_horizon_makes_the_stored_horizon_from_the_stored_coupled_run_and_says_what_it_needs() {
+    use planet::horizonworld::CoarseStanding;
+    let store = std::env::temp_dir().join(format!("planet-coarse-cli-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&store);
+    let dir = store.to_str().unwrap();
+    run(&["generate", "--global-dir", dir, "--global-res", &RES.to_string(), "--threads", "2"]).unwrap();
+    // Without a stored coupled run the command names it; without --global-res it says what is missing.
+    let err = run(&["generate", "--coarse-horizon", dir, "--global-res", &RES.to_string(), "--seed", &seed().to_string()]).unwrap_err();
+    assert!(err.contains("no stored coupled run"), "{err}");
+    assert!(run(&["generate", "--coarse-horizon", dir]).unwrap_err().contains("--global-res"));
+    assert!(run(&["generate", "--coarse-horizon", dir, "--global-res", "32", "--plan-check", dir]).unwrap_err().contains("--plan-check"));
+    wait_for_run(&open(&store));
+    let text =
+        run(&["generate", "--coarse-horizon", dir, "--global-res", &RES.to_string(), "--seed", &seed().to_string(), "--threads", "2"])
+            .unwrap();
+    assert!(text.contains("marching 16 azimuths") && text.contains("records stored"), "{text}");
+    let world = open(&store);
+    world.request_coarse_horizon();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        match world.coarse_standing() {
+            CoarseStanding::Ready(h) => {
+                assert_eq!((h.m, h.azimuths), (RES, 16));
+                break;
+            }
+            CoarseStanding::Idle | CoarseStanding::Working => {
+                assert!(std::time::Instant::now() < deadline, "the coarse horizon did not end");
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            s => panic!("{s:?}"),
+        }
     }
 }
