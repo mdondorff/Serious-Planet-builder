@@ -1,0 +1,1 @@
+- 2026-10-25 **m8-look-review-1-hills-2**: second site redone on the steepest river anywhere (2.9 degrees, ground 3243 m), snapped to the chunk channel; slope table by ground band (the base field is under 2.4 degrees at p99 in every band); sections.txt of the chunk heights across the channel; wall spikes in the near views open (TEST-052)

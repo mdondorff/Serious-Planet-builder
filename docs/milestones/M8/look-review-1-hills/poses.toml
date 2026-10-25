@@ -1,22 +1,24 @@
-# The poses of look review 1, second site (M8-3 hills): the six poses of look-review-1 over the largest river of the coupled run in hilly ground.
-# The anchor is the land river cell at least 150 m high with the largest drainage area among the cells whose surroundings within 20 km span
-# 1000 to 2500 m of coupled-run height (relief_radius_m, relief_min_m, relief_max_m). Heading 267 is the river's flow there (looking downstream).
+# The poses of look review 1, second site (M8-3 hills): the six poses of look-review-1 over the steepest river of the coupled run.
+# The anchor is the land river cell of the coupled run with a drainage area of at least 1e10 m2 (10,000 km2) whose surroundings within 2 km have
+# the steepest slope on the base field (the 16384 bake, a grid of its cell spacing), anywhere on the planet. The anchor then snaps to the lowest
+# ground of the landed chunks within 1200 m (the channel the chunk stage cut, which lies up to a cell of the coupled run from the anchor cell);
+# heading_deg is relative to the channel's downstream bearing (0: looking downstream).
 # Run: cargo xtask capture stills --poses docs/milestones/M8/look-review-1-hills/poses.toml --store DIR
+# slopes.txt (the slope table) is made by adding `slope_table_stride = 8` to [place] (about 8 minutes).
 
 chunk_timeout_s = 3600
 
 [place]
-anchor = "largest-river"
-min_height_m = 150   # inland, off the river mouths
-relief_radius_m = 20000
-relief_min_m = 1000
-relief_max_m = 2500
+anchor = "steepest-river"
+slope_radius_m = 2000
+min_area_m2 = 1e10
+snap_to_channel_m = 1200
 
 [[pose]]
 name = "300m-sunset"
 altitude_m = 300
 back_m = 1500
-heading_deg = 267
+heading_deg = 0
 pitch_deg = 15
 sun_local_hours = 17.5
 
@@ -24,7 +26,7 @@ sun_local_hours = 17.5
 name = "300m-midday"
 altitude_m = 300
 back_m = 1500
-heading_deg = 267
+heading_deg = 0
 pitch_deg = 15
 sun_local_hours = 12
 
@@ -32,7 +34,7 @@ sun_local_hours = 12
 name = "30m-sunset"
 altitude_m = 30
 back_m = 400
-heading_deg = 267
+heading_deg = 0
 pitch_deg = 8
 sun_local_hours = 17.5
 
@@ -40,7 +42,7 @@ sun_local_hours = 17.5
 name = "30m-midday"
 altitude_m = 30
 back_m = 400
-heading_deg = 267
+heading_deg = 0
 pitch_deg = 8
 sun_local_hours = 12
 
@@ -48,7 +50,7 @@ sun_local_hours = 12
 name = "1.8m-sunset"
 altitude_m = 1.8
 back_m = 60
-heading_deg = 267
+heading_deg = 0
 pitch_deg = 0
 sun_local_hours = 17.5
 
@@ -56,6 +58,6 @@ sun_local_hours = 17.5
 name = "1.8m-midday"
 altitude_m = 1.8
 back_m = 60
-heading_deg = 267
+heading_deg = 0
 pitch_deg = 0
 sun_local_hours = 12
