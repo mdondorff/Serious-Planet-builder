@@ -1853,9 +1853,9 @@ fn the_loop_gives_every_node_the_fade_weight_of_the_chunks_it_reads() {
     assert!(rig.step(&req).pipeline.draw.plan.nodes.iter().all(|n| n.chunk_weight == 1.0));
     rig.lp.set_chunk_view(Some(view));
     rig.lp.set_chunk_fade(1_500, clock.clone());
-    let resident: Vec<TileId> = rig.lp.resident().keys().copied().collect();
-    let target =
-        resident.iter().find(|t| t.level() >= 6).map(|t| (t.face().0, t.x() >> (t.level() - 6), t.y() >> (t.level() - 6))).unwrap();
+    // The chunk of the first drawn node that reads one (the plan's order is fixed, a hash map's is not).
+    let drawn = rig.step(&req).pipeline.draw.plan.nodes.iter().map(|n| n.tile).find(|t| t.level() >= 6).expect("the plan draws fine tiles");
+    let target = (drawn.face().0, drawn.x() >> (drawn.level() - 6), drawn.y() >> (drawn.level() - 6));
     rig.lp.chunk_landed(&[target]);
     let reads_target = |t: TileId| t.level() >= 6 && (t.face().0, t.x() >> (t.level() - 6), t.y() >> (t.level() - 6)) == target;
     let mut now = 0u64;
