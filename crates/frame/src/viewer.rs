@@ -260,10 +260,8 @@ pub fn state_legend() -> Vec<([u8; 3], String)> {
     STATE_COLOURS.iter().copied().zip(words.map(String::from)).collect()
 }
 
-/// The key bindings, as text for the usage message and the log.
-pub const KEYS_HELP: &str = "P or Space pause, R restart the flight, L lit path (with the atmosphere) or debug path, G globe overview (drag turns it, wheel zooms, a click on a marker or the surface flies there and lands in the free camera), K what the climate shows (the climate, the coupled run's heights, its drainage area: the global river network; lit path; the run loads or is made once, the title says when it is ready), F3 cycles the overlay (off, tiles, mesh, regions, stale tiles; lit path), F4 coarse LOD (error bound x4), F6 ground detail (natural, full, off; the procedural detail and gloss of the ground, on at the start), F7 scale references (drops a chair 0.9 m, a house 8 m, a boat 10 m, a tower 291 m and a block of boxes 1 km across on the ground in front of you; again takes them away; lit path), F9 writes the camera path of the last minute and a repro bundle (target/review), V next debug view (debug path), T vsync on/off, C flight or free camera, \
-     H editing light (a sun fixed over your shoulder, 35 degrees up, so no slope is black; off by default), \
-     J shade view (normal, horizon, shadow: the horizon elevation at the sun and its shadow factor; lit path, needs a store with a coupled run), [ and ] the sun half an hour earlier or later in local solar time at the camera (Backslash back to the look's sun; the title shows the time), \n     free camera: WASD move, Q/E down/up, arrows look, click captures the mouse to look (Esc releases it), Shift boost; Esc quits";
+/// The key bindings, as text for the usage message and the log: made from the key table (VIEW-055).
+pub use crate::keytable::KEYS_HELP;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CameraMode {
@@ -1406,7 +1404,7 @@ mod tests {
         v.command(Command::ToggleCoarseLod, 60, &c);
         assert!(!v.coarse_lod);
         for word in ["F3", "tiles", "mesh", "regions", "F4", "coarse LOD"] {
-            assert!(KEYS_HELP.contains(word), "the help names {word}: {KEYS_HELP}");
+            assert!(KEYS_HELP.contains(word), "the help names {word}: {}", *KEYS_HELP);
         }
     }
 
@@ -1427,7 +1425,7 @@ mod tests {
         assert_eq!(seen, [Some(Height), Some(Area), None, Some(Height)]);
         assert_eq!((v.lit, v.overlay, v.scale_refs), (lit, overlay, scale_refs), "the other switches are as they were");
         for word in ["K", "coupled", "drainage area"] {
-            assert!(KEYS_HELP.contains(word), "the help names {word}: {KEYS_HELP}");
+            assert!(KEYS_HELP.contains(word), "the help names {word}: {}", *KEYS_HELP);
         }
     }
 
@@ -1442,7 +1440,7 @@ mod tests {
         v.command(Command::ToggleScaleRefs, 20, &c);
         assert!(!v.scale_refs, "the second press takes them away");
         for word in ["F7", "scale references"] {
-            assert!(KEYS_HELP.contains(word), "the help names {word}: {KEYS_HELP}");
+            assert!(KEYS_HELP.contains(word), "the help names {word}: {}", *KEYS_HELP);
         }
     }
 
@@ -1473,7 +1471,7 @@ mod tests {
         );
         assert_eq!((v.lit, v.overlay, v.coarse_lod), (lit, overlay, coarse), "the other switches are as they were");
         for word in ["F6", "ground detail"] {
-            assert!(KEYS_HELP.contains(word), "the help names {word}: {KEYS_HELP}");
+            assert!(KEYS_HELP.contains(word), "the help names {word}: {}", *KEYS_HELP);
         }
     }
 
@@ -1489,7 +1487,7 @@ mod tests {
         assert!(!v.take_repro_request(), "once");
         assert_eq!((v.lit, v.mode, v.overlay, v.user_paused), (lit, mode, overlay, paused), "the viewer is as it was");
         for word in ["F9", "camera path", "repro bundle"] {
-            assert!(KEYS_HELP.contains(word), "the help names {word}: {KEYS_HELP}");
+            assert!(KEYS_HELP.contains(word), "the help names {word}: {}", *KEYS_HELP);
         }
     }
 
@@ -1543,7 +1541,7 @@ mod tests {
         // G in the free camera shows the overview over the free camera's point and leaves the free mode alone.
         v.command(Command::ToggleGlobe, 90_000, &c);
         assert!(v.globe.is_some() && v.is_free());
-        assert!(KEYS_HELP.contains("globe overview"), "{KEYS_HELP}");
+        assert!(KEYS_HELP.contains("globe overview"), "{}", *KEYS_HELP);
     }
 
     // spec: VIEW-034
