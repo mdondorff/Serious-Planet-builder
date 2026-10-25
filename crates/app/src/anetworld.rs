@@ -215,6 +215,7 @@ impl WorldTerrain {
         lon_deg: f64,
         slump_rate: Option<f64>,
         steps: Option<u32>,
+        route_off: bool,
     ) -> Result<String, String> {
         use planet_core::cube::TangentWarp;
         use planet_core::{TileId, Vec3};
@@ -238,13 +239,22 @@ impl WorldTerrain {
         if let Some(v) = steps {
             params.steps = v;
         }
+        // The coarse path of before local routing (GEN-066), for the comparison of the report.
+        if route_off {
+            params.anchor.route_band_m = 0.0;
+            params.anchor.slide_m = 0.0;
+            params.anchor.slide_steep_m = 0.0;
+            params.anchor.head_m = 0.0;
+        }
         let halo = params.halo_rings;
         let stage = ANet { run: run.maps, base: Arc::new(WorldBase::new(self)), radius_m: radius, params };
         let dir = Vec3::from_lat_lon(lat_deg.to_radians(), lon_deg.to_radians());
         let tile = TileId::from_direction(&TangentWarp, dir, planet_generators::chunk::CHUNK_GRID_LEVEL);
         let reg = region(&clat, tile, halo);
         let s = stage.solve(&clat, &reg);
+        let started = std::time::Instant::now();
         let net = planet_generators::anet::Network::build_with(&*stage.run, &*stage.base, &clat, &reg, radius, &stage.params.anchor);
+        let network_s = started.elapsed().as_secs_f64();
         let core = reg.core;
         let mut anchors: Vec<f64> =
             (0..reg.cells.len()).filter(|&c| !net.anchor_z[c].is_nan()).map(|c| net.anchor_z[c] - net.base_z[c]).collect();
@@ -267,6 +277,10 @@ impl WorldTerrain {
             anchors.get(na / 2).copied().unwrap_or(f64::NAN),
             anchors.get(na * 9 / 10).copied().unwrap_or(f64::NAN),
             anchors.last().copied().unwrap_or(f64::NAN)
+        );
+        out += &format!(
+            "network build (corridor, routing, beds, band) {network_s:.2} s
+"
         );
         out += &format!(
             "tile {tile:?}: {n} core cells of {:.1} m, halo {halo} rings

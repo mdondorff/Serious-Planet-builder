@@ -1,0 +1,1 @@
+- 2026-10-25 **local-routing** (ADR 0081, GEN-059 modified, GEN-066/067): nodes of the coarse path slide to the lowest ground (heads to the highest), segments routed node to node over the ground within 1 km of the guide, the bed the running minimum from upstream (cut at most 200 m); ANET_VERSION 6; climbing links at the four sites 0 (lowland 205), the steepest site 519 of 1,344

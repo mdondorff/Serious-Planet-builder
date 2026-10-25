@@ -239,9 +239,15 @@ impl Network {
         let mut relief_of = vec![0.0f64; len];
         let half_cell_m = 0.5 * lat.cell_m(radius_m);
         let key = |x: usize| region.cells[x].key();
-        let anchors = anchor_profiles(run, base, &segments, radius_m, law, is_river);
+        // The segments a region reads are those of its coarse cells and one ring more; a routed path leaves its coarse chord by the slide, the meander and the band.
+        debug_assert!(
+            law.route_band_m + law.slide_steep_m.max(law.slide_m).max(law.head_m) + MEANDER_M < 3_400.0,
+            "the routing reaches past the coarse ring a region reads"
+        );
+        let router = crate::route::Router::new(run, base, lat, radius_m, law);
+        let anchors = anchor_profiles(run, base, &segments, radius_m, law, is_river, &router);
         for (from, to) in segments {
-            let points = segment_points(coarse.direction(from), coarse.direction(to), from as u64, radius_m);
+            let points = router.polyline(from, to);
             // The cells along the polyline in runs: a run ends where the polyline leaves the region, and a cell is visited once per run (a
             // meander that turns back within a cell must not make a loop of links).
             let mut runs: Vec<Vec<usize>> = vec![Vec::new()];
@@ -331,10 +337,8 @@ impl Network {
 
 /// How far under the drawn ground a corridor bed is anchored (GEN-047): `depth_m (A / area_ref_m2)^exponent`, at most `cap_m`, for a river of drainage
 /// area `A`. The bed follows the ground the chunk is drawn over, never the coupled run's absolute height (the run's heights lie far from the base's
-/// where the relief is high). `window` is how many coarse segments downstream the bed profile looks: a bed is never lower than the raw beds downstream
-/// of it within the window (a running maximum from the downstream end). A sliding window is not monotone across a segment boundary (a rise beyond
-/// the window of one segment and inside the window of the next), and the lower of bed and base decides the cell: where either leaves a corridor link
-/// climbing the solve lifts the donor to the receiver, a flat (the bed behind a dam).
+/// where the relief is high). `window` is how many coarse segments upstream along the main stem the bed profile looks (GEN-059): a bed is never higher than
+/// the raw beds upstream of it within the window (a running minimum from the upstream end), and at most `cut_cap_m` under the ground.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AnchorLaw {
     pub depth_m: f64,
@@ -365,6 +369,18 @@ pub struct AnchorLaw {
     pub side_low: f64,
     pub side_high: f64,
     pub band_cap_m: f64,
+    /// The most a bed lies under the ground (GEN-059): a rise the river's path forces it through is cut at most this deep (a dam beyond), under the stage's
+    /// bound on the change.
+    pub cut_cap_m: f64,
+    /// Local main-stem routing (GEN-066, ADR 0081; `crate::route`): the band in metres round the coarse guide within which the least-cost path runs (0: the
+    /// coarse path), the weight of the length in the cost (metres of rise per metre), the raster stride in cells, the radius in metres within which a node
+    /// slides to the lowest ground (on flat ground and on steep ground, by the relief factor) and the radius within which a head moves to the highest.
+    pub route_band_m: f64,
+    pub route_lambda: f64,
+    pub route_stride: u32,
+    pub slide_m: f64,
+    pub slide_steep_m: f64,
+    pub head_m: f64,
 }
 
 impl Default for AnchorLaw {
@@ -374,7 +390,7 @@ impl Default for AnchorLaw {
             area_ref_m2: RIVER_AREA_M2,
             exponent: 0.5,
             cap_m: 100.0,
-            window: 64,
+            window: 16,
             slope_ks: 40.0,
             slope_theta: 0.45,
             slope_cap: 1.0e-4,
@@ -390,6 +406,13 @@ impl Default for AnchorLaw {
             side_low: 0.15,
             side_high: 0.9,
             band_cap_m: 1600.0,
+            cut_cap_m: 200.0,
+            route_band_m: 0.0,
+            route_lambda: 0.02,
+            route_stride: 4,
+            slide_m: 0.0,
+            slide_steep_m: 0.0,
+            head_m: 0.0,
         }
     }
 }
@@ -439,8 +462,15 @@ type BandSpec = (f64, f64, f64, f64, f64, f64);
 /// The bed profile of a segment, `(t, height)` along it, and the relief factor round its start.
 type SegmentBed = (Vec<(f64, f64)>, f64);
 
-/// A segment and the chain of segments from it on down the river (itself included).
+/// A segment, the chain of main-stem segments upstream of it (itself last) and the confluence its river meets as a tributary within the window.
+type SegmentChains = (Chain, Option<Confluence>);
+
+/// A segment and the chain of segments from it on up the main stem (itself last).
 type Chain = ((usize, usize), Vec<(usize, usize)>);
+
+/// A confluence a river enters as a tributary: the chain of the main stem that arrives there (farthest first) and the distance in metres from the end of
+/// the segment to the confluence along the river.
+type Confluence = (Vec<(usize, usize)>, f64);
 
 /// The channel and the valley round the corridor (GEN-060): every cell within the reach of a corridor cell is held at the profile of a corridor cell (the
 /// lower where it lies under the ground): the channel (`bankfull_m`: a depth `d` under the valley floor at the axis, the parabola `d (1 - (2x / w)^2)`
@@ -561,12 +591,13 @@ fn paint_band(
 }
 
 /// The bed of every segment of `segments` (GEN-059), sampled every `PROFILE_SAMPLES` polyline points: `(t, height)` along the segment, the height of
-/// the bed `t` of the way along it. The raw bed at a point is the base height there minus the law's depth for the river's area; the bed is the
-/// running maximum from downstream of the raw beds along the river for up to `law.window` further segments, each point at least the least fall of its
-/// river above the point below it: the bed never rises downstream within the window and has no flat reach. Where the ground downstream is higher the
-/// bed lies above the ground (a river held up behind a ridge: the stage takes the lower of bed and base), not under it: a minimum from upstream would
-/// carry every low of the river's ground down its whole course and cut every rise in its way. A function of the run and the base at positions alone:
-/// the same in every chunk.
+/// the bed `t` of the way along it. The raw bed at a point is the base height there minus the law's valley depth for the river's area. The bed is the
+/// running minimum from upstream of the raw beds along the river's main stem (the donor of the largest area at every cell) for up to `law.window` segments
+/// back, each point at least the least fall under the one above it and at most `cut_cap_m` under the ground: the bed follows the ground and cuts through a
+/// rise only where the river's path forces it, never lying over the ground it runs on. A tributary's bed, back to the window, is held no lower than the main
+/// stem's bed that arrives at the confluence it flows into (rising at the least fall: a tributary hangs above the stem, never under it). A function of the run
+/// and the base at positions alone: the same in every chunk. The window is the limit: a low carried from the segment `window` above one segment is not carried by
+/// the next, which releases it as a step there (rare; a link that climbs by more than the bed tolerance makes its donor an outlet in the solve).
 fn anchor_profiles(
     run: &dyn CoarseRun,
     base: &dyn BaseDetail,
@@ -574,24 +605,72 @@ fn anchor_profiles(
     radius_m: f64,
     law: &AnchorLaw,
     is_river: impl Fn(usize) -> bool,
+    router: &crate::route::Router,
 ) -> BTreeMap<(usize, usize), SegmentBed> {
     let coarse = run.lattice();
-    // The chain of segments from each segment on down the river (itself included).
-    let mut chains: Vec<Chain> = Vec::new();
+    // The donor of the largest area into a cell (the main stem), the lower cell index among equals.
+    let main_donor = |c: usize| -> Option<usize> {
+        let mut best: Option<usize> = None;
+        for nb in coarse.neighbours(c) {
+            let nb = nb as usize;
+            if nb < coarse.len() && is_river(nb) && run.receiver(nb) as usize == c {
+                let better = match best {
+                    None => true,
+                    Some(b) => run.area_m2(nb) > run.area_m2(b) || (run.area_m2(nb) == run.area_m2(b) && nb < b),
+                };
+                if better {
+                    best = Some(nb);
+                }
+            }
+        }
+        best
+    };
+    // The main stem back from a segment: the segments upstream of it along the main donors, farthest first, ending with the segment itself.
+    let upstream = |seg: (usize, usize)| -> Vec<(usize, usize)> {
+        let mut chain = vec![seg];
+        let mut at = seg.0;
+        for _ in 0..law.window {
+            match main_donor(at) {
+                Some(d) => {
+                    chain.push((d, at));
+                    at = d;
+                }
+                None => break,
+            }
+        }
+        chain.reverse();
+        chain
+    };
+    // For every requested segment: its own chain, and the confluence where its river meets a main stem as a tributary within the window downstream.
+    let mut chains: Vec<SegmentChains> = Vec::new();
     let mut needed: BTreeSet<(usize, usize)> = BTreeSet::new();
+    // The length of a segment on the way to a confluence: the distance between the two coarse centres (the lift is a floor, a rough distance serves, and
+    // the segments downstream are not routed for it).
+    let length_m = |seg: (usize, usize)| -> f64 { (coarse.direction(seg.0) - coarse.direction(seg.1)).length() * radius_m };
     for &(from, to) in segments {
-        let mut chain = vec![(from, to)];
-        let mut at = to;
+        let own = upstream((from, to));
+        let (mut at, mut last, mut run_m, mut confluence) = (to, (from, to), 0.0, None);
         for _ in 0..law.window {
             if !is_river(at) {
                 break;
             }
+            match main_donor(at) {
+                Some(d) if d != last.0 => {
+                    confluence = Some((upstream((d, at)), run_m));
+                    break;
+                }
+                _ => {}
+            }
             let next = run.receiver(at) as usize;
-            chain.push((at, next));
+            run_m += length_m((at, next));
+            last = (at, next);
             at = next;
         }
-        needed.extend(chain.iter().copied());
-        chains.push(((from, to), chain));
+        needed.extend(own.iter().copied());
+        if let Some((st, _)) = &confluence {
+            needed.extend(st.iter().copied());
+        }
+        chains.push((((from, to), own), confluence));
     }
     // The sample points of every needed segment, and one batch of base heights for all of them.
     struct Samples {
@@ -602,7 +681,7 @@ fn anchor_profiles(
     let mut samples: BTreeMap<(usize, usize), Samples> = BTreeMap::new();
     let mut dirs: Vec<Vec3> = Vec::new();
     for &(from, to) in &needed {
-        let line = segment_points(coarse.direction(from), coarse.direction(to), from as u64, radius_m);
+        let line = router.polyline(from, to);
         let mut idx: Vec<usize> = (0..line.len()).step_by(PROFILE_SAMPLES).collect();
         if idx.last() != Some(&(line.len() - 1)) {
             idx.push(line.len() - 1);
@@ -615,53 +694,55 @@ fn anchor_profiles(
         dirs.extend(spots.iter().copied());
         samples.insert((from, to), Samples { ts, spots, areas });
     }
-    // The relief round the start of every needed segment: the base at the centres of its cell and the eight round it (about 10 km across).
-    let froms: BTreeSet<usize> = needed.iter().map(|&(from, _)| from).collect();
-    let mut around: BTreeMap<usize, Vec<Vec3>> = BTreeMap::new();
-    for &c in &froms {
-        let mut ring: Vec<Vec3> = vec![coarse.direction(c)];
-        ring.extend(coarse.neighbours(c).into_iter().filter(|&x| (x as usize) < coarse.len()).map(|x| coarse.direction(x as usize)));
-        dirs.extend(ring.iter().copied());
-        around.insert(c, ring);
-    }
     let heights = base.base_heights(&dirs);
-    let mut at = heights.len() - around.values().map(Vec::len).sum::<usize>();
-    let mut rf_of: BTreeMap<usize, f64> = BTreeMap::new();
-    for (c, ring) in &around {
-        let h = &heights[at..at + ring.len()];
-        let (lo, hi) = h.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, u), &x| (l.min(x), u.max(x)));
-        rf_of.insert(*c, law.relief_factor(hi - lo));
-        at += ring.len();
-    }
-    let mut raw: BTreeMap<(usize, usize), Vec<f64>> = BTreeMap::new();
+    let mut ground: BTreeMap<(usize, usize), Vec<f64>> = BTreeMap::new();
     let mut at = 0;
     for (seg, smp) in &samples {
-        let rf = rf_of[&seg.0];
-        raw.insert(*seg, (0..smp.spots.len()).map(|k| heights[at + k] - law.valley_depth_m(smp.areas[k], rf)).collect());
+        ground.insert(*seg, heights[at..at + smp.spots.len()].to_vec());
         at += smp.spots.len();
     }
+    // The relief factor round the start of every needed segment.
+    let froms: BTreeSet<usize> = needed.iter().map(|&(from, _)| from).collect();
+    let rf_of: BTreeMap<usize, f64> = froms.into_iter().map(|c| (c, router.relief_factor(c))).collect();
+    // The bed along a chain of segments (farthest upstream first): the running minimum with the least fall, floored at the cut cap under the ground.
+    let along = |chain: &[(usize, usize)]| -> Vec<Vec<f64>> {
+        let mut out: Vec<Vec<f64>> = Vec::new();
+        let mut v = f64::INFINITY;
+        let mut prev: Option<Vec3> = None;
+        for seg in chain {
+            let smp = &samples[seg];
+            let (g, rf) = (&ground[seg], rf_of[&seg.0]);
+            let mut bed = Vec::with_capacity(smp.spots.len());
+            for (k, &gk) in g.iter().enumerate() {
+                debug_assert!(gk.is_finite(), "a base height that is not a number");
+                let raw = gk - law.valley_depth_m(smp.areas[k], rf);
+                let fall = prev.map_or(0.0, |p| law.min_slope(smp.areas[k]) * (smp.spots[k] - p).length() * radius_m);
+                v = raw.min(v - fall).max(gk - law.cut_cap_m);
+                bed.push(v);
+                prev = Some(smp.spots[k]);
+            }
+            out.push(bed);
+        }
+        out
+    };
     let mut out = BTreeMap::new();
-    for (seg, chain) in chains {
-        // Along the chain the samples run downstream; the running maximum from the downstream end with the least fall.
-        let mut along: Vec<(f64, f64, Vec3)> = Vec::new(); // raw bed, area, position
-        for s in &chain {
-            for (k, &bed) in raw[s].iter().enumerate() {
-                along.push((bed, samples[s].areas[k], samples[s].spots[k]));
+    for (((from, to), own), confluence) in chains {
+        let seg = (from, to);
+        let mut bed = along(&own).pop().expect("the segment's own bed");
+        let smp = &samples[&seg];
+        if let Some((st, downstream_m)) = confluence {
+            // The main stem's bed where it arrives at the confluence: the last sample of its chain. A tributary is held no lower than this, rising at
+            // the least fall from the confluence back up the river, so the whole of its reach above the confluence meets the stem from above.
+            let arriving = *along(&st).last().and_then(|b| b.last()).expect("a bed");
+            let last = bed.len() - 1;
+            let slope = law.min_slope(smp.areas[last]);
+            for (k, b) in bed.iter_mut().enumerate() {
+                let rest: f64 = (k..last).map(|m| (smp.spots[m + 1] - smp.spots[m]).length() * radius_m).sum::<f64>() + downstream_m;
+                // Never over the ground: a hollow on the way holds the bed at the ground (a flat at worst).
+                *b = b.max(arriving + slope * rest).min(ground[&seg][k]);
             }
         }
-        let mut suffix = vec![0.0; along.len()];
-        let mut best = along[along.len() - 1].0;
-        for k in (0..along.len()).rev() {
-            debug_assert!(along[k].0.is_finite(), "a base height that is not a number");
-            if k + 1 < along.len() {
-                let run_m = (along[k + 1].2 - along[k].2).length() * radius_m;
-                best += law.min_slope(along[k].1) * run_m;
-            }
-            best = best.max(along[k].0);
-            suffix[k] = best;
-        }
-        let own = &samples[&seg];
-        out.insert(seg, (own.ts.iter().copied().zip(suffix.iter().copied()).collect(), rf_of[&seg.0]));
+        out.insert(seg, (smp.ts.iter().copied().zip(bed.iter().copied()).collect(), rf_of[&from]));
     }
     out
 }
@@ -673,7 +754,7 @@ fn anchor_profiles(
 const BED_TOLERANCE_M: f64 = 0.05;
 
 /// Polyline points between two samples of a segment's bed (about 200 m at the point spacing).
-const PROFILE_SAMPLES: usize = 5;
+const PROFILE_SAMPLES: usize = 1;
 
 /// The parameters of the incision (SPIKE-33, SPIKE-35): stream power `K A^m S` with the implicit step, N steps along the frozen network.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -738,6 +819,11 @@ impl ANetParams {
         // holds besides that (GEN-049, GEN-060).
         let spare_rings = f64::from(params.halo_rings) - f64::from(params.area_window) - 2.0;
         params.anchor.band_cap_m = params.anchor.band_cap_m.min(spare_rings.max(0.0) * cell_m);
+        // Local main-stem routing (GEN-066, ADR 0081): nodes slide 0.5 km (1 km on steep ground), heads move up to 1 km, the path runs within 1 km of the guide.
+        params.anchor.route_band_m = 1000.0;
+        params.anchor.slide_m = 500.0;
+        params.anchor.slide_steep_m = 1000.0;
+        params.anchor.head_m = 1000.0;
         params
     }
 }
@@ -1172,6 +1258,13 @@ impl crate::chunkfield::ChunkStage for ANet {
                 p.anchor.side_low.to_bits(),
                 p.anchor.side_high.to_bits(),
                 p.anchor.band_cap_m.to_bits(),
+                p.anchor.cut_cap_m.to_bits(),
+                p.anchor.route_band_m.to_bits(),
+                p.anchor.route_lambda.to_bits(),
+                u64::from(p.anchor.route_stride),
+                p.anchor.slide_m.to_bits(),
+                p.anchor.slide_steep_m.to_bits(),
+                p.anchor.head_m.to_bits(),
                 self.run.identity(),
                 self.base.identity(),
                 self.radius_m.to_bits(),
@@ -1182,7 +1275,7 @@ impl crate::chunkfield::ChunkStage for ANet {
 }
 
 /// Version of the stage's algorithm: part of its definition hash, so a change that changes results re-keys every chunk.
-pub const ANET_VERSION: u32 = 5;
+pub const ANET_VERSION: u32 = 6;
 
 /// The change of height each cell takes in one pass of thermal slumping (GEN-051): a cell steeper than `talus` over a neighbour gives that
 /// neighbour `rate x (slope - talus) x distance`. `dist[c][k]` is the distance to the `k`-th neighbour of `c` (the order of the region's neighbour

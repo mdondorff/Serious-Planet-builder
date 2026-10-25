@@ -88,16 +88,16 @@ Source: planner decision 2026-10-25, GEN-051, learnings 2026-10-25 (walls), ADR 
 - **WHEN** a chunk of a river that crosses a 600 m ridge runs with and without the settle
 - **THEN** without it more than ten bank pairs stand over the repose slope, with it at most one in twenty, no protected cell differs, and no cell is higher with it than without
 
-### Requirement: GEN-059 The bed of a river is monotone, with no flat reach and no step
-Every corridor cell of an A-net chunk SHALL be held at a bed interpolated along its segment from samples about 200 m apart: the base height minus the depth law (GEN-057), the running maximum from downstream over the next 64 segments, each sample at least `min(slope_ks A^-slope_theta, slope_cap)` per metre above the sample below it. The bed of the core SHALL have no run of equal heights over 400 m and no drop between linked cells over 5 m, no link SHALL climb by more than 5 cm, and no linked corridor cell SHALL be left without a receiver, wherever the ground does not rise downstream by more than the window of 64 segments sees. The law's constants are part of the stage's definition hash.
+### Requirement: GEN-059 The bed of a river follows the ground and falls the whole way
+Every corridor cell of an A-net chunk SHALL be held at a bed interpolated along its segment from samples at every polyline point: the base height minus the depth law (GEN-057), the running minimum from upstream along the river's main stem (the donor of the largest area at every cell) over the previous `window` (16) segments, each sample at least `min(slope_ks A^-slope_theta, slope_cap)` per metre under the sample above it and at most `cut_cap_m` (200 m) under the ground; a tributary's bed SHALL end no lower than the main stem's bed that arrives at the confluence. No corridor bed SHALL lie over the ground, no link SHALL climb by more than 5 cm and no linked corridor cell SHALL be left without a receiver, wherever the ground does not rise along the river by more than the cut cap. The law's constants are part of the stage's definition hash.
 
 Verify: A
 Status: planned
-Source: SPIKE-40 (bed profile), planner decision 2026-10-25 (H1), GEN-057
+Source: SPIKE-40, SPIKE-42, ADR 0081, GEN-057
 
-#### Scenario: A smooth base over a river
-- **WHEN** a chunk of a river over a smooth base runs its incision
-- **THEN** the longest flat reach is at most 400 m, the largest drop between linked cells is under 5 m, no link climbs and no corridor cell loses its receiver
+#### Scenario: A ridge across the river
+- **WHEN** a chunk of a river over a base with a ridge across its path runs
+- **THEN** every corridor bed is at most the ground, no link climbs by more than 5 cm, and the cut is at most the cut cap plus the valley depth
 
 ### Requirement: GEN-060 The channel from discharge, the valley from relief
 Round every corridor cell an A-net chunk SHALL hold the cells within `band_cap_m` of the river at a channel and valley profile: a channel of width `w_coef Q^w_exp` and depth `d_coef Q^d_exp` under the valley floor, discharge `Q = q_per_km2 A` (km2); a valley floor `lerp(floor_low, floor_high, rf)` channel widths wide at the bed of the corridor, no wider than `band_cap_m` allows (the cap follows the halo: `(halo_rings - area_window - 2)` cells at most, and 0 paints no band); the corridor cells at the channel floor, the lowest point of the cross-section; sides rising at `lerp(side_low, side_high, rf)` to the ground; `rf` the base's relief over the river's coarse cell and the eight round it over `relief_full_m`. The constants are part of the stage's definition hash.

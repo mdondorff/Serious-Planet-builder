@@ -5,6 +5,7 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 ## Waiting for the owner
 - **D3 provisional (owner, 2026-10-23):** whether edits sit on top of the eroded world or under it is not settled; the chunk stage's position is built as a per-layer setting (default: edits on top), and the planner asks for the owner's explicit confirmation before M8-7 (edits over chunks) starts.
 - **M8 GO:** decisions D1 to D7 taken (owner, 2026-10-23; `docs/briefings/m8-plan.md`); everything up to M8-6 is independent of D3; the lanes start on the owner's GO.
+- **ADR 0080 and ADR 0082: acceptance** (proposed; both built before acceptance as easy to reverse): 0080 the hill band, landform creases and the run (point 4 amended: erosion off, input plus fill, GEN-065); 0082 the coarse node slides instead of the border crossing (amends 0081 point 1; #692).
 - **Optional, when convenient:** the M6 retest list (`docs/archive/M6/briefings/m6-owner-test-plan.md`, "Retest"); a live check of the flickers (Tracked).
 - **At the laptop (postponed):** the NVIDIA driver update (591.86; device losses under parallel GPU load, Tracked); excluding the repo's `target` folders from Windows Search indexing.
 
@@ -52,7 +53,7 @@ Open owner items: the two flickers (Tracked) need a live check (editor off, debu
 - **M3 gate condition 2**: the declared-versus-recorded reads contract test (ADR 0021 point 7) and a tile-level GEN-017 test are approved, not written; the per-tile node set id waits for the first stored regional field.
 - **Device loss on the RTX** (windows 8, 2026-10-18): in the lit dive and in parallel `test gpu --real` runs; passes alone. A recurrence prints `wgpu device lost`; stop and investigate. Driver update is the owner's.
 - **Flaky `gpu_window` flight test**: one failure after 7.5 s, 0 of 5 since. On a second failure keep the full output before any rerun.
-- **Test timeouts under machine load** (2026-10-19 to 20): tier-C tests hit 300 s with other sessions building; all pass alone. Rerun once and note it.
+- **Test timeouts under machine load** (2026-10-19 to 20): tier-C tests hit 300 s with other sessions building; all pass alone. Rerun once and note it. CI too (2026-10-25, #686, #692): `gpu_stills` on windows WARP C 2/2 timed out at 300 s twice; it takes 99 to 180 s on CI on main and chunk routing adds to it; next: split it or raise its own limit with a declared reason.
 - **WARP device removal with the compact format and the atmosphere**: test-only, accepted; the software smoke stays on the vertex format. Re-test when WARP, wgpu or Windows changes.
 - **Beach shading flashes on WARP** (36.8 % of shore-band pixels on the coastal descent): unchecked since REND-030; check with the next look review.
 - **ADR 0056 limits**: steep coastal ground and inlets under 4 km stay dry (fix: per-vertex sea mask); `WaterBook` is never evicted (watch its growth).
