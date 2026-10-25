@@ -433,6 +433,12 @@ impl AnchorLaw {
     }
 }
 
+/// What a corridor cell asks of the cells round it: (bed, bankfull width, depth, floor half width, side slope, reach in metres).
+type BandSpec = (f64, f64, f64, f64, f64, f64);
+
+/// The bed profile of a segment, `(t, height)` along it, and the relief factor round its start.
+type SegmentBed = (Vec<(f64, f64)>, f64);
+
 /// A segment and the chain of segments from it on down the river (itself included).
 type Chain = ((usize, usize), Vec<(usize, usize)>);
 
@@ -456,7 +462,7 @@ fn paint_band(
     let len = corridor.len();
     let key = |x: usize| region.cells[x].key();
     // What each corridor cell asks of the cells round it: (bed, bankfull width, depth, floor half width, side slope, reach in metres).
-    let spec = |c: usize| -> (f64, f64, f64, f64, f64, f64) {
+    let spec = |c: usize| -> BandSpec {
         let rf = relief[c];
         let (w, d) = law.bankfull_m(area[c]);
         let half_floor = 0.5 * law.floor_width_m(area[c], rf).max(w);
@@ -472,7 +478,7 @@ fn paint_band(
     let mut best = vec![f64::INFINITY; len];
     let mut from = vec![u32::MAX; len];
     let mut changed: Vec<usize> = Vec::new();
-    let mut specs: Vec<Option<(f64, f64, f64, f64, f64, f64)>> = vec![None; len];
+    let mut specs: Vec<Option<BandSpec>> = vec![None; len];
     for c in 0..len {
         if corridor[c] && !anchor_z[c].is_nan() {
             best[c] = 0.0;
@@ -546,7 +552,7 @@ fn anchor_profiles(
     radius_m: f64,
     law: &AnchorLaw,
     is_river: impl Fn(usize) -> bool,
-) -> BTreeMap<(usize, usize), (Vec<(f64, f64)>, f64)> {
+) -> BTreeMap<(usize, usize), SegmentBed> {
     let coarse = run.lattice();
     // The chain of segments from each segment on down the river (itself included).
     let mut chains: Vec<Chain> = Vec::new();
