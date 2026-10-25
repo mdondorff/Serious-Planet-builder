@@ -704,3 +704,91 @@ fn the_bed_between_the_anchors_falls_the_whole_way_with_no_flat_reach_and_no_ste
         assert_eq!((climbs, outlets), (0, 0), "chunk {x}: the bed climbs in {climbs} links, {outlets} cells lost their receiver");
     }
 }
+
+
+/// The base of `HighBase` with a 50 m rise from coarse column 1009 on: the ground climbs downstream beyond the window of some segments and inside the
+/// window of the next, where a sliding maximum is not monotone.
+struct Bump;
+
+impl BaseDetail for Bump {
+    fn base_height(&self, dir: Vec3) -> f64 {
+        let c = lattice().cell_at(dir);
+        HighBase.base_height(dir) + if c % N >= 1009 { 50.0 } else { 0.0 }
+    }
+    fn coarse_input(&self, dir: Vec3) -> f64 {
+        self.base_height(dir)
+    }
+    fn identity(&self) -> u64 {
+        37
+    }
+}
+
+// spec: GEN-059, GEN-048
+#[test]
+fn a_rise_of_the_ground_beyond_the_window_makes_a_flat_behind_it_not_an_outlet_that_cuts_the_river() {
+    let a = stage_over(Arc::new(Bump), 30);
+    for x in [1000, 1001, 1002, 1003] {
+        let (flat_m, _, climbs, links, outlets) = bed_profile(&a, &Bump, x);
+        eprintln!("chunk {x} over the bump: longest flat {flat_m:.0} m, climbing links {climbs} of {links}, outlets {outlets}");
+        assert_eq!((climbs, outlets), (0, 0), "chunk {x}: {climbs} links climb, {outlets} corridor cells lost their receiver");
+        // The river behind a rise of the ground is held up: a flat of the reach the rise holds back, not a cut river.
+        assert!(flat_m > 400.0, "chunk {x}: the river behind the rise is a flat");
+    }
+}
+
+/// The river of the lowland review site: a drainage area of 9.5e6 km2 all along the row, over the smooth `HighBase` ground (relief factor 0).
+struct WideRiver;
+
+impl CoarseRun for WideRiver {
+    fn lattice(&self) -> &Lattice {
+        lattice()
+    }
+    fn z(&self, c: usize) -> f32 {
+        River.z(c)
+    }
+    fn area_m2(&self, c: usize) -> f32 {
+        on_river(c).map_or(1.0e6, |_| 9.5e12)
+    }
+    fn identity(&self) -> u64 {
+        41
+    }
+    fn receiver(&self, c: usize) -> u32 {
+        River.receiver(c)
+    }
+}
+
+// spec: GEN-060
+#[test]
+fn a_great_river_has_a_channel_as_wide_and_as_deep_as_its_discharge_says_in_a_valley_floor_wider_than_the_channel() {
+    use planet_generators::chunkfield::Cell;
+    let lat = ChunkLattice::new(PER).unwrap();
+    let params = stage_over(Arc::new(HighBase), 30).params;
+    let a = ANet { run: Arc::new(WideRiver), base: Arc::new(HighBase), radius_m: R, params };
+    let r = region(&lat, chunk(1003), 30);
+    let s = a.solve(&lat, &r);
+    let (w, d) = a.params.anchor.bankfull_m(9.5e12);
+    assert!((2000.0..2400.0).contains(&w) && (35.0..45.0).contains(&d), "the law gives {w} m wide, {d} m deep");
+    // A section across the river at the middle of the chunk: the row of cells along the face coordinate that runs across it.
+    let (i, j0) = (1003 * PER + PER / 2, 1000 * PER + PER / 2);
+    let section: Vec<(f64, f64)> = (0..=2 * 25u32)
+        .filter_map(|k| {
+            let cell = Cell { face: FACE as u8, i, j: j0 + k - 25 };
+            r.index_of(cell).map(|c| ((f64::from(k) - 25.0) * lat.cell_m(R), s.z[c]))
+        })
+        .collect();
+    let floor = section.iter().map(|p| p.1).fold(f64::INFINITY, f64::min);
+    let bed = floor + d;
+    let cell_m = lat.cell_m(R);
+    let width_at = |z: f64| section.iter().filter(|p| p.1 < z).count() as f64 * cell_m;
+    // The channel under half its depth is 0.71 of the bankfull width (the parabola), within the factor 2 the law is good for.
+    let measured = width_at(bed - 0.5 * d);
+    eprintln!(
+        "section: floor {floor:.1}, bed {bed:.1}; width at half depth {measured:.0} m (law: {:.0}); valley floor {:.0} m",
+        0.71 * w,
+        width_at(bed + 1.0) - measured
+    );
+    assert!(measured > 0.5 * 0.71 * w && measured < 2.0 * 0.71 * w, "channel {measured} m wide at half depth, the law says {} m", 0.71 * w);
+    // The valley floor (within 1 m of the bed) is wider than the channel it holds.
+    let floor_width = section.iter().filter(|p| (p.1 - bed).abs() <= 1.0).count() as f64 * cell_m;
+    assert!(floor_width >= 0.5 * w, "the valley floor is {floor_width} m wide beside a channel of {w} m");
+}

@@ -236,6 +236,7 @@ impl Network {
         let (mut corridor, mut next, mut inflow_m2) = (vec![false; len], vec![NO_NEXT; len], vec![0.0f64; len]);
         let mut anchor_z = vec![f64::NAN; len];
         let mut river_area_m2 = vec![f64::NAN; len];
+        let mut relief_of = vec![0.0f64; len];
         let half_cell_m = 0.5 * lat.cell_m(radius_m);
         let key = |x: usize| region.cells[x].key();
         let anchors = anchor_profiles(run, base, &segments, radius_m, law, is_river);
@@ -253,7 +254,8 @@ impl Network {
                         river_area_m2[i] = a;
                     }
                     // The bed of a corridor cell: the anchors of the segment interpolated along it (GEN-059), the lower where two rivers meet.
-                    let profile = &anchors[&(from, to)];
+                    let (profile, rf) = &anchors[&(from, to)];
+                    relief_of[i] = relief_of[i].max(*rf);
                     let k = profile.partition_point(|&(pt, _)| pt <= t).clamp(1, profile.len() - 1);
                     let ((t0, h0), (t1, h1)) = (profile[k - 1], profile[k]);
                     let bed = if t1 > t0 { h0 + (h1 - h0) * ((t - t0) / (t1 - t0)).clamp(0.0, 1.0) } else { h0 };
@@ -321,6 +323,7 @@ impl Network {
 
         let dirs: Vec<Vec3> = region.cells.iter().map(|&c| lat.direction(c)).collect();
         let heights = base.base_heights(&dirs);
+        paint_band(&corridor, &river_area_m2, &relief_of, &mut anchor_z, &heights, &dirs, region, radius_m, law);
         let z0 = dirs.iter().zip(&heights).map(|(&d, &h)| (coarse_z_at(run, d) + (h - base.coarse_input(d))) as f32).collect();
         Network { corridor, next, inflow_m2, z0, anchor_z, river_area_m2, base_z: heights, dirs }
     }
@@ -344,6 +347,24 @@ pub struct AnchorLaw {
     pub slope_ks: f64,
     pub slope_theta: f64,
     pub slope_cap: f64,
+    /// The bankfull channel (GEN-060): discharge `Q = q_per_km2 A` (m3/s, `A` in km2), width `w_coef Q^w_exp` m (Moody and Troutman: 7.2 and 0.5, a
+    /// factor 2 of scatter), depth `d_coef Q^d_exp` m (Miller et al.: 0.18 and 0.47 at large `Q`; the exponent runs from 0.3 to 0.47).
+    pub q_per_km2: f64,
+    pub w_coef: f64,
+    pub w_exp: f64,
+    pub d_coef: f64,
+    pub d_exp: f64,
+    /// The valley (GEN-060), by the relief factor `rf = clamp(relief / relief_full_m, 0, 1)` of the base round the river: the valley floor is
+    /// `lerp(floor_low, floor_high, rf)` bankfull widths wide (5 on a lowland is provisional, 1 where confined), the valley depth is the depth law
+    /// capped at `lerp(cap_low_m, cap_m, rf)`, the sides rise at `lerp(side_low, side_high, rf)` (rise over run) up to the ground, and no band is painted
+    /// further than `band_cap_m` from the river.
+    pub relief_full_m: f64,
+    pub floor_low: f64,
+    pub floor_high: f64,
+    pub cap_low_m: f64,
+    pub side_low: f64,
+    pub side_high: f64,
+    pub band_cap_m: f64,
 }
 
 impl Default for AnchorLaw {
@@ -357,11 +378,50 @@ impl Default for AnchorLaw {
             slope_ks: 40.0,
             slope_theta: 0.45,
             slope_cap: 1.0e-4,
+            q_per_km2: 0.01,
+            w_coef: 7.2,
+            w_exp: 0.5,
+            d_coef: 0.18,
+            d_exp: 0.47,
+            relief_full_m: 1000.0,
+            floor_low: 5.0,
+            floor_high: 1.0,
+            cap_low_m: 30.0,
+            side_low: 0.15,
+            side_high: 0.9,
+            band_cap_m: 2400.0,
         }
     }
 }
 
 impl AnchorLaw {
+    /// The relief factor of a base whose heights over about 10 km span `relief_m`.
+    pub fn relief_factor(&self, relief_m: f64) -> f64 {
+        (relief_m / self.relief_full_m).clamp(0.0, 1.0)
+    }
+
+    /// The bankfull width and depth in metres of a river of drainage area `area_m2` (GEN-060).
+    pub fn bankfull_m(&self, area_m2: f64) -> (f64, f64) {
+        let q = self.q_per_km2 * area_m2.max(0.0) / 1.0e6;
+        (self.w_coef * libm::pow(q, self.w_exp), self.d_coef * libm::pow(q, self.d_exp))
+    }
+
+    /// The depth of the valley floor under the ground for a river of area `area_m2` in a base of relief factor `rf`.
+    pub fn valley_depth_m(&self, area_m2: f64, rf: f64) -> f64 {
+        let cap = self.cap_low_m + (self.cap_m - self.cap_low_m) * rf;
+        (self.depth_m * libm::pow((area_m2 / self.area_ref_m2).max(0.0), self.exponent)).min(cap)
+    }
+
+    /// The width of the valley floor in metres.
+    pub fn floor_width_m(&self, area_m2: f64, rf: f64) -> f64 {
+        (self.floor_low + (self.floor_high - self.floor_low) * rf) * self.bankfull_m(area_m2).0
+    }
+
+    /// The slope of the valley sides (rise over run).
+    pub fn side_slope(&self, rf: f64) -> f64 {
+        self.side_low + (self.side_high - self.side_low) * rf
+    }
+
     /// The least slope of the bed of a river of drainage area `area_m2` (rise over run, positive downhill).
     pub fn min_slope(&self, area_m2: f64) -> f64 {
         (self.slope_ks * libm::pow(area_m2.max(1.0), -self.slope_theta)).min(self.slope_cap)
@@ -375,6 +435,99 @@ impl AnchorLaw {
 
 /// A segment and the chain of segments from it on down the river (itself included).
 type Chain = ((usize, usize), Vec<(usize, usize)>);
+
+/// The channel and the valley round the corridor (GEN-060): every cell within the reach of a corridor cell is held at the profile of its nearest corridor
+/// cell (the lower where it lies under the ground): the channel (`bankfull_m`: a depth `d` under the bed at the axis, the parabola `d (1 - (2x / w)^2)`
+/// across the width `w`), the valley floor at the bed out to half the floor width, and the valley sides rising at the side slope up to the ground. A band
+/// cell is fixed like a corridor cell (its height is `anchor_z`). The reach is `band_cap_m` at most, so a core cell reads sources within that distance
+/// only: a halo of the stated size holds them all.
+#[allow(clippy::too_many_arguments)]
+fn paint_band(
+    corridor: &[bool],
+    area: &[f64],
+    relief: &[f64],
+    anchor_z: &mut [f64],
+    ground: &[f64],
+    dirs: &[Vec3],
+    region: &Region,
+    radius_m: f64,
+    law: &AnchorLaw,
+) {
+    let len = corridor.len();
+    let key = |x: usize| region.cells[x].key();
+    // What each corridor cell asks of the cells round it: (bed, bankfull width, depth, floor half width, side slope, reach in metres).
+    let spec = |c: usize| -> (f64, f64, f64, f64, f64, f64) {
+        let rf = relief[c];
+        let (w, d) = law.bankfull_m(area[c]);
+        let half_floor = 0.5 * law.floor_width_m(area[c], rf).max(w);
+        let side = law.side_slope(rf).max(1e-3);
+        let rise = (ground[c] - anchor_z[c]).max(0.0) + d;
+        let extent = rise / side;
+        let reach = (half_floor + extent).min(law.band_cap_m);
+        // The sides reach the ground inside the cap: a floor wider than the cap allows is cut back (the valley floor of a great lowland river is wider
+        // than the halo of a chunk reads, so it is provisional, GEN-060).
+        let half_floor = (reach - extent).max(0.5 * w).min(half_floor);
+        (anchor_z[c], w, d, half_floor, side, reach.max(half_floor))
+    };
+    let mut best = vec![f64::INFINITY; len];
+    let mut from = vec![u32::MAX; len];
+    let mut changed: Vec<usize> = Vec::new();
+    let mut specs: Vec<Option<(f64, f64, f64, f64, f64, f64)>> = vec![None; len];
+    for c in 0..len {
+        if corridor[c] && !anchor_z[c].is_nan() {
+            best[c] = 0.0;
+            from[c] = c as u32;
+            specs[c] = Some(spec(c));
+            changed.push(c);
+        }
+    }
+    let mut stamp = vec![usize::MAX; len];
+    for round in 0..100_000usize {
+        if changed.is_empty() {
+            break;
+        }
+        let mut next: Vec<usize> = Vec::new();
+        for &c in &changed {
+            let src = from[c] as usize;
+            let reach = specs[src].map_or(0.0, |s| s.5);
+            for k in 0..8 {
+                let q = region.neighbours[c][k] as usize;
+                let d = best[c] + (dirs[c] - dirs[q]).length() * radius_m;
+                if d > reach || corridor[q] {
+                    continue;
+                }
+                let take = d < best[q] || (d == best[q] && from[q] as usize != src && key(src) < key(from[q] as usize));
+                if take {
+                    best[q] = d;
+                    from[q] = src as u32;
+                    if stamp[q] != round {
+                        stamp[q] = round;
+                        next.push(q);
+                    }
+                }
+            }
+        }
+        changed = next;
+    }
+    for c in 0..len {
+        if corridor[c] || from[c] == u32::MAX {
+            continue;
+        }
+        let (bed, w, d, half_floor, side, _) = specs[from[c] as usize].expect("a source");
+        let x = best[c];
+        let z = if x <= 0.5 * w {
+            let u = 2.0 * x / w.max(1e-9);
+            bed - d * (1.0 - u * u)
+        } else if x <= half_floor {
+            bed
+        } else {
+            bed + side * (x - half_floor)
+        };
+        if z < ground[c] && (anchor_z[c].is_nan() || z < anchor_z[c]) {
+            anchor_z[c] = z;
+        }
+    }
+}
 
 /// The bed of every segment of `segments` (GEN-059), sampled every `PROFILE_SAMPLES` polyline points: `(t, height)` along the segment, the height of
 /// the bed `t` of the way along it. The raw bed at a point is the base height there minus the law's depth for the river's area; the bed is the
@@ -390,7 +543,7 @@ fn anchor_profiles(
     radius_m: f64,
     law: &AnchorLaw,
     is_river: impl Fn(usize) -> bool,
-) -> BTreeMap<(usize, usize), Vec<(f64, f64)>> {
+) -> BTreeMap<(usize, usize), (Vec<(f64, f64)>, f64)> {
     let coarse = run.lattice();
     // The chain of segments from each segment on down the river (itself included).
     let mut chains: Vec<Chain> = Vec::new();
@@ -431,11 +584,29 @@ fn anchor_profiles(
         dirs.extend(spots.iter().copied());
         samples.insert((from, to), Samples { ts, spots, areas });
     }
+    // The relief round the start of every needed segment: the base at the centres of its cell and the eight round it (about 10 km across).
+    let froms: BTreeSet<usize> = needed.iter().map(|&(from, _)| from).collect();
+    let mut around: BTreeMap<usize, Vec<Vec3>> = BTreeMap::new();
+    for &c in &froms {
+        let mut ring: Vec<Vec3> = vec![coarse.direction(c)];
+        ring.extend(coarse.neighbours(c).into_iter().filter(|&x| (x as usize) < coarse.len()).map(|x| coarse.direction(x as usize)));
+        dirs.extend(ring.iter().copied());
+        around.insert(c, ring);
+    }
     let heights = base.base_heights(&dirs);
+    let mut at = heights.len() - around.values().map(Vec::len).sum::<usize>();
+    let mut rf_of: BTreeMap<usize, f64> = BTreeMap::new();
+    for (c, ring) in &around {
+        let h = &heights[at..at + ring.len()];
+        let (lo, hi) = h.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, u), &x| (l.min(x), u.max(x)));
+        rf_of.insert(*c, law.relief_factor(hi - lo));
+        at += ring.len();
+    }
     let mut raw: BTreeMap<(usize, usize), Vec<f64>> = BTreeMap::new();
     let mut at = 0;
     for (seg, smp) in &samples {
-        raw.insert(*seg, (0..smp.spots.len()).map(|k| heights[at + k] - law.depth_m(smp.areas[k])).collect());
+        let rf = rf_of[&seg.0];
+        raw.insert(*seg, (0..smp.spots.len()).map(|k| heights[at + k] - law.valley_depth_m(smp.areas[k], rf)).collect());
         at += smp.spots.len();
     }
     let mut out = BTreeMap::new();
@@ -459,7 +630,7 @@ fn anchor_profiles(
             suffix[k] = best;
         }
         let own = &samples[&seg];
-        out.insert(seg, own.ts.iter().copied().zip(suffix.iter().copied()).collect());
+        out.insert(seg, (own.ts.iter().copied().zip(suffix.iter().copied()).collect(), rf_of[&seg.0]));
     }
     out
 }
@@ -953,6 +1124,18 @@ impl crate::chunkfield::ChunkStage for ANet {
                 p.anchor.slope_ks.to_bits(),
                 p.anchor.slope_theta.to_bits(),
                 p.anchor.slope_cap.to_bits(),
+                p.anchor.q_per_km2.to_bits(),
+                p.anchor.w_coef.to_bits(),
+                p.anchor.w_exp.to_bits(),
+                p.anchor.d_coef.to_bits(),
+                p.anchor.d_exp.to_bits(),
+                p.anchor.relief_full_m.to_bits(),
+                p.anchor.floor_low.to_bits(),
+                p.anchor.floor_high.to_bits(),
+                p.anchor.cap_low_m.to_bits(),
+                p.anchor.side_low.to_bits(),
+                p.anchor.side_high.to_bits(),
+                p.anchor.band_cap_m.to_bits(),
                 self.run.identity(),
                 self.base.identity(),
                 self.radius_m.to_bits(),
@@ -963,7 +1146,7 @@ impl crate::chunkfield::ChunkStage for ANet {
 }
 
 /// Version of the stage's algorithm: part of its definition hash, so a change that changes results re-keys every chunk.
-pub const ANET_VERSION: u32 = 4;
+pub const ANET_VERSION: u32 = 5;
 
 /// The change of height each cell takes in one pass of thermal slumping (GEN-051): a cell steeper than `talus` over a neighbour gives that
 /// neighbour `rate x (slope - talus) x distance`. `dist[c][k]` is the distance to the `k`-th neighbour of `c` (the order of the region's neighbour
