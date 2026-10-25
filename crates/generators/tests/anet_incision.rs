@@ -595,7 +595,38 @@ fn the_bank_of_a_channel_is_held_to_the_angle_of_repose_relative_to_the_channel_
         } else if a.z[c] < b.z[c] {
             moved += 1;
         }
-        assert!(a.z[c] <= b.z[c] + 1e-9, "the settle only lowers: {:?}", r.cells[c]);
+        assert!(a.z[c] <= b.z[c], "the settle only lowers: {:?}", r.cells[c]);
     }
     assert!(moved > 50, "{moved} bank cells came down");
+}
+
+// spec: GEN-049, GEN-058
+#[test]
+fn the_settled_banks_do_not_depend_on_how_far_the_region_reaches_and_make_no_new_wall_below_a_channel() {
+    // The same stated halo's reach over a wider region: bit for bit the same core.
+    let (mut a, mut b) = (stage_over(Arc::new(Ridge), 30), stage_over(Arc::new(Ridge), 30));
+    a.params.bank_rounds = 14;
+    b.params.bank_rounds = 14;
+    assert_eq!(max_difference(&a, &b, 1003, 30, 70), 0.0);
+    // The settle makes no wall under a protected cell that the incision did not leave: free cells more than 0.9 under a protected neighbour.
+    let lat = ChunkLattice::new(PER).unwrap();
+    let r = region(&lat, chunk(1003), 30);
+    let (on, mut off) = (stage_over(Arc::new(Ridge), 30), stage_over(Arc::new(Ridge), 30));
+    off.params.bank_rounds = 0;
+    let net = planet_generators::anet::Network::build_with(&River, &Ridge, &lat, &r, R, &on.params.anchor);
+    let under = |a: &ANet| {
+        let s = a.solve(&lat, &r);
+        let protected = |c: usize| s.area_m2[c] > a.params.channel_area_m2 || net.corridor[c] || !net.anchor_z[c].is_nan();
+        let mut n = 0;
+        for c in 0..r.core {
+            for k in 0..4 {
+                let q = r.neighbours[c][k] as usize;
+                if q < r.core && protected(q) && !protected(c) && s.z[q] - s.z[c] > 0.9 * lat.cell_m(R) {
+                    n += 1;
+                }
+            }
+        }
+        n
+    };
+    assert!(under(&on) <= under(&off), "the settle made walls below protected cells: {} against {}", under(&on), under(&off));
 }

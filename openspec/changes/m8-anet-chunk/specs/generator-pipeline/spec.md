@@ -78,7 +78,7 @@ Source: owner decision 2026-10-25 (terrain relief into M8, part 1), GEN-047, lea
 - **THEN** every anchor lies at most `cap_m` under the base, no core cell is cut by half the bound or more, and the depth of the law rises with the drainage area up to the cap
 
 ### Requirement: GEN-058 The banks settle to the angle of repose
-After the incision steps an A-net chunk SHALL lower every free cell within `bank_rounds` (48) rings of the core to at most `z(s) + talus x distance` of every protected cell `s` that is not in the outer ring (a channel, the corridor, an anchor), and SHALL not move any protected cell. A cell SHALL only be lowered, and the result SHALL not depend on the halo.
+After the incision steps an A-net chunk SHALL lower every free cell within `bank_rounds` (`ceil(bound_m / (talus cell_m)) + 6`, 48 at 8 m) rings of the core to at most `z(s) + talus x distance` of every protected cell `s` that is not in the outer ring (a channel, the corridor, an anchor), but not under a protected neighbour by more than `talus x distance`, and SHALL not move any protected cell. A cell SHALL only be lowered, and the core SHALL be the same for every halo of at least the stated one.
 
 Verify: A
 Status: planned

@@ -486,7 +486,7 @@ impl ANetParams {
             diffusion: 0.005,
             talus: 0.9,
             slump_rate: 0.09,
-            bank_rounds: 48,
+            bank_rounds: ((300.0 / (0.9 * cell_m)).ceil() + 6.0).clamp(1.0, 96.0) as u16,
             anchor: AnchorLaw::default(),
         }
     }
@@ -781,13 +781,14 @@ pub fn solve(
         }
     }
     // The banks settle (GEN-058): a free cell stands at most the angle of repose over the protected cells near it, as the distance allows: the lower
-    // cone of slope `talus` from every sink (a channel, the corridor, an anchor; they do not move), `bank_rounds` rings far (the cut walls are at most
-    // `bound_m` deep, so 48 rings of 8 m at the repose slope reach any wall), seeded from the sinks twice that far out so that a cell's cone does not
-    // depend on where the region ends.
+    // cone of slope `talus` from every sink (a channel, the corridor, an anchor; they do not move), `bank_rounds` rings far (a wall of `bound_m` at the
+    // repose slope is `bound_m / (talus cell)` cells wide; a base cliff steeper than that is cut at the edge of the reach). Only cells within `rounds`
+    // rings of the core are lowered, by sinks at most one ring further out; the reach is read from the stated halo, not the region's, so a wider
+    // region gives the same core. A cell is never lowered under a protected neighbour by more than the repose slope (no new wall below a higher bed).
     if p.bank_rounds > 0 {
-        let rounds = usize::from(p.bank_rounds).min(usize::from(region.halo.saturating_sub(2)) / 2);
+        let rounds = usize::from(p.bank_rounds).min(usize::from(p.halo_rings.saturating_sub(2)) / 2);
         let cover = region.depth.partition_point(|&d| usize::from(d) <= rounds);
-        let seeds = region.depth.partition_point(|&d| usize::from(d) <= 2 * rounds);
+        let seeds = region.depth.partition_point(|&d| usize::from(d) <= rounds + 1);
         let mut env = vec![f64::INFINITY; len];
         let mut changed: Vec<usize> = Vec::new();
         for c in 0..seeds {
@@ -822,7 +823,14 @@ pub fn solve(
         }
         for c in 0..cover {
             if !protected(c) && env[c] < z[c] {
-                z[c] = env[c];
+                let mut lowered = env[c];
+                for k in 0..8 {
+                    let q = region.neighbours[c][k] as usize;
+                    if protected(q) {
+                        lowered = lowered.max(z[q] - p.talus * dist(c, q));
+                    }
+                }
+                z[c] = lowered.min(z[c]);
             }
         }
     }
