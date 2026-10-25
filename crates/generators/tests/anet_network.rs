@@ -371,3 +371,77 @@ fn the_bed_never_lies_over_the_ground_and_never_climbs_downstream_even_where_a_r
     assert!(checked > 30, "{checked} links checked");
     assert!(cut <= 200.0 + 100.0, "the cut stays within the cap and the valley depth ({cut} m)");
 }
+
+/// The river of `River(1000)` with a tributary down column 1002 from row 995 to the river at row 1000 (a confluence at the coarse cell (1002, 1000)).
+struct Fork;
+
+fn on_trib(c: usize) -> Option<usize> {
+    let (f, r) = (c / (N * N), c % (N * N));
+    let (i, j) = (r % N, r / N);
+    (f == FACE && i == 1002 && (995..1000).contains(&j)).then_some(j)
+}
+
+impl CoarseRun for Fork {
+    fn lattice(&self) -> &Lattice {
+        lattice()
+    }
+    fn z(&self, c: usize) -> f32 {
+        River(1000).z(c)
+    }
+    fn area_m2(&self, c: usize) -> f32 {
+        on_trib(c).map_or_else(|| River(1000).area_m2(c), |_| 3.0e8)
+    }
+    fn identity(&self) -> u64 {
+        17
+    }
+    fn receiver(&self, c: usize) -> u32 {
+        if on_trib(c).is_some() {
+            (c + N) as u32
+        } else {
+            River(1000).receiver(c)
+        }
+    }
+}
+
+/// `Detail` with a hollow `depth` m deep on the tributary, two coarse cells above the confluence.
+struct Hollow(f64);
+
+impl BaseDetail for Hollow {
+    fn base_height(&self, dir: Vec3) -> f64 {
+        let at = lattice().direction(FACE * N * N + 998 * N + 1002);
+        let d = (dir - at).length() * R;
+        self.coarse_input(dir) + 7.0 - self.0 * libm::exp(-(d / 300.0) * (d / 300.0))
+    }
+    fn identity(&self) -> u64 {
+        19
+    }
+    fn coarse_input(&self, dir: Vec3) -> f64 {
+        100.0 + 3.0 * dir.x
+    }
+}
+
+// spec: GEN-059
+#[test]
+fn a_tributary_hangs_above_the_stem_at_a_confluence_with_no_climb_and_never_over_the_ground() {
+    let lat = ChunkLattice::new(32).unwrap();
+    for (depth, climbs_allowed) in [(0.0, false), (30.0, true)] {
+        let base = Hollow(depth);
+        let r = region(&lat, chunk(1002), 40);
+        let net = Network::build_with(&Fork, &base, &lat, &r, R, &routed_law());
+        let (mut links, mut worst_climb) = (0, 0.0f64);
+        for c in 0..r.cells.len() {
+            if !net.corridor[c] {
+                continue;
+            }
+            assert!(net.anchor_z[c] <= net.base_z[c] + 1e-6, "depth {depth}: the bed of {:?} is over the ground", r.cells[c]);
+            let n = net.next[c];
+            if n != NO_NEXT {
+                worst_climb = worst_climb.max(net.anchor_z[n as usize] - net.anchor_z[c]);
+                links += 1;
+            }
+        }
+        assert!(links > 30, "{links} links");
+        // Where the ground is smooth no link climbs; in a hollow the bed is held at the ground, a flat or a short rise out of it at worst.
+        assert!(climbs_allowed || worst_climb <= 0.05, "depth {depth}: a link climbs by {worst_climb} m");
+    }
+}
