@@ -240,30 +240,6 @@ impl CompactTile {
         self.hr_min + self.texels[j * (self.cells as usize + 1) + i][0] as f32 * self.hr_step
     }
 
-    // spec: STRM-047
-    /// The change plane of this tile as the replacement of `old`, the same tile as it is being drawn, `old_weight` of its own change in
-    /// (REND-039): per texel the difference of this tile's final height and the height `old` is drawn at, so that at weight 0 this tile draws
-    /// what `old` drew and at weight 1 its own final heights; a plane made of the change against the base would drop whatever `old` already
-    /// showed. `None` when the two draw alike everywhere (no plane is needed) or are not the same tile.
-    pub fn change_replacing(&self, old: &CompactTile, old_weight: f32) -> Option<Vec<f32>> {
-        if old.id != self.id || old.cells != self.cells {
-            return None;
-        }
-        let w = self.cells as usize + 1;
-        let fade_old = f64::from(1.0 - old_weight);
-        let mut plane = Vec::with_capacity(w * w);
-        for j in 0..w {
-            for i in 0..w {
-                let k = j * w + i;
-                let drawn_old = f64::from(old.h_origin) + f64::from(old.rel_height(i, j))
-                    - old.change.as_ref().map_or(0.0, |c| fade_old * f64::from(c[k]));
-                let fin = f64::from(self.h_origin) + f64::from(self.rel_height(i, j));
-                plane.push((fin - drawn_old) as f32);
-            }
-        }
-        plane.iter().any(|&v| v != 0.0).then_some(plane)
-    }
-
     /// The largest error the 32-bit height quantisation can cause: half a step.
     pub fn height_error_bound_m(&self) -> f64 {
         0.5 * f64::from(self.hr_step)
