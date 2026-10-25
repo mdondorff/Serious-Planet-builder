@@ -231,7 +231,7 @@ fn a_chunk_of_the_synthetic_scene_keeps_its_known_answer() {
     assert_eq!(fnv(&core_change(1003, 40)), KNOWN_ANSWER, "the stage changed: platform, order or arithmetic");
 }
 
-const KNOWN_ANSWER: u64 = 2_924_459_866_857_506_201;
+const KNOWN_ANSWER: u64 = 15_453_545_016_494_209_173;
 
 /// A gentle valley along the river (slope 0.001, below the breach slope) plus a little noise: every stream runs to the river.
 struct Plane;
@@ -470,4 +470,65 @@ fn the_changes_of_eight_chunks_are_the_same_on_one_two_and_eight_threads() {
     assert_eq!(one, hashes_on(2, &tiles), "1 against 2 threads");
     assert_eq!(one, hashes_on(8, &tiles), "1 against 8 threads");
     assert!(one.windows(2).any(|w| w[0] != w[1]), "the chunks differ");
+}
+
+/// The real high ground: the base 2,600 m above the run (the run lies 1.2 to 2.7 km under the base where the relief is high).
+struct HighBase;
+
+impl BaseDetail for HighBase {
+    fn base_height(&self, dir: Vec3) -> f64 {
+        f64::from(River.z(lattice().cell_at(dir))) + 2_600.0
+    }
+    fn coarse_input(&self, dir: Vec3) -> f64 {
+        self.base_height(dir)
+    }
+    fn identity(&self) -> u64 {
+        23
+    }
+}
+
+// spec: GEN-057
+#[test]
+fn the_anchors_lie_a_depth_under_the_drawn_ground_that_grows_with_area_and_no_core_cell_reaches_the_clamp() {
+    use planet_generators::anet::{AnchorLaw, Network};
+    let law = AnchorLaw::default();
+    // The law: shallow for a small river, deeper for a larger one, capped well inside the stage's bound.
+    let depths: Vec<f64> = [1.0e8, 1.0e9, 1.0e10, 1.0e11, 1.0e13].iter().map(|&a| law.depth_m(a)).collect();
+    assert!(depths.windows(2).all(|w| w[1] >= w[0]) && depths[3] > depths[0] + 20.0, "{depths:?}");
+    assert_eq!(depths[4], law.cap_m);
+    let lat = ChunkLattice::new(PER).unwrap();
+    for x in [1000, 1008] {
+        let a = stage_over(Arc::new(HighBase), 30);
+        let r = region(&lat, chunk(x), 30);
+        assert!(law.cap_m * 2.0 < a.bound_m(), "the cap is well inside the bound");
+        let net = Network::build(&River, &HighBase, &lat, &r, R);
+        let anchored: Vec<usize> = (0..r.cells.len()).filter(|&c| !net.anchor_z[c].is_nan()).collect();
+        assert!(!anchored.is_empty(), "chunk {x} has anchors");
+        for &c in &anchored {
+            // The base falls with the river here, so the running maximum is each anchor's own value: under the ground by the law, at most the cap.
+            let depth = net.base_z[c] - net.anchor_z[c];
+            assert!(depth >= -1e-9 && depth <= law.cap_m + 1e-9, "anchor {depth} m under the ground, cap {}", law.cap_m);
+        }
+        let s = a.solve(&lat, &r);
+        let deepest = (0..r.core).map(|c| s.z_base[c] - s.z[c]).fold(0.0f64, f64::max);
+        assert!(deepest < a.bound_m() * 0.5, "chunk {x}: the deepest cut is {deepest} m, the clamp {}", a.bound_m());
+    }
+}
+
+// spec: GEN-049, GEN-057
+#[test]
+fn the_anchors_of_a_cell_are_the_same_whatever_the_halo_over_ground_that_is_not_monotone() {
+    use planet_generators::anet::Network;
+    let lat = ChunkLattice::new(PER).unwrap();
+    for x in [1000, 1003, 1008] {
+        let (ra, rb) = (region(&lat, chunk(x), 10), region(&lat, chunk(x), 30));
+        let (na, nb) = (Network::build(&River, &Hills, &lat, &ra, R), Network::build(&River, &Hills, &lat, &rb, R));
+        let mut shared = 0;
+        for (i, cell) in ra.cells.iter().enumerate() {
+            let Some(j) = rb.index_of(*cell) else { continue };
+            assert_eq!(na.anchor_z[i].to_bits(), nb.anchor_z[j].to_bits(), "chunk {x}, cell {cell:?}");
+            shared += usize::from(!na.anchor_z[i].is_nan());
+        }
+        assert!(shared > 0 || x == 1000, "chunk {x}: anchors compared: {shared}");
+    }
 }
