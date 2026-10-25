@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use planet_cache::global_store::{load_coupled, store_coupled, CoupledSpec, GlobalWorld};
 use planet_cache::pack::{TileStore, DEFAULT_MAX_PACK_BYTES};
 use planet_core::{Face, TileId};
-use planet_generators::coupled::{run, CoupledInput, CoupledMaps, CoupledParams, Lattice};
+use planet_generators::coupled::{run_with, CoupledInput, CoupledMaps, CoupledParams, Lattice};
 use planet_generators::coupledinput::{declared_inputs_hash, reduce_bake};
 use planet_generators::global::LatticeSource;
 use planet_world_def::{BodyId, GenContext, WorldDefinition};
@@ -141,8 +141,12 @@ pub fn load_or_run(def: &WorldDefinition, dir: Option<&Path>, src: &dyn LatticeS
     if let Some(r) = p.load(dir) {
         return Ok(r);
     }
+    let started = std::time::Instant::now();
     let input = bake_input(src, &p.lat)?;
-    let state = run(&p.lat, &input, &p.spec.params, p.steps as usize);
+    eprintln!("coupled run: bake of {} cells reduced to {} in {:.1} s", src.res(), p.n, started.elapsed().as_secs_f64());
+    let state = run_with(&p.lat, &input, &p.spec.params, p.steps as usize, |n, steps| {
+        eprintln!("coupled run: step {n} of {steps}, {:.1} s", started.elapsed().as_secs_f64());
+    });
     let store_error =
         dir.and_then(|d| store_coupled(d, &p.world, &state, DEFAULT_MAX_PACK_BYTES).err().map(|e| format!("{}: {e}", d.display())));
     Ok(CoupledRun { maps: Arc::new(CoupledMaps::new(p.lat, state.z, state.area_m2, p.id)), origin: Origin::Ran, store_error })

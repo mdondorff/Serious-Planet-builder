@@ -468,14 +468,26 @@ fn step_with(
 
 /// The run: `steps` steps from the input heights.
 pub fn run(lat: &Lattice, input: &CoupledInput, p: &CoupledParams, steps: usize) -> CoupledState {
+    run_with(lat, input, p, steps, |_, _| {})
+}
+
+/// [`run`] that calls `after_step(n, steps)` after each step (`n` from 1); the result does not depend on it.
+pub fn run_with(
+    lat: &Lattice,
+    input: &CoupledInput,
+    p: &CoupledParams,
+    steps: usize,
+    mut after_step: impl FnMut(usize, usize),
+) -> CoupledState {
     let mut z = input.z.clone();
     let mut log = Vec::with_capacity(steps);
     let mut leaf_pow = vec![f64::NAN; lat.n * lat.n];
     let mut last = (vec![NONE; lat.len()], vec![0.0; lat.len()]);
-    for _ in 0..steps {
+    for n in 1..=steps {
         let (rec, a, stat) = step_with(lat, input, &mut z, p, &mut leaf_pow);
         log.push(stat);
         last = (rec, a);
+        after_step(n, steps);
     }
     CoupledState { z, area_m2: last.1.iter().map(|&a| a as f32).collect(), receiver: last.0, steps: log }
 }
