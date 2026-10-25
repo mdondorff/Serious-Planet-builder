@@ -1840,3 +1840,38 @@ fn a_landed_chunk_refreshes_exactly_the_resident_tiles_that_read_it() {
     assert_eq!(queued, readers, "exactly the resident tiles that read the chunk are queued for a refresh");
     assert_eq!(rig.lp.chunk_landed(&[(5, 63, 63)]), 0, "a chunk nobody resident reads refreshes nothing");
 }
+
+// spec: STRM-047
+#[test]
+fn the_loop_gives_every_node_the_fade_weight_of_the_chunks_it_reads() {
+    let mut rig = Rig::new(1_000_000);
+    let req = request(here(), 0.0, -0.4);
+    rig.settle(&req);
+    let view = Arc::new(StubView { ready: std::sync::atomic::AtomicBool::new(true) });
+    let clock = Arc::new(planet_streaming::FakeClock::default());
+    // Without a fade every node is at weight 1: the plan is what it was.
+    assert!(rig.step(&req).pipeline.draw.plan.nodes.iter().all(|n| n.chunk_weight == 1.0));
+    rig.lp.set_chunk_view(Some(view));
+    rig.lp.set_chunk_fade(1_500, clock.clone());
+    // The chunk of the first drawn node that reads one (the plan's order is fixed, a hash map's is not).
+    let drawn = rig.step(&req).pipeline.draw.plan.nodes.iter().map(|n| n.tile).find(|t| t.level() >= 6).expect("the plan draws fine tiles");
+    let target = (drawn.face().0, drawn.x() >> (drawn.level() - 6), drawn.y() >> (drawn.level() - 6));
+    rig.lp.chunk_landed(&[target]);
+    let reads_target = |t: TileId| t.level() >= 6 && (t.face().0, t.x() >> (t.level() - 6), t.y() >> (t.level() - 6)) == target;
+    let mut now = 0u64;
+    for (ms, want) in [(0u64, 0.0f32), (750, 0.5), (1_500, 1.0), (4_000, 1.0)] {
+        clock.advance(ms - now);
+        now = ms;
+        let f = rig.step(&req);
+        let mut seen = 0;
+        for n in &f.pipeline.draw.plan.nodes {
+            if reads_target(n.tile) {
+                assert!((n.chunk_weight - want).abs() < 1e-6, "{ms} ms: {:?} weighs {}", n.tile, n.chunk_weight);
+                seen += 1;
+            } else {
+                assert_eq!(n.chunk_weight, 1.0, "{ms} ms: {:?} reads no chunk that landed", n.tile);
+            }
+        }
+        assert!(seen > 0, "the plan draws tiles that read the chunk that landed");
+    }
+}

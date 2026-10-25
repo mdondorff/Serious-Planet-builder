@@ -119,6 +119,8 @@ impl TerrainPlan {
                 quadrants: _,
                 // A runtime state of the draw plan (VIEW-044), not part of a recorded plan.
                 state: _,
+                // A runtime value of the draw plan (STRM-047), not part of a recorded plan.
+                chunk_weight: _,
             } = n;
             let r = n.camera_relative_origin;
             s += &format!(
@@ -216,6 +218,7 @@ impl TerrainPlan {
                         fine: 0,
                         quadrants,
                         state: crate::terrain::TileState::Exact,
+                        chunk_weight: 1.0,
                     });
                 }
                 _ => return Err(format!("cannot parse terrain plan line '{line}'")),

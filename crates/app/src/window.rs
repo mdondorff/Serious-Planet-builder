@@ -749,11 +749,14 @@ impl App<'_> {
             if !st.chunks_on && self.world.chunk_manager().is_some() {
                 st.chunks_on = true;
                 st.rig.managed.set_chunk_view(self.world.chunk_view());
+                // The change of a landing chunk fades in over 1.5 s (STRM-047, criterion 3), on the window's clock.
+                st.rig.managed.set_chunk_fade(planet_frame::chunkshare::ChunkFade::DEFAULT_FADE_MS, self.clock.clone());
             }
             if st.chunks_on {
                 let tiles: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
                 let update = self.world.chunk_frame(&tiles, camera.position, &[]);
                 st.rig.managed.chunk_landed(&update.landed);
+                st.rig.managed.chunk_evicted(&update.evicted);
             }
             // A refusal of the plan for the base parameters degrades the frame (it draws the newest plan in hand); it is said once, never fatal.
             // One line, one report file and one title notice per cause (kind and level) in 5 s; the title counts all of them.

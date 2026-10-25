@@ -69,7 +69,7 @@ fn a_landed_chunks_change_fades_in_linearly_over_the_fade_time_with_a_bounded_st
     let lat = ChunkLattice::new(64).unwrap();
     let tile = TileId::new(Face(2), CHUNK_GRID_LEVEL, 1000, 1000).unwrap();
     let key = (2u8, 1000u32, 1000u32);
-    let mut fade = ChunkFade::new(ChunkFade::DEFAULT_FADE_MS);
+    let mut fade = ChunkFade::new(500);
     assert_eq!(fade.weight(key, false, 0), 0.0, "not ready: the base");
     fade.landed(key, 1_000);
     // 60 frames per second from the landing: monotone, 0 to 1 over 500 ms, never above 1.
@@ -179,4 +179,50 @@ fn a_prefetched_chunk_takes_only_the_workers_the_wanted_chunks_leave_and_is_not_
     assert!(m.update_with(&[(here, 10.0)], &[next]).evicted.is_empty());
     clock.advance(6_000);
     assert_eq!(m.update_with(&[(here, 10.0)], &[]).evicted, vec![next]);
+}
+
+/// A chunk view with the reads and the ready flags given.
+struct Fixed {
+    reads: Vec<planet_generators::chunkfield::ChunkKey>,
+    ready: Vec<planet_generators::chunkfield::ChunkKey>,
+}
+
+impl ChunkView for Fixed {
+    fn top_level(&self) -> u8 {
+        11
+    }
+    fn reads(&self, _tile: TileId) -> Vec<planet_generators::chunkfield::ChunkKey> {
+        self.reads.clone()
+    }
+    fn is_ready(&self, key: planet_generators::chunkfield::ChunkKey) -> bool {
+        self.ready.contains(&key)
+    }
+}
+
+// spec: STRM-047
+#[test]
+fn a_tiles_weight_is_the_minimum_over_the_chunks_it_reads_and_the_default_fade_is_one_and_a_half_seconds() {
+    assert_eq!(ChunkFade::DEFAULT_FADE_MS, 1_500, "criterion 3 as amended: the change fades in over about 1.5 s");
+    let tile = TileId::new(Face(2), CHUNK_GRID_LEVEL + 3, 8 * 1000 + 7, 8 * 1000 + 3).unwrap();
+    let (a, b) = ((2u8, 1000u32, 1000u32), (2u8, 1001u32, 1000u32));
+    let mut fade = ChunkFade::new(ChunkFade::DEFAULT_FADE_MS);
+    fade.landed(a, 0);
+    fade.landed(b, 1_000);
+    let both = Fixed { reads: vec![a, b], ready: vec![a, b] };
+    let own = Fixed { reads: vec![a], ready: vec![a, b] };
+    // Own chunk alone: its own weight. Across the border: the smaller of the two, so the tiles on either side of the border rise together.
+    assert_eq!(fade.tile_weight(&own, tile, 750), 0.5);
+    assert_eq!(fade.tile_weight(&both, tile, 750), 0.0, "b landed later, its weight is 0 at 750 ms and the minimum is taken");
+    assert!((fade.tile_weight(&both, tile, 1_750) - 0.5).abs() < 1e-6, "a is at 1.0 at 1.5 s, b at 0.5: the minimum");
+    assert_eq!(fade.tile_weight(&both, tile, 3_000), 1.0, "both faded in");
+    // A chunk that is not ready weighs 0 and holds the tile at the base.
+    let one_missing = Fixed { reads: vec![a, b], ready: vec![a] };
+    assert_eq!(fade.tile_weight(&one_missing, tile, 3_000), 0.0);
+    // A tile that reads no chunk has no change plane: its weight is 1, the draw the old arithmetic bit for bit.
+    let none = Fixed { reads: vec![], ready: vec![] };
+    assert_eq!(fade.tile_weight(&none, tile, 0), 1.0);
+    // The step of the weight per frame at 60 fps over the default fade: a change of 17.55 m (the largest entry step of m8-anet-chunk) moves a
+    // vertex by 0.195 m per frame, inside the 0.25 m of criterion 3.
+    let step = f64::from(fade.weight(a, true, 1_000 / 60) - fade.weight(a, true, 0));
+    assert!(step * 17.55 <= 0.25, "{} m per frame", step * 17.55);
 }

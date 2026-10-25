@@ -195,6 +195,8 @@ pub struct ManagedLoop {
     last_node_bytes: u64,
     /// What the frame knows of the chunk field (STRM-039): set by the window that has one.
     chunk_view: Option<Arc<dyn crate::chunkshare::ChunkView>>,
+    /// The fade-in of landed chunks on the injected clock (STRM-047): each frame's nodes take its weights; `None` leaves every weight at 1.
+    chunk_fade: Option<(crate::chunkshare::ChunkFade, Arc<dyn Clock>)>,
     /// The lists of `wants` that changed since the manager was last given them.
     draw_changed: bool,
     residency_changed: bool,
@@ -282,6 +284,7 @@ impl ManagedLoop {
             prefetch_rebuilds: 0,
             last_node_bytes: 0,
             chunk_view: None,
+            chunk_fade: None,
             draw_changed: false,
             residency_changed: false,
             prefetch_changed: false,
@@ -376,12 +379,33 @@ impl ManagedLoop {
         self.chunk_view = view;
     }
 
+    /// Fade the change of landing chunks in over `fade_ms` of `clock` (STRM-047, [`crate::chunkshare::ChunkFade::DEFAULT_FADE_MS`]): the nodes of
+    /// every frame carry the weight of their chunks. Needs a chunk view too; without a fade every weight is 1.
+    pub fn set_chunk_fade(&mut self, fade_ms: u64, clock: Arc<dyn Clock>) {
+        self.chunk_fade = Some((crate::chunkshare::ChunkFade::new(fade_ms), clock));
+    }
+
+    /// Chunks left RAM: they fade in again when they land again (STRM-047).
+    pub fn chunk_evicted(&mut self, evicted: &[planet_generators::chunkfield::ChunkKey]) {
+        if let Some((fade, _)) = self.chunk_fade.as_mut() {
+            for &k in evicted {
+                fade.evicted(k);
+            }
+        }
+    }
+
     /// Chunks landed (STRM-040): the resident tiles that read one of them are refreshed through the stale-tile machinery (the old tile keeps
     /// drawing while the new one is made, REND-032) and their cached origins dropped. Returns the tiles queued; 0 without a chunk view.
     pub fn chunk_landed(&mut self, landed: &[planet_generators::chunkfield::ChunkKey]) -> usize {
         let Some(view) = self.chunk_view.clone() else { return 0 };
         if landed.is_empty() {
             return 0;
+        }
+        if let Some((fade, clock)) = self.chunk_fade.as_mut() {
+            let now = clock.now_ms();
+            for &k in landed {
+                fade.landed(k, now);
+            }
         }
         let mut tiles: Vec<TileId> = self.resident.keys().copied().filter(|t| view.reads(*t).iter().any(|k| landed.contains(k))).collect();
         tiles.sort_unstable_by_key(|t| t.raw());
@@ -599,7 +623,14 @@ impl ManagedLoop {
             est.observe(clock.now_ms(), req.camera.position);
             est.predict()
         });
-        let pipeline = self.pipe.begin_frame_predicted(req, predicted, &self.resident)?;
+        let mut pipeline = self.pipe.begin_frame_predicted(req, predicted, &self.resident)?;
+        // The weights of the landed chunks' fade (STRM-047): each node takes the minimum over the chunks it reads; 1 without a fade or a view.
+        if let (Some(view), Some((fade, clock))) = (self.chunk_view.as_deref(), self.chunk_fade.as_ref()) {
+            let now = clock.now_ms();
+            for n in &mut pipeline.draw.plan.nodes {
+                n.chunk_weight = fade.tile_weight(view, n.tile, now);
+            }
+        }
         let node_bytes = indirect_frame_bytes(pipeline.draw.plan.nodes.len());
         self.last_node_bytes = node_bytes;
         let stats = self.manager.streamer().stats();

@@ -601,6 +601,7 @@ mod tests {
             fine: 0,
             quadrants: 0b1111,
             state: crate::terrain::TileState::Exact,
+            chunk_weight: 1.0,
         }
     }
 

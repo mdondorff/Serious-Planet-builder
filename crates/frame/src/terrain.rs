@@ -101,6 +101,11 @@ pub struct TerrainDraw {
     /// How the node stands against the current definition (VIEW-044): set by the draw plan, [`TileState::Exact`] in a plan made by the
     /// planner. The stale-tile overlay colours by it; the text form does not carry it.
     pub state: TileState,
+    /// The fade weight of the tile's chunk change, 0 to 1 (STRM-047, REND-039): the minimum of the weights of the chunks the tile reads (so two
+    /// tiles on either side of a chunk border rise together), as an f32 (CON-11). 1 for a plan made by the planner and for a tile without a
+    /// change plane (the draw is then the final height, bit for bit); the managed loop sets it from the landing times. A runtime value of the
+    /// draw plan; the recorded text form and the summary hash do not carry it.
+    pub chunk_weight: f32,
 }
 
 /// The state of a drawn node against the current definition (VIEW-044).
@@ -355,6 +360,7 @@ pub(crate) fn plan_terrain_keyed(
                 quadrants: crate::lod::ALL_QUADRANTS,
                 // A leaf held back by a tile too steep to morph (ADR 0074) shows in its own colour in the overlays.
                 state: if n.capped { TileState::Capped } else { TileState::Exact },
+                chunk_weight: 1.0,
             }
         })
         .collect();
