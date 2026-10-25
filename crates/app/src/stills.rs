@@ -381,7 +381,7 @@ fn anchor_direction(
     let note = match anchor {
         Anchor::SteepestRiver { radius_m, .. } => {
             let (slope, relief) = local_slope(ground, dir, radius_m, step_m, maps.lattice().radius_m());
-            format!(", steepest slope {:.1} degrees and relief {relief:.0} m within {radius_m:.0} m", slope.atan().to_degrees())
+            format!(", steepest slope {:.1} degrees and relief {relief:.0} m within {radius_m:.0} m", libm::atan(slope).to_degrees())
         }
         _ => String::new(),
     };
