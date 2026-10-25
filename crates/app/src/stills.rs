@@ -549,6 +549,69 @@ pub fn snap_to_channel(
     Ok((at, ring.1))
 }
 
+/// Where the capped nodes of a plan sit (ADR 0074), one line per capped node: its level and edge, the height range and the steepest slope (rise over
+/// run between neighbouring samples, axis and diagonal) of the heights `ground` gives on a grid of at most 8 m, the distance of its centre from the
+/// nearest edge of its chunk (the level-11 tile), and the morph interval the plan gave it. Then totals by level and by slope.
+pub fn capped_report(nodes: &[planet_frame::TerrainDraw], ground: &dyn Fn(Vec3) -> f64, planet_radius_m: f64) -> String {
+    use planet_core::cube::{direction_to_face, TangentWarp};
+    let chunk_level = planet_generators::chunk::CHUNK_GRID_LEVEL;
+    let chunk_edge_m = planet_radius_m * core::f64::consts::FRAC_PI_2 / f64::from(1u32 << chunk_level);
+    let mut out =
+        String::from("# level edge_m grid_res height_min_m height_max_m max_slope morph_start_m morph_end_m chunk_edge_distance_m\n");
+    let (mut by_level, mut steep, mut total) = (std::collections::BTreeMap::<u8, usize>::new(), 0usize, 0usize);
+    let mut slopes: Vec<f64> = Vec::new();
+    let mut near_edge = 0usize;
+    for n in nodes.iter().filter(|n| n.capped) {
+        let level = n.tile.level();
+        let edge_m = planet_radius_m * core::f64::consts::FRAC_PI_2 / f64::from(1u32 << level);
+        let res = ((edge_m / 8.0).ceil() as u32).next_power_of_two().clamp(4, 128);
+        let side = (res + 1) as usize;
+        let mut h = vec![0.0f64; side * side];
+        for l in 0..=res {
+            for k in 0..=res {
+                h[l as usize * side + k as usize] = ground(n.tile.sample_direction(&TangentWarp, res, k, l));
+            }
+        }
+        let spacing = edge_m / f64::from(res);
+        let (mut slope, mut lo, mut hi) = (0.0f64, f64::INFINITY, f64::NEG_INFINITY);
+        for l in 0..side {
+            for k in 0..side {
+                let here = h[l * side + k];
+                lo = lo.min(here);
+                hi = hi.max(here);
+                for (dk, dl) in [(1usize, 0usize), (0, 1), (1, 1)] {
+                    if k + dk < side && l + dl < side {
+                        let run = spacing * libm::sqrt((dk * dk + dl * dl) as f64);
+                        slope = slope.max((h[(l + dl) * side + k + dk] - here).abs() / run);
+                    }
+                }
+            }
+        }
+        let (_, u, v) = direction_to_face(&TangentWarp, n.tile.center_direction(&TangentWarp));
+        let cells = f64::from(1u32 << chunk_level);
+        let (fu, fv) = ((u + 1.0) * 0.5 * cells, (v + 1.0) * 0.5 * cells);
+        let (fu, fv) = (fu - libm::floor(fu), fv - libm::floor(fv));
+        let edge_distance = fu.min(1.0 - fu).min(fv.min(1.0 - fv)) * chunk_edge_m;
+        out.push_str(&format!(
+            "{level} {edge_m:.0} {res} {lo:.1} {hi:.1} {slope:.2} {:.0} {:.0} {edge_distance:.0}\n",
+            n.morph_start_m, n.morph_end_m
+        ));
+        *by_level.entry(level).or_default() += 1;
+        steep += usize::from(slope > 0.9);
+        near_edge += usize::from(edge_distance < edge_m);
+        total += 1;
+        slopes.push(slope);
+    }
+    slopes.sort_by(f64::total_cmp);
+    out.push_str(&format!(
+        "# capped {total}; by level {by_level:?}; max slope p50 {:.2} p90 {:.2} max {:.2}; over the repose slope 0.9: {steep}; within one tile edge of a chunk edge: {near_edge}\n",
+        slopes.get(slopes.len() / 2).copied().unwrap_or(f64::NAN),
+        slopes.get(slopes.len() * 9 / 10).copied().unwrap_or(f64::NAN),
+        slopes.last().copied().unwrap_or(f64::NAN)
+    ));
+    out
+}
+
 /// The steepest slope (rise over run between samples) and the height range of the ground within `radius_m` of `dir`, sampled on a grid of
 /// `step_m` and read along the grid's lines and diagonals.
 pub fn local_slope(ground: &dyn Fn(Vec3) -> f64, dir: Vec3, radius_m: f64, step_m: f64, planet_radius_m: f64) -> (f64, f64) {
@@ -880,6 +943,11 @@ pub fn capture_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         };
         let plan =
             planet_frame::plan_terrain_cached(&request(&rig, camera), rig.field, &mut SelectionCache::new()).map_err(|e| e.to_string())?;
+        if std::ptr::eq(pose, &config.poses[0]) || pose.name == config.poses[0].name {
+            let level = crate::anetworld::ANET_TOP_LEVEL;
+            let report = capped_report(&plan.nodes, &|d| field.height_at_level(d, level), radius_m);
+            std::fs::write(dir.join("capped.txt"), report).map_err(err)?;
+        }
         let tiles: Vec<TileId> = plan.nodes.iter().map(|n| n.tile).collect();
         let missing = needed(&world, &tiles).into_iter().filter(|k| !world.chunk_manager().is_some_and(|m| m.is_ready(*k))).count();
         if missing > 0 {

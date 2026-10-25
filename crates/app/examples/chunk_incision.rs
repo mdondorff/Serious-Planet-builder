@@ -1,5 +1,5 @@
 //! Diagnostic, not production: the unclamped change of the A-net chunk solve at a point (see `WorldTerrain::chunk_incision_report`).
-//! `cargo run --release -p planet --example chunk_incision -- --store DIR --lat DEG --lon DEG`
+//! `cargo run --release -p planet --example chunk_incision -- --store DIR --lat DEG --lon DEG [--slump-rate R] [--steps N]`, or `--run-vs-base`.
 
 use planet::worldfield::WorldTerrain;
 use planet_world_def::WorldDefinition;
@@ -20,5 +20,7 @@ fn main() {
         println!("{}", world.run_against_base_report(8, 1e10).unwrap());
         return;
     }
-    println!("{}", world.chunk_incision_report(lat, lon).unwrap());
+    let slump_rate = arg("--slump-rate").map(|v| v.parse().expect("--slump-rate"));
+    let steps = arg("--steps").map(|v| v.parse().expect("--steps"));
+    println!("{}", world.chunk_incision_report(lat, lon, slump_rate, steps).unwrap());
 }

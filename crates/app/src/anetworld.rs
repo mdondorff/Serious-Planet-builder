@@ -207,9 +207,15 @@ impl WorldTerrain {
 }
 
 impl WorldTerrain {
-    /// A diagnostic, not part of the viewer: the unclamped change of the A-net solve over the chunk holding `lat_deg`, `lon_deg` (the stage clamps its
+    /// A diagnostic, not part of the viewer (`slump_rate` and `steps` replace the stage's defaults for the report only): the unclamped change of the A-net solve over the chunk holding `lat_deg`, `lon_deg` (the stage clamps its
     /// change to `bound_m`): the distribution of the change, how many cells sit at the bound, and the change of the cut cells by drainage area.
-    pub fn chunk_incision_report(self: &Arc<Self>, lat_deg: f64, lon_deg: f64) -> Result<String, String> {
+    pub fn chunk_incision_report(
+        self: &Arc<Self>,
+        lat_deg: f64,
+        lon_deg: f64,
+        slump_rate: Option<f64>,
+        steps: Option<u32>,
+    ) -> Result<String, String> {
         use planet_core::cube::TangentWarp;
         use planet_core::{TileId, Vec3};
         use planet_generators::chunkfield::{region, ChunkLattice};
@@ -224,7 +230,14 @@ impl WorldTerrain {
         let radius = self.radius_m();
         let per = cells_per_chunk_for(radius, ANET_CELL_M);
         let clat = ChunkLattice::new(per).ok_or("no chunk lattice")?;
-        let params = ANetParams::spike(ANET_HALO_M, clat.cell_m(radius));
+        let mut params = ANetParams::spike(ANET_HALO_M, clat.cell_m(radius));
+        // What the census says when the hillslope step is stronger or the run longer than the defaults (an argument of the report, never a production value).
+        if let Some(v) = slump_rate {
+            params.slump_rate = v;
+        }
+        if let Some(v) = steps {
+            params.steps = v;
+        }
         let halo = params.halo_rings;
         let stage = ANet { run: run.maps, base: Arc::new(WorldBase::new(self)), radius_m: radius, params };
         let dir = Vec3::from_lat_lon(lat_deg.to_radians(), lon_deg.to_radians());
@@ -282,6 +295,53 @@ impl WorldTerrain {
                 );
             }
         }
+        // The steep pairs of neighbouring core cells of the solved surface: how many are over the angle of repose and over the slope the plan can draw,
+        // and whether a protected cell (a channel, the corridor, an anchor: the hillslope steps skip every pair with one) is one of the two.
+        let cell_m = clat.cell_m(radius);
+        let channel_m2 = stage.params.channel_area_m2;
+        let protected = |c: usize| s.area_m2[c] > channel_m2 || net.corridor[c] || !net.anchor_z[c].is_nan();
+        let (mut over_repose, mut over_drawable, mut with_protected, mut max_free, mut max_any) = (0usize, 0usize, 0usize, 0.0f64, 0.0f64);
+        let mut pairs = 0usize;
+        for c in 0..core {
+            for (k, &nb) in reg.neighbours[c].iter().enumerate() {
+                let q = nb as usize;
+                if q >= core || k >= 4 {
+                    continue;
+                }
+                pairs += 1;
+                let slope = (s.z[c] - s.z[q]).abs() / cell_m;
+                max_any = max_any.max(slope);
+                let prot = protected(c) || protected(q);
+                if !prot {
+                    max_free = max_free.max(slope);
+                }
+                if slope > 0.9 {
+                    over_repose += 1;
+                    with_protected += usize::from(prot);
+                }
+                over_drawable += usize::from(slope > 3.42);
+            }
+        }
+        let (mut base_repose, mut base_max) = (0usize, 0.0f64);
+        for c in 0..core {
+            for (k, &nb) in reg.neighbours[c].iter().enumerate() {
+                let q = nb as usize;
+                if q >= core || k >= 4 {
+                    continue;
+                }
+                let slope = (s.z_base[c] - s.z_base[q]).abs() / cell_m;
+                base_max = base_max.max(slope);
+                base_repose += usize::from(slope > 0.9);
+            }
+        }
+        out += &format!(
+            "the base surface alone: pairs over 0.9: {base_repose}, steepest pair {base_max:.2}
+"
+        );
+        out += &format!(
+            "edge pairs {pairs}: over the repose slope 0.9: {over_repose} (with a protected cell: {with_protected}), over 3.42: {over_drawable}; steepest pair {max_any:.2}, steepest pair of two unprotected cells {max_free:.2}
+"
+        );
         Ok(out)
     }
 }
