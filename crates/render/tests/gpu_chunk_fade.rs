@@ -232,7 +232,7 @@ fn two_tiles(s: &Scene) -> (Vec<CompactTile>, TerrainPlan) {
                 origin: t.origin,
                 camera_relative_origin: [rel.x as f32, rel.y as f32, rel.z as f32],
                 mesh_key: t.key,
-                ..s.plan.nodes[0].clone()
+                ..s.plan.nodes[0]
             }
         })
         .collect();
