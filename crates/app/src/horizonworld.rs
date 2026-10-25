@@ -188,6 +188,8 @@ pub struct CoarseHorizon {
     pub m: u32,
     pub azimuths: u32,
     pub bytes: Arc<Vec<u8>>,
+    /// The map packed as the GPU reads it (`pack_coarse`), made on the loading thread so no frame pays for it.
+    pub packed: Arc<Vec<u8>>,
 }
 
 /// Where the coarse horizon of a world stands.
@@ -272,7 +274,15 @@ pub fn read_coarse(def: &WorldDefinition, dir: Option<&Path>, src: &dyn LatticeS
     };
     match load_horizon(&store, &world) {
         Ok(h) if h.azimuths == planet_frame::horizonview::MAX_SLOT_AZIMUTHS as u32 && h.m >= 2 => {
-            CoarseStanding::Ready(CoarseHorizon { m: h.m, azimuths: h.azimuths, bytes: Arc::new(h.bytes) })
+            match planet_frame::horizonview::pack_coarse(&h.bytes, h.m as usize, h.azimuths as usize) {
+                Some(packed) => CoarseStanding::Ready(CoarseHorizon {
+                    m: h.m,
+                    azimuths: h.azimuths,
+                    bytes: Arc::new(h.bytes),
+                    packed: Arc::new(packed),
+                }),
+                None => CoarseStanding::Failed("the stored coarse horizon does not pack for the GPU".to_string()),
+            }
         }
         Ok(h) => CoarseStanding::Failed(format!(
             "the stored coarse horizon has {} azimuths over {} cells: the shader reads 16 over at least 2",
@@ -381,5 +391,111 @@ impl WorldTerrain {
     /// Where the coarse horizon stands.
     pub fn coarse_standing(&self) -> CoarseStanding {
         self.coarse.standing()
+    }
+}
+
+/// What the viewer keeps between frames to give the renderer the horizon shadows (REND-038, REND-041): the slots of the chunk maps, the version of
+/// each map (a re-bake changes it), the uploads still to do (one a frame, so a landing map never stalls a frame, CON-22) and whether the coarse
+/// map was handed over.
+pub struct HorizonRig {
+    slots: planet_frame::horizonview::HorizonSlots,
+    versions: std::collections::HashMap<ChunkKey, u64>,
+    pending: std::collections::VecDeque<(ChunkKey, u32)>,
+    frame: u64,
+    coarse_done: bool,
+    warned_azimuths: bool,
+}
+
+/// Slots of the viewer array of chunk horizons (one MiB each).
+pub const VIEWER_HORIZON_SLOTS: u32 = 64;
+
+impl Default for HorizonRig {
+    fn default() -> Self {
+        HorizonRig {
+            slots: planet_frame::horizonview::HorizonSlots::new(VIEWER_HORIZON_SLOTS),
+            versions: Default::default(),
+            pending: Default::default(),
+            frame: 0,
+            coarse_done: false,
+            warned_azimuths: false,
+        }
+    }
+}
+
+impl HorizonRig {
+    /// One frame: run the horizon jobs of the world for the plan tiles `tiles`, hand the renderer the table of the frame, the next map to upload and
+    /// (once) the coarse map. `sun` is the lit plan sun direction. Does nothing without the chunk stage of the world.
+    pub fn frame(
+        &mut self,
+        world: &WorldTerrain,
+        ctx: &planet_render::GpuContext,
+        renderer: &mut planet_render::TerrainRenderer,
+        tiles: &[TileId],
+        camera: PlanetFixed,
+        sun: [f32; 3],
+    ) {
+        use planet_frame::horizonview::{pack_map, tile_in_chunk, HorizonFrame, MAX_SLOT_AZIMUTHS};
+        let (Some(lat), true) = (world.chunk_lattice(), world.chunk_manager().is_some()) else { return };
+        self.frame += 1;
+        let update = world.horizon_frame(tiles, camera);
+        for key in &update.landed {
+            *self.versions.entry(*key).or_insert(0) += 1;
+        }
+        // The chunks of the plan tiles that have a map, in the plan order.
+        let mut wanted: Vec<(ChunkKey, u64)> = Vec::new();
+        for &t in tiles {
+            let Some((key, _)) = tile_in_chunk(t) else { continue };
+            if wanted.iter().all(|(k, _)| *k != key) && world.horizon_map(key).is_some() {
+                wanted.push((key, self.versions.get(&key).copied().unwrap_or(0)));
+            }
+        }
+        let slot_update = self.slots.update(&wanted, self.frame);
+        self.pending.extend(slot_update.uploads.iter().copied());
+        // One upload a frame: the oldest still valid (the chunk keeps that slot and the map is still there).
+        let mut packed: Vec<(u32, Vec<u8>)> = Vec::new();
+        while let Some((key, slot)) = self.pending.pop_front() {
+            if self.slots.slot_of(key) != Some(slot) {
+                continue;
+            }
+            let Some(map) = world.horizon_map(key) else { continue };
+            let n = lat.cells_per_chunk() as usize;
+            match pack_map(&map, n, map.len() / (n * n).max(1)) {
+                Some(bytes) => packed.push((slot, bytes)),
+                None => {
+                    if !self.warned_azimuths {
+                        self.warned_azimuths = true;
+                        eprintln!(
+                            "horizon: a chunk map of {} bytes over {n} cells is not {MAX_SLOT_AZIMUTHS} azimuths: no shadow from it",
+                            map.len()
+                        );
+                    }
+                }
+            }
+            break;
+        }
+        let sun3 = planet_core::Vec3::new(f64::from(sun[0]), f64::from(sun[1]), f64::from(sun[2]));
+        let mut frame = HorizonFrame::build(&self.slots, slot_update, tiles, sun3, &planet_core::cube::TangentWarp);
+        // A node whose map has not been uploaded yet reads no map (slot -1): the stand-in is the coarse horizon (CON-22).
+        let waiting: std::collections::HashSet<ChunkKey> =
+            self.pending.iter().filter(|(k, s)| self.slots.slot_of(*k) == Some(*s)).map(|(k, _)| *k).collect();
+        for (node, &t) in frame.nodes.iter_mut().zip(tiles) {
+            if tile_in_chunk(t).is_some_and(|(k, _)| waiting.contains(&k)) {
+                node.slot = -1;
+            }
+        }
+        renderer.set_horizon(ctx, &frame, &packed);
+        if !self.coarse_done {
+            match world.coarse_standing() {
+                CoarseStanding::Ready(h) => {
+                    renderer.set_horizon_coarse(ctx, Some((h.m, &h.packed)));
+                    self.coarse_done = true;
+                }
+                CoarseStanding::Absent(text) | CoarseStanding::Failed(text) => {
+                    eprintln!("horizon: {text}");
+                    self.coarse_done = true;
+                }
+                CoarseStanding::Idle | CoarseStanding::Working => {}
+            }
+        }
     }
 }

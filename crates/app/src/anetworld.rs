@@ -163,8 +163,20 @@ impl WorldTerrain {
         let world = Arc::clone(self);
         std::thread::Builder::new()
             .name("anet-load".into())
-            .spawn(move || match world.enable_anet_from_store(ANET_CELL_M, spawner, clock, cfg) {
-                Ok(true) => {}
+            .spawn(move || match world.enable_anet_from_store(ANET_CELL_M, spawner.clone(), clock.clone(), cfg) {
+                Ok(true) => {
+                    // The horizon shadows (STRM-049, STRM-045): the second job of every chunk and the stored far-field horizon.
+                    if let Some(lat) = world.chunk_lattice() {
+                        let params = crate::horizonworld::chunk_horizon_params(&lat, world.radius_m());
+                        let threads = std::thread::available_parallelism().map_or(1, |t| t.get()).min(4);
+                        if let Err(e) =
+                            world.enable_horizon(params, spawner, clock, planet_streaming::chunks::HorizonConfig::default(), threads)
+                        {
+                            eprintln!("horizon: {e}");
+                        }
+                    }
+                    world.request_coarse_horizon();
+                }
                 Ok(false) => eprintln!(
                     "chunks: no stored coupled channel for this world: the terrain is the base (generate it with the coupled lens, K)"
                 ),
