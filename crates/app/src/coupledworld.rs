@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use planet_cache::global_store::{load_coupled, store_coupled, CoupledSpec, GlobalWorld};
 use planet_cache::pack::{TileStore, DEFAULT_MAX_PACK_BYTES};
 use planet_core::{Face, TileId};
-use planet_generators::coupled::{run_with, CoupledInput, CoupledMaps, CoupledParams, Lattice};
+use planet_generators::coupled::{run_with, stationary_uplift, CoupledInput, CoupledMaps, CoupledParams, Lattice};
 use planet_generators::coupledinput::{declared_inputs_hash, reduce_bake};
 use planet_generators::global::LatticeSource;
 use planet_world_def::{BodyId, GenContext, WorldDefinition};
@@ -19,9 +19,12 @@ pub const COUPLED_STEPS: u32 = 80;
 /// Cells per face edge of the run on a bake that has at least that many (see [`run_cells`]).
 pub const COUPLED_CELLS: u32 = 2048;
 
-/// Uplift of every cell in m per year, and the erodibility of the stream power law: placeholders until the driver maps give the run its own
-/// (ADR 0076). They are inputs, so the hash in the key covers them.
-pub const UPLIFT_M_PER_YEAR: f32 = 1.0e-3;
+/// The factor of the stationary uplift (GEN-063): 1 makes the bake a steady state of the stream power law, so the run keeps its relief; lower
+/// values let it keep eroding. A declared parameter of the run, part of its key.
+pub const UPLIFT_RHO: f64 = 1.0;
+
+/// The erodibility of the stream power law: a placeholder until the lithology driver exists (ADR 0076). An input, so the hash in the key
+/// covers it.
 pub const ERODIBILITY: f32 = 2.0e-5;
 
 /// Where the maps of a run came from.
@@ -53,10 +56,13 @@ fn reduce_threads() -> usize {
 }
 
 /// The input of the run on the lattice `lat` from the bake `src` (a finer lattice whose cells nest in the run's): the bake's elevation reduced
-/// by the box filter of GEN-056, the constant uplift and erodibility. A read error names the vertex.
-pub fn bake_input(src: &dyn LatticeSource, lat: &Lattice) -> Result<CoupledInput, String> {
+/// by the box filter of GEN-056, the constant erodibility and the stationary uplift of those heights (`UPLIFT_RHO`, GEN-063). A read error
+/// names the vertex.
+pub fn bake_input(src: &dyn LatticeSource, lat: &Lattice, params: &CoupledParams) -> Result<CoupledInput, String> {
     let z = reduce_bake(src, lat.n() as u32, reduce_threads()).map_err(|e| e.to_string())?;
-    Ok(CoupledInput { uplift: vec![UPLIFT_M_PER_YEAR; z.len()], erodibility: vec![ERODIBILITY; z.len()], z })
+    let erodibility = vec![ERODIBILITY; z.len()];
+    let uplift = stationary_uplift(lat, &z, &erodibility, params, UPLIFT_RHO);
+    Ok(CoupledInput { uplift, erodibility, z })
 }
 
 /// The maps read from the stored channel when the store in `dir` holds the run of `def` on `n` cells per face edge from the bake `src` (same
@@ -111,7 +117,7 @@ fn prepare(def: &WorldDefinition, src: &dyn LatticeSource, n: u32, steps: u32) -
         steps,
         bake_res,
         params: CoupledParams::default(),
-        inputs: declared_inputs_hash(radius_m, UPLIFT_M_PER_YEAR, ERODIBILITY, src.relief_scale()),
+        inputs: declared_inputs_hash(radius_m, UPLIFT_RHO, ERODIBILITY, src.relief_scale()),
     };
     let world = GlobalWorld::from_definition(def).map_err(|e| format!("the definition cannot be generated: {e}"))?.with_coupled(spec);
     let (level, cells) = world.layout(n).map_err(|e| format!("a coupled run of {n} cells: {e:?}"))?;
@@ -142,7 +148,7 @@ pub fn load_or_run(def: &WorldDefinition, dir: Option<&Path>, src: &dyn LatticeS
         return Ok(r);
     }
     let started = std::time::Instant::now();
-    let input = bake_input(src, &p.lat)?;
+    let input = bake_input(src, &p.lat, &p.spec.params)?;
     eprintln!("coupled run: bake of {} cells reduced to {} in {:.1} s", src.res(), p.n, started.elapsed().as_secs_f64());
     let state = run_with(&p.lat, &input, &p.spec.params, p.steps as usize, |n, steps| {
         eprintln!("coupled run: step {n} of {steps}, {:.1} s", started.elapsed().as_secs_f64());
