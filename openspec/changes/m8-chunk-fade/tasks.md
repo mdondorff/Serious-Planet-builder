@@ -13,7 +13,7 @@
 - [ ] 3.3 The landing on the software adapter: a tile's drawn height steps by at most the weight step times the change per frame (tier C, spec: STRM-039 fade scenario as REND-039)
 
 ## 4. Length, normals, golden-review
-- [ ] 4.1 `chunk_fade_ms` from the M8-3 measurement; the look test of the normal choice (decision 4), recorded
+- [ ] 4.1 `chunk_fade_ms` default 1500 (criterion 3, amended 2026-10-24); the screen step at the entry level at the review poses at most about 0.5 px p99 with blending (measured on the landing stills); the look test of the normal choice (decision 4), recorded
 - [ ] 4.2 `golden-review` of the candidates; stop and report only if one escalates to the owner's /bless
 - [ ] 4.3 numerics-reviewer, spec-guardian, verifier; PR
 
