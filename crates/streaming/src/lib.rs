@@ -1307,7 +1307,13 @@ impl<T: Send + Sync + 'static> Streamer<T> {
             // for a tile that left every class is dropped and counted: the class it was queued under no longer lists the tile, and the
             // tile stays marked stale, so the request is made again when something wants it.
             if new.is_some() && self.stale.contains(&t) && !self.in_flight.contains_key(&t) {
-                self.request_refresh(t);
+                if self.queue.contains(t) {
+                    // A request queued under the class the tile left moves to its new class even while the settle window holds the tile: the
+                    // scheduler reads a queued request's key from the layer of its class.
+                    self.request_ahead(t);
+                } else {
+                    self.request_refresh(t);
+                }
             } else if new.is_none() {
                 if let Some(class) = self.queue.remove(t) {
                     self.stats.cancelled += 1;

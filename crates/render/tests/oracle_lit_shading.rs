@@ -35,6 +35,9 @@ struct Case {
     table: AlbedoParams,
 }
 
+/// The views `shade_lit` computes (lit to precipitation): `Horizon` and `Shadow` are written by the fragment stage from the horizon maps (REND-038) and have their own tests (`gpu_horizon`).
+const SHADED: usize = 5;
+
 fn rng(seed: u64) -> impl FnMut() -> f64 {
     let mut state = seed;
     move || {
@@ -88,7 +91,7 @@ fn cases() -> Vec<Case> {
         };
         let scale = 0.5 + 3.0 * next();
         out.push(Case {
-            view: ShadeView::ALL[k % 5],
+            view: ShadeView::ALL[k % SHADED],
             normal: n.map(|c| c * scale),
             up,
             t: -45.0 + 90.0 * next(),
@@ -123,14 +126,14 @@ fn cases() -> Vec<Case> {
     ] {
         let up = [0.0, 0.0, 1.0];
         let n = [libm::sqrt(1.0 - cs * cs), 0.0, cs];
-        for view in ShadeView::ALL {
+        for view in ShadeView::ALL.into_iter().take(SHADED) {
             out.push(Case { view, normal: n, up, t, p, h, ramp: 0.0, morph: 0.0, sun: [0.0, 0.0, 1.0], pre_ev: 15.0, table: e });
         }
     }
     // The ramp's own corners (REND-030): heights at its foot, middle and top for a node of 8 m ramp and for one that ramps by the blend
     // alone, and a ramp narrower than the blend (the blend wins).
     for (h, ramp) in [(-8.0, 8.0), (-4.0, 8.0), (-0.5, 8.0), (0.0, 8.0), (-4.0, 0.0), (-0.5, 0.5), (-0.5, 0.0)] {
-        for view in ShadeView::ALL {
+        for view in ShadeView::ALL.into_iter().take(SHADED) {
             out.push(Case {
                 view,
                 normal: [0.0, 0.0, 1.0],

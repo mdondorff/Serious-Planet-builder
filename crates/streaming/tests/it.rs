@@ -12,6 +12,8 @@ mod job_log;
 mod manager;
 #[path = "priority.rs"]
 mod priority;
+#[path = "queue_class_move.rs"]
+mod queue_class_move;
 #[path = "refresh.rs"]
 mod refresh;
 #[path = "refresh_preempt.rs"]

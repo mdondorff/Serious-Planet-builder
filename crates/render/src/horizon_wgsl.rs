@@ -111,6 +111,14 @@ fn shadow_factor(node_index: u32, tile_uv: vec2<f32>, up: vec3<f32>, sun: vec3<f
     }
     return horizon_lit(sun, up, h.x);
 }
+
+// The two debug views (CON-18, `ShadeView::Horizon` = 5 and `Shadow` = 6) as the radiance of a surface facing the sun (grey / pi, like the climate
+// views): the horizon elevation at the sun's azimuth (white at 30 degrees) and the shadow factor.
+fn horizon_view_colour(view: u32, node_index: u32, tile_uv: vec2<f32>, up: vec3<f32>, sun: vec3<f32>) -> vec3<f32> {
+    let h = horizon_at(node_index, tile_uv, up, sun);
+    let grey = select(shadow_factor(node_index, tile_uv, up, sun), clamp(h.x / 0.5235987755982988, 0.0, 1.0), view == 5u);
+    return vec3<f32>(grey * 0.31830988618);
+}
 "#
     };
 }

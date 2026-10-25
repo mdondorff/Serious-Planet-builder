@@ -83,18 +83,29 @@ fn write_report(kind: &str, message: &str, location: &str, backtrace: &str, once
         Some((c.args.clone(), c.log.iter().cloned().collect::<Vec<_>>(), c.path_text.clone()))
     })?;
     let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    let input = Input { kind, message, location, backtrace, commit: &commit(), args: &args, path_text: &path_text, log: &log, secs };
+    let survived = !once;
+    let input =
+        Input { kind, survived, message, location, backtrace, commit: &commit(), args: &args, path_text: &path_text, log: &log, secs };
     let dir = crash_dir();
     let path = dir.join(format!("{}.txt", file_stamp(secs)));
     match std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&path, format_report(&input))) {
         Ok(()) => {
-            eprintln!("crash report: {}", path.display());
+            eprintln!("{} report: {}", noun(survived), path.display());
             Some(path)
         }
         Err(e) => {
-            eprintln!("crash report could not be written to {}: {e}", path.display());
+            eprintln!("{} report could not be written to {}: {e}", noun(survived), path.display());
             None
         }
+    }
+}
+
+/// What the report of a failure is called: a crash ends the run, a refusal does not.
+fn noun(survived: bool) -> &'static str {
+    if survived {
+        "refusal"
+    } else {
+        "crash"
     }
 }
 
@@ -116,6 +127,8 @@ fn commit() -> String {
 
 pub struct Input<'a> {
     pub kind: &'a str,
+    /// The run went on after the failure (a plan refusal): the report is called a refusal report, not a crash report.
+    pub survived: bool,
     pub message: &'a str,
     pub location: &'a str,
     pub backtrace: &'a str,
@@ -129,7 +142,8 @@ pub struct Input<'a> {
 /// The text of a report.
 pub fn format_report(i: &Input) -> String {
     let mut s = format!(
-        "planet crash report\nkind: {}\ntime: {}\nbuild commit: {}\nversion: {}\ncommand line: {}\n\nmessage:\n{}\n\nlocation: {}\n\nbacktrace:\n{}\n",
+        "planet {} report\nkind: {}\ntime: {}\nbuild commit: {}\nversion: {}\ncommand line: {}\n\nmessage:\n{}\n\nlocation: {}\n\nbacktrace:\n{}\n",
+        noun(i.survived),
         i.kind,
         iso_stamp(i.secs),
         i.commit,
@@ -194,6 +208,7 @@ mod tests {
         let log = vec!["a line".to_string()];
         let text = format_report(&Input {
             kind: "plan refusal",
+            survived: false,
             message: "plan for frame 5640: too steep",
             location: "pipeline.rs:869",
             backtrace: "0: frame",
@@ -203,6 +218,7 @@ mod tests {
             log: &log,
             secs: 1_792_518_541,
         });
+        assert!(text.starts_with("planet crash report"), "{text}");
         for want in ["plan refusal", "too steep", "pipeline.rs:869", "0: frame", "abc123", "editor --smoke", "a line", "planet-camera-path"]
         {
             assert!(text.contains(want), "missing {want}: {text}");
@@ -219,5 +235,25 @@ mod tests {
         assert!(p.starts_with(&dir) && std::fs::read_to_string(&p).unwrap().contains("log line before the crash"));
         assert!(report("test", "second", "here", "").is_none(), "once per run");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: VIEW-037
+    #[test]
+    fn the_report_of_a_refusal_the_window_survived_is_called_a_refusal_report() {
+        let input = |survived| Input {
+            kind: "plan refusal",
+            survived,
+            message: "m",
+            location: "",
+            backtrace: "",
+            commit: "c",
+            args: &[],
+            path_text: "",
+            log: &[],
+            secs: 0,
+        };
+        assert!(format_report(&input(true)).starts_with("planet refusal report\n"));
+        assert!(format_report(&input(false)).starts_with("planet crash report\n"));
+        assert_eq!((noun(true), noun(false)), ("refusal", "crash"));
     }
 }

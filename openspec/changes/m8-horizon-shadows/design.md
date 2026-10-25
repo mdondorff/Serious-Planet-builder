@@ -69,6 +69,9 @@ Where the render PR touches the code, and how to keep it additive. Planner's rul
 - The coarse map's azimuths are in the geographic frame of each cell's centre; the lookup uses the fragment's own geographic frame, so within about 5 coarse cells of a pole (about 100 km at 512) the frames differ by up to the longitude difference. CPU and GPU share this; a pole-free frame (the face raster frame) is the fix if the stills show it.
 - A map arriving switches a fragment from the identity to `lit_factor(el, 0)` (a sun under 0.9 degrees on flat ground dims at once); the chunk fade does not hide it.
 
+## Step 6 plan (opus-planner, 2026-10-25; reversible)
+- 6a: `ShadeView::Horizon` and `Shadow`, tier-C views, pending goldens. 6c (own PR): the world loads the stored coarse horizon channel (kind 9) on a thread beside the store, never on the frame path (CON-22); making it from the coupled run is an explicit generate/xtask step; no stored channel gives chunk horizon only and one line saying how to make it; tier A on load and absence. 6b: viewer wiring in `window.rs` after explorer's field-stage change is on main, hooked into that same path. Then a small PR for `stills.rs` (horizon jobs, `set_horizon`, wait per pose for chunk and coarse maps), after explorer's hilly-site anchor change; stills through golden-review.
+
 ## Risks
 - The sunset look needs shadows from terrain 20 km away; the coarse horizon at a lattice step of 4.9 km (2048 cells) can show a blocky outline near the combination. Check on stills.
 - The texture array limits (layers per array, 2048 on common hardware) cap resident chunks; eviction is already by need.
