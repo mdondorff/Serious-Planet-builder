@@ -251,6 +251,7 @@ fn creases_cut_deeper_on_steep_ground_than_on_flat_ground() {
     assert!(steep > 3.0 * flat, "mean incision on the ramp {steep} m, on flat ground {flat} m");
 }
 
+// Re-pinned 2026-10-25 by `m8-relief-creases` (GEN-061, GEN-062, declared): the second probe lies where the landform is active; its bits moved with the fine creases (4654631722428695292 to 4654644490283343484, landform read from the lattice).
 // spec: GEN-017
 #[test]
 fn known_answers() {
