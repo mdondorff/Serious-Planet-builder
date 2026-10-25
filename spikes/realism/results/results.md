@@ -1,6 +1,6 @@
 Opened: 2026-10-22
 Question: What quality can this engine reach on ONE 5 km alpine region (relief at 50 m to 2 km, real shadows, snow and rock mixed at metre scale, grass floors, photo detail without banding), what does each step cost, and what must change in the architecture to do it planet-wide?
-Why it matters: M8 "Natural landscape" planning input (opus-planner, the owner's bar: an Outerra alpine valley at sunset).
+Why it matters: M8 "Natural landscape" planning input (opus-planner, the owner's bar: a photoreal alpine valley at sunset from the owner's look reference).
 Time box: about 5 h of agent work, indicative on the RTX 3080 Ti Laptop (other sessions running), no perf window.
 Success criteria: stills at sunset and midday from 300 m, 30 m and 1.8 m, main as it is and with each of landforms, shadows, material map and photo sets switched on in turn; a cost table per step; the architecture changes each step needs.
 Fallback if it fails: a written list of what blocks each step.
@@ -11,7 +11,7 @@ Code location: branch `spike/realism` (never merged); `realism-prototype.patch` 
 Machine: Rasierklinge, RTX 3080 Ti Laptop (Vulkan), release build, 2560 x 1440, the lit path with the atmosphere, other sessions running (GPU times are indicative: median of 60 frames per still, GPU timestamps of the terrain pass).
 
 ## Verdict
-- **The engine's lit path can carry all four steps in one pass with small changes; the result reads as a mountain landscape at 300 m and 30 m, but it does not reach the Outerra bar.** What is missing is in the content, not in the renderer: the landform generator of the prototype is a stop-gap, the material rules are first guesses and the photo sets are ungraded.
+- **The engine's lit path can carry all four steps in one pass with small changes; the result reads as a mountain landscape at 300 m and 30 m, but it does not reach the owner's look reference.** What is missing is in the content, not in the renderer: the landform generator of the prototype is a stop-gap, the material rules are first guesses and the photo sets are ungraded.
 - **What works** (`images/sheet_*`): real peaks and ridges at 0.5 to 2 km (step 1); long ridge shadows at 3.5 degrees sun elevation for +0.06 ms (step 2); five materials mixed at metre scale by height-based blending of photo sets, scree under cliffs, grass floors (steps 3 and 4); the photo layer fades to the sets' mean colour by footprint (2 to 6 m per pixel), so no octave bands appear.
 - **What does not reach the bar:** pinnacle-shaped peaks (thermal erosion makes cones); no glacial valley shapes; snow is scarce and blotchy ("leopard" patches from the noise terms of the rules); the photo grass reads yellow-olive (sets need colour grading); radial streaks at grazing angles in the de-tiled grass near the horizon; shadows come only from terrain inside the 5 km region and fan out at 22.5 degree azimuth steps; the 1.8 m ground is a lawn without clumps (instancing, SPIKE-28).
 - **Cost** at 1440p on the RTX, terrain pass, median over 12 stills: landforms alone 0.92 ms (main's own shading), +0.06 ms shadows, +0.85 ms material map, +2.27 ms photo sets (total 4.1 ms, range 3.0 to 4.8 ms; main as it is: 1.2 to 1.5 ms on the base world). The photo layer is the expensive step.
