@@ -373,6 +373,9 @@ impl AnchorLaw {
     }
 }
 
+/// A segment and the chain of segments from it on down the river (itself included).
+type Chain = ((usize, usize), Vec<(usize, usize)>);
+
 /// The bed of every segment of `segments` (GEN-059), sampled every `PROFILE_SAMPLES` polyline points: `(t, height)` along the segment, the height of
 /// the bed `t` of the way along it. The raw bed at a point is the base height there minus the law's depth for the river's area; the bed is the
 /// running maximum from downstream of the raw beds along the river for up to `law.window` further segments, each point at least the least fall of its
@@ -390,7 +393,7 @@ fn anchor_profiles(
 ) -> BTreeMap<(usize, usize), Vec<(f64, f64)>> {
     let coarse = run.lattice();
     // The chain of segments from each segment on down the river (itself included).
-    let mut chains: Vec<((usize, usize), Vec<(usize, usize)>)> = Vec::new();
+    let mut chains: Vec<Chain> = Vec::new();
     let mut needed: BTreeSet<(usize, usize)> = BTreeSet::new();
     for &(from, to) in segments {
         let mut chain = vec![(from, to)];
@@ -440,8 +443,8 @@ fn anchor_profiles(
         // Along the chain the samples run downstream; the running maximum from the downstream end with the least fall.
         let mut along: Vec<(f64, f64, Vec3)> = Vec::new(); // raw bed, area, position
         for s in &chain {
-            for k in 0..samples[s].spots.len() {
-                along.push((raw[s][k], samples[s].areas[k], samples[s].spots[k]));
+            for (k, &bed) in raw[s].iter().enumerate() {
+                along.push((bed, samples[s].areas[k], samples[s].spots[k]));
             }
         }
         let mut suffix = vec![0.0; along.len()];
