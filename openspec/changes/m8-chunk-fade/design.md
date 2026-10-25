@@ -45,6 +45,10 @@ Scene: the store `C:/DEV/SeriousPlanetData/global16384` (bake 16384 cells with t
 
 ### 6b. Known limits of the fade clock (2026-10-26)
 - The clock of a chunk starts on the first drawn tile whose mesh key is the key the plan expects (`ChunkFade::drawn`): a plan made just before a landing can match the old tile for the frames the plan lags (about 30 ms of a 1.5 s fade, 2 % of the change).
+- The clock of a chunk waits while a stale tile that reads it is still drawn (the rebuilds of a landing are spread over several frames by the upload budget), and only exact tiles start it; a tile that arrives after the clock started appears at the chunk's progress (a pop of w x change for that tile), as does a tile new to the view.
+- The minimum rule holds a tile that reads a chunk that is not ready at the base while a neighbour that reads only the ready ones is at its weight: the crack between them lasts as long as the neighbour chunk takes (seconds of A-net work), not 1.5 s, and the skirt (0.08 of the edge) covers only the finer levels' steps. Taking the minimum over the ready chunks only would drop a tile's already visible change when a neighbour lands; the cure of both is the increment plane (docs/status.md, M8-7).
+- A plane grant is forgotten when its tile leaves the plan for a frame; one that comes back mid-fade can switch between faded and final.
+- The change plane of the builder holds only finite values (a non-finite one is taken as no change), because the renderer's refusal fails the frame's whole upload batch.
 - `upload_roots` starts no clock: the floor tiles it uploads lie above the chunk reads.
 - A new version of a faded chunk keeps its weight and shows its difference at the swap; the increment plane is revisited at M8-7 (docs/status.md, Tracked).
 
