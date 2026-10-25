@@ -367,6 +367,9 @@ impl crate::height::HeightField for WaterBounded<'_> {
     fn level_aware(&self) -> bool {
         self.f().level_aware()
     }
+    fn level_change(&self, dirs: &[Vec3], level: u8) -> Option<Vec<f64>> {
+        self.f().level_change(dirs, level)
+    }
     fn heights_until(&self, dirs: &[Vec3], stop: &dyn Fn() -> bool) -> Vec<f64> {
         self.f().heights_until(dirs, stop)
     }
