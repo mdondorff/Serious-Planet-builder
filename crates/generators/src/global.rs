@@ -293,7 +293,9 @@ impl LandformLattice {
     }
 }
 
-/// The landform lattice of `seed`, built once and shared (the few seeds of a run: the cache holds the last four).
+/// The landform lattice of `seed`, built once and shared. The static below is a memo of a pure function of the seed, not state a result depends on: the
+/// lattice is the same bits whether it was built here or read from the memo (planner's reading of CON-06, 2026-10-25), and the memo holds at most four seeds.
+/// A field is made per plan and per tile call, so a lattice per field costs 0.5 s a call; moving its ownership to the bake's owner is tracked in `docs/status.md`.
 pub fn landform_lattice(seed: u64) -> Arc<LandformLattice> {
     static CACHE: Mutex<Vec<(u64, Arc<LandformLattice>)>> = Mutex::new(Vec::new());
     let mut cache = CACHE.lock().expect("landform lattice cache");
