@@ -345,7 +345,78 @@ fn enable_chunks(
     let pool = planet_streaming::GenWorkers::new(workers).pool();
     let cfg = ChunkConfig { workers, evict_ms: 3_600_000, cap_bytes: 4 << 30 };
     world.enable_anet(maps.clone(), cell_m, pool, Arc::new(planet_streaming::SystemClock::new()), cfg)?;
+    // The horizon shadows (REND-038): the second job of every chunk, and the stored far-field horizon read now (a still waits for both).
+    let lat = world.chunk_lattice().ok_or("the world has no chunk lattice")?;
+    let params = crate::horizonworld::chunk_horizon_params(&lat, world.radius_m());
+    let horizon_pool = planet_streaming::GenWorkers::new(workers).pool();
+    world.enable_horizon(
+        params,
+        horizon_pool,
+        Arc::new(planet_streaming::SystemClock::new()),
+        planet_streaming::chunks::HorizonConfig { workers, settle_ms: 1_000 },
+        workers,
+    )?;
+    world.request_coarse_horizon();
+    let coarse = loop {
+        match world.coarse_standing() {
+            crate::horizonworld::CoarseStanding::Idle | crate::horizonworld::CoarseStanding::Working => {
+                std::thread::sleep(Duration::from_millis(50))
+            }
+            crate::horizonworld::CoarseStanding::Ready(h) => {
+                break format!("coarse horizon: {} observer cells per face edge, {} azimuths", h.m, h.azimuths)
+            }
+            crate::horizonworld::CoarseStanding::Absent(t) | crate::horizonworld::CoarseStanding::Failed(t) => {
+                break format!("horizon: {t}")
+            }
+        }
+    };
+    writeln!(out, "{coarse}").map_err(err)?;
     Ok(maps)
+}
+
+/// How far from the eye a still waits for chunk horizon maps, metres (two chunk edges and a bit).
+const HORIZON_WAIT_M: f64 = 12_000.0;
+
+/// Run the horizon jobs for the plan `tiles` until every chunk a tile lies in has its map and no job is in flight, or `timeout_s` passes
+/// (an error naming the chunks that have none). Returns the number of maps.
+fn settle_horizon(world: &WorldTerrain, pose: &str, tiles: &[TileId], camera: PlanetFixed, timeout_s: f64) -> Result<usize, String> {
+    let started = Instant::now();
+    // The chunks within `HORIZON_WAIT_M` of the eye: the farther ones read the coarse horizon (the stand-in rule), as they do in the viewer.
+    let radius_m = world.radius_m();
+    let keys: Vec<ChunkKey> = {
+        let mut seen = HashSet::new();
+        tiles
+            .iter()
+            .filter_map(|&t| planet_frame::horizonview::tile_in_chunk(t).map(|(k, _)| k))
+            .filter(|k| seen.insert(*k))
+            // A chunk no tile reads is not made (a coarse tile lies in it): its tiles read the coarse horizon.
+            .filter(|k| world.chunk_manager().is_some_and(|m| m.is_ready(*k)))
+            .filter(|k| {
+                let tile =
+                    TileId::new(planet_core::Face(k.0), planet_generators::chunk::CHUNK_GRID_LEVEL, k.1, k.2).expect("a chunk of the grid");
+                (tile.center_direction(&planet_core::cube::TangentWarp) * radius_m - camera.0).length() <= HORIZON_WAIT_M
+            })
+            .collect()
+    };
+    loop {
+        world.horizon_frame(tiles, camera);
+        world.chunk_frame(tiles, camera, &[]);
+        let missing: Vec<&ChunkKey> = keys.iter().filter(|k| world.horizon_map(**k).is_none()).collect();
+        if missing.is_empty() {
+            return Ok(keys.len());
+        }
+        let waited = started.elapsed().as_secs_f64();
+        if waited > timeout_s {
+            let some: Vec<String> = missing.iter().take(4).map(|k| format!("face {} x {} y {}", k.0, k.1, k.2)).collect();
+            return Err(format!(
+                "pose '{pose}': {} of {} chunks had no horizon map after {waited:.0} s (first missing: {}); raise chunk_timeout_s",
+                missing.len(),
+                keys.len(),
+                some.join(", ")
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }
 
 /// The highest minus the lowest height of the coupled run over the cells within `radius_m` of cell `c` (flood over the eight neighbours, by
@@ -821,24 +892,39 @@ pub fn capture_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         if let Some(s) = share.filter(|s| s.chunk_stand_in > 0) {
             return Err(format!("pose '{}': {} of {} chunk nodes are stand-in", pose.name, s.chunk_stand_in, s.chunk_nodes));
         }
+        // The horizon maps of the chunks the tiles lie in (REND-038): a still shows the shadows, never the stand-in.
+        let horizon_started = Instant::now();
+        let horizon_maps = settle_horizon(&world, &pose.name, &tiles, camera.position, config.chunk_timeout_s)?;
+        let horizon_s = horizon_started.elapsed().as_secs_f64();
         let mut r = new_renderer(&rig, &setup, camera)?;
         crate::skeleton::upload_missing_meshes(ctx, Some(&world), &mut r, &plan, rig.field, radius_m, o.cells)?;
         let (_, eye_lon) = camera.position.0.lat_lon();
         let sun = sun_for(pose.sun_local_hours, eye_lon.to_degrees(), pose.sun_declination_deg);
+        let mut horizon = crate::horizonworld::HorizonRig::default();
         // The exposure adapts over a few frames of half a second, the first snapping to its target.
         for k in 0..4 {
             let mut lit = setup.plan(&world, rig.field, &plan, WATER_T0 + k as f64 * 0.5, 0.5, k == 0)?;
             if let Some(l) = lit.lit.as_mut() {
                 l.sun_dir = sun;
             }
+            // One map is uploaded a frame: the frames of the exposure give the first four, the settling frames the rest.
+            horizon.frame(&world, ctx, &mut r, &tiles, camera.position, sun);
             r.render(ctx, &lit, false).map_err(|e| e.to_string())?;
         }
+        for _ in 0..horizon_maps {
+            horizon.frame(&world, ctx, &mut r, &tiles, camera.position, sun);
+        }
+        let mut lit = setup.plan(&world, rig.field, &plan, WATER_T0 + 2.0, 0.5, false)?;
+        if let Some(l) = lit.lit.as_mut() {
+            l.sun_dir = sun;
+        }
+        r.render(ctx, &lit, false).map_err(|e| e.to_string())?;
         r.read_color(ctx).write_png(&dir.join(format!("{}.png", pose.name))).map_err(|e| format!("writing {}: {e}", pose.name))?;
         let (eye_lat, _) = camera.position.0.lat_lon();
         let height = camera.position.0.length() - radius_m;
         writeln!(
             out,
-            "{}: {} chunks after {} rounds and {:.1} s, drawn in {:.1} s -> {}",
+            "{}: {} chunks after {} rounds and {:.1} s, {horizon_maps} horizon maps in {horizon_s:.1} s, drawn in {:.1} s -> {}",
             pose.name,
             settled.chunks,
             settled.rounds,
