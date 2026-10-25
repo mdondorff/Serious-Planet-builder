@@ -78,6 +78,26 @@ fn rig(settle_ms: u64, workers: usize) -> Rig {
 
 // spec: STRM-048
 #[test]
+fn the_state_word_of_a_horizon_hashes_a_chunks_pyramid_once_however_many_frames_ask() {
+    let (_clock, cs, _hs, m, _baker, jobs) = rig(1_000, 1);
+    let keys: Vec<ChunkKey> = (0..3).flat_map(|x| (0..3).map(move |y| key(x, y))).collect();
+    land(&m, &cs, &keys);
+    let wanted: Vec<(ChunkKey, f64)> = keys.iter().map(|k| (*k, 1.0)).collect();
+    // Every frame the state word of every wanted chunk reads the result hash of the nine chunks around it: with the hash made on every call that
+    // was 9 x 9 hashes of the whole pyramid a frame, on the main thread and under the chunk-state lock.
+    for _ in 0..50 {
+        jobs.update(&wanted);
+        for k in &keys {
+            assert!(m.result_hash(*k).is_some());
+        }
+    }
+    for k in &keys {
+        assert_eq!(m.result(*k).unwrap().hash_runs(), 1, "the pyramid of {k:?} was hashed once, in the job that made it");
+    }
+}
+
+// spec: STRM-048
+#[test]
 fn a_horizon_is_baked_only_after_its_chunk_is_ready_and_until_it_lands_the_tile_has_none() {
     let (_clock, cs, hs, m, baker, jobs) = rig(1_000, 1);
     let k = key(0, 0);

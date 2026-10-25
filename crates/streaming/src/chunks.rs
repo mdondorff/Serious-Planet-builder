@@ -225,6 +225,8 @@ impl ChunkManager {
                     (r, false)
                 }
             };
+            // The hash of the pyramid is made here, on the worker and outside every lock: the horizon jobs read it every frame (STRM-048).
+            let _ = result.hash();
             let mut sh = shared.lock().expect("chunk state");
             sh.running.remove(&key);
             sh.ready.insert(key, Entry { result: Arc::new(result), last_wanted_ms: clock.now_ms() });
@@ -268,7 +270,9 @@ impl ChunkManager {
 
     /// The hash of the ready result of `key`: the part of a horizon's state word that this chunk contributes.
     pub fn result_hash(&self, key: ChunkKey) -> Option<u64> {
-        self.shared.lock().expect("chunk state").ready.get(&key).map(|e| e.result.hash())
+        // The result is taken under the lock and hashed (made once, then read) outside it: a chunk worker landing its result never waits for a hash.
+        let result = self.shared.lock().expect("chunk state").ready.get(&key).map(|e| e.result.clone());
+        result.map(|r| r.hash())
     }
 
     /// Jobs running or waiting for a worker.
@@ -407,6 +411,8 @@ impl HorizonJobs {
         let now = self.clock.now_ms();
         let mut out = HorizonUpdate::default();
         let mut starts: Vec<(ChunkKey, u64)> = Vec::new();
+        // The state word of each wanted chunk that is ready, made before the horizon lock is taken (it reads the chunk manager's state).
+        let words: Vec<Option<u64>> = wanted.iter().map(|&(k, _)| self.chunks.is_ready(k).then(|| self.word(k))).collect();
         {
             let mut sh = self.shared.lock().expect("horizon state");
             let gone: Vec<ChunkKey> = {
@@ -424,11 +430,11 @@ impl HorizonJobs {
             out.landed = std::mem::take(&mut sh.landed);
             let free = self.cfg.workers.saturating_sub(sh.running.len());
             let mut candidates: Vec<(f64, ChunkKey, u64)> = Vec::new();
-            for &(k, d) in wanted {
+            for (&(k, d), word) in wanted.iter().zip(&words) {
+                let Some(word) = *word else { continue };
                 if !self.chunks.is_ready(k) || sh.running.contains(&k) {
                     continue;
                 }
-                let word = self.word(k);
                 let since = match sh.seen.get(&k) {
                     Some(&(w, at)) if w == word => at,
                     _ => {
