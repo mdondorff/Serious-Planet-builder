@@ -15,6 +15,8 @@ struct Chunk {
     next: Vec<i32>,
     exits: Vec<[i32; 4]>,
     entries: Vec<[i32; 4]>,
+    origin: (i32, i32, i32),
+    ring: Option<[Vec<f64>; 4]>,
 }
 
 fn rd(buf: &[u8], pos: &mut usize, n: usize) -> Vec<[u8; 8]> {
@@ -45,7 +47,19 @@ fn load(path: &str) -> Chunk {
     let ex = rd_i32(&buf, &mut pos, 4 * ne);
     let nn = rd_i32(&buf, &mut pos, 1)[0] as usize;
     let en = rd_i32(&buf, &mut pos, 4 * nn);
+    let origin = (i32::from_le_bytes(buf[12..16].try_into().unwrap()), i32::from_le_bytes(buf[16..20].try_into().unwrap()), i32::from_le_bytes(buf[20..24].try_into().unwrap()));
+    let ring = if pos + 4 * per * 8 <= buf.len() {
+        let mut r = vec![];
+        for _ in 0..4 {
+            r.push(rd(&buf, &mut pos, per).into_iter().map(f64::from_le_bytes).collect::<Vec<f64>>());
+        }
+        Some([r[0].clone(), r[1].clone(), r[2].clone(), r[3].clone()])
+    } else {
+        None
+    };
     Chunk {
+        origin,
+        ring,
         per,
         cell_m,
         z,
@@ -137,6 +151,51 @@ fn route(ch: &Chunk, inband: &[i64], s: usize, e: usize, lambda: f64) -> Vec<usi
     }
     p.reverse();
     p
+}
+
+/// The symmetric gate: along the edge that holds `c0`, the position within +-`g` cells of it that minimises the lower of the two rows' ground
+/// (this chunk's edge row and the neighbour's row beside it, read from the halo); ties to the lower position. Both chunks of an edge evaluate the
+/// same positions and values, so they pick the same pair of cells. Returns the cell and the edge name.
+fn sym_gate(ch: &Chunk, c0: usize, g: i64, other: Option<(i32, i32)>) -> Option<(usize, &'static str)> {
+    let ring = ch.ring.as_ref()?;
+    let per = ch.per as i64;
+    let (i, j) = ((c0 % ch.per) as i64, (c0 / ch.per) as i64);
+    let (edge, t0, name) = if i == 0 {
+        (0, j, "W")
+    } else if i == per - 1 {
+        (1, j, "E")
+    } else if j == 0 {
+        (2, i, "N")
+    } else if j == per - 1 {
+        (3, i, "S")
+    } else {
+        return None;
+    };
+    // The window is centred on the lower tangential coordinate of the pair (this chunk's cell and the other chunk's cell it links to), the same for
+    // both chunks of the edge (the two cells of a diagonal link differ by one along the edge).
+    let t0 = match other {
+        Some((gi, gj)) => {
+            let ot = if edge < 2 { i64::from(gj) - i64::from(ch.origin.2) } else { i64::from(gi) - i64::from(ch.origin.1) };
+            t0.min(ot)
+        }
+        None => t0,
+    };
+    let cell = |t: i64| -> usize {
+        match edge {
+            0 => (t * per) as usize,
+            1 => (t * per + per - 1) as usize,
+            2 => t as usize,
+            _ => ((per - 1) * per + t) as usize,
+        }
+    };
+    let mut best: Option<(f64, i64)> = None;
+    for t in (t0 - g).max(0)..=(t0 + g).min(per - 1) {
+        let v = ch.z[cell(t)].min(ring[edge][t as usize]);
+        if best.map_or(true, |(bv, _)| v < bv) {
+            best = Some((v, t));
+        }
+    }
+    best.map(|(_, t)| (cell(t), name))
 }
 
 fn cum_len(ch: &Chunk, p: &[usize]) -> Vec<f64> {
@@ -489,6 +548,35 @@ fn main() {
             let b = band(per, &guide, (1000.0 / ch.cell_m * 1000.0) as i64);
             let p = route(&ch, &b, best, e2, 0.02);
             let name = format!("A2 head R={rw:.0} gate G={gate_m:.0}");
+            let mut r = analyse(&ch, &name, &p, t1);
+            r.ms = t1.elapsed().as_secs_f64() * 1000.0;
+            paths.push((name, p));
+            rows.push(r);
+        }
+    }
+    // A2sym: the head free (no entry) or gated by the symmetric rule (an entry on an edge), the exit gated by the symmetric rule.
+    if ch.ring.is_some() {
+        let on_e = |c: usize| {
+            let (i, j) = (c % per, c / per);
+            i == 0 || j == 0 || i == per - 1 || j == per - 1
+        };
+        for gate_m in [500.0, 1000.0] {
+            let g = (gate_m / ch.cell_m) as i64;
+            let glob = |c: usize| (ch.origin.1 as i64 + (c % per) as i64, ch.origin.2 as i64 + (c / per) as i64);
+            let oe = ch.exits.iter().find(|x| x[0] as usize == e).map(|x| (x[2], x[3]));
+            let e2 = if on_e(e) { sym_gate(&ch, e, g, oe).map(|x| (x.0, x.1)) } else { None };
+            let os = ch.entries.iter().find(|x| x[0] as usize == s).map(|x| (x[2], x[3]));
+            let s2 = if on_e(s) { sym_gate(&ch, s, g, os).map(|x| (x.0, x.1)) } else { None };
+            let (e_cell, e_edge) = e2.unwrap_or((e, "-"));
+            let (s_cell, s_edge) = s2.unwrap_or((s, "-"));
+            println!("# A2sym G={gate_m:.0}: entry {} {:?} -> {} {:?} (edge {s_edge}); exit {} {:?} -> {} {:?} (edge {e_edge}) [global i, j]", s, glob(s), s_cell, glob(s_cell), e, glob(e), e_cell, glob(e_cell));
+            let t1 = Instant::now();
+            let mut guide = stem.clone();
+            guide.push(s_cell);
+            guide.push(e_cell);
+            let b = band(per, &guide, (1000.0 / ch.cell_m * 1000.0) as i64);
+            let p = route(&ch, &b, s_cell, e_cell, 0.02);
+            let name = format!("A2sym G={gate_m:.0} W=1000");
             let mut r = analyse(&ch, &name, &p, t1);
             r.ms = t1.elapsed().as_secs_f64() * 1000.0;
             paths.push((name, p));

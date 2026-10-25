@@ -22,7 +22,7 @@ slope = np.arctan(np.hypot(gx, gy))
 aspect = np.arctan2(gy, -gx)
 shade = np.sin(alt) * np.cos(slope) + np.cos(alt) * np.sin(slope) * np.cos(az - aspect)
 
-show = [("B coarse path", "tab:red"), ("A W=1000 lam=0.02", "tab:cyan"), ("A W=2000 lam=0.1", "tab:blue")]
+show = [("B coarse path", "tab:red"), ("A W=1000 lam=0.02", "tab:cyan"), ("A2sym G=500 W=1000", "tab:green")]
 fig, ax = plt.subplots(1, 2, figsize=(15, 7.2), gridspec_kw={"width_ratios": [1, 1]})
 ax[0].imshow(shade, cmap="gray", origin="upper", extent=[0, per * cell / 1000, per * cell / 1000, 0])
 for name, col in show:
