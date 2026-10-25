@@ -10,6 +10,7 @@ pub mod exec;
 pub mod gate;
 pub mod gpu_timing;
 pub mod graph;
+pub mod horizon;
 pub mod lit;
 #[cfg(feature = "reference-renderer")]
 pub mod reference;
