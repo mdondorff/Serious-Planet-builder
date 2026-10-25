@@ -98,3 +98,14 @@ Source: SPIKE-40 (bed profile), planner decision 2026-10-25 (H1), GEN-057
 #### Scenario: A smooth base over a river
 - **WHEN** a chunk of a river over a smooth base runs its incision
 - **THEN** the longest flat reach is at most 400 m, the largest drop between linked cells is under 5 m, no link climbs and no corridor cell loses its receiver
+
+### Requirement: GEN-060 The channel from discharge, the valley from relief
+Round every corridor cell an A-net chunk SHALL hold the cells within `band_cap_m` of the river at a channel and valley profile: a channel of width `w_coef Q^w_exp` and depth `d_coef Q^d_exp` under the valley floor, discharge `Q = q_per_km2 A` (km2); a valley floor `lerp(floor_low, floor_high, rf)` channel widths wide at the bed of the corridor, no wider than `band_cap_m` allows (the cap follows the halo: `(halo_rings - area_window - 2)` cells at most, and 0 paints no band); the corridor cells at the channel floor, the lowest point of the cross-section; sides rising at `lerp(side_low, side_high, rf)` to the ground; `rf` the base's relief over the river's coarse cell and the eight round it over `relief_full_m`. The constants are part of the stage's definition hash.
+
+Verify: A
+Status: planned
+Source: SPIKE-40, SPIKE-41, planner decision 2026-10-25 (H2), GEN-057, GEN-058
+
+#### Scenario: A great lowland river
+- **WHEN** a chunk of a river of 9.5e6 km2 over smooth ground runs its incision
+- **THEN** the channel is within a factor 2 of the law's width at half depth and its depth within 1.5 of the law's, in a valley floor wider than half the channel
