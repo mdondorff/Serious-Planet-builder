@@ -3,7 +3,7 @@
 Opened: 2026-10-26
 Question: which scheme gives a border-consistent fine channel network (heads 0.1 to 1 km2, density 0.5 to 3 km/km2) at chunk cost: (a) per-entry-point inflow from the global run's area, (b) 3x3 chunk blocks on a fixed lattice with overlap, (c) another?
 Why it matters: ADR 0081 point 3 moved the fine tier to M9; `m8-tributary-tier` records the region-extent constraint (flow accumulated in a region restarts at 0 at its edge).
-Time box: 1 day of agent work (opus-planner, 2026-10-25)
+Time box: 1 day of agent work (opus-planner, 2026-10-25); step 2 half a day (2026-10-26)
 Success criteria: density, border mismatch of channel area at shared edges, cost per chunk and thread identity, measured per scheme.
 Fallback if it fails: the fine tier waits for a block stage (ADR 0077 point 2).
 Code location: `spikes/fine-network/results/proto/` (throwaway; `finespike.rs` and `fine_dump.rs` were copied into `crates/app` for the dump and removed; `fine/` is a standalone crate).
@@ -89,5 +89,63 @@ Core plus a ring of one cell (the outlet), the fine area of the reference's dono
 4. Cost 0.2 s at 375 and 0.35 to 0.4 s at 600 per chunk on one thread, bit-identical at 1 and 8 workers.
 5. Not recommended: (a) as the only border mechanism, (b) as a separate scheme.
 
+## Step 2 (2026-10-26): a fill that is local by construction, on the A-net's solved ground
+Asked by opus-planner: border agreement must hold by construction, not at four sites; run on solved ground (base plus the A-net's clamped change, `ANet::solve` of the nine chunks round the centre chunk, main at #694), H 375 and 600, A_t 0.3 km2. Code: `proto/fine2/` (analysis), `proto/groundspike.rs` and `ground_dump.rs` (dump, removed from `crates/app` after the run), `proto/render2.py`; raw output `run2_<site>.txt`.
+
+### The scheme and its locality argument
+Parameters: breach radius `Rb` = 64 cells (0.5 km), carve limit 20 m, area depth `L` = 245 steps. Steps:
+1. A pit is an interior cell with no strictly lower neighbour. Each pit searches, by least-excess path (step cost = rise over the pit's height + 1e-3), inside the box of radius `Rb` round it for the nearest cell more than 1 cm lower; the search reads the original heights only.
+2. If a falling ramp from the pit to that cell needs a cut of at most 20 m anywhere along the path, the path cells are lowered to a strictly decreasing ramp; else the pit stays a sink (a lake). The carves of all pits are combined by `min`.
+3. Receiver: the steepest strictly lower neighbour of the carved heights (ties by neighbour order); cells on the region's border are outlets.
+4. Area of a cell: 1 plus the areas, at depth at most `L`, of the cells that drain into it (the cells that reach it in at most `L` steps). Channel = area at least A_t.
+
+Locality (one paragraph): a core cell's area and receiver are a function of the heights inside its Chebyshev ball of radius `Rd` = `L` + 2 `Rb` + 2 = 375 cells, and of nothing else. A pit test reads 8 neighbours. A pit's search reads only original heights inside its own box and writes only cells of its own path, which lie inside that box; no search reads another's carve, and the carves combine by `min`, which is order-free, so the carved height of a cell is a function of the heights within 2 `Rb` of it. A receiver reads the carved heights of 8 neighbours (2 `Rb` + 1). The area counts cells that reach the cell in at most `L` steps; each step moves one cell, so these cells lie within `L` of it, each with its receiver fixed by heights within 2 `Rb` + 1 of itself, and one more ring for the pit test of the neighbours: `L` + 2 `Rb` + 2. A region border only truncates searches, boxes and the area depth for cells less than `Rd` from the border (outlets and clipped boxes act within `Rb` of it, the area depth within `L`). Any region whose halo is at least `Rd` therefore gives every core cell the same receiver and area as any other such region, and two chunks agree on their shared border cells without exchanging data. All arithmetic is +, -, *, / on f64 heights and integer counts, one thread per chunk: no thread-count dependence. The price: a channel is defined by the area within `L` steps, not by the whole catchment (a head 245 steps = 2 km upstream of the cell does not count). `L` = 1400 gives the identical mask at all four sites, so the cap does not bind at A_t 0.3 km2.
+
+### Measured (centre chunk, A_t 0.3 km2, `Rd` 375)
+Bounded chunk against the bounded scheme run on the whole 1824-cell window (margin 608 round the core; `mismatch` = core cells whose area or receiver differs in any way, with the mask miss % in brackets):
+| H | lowland | site 2 | hillsB | hillsA |
+|---|---|---|---|---|
+| 100 | 314 (0) | 448 (0) | 1990 (3.8) | 1565 (6.5) |
+| 200 | 42 (0) | 80 (0) | 169 (0) | 215 (0.2) |
+| 300 | 0 | 0 | 0 | 0 |
+| 375 | 0 | 0 | 0 | 0 |
+| 600 | 0 | 0 | 0 | 0 |
+
+- Zero mismatches from H 300 at every site, non-zero at 100 and 200: the bound is not vacuous and has margin (300 against 375).
+- Seam links across the east and north edges (lowland 4 / 3, site 2 0 / 3, hillsB 2 / 0, hillsA 0 / 0): `differ` is 0 at H 200 and above; at H 100 one link differs at lowland (both edges) and one at hillsB. `stepdn` stays at 2 at lowland (both edges) and 1 at hillsB: the receiver's area is below the sender's because the depth `L` cuts the receiver's count where the sender's tree is deepest; it follows from the definition and is the same in both chunks.
+- The unbounded fill of step 1 on the same solved ground, against its own whole-window reference: exact at H 375 at all four sites (miss 0, extra 0), seams `differ` 0; at H 200 lowland 1.9 / 2.5 %, site 2 1.2 / 0, hillsB 0, hillsA 0.7 / 0. The hillsA bowl of step 1 is gone on solved ground (the stem carve and the A-net's breach drain it); nothing guarantees that elsewhere, which is what the bounded scheme adds.
+
+### Density, price of the bound, flats (whole-window core, A_t 0.3 km2)
+| | lowland | site 2 | hillsB | hillsA |
+|---|---|---|---|---|
+| density, fill / bounded (km/km2) | 1.33 / 1.19 | 1.50 / 1.32 | 1.90 / 1.79 | 1.66 / 1.65 |
+| flat cells routed by the flood (fill) | 26,064 (7.0 %) | 22,404 (6.1 %) | 21,443 (5.8 %) | 70,517 (19.1 %) |
+| sink cells left (bounded) | 2 | 3 | 9 | 21 |
+| channel cells in straight runs of 40 or more links, fill / bounded (%) | 13.1 / 9.5 | 1.7 / 1.7 | 4.3 / 0.4 | 20.2 / 0.2 |
+| fill channel cells with no bounded channel within 3 / 8 cells (%) | 47.5 / 28.7 | 36.0 / 21.5 | 28.8 / 16.2 | 51.1 / 41.9 |
+| bounded channel cells with no fill channel within 3 / 8 cells (%) | 42.1 / 25.3 | 27.4 / 11.0 | 25.9 / 13.1 | 52.5 / 41.2 |
+
+- Density stays inside the SPIKE-40 target (0.5 to 3 km/km2) at 1.19 to 1.79; the bounded scheme is 1 to 12 % below the fill.
+- Cell for cell the two networks differ (miss 41 to 65 %, extra 39 to 67 % against the fill reference): they route the same drainage through flats differently (fill: straight along the flood; breach: down the carved ramp). Within 64 m about 71 to 89 % of the channel cells's channel cells of the other network near them at three sites and 58 to 59 % at hillsA. Neither network is the truth; the claim is that the bounded one is local.
+- Flats: the fill leaves 6 to 19 % of the core as flood-routed flat cells, which show as straight diagonal runs (20 % of hillsA's channel cells); the bounded scheme leaves 2 to 21 sink cells in the core (lakes, channel ends) and 0.2 to 9.5 % of channel cells in straight runs (the 9.5 % at lowland is the uniform slope of the plain, not flats). Fewer diagonal lines and a few pits, as asked: no flat remains, the carves are ramps.
+- Parameters (rows in `run2_<site>.txt`): the carve limit 5 m instead of 20 m lowers density by 2 to 12 % (lowland 1.17, hillsA 1.45); 100 m changes it by up to 2 %; `Rb` 32 with `L` 309 lowers lowland to 0.87 (18 sinks), `Rb` 96 with `L` 181 gives 1.27. `Rb` 64, 20 m, `L` 245 is the middle of the range; the choice is a tuning, not a property of the scheme.
+
+### Cost and threads (centre chunk, H 375 = 1358 x 1358 cells, 1 thread)
+| | lowland | site 2 | hillsB | hillsA |
+|---|---|---|---|---|
+| bounded, ms (breach + receivers + area) | 898 (524 + 11 + 363) | 587 (278 + 11 + 299) | 446 (80 + 10 + 356) | 438 (74 + 11 + 353) |
+| fill of step 1, ms | 181 | 179 | 186 | 187 |
+| pits searched | 15,855 | 19,308 | 1,930 | 2,797 |
+| 9 chunks, 1 worker / 8 workers (s) | 5.24 / 1.40 | 3.55 / 0.96 | 2.64 / 0.80 | 2.40 / 0.83 |
+
+- Hashes of all nine chunks (area and receiver of every cell) are identical at 1 and at 8 workers at every site.
+- The bounded scheme costs 2.4 to 5 times the fill: 0.4 to 0.9 s a chunk, 10 to 22 % of the A-net's 4 s. The area rounds (about 350 ms) and the breach on flat plains (many pits) dominate; neither was optimised.
+
+### Step 2 verdict
+- Border agreement by construction is available at the stage's own halo: `Rd` = 375 = `L` + 2 `Rb` + 2 with `Rb` 64 and `L` 245; any halo at or above it gives identical cells, and the parameters trade `Rd` against the reach of channels (a larger `L` or `Rb` needs a larger halo).
+- It costs 0.4 to 0.9 s a chunk against 0.18 s for the fill, and moves cells (not density) away from the fill's network; it removes the flood-routed flats and their straight lines.
+- Not measured: the stems inside the fine network (the carved valley floor of the main stem shows as channel cells along the stem in the images), junctions with the coarse-link tributaries, carved depth and sinuosity, a flat rule for the lake cells.
+
 ## Visuals
 ![Channel mask of the centre chunk (A_t 0.3 km2) against the reference by halo H: green both, red missed, blue false. Top: lowland at H 0, 100, 375. Bottom: hillsA at H 0, 375, 600. CPU run, hillshade of the base heights](images/halo_masks.png)
+![Step 2 on solved ground: left, the unbounded fill chunk at H 200 against its reference; middle, the fill reference (straight runs across flats); right, the bounded chunk at H 375 against the bounded reference (identical). Top hillsA, bottom lowland; green both, red missed, blue false; CPU run, hillshade of the solved ground](images/bounded_masks.png)
