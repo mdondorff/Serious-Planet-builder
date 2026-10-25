@@ -178,6 +178,8 @@ pub struct WorldTerrain {
     water_book: Arc<planet_frame::water::WaterBook>,
     /// The global coupled run (M8-1 part c): asked for from a thread, read when drawn through the lens.
     coupled: crate::coupledworld::CoupledSlot,
+    /// The stored coarse horizon (M8-5, STRM-045), loaded on a thread beside the store: asked for in `horizonworld`.
+    pub(crate) coarse: crate::horizonworld::CoarseSlot,
     /// The lens the fields are built with: 0 off, 1 height, 2 drainage area (the climate views show the run, GEN-043).
     coupled_lens: std::sync::atomic::AtomicU8,
     /// The directory of the stored bake the coupled channel lives beside; none for an in-memory bake.
@@ -289,6 +291,7 @@ impl WorldTerrain {
             bound_water: false,
             water_book: Default::default(),
             coupled: Default::default(),
+            coarse: Default::default(),
             chunks: Default::default(),
             anet_asked: Default::default(),
             horizon: Default::default(),
@@ -371,6 +374,7 @@ impl WorldTerrain {
             bound_water: false,
             water_book: Default::default(),
             coupled: Default::default(),
+            coarse: Default::default(),
             chunks: Default::default(),
             anet_asked: Default::default(),
             horizon: Default::default(),
@@ -700,6 +704,30 @@ impl WorldTerrain {
             }
             load_or_run(&world.definition(), world.store_dir.as_deref(), world.src.as_ref(), run_cells(world.res), COUPLED_STEPS)
         });
+    }
+
+    /// Make the coarse horizon from the stored coupled run beside the bake and store it (the explicit step of STRM-045; minutes at the run's full
+    /// size). Errors without a store, a bake, or a stored coupled run (`request_coupled` makes and stores it).
+    pub fn make_coarse_horizon(&self, threads: usize) -> Result<usize, String> {
+        let dir = self.store_dir.as_deref().ok_or("this world has no store directory to keep a coarse horizon in")?;
+        if !self.has_bake {
+            return Err("this height field reads no bake: there is no coupled run to take the horizon from".to_string());
+        }
+        crate::horizonworld::make_coarse_horizon(&self.definition(), dir, self.src.as_ref(), run_cells(self.res), COUPLED_STEPS, threads)
+    }
+
+    /// The stored coarse horizon of the coupled run this world shows, read now (the thread of `request_coarse_horizon` calls this).
+    pub(crate) fn read_coarse_now(&self) -> crate::horizonworld::CoarseStanding {
+        if !self.has_bake {
+            return crate::horizonworld::CoarseStanding::Absent("this height field reads no bake: there is no coarse horizon".to_string());
+        }
+        crate::horizonworld::read_coarse(
+            &self.definition(),
+            self.store_dir.as_deref(),
+            self.src.as_ref(),
+            run_cells(self.res),
+            COUPLED_STEPS,
+        )
     }
 
     /// Give this world a chunk stage (GEN-039 `on-top`): the process `stage` over a lattice of `cells_per_chunk` cells per chunk edge, its jobs
