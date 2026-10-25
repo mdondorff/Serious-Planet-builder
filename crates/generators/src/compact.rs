@@ -499,7 +499,8 @@ impl CompactTile {
         let c = self.cells as f32;
         let (u, v) = (i as f32 / c, j as f32 / c);
         let mut hr = self.rel_height(i as usize, j as usize);
-        if let Some(change) = &self.change {
+        // At fade 0 nothing is taken off: no `0 x change` is formed, so a plane's value cannot reach the texel's height (the shader returns it unchanged).
+        if let (Some(change), true) = (&self.change, fade != 0.0) {
             hr -= fade * change[j as usize * (self.cells as usize + 1) + i as usize];
         }
         (add(self.base_point(u, v), scale(self.base_normal(u, v), hr)), hr)
