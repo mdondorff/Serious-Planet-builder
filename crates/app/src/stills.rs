@@ -46,6 +46,10 @@ pub enum Anchor {
     /// With `relief`, only cells whose surrounding ground (`radius_m` around, by lattice steps) spans a height range inside `min_m..=max_m`
     /// (hilly ground); the river is the largest drainage area among those.
     LargestRiver { min_height_m: f64, relief: Option<Relief> },
+    /// The land river cell of the coupled run whose ground on the base field is `ground_min_m` to `ground_max_m` high and whose surroundings
+    /// within `radius_m` have the steepest slope on the base field (sampled at the bake's cell spacing), among the cells with a drainage area of
+    /// at least `min_area_m2`.
+    SteepestRiver { ground_min_m: f64, ground_max_m: f64, radius_m: f64, min_area_m2: f64 },
     /// Latitude and longitude in degrees.
     LatLon(f64, f64),
 }
@@ -70,6 +74,9 @@ pub struct StillsConfig {
     pub chunk_timeout_s: f64,
     /// The cell of the chunks in metres (the viewer's 8 m unless the file says otherwise; a test uses coarse chunks to stay quick).
     pub chunk_cell_m: f64,
+    /// `[place] snap_to_channel_m`: the anchor moves to the lowest ground of the landed chunks within this distance of it (the channel the
+    /// chunk stage cut), and a pose's `heading_deg` is then relative to the channel's downstream bearing (0: downstream).
+    pub snap_to_channel_m: Option<f64>,
     pub poses: Vec<Pose>,
 }
 
@@ -113,8 +120,20 @@ pub fn parse_config(text: &str) -> Result<StillsConfig, String> {
             };
             Anchor::LargestRiver { min_height_m: number(place, "min_height_m", "[place]")?.unwrap_or(0.0), relief }
         }
+        (Some(a), None, None) if a.as_str() == Some("steepest-river") => {
+            let (ground_min_m, ground_max_m) = (required(place, "ground_min_m", "[place]")?, required(place, "ground_max_m", "[place]")?);
+            let (radius_m, min_area_m2) =
+                (required(place, "slope_radius_m", "[place]")?, number(place, "min_area_m2", "[place]")?.unwrap_or(0.0));
+            if radius_m <= 0.0 || ground_max_m < ground_min_m || min_area_m2 < 0.0 {
+                return Err(format!("[place]: ground {ground_min_m} to {ground_max_m}, slope_radius_m {radius_m}, min_area_m2 {min_area_m2} are not a range, a radius and an area"));
+            }
+            Anchor::SteepestRiver { ground_min_m, ground_max_m, radius_m, min_area_m2 }
+        }
         (Some(a), None, None) => {
-            return Err(format!("[place]: anchor {} is unknown (known: \"largest-river\"; or give lat and lon)", show(a)))
+            return Err(format!(
+                "[place]: anchor {} is unknown (known: \"largest-river\", \"steepest-river\"; or give lat and lon)",
+                show(a)
+            ))
         }
         (None, Some(_), Some(_)) => {
             let (lat, lon) = (required(place, "lat", "[place]")?, required(place, "lon", "[place]")?);
@@ -168,7 +187,11 @@ pub fn parse_config(text: &str) -> Result<StillsConfig, String> {
     if poses.is_empty() {
         return Err("the poses file: no [[pose]]".into());
     }
-    Ok(StillsConfig { anchor, chunk_timeout_s, chunk_cell_m, poses })
+    let snap_to_channel_m = number(place, "snap_to_channel_m", "[place]")?;
+    if snap_to_channel_m.is_some_and(|m| m <= 0.0) {
+        return Err(format!("[place]: snap_to_channel_m {} must be positive", snap_to_channel_m.unwrap_or(0.0)));
+    }
+    Ok(StillsConfig { anchor, chunk_timeout_s, chunk_cell_m, snap_to_channel_m, poses })
 }
 
 /// The unit vector towards the sun when it stands at `local_hours` of local solar time (12 is noon) at longitude `lon_deg`, with
@@ -348,9 +371,165 @@ pub fn local_relief_m(maps: &planet_generators::coupled::CoupledMaps, c: usize, 
 
 /// The direction of the anchor and, for a river cell, the bearing of the river's flow there (degrees clockwise from north), so the poses can
 /// be given along the river.
-fn anchor_direction(anchor: Anchor, maps: &planet_generators::coupled::CoupledMaps) -> Result<(Vec3, Option<f64>), String> {
+fn anchor_direction(
+    anchor: Anchor,
+    maps: &planet_generators::coupled::CoupledMaps,
+    ground: &dyn Fn(Vec3) -> f64,
+    step_m: f64,
+) -> Result<(Vec3, Option<f64>, String), String> {
+    let (dir, flow) = anchor_cell(anchor, maps, ground, step_m)?;
+    let note = match anchor {
+        Anchor::SteepestRiver { radius_m, .. } => {
+            let (slope, relief) = local_slope(ground, dir, radius_m, step_m, maps.lattice().radius_m());
+            format!(", steepest slope {:.1} degrees and relief {relief:.0} m within {radius_m:.0} m", slope.atan().to_degrees())
+        }
+        _ => String::new(),
+    };
+    Ok((dir, flow, note))
+}
+
+/// Sections of the ground across `heading` at 0 to 2000 m downstream of `anchor` every 100 m, `+-1000 m` every 8 m (the chunk cell): per section
+/// the median height (the ground the channel is cut into), the lowest point and its offset from the anchor's line (positive to the right of
+/// the heading), the width of what lies more than 20 m under the median, and the highest point over the median with its offset. One line per
+/// section.
+pub fn channel_sections(ground: &dyn Fn(Vec3) -> f64, anchor: Vec3, heading_deg: f64, planet_radius_m: f64) -> String {
+    let mut out = String::from(
+        "# downstream_m median_m lowest_m lowest_offset_m cut_width_m highest_over_median_m highest_offset_m
+",
+    );
+    let ahead = heading_vector(anchor, heading_deg);
+    for k in 0..=20 {
+        let along = f64::from(k) * 100.0;
+        // The point `along` downstream on the great circle through the anchor, and the tangent across the heading there.
+        let theta = along / planet_radius_m;
+        let here = (anchor * libm::cos(theta) + ahead * libm::sin(theta)).normalized();
+        let forward = (ahead * libm::cos(theta) - anchor * libm::sin(theta)).normalized();
+        let right = forward.cross(here).normalized();
+        let row: Vec<(f64, f64)> = (-125..=125)
+            .map(|i| (f64::from(i) * 8.0, ground((here * planet_radius_m + right * (f64::from(i) * 8.0)).normalized())))
+            .collect();
+        let mut sorted: Vec<f64> = row.iter().map(|r| r.1).collect();
+        sorted.sort_by(f64::total_cmp);
+        let median = sorted[sorted.len() / 2];
+        let low = row.iter().copied().min_by(|a, b| a.1.total_cmp(&b.1)).unwrap_or((0.0, median));
+        let high = row.iter().copied().max_by(|a, b| a.1.total_cmp(&b.1)).unwrap_or((0.0, median));
+        let width = row.iter().filter(|r| r.1 < median - 20.0).count() as f64 * 8.0;
+        out.push_str(&format!(
+            "{along:.0} {median:.1} {:.1} {:.0} {width:.0} {:.1} {:.0}
+",
+            low.1,
+            low.0,
+            high.1 - median,
+            high.0
+        ));
+    }
+    out
+}
+
+/// The channel nearest the coupled run's anchor as the chunks cut it: the lowest ground within `radius_m` of `anchor` (sampled every `step_m`),
+/// which must lie at least 50 m under the median of the samples, and the bearing of the channel's floor downstream there (degrees clockwise
+/// from north): the lowest point of a ring 500 m round it, among the points within 90 degrees of `prior_bearing` when there is one.
+pub fn snap_to_channel(
+    ground: &dyn Fn(Vec3) -> f64,
+    anchor: Vec3,
+    prior_bearing: Option<f64>,
+    radius_m: f64,
+    step_m: f64,
+    planet_radius_m: f64,
+) -> Result<(Vec3, f64), String> {
+    let (north, east) = (heading_vector(anchor, 0.0), heading_vector(anchor, 90.0));
+    let n = (radius_m / step_m).floor() as i64;
+    let mut samples = Vec::new();
+    for j in -n..=n {
+        for i in -n..=n {
+            let (x, y) = (i as f64 * step_m, j as f64 * step_m);
+            if x * x + y * y <= radius_m * radius_m {
+                let d = (anchor * planet_radius_m + east * x + north * y).normalized();
+                samples.push((ground(d), d));
+            }
+        }
+    }
+    let mut heights: Vec<f64> = samples.iter().map(|s| s.0).collect();
+    heights.sort_by(f64::total_cmp);
+    let median = heights[heights.len() / 2];
+    let (low, at) = samples.iter().copied().min_by(|a, b| a.0.total_cmp(&b.0)).ok_or("no ground to look for a channel in")?;
+    if low > median - 50.0 {
+        return Err(format!("no channel within {radius_m} m of the anchor: the lowest ground is {low:.0} m, the median {median:.0} m"));
+    }
+    let (n2, e2) = (heading_vector(at, 0.0), heading_vector(at, 90.0));
+    let ring = (0..72)
+        .map(|k| f64::from(k) * 5.0)
+        .filter(|b| prior_bearing.is_none_or(|p| ((b - p + 540.0).rem_euclid(360.0) - 180.0).abs() <= 90.0))
+        .map(|b| {
+            let h = b.to_radians();
+            let d = (at * planet_radius_m + (n2 * libm::cos(h) + e2 * libm::sin(h)) * 500.0).normalized();
+            (ground(d), b)
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .ok_or("no direction to follow the channel in")?;
+    Ok((at, ring.1))
+}
+
+/// The steepest slope (rise over run between samples) and the height range of the ground within `radius_m` of `dir`, sampled on a grid of
+/// `step_m` and read along the grid's lines and diagonals.
+pub fn local_slope(ground: &dyn Fn(Vec3) -> f64, dir: Vec3, radius_m: f64, step_m: f64, planet_radius_m: f64) -> (f64, f64) {
+    let n = (radius_m / step_m).floor() as i64;
+    let (north, east) = (heading_vector(dir, 0.0), heading_vector(dir, 90.0));
+    let at = |i: i64, j: i64| -> Option<f64> {
+        let (x, y) = (i as f64 * step_m, j as f64 * step_m);
+        (x * x + y * y <= radius_m * radius_m).then(|| ground((dir * planet_radius_m + east * x + north * y).normalized()))
+    };
+    let (mut slope, mut lo, mut hi) = (0.0f64, f64::INFINITY, f64::NEG_INFINITY);
+    for j in -n..=n {
+        for i in -n..=n {
+            let Some(h) = at(i, j) else { continue };
+            lo = lo.min(h);
+            hi = hi.max(h);
+            for (di, dj) in [(1, 0), (0, 1), (1, 1), (1, -1)] {
+                if let Some(g) = at(i + di, j + dj) {
+                    let run = step_m * libm::sqrt((di * di + dj * dj) as f64);
+                    slope = slope.max((g - h).abs() / run);
+                }
+            }
+        }
+    }
+    (slope, hi - lo)
+}
+
+fn anchor_cell(
+    anchor: Anchor,
+    maps: &planet_generators::coupled::CoupledMaps,
+    ground: &dyn Fn(Vec3) -> f64,
+    step_m: f64,
+) -> Result<(Vec3, Option<f64>), String> {
     match anchor {
         Anchor::LatLon(lat, lon) => Ok((direction_of(lat, lon), None)),
+        Anchor::SteepestRiver { ground_min_m, ground_max_m, radius_m, min_area_m2 } => {
+            let rec = maps.receivers();
+            let lat = maps.lattice();
+            let mut best: Option<(usize, f64)> = None;
+            for (c, &r) in rec.iter().enumerate() {
+                if r == planet_generators::coupled::NONE || f64::from(maps.network_area_m2(c)) < min_area_m2 {
+                    continue;
+                }
+                let d = lat.direction(c);
+                if !(ground_min_m..=ground_max_m).contains(&ground(d)) {
+                    continue;
+                }
+                let (slope, _) = local_slope(ground, d, radius_m, step_m, lat.radius_m());
+                if best.is_none_or(|(_, b)| slope > b) {
+                    best = Some((c, slope));
+                }
+            }
+            let (cell, _) = best.ok_or_else(|| {
+                format!("the coupled run has no river of at least {min_area_m2} m2 with ground from {ground_min_m} to {ground_max_m} m")
+            })?;
+            let here = lat.direction(cell);
+            let there = lat.direction(rec[cell] as usize);
+            let (north, east) = (heading_vector(here, 0.0), heading_vector(here, 90.0));
+            let bearing = libm::atan2(there.dot(east), there.dot(north)).to_degrees().rem_euclid(360.0);
+            Ok((here, Some(bearing)))
+        }
         Anchor::LargestRiver { min_height_m, relief } => {
             let rec = maps.receivers();
             let mut best: Option<(usize, f32)> = None;
@@ -417,22 +596,51 @@ pub fn capture_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
     .map_err(err)?;
     let workers = o.gen_workers().workers.max(1);
     let maps = enable_chunks(&world, config.chunk_cell_m, workers, out)?;
-    let (anchor, flow) = anchor_direction(config.anchor, &maps)?;
+    let base = world.field()?;
+    let step_m = std::f64::consts::FRAC_PI_2 * radius_m / f64::from(world.global_res());
+    let (mut anchor, flow, measured) = anchor_direction(config.anchor, &maps, &|d| base.height(d), step_m)?;
     let (lat, lon) = anchor.lat_lon();
-    let ground = world.field()?.height(anchor);
+    let ground = base.height(anchor);
     writeln!(
         out,
         "anchor: latitude {:.4} longitude {:.4} degrees, ground {ground:.1} m{}",
         lat.to_degrees(),
         lon.to_degrees(),
-        flow.map_or(String::new(), |b| format!(", the river flows towards bearing {b:.0} degrees"))
+        flow.map_or(String::new(), |b| format!(", the river flows towards bearing {b:.0} degrees{measured}"))
     )
     .map_err(err)?;
     let level_m = world.definition().sea(planet_world_def::BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;
+    // The chunk stage cuts its channel within a cell of the coupled run's anchor, not through it: with `snap_to_channel_m` the anchor moves onto the
+    // channel once the chunks under the first pose have landed, and the headings are read from the channel's downstream bearing.
+    let mut heading_base = 0.0;
+    if let Some(snap_m) = config.snap_to_channel_m {
+        let first = &config.poses[0];
+        let fov = planet_frame::litscenes::FOV_DEG.to_radians();
+        let camera = {
+            let f = world.field()?;
+            pose_camera(anchor, first, &|d| f.height(d), radius_m, level_m, aspect, fov)
+        };
+        settle(o, ctx, &world, first, camera, size, config.chunk_timeout_s)?;
+        let f = world.field()?;
+        let level = crate::anetworld::ANET_TOP_LEVEL;
+        let (at, bearing) = snap_to_channel(&|d| f.height_at_level(d, level), anchor, flow, snap_m, 16.0, radius_m)?;
+        let (lat, lon) = at.lat_lon();
+        writeln!(
+            out,
+            "snapped to the channel, {:.0} m from the anchor: latitude {:.4} longitude {:.4} degrees, ground {:.1} m, downstream bearing {bearing:.0} degrees",
+            libm::acos(anchor.dot(at).clamp(-1.0, 1.0)) * radius_m,
+            lat.to_degrees(),
+            lon.to_degrees(),
+            f.height_at_level(at, level)
+        )
+        .map_err(err)?;
+        (anchor, heading_base) = (at, bearing);
+    }
     std::fs::create_dir_all(&dir).map_err(err)?;
     let mut index =
         String::from("# pose width height eye_lat_deg eye_lon_deg eye_height_m heading_deg pitch_deg sun_local_hours chunks waited_s\n");
     for pose in &config.poses {
+        let pose = &Pose { heading_deg: (pose.heading_deg + heading_base).rem_euclid(360.0), ..pose.clone() };
         let started = Instant::now();
         // The eye is `altitude_m` above the ground the chunks give, so the camera follows the field as chunks land: settle, move the
         // camera to the new ground, and settle again until the camera stays.
@@ -530,7 +738,12 @@ pub fn capture_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         );
     }
     std::fs::write(dir.join("stills.txt"), index).map_err(err)?;
-    writeln!(out, "wrote {} (one PNG per pose and stills.txt)", dir.display()).map_err(err)
+    // The channel below the anchor as the landed chunks give it: sections across the heading, 8 m apart (the chunk cell), every 100 m downstream.
+    let heading = config.poses.first().map_or(0.0, |p| p.heading_deg + heading_base);
+    let field = world.field()?;
+    let sections = channel_sections(&|d| field.height_at_level(d, crate::anetworld::ANET_TOP_LEVEL), anchor, heading, radius_m);
+    std::fs::write(dir.join("sections.txt"), sections).map_err(err)?;
+    writeln!(out, "wrote {} (one PNG per pose, stills.txt and sections.txt)", dir.display()).map_err(err)
 }
 
 #[cfg(test)]
@@ -594,6 +807,82 @@ relief_min_m = 5"
         ))
         .unwrap_err()
         .contains("go together"));
+    }
+
+    // spec: TEST-052
+    #[test]
+    fn the_slope_around_an_anchor_is_read_off_the_ground_and_the_poses_file_asks_for_a_steepest_river() {
+        let radius = 6.0e6;
+        let at = direction_of(10.0, 10.0);
+        let east = heading_vector(at, 90.0);
+        // A ramp of 0.5 rise over run towards the east: every pair of samples along it shows 0.5, the diagonals less or more by the projection.
+        let ramp = |d: Vec3| 0.5 * radius * d.dot(east);
+        let (slope, relief) = local_slope(&ramp, at, 1000.0, 100.0, radius);
+        assert!((slope - 0.5).abs() < 0.01, "{slope}");
+        assert!((relief - 1000.0).abs() < 60.0, "{relief}");
+        let flat = local_slope(&|_| 3.0, at, 1000.0, 100.0, radius);
+        assert_eq!(flat, (0.0, 0.0));
+        let text = GOOD.replace(
+            "anchor = \"largest-river\"",
+            "anchor = \"steepest-river\"
+ground_min_m = 1000
+ground_max_m = 2500
+slope_radius_m = 2000
+min_area_m2 = 1e9",
+        );
+        assert_eq!(
+            parse_config(&text).unwrap().anchor,
+            Anchor::SteepestRiver { ground_min_m: 1000.0, ground_max_m: 2500.0, radius_m: 2000.0, min_area_m2: 1e9 }
+        );
+        assert!(parse_config(&GOOD.replace("anchor = \"largest-river\"", "anchor = \"steepest-river\""))
+            .unwrap_err()
+            .contains("'ground_min_m' is missing"));
+    }
+
+    // spec: TEST-052
+    #[test]
+    fn the_anchor_snaps_to_the_channel_the_chunks_cut_and_the_sections_show_its_depth() {
+        let radius = 6.0e6;
+        let at = direction_of(10.0, 10.0);
+        let (north, east) = (heading_vector(at, 0.0), heading_vector(at, 90.0));
+        // A trench 300 m deep and 100 m wide along bearing 100 degrees, 600 m south-east of the anchor, whose floor falls 2 m per 100 m towards it.
+        let bearing = 100.0f64.to_radians();
+        let axis = north * libm::cos(bearing) + east * libm::sin(bearing);
+        let side = axis.cross(at).normalized();
+        let origin = at + (east * 400.0 - north * 450.0) * (1.0 / radius);
+        let ground = move |d: Vec3| {
+            let rel = (d - origin) * radius;
+            let (along, across) = (rel.dot(axis), rel.dot(side));
+            let floor = -0.02 * along;
+            100.0 - if across.abs() < 50.0 { 300.0 + floor } else { 0.0 }
+        };
+        let (snapped, found) = snap_to_channel(&ground, at, Some(110.0), 1200.0, 16.0, radius).unwrap();
+        let (rel, across) = ((snapped - origin) * radius, ((snapped - origin) * radius).dot(side));
+        assert!(across.abs() < 50.0 && rel.length() < 2000.0, "{across}");
+        assert!((found - 100.0).abs() <= 10.0, "downstream bearing {found}");
+        let flat = snap_to_channel(&|_| 5.0, at, None, 1200.0, 16.0, radius).unwrap_err();
+        assert!(flat.contains("no channel within 1200"), "{flat}");
+        let sections = channel_sections(&ground, snapped, found, radius);
+        let first: Vec<&str> = sections.lines().nth(1).unwrap().split(' ').collect();
+        assert!(first[2].parse::<f64>().unwrap() < -150.0 && first[4].parse::<f64>().unwrap() > 50.0, "{sections}");
+        assert_eq!(sections.lines().count(), 22, "a header and 21 sections");
+        assert_eq!(
+            parse_config(&GOOD.replace(
+                "anchor = \"largest-river\"",
+                "anchor = \"largest-river\"
+snap_to_channel_m = 1200"
+            ))
+            .unwrap()
+            .snap_to_channel_m,
+            Some(1200.0)
+        );
+        assert!(parse_config(&GOOD.replace(
+            "anchor = \"largest-river\"",
+            "anchor = \"largest-river\"
+snap_to_channel_m = 0"
+        ))
+        .unwrap_err()
+        .contains("must be positive"));
     }
 
     // spec: TEST-050

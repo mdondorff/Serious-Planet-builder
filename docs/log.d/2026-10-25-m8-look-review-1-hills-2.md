@@ -1,0 +1,1 @@
+- 2026-10-25 **m8-look-review-1-hills-2**: second site redone on the steepest-river anchor (ground 1000-2500 m, 2 km slope on the base field), snapped to the chunk channel; sections.txt of the chunk heights across the channel (TEST-052)

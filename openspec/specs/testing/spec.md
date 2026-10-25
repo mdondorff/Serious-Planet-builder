@@ -1055,6 +1055,13 @@ Verify: A
 Status: active
 Source: opus-planner (2026-10-25), look review 1 second site, TEST-050
 
+### Requirement: TEST-052 Anchor on the steepest river and the chunk channel
+`[place] anchor = "steepest-river"` (`ground_min_m`, `ground_max_m`, `slope_radius_m`, optional `min_area_m2`) SHALL anchor on the coupled run's river cell of at least that drainage area whose ground on the base field lies in the range and whose surroundings within the radius have the steepest slope; the anchor line prints that slope and the relief. `snap_to_channel_m` SHALL, once the first pose's chunks have landed, move the anchor to the lowest chunk ground within that distance (refused when it lies under 50 m below the median) and make every `heading_deg` relative to the channel's downstream bearing. `sections.txt` SHALL list sections across the channel every 100 m downstream.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-25), look review 1 second site, TEST-050
+
 #### Scenario: A bad value
 - **WHEN** `heading_deg` is a string, or `pitch_deg` is missing, or a name is given twice
 - **THEN** the file is refused naming the key and the value
