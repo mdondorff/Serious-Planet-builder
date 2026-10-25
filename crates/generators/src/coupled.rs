@@ -148,11 +148,15 @@ pub struct CoupledParams {
     pub seed: u64,
     /// The height land cells never fall below, in metres.
     pub min_height_m: f64,
+    /// Whether the run erodes (the stream power steps) or only fills (GEN-065): off, the run's heights are the input's plus the priority-flood fill
+    /// and the receivers and areas are those of that surface. The algorithm's own default is on (the steps and their known answers); a world's run
+    /// sets it with `coupledworld::COUPLED_ERODE`. Part of the key of the stored run.
+    pub erode: bool,
 }
 
 impl Default for CoupledParams {
     fn default() -> Self {
-        CoupledParams { area_exp: 0.45, dt_years: 1.0e5, jitter: 0.4, seed: 0, min_height_m: 0.5 }
+        CoupledParams { area_exp: 0.45, dt_years: 1.0e5, jitter: 0.4, seed: 0, min_height_m: 0.5, erode: true }
     }
 }
 
@@ -497,6 +501,26 @@ pub fn stationary_uplift(lat: &Lattice, z: &[f32], erodibility: &[f32], p: &Coup
     u
 }
 
+/// The run without erosion (GEN-065): the heights are the input's plus the priority-flood fill (a cell outside a depression keeps its input
+/// height bit for bit, a cell in one takes the level of the fill), and the receivers and the drainage areas are those of the filled surface, so
+/// the run keeps the relief of its input and gives the river network and the areas. One pass; a pure function in the fixed order of the run.
+pub fn filled_state(lat: &Lattice, input: &CoupledInput, p: &CoupledParams) -> CoupledState {
+    assert!(input.z.len() == lat.len(), "the inputs must have one value per cell");
+    assert!(input.z.iter().all(|v| v.is_finite()), "the heights must be finite");
+    let (filled, order) = priority_flood(lat, &input.z);
+    let (rec, _) = receivers(lat, &filled, &order, p);
+    let a = accumulate(lat, &filled, &order, &rec);
+    let n = order.len().max(1) as f64;
+    let (mut sum, mut max) = (0.0f64, 0.0f64);
+    for (&f, &z) in filled.iter().zip(&input.z) {
+        let d = f64::from(f) - f64::from(z);
+        sum += d;
+        max = max.max(d);
+    }
+    let stat = StepStat { mean_dz_m: sum / n, max_dz_m: max };
+    CoupledState { z: filled, area_m2: a.iter().map(|&x| x as f32).collect(), receiver: rec, steps: vec![stat] }
+}
+
 /// The run: `steps` steps from the input heights.
 pub fn run(lat: &Lattice, input: &CoupledInput, p: &CoupledParams, steps: usize) -> CoupledState {
     run_with(lat, input, p, steps, |_, _| {})
@@ -510,6 +534,9 @@ pub fn run_with(
     steps: usize,
     mut after_step: impl FnMut(usize, usize),
 ) -> CoupledState {
+    if !p.erode {
+        return filled_state(lat, input, p);
+    }
     let mut z = input.z.clone();
     let mut log = Vec::with_capacity(steps);
     let mut leaf_pow = vec![f64::NAN; lat.n * lat.n];
