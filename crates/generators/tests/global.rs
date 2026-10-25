@@ -7,8 +7,9 @@ use planet_core::{Face, TileId, Vec3};
 use planet_generators::dump::NET_BACKGROUND;
 use planet_generators::global::{
     bake, bake_block, bake_blocks, equirect_product, grid_hash, product, sample, sin_latitude, BakeError, Channel, GlobalGrid,
-    GlobalSample, GLOBAL_VERSION, MAX_BAKE_RES, MAX_BLOCK_CELLS, SEA_LEVEL_C, SEA_LEVEL_F32,
+    GlobalSample, GLOBAL_VERSION, HILL_BAND_MAX_M, MAX_BAKE_RES, MAX_BLOCK_CELLS, MAX_ELEVATION_M, SEA_LEVEL_C, SEA_LEVEL_F32,
 };
+use planet_generators::global::{hill_band_m, landform};
 
 const SEED: u64 = 7;
 
@@ -411,7 +412,107 @@ fn the_peak_of_live_blocks_is_counted_between_creation_and_delivery() {
     }
 }
 
+/// Directions spread over the sphere by a fixed integer hash (a test set that does not depend on the generator under test).
+fn spread(n: usize) -> Vec<Vec3> {
+    use planet_core::hash::mix64;
+    (0..n as u64)
+        .map(|i| {
+            let (a, b) = (mix64(i * 2 + 1) >> 11, mix64(i * 2 + 2) >> 11);
+            let (z, lon) =
+                (2.0 * a as f64 / 9_007_199_254_740_992.0 - 1.0, 2.0 * std::f64::consts::PI * b as f64 / 9_007_199_254_740_992.0);
+            let r = (1.0 - z * z).sqrt();
+            Vec3::new(r * lon.cos(), r * lon.sin(), z)
+        })
+        .collect()
+}
+
+// spec: GEN-064
+#[test]
+fn the_hill_band_only_lifts_land_stays_within_its_largest_amplitude_and_is_zero_at_the_coast() {
+    let (mut land, mut lifted) = (0, 0);
+    for d in spread(40_000) {
+        let s = sample(SEED, d);
+        let b = hill_band_m(SEED, d);
+        assert!((0.0..=HILL_BAND_MAX_M).contains(&b), "band {b} m at {d:?}");
+        if !s.is_land() {
+            assert_eq!(b, 0.0, "no band over the sea at {d:?}");
+        } else {
+            land += 1;
+            lifted += usize::from(b > 1.0);
+        }
+        assert!(f64::from(s.elevation_m) <= MAX_ELEVATION_M);
+    }
+    assert!(land > 5_000 && lifted > land / 4, "the band lifts the land: {lifted} of {land}");
+    // The bounds: the base and the ranges reach 1000 + 5200 m and the band adds its largest amplitude below the clamp.
+    assert!(1000.0 + 5200.0 + HILL_BAND_MAX_M <= MAX_ELEVATION_M, "the clamp needs no raising");
+}
+
+// spec: GEN-064
+#[test]
+fn the_hill_band_is_larger_in_mountain_country_than_on_the_plains() {
+    let (mut plains, mut np, mut ranges, mut nr) = (0.0f64, 0usize, 0.0f64, 0usize);
+    let mut plains_max = 0.0f64;
+    for d in spread(60_000) {
+        if !sample(SEED, d).is_land() {
+            continue;
+        }
+        let (l, b) = (landform(SEED, d), hill_band_m(SEED, d));
+        assert!((0.0..=1.0).contains(&l), "landform {l}");
+        if l < 0.02 {
+            plains += b;
+            np += 1;
+            plains_max = plains_max.max(b);
+        } else if l > 0.5 {
+            ranges += b;
+            nr += 1;
+        }
+    }
+    assert!(np > 500 && nr > 200, "both classes occur: {np} plains, {nr} ranges");
+    let (mp, mr) = (plains / np as f64, ranges / nr as f64);
+    eprintln!("hill band: plains mean {mp:.1} m (max {plains_max:.1}), ranges mean {mr:.1} m");
+    assert!(plains_max <= 40.0, "plains carry 20 to 40 m at most: {plains_max}");
+    assert!(mr > 8.0 * mp, "ranges {mr} m against plains {mp} m");
+}
+
+// spec: GEN-064
+#[test]
+fn the_hill_band_has_no_wavelength_under_two_kilometres() {
+    // Each octave's gradient is at most 2 (ridge) x 3 sqrt 3 (noise) per unit of its argument, so along a great circle step of `ds` metres on
+    // a planet of radius `R` the band moves by at most max_amplitude x sum of weights x 2 x 5.2 x freq x ds / R, with freq in units of the
+    // unit direction. At 100 m steps (a 2 km octave is 20 steps long) that bound is a small share of the amplitude.
+    let (r, ds) = (6_371_000.0f64, 100.0f64);
+    let step = ds / r;
+    let mut worst = 0.0f64;
+    for start in spread(300) {
+        // A great circle through `start` along an arbitrary perpendicular.
+        let t = if start.z.abs() < 0.9 {
+            Vec3::new(0.0, 0.0, 1.0).cross(start).normalized()
+        } else {
+            Vec3::new(1.0, 0.0, 0.0).cross(start).normalized()
+        };
+        let at = |k: f64| (start * (k * step).cos() + t * (k * step).sin()).normalized();
+        for k in 0..200 {
+            worst = worst.max((hill_band_m(SEED, at(f64::from(k + 1))) - hill_band_m(SEED, at(f64::from(k)))).abs());
+        }
+    }
+    // Largest weighted frequency: (1 x 796 + 0.5 x 1592 + 0.25 x 3184) / 1.75 = 1365; 2 x 5.2 x 1365 x 1.57e-5 = 0.22 of the amplitude per
+    // 100 m, the unit-sphere frequencies being 8, 4 and 2 km at this radius.
+    eprintln!("largest band step over 100 m: {worst:.1} m");
+    assert!(worst <= 0.23 * HILL_BAND_MAX_M, "band step {worst} m over {ds} m");
+}
+
+// spec: GEN-064
+#[test]
+fn the_landform_driver_is_the_range_zone_strength_and_pinned() {
+    let dirs = [Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.36, -0.48, 0.8), Vec3::new(-0.6, 0.64, 0.48)];
+    let got: Vec<u64> = dirs.iter().map(|d| landform(SEED, *d).to_bits()).collect();
+    assert_eq!(format!("{got:016x?}"), KNOWN_LANDFORM, "known answers of the landform driver");
+    assert_eq!(landform(SEED, dirs[2]), landform(SEED, dirs[2]));
+}
+
+const KNOWN_LANDFORM: &str = "[3febd551a18cedd4, 0000000000000000, 3f91678e96fd4c3a, 0000000000000000]";
+
 /// The version the known answers below were recorded against (ADR 0006): changing the output without a bump fails here.
-const RECORDED_VERSION: u32 = 4; // 3 -> 4: the ocean channel (ADR 0041); no sample bit moved, the grid hash names the version. 2 -> 3: latitude from COORD's +z pole (was d.y)
-const KNOWN_POINTS: &str = "[[3f3ef54b, 44cb75f7, 41a18f38, 45032416], [be83b213, c4c37fdb, 41e85e2b, 451fdf30], [bed97260, c52f51c0, c1cc7154, 442aa58a], [3e25822e, 42c5afbf, c0853821, 44c8606a], [beff7496, c54fe3c7, 4172b6d8, 42fa29a4]]";
-const KNOWN_GRID_HASH: &str = "33d719d1d0abe93b";
+const RECORDED_VERSION: u32 = 5; // 4 -> 5: the hill band (GEN-064, ADR 0080); the elevation of land moved. 3 -> 4: the ocean channel (ADR 0041); no sample bit moved, the grid hash names the version. 2 -> 3: latitude from COORD's +z pole (was d.y)
+const KNOWN_POINTS: &str = "[[3f3ef54b, 44ddf6b1, 4199dcbd, 45032416], [be83b213, c4c37fdb, 41e85e2b, 451fdf30], [bed97260, c52f51c0, c1cc7154, 442aa58a], [3e25822e, 42d4b964, c086c87e, 44c8606a], [beff7496, c54fe3c7, 4172b6d8, 42fa29a4]]";
+const KNOWN_GRID_HASH: &str = "53151403187027b0";

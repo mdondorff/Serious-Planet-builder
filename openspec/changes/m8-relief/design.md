@@ -1,0 +1,6 @@
+## Decisions of the planner (2026-10-25), reversible
+1. Requirement IDs: the explorer lane uses GEN-059 to 062; the crusader lane uses GEN-063 (the stationary uplift) and GEN-064 onward (the hill band).
+2. Landform driver: pointwise `L = zone x inland`, mountain strength `L (0.25 + 0.75 ridge)`, three ridged octaves at 8, 4 and 2 km on the warped direction. Why: the bake is a pure function of `(seed, direction)`; a neighbourhood range costs a stencil per sample (about 4 times the bake time) or a coarse lattice with a cache. The bake stays resolution-independent and the band does not feed back into its driver.
+3. The field side gets the driver from the public pure function `global::landform(seed, direction)`; no new stored channel (ADR 0026 keeps four).
+4. The band only lifts (a ridged term in `[0, 1]` times the amplitude), so no inland cell falls below the sea and no lake appears from it; it is 0 at the coast by a ramp over the first 0.1 of land depth.
+5. The bounds need no raising: the base reaches 1000 m and the ranges 5200 m, the largest band is 1000 m and the bake clamp is 9000 m; a test pins that.

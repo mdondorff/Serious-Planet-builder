@@ -253,5 +253,5 @@ fn known_answers() {
     assert_eq!((TERRAIN_VERSION, TERRAIN_IMPLEMENTATION_ID), (1, "cpu-terrain-v1"));
     let at = |x: f64, y: f64, z: f64| f.height(Vec3::new(x, y, z).normalized());
     let got = [at(1.0, 0.0, 0.0), at(0.3, -0.5, 0.8), at(-0.6, 0.1, -0.2), at(0.0, 0.0, 1.0)];
-    assert_eq!(got.map(f64::to_bits), [4654905045284363516, 13865995584287959468, 13864863918882730402, 4652012224163941967], "{got:?}");
+    assert_eq!(got.map(f64::to_bits), [4655559553819126269, 13865995584287959468, 13864863918882730402, 4652319206642888986], "{got:?}");
 }

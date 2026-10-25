@@ -305,7 +305,7 @@ fn the_lattice_trait_reads_the_grid_and_refuses_a_vertex_beyond_it() {
 fn known_answers_of_a_small_bake_are_pinned() {
     // The serial reference and the tiled computation agree (asserted above for these inputs) and give these values on every
     // platform. If a value moves, the bake or the area formula changed: bump GLOBAL_VERSION and re-record.
-    assert_eq!(GLOBAL_VERSION, 4, "new known answers belong with a new global version");
+    assert_eq!(GLOBAL_VERSION, 5, "new known answers belong with a new global version");
     assert_eq!(SEA_LEVEL_F32, 0.1);
     let g = bake(1, &TangentWarp, 128, 4).unwrap();
     let (rt, rg) = reference_ocean(&g, &TangentWarp, EARTH_OCEAN_MIN_AREA_FRACTION).unwrap();
@@ -320,8 +320,8 @@ fn known_answers_of_a_small_bake_are_pinned() {
 }
 
 const KNOWN_COMPONENTS: usize = 5;
-const KNOWN_TABLE_HASH: u64 = 0x2471_1406_5250_894a;
-const KNOWN_OCEAN_HASH: u64 = 0x46d4_7785_2d62_df8f;
+const KNOWN_TABLE_HASH: u64 = 0x891d_8335_2c54_8aa1;
+const KNOWN_OCEAN_HASH: u64 = 0xf4b0_83d1_fdef_40ab;
 
 // spec: GEN-022
 #[test]
