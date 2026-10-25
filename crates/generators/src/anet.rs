@@ -14,7 +14,7 @@ use crate::coupled::{Lattice, NONE as COARSE_NONE};
 use planet_core::cube::{direction_to_face, TangentWarp};
 use planet_core::hash::mix64;
 use planet_core::Vec3;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The drainage area above which a coarse cell is a river of the network (ADR 0077): 100 km2.
 pub const RIVER_AREA_M2: f64 = 1.0e8;
@@ -174,9 +174,10 @@ pub struct Network {
     pub inflow_m2: Vec<f64>,
     /// The initial fine height of each cell in metres: the run's height upsampled plus the base's detail.
     pub z0: Vec<f32>,
-    /// The height a corridor cell is held at where the coarse run fixes it (NaN elsewhere): at every quarter of a coarse segment, the run's heights
-    /// interpolated along the segment. Beds are tied to the run at these anchors, so a bed does not depend on the heights of a region's ring (the
-    /// implicit step carries a downstream height far up a channel); the stage keeps the lower of this and the base height.
+    /// The height a corridor cell is held at where an anchor fixes it (NaN elsewhere): at every quarter of a coarse segment, the base height there minus the
+    /// anchor law's depth for the river's area, as a running maximum from downstream (`anchor_heights`). Beds are tied to the ground at these anchors, so a
+    /// bed does not depend on the heights of a region's ring (the implicit step carries a downstream height far up a channel); the stage keeps the lower of this
+    /// and the base height.
     pub anchor_z: Vec<f64>,
     /// The drainage area of a corridor cell in m2: the coarse areas of its segment interpolated along it (NaN off the corridor). A river's area is a
     /// function of position, not of how much of its catchment the region holds.
@@ -193,6 +194,18 @@ pub const NO_NEXT: u32 = u32::MAX;
 impl Network {
     /// The network of `region` (a region of `lat`) from the run `run` of the coarse lattice, on a body of radius `radius_m`.
     pub fn build(run: &dyn CoarseRun, base: &dyn BaseDetail, lat: &ChunkLattice, region: &Region, radius_m: f64) -> Network {
+        Network::build_with(run, base, lat, region, radius_m, &AnchorLaw::default())
+    }
+
+    /// [`Network::build`] with the anchor law of the stage.
+    pub fn build_with(
+        run: &dyn CoarseRun,
+        base: &dyn BaseDetail,
+        lat: &ChunkLattice,
+        region: &Region,
+        radius_m: f64,
+        law: &AnchorLaw,
+    ) -> Network {
         let coarse = run.lattice();
         let n_coarse = coarse.n();
         // Fine cells per coarse cell along an edge: the chunk lattice cut by the coarse one (the production run is the chunk grid, 2048 cells).
@@ -225,6 +238,7 @@ impl Network {
         let mut river_area_m2 = vec![f64::NAN; len];
         let half_cell_m = 0.5 * lat.cell_m(radius_m);
         let key = |x: usize| region.cells[x].key();
+        let anchors = anchor_heights(run, base, &segments, radius_m, law, is_river);
         for (from, to) in segments {
             let points = segment_points(coarse.direction(from), coarse.direction(to), from as u64, radius_m);
             // The cells along the polyline in runs: a run ends where the polyline leaves the region, and a cell is visited once per run (a
@@ -259,12 +273,11 @@ impl Network {
             if let Some(&last) = points.last() {
                 visit(last, 1.0, &mut runs);
             }
-            // The anchors: the quarter points of the segment, held at the run's height there.
-            for q in 0..=4usize {
+            // The anchors: the quarter points of the segment, held a depth under the ground there (`anchor_heights`).
+            for (q, &h) in anchors[&(from, to)].iter().enumerate() {
                 let t = q as f64 / 4.0;
                 let p = points[(t * (points.len() - 1) as f64).round() as usize];
                 if let Some(i) = region.index_of(lat.cell_at(p)) {
-                    let h = f64::from(run.z(from)) * (1.0 - t) + f64::from(run.z(to)) * t;
                     if anchor_z[i].is_nan() || h < anchor_z[i] {
                         anchor_z[i] = h;
                     }
@@ -315,6 +328,108 @@ impl Network {
     }
 }
 
+/// How far under the drawn ground a corridor bed is anchored (GEN-047): `depth_m (A / area_ref_m2)^exponent`, at most `cap_m`, for a river of drainage
+/// area `A`. The bed follows the ground the chunk is drawn over, never the coupled run's absolute height (the run's heights lie far from the base's
+/// where the relief is high). `window` is how many coarse segments downstream the bed profile looks: an anchor is never lower than the bed
+/// downstream of it within the window by the running maximum of the raw anchors from the downstream end: the profile is non-increasing downstream of a point only up to the window (a sliding maximum is not monotone across a segment boundary), and the lower of anchor and base still decides the fixed cell.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AnchorLaw {
+    pub depth_m: f64,
+    pub area_ref_m2: f64,
+    pub exponent: f64,
+    pub cap_m: f64,
+    pub window: u16,
+}
+
+impl Default for AnchorLaw {
+    fn default() -> AnchorLaw {
+        AnchorLaw { depth_m: 3.0, area_ref_m2: RIVER_AREA_M2, exponent: 0.5, cap_m: 100.0, window: 8 }
+    }
+}
+
+impl AnchorLaw {
+    /// The depth in metres of a river of drainage area `area_m2` (never negative, never over `cap_m`).
+    pub fn depth_m(&self, area_m2: f64) -> f64 {
+        (self.depth_m * libm::pow((area_m2 / self.area_ref_m2).max(0.0), self.exponent)).min(self.cap_m)
+    }
+}
+
+/// A segment and the chain of segments from it on down the river (itself included).
+type Chain = ((usize, usize), Vec<(usize, usize)>);
+
+/// The anchor heights of every segment of `segments` at its five quarter points (GEN-047): the base height at the point minus the law's depth for the
+/// river's area there, then the running maximum from downstream along the river for up to `law.window` further segments, so no anchor lies under the
+/// bed downstream of it (the bed profile is non-increasing downstream). A function of the run and the base at positions alone: the same in every chunk.
+fn anchor_heights(
+    run: &dyn CoarseRun,
+    base: &dyn BaseDetail,
+    segments: &BTreeSet<(usize, usize)>,
+    radius_m: f64,
+    law: &AnchorLaw,
+    is_river: impl Fn(usize) -> bool,
+) -> BTreeMap<(usize, usize), [f64; 5]> {
+    let coarse = run.lattice();
+    // The chain of segments from each segment on down the river (itself included).
+    let mut chains: Vec<Chain> = Vec::new();
+    let mut needed: BTreeSet<(usize, usize)> = BTreeSet::new();
+    for &(from, to) in segments {
+        let mut chain = vec![(from, to)];
+        let mut at = to;
+        for _ in 0..law.window {
+            if !is_river(at) {
+                break;
+            }
+            let next = run.receiver(at) as usize;
+            chain.push((at, next));
+            at = next;
+        }
+        needed.extend(chain.iter().copied());
+        chains.push(((from, to), chain));
+    }
+    // The five quarter points and the river's area at each, per needed segment, and one batch of base heights for all of them.
+    let mut areas: BTreeMap<(usize, usize), [f64; 5]> = BTreeMap::new();
+    let mut dirs: Vec<Vec3> = Vec::new();
+    for &(from, to) in &needed {
+        let line = segment_points(coarse.direction(from), coarse.direction(to), from as u64, radius_m);
+        let (area_from, area_to) = (f64::from(run.area_m2(from)), f64::from(run.area_m2(to)));
+        let mut five_area = [0.0; 5];
+        for (q, a) in five_area.iter_mut().enumerate() {
+            let t = q as f64 / 4.0;
+            dirs.push(line[(t * (line.len() - 1) as f64).round() as usize]);
+            *a = area_from + (area_to - area_from) * t;
+        }
+        areas.insert((from, to), five_area);
+    }
+    let heights = base.base_heights(&dirs);
+    let raw: BTreeMap<(usize, usize), [f64; 5]> = needed
+        .iter()
+        .enumerate()
+        .map(|(k, seg)| {
+            let mut out = [0.0; 5];
+            for (q, o) in out.iter_mut().enumerate() {
+                *o = heights[k * 5 + q] - law.depth_m(areas[seg][q]);
+            }
+            (*seg, out)
+        })
+        .collect();
+    let mut out = BTreeMap::new();
+    for (seg, chain) in chains {
+        // Along the chain the points run downstream; the running maximum from the downstream end.
+        let along: Vec<f64> = chain.iter().flat_map(|s| raw[s]).collect();
+        let mut suffix = vec![0.0; along.len()];
+        let mut best = *along.last().expect("a chain has points");
+        for (k, &h) in along.iter().enumerate().rev() {
+            debug_assert!(h.is_finite(), "a base height that is not a number");
+            best = best.max(h);
+            suffix[k] = best;
+        }
+        let mut five = [0.0; 5];
+        five.copy_from_slice(&suffix[..5]);
+        out.insert(seg, five);
+    }
+    out
+}
+
 /// The parameters of the incision (SPIKE-33, SPIKE-35): stream power `K A^m S` with the implicit step, N steps along the frozen network.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ANetParams {
@@ -346,6 +461,8 @@ pub struct ANetParams {
     pub diffusion: f64,
     pub talus: f64,
     pub slump_rate: f64,
+    /// How far under the drawn ground the corridor beds are anchored.
+    pub anchor: AnchorLaw,
 }
 
 impl ANetParams {
@@ -367,6 +484,7 @@ impl ANetParams {
             diffusion: 0.005,
             talus: 0.9,
             slump_rate: 0.09,
+            anchor: AnchorLaw::default(),
         }
     }
 }
@@ -671,7 +789,7 @@ pub struct ANet {
 impl ANet {
     /// The solve over a region (also what the tests look at).
     pub fn solve(&self, lat: &ChunkLattice, region: &Region) -> Solution {
-        let net = Network::build(&*self.run, &*self.base, lat, region, self.radius_m);
+        let net = Network::build_with(&*self.run, &*self.base, lat, region, self.radius_m, &self.params.anchor);
         // The own area of a fine cell: the coarse cell's area over the cells it holds.
         let n = self.run.lattice().n();
         let per = lat.n() as usize / n.max(1);
@@ -724,6 +842,11 @@ impl crate::chunkfield::ChunkStage for ANet {
                 p.diffusion.to_bits(),
                 p.talus.to_bits(),
                 p.slump_rate.to_bits(),
+                p.anchor.depth_m.to_bits(),
+                p.anchor.area_ref_m2.to_bits(),
+                p.anchor.exponent.to_bits(),
+                p.anchor.cap_m.to_bits(),
+                u64::from(p.anchor.window),
                 self.run.identity(),
                 self.base.identity(),
                 self.radius_m.to_bits(),
@@ -734,7 +857,7 @@ impl crate::chunkfield::ChunkStage for ANet {
 }
 
 /// Version of the stage's algorithm: part of its definition hash, so a change that changes results re-keys every chunk.
-pub const ANET_VERSION: u32 = 1;
+pub const ANET_VERSION: u32 = 2;
 
 /// The change of height each cell takes in one pass of thermal slumping (GEN-051): a cell steeper than `talus` over a neighbour gives that
 /// neighbour `rate x (slope - talus) x distance`. `dist[c][k]` is the distance to the `k`-th neighbour of `c` (the order of the region's neighbour

@@ -65,3 +65,14 @@ Source: SPIKE-33, M8 plan risks, CON-22, planner decision 2026-10-24 (8 m defaul
 #### Scenario: Chunk time
 - **WHEN** a chunk of 24 km2 at 8 m cells runs on the reference machine in a perf window
 - **THEN** it finishes within 4 s at 8 m cells and the log holds the times at 4 and 10 m
+
+### Requirement: GEN-057 Corridor anchors follow the drawn ground
+The corridor of an A-net chunk SHALL be anchored at every quarter of a coarse segment at the base field's height there minus `depth_m (A / area_ref_m2)^exponent`, at most `cap_m`, for the river's area `A` at that point (defaults: 3 m at 100 km2, exponent 0.5, cap 100 m, so the cap is under a third of `bound_m`), and the running maximum from the downstream end of those raw anchors over the next 8 coarse segments down the river. The coupled run's absolute height SHALL not set an anchor. The law's constants are part of the stage's definition hash.
+
+Verify: A
+Status: planned
+Source: owner decision 2026-10-25 (terrain relief into M8, part 1), GEN-047, learnings 2026-10-25
+
+#### Scenario: High ground over a low run
+- **WHEN** a chunk of a base 2,600 m above the coupled run runs its incision
+- **THEN** every anchor lies at most `cap_m` under the base, no core cell is cut by half the bound or more, and the depth of the law rises with the drainage area up to the cap
