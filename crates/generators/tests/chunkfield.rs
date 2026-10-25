@@ -465,6 +465,48 @@ fn a_compact_tile_over_a_ready_chunk_carries_its_change_plane_and_one_away_from_
     assert_eq!(bare.content_hash(), compact_tile_field(&Reference(3), &TangentWarp, id, cells, R).content_hash());
 }
 
+// spec: STRM-047
+#[test]
+fn a_tile_replacing_one_that_is_drawn_draws_what_it_drew_at_weight_zero_and_its_own_surface_at_one() {
+    use planet_generators::compact::compact_tile_field;
+    let lat = ChunkLattice::new(608).unwrap();
+    let stage = stand_in(8);
+    let tile = chunk_tile(2, 1000, 1000);
+    let result = Arc::new(compute_chunk(&lat, &stage, R, TOP11, tile, halo_rings(&stage)).unwrap());
+    let field = ChunkField::new(Reference(3), lat, R, &stage).with_top_level(TOP11).with_ready(result);
+    let id = TileId::new(Face(2), 15, 16 * 1000 + 5, 16 * 1000 + 7).unwrap();
+    let cells = 32u32;
+    let with = compact_tile_field(&field, &TangentWarp, id, cells, R);
+    let bare = compact_tile_field(&Reference(3), &TangentWarp, id, cells, R);
+    let w = (cells + 1) as usize;
+    // The height a tile draws vertex (i, j) at, absolute, at fade `fade` of its plane (the mirror of the vertex stage).
+    let drawn = |t: &planet_generators::compact::CompactTile, i: usize, j: usize, fade: f32| {
+        f64::from(t.h_origin) + f64::from(t.shade_vertex_faded(j * w + i, fade).height - t.h_origin)
+    };
+    // The old tile is the base, then the final tile at weights 0.4 and 1, and the new tile is the final one: from the base it is the change.
+    let mut worst = 0.0f64;
+    for (old, old_w) in [(&bare, 1.0f32), (&with, 0.4), (&with, 1.0), (&with, 0.0)] {
+        let plane = with.change_replacing(old, old_w);
+        let mut replaced = with.clone();
+        replaced.change = plane.clone();
+        for j in 0..w {
+            for i in 0..w {
+                let old_drawn = drawn(old, i, j, 1.0 - old_w);
+                // Weight 0 (fade 1) draws what the old tile drew; weight 1 (fade 0) the final surface.
+                let at0 = if plane.is_some() { drawn(&replaced, i, j, 1.0) } else { drawn(&replaced, i, j, 0.0) };
+                worst = worst.max((at0 - old_drawn).abs());
+                assert_eq!(drawn(&replaced, i, j, 0.0).to_bits(), drawn(&with, i, j, 0.0).to_bits(), "weight 1 is the final surface");
+            }
+        }
+    }
+    eprintln!("a replacing tile at weight 0 against the tile it replaces: worst {worst:.2e} m");
+    assert!(worst < 1e-3, "worst {worst} m");
+    // A tile that draws like the old one needs no plane; another tile is not a replacement.
+    assert_eq!(with.change_replacing(&with, 1.0), None);
+    let other = compact_tile_field(&field, &TangentWarp, TileId::new(Face(2), 15, 16 * 1000 + 6, 16 * 1000 + 7).unwrap(), cells, R);
+    assert_eq!(with.change_replacing(&other, 1.0), None);
+}
+
 // spec: REND-039
 #[test]
 fn the_mirror_of_the_vertex_stage_draws_the_final_height_at_weight_one_the_base_at_zero_and_the_old_arithmetic_without_a_plane() {
