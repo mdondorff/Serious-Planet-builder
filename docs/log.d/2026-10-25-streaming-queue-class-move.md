@@ -1,0 +1,1 @@
+- 2026-10-25 **streaming-queue-class-move**: a queued refresh request now follows its tile to the new class while the settle window holds it (the editor's panic 'a request's tile is a member of its class's layer', `layer.rs:220`); a plan refusal the window survived is reported as a refusal report, not a crash report

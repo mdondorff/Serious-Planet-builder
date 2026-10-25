@@ -72,6 +72,11 @@ impl RequestQueue {
         self.by_kind
     }
 
+    /// Whether a request of `t` is queued.
+    pub fn contains(&self, t: TileId) -> bool {
+        self.at.contains_key(&t)
+    }
+
     /// Queue `t` in the bucket of `(class, rank)`; a request already queued moves if its bucket differs and stays otherwise.
     /// Returns whether the queue changed.
     pub fn insert(&mut self, t: TileId, class: u8, rank: u64, kind: usize) -> bool {
