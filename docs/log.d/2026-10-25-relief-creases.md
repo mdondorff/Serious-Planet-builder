@@ -1,0 +1,1 @@
+- 2026-10-25 **relief-creases** (m8-relief part 3, field side; GEN-061/062): the fine crease octaves (wavelengths under 1.6 km) take the bake slope's factor lifted towards 1 by global::landform; landform_lipschitz bounds it over a cap; EROSION_VERSION 2

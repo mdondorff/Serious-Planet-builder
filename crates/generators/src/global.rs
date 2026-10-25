@@ -199,6 +199,21 @@ pub fn landform(seed: u64, d: Vec3) -> f64 {
     t.zone * t.inland
 }
 
+/// A Lipschitz constant of [`landform`] in the unit direction (per unit of chord): `|landform(a) - landform(b)| <= K |a - b|` (GEN-062). From the
+/// noise's gradient bound `G` (`height::NOISE_GRADIENT_BOUND`): an fBm of base frequency `f` and `n` octaves of halving amplitudes is `G f n / (2 - 2^(1-n))`
+/// Lipschitz; the warped direction `d + 0.45 warp(d)` (three such fBms, a vector: a factor of the square root of 3) is `1 + 0.45 sqrt(3) L_warp`; the range
+/// zone is a smoothstep (slope at most 3) of one fBm of the warped direction, the inland ramp a smoothstep (slope at most 4.55) of 1.7 times another, and
+/// the landform their product of two values in `[0, 1]`, so the sum of the two. A test checks it against random pairs, so a change of the terms of
+/// [`terrain`] that is not carried here fails there.
+pub fn landform_lipschitz() -> f64 {
+    let g = crate::height::NOISE_GRADIENT_BOUND;
+    let fbm_lip = |freq: f64, octaves: f64| g * freq * octaves / (2.0 - libm::pow(2.0, 1.0 - octaves));
+    let warped = 1.0 + 0.45 * libm::sqrt(3.0) * fbm_lip(1.3, 3.0);
+    let zone = 3.0 * fbm_lip(1.7, 3.0) * warped;
+    let inland = (1.5 / 0.33) * 1.7 * fbm_lip(1.1, 5.0) * warped;
+    (zone + inland) * 1.05
+}
+
 /// The largest amplitude of the hill band in metres (GEN-064); the elevation clamp has room for it above the highest base and range
 /// (`1000 + 5200` m), so the clamp is not raised.
 pub const HILL_BAND_MAX_M: f64 = 1000.0;

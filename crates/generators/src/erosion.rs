@@ -23,7 +23,7 @@ use crate::height::{layer_noise, layer_noise_bounds, HeightField};
 use crate::terrain::scan_base;
 
 /// Bump whenever any output of this module changes (ADR 0006); it also covers [`GLOBAL_VERSION`] through the bake key.
-pub const EROSION_VERSION: u32 = 1;
+pub const EROSION_VERSION: u32 = 2;
 /// Names this implementation in cache keys (CON-07).
 pub const EROSION_IMPLEMENTATION_ID: &str = "cpu-erosion-v1";
 
@@ -42,6 +42,9 @@ const SLOPE_CELLS: f64 = 3.0;
 const CARVE_FLOOR: f64 = 0.15;
 const CARVE_FROM: f64 = 0.01;
 const CARVE_TO: f64 = 0.2;
+/// The octave the creases are split at (GEN-061): octaves below it (wavelengths over 1.6 km at 25 km spacing halving) keep the amplitude of the bake's
+/// slope; the fine ones (under 1.6 km) lift it towards the full amplitude by the landform driver.
+const CREASE_SPLIT: u32 = 4;
 /// The crease sum lies in [-0.75, 0.25], so the detail lies in [-0.75, 0.25] times the largest amplitude.
 const AMPLITUDE_MAX_M: f64 = AMPLITUDE_OCEAN_M + AMPLITUDE_LAND_M;
 /// The lower bound of the crease sum.
@@ -102,16 +105,34 @@ fn crease_range(nlo: f64, nhi: f64) -> (f64, f64) {
     (crease(a), crease(b))
 }
 
-/// The normalised crease sum in [-0.75, 0.25] at a direction.
-fn crease_sum(seed: u64, dir: Vec3) -> f64 {
-    let (mut sum, mut amp, mut norm, mut freq) = (0.0, 1.0, 0.0, BASE_FREQUENCY);
+/// The normalised crease sum at a direction in two parts, the coarse octaves (below [`CREASE_SPLIT`]) and the fine ones: their sum lies in [-0.75, 0.25].
+fn crease_parts(seed: u64, dir: Vec3) -> (f64, f64) {
+    let (mut coarse, mut fine, mut amp, mut norm, mut freq) = (0.0, 0.0, 1.0, 0.0, BASE_FREQUENCY);
     for o in 0..OCTAVES {
-        sum += amp * crease(layer_noise(seed, LAYER_CREASE, o, dir * freq));
+        let term = amp * crease(layer_noise(seed, LAYER_CREASE, o, dir * freq));
+        if o < CREASE_SPLIT {
+            coarse += term;
+        } else {
+            fine += term;
+        }
         norm += amp;
         amp *= PERSISTENCE;
         freq *= 2.0;
     }
-    sum / norm
+    (coarse / norm, fine / norm)
+}
+
+/// The slope factor of the fine creases (GEN-061): the factor of the bake's slope lifted towards 1 by the landform driver `l` in `[0, 1]`
+/// (`l` 0 on a plain or at the coast: the factor of the slope alone; `l` 1 deep inland in a range zone: the full amplitude whatever the slope).
+fn fine_carve(carve: f64, landform: f64) -> f64 {
+    carve + (1.0 - carve) * landform
+}
+
+/// The detail in metres at a point of ground elevation `e`, bake slope factor `carve` and landform `landform`: the coarse creases at the amplitude of the
+/// slope, the fine ones at the amplitude lifted by the landform.
+fn detail_m(seed: u64, dir: Vec3, e: f64, carve: f64, landform: f64) -> f64 {
+    let (coarse, fine) = crease_parts(seed, dir);
+    amplitude_m(e, carve) * coarse + amplitude_m(e, fine_carve(carve, landform)) * fine
 }
 
 /// The eroded terrain field of one body over a baked global-coarse grid.
@@ -191,7 +212,7 @@ impl ErosionField<'_> {
     fn height_via(&self, src: &dyn LatticeSource, dir: Vec3) -> f64 {
         let e = self.base_via(src, dir);
         let slope = self.gradient_via(src, dir) / self.radius_m;
-        e + amplitude_m(e, carve(slope)) * crease_sum(self.seed, dir)
+        e + detail_m(self.seed, dir, e, carve(slope), crate::global::landform(self.seed, dir))
     }
 }
 
@@ -344,20 +365,37 @@ impl HeightField for ErosionField<'_> {
         } else {
             (carve(0.0), 1.0)
         };
+        // The landform over the cap: its value at the centre within the Lipschitz constant times the chord (GEN-062).
+        let l_centre = crate::global::landform(self.seed, centre);
+        let l_reach = crate::global::landform_lipschitz() * angular_radius * (1.0 + 1e-9) + 1e-9;
+        let (l_lo, l_hi) = ((l_centre - l_reach).max(0.0), (l_centre + l_reach).min(1.0));
+        let (f_lo, f_hi) = (fine_carve(carve_lo, l_lo), fine_carve(carve_hi, l_hi));
         let (a_lo, a_hi) = (amplitude_m(blo, carve_lo), amplitude_m(bhi, carve_hi));
-        let (mut slo, mut shi, mut amp, mut norm, mut freq) = (0.0, 0.0, 1.0, 0.0, BASE_FREQUENCY);
+        let (fa_lo, fa_hi) = (amplitude_m(blo, f_lo), amplitude_m(bhi, f_hi));
+        // The two parts of the crease sum, each from its octaves' noise bounds.
+        let (mut clo_sum, mut chi_sum, mut flo_sum, mut fhi_sum, mut amp, mut norm, mut freq) =
+            (0.0, 0.0, 0.0, 0.0, 1.0, 0.0, BASE_FREQUENCY);
         for o in 0..OCTAVES {
             let (nlo, nhi) = layer_noise_bounds(self.seed, LAYER_CREASE, o, centre, angular_radius, freq);
             let (clo, chi) = crease_range(nlo.max(-1.0), nhi.min(1.0));
-            slo += amp * clo;
-            shi += amp * chi;
+            if o < CREASE_SPLIT {
+                clo_sum += amp * clo;
+                chi_sum += amp * chi;
+            } else {
+                flo_sum += amp * clo;
+                fhi_sum += amp * chi;
+            }
             norm += amp;
             amp *= PERSISTENCE;
             freq *= 2.0;
         }
-        let (slo, shi) = ((slo / norm - 1e-9).max(-0.75), (shi / norm + 1e-9).min(0.25));
-        let dlo = if slo >= 0.0 { a_lo * slo } else { a_hi * slo };
-        let dhi = if shi >= 0.0 { a_hi * shi } else { a_lo * shi };
+        let (clo, chi) = (clo_sum / norm - 1e-9, chi_sum / norm + 1e-9);
+        let (flo, fhi) = (flo_sum / norm - 1e-9, fhi_sum / norm + 1e-9);
+        let part = |amp_lo: f64, amp_hi: f64, lo: f64, hi: f64| {
+            (if lo >= 0.0 { amp_lo * lo } else { amp_hi * lo }, if hi >= 0.0 { amp_hi * hi } else { amp_lo * hi })
+        };
+        let ((c1, c2), (f1, f2)) = (part(a_lo, a_hi, clo, chi), part(fa_lo, fa_hi, flo, fhi));
+        let (dlo, dhi) = ((c1 + f1).max(-0.75 * AMPLITUDE_MAX_M), (c2 + f2).min(0.25 * AMPLITUDE_MAX_M));
         let pad = |x: f64| 1e-6 + x.abs() * 1.2e-7;
         let (l, h) = (blo + dlo, bhi + dhi);
         ((l - pad(l)).max(global.0), (h + pad(h)).min(global.1))
@@ -408,5 +446,67 @@ impl ErosionGenerator {
             relief,
             error: Mutex::new(None),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use planet_core::hash::SplitMix64;
+
+    fn random_dir(rng: &mut SplitMix64) -> Vec3 {
+        Vec3::new(rng.next_f64() * 2.0 - 1.0, rng.next_f64() * 2.0 - 1.0, rng.next_f64() * 2.0 - 1.0).normalized()
+    }
+
+    // spec: GEN-061
+    #[test]
+    fn without_the_landform_the_detail_is_the_old_one_and_with_it_only_the_fine_creases_are_lifted() {
+        let mut rng = SplitMix64(5);
+        let (mut lifted, mut full) = (0, 0);
+        for _ in 0..400 {
+            let dir = random_dir(&mut rng);
+            let e = rng.next_f64() * 3000.0 - 200.0;
+            let c = carve(rng.next_f64() * 0.3);
+            let (coarse, fine) = crease_parts(7, dir);
+            // The two parts are the old normalised sum.
+            let old = amplitude_m(e, c) * (coarse + fine);
+            assert!((detail_m(7, dir, e, c, 0.0) - old).abs() < 1e-9 * (1.0 + old.abs()), "landform 0 is the old detail");
+            // Landform 1: the fine creases at the full factor, the coarse ones unchanged.
+            let full_fine = amplitude_m(e, c) * coarse + amplitude_m(e, 1.0) * fine;
+            assert!((detail_m(7, dir, e, c, 1.0) - full_fine).abs() < 1e-9 * (1.0 + full_fine.abs()));
+            if (detail_m(7, dir, e, c, 1.0) - old).abs() > 1.0 {
+                lifted += 1;
+            }
+            if c >= 1.0 - 1e-12 {
+                full += 1;
+                assert!(
+                    (detail_m(7, dir, e, c, 1.0) - old).abs() < 1e-9 * (1.0 + old.abs()),
+                    "on the steepest ground the landform adds nothing"
+                );
+            }
+        }
+        assert!(lifted > 100, "{lifted} of 400 points change by over a metre");
+        let _ = full;
+    }
+
+    // spec: GEN-062
+    #[test]
+    fn the_landform_constant_holds_for_random_pairs() {
+        let k = crate::global::landform_lipschitz();
+        let mut rng = SplitMix64(9);
+        let (mut worst, mut moved) = (0.0f64, 0);
+        for _ in 0..20_000 {
+            let a = random_dir(&mut rng);
+            let dist = [1e-5, 1e-4, 1e-3, 1e-2, 1e-1][(rng.next_f64() * 5.0) as usize % 5];
+            let b = (a + random_dir(&mut rng) * dist).normalized();
+            let (la, lb) = (crate::global::landform(7, a), crate::global::landform(7, b));
+            let ratio = (la - lb).abs() / (a - b).length().max(1e-300);
+            worst = worst.max(ratio);
+            moved += usize::from((la - lb).abs() > 0.0);
+            assert!((0.0..=1.0).contains(&la) && (0.0..=1.0).contains(&lb));
+        }
+        assert!(moved > 1000, "{moved} pairs differ");
+        assert!(worst <= k, "a pair changes by {worst} per unit of chord, the constant is {k}");
+        assert!(worst > 0.0);
     }
 }
