@@ -92,6 +92,18 @@ impl ChunkFade {
         }
     }
 
+    /// The tile `tile` is drawn at `now_ms` with the mesh `resident_key`, the plan expecting `planned_key` (the key a tile has when it was built
+    /// against the chunks' current versions, STRM-038): when they are the same the change of every chunk it reads is being drawn, and the fade of
+    /// those that landed starts. A tile that is still the one built before a landing (its key is the old one) starts nothing, so the clock never
+    /// runs for a change that is not on screen.
+    pub fn drawn(&mut self, view: &dyn ChunkView, tile: TileId, resident_key: u64, planned_key: u64, now_ms: u64) {
+        if resident_key == planned_key {
+            for k in view.reads(tile) {
+                self.shown(k, now_ms);
+            }
+        }
+    }
+
     /// A chunk left RAM: it fades in again if it lands again.
     pub fn evicted(&mut self, key: ChunkKey) {
         self.shown_ms.remove(&key);

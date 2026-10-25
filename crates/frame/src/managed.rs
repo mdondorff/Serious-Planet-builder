@@ -540,14 +540,6 @@ impl ManagedLoop {
                     // Act on the state now: a tile added and evicted since the last frame is not resident any more.
                     let (Some(mesh), Some(slot)) = (streamer.get(tile), streamer.slot_of(tile)) else { continue };
                     if self.slots.get(&tile) == Some(&slot) && self.resident.get(&tile).is_some_and(|r| r.mesh_key == mesh.key()) {
-                        // The refresh made the very tile the sink holds: nothing to write, but it is the rebuilt tile that is drawn from now on,
-                        // so the fade of the chunks it reads starts here (STRM-047).
-                        if let (Some(view), Some((fade, clock))) = (self.chunk_view.as_deref(), self.chunk_fade.as_mut()) {
-                            let now = clock.now_ms();
-                            for k in view.reads(tile) {
-                                fade.shown(k, now);
-                            }
-                        }
                         continue;
                     }
                     self.pending.insert(tile);
@@ -613,15 +605,6 @@ impl ManagedLoop {
             let refs: Vec<(&CompactTile, SlotRef)> = batch.iter().map(|(_, mesh, slot, _)| (&**mesh, *slot)).collect();
             let stats = sink.upload_batch(&refs)?;
             upload_calls += stats.calls;
-            // The first tile of a landed chunk to reach the renderer starts that chunk's fade (STRM-047): its change is drawn from now.
-            if let (Some(view), Some((fade, clock))) = (self.chunk_view.as_deref(), self.chunk_fade.as_mut()) {
-                let now = clock.now_ms();
-                for (tile, ..) in &batch {
-                    for k in view.reads(*tile) {
-                        fade.shown(k, now);
-                    }
-                }
-            }
             for (tile, mesh, slot, bytes) in &batch {
                 self.resident.insert(*tile, ResidentTile { mesh_key: mesh.key(), origin: mesh.origin() });
                 self.slots.insert(*tile, *slot);
@@ -642,9 +625,14 @@ impl ManagedLoop {
         });
         let mut pipeline = self.pipe.begin_frame_predicted(req, predicted, &self.resident)?;
         // The weights of the landed chunks' fade (STRM-047): each node takes the minimum over the chunks it reads; 1 without a fade or a view.
-        if let (Some(view), Some((fade, clock))) = (self.chunk_view.as_deref(), self.chunk_fade.as_ref()) {
+        if let (Some(view), Some((fade, clock))) = (self.chunk_view.as_deref(), self.chunk_fade.as_mut()) {
             let now = clock.now_ms();
             for n in &mut pipeline.draw.plan.nodes {
+                // A drawn tile that is the one the plan expects was built against the chunks' current versions: the first such tile of a
+                // landed chunk starts its fade (STRM-047), and a tile built before the landing starts nothing.
+                if let Some(r) = self.resident.get(&n.tile) {
+                    fade.drawn(view, n.tile, r.mesh_key, n.mesh_key, now);
+                }
                 n.chunk_weight = fade.tile_weight(view, n.tile, now);
             }
         }
