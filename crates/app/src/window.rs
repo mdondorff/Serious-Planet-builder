@@ -1682,9 +1682,9 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         markers: parse_markers(&o.markers)?,
     };
     writeln!(out, "planet editor: {} ({})", if o.smoke { "smoke test" } else { "viewer" }, world.describe()).map_err(err)?;
-    writeln!(out, "keys: {}", &*KEYS_HELP).map_err(err)?;
+    writeln!(out, "keys: {}", *KEYS_HELP).map_err(err)?;
     if !o.no_ui {
-        writeln!(out, "{}", &*EDIT_KEYS_HELP).map_err(err)?;
+        writeln!(out, "{}", *EDIT_KEYS_HELP).map_err(err)?;
     }
     writeln!(
         out,
