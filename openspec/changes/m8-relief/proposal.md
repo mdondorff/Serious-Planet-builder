@@ -1,5 +1,5 @@
 ## Why
-Owner decision 2026-10-25: terrain relief goes into M8 before look review 2, in three parts: (1) chunk bed anchors relative to the drawn ground (done, `m8-anet-chunk` design section 17, GEN-057), (2) the coupled run keeps relief, (3) hill-scale relief in the base field; one shared rebuild of bake, run, coarse horizon and chunks at the end. This change covers parts (2) and (3). It is a proposal for the architect's and the owner's review; no implementation starts before the targets are accepted.
+Owner decisions 2026-10-25: terrain relief goes into M8 before look review 2, and M8's scope is plausible relief, hydrology and horizon shadows (realism of hill terrain is a later milestone; criterion 1 judges river and valley forms on plausible relief). The relief comes in three parts: (1) chunk bed anchors relative to the drawn ground (done, `m8-anet-chunk` design section 17, GEN-057), (2) the coupled run keeps relief, (3) hill-scale relief in the base field; one shared rebuild of bake, run, coarse horizon and chunks at the end. This change covers parts (2) and (3). It is a proposal for the architect's and the owner's review; no implementation starts before the targets are accepted.
 
 Measured evidence (tools of #648, #652; all at the 16384 bake, 611 m spacing; `docs/milestones/M8/look-review-1-hills/slopes.txt`, `docs/learnings.md` 2026-10-25):
 - **The base is smooth at hill scale.** The steepest rise over run within 2 km of a land cell, in degrees:
@@ -21,15 +21,15 @@ Measured evidence (tools of #648, #652; all at the 16384 bake, 611 m spacing; `d
 Part (3), hill-scale relief, wavelengths 0.5 to 8 km, split by wavelength (a departure from ADR 0030 point 1, below):
 1. **A hill band in the bake** for wavelengths of 1.5 to 8 km (at least 2.5 bake cells): a ridged-multifractal band added to the bake's elevation at generation, its amplitude set by a landform driver per cell. The coupled run, the coarse horizon and the hydrology then see the hills, so drainage follows them.
 2. **Creases in the field for wavelengths under 1.5 km**: the amplitude of `cpu-erosion-v1`'s creases is keyed by the same landform driver instead of the bake's slope alone (the slope factor stays as a multiplier from its floor, which rises from 0.15 with the driver).
-3. **The landform driver** `ruggedness` (a derived channel, not stored): the elevation range within 50 km of the bake cell over its elevation above the sea, from the bake's own coarse neighbourhood (the stage before the field; ADR 0022 option 1 is kept). Amplitude of the hill band by landform (first values, calibration inputs): plains (ruggedness under 0.05) 20 to 40 m, hills (0.05 to 0.2) 100 to 250 m, mountains (over 0.2) 400 to 1000 m; the product at wavelength `L` gives slopes of `2 pi A / L`, 0.42 (23 degrees) for 200 m at 3 km.
+3. **The landform driver** `ruggedness` (a derived channel, not stored): the elevation range over the 81 x 81 cells (40 cells each side, about 49 km across) round a bake cell at 16384 cells per face edge, over its elevation above the sea. It is computed from the bake **before the hill band is added**, so the band's amplitude does not feed back into the driver that sets it (no circularity); the field reads the bake, the stage before it (ADR 0022 option 1 is kept). Amplitude of the hill band by landform (first values, calibration inputs): plains (ruggedness under 0.05) 20 to 40 m, hills (0.05 to 0.2) 100 to 250 m, mountains (over 0.2) 400 to 1000 m; the product at wavelength `L` gives slopes of `2 pi A / L`, 0.42 (23 degrees) for 200 m at 3 km.
 4. **Bounds:** `max_abs_height_m` and the bake's elevation clamp are raised by the band's largest amplitude; the stamp, chunk and plan bounds read it (GEN-026, GEN-039).
 
 Part (2), the coupled run keeps relief (crusader's lane):
-5. **A stationary uplift field.** `uplift(c) = rho K(c) A_in(c)^m S_in(c)`, evaluated on the input: the input's receivers from the priority flood, its areas by accumulation, its slopes to the receivers; `rho` 1 makes the input a steady state, lower values let the run keep eroding. The constant uplift of `coupledworld.rs` is replaced (a departure from the run's declared inputs, below), and `K(c)` stays constant until a lithology driver exists.
+5. **A stationary uplift field.** `uplift(c) = rho K(c) A_in(c)^m S_in(c)`, evaluated on the input: the input's receivers from the priority flood, its areas by accumulation, its slopes to the receivers. `rho` is a declared parameter of the run (default 1; part of the run's key with the other declared inputs); `rho` 1 makes the input a steady state, lower values let the run keep eroding. At `rho` 1 the run still does routing, the filling of pits and lakes and the breaches, and no longer reshapes relief. The constant uplift of `coupledworld.rs` is replaced (a departure from the run's declared inputs, below), and `K(c)` stays constant until a lithology driver exists.
 6. **The run then evolves only where the input is not graded** (pits, lakes, breaches), and the run minus the base stays small; the uplift field is part of the stored run's key (STRM-043), the first of ADR 0076's driver maps in effect (uplift ahead of the maps, a reordering of ADR 0076 point 6, below).
 
 ## Targets (measured by the tools above; for the owner to accept or move)
-Targets for the slope table (same definition: steepest rise over run within 2 km, 611 m grid, degrees), proposed from the shape of Earth's land (to be checked against the owner's look reference or a DEM sample before acceptance; these are estimates, not measurements):
+Targets for the slope table (same definition: steepest rise over run within 2 km, 611 m grid, degrees). They are **provisional guard rails for plausible relief**, from the shape of Earth's land (estimates, not measurements); the check against a DEM sample or the look reference moves out of M8 to the realism milestone, so the owner's acceptance of the guard rails does not wait for it:
 
 | Ground band (m) | Land p50 | p90 | p99 |
 |---|---|---|---|
@@ -53,22 +53,29 @@ One shared rebuild after the last of parts (2) and (3), in this order (each stag
 2. The coupled run from the new bake and the stationary uplift: the first make from the 16384 bake took 9,916 s before #638's fix of its lattice (the time after it is to be re-measured; a progress line is on the queue).
 3. The coarse horizon from the run: time to be measured.
 4. Chunks: on demand, 3.4 s per 24 km2 chunk at 8 m cells, one thread (GEN-052); the chunk cache re-keys through the run and base identities.
-The machine time of 1 to 3 is the cost to be stated before implementation starts; stage 2 is the one known long step. The slope table (456 s) and the run-against-base report re-measure the targets after the rebuild.
+The 16384 bake time and the coupled make (stage 2) are **measured by crusader before stage 1** (its M8-1 (c) item) and entered here; stage 2 is the one known long step. The slope table (456 s) and the run-against-base report re-measure the targets after the rebuild.
 
 ## Lanes
 - **Global stage and run calibration (crusader):** items 1 and 3's bake side (the hill band and the driver), 5 and 6, the rebuild.
 - **Field chain (this lane):** items 2, 3's field side, 4, the targets' tools, the stills of the two sites.
 
 ## Departures from accepted decisions (marked)
-- ADR 0030 point 1 (the erosion filter's amplitude follows the bake's slope): the amplitude follows the landform driver as well, and a hill band joins the bake. Needs an amendment or a new ADR.
+All of these are drafted as ADR 0080 (proposed; easy to reverse, so implementation may build on it before the owner accepts):
+- ADR 0030 point 1 (the erosion filter's amplitude follows the bake's slope): the amplitude follows the landform driver as well, and a hill band joins the bake.
 - ADR 0026 (four global channels): a derived `ruggedness` channel is read from the bake, not stored; no new stored channel. Check against the ADR before building.
 - The coupled run's constant uplift (`UPLIFT_M_PER_YEAR`, `declared_inputs_hash`): replaced by a field made from the input. Changes the run's key and the spec of its inputs.
 - ADR 0076 point 6 (processes are pre-bake stages, the stream-power routing first): the uplift field lands before the driver maps; no map depends on it yet.
 - GEN-057's anchor law stays; it reads the new base through `base_height` with no change.
 
+## Goldens
+No golden class is expected to move: the goldens of the render crate (`terrain_*`, `lit_*`, `sky_*`, `water_class_*`, `hello_triangle`, `debug_view_*`; `tests/goldens/classes.txt`) draw the synthetic `Reference` field or small synthetic worlds, not the bake or `cpu-erosion-v1`. Confirmed by the first implementation change's `cargo xtask test gpu` (a moved golden would be classed by `golden-review`): debug and shaded views would auto-bless as declared changes (ADR 0017, 0061), lit, sky and water views would escalate to the owner's `/bless`, so any escalation shows by class in that change's report. The stills of the look reviews are not goldens.
+
+## Dates (estimates)
+Proposal merged 2026-10-26; both lanes' implementation 2026-10-26 to about 2026-11-01; the shared rebuild about 2026-11-01; look review 2 about 2026-11-02.
+
 ## Impact
 - Specs: generator-pipeline (the hill band, the driver, GEN-026 bounds), world-definition or global-coarse (the bake's version), coupled run (the uplift field), testing (the targets).
 - Code: `generators/global.rs` or the bake generator, `generators/erosion.rs`, `generators/coupled.rs`, `app/coupledworld.rs`, the targets' tools (`stills.rs` slope table, `anetworld.rs` reports).
 - Cost: the rebuild's machine time (to be measured); about a week for the field chain and the same for the global stage.
-- Risk: the hill band changes every height of the planet, so every golden that draws terrain moves (golden-review, ADR 0017: first-of-class looks escalate to the owner's /bless); the bounds rise.
+- Risk: the hill band changes every height of the planet; the bounds rise; the goldens are not expected to move (section Goldens).
 - Out of scope: lithology and erodibility maps, soil and plants from the hills, the chunk stage's calibration of incision and diffusion beyond R-a, the owner's look review 2.
