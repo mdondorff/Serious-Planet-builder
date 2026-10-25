@@ -308,8 +308,8 @@ impl WorldTerrain {
             }
             let (mut longest_flat, mut max_drop, mut climbs, mut links) = (0.0f64, 0.0f64, 0usize, 0usize);
             let mut window_slopes: Vec<f64> = Vec::new();
-            for start in 0..reg.cells.len() {
-                if !net.corridor[start] || has_donor[start] {
+            for (start, &donor) in has_donor.iter().enumerate() {
+                if !net.corridor[start] || donor {
                     continue;
                 }
                 let (mut at, mut flat, mut chain) = (start, 0.0f64, vec![s.z[start]]);

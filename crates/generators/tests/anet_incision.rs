@@ -664,8 +664,8 @@ fn bed_profile(a: &ANet, base: &dyn BaseDetail, x: u32) -> (f64, f64, usize, usi
     for c in 0..r.core {
         outlets += usize::from(net.corridor[c] && net.next[c] != NO_NEXT && (net.next[c] as usize) < r.core && s.receiver[c] == u32::MAX);
     }
-    for start in 0..len {
-        if !net.corridor[start] || has_donor[start] {
+    for (start, &donor) in has_donor.iter().enumerate() {
+        if !net.corridor[start] || donor {
             continue;
         }
         let (mut at, mut flat) = (start, 0.0f64);
