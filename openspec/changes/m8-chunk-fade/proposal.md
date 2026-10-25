@@ -6,7 +6,7 @@ M8 exit criterion 3 (`docs/briefings/m8-plan.md`): "the switch fades in, with no
 - **A weight per node**: the plan's node record gets the tile's `ChunkFade` weight (an f32, CON-11); the shader draws `base + w x change` with the base reconstructed as the texel height minus the change.
 - **The shader and its mirrors**: WGSL, the CPU mirror in `generators::compact`, the reference renderer (REND-031); normals use the faded heights' normal blend or the final normals, decided by a look test.
 - **Carrying the change out of the field chain**: a `HeightField` method that returns the chunk change at a tile's directions through the wrappers, so a compact tile builder can store it.
-- **The fade length** from M8-3's measurement (`max |change| / (0.25 m x 60 fps)`), the default `chunk_fade_ms` set from it.
+- **The fade length: 1.5 s on landing** (`chunk_fade_ms` default 1500; criterion 3 as amended by the owner, 2026-10-24): the change of a landing chunk fades in over about 1.5 s, and at the level where the chunk change enters (base to base + change) the step on screen is at most about 0.5 px p99 with blending; between pyramid levels inside the chunk range no step over 0.25 m p99. M8-3 measured the A-net's entry step (`openspec/changes/m8-anet-chunk/design.md` section 16, top level 15): p99 3.90 m, max 17.55 m, so a fade at 60 fps moves a vertex by at most 17.55 m / 90 frames = 0.19 m per frame (p99 0.04 m), inside 0.25 m. The tile's top level (`ANET_TOP_LEVEL`) is 15.
 - **Golden-review** classifies the candidates: with no chunk ready the drawn image should be unchanged (rounding or nothing); stop and report only if it escalates to the owner's /bless.
 
 ## Impact
