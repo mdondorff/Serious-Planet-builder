@@ -124,6 +124,14 @@ pub enum Command {
     CycleCoupledLens,
     /// H: the editing light, a sun fixed in camera space over the viewer's shoulder, or back to the look's sun (VIEW-042).
     ToggleEditingLight,
+    /// J: the lit shade view, cycling normal, horizon and shadow (REND-038; VIEW-054).
+    CycleShadeView,
+    /// `[`: the sun half an hour earlier in local solar time at the camera, over the look's sun (VIEW-054).
+    SunEarlier,
+    /// `]`: the sun half an hour later (VIEW-054).
+    SunLater,
+    /// `\`: back to the look's sun (VIEW-054).
+    SunReset,
     /// G: the globe overview over the point under the camera, or back (VIEW-013).
     ToggleGlobe,
     /// F9: write the camera path of the last minute and the repro bundle of this frame (VIEW-024). Changes nothing in the viewer; the window
@@ -255,7 +263,7 @@ pub fn state_legend() -> Vec<([u8; 3], String)> {
 /// The key bindings, as text for the usage message and the log.
 pub const KEYS_HELP: &str = "P or Space pause, R restart the flight, L lit path (with the atmosphere) or debug path, G globe overview (drag turns it, wheel zooms, a click on a marker or the surface flies there and lands in the free camera), K what the climate shows (the climate, the coupled run's heights, its drainage area: the global river network; lit path; the run loads or is made once, the title says when it is ready), F3 cycles the overlay (off, tiles, mesh, regions, stale tiles; lit path), F4 coarse LOD (error bound x4), F6 ground detail (natural, full, off; the procedural detail and gloss of the ground, on at the start), F7 scale references (drops a chair 0.9 m, a house 8 m, a boat 10 m, a tower 291 m and a block of boxes 1 km across on the ground in front of you; again takes them away; lit path), F9 writes the camera path of the last minute and a repro bundle (target/review), V next debug view (debug path), T vsync on/off, C flight or free camera, \
      H editing light (a sun fixed over your shoulder, 35 degrees up, so no slope is black; off by default), \
-     free camera: WASD move, Q/E down/up, arrows look, click captures the mouse to look (Esc releases it), Shift boost; Esc quits";
+     J shade view (normal, horizon, shadow: the horizon elevation at the sun and its shadow factor; lit path, needs a store with a coupled run), [ and ] the sun half an hour earlier or later in local solar time at the camera (Backslash back to the look's sun; the title shows the time), \n     free camera: WASD move, Q/E down/up, arrows look, click captures the mouse to look (Esc releases it), Shift boost; Esc quits";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CameraMode {
@@ -286,6 +294,10 @@ pub struct ViewerState {
     pub coarse_lod: bool,
     /// The editing light (VIEW-042): the lit frames take [`editing_sun_dir`] for the sun; off at the start, so the look's sun and every golden stay.
     pub editing_light: bool,
+    /// Which image the lit terrain shows (VIEW-054): the lit surface at the start; J cycles it through the horizon elevation and the shadow factor.
+    pub shade_view: crate::look::shading::ShadeView,
+    /// Hours the sun is moved from the look's sun in local solar time (VIEW-054); 0 at the start, so the look's sun and every golden stay.
+    pub sun_offset_h: f64,
     /// The strength of the ground detail the lit frames take (VIEW-046): natural at the start; F6 cycles it. Not part of the headless modes.
     pub ground_detail: crate::look::materials::GroundDetailMode,
     /// The scale references are asked for (VIEW-050): the window drops them where the camera is when this turns on and removes them when it
@@ -320,6 +332,8 @@ impl ViewerState {
             overlay: Overlay::None,
             coarse_lod: false,
             editing_light: false,
+            shade_view: crate::look::shading::ShadeView::Lit,
+            sun_offset_h: 0.0,
             ground_detail: crate::look::materials::GroundDetailMode::default(),
             scale_refs: false,
             coupled_lens: None,
@@ -390,6 +404,10 @@ impl ViewerState {
             Command::SaveRepro => self.repro_requested = true,
             Command::ToggleCoarseLod => self.coarse_lod = !self.coarse_lod,
             Command::ToggleEditingLight => self.editing_light = !self.editing_light,
+            Command::CycleShadeView => self.shade_view = next_shade_view(self.shade_view),
+            Command::SunEarlier => self.sun_offset_h = (self.sun_offset_h - SUN_STEP_H).rem_euclid(24.0),
+            Command::SunLater => self.sun_offset_h = (self.sun_offset_h + SUN_STEP_H).rem_euclid(24.0),
+            Command::SunReset => self.sun_offset_h = 0.0,
             Command::CycleGroundDetail => self.ground_detail = self.ground_detail.next(),
             Command::ToggleScaleRefs => self.scale_refs = !self.scale_refs,
             Command::CycleCoupledLens => {
@@ -715,6 +733,39 @@ pub fn editing_sun_dir(camera: &crate::camera::Camera) -> [f32; 3] {
     let sun = horizontal * libm::cos(el) + up * libm::sin(el);
     let s = sun.normalized();
     [s.x as f32, s.y as f32, s.z as f32]
+}
+
+/// The step of `[` and `]`, hours (VIEW-054).
+pub const SUN_STEP_H: f64 = 0.5;
+
+/// The shade view after `view` in the cycle of J: normal, horizon, shadow, normal (VIEW-054). A view outside the cycle goes to normal.
+pub fn next_shade_view(view: crate::look::shading::ShadeView) -> crate::look::shading::ShadeView {
+    use crate::look::shading::ShadeView::{Horizon, Lit, Shadow};
+    match view {
+        Lit => Horizon,
+        Horizon => Shadow,
+        _ => Lit,
+    }
+}
+
+/// The look's sun `sun` moved `offset_h` hours later in the day (VIEW-054): the same declination, the sub-solar longitude moved west by 15
+/// degrees an hour (the convention of `shading::sun_direction`). An offset of 0 gives `sun` itself. Computed in f64 with `libm`.
+pub fn sun_with_offset(sun: [f32; 3], offset_h: f64) -> [f32; 3] {
+    if offset_h == 0.0 {
+        return sun;
+    }
+    let (x, y, z) = (f64::from(sun[0]), f64::from(sun[1]), f64::from(sun[2]));
+    let declination = libm::asin(z.clamp(-1.0, 1.0)).to_degrees();
+    let hours = 12.0 - libm::atan2(y, x).to_degrees() / 15.0;
+    crate::look::shading::sun_direction(hours + offset_h, declination)
+}
+
+/// The local solar time at `position` (planet-fixed) for the sun `sun`, hours in 0 to 24: 12 when the sun is on the camera's meridian, earlier
+/// when it is east of it (VIEW-054).
+pub fn local_solar_hours(sun: [f32; 3], position: Vec3) -> f64 {
+    let sun_lon = libm::atan2(f64::from(sun[1]), f64::from(sun[0])).to_degrees();
+    let lon = libm::atan2(position.y, position.x).to_degrees();
+    (12.0 + (lon - sun_lon) / 15.0).rem_euclid(24.0)
 }
 
 /// The lit plan of one viewer frame: the body's look (sun, tone curve, units, histogram, albedo), the adaptive exposure with `dt_s`
@@ -1778,5 +1829,57 @@ mod tests {
         assert!(v.editing_light);
         v.command(Command::ToggleEditingLight, 20, &c);
         assert!(!v.editing_light);
+    }
+
+    // spec: VIEW-054
+    #[test]
+    fn j_cycles_the_shade_view_and_the_bracket_keys_move_the_sun_half_an_hour_until_reset() {
+        use crate::look::shading::ShadeView::{Horizon, Lit, Shadow};
+        let c = crate::camera::Camera::at_surface_point(
+            planet_core::PlanetFixed(Vec3::new(6_371_000.0, 0.0, 0.0)),
+            Vec3::new(0.0, 0.0, 1.0),
+            0.0,
+            1.0,
+            16.0 / 9.0,
+            0.1,
+        );
+        let mut v = ViewerState::new(0, 3, 0, false);
+        assert_eq!((v.shade_view, v.sun_offset_h), (Lit, 0.0), "the look's sun and the lit view at the start");
+        let seen: Vec<_> = (0..4)
+            .map(|_| {
+                v.command(Command::CycleShadeView, 0, &c);
+                v.shade_view
+            })
+            .collect();
+        assert_eq!(seen, [Horizon, Shadow, Lit, Horizon]);
+        v.command(Command::SunLater, 0, &c);
+        v.command(Command::SunLater, 0, &c);
+        v.command(Command::SunEarlier, 0, &c);
+        assert_eq!(v.sun_offset_h, 0.5);
+        v.command(Command::SunEarlier, 0, &c);
+        v.command(Command::SunEarlier, 0, &c);
+        assert_eq!(v.sun_offset_h, 23.5, "the day wraps");
+        v.command(Command::SunReset, 0, &c);
+        assert_eq!(v.sun_offset_h, 0.0);
+    }
+
+    // spec: VIEW-054
+    #[test]
+    fn the_sun_override_moves_the_sun_west_fifteen_degrees_an_hour_and_reads_as_local_solar_time() {
+        // Noon at longitude 0 on the equator: the sun on +x. A camera on +x reads 12:00.
+        let noon = crate::look::shading::sun_direction(12.0, 0.0);
+        let at = Vec3::new(6_371_000.0, 0.0, 0.0);
+        assert!((local_solar_hours(noon, at) - 12.0).abs() < 1e-9);
+        assert_eq!(sun_with_offset(noon, 0.0), noon, "no offset, the look's sun");
+        // Six hours later the sun is over longitude -90 degrees (-y), and the camera reads 18:00.
+        let evening = sun_with_offset(noon, 6.0);
+        assert!(evening[0].abs() < 1e-6 && (evening[1] + 1.0).abs() < 1e-6 && evening[2].abs() < 1e-6, "{evening:?}");
+        assert!((local_solar_hours(evening, at) - 18.0).abs() < 1e-6);
+        // A camera a quarter turn west of the first (longitude -90) reads 12:00 for that sun, and the declination is kept.
+        assert!((local_solar_hours(evening, Vec3::new(0.0, -6_371_000.0, 0.0)) - 12.0).abs() < 1e-6);
+        let tilted = crate::look::shading::sun_direction(9.0, 20.0);
+        let later = sun_with_offset(tilted, 3.5);
+        assert!((f64::from(later[2]) - f64::from(tilted[2])).abs() < 1e-6, "the same declination");
+        assert!((local_solar_hours(later, at) - local_solar_hours(tilted, at) - 3.5).abs() < 1e-5);
     }
 }
