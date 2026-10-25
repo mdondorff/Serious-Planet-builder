@@ -260,15 +260,16 @@ impl LandformLattice {
 
     /// The range of [`LandformLattice::at`] over the cap of angular radius `angular_radius` (radians) round the unit direction `centre` (GEN-062): the
     /// least and the greatest sample of the cells the cap touches, which the interpolant of a cell cannot leave. A cap that may leave its face (it reaches
-    /// the edge, or is over 0.05 rad) or touches over 16 cells an axis gets `[0, 1]`. On a face a cap point is within `4 / (pi / 4)` face units of the centre
-    /// per radian (the plane coordinate `a / w` has a gradient of at most `sqrt(1 + u^2) / w` per radian with `w >= cos(0.955 + 0.05)` and `|u| <= 1 / w`,
-    /// and the tangent warp stretches by at least `pi / 4`).
+    /// the edge, or is over 0.05 rad) or touches over 16 cells an axis gets `[0, 1]`. On a face a cap point is within `(4 / pi) sqrt(2) = 1.80` face units of the centre
+    /// per radian (the plane coordinate `u = a / w` moves by at most `sqrt(1 + u^2) / w` per radian, the face coordinate `s` by that over the tangent warp's
+    /// stretch of at least `pi / 4`, which comes to `(4 / pi) sqrt((1 + u^2 + v^2) / (1 + u^2))`); the code takes 2.0, and a cap whose box stays inside the face has
+    /// every point on it.
     pub fn bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
-        if angular_radius.is_nan() || angular_radius > 0.05 {
+        if !(0.0..=0.05).contains(&angular_radius) {
             return (0.0, 1.0);
         }
         let (face, s, t) = planet_core::cube::direction_to_face(&planet_core::cube::TangentWarp, centre);
-        let reach = 5.2 * angular_radius + 1e-9;
+        let reach = 2.0 * angular_radius + 1e-9;
         if s - reach <= -1.0 || s + reach >= 1.0 || t - reach <= -1.0 || t + reach >= 1.0 {
             return (0.0, 1.0);
         }

@@ -522,7 +522,7 @@ mod tests {
             let b = (a + random_dir(&mut rng) * 1e-6).normalized();
             worst_step = worst_step.max((la - lat.at(b)).abs());
             // The bounds of a cap hold its centre and a point on its rim.
-            let rho = [1e-6, 1e-4, 1e-3, 1e-2, 0.04][(rng.next_f64() * 5.0) as usize % 5];
+            let rho = [1e-6, 1e-4, 1e-3, 3e-3, 1e-2][(rng.next_f64() * 5.0) as usize % 5];
             let rim = (a + random_dir(&mut rng) * rho).normalized();
             let ang = libm::acos(a.dot(rim).clamp(-1.0, 1.0));
             let (lo, hi) = lat.bounds(a, ang * (1.0 + 1e-9));
@@ -530,8 +530,16 @@ mod tests {
             assert!(lo <= la && la <= hi && lo <= lr && lr <= hi, "cap of {ang} rad: [{lo}, {hi}] misses {la} or {lr}");
             inside += usize::from(hi - lo < 1.0);
         }
-        assert!(worst < 0.1, "the lattice differs from the driver by {worst}");
+        assert!(worst < 0.03, "the lattice differs from the driver by {worst}");
         assert!(worst_step < 1e-3, "a pair 1e-6 apart differs by {worst_step}");
+        // The seams: two points 1e-12 either side of a cube edge (x = y) and of a corner agree.
+        for k in 0..200 {
+            let w = -0.9 + 1.8 * f64::from(k) / 199.0;
+            let (a, b) = (Vec3::new(1.0, 1.0 - 1e-12, w).normalized(), Vec3::new(1.0 - 1e-12, 1.0, w).normalized());
+            assert!((lat.at(a) - lat.at(b)).abs() < 1e-9, "seam at z {w}");
+        }
+        let (c1, c2) = (Vec3::new(1.0, 1.0, 1.0 - 1e-12).normalized(), Vec3::new(1.0 - 1e-12, 1.0, 1.0).normalized());
+        assert!((lat.at(c1) - lat.at(c2)).abs() < 1e-9, "corner seam");
         assert!(inside > 10_000, "{inside} caps with a range under [0, 1]");
     }
 }
