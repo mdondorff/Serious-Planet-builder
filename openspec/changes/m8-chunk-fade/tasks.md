@@ -1,7 +1,7 @@
 ## 1. Carry the change out (STRM-047), about half a day
-- [ ] 1.1 Tests first (tier A): `ChunkField::level_change` equals `height_at_level - base height` at every direction and level; every wrapper over a chunk field returns it; a field without chunk detail returns `None` (spec: STRM-047)
-- [ ] 1.2 `HeightField::level_change`, `ChunkField`, the wrappers
-- [ ] 1.3 The compact builder stores the change plane (tile flag, plane of f32); numerics-reviewer
+- [x] 1.1 Tests first (tier A): `ChunkField::level_change` equals `height_at_level - base height` at every direction and level; every wrapper over a chunk field returns it; a field without chunk detail returns `None` (spec: STRM-047)
+- [x] 1.2 `HeightField::level_change`, `ChunkField`, the wrappers
+- [x] 1.3 The compact builder stores the change plane (tile flag, plane of f32); numerics-reviewer
 
 ## 2. The node weight (STRM-047), about half a day
 - [ ] 2.1 Tests first: the node record carries `chunk_weight`; a tile near a chunk border takes the minimum of the weights of the chunks it reads; `node_bytes` grows by 4 (spec: STRM-047)

@@ -393,3 +393,74 @@ fn the_dense_index_of_an_interior_region_gives_the_region_of_the_hash_index() {
         assert_eq!(a.index_of(outside), b.index_of(outside));
     }
 }
+
+// spec: STRM-047
+#[test]
+fn the_level_change_is_the_chunk_change_and_none_without_chunk_detail_and_wrappers_keep_it() {
+    let lat = ChunkLattice::new(608).unwrap();
+    let stage = stand_in(8);
+    let tile = chunk_tile(2, 1000, 1000);
+    let result = Arc::new(compute_chunk(&lat, &stage, R, TOP11, tile, halo_rings(&stage)).unwrap());
+    let none = ChunkField::new(Reference(3), lat, R, &stage).with_top_level(TOP11);
+    let field = ChunkField::new(Reference(3), lat, R, &stage).with_top_level(TOP11).with_ready(result);
+    let centre = tile.center_direction(&TangentWarp);
+    let dirs: Vec<Vec3> =
+        (0..9u32).map(|k| TileId::new(Face(2), 15, 16 * 1000 + k, 16 * 1000 + 8 - k).unwrap().center_direction(&TangentWarp)).collect();
+    for level in [TOP11 - 1, TOP11, 13, 15, 18] {
+        let got = field.level_change(&dirs, level).expect("a chunk is ready");
+        assert_eq!(got.len(), dirs.len());
+        for (k, &d) in dirs.iter().enumerate() {
+            assert_eq!(got[k].to_bits(), field.change_at_level(d, level).to_bits(), "level {level} direction {k}");
+            let by_difference = field.height_at_level(d, level) - Reference(3).height_at_level(d, level);
+            assert!((got[k] - by_difference).abs() < 1e-6, "level {level} direction {k}: {} against {by_difference}", got[k]);
+        }
+    }
+    assert!(field.level_change(&dirs, 16).unwrap().iter().any(|&c| c != 0.0), "the stand-in changes the ground");
+    assert!(field.level_change(&dirs, TOP11 - 1).unwrap().iter().all(|&c| c == 0.0), "above the top level the base is drawn");
+    // Without chunk detail: no change at all, for a chunk field with nothing ready and for a plain field.
+    assert_eq!(none.level_change(&dirs, 16), None);
+    assert_eq!(Reference(3).level_change(&dirs, 16), None);
+    // The wrappers hand it on: a boxed field answers as the chunk field does (the other wrappers forward it the same way; the world's own chain is
+    // checked where it is built).
+    let want = field.level_change(&[centre], 16);
+    let boxed: Box<dyn HeightField> = Box::new(
+        ChunkField::new(Reference(3), lat, R, &stage)
+            .with_top_level(TOP11)
+            .with_ready(Arc::new(compute_chunk(&lat, &stage, R, TOP11, tile, halo_rings(&stage)).unwrap())),
+    );
+    assert_eq!(boxed.level_change(&[centre], 16), want);
+}
+
+// spec: STRM-047
+#[test]
+fn a_compact_tile_over_a_ready_chunk_carries_its_change_plane_and_one_away_from_chunks_does_not() {
+    use planet_generators::compact::compact_tile_field;
+    let lat = ChunkLattice::new(608).unwrap();
+    let stage = stand_in(8);
+    let tile = chunk_tile(2, 1000, 1000);
+    let result = Arc::new(compute_chunk(&lat, &stage, R, TOP11, tile, halo_rings(&stage)).unwrap());
+    let field = ChunkField::new(Reference(3), lat, R, &stage).with_top_level(TOP11).with_ready(result);
+    let id = TileId::new(Face(2), 15, 16 * 1000 + 5, 16 * 1000 + 7).unwrap();
+    assert_eq!(TileId::from_direction(&TangentWarp, id.center_direction(&TangentWarp), CHUNK_GRID_LEVEL), tile);
+    let cells = 32u32;
+    let with = compact_tile_field(&field, &TangentWarp, id, cells, R);
+    let plane = with.change.as_ref().expect("the tile reads a change");
+    assert_eq!(plane.len(), ((cells + 1) * (cells + 1)) as usize);
+    for (k, l) in [(0u32, 0u32), (7, 3), (32, 32), (16, 16), (31, 1)] {
+        let d = id.sample_direction(&TangentWarp, cells, k, l);
+        let want = field.change_at_level(d, id.level()) as f32;
+        assert_eq!(plane[(l * (cells + 1) + k) as usize].to_bits(), want.to_bits(), "texel ({k}, {l})");
+    }
+    assert!(plane.iter().any(|&c| c != 0.0));
+    // The texels hold the final heights: the tile of the field without the chunk differs from this one by the plane (to the height step).
+    let bare = compact_tile_field(&Reference(3), &TangentWarp, id, cells, R);
+    assert_eq!(bare.change, None, "a field without chunk detail builds no plane");
+    // A tile elsewhere reads no change, so it carries no plane even though the field has a chunk ready.
+    let far = TileId::new(Face(4), 15, 16 * 300, 16 * 300).unwrap();
+    assert_eq!(compact_tile_field(&field, &TangentWarp, far, cells, R).change, None);
+    // The plane is part of the hash of the tile; a tile without one hashes as before.
+    let mut without = with.clone();
+    without.change = None;
+    assert_ne!(with.content_hash(), without.content_hash());
+    assert_eq!(bare.content_hash(), compact_tile_field(&Reference(3), &TangentWarp, id, cells, R).content_hash());
+}

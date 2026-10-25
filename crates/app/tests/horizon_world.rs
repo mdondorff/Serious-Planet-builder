@@ -209,3 +209,23 @@ fn a_flight_over_the_chunks_lands_every_map_and_the_rebakes_stay_few_and_an_edit
     assert!(after.baked > before, "the edit bakes the maps again: {after:?}");
     assert!(after.rebaked > s.rebaked);
 }
+
+// spec: STRM-047
+#[test]
+fn the_worlds_field_chain_hands_the_chunk_change_to_the_tile_builder() {
+    use planet_generators::height::HeightField;
+    let r = rig();
+    let dirs = [tile().center_direction(&TangentWarp)];
+    // No chunk ready: no change, so the tiles of a world without chunks are built as they were.
+    assert_eq!(r.world.field().unwrap().level_change(&dirs, 17), None);
+    for _ in 0..40 {
+        r.world.chunk_frame(&[tile()], camera(), &[]);
+        r.chunk_jobs.run(64);
+        r.clock.advance(100);
+    }
+    let field = r.world.field().unwrap();
+    let got = field.level_change(&dirs, 17).expect("a chunk landed, the chain carries its change");
+    assert!(got[0] != 0.0, "the stand-in changes the ground at the tile: {got:?}");
+    let by_difference = field.height_at_level(dirs[0], 17) - field.height_at_level(dirs[0], 5);
+    assert!((got[0] - by_difference).abs() < 1e-6, "{} against {by_difference}", got[0]);
+}

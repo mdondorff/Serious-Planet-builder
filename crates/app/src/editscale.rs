@@ -370,6 +370,9 @@ impl HeightField for Timed<'_> {
     fn level_aware(&self) -> bool {
         self.inner.level_aware()
     }
+    fn level_change(&self, dirs: &[Vec3], level: u8) -> Option<Vec<f64>> {
+        self.inner.level_change(dirs, level)
+    }
     fn heights_and_climate(
         &self,
         map: &dyn FaceMapping,

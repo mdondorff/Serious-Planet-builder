@@ -512,6 +512,9 @@ impl HeightField for StampStage<'_> {
     fn level_aware(&self) -> bool {
         self.base.level_aware()
     }
+    fn level_change(&self, dirs: &[Vec3], level: u8) -> Option<Vec<f64>> {
+        self.base.level_change(dirs, level)
+    }
 
     fn heights_until(&self, dirs: &[Vec3], stop: &dyn Fn() -> bool) -> Vec<f64> {
         let base = self.base.heights_until(dirs, stop);
