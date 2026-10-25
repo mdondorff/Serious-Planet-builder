@@ -246,6 +246,14 @@ pub trait HeightField: Send + Sync {
     fn level_aware(&self) -> bool {
         false
     }
+    /// The chunk change at `dirs` as tile level `level` reads it, in metres: `height_at_level` less the height of the field below the chunk stage
+    /// (STRM-047). `None` for every field without chunk detail and for a chunk field with no chunk ready, so a world without chunks builds the
+    /// tiles it always built. A wrapper forwards it with `height_at_level`, or the change is lost on its way to the compact builder; a wrapper that
+    /// is not additive in its input height (a stage that clamps toward a target) recomputes it as the difference of its own heights with and
+    /// without the chunk change, because the change that reaches the texel is that difference.
+    fn level_change(&self, _dirs: &[Vec3], _level: u8) -> Option<Vec<f64>> {
+        None
+    }
     /// [`heights_threaded`](HeightField::heights_threaded) as drawn at tile level `level` (the plan's origin heights, GEN-036): the same values as
     /// `height_at_level` per direction in the caller's order for every `threads`; a field that is not level-aware takes its batch path.
     fn heights_threaded_at_level(&self, dirs: &[Vec3], level: u8, threads: usize) -> Vec<f64> {
@@ -589,6 +597,9 @@ impl<F: HeightField> HeightField for Bound<F> {
     fn level_aware(&self) -> bool {
         self.field.level_aware()
     }
+    fn level_change(&self, dirs: &[Vec3], level: u8) -> Option<Vec<f64>> {
+        self.field.level_change(dirs, level)
+    }
     fn heights_until(&self, dirs: &[Vec3], stop: &dyn Fn() -> bool) -> Vec<f64> {
         self.field.heights_until(dirs, stop)
     }
@@ -665,6 +676,9 @@ impl<T: HeightField + ?Sized> HeightField for Box<T> {
     }
     fn level_aware(&self) -> bool {
         (**self).level_aware()
+    }
+    fn level_change(&self, dirs: &[Vec3], level: u8) -> Option<Vec<f64>> {
+        (**self).level_change(dirs, level)
     }
     fn heights_threaded_at_level(&self, dirs: &[Vec3], level: u8, threads: usize) -> Vec<f64> {
         (**self).heights_threaded_at_level(dirs, level, threads)

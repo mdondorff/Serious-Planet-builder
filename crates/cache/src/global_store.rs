@@ -560,6 +560,7 @@ impl CoupledSpec {
             out.extend_from_slice(&v.to_bits().to_le_bytes());
         }
         out.extend_from_slice(&self.params.seed.to_le_bytes());
+        out.push(u8::from(self.params.erode));
         out.extend_from_slice(&self.inputs.to_le_bytes());
         out.extend_from_slice(&COUPLED_VERSION.to_le_bytes());
         out

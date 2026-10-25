@@ -104,6 +104,10 @@ pub struct CompactTile {
     pub climate_words: [u32; CLIMATE_TEXELS],
     /// `(cells + 1)^2` texels `[height step count, two 15-bit normal components]`, row `j` major.
     pub texels: Vec<[u32; 2]>,
+    /// The chunk change of every texel in metres, row `j` major like the texels (STRM-047, REND-039): the texel heights already include it, so a
+    /// vertex fades it with `h_q - (1 - w) change`. `None` for a tile without chunk detail (and for every tile of a world without chunks); it is
+    /// not part of the slot, so the slot bytes, the pack payloads and the hashes of GEN-025 are what they were.
+    pub change: Option<Vec<f32>>,
 }
 
 impl CompactTile {
@@ -212,6 +216,7 @@ impl CompactTile {
             relief_m,
             climate_words,
             texels,
+            change: None,
         })
     }
 
@@ -284,6 +289,11 @@ impl CompactTile {
             self.origin.0.z.to_bits(),
         ];
         v.extend(self.slot_data().chunks(4).map(|c| u64::from(u32::from_le_bytes(c.try_into().expect("a slot is a multiple of 4 bytes")))));
+        // A tile with a change plane hashes it too (after a marker); a tile without one hashes exactly as it always did.
+        if let Some(change) = &self.change {
+            v.push(0x0063_6870);
+            v.extend(change.iter().map(|c| u64::from(c.to_bits())));
+        }
         hash_u64s(0x0063_706b, &v)
     }
 }
@@ -360,6 +370,12 @@ pub fn compact_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: Ti
     dirs.push(centre);
     dirs.extend(crate::normals::lattice_directions(map, id, cells));
     let (all, climate) = field.heights_and_climate(map, id, &dirs, &|| false);
+    // The chunk change at the lattice points (the origin and the ring excluded), when the field has chunk detail here (STRM-047): stored only
+    // when some texel moved, so a tile away from every chunk is the tile it was.
+    let change = field
+        .level_change(&dirs[1..1 + count], id.level())
+        .filter(|c| c.iter().any(|&v| v != 0.0))
+        .map(|c| c.into_iter().map(|v| v as f32).collect::<Vec<f32>>());
     let h_origin = all[0];
     let origin = PlanetFixed(centre * (radius_m + h_origin));
     // The shell through the origin: control points are small tile-local numbers (CON-11), not heights from the sea level.
@@ -406,6 +422,7 @@ pub fn compact_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: Ti
         relief_m: hi - lo,
         climate_words: climate.to_words(),
         texels,
+        change,
     };
     let (du, dv) = tile.base_derivs(0.5, 0.5);
     let c = [centre.x as f32, centre.y as f32, centre.z as f32];

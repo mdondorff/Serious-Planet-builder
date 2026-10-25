@@ -596,6 +596,12 @@ impl<F: HeightField> HeightField for ChunkField<F> {
     fn level_aware(&self) -> bool {
         true
     }
+    fn level_change(&self, dirs: &[Vec3], level: u8) -> Option<Vec<f64>> {
+        if self.ready.is_empty() {
+            return None;
+        }
+        Some(dirs.iter().map(|&d| self.change_at_level(d, level)).collect())
+    }
     /// The tile's heights as drawn at its own level (GEN-036): the base's batch plus the change of the pyramid level the tile reads. The base is
     /// read as the field below the chunk stage reads it (level-independent: the global run and the layers under the chunks).
     fn heights_and_climate(

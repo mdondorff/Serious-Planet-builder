@@ -1,5 +1,6 @@
-//! M8-1 (c) timing: the coupled run made from a stored bake, timed, with nothing written (the store is only read; the result is not stored).
-//! `cargo run --release -p planet --example time_coupled_make -- --store DIR --global-res N [--cells 2048] [--steps 80]`. Not production code.
+//! M8-1 (c) timing: the coupled run made from a stored bake, timed. By default nothing is written (the store is only read); with `--write` the run
+//! is loaded from the store when it is there and else made and stored beside the bake, as the viewer does (it takes the store's writer lock).
+//! `cargo run --release -p planet --example time_coupled_make -- --store DIR --global-res N [--cells 2048] [--steps 80] [--write]`. Not production code.
 
 use planet::coupledworld::{load_or_run, COUPLED_CELLS, COUPLED_STEPS};
 use planet_cache::global_store::{GlobalWorld, StoreSource};
@@ -20,8 +21,18 @@ fn main() -> Result<(), String> {
     let store = planet_cache::pack::TileStore::open(std::path::Path::new(&dir), world.params()).map_err(|e| e.to_string())?;
     let src = StoreSource::new(&store, &world, res).map_err(|e| format!("{e}"))?;
     let t = std::time::Instant::now();
-    let r = load_or_run(&def, None, &src, n, steps)?;
-    println!("made {n} cells, {steps} steps from a bake of {res} in {:.1} s; block cache {:?}", t.elapsed().as_secs_f64(), src.stats());
+    let write = std::env::args().any(|a| a == "--write");
+    let r = load_or_run(&def, write.then(|| std::path::Path::new(&dir)), &src, n, steps)?;
+    println!(
+        "{:?} {n} cells, {steps} steps from a bake of {res} in {:.1} s (stored: {}); block cache {:?}",
+        r.origin,
+        t.elapsed().as_secs_f64(),
+        write && r.store_error.is_none(),
+        src.stats()
+    );
+    if let Some(e) = &r.store_error {
+        return Err(format!("the run is made but not stored: {e}"));
+    }
     drop(r);
     Ok(())
 }
