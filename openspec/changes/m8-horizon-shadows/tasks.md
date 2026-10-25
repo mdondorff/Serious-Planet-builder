@@ -11,7 +11,7 @@ Step 1 landed with the first PR; the rest follows. Each step is one PR of at mos
 - [x] 4b. STRM-049: the world wiring (`app::horizonworld`: baker from the world's field, `enable_horizon`, `horizon_frame`, `horizon_map`), flight test with the re-bake count. The pack-backed disk is STRM-050 (planned; it needs a record kind of its own: coordinate the number with explorer).
 - [x] 5a. REND-038 part (a) (REND-041): `HorizonFrame` and the per-node table builder in `frame` (`frame::horizonview`, design.md "Render design" point 1, 8a).
 - [x] 5b. REND-038 part (b): the render plumbing, bindings 4 to 7, dummies, `set_horizon`, uploads; frames identical with an all -1 table. (`render::horizon`, `TerrainRenderer::set_horizon`; `gpu_horizon`)
-- [ ] 5c. REND-038 part (c): the shader term and its test against the CPU reference.
+- [x] 5c. REND-038 part (c): the shader term and its test against the CPU reference. (`render::horizon_wgsl`, `probe_horizon`, `frame::horizonview::pack_coarse`, `set_horizon_coarse`; `gpu_horizon`)
 - [ ] 6. REND-038 part (d), CON-18: `ShadeView::Horizon` / `Shadow`, the viewer call sites, stills at sunset and midday on the fixed poses; goldens through `golden-review`.
 - [ ] 7. Perf (architect's window): the shadow term's GPU time at 1440p, the chunk job time with the bake; judged against criterion 5 together with M8-6.
 - [ ] 8. Spec-guardian, numerics-reviewer (core, generators, shaders), verifier; archive when all requirements pass and the window has recorded the figures.

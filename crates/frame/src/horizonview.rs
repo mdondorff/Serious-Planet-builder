@@ -26,9 +26,9 @@ pub const SLOT_BYTES: usize = LAYERS_PER_SLOT * HORIZON_TEXELS * HORIZON_TEXELS 
 
 /// The map of a chunk packed for the GPU: `LAYERS_PER_SLOT` layers one after another, each `HORIZON_TEXELS` rows of `HORIZON_TEXELS` texels of
 /// four bytes (the azimuths `4 L .. 4 L + 3` for layer `L`; a missing azimuth is 0). Each texel is the mean of the cells of the map under it, at
-/// least one cell. `None` for a map that is not `n x n` cells of 1 to `MAX_SLOT_AZIMUTHS` azimuths.
+/// least one cell. `None` for a map that is not `n x n` cells of exactly `MAX_SLOT_AZIMUTHS` (16) azimuths: the shader places azimuth `k` at `k / 16` of a turn.
 pub fn pack_map(bytes: &[u8], n: usize, azimuths: usize) -> Option<Vec<u8>> {
-    if n == 0 || azimuths == 0 || azimuths > MAX_SLOT_AZIMUTHS || bytes.len() != n * n * azimuths {
+    if n == 0 || azimuths != MAX_SLOT_AZIMUTHS || bytes.len() != n * n * azimuths {
         return None;
     }
     let h = HORIZON_TEXELS;
@@ -53,6 +53,25 @@ pub fn pack_map(bytes: &[u8], n: usize, azimuths: usize) -> Option<Vec<u8>> {
                 }
                 let (layer, channel) = (k / AZIMUTHS_PER_LAYER, k % AZIMUTHS_PER_LAYER);
                 out[((layer * h + ty) * h + tx) * 4 + channel] = ((sum + count / 2) / count) as u8;
+            }
+        }
+    }
+    Some(out)
+}
+
+/// The coarse horizon map (GEN-045: faces in order, rows `j` outer, `i`, then azimuth; `m x m` cells a face) packed as the GPU reads it: layer
+/// `4 f + L` of the array holds face `f`, azimuths `4 L .. 4 L + 3` in the four channels of the texel `(i, j)`; a missing azimuth is 0. `None`
+/// for a map that is not `6 m^2` cells (`m >= 2`: a 1 x 1 texture is the shader's "no coarse map") of exactly [`MAX_SLOT_AZIMUTHS`] (16) azimuths.
+pub fn pack_coarse(bytes: &[u8], m: usize, azimuths: usize) -> Option<Vec<u8>> {
+    if m < 2 || azimuths != MAX_SLOT_AZIMUTHS || bytes.len() != 6 * m * m * azimuths {
+        return None;
+    }
+    let mut out = vec![0u8; 6 * LAYERS_PER_SLOT * m * m * 4];
+    for face in 0..6 {
+        for cell in 0..m * m {
+            for k in 0..azimuths {
+                let (layer, channel) = (face * LAYERS_PER_SLOT + k / AZIMUTHS_PER_LAYER, k % AZIMUTHS_PER_LAYER);
+                out[(layer * m * m + cell) * 4 + channel] = bytes[(face * m * m + cell) * azimuths + k];
             }
         }
     }
@@ -251,33 +270,52 @@ mod tests {
 
     // spec: REND-041
     #[test]
+    fn the_coarse_map_is_packed_to_four_layers_a_face_with_four_azimuths_a_texel() {
+        let (m, a) = (3usize, 16usize);
+        let bytes: Vec<u8> = (0..6 * m * m * a).map(|i| (i % 251) as u8).collect();
+        let packed = pack_coarse(&bytes, m, a).unwrap();
+        assert_eq!(packed.len(), 6 * LAYERS_PER_SLOT * m * m * 4);
+        for (face, cell, k) in [(0usize, 0usize, 0usize), (2, 4, 15), (5, 8, 3), (3, 1, 4)] {
+            let (layer, channel) = (face * LAYERS_PER_SLOT + k / 4, k % 4);
+            assert_eq!(
+                packed[(layer * m * m + cell) * 4 + channel],
+                bytes[(face * m * m + cell) * a + k],
+                "face {face} cell {cell} azimuth {k}"
+            );
+        }
+        // The shader places azimuth k at k / 16 of a turn: any other count, a missing byte and a 1 x 1 map (the shader's "none") are refused.
+        assert!(pack_coarse(&bytes[1..], m, a).is_none() && pack_coarse(&bytes, m, 17).is_none());
+        assert!(pack_coarse(&vec![0u8; 6 * m * m * 4], m, 4).is_none() && pack_coarse(&[0u8; 6 * 16], 1, 16).is_none());
+    }
+
+    // spec: REND-041
+    #[test]
     fn a_map_is_packed_to_four_layers_of_256_squared_texels_with_four_azimuths_a_texel() {
-        let (n, a) = (8usize, 6usize);
+        let (n, a) = (8usize, 16usize);
         let bytes: Vec<u8> = (0..n * n * a).map(|i| ((i * 37) % 251) as u8).collect();
         let packed = pack_map(&bytes, n, a).unwrap();
         assert_eq!(packed.len(), SLOT_BYTES);
         let h = HORIZON_TEXELS;
         // A map smaller than the layer: every texel is the cell under it (the span is one cell), azimuth k in layer k/4, channel k%4.
-        for (cx, cy, k) in [(0usize, 0usize, 0usize), (7, 7, 5), (3, 2, 4), (5, 6, 1)] {
+        for (cx, cy, k) in [(0usize, 0usize, 0usize), (7, 7, 15), (3, 2, 4), (5, 6, 1)] {
             let (tx, ty) = (cx * h / n + 1, cy * h / n + 1);
             let v = packed[(((k / 4) * h + ty) * h + tx) * 4 + k % 4];
             assert_eq!(v, bytes[(cy * n + cx) * a + k], "cell ({cx}, {cy}) azimuth {k}");
         }
-        // The azimuths a map does not have are 0 in the last layers.
-        assert!(packed[(2 * h * h) * 4..].iter().all(|&b| b == 0), "azimuths 8 and up are absent");
     }
 
     // spec: REND-041
     #[test]
     fn a_larger_map_is_the_mean_of_the_cells_under_a_texel_and_a_bad_map_is_refused() {
-        let (n, a) = (512usize, 1usize);
-        let bytes: Vec<u8> = (0..n * n).map(|i| if (i % n) % 2 == 0 { 10 } else { 30 }).collect();
+        let (n, a) = (512usize, 16usize);
+        let bytes: Vec<u8> = (0..n * n * a).map(|i| if ((i / a) % n) % 2 == 0 { 10 } else { 30 }).collect();
         let packed = pack_map(&bytes, n, a).unwrap();
         // 2 x 2 cells a texel: the mean of 10, 30, 10, 30.
-        assert!(packed[..HORIZON_TEXELS * HORIZON_TEXELS * 4].chunks(4).all(|t| t[0] == 20 && t[1] == 0), "the mean, and no other channel");
+        assert!(packed[..HORIZON_TEXELS * HORIZON_TEXELS * 4].chunks(4).all(|t| t == [20; 4]), "the mean in every channel");
         assert_eq!(pack_map(&bytes[1..], n, a), None);
         assert_eq!(pack_map(&bytes, 0, a), None);
         assert_eq!(pack_map(&vec![0u8; 4 * 4 * 17], 4, 17), None, "more azimuths than a slot holds");
+        assert_eq!(pack_map(&[0u8; 4 * 4 * 8], 4, 8), None, "the shader reads 16 azimuths");
         // A map that is not a multiple of the layer: the spans cover every cell once or more and never run past the map.
         let odd = pack_map(&vec![200u8; 614 * 614 * 16], 614, 16).unwrap();
         assert!(odd.iter().all(|&b| b == 200), "a constant map packs to the same constant, 614 cells to 256 texels");
