@@ -1,9 +1,9 @@
 # anchor: latitude -37.6853 longitude 3.1421 degrees, ground 3242.9 m, the river flows towards bearing 180 degrees, steepest slope 2.9 degrees and relief 126 m within 2000 m
 # snapped to the channel, 334 m from the anchor: latitude -37.6882 longitude 3.1410 degrees, ground 3175.0 m, downstream bearing 200 degrees
 # pose width height eye_lat_deg eye_lon_deg eye_height_m heading_deg pitch_deg sun_local_hours chunks waited_s nodes capped_nodes
-300m-sunset 2560 1440 -37.67554 3.14683 3555.5 200 15 17.5 6 11.7 1715 122
-300m-midday 2560 1440 -37.67554 3.14683 3555.5 200 15 12 6 2.9 1715 122
-30m-sunset 2560 1440 -37.68484 3.14255 3269.4 200 8 17.5 5 5.5 1734 126
-30m-midday 2560 1440 -37.68484 3.14255 3269.4 200 8 12 5 5.4 1734 126
-1.8m-sunset 2560 1440 -37.68771 3.14123 3177.1 200 0 17.5 5 3.6 1729 125
-1.8m-midday 2560 1440 -37.68771 3.14123 3177.1 200 0 12 5 4.1 1729 125
+300m-sunset 2560 1440 -37.67554 3.14683 3555.5 200 15 17.5 6 2.7 1715 122
+300m-midday 2560 1440 -37.67554 3.14683 3555.5 200 15 12 6 4.0 1715 122
+30m-sunset 2560 1440 -37.68484 3.14255 3269.4 200 8 17.5 5 4.9 1734 126
+30m-midday 2560 1440 -37.68484 3.14255 3269.4 200 8 12 5 3.6 1734 126
+1.8m-sunset 2560 1440 -37.68771 3.14123 3177.1 200 0 17.5 5 4.9 1729 125
+1.8m-midday 2560 1440 -37.68771 3.14123 3177.1 200 0 12 5 3.4 1729 125

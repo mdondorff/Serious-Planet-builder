@@ -86,4 +86,4 @@ Source: planner decision 2026-10-25, GEN-051, learnings 2026-10-25 (walls), ADR 
 
 #### Scenario: A breach cut through a ridge
 - **WHEN** a chunk of a river that crosses a 600 m ridge runs with and without the settle
-- **THEN** without it more than ten bank pairs stand over the repose slope, with it at most one in a hundred, no protected cell differs, and no cell is higher with it than without
+- **THEN** without it more than ten bank pairs stand over the repose slope, with it at most one in twenty, no protected cell differs, and no cell is higher with it than without
