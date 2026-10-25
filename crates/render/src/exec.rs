@@ -23,6 +23,11 @@ pub enum ExecError {
         expected: usize,
         got: usize,
     },
+    /// A chunk change plane holds a value that is not finite (REND-039): its tile would lose its triangles while it fades.
+    NonFiniteChange {
+        id: TileId,
+        index: usize,
+    },
     OutsideFrame {
         index: usize,
         rect: [u32; 4],
@@ -137,6 +142,12 @@ impl fmt::Display for ExecError {
             }
             ExecError::MissingTile(id) => write!(f, "the plan draws tile {id:?} but no resource for it was supplied"),
             ExecError::BadResource { id, expected, got } => write!(f, "tile {id:?}: expected {expected} height samples, got {got}"),
+            ExecError::NonFiniteChange { id, index } => {
+                write!(
+                    f,
+                    "tile {id:?}: the chunk change plane is not finite at texel {index}: the tile is refused rather than drawn with holes"
+                )
+            }
             ExecError::OutsideFrame { index, rect, size } => {
                 write!(f, "draw {index}: rectangle {rect:?} lies outside the {}x{} frame", size.0, size.1)
             }

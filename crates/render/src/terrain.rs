@@ -916,6 +916,50 @@ struct FrameSet {
 /// its final height (counted in [`TerrainStats::fade_overflow`]).
 pub const FADE_PLANES: usize = 512;
 
+/// Which fading tiles hold a plane of the frame's buffer (REND-039): a tile that held one keeps it while it fades, a tile that was left without
+/// one stays without until its fade ends, and a tile new to the fade is granted one in tile-id order while there is room. So a node is never
+/// switched between its faded and its final height mid-fade, whatever finishes or starts around it. `candidates` are the (tile id, node index)
+/// pairs of the nodes still fading with a plane on the CPU; the result is the granted nodes in tile-id order.
+#[derive(Debug, Default)]
+pub struct FadePlaneGrants {
+    granted: std::collections::HashSet<planet_core::TileId>,
+    denied: std::collections::HashSet<planet_core::TileId>,
+}
+
+impl FadePlaneGrants {
+    /// The nodes that carry a plane this frame, and how many candidates were left without.
+    pub fn assign(&mut self, candidates: &mut [(planet_core::TileId, usize)], cap: usize) -> (Vec<(planet_core::TileId, usize)>, usize) {
+        candidates.sort_unstable_by_key(|&(t, i)| (t.raw(), i));
+        let now: std::collections::HashSet<planet_core::TileId> = candidates.iter().map(|c| c.0).collect();
+        self.granted.retain(|t| now.contains(t));
+        self.denied.retain(|t| now.contains(t));
+        let mut out = Vec::new();
+        let mut left = 0;
+        // Those that hold a plane keep it, even past what a fresh assignment would give (the cap is never exceeded: they were granted under it).
+        for &(t, i) in candidates.iter() {
+            if self.granted.contains(&t) {
+                out.push((t, i));
+            }
+        }
+        for &(t, i) in candidates.iter() {
+            if self.granted.contains(&t) {
+                continue;
+            }
+            if self.denied.contains(&t) {
+                left += 1;
+            } else if out.len() < cap {
+                self.granted.insert(t);
+                out.push((t, i));
+            } else {
+                self.denied.insert(t);
+                left += 1;
+            }
+        }
+        out.sort_unstable_by_key(|&(t, i)| (t.raw(), i));
+        (out, left)
+    }
+}
+
 /// 16-byte entries one fade plane takes in the frame's tile-reference buffer: `(cells + 1)^2` f32, padded to whole entries.
 pub fn fade_plane_vec4s(cells: u32) -> usize {
     ((cells as usize + 1) * (cells as usize + 1)).div_ceil(4)
@@ -1069,6 +1113,8 @@ pub struct TerrainRenderer {
     /// The chunk change plane of the tile in each slot that has one (REND-039), by slot index: kept on the CPU and written into the frame's
     /// buffer only for the nodes whose change is still fading in, so a settled view reads no plane.
     planes: HashMap<u32, std::sync::Arc<Vec<f32>>>,
+    /// Which fading tiles hold a plane of the frame's buffer, kept from frame to frame (REND-039).
+    fade_grants: FadePlaneGrants,
     /// Most nodes the node record buffer may hold.
     max_nodes: usize,
     /// Frames rendered; the clock of the slot retirement.
@@ -1380,6 +1426,7 @@ impl TerrainRenderer {
             compact: compact_gpu,
             owners: HashMap::new(),
             planes: HashMap::new(),
+            fade_grants: FadePlaneGrants::default(),
             max_nodes,
             frame: 0,
             pool,
@@ -1927,6 +1974,9 @@ impl TerrainRenderer {
             if change.len() != want {
                 return Err(ExecError::BadResource { id, expected: want, got: change.len() });
             }
+            if let Some(index) = change.iter().position(|v| !v.is_finite()) {
+                return Err(ExecError::NonFiniteChange { id, index });
+            }
         }
         let slot = match at {
             Some(slot) => slot,
@@ -2346,16 +2396,16 @@ impl TerrainRenderer {
             let stride = fade_plane_vec4s(self.cells);
             // The nodes whose change is still coming in and that have a plane, ordered by tile id so that the ones past `FADE_PLANES` are the same
             // from one frame to the next whatever the order of the plan: a node never flips between faded and final for want of room.
-            let mut fading: Vec<(u64, usize)> = plan
+            let mut candidates: Vec<(planet_core::TileId, usize)> = plan
                 .nodes
                 .iter()
                 .enumerate()
                 .filter(|(_, d)| d.chunk_weight < 1.0 && self.planes.contains_key(&self.tiles[&d.tile].slot.index))
-                .map(|(i, d)| (d.tile.raw(), i))
+                .map(|(i, d)| (d.tile, i))
                 .collect();
-            fading.sort_unstable();
-            stats.fade_overflow += fading.len().saturating_sub(FADE_PLANES) as u32;
-            fading.truncate(FADE_PLANES);
+            let (granted, left) = self.fade_grants.assign(&mut candidates, FADE_PLANES);
+            let fading: Vec<(u64, usize)> = granted.into_iter().map(|(t, i)| (t.raw(), i)).collect();
+            stats.fade_overflow += left as u32;
             stats.faded_tiles += fading.len() as u32;
             let mut planes = vec![0u8; fading.len() * REF_BYTES as usize * stride];
             let mut position = vec![0u32; plan.nodes.len()];
@@ -2691,6 +2741,45 @@ pub fn execute_terrain_tiles_preview_split(
     let (_, mut stats) = renderer.render(ctx, plan, false)?;
     stats.vertex_bytes = renderer.uploaded_bytes;
     Ok((renderer.read_color(ctx), stats))
+}
+
+#[cfg(test)]
+mod fade_grant_tests {
+    use super::*;
+    use planet_core::{Face, TileId};
+
+    fn tile(x: u32) -> TileId {
+        TileId::new(Face(0), 15, x, 0).unwrap()
+    }
+
+    // spec: REND-039
+    #[test]
+    fn a_node_is_never_switched_between_faded_and_final_mid_fade_whatever_finishes_or_starts_around_it() {
+        let cap = 4;
+        let mut g = FadePlaneGrants::default();
+        let set = |ids: &[u32]| -> Vec<(TileId, usize)> { ids.iter().enumerate().map(|(i, &x)| (tile(x), i)).collect() };
+        // Six fading, room for four: tiles 0..3 hold planes, 4 and 5 are left without.
+        let (granted, left) = g.assign(&mut set(&[0, 1, 2, 3, 4, 5]), cap);
+        assert_eq!(granted.iter().map(|c| c.0).collect::<Vec<_>>(), (0..4).map(tile).collect::<Vec<_>>());
+        assert_eq!(left, 2);
+        // The lowest id finishes: a fresh sort by id would now move tile 4 into the planes (a pop of (1 - w) x change); it stays without.
+        let (granted, left) = g.assign(&mut set(&[1, 2, 3, 4, 5]), cap);
+        assert_eq!(granted.iter().map(|c| c.0).collect::<Vec<_>>(), (1..4).map(tile).collect::<Vec<_>>());
+        assert_eq!(left, 2, "tiles 4 and 5 stay final until their fades end");
+        // A tile with a lower id than all starts to fade: it takes the free plane, the ones that hold planes keep theirs.
+        let (granted, _) = g.assign(&mut set(&[0, 1, 2, 3, 4, 5]), cap);
+        assert_eq!(granted.iter().map(|c| c.0).collect::<Vec<_>>(), (0..4).map(tile).collect::<Vec<_>>());
+        // A denied tile that finished and starts again is new to the fade.
+        let (_, _) = g.assign(&mut set(&[0, 1, 2, 3]), cap);
+        let (granted, left) = g.assign(&mut set(&[0, 1, 2, 3, 4]), cap);
+        assert_eq!(granted.len(), 4);
+        assert_eq!(left, 1);
+        // Room opens: one holder finishes, a new tile is granted, a denied one is not.
+        let (granted, left) = g.assign(&mut set(&[1, 2, 3, 4, 6]), cap);
+        let ids: Vec<u32> = granted.iter().map(|c| c.0.x()).collect();
+        assert_eq!(ids, vec![1, 2, 3, 6], "{ids:?}");
+        assert_eq!(left, 1, "tile 4 was denied and stays final");
+    }
 }
 
 #[cfg(test)]

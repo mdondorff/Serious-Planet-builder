@@ -1857,6 +1857,8 @@ fn the_loop_gives_every_node_the_fade_weight_of_the_chunks_it_reads() {
     let drawn = rig.step(&req).pipeline.draw.plan.nodes.iter().map(|n| n.tile).find(|t| t.level() >= 6).expect("the plan draws fine tiles");
     let target = (drawn.face().0, drawn.x() >> (drawn.level() - 6), drawn.y() >> (drawn.level() - 6));
     rig.lp.chunk_landed(&[target]);
+    // The fade of a landed chunk starts when the rebuilt tiles reach the renderer (STRM-047), not at the landing: let the refresh finish first.
+    rig.settle(&req);
     let reads_target = |t: TileId| t.level() >= 6 && (t.face().0, t.x() >> (t.level() - 6), t.y() >> (t.level() - 6)) == target;
     let mut now = 0u64;
     for (ms, want) in [(0u64, 0.0f32), (750, 0.5), (1_500, 1.0), (4_000, 1.0)] {
@@ -1874,4 +1876,57 @@ fn the_loop_gives_every_node_the_fade_weight_of_the_chunks_it_reads() {
         }
         assert!(seen > 0, "the plan draws tiles that read the chunk that landed");
     }
+}
+
+// spec: STRM-047
+#[test]
+fn a_rebuild_slower_than_the_fade_still_fades_and_neither_a_neighbour_nor_a_new_version_drops_the_tiles_under_a_faded_chunk() {
+    let mut rig = Rig::new(1_000_000);
+    let req = request(here(), 0.0, -0.4);
+    rig.settle(&req);
+    let view = Arc::new(StubView { ready: std::sync::atomic::AtomicBool::new(true) });
+    let clock = Arc::new(planet_streaming::FakeClock::default());
+    rig.lp.set_chunk_view(Some(view));
+    rig.lp.set_chunk_fade(1_500, clock.clone());
+    let drawn = rig.step(&req).pipeline.draw.plan.nodes.iter().map(|n| n.tile).find(|t| t.level() >= 6).expect("the plan draws fine tiles");
+    let key_of = |t: TileId| (t.face().0, t.x() >> (t.level() - 6), t.y() >> (t.level() - 6));
+    let target = key_of(drawn);
+    let reads_target = |t: TileId| t.level() >= 6 && key_of(t) == target;
+    let weights = |rig: &mut Rig| -> Vec<f32> {
+        let f = rig.step(&req);
+        f.pipeline.draw.plan.nodes.iter().filter(|n| reads_target(n.tile)).map(|n| n.chunk_weight).collect()
+    };
+    // The chunk lands and the rebuild takes 2 s, longer than the fade: nothing of the change is drawn before the rebuilt tiles arrive, and
+    // the first frame that draws them starts at the base, not at the whole change.
+    rig.lp.chunk_landed(&[target]);
+    clock.advance(2_000);
+    assert!(weights(&mut rig).iter().all(|&w| w == 0.0), "2 s after the landing and the rebuild not delivered: the base");
+    rig.settle(&req);
+    let w0 = weights(&mut rig);
+    assert!(!w0.is_empty() && w0.iter().all(|&w| w == 0.0), "the first frame that draws the rebuilt tiles: {w0:?}");
+    clock.advance(750);
+    assert!(weights(&mut rig).iter().all(|&w| (w - 0.5).abs() < 1e-6));
+    clock.advance(1_000);
+    assert!(weights(&mut rig).iter().all(|&w| w == 1.0));
+    // A chunk that nobody under the target reads lands: the tiles under the target keep weight 1 through the refresh of the others.
+    let other = resident_chunk_other_than(&rig, target);
+    rig.lp.chunk_landed(&[other]);
+    rig.settle(&req);
+    assert!(weights(&mut rig).iter().all(|&w| w == 1.0), "a neighbour landing leaves the tiles under the faded chunk alone");
+    // The target lands again as a new version: its tiles are rebuilt and keep their weight (no drop to the base, no second fade).
+    rig.lp.chunk_landed(&[target]);
+    assert!(weights(&mut rig).iter().all(|&w| w == 1.0), "before the rebuilt tiles arrive");
+    rig.settle(&req);
+    assert!(weights(&mut rig).iter().all(|&w| w == 1.0), "after");
+}
+
+/// The key of another chunk some resident tile of level 6 or finer lies in.
+fn resident_chunk_other_than(rig: &Rig, target: (u8, u32, u32)) -> (u8, u32, u32) {
+    rig.lp
+        .resident()
+        .keys()
+        .filter(|t| t.level() >= 6)
+        .map(|t| (t.face().0, t.x() >> (t.level() - 6), t.y() >> (t.level() - 6)))
+        .find(|k| *k != target)
+        .expect("the settled view reads more than one chunk")
 }

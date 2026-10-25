@@ -540,6 +540,14 @@ impl ManagedLoop {
                     // Act on the state now: a tile added and evicted since the last frame is not resident any more.
                     let (Some(mesh), Some(slot)) = (streamer.get(tile), streamer.slot_of(tile)) else { continue };
                     if self.slots.get(&tile) == Some(&slot) && self.resident.get(&tile).is_some_and(|r| r.mesh_key == mesh.key()) {
+                        // The refresh made the very tile the sink holds: nothing to write, but it is the rebuilt tile that is drawn from now on,
+                        // so the fade of the chunks it reads starts here (STRM-047).
+                        if let (Some(view), Some((fade, clock))) = (self.chunk_view.as_deref(), self.chunk_fade.as_mut()) {
+                            let now = clock.now_ms();
+                            for k in view.reads(tile) {
+                                fade.shown(k, now);
+                            }
+                        }
                         continue;
                     }
                     self.pending.insert(tile);
@@ -605,6 +613,15 @@ impl ManagedLoop {
             let refs: Vec<(&CompactTile, SlotRef)> = batch.iter().map(|(_, mesh, slot, _)| (&**mesh, *slot)).collect();
             let stats = sink.upload_batch(&refs)?;
             upload_calls += stats.calls;
+            // The first tile of a landed chunk to reach the renderer starts that chunk's fade (STRM-047): its change is drawn from now.
+            if let (Some(view), Some((fade, clock))) = (self.chunk_view.as_deref(), self.chunk_fade.as_mut()) {
+                let now = clock.now_ms();
+                for (tile, ..) in &batch {
+                    for k in view.reads(*tile) {
+                        fade.shown(k, now);
+                    }
+                }
+            }
             for (tile, mesh, slot, bytes) in &batch {
                 self.resident.insert(*tile, ResidentTile { mesh_key: mesh.key(), origin: mesh.origin() });
                 self.slots.insert(*tile, *slot);
