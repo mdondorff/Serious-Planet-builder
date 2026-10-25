@@ -1,0 +1,98 @@
+$ spikes/fine-network/proto/fine/target/release/fine.exe C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/08b1f229-f4b3-4c7e-af80-ff382dc3bd95/scratchpad/fine hillsA
+site hillsA: window 3408 cells, cell 8.037 m, core 608 cells, margin 1400, thresholds [0.1, 0.3, 1.0] km2 = [1548.1466, 4644.44, 15481.467] cells
+reference fill=true: 11614464 cells in 1.5 s
+reference fill=false: 11614464 cells in 3.1 s
+
+Rows: halo H (cells) per scheme; stats of the centre chunk's core vs the reference. density km/km2 (chunk / reference), miss and extra as a share of the reference's channel cells.
+
+== fill=true ==
+-- threshold 0.1 km2, reference density 3.414 km/km2
+    H       ms     dens    miss%   extra% | seam E:  links differ  stepdn  bothno | seam N:  links differ stepdn
+    0       36    2.241    93.59    63.74 |      7      0       1       7 |      8      0      0
+   25       40    2.541    91.47    70.38 |      7      1       3       6 |      8      0      5
+   50       50    2.915    88.81    78.11 |      7      0       3       6 |      8      0      5
+  100       66    3.038    85.23    77.01 |      7      0       5       6 |      8      0      5
+  200      103    4.012    84.62   103.41 |      7      1       3       6 |      8      0      5
+  375      207    4.664    84.87   121.29 |      7      1       3       6 |      8      0      5
+  600      375    3.414     0.00     0.00 |      7      7       7       0 |      8      8      8
+  780      555    3.414     0.00     0.00 |      7      0       1       0 |      8      0      0
+-- threshold 0.3 km2, reference density 1.438 km/km2
+    H       ms     dens    miss%   extra% | seam E:  links differ  stepdn  bothno | seam N:  links differ stepdn
+    0       38    1.185    95.00    80.83 |      3      0       0       3 |      4      0      0
+   25       44    1.381    92.26    90.58 |      3      0       1       3 |      4      0      3
+   50       50    1.337    89.84    85.32 |      3      0       1       3 |      4      0      3
+  100       66    1.934    80.61   116.36 |      3      0       2       3 |      4      0      3
+  200      104    2.125    78.45   126.68 |      3      0       1       3 |      4      0      3
+  375      199    2.293    78.41   136.80 |      3      0       1       3 |      4      0      3
+  600      363    1.438     0.00     0.00 |      3      3       3       0 |      4      4      4
+  780      543    1.438     0.00     0.00 |      3      0       1       0 |      4      0      0
+-- threshold 1 km2, reference density 0.467 km/km2
+    H       ms     dens    miss%   extra% | seam E:  links differ  stepdn  bothno | seam N:  links differ stepdn
+    0       35    0.472   100.00   102.23 |      2      0       0       2 |      2      0      0
+   25       42    0.705    96.56   141.54 |      2      0       1       2 |      2      0      1
+   50       50    0.696    89.87   132.25 |      2      0       1       2 |      2      0      1
+  100       66    0.812    78.62   146.19 |      2      0       1       2 |      2      0      1
+  200       96    0.986    60.13   164.78 |      2      0       1       2 |      2      0      1
+  375      199    0.579    54.09    78.62 |      2      0       1       2 |      2      0      1
+  600      371    0.467     0.00     0.00 |      2      2       2       0 |      2      2      2
+  780      552    0.467     0.00     0.00 |      2      0       1       0 |      2      0      0
+
+== fill=false ==
+-- threshold 0.1 km2, reference density 0.436 km/km2
+    H       ms     dens    miss%   extra% | seam E:  links differ  stepdn  bothno | seam N:  links differ stepdn
+    0       40    0.175    59.01     0.00 |      0      0       0       0 |      0      0      0
+   25       47    0.263    39.06     0.00 |      0      0       0       0 |      0      0      0
+   50       53    0.329    24.36     0.00 |      0      0       0       0 |      0      0      0
+  100       70    0.406     6.71     0.00 |      0      0       0       0 |      0      0      0
+  200      111    0.435     0.37     0.00 |      0      0       0       0 |      0      0      0
+  375      205    0.436     0.00     0.00 |      0      0       0       0 |      0      0      0
+  600      384    0.436     0.00     0.00 |      0      0       0       0 |      0      0      0
+  780      556    0.436     0.00     0.00 |      0      0       0       0 |      0      0      0
+-- threshold 0.3 km2, reference density 0.099 km/km2
+    H       ms     dens    miss%   extra% | seam E:  links differ  stepdn  bothno | seam N:  links differ stepdn
+    0       39    0.006    93.90     0.00 |      0      0       0       0 |      0      0      0
+   25       47    0.020    78.46     0.00 |      0      0       0       0 |      0      0      0
+   50       53    0.020    78.46     0.00 |      0      0       0       0 |      0      0      0
+  100       72    0.062    35.37     0.00 |      0      0       0       0 |      0      0      0
+  200      100    0.099     0.00     0.00 |      0      0       0       0 |      0      0      0
+  375      198    0.099     0.00     0.00 |      0      0       0       0 |      0      0      0
+  600      382    0.099     0.00     0.00 |      0      0       0       0 |      0      0      0
+  780      571    0.099     0.00     0.00 |      0      0       0       0 |      0      0      0
+-- threshold 1 km2, reference density 0.000 km/km2
+    H       ms     dens    miss%   extra% | seam E:  links differ  stepdn  bothno | seam N:  links differ stepdn
+    0       41    0.000     0.00     0.00 |      0      0       0       0 |      0      0      0
+   25       45    0.000     0.00     0.00 |      0      0       0       0 |      0      0      0
+   50       49    0.000     0.00     0.00 |      0      0       0       0 |      0      0      0
+  100       71    0.000     0.00     0.00 |      0      0       0       0 |      0      0      0
+  200      112    0.000     0.00     0.00 |      0      0       0       0 |      0      0      0
+  375      209    0.000     0.00     0.00 |      0      0       0       0 |      0      0      0
+  600      369    0.000     0.00     0.00 |      0      0       0       0 |      0      0      0
+  780      572    0.000     0.00     0.00 |      0      0       0       0 |      0      0      0
+
+== (a) edge inflow: core + 1 ring, fill=true ==
+fine channels entering the core from outside (reference donors with area over the threshold): 25 / 12 / 6 at [0.1, 0.3, 1.0] km2 (a coarse cell is 24 km2; the coarse run names the stems only)
+threshold 0.1 km2 (reference 3.414 km/km2):
+  restart (no inflow)    density 2.164  miss 93.16 %  extra 60.53 %
+  oracle entry inflow    density 3.558  miss 84.79 %  extra 95.36 %
+  even smear per side    density 6.081  miss 82.79 %  extra 174.81 %
+threshold 0.3 km2 (reference 1.438 km/km2):
+  restart (no inflow)    density 1.195  miss 94.87 %  extra 80.23 %
+  oracle entry inflow    density 1.793  miss 79.78 %  extra 110.22 %
+  even smear per side    density 3.294  miss 81.28 %  extra 224.23 %
+threshold 1 km2 (reference 0.467 km/km2):
+  restart (no inflow)    density 0.537  miss 100.00 %  extra 111.34 %
+  oracle entry inflow    density 0.986  miss 59.29 %  extra 169.52 %
+  even smear per side    density 1.635  miss 68.22 %  extra 323.14 %
+
+== depression fill in the core (reference) and where the mismatch sits (threshold 0.3 km2) ==
+share of core cells filled by more than 0.5 / 5 / 50 m: 79.9 / 79.2 / 71.54 %, deepest 239 m
+H 100: 6187 mismatching cells, 6044 of them on ground filled by more than 0.5 m in either solution
+H 200: 6443 mismatching cells, 6368 of them on ground filled by more than 0.5 m in either solution
+H 375: 6760 mismatching cells, 6691 of them on ground filled by more than 0.5 m in either solution
+H 600: 0 mismatching cells, 0 of them on ground filled by more than 0.5 m in either solution
+threshold 0.1 km2: 41 channel heads in the core, 1.72 per km2
+threshold 0.3 km2: 17 channel heads in the core, 0.71 per km2
+threshold 1 km2: 8 channel heads in the core, 0.34 per km2
+
+== thread identity and cost: 9 chunks, H = 375, fill=true ==
+1 worker 1.85 s (0.21 s per chunk), 8 workers 0.48 s; hashes identical: true
