@@ -8,9 +8,9 @@
 - [x] 2.2 `ChunkFade::tile_weight` (minimum rule, default fade 1,500 ms) into `TerrainDraw::chunk_weight` through `ManagedLoop::set_chunk_fade`; the window turns it on with the chunk view
 
 ## 3. The shader and its mirrors (REND-039), about a day
-- [ ] 3.1 Tests first: with `w = 1` or no change plane the CPU mirror equals the old arithmetic bit for bit; at `w = 0` the drawn height is the base's; the shader scan finds the new binding and word offsets (spec: REND-039)
-- [ ] 3.2 The second pool binding (dummy when chunks are off), the WGSL, the CPU mirror, the reference renderer
-- [ ] 3.3 The landing on the software adapter: a tile's drawn height steps by at most the weight step times the change per frame (tier C, spec: STRM-039 fade scenario as REND-039)
+- [x] 3.1 Tests first: with `w = 1` or no change plane the CPU mirror equals the old arithmetic bit for bit; at `w = 0` the drawn height is the base's; the node record lane (spec: REND-039)
+- [x] 3.2 The WGSL (the plane in the tile-reference buffer, the fade lane), the CPU mirror (`shade_vertex_faded`), the renderer's plane upload; the reference renderer draws a mesh of the blended field
+- [x] 3.3 The faded tile on the software adapter at weights 0, 0.5 and 1 equals the reference renderer's image of the blended field (tier C, `gpu_chunk_fade`)
 
 ## 4. Length, normals, golden-review
 - [ ] 4.1 `chunk_fade_ms` default 1500 (criterion 3, amended 2026-10-24); the screen step at the entry level at the review poses at most about 0.5 px p99 with blending (measured on the landing stills); the look test of the normal choice (decision 4), recorded

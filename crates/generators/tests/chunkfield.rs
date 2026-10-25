@@ -464,3 +464,51 @@ fn a_compact_tile_over_a_ready_chunk_carries_its_change_plane_and_one_away_from_
     assert_ne!(with.content_hash(), without.content_hash());
     assert_eq!(bare.content_hash(), compact_tile_field(&Reference(3), &TangentWarp, id, cells, R).content_hash());
 }
+
+// spec: REND-039
+#[test]
+fn the_mirror_of_the_vertex_stage_draws_the_final_height_at_weight_one_the_base_at_zero_and_the_old_arithmetic_without_a_plane() {
+    use planet_generators::compact::compact_tile_field;
+    let lat = ChunkLattice::new(608).unwrap();
+    let stage = stand_in(8);
+    let tile = chunk_tile(2, 1000, 1000);
+    let result = Arc::new(compute_chunk(&lat, &stage, R, TOP11, tile, halo_rings(&stage)).unwrap());
+    let field = ChunkField::new(Reference(3), lat, R, &stage).with_top_level(TOP11).with_ready(result);
+    let id = TileId::new(Face(2), 15, 16 * 1000 + 5, 16 * 1000 + 7).unwrap();
+    let cells = 32u32;
+    let with = compact_tile_field(&field, &TangentWarp, id, cells, R);
+    let plane = with.change.clone().expect("the tile reads a change");
+    let bare = compact_tile_field(&Reference(3), &TangentWarp, id, cells, R);
+    assert_eq!(bare.change, None);
+    for vi in 0..bare.shade_all().len() {
+        // No plane: any fade is the old arithmetic, bit for bit.
+        for fade in [0.0f32, 0.25, 1.0] {
+            let (a, b) = (bare.shade_vertex(vi), bare.shade_vertex_faded(vi, fade));
+            assert_eq!((a.height.to_bits(), a.pos.map(f32::to_bits)), (b.height.to_bits(), b.pos.map(f32::to_bits)), "vertex {vi}");
+        }
+        // Weight 1 is fade 0: the old arithmetic again, with a plane (the change times 0 adds 0).
+        let (a, b) = (with.shade_vertex(vi), with.shade_vertex_faded(vi, 0.0));
+        assert_eq!((a.height.to_bits(), a.pos.map(f32::to_bits)), (b.height.to_bits(), b.pos.map(f32::to_bits)), "vertex {vi}");
+    }
+    // Weight 0 (fade 1): the grid vertices sit at the base's height, final less the change; weight 0.5 halfway.
+    let w = (cells + 1) as usize;
+    let (mut worst0, mut worst_half) = (0.0f64, 0.0f64);
+    for j in 0..w {
+        for i in 0..w {
+            let k = j * w + i;
+            let (fin, base0, half) =
+                (with.shade_vertex(k).height, with.shade_vertex_faded(k, 1.0).height, with.shade_vertex_faded(k, 0.5).height);
+            worst0 = worst0.max((f64::from(fin) - f64::from(plane[k]) - f64::from(base0)).abs());
+            worst_half = worst_half.max((f64::from(fin) - 0.5 * f64::from(plane[k]) - f64::from(half)).abs());
+        }
+    }
+    eprintln!("faded heights against final - fade x change: weight 0 {worst0:.2e} m, weight 0.5 {worst_half:.2e} m");
+    // The heights carry the origin height (f32, about 1e-4 m of spacing at a few thousand metres): the comparison is good to a few of its steps.
+    assert!(worst0 < 5e-4 && worst_half < 5e-4, "{worst0}, {worst_half}");
+    // And the drawn base is the base field's height at the tile's level (to the quantisation of the texels).
+    let (i, j) = (7usize, 11usize);
+    let d = id.sample_direction(&TangentWarp, cells, i as u32, j as u32);
+    let drawn = f64::from(with.shade_vertex_faded(j * w + i, 1.0).height);
+    let base = Reference(3).height_at_level(d, id.level());
+    assert!((drawn - base).abs() < 2.0 * with.height_error_bound_m() + 5e-4, "{drawn} against the base {base}");
+}

@@ -60,6 +60,10 @@ var<private> skirt_depth: f32;
 var<private> flip: bool;
 // Index of the slot's first word in the block.
 var<private> origin: u32;
+// The chunk change fading in (REND-039): the entry of the frame's tile-reference buffer where the tile's change plane starts, plus one (0: the
+// tile has no plane in this frame), and the fade `1 - w` of the node; 0 reads no plane, so the old arithmetic is untouched.
+var<private> plane_entry: u32;
+var<private> fade: f32;
 
 fn hf(k: u32) -> f32 {
     return bitcast<f32>(block[origin + k]);
@@ -126,6 +130,22 @@ fn texel(i: i32, j: i32) -> vec2<u32> {
 
 fn rel_height(t: vec2<u32>) -> f32 {
     return hr_min + f32(t.x) * hr_step;
+}
+
+// The height of texel (i, j) with the fade of the chunk change taken off: `h_q - fade x change` (REND-039). Without a plane in this frame
+// or at fade 0 it is `hr` itself, the same operations as before.
+fn faded_height(i: i32, j: i32, hr: f32) -> f32 {
+    if (fade == 0.0) {
+        return hr;
+    }
+    let k = u32(j * (CELLS + 1) + i);
+    let v = tile_refs[plane_entry - 1u + k / 4u];
+    let lane = k & 3u;
+    var bits = v.x;
+    if (lane == 1u) { bits = v.y; }
+    if (lane == 2u) { bits = v.z; }
+    if (lane == 3u) { bits = v.w; }
+    return hr - fade * bitcast<f32>(bits);
 }
 
 fn texel_normal(t: vec2<u32>) -> vec3<f32> {
@@ -227,7 +247,7 @@ fn preview_place(o_rel: vec3<f32>, nup: vec4<f32>, i: i32, j: i32, hr: f32, k0: 
 
 // A neighbour for the parent-grid target: the preview's displaced vertex for a previewed node, the plain one otherwise.
 fn cplace(previewed: bool, o_rel: vec3<f32>, nup: vec4<f32>, i: i32, j: i32, k0: u32) -> vec4<f32> {
-    let hr = rel_height(texel(i, j));
+    let hr = faded_height(i, j, rel_height(texel(i, j)));
     if (previewed) {
         return preview_place(o_rel, nup, i, j, hr, k0);
     }
@@ -238,6 +258,8 @@ fn terrain_vertex(inst: u32, vi: u32) -> VsOut {
     let node = nodes[inst];
     let tref = tile_refs[inst];
     load_tile(tref.x);
+    plane_entry = tref.y;
+    fade = select(0.0, node.phase[6].w, tref.y != 0u);
     let w = CELLS + 1;
     let idx = i32(vi);
     var i = 0;
@@ -268,7 +290,7 @@ fn terrain_vertex(inst: u32, vi: u32) -> VsOut {
     let previewed = g.extra.w > 0.5 && node.morph.z > 0.5;
     // 2 marks a node only the transient stamps (after the delta's) apply to (VIEW-036).
     let k0 = select(0u, u32(g.extra.w) >> 6u, node.morph.z > 1.5);
-    var own = place(i, j, rel_height(own_t));
+    var own = place(i, j, faded_height(i, j, rel_height(own_t)));
     var grad = vec3<f32>(0.0);
     var flat_w = 0.0;
     var vup = vec3<f32>(0.0);
