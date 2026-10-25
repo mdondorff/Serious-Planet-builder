@@ -1,0 +1,1 @@
+- 2026-10-25 **viewer-plan-bound-follows-field**: the window builds its field and the plan's height bound again when the chunk stage arrives or the coupled lens changes (`WorldTerrain::field_stage`); before, every plan was refused once the stage landed (heights 10035 m over the bound 9735 m) and no tile refined
