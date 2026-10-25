@@ -143,3 +143,55 @@ fn the_chunk_edge_of_every_cell_size_carries_the_pyramid_the_top_level_reads() {
         assert!((lat.cell_m(R) / cell_m - 1.0).abs() < 0.03, "the cell stays near {cell_m} m: {}", lat.cell_m(R));
     }
 }
+
+// spec: STRM-046
+#[test]
+fn the_plan_bound_taken_before_the_chunk_stage_refuses_after_it_and_the_stage_marks_the_change() {
+    use planet_core::cube::{FaceMapping, TangentWarp};
+    use planet_core::{PlanetFixed, Vec3};
+    use planet_frame::{plan_terrain_cached, Camera, LodParams, SelectionCache, TerrainRequest, TerrainView};
+    let store = std::env::temp_dir().join(format!("planet-anet-bound-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&store);
+    run(&["generate", "--global-dir", store.to_str().unwrap(), "--global-res", &RES.to_string(), "--threads", "2"]).unwrap();
+    let world = open(&store);
+    wait_for_run(&world);
+    let world = open(&store);
+    let before = world.field_stage();
+    let (bound_before, bound_after) = {
+        let field = world.field().unwrap();
+        let bound = field.max_abs_height_m();
+        assert_eq!(
+            world.enable_anet_from_store(
+                CELL_M,
+                Arc::new(ManualSpawner::default()),
+                Arc::new(FakeClock::default()),
+                ChunkConfig::default()
+            ),
+            Ok(true)
+        );
+        // The window keeps `field` and the bound it took; the stage coming in changes what the world's field is built from.
+        assert_ne!(world.field_stage(), before, "the stage's arrival is visible to a viewer that keeps a field");
+        (bound, world.field().unwrap().max_abs_height_m())
+    };
+    assert!(bound_after > bound_before, "the stage lifts the field's bound: {bound_before} to {bound_after}");
+
+    let field = world.field().unwrap();
+    let fov = std::f64::consts::FRAC_PI_3;
+    let camera = Camera::looking_at_centre(PlanetFixed(Vec3::new(0.0, 0.0, 2.0 * R)), Vec3::new(1.0, 0.0, 0.0), fov, 16.0 / 9.0, 100.0);
+    let plan = |max_height_m: f64| {
+        let lod = LodParams { max_height_m, ..LodParams::earth_1080p() };
+        let req = TerrainRequest {
+            camera,
+            size: (1280, 720),
+            view: TerrainView::Level,
+            lod,
+            face_mapping: FaceMapping::id(&TangentWarp).to_string(),
+            seed: field.seed(),
+        };
+        plan_terrain_cached(&req, field.as_ref(), &mut SelectionCache::new())
+    };
+    let refused = plan(bound_before).unwrap_err().to_string();
+    assert!(refused.contains("exceed max_height_m"), "{refused}");
+    plan(bound_after).expect("the bound taken from the field it plans with plans");
+    let _ = std::fs::remove_dir_all(&store);
+}

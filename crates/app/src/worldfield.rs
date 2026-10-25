@@ -654,6 +654,12 @@ impl WorldTerrain {
         Ok(Some(f(&field)))
     }
 
+    /// What the next [`WorldTerrain::field`] is built from besides the definition: whether the chunk stage is on, and the coupled lens. A viewer
+    /// that keeps a field and the plan bound taken from it builds them again when this changes.
+    pub fn field_stage(&self) -> (bool, Option<CoupledLens>) {
+        (self.chunk_manager().is_some(), self.coupled_lens())
+    }
+
     /// The lens the fields are built with, if one is on.
     pub fn coupled_lens(&self) -> Option<CoupledLens> {
         match self.coupled_lens.load(std::sync::atomic::Ordering::Relaxed) {

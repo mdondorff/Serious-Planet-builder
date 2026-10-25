@@ -327,6 +327,8 @@ struct App<'w> {
     world: &'w Arc<WorldTerrain>,
     /// The height field the window picks and reads the ground from; rebuilt when the edits change the definition.
     field: Box<dyn HeightField + 'w>,
+    /// What the world's field was built from ([`WorldTerrain::field_stage`]); a change builds `field` and the plan's height bound again.
+    field_stage: (bool, Option<planet_generators::coupled::CoupledLens>),
     /// The plan parameters: the configured ones, with the height bound raised to the field's maximum when the stamps lift it (VIEW-022).
     lod: LodParams,
     cameras: &'w [Camera],
@@ -635,11 +637,14 @@ impl App<'_> {
                 st.rig.managed.set_transient_preview(stamps);
             }
         }
-        if republished {
+        // The chunk stage arriving (STRM-046) and the coupled lens change what the world's field reads, as an edit does.
+        let stage = self.world.field_stage();
+        if republished || stage != self.field_stage {
+            self.field_stage = stage;
             let world = self.world;
             self.field = world.field()?;
-            // The stamps lift the field: the plan's bound for the horizon, the frustum and the morph follows the field's maximum, and is never
-            // below the configured one (a run with no edits plans as it did).
+            // The stamps and the chunk stage lift the field: the plan's bound for the horizon, the frustum and the morph follows the field's
+            // maximum, and is never below the configured one (a run with no edits and no chunk stage plans as it did).
             self.lod.max_height_m = cfg.lod.max_height_m.max(self.field.max_abs_height_m());
         }
         let lod_max_height_m = self.lod.max_height_m;
@@ -856,7 +861,7 @@ impl App<'_> {
                 // The water of the frame (ADR 0041, ADR 0051 point 6): the nodes that carry water, decided by one query of the field W
                 // per new tile; the renderer draws what the plan says.
                 let time_s = now_ms as f64 / 1000.0;
-                let coarse_lod = planet_frame::viewer::effective_lod(&cfg.lod, st.viewer.coarse_lod);
+                let coarse_lod = planet_frame::viewer::effective_lod(&self.lod, st.viewer.coarse_lod);
                 let (look, liquids, lod) = (&cfg.look.water, &cfg.liquids, &coarse_lod);
                 let cache = &mut st.water_cache;
                 let water = self.world.with_water(|wf| {
@@ -1693,6 +1698,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         cfg: &cfg,
         world: &world,
         field,
+        field_stage: world.field_stage(),
         lod: cfg.lod.clone(),
         cameras: &script.cameras,
         clock: Arc::new(SystemClock::new()),
