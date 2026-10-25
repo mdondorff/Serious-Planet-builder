@@ -814,9 +814,9 @@ mod tests {
         let p = CoupledParams::default();
         let a = stationary_uplift(&lat, &input.z, &input.erodibility, &p, 1.0);
         assert_eq!(a, stationary_uplift(&lat, &input.z, &input.erodibility, &p, 1.0));
-        for c in 0..lat.len() {
-            if input.z[c] <= 0.0 {
-                assert_eq!(a[c], 0.0, "cell {c} is sea");
+        for (c, (u, z)) in a.iter().zip(&input.z).enumerate() {
+            if *z <= 0.0 {
+                assert_eq!(*u, 0.0, "cell {c} is sea");
             }
         }
     }
