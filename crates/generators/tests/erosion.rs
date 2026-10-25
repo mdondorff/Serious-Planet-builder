@@ -261,3 +261,29 @@ fn known_answers() {
     let got: Vec<u64> = probes.iter().map(|&d| f.height(d).to_bits()).collect();
     assert_eq!(got, [13866102441991740545, 4654644485409279484, 4640568334212959128]);
 }
+
+// spec: GEN-062
+#[test]
+fn bounds_hold_over_small_caps_where_the_landform_is_neither_0_nor_1() {
+    let g = grid(256);
+    let src = GridSource(&g);
+    let f = field(&src);
+    let seed = GenContext::new(&WorldDefinition::single_planet(R, SEED)).body_seed(BodyId::PLANET).unwrap();
+    let mut rng = SplitMix64(23);
+    let mut checked = 0;
+    for _ in 0..4000 {
+        let c = random_dir(&mut rng);
+        let l = planet_generators::global::landform(seed, c);
+        if !(0.05..0.95).contains(&l) {
+            continue;
+        }
+        for theta in [1e-6, 1e-5, 1e-4] {
+            check_cap(&f, c, theta, true);
+        }
+        checked += 1;
+        if checked >= 40 {
+            break;
+        }
+    }
+    assert!(checked >= 10, "{checked} centres with a landform between 0.05 and 0.95");
+}

@@ -9,10 +9,10 @@ Source: ADR 0080 point 2, owner decision 2026-10-25 (terrain relief into M8), GE
 
 #### Scenario: Plain and range zone
 - **WHEN** the detail is evaluated at the same ground elevation and bake slope with `L` 0 and `L` 1
-- **THEN** the coarse part is equal and the fine part is larger by `A (1 - carve)` times the fine crease sum
+- **THEN** the coarse part is equal and the fine part changes by `A (1 - carve) L` times the fine crease sum
 
 ### Requirement: GEN-062 The landform has a Lipschitz constant and bounds over a cap
-`global::landform_lipschitz()` SHALL return a constant `K` with `|landform(a) - landform(b)| <= K |a - b|` for every pair of unit directions, derived from the noise gradient bound and the terms of the terrain, and a test SHALL check it against random pairs. The erosion field's height bounds over a cap of angular radius `r` SHALL take the landform in `[L(centre) - K r, L(centre) + K r]` clipped to `[0, 1]`.
+`global::landform_lipschitz()` SHALL return a constant `K` with `|landform(a) - landform(b)| <= K |a - b| + LANDFORM_F32_STEP` for every pair of unit directions (`LANDFORM_F32_STEP` 2e-7: the continent is rounded to f32 before use), derived from the noise gradient bound and the terms of the terrain, and a test SHALL check it against random pairs. The erosion field's height bounds over a cap of angular radius `r` SHALL take the landform in `[L(centre) - K r - LANDFORM_F32_STEP, L(centre) + K r + LANDFORM_F32_STEP]` clipped to `[0, 1]`.
 
 Verify: A
 Status: planned

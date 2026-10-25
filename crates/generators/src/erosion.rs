@@ -212,7 +212,10 @@ impl ErosionField<'_> {
     fn height_via(&self, src: &dyn LatticeSource, dir: Vec3) -> f64 {
         let e = self.base_via(src, dir);
         let slope = self.gradient_via(src, dir) / self.radius_m;
-        e + detail_m(self.seed, dir, e, carve(slope), crate::global::landform(self.seed, dir))
+        let c = carve(slope);
+        // Where the slope factor is 1 the landform changes nothing (`fine_carve(1, L)` is 1), so it is not evaluated.
+        let l = if c >= 1.0 { 0.0 } else { crate::global::landform(self.seed, dir) };
+        e + detail_m(self.seed, dir, e, c, l)
     }
 }
 
@@ -367,7 +370,8 @@ impl HeightField for ErosionField<'_> {
         };
         // The landform over the cap: its value at the centre within the Lipschitz constant times the chord (GEN-062).
         let l_centre = crate::global::landform(self.seed, centre);
-        let l_reach = crate::global::landform_lipschitz() * angular_radius * (1.0 + 1e-9) + 1e-9;
+        // Plus `LANDFORM_F32_STEP`: the continent is rounded to f32 before use, a step the Lipschitz constant does not cover.
+        let l_reach = crate::global::landform_lipschitz() * angular_radius * (1.0 + 1e-9) + crate::global::LANDFORM_F32_STEP;
         let (l_lo, l_hi) = ((l_centre - l_reach).max(0.0), (l_centre + l_reach).min(1.0));
         let (f_lo, f_hi) = (fine_carve(carve_lo, l_lo), fine_carve(carve_hi, l_hi));
         let (a_lo, a_hi) = (amplitude_m(blo, carve_lo), amplitude_m(bhi, carve_hi));
@@ -486,7 +490,7 @@ mod tests {
             }
         }
         assert!(lifted > 100, "{lifted} of 400 points change by over a metre");
-        let _ = full;
+        assert!(full > 20, "{full} of 400 points stand on the steepest ground");
     }
 
     // spec: GEN-062
@@ -500,13 +504,19 @@ mod tests {
             let dist = [1e-5, 1e-4, 1e-3, 1e-2, 1e-1][(rng.next_f64() * 5.0) as usize % 5];
             let b = (a + random_dir(&mut rng) * dist).normalized();
             let (la, lb) = (crate::global::landform(7, a), crate::global::landform(7, b));
-            let ratio = (la - lb).abs() / (a - b).length().max(1e-300);
+            let chord = (a - b).length();
+            assert!(
+                (la - lb).abs() <= k * chord + crate::global::LANDFORM_F32_STEP,
+                "a pair changes by {} over a chord of {chord}",
+                (la - lb).abs()
+            );
+            let ratio = (la - lb).abs() / chord.max(1e-300);
             worst = worst.max(ratio);
             moved += usize::from((la - lb).abs() > 0.0);
             assert!((0.0..=1.0).contains(&la) && (0.0..=1.0).contains(&lb));
         }
         assert!(moved > 1000, "{moved} pairs differ");
-        assert!(worst <= k, "a pair changes by {worst} per unit of chord, the constant is {k}");
+        assert!(worst <= k + crate::global::LANDFORM_F32_STEP / 1e-5, "a pair changes by {worst} per unit of chord, the constant is {k}");
         assert!(worst > 0.0);
     }
 }

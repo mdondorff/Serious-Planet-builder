@@ -204,7 +204,10 @@ pub fn landform(seed: u64, d: Vec3) -> f64 {
 /// Lipschitz; the warped direction `d + 0.45 warp(d)` (three such fBms, a vector: a factor of the square root of 3) is `1 + 0.45 sqrt(3) L_warp`; the range
 /// zone is a smoothstep (slope at most 3) of one fBm of the warped direction, the inland ramp a smoothstep (slope at most 4.55) of 1.7 times another, and
 /// the landform their product of two values in `[0, 1]`, so the sum of the two. A test checks it against random pairs, so a change of the terms of
-/// [`terrain`] that is not carried here fails there.
+/// [`terrain`] that is not carried here fails there. The continent is rounded to f32 before use (a step of at most one ulp, 3e-8 over the inland
+/// ramp, times the ramp's slope 4.55): the landform can jump by [`LANDFORM_F32_STEP`] between two directions as close as you like, which the constant
+/// does not cover, so a bound over a cap adds it.
+
 pub fn landform_lipschitz() -> f64 {
     let g = crate::height::NOISE_GRADIENT_BOUND;
     let fbm_lip = |freq: f64, octaves: f64| g * freq * octaves / (2.0 - libm::pow(2.0, 1.0 - octaves));
@@ -213,6 +216,9 @@ pub fn landform_lipschitz() -> f64 {
     let inland = (1.5 / 0.33) * 1.7 * fbm_lip(1.1, 5.0) * warped;
     (zone + inland) * 1.05
 }
+
+/// The most the landform jumps at the f32 rounding step of the continent (GEN-062): 4.55 times one f32 ulp (2.98e-8) of a value in `[0.12, 0.45]`, rounded up.
+pub const LANDFORM_F32_STEP: f64 = 2.0e-7;
 
 /// The largest amplitude of the hill band in metres (GEN-064); the elevation clamp has room for it above the highest base and range
 /// (`1000 + 5200` m), so the clamp is not raised.
