@@ -6,7 +6,7 @@ Status: direction, not a plan (owner and opus-planner, 2026-10-23). Each milesto
 | # | Milestone | Content | Status |
 |---|---|---|---|
 | M0 to M7 | Foundations to cities | coordinates, LOD, fields and cache, streaming, atmosphere and ocean, editor, cities | done |
-| M8 | Natural landscape | global coupled river network, chunk erosion at 4 to 10 m (ADR 0077), horizon shadows, driver maps to materials; the Outerra look reference; the speed envelope (`docs/briefings/m8-plan.md`) | running |
+| M8 | Natural landscape | global coupled river network, chunk erosion at 4 to 10 m (ADR 0077), horizon shadows, driver maps to materials; the owner's look reference; the speed envelope (`docs/briefings/m8-plan.md`) | running |
 | M9 | Living surface | vegetation, rocks and ground cover placed from the driver maps (wetness, soil depth); GPU instancing (SPIKE-28); the speed envelope stays a regression check | next |
 | M10 | Water and sky | rivers and lakes as water surfaces from the global network, FFT ocean, clouds, weather light | open |
 | M11 | Settled world | cities on the natural landscape: roads follow terrain and cross rivers, settlement placement from the driver maps, night lights | open |
@@ -15,6 +15,8 @@ Status: direction, not a plan (owner and opus-planner, 2026-10-23). Each milesto
 | later | Cloud tiles | tile server over `generators` and `cache` (the original M9) | optional |
 
 M9 and M10 may swap after the M8 look reviews.
+
+Generator polish, after M8 (owner, 2026-10-25: M8 proves the engine at chosen places; global realism is later work): middle-scale relief on lowland by landform instead of a flat detail amplitude (about 30 m today, `generators/terrain.rs`); erosion that forms its own tributary network inside chunks; why a stamped hill in the ocean ends just below sea level.
 
 ## Game layer: direction
 - One workspace and one technology: the planet crates (`core`, `world-def`, `generators`, `cache`, `streaming`, `frame`, `render`) stay a library without game logic; a game is its own crate and run mode on top.
