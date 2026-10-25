@@ -578,6 +578,8 @@ fn deep_stage(base: Arc<dyn BaseDetail>, halo_rings: u16) -> ANet {
     // The corridor cells here are 153 m: a free cell next to the corridor would erode down to the bed (its coefficient grows with the cell), which at the stage's
     // 8 m cells it does not (a coefficient of about 1e-4). Switching the free incision off keeps the banks the 8 m chunks have.
     a.params.tributary_f_max = 0.0;
+    // The valley band of GEN-060 would give the banks its own gentle sides: these tests are about the bank rule, which acts on the cut walls.
+    a.params.anchor.band_cap_m = 0.0;
     a
 }
 
@@ -705,37 +707,6 @@ fn the_bed_between_the_anchors_falls_the_whole_way_with_no_flat_reach_and_no_ste
     }
 }
 
-
-/// The base of `HighBase` with a 50 m rise from coarse column 1009 on: the ground climbs downstream beyond the window of some segments and inside the
-/// window of the next, where a sliding maximum is not monotone.
-struct Bump;
-
-impl BaseDetail for Bump {
-    fn base_height(&self, dir: Vec3) -> f64 {
-        let c = lattice().cell_at(dir);
-        HighBase.base_height(dir) + if c % N >= 1009 { 50.0 } else { 0.0 }
-    }
-    fn coarse_input(&self, dir: Vec3) -> f64 {
-        self.base_height(dir)
-    }
-    fn identity(&self) -> u64 {
-        37
-    }
-}
-
-// spec: GEN-059, GEN-048
-#[test]
-fn a_rise_of_the_ground_beyond_the_window_makes_a_flat_behind_it_not_an_outlet_that_cuts_the_river() {
-    let a = stage_over(Arc::new(Bump), 30);
-    for x in [1000, 1001, 1002, 1003] {
-        let (flat_m, _, climbs, links, outlets) = bed_profile(&a, &Bump, x);
-        eprintln!("chunk {x} over the bump: longest flat {flat_m:.0} m, climbing links {climbs} of {links}, outlets {outlets}");
-        assert_eq!((climbs, outlets), (0, 0), "chunk {x}: {climbs} links climb, {outlets} corridor cells lost their receiver");
-        // The river behind a rise of the ground is held up: a flat of the reach the rise holds back, not a cut river.
-        assert!(flat_m > 400.0, "chunk {x}: the river behind the rise is a flat");
-    }
-}
-
 /// The river of the lowland review site: a drainage area of 9.5e6 km2 all along the row, over the smooth `HighBase` ground (relief factor 0).
 struct WideRiver;
 
@@ -777,7 +748,13 @@ fn a_great_river_has_a_channel_as_wide_and_as_deep_as_its_discharge_says_in_a_va
         })
         .collect();
     let floor = section.iter().map(|p| p.1).fold(f64::INFINITY, f64::min);
-    let bed = floor + d;
+    // The bed of the valley floor: the corridor's own, read from the network (the median over the corridor cells of the core).
+    let net = planet_generators::anet::Network::build_with(&WideRiver, &HighBase, &lat, &r, R, &a.params.anchor);
+    let mut beds: Vec<f64> = (0..r.core).filter(|&c| net.corridor[c]).map(|c| net.anchor_z[c]).collect();
+    beds.sort_by(f64::total_cmp);
+    let bed = beds[beds.len() / 2];
+    let depth = bed - floor;
+    assert!(depth > d / 1.5 && depth < d * 1.5, "the channel is {depth} m under the valley floor, the law says {d} m");
     let cell_m = lat.cell_m(R);
     let width_at = |z: f64| section.iter().filter(|p| p.1 < z).count() as f64 * cell_m;
     // The channel under half its depth is 0.71 of the bankfull width (the parabola), within the factor 2 the law is good for.

@@ -492,6 +492,9 @@ fn paint_band(
             let reach = specs[src].map_or(0.0, |s| s.5);
             for k in 0..8 {
                 let q = region.neighbours[c][k] as usize;
+                if q >= len {
+                    continue;
+                }
                 let d = best[c] + (dirs[c] - dirs[q]).length() * radius_m;
                 if d > reach || corridor[q] {
                     continue;
