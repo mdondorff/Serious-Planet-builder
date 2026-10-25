@@ -9,7 +9,7 @@ use planet_cache::global_store::{load_coupled, store_coupled, CoupledSpec, Globa
 use planet_cache::pack::{TileStore, DEFAULT_MAX_PACK_BYTES};
 use planet_core::{Face, TileId};
 use planet_generators::coupled::{run_with, stationary_uplift, CoupledInput, CoupledMaps, CoupledParams, Lattice};
-use planet_generators::coupledinput::{declared_inputs_hash, reduce_bake};
+use planet_generators::coupledinput::{declared_inputs_hash, reduce_bake_with};
 use planet_generators::global::LatticeSource;
 use planet_world_def::{BodyId, GenContext, WorldDefinition};
 
@@ -69,7 +69,23 @@ fn reduce_threads() -> usize {
 /// by the box filter of GEN-056, the constant erodibility and the stationary uplift of those heights (`UPLIFT_RHO`, GEN-063). A read error
 /// names the vertex.
 pub fn bake_input(src: &dyn LatticeSource, lat: &Lattice, params: &CoupledParams) -> Result<CoupledInput, String> {
-    let z = reduce_bake(src, lat.n() as u32, reduce_threads()).map_err(|e| e.to_string())?;
+    let started = std::time::Instant::now();
+    let last_say = std::sync::atomic::AtomicU64::new(0);
+    // STRM-051: a line at most every 10 s with the share done and the projected total (the viewer's thread and the command both print it).
+    let say = |done: usize, total: usize| {
+        let secs = started.elapsed().as_secs();
+        if done < total && (secs < last_say.load(std::sync::atomic::Ordering::Relaxed) + 10 || secs == 0) {
+            return;
+        }
+        last_say.store(secs, std::sync::atomic::Ordering::Relaxed);
+        let share = done as f64 / total as f64;
+        eprintln!(
+            "coupled run: reducing the bake, band {done} of {total} ({:.0} %), {secs} s so far, about {:.0} s in all",
+            share * 100.0,
+            secs as f64 / share
+        );
+    };
+    let z = reduce_bake_with(src, lat.n() as u32, reduce_threads(), &say).map_err(|e| e.to_string())?;
     let erodibility = vec![ERODIBILITY; z.len()];
     // The uplift is read only by the stream-power steps; a run that only fills does not make it.
     let uplift = if params.erode { stationary_uplift(lat, &z, &erodibility, params, UPLIFT_RHO) } else { vec![0.0; z.len()] };
@@ -167,6 +183,53 @@ pub fn load_or_run(def: &WorldDefinition, dir: Option<&Path>, src: &dyn LatticeS
     let store_error =
         dir.and_then(|d| store_coupled(d, &p.world, &state, DEFAULT_MAX_PACK_BYTES).err().map(|e| format!("{}: {e}", d.display())));
     Ok(CoupledRun { maps: Arc::new(CoupledMaps::new(p.lat, state.z, state.area_m2, p.id)), origin: Origin::Ran, store_error })
+}
+
+// spec: STRM-051
+/// `generate --coupled-run DIR --global-res N [--world F | --seed S]`: make the coupled run of the bake stored in `DIR` (or find it there) and
+/// store it; prints the stages as the viewer's make does and the wall time.
+pub fn generate_coupled_run(o: &crate::Options, out: &mut dyn std::io::Write) -> Result<(), String> {
+    use crate::err;
+    let dir = o.coupled_run.as_ref().expect("checked by the caller");
+    if !o.given.contains("--global-res") {
+        return Err(
+            "--coupled-run needs --global-res N, the resolution the bake was made at (a store holds one bake per resolution)".into()
+        );
+    }
+    if o.given.contains("--world") && o.given.contains("--seed") {
+        return Err("--world and --seed both name the definition: give one".into());
+    }
+    if !dir.is_dir() {
+        return Err(format!("{}: no such store directory (a bake made by `generate --global-dir`)", dir.display()));
+    }
+    let def = match &o.world {
+        Some(path) => {
+            let text = std::fs::read_to_string(path).map_err(|e| format!("reading {}: {e}", path.display()))?;
+            planet_world_def::toml_io::parse_definition(&text).map_err(|e| format!("{}: {e}", path.display()))?
+        }
+        None => WorldDefinition::single_planet(crate::skeleton::RADIUS_M, o.seed),
+    };
+    let world = GlobalWorld::from_definition(&def).map_err(|e| format!("the definition cannot be generated: {e}"))?;
+    let store = TileStore::open(dir, world.params()).map_err(|e| e.to_string())?;
+    let src = planet_cache::global_store::StoreSource::new(&store, &world, o.global_res).map_err(|e| e.to_string())?;
+    let n = run_cells(o.global_res);
+    writeln!(
+        out,
+        "coupled run: {n} cells per face edge from the bake of {} cells, {COUPLED_STEPS} steps, {} threads for the reduction",
+        o.global_res,
+        reduce_threads()
+    )
+    .map_err(err)?;
+    let started = std::time::Instant::now();
+    let run = load_or_run(&def, Some(dir), &src, n, COUPLED_STEPS)?;
+    if let Some(e) = &run.store_error {
+        return Err(format!("the run was made but not stored: {e}"));
+    }
+    let how = match run.origin {
+        Origin::Stored => "found in the store",
+        Origin::Ran => "made and stored",
+    };
+    writeln!(out, "coupled run: {how} in {} in {:.1} s", dir.display(), started.elapsed().as_secs_f64()).map_err(err)
 }
 
 /// Where a world's coupled run stands.
