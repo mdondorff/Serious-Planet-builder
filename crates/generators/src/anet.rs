@@ -174,10 +174,10 @@ pub struct Network {
     pub inflow_m2: Vec<f64>,
     /// The initial fine height of each cell in metres: the run's height upsampled plus the base's detail.
     pub z0: Vec<f32>,
-    /// The height a corridor cell is held at where an anchor fixes it (NaN elsewhere): at every quarter of a coarse segment, the base height there minus the
-    /// anchor law's depth for the river's area, as a running maximum from downstream (`anchor_heights`). Beds are tied to the ground at these anchors, so a
-    /// bed does not depend on the heights of a region's ring (the implicit step carries a downstream height far up a channel); the stage keeps the lower of this
-    /// and the base height.
+    /// The height a corridor cell is held at (NaN off the corridor): the bed of its segment interpolated at the cell, from samples about 200 m apart of the
+    /// base height minus the anchor law's depth for the river's area, as a running maximum from downstream with a least fall (`anchor_profiles`). Beds are
+    /// tied to the ground, so a bed does not depend on the heights of a region's ring (the implicit step carries a downstream height far up a channel); the
+    /// stage keeps the lower of this and the base height.
     pub anchor_z: Vec<f64>,
     /// The drainage area of a corridor cell in m2: the coarse areas of its segment interpolated along it (NaN off the corridor). A river's area is a
     /// function of position, not of how much of its catchment the region holds.
@@ -328,8 +328,10 @@ impl Network {
 
 /// How far under the drawn ground a corridor bed is anchored (GEN-047): `depth_m (A / area_ref_m2)^exponent`, at most `cap_m`, for a river of drainage
 /// area `A`. The bed follows the ground the chunk is drawn over, never the coupled run's absolute height (the run's heights lie far from the base's
-/// where the relief is high). `window` is how many coarse segments downstream the bed profile looks: an anchor is never lower than the bed
-/// downstream of it within the window by the running maximum of the raw anchors from the downstream end: the profile is non-increasing downstream of a point only up to the window (a sliding maximum is not monotone across a segment boundary), and the lower of anchor and base still decides the fixed cell.
+/// where the relief is high). `window` is how many coarse segments downstream the bed profile looks: a bed is never lower than the raw beds downstream
+/// of it within the window (a running maximum from the downstream end). A sliding window is not monotone across a segment boundary (a rise beyond
+/// the window of one segment and inside the window of the next), and the lower of bed and base decides the cell: where either leaves a corridor link
+/// climbing the solve lifts the donor to the receiver, a flat (the bed behind a dam).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AnchorLaw {
     pub depth_m: f64,
@@ -461,10 +463,6 @@ fn anchor_profiles(
 
 /// Polyline points between two samples of a segment's bed (about 200 m at the point spacing).
 const PROFILE_SAMPLES: usize = 5;
-
-/// A link between two fixed cells that climbs by no more than this is a flat, not a reason to make the donor an outlet (the beds of two linked cells
-/// are interpolated along the polyline in an order that can differ from the link order by millimetres).
-const BED_TOLERANCE_M: f64 = 0.05;
 
 /// The parameters of the incision (SPIKE-33, SPIKE-35): stream power `K A^m S` with the implicit step, N steps along the frozen network.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -791,13 +789,15 @@ pub fn solve(
             }
         }
     }
-    // No channel cell drains uphill (GEN-048). A corridor donor below a fixed receiver is lifted to it, a flat (the bed behind a dam fills up to it),
+    // No channel cell drains uphill (GEN-048). A corridor donor below its receiver is lifted to it, fixed (an anchor, a bed) or not: a flat, the bed behind a
+    // dam fills up to it (where the bed lies over the ground, or the window of the bed profile ended at a rise, GEN-059), receivers first so that the lift
+    // reaches the donors above it;
     // receivers first; a free corridor receiver above its donor is cut down to the donor, donors first (it ends at the next anchor); a link that
     // joins two fixed cells the wrong way, or a donor off the corridor, becomes an outlet. Each rule reaches the cell and the corridor next to it.
     let channel = |c: usize, area: &[f64]| area[c] > p.channel_area_m2;
     for &c in order.iter().rev() {
         let r = rec[c];
-        if r != NONE && !fixed(c) && channel(c, &area) && z[c] < z[r as usize] {
+        if r != NONE && !ring(c) && channel(c, &area) && z[c] < z[r as usize] {
             if is_link[c] {
                 z[c] = z[r as usize];
             } else {
@@ -807,7 +807,7 @@ pub fn solve(
     }
     for &c in &order {
         let r = rec[c];
-        if r == NONE || !channel(c, &area) || z[r as usize] <= z[c] + BED_TOLERANCE_M {
+        if r == NONE || !channel(c, &area) || z[r as usize] <= z[c] {
             continue;
         }
         if !fixed(r as usize) {

@@ -231,7 +231,7 @@ fn a_chunk_of_the_synthetic_scene_keeps_its_known_answer() {
     assert_eq!(fnv(&core_change(1003, 40)), KNOWN_ANSWER, "the stage changed: platform, order or arithmetic");
 }
 
-const KNOWN_ANSWER: u64 = 4_674_115_344_839_955_587;
+const KNOWN_ANSWER: u64 = 12_524_793_930_177_189_988;
 
 /// A gentle valley along the river (slope 0.001, below the breach slope) plus a little noise: every stream runs to the river.
 struct Plane;
@@ -575,7 +575,8 @@ fn deep_stage(base: Arc<dyn BaseDetail>, halo_rings: u16) -> ANet {
     let mut a = stage_over(base, halo_rings);
     a.params.anchor.depth_m = 400.0;
     a.params.anchor.cap_m = 250.0;
-    // At 8 m cells a free cell next to the corridor has a tiny erosion coefficient and does not come down to the bed; at these cells it would.
+    // The corridor cells here are 153 m: a free cell next to the corridor would erode down to the bed (its coefficient grows with the cell), which at the stage's
+    // 8 m cells it does not (a coefficient of about 1e-4). Switching the free incision off keeps the banks the 8 m chunks have.
     a.params.tributary_f_max = 0.0;
     a
 }
@@ -643,8 +644,9 @@ fn the_settled_banks_do_not_depend_on_how_far_the_region_reaches_and_make_no_new
 }
 
 /// The bed along the corridor of a solved chunk, following the links from the cells nothing links to: (longest run of equal heights in metres, the
-/// largest drop between two linked cells, links that climb, links).
-fn bed_profile(a: &ANet, base: &dyn BaseDetail, x: u32) -> (f64, f64, usize, usize) {
+/// largest drop between two linked cells, links that climb by more than 5 cm, links, linked corridor cells left without a receiver), over the links
+/// inside the core.
+fn bed_profile(a: &ANet, base: &dyn BaseDetail, x: u32) -> (f64, f64, usize, usize, usize) {
     use planet_generators::anet::{Network, NO_NEXT};
     let lat = ChunkLattice::new(PER).unwrap();
     let r = region(&lat, chunk(x), 30);
@@ -658,43 +660,77 @@ fn bed_profile(a: &ANet, base: &dyn BaseDetail, x: u32) -> (f64, f64, usize, usi
             has_donor[net.next[c] as usize] = true;
         }
     }
-    let (mut longest, mut max_step, mut climbs, mut links) = (0.0f64, 0.0f64, 0usize, 0usize);
+    let (mut longest, mut max_step, mut climbs, mut links, mut outlets) = (0.0f64, 0.0f64, 0usize, 0usize, 0usize);
+    for c in 0..r.core {
+        outlets += usize::from(net.corridor[c] && net.next[c] != NO_NEXT && (net.next[c] as usize) < r.core && s.receiver[c] == u32::MAX);
+    }
     for start in 0..len {
-        if !net.corridor[start] || has_donor[start] || r.depth[start] > 3 * 30 {
+        if !net.corridor[start] || has_donor[start] {
             continue;
         }
         let (mut at, mut flat) = (start, 0.0f64);
         while net.next[at] != NO_NEXT {
             let n = net.next[at] as usize;
-            let drop = s.z[at] - s.z[n];
-            links += 1;
-            max_step = max_step.max(drop.abs());
-            if drop < -0.05 {
-                climbs += 1;
-            }
-            if drop.abs() < 1e-9 {
-                flat += cell_m;
-                longest = longest.max(flat);
-            } else {
-                flat = 0.0;
+            if at < r.core && n < r.core {
+                let drop = s.z[at] - s.z[n];
+                links += 1;
+                max_step = max_step.max(drop.abs());
+                climbs += usize::from(drop < -0.05);
+                if drop.abs() < 1e-9 {
+                    flat += cell_m;
+                    longest = longest.max(flat);
+                } else {
+                    flat = 0.0;
+                }
             }
             at = n;
         }
     }
-    (longest, max_step, climbs, links)
+    (longest, max_step, climbs, links, outlets)
 }
 
 // spec: GEN-059
 #[test]
 fn the_bed_between_the_anchors_falls_the_whole_way_with_no_flat_reach_and_no_step() {
     let a = stage_over(Arc::new(HighBase), 30);
-    let cell_m = ChunkLattice::new(PER).unwrap().cell_m(R);
     for x in [1000, 1003, 1008] {
-        let (flat_m, step_m, climbs, links) = bed_profile(&a, &HighBase, x);
-        eprintln!("chunk {x}: longest flat {flat_m:.0} m, largest drop {step_m:.3} m, climbing links {climbs} of {links}");
+        let (flat_m, step_m, climbs, links, outlets) = bed_profile(&a, &HighBase, x);
+        eprintln!(
+            "chunk {x}: longest flat {flat_m:.0} m, largest drop {step_m:.3} m, climbing links {climbs} of {links}, outlets {outlets}"
+        );
         assert!(links > 20, "chunk {x}: {links} links");
-        assert!(flat_m <= 400.0, "chunk {x}: a flat reach of {flat_m} m ({cell_m} m cells)");
-        assert!(step_m <= 5.0, "chunk {x}: a step of {step_m} m");
-        assert_eq!(climbs, 0, "chunk {x}: the bed climbs in {climbs} links");
+        assert!(flat_m <= 400.0, "chunk {x}: a flat reach of {flat_m} m");
+        assert!(step_m <= 1.0, "chunk {x}: a step of {step_m} m");
+        assert_eq!((climbs, outlets), (0, 0), "chunk {x}: the bed climbs in {climbs} links, {outlets} cells lost their receiver");
+    }
+}
+
+/// The base of `HighBase` with a 50 m rise from coarse column 1009 on: the ground climbs downstream beyond the window of some segments and inside the
+/// window of the next, where a sliding maximum is not monotone.
+struct Bump;
+
+impl BaseDetail for Bump {
+    fn base_height(&self, dir: Vec3) -> f64 {
+        let c = lattice().cell_at(dir);
+        HighBase.base_height(dir) + if c % N >= 1009 { 50.0 } else { 0.0 }
+    }
+    fn coarse_input(&self, dir: Vec3) -> f64 {
+        self.base_height(dir)
+    }
+    fn identity(&self) -> u64 {
+        37
+    }
+}
+
+// spec: GEN-059, GEN-048
+#[test]
+fn a_rise_of_the_ground_beyond_the_window_makes_a_flat_behind_it_not_an_outlet_that_cuts_the_river() {
+    let a = stage_over(Arc::new(Bump), 30);
+    for x in [1000, 1001, 1002, 1003] {
+        let (flat_m, _, climbs, links, outlets) = bed_profile(&a, &Bump, x);
+        eprintln!("chunk {x} over the bump: longest flat {flat_m:.0} m, climbing links {climbs} of {links}, outlets {outlets}");
+        assert_eq!((climbs, outlets), (0, 0), "chunk {x}: {climbs} links climb, {outlets} corridor cells lost their receiver");
+        // The river behind a rise of the ground is held up: a flat of the reach the rise holds back, not a cut river.
+        assert!(flat_m > 400.0, "chunk {x}: the river behind the rise is a flat");
     }
 }
