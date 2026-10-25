@@ -13,3 +13,17 @@ Part (3) of `m8-relief` (ADR 0080 points 1, 3 and 5, crusader's lane, the bake s
 - ADR 0080 point 3 is amended: the driver is the range-zone strength, not a neighbourhood range (the bake is a pointwise function of the direction, so a neighbourhood range needs a stencil per sample or a coarse lattice).
 - The shared rebuild makes the new bake (about 8 minutes at 16384), the coupled run (about 5 minutes) and the coarse horizon.
 - Out of scope: the erosion filter's crease amplitude following the landform (explorer's lane, reads `landform`), the targets' measurements (after the rebuild).
+
+Expected golden changes:
+- lit_orbit_ev15: the hill band lifts land by up to 1000 m, so a few limb/coast pixels of the orbit view change (4 pixels at WARP).
+- lit_orbit_ev_bands: the same cause (2 pixels).
+- lit_orbit_temperature_ev15: the temperature texels of land fall with the lifted heights (352 pixels, max delta 45).
+- sky_orbit_ev15: the same cause as the lit orbit view (5 pixels).
+- water_class_orbit: the coast of the water class moves with the lifted land (10 pixels).
+
+Bound tests:
+- lit_orbit_ev15: planet-generators::it::global::the_hill_band_only_lifts_land_stays_within_its_largest_amplitude_and_is_zero_at_the_coast
+- lit_orbit_ev_bands: planet-generators::it::global::the_hill_band_only_lifts_land_stays_within_its_largest_amplitude_and_is_zero_at_the_coast
+- lit_orbit_temperature_ev15: planet-generators::it::global::the_hill_band_only_lifts_land_stays_within_its_largest_amplitude_and_is_zero_at_the_coast
+- sky_orbit_ev15: planet-generators::it::global::the_hill_band_only_lifts_land_stays_within_its_largest_amplitude_and_is_zero_at_the_coast
+- water_class_orbit: planet-generators::it::global::the_hill_band_only_lifts_land_stays_within_its_largest_amplitude_and_is_zero_at_the_coast
