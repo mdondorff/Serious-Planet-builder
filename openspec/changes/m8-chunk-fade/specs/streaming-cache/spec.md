@@ -10,3 +10,20 @@ Source: STRM-039 (the weight), STRM-038 (the chunks a tile reads), REND-039
 #### Scenario: Change and weight
 - **WHEN** a tile at the pyramid top over a ready chunk and a tile near its border with a chunk that landed later are built and planned
 - **THEN** the stored change equals the field's height at the tile's level minus the base's, the node weights follow the fade of each chunk, and the border tile takes the smaller weight of the two chunks it reads
+
+## MODIFIED Requirements
+
+### Requirement: STRM-039 Chunk jobs never block a frame
+Chunk jobs SHALL run on the injected spawner (CON-04), ordered by distance to the camera, at most `chunk_workers` at once, and no frame SHALL wait for one. A tile whose chunk is not ready SHALL draw the base; on landing, the chunk's change SHALL fade in per tile over `chunk_fade_ms` (default 1500, the owner, 2026-10-24) on the injected clock, through a plain f32 weight (CON-11; the weight is the CPU side, drawing with it is REND-039). The per-frame log SHALL count the plan's nodes that read chunk detail (at or finer than the pyramid's top level, column `chunk_nodes`) and those among them whose own chunk is not ready (column `chunk_stand_in`): the stand-in share, for the speed-envelope scene.
+
+Verify: A, B
+Status: active
+Source: ADR 0077 point 7, CON-22, CON-04, CON-11, M8 plan criteria 3 and 7
+
+#### Scenario: Flight without waiting
+- **WHEN** a scripted flight from 30 km to 1.8 m and a 300 m pan run on the fake clock with a stand-in chunk cost of 0.25 s per km2 and 6 workers
+- **THEN** no frame waits for a chunk, every chunk lands (the first within 10 s at the pan), and the log shows the stand-in share falling to zero
+
+#### Scenario: Fade
+- **WHEN** a chunk lands under visible tiles
+- **THEN** each tile's weight rises linearly from 0 to 1 over `chunk_fade_ms` (default 1500), so the drawn height `base + w x change` steps by at most the weight step times the change per frame (a change of 17.55 m, the 256-bake figure, moves 0.19 m a frame at 60 frames per second; the shared store's largest entry step of 58.3 m moves 0.65 m a frame, which is 0.20 px on screen at the distance where it enters: design.md 6a of `m8-chunk-fade`)

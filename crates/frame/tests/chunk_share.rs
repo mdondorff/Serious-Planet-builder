@@ -222,7 +222,7 @@ fn a_tiles_weight_is_the_minimum_over_the_chunks_it_reads_and_the_default_fade_i
     let none = Fixed { reads: vec![], ready: vec![] };
     assert_eq!(fade.tile_weight(&none, tile, 0), 1.0);
     // The step of the weight per frame at 60 fps over the default fade: a change of 17.55 m (the largest entry step of m8-anet-chunk) moves a
-    // vertex by 0.195 m per frame, inside the 0.25 m of criterion 3.
+    // vertex by 0.195 m per frame (the 256 bake's figure; the shared store's 58.3 m is 0.65 m a frame and the criterion that counts is the screen step, m8-chunk-fade design.md 6a).
     let step = f64::from(fade.weight(a, true, 1_000 / 60) - fade.weight(a, true, 0));
     assert!(step * 17.55 <= 0.25, "{} m per frame", step * 17.55);
 }
