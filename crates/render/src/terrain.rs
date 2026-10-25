@@ -1927,6 +1927,9 @@ impl TerrainRenderer {
             if change.len() != want {
                 return Err(ExecError::BadResource { id, expected: want, got: change.len() });
             }
+            if let Some(index) = change.iter().position(|v| !v.is_finite()) {
+                return Err(ExecError::NonFiniteChange { id, index });
+            }
         }
         let slot = match at {
             Some(slot) => slot,
