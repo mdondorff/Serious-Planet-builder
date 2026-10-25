@@ -125,7 +125,7 @@ fn f3(v: Vec3) -> [f32; 3] {
 
 /// A unit sun at `elevation` over the horizontal plane of `up`, its horizontal part along `heading` (a unit vector in the tangent plane).
 fn sun_at(up: Vec3, heading: Vec3, elevation: f64) -> Vec3 {
-    up * elevation.sin() + heading * elevation.cos()
+    up * libm::sin(elevation) + heading * libm::cos(elevation)
 }
 
 fn table_of(nodes: &[HorizonNode]) -> Vec<f32> {
@@ -154,7 +154,7 @@ fn the_shader_factor_of_a_chunk_map_equals_the_cpu_reference_at_texel_centres() 
         let az = -3.0 + 0.4 * q as f64;
         let h = interpolate(&map[(y * n + x) * AZ..(y * n + x + 1) * AZ], az);
         let el = h + (-0.6 + 0.04 * q as f64).to_radians();
-        let sun = sun_at(up, north * az.cos() + east * az.sin(), el);
+        let sun = sun_at(up, north * libm::cos(az) + east * libm::sin(az), el);
         nodes.push(HorizonNode { slot: 1, sun_azimuth: az as f32, sun_elevation: 0.0, fade: 1.0, rect });
         qs.push(HorizonQuery { node: q as u32, tile_uv, up: f3(up), sun: f3(sun) });
         expect.push((h, lit_factor(sun_elevation(sun, up), h)));
@@ -201,14 +201,14 @@ fn the_shader_factor_of_the_coarse_map_equals_the_cpu_reference_on_every_face_an
             let (east, north) = geographic_frame(up);
             let phi = 0.7 * f64::from(face) + 1.3 * k as f64 - 2.0;
             let hc = interpolate(&coarse[(face as usize * m * m + j * m + i) * AZ..][..AZ], phi);
-            let with = (face as usize + k) % 2 == 0;
+            let with = (face as usize + k).is_multiple_of(2);
             let (x, y) = ((17 * (k + 1)) % n, (29 * (face as usize + 1)) % n);
             let tile_uv = [(x as f32 + 0.5) / 256.0, (y as f32 + 0.5) / 256.0];
             let chunk_az = 0.37 * k as f64 + 0.11 * f64::from(face);
             let hk = if with { interpolate(&chunk[(y * n + x) * AZ..(y * n + x + 1) * AZ], chunk_az) } else { 0.0 };
             let h = hc.max(hk);
             let el = h + (-0.3 + 0.2 * k as f64).to_radians();
-            let sun = sun_at(up, north * phi.cos() + east * phi.sin(), el);
+            let sun = sun_at(up, north * libm::cos(phi) + east * libm::sin(phi), el);
             assert!(
                 (azimuth_in_frame(sun, east, north) - phi).rem_euclid(std::f64::consts::TAU).min(std::f64::consts::TAU) < 1e-9
                     || (phi - azimuth_in_frame(sun, east, north)).rem_euclid(std::f64::consts::TAU) < 1e-9
@@ -291,7 +291,7 @@ fn the_shader_azimuth_frame_agrees_with_the_reference_at_a_pole_and_with_the_sun
         let up = up.normalized();
         let (east, north) = geographic_frame(up);
         for phi in [0.5f64, 1.5, 4.0] {
-            let sun = sun_at(up, north * phi.cos() + east * phi.sin(), 5f64.to_radians());
+            let sun = sun_at(up, north * libm::cos(phi) + east * libm::sin(phi), 5f64.to_radians());
             let h = interpolate(&cell, azimuth_in_frame(sun, east, north));
             qs.push(HorizonQuery { node: 0, tile_uv: [0.5, 0.5], up: f3(up), sun: f3(sun) });
             expect.push(lit_factor(sun_elevation(sun, up), h));

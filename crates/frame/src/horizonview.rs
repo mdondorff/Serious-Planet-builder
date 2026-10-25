@@ -285,7 +285,7 @@ mod tests {
         }
         // The shader places azimuth k at k / 16 of a turn: any other count, a missing byte and a 1 x 1 map (the shader's "none") are refused.
         assert!(pack_coarse(&bytes[1..], m, a).is_none() && pack_coarse(&bytes, m, 17).is_none());
-        assert!(pack_coarse(&vec![0u8; 6 * m * m * 4], m, 4).is_none() && pack_coarse(&vec![0u8; 6 * 16], 1, 16).is_none());
+        assert!(pack_coarse(&vec![0u8; 6 * m * m * 4], m, 4).is_none() && pack_coarse(&[0u8; 6 * 16], 1, 16).is_none());
     }
 
     // spec: REND-041
@@ -315,7 +315,7 @@ mod tests {
         assert_eq!(pack_map(&bytes[1..], n, a), None);
         assert_eq!(pack_map(&bytes, 0, a), None);
         assert_eq!(pack_map(&vec![0u8; 4 * 4 * 17], 4, 17), None, "more azimuths than a slot holds");
-        assert_eq!(pack_map(&vec![0u8; 4 * 4 * 8], 4, 8), None, "the shader reads 16 azimuths");
+        assert_eq!(pack_map(&[0u8; 4 * 4 * 8], 4, 8), None, "the shader reads 16 azimuths");
         // A map that is not a multiple of the layer: the spans cover every cell once or more and never run past the map.
         let odd = pack_map(&vec![200u8; 614 * 614 * 16], 614, 16).unwrap();
         assert!(odd.iter().all(|&b| b == 200), "a constant map packs to the same constant, 614 cells to 256 texels");
