@@ -76,6 +76,12 @@ pub fn load_stored(
     Ok(prepare(def, src, n, steps)?.load(dir))
 }
 
+/// The world that keys the run of `def` on `n` cells per face edge from the bake `src` for `steps` steps (the stored channels beside it, such
+/// as the coarse horizon, are keyed through it); the bake is not read.
+pub fn keyed_world(def: &WorldDefinition, src: &dyn LatticeSource, n: u32, steps: u32) -> Result<GlobalWorld, String> {
+    Ok(prepare(def, src, n, steps)?.world)
+}
+
 /// What a run of `def` needs: the lattice, the spec of the channel and the world that keys it. The bake is read only when the run is made.
 struct Prepared {
     lat: Lattice,

@@ -195,3 +195,46 @@ fn the_plan_bound_taken_before_the_chunk_stage_refuses_after_it_and_the_stage_ma
     plan(bound_after).expect("the bound taken from the field it plans with plans");
     let _ = std::fs::remove_dir_all(&store);
 }
+
+// spec: STRM-045
+#[test]
+fn the_stored_coarse_horizon_is_read_on_a_thread_and_a_world_without_one_says_how_to_make_it() {
+    use planet::horizonworld::CoarseStanding;
+    let store = std::env::temp_dir().join(format!("planet-coarse-world-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&store);
+    run(&["generate", "--global-dir", store.to_str().unwrap(), "--global-res", &RES.to_string(), "--threads", "2"]).unwrap();
+    let wait = |world: &Arc<WorldTerrain>| {
+        world.request_coarse_horizon();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        loop {
+            match world.coarse_standing() {
+                CoarseStanding::Idle | CoarseStanding::Working => {
+                    assert!(std::time::Instant::now() < deadline, "the coarse horizon did not end");
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                s => return s,
+            }
+        }
+    };
+    // Nothing stored: absent, with the line that says how to make it, and the frame path was never asked to wait.
+    let world = open(&store);
+    match wait(&world) {
+        CoarseStanding::Absent(text) => assert!(text.contains("make_coarse_horizon") && text.contains("chunk horizon alone"), "{text}"),
+        s => panic!("expected Absent, got {s:?}"),
+    }
+    // Making it needs the stored coupled run: without one the step names it.
+    let err = world.make_coarse_horizon(2).expect_err("no coupled run yet");
+    assert!(err.contains("no stored coupled run"), "{err}");
+    wait_for_run(&world);
+    let records = world.make_coarse_horizon(2).expect("the horizon is made");
+    assert!(records >= 6, "{records} records");
+    // A fresh world over the same store reads it back: observer lattice of the run's size, 16 azimuths, as many bytes as the layout says.
+    let again = open(&store);
+    match wait(&again) {
+        CoarseStanding::Ready(h) => {
+            assert_eq!((h.m, h.azimuths), (RES, 16));
+            assert_eq!(h.bytes.len(), 6 * (RES as usize) * (RES as usize) * 16);
+        }
+        s => panic!("expected Ready, got {s:?}"),
+    }
+}

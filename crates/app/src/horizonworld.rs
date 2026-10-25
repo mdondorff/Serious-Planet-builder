@@ -5,13 +5,20 @@
 //! directions of the chunk lattice over the chunk and a halo of `ceil(range / cell) + 2` cells, on the extended cube plane past a face edge.
 //! The chunk's map is one byte per azimuth for each of its cells, row `j` outer (`HorizonMap` of GEN-044).
 
-use std::sync::{Arc, Weak};
+use std::path::Path;
+use std::sync::{Arc, Mutex, Weak};
 
+use planet_cache::global_store::HorizonSpec;
+use planet_cache::horizon_store::{load_horizon, store_horizon};
+use planet_cache::pack::{TileStore, DEFAULT_MAX_PACK_BYTES};
 use planet_core::{Face, PlanetFixed, TileId};
 use planet_generators::chunkfield::{ChunkKey, ChunkLattice, ChunkResult};
+use planet_generators::coarsehorizon::{coarse_horizon, CoarseParams};
+use planet_generators::global::LatticeSource;
 use planet_generators::horizon::{bake_horizon, halo_texels, HeightRaster, HorizonParams};
 use planet_streaming::chunks::{HorizonBaker, HorizonConfig, HorizonJobs, HorizonStats, HorizonUpdate};
 use planet_streaming::{Clock, Spawner};
+use planet_world_def::WorldDefinition;
 
 use crate::worldfield::WorldTerrain;
 
@@ -171,5 +178,143 @@ impl WorldTerrain {
     /// What the horizon jobs did so far, `None` without them.
     pub fn horizon_stats(&self) -> Option<HorizonStats> {
         self.horizon.read().expect("horizon jobs").as_ref().map(|j| j.stats())
+    }
+}
+
+/// The coarse horizon of a world as the renderer reads it (GEN-045, STRM-045): `6 m^2` observer cells of `azimuths` bytes, faces in order, rows
+/// `j` outer, then `i`, then the azimuth.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CoarseHorizon {
+    pub m: u32,
+    pub azimuths: u32,
+    pub bytes: Arc<Vec<u8>>,
+}
+
+/// Where the coarse horizon of a world stands.
+#[derive(Clone, Debug)]
+pub enum CoarseStanding {
+    /// Not asked for.
+    Idle,
+    /// The thread is reading it.
+    Working,
+    Ready(CoarseHorizon),
+    /// The store holds none (or there is no store): the world shades with the chunk horizon alone; the text says how to make it.
+    Absent(String),
+    /// The store holds one that cannot be used.
+    Failed(String),
+}
+
+/// The slot a world keeps its coarse horizon in: asked for once, read on a thread, read by whoever draws (CON-22: no frame waits for it).
+#[derive(Clone)]
+pub struct CoarseSlot {
+    inner: Arc<Mutex<CoarseStanding>>,
+}
+
+impl Default for CoarseSlot {
+    fn default() -> Self {
+        CoarseSlot { inner: Arc::new(Mutex::new(CoarseStanding::Idle)) }
+    }
+}
+
+impl CoarseSlot {
+    pub fn standing(&self) -> CoarseStanding {
+        self.inner.lock().expect("coarse slot").clone()
+    }
+
+    /// Run `job` on a thread, once: a later call while it works or after it ended does nothing.
+    pub fn request(&self, job: impl FnOnce() -> CoarseStanding + Send + 'static) {
+        {
+            let mut s = self.inner.lock().expect("coarse slot");
+            if !matches!(*s, CoarseStanding::Idle) {
+                return;
+            }
+            *s = CoarseStanding::Working;
+        }
+        let inner = Arc::clone(&self.inner);
+        std::thread::Builder::new()
+            .name("coarse-horizon".into())
+            .spawn(move || {
+                let result = job();
+                *inner.lock().expect("coarse slot") = result;
+            })
+            .expect("spawn the coarse horizon's thread");
+    }
+}
+
+/// The observer lattice and march the world's coarse horizon is stored under: 512 observer cells per face edge (or the run's, if smaller) and
+/// the march of `CoarseParams::for_lattice` over the coupled run of `n` cells per face edge.
+pub fn coarse_spec(n: u32, radius_m: f64) -> HorizonSpec {
+    let params = CoarseParams::for_lattice(n as usize, radius_m);
+    // A small run (a test body) has cells wider than the range: one step then, never a step past the range the march refuses.
+    HorizonSpec { m: n.min(512), params: CoarseParams { step_m: params.step_m.min(params.range_m), ..params } }
+}
+
+/// What a world without a stored coarse horizon says: the far-field shadows need the explicit step that makes it from the stored coupled run.
+fn absent_text(why: &str) -> String {
+    format!("no coarse horizon for the far-field shadows ({why}): shading with the chunk horizon alone; make it from the stored coupled run with `make_coarse_horizon`")
+}
+
+/// The stored coarse horizon beside the store `dir` for the run of `def` on `n` cells per face edge from the bake `src`: read, never made (the
+/// march costs minutes at the run's size). `Absent` when there is no store or it holds none for this run and march.
+pub fn read_coarse(def: &WorldDefinition, dir: Option<&Path>, src: &dyn LatticeSource, n: u32, steps: u32) -> CoarseStanding {
+    let Some(dir) = dir else { return CoarseStanding::Absent(absent_text("the world has no store directory")) };
+    let radius_m = match planet_world_def::GenContext::new(def).body_radius_m(planet_world_def::BodyId::PLANET) {
+        Ok(r) => r,
+        Err(e) => return CoarseStanding::Failed(format!("the definition cannot be generated: {e}")),
+    };
+    let world = match crate::coupledworld::keyed_world(def, src, n, steps) {
+        Ok(w) => w.with_horizon(coarse_spec(n, radius_m)),
+        Err(e) => return CoarseStanding::Absent(absent_text(&e)),
+    };
+    let store = match TileStore::open(dir, world.params()) {
+        Ok(s) => s,
+        Err(e) => return CoarseStanding::Absent(absent_text(&format!("{}: {e}", dir.display()))),
+    };
+    match load_horizon(&store, &world) {
+        Ok(h) if h.azimuths == planet_frame::horizonview::MAX_SLOT_AZIMUTHS as u32 && h.m >= 2 => {
+            CoarseStanding::Ready(CoarseHorizon { m: h.m, azimuths: h.azimuths, bytes: Arc::new(h.bytes) })
+        }
+        Ok(h) => CoarseStanding::Failed(format!(
+            "the stored coarse horizon has {} azimuths over {} cells: the shader reads 16 over at least 2",
+            h.azimuths, h.m
+        )),
+        Err(e) => CoarseStanding::Absent(absent_text(&e.to_string())),
+    }
+}
+
+/// Make the coarse horizon of the stored coupled run beside the store `dir` and store it there (the explicit step; minutes at 2048 cells).
+/// Errors when the store holds no coupled run for `n` and `steps` (made by the viewer or the coupled scene), naming it. Returns the records written.
+pub fn make_coarse_horizon(
+    def: &WorldDefinition,
+    dir: &Path,
+    src: &dyn LatticeSource,
+    n: u32,
+    steps: u32,
+    threads: usize,
+) -> Result<usize, String> {
+    let run = crate::coupledworld::load_stored(def, Some(dir), src, n, steps)?
+        .ok_or_else(|| format!("{}: no stored coupled run of {n} cells and {steps} steps to take the horizon from", dir.display()))?;
+    let radius_m = planet_world_def::GenContext::new(def)
+        .body_radius_m(planet_world_def::BodyId::PLANET)
+        .map_err(|e| format!("the definition cannot be generated: {e}"))?;
+    let spec = coarse_spec(n, radius_m);
+    let world = crate::coupledworld::keyed_world(def, src, n, steps)?.with_horizon(spec);
+    let lat = run.maps.lattice();
+    let z: Vec<f32> = (0..lat.len()).map(|c| run.maps.z(c)).collect();
+    let map = coarse_horizon(lat, &z, spec.m as usize, &spec.params, threads.max(1))?;
+    store_horizon(dir, &world, &map, DEFAULT_MAX_PACK_BYTES).map_err(|e| format!("{}: {e}", dir.display()))
+}
+
+impl WorldTerrain {
+    /// Start reading the stored coarse horizon on a thread, once (STRM-045): from the store beside the bake, for the coupled run the viewer shows.
+    /// No frame waits for it (CON-22); until it is `Ready` the shadows come from the chunk horizon alone.
+    pub fn request_coarse_horizon(self: &Arc<Self>) {
+        let world = Arc::clone(self);
+        self.coarse.request(move || world.read_coarse_now());
+    }
+
+    /// Where the coarse horizon stands.
+    pub fn coarse_standing(&self) -> CoarseStanding {
+        self.coarse.standing()
     }
 }
