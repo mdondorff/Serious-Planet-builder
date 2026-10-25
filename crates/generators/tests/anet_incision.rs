@@ -231,7 +231,7 @@ fn a_chunk_of_the_synthetic_scene_keeps_its_known_answer() {
     assert_eq!(fnv(&core_change(1003, 40)), KNOWN_ANSWER, "the stage changed: platform, order or arithmetic");
 }
 
-const KNOWN_ANSWER: u64 = 15_453_545_016_494_209_173;
+const KNOWN_ANSWER: u64 = 4_674_115_344_839_955_587;
 
 /// A gentle valley along the river (slope 0.001, below the breach slope) plus a little noise: every stream runs to the river.
 struct Plane;
@@ -570,16 +570,27 @@ fn bank_census(a: &ANet, base: &dyn BaseDetail, x: u32) -> (usize, usize, usize)
     (banks, steep_banks, steep_free)
 }
 
+/// A stage whose corridor is cut 250 m under the ground (the cells of these tests are 153 m, so the banks stand steeper than the angle of repose).
+fn deep_stage(base: Arc<dyn BaseDetail>, halo_rings: u16) -> ANet {
+    let mut a = stage_over(base, halo_rings);
+    a.params.anchor.depth_m = 400.0;
+    a.params.anchor.cap_m = 250.0;
+    // The corridor cells here are 153 m: a free cell next to the corridor would erode down to the bed (its coefficient grows with the cell), which at the stage's
+    // 8 m cells it does not (a coefficient of about 1e-4). Switching the free incision off keeps the banks the 8 m chunks have.
+    a.params.tributary_f_max = 0.0;
+    a
+}
+
 // spec: GEN-051, GEN-058
 #[test]
 fn the_bank_of_a_channel_is_held_to_the_angle_of_repose_relative_to_the_channel_cell() {
     // Without the settle the breach leaves walls over the repose slope next to the channel cells ...
-    let mut off = stage_over(Arc::new(Ridge), 30);
+    let mut off = deep_stage(Arc::new(Ridge), 30);
     off.params.bank_rounds = 0;
     let (banks_off, steep_off, _) = bank_census(&off, &Ridge, 1003);
     assert!(banks_off > 100 && steep_off > 10, "without the settle: {steep_off} of {banks_off} bank pairs are over the repose slope");
     // ... and with it no bank is over it; the channel cells did not move.
-    let on = stage_over(Arc::new(Ridge), 30);
+    let on = deep_stage(Arc::new(Ridge), 30);
     let (banks, steep, _) = bank_census(&on, &Ridge, 1003);
     assert!(banks > 100, "{banks} bank pairs");
     // A free cell between a high bed and a low one stays over the low one's cone (it is not lowered under the high bed by more than the repose slope).
@@ -605,14 +616,14 @@ fn the_bank_of_a_channel_is_held_to_the_angle_of_repose_relative_to_the_channel_
 #[test]
 fn the_settled_banks_do_not_depend_on_how_far_the_region_reaches_and_make_no_new_wall_below_a_channel() {
     // The same stated halo's reach over a wider region: bit for bit the same core.
-    let (mut a, mut b) = (stage_over(Arc::new(Ridge), 30), stage_over(Arc::new(Ridge), 30));
+    let (mut a, mut b) = (deep_stage(Arc::new(Ridge), 30), deep_stage(Arc::new(Ridge), 30));
     a.params.bank_rounds = 14;
     b.params.bank_rounds = 14;
     assert_eq!(max_difference(&a, &b, 1003, 30, 70), 0.0);
     // The settle makes no wall under a protected cell that the incision did not leave: free cells more than 0.9 under a protected neighbour.
     let lat = ChunkLattice::new(PER).unwrap();
     let r = region(&lat, chunk(1003), 30);
-    let (on, mut off) = (stage_over(Arc::new(Ridge), 30), stage_over(Arc::new(Ridge), 30));
+    let (on, mut off) = (deep_stage(Arc::new(Ridge), 30), deep_stage(Arc::new(Ridge), 30));
     off.params.bank_rounds = 0;
     let net = planet_generators::anet::Network::build_with(&River, &Ridge, &lat, &r, R, &on.params.anchor);
     let under = |a: &ANet| {
@@ -630,4 +641,66 @@ fn the_settled_banks_do_not_depend_on_how_far_the_region_reaches_and_make_no_new
         n
     };
     assert!(under(&on) <= under(&off), "the settle made walls below protected cells: {} against {}", under(&on), under(&off));
+}
+
+/// The bed along the corridor of a solved chunk, following the links from the cells nothing links to: (longest run of links falling less than 1 mm, in metres, the
+/// largest drop between two linked cells, links that climb by more than 5 cm, links, linked corridor cells left without a receiver), over the links
+/// inside the core.
+fn bed_profile(a: &ANet, base: &dyn BaseDetail, x: u32) -> (f64, f64, usize, usize, usize) {
+    use planet_generators::anet::{Network, NO_NEXT};
+    let lat = ChunkLattice::new(PER).unwrap();
+    let r = region(&lat, chunk(x), 30);
+    let net = Network::build_with(&River, base, &lat, &r, R, &a.params.anchor);
+    let s = a.solve(&lat, &r);
+    let cell_m = lat.cell_m(R);
+    let len = r.cells.len();
+    let mut has_donor = vec![false; len];
+    for c in 0..len {
+        if net.corridor[c] && net.next[c] != NO_NEXT {
+            has_donor[net.next[c] as usize] = true;
+        }
+    }
+    let (mut longest, mut max_step, mut climbs, mut links, mut outlets) = (0.0f64, 0.0f64, 0usize, 0usize, 0usize);
+    for c in 0..r.core {
+        outlets += usize::from(net.corridor[c] && net.next[c] != NO_NEXT && (net.next[c] as usize) < r.core && s.receiver[c] == u32::MAX);
+    }
+    for (start, &donor) in has_donor.iter().enumerate() {
+        if !net.corridor[start] || donor {
+            continue;
+        }
+        let (mut at, mut flat) = (start, 0.0f64);
+        while net.next[at] != NO_NEXT {
+            let n = net.next[at] as usize;
+            if at < r.core && n < r.core {
+                let drop = s.z[at] - s.z[n];
+                links += 1;
+                max_step = max_step.max(drop.abs());
+                climbs += usize::from(drop < -0.05);
+                if drop.abs() < 0.001 {
+                    flat += cell_m;
+                    longest = longest.max(flat);
+                } else {
+                    flat = 0.0;
+                }
+            }
+            at = n;
+        }
+    }
+    (longest, max_step, climbs, links, outlets)
+}
+
+// spec: GEN-059
+#[test]
+fn the_bed_between_the_anchors_falls_the_whole_way_with_no_flat_reach_and_no_step() {
+    let a = stage_over(Arc::new(HighBase), 30);
+    for x in [1000, 1003, 1008] {
+        let (flat_m, step_m, climbs, links, outlets) = bed_profile(&a, &HighBase, x);
+        eprintln!(
+            "chunk {x}: longest flat {flat_m:.0} m, largest drop {step_m:.3} m, climbing links {climbs} of {links}, outlets {outlets}"
+        );
+        assert!(links > 20, "chunk {x}: {links} links");
+        assert!(flat_m <= 400.0, "chunk {x}: a flat reach of {flat_m} m");
+        assert!(step_m <= 1.0, "chunk {x}: a step of {step_m} m");
+        assert_eq!((climbs, outlets), (0, 0), "chunk {x}: the bed climbs in {climbs} links, {outlets} cells lost their receiver");
+    }
 }

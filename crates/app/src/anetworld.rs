@@ -295,6 +295,53 @@ impl WorldTerrain {
                 );
             }
         }
+        // The bed along the corridor, following the links from the cells nothing links to: the longest run of equal heights, the largest drop between two
+        // linked cells, the links that climb by more than 5 cm, and the median bed slope over 8-link windows.
+        {
+            use planet_generators::anet::NO_NEXT;
+            let cell_m = clat.cell_m(radius);
+            let mut has_donor = vec![false; reg.cells.len()];
+            for c in 0..reg.cells.len() {
+                if net.corridor[c] && net.next[c] != NO_NEXT {
+                    has_donor[net.next[c] as usize] = true;
+                }
+            }
+            let (mut longest_flat, mut max_drop, mut climbs, mut links) = (0.0f64, 0.0f64, 0usize, 0usize);
+            let mut window_slopes: Vec<f64> = Vec::new();
+            for (start, &donor) in has_donor.iter().enumerate() {
+                if !net.corridor[start] || donor {
+                    continue;
+                }
+                let (mut at, mut flat, mut chain) = (start, 0.0f64, vec![s.z[start]]);
+                while net.next[at] != NO_NEXT {
+                    let n = net.next[at] as usize;
+                    let drop = s.z[at] - s.z[n];
+                    if at < core && n < core {
+                        links += 1;
+                        max_drop = max_drop.max(drop.abs());
+                        climbs += usize::from(drop < -0.05);
+                        if drop.abs() < 1e-9 {
+                            flat += cell_m;
+                            longest_flat = longest_flat.max(flat);
+                        } else {
+                            flat = 0.0;
+                        }
+                    }
+                    chain.push(s.z[n]);
+                    at = n;
+                }
+                for w in chain.windows(9) {
+                    window_slopes.push((w[0] - w[8]) / (8.0 * cell_m));
+                }
+            }
+            let outlets = (0..core).filter(|&c| net.corridor[c] && net.next[c] != NO_NEXT && s.receiver[c] == u32::MAX).count();
+            window_slopes.sort_by(f64::total_cmp);
+            out += &format!(
+                "bed: {links} links in the core; longest flat reach {longest_flat:.0} m; largest drop between linked cells {max_drop:.2} m; links that climb over 5 cm {climbs}; linked corridor cells left without a receiver {outlets}; median slope over 8 links {:.2e}
+",
+                window_slopes.get(window_slopes.len() / 2).copied().unwrap_or(f64::NAN)
+            );
+        }
         // The steep pairs of neighbouring core cells of the solved surface: how many are over the angle of repose and over the slope the plan can draw,
         // and whether a protected cell (a channel, the corridor, an anchor: the hillslope steps skip every pair with one) is one of the two.
         let cell_m = clat.cell_m(radius);

@@ -87,3 +87,14 @@ Source: planner decision 2026-10-25, GEN-051, learnings 2026-10-25 (walls), ADR 
 #### Scenario: A breach cut through a ridge
 - **WHEN** a chunk of a river that crosses a 600 m ridge runs with and without the settle
 - **THEN** without it more than ten bank pairs stand over the repose slope, with it at most one in twenty, no protected cell differs, and no cell is higher with it than without
+
+### Requirement: GEN-059 The bed of a river is monotone, with no flat reach and no step
+Every corridor cell of an A-net chunk SHALL be held at a bed interpolated along its segment from samples about 200 m apart: the base height minus the depth law (GEN-057), the running maximum from downstream over the next 64 segments, each sample at least `min(slope_ks A^-slope_theta, slope_cap)` per metre above the sample below it. The bed of the core SHALL have no run of equal heights over 400 m and no drop between linked cells over 5 m, no link SHALL climb by more than 5 cm, and no linked corridor cell SHALL be left without a receiver, wherever the ground does not rise downstream by more than the window of 64 segments sees. The law's constants are part of the stage's definition hash.
+
+Verify: A
+Status: planned
+Source: SPIKE-40 (bed profile), planner decision 2026-10-25 (H1), GEN-057
+
+#### Scenario: A smooth base over a river
+- **WHEN** a chunk of a river over a smooth base runs its incision
+- **THEN** the longest flat reach is at most 400 m, the largest drop between linked cells is under 5 m, no link climbs and no corridor cell loses its receiver
