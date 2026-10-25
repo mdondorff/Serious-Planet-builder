@@ -19,6 +19,18 @@ pub const REDUCTION_VERSION: u32 = 1;
 /// face's `s` axis (the order of `coupled::Lattice`). `threads` only sets the speed. A read error names the vertex; `res` that is not a
 /// multiple of `n` is refused.
 pub fn reduce_bake(src: &dyn LatticeSource, n: u32, threads: usize) -> Result<Vec<f32>, ReadError> {
+    reduce_bake_with(src, n, threads, &|_, _| {})
+}
+
+// spec: STRM-051
+/// [`reduce_bake`] that calls `progress(done, total)` once per band of rows when the band is finished, from the thread that did it (the counts
+/// reach `total`; the heights do not depend on it, CON-14).
+pub fn reduce_bake_with(
+    src: &dyn LatticeSource,
+    n: u32,
+    threads: usize,
+    progress: &(dyn Fn(usize, usize) + Sync),
+) -> Result<Vec<f32>, ReadError> {
     let res = src.res();
     if n == 0 || res < n || !res.is_multiple_of(n) || !(res / n).is_power_of_two() {
         return Err(ReadError::Shape(format!(
@@ -31,6 +43,7 @@ pub fn reduce_bake(src: &dyn LatticeSource, n: u32, threads: usize) -> Result<Ve
     let bands_per_face = n.div_ceil(rows_per_band);
     let bands = 6 * bands_per_face;
     let next = AtomicUsize::new(0);
+    let finished = AtomicUsize::new(0);
     let done: Mutex<Vec<Band>> = Mutex::new(Vec::with_capacity(bands));
     std::thread::scope(|s| {
         for _ in 0..threads.clamp(1, bands) {
@@ -43,6 +56,7 @@ pub fn reduce_bake(src: &dyn LatticeSource, n: u32, threads: usize) -> Result<Ve
                 let j0 = (b % bands_per_face) * rows_per_band;
                 let out = band(src, face, j0, (j0 + rows_per_band).min(n), n, r);
                 done.lock().expect("reduction results").push((b, out));
+                progress(finished.fetch_add(1, Ordering::Relaxed) + 1, bands);
             });
         }
     });

@@ -2,7 +2,7 @@
 
 use planet_core::cube::TangentWarp;
 use planet_generators::coupled::{filled_state, priority_flood, run, CoupledInput, CoupledParams, Lattice, NONE};
-use planet_generators::coupledinput::reduce_bake;
+use planet_generators::coupledinput::{reduce_bake, reduce_bake_with};
 use planet_generators::global::{bake, GridSource};
 
 const R: f64 = 6_371_000.0;
@@ -85,4 +85,33 @@ fn the_network_and_the_areas_are_those_of_the_filled_surface_and_the_run_is_dete
     }
     assert!((outlets_area / land_area - 1.0).abs() < 1.0e-3, "the outlets drain the land: {outlets_area} against {land_area}");
     assert_eq!(state.steps.len(), 1, "one pass");
+}
+
+// spec: STRM-051
+#[test]
+fn the_reduction_reports_every_band_once_and_its_heights_do_not_depend_on_the_reporting_or_the_threads() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex;
+    let grid = bake(1, &TangentWarp, 128, 2).unwrap();
+    let plain = reduce_bake(&GridSource(&grid), 32, 1).unwrap();
+    for threads in [1, 4] {
+        let seen = Mutex::new(Vec::new());
+        let calls = AtomicUsize::new(0);
+        let z = reduce_bake_with(&GridSource(&grid), 32, threads, &|done, total| {
+            calls.fetch_add(1, Ordering::Relaxed);
+            seen.lock().unwrap().push((done, total));
+        })
+        .unwrap();
+        assert_eq!(z, plain, "{threads} threads: the reported reduction equals the plain one");
+        let mut seen = seen.into_inner().unwrap();
+        seen.sort();
+        let total = seen[0].1;
+        assert_eq!(calls.load(Ordering::Relaxed), total, "{threads} threads: one call a band");
+        assert!(seen.iter().all(|&(_, t)| t == total));
+        assert_eq!(
+            seen.iter().map(|&(d, _)| d).collect::<Vec<_>>(),
+            (1..=total).collect::<Vec<_>>(),
+            "{threads} threads: the counts are 1..=total"
+        );
+    }
 }
