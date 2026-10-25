@@ -274,11 +274,10 @@ impl Network {
                 visit(last, 1.0, &mut runs);
             }
             // The anchors: the quarter points of the segment, held a depth under the ground there (`anchor_heights`).
-            for q in 0..=4usize {
+            for (q, &h) in anchors[&(from, to)].iter().enumerate() {
                 let t = q as f64 / 4.0;
                 let p = points[(t * (points.len() - 1) as f64).round() as usize];
                 if let Some(i) = region.index_of(lat.cell_at(p)) {
-                    let h = anchors[&(from, to)][q];
                     if anchor_z[i].is_nan() || h < anchor_z[i] {
                         anchor_z[i] = h;
                     }
@@ -355,6 +354,9 @@ impl AnchorLaw {
     }
 }
 
+/// A segment and the chain of segments from it on down the river (itself included).
+type Chain = ((usize, usize), Vec<(usize, usize)>);
+
 /// The anchor heights of every segment of `segments` at its five quarter points (GEN-047): the base height at the point minus the law's depth for the
 /// river's area there, then the running maximum from downstream along the river for up to `law.window` further segments, so no anchor lies under the
 /// bed downstream of it (the bed profile is non-increasing downstream). A function of the run and the base at positions alone: the same in every chunk.
@@ -368,7 +370,7 @@ fn anchor_heights(
 ) -> BTreeMap<(usize, usize), [f64; 5]> {
     let coarse = run.lattice();
     // The chain of segments from each segment on down the river (itself included).
-    let mut chains: Vec<((usize, usize), Vec<(usize, usize)>)> = Vec::new();
+    let mut chains: Vec<Chain> = Vec::new();
     let mut needed: BTreeSet<(usize, usize)> = BTreeSet::new();
     for &(from, to) in segments {
         let mut chain = vec![(from, to)];
