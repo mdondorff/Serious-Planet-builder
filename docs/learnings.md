@@ -118,3 +118,12 @@ Scope: generators::coupled (GEN-040, GEN-063), app::coupledworld; M8 rebuild at 
 - Not found: why the run then relaxes to a much lower surface. Candidates: receiver and area changes after step 1, the fill, ties on the 2048 flats. The planner decided not to spend more time (2026-10-25): the run keeps the input and only fills (GEN-065); the erosion option stays for M9.
 - Tool: a scratch diagnostic (run minus input by band after N steps) was not committed; the stored-run report is `chunk_incision --run-vs-base`.
 - Obsolete when the stream-power run is calibrated so that its steady state holds on a real bake.
+
+## 2026-10-25 The chunk fade is bounded on screen, not per frame: the real run's entry step is up to 58 m, not 17.55 m
+Scope: m8-chunk-fade (REND-039, STRM-047), criterion 3 of M8; app::globalperf `anet_steps_report`
+- On the shared store (bake 16384, stored fill-only run, chunk of the largest inland river, face 0, 14.1 million km2 at its coarse cell) the change at the entry level is all incision: p0 -58.3, p50 -25.9, p90 -0.4, max +0.15 m over 69,696 vertices; the entry step is p99 56.9 m, max 58.3 m. The 256 bake's figure was 3.90 m p99 and 17.55 m max, for a smaller river.
+- A fade over 1.5 s at 60 fps moves a vertex by 0.65 m a frame at most (p99 0.63 m); 0.25 m a frame would need 3.9 s. On screen at the entry distance (about 4 km at tau 6 px, 1440p, 60 degrees: 3.2 m a pixel) that is 0.20 px a frame, inside the amended 0.5 px.
+- The steps between pyramid levels inside the chunk range are inside 0.25 m p99: 0.126 m (15 against 14), 0.030 m (16 against 15).
+- The screen numbers are computed from the field and the camera geometry; no rendered frame measures the pixel step.
+- Tool: `PLANET_ANET_STORE=DIR PLANET_ANET_RES=N PLANET_ANET_MIN_HEIGHT_M=150 cargo test -p planet --release --lib anet_steps_report -- --ignored --nocapture` (read only).
+- Obsolete when the criterion is judged on rendered frames of the fade (look review 2).
