@@ -253,7 +253,7 @@ pub fn coarse_spec(n: u32, radius_m: f64) -> HorizonSpec {
 
 /// What a world without a stored coarse horizon says: the far-field shadows need the explicit step that makes it from the stored coupled run.
 fn absent_text(why: &str) -> String {
-    format!("no coarse horizon for the far-field shadows ({why}): shading with the chunk horizon alone; make it from the stored coupled run with `make_coarse_horizon`")
+    format!("no coarse horizon for the far-field shadows ({why}): shading with the chunk horizon alone; make it with `planet generate --coarse-horizon <store dir> --global-res <N>` from the coupled run stored beside the bake")
 }
 
 /// The stored coarse horizon beside the store `dir` for the run of `def` on `n` cells per face edge from the bake `src`: read, never made (the
@@ -313,6 +313,71 @@ pub fn make_coarse_horizon(
     let z: Vec<f32> = (0..lat.len()).map(|c| run.maps.z(c)).collect();
     let map = coarse_horizon(lat, &z, spec.m as usize, &spec.params, threads.max(1))?;
     store_horizon(dir, &world, &map, DEFAULT_MAX_PACK_BYTES).map_err(|e| format!("{}: {e}", dir.display()))
+}
+
+/// `generate --coarse-horizon DIR --global-res N [--world F | --seed S] [--threads T]`: make the coarse horizon of the coupled run stored beside the
+/// bake in `DIR` and store it there; prints a progress line before the march and the wall time after it.
+pub fn generate_coarse_horizon(o: &crate::Options, out: &mut dyn std::io::Write) -> Result<(), String> {
+    use crate::err;
+    let dir = o.coarse_horizon.as_ref().expect("checked by the caller");
+    let others = [
+        "--plan-check",
+        "--compact-cache",
+        "--prefill-dir",
+        "--global-dir",
+        "--verify-global",
+        "--global-products",
+        "--cache-dir",
+        "--verify-cache",
+        "--manifest",
+        "--tile",
+        "--out",
+        "--region",
+    ];
+    let clash: Vec<&str> = others.into_iter().filter(|f| o.given.contains(*f)).collect();
+    if !clash.is_empty() {
+        return Err(format!("--coarse-horizon takes only --global-res, --world or --seed and --threads, not {}", clash.join(", ")));
+    }
+    if !o.given.contains("--global-res") {
+        return Err(
+            "--coarse-horizon needs --global-res N, the resolution the bake was made at (a store holds one bake per resolution)".into()
+        );
+    }
+    if o.given.contains("--world") && o.given.contains("--seed") {
+        return Err("--world and --seed both name the definition: give one".into());
+    }
+    if !dir.is_dir() {
+        return Err(format!("{}: no such store directory (a bake made by `generate --global-dir`)", dir.display()));
+    }
+    let def = match &o.world {
+        Some(path) => {
+            let text = std::fs::read_to_string(path).map_err(|e| format!("reading {}: {e}", path.display()))?;
+            planet_world_def::toml_io::parse_definition(&text).map_err(|e| format!("{}: {e}", path.display()))?
+        }
+        None => WorldDefinition::single_planet(crate::skeleton::RADIUS_M, o.seed),
+    };
+    let world =
+        planet_cache::global_store::GlobalWorld::from_definition(&def).map_err(|e| format!("the definition cannot be generated: {e}"))?;
+    let store = TileStore::open(dir, world.params()).map_err(|e| e.to_string())?;
+    let src = planet_cache::global_store::StoreSource::new(&store, &world, o.global_res).map_err(|e| e.to_string())?;
+    let n = crate::coupledworld::run_cells(o.global_res);
+    let radius_m = planet_world_def::GenContext::new(&def)
+        .body_radius_m(planet_world_def::BodyId::PLANET)
+        .map_err(|e| format!("the definition cannot be generated: {e}"))?;
+    let spec = coarse_spec(n, radius_m);
+    let threads = if o.threads == 0 { std::thread::available_parallelism().map_or(1, |t| t.get()) } else { o.threads };
+    writeln!(
+        out,
+        "coarse horizon: marching {} azimuths to {:.0} km from {} observer cells per face edge over the coupled run of {n} cells ({} steps), {threads} threads",
+        spec.params.azimuths,
+        spec.params.range_m / 1000.0,
+        spec.m,
+        crate::coupledworld::COUPLED_STEPS
+    )
+    .map_err(err)?;
+    let started = std::time::Instant::now();
+    let records = make_coarse_horizon(&def, dir, &src, n, crate::coupledworld::COUPLED_STEPS, threads)?;
+    writeln!(out, "coarse horizon: {records} records stored in {} in {:.1} s", dir.display(), started.elapsed().as_secs_f64()).map_err(err)
 }
 
 impl WorldTerrain {
