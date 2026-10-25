@@ -192,6 +192,9 @@ pub fn generate(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     if o.coarse_horizon.is_some() {
         return crate::horizonworld::generate_coarse_horizon(o, out);
     }
+    if o.coupled_run.is_some() {
+        return crate::coupledworld::generate_coupled_run(o, out);
+    }
     if o.plan_check.is_some() {
         return crate::plancheck::plan_check(o, out);
     }
