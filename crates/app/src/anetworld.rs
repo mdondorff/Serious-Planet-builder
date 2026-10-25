@@ -135,6 +135,7 @@ impl WorldTerrain {
             base: Arc::new(WorldBase::new(self)),
             radius_m: self.radius_m(),
             params: ANetParams::spike(ANET_HALO_M, lat.cell_m(self.radius_m())),
+            memo: Default::default(),
         });
         let disk: Option<Arc<dyn ChunkDisk>> = self.store_dir().map(|dir| {
             let spec = ChunkSpec {
@@ -251,7 +252,7 @@ impl WorldTerrain {
             params.anchor.head_m = 0.0;
         }
         let halo = params.halo_rings;
-        let stage = ANet { run: run.maps, base: Arc::new(WorldBase::new(self)), radius_m: radius, params };
+        let stage = ANet { run: run.maps, base: Arc::new(WorldBase::new(self)), radius_m: radius, params, memo: Default::default() };
         let dir = Vec3::from_lat_lon(lat_deg.to_radians(), lon_deg.to_radians());
         let tile = TileId::from_direction(&TangentWarp, dir, planet_generators::chunk::CHUNK_GRID_LEVEL);
         let reg = region(&clat, tile, halo);

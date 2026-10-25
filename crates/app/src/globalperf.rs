@@ -182,6 +182,7 @@ pub fn perf_anet_chunk(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Re
             base: Arc::new(WorldBase::new(&world).with_threads(1)),
             radius_m: radius,
             params: ANetParams::spike(ANET_HALO_M, lat.cell_m(radius)),
+            memo: Default::default(),
         };
         let halo = halo_rings(&stage);
         // The share of the base field: its heights over the region, one thread.
@@ -383,6 +384,7 @@ mod tests {
             base: std::sync::Arc::new(crate::anetworld::WorldBase::new(&world)),
             radius_m: radius,
             params: planet_generators::anet::ANetParams::spike(crate::anetworld::ANET_HALO_M, lat.cell_m(radius)),
+            memo: Default::default(),
         };
         anet_steps(&world, &maps, &stage, &lat, tile, &mut out).unwrap();
     }

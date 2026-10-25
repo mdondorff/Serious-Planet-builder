@@ -206,6 +206,19 @@ impl Network {
         radius_m: f64,
         law: &AnchorLaw,
     ) -> Network {
+        Network::build_with_memo(run, base, lat, region, radius_m, law, &crate::route::RouteMemo::default())
+    }
+
+    /// [`Network::build_with`] keeping the routed segments in `memo` for the next build (a stage's chunks share most of them).
+    pub fn build_with_memo(
+        run: &dyn CoarseRun,
+        base: &dyn BaseDetail,
+        lat: &ChunkLattice,
+        region: &Region,
+        radius_m: f64,
+        law: &AnchorLaw,
+        memo: &crate::route::RouteMemo,
+    ) -> Network {
         let coarse = run.lattice();
         let n_coarse = coarse.n();
         // Fine cells per coarse cell along an edge: the chunk lattice cut by the coarse one (the production run is the chunk grid, 2048 cells).
@@ -244,7 +257,7 @@ impl Network {
             law.route_band_m + law.slide_steep_m.max(law.slide_m).max(law.head_m) + MEANDER_M < 3_400.0,
             "the routing reaches past the coarse ring a region reads"
         );
-        let router = crate::route::Router::new(run, base, lat, radius_m, law);
+        let router = crate::route::Router::new(run, base, lat, radius_m, law, memo);
         let anchors = anchor_profiles(run, base, &segments, radius_m, law, is_river, &router);
         for (from, to) in segments {
             let points = router.polyline(from, to);
@@ -1185,12 +1198,14 @@ pub struct ANet {
     pub base: std::sync::Arc<dyn BaseDetail>,
     pub radius_m: f64,
     pub params: ANetParams,
+    /// The routed segments of this stage's chunks (GEN-066): a memo of pure functions of the run, the base and the law, emptied when the law changes.
+    pub memo: crate::route::RouteMemo,
 }
 
 impl ANet {
     /// The solve over a region (also what the tests look at).
     pub fn solve(&self, lat: &ChunkLattice, region: &Region) -> Solution {
-        let net = Network::build_with(&*self.run, &*self.base, lat, region, self.radius_m, &self.params.anchor);
+        let net = Network::build_with_memo(&*self.run, &*self.base, lat, region, self.radius_m, &self.params.anchor, &self.memo);
         // The own area of a fine cell: the coarse cell's area over the cells it holds.
         let n = self.run.lattice().n();
         let per = lat.n() as usize / n.max(1);

@@ -16,13 +16,52 @@ use crate::chunkfield::ChunkLattice;
 use crate::coupled::NONE as COARSE_NONE;
 use planet_core::Face;
 use planet_core::Vec3;
-use std::cell::RefCell;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap};
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 /// The points of a routed segment.
-type Polyline = Rc<Vec<Vec3>>;
+type Polyline = Arc<Vec<Vec3>>;
+
+/// The most routed segments a [`RouteMemo`] keeps (about 125 points of 24 bytes each): over it the memo is cleared.
+const MEMO_SEGMENTS: usize = 4096;
+
+/// A memo of the nodes, relief factors and routed polylines of one run, base and law (what a stage keeps between its chunks, so a segment the chunks share
+/// is routed once). Every value is a pure function of its key under those three, so a hit is the value a miss would compute, bit for bit; a different law
+/// empties it.
+#[derive(Default)]
+pub struct RouteMemo {
+    law_key: Mutex<Option<u64>>,
+    nodes: Mutex<BTreeMap<usize, Vec3>>,
+    reliefs: Mutex<BTreeMap<usize, f64>>,
+    lines: Mutex<BTreeMap<(usize, usize), Polyline>>,
+}
+
+impl RouteMemo {
+    /// Empties the memo when `law` is not the law it was filled under.
+    fn for_law(&self, law: &AnchorLaw) {
+        let key = planet_core::hash::hash_u64s(
+            0x0072_6f75_7465,
+            &[
+                law.route_band_m.to_bits(),
+                law.route_lambda.to_bits(),
+                u64::from(law.route_stride),
+                law.slide_m.to_bits(),
+                law.slide_steep_m.to_bits(),
+                law.head_m.to_bits(),
+                law.river_area_m2.to_bits(),
+                law.relief_full_m.to_bits(),
+            ],
+        );
+        let mut current = self.law_key.lock().expect("memo");
+        if *current != Some(key) {
+            *current = Some(key);
+            self.nodes.lock().expect("memo").clear();
+            self.reliefs.lock().expect("memo").clear();
+            self.lines.lock().expect("memo").clear();
+        }
+    }
+}
 
 /// The routing of the segments of one network build: a memo of pure functions of the coarse cell and the segment, so a segment is routed once however
 /// many segments and chains ask for it.
@@ -32,23 +71,20 @@ pub struct Router<'a> {
     lat: &'a ChunkLattice,
     radius_m: f64,
     law: &'a AnchorLaw,
-    nodes: RefCell<BTreeMap<usize, Vec3>>,
-    reliefs: RefCell<BTreeMap<usize, f64>>,
-    lines: RefCell<BTreeMap<(usize, usize), Polyline>>,
+    memo: &'a RouteMemo,
 }
 
 impl<'a> Router<'a> {
-    pub fn new(run: &'a dyn CoarseRun, base: &'a dyn BaseDetail, lat: &'a ChunkLattice, radius_m: f64, law: &'a AnchorLaw) -> Router<'a> {
-        Router {
-            run,
-            base,
-            lat,
-            radius_m,
-            law,
-            nodes: RefCell::new(BTreeMap::new()),
-            reliefs: RefCell::new(BTreeMap::new()),
-            lines: RefCell::new(BTreeMap::new()),
-        }
+    pub fn new(
+        run: &'a dyn CoarseRun,
+        base: &'a dyn BaseDetail,
+        lat: &'a ChunkLattice,
+        radius_m: f64,
+        law: &'a AnchorLaw,
+        memo: &'a RouteMemo,
+    ) -> Router<'a> {
+        memo.for_law(law);
+        Router { run, base, lat, radius_m, law, memo }
     }
 
     /// Whether the routing changes anything (a band or a slide is set).
@@ -66,7 +102,7 @@ impl<'a> Router<'a> {
 
     /// The relief factor round the coarse cell `c`: the base at its centre and the eight round it.
     pub fn relief_factor(&self, c: usize) -> f64 {
-        if let Some(&r) = self.reliefs.borrow().get(&c) {
+        if let Some(&r) = self.memo.reliefs.lock().expect("memo").get(&c) {
             return r;
         }
         let coarse = self.run.lattice();
@@ -75,13 +111,13 @@ impl<'a> Router<'a> {
         let h = self.base.base_heights(&ring);
         let (lo, hi) = h.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, u), &x| (l.min(x), u.max(x)));
         let rf = self.law.relief_factor(hi - lo);
-        self.reliefs.borrow_mut().insert(c, rf);
+        self.memo.reliefs.lock().expect("memo").insert(c, rf);
         rf
     }
 
     /// The direction of the node of coarse cell `c` (see the module comment).
     pub fn node(&self, c: usize) -> Vec3 {
-        if let Some(&d) = self.nodes.borrow().get(&c) {
+        if let Some(&d) = self.memo.nodes.lock().expect("memo").get(&c) {
             return d;
         }
         let centre = self.run.lattice().direction(c);
@@ -102,7 +138,7 @@ impl<'a> Router<'a> {
                 centre
             }
         };
-        self.nodes.borrow_mut().insert(c, d);
+        self.memo.nodes.lock().expect("memo").insert(c, d);
         d
     }
 
@@ -137,9 +173,9 @@ impl<'a> Router<'a> {
     }
 
     /// The polyline of the coarse segment `from` to `to`: the first point is the node of `from`, the last the node of `to`.
-    pub fn polyline(&self, from: usize, to: usize) -> Rc<Vec<Vec3>> {
-        if let Some(l) = self.lines.borrow().get(&(from, to)) {
-            return Rc::clone(l);
+    pub fn polyline(&self, from: usize, to: usize) -> Polyline {
+        if let Some(l) = self.memo.lines.lock().expect("memo").get(&(from, to)) {
+            return Arc::clone(l);
         }
         let coarse = self.run.lattice();
         let line = if !self.enabled() {
@@ -153,8 +189,12 @@ impl<'a> Router<'a> {
                 guide
             }
         };
-        let line = Rc::new(line);
-        self.lines.borrow_mut().insert((from, to), Rc::clone(&line));
+        let line = Arc::new(line);
+        let mut lines = self.memo.lines.lock().expect("memo");
+        if lines.len() >= MEMO_SEGMENTS {
+            lines.clear();
+        }
+        lines.insert((from, to), Arc::clone(&line));
         line
     }
 

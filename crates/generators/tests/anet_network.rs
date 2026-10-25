@@ -336,7 +336,8 @@ fn the_routed_path_goes_round_a_ridge_the_coarse_path_crosses_and_the_nodes_of_a
     law.slide_m = 600.0;
     law.slide_steep_m = 600.0;
     let run = River(1000);
-    let router = Router::new(&run, &Ridge, &lat, R, &law);
+    let memo = planet_generators::route::RouteMemo::default();
+    let router = Router::new(&run, &Ridge, &lat, R, &law, &memo);
     let c = FACE * N * N + 1000 * N + 1002;
     let (up, down) = (router.polyline(c - 1, c), router.polyline(c, c + 1));
     assert_eq!(up[up.len() - 1], down[0], "the segments meet at the same node");
@@ -505,4 +506,29 @@ fn a_tributary_of_the_coarse_run_is_routed_like_a_stem_only_above_the_river_thre
     let without = north(&law);
     assert!(with > 20, "the tributary of 3e8 m2 has {with} corridor cells above a threshold of 1e8");
     assert_eq!(without, 0, "and none above a threshold of 5e8");
+}
+
+// spec: GEN-067
+#[test]
+fn a_stage_memo_of_routed_segments_gives_the_bits_of_a_fresh_build_and_empties_when_the_law_changes() {
+    use planet_generators::route::RouteMemo;
+    let lat = ChunkLattice::new(32).unwrap();
+    let mut law = routed_law();
+    law.slide_m = 400.0;
+    law.slide_steep_m = 400.0;
+    let (ra, rb) = (region(&lat, chunk(1002), 40), region(&lat, chunk(1003), 40));
+    let bits = |n: &Network| n.anchor_z.iter().map(|z| z.to_bits()).collect::<Vec<u64>>();
+    let memo = RouteMemo::default();
+    let first = Network::build_with_memo(&Fork, &Ridge, &lat, &ra, R, &law, &memo);
+    // A second chunk through the same memo is the fresh build, and so is the first again (all hits).
+    let second = Network::build_with_memo(&Fork, &Ridge, &lat, &rb, R, &law, &memo);
+    assert_eq!(bits(&second), bits(&Network::build_with(&Fork, &Ridge, &lat, &rb, R, &law)));
+    assert_eq!(bits(&first), bits(&Network::build_with_memo(&Fork, &Ridge, &lat, &ra, R, &law, &memo)));
+    // Another law through the same memo is that law's fresh build, not the memo's old paths.
+    let mut other = law;
+    other.route_band_m = 800.0;
+    other.slide_m = 200.0;
+    let changed = Network::build_with_memo(&Fork, &Ridge, &lat, &ra, R, &other, &memo);
+    assert_eq!(bits(&changed), bits(&Network::build_with(&Fork, &Ridge, &lat, &ra, R, &other)));
+    assert_ne!(bits(&changed), bits(&first), "the law changes the beds");
 }
