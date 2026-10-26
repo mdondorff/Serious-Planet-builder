@@ -2752,7 +2752,7 @@ mod fade_grant_tests {
         TileId::new(Face(0), 15, x, 0).unwrap()
     }
 
-    // spec: REND-039
+    // spec: REND-042
     #[test]
     fn a_node_is_never_switched_between_faded_and_final_mid_fade_whatever_finishes_or_starts_around_it() {
         let cap = 4;

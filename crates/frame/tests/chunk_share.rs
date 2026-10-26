@@ -203,7 +203,7 @@ impl ChunkView for Fixed {
     }
 }
 
-// spec: STRM-047
+// spec: STRM-052
 #[test]
 fn the_fade_starts_when_the_change_is_first_drawn_so_a_slow_rebuild_still_fades_and_a_new_version_keeps_the_state() {
     let key = (2u8, 1000u32, 1000u32);
@@ -229,7 +229,7 @@ fn the_fade_starts_when_the_change_is_first_drawn_so_a_slow_rebuild_still_fades_
     assert_eq!(fade.weight(key, true, 6_000), 0.0);
 }
 
-// spec: STRM-047
+// spec: STRM-052
 #[test]
 fn a_tile_built_before_the_landing_starts_no_clock_and_the_rebuilt_one_starts_it_at_weight_zero() {
     let tile = TileId::new(Face(2), CHUNK_GRID_LEVEL + 3, 8 * 1000 + 7, 8 * 1000 + 3).unwrap();
