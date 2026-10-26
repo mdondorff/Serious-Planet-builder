@@ -800,3 +800,152 @@ fn a_band_cap_of_zero_paints_no_band_and_the_default_cap_follows_the_halo() {
     assert_eq!((p.halo_rings, p.area_window), (375, 128));
     assert!(p.anchor.band_cap_m <= (375.0 - 128.0 - 2.0) * 8.0 && p.anchor.band_cap_m >= 1000.0, "{}", p.anchor.band_cap_m);
 }
+
+// spec: GEN-071
+#[test]
+fn a_chunk_result_carries_the_driver_channels_with_box_pyramids_and_they_round_trip_and_re_key() {
+    use planet_generators::chunkfield::ChunkResult;
+    use planet_generators::drivers::ChunkDrivers;
+    let (n, k_max) = (8usize, 2usize);
+    let values = vec![0.5f32; n * n];
+    let make = |bump: u8| ChunkDrivers {
+        soil: (0..n * n).map(|k| (k % 251) as u8).collect(),
+        moisture: (0..n * n).map(|k| ((3 * k) % 253) as u8 ^ bump).collect(),
+        insolation: vec![200; n * n],
+    };
+    let plain = ChunkResult::new(chunk(1003), n, &values, k_max).unwrap();
+    assert!(!plain.has_drivers() && plain.driver_at(0, 0, 0, 0).is_none());
+    let with = ChunkResult::new(chunk(1003), n, &values, k_max).unwrap().with_drivers(&make(0)).unwrap();
+    // The raster is the channel, a level the 2 x 2 mean rounded to nearest (half up).
+    let d = make(0);
+    assert_eq!(with.driver_at(1, 0, 3, 5), Some(d.moisture[5 * n + 3]));
+    let mean = |c: &[u8], i: usize, j: usize| {
+        (u32::from(c[2 * j * n + 2 * i])
+            + u32::from(c[2 * j * n + 2 * i + 1])
+            + u32::from(c[(2 * j + 1) * n + 2 * i])
+            + u32::from(c[(2 * j + 1) * n + 2 * i + 1])
+            + 2)
+            / 4
+    };
+    assert_eq!(with.driver_at(0, 1, 2, 1), Some(mean(&d.soil, 2, 1) as u8));
+    assert_eq!(with.driver_at(2, 2, 1, 1), Some(200));
+    // Bytes round trip, the old bytes (no drivers) still parse, and a driver changes the hash and the size.
+    let back = ChunkResult::from_bytes(chunk(1003), &with.to_bytes()).unwrap();
+    assert!(back.has_drivers() && back.hash() == with.hash() && back.size_bytes() == with.size_bytes());
+    assert!(!ChunkResult::from_bytes(chunk(1003), &plain.to_bytes()).unwrap().has_drivers());
+    assert_ne!(plain.hash(), with.hash());
+    assert_ne!(with.hash(), ChunkResult::new(chunk(1003), n, &values, k_max).unwrap().with_drivers(&make(1)).unwrap().hash());
+    assert!(with.size_bytes() > plain.size_bytes());
+    let mut damaged = with.to_bytes();
+    damaged.pop();
+    assert!(ChunkResult::from_bytes(chunk(1003), &damaged).is_none());
+    // A channel of the wrong size is refused.
+    let short = ChunkDrivers { soil: vec![0; n * n - 1], ..make(0) };
+    assert!(ChunkResult::new(chunk(1003), n, &values, k_max).unwrap().with_drivers(&short).is_none());
+}
+
+// spec: GEN-071
+#[test]
+fn the_blend_is_the_neutral_value_at_weight_0_the_chunks_at_1_and_monotone_between() {
+    use planet_generators::drivers::blend_driver;
+    for (neutral, chunk_value) in [(1.0, 5.0), (0.5, 0.1), (0.7, 0.7)] {
+        assert_eq!(blend_driver(neutral, chunk_value, 0.0), neutral);
+        assert_eq!(blend_driver(neutral, chunk_value, 1.0), chunk_value);
+        let mut last = neutral;
+        for k in 1..=100 {
+            let v = blend_driver(neutral, chunk_value, f64::from(k) / 100.0);
+            assert!(if chunk_value >= neutral { v >= last } else { v <= last }, "not monotone at {k}");
+            last = v;
+        }
+        assert_eq!(blend_driver(neutral, chunk_value, 2.0), chunk_value, "the weight is clamped");
+    }
+}
+
+/// The driver channels of `tiles` on `threads` threads, as hashes.
+fn driver_hashes_on(threads: usize, tiles: &[TileId]) -> Vec<u64> {
+    let lat = ChunkLattice::new(PER).unwrap();
+    let per = tiles.len().div_ceil(threads);
+    let mut out = vec![0u64; tiles.len()];
+    std::thread::scope(|s| {
+        for (lane, slot) in out.chunks_mut(per).enumerate() {
+            s.spawn(move || {
+                let a = stage(0.4, 24);
+                for (k, h) in slot.iter_mut().enumerate() {
+                    let r = region(&lat, tiles[lane * per + k], 24);
+                    let d = a.compute_full(&lat, &r).drivers.expect("the A-net stage makes drivers");
+                    *h = d
+                        .soil
+                        .iter()
+                        .chain(&d.moisture)
+                        .chain(&d.insolation)
+                        .fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(*b)).wrapping_mul(0x0000_0100_0000_01b3));
+                }
+            });
+        }
+    });
+    out
+}
+
+// spec: GEN-070, GEN-071
+#[test]
+fn the_stage_makes_driver_channels_that_are_wetter_along_the_river_and_the_same_on_one_and_eight_threads() {
+    let lat = ChunkLattice::new(PER).unwrap();
+    let a = stage(0.4, 24);
+    let r = region(&lat, chunk(1003), 24);
+    let out = a.compute_full(&lat, &r);
+    let d = out.drivers.expect("drivers");
+    assert_eq!((d.soil.len(), d.moisture.len(), d.insolation.len()), (r.core, r.core, r.core));
+    // The river's corridor cells of the core are wetter than the cells far from it.
+    let net = planet_generators::anet::Network::build_with(&River, &Hills, &lat, &r, R, &a.params.anchor);
+    let mean = |on: bool| {
+        let cells: Vec<f64> =
+            (0..r.core).filter(|&c| net.corridor[c] == on && (on || r.depth[c] == 0)).map(|c| f64::from(d.moisture[c])).collect();
+        cells.iter().sum::<f64>() / cells.len().max(1) as f64
+    };
+    assert!(mean(true) > mean(false) + 20.0, "river {} against away {}", mean(true), mean(false));
+    assert_eq!(out.change.len(), r.cells.len());
+    let tiles: Vec<TileId> = (1000..1008).map(chunk).collect();
+    let one = driver_hashes_on(1, &tiles);
+    assert!(one.windows(2).any(|w| w[0] != w[1]), "the chunks differ");
+    assert_eq!(one, driver_hashes_on(2, &tiles));
+    assert_eq!(one, driver_hashes_on(8, &tiles));
+}
+
+// spec: GEN-070
+#[test]
+fn the_definition_hash_covers_the_driver_constants() {
+    let a = stage(0.4, 24);
+    let mut b = stage(0.4, 24);
+    b.params.drivers.soil_base_m += 0.5;
+    assert_ne!(a.definition_hash(), b.definition_hash());
+}
+
+// spec: GEN-070
+#[test]
+fn the_drivers_of_a_ramp_do_not_change_at_the_cells_along_a_cube_face_edge() {
+    use planet_generators::anet::Solution;
+    // A planar ramp h = R (g . d) over a chunk on the edge of its face (tile x = 0) and one in the middle of the face: the same slope everywhere, so the
+    // drivers of the first and third column of the edge chunk agree within the rounding of the codes (the ring cells across the edge are not on the regular grid).
+    let lat = ChunkLattice::new(PER).unwrap();
+    let a = stage(0.4, 24);
+    let g = Vec3::new(0.25, 0.2, 0.3);
+    for tile in [TileId::new(Face(2), CHUNK_GRID_LEVEL, 0, 512).unwrap(), TileId::new(Face(0), CHUNK_GRID_LEVEL, 512, 0).unwrap()] {
+        let r = region(&lat, tile, 24);
+        let centre = lat.direction(r.cells[r.core / 2]);
+        let z_base: Vec<f64> = r.cells.iter().map(|&c| 100.0 + R * g.dot(lat.direction(c) - centre)).collect();
+        let s = Solution { receiver: vec![u32::MAX; r.cells.len()], z: z_base.clone(), area_m2: vec![1.0e6; r.cells.len()], z_base };
+        let change = vec![0.0f32; r.cells.len()];
+        let d = a.chunk_drivers(&lat, &r, &s, &change);
+        let n = PER as usize;
+        // Compare each column and row at the edge with the next two: the codes of a uniform ramp are constant but for the curvature of the sphere.
+        let mut worst = 0i32;
+        for k in 3..n - 3 {
+            for line in [&d.soil, &d.moisture, &d.insolation] {
+                for (edge, inner) in [(k * n, k * n + 2), (k, 2 * n + k)] {
+                    worst = worst.max((i32::from(line[edge]) - i32::from(line[inner])).abs());
+                }
+            }
+        }
+        assert!(worst <= 2, "{tile:?}: the codes at the edge differ from two cells in by {worst}");
+    }
+}

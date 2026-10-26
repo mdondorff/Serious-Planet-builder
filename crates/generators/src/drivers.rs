@@ -78,15 +78,18 @@ impl DriverParams {
 }
 
 /// The slope (rise over run) components `(p, q)` along the raster's `i` and `j` axes and the mean curvature `kappa` in 1/m (positive in a hollow, negative
-/// on a ridge) at the centre of a 3 x 3 stencil `z[(dj + 1) * 3 + (di + 1)]` of heights at the spacings `si` and `sj` in metres along the two axes
-/// (Zevenbergen and Thorne). The axes are taken as orthogonal; near a cube corner they meet at 60 degrees and the curvature is approximate.
-pub fn gradient_and_curvature(z: &[f64; 9], si: f64, sj: f64) -> (f64, f64, f64) {
+/// on a ridge) at the centre of a 3 x 3 stencil `z[(dj + 1) * 3 + (di + 1)]` of heights. `hi` and `hj` are the distances in metres from the centre to the
+/// neighbours before and after it along each axis: they differ where a neighbour lies across a cube-face edge, where the cell found is not at the point
+/// a regular stencil would read. The derivatives are those of the parabola through three unequally spaced points (Zevenbergen and Thorne when equal).
+/// The axes are taken as orthogonal; near a cube corner they meet at 60 degrees and the curvature is approximate.
+pub fn gradient_and_curvature(z: &[f64; 9], hi: [f64; 2], hj: [f64; 2]) -> (f64, f64, f64) {
     let at = |di: usize, dj: usize| z[dj * 3 + di];
-    let p = (at(2, 1) - at(0, 1)) / (2.0 * si);
-    let q = (at(1, 2) - at(1, 0)) / (2.0 * sj);
-    let r = (at(2, 1) - 2.0 * at(1, 1) + at(0, 1)) / (si * si);
-    let t = (at(1, 2) - 2.0 * at(1, 1) + at(1, 0)) / (sj * sj);
-    let s = (at(2, 2) - at(0, 2) - at(2, 0) + at(0, 0)) / (4.0 * si * sj);
+    let first = |fm: f64, f0: f64, fp: f64, a: f64, b: f64| -b / (a * (a + b)) * fm + (b - a) / (a * b) * f0 + a / (b * (a + b)) * fp;
+    let second = |fm: f64, f0: f64, fp: f64, a: f64, b: f64| 2.0 * (fm / (a * (a + b)) - f0 / (a * b) + fp / (b * (a + b)));
+    let (p, q) = (first(at(0, 1), at(1, 1), at(2, 1), hi[0], hi[1]), first(at(1, 0), at(1, 1), at(1, 2), hj[0], hj[1]));
+    let r = second(at(0, 1), at(1, 1), at(2, 1), hi[0], hi[1]);
+    let t = second(at(1, 0), at(1, 1), at(1, 2), hj[0], hj[1]);
+    let s = (at(2, 2) - at(0, 2) - at(2, 0) + at(0, 0)) / ((hi[0] + hi[1]) * (hj[0] + hj[1]));
     let g = 1.0 + p * p + q * q;
     let kappa = ((1.0 + q * q) * r - 2.0 * p * q * s + (1.0 + p * p) * t) / (2.0 * g * libm::sqrt(g));
     (p, q, kappa)
@@ -254,6 +257,23 @@ impl InsolationTable {
     }
 }
 
+/// The neutral soil depth in metres and moisture: what a consumer reads where no chunk has landed (GEN-071).
+pub const NEUTRAL_SOIL_M: f64 = 1.0;
+pub const NEUTRAL_MOISTURE: f64 = 0.5;
+
+/// The neutral insolation at a latitude: the flat plane's annual mean there (the latitude alone).
+pub fn neutral_insolation(lat_rad: f64) -> f64 {
+    annual_mean_irradiance(lat_rad, 0.0, 0.0)
+}
+
+/// A driver as a consumer reads it (GEN-071): `neutral + w (chunk - neutral)`, written `neutral (1 - w) + chunk w` so that both ends are exact (monotone
+/// up to a rounding step), with `w` in `[0, 1]` the chunk weight that fades the height, so the
+/// driver is the neutral value at weight 0, the chunk's at weight 1 and monotone between.
+pub fn blend_driver(neutral: f64, chunk: f64, w: f64) -> f64 {
+    let w = w.clamp(0.0, 1.0);
+    neutral * (1.0 - w) + chunk * w
+}
+
 /// The three driver channels of a chunk's core, 8 bits each, row-major over the core with `j` outer.
 pub struct ChunkDrivers {
     pub soil: Vec<u8>,
@@ -262,8 +282,8 @@ pub struct ChunkDrivers {
 }
 
 /// What the drivers need of a chunk. `heights` is the `(n + 2) x (n + 2)` raster of the core and one ring (row-major, `j` outer, heights over the water),
-/// `area_m2` the `n x n` drainage area of the core, `dirs` the unit directions of the core's cells, `spacing_m` the true spacing in metres of each core
-/// cell along the raster's `i` and `j` axes (the lattice is equal-angle: the spacing is 0.7 of the face-centre cell at a face edge), `compass` for each
+/// `area_m2` the `n x n` drainage area of the core, `dirs` the unit directions of the core's cells, `spacing_m` the true distances in metres from each core
+/// cell to its neighbours before and after it along `i` then `j` (`[a_i, b_i, a_j, b_j]`; the lattice is equal-angle: 0.7 of the face-centre cell at a face edge), `compass` for each
 /// core cell the components `[ei, ej, ni, nj]` that turn the gradient `(p, q)` along the axes into its east and north parts (`ge = p ei + q ej`,
 /// `gn = p ni + q nj`; the identity `[1, 0, 0, 1]` where the axes are east and north), and `lat_rad` the latitude of the chunk's centre.
 pub struct ChunkRaster<'a> {
@@ -271,7 +291,7 @@ pub struct ChunkRaster<'a> {
     pub heights: &'a [f64],
     pub area_m2: &'a [f64],
     pub dirs: &'a [Vec3],
-    pub spacing_m: &'a [[f64; 2]],
+    pub spacing_m: &'a [[f64; 4]],
     pub compass: &'a [[f64; 4]],
     pub lat_rad: f64,
 }
@@ -286,7 +306,8 @@ pub fn chunk_drivers(chunk: &ChunkRaster, params: &DriverParams) -> ChunkDrivers
     }
     assert!(chunk.heights.iter().all(|h| h.is_finite()), "a driver raster with a height that is not a number");
     assert!(chunk.area_m2.iter().all(|a| a.is_finite()), "a driver raster with an area that is not a number");
-    assert!(chunk.spacing_m.iter().all(|s| s[0] > 0.0 && s[0] < 1.0e4 && s[1] > 0.0 && s[1] < 1.0e4), "a cell spacing out of range");
+    assert!(chunk.spacing_m.iter().all(|s| s.iter().all(|&h| h > 0.0 && h < 1.0e4)), "a cell spacing out of range");
+    assert!(chunk.compass.iter().all(|c| c.iter().all(|v| v.is_finite())), "a driver raster with a compass that is not a number");
     assert!(params.soil_alt_hi_m > params.soil_alt_lo_m && params.flow_area_hi_m2 > params.flow_area_lo_m2 && params.moisture_span > 0.0);
     let table = InsolationTable::new(chunk.lat_rad);
     let mut out =
@@ -300,8 +321,8 @@ pub fn chunk_drivers(chunk: &ChunkRaster, params: &DriverParams) -> ChunkDrivers
                 }
             }
             let cell = j * n + i;
-            let [si, sj] = chunk.spacing_m[cell];
-            let (p, q, kappa) = gradient_and_curvature(&z, si, sj);
+            let [ai, bi, aj, bj] = chunk.spacing_m[cell];
+            let (p, q, kappa) = gradient_and_curvature(&z, [ai, bi], [aj, bj]);
             // The downhill direction on the compass: the gradient turned to (east, north); the plane faces down the gradient. The slope is the true one.
             let [ei, ej, ni, nj] = chunk.compass[cell];
             let (ge, gn) = (p * ei + q * ej, p * ni + q * nj);
@@ -309,7 +330,7 @@ pub fn chunk_drivers(chunk: &ChunkRaster, params: &DriverParams) -> ChunkDrivers
             let slope = libm::atan(tan_s);
             let azimuth = if ge == 0.0 && gn == 0.0 { 0.0 } else { libm::atan2(-ge, -gn) };
             let area = chunk.area_m2[cell];
-            let wet = wetness_index(area, libm::sqrt(si * sj), tan_s, params);
+            let wet = wetness_index(area, libm::sqrt(0.25 * (ai + bi) * (aj + bj)), tan_s, params);
             let depth = soil_depth_m(slope, kappa, area, lithology(chunk.dirs[cell], params), z[4], params);
             out.soil.push(encode_soil(depth, params));
             out.moisture.push(encode_unit(moisture(wet, params)));
@@ -338,29 +359,29 @@ mod tests {
     // spec: GEN-070
     #[test]
     fn the_gradient_and_the_mean_curvature_are_the_surfaces_for_a_plane_a_bowl_a_saddle_and_a_tilted_cone() {
-        let (p, q, k) = gradient_and_curvature(&stencil(|x, y| 0.3 * x + 0.1 * y, L, L), L, L);
+        let (p, q, k) = gradient_and_curvature(&stencil(|x, y| 0.3 * x + 0.1 * y, L, L), [L, L], [L, L]);
         assert!((p - 0.3).abs() < 1e-12 && (q - 0.1).abs() < 1e-12 && k.abs() < 1e-12, "{p} {q} {k}");
         let kappa = 0.01;
-        let (_, _, k) = gradient_and_curvature(&stencil(|x, y| 0.5 * kappa * (x * x + y * y), L, L), L, L);
+        let (_, _, k) = gradient_and_curvature(&stencil(|x, y| 0.5 * kappa * (x * x + y * y), L, L), [L, L], [L, L]);
         assert!((k - kappa).abs() < 1e-12, "{k}");
         let f = curvature_factor(k, &DriverParams::default());
         assert!((f - 1.3808).abs() < 1e-4, "the curvature factor of kappa 0.01 per metre is {f}");
         // A ridge is negative, a saddle z = c x y has the mean curvature -2 p q s / g^3/2 = 0 at its centre and a tilted one gets the gradient terms.
-        let (_, _, k) = gradient_and_curvature(&stencil(|x, y| -0.5 * kappa * (x * x + y * y), L, L), L, L);
+        let (_, _, k) = gradient_and_curvature(&stencil(|x, y| -0.5 * kappa * (x * x + y * y), L, L), [L, L], [L, L]);
         assert!((k + kappa).abs() < 1e-12);
         let (a, b, c) = (0.2, -0.1, 0.004);
         let z = stencil(|x, y| a * x + b * y + c * x * y, L, L);
-        let (p, q, k) = gradient_and_curvature(&z, L, L);
+        let (p, q, k) = gradient_and_curvature(&z, [L, L], [L, L]);
         let g = 1.0 + a * a + b * b;
         let want = -2.0 * a * b * c / (2.0 * g * libm::sqrt(g));
         assert!((p - a).abs() < 1e-12 && (q - b).abs() < 1e-12 && (k - want).abs() < 1e-12, "{k} against {want}");
         // A cone of slope 0.5 about the stencil's centre (sampled off the apex, at distance 3 cells): the curvature is 1 / (2 r) of a cone, over the slope term.
         let (cx, cy) = (3.0 * L, 0.0);
         let cone = stencil(|x, y| 0.5 * libm::sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy)), L, L);
-        let (_, _, k) = gradient_and_curvature(&cone, L, L);
+        let (_, _, k) = gradient_and_curvature(&cone, [L, L], [L, L]);
         assert!(k > 0.0 && (k - 0.5 / (2.0 * 3.0 * L * libm::sqrt(1.25))).abs() < 5e-4, "the cone's curvature {k}");
         // The spacing along the axes can differ: a plane of true slope 0.3 along an axis whose cells are 0.707 as wide reads 0.3.
-        let (p, _, _) = gradient_and_curvature(&stencil(|x, _| 0.3 * x, 0.707 * L, L), 0.707 * L, L);
+        let (p, _, _) = gradient_and_curvature(&stencil(|x, _| 0.3 * x, 0.707 * L, L), [0.707 * L, 0.707 * L], [L, L]);
         assert!((p - 0.3).abs() < 1e-12);
     }
 
@@ -475,6 +496,7 @@ mod tests {
     }
 
     fn plane_chunk(n: usize, heights: Vec<f64>, lat_rad: f64, compass: [f64; 4], spacing: [f64; 2]) -> ChunkDrivers {
+        let spacing = [spacing[0], spacing[0], spacing[1], spacing[1]];
         let area = vec![1.0e6; n * n];
         let dirs = vec![Vec3::new(1.0, 0.0, 0.0); n * n];
         let compass = vec![compass; n * n];
@@ -492,7 +514,6 @@ mod tests {
     fn a_chunk_of_a_tilted_plane_gives_the_drivers_of_that_plane_with_the_compass_and_the_spacing_and_the_same_bits_on_another_thread() {
         let n = 16;
         let id = [1.0, 0.0, 0.0, 1.0];
-        let params = DriverParams::default();
         let slope = libm::atan(0.3);
         // Rising to the east it faces west; rising to the north, south; at 45 degrees north the south face has the sun.
         let west = plane_chunk(n, ramp(n, |x, _| 0.3 * x), 0.0, id, [L, L]);
@@ -516,7 +537,6 @@ mod tests {
             .expect("thread");
         assert_eq!((&west.soil, &west.moisture, &west.insolation), (&again.soil, &again.moisture, &again.insolation));
         assert!(west.soil.iter().all(|&v| v == west.soil[0]) && west.moisture.iter().all(|&m| m == west.moisture[0]));
-        let _ = params;
     }
 
     // spec: GEN-070

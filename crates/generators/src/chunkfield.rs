@@ -23,6 +23,9 @@ pub const PYRAMID_TOP_LEVEL: u8 = 14;
 /// The eight neighbours of a cell, in order: the four edge neighbours, then the four diagonals.
 const OFFS: [(i64, i64); 8] = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)];
 
+/// The tag before the driver channels in the bytes of a chunk result.
+const DRIVERS_TAG: &[u8; 4] = b"DRV1";
+
 /// "No cell" in a region's neighbour table (cells at the outer ring have no table).
 const NONE: u32 = u32::MAX;
 
@@ -243,6 +246,12 @@ pub fn region_indexed(lat: &ChunkLattice, tile: TileId, halo: u16, allow_dense: 
     Region { cells, depth, neighbours, core, halo, index }
 }
 
+/// What a chunk stage yields for a region: the change at every cell and, for a stage that makes them, the driver channels of the chunk's own cells (GEN-071).
+pub struct StageOutput {
+    pub change: Vec<f32>,
+    pub drivers: Option<crate::drivers::ChunkDrivers>,
+}
+
 /// A chunk stage: a process over a region of the cell graph that yields a change to the base height (ADR 0077 point 3). It states its step
 /// cap and its bound; the halo it needs is `step_cap x reach + 1` rings (reach: one ring per step), one ring more than the steps need so the
 /// chunk's own cells come out with one exact ring of apron around them.
@@ -255,6 +264,10 @@ pub trait ChunkStage: Send + Sync {
     /// are exact; a stage along a network (A-net) promises only the chunk's own cells and one ring of apron (its halo is what the network needs). The cells further out
     /// are what the shrinking region left behind and are not to be read.
     fn compute(&self, lat: &ChunkLattice, region: &Region) -> Vec<f32>;
+    /// [`ChunkStage::compute`] with the driver channels of the chunk's own cells where the stage makes them (default: the change alone).
+    fn compute_full(&self, lat: &ChunkLattice, region: &Region) -> StageOutput {
+        StageOutput { change: self.compute(lat, region), drivers: None }
+    }
     /// The rings of halo the stage needs around a chunk (default: the step cap, each step reaching one ring, plus the apron ring). A stage whose
     /// reach is not one ring per step (a process along a network) states its own, in metres over the cell size.
     fn halo_rings(&self) -> u16 {
@@ -279,6 +292,8 @@ pub struct ChunkResult {
     tile: TileId,
     n: usize,
     levels: Vec<Vec<f32>>,
+    /// The driver channels (soil depth, moisture, insolation) at the raster and the pyramid levels above it, 8 bits each, where the stage made them (GEN-071).
+    drivers: Option<[Vec<Vec<u8>>; 3]>,
     /// The hash of the pyramid, made once (it is read every frame by the horizon jobs' state word, STRM-048) and how many times it was made.
     hash_cache: std::sync::OnceLock<u64>,
     hash_runs: std::sync::atomic::AtomicU32,
@@ -304,10 +319,48 @@ impl ChunkResult {
             }
             levels.push(level);
         }
-        Some(ChunkResult { tile, n, levels, hash_cache: Default::default(), hash_runs: Default::default() })
+        Some(ChunkResult { tile, n, levels, drivers: None, hash_cache: Default::default(), hash_runs: Default::default() })
     }
 
-    /// Bytes of the raster and its levels: `n (u32) | levels above the raster (u32) | every level's values, f32 little endian`.
+    /// This result with the driver channels `drivers` of the chunk's own cells (`n x n` each, row-major) and their pyramid levels, each the mean of the 2 x 2
+    /// cells below rounded to nearest (half up); `None` if a channel is not `n x n`.
+    pub fn with_drivers(mut self, drivers: &crate::drivers::ChunkDrivers) -> Option<ChunkResult> {
+        let k_max = self.k_max();
+        let build = |raster: &[u8]| -> Option<Vec<Vec<u8>>> {
+            if raster.len() != self.n * self.n {
+                return None;
+            }
+            let mut levels = vec![raster.to_vec()];
+            for k in 1..=k_max {
+                let (m, below, w) = (self.n >> k, &levels[k - 1], self.n >> (k - 1));
+                let mut level = Vec::with_capacity(m * m);
+                for j in 0..m {
+                    for i in 0..m {
+                        let (a, b) = (2 * j * w + 2 * i, (2 * j + 1) * w + 2 * i);
+                        let sum = u32::from(below[a]) + u32::from(below[a + 1]) + u32::from(below[b]) + u32::from(below[b + 1]);
+                        level.push(((sum + 2) / 4) as u8);
+                    }
+                }
+                levels.push(level);
+            }
+            Some(levels)
+        };
+        self.drivers = Some([build(&drivers.soil)?, build(&drivers.moisture)?, build(&drivers.insolation)?]);
+        Some(self)
+    }
+
+    /// Whether the result carries driver channels.
+    pub fn has_drivers(&self) -> bool {
+        self.drivers.is_some()
+    }
+
+    /// The code of driver channel `channel` (0 soil depth, 1 moisture, 2 insolation) at cell (`i`, `j`) of pyramid level `k`.
+    pub fn driver_at(&self, channel: usize, k: usize, i: usize, j: usize) -> Option<u8> {
+        Some(self.drivers.as_ref()?[channel][k][j * (self.n >> k) + i])
+    }
+
+    /// Bytes of the raster and its levels: `n (u32) | levels above the raster (u32) | every level's values, f32 little endian`, then for a result with
+    /// drivers the tag `DRV1` and the three channels' levels, bytes.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(8 + self.size_bytes());
         out.extend_from_slice(&(self.n as u32).to_le_bytes());
@@ -315,6 +368,14 @@ impl ChunkResult {
         for level in &self.levels {
             for v in level {
                 out.extend_from_slice(&v.to_le_bytes());
+            }
+        }
+        if let Some(channels) = &self.drivers {
+            out.extend_from_slice(DRIVERS_TAG);
+            for channel in channels {
+                for level in channel {
+                    out.extend_from_slice(level);
+                }
             }
         }
         out
@@ -329,7 +390,8 @@ impl ChunkResult {
             return None;
         }
         let count: usize = (0..=k_max).map(|k| (n >> k) * (n >> k)).sum();
-        if bytes.len() != 8 + 4 * count {
+        let with_drivers = bytes.len() == 8 + 4 * count + DRIVERS_TAG.len() + 3 * count;
+        if bytes.len() != 8 + 4 * count && !with_drivers {
             return None;
         }
         let mut at = 8;
@@ -339,12 +401,29 @@ impl ChunkResult {
             levels.push((0..m).map(|i| f32::from_le_bytes(bytes[at + 4 * i..at + 4 * i + 4].try_into().expect("4 bytes"))).collect());
             at += 4 * m;
         }
-        Some(ChunkResult { tile, n, levels, hash_cache: Default::default(), hash_runs: Default::default() })
+        let mut drivers = None;
+        if with_drivers {
+            if &bytes[at..at + DRIVERS_TAG.len()] != DRIVERS_TAG {
+                return None;
+            }
+            at += DRIVERS_TAG.len();
+            let mut channels: [Vec<Vec<u8>>; 3] = [Vec::new(), Vec::new(), Vec::new()];
+            for channel in &mut channels {
+                for k in 0..=k_max {
+                    let m = (n >> k) * (n >> k);
+                    channel.push(bytes[at..at + m].to_vec());
+                    at += m;
+                }
+            }
+            drivers = Some(channels);
+        }
+        Some(ChunkResult { tile, n, levels, drivers, hash_cache: Default::default(), hash_runs: Default::default() })
     }
 
     /// The bytes the result holds in memory (counted toward the chunk pool of the RAM caps, STRM-041).
     pub fn size_bytes(&self) -> usize {
-        self.levels.iter().map(|l| 4 * l.len()).sum()
+        let drivers: usize = self.drivers.iter().flatten().flatten().map(Vec::len).sum();
+        self.levels.iter().map(|l| 4 * l.len()).sum::<usize>() + drivers
     }
     pub fn tile(&self) -> TileId {
         self.tile
@@ -387,6 +466,11 @@ impl ChunkResult {
                 }
             }
         }
+        if let Some(channels) = &self.drivers {
+            for b in DRIVERS_TAG.iter().chain(channels.iter().flatten().flatten()) {
+                h = (h ^ u64::from(*b)).wrapping_mul(0x0000_0100_0000_01b3);
+            }
+        }
         h
     }
 }
@@ -415,8 +499,12 @@ pub fn compute_chunk(lat: &ChunkLattice, stage: &dyn ChunkStage, radius_m: f64, 
         return None;
     }
     let reg = region(lat, tile, halo);
-    let change = stage.compute(lat, &reg);
-    ChunkResult::new(tile, lat.per_chunk as usize, &change[..reg.core], pyramid_levels(lat, radius_m, top))
+    let out = stage.compute_full(lat, &reg);
+    let result = ChunkResult::new(tile, lat.per_chunk as usize, &out.change[..reg.core], pyramid_levels(lat, radius_m, top))?;
+    match &out.drivers {
+        Some(drivers) => result.with_drivers(drivers),
+        None => Some(result),
+    }
 }
 
 /// A height field with chunk detail over a base field (GEN-036): the base plus, for a tile level at or below the pyramid's top, the change of
