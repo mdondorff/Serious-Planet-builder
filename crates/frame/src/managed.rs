@@ -425,8 +425,10 @@ impl ManagedLoop {
             }
         }
         // The plan cache holds origins and mesh keys of tiles that are not resident too (the plan's nodes before their tiles arrive): drop those.
+        // The scan of the plan cache for those tiles is the plan job's, before its next plan (the replan `edit` forces below, or any plan: no plan that starts
+        // after this reads a tile that reads a landed chunk without it having been dropped): the cache holds up to 400,000 tiles, 0.5 s on this thread.
         for &k in landed {
-            self.pipe.worker().invalidate_chunk(k, |t| view.reads(t));
+            self.pipe.worker().invalidate_chunk_later(k, view.clone());
         }
         if tiles.is_empty() {
             0

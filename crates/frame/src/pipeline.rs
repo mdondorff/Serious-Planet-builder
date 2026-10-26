@@ -565,35 +565,142 @@ pub struct PlanWorker {
     cache: Arc<Mutex<SelectionCache>>,
     threads: usize,
     state: Arc<Mutex<WorkerState>>,
+    /// What the main thread asked of the plan cache since the last plan job (STRM-040, STRM-026, STRM-034), in order: the job applies it under the cache's
+    /// lock before it plans. The main thread never takes that lock: the plan job holds it for the whole plan, which can take a second.
+    ops: Arc<Mutex<Vec<CacheOp>>>,
+}
+
+/// A change to the plan cache that waits for the plan job.
+enum CacheOp {
+    /// An item edit changed what these tiles read.
+    InvalidateTiles(Vec<TileId>),
+    /// Everything is stale.
+    Clear,
+    /// The item revision went from `from` to `to`.
+    NoteItemChange { from: u64, to: u64, changes: Vec<crate::lod::ItemChange> },
+    /// A chunk landed: the tiles `view` says read it.
+    LandedChunk((u8, u32, u32), Arc<dyn crate::chunkshare::ChunkView>),
+}
+
+/// Apply the queued operations to `cache` in the order they were asked; called by a job with the cache locked, before it reads the cache. Landed chunks
+/// that follow one another are dropped in one pass over the cache.
+fn apply_ops(cache: &mut SelectionCache, ops: &Mutex<Vec<CacheOp>>) {
+    let queued = std::mem::take(&mut *ops.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+    let mut landed: Vec<(u8, u32, u32)> = Vec::new();
+    let mut view: Option<Arc<dyn crate::chunkshare::ChunkView>> = None;
+    let flush = |cache: &mut SelectionCache, landed: &mut Vec<(u8, u32, u32)>, view: &Option<Arc<dyn crate::chunkshare::ChunkView>>| {
+        if let (false, Some(v)) = (landed.is_empty(), view) {
+            cache.invalidate_chunks(landed, |t| v.reads(t));
+        }
+        landed.clear();
+    };
+    for op in queued {
+        if let CacheOp::LandedChunk(k, v) = op {
+            if !landed.contains(&k) {
+                landed.push(k);
+            }
+            view = Some(v);
+            continue;
+        }
+        flush(cache, &mut landed, &view);
+        match op {
+            CacheOp::InvalidateTiles(t) => {
+                cache.invalidate_tiles(&t);
+            }
+            CacheOp::Clear => cache.clear(),
+            CacheOp::NoteItemChange { from, to, changes } => cache.note_item_change(from, to, changes),
+            CacheOp::LandedChunk(..) => {}
+        }
+    }
+    flush(cache, &mut landed, &view);
 }
 
 impl PlanWorker {
     pub fn new(spawner: Arc<dyn Spawner>, field: Arc<dyn PlanField>, threads: usize) -> Self {
-        Self { spawner, field, cache: Arc::new(Mutex::new(SelectionCache::new())), threads, state: Arc::default() }
+        Self { spawner, field, cache: Arc::new(Mutex::new(SelectionCache::new())), threads, state: Arc::default(), ops: Arc::default() }
     }
 
-    /// Forget the cached origin heights, mesh keys and volumes of `tiles` (an item edit changed what they read, STRM-026), or of every
-    /// tile with `None`, so the next plan computes them again.
-    pub fn invalidate_cache(&self, tiles: Option<&[TileId]>) {
-        let mut c = self.cache.lock().expect("selection cache");
-        match tiles {
-            Some(t) => {
-                c.invalidate_tiles(t);
+    /// A chunk landed (STRM-040): the plan job forgets what the cache holds of the tiles `view` says read it before its next plan, on its own thread. O(1)
+    /// and no lock of the cache; the caller must also make the next plan happen (`ManagedLoop::chunk_landed` does, through `edit`), and no plan that
+    /// starts after this call reads the cache without having dropped them.
+    pub fn invalidate_chunk_later(&self, landed: (u8, u32, u32), view: Arc<dyn crate::chunkshare::ChunkView>) {
+        self.push_op(CacheOp::LandedChunk(landed, view));
+    }
+
+    /// Queue `op`, keeping the queue bounded and equivalent: a clear makes everything queued before it moot (it empties the cache and the item transitions) and
+    /// what is asked of the tiles after it; consecutive tile drops merge and drop duplicates; a chunk is queued once; more item changes than the cache keeps
+    /// drop the oldest; a queue that outgrows what the cache can hold becomes a clear.
+    fn push_op(&self, op: CacheOp) {
+        const MAX_LANDED: usize = 4096;
+        let mut q = self.ops.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let cleared = matches!(q.first(), Some(CacheOp::Clear));
+        match op {
+            CacheOp::Clear => {
+                q.clear();
+                q.push(CacheOp::Clear);
             }
-            None => c.clear(),
+            CacheOp::InvalidateTiles(_) | CacheOp::LandedChunk(..) if cleared => {}
+            CacheOp::InvalidateTiles(mut tiles) => {
+                if let Some(CacheOp::InvalidateTiles(prev)) = q.last_mut() {
+                    prev.append(&mut tiles);
+                    if prev.len() > MAX_LANDED {
+                        prev.sort_unstable_by_key(|t| t.raw());
+                        prev.dedup();
+                    }
+                    if prev.len() > SelectionCache::MAX_TILES {
+                        q.clear();
+                        q.push(CacheOp::Clear);
+                    }
+                } else {
+                    q.push(CacheOp::InvalidateTiles(tiles));
+                }
+            }
+            CacheOp::LandedChunk(key, view) => {
+                if q.iter().any(|o| matches!(o, CacheOp::LandedChunk(k, _) if *k == key)) {
+                    return;
+                }
+                q.push(CacheOp::LandedChunk(key, view));
+                if q.iter().filter(|o| matches!(o, CacheOp::LandedChunk(..))).count() > MAX_LANDED {
+                    q.clear();
+                    q.push(CacheOp::Clear);
+                }
+            }
+            note @ CacheOp::NoteItemChange { .. } => {
+                q.push(note);
+                let notes: Vec<usize> =
+                    q.iter().enumerate().filter(|(_, o)| matches!(o, CacheOp::NoteItemChange { .. })).map(|(i, _)| i).collect();
+                if notes.len() > crate::lod::MAX_TRANSITIONS {
+                    q.remove(notes[0]);
+                }
+            }
         }
     }
 
-    /// Forget what the plan cache holds of every tile that reads the chunk `landed` (STRM-040), resident or not: `reads` decides the chunks a
-    /// tile reads. Returns how many origin heights were dropped.
-    pub fn invalidate_chunk(&self, landed: (u8, u32, u32), reads: impl Fn(TileId) -> Vec<(u8, u32, u32)>) -> usize {
-        self.cache.lock().expect("selection cache").invalidate_chunk(landed, reads)
+    /// How many operations wait for the plan job and how many tiles the tile drops among them name; for tests of the queue's bound.
+    #[doc(hidden)]
+    pub fn queued_for_test(&self) -> (usize, usize) {
+        let q = self.ops.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let tiles = q.iter().map(|o| if let CacheOp::InvalidateTiles(t) = o { t.len() } else { 0 }).sum();
+        (q.len(), tiles)
+    }
+
+    /// The cache for a test: what a landing left in it, once a job has run.
+    #[doc(hidden)]
+    pub fn with_cache_for_test<R>(&self, f: impl FnOnce(&mut SelectionCache) -> R) -> R {
+        f(&mut self.cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
+    }
+
+    /// Forget the cached origin heights, mesh keys and volumes of `tiles` (an item edit changed what they read, STRM-026), or of every
+    /// tile with `None`, so the next plan computes them again: queued for the plan job (no lock of the cache here), done before its next plan.
+    pub fn invalidate_cache(&self, tiles: Option<&[TileId]>) {
+        self.push_op(tiles.map_or(CacheOp::Clear, |t| CacheOp::InvalidateTiles(t.to_vec())));
     }
 
     /// Announce a change of the authored items to the plan cache: the field's item revision went from `from` to `to`, and `changes` is where the
-    /// items that differ were and are (STRM-034). Call it before [`PlanWorker::invalidate_cache`] for the same edit and before the next plan.
+    /// items that differ were and are (STRM-034). Call it before [`PlanWorker::invalidate_cache`] for the same edit and before the next plan; the
+    /// plan job applies the two in that order.
     pub fn note_item_change(&self, from: u64, to: u64, changes: Vec<crate::lod::ItemChange>) {
-        self.cache.lock().expect("selection cache").note_item_change(from, to, changes);
+        self.push_op(CacheOp::NoteItemChange { from, to, changes });
     }
 
     /// Ask for the plan of `req`. Never blocks and never plans on the calling thread.
@@ -626,6 +733,7 @@ impl PlanWorker {
     fn spawn_job(&self, seq: u64, req: TerrainRequest, predicted: Option<PlanetFixed>) {
         let (state, cache, field, threads, spawner) =
             (Arc::clone(&self.state), Arc::clone(&self.cache), Arc::clone(&self.field), self.threads, Arc::clone(&self.spawner));
+        let ops = Arc::clone(&self.ops);
         let spawner_again = Arc::clone(&spawner);
         spawner.spawn(Box::new(move || {
             if state.lock().expect("worker state").closed {
@@ -638,6 +746,7 @@ impl PlanWorker {
             // A panicking field is an error outcome, not a worker that stays "running" for ever.
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let mut cache = cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                apply_ops(&mut cache, &ops);
                 field.plan(&req, &mut cache, threads)
             }))
             .unwrap_or_else(|_| Err(PlanError::HeightField("the plan job panicked".into())));
@@ -720,7 +829,7 @@ impl PlanWorker {
                 next
             };
             if let Some((seq, req, predicted)) = next {
-                let worker = PlanWorker { spawner: spawner_again, field, cache, threads, state };
+                let worker = PlanWorker { spawner: spawner_again, field, cache, threads, state, ops };
                 worker.spawn_job(seq, req, predicted);
             }
         }));

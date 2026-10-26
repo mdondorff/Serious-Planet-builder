@@ -150,6 +150,9 @@ pub struct ChunkManager {
     versions: Option<Arc<dyn ChunkVersions>>,
     hold_stale: std::sync::atomic::AtomicBool,
     shared: Arc<Mutex<Shared>>,
+    /// How far into a neighbouring chunk a tile's reads reach, in cells (a constant of the lattice, body and top level: the plan cache asks `reads` for
+    /// every tile it holds when a chunk lands, so it is not recomputed per call).
+    reach: i64,
 }
 
 fn tile_of(key: ChunkKey) -> TileId {
@@ -168,6 +171,7 @@ impl ChunkManager {
         disk: Option<Arc<dyn ChunkDisk>>,
         cfg: ChunkConfig,
     ) -> ChunkManager {
+        let reach = planet_generators::chunkfield::reach_cells(&lat, radius_m, top);
         ChunkManager {
             lat,
             radius_m,
@@ -180,6 +184,7 @@ impl ChunkManager {
             versions: None,
             hold_stale: Default::default(),
             shared: Arc::default(),
+            reach,
         }
     }
 
@@ -391,8 +396,7 @@ impl ChunkManager {
 
     /// The chunks tile `tile` reads (own chunk first), as a chunk field of this manager's chunks decides them for keys and invalidation.
     pub fn reads(&self, tile: TileId) -> Vec<ChunkKey> {
-        let reach = planet_generators::chunkfield::reach_cells(&self.lat, self.radius_m, self.top);
-        planet_generators::chunkfield::chunks_read_by(&self.lat, self.top, reach, tile)
+        planet_generators::chunkfield::chunks_read_by(&self.lat, self.top, self.reach, tile)
     }
 
     pub fn is_ready(&self, key: ChunkKey) -> bool {
