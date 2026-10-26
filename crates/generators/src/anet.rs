@@ -257,7 +257,11 @@ impl Network {
             law.route_band_m + law.slide_steep_m.max(law.slide_m).max(law.head_m) + MEANDER_M < 3_400.0,
             "the routing reaches past the coarse ring a region reads"
         );
-        let router = crate::route::Router::new(run, base, lat, radius_m, law, memo);
+        // The base heights of the region's cells, read before the routing: the raster of a segment is every few cells of this lattice, so the points of it
+        // that lie in the region are these heights (GEN-077).
+        let dirs: Vec<Vec3> = region.cells.iter().map(|&c| lat.direction(c)).collect();
+        let heights = base.base_heights(&dirs);
+        let router = crate::route::Router::new(run, base, lat, radius_m, law, memo).with_known(region, &heights);
         let anchors = anchor_profiles(run, base, &segments, radius_m, law, is_river, &router);
         for (from, to) in segments {
             let points = router.polyline(from, to);
@@ -340,8 +344,6 @@ impl Network {
             }
         }
 
-        let dirs: Vec<Vec3> = region.cells.iter().map(|&c| lat.direction(c)).collect();
-        let heights = base.base_heights(&dirs);
         paint_band(&corridor, &river_area_m2, &relief_of, &mut anchor_z, &heights, &dirs, region, radius_m, law);
         let z0 = dirs.iter().zip(&heights).map(|(&d, &h)| (coarse_z_at(run, d) + (h - base.coarse_input(d))) as f32).collect();
         Network { corridor, next, inflow_m2, z0, anchor_z, river_area_m2, base_z: heights, dirs }

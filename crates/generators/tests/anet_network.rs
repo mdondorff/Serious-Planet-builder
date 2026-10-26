@@ -1,6 +1,7 @@
 //! GEN-047: the global network in the chunk raster: one corridor path for neighbouring chunks, zero meander at the coarse cell centres,
 //! inflow where a river enters the region, and initial heights from the run plus the base's detail.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 
 use planet_core::cube::TangentWarp;
@@ -580,4 +581,109 @@ fn chunks_built_at_once_on_several_threads_through_one_stage_memo_equal_fresh_bu
         handles.into_iter().map(|h| h.join().expect("a thread")).collect()
     });
     assert_eq!(shared, fresh, "chunks built concurrently through one memo differ from fresh builds");
+}
+
+/// A base that counts the directions it is asked for (the raster of the routing reads it only where the region and the memo do not).
+struct Counting(AtomicUsize);
+
+impl BaseDetail for Counting {
+    fn base_height(&self, dir: Vec3) -> f64 {
+        self.0.fetch_add(1, Ordering::Relaxed);
+        Ridge.base_height(dir)
+    }
+    fn coarse_input(&self, dir: Vec3) -> f64 {
+        Ridge.coarse_input(dir)
+    }
+    fn identity(&self) -> u64 {
+        Ridge.identity()
+    }
+}
+
+fn stride_law(stride: u32) -> planet_generators::anet::AnchorLaw {
+    let mut law = routed_law();
+    law.route_stride = stride;
+    law.slide_m = 400.0;
+    law.slide_steep_m = 400.0;
+    law
+}
+
+// spec: GEN-077
+#[test]
+fn the_routing_reads_the_regions_heights_and_the_memo_and_evaluates_only_the_rest_with_the_bits_of_evaluating_everything() {
+    use planet_generators::route::{RouteMemo, Router};
+    let lat = ChunkLattice::new(32).unwrap();
+    for stride in [1u32, 4] {
+        let law = stride_law(stride);
+        // A router that reads the base at every raster point (no region heights, no memo) against one that reads the region's heights.
+        let ra = region(&lat, chunk(1002), 40);
+        let dirs: Vec<Vec3> = ra.cells.iter().map(|&c| lat.direction(c)).collect();
+        let heights = Ridge.base_heights(&dirs);
+        let plain_memo = RouteMemo::with_height_cap(0);
+        let plain = Router::new(&River(1000), &Ridge, &lat, R, &law, &plain_memo);
+        let known_memo = RouteMemo::default();
+        let known = Router::new(&River(1000), &Ridge, &lat, R, &law, &known_memo).with_known(&ra, &heights);
+        let c = FACE * N * N + 1000 * N + 1002;
+        for (from, to) in [(c - 1, c), (c, c + 1), (c + 1, c + 2)] {
+            let (a, b) = (plain.polyline(from, to), known.polyline(from, to));
+            assert_eq!(a.len(), b.len(), "stride {stride}: the path differs in length");
+            assert!(
+                a.iter().zip(b.iter()).all(|(p, q)| p == q),
+                "stride {stride}: the path differs from the one that evaluates every point"
+            );
+        }
+        let [from_region, from_memo, evaluated] = known_memo.raster_counts();
+        let [_, _, plain_evaluated] = plain_memo.raster_counts();
+        assert!(from_region > 0, "stride {stride}: no raster point read the region's heights");
+        assert_eq!(from_region + from_memo + evaluated, plain_evaluated, "stride {stride}: every raster point is served once");
+        assert!(evaluated < plain_evaluated, "stride {stride}: {evaluated} of {plain_evaluated} points still evaluated");
+    }
+}
+
+// spec: GEN-077
+#[test]
+fn chunks_have_the_same_bits_with_the_memo_cold_warm_filled_in_another_order_or_capped_at_one_and_eight_workers() {
+    use planet_generators::route::RouteMemo;
+    let lat = ChunkLattice::new(32).unwrap();
+    let law = stride_law(4);
+    let chunks: Vec<u32> = (1001..=1008).collect();
+    let bits = |n: &Network| n.anchor_z.iter().map(|z| z.to_bits()).collect::<Vec<u64>>();
+    let build = |x: u32, memo: &RouteMemo| {
+        let base = Counting(AtomicUsize::new(0));
+        let net = Network::build_with_memo(&Fork, &base, &lat, &region(&lat, chunk(x), 40), R, &law, memo);
+        (bits(&net), base.0.load(Ordering::Relaxed))
+    };
+    // Cold: a fresh memo for every chunk.
+    let cold: Vec<Vec<u64>> = chunks.iter().map(|&x| build(x, &RouteMemo::default()).0).collect();
+    // Warm and in reverse order: one memo, the chunks in reverse order, then again (the second time every raster point from the memo).
+    let memo = RouteMemo::default();
+    let reversed: Vec<Vec<u64>> = chunks.iter().rev().map(|&x| build(x, &memo).0).collect::<Vec<_>>().into_iter().rev().collect();
+    assert_eq!(reversed, cold, "the memo filled in reverse order changes a chunk");
+    let evaluated_once = memo.raster_counts()[2];
+    let again: Vec<Vec<u64>> = chunks.iter().map(|&x| build(x, &memo).0).collect();
+    assert_eq!(again, cold, "a warm memo changes a chunk");
+    assert_eq!(memo.raster_counts()[2], evaluated_once, "the warm builds still evaluated raster points");
+    // Capped far under what the chunks read: the memo clears and refills, and never holds more than the cap.
+    let capped = RouteMemo::with_height_cap(500);
+    let through_cap: Vec<Vec<u64>> = chunks.iter().map(|&x| build(x, &capped).0).collect();
+    assert_eq!(through_cap, cold, "a memo that clears often changes a chunk");
+    assert!(capped.raster_heights_held() <= 500, "the memo holds {} heights over its cap of 500", capped.raster_heights_held());
+    // One and eight workers through one memo.
+    for workers in [1usize, 8] {
+        let shared = RouteMemo::default();
+        let next = AtomicUsize::new(0);
+        let results = std::sync::Mutex::new(vec![Vec::new(); chunks.len()]);
+        std::thread::scope(|scope| {
+            for _ in 0..workers {
+                scope.spawn(|| loop {
+                    let k = next.fetch_add(1, Ordering::SeqCst);
+                    if k >= chunks.len() {
+                        break;
+                    }
+                    let b = build(chunks[k], &shared).0;
+                    results.lock().expect("results")[k] = b;
+                });
+            }
+        });
+        assert_eq!(results.into_inner().expect("results"), cold, "{workers} workers through one memo change a chunk");
+    }
 }

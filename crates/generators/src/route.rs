@@ -12,12 +12,13 @@
 //! `route_band_m` zero and no slide is the coarse path of before (`segment_points` between the cell centres).
 
 use crate::anet::{segment_points, AnchorLaw, BaseDetail, CoarseRun};
-use crate::chunkfield::ChunkLattice;
+use crate::chunkfield::{Cell, ChunkLattice, Region};
 use crate::coupled::NONE as COARSE_NONE;
 use planet_core::Face;
 use planet_core::Vec3;
 use std::cmp::Reverse;
-use std::collections::{BTreeMap, BinaryHeap};
+use std::collections::{BTreeMap, BinaryHeap, HashMap};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// The points of a routed segment.
@@ -25,6 +26,15 @@ type Polyline = Arc<Vec<Vec3>>;
 
 /// The most routed segments a [`RouteMemo`] keeps (about 125 points of 24 bytes each): over it the memo is cleared.
 const MEMO_SEGMENTS: usize = 4096;
+
+/// The most raster heights a [`RouteMemo`] keeps (a `u64` key and an `f64` value each, about 24 MB): over it the memo is cleared, like the lines.
+pub const MEMO_HEIGHTS: usize = 1 << 20;
+
+/// The key of the lattice point `(i, j)` of `face` in the memo of raster heights: the chart may reach past the face edge, so the indices carry an offset.
+fn height_key(face: u8, i: i64, j: i64) -> u64 {
+    const OFFSET: i64 = 1 << 28;
+    u64::from(face) << 58 | ((i + OFFSET) as u64) << 29 | (j + OFFSET) as u64
+}
 
 /// A memo of the nodes, relief factors and routed polylines of one run, base and law (what a stage keeps between its chunks, so a segment the chunks share
 /// is routed once). Every value is a pure function of its key under those three, so a hit is the value a miss would compute, bit for bit; a different law
@@ -35,9 +45,21 @@ pub struct RouteMemo {
     nodes: Mutex<BTreeMap<usize, Vec3>>,
     reliefs: Mutex<BTreeMap<usize, f64>>,
     lines: Mutex<BTreeMap<(usize, usize), Polyline>>,
+    /// The base heights at the raster points routed over so far, by lattice point (GEN-077): each value is the base field's height at the direction of
+    /// the point, whichever chunk, thread or batch asked, so a hit is the value a miss would compute, bit for bit.
+    heights: Mutex<HashMap<u64, f64>>,
+    /// Raster points served by the region's own heights, by this memo, and evaluated (since the memo was made).
+    served: [AtomicU64; 3],
+    /// The most heights held (`None`: [`MEMO_HEIGHTS`]); a test makes a memo with a small cap.
+    height_cap: Option<usize>,
 }
 
 impl RouteMemo {
+    /// A memo that holds at most `cap` raster heights (the default is [`MEMO_HEIGHTS`]).
+    pub fn with_height_cap(cap: usize) -> RouteMemo {
+        RouteMemo { height_cap: Some(cap), ..RouteMemo::default() }
+    }
+
     /// Empties the memo when `law` is not the law it was filled under.
     fn for_law(&self, law: &AnchorLaw) {
         let key = planet_core::hash::hash_u64s(
@@ -61,6 +83,16 @@ impl RouteMemo {
             self.lines.lock().expect("memo").clear();
         }
     }
+
+    /// How many raster points were served by the region's heights, by the memo and by evaluating the base field, since the memo was made.
+    pub fn raster_counts(&self) -> [u64; 3] {
+        [0, 1, 2].map(|k| self.served[k].load(Ordering::Relaxed))
+    }
+
+    /// The points the memo of raster heights holds.
+    pub fn raster_heights_held(&self) -> usize {
+        self.heights.lock().expect("memo").len()
+    }
 }
 
 /// The routing of the segments of one network build: a memo of pure functions of the coarse cell and the segment, so a segment is routed once however
@@ -72,6 +104,8 @@ pub struct Router<'a> {
     radius_m: f64,
     law: &'a AnchorLaw,
     memo: &'a RouteMemo,
+    /// The base heights of the cells of a region the build has already read (the raster points that fall in it need no evaluation).
+    known: Option<(&'a Region, &'a [f64])>,
 }
 
 impl<'a> Router<'a> {
@@ -84,7 +118,65 @@ impl<'a> Router<'a> {
         memo: &'a RouteMemo,
     ) -> Router<'a> {
         memo.for_law(law);
-        Router { run, base, lat, radius_m, law, memo }
+        Router { run, base, lat, radius_m, law, memo, known: None }
+    }
+
+    /// This router reading the base heights `heights` of the cells of `region` instead of evaluating the base field at raster points inside it.
+    pub fn with_known(mut self, region: &'a Region, heights: &'a [f64]) -> Router<'a> {
+        debug_assert_eq!(region.cells.len(), heights.len());
+        self.known = Some((region, heights));
+        self
+    }
+
+    /// The base heights at the raster points `(face, i, j)` of the lattice, in order: from the region's heights, else the memo, else evaluated in one batch.
+    fn raster_heights(&self, face: u8, points: &[(i64, i64)]) -> Vec<f64> {
+        let n = self.lat.n() as i64;
+        let mut z = vec![0.0f64; points.len()];
+        let mut miss: Vec<usize> = Vec::new();
+        let mut counts = [0u64; 3];
+        {
+            let held = self.memo.heights.lock().expect("memo");
+            for (k, &(i, j)) in points.iter().enumerate() {
+                let inside = self.known.and_then(|(region, heights)| {
+                    if i < 0 || j < 0 || i >= n || j >= n {
+                        return None;
+                    }
+                    region.index_of(Cell { face, i: i as u32, j: j as u32 }).map(|x| heights[x])
+                });
+                if let Some(h) = inside {
+                    z[k] = h;
+                    counts[0] += 1;
+                } else if let Some(&h) = held.get(&height_key(face, i, j)) {
+                    z[k] = h;
+                    counts[1] += 1;
+                } else {
+                    miss.push(k);
+                }
+            }
+        }
+        if !miss.is_empty() {
+            let dirs: Vec<Vec3> = miss.iter().map(|&k| self.lat.direction_ext(face, points[k].0, points[k].1)).collect();
+            let h = self.base.base_heights(&dirs);
+            let mut held = self.memo.heights.lock().expect("memo");
+            let cap = self.memo.height_cap.unwrap_or(MEMO_HEIGHTS);
+            if held.len() + miss.len() > cap {
+                held.clear();
+            }
+            for (&k, &v) in miss.iter().zip(&h) {
+                z[k] = v;
+            }
+            // A batch over the cap is not kept (the memo never holds more than the cap).
+            if miss.len() <= cap {
+                for (&k, &v) in miss.iter().zip(&h) {
+                    held.insert(height_key(face, points[k].0, points[k].1), v);
+                }
+            }
+            counts[2] += miss.len() as u64;
+        }
+        for (c, n) in self.memo.served.iter().zip(counts) {
+            c.fetch_add(n, Ordering::Relaxed);
+        }
+        z
     }
 
     /// Whether the routing changes anything (a band or a slide is set).
@@ -155,14 +247,17 @@ impl<'a> Router<'a> {
         let (s, step_m) = self.stride();
         let r = (radius_m / step_m).floor() as i64;
         let mut dirs: Vec<Vec3> = Vec::new();
+        let mut points: Vec<(i64, i64)> = Vec::new();
         for a in -r..=r {
             for b in -r..=r {
                 if ((a * a + b * b) as f64) * step_m * step_m <= radius_m * radius_m {
-                    dirs.push(self.lat.direction_ext(cell.face, i64::from(cell.i) + a * s, i64::from(cell.j) + b * s));
+                    let (i, j) = (i64::from(cell.i) + a * s, i64::from(cell.j) + b * s);
+                    dirs.push(self.lat.direction_ext(cell.face, i, j));
+                    points.push((i, j));
                 }
             }
         }
-        let h = self.base.base_heights(&dirs);
+        let h = self.raster_heights(cell.face, &points);
         let mut best = 0;
         for k in 1..dirs.len() {
             if (highest && h[k] > h[best]) || (!highest && h[k] < h[best]) {
@@ -254,15 +349,17 @@ impl<'a> Router<'a> {
         // The heights of the band in one batch.
         let mut index = vec![usize::MAX; w * h];
         let mut dirs: Vec<Vec3> = Vec::new();
+        let mut points: Vec<(i64, i64)> = Vec::new();
         for y in y0..=y1 {
             for x in x0..=x1 {
                 if inband[at(x, y)] {
                     index[at(x, y)] = dirs.len();
                     dirs.push(self.lat.direction_ext(cell0.face, i0 + x * s, j0 + y * s));
+                    points.push((i0 + x * s, j0 + y * s));
                 }
             }
         }
-        let z = self.base.base_heights(&dirs);
+        let z = self.raster_heights(cell0.face, &points);
         // Dijkstra with integer costs (millimetres): the rise plus `lambda` times the length, ties to the lower cell index.
         let mut cost = vec![i64::MAX; w * h];
         let mut from = vec![usize::MAX; w * h];
