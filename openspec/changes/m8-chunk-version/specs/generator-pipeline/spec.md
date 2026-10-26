@@ -4,7 +4,7 @@
 A layer SHALL have a `chunk_stage` setting, `Under` by default for a world with a chunk stage: the chain is base, stamps, chunk, and an edit changes the version of the chunks whose read set (GEN-081) it touches (GEN-082). `OnTop` (base, chunk, stamps) SHALL stay representable in the key; an edit then never invalidates a chunk.
 
 Verify: A
-Status: planned
+Status: active
 Source: M8 plan D3 (owner, 2026-10-26), ADR 0077 point 7, m8-chunk-version
 
 #### Scenario: Under is the default
@@ -28,7 +28,7 @@ Source: m8-chunk-version, GEN-049, GEN-059, GEN-078
 A chunk's version SHALL be the hash of the items of the `Under` chain whose reach touches its read set (GEN-081), the empty hash for none. It SHALL be part of the chunk's disk key. A chunk re-solved after an edit SHALL equal, bit for bit, a cold solve of the same version on any thread count.
 
 Verify: A
-Status: planned
+Status: active
 Source: m8-chunk-version, GEN-039, CON-14
 
 #### Scenario: A re-solve equals a cold solve

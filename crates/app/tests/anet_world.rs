@@ -276,3 +276,82 @@ fn generate_coarse_horizon_makes_the_stored_horizon_from_the_stored_coupled_run_
         }
     }
 }
+
+fn store_with_run(name: &str) -> std::path::PathBuf {
+    let store = std::env::temp_dir().join(format!("planet-anet-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&store);
+    run(&["generate", "--global-dir", store.to_str().unwrap(), "--global-res", &RES.to_string(), "--threads", "2"]).unwrap();
+    wait_for_run(&open(&store));
+    store
+}
+
+fn hill_at(dir: planet_core::Vec3, id: u128) -> planet_world_def::ItemSpec {
+    use planet_world_def::stamp::{Stamp, StampKind};
+    planet_world_def::ItemSpec {
+        id,
+        layer: "stamps".into(),
+        priority: 0,
+        dir,
+        content_hash: 0,
+        reach_m: 3_000.0,
+        max_delta_m: 60.0,
+        stamp: None,
+    }
+    .with_stamp(Stamp::new(StampKind::Hill, [40.0, 0.0, 0.0]))
+}
+
+/// Land the chunk `tile` reads first on `world` and return its key and result hash.
+fn land(world: &Arc<WorldTerrain>, spawner: &ManualSpawner, tile: TileId) -> (planet_generators::chunkfield::ChunkKey, u64) {
+    let manager = world.chunk_manager().expect("chunks");
+    let key = manager.reads(tile)[0];
+    let camera = planet_core::PlanetFixed(tile.center_direction(&planet_core::cube::TangentWarp) * R);
+    world.chunk_frame(&[tile], camera, &[]);
+    while manager.result_hash(key).is_none() || manager.in_flight() > 0 {
+        spawner.run_one();
+        world.chunk_frame(&[tile], camera, &[]);
+    }
+    (key, manager.result_hash(key).expect("landed"))
+}
+
+// spec: GEN-082, STRM-056
+#[test]
+fn an_edit_in_the_read_set_re_solves_the_chunk_to_the_bits_of_a_cold_solve_and_an_edit_outside_it_changes_nothing() {
+    let (a, b) = (store_with_run("resolve-a"), store_with_run("resolve-b"));
+    let cfg = ChunkConfig { workers: 2, ..ChunkConfig::default() };
+    let spawner = Arc::new(ManualSpawner::default());
+    let tile = TileId::new(Face(0), 15, 16000, 16000).unwrap();
+    let centre = tile.center_direction(&planet_core::cube::TangentWarp);
+
+    // World A: the chunk is solved plain, then a hill is put in its halo.
+    let world = open(&a);
+    assert_eq!(world.enable_anet_from_store(CELL_M, spawner.clone(), Arc::new(FakeClock::default()), cfg), Ok(true));
+    let (key, plain) = land(&world, &spawner, tile);
+    // A hill on the far side of the planet: outside every read set, so nothing is stale and nothing starts.
+    let mut def = (*world.definition()).clone();
+    def.put_item_spec(planet_world_def::BodyId::PLANET, hill_at(-centre, 1)).unwrap();
+    world.set_definition(Arc::new(def.clone())).unwrap();
+    let camera = planet_core::PlanetFixed(centre * R);
+    world.chunk_frame(&[tile], camera, &[]);
+    assert_eq!(spawner.pending(), 0, "an edit outside the read set starts no job");
+    // The hill at the chunk: stale, re-solved when wanted, and the old result keeps drawing until the new lands.
+    def.put_item_spec(planet_world_def::BodyId::PLANET, hill_at(centre, 2)).unwrap();
+    world.set_definition(Arc::new(def.clone())).unwrap();
+    let manager = world.chunk_manager().unwrap();
+    world.chunk_frame(&[tile], camera, &[]);
+    assert!(manager.in_flight() >= 1, "the chunks the hill reaches are re-solved (the tile reads its neighbours too)");
+    assert_eq!(manager.result_hash(key), Some(plain), "the old result draws meanwhile");
+    while manager.in_flight() > 0 {
+        spawner.run_one();
+        world.chunk_frame(&[tile], camera, &[]);
+    }
+    let resolved = manager.result_hash(key).expect("landed");
+    assert_ne!(resolved, plain, "the hill changed the chunk");
+
+    // World B: the same definition from the start, a cold solve of the same version: the same bits.
+    let cold_world = Arc::new(WorldTerrain::open_store(def, &b, RES).expect("the store opens"));
+    let spawner_b = Arc::new(ManualSpawner::default());
+    assert_eq!(cold_world.enable_anet_from_store(CELL_M, spawner_b.clone(), Arc::new(FakeClock::default()), cfg), Ok(true));
+    let (_, cold) = land(&cold_world, &spawner_b, tile);
+    assert_eq!(cold, resolved, "a re-solve after an edit equals a cold solve of the new version");
+    let _ = (std::fs::remove_dir_all(&a), std::fs::remove_dir_all(&b));
+}

@@ -761,11 +761,30 @@ impl WorldTerrain {
         disk: Option<Arc<dyn planet_streaming::chunks::ChunkDisk>>,
         cfg: planet_streaming::chunks::ChunkConfig,
     ) -> Result<(), String> {
+        self.enable_chunks_versioned(stage, cells_per_chunk, top, spawner, clock, disk, cfg, None)
+    }
+
+    /// [`WorldTerrain::enable_chunks_at`] with a source of chunk versions (GEN-082): the chunks the edits reach are re-solved when wanted.
+    #[allow(clippy::too_many_arguments)]
+    pub fn enable_chunks_versioned(
+        &self,
+        stage: Arc<dyn planet_generators::chunkfield::ChunkStage>,
+        cells_per_chunk: u32,
+        top: u8,
+        spawner: Arc<dyn planet_streaming::Spawner>,
+        clock: Arc<dyn planet_streaming::Clock>,
+        disk: Option<Arc<dyn planet_streaming::chunks::ChunkDisk>>,
+        cfg: planet_streaming::chunks::ChunkConfig,
+        versions: Option<Arc<dyn planet_streaming::chunks::ChunkVersions>>,
+    ) -> Result<(), String> {
         let lat = planet_generators::chunkfield::ChunkLattice::new(cells_per_chunk).ok_or_else(|| {
             format!("{cells_per_chunk} cells per chunk edge: the lattice needs at least one cell and fits 2^27 per face edge")
         })?;
-        let manager =
-            Arc::new(planet_streaming::chunks::ChunkManager::new(lat, self.radius_m, top, stage.clone(), spawner, clock, disk, cfg));
+        let mut manager = planet_streaming::chunks::ChunkManager::new(lat, self.radius_m, top, stage.clone(), spawner, clock, disk, cfg);
+        if let Some(v) = versions {
+            manager = manager.with_versions(v);
+        }
+        let manager = Arc::new(manager);
         *self.chunks.write().expect("chunk stage") = Some(Arc::new(ChunkWorld { lat, top, stage, manager }));
         Ok(())
     }
@@ -796,7 +815,15 @@ impl WorldTerrain {
         GenContext::new(&self.definition()).body_seed(BodyId::PLANET).unwrap_or(0)
     }
 
-    /// The field below the chunk stage and the stamps: what the A-net starts from.
+    /// The field the A-net starts from (GEN-039): the base with the stamps of the layers whose chunk stage is `Under` (the default) over it.
+    pub(crate) fn under_field(&self) -> Result<Box<dyn HeightField + '_>, String> {
+        let def = self.definition();
+        let base = self.base_field()?;
+        let under = |layer: &str| def.chunk_stage(BodyId::PLANET, layer) == planet_world_def::ChunkStagePosition::Under;
+        planet_generators::chain::with_stamps_where(base, &def, &under)
+    }
+
+    /// The field below the chunk stage and the stamps: the base alone.
     pub(crate) fn base_field(&self) -> Result<Box<dyn HeightField + '_>, String> {
         let def = self.definition();
         planet_generators::height_fields::build_field(self.kind, &GenContext::new(&def), BodyId::PLANET, self.src.as_ref(), self.bake_key)

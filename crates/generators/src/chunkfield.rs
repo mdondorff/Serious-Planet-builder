@@ -275,6 +275,10 @@ pub trait ChunkStage: Send + Sync {
     }
     /// A hash of everything that defines the process (seed, parameters, version): a change re-keys every tile a chunk of it can reach.
     fn definition_hash(&self) -> u64;
+    /// The discs outside which no item can change the bits of the chunk over `region` (GEN-081); a stage that reads no item has none.
+    fn read_discs(&self, _lat: &ChunkLattice, _region: &Region) -> Vec<crate::anet::ReadDisc> {
+        Vec::new()
+    }
     /// Whether the result just computed is a good one to store: a stage that read a source which had gone answers `false` (default `true`).
     fn healthy(&self) -> bool {
         true

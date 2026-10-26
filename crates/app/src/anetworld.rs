@@ -64,7 +64,7 @@ impl BaseDetail for WorldBase {
     /// One field for the whole batch (building it costs more than a read); a world that is gone or a field that cannot be built reads as sea level.
     fn base_heights(&self, dirs: &[Vec3]) -> Vec<f64> {
         let Some(world) = self.world.upgrade() else { return self.lost(dirs.len()) };
-        let Ok(field) = world.base_field() else { return self.lost(dirs.len()) };
+        let Ok(field) = world.under_field() else { return self.lost(dirs.len()) };
         let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(self.threads);
         field.heights_threaded_until(dirs, &|| false, threads)
     }
@@ -76,6 +76,10 @@ impl BaseDetail for WorldBase {
 
     fn identity(&self) -> u64 {
         self.identity
+    }
+
+    fn epoch(&self) -> u64 {
+        self.world.upgrade().map_or(0, |w| w.definition().revision())
     }
 
     fn healthy(&self) -> bool {
@@ -153,7 +157,84 @@ impl WorldTerrain {
             };
             Arc::new(PackChunkDisk::new(dir.to_path_buf(), spec)) as Arc<dyn ChunkDisk>
         });
-        self.enable_chunks_at(stage, per, ANET_TOP_LEVEL, spawner, clock, disk, cfg)
+        let versions: Arc<dyn planet_streaming::chunks::ChunkVersions> = Arc::new(WorldChunkVersions::new(self, stage.clone(), lat));
+        self.enable_chunks_versioned(stage, per, ANET_TOP_LEVEL, spawner, clock, disk, cfg, Some(versions))
+    }
+}
+
+/// The versions of the world's chunks (GEN-082): the hash of the items of the `Under` layers whose reach touches the chunk's read set (GEN-081),
+/// 0 for none. Made once per chunk and definition revision; the read set depends on the chunk, the run and the law only, so it is made once.
+pub struct WorldChunkVersions {
+    world: Weak<WorldTerrain>,
+    stage: Arc<dyn planet_generators::chunkfield::ChunkStage>,
+    lat: planet_generators::chunkfield::ChunkLattice,
+    discs:
+        std::sync::Mutex<std::collections::HashMap<planet_generators::chunkfield::ChunkKey, Arc<Vec<planet_generators::anet::ReadDisc>>>>,
+    made: std::sync::Mutex<std::collections::HashMap<planet_generators::chunkfield::ChunkKey, (u64, u64)>>,
+}
+
+impl WorldChunkVersions {
+    pub fn new(
+        world: &Arc<WorldTerrain>,
+        stage: Arc<dyn planet_generators::chunkfield::ChunkStage>,
+        lat: planet_generators::chunkfield::ChunkLattice,
+    ) -> WorldChunkVersions {
+        WorldChunkVersions { world: Arc::downgrade(world), stage, lat, discs: Default::default(), made: Default::default() }
+    }
+}
+
+impl planet_streaming::chunks::ChunkVersions for WorldChunkVersions {
+    fn version(&self, key: planet_generators::chunkfield::ChunkKey) -> u64 {
+        let Some(world) = self.world.upgrade() else { return 0 };
+        let def = world.definition();
+        let revision = def.revision();
+        if let Some(&(r, v)) = self.made.lock().expect("versions").get(&key) {
+            if r == revision {
+                return v;
+            }
+        }
+        let layers: Vec<String> = def
+            .stamp_layers(BodyId::PLANET)
+            .into_iter()
+            .filter(|l| def.chunk_stage(BodyId::PLANET, l) == planet_world_def::ChunkStagePosition::Under)
+            .collect();
+        let version = if layers.is_empty() {
+            0
+        } else {
+            let discs = {
+                let mut cache = self.discs.lock().expect("versions");
+                cache
+                    .entry(key)
+                    .or_insert_with(|| {
+                        let tile =
+                            planet_core::TileId::new(planet_core::Face(key.0), planet_generators::chunk::CHUNK_GRID_LEVEL, key.1, key.2)
+                                .expect("a chunk of the grid is a tile");
+                        let region =
+                            planet_generators::chunkfield::region(&self.lat, tile, planet_generators::chunkfield::halo_rings(&*self.stage));
+                        Arc::new(self.stage.read_discs(&self.lat, &region))
+                    })
+                    .clone()
+            };
+            let mut items: std::collections::BTreeMap<(String, u128), planet_world_def::footprint::FootprintItem> = Default::default();
+            for layer in &layers {
+                for d in discs.iter() {
+                    let cap = planet_world_def::footprint::Cap { centre: d.centre, angle: d.angle.min(core::f64::consts::PI) };
+                    if let Ok(found) = def.footprint_items_cap(BodyId::PLANET, layer, cap) {
+                        for it in found {
+                            items.entry((layer.clone(), it.id)).or_insert(it);
+                        }
+                    }
+                }
+            }
+            if items.is_empty() {
+                0
+            } else {
+                let all: Vec<planet_world_def::footprint::FootprintItem> = items.into_values().collect();
+                planet_world_def::footprint_hash(&all) | 1
+            }
+        };
+        self.made.lock().expect("versions").insert(key, (revision, version));
+        version
     }
 }
 

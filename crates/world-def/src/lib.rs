@@ -375,21 +375,20 @@ pub struct WorldDefinition {
     /// The implementation id of the height field the world names (GEN-018), if it names one. Not a node (nodes are
     /// numbers); it enters the base hash only when set, so a definition that names none hashes as it always did.
     height_field: Option<String>,
-    /// The `chunk_stage` setting of the layers that have one (GEN-039); a layer without an entry is [`ChunkStagePosition::OnTop`]. It enters the
+    /// The `chunk_stage` setting of the layers that have one (GEN-039); a layer without an entry is [`ChunkStagePosition::Under`] (M8-7). It enters the
     /// hash only when an entry exists, so a definition without any hashes as it always did.
     chunk_stages: BTreeMap<(BodyId, String), ChunkStagePosition>,
     /// Changes to this instance (STRM-027); not part of the content.
     revision: revision::Revision,
 }
 
-/// Where a layer's chunk stage sits in the chain (GEN-039, M8 plan D3, provisional): `OnTop` is base, chunk, stamps (an edit never invalidates a
-/// chunk); `Under` is base, stamps, chunk (the chunks would read the edits, and an edit would invalidate the chunks it reaches). `Under` is
-/// representable here and in the key, and refused by [`WorldDefinition::check_chunk_stages`] until the editor supports it (M8-7, after the
-/// owner confirms D3).
+/// Where a layer's chunk stage sits in the chain (GEN-039, M8 plan D3, owner 2026-10-26): `Under` is base, stamps, chunk (the chunks read the
+/// edits, and an edit changes the version of the chunks whose read set it reaches, GEN-082); it is the default. `OnTop` is base, chunk, stamps
+/// (an edit never invalidates a chunk).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ChunkStagePosition {
-    #[default]
     OnTop,
+    #[default]
     Under,
 }
 
@@ -485,21 +484,14 @@ impl WorldDefinition {
         }
     }
 
-    /// The `chunk_stage` of `layer` of `body`: `OnTop` unless set.
+    /// The `chunk_stage` of `layer` of `body`: `Under` unless set.
     pub fn chunk_stage(&self, body: BodyId, layer: &str) -> ChunkStagePosition {
         self.chunk_stages.get(&(body, layer.to_string())).copied().unwrap_or_default()
     }
 
-    /// Whether every layer of `body` has a `chunk_stage` the build supports: `Under` is refused with an error naming the layer (GEN-039).
-    pub fn check_chunk_stages(&self, body: BodyId) -> Result<(), String> {
-        for ((b, layer), position) in &self.chunk_stages {
-            if *b == body && *position == ChunkStagePosition::Under {
-                return Err(format!(
-                    "layer '{layer}' sets chunk_stage to '{}': the chunk stage under the stamps is not supported yet (it arrives with the editor over chunks, M8-7); use 'on-top'",
-                    position.name()
-                ));
-            }
-        }
+    /// Whether every layer of `body` has a `chunk_stage` the build supports: both positions are (GEN-039), so this always holds.
+    pub fn check_chunk_stages(&self, _body: BodyId) -> Result<(), String> {
+        // Both positions are built since M8-7 (GEN-039); kept for the callers that check before a build.
         Ok(())
     }
 
