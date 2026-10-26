@@ -1,0 +1,1 @@
+- 2026-10-26 **m8-chunk-fade-increment** (STRM-053; #705, #711): a rebuilt tile carries the increment over the tile it replaces (final' - drawn_old), tile weights over the ready chunks, stale tiles keep their weight until the swap; sequential epochs tried and closed (#714)
