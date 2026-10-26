@@ -80,14 +80,15 @@ pub fn field_chain_with<'a>(
     // The layers whose chunk stage is `Under` (the default, GEN-039) put their stamps below the chunk stage, the rest above it.
     let under = |layer: &str| def.chunk_stage(BodyId::PLANET, layer) == planet_world_def::ChunkStagePosition::Under;
     let ctx = GenContext::new(def);
-    let built = build_field(kind, &ctx, BodyId::PLANET, src, bake_key)
-        .map_err(|e| format!("the definition cannot be generated: {e}"))
-        .and_then(|base| with_stamps_where(base, def, &under))
-        .map(|base| match chunks {
-            Some(c) => c.wrap(base),
-            None => base,
-        })
-        .and_then(|base| with_stamps_where(base, def, &|layer: &str| !under(layer)));
+    let base = build_field(kind, &ctx, BodyId::PLANET, src, bake_key).map_err(|e| format!("the definition cannot be generated: {e}"));
+    // Without a chunk stage nothing sits between the layers: they stack in the order of ADR 0007 whatever their chunk stage says.
+    let built = match chunks {
+        None => base.and_then(|base| with_stamps(base, def)),
+        Some(c) => base
+            .and_then(|base| with_stamps_where(base, def, &under))
+            .map(|base| c.wrap(base))
+            .and_then(|base| with_stamps_where(base, def, &|layer: &str| !under(layer))),
+    };
     match (built, bound_water) {
         (Ok(f), true) => {
             let level = def.sea(BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;

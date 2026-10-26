@@ -37,6 +37,10 @@ pub trait ChunkDisk: Send + Sync {
     }
 }
 
+/// The version of a result that was computed while the stage's inputs moved (an edit landed during the job): never a real version, so the chunk is
+/// stale at once and is solved again; its bits are neither trusted nor stored.
+pub const UNTRUSTED_VERSION: u64 = u64::MAX - 1;
+
 /// The version a chunk should have now (GEN-082): the hash of the edits that can change it, 0 for none. A frame asks it for the wanted chunks; a
 /// ready chunk of another version is stale (STRM-056).
 pub trait ChunkVersions: Send + Sync {
@@ -177,6 +181,8 @@ impl ChunkManager {
             None => HashMap::new(),
         };
         let want_version = |k: &ChunkKey| versions.get(k).copied().unwrap_or(0);
+        // The stage's epoch when the versions were asked: a job that ends under another epoch computed against edits it was not keyed for.
+        let epoch0 = self.stage.epoch();
         let to_start: Vec<(ChunkKey, u64, bool)> = {
             let mut sh = self.shared.lock().expect("chunk state");
             for key in wanted.iter().map(|w| &w.0).chain(prefetch) {
@@ -251,17 +257,18 @@ impl ChunkManager {
         };
         out.started = to_start.len();
         for (key, version, _) in to_start {
-            self.spawner.spawn(self.job(key, version));
+            self.spawner.spawn(self.job(key, version, epoch0));
         }
         out
     }
 
-    fn job(&self, key: ChunkKey, version: u64) -> crate::Job {
+    fn job(&self, key: ChunkKey, version: u64, epoch0: u64) -> crate::Job {
         let (lat, radius_m, top) = (self.lat, self.radius_m, self.top);
         let (stage, disk, clock, shared) = (self.stage.clone(), self.disk.clone(), self.clock.clone(), self.shared.clone());
         Box::new(move || {
             let tile = tile_of(key);
             let mut from_disk = None;
+            let mut moved = false;
             if let Some(disk) = &disk {
                 match disk.get_versioned(tile, version) {
                     Ok(Some(bytes)) => match ChunkResult::from_bytes(tile, &bytes) {
@@ -285,7 +292,8 @@ impl ChunkManager {
                 None => {
                     let r =
                         compute_chunk(&lat, &*stage, radius_m, top, tile, halo_rings(&*stage)).expect("the stage's own halo is accepted");
-                    if let Some(disk) = disk.as_ref().filter(|_| stage.healthy()) {
+                    moved = stage.epoch() != epoch0;
+                    if let Some(disk) = disk.as_ref().filter(|_| stage.healthy() && !moved) {
                         if let Err(e) = disk.put_versioned(tile, version, r.to_bytes()) {
                             shared.lock().expect("chunk state").log.push(format!("chunk {key:?}: not stored ({e})"));
                         }
@@ -298,7 +306,14 @@ impl ChunkManager {
             let mut sh = shared.lock().expect("chunk state");
             sh.running.remove(&key);
             sh.stale_running.remove(&key);
-            sh.ready.insert(key, Entry { result: Arc::new(result), last_wanted_ms: clock.now_ms(), version });
+            sh.ready.insert(
+                key,
+                Entry {
+                    result: Arc::new(result),
+                    last_wanted_ms: clock.now_ms(),
+                    version: if moved { UNTRUSTED_VERSION } else { version },
+                },
+            );
             sh.landed.push(key);
             sh.stats.landed += 1;
             if hit {

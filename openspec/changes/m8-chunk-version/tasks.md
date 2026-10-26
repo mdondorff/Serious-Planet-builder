@@ -5,7 +5,7 @@
 ## 2. Version and Under
 - [x] 2.1 `ChunkVersion` from the items touching the read set (the disk key carries it, done)
 - [x] 2.2 `WorldBase` reads base plus stamps under `Under`; GEN-039 default `Under`
-- [x] 2.3 Test: re-solve == cold solve of the new version, bit for bit; outside-halo-inside-routing-reach edit changes version and bits; outside the read set changes neither
+- [x] 2.3 Test: re-solve == cold solve of the new version, bit for bit; an edit outside the read set starts no job (app); the read set covers the routing reach (generators, GEN-081); a job that straddles an edit is neither stored nor trusted (streaming)
 
 ## 3. Stale and re-solve
 - [x] 3.1 `ChunkManager`: stale mark, version in the want, replace on landing, order and worker cap

@@ -1509,6 +1509,9 @@ impl crate::chunkfield::ChunkStage for ANet {
     fn healthy(&self) -> bool {
         self.base.healthy()
     }
+    fn epoch(&self) -> u64 {
+        self.base.epoch()
+    }
     fn read_discs(&self, lat: &ChunkLattice, region: &Region) -> Vec<ReadDisc> {
         chunk_read_set(&*self.run, lat, region, self.radius_m, &self.params.anchor)
     }
