@@ -157,6 +157,8 @@ pub struct PanelData<'a> {
     pub saved: &'a str,
     /// The window's own status line (path, overlay).
     pub view_status: &'a str,
+    /// The rows of the Keys tab (VIEW-057): the keys the window accepts now, by group, with their state.
+    pub keys: &'a [planet_frame::keytable::KeyRow],
 }
 
 fn kind_color(kind: &str) -> egui::Color32 {
@@ -406,6 +408,7 @@ fn left_panel(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Ve
             ui.weak("Procedural base: locked, generator pinned");
         }
         Tab::Problems => problems_tab(ui, st, d, ev),
+        Tab::Keys => keys_tab(ui, st, d),
         Tab::Graph => {
             ui.label(egui::RichText::new("Chain, top applies first").small().weak());
             ui.group(|ui| {
@@ -421,6 +424,32 @@ fn left_panel(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Ve
             });
         }
     });
+}
+
+/// The Keys tab (VIEW-057): the keys the window accepts, by group, each with what it does and the state it is in.
+fn keys_tab(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData) {
+    if d.keys.is_empty() {
+        ui.weak("No keys listed.");
+        return;
+    }
+    for group in planet_frame::keytable::Group::ALL {
+        let rows: Vec<_> = d.keys.iter().filter(|r| r.group == group).collect();
+        if rows.is_empty() {
+            continue;
+        }
+        ui.strong(group.title());
+        for row in rows {
+            ui.horizontal_wrapped(|ui| {
+                let key = ui.monospace(row.label);
+                st.marks.push((format!("key:{}", row.label), key.rect));
+                if let Some(state) = &row.state {
+                    ui.label(egui::RichText::new(format!("[{state}]")).weak());
+                }
+            });
+            ui.label(egui::RichText::new(row.help).small().weak());
+        }
+        ui.separator();
+    }
 }
 
 /// The problems tab (VIEW-047): each edit the engine cannot draw fully or that costs more than it should, what is wrong, and what to do:
@@ -949,6 +978,7 @@ mod tests {
             edit_count: 2,
             saved: "not saved",
             view_status: "",
+            keys: &[],
         }
     }
 
@@ -1116,6 +1146,35 @@ mod tests {
         rig.settle(&data(&h));
         assert!(rig.st.mark(&format!("steep:{label}")).is_some(), "the row carries the warning");
         assert!(rig.st.mark("steep-warning").is_some(), "the inspector carries it");
+    }
+
+    // spec: VIEW-057
+    #[test]
+    fn the_keys_tab_lists_every_key_the_editor_accepts_by_group_with_its_state() {
+        use planet_frame::keytable::{rows, Group};
+        let f = fixture();
+        let layout = Layout::default();
+        assert_eq!(layout.tabs.last(), Some(&Tab::Keys), "the tab is last in the default layout");
+        let h = held(&f, layout.clone());
+        let mut viewer = planet_frame::viewer::ViewerState::new(0, 3, 0, true);
+        viewer.lit = true;
+        let listed = rows(true, &viewer, None);
+        assert!(
+            !listed.is_empty() && Group::ALL.iter().all(|g| listed.iter().any(|r| r.group == *g)),
+            "every group has keys in the editor mode"
+        );
+        let mut rig = Rig::new(&layout);
+        // Without rows the tab says so; with the window's rows every key is listed once, and a key with a state shows it.
+        rig.settle(&data(&h));
+        rig.click(&data(&h), rig.mark("tab:keys"));
+        assert_eq!(rig.st.tab, Tab::Keys);
+        assert!(rig.st.marks.iter().all(|m| !m.0.starts_with("key:")));
+        rig.settle(&PanelData { keys: &listed, ..data(&h) });
+        for r in &listed {
+            assert!(rig.st.mark(&format!("key:{}", r.label)).is_some(), "the key {} is listed", r.label);
+        }
+        assert_eq!(rig.st.marks.iter().filter(|m| m.0.starts_with("key:")).count(), listed.len(), "each key once");
+        assert!(listed.iter().any(|r| r.state.is_some()), "some keys carry a state");
     }
 
     // spec: VIEW-047

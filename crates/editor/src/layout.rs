@@ -15,6 +15,8 @@ pub enum Tab {
     Graph,
     /// The edits the engine cannot draw fully or that cost more than they should (VIEW-047), with fly-to and the fixes.
     Problems,
+    /// The keys the window accepts, by group, with their state (VIEW-055, VIEW-057).
+    Keys,
 }
 
 impl Tab {
@@ -24,6 +26,7 @@ impl Tab {
             Tab::Layers => "layers",
             Tab::Graph => "graph",
             Tab::Problems => "problems",
+            Tab::Keys => "keys",
         }
     }
 
@@ -33,11 +36,12 @@ impl Tab {
             Tab::Layers => "Layers",
             Tab::Graph => "Graph",
             Tab::Problems => "Problems",
+            Tab::Keys => "Keys",
         }
     }
 
     fn of_key(s: &str) -> Option<Tab> {
-        [Tab::Near, Tab::Layers, Tab::Graph, Tab::Problems].into_iter().find(|t| t.key() == s)
+        [Tab::Near, Tab::Layers, Tab::Graph, Tab::Problems, Tab::Keys].into_iter().find(|t| t.key() == s)
     }
 }
 
@@ -72,7 +76,7 @@ impl Default for Layout {
             left_width: 300.0,
             inspector_width: 320.0,
             inspector_side: Side::Right,
-            tabs: vec![Tab::Near, Tab::Layers, Tab::Graph, Tab::Problems],
+            tabs: vec![Tab::Near, Tab::Layers, Tab::Graph, Tab::Problems, Tab::Keys],
             status_bar: true,
             handle_hit_px: 10.0,
         }
@@ -148,7 +152,7 @@ impl Layout {
             let mut tabs = Vec::new();
             for t in a {
                 let s = t.as_str().ok_or_else(|| bad("tabs", "a list of tab names"))?;
-                let tab = Tab::of_key(s).ok_or_else(|| bad("tabs", format!("'{s}' is not a tab (near, layers, graph, problems)")))?;
+                let tab = Tab::of_key(s).ok_or_else(|| bad("tabs", format!("'{s}' is not a tab (near, layers, graph, problems, keys)")))?;
                 if tabs.contains(&tab) {
                     return Err(bad("tabs", format!("'{s}' is listed twice")));
                 }
