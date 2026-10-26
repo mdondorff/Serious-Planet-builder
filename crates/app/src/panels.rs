@@ -426,8 +426,6 @@ fn left_panel(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Ve
     });
 }
 
-/// The problems tab (VIEW-047): each edit the engine cannot draw fully or that costs more than it should, what is wrong, and what to do:
-/// fly there, reduce the strengths of a brush, merge its stack of strokes into one, delete it.
 /// The Keys tab (VIEW-057): the keys the window accepts, by group, each with what it does and the state it is in.
 fn keys_tab(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData) {
     if d.keys.is_empty() {
@@ -454,6 +452,8 @@ fn keys_tab(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData) {
     }
 }
 
+/// The problems tab (VIEW-047): each edit the engine cannot draw fully or that costs more than it should, what is wrong, and what to do:
+/// fly there, reduce the strengths of a brush, merge its stack of strokes into one, delete it.
 fn problems_tab(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Vec<Event>) {
     if d.problems.is_empty() {
         ui.weak("No problem: every edit can be drawn fully.");
