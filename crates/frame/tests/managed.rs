@@ -1842,6 +1842,67 @@ fn a_landed_chunk_refreshes_exactly_the_resident_tiles_that_read_it() {
     assert_eq!(rig.lp.chunk_landed(&[(5, 63, 63)]), 0, "a chunk nobody resident reads refreshes nothing");
 }
 
+/// A plan field that plans nothing and records, when a plan starts, whether the cache still holds an origin height for each of its `tiles`.
+struct CacheWatcher {
+    tiles: Vec<TileId>,
+    seen: Arc<std::sync::Mutex<SeenOrigins>>,
+}
+
+/// For each plan, for each watched tile: whether the cache held its origin height when the plan started.
+type SeenOrigins = Vec<Vec<(TileId, bool)>>;
+
+impl PlanField for CacheWatcher {
+    fn plan(
+        &self,
+        _req: &TerrainRequest,
+        cache: &mut SelectionCache,
+        _threads: usize,
+    ) -> Result<planet_frame::TerrainPlan, planet_frame::PlanError> {
+        self.seen.lock().unwrap().push(self.tiles.iter().map(|&t| (t, cache.has_origin_for_test(t))).collect());
+        Err(planet_frame::PlanError::HeightField("recorded".into()))
+    }
+    fn residency(&self, _req: &TerrainRequest, _cache: &mut SelectionCache) -> Result<planet_frame::ResidencySet, planet_frame::PlanError> {
+        Err(planet_frame::PlanError::HeightField("recorded".into()))
+    }
+}
+
+// spec: STRM-040
+#[test]
+fn a_landing_only_queues_the_drop_and_no_plan_that_starts_after_it_reads_a_tile_that_reads_the_landed_chunk() {
+    let spawner = Arc::new(ManualSpawner::default());
+    // 64 tiles of level 8 over one face: the stub view gives each the chunk of its level 6 ancestor, so 4 chunks of 16 tiles each.
+    let tiles: Vec<TileId> = (0..8).flat_map(|x| (0..8).map(move |y| TileId::new(planet_core::Face(0), 8, x, y).unwrap())).collect();
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let worker = PlanWorker::new(spawner.clone(), Arc::new(CacheWatcher { tiles: tiles.clone(), seen: seen.clone() }), 1);
+    worker.with_cache_for_test(|c| tiles.iter().for_each(|&t| c.origin_height_for_test(t, 1.0)));
+    let view = Arc::new(StubView { ready: std::sync::atomic::AtomicBool::new(true) });
+    let reads = |t: TileId| planet_frame::chunkshare::ChunkView::reads(&*view, t);
+    let (first, second) = (reads(tiles[0])[0], reads(tiles[63])[0]);
+    assert_ne!(first, second);
+    let readers = |k| tiles.iter().filter(|&&t| reads(t).contains(&k)).count();
+    assert_eq!((readers(first), readers(second)), (16, 16));
+    // The landing runs nothing on the calling thread: the cache is untouched until a plan job takes it.
+    worker.invalidate_chunk_later(first, view.clone());
+    assert!(worker.with_cache_for_test(|c| tiles.iter().all(|&t| c.has_origin_for_test(t))), "the landing scanned nothing");
+    // The next plan starts after the landing: it sees no origin height of a tile that reads the chunk, and keeps the others.
+    worker.submit(1, request(here(), 0.0, -0.4));
+    spawner.run(1);
+    let first_plan = seen.lock().unwrap()[0].clone();
+    for (t, has) in &first_plan {
+        assert_eq!(*has, !reads(*t).contains(&first), "tile {t:?} after the landing of {first:?}");
+    }
+    // Two landings together: one pass drops both chunks' tiles, and a plan after it sees neither.
+    worker.with_cache_for_test(|c| tiles.iter().for_each(|&t| c.origin_height_for_test(t, 1.0)));
+    worker.invalidate_chunk_later(first, view.clone());
+    worker.invalidate_chunk_later(second, view.clone());
+    worker.submit(2, request(here(), 1.0, -0.4));
+    spawner.run(1);
+    let second_plan = seen.lock().unwrap()[1].clone();
+    let dropped = second_plan.iter().filter(|(_, has)| !*has).count();
+    assert_eq!(dropped, 32, "the 16 readers of each of the two landed chunks");
+    assert!(second_plan.iter().all(|(t, has)| *has != (reads(*t).contains(&first) || reads(*t).contains(&second))));
+}
+
 // spec: STRM-047
 #[test]
 fn the_loop_gives_every_node_the_fade_weight_of_the_chunks_it_reads() {

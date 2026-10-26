@@ -632,11 +632,22 @@ impl SelectionCache {
     /// Forget what is cached of the tiles a chunk that has just landed can change (STRM-040): those whose reads, decided by `reads` (a chunk
     /// field's `chunks_read_by`), include it. Returns how many origin heights were dropped.
     pub fn invalidate_chunk(&mut self, landed: (u8, u32, u32), reads: impl Fn(TileId) -> Vec<(u8, u32, u32)>) -> usize {
+        self.invalidate_chunks(&[landed], reads)
+    }
+
+    /// [`SelectionCache::invalidate_chunk`] for several landed chunks in one pass over the cache (the pass costs `reads` for every tile it holds).
+    pub fn invalidate_chunks(&mut self, landed: &[(u8, u32, u32)], reads: impl Fn(TileId) -> Vec<(u8, u32, u32)>) -> usize {
         let mut tiles: Vec<TileId> = self.origin_heights.keys().chain(self.mesh_keys.keys()).chain(self.volumes.keys()).copied().collect();
         tiles.sort_unstable_by_key(|t| t.raw());
         tiles.dedup();
-        tiles.retain(|&t| reads(t).contains(&landed));
+        tiles.retain(|&t| reads(t).iter().any(|k| landed.contains(k)));
         self.invalidate_tiles(&tiles)
+    }
+
+    /// Whether the cache holds an origin height for `tile`; for tests of what a landing drops.
+    #[doc(hidden)]
+    pub fn has_origin_for_test(&self, tile: TileId) -> bool {
+        self.origin_heights.contains_key(&tile)
     }
 
     pub fn clear(&mut self) {
