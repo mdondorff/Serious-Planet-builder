@@ -1866,7 +1866,7 @@ impl PlanField for CacheWatcher {
     }
 }
 
-// spec: STRM-040
+// spec: STRM-040, STRM-058
 #[test]
 fn a_landing_only_queues_the_drop_and_no_plan_that_starts_after_it_reads_a_tile_that_reads_the_landed_chunk() {
     let spawner = Arc::new(ManualSpawner::default());

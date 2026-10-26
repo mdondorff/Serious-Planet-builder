@@ -1,0 +1,1 @@
+- 2026-10-26 **m8-landing-frame** (STRM-040): the main thread no longer takes the plan cache's lock: landed chunks, edited tiles and item changes are queued for the plan job; ChunkManager::reads computes its reach once; the landing frame's chunk_landed 438-672 ms (up to 2,151) down to 0.9-2.1 ms.
