@@ -6,6 +6,7 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 - **D3 confirmed (owner, 2026-10-26):** both orders are wanted eventually; M8-7 builds edits under the erosion first (option 2: the edit shows at once, its eroded result follows within 10 s); edits on top (finishing touches) stay a per-layer setting for later. Cost per stamp or brush stroke is M8-7's first measurement.
 - **M8 GO:** decisions D1 to D7 taken (owner, 2026-10-23; `docs/briefings/m8-plan.md`); everything up to M8-6 is independent of D3; the lanes start on the owner's GO.
 - **ADR 0080 and ADR 0082: acceptance** (proposed; both built before acceptance as easy to reverse): 0080 the hill band, landform creases and the run (point 4 amended: erosion off, input plus fill, GEN-065); 0082 the coarse node slides instead of the border crossing (amends 0081 point 1; #692).
+- **ADR 0083 runtime compute budgets: acceptance** (proposed, from SPIKE-44): frame shares at 1440p/60 fps with reserves, one job system with core budgets and priority classes, memory shares; numbers in a spec after acceptance.
 - **Optional, when convenient:** the M6 retest list (`docs/archive/M6/briefings/m6-owner-test-plan.md`, "Retest"); a live check of the flickers (Tracked).
 - **At the laptop (postponed):** the NVIDIA driver update (591.86; device losses under parallel GPU load, Tracked); excluding the repo's `target` folders from Windows Search indexing.
 
@@ -27,6 +28,7 @@ Done before the reset (2026-10-23 and 24; M8-2 archived #621, chunk fade split i
 Open owner items: the two flickers (Tracked) need a live check (editor off, debug path L, or a recording or F9 at the moment); P1-5 editing frame rate on a quiet machine; P2-8 missing tiles during an edit's refresh.
 
 ## Tracked
+- **Frame tail at 1 m** (SPIKE-44 step 2, 2026-10-26, RTX): vsync-paced 59.6 fps, but 3.2 % of frames over 30 ms: begin_frame (plan + residency) up to 124 ms, the chunk frame up to 729 ms on a chunk landing (CON-22). Next: find what the landing frame does on the main thread; the per-frame phase dump as a debug switch.
 - **GEN-052 met, window 2026-10-26** (production store, `perf anet-chunk --store`): 8 m 3.33 / 3.30 s on 4 threads, 5.27 / 5.35 s on one; 4 m 14.8 / 14.6 s; 10 m 2.14 / 2.11 s. Next window: repeat after any change to the base field or the routing.
 - **Driver fade seam** (#716): a tile rebuilt for a neighbour chunk's landing fades its drivers up from neutral again. Trigger: the first look with driver curves. Fix: a driver increment plane on the upload path (crusader). Resolution: 32 m texels (GEN-074); M9: per-vertex.
 - **Steepest river and the 3e7 m2 drop**: at (34.158, 140.835) 519 of 1,344 links climb and 3,491 cells sit at the 300 m bound: the coarse network climbs beyond a 1 km node slide (M9, coarse run). A 3e7 m2 tributary threshold gave a 27.8 m drop; the stage uses 5e7.

@@ -92,3 +92,4 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0080 | [Hill-scale relief: a band in the bake, landform-keyed creases, and a stationary uplift for the coupled run](0080-hill-relief-in-the-bake-landform-creases-and-a-stationary-uplift.md) | proposed | amends 0030 point 1; reorders 0076 point 6; easy to reverse |
 | 0081 | [Local main-stem routing inside a chunk](0081-local-main-stem-routing-inside-a-chunk.md) | accepted | departs from 0077 point 3 (refines it: topology and border crossings stay global) |
 | 0082 | [The coarse node slides, not the border crossing](0082-the-coarse-node-slides-not-the-border-crossing.md) | proposed | amends 0081 point 1 |
+| 0083 | [Runtime compute budgets](0083-runtime-compute-budgets.md) | proposed | new; numbers in a spec after acceptance |
