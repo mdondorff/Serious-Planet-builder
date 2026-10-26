@@ -25,6 +25,8 @@ pub struct Requirement {
     pub tier: Option<char>,
     pub status: Option<String>,
     pub review: Option<String>,
+    /// Declared under an `## ADDED` heading of a change delta: the ID must be new.
+    pub added: bool,
 }
 
 /// `ABC-012` style ID: 2-6 uppercase letters, a dash, two or three digits (constitution rules are `CON-15`).
@@ -40,9 +42,11 @@ pub fn parse_requirements(spec_name: &str, text: &str) -> (Vec<Requirement>, Vec
     let mut reqs: Vec<Requirement> = Vec::new();
     let mut errors = Vec::new();
     let mut removed = false;
+    let mut added = false;
     for (n, line) in text.lines().enumerate() {
         if let Some(h) = line.strip_prefix("## ") {
             removed = h.trim_start().starts_with("REMOVED");
+            added = h.trim_start().starts_with("ADDED");
         }
         if let Some(rest) = line.strip_prefix("### Requirement:") {
             let rest = rest.trim();
@@ -50,7 +54,7 @@ pub fn parse_requirements(spec_name: &str, text: &str) -> (Vec<Requirement>, Vec
             if !is_trace_id(id) {
                 errors.push(format!("{spec_name}:{}: requirement heading '{rest}' does not start with a trace ID like COORD-003", n + 1));
             }
-            let mut r = Requirement { id: id.to_string(), spec: spec_name.to_string(), ..Default::default() };
+            let mut r = Requirement { id: id.to_string(), spec: spec_name.to_string(), added, ..Default::default() };
             if removed {
                 // Removed by a change delta: outside the coverage rules.
                 r.tier = Some('A');
@@ -257,6 +261,12 @@ pub fn lint(specs: &BTreeMap<String, String>, sources: &BTreeMap<PathBuf, String
         let (parsed, e) = parse_requirements(name, text);
         errors.extend(e);
         for req in parsed {
+            // An ADDED requirement of a change must be new: an ID in a main spec (or another change) is a clash, which would silently replace it.
+            if req.added && is_delta(name) {
+                if let Some(x) = reqs.iter().find(|x| x.id == req.id && !is_delta(&x.spec)) {
+                    errors.push(format!("{}: ADDED in '{name}' but already a requirement of spec '{}' (take a free ID, or MODIFIED if it is meant to change it)", req.id, x.spec));
+                }
+            }
             match reqs.iter().position(|x| x.id == req.id && is_delta(name) && !is_delta(&x.spec)) {
                 Some(i) => reqs[i] = req,
                 None => reqs.push(req),
@@ -926,6 +936,29 @@ Status: active
         // COORD-003 is active in the delta and uncited; COORD-009 is removed, so not reported, and no duplicate error.
         assert_eq!(r.errors.len(), 1, "{:?}", r.errors);
         assert!(r.errors[0].starts_with("COORD-003"), "{:?}", r.errors);
+    }
+
+    // spec: TEST-001
+    #[test]
+    fn an_added_requirement_whose_id_is_already_in_a_main_spec_is_reported() {
+        let main = "### Requirement: COORD-003 Geo
+Verify: A
+Status: planned
+";
+        let delta = "## ADDED Requirements
+### Requirement: COORD-003 Other
+Verify: A
+Status: planned
+
+### Requirement: COORD-004 New
+Verify: A
+Status: planned
+";
+        let specs =
+            BTreeMap::from([("coordinates".to_string(), with_purpose(main)), ("change:m1/coordinates".to_string(), delta.to_string())]);
+        let r = lint(&specs, &BTreeMap::new(), "");
+        assert_eq!(r.errors.len(), 1, "{:?}", r.errors);
+        assert!(r.errors[0].starts_with("COORD-003") && r.errors[0].contains("ADDED"), "{:?}", r.errors);
     }
 
     // spec: TEST-001
