@@ -1,0 +1,1 @@
+- 2026-10-26 **M8 criterion 7 floor** (owner): 200 m/s at 300 m, met in M8; faster is better, optimization is not deferred.

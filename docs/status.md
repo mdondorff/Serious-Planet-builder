@@ -22,7 +22,7 @@ Done before the reset (2026-10-23 and 24; M8-2 archived #621, chunk fade split i
 |---|---|---|
 | M8-R | Plausible relief (owner, 2026-10-25: plausible relief, hydrology and shadows in M8; realism of hill terrain later): the hill band and landform driver in the bake and the uplift that keeps relief in the coupled run (crusader), the field-side creases and bounds (explorer), one rebuild of bake, run, coarse horizon and chunks on `C:/DEV/SeriousPlanetData/global16384` | explorer, crusader |
 | M8-1 (c) rest | the run at 2048 from any bake is done (#638, GEN-056); its first make from the 16384 bake took 9,916 s, likely evaluating the field per vertex instead of reading stored samples: check and add a progress line; re-time the run on the real heights (margin 55 s); the key read of about 25M bake samples even when the run is stored; uplift and erodibility constant until the driver maps (ADR 0076); the K view is coarse (climate shading) | crusader, next (the rebuild re-runs the coupled make) |
-| M8-V | done: tile curve (#619); chunk curve (2026-10-26, viewer pools): floor 145, 95, 115, 115 m/s at 30, 100, 300, 1000 m; horizon jobs cost 15 % at 300 m (135 off) (`perf/logs/envelope.json`) | owner |
+| M8-V | floor 200 m/s at 300 m, met in M8 (owner, 2026-10-26); measured 145, 95, 115, 115 m/s at 30, 100, 300, 1000 m (viewer pools; 300 m horizon off 135; `perf/logs/envelope.json`) | crusader, explorer |
 | R4b | `GeoPoint::of_dir` and `dir` in `editor/polyline.rs` onto the core helpers | crusader, with M8-7 |
 
 Open owner items: the two flickers (Tracked) need a live check (editor off, debug path L, or a recording or F9 at the moment); P1-5 editing frame rate on a quiet machine; P2-8 missing tiles during an edit's refresh.
