@@ -950,3 +950,86 @@ fn the_drivers_of_a_ramp_do_not_change_at_the_cells_along_a_cube_face_edge() {
         assert!(worst <= 2, "{tile:?}: the codes at the edge differ from two cells in by {worst}");
     }
 }
+
+// spec: GEN-060
+#[test]
+fn the_valley_walls_rise_evenly_cell_to_cell_on_a_corridor_off_the_grid_axes() {
+    use planet_generators::anet::{paint_band, AnchorLaw, NO_NEXT};
+    use planet_generators::chunkfield::Cell;
+    // Cells of 38 m: a wall of a great river (valley depth at its cap) is then a dozen cells wide.
+    let lat = ChunkLattice::new(128).unwrap();
+    let cell_m = lat.cell_m(R);
+    let law = AnchorLaw::default();
+    let r = region(&lat, chunk(1003), 30);
+    let len = r.cells.len();
+    // A straight corridor at one step in j for two in i (26.6 degrees to the axes), through the middle of the chunk.
+    let (i0, j0) = (r.cells[0].i + 24, r.cells[0].j + 40);
+    let on_line = |k: u32| Cell { face: r.cells[0].face, i: i0 + k, j: j0 + k / 2 };
+    let (mut corridor, mut next, mut anchor_z) = (vec![false; len], vec![NO_NEXT; len], vec![f64::NAN; len]);
+    for k in 0..120 {
+        let (Some(c), Some(n)) = (r.index_of(on_line(k)), r.index_of(on_line(k + 1))) else { continue };
+        corridor[c] = true;
+        next[c] = n as u32;
+        anchor_z[c] = 250.0;
+    }
+    let dirs: Vec<Vec3> = r.cells.iter().map(|&c| lat.direction(c)).collect();
+    paint_band(&corridor, &vec![1.0e12; len], &vec![0.0; len], &mut anchor_z, &vec![300.0; len], &dirs, &r, R, &law);
+    // The middle of the wall is away from the channel, the floor's edge and the rim, whose slopes change by design. Along a wall of one side slope the
+    // slope per cell changes smoothly; a distance that gains unevenly per cell (a graph metric) alternates it from one cell to the next.
+    let mid = |x: usize| !corridor[x] && (260.0..290.0).contains(&anchor_z[x]);
+    let mut ratios: Vec<f64> = Vec::new();
+    for c in 0..r.core {
+        for (a, b) in [(0usize, 1usize), (2, 3)] {
+            let (p, q) = (r.neighbours[c][a] as usize, r.neighbours[c][b] as usize);
+            if p < len && q < len && mid(c) && mid(p) && mid(q) {
+                let (s1, s2) = ((anchor_z[c] - anchor_z[p]).abs() / cell_m, (anchor_z[q] - anchor_z[c]).abs() / cell_m);
+                if s1 > 0.02 && s2 > 0.02 {
+                    ratios.push((s1 / s2).max(s2 / s1));
+                }
+            }
+        }
+    }
+    ratios.sort_by(f64::total_cmp);
+    assert!(ratios.len() > 300, "wall triples compared: {}", ratios.len());
+    let p90 = ratios[((ratios.len() - 1) as f64 * 0.9) as usize];
+    eprintln!("triples {} p50 {} p90 {p90}", ratios.len(), ratios[ratios.len() / 2]);
+    assert!(p90 <= 1.2, "adjacent-cell slopes of the wall differ by {p90}x at the 90th percentile");
+}
+
+// spec: GEN-049, GEN-060
+#[test]
+fn the_band_of_a_core_cell_is_the_same_whatever_the_halo_with_two_corridors_off_the_grid_axes() {
+    use planet_generators::anet::{paint_band, AnchorLaw, NO_NEXT};
+    use planet_generators::chunkfield::Cell;
+    let lat = ChunkLattice::new(128).unwrap();
+    let law = AnchorLaw::default();
+    let painted = |halo: u16| {
+        let r = region(&lat, chunk(1003), halo);
+        let len = r.cells.len();
+        let origin = region(&lat, chunk(1003), 0).cells[0];
+        let (mut corridor, next, mut anchor_z) = (vec![false; len], vec![NO_NEXT; len], vec![f64::NAN; len]);
+        // Two corridors that run towards each other from opposite sides of the chunk, at 26.6 and at minus 18.4 degrees to the i axis.
+        for k in 0..200i64 {
+            for (i, j, bed) in [(-30 + k, 20 + k / 2, 250.0), (-30 + k, 110 - k / 3, 240.0)] {
+                let cell = Cell { face: origin.face, i: (i64::from(origin.i) + i) as u32, j: (i64::from(origin.j) + j) as u32 };
+                if let Some(c) = r.index_of(cell) {
+                    corridor[c] = true;
+                    anchor_z[c] = bed;
+                }
+            }
+        }
+        let dirs: Vec<Vec3> = r.cells.iter().map(|&c| lat.direction(c)).collect();
+        paint_band(&corridor, &vec![1.0e12; len], &vec![0.0; len], &mut anchor_z, &vec![300.0; len], &dirs, &r, R, &law);
+        (0..r.core).map(|c| (r.cells[c], anchor_z[c])).collect::<Vec<_>>()
+    };
+    let (small, large) = (painted(30), painted(45));
+    let large: std::collections::HashMap<_, _> = large.into_iter().map(|(c, z)| (c.key(), z)).collect();
+    let (mut differing, mut painted_cells) = (0, 0);
+    for (c, z) in &small {
+        let w = large[&c.key()];
+        painted_cells += usize::from(!z.is_nan());
+        differing += usize::from(z.to_bits() != w.to_bits());
+    }
+    assert!(painted_cells > 1000, "cells painted: {painted_cells}");
+    assert_eq!(differing, 0, "{differing} of {painted_cells} painted core cells differ between halo 30 and halo 45");
+}

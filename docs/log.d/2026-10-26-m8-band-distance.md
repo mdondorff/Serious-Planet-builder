@@ -1,0 +1,1 @@
+- 2026-10-26 **m8-band-distance**: the valley band's distance is Euclidean to the owning source (vector transform), not a graph sum: the wall's per-cell slope no longer alternates 0.082/0.158 (GEN-060, ANET_VERSION 9).
