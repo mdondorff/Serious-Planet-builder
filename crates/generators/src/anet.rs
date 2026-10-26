@@ -689,7 +689,7 @@ pub struct ReadDisc {
 /// - The network: the segments the region reads and the pruning keeps (GEN-078), each with the chain upstream of it along the main stem up to
 ///   `law.window` back, the chain downstream of it up to `law.window` on (a bed is held under the stem it meets), and the chain upstream of the main
 ///   donor at every cell of the downstream chain (the confluence); every segment as discs along its chord (nine points) of the radius of
-///   `routing_reach_m` and the half step between them.
+///   `routing_reach_m` and the half step between them, and the eight neighbours of every cell of those segments (the relief factor of a start cell).
 pub fn chunk_read_set(run: &dyn CoarseRun, lat: &ChunkLattice, region: &Region, radius_m: f64, law: &AnchorLaw) -> Vec<ReadDisc> {
     let coarse = run.lattice();
     let dirs: Vec<Vec3> = region.cells.iter().map(|&c| lat.direction(c)).collect();
@@ -736,6 +736,12 @@ pub fn chunk_read_set(run: &dyn CoarseRun, lat: &ChunkLattice, region: &Region, 
             let p = (a * (1.0 - f64::from(k) / 8.0) + b * (f64::from(k) / 8.0)).normalized();
             discs.push(ReadDisc { centre: p, angle: reach_rad + half_step_rad + 1.0e-9 });
         }
+    }
+    // The relief factor of a segment's start cell reads the base at the cell's centre and its eight neighbours (coarse spacing).
+    let cells: BTreeSet<usize> = all.iter().flat_map(|&(from, to)| [from, to]).collect();
+    let ring: BTreeSet<usize> = cells.iter().flat_map(|&c| coarse.neighbours(c).into_iter().map(|x| x as usize)).collect();
+    for c in ring {
+        discs.push(ReadDisc { centre: coarse.direction(c), angle: reach_rad + 1.0e-9 });
     }
     discs
 }

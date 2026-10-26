@@ -758,15 +758,16 @@ fn an_item_outside_the_read_set_changes_no_bit_of_a_chunk_and_one_inside_does() 
     use planet_generators::anet::chunk_read_set;
     use planet_generators::route::RouteMemo;
     let lat = ChunkLattice::new(32).unwrap();
-    let law = stride_law(4);
     let bits = |n: &Network| {
         let z: Vec<u64> = n.anchor_z.iter().map(|z| z.to_bits()).collect();
         let a: Vec<u64> = n.river_area_m2.iter().map(|a| a.to_bits()).collect();
         let inflow: Vec<u64> = n.inflow_m2.iter().map(|a| a.to_bits()).collect();
         (z, a, inflow, n.corridor.clone(), n.next.clone())
     };
+    // The default window and a short one (3 segments back): a bump beyond the short window must change nothing.
+    let short = planet_generators::anet::AnchorLaw { window: 3, ..stride_law(4) };
     let (bump_m, mut changed_inside, mut tested_outside) = (300.0, 0, 0);
-    for x in [1003u32, 1006] {
+    for (x, law) in [(1003u32, stride_law(4)), (1006, stride_law(4)), (1008, short.clone()), (1004, short)] {
         let r = region(&lat, chunk(x), 40);
         let discs = chunk_read_set(&Fork, &lat, &r, R, &law);
         // The set is a function of the chunk, the run and the law only: the same twice.
