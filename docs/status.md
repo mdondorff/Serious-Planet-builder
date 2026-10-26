@@ -27,7 +27,7 @@ Done before the reset (2026-10-23 and 24; M8-2 archived #621, chunk fade split i
 Open owner items: the two flickers (Tracked) need a live check (editor off, debug path L, or a recording or F9 at the moment); P1-5 editing frame rate on a quiet machine; P2-8 missing tiles during an edit's refresh.
 
 ## Tracked
-- **GEN-052 chunk time open** (stays `planned`, Verify C): 2026-10-26 on the production store, one thread: 8 m 7.0 s (base heights 4.46 s, routing 0.32); `m8-base-gather` takes the footprint pass out (about 5 s); the 4 s now counts on the production threads: `perf anet-chunk --store`.
+- **GEN-052 met, window 2026-10-26** (production store, `perf anet-chunk --store`): 8 m 3.33 / 3.30 s on 4 threads, 5.27 / 5.35 s on one; 4 m 14.8 / 14.6 s; 10 m 2.14 / 2.11 s. Next window: repeat after any change to the base field or the routing.
 - **Driver fade seam** (#716): a tile rebuilt for a neighbour chunk's landing fades its drivers up from neutral again. Trigger: the first look with driver curves. Fix: a driver increment plane on the upload path (crusader). Resolution: 32 m texels (GEN-074); M9: per-vertex.
 - **Steepest river and the 3e7 m2 drop**: at (34.158, 140.835) 519 of 1,344 links climb and 3,491 cells sit at the 300 m bound: the coarse network climbs beyond a 1 km node slide (M9, coarse run). A 3e7 m2 tributary threshold gave a 27.8 m drop; the stage uses 5e7.
 - **Deep cut where the ground along the routed path rises** (river-r1, look review 2): a 40-50 m canyon on a plain, the routed ground +15 m over 3 km, the bed at the least fall (GEN-059); a cut-cap change trades it for a dam (GEN-069). Fix with the M9 coarse/fine network work.
