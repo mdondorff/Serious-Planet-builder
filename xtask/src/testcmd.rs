@@ -817,7 +817,7 @@ fn perf_stream_args(args: &[String]) -> Result<Vec<String>, String> {
     while let Some(a) = it.next() {
         match a.as_str() {
             "--smoke" => smoke = true,
-            "--machine-ready" | "--allow-memory-bake" | "--lit" => tail.push(a.clone()),
+            "--machine-ready" | "--allow-memory-bake" | "--lit" | "--no-chunks" => tail.push(a.clone()),
             "--store" | "--global-res" | "--out" | "--upload" | "--prefill-levels" | "--gen-workers" | "--gen-ahead" | "--gen-reserve" | "--gen-priority" | "--settle-ms" | "--share-bound" => {
                 let value = it.next().ok_or_else(|| format!("{a} needs a value"))?;
                 tail.push(a.clone());
