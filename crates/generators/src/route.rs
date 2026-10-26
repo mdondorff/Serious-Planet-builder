@@ -45,6 +45,8 @@ pub struct RouteMemo {
     nodes: Mutex<BTreeMap<usize, Vec3>>,
     reliefs: Mutex<BTreeMap<usize, f64>>,
     lines: Mutex<BTreeMap<(usize, usize), Polyline>>,
+    /// The routed polylines before smoothing (GEN-084), by segment.
+    raw: Mutex<BTreeMap<(usize, usize), Polyline>>,
     /// The base heights at the raster points routed over so far, by lattice point (GEN-077): each value is the base field's height at the direction of
     /// the point, whichever chunk, thread or batch asked, so a hit is the value a miss would compute, bit for bit.
     heights: Mutex<HashMap<u64, f64>>,
@@ -73,6 +75,8 @@ impl RouteMemo {
                 law.head_m.to_bits(),
                 law.river_area_m2.to_bits(),
                 law.relief_full_m.to_bits(),
+                law.smooth_m.to_bits(),
+                law.smooth_max_m.to_bits(),
             ],
         );
         let mut current = self.law_key.lock().expect("memo");
@@ -81,6 +85,7 @@ impl RouteMemo {
             self.nodes.lock().expect("memo").clear();
             self.reliefs.lock().expect("memo").clear();
             self.lines.lock().expect("memo").clear();
+            self.raw.lock().expect("memo").clear();
         }
     }
 
@@ -91,7 +96,7 @@ impl RouteMemo {
 
     /// The segments the memo holds a routed polyline for.
     pub fn routed_segments(&self) -> usize {
-        self.lines.lock().expect("memo").len()
+        self.raw.lock().expect("memo").len()
     }
 
     /// The points the memo of raster heights holds.
@@ -272,9 +277,50 @@ impl<'a> Router<'a> {
         dirs[best]
     }
 
-    /// The polyline of the coarse segment `from` to `to`: the first point is the node of `from`, the last the node of `to`.
+    /// The coarse cells that drain into `c` through a river segment.
+    fn donors(&self, c: usize) -> Vec<usize> {
+        let coarse = self.run.lattice();
+        coarse
+            .neighbours(c)
+            .into_iter()
+            .map(|x| x as usize)
+            .filter(|&x| x < coarse.len() && self.is_river(x) && self.run.receiver(x) as usize == c)
+            .collect()
+    }
+
+    /// The polyline of the coarse segment `from` to `to`: the first point is near the node of `from`, the last near the node of `to` (GEN-084: the
+    /// routed path averaged with the paths it continues from and into; a joint where the river continues through a node is smoothed from both sides,
+    /// a source, a confluence and an outlet keep their node). A function of the segment alone, so two chunks that see it find the same polyline.
     pub fn polyline(&self, from: usize, to: usize) -> Polyline {
+        if self.law.smooth_m <= 0.0 || !self.enabled() {
+            return self.raw_polyline(from, to);
+        }
         if let Some(l) = self.memo.lines.lock().expect("memo").get(&(from, to)) {
+            return Arc::clone(l);
+        }
+        let own = self.raw_polyline(from, to);
+        let donors = self.donors(from);
+        let prev = (donors.len() == 1).then(|| self.raw_polyline(donors[0], from));
+        let next = (self.is_river(to) && self.donors(to).len() == 1).then(|| self.raw_polyline(to, self.run.receiver(to) as usize));
+        let line = Arc::new(smooth_chain(
+            prev.as_deref().map(Vec::as_slice),
+            &own,
+            next.as_deref().map(Vec::as_slice),
+            self.radius_m,
+            self.law.smooth_m,
+            self.law.smooth_max_m,
+        ));
+        let mut lines = self.memo.lines.lock().expect("memo");
+        if lines.len() >= MEMO_SEGMENTS {
+            lines.clear();
+        }
+        lines.insert((from, to), Arc::clone(&line));
+        line
+    }
+
+    /// The routed polyline of the coarse segment `from` to `to` before smoothing: the first point is the node of `from`, the last the node of `to`.
+    pub fn raw_polyline(&self, from: usize, to: usize) -> Polyline {
+        if let Some(l) = self.memo.raw.lock().expect("memo").get(&(from, to)) {
             return Arc::clone(l);
         }
         let coarse = self.run.lattice();
@@ -290,11 +336,11 @@ impl<'a> Router<'a> {
             }
         };
         let line = Arc::new(line);
-        let mut lines = self.memo.lines.lock().expect("memo");
-        if lines.len() >= MEMO_SEGMENTS {
-            lines.clear();
+        let mut raw = self.memo.raw.lock().expect("memo");
+        if raw.len() >= MEMO_SEGMENTS {
+            raw.clear();
         }
-        lines.insert((from, to), Arc::clone(&line));
+        raw.insert((from, to), Arc::clone(&line));
         line
     }
 
@@ -424,4 +470,125 @@ impl<'a> Router<'a> {
         out.push(last);
         out
     }
+}
+
+/// Samples of each side of the tent filter of [`smooth_chain`].
+const SMOOTH_TAPS: i64 = 8;
+
+/// The points of `own` moved to the average of the chain `prev` ++ `own` ++ `next` over a tent of half width `smooth_m` metres along it (GEN-084). `prev`
+/// is the polyline of the segment `own` continues from and `next` of the one it continues into (the last point of `prev` and the first of `next` are the
+/// ends of `own`); `None` is a river that begins, ends or meets another here, whose end stays where it is: the move fades to zero over `smooth_m` of
+/// path towards it. A point moves at most `max_m`. The result of a point depends on the chain within `smooth_m` of it only, so the two segments of a joint
+/// that continues through find the same point. A chain end is extended by its end point.
+pub fn smooth_chain(prev: Option<&[Vec3]>, own: &[Vec3], next: Option<&[Vec3]>, radius_m: f64, smooth_m: f64, max_m: f64) -> Vec<Vec3> {
+    if own.len() < 2 || smooth_m <= 0.0 {
+        return own.to_vec();
+    }
+    let mut chain: Vec<Vec3> = Vec::with_capacity(own.len() + prev.map_or(0, <[Vec3]>::len) + next.map_or(0, <[Vec3]>::len));
+    if let Some(p) = prev {
+        chain.extend_from_slice(&p[..p.len().saturating_sub(1)]);
+    }
+    let first = chain.len();
+    chain.extend_from_slice(own);
+    let last = chain.len() - 1;
+    if let Some(n) = next {
+        chain.extend_from_slice(n.get(1..).unwrap_or(&[]));
+    }
+    let mut s = vec![0.0f64; chain.len()];
+    for k in 1..chain.len() {
+        s[k] = s[k - 1] + (chain[k] - chain[k - 1]).length() * radius_m;
+    }
+    let at = |x: f64| -> Vec3 {
+        if x <= s[0] {
+            return chain[0];
+        }
+        if x >= s[s.len() - 1] {
+            return chain[chain.len() - 1];
+        }
+        let k = s.partition_point(|&v| v <= x).clamp(1, s.len() - 1);
+        let span = s[k] - s[k - 1];
+        let t = if span > 0.0 { (x - s[k - 1]) / span } else { 0.0 };
+        chain[k - 1] * (1.0 - t) + chain[k] * t
+    };
+    // A segment shorter than the filter would read past its neighbour: not a river of this lattice (a coarse cell is kilometres).
+    debug_assert!(
+        (prev.is_none() && next.is_none()) || s[last] - s[first] >= smooth_m,
+        "a segment of {} m is shorter than the smoothing's {smooth_m} m",
+        s[last] - s[first]
+    );
+    let h = smooth_m / SMOOTH_TAPS as f64;
+    let mut out = Vec::with_capacity(own.len());
+    for k in first..=last {
+        let mut sum = Vec3::new(0.0, 0.0, 0.0);
+        for m in -SMOOTH_TAPS..=SMOOTH_TAPS {
+            sum = sum + at(s[k] + m as f64 * h) * ((SMOOTH_TAPS + 1 - m.abs()) as f64);
+        }
+        let target = sum.normalized();
+        let raw = chain[k];
+        let mut fade = 1.0f64;
+        if prev.is_none() {
+            fade = fade.min(((s[k] - s[first]) / smooth_m).clamp(0.0, 1.0));
+        }
+        if next.is_none() {
+            fade = fade.min(((s[last] - s[k]) / smooth_m).clamp(0.0, 1.0));
+        }
+        let mut v = (target - raw) * fade;
+        let moved_m = v.length() * radius_m;
+        if moved_m > max_m {
+            v = v * (max_m / moved_m);
+        }
+        out.push((raw + v).normalized());
+    }
+    // The joint with a neighbour: from the points around it, measured from it, whichever segment asks, so both segments put it at the same bits.
+    if next.is_some() {
+        if let (Some(n), Some(l)) = (next, out.last_mut()) {
+            *l = joint_point(own.iter().rev().copied(), n.iter().copied(), radius_m, smooth_m, max_m);
+        }
+    }
+    if let (Some(p), Some(f)) = (prev, out.first_mut()) {
+        *f = joint_point(p.iter().rev().copied(), own.iter().copied(), radius_m, smooth_m, max_m);
+    }
+    out
+}
+
+/// The smoothed point at a joint: `back` runs from the joint backwards along one segment, `ahead` from the joint forwards along the next (both start with
+/// the joint). The tent average of the two arms, arclength measured from the joint outward, moved at most `max_m` from the joint.
+fn joint_point(back: impl Iterator<Item = Vec3>, ahead: impl Iterator<Item = Vec3>, radius_m: f64, smooth_m: f64, max_m: f64) -> Vec3 {
+    // One arm as points with their distance from the joint, as far as the filter reaches.
+    let arm = |points: &mut dyn Iterator<Item = Vec3>| -> (Vec<Vec3>, Vec<f64>) {
+        let (mut pts, mut dist): (Vec<Vec3>, Vec<f64>) = (Vec::new(), Vec::new());
+        for p in points {
+            let d = pts.last().map_or(0.0, |&q: &Vec3| dist[dist.len() - 1] + (p - q).length() * radius_m);
+            pts.push(p);
+            dist.push(d);
+            if d >= smooth_m {
+                break;
+            }
+        }
+        (pts, dist)
+    };
+    let (mut back, mut ahead) = (back, ahead);
+    let (bp, bd) = arm(&mut back);
+    let (ap, ad) = arm(&mut ahead);
+    let joint = ap[0];
+    let along = |pts: &[Vec3], dist: &[f64], x: f64| -> Vec3 {
+        if x >= dist[dist.len() - 1] {
+            return pts[pts.len() - 1];
+        }
+        let k = dist.partition_point(|&v| v <= x).clamp(1, dist.len() - 1);
+        let span = dist[k] - dist[k - 1];
+        let t = if span > 0.0 { (x - dist[k - 1]) / span } else { 0.0 };
+        pts[k - 1] * (1.0 - t) + pts[k] * t
+    };
+    let h = smooth_m / SMOOTH_TAPS as f64;
+    let mut sum = Vec3::new(0.0, 0.0, 0.0);
+    for m in -SMOOTH_TAPS..=SMOOTH_TAPS {
+        let x = m.abs() as f64 * h;
+        let q = if m < 0 { along(&bp, &bd, x) } else { along(&ap, &ad, x) };
+        sum = sum + q * ((SMOOTH_TAPS + 1 - m.abs()) as f64);
+    }
+    let v = sum.normalized() - joint;
+    let moved_m = v.length() * radius_m;
+    let v = if moved_m > max_m { v * (max_m / moved_m) } else { v };
+    (joint + v).normalized()
 }
