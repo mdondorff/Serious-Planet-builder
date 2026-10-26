@@ -705,7 +705,8 @@ pub fn chunk_read_set(run: &dyn CoarseRun, lat: &ChunkLattice, region: &Region, 
     let mut all: BTreeSet<(usize, usize)> = kept.clone();
     let upstream_of = |all: &mut BTreeSet<(usize, usize)>, from: usize| {
         let mut at = from;
-        for _ in 0..law.window {
+        // `window + 1` segments: the confluence chain of `anchor_profiles` is the segment into the cell and `window` more upstream of its donor.
+        for _ in 0..=law.window {
             match main_donor_of(run, &is_river, at) {
                 Some(d) => {
                     all.insert((d, at));
