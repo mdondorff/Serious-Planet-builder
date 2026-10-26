@@ -885,6 +885,18 @@ impl ManagedLoop {
         // The weights of the landed chunks' fade (STRM-047): each node takes the minimum over the chunks it reads; 1 without a fade or a view.
         if let (Some(view), Some((fade, clock))) = (self.chunk_view.as_deref(), self.chunk_fade.as_mut()) {
             let now = clock.now_ms();
+            // The clock of a published chunk starts when no tile the plan draws and that read the chunk before its landing is still to be rebuilt
+            // (STRM-052): readers that are not drawn do not hold it, a real flight rebuilds hundreds of tiles over seconds.
+            if !self.pending_readers.is_empty() {
+                let drawn: HashSet<TileId> = pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
+                let free: Vec<_> =
+                    self.pending_readers.iter().filter(|(_, (readers, _))| readers.is_disjoint(&drawn)).map(|(k, _)| *k).collect();
+                for k in free {
+                    self.pending_readers.remove(&k);
+                    fade.shown(k, now);
+                    self.started_keys.push((k, now));
+                }
+            }
             for n in &mut pipeline.draw.plan.nodes {
                 n.chunk_weight = self.stale_weights.get(&n.tile).copied().unwrap_or_else(|| fade.tile_weight(view, n.tile, now));
             }
