@@ -127,3 +127,12 @@ Scope: m8-chunk-fade (REND-039, STRM-047), criterion 3 of M8; app::globalperf `a
 - The screen numbers are computed from the field and the camera geometry; no rendered frame measures the pixel step.
 - Tool: `PLANET_ANET_STORE=DIR PLANET_ANET_RES=N PLANET_ANET_MIN_HEIGHT_M=150 cargo test -p planet --release --lib anet_steps_report -- --ignored --nocapture` (read only).
 - Obsolete when the criterion is judged on rendered frames of the fade (look review 2).
+
+## 2026-10-26 Sequential fade epochs do not survive a real flight: the rebuild of the tiles under a landing takes seconds
+Scope: m8-chunk-fade (STRM-052, STRM-053), the closed `m8-chunk-fade-publish` (branch `change/m8-chunk-fade-publish-impl`, PR #714 closed); app::window, frame::managed
+- The idea: publish landed chunks to the tile pipeline one fade at a time, so a tile never sees two fades (the crack of overlapping landings, numerics review of #711). The gate, its queue, the fresh-tile wait and the 5 s fallback were built and tested on the fake clock.
+- The real window, the gate on, the shared store (RTX 3080 Ti), the scripted orbit to 1 m flight repeated, two attempts. All resident readers rebuilt before the clock: 14 forced publications in 3 min (11 by the readers' timeout), longest landing to drawn 80 s, 133 to 295 tiles deferred. Only the plan's drawn readers: 12 and 14 forced in 4.5 min (10 and 13 timeouts), longest 10 s and 40 s, 352 and 174 tiles deferred. Frames over 1 s: 0 in both.
+- Cause: in a real flight the refresh of the hundreds of tiles that read a landed chunk shares the streamer's workers with the new tiles of the descent and takes seconds, not the dozen frames of the test rig. A rule that waits for it before the next epoch makes the 5 s fallback the normal path.
+- The same latency is in the merged fade: a chunk's change is drawn only when the tiles that read it are rebuilt; the clock of #711 waits for the stale tiles that are drawn.
+- Tool: `PublishStats` on the closed branch (title, stall report, log line every 10 s with what forced a publication).
+- Obsolete when the tile rebuild after a landing is fast enough (a priority for refreshes of drawn tiles, or the increment on the CPU without a rebuild).
