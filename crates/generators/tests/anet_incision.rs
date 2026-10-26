@@ -232,7 +232,8 @@ fn a_chunk_of_the_synthetic_scene_keeps_its_known_answer() {
 }
 
 // Re-pinned 2026-10-25 by `m8-local-routing` (GEN-066, GEN-059, declared): the stage routes the corridor over the ground and the bed follows the ground; ANET_VERSION 6.
-const KNOWN_ANSWER: u64 = 12_151_146_585_865_702_238;
+// Re-pinned 2026-10-26 by `m8-routing-cost` (GEN-066, declared): the routing raster stride 4 to 8 (the stage's parameter); the pruning and the memos change no bit (the old answer held with stride 4).
+const KNOWN_ANSWER: u64 = 13_218_121_145_527_202_790;
 
 /// A gentle valley along the river (slope 0.001, below the breach slope) plus a little noise: every stream runs to the river.
 struct Plane;

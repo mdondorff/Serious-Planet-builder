@@ -1,6 +1,7 @@
 //! GEN-047: the global network in the chunk raster: one corridor path for neighbouring chunks, zero meander at the coarse cell centres,
 //! inflow where a river enters the region, and initial heights from the run plus the base's detail.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 
 use planet_core::cube::TangentWarp;
@@ -580,4 +581,153 @@ fn chunks_built_at_once_on_several_threads_through_one_stage_memo_equal_fresh_bu
         handles.into_iter().map(|h| h.join().expect("a thread")).collect()
     });
     assert_eq!(shared, fresh, "chunks built concurrently through one memo differ from fresh builds");
+}
+
+/// A base that counts the directions it is asked for (the raster of the routing reads it only where the region and the memo do not).
+struct Counting(AtomicUsize);
+
+impl BaseDetail for Counting {
+    fn base_height(&self, dir: Vec3) -> f64 {
+        self.0.fetch_add(1, Ordering::Relaxed);
+        Ridge.base_height(dir)
+    }
+    fn coarse_input(&self, dir: Vec3) -> f64 {
+        Ridge.coarse_input(dir)
+    }
+    fn identity(&self) -> u64 {
+        Ridge.identity()
+    }
+}
+
+fn stride_law(stride: u32) -> planet_generators::anet::AnchorLaw {
+    let mut law = routed_law();
+    law.route_stride = stride;
+    law.slide_m = 400.0;
+    law.slide_steep_m = 400.0;
+    law
+}
+
+// spec: GEN-077
+#[test]
+fn the_routing_reads_the_regions_heights_and_the_memo_and_evaluates_only_the_rest_with_the_bits_of_evaluating_everything() {
+    use planet_generators::route::{RouteMemo, Router};
+    let lat = ChunkLattice::new(32).unwrap();
+    for stride in [1u32, 4] {
+        let law = stride_law(stride);
+        // A router that reads the base at every raster point (no region heights, no memo) against one that reads the region's heights.
+        let ra = region(&lat, chunk(1002), 40);
+        let dirs: Vec<Vec3> = ra.cells.iter().map(|&c| lat.direction(c)).collect();
+        let heights = Ridge.base_heights(&dirs);
+        let plain_memo = RouteMemo::with_height_cap(0);
+        let plain = Router::new(&River(1000), &Ridge, &lat, R, &law, &plain_memo);
+        let known_memo = RouteMemo::default();
+        let known = Router::new(&River(1000), &Ridge, &lat, R, &law, &known_memo).with_known(&ra, &heights);
+        let c = FACE * N * N + 1000 * N + 1002;
+        for (from, to) in [(c - 1, c), (c, c + 1), (c + 1, c + 2)] {
+            let (a, b) = (plain.polyline(from, to), known.polyline(from, to));
+            assert_eq!(a.len(), b.len(), "stride {stride}: the path differs in length");
+            assert!(
+                a.iter().zip(b.iter()).all(|(p, q)| p == q),
+                "stride {stride}: the path differs from the one that evaluates every point"
+            );
+        }
+        let [from_region, from_memo, evaluated] = known_memo.raster_counts();
+        let [_, _, plain_evaluated] = plain_memo.raster_counts();
+        assert!(from_region > 0, "stride {stride}: no raster point read the region's heights");
+        assert_eq!(from_region + from_memo + evaluated, plain_evaluated, "stride {stride}: every raster point is served once");
+        assert!(evaluated < plain_evaluated, "stride {stride}: {evaluated} of {plain_evaluated} points still evaluated");
+    }
+}
+
+// spec: GEN-077
+#[test]
+fn chunks_have_the_same_bits_with_the_memo_cold_warm_filled_in_another_order_or_capped_at_one_and_eight_workers() {
+    use planet_generators::route::RouteMemo;
+    let lat = ChunkLattice::new(32).unwrap();
+    let law = stride_law(4);
+    let chunks: Vec<u32> = (1001..=1008).collect();
+    let bits = |n: &Network| n.anchor_z.iter().map(|z| z.to_bits()).collect::<Vec<u64>>();
+    let build = |x: u32, memo: &RouteMemo| {
+        let base = Counting(AtomicUsize::new(0));
+        let net = Network::build_with_memo(&Fork, &base, &lat, &region(&lat, chunk(x), 40), R, &law, memo);
+        (bits(&net), base.0.load(Ordering::Relaxed))
+    };
+    // Cold: a fresh memo for every chunk.
+    let cold: Vec<Vec<u64>> = chunks.iter().map(|&x| build(x, &RouteMemo::default()).0).collect();
+    // Warm and in reverse order: one memo, the chunks in reverse order, then again (the second time every raster point from the memo).
+    let memo = RouteMemo::default();
+    let reversed: Vec<Vec<u64>> = chunks.iter().rev().map(|&x| build(x, &memo).0).collect::<Vec<_>>().into_iter().rev().collect();
+    assert_eq!(reversed, cold, "the memo filled in reverse order changes a chunk");
+    let evaluated_once = memo.raster_counts()[2];
+    let again: Vec<Vec<u64>> = chunks.iter().map(|&x| build(x, &memo).0).collect();
+    assert_eq!(again, cold, "a warm memo changes a chunk");
+    assert_eq!(memo.raster_counts()[2], evaluated_once, "the warm builds still evaluated raster points");
+    // Capped far under what the chunks read: the memo clears and refills, and never holds more than the cap.
+    let capped = RouteMemo::with_height_cap(500);
+    let through_cap: Vec<Vec<u64>> = chunks.iter().map(|&x| build(x, &capped).0).collect();
+    assert_eq!(through_cap, cold, "a memo that clears often changes a chunk");
+    assert!(capped.raster_heights_held() <= 500, "the memo holds {} heights over its cap of 500", capped.raster_heights_held());
+    // One and eight workers through one memo.
+    for workers in [1usize, 8] {
+        let shared = RouteMemo::default();
+        let next = AtomicUsize::new(0);
+        let results = std::sync::Mutex::new(vec![Vec::new(); chunks.len()]);
+        std::thread::scope(|scope| {
+            for _ in 0..workers {
+                scope.spawn(|| loop {
+                    let k = next.fetch_add(1, Ordering::SeqCst);
+                    if k >= chunks.len() {
+                        break;
+                    }
+                    let b = build(chunks[k], &shared).0;
+                    results.lock().expect("results")[k] = b;
+                });
+            }
+        });
+        assert_eq!(results.into_inner().expect("results"), cold, "{workers} workers through one memo change a chunk");
+    }
+}
+
+// spec: GEN-078
+#[test]
+fn a_chunk_routes_only_the_segments_that_can_reach_its_region_and_has_the_bits_of_routing_them_all() {
+    use planet_generators::route::RouteMemo;
+    let lat = ChunkLattice::new(32).unwrap();
+    let bits = |n: &Network| {
+        let z: Vec<u64> = n.anchor_z.iter().map(|z| z.to_bits()).collect();
+        let a: Vec<u64> = n.river_area_m2.iter().map(|a| a.to_bits()).collect();
+        let inflow: Vec<u64> = n.inflow_m2.iter().map(|a| a.to_bits()).collect();
+        (z, a, inflow, n.corridor.clone(), n.next.clone())
+    };
+    let (mut pruned_total, mut all_total) = (0, 0);
+    for law in [stride_law(1), stride_law(4), planet_generators::anet::AnchorLaw::default()] {
+        for x in 1001..=1008u32 {
+            for halo in [10u16, 40] {
+                let r = region(&lat, chunk(x), halo);
+                let (m_pruned, m_all) = (RouteMemo::default(), RouteMemo::default());
+                let pruned = Network::build_with_memo(&Fork, &Ridge, &lat, &r, R, &law, &m_pruned);
+                let all = Network::build_unpruned(&Fork, &Ridge, &lat, &r, R, &law, &m_all);
+                assert_eq!(bits(&pruned), bits(&all), "chunk {x}, halo {halo}, stride {}: pruning changed the network", law.route_stride);
+                assert!(m_pruned.routed_segments() <= m_all.routed_segments());
+                pruned_total += m_pruned.routed_segments();
+                all_total += m_all.routed_segments();
+            }
+        }
+    }
+    assert!(pruned_total < all_total, "pruning saved nothing: {pruned_total} of {all_total} segments routed");
+}
+
+// spec: GEN-078
+#[test]
+fn the_reach_of_a_routed_path_covers_the_charts_stretch_at_a_cube_corner() {
+    use planet_generators::anet::{routing_reach_m, AnchorLaw};
+    // The production law: band 1 km, slide and head 1 km, 8 m cells at stride 8. The equal-angle chart stretches a grid step by 2/sqrt(3) at a cube corner,
+    // so the band disc and the slide disc reach 1.1547 km there along the diagonal, and the meander (700 m, true metres) adds to both.
+    let law =
+        AnchorLaw { route_band_m: 1000.0, slide_m: 500.0, slide_steep_m: 1000.0, head_m: 1000.0, route_stride: 8, ..AnchorLaw::default() };
+    let worst = 2.0 / 3.0f64.sqrt() * (1000.0 + 1000.0) + planet_generators::anet::MEANDER_M + 2.0 * 64.0;
+    assert!(routing_reach_m(&law, 8.0) >= worst, "the reach {} m is under the corner's {worst} m", routing_reach_m(&law, 8.0));
+    // Without routing nothing but the meander (and the raster's rounding) is left.
+    let off = AnchorLaw { route_band_m: 0.0, slide_m: 0.0, slide_steep_m: 0.0, head_m: 0.0, ..AnchorLaw::default() };
+    assert!(routing_reach_m(&off, 8.0) >= planet_generators::anet::MEANDER_M);
 }
