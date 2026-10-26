@@ -227,6 +227,8 @@ struct Running {
     stall: crate::stall::StallProbe,
     /// What the scheduler counted in the last frame, for a stall report.
     last_counts: planet_frame::managed::FrameCounts,
+    /// The job log index and the time of the last refresh line (STRM-055).
+    refresh_logged: (usize, u64),
     last_ms: Option<u64>,
     last_gpu_sample: Instant,
     gpu_ms: Option<f64>,
@@ -449,6 +451,7 @@ impl App<'_> {
             stats: FrameStats::new(now, if cfg.smoke { SMOKE_TITLE_PERIOD_MS } else { TITLE_PERIOD_MS }),
             stall: Default::default(),
             last_counts: Default::default(),
+            refresh_logged: (0, 0),
             last_ms: None,
             last_gpu_sample: Instant::now(),
             gpu_ms: None,
@@ -735,6 +738,16 @@ impl App<'_> {
                 let update = self.world.chunk_frame(&tiles, camera.position, &[]);
                 st.rig.managed.chunk_landed(&update.landed);
                 st.rig.managed.chunk_evicted(&update.evicted);
+                // One line every 10 s about the refresh jobs since the last: the wait in the queues and the load of the rebuilds that bring a landed
+                // chunk's change to the screen (STRM-055).
+                if now_ms >= st.refresh_logged.1 + 10_000 {
+                    let log = st.rig.managed.manager().streamer().job_log();
+                    let samples = log.since(st.refresh_logged.0);
+                    st.refresh_logged = (st.refresh_logged.0 + samples.len(), now_ms);
+                    if let Some(line) = planet_streaming::refresh_summary(&samples) {
+                        crate::crash::note(&line);
+                    }
+                }
             }
             // A refusal of the plan for the base parameters degrades the frame (it draws the newest plan in hand); it is said once, never fatal.
             // One line, one report file and one title notice per cause (kind and level) in 5 s; the title counts all of them.
