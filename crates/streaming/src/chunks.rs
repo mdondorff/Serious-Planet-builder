@@ -391,6 +391,11 @@ pub trait HorizonBaker: Send + Sync {
     fn bake(&self, key: ChunkKey, ready: &[(ChunkKey, Arc<ChunkResult>)]) -> Vec<u8>;
     /// A hash of everything that defines the march (texel, azimuths, range, version): a change re-keys every stored map.
     fn spec_hash(&self) -> u64;
+    /// A word that differs when an edit can change the heights the horizon of `key` samples (the items that touch the chunk and its halo, GEN-082),
+    /// 0 for none: the map of a chunk no edit reaches is not baked again (STRM-048). Default 0: a baker whose field never changes.
+    fn edit_word(&self, _key: ChunkKey) -> u64 {
+        0
+    }
 }
 
 /// The disk side of the horizon cache: a map by its tile and its state word (the march and the results of the chunk and of the neighbours it
@@ -483,6 +488,7 @@ impl HorizonJobs {
     /// The state word of the horizon of `key` now: the march, and the result of every chunk it reads (0 for one that is not ready).
     fn word(&self, key: ChunkKey) -> u64 {
         let mut h = planet_core::hash::mix64(self.baker.spec_hash() ^ 0x484f_5249_5a4f_4e00);
+        h = planet_core::hash::mix64(h ^ self.baker.edit_word(key));
         for r in self.baker.reads(key) {
             h = planet_core::hash::mix64(h ^ self.chunks.result_hash(r).unwrap_or(0));
         }

@@ -45,7 +45,7 @@ flowchart TB
   end
   subgraph TILE["Per tile, on demand, on a streamer worker"]
     ST --> BF["base field"]
-    BF -.-> P["chunk erosion along the river network; before or after the edits: D3, section 6"]
+    BF -.-> P["chunk erosion along the river network; after the edits by default: D3, section 6"]
     BF --> SS["stamp stages: the items"]
     P -.-> SS
     SS --> CT["compact tile"] --> PK["tile pack cache"]
@@ -147,12 +147,13 @@ The editor changes items in the WorldDefinition; the keys of the tiles those ite
 | Per frame, GPU | morph, lighting, materials, ground detail, atmosphere, water | yes |
 | Editor only | commands and undo, preview stamps, hover and drag picking, problems list, regions overlay, edit markers | no |
 
-## 6. Where an edit sits relative to erosion (open for M8, decision D3)
-Today the chain is `base field (bake + erosion creases) -> stamp stages (edits)`: edits are added on top of an eroded ground and nothing erodes them. M8 inserts a chunk stage. Its place decides D3:
+## 6. Where an edit sits relative to erosion (decision D3, owner 2026-10-26)
+The chain is `base field (bake) -> stamp stages (edits) -> chunk stage (erosion along the river network)` by default (`Under`, GEN-039). The chunk stage's place was decision D3:
 | Order | Effect |
 |---|---|
 | `bake -> chunk erosion -> edits` | an edit is a shape on top of eroded ground: instant, but never weathered |
 | `bake -> edits -> chunk erosion` | an edit is weathered like the land around it: rivers cut through it; each edit re-runs its chunks (seconds) |
+Chosen: the second row is the default (`Under`); `OnTop` stays a per-layer setting. The chunks an edit re-keys are those whose read set it touches (GEN-081, GEN-082).
 
 ## 7. Keeping it current
 - An ADR, spec or change that adds, renames or retires a term updates this file in the same PR.
