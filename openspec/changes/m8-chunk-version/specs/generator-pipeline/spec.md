@@ -14,10 +14,10 @@ Source: M8 plan D3 (owner, 2026-10-26), ADR 0077 point 7, m8-chunk-version
 ## ADDED Requirements
 
 ### Requirement: GEN-079 The read set of a chunk
-`chunk_read_set` SHALL return the discs (centre direction and angle) outside which no item can change a chunk's bits: the chunk's region (its square plus the halo of GEN-049) and the routed network it reads, that is every segment the pruning of GEN-078 keeps and the segments upstream of those along the main stem up to the law's window, each widened by `routing_reach_m` along its chord. The pruning of GEN-078 SHALL take its segments from the same function. The read set SHALL be a function of the chunk key, the global run and the stage parameters only, built from the coarse guides and bands and never from routed paths or items, so that it cannot depend on the edits it is used to select.
+`chunk_read_set` SHALL return the discs (centre direction and angle) outside which no item can change a chunk's bits: the chunk's region (its square plus the halo of GEN-049) and the routed network it reads, that is every segment the pruning of GEN-078 keeps and the segments upstream of those along the main stem up to the law's window, each widened by `routing_reach_m` along its chord. The segments the pruning of GEN-078 keeps SHALL be those the read set starts from (one `region_segments` and one `segments_reaching`). The read set SHALL be a function of the chunk key, the global run and the stage parameters only, built from the coarse guides and bands and never from routed paths or items, so that it cannot depend on the edits it is used to select.
 
 Verify: A
-Status: planned
+Status: active
 Source: m8-chunk-version, GEN-049, GEN-059, GEN-078
 
 #### Scenario: The set covers what the network reads
