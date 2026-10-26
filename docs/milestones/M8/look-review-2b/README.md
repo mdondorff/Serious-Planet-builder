@@ -22,3 +22,9 @@ Command (per directory): `cargo xtask capture stills --poses docs/milestones/M8/
 - `hills-b/`: the sample look turns the default's olive-brown grass to a fresher green on the lit slopes (the moisture curve at work); relief and valley are the same in both. This is the site where the curves show.
 - `hills-r1/`: snow again (3.8 km); the looks are indistinguishable.
 - `river-r1/`: the 300 m views show the incised channel floor as flat stepped benches, a few hundred metres long, with a dark grid of fine ridges across them (`300m-sunset.png`); the channel walls are sharp. The steps and the grid look like an artefact of the channel bed, not terrain. Flagged to the planner.
+
+## Re-render after the band-distance fix (explorer, 2026-10-26)
+All six directories were re-rendered on main with #744 (GEN-083: the valley band's distance is Euclidean to the owning source, `ANET_VERSION` 9); same poses, store and run, nothing else changed. Not goldens.
+- `river-r1/default/30m-sunset.png` (60 m eye, sun 7.5 degrees near the wall tilt): the per-cell banding of the lit wall is gone (the wall's slope per cell no longer alternates 0.082 / 0.158).
+- `river-r1/*/300m-sunset.png`: the stepped benches at the channel bend are still there (flat steps a few hundred metres long on the channel floor, the near bend). They are a different artefact from the ripple: the corridor's bed and the benches are not touched by the distance fix. Open for the planner (the bed path, GEN-059 and GEN-066).
+- `hills-r1/` and `hills-b/` change only where a river band lies in the view; the band's distance is the only code change.
