@@ -1,9 +1,10 @@
 name: ci
 
+# A branch runs on its pull request (and only there: a push to a PR branch used to run it a second time); main runs after each merge.
 # Docs-only changes (docs/, openspec/, .claude/, root *.md, spikes/**/results/**; owner, 2026-10-16) run the light `docs` workflow instead; any other file in a change runs this one.
 on:
   push:
-    branches: ["**"]
+    branches: ["main"]
     paths-ignore: ["docs/**", "openspec/**", ".claude/**", "*.md", "spikes/**/results/**"]
   pull_request:
     paths-ignore: ["docs/**", "openspec/**", ".claude/**", "*.md", "spikes/**/results/**"]
