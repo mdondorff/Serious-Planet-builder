@@ -265,7 +265,7 @@ impl Network {
         let key = |x: usize| region.cells[x].key();
         // The segments a region reads are those of its coarse cells and one ring more; a routed path leaves its coarse chord by the slide, the meander and the band.
         debug_assert!(
-            law.route_band_m + law.slide_steep_m.max(law.slide_m).max(law.head_m) + MEANDER_M < 3_400.0,
+            law.route_band_m + law.slide_steep_m.max(law.slide_m).max(law.head_m) + MEANDER_M + law.smooth_max_m < 3_400.0,
             "the routing reaches past the coarse ring a region reads"
         );
         // The base heights of the region's cells, read before the routing: the raster of a segment is every few cells of this lattice, so the points of it
@@ -718,8 +718,9 @@ pub fn chunk_read_set(run: &dyn CoarseRun, lat: &ChunkLattice, region: &Region, 
     let mut all: BTreeSet<(usize, usize)> = kept.clone();
     let upstream_of = |all: &mut BTreeSet<(usize, usize)>, from: usize| {
         let mut at = from;
-        // `window + 1` segments: the confluence chain of `anchor_profiles` is the segment into the cell and `window` more upstream of its donor.
-        for _ in 0..=law.window {
+        // `window + 1` segments: the confluence chain of `anchor_profiles` is the segment into the cell and `window` more upstream of its donor; with the
+        // smoothing (GEN-084) the farthest of them reads the segment before it, one more.
+        for _ in 0..=law.window + u16::from(law.smooth_m > 0.0) {
             match main_donor_of(run, &is_river, at) {
                 Some(d) => {
                     all.insert((d, at));

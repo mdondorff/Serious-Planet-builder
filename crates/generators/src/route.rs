@@ -510,6 +510,12 @@ pub fn smooth_chain(prev: Option<&[Vec3]>, own: &[Vec3], next: Option<&[Vec3]>, 
         let t = if span > 0.0 { (x - s[k - 1]) / span } else { 0.0 };
         chain[k - 1] * (1.0 - t) + chain[k] * t
     };
+    // A segment shorter than the filter would read past its neighbour: not a river of this lattice (a coarse cell is kilometres).
+    debug_assert!(
+        (prev.is_none() && next.is_none()) || s[last] - s[first] >= smooth_m,
+        "a segment of {} m is shorter than the smoothing's {smooth_m} m",
+        s[last] - s[first]
+    );
     let h = smooth_m / SMOOTH_TAPS as f64;
     let mut out = Vec::with_capacity(own.len());
     for k in first..=last {
@@ -533,5 +539,56 @@ pub fn smooth_chain(prev: Option<&[Vec3]>, own: &[Vec3], next: Option<&[Vec3]>, 
         }
         out.push((raw + v).normalized());
     }
+    // The joint with a neighbour: from the points around it, measured from it, whichever segment asks, so both segments put it at the same bits.
+    if next.is_some() {
+        if let (Some(n), Some(l)) = (next, out.last_mut()) {
+            *l = joint_point(own.iter().rev().copied(), n.iter().copied(), radius_m, smooth_m, max_m);
+        }
+    }
+    if let (Some(p), Some(f)) = (prev, out.first_mut()) {
+        *f = joint_point(p.iter().rev().copied(), own.iter().copied(), radius_m, smooth_m, max_m);
+    }
     out
+}
+
+/// The smoothed point at a joint: `back` runs from the joint backwards along one segment, `ahead` from the joint forwards along the next (both start with
+/// the joint). The tent average of the two arms, arclength measured from the joint outward, moved at most `max_m` from the joint.
+fn joint_point(back: impl Iterator<Item = Vec3>, ahead: impl Iterator<Item = Vec3>, radius_m: f64, smooth_m: f64, max_m: f64) -> Vec3 {
+    // One arm as points with their distance from the joint, as far as the filter reaches.
+    let arm = |points: &mut dyn Iterator<Item = Vec3>| -> (Vec<Vec3>, Vec<f64>) {
+        let (mut pts, mut dist): (Vec<Vec3>, Vec<f64>) = (Vec::new(), Vec::new());
+        for p in points {
+            let d = pts.last().map_or(0.0, |&q: &Vec3| dist[dist.len() - 1] + (p - q).length() * radius_m);
+            pts.push(p);
+            dist.push(d);
+            if d >= smooth_m {
+                break;
+            }
+        }
+        (pts, dist)
+    };
+    let (mut back, mut ahead) = (back, ahead);
+    let (bp, bd) = arm(&mut back);
+    let (ap, ad) = arm(&mut ahead);
+    let joint = ap[0];
+    let along = |pts: &[Vec3], dist: &[f64], x: f64| -> Vec3 {
+        if x >= dist[dist.len() - 1] {
+            return pts[pts.len() - 1];
+        }
+        let k = dist.partition_point(|&v| v <= x).clamp(1, dist.len() - 1);
+        let span = dist[k] - dist[k - 1];
+        let t = if span > 0.0 { (x - dist[k - 1]) / span } else { 0.0 };
+        pts[k - 1] * (1.0 - t) + pts[k] * t
+    };
+    let h = smooth_m / SMOOTH_TAPS as f64;
+    let mut sum = Vec3::new(0.0, 0.0, 0.0);
+    for m in -SMOOTH_TAPS..=SMOOTH_TAPS {
+        let x = m.abs() as f64 * h;
+        let q = if m < 0 { along(&bp, &bd, x) } else { along(&ap, &ad, x) };
+        sum = sum + q * ((SMOOTH_TAPS + 1 - m.abs()) as f64);
+    }
+    let v = sum.normalized() - joint;
+    let moved_m = v.length() * radius_m;
+    let v = if moved_m > max_m { v * (max_m / moved_m) } else { v };
+    (joint + v).normalized()
 }
