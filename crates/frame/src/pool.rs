@@ -1,9 +1,9 @@
 //! The terrain pools of the compact format (STRM-006, ADR 0033 points 1 and 3, ADR 0054, ADR 0062): the slot size and the share of
 //! a tier, as the numbers `planet_streaming::PoolConfig` counts in. GPU-free; the renderer allocates exactly this.
 //!
-//! The slot is the compact tile of GEN-025 at the given `cells`: 9,168 B at cells 32 (ADR 0063; 2,768 B at 16, 34,256 B at 64). The
-//! share is a byte ceiling, so the slot count follows from the slot: 219,585 slots at the mid share, 336,697 at the high share at
-//! cells 32 (231,090 and 354,338 before the slot of 9,168 B).
+//! The slot is the compact tile of GEN-025 at the given `cells`: 9,488 B at cells 32 (ADR 0063 and the driver block of MESH_VERSION 10, ADR 0076/GEN-071; 3,088 B at 16, 34,576 B at 64). The
+//! share is a byte ceiling, so the slot count follows from the slot: 212,190 slots at the mid share, 325,358 at the high share at
+//! cells 32 (231,090 and 354,338 before the slot of 9,168 B; 219,585 and 336,697 at 9,168 B).
 
 use planet_generators::compact::slot_bytes;
 use planet_generators::mesh::grid_indices;
@@ -47,7 +47,7 @@ pub fn compact_format_pool(share_bytes: u64, cells: u32, frames_in_flight: u64) 
     compact_format_pool_with(share_bytes, cells, block_slots_in(COMPACT_BLOCK_BYTES, cells), frames_in_flight)
 }
 
-/// The compact pools of a hardware tier's terrain share: 15 blocks = 219,585 slots at the mid share, 23 = 336,697 at the high
+/// The compact pools of a hardware tier's terrain share: 15 blocks = 212,190 slots at the mid share, 23 = 325,358 at the high
 /// share at cells 32 (ADR 0033 point 3 as amended by ADR 0062 and 0063).
 pub fn tier_compact_pool(tier: Tier, cells: u32, frames_in_flight: u64) -> Result<PoolConfig, String> {
     compact_format_pool(tier.terrain_share_bytes(), cells, frames_in_flight)

@@ -1318,7 +1318,7 @@ impl TerrainRenderer {
         }
     }
 
-    /// A renderer with the mid tier's terrain share (ADR 0033: 2 GiB, a ceiling counted in slots: 15 blocks, 219,585 slots at cells
+    /// A renderer with the mid tier's terrain share (ADR 0033: 2 GiB, a ceiling counted in slots: 15 blocks, 212,190 slots at cells
     /// 32). Slots are reusable one frame after their release (the renderer finishes a frame before it returns).
     pub fn new(ctx: &GpuContext, size: (u32, u32), cells: u32) -> Self {
         Self::with_frames_in_flight(ctx, size, cells, 1)

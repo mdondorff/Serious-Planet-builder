@@ -336,7 +336,8 @@ fn the_compact_payload_is_the_slot_and_a_damaged_slot_is_refused() {
     let spec = spec_of(&field, MAX_LEVEL);
     let id = TileId::new(Face(3), 4, 1, 2).unwrap();
     let tile = spec.generate(id);
-    assert_eq!(PAYLOAD_VERSION, 3);
+    // MESH_VERSION 10, driver block, ADR 0076/GEN-071: the payload version is 4 (3 before).
+    assert_eq!(PAYLOAD_VERSION, 4);
     // The payload's raw bytes end in the slot, byte for byte (GEN-025).
     let payload = encode_render_tile(&tile).unwrap();
     let raw_len = u32::from_le_bytes(payload[6..10].try_into().unwrap()) as usize;
