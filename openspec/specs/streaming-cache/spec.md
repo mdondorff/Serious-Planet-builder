@@ -1168,3 +1168,14 @@ Source: STRM-053, STRM-047
 #### Scenario: A landing under a drawn tile
 - **WHEN** a chunk lands under a resident tile that reads it while the tile is drawn at some weight
 - **THEN** the tile keeps drawing at the weight it had when the chunk landed until its rebuilt tile is uploaded, and the loop holds the tile as it was last uploaded
+
+### Requirement: STRM-055 The job log tells a refresh and its waits
+The job log (STRM-022) SHALL record for each job the milliseconds from the request of its tile to its dispatch (the wait in the streamer's queue) and whether it rebuilds a stale resident tile (a refresh, STRM-026). `refresh_summary` SHALL put the refresh jobs of a slice in one line: their count and the median, 90th percentile and largest of the streamer-queue wait, the spawner-queue wait and the load, in milliseconds; none without a refresh. The viewer SHALL write that line every 10 s while there are refreshes, with the chunks landed and the stand-in share (`ChunkShare::landing_note`). The readings decide nothing (CON-14).
+
+Verify: A
+Status: active
+Source: m8-refresh-priority, STRM-022, STRM-026
+
+#### Scenario: A refresh after a wait
+- **WHEN** a resident tile is refreshed and 250 ms of the clock pass before the step that dispatches it
+- **THEN** its sample is a refresh that is done with a streamer queue wait of 250 ms, the samples of the missing tiles before it are not refreshes with a wait of 0, and the summary counts the one refresh

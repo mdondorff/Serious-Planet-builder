@@ -357,3 +357,10 @@ fn the_shared_edge_of_two_tiles_stays_closed_through_a_neighbour_landing_and_nex
         }
     }
 }
+
+// spec: STRM-055
+#[test]
+fn the_landing_note_gives_the_chunks_landed_and_the_stand_in_share_and_zero_without_nodes() {
+    assert_eq!(planet_frame::chunkshare::landing_note(6, 200, 170), "6 chunks landed, stand-in share 85.0 %");
+    assert_eq!(planet_frame::chunkshare::landing_note(0, 0, 0), "0 chunks landed, stand-in share 0.0 %");
+}

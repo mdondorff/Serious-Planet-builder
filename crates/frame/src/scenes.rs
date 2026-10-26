@@ -139,6 +139,20 @@ impl SceneScript {
 /// Build the script of `scene` for a planet of `radius_m` with `field` (cameras are placed above the terrain), a viewport of
 /// `aspect`, and `seed` for the mouse-look sequence. Pure and deterministic.
 pub fn build_script(scene: StreamScene, radius_m: f64, aspect: f64, field: &dyn HeightField, seed: u64) -> SceneScript {
+    build_script_at((SITE_LAT_DEG, SITE_LON_DEG), scene, radius_m, aspect, field, seed)
+}
+
+/// [`build_script`] over the site `(lat, lon)` in degrees instead of the standard one (the viewer's `--site`: a flight over land whose
+/// chunks nobody has computed yet).
+pub fn build_script_at(
+    site: (f64, f64),
+    scene: StreamScene,
+    radius_m: f64,
+    aspect: f64,
+    field: &dyn HeightField,
+    seed: u64,
+) -> SceneScript {
+    let (site_lat_deg, site_lon_deg) = site;
     let fov = FOV_Y_DEG.to_radians();
     let north = Vec3::new(0.0, 0.0, 1.0);
     let cam = |lat: f64, lon: f64, h: f64, pitch_deg: f64| {
@@ -157,8 +171,8 @@ pub fn build_script(scene: StreamScene, radius_m: f64, aspect: f64, field: &dyn 
                     // TEST-013 flight's law: a function of time only, no look input), then stays.
                     let u = (t / DIVE_DESCENT_S).clamp(0.0, 1.0);
                     let pitch = 85.0 - 77.0 * u;
-                    let lat = SITE_LAT_DEG + (dive_ground_distance_m(t, speed) / radius_m).to_degrees();
-                    cam(lat, SITE_LON_DEG, h, pitch)
+                    let lat = site_lat_deg + (dive_ground_distance_m(t, speed) / radius_m).to_degrees();
+                    cam(lat, site_lon_deg, h, pitch)
                 })
                 .collect();
             SceneScript { scene, prelude: None, cameras, descent_frames }
@@ -167,12 +181,12 @@ pub fn build_script(scene: StreamScene, radius_m: f64, aspect: f64, field: &dyn 
             let frames = (HOLD_S / FRAME_STEP_S).round() as usize;
             let pitch = if scene == StreamScene::Teleport1m { 8.0 } else { 20.0 };
             // Start at rest at 2 km over the site; land on its antipode.
-            let prelude = cam(SITE_LAT_DEG, SITE_LON_DEG, LOW_M, 20.0);
-            let landing = cam(-SITE_LAT_DEG, SITE_LON_DEG + 180.0, scene.altitude_m(), pitch);
+            let prelude = cam(site_lat_deg, site_lon_deg, LOW_M, 20.0);
+            let landing = cam(-site_lat_deg, site_lon_deg + 180.0, scene.altitude_m(), pitch);
             SceneScript { scene, prelude: Some(prelude), cameras: vec![landing; frames], descent_frames: 0 }
         }
         StreamScene::Look1m | StreamScene::Look2km => {
-            let position = above_terrain(radius_m, field, SITE_LAT_DEG, SITE_LON_DEG, scene.altitude_m());
+            let position = above_terrain(radius_m, field, site_lat_deg, site_lon_deg, scene.altitude_m());
             let up = position.0.normalized();
             let north_t = (north - up * north.dot(up)).normalized();
             let east = north_t.cross(up);
@@ -482,6 +496,18 @@ mod tests {
 
     fn script(scene: StreamScene) -> SceneScript {
         build_script(scene, R, 16.0 / 9.0, &Reference(1), LOOK_SEED)
+    }
+
+    // spec: VIEW-058
+    #[test]
+    fn the_script_over_the_default_site_is_the_standard_one_and_another_site_moves_the_path() {
+        let std = script(StreamScene::Dive);
+        let same = build_script_at((SITE_LAT_DEG, SITE_LON_DEG), StreamScene::Dive, R, 16.0 / 9.0, &Reference(1), LOOK_SEED);
+        assert_eq!(std, same, "the default site gives the standard script");
+        let other = build_script_at((45.0, -100.0), StreamScene::Dive, R, 16.0 / 9.0, &Reference(1), LOOK_SEED);
+        assert_eq!(other.cameras.len(), std.cameras.len());
+        let d = (other.cameras[0].position.0 - std.cameras[0].position.0).length();
+        assert!(d > 1.0e6, "the first camera is {d} m from the standard one");
     }
 
     // spec: TEST-018
