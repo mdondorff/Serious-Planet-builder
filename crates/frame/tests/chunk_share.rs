@@ -239,11 +239,15 @@ fn a_tile_built_before_the_landing_starts_no_clock_and_the_rebuilt_one_starts_it
     fade.landed(a, 0);
     // The tile that was waiting for its upload when the chunk landed reaches the renderer with the key it was built with, not the key the plan
     // expects now: it is drawn, but its change is not the landed one, so nothing starts.
-    fade.drawn(&view, tile, 111, 222, 400);
+    let none = std::collections::HashSet::new();
+    fade.drawn(&view, tile, 111, 222, 400, &none);
     assert_eq!(fade.tile_weight(&view, tile, 400), 0.0);
     assert_eq!(fade.tile_weight(&view, tile, 5_000), 0.0, "still the base: the clock has not started");
     // The rebuilt tile carries the key the plan expects: the clock starts at its first drawn frame, at weight 0.
-    fade.drawn(&view, tile, 222, 222, 6_000);
+    // Another tile that reads the chunk is still being rebuilt: the clock waits for it.
+    fade.drawn(&view, tile, 222, 222, 5_500, &std::collections::HashSet::from([a]));
+    assert_eq!(fade.tile_weight(&view, tile, 6_000), 0.0);
+    fade.drawn(&view, tile, 222, 222, 6_000, &none);
     assert_eq!(fade.tile_weight(&view, tile, 6_000), 0.0);
     assert!((fade.tile_weight(&view, tile, 6_750) - 0.5).abs() < 1e-6);
 }

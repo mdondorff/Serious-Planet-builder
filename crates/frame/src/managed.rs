@@ -627,11 +627,21 @@ impl ManagedLoop {
         // The weights of the landed chunks' fade (STRM-047): each node takes the minimum over the chunks it reads; 1 without a fade or a view.
         if let (Some(view), Some((fade, clock))) = (self.chunk_view.as_deref(), self.chunk_fade.as_mut()) {
             let now = clock.now_ms();
+            // The chunks that tiles drawn from a mesh built before a landing (the stale ones) read: their change is not all on screen yet.
+            let mut waiting: HashSet<planet_generators::chunkfield::ChunkKey> = HashSet::new();
+            for n in &pipeline.draw.plan.nodes {
+                if n.state == crate::terrain::TileState::Stale {
+                    waiting.extend(view.reads(n.tile));
+                }
+            }
             for n in &mut pipeline.draw.plan.nodes {
-                // A drawn tile that is the one the plan expects was built against the chunks' current versions: the first such tile of a
-                // landed chunk starts its fade (STRM-047), and a tile built before the landing starts nothing.
-                if let Some(r) = self.resident.get(&n.tile) {
-                    fade.drawn(view, n.tile, r.mesh_key, n.mesh_key, now);
+                // An exact tile is the mesh the plan expects: it was built against the chunks' current versions. The first one of a landed
+                // chunk, once the stale tiles that read it are rebuilt, starts that chunk's fade (STRM-047); the node of a stale tile carries
+                // the resident key as its own and starts nothing.
+                if n.state == crate::terrain::TileState::Exact {
+                    if let Some(r) = self.resident.get(&n.tile) {
+                        fade.drawn(view, n.tile, r.mesh_key, n.mesh_key, now, &waiting);
+                    }
                 }
                 n.chunk_weight = fade.tile_weight(view, n.tile, now);
             }

@@ -375,7 +375,8 @@ pub fn compact_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: Ti
     let change = field
         .level_change(&dirs[1..1 + count], id.level())
         .filter(|c| c.iter().any(|&v| v != 0.0))
-        .map(|c| c.into_iter().map(|v| v as f32).collect::<Vec<f32>>());
+        // A value that is not finite as an f32 is no change (the renderer refuses a plane with one, which would fail the frame's whole upload batch).
+        .map(|c| c.into_iter().map(|v| Some(v as f32).filter(|x| x.is_finite()).unwrap_or(0.0)).collect::<Vec<f32>>());
     let h_origin = all[0];
     let origin = PlanetFixed(centre * (radius_m + h_origin));
     // The shell through the origin: control points are small tile-local numbers (CON-11), not heights from the sea level.

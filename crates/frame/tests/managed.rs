@@ -1899,6 +1899,8 @@ fn a_rebuild_slower_than_the_fade_still_fades_and_neither_a_neighbour_nor_a_new_
     // The chunk lands and the rebuild takes 2 s, longer than the fade: nothing of the change is drawn before the rebuilt tiles arrive, and
     // the first frame that draws them starts at the base, not at the whole change.
     rig.lp.chunk_landed(&[target]);
+    // The frames after the landing draw the tiles built before it as stale tiles, whose node carries the resident key: no clock starts.
+    assert!(weights(&mut rig).iter().all(|&w| w == 0.0), "the frame after the landing");
     clock.advance(2_000);
     assert!(weights(&mut rig).iter().all(|&w| w == 0.0), "2 s after the landing and the rebuild not delivered: the base");
     rig.settle(&req);
