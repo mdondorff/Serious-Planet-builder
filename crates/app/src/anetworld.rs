@@ -134,7 +134,11 @@ impl WorldTerrain {
             run: maps,
             base: Arc::new(WorldBase::new(self)),
             radius_m: self.radius_m(),
-            params: ANetParams::spike(ANET_HALO_M, lat.cell_m(self.radius_m())),
+            params: {
+                let mut params = ANetParams::spike(ANET_HALO_M, lat.cell_m(self.radius_m()));
+                params.drivers.seed = self.base_seed();
+                params
+            },
             memo: Default::default(),
         });
         let disk: Option<Arc<dyn ChunkDisk>> = self.store_dir().map(|dir| {
@@ -234,6 +238,7 @@ impl WorldTerrain {
         let per = cells_per_chunk_for(radius, ANET_CELL_M);
         let clat = ChunkLattice::new(per).ok_or("no chunk lattice")?;
         let mut params = ANetParams::spike(ANET_HALO_M, clat.cell_m(radius));
+        params.drivers.seed = self.base_seed();
         // What the census says when the hillslope step is stronger or the run longer than the defaults (an argument of the report, never a production value).
         if let Some(v) = slump_rate {
             params.slump_rate = v;

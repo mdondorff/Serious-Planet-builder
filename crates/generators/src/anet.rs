@@ -808,7 +808,8 @@ pub struct ANetParams {
     pub bank_rounds: u16,
     /// How far under the drawn ground the corridor beds are anchored.
     pub anchor: AnchorLaw,
-    /// The constants of the driver channels of a chunk (GEN-070, GEN-071); the lithology noise reads the base's identity as its seed.
+    /// The constants of the driver channels of a chunk (GEN-070, GEN-071); `drivers.seed` is the world's seed, which the lithology noise reads (a local
+    /// edit of the base does not touch it).
     pub drivers: crate::drivers::DriverParams,
 }
 
@@ -1215,7 +1216,7 @@ impl ANet {
     /// The driver channels of the chunk's own cells (GEN-070) from the final heights (the base plus the stage's clamped change, over the reference surface: sea level 0), the
     /// drainage area of the solve and the cells' own geometry: the spacing along each axis, the compass turned into the gradient's east and north parts.
     pub fn chunk_drivers(&self, lat: &ChunkLattice, region: &Region, s: &Solution, change: &[f32]) -> crate::drivers::ChunkDrivers {
-        use crate::drivers::{chunk_drivers, ChunkRaster, DriverParams};
+        use crate::drivers::{chunk_drivers, ChunkRaster};
         assert!(region.halo >= 1, "the drivers read one ring round the chunk");
         let n = lat.cells_per_chunk() as usize;
         let first = region.cells[0];
@@ -1276,7 +1277,7 @@ impl ANet {
             }
         }
         let centre = lat.direction_ext(face, i0 + (n / 2) as i64, j0 + (n / 2) as i64);
-        let params = DriverParams { seed: self.base.identity(), ..self.params.drivers };
+        let params = self.params.drivers;
         let raster = ChunkRaster {
             n,
             heights: &heights,
