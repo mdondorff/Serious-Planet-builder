@@ -796,3 +796,157 @@ fn an_item_outside_the_read_set_changes_no_bit_of_a_chunk_and_one_inside_does() 
     assert!(tested_outside > 0, "no bump lay outside the read set");
     assert!(changed_inside > 0, "no bump inside the read set changed a network");
 }
+
+/// A chain of points every 64 m: `east` metres straight east, then the same length turned by `turn_deg` to the north, near the equator.
+fn kinked_chain(east_m: f64, turn_deg: f64) -> Vec<Vec3> {
+    let step = 64.0;
+    let n = (east_m / step) as usize;
+    let mut pts = Vec::new();
+    for k in 0..=2 * n {
+        let (x, y) = if k <= n {
+            (k as f64 * step, 0.0)
+        } else {
+            let d = (k - n) as f64 * step;
+            (n as f64 * step + d * libm::cos(turn_deg.to_radians()), d * libm::sin(turn_deg.to_radians()))
+        };
+        pts.push(Vec3::from_lat_lon(y / R, x / R));
+    }
+    pts
+}
+
+/// The largest turn of a chain over `span` points on each side, in degrees per 100 m.
+fn worst_turn_deg_per_100m(chain: &[Vec3], span: usize) -> f64 {
+    let mut worst = 0.0f64;
+    for k in span..chain.len() - span {
+        let (a, b) = ((chain[k] - chain[k - span]).normalized(), (chain[k + span] - chain[k]).normalized());
+        let angle = libm::acos(a.dot(b).clamp(-1.0, 1.0)).to_degrees();
+        let metres = 0.5 * ((chain[k] - chain[k - span]).length() + (chain[k + span] - chain[k]).length()) * R;
+        worst = worst.max(angle / metres * 100.0);
+    }
+    worst
+}
+
+// spec: GEN-084
+#[test]
+fn smoothing_spreads_a_45_degree_kink_the_ends_of_a_river_stay_and_no_point_moves_more_than_the_bound() {
+    use planet_generators::route::smooth_chain;
+    let chain = kinked_chain(3200.0, 45.0);
+    let (smooth_m, max_m) = (256.0, 64.0);
+    // A river with a joint through the kink: a chain of its own with both neighbours.
+    let n = chain.len() / 2;
+    let (before, after) = (&chain[..=n], &chain[n..]);
+    let (head, tail) = (&chain[..=n / 2], &chain[n / 2..=n + n / 2]);
+    let _ = (head, tail);
+    let raw_turn = worst_turn_deg_per_100m(&chain, 2);
+    // The middle part of the chain, the kink inside it, the rest of the chain on both sides as its neighbours.
+    let (lo, hi) = (n - 20, n + 20);
+    let own = &chain[lo..=hi];
+    let smooth = smooth_chain(Some(&chain[..=lo]), own, Some(&chain[hi..]), R, smooth_m, max_m);
+    assert_eq!(smooth.len(), own.len());
+    let moved = own.iter().zip(&smooth).map(|(a, b)| (*a - *b).length() * R).fold(0.0, f64::max);
+    assert!(moved > 5.0 && moved <= max_m + 1e-6, "the kink moves {moved} m, at most {max_m} m");
+    let mut whole: Vec<Vec3> = chain[..lo].to_vec();
+    whole.extend_from_slice(&smooth);
+    whole.extend_from_slice(&chain[hi + 1..]);
+    let turn = worst_turn_deg_per_100m(&whole, 2);
+    assert!(turn <= 0.5 * raw_turn, "the worst turn falls from {raw_turn} to {turn} degrees per 100 m");
+    // A river that begins and ends here keeps its ends and fades the move in.
+    let alone = smooth_chain(None, own, None, R, smooth_m, max_m);
+    let ends = [(alone[0], own[0]), (alone[alone.len() - 1], own[own.len() - 1])];
+    assert!(ends.iter().all(|(a, b)| (*a - *b).length() * R < 1e-6), "a source and an outlet stay where they are");
+    // A straight chain is not changed.
+    let straight: Vec<Vec3> = chain[..=n].to_vec();
+    let same = smooth_chain(Some(&straight[..=10]), &straight[10..30], Some(&straight[29..]), R, smooth_m, max_m);
+    assert!(straight[10..30].iter().zip(&same).all(|(a, b)| (*a - *b).length() * R < 1e-6), "a straight river stays");
+    let _ = (before, after);
+}
+
+// spec: GEN-084
+#[test]
+fn the_two_segments_of_a_joint_the_river_runs_through_find_the_same_point_and_a_confluence_keeps_its_node() {
+    use planet_generators::route::{smooth_chain, Router};
+    let chain = kinked_chain(3200.0, 45.0);
+    let n = chain.len() / 2;
+    // Two segments that meet at the kink: from each side the joint is smoothed from the other's points.
+    let (first, second) = (&chain[..=n], &chain[n..]);
+    let a = smooth_chain(None, first, Some(second), R, 256.0, 64.0);
+    let b = smooth_chain(Some(first), second, None, R, 256.0, 64.0);
+    assert!((a[a.len() - 1] - b[0]).length() * R < 1e-6, "the joint is one point: {} m apart", (a[a.len() - 1] - b[0]).length() * R);
+    assert!((a[a.len() - 1] - first[first.len() - 1]).length() * R > 5.0, "and it moved");
+    // A confluence (two rivers into one cell): every segment keeps the node exactly.
+    let lat = ChunkLattice::new(32).unwrap();
+    let mut law = routed_law();
+    law.slide_m = 400.0;
+    law.slide_steep_m = 400.0;
+    law.smooth_m = 256.0;
+    law.smooth_max_m = 64.0;
+    let run = Fork;
+    let memo = planet_generators::route::RouteMemo::default();
+    let router = Router::new(&run, &Hollow(0.0), &lat, R, &law, &memo);
+    let mut checked = 0;
+    for from in [FACE * N * N + 1000 * N + 1000, FACE * N * N + 1000 * N + 1001] {
+        for to in [from + 1, from + 2] {
+            let (line, raw) = (router.polyline(from, to), router.raw_polyline(from, to));
+            let moved = line.iter().zip(raw.iter()).map(|(p, q)| (*p - *q).length() * R).fold(0.0, f64::max);
+            assert!(moved <= 64.0 + 1e-6, "{from}->{to} moved {moved} m");
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 4);
+}
+
+// spec: GEN-084, GEN-067
+#[test]
+fn the_smoothed_corridor_beds_and_links_do_not_depend_on_the_halo_the_neighbour_chunk_or_the_thread() {
+    let lat = ChunkLattice::new(32).unwrap();
+    let mut law = routed_law();
+    law.slide_m = 400.0;
+    law.slide_steep_m = 400.0;
+    law.head_m = 400.0;
+    law.smooth_m = 256.0;
+    law.smooth_max_m = 64.0;
+    // The same chunk at two halos, over a fork (a confluence) and over a ridge: shared cells agree on the corridor, the bed bits and the next cell.
+    let (small, wide) = (region(&lat, chunk(1002), 20), region(&lat, chunk(1002), 40));
+    let (ns, nw) =
+        (Network::build_with(&Fork, &Hollow(0.0), &lat, &small, R, &law), Network::build_with(&Fork, &Hollow(0.0), &lat, &wide, R, &law));
+    let mut compared = 0;
+    for (i, &cell) in small.cells.iter().enumerate() {
+        let j = wide.index_of(cell).expect("the small region lies in the wide one");
+        assert_eq!(ns.corridor[i], nw.corridor[j], "corridor at {cell:?}");
+        if ns.corridor[i] {
+            assert_eq!(ns.anchor_z[i].to_bits(), nw.anchor_z[j].to_bits(), "bed at {cell:?}");
+            if ns.next[i] != NO_NEXT && nw.next[j] != NO_NEXT {
+                assert_eq!(small.cells[ns.next[i] as usize], wide.cells[nw.next[j] as usize], "next cell at {cell:?}");
+            }
+            compared += 1;
+        }
+    }
+    assert!(compared > 30, "{compared} corridor cells compared");
+    let (ra, rb) = (region(&lat, chunk(1002), 40), region(&lat, chunk(1003), 40));
+    let (na, nb) =
+        (Network::build_with(&River(1000), &Ridge, &lat, &ra, R, &law), Network::build_with(&River(1000), &Ridge, &lat, &rb, R, &law));
+    let (mut shared, mut on_path) = (0, 0);
+    for (ia, &cell) in ra.cells.iter().enumerate() {
+        let Some(ib) = rb.index_of(cell) else { continue };
+        shared += 1;
+        assert_eq!(na.corridor[ia], nb.corridor[ib], "corridor at {cell:?}");
+        assert_eq!(na.anchor_z[ia].to_bits(), nb.anchor_z[ib].to_bits(), "bed at {cell:?}");
+        on_path += usize::from(na.corridor[ia]);
+    }
+    assert!(shared > 1000 && on_path >= 15, "{shared} shared cells, {on_path} on the corridor");
+    // Four threads at once: the same bits.
+    let reference: Vec<u64> = nw.anchor_z.iter().map(|z| z.to_bits()).collect();
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..4)
+            .map(|_| {
+                scope.spawn(|| {
+                    let n = Network::build_with(&Fork, &Hollow(0.0), &lat, &wide, R, &law);
+                    n.anchor_z.iter().map(|z| z.to_bits()).collect::<Vec<u64>>()
+                })
+            })
+            .collect();
+        for h in handles {
+            assert_eq!(h.join().expect("a thread"), reference, "a build on another thread differs");
+        }
+    });
+}

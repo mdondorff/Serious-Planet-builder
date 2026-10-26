@@ -413,6 +413,10 @@ pub struct AnchorLaw {
     pub slide_m: f64,
     pub slide_steep_m: f64,
     pub head_m: f64,
+    /// Smoothing of the routed corridor (GEN-084): the half width in metres of the tent filter that averages a routed path with the paths of the
+    /// segments it continues into and out of (0: the routed path as it is) and the most a point moves off the routed path, in metres.
+    pub smooth_m: f64,
+    pub smooth_max_m: f64,
 }
 
 impl Default for AnchorLaw {
@@ -446,6 +450,8 @@ impl Default for AnchorLaw {
             slide_m: 0.0,
             slide_steep_m: 0.0,
             head_m: 0.0,
+            smooth_m: 0.0,
+            smooth_max_m: 0.0,
         }
     }
 }
@@ -633,7 +639,7 @@ pub fn routing_reach_m(law: &AnchorLaw, cell_m: f64) -> f64 {
     let raster_m = f64::from(law.route_stride.max(1)) * cell_m;
     let slide_m = law.slide_m.max(law.slide_steep_m).max(law.head_m);
     let band_m = if law.route_band_m > 0.0 { law.route_band_m } else { 0.0 };
-    CHART_STRETCH * (band_m + slide_m + 5.0 * raster_m) + MEANDER_M
+    CHART_STRETCH * (band_m + slide_m + 5.0 * raster_m) + MEANDER_M + law.smooth_max_m
 }
 
 /// The coarse segments a region reads: the segments of rivers through the coarse cells the region touches and one ring more, and into them from outside
@@ -1011,6 +1017,9 @@ impl ANetParams {
         params.anchor.slide_m = 500.0;
         params.anchor.slide_steep_m = 1000.0;
         params.anchor.head_m = 1000.0;
+        // The corridor is smoothed over 256 m (a tent of that half width), by at most 64 m (GEN-084).
+        params.anchor.smooth_m = 256.0;
+        params.anchor.smooth_max_m = 64.0;
         // The tributaries of the coarse run (GEN-068): every coarse link of two cells' area and over is routed like a stem.
         params.anchor.river_area_m2 = 5.0e7;
         params
@@ -1577,6 +1586,8 @@ impl crate::chunkfield::ChunkStage for ANet {
                 p.anchor.slide_m.to_bits(),
                 p.anchor.slide_steep_m.to_bits(),
                 p.anchor.head_m.to_bits(),
+                p.anchor.smooth_m.to_bits(),
+                p.anchor.smooth_max_m.to_bits(),
                 planet_core::hash::hash_u64s(0x6472_6976, &p.drivers.hash_words()),
                 self.run.identity(),
                 self.base.identity(),
@@ -1588,7 +1599,7 @@ impl crate::chunkfield::ChunkStage for ANet {
 }
 
 /// Version of the stage's algorithm: part of its definition hash, so a change that changes results re-keys every chunk.
-pub const ANET_VERSION: u32 = 9;
+pub const ANET_VERSION: u32 = 10;
 
 /// The change of height each cell takes in one pass of thermal slumping (GEN-051): a cell steeper than `talus` over a neighbour gives that
 /// neighbour `rate x (slope - talus) x distance`. `dist[c][k]` is the distance to the `k`-th neighbour of `c` (the order of the region's neighbour
