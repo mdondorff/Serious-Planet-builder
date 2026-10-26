@@ -813,7 +813,7 @@ mod tests {
             chunk_field,
             horizon: true,
             horizon_off,
-            edge_fraction: None,
+            edge_fraction: chunk_field.then_some(EDGE_FRACTION),
         };
         let off: &'static Point = Box::leak(Box::new(off));
         let with = log_json(&[pt(30.0, measure)], &facts(true, Some(off)));
@@ -826,6 +826,7 @@ mod tests {
             "\"chunk_jobs_at_end\": 3",
             "\"horizon_jobs_at_end\": 1",
             "\"horizon_off_comparison\"",
+            "\"edge_fraction\": 0.5",
             "\"horizon_jobs_at_end\": 0",
         ] {
             assert!(with.contains(want), "missing {want}: {with}");
@@ -833,7 +834,10 @@ mod tests {
         // Without a chunk stage the trials say `null` and there is no comparison.
         let without = log_json(&[pt(30.0, Measure::coarse_only(0.004))], &facts(false, None));
         assert!(
-            without.contains("\"stage\": null") && !without.contains("horizon_off_comparison") && without.contains("\"horizon\": false")
+            without.contains("\"stage\": null")
+                && !without.contains("horizon_off_comparison")
+                && without.contains("\"horizon\": false")
+                && without.contains("\"edge_fraction\": null")
         );
     }
 
