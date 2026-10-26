@@ -942,15 +942,15 @@ Source: SPIKE-33 stage model, ADR 0077 point 3, CON-14
 - **THEN** the channel cells are unchanged, no non-channel cell exceeds the angle of repose by more than one pass can move, the volume moved equals the volume received, and the hash is the same on 1, 2 and 8 threads
 
 ### Requirement: GEN-052 A-net chunk time
-An A-net chunk of 24 km2 of core SHALL take at most 4 s at 8 m cells with the 3 km halo (1.8 million cells) on the reference machine, one thread, measured by the performance harness through the architect and never in a test (CON-20); the time at 4 and 10 m is recorded with the run (4 m was about 14 s per chunk on a synthetic scene: not met, ADR 0077 allows 4 to 10 m).
+An A-net chunk of 24 km2 of core SHALL take at most 4 s at 8 m cells with the 3 km halo (1.8 million cells) on the reference machine with the stage's production thread setting (the viewer's chunk workers), measured by the performance harness through the architect on the production geometry (the stored bake) and never in a test (CON-20); the one-thread time and the times at 4 and 10 m are recorded with the run (4 m was about 55 s per chunk on one thread: not met, ADR 0077 allows 4 to 10 m).
 
 Verify: C
 Status: planned
-Source: SPIKE-33, M8 plan risks, CON-22, planner decision 2026-10-24 (8 m default)
+Source: SPIKE-33, M8 plan risks, CON-22, planner decision 2026-10-24 (8 m default), planner decision 2026-10-26 (production threads; the one-thread window gave 7.0 s with the base heights 4.46 s)
 
 #### Scenario: Chunk time
-- **WHEN** a chunk of 24 km2 at 8 m cells runs on the reference machine in a perf window
-- **THEN** it finishes within 4 s at 8 m cells and the log holds the times at 4 and 10 m
+- **WHEN** a chunk of 24 km2 at 8 m cells runs on the reference machine in a perf window on the production threads
+- **THEN** it finishes within 4 s at 8 m cells and the log holds the one-thread time and the times at 4 and 10 m
 
 ### Requirement: GEN-057 Corridor anchors follow the drawn ground
 The corridor of an A-net chunk SHALL be anchored at every polyline point at the base field's height there minus the valley depth `depth_m (A / area_ref_m2)^exponent` for the river's area `A` at that point, at most `lerp(cap_low_m, cap_m, rf)` with `rf` the relief factor (GEN-060; defaults: 3 m at 100 km2, exponent 0.5, `cap_m` 100 m, `cap_low_m` 30 m, so the cap is at most a third of `bound_m`, 300 m), and GEN-059 sets the bed from these raw anchors. The coupled run's absolute height SHALL not set an anchor. The law's constants are part of the stage's definition hash.
@@ -1172,3 +1172,14 @@ Source: opus-planner (2026-10-26), GEN-066, GEN-067
 #### Scenario: Pruned and unpruned
 - **WHEN** chunks of a fork of rivers are built with every segment of the ring routed and with only the segments that can reach the region, at strides 1 and 4 and two halos
 - **THEN** the corridor, links, anchors, areas and inflows are bit for bit equal and fewer segments are routed in total
+
+### Requirement: GEN-079 A compact batch takes its footprint from a hint
+A batch of directions that lies on one face at least `reach + 2` cells from its edges, in a box of at most 4,194,304 cells, evaluated by a field whose reads stay within `reach` cells of a direction's cell (the eroded field's `reach` is 8), SHALL take the cells to gather from the box of `reach` cells before and `reach + 1` after the cell of each direction, not from a pass that reads for every direction; any other batch SHALL take the exact footprint. The gathered cells are the source's own samples, so every value is bit for bit the single `height` at any thread count, with the tile's climate (GEN-021) joined.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-26), GEN-020, perf window 2026-10-26
+
+#### Scenario: Bits and reads
+- **WHEN** compact batches (across a block edge, inside a block, near a face edge, at a cube corner) are evaluated on 1 and 8 threads
+- **THEN** every value equals the single `height`, no read fails, and a batch of about 12 cells reads fewer than 2,000 cells and decodes the four blocks round its centre once
