@@ -1206,22 +1206,32 @@ pub struct ANet {
 }
 
 impl ANet {
-    /// The driver channels of the chunk's own cells (GEN-070) from the final heights (the base plus the stage's clamped change, over the water), the
+    /// The change of every cell of `region` as the stage reports it: the solve's change cut to the stage's bound (GEN-039).
+    fn clamped_change(&self, region: &Region, s: &Solution) -> Vec<f32> {
+        let bound = crate::chunkfield::ChunkStage::bound_m(self);
+        (0..region.cells.len()).map(|c| (s.z[c] - s.z_base[c]).clamp(-bound, bound) as f32).collect()
+    }
+
+    /// The driver channels of the chunk's own cells (GEN-070) from the final heights (the base plus the stage's clamped change, over the reference surface: sea level 0), the
     /// drainage area of the solve and the cells' own geometry: the spacing along each axis, the compass turned into the gradient's east and north parts.
     pub fn chunk_drivers(&self, lat: &ChunkLattice, region: &Region, s: &Solution, change: &[f32]) -> crate::drivers::ChunkDrivers {
         use crate::drivers::{chunk_drivers, ChunkRaster, DriverParams};
+        assert!(region.halo >= 1, "the drivers read one ring round the chunk");
         let n = lat.cells_per_chunk() as usize;
         let first = region.cells[0];
         let (face, i0, j0) = (first.face, i64::from(first.i), i64::from(first.j));
         let n_face = lat.n();
         // The height at a cell of the core's ring (position relative to the core's origin): the final height of the region's cell there.
-        let height_at = |i: i64, j: i64| -> f64 {
-            let cell = if (0..n_face).contains(&i) && (0..n_face).contains(&j) {
+        // The cell at a position that may lie beyond the face edge: the cell holding the direction there, whose centre is not at that point.
+        let real_cell = |i: i64, j: i64| -> Cell {
+            if (0..n_face).contains(&i) && (0..n_face).contains(&j) {
                 Cell { face, i: i as u32, j: j as u32 }
             } else {
                 lat.cell_at(lat.direction_ext(face, i, j))
-            };
-            let c = region.index_of(cell).expect("the ring of the chunk lies in its region");
+            }
+        };
+        let height_at = |i: i64, j: i64| -> f64 {
+            let c = region.index_of(real_cell(i, j)).expect("the ring of the chunk lies in its region");
             s.z_base[c] + f64::from(change[c])
         };
         let mut heights = Vec::with_capacity((n + 2) * (n + 2));
@@ -1237,11 +1247,11 @@ impl ANet {
             for i in 0..n {
                 let c = j * n + i;
                 let (ci, cj) = (i0 + i as i64, j0 + j as i64);
-                let d = lat.direction_ext(face, ci, cj);
-                let (di, dj) = (
-                    lat.direction_ext(face, ci + 1, cj) - lat.direction_ext(face, ci - 1, cj),
-                    lat.direction_ext(face, ci, cj + 1) - lat.direction_ext(face, ci, cj - 1),
-                );
+                let d = lat.direction(real_cell(ci, cj));
+                // The neighbours the heights belong to, at their own centres (across a face edge those are not on the regular grid).
+                let at = |i: i64, j: i64| lat.direction(real_cell(i, j));
+                let (im, ip, jm, jp) = (at(ci - 1, cj), at(ci + 1, cj), at(ci, cj - 1), at(ci, cj + 1));
+                let (di, dj) = (ip - im, jp - jm);
                 let (ei, ej) = (di.normalized(), dj.normalized());
                 // The local north and east (COORD: +z the north pole, +y 90 degrees east of +x): north is the pole's part across `d`, east is north x up.
                 let north = (pole - d * pole.dot(d)).normalized();
@@ -1255,7 +1265,12 @@ impl ANet {
                 };
                 let (pe, pn) = (part(east), part(north));
                 compass.push([pe[0], pe[1], pn[0], pn[1]]);
-                spacing.push([0.5 * di.length() * self.radius_m, 0.5 * dj.length() * self.radius_m]);
+                spacing.push([
+                    (d - im).length() * self.radius_m,
+                    (ip - d).length() * self.radius_m,
+                    (d - jm).length() * self.radius_m,
+                    (jp - d).length() * self.radius_m,
+                ]);
                 dirs.push(d);
                 area.push(s.area_m2[c]);
             }
@@ -1304,13 +1319,13 @@ impl crate::chunkfield::ChunkStage for ANet {
         self.base.healthy()
     }
     fn compute(&self, lat: &ChunkLattice, region: &Region) -> Vec<f32> {
-        self.compute_full(lat, region).change
+        let s = self.solve(lat, region);
+        self.clamped_change(region, &s)
     }
     fn compute_full(&self, lat: &ChunkLattice, region: &Region) -> crate::chunkfield::StageOutput {
         let s = self.solve(lat, region);
         // The stage's own bound is a promise to the plan's bounds (GEN-039): a change beyond it is cut to it.
-        let bound = self.bound_m();
-        let change: Vec<f32> = (0..region.cells.len()).map(|c| (s.z[c] - s.z_base[c]).clamp(-bound, bound) as f32).collect();
+        let change = self.clamped_change(region, &s);
         let drivers = Some(self.chunk_drivers(lat, region, &s, &change));
         crate::chunkfield::StageOutput { change, drivers }
     }

@@ -919,3 +919,33 @@ fn the_definition_hash_covers_the_driver_constants() {
     b.params.drivers.soil_base_m += 0.5;
     assert_ne!(a.definition_hash(), b.definition_hash());
 }
+
+// spec: GEN-070
+#[test]
+fn the_drivers_of_a_ramp_do_not_change_at_the_cells_along_a_cube_face_edge() {
+    use planet_generators::anet::Solution;
+    // A planar ramp h = R (g . d) over a chunk on the edge of its face (tile x = 0) and one in the middle of the face: the same slope everywhere, so the
+    // drivers of the first and third column of the edge chunk agree within the rounding of the codes (the ring cells across the edge are not on the regular grid).
+    let lat = ChunkLattice::new(PER).unwrap();
+    let a = stage(0.4, 24);
+    let g = Vec3::new(0.25, 0.2, 0.3);
+    for tile in [TileId::new(Face(2), CHUNK_GRID_LEVEL, 0, 512).unwrap(), TileId::new(Face(0), CHUNK_GRID_LEVEL, 512, 0).unwrap()] {
+        let r = region(&lat, tile, 24);
+        let centre = lat.direction(r.cells[r.core / 2]);
+        let z_base: Vec<f64> = r.cells.iter().map(|&c| 100.0 + R * g.dot(lat.direction(c) - centre)).collect();
+        let s = Solution { receiver: vec![u32::MAX; r.cells.len()], z: z_base.clone(), area_m2: vec![1.0e6; r.cells.len()], z_base };
+        let change = vec![0.0f32; r.cells.len()];
+        let d = a.chunk_drivers(&lat, &r, &s, &change);
+        let n = PER as usize;
+        // Compare each column and row at the edge with the next two: the codes of a uniform ramp are constant but for the curvature of the sphere.
+        let mut worst = 0i32;
+        for k in 3..n - 3 {
+            for line in [&d.soil, &d.moisture, &d.insolation] {
+                for (edge, inner) in [(k * n, k * n + 2), (k, 2 * n + k)] {
+                    worst = worst.max((i32::from(line[edge]) - i32::from(line[inner])).abs());
+                }
+            }
+        }
+        assert!(worst <= 2, "{tile:?}: the codes at the edge differ from two cells in by {worst}");
+    }
+}
