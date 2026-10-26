@@ -14,7 +14,7 @@ Source: SPIKE-33, M8 plan risks, CON-22, planner decision 2026-10-24 (8 m defaul
 ## ADDED Requirements
 
 ### Requirement: GEN-079 A compact batch takes its footprint from a hint
-A batch of directions that lies on one face at least `reach + 2` cells from its edges and within 4,194,304 cells of bounding box, evaluated by a field whose reads stay within `reach` cells of a direction's own cell (the eroded field: `GRADIENT_REACH_CELLS`, 8), SHALL take the cells to gather from the box of `reach` cells before and `reach + 1` after the cell of each direction instead of from a pass that makes the reads of every direction; any other batch SHALL take the exact footprint. The gathered cells are the source's own samples and the evaluation is unchanged, so every value is bit for bit the single `height`, at any thread count and with the tile's climate (GEN-021) joined to the footprint.
+A batch of directions that lies on one face at least `reach + 2` cells from its edges, in a box of at most 4,194,304 cells, evaluated by a field whose reads stay within `reach` cells of a direction's cell (the eroded field's `reach` is 8), SHALL take the cells to gather from the box of `reach` cells before and `reach + 1` after the cell of each direction, not from a pass that reads for every direction; any other batch SHALL take the exact footprint. The gathered cells are the source's own samples, so every value is bit for bit the single `height` at any thread count, with the tile's climate (GEN-021) joined.
 
 Verify: A
 Status: active
