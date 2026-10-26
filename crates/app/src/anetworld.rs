@@ -293,6 +293,19 @@ impl WorldTerrain {
         clock: Arc<dyn Clock>,
         cfg: ChunkConfig,
     ) -> Result<bool, String> {
+        self.enable_anet_from_store_with(cell_m, spawner, clock, cfg, true)
+    }
+
+    /// [`WorldTerrain::enable_anet_from_store`] with the disk cache of landed chunks switched by `use_disk`: off, the store is only read (the
+    /// coupled run), every chunk is computed in memory and nothing is written beside it (the `generate --edit-resolve` measurement).
+    pub fn enable_anet_from_store_with(
+        self: &Arc<Self>,
+        cell_m: f64,
+        spawner: Arc<dyn Spawner>,
+        clock: Arc<dyn Clock>,
+        cfg: ChunkConfig,
+        use_disk: bool,
+    ) -> Result<bool, String> {
         let run = crate::coupledworld::load_stored(
             &self.definition(),
             self.store_dir(),
@@ -301,7 +314,7 @@ impl WorldTerrain {
             COUPLED_STEPS,
         )?;
         let Some(run) = run else { return Ok(false) };
-        self.enable_anet(run.maps, cell_m, spawner, clock, cfg)?;
+        self.enable_anet_with(run.maps, cell_m, spawner, clock, cfg, use_disk)?;
         Ok(true)
     }
 }
