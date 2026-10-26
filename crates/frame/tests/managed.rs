@@ -1982,3 +1982,137 @@ fn a_drawn_tile_that_reads_a_chunk_is_never_stale_while_that_chunks_clock_runs()
     }
     assert!(saw_clock, "the fade ran once the stale tiles were rebuilt (stale seen: {saw_stale})");
 }
+
+/// A chunk view with the publish gate on (STRM-054): every chunk is ready; what the loop publishes is recorded.
+struct GatedView {
+    published: std::sync::Mutex<Vec<planet_generators::chunkfield::ChunkKey>>,
+}
+
+impl planet_frame::chunkshare::ChunkView for GatedView {
+    fn top_level(&self) -> u8 {
+        6
+    }
+    fn reads(&self, tile: TileId) -> Vec<planet_generators::chunkfield::ChunkKey> {
+        StubView { ready: std::sync::atomic::AtomicBool::new(true) }.reads(tile)
+    }
+    fn is_ready(&self, _key: planet_generators::chunkfield::ChunkKey) -> bool {
+        true
+    }
+    fn gated(&self) -> bool {
+        true
+    }
+    fn publish(&self, keys: &[planet_generators::chunkfield::ChunkKey]) {
+        self.published.lock().unwrap().extend_from_slice(keys);
+    }
+}
+
+// spec: STRM-054
+#[test]
+fn a_landing_waits_for_the_running_fade_and_is_published_when_it_ends_without_the_timeout() {
+    let mut rig = Rig::new(1_000_000);
+    let req = request(here(), 0.0, -0.4);
+    rig.settle(&req);
+    let view = Arc::new(GatedView { published: Default::default() });
+    let clock = Arc::new(planet_streaming::FakeClock::default());
+    rig.lp.set_chunk_view(Some(view.clone()));
+    rig.lp.set_chunk_fade(1_500, clock.clone());
+    let key_of = |t: TileId| (t.face().0, t.x() >> (t.level() - 6), t.y() >> (t.level() - 6));
+    let drawn = rig.step(&req).pipeline.draw.plan.nodes.iter().map(|n| n.tile).find(|t| t.level() >= 6).expect("the plan draws fine tiles");
+    let (a, b) = (key_of(drawn), resident_chunk_other_than(&rig, key_of(drawn)));
+    // Nothing fades yet: the first landing is published at once, and its stale tiles are rebuilt before its clock starts.
+    rig.lp.chunk_landed(&[a]);
+    assert_eq!(*view.published.lock().unwrap(), vec![a]);
+    rig.settle(&req);
+    rig.step(&req);
+    // 500 ms into the fade another chunk lands: it waits.
+    clock.advance(500);
+    rig.lp.chunk_landed(&[b]);
+    assert_eq!(*view.published.lock().unwrap(), vec![a], "the second landing waits for the fade of the first");
+    // Frame by frame to the end of the fade (100 ms apart): published at the first frame at or after the end, never forced.
+    let mut at = None;
+    for _ in 0..30 {
+        clock.advance(100);
+        rig.step(&req);
+        rig.lp.chunk_landed(&[]);
+        if at.is_none() && view.published.lock().unwrap().contains(&b) {
+            at = Some(planet_streaming::Clock::now_ms(&*clock));
+        }
+    }
+    let at = at.expect("the waiting chunk is published");
+    assert!((1_500..=1_800).contains(&at), "published at {at} ms: the fade of the first lasts 1.5 s and the rebuild a few frames");
+    assert_eq!(rig.lp.forced_publications(), 0);
+}
+
+// spec: STRM-054
+#[test]
+fn a_landing_held_longer_than_the_timeout_is_published_anyway_and_counted() {
+    let mut rig = Rig::new(1_000_000);
+    let req = request(here(), 0.0, -0.4);
+    rig.settle(&req);
+    let view = Arc::new(GatedView { published: Default::default() });
+    let clock = Arc::new(planet_streaming::FakeClock::default());
+    rig.lp.set_chunk_view(Some(view.clone()));
+    // A fade that outlasts the timeout stands for a stale tile that never gets its rebuild: the clock is not idle for 20 s.
+    rig.lp.set_chunk_fade(20_000, clock.clone());
+    let key_of = |t: TileId| (t.face().0, t.x() >> (t.level() - 6), t.y() >> (t.level() - 6));
+    let drawn = rig.step(&req).pipeline.draw.plan.nodes.iter().map(|n| n.tile).find(|t| t.level() >= 6).expect("the plan draws fine tiles");
+    let (a, b) = (key_of(drawn), resident_chunk_other_than(&rig, key_of(drawn)));
+    rig.lp.chunk_landed(&[a]);
+    rig.settle(&req);
+    rig.step(&req);
+    rig.lp.chunk_landed(&[b]);
+    for _ in 0..4 {
+        clock.advance(1_000);
+        rig.step(&req);
+        rig.lp.chunk_landed(&[]);
+        assert!(!view.published.lock().unwrap().contains(&b), "{} ms: still waiting", planet_streaming::Clock::now_ms(&*clock));
+    }
+    assert_eq!(rig.lp.forced_publications(), 0);
+    clock.advance(1_000);
+    rig.step(&req);
+    rig.lp.chunk_landed(&[]);
+    assert!(view.published.lock().unwrap().contains(&b), "5 s after it landed it is published anyway");
+    assert_eq!(rig.lp.forced_publications(), 1);
+}
+
+// spec: STRM-054
+#[test]
+fn chunks_landing_along_a_stream_are_each_published_within_one_fade_and_a_rebuild_and_none_is_forced() {
+    let mut rig = Rig::new(1_000_000);
+    let req = request(here(), 0.0, -0.4);
+    rig.settle(&req);
+    let view = Arc::new(GatedView { published: Default::default() });
+    let clock = Arc::new(planet_streaming::FakeClock::default());
+    rig.lp.set_chunk_view(Some(view.clone()));
+    rig.lp.set_chunk_fade(1_500, clock.clone());
+    let key_of = |t: TileId| (t.face().0, t.x() >> (t.level() - 6), t.y() >> (t.level() - 6));
+    rig.step(&req);
+    let mut keys: Vec<_> = rig.lp.resident().keys().filter(|t| t.level() >= 6).map(|t| key_of(*t)).collect();
+    keys.sort_unstable();
+    keys.dedup();
+    assert!(keys.len() >= 3, "the settled view reads several chunks: {keys:?}");
+    // One chunk lands every 300 ms (a flight along a river), frames 100 ms apart, then 4 s without landings; when each was published.
+    let mut landed_at = std::collections::HashMap::new();
+    let mut published_at = std::collections::HashMap::new();
+    let mut next = 0;
+    for frame in 0..120u64 {
+        let now = planet_streaming::Clock::now_ms(&*clock);
+        let mut landed = Vec::new();
+        if frame % 3 == 0 && frame < 80 && next < keys.len() {
+            landed.push(keys[next]);
+            landed_at.insert(keys[next], now);
+            next += 1;
+        }
+        rig.lp.chunk_landed(&landed);
+        for k in view.published.lock().unwrap().iter() {
+            published_at.entry(*k).or_insert(now);
+        }
+        rig.step(&req);
+        clock.advance(100);
+    }
+    // A chunk waits for the fade of the epoch before it (1.5 s) and the rebuild of that epoch's tiles (a few frames): never more than 1.9 s.
+    let worst = landed_at.iter().map(|(k, at)| published_at.get(k).map(|p| p - at).unwrap_or(u64::MAX)).max().unwrap();
+    assert!(worst <= 1_900, "the longest wait for publication was {worst} ms");
+    assert_eq!(published_at.len(), landed_at.len(), "every landed chunk is published");
+    assert_eq!(rig.lp.forced_publications(), 0, "none needed the timeout");
+}

@@ -357,3 +357,19 @@ fn the_shared_edge_of_two_tiles_stays_closed_through_a_neighbour_landing_and_nex
         }
     }
 }
+
+// spec: STRM-054
+#[test]
+fn the_fade_is_idle_when_no_drawn_chunk_is_still_rising_and_a_chunk_under_a_running_fade_makes_new_tiles_wait() {
+    let (a, b) = ((2u8, 1000u32, 1000u32), (2u8, 1001u32, 1000u32));
+    let mut fade = ChunkFade::new(1_500);
+    assert!(fade.idle(0), "nothing landed");
+    fade.landed(a, 0);
+    assert!(fade.idle(0), "landed and not drawn yet: its stale readers hold the loop's gate, not the clock");
+    assert!(fade.is_fading(a, 0), "but a tile new to the renderer that reads it waits");
+    fade.shown(a, 100);
+    assert!(!fade.idle(1_000) && fade.is_fading(a, 1_000));
+    assert!(!fade.idle(1_599) && fade.idle(1_600) && !fade.is_fading(a, 1_600));
+    assert!(!fade.is_fading(b, 0), "a chunk the fade does not know does not make anything wait");
+    assert!(ChunkFade::new(0).idle(0) && !ChunkFade::new(0).is_fading(a, 0));
+}

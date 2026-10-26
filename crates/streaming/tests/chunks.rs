@@ -238,3 +238,47 @@ fn a_result_of_a_stage_that_lost_its_source_lands_but_is_not_written_to_disk() {
     let tile = planet_core::TileId::new(planet_core::Face(2), planet_generators::chunk::CHUNK_GRID_LEVEL, 1000, 1000).unwrap();
     assert_eq!(disk.get(tile), Ok(None), "nothing was written for a later session to read");
 }
+
+// spec: STRM-054
+#[test]
+fn with_the_publish_gate_the_readers_see_a_landed_chunk_only_after_it_is_published() {
+    let (spawner, clock) = (Arc::new(ManualSpawner::default()), Arc::new(FakeClock::default()));
+    let gated = manager(spawner.clone(), clock.clone(), None, ChunkConfig { workers: 4, publish_gate: true, ..ChunkConfig::default() });
+    let open = manager(spawner.clone(), clock.clone(), None, ChunkConfig { workers: 4, ..ChunkConfig::default() });
+    let wanted = [(key(0, 0), 100.0), (key(1, 0), 200.0)];
+    gated.update(&wanted);
+    open.update(&wanted);
+    spawner.run(4);
+    // The landing is reported at once either way; only the gated manager keeps it from the readers.
+    assert_eq!(gated.update(&wanted).landed.len(), 2);
+    assert_eq!(open.update(&wanted).landed.len(), 2);
+    assert!(gated.gated() && !open.gated());
+    assert_eq!(open.snapshot().len(), 2, "without the gate every ready chunk is visible, as before");
+    assert!(open.is_ready(key(0, 0)) && open.unpublished().is_empty());
+    assert!(
+        gated.snapshot().is_empty()
+            && !gated.is_ready(key(0, 0))
+            && gated.result(key(0, 0)).is_none()
+            && gated.result_hash(key(0, 0)).is_none()
+    );
+    assert_eq!(gated.unpublished(), vec![key(0, 0), key(1, 0)]);
+    // Publishing a chunk that is not ready does nothing; a ready one becomes visible to every reader.
+    gated.publish(&[key(0, 0), key(5, 5)]);
+    assert!(gated.is_ready(key(0, 0)) && !gated.is_ready(key(1, 0)) && !gated.is_ready(key(5, 5)));
+    assert_eq!(gated.snapshot().len(), 1);
+    assert!(gated.result(key(0, 0)).is_some() && gated.result_hash(key(0, 0)).is_some());
+    assert_eq!(gated.unpublished(), vec![key(1, 0)]);
+    gated.publish(&[key(1, 0)]);
+    assert_eq!(gated.snapshot().len(), 2);
+    assert!(gated.unpublished().is_empty());
+    // An evicted chunk is unpublished: it is not visible when it lands again before it is published.
+    clock.advance(20_000);
+    let up = gated.update(&[]);
+    assert_eq!(up.evicted.len(), 2);
+    assert!(gated.snapshot().is_empty());
+    gated.update(&wanted);
+    spawner.run(4);
+    gated.update(&wanted);
+    assert!(!gated.is_ready(key(0, 0)), "landed again, not published again");
+    assert_eq!(gated.unpublished().len(), 2);
+}

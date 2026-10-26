@@ -399,7 +399,11 @@ impl App<'_> {
         if self.world.has_bake() && !cfg.smoke {
             let workers = (cfg.gen.workers / 2).max(1);
             let pool = planet_streaming::GenWorkers::new(workers).with_priority(cfg.gen.priority).pool();
-            self.world.request_anet(pool, self.clock.clone(), planet_streaming::chunks::ChunkConfig { workers, ..Default::default() });
+            self.world.request_anet(
+                pool,
+                self.clock.clone(),
+                planet_streaming::chunks::ChunkConfig { workers, publish_gate: true, ..Default::default() },
+            );
         }
         // `enable_lit` is not part of `warm_up`: the lit and atmosphere passes are enabled and used once per ring set here, before the
         // first measured frame, whether the window starts lit or on the debug path (REND-017, VIEW-007).

@@ -108,6 +108,8 @@ pub struct FrameCounts {
     /// The plan's nodes that read chunk detail and those still on the base because their chunk is not ready (STRM-039); all zero without a
     /// chunk view. Logged under [`crate::chunkshare::CHUNK_COLUMNS`], not among [`FrameCounts::NAMES`] (the scheduler digests keep their width).
     pub chunk: crate::chunkshare::ChunkShare,
+    /// How often the publish gate published at its timeout (STRM-054), cumulative; 0 in a healthy run. Not among the logged columns.
+    pub forced_publications: u64,
 }
 
 impl FrameCounts {
@@ -162,6 +164,10 @@ pub struct ManagedFrame {
     pub upload_ms: f64,
 }
 
+/// A landing the publish gate holds back for longer than this is published anyway (STRM-054): the fade's liveness does not depend on a stale tile
+/// getting its rebuild.
+pub const PUBLISH_TIMEOUT_MS: u64 = 5_000;
+
 pub struct ManagedLoop {
     pipe: PlanPipeline,
     manager: ResidencyManager<CompactTile>,
@@ -199,6 +205,12 @@ pub struct ManagedLoop {
     chunk_fade: Option<(crate::chunkshare::ChunkFade, Arc<dyn Clock>)>,
     /// What each resident tile that reads chunks was last uploaded as, its change plane included: the tile a rebuilt one replaces (STRM-053).
     drawn_tiles: HashMap<TileId, Arc<CompactTile>>,
+    /// Chunks that landed and wait for the gate (STRM-054), since when the oldest waits, whether the last plan drew a stale tile that reads a
+    /// chunk, and how often the timeout published anyway.
+    publish_queue: Vec<planet_generators::chunkfield::ChunkKey>,
+    publish_waiting_since: Option<u64>,
+    stale_drawn: bool,
+    forced_publications: u64,
     /// The weight a resident tile keeps drawing at from the landing of a chunk it reads until its rebuilt tile is uploaded (STRM-053).
     stale_weights: HashMap<TileId, f32>,
     /// The lists of `wants` that changed since the manager was last given them.
@@ -290,6 +302,10 @@ impl ManagedLoop {
             chunk_view: None,
             chunk_fade: None,
             drawn_tiles: HashMap::new(),
+            publish_queue: Vec::new(),
+            publish_waiting_since: None,
+            stale_drawn: false,
+            forced_publications: 0,
             stale_weights: HashMap::new(),
             draw_changed: false,
             residency_changed: false,
@@ -408,6 +424,39 @@ impl ManagedLoop {
     /// drawing while the new one is made, REND-032) and their cached origins dropped. Returns the tiles queued; 0 without a chunk view.
     pub fn chunk_landed(&mut self, landed: &[planet_generators::chunkfield::ChunkKey]) -> usize {
         let Some(view) = self.chunk_view.clone() else { return 0 };
+        // With the publish gate (STRM-054) the landed chunks wait until no fade runs and no stale tile that reads a chunk is drawn, then all
+        // that waits is published as one epoch; a stale tile that never gets its rebuild holds them for at most `PUBLISH_TIMEOUT_MS`.
+        if view.gated() && self.chunk_fade.is_some() {
+            let now = self.chunk_fade.as_ref().map_or(0, |(_, c)| c.now_ms());
+            self.publish_queue.extend_from_slice(landed);
+            if self.publish_queue.is_empty() {
+                return 0;
+            }
+            let since = *self.publish_waiting_since.get_or_insert(now);
+            let idle = self.chunk_fade.as_ref().is_some_and(|(f, _)| f.idle(now)) && !self.stale_drawn;
+            let forced = !idle && now.saturating_sub(since) >= PUBLISH_TIMEOUT_MS;
+            if !idle && !forced {
+                return 0;
+            }
+            if forced {
+                self.forced_publications += 1;
+            }
+            self.publish_waiting_since = None;
+            let queue = std::mem::take(&mut self.publish_queue);
+            view.publish(&queue);
+            return self.apply_landed(&queue);
+        }
+        self.apply_landed(landed)
+    }
+
+    /// How many times the gate published a waiting landing at the timeout instead of at the end of the fade (STRM-054); 0 in a healthy run.
+    pub fn forced_publications(&self) -> u64 {
+        self.forced_publications
+    }
+
+    /// The landing of `landed` chunks, now visible to the readers (STRM-040).
+    fn apply_landed(&mut self, landed: &[planet_generators::chunkfield::ChunkKey]) -> usize {
+        let Some(view) = self.chunk_view.clone() else { return 0 };
         if landed.is_empty() {
             return 0;
         }
@@ -422,6 +471,11 @@ impl ManagedLoop {
             }
             for &k in landed {
                 fade.landed(k, now);
+                // Nobody resident reads this chunk, so no stale tile holds its clock back: its fade starts now, and a tile new to the renderer
+                // that reads it waits for the end of that fade (STRM-054) instead of for a clock that nothing would start.
+                if !tiles.iter().any(|t| view.reads(*t).contains(&k)) {
+                    fade.shown(k, now);
+                }
             }
         }
         // The plan cache holds origins and mesh keys of tiles that are not resident too (the plan's nodes before their tiles arrive): drop those.
@@ -605,6 +659,16 @@ impl ManagedLoop {
                 } else {
                     (UploadClass::Other, 0.0)
                 };
+                // A tile new to the renderer that reads a chunk whose fade is running waits for its end (STRM-054): its plane over the base would
+                // drop the earlier changes its neighbours still show; its parent stays drawn meanwhile.
+                if !self.resident.contains_key(&tile) && tile.level() > floor {
+                    if let (Some(view), Some((fade, clock))) = (self.chunk_view.as_deref(), self.chunk_fade.as_ref()) {
+                        let now = clock.now_ms();
+                        if view.gated() && view.reads(tile).iter().any(|k| fade.is_fading(*k, now)) {
+                            continue;
+                        }
+                    }
+                }
                 waiting.push(Waiting { tile, class, priority, bytes: sink.upload_bytes(&mesh) });
             }
             sort_waiting(&mut waiting);
@@ -678,6 +742,7 @@ impl ManagedLoop {
                     waiting.extend(view.reads(n.tile));
                 }
             }
+            self.stale_drawn = !waiting.is_empty();
             for n in &mut pipeline.draw.plan.nodes {
                 // An exact tile is the mesh the plan expects: it was built against the chunks' current versions. The first one of a landed
                 // chunk, once the stale tiles that read it are rebuilt, starts that chunk's fade (STRM-047); the node of a stale tile carries
@@ -714,6 +779,7 @@ impl ManagedLoop {
             budget_failure,
             prefetch: self.wants.prefetch.len(),
             cancelled_prefetch: stats.cancelled_prefetch - self.last.cancelled_prefetch,
+            forced_publications: self.forced_publications,
             chunk: self
                 .chunk_view
                 .as_deref()

@@ -13,6 +13,13 @@ pub trait ChunkView: Send + Sync {
     /// The chunks `tile` reads, its own first; empty for a tile above the top level.
     fn reads(&self, tile: TileId) -> Vec<ChunkKey>;
     fn is_ready(&self, key: ChunkKey) -> bool;
+    /// Whether landed chunks are published to the readers one fade at a time (STRM-054); the loop then queues what lands and publishes it when
+    /// no fade runs. A view without the gate (the default) shows every ready chunk, and the loop applies a landing at once.
+    fn gated(&self) -> bool {
+        false
+    }
+    /// Make the ready chunks among `keys` visible (STRM-054).
+    fn publish(&self, _keys: &[ChunkKey]) {}
 }
 
 /// The names of the per-frame log columns of the chunk share, in [`ChunkShare::values`] order. Stable: the speed-envelope scene reads them.
@@ -115,6 +122,23 @@ impl ChunkFade {
         }
     }
 
+    /// Whether no fade is running at `now_ms`: every chunk whose change is drawn has been at weight 1 for good. A chunk that landed and is not
+    /// drawn yet does not count (its readers are stale and drawn: the loop checks that; or none reads it).
+    pub fn idle(&self, now_ms: u64) -> bool {
+        self.fade_ms == 0 || self.shown_ms.values().all(|s| s.is_none_or(|at| now_ms.saturating_sub(at) >= self.fade_ms))
+    }
+
+    /// Whether the change of `key` is landed and not yet fully faded in at `now_ms` (running, or waiting to be drawn): a tile new to the
+    /// renderer that reads it waits for the end (STRM-054).
+    pub fn is_fading(&self, key: ChunkKey, now_ms: u64) -> bool {
+        match self.shown_ms.get(&key) {
+            None => false,
+            Some(_) if self.fade_ms == 0 => false,
+            Some(None) => true,
+            Some(&Some(at)) => now_ms.saturating_sub(at) < self.fade_ms,
+        }
+    }
+
     /// A chunk left RAM: it fades in again if it lands again.
     pub fn evicted(&mut self, key: ChunkKey) {
         self.shown_ms.remove(&key);
@@ -154,6 +178,12 @@ impl ChunkView for ManagerView {
     }
     fn is_ready(&self, key: ChunkKey) -> bool {
         self.0.is_ready(key)
+    }
+    fn gated(&self) -> bool {
+        self.0.gated()
+    }
+    fn publish(&self, keys: &[ChunkKey]) {
+        self.0.publish(keys)
     }
 }
 

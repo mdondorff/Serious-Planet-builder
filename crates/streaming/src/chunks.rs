@@ -40,11 +40,14 @@ pub struct ChunkConfig {
     /// The bytes the ready chunks may hold (their own pool of the RAM caps, STRM-041; 512 MiB by default, about 250 chunks of 8 m cells): the least
     /// recently wanted leave first beyond it.
     pub cap_bytes: u64,
+    /// Whether landed chunks are visible to the readers (`snapshot`, `is_ready`, `result`, `result_hash`) only once published
+    /// ([`ChunkManager::publish`], STRM-054): the viewer publishes them one fade at a time. Off: every ready chunk is visible, as before.
+    pub publish_gate: bool,
 }
 
 impl Default for ChunkConfig {
     fn default() -> Self {
-        ChunkConfig { workers: 3, evict_ms: 5_000, cap_bytes: 512 << 20 }
+        ChunkConfig { workers: 3, evict_ms: 5_000, cap_bytes: 512 << 20, publish_gate: false }
     }
 }
 
@@ -81,6 +84,8 @@ struct Shared {
     ready: HashMap<ChunkKey, Entry>,
     running: HashSet<ChunkKey>,
     landed: Vec<ChunkKey>,
+    /// The ready chunks the readers may see when the gate is on (STRM-054).
+    published: HashSet<ChunkKey>,
     stats: ChunkStats,
     log: Vec<String>,
 }
@@ -157,6 +162,7 @@ impl ChunkManager {
             gone.sort_unstable();
             for k in &gone {
                 sh.ready.remove(k);
+                sh.published.remove(k);
             }
             sh.stats.evicted += gone.len() as u64;
             out.evicted = gone;
@@ -240,10 +246,40 @@ impl ChunkManager {
         })
     }
 
-    /// The ready chunks, in key order: what a frame builds its chunk field from.
+    /// Whether the readers see published chunks only (the gate of [`ChunkConfig::publish_gate`]).
+    pub fn gated(&self) -> bool {
+        self.cfg.publish_gate
+    }
+
+    /// Make the ready chunks among `keys` visible to the readers (STRM-054); a no-op without the gate. A chunk that is not ready is ignored.
+    pub fn publish(&self, keys: &[ChunkKey]) {
+        let mut sh = self.shared.lock().expect("chunk state");
+        for k in keys {
+            if sh.ready.contains_key(k) {
+                sh.published.insert(*k);
+            }
+        }
+    }
+
+    /// The ready chunks the readers do not see yet, in key order; empty without the gate.
+    pub fn unpublished(&self) -> Vec<ChunkKey> {
+        if !self.cfg.publish_gate {
+            return Vec::new();
+        }
+        let sh = self.shared.lock().expect("chunk state");
+        let mut keys: Vec<ChunkKey> = sh.ready.keys().filter(|k| !sh.published.contains(k)).copied().collect();
+        keys.sort_unstable();
+        keys
+    }
+
+    fn visible(&self, sh: &Shared, key: &ChunkKey) -> bool {
+        !self.cfg.publish_gate || sh.published.contains(key)
+    }
+
+    /// The visible chunks, in key order: what a frame builds its chunk field from (the horizon jobs, the keys and the weights read the same).
     pub fn snapshot(&self) -> Vec<Arc<ChunkResult>> {
         let sh = self.shared.lock().expect("chunk state");
-        let mut keys: Vec<&ChunkKey> = sh.ready.keys().collect();
+        let mut keys: Vec<&ChunkKey> = sh.ready.keys().filter(|k| self.visible(&sh, k)).collect();
         keys.sort_unstable();
         keys.into_iter().map(|k| sh.ready[k].result.clone()).collect()
     }
@@ -260,18 +296,23 @@ impl ChunkManager {
     }
 
     pub fn is_ready(&self, key: ChunkKey) -> bool {
-        self.shared.lock().expect("chunk state").ready.contains_key(&key)
+        let sh = self.shared.lock().expect("chunk state");
+        sh.ready.contains_key(&key) && self.visible(&sh, &key)
     }
 
-    /// The ready result of `key` (what a horizon bake reads of a chunk).
+    /// The visible result of `key` (what a horizon bake reads of a chunk).
     pub fn result(&self, key: ChunkKey) -> Option<Arc<ChunkResult>> {
-        self.shared.lock().expect("chunk state").ready.get(&key).map(|e| e.result.clone())
+        let sh = self.shared.lock().expect("chunk state");
+        sh.ready.get(&key).filter(|_| self.visible(&sh, &key)).map(|e| e.result.clone())
     }
 
     /// The hash of the ready result of `key`: the part of a horizon's state word that this chunk contributes.
     pub fn result_hash(&self, key: ChunkKey) -> Option<u64> {
         // The result is taken under the lock and hashed (made once, then read) outside it: a chunk worker landing its result never waits for a hash.
-        let result = self.shared.lock().expect("chunk state").ready.get(&key).map(|e| e.result.clone());
+        let result = {
+            let sh = self.shared.lock().expect("chunk state");
+            sh.ready.get(&key).filter(|_| self.visible(&sh, &key)).map(|e| e.result.clone())
+        };
         result.map(|r| r.hash())
     }
 
