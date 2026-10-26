@@ -1,0 +1,1 @@
+- 2026-10-26 **m8-horizon-bake-cost** (GEN-085, STRM-059): archived; the horizon march walks a step table and chunks share height tiles (#774). One chunk on global16384, idle, 6 threads: 3.67 s before, 3.35 s whole raster, 3.28 s cold tiles, 1.48 s warm (march only), 2.3 s for an east neighbour. Next: AVX2 lockstep for the march, field cost per tile.
