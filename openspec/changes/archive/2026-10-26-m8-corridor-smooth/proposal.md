@@ -7,8 +7,9 @@ Look review 2b, river-r1 at 300 m: the lit valley wall shows stepped strips at t
 - `ANET_VERSION` 10: every chunk is re-keyed.
 
 ## Impact
-- Spec: generator-pipeline GEN-084 (new), GEN-078 (the reach names the smoothing).
+- Spec: generator-pipeline GEN-084 (new), GEN-078 (the reach names the smoothing), GEN-081 (the read set takes one more segment upstream along the main stem when the corridor is smoothed: the smoothing of the farthest segment of a confluence chain reads the one before it; found by the numerics review).
 - Code: `generators/route.rs`, `generators/anet.rs`; tests in `anet_network.rs` (kink, joint and confluence, borders/halos/threads).
 - Measured at the two sites (chunk solve, smoothing off against on): river-r1 cut min -46.7 to -46.9 m, p1 -41.8 to -41.7, median -0.73 to -0.72, corridor cells 633 to 728, largest difference of a cell's height 5.7 m (p99 3.2 m), corridor moved at most 4.2 cells (34 m); hills B cut min -79.6 to -79.5, p1 -31.6 to -31.5, median -10.80 both, corridor cells 640 to 770, largest difference of a cell's height 35 m (p99.9 15 m; the valley moves up to 6.4 cells = 51 m on steep ground), largest drop between linked cells 2.35 to 2.92 m. Chunk solve time is unchanged within noise (5.7 to 5.8 s river, 4.8 to 6.1 s hills B on a busy machine).
-- GEN-081's read set (crusader) uses `routing_reach_m`: it grows by 64 m (0.01 % of a chunk's discs).
+- GEN-081's read set (crusader) uses `routing_reach_m`: every disc grows by 64 m, and `chunk_read_set` walks one more segment upstream (nine more discs per confluence chain).
 - Moved goldens: chunk scenes with a river in view (checked by `cargo xtask test gpu`; lit views escalate to the owner's /bless).
+- Numerics review: the joint of two segments is one point bit for bit (computed from the points around it, arclength measured from it, whichever segment asks); a debug assertion that a segment is at least `smooth_m` long when it has a neighbour; the confluence test uses the three real segments of the fork.

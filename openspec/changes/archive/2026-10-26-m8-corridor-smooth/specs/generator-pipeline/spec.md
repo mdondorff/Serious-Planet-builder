@@ -31,3 +31,14 @@ Source: opus-planner (2026-10-26), GEN-066, GEN-067
 #### Scenario: Pruned and unpruned
 - **WHEN** chunks of a fork of rivers are built with every segment of the ring routed and with only the segments that can reach the region, at strides 1 and 4 and two halos
 - **THEN** the corridor, links, anchors, areas and inflows are bit for bit equal and fewer segments are routed in total
+
+### Requirement: GEN-081 The read set of a chunk
+`chunk_read_set` SHALL return the discs outside which no item can change a chunk's bits: the chunk's region (its square plus the halo of GEN-049) and the routed network it reads, that is the segments the pruning of GEN-078 keeps (one `region_segments`, one `segments_reaching`) and those upstream of them along the main stem up to the law's window (one more segment when the corridor is smoothed, GEN-084), each widened by `routing_reach_m` along its chord. The set SHALL be a function of the chunk key, the global run and the stage parameters only, never of routed paths or items, so it cannot depend on the edits it selects.
+
+Verify: A
+Status: active
+Source: m8-chunk-version, GEN-049, GEN-059, GEN-078
+
+#### Scenario: The set covers what the network reads
+- **WHEN** an item's reach touches only the routing reach of a kept segment, outside the halo
+- **THEN** it is inside the read set and the chunk's bits change with it; an item outside every disc changes no bit, and the set takes no item as input
