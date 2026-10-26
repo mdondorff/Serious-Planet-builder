@@ -339,3 +339,56 @@ fn the_hinted_footprint_reads_about_the_cells_the_batch_needs_and_decodes_each_b
     assert!(reads < 2_000, "{reads} cell reads for a batch of about 12 x 12 cells");
     assert!(src.decodes() <= 4, "{} block decodes for the four blocks round the centre", src.decodes());
 }
+
+// spec: GEN-079
+#[test]
+fn a_hinted_batch_at_the_middle_of_a_face_edge_where_the_chart_stretches_most_has_the_bits_of_the_single_heights() {
+    // The chart stretches a stencil by sqrt(2) at the middle of a face edge: 100 x 100 directions 1.5e-5 apart, centred 0.0015 (about 12 cells) inside the edge.
+    let dirs = compact_batch(4, 0.0, 0.9985, 1.5e-5, 100);
+    let direct = Simulated::new(usize::MAX, false);
+    let want: Vec<u64> = dirs.iter().map(|&d| field(&direct).height(d).to_bits()).collect();
+    for threads in [1usize, 8] {
+        let src = Simulated::new(3, true);
+        let f = field(&src);
+        let got: Vec<u64> = f.heights_threaded_until(&dirs, &|| false, threads).iter().map(|h| h.to_bits()).collect();
+        assert!(got == want && f.error().is_none(), "{threads} threads: {:?}", f.error());
+        // The hint was taken (a few hundred cells, not one per read).
+        assert!(src.reads.load(Ordering::Relaxed) < 3_000, "{} reads", src.reads.load(Ordering::Relaxed));
+    }
+}
+
+// spec: GEN-079
+#[test]
+fn a_sparse_batch_takes_the_exact_footprint_and_a_box_that_is_too_small_fails_loudly_instead_of_changing_a_value() {
+    use planet_generators::global::{eval_gathered, read_direction};
+    // 33 x 33 directions 32 bake cells apart (a coarse tile): the hinted boxes would gather 100 times the cells the reads touch.
+    let dirs = compact_batch(2, 0.0, 0.0, 32.0 * 1.2e-4, 33);
+    let src = Simulated::new(3, true);
+    let _ = field(&src).heights_threaded_until(&dirs, &|| false, 1);
+    let reads = src.reads.load(Ordering::Relaxed);
+    assert!(
+        reads < 60_000,
+        "{reads} cell reads for a sparse batch of 33 x 33 (the exact footprint is about 22,000, the boxes would be about 350,000)"
+    );
+    // A stencil of 5 cells: a box of 8 holds it, a box of 1 does not (the missing cells are errors, here NaN, never another value).
+    let stencil = |s: &dyn LatticeSource, d: Vec3| -> f64 {
+        let step = 5.0 * 1.2e-4;
+        let mut sum = 0.0;
+        for (a, b) in [(step, 0.0), (-step, 0.0), (0.0, step), (0.0, -step)] {
+            let e = planet_core::cube::direction_to_face(&TangentWarp, d);
+            let moved = planet_core::cube::face_to_direction(&TangentWarp, e.0, e.1 + a, e.2 + b);
+            sum += read_direction(s, &TangentWarp, moved).map_or(f64::NAN, |x| f64::from(x.elevation_m));
+        }
+        sum
+    };
+    let footprint = |g: &dyn LatticeSource, d: Vec3| {
+        stencil(g, d);
+    };
+    let compact = compact_batch(1, 0.3, -0.2, 1.5e-5, 100);
+    let src = Simulated::new(3, true);
+    let direct: Vec<u64> = compact.iter().map(|&d| stencil(&src, d).to_bits()).collect();
+    let hinted = eval_gathered(&src, &compact, &|| false, &footprint, Some(8), &stencil);
+    assert!(hinted.iter().map(|h| h.to_bits()).eq(direct.iter().copied()), "a box of 8 changed a value");
+    let small = eval_gathered(&src, &compact, &|| false, &footprint, Some(1), &stencil);
+    assert!(small.iter().any(|h| h.is_nan()), "a box of 1 did not miss a cell of a 5-cell stencil");
+}

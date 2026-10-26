@@ -1030,6 +1030,9 @@ enum Hinted {
 /// The largest bounding box, in cells, of a batch whose footprint is taken from a hint.
 const HINT_MAX_CELLS: u64 = 1 << 22;
 
+/// The most cells a hinted footprint may hold per direction of the batch (plus 4,096): a batch with fewer directions than that is gathered exactly.
+const HINT_CELLS_PER_DIRECTION: u64 = 4;
+
 /// The footprint of a batch that is compact on one face, without running the reads of every direction: a superset made of the box of `reach` cells round
 /// the cell each direction falls in (one more on the far side, for the vertex a bilinear read adds). The caller's reads (a gradient stencil) stay within
 /// `reach` cells of the direction's own cell, so the box holds every cell they touch; the extra cells are the source's own samples and nobody reads them.
@@ -1044,6 +1047,10 @@ fn footprint_hinted(src: &dyn LatticeSource, dirs: &[Vec3], stop: &dyn Fn() -> b
     for (k, &d) in dirs.iter().enumerate() {
         if k % 64 == 0 && stop() {
             return Hinted::Stopped;
+        }
+        // (A direction that is not a unit vector moves the stencil's reach: the exact footprint is taken.)
+        if (d.dot(d) - 1.0).abs() > 1.0e-9 {
+            return Hinted::Declined;
         }
         let Ok(at) = locate_direction(res, &planet_core::cube::TangentWarp, d) else { return Hinted::Declined };
         if face.is_some_and(|f| f != at.face.0) || at.i < margin || at.j < margin || at.i + margin > res || at.j + margin > res {
@@ -1071,6 +1078,11 @@ fn footprint_hinted(src: &dyn LatticeSource, dirs: &[Vec3], stop: &dyn Fn() -> b
                 *m = true;
             }
         }
+    }
+    // A sparse batch (a coarse tile: a few dozen cells apart) would gather far more cells than it reads: the exact footprint is cheaper then.
+    let marked = mark.iter().filter(|&&m| m).count() as u64;
+    if marked > HINT_CELLS_PER_DIRECTION * dirs.len() as u64 + 4096 {
+        return Hinted::Declined;
     }
     let mut keys: Vec<u64> = Vec::new();
     for y in 0..h {
