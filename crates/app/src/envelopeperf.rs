@@ -209,6 +209,8 @@ pub struct LogFacts<'a> {
     /// Whether the curve ran with the horizon jobs (REND-038) and, with a chunk stage, the comparison point of one altitude without them.
     pub horizon: bool,
     pub horizon_off: Option<&'a Point>,
+    /// With a chunk stage, where along each flight the start put a chunk edge (0.5: half way); `None` without one.
+    pub edge_fraction: Option<f64>,
 }
 
 /// Why the chunk stand-in share is `null` in a log of a world without a chunk field.
@@ -292,6 +294,7 @@ pub fn log_json(points: &[Point], facts: &LogFacts<'_>) -> String {
     s += "  \"stand_in_weighting\": \"nodes: unweighted share of the plan nodes at or finer than the pyramid top level whose chunk is not ready (STRM-039)\",\n";
     s += &format!("  \"chunk_field\": {},\n", facts.chunk_field);
     s += &format!("  \"horizon\": {},\n", facts.chunk_field && facts.horizon);
+    s += &format!("  \"edge_fraction\": {},\n", facts.edge_fraction.map_or("null".to_string(), number));
     if !facts.chunk_field {
         s += &format!("  \"stand_in_reason\": {NO_CHUNK_FIELD:?},\n");
     }
@@ -307,6 +310,60 @@ pub fn log_json(points: &[Point], facts: &LogFacts<'_>) -> String {
     }
     s += "  ]\n}\n";
     s
+}
+
+/// Where along a flight with a chunk stage the start puts a chunk edge: half way (TEST-054).
+pub const EDGE_FRACTION: f64 = 0.5;
+
+/// The key of the chunk that holds the point (`lat_deg`, `lon_deg`).
+pub fn chunk_key_at(lat_deg: f64, lon_deg: f64) -> (u8, u32, u32) {
+    let d = planet_core::Vec3::from_lat_lon(lat_deg.to_radians(), lon_deg.to_radians());
+    let t = planet_core::TileId::from_direction(&TangentWarp, d, planet_generators::chunk::CHUNK_GRID_LEVEL);
+    (t.face().0, t.x(), t.y())
+}
+
+/// The latitude to start a flight due north of (`lat0_deg`, `lon_deg`) so that it crosses the first chunk edge north of `lat0_deg` at `fraction` of its
+/// length `flight_deg` (TEST-054): every flight then has fresh chunks ahead of the eye, the worst phase, and the curve is a floor that does not depend on
+/// where an edge happens to fall. `key_at` gives the chunk key of a point; the edge is found by walking north in steps of at most a quarter of the
+/// flight and bisecting to a micro-degree. No edge within 0.2 degrees (22 km) leaves the start where it is.
+pub fn straddling_start_lat(
+    key_at: &dyn Fn(f64, f64) -> (u8, u32, u32),
+    lat0_deg: f64,
+    lon_deg: f64,
+    flight_deg: f64,
+    fraction: f64,
+) -> f64 {
+    let first = key_at(lat0_deg, lon_deg);
+    let step = (flight_deg / 4.0).clamp(0.001, 0.05);
+    let (mut below, mut above) = (lat0_deg, lat0_deg + step);
+    while key_at(above, lon_deg) == first {
+        below = above;
+        above = below + step;
+        if above - lat0_deg > 0.2 {
+            return lat0_deg;
+        }
+    }
+    for _ in 0..40 {
+        let mid = 0.5 * (below + above);
+        if key_at(mid, lon_deg) == first {
+            below = mid;
+        } else {
+            above = mid;
+        }
+    }
+    above - fraction * flight_deg
+}
+
+/// The place trial `n` starts from: [`start_place`], moved north so that the flight (`speed_mps` for `frames` frames) crosses a chunk edge half way when
+/// the scene runs the chunk stage.
+pub fn trial_start(n: usize, speed_mps: f64, frames: usize, radius_m: f64, chunks: bool) -> (f64, f64) {
+    let (lat, lon) = start_place(n);
+    if !chunks {
+        return (lat, lon);
+    }
+    let flight_m = speed_mps * frames.saturating_sub(1) as f64 * FRAME_STEP_S;
+    let flight_deg = (flight_m / radius_m).to_degrees();
+    (straddling_start_lat(&chunk_key_at, lat, lon, flight_deg, EDGE_FRACTION), lon)
 }
 
 /// The start place of trial `n` (counted over the whole run): the scene's site moved north by [`PLACE_STEP_DEG`] a trial, so no two
@@ -494,7 +551,7 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
     for &altitude in altitudes {
         let point = if smoke {
             // One trial at the start speed: proves the path, decides nothing.
-            let (lat, lon) = start_place(n);
+            let (lat, lon) = trial_start(n, START_SPEED_MPS, frames, radius_m, stage.is_some());
             n += 1;
             let cameras = level_flight_cameras(radius_m, aspect, field.as_ref(), altitude, START_SPEED_MPS, lat, lon, frames);
             let measure = fly(ctx, &world, &req_of, &cameras, true, o.gen_workers(), stage, out)?;
@@ -508,7 +565,7 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
             }
         } else {
             search(altitude, o.share_bound, |speed| {
-                let (lat, lon) = start_place(n);
+                let (lat, lon) = trial_start(n, speed, frames, radius_m, stage.is_some());
                 n += 1;
                 let cameras = level_flight_cameras(radius_m, aspect, field.as_ref(), altitude, speed, lat, lon, frames);
                 let measure = fly(ctx, &world, &req_of, &cameras, false, o.gen_workers(), stage, out)?;
@@ -531,7 +588,7 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
             let off = StageSetup { horizon: false, ..st };
             let altitude = COMPARISON_ALTITUDE_M;
             let point = if smoke {
-                let (lat, lon) = start_place(n);
+                let (lat, lon) = trial_start(n, START_SPEED_MPS, frames, radius_m, true);
                 let cameras = level_flight_cameras(radius_m, aspect, field.as_ref(), altitude, START_SPEED_MPS, lat, lon, frames);
                 let measure = fly(ctx, &world, &req_of, &cameras, true, o.gen_workers(), Some(off), out)?;
                 let share = measure.judged();
@@ -544,7 +601,7 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
                 }
             } else {
                 search(altitude, o.share_bound, |speed| {
-                    let (lat, lon) = start_place(n);
+                    let (lat, lon) = trial_start(n, speed, frames, radius_m, true);
                     n += 1;
                     let cameras = level_flight_cameras(radius_m, aspect, field.as_ref(), altitude, speed, lat, lon, frames);
                     let measure = fly(ctx, &world, &req_of, &cameras, false, o.gen_workers(), Some(off), out)?;
@@ -579,6 +636,7 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
             chunk_field,
             horizon: true,
             horizon_off: horizon_off.as_ref(),
+            edge_fraction: stage.map(|_| EDGE_FRACTION),
         },
     );
     let path = o.out.clone().unwrap_or_else(|| Path::new("perf").join("logs").join("envelope.json"));
@@ -709,6 +767,7 @@ mod tests {
             chunk_field,
             horizon: true,
             horizon_off: None,
+            edge_fraction: None,
         };
         let without = log_json(&[pt(Measure::coarse_only(0.004))], &facts(false));
         assert!(
@@ -754,6 +813,7 @@ mod tests {
             chunk_field,
             horizon: true,
             horizon_off,
+            edge_fraction: None,
         };
         let off: &'static Point = Box::leak(Box::new(off));
         let with = log_json(&[pt(30.0, measure)], &facts(true, Some(off)));
@@ -775,6 +835,45 @@ mod tests {
         assert!(
             without.contains("\"stage\": null") && !without.contains("horizon_off_comparison") && without.contains("\"horizon\": false")
         );
+    }
+
+    // spec: TEST-054
+    #[test]
+    fn the_start_puts_a_chunk_edge_half_way_along_the_flight_whichever_the_speed_and_the_phase() {
+        // Chunks of 0.04 degrees of latitude, edges at multiples of it; a fake key, a function of the point alone.
+        let key = |lat: f64, _lon: f64| (0u8, (lat / 0.04).floor() as u32, 7u32);
+        let edge_of = |lat0: f64| ((lat0 / 0.04).floor() + 1.0) * 0.04;
+        for flight_deg in [0.003, 0.011, 0.019, 0.05] {
+            for k in 0..40 {
+                let lat0 = 3.0 + 0.0093 * f64::from(k);
+                let start = straddling_start_lat(&key, lat0, 20.0, flight_deg, 0.5);
+                let crossing = start + 0.5 * flight_deg;
+                assert!(
+                    (crossing - edge_of(lat0)).abs() < 1e-6,
+                    "flight {flight_deg}, start {lat0}: the edge is {} deg along",
+                    crossing - lat0
+                );
+                // The flight starts in the chunk before the edge and ends in the one after it: exactly one edge crossed.
+                assert_ne!(key(start, 20.0), key(start + flight_deg, 20.0));
+                assert_eq!(key(start, 20.0).1 + 1, key(start + flight_deg, 20.0).1);
+            }
+        }
+        // No edge within reach leaves the start where it is.
+        assert_eq!(straddling_start_lat(&|_, _| (0, 0, 0), 3.0, 20.0, 0.01, 0.5), 3.0);
+    }
+
+    // spec: TEST-054
+    #[test]
+    fn the_real_chunk_grid_has_an_edge_within_reach_of_every_trial_start_and_the_trial_start_keeps_the_site_without_chunks() {
+        for n in 0..12 {
+            let (lat, lon) = trial_start(n, 150.0, 721, 6_371_000.0, true);
+            let flight_deg = (150.0 * 720.0 * FRAME_STEP_S / 6_371_000.0).to_degrees();
+            // The flight starts in one chunk and ends in the next.
+            assert_ne!(chunk_key_at(lat, lon), chunk_key_at(lat + flight_deg, lon), "trial {n} crosses no chunk edge");
+            // A start stays within one chunk edge (about 5 km) of the site's place.
+            assert!((lat - start_place(n).0).abs() < 0.1, "trial {n} moved {} degrees", lat - start_place(n).0);
+            assert_eq!(trial_start(n, 150.0, 721, 6_371_000.0, false), start_place(n));
+        }
     }
 
     // spec: TEST-047
@@ -809,6 +908,7 @@ mod tests {
                 chunk_field: false,
                 horizon: true,
                 horizon_off: None,
+                edge_fraction: None,
             },
         );
         for want in [
