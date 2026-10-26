@@ -171,8 +171,10 @@ pub struct PublishStats {
     pub queued: usize,
     pub pending_chunks: usize,
     pub deferred_tiles: usize,
-    /// Landings and clocks the timeout released, cumulative.
+    /// Landings and clocks the timeout released, cumulative, and what held the queue back when it was forced (a fade still running, readers not
+    /// rebuilt, tiles deferred) and how many clocks the readers' timeout started.
     pub forced: u64,
+    pub forced_by: [u64; 4],
     /// The largest number of deferred tiles seen, and the longest time from a chunk's landing to its change being drawn (its clock started).
     pub max_deferred_tiles: usize,
     pub max_landing_to_drawn_ms: u64,
@@ -185,8 +187,15 @@ impl PublishStats {
             return String::new();
         }
         format!(
-            " | chunk gate: {} waiting, {} unrebuilt, {} tiles deferred, {} forced",
-            self.queued, self.pending_chunks, self.deferred_tiles, self.forced
+            " | chunk gate: {} waiting, {} unrebuilt, {} tiles deferred, {} forced (fade {}, readers {}, deferred {}, clocks {})",
+            self.queued,
+            self.pending_chunks,
+            self.deferred_tiles,
+            self.forced,
+            self.forced_by[0],
+            self.forced_by[1],
+            self.forced_by[2],
+            self.forced_by[3]
         )
     }
 }
@@ -246,6 +255,7 @@ pub struct ManagedLoop {
     max_deferred_tiles: usize,
     max_landing_to_drawn_ms: u64,
     forced_publications: u64,
+    forced_by: [u64; 4],
     /// The weight a resident tile keeps drawing at from the landing of a chunk it reads until its rebuilt tile is uploaded (STRM-053).
     stale_weights: HashMap<TileId, f32>,
     /// The lists of `wants` that changed since the manager was last given them.
@@ -346,6 +356,7 @@ impl ManagedLoop {
             max_deferred_tiles: 0,
             max_landing_to_drawn_ms: 0,
             forced_publications: 0,
+            forced_by: [0; 4],
             stale_weights: HashMap::new(),
             draw_changed: false,
             residency_changed: false,
@@ -496,6 +507,10 @@ impl ManagedLoop {
             }
             if forced {
                 self.forced_publications += 1;
+                let fade_running = !self.chunk_fade.as_ref().is_some_and(|(f, _)| f.idle(now));
+                self.forced_by[0] += u64::from(fade_running);
+                self.forced_by[1] += u64::from(!self.pending_readers.is_empty());
+                self.forced_by[2] += u64::from(self.deferred_fresh != 0);
             }
             self.publish_waiting_since = None;
             let queue = std::mem::take(&mut self.publish_queue);
@@ -513,6 +528,7 @@ impl ManagedLoop {
             pending_chunks: self.pending_readers.len(),
             deferred_tiles: self.deferred_fresh,
             forced: self.forced_publications,
+            forced_by: self.forced_by,
             max_deferred_tiles: self.max_deferred_tiles,
             max_landing_to_drawn_ms: self.max_landing_to_drawn_ms,
         }
@@ -567,6 +583,7 @@ impl ManagedLoop {
         for k in late {
             self.pending_readers.remove(&k);
             self.forced_publications += 1;
+            self.forced_by[3] += 1;
             if let Some((fade, _)) = self.chunk_fade.as_mut() {
                 fade.shown(k, now);
                 self.started_keys.push((k, now));
