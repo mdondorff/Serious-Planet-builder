@@ -687,3 +687,32 @@ fn chunks_have_the_same_bits_with_the_memo_cold_warm_filled_in_another_order_or_
         assert_eq!(results.into_inner().expect("results"), cold, "{workers} workers through one memo change a chunk");
     }
 }
+
+// spec: GEN-078
+#[test]
+fn a_chunk_routes_only_the_segments_that_can_reach_its_region_and_has_the_bits_of_routing_them_all() {
+    use planet_generators::route::RouteMemo;
+    let lat = ChunkLattice::new(32).unwrap();
+    let bits = |n: &Network| {
+        let z: Vec<u64> = n.anchor_z.iter().map(|z| z.to_bits()).collect();
+        let a: Vec<u64> = n.river_area_m2.iter().map(|a| a.to_bits()).collect();
+        let inflow: Vec<u64> = n.inflow_m2.iter().map(|a| a.to_bits()).collect();
+        (z, a, inflow, n.corridor.clone(), n.next.clone())
+    };
+    let (mut pruned_total, mut all_total) = (0, 0);
+    for law in [stride_law(1), stride_law(4), planet_generators::anet::AnchorLaw::default()] {
+        for x in 1001..=1008u32 {
+            for halo in [10u16, 40] {
+                let r = region(&lat, chunk(x), halo);
+                let (m_pruned, m_all) = (RouteMemo::default(), RouteMemo::default());
+                let pruned = Network::build_with_memo(&Fork, &Ridge, &lat, &r, R, &law, &m_pruned);
+                let all = Network::build_unpruned(&Fork, &Ridge, &lat, &r, R, &law, &m_all);
+                assert_eq!(bits(&pruned), bits(&all), "chunk {x}, halo {halo}, stride {}: pruning changed the network", law.route_stride);
+                assert!(m_pruned.routed_segments() <= m_all.routed_segments());
+                pruned_total += m_pruned.routed_segments();
+                all_total += m_all.routed_segments();
+            }
+        }
+    }
+    assert!(pruned_total < all_total, "pruning saved nothing: {pruned_total} of {all_total} segments routed");
+}

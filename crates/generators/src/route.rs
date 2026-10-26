@@ -89,6 +89,11 @@ impl RouteMemo {
         [0, 1, 2].map(|k| self.served[k].load(Ordering::Relaxed))
     }
 
+    /// The segments the memo holds a routed polyline for.
+    pub fn routed_segments(&self) -> usize {
+        self.lines.lock().expect("memo").len()
+    }
+
     /// The points the memo of raster heights holds.
     pub fn raster_heights_held(&self) -> usize {
         self.heights.lock().expect("memo").len()
@@ -130,7 +135,7 @@ impl<'a> Router<'a> {
 
     /// The base heights at the raster points `(face, i, j)` of the lattice, in order: from the region's heights, else the memo, else evaluated in one batch.
     fn raster_heights(&self, face: u8, points: &[(i64, i64)]) -> Vec<f64> {
-        let n = self.lat.n() as i64;
+        let n = self.lat.n();
         let mut z = vec![0.0f64; points.len()];
         let mut miss: Vec<usize> = Vec::new();
         let mut counts = [0u64; 3];

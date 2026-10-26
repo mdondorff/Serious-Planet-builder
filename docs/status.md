@@ -27,7 +27,7 @@ Done before the reset (2026-10-23 and 24; M8-2 archived #621, chunk fade split i
 Open owner items: the two flickers (Tracked) need a live check (editor off, debug path L, or a recording or F9 at the moment); P1-5 editing frame rate on a quiet machine; P2-8 missing tiles during an edit's refresh.
 
 ## Tracked
-- **GEN-052 chunk time open** (stays `planned`, Verify C): 4.36 s at 8 m (2026-10-24), 4.2 s after m8-3f, budget 4 s; routing adds network time (3.1-5.5 to 4.2-9.7 s) the stage memo shares. Next perf window: `cargo xtask perf anet-chunk` at 8, 4, 10 m; then optimise or relax.
+- **GEN-052 chunk time open** (stays `planned`, Verify C): 2026-10-26 on the 256-cell bake (segments 8x production's): 8 m 13.5 s, routing 8.9 s; 4 m 55.3 s, 10 m 9.0 s. Production geometry (2,048 run, stride 8): network 3.4-3.8 s, chunk 6.8-7.5 s cold. Next: `perf anet-chunk --store`.
 - **Driver fade seam** (#716): a tile rebuilt for a neighbour chunk's landing fades its drivers up from neutral again. Trigger: the first look with driver curves. Fix: a driver increment plane on the upload path (crusader). Resolution: 32 m texels (GEN-074); M9: per-vertex.
 - **Look review renders** (tier D): lit stills at 300 m, 30 m, 1.8 m on the rebuilt store (routed corridor, hill band) for the owner.
 - **Steepest river and the 3e7 m2 drop**: at (34.158, 140.835) 519 of 1,344 links climb and 3,491 cells sit at the 300 m bound: the coarse network climbs beyond a 1 km node slide (M9, coarse run). A 3e7 m2 tributary threshold gave a 27.8 m drop; the stage uses 5e7.

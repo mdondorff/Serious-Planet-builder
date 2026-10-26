@@ -219,6 +219,35 @@ impl Network {
         law: &AnchorLaw,
         memo: &crate::route::RouteMemo,
     ) -> Network {
+        Network::build_pruned(run, base, lat, region, radius_m, law, memo, true)
+    }
+
+    /// [`Network::build_with_memo`] routing every segment of the ring of coarse cells, also those that cannot reach the region (the tests compare it
+    /// with the pruned build; the two are bit for bit the same).
+    #[doc(hidden)]
+    pub fn build_unpruned(
+        run: &dyn CoarseRun,
+        base: &dyn BaseDetail,
+        lat: &ChunkLattice,
+        region: &Region,
+        radius_m: f64,
+        law: &AnchorLaw,
+        memo: &crate::route::RouteMemo,
+    ) -> Network {
+        Network::build_pruned(run, base, lat, region, radius_m, law, memo, false)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn build_pruned(
+        run: &dyn CoarseRun,
+        base: &dyn BaseDetail,
+        lat: &ChunkLattice,
+        region: &Region,
+        radius_m: f64,
+        law: &AnchorLaw,
+        memo: &crate::route::RouteMemo,
+        prune: bool,
+    ) -> Network {
         let coarse = run.lattice();
         let n_coarse = coarse.n();
         // Fine cells per coarse cell along an edge: the chunk lattice cut by the coarse one (the production run is the chunk grid, 2048 cells).
@@ -261,6 +290,9 @@ impl Network {
         // that lie in the region are these heights (GEN-077).
         let dirs: Vec<Vec3> = region.cells.iter().map(|&c| lat.direction(c)).collect();
         let heights = base.base_heights(&dirs);
+        if prune {
+            segments = segments_reaching(run, &dirs, &segments, lat, radius_m, law);
+        }
         let router = crate::route::Router::new(run, base, lat, radius_m, law, memo).with_known(region, &heights);
         let anchors = anchor_profiles(run, base, &segments, radius_m, law, is_river, &router);
         for (from, to) in segments {
@@ -617,6 +649,44 @@ fn paint_band(
 /// stem's bed that arrives at the confluence it flows into (rising at the least fall: a tributary hangs above the stem, never under it). A function of the run
 /// and the base at positions alone: the same in every chunk. The window is the limit: a low carried from the segment `window` above one segment is not carried by
 /// the next, which releases it as a step there (rare; a link that climbs by more than the bed tolerance makes its donor an outlet in the solve).
+/// The segments of `segments` whose routed path can touch the region whose cell directions are `dirs` (GEN-078). A path stays within the band of its guide,
+/// the guide within the meander of the chord between its two nodes, and a node within the slide of its coarse centre, so a segment whose chord is farther
+/// from the region than the region's radius plus those and the raster's rounding cannot give the region a single cell, a bed, an inflow or a link: leaving
+/// it out changes nothing.
+fn segments_reaching(
+    run: &dyn CoarseRun,
+    dirs: &[Vec3],
+    segments: &BTreeSet<(usize, usize)>,
+    lat: &ChunkLattice,
+    radius_m: f64,
+    law: &AnchorLaw,
+) -> BTreeSet<(usize, usize)> {
+    let mut sum = Vec3::new(0.0, 0.0, 0.0);
+    for &d in dirs {
+        sum = sum + d;
+    }
+    let centre = sum.normalized();
+    let reach_m = dirs.iter().map(|&d| (d - centre).length()).fold(0.0, f64::max) * radius_m;
+    let raster_m = f64::from(law.route_stride.max(1)) * lat.cell_m(radius_m);
+    let slide_m = law.slide_m.max(law.slide_steep_m).max(law.head_m);
+    let band_m = if law.route_band_m > 0.0 { law.route_band_m + 3.0 * raster_m } else { 0.0 };
+    // A chord is sampled every eighth: the farthest a sample can be from the nearest point of the chord is half a step.
+    let margin_m = reach_m + band_m + slide_m + MEANDER_M + 2.0 * raster_m;
+    let coarse = run.lattice();
+    segments
+        .iter()
+        .copied()
+        .filter(|&(from, to)| {
+            let (a, b) = (coarse.direction(from), coarse.direction(to));
+            let half_step_m = (a - b).length() * radius_m / 16.0;
+            (0..=8).any(|k| {
+                let p = (a * (1.0 - f64::from(k) / 8.0) + b * (f64::from(k) / 8.0)).normalized();
+                (p - centre).length() * radius_m - half_step_m <= margin_m
+            })
+        })
+        .collect()
+}
+
 fn anchor_profiles(
     run: &dyn CoarseRun,
     base: &dyn BaseDetail,
@@ -844,6 +914,7 @@ impl ANetParams {
         params.anchor.band_cap_m = params.anchor.band_cap_m.min(spare_rings.max(0.0) * cell_m);
         // Local main-stem routing (GEN-066, ADR 0081): nodes slide 0.5 km (1 km on steep ground), heads move up to 1 km, the path runs within 1 km of the guide.
         params.anchor.route_band_m = 1000.0;
+        params.anchor.route_stride = 8;
         params.anchor.slide_m = 500.0;
         params.anchor.slide_steep_m = 1000.0;
         params.anchor.head_m = 1000.0;
