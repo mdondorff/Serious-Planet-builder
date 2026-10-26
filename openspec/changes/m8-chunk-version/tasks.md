@@ -1,6 +1,6 @@
 ## 1. Read set
-- [ ] 1.1 `anet::chunk_read_set` and tests (equal to `segments_reaching` on the existing network tests; the upstream window included)
-- [ ] 1.2 `segments_reaching` uses it
+- [x] 1.1 `anet::chunk_read_set` and tests (equal to `segments_reaching` on the existing network tests; the upstream window included)
+- [x] 1.2 `region_segments` and `main_donor_of` shared by the build and the read set
 
 ## 2. Version and Under
 - [ ] 2.1 `ChunkVersion` from the items touching the read set; part of `ChunkSpec` and the record

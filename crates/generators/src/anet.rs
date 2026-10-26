@@ -248,31 +248,8 @@ impl Network {
         memo: &crate::route::RouteMemo,
         prune: bool,
     ) -> Network {
-        let coarse = run.lattice();
-        let n_coarse = coarse.n();
-        // Fine cells per coarse cell along an edge: the chunk lattice cut by the coarse one (the production run is the chunk grid, 2048 cells).
-        let ratio = lat.n() as usize / n_coarse.max(1);
-        assert_eq!(n_coarse * ratio, lat.n() as usize, "the fine lattice must be the coarse lattice cut into squares of {ratio} cells");
-        let coarse_of = |c: Cell| usize::from(c.face) * n_coarse * n_coarse + (c.j as usize / ratio) * n_coarse + (c.i as usize / ratio);
-
-        // The coarse cells the region touches, and the segments of rivers through them (and into them from outside).
-        let inside: BTreeSet<usize> = region.cells.iter().map(|&c| coarse_of(c)).collect();
-        // One coarse ring more than the region touches: a meander of 700 m takes a segment of the next cell into the region's outer cells.
-        let touch: BTreeSet<usize> =
-            inside.iter().flat_map(|&c| core::iter::once(c).chain(coarse.neighbours(c).into_iter().map(|x| x as usize))).collect();
         let is_river = |c: usize| f64::from(run.area_m2(c)) > law.river_area_m2 && run.receiver(c) != COARSE_NONE;
-        let mut segments: BTreeSet<(usize, usize)> = BTreeSet::new();
-        for &c in &touch {
-            if is_river(c) {
-                segments.insert((c, run.receiver(c) as usize));
-            }
-            for nb in coarse.neighbours(c) {
-                let nb = nb as usize;
-                if !touch.contains(&nb) && is_river(nb) && run.receiver(nb) as usize == c {
-                    segments.insert((nb, c));
-                }
-            }
-        }
+        let mut segments = region_segments(run, lat, region, law);
 
         let len = region.cells.len();
         let (mut corridor, mut next, mut inflow_m2) = (vec![false; len], vec![NO_NEXT; len], vec![0.0f64; len]);
@@ -652,6 +629,124 @@ pub fn routing_reach_m(law: &AnchorLaw, cell_m: f64) -> f64 {
     CHART_STRETCH * (band_m + slide_m + 5.0 * raster_m) + MEANDER_M
 }
 
+/// The coarse segments a region reads: the segments of rivers through the coarse cells the region touches and one ring more, and into them from outside
+/// (a meander of 700 m takes a segment of the next cell into the region's outer cells). A function of the region, the run and the law only.
+fn region_segments(run: &dyn CoarseRun, lat: &ChunkLattice, region: &Region, law: &AnchorLaw) -> BTreeSet<(usize, usize)> {
+    let coarse = run.lattice();
+    let n_coarse = coarse.n();
+    // Fine cells per coarse cell along an edge: the chunk lattice cut by the coarse one (the production run is the chunk grid, 2048 cells).
+    let ratio = lat.n() as usize / n_coarse.max(1);
+    assert_eq!(n_coarse * ratio, lat.n() as usize, "the fine lattice must be the coarse lattice cut into squares of {ratio} cells");
+    let coarse_of = |c: Cell| usize::from(c.face) * n_coarse * n_coarse + (c.j as usize / ratio) * n_coarse + (c.i as usize / ratio);
+    let inside: BTreeSet<usize> = region.cells.iter().map(|&c| coarse_of(c)).collect();
+    let touch: BTreeSet<usize> =
+        inside.iter().flat_map(|&c| core::iter::once(c).chain(coarse.neighbours(c).into_iter().map(|x| x as usize))).collect();
+    let is_river = |c: usize| f64::from(run.area_m2(c)) > law.river_area_m2 && run.receiver(c) != COARSE_NONE;
+    let mut segments: BTreeSet<(usize, usize)> = BTreeSet::new();
+    for &c in &touch {
+        if is_river(c) {
+            segments.insert((c, run.receiver(c) as usize));
+        }
+        for nb in coarse.neighbours(c) {
+            let nb = nb as usize;
+            if !touch.contains(&nb) && is_river(nb) && run.receiver(nb) as usize == c {
+                segments.insert((nb, c));
+            }
+        }
+    }
+    segments
+}
+
+/// The donor of the largest area into the coarse cell `c` (the main stem), the lower cell index among equals.
+fn main_donor_of(run: &dyn CoarseRun, is_river: &dyn Fn(usize) -> bool, c: usize) -> Option<usize> {
+    let coarse = run.lattice();
+    let mut best: Option<usize> = None;
+    for nb in coarse.neighbours(c) {
+        let nb = nb as usize;
+        if nb < coarse.len() && is_river(nb) && run.receiver(nb) as usize == c {
+            let better = match best {
+                None => true,
+                Some(b) => run.area_m2(nb) > run.area_m2(b) || (run.area_m2(nb) == run.area_m2(b) && nb < b),
+            };
+            if better {
+                best = Some(nb);
+            }
+        }
+    }
+    best
+}
+
+/// A disc on the sphere: the centre direction and the angle in radians. An item whose reach touches it can change what a chunk reads.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ReadDisc {
+    pub centre: Vec3,
+    pub angle: f64,
+}
+
+/// The read set of a chunk (GEN-081): discs outside which no item can change the chunk's bits. A function of the region, the global run and the law
+/// only, built from the coarse guides and their bands, never from routed paths or items.
+/// - The region: one disc round its centre holding every cell.
+/// - The network: the segments the region reads and the pruning keeps (GEN-078), each with the chain upstream of it along the main stem up to
+///   `law.window` back, the chain downstream of it up to `law.window` on (a bed is held under the stem it meets), and the chain upstream of the main
+///   donor at every cell of the downstream chain (the confluence); every segment as discs along its chord (nine points) of the radius of
+///   `routing_reach_m` and the half step between them, and the eight neighbours of every cell of those segments (the relief factor of a start cell).
+pub fn chunk_read_set(run: &dyn CoarseRun, lat: &ChunkLattice, region: &Region, radius_m: f64, law: &AnchorLaw) -> Vec<ReadDisc> {
+    let coarse = run.lattice();
+    let dirs: Vec<Vec3> = region.cells.iter().map(|&c| lat.direction(c)).collect();
+    let mut sum = Vec3::new(0.0, 0.0, 0.0);
+    for &d in &dirs {
+        sum = sum + d;
+    }
+    let centre = sum.normalized();
+    let region_angle = dirs.iter().map(|&d| centre.angle_to(d)).fold(0.0, f64::max);
+    let mut discs = vec![ReadDisc { centre, angle: region_angle + 1.0e-9 }];
+    let is_river = |c: usize| f64::from(run.area_m2(c)) > law.river_area_m2 && run.receiver(c) != COARSE_NONE;
+    let kept = segments_reaching(run, &dirs, &region_segments(run, lat, region, law), lat, radius_m, law);
+    let mut all: BTreeSet<(usize, usize)> = kept.clone();
+    let upstream_of = |all: &mut BTreeSet<(usize, usize)>, from: usize| {
+        let mut at = from;
+        // `window + 1` segments: the confluence chain of `anchor_profiles` is the segment into the cell and `window` more upstream of its donor.
+        for _ in 0..=law.window {
+            match main_donor_of(run, &is_river, at) {
+                Some(d) => {
+                    all.insert((d, at));
+                    at = d;
+                }
+                None => break,
+            }
+        }
+    };
+    for &(from, to) in &kept {
+        upstream_of(&mut all, from);
+        let mut at = to;
+        for _ in 0..law.window {
+            if !is_river(at) {
+                break;
+            }
+            let next = run.receiver(at) as usize;
+            all.insert((at, next));
+            upstream_of(&mut all, at);
+            at = next;
+        }
+    }
+    let reach_rad = routing_reach_m(law, lat.cell_m(radius_m)) / radius_m;
+    for &(from, to) in &all {
+        let (a, b) = (coarse.direction(from), coarse.direction(to));
+        let half_step_rad = (a - b).length() / 16.0;
+        for k in 0..=8 {
+            let p = (a * (1.0 - f64::from(k) / 8.0) + b * (f64::from(k) / 8.0)).normalized();
+            discs.push(ReadDisc { centre: p, angle: reach_rad + half_step_rad + 1.0e-9 });
+        }
+    }
+    // The relief factor of a segment's start cell reads the base at the cell's centre and its eight neighbours (coarse spacing).
+    let cells: BTreeSet<usize> = all.iter().flat_map(|&(from, to)| [from, to]).collect();
+    let ring: BTreeSet<usize> = cells.iter().flat_map(|&c| coarse.neighbours(c).into_iter().map(|x| x as usize)).collect();
+    for c in ring {
+        discs.push(ReadDisc { centre: coarse.direction(c), angle: reach_rad + 1.0e-9 });
+    }
+    discs
+}
+
 /// The segments of `segments` whose routed path can touch the region whose cell directions are `dirs` (GEN-078). A path stays within the band of its guide,
 /// the guide within the meander of the chord between its two nodes, and a node within the slide of its coarse centre, so a segment whose chord is farther
 /// from the region than the region's radius plus those and the raster's rounding cannot give the region a single cell, a bed, an inflow or a link: leaving
@@ -704,23 +799,7 @@ fn anchor_profiles(
     router: &crate::route::Router,
 ) -> BTreeMap<(usize, usize), SegmentBed> {
     let coarse = run.lattice();
-    // The donor of the largest area into a cell (the main stem), the lower cell index among equals.
-    let main_donor = |c: usize| -> Option<usize> {
-        let mut best: Option<usize> = None;
-        for nb in coarse.neighbours(c) {
-            let nb = nb as usize;
-            if nb < coarse.len() && is_river(nb) && run.receiver(nb) as usize == c {
-                let better = match best {
-                    None => true,
-                    Some(b) => run.area_m2(nb) > run.area_m2(b) || (run.area_m2(nb) == run.area_m2(b) && nb < b),
-                };
-                if better {
-                    best = Some(nb);
-                }
-            }
-        }
-        best
-    };
+    let main_donor = |c: usize| main_donor_of(run, &is_river, c);
     // The main stem back from a segment: the segments upstream of it along the main donors, farthest first, ending with the segment itself.
     let upstream = |seg: (usize, usize)| -> Vec<(usize, usize)> {
         let mut chain = vec![seg];

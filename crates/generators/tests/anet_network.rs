@@ -731,3 +731,68 @@ fn the_reach_of_a_routed_path_covers_the_charts_stretch_at_a_cube_corner() {
     let off = AnchorLaw { route_band_m: 0.0, slide_m: 0.0, slide_steep_m: 0.0, head_m: 0.0, ..AnchorLaw::default() };
     assert!(routing_reach_m(&off, 8.0) >= planet_generators::anet::MEANDER_M);
 }
+
+/// The `Ridge` base with a bump of `dh` metres within `radius_m` of `at`: an item that raises the ground.
+struct Bumped {
+    at: Vec3,
+    radius_m: f64,
+    dh: f64,
+}
+
+impl BaseDetail for Bumped {
+    fn base_height(&self, dir: Vec3) -> f64 {
+        let bump = if (dir - self.at).length() * R <= self.radius_m { self.dh } else { 0.0 };
+        Ridge.base_height(dir) + bump
+    }
+    fn coarse_input(&self, dir: Vec3) -> f64 {
+        Ridge.coarse_input(dir)
+    }
+    fn identity(&self) -> u64 {
+        14
+    }
+}
+
+// spec: GEN-081
+#[test]
+fn an_item_outside_the_read_set_changes_no_bit_of_a_chunk_and_one_inside_does() {
+    use planet_generators::anet::chunk_read_set;
+    use planet_generators::route::RouteMemo;
+    let lat = ChunkLattice::new(32).unwrap();
+    let bits = |n: &Network| {
+        let z: Vec<u64> = n.anchor_z.iter().map(|z| z.to_bits()).collect();
+        let a: Vec<u64> = n.river_area_m2.iter().map(|a| a.to_bits()).collect();
+        let inflow: Vec<u64> = n.inflow_m2.iter().map(|a| a.to_bits()).collect();
+        (z, a, inflow, n.corridor.clone(), n.next.clone())
+    };
+    // The default window and a short one (2 segments back): a bump beyond the short window must change nothing.
+    let short = planet_generators::anet::AnchorLaw { window: 2, ..stride_law(4) };
+    // Slide and head differ from the steep slide: the relief factor of a start cell moves the node, so the base at its eight neighbours is read.
+    let slide = planet_generators::anet::AnchorLaw { slide_m: 500.0, slide_steep_m: 1000.0, head_m: 1000.0, ..stride_law(4) };
+    let (bump_m, mut changed_inside, mut tested_outside) = (300.0, 0, 0);
+    for (x, law) in
+        [(1003u32, stride_law(4)), (1006, stride_law(4)), (1008, short), (1004, short), (1002, short), (1005, slide), (1007, slide)]
+    {
+        let r = region(&lat, chunk(x), 40);
+        let discs = chunk_read_set(&Fork, &lat, &r, R, &law);
+        // The set is a function of the chunk, the run and the law only: the same twice.
+        assert_eq!(discs, chunk_read_set(&Fork, &lat, &r, R, &law));
+        let plain = Network::build_with_memo(&Fork, &Ridge, &lat, &r, R, &law, &RouteMemo::default());
+        let plain = bits(&plain);
+        for i in (990..=1020).step_by(3) {
+            for j in 994..=1006 {
+                let at = lattice().direction(FACE * N * N + j * N + i);
+                let inside = discs.iter().any(|d| d.centre.angle_to(at) <= d.angle + bump_m / R);
+                let with =
+                    Network::build_with_memo(&Fork, &Bumped { at, radius_m: bump_m, dh: -60.0 }, &lat, &r, R, &law, &RouteMemo::default());
+                if inside {
+                    changed_inside += usize::from(bits(&with) != plain);
+                } else {
+                    tested_outside += 1;
+                    assert_eq!(bits(&with), plain, "chunk {x}: a bump at ({i}, {j}) outside every disc changed the network");
+                }
+            }
+        }
+    }
+    assert!(tested_outside > 0, "no bump lay outside the read set");
+    assert!(changed_inside > 0, "no bump inside the read set changed a network");
+}
