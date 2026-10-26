@@ -427,6 +427,10 @@ pub struct ChunkStages {
     /// When the tiles that read the last chunk were drawn again (the plan exact and nothing waiting), which is when the eroded result of
     /// every touched chunk the view wants is on the screen (the refreshed tiles are drawn at once; the fade over about 1.5 s follows).
     pub drawn_ms: Option<f64>,
+    /// The horizon jobs after the edit (0 without them): maps baked, of them re-bakes of a map that had one, and when the last was in flight.
+    pub horizon_baked: u64,
+    pub horizon_rebaked: u64,
+    pub horizon_last_ms: Option<f64>,
 }
 
 /// What a case edits: a hill stamp, or a brush stroke (TEST-042).
@@ -832,12 +836,17 @@ fn run_once(
     // tiles that read the last of them are drawn (M8-7, criterion 6).
     if let Some(manager) = h.chunk_world.as_ref().and_then(|w| w.chunk_manager()) {
         let first_frame_ms = h.chunk_frame_max_ms;
+        let hz0 = h.chunk_world.as_ref().and_then(|w| w.horizon_stats()).unwrap_or_default();
+        let mut hz_last: Option<f64> = None;
         let limit = Duration::from_secs(120);
         let mut quiet = 0;
         let mut drawn_after_last: Option<f64> = None;
         loop {
             let frame = h.step(req)?;
             let busy = manager.in_flight() > 0 || !h.idle(&frame);
+            if h.chunk_world.as_ref().is_some_and(|w| w.horizon_in_flight() > 0) {
+                hz_last = Some(ms(sampler_started));
+            }
             if !busy {
                 quiet += 1;
                 if drawn_after_last.is_none() {
@@ -852,6 +861,7 @@ fn run_once(
             }
             std::thread::sleep(Duration::from_millis(1));
         }
+        let hz1 = h.chunk_world.as_ref().and_then(|w| w.horizon_stats()).unwrap_or_default();
         let centre = world_centre_chunk(stamp);
         let at = |t: Instant| t.duration_since(sampler_started).as_secs_f64() * 1000.0;
         out.stages.chunks = Some(ChunkStages {
@@ -860,6 +870,9 @@ fn run_once(
             centre_ms: h.landed_log.iter().find(|l| l.1 == centre).map(|l| at(l.0)),
             last_ms: h.landed_log.last().map(|l| at(l.0)),
             drawn_ms: if h.landed_log.is_empty() { None } else { drawn_after_last },
+            horizon_baked: hz1.baked - hz0.baked,
+            horizon_rebaked: hz1.rebaked - hz0.rebaked,
+            horizon_last_ms: hz_last,
         });
     }
     // Take the edit back: the old definition, the same tiles refreshed, no preview, settled.
@@ -880,7 +893,7 @@ fn world_centre_chunk(stamp: &ItemSpec) -> planet_generators::chunkfield::ChunkK
 /// The table of the chunk side of every case (a run with the chunk stage): per case the medians over its repeats.
 pub fn chunks_table(rows: &[CaseRow]) -> String {
     let mut s = String::from(
-        "| altitude | stamp radius | first chunk frame ms (versions) | chunks re-solved | centre chunk landed ms | last chunk landed ms | drawn again ms | verdict (10 s) |\n|---|---|---|---|---|---|---|---|\n",
+        "| altitude | stamp radius | first chunk frame ms (versions) | chunks re-solved | centre chunk landed ms | last chunk landed ms | drawn again ms | verdict (10 s) | horizon maps baked (re-baked) | horizon last in flight ms |\n|---|---|---|---|---|---|---|---|---|---|\n",
     );
     let cell = |v: Option<f64>| v.map_or("-".to_string(), |x| format!("{x:.1}"));
     for r in rows {
@@ -893,7 +906,7 @@ pub fn chunks_table(rows: &[CaseRow]) -> String {
             Some(_) => "over",
         };
         s += &format!(
-            "| {} m | {} | {} | {} | {} | {} | {} | {} |\n",
+            "| {} m | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
             r.altitude_m,
             r.radius_label(),
             cell(pick(&|c| Some(c.first_frame_ms))),
@@ -901,7 +914,9 @@ pub fn chunks_table(rows: &[CaseRow]) -> String {
             cell(pick(&|c| c.centre_ms)),
             cell(pick(&|c| c.last_ms)),
             cell(drawn),
-            verdict
+            verdict,
+            cell(pick(&|c| Some(c.horizon_baked as f64))) + &format!(" ({})", cell(pick(&|c| Some(c.horizon_rebaked as f64)))),
+            cell(pick(&|c| c.horizon_last_ms))
         );
     }
     s
@@ -1018,7 +1033,10 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
     let with_chunks = !smoke && !o.no_chunks && o.store.is_some() && !o.allow_memory_bake;
     if with_chunks {
         // The viewer's own pools and chunk configuration, with its horizon jobs (the shared stage of `anetworld::viewer_chunk_stage`), no disk cache.
-        crate::chunkstage::enable_viewer_stage(&world, o.gen_workers(), true, false, out)?;
+        if let Some(n) = o.base_threads {
+            world.set_base_threads(n);
+        }
+        crate::chunkstage::enable_viewer_stage_sized(&world, o.gen_workers(), o.chunk_workers, !o.no_horizon_jobs, false, out)?;
     }
     let size = if smoke { (768u32, 432u32) } else { (2560u32, 1440u32) };
     let tau = o.tau;
@@ -1209,6 +1227,7 @@ mod tests {
                     centre_ms: Some(4_800.0),
                     last_ms: Some(8_800.0),
                     drawn_ms: drawn,
+                    ..ChunkStages::default()
                 }),
                 ..Stages::default()
             },
@@ -1229,7 +1248,7 @@ mod tests {
         assert!(lines[0].contains("first chunk frame ms") && lines[0].contains("verdict (10 s)"), "{t}");
         assert!(lines[2].contains("| 3.5 | 4.0 | 4800.0 | 8800.0 | 9500.0 | ok |"), "the median of three runs: {}", lines[2]);
         assert!(lines[3].contains("| 14000.0 | over |"), "{}", lines[3]);
-        assert!(lines[4].ends_with("| - | - | - | - | - | - |"), "a case without a chunk stage has no cells: {}", lines[4]);
+        assert!(lines[4].ends_with("| - | - | - | - | - | - | - (-) | - |"), "a case without a chunk stage has no cells: {}", lines[4]);
     }
 
     // spec: TEST-044

@@ -8,5 +8,5 @@ Criterion 6 of M8 (owner, 2026-10-26): an edit over a chunk shows within the M6 
 
 ## Impact
 - Spec: TEST-056 (tier A for the table; the scene itself runs in the M8-8 window).
-- Code: `app/src/editperf.rs`, `lib.rs` (`--no-chunks`, `--no-stale-hold`), `xtask/src/testcmd.rs` (the option is passed on).
+- Code: `app/src/editperf.rs`, `lib.rs` (`--no-chunks`, `--no-stale-hold`, `--no-horizon-jobs`, `--chunk-workers N`, `--base-threads N`; the chunk table gives the horizon maps baked after the edit), `xtask/src/testcmd.rs` (the option is passed on).
 - Not in this change: the one-round re-solve (separate proposal), brush cases over chunks (they run with the same code).
