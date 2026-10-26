@@ -1,3 +1,5 @@
+#[path = "oracle_edit_resolve.rs"]
+mod oracle_edit_resolve;
 #[path = "oracle_plan_check.rs"]
 mod oracle_plan_check;
 #[path = "oracle_stream_smoke.rs"]
