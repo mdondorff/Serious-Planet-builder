@@ -1036,6 +1036,26 @@ pub struct Solution {
     pub z_base: Vec<f64>,
 }
 
+/// Diagnostic clocks of the chunk stage, summed over every chunk since the last [`phase_totals_ms`] (the `generate --edit-resolve` report): the
+/// network (base heights, routing, beds), the solve and the driver channels, in nanoseconds, and the chunks counted. Never read by the stage.
+static PHASE_NS: [std::sync::atomic::AtomicU64; 4] = [
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+];
+
+/// The summed times in milliseconds of the network, the solve and the drivers, and the number of chunks solved, since the last call (reset).
+pub fn phase_totals_ms() -> [f64; 4] {
+    use std::sync::atomic::Ordering::SeqCst;
+    let take = |i: usize| PHASE_NS[i].swap(0, SeqCst);
+    [take(0) as f64 / 1.0e6, take(1) as f64 / 1.0e6, take(2) as f64 / 1.0e6, take(3) as f64]
+}
+
+fn phase_add(i: usize, started: std::time::Instant) {
+    PHASE_NS[i].fetch_add(u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX), std::sync::atomic::Ordering::Relaxed);
+}
+
 /// The receivers, the breach and the implicit incision on `region` (A-net, SPIKE-35 variant c4 with the corridor of GEN-047). The surface the
 /// incision starts from is the base field's: the change is what the incision does to it.
 pub fn solve(
@@ -1486,6 +1506,7 @@ impl ANet {
 
     /// The solve over a region (also what the tests look at).
     pub fn solve(&self, lat: &ChunkLattice, region: &Region) -> Solution {
+        let started = std::time::Instant::now();
         let net = Network::build_with_memo(
             &*self.run,
             &*self.base,
@@ -1503,7 +1524,12 @@ impl ANet {
             let coarse = usize::from(c.face) * n * n + (c.j as usize / per) * n + (c.i as usize / per);
             self.run.lattice().area_m2(coarse) / cells
         };
-        solve(&net, &*self.base, lat, region, self.radius_m, &area, &self.params)
+        phase_add(0, started);
+        let started = std::time::Instant::now();
+        let s = solve(&net, &*self.base, lat, region, self.radius_m, &area, &self.params);
+        phase_add(1, started);
+        PHASE_NS[3].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        s
     }
 }
 
@@ -1535,7 +1561,9 @@ impl crate::chunkfield::ChunkStage for ANet {
         let s = self.solve(lat, region);
         // The stage's own bound is a promise to the plan's bounds (GEN-039): a change beyond it is cut to it.
         let change = self.clamped_change(region, &s);
+        let started = std::time::Instant::now();
         let drivers = Some(self.chunk_drivers(lat, region, &s, &change));
+        phase_add(2, started);
         crate::chunkfield::StageOutput { change, drivers }
     }
     fn definition_hash(&self) -> u64 {
