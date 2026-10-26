@@ -284,7 +284,8 @@ pub fn neutral_insolation(lat_rad: f64) -> f64 {
         total / DAYS as f64
     };
     // At the poles `tan` of the latitude is huge, which the clamp of `x` turns into the polar day or night.
-    mean(lat_rad.clamp(-1.5707, 1.5707)) / mean(0.0)
+    let limit = core::f64::consts::FRAC_PI_2 - 1.0e-4;
+    mean(lat_rad.clamp(-limit, limit)) / mean(0.0)
 }
 
 /// Texels of the driver block of a tile: 9 x 9 like the climate block.
@@ -521,6 +522,21 @@ mod tests {
         // The north and south faces differ at 45 degrees north: the sun is in the south.
         let (n, s) = (annual_mean_irradiance(0.785, 0.5, 0.0), annual_mean_irradiance(0.785, 0.5, core::f64::consts::PI));
         assert!(s > n * 1.3, "south {s}, north {n}");
+    }
+
+    // spec: GEN-070
+    #[test]
+    fn the_neutral_insolation_is_the_flat_plane_of_the_integration_at_every_latitude_and_rises_to_the_equator() {
+        let mut last = f64::INFINITY;
+        for deg in (0..=90).step_by(5) {
+            let lat = f64::from(deg).to_radians();
+            let (closed, integrated) = (neutral_insolation(lat), annual_mean_irradiance(lat, 0.0, 0.0));
+            assert!((closed - integrated).abs() < 0.01, "latitude {deg}: {closed} against {integrated}");
+            assert!(closed <= last + 1e-12, "latitude {deg}: not falling towards the pole");
+            last = closed;
+        }
+        assert!((neutral_insolation(0.0) - 1.0).abs() < 1e-12);
+        assert!((neutral_insolation(0.7) - neutral_insolation(-0.7)).abs() < 0.03, "the hemispheres are near symmetric over the year");
     }
 
     // spec: GEN-070

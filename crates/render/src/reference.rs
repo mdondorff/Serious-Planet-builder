@@ -52,6 +52,11 @@ fn tile_climate(in: VsOut) -> vec2<f32> {
     return in.aux;
 }
 
+// The reference renderer has no driver block: the neutral drivers (soil 1 m, moisture 0.5, insolation 0.8).
+fn tile_drivers(in: VsOut) -> vec3<f32> {
+    return vec3<f32>(1.0, 0.5, 0.8);
+}
+
 "#;
 
 /// The reference renderer's WGSL module (for the validation and scan tests).

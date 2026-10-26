@@ -397,10 +397,16 @@ pub enum ShadeView {
     Horizon,
     /// The horizon shadow's factor as grey (1 lit, 0 in shadow; REND-038).
     Shadow,
+    /// The soil depth of the driver block in false colour (0 to 8 m, square-root scale; GEN-071).
+    SoilDepth,
+    /// The moisture of the driver block in false colour (0 to 1).
+    Moisture,
+    /// The annual-mean insolation of the driver block in false colour (0 to 1).
+    Insolation,
 }
 
 impl ShadeView {
-    pub const ALL: [ShadeView; 7] = [
+    pub const ALL: [ShadeView; 10] = [
         ShadeView::Lit,
         ShadeView::Albedo,
         ShadeView::Lighting,
@@ -408,6 +414,9 @@ impl ShadeView {
         ShadeView::Precipitation,
         ShadeView::Horizon,
         ShadeView::Shadow,
+        ShadeView::SoilDepth,
+        ShadeView::Moisture,
+        ShadeView::Insolation,
     ];
 
     pub fn name(self) -> &'static str {
@@ -419,6 +428,9 @@ impl ShadeView {
             ShadeView::Precipitation => "precipitation",
             ShadeView::Horizon => "horizon",
             ShadeView::Shadow => "shadow",
+            ShadeView::SoilDepth => "soil",
+            ShadeView::Moisture => "moisture",
+            ShadeView::Insolation => "insolation",
         }
     }
 
@@ -450,6 +462,18 @@ pub fn climate_view_colour(view: ShadeView, temperature_c: f64, precipitation_mm
                 .clamp(0.0, 1.0);
             mix3([0.95, 0.92, 0.80], [0.05, 0.15, 0.55], t)
         }
+        _ => [0.0; 3],
+    }
+}
+
+/// The false colour of a driver value (the debug views of GEN-071, CON-18): the soil depth in metres (0 to 8, on a square-root scale) from pale sand to
+/// dark brown, the moisture (0 to 1) from sand to deep blue, the insolation (0 to 1) from dark blue to yellow; written as the radiance of a surface facing
+/// the sun (`/ pi`) like the climate views.
+pub fn driver_view_colour(view: ShadeView, soil_depth_m: f64, moisture: f64, insolation: f64) -> [f64; 3] {
+    match view {
+        ShadeView::SoilDepth => mix3([0.85, 0.80, 0.70], [0.25, 0.15, 0.08], libm::sqrt((soil_depth_m / 8.0).clamp(0.0, 1.0))),
+        ShadeView::Moisture => mix3([0.95, 0.90, 0.75], [0.05, 0.20, 0.60], moisture.clamp(0.0, 1.0)),
+        ShadeView::Insolation => mix3([0.10, 0.10, 0.35], [1.00, 0.90, 0.40], insolation.clamp(0.0, 1.0)),
         _ => [0.0; 3],
     }
 }
@@ -502,6 +526,8 @@ pub fn terrain_radiance_with_ramp(
         // With no horizon map the horizon is the sky's own (0) and the sun is never shadowed (1); the maps come from `horizon_lookup` (REND-038).
         ShadeView::Horizon => [0.0; 3],
         ShadeView::Shadow => [1.0 / pi; 3],
+        // The driver views read the tile's driver block; this reference has none, so it shows the neutral drivers (soil 1 m, moisture 0.5, insolation 0.8).
+        ShadeView::SoilDepth | ShadeView::Moisture | ShadeView::Insolation => driver_view_colour(view, 1.0, 0.5, 0.8).map(|c| c / pi),
     }
 }
 

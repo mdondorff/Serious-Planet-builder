@@ -425,3 +425,42 @@ fn the_sun_adds_a_highlight_to_the_detailed_ground_that_follows_the_gloss_table_
     albedo.gloss.f0 = 1.0;
     assert!(hdr_of(&mut r, &ctx, &p, albedo) == hdr_of(&mut r, &ctx, &p, detail_plan(ShadeView::Albedo, 1.0)), "gloss in the albedo view");
 }
+
+// spec: GEN-071, GEN-072, CON-18
+#[test]
+fn the_driver_views_show_the_drivers_of_the_tiles_driver_block() {
+    use planet_frame::look::shading::driver_view_colour;
+    use planet_generators::drivers::{decode_soil, decode_unit, pack_driver_word, DriverParams};
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let (p, _) = plan(3);
+    let params = DriverParams::default();
+    // Every texel of every tile holds soil code 180, moisture 100 and insolation 200 (neutral insolation 128).
+    let codes = [180u8, 100, 200];
+    let word = pack_driver_word(codes, 128);
+    let mut r = TerrainRenderer::with_pools(&ctx, SIZE, CELLS, compact_pool());
+    r.enable_lit(&ctx);
+    for n in &p.nodes {
+        if r.slot_of(n.tile).is_none() {
+            let mut tile = compact_tile_field(&Reference(1), &TangentWarp, n.tile, CELLS, R);
+            tile.driver_words = [word; planet_generators::drivers::DRIVER_TEXELS];
+            r.upload_tile(&ctx, &tile).unwrap();
+        }
+    }
+    let (soil, moisture, insolation) = (decode_soil(codes[0], &params), decode_unit(codes[1]), decode_unit(codes[2]));
+    for view in [ShadeView::SoilDepth, ShadeView::Moisture, ShadeView::Insolation] {
+        let hdr = hdr_of(&mut r, &ctx, &p, view_plan(view));
+        let want = driver_view_colour(view, soil, moisture, insolation);
+        let (mut n, mut worst) = (0usize, 0.0f64);
+        for px in hdr.iter().filter(|px| px[3] > 0.0) {
+            let got = colour_of(px);
+            worst = worst.max((0..3).map(|c| (got[c] - want[c]).abs()).fold(0.0, f64::max));
+            n += 1;
+        }
+        assert!(n > 300, "{view:?}: the planet covers {n} pixels");
+        assert!(worst < 0.01, "{view:?}: the colour is {worst} off the CPU's {want:?}");
+    }
+    // The three views differ from one another and from the lit picture.
+    let lit_hdr = hdr_of(&mut r, &ctx, &p, view_plan(ShadeView::Lit));
+    let soil_hdr = hdr_of(&mut r, &ctx, &p, view_plan(ShadeView::SoilDepth));
+    assert_ne!(lit_hdr, soil_hdr);
+}

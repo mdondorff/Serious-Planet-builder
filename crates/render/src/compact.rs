@@ -13,7 +13,7 @@
 //! requires it by name).
 
 use crate::terrain::{SHADER_HEAD, SHADER_TAIL};
-use planet_generators::compact::{NORMAL_SCALE, SLOT_CLIMATE_OFFSET, SLOT_TEXEL_OFFSET};
+use planet_generators::compact::{NORMAL_SCALE, SLOT_CLIMATE_OFFSET, SLOT_DRIVER_OFFSET, SLOT_TEXEL_OFFSET};
 
 /// Bytes of one tile reference: the slot's first texel in its block, the entry of the tile's fade plane plus one (0: none, REND-039), slot index, reserved.
 pub const REF_BYTES: u64 = 16;
@@ -26,6 +26,7 @@ pub fn compact_terrain_shader(cells: u32) -> String {
     let vertex = COMPACT_VERTEX
         .replace("{CELLS}", &cells.to_string())
         .replace("{CLIMATE_WORD}", &(SLOT_CLIMATE_OFFSET / 4).to_string())
+        .replace("{DRIVER_WORD}", &(SLOT_DRIVER_OFFSET / 4).to_string())
         .replace("{TEXEL_WORD}", &(SLOT_TEXEL_OFFSET / 4).to_string())
         .replace("{NORMAL_SCALE}", &format!("{NORMAL_SCALE:?}"));
     format!("{head}{vertex}{tail}")
@@ -34,13 +35,14 @@ pub fn compact_terrain_shader(cells: u32) -> String {
 const COMPACT_VERTEX: &str = r#"
 // Compact tiles (REND-016, GEN-025). Group 1: the per-frame tile reference of each node (first word of its slot in the block, the entry of its
 // fade plane plus one or 0, slot index, reserved), then the frame's fade planes (REND-039). Group 2: the block, read as words: the slot's header (nine control points as 27 f32, hr_min, hr_step,
-// h_origin, skirt depth, the flags word), the climate block (81 words) and the texels (two words each).
+// h_origin, skirt depth, the flags word), the climate block (81 words), the driver block (81 words) and the texels (two words each).
 @group(1) @binding(0) var<storage, read> tile_refs: array<vec4<u32>>;
 @group(2) @binding(0) var<storage, read> block: array<u32>;
 
 const CELLS: i32 = {CELLS};
-// Word offsets inside the slot (GEN-025: climate block at byte 128, texels at byte 456).
+// Word offsets inside the slot (GEN-025: climate block at byte 128, driver block at byte 452, texels at byte 776).
 const CLIMATE_WORD: u32 = {CLIMATE_WORD}u;
+const DRIVER_WORD: u32 = {DRIVER_WORD}u;
 const TEXEL_WORD: u32 = {TEXEL_WORD}u;
 const NORMAL_SCALE: f32 = {NORMAL_SCALE};
 
@@ -450,6 +452,31 @@ fn tile_climate(in: VsOut) -> vec2<f32> {
     let c01 = climate_texel(base, i00 + 9);
     let c11 = climate_texel(base, i00 + 10);
     return mix(mix(c00, c10, wx), mix(c01, c11, wx), wy);
+}
+
+// The drivers at a fragment of a compact tile (presentation data): the bilinear interpolation of the tile's 9 x 9 driver block at the fragment's tile
+// coordinates, as (soil depth in metres, moisture, insolation), faded in with the node's chunk weight `w = 1 - fade` from the neutral values
+// (soil 1 m, moisture 0.5, the neutral insolation of the texel's latitude in the top byte of the word): `neutral + w (chunk - neutral)` (GEN-071).
+// A tile with no chunk holds the neutral values, so the blend changes nothing there. The unorm8 decode is exact in f32.
+fn driver_texel(base: u32, idx: i32) -> vec4<f32> {
+    let word = block[base + DRIVER_WORD + u32(idx)];
+    let soil_code = f32(word & 255u) / 255.0;
+    return vec4<f32>(soil_code * soil_code * 8.0, f32((word >> 8u) & 255u) / 255.0, f32((word >> 16u) & 255u) / 255.0, f32(word >> 24u) / 255.0);
+}
+
+fn tile_drivers(in: VsOut) -> vec3<f32> {
+    let tref = tile_refs[in.node_index];
+    let base = tref.x;
+    let x = clamp(in.aux.x, 0.0, 1.0) * 8.0;
+    let y = clamp(in.aux.y, 0.0, 1.0) * 8.0;
+    let a = min(i32(x), 7);
+    let b = min(i32(y), 7);
+    let wx = x - f32(a);
+    let wy = y - f32(b);
+    let i00 = b * 9 + a;
+    let d = mix(mix(driver_texel(base, i00), driver_texel(base, i00 + 1), wx), mix(driver_texel(base, i00 + 9), driver_texel(base, i00 + 10), wx), wy);
+    let fade_w = 1.0 - select(0.0, nodes[in.node_index].phase[6].w, tref.y != 0u);
+    return vec3<f32>(1.0 + fade_w * (d.x - 1.0), 0.5 + fade_w * (d.y - 0.5), d.w + fade_w * (d.z - d.w));
 }
 
 "#;

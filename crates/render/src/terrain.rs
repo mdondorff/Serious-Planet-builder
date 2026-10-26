@@ -421,7 +421,7 @@ struct GroundDetail {
 // SEAM for the photo layer (owner, 2026-10-21): per material the procedural term below is one source of `mul` and the gradient `g`. A texture
 // source for a material (CC0 sets from the asset cache, close range only) returns the same two things from the node's decade phases and is
 // blended in by a distance weight before the weights combine them; neither the weights function nor the node record changes.
-fn ground_detail(node_index: u32, local: vec3<f32>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32) -> GroundDetail {
+fn ground_detail(node_index: u32, local: vec3<f32>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32, drv: vec3<f32>) -> GroundDetail {
     var out: GroundDetail;
     out.mul = vec3<f32>(1.0);
     // Off, the normal goes through as it came (not normalised again), so the picture is what it was bit for bit.
@@ -437,7 +437,8 @@ fn ground_detail(node_index: u32, local: vec3<f32>, normal: vec3<f32>, up: vec3<
     let n = normalize(normal);
     let cs = clamp(dot(n, up), 0.0, 1.0);
     let ia = vec4<f32>(cs, h, t, p);
-    let ib = vec4<f32>(0.0);
+    // The surface type is 0 outside regions; the three driver slots (LOOK-008) are the tile's blended soil depth, moisture and insolation.
+    let ib = vec4<f32>(0.0, drv.x, drv.y, drv.z);
     let w = material_weights(ia, ib);
     if (w.x + w.y + w.z + w.w <= 0.0) {
         return out;
@@ -605,6 +606,18 @@ fn climate_colour(view: u32, t: f32, p: f32) -> vec3<f32> {
     return mix(vec3<f32>(0.95, 0.92, 0.80), vec3<f32>(0.05, 0.15, 0.55), y);
 }
 
+// The false colour of a driver (the debug views of GEN-071, `ShadeView::SoilDepth` = 7, `Moisture` = 8, `Insolation` = 9): `driver_view_colour` of the CPU
+// mirror. `drv` is the soil depth in metres, the moisture and the insolation.
+fn driver_colour(view: u32, drv: vec3<f32>) -> vec3<f32> {
+    if (view == 7u) {
+        return mix(vec3<f32>(0.85, 0.80, 0.70), vec3<f32>(0.25, 0.15, 0.08), sqrt(clamp(drv.x / 8.0, 0.0, 1.0)));
+    }
+    if (view == 8u) {
+        return mix(vec3<f32>(0.95, 0.90, 0.75), vec3<f32>(0.05, 0.20, 0.60), clamp(drv.y, 0.0, 1.0));
+    }
+    return mix(vec3<f32>(0.10, 0.10, 0.35), vec3<f32>(1.00, 0.90, 0.40), clamp(drv.z, 0.0, 1.0));
+}
+
 // The lit terrain's radiance before the pre-exposure (ADR 0039 point 4, REND-026): Lambert diffuse `albedo * max(n . sun, 0) / pi`
 // for the sun's illuminance of one unit, in the view `view` (0 lit, 1 albedo, 2 lighting, 3 temperature, 4 precipitation, 5 horizon, 6 shadow). `up` is
 // the unit up vector at the point; the climate comes from the tile's field. No ambient, no shadows, no specular.
@@ -654,14 +667,18 @@ fn fs_lit_view(in: VsOut) -> vec4<f32> {
     let sun = vec3<f32>(bitcast<f32>(g.mode.y), bitcast<f32>(g.mode.z), bitcast<f32>(g.mode.w));
     let up = up_at(nodes[in.node_index].up, in.local);
     let climate = tile_climate(in);
-    let gd = ground_detail(in.node_index, in.local, in.normal, up, climate.x, climate.y, in.height - g.extra.x);
+    let drv = tile_drivers(in);
+    let gd = ground_detail(in.node_index, in.local, in.normal, up, climate.x, climate.y, in.height - g.extra.x, drv);
     // The horizon shadow multiplies the direct sun term of the views that have one (Lit, Lighting; REND-038): 1.0 where no horizon map is there.
     let sun_vis = select(1.0, shadow_factor(in.node_index, in.aux, up, sun), g.mode.x == 0u || g.mode.x == 2u);
     var rgb = sun_vis * shade_lit(g.mode.x, g.albedo, gd.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), sun, g.range.z) * detail_mul(gd, g.mode.x, g.albedo, climate.x, climate.y, clamp(dot(normalize(gd.normal), up), 0.0, 1.0), in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)));
     // The sum is clamped like the rest of the lit radiance: the scene target is f16.
     rgb = min(rgb + vec3<f32>(ground_gloss(in.node_index, in.local, gd, sun) * (g.range.z * sun_vis)), vec3<f32>(60000.0));
-    if (g.mode.x >= 5u) {
+    if (g.mode.x == 5u || g.mode.x == 6u) {
         rgb = horizon_view_colour(g.mode.x, in.node_index, in.aux, up, sun) * g.range.z;
+    }
+    if (g.mode.x >= 7u) {
+        rgb = clamp(driver_colour(g.mode.x, drv) * 0.31830988618 * g.range.z, vec3<f32>(0.0), vec3<f32>(60000.0));
     }
     if (g.extra.y > 3.5) {
         rgb = stale_tint(in, rgb, g.range.z);
