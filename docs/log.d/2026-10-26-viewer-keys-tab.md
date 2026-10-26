@@ -1,0 +1,1 @@
+- 2026-10-26 **viewer-keys-tab** (VIEW-057): archived; the Keys tab in the editor's left panel (#719).

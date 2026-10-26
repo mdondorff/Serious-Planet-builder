@@ -1151,3 +1151,76 @@ The window title names the lens and where the run stands (working, stored run, r
 #### Scenario: Ready, then off
 - **WHEN** the lens is asked for on a world, and again switched off
 - **THEN** the fields the world builds carry the lens (its climate and mesh key, the base heights) only once the run is ready, and are the plain fields again with the lens off
+
+### Requirement: VIEW-055 One key table
+`planet_frame::keytable::KEYS` SHALL be the only list of the keys the window takes: each entry has the `Debug` names of its `KeyCode`s (none for a chord or the mouse), its label, its action (a viewer command, a key of the editor mode, a held key or other), its group (editing, camera and movement, view and debug), the mode that accepts it (either, editor off, editor on), its help text and, where it has one, the state shown beside it.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-25), owner: the keys visible in the app at all times and always current; VIEW-003, VIEW-022, VIEW-042, VIEW-054
+
+#### Detail
+`command_for`, `edit_key_for` and `held_for` SHALL answer from it, the window's `key_command`, `edit_key` and `set_held` SHALL call them, and the usage text (`KEYS_HELP`, `EDIT_KEYS_HELP`), the F1 list and `rows` (the rows of the panel, with their state) SHALL be made from it. Every viewer command and every key of the editor mode SHALL have an entry, no code SHALL be listed twice for the same kind of action, a key the window handles SHALL be in the table and a key the table lists SHALL be handled, and a mode SHALL list exactly the entries it accepts.
+
+#### Scenario: Handled and listed
+- **WHEN** every key a person can press that the window might bind is looked up in the handling and in the table
+- **THEN** a key is handled exactly when it is listed, a command's keys are the ones the lookup finds, and a misspelt name in the table is caught
+
+#### Scenario: The modes
+- **WHEN** the entries of the editor off and the editor on are listed
+- **THEN** the viewer lists Esc (quit) and no editing key, the editor lists the tools, Ctrl+Z, F1 or ? and Esc (step back), each help text and row come from the same entries, and a row with a state shows it (vsync on, the shade view, the sun)
+
+### Requirement: VIEW-057 The Keys tab
+The editor's left panel SHALL have a tab `Keys` (last in the default layout, named `keys` in the layout file) that lists the keys the window accepts in the editor mode, the rows of `frame::keytable::rows`, which the window SHALL give it each frame: grouped under the table's group titles, each key once with its label, the state it is in in brackets when it has one (shade view, ground detail, sun time, and the like) and its help line.
+
+Verify: A
+Status: active
+Source: VIEW-055, the owner (2026-10-25)
+
+#### Scenario: Every key
+- **WHEN** the Keys tab is selected with the rows of the editor mode
+- **THEN** every row of the table is listed exactly once under its group, a key with a state shows it, and without rows the tab lists none
+
+### Requirement: VIEW-056 A stall names its culprit
+The window's frame SHALL time its phases (`stall::StallProbe::mark` after each) and the locks the main thread waits on (`stall::read`, `stall::write` and `stall::lock` record a wait of 2 ms or more in a thread-local of the thread that began the frame).
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-25), owner: the editor stalls and Windows reports it not responding, one unnamed thread busy; VIEW-037
+
+#### Detail
+A frame that takes at least one second SHALL be a stall: the report `stall (the window went on)` SHALL be written with the crash report's means (at most one in ten seconds, the others one log line) and SHALL list the phases longest first, the locks waited on longest first, the tile streamer's jobs in flight and queued and the chunk and horizon job counts, and, when a report is written, the title SHALL carry a notice with the frame time and the longest phase (a stall the limit leaves to one log line leaves the title as it was, so it does not flicker). The probe SHALL read only the clock. Every thread the program starts for the frame, the streaming pool and the scoped workers of the generators SHALL have a name.
+
+#### Scenario: A frame over a second
+- **WHEN** a frame has phases of 20, 900 and 300 ms and took 1.3 s, and another took 0.4 s
+- **THEN** the first is a stall listing the phases longest first and the second is none, and a report is due at most once in ten seconds
+
+#### Scenario: A lock waited on
+- **WHEN** another thread holds a mutex for 40 ms while the main thread acquires it through the timed acquire, and an uncontended acquire is made too
+- **THEN** only the held lock is recorded, with its name and a wait of at least 20 ms, and the next frame starts with no waits
+
+#### Scenario: Named workers
+- **WHEN** a scoped worker is started with `spawn_named`
+- **THEN** its thread has the name it was given
+
+### Requirement: VIEW-054 The shade view and the time of day of the lit viewer
+J SHALL cycle `ViewerState::shade_view` through normal (`ShadeView::Lit`), horizon, shadow and, since M8-6 (GEN-074), soil depth, moisture and insolation; the lit frames SHALL draw that view unless the coupled lens (K) is showing. `[` and `]` SHALL move `ViewerState::sun_offset_h` by `-SUN_STEP_H` and `+SUN_STEP_H` (0.5 hours, wrapping at 24) and Backslash SHALL set it to 0. A lit frame SHALL take `sun_with_offset(look_sun, sun_offset_h)` for `LitPlan::sun_dir`: the look's declination with the sub-solar longitude moved west 15 degrees an hour (the convention of `shading::sun_direction`), the look's sun itself at 0; the editing light (H) SHALL win over it. Both states start at the look's own (normal view, offset 0), so every golden stays.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-25), owner: horizon shadows cannot be seen in the viewer; REND-038, VIEW-042
+
+#### Detail
+The title SHALL name a shade view other than normal, the local solar time at the camera of a moved sun (`local_solar_hours`: 12 when the sun is on the camera's meridian) while the editing light is off, and, on the lit path, a window without a chunk stage with "no chunk stage: no horizon shadows (open a store with a coupled run)". The usage and editor help texts SHALL name J, `[`, `]` and Backslash.
+
+#### Scenario: Keys and sun
+- **WHEN** J is pressed seven times, then `]` twice and `[` once, then `[` twice more, then Backslash
+- **THEN** the shade view goes horizon, shadow, soil depth, moisture, insolation, normal, horizon; the offset is 0.5, then 23.5 hours, then 0
+
+#### Scenario: A known pose
+- **WHEN** the look's sun is noon on the equator at longitude 0 and a camera is at longitude 0
+- **THEN** the camera reads 12:00; six hours later the sun is on the -y axis and the camera reads 18:00; a camera 90 degrees west of the first reads 12:00 for that sun; a sun of another declination keeps it
+
+#### Scenario: The title
+- **WHEN** the title is made at the start over a world with a chunk stage, over a world without one, and with the horizon view and a sun six hours later
+- **THEN** it adds nothing, adds the chunk-stage notice, and adds "shade view horizon" and "sun 18:00 local solar time"; with the editing light on it does not claim the time
