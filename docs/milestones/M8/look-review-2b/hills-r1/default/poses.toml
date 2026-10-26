@@ -1,0 +1,56 @@
+# Look review 2b, default look. Look review 1 hills site at its exact snapped coordinates (README of look-review-1-hills: latitude -37.6958, longitude 3.1397), looking along its downstream bearing 145.
+# Run: cargo xtask capture stills --poses docs/milestones/M8/look-review-2b/hills-r1/default/poses.toml --store target/accept/global16384 --out-dir docs/milestones/M8/look-review-2b/hills-r1/default
+
+chunk_timeout_s = 3600
+
+[place]
+lat = -37.6958
+lon = 3.1397
+
+[[pose]]
+name = "300m-sunset"
+altitude_m = 300
+back_m = 1500
+heading_deg = 145
+pitch_deg = 15
+sun_local_hours = 17.5
+
+[[pose]]
+name = "300m-midday"
+altitude_m = 300
+back_m = 1500
+heading_deg = 145
+pitch_deg = 15
+sun_local_hours = 12
+
+[[pose]]
+name = "30m-sunset"
+altitude_m = 30
+back_m = 400
+heading_deg = 145
+pitch_deg = 8
+sun_local_hours = 17.5
+
+[[pose]]
+name = "30m-midday"
+altitude_m = 30
+back_m = 400
+heading_deg = 145
+pitch_deg = 8
+sun_local_hours = 12
+
+[[pose]]
+name = "1.8m-sunset"
+altitude_m = 1.8
+back_m = 60
+heading_deg = 145
+pitch_deg = 0
+sun_local_hours = 17.5
+
+[[pose]]
+name = "1.8m-midday"
+altitude_m = 1.8
+back_m = 60
+heading_deg = 145
+pitch_deg = 0
+sun_local_hours = 12

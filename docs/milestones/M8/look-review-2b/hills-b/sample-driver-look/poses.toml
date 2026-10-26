@@ -1,0 +1,91 @@
+# Look review 2b, sample-driver-look look. Hills B (latitude 8.972, longitude -16.238): snow-free, with a river valley; looking east (heading 90) across the channel.
+# Run: cargo xtask capture stills --poses docs/milestones/M8/look-review-2b/hills-b/sample-driver-look/poses.toml --store target/accept/global16384 --out-dir docs/milestones/M8/look-review-2b/hills-b/sample-driver-look
+
+chunk_timeout_s = 3600
+
+[place]
+lat = 8.972
+lon = -16.238
+
+[[pose]]
+name = "300m-sunset"
+altitude_m = 300
+back_m = 1500
+heading_deg = 90
+pitch_deg = 15
+sun_local_hours = 17.5
+
+[[pose]]
+name = "300m-midday"
+altitude_m = 300
+back_m = 1500
+heading_deg = 90
+pitch_deg = 15
+sun_local_hours = 12
+
+[[pose]]
+name = "30m-sunset"
+altitude_m = 30
+back_m = 400
+heading_deg = 90
+pitch_deg = 8
+sun_local_hours = 17.5
+
+[[pose]]
+name = "30m-midday"
+altitude_m = 30
+back_m = 400
+heading_deg = 90
+pitch_deg = 8
+sun_local_hours = 12
+
+[[pose]]
+name = "1.8m-sunset"
+altitude_m = 1.8
+back_m = 60
+heading_deg = 90
+pitch_deg = 0
+sun_local_hours = 17.5
+
+[[pose]]
+name = "1.8m-midday"
+altitude_m = 1.8
+back_m = 60
+heading_deg = 90
+pitch_deg = 0
+sun_local_hours = 12
+
+# The sample driver look (a proposal for the owner's review, not a decision; GEN-074, ADR 0076): the ground detail at 0.6 and modest curves on the driver
+# inputs, soil depth in metres and moisture in 0..1 (the neutral values are 1 m and 0.5). A curve is a smoothstep from lo to hi (lo > hi falls); the weights
+# are normalised over the materials.
+[look]
+ground_detail = 0.6
+
+# Soil: wet (moisture rising 0.55 to 0.85), deep (0.5 to 1.2 m) and flat ground (slope cosine rising 0.7 to 0.9). The hollows the wetness map finds.
+[[look.curve]]
+material = "soil"
+input = "moisture"
+lo = 0.55
+hi = 0.85
+[[look.curve]]
+material = "soil"
+input = "soil_depth"
+lo = 0.5
+hi = 1.2
+[[look.curve]]
+material = "soil"
+input = "slope_cos"
+lo = 0.7
+hi = 0.9
+
+# Rock: dry (moisture falling 0.8 to 0.3) and thin soil (depth falling 1.6 to 0.8 m) on top of its slope curve, so the dry steep flanks go bare first.
+[[look.curve]]
+material = "rock"
+input = "moisture"
+lo = 0.8
+hi = 0.3
+[[look.curve]]
+material = "rock"
+input = "soil_depth"
+lo = 1.6
+hi = 0.8
