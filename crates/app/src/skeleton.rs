@@ -910,6 +910,9 @@ impl planet_generators::height::HeightField for CancelGuarded<'_> {
     fn level_aware(&self) -> bool {
         self.inner.level_aware()
     }
+    fn level_drivers(&self, dirs: &[Vec3], level: u8) -> Option<Vec<Option<[u8; 3]>>> {
+        self.inner.level_drivers(dirs, level)
+    }
     fn level_change(&self, dirs: &[Vec3], level: u8) -> Option<Vec<f64>> {
         self.inner.level_change(dirs, level)
     }

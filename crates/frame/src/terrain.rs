@@ -426,7 +426,7 @@ pub struct PlanCounts {
     pub triangles: u64,
     /// Distinct tiles that must be resident to draw the plan.
     pub resident_tiles: u32,
-    /// Slot bytes uploaded to draw the plan from a cold start (one compact slot per resident tile, GEN-025; 9,168 B at cells 32).
+    /// Slot bytes uploaded to draw the plan from a cold start (one compact slot per resident tile, GEN-025; 9,488 B at cells 32 since MESH_VERSION 10, 9,168 B before).
     pub upload_bytes: u64,
 }
 

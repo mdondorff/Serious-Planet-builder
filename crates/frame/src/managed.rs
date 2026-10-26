@@ -34,7 +34,7 @@ pub trait TileSink {
     fn upload_at(&mut self, tile: &CompactTile, slot: SlotRef) -> Result<(), String>;
     /// Bytes `upload_at` writes for `tile`: the tile's size in the sink's format (the per-frame upload budget counts in
     /// them, STRM-006). The default is what the renderer writes: a compact tile at its
-    /// slot (header, climate block and texels, 9,168 B at cells 32); a sink that writes something else says so.
+    /// slot (header, climate block and texels, 9,488 B at cells 32 since MESH_VERSION 10, driver block; 9,168 B before); a sink that writes something else says so.
     fn upload_bytes(&self, tile: &CompactTile) -> u64 {
         tile.resident_bytes()
     }

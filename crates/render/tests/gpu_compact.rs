@@ -259,10 +259,11 @@ fn the_production_block_geometry_works_on_this_adapter() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let field = Reference(1);
     let cells = 32;
-    // One real block of 128 MiB (the largest storage binding every adapter offers): 14,639 slots, tiles in its last slots.
+    // One real block of 128 MiB (the largest storage binding every adapter offers): 14,146 slots (MESH_VERSION 10, driver block, ADR 0076/GEN-071; 14,639
+    // of 9,168 B before), tiles in its last slots.
     let slots = block_slots_in(COMPACT_BLOCK_BYTES, cells);
     let pool = compact_format_pool_with((128 << 20) + COMPACT_BLOCK_BYTES, cells, slots, 1).unwrap();
-    assert_eq!((pool.main_blocks, pool.block_slots), (1, 14_639));
+    assert_eq!((pool.main_blocks, pool.block_slots), (1, 14_146));
     let p = plan_of(&field, cells, 26, 6, TerrainView::Relief, false);
     let reference = reference_render(&ctx, &field, &p);
     let mut r = TerrainRenderer::with_pools(&ctx, SIZE, cells, pool);

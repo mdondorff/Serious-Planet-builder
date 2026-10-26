@@ -6,7 +6,8 @@ use planet_core::hash::SplitMix64;
 use planet_core::{Face, TileId, Vec3};
 use planet_generators::compact::{
     compact_tile_field, oct_decode, oct_encode, pack_normal, slot_bytes, slot_texel_bytes, unpack_normal, CompactTile, COMPACT_MIN_LEVEL,
-    HEIGHT_STEPS, SLOT_CLIMATE_OFFSET, SLOT_HEADER_BYTES, SLOT_PAD_OFFSET, SLOT_TEXEL_OFFSET, TEXEL_BYTES, WIDE_RELIEF_1MM_M,
+    HEIGHT_STEPS, SLOT_CLIMATE_OFFSET, SLOT_DRIVER_BYTES, SLOT_DRIVER_OFFSET, SLOT_HEADER_BYTES, SLOT_TEXEL_OFFSET, TEXEL_BYTES,
+    WIDE_RELIEF_1MM_M,
 };
 use planet_generators::global::{bake, GridSource};
 use planet_generators::height::{HeightField, Reference};
@@ -29,12 +30,16 @@ fn angle_deg(a: [f32; 3], b: Vec3) -> f64 {
 
 // spec: GEN-019, GEN-025
 #[test]
-fn a_tile_is_a_slot_of_a_header_a_climate_block_a_pad_and_8_byte_texels() {
+fn a_tile_is_a_slot_of_a_header_a_climate_block_a_driver_block_and_8_byte_texels() {
     assert_eq!(TEXEL_BYTES, 8);
-    assert_eq!((SLOT_HEADER_BYTES, SLOT_CLIMATE_OFFSET, SLOT_PAD_OFFSET, SLOT_TEXEL_OFFSET), (128, 128, 452, 456));
-    // GEN-025: the stride is 456 + 8 (cells + 1)^2, a multiple of 16 for every even cell count.
-    assert_eq!((slot_texel_bytes(32), slot_bytes(32)), (8_712, 9_168));
-    assert_eq!((slot_bytes(16), slot_bytes(64)), (2_768, 34_256));
+    // MESH_VERSION 10, driver block, ADR 0076/GEN-071: the driver block (324 B) follows the climate block and the texels start at byte 776 (456 before).
+    assert_eq!(
+        (SLOT_HEADER_BYTES, SLOT_CLIMATE_OFFSET, SLOT_DRIVER_OFFSET, SLOT_DRIVER_BYTES, SLOT_TEXEL_OFFSET),
+        (128, 128, 452, 324, 776)
+    );
+    // GEN-025: the stride is 776 + 8 (cells + 1)^2, a multiple of 16 for every even cell count.
+    assert_eq!((slot_texel_bytes(32), slot_bytes(32)), (8_712, 9_488));
+    assert_eq!((slot_bytes(16), slot_bytes(64)), (3_088, 34_576));
     for cells in [16u32, 32, 64] {
         assert_eq!(slot_bytes(cells) % 16, 0, "cells {cells}");
         let t = compact_tile_field(&Reference(1), &TangentWarp, id(2, 12, 100, 200), cells, R);
@@ -44,13 +49,19 @@ fn a_tile_is_a_slot_of_a_header_a_climate_block_a_pad_and_8_byte_texels() {
         assert_eq!(t.resident_bytes(), slot_bytes(cells));
         let slot = t.slot_data();
         assert_eq!(slot.len() as u64, slot_bytes(cells));
-        // The header, climate block, pad and texels sit at the offsets of the table.
+        // The header, climate block, driver block and texels sit at the offsets of the table.
         assert_eq!(slot[..128], t.header_bytes());
         let word = |at: u64| u32::from_le_bytes(slot[at as usize..at as usize + 4].try_into().unwrap());
         for k in 0..81u64 {
             assert_eq!(word(SLOT_CLIMATE_OFFSET + 4 * k), t.climate_words[k as usize]);
         }
-        assert_eq!(word(SLOT_PAD_OFFSET), 0, "the pad word is zero");
+        for k in 0..81u64 {
+            assert_eq!(word(SLOT_DRIVER_OFFSET + 4 * k), t.driver_words[k as usize]);
+        }
+        // A tile of a field without chunks holds the neutral drivers: soil 1 m, moisture 0.5, the insolation of the latitude alone in two bytes.
+        let neutral = planet_generators::drivers::unpack_driver_word(t.driver_words[0]);
+        assert_eq!(neutral.0[0], planet_generators::drivers::encode_soil(1.0, &planet_generators::drivers::DriverParams::default()));
+        assert_eq!((neutral.0[1], neutral.0[2]), (128, neutral.1), "moisture 0.5, the insolation is the neutral one");
         assert_eq!(slot[SLOT_TEXEL_OFFSET as usize..], t.texel_data()[..]);
         for k in [0usize, 1, n / 2, n - 1] {
             assert_eq!(word(SLOT_TEXEL_OFFSET + 8 * k as u64), t.texels[k][0]);
@@ -83,9 +94,10 @@ fn a_slot_with_a_wrong_length_or_reserved_bits_is_refused() {
     let mut b = ok.clone();
     b[124] = 3;
     assert!(dec(&b).unwrap_err().contains("flags"));
+    // Every byte of the driver block is data: a slot with another driver word decodes to the tile with that word.
     let mut b = ok.clone();
-    b[SLOT_PAD_OFFSET as usize] = 1;
-    assert!(dec(&b).unwrap_err().contains("pad"));
+    b[SLOT_DRIVER_OFFSET as usize] = 0x5a;
+    assert_eq!(dec(&b).unwrap().driver_words[0] & 0xff, 0x5a);
     let mut b = ok;
     b[SLOT_TEXEL_OFFSET as usize + 7] = 0x40;
     assert!(dec(&b).unwrap_err().contains("reserved"));
@@ -325,7 +337,8 @@ fn compact_tiles_are_bit_identical_across_thread_counts_and_match_the_known_answ
     assert_eq!(one, KNOWN_ANSWERS, "compact tile content hashes changed: {one:016x?}");
 }
 
-const KNOWN_ANSWERS: [u64; 4] = [14590730449213597702, 13202256900304499467, 14422221813819168315, 15511102764023661304];
+// Re-recorded 2026-10-26 with MESH_VERSION 10, driver block, ADR 0076/GEN-071 (declared): the slot gained the driver block, so the content hash of every tile moved; heights, normals and climate did not.
+const KNOWN_ANSWERS: [u64; 4] = [17436593168830713006, 8256297299846410263, 4509477482494538851, 1687505822890779193];
 
 // spec: GEN-019, CON-13, CON-14
 #[test]

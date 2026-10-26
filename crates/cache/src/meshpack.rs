@@ -49,8 +49,8 @@ pub const PARAM_RENDER_FORM: u8 = 5;
 pub const COMPACT_FORM: u8 = 1;
 
 /// Version of the payload layout. History: 1 = LZ4 block of the exact tile; 2 = the vertex form carries the climate block;
-/// 3 = the compact form is the slot of GEN-025 (`MESH_VERSION` 8).
-pub const PAYLOAD_VERSION: u8 = 3;
+/// 3 = the compact form is the slot of GEN-025 (`MESH_VERSION` 8); 4 = the slot carries the driver block (`MESH_VERSION` 10, ADR 0076/GEN-071).
+pub const PAYLOAD_VERSION: u8 = 4;
 
 /// The default depth of the pre-fill: levels from the render floor to this one (1,920 tiles at floor 3, 2,046 at floor 0).
 pub const DEFAULT_PREFILL_LEVELS: u8 = 4;
