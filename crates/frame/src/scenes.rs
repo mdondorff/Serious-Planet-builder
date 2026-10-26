@@ -498,6 +498,18 @@ mod tests {
         build_script(scene, R, 16.0 / 9.0, &Reference(1), LOOK_SEED)
     }
 
+    // spec: VIEW-058
+    #[test]
+    fn the_script_over_the_default_site_is_the_standard_one_and_another_site_moves_the_path() {
+        let std = script(StreamScene::Dive);
+        let same = build_script_at((SITE_LAT_DEG, SITE_LON_DEG), StreamScene::Dive, R, 16.0 / 9.0, &Reference(1), LOOK_SEED);
+        assert_eq!(std, same, "the default site gives the standard script");
+        let other = build_script_at((45.0, -100.0), StreamScene::Dive, R, 16.0 / 9.0, &Reference(1), LOOK_SEED);
+        assert_eq!(other.cameras.len(), std.cameras.len());
+        let d = (other.cameras[0].position.0 - std.cameras[0].position.0).length();
+        assert!(d > 1.0e6, "the first camera is {d} m from the standard one");
+    }
+
     // spec: TEST-018
     #[test]
     fn the_dive_falls_by_a_constant_factor_per_time_from_20000_km_to_1_m_in_30_s_then_holds() {

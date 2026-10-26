@@ -56,6 +56,13 @@ impl ChunkShare {
     }
 }
 
+/// The tail of the viewer's refresh line (STRM-055): the chunks landed and the share of chunk-reading nodes drawn as stand-ins, summed over
+/// the frames since the last line.
+pub fn landing_note(landed: u64, nodes: u64, stand_in: u64) -> String {
+    let share = if nodes == 0 { 0.0 } else { 100.0 * stand_in as f64 / nodes as f64 };
+    format!("{landed} chunks landed, stand-in share {share:.1} %")
+}
+
 /// The fade-in of landed chunks (STRM-039, STRM-047): a chunk's change enters a tile with a weight that rises from 0 to 1 over `fade_ms` of the
 /// injected clock, as a plain f32 (CON-11). The clock of a chunk starts when its change is first drawn, that is when the first tile reading it
 /// is uploaded after the chunk landed ([`ChunkFade::shown`]), not when it landed: a rebuild that takes longer than the fade would otherwise

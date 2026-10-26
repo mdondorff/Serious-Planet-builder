@@ -968,6 +968,19 @@ mod tests {
         assert!(USAGE.contains("--no-ui"), "the usage names the option");
     }
 
+    // spec: VIEW-058
+    #[test]
+    fn the_flight_site_is_given_by_site_and_refused_out_of_range() {
+        let args = |a: &[&str]| parse_args(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        assert_eq!(args(&["editor"]).unwrap().site, None, "the default site is the scene's");
+        assert_eq!(args(&["editor", "--site", "45,-100"]).unwrap().site, Some((45.0, -100.0)));
+        for bad in ["95,0", "0,400", "x,1", "1"] {
+            assert!(args(&["editor", "--site", bad]).is_err(), "--site {bad} is refused");
+        }
+        assert!(args(&["editor", "--site"]).is_err(), "--site needs a value");
+        assert!(USAGE.contains("--site"), "the usage names the option");
+    }
+
     // spec: STRM-020, TEST-012
     #[test]
     fn the_generation_pool_defaults_to_the_machine_less_the_reserve_and_the_options_override_it() {

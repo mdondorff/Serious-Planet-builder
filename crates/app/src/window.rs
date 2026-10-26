@@ -752,8 +752,7 @@ impl App<'_> {
                     st.refresh_logged = (st.refresh_logged.0 + samples.len(), now_ms);
                     let (landed, nodes, stand_in) = std::mem::take(&mut st.chunk_acc);
                     if let Some(line) = planet_streaming::refresh_summary(&samples) {
-                        let share = if nodes == 0 { 0.0 } else { 100.0 * stand_in as f64 / nodes as f64 };
-                        crate::crash::note(&format!("{line}; {landed} chunks landed, stand-in share {share:.1} %"));
+                        crate::crash::note(&format!("{line}; {}", planet_frame::chunkshare::landing_note(landed, nodes, stand_in)));
                     }
                 }
             }
