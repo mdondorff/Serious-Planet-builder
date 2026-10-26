@@ -579,6 +579,8 @@ struct Harness<'a> {
     settle_ms: u64,
     /// The world with a chunk stage the frames drive (`chunk_frame`, the landings into the managed loop), as the viewer does.
     chunk_world: Option<Arc<WorldTerrain>>,
+    /// Whether the stale chunks wait for the edit's tiles (`ChunkManager::hold_stale`, the viewer's behaviour); `--no-stale-hold` runs without.
+    stale_hold: bool,
     /// The chunks that landed in the frames since the log was last taken, with the instant, and the time of the slowest `chunk_frame` call.
     landed_log: Vec<(Instant, planet_generators::chunkfield::ChunkKey)>,
     chunk_frame_max_ms: f64,
@@ -595,6 +597,9 @@ impl Harness<'_> {
             // The chunks the plan's tiles read: the version of every wanted chunk is asked, the stale and the missing ones are solved, the
             // landed ones refresh the tiles that read them (the viewer's frame, STRM-040, STRM-056).
             let tiles: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
+            world.hold_stale_chunks(
+                self.stale_hold && (!rig.managed.pending().is_empty() || rig.managed.manager().streamer().unfinished_jobs() > 0),
+            );
             let call = Instant::now();
             let update = world.chunk_frame(&tiles, req.camera.position, &[]);
             self.chunk_frame_max_ms = self.chunk_frame_max_ms.max(call.elapsed().as_secs_f64() * 1000.0);
@@ -1012,13 +1017,8 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
     // The chunk stage on the M8 default (Under, versions, stale marking): with a store and not smoke, unless `--no-chunks` asks for the comparison.
     let with_chunks = !smoke && !o.no_chunks && o.store.is_some() && !o.allow_memory_bake;
     if with_chunks {
-        crate::chunkstage::enable_chunks(
-            &world,
-            crate::anetworld::ANET_CELL_M,
-            crate::chunkstage::stage_workers(o),
-            crate::chunkstage::StageOptions { horizon: false, disk: false },
-            out,
-        )?;
+        // The viewer's own pools and chunk configuration, with its horizon jobs (the shared stage of `anetworld::viewer_chunk_stage`), no disk cache.
+        crate::chunkstage::enable_viewer_stage(&world, o.gen_workers(), true, false, out)?;
     }
     let size = if smoke { (768u32, 432u32) } else { (2560u32, 1440u32) };
     let tau = o.tau;
@@ -1098,6 +1098,7 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
             settle_limit: if smoke { Duration::from_secs(120) } else { SETTLE_LIMIT },
             settle_ms: o.settle_ms,
             chunk_world: with_chunks.then(|| Arc::clone(&world)),
+            stale_hold: !o.no_stale_hold,
             landed_log: Vec::new(),
             chunk_frame_max_ms: 0.0,
         };
