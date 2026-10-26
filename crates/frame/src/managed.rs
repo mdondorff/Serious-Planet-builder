@@ -383,12 +383,16 @@ impl ManagedLoop {
     /// The chunk field the frame counts its stand-in share against (STRM-039); `None` counts nothing.
     pub fn set_chunk_view(&mut self, view: Option<Arc<dyn crate::chunkshare::ChunkView>>) {
         self.chunk_view = view;
+        self.drawn_tiles.clear();
+        self.stale_weights.clear();
     }
 
     /// Fade the change of landing chunks in over `fade_ms` of `clock` (STRM-047, [`crate::chunkshare::ChunkFade::DEFAULT_FADE_MS`]): the nodes of
     /// every frame carry the weight of their chunks. Needs a chunk view too; without a fade every weight is 1.
     pub fn set_chunk_fade(&mut self, fade_ms: u64, clock: Arc<dyn Clock>) {
         self.chunk_fade = Some((crate::chunkshare::ChunkFade::new(fade_ms), clock));
+        self.drawn_tiles.clear();
+        self.stale_weights.clear();
     }
 
     /// Chunks left RAM: they fade in again when they land again (STRM-047).
@@ -482,6 +486,8 @@ impl ManagedLoop {
             match change {
                 ResidentChange::Evicted(tile) => {
                     self.pending.remove(&tile);
+                    self.drawn_tiles.remove(&tile);
+                    self.stale_weights.remove(&tile);
                     if self.resident.remove(&tile).is_some() {
                         self.slots.remove(&tile);
                         sink.forget(tile);
@@ -640,7 +646,7 @@ impl ManagedLoop {
             let stats = sink.upload_batch(&refs)?;
             upload_calls += stats.calls;
             for (tile, mesh, slot, bytes) in &batch {
-                if self.chunk_view.as_deref().is_some_and(|v| !v.reads(*tile).is_empty()) {
+                if self.chunk_fade.is_some() && self.chunk_view.as_deref().is_some_and(|v| !v.reads(*tile).is_empty()) {
                     self.drawn_tiles.insert(*tile, mesh.clone());
                 }
                 self.stale_weights.remove(tile);

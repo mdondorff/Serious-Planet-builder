@@ -14,3 +14,11 @@ The fade of `m8-chunk-fade` scales a tile's whole change plane with one weight. 
 - Spec: STRM-047 (the plane and the weight), REND-039 unchanged. Tier A.
 - Code: `generators/compact.rs` (`change_replacing`, written and tested in the first attempt of 2026-10-25, removed unused), `frame/managed.rs`, `frame/chunkshare.rs`.
 - Cost: about 1.5 days. Explorer's M8-6 touches `compact.rs` for the tile driver block after the archive of `m8-chunk-fade`; rebase order to be agreed.
+
+## Known limits of this change (numerics review of #711, 2026-10-26)
+One scalar weight and one plane per tile cannot describe two concurrent fades; `m8-chunk-fade-publish` (sequential epochs) is the cure.
+1. A tile that reads two chunks whose fades overlap (B lands while A's clock runs, within 1.5 s: the normal case along a river) keeps the weight it had at B's landing while A's clock goes on, so it opens a crack against a neighbour that reads only A, up to the remaining part of A's change.
+2. A fresh tile (an LOD child) built during a fade has its plane over the base: at weight 0 it draws the base and drops the change of earlier epochs that its neighbours still show.
+3. (M8-7) A replacement that is not caused by a landing (an edit, a refresh mid-fade) is drawn at the live weight: its first frame is off by `w x (edit + (1 - w) d_old)`.
+4. (M8-7) A new version of a chunk whose clock has started keeps its weight and shows its difference at the swap.
+5. The loop holds a clone of each uploaded tile that reads chunks (up to twice the CPU tile memory of those tiles, outside the streamer's budget).

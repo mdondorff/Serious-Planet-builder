@@ -1904,7 +1904,14 @@ fn a_rebuild_slower_than_the_fade_still_fades_and_neither_a_neighbour_nor_a_new_
     assert!(weights(&mut rig).iter().all(|&w| w == 1.0), "the frame after the landing");
     // The rebuild is delivered 2 s after the landing, longer than the fade: the first frame that draws the rebuilt tiles starts at weight 0.
     clock.advance(2_000);
-    rig.step(&req);
+    {
+        // A tile still waiting for its rebuild keeps the weight it had; one that has been rebuilt starts at the base, not at the whole change.
+        let f = rig.step(&req);
+        for n in f.pipeline.draw.plan.nodes.iter().filter(|n| reads_target(n.tile)) {
+            let want = if n.state == planet_frame::TileState::Stale { 1.0 } else { 0.0 };
+            assert_eq!(n.chunk_weight, want, "2 s after the landing: {:?} is {:?}", n.tile, n.state);
+        }
+    }
     rig.settle(&req);
     let w0 = weights(&mut rig);
     assert!(!w0.is_empty() && w0.iter().all(|&w| w == 0.0), "the first frame that draws the rebuilt tiles: {w0:?}");
