@@ -1,0 +1,1 @@
+- 2026-10-26 **M8-6 closed** (m8-driver-maps archived: GEN-070..076 drivers per chunk, chunk channels and blend, materials read them, tile driver block, slot 9,488 B, MESH_VERSION 10; J also cycles the soil, moisture and insolation views; default look unchanged; Tracked: the neighbour-landing fade seam, 32 m resolution)

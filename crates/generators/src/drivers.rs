@@ -211,7 +211,7 @@ impl SunGrid {
     }
 }
 
-/// The annual-mean irradiance on a tilted plane in units of the flat plane at the equator (see [`SunGrid::mean`]): 73 days, 24 steps of the day.
+/// The annual-mean irradiance on a tilted plane in units of the flat plane at the equator (see [`SunGrid::mean`]): 73 days, 96 steps of the day.
 pub fn annual_mean_irradiance(lat_rad: f64, slope_rad: f64, azimuth_rad: f64) -> f64 {
     let grid = SunGrid::new();
     grid.mean(lat_rad, slope_rad, azimuth_rad) / grid.mean(0.0, 0.0, 0.0)
@@ -488,7 +488,7 @@ mod tests {
         }
     }
 
-    // spec: GEN-070
+    // spec: GEN-075
     #[test]
     fn the_soil_is_deeper_in_a_hollow_on_flat_ground_and_with_more_flow_and_thin_on_steep_ground_and_high_up() {
         let p = DriverParams::default();
@@ -507,7 +507,7 @@ mod tests {
         }
     }
 
-    // spec: GEN-070
+    // spec: GEN-075
     #[test]
     fn the_lithology_reads_the_f64_direction_and_is_a_function_of_it_and_the_seed_alone() {
         let p = DriverParams { seed: 7, ..DriverParams::default() };
@@ -546,7 +546,7 @@ mod tests {
         mean(lat, slope, azimuth) / mean(0.0, 0.0, 0.0)
     }
 
-    // spec: GEN-070
+    // spec: GEN-076
     #[test]
     fn the_insolation_is_within_a_percent_of_a_brute_force_integration_at_the_equator_and_at_45_degrees_north_up_to_the_tables_60_degrees()
     {
@@ -570,7 +570,7 @@ mod tests {
         assert!(s > n * 1.3, "south {s}, north {n}");
     }
 
-    // spec: GEN-070
+    // spec: GEN-076
     #[test]
     fn the_neutral_insolation_is_the_flat_plane_of_the_integration_at_every_latitude_and_rises_to_the_equator() {
         let mut last = f64::INFINITY;
@@ -608,7 +608,7 @@ mod tests {
         assert!((mid[0] - 0.5 * (NEUTRAL_SOIL_M + full[0])).abs() < 1e-9 && (mid[2] - 0.5 * (decode_unit(100) + full[2])).abs() < 1e-9);
     }
 
-    // spec: GEN-070
+    // spec: GEN-076
     #[test]
     fn the_table_reads_the_function_it_tabulates_and_wraps_the_aspect() {
         let lat = 0.6;
