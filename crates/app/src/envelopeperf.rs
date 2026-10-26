@@ -372,10 +372,11 @@ pub fn start_place(n: usize) -> (f64, f64) {
     (SITE_LAT_DEG + PLACE_STEP_DEG * n as f64, SITE_LON_DEG)
 }
 
-/// The chunk stage a flight runs (TEST-054): the workers of its pools and whether the horizon jobs run.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The chunk stage a flight runs (TEST-054): the generation workers the viewer's pool size comes from (`anetworld::viewer_chunk_stage`) and whether the
+/// horizon jobs run.
+#[derive(Clone, Copy, Debug)]
 struct StageSetup {
-    workers: usize,
+    gen: planet_streaming::GenWorkers,
     horizon: bool,
 }
 
@@ -394,13 +395,7 @@ fn fly(
 ) -> Result<Measure, String> {
     // A flight starts with a chunk stage of its own and nothing resident: no disk cache, an empty chunk cache (TEST-054).
     if let Some(st) = stage {
-        crate::chunkstage::enable_chunks(
-            world,
-            crate::anetworld::ANET_CELL_M,
-            st.workers,
-            crate::chunkstage::StageOptions { horizon: st.horizon, disk: false },
-            out,
-        )?;
+        crate::chunkstage::enable_viewer_stage(world, st.gen, st.horizon, false, out)?;
     }
     let chunk_view = chunk_view_of(world);
     let first = req_of(cameras[0]);
@@ -492,18 +487,11 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
     let tau = if smoke { o.tau * f64::from(size.1) / 1440.0 } else { o.tau };
     // With a stored world the scene runs the chunk stage, horizon jobs included, as the viewer does (TEST-054); a world of an in-memory bake has no
     // stored coupled run to start from and keeps the tile-only scene.
-    let stage =
-        (o.store.is_some() && !o.allow_memory_bake).then(|| StageSetup { workers: crate::chunkstage::stage_workers(o), horizon: true });
+    let stage = (o.store.is_some() && !o.allow_memory_bake).then(|| StageSetup { gen: crate::chunkstage::stage_gen(o), horizon: true });
     // The plan's height bound has to include the change of the chunk stage (as the window does), so the stage exists before the LOD parameters are
     // made; every flight then starts one of its own.
     if let Some(st) = stage {
-        crate::chunkstage::enable_chunks(
-            &world,
-            crate::anetworld::ANET_CELL_M,
-            st.workers,
-            crate::chunkstage::StageOptions { horizon: st.horizon, disk: false },
-            out,
-        )?;
+        crate::chunkstage::enable_viewer_stage(&world, st.gen, st.horizon, false, out)?;
     }
     let field = world.field()?;
     let lod = LodParams {

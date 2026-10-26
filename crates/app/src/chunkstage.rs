@@ -74,9 +74,45 @@ pub fn enable_chunks(
     Ok(maps)
 }
 
-/// The workers a scene gives the chunk stage: the options' generator workers, at least one.
-pub fn stage_workers(o: &Options) -> usize {
-    o.gen_workers().workers.max(1)
+/// The viewer's chunk stage for a headless scene: exactly what the window sets up (`anetworld::viewer_chunk_stage` for the pool and the knobs,
+/// `WorldTerrain::enable_viewer_chunks` for the stage and the horizon jobs), on the generation workers `gen_workers`; waits for the far-field horizon when
+/// `horizon`. A second call replaces the stage (its chunk cache starts empty). `disk` off computes every chunk.
+pub fn enable_viewer_stage(
+    world: &Arc<WorldTerrain>,
+    gen: planet_streaming::GenWorkers,
+    horizon: bool,
+    disk: bool,
+    out: &mut dyn Write,
+) -> Result<(), String> {
+    let (pool, cfg) = crate::anetworld::viewer_chunk_stage(gen);
+    let workers = cfg.workers;
+    if !world.enable_viewer_chunks(pool, Arc::new(planet_streaming::SystemClock::new()), cfg, horizon, disk)? {
+        return Err("the store holds no coupled run: the viewer's chunk stage needs one (generate --coupled-run)".into());
+    }
+    writeln!(out, "viewer chunk stage: {workers} workers, horizon {horizon}, disk cache {disk}").map_err(err)?;
+    if horizon {
+        loop {
+            match world.coarse_standing() {
+                crate::horizonworld::CoarseStanding::Idle | crate::horizonworld::CoarseStanding::Working => {
+                    std::thread::sleep(Duration::from_millis(50))
+                }
+                crate::horizonworld::CoarseStanding::Ready(h) => {
+                    writeln!(out, "coarse horizon: {} observer cells per face edge, {} azimuths", h.m, h.azimuths).map_err(err)?;
+                    break;
+                }
+                crate::horizonworld::CoarseStanding::Absent(t) | crate::horizonworld::CoarseStanding::Failed(t) => {
+                    writeln!(out, "horizon: {t}").map_err(err)?;
+                    break;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The generation workers of the options, which the viewer's chunk stage takes its pool size from.
+pub fn stage_gen(o: &Options) -> planet_streaming::GenWorkers {
+    o.gen_workers()
 }
 
 /// How long chunks took to arrive: the time from the first frame that wanted a chunk to the frame its landing was seen, in seconds of the
