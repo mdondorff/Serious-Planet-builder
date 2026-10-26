@@ -193,6 +193,8 @@ pub struct WorldTerrain {
     chunks: std::sync::RwLock<Option<Arc<ChunkWorld>>>,
     /// Whether the A-net stage was asked for ([`WorldTerrain::request_anet`]).
     pub(crate) anet_asked: std::sync::atomic::AtomicBool,
+    /// Threads a batch of base heights of the A-net uses (default 4; a measurement sets it).
+    base_threads: std::sync::atomic::AtomicUsize,
     /// The horizon jobs of the chunks (M8-5, STRM-049): none until `enable_horizon` (in `horizonworld`).
     pub(crate) horizon: std::sync::RwLock<Option<Arc<planet_streaming::chunks::HorizonJobs>>>,
 }
@@ -298,6 +300,7 @@ impl WorldTerrain {
             coarse: Default::default(),
             chunks: Default::default(),
             anet_asked: Default::default(),
+            base_threads: std::sync::atomic::AtomicUsize::new(4),
             horizon: Default::default(),
             coupled_lens: Default::default(),
             store_dir: None,
@@ -381,6 +384,7 @@ impl WorldTerrain {
             coarse: Default::default(),
             chunks: Default::default(),
             anet_asked: Default::default(),
+            base_threads: std::sync::atomic::AtomicUsize::new(4),
             horizon: Default::default(),
             coupled_lens: Default::default(),
             store_dir: Some(dir.to_path_buf()),
@@ -808,6 +812,15 @@ impl WorldTerrain {
 
     pub(crate) fn lattice_source(&self) -> &dyn LatticeSource {
         self.src.as_ref()
+    }
+
+    /// Set the threads a batch of the A-net base heights uses (at least 1); a chunk stage made after the call takes it.
+    pub fn set_base_threads(&self, n: usize) {
+        self.base_threads.store(n.max(1), std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub(crate) fn base_threads(&self) -> usize {
+        self.base_threads.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// The seed of the planet body (it goes into the chunk cache's keys).

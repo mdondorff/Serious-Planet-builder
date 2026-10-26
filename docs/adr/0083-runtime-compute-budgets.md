@@ -21,6 +21,7 @@ Source: owner, 2026-10-26 (1440p at 60 fps on Rasierklinge; weaker machines degr
 - The tile, chunk and plan pools and the plan job's scoped workers move onto the job system (one change, before M8's acceptance perf window if it fits); criterion 7 is then measured inside terrain's share.
 - A frame over budget names the share that overran (the stall probe's phase marks, VIEW-056).
 - New subsystems claim a share before they add work.
+- The chunk pool is 4 workers on Rasierklinge (M8-7, criterion 6: the 4 chunks of a view at 100 to 300 m re-solve in one round after an edit; measured 5.4 to 6.8 s for the last chunk against 8.5 to 9.8 s with 3 workers of which 2 serve stale chunks). Each chunk job reads base heights on up to 4 threads, so 4 jobs are 16 threads of the 20; a bigger pool oversubscribes. The share table sets it later.
 
 ## Licences of adopted code or techniques
 None.

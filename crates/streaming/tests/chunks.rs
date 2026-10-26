@@ -398,3 +398,45 @@ fn a_chunk_computed_while_the_stage_inputs_moved_is_not_stored_and_is_solved_aga
     assert!(disk.get(tile).unwrap().is_some(), "a solve with still inputs is stored");
     assert_eq!(m2.update(&wanted).started, 0, "and trusted: nothing is solved again");
 }
+
+/// A version source that says which chunks have the edit in their own region.
+struct NearVersions {
+    version: std::sync::atomic::AtomicU64,
+    near: Vec<ChunkKey>,
+}
+
+impl planet_streaming::chunks::ChunkVersions for NearVersions {
+    fn version(&self, _key: ChunkKey) -> u64 {
+        self.version.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    fn near_edit(&self, key: ChunkKey) -> bool {
+        self.near.contains(&key)
+    }
+}
+
+// spec: STRM-056
+#[test]
+fn with_the_default_pool_every_stale_chunk_of_a_view_is_solved_in_one_round_and_the_ones_with_the_edit_in_their_own_region_go_first() {
+    let defaults = ChunkConfig::default();
+    assert!(defaults.workers >= planet_streaming::chunks::VIEW_CHUNK_WORKERS, "the pool holds the chunks of a low view");
+    let (spawner, clock) = (Arc::new(ManualSpawner::default()), Arc::new(FakeClock::default()));
+    let keys: Vec<(ChunkKey, f64)> = (0..6).map(|x| (key(x, 0), 100.0 * f64::from(x) + 100.0)).collect();
+    // Chunk 5 (the farthest from the camera) holds the edit; 4 is only reached by the read set.
+    let versions = Arc::new(NearVersions { version: 0.into(), near: vec![key(5, 0)] });
+    let m = manager(spawner.clone(), clock, None, ChunkConfig { workers: 4, ..ChunkConfig::default() }).with_versions(versions.clone());
+    for _ in 0..3 {
+        m.update(&keys);
+        spawner.run(4);
+    }
+    assert_eq!(m.stats().landed, 6);
+    versions.version.store(7, std::sync::atomic::Ordering::SeqCst);
+    // Six stale chunks wanted, four workers, every worker may serve stale chunks: four start at once, the one with the edit first although it is
+    // the farthest from the camera, then the nearest of the rest.
+    let up = m.update(&keys);
+    assert_eq!(up.started, 4, "the default lets every worker serve stale chunks: one round for four chunks");
+    spawner.run(4);
+    let up = m.update(&keys);
+    assert_eq!(up.landed.len(), 4);
+    assert!(up.landed.contains(&key(5, 0)), "the chunk with the edit in its own region was in the first round");
+    assert!(!up.landed.contains(&key(4, 0)), "a nearer chunk the read set only reaches waited: {:?}", up.landed);
+}

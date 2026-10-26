@@ -401,7 +401,9 @@ impl App<'_> {
         })?;
         // A world with a stored coupled channel gets the A-net chunk stage on a thread (STRM-046); the jobs run on a pool of half the generation workers' size.
         if self.world.has_bake() && !cfg.smoke {
-            let workers = (cfg.gen.workers / 2).max(1);
+            // Half the generation workers, at most the 4 chunks a low view wants (M8-7: one round of re-solves after an edit, criterion 6; the
+            // measured setting on Rasierklinge). More would oversubscribe: each chunk job reads its base heights on up to 4 threads (ADR 0083).
+            let workers = (cfg.gen.workers / 2).clamp(1, planet_streaming::chunks::VIEW_CHUNK_WORKERS);
             let pool = planet_streaming::GenWorkers::new(workers).with_priority(cfg.gen.priority).pool();
             self.world.request_anet(pool, self.clock.clone(), planet_streaming::chunks::ChunkConfig { workers, ..Default::default() });
         }
