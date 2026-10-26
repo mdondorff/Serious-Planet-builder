@@ -400,6 +400,10 @@ impl ChunkStagePosition {
         }
     }
 }
+/// The era of the chain order a definition's items are read in (GEN-039): 1 had the chunk stage over the stamps (`OnTop`), 2 has it over the base
+/// plus the stamps of the `Under` layers (the default). Part of the hash of a definition that has items.
+pub const CHAIN_ORDER_ERA: u64 = 2;
+
 /// The layers of the stack of ADR 0007, lowest first. A layer with another name stacks above them, by name.
 pub const LAYER_STACK: [&str; 7] = ["base", "imported", "intent", "stamps", "splines", "placed", "frozen"];
 
@@ -533,6 +537,12 @@ impl WorldDefinition {
             return base;
         }
         let mut v = vec![u64::from(HASH_VERSION), base, self.items.len() as u64];
+        // The order the layers stack in around the chunk stage is part of what the items mean (GEN-039): the era is in the hash, so a definition with
+        // items made when `OnTop` was the default does not hash to the key of the same definition now (a declared re-key, M8-7). A definition without
+        // items has no stamp to order and hashes as before.
+        if !self.items.is_empty() {
+            v.extend([0x0063_6f72, CHAIN_ORDER_ERA]);
+        }
         for ((body, id), rec) in &self.items {
             v.extend([u64::from(body.0), item_id::lo(*id), item_id::lo(rec.content), rec.dir[0], rec.dir[1], rec.dir[2]]);
             v.extend([rec.reach_bits, rec.max_delta_bits, u64::from(rec.priority as u32), hash_u64s(3, &path_words(&rec.layer))]);
