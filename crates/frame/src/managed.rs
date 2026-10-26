@@ -164,6 +164,33 @@ pub struct ManagedFrame {
     pub upload_ms: f64,
 }
 
+/// What the publish gate is doing (STRM-054), for the title, the stall report and the log: a silent fallback would be a pop nobody finds.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PublishStats {
+    /// Landed chunks waiting for the gate, chunks whose readers are not all rebuilt, tiles new to the renderer waiting for a fade.
+    pub queued: usize,
+    pub pending_chunks: usize,
+    pub deferred_tiles: usize,
+    /// Landings and clocks the timeout released, cumulative.
+    pub forced: u64,
+    /// The largest number of deferred tiles seen, and the longest time from a chunk's landing to its change being drawn (its clock started).
+    pub max_deferred_tiles: usize,
+    pub max_landing_to_drawn_ms: u64,
+}
+
+impl PublishStats {
+    /// The title's words for it: empty while the gate has nothing to say.
+    pub fn text(&self) -> String {
+        if self.queued == 0 && self.pending_chunks == 0 && self.deferred_tiles == 0 && self.forced == 0 {
+            return String::new();
+        }
+        format!(
+            " | chunk gate: {} waiting, {} unrebuilt, {} tiles deferred, {} forced",
+            self.queued, self.pending_chunks, self.deferred_tiles, self.forced
+        )
+    }
+}
+
 /// A landing the publish gate holds back for longer than this is published anyway (STRM-054): the fade's liveness does not depend on a stale tile
 /// getting its rebuild.
 pub const PUBLISH_TIMEOUT_MS: u64 = 5_000;
@@ -213,6 +240,11 @@ pub struct ManagedLoop {
     /// (STRM-052: the clock starts when the last of them has been uploaded); and the tiles new to the renderer that wait for a running fade.
     pending_readers: HashMap<planet_generators::chunkfield::ChunkKey, (HashSet<TileId>, u64)>,
     deferred_fresh: usize,
+    /// When each landed chunk landed, until its change is drawn; the keys whose clocks started since the last settle; the stats' maxima.
+    landed_since: HashMap<planet_generators::chunkfield::ChunkKey, u64>,
+    started_keys: Vec<(planet_generators::chunkfield::ChunkKey, u64)>,
+    max_deferred_tiles: usize,
+    max_landing_to_drawn_ms: u64,
     forced_publications: u64,
     /// The weight a resident tile keeps drawing at from the landing of a chunk it reads until its rebuilt tile is uploaded (STRM-053).
     stale_weights: HashMap<TileId, f32>,
@@ -309,6 +341,10 @@ impl ManagedLoop {
             publish_waiting_since: None,
             pending_readers: HashMap::new(),
             deferred_fresh: 0,
+            landed_since: HashMap::new(),
+            started_keys: Vec::new(),
+            max_deferred_tiles: 0,
+            max_landing_to_drawn_ms: 0,
             forced_publications: 0,
             stale_weights: HashMap::new(),
             draw_changed: false,
@@ -434,6 +470,9 @@ impl ManagedLoop {
         let Some(view) = self.chunk_view.clone() else { return 0 };
         if let Some(now) = self.chunk_fade.as_ref().map(|(_, c)| c.now_ms()) {
             self.expire_pending(now);
+            for &k in landed {
+                self.landed_since.entry(k).or_insert(now);
+            }
         }
         // Without a fade nothing waits for one: what lands is published at once.
         if view.gated() && self.chunk_fade.is_none() {
@@ -466,6 +505,28 @@ impl ManagedLoop {
         self.apply_landed(landed)
     }
 
+    /// What the publish gate is doing now and its maxima (STRM-054).
+    pub fn publish_stats(&mut self) -> PublishStats {
+        self.settle_started();
+        PublishStats {
+            queued: self.publish_queue.len(),
+            pending_chunks: self.pending_readers.len(),
+            deferred_tiles: self.deferred_fresh,
+            forced: self.forced_publications,
+            max_deferred_tiles: self.max_deferred_tiles,
+            max_landing_to_drawn_ms: self.max_landing_to_drawn_ms,
+        }
+    }
+
+    /// The clocks that started since the last call: the time from each chunk's landing to its change being drawn.
+    fn settle_started(&mut self) {
+        for (k, at) in std::mem::take(&mut self.started_keys) {
+            if let Some(landed) = self.landed_since.remove(&k) {
+                self.max_landing_to_drawn_ms = self.max_landing_to_drawn_ms.max(at.saturating_sub(landed));
+            }
+        }
+    }
+
     /// How many times the gate published a waiting landing at the timeout instead of at the end of the fade (STRM-054); 0 in a healthy run.
     pub fn forced_publications(&self) -> u64 {
         self.forced_publications
@@ -476,6 +537,7 @@ impl ManagedLoop {
     fn reader_rebuilt(
         pending: &mut HashMap<planet_generators::chunkfield::ChunkKey, (HashSet<TileId>, u64)>,
         fade: &mut Option<(crate::chunkshare::ChunkFade, Arc<dyn Clock>)>,
+        started_keys: &mut Vec<(planet_generators::chunkfield::ChunkKey, u64)>,
         tile: TileId,
     ) {
         let mut started = Vec::new();
@@ -487,7 +549,9 @@ impl ManagedLoop {
         for k in started {
             pending.remove(&k);
             if let Some((fade, clock)) = fade.as_mut() {
-                fade.shown(k, clock.now_ms());
+                let now = clock.now_ms();
+                fade.shown(k, now);
+                started_keys.push((k, now));
             }
         }
     }
@@ -505,6 +569,7 @@ impl ManagedLoop {
             self.forced_publications += 1;
             if let Some((fade, _)) = self.chunk_fade.as_mut() {
                 fade.shown(k, now);
+                self.started_keys.push((k, now));
             }
         }
     }
@@ -534,6 +599,7 @@ impl ManagedLoop {
                 let readers: HashSet<TileId> = tiles.iter().copied().filter(|t| view.reads(*t).contains(&k)).collect();
                 if readers.is_empty() {
                     fade.shown(k, now);
+                    self.started_keys.push((k, now));
                 } else {
                     self.pending_readers.insert(k, (readers, now));
                 }
@@ -665,7 +731,7 @@ impl ManagedLoop {
                     self.pending.remove(&tile);
                     self.drawn_tiles.remove(&tile);
                     self.stale_weights.remove(&tile);
-                    Self::reader_rebuilt(&mut self.pending_readers, &mut self.chunk_fade, tile);
+                    Self::reader_rebuilt(&mut self.pending_readers, &mut self.chunk_fade, &mut self.started_keys, tile);
                     if self.resident.remove(&tile).is_some() {
                         self.slots.remove(&tile);
                         sink.forget(tile);
@@ -736,6 +802,7 @@ impl ManagedLoop {
                 waiting.push(Waiting { tile, class, priority, bytes: sink.upload_bytes(&mesh) });
             }
             self.deferred_fresh = deferred_fresh;
+            self.max_deferred_tiles = self.max_deferred_tiles.max(deferred_fresh);
             sort_waiting(&mut waiting);
             // The start-up load of the roots is not a steady frame (STRM-001, a declared exception to the cap of STRM-006): every
             // root that waits is written before the frame is drawn, whatever its bytes. They sort first (the draw class, the
@@ -779,7 +846,7 @@ impl ManagedLoop {
                     self.drawn_tiles.insert(*tile, mesh.clone());
                 }
                 self.stale_weights.remove(tile);
-                Self::reader_rebuilt(&mut self.pending_readers, &mut self.chunk_fade, *tile);
+                Self::reader_rebuilt(&mut self.pending_readers, &mut self.chunk_fade, &mut self.started_keys, *tile);
                 self.resident.insert(*tile, ResidentTile { mesh_key: mesh.key(), origin: mesh.origin() });
                 self.slots.insert(*tile, *slot);
                 uploaded += 1;

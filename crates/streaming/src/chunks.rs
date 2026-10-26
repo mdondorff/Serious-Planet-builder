@@ -45,6 +45,14 @@ pub struct ChunkConfig {
     pub publish_gate: bool,
 }
 
+impl ChunkConfig {
+    /// The config of the viewer and of every scene that measures what the viewer shows (criterion 7's speed envelope included): the publish
+    /// gate on (STRM-054), the rest as the default. Stills and tests that wait for every chunk use the default, ungated.
+    pub fn viewer(workers: usize) -> ChunkConfig {
+        ChunkConfig { workers, publish_gate: true, ..ChunkConfig::default() }
+    }
+}
+
 impl Default for ChunkConfig {
     fn default() -> Self {
         ChunkConfig { workers: 3, evict_ms: 5_000, cap_bytes: 512 << 20, publish_gate: false }

@@ -2115,6 +2115,15 @@ fn chunks_landing_along_a_stream_are_each_published_within_one_fade_and_a_rebuil
     let worst = landed_at.iter().map(|(k, at)| published_at.get(k).map(|p| p - at).unwrap_or(u64::MAX)).max().unwrap();
     assert!(worst <= 1_900, "the longest wait for publication was {worst} ms");
     assert_eq!(published_at.len(), landed_at.len(), "every landed chunk is published");
+    // The stats the title, the stall report and the log carry: nothing forced, and the longest time from a landing to its change being drawn
+    // (its clock started) is a wait for the running epoch plus the rebuild of the one before.
+    let stats = rig.lp.publish_stats();
+    assert_eq!(stats.forced, 0);
+    assert!((1..=2_100).contains(&stats.max_landing_to_drawn_ms), "{stats:?}");
+    assert_eq!((stats.queued, stats.pending_chunks, stats.deferred_tiles), (0, 0, 0), "the gate is at rest at the end: {stats:?}");
+    assert_eq!(stats.text(), "", "and has nothing to say in the title");
+    let busy = planet_frame::managed::PublishStats { queued: 2, forced: 1, ..stats };
+    assert!(busy.text().contains("2 waiting") && busy.text().contains("1 forced"), "{}", busy.text());
     assert_eq!(rig.lp.forced_publications(), 0, "none needed the timeout");
 }
 

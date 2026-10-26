@@ -227,6 +227,9 @@ struct Running {
     stall: crate::stall::StallProbe,
     /// What the scheduler counted in the last frame, for a stall report.
     last_counts: planet_frame::managed::FrameCounts,
+    /// What the chunk publish gate is doing (STRM-054), for the title and the log line every 10 s.
+    gate: planet_frame::managed::PublishStats,
+    gate_logged_at: u64,
     last_ms: Option<u64>,
     last_gpu_sample: Instant,
     gpu_ms: Option<f64>,
@@ -399,11 +402,7 @@ impl App<'_> {
         if self.world.has_bake() && !cfg.smoke {
             let workers = (cfg.gen.workers / 2).max(1);
             let pool = planet_streaming::GenWorkers::new(workers).with_priority(cfg.gen.priority).pool();
-            self.world.request_anet(
-                pool,
-                self.clock.clone(),
-                planet_streaming::chunks::ChunkConfig { workers, publish_gate: true, ..Default::default() },
-            );
+            self.world.request_anet(pool, self.clock.clone(), planet_streaming::chunks::ChunkConfig::viewer(workers));
         }
         // `enable_lit` is not part of `warm_up`: the lit and atmosphere passes are enabled and used once per ring set here, before the
         // first measured frame, whether the window starts lit or on the debug path (REND-017, VIEW-007).
@@ -453,6 +452,8 @@ impl App<'_> {
             stats: FrameStats::new(now, if cfg.smoke { SMOKE_TITLE_PERIOD_MS } else { TITLE_PERIOD_MS }),
             stall: Default::default(),
             last_counts: Default::default(),
+            gate: Default::default(),
+            gate_logged_at: 0,
             last_ms: None,
             last_gpu_sample: Instant::now(),
             gpu_ms: None,
@@ -739,6 +740,20 @@ impl App<'_> {
                 let update = self.world.chunk_frame(&tiles, camera.position, &[]);
                 st.rig.managed.chunk_landed(&update.landed);
                 st.rig.managed.chunk_evicted(&update.evicted);
+                st.gate = st.rig.managed.publish_stats();
+                // One line every 10 s while the gate has something to say or its maxima moved: a silent fallback would be a pop nobody finds.
+                if now_ms >= st.gate_logged_at + 10_000
+                    && (st.gate.max_deferred_tiles > 0 || st.gate.forced > 0 || st.gate.max_landing_to_drawn_ms > 0)
+                {
+                    st.gate_logged_at = now_ms;
+                    crate::crash::note(&format!(
+                        "chunk gate:{} (most tiles deferred {}, longest landing to drawn {} ms, forced {})",
+                        st.gate.text(),
+                        st.gate.max_deferred_tiles,
+                        st.gate.max_landing_to_drawn_ms,
+                        st.gate.forced
+                    ));
+                }
             }
             // A refusal of the plan for the base parameters degrades the frame (it draws the newest plan in hand); it is said once, never fatal.
             // One line, one report file and one title notice per cause (kind and level) in 5 s; the title counts all of them.
@@ -1067,6 +1082,13 @@ impl App<'_> {
         if let Some(h) = self.world.horizon_stats() {
             extra += &format!("horizon jobs: {h:?}\n");
         }
+        let gate = st.rig.managed.publish_stats();
+        extra += &format!(
+            "chunk gate:{}; most tiles deferred {}, longest landing to drawn {} ms\n",
+            gate.text(),
+            gate.max_deferred_tiles,
+            gate.max_landing_to_drawn_ms
+        );
         extra += &format!("stalls so far: {}\n", st.stall.stalls);
         let text = stall.text(&extra);
         let now_ms = self.clock.now_ms();
@@ -1242,6 +1264,7 @@ fn title_text(st: &Running, now_ms: u64) -> String {
     if st.viewer.lit {
         input += &lit_extras_text(&st.viewer, st.chunks_on, st.sun_dir, st.camera_position);
     }
+    input += &st.gate.text();
     input += &format!(" | detail {}", st.viewer.ground_detail.name());
     input += &format!(" | {}", st.world_label);
     if st.viewer.scale_refs {

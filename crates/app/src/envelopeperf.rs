@@ -311,6 +311,9 @@ fn fly(
 
 /// The chunk field the scene counts its stand-in share against (STRM-039): the world's, `None` while the app builds no chunk manager for a
 /// world. The one place to give the scene a [`ManagerView`] when a world gets a chunk field; the log says it had none.
+///
+/// A scene that gives its world a chunk stage builds the manager with `ChunkConfig::viewer` (the publish gate on, STRM-054), so that the
+/// speed envelope measures the chunks as the window shows them. None does today: this returns `None` for every world the scene builds.
 fn chunk_view_of(world: &WorldTerrain) -> Option<Arc<dyn ChunkView>> {
     world.chunk_view()
 }
