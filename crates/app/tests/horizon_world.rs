@@ -164,7 +164,7 @@ fn a_chunk_gets_its_horizon_map_after_its_heights_from_the_worlds_own_field_and_
     assert_eq!(maps[0], maps[1], "the same world gives the same map");
 }
 
-// spec: STRM-049
+// spec: STRM-049, STRM-057
 #[test]
 fn a_flight_over_the_chunks_lands_every_map_and_the_rebakes_stay_few_and_an_edit_bakes_again() {
     let r = rig();
@@ -186,8 +186,27 @@ fn a_flight_over_the_chunks_lands_every_map_and_the_rebakes_stay_few_and_an_edit
         r.clock.advance(100);
     }
     assert_eq!(r.world.horizon_stats().unwrap().baked, before, "an unchanged world bakes nothing more");
-    // An edit changes the definition's revision and so every map's state word: they are baked again once the edit has settled.
+    // An edit far from every chunk of the flight changes no map's word: nothing is baked again.
+    let far = ItemSpec {
+        id: 7,
+        layer: DEFAULT_ITEM_LAYER.into(),
+        priority: 0,
+        dir: -tile().center_direction(&TangentWarp),
+        content_hash: 0,
+        reach_m: 800.0,
+        max_delta_m: 60.0,
+        stamp: None,
+    }
+    .with_stamp(Stamp::new(StampKind::Hill, [50.0, 0.0, 0.0]));
     let mut def = (*r.world.definition()).clone();
+    def.put_item_spec(BodyId::PLANET, far).unwrap();
+    r.world.set_definition(Arc::new(def.clone())).unwrap();
+    for _ in 0..40 {
+        frame(&r);
+        r.clock.advance(100);
+    }
+    assert_eq!(r.world.horizon_stats().unwrap().baked, before, "an edit outside every halo bakes nothing again");
+    // An edit at the chunks changes the words of the chunks it touches: they are baked again once the edit has settled, and only they.
     let item = ItemSpec {
         id: 1,
         layer: DEFAULT_ITEM_LAYER.into(),
@@ -206,7 +225,9 @@ fn a_flight_over_the_chunks_lands_every_map_and_the_rebakes_stay_few_and_an_edit
         r.clock.advance(100);
     }
     let after = r.world.horizon_stats().unwrap();
-    assert!(after.baked > before, "the edit bakes the maps again: {after:?}");
+    assert!(after.baked > before, "the edit bakes the maps it touches again: {after:?}");
+    // (The chunks of this rig are a few hundred metres across, so the hill reaches all nine; the selectivity is the far edit above.)
+    assert!(after.baked - before <= chunks, "at most one bake per chunk: {} for {chunks} chunks", after.baked - before);
     assert!(after.rebaked > s.rebaked);
 }
 

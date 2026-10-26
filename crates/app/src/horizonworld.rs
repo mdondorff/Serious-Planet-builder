@@ -31,11 +31,13 @@ pub struct ChunkHorizonBaker {
     lat: ChunkLattice,
     params: HorizonParams,
     threads: usize,
+    /// The edit word of a chunk by the definition revision it was made for.
+    words: Mutex<std::collections::HashMap<ChunkKey, (u64, u64)>>,
 }
 
 impl ChunkHorizonBaker {
     pub fn new(world: &Arc<WorldTerrain>, lat: ChunkLattice, params: HorizonParams, threads: usize) -> ChunkHorizonBaker {
-        ChunkHorizonBaker { world: Arc::downgrade(world), lat, params, threads: threads.max(1) }
+        ChunkHorizonBaker { world: Arc::downgrade(world), lat, params, threads: threads.max(1), words: Default::default() }
     }
 
     /// Cells of halo the march of this baker needs on every side of a chunk.
@@ -88,8 +90,40 @@ impl HorizonBaker for ChunkHorizonBaker {
         bake_horizon(&raster, (halo, halo, n, n), &self.params, self.threads).map_or_else(|_| none(), |m| m.data)
     }
 
-    /// The march, the lattice, the bake and the world's edits: an edit changes every map's word, so every map is baked again once the edit has
-    /// settled (a superset of the chunks whose halo it touches; the precise set is M8-7's).
+    /// The items of every stamp layer that touch the chunk and the halo the march reads around it (the horizon samples the whole field, so the layers
+    /// above the chunk stage count too): the hash of those items, 0 for none. The cap is the chunk's own with a halo of the march's cells.
+    fn edit_word(&self, key: ChunkKey) -> u64 {
+        let Some(world) = self.world.upgrade() else { return 0 };
+        let def = world.definition();
+        let revision = def.revision();
+        if let Some(&(r, w)) = self.words.lock().expect("edit words").get(&key) {
+            if r == revision {
+                return w;
+            }
+        }
+        let tile =
+            TileId::new(Face(key.0), planet_generators::chunk::CHUNK_GRID_LEVEL, key.1, key.2).expect("a chunk of the grid is a tile");
+        let halo = (self.halo_cells() as f64 / f64::from(self.lat.cells_per_chunk())).clamp(0.0, 1.0);
+        let cap = planet_world_def::footprint::tile_cap(&planet_core::TangentWarp, tile, halo);
+        let mut items = std::collections::BTreeMap::new();
+        for layer in def.stamp_layers(planet_world_def::BodyId::PLANET) {
+            if let Ok(found) = def.footprint_items_cap(planet_world_def::BodyId::PLANET, &layer, cap) {
+                for it in found {
+                    items.entry((layer.clone(), it.id)).or_insert(it);
+                }
+            }
+        }
+        let word = if items.is_empty() {
+            0
+        } else {
+            let all: Vec<planet_world_def::footprint::FootprintItem> = items.into_values().collect();
+            planet_world_def::footprint_hash(&all) | 1
+        };
+        self.words.lock().expect("edit words").insert(key, (revision, word));
+        word
+    }
+
+    /// The march, the lattice and the bake (the edits are in [`HorizonBaker::edit_word`], per chunk).
     fn spec_hash(&self) -> u64 {
         use planet_core::hash::mix64;
         let p = &self.params;
@@ -98,9 +132,6 @@ impl HorizonBaker for ChunkHorizonBaker {
             h = mix64(h ^ v.to_bits());
         }
         h = mix64(h ^ u64::from(self.lat.cells_per_chunk()));
-        if let Some(world) = self.world.upgrade() {
-            h = mix64(h ^ world.definition().revision());
-        }
         h
     }
 }
