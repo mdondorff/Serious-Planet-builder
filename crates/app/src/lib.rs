@@ -155,6 +155,8 @@ pub struct Options {
     pub radii_m: Option<String>,
     /// `--altitudes-m`: cameras at these altitudes (metres separated by commas) in the `--edit-resolve` measurement; none: the low camera.
     pub altitudes_m: Option<String>,
+    /// `--no-chunks`: the `edit-latency` scene without the chunk stage (the comparison line of M8-8); with a store it runs with one.
+    pub no_chunks: bool,
     /// `generate --coupled-run DIR`: make (or find) the coupled run of the bake stored in `DIR` (STRM-051).
     pub coupled_run: Option<PathBuf>,
     /// `generate`: write the coarse tiles (levels `F..=--prefill-levels`, F the render floor) into the pack of the stored bake in this directory (STRM-021).
@@ -318,6 +320,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         edit_resolve: None,
         radii_m: None,
         altitudes_m: None,
+        no_chunks: false,
         coupled_run: None,
         prefill_dir: None,
         prefill_levels: None,
@@ -453,6 +456,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--allow-stale" => o.allow_stale = true,
             "--global-dir" => o.global_dir = Some(PathBuf::from(it.next().ok_or("--global-dir needs a directory")?)),
             "--edit-resolve" => o.edit_resolve = Some(PathBuf::from(it.next().ok_or("--edit-resolve needs a store directory")?)),
+            "--no-chunks" => o.no_chunks = true,
             "--altitudes-m" => o.altitudes_m = Some(it.next().ok_or("--altitudes-m needs metres separated by commas")?.clone()),
             "--radii-m" => o.radii_m = Some(it.next().ok_or("--radii-m needs metres separated by commas")?.clone()),
             "--coarse-horizon" => o.coarse_horizon = Some(PathBuf::from(it.next().ok_or("--coarse-horizon needs a store directory")?)),
