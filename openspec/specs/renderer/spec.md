@@ -759,3 +759,14 @@ Source: REND-039, M8 exit criterion 3
 #### Scenario: Known limit at a chunk border
 - **WHEN** a tile reads a chunk that is not ready while its neighbour reads only the ready ones
 - **THEN** the tile weighs 0 while the neighbour is at its weight, so the two differ along their shared edge by up to the change times the weight difference for as long as the neighbour chunk takes; the skirt (0.08 of the tile edge, about 12 m at level 16 and 49 m at level 14) covers only the steps of the finer levels, not the 58 m of the largest valley, until `m8-chunk-fade-increment`
+
+### Requirement: REND-043 The coarse horizon fades out with distance
+The elevation the coarse horizon map gives SHALL be multiplied by a strength that is 1 up to 1,000 km from the camera to the surface point, falls as a smoothstep to 0 at 3,000 km and stays 0 beyond (`planet_generators::horizon::coarse_fade`; the shader's `horizon_coarse_fade` is the same function); the chunk horizon maps SHALL NOT be faded. The probe of the shader SHALL take the distance.
+
+Verify: A, C
+Status: active
+Source: REND-038, GEN-045, the owner's frame of 2026-10-25 (dark spots near the terminator at 3,904 km)
+
+#### Scenario: Near and far
+- **WHEN** a coarse map with a horizon of 10 degrees is probed for a sun at 5 degrees at distances from 0 to 6,000 km
+- **THEN** the factor is 0 near, 1 far, monotone between, and equal to the CPU reference with `coarse_fade` within 0.02
