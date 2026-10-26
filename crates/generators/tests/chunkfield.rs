@@ -567,7 +567,7 @@ fn the_mirror_of_the_vertex_stage_draws_the_final_height_at_weight_one_the_base_
     assert!((drawn - base).abs() < 2.0 * with.height_error_bound_m() + 5e-4, "{drawn} against the base {base}");
 }
 
-// spec: GEN-071
+// spec: GEN-071, GEN-074
 #[test]
 fn a_compact_tile_over_a_ready_chunk_with_drivers_carries_the_chunks_codes_and_one_away_from_chunks_the_neutral_ones() {
     use planet_generators::compact::compact_tile_field;

@@ -426,7 +426,7 @@ fn the_sun_adds_a_highlight_to_the_detailed_ground_that_follows_the_gloss_table_
     assert!(hdr_of(&mut r, &ctx, &p, albedo) == hdr_of(&mut r, &ctx, &p, detail_plan(ShadeView::Albedo, 1.0)), "gloss in the albedo view");
 }
 
-// spec: GEN-071, GEN-072, CON-18
+// spec: GEN-071, GEN-072, GEN-074, CON-18
 #[test]
 fn the_driver_views_show_the_drivers_of_the_tiles_driver_block() {
     use planet_frame::look::shading::driver_view_colour;
