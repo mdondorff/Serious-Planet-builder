@@ -848,6 +848,13 @@ impl WorldTerrain {
         crate::stall::read(&self.chunks, "chunk stage lock (read)").as_ref().map(|c| c.lat)
     }
 
+    /// Tell the chunk manager whether the visible edit is still being drawn (`ChunkManager::hold_stale`); without a chunk stage nothing happens.
+    pub fn hold_stale_chunks(&self, hold: bool) {
+        if let Some(m) = self.chunk_manager() {
+            m.hold_stale(hold);
+        }
+    }
+
     /// The manager of this world's chunks, if it has a chunk stage.
     pub fn chunk_manager(&self) -> Option<Arc<planet_streaming::chunks::ChunkManager>> {
         crate::stall::read(&self.chunks, "chunk stage lock (read)").as_ref().map(|c| c.manager.clone())

@@ -440,3 +440,38 @@ fn with_the_default_pool_every_stale_chunk_of_a_view_is_solved_in_one_round_and_
     assert!(up.landed.contains(&key(5, 0)), "the chunk with the edit in its own region was in the first round");
     assert!(!up.landed.contains(&key(4, 0)), "a nearer chunk the read set only reaches waited: {:?}", up.landed);
 }
+
+// spec: STRM-056
+#[test]
+fn stale_chunks_wait_while_the_edit_is_being_drawn_and_start_at_the_event_or_at_the_cap() {
+    let (spawner, clock) = (Arc::new(ManualSpawner::default()), Arc::new(FakeClock::default()));
+    let versions = Arc::new(Versions(0.into()));
+    let cfg = ChunkConfig { workers: 4, stale_hold_cap_ms: 1_000, ..ChunkConfig::default() };
+    let m = manager(spawner.clone(), clock.clone(), None, cfg).with_versions(versions.clone());
+    let wanted: Vec<(ChunkKey, f64)> = (0..3).map(|x| (key(x, 0), 100.0 * f64::from(x) + 100.0)).collect();
+    for _ in 0..2 {
+        m.update(&wanted);
+        spawner.run(4);
+    }
+    m.update(&wanted);
+    assert_eq!(m.stats().landed, 3);
+    // An edit, and the loop says its tiles are still being built: the stale chunks wait.
+    versions.0.store(5, std::sync::atomic::Ordering::SeqCst);
+    m.hold_stale(true);
+    assert_eq!(m.update(&wanted).started, 0, "held at the first sight of the edit");
+    clock.advance(600);
+    assert_eq!(m.update(&wanted).started, 0, "still held 600 ms later");
+    // The event: the edit's tiles are drawn, the hold is off, the stale chunks start at once (before the cap).
+    m.hold_stale(false);
+    assert_eq!(m.update(&wanted).started, 3, "released at the event");
+    spawner.run(4);
+    m.update(&wanted);
+    // A second edit: held again, but a stuck refresh cannot hold erosion longer than the cap.
+    versions.0.store(6, std::sync::atomic::Ordering::SeqCst);
+    m.hold_stale(true);
+    assert_eq!(m.update(&wanted).started, 0);
+    clock.advance(999);
+    assert_eq!(m.update(&wanted).started, 0, "one millisecond short of the cap");
+    clock.advance(1);
+    assert_eq!(m.update(&wanted).started, 3, "the cap ends the hold");
+}

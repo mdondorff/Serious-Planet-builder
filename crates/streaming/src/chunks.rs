@@ -76,6 +76,9 @@ pub struct ChunkConfig {
     /// Jobs on stale chunks (a ready chunk of an older version, STRM-056) running at once, at most `workers`; the default is every worker: a chunk
     /// that is missing still goes first, and an edit's chunks take what is left (ADR 0083's class "visible streaming and edits").
     pub stale_workers: usize,
+    /// The longest a stale chunk waits for the visible edit to be drawn (milliseconds of the injected clock): while the loop says the edit's own tiles
+    /// are still being built ([`ChunkManager::hold_stale`]) the stale jobs do not start, so they do not compete with them; after this long they start.
+    pub stale_hold_cap_ms: u64,
     /// Jobs running at once (`chunk_workers`; the default of a viewer is half its worker pool, so tiles are not starved).
     pub workers: usize,
     /// A chunk not wanted for this long leaves RAM (`chunk_evict_s` 5, in milliseconds).
@@ -87,7 +90,7 @@ pub struct ChunkConfig {
 
 impl Default for ChunkConfig {
     fn default() -> Self {
-        ChunkConfig { workers: 4, stale_workers: usize::MAX, evict_ms: 5_000, cap_bytes: 512 << 20 }
+        ChunkConfig { workers: 4, stale_workers: usize::MAX, stale_hold_cap_ms: 1_000, evict_ms: 5_000, cap_bytes: 512 << 20 }
     }
 }
 
@@ -127,6 +130,8 @@ struct Shared {
     running: HashSet<ChunkKey>,
     /// The running jobs that re-solve a ready chunk of an older version (a subset of `running`).
     stale_running: HashSet<ChunkKey>,
+    /// The instant (injected clock) a ready chunk was first seen stale, until it lands again: the hold of the stale jobs ends a cap after the first.
+    stale_since: HashMap<ChunkKey, u64>,
     landed: Vec<ChunkKey>,
     stats: ChunkStats,
     log: Vec<String>,
@@ -143,6 +148,7 @@ pub struct ChunkManager {
     disk: Option<Arc<dyn ChunkDisk>>,
     cfg: ChunkConfig,
     versions: Option<Arc<dyn ChunkVersions>>,
+    hold_stale: std::sync::atomic::AtomicBool,
     shared: Arc<Mutex<Shared>>,
 }
 
@@ -162,7 +168,25 @@ impl ChunkManager {
         disk: Option<Arc<dyn ChunkDisk>>,
         cfg: ChunkConfig,
     ) -> ChunkManager {
-        ChunkManager { lat, radius_m, top, stage, spawner, clock, disk, cfg, versions: None, shared: Arc::default() }
+        ChunkManager {
+            lat,
+            radius_m,
+            top,
+            stage,
+            spawner,
+            clock,
+            disk,
+            cfg,
+            versions: None,
+            hold_stale: Default::default(),
+            shared: Arc::default(),
+        }
+    }
+
+    /// Whether the visible edit is still being drawn: while it is, the stale chunks wait (at most `stale_hold_cap_ms` from the first one seen stale),
+    /// so the tiles of the edit are built first (the class "visible streaming and edits" of ADR 0083 comes before the chunk re-solve it causes).
+    pub fn hold_stale(&self, hold: bool) {
+        self.hold_stale.store(hold, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// The manager with a source of chunk versions (GEN-082): a ready chunk whose version differs from the source's is stale and is re-solved when
@@ -248,7 +272,18 @@ impl ChunkManager {
             let is_near = |k: &ChunkKey| near.get(k).copied().unwrap_or(false);
             stale.sort_by(|a, b| is_near(&b.1).cmp(&is_near(&a.1)).then(a.0.total_cmp(&b.0)).then(a.1.cmp(&b.1)));
             stale.dedup_by_key(|c| c.1);
-            for (_, k) in stale.into_iter().take(stale_free) {
+            // The instants chunks were first seen stale (kept while they are stale or running), and whether the hold is on: the loop says the edit's
+            // tiles are not drawn yet and the first stale chunk has not waited for the cap.
+            for (_, k) in &stale {
+                sh.stale_since.entry(*k).or_insert(now);
+            }
+            let stale_keys: HashSet<ChunkKey> = stale.iter().map(|c| c.1).collect();
+            let running_stale = sh.stale_running.clone();
+            sh.stale_since.retain(|k, _| stale_keys.contains(k) || running_stale.contains(k));
+            let first_stale = stale.iter().filter_map(|c| sh.stale_since.get(&c.1)).min().copied();
+            let held = self.hold_stale.load(std::sync::atomic::Ordering::Relaxed)
+                && first_stale.is_some_and(|t| now.saturating_sub(t) < self.cfg.stale_hold_cap_ms);
+            for (_, k) in stale.into_iter().take(if held { 0 } else { stale_free }) {
                 if chosen.len() >= free {
                     break;
                 }
@@ -322,6 +357,7 @@ impl ChunkManager {
             let mut sh = shared.lock().expect("chunk state");
             sh.running.remove(&key);
             sh.stale_running.remove(&key);
+            sh.stale_since.remove(&key);
             sh.ready.insert(
                 key,
                 Entry {
