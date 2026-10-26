@@ -48,7 +48,7 @@ Scope (owner, 2026-10-25): M8 delivers plausible relief, hydrology and horizon s
 |---|---|---|
 | D1 | Accept ADR 0077 (chunks of a fixed grid; the global coupled run fixes the river network) | **accepted** |
 | D2 | CON-08: a reading of "per tile with a halo" as "per chunk of a fixed grid with a bounded halo", or a one-sentence amendment | **"per tile with a halo" applies to chunks; CON-08 amended to say so (constitution v1.6)** |
-| D3 | Edits over chunks: (1) edits apply after erosion, instant, erosion ignores them; (2) the edit shows at once, the eroded result follows within 10 s; (3) edited areas skip chunk erosion. Affects the editor only: a viewer receives a finished world | **2, provisional: the order is built as a per-layer setting (default: edits on top of the eroded ground); the owner confirms before M8-7** |
+| D3 | Edits over chunks: (1) edits apply after erosion, instant, erosion ignores them; (2) the edit shows at once, the eroded result follows within 10 s; (3) edited areas skip chunk erosion. Affects the editor only: a viewer receives a finished world | **2, confirmed (owner, 2026-10-26): both orders are wanted eventually (edits shaped by erosion, and finishing touches on top); M8-7 builds edits under the erosion first (the edit shows at once, its eroded result follows within 10 s); edits on top stay the per-layer setting for later** |
 | D4 | The exit criteria above | **accepted** |
 | D5 | Lanes from 2026-10-25 as in "Lanes and files" | **accepted** |
 | D6 | The photo layer (SPIKE-32 step 4, asset cache ADR): in M8 after criterion 1 is met, or in M9 | **later (M9 or after); M8 keeps the procedural look extensible** |
