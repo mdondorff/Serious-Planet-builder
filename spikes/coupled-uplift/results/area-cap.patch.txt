@@ -1,0 +1,40 @@
+diff --git a/crates/generators/src/coupled.rs b/crates/generators/src/coupled.rs
+index 6934c282..968186dd 100644
+--- a/crates/generators/src/coupled.rs
++++ b/crates/generators/src/coupled.rs
+@@ -148,6 +148,8 @@ pub struct CoupledParams {
+     pub seed: u64,
+     /// The height land cells never fall below, in metres.
+     pub min_height_m: f64,
++    /// SPIKE-45 (spike branch only): the drainage area the stream power term saturates at, in m2 (infinite: no cap).
++    pub area_cap_m2: f64,
+     /// Whether the run erodes (the stream power steps) or only fills (GEN-065): off, the run's heights are the input's plus the priority-flood fill
+     /// and the receivers and areas are those of that surface. The algorithm's own default is on (the steps and their known answers); a world's run
+     /// sets it with `coupledworld::COUPLED_ERODE`. Part of the key of the stored run.
+@@ -156,7 +158,7 @@ pub struct CoupledParams {
+ 
+ impl Default for CoupledParams {
+     fn default() -> Self {
+-        CoupledParams { area_exp: 0.45, dt_years: 1.0e5, jitter: 0.4, seed: 0, min_height_m: 0.5, erode: true }
++        CoupledParams { area_exp: 0.45, dt_years: 1.0e5, jitter: 0.4, seed: 0, min_height_m: 0.5, area_cap_m2: f64::INFINITY, erode: true }
+     }
+ }
+ 
+@@ -458,7 +460,7 @@ fn step_with(
+             let dist = lat.spacing_m(c, usize::from(dir[c]), r as usize);
+             (
+                 f64::from(z[r as usize]).max(0.0),
+-                f64::from(input.erodibility[c]) * area_pow(lat, leaf_pow, c, a[c], p.area_exp) * p.dt_years / dist,
++                f64::from(input.erodibility[c]) * area_pow(lat, leaf_pow, c, a[c].min(p.area_cap_m2), p.area_exp) * p.dt_years / dist,
+             )
+         };
+         let new = ((old + p.dt_years * f64::from(input.uplift[c]) + f * zr) / (1.0 + f)).max(p.min_height_m);
+@@ -494,7 +496,7 @@ pub fn stationary_uplift(lat: &Lattice, z: &[f32], erodibility: &[f32], p: &Coup
+         }
+         let dist = lat.spacing_m(c, usize::from(dir[c]), r as usize);
+         let drop = (f64::from(z[c]) - f64::from(z[r as usize]).max(0.0)).max(0.0);
+-        let v = (rho * f64::from(erodibility[c]) * area_pow(lat, &mut leaf_pow, c, a[c], p.area_exp) * (drop / dist)) as f32;
++        let v = (rho * f64::from(erodibility[c]) * area_pow(lat, &mut leaf_pow, c, a[c].min(p.area_cap_m2), p.area_exp) * (drop / dist)) as f32;
+         assert!(v.is_finite(), "the uplift of cell {c} is {v}: rho {rho} is too large for this input");
+         u[c] = v;
+     }
