@@ -6,6 +6,7 @@ pub mod chunkstage;
 pub mod coupledworld;
 pub mod crash;
 pub mod editperf;
+pub mod editresolve;
 pub mod editscale;
 pub mod editwin;
 pub mod envelopeperf;
@@ -41,7 +42,7 @@ use planet_render::{AdapterPolicy, GpuContext};
 pub const USAGE: &str = "usage: planet <mode> [options]
 modes:
   editor        the viewer window (VIEW-001..VIEW-007): the scripted orbit-to-1 m flight on the pipelined loop; keys P/Space pause, R restart, L lit (with the atmosphere) or debug path, V debug view, T vsync, C flight or free camera (WASD move, Q/E down/up, arrows look, Shift boost), Esc quit; the window opens on the lit path with the atmosphere, the look file drawn (sun, adaptive exposure); the title shows frame rate, CPU and GPU time, the path (or the debug view), on the lit path the exposure, and the readiness report; runs on a discrete GPU only (an integrated GPU, a software adapter or an adapter missing a feature or limit is refused with the reason); [--world F --global-res N | --store DIR] [--look F] [--size WxH] [--view NAME] [--cells N --tau PX --finest-level N] [--no-vsync] [--no-ui] (the editor UI, an egui layer drawn after the tone map, VIEW-011) [--edit] (start in the editor mode, VIEW-022: Tab toggles it; the panels, stamps by 2-4 and a click, handles on the planet, Ctrl+Z / Ctrl+Y) [--items DIR] (the edits as one TOML file each in DIR, loaded at the start) [--editor-layout F] (the panel layout, VIEW-018) [--marker LAT,LON[,RADIUS_M]]... (item markers of the globe overview, G, VIEW-013) [--site LAT,LON] (the scripted flight descends over this point, default 20,30); --smoke opens the window, drives the keys for a few dozen frames and closes it (test mode: PLANET_ADAPTER or --adapter, software by default; exits with `no display` where there is none); --no-window starts and exits without a window; --offscreen runs the skeleton without a window
-  generate      headless generator CLI: --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --manifest <file> writes the determinism manifest (GEN-003); --cache-dir <dir> --region F,L [--res N] writes a tile face region into a tile store; --verify-cache <dir> [--sample N] regenerates stored tiles and compares (both take --world <definition.toml> or --seed N; --verify-cache fails when nothing could be compared, --allow-stale accepts that); --global-dir <dir> [--global-res N, default 256] bakes the global-coarse field (continents, elevation, climate) of N cells per face edge into a tile store as blocks in the canonical layout (blocks of min(N, 1024) cells) together with its ocean-connectivity channel (one bit per vertex; the area threshold is the definition's `body.0.sea.min_area_fraction`) and prints the time per sample and the channel's cost; --verify-global <dir> [--sample N] regenerates stored blocks and compares; --global-products <dir> [--global-res N] writes cube nets and maps of an in-memory bake (these take --world or --seed and --threads N); --coupled-run <dir> --global-res N (required) makes the coupled run of the bake stored in <dir> (or finds it there) and stores it, with a progress line at most every 10 s during the reduction of the bake and the wall time (STRM-051); --coarse-horizon <dir> --global-res N (required) [--threads N] makes the coarse horizon (far-field shadows, STRM-045) from the coupled run stored beside the bake in <dir> and stores it there, with a progress line and the wall time (the coupled run is made and stored by the viewer or `test-render --scene coupled`); --plan-check <dir> --global-res N (required) plans the standard flight at cells 32 and viewport / tau 240 over the stored bake with the terrain and the eroded field and fails if a view is rejected (M3 acceptance); --prefill-dir <dir> --global-res N [--prefill-levels L] [--floor-level F] writes the coarse tiles of levels F..=L (F the render floor, default 3; L default 4; an L below F writes nothing and says so; the tiles of cells 32, finest level 22, compact form, as the streamer generates them) of the stored bake into its tile pack, skipping what is there; --global-dir pre-fills the same way after the bake (--prefill-levels 0 disables; --floor-level takes both); --smoke starts and exits
+  generate      headless generator CLI: --edit-resolve <dir> [--site LAT,LON --radii-m R,R --threads N] (M8-7: land the chunks under the site, put a hill of each reach, report the chunks re-solved and the time); --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --manifest <file> writes the determinism manifest (GEN-003); --cache-dir <dir> --region F,L [--res N] writes a tile face region into a tile store; --verify-cache <dir> [--sample N] regenerates stored tiles and compares (both take --world <definition.toml> or --seed N; --verify-cache fails when nothing could be compared, --allow-stale accepts that); --global-dir <dir> [--global-res N, default 256] bakes the global-coarse field (continents, elevation, climate) of N cells per face edge into a tile store as blocks in the canonical layout (blocks of min(N, 1024) cells) together with its ocean-connectivity channel (one bit per vertex; the area threshold is the definition's `body.0.sea.min_area_fraction`) and prints the time per sample and the channel's cost; --verify-global <dir> [--sample N] regenerates stored blocks and compares; --global-products <dir> [--global-res N] writes cube nets and maps of an in-memory bake (these take --world or --seed and --threads N); --coupled-run <dir> --global-res N (required) makes the coupled run of the bake stored in <dir> (or finds it there) and stores it, with a progress line at most every 10 s during the reduction of the bake and the wall time (STRM-051); --coarse-horizon <dir> --global-res N (required) [--threads N] makes the coarse horizon (far-field shadows, STRM-045) from the coupled run stored beside the bake in <dir> and stores it there, with a progress line and the wall time (the coupled run is made and stored by the viewer or `test-render --scene coupled`); --plan-check <dir> --global-res N (required) plans the standard flight at cells 32 and viewport / tau 240 over the stored bake with the terrain and the eroded field and fails if a view is rejected (M3 acceptance); --prefill-dir <dir> --global-res N [--prefill-levels L] [--floor-level F] writes the coarse tiles of levels F..=L (F the render floor, default 3; L default 4; an L below F writes nothing and says so; the tiles of cells 32, finest level 22, compact form, as the streamer generates them) of the stored bake into its tile pack, skipping what is there; --global-dir pre-fills the same way after the bake (--prefill-levels 0 disables; --floor-level takes both); --smoke starts and exits
   test-render   headless render harness
     --scene hello-triangle|tiles|terrain   render a scene (default hello-triangle)
     --script N|name          scripted terrain camera 0..9 or its name (default 3 = aerial-20km)
@@ -148,6 +149,10 @@ pub struct Options {
     pub plan_check: Option<PathBuf>,
     /// `generate --coarse-horizon DIR`: make the coarse horizon of the store `DIR`'s stored coupled run (STRM-045).
     pub coarse_horizon: Option<PathBuf>,
+    /// `generate --edit-resolve DIR [--site LAT,LON] [--radii-m R,R..]`: the first measurement of an edit over chunks (M8-7).
+    pub edit_resolve: Option<PathBuf>,
+    /// `--radii-m`: the reaches of the hills the measurement puts, in metres separated by commas.
+    pub radii_m: Option<String>,
     /// `generate --coupled-run DIR`: make (or find) the coupled run of the bake stored in `DIR` (STRM-051).
     pub coupled_run: Option<PathBuf>,
     /// `generate`: write the coarse tiles (levels `F..=--prefill-levels`, F the render floor) into the pack of the stored bake in this directory (STRM-021).
@@ -308,6 +313,8 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         verify_global: None,
         plan_check: None,
         coarse_horizon: None,
+        edit_resolve: None,
+        radii_m: None,
         coupled_run: None,
         prefill_dir: None,
         prefill_levels: None,
@@ -442,6 +449,8 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             }
             "--allow-stale" => o.allow_stale = true,
             "--global-dir" => o.global_dir = Some(PathBuf::from(it.next().ok_or("--global-dir needs a directory")?)),
+            "--edit-resolve" => o.edit_resolve = Some(PathBuf::from(it.next().ok_or("--edit-resolve needs a store directory")?)),
+            "--radii-m" => o.radii_m = Some(it.next().ok_or("--radii-m needs metres separated by commas")?.clone()),
             "--coarse-horizon" => o.coarse_horizon = Some(PathBuf::from(it.next().ok_or("--coarse-horizon needs a store directory")?)),
             "--coupled-run" => o.coupled_run = Some(PathBuf::from(it.next().ok_or("--coupled-run needs a store directory")?)),
             "--plan-check" => o.plan_check = Some(PathBuf::from(it.next().ok_or("--plan-check needs a directory")?)),
@@ -521,7 +530,9 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
 use planet_cache::tiles::MAX_REGION_LEVEL;
 
 /// Options that only the tile store commands of `generate` understand.
-pub(crate) const STORE_OPTIONS: [&str; 17] = [
+pub(crate) const STORE_OPTIONS: [&str; 19] = [
+    "--edit-resolve",
+    "--radii-m",
     "--coarse-horizon",
     "--prefill-dir",
     "--prefill-levels",
@@ -980,6 +991,17 @@ mod tests {
         }
         assert!(args(&["editor", "--site"]).is_err(), "--site needs a value");
         assert!(USAGE.contains("--site"), "the usage names the option");
+    }
+
+    // spec: STRM-056
+    #[test]
+    fn the_edit_resolve_measurement_takes_a_store_a_site_and_radii_and_is_a_store_command() {
+        let args = |a: &[&str]| parse_args(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        let o = args(&["generate", "--edit-resolve", "store", "--site", "45,-100", "--radii-m", "150,5000"]).unwrap();
+        assert_eq!(o.edit_resolve.as_deref(), Some(std::path::Path::new("store")));
+        assert_eq!((o.site, o.radii_m.as_deref()), (Some((45.0, -100.0)), Some("150,5000")));
+        assert!(args(&["generate", "--edit-resolve"]).is_err(), "--edit-resolve needs a directory");
+        assert!(STORE_OPTIONS.contains(&"--edit-resolve") && USAGE.contains("--edit-resolve"));
     }
 
     // spec: STRM-020, TEST-012
