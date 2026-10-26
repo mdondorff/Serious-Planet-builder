@@ -728,7 +728,7 @@ mod tests {
         assert!(with.contains("\"coarse_share\": 0.004"), "{with}");
     }
 
-    // spec: TEST-054
+    // spec: TEST-055
     #[test]
     fn the_log_gives_what_the_chunk_stage_did_per_trial_and_the_horizon_off_comparison() {
         let stage = StageFacts {

@@ -145,7 +145,7 @@ pub fn chunks_busy(stand_in_nodes: usize, chunk_jobs: usize, horizon_jobs: usize
 mod tests {
     use super::*;
 
-    // spec: TEST-054
+    // spec: TEST-055
     #[test]
     fn the_trace_measures_from_the_first_frame_that_wanted_a_chunk_to_the_frame_that_saw_it_land() {
         let mut t = ChunkTrace::default();
