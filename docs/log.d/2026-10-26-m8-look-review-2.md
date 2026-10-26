@@ -1,0 +1,1 @@
+- 2026-10-26 **m8-look-review-2** (TEST-053): stills tool takes a per-pose view and a [look] table; look-review-2 stills on the rebuilt store, default and sample driver look, plus the soil, moisture and insolation views (docs/milestones/M8/look-review-2*).
