@@ -333,7 +333,7 @@ mod tests {
             let block = (halo, halo, n - 2 * halo, n - 2 * halo);
             let got = bake_horizon(&raster, block, &p, 3).unwrap();
             assert_eq!(got.data, reference_bake(&raster, block, &p), "range {range} growth {growth} radius {radius}");
-            assert!(got.data.iter().any(|&q| q > 0) && got.data.iter().any(|&q| q == 0), "the fixture shades some texels and not others");
+            assert!(got.data.iter().any(|&q| q > 0) && got.data.contains(&0), "the fixture shades some texels and not others");
         }
     }
 
