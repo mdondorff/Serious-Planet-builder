@@ -122,7 +122,9 @@ pub fn check_options(o: &Options) -> Result<(), String> {
         }
     }
     let stream = (o.perf || o.perf_smoke || capture) && (is_stream_scene(&o.scene) || crate::litperf::is_lit_scene(&o.scene) || capture);
-    if !stream && (o.store.is_some() || o.allow_memory_bake) {
+    // The chunk scene reads a stored production bake too (`--store DIR`, the viewer's geometry).
+    let chunk_on_store = o.perf && o.scene == "anet-chunk" && o.store.is_some() && !o.allow_memory_bake;
+    if !stream && !chunk_on_store && (o.store.is_some() || o.allow_memory_bake) {
         return Err("--store and --allow-memory-bake only apply to the streaming perf scenes (dive, dive-fast, teleport-1m, teleport-2km, look-1m, look-2km, streaming)".into());
     }
     if o.store.is_some() && o.allow_memory_bake {
@@ -1148,6 +1150,9 @@ mod tests {
         );
         let e = check_options(&opts(&["test-render", "--perf", "--scene", "dive", "--store", "x", "--allow-memory-bake"])).unwrap_err();
         assert!(e.contains("exclude each other"), "{e}");
+        assert!(check_options(&opts(&["test-render", "--perf", "--scene", "anet-chunk", "--store", "x", "--global-res", "16384"])).is_ok());
+        let e = check_options(&opts(&["test-render", "--perf", "--scene", "anet-chunk", "--allow-memory-bake"])).unwrap_err();
+        assert!(e.contains("only apply to the streaming perf scenes"), "{e}");
         let e = check_options(&opts(&["test-render", "--perf", "--scene", "terrain", "--store", "x"])).unwrap_err();
         assert!(e.contains("only apply to the streaming perf scenes"), "{e}");
         // The terrain scene keeps its default (in-memory 256-cell bake) and needs no store.

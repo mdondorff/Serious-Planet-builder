@@ -304,9 +304,8 @@ pub fn pose_camera(
     let theta = pose.back_m / radius_m;
     let eye_dir = (anchor * libm::cos(theta) - heading * libm::sin(theta)).normalized();
     let eye_alt = ground_m(eye_dir).max(level_m) + pose.altitude_m;
-    // The heading carried to the eye: the tangent at the eye along the great circle through the anchor.
-    let ahead = (anchor - eye_dir * anchor.dot(eye_dir)).normalized();
-    let ahead = if pose.back_m > 0.0 { ahead } else { heading };
+    // The heading carried to the eye: the tangent at the eye along the great circle through the anchor (at the anchor itself the heading: that vector is zero).
+    let ahead = if pose.back_m > 0.0 { (anchor - eye_dir * anchor.dot(eye_dir)).normalized() } else { heading };
     let near = (pose.altitude_m * 0.05).clamp(0.05, 0.1);
     Camera::at_surface_point(PlanetFixed(eye_dir * (radius_m + eye_alt)), ahead, pose.pitch_deg.to_radians(), fov_y_rad, aspect, near)
 }
@@ -1368,6 +1367,26 @@ snap_to_channel_m = 0"
             let west = Vec3::new(libm::sin(lon.to_radians()), -libm::cos(lon.to_radians()), 0.0);
             assert!(dusk[0] as f64 * west.x + dusk[1] as f64 * west.y > 0.999_999, "the sun sets in the west");
         }
+    }
+
+    // spec: TEST-048
+    #[test]
+    fn a_pose_at_its_anchor_with_nothing_behind_it_looks_along_the_heading_and_does_not_normalise_a_zero_vector() {
+        // On the equator at longitude 0 the anchor is exactly (1, 0, 0): the tangent at the eye along the great circle through the anchor is the zero vector.
+        let anchor = direction_of(0.0, 0.0);
+        assert_eq!(anchor.dot(anchor), 1.0);
+        let pose = Pose {
+            name: "p".into(),
+            altitude_m: 300.0,
+            back_m: 0.0,
+            heading_deg: 90.0,
+            pitch_deg: 0.0,
+            sun_local_hours: 12.0,
+            sun_declination_deg: 0.0,
+            view: None,
+        };
+        let cam = pose_camera(anchor, &pose, &|_| 100.0, 6_371_000.0, 0.0, 16.0 / 9.0, 1.0);
+        assert!((cam.position.0.length() - 6_371_000.0 - 400.0).abs() < 1e-6);
     }
 
     // spec: TEST-048
