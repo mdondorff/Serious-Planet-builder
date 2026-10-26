@@ -999,7 +999,7 @@ fn the_valley_walls_rise_evenly_cell_to_cell_on_a_corridor_off_the_grid_axes() {
 // spec: GEN-049, GEN-060
 #[test]
 fn the_band_of_a_core_cell_is_the_same_whatever_the_halo_with_two_corridors_off_the_grid_axes() {
-    use planet_generators::anet::{paint_band, AnchorLaw, NO_NEXT};
+    use planet_generators::anet::{paint_band, AnchorLaw};
     use planet_generators::chunkfield::Cell;
     let lat = ChunkLattice::new(128).unwrap();
     let law = AnchorLaw::default();
@@ -1007,7 +1007,7 @@ fn the_band_of_a_core_cell_is_the_same_whatever_the_halo_with_two_corridors_off_
         let r = region(&lat, chunk(1003), halo);
         let len = r.cells.len();
         let origin = region(&lat, chunk(1003), 0).cells[0];
-        let (mut corridor, next, mut anchor_z) = (vec![false; len], vec![NO_NEXT; len], vec![f64::NAN; len]);
+        let (mut corridor, mut anchor_z) = (vec![false; len], vec![f64::NAN; len]);
         // Two corridors that run towards each other from opposite sides of the chunk, at 26.6 and at minus 18.4 degrees to the i axis.
         for k in 0..200i64 {
             for (i, j, bed) in [(-30 + k, 20 + k / 2, 250.0), (-30 + k, 110 - k / 3, 240.0)] {
