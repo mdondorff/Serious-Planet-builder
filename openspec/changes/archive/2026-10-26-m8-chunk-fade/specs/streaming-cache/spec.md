@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: STRM-047 The change and its weight reach the draw
-The compact tile builder SHALL store the chunk change of a tile at the tile's own level beside its heights (`HeightField::level_change`, forwarded by every wrapper that forwards `height_at_level`), and the plan's node (`TerrainDraw::chunk_weight`) SHALL carry the tile's fade weight, the minimum of the weights of the chunks the tile reads, so two tiles on either side of a chunk border rise together; the node record holds it as the fade `1 - w` (REND-039). The clock of a chunk SHALL start when its change is first drawn, that is when the first exact tile reading it is drawn (the plan found the tile's mesh to be the one it expects, built against the chunks' current versions, STRM-038), once no stale tile that reads it is still drawn from the mesh it had before the landing, not at the landing; a stale tile starts nothing: until then the chunk weighs 0 like a chunk that is not ready, so a rebuild slower than `chunk_fade_ms` still fades; every tile of the chunk shares that one clock; a chunk that lands again without having left RAM (a new version) keeps its state, so the tiles under it neither drop to the base nor fade again.
+The compact tile builder SHALL store the chunk change of a tile at the tile's own level beside its heights (`HeightField::level_change`, forwarded by every wrapper that forwards `height_at_level`), and the plan's node (`TerrainDraw::chunk_weight`) SHALL carry the tile's fade weight, the minimum of the weights of the chunks the tile reads, so two tiles on either side of a chunk border rise together; the node record holds it as the fade `1 - w` (REND-039).
 
 Verify: A
 Status: active
@@ -10,6 +10,13 @@ Source: STRM-039 (the weight), STRM-038 (the chunks a tile reads), REND-039
 #### Scenario: Change and weight
 - **WHEN** a tile at the pyramid top over a ready chunk and a tile near its border with a chunk that landed later are built and planned
 - **THEN** the stored change equals the field's height at the tile's level minus the base's, the node weights follow the fade of each chunk, and the border tile takes the smaller weight of the two chunks it reads
+
+### Requirement: STRM-052 The fade clock of a landed chunk
+The fade of a landed chunk's change (STRM-047) SHALL start when the change is first drawn: when the first exact tile that reads the chunk is drawn (its mesh is the one the plan expects, STRM-038), once no stale tile that reads it is still drawn from the mesh it had before the landing. A stale tile SHALL start nothing; until the clock starts the chunk SHALL weigh 0, so a rebuild slower than `chunk_fade_ms` still fades. Every tile of the chunk SHALL share that one clock. A chunk that lands again without having left RAM (a new version) SHALL keep its state, so the tiles under it neither drop to the base nor fade again.
+
+Verify: A
+Status: active
+Source: STRM-047, STRM-038, M8 plan criterion 3
 
 #### Scenario: A slow rebuild and a new version
 - **WHEN** a chunk lands and its rebuilt tiles reach the renderer 2 s later (the fade is 1.5 s), and later the chunk and a neighbour land again

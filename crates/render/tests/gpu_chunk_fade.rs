@@ -239,7 +239,7 @@ fn two_tiles(s: &Scene) -> (Vec<CompactTile>, TerrainPlan) {
     (tiles, plan)
 }
 
-// spec: REND-039
+// spec: REND-042
 #[test]
 fn two_faded_tiles_each_read_their_own_plane_and_a_plan_over_the_limit_fades_the_same_nodes_whatever_its_order() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
@@ -286,7 +286,7 @@ fn two_faded_tiles_each_read_their_own_plane_and_a_plan_over_the_limit_fades_the
     assert_eq!(r.read_color(&ctx).rgba, image.rgba, "the same picture whatever the order of the nodes");
 }
 
-// spec: REND-039
+// spec: REND-042
 #[test]
 fn a_change_plane_with_a_value_that_is_not_finite_is_refused_and_names_the_texel() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
@@ -310,7 +310,7 @@ fn a_change_plane_with_a_value_that_is_not_finite_is_refused_and_names_the_texel
     }
 }
 
-// spec: REND-039
+// spec: REND-042
 #[test]
 fn a_change_plane_that_does_not_hold_one_value_per_texel_is_refused() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");

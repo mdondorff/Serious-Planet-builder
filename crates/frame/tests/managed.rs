@@ -1878,7 +1878,7 @@ fn the_loop_gives_every_node_the_fade_weight_of_the_chunks_it_reads() {
     }
 }
 
-// spec: STRM-047
+// spec: STRM-052
 #[test]
 fn a_rebuild_slower_than_the_fade_still_fades_and_neither_a_neighbour_nor_a_new_version_drops_the_tiles_under_a_faded_chunk() {
     let mut rig = Rig::new(1_000_000);
