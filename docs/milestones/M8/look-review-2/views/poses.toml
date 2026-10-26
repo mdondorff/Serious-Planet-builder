@@ -1,0 +1,35 @@
+# Look review 2, driver views at 300 m over the largest river (J cycle: soil, moisture, insolation).
+# Run: cargo xtask capture stills --poses docs/milestones/M8/look-review-2/views/poses.toml --store target/accept/global16384 --out-dir docs/milestones/M8/look-review-2/views
+
+chunk_timeout_s = 3600
+
+[place]
+anchor = "largest-river"
+min_height_m = 150   # inland: the cell of the largest river over the sea is a river mouth
+
+[[pose]]
+name = "300m-midday-soil"
+altitude_m = 300
+back_m = 1500
+heading_deg = 131
+pitch_deg = 15
+sun_local_hours = 12
+view = "soil"
+
+[[pose]]
+name = "300m-midday-moisture"
+altitude_m = 300
+back_m = 1500
+heading_deg = 131
+pitch_deg = 15
+sun_local_hours = 12
+view = "moisture"
+
+[[pose]]
+name = "300m-midday-insolation"
+altitude_m = 300
+back_m = 1500
+heading_deg = 131
+pitch_deg = 15
+sun_local_hours = 12
+view = "insolation"

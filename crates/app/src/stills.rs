@@ -66,6 +66,8 @@ pub struct Pose {
     pub pitch_deg: f64,
     pub sun_local_hours: f64,
     pub sun_declination_deg: f64,
+    /// `view = "soil"` (any name of the viewer's J cycle): the debug view drawn instead of the lit one; `None` is the lit view.
+    pub view: Option<planet_frame::look::shading::ShadeView>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -80,6 +82,60 @@ pub struct StillsConfig {
     /// `[place] slope_table_stride`: write `slopes.txt` ([`slope_table`]) over every this-many-th cell of the coupled lattice before the poses.
     pub slope_table_stride: Option<usize>,
     pub poses: Vec<Pose>,
+    /// `[look]`: the strength of the ground detail and curves of the ground materials that replace the look's (a sample look for the owner's review;
+    /// nothing here is stored or keyed, ADR 0035).
+    pub look: LookOverride,
+}
+
+/// The `[look]` table of a poses file: `ground_detail = 0.6` and any number of `[[look.curve]]` with `material` (rock, sand, grass, soil), `input`
+/// (slope_cos, height, temperature, precipitation, surface_type, soil_depth, moisture, insolation), `lo` and `hi` (a `lo == hi` pair leaves the input out).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LookOverride {
+    pub ground_detail: Option<f64>,
+    pub curves: Vec<(usize, usize, [f64; 2])>,
+}
+
+impl LookOverride {
+    /// `lit` with the override applied (the detail strength and the curves).
+    pub fn apply(&self, lit: &mut planet_frame::look::LitPlan) {
+        if let Some(d) = self.ground_detail {
+            lit.ground_detail = d;
+        }
+        for &(material, input, pair) in &self.curves {
+            lit.materials.curves[material][input] = pair;
+        }
+    }
+}
+
+fn parse_look(root: &toml::Table) -> Result<LookOverride, String> {
+    const INPUTS: [&str; 8] =
+        ["slope_cos", "height", "temperature", "precipitation", "surface_type", "soil_depth", "moisture", "insolation"];
+    let Some(look) = root.get("look") else { return Ok(LookOverride::default()) };
+    let look = look.as_table().ok_or("the poses file: [look] must be a table")?;
+    let ground_detail = number(look, "ground_detail", "[look]")?;
+    if let Some(d) = ground_detail {
+        if !(0.0..=1.0).contains(&d) {
+            return Err(format!("[look]: ground_detail {d} must be from 0 to 1"));
+        }
+    }
+    let mut curves = Vec::new();
+    if let Some(list) = look.get("curve") {
+        for (k, c) in list.as_array().ok_or("[look]: 'curve' must be an array of tables")?.iter().enumerate() {
+            let whose = format!("[[look.curve]] {}", k + 1);
+            let t = c.as_table().ok_or_else(|| format!("{whose}: must be a table"))?;
+            let name = |key: &str| t.get(key).and_then(|v| v.as_str()).ok_or_else(|| format!("{whose}: '{key}' is missing"));
+            let material = planet_frame::look::materials::MATERIAL_NAMES
+                .iter()
+                .position(|m| *m == name("material").unwrap_or(""))
+                .ok_or_else(|| format!("{whose}: material {:?} is not rock, sand, grass or soil", name("material").unwrap_or("")))?;
+            let input = INPUTS
+                .iter()
+                .position(|i| *i == name("input").unwrap_or(""))
+                .ok_or_else(|| format!("{whose}: input {:?} is not one of {}", name("input").unwrap_or(""), INPUTS.join(", ")))?;
+            curves.push((material, input, [required(t, "lo", &whose)?, required(t, "hi", &whose)?]));
+        }
+    }
+    Ok(LookOverride { ground_detail, curves })
 }
 
 /// A value as the file wrote it, for a message.
@@ -174,6 +230,15 @@ pub fn parse_config(text: &str) -> Result<StillsConfig, String> {
             pitch_deg: required(t, "pitch_deg", &whose)?,
             sun_local_hours: required(t, "sun_local_hours", &whose)?,
             sun_declination_deg: number(t, "sun_declination_deg", &whose)?.unwrap_or(0.0),
+            view: match t.get("view") {
+                None => None,
+                Some(v) => Some(v.as_str().and_then(planet_frame::look::shading::ShadeView::parse).ok_or_else(|| {
+                    format!(
+                        "{whose}: view {} is not a view of the J cycle (lit, horizon, shadow, soil, moisture, insolation, ...)",
+                        show(v)
+                    )
+                })?),
+            },
             name,
         };
         if pose.altitude_m <= 0.0 || pose.back_m < 0.0 {
@@ -199,7 +264,7 @@ pub fn parse_config(text: &str) -> Result<StillsConfig, String> {
         Some(k) if k >= 1.0 && k.fract() == 0.0 => Some(k as usize),
         Some(k) => return Err(format!("[place]: slope_table_stride {k} must be a whole number of at least 1")),
     };
-    Ok(StillsConfig { anchor, chunk_timeout_s, chunk_cell_m, snap_to_channel_m, slope_table_stride, poses })
+    Ok(StillsConfig { anchor, chunk_timeout_s, chunk_cell_m, snap_to_channel_m, slope_table_stride, poses, look: parse_look(&root)? })
 }
 
 /// The unit vector towards the sun when it stands at `local_hours` of local solar time (12 is noon) at longitude `lon_deg`, with
@@ -974,6 +1039,8 @@ pub fn capture_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
             let mut lit = setup.plan(&world, rig.field, &plan, WATER_T0 + k as f64 * 0.5, 0.5, k == 0)?;
             if let Some(l) = lit.lit.as_mut() {
                 l.sun_dir = sun;
+                config.look.apply(l);
+                l.view = pose.view.unwrap_or(l.view);
             }
             // One map is uploaded a frame: the frames of the exposure give the first four, the settling frames the rest.
             horizon.frame(&world, ctx, &mut r, &tiles, camera.position, sun);
@@ -985,6 +1052,8 @@ pub fn capture_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         let mut lit = setup.plan(&world, rig.field, &plan, WATER_T0 + 2.0, 0.5, false)?;
         if let Some(l) = lit.lit.as_mut() {
             l.sun_dir = sun;
+            config.look.apply(l);
+            l.view = pose.view.unwrap_or(l.view);
         }
         r.render(ctx, &lit, false).map_err(|e| e.to_string())?;
         r.read_color(ctx).write_png(&dir.join(format!("{}.png", pose.name))).map_err(|e| format!("writing {}: {e}", pose.name))?;
@@ -1052,6 +1121,81 @@ pitch_deg = 0
 sun_local_hours = 12
 sun_declination_deg = 10
 "#;
+
+    // spec: TEST-048
+    #[test]
+    fn the_look_table_and_a_poses_view_are_read_and_a_bad_name_is_refused_with_the_names_it_knows() {
+        use planet_frame::look::shading::ShadeView;
+        let text = format!(
+            "{GOOD}
+view = \"soil\"
+[look]
+ground_detail = 0.6
+[[look.curve]]
+material = \"soil\"
+input = \"moisture\"
+lo = 0.5
+hi = 0.8
+"
+        );
+        // The trailing `view` lands in the last pose's table; the [look] table follows it.
+        let c = parse_config(&text).unwrap();
+        assert_eq!(c.poses[1].view, Some(ShadeView::SoilDepth));
+        assert_eq!(c.poses[0].view, None);
+        assert_eq!(c.look, LookOverride { ground_detail: Some(0.6), curves: vec![(3, 6, [0.5, 0.8])] });
+        let mut lit = planet_frame::look::LitPlan::fixed(12.0);
+        c.look.apply(&mut lit);
+        assert_eq!((lit.ground_detail, lit.materials.curves[3][6]), (0.6, [0.5, 0.8]));
+        assert_eq!(parse_config(GOOD).unwrap().look, LookOverride::default());
+        for (bad, want) in [
+            (
+                "[look]
+ground_detail = 2
+",
+                "ground_detail",
+            ),
+            (
+                "[[look.curve]]
+material = \"mud\"
+input = \"moisture\"
+lo = 0
+hi = 1
+",
+                "mud",
+            ),
+            (
+                "[[look.curve]]
+material = \"soil\"
+input = \"wetness\"
+lo = 0
+hi = 1
+",
+                "wetness",
+            ),
+            (
+                "[[look.curve]]
+material = \"soil\"
+input = \"moisture\"
+lo = 0
+",
+                "hi",
+            ),
+        ] {
+            let e = parse_config(&format!(
+                "{GOOD}
+{bad}"
+            ))
+            .unwrap_err();
+            assert!(e.contains(want), "{e}");
+        }
+        let e = parse_config(&GOOD.replace(
+            "sun_local_hours = 17.5",
+            "sun_local_hours = 17.5
+view = \"x\"",
+        ))
+        .unwrap_err();
+        assert!(e.contains("\"x\"") && e.contains("300m-sunset"), "{e}");
+    }
 
     // spec: TEST-051
     #[test]
@@ -1239,6 +1383,7 @@ snap_to_channel_m = 0"
             pitch_deg: 10.0,
             sun_local_hours: 12.0,
             sun_declination_deg: 0.0,
+            view: None,
         };
         let ground = |d: Vec3| 100.0 + 50.0 * d.z;
         let cam = pose_camera(anchor, &pose, &ground, radius, 0.0, 16.0 / 9.0, 1.0);
