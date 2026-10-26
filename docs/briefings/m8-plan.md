@@ -17,7 +17,7 @@ Scope (owner, 2026-10-25): M8 delivers plausible relief, hydrology and horizon s
 | 3 | No frame waits for a chunk (CON-22); a chunk lands within 10 s at a 300 m pan; a landing chunk's change fades in over about 1.5 s; at the level where the chunk change enters (base to base + change) the step is at most about 0.5 px p99 on screen, with blending; between levels inside the chunk range no step over 0.25 m p99 (amended by the owner, 2026-10-24: the entry step is metres at every top level, `openspec/changes/m8-anet-chunk/design.md` section 16) | A, C |
 | 4 | Global coupled run at most 10 min on Rasierklinge per world version | perf |
 | 5 | Shadows and the material map together at most 1.5 ms of terrain-pass GPU time at 1440p | perf |
-| 6 | An edit over a chunk shows within the M6 budgets, and its eroded result within 10 s | A, perf |
+| 6 | An edit over a chunk shows within the M6 budgets, and its eroded result within 10 s on screen for every touched chunk the view wants, not only the chunk under the edit (owner, 2026-10-26) | A, perf |
 | 7 | Speed envelope (owner, 2026-10-23): a perf scene flies level over unvisited ground at fixed altitudes (30 m, 100 m, 300 m, 1 km) and raises the speed until the stand-in share of the screen at the chunk's apply level exceeds a bound; it reports the highest speed per altitude on Rasierklinge. M8 records the curve; the owner sets the floor from it; later milestones keep it as a regression check | perf |
 
 ## Steps
