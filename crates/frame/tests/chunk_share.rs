@@ -270,9 +270,13 @@ fn a_tiles_weight_is_the_minimum_over_the_chunks_it_reads_and_the_default_fade_i
     assert_eq!(fade.tile_weight(&both, tile, 750), 0.0, "b landed later, its weight is 0 at 750 ms and the minimum is taken");
     assert!((fade.tile_weight(&both, tile, 1_750) - 0.5).abs() < 1e-6, "a is at 1.0 at 1.5 s, b at 0.5: the minimum");
     assert_eq!(fade.tile_weight(&both, tile, 3_000), 1.0, "both faded in");
-    // A chunk that is not ready weighs 0 and holds the tile at the base.
+    // A chunk that is not ready adds nothing to the tile's plane and has no weight: the tile is at the weight of the ready ones, like its
+    // neighbour that reads only those (no crack at the edge between them while the chunk is computed).
     let one_missing = Fixed { reads: vec![a, b], ready: vec![a] };
-    assert_eq!(fade.tile_weight(&one_missing, tile, 3_000), 0.0);
+    assert_eq!(fade.tile_weight(&one_missing, tile, 3_000), fade.tile_weight(&own, tile, 3_000));
+    assert_eq!(fade.tile_weight(&one_missing, tile, 750), 0.5);
+    let none_ready = Fixed { reads: vec![a, b], ready: vec![] };
+    assert_eq!(fade.tile_weight(&none_ready, tile, 750), 1.0, "no ready chunk: no plane, the final height");
     // A tile that reads no chunk has no change plane: its weight is 1, the draw the old arithmetic bit for bit.
     let none = Fixed { reads: vec![], ready: vec![] };
     assert_eq!(fade.tile_weight(&none, tile, 0), 1.0);
@@ -280,4 +284,76 @@ fn a_tiles_weight_is_the_minimum_over_the_chunks_it_reads_and_the_default_fade_i
     // vertex by 0.195 m per frame (the 256 bake's figure; the shared store's 58.3 m is 0.65 m a frame and the criterion that counts is the screen step, m8-chunk-fade design.md 6a).
     let step = f64::from(fade.weight(a, true, 1_000 / 60) - fade.weight(a, true, 0));
     assert!(step * 17.55 <= 0.25, "{} m per frame", step * 17.55);
+}
+
+// spec: STRM-053
+#[test]
+fn the_shared_edge_of_two_tiles_stays_closed_through_a_neighbour_landing_and_next_to_a_chunk_that_is_not_ready() {
+    use planet_generators::compact::{compact_tile_field, CompactTile};
+    let lat = ChunkLattice::new(608).unwrap();
+    let s = stage(30.0);
+    let top = 11u8;
+    let (ka, kb) = ((2u8, 1000u32, 1000u32), (2u8, 1001u32, 1000u32));
+    let result = |k: (u8, u32, u32)| {
+        let t = TileId::new(Face(k.0), CHUNK_GRID_LEVEL, k.1, k.2).unwrap();
+        Arc::new(compute_chunk(&lat, &s, R, top, t, halo_rings(&s)).unwrap())
+    };
+    let (ra, rb) = (result(ka), result(kb));
+    let field_a = || ChunkField::new(Reference(3), lat, R, &s).with_top_level(top).with_ready(ra.clone());
+    let field_ab = || field_a().with_ready(rb.clone());
+    let cells = 32u32;
+    // Two tiles side by side across the border of the two chunks: A's east column is B's west column.
+    let ta = TileId::new(Face(2), 15, 16 * 1000 + 15, 16 * 1000 + 7).unwrap();
+    let tb = TileId::new(Face(2), 15, 16 * 1001, 16 * 1000 + 7).unwrap();
+    let build = |f: &dyn planet_generators::height::HeightField, id| compact_tile_field(f, &TangentWarp, id, cells, R);
+    let w = (cells + 1) as usize;
+    let drawn = |t: &CompactTile, i: usize, j: usize, weight: f32| f64::from(t.shade_vertex_faded(j * w + i, 1.0 - weight).height);
+    let edge_gap = |a: &CompactTile, wa: f32, b: &CompactTile, wb: f32| {
+        (0..w).map(|j| (drawn(a, cells as usize, j, wa) - drawn(b, 0, j, wb)).abs()).fold(0.0, f64::max)
+    };
+    // Where the allowance on the edge comes from: the two tiles sample the same field at the same points, but each rounds the height to its own
+    // quantisation step (`hr_step`, at most half a step of error each, `height_error_bound_m`), and the plane and the weights are f32 (a few 1e-5
+    // m at these heights). So two tiles agree on their edge to half a step of each plus 1e-4 m, and not more: a crack that opens at a swap or
+    // with the weight is the change times a weight difference, metres, far above it.
+    let tolerance = |a: &CompactTile, b: &CompactTile| a.height_error_bound_m() + b.height_error_bound_m() + 1e-4;
+
+    // Chunk A is ready and faded in; chunk B is not ready: the tile beside the border reads both and weighs what its neighbour weighs.
+    let (a0, b0) = (build(&field_a(), ta), build(&field_a(), tb));
+    assert!(a0.change.is_some(), "the tile over the ready chunk carries a change");
+    let mut fade = ChunkFade::new(1_500);
+    fade.landed(ka, 0);
+    fade.shown(ka, 0);
+    let view_a = Fixed { reads: vec![ka], ready: vec![ka] };
+    let view_b = Fixed { reads: vec![kb, ka], ready: vec![ka] };
+    for ms in [0u64, 400, 900, 1_500] {
+        let (wa, wb) = (fade.tile_weight(&view_a, ta, ms), fade.tile_weight(&view_b, tb, ms));
+        assert_eq!(wa, wb, "{ms} ms: both sides weigh what the ready chunk weighs");
+        let gap = edge_gap(&a0, wa, &b0, wb);
+        assert!(gap <= tolerance(&a0, &b0), "{ms} ms: the shared edge is open by {gap} m next to a chunk that is not ready");
+    }
+
+    // Chunk B lands: both tiles are rebuilt; each carries the increment over what it was drawn at, and one clock moves both.
+    let (a1, b1) = (build(&field_ab(), ta), build(&field_ab(), tb));
+    let mut a2 = a1.clone();
+    let mut b2 = b1.clone();
+    a2.change = a1.change_replacing(&a0, 1.0);
+    b2.change = b1.change_replacing(&b0, 1.0);
+    assert!(a2.change.is_some() || b2.change.is_some(), "chunk B changes the tiles beside its border");
+    let was = (edge_gap(&a0, 1.0, &b0, 1.0), drawn(&a0, cells as usize, 5, 1.0));
+    assert!(was.0 <= tolerance(&a0, &b0), "the old tiles agree on the edge: {}", was.0);
+    let mut worst = 0.0f64;
+    for epoch in [0.0f32, 0.3, 0.7, 1.0] {
+        let gap = edge_gap(&a2, epoch, &b2, epoch);
+        worst = worst.max(gap);
+        assert!(gap <= tolerance(&a2, &b2), "epoch {epoch}: the edge between the rebuilt tiles is open by {gap} m");
+    }
+    eprintln!("shared edge: worst gap {worst:.2e} m against an allowance of {:.2e} m", tolerance(&a2, &b2));
+    // At weight 0 the rebuilt tile draws what the old one drew, and at weight 1 its own surface (nothing popped at the swap).
+    for j in 0..w {
+        for i in 0..w {
+            assert!((drawn(&a2, i, j, 0.0) - drawn(&a0, i, j, 1.0)).abs() <= tolerance(&a2, &a0), "tile A at ({i}, {j}) pops at the swap");
+            assert!((drawn(&b2, i, j, 0.0) - drawn(&b0, i, j, 1.0)).abs() <= tolerance(&b2, &b0), "tile B at ({i}, {j}) pops at the swap");
+            assert!((drawn(&a2, i, j, 1.0) - drawn(&a1, i, j, 1.0)).abs() <= tolerance(&a2, &a1));
+        }
+    }
 }
