@@ -814,7 +814,6 @@ impl WorldTerrain {
         self.src.as_ref()
     }
 
-    /// The seed of the planet body (it goes into the chunk cache's keys).
     /// Set the threads a batch of the A-net base heights uses (at least 1); a chunk stage made after the call takes it.
     pub fn set_base_threads(&self, n: usize) {
         self.base_threads.store(n.max(1), std::sync::atomic::Ordering::Relaxed);
@@ -824,6 +823,7 @@ impl WorldTerrain {
         self.base_threads.load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// The seed of the planet body (it goes into the chunk cache's keys).
     pub(crate) fn base_seed(&self) -> u64 {
         GenContext::new(&self.definition()).body_seed(BodyId::PLANET).unwrap_or(0)
     }
