@@ -254,6 +254,22 @@ impl InsolationTable {
     }
 }
 
+/// The neutral soil depth in metres and moisture: what a consumer reads where no chunk has landed (GEN-071).
+pub const NEUTRAL_SOIL_M: f64 = 1.0;
+pub const NEUTRAL_MOISTURE: f64 = 0.5;
+
+/// The neutral insolation at a latitude: the flat plane's annual mean there (the latitude alone).
+pub fn neutral_insolation(lat_rad: f64) -> f64 {
+    annual_mean_irradiance(lat_rad, 0.0, 0.0)
+}
+
+/// A driver as a consumer reads it (GEN-071): `neutral + w (chunk - neutral)`, written `neutral (1 - w) + chunk w` so that both ends are exact, with `w` in `[0, 1]` the chunk weight that fades the height, so the
+/// driver is the neutral value at weight 0, the chunk's at weight 1 and monotone between.
+pub fn blend_driver(neutral: f64, chunk: f64, w: f64) -> f64 {
+    let w = w.clamp(0.0, 1.0);
+    neutral * (1.0 - w) + chunk * w
+}
+
 /// The three driver channels of a chunk's core, 8 bits each, row-major over the core with `j` outer.
 pub struct ChunkDrivers {
     pub soil: Vec<u8>,
@@ -492,7 +508,6 @@ mod tests {
     fn a_chunk_of_a_tilted_plane_gives_the_drivers_of_that_plane_with_the_compass_and_the_spacing_and_the_same_bits_on_another_thread() {
         let n = 16;
         let id = [1.0, 0.0, 0.0, 1.0];
-        let params = DriverParams::default();
         let slope = libm::atan(0.3);
         // Rising to the east it faces west; rising to the north, south; at 45 degrees north the south face has the sun.
         let west = plane_chunk(n, ramp(n, |x, _| 0.3 * x), 0.0, id, [L, L]);
@@ -516,7 +531,6 @@ mod tests {
             .expect("thread");
         assert_eq!((&west.soil, &west.moisture, &west.insolation), (&again.soil, &again.moisture, &again.insolation));
         assert!(west.soil.iter().all(|&v| v == west.soil[0]) && west.moisture.iter().all(|&m| m == west.moisture[0]));
-        let _ = params;
     }
 
     // spec: GEN-070

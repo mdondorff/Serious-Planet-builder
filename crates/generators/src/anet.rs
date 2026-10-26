@@ -808,6 +808,8 @@ pub struct ANetParams {
     pub bank_rounds: u16,
     /// How far under the drawn ground the corridor beds are anchored.
     pub anchor: AnchorLaw,
+    /// The constants of the driver channels of a chunk (GEN-070, GEN-071); the lithology noise reads the base's identity as its seed.
+    pub drivers: crate::drivers::DriverParams,
 }
 
 impl ANetParams {
@@ -831,6 +833,7 @@ impl ANetParams {
             slump_rate: 0.09,
             bank_rounds: ((300.0 / (0.9 * cell_m)).ceil() + 6.0).clamp(1.0, 96.0) as u16,
             anchor: AnchorLaw::default(),
+            drivers: crate::drivers::DriverParams::default(),
         };
         // The valley band reads sources within `band_cap_m` and the solve reads `area_window + 1` rings further: the band reaches at most what the halo
         // holds besides that (GEN-049, GEN-060).
@@ -1203,6 +1206,74 @@ pub struct ANet {
 }
 
 impl ANet {
+    /// The driver channels of the chunk's own cells (GEN-070) from the final heights (the base plus the stage's clamped change, over the water), the
+    /// drainage area of the solve and the cells' own geometry: the spacing along each axis, the compass turned into the gradient's east and north parts.
+    pub fn chunk_drivers(&self, lat: &ChunkLattice, region: &Region, s: &Solution, change: &[f32]) -> crate::drivers::ChunkDrivers {
+        use crate::drivers::{chunk_drivers, ChunkRaster, DriverParams};
+        let n = lat.cells_per_chunk() as usize;
+        let first = region.cells[0];
+        let (face, i0, j0) = (first.face, i64::from(first.i), i64::from(first.j));
+        let n_face = lat.n();
+        // The height at a cell of the core's ring (position relative to the core's origin): the final height of the region's cell there.
+        let height_at = |i: i64, j: i64| -> f64 {
+            let cell = if (0..n_face).contains(&i) && (0..n_face).contains(&j) {
+                Cell { face, i: i as u32, j: j as u32 }
+            } else {
+                lat.cell_at(lat.direction_ext(face, i, j))
+            };
+            let c = region.index_of(cell).expect("the ring of the chunk lies in its region");
+            s.z_base[c] + f64::from(change[c])
+        };
+        let mut heights = Vec::with_capacity((n + 2) * (n + 2));
+        for rj in 0..n + 2 {
+            for ri in 0..n + 2 {
+                heights.push(height_at(i0 + ri as i64 - 1, j0 + rj as i64 - 1));
+            }
+        }
+        let (mut area, mut dirs, mut spacing, mut compass) =
+            (Vec::with_capacity(n * n), Vec::with_capacity(n * n), Vec::with_capacity(n * n), Vec::with_capacity(n * n));
+        let pole = Vec3::new(0.0, 0.0, 1.0);
+        for j in 0..n {
+            for i in 0..n {
+                let c = j * n + i;
+                let (ci, cj) = (i0 + i as i64, j0 + j as i64);
+                let d = lat.direction_ext(face, ci, cj);
+                let (di, dj) = (
+                    lat.direction_ext(face, ci + 1, cj) - lat.direction_ext(face, ci - 1, cj),
+                    lat.direction_ext(face, ci, cj + 1) - lat.direction_ext(face, ci, cj - 1),
+                );
+                let (ei, ej) = (di.normalized(), dj.normalized());
+                // The local north and east (COORD: +z the north pole, +y 90 degrees east of +x): north is the pole's part across `d`, east is north x up.
+                let north = (pole - d * pole.dot(d)).normalized();
+                let east = north.cross(d);
+                // The gradient is `alpha ei + beta ej` with `(alpha, beta)` the dual of the slopes `(p, q)` along the axes: the Gram matrix of the axes inverted.
+                let (g11, g12, g22) = (ei.dot(ei), ei.dot(ej), ej.dot(ej));
+                let det = g11 * g22 - g12 * g12;
+                let part = |v: Vec3| {
+                    let (a, b) = (v.dot(ei), v.dot(ej));
+                    [(a * g22 - b * g12) / det, (-a * g12 + b * g11) / det]
+                };
+                let (pe, pn) = (part(east), part(north));
+                compass.push([pe[0], pe[1], pn[0], pn[1]]);
+                spacing.push([0.5 * di.length() * self.radius_m, 0.5 * dj.length() * self.radius_m]);
+                dirs.push(d);
+                area.push(s.area_m2[c]);
+            }
+        }
+        let centre = lat.direction_ext(face, i0 + (n / 2) as i64, j0 + (n / 2) as i64);
+        let params = DriverParams { seed: self.base.identity(), ..self.params.drivers };
+        let raster = ChunkRaster {
+            n,
+            heights: &heights,
+            area_m2: &area,
+            dirs: &dirs,
+            spacing_m: &spacing,
+            compass: &compass,
+            lat_rad: libm::asin(centre.z.clamp(-1.0, 1.0)),
+        };
+        chunk_drivers(&raster, &params)
+    }
+
     /// The solve over a region (also what the tests look at).
     pub fn solve(&self, lat: &ChunkLattice, region: &Region) -> Solution {
         let net = Network::build_with_memo(&*self.run, &*self.base, lat, region, self.radius_m, &self.params.anchor, &self.memo);
@@ -1233,10 +1304,15 @@ impl crate::chunkfield::ChunkStage for ANet {
         self.base.healthy()
     }
     fn compute(&self, lat: &ChunkLattice, region: &Region) -> Vec<f32> {
+        self.compute_full(lat, region).change
+    }
+    fn compute_full(&self, lat: &ChunkLattice, region: &Region) -> crate::chunkfield::StageOutput {
         let s = self.solve(lat, region);
         // The stage's own bound is a promise to the plan's bounds (GEN-039): a change beyond it is cut to it.
         let bound = self.bound_m();
-        (0..region.cells.len()).map(|c| (s.z[c] - s.z_base[c]).clamp(-bound, bound) as f32).collect()
+        let change: Vec<f32> = (0..region.cells.len()).map(|c| (s.z[c] - s.z_base[c]).clamp(-bound, bound) as f32).collect();
+        let drivers = Some(self.chunk_drivers(lat, region, &s, &change));
+        crate::chunkfield::StageOutput { change, drivers }
     }
     fn definition_hash(&self) -> u64 {
         let p = &self.params;
@@ -1287,6 +1363,7 @@ impl crate::chunkfield::ChunkStage for ANet {
                 p.anchor.slide_m.to_bits(),
                 p.anchor.slide_steep_m.to_bits(),
                 p.anchor.head_m.to_bits(),
+                planet_core::hash::hash_u64s(0x6472_6976, &p.drivers.hash_words()),
                 self.run.identity(),
                 self.base.identity(),
                 self.radius_m.to_bits(),
@@ -1297,7 +1374,7 @@ impl crate::chunkfield::ChunkStage for ANet {
 }
 
 /// Version of the stage's algorithm: part of its definition hash, so a change that changes results re-keys every chunk.
-pub const ANET_VERSION: u32 = 7;
+pub const ANET_VERSION: u32 = 8;
 
 /// The change of height each cell takes in one pass of thermal slumping (GEN-051): a cell steeper than `talus` over a neighbour gives that
 /// neighbour `rate x (slope - talus) x distance`. `dist[c][k]` is the distance to the `k`-th neighbour of `c` (the order of the region's neighbour

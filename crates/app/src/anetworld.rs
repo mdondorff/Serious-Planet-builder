@@ -259,6 +259,24 @@ impl WorldTerrain {
         let solve_started = std::time::Instant::now();
         let s = stage.solve(&clat, &reg);
         let solve_s = solve_started.elapsed().as_secs_f64();
+        // The driver channels of the chunk (GEN-070): their time and the share of the core cells in each coarse step of moisture and soil.
+        let drivers_line = {
+            let bound = stage.bound_m();
+            let change: Vec<f32> = (0..reg.cells.len()).map(|c| (s.z[c] - s.z_base[c]).clamp(-bound, bound) as f32).collect();
+            let drivers_started = std::time::Instant::now();
+            let d = stage.chunk_drivers(&clat, &reg, &s, &change);
+            let drivers_s = drivers_started.elapsed().as_secs_f64();
+            let mean = |v: &[u8]| v.iter().map(|&x| f64::from(x)).sum::<f64>() / v.len().max(1) as f64 / 255.0;
+            format!(
+                "drivers {drivers_s:.2} s: mean moisture {:.2}, mean insolation {:.2}, mean soil {:.2} m (code mean {:.2})
+",
+                mean(&d.moisture),
+                mean(&d.insolation),
+                d.soil.iter().map(|&x| planet_generators::drivers::decode_soil(x, &stage.params.drivers)).sum::<f64>()
+                    / d.soil.len().max(1) as f64,
+                mean(&d.soil)
+            )
+        };
         let started = std::time::Instant::now();
         let net = planet_generators::anet::Network::build_with(&*stage.run, &*stage.base, &clat, &reg, radius, &stage.params.anchor);
         let network_s = started.elapsed().as_secs_f64();
@@ -285,6 +303,7 @@ impl WorldTerrain {
             anchors.get(na * 9 / 10).copied().unwrap_or(f64::NAN),
             anchors.last().copied().unwrap_or(f64::NAN)
         );
+        out += &drivers_line;
         out += &format!(
             "chunk solve incl. network {solve_s:.2} s; network build (corridor, routing, beds, band) {network_s:.2} s
 "
