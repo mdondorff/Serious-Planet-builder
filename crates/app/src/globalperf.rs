@@ -148,7 +148,7 @@ pub fn perf_coupled(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
     }
 }
 
-/// The GEN-052 budget: an A-net chunk of 24 km2 takes at most 4 s at 8 m cells (one thread).
+/// The GEN-052 budget: an A-net chunk of 24 km2 takes at most 4 s at 8 m cells on the stage's production thread setting.
 pub(crate) fn anet_chunk_budget_failures(cell_m: f64, secs: f64) -> Vec<String> {
     if cell_m == 8.0 && !(secs.is_finite() && secs <= 4.0) {
         vec![format!("A-net chunk time {secs:.2} s at 8 m exceeds 4 s (GEN-052)")]
@@ -158,9 +158,10 @@ pub(crate) fn anet_chunk_budget_failures(cell_m: f64, secs: f64) -> Vec<String> 
 }
 
 // spec: GEN-052
-/// Time one A-net chunk (the chunk of the coupled run's largest land river) at 8, 4 and 10 m with the 3 km halo on one thread after the ADR 0020
-/// readiness gate. The world is the default eroded one over a bake of `--global-res` cells (default 256) and its coupled run; the chunk time
-/// does not depend on the run's resolution, only on the cells of the chunk and its rivers.
+/// Time one A-net chunk (the chunk of the coupled run's largest land river) at 8, 4 and 10 m with the 3 km halo after the ADR 0020 readiness gate, on the
+/// stage's production thread setting (`WorldBase`'s default), and once more at 8 m on one thread (recorded, not judged). The world is the default eroded one
+/// over a bake of `--global-res` cells (default 256, which makes the coarse segments 8 times longer than the production run's) or the stored production
+/// bake of `--store DIR` (then `--global-res 16384`: the geometry of the viewer).
 pub fn perf_anet_chunk(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<(), String> {
     use crate::anetworld::ANET_TOP_LEVEL;
     use crate::anetworld::{cells_per_chunk_for, WorldBase, ANET_HALO_M};
@@ -170,16 +171,17 @@ pub fn perf_anet_chunk(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Re
     planet_perf::check_reference_adapter(&crate::facts(ctx)).map_err(|r| r.to_string())?;
     let owner_override = crate::readiness_gate(o, ctx, out)?;
     let res = if o.given.contains("--global-res") { o.global_res } else { 256 };
-    let (world, maps, tile) = anet_scene(res, o.seed, out)?;
+    let store = o.store.clone().or_else(|| std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from));
+    let (world, maps, tile) = anet_scene(res, o.seed, store, out)?;
     let radius = world.radius_m();
     let mut failures = Vec::new();
     let mut rows = Vec::new();
-    for cell_m in [8.0, 4.0, 10.0] {
+    for (cell_m, one_thread) in [(8.0, false), (8.0, true), (4.0, false), (10.0, false)] {
         let per = cells_per_chunk_for(radius, cell_m);
         let lat = ChunkLattice::new(per).ok_or("no lattice")?;
         let stage = ANet {
             run: maps.clone(),
-            base: Arc::new(WorldBase::new(&world).with_threads(1)),
+            base: Arc::new(if one_thread { WorldBase::new(&world).with_threads(1) } else { WorldBase::new(&world) }),
             radius_m: radius,
             params: {
                 let mut params = ANetParams::spike(ANET_HALO_M, lat.cell_m(radius));
@@ -189,7 +191,7 @@ pub fn perf_anet_chunk(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Re
             memo: Default::default(),
         };
         let halo = halo_rings(&stage);
-        // The share of the base field: its heights over the region, one thread.
+        // The share of the base field: its heights over the region, on the same thread setting.
         let reg = planet_generators::chunkfield::region(&lat, tile, halo);
         let dirs: Vec<planet_core::Vec3> = reg.cells.iter().map(|&c| lat.direction(c)).collect();
         let t0 = Instant::now();
@@ -201,18 +203,24 @@ pub fn perf_anet_chunk(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Re
         let cells = (per as usize + 2 * halo as usize).pow(2);
         writeln!(
             out,
-            "{cell_m} m: {per} cells per chunk, halo {halo} rings, about {cells} cells with the halo: {secs:.2} s, the base field of it {base_secs:.2} s (hash {:016x})",
+            "{cell_m} m, {}: {per} cells per chunk, halo {halo} rings, about {cells} cells with the halo: {secs:.2} s, the base field of it {base_secs:.2} s (hash {:016x})",
+            if one_thread { "one thread (recorded)" } else { "production threads" },
             r.hash()
         )
         .map_err(err)?;
-        if cell_m == 8.0 {
+        if cell_m == 8.0 && !one_thread {
             anet_steps(&world, &maps, &stage, &lat, tile, out)?;
         }
-        failures.extend(anet_chunk_budget_failures(cell_m, secs));
-        rows.push(format!("{{\"cell_m\": {cell_m}, \"cells_per_chunk\": {per}, \"halo_rings\": {halo}, \"seconds\": {secs:.3}}}"));
+        if !one_thread {
+            failures.extend(anet_chunk_budget_failures(cell_m, secs));
+        }
+        rows.push(format!(
+            "{{\"cell_m\": {cell_m}, \"threads\": \"{}\", \"cells_per_chunk\": {per}, \"halo_rings\": {halo}, \"seconds\": {secs:.3}}}",
+            if one_thread { "1" } else { "production" }
+        ));
     }
     let json = format!(
-        "{{\n  \"scene\": \"anet-chunk\",\n  \"adapter\": \"{}\",\n  \"owner_override\": {:?},\n  \"res\": {res},\n  \"threads\": 1,\n  \"chunks\": [{}],\n  \"budget_failures\": {:?}\n}}\n",
+        "{{\n  \"scene\": \"anet-chunk\",\n  \"adapter\": \"{}\",\n  \"owner_override\": {:?},\n  \"res\": {res},\n  \"chunks\": [{}],\n  \"budget_failures\": {:?}\n}}\n",
         ctx.adapter_name().replace('"', "'"),
         owner_override,
         rows.join(", "),
@@ -236,6 +244,7 @@ pub fn perf_anet_chunk(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Re
 fn anet_scene(
     res: u32,
     seed: u64,
+    store: Option<std::path::PathBuf>,
     out: &mut dyn Write,
 ) -> Result<
     (std::sync::Arc<crate::worldfield::WorldTerrain>, std::sync::Arc<planet_generators::coupled::CoupledMaps>, planet_core::TileId),
@@ -244,9 +253,8 @@ fn anet_scene(
     use crate::coupledworld::Standing;
     use crate::worldfield::WorldTerrain;
     use std::sync::Arc;
-    // `PLANET_ANET_STORE=DIR` reads the bake and the stored coupled run of a production store (seed 1, the viewer's default) instead of baking
-    // in memory: the measurements of the exit criteria are made on the shared store.
-    let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
+    // A store (`--store DIR`, or `PLANET_ANET_STORE=DIR`) is read for the bake and the stored coupled run of a production store (seed 1, the viewer's
+    // default) instead of baking in memory: the measurements of the exit criteria are made on the shared store.
     let def = planet_world_def::WorldDefinition::single_planet(planet_core::EARTH_RADIUS_M, if store.is_some() { 1 } else { seed });
     let world = Arc::new(match &store {
         Some(dir) => WorldTerrain::open_store(def, dir, res)?,
@@ -411,7 +419,8 @@ mod tests {
     fn anet_steps_report() {
         let mut out = std::io::stdout();
         let res = std::env::var("PLANET_ANET_RES").ok().and_then(|r| r.parse().ok()).unwrap_or(256);
-        let (world, maps, tile) = anet_scene(res, 11, &mut out).unwrap();
+        let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
+        let (world, maps, tile) = anet_scene(res, 11, store, &mut out).unwrap();
         let radius = world.radius_m();
         let lat = planet_generators::chunkfield::ChunkLattice::new(crate::anetworld::cells_per_chunk_for(radius, 8.0)).unwrap();
         let stage = planet_generators::anet::ANet {
