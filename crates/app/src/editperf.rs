@@ -719,6 +719,20 @@ fn write_report(out: &std::path::Path, text: &str) -> Result<std::path::PathBuf,
     Ok(path)
 }
 
+/// Tell the plan cache where the items changed from `old` to the world's definition now, as the viewer does after a swap (STRM-034), so the plan
+/// after the edit keeps what the change cannot reach; `old_revision` is the item revision of the field before the swap.
+fn announce_item_change(h: &mut Harness<'_>, world: &Arc<WorldTerrain>, old: &planet_world_def::WorldDefinition, old_revision: u64) {
+    if let Ok(field) = world.field() {
+        let changes = world
+            .definition()
+            .item_changes_from(old)
+            .into_iter()
+            .map(|(dir, reach_m)| planet_frame::lod::ItemChange { dir, reach_m })
+            .collect();
+        h.rig.managed.note_item_change(old_revision, field.item_revision(), changes);
+    }
+}
+
 /// One run of a case on a settled harness: edit, time the preview and the exact frame, take the edit back and settle.
 fn run_once(
     h: &mut Harness<'_>,
@@ -733,6 +747,7 @@ fn run_once(
     let edited = Arc::new(edited);
     let mut out = CaseRun { resident: h.rig.managed.resident().len(), ..Default::default() };
     let before_stats = h.rig.managed.manager().streamer().stats();
+    let old_revision = world.field()?.item_revision();
     let sampler_started = Instant::now();
     let ms = |t: Instant| t.elapsed().as_secs_f64() * 1000.0;
     // The edit as the editor does it: swap the definition, name the edited tiles, set the preview.
@@ -740,6 +755,7 @@ fn run_once(
     world.set_definition(Arc::clone(&edited))?;
     out.stages.set_definition_ms = ms(call);
     let call = Instant::now();
+    announce_item_change(h, world, &before_def, old_revision);
     let resident: Vec<TileId> = h.rig.managed.resident().keys().copied().collect();
     let found = Instant::now();
     let tiles = found_tiles(stamp, &resident, world.radius_m());
@@ -876,7 +892,9 @@ fn run_once(
         });
     }
     // Take the edit back: the old definition, the same tiles refreshed, no preview, settled.
-    world.set_definition(before_def)?;
+    let edited_revision = world.field()?.item_revision();
+    world.set_definition(Arc::clone(&before_def))?;
+    announce_item_change(h, world, &edited, edited_revision);
     h.rig.managed.edit(&tiles);
     h.rig.managed.set_preview(Vec::new());
     h.settle(req, 20)?;
