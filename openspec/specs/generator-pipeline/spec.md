@@ -1183,3 +1183,87 @@ Source: opus-planner (2026-10-26), GEN-020, perf window 2026-10-26
 #### Scenario: Bits and reads
 - **WHEN** compact batches (across a block edge, inside a block, near a face edge, at a cube corner) are evaluated on 1 and 8 threads
 - **THEN** every value equals the single `height`, no read fails, and a batch of about 12 cells reads fewer than 2,000 cells and decodes the four blocks round its centre once
+
+### Requirement: GEN-043 The coupled run through the climate views
+`generators::coupled` SHALL draw the stored run onto a tile's climate texture (9 x 9 texels, GEN-021) so the viewer's climate views show the global river network: with the height lens the temperature channel holds the run's height (sea at -30 C, land from the height grey of the height debug view up to 40 C) and the precipitation channel is 0; with the area lens the precipitation channel holds the drainage area on the log scale of the area map (0 mm at one cell's area, 3000 mm at the largest area of the run) and the temperature channel is -30 C.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-24, M8-1 part c), ADR 0077
+
+#### Detail
+A texel's height is the run's at its cell; its area is the largest in the cells the texel covers, so a river a coarse tile cannot resolve still shows. `generators::chain::CoupledLensField` SHALL put the lens over any field: every height, key and reading is the base's, the climate is the lens's, and the climate version word (hence the mesh key of every tile) carries the run's identifier, the lens and the run's algorithm version. The texture is a pure function of the run, the lens and the tile.
+
+#### Scenario: What a tile shows
+- **WHEN** the lenses are applied to the tiles of a run on a small lattice, to the whole face as one tile and to a fine tile
+- **THEN** the height lens holds sea at -30 C and land above it, the area lens holds the largest area of a texel's cells (the main stem on the wet half of the scale from the coarse tile), the other channel is flat, and two draws are equal
+
+#### Scenario: The lens field
+- **WHEN** a field is wrapped in the lens
+- **THEN** its heights are equal to the base's bit for bit, its climate is the lens's, and its mesh key differs from the base's and between the two lenses and between two runs
+
+### Requirement: GEN-056 The coupled run's lattice is independent of the bake's
+`generators::coupledinput::reduce_bake` SHALL give the run's starting heights on a lattice of `n` cells per face edge from a bake of `res` cells per face edge, `n` dividing `res` (anything else refused with both numbers). A bake cell holds the mean of its four corner vertices and a run cell the mean of the `(res / n)^2` bake cells it covers, summed in `f64` in a fixed order and rounded to `f32` once, so the result is bit-equal for any thread count and block structure of the source (CON-14). The run SHALL start from the reduced heights exactly as from the same heights given directly. The world's run SHALL use `min(res, 2048)` cells per face edge.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-24, M8-1 (c) rest, owner: solid software), ADR 0077, CON-14
+
+#### Scenario: Reduction and run
+- **WHEN** synthetic bakes of 16 to 64 cells are reduced to runs of 1 to 16 cells per face edge, with 1 to 64 threads and blocks of 0 to 64 cells, and a run of 8 cells is made from bakes of 32 and 64 and from the heights reduced by the definition
+- **THEN** every run cell equals the definition's mean, a plane reduces to the plane at the cell centre, all thread counts agree bit for bit, the two runs agree bit for bit in heights, area and receivers, a run that does not divide the bake is refused and a missing vertex is named
+
+### Requirement: GEN-042 Global coupled run time
+The global coupled run (GEN-040) at 2048 cells per face edge and 100 steps SHALL take no more than ten minutes on the reference machine, measured by the performance harness through the architect and never in a test (CON-20). The `coupled` perf scene (`perf_coupled`) cites this requirement for spec-lint (TEST-001). The harness entry is `cargo xtask perf coupled` (ADR 0020 readiness gate, log `perf/logs/coupled.json` with wall time, steps, seconds per step and threads); the run is single-threaded, so `threads` is 1.
+
+Verify: C
+Status: active
+Source: opus-planner (2026-10-24), M8 exit criterion 4
+
+#### Scenario: Coupled run timing
+- **WHEN** the coupled run of 2048 cells per face edge and 100 steps runs on the reference machine in a perf window
+- **THEN** it finishes within ten minutes
+
+### Requirement: GEN-064 The hill band and the landform driver of the bake
+`global::sample` SHALL add to the elevation of land a hill band: a ridged multifractal of three octaves at the frequencies 796, 1592 and 3184 per unit direction (wavelengths of 8, 4 and 2 km at Earth's radius; they scale with the body's radius) on the warped direction (which stretches them locally), weights 1, 1/2 and 1/4 of `(1 - |n|)^2`, normalised, times an amplitude and times `smoothstep(0, 0.1, land depth)`. The band SHALL be 0 over the sea and at the coast and never negative, and at most `HILL_BAND_MAX_M` (1000 m).
+
+Verify: A
+Status: active
+Source: owner (2026-10-25, via opus-planner): plausible relief in M8; ADR 0080 points 1, 3 and 5, `openspec/changes/m8-relief/proposal.md`
+
+#### Detail
+The amplitude SHALL be `30 + 145 smoothstep(0, 0.25, m) + 825 smoothstep(0.25, 0.7, m)` m for the mountain strength `m = landform x (0.25 + 0.75 ridge)`. `global::landform(seed, d)` SHALL be the range-zone strength times the distance from the coast, in `[0, 1]`, a pure function of the seed and the direction that does not read the band. The bake's elevation clamp and the field's `max_abs_height_m` SHALL stay as they are while the highest base and range (6200 m) plus `HILL_BAND_MAX_M` stay below the clamp. `GLOBAL_VERSION` SHALL be 5.
+
+#### Scenario: Where the band is and how large
+- **WHEN** 40,000 directions spread over the sphere are sampled
+- **THEN** the band is between 0 and 1000 m, 0 over the sea, positive over a quarter of the land at least, the elevation never exceeds the clamp, and the highest base plus range plus the band is below it
+
+#### Scenario: By landform
+- **WHEN** land with landform under 0.02 and land with landform over 0.5 are compared
+- **THEN** the plains carry at most 40 m and the mean band of the ranges is at least eight times the plains'
+
+#### Scenario: Gentle at 100 m
+- **WHEN** the band is stepped 100 m along 300 great circles
+- **THEN** the largest step is under 90 m (58 m recorded; the warp stretches the octaves locally, so this is a regression guard and not a bound: a 1 km octave or a doubled frequency would move it by far more)
+
+#### Scenario: Known answers
+- **WHEN** the landform driver is read at four fixed directions
+- **THEN** its bits are the pinned ones (GLOBAL_VERSION 5)
+
+### Requirement: GEN-063 The stationary uplift of the coupled run
+`coupled::stationary_uplift` SHALL give each land cell the uplift `rho K A^m S` in m/year, `A` the drainage area and `S = (z - max(z_r, 0)) / distance` the slope to the receiver, both taken from the input heights `z` by the run's priority flood, jittered receivers and accumulation, so that the implicit update `z = (z + dt U + f z_r) / (1 + f)` leaves the input where it is at `rho` 1 (to a few f32 ulps; not the cells in a depression, which the flood raises, nor land cells under `min_height_m`, which the step lifts to it, nor the cells that drain to either, which read the moved height).
+
+Verify: A
+Status: active
+Source: owner (2026-10-25, via opus-planner): plausible relief in M8; ADR 0080 point 4, `openspec/changes/m8-relief/proposal.md` items 5 and 6, GEN-040
+
+#### Detail
+Sea cells, outlets and cells whose drop to the receiver is not positive SHALL get 0, the result SHALL be linear in `rho` (a factor of zero or more) and a pure function of its arguments in the fixed order of the run (CON-14). The coupled run of a world SHALL, when it erodes (`CoupledParams::erode`, off for M8, GEN-065), take this field with `rho` `UPLIFT_RHO` (1) in place of a constant uplift; `rho` and `UPLIFT_FIELD_VERSION` SHALL be part of the declared identity of the run's inputs (STRM-043).
+
+#### Scenario: The input is kept
+- **WHEN** a 24-cell world runs 20 steps on its stationary uplift at `rho` 1 and, from the same heights, on a constant uplift of 1e-3 m/year
+- **THEN** the median height change over land is under a tenth of the constant run's and under 20 m, one step moves every land cell that is not in a depression, under the height floor or draining to such a cell by at most 4 f32 ulps (coastal cells included), the uplift is never negative, `rho` 0 gives zero everywhere and `rho` 2 gives exactly twice the field, and in a world without sea the outlets and the cells in pits get 0
+
+#### Scenario: Sea and determinism
+- **WHEN** the field is made twice on a 12-cell world
+- **THEN** both agree bit for bit and every sea cell is 0

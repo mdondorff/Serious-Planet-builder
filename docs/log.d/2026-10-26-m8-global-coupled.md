@@ -1,0 +1,1 @@
+- 2026-10-26 **m8-global-coupled** (GEN-043, GEN-056, STRM-044, VIEW-053): archived; the world loads or makes the coupled run, its lattice independent of the bake's, the K view shows it (#603, #638); GEN-040 and GEN-041 were already in the specs, their duplicate blocks dropped from the delta.
