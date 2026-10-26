@@ -84,7 +84,9 @@ fn horizon_coarse_elevation(up: vec3<f32>, sun: vec3<f32>) -> f32 {
 // The strength of the coarse map at `distance` metres from the fragment's surface point (REND-043): full up to 1000 km, gone from 3000 km, a
 // smoothstep between (`planet_generators::horizon::coarse_fade`). A distance of 0 is full.
 fn horizon_coarse_fade(distance: f32) -> f32 {
-    let x = clamp((distance - 1.0e6) / 2.0e6, 0.0, 1.0);
+    // In kilometres: no planet-scale literal in a shader (CON-11, REND-005).
+    let km = distance * 0.001;
+    let x = clamp((km - 1000.0) / 2000.0, 0.0, 1.0);
     return 1.0 - x * x * (3.0 - 2.0 * x);
 }
 
