@@ -20,6 +20,7 @@
 //! exactly, so CPU and GPU form the same `f32(q)`, and the step is at most 1 mm up to [`WIDE_RELIEF_1MM_M`] (16.7 km) of relief in one tile; the reconstruction error stays within 1 mm up to 8,192 m (the f32 sum, GEN-019). There is no relief guard and no fallback format: a tile with more relief has a larger step, documented in GEN-019.
 
 use crate::climate::{ClimateTexture, CLIMATE_BYTES, CLIMATE_MIN_COMPACT_CELLS, CLIMATE_TEXELS};
+use crate::drivers::DRIVER_TEXELS;
 use crate::height::HeightField;
 use crate::mesh::{mesh_key_field, skirt_depth, vertex_count, MeshVertex};
 use planet_core::cube::FaceMapping;
@@ -42,11 +43,14 @@ pub const SLOT_CLIMATE_OFFSET: u64 = SLOT_HEADER_BYTES;
 /// Bytes of the climate block: 81 words.
 pub const SLOT_CLIMATE_BYTES: u64 = CLIMATE_BYTES as u64;
 
-/// Offset of the pad word (GEN-025).
-pub const SLOT_PAD_OFFSET: u64 = SLOT_CLIMATE_OFFSET + SLOT_CLIMATE_BYTES;
+/// Offset of the driver block in the slot (GEN-025, MESH_VERSION 10): right after the climate block.
+pub const SLOT_DRIVER_OFFSET: u64 = SLOT_CLIMATE_OFFSET + SLOT_CLIMATE_BYTES;
 
-/// Offset of the texels in the slot: 456 bytes of header, climate block and pad (GEN-025), a multiple of 8.
-pub const SLOT_TEXEL_OFFSET: u64 = SLOT_PAD_OFFSET + 4;
+/// Bytes of the driver block: 81 words (soil depth, moisture, insolation and the neutral insolation, one byte each).
+pub const SLOT_DRIVER_BYTES: u64 = 4 * DRIVER_TEXELS as u64;
+
+/// Offset of the texels in the slot: 776 bytes of header, climate block and driver block (GEN-025), a multiple of 8.
+pub const SLOT_TEXEL_OFFSET: u64 = SLOT_DRIVER_OFFSET + SLOT_DRIVER_BYTES;
 
 /// Scale of the 15-bit normal components: `2^14 - 1`.
 pub const NORMAL_SCALE: f32 = 16_383.0;
@@ -71,7 +75,7 @@ pub const fn slot_texel_bytes(cells: u32) -> u64 {
     texel_count(cells) as u64 * TEXEL_BYTES
 }
 
-/// The stride of a slot at `cells`: `456 + 8 (cells + 1)^2` (GEN-025: 2,768, 9,168 and 34,256 B at cells 16, 32 and 64).
+/// The stride of a slot at `cells`: `776 + 8 (cells + 1)^2` (GEN-025: 3,088, 9,488 and 34,576 B at cells 16, 32 and 64).
 pub const fn slot_bytes(cells: u32) -> u64 {
     SLOT_TEXEL_OFFSET + slot_texel_bytes(cells)
 }
@@ -102,6 +106,9 @@ pub struct CompactTile {
     pub relief_m: f64,
     /// The climate block (GEN-021), 81 words: temperature `f16` low, precipitation `f16` high.
     pub climate_words: [u32; CLIMATE_TEXELS],
+    /// The driver block (GEN-071, ADR 0076), 81 words: soil depth code, moisture code, insolation code and the neutral insolation code of the texel's
+    /// latitude, one byte each (`drivers::pack_driver_word`). The chunk's values where a chunk is ready under the tile, the neutral values elsewhere.
+    pub driver_words: [u32; DRIVER_TEXELS],
     /// `(cells + 1)^2` texels `[height step count, two 15-bit normal components]`, row `j` major.
     pub texels: Vec<[u32; 2]>,
     /// The chunk change of every texel in metres, row `j` major like the texels (STRM-047, REND-039): the texel heights already include it, so a
@@ -139,7 +146,7 @@ impl CompactTile {
         out
     }
 
-    /// The whole slot, byte for byte as the pool's block holds it (GEN-025): header, climate block, pad, texels.
+    /// The whole slot, byte for byte as the pool's block holds it (GEN-025): header, climate block, driver block, texels.
     pub fn slot_data(&self) -> Vec<u8> {
         let mut out = Vec::new();
         self.write_slot_into(&mut out);
@@ -154,7 +161,9 @@ impl CompactTile {
         for w in &self.climate_words {
             out.extend_from_slice(&w.to_le_bytes());
         }
-        out.extend_from_slice(&[0u8; 4]);
+        for w in &self.driver_words {
+            out.extend_from_slice(&w.to_le_bytes());
+        }
         for t in &self.texels {
             out.extend_from_slice(&t[0].to_le_bytes());
             out.extend_from_slice(&t[1].to_le_bytes());
@@ -163,7 +172,7 @@ impl CompactTile {
     }
 
     /// Rebuild a tile from the bytes of its slot (the inverse of [`slot_data`](CompactTile::slot_data)); the fields the slot does
-    /// not hold (key, origin, relief) come from the caller. Names what is wrong with the bytes: a wrong length, flag bits, a pad word
+    /// not hold (key, origin, relief) come from the caller. Names what is wrong with the bytes: a wrong length, flag bits
     /// or texel bits that must be zero.
     pub fn from_slot_data(
         id: TileId,
@@ -186,8 +195,9 @@ impl CompactTile {
         if flags > 1 {
             return Err(format!("the slot's flags word {flags:#x} has reserved bits set"));
         }
-        if word(SLOT_PAD_OFFSET as usize) != 0 {
-            return Err("the slot's pad word is not zero".into());
+        let mut driver_words = [0u32; DRIVER_TEXELS];
+        for (k, w) in driver_words.iter_mut().enumerate() {
+            *w = word(SLOT_DRIVER_OFFSET as usize + 4 * k);
         }
         let mut climate_words = [0u32; CLIMATE_TEXELS];
         for (k, w) in climate_words.iter_mut().enumerate() {
@@ -215,6 +225,7 @@ impl CompactTile {
             flip: flags == 1,
             relief_m,
             climate_words,
+            driver_words,
             texels,
             change: None,
         })
@@ -380,6 +391,26 @@ fn f32_up(x: f64) -> f32 {
     }
 }
 
+/// The driver block of tile `id` (GEN-071): at each of the 9 x 9 climate texels the codes of the ready chunk under it as the tile's level reads them
+/// (`HeightField::level_drivers`) or the neutral codes, with the neutral insolation of the texel's latitude in the top byte.
+fn driver_block(field: &dyn HeightField, map: &dyn FaceMapping, id: TileId) -> [u32; DRIVER_TEXELS] {
+    use crate::climate::{CLIMATE_CELLS, CLIMATE_EDGE};
+    use crate::drivers::{neutral_codes, pack_driver_word, DriverParams};
+    let dirs: Vec<Vec3> = (0..CLIMATE_EDGE)
+        .flat_map(|b| (0..CLIMATE_EDGE).map(move |a| (a, b)))
+        .map(|(a, b)| id.sample_direction(map, CLIMATE_CELLS, a as u32, b as u32))
+        .collect();
+    let chunk = field.level_drivers(&dirs, id.level());
+    let params = DriverParams::default();
+    let mut words = [0u32; DRIVER_TEXELS];
+    for (k, w) in words.iter_mut().enumerate() {
+        let neutral = neutral_codes(libm::asin(dirs[k].z.clamp(-1.0, 1.0)), &params);
+        let codes = chunk.as_ref().and_then(|c| c[k]).unwrap_or(neutral);
+        *w = pack_driver_word(codes, neutral[2]);
+    }
+    words
+}
+
 /// Build the compact tile from a height field (all geometry in f64, rounded once).
 pub fn compact_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileId, cells: u32, radius_m: f64) -> CompactTile {
     assert!(
@@ -446,6 +477,7 @@ pub fn compact_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: Ti
         flip: false,
         relief_m: hi - lo,
         climate_words: climate.to_words(),
+        driver_words: driver_block(field, map, id),
         texels,
         change,
     };

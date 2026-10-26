@@ -574,6 +574,51 @@ impl<F: HeightField> ChunkField<F> {
         }
     }
 
+    /// The driver codes `[soil depth, moisture, insolation]` at `dir` as tile level `level` reads them (GEN-071): the 8-bit pyramid levels of the chunks
+    /// read bilinearly across the cells and linearly between two levels, rounded to nearest; `None` where no chunk with drivers is ready.
+    pub fn drivers_at_level(&self, dir: Vec3, level: u8) -> Option<[u8; 3]> {
+        let x = pyramid_position(&self.lat, self.radius_m, level, self.top)?;
+        let own_tile = TileId::from_direction(&TangentWarp, dir, CHUNK_GRID_LEVEL);
+        let own = self.ready.get(&(own_tile.face().0, own_tile.x(), own_tile.y()))?;
+        if !own.has_drivers() {
+            return None;
+        }
+        let (face, s, t) = direction_to_face(&TangentWarp, dir);
+        let k0 = (libm::floor(x) as usize).min(own.k_max());
+        let k1 = (k0 + 1).min(own.k_max());
+        let frac = if k1 == k0 { 0.0 } else { (x - k0 as f64).min(1.0) };
+        let mut out = [0u8; 3];
+        for (channel, code) in out.iter_mut().enumerate() {
+            let a = self.read_driver_level(own, channel, k0, face.0, s, t);
+            let v = if frac == 0.0 { a } else { a * (1.0 - frac) + self.read_driver_level(own, channel, k1, face.0, s, t) * frac };
+            *code = libm::round(v).clamp(0.0, 255.0) as u8;
+        }
+        Some(out)
+    }
+
+    /// Driver channel `channel` of pyramid level `k` at the face position (`s`, `t`), bilinear across the cells (a cell of a chunk that is not ready, or has
+    /// no drivers, is the nearest cell of this one).
+    fn read_driver_level(&self, own: &ChunkResult, channel: usize, k: usize, face: u8, s: f64, t: f64) -> f64 {
+        let nk = self.lat.n() >> k;
+        let per = i64::from(self.lat.per_chunk) >> k;
+        let (u, v) = ((s + 1.0) * 0.5 * nk as f64 - 0.5, (t + 1.0) * 0.5 * nk as f64 - 0.5);
+        let (fu, fv) = (libm::floor(u), libm::floor(v));
+        let (i0, j0, wx, wy) = (fu as i64, fv as i64, u - fu, v - fv);
+        let (ox, oy) = (i64::from(own.tile().x()) * per, i64::from(own.tile().y()) * per);
+        let sample = |i: i64, j: i64| -> f64 {
+            let c = canon_n(nk, face, i, j);
+            let (i, j) = (i64::from(c.i), i64::from(c.j));
+            let (chunk, li, lj) = match self.ready.get(&(c.face, (i / per) as u32, (j / per) as u32)).filter(|c| c.has_drivers()) {
+                Some(c) => (&**c, (i % per) as usize, (j % per) as usize),
+                None => (own, (i.clamp(ox, ox + per - 1) - ox) as usize, (j.clamp(oy, oy + per - 1) - oy) as usize),
+            };
+            f64::from(chunk.driver_at(channel, k, li, lj).unwrap_or(0))
+        };
+        let top = sample(i0, j0) * (1.0 - wx) + sample(i0 + 1, j0) * wx;
+        let bottom = sample(i0, j0 + 1) * (1.0 - wx) + sample(i0 + 1, j0 + 1) * wx;
+        top * (1.0 - wy) + bottom * wy
+    }
+
     /// Pyramid level `k` at the face position (`s`, `t`), interpolated with a Catmull-Rom spline across the cells (a linear read of a coarse
     /// level errs by far more than 0.25 m on the stand-in's relief). A cell outside the chunk is the cell of the chunk holding it if that is
     /// ready, else the nearest cell of this one; past the face edge it is the edge cell.
@@ -704,6 +749,12 @@ impl<F: HeightField> HeightField for ChunkField<F> {
             return None;
         }
         Some(dirs.iter().map(|&d| self.change_at_level(d, level)).collect())
+    }
+    fn level_drivers(&self, dirs: &[Vec3], level: u8) -> Option<Vec<Option<[u8; 3]>>> {
+        if self.ready.is_empty() {
+            return None;
+        }
+        Some(dirs.iter().map(|&d| self.drivers_at_level(d, level)).collect())
     }
     /// The tile's heights as drawn at its own level (GEN-036): the base's batch plus the change of the pyramid level the tile reads. The base is
     /// read as the field below the chunk stage reads it (level-independent: the global run and the layers under the chunks).

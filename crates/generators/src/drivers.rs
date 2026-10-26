@@ -261,9 +261,49 @@ impl InsolationTable {
 pub const NEUTRAL_SOIL_M: f64 = 1.0;
 pub const NEUTRAL_MOISTURE: f64 = 0.5;
 
-/// The neutral insolation at a latitude: the flat plane's annual mean there (the latitude alone).
+/// The neutral insolation at a latitude: the flat plane's annual mean there (the latitude alone), in units of the flat plane at the equator. The closed
+/// form of the daily mean on a horizontal plane (Duffie and Beckman, the sunset hour angle `h0 = acos(-tan f tan d)` with the polar day and night as the
+/// limits) over the same 73 days as [`annual_mean_irradiance`], which it equals within the integration's step.
 pub fn neutral_insolation(lat_rad: f64) -> f64 {
-    annual_mean_irradiance(lat_rad, 0.0, 0.0)
+    let mean = |lat: f64| -> f64 {
+        let (sf, cf, tf) = (libm::sin(lat), libm::cos(lat), libm::tan(lat));
+        let mut total = 0.0;
+        for k in 0..DAYS {
+            let d = declination((3 + DAY_STEP * k) as f64);
+            let (sd, cd, td) = (libm::sin(d), libm::cos(d), libm::tan(d));
+            let x = -tf * td;
+            let h0 = if x >= 1.0 {
+                0.0
+            } else if x <= -1.0 {
+                core::f64::consts::PI
+            } else {
+                libm::acos(x)
+            };
+            total += (h0 * sf * sd + cf * cd * libm::sin(h0)) / core::f64::consts::PI;
+        }
+        total / DAYS as f64
+    };
+    // At the poles `tan` of the latitude is huge, which the clamp of `x` turns into the polar day or night.
+    mean(lat_rad.clamp(-1.5707, 1.5707)) / mean(0.0)
+}
+
+/// Texels of the driver block of a tile: 9 x 9 like the climate block.
+pub const DRIVER_TEXELS: usize = 81;
+
+/// The word of one texel of the tile's driver block (GEN-071, GEN-025): the soil depth code in bits 0-7, the moisture in 8-15, the insolation in 16-23
+/// and the neutral insolation of the texel's latitude in 24-31 (what the shader fades the insolation from).
+pub fn pack_driver_word(codes: [u8; 3], neutral_insolation: u8) -> u32 {
+    u32::from(codes[0]) | u32::from(codes[1]) << 8 | u32::from(codes[2]) << 16 | u32::from(neutral_insolation) << 24
+}
+
+/// The codes `[soil, moisture, insolation]` and the neutral insolation code of a driver word.
+pub fn unpack_driver_word(word: u32) -> ([u8; 3], u8) {
+    ([word as u8, (word >> 8) as u8, (word >> 16) as u8], (word >> 24) as u8)
+}
+
+/// The codes of the neutral drivers at latitude `lat_rad`: soil 1 m, moisture 0.5 and the neutral insolation.
+pub fn neutral_codes(lat_rad: f64, params: &DriverParams) -> [u8; 3] {
+    [encode_soil(NEUTRAL_SOIL_M, params), encode_unit(NEUTRAL_MOISTURE), encode_unit(neutral_insolation(lat_rad))]
 }
 
 /// A driver as a consumer reads it (GEN-071): `neutral + w (chunk - neutral)`, written `neutral (1 - w) + chunk w` so that both ends are exact (monotone

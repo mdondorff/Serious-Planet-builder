@@ -68,8 +68,10 @@ pub const SKIRT_FRACTION: f64 = 0.08;
 /// texel, the climate block and the header inside the slot; every compact key changes, vertex tiles are unchanged.
 /// 9 = the canonical normal is the lattice normal (ADR 0073, GEN-019): the cross product of the centred differences of the lattice
 /// neighbours' positions, the ring of a tile read across tile and face edges; every key changes, heights and positions are unchanged,
-/// a pre-filled pack is written again.
-pub const MESH_VERSION: u32 = 9;
+/// a pre-filled pack is written again;
+/// 10 = the slot gains the driver block (ADR 0076, GEN-071, GEN-025): 324 bytes after the climate block, the texels at byte 776, the slot 9,488 bytes at
+/// 32 cells; every key changes, the vertex output and the texels are unchanged.
+pub const MESH_VERSION: u32 = 10;
 
 /// Key of a mesh: the height key of the tile (generator, seed, mapping, tile; resolution = `cells`), the grid size, the
 /// radius bits, the skirt fraction bits and [`MESH_VERSION`].

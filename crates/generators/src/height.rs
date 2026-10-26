@@ -254,6 +254,11 @@ pub trait HeightField: Send + Sync {
     fn level_change(&self, _dirs: &[Vec3], _level: u8) -> Option<Vec<f64>> {
         None
     }
+    /// The driver codes `[soil depth, moisture, insolation]` of the ready chunks at `dirs` as tile level `level` reads them (GEN-071), `None` for a direction
+    /// no chunk covers and for every field without chunks (the tile then holds the neutral drivers). A wrapper forwards it with `level_change`.
+    fn level_drivers(&self, _dirs: &[Vec3], _level: u8) -> Option<Vec<Option<[u8; 3]>>> {
+        None
+    }
     /// [`heights_threaded`](HeightField::heights_threaded) as drawn at tile level `level` (the plan's origin heights, GEN-036): the same values as
     /// `height_at_level` per direction in the caller's order for every `threads`; a field that is not level-aware takes its batch path.
     fn heights_threaded_at_level(&self, dirs: &[Vec3], level: u8, threads: usize) -> Vec<f64> {
@@ -601,6 +606,9 @@ impl<F: HeightField> HeightField for Bound<F> {
     fn level_aware(&self) -> bool {
         self.field.level_aware()
     }
+    fn level_drivers(&self, dirs: &[Vec3], level: u8) -> Option<Vec<Option<[u8; 3]>>> {
+        self.field.level_drivers(dirs, level)
+    }
     fn level_change(&self, dirs: &[Vec3], level: u8) -> Option<Vec<f64>> {
         self.field.level_change(dirs, level)
     }
@@ -680,6 +688,9 @@ impl<T: HeightField + ?Sized> HeightField for Box<T> {
     }
     fn level_aware(&self) -> bool {
         (**self).level_aware()
+    }
+    fn level_drivers(&self, dirs: &[Vec3], level: u8) -> Option<Vec<Option<[u8; 3]>>> {
+        (**self).level_drivers(dirs, level)
     }
     fn level_change(&self, dirs: &[Vec3], level: u8) -> Option<Vec<f64>> {
         (**self).level_change(dirs, level)
