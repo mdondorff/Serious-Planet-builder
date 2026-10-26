@@ -641,14 +641,17 @@ fn paint_band(
     }
 }
 
-/// The bed of every segment of `segments` (GEN-059), sampled every `PROFILE_SAMPLES` polyline points: `(t, height)` along the segment, the height of
-/// the bed `t` of the way along it. The raw bed at a point is the base height there minus the law's valley depth for the river's area. The bed is the
-/// running minimum from upstream of the raw beds along the river's main stem (the donor of the largest area at every cell) for up to `law.window` segments
-/// back, each point at least the least fall under the one above it and at most `cut_cap_m` under the ground: the bed follows the ground and cuts through a
-/// rise only where the river's path forces it, never lying over the ground it runs on. A tributary's bed, back to the window, is held no lower than the main
-/// stem's bed that arrives at the confluence it flows into (rising at the least fall: a tributary hangs above the stem, never under it). A function of the run
-/// and the base at positions alone: the same in every chunk. The window is the limit: a low carried from the segment `window` above one segment is not carried by
-/// the next, which releases it as a step there (rare; a link that climbs by more than the bed tolerance makes its donor an outlet in the solve).
+/// How far a routed path can lie from the chord between the coarse centres of its segment, in metres (GEN-078): the band and the slide are discs in the
+/// raster's grid units, and the chart stretches a grid step by up to 2/sqrt(3) at a cube corner (a little more on the extended chart past an edge), so
+/// both count `CHART_STRETCH` times; the meander is in true metres; the raster's rounding adds a few steps.
+pub fn routing_reach_m(law: &AnchorLaw, cell_m: f64) -> f64 {
+    const CHART_STRETCH: f64 = 1.17;
+    let raster_m = f64::from(law.route_stride.max(1)) * cell_m;
+    let slide_m = law.slide_m.max(law.slide_steep_m).max(law.head_m);
+    let band_m = if law.route_band_m > 0.0 { law.route_band_m } else { 0.0 };
+    CHART_STRETCH * (band_m + slide_m + 5.0 * raster_m) + MEANDER_M
+}
+
 /// The segments of `segments` whose routed path can touch the region whose cell directions are `dirs` (GEN-078). A path stays within the band of its guide,
 /// the guide within the meander of the chord between its two nodes, and a node within the slide of its coarse centre, so a segment whose chord is farther
 /// from the region than the region's radius plus those and the raster's rounding cannot give the region a single cell, a bed, an inflow or a link: leaving
@@ -667,11 +670,7 @@ fn segments_reaching(
     }
     let centre = sum.normalized();
     let reach_m = dirs.iter().map(|&d| (d - centre).length()).fold(0.0, f64::max) * radius_m;
-    let raster_m = f64::from(law.route_stride.max(1)) * lat.cell_m(radius_m);
-    let slide_m = law.slide_m.max(law.slide_steep_m).max(law.head_m);
-    let band_m = if law.route_band_m > 0.0 { law.route_band_m + 3.0 * raster_m } else { 0.0 };
-    // A chord is sampled every eighth: the farthest a sample can be from the nearest point of the chord is half a step.
-    let margin_m = reach_m + band_m + slide_m + MEANDER_M + 2.0 * raster_m;
+    let margin_m = reach_m + routing_reach_m(law, lat.cell_m(radius_m));
     let coarse = run.lattice();
     segments
         .iter()
@@ -687,6 +686,14 @@ fn segments_reaching(
         .collect()
 }
 
+/// The bed of every segment of `segments` (GEN-059), sampled every `PROFILE_SAMPLES` polyline points: `(t, height)` along the segment, the height of
+/// the bed `t` of the way along it. The raw bed at a point is the base height there minus the law's valley depth for the river's area. The bed is the
+/// running minimum from upstream of the raw beds along the river's main stem (the donor of the largest area at every cell) for up to `law.window` segments
+/// back, each point at least the least fall under the one above it and at most `cut_cap_m` under the ground: the bed follows the ground and cuts through a
+/// rise only where the river's path forces it, never lying over the ground it runs on. A tributary's bed, back to the window, is held no lower than the main
+/// stem's bed that arrives at the confluence it flows into (rising at the least fall: a tributary hangs above the stem, never under it). A function of the run
+/// and the base at positions alone: the same in every chunk. The window is the limit: a low carried from the segment `window` above one segment is not carried by
+/// the next, which releases it as a step there (rare; a link that climbs by more than the bed tolerance makes its donor an outlet in the solve).
 fn anchor_profiles(
     run: &dyn CoarseRun,
     base: &dyn BaseDetail,

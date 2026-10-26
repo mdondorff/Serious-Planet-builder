@@ -716,3 +716,18 @@ fn a_chunk_routes_only_the_segments_that_can_reach_its_region_and_has_the_bits_o
     }
     assert!(pruned_total < all_total, "pruning saved nothing: {pruned_total} of {all_total} segments routed");
 }
+
+// spec: GEN-078
+#[test]
+fn the_reach_of_a_routed_path_covers_the_charts_stretch_at_a_cube_corner() {
+    use planet_generators::anet::{routing_reach_m, AnchorLaw};
+    // The production law: band 1 km, slide and head 1 km, 8 m cells at stride 8. The equal-angle chart stretches a grid step by 2/sqrt(3) at a cube corner,
+    // so the band disc and the slide disc reach 1.1547 km there along the diagonal, and the meander (700 m, true metres) adds to both.
+    let law =
+        AnchorLaw { route_band_m: 1000.0, slide_m: 500.0, slide_steep_m: 1000.0, head_m: 1000.0, route_stride: 8, ..AnchorLaw::default() };
+    let worst = 2.0 / 3.0f64.sqrt() * (1000.0 + 1000.0) + planet_generators::anet::MEANDER_M + 2.0 * 64.0;
+    assert!(routing_reach_m(&law, 8.0) >= worst, "the reach {} m is under the corner's {worst} m", routing_reach_m(&law, 8.0));
+    // Without routing nothing but the meander (and the raster's rounding) is left.
+    let off = AnchorLaw { route_band_m: 0.0, slide_m: 0.0, slide_steep_m: 0.0, head_m: 0.0, ..AnchorLaw::default() };
+    assert!(routing_reach_m(&off, 8.0) >= planet_generators::anet::MEANDER_M);
+}
