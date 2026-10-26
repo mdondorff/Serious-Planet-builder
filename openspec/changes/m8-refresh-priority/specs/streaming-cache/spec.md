@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: STRM-055 The job log tells a refresh and its waits
-The job log (STRM-022) SHALL record for each job the milliseconds on the streamer's clock from the request of its tile to its dispatch (the wait in the streamer's own queue) and whether the job rebuilds a resident tile that was stale (a refresh, STRM-026). `refresh_summary` SHALL put the refresh jobs of a slice of the log in one line: their count and the median, 90th percentile and largest of the wait in the streamer's queue, the wait in the spawner's queue and the load, in milliseconds; none without a refresh. The viewer SHALL write that line about the jobs since the last, once every 10 s while there are refreshes. The readings decide nothing (CON-14).
+The job log (STRM-022) SHALL record for each job the milliseconds on the streamer's clock from the request of its tile to its dispatch (the wait in the streamer's own queue) and whether the job rebuilds a resident tile that was stale (a refresh, STRM-026). `refresh_summary` SHALL put the refresh jobs of a slice of the log in one line: their count and the median, 90th percentile and largest of the wait in the streamer's queue, the wait in the spawner's queue and the load, in milliseconds; none without a refresh. The viewer SHALL write that line about the jobs since the last, once every 10 s while there are refreshes, with the chunks landed and the share of the plan's chunk-reading nodes drawn as stand-ins over the frames since the last line. The editor's `--site LAT,LON` SHALL start the scripted flight over that point (default 20, 30), so a flight can run over land whose chunks are not stored. The readings decide nothing (CON-14).
 
 Verify: A
 Status: active
