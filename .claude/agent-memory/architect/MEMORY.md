@@ -8,13 +8,17 @@ Refreshed 2026-10-24 during M8 (session `opus-planner`, worktree `.claude/worktr
 - **sonnet-spikes:** scouts the next milestone's questions (owner, 2026-10-24); unreachable on 2026-10-24.
 - Claude Desktop sessions, cleared or idle, wake on an incoming message; no paste needed. Check `ListAgents` for exact names.
 - 2026-10-25: this planner session is `opus-planner [fa3069]`; a stale Remote Control row `opus-planner [d8d159]` shares the name, so coders address `[fa3069]`. After an app restart the sonnet-* Desktop sessions were missing from `ListAgents` until opened.
+- 2026-10-26: after a clear a lane gets a new ref (crusader is now `sonnet-crusader [3f46e7]`, explorer `[cb2991]`, spikes `[198570]`); re-check ListAgents after every clear.
 
-## State (2026-10-24 evening)
-- M8 natural landscape: M8-2 archived (#621); M8-3 steps 1 to 4 merged (A-net in the viewer, 8 m cells, top level 15, chunk 4.2 s indicative); M8-5 to frame data (#628), render design #629; M8-V tile-streaming curve (#619); global run 545 s for 100 steps (criterion 4 met, synthetic input).
-- Criterion 3 amended by the owner (#634). Open owner item: D3 (edits on top of or under erosion) before M8-7.
-- Look review 1 (M8-4) is next after explorer's step 5 renders.
+## State (2026-10-26 early)
+- Owner scope (2026-10-25): M8 = plausible relief, hydrology right, horizon shadows; realistic terrain is M9. ADR 0081 accepted; ADR 0080 and ADR 0082 (node slides, #695) proposed, owner to accept.
+- Done overnight: #686 key table, #689 stall probe, #691 heavy lock, #692 routing (ADR 0081), #694 run CLI, #698 fade stability, #699 coarse-link tributaries (ANET 7, fine tier = M9), SPIKE-43 (bounded breach local within the 375 halo; open: halo ground differs between separate solves).
+- In flight: crusader closes m8-chunk-fade (stale-mesh clock fix, reviewers, archive; #696), then Keys tab, dark spots A+B; explorer closes M8-3 then proposes M8-6 driver maps (proposal to planner before code); spikes idle.
+- Owner items: /bless; ADR 0080/0082; D3 before M8-7; look review 2; store compaction (24 GB); approve a real-elevation download source for M9 scouting.
+- Shared store is current (bake v5, run stored, coarse horizon written; verified 2026-10-25 by crusader).
+- Quota: 11 % of the weekly quota used on 2026-10-25 (first day after reset) with three lanes and the planner most of the day.
 
-- Shared store (owner, 2026-10-25): `C:/DEV/SeriousPlanetData/global16384`; worktrees link to it; one writer at a time via writer.lock. Owner idea for later: stores behind a local or remote data server (roadmap, not M8).
+- Shared store (owner, 2026-10-25): `C:/DEV/SeriousPlanetData/global16384`; worktrees and the root link to it by junction (a .lnk shortcut does not work); one writer at a time via writer.lock. Owner idea for later: stores behind a local or remote data server (roadmap).
 
 ## Practice
 - Owner decisions are committed in the planner session; coders merge them.
