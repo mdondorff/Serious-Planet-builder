@@ -611,6 +611,8 @@ impl Harness<'_> {
             self.landed_log.extend(update.landed.iter().map(|k| (now, *k)));
             rig.managed.chunk_landed(&update.landed);
             rig.managed.chunk_evicted(&update.evicted);
+            // The horizon jobs of the chunks the plan reads share the chunk pool, as in the viewer (their maps are not uploaded here).
+            world.horizon_frame(&tiles, req.camera.position);
         }
         rig.fi.retire_to(rig.renderer.retired_frames(ctx));
         while rig.fi.is_full() {
