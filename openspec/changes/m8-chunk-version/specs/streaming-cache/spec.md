@@ -4,7 +4,7 @@
 An edit SHALL mark the ready chunks whose read set (GEN-081) it touches stale. A stale chunk SHALL keep drawing its old version (STRM-054) until the new version lands, and SHALL be re-solved only when the plan reads it: nearest to the camera first, ahead of prefetch (STRM-042), with at most two of the chunk workers on stale chunks. The new version SHALL land as a second landing (STRM-052, STRM-053). No frame waits for it (CON-22).
 
 Verify: A
-Status: planned
+Status: active
 Source: m8-chunk-version, STRM-040, STRM-042, STRM-054
 
 #### Scenario: An edit over a drawn chunk

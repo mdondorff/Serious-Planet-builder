@@ -19,6 +19,28 @@ use std::sync::{Arc, Mutex};
 pub trait ChunkDisk: Send + Sync {
     fn get(&self, tile: TileId) -> Result<Option<Vec<u8>>, String>;
     fn put(&self, tile: TileId, bytes: Vec<u8>) -> Result<(), String>;
+    /// [`ChunkDisk::get`] of the chunk at `version` (GEN-082); a disk that keeps no versions has only the first (0).
+    fn get_versioned(&self, tile: TileId, version: u64) -> Result<Option<Vec<u8>>, String> {
+        if version == 0 {
+            self.get(tile)
+        } else {
+            Ok(None)
+        }
+    }
+    /// [`ChunkDisk::put`] of the chunk at `version`; a disk that keeps no versions stores only the first.
+    fn put_versioned(&self, tile: TileId, version: u64, bytes: Vec<u8>) -> Result<(), String> {
+        if version == 0 {
+            self.put(tile, bytes)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+/// The version a chunk should have now (GEN-082): the hash of the edits that can change it, 0 for none. A frame asks it for the wanted chunks; a
+/// ready chunk of another version is stale (STRM-056).
+pub trait ChunkVersions: Send + Sync {
+    fn version(&self, key: ChunkKey) -> u64;
 }
 
 impl ChunkDisk for PackChunkDisk {
@@ -28,11 +50,19 @@ impl ChunkDisk for PackChunkDisk {
     fn put(&self, tile: TileId, bytes: Vec<u8>) -> Result<(), String> {
         PackChunkDisk::put(self, tile, bytes)
     }
+    fn get_versioned(&self, tile: TileId, version: u64) -> Result<Option<Vec<u8>>, String> {
+        PackChunkDisk::get_versioned(self, tile, version)
+    }
+    fn put_versioned(&self, tile: TileId, version: u64, bytes: Vec<u8>) -> Result<(), String> {
+        PackChunkDisk::put_versioned(self, tile, version, bytes)
+    }
 }
 
 /// The knobs of the chunk jobs.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ChunkConfig {
+    /// Jobs on stale chunks (a ready chunk of an older version, STRM-056) running at once: the other workers stay free for new chunks.
+    pub stale_workers: usize,
     /// Jobs running at once (`chunk_workers`; the default of a viewer is half its worker pool, so tiles are not starved).
     pub workers: usize,
     /// A chunk not wanted for this long leaves RAM (`chunk_evict_s` 5, in milliseconds).
@@ -44,7 +74,7 @@ pub struct ChunkConfig {
 
 impl Default for ChunkConfig {
     fn default() -> Self {
-        ChunkConfig { workers: 3, evict_ms: 5_000, cap_bytes: 512 << 20 }
+        ChunkConfig { workers: 3, stale_workers: 2, evict_ms: 5_000, cap_bytes: 512 << 20 }
     }
 }
 
@@ -74,12 +104,16 @@ pub struct ChunkUpdate {
 struct Entry {
     result: Arc<ChunkResult>,
     last_wanted_ms: u64,
+    /// The version the result was made at (0: no edit reaches it).
+    version: u64,
 }
 
 #[derive(Default)]
 struct Shared {
     ready: HashMap<ChunkKey, Entry>,
     running: HashSet<ChunkKey>,
+    /// The running jobs that re-solve a ready chunk of an older version (a subset of `running`).
+    stale_running: HashSet<ChunkKey>,
     landed: Vec<ChunkKey>,
     stats: ChunkStats,
     log: Vec<String>,
@@ -95,6 +129,7 @@ pub struct ChunkManager {
     clock: Arc<dyn Clock>,
     disk: Option<Arc<dyn ChunkDisk>>,
     cfg: ChunkConfig,
+    versions: Option<Arc<dyn ChunkVersions>>,
     shared: Arc<Mutex<Shared>>,
 }
 
@@ -114,7 +149,14 @@ impl ChunkManager {
         disk: Option<Arc<dyn ChunkDisk>>,
         cfg: ChunkConfig,
     ) -> ChunkManager {
-        ChunkManager { lat, radius_m, top, stage, spawner, clock, disk, cfg, shared: Arc::default() }
+        ChunkManager { lat, radius_m, top, stage, spawner, clock, disk, cfg, versions: None, shared: Arc::default() }
+    }
+
+    /// The manager with a source of chunk versions (GEN-082): a ready chunk whose version differs from the source's is stale and is re-solved when
+    /// wanted (STRM-056), while its old result keeps drawing.
+    pub fn with_versions(mut self, versions: Arc<dyn ChunkVersions>) -> ChunkManager {
+        self.versions = Some(versions);
+        self
     }
 
     /// One frame: note which ready chunks are wanted, evict the ones that have not been for `evict_ms` (and the least recently wanted beyond
@@ -129,7 +171,13 @@ impl ChunkManager {
     pub fn update_with(&self, wanted: &[(ChunkKey, f64)], prefetch: &[ChunkKey]) -> ChunkUpdate {
         let now = self.clock.now_ms();
         let mut out = ChunkUpdate::default();
-        let to_start: Vec<ChunkKey> = {
+        // The version of every wanted chunk now, asked before the lock is taken (the source reads the world's definition).
+        let versions: HashMap<ChunkKey, u64> = match &self.versions {
+            Some(v) => wanted.iter().map(|w| w.0).chain(prefetch.iter().copied()).map(|k| (k, v.version(k))).collect(),
+            None => HashMap::new(),
+        };
+        let want_version = |k: &ChunkKey| versions.get(k).copied().unwrap_or(0);
+        let to_start: Vec<(ChunkKey, u64, bool)> = {
             let mut sh = self.shared.lock().expect("chunk state");
             for key in wanted.iter().map(|w| &w.0).chain(prefetch) {
                 if let Some(e) = sh.ready.get_mut(key) {
@@ -166,36 +214,56 @@ impl ChunkManager {
                 wanted.iter().filter(|(k, _)| !sh.ready.contains_key(k) && !sh.running.contains(k)).map(|&(k, d)| (d, k)).collect();
             candidates.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
             candidates.dedup_by_key(|c| c.1);
-            let mut chosen: Vec<ChunkKey> = candidates.into_iter().take(free).map(|(_, k)| k).collect();
+            let mut chosen: Vec<(ChunkKey, u64, bool)> =
+                candidates.into_iter().take(free).map(|(_, k)| (k, want_version(&k), false)).collect();
+            // Then the stale chunks the plan reads (STRM-056), nearest first, at most `stale_workers` at once: a chunk of an older version keeps
+            // drawing, so it waits behind the chunks that are missing, and the workers it does not use stay free for new chunks.
+            let stale_free = self.cfg.stale_workers.saturating_sub(sh.stale_running.len());
+            let mut stale: Vec<(f64, ChunkKey)> = wanted
+                .iter()
+                .filter(|(k, _)| sh.ready.get(k).is_some_and(|e| e.version != want_version(k)) && !sh.running.contains(k))
+                .map(|&(k, d)| (d, k))
+                .collect();
+            stale.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+            stale.dedup_by_key(|c| c.1);
+            for (_, k) in stale.into_iter().take(stale_free) {
+                if chosen.len() >= free {
+                    break;
+                }
+                chosen.push((k, want_version(&k), true));
+            }
             // What is left of the workers goes to the prefetch, in the order given (wanted chunks never wait for it).
             for k in prefetch {
                 if chosen.len() >= free {
                     break;
                 }
-                if !sh.ready.contains_key(k) && !sh.running.contains(k) && !chosen.contains(k) {
-                    chosen.push(*k);
+                if !sh.ready.contains_key(k) && !sh.running.contains(k) && !chosen.iter().any(|c| c.0 == *k) {
+                    chosen.push((*k, want_version(k), false));
                 }
             }
-            for k in &chosen {
+            for (k, _, stale) in &chosen {
                 sh.running.insert(*k);
+                if *stale {
+                    sh.stale_running.insert(*k);
+                }
             }
             chosen
         };
         out.started = to_start.len();
-        for key in to_start {
-            self.spawner.spawn(self.job(key));
+        for (key, version, _) in to_start {
+            self.spawner.spawn(self.job(key, version));
         }
         out
     }
 
-    fn job(&self, key: ChunkKey) -> crate::Job {
+    fn job(&self, key: ChunkKey, version: u64) -> crate::Job {
         let (lat, radius_m, top) = (self.lat, self.radius_m, self.top);
         let (stage, disk, clock, shared) = (self.stage.clone(), self.disk.clone(), self.clock.clone(), self.shared.clone());
         Box::new(move || {
             let tile = tile_of(key);
             let mut from_disk = None;
             if let Some(disk) = &disk {
-                match disk.get(tile) {
+                match disk.get_versioned(tile, version) {
                     Ok(Some(bytes)) => match ChunkResult::from_bytes(tile, &bytes) {
                         Some(r) => from_disk = Some(r),
                         None => {
@@ -218,7 +286,7 @@ impl ChunkManager {
                     let r =
                         compute_chunk(&lat, &*stage, radius_m, top, tile, halo_rings(&*stage)).expect("the stage's own halo is accepted");
                     if let Some(disk) = disk.as_ref().filter(|_| stage.healthy()) {
-                        if let Err(e) = disk.put(tile, r.to_bytes()) {
+                        if let Err(e) = disk.put_versioned(tile, version, r.to_bytes()) {
                             shared.lock().expect("chunk state").log.push(format!("chunk {key:?}: not stored ({e})"));
                         }
                     }
@@ -229,7 +297,8 @@ impl ChunkManager {
             let _ = result.hash();
             let mut sh = shared.lock().expect("chunk state");
             sh.running.remove(&key);
-            sh.ready.insert(key, Entry { result: Arc::new(result), last_wanted_ms: clock.now_ms() });
+            sh.stale_running.remove(&key);
+            sh.ready.insert(key, Entry { result: Arc::new(result), last_wanted_ms: clock.now_ms(), version });
             sh.landed.push(key);
             sh.stats.landed += 1;
             if hit {

@@ -238,3 +238,74 @@ fn a_result_of_a_stage_that_lost_its_source_lands_but_is_not_written_to_disk() {
     let tile = planet_core::TileId::new(planet_core::Face(2), planet_generators::chunk::CHUNK_GRID_LEVEL, 1000, 1000).unwrap();
     assert_eq!(disk.get(tile), Ok(None), "nothing was written for a later session to read");
 }
+
+/// A version source the test moves: the version of every chunk, as the edits stand.
+struct Versions(std::sync::atomic::AtomicU64);
+
+impl planet_streaming::chunks::ChunkVersions for Versions {
+    fn version(&self, _key: ChunkKey) -> u64 {
+        self.0.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+// spec: STRM-056
+#[test]
+fn a_stale_chunk_keeps_drawing_is_re_solved_only_when_wanted_after_the_missing_ones_and_with_at_most_two_workers() {
+    let (spawner, clock) = (Arc::new(ManualSpawner::default()), Arc::new(FakeClock::default()));
+    let v = Arc::new(Versions(0.into()));
+    let cfg = ChunkConfig { workers: 3, stale_workers: 2, ..ChunkConfig::default() };
+    let m = manager(spawner.clone(), clock, None, cfg).with_versions(v.clone());
+    let keys: Vec<(ChunkKey, f64)> = (0..4).map(|x| (key(x, 0), 100.0 * f64::from(x) + 100.0)).collect();
+    m.update(&keys);
+    spawner.run(3);
+    m.update(&keys);
+    spawner.run(1);
+    m.update(&keys);
+    assert_eq!(m.stats().landed, 4);
+    let before = m.snapshot();
+    // An edit: every chunk is now at version 9. Nothing is dropped, and a chunk nobody wants is not re-solved.
+    v.0.store(9, std::sync::atomic::Ordering::SeqCst);
+    let up = m.update(&keys[..1]);
+    assert!(up.landed.is_empty() && up.evicted.is_empty());
+    assert_eq!(up.started, 1, "the one wanted stale chunk is re-solved, the others are not wanted");
+    assert_eq!(m.snapshot().len(), 4, "the old results keep drawing while the new one is made");
+    assert!(Arc::ptr_eq(&m.snapshot()[0], &before[0]), "the old result is still the one drawn");
+    // Four wanted at once: at most two stale jobs run, nearest first, and a new (missing) chunk still gets a worker.
+    let want_all: Vec<(ChunkKey, f64)> = keys.iter().copied().chain([(key(9, 9), 5000.0)]).collect();
+    spawner.run(1);
+    let up = m.update(&want_all);
+    assert_eq!(up.landed, vec![key(0, 0)], "the re-solved chunk lands as a second landing");
+    assert_eq!(up.started, 3, "the missing chunk first, then two stale ones (at most `stale_workers` stale jobs)");
+    assert_eq!(m.in_flight(), 3);
+    // Once they land, the next stale chunk is taken, and an unchanged version starts nothing.
+    spawner.run(3);
+    let up = m.update(&want_all);
+    assert_eq!(up.landed.len(), 3);
+    spawner.run(2);
+    m.update(&want_all);
+    assert_eq!(m.update(&want_all).started, 0, "every chunk is at the current version");
+}
+
+// spec: GEN-082
+#[test]
+fn the_disk_keeps_a_chunk_per_version_and_the_first_version_keeps_the_key_it_always_had() {
+    let spec = ChunkSpec {
+        body: BodyId::PLANET,
+        seed: 7,
+        radius_m: R,
+        definition: planet_generators::chunkfield::ChunkStage::definition_hash(&stage()),
+        cells_per_chunk: 16,
+        top_level: PYRAMID_TOP_LEVEL,
+        base: [0; 16],
+    };
+    let tile = planet_core::TileId::new(planet_core::Face(2), planet_generators::chunk::CHUNK_GRID_LEVEL, 1000, 1000).unwrap();
+    assert_eq!(spec.key_versioned(tile, 0), spec.key(tile), "version 0 is the key of every chunk stored before versions");
+    assert_ne!(spec.key_versioned(tile, 5), spec.key(tile));
+    assert_ne!(spec.key_versioned(tile, 5), spec.key_versioned(tile, 6));
+    let d = dir("versions");
+    let disk = PackChunkDisk::new(d, spec);
+    disk.put_versioned(tile, 5, vec![1, 2, 3]).unwrap();
+    assert_eq!(disk.get_versioned(tile, 5).unwrap(), Some(vec![1, 2, 3]));
+    assert_eq!(disk.get_versioned(tile, 6).unwrap(), None, "another version is a miss");
+    assert_eq!(disk.get(tile).unwrap(), None, "so is the first");
+}
