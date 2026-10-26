@@ -504,12 +504,12 @@ type Confluence = (Vec<(usize, usize)>, f64);
 /// lower where it lies under the ground): the channel (`bankfull_m`: a depth `d` under the valley floor at the axis, the parabola `d (1 - (2x / w)^2)`
 /// across the width `w`), the valley floor at the bed out to half the floor width, and the valley sides rising at the side slope up to the ground. The corridor
 /// cells themselves are lowered to the channel floor (`bed - d`), so the axis is the lowest point of the cross-section. The sources are taken in four tiers
-/// by reach (80 m, 400 m, 1.2 km, more), each tier relaxed on its own with the nearest source of the tier, and a cell takes the lowest profile of the tiers:
+/// by reach (80 m, 400 m, 1.2 km, more), each tier relaxed on its own, a cell owned by the nearest source of the tier that the relaxation reaches (the distance is Euclidean to the owner, GEN-060), and a cell takes the lowest profile of the tiers:
 /// the valley of a great river is not walled in by the narrower valley of a tributary that is nearer. A band cell is fixed like a corridor cell (its height
 /// is `anchor_z`). The reach is `band_cap_m` at most (0 paints nothing): a core cell reads sources within that distance only, so the halo must hold
 /// `band_cap_m / cell`, the drainage-area window and the settle's reach (`ANetParams::spike` derives the cap from the halo).
 #[allow(clippy::too_many_arguments)]
-fn paint_band(
+pub fn paint_band(
     corridor: &[bool],
     area: &[f64],
     relief: &[f64],
@@ -570,7 +570,9 @@ fn paint_band(
                     if q >= len {
                         continue;
                     }
-                    let d = best[c] + (dirs[c] - dirs[q]).length() * radius_m;
+                    // The distance from `q` to the owner's source itself (a vector distance transform): summing edge lengths over the 8-neighbour graph
+                    // is off by up to 8 % and unevenly cell to cell, which ripples a wall that runs off the grid axes.
+                    let d = (dirs[q] - dirs[sources[src]]).length() * radius_m;
                     if d > reach || corridor[q] {
                         continue;
                     }
@@ -1549,7 +1551,7 @@ impl crate::chunkfield::ChunkStage for ANet {
 }
 
 /// Version of the stage's algorithm: part of its definition hash, so a change that changes results re-keys every chunk.
-pub const ANET_VERSION: u32 = 8;
+pub const ANET_VERSION: u32 = 9;
 
 /// The change of height each cell takes in one pass of thermal slumping (GEN-051): a cell steeper than `talus` over a neighbour gives that
 /// neighbour `rate x (slope - talus) x distance`. `dist[c][k]` is the distance to the `k`-th neighbour of `c` (the order of the region's neighbour
