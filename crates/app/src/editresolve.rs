@@ -1,5 +1,5 @@
 //! `generate --edit-resolve DIR` (M8-7, criterion 6): the first measurement of an edit over chunks, repeatable and without a window. Opens the
-//! stored world in `DIR`, lands the chunks under a camera at `--site`, then for every radius of `--radii-m` puts a hill of that reach at the
+//! stored world in `DIR` read-only (the chunks are computed in memory and nothing is written beside it), lands the chunks under a camera at `--site`, then for every radius of `--radii-m` puts a hill of that reach at the
 //! site, counts how many chunks are re-solved and how long they take on the real thread pool, takes the hill away and settles. Never a perf
 //! measurement (`cargo xtask perf` is the architect's); a recorded reading with the machine's load as it was.
 
@@ -74,13 +74,18 @@ pub fn edit_resolve(o: &crate::Options, out: &mut dyn Write) -> Result<(), Strin
     let world = Arc::new(WorldTerrain::open_store(def, dir, o.global_res)?);
     let pool = Arc::new(ThreadPool::new(workers));
     let cfg = ChunkConfig { workers, ..ChunkConfig::default() };
-    if !world.enable_anet_from_store(crate::anetworld::ANET_CELL_M, pool, Arc::new(SystemClock::new()), cfg)? {
+    if !world.enable_anet_from_store_with(crate::anetworld::ANET_CELL_M, pool, Arc::new(SystemClock::new()), cfg, false)? {
         return Err("the store holds no coupled run: make it first (the viewer or `test-render --scene coupled`)".into());
     }
     let site = Vec3::from_lat_lon(lat.to_radians(), lon.to_radians());
     let camera = PlanetFixed(site * world.radius_m());
     let tiles = tiles_at(site);
-    writeln!(out, "edit-resolve: site {lat}, {lon}; {} tiles; {workers} chunk workers", tiles.len()).map_err(err)?;
+    writeln!(
+        out,
+        "edit-resolve: site {lat}, {lon}; {} tiles; {workers} chunk workers; store read-only: chunks computed in memory, nothing written",
+        tiles.len()
+    )
+    .map_err(err)?;
     let (t, n) = settle(&world, &tiles, camera)?;
     writeln!(
         out,
