@@ -752,7 +752,7 @@ impl BaseDetail for Bumped {
     }
 }
 
-// spec: GEN-079
+// spec: GEN-081
 #[test]
 fn an_item_outside_the_read_set_changes_no_bit_of_a_chunk_and_one_inside_does() {
     use planet_generators::anet::chunk_read_set;

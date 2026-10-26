@@ -683,7 +683,7 @@ pub struct ReadDisc {
     pub angle: f64,
 }
 
-/// The read set of a chunk (GEN-079): discs outside which no item can change the chunk's bits. A function of the region, the global run and the law
+/// The read set of a chunk (GEN-081): discs outside which no item can change the chunk's bits. A function of the region, the global run and the law
 /// only, built from the coarse guides and their bands, never from routed paths or items.
 /// - The region: one disc round its centre holding every cell.
 /// - The network: the segments the region reads and the pruning keeps (GEN-078), each with the chain upstream of it along the main stem up to
