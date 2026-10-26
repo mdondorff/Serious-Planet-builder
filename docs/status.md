@@ -5,8 +5,7 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 ## Waiting for the owner
 - **D3 confirmed (owner, 2026-10-26):** both orders are wanted eventually; M8-7 builds edits under the erosion first (option 2: the edit shows at once, its eroded result follows within 10 s); edits on top (finishing touches) stay a per-layer setting for later. Cost per stamp or brush stroke is M8-7's first measurement.
 - **M8 GO:** decisions D1 to D7 taken (owner, 2026-10-23; `docs/briefings/m8-plan.md`); everything up to M8-6 is independent of D3; the lanes start on the owner's GO.
-- **ADR 0080 and ADR 0082: acceptance** (proposed; both built before acceptance as easy to reverse): 0080 the hill band, landform creases and the run (point 4 amended: erosion off, input plus fill, GEN-065); 0082 the coarse node slides instead of the border crossing (amends 0081 point 1; #692).
-- **ADR 0083 runtime compute budgets: acceptance** (proposed, from SPIKE-44): frame shares at 1440p/60 fps with reserves, one job system with core budgets and priority classes, memory shares; numbers in a spec after acceptance.
+- **ADR 0080: held until SPIKE-45 (owner, 2026-10-26):** point 4 (the run without erosion: input plus fill) waits for the cause of step 1 raising 4.24M land cells by over 1 m; then accept as written, or turn erosion on in M8 with a fix. ADR 0082 and 0083 accepted (owner, 2026-10-26); 0083's share table is a spec to write.
 - **Optional, when convenient:** the M6 retest list (`docs/archive/M6/briefings/m6-owner-test-plan.md`, "Retest"); a live check of the flickers (Tracked).
 - **At the laptop (postponed):** the NVIDIA driver update (591.86; device losses under parallel GPU load, Tracked); excluding the repo's `target` folders from Windows Search indexing.
 

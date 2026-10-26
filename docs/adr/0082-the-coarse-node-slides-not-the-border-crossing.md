@@ -1,5 +1,5 @@
 # 0082 The coarse node slides, not the border crossing
-Status: proposed (drafted by opus-planner, 2026-10-25; built in #692 before acceptance, easy to reverse)
+Status: accepted (owner, 2026-10-26; drafted by opus-planner; built in #692 before acceptance)
 Date: 2026-10-25
 Source: #692 (sonnet-explorer); ADR 0081 point 1; GEN-066, GEN-067
 

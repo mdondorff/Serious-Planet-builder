@@ -1,5 +1,5 @@
 # 0083 Runtime compute budgets
-Status: proposed (drafted by opus-planner, 2026-10-26; owner's targets 2026-10-26)
+Status: accepted (owner, 2026-10-26; drafted by opus-planner; owner's targets 2026-10-26)
 Date: 2026-10-26
 Source: owner, 2026-10-26 (1440p at 60 fps on Rasierklinge; weaker machines degrade later); SPIKE-44 (`spikes/compute-inventory/results/results.md`, #737, #738)
 
