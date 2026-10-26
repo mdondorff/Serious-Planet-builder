@@ -368,6 +368,54 @@ pub const LONG_STATEMENTS: &str = include_str!("long_statements.txt");
 /// The entries `long_statements.txt` started with; it never holds more.
 pub const LONG_STATEMENTS_MAX_ENTRIES: usize = 191;
 
+/// The requirements that carry a `#### Detail` block (the archive sweep of 2026-10-26 moved the sentences of long statements there; BUILD-027),
+/// one `ID` line each (`detail_blocks.txt`). The list only shrinks: a line is deleted when its requirement is split or shortened.
+pub const DETAIL_BLOCKS: &str = include_str!("detail_blocks.txt");
+
+/// The entries `detail_blocks.txt` started with; it never holds more.
+pub const DETAIL_BLOCKS_MAX_ENTRIES: usize = 10;
+
+/// BUILD-027: one error per requirement with a `#### Detail` block that is not in `listed`, per listed ID whose requirement has none, and when
+/// the list holds more than [`DETAIL_BLOCKS_MAX_ENTRIES`]. `specs` are the main specs by name.
+pub fn detail_block_errors(specs: &BTreeMap<String, String>, listed: &str) -> Vec<String> {
+    let listed: BTreeSet<&str> = listed.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let mut errors = Vec::new();
+    if listed.len() > DETAIL_BLOCKS_MAX_ENTRIES {
+        errors.push(format!(
+            "detail_blocks.txt lists {} requirements, over the {DETAIL_BLOCKS_MAX_ENTRIES} it started with (BUILD-027): the list only shrinks",
+            listed.len()
+        ));
+    }
+    let mut with_block: BTreeSet<String> = BTreeSet::new();
+    for (spec, text) in specs {
+        let mut current: Option<String> = None;
+        let mut removed = false;
+        for line in text.lines() {
+            if let Some(h) = line.strip_prefix("## ") {
+                removed = h.trim_start().starts_with("REMOVED");
+            }
+            if let Some(rest) = line.strip_prefix("### Requirement:") {
+                current = (!removed).then(|| rest.split_whitespace().next().unwrap_or("").to_string());
+            } else if line.trim() == "#### Detail" {
+                if let Some(id) = &current {
+                    with_block.insert(id.clone());
+                    if !listed.contains(id.as_str()) {
+                        errors.push(format!(
+                            "{id} ({spec}): a `#### Detail` block moves requirement text out of the statement (BUILD-027): split the requirement into short ones or shorten it"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    for id in &listed {
+        if !with_block.contains(*id) {
+            errors.push(format!("{id}: listed in detail_blocks.txt but has no `#### Detail` block (BUILD-027): delete its line"));
+        }
+    }
+    errors
+}
+
 /// First-person words a statement does not use (ADR 0055 point 4: no "we", no "I").
 const FIRST_PERSON: [&str; 4] = ["we", "I", "our", "my"];
 
@@ -638,6 +686,10 @@ pub fn run(root: &Path) -> Res {
     report.errors.extend(style_errors(
         &specs.iter().filter(|(n, _)| !n.starts_with("change:")).map(|(n, t)| (n.clone(), t.clone())).collect(),
         LONG_STATEMENTS,
+    ));
+    report.errors.extend(detail_block_errors(
+        &specs.iter().filter(|(n, _)| !n.starts_with("change:")).map(|(n, t)| (n.clone(), t.clone())).collect(),
+        DETAIL_BLOCKS,
     ));
     // BUILD-009: tracked files only (git is on every CI runner).
     let tracked = capture(root, "git", &["ls-files", "-z"])?;
@@ -1288,5 +1340,27 @@ struct S;
         assert!(
             style("## REMOVED Requirements\n### Requirement: COORD-009 Old\nWe removed it, and I agree: word word word.\n", "").is_empty()
         );
+    }
+
+    // spec: BUILD-027
+    #[test]
+    fn a_detail_block_fails_unless_its_requirement_is_listed_and_the_list_only_shrinks() {
+        let with_detail = |id: &str| {
+            format!("### Requirement: {id} Name\nThe system SHALL work.\n\nVerify: A\nStatus: active\nSource: CON-01\n\n#### Detail\nMore.\n\n#### Scenario: S\n- **WHEN** a\n")
+        };
+        let run = |text: &str, listed: &str| detail_block_errors(&BTreeMap::from([("coordinates".to_string(), text.to_string())]), listed);
+        // A block of an unlisted requirement fails, a listed one passes.
+        let e = run(&with_detail("COORD-001"), "");
+        assert!(e.len() == 1 && e[0].starts_with("COORD-001 (coordinates)") && e[0].contains("BUILD-027"), "{e:?}");
+        assert!(run(&with_detail("COORD-001"), "COORD-001\n").is_empty());
+        // Another ID is not covered by the entry, and the entry of a requirement without a block must go.
+        assert!(run(&with_detail("COORD-002"), "COORD-001\n").iter().any(|m| m.starts_with("COORD-002 (coordinates)")));
+        let e = run(&req("COORD-001", "The system SHALL work."), "COORD-001\n");
+        assert!(e.len() == 1 && e[0].contains("delete its line"), "{e:?}");
+        // A removed requirement is not read; the list never holds more than it started with.
+        assert!(run(&format!("## REMOVED Requirements\n{}", with_detail("COORD-009")), "").is_empty());
+        let many: String = (0..=DETAIL_BLOCKS_MAX_ENTRIES).map(|k| format!("X-{k:03}\n")).collect();
+        assert!(run("", &many).iter().any(|m| m.contains("the list only shrinks")));
+        assert!(DETAIL_BLOCKS.lines().count() <= DETAIL_BLOCKS_MAX_ENTRIES);
     }
 }

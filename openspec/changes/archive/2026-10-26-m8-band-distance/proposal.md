@@ -9,7 +9,7 @@ Cause: `paint_band` takes the wall height `bed + side (x - half_floor)` from `x`
 - `paint_band` is `pub` so that its test builds a corridor of its own.
 
 ## Impact
-- Spec: generator-pipeline GEN-060 (one sentence and one scenario).
+- Spec: generator-pipeline GEN-083 (new; GEN-060's statement is at its word limit).
 - Code: `generators/anet.rs`; test `anet_incision.rs::the_valley_walls_rise_evenly_cell_to_cell_on_a_corridor_off_the_grid_axes`.
 - Real site (river-r1 chunk, solved raster dump): the alternation is gone.
 - The owner of a cell is the graph's source, not always the true nearest; the vector distance has the small errors of any vector transform near the ridge between two owners. The scallop between two points of the corridor remains the limit; a distance to the corridor's segments is the next step if the look review asks.

@@ -504,7 +504,7 @@ type Confluence = (Vec<(usize, usize)>, f64);
 /// lower where it lies under the ground): the channel (`bankfull_m`: a depth `d` under the valley floor at the axis, the parabola `d (1 - (2x / w)^2)`
 /// across the width `w`), the valley floor at the bed out to half the floor width, and the valley sides rising at the side slope up to the ground. The corridor
 /// cells themselves are lowered to the channel floor (`bed - d`), so the axis is the lowest point of the cross-section. The sources are taken in four tiers
-/// by reach (80 m, 400 m, 1.2 km, more), each tier relaxed on its own, a cell owned by the nearest source of the tier that the relaxation reaches (the distance is Euclidean to the owner, GEN-060), and a cell takes the lowest profile of the tiers:
+/// by reach (80 m, 400 m, 1.2 km, more), each tier relaxed on its own, a cell owned by the nearest source of the tier that the relaxation reaches (the distance is Euclidean to the owner, GEN-083), and a cell takes the lowest profile of the tiers:
 /// the valley of a great river is not walled in by the narrower valley of a tributary that is nearer. A band cell is fixed like a corridor cell (its height
 /// is `anchor_z`). The reach is `band_cap_m` at most (0 paints nothing): a core cell reads sources within that distance only, so the halo must hold
 /// `band_cap_m / cell`, the drainage-area window and the settle's reach (`ANetParams::spike` derives the cap from the halo).
