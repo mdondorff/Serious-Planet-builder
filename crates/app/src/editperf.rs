@@ -410,6 +410,23 @@ pub struct Stages {
     pub coalesced: u64,
     pub cancelled: u64,
     pub dropped: u64,
+    /// The chunk side of the edit (a run with the chunk stage): `None` without one.
+    pub chunks: Option<ChunkStages>,
+}
+
+/// What the chunk stage did after an edit (M8-7, criterion 6), in milliseconds from `set_definition`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ChunkStages {
+    /// The longest `chunk_frame` call of the frames up to the exact one: what the versions of the wanted chunks cost on the first frames
+    /// after the edit (a duration).
+    pub first_frame_ms: f64,
+    /// Chunks that landed again after the edit, and when the one under the edit centre and the last one did (`None`: none did).
+    pub resolved: u64,
+    pub centre_ms: Option<f64>,
+    pub last_ms: Option<f64>,
+    /// When the tiles that read the last chunk were drawn again (the plan exact and nothing waiting), which is when the eroded result of
+    /// every touched chunk the view wants is on the screen (the refreshed tiles are drawn at once; the fade over about 1.5 s follows).
+    pub drawn_ms: Option<f64>,
 }
 
 /// What a case edits: a hill stamp, or a brush stroke (TEST-042).
@@ -560,6 +577,13 @@ struct Harness<'a> {
     settle_limit: Duration,
     /// The refresh settle window of the run (ADR 0072), for the report.
     settle_ms: u64,
+    /// The world with a chunk stage the frames drive (`chunk_frame`, the landings into the managed loop), as the viewer does.
+    chunk_world: Option<Arc<WorldTerrain>>,
+    /// Whether the stale chunks wait for the edit's tiles (`ChunkManager::hold_stale`, the viewer's behaviour); `--no-stale-hold` runs without.
+    stale_hold: bool,
+    /// The chunks that landed in the frames since the log was last taken, with the instant, and the time of the slowest `chunk_frame` call.
+    landed_log: Vec<(Instant, planet_generators::chunkfield::ChunkKey)>,
+    chunk_frame_max_ms: f64,
 }
 
 impl Harness<'_> {
@@ -569,6 +593,21 @@ impl Harness<'_> {
         let ctx = self.ctx;
         let rig = &mut self.rig;
         let frame = rig.managed.begin_frame_strict(req, &mut RendererSink { ctx, renderer: &mut rig.renderer })?;
+        if let Some(world) = &self.chunk_world {
+            // The chunks the plan's tiles read: the version of every wanted chunk is asked, the stale and the missing ones are solved, the
+            // landed ones refresh the tiles that read them (the viewer's frame, STRM-040, STRM-056).
+            let tiles: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
+            world.hold_stale_chunks(
+                self.stale_hold && (!rig.managed.pending().is_empty() || rig.managed.manager().streamer().unfinished_jobs() > 0),
+            );
+            let call = Instant::now();
+            let update = world.chunk_frame(&tiles, req.camera.position, &[]);
+            self.chunk_frame_max_ms = self.chunk_frame_max_ms.max(call.elapsed().as_secs_f64() * 1000.0);
+            let now = Instant::now();
+            self.landed_log.extend(update.landed.iter().map(|k| (now, *k)));
+            rig.managed.chunk_landed(&update.landed);
+            rig.managed.chunk_evicted(&update.evicted);
+        }
         rig.fi.retire_to(rig.renderer.retired_frames(ctx));
         while rig.fi.is_full() {
             rig.fi.note_wait();
@@ -584,6 +623,27 @@ impl Harness<'_> {
     /// Whether nothing is left to do: the plan is the exact one, nothing generates, nothing waits for an upload.
     fn idle(&self, frame: &planet_frame::managed::ManagedFrame) -> bool {
         crate::editwin::exact_and_idle(&self.rig.managed, frame)
+    }
+
+    /// Frames with the camera still until the chunks the view wants are all landed and nothing is in flight for `calm` frames, then the
+    /// tiles that read them are drawn and idle (a no-op without a chunk stage).
+    fn settle_chunks(&mut self, req: &TerrainRequest, calm: usize) -> Result<(), String> {
+        let Some(manager) = self.chunk_world.as_ref().and_then(|w| w.chunk_manager()) else { return Ok(()) };
+        let started = Instant::now();
+        let mut quiet = 0;
+        loop {
+            let frame = self.step(req)?;
+            let busy = manager.in_flight() > 0 || !self.idle(&frame);
+            quiet = if busy { 0 } else { quiet + 1 };
+            if quiet >= calm {
+                self.landed_log.clear();
+                return Ok(());
+            }
+            if started.elapsed() > Duration::from_secs(600) {
+                return Err("the chunks did not settle in 600 s".into());
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
     }
 
     /// Frames with the camera still until `calm` consecutive idle frames.
@@ -688,6 +748,8 @@ fn run_once(
     out.stages.preview_call_ms = ms(call);
     let mut waiting_for_exact = false;
     let mut frame_ms: Vec<f64> = Vec::new();
+    h.landed_log.clear();
+    h.chunk_frame_max_ms = 0.0;
     loop {
         let frame_started = Instant::now();
         let frame = h.step(req)?;
@@ -760,12 +822,89 @@ fn run_once(
         }
         std::thread::sleep(Duration::from_millis(1));
     }
+    // With a chunk stage the plan is not exact until the stale chunks have landed (the tiles' keys follow the chunks), so the frame DrawKind::Exact
+    // waits for the eroded result: the M6 budget reads the instant every tile the edit names was refreshed and written (what the editor shows of the
+    // edit itself), and the chunk table below carries the eroded result (TEST-056).
+    if h.chunk_world.is_some() {
+        out.stages.drawn_exact_ms = out.stages.uploaded_ms;
+    }
+    // The chunk side: the chunks the edit made stale are solved again while the frames go on; the eroded result is on the screen when the
+    // tiles that read the last of them are drawn (M8-7, criterion 6).
+    if let Some(manager) = h.chunk_world.as_ref().and_then(|w| w.chunk_manager()) {
+        let first_frame_ms = h.chunk_frame_max_ms;
+        let limit = Duration::from_secs(120);
+        let mut quiet = 0;
+        let mut drawn_after_last: Option<f64> = None;
+        loop {
+            let frame = h.step(req)?;
+            let busy = manager.in_flight() > 0 || !h.idle(&frame);
+            if !busy {
+                quiet += 1;
+                if drawn_after_last.is_none() {
+                    drawn_after_last = Some(ms(sampler_started));
+                }
+            } else {
+                quiet = 0;
+                drawn_after_last = None;
+            }
+            if quiet >= 3 || sampler_started.elapsed() > limit + Duration::from_secs(60) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let centre = world_centre_chunk(stamp);
+        let at = |t: Instant| t.duration_since(sampler_started).as_secs_f64() * 1000.0;
+        out.stages.chunks = Some(ChunkStages {
+            first_frame_ms,
+            resolved: h.landed_log.len() as u64,
+            centre_ms: h.landed_log.iter().find(|l| l.1 == centre).map(|l| at(l.0)),
+            last_ms: h.landed_log.last().map(|l| at(l.0)),
+            drawn_ms: if h.landed_log.is_empty() { None } else { drawn_after_last },
+        });
+    }
     // Take the edit back: the old definition, the same tiles refreshed, no preview, settled.
     world.set_definition(before_def)?;
     h.rig.managed.edit(&tiles);
     h.rig.managed.set_preview(Vec::new());
     h.settle(req, 20)?;
+    h.settle_chunks(req, 20)?;
     Ok(out)
+}
+
+/// The chunk under the centre of the edit (the item's anchor).
+fn world_centre_chunk(stamp: &ItemSpec) -> planet_generators::chunkfield::ChunkKey {
+    let t = TileId::from_direction(&TangentWarp, stamp.dir, planet_generators::chunk::CHUNK_GRID_LEVEL);
+    (t.face().0, t.x(), t.y())
+}
+
+/// The table of the chunk side of every case (a run with the chunk stage): per case the medians over its repeats.
+pub fn chunks_table(rows: &[CaseRow]) -> String {
+    let mut s = String::from(
+        "| altitude | stamp radius | first chunk frame ms (versions) | chunks re-solved | centre chunk landed ms | last chunk landed ms | drawn again ms | verdict (10 s) |\n|---|---|---|---|---|---|---|---|\n",
+    );
+    let cell = |v: Option<f64>| v.map_or("-".to_string(), |x| format!("{x:.1}"));
+    for r in rows {
+        let pick =
+            |f: &dyn Fn(&ChunkStages) -> Option<f64>| median(r.runs.iter().filter_map(|x| x.stages.chunks.as_ref().and_then(f)).collect());
+        let drawn = pick(&|c| c.drawn_ms);
+        let verdict = match drawn {
+            None => "-",
+            Some(d) if d <= 10_000.0 => "ok",
+            Some(_) => "over",
+        };
+        s += &format!(
+            "| {} m | {} | {} | {} | {} | {} | {} | {} |\n",
+            r.altitude_m,
+            r.radius_label(),
+            cell(pick(&|c| Some(c.first_frame_ms))),
+            cell(pick(&|c| Some(c.resolved as f64))),
+            cell(pick(&|c| c.centre_ms)),
+            cell(pick(&|c| c.last_ms)),
+            cell(drawn),
+            verdict
+        );
+    }
+    s
 }
 
 /// One case of the scene: what is edited, how big it is (the radius, the length or the side), where the camera looks, and the item that
@@ -875,6 +1014,12 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
         planet_perf::check_reference_adapter(&crate::facts(ctx)).map_err(|r| r.to_string())?;
         crate::readiness_gate(o, ctx, out)?;
     }
+    // The chunk stage on the M8 default (Under, versions, stale marking): with a store and not smoke, unless `--no-chunks` asks for the comparison.
+    let with_chunks = !smoke && !o.no_chunks && o.store.is_some() && !o.allow_memory_bake;
+    if with_chunks {
+        // The viewer's own pools and chunk configuration, with its horizon jobs (the shared stage of `anetworld::viewer_chunk_stage`), no disk cache.
+        crate::chunkstage::enable_viewer_stage(&world, o.gen_workers(), true, false, out)?;
+    }
     let size = if smoke { (768u32, 432u32) } else { (2560u32, 1440u32) };
     let tau = o.tau;
     let field = world.field()?;
@@ -940,6 +1085,9 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
         let rho = (1.5 * first.size_m).max(altitude);
         let first_req = req_of(camera_for(first.centre, &ground, radius_m, rho, altitude, aspect));
         let mut rig = Rig::new(ctx, &world, &first_req, o.gen_workers())?;
+        if with_chunks {
+            rig.managed.set_chunk_view(world.chunk_view());
+        }
         // The editor's refresh settle window, or the one the run names (ADR 0072): a run at 0 and a run at 40 show its share of a case.
         rig.managed.set_refresh_settle(o.settle_ms);
         let mut h = Harness {
@@ -949,6 +1097,10 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
             drawn: HashSet::new(),
             settle_limit: if smoke { Duration::from_secs(120) } else { SETTLE_LIMIT },
             settle_ms: o.settle_ms,
+            chunk_world: with_chunks.then(|| Arc::clone(&world)),
+            stale_hold: !o.no_stale_hold,
+            landed_log: Vec::new(),
+            chunk_frame_max_ms: 0.0,
         };
         for case in &cases {
             let rho = (1.5 * case.size_m).max(altitude);
@@ -965,6 +1117,7 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
             }
             // A smoke run needs the frames to be exact once, not a long calm: every frame is slow on the software adapter.
             let settle = h.settle(&req, if smoke { 3 } else { 20 })?;
+            h.settle_chunks(&req, if smoke { 3 } else { 20 })?;
             writeln!(out, "  altitude {altitude} m, {}: settled in {settle:.1} s", case.name).map_err(err)?;
             let mut runs = Vec::new();
             for _ in 0..repeats {
@@ -986,6 +1139,12 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
     let table = table(&rows);
     let stages = stages_table(&rows);
     let levels = levels_table(&rows);
+    let chunks = if with_chunks {
+        format!("\nthe chunk side of every case (ms from set_definition; the chunk stage on the M8 default, the first frame is a duration):\n\n{}", chunks_table(&rows))
+    } else {
+        String::from("\n(no chunk stage in this run: the comparison line, or a smoke or memory-bake run)\n")
+    };
+    writeln!(out, "{chunks}").map_err(err)?;
     writeln!(out, "\n{table}\nstages (ms from set_definition; the calls and the frame median are durations):\n\n{stages}").map_err(err)?;
     writeln!(out, "\nthe refreshed set by level (first run of each case):\n\n{levels}").map_err(err)?;
     let cost = preview_cost_table(&costs);
@@ -996,7 +1155,7 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
     )
     .map_err(err)?;
     if let Some(dir) = &o.out {
-        let path = write_report(dir, &format!("{table}\n{stages}\n{levels}\n{cost}"))?;
+        let path = write_report(dir, &format!("{table}\n{stages}\n{levels}\n{chunks}\n{cost}"))?;
         writeln!(out, "table written to {}", path.display()).map_err(err)?;
     }
     if smoke && rows.iter().any(|r| r.runs.iter().any(|x| x.exact_ms.is_none())) {
@@ -1037,6 +1196,40 @@ mod tests {
             let mut def = WorldDefinition::single_planet(R, 7);
             def.put_item_spec(BodyId::PLANET, spec).unwrap_or_else(|e| panic!("radius {radius}: {e:?}"));
         }
+    }
+
+    // spec: TEST-056
+    #[test]
+    fn the_chunks_table_gives_the_medians_of_the_chunk_side_per_case_and_the_ten_second_verdict() {
+        let run = |drawn: Option<f64>, resolved: u64| CaseRun {
+            stages: Stages {
+                chunks: Some(ChunkStages {
+                    first_frame_ms: 3.5,
+                    resolved,
+                    centre_ms: Some(4_800.0),
+                    last_ms: Some(8_800.0),
+                    drawn_ms: drawn,
+                }),
+                ..Stages::default()
+            },
+            ..CaseRun::default()
+        };
+        let rows = vec![
+            CaseRow {
+                kind: CaseKind::Stamp,
+                altitude_m: 200.0,
+                radius_m: 2_000.0,
+                runs: vec![run(Some(9_000.0), 4), run(Some(9_500.0), 4), run(Some(30_000.0), 4)],
+            },
+            CaseRow { kind: CaseKind::Stamp, altitude_m: 200.0, radius_m: 5_000.0, runs: vec![run(Some(14_000.0), 4)] },
+            CaseRow { kind: CaseKind::Stamp, altitude_m: 2_000.0, radius_m: 50.0, runs: vec![CaseRun::default()] },
+        ];
+        let t = chunks_table(&rows);
+        let lines: Vec<&str> = t.lines().collect();
+        assert!(lines[0].contains("first chunk frame ms") && lines[0].contains("verdict (10 s)"), "{t}");
+        assert!(lines[2].contains("| 3.5 | 4.0 | 4800.0 | 8800.0 | 9500.0 | ok |"), "the median of three runs: {}", lines[2]);
+        assert!(lines[3].contains("| 14000.0 | over |"), "{}", lines[3]);
+        assert!(lines[4].ends_with("| - | - | - | - | - | - |"), "a case without a chunk stage has no cells: {}", lines[4]);
     }
 
     // spec: TEST-044

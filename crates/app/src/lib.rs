@@ -159,6 +159,10 @@ pub struct Options {
     pub stale_workers: Option<usize>,
     /// `--base-threads N`: the threads a batch of base heights of the A-net uses in the `--edit-resolve` measurement (default 4).
     pub base_threads: Option<usize>,
+    /// `--no-chunks`: the `edit-latency` scene without the chunk stage (the comparison line of M8-8); with a store it runs with one.
+    pub no_chunks: bool,
+    /// `--no-stale-hold`: the `edit-latency` scene's chunk stage without the hold of the stale chunks while the edit's tiles are built (STRM-056).
+    pub no_stale_hold: bool,
     /// `generate --coupled-run DIR`: make (or find) the coupled run of the bake stored in `DIR` (STRM-051).
     pub coupled_run: Option<PathBuf>,
     /// `generate`: write the coarse tiles (levels `F..=--prefill-levels`, F the render floor) into the pack of the stored bake in this directory (STRM-021).
@@ -324,6 +328,8 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         altitudes_m: None,
         stale_workers: None,
         base_threads: None,
+        no_chunks: false,
+        no_stale_hold: false,
         coupled_run: None,
         prefill_dir: None,
         prefill_levels: None,
@@ -467,6 +473,8 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
                 o.stale_workers =
                     Some(it.next().ok_or("--stale-workers needs a number")?.parse().map_err(|e| format!("--stale-workers: {e}"))?)
             }
+            "--no-chunks" => o.no_chunks = true,
+            "--no-stale-hold" => o.no_stale_hold = true,
             "--altitudes-m" => o.altitudes_m = Some(it.next().ok_or("--altitudes-m needs metres separated by commas")?.clone()),
             "--radii-m" => o.radii_m = Some(it.next().ok_or("--radii-m needs metres separated by commas")?.clone()),
             "--coarse-horizon" => o.coarse_horizon = Some(PathBuf::from(it.next().ok_or("--coarse-horizon needs a store directory")?)),
