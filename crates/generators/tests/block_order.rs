@@ -391,4 +391,7 @@ fn a_sparse_batch_takes_the_exact_footprint_and_a_box_that_is_too_small_fails_lo
     assert!(hinted.iter().map(|h| h.to_bits()).eq(direct.iter().copied()), "a box of 8 changed a value");
     let small = eval_gathered(&src, &compact, &|| false, &footprint, Some(1), &stencil);
     assert!(small.iter().any(|h| h.is_nan()), "a box of 1 did not miss a cell of a 5-cell stencil");
+    // A box of 4 holds a 3-cell stencil (the eroded field's) but not a 5-cell one: the 5-cell stencil reads 5 cells before the cell.
+    let four = eval_gathered(&src, &compact, &|| false, &footprint, Some(4), &stencil);
+    assert!(four.iter().any(|h| h.is_nan()), "a box of 4 did not miss a cell of a 5-cell stencil");
 }
