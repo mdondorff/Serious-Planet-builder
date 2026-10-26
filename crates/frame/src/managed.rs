@@ -197,6 +197,10 @@ pub struct ManagedLoop {
     chunk_view: Option<Arc<dyn crate::chunkshare::ChunkView>>,
     /// The fade-in of landed chunks on the injected clock (STRM-047): each frame's nodes take its weights; `None` leaves every weight at 1.
     chunk_fade: Option<(crate::chunkshare::ChunkFade, Arc<dyn Clock>)>,
+    /// What each resident tile that reads chunks was last uploaded as, its change plane included: the tile a rebuilt one replaces (STRM-053).
+    drawn_tiles: HashMap<TileId, Arc<CompactTile>>,
+    /// The weight a resident tile keeps drawing at from the landing of a chunk it reads until its rebuilt tile is uploaded (STRM-053).
+    stale_weights: HashMap<TileId, f32>,
     /// The lists of `wants` that changed since the manager was last given them.
     draw_changed: bool,
     residency_changed: bool,
@@ -285,6 +289,8 @@ impl ManagedLoop {
             last_node_bytes: 0,
             chunk_view: None,
             chunk_fade: None,
+            drawn_tiles: HashMap::new(),
+            stale_weights: HashMap::new(),
             draw_changed: false,
             residency_changed: false,
             prefetch_changed: false,
@@ -401,14 +407,19 @@ impl ManagedLoop {
         if landed.is_empty() {
             return 0;
         }
+        let mut tiles: Vec<TileId> = self.resident.keys().copied().filter(|t| view.reads(*t).iter().any(|k| landed.contains(k))).collect();
+        tiles.sort_unstable_by_key(|t| t.raw());
         if let Some((fade, clock)) = self.chunk_fade.as_mut() {
             let now = clock.now_ms();
+            // The tiles that read the landed chunks keep drawing as they are, at the weight they have now, until their rebuilt tiles arrive:
+            // taken before the landing is known to the fade (a chunk that has just landed adds nothing to a weight before it is drawn).
+            for t in &tiles {
+                self.stale_weights.entry(*t).or_insert_with(|| fade.tile_weight(&*view, *t, now));
+            }
             for &k in landed {
                 fade.landed(k, now);
             }
         }
-        let mut tiles: Vec<TileId> = self.resident.keys().copied().filter(|t| view.reads(*t).iter().any(|k| landed.contains(k))).collect();
-        tiles.sort_unstable_by_key(|t| t.raw());
         // The plan cache holds origins and mesh keys of tiles that are not resident too (the plan's nodes before their tiles arrive): drop those.
         for &k in landed {
             self.pipe.worker().invalidate_chunk(k, |t| view.reads(t));
@@ -531,6 +542,8 @@ impl ManagedLoop {
             match change {
                 ResidentChange::Evicted(tile) => {
                     self.pending.remove(&tile);
+                    self.drawn_tiles.remove(&tile);
+                    self.stale_weights.remove(&tile);
                     if self.resident.remove(&tile).is_some() {
                         self.slots.remove(&tile);
                         sink.forget(tile);
@@ -602,10 +615,35 @@ impl ManagedLoop {
                 let (Some(mesh), Some(slot)) = (streamer.get(w.tile), streamer.slot_of(w.tile)) else { continue };
                 batch.push((w.tile, mesh, slot, w.bytes));
             }
+            // A rebuilt tile that reads chunks carries its change as the increment over what the tile it replaces is drawn at (STRM-053), so at
+            // weight 0 it draws what was on screen and at weight 1 its own surface.
+            if let (Some(view), Some((fade, clock))) = (self.chunk_view.as_deref(), self.chunk_fade.as_ref()) {
+                let now = clock.now_ms();
+                for item in batch.iter_mut() {
+                    let tile = item.0;
+                    if view.reads(tile).is_empty() {
+                        continue;
+                    }
+                    let texels = item.1.texel_bytes() > 0;
+                    if let Some(old) = self.drawn_tiles.get(&tile).filter(|o| texels && o.texels.len() == item.1.texels.len()) {
+                        let w_old = self.stale_weights.get(&tile).copied().unwrap_or_else(|| fade.tile_weight(view, tile, now));
+                        let plane = item.1.change_replacing(old, w_old);
+                        if plane != item.1.change {
+                            let mut replaced = (*item.1).clone();
+                            replaced.change = plane;
+                            item.1 = Arc::new(replaced);
+                        }
+                    }
+                }
+            }
             let refs: Vec<(&CompactTile, SlotRef)> = batch.iter().map(|(_, mesh, slot, _)| (&**mesh, *slot)).collect();
             let stats = sink.upload_batch(&refs)?;
             upload_calls += stats.calls;
             for (tile, mesh, slot, bytes) in &batch {
+                if self.chunk_view.as_deref().is_some_and(|v| !v.reads(*tile).is_empty()) {
+                    self.drawn_tiles.insert(*tile, mesh.clone());
+                }
+                self.stale_weights.remove(tile);
                 self.resident.insert(*tile, ResidentTile { mesh_key: mesh.key(), origin: mesh.origin() });
                 self.slots.insert(*tile, *slot);
                 uploaded += 1;
@@ -643,7 +681,7 @@ impl ManagedLoop {
                         fade.drawn(view, n.tile, r.mesh_key, n.mesh_key, now, &waiting);
                     }
                 }
-                n.chunk_weight = fade.tile_weight(view, n.tile, now);
+                n.chunk_weight = self.stale_weights.get(&n.tile).copied().unwrap_or_else(|| fade.tile_weight(view, n.tile, now));
             }
         }
         let node_bytes = indirect_frame_bytes(pipeline.draw.plan.nodes.len());

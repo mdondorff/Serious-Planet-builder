@@ -1900,9 +1900,11 @@ fn a_rebuild_slower_than_the_fade_still_fades_and_neither_a_neighbour_nor_a_new_
     // the first frame that draws them starts at the base, not at the whole change.
     rig.lp.chunk_landed(&[target]);
     // The frames after the landing draw the tiles built before it as stale tiles, whose node carries the resident key: no clock starts.
-    assert!(weights(&mut rig).iter().all(|&w| w == 0.0), "the frame after the landing");
+    // The stale tiles keep the weight they had (1: nothing of the landed chunk was in them) and the clock does not run.
+    assert!(weights(&mut rig).iter().all(|&w| w == 1.0), "the frame after the landing");
+    // The rebuild is delivered 2 s after the landing, longer than the fade: the first frame that draws the rebuilt tiles starts at weight 0.
     clock.advance(2_000);
-    assert!(weights(&mut rig).iter().all(|&w| w == 0.0), "2 s after the landing and the rebuild not delivered: the base");
+    rig.step(&req);
     rig.settle(&req);
     let w0 = weights(&mut rig);
     assert!(!w0.is_empty() && w0.iter().all(|&w| w == 0.0), "the first frame that draws the rebuilt tiles: {w0:?}");
@@ -1931,4 +1933,45 @@ fn resident_chunk_other_than(rig: &Rig, target: (u8, u32, u32)) -> (u8, u32, u32
         .map(|t| (t.face().0, t.x() >> (t.level() - 6), t.y() >> (t.level() - 6)))
         .find(|k| *k != target)
         .expect("the settled view reads more than one chunk")
+}
+
+// spec: STRM-053
+#[test]
+fn a_drawn_tile_that_reads_a_chunk_is_never_stale_while_that_chunks_clock_runs() {
+    use planet_frame::TileState;
+    let mut rig = Rig::new(1_000_000);
+    let req = request(here(), 0.0, -0.4);
+    rig.settle(&req);
+    let view = Arc::new(StubView { ready: std::sync::atomic::AtomicBool::new(true) });
+    let clock = Arc::new(planet_streaming::FakeClock::default());
+    rig.lp.set_chunk_view(Some(view));
+    rig.lp.set_chunk_fade(1_500, clock.clone());
+    let drawn = rig.step(&req).pipeline.draw.plan.nodes.iter().map(|n| n.tile).find(|t| t.level() >= 6).expect("the plan draws fine tiles");
+    let key_of = |t: TileId| (t.face().0, t.x() >> (t.level() - 6), t.y() >> (t.level() - 6));
+    let target = key_of(drawn);
+    rig.lp.chunk_landed(&[target]);
+    // The rule that makes the increment planes right: a rebuilt tile is drawn at weight 0 while any tile that reads the chunk is still the
+    // stale one, because the clock of the chunk waits for it. Frame by frame, 100 ms apart, through the refresh of the landing.
+    let (mut saw_stale, mut saw_clock) = (false, false);
+    let mut last = 0.0f32;
+    for _ in 0..40 {
+        let f = rig.step(&req);
+        let readers: Vec<_> = f.pipeline.draw.plan.nodes.iter().filter(|n| n.tile.level() >= 6 && key_of(n.tile) == target).collect();
+        if readers.iter().any(|n| n.state == TileState::Stale) {
+            saw_stale = true;
+            assert!(
+                readers.iter().filter(|n| n.state == TileState::Exact).all(|n| n.chunk_weight == 0.0),
+                "a rebuilt tile moved while a stale tile that reads the chunk was still drawn"
+            );
+        } else if readers.iter().all(|n| n.state == TileState::Exact) {
+            let w = readers.iter().map(|n| n.chunk_weight).fold(1.0, f32::min);
+            if w > 0.0 {
+                saw_clock = true;
+            }
+            assert!(w >= last, "the weight fell from {last} to {w}");
+            last = w;
+        }
+        clock.advance(100);
+    }
+    assert!(saw_clock, "the fade ran once the stale tiles were rebuilt (stale seen: {saw_stale})");
 }

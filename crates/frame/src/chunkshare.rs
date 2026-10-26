@@ -133,11 +133,12 @@ impl ChunkFade {
         }
     }
 
-    /// The weight of a tile (STRM-047): the minimum of the weights of the chunks it reads, so the tiles on either side of a chunk border rise
-    /// together (the cells a tile reads cross borders). A tile that reads none (above the top level) has no change plane, and weighs 1: its draw
-    /// is the final height, bit for bit.
+    /// The weight of a tile (STRM-047): the minimum of the weights of the chunks it reads that are ready, so the tiles on either side of a
+    /// chunk border rise together (the cells a tile reads cross borders). A chunk that is not ready adds nothing to the tile's plane, so it
+    /// has no weight: the tile next to it is at the weight of the ready ones, like its neighbour that reads only those. A tile that reads no
+    /// ready chunk (above the top level, or none landed) has no change plane, and weighs 1: its draw is the final height, bit for bit.
     pub fn tile_weight(&self, view: &dyn ChunkView, tile: TileId, now_ms: u64) -> f32 {
-        view.reads(tile).into_iter().map(|k| self.weight(k, view.is_ready(k), now_ms)).fold(1.0, f32::min)
+        view.reads(tile).into_iter().filter(|&k| view.is_ready(k)).map(|k| self.weight(k, true, now_ms)).fold(1.0, f32::min)
     }
 }
 
