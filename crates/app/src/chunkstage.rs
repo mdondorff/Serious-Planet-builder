@@ -84,7 +84,28 @@ pub fn enable_viewer_stage(
     disk: bool,
     out: &mut dyn Write,
 ) -> Result<(), String> {
-    let (pool, cfg) = crate::anetworld::viewer_chunk_stage(gen);
+    enable_viewer_stage_sized(world, gen, None, horizon, disk, out)
+}
+
+/// [`enable_viewer_stage`] with the chunk workers fixed to `workers` (a measurement of other pool sizes); `None` is the viewer's own.
+pub fn enable_viewer_stage_sized(
+    world: &Arc<WorldTerrain>,
+    gen: planet_streaming::GenWorkers,
+    workers: Option<usize>,
+    horizon: bool,
+    disk: bool,
+    out: &mut dyn Write,
+) -> Result<(), String> {
+    let (pool, cfg): (Arc<dyn planet_streaming::Spawner>, _) = match workers {
+        Some(n) => {
+            let n = n.max(1);
+            (
+                planet_streaming::GenWorkers::new(n).with_priority(gen.priority).pool(),
+                planet_streaming::chunks::ChunkConfig { workers: n, ..Default::default() },
+            )
+        }
+        None => crate::anetworld::viewer_chunk_stage(gen),
+    };
     let workers = cfg.workers;
     if !world.enable_viewer_chunks(pool, Arc::new(planet_streaming::SystemClock::new()), cfg, horizon, disk)? {
         return Err("the store holds no coupled run: the viewer's chunk stage needs one (generate --coupled-run)".into());

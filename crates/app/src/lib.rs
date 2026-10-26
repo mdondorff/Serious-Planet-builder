@@ -163,6 +163,10 @@ pub struct Options {
     pub no_chunks: bool,
     /// `--no-stale-hold`: the `edit-latency` scene's chunk stage without the hold of the stale chunks while the edit's tiles are built (STRM-056).
     pub no_stale_hold: bool,
+    /// `--no-horizon-jobs`: the `edit-latency` scene's chunk stage without the horizon jobs (they share the chunk pool).
+    pub no_horizon_jobs: bool,
+    /// `--chunk-workers N`: the `edit-latency` scene's chunk pool size (default the viewer's).
+    pub chunk_workers: Option<usize>,
     /// `generate --coupled-run DIR`: make (or find) the coupled run of the bake stored in `DIR` (STRM-051).
     pub coupled_run: Option<PathBuf>,
     /// `generate`: write the coarse tiles (levels `F..=--prefill-levels`, F the render floor) into the pack of the stored bake in this directory (STRM-021).
@@ -330,6 +334,8 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         base_threads: None,
         no_chunks: false,
         no_stale_hold: false,
+        no_horizon_jobs: false,
+        chunk_workers: None,
         coupled_run: None,
         prefill_dir: None,
         prefill_levels: None,
@@ -475,6 +481,11 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             }
             "--no-chunks" => o.no_chunks = true,
             "--no-stale-hold" => o.no_stale_hold = true,
+            "--no-horizon-jobs" => o.no_horizon_jobs = true,
+            "--chunk-workers" => {
+                o.chunk_workers =
+                    Some(it.next().ok_or("--chunk-workers needs a number")?.parse().map_err(|e| format!("--chunk-workers: {e}"))?)
+            }
             "--altitudes-m" => o.altitudes_m = Some(it.next().ok_or("--altitudes-m needs metres separated by commas")?.clone()),
             "--radii-m" => o.radii_m = Some(it.next().ok_or("--radii-m needs metres separated by commas")?.clone()),
             "--coarse-horizon" => o.coarse_horizon = Some(PathBuf::from(it.next().ok_or("--coarse-horizon needs a store directory")?)),
