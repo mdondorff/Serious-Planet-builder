@@ -18,7 +18,7 @@ Scope (owner, 2026-10-25): M8 delivers plausible relief, hydrology and horizon s
 | 4 | Global coupled run at most 10 min on Rasierklinge per world version | perf |
 | 5 | Shadows and the material map together at most 1.5 ms of terrain-pass GPU time at 1440p | perf |
 | 6 | An edit over a chunk shows within the M6 budgets, and its eroded result within 10 s on screen for every touched chunk the view wants, not only the chunk under the edit (owner, 2026-10-26) | A, perf |
-| 7 | Speed envelope (owner, 2026-10-23): a perf scene flies level over unvisited ground at fixed altitudes (30 m, 100 m, 300 m, 1 km) and raises the speed until the stand-in share of the screen at the chunk's apply level exceeds a bound; it reports the highest speed per altitude on Rasierklinge. M8 records the curve; the owner sets the floor from it; later milestones keep it as a regression check | perf |
+| 7 | Speed envelope (owner, 2026-10-23): a perf scene flies level over unvisited ground at fixed altitudes (30 m, 100 m, 300 m, 1 km) and raises the speed until the stand-in share of the screen at the chunk's apply level exceeds a bound; it reports the highest speed per altitude on Rasierklinge. M8 records the curve; floor at 300 m: 200 m/s, met in M8 (owner, 2026-10-26: faster is better; no deferred optimization); later milestones keep it as a regression check | perf |
 
 ## Steps
 | # | Step | Depends on | Lane |
