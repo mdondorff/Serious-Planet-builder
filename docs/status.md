@@ -29,8 +29,8 @@ Open owner items: the two flickers (Tracked) need a live check (editor off, debu
 
 ## Tracked
 - **Detail blocks** (BUILD-027): 10 requirements in `xtask/src/detail_blocks.txt`: split or shorten each, delete its line; no new blocks.
-- **Frame tail at 1 m** (SPIKE-44 step 2): landing frame fixed (#765); the rest was starvation by oversubscribed chunk pools (fixed in the scenes, #768): re-check on the viewer's pools: none over 3 ms.
-- **Hillslope flat patches** (look review 2b): ground beyond a rim is 0.7 m under the base, half as rough, flat in patches of 60 to 160 m.
+- **Frame tail at 1 m** (SPIKE-44): landing frame fixed (#765); the rest was starvation by oversubscribed scene pools (#768); re-check: none over 3 ms.
+- **Hillslope flat patches** (look review 2b): ground beyond a rim is 0.7 m under the base, half as rough, flat in 60-160 m patches.
 - **GEN-052 met, window 2026-10-26** (`perf anet-chunk --store`): 8 m 3.33 / 3.30 s on 4 threads, 5.3 s on one; 4 m 14.8 s; 10 m 2.1 s. Repeat after any change to the base field, the routing or the band (#744).
 - **Driver fade seam** (#716): a tile rebuilt for a neighbour chunk's landing fades its drivers up from neutral again. Trigger: the first look with driver curves. Fix: a driver increment plane on the upload path (crusader). Resolution: 32 m texels (GEN-074); M9: per-vertex.
 - **Steepest river and the 3e7 m2 drop**: at (34.158, 140.835) 519 of 1,344 links climb and 3,491 cells sit at the 300 m bound: the coarse network climbs beyond a 1 km node slide (M9, coarse run). A 3e7 m2 tributary threshold gave a 27.8 m drop; the stage uses 5e7.
