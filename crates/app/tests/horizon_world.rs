@@ -367,8 +367,51 @@ fn a_neighbours_edit_replaces_the_tile_it_touches_in_the_halo_and_no_other_and_a
     let s = shared.tile_stats();
     // (A tile's key holds the items within the stamp stage's halo of it, so the hill, 2.5 km in, also re-keys the tiles beside the east one;
     // the three of the far west column, 7 km away, are read from the cache.)
-    assert!(s.evaluated > 18 && s.hits >= 3 && s.evaluated - 18 + s.hits == 9, "only the tiles the hill reaches are made again, not the nine: {s:?}");
+    assert!(
+        s.evaluated > 18 && s.hits >= 3 && s.evaluated - 18 + s.hits == 9,
+        "only the tiles the hill reaches are made again, not the nine: {s:?}"
+    );
     // Nothing changes: nothing is made again.
     let again = shared.bake(own, &[]);
     assert_eq!((again, shared.tile_stats().evaluated), (edited, s.evaluated));
+}
+
+// spec: STRM-059
+#[test]
+fn a_change_of_the_lens_makes_every_tile_again_and_the_map_still_equals_the_whole_raster() {
+    use planet::horizonworld::ChunkHorizonBaker;
+    use planet_streaming::chunks::HorizonBaker;
+    let r = rig();
+    land_chunks(&r);
+    let lat = r.world.chunk_lattice().unwrap();
+    let shared = ChunkHorizonBaker::new(&r.world, lat, params(), 2);
+    let plain = ChunkHorizonBaker::new(&r.world, lat, params(), 2).with_tile_cap(0);
+    let own: ChunkKey = (2, 1000, 1000);
+    shared.bake(own, &[]);
+    assert_eq!(shared.tile_stats().evaluated, 9);
+    // The coupled lens (the field chain does not hash it into a tile key).
+    r.world.set_coupled_lens(Some(planet_generators::coupled::CoupledLens::Height));
+    assert_eq!(shared.bake(own, &[]), plain.bake(own, &[]));
+    assert_eq!(shared.tile_stats().evaluated, 18, "a lens makes all nine again");
+}
+
+// spec: STRM-059
+#[test]
+fn a_chunk_that_lands_after_a_neighbours_tile_was_kept_replaces_the_tile_because_the_spline_reads_across_the_edge() {
+    use planet::horizonworld::ChunkHorizonBaker;
+    use planet_streaming::chunks::HorizonBaker;
+    let r = rig();
+    let lat = r.world.chunk_lattice().unwrap();
+    let shared = ChunkHorizonBaker::new(&r.world, lat, params(), 2);
+    let plain = ChunkHorizonBaker::new(&r.world, lat, params(), 2).with_tile_cap(0);
+    let own: ChunkKey = (2, 1000, 1000);
+    // Only the chunk under the tile lands first (one frame of the chunk jobs for the tile alone), then the rest.
+    r.world.chunk_frame(&[tile()], camera(), &[]);
+    r.chunk_jobs.run(1);
+    let first = shared.bake(own, &[]);
+    assert_eq!(first, plain.bake(own, &[]));
+    let made = shared.tile_stats().evaluated;
+    land_chunks(&r);
+    assert_eq!(shared.bake(own, &[]), plain.bake(own, &[]), "the map equals the whole raster after the neighbours landed");
+    assert!(shared.tile_stats().evaluated > made, "the tiles were made again");
 }

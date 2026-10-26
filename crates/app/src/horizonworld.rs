@@ -240,15 +240,14 @@ impl HorizonBaker for ChunkHorizonBaker {
         let manager = world.chunk_manager();
         let per_face = 1i64 << planet_generators::chunk::CHUNK_GRID_LEVEL;
         let in_face = |b: i64| (0..per_face).contains(&b);
-        let own_hashes = |blocks: &[(i64, i64)]| -> Vec<u64> {
-            blocks
-                .iter()
-                .map(|&(bx, by)| {
-                    let m = manager.as_ref().filter(|_| in_face(bx) && in_face(by));
-                    m.and_then(|m| m.result_hash((key.0, bx as u32, by as u32))).unwrap_or(0)
-                })
-                .collect()
+        // The state of a block: the results of the chunks its heights read (its own and the cells of its neighbours across the edge, GEN-039).
+        let state = |bx: i64, by: i64| -> u64 {
+            let Some(m) = manager.as_ref().filter(|_| in_face(bx) && in_face(by)) else { return 0 };
+            self.reads((key.0, bx as u32, by as u32))
+                .into_iter()
+                .fold(0x4854_5354, |h, k| planet_core::hash::mix64(h ^ m.result_hash(k).unwrap_or(0)))
         };
+        let own_hashes = |blocks: &[(i64, i64)]| -> Vec<u64> { blocks.iter().map(|&(bx, by)| state(bx, by)).collect() };
         let blocks: Vec<(i64, i64)> =
             (-1..=1i64).flat_map(|dy| (-1..=1i64).map(move |dx| (i64::from(key.1) + dx, i64::from(key.2) + dy))).collect();
         // The result each block holds now, read before the field is built: a tile is kept only if it is still that result after (the field takes
