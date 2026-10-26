@@ -143,6 +143,7 @@ pub struct ChunkTrace {
     first_wanted: HashMap<ChunkKey, f64>,
     waits: Vec<f64>,
     horizon_landed: u64,
+    prefetch_asked: u64,
 }
 
 /// What a flight's [`ChunkTrace`] says.
@@ -150,6 +151,8 @@ pub struct ChunkTrace {
 pub struct TraceSummary {
     pub chunks_landed: u64,
     pub horizon_maps_landed: u64,
+    /// Chunks the flight asked to be prefetched (STRM-042), counted once per frame they were asked in.
+    pub prefetch_asked: u64,
     /// The median and the largest wait of a landed chunk that the flight itself asked for, seconds; 0 when none landed.
     pub median_wait_s: f64,
     pub max_wait_s: f64,
@@ -180,16 +183,34 @@ impl ChunkTrace {
         self.horizon_landed += n as u64;
     }
 
+    /// The chunks a frame asked to prefetch.
+    pub fn prefetch(&mut self, keys: &[ChunkKey]) {
+        self.prefetch_asked += keys.len() as u64;
+    }
+
     pub fn summary(&self) -> TraceSummary {
         let mut w = self.waits.clone();
         w.sort_by(f64::total_cmp);
         TraceSummary {
             chunks_landed: w.len() as u64,
             horizon_maps_landed: self.horizon_landed,
+            prefetch_asked: self.prefetch_asked,
             median_wait_s: w.get(w.len() / 2).copied().unwrap_or(0.0),
             max_wait_s: w.last().copied().unwrap_or(0.0),
         }
     }
+}
+
+// spec: STRM-042
+/// The chunks a frame asks the chunk manager to prefetch: the ones `prefetch_chunks` names for the camera's predicted position, from the travel
+/// estimator of the managed loop (`None` when prefetch is off); empty when the camera does not travel. The viewer and the scenes pass this to
+/// `WorldTerrain::chunk_frame`, never an empty slice by default.
+pub fn chunk_prefetch(
+    travel: Option<&planet_frame::prefetch::TravelEstimator>,
+    position: planet_core::PlanetFixed,
+    radius_m: f64,
+) -> Vec<ChunkKey> {
+    planet_frame::chunkshare::prefetch_chunks(position, travel.and_then(|e| e.predict()), radius_m)
 }
 
 /// Whether a frame still waits for the chunk stage: a plan node reads a chunk that is not ready, or a chunk job or horizon job is in flight. A
@@ -217,6 +238,37 @@ mod tests {
         // The waits are 2.5 s, 6 s (asked at 1.0, not again at 2.0) and 0 s (nobody asked in this flight).
         assert_eq!((s.median_wait_s, s.max_wait_s), (2.5, 6.0));
         assert_eq!(ChunkTrace::default().summary(), TraceSummary::default());
+    }
+
+    // spec: STRM-042
+    #[test]
+    fn a_moving_camera_asks_for_the_next_chunk_and_a_still_or_turning_one_and_no_estimator_ask_for_none() {
+        use planet_core::{cube::TangentWarp, Face, PlanetFixed, TileId};
+        use planet_frame::prefetch::{PrefetchConfig, TravelEstimator};
+        const R: f64 = 6_371_000.0;
+        let chunk = TileId::new(Face(2), planet_generators::chunk::CHUNK_GRID_LEVEL, 1000, 1000).unwrap();
+        let (s0, s1, t0, t1) = chunk.bounds();
+        let at = |s: f64| PlanetFixed(planet_core::cube::face_to_direction(&TangentWarp, Face(2), s, 0.5 * (t0 + t1)) * (R + 300.0));
+        // 100 m/s east, 100 ms frames: the next chunk east is asked for within the first second.
+        let mut est = TravelEstimator::new(PrefetchConfig::default(), R);
+        let mut asked = Vec::new();
+        for frame in 0..10u64 {
+            let pos = at(s0 + (s1 - s0) * 0.1 + 100.0 * (frame as f64 * 0.1) / (R * std::f64::consts::FRAC_PI_2) * 2.0);
+            est.observe(frame * 100, pos);
+            asked = chunk_prefetch(Some(&est), pos, R);
+        }
+        assert_eq!(asked.first(), Some(&(2, 1001, 1000)), "{asked:?}");
+        // Standing still: nothing. No estimator (prefetch off): nothing.
+        let mut still = TravelEstimator::new(PrefetchConfig::default(), R);
+        let here = at(s0 + (s1 - s0) * 0.1);
+        for frame in 0..10u64 {
+            still.observe(frame * 100, here);
+        }
+        assert!(chunk_prefetch(Some(&still), here, R).is_empty());
+        assert!(chunk_prefetch(None, here, R).is_empty());
+        let mut t = ChunkTrace::default();
+        t.prefetch(&asked);
+        assert_eq!(t.summary().prefetch_asked, asked.len() as u64);
     }
 
     // spec: TEST-054
