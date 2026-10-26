@@ -951,7 +951,7 @@ fn the_drivers_of_a_ramp_do_not_change_at_the_cells_along_a_cube_face_edge() {
     }
 }
 
-// spec: GEN-060
+// spec: GEN-083
 #[test]
 fn the_valley_walls_rise_evenly_cell_to_cell_on_a_corridor_off_the_grid_axes() {
     use planet_generators::anet::{paint_band, AnchorLaw, NO_NEXT};
@@ -996,7 +996,7 @@ fn the_valley_walls_rise_evenly_cell_to_cell_on_a_corridor_off_the_grid_axes() {
     assert!(p90 <= 1.2, "adjacent-cell slopes of the wall differ by {p90}x at the 90th percentile");
 }
 
-// spec: GEN-049, GEN-060
+// spec: GEN-049, GEN-083
 #[test]
 fn the_band_of_a_core_cell_is_the_same_whatever_the_halo_with_two_corridors_off_the_grid_axes() {
     use planet_generators::anet::{paint_band, AnchorLaw};

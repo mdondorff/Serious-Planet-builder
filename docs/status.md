@@ -20,7 +20,7 @@ Done before the reset (2026-10-23 and 24; M8-2 archived #621, chunk fade split i
 
 | # | Step | Lane |
 |---|---|---|
-| M8-R | Plausible relief (owner, 2026-10-25: plausible relief, hydrology and shadows in M8; realism of hill terrain later): `openspec/changes/m8-relief/` proposal #658 under the planner's review; then the hill band and landform driver in the bake and the uplift that keeps relief in the coupled run (crusader), the field-side creases and bounds (explorer), one rebuild of bake, run, coarse horizon and chunks on `C:/DEV/SeriousPlanetData/global16384` | explorer, crusader |
+| M8-R | Plausible relief (owner, 2026-10-25: plausible relief, hydrology and shadows in M8; realism of hill terrain later): the hill band and landform driver in the bake and the uplift that keeps relief in the coupled run (crusader), the field-side creases and bounds (explorer), one rebuild of bake, run, coarse horizon and chunks on `C:/DEV/SeriousPlanetData/global16384` | explorer, crusader |
 | M8-1 (c) rest | the run at 2048 from any bake is done (#638, GEN-056); its first make from the 16384 bake took 9,916 s, likely evaluating the field per vertex instead of reading stored samples: check and add a progress line; re-time the run on the real heights (margin 55 s); the key read of about 25M bake samples even when the run is stored; uplift and erodibility constant until the driver maps (ADR 0076); the K view is coarse (climate shading) | crusader, next (the rebuild re-runs the coupled make) |
 | M8-V | done for tile streaming (#608, #611, curve #619: 70, 250, 540, 1600 m/s at 30 m, 100 m, 300 m, 1 km); the chunk curve after M8-3 | planner window |
 | R4b | `GeoPoint::of_dir` and `dir` in `editor/polyline.rs` onto the core helpers | crusader, with M8-7 |
@@ -28,8 +28,9 @@ Done before the reset (2026-10-23 and 24; M8-2 archived #621, chunk fade split i
 Open owner items: the two flickers (Tracked) need a live check (editor off, debug path L, or a recording or F9 at the moment); P1-5 editing frame rate on a quiet machine; P2-8 missing tiles during an edit's refresh.
 
 ## Tracked
+- **Detail blocks** (BUILD-027): 10 requirements in `xtask/src/detail_blocks.txt`: split or shorten each, delete its line; no new blocks.
 - **Frame tail at 1 m** (SPIKE-44 step 2, 2026-10-26, RTX): vsync-paced 59.6 fps, but 3.2 % of frames over 30 ms: begin_frame (plan + residency) up to 124 ms, the chunk frame up to 729 ms on a chunk landing (CON-22). Next: find what the landing frame does on the main thread; the per-frame phase dump as a debug switch.
-- **GEN-052 met, window 2026-10-26** (production store, `perf anet-chunk --store`): 8 m 3.33 / 3.30 s on 4 threads, 5.27 / 5.35 s on one; 4 m 14.8 / 14.6 s; 10 m 2.14 / 2.11 s. Next window: repeat after any change to the base field or the routing.
+- **GEN-052 met, window 2026-10-26** (`perf anet-chunk --store`): 8 m 3.33 / 3.30 s on 4 threads, 5.3 s on one; 4 m 14.8 s; 10 m 2.1 s. Repeat after any change to the base field, the routing or the band (#744).
 - **Driver fade seam** (#716): a tile rebuilt for a neighbour chunk's landing fades its drivers up from neutral again. Trigger: the first look with driver curves. Fix: a driver increment plane on the upload path (crusader). Resolution: 32 m texels (GEN-074); M9: per-vertex.
 - **Steepest river and the 3e7 m2 drop**: at (34.158, 140.835) 519 of 1,344 links climb and 3,491 cells sit at the 300 m bound: the coarse network climbs beyond a 1 km node slide (M9, coarse run). A 3e7 m2 tributary threshold gave a 27.8 m drop; the stage uses 5e7.
 - **Deep cut where the ground along the routed path rises** (river-r1, look review 2): a 40-50 m canyon on a plain, the routed ground +15 m over 3 km, the bed at the least fall (GEN-059); a cut-cap change trades it for a dam (GEN-069). Fix with the M9 coarse/fine network work.
