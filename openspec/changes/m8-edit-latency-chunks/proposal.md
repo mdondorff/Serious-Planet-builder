@@ -4,7 +4,8 @@ Criterion 6 of M8 (owner, 2026-10-26): an edit over a chunk shows within the M6 
 ## What Changes
 1. With `--store` and without `--no-chunks` the scene gives the world the A-net chunk stage (`chunkstage::enable_viewer_stage`: the pool, the `ChunkConfig` and the horizon jobs of the window, no disk cache), with the hold of the stale chunks while the edit's tiles are built, drives the chunk frames in its loop as the viewer does (`chunk_frame`, the landings into the managed loop) and settles the chunks before every case.
 2. After each run's exact frame it keeps the frames going until the chunks are solved and drawn again and records, from `set_definition`: the longest `chunk_frame` call of the first frames (what the versions of the wanted chunks cost), the chunks that landed again, when the chunk under the edit centre and the last one landed, and when the tiles that read them were drawn (the eroded result on the screen).
-3. A table of that chunk side after the stages table, with the 10 s verdict on the last column; `--no-chunks` keeps the scene as it was for the comparison line.
+3. After every swap of the definition (the edit and its undo) the scene tells the plan cache where the items changed (`note_item_change`, STRM-034), as the viewer does, so the plan after the edit keeps what the change cannot reach.
+4. A table of that chunk side after the stages table, with the 10 s verdict on the last column; `--no-chunks` keeps the scene as it was for the comparison line.
 
 ## Impact
 - Spec: TEST-056 (tier A for the table; the scene itself runs in the M8-8 window).
