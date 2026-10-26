@@ -253,7 +253,7 @@ fn the_chunks_an_edit_re_keys_are_those_its_reach_and_the_halo_can_touch() {
         assert!(found.contains(&TileId::from_direction(&map, p, level)), "the chunk of a point 3.9 km away is in");
     }
     assert!(!found.contains(&TileId::from_direction(&map, shape::point_at(at, 90.0, 20_000.0, R), level)));
-    // Without a halo the result is the tiles' refresh set at the chunk level with no tile halo is a subset of the chunks with one.
+    // Without a halo the result is a subset of the result with one.
     let bare = edited_chunks(&aff, BodyId::PLANET, &chunks, level, 0.0, R, &map);
     assert!(bare.iter().all(|c| found.contains(c)) && bare.len() <= found.len());
     // Sorted, no repeats, another body's places do not count, an empty list finds nothing.
