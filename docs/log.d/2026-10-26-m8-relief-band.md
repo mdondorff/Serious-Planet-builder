@@ -1,0 +1,1 @@
+- 2026-10-26 **m8-relief-band** (GEN-064): archived; the hill band and the landform driver in the bake (#673).

@@ -1,0 +1,1 @@
+- 2026-10-26 **m8-perf-coupled** (GEN-042): archived; cargo xtask perf coupled times the global coupled run (#602).
