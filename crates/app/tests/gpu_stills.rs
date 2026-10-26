@@ -44,15 +44,23 @@ fn png_size(path: &std::path::Path) -> (u32, u32) {
     (u32::from_be_bytes(bytes[16..20].try_into().unwrap()), u32::from_be_bytes(bytes[20..24].try_into().unwrap()))
 }
 
-// spec: TEST-048, TEST-049
-#[test]
-fn the_stills_scene_draws_each_pose_with_its_chunks_landed_and_refuses_a_bad_call() {
-    let store = tmp("store");
-    let dir = tmp("out");
-    let poses = tmp("poses.toml");
-    std::fs::write(&poses, POSES).unwrap();
-    run(&["generate", "--global-dir", store.to_str().unwrap(), "--global-res", "32", "--threads", "2"]).unwrap();
-    let call = |extra: &[&str]| {
+/// A small store of 32 cells per face edge, the poses file and the output directory of one test (each test makes its own: the two run in
+/// one binary and a still takes the better part of a minute on the software adapter, so they are separate tests, TEST-048).
+struct Fixture {
+    store: std::path::PathBuf,
+    dir: std::path::PathBuf,
+    poses: std::path::PathBuf,
+}
+
+impl Fixture {
+    fn new(tag: &str) -> Fixture {
+        let f = Fixture { store: tmp(&format!("{tag}-store")), dir: tmp(&format!("{tag}-out")), poses: tmp(&format!("{tag}-poses.toml")) };
+        std::fs::write(&f.poses, POSES).unwrap();
+        run(&["generate", "--global-dir", f.store.to_str().unwrap(), "--global-res", "32", "--threads", "2"]).unwrap();
+        f
+    }
+
+    fn call(&self, extra: &[&str]) -> Result<String, String> {
         let mut a = vec![
             "test-render",
             "--scene",
@@ -60,7 +68,7 @@ fn the_stills_scene_draws_each_pose_with_its_chunks_landed_and_refuses_a_bad_cal
             "--adapter",
             "software",
             "--store",
-            store.to_str().unwrap(),
+            self.store.to_str().unwrap(),
             "--global-res",
             "32",
             "--size",
@@ -69,14 +77,29 @@ fn the_stills_scene_draws_each_pose_with_its_chunks_landed_and_refuses_a_bad_cal
             "--tau",
             "0.4",
             "--poses",
-            poses.to_str().unwrap(),
+            self.poses.to_str().unwrap(),
             "--out-dir",
-            dir.to_str().unwrap(),
+            self.dir.to_str().unwrap(),
         ];
         a.extend_from_slice(extra);
         run(&a)
-    };
-    let out = call(&[]).unwrap();
+    }
+}
+
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.store);
+        let _ = std::fs::remove_dir_all(&self.dir);
+        let _ = std::fs::remove_file(&self.poses);
+    }
+}
+
+// spec: TEST-048, TEST-049
+#[test]
+fn the_stills_scene_draws_each_pose_with_its_chunks_landed() {
+    let f = Fixture::new("all");
+    let dir = &f.dir;
+    let out = f.call(&[]).unwrap();
     assert!(out.contains("capture-stills: NOT a measurement (no gate, no timestamps, no log)"), "{out}");
     assert!(out.contains("anchor: latitude"), "{out}");
     // spec: REND-038 — every pose waited for the horizon maps of the chunks near the eye and says so.
@@ -95,11 +118,16 @@ fn the_stills_scene_draws_each_pose_with_its_chunks_landed_and_refuses_a_bad_cal
     // The sun differs between the two poses: the images differ.
     assert_ne!(std::fs::read(dir.join("ground-sunset.png")).unwrap(), std::fs::read(dir.join("ground-midday.png")).unwrap());
     assert!(!dir.join("lit.json").exists() && !out.contains("budget"), "a tool: no perf log, no budget row: {out}");
+}
 
+// spec: TEST-048, TEST-049
+#[test]
+fn the_stills_scene_draws_one_pose_by_name_and_refuses_a_bad_call() {
+    let f = Fixture::new("one");
     // One pose by name; an unknown name, a missing poses file or output directory, and a perf-only option are refused.
-    let one = call(&["--views", "ground-midday"]).unwrap();
+    let one = f.call(&["--views", "ground-midday"]).unwrap();
     assert!(one.contains("ground-midday:") && !one.contains("ground-sunset:"), "{one}");
-    let e = call(&["--views", "nope"]).unwrap_err();
+    let e = f.call(&["--views", "nope"]).unwrap_err();
     assert!(e.contains("no pose 'nope'") && e.contains("ground-sunset"), "{e}");
     let e = run(&[
         "test-render",
@@ -108,17 +136,14 @@ fn the_stills_scene_draws_each_pose_with_its_chunks_landed_and_refuses_a_bad_cal
         "--adapter",
         "software",
         "--store",
-        store.to_str().unwrap(),
+        f.store.to_str().unwrap(),
         "--out-dir",
-        dir.to_str().unwrap(),
+        f.dir.to_str().unwrap(),
     ])
     .unwrap_err();
     assert!(e.contains("--poses"), "{e}");
-    let e = call(&["--flight-frames", "3"]).unwrap_err();
+    let e = f.call(&["--flight-frames", "3"]).unwrap_err();
     assert!(e.contains("--flight-frames"), "{e}");
-    let e = run(&["test-render", "--scene", "lit", "--poses", poses.to_str().unwrap(), "--adapter", "software"]).unwrap_err();
+    let e = run(&["test-render", "--scene", "lit", "--poses", f.poses.to_str().unwrap(), "--adapter", "software"]).unwrap_err();
     assert!(e.contains("--poses applies to the scene `capture-stills`"), "{e}");
-    let _ = std::fs::remove_dir_all(&store);
-    let _ = std::fs::remove_dir_all(&dir);
-    let _ = std::fs::remove_file(&poses);
 }
