@@ -17,6 +17,8 @@ Status: direction, not a plan (owner and opus-planner, 2026-10-23). Each milesto
 
 M10 and M11 may swap after the M8 look reviews. Spikes for M9 start once M8's hydrology and shadows are close to landing (owner, 2026-10-25).
 
+Option (owner, 2026-10-26): horizon shadows may become an exception to identical results across machines (e.g. a GPU bake) if speed needs it; not now, needs an ADR when taken.
+
 Generator polish, after M8: why a stamped hill in the ocean ends just below sea level.
 
 Data later (owner's idea, 2026-10-25): stores read through a local or remote data server, the local disk a cache, larger bakes streamed on demand; a backend behind the pack store's interface.
