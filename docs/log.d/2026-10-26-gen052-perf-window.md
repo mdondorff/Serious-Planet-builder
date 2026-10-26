@@ -1,0 +1,1 @@
+- 2026-10-26 **GEN-052 perf window**: 8 m chunk 13.5 s (routing 8.9 s of it, 4.5 s without), 4 m 55.3 s, 10 m 9.0 s; status Tracked updated.
