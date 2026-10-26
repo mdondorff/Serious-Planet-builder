@@ -94,8 +94,7 @@ pub fn edit_resolve(o: &crate::Options, out: &mut dyn Write) -> Result<(), Strin
         t.as_secs_f64() * workers as f64 / n.max(1) as f64
     )
     .map_err(err)?;
-    let mut id = 1u128;
-    for r in radii {
+    for (id, r) in (1u128..).zip(radii) {
         let mut def = (*world.definition()).clone();
         let item =
             ItemSpec { id, layer: "stamps".into(), priority: 0, dir: site, content_hash: 0, reach_m: r, max_delta_m: 60.0, stamp: None }
@@ -114,7 +113,6 @@ pub fn edit_resolve(o: &crate::Options, out: &mut dyn Write) -> Result<(), Strin
         world.set_definition(Arc::new(def))?;
         let (t, n) = settle(&world, &tiles, camera)?;
         writeln!(out, "  removed: {n} chunks back in {:.1} s", t.as_secs_f64()).map_err(err)?;
-        id += 1;
     }
     Ok(())
 }
