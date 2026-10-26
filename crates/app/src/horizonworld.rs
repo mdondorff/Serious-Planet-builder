@@ -16,6 +16,7 @@ use planet_generators::chunkfield::{ChunkKey, ChunkLattice, ChunkResult};
 use planet_generators::coarsehorizon::{coarse_horizon, CoarseParams};
 use planet_generators::global::LatticeSource;
 use planet_generators::horizon::{bake_horizon, halo_texels, HeightRaster, HorizonParams};
+use planet_generators::stamp::STAGE_HALO;
 use planet_streaming::chunks::{HorizonBaker, HorizonConfig, HorizonJobs, HorizonStats, HorizonUpdate};
 use planet_streaming::{Clock, Spawner};
 use planet_world_def::WorldDefinition;
@@ -32,12 +33,171 @@ pub struct ChunkHorizonBaker {
     params: HorizonParams,
     threads: usize,
     /// The edit word of a chunk by the definition revision it was made for.
-    words: Mutex<std::collections::HashMap<ChunkKey, (u64, u64)>>,
+    words: Mutex<std::collections::HashMap<(ChunkKey, u64), (u64, u64)>>,
+    /// The heights of the chunk-sized blocks of the raster, shared by the chunks that read them (STRM-059).
+    tiles: Mutex<HeightTiles>,
+    tile_cap: usize,
+}
+
+/// Most height tiles a baker keeps (STRM-059): 64 tiles of 614 x 614 f32 are 96.5 MB, the horizon's share of RAM (ADR 0083 point 4). The nine tiles
+/// a bake reads, for the few bakes that run at once, are well inside it; the oldest-used tile goes first.
+pub const HEIGHT_TILES_MAX: usize = 64;
+
+/// What the height tiles did (the tests and the stats read it).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TileStats {
+    /// Tiles evaluated from the field (cached or not).
+    pub evaluated: u64,
+    /// Tiles read from the cache.
+    pub hits: u64,
+    /// Tiles in the cache now.
+    pub held: usize,
+}
+
+#[derive(Default)]
+struct HeightTiles {
+    /// By chunk: the key the heights were made under, the heights, and the use counter of the last read.
+    held: std::collections::HashMap<ChunkKey, (u64, Arc<Vec<f32>>, u64)>,
+    uses: u64,
+    evaluated: u64,
+    hits: u64,
 }
 
 impl ChunkHorizonBaker {
     pub fn new(world: &Arc<WorldTerrain>, lat: ChunkLattice, params: HorizonParams, threads: usize) -> ChunkHorizonBaker {
-        ChunkHorizonBaker { world: Arc::downgrade(world), lat, params, threads: threads.max(1), words: Default::default() }
+        ChunkHorizonBaker {
+            world: Arc::downgrade(world),
+            lat,
+            params,
+            threads: threads.max(1),
+            words: Default::default(),
+            tiles: Default::default(),
+            tile_cap: HEIGHT_TILES_MAX,
+        }
+    }
+
+    /// The hash of the items of every stamp layer that touch the chunk and `halo_cells` cells around it, 0 for none (the edit word of a horizon,
+    /// and of a height tile with the stamp stage's own halo, STRM-059).
+    fn items_word(&self, key: ChunkKey, halo_cells: f64) -> u64 {
+        let Some(world) = self.world.upgrade() else { return 0 };
+        let def = world.definition();
+        let revision = def.revision();
+        if let Some(&(r, w)) = self.words.lock().expect("edit words").get(&(key, halo_cells.to_bits())) {
+            if r == revision {
+                return w;
+            }
+        }
+        let tile =
+            TileId::new(Face(key.0), planet_generators::chunk::CHUNK_GRID_LEVEL, key.1, key.2).expect("a chunk of the grid is a tile");
+        let halo = (halo_cells / f64::from(self.lat.cells_per_chunk())).clamp(0.0, 1.0);
+        let cap = planet_world_def::footprint::tile_cap(&planet_core::TangentWarp, tile, halo);
+        let mut items = std::collections::BTreeMap::new();
+        for layer in def.stamp_layers(planet_world_def::BodyId::PLANET) {
+            if let Ok(found) = def.footprint_items_cap(planet_world_def::BodyId::PLANET, &layer, cap) {
+                for it in found {
+                    items.entry((layer.clone(), it.id)).or_insert(it);
+                }
+            }
+        }
+        let word = if items.is_empty() {
+            0
+        } else {
+            let all: Vec<planet_world_def::footprint::FootprintItem> = items.into_values().collect();
+            planet_world_def::footprint_hash(&all) | 1
+        };
+        self.words.lock().expect("edit words").insert((key, halo_cells.to_bits()), (revision, word));
+        word
+    }
+
+    /// Keep at most `cap` height tiles (0 turns the cache off: every bake evaluates its whole raster).
+    pub fn with_tile_cap(mut self, cap: usize) -> ChunkHorizonBaker {
+        self.tile_cap = cap;
+        self
+    }
+
+    /// What the height tiles did so far.
+    pub fn tile_stats(&self) -> TileStats {
+        let t = self.tiles.lock().expect("height tiles");
+        TileStats { evaluated: t.evaluated, hits: t.hits, held: t.held.len() }
+    }
+
+    /// What the heights of a block depend on besides its items and its chunk: the base of the definition (seed, radius, height field, stage order), the baked input, the code that makes the chunks and the field above them
+    /// (`ANET_VERSION`, the chunk stage, this bake), the lattice, and the coupled lens, which the field chain does not hash into a tile key.
+    fn world_word(&self, world: &WorldTerrain) -> u64 {
+        let lens = world.coupled_lens().map_or(0, |l| 1 + l as u64);
+        let ready = matches!(world.coupled_standing(), crate::coupledworld::Standing::Ready(..));
+        let def = world.definition();
+        let body = planet_world_def::BodyId::PLANET;
+        let positions: Vec<u64> = planet_world_def::LAYER_STACK.iter().map(|l| def.chunk_stage(body, l) as u64).collect();
+        let bake_key = world.bake_key();
+        let key_words = [
+            u64::from_le_bytes(bake_key[..8].try_into().expect("8 bytes")),
+            u64::from_le_bytes(bake_key[8..].try_into().expect("8 bytes")),
+        ];
+        planet_core::hash::hash_u64s(
+            0x4854_5753,
+            &[
+                u64::from(BAKE_VERSION),
+                u64::from(planet_generators::anet::ANET_VERSION),
+                u64::from(planet_generators::chunkfield::CHUNK_STAGE_VERSION),
+                u64::from(self.lat.cells_per_chunk()),
+                self.params.radius_m.to_bits(),
+                lens,
+                u64::from(ready),
+                def.base_hash(),
+                planet_core::hash::hash_u64s(2, &positions),
+                key_words[0],
+                key_words[1],
+            ],
+        )
+    }
+
+    /// The heights of the `side x side` cells from `(x0, y0)` on `face`'s plane (past a face edge on the extended plane), from the field.
+    fn evaluate(&self, field: &dyn planet_generators::height::HeightField, face: u8, x0: i64, y0: i64, side: usize) -> Vec<f32> {
+        let mut dirs = Vec::with_capacity(side * side);
+        for j in 0..side {
+            for i in 0..side {
+                dirs.push(self.lat.direction_ext(face, x0 + i as i64, y0 + j as i64));
+            }
+        }
+        field.heights_threaded_until(&dirs, &|| false, self.threads).into_iter().map(|h| h as f32).collect()
+    }
+
+    /// The heights of the chunk-sized block `(bx, by)` of `face`'s plane: from the cache under `tile_key`, else from the field (and kept under
+    /// it). A block without a key (past the face edge, or a chunk that changed while the field was built) is evaluated and not kept.
+    fn block_heights(
+        &self,
+        field: &dyn planet_generators::height::HeightField,
+        face: u8,
+        (bx, by): (i64, i64),
+        n: usize,
+        tile_key: Option<u64>,
+    ) -> Arc<Vec<f32>> {
+        let chunk = (face, bx as u32, by as u32);
+        if let Some(k) = tile_key.filter(|_| self.tile_cap > 0) {
+            let mut t = self.tiles.lock().expect("height tiles");
+            t.uses += 1;
+            let uses = t.uses;
+            if let Some(e) = t.held.get_mut(&chunk).filter(|e| e.0 == k) {
+                e.2 = uses;
+                let h = e.1.clone();
+                t.hits += 1;
+                return h;
+            }
+        }
+        let heights = Arc::new(self.evaluate(field, face, bx * n as i64, by * n as i64, n));
+        let mut t = self.tiles.lock().expect("height tiles");
+        t.evaluated += 1;
+        if let Some(k) = tile_key.filter(|_| self.tile_cap > 0) {
+            t.uses += 1;
+            let uses = t.uses;
+            t.held.insert(chunk, (k, heights.clone(), uses));
+            while t.held.len() > self.tile_cap {
+                let oldest = t.held.iter().min_by_key(|(c, e)| (e.2, **c)).map(|(c, _)| *c).expect("a tile");
+                t.held.remove(&oldest);
+            }
+        }
+        heights
     }
 
     /// Cells of halo the march of this baker needs on every side of a chunk.
@@ -75,17 +235,54 @@ impl HorizonBaker for ChunkHorizonBaker {
         let n = self.lat.cells_per_chunk() as usize;
         let none = || vec![0u8; n * n * self.params.azimuths as usize];
         let Some(world) = self.world.upgrade() else { return none() };
-        let Ok(field) = world.field() else { return none() };
         let halo = self.halo_cells();
         let side = n + 2 * halo;
+        let manager = world.chunk_manager();
+        let per_face = 1i64 << planet_generators::chunk::CHUNK_GRID_LEVEL;
+        let in_face = |b: i64| (0..per_face).contains(&b);
+        // The state of a block: the results of the chunks its heights read (its own and the cells of its neighbours across the edge, GEN-039).
+        let state = |bx: i64, by: i64| -> u64 {
+            let Some(m) = manager.as_ref().filter(|_| in_face(bx) && in_face(by)) else { return 0 };
+            self.reads((key.0, bx as u32, by as u32))
+                .into_iter()
+                .fold(0x4854_5354, |h, k| planet_core::hash::mix64(h ^ m.result_hash(k).unwrap_or(0)))
+        };
+        let own_hashes = |blocks: &[(i64, i64)]| -> Vec<u64> { blocks.iter().map(|&(bx, by)| state(bx, by)).collect() };
+        let blocks: Vec<(i64, i64)> =
+            (-1..=1i64).flat_map(|dy| (-1..=1i64).map(move |dx| (i64::from(key.1) + dx, i64::from(key.2) + dy))).collect();
+        // The result each block holds now, read before the field is built: a tile is kept only if it is still that result after (the field takes
+        // its own snapshot of the ready chunks in between).
+        let before = own_hashes(&blocks);
+        let Ok(field) = world.field() else { return none() };
+        let after = own_hashes(&blocks);
+        let world_word = self.world_word(&world);
         let (x0, y0) = (i64::from(key.1) * n as i64 - halo as i64, i64::from(key.2) * n as i64 - halo as i64);
-        let mut dirs = Vec::with_capacity(side * side);
-        for j in 0..side {
-            for i in 0..side {
-                dirs.push(self.lat.direction_ext(key.0, x0 + i as i64, y0 + j as i64));
+        let mut heights = vec![0.0f32; side * side];
+        if halo > n {
+            // A halo wider than a chunk edge reaches past the nine blocks: the whole raster from the field, as before the tiles.
+            heights = self.evaluate(&*field, key.0, x0, y0, side);
+        } else {
+            for (idx, &(bx, by)) in blocks.iter().enumerate() {
+                let tile_key = (in_face(bx) && in_face(by) && before[idx] == after[idx]).then(|| {
+                    let block = (key.0, bx as u32, by as u32);
+                    planet_core::hash::hash_u64s(
+                        0x4854_494c,
+                        &[world_word, self.items_word(block, STAGE_HALO * f64::from(self.lat.cells_per_chunk())), before[idx]],
+                    )
+                });
+                let tile = self.block_heights(&*field, key.0, (bx, by), n, tile_key);
+                // The rows of the block inside the raster: the block's cells are [bx n, bx n + n), the raster's [x0, x0 + side).
+                let (cx, cy) = (bx * n as i64 - x0, by * n as i64 - y0);
+                let (i0, i1) = (cx.max(0), (cx + n as i64).min(side as i64));
+                let (j0, j1) = (cy.max(0), (cy + n as i64).min(side as i64));
+                for j in j0..j1 {
+                    let src = ((j - cy) as usize) * n + (i0 - cx) as usize;
+                    let dst = (j as usize) * side + i0 as usize;
+                    let len = (i1 - i0) as usize;
+                    heights[dst..dst + len].copy_from_slice(&tile[src..src + len]);
+                }
             }
         }
-        let heights: Vec<f32> = field.heights_threaded_until(&dirs, &|| false, self.threads).into_iter().map(|h| h as f32).collect();
         let raster = HeightRaster { n: side, texel_m: self.lat.cell_m(self.params.radius_m), heights: &heights };
         bake_horizon(&raster, (halo, halo, n, n), &self.params, self.threads).map_or_else(|_| none(), |m| m.data)
     }
@@ -93,34 +290,7 @@ impl HorizonBaker for ChunkHorizonBaker {
     /// The items of every stamp layer that touch the chunk and the halo the march reads around it (the horizon samples the whole field, so the layers
     /// above the chunk stage count too): the hash of those items, 0 for none. The cap is the chunk's own with a halo of the march's cells.
     fn edit_word(&self, key: ChunkKey) -> u64 {
-        let Some(world) = self.world.upgrade() else { return 0 };
-        let def = world.definition();
-        let revision = def.revision();
-        if let Some(&(r, w)) = self.words.lock().expect("edit words").get(&key) {
-            if r == revision {
-                return w;
-            }
-        }
-        let tile =
-            TileId::new(Face(key.0), planet_generators::chunk::CHUNK_GRID_LEVEL, key.1, key.2).expect("a chunk of the grid is a tile");
-        let halo = (self.halo_cells() as f64 / f64::from(self.lat.cells_per_chunk())).clamp(0.0, 1.0);
-        let cap = planet_world_def::footprint::tile_cap(&planet_core::TangentWarp, tile, halo);
-        let mut items = std::collections::BTreeMap::new();
-        for layer in def.stamp_layers(planet_world_def::BodyId::PLANET) {
-            if let Ok(found) = def.footprint_items_cap(planet_world_def::BodyId::PLANET, &layer, cap) {
-                for it in found {
-                    items.entry((layer.clone(), it.id)).or_insert(it);
-                }
-            }
-        }
-        let word = if items.is_empty() {
-            0
-        } else {
-            let all: Vec<planet_world_def::footprint::FootprintItem> = items.into_values().collect();
-            planet_world_def::footprint_hash(&all) | 1
-        };
-        self.words.lock().expect("edit words").insert(key, (revision, word));
-        word
+        self.items_word(key, self.halo_cells() as f64)
     }
 
     /// The march, the lattice and the bake (the edits are in [`HorizonBaker::edit_word`], per chunk).

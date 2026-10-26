@@ -136,3 +136,9 @@ Scope: m8-chunk-fade (STRM-052, STRM-053), the closed `m8-chunk-fade-publish` (b
 - The same latency is in the merged fade: a chunk's change is drawn only when the tiles that read it are rebuilt; the clock of #711 waits for the stale tiles that are drawn.
 - Tool: `PublishStats` on the closed branch (title, stall report, log line every 10 s with what forced a publication).
 - Obsolete when the tile rebuild after a landing is fast enough (a priority for refreshes of drawn tiles, or the increment on the CPU without a rebuild).
+
+## 2026-10-26 The horizon march is bound by arithmetic per step, not by loads: a block-max skip gains nothing
+Scope: `generators::horizon` march, 8 m raster of 1824^2 texels, 16 azimuths, range 4.8 km.
+- Measured offline (4 threads, busy machine): an exact skip of steps whose block max cannot beat the best slope skipped 60 % of the steps and took 6.5 to 8.7 s against 6.8 s without it.
+- Cause: each step costs two divisions, a floor and a division for the slope; the table of distances and drops and an integer floor take the march to 2.6 s with identical bytes (GEN-085).
+- Obsolete when the march is vectorised over azimuths (then loads may matter again).
