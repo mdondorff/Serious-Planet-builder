@@ -137,7 +137,7 @@ impl HeightField for TerrainField<'_> {
         let footprint = |g: &dyn LatticeSource, d: Vec3| {
             self.base_via(g, d);
         };
-        crate::global::eval_gathered(&self.src, dirs, stop, &footprint, &|s, d| self.height_via(s, d))
+        crate::global::eval_gathered(&self.src, dirs, stop, &footprint, None, &|s, d| self.height_via(s, d))
     }
 
     /// [`HeightField::heights_until`] with the distinct blocks of the batch read on `threads` threads (GEN-020, LOD-009).
@@ -145,7 +145,7 @@ impl HeightField for TerrainField<'_> {
         let footprint = |g: &dyn LatticeSource, d: Vec3| {
             self.base_via(g, d);
         };
-        crate::global::eval_gathered_threads(&self.src, dirs, stop, threads, &footprint, &|s, d| self.height_via(s, d))
+        crate::global::eval_gathered_threads(&self.src, dirs, stop, threads, &footprint, None, &|s, d| self.height_via(s, d))
     }
 
     fn seed(&self) -> u64 {
@@ -187,7 +187,7 @@ impl HeightField for TerrainField<'_> {
                 crate::climate::ClimateTexture::default()
             }
         };
-        crate::global::eval_gathered_with(&self.src, dirs, stop, &footprint, &|s, d| self.height_via(s, d), &climate)
+        crate::global::eval_gathered_with(&self.src, dirs, stop, &footprint, None, &|s, d| self.height_via(s, d), &climate)
     }
 
     fn implementation_id(&self) -> &'static str {

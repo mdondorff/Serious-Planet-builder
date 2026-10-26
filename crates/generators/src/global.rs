@@ -970,7 +970,24 @@ fn footprint_by_block(
     dirs: &[Vec3],
     stop: &dyn Fn() -> bool,
     footprint: &dyn Fn(&dyn LatticeSource, Vec3),
+    reach: Option<u32>,
+    extra: Option<&ExtraReads>,
 ) -> Option<Vec<(u8, u64, u64)>> {
+    if let Some(r) = reach {
+        match footprint_hinted(src, dirs, stop, r) {
+            Hinted::Done(mut keys) => {
+                // The reads of `extra` (a tile's climate) join the hinted ones, taken exactly.
+                if let Some(extra) = extra {
+                    let gather = Gather { res: src.res(), seen: Mutex::new(Vec::new()) };
+                    extra(&gather);
+                    keys.extend(gather.seen.into_inner().expect("gather mutex"));
+                }
+                return Some(blocks_of(keys, src.res(), src.block_cells()));
+            }
+            Hinted::Stopped => return None,
+            Hinted::Declined => {}
+        }
+    }
     let (res, bc) = (src.res(), src.block_cells());
     let gather = Gather { res, seen: Mutex::new(Vec::new()) };
     for (k, &d) in dirs.iter().enumerate() {
@@ -979,7 +996,12 @@ fn footprint_by_block(
         }
         footprint(&gather, d);
     }
-    let mut keys = gather.seen.into_inner().expect("gather mutex");
+    let keys = gather.seen.into_inner().expect("gather mutex");
+    Some(blocks_of(keys, res, bc))
+}
+
+/// The distinct cells `keys` as (face, Z-order block, cell key) sorted by block.
+fn blocks_of(mut keys: Vec<u64>, res: u32, bc: u32) -> Vec<(u8, u64, u64)> {
     keys.sort_unstable();
     keys.dedup();
     // The block that holds a cell: the last block of a row holds the far edge as its own last sample.
@@ -992,7 +1014,74 @@ fn footprint_by_block(
         })
         .collect();
     by_block.sort_unstable();
-    Some(by_block)
+    by_block
+}
+
+/// The reads of a computation that joins the footprint of a batch (a tile's climate).
+type ExtraReads<'a> = dyn Fn(&dyn LatticeSource) + 'a;
+
+/// What [`footprint_hinted`] made of a batch.
+enum Hinted {
+    Done(Vec<u64>),
+    Stopped,
+    Declined,
+}
+
+/// The largest bounding box, in cells, of a batch whose footprint is taken from a hint.
+const HINT_MAX_CELLS: u64 = 1 << 22;
+
+/// The footprint of a batch that is compact on one face, without running the reads of every direction: a superset made of the box of `reach` cells round
+/// the cell each direction falls in (one more on the far side, for the vertex a bilinear read adds). The caller's reads (a gradient stencil) stay within
+/// `reach` cells of the direction's own cell, so the box holds every cell they touch; the extra cells are the source's own samples and nobody reads them.
+/// A batch that touches two faces, comes within `reach + 2` cells of a face edge (a read may cross it), is wider than [`HINT_MAX_CELLS`] or has a direction
+/// the lattice cannot locate is declined: the exact footprint is taken then.
+fn footprint_hinted(src: &dyn LatticeSource, dirs: &[Vec3], stop: &dyn Fn() -> bool, reach: u32) -> Hinted {
+    let res = src.res();
+    let margin = reach + 2;
+    let mut face: Option<u8> = None;
+    let (mut i0, mut i1, mut j0, mut j1) = (u32::MAX, 0u32, u32::MAX, 0u32);
+    let mut cells: Vec<(u32, u32)> = Vec::new();
+    for (k, &d) in dirs.iter().enumerate() {
+        if k % 64 == 0 && stop() {
+            return Hinted::Stopped;
+        }
+        let Ok(at) = locate_direction(res, &planet_core::cube::TangentWarp, d) else { return Hinted::Declined };
+        if face.is_some_and(|f| f != at.face.0) || at.i < margin || at.j < margin || at.i + margin > res || at.j + margin > res {
+            return Hinted::Declined;
+        }
+        face = Some(at.face.0);
+        if cells.last() != Some(&(at.i, at.j)) {
+            cells.push((at.i, at.j));
+        }
+        (i0, i1, j0, j1) = (i0.min(at.i), i1.max(at.i), j0.min(at.j), j1.max(at.j));
+    }
+    let Some(face) = face else { return Hinted::Declined };
+    // The bounding box of the boxes: `reach` before a cell and `reach + 1` after it.
+    let side = 2 * u64::from(reach) + 2;
+    let (w, h) = (u64::from(i1 - i0) + side, u64::from(j1 - j0) + side);
+    if w * h > HINT_MAX_CELLS {
+        return Hinted::Declined;
+    }
+    let mut mark = vec![false; (w * h) as usize];
+    for &(i, j) in &cells {
+        let (x, y) = (u64::from(i - i0), u64::from(j - j0));
+        for dy in 0..side {
+            let row = ((y + dy) * w + x) as usize;
+            for m in &mut mark[row..row + side as usize] {
+                *m = true;
+            }
+        }
+    }
+    let mut keys: Vec<u64> = Vec::new();
+    for y in 0..h {
+        for x in 0..w {
+            if mark[(y * w + x) as usize] {
+                // The box of a cell starts `reach` before it.
+                keys.push(cell_key(face, (i0 + x as u32) - reach, (j0 + y as u32) - reach));
+            }
+        }
+    }
+    Hinted::Done(keys)
 }
 
 fn read_cell(src: &dyn LatticeSource, face: u8, k: u64) -> (u64, Result<GlobalSample, ReadError>) {
@@ -1014,9 +1103,10 @@ pub fn eval_gathered(
     dirs: &[Vec3],
     stop: &dyn Fn() -> bool,
     footprint: &dyn Fn(&dyn LatticeSource, Vec3),
+    reach: Option<u32>,
     eval: &dyn Fn(&dyn LatticeSource, Vec3) -> f64,
 ) -> Vec<f64> {
-    eval_gathered_from(src, dirs, stop, footprint, eval, 64)
+    eval_gathered_from(src, dirs, stop, footprint, reach, eval, 64)
 }
 
 /// [`eval_gathered`] together with `extra`, a computation that reads further lattice cells (a tile's climate, GEN-021): the cells
@@ -1029,6 +1119,7 @@ pub fn eval_gathered_with<R>(
     dirs: &[Vec3],
     stop: &dyn Fn() -> bool,
     footprint: &dyn Fn(&dyn LatticeSource, Vec3),
+    reach: Option<u32>,
     eval: &dyn Fn(&dyn LatticeSource, Vec3) -> f64,
     extra: &dyn Fn(&dyn LatticeSource) -> R,
 ) -> (Vec<f64>, R) {
@@ -1049,7 +1140,18 @@ pub fn eval_gathered_with<R>(
         }
         footprint(g, d);
     };
-    let Some(by_block) = footprint_by_block(src, dirs, stop, &both) else { return (out, extra(src)) };
+    let Some(by_block) = footprint_by_block(
+        src,
+        dirs,
+        stop,
+        &both,
+        reach,
+        Some(&|g| {
+            let _ = extra(g);
+        }),
+    ) else {
+        return (out, extra(src));
+    };
     let mut cells = Vec::with_capacity(by_block.len());
     for (n, &(face, block, k)) in by_block.iter().enumerate() {
         if (n == 0 || (by_block[n - 1].0, by_block[n - 1].1) != (face, block) || n % 64 == 0) && stop() {
@@ -1074,6 +1176,7 @@ fn eval_gathered_from(
     dirs: &[Vec3],
     stop: &dyn Fn() -> bool,
     footprint: &dyn Fn(&dyn LatticeSource, Vec3),
+    reach: Option<u32>,
     eval: &dyn Fn(&dyn LatticeSource, Vec3) -> f64,
     min_dirs: usize,
 ) -> Vec<f64> {
@@ -1087,7 +1190,7 @@ fn eval_gathered_from(
         }
         return out;
     }
-    let Some(by_block) = footprint_by_block(src, dirs, stop, footprint) else { return out };
+    let Some(by_block) = footprint_by_block(src, dirs, stop, footprint, reach, None) else { return out };
     let mut cells = Vec::with_capacity(by_block.len());
     for (n, &(face, block, k)) in by_block.iter().enumerate() {
         if (n == 0 || (by_block[n - 1].0, by_block[n - 1].1) != (face, block) || n % 64 == 0) && stop() {
@@ -1117,16 +1220,17 @@ pub fn eval_gathered_threads(
     stop: &(dyn Fn() -> bool + Sync),
     threads: usize,
     footprint: &(dyn Fn(&dyn LatticeSource, Vec3) + Sync),
+    reach: Option<u32>,
     eval: &(dyn Fn(&dyn LatticeSource, Vec3) -> f64 + Sync),
 ) -> Vec<f64> {
     if threads <= 1 {
-        return eval_gathered_from(src, dirs, stop, footprint, eval, 2);
+        return eval_gathered_from(src, dirs, stop, footprint, reach, eval, 2);
     }
     if !gatherable(src, dirs.len(), 2) {
         return crate::height::eval_chunked(dirs, stop, threads, &|d| eval(src, d));
     }
     let out = vec![0.0; dirs.len()];
-    let Some(by_block) = footprint_by_block(src, dirs, stop, footprint) else { return out };
+    let Some(by_block) = footprint_by_block(src, dirs, stop, footprint, reach, None) else { return out };
     // Contiguous runs of one (face, block).
     let mut groups: Vec<std::ops::Range<usize>> = Vec::new();
     for (n, b) in by_block.iter().enumerate() {
@@ -1195,7 +1299,7 @@ pub fn gather_cells(src: &dyn LatticeSource, reads: &dyn Fn(&dyn LatticeSource))
     if !gatherable(src, 1, 1) {
         return None;
     }
-    let by_block = footprint_by_block(src, &[Vec3::new(0.0, 0.0, 0.0)], &|| false, &|g, _| reads(g))?;
+    let by_block = footprint_by_block(src, &[Vec3::new(0.0, 0.0, 0.0)], &|| false, &|g, _| reads(g), None, None)?;
     let mut cells: Vec<_> = by_block.iter().map(|&(face, _, k)| read_cell(src, face, k)).collect();
     cells.sort_unstable_by_key(|c| c.0);
     Some(GatheredCells(CellTable { res: src.res(), cells }))

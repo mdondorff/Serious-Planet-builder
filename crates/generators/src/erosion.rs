@@ -38,6 +38,9 @@ const AMPLITUDE_OCEAN_M: f64 = 80.0;
 const AMPLITUDE_LAND_M: f64 = 900.0;
 /// Bake cells either side of a point over which the slope is measured.
 const SLOPE_CELLS: f64 = 3.0;
+/// How far from the cell of a direction the lattice reads of a height reach, in cells (GEN-020): the gradient stencil reaches [`SLOPE_CELLS`] cells (a bit
+/// more on the chart, 2/sqrt(3) at most) and the bilinear read one more; a footprint taken from this hint is a superset of the exact one.
+pub const GRADIENT_REACH_CELLS: u32 = 8;
 /// The slope factor: this share of the amplitude on flat ground, the rest from slope 0.01 (rise over run) to 0.2.
 const CARVE_FLOOR: f64 = 0.15;
 const CARVE_FROM: f64 = 0.01;
@@ -246,7 +249,7 @@ impl HeightField for ErosionField<'_> {
             self.base_via(g, d);
             self.gradient_via(g, d);
         };
-        crate::global::eval_gathered(&self.src, dirs, stop, &footprint, &|s, d| self.height_via(s, d))
+        crate::global::eval_gathered(&self.src, dirs, stop, &footprint, Some(GRADIENT_REACH_CELLS), &|s, d| self.height_via(s, d))
     }
 
     /// [`HeightField::heights_until`] with the distinct blocks of the batch read on `threads` threads (GEN-020, LOD-009).
@@ -255,7 +258,9 @@ impl HeightField for ErosionField<'_> {
             self.base_via(g, d);
             self.gradient_via(g, d);
         };
-        crate::global::eval_gathered_threads(&self.src, dirs, stop, threads, &footprint, &|s, d| self.height_via(s, d))
+        crate::global::eval_gathered_threads(&self.src, dirs, stop, threads, &footprint, Some(GRADIENT_REACH_CELLS), &|s, d| {
+            self.height_via(s, d)
+        })
     }
 
     /// The climate of the tile from the bake with the integer reader, as the terrain field (GEN-021); a failed read is recorded like a
@@ -294,7 +299,15 @@ impl HeightField for ErosionField<'_> {
                 crate::climate::ClimateTexture::default()
             }
         };
-        crate::global::eval_gathered_with(&self.src, dirs, stop, &footprint, &|s, d| self.height_via(s, d), &climate)
+        crate::global::eval_gathered_with(
+            &self.src,
+            dirs,
+            stop,
+            &footprint,
+            Some(GRADIENT_REACH_CELLS),
+            &|s, d| self.height_via(s, d),
+            &climate,
+        )
     }
 
     fn seed(&self) -> u64 {

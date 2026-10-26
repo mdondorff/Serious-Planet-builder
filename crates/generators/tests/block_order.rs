@@ -287,3 +287,55 @@ fn a_threaded_batch_reads_nothing_once_the_flag_is_set() {
     assert!(reads <= limit + 8 * 64, "{reads} reads after the flag was set at {limit}");
     assert!(cut.iter().all(|x| *x == 0.0), "an unfinished batch leaves 0.0");
 }
+
+/// A compact batch of `n` x `n` directions on one face, `step` apart in face coordinates round `(s0, t0)`: the shape of a chunk's region or a tile.
+fn compact_batch(face: u8, s0: f64, t0: f64, step: f64, n: usize) -> Vec<Vec3> {
+    let h = n as f64 / 2.0;
+    (0..n * n)
+        .map(|k| {
+            let (a, b) = ((k % n) as f64 - h, (k / n) as f64 - h);
+            planet_core::cube::face_to_direction(&TangentWarp, Face(face), s0 + a * step, t0 + b * step)
+        })
+        .collect()
+}
+
+// spec: GEN-020
+// spec: CON-14
+// spec: GEN-079
+#[test]
+fn a_compact_batch_takes_its_footprint_from_the_hint_and_has_the_bits_of_the_single_heights_at_1_and_8_threads() {
+    // 100 x 100 directions 1.5e-5 apart in face coordinates (a bake cell is 1.2e-4): about 12 cells across. The first batch straddles a block edge (the
+    // face centre is the edge of the blocks 7 and 8), the second lies inside a block, the third a few cells from a face edge (the hint is declined there)
+    // and the fourth at a cube corner.
+    let batches = [
+        compact_batch(2, 0.0, 0.0, 1.5e-5, 100),
+        compact_batch(1, 0.3, -0.2, 1.5e-5, 100),
+        compact_batch(4, 0.99965, 0.2, 1.5e-5, 100),
+        compact_batch(5, 0.9998, 0.9998, 1.5e-5, 100),
+    ];
+    for (b, dirs) in batches.iter().enumerate() {
+        let direct = Simulated::new(usize::MAX, false);
+        let want: Vec<u64> = dirs.iter().map(|&d| field(&direct).height(d).to_bits()).collect();
+        for threads in [1usize, 8] {
+            let src = Simulated::new(3, true);
+            let f = field(&src);
+            let got: Vec<u64> = f.heights_threaded_until(dirs, &|| false, threads).iter().map(|h| h.to_bits()).collect();
+            assert!(got == want, "batch {b}, {threads} threads: a height differs from the single read");
+            assert!(f.error().is_none(), "batch {b}, {threads} threads: a read failed: {:?}", f.error());
+        }
+    }
+}
+
+// spec: GEN-020
+// spec: GEN-079
+#[test]
+fn the_hinted_footprint_reads_about_the_cells_the_batch_needs_and_decodes_each_block_once() {
+    let dirs = compact_batch(2, 0.0, 0.0, 1.5e-5, 100);
+    let src = Simulated::new(1, true);
+    let f = field(&src);
+    let _ = f.heights_threaded_until(&dirs, &|| false, 1);
+    // The cells of a 12-cell batch with a 3-cell stencil and a box of 8: a few hundred, on the four blocks round the face centre; never one per read.
+    let reads = src.reads.load(Ordering::Relaxed);
+    assert!(reads < 2_000, "{reads} cell reads for a batch of about 12 x 12 cells");
+    assert!(src.decodes() <= 4, "{} block decodes for the four blocks round the centre", src.decodes());
+}

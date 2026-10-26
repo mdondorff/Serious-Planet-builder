@@ -755,7 +755,7 @@ fn perf_coupled_args(args: &[String]) -> Result<Vec<String>, String> {
     perf_bake_scene_args("coupled", args)
 }
 
-/// The `cargo` arguments of a perf scene that takes only `--global-res` and `--machine-ready` (`coupled`, `anet-chunk`).
+/// The `cargo` arguments of a perf scene that takes `--global-res`, `--machine-ready` and, for `anet-chunk`, `--store DIR` (`coupled`, `anet-chunk`).
 fn perf_bake_scene_args(scene: &str, args: &[String]) -> Result<Vec<String>, String> {
     let mut v: Vec<String> = ["run", "--release", "-p", "planet", "--", "test-render", "--perf", "--scene", scene, "--adapter", "hardware"]
         .iter()
@@ -769,9 +769,14 @@ fn perf_bake_scene_args(scene: &str, args: &[String]) -> Result<Vec<String>, Str
                 v.push(a.clone());
                 v.push(it.next().ok_or_else(|| format!("{a} needs a value"))?.clone());
             }
+            "--store" if scene == "anet-chunk" => {
+                v.push(a.clone());
+                v.push(it.next().ok_or_else(|| format!("{a} needs the directory of a stored bake"))?.clone());
+            }
             other => {
                 return Err(format!(
-                    "unknown perf coupled option '{other}' (known: --global-res, --machine-ready, the owner's override of a failed readiness gate)"
+                    "unknown perf {scene} option '{other}' (known: --global-res, --machine-ready{}, the owner's override of a failed readiness gate)",
+                    if scene == "anet-chunk" { ", --store" } else { "" }
                 ))
             }
         }
@@ -1586,6 +1591,10 @@ mod tests {
         let chunk = perf_bake_scene_args("anet-chunk", &s(&["--global-res", "64"])).unwrap();
         assert!(chunk.contains(&"anet-chunk".to_string()) && chunk.contains(&"hardware".to_string()) && chunk.contains(&"64".to_string()));
         assert!(!chunk.contains(&"--machine-ready".to_string()), "the owner's override is never added by default");
+        // The chunk scene reads a stored production bake (the viewer's geometry); the coupled scene has no store.
+        let on_store = perf_bake_scene_args("anet-chunk", &s(&["--store", "target/accept/global16384", "--global-res", "16384"])).unwrap();
+        assert!(on_store.windows(2).any(|w| w[0] == "--store" && w[1] == "target/accept/global16384"));
+        assert!(perf_bake_scene_args("coupled", &s(&["--store", "x"])).unwrap_err().contains("unknown perf coupled option"));
     }
 
     // spec: GEN-014, BUILD-002
