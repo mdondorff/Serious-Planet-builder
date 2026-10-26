@@ -143,3 +143,8 @@ Two attempts failed on input, not on the app: the SendKeys `c` and `p` keys did 
 ### What this means for the 60 fps target (numbers only)
 - At 1 m, flight, 1440p on the window size used, RTX 3080 Ti, the frame holds 60 fps on vsync with about 7 ms of CPU and 12 ms of GPU headroom (GPU 4.3 ms span).
 - The risks are the tail (p99 60 ms, max 760 ms, from `begin_frame`, render submit and chunk landings) and the CPU use of the worker side (4.7 to 5.4 cores, half of it the plan job's per-call threads, section 3), which competes with the main thread when other sessions or a game's own threads load the machine.
+
+### Patch notes (local only, reverted; a debug switch is a tracked item)
+- `crates/app/src/stall.rs`, `StallProbe::end_at`: before the stall test, when the env var `PLANET_PHASES` names a file, append one line per frame: `frame_ms,phase=ms;phase=ms;...|lock=ms;...` (phases in run order, waits from the thread-local of the main thread, 2 ms or more).
+- `crates/app/src/window.rs`, after `st.gpu_ms = timing.gpu_ms` in the timed frame: when `PLANET_PASSES` names a file, append `cpu, total, gpu, span, copy` and `timing.passes.get(p)` for each `GpuPass::ALL` pass.
+- Both write with `OpenOptions::append` per frame (about 40 µs); no change to what a frame does. Launch: `PLANET_PHASES=<file> PLANET_PASSES=<file> planet editor --store <store> --site LAT,LON`.
