@@ -311,6 +311,11 @@ fn the_shared_edge_of_two_tiles_stays_closed_through_a_neighbour_landing_and_nex
     let edge_gap = |a: &CompactTile, wa: f32, b: &CompactTile, wb: f32| {
         (0..w).map(|j| (drawn(a, cells as usize, j, wa) - drawn(b, 0, j, wb)).abs()).fold(0.0, f64::max)
     };
+    // Where the allowance on the edge comes from: the two tiles sample the same field at the same points, but each rounds the height to its own
+    // quantisation step (`hr_step`, at most half a step of error each, `height_error_bound_m`), and the plane and the weights are f32 (a few 1e-5
+    // m at these heights). So two tiles agree on their edge to half a step of each plus 1e-4 m, and not more: a crack that opens at a swap or
+    // with the weight is the change times a weight difference, metres, far above it.
+    let tolerance = |a: &CompactTile, b: &CompactTile| a.height_error_bound_m() + b.height_error_bound_m() + 1e-4;
 
     // Chunk A is ready and faded in; chunk B is not ready: the tile beside the border reads both and weighs what its neighbour weighs.
     let (a0, b0) = (build(&field_a(), ta), build(&field_a(), tb));
@@ -324,7 +329,7 @@ fn the_shared_edge_of_two_tiles_stays_closed_through_a_neighbour_landing_and_nex
         let (wa, wb) = (fade.tile_weight(&view_a, ta, ms), fade.tile_weight(&view_b, tb, ms));
         assert_eq!(wa, wb, "{ms} ms: both sides weigh what the ready chunk weighs");
         let gap = edge_gap(&a0, wa, &b0, wb);
-        assert!(gap < 0.05, "{ms} ms: the shared edge is open by {gap} m next to a chunk that is not ready");
+        assert!(gap <= tolerance(&a0, &b0), "{ms} ms: the shared edge is open by {gap} m next to a chunk that is not ready");
     }
 
     // Chunk B lands: both tiles are rebuilt; each carries the increment over what it was drawn at, and one clock moves both.
@@ -335,17 +340,20 @@ fn the_shared_edge_of_two_tiles_stays_closed_through_a_neighbour_landing_and_nex
     b2.change = b1.change_replacing(&b0, 1.0);
     assert!(a2.change.is_some() || b2.change.is_some(), "chunk B changes the tiles beside its border");
     let was = (edge_gap(&a0, 1.0, &b0, 1.0), drawn(&a0, cells as usize, 5, 1.0));
-    assert!(was.0 < 0.05, "the old tiles agree on the edge: {}", was.0);
+    assert!(was.0 <= tolerance(&a0, &b0), "the old tiles agree on the edge: {}", was.0);
+    let mut worst = 0.0f64;
     for epoch in [0.0f32, 0.3, 0.7, 1.0] {
         let gap = edge_gap(&a2, epoch, &b2, epoch);
-        assert!(gap < 0.05, "epoch {epoch}: the edge between the rebuilt tiles is open by {gap} m");
+        worst = worst.max(gap);
+        assert!(gap <= tolerance(&a2, &b2), "epoch {epoch}: the edge between the rebuilt tiles is open by {gap} m");
     }
+    eprintln!("shared edge: worst gap {worst:.2e} m against an allowance of {:.2e} m", tolerance(&a2, &b2));
     // At weight 0 the rebuilt tile draws what the old one drew, and at weight 1 its own surface (nothing popped at the swap).
     for j in 0..w {
         for i in 0..w {
-            assert!((drawn(&a2, i, j, 0.0) - drawn(&a0, i, j, 1.0)).abs() < 1e-3, "tile A at ({i}, {j}) pops at the swap");
-            assert!((drawn(&b2, i, j, 0.0) - drawn(&b0, i, j, 1.0)).abs() < 1e-3, "tile B at ({i}, {j}) pops at the swap");
-            assert!((drawn(&a2, i, j, 1.0) - drawn(&a1, i, j, 1.0)).abs() < 1e-3);
+            assert!((drawn(&a2, i, j, 0.0) - drawn(&a0, i, j, 1.0)).abs() <= tolerance(&a2, &a0), "tile A at ({i}, {j}) pops at the swap");
+            assert!((drawn(&b2, i, j, 0.0) - drawn(&b0, i, j, 1.0)).abs() <= tolerance(&b2, &b0), "tile B at ({i}, {j}) pops at the swap");
+            assert!((drawn(&a2, i, j, 1.0) - drawn(&a1, i, j, 1.0)).abs() <= tolerance(&a2, &a1));
         }
     }
 }
