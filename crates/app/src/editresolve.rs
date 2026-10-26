@@ -95,6 +95,17 @@ fn secs(d: Duration) -> f64 {
     d.as_secs_f64()
 }
 
+/// The per-chunk-job times of the phases of the chunks solved since the last call: the network (base heights, routing, beds), the solve and the
+/// drivers, summed over the jobs and divided by their number; the jobs overlap in wall time when they run in parallel.
+fn phases() -> String {
+    let [network, solve, drivers, solved] = planet_generators::anet::phase_totals_ms();
+    if solved < 1.0 {
+        return String::new();
+    }
+    let per = |ms: f64| ms / solved / 1000.0;
+    format!(" [per chunk job: network {:.1} s, solve {:.1} s, drivers {:.1} s, {solved:.0} jobs]", per(network), per(solve), per(drivers))
+}
+
 fn fmt_opt(d: Option<Duration>) -> String {
     d.map_or_else(|| "(not re-solved)".to_string(), |d| format!("{:.1} s", secs(d)))
 }
@@ -118,7 +129,10 @@ pub fn edit_resolve(o: &crate::Options, out: &mut dyn Write) -> Result<(), Strin
     let def = planet_world_def::WorldDefinition::single_planet(crate::skeleton::RADIUS_M, o.seed);
     let world = Arc::new(WorldTerrain::open_store(def, dir, o.global_res)?);
     let pool = Arc::new(ThreadPool::new(workers));
-    let cfg = ChunkConfig { workers, ..ChunkConfig::default() };
+    let cfg = {
+        let d = ChunkConfig::default();
+        ChunkConfig { workers, stale_workers: o.stale_workers.unwrap_or(d.stale_workers), ..d }
+    };
     if !world.enable_anet_from_store_with(crate::anetworld::ANET_CELL_M, pool, Arc::new(SystemClock::new()), cfg, false)? {
         return Err("the store holds no coupled run: make it first (the viewer or `test-render --scene coupled`)".into());
     }
@@ -148,7 +162,8 @@ pub fn edit_resolve(o: &crate::Options, out: &mut dyn Write) -> Result<(), Strin
         };
         writeln!(out, "{label}: {} tiles read {wanted} chunks", tiles.len()).map_err(err)?;
         let s = settle(&world, &tiles, camera, centre)?;
-        writeln!(out, "  landed: {} chunks in {:.1} s (centre chunk after {})", s.landed, secs(s.total), fmt_opt(s.centre)).map_err(err)?;
+        writeln!(out, "  landed: {} chunks in {:.1} s (centre chunk after {}){}", s.landed, secs(s.total), fmt_opt(s.centre), phases())
+            .map_err(err)?;
         for (k, &r) in radii.iter().enumerate() {
             let id = (n * radii.len() + k + 1) as u128;
             let mut def = (*world.definition()).clone();
@@ -168,10 +183,11 @@ pub fn edit_resolve(o: &crate::Options, out: &mut dyn Write) -> Result<(), Strin
             let s = settle(&world, &tiles, camera, centre)?;
             writeln!(
                 out,
-                "  hill reach {r} m: {} of {wanted} wanted chunks re-solved; the centre chunk landed after {}, the last after {:.1} s",
+                "  hill reach {r} m: {} of {wanted} wanted chunks re-solved; the centre chunk landed after {}, the last after {:.1} s{}",
                 s.landed,
                 fmt_opt(s.centre),
-                secs(s.total)
+                secs(s.total),
+                phases()
             )
             .map_err(err)?;
             def.remove_item(BodyId::PLANET, id);
