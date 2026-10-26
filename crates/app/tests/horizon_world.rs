@@ -293,3 +293,82 @@ fn a_plateau_that_absorbs_the_chunk_change_leaves_none_of_it_in_the_plane() {
         "the plateau absorbs the change: {got}, {by_difference} (the chunk's own {plain})"
     );
 }
+
+fn land_chunks(r: &Rig) {
+    for _ in 0..40 {
+        r.world.chunk_frame(&[tile()], camera(), &[]);
+        r.chunk_jobs.run(64);
+        r.clock.advance(100);
+    }
+}
+
+fn hill_at(chunk: (u32, u32), id: u128) -> ItemSpec {
+    let at = TileId::new(Face(2), CHUNK_GRID_LEVEL, chunk.0, chunk.1).unwrap().center_direction(&TangentWarp);
+    ItemSpec { id, layer: DEFAULT_ITEM_LAYER.into(), priority: 0, dir: at, content_hash: 0, reach_m: 800.0, max_delta_m: 60.0, stamp: None }
+        .with_stamp(Stamp::new(StampKind::Hill, [50.0, 0.0, 0.0]))
+}
+
+// spec: STRM-059
+#[test]
+fn a_bake_from_shared_height_tiles_equals_the_bake_that_evaluates_its_whole_raster_and_neighbours_share_the_tiles() {
+    use planet::horizonworld::ChunkHorizonBaker;
+    use planet_streaming::chunks::HorizonBaker;
+    let r = rig();
+    land_chunks(&r);
+    let lat = r.world.chunk_lattice().unwrap();
+    let shared = ChunkHorizonBaker::new(&r.world, lat, params(), 2);
+    let plain = ChunkHorizonBaker::new(&r.world, lat, params(), 2).with_tile_cap(0);
+    let own: ChunkKey = (2, 1000, 1000);
+    let east: ChunkKey = (2, 1001, 1000);
+    let reads = shared.reads(own);
+    assert!(reads.len() == 9, "the rig's chunks around the tile are all ready: {reads:?}");
+    let first = shared.bake(own, &[]);
+    assert_eq!(first, plain.bake(own, &[]), "the chunk");
+    assert!(first.iter().any(|&b| b > 0), "the stand-in's relief shades something");
+    assert_eq!(shared.tile_stats(), planet::horizonworld::TileStats { evaluated: 9, hits: 0, held: 9 });
+    // The chunk to the east shares six of its nine tiles with the first: three are new.
+    assert_eq!(shared.bake(east, &[]), plain.bake(east, &[]), "the neighbour");
+    let s = shared.tile_stats();
+    assert_eq!((s.evaluated, s.hits), (12, 6), "{s:?}");
+    // The same chunk again evaluates nothing.
+    assert_eq!(shared.bake(own, &[]), first);
+    assert_eq!(shared.tile_stats().evaluated, 12);
+    // A cache that holds fewer tiles than a bake reads still gives the same map, and never holds more than its bound.
+    let tight = ChunkHorizonBaker::new(&r.world, lat, params(), 2).with_tile_cap(4);
+    assert_eq!(tight.bake(own, &[]), first);
+    assert_eq!(tight.tile_stats().held, 4);
+}
+
+// spec: STRM-059
+#[test]
+fn a_neighbours_edit_replaces_the_tile_it_touches_in_the_halo_and_no_other_and_a_chunk_landing_replaces_its_own() {
+    use planet::horizonworld::ChunkHorizonBaker;
+    use planet_streaming::chunks::HorizonBaker;
+    let r = rig();
+    let lat = r.world.chunk_lattice().unwrap();
+    let shared = ChunkHorizonBaker::new(&r.world, lat, params(), 2);
+    let plain = ChunkHorizonBaker::new(&r.world, lat, params(), 2).with_tile_cap(0);
+    let own: ChunkKey = (2, 1000, 1000);
+    // Nothing landed yet: the tiles are the base alone. Then the chunks land: every tile is made again (their key holds the result).
+    let before_landing = shared.bake(own, &[]);
+    assert_eq!(shared.tile_stats().evaluated, 9);
+    land_chunks(&r);
+    let landed = shared.bake(own, &[]);
+    assert_eq!(landed, plain.bake(own, &[]));
+    assert_ne!(landed, before_landing, "the stand-in's change is in the heights");
+    assert_eq!(shared.tile_stats().evaluated, 18, "nine tiles held a chunk that was not ready: all nine are made again");
+    // An edit inside the chunk to the east, 800 m across and clear of every other chunk of the nine.
+    let mut def = (*r.world.definition()).clone();
+    def.put_item_spec(BodyId::PLANET, hill_at((1001, 1000), 11)).unwrap();
+    r.world.set_definition(Arc::new(def)).unwrap();
+    let edited = shared.bake(own, &[]);
+    assert_eq!(edited, plain.bake(own, &[]), "the edit is in the map, as if nothing had been kept");
+    assert_ne!(edited, landed, "the hill beside the chunk shades its edge");
+    let s = shared.tile_stats();
+    // (A tile's key holds the items within the stamp stage's halo of it, so the hill, 2.5 km in, also re-keys the tiles beside the east one;
+    // the three of the far west column, 7 km away, are read from the cache.)
+    assert!(s.evaluated > 18 && s.hits >= 3 && s.evaluated - 18 + s.hits == 9, "only the tiles the hill reaches are made again, not the nine: {s:?}");
+    // Nothing changes: nothing is made again.
+    let again = shared.bake(own, &[]);
+    assert_eq!((again, shared.tile_stats().evaluated), (edited, s.evaluated));
+}

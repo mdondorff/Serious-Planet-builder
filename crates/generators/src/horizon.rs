@@ -91,23 +91,46 @@ fn sample(r: &HeightRaster<'_>, i: i64, j: i64, fx: f64, fy: f64) -> Option<f64>
     Some((h00 * (1.0 - fx) + h10 * fx) * (1.0 - fy) + (h01 * (1.0 - fx) + h11 * fx) * fy)
 }
 
+/// The distance of every step of the march and the curvature drop at it, `d^2 / (2 R)`: the same for every texel and azimuth, so made once per bake
+/// (GEN-085). The steps are the recurrence `d += step_min + growth * d` from one texel, evaluated in the same order as a march that adds them as
+/// it goes, so every `d` and every drop is the same double.
+fn march_steps(p: &HorizonParams, texel_m: f64) -> Vec<(f64, f64)> {
+    let mut steps = Vec::new();
+    let mut d = texel_m;
+    while d <= p.range_m {
+        steps.push((d, d * d / (2.0 * p.radius_m)));
+        d += p.step_min_m + p.step_growth * d;
+    }
+    steps
+}
+
 /// The horizon byte of texel `(x, y)` of the raster at azimuth index `k`: the steepest rise (tangent) over the samples along the azimuth
 /// out to the range or the raster's edge, as an angle.
-fn horizon_at(r: &HeightRaster<'_>, p: &HorizonParams, x: usize, y: usize, dir: (f64, f64)) -> u8 {
+fn horizon_at(r: &HeightRaster<'_>, steps: &[(f64, f64)], x: usize, y: usize, dir: (f64, f64)) -> u8 {
     let h0 = f64::from(r.heights[y * r.n + x]);
-    let (mut best, mut d) = (f64::NEG_INFINITY, r.texel_m);
-    while d <= p.range_m {
+    let mut best = f64::NEG_INFINITY;
+    for &(d, drop) in steps {
         let (sx, sy) = (d * dir.0 / r.texel_m, d * dir.1 / r.texel_m);
-        let (ix, iy) = (libm::floor(sx), libm::floor(sy));
-        let Some(h) = sample(r, x as i64 + ix as i64, y as i64 + iy as i64, sx - ix, sy - iy) else { break };
-        let rise = h - h0 - d * d / (2.0 * p.radius_m);
+        let (ix, iy) = (floor_i64(sx), floor_i64(sy));
+        let Some(h) = sample(r, x as i64 + ix, y as i64 + iy, sx - ix as f64, sy - iy as f64) else { break };
+        let rise = h - h0 - drop;
         best = best.max(rise / d);
-        d += p.step_min_m + p.step_growth * d;
     }
     if best.is_finite() {
         quantize(libm::atan(best))
     } else {
         0
+    }
+}
+
+/// `floor` as an integer: exact (the cast truncates toward zero, one step down fixes a negative fraction), and the arguments are at most a
+/// million texels, far inside `i64`.
+fn floor_i64(v: f64) -> i64 {
+    let t = v as i64;
+    if (t as f64) > v {
+        t - 1
+    } else {
+        t
     }
 }
 
@@ -171,19 +194,20 @@ pub fn bake_horizon(
         ));
     }
     let a = p.azimuths as usize;
+    let steps = march_steps(p, raster.texel_m);
     let dirs: Vec<(f64, f64)> = (0..p.azimuths).map(|k| azimuth_dir(k, p.azimuths)).collect();
     let mut data = vec![0u8; w * h * a];
     let row_len = w * a;
     let rows_per = h.div_ceil(threads.clamp(1, h)).max(1);
     std::thread::scope(|s| {
         for (c, part) in data.chunks_mut(rows_per * row_len).enumerate() {
-            let dirs = &dirs;
+            let (dirs, steps) = (&dirs, &steps);
             planet_core::thread::spawn_named(s, "horizon-bake", move || {
                 for (r, row) in part.chunks_mut(row_len).enumerate() {
                     let y = y0 + c * rows_per + r;
                     for i in 0..w {
                         for (k, d) in dirs.iter().enumerate() {
-                            row[i * a + k] = horizon_at(raster, p, x0 + i, y, *d);
+                            row[i * a + k] = horizon_at(raster, steps, x0 + i, y, *d);
                         }
                     }
                 }
@@ -261,6 +285,55 @@ mod tests {
             assert!((lo..=hi).contains(&q), "y {y}: {q} not in [{lo}, {hi}]");
             assert_eq!(map.at(3, y - 60, south), 0, "y {y}: nothing to the south");
             assert_eq!((map.at(3, y - 60, east), map.at(3, y - 60, west)), (0, 0));
+        }
+    }
+
+    /// The march as it was before the step table (GEN-085): the distance and its curvature drop made as it goes, `libm::floor` for the sample.
+    fn reference_bake(r: &HeightRaster<'_>, block: (usize, usize, usize, usize), p: &HorizonParams) -> Vec<u8> {
+        let (x0, y0, w, h) = block;
+        let mut out = Vec::new();
+        for y in y0..y0 + h {
+            for x in x0..x0 + w {
+                for k in 0..p.azimuths {
+                    let dir = azimuth_dir(k, p.azimuths);
+                    let h0 = f64::from(r.heights[y * r.n + x]);
+                    let (mut best, mut d) = (f64::NEG_INFINITY, r.texel_m);
+                    while d <= p.range_m {
+                        let (sx, sy) = (d * dir.0 / r.texel_m, d * dir.1 / r.texel_m);
+                        let (ix, iy) = (libm::floor(sx), libm::floor(sy));
+                        let Some(hh) = sample(r, x as i64 + ix as i64, y as i64 + iy as i64, sx - ix, sy - iy) else { break };
+                        let rise = hh - h0 - d * d / (2.0 * p.radius_m);
+                        best = best.max(rise / d);
+                        d += p.step_min_m + p.step_growth * d;
+                    }
+                    out.push(if best.is_finite() { quantize(libm::atan(best)) } else { 0 });
+                }
+            }
+        }
+        out
+    }
+
+    // spec: GEN-085
+    #[test]
+    fn the_step_table_march_equals_the_march_that_adds_its_steps_as_it_goes_byte_for_byte() {
+        // Rough terrain with ridges and a plain, a texel that is not a power of two, a body small enough for the curvature to matter, and the
+        // default 16 azimuths (the cardinal ones snap to a row or a column), at three ranges and two growths.
+        let n = 330usize;
+        let heights: Vec<f32> = (0..n * n)
+            .map(|k| {
+                let (i, j) = ((k % n) as f64, (k / n) as f64);
+                (60.0 * libm::sin(0.11 * i) * libm::cos(0.07 * j) + 25.0 * libm::sin(0.31 * i + 0.17 * j) + 0.013 * i * j.sqrt()) as f32
+            })
+            .collect();
+        let texel = 8.037;
+        let raster = HeightRaster { n, texel_m: texel, heights: &heights };
+        for (range, growth, radius) in [(300.0, 0.045, 20_000.0), (1_200.0, 0.045, R), (1_200.0, 0.0, 50_000.0)] {
+            let p = HorizonParams { range_m: range, step_growth: growth, radius_m: radius, ..HorizonParams::chunk(R) };
+            let halo = halo_texels(&p, texel);
+            let block = (halo, halo, n - 2 * halo, n - 2 * halo);
+            let got = bake_horizon(&raster, block, &p, 3).unwrap();
+            assert_eq!(got.data, reference_bake(&raster, block, &p), "range {range} growth {growth} radius {radius}");
+            assert!(got.data.iter().any(|&q| q > 0) && got.data.iter().any(|&q| q == 0), "the fixture shades some texels and not others");
         }
     }
 
