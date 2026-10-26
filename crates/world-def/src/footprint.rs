@@ -91,6 +91,38 @@ pub fn touches(cap: Cap, anchor: Vec3, reach_m: f64, radius_m: f64) -> bool {
     angle_between(cap.centre, anchor) <= limit * (1.0 + FOOTPRINT_REL_MARGIN) + FOOTPRINT_ABS_MARGIN_RAD
 }
 
+/// An angle widened the way [`touches`] widens its limit (twice its relative and absolute margins), and by a further 1e-7 rad: on a body small
+/// enough for `reach / R` to be about a radian the relative margin is a millionth of it, more than the slack of a tile a few centimetres wide.
+pub fn widened_angle(angle: f64) -> f64 {
+    angle * (1.0 + 2.0 * FOOTPRINT_REL_MARGIN) + 2.0 * FOOTPRINT_ABS_MARGIN_RAD + 1e-7
+}
+
+/// Where an edit was or is and what it can change: the one answer to "does this edit reach that place" for tiles, chunks and the bounds of
+/// a plan (R3). False positives only cost a refresh; a false negative would leave stale data.
+#[derive(Clone, Copy, Debug)]
+pub struct EditReach<'a> {
+    /// The unit direction of the anchor.
+    pub dir: Vec3,
+    pub reach_m: f64,
+    /// A brush's strokes bound the change inside the reach disc (WDEF-007); `None` or empty: the whole disc.
+    pub strokes: Option<&'a [crate::stamp::StrokeBits]>,
+}
+
+impl EditReach<'_> {
+    /// Whether the edit can change something in `cap` (the reach disc touches it and, for a brush, a stroke does).
+    pub fn touches_cap(&self, cap: Cap, radius_m: f64) -> bool {
+        touches(cap, self.dir, self.reach_m, radius_m) && self.strokes.is_none_or(|s| s.is_empty() || strokes_touch(cap, s, radius_m))
+    }
+
+    /// Whether the edit's disc reaches within `angle` radians of `centre`, the test of a read whose extent is only an angle (the bounds and reads of
+    /// a plan, `frame/lod.rs`): [`widened_angle`] of the angle plus the reach, and not a number counts as reached (the safe side).
+    pub fn within_angle(&self, centre: Vec3, angle: f64, radius_m: f64) -> bool {
+        let a = angle_between(centre, self.dir);
+        let limit = widened_angle(angle + self.reach_m / radius_m);
+        a.is_nan() || limit.is_nan() || a <= limit
+    }
+}
+
 /// The 16-byte id of an item, big-endian, so the byte order is the numeric order (an id below `2^64` is zero-extended, as it was when
 /// ids were 64 bits).
 pub fn id_bytes(id: crate::item_id::ItemId) -> [u8; 16] {
