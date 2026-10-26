@@ -144,7 +144,14 @@ pub fn build_script(scene: StreamScene, radius_m: f64, aspect: f64, field: &dyn 
 
 /// [`build_script`] over the site `(lat, lon)` in degrees instead of the standard one (the viewer's `--site`: a flight over land whose
 /// chunks nobody has computed yet).
-pub fn build_script_at(site: (f64, f64), scene: StreamScene, radius_m: f64, aspect: f64, field: &dyn HeightField, seed: u64) -> SceneScript {
+pub fn build_script_at(
+    site: (f64, f64),
+    scene: StreamScene,
+    radius_m: f64,
+    aspect: f64,
+    field: &dyn HeightField,
+    seed: u64,
+) -> SceneScript {
     let (site_lat_deg, site_lon_deg) = site;
     let fov = FOV_Y_DEG.to_radians();
     let north = Vec3::new(0.0, 0.0, 1.0);

@@ -1719,7 +1719,14 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         ..LodParams::earth_1080p()
     };
     lod.validate().map_err(|e| format!("--cells {} --tau {}: {e}", o.cells, tau))?;
-    let script = build_script_at(o.site.unwrap_or((SITE_LAT_DEG, SITE_LON_DEG)), StreamScene::Dive, radius_m, f64::from(size.0) / f64::from(size.1), field.as_ref(), field.seed());
+    let script = build_script_at(
+        o.site.unwrap_or((SITE_LAT_DEG, SITE_LON_DEG)),
+        StreamScene::Dive,
+        radius_m,
+        f64::from(size.0) / f64::from(size.1),
+        field.as_ref(),
+        field.seed(),
+    );
     let views: Vec<&str> = TerrainView::ALL.iter().map(|v| v.name()).collect();
     // A flight shows the relief view unless `--view` says otherwise (the flat-colour views are one colour at 1 m).
     let view_name = if o.given.contains("--view") { o.view.as_str() } else { "relief" };
