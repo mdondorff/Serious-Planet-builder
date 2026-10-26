@@ -2,6 +2,8 @@
 - Region: the chunk's square plus `ANET_HALO_M` (GEN-049), a disc around its centre of the region's radius.
 - Network: the segments `segments_reaching` keeps for the region (GEN-078) plus, for each, the segments upstream along the main stem up to `law.window` back (the bed's running minimum, `anchor_profiles`). Each segment contributes discs along its chord (every chord / 8) of radius `routing_reach_m(law, cell_m)` plus the half step.
 - One function returns the discs; the version and the pruning take it. The pruning (#730) is the source of the reach; the function lives beside it in `anet.rs` and `segments_reaching` calls it (no change in what it keeps; tier A: equal sets on the existing network tests). The owner of the pruning (explorer) is asked for its reach before the code.
+- The node slide search (`slide_m`, `slide_steep_m`, `head_m`, 0.5 to 1 km around a node) is inside the discs: `routing_reach_m` counts the largest of the three beside the band, the meander and the raster rounding. No extra disc is needed; tier A pins it (the reach is at least the sum for the law's values).
+- The set is built from the key, the coarse run and the law only (guides = chords between coarse centres, bands = the reach): never from routed paths or items, so it cannot depend on the edits it selects; tier A: identical with and without items.
 - A disc is a cap: the test against an item is `EditReach::touches_cap` (R3, strokes included).
 
 ## Version
