@@ -1122,7 +1122,7 @@ sun_local_hours = 12
 sun_declination_deg = 10
 "#;
 
-    // spec: TEST-048
+    // spec: TEST-053
     #[test]
     fn the_look_table_and_a_poses_view_are_read_and_a_bad_name_is_refused_with_the_names_it_knows() {
         use planet_frame::look::shading::ShadeView;
