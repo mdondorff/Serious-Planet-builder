@@ -45,6 +45,11 @@ pub const UNTRUSTED_VERSION: u64 = u64::MAX - 1;
 /// ready chunk of another version is stale (STRM-056).
 pub trait ChunkVersions: Send + Sync {
     fn version(&self, key: ChunkKey) -> u64;
+    /// Whether an edit lies in the chunk's own region (its square and halo) and not only in the wider read set (the routed network it reads,
+    /// GEN-081): such a chunk is certain to change and is solved first among the stale ones (default: none).
+    fn near_edit(&self, _key: ChunkKey) -> bool {
+        false
+    }
 }
 
 impl ChunkDisk for PackChunkDisk {
@@ -62,10 +67,14 @@ impl ChunkDisk for PackChunkDisk {
     }
 }
 
+/// The chunks a view at 100 to 300 m wants (SPIKE-44, the 2026-10-26 readings): a pool of this size re-solves them in one round.
+pub const VIEW_CHUNK_WORKERS: usize = 4;
+
 /// The knobs of the chunk jobs.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ChunkConfig {
-    /// Jobs on stale chunks (a ready chunk of an older version, STRM-056) running at once: the other workers stay free for new chunks.
+    /// Jobs on stale chunks (a ready chunk of an older version, STRM-056) running at once, at most `workers`; the default is every worker: a chunk
+    /// that is missing still goes first, and an edit's chunks take what is left (ADR 0083's class "visible streaming and edits").
     pub stale_workers: usize,
     /// Jobs running at once (`chunk_workers`; the default of a viewer is half its worker pool, so tiles are not starved).
     pub workers: usize,
@@ -78,7 +87,7 @@ pub struct ChunkConfig {
 
 impl Default for ChunkConfig {
     fn default() -> Self {
-        ChunkConfig { workers: 3, stale_workers: 2, evict_ms: 5_000, cap_bytes: 512 << 20 }
+        ChunkConfig { workers: 4, stale_workers: usize::MAX, evict_ms: 5_000, cap_bytes: 512 << 20 }
     }
 }
 
@@ -181,6 +190,10 @@ impl ChunkManager {
             None => HashMap::new(),
         };
         let want_version = |k: &ChunkKey| versions.get(k).copied().unwrap_or(0);
+        let near: HashMap<ChunkKey, bool> = match &self.versions {
+            Some(v) => wanted.iter().map(|w| w.0).map(|k| (k, v.near_edit(k))).collect(),
+            None => HashMap::new(),
+        };
         // The stage's epoch when the versions were asked: a job that ends under another epoch computed against edits it was not keyed for.
         let epoch0 = self.stage.epoch();
         let to_start: Vec<(ChunkKey, u64, bool)> = {
@@ -224,13 +237,16 @@ impl ChunkManager {
                 candidates.into_iter().take(free).map(|(_, k)| (k, want_version(&k), false)).collect();
             // Then the stale chunks the plan reads (STRM-056), nearest first, at most `stale_workers` at once: a chunk of an older version keeps
             // drawing, so it waits behind the chunks that are missing, and the workers it does not use stay free for new chunks.
-            let stale_free = self.cfg.stale_workers.saturating_sub(sh.stale_running.len());
+            let stale_free = self.cfg.stale_workers.min(self.cfg.workers).saturating_sub(sh.stale_running.len());
+            // The ones with an edit in their own region first (they surely change), then the ones only the wider read set reaches (they may come out
+            // as they were), each group nearest to the camera first.
             let mut stale: Vec<(f64, ChunkKey)> = wanted
                 .iter()
                 .filter(|(k, _)| sh.ready.get(k).is_some_and(|e| e.version != want_version(k)) && !sh.running.contains(k))
                 .map(|&(k, d)| (d, k))
                 .collect();
-            stale.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+            let is_near = |k: &ChunkKey| near.get(k).copied().unwrap_or(false);
+            stale.sort_by(|a, b| is_near(&b.1).cmp(&is_near(&a.1)).then(a.0.total_cmp(&b.0)).then(a.1.cmp(&b.1)));
             stale.dedup_by_key(|c| c.1);
             for (_, k) in stale.into_iter().take(stale_free) {
                 if chosen.len() >= free {

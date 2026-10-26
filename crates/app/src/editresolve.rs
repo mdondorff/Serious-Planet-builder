@@ -128,6 +128,9 @@ pub fn edit_resolve(o: &crate::Options, out: &mut dyn Write) -> Result<(), Strin
     let workers = o.threads.max(1);
     let def = planet_world_def::WorldDefinition::single_planet(crate::skeleton::RADIUS_M, o.seed);
     let world = Arc::new(WorldTerrain::open_store(def, dir, o.global_res)?);
+    if let Some(n) = o.base_threads {
+        world.set_base_threads(n);
+    }
     let pool = Arc::new(ThreadPool::new(workers));
     let cfg = {
         let d = ChunkConfig::default();
@@ -156,16 +159,18 @@ pub fn edit_resolve(o: &crate::Options, out: &mut dyn Write) -> Result<(), Strin
                 format!("camera {altitude} m up, in view"),
             )
         };
-        let wanted: usize = {
+        let keys: Vec<ChunkKey> = {
             let mut seen = std::collections::HashSet::new();
-            tiles.iter().flat_map(|&t| manager.reads(t)).filter(|k| seen.insert(*k)).count()
+            tiles.iter().flat_map(|&t| manager.reads(t)).filter(|k| seen.insert(*k)).collect()
         };
+        let wanted = keys.len();
         writeln!(out, "{label}: {} tiles read {wanted} chunks", tiles.len()).map_err(err)?;
         let s = settle(&world, &tiles, camera, centre)?;
         writeln!(out, "  landed: {} chunks in {:.1} s (centre chunk after {}){}", s.landed, secs(s.total), fmt_opt(s.centre), phases())
             .map_err(err)?;
         for (k, &r) in radii.iter().enumerate() {
             let id = (n * radii.len() + k + 1) as u128;
+            let before: Vec<Option<u64>> = keys.iter().map(|&k| manager.result_hash(k)).collect();
             let mut def = (*world.definition()).clone();
             let item = ItemSpec {
                 id,
@@ -181,9 +186,12 @@ pub fn edit_resolve(o: &crate::Options, out: &mut dyn Write) -> Result<(), Strin
             def.put_item_spec(BodyId::PLANET, item).map_err(|e| format!("{e:?}"))?;
             world.set_definition(Arc::new(def.clone()))?;
             let s = settle(&world, &tiles, camera, centre)?;
+            // Of the chunks that were solved again, how many came out with other bits than before (the read set is conservative: a chunk the
+            // edit does not change still re-solves, M8-7).
+            let changed = keys.iter().zip(&before).filter(|(k, b)| manager.result_hash(**k) != **b).count();
             writeln!(
                 out,
-                "  hill reach {r} m: {} of {wanted} wanted chunks re-solved; the centre chunk landed after {}, the last after {:.1} s{}",
+                "  hill reach {r} m: {} of {wanted} wanted chunks re-solved, {changed} of them with other bits than before; the centre chunk landed after {}, the last after {:.1} s{}",
                 s.landed,
                 fmt_opt(s.centre),
                 secs(s.total),

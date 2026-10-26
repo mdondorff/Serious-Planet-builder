@@ -52,7 +52,7 @@ impl WorldBase {
             h = mix64(h ^ fold(f.implementation_id()));
             h = mix64(h ^ u64::from(f.version()));
         }
-        WorldBase { world: Arc::downgrade(world), identity: h, failed: Default::default(), threads: 4 }
+        WorldBase { world: Arc::downgrade(world), identity: h, failed: Default::default(), threads: world.base_threads() }
     }
 }
 
@@ -184,7 +184,7 @@ pub struct WorldChunkVersions {
     lat: planet_generators::chunkfield::ChunkLattice,
     discs:
         std::sync::Mutex<std::collections::HashMap<planet_generators::chunkfield::ChunkKey, Arc<Vec<planet_generators::anet::ReadDisc>>>>,
-    made: std::sync::Mutex<std::collections::HashMap<planet_generators::chunkfield::ChunkKey, (u64, u64)>>,
+    made: std::sync::Mutex<std::collections::HashMap<planet_generators::chunkfield::ChunkKey, (u64, u64, bool)>>,
 }
 
 impl WorldChunkVersions {
@@ -202,7 +202,7 @@ impl planet_streaming::chunks::ChunkVersions for WorldChunkVersions {
         let Some(world) = self.world.upgrade() else { return 0 };
         let def = world.definition();
         let revision = def.revision();
-        if let Some(&(r, v)) = self.made.lock().expect("versions").get(&key) {
+        if let Some(&(r, v, _)) = self.made.lock().expect("versions").get(&key) {
             if r == revision {
                 return v;
             }
@@ -212,6 +212,7 @@ impl planet_streaming::chunks::ChunkVersions for WorldChunkVersions {
             .into_iter()
             .filter(|l| def.chunk_stage(BodyId::PLANET, l) == planet_world_def::ChunkStagePosition::Under)
             .collect();
+        let mut near = false;
         let version = if layers.is_empty() {
             0
         } else {
@@ -231,9 +232,11 @@ impl planet_streaming::chunks::ChunkVersions for WorldChunkVersions {
             };
             let mut items: std::collections::BTreeMap<(String, u128), planet_world_def::footprint::FootprintItem> = Default::default();
             for layer in &layers {
-                for d in discs.iter() {
+                for (n, d) in discs.iter().enumerate() {
                     let cap = planet_world_def::footprint::Cap { centre: d.centre, angle: d.angle.min(core::f64::consts::PI) };
                     if let Ok(found) = def.footprint_items_cap(BodyId::PLANET, layer, cap) {
+                        // The first disc of the read set is the chunk's own region (GEN-081).
+                        near |= n == 0 && !found.is_empty();
                         for it in found {
                             items.entry((layer.clone(), it.id)).or_insert(it);
                         }
@@ -247,8 +250,14 @@ impl planet_streaming::chunks::ChunkVersions for WorldChunkVersions {
                 planet_world_def::footprint_hash(&all) | 1
             }
         };
-        self.made.lock().expect("versions").insert(key, (revision, version));
+        self.made.lock().expect("versions").insert(key, (revision, version, near));
         version
+    }
+
+    fn near_edit(&self, key: planet_generators::chunkfield::ChunkKey) -> bool {
+        // The version is made (and cached) first, so the flag is the one of the current revision.
+        let _ = self.version(key);
+        self.made.lock().expect("versions").get(&key).is_some_and(|m| m.2)
     }
 }
 
