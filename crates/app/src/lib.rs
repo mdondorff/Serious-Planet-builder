@@ -712,7 +712,8 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
             &["--world", "--global-res", "--threads"]
         } else if stream_scene {
             // `--prefill-levels`: the levels of the tile pack the gated dives require pre-filled at their start (default 4).
-            &["--world", "--global-res", "--prefill-levels"]
+            // `--base-threads`: the threads of a batch of the A-net's base heights in the edit-latency scene (with `--chunk-workers`).
+            &["--world", "--global-res", "--prefill-levels", "--base-threads"]
         } else if window {
             &["--world", "--global-res", "--prefill-levels"]
         } else if terrain_scene {
