@@ -407,7 +407,7 @@ fn enable_chunks(
     };
     writeln!(out, "coupled run ready after {:.1} s", started.elapsed().as_secs_f64()).map_err(err)?;
     let pool = planet_streaming::GenWorkers::new(workers).pool();
-    let cfg = ChunkConfig { workers, evict_ms: 3_600_000, cap_bytes: 4 << 30 };
+    let cfg = ChunkConfig { workers, evict_ms: 3_600_000, cap_bytes: 4 << 30, ..ChunkConfig::default() };
     world.enable_anet(maps.clone(), cell_m, pool, Arc::new(planet_streaming::SystemClock::new()), cfg)?;
     // The horizon shadows (REND-038): the second job of every chunk, and the stored far-field horizon read now (a still waits for both).
     let lat = world.chunk_lattice().ok_or("the world has no chunk lattice")?;
