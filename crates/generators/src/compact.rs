@@ -391,24 +391,25 @@ fn f32_up(x: f64) -> f32 {
     }
 }
 
-/// The driver block of tile `id` (GEN-071): at each of the 9 x 9 climate texels the codes of the ready chunk under it as the tile's level reads them
+/// The driver block of tile `id` (GEN-071) and whether a ready chunk gave any of it: at each of the 9 x 9 climate texels the codes of the ready chunk under it as the tile's level reads them
 /// (`HeightField::level_drivers`) or the neutral codes, with the neutral insolation of the texel's latitude in the top byte.
-fn driver_block(field: &dyn HeightField, map: &dyn FaceMapping, id: TileId) -> [u32; DRIVER_TEXELS] {
+fn driver_block(field: &dyn HeightField, map: &dyn FaceMapping, id: TileId) -> ([u32; DRIVER_TEXELS], bool) {
     use crate::climate::{CLIMATE_CELLS, CLIMATE_EDGE};
-    use crate::drivers::{neutral_codes, pack_driver_word, DriverParams};
+    use crate::drivers::{neutral_codes, pack_driver_word, DriverParams, NeutralInsolation};
     let dirs: Vec<Vec3> = (0..CLIMATE_EDGE)
         .flat_map(|b| (0..CLIMATE_EDGE).map(move |a| (a, b)))
         .map(|(a, b)| id.sample_direction(map, CLIMATE_CELLS, a as u32, b as u32))
         .collect();
     let chunk = field.level_drivers(&dirs, id.level());
     let params = DriverParams::default();
+    let insolation = NeutralInsolation::new();
     let mut words = [0u32; DRIVER_TEXELS];
     for (k, w) in words.iter_mut().enumerate() {
-        let neutral = neutral_codes(libm::asin(dirs[k].z.clamp(-1.0, 1.0)), &params);
+        let neutral = neutral_codes(libm::asin(dirs[k].z.clamp(-1.0, 1.0)), &params, &insolation);
         let codes = chunk.as_ref().and_then(|c| c[k]).unwrap_or(neutral);
         *w = pack_driver_word(codes, neutral[2]);
     }
-    words
+    (words, chunk.is_some_and(|c| c.iter().any(Option::is_some)))
 }
 
 /// Build the compact tile from a height field (all geometry in f64, rounded once).
@@ -432,6 +433,13 @@ pub fn compact_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: Ti
         .filter(|c| c.iter().any(|&v| v != 0.0))
         // A value that is not finite as an f32 is no change (the renderer refuses a plane with one, which would fail the frame's whole upload batch).
         .map(|c| c.into_iter().map(|v| Some(v as f32).filter(|x| x.is_finite()).unwrap_or(0.0)).collect::<Vec<f32>>());
+    // The drivers fade in with the node's chunk weight, which reaches the fragment stage through the tile's change plane: a tile under a chunk gets a
+    // plane of zeros when the chunk moved no height of it, so its drivers do not appear at full weight in the first frame.
+    let (driver_words, has_chunk_drivers) = driver_block(field, map, id);
+    let change = match change {
+        None if has_chunk_drivers => Some(vec![0.0f32; count]),
+        other => other,
+    };
     let h_origin = all[0];
     let origin = PlanetFixed(centre * (radius_m + h_origin));
     // The shell through the origin: control points are small tile-local numbers (CON-11), not heights from the sea level.
@@ -477,7 +485,7 @@ pub fn compact_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: Ti
         flip: false,
         relief_m: hi - lo,
         climate_words: climate.to_words(),
-        driver_words: driver_block(field, map, id),
+        driver_words,
         texels,
         change,
     };

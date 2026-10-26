@@ -457,10 +457,54 @@ fn the_driver_views_show_the_drivers_of_the_tiles_driver_block() {
             n += 1;
         }
         assert!(n > 300, "{view:?}: the planet covers {n} pixels");
-        assert!(worst < 0.01, "{view:?}: the colour is {worst} off the CPU's {want:?}");
+        assert!(worst < 0.003, "{view:?}: the colour is {worst} off the CPU's {want:?}");
     }
     // The three views differ from one another and from the lit picture.
     let lit_hdr = hdr_of(&mut r, &ctx, &p, view_plan(ShadeView::Lit));
     let soil_hdr = hdr_of(&mut r, &ctx, &p, view_plan(ShadeView::SoilDepth));
     assert_ne!(lit_hdr, soil_hdr);
+}
+
+// spec: GEN-074
+#[test]
+fn a_ramp_in_the_driver_block_shows_in_the_views_between_the_cpu_mirrors_extremes() {
+    use planet_frame::look::shading::driver_view_colour;
+    use planet_generators::drivers::{pack_driver_word, tile_drivers_at, DriverParams, DRIVER_TEXELS};
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let (p, _) = plan(3);
+    let params = DriverParams::default();
+    // The soil code runs with the texel column, the moisture with its row, the insolation with their sum: a transposed index shows.
+    let mut words = [0u32; DRIVER_TEXELS];
+    for b in 0..9 {
+        for a in 0..9 {
+            words[b * 9 + a] = pack_driver_word([(a * 28) as u8, (b * 28) as u8, ((a + b) * 14) as u8], 60);
+        }
+    }
+    let mut r = TerrainRenderer::with_pools(&ctx, SIZE, CELLS, compact_pool());
+    r.enable_lit(&ctx);
+    for n in &p.nodes {
+        if r.slot_of(n.tile).is_none() {
+            let mut tile = compact_tile_field(&Reference(1), &TangentWarp, n.tile, CELLS, R);
+            tile.driver_words = words;
+            r.upload_tile(&ctx, &tile).unwrap();
+        }
+    }
+    for view in [ShadeView::SoilDepth, ShadeView::Moisture, ShadeView::Insolation] {
+        let hdr = hdr_of(&mut r, &ctx, &p, view_plan(view));
+        let seen: Vec<[f64; 3]> = hdr.iter().filter(|px| px[3] > 0.0).map(colour_of).collect();
+        let corner = |u: f64, v: f64| {
+            let d = tile_drivers_at(&words, u, v, 1.0, &params);
+            driver_view_colour(view, d[0], d[1], d[2])
+        };
+        let (lo, hi) = (corner(0.0, 0.0), corner(1.0, 1.0));
+        let span = |c: usize| (lo[c].min(hi[c]) - 0.003, lo[c].max(hi[c]) + 0.003);
+        let inside = seen.iter().filter(|g| (0..3).all(|c| g[c] >= span(c).0 && g[c] <= span(c).1)).count();
+        assert!(
+            seen.len() > 300 && inside * 20 >= seen.len() * 19,
+            "{view:?}: {inside} of {} pixels inside the ramp's colours",
+            seen.len()
+        );
+        let distinct: std::collections::BTreeSet<u64> = seen.iter().map(|g| (g[0] * 1000.0) as u64).collect();
+        assert!(distinct.len() > 3, "{view:?}: the ramp shows as one colour");
+    }
 }

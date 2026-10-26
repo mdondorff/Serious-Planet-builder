@@ -20,13 +20,13 @@ pub const NODE_RECORD_STRIDE_MAX: u64 = 512;
 /// `max_storage_buffer_binding_size` of wgpu's default limits, which the adapter gate requires by name, VIEW-001).
 pub const COMPACT_BLOCK_BYTES: u64 = 128 << 20;
 
-/// Slots of a block of at most `block_bytes` for tiles of `cells`: `block_bytes / slot_bytes` (GEN-025; 14,639 at cells 32 in 128 MiB).
+/// Slots of a block of at most `block_bytes` for tiles of `cells`: `block_bytes / slot_bytes` (GEN-025; 14,146 at cells 32 in 128 MiB since MESH_VERSION 10, 14,639 before).
 pub fn block_slots_in(block_bytes: u64, cells: u32) -> u32 {
     u32::try_from(block_bytes / slot_bytes(cells)).unwrap_or(u32::MAX)
 }
 
 /// The compact pools of a terrain share for blocks of `block_slots` slots (ADR 0054): a block is one storage buffer of
-/// `block_slots * slot_bytes` bytes (the slots of GEN-025, header, climate block and texels, slot after slot; no record buffer).
+/// `block_slots * slot_bytes` bytes (the slots of GEN-025, header, climate block, driver block and texels, slot after slot; no record buffer).
 pub fn compact_format_pool_with(share_bytes: u64, cells: u32, block_slots: u32, frames_in_flight: u64) -> Result<PoolConfig, String> {
     if block_slots == 0 {
         return Err(format!("a block of 0 slots holds no tile of {cells} cells"));

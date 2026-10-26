@@ -584,6 +584,8 @@ impl<F: HeightField> ChunkField<F> {
             return None;
         }
         let (face, s, t) = direction_to_face(&TangentWarp, dir);
+        // The driver block has 8 texels an edge for the tile's 32 cells: its texels are 4 times as far apart, so it reads two pyramid levels up.
+        let x = (x + 2.0).min(own.k_max() as f64);
         let k0 = (libm::floor(x) as usize).min(own.k_max());
         let k1 = (k0 + 1).min(own.k_max());
         let frac = if k1 == k0 { 0.0 } else { (x - k0 as f64).min(1.0) };

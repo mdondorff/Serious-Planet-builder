@@ -619,7 +619,7 @@ fn driver_colour(view: u32, drv: vec3<f32>) -> vec3<f32> {
 }
 
 // The lit terrain's radiance before the pre-exposure (ADR 0039 point 4, REND-026): Lambert diffuse `albedo * max(n . sun, 0) / pi`
-// for the sun's illuminance of one unit, in the view `view` (0 lit, 1 albedo, 2 lighting, 3 temperature, 4 precipitation, 5 horizon, 6 shadow). `up` is
+// for the sun's illuminance of one unit, in the view `view` (0 lit, 1 albedo, 2 lighting, 3 temperature, 4 precipitation, 5 horizon, 6 shadow, 7 soil depth, 8 moisture, 9 insolation). `up` is
 // the unit up vector at the point; the climate comes from the tile's field. No ambient, no shadows, no specular.
 fn terrain_radiance(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32, ramp_min: f32, sun: vec3<f32>) -> vec3<f32> {
     let n = normalize(normal);
