@@ -88,6 +88,42 @@ pub struct JobSample {
     pub done: bool,
     /// The level of the tile.
     pub level: u8,
+    /// Milliseconds on the streamer's clock from the request (the tile was queued) to the dispatch: the wait in the streamer's own queue
+    /// behind the requests that rank before it (STRM-055).
+    pub queue_ms: u64,
+    /// The job rebuilds a resident tile that was stale (a refresh, STRM-026), not a tile that was missing.
+    pub refresh: bool,
+}
+
+/// The refresh jobs among `samples` in words (STRM-055): how many, and the median, 90th percentile and largest of the wait in the streamer's queue,
+/// the wait in the spawner's queue and the load, in milliseconds; `None` without a refresh.
+pub fn refresh_summary(samples: &[JobSample]) -> Option<String> {
+    let r: Vec<&JobSample> = samples.iter().filter(|j| j.refresh).collect();
+    if r.is_empty() {
+        return None;
+    }
+    let stat = |mut v: Vec<u64>| -> (u64, u64, u64) {
+        v.sort_unstable();
+        (v[v.len() / 2], v[(v.len() * 9 / 10).min(v.len() - 1)], v[v.len() - 1])
+    };
+    let (q, w, l) = (
+        stat(r.iter().map(|j| j.queue_ms).collect()),
+        stat(r.iter().map(|j| j.wait_us / 1000).collect()),
+        stat(r.iter().map(|j| j.run_us / 1000).collect()),
+    );
+    Some(format!(
+        "{} refresh jobs: streamer queue {}/{}/{} ms, spawner queue {}/{}/{} ms, load {}/{}/{} ms (median/p90/max)",
+        r.len(),
+        q.0,
+        q.1,
+        q.2,
+        w.0,
+        w.1,
+        w.2,
+        l.0,
+        l.1,
+        l.2
+    ))
 }
 
 /// Most samples a log keeps (about 25 MB); later jobs run unlogged.
@@ -116,14 +152,21 @@ impl JobLog {
     }
 
     /// Run `load`, recording its duration, how long the job waited since `queued` and how many loads ran beside it.
-    fn timed<R>(&self, level: u8, queued: std::time::Instant, load: impl FnOnce() -> R, done: impl Fn(&R) -> bool) -> R {
+    fn timed<R>(
+        &self,
+        level: u8,
+        (queue_ms, refresh): (u64, bool),
+        queued: std::time::Instant,
+        load: impl FnOnce() -> R,
+        done: impl Fn(&R) -> bool,
+    ) -> R {
         let started = std::time::Instant::now();
         let running = self.running.fetch_add(1, Ordering::SeqCst) + 1;
         let out = load();
         let run_us = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
         self.running.fetch_sub(1, Ordering::SeqCst);
         let wait_us = u64::try_from(started.saturating_duration_since(queued).as_micros()).unwrap_or(u64::MAX);
-        let sample = JobSample { wait_us, run_us, running, done: done(&out), level };
+        let sample = JobSample { wait_us, run_us, running, done: done(&out), level, queue_ms, refresh };
         let mut samples = self.samples.lock().expect("job log");
         if samples.len() < MAX_JOB_SAMPLES {
             samples.push(sample);
@@ -713,6 +756,8 @@ pub struct Streamer<T: Send + Sync + 'static> {
     /// nothing is running for them and something wants them (a job that ended without replacing them, a failure after its delay, a
     /// tile wanted again after it lost every class), and leave the set when the new version replaces them or they are evicted.
     stale: FxSet<TileId>,
+    /// When each queued request was made and whether it is a refresh, until it is dispatched (recorded only, STRM-055).
+    requested: FxMap<TileId, (u64, bool)>,
     /// The settle window of the refresh pre-emption (STRM-031), milliseconds of the injected clock; 0: nothing is held.
     refresh_settle_ms: u64,
     /// Stale tiles whose next refresh request waits for the settle window: tile, clock time at which it is due.
@@ -790,6 +835,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
             pending: [None, None, None],
             missing: FxSet::default(),
             stale: FxSet::default(),
+            requested: FxMap::default(),
             refresh_settle_ms: 0,
             held: BTreeMap::new(),
             refresh_stopped: FxSet::default(),
@@ -1318,6 +1364,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
                     self.request_refresh(t);
                 }
             } else if new.is_none() {
+                self.requested.remove(&t);
                 if let Some(class) = self.queue.remove(t) {
                     self.stats.cancelled += 1;
                     self.stats.cancelled_prefetch += u64::from(class == RequestClass::Prefetch as u8);
@@ -1336,6 +1383,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
         }
         match new {
             None => {
+                self.requested.remove(&t);
                 if let Some(class) = self.queue.remove(t) {
                     self.stats.cancelled += 1;
                     self.stats.cancelled_prefetch += u64::from(class == RequestClass::Prefetch as u8);
@@ -1354,6 +1402,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
         let queued = self.queue.insert(t, class as u8, 0, self.pools.kind_of(t) as usize);
         if queued {
             self.work.updated += 1;
+            self.requested.insert(t, (self.clock.now_ms(), self.stale.contains(&t)));
         }
         queued
     }
@@ -1365,6 +1414,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
         let rank = if class == RequestClass::Draw { 0 } else { u64::from(t.level()) };
         if self.queue.insert(t, class as u8, rank, self.pools.kind_of(t) as usize) {
             self.work.updated += 1;
+            self.requested.insert(t, (self.clock.now_ms(), self.stale.contains(&t)));
         }
     }
 
@@ -1408,6 +1458,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
     /// Step 5, dispatch in queue order. Prefetch is first in the queue only when nothing of the other classes waits; it goes
     /// out only into free slots and never evicts. A request without a slot blocks its pool for this frame.
     fn dispatch(&mut self) {
+        let now_ms = self.clock.now_ms();
         let mut blocked = [false; 2];
         // Entries of each pool passed over: when every pool is blocked or has nothing left behind the cursor, nothing can start.
         let mut passed = [0usize; 2];
@@ -1445,6 +1496,8 @@ impl<T: Send + Sync + 'static> Streamer<T> {
                 continue;
             };
             self.queue.remove(tile);
+            let (requested_ms, refresh) = self.requested.remove(&tile).unwrap_or((now_ms, false));
+            let queue_ms = now_ms.saturating_sub(requested_ms);
             let token = Arc::new(AtomicBool::new(false));
             let class = match key.0 {
                 0 => RequestClass::Draw,
@@ -1470,6 +1523,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
                 // A panicking source must not wedge the tile: it becomes a failure with the usual retry delay.
                 let loaded = log.timed(
                     tile.level(),
+                    (queue_ms, refresh),
                     queued,
                     || std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| source.load_staged(tile, &cancel))),
                     |r| matches!(r, Ok(Ok(Some(_)))),

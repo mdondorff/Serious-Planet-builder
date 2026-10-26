@@ -4,6 +4,6 @@
   "owner_override": [],
   "res": 256,
   "threads": 1,
-  "chunks": [{"cell_m": 8, "cells_per_chunk": 608, "halo_rings": 374, "seconds": 4.359}, {"cell_m": 4, "cells_per_chunk": 1216, "halo_rings": 747, "seconds": 18.774}, {"cell_m": 10, "cells_per_chunk": 496, "halo_rings": 305, "seconds": 2.775}],
-  "budget_failures": ["A-net chunk time 4.36 s at 8 m exceeds 4 s (GEN-052)"]
+  "chunks": [{"cell_m": 8, "cells_per_chunk": 608, "halo_rings": 374, "seconds": 13.726}, {"cell_m": 4, "cells_per_chunk": 1216, "halo_rings": 747, "seconds": 55.554}, {"cell_m": 10, "cells_per_chunk": 496, "halo_rings": 305, "seconds": 8.863}],
+  "budget_failures": ["A-net chunk time 13.73 s at 8 m exceeds 4 s (GEN-052)"]
 }

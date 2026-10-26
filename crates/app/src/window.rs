@@ -19,7 +19,7 @@ use planet_frame::look::file::LookParams;
 use planet_frame::mouselook::{Grab, GrabChange, GRAB_ORDER};
 use planet_frame::pathlog::PathLog;
 use planet_frame::pick::PickLimits;
-use planet_frame::scenes::{build_script, DrawnSet, StreamScene};
+use planet_frame::scenes::{build_script_at, DrawnSet, StreamScene, SITE_LAT_DEG, SITE_LON_DEG};
 use planet_frame::viewer::{
     lit_warm_plan, mode_label, smoke_verdict, title, view_coverage, viewer_lit_plan, Command, ExposureReading, FrameStats, Held, Readiness,
     SmokeCounts, TitleInfo, ViewCoverage, ViewerState, KEYS_HELP,
@@ -227,6 +227,10 @@ struct Running {
     stall: crate::stall::StallProbe,
     /// What the scheduler counted in the last frame, for a stall report.
     last_counts: planet_frame::managed::FrameCounts,
+    /// The job log index and the time of the last refresh line (STRM-055).
+    refresh_logged: (usize, u64),
+    /// Since the last refresh line: chunks landed, and the plan's chunk-reading nodes and their stand-ins summed over the frames.
+    chunk_acc: (u64, u64, u64),
     last_ms: Option<u64>,
     last_gpu_sample: Instant,
     gpu_ms: Option<f64>,
@@ -449,6 +453,8 @@ impl App<'_> {
             stats: FrameStats::new(now, if cfg.smoke { SMOKE_TITLE_PERIOD_MS } else { TITLE_PERIOD_MS }),
             stall: Default::default(),
             last_counts: Default::default(),
+            refresh_logged: (0, 0),
+            chunk_acc: (0, 0, 0),
             last_ms: None,
             last_gpu_sample: Instant::now(),
             gpu_ms: None,
@@ -734,7 +740,21 @@ impl App<'_> {
                 let tiles: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
                 let update = self.world.chunk_frame(&tiles, camera.position, &[]);
                 st.rig.managed.chunk_landed(&update.landed);
+                st.chunk_acc.0 += update.landed.len() as u64;
+                st.chunk_acc.1 += frame.counts.chunk.chunk_nodes as u64;
+                st.chunk_acc.2 += frame.counts.chunk.chunk_stand_in as u64;
                 st.rig.managed.chunk_evicted(&update.evicted);
+                // One line every 10 s about the refresh jobs since the last: the wait in the queues and the load of the rebuilds that bring a landed
+                // chunk's change to the screen (STRM-055).
+                if now_ms >= st.refresh_logged.1 + 10_000 {
+                    let log = st.rig.managed.manager().streamer().job_log();
+                    let samples = log.since(st.refresh_logged.0);
+                    st.refresh_logged = (st.refresh_logged.0 + samples.len(), now_ms);
+                    let (landed, nodes, stand_in) = std::mem::take(&mut st.chunk_acc);
+                    if let Some(line) = planet_streaming::refresh_summary(&samples) {
+                        crate::crash::note(&format!("{line}; {}", planet_frame::chunkshare::landing_note(landed, nodes, stand_in)));
+                    }
+                }
             }
             // A refusal of the plan for the base parameters degrades the frame (it draws the newest plan in hand); it is said once, never fatal.
             // One line, one report file and one title notice per cause (kind and level) in 5 s; the title counts all of them.
@@ -1698,7 +1718,14 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         ..LodParams::earth_1080p()
     };
     lod.validate().map_err(|e| format!("--cells {} --tau {}: {e}", o.cells, tau))?;
-    let script = build_script(StreamScene::Dive, radius_m, f64::from(size.0) / f64::from(size.1), field.as_ref(), field.seed());
+    let script = build_script_at(
+        o.site.unwrap_or((SITE_LAT_DEG, SITE_LON_DEG)),
+        StreamScene::Dive,
+        radius_m,
+        f64::from(size.0) / f64::from(size.1),
+        field.as_ref(),
+        field.seed(),
+    );
     let views: Vec<&str> = TerrainView::ALL.iter().map(|v| v.name()).collect();
     // A flight shows the relief view unless `--view` says otherwise (the flat-colour views are one colour at 1 m).
     let view_name = if o.given.contains("--view") { o.view.as_str() } else { "relief" };
