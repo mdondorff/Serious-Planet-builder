@@ -1107,7 +1107,7 @@ Source: TEST-048, STRM-039
 - **THEN** the chunk share of its plan has no stand-in node and the eye is `altitude_m` over the ground of the field with the chunks
 
 ### Requirement: TEST-054 The envelope scene runs the chunk stage
-When its world has a stored coupled run, the envelope scene (TEST-047) SHALL give the world the A-net chunk stage of the viewer (cells of 8 m, its own worker pool, its horizon jobs, REND-038), drive the chunk jobs every frame from the plan's tiles and pass what landed and what was evicted to the managed loop, and start every flight with no chunk resident, the chunks of the start view ready and a chunk edge half way along the flight (the worst phase: fresh chunks ahead of the eye). The stand-in share (STRM-039) SHALL count in the judged share. A world without a stored run SHALL keep the tile-only scene.
+When its world has a stored coupled run, the envelope scene (TEST-047) SHALL give the world the A-net chunk stage exactly as the viewer's window does (the same function, STRM-046), drive the chunk jobs every frame from the plan's tiles and pass what landed and what was evicted to the managed loop, and start every flight with no chunk resident, the chunks of the start view ready and a chunk edge half way along the flight (the worst phase: fresh chunks ahead of the eye). The stand-in share (STRM-039) SHALL count in the judged share. A world without a stored run SHALL keep the tile-only scene.
 
 Verify: A
 Status: active

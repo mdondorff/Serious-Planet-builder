@@ -113,6 +113,16 @@ pub fn cells_per_chunk_for(radius_m: f64, cell_m: f64) -> u32 {
     ((edge / cell_m / 16.0).round().max(1.0) as u32) * 16
 }
 
+/// The pool and the knobs of the viewer's chunk stage for generation workers `gen` (STRM-046, M8-7): half the generation workers, at most
+/// [`planet_streaming::chunks::VIEW_CHUNK_WORKERS`] (the 4 chunks a low view wants; more would oversubscribe: each chunk job reads its base heights on up to 4
+/// threads, ADR 0083), at the generation workers' priority, one pool for the chunk jobs and the horizon jobs. The window and the headless scenes take it
+/// from here.
+pub fn viewer_chunk_stage(gen: planet_streaming::GenWorkers) -> (Arc<dyn Spawner>, ChunkConfig) {
+    let workers = (gen.workers / 2).clamp(1, planet_streaming::chunks::VIEW_CHUNK_WORKERS);
+    let pool = planet_streaming::GenWorkers::new(workers).with_priority(gen.priority).pool();
+    (pool, ChunkConfig { workers, ..Default::default() })
+}
+
 impl WorldTerrain {
     /// Give the world the A-net chunk stage from the coupled run `maps` (the stored channel or a run just made): cells of about `cell_m`,
     /// chunk jobs on `spawner`, eviction on `clock`, landed chunks cached beside the store when the world has one. Replaces an earlier stage.
@@ -272,26 +282,43 @@ impl WorldTerrain {
         let world = Arc::clone(self);
         std::thread::Builder::new()
             .name("anet-load".into())
-            .spawn(move || match world.enable_anet_from_store(ANET_CELL_M, spawner.clone(), clock.clone(), cfg) {
-                Ok(true) => {
-                    // The horizon shadows (STRM-049, STRM-045): the second job of every chunk and the stored far-field horizon.
-                    if let Some(lat) = world.chunk_lattice() {
-                        let params = crate::horizonworld::chunk_horizon_params(&lat, world.radius_m());
-                        let threads = std::thread::available_parallelism().map_or(1, |t| t.get()).min(4);
-                        if let Err(e) =
-                            world.enable_horizon(params, spawner, clock, planet_streaming::chunks::HorizonConfig::default(), threads)
-                        {
-                            eprintln!("horizon: {e}");
-                        }
-                    }
-                    world.request_coarse_horizon();
-                }
+            .spawn(move || match world.enable_viewer_chunks(spawner, clock, cfg, true, true) {
+                Ok(true) => {}
                 Ok(false) => eprintln!(
                     "chunks: no stored coupled channel for this world: the terrain is the base (generate it with the coupled lens, K)"
                 ),
                 Err(e) => eprintln!("chunks: {e}"),
             })
             .expect("spawn the chunk stage's thread");
+    }
+
+    /// The viewer's chunk stage, blocking: the A-net stage from the stored channel on `spawner` (`cfg`, see [`viewer_chunk_stage`]) and, with `horizon`,
+    /// the horizon jobs on the same spawner (STRM-049) and the request for the stored far-field horizon (STRM-045). `use_disk` off computes every chunk.
+    /// The window's thread ([`WorldTerrain::request_anet`]) and the headless scenes call this one, so the scenes measure the viewer's setup.
+    /// `Ok(false)` when the store holds no coupled channel for this world.
+    pub fn enable_viewer_chunks(
+        self: &Arc<Self>,
+        spawner: Arc<dyn Spawner>,
+        clock: Arc<dyn Clock>,
+        cfg: ChunkConfig,
+        horizon: bool,
+        use_disk: bool,
+    ) -> Result<bool, String> {
+        if !self.enable_anet_from_store_with(ANET_CELL_M, spawner.clone(), clock.clone(), cfg, use_disk)? {
+            return Ok(false);
+        }
+        if horizon {
+            // The horizon shadows (STRM-049, STRM-045): the second job of every chunk and the stored far-field horizon.
+            if let Some(lat) = self.chunk_lattice() {
+                let params = crate::horizonworld::chunk_horizon_params(&lat, self.radius_m());
+                let threads = std::thread::available_parallelism().map_or(1, |t| t.get()).min(4);
+                if let Err(e) = self.enable_horizon(params, spawner, clock, planet_streaming::chunks::HorizonConfig::default(), threads) {
+                    eprintln!("horizon: {e}");
+                }
+            }
+            self.request_coarse_horizon();
+        }
+        Ok(true)
     }
 
     /// [`WorldTerrain::enable_anet`] from the stored channel beside the store; `Ok(false)` when the store holds none for this world.
@@ -681,5 +708,20 @@ impl WorldTerrain {
             );
         }
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // spec: STRM-046
+    #[test]
+    fn the_viewers_chunk_stage_takes_half_the_generation_workers_at_most_four_and_one_shared_pool() {
+        let sized = |n: usize| viewer_chunk_stage(planet_streaming::GenWorkers::new(n)).1.workers;
+        assert_eq!((sized(18), sized(8), sized(6), sized(3), sized(2), sized(1)), (4, 4, 3, 1, 1, 1));
+        // The knobs besides the workers are the defaults of the chunk manager.
+        let (_, cfg) = viewer_chunk_stage(planet_streaming::GenWorkers::new(18));
+        assert_eq!(cfg, ChunkConfig { workers: 4, ..Default::default() });
     }
 }
