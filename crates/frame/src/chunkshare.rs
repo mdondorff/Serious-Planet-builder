@@ -99,29 +99,6 @@ impl ChunkFade {
         }
     }
 
-    /// The tile `tile` is drawn at `now_ms` as an exact tile (the frame's plan found its mesh to be the one it expects, `resident_key` equal to
-    /// `planned_key`, the key a tile has when it was built against the chunks' current versions, STRM-038): the change of every chunk it reads is
-    /// on screen, and the fade of those that landed starts, except the chunks in `waiting`: some other tile that reads them is still drawn from
-    /// the mesh it had before the landing and is being rebuilt, and the clock would run for a change that is not all on screen yet. A tile that
-    /// is not exact (the stale tile of a landing) must not be passed: its resident key is the one the plan copies.
-    pub fn drawn(
-        &mut self,
-        view: &dyn ChunkView,
-        tile: TileId,
-        resident_key: u64,
-        planned_key: u64,
-        now_ms: u64,
-        waiting: &std::collections::HashSet<ChunkKey>,
-    ) {
-        if resident_key == planned_key {
-            for k in view.reads(tile) {
-                if !waiting.contains(&k) {
-                    self.shown(k, now_ms);
-                }
-            }
-        }
-    }
-
     /// Whether no fade is running at `now_ms`: every chunk whose change is drawn has been at weight 1 for good. A chunk that landed and is not
     /// drawn yet does not count (its readers are stale and drawn: the loop checks that; or none reads it).
     pub fn idle(&self, now_ms: u64) -> bool {

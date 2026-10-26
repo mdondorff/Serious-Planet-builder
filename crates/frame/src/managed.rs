@@ -209,7 +209,10 @@ pub struct ManagedLoop {
     /// chunk, and how often the timeout published anyway.
     publish_queue: Vec<planet_generators::chunkfield::ChunkKey>,
     publish_waiting_since: Option<u64>,
-    stale_drawn: bool,
+    /// For each landed chunk whose clock has not started, the resident tiles that read it and are not rebuilt yet, and since when it waits
+    /// (STRM-052: the clock starts when the last of them has been uploaded); and the tiles new to the renderer that wait for a running fade.
+    pending_readers: HashMap<planet_generators::chunkfield::ChunkKey, (HashSet<TileId>, u64)>,
+    deferred_fresh: usize,
     forced_publications: u64,
     /// The weight a resident tile keeps drawing at from the landing of a chunk it reads until its rebuilt tile is uploaded (STRM-053).
     stale_weights: HashMap<TileId, f32>,
@@ -304,7 +307,8 @@ impl ManagedLoop {
             drawn_tiles: HashMap::new(),
             publish_queue: Vec::new(),
             publish_waiting_since: None,
-            stale_drawn: false,
+            pending_readers: HashMap::new(),
+            deferred_fresh: 0,
             forced_publications: 0,
             stale_weights: HashMap::new(),
             draw_changed: false,
@@ -413,6 +417,10 @@ impl ManagedLoop {
 
     /// Chunks left RAM: they fade in again when they land again (STRM-047).
     pub fn chunk_evicted(&mut self, evicted: &[planet_generators::chunkfield::ChunkKey]) {
+        self.publish_queue.retain(|k| !evicted.contains(k));
+        for k in evicted {
+            self.pending_readers.remove(k);
+        }
         if let Some((fade, _)) = self.chunk_fade.as_mut() {
             for &k in evicted {
                 fade.evicted(k);
@@ -424,8 +432,16 @@ impl ManagedLoop {
     /// drawing while the new one is made, REND-032) and their cached origins dropped. Returns the tiles queued; 0 without a chunk view.
     pub fn chunk_landed(&mut self, landed: &[planet_generators::chunkfield::ChunkKey]) -> usize {
         let Some(view) = self.chunk_view.clone() else { return 0 };
-        // With the publish gate (STRM-054) the landed chunks wait until no fade runs and no stale tile that reads a chunk is drawn, then all
-        // that waits is published as one epoch; a stale tile that never gets its rebuild holds them for at most `PUBLISH_TIMEOUT_MS`.
+        if let Some(now) = self.chunk_fade.as_ref().map(|(_, c)| c.now_ms()) {
+            self.expire_pending(now);
+        }
+        // Without a fade nothing waits for one: what lands is published at once.
+        if view.gated() && self.chunk_fade.is_none() {
+            view.publish(landed);
+        }
+        // With the publish gate (STRM-054) the landed chunks wait until no fade runs, every tile that reads the last epoch is rebuilt and no
+        // tile new to the renderer waits for a fade, then all that waits is published as one epoch; a hold-up longer than
+        // `PUBLISH_TIMEOUT_MS` publishes anyway.
         if view.gated() && self.chunk_fade.is_some() {
             let now = self.chunk_fade.as_ref().map_or(0, |(_, c)| c.now_ms());
             self.publish_queue.extend_from_slice(landed);
@@ -433,7 +449,8 @@ impl ManagedLoop {
                 return 0;
             }
             let since = *self.publish_waiting_since.get_or_insert(now);
-            let idle = self.chunk_fade.as_ref().is_some_and(|(f, _)| f.idle(now)) && !self.stale_drawn;
+            let idle =
+                self.chunk_fade.as_ref().is_some_and(|(f, _)| f.idle(now)) && self.pending_readers.is_empty() && self.deferred_fresh == 0;
             let forced = !idle && now.saturating_sub(since) >= PUBLISH_TIMEOUT_MS;
             if !idle && !forced {
                 return 0;
@@ -454,9 +471,50 @@ impl ManagedLoop {
         self.forced_publications
     }
 
+    /// A resident tile was uploaded (rebuilt) or left: the clock of every landed chunk it was the last unrebuilt reader of starts (STRM-052).
+    /// An associated function on the parts, so that it can run while the streamer is borrowed.
+    fn reader_rebuilt(
+        pending: &mut HashMap<planet_generators::chunkfield::ChunkKey, (HashSet<TileId>, u64)>,
+        fade: &mut Option<(crate::chunkshare::ChunkFade, Arc<dyn Clock>)>,
+        tile: TileId,
+    ) {
+        let mut started = Vec::new();
+        for (k, (readers, _)) in pending.iter_mut() {
+            if readers.remove(&tile) && readers.is_empty() {
+                started.push(*k);
+            }
+        }
+        for k in started {
+            pending.remove(&k);
+            if let Some((fade, clock)) = fade.as_mut() {
+                fade.shown(k, clock.now_ms());
+            }
+        }
+    }
+
+    /// The chunks whose readers were not all rebuilt within `PUBLISH_TIMEOUT_MS` of their publication start their clocks anyway (counted).
+    fn expire_pending(&mut self, now: u64) {
+        let late: Vec<_> = self
+            .pending_readers
+            .iter()
+            .filter(|(_, (_, since))| now.saturating_sub(*since) >= PUBLISH_TIMEOUT_MS)
+            .map(|(k, _)| *k)
+            .collect();
+        for k in late {
+            self.pending_readers.remove(&k);
+            self.forced_publications += 1;
+            if let Some((fade, _)) = self.chunk_fade.as_mut() {
+                fade.shown(k, now);
+            }
+        }
+    }
+
     /// The landing of `landed` chunks, now visible to the readers (STRM-040).
     fn apply_landed(&mut self, landed: &[planet_generators::chunkfield::ChunkKey]) -> usize {
         let Some(view) = self.chunk_view.clone() else { return 0 };
+        // A chunk that was evicted while it waited is not landed any more.
+        let landed: Vec<planet_generators::chunkfield::ChunkKey> = landed.iter().copied().filter(|k| view.is_ready(*k)).collect();
+        let landed = &landed[..];
         if landed.is_empty() {
             return 0;
         }
@@ -471,10 +529,13 @@ impl ManagedLoop {
             }
             for &k in landed {
                 fade.landed(k, now);
-                // Nobody resident reads this chunk, so no stale tile holds its clock back: its fade starts now, and a tile new to the renderer
-                // that reads it waits for the end of that fade (STRM-054) instead of for a clock that nothing would start.
-                if !tiles.iter().any(|t| view.reads(*t).contains(&k)) {
+                // The clock of the chunk starts when the last resident tile that reads it has been rebuilt (STRM-052); if nobody resident reads
+                // it, now, and a tile new to the renderer that reads it waits for the end of that fade (STRM-054).
+                let readers: HashSet<TileId> = tiles.iter().copied().filter(|t| view.reads(*t).contains(&k)).collect();
+                if readers.is_empty() {
                     fade.shown(k, now);
+                } else {
+                    self.pending_readers.insert(k, (readers, now));
                 }
             }
         }
@@ -604,6 +665,7 @@ impl ManagedLoop {
                     self.pending.remove(&tile);
                     self.drawn_tiles.remove(&tile);
                     self.stale_weights.remove(&tile);
+                    Self::reader_rebuilt(&mut self.pending_readers, &mut self.chunk_fade, tile);
                     if self.resident.remove(&tile).is_some() {
                         self.slots.remove(&tile);
                         sink.forget(tile);
@@ -645,6 +707,7 @@ impl ManagedLoop {
             let prefetch = &self.prefetch_closure;
             let mut waiting = std::mem::take(&mut self.waiting_scratch);
             waiting.clear();
+            let mut deferred_fresh = 0;
             self.pending.retain(|t| streamer.is_resident(*t));
             for &tile in &self.pending {
                 let Some(mesh) = streamer.get(tile) else { continue };
@@ -665,12 +728,14 @@ impl ManagedLoop {
                     if let (Some(view), Some((fade, clock))) = (self.chunk_view.as_deref(), self.chunk_fade.as_ref()) {
                         let now = clock.now_ms();
                         if view.gated() && view.reads(tile).iter().any(|k| fade.is_fading(*k, now)) {
+                            deferred_fresh += 1;
                             continue;
                         }
                     }
                 }
                 waiting.push(Waiting { tile, class, priority, bytes: sink.upload_bytes(&mesh) });
             }
+            self.deferred_fresh = deferred_fresh;
             sort_waiting(&mut waiting);
             // The start-up load of the roots is not a steady frame (STRM-001, a declared exception to the cap of STRM-006): every
             // root that waits is written before the frame is drawn, whatever its bytes. They sort first (the draw class, the
@@ -714,6 +779,7 @@ impl ManagedLoop {
                     self.drawn_tiles.insert(*tile, mesh.clone());
                 }
                 self.stale_weights.remove(tile);
+                Self::reader_rebuilt(&mut self.pending_readers, &mut self.chunk_fade, *tile);
                 self.resident.insert(*tile, ResidentTile { mesh_key: mesh.key(), origin: mesh.origin() });
                 self.slots.insert(*tile, *slot);
                 uploaded += 1;
@@ -735,23 +801,7 @@ impl ManagedLoop {
         // The weights of the landed chunks' fade (STRM-047): each node takes the minimum over the chunks it reads; 1 without a fade or a view.
         if let (Some(view), Some((fade, clock))) = (self.chunk_view.as_deref(), self.chunk_fade.as_mut()) {
             let now = clock.now_ms();
-            // The chunks that tiles drawn from a mesh built before a landing (the stale ones) read: their change is not all on screen yet.
-            let mut waiting: HashSet<planet_generators::chunkfield::ChunkKey> = HashSet::new();
-            for n in &pipeline.draw.plan.nodes {
-                if n.state == crate::terrain::TileState::Stale {
-                    waiting.extend(view.reads(n.tile));
-                }
-            }
-            self.stale_drawn = !waiting.is_empty();
             for n in &mut pipeline.draw.plan.nodes {
-                // An exact tile is the mesh the plan expects: it was built against the chunks' current versions. The first one of a landed
-                // chunk, once the stale tiles that read it are rebuilt, starts that chunk's fade (STRM-047); the node of a stale tile carries
-                // the resident key as its own and starts nothing.
-                if n.state == crate::terrain::TileState::Exact {
-                    if let Some(r) = self.resident.get(&n.tile) {
-                        fade.drawn(view, n.tile, r.mesh_key, n.mesh_key, now, &waiting);
-                    }
-                }
                 n.chunk_weight = self.stale_weights.get(&n.tile).copied().unwrap_or_else(|| fade.tile_weight(view, n.tile, now));
             }
         }

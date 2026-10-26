@@ -229,29 +229,6 @@ fn the_fade_starts_when_the_change_is_first_drawn_so_a_slow_rebuild_still_fades_
     assert_eq!(fade.weight(key, true, 6_000), 0.0);
 }
 
-// spec: STRM-052
-#[test]
-fn a_tile_built_before_the_landing_starts_no_clock_and_the_rebuilt_one_starts_it_at_weight_zero() {
-    let tile = TileId::new(Face(2), CHUNK_GRID_LEVEL + 3, 8 * 1000 + 7, 8 * 1000 + 3).unwrap();
-    let a = (2u8, 1000u32, 1000u32);
-    let view = Fixed { reads: vec![a], ready: vec![a] };
-    let mut fade = ChunkFade::new(ChunkFade::DEFAULT_FADE_MS);
-    fade.landed(a, 0);
-    // The tile that was waiting for its upload when the chunk landed reaches the renderer with the key it was built with, not the key the plan
-    // expects now: it is drawn, but its change is not the landed one, so nothing starts.
-    let none = std::collections::HashSet::new();
-    fade.drawn(&view, tile, 111, 222, 400, &none);
-    assert_eq!(fade.tile_weight(&view, tile, 400), 0.0);
-    assert_eq!(fade.tile_weight(&view, tile, 5_000), 0.0, "still the base: the clock has not started");
-    // The rebuilt tile carries the key the plan expects: the clock starts at its first drawn frame, at weight 0.
-    // Another tile that reads the chunk is still being rebuilt: the clock waits for it.
-    fade.drawn(&view, tile, 222, 222, 5_500, &std::collections::HashSet::from([a]));
-    assert_eq!(fade.tile_weight(&view, tile, 6_000), 0.0);
-    fade.drawn(&view, tile, 222, 222, 6_000, &none);
-    assert_eq!(fade.tile_weight(&view, tile, 6_000), 0.0);
-    assert!((fade.tile_weight(&view, tile, 6_750) - 0.5).abs() < 1e-6);
-}
-
 // spec: STRM-047
 #[test]
 fn a_tiles_weight_is_the_minimum_over_the_chunks_it_reads_and_the_default_fade_is_one_and_a_half_seconds() {
