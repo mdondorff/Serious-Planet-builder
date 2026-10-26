@@ -260,6 +260,8 @@ fn a_plateau_that_absorbs_the_chunk_change_leaves_none_of_it_in_the_plane() {
     }
     .with_stamp(Stamp::new(StampKind::Plateau, [target, 0.0, 0.0]));
     def.put_item_spec(BodyId::PLANET, item).unwrap();
+    // The plateau sits above the chunk stage (`on-top`): the other position, `under`, lets the change through the stamp.
+    def.set_chunk_stage(BodyId::PLANET, DEFAULT_ITEM_LAYER, planet_world_def::ChunkStagePosition::OnTop);
     r.world.set_definition(Arc::new(def)).unwrap();
     let field = r.world.field().unwrap();
     let got = field.level_change(&[d], 17).expect("a chunk landed")[0];

@@ -309,3 +309,92 @@ fn the_disk_keeps_a_chunk_per_version_and_the_first_version_keeps_the_key_it_alw
     assert_eq!(disk.get_versioned(tile, 6).unwrap(), None, "another version is a miss");
     assert_eq!(disk.get(tile).unwrap(), None, "so is the first");
 }
+
+/// The stand-in stage with an epoch the test moves, and one that moves while a chunk is computed.
+struct Moving {
+    inner: StandIn,
+    epoch: std::sync::atomic::AtomicU64,
+    moves_in_compute: bool,
+}
+
+impl planet_generators::chunkfield::ChunkStage for Moving {
+    fn step_cap(&self) -> u32 {
+        self.inner.step_cap()
+    }
+    fn bound_m(&self) -> f64 {
+        self.inner.bound_m()
+    }
+    fn compute(&self, lat: &ChunkLattice, region: &planet_generators::chunkfield::Region) -> Vec<f32> {
+        if self.moves_in_compute {
+            self.epoch.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        self.inner.compute(lat, region)
+    }
+    fn halo_rings(&self) -> u16 {
+        self.inner.halo_rings()
+    }
+    fn definition_hash(&self) -> u64 {
+        self.inner.definition_hash()
+    }
+    fn epoch(&self) -> u64 {
+        self.epoch.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+// spec: GEN-082
+#[test]
+fn a_chunk_computed_while_the_stage_inputs_moved_is_not_stored_and_is_solved_again() {
+    let spec = ChunkSpec {
+        body: BodyId::PLANET,
+        seed: 7,
+        radius_m: R,
+        definition: planet_generators::chunkfield::ChunkStage::definition_hash(&stage()),
+        cells_per_chunk: 16,
+        top_level: PYRAMID_TOP_LEVEL,
+        base: [0; 16],
+    };
+    let d = dir("moved");
+    let disk = Arc::new(PackChunkDisk::new(d, spec));
+    let (spawner, clock) = (Arc::new(ManualSpawner::default()), Arc::new(FakeClock::default()));
+    let moving = Arc::new(Moving { inner: stage(), epoch: 0.into(), moves_in_compute: true });
+    let m = ChunkManager::new(
+        ChunkLattice::new(16).unwrap(),
+        R,
+        PYRAMID_TOP_LEVEL,
+        moving.clone(),
+        spawner.clone(),
+        clock,
+        Some(disk.clone() as Arc<dyn ChunkDisk>),
+        ChunkConfig::default(),
+    )
+    .with_versions(Arc::new(Versions(0.into())));
+    let tile = planet_core::TileId::new(planet_core::Face(2), planet_generators::chunk::CHUNK_GRID_LEVEL, 1000, 1000).unwrap();
+    let wanted = [(key(0, 0), 100.0)];
+    m.update(&wanted);
+    spawner.run(1);
+    let up = m.update(&wanted);
+    assert_eq!(up.landed, vec![key(0, 0)], "the result lands, so the frame has something to draw");
+    assert_eq!(disk.get(tile).unwrap(), None, "but it is not stored: the inputs moved while it was made");
+    // It is not trusted as its version: the chunk is stale at once and solved again (the stage keeps moving here, so it stays untrusted).
+    assert_eq!(up.started, 1, "an untrusted chunk is solved again when wanted");
+    spawner.run(1);
+    // With the inputs still, the next solve is trusted, stored, and nothing more starts.
+    let still = Arc::new(Moving { inner: stage(), epoch: 5.into(), moves_in_compute: false });
+    let spawner2 = Arc::new(ManualSpawner::default());
+    let m2 = ChunkManager::new(
+        ChunkLattice::new(16).unwrap(),
+        R,
+        PYRAMID_TOP_LEVEL,
+        still,
+        spawner2.clone(),
+        Arc::new(FakeClock::default()),
+        Some(disk.clone() as Arc<dyn ChunkDisk>),
+        ChunkConfig::default(),
+    )
+    .with_versions(Arc::new(Versions(0.into())));
+    m2.update(&wanted);
+    spawner2.run(1);
+    m2.update(&wanted);
+    assert!(disk.get(tile).unwrap().is_some(), "a solve with still inputs is stored");
+    assert_eq!(m2.update(&wanted).started, 0, "and trusted: nothing is solved again");
+}

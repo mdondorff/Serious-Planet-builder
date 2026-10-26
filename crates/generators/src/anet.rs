@@ -96,6 +96,11 @@ pub trait BaseDetail: Send + Sync {
     fn coarse_input(&self, dir: Vec3) -> f64;
     /// A hash of the base field and the input the run started from (their keys): part of the stage's definition hash.
     fn identity(&self) -> u64;
+    /// A number that differs whenever the base's heights may have changed (an edit under the chunk stage, GEN-082): the routing memo of one
+    /// epoch is never read in another (default 0: a base that never changes).
+    fn epoch(&self) -> u64 {
+        0
+    }
     /// Whether every answer so far was a real one (a base that lost its source answers zeros and says so here): a result made while it is not
     /// healthy is not to be stored.
     fn healthy(&self) -> bool {
@@ -1364,7 +1369,25 @@ pub struct ANet {
     pub radius_m: f64,
     pub params: ANetParams,
     /// The routed segments of this stage's chunks (GEN-066): a memo of pure functions of the run, the base and the law, emptied when the law changes.
-    pub memo: crate::route::RouteMemo,
+    pub memo: EpochMemo,
+}
+
+/// The routing memo of the stage by the epoch of its base (GEN-082): the memo holds heights of the base, so a memo made before an edit is never read
+/// after it, and a job that began before the edit keeps filling the memo it took, which no later job reads.
+#[derive(Default)]
+pub struct EpochMemo {
+    current: std::sync::Mutex<(u64, std::sync::Arc<crate::route::RouteMemo>)>,
+}
+
+impl EpochMemo {
+    /// The memo of `epoch`: the current one, or a new one when the epoch moved.
+    pub fn get(&self, epoch: u64) -> std::sync::Arc<crate::route::RouteMemo> {
+        let mut cur = self.current.lock().expect("epoch memo");
+        if cur.0 != epoch {
+            *cur = (epoch, std::sync::Arc::default());
+        }
+        cur.1.clone()
+    }
 }
 
 impl ANet {
@@ -1453,7 +1476,15 @@ impl ANet {
 
     /// The solve over a region (also what the tests look at).
     pub fn solve(&self, lat: &ChunkLattice, region: &Region) -> Solution {
-        let net = Network::build_with_memo(&*self.run, &*self.base, lat, region, self.radius_m, &self.params.anchor, &self.memo);
+        let net = Network::build_with_memo(
+            &*self.run,
+            &*self.base,
+            lat,
+            region,
+            self.radius_m,
+            &self.params.anchor,
+            &self.memo.get(self.base.epoch()),
+        );
         // The own area of a fine cell: the coarse cell's area over the cells it holds.
         let n = self.run.lattice().n();
         let per = lat.n() as usize / n.max(1);
@@ -1479,6 +1510,12 @@ impl crate::chunkfield::ChunkStage for ANet {
     }
     fn healthy(&self) -> bool {
         self.base.healthy()
+    }
+    fn epoch(&self) -> u64 {
+        self.base.epoch()
+    }
+    fn read_discs(&self, lat: &ChunkLattice, region: &Region) -> Vec<ReadDisc> {
+        chunk_read_set(&*self.run, lat, region, self.radius_m, &self.params.anchor)
     }
     fn compute(&self, lat: &ChunkLattice, region: &Region) -> Vec<f32> {
         let s = self.solve(lat, region);

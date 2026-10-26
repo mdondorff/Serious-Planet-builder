@@ -76,15 +76,27 @@ fn a_stamped_world_is_the_stamp_stage_over_the_base_field() {
 
 // spec: GEN-039
 #[test]
-fn a_chain_over_a_layer_with_the_chunk_stage_under_is_refused_naming_the_layer_and_on_top_builds_as_before() {
+fn without_a_chunk_stage_the_layers_stack_in_the_order_of_adr_0007_whatever_their_chunk_stage_says() {
+    use planet_world_def::stamp::{Stamp, StampKind};
+    use planet_world_def::ItemSpec;
     let src = OwnedBake(bake(7, &TangentWarp, 16, 2).unwrap());
+    let at = Vec3::new(1.0, 0.2, 0.1).normalized();
+    let item = |id: u128, layer: &str, kind: StampKind, a: f64| {
+        ItemSpec { id, layer: layer.into(), priority: 0, dir: at, content_hash: 0, reach_m: 3_000.0, max_delta_m: 500.0, stamp: None }
+            .with_stamp(Stamp::new(kind, [a, 0.0, 0.0]))
+    };
     let mut def = WorldDefinition::single_planet(R, 7);
+    // A hill in `stamps` (stack index 3) and a plateau in `placed` (index 5) over the same place: the plateau is applied last in the stack.
+    def.put_item_spec(BodyId::PLANET, item(1, "stamps", StampKind::Hill, 40.0)).unwrap();
+    def.put_item_spec(BodyId::PLANET, item(2, "placed", StampKind::Plateau, 120.0)).unwrap();
     let plain = field_chain(HeightFieldKind::Eroded, &Arc::new(def.clone()), &src, [1; 16], false).unwrap();
-    // `on-top` is the default: setting it explicitly builds the same field.
+    // `under` is the default: setting it explicitly builds the same field.
+    def.set_chunk_stage(BodyId::PLANET, "stamps", planet_world_def::ChunkStagePosition::Under);
+    let under = field_chain(HeightFieldKind::Eroded, &Arc::new(def.clone()), &src, [1; 16], false).unwrap();
+    same(plain.as_ref(), under.as_ref());
+    // The layers set to different positions: with no chunk stage the order is still the stack's, so the heights are the plain ones.
     def.set_chunk_stage(BodyId::PLANET, "stamps", planet_world_def::ChunkStagePosition::OnTop);
-    let on_top = field_chain(HeightFieldKind::Eroded, &Arc::new(def.clone()), &src, [1; 16], false).unwrap();
-    same(plain.as_ref(), on_top.as_ref());
-    def.set_chunk_stage(BodyId::PLANET, "placed", planet_world_def::ChunkStagePosition::Under);
-    let e = field_chain(HeightFieldKind::Eroded, &Arc::new(def), &src, [1; 16], false).err().expect("refused");
-    assert!(e.contains("layer 'placed'"), "{e}");
+    let mixed = field_chain(HeightFieldKind::Eroded, &Arc::new(def), &src, [1; 16], false).unwrap();
+    assert_eq!(plain.height(at).to_bits(), mixed.height(at).to_bits(), "a hill under a plateau, whatever the setting says");
+    same(plain.as_ref(), mixed.as_ref());
 }
