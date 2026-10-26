@@ -332,3 +332,30 @@ fn a_refresh_request_of_a_tile_that_left_every_class_is_dropped_and_counted_and_
     }
     assert_eq!(s.get(t).as_deref(), Some(&(t.raw(), 1)), "the new version replaced the stale one when the tile was wanted again");
 }
+
+// spec: STRM-055
+#[test]
+fn a_refresh_job_is_logged_as_a_refresh_with_the_time_it_waited_in_the_streamers_queue() {
+    let (mut s, sp, src, clock) = fixture_with_clock(4);
+    let t = id(0, 3, 1, 0);
+    let wants = [(t, 0.0)];
+    s.set_draw(&wants);
+    settle(&mut s, &sp, &wants, t);
+    let first = s.job_log().since(0);
+    assert!(!first.is_empty() && first.iter().all(|j| !j.refresh && j.queue_ms == 0), "a missing tile is not a refresh: {first:?}");
+    // The tile changes; its refresh waits 250 ms of the clock in the queue before a step dispatches it.
+    src.rev.fetch_add(1, Ordering::SeqCst);
+    assert_eq!(s.refresh(&[t]), 1);
+    clock.advance(250);
+    s.step();
+    sp.run(10);
+    s.step();
+    let later = s.job_log().since(first.len());
+    let r = later.iter().find(|j| j.level == 3).unwrap_or_else(|| panic!("the refresh ran: {later:?}"));
+    assert!(r.refresh && r.done, "{r:?}");
+    assert_eq!(r.queue_ms, 250, "{r:?}");
+    // The summary counts the refresh only, and says nothing when there is none.
+    let line = planet_streaming::refresh_summary(&s.job_log().since(0)).expect("one refresh");
+    assert!(line.starts_with("1 refresh jobs: streamer queue 250/250/250 ms"), "{line}");
+    assert_eq!(planet_streaming::refresh_summary(&first), None);
+}
