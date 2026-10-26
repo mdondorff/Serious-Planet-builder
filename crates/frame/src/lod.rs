@@ -508,7 +508,7 @@ impl ItemChange {
 }
 
 /// The most announced transitions kept.
-const MAX_TRANSITIONS: usize = 32;
+pub(crate) const MAX_TRANSITIONS: usize = 32;
 
 /// Whether a change can alter the bounds over the neighbourhood of the tile `geom` (the pads of the steepness proof and the caps of `none_steep`):
 /// the angle from the tile's centre to the change is within eight radii of the tile and the change's reach (an item changes bounds over a cap only

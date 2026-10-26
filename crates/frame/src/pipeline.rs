@@ -624,7 +624,64 @@ impl PlanWorker {
     /// and no lock of the cache; the caller must also make the next plan happen (`ManagedLoop::chunk_landed` does, through `edit`), and no plan that
     /// starts after this call reads the cache without having dropped them.
     pub fn invalidate_chunk_later(&self, landed: (u8, u32, u32), view: Arc<dyn crate::chunkshare::ChunkView>) {
-        self.ops.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(CacheOp::LandedChunk(landed, view));
+        self.push_op(CacheOp::LandedChunk(landed, view));
+    }
+
+    /// Queue `op`, keeping the queue bounded and equivalent: a clear makes everything queued before it moot (it empties the cache and the item transitions) and
+    /// what is asked of the tiles after it; consecutive tile drops merge and drop duplicates; a chunk is queued once; more item changes than the cache keeps
+    /// drop the oldest; a queue that outgrows what the cache can hold becomes a clear.
+    fn push_op(&self, op: CacheOp) {
+        const MAX_LANDED: usize = 4096;
+        let mut q = self.ops.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let cleared = matches!(q.first(), Some(CacheOp::Clear));
+        match op {
+            CacheOp::Clear => {
+                q.clear();
+                q.push(CacheOp::Clear);
+            }
+            CacheOp::InvalidateTiles(_) | CacheOp::LandedChunk(..) if cleared => {}
+            CacheOp::InvalidateTiles(mut tiles) => {
+                if let Some(CacheOp::InvalidateTiles(prev)) = q.last_mut() {
+                    prev.append(&mut tiles);
+                    if prev.len() > MAX_LANDED {
+                        prev.sort_unstable_by_key(|t| t.raw());
+                        prev.dedup();
+                    }
+                    if prev.len() > SelectionCache::MAX_TILES {
+                        q.clear();
+                        q.push(CacheOp::Clear);
+                    }
+                } else {
+                    q.push(CacheOp::InvalidateTiles(tiles));
+                }
+            }
+            CacheOp::LandedChunk(key, view) => {
+                if q.iter().any(|o| matches!(o, CacheOp::LandedChunk(k, _) if *k == key)) {
+                    return;
+                }
+                q.push(CacheOp::LandedChunk(key, view));
+                if q.iter().filter(|o| matches!(o, CacheOp::LandedChunk(..))).count() > MAX_LANDED {
+                    q.clear();
+                    q.push(CacheOp::Clear);
+                }
+            }
+            note @ CacheOp::NoteItemChange { .. } => {
+                q.push(note);
+                let notes: Vec<usize> =
+                    q.iter().enumerate().filter(|(_, o)| matches!(o, CacheOp::NoteItemChange { .. })).map(|(i, _)| i).collect();
+                if notes.len() > crate::lod::MAX_TRANSITIONS {
+                    q.remove(notes[0]);
+                }
+            }
+        }
+    }
+
+    /// How many operations wait for the plan job and how many tiles the tile drops among them name; for tests of the queue's bound.
+    #[doc(hidden)]
+    pub fn queued_for_test(&self) -> (usize, usize) {
+        let q = self.ops.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let tiles = q.iter().map(|o| if let CacheOp::InvalidateTiles(t) = o { t.len() } else { 0 }).sum();
+        (q.len(), tiles)
     }
 
     /// The cache for a test: what a landing left in it, once a job has run.
@@ -636,15 +693,14 @@ impl PlanWorker {
     /// Forget the cached origin heights, mesh keys and volumes of `tiles` (an item edit changed what they read, STRM-026), or of every
     /// tile with `None`, so the next plan computes them again: queued for the plan job (no lock of the cache here), done before its next plan.
     pub fn invalidate_cache(&self, tiles: Option<&[TileId]>) {
-        let op = tiles.map_or(CacheOp::Clear, |t| CacheOp::InvalidateTiles(t.to_vec()));
-        self.ops.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(op);
+        self.push_op(tiles.map_or(CacheOp::Clear, |t| CacheOp::InvalidateTiles(t.to_vec())));
     }
 
     /// Announce a change of the authored items to the plan cache: the field's item revision went from `from` to `to`, and `changes` is where the
     /// items that differ were and are (STRM-034). Call it before [`PlanWorker::invalidate_cache`] for the same edit and before the next plan; the
     /// plan job applies the two in that order.
     pub fn note_item_change(&self, from: u64, to: u64, changes: Vec<crate::lod::ItemChange>) {
-        self.ops.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(CacheOp::NoteItemChange { from, to, changes });
+        self.push_op(CacheOp::NoteItemChange { from, to, changes });
     }
 
     /// Ask for the plan of `req`. Never blocks and never plans on the calling thread.
