@@ -156,7 +156,7 @@ fn the_shader_factor_of_a_chunk_map_equals_the_cpu_reference_at_texel_centres() 
         let el = h + (-0.6 + 0.04 * q as f64).to_radians();
         let sun = sun_at(up, north * libm::cos(az) + east * libm::sin(az), el);
         nodes.push(HorizonNode { slot: 1, sun_azimuth: az as f32, sun_elevation: 0.0, fade: 1.0, rect });
-        qs.push(HorizonQuery { node: q as u32, tile_uv, up: f3(up), sun: f3(sun) });
+        qs.push(HorizonQuery { node: q as u32, tile_uv, up: f3(up), sun: f3(sun), distance_m: 0.0 });
         expect.push((h, lit_factor(sun_elevation(sun, up), h)));
     }
     let got = probe_horizon(&ctx, 2, &[(1, slot_bytes)], None, &table_of(&nodes), &qs);
@@ -214,7 +214,7 @@ fn the_shader_factor_of_the_coarse_map_equals_the_cpu_reference_on_every_face_an
                     || (phi - azimuth_in_frame(sun, east, north)).rem_euclid(std::f64::consts::TAU) < 1e-9
             );
             nodes.push(HorizonNode { slot: if with { 0 } else { -1 }, sun_azimuth: chunk_az as f32, sun_elevation: 0.0, fade: 1.0, rect });
-            qs.push(HorizonQuery { node: qs.len() as u32, tile_uv, up: f3(up), sun: f3(sun) });
+            qs.push(HorizonQuery { node: qs.len() as u32, tile_uv, up: f3(up), sun: f3(sun), distance_m: 0.0 });
             expect.push((h, lit_factor(sun_elevation(sun, up), h)));
         }
     }
@@ -241,7 +241,13 @@ fn a_node_with_no_chunk_map_and_no_coarse_map_is_lit_in_full_and_a_coarse_map_al
     let none = HorizonNode { slot: -1, sun_azimuth: 0.0, sun_elevation: 0.0, fade: 1.0, rect: [0.0; 4] };
     let table = table_of(&[none]);
     let up = Vec3::new(0.0, 1.0, 0.0);
-    let q = |el: f64| HorizonQuery { node: 0, tile_uv: [0.5, 0.5], up: f3(up), sun: f3(sun_at(up, Vec3::new(1.0, 0.0, 0.0), el)) };
+    let q = |el: f64| HorizonQuery {
+        node: 0,
+        tile_uv: [0.5, 0.5],
+        up: f3(up),
+        sun: f3(sun_at(up, Vec3::new(1.0, 0.0, 0.0), el)),
+        distance_m: 0.0,
+    };
     let got = probe_horizon(&ctx, 1, &[], None, &table, &[q(-0.5), q(0.0), q(0.3), q(1.5)]);
     for g in &got {
         assert!(!g.present && g.factor == 1.0, "no map is the identity, even for a sun below the horizon: {g:?}");
@@ -293,13 +299,13 @@ fn the_shader_azimuth_frame_agrees_with_the_reference_at_a_pole_and_with_the_sun
         for phi in [0.5f64, 1.5, 4.0] {
             let sun = sun_at(up, north * libm::cos(phi) + east * libm::sin(phi), 5f64.to_radians());
             let h = interpolate(&cell, azimuth_in_frame(sun, east, north));
-            qs.push(HorizonQuery { node: 0, tile_uv: [0.5, 0.5], up: f3(up), sun: f3(sun) });
+            qs.push(HorizonQuery { node: 0, tile_uv: [0.5, 0.5], up: f3(up), sun: f3(sun), distance_m: 0.0 });
             expect.push(lit_factor(sun_elevation(sun, up), h));
         }
     }
     // The sun straight overhead: no horizontal direction, the reference azimuth is 0 and the answer is finite.
     let up = Vec3::new(1.0, 0.0, 0.0);
-    qs.push(HorizonQuery { node: 0, tile_uv: [0.5, 0.5], up: f3(up), sun: f3(up) });
+    qs.push(HorizonQuery { node: 0, tile_uv: [0.5, 0.5], up: f3(up), sun: f3(up), distance_m: 0.0 });
     expect.push(1.0);
     let got = probe_horizon(&ctx, 1, &[], Some((m as u32, &packed)), &table, &qs);
     for (i, (g, e)) in got.iter().zip(&expect).enumerate() {
@@ -353,4 +359,34 @@ fn the_horizon_and_shadow_views_show_the_ridge_that_casts_the_shadow_and_match_t
     let (lit, dark) = (grey[1].iter().filter(|&&v| v > 200).count(), grey[1].iter().filter(|&&v| v < 20).count());
     assert!(lit > 50 && dark > 50, "the shadow view shows lit ({lit}) and shadowed ({dark}) terrain");
     goldens.finish();
+}
+
+// spec: REND-043
+#[test]
+fn the_coarse_map_fades_out_with_the_distance_of_the_camera_the_way_the_cpu_function_says() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let none = HorizonNode { slot: -1, sun_azimuth: 0.0, sun_elevation: 0.0, fade: 1.0, rect: [0.0; 4] };
+    let table = table_of(&[none]);
+    let up = Vec3::new(0.0, 1.0, 0.0);
+    let sun = sun_at(up, Vec3::new(1.0, 0.0, 0.0), 5f64.to_radians());
+    // A coarse map whose horizon is 10 degrees everywhere, the sun at 5 degrees: in shadow near, lit far, in between as the fade says.
+    let m = 4usize;
+    let byte = (10.0f64 / (90.0 / 255.0)).round() as u8;
+    let packed = pack_coarse(&vec![byte; 6 * m * m * AZ], m, AZ).unwrap();
+    let h10 = planet_generators::horizon::dequantize(byte);
+    let distances = [0.0f64, 5.0e5, 1.0e6, 1.5e6, 2.0e6, 2.5e6, 3.0e6, 6.0e6];
+    let qs: Vec<HorizonQuery> =
+        distances.iter().map(|&d| HorizonQuery { node: 0, tile_uv: [0.5, 0.5], up: f3(up), sun: f3(sun), distance_m: d as f32 }).collect();
+    let got = probe_horizon(&ctx, 1, &[], Some((m as u32, &packed)), &table, &qs);
+    let el = sun_elevation(up, sun);
+    let mut worst = 0.0f64;
+    for (g, &d) in got.iter().zip(&distances) {
+        let want = lit_factor(el, h10 * planet_generators::horizon::coarse_fade(d));
+        worst = worst.max((f64::from(g.factor) - want).abs());
+        assert!((f64::from(g.factor) - want).abs() < 2e-2, "{d} m: gpu {} cpu {want}", g.factor);
+    }
+    eprintln!("coarse fade: worst factor error {worst:.2e}");
+    assert_eq!(got[0].factor, 0.0, "near: in shadow");
+    assert_eq!(got.last().unwrap().factor, 1.0, "far: the coarse map casts nothing");
+    assert!(got.windows(2).all(|w| w[1].factor >= w[0].factor - 1e-6), "monotone in the distance");
 }

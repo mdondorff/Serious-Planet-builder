@@ -217,6 +217,8 @@ pub struct HorizonQuery {
     pub tile_uv: [f32; 2],
     pub up: [f32; 3],
     pub sun: [f32; 3],
+    /// The distance in metres from the surface point to the camera, for the fade of the coarse map (REND-043); 0 is full strength.
+    pub distance_m: f32,
 }
 
 /// What [`probe_horizon`] gives back for a query.
@@ -238,8 +240,9 @@ struct Q { up: vec4<f32>, sun: vec4<f32>, at: vec4<f32> };
 @compute @workgroup_size(1)
 fn probe(@builtin(global_invocation_id) id: vec3<u32>) {
     let q = queries[id.x];
-    let h = horizon_at(u32(q.at.z), q.at.xy, q.up.xyz, q.sun.xyz);
-    results[id.x] = vec4<f32>(shadow_factor(u32(q.at.z), q.at.xy, q.up.xyz, q.sun.xyz), h.x, h.y, 0.0);
+    let fade = horizon_coarse_fade(q.at.w);
+    let h = horizon_at(u32(q.at.z), q.at.xy, q.up.xyz, q.sun.xyz, fade);
+    results[id.x] = vec4<f32>(shadow_factor(u32(q.at.z), q.at.xy, q.up.xyz, q.sun.xyz, fade), h.x, h.y, 0.0);
 }
 "#;
 
@@ -270,7 +273,9 @@ pub fn probe_horizon(
     });
     let input: Vec<f32> = queries
         .iter()
-        .flat_map(|q| [q.up[0], q.up[1], q.up[2], 0.0, q.sun[0], q.sun[1], q.sun[2], 0.0, q.tile_uv[0], q.tile_uv[1], q.node as f32, 0.0])
+        .flat_map(|q| {
+            [q.up[0], q.up[1], q.up[2], 0.0, q.sun[0], q.sun[1], q.sun[2], 0.0, q.tile_uv[0], q.tile_uv[1], q.node as f32, q.distance_m]
+        })
         .collect();
     let query_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("horizon-probe-queries"),

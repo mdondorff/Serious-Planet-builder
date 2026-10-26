@@ -1,0 +1,1 @@
+- 2026-10-26 **m8-dark-spots** (REND-043): the coarse horizon map fades out between 1,000 and 3,000 km from the camera; the owner's dark spots at 3,904 km near the terminator were its 19.6 km cells in shadow (4.5 % of land cell-azimuths at a sun of 0.9 degrees); no golden moved
