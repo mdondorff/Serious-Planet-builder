@@ -189,6 +189,19 @@ pub(crate) struct Tick {
     pub(crate) drawn: Vec<TileId>,
     /// The frame's chunk stand-in share (STRM-039): all zero without a chunk view.
     pub(crate) chunk: planet_frame::chunkshare::ChunkShare,
+    /// Whether the chunk stage still has work for the frame's plan (TEST-054): a stand-in node or a chunk or horizon job in flight; false without
+    /// a chunk stage.
+    pub(crate) chunk_busy: bool,
+}
+
+/// The chunk stage a driver runs every frame (TEST-054): what the viewer's window does after the plan of a frame.
+pub(crate) struct ChunkDrive {
+    world: Arc<WorldTerrain>,
+    /// Whether the horizon jobs (REND-038) run too.
+    horizon: bool,
+    trace: crate::chunkstage::ChunkTrace,
+    /// The flight's own clock for the trace.
+    started: Instant,
 }
 
 /// The rig and the pacing of one case.
@@ -202,12 +215,14 @@ pub(crate) struct Driver<'a> {
     cut_field: Option<Box<dyn planet_generators::height::HeightField + 'a>>,
     /// Frames ticked, for the clock of the waves and the exposure's first frame.
     ticks: u64,
+    /// The chunk stage the frames drive; `None` leaves the chunk jobs alone (the scene has no stage).
+    chunk: Option<ChunkDrive>,
 }
 
 impl<'a> Driver<'a> {
     /// A driver of the debug path (no lit plan) over `rig`, paced from now.
     pub(crate) fn plain(ctx: &'a GpuContext, rig: Rig) -> Driver<'a> {
-        Driver { ctx, rig, next_deadline: Instant::now(), lit: None, cut_field: None, ticks: 0 }
+        Driver { ctx, rig, next_deadline: Instant::now(), lit: None, cut_field: None, ticks: 0, chunk: None }
     }
 
     /// The chunk field the frames count their stand-in share against (STRM-039); `None` counts nothing.
@@ -215,9 +230,30 @@ impl<'a> Driver<'a> {
         self.rig.managed.set_chunk_view(view);
     }
 
+    /// Drive the chunk jobs of `world` every frame (TEST-054): the chunks the plan reads, nearest first, what landed and what was evicted to the
+    /// managed loop, and the horizon jobs when `horizon`.
+    pub(crate) fn drive_chunks(&mut self, world: Arc<WorldTerrain>, horizon: bool) {
+        self.chunk = Some(ChunkDrive { world, horizon, trace: Default::default(), started: Instant::now() });
+    }
+
     /// Restart the pacing: the next iteration is due now.
     pub(crate) fn restart_pacing(&mut self) {
         self.next_deadline = Instant::now();
+    }
+
+    /// Start the chunk trace afresh (the flight begins): what landed during the settle is not the flight's.
+    pub(crate) fn restart_chunk_trace(&mut self) {
+        if let Some(c) = self.chunk.as_mut() {
+            c.trace = Default::default();
+            c.started = Instant::now();
+        }
+    }
+
+    /// What the chunk stage did since the trace restarted and the jobs still in flight (chunk, horizon); `None` without a chunk stage.
+    pub(crate) fn chunk_summary(&self) -> Option<(crate::chunkstage::TraceSummary, usize, usize)> {
+        let c = self.chunk.as_ref()?;
+        let jobs = c.world.chunk_manager().map_or(0, |m| m.in_flight());
+        Some((c.trace.summary(), jobs, c.world.horizon_in_flight()))
     }
 }
 
@@ -228,6 +264,26 @@ impl Driver<'_> {
         let started = Instant::now();
         let ctx = self.ctx;
         let frame = self.rig.managed.begin_frame_strict(req, &mut RendererSink { ctx, renderer: &mut self.rig.renderer })?;
+        // The chunk stage, as the window does after the plan (STRM-039, STRM-040): the chunks the plan's tiles read, nearest first; the tiles that read a
+        // landed chunk are refreshed.
+        let mut chunk_busy = false;
+        if let Some(cd) = self.chunk.as_mut() {
+            let tiles: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
+            let at = cd.started.elapsed().as_secs_f64();
+            let manager = cd.world.chunk_manager();
+            if let Some(m) = manager.as_ref() {
+                cd.trace.wanted(tiles.iter().flat_map(|&t| m.reads(t)), at);
+            }
+            let update = cd.world.chunk_frame(&tiles, req.camera.position, &[]);
+            self.rig.managed.chunk_landed(&update.landed);
+            self.rig.managed.chunk_evicted(&update.evicted);
+            cd.trace.landed(&update.landed, at);
+            if cd.horizon {
+                cd.trace.horizon_landed(cd.world.horizon_frame(&tiles, req.camera.position).landed.len());
+            }
+            let jobs = manager.map_or(0, |m| m.in_flight());
+            chunk_busy = crate::chunkstage::chunks_busy(frame.counts.chunk.chunk_stand_in, jobs, cd.world.horizon_in_flight());
+        }
         self.rig.fi.retire_to(self.rig.renderer.retired_frames(ctx));
         while self.rig.fi.is_full() {
             self.rig.fi.note_wait();
@@ -300,7 +356,7 @@ impl Driver<'_> {
             lit_plan_ms,
         };
         self.pace();
-        Ok(Tick { record, settled, drawn, chunk: c.chunk })
+        Ok(Tick { record, settled, drawn, chunk: c.chunk, chunk_busy })
     }
 
     /// Hold the loop to the frame step of script time: the next iteration starts one step after this one was due (a late frame
@@ -409,7 +465,8 @@ fn run_case(
             .map_err(|e| format!("warming the lit path: {e}"))?;
     }
     let cut_field = if lit.is_some() { Some(world.field()?) } else { None };
-    let mut d = Driver { ctx, rig, next_deadline: Instant::now(), lit: lit.map(|s| (s, Arc::clone(world))), cut_field, ticks: 0 };
+    let mut d =
+        Driver { ctx, rig, next_deadline: Instant::now(), lit: lit.map(|s| (s, Arc::clone(world))), cut_field, ticks: 0, chunk: None };
     // The machine's state as a fixed job sees it, alone and with the pool's thread count at once, before and after the case (STRM-022:
     // recorded only, never judged; the per-tile times of the log read against it). Nothing of the case runs yet.
     let calib_threads = gen.workers;
