@@ -8,8 +8,8 @@ Machine: Rasierklinge (RTX 3080 Ti Laptop), release build, store `global16384`, 
 | Drawn again, typical | 10.1 to 13.1 s (1 m: 11.4 to 13.1; 200 m: 10.3 to 12.5; 2 km: 10.1 to 11.9) | n/a |
 | Centre chunk landed / last chunk landed | 6.0 to 8.3 s / 10.0 to 12.7 s | n/a |
 | Chunks re-solved per edit | 5 to 7 (4 for a 40 km hill) on a pool of 4: two rounds of about 5.5 s | n/a |
-| M6 column (tiles the edit names refreshed and written) | 345 to 1003 ms | 70 to 326 ms |
-| Preview | 2 to 14.5 ms (budget 16) | 2 to 10 ms |
+| M6 column (tiles the edit names refreshed and written), gated cases | 345 to 1003 ms (the recorded 20 km cases go down to 240 ms) | 69 to 326 ms |
+| Preview | 2 to 14.5 ms (budget 16) | up to 10.4 ms |
 | First chunk frame after an edit (the versions) | median 0.5 to 1 ms; spikes 5 to 49 ms in the first edit of a view | n/a |
 
 ## Verdict
