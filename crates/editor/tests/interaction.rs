@@ -3,7 +3,7 @@
 use planet_core::cube::{FaceMapping, TangentWarp};
 use planet_core::{PlanetFixed, TileId, Vec3};
 use planet_editor::commands::{Affected, Editor};
-use planet_editor::feed::{edited_tiles, REFRESH_HALO};
+use planet_editor::feed::{edited_chunks, edited_tiles, REFRESH_HALO};
 use planet_editor::ids::{FixedClock, IdMaker, SeededEntropy};
 use planet_editor::interaction::{Interaction, PointerView, Pressed};
 use planet_editor::overlay::{self, OUTLINE_SEGMENTS};
@@ -223,6 +223,43 @@ fn the_tiles_an_edit_sends_to_refresh_are_those_its_reach_can_touch() {
     assert!(edited_tiles(&[], BodyId::PLANET, &tiles, R, &map).is_empty());
     assert!(edited_tiles(&aff, BodyId::PLANET, &[], R, &map).is_empty());
     assert!(REFRESH_HALO > 0.0 && !map.id().is_empty());
+}
+
+// spec: VIEW-019
+#[test]
+fn the_chunks_an_edit_re_keys_are_those_its_reach_and_the_halo_can_touch() {
+    let map = TangentWarp;
+    let (level, halo_m) = (11u8, 3_000.0);
+    let at = unit(47.2, 8.55);
+    // The chunks of a patch of the grid around the edit: a lattice of points 2 km apart over 60 km.
+    let mut chunks: Vec<TileId> = Vec::new();
+    for i in -15..=15 {
+        for j in -15..=15 {
+            let p = shape::point_at(at, if i < 0 { 270.0 } else { 90.0 }, 2_000.0 * f64::from(i).abs(), R);
+            let p = shape::point_at(p, if j < 0 { 180.0 } else { 0.0 }, 2_000.0 * f64::from(j).abs(), R);
+            chunks.push(TileId::from_direction(&map, p, level));
+        }
+    }
+    chunks.sort_by_key(|t| t.raw());
+    chunks.dedup();
+    let aff = [Affected { body: BodyId::PLANET, dir: at, reach_m: 1_000.0, brush: None }];
+    let found = edited_chunks(&aff, BodyId::PLANET, &chunks, level, halo_m, R, &map);
+    // A chunk edge is 4.9 km: a 1 km reach plus the 3 km halo touches the own chunk and some neighbours, not the whole patch (the cap round a square is a little wider than the square).
+    assert!(found.contains(&TileId::from_direction(&map, at, level)));
+    assert!(found.len() > 1 && found.len() <= 16, "got {}", found.len());
+    // No false negative: the chunk of a point 3.9 km away (reach plus halo, less a margin) is in; one 20 km away is out.
+    for k in 0..16 {
+        let p = shape::point_at(at, k as f64 * 22.5, 3_900.0, R);
+        assert!(found.contains(&TileId::from_direction(&map, p, level)), "the chunk of a point 3.9 km away is in");
+    }
+    assert!(!found.contains(&TileId::from_direction(&map, shape::point_at(at, 90.0, 20_000.0, R), level)));
+    // Without a halo the result is a subset of the result with one.
+    let bare = edited_chunks(&aff, BodyId::PLANET, &chunks, level, 0.0, R, &map);
+    assert!(bare.iter().all(|c| found.contains(c)) && bare.len() <= found.len());
+    // Sorted, no repeats, another body's places do not count, an empty list finds nothing.
+    assert!(found.windows(2).all(|w| w[0].raw() < w[1].raw()));
+    assert!(edited_chunks(&aff, BodyId(1), &chunks, level, halo_m, R, &map).is_empty());
+    assert!(edited_chunks(&[], BodyId::PLANET, &chunks, level, halo_m, R, &map).is_empty());
 }
 
 // ---- VIEW-020: the overlay -----------------------------------------------------------------------------------------------------

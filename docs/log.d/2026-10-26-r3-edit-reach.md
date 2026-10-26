@@ -1,0 +1,1 @@
+- 2026-10-26 **R3**: `footprint::EditReach` is the one reach test of an edit (tiles in `editor/feed.rs`, plan reads in `frame/lod.rs`); `edited_chunks` names the chunks an edit re-keys (reach plus halo); no behaviour change (VIEW-019).
