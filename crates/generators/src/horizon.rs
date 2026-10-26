@@ -62,6 +62,19 @@ pub fn quantize(angle_rad: f64) -> u8 {
     q.clamp(0.0, 255.0) as u8
 }
 
+/// Distance from the surface (metres) up to which the coarse horizon shadows are full (REND-043).
+pub const COARSE_FADE_NEAR_M: f64 = 1.0e6;
+/// Distance from which they are gone (REND-043): a coarse cell of 19.6 km is under a few pixels there, and its shadow is a spot, not a shape.
+pub const COARSE_FADE_FAR_M: f64 = 3.0e6;
+
+// spec: REND-043
+/// The strength of the coarse horizon at `distance_m` from the surface point: 1 up to [`COARSE_FADE_NEAR_M`], a smoothstep down to 0 at
+/// [`COARSE_FADE_FAR_M`]. The shader's `horizon_coarse_fade` is this function; the chunk horizon is not faded.
+pub fn coarse_fade(distance_m: f64) -> f64 {
+    let x = ((distance_m - COARSE_FADE_NEAR_M) / (COARSE_FADE_FAR_M - COARSE_FADE_NEAR_M)).clamp(0.0, 1.0);
+    1.0 - x * x * (3.0 - 2.0 * x)
+}
+
 /// The elevation angle in radians a byte stands for.
 pub fn dequantize(q: u8) -> f64 {
     (f64::from(q) * DEGREES_PER_STEP).to_radians()
@@ -373,5 +386,20 @@ mod tests {
         assert!((0..=255u8).all(|q| quantize(dequantize(q)) == q));
         let half = (DEGREES_PER_STEP * 0.5).to_radians();
         assert_eq!((quantize(half * 0.999), quantize(half * 1.001)), (0, 1));
+    }
+
+    // spec: REND-043
+    #[test]
+    fn the_coarse_strength_is_one_near_zero_far_and_a_monotone_smoothstep_between() {
+        assert_eq!(
+            (coarse_fade(0.0), coarse_fade(COARSE_FADE_NEAR_M), coarse_fade(COARSE_FADE_FAR_M), coarse_fade(1.0e9)),
+            (1.0, 1.0, 0.0, 0.0)
+        );
+        let mid = 0.5 * (COARSE_FADE_NEAR_M + COARSE_FADE_FAR_M);
+        assert!((coarse_fade(mid) - 0.5).abs() < 1e-12, "the middle is one half");
+        let d: Vec<f64> = (0..=40).map(|k| COARSE_FADE_NEAR_M + (COARSE_FADE_FAR_M - COARSE_FADE_NEAR_M) * f64::from(k) / 40.0).collect();
+        assert!(d.windows(2).all(|w| coarse_fade(w[1]) <= coarse_fade(w[0])), "monotone");
+        // The owner's frame was taken at 3,904 km: the coarse shadows are gone there.
+        assert_eq!(coarse_fade(3.904e6), 0.0);
     }
 }
