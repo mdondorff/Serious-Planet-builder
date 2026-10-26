@@ -67,8 +67,12 @@ impl ChunkDisk for PackChunkDisk {
     }
 }
 
-/// The chunks a view at 100 to 300 m wants (SPIKE-44, the 2026-10-26 readings): a pool of this size re-solves them in one round.
-pub const VIEW_CHUNK_WORKERS: usize = 4;
+/// The chunk workers of a viewer on the reference machine: an edit re-solves 5 to 7 chunks of the view, and a pool of 6 does it in one round (the
+/// window of 2026-10-26: 17 of 19 cases within 10 s, against 3 with 4; 8 adds nothing).
+pub const VIEW_CHUNK_WORKERS: usize = 6;
+
+/// The threads of one chunk job's batch of base heights in a viewer (6 jobs of 2 threads use the 12 threads the chunk jobs may take of the 24).
+pub const VIEW_BASE_THREADS: usize = 2;
 
 /// The knobs of the chunk jobs.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -90,7 +94,13 @@ pub struct ChunkConfig {
 
 impl Default for ChunkConfig {
     fn default() -> Self {
-        ChunkConfig { workers: 4, stale_workers: usize::MAX, stale_hold_cap_ms: 1_000, evict_ms: 5_000, cap_bytes: 512 << 20 }
+        ChunkConfig {
+            workers: VIEW_CHUNK_WORKERS,
+            stale_workers: usize::MAX,
+            stale_hold_cap_ms: 1_000,
+            evict_ms: 5_000,
+            cap_bytes: 512 << 20,
+        }
     }
 }
 
