@@ -28,3 +28,9 @@ All six directories were re-rendered on main with #744 (GEN-083: the valley band
 - `river-r1/default/30m-sunset.png` (60 m eye, sun 7.5 degrees near the wall tilt): the per-cell banding of the lit wall is gone (the wall's slope per cell no longer alternates 0.082 / 0.158).
 - `river-r1/*/300m-sunset.png`: the stepped benches at the channel bend are still there (flat steps a few hundred metres long on the channel floor, the near bend). They are a different artefact from the ripple: the corridor's bed and the benches are not touched by the distance fix. Open for the planner (the bed path, GEN-059 and GEN-066).
 - `hills-r1/` and `hills-b/` change only where a river band lies in the view; the band's distance is the only code change.
+
+## Re-render after the corridor smoothing (explorer, 2026-10-26)
+All six directories were rendered again on main with #757 (GEN-084: the routed corridor is smoothed across its joints, a tent of 256 m, at most 64 m; `ANET_VERSION` 10); nothing else changed. Not goldens. The stills of the earlier note (band distance, #744) are replaced.
+- `river-r1/*/300m-sunset.png`: the stepped benches at the near bend are gone; the valley bends smoothly. Faint striations remain on the shadowed wall (the hillslope stage's flat patches beyond the rim, tracked for look review 2).
+- `hills-b/`: the place to look is the steep walls along the river valley: smoothing moves the corridor by at most 64 m, and on steep ground a wall moves with it (the largest height difference of a cell between the two corridors at this site is 35 m, p99.9 15 m, p99 5.6 m; the cut's distribution does not change: minimum -79.6 to -79.5 m, median -10.80 m both).
+- `hills-r1/` and `river-r1/` other poses: changes only where a river band lies in the view.
