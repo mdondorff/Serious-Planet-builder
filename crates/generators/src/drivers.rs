@@ -78,14 +78,15 @@ impl DriverParams {
 }
 
 /// The slope (rise over run) components `(p, q)` along the raster's `i` and `j` axes and the mean curvature `kappa` in 1/m (positive in a hollow, negative
-/// on a ridge) at the centre of a 3 x 3 stencil `z[(dj + 1) * 3 + (di + 1)]` of heights at `cell_m` spacing (Zevenbergen and Thorne).
-pub fn gradient_and_curvature(z: &[f64; 9], cell_m: f64) -> (f64, f64, f64) {
+/// on a ridge) at the centre of a 3 x 3 stencil `z[(dj + 1) * 3 + (di + 1)]` of heights at the spacings `si` and `sj` in metres along the two axes
+/// (Zevenbergen and Thorne). The axes are taken as orthogonal; near a cube corner they meet at 60 degrees and the curvature is approximate.
+pub fn gradient_and_curvature(z: &[f64; 9], si: f64, sj: f64) -> (f64, f64, f64) {
     let at = |di: usize, dj: usize| z[dj * 3 + di];
-    let p = (at(2, 1) - at(0, 1)) / (2.0 * cell_m);
-    let q = (at(1, 2) - at(1, 0)) / (2.0 * cell_m);
-    let r = (at(2, 1) - 2.0 * at(1, 1) + at(0, 1)) / (cell_m * cell_m);
-    let t = (at(1, 2) - 2.0 * at(1, 1) + at(1, 0)) / (cell_m * cell_m);
-    let s = (at(2, 2) - at(0, 2) - at(2, 0) + at(0, 0)) / (4.0 * cell_m * cell_m);
+    let p = (at(2, 1) - at(0, 1)) / (2.0 * si);
+    let q = (at(1, 2) - at(1, 0)) / (2.0 * sj);
+    let r = (at(2, 1) - 2.0 * at(1, 1) + at(0, 1)) / (si * si);
+    let t = (at(1, 2) - 2.0 * at(1, 1) + at(1, 0)) / (sj * sj);
+    let s = (at(2, 2) - at(0, 2) - at(2, 0) + at(0, 0)) / (4.0 * si * sj);
     let g = 1.0 + p * p + q * q;
     let kappa = ((1.0 + q * q) * r - 2.0 * p * q * s + (1.0 + p * p) * t) / (2.0 * g * libm::sqrt(g));
     (p, q, kappa)
@@ -93,7 +94,7 @@ pub fn gradient_and_curvature(z: &[f64; 9], cell_m: f64) -> (f64, f64, f64) {
 
 /// The wetness index `W = ln(A / (w tan s))` for the drainage area `area_m2`, the cell width `cell_m` and `tan s` (floored, the area clamped).
 pub fn wetness_index(area_m2: f64, cell_m: f64, tan_s: f64, params: &DriverParams) -> f64 {
-    let a = area_m2.clamp(cell_m * cell_m, params.area_clamp_m2);
+    let a = area_m2.clamp(cell_m * cell_m, params.area_clamp_m2.max(cell_m * cell_m));
     libm::log(a / (cell_m * libm::fmax(tan_s, params.tan_floor)))
 }
 
@@ -118,7 +119,8 @@ pub fn lithology(dir: Vec3, params: &DriverParams) -> f64 {
 }
 
 /// The soil depth in metres (0 to `soil_max_m`) of a cell of slope `slope_rad`, curvature `kappa`, drainage area `area_m2`, lithology `litho` in `[-1, 1]`
-/// and height `height_m` over the water.
+/// and height `height_m` over the water level (the caller passes the height over the water). The product of the factors reaches 5.6 m at most with the
+/// default constants, so the clamp is a guard for other constants.
 pub fn soil_depth_m(slope_rad: f64, kappa: f64, area_m2: f64, litho: f64, height_m: f64, params: &DriverParams) -> f64 {
     let slope = libm::exp(-slope_rad.to_degrees() / params.soil_slope_deg);
     let flow = 0.5
@@ -151,64 +153,88 @@ pub fn decode_unit(code: u8) -> f64 {
     f64::from(code) / 255.0
 }
 
-/// The representative days of the year of Klein (1977), one for each month.
-const KLEIN_DAYS: [f64; 12] = [17.0, 47.0, 75.0, 105.0, 135.0, 162.0, 198.0, 228.0, 258.0, 288.0, 318.0, 344.0];
-/// The steps of the day.
-const HOUR_STEPS: usize = 24;
+/// The days of the year the insolation is integrated over: every fifth day from day 3 (73 days), and the steps of the day.
+const DAY_STEP: usize = 5;
+const DAYS: usize = 73;
+const HOUR_STEPS: usize = 96;
 
 /// The declination of the sun in radians on day `n` of the year (Cooper).
 fn declination(n: f64) -> f64 {
     23.45_f64.to_radians() * libm::sin(core::f64::consts::TAU * (284.0 + n) / 365.0)
 }
 
-/// The mean over the twelve days and the day's hours of the beam irradiance on a plane of slope `slope_rad` and surface azimuth `azimuth_rad` (from north,
-/// clockwise: the direction the plane faces) at latitude `lat_rad`, in units of the flat plane at the equator, with the sun above the horizon only and no
-/// shadowing by terrain: Duffie and Beckman's `cos theta = sin d (sin f cos b - cos f sin b cos g) + cos d cos w (cos f cos b + sin f sin b cos g)
-/// + cos d sin b sin g sin w` with `g` the azimuth from south (positive to the west).
-pub fn annual_mean_irradiance(lat_rad: f64, slope_rad: f64, azimuth_rad: f64) -> f64 {
-    let mean = |lat: f64, slope: f64, azimuth: f64| -> f64 {
-        // The azimuth from south: south-facing is 0, west-facing positive.
-        let g = azimuth - core::f64::consts::PI;
-        let (sf, cf, sb, cb, sg, cg) = (libm::sin(lat), libm::cos(lat), libm::sin(slope), libm::cos(slope), libm::sin(g), libm::cos(g));
-        let mut total = 0.0;
-        for day in KLEIN_DAYS {
-            let d = declination(day);
-            let (sd, cd) = (libm::sin(d), libm::cos(d));
-            for h in 0..HOUR_STEPS {
+/// The sines and cosines of the declinations and the hour angles, made once for many evaluations.
+struct SunGrid {
+    days: Vec<(f64, f64)>,
+    hours: Vec<(f64, f64)>,
+}
+
+impl SunGrid {
+    fn new() -> SunGrid {
+        let days = (0..DAYS)
+            .map(|k| {
+                let d = declination((3 + DAY_STEP * k) as f64);
+                (libm::sin(d), libm::cos(d))
+            })
+            .collect();
+        let hours = (0..HOUR_STEPS)
+            .map(|h| {
                 let w = core::f64::consts::TAU * (h as f64 + 0.5) / HOUR_STEPS as f64 - core::f64::consts::PI;
-                let (sw, cw) = (libm::sin(w), libm::cos(w));
-                let up = sd * sf + cd * cf * cw;
-                if up <= 0.0 {
+                (libm::sin(w), libm::cos(w))
+            })
+            .collect();
+        SunGrid { days, hours }
+    }
+
+    /// The mean over the days and the hours of the beam irradiance on a plane of slope `slope_rad` and surface azimuth `azimuth_rad` (from north, clockwise:
+    /// the direction the plane faces) at latitude `lat_rad`, in units of the flat plane (not normalised), with the sun above the horizon only and no
+    /// shadowing by terrain: Duffie and Beckman's `cos theta = sin d (sin f cos b - cos f sin b cos g) + cos d cos w (cos f cos b + sin f sin b cos g)
+    /// + cos d sin b sin g sin w` with `g` the azimuth from south (positive to the west).
+    fn mean(&self, lat_rad: f64, slope_rad: f64, azimuth_rad: f64) -> f64 {
+        let g = azimuth_rad - core::f64::consts::PI;
+        let (sf, cf, sb, cb, sg, cg) =
+            (libm::sin(lat_rad), libm::cos(lat_rad), libm::sin(slope_rad), libm::cos(slope_rad), libm::sin(g), libm::cos(g));
+        let mut total = 0.0;
+        for &(sd, cd) in &self.days {
+            for &(sw, cw) in &self.hours {
+                if sd * sf + cd * cf * cw <= 0.0 {
                     continue;
                 }
                 let c = sd * (sf * cb - cf * sb * cg) + cd * cw * (cf * cb + sf * sb * cg) + cd * sb * sg * sw;
                 total += c.max(0.0);
             }
         }
-        total / (12.0 * HOUR_STEPS as f64)
-    };
-    mean(lat_rad, slope_rad, azimuth_rad) / mean(0.0, 0.0, 0.0)
+        total / (DAYS * HOUR_STEPS) as f64
+    }
+}
+
+/// The annual-mean irradiance on a tilted plane in units of the flat plane at the equator (see [`SunGrid::mean`]): 73 days, 24 steps of the day.
+pub fn annual_mean_irradiance(lat_rad: f64, slope_rad: f64, azimuth_rad: f64) -> f64 {
+    let grid = SunGrid::new();
+    grid.mean(lat_rad, slope_rad, azimuth_rad) / grid.mean(0.0, 0.0, 0.0)
 }
 
 /// The slopes and aspects of the insolation table.
 const TABLE_SLOPES: usize = 17;
 const TABLE_ASPECTS: usize = 16;
-/// The steepest slope of the table in degrees.
+/// The steepest slope of the table in degrees; a steeper cell reads the 60 degree value.
 const TABLE_MAX_DEG: f64 = 60.0;
 
 /// The annual-mean insolation of a chunk: a table over slope and aspect at the chunk centre's latitude, read bilinearly (the latitude changes by 0.04
-/// degrees across a chunk).
+/// degrees across a chunk, so two chunks may differ by one 8-bit code at their border).
 pub struct InsolationTable {
     values: Vec<f64>,
 }
 
 impl InsolationTable {
     pub fn new(lat_rad: f64) -> InsolationTable {
+        let grid = SunGrid::new();
+        let flat = grid.mean(0.0, 0.0, 0.0);
         let mut values = Vec::with_capacity(TABLE_SLOPES * (TABLE_ASPECTS + 1));
         for s in 0..TABLE_SLOPES {
             let slope = (TABLE_MAX_DEG * s as f64 / (TABLE_SLOPES - 1) as f64).to_radians();
             for a in 0..=TABLE_ASPECTS {
-                values.push(annual_mean_irradiance(lat_rad, slope, core::f64::consts::TAU * a as f64 / TABLE_ASPECTS as f64));
+                values.push(grid.mean(lat_rad, slope, core::f64::consts::TAU * a as f64 / TABLE_ASPECTS as f64) / flat);
             }
         }
         InsolationTable { values }
@@ -235,24 +261,33 @@ pub struct ChunkDrivers {
     pub insolation: Vec<u8>,
 }
 
-/// What the drivers need of a chunk. `heights` is the `(n + 2) x (n + 2)` raster of the core and one ring (row-major, `j` outer), `area_m2` the `n x n`
-/// drainage area of the core, `dirs` the unit directions of the core's cells, `(east, north)` the local east and north unit vectors at each cell as
-/// `(i-axis, j-axis)` components: the rotation from the raster's axes to the compass, `lat_rad` the latitude of the chunk's centre.
+/// What the drivers need of a chunk. `heights` is the `(n + 2) x (n + 2)` raster of the core and one ring (row-major, `j` outer, heights over the water),
+/// `area_m2` the `n x n` drainage area of the core, `dirs` the unit directions of the core's cells, `spacing_m` the true spacing in metres of each core
+/// cell along the raster's `i` and `j` axes (the lattice is equal-angle: the spacing is 0.7 of the face-centre cell at a face edge), `compass` for each
+/// core cell the components `[ei, ej, ni, nj]` that turn the gradient `(p, q)` along the axes into its east and north parts (`ge = p ei + q ej`,
+/// `gn = p ni + q nj`; the identity `[1, 0, 0, 1]` where the axes are east and north), and `lat_rad` the latitude of the chunk's centre.
 pub struct ChunkRaster<'a> {
     pub n: usize,
-    pub cell_m: f64,
     pub heights: &'a [f64],
     pub area_m2: &'a [f64],
     pub dirs: &'a [Vec3],
+    pub spacing_m: &'a [[f64; 2]],
     pub compass: &'a [[f64; 4]],
     pub lat_rad: f64,
 }
 
-/// The drivers of every core cell of `chunk`.
+/// The drivers of every core cell of `chunk`. Heights or areas that are not finite, a cell wider than 10 km and constants out of order are refused
+/// (a panic): the stage hands over finite rasters or does not run (GEN-070).
 pub fn chunk_drivers(chunk: &ChunkRaster, params: &DriverParams) -> ChunkDrivers {
     let n = chunk.n;
     assert_eq!(chunk.heights.len(), (n + 2) * (n + 2));
-    assert_eq!(chunk.area_m2.len(), n * n);
+    for len in [chunk.area_m2.len(), chunk.dirs.len(), chunk.spacing_m.len(), chunk.compass.len()] {
+        assert_eq!(len, n * n);
+    }
+    assert!(chunk.heights.iter().all(|h| h.is_finite()), "a driver raster with a height that is not a number");
+    assert!(chunk.area_m2.iter().all(|a| a.is_finite()), "a driver raster with an area that is not a number");
+    assert!(chunk.spacing_m.iter().all(|s| s[0] > 0.0 && s[0] < 1.0e4 && s[1] > 0.0 && s[1] < 1.0e4), "a cell spacing out of range");
+    assert!(params.soil_alt_hi_m > params.soil_alt_lo_m && params.flow_area_hi_m2 > params.flow_area_lo_m2 && params.moisture_span > 0.0);
     let table = InsolationTable::new(chunk.lat_rad);
     let mut out =
         ChunkDrivers { soil: Vec::with_capacity(n * n), moisture: Vec::with_capacity(n * n), insolation: Vec::with_capacity(n * n) };
@@ -264,16 +299,17 @@ pub fn chunk_drivers(chunk: &ChunkRaster, params: &DriverParams) -> ChunkDrivers
                     z[dj * 3 + di] = chunk.heights[(j + dj) * (n + 2) + (i + di)];
                 }
             }
-            let (p, q, kappa) = gradient_and_curvature(&z, chunk.cell_m);
-            let tan_s = libm::sqrt(p * p + q * q);
-            let slope = libm::atan(tan_s);
             let cell = j * n + i;
-            let area = chunk.area_m2[cell];
-            // The downhill direction on the compass: the gradient of the height rotated to (east, north); the plane faces down the gradient.
+            let [si, sj] = chunk.spacing_m[cell];
+            let (p, q, kappa) = gradient_and_curvature(&z, si, sj);
+            // The downhill direction on the compass: the gradient turned to (east, north); the plane faces down the gradient. The slope is the true one.
             let [ei, ej, ni, nj] = chunk.compass[cell];
             let (ge, gn) = (p * ei + q * ej, p * ni + q * nj);
+            let tan_s = libm::sqrt(ge * ge + gn * gn);
+            let slope = libm::atan(tan_s);
             let azimuth = if ge == 0.0 && gn == 0.0 { 0.0 } else { libm::atan2(-ge, -gn) };
-            let wet = wetness_index(area, chunk.cell_m, tan_s, params);
+            let area = chunk.area_m2[cell];
+            let wet = wetness_index(area, libm::sqrt(si * sj), tan_s, params);
             let depth = soil_depth_m(slope, kappa, area, lithology(chunk.dirs[cell], params), z[4], params);
             out.soil.push(encode_soil(depth, params));
             out.moisture.push(encode_unit(moisture(wet, params)));
@@ -287,43 +323,56 @@ pub fn chunk_drivers(chunk: &ChunkRaster, params: &DriverParams) -> ChunkDrivers
 mod tests {
     use super::*;
 
+    const L: f64 = 8.0;
+
+    fn stencil(f: impl Fn(f64, f64) -> f64, si: f64, sj: f64) -> [f64; 9] {
+        let mut z = [0.0; 9];
+        for dj in 0..3 {
+            for di in 0..3 {
+                z[dj * 3 + di] = f((di as f64 - 1.0) * si, (dj as f64 - 1.0) * sj);
+            }
+        }
+        z
+    }
+
     // spec: GEN-070
     #[test]
-    fn a_plane_has_its_slope_and_no_curvature_and_a_paraboloid_its_curvature() {
-        let l = 8.0;
-        let plane: Vec<f64> = (0..3).flat_map(|j| (0..3).map(move |i| 0.3 * l * i as f64 + 0.1 * l * j as f64)).collect();
-        let (p, q, k) = gradient_and_curvature(plane.as_slice().try_into().unwrap(), l);
+    fn the_gradient_and_the_mean_curvature_are_the_surfaces_for_a_plane_a_bowl_a_saddle_and_a_tilted_cone() {
+        let (p, q, k) = gradient_and_curvature(&stencil(|x, y| 0.3 * x + 0.1 * y, L, L), L, L);
         assert!((p - 0.3).abs() < 1e-12 && (q - 0.1).abs() < 1e-12 && k.abs() < 1e-12, "{p} {q} {k}");
-        // z = kappa / 2 (x^2 + y^2) about the centre: the curvature is kappa, in a hollow positive.
         let kappa = 0.01;
-        let bowl: Vec<f64> = (0..3)
-            .flat_map(|j| {
-                (0..3).map(move |i| {
-                    0.5 * kappa * {
-                        let (x, y) = ((i as f64 - 1.0) * l, (j as f64 - 1.0) * l);
-                        x * x + y * y
-                    }
-                })
-            })
-            .collect();
-        let (_, _, k) = gradient_and_curvature(bowl.as_slice().try_into().unwrap(), l);
+        let (_, _, k) = gradient_and_curvature(&stencil(|x, y| 0.5 * kappa * (x * x + y * y), L, L), L, L);
         assert!((k - kappa).abs() < 1e-12, "{k}");
         let f = curvature_factor(k, &DriverParams::default());
         assert!((f - 1.3808).abs() < 1e-4, "the curvature factor of kappa 0.01 per metre is {f}");
+        // A ridge is negative, a saddle z = c x y has the mean curvature -2 p q s / g^3/2 = 0 at its centre and a tilted one gets the gradient terms.
+        let (_, _, k) = gradient_and_curvature(&stencil(|x, y| -0.5 * kappa * (x * x + y * y), L, L), L, L);
+        assert!((k + kappa).abs() < 1e-12);
+        let (a, b, c) = (0.2, -0.1, 0.004);
+        let z = stencil(|x, y| a * x + b * y + c * x * y, L, L);
+        let (p, q, k) = gradient_and_curvature(&z, L, L);
+        let g = 1.0 + a * a + b * b;
+        let want = -2.0 * a * b * c / (2.0 * g * libm::sqrt(g));
+        assert!((p - a).abs() < 1e-12 && (q - b).abs() < 1e-12 && (k - want).abs() < 1e-12, "{k} against {want}");
+        // A cone of slope 0.5 about the stencil's centre (sampled off the apex, at distance 3 cells): the curvature is 1 / (2 r) of a cone, over the slope term.
+        let (cx, cy) = (3.0 * L, 0.0);
+        let cone = stencil(|x, y| 0.5 * libm::sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy)), L, L);
+        let (_, _, k) = gradient_and_curvature(&cone, L, L);
+        assert!(k > 0.0 && (k - 0.5 / (2.0 * 3.0 * L * libm::sqrt(1.25))).abs() < 5e-4, "the cone's curvature {k}");
+        // The spacing along the axes can differ: a plane of true slope 0.3 along an axis whose cells are 0.707 as wide reads 0.3.
+        let (p, _, _) = gradient_and_curvature(&stencil(|x, _| 0.3 * x, 0.707 * L, L), 0.707 * L, L);
+        assert!((p - 0.3).abs() < 1e-12);
     }
 
     // spec: GEN-070
     #[test]
     fn the_wetness_floors_the_slope_clamps_the_area_and_the_moisture_stays_in_the_unit_range() {
         let p = DriverParams::default();
-        // A flat has the floor's value: ln(A / (w 0.01)).
         let flat = wetness_index(64.0 * 100.0, 8.0, 0.0, &p);
         assert!((flat - libm::log(6400.0 / (8.0 * 0.01))).abs() < 1e-12);
-        // A hollow whose area exceeds the clamp is as wet as the clamp says.
         let max = wetness_index(1.0e12, 8.0, 0.0, &p);
         assert!((max - libm::log(1.0e8 / (8.0 * 0.01))).abs() < 1e-12, "{max}");
         assert_eq!(moisture(max, &p), 1.0);
-        // Steeper is drier, a bigger area is wetter, and the moisture stays in [0, 1].
         assert!(wetness_index(1.0e5, 8.0, 0.5, &p) < wetness_index(1.0e5, 8.0, 0.05, &p));
         assert!(wetness_index(1.0e4, 8.0, 0.05, &p) < wetness_index(1.0e6, 8.0, 0.05, &p));
         for w in [-5.0, 0.0, 4.0, 10.0, 25.0] {
@@ -342,10 +391,11 @@ mod tests {
         assert!(soil_depth_m(0.0, 0.0, 1.0e8, 0.0, 100.0, &p) > soil_depth_m(0.0, 0.0, 1.0e3, 0.0, 100.0, &p));
         assert_eq!(soil_depth_m(0.0, 0.0, 1.0e6, 0.0, 5000.0, &p), 0.0, "above the altitude range there is no soil");
         assert!(soil_depth_m(0.0, 0.0, 1.0e6, 1.0, 100.0, &p) > soil_depth_m(0.0, 0.0, 1.0e6, -1.0, 100.0, &p));
-        // The codes round trip within their step.
-        for d in [0.0, 0.2, 1.0, 4.0, 8.0] {
+        // The square-root code is exact to half a code step: |sqrt(back / max) - sqrt(d / max)| <= 0.5 / 255.
+        for k in 0..=800 {
+            let d = p.soil_max_m * f64::from(k) / 800.0;
             let back = decode_soil(encode_soil(d, &p), &p);
-            assert!((back - d).abs() < 0.07 * (1.0 + d), "{d} -> {back}");
+            assert!((libm::sqrt(back / p.soil_max_m) - libm::sqrt(d / p.soil_max_m)).abs() <= 0.5 / 255.0 + 1e-12, "{d} -> {back}");
         }
     }
 
@@ -368,14 +418,12 @@ mod tests {
     /// The mean irradiance on a plane by the sun's vector, every minute of 365 days: independent of the cosine formula (a frame of east, north and up).
     fn brute_force(lat: f64, slope: f64, azimuth: f64) -> f64 {
         let mean = |lat: f64, slope: f64, azimuth: f64| {
-            // Frame at the latitude: x east, y north, z up. The plane's normal tilts from up towards `azimuth` (from north, clockwise) by `slope`.
             let normal = [libm::sin(slope) * libm::sin(azimuth), libm::sin(slope) * libm::cos(azimuth), libm::cos(slope)];
             let (mut total, mut count) = (0.0, 0.0);
             for day in 0..365 {
                 let d = declination(f64::from(day) + 1.0);
                 for minute in 0..1440 {
                     let w = core::f64::consts::TAU * (f64::from(minute) + 0.5) / 1440.0 - core::f64::consts::PI;
-                    // The sun's direction in the local frame from the hour angle, the declination and the latitude.
                     let east = -libm::cos(d) * libm::sin(w);
                     let north = libm::cos(lat) * libm::sin(d) - libm::sin(lat) * libm::cos(d) * libm::cos(w);
                     let up = libm::sin(lat) * libm::sin(d) + libm::cos(lat) * libm::cos(d) * libm::cos(w);
@@ -392,17 +440,23 @@ mod tests {
 
     // spec: GEN-070
     #[test]
-    fn the_insolation_is_within_a_percent_of_a_brute_force_integration_at_the_equator_and_at_45_degrees_north() {
+    fn the_insolation_is_within_a_percent_of_a_brute_force_integration_at_the_equator_and_at_45_degrees_north_up_to_the_tables_60_degrees()
+    {
+        let mut worst = 0.0f64;
         for lat_deg in [0.0, 45.0] {
-            for (slope_deg, azimuth_deg) in [(0.0, 0.0), (20.0, 0.0), (20.0, 180.0), (40.0, 90.0), (40.0, 270.0), (30.0, 200.0)] {
+            for (slope_deg, azimuth_deg) in
+                [(0.0, 0.0), (20.0, 0.0), (20.0, 180.0), (40.0, 90.0), (40.0, 270.0), (30.0, 200.0), (60.0, 0.0), (60.0, 180.0)]
+            {
                 let (lat, slope, azimuth) = (f64::to_radians(lat_deg), f64::to_radians(slope_deg), f64::to_radians(azimuth_deg));
                 let (fast, slow) = (annual_mean_irradiance(lat, slope, azimuth), brute_force(lat, slope, azimuth));
+                worst = worst.max((fast - slow).abs() / slow.max(0.05));
                 assert!(
                     (fast - slow).abs() <= 0.01 * slow.max(0.05),
                     "lat {lat_deg} slope {slope_deg} azimuth {azimuth_deg}: {fast} against {slow}"
                 );
             }
         }
+        assert!(worst > 0.0);
         // The north and south faces differ at 45 degrees north: the sun is in the south.
         let (n, s) = (annual_mean_irradiance(0.785, 0.5, 0.0), annual_mean_irradiance(0.785, 0.5, core::f64::consts::PI));
         assert!(s > n * 1.3, "south {s}, north {n}");
@@ -420,25 +474,58 @@ mod tests {
         assert!((table.at(0.4, 0.0) - table.at(0.4, core::f64::consts::TAU)).abs() < 1e-12);
     }
 
-    // spec: GEN-070
-    #[test]
-    fn a_chunk_of_a_tilted_plane_gives_the_drivers_of_that_plane_and_the_same_bits_each_time() {
-        let n = 16;
-        let cell_m = 8.0;
-        // A plane rising to the east by 0.3 (the i axis is east, the j axis north): it faces west.
-        let heights: Vec<f64> = (0..(n + 2) * (n + 2)).map(|k| 0.3 * cell_m * (k % (n + 2)) as f64 + 100.0).collect();
+    fn plane_chunk(n: usize, heights: Vec<f64>, lat_rad: f64, compass: [f64; 4], spacing: [f64; 2]) -> ChunkDrivers {
         let area = vec![1.0e6; n * n];
         let dirs = vec![Vec3::new(1.0, 0.0, 0.0); n * n];
-        let compass = vec![[1.0, 0.0, 0.0, 1.0]; n * n];
-        let raster = ChunkRaster { n, cell_m, heights: &heights, area_m2: &area, dirs: &dirs, compass: &compass, lat_rad: 0.0 };
+        let compass = vec![compass; n * n];
+        let spacing = vec![spacing; n * n];
+        let raster = ChunkRaster { n, heights: &heights, area_m2: &area, dirs: &dirs, spacing_m: &spacing, compass: &compass, lat_rad };
+        chunk_drivers(&raster, &DriverParams::default())
+    }
+
+    fn ramp(n: usize, f: impl Fn(f64, f64) -> f64) -> Vec<f64> {
+        (0..(n + 2) * (n + 2)).map(|k| f((k % (n + 2)) as f64 * L, (k / (n + 2)) as f64 * L)).collect()
+    }
+
+    // spec: GEN-070
+    #[test]
+    fn a_chunk_of_a_tilted_plane_gives_the_drivers_of_that_plane_with_the_compass_and_the_spacing_and_the_same_bits_on_another_thread() {
+        let n = 16;
+        let id = [1.0, 0.0, 0.0, 1.0];
         let params = DriverParams::default();
-        let a = chunk_drivers(&raster, &params);
-        let b = chunk_drivers(&raster, &params);
-        assert_eq!((&a.soil, &a.moisture, &a.insolation), (&b.soil, &b.moisture, &b.insolation));
         let slope = libm::atan(0.3);
-        // West-facing at the equator: the afternoon sun, the same as east-facing, below the flat plane's value of 1 by the tilt.
+        // Rising to the east it faces west; rising to the north, south; at 45 degrees north the south face has the sun.
+        let west = plane_chunk(n, ramp(n, |x, _| 0.3 * x), 0.0, id, [L, L]);
         let want = annual_mean_irradiance(0.0, slope, 3.0 * core::f64::consts::FRAC_PI_2);
-        assert!((decode_unit(a.insolation[0]) - want).abs() < 0.02, "{} against {want}", decode_unit(a.insolation[0]));
-        assert!(a.soil.iter().all(|&s| s == a.soil[0]) && a.moisture.iter().all(|&m| m == a.moisture[0]));
+        assert!((decode_unit(west.insolation[0]) - want).abs() < 0.01, "{} against {want}", decode_unit(west.insolation[0]));
+        let lat = 45.0_f64.to_radians();
+        let south = plane_chunk(n, ramp(n, |_, y| 0.3 * y), lat, id, [L, L]);
+        let north = plane_chunk(n, ramp(n, |_, y| -0.3 * y), lat, id, [L, L]);
+        let (s, t) = (decode_unit(south.insolation[0]), decode_unit(north.insolation[0]));
+        assert!((s - annual_mean_irradiance(lat, slope, core::f64::consts::PI)).abs() < 0.01, "south face {s}");
+        assert!((t - annual_mean_irradiance(lat, slope, 0.0)).abs() < 0.01 && s > t * 1.3, "north face {t}");
+        // A compass turned a quarter (the raster's i axis is north, its j axis west): a plane rising along i faces south all the same.
+        let turned = plane_chunk(n, ramp(n, |x, _| 0.3 * x), lat, [0.0, -1.0, 1.0, 0.0], [L, L]);
+        assert_eq!(turned.insolation[0], south.insolation[0]);
+        // Cells 0.707 as wide along i: a plane of true slope 0.3 has heights rising 0.3 x 0.707 L per cell and reads the same moisture and soil.
+        let narrow = plane_chunk(n, ramp(n, |x, _| 0.3 * 0.707 * x), 0.0, id, [0.707 * L, L]);
+        assert_eq!((narrow.soil[0], narrow.insolation[0]), (west.soil[0], west.insolation[0]));
+        // The same bits on a second thread; a cell is equal to every other on a plane.
+        let again = std::thread::spawn(move || plane_chunk(16, ramp(16, |x, _| 0.3 * x), 0.0, [1.0, 0.0, 0.0, 1.0], [L, L]))
+            .join()
+            .expect("thread");
+        assert_eq!((&west.soil, &west.moisture, &west.insolation), (&again.soil, &again.moisture, &again.insolation));
+        assert!(west.soil.iter().all(|&v| v == west.soil[0]) && west.moisture.iter().all(|&m| m == west.moisture[0]));
+        let _ = params;
+    }
+
+    // spec: GEN-070
+    #[test]
+    #[should_panic(expected = "height that is not a number")]
+    fn a_raster_with_a_height_that_is_not_a_number_is_refused() {
+        let n = 8;
+        let mut heights = ramp(n, |x, _| 0.1 * x);
+        heights[40] = f64::NAN;
+        plane_chunk(n, heights, 0.0, [1.0, 0.0, 0.0, 1.0], [L, L]);
     }
 }
