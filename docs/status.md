@@ -22,14 +22,14 @@ Done before the reset (2026-10-23 and 24; M8-2 archived #621, chunk fade split i
 |---|---|---|
 | M8-R | Plausible relief (owner, 2026-10-25: plausible relief, hydrology and shadows in M8; realism of hill terrain later): the hill band and landform driver in the bake and the uplift that keeps relief in the coupled run (crusader), the field-side creases and bounds (explorer), one rebuild of bake, run, coarse horizon and chunks on `C:/DEV/SeriousPlanetData/global16384` | explorer, crusader |
 | M8-1 (c) rest | the run at 2048 from any bake is done (#638, GEN-056); its first make from the 16384 bake took 9,916 s, likely evaluating the field per vertex instead of reading stored samples: check and add a progress line; re-time the run on the real heights (margin 55 s); the key read of about 25M bake samples even when the run is stored; uplift and erodibility constant until the driver maps (ADR 0076); the K view is coarse (climate shading) | crusader, next (the rebuild re-runs the coupled make) |
-| M8-V | done: tile curve (#619); chunk curve (2026-10-26, viewer pools): floor 145, 95, 115, 115 m/s at 30, 100, 300, 1000 m; horizon jobs cost 15 % at 300 m (135 off) (`perf/logs/envelope.json`); owner sets the floor | owner |
+| M8-V | done: tile curve (#619); chunk curve (2026-10-26, viewer pools): floor 145, 95, 115, 115 m/s at 30, 100, 300, 1000 m; horizon jobs cost 15 % at 300 m (135 off) (`perf/logs/envelope.json`) | owner |
 | R4b | `GeoPoint::of_dir` and `dir` in `editor/polyline.rs` onto the core helpers | crusader, with M8-7 |
 
 Open owner items: the two flickers (Tracked) need a live check (editor off, debug path L, or a recording or F9 at the moment); P1-5 editing frame rate on a quiet machine; P2-8 missing tiles during an edit's refresh.
 
 ## Tracked
 - **Detail blocks** (BUILD-027): 10 requirements in `xtask/src/detail_blocks.txt`: split or shorten each, delete its line; no new blocks.
-- **Frame tail** (SPIKE-44): `draw_plan_transient` 8-14 ms on a plan delivery (24-48 frames a minute at 30-100 m), on top of ~9 ms of frame work: a dropped frame at 60 fps; candidate for ADR 0083's frame share.
+- **Frame tail** (SPIKE-44): `draw_plan_transient` 8-14 ms on a plan delivery (24-48 frames/min) + ~9 ms frame work drops a frame at 60 fps; ADR 0083 frame share.
 - **Hillslope flat patches** (look review 2b): ground beyond a rim is 0.7 m under the base, half as rough, flat in 60-160 m patches.
 - **GEN-052 met, window 2026-10-26** (`perf anet-chunk --store`): 8 m 3.33 / 3.30 s on 4 threads, 5.3 s on one; 4 m 14.8 s; 10 m 2.1 s. Repeat after any change to the base field, the routing or the band (#744).
 - **Driver fade seam** (#716): a tile rebuilt for a neighbour chunk's landing fades its drivers up from neutral again. Trigger: the first look with driver curves. Fix: a driver increment plane on the upload path (crusader). Resolution: 32 m texels (GEN-074); M9: per-vertex.
