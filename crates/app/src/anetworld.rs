@@ -120,6 +120,20 @@ impl WorldTerrain {
         clock: Arc<dyn Clock>,
         cfg: ChunkConfig,
     ) -> Result<(), String> {
+        self.enable_anet_with(maps, cell_m, spawner, clock, cfg, true)
+    }
+
+    /// [`WorldTerrain::enable_anet`] with the disk cache of landed chunks switched by `use_disk`: off, every chunk is computed (a cold start, the
+    /// speed-envelope scene's trials, TEST-054), and nothing is written beside the store either.
+    pub fn enable_anet_with(
+        self: &Arc<Self>,
+        maps: Arc<CoupledMaps>,
+        cell_m: f64,
+        spawner: Arc<dyn Spawner>,
+        clock: Arc<dyn Clock>,
+        cfg: ChunkConfig,
+        use_disk: bool,
+    ) -> Result<(), String> {
         let per = cells_per_chunk_for(self.radius_m(), cell_m);
         let lat = planet_generators::chunkfield::ChunkLattice::new(per)
             .ok_or_else(|| format!("{per} cells per chunk edge do not fit a lattice"))?;
@@ -141,7 +155,7 @@ impl WorldTerrain {
             },
             memo: Default::default(),
         });
-        let disk: Option<Arc<dyn ChunkDisk>> = self.store_dir().map(|dir| {
+        let disk: Option<Arc<dyn ChunkDisk>> = self.store_dir().filter(|_| use_disk).map(|dir| {
             let spec = ChunkSpec {
                 body: BodyId::PLANET,
                 seed: self.base_seed(),

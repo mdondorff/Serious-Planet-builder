@@ -2,6 +2,7 @@
 //! and `test-render` (headless harness). It wires the other crates together: the window and the editor mode (`window`, `editwin`, `panels`), the world's field chain (`worldfield`), the stores and bakes, and the perf and stress scenes.
 
 pub mod anetworld;
+pub mod chunkstage;
 pub mod coupledworld;
 pub mod crash;
 pub mod editperf;

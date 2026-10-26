@@ -13,7 +13,6 @@ use planet_frame::chunkshare::ChunkShare;
 use planet_frame::{Camera, SelectionCache};
 use planet_generators::chunkfield::ChunkKey;
 use planet_render::GpuContext;
-use planet_streaming::chunks::ChunkConfig;
 use std::collections::HashSet;
 use std::io::Write;
 use std::sync::Arc;
@@ -386,56 +385,6 @@ fn settle(
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-}
-
-/// Wait for the coupled run of the world (made and stored if the store holds none) and give the world its A-net chunk stage.
-fn enable_chunks(
-    world: &Arc<WorldTerrain>,
-    cell_m: f64,
-    workers: usize,
-    out: &mut dyn Write,
-) -> Result<Arc<planet_generators::coupled::CoupledMaps>, String> {
-    use crate::coupledworld::Standing;
-    world.request_coupled();
-    let started = Instant::now();
-    let maps = loop {
-        match world.coupled_standing() {
-            Standing::Ready(m, _) => break m,
-            Standing::Failed(e) => return Err(format!("the coupled run failed: {e}")),
-            _ => std::thread::sleep(Duration::from_millis(100)),
-        }
-    };
-    writeln!(out, "coupled run ready after {:.1} s", started.elapsed().as_secs_f64()).map_err(err)?;
-    let pool = planet_streaming::GenWorkers::new(workers).pool();
-    let cfg = ChunkConfig { workers, evict_ms: 3_600_000, cap_bytes: 4 << 30, ..ChunkConfig::default() };
-    world.enable_anet(maps.clone(), cell_m, pool, Arc::new(planet_streaming::SystemClock::new()), cfg)?;
-    // The horizon shadows (REND-038): the second job of every chunk, and the stored far-field horizon read now (a still waits for both).
-    let lat = world.chunk_lattice().ok_or("the world has no chunk lattice")?;
-    let params = crate::horizonworld::chunk_horizon_params(&lat, world.radius_m());
-    let horizon_pool = planet_streaming::GenWorkers::new(workers).pool();
-    world.enable_horizon(
-        params,
-        horizon_pool,
-        Arc::new(planet_streaming::SystemClock::new()),
-        planet_streaming::chunks::HorizonConfig { workers, settle_ms: 1_000 },
-        workers,
-    )?;
-    world.request_coarse_horizon();
-    let coarse = loop {
-        match world.coarse_standing() {
-            crate::horizonworld::CoarseStanding::Idle | crate::horizonworld::CoarseStanding::Working => {
-                std::thread::sleep(Duration::from_millis(50))
-            }
-            crate::horizonworld::CoarseStanding::Ready(h) => {
-                break format!("coarse horizon: {} observer cells per face edge, {} azimuths", h.m, h.azimuths)
-            }
-            crate::horizonworld::CoarseStanding::Absent(t) | crate::horizonworld::CoarseStanding::Failed(t) => {
-                break format!("horizon: {t}")
-            }
-        }
-    };
-    writeln!(out, "{coarse}").map_err(err)?;
-    Ok(maps)
 }
 
 /// How far from the eye a still waits for chunk horizon maps, metres (two chunk edges and a bit).
@@ -899,7 +848,13 @@ pub fn capture_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
     )
     .map_err(err)?;
     let workers = o.gen_workers().workers.max(1);
-    let maps = enable_chunks(&world, config.chunk_cell_m, workers, out)?;
+    let maps = crate::chunkstage::enable_chunks(
+        &world,
+        config.chunk_cell_m,
+        workers,
+        crate::chunkstage::StageOptions { horizon: true, disk: true },
+        out,
+    )?;
     let base = world.field()?;
     let step_m = std::f64::consts::FRAC_PI_2 * radius_m / f64::from(world.global_res());
     let (mut anchor, flow, measured) = anchor_direction(config.anchor, &maps, &|d| base.height(d), step_m)?;

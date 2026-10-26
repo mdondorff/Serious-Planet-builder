@@ -175,6 +175,11 @@ impl WorldTerrain {
         crate::stall::read(&self.horizon, "horizon jobs lock (read)").as_ref()?.horizon(key)
     }
 
+    /// The horizon jobs in flight, 0 without them.
+    pub fn horizon_in_flight(&self) -> usize {
+        crate::stall::read(&self.horizon, "horizon jobs lock (read)").as_ref().map_or(0, |j| j.in_flight())
+    }
+
     /// What the horizon jobs did so far, `None` without them.
     pub fn horizon_stats(&self) -> Option<HorizonStats> {
         crate::stall::read(&self.horizon, "horizon jobs lock (read)").as_ref().map(|j| j.stats())
