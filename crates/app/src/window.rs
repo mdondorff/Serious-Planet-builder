@@ -973,8 +973,11 @@ impl App<'_> {
                 // The legend of the stale-tile overlay (VIEW-044) in the corner while it is on.
                 ui.legend =
                     if st.viewer.overlay == planet_frame::look::Overlay::Stale { planet_frame::viewer::state_legend() } else { Vec::new() };
+                let sun_time = st.viewer.lit.then(|| sun_time_text(st.sun_dir, st.camera_position));
+                let keys = planet_frame::keytable::rows(true, &st.viewer, sun_time.as_deref());
                 let mut frame_ui = match st.edit.as_mut().filter(|e| e.on) {
                     Some(e) => {
+                        e.set_keys(keys);
                         let view_status = format!("{} · {status}", crate::editwin::mode_status(e));
                         let mut draw = |ui: &mut egui::Ui| panel_events = e.draw(ui, &view_status, scale);
                         ui.frame(&st.window, &status, &layer, Some(&mut draw))
@@ -1191,6 +1194,13 @@ fn smoke_globe(st: &mut Running, camera: &Camera, viewport: Viewport, radius_m: 
         }
         _ => {}
     }
+}
+
+/// The local solar time at the camera as the Keys tab shows it (`HH:MM`), for a moved sun.
+fn sun_time_text(sun: [f32; 3], camera: planet_core::Vec3) -> String {
+    let t = planet_frame::viewer::local_solar_hours(sun, camera);
+    let minutes = (t * 60.0).round() as u32 % 1440;
+    format!("{:02}:{:02} local solar time", minutes / 60, minutes % 60)
 }
 
 /// What the title adds for the shade view, the moved sun and a world without a chunk stage (VIEW-054): empty at the start.

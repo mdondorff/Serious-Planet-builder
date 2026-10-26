@@ -85,7 +85,8 @@ const KNOWN_STEEP_MESH: u64 = 10611333974132247449;
 fn the_stress_field_has_a_version_guarded_known_answer() {
     assert_eq!(
         (STEEP_VERSION, planet_generators::mesh::MESH_VERSION),
-        (1, 9),
+        // MESH_VERSION 10, driver block, ADR 0076/GEN-071 (9 before); the stress mesh itself is unchanged.
+        (1, 10),
         "bump KNOWN_STEEP_MESH together with STEEP_VERSION or MESH_VERSION"
     );
     let h = tile_mesh_field(&STEEP, &TangentWarp, id(4, 12, 1000, 2000), CELLS, R).content_hash();

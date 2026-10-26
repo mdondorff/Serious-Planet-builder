@@ -162,6 +162,8 @@ pub struct EditRuntime {
     smoke_start: Option<u64>,
     smoke_done: bool,
     lists: Lists,
+    /// The rows of the Keys tab, set by the window each frame (VIEW-057).
+    keys: Vec<planet_frame::keytable::KeyRow>,
     camera_position: Vec3,
     /// An edit the camera is to fly to (set by a double click or Fly to; the window takes it).
     fly: Option<ItemId>,
@@ -272,6 +274,7 @@ impl EditRuntime {
             smoke_start: None,
             smoke_done: false,
             lists: Lists::default(),
+            keys: Vec::new(),
             camera_position: Vec3::new(radius_m, 0.0, 0.0),
             fly: None,
             affected: Vec::new(),
@@ -569,6 +572,11 @@ impl EditRuntime {
         &self.overlay
     }
 
+    /// The rows the Keys tab lists this frame: the window's key table with the state of each key (VIEW-057).
+    pub fn set_keys(&mut self, rows: Vec<planet_frame::keytable::KeyRow>) {
+        self.keys = rows;
+    }
+
     /// The data the panels show this frame.
     pub fn panel_data<'a>(&'a self, view_status: &'a str) -> PanelData<'a> {
         let s = &self.session;
@@ -591,6 +599,7 @@ impl EditRuntime {
             edit_count: self.edit_count(),
             saved: &self.saved,
             view_status,
+            keys: &self.keys,
         }
     }
 

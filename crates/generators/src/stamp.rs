@@ -512,6 +512,9 @@ impl HeightField for StampStage<'_> {
     fn level_aware(&self) -> bool {
         self.base.level_aware()
     }
+    fn level_drivers(&self, dirs: &[Vec3], level: u8) -> Option<Vec<Option<[u8; 3]>>> {
+        self.base.level_drivers(dirs, level)
+    }
     /// The change that reaches the heights this stage returns: a stage that is additive in its input height (hills, craters, ridges, channels,
     /// raise and lower strokes, smooth) passes the chunk change on, but a plateau or a flatten stroke clamps toward a target and takes part or all
     /// of it, so the change is the difference of the stamped heights with and without the chunk's change (STRM-047).

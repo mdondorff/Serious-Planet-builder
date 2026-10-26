@@ -810,7 +810,8 @@ fn fs_lit_atmo_view(in: VsOut) -> vec4<f32> {
     let sun = vec3<f32>(bitcast<f32>(g.mode.y), bitcast<f32>(g.mode.z), bitcast<f32>(g.mode.w));
     let up = up_at(nodes[in.node_index].up, in.local);
     let climate = tile_climate(in);
-    let gd = ground_detail(in.node_index, in.local, in.normal, up, climate.x, climate.y, in.height - g.extra.x);
+    let drv = tile_drivers(in);
+    let gd = ground_detail(in.node_index, in.local, in.normal, up, climate.x, climate.y, in.height - g.extra.x, drv);
     // The horizon shadow multiplies the direct sun term (REND-038): 1.0 where no horizon map is there.
     let coarse_fade = horizon_coarse_fade(camera_distance(nodes[in.node_index].origin_rel, in.local));
     let sun_vis = select(1.0, shadow_factor(in.node_index, in.aux, up, sun, coarse_fade), g.mode.x == 0u || g.mode.x == 2u);
@@ -819,8 +820,11 @@ fn fs_lit_atmo_view(in: VsOut) -> vec4<f32> {
     if (gloss > 0.0) {
         rgb = min(rgb + atm_sun_direct(up, in.height, sun) * (gloss * g.range.z * sun_vis), vec3<f32>(60000.0));
     }
-    if (g.mode.x >= 5u) {
+    if (g.mode.x == 5u || g.mode.x == 6u) {
         rgb = horizon_view_colour(g.mode.x, in.node_index, in.aux, up, sun, coarse_fade) * g.range.z;
+    }
+    if (g.mode.x >= 7u) {
+        rgb = clamp(driver_colour(g.mode.x, drv) * 0.31830988618 * g.range.z, vec3<f32>(0.0), vec3<f32>(60000.0));
     }
     if (g.extra.y > 3.5) {
         rgb = stale_tint(in, rgb, g.range.z);

@@ -34,7 +34,7 @@ fn a_compact_tile_counts_at_its_slot_size() {
     let sink = DefaultSink;
 
     assert_eq!(sink.upload_bytes(&compact), slot_bytes(CELLS), "a compact tile counts at its slot (GEN-025)");
-    assert_eq!(sink.upload_bytes(&compact), 9_168, "9,168 B at cells 32");
-    // Whole tiles under the cap: 114 compact tiles of 9,168 B in 1 MiB (the learnings entry of the upload budget).
-    assert_eq!((1u64 << 20) / sink.upload_bytes(&compact), 114);
+    assert_eq!(sink.upload_bytes(&compact), 9_488, "9,488 B at cells 32 (MESH_VERSION 10, driver block, ADR 0076/GEN-071; 9,168 B before)");
+    // Whole tiles under the cap: 110 compact tiles of 9,488 B in 1 MiB (114 of 9,168 B before; the learnings entry of the upload budget).
+    assert_eq!((1u64 << 20) / sink.upload_bytes(&compact), 110);
 }

@@ -566,3 +566,67 @@ fn the_mirror_of_the_vertex_stage_draws_the_final_height_at_weight_one_the_base_
     let base = Reference(3).height_at_level(d, id.level());
     assert!((drawn - base).abs() < 2.0 * with.height_error_bound_m() + 5e-4, "{drawn} against the base {base}");
 }
+
+// spec: GEN-071, GEN-074
+#[test]
+fn a_compact_tile_over_a_ready_chunk_with_drivers_carries_the_chunks_codes_and_one_away_from_chunks_the_neutral_ones() {
+    use planet_generators::compact::compact_tile_field;
+    use planet_generators::drivers::{encode_soil, neutral_codes, unpack_driver_word, ChunkDrivers, DriverParams, NeutralInsolation};
+    let lat = ChunkLattice::new(608).unwrap();
+    let stage = stand_in(8);
+    let tile = chunk_tile(2, 1000, 1000);
+    let n = 608usize;
+    let drivers = ChunkDrivers { soil: vec![200; n * n], moisture: vec![100; n * n], insolation: vec![50; n * n] };
+    let result = compute_chunk(&lat, &stage, R, TOP11, tile, halo_rings(&stage)).unwrap().with_drivers(&drivers).unwrap();
+    let field = ChunkField::new(Reference(3), lat, R, &stage).with_top_level(TOP11).with_ready(Arc::new(result));
+    let id = TileId::new(Face(2), 15, 16 * 1000 + 5, 16 * 1000 + 7).unwrap();
+    let cells = 32u32;
+    let with = compact_tile_field(&field, &TangentWarp, id, cells, R);
+    // Under the chunk every texel holds the chunk's codes; the top byte is the neutral insolation of the texel's latitude, which varies with it.
+    let mut tops = std::collections::BTreeSet::new();
+    for w in with.driver_words {
+        let (codes, neutral_insolation) = unpack_driver_word(w);
+        assert_eq!(codes, [200, 100, 50]);
+        tops.insert(neutral_insolation);
+    }
+    assert!(!tops.is_empty());
+    // A tile away from the chunk holds the neutral codes of its latitude (soil 1 m, moisture 0.5, the flat plane's insolation), and a field without chunks too.
+    let far = TileId::new(Face(4), 15, 16 * 300, 16 * 300).unwrap();
+    let params = DriverParams::default();
+    let insolation = NeutralInsolation::new();
+    for tile in [compact_tile_field(&field, &TangentWarp, far, cells, R), compact_tile_field(&Reference(3), &TangentWarp, far, cells, R)] {
+        for (k, w) in tile.driver_words.iter().enumerate() {
+            let (codes, top) = unpack_driver_word(*w);
+            let dir = far.sample_direction(&TangentWarp, 8, (k % 9) as u32, (k / 9) as u32);
+            let neutral = neutral_codes(libm::asin(dir.z), &params, &insolation);
+            assert_eq!((codes, top), (neutral, neutral[2]), "texel {k}");
+            assert_eq!(codes[0], encode_soil(1.0, &params));
+        }
+    }
+    // The block is part of the tile's hash.
+    let mut without = with.clone();
+    without.driver_words = compact_tile_field(&Reference(3), &TangentWarp, id, cells, R).driver_words;
+    assert_ne!(with.content_hash(), without.content_hash());
+}
+
+// spec: GEN-074
+#[test]
+fn a_tile_under_a_chunk_with_drivers_but_no_height_change_still_gets_a_change_plane_so_its_drivers_fade_in() {
+    use planet_generators::compact::compact_tile_field;
+    use planet_generators::drivers::ChunkDrivers;
+    let lat = ChunkLattice::new(608).unwrap();
+    // A stage that moves no height: the chunk's change is zero everywhere, but it has drivers.
+    let stage = StandIn { seed: 7, radius_m: R, amplitude_m: 0.0, steps: 8 };
+    let tile = chunk_tile(2, 1000, 1000);
+    let n = 608usize;
+    let drivers = ChunkDrivers { soil: vec![200; n * n], moisture: vec![100; n * n], insolation: vec![50; n * n] };
+    let result = compute_chunk(&lat, &stage, R, TOP11, tile, halo_rings(&stage)).unwrap().with_drivers(&drivers).unwrap();
+    let field = ChunkField::new(Reference(3), lat, R, &stage).with_top_level(TOP11).with_ready(Arc::new(result));
+    let id = TileId::new(Face(2), 15, 16 * 1000 + 5, 16 * 1000 + 7).unwrap();
+    let with = compact_tile_field(&field, &TangentWarp, id, 32, R);
+    let plane = with.change.as_ref().expect("the chunk's drivers need the fade plane the change rides on");
+    assert!(plane.iter().all(|&c| c == 0.0) && plane.len() == 33 * 33);
+    // A tile away from the chunk gets no plane.
+    let far = TileId::new(Face(4), 15, 16 * 300, 16 * 300).unwrap();
+    assert_eq!(compact_tile_field(&field, &TangentWarp, far, 32, R).change, None);
+}

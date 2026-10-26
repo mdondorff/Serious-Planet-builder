@@ -736,12 +736,16 @@ pub fn editing_sun_dir(camera: &crate::camera::Camera) -> [f32; 3] {
 /// The step of `[` and `]`, hours (VIEW-054).
 pub const SUN_STEP_H: f64 = 0.5;
 
-/// The shade view after `view` in the cycle of J: normal, horizon, shadow, normal (VIEW-054). A view outside the cycle goes to normal.
+/// The shade view after `view` in the cycle of J: normal, horizon, shadow, soil depth, moisture, insolation, normal (VIEW-054; the three driver views of
+/// GEN-074 since M8-6). A view outside the cycle goes to normal.
 pub fn next_shade_view(view: crate::look::shading::ShadeView) -> crate::look::shading::ShadeView {
-    use crate::look::shading::ShadeView::{Horizon, Lit, Shadow};
+    use crate::look::shading::ShadeView::{Horizon, Insolation, Lit, Moisture, Shadow, SoilDepth};
     match view {
         Lit => Horizon,
         Horizon => Shadow,
+        Shadow => SoilDepth,
+        SoilDepth => Moisture,
+        Moisture => Insolation,
         _ => Lit,
     }
 }
@@ -1833,7 +1837,7 @@ mod tests {
     // spec: VIEW-054
     #[test]
     fn j_cycles_the_shade_view_and_the_bracket_keys_move_the_sun_half_an_hour_until_reset() {
-        use crate::look::shading::ShadeView::{Horizon, Lit, Shadow};
+        use crate::look::shading::ShadeView::{Horizon, Insolation, Lit, Moisture, Shadow, SoilDepth};
         let c = crate::camera::Camera::at_surface_point(
             planet_core::PlanetFixed(Vec3::new(6_371_000.0, 0.0, 0.0)),
             Vec3::new(0.0, 0.0, 1.0),
@@ -1844,13 +1848,14 @@ mod tests {
         );
         let mut v = ViewerState::new(0, 3, 0, false);
         assert_eq!((v.shade_view, v.sun_offset_h), (Lit, 0.0), "the look's sun and the lit view at the start");
-        let seen: Vec<_> = (0..4)
+        let seen: Vec<_> = (0..7)
             .map(|_| {
                 v.command(Command::CycleShadeView, 0, &c);
                 v.shade_view
             })
             .collect();
-        assert_eq!(seen, [Horizon, Shadow, Lit, Horizon]);
+        // The driver views of M8-6 (GEN-074) follow the horizon views.
+        assert_eq!(seen, [Horizon, Shadow, SoilDepth, Moisture, Insolation, Lit, Horizon]);
         v.command(Command::SunLater, 0, &c);
         v.command(Command::SunLater, 0, &c);
         v.command(Command::SunEarlier, 0, &c);

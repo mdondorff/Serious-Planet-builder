@@ -135,4 +135,4 @@ fn the_key_format_version_is_the_one_the_body_fields_belong_to() {
 }
 
 const KNOWN_HEIGHT_KEY: u64 = 16898139709241435207;
-const KNOWN_MESH_KEY: u64 = 3407096947482988834; // moved with GLOBAL_VERSION 5 (the hill band; the climate version word is in the key, was 7682577910981892964), mesh version 9 (ADR 0073; was 12419393412603072957 under 8), earlier: mesh version 8 (the slot of GEN-025; was 15310647050855191544 under 7: the climate version word is in the key); moved with GLOBAL_VERSION 4 (the ocean channel; 3 was the latitude axis), the height key did not
+const KNOWN_MESH_KEY: u64 = 12108674477039701032; // moved with MESH_VERSION 10 (driver block, ADR 0076/GEN-071; was 3407096947482988834 under 9), earlier with GLOBAL_VERSION 5 (the hill band; the climate version word is in the key, was 7682577910981892964), mesh version 9 (ADR 0073; was 12419393412603072957 under 8), earlier: mesh version 8 (the slot of GEN-025; was 15310647050855191544 under 7: the climate version word is in the key); moved with GLOBAL_VERSION 4 (the ocean channel; 3 was the latitude axis), the height key did not

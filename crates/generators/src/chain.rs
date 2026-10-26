@@ -151,6 +151,9 @@ impl HeightField for CoupledLensField<'_> {
     fn level_aware(&self) -> bool {
         self.f().level_aware()
     }
+    fn level_drivers(&self, dirs: &[Vec3], level: u8) -> Option<Vec<Option<[u8; 3]>>> {
+        self.f().level_drivers(dirs, level)
+    }
     fn level_change(&self, dirs: &[Vec3], level: u8) -> Option<Vec<f64>> {
         self.f().level_change(dirs, level)
     }
