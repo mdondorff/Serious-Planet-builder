@@ -1,0 +1,1 @@
+- 2026-10-26 **xtask-heavy-lock** (BUILD-026): archived; the machine-wide heavy-run lock and the owner's quiet flag (#691).

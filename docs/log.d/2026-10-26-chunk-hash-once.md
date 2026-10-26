@@ -1,0 +1,1 @@
+- 2026-10-26 **chunk-hash-once** (STRM-048): archived; the hash of a chunk result is made once on the worker and read outside the chunk-state lock; no delta (#688).
