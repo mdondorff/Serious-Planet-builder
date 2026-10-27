@@ -1084,6 +1084,9 @@ pub const COST_NEAR: f64 = 0.2;
 /// Frames dropped before the timed ones of a variant, and the timed frames whose median is the variant's time.
 const COST_WARM: usize = 8;
 const COST_FRAMES: usize = 41;
+/// Seconds of untimed frames before the first variant of a pose (the GPU idled while the pose settled) and before each later one.
+const COST_WARM_FIRST_S: f64 = 3.0;
+const COST_WARM_S: f64 = 1.0;
 
 /// The terrain-pass GPU time of one pose, milliseconds, medians of [`COST_FRAMES`] waited frames (REND-044).
 #[derive(Clone, Debug, PartialEq)]
@@ -1120,10 +1123,19 @@ pub fn median(mut v: Vec<f64>) -> f64 {
     }
 }
 
-/// The median terrain-pass time of [`COST_FRAMES`] timed frames of `plan` after [`COST_WARM`] untimed ones.
-fn terrain_ms(ctx: &GpuContext, r: &mut planet_render::TerrainRenderer, plan: &planet_frame::TerrainPlan) -> Result<f64, String> {
-    for _ in 0..COST_WARM {
+/// The median terrain-pass time of [`COST_FRAMES`] timed frames of `plan` after untimed frames for `warm_s` seconds (at least [`COST_WARM`]): the
+/// GPU idles while a pose settles and its clocks need a moment to rise, which showed as a pose at 2 to 3 times its neighbours in window 22.
+fn terrain_ms(
+    ctx: &GpuContext,
+    r: &mut planet_render::TerrainRenderer,
+    plan: &planet_frame::TerrainPlan,
+    warm_s: f64,
+) -> Result<f64, String> {
+    let started = Instant::now();
+    let mut warmed = 0;
+    while warmed < COST_WARM || started.elapsed().as_secs_f64() < warm_s {
         r.render(ctx, plan, false).map_err(|e| e.to_string())?;
+        warmed += 1;
     }
     let mut v = Vec::with_capacity(COST_FRAMES);
     for _ in 0..COST_FRAMES {
@@ -1147,14 +1159,14 @@ fn measure_cost(
         }
     };
     detail(plan, 1.0);
-    let full = terrain_ms(ctx, r, plan)?;
+    let full = terrain_ms(ctx, r, plan, COST_WARM_FIRST_S)?;
     detail(plan, 0.0);
-    let no_material = terrain_ms(ctx, r, plan)?;
+    let no_material = terrain_ms(ctx, r, plan, COST_WARM_S)?;
     r.clear_horizon();
     r.set_horizon_coarse(ctx, None);
-    let neither = terrain_ms(ctx, r, plan)?;
+    let neither = terrain_ms(ctx, r, plan, COST_WARM_S)?;
     detail(plan, 1.0);
-    let no_shadow = terrain_ms(ctx, r, plan)?;
+    let no_shadow = terrain_ms(ctx, r, plan, COST_WARM_S)?;
     Ok(CostRow { pose: pose.to_string(), full, no_shadow, no_material, neither })
 }
 

@@ -1,0 +1,18 @@
+{
+  "scene": "shadow-cost",
+  "adapter": "NVIDIA GeForce RTX 3080 Ti Laptop GPU",
+  "owner_override": [],
+  "size": [2560, 1440],
+  "frames": 41,
+  "budget_ms": 1.5,
+  "poses": [
+    {"pose": "300m-sunset", "full_ms": 2.8017, "no_shadow_ms": 2.4371, "no_material_ms": 1.6937, "neither_ms": 1.3691, "shadow_ms": 0.3645, "material_ms": 1.1080, "together_ms": 1.4326},
+    {"pose": "300m-midday", "full_ms": 2.5702, "no_shadow_ms": 2.3194, "no_material_ms": 1.6056, "neither_ms": 1.3527, "shadow_ms": 0.2509, "material_ms": 0.9646, "together_ms": 1.2175},
+    {"pose": "30m-sunset", "full_ms": 2.0275, "no_shadow_ms": 1.8790, "no_material_ms": 1.3230, "neither_ms": 1.1469, "shadow_ms": 0.1485, "material_ms": 0.7045, "together_ms": 0.8806},
+    {"pose": "30m-midday", "full_ms": 2.1135, "no_shadow_ms": 1.8883, "no_material_ms": 1.3619, "neither_ms": 1.1387, "shadow_ms": 0.2253, "material_ms": 0.7516, "together_ms": 0.9748},
+    {"pose": "1.8m-sunset", "full_ms": 1.9845, "no_shadow_ms": 1.8196, "no_material_ms": 1.2698, "neither_ms": 1.1080, "shadow_ms": 0.1649, "material_ms": 0.7148, "together_ms": 0.8765},
+    {"pose": "1.8m-midday", "full_ms": 1.9855, "no_shadow_ms": 1.8196, "no_material_ms": 1.2739, "neither_ms": 1.1069, "shadow_ms": 0.1659, "material_ms": 0.7117, "together_ms": 0.8786}
+  ],
+  "near_budget": ["300m-sunset: 1.433 ms is within 20 % of the 1.5 ms budget: build the shader variants before calling it met", "300m-midday: 1.218 ms is within 20 % of the 1.5 ms budget: build the shader variants before calling it met"],
+  "budget_failures": []
+}
