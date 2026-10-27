@@ -2018,6 +2018,100 @@ mod tests {
         .unwrap();
     }
 
+    // spec: GEN-071
+    /// The drivers at the boundary between the chunk's entry level (15) and the level above, at the pose of an F9 bundle (owner test finding 3): a level-14 tile
+    /// has no chunk drivers (`level_drivers` is `None` below the pyramid top) and reads the neutral codes (soil 1 m, moisture 0.5, the latitude's insolation); a
+    /// level-15 tile reads the chunk's. For every level-15 node of the plan with a level-14 neighbour, at its 9 x 9 driver texels: the share of texels where the
+    /// chunk gives codes at all, and the difference chunk against neutral: soil depth (m), moisture (0 to 1) and insolation (0 to 1): the share beyond 1 m / 0.25
+    /// / 0.1 and the mean and p99 of the absolute difference. `PLANET_BUNDLE=FILE PLANET_ANET_STORE=DIR PLANET_ANET_RES=N cargo test -p planet --release --lib
+    /// driver_step_report -- --ignored --nocapture`. Read only.
+    #[test]
+    #[ignore = "a measurement: it solves the chunks under a view"]
+    fn driver_step_report() {
+        use planet_core::cube::TangentWarp;
+        use planet_core::Side;
+        use planet_generators::drivers::{decode_soil, decode_unit, neutral_codes, DriverParams, NeutralInsolation};
+        let mut out = std::io::stdout();
+        let bundle = std::env::var_os("PLANET_BUNDLE").map(std::path::PathBuf::from).expect("PLANET_BUNDLE=FILE");
+        let b = planet_frame::TerrainBundle::from_text(&std::fs::read_to_string(&bundle).expect("the bundle reads")).expect("a terrain bundle");
+        let res = std::env::var("PLANET_ANET_RES").ok().and_then(|r| r.parse().ok()).unwrap_or(256);
+        let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
+        let (world, _maps, _tile) = anet_scene(res, 11, store, &mut out).unwrap();
+        let spawner = std::sync::Arc::new(planet_streaming::ThreadPool::new(6));
+        let cfg = planet_streaming::chunks::ChunkConfig { workers: 6, ..Default::default() };
+        assert_eq!(
+            world.enable_anet_from_store_with(
+                crate::anetworld::ANET_CELL_M,
+                spawner,
+                std::sync::Arc::new(planet_streaming::SystemClock::new()),
+                cfg,
+                false
+            ),
+            Ok(true)
+        );
+        let entry = crate::anetworld::ANET_TOP_LEVEL;
+        let lod = b.request.lod.clone();
+        let sel = planet_frame::select_nodes_in_view_field(&TangentWarp, &b.request.camera, &*world.field().unwrap(), &lod);
+        let nodes: std::collections::HashSet<planet_core::TileId> = sel.nodes.iter().map(|n| n.tile).collect();
+        let fine: Vec<planet_core::TileId> = nodes.iter().copied().filter(|t| t.level() >= entry).collect();
+        let manager = world.chunk_manager().unwrap();
+        let camera = b.request.camera.position;
+        let start = std::time::Instant::now();
+        loop {
+            world.chunk_frame(&fine, camera, &[]);
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            if fine.iter().all(|t| manager.reads(*t).iter().all(|k| manager.is_ready(*k))) && manager.in_flight() == 0 {
+                break;
+            }
+            assert!(start.elapsed().as_secs() < 1_800, "the chunks did not land");
+        }
+        let field = world.field().unwrap();
+        let params = DriverParams::default();
+        let insolation = NeutralInsolation::new();
+        let (mut soil, mut wet, mut sun) = (Vec::<f64>::new(), Vec::<f64>::new(), Vec::<f64>::new());
+        let (mut texels, mut given, mut tiles) = (0usize, 0usize, 0usize);
+        for t in nodes.iter().filter(|t| t.level() == entry) {
+            let coarser = [Side::East, Side::West, Side::North, Side::South].iter().any(|&side| {
+                let nb = t.neighbor(&TangentWarp, side);
+                !nodes.contains(&nb) && nb.parent().is_some_and(|p| nodes.contains(&p))
+            });
+            if !coarser {
+                continue;
+            }
+            tiles += 1;
+            let dirs: Vec<planet_core::Vec3> = (0..9u32).flat_map(|bb| (0..9u32).map(move |a| (a, bb))).map(|(a, bb)| t.sample_direction(&TangentWarp, 8, a, bb)).collect();
+            let codes = field.level_drivers(&dirs, entry);
+            for (k, d) in dirs.iter().enumerate() {
+                texels += 1;
+                let neutral = neutral_codes(libm::asin(d.z.clamp(-1.0, 1.0)), &params, &insolation);
+                let Some(c) = codes.as_ref().and_then(|c| c[k]) else { continue };
+                given += 1;
+                soil.push((decode_soil(c[0], &params) - decode_soil(neutral[0], &params)).abs());
+                wet.push((decode_unit(c[1]) - decode_unit(neutral[1])).abs());
+                sun.push((decode_unit(c[2]) - decode_unit(neutral[2])).abs());
+            }
+        }
+        writeln!(out, "pose of {}: {tiles} level-{entry} nodes with a level-{} neighbour, {texels} texels, the chunk gives codes at {given}", bundle.display(), entry - 1)
+            .map_err(err)
+            .unwrap();
+        let line = |name: &str, v: &mut Vec<f64>, big: f64| {
+            v.sort_by(f64::total_cmp);
+            let n = v.len().max(1);
+            format!(
+                "RESULT  {name}: |chunk - neutral| mean {:.3}, p99 {:.3}, max {:.3}; beyond {big}: {:.1} % of the texels",
+                v.iter().sum::<f64>() / n as f64,
+                v[(n - 1) * 99 / 100],
+                v[n - 1],
+                100.0 * v.iter().filter(|x| **x > big).count() as f64 / n as f64
+            )
+        };
+        if given > 0 {
+            writeln!(out, "{}", line("soil depth (m)", &mut soil, 1.0)).map_err(err).unwrap();
+            writeln!(out, "{}", line("moisture (0-1)", &mut wet, 0.25)).map_err(err).unwrap();
+            writeln!(out, "{}", line("insolation (0-1)", &mut sun, 0.1)).map_err(err).unwrap();
+        }
+    }
+
     // spec: GEN-052
     #[test]
     fn the_chunk_budget_is_four_seconds_at_8_m_and_a_missing_time_never_passes() {
