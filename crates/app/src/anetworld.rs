@@ -775,3 +775,38 @@ mod tests {
         assert_eq!(cfg, ChunkConfig { workers: 6, ..Default::default() });
     }
 }
+
+impl WorldTerrain {
+    /// SPIKE-47 (spike branch only): the tributary variants of the chunk solve over the chunk holding `lat_deg`, `lon_deg`.
+    pub fn tributary_spike(
+        self: &Arc<Self>,
+        lat_deg: f64,
+        lon_deg: f64,
+        variants: &[String],
+        threads: usize,
+    ) -> Result<crate::tribspike::SiteRun, String> {
+        use planet_core::cube::TangentWarp;
+        use planet_core::{TileId, Vec3};
+        use planet_generators::chunkfield::{region, ChunkLattice};
+        let run = crate::coupledworld::load_stored(
+            &self.definition(),
+            self.store_dir(),
+            self.lattice_source(),
+            run_cells(self.res()),
+            COUPLED_STEPS,
+        )?
+        .ok_or("no stored coupled run")?;
+        let radius = self.radius_m();
+        let per = cells_per_chunk_for(radius, ANET_CELL_M);
+        let clat = ChunkLattice::new(per).ok_or("no chunk lattice")?;
+        let mut params = ANetParams::spike(ANET_HALO_M, clat.cell_m(radius));
+        params.drivers.seed = self.base_seed();
+        let halo = params.halo_rings;
+        let vs: Vec<crate::tribspike::Variant> = variants.iter().map(|s| crate::tribspike::Variant::parse(s, &params)).collect();
+        let stage = ANet { run: run.maps, base: Arc::new(WorldBase::new(self)), radius_m: radius, params, memo: Default::default() };
+        let dir = Vec3::from_lat_lon(lat_deg.to_radians(), lon_deg.to_radians());
+        let tile = TileId::from_direction(&TangentWarp, dir, planet_generators::chunk::CHUNK_GRID_LEVEL);
+        let reg = region(&clat, tile, halo);
+        Ok(crate::tribspike::run_site(&stage, &clat, &reg, &vs, threads))
+    }
+}
