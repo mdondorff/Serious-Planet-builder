@@ -1087,6 +1087,8 @@ const COST_FRAMES: usize = 41;
 /// Seconds of untimed frames before the first variant of a pose (the GPU idled while the pose settled) and before each later one.
 const COST_WARM_FIRST_S: f64 = 3.0;
 const COST_WARM_S: f64 = 1.0;
+/// Rounds of the round-robin over the product shader and the three compiled-out builds.
+const COST_ROUNDS: usize = 3;
 
 /// The terrain-pass GPU time of one pose, milliseconds, medians of [`COST_FRAMES`] waited frames (REND-044).
 #[derive(Clone, Debug, PartialEq)]
@@ -1103,6 +1105,9 @@ pub struct CostRow {
     /// The same three variants with the code compiled out of the shader (`MeasureVariant`: no shadow, no material, neither); no branch is left,
     /// so the shares from them neither under-read the shadows nor over-read the material map.
     pub compiled_out: Option<[f64; 3]>,
+    /// The spread (largest minus smallest) of the round medians of `full` and the three compiled-out variants; `full` and `compiled_out` are
+    /// the medians of those [`COST_ROUNDS`] round medians, the variants interleaved round-robin so a slow period hits every variant alike.
+    pub spread: Option<[f64; 4]>,
 }
 
 impl CostRow {
@@ -1166,18 +1171,27 @@ fn measure_cost(
         }
     };
     detail(plan, 1.0);
-    let full = terrain_ms(ctx, r, plan, COST_WARM_FIRST_S)?;
-    // The shader without the code (a measurement build of the same source, REND-044), while the maps and the detail are still on.
-    let mut compiled_out = [0.0; 3];
-    for (slot, variant) in compiled_out.iter_mut().zip([
-        planet_render::MeasureVariant::NoShadow,
-        planet_render::MeasureVariant::NoMaterial,
-        planet_render::MeasureVariant::Neither,
-    ]) {
-        r.set_measure_variant(ctx, variant)?;
-        *slot = terrain_ms(ctx, r, plan, COST_WARM_S)?;
+    // The product shader and the three builds with the code compiled out (REND-044), while the maps and the detail are still on, round-robin
+    // for [`COST_ROUNDS`] rounds: a slow period of the machine falls on every variant alike, and the value of a variant is the median of its
+    // round medians (the minimum would bias the shares low).
+    use planet_render::MeasureVariant as V;
+    let variants = [V::Product, V::NoShadow, V::NoMaterial, V::Neither];
+    // `rounds[round][variant]`: the median of one round of one variant.
+    let mut rounds = [[0.0; 4]; COST_ROUNDS];
+    let mut first = true;
+    for row in rounds.iter_mut() {
+        for (slot, variant) in row.iter_mut().zip(variants) {
+            r.set_measure_variant(ctx, variant)?;
+            *slot = terrain_ms(ctx, r, plan, if std::mem::take(&mut first) { COST_WARM_FIRST_S } else { COST_WARM_S })?;
+        }
     }
-    r.set_measure_variant(ctx, planet_render::MeasureVariant::Product)?;
+    r.set_measure_variant(ctx, V::Product)?;
+    let column = |k: usize| rounds.iter().map(|row| row[k]).collect::<Vec<f64>>();
+    let med = |k: usize| median(column(k));
+    let spread = |k: usize| column(k).iter().cloned().fold(f64::MIN, f64::max) - column(k).iter().cloned().fold(f64::MAX, f64::min);
+    let full = med(0);
+    let compiled_out = [med(1), med(2), med(3)];
+    let spread = [spread(0), spread(1), spread(2), spread(3)];
     detail(plan, 0.0);
     let no_material = terrain_ms(ctx, r, plan, COST_WARM_S)?;
     r.clear_horizon();
@@ -1185,7 +1199,7 @@ fn measure_cost(
     let neither = terrain_ms(ctx, r, plan, COST_WARM_S)?;
     detail(plan, 1.0);
     let no_shadow = terrain_ms(ctx, r, plan, COST_WARM_S)?;
-    Ok(CostRow { pose: pose.to_string(), full, no_shadow, no_material, neither, compiled_out: Some(compiled_out) })
+    Ok(CostRow { pose: pose.to_string(), full, no_shadow, no_material, neither, compiled_out: Some(compiled_out), spread: Some(spread) })
 }
 
 /// The failures of the budget (the shadows and the material map together at most [`COST_BUDGET_MS`] in every pose) and the poses within
@@ -1219,19 +1233,20 @@ pub fn perf_shadow_cost(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> R
         let (s, m, both) = r.shares();
         writeln!(
             out,
-            "{}: terrain pass {:.3} ms; shadows {s:.3} ms, material map {m:.3} ms, together {both:.3} ms (runtime off: without shadows {:.3}, without material {:.3}, without both {:.3}; compiled out: {})",
+            "{}: terrain pass {:.3} ms; shadows {s:.3} ms, material map {m:.3} ms, together {both:.3} ms (runtime off: without shadows {:.3}, without material {:.3}, without both {:.3}; compiled out: {}; spread across rounds: {})",
             r.pose,
             r.full,
             r.no_shadow,
             r.no_material,
             r.neither,
-            r.compiled_out.map_or("none".to_string(), |c| format!("{:.3}, {:.3}, {:.3}", c[0], c[1], c[2]))
+            r.compiled_out.map_or("none".to_string(), |c| format!("{:.3}, {:.3}, {:.3}", c[0], c[1], c[2])),
+            r.spread.map_or("none".to_string(), |c| format!("{:.3}, {:.3}, {:.3}, {:.3}", c[0], c[1], c[2], c[3]))
         )
         .map_err(err)?;
     }
     writeln!(
         out,
-        "the shares are full minus the shader with the code compiled out (no branch left; the runtime-off variants under-read the shadows and over-read the material map); 1440p, medians of {COST_FRAMES} frames"
+        "the shares are full minus the shader with the code compiled out (no branch left; the runtime-off variants under-read the shadows and over-read the material map); 1440p, each variant the median of {COST_ROUNDS} round medians of {COST_FRAMES} frames, interleaved round-robin"
     )
     .map_err(err)?;
     for n in &near {
@@ -1242,13 +1257,14 @@ pub fn perf_shadow_cost(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> R
         .map(|r| {
             let (s, m, both) = r.shares();
             format!(
-                "    {{\"pose\": {:?}, \"full_ms\": {:.4}, \"no_shadow_ms\": {:.4}, \"no_material_ms\": {:.4}, \"neither_ms\": {:.4}, \"compiled_out_ms\": {}, \"shadow_ms\": {s:.4}, \"material_ms\": {m:.4}, \"together_ms\": {both:.4}}}",
+                "    {{\"pose\": {:?}, \"full_ms\": {:.4}, \"no_shadow_ms\": {:.4}, \"no_material_ms\": {:.4}, \"neither_ms\": {:.4}, \"compiled_out_ms\": {}, \"round_spread_ms\": {}, \"shadow_ms\": {s:.4}, \"material_ms\": {m:.4}, \"together_ms\": {both:.4}}}",
                 r.pose,
                 r.full,
                 r.no_shadow,
                 r.no_material,
                 r.neither,
-                r.compiled_out.map_or("null".to_string(), |c| format!("[{:.4}, {:.4}, {:.4}]", c[0], c[1], c[2]))
+                r.compiled_out.map_or("null".to_string(), |c| format!("[{:.4}, {:.4}, {:.4}]", c[0], c[1], c[2])),
+                r.spread.map_or("null".to_string(), |c| format!("[{:.4}, {:.4}, {:.4}, {:.4}]", c[0], c[1], c[2], c[3]))
             )
         })
         .collect();
@@ -1290,6 +1306,7 @@ mod tests {
             no_material: material,
             neither,
             compiled_out: None,
+            spread: None,
         };
         // The compiled-out variants, when a row has them, are what the shares and the verdict read.
         let with = CostRow { compiled_out: Some([4.6, 4.2, 3.9]), ..row("w", 5.0, 4.5, 4.6, 4.0) };
