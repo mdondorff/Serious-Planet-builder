@@ -1,6 +1,0 @@
-ROUTING n=1024: D8 accumulate 0.22s, MFD accumulate 0.31s
-EDGE-CHECK D8 n=1024 all land: mean |dlnA| inside a face 0.4586 (11907796 pairs), across an edge 0.7099 (11076 pairs), ratio 1.548
-EDGE-CHECK D8 n=1024 rivers (A >= 1000 km2): mean |dlnA| inside a face 0.3257 (7018280 pairs), across an edge 0.4315 (5444 pairs), ratio 1.325
-EDGE-CHECK MFD n=1024 all land: mean |dlnA| inside a face 0.1139 (11907796 pairs), across an edge 0.1706 (11076 pairs), ratio 1.497
-EDGE-CHECK MFD n=1024 rivers (A >= 1000 km2): mean |dlnA| inside a face 0.1072 (9156938 pairs), across an edge 0.1780 (7334 pairs), ratio 1.661
-wrote results/images/routing-d8-vs-mfd.png (772x384, 38 KB)

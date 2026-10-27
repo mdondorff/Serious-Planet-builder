@@ -1,1 +1,0 @@
-LOD 20 m run averaged 2x2 against the 40 m run (N=30): |dz| p50 19.15 p90 51.78 p99 100.22 m (the initial fields differ by p50 0.45 p90 1.68 p99 3.59); |dlnA| median 0.69 p90 3.39

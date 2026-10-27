@@ -1,4 +1,0 @@
-ROUTE D8: 3.11 s for 49 km2 at 4 m (34 ns per cell-step); axis share of the receivers over 2e4 m2 0.591 (31364 cells), over 2e5 m2 0.666 (3532 cells) (0.5 = no preferred direction); uphill channel cells 0 of 14117; cycle cells 25
-ROUTE jitter 0.4: 3.11 s for 49 km2 at 4 m (34 ns per cell-step); axis share of the receivers over 2e4 m2 0.552 (32880 cells), over 2e5 m2 0.572 (3568 cells) (0.5 = no preferred direction); uphill channel cells 0 of 15466; cycle cells 34
-ROUTE jitter 0.8: 3.10 s for 49 km2 at 4 m (34 ns per cell-step); axis share of the receivers over 2e4 m2 0.517 (35869 cells), over 2e5 m2 0.527 (3732 cells) (0.5 = no preferred direction); uphill channel cells 0 of 16425; cycle cells 31
-ROUTE D-inf: 3.77 s for 49 km2 at 4 m (41 ns per cell-step); axis share of the receivers over 2e4 m2 0.638 (26357 cells), over 2e5 m2 0.768 (2047 cells) (0.5 = no preferred direction); uphill channel cells 512 of 12280; cycle cells 1757

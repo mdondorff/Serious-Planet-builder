@@ -1,7 +1,0 @@
-DET A-net c4: 16 chunks (core 2.5 km, halo 0.5 km, N = 30), 1 threads, run 0: hash 4b5bc84fb64df93d (0.3 s)
-DET A-net c4: 16 chunks (core 2.5 km, halo 0.5 km, N = 30), 1 threads, run 1: hash 4b5bc84fb64df93d (0.3 s)
-DET A-net c4: 16 chunks (core 2.5 km, halo 0.5 km, N = 30), 4 threads, run 0: hash 4b5bc84fb64df93d (0.1 s)
-DET A-net c4: 16 chunks (core 2.5 km, halo 0.5 km, N = 30), 4 threads, run 1: hash 4b5bc84fb64df93d (0.1 s)
-DET A-net c4: 16 chunks (core 2.5 km, halo 0.5 km, N = 30), 16 threads, run 0: hash 4b5bc84fb64df93d (0.1 s)
-DET A-net c4: 16 chunks (core 2.5 km, halo 0.5 km, N = 30), 16 threads, run 1: hash 4b5bc84fb64df93d (0.1 s)
-DET A-net: PASS (bit-exact)
