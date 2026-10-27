@@ -251,6 +251,12 @@ impl<'a> Driver<'a> {
         }
     }
 
+    /// What the chunk step counted over the run and the features it ran with (TEST-058); `None` without a chunk stage.
+    pub(crate) fn chunk_counters(&self) -> Option<(crate::chunkstage::FeatureCounters, crate::chunkstage::FrameFeatures)> {
+        let c = self.chunk.as_ref()?;
+        Some((c.counters, crate::chunkstage::FrameFeatures { horizon: c.horizon, ..Default::default() }))
+    }
+
     /// What the chunk stage did since the trace restarted and the jobs still in flight (chunk, horizon); `None` without a chunk stage.
     pub(crate) fn chunk_summary(&self) -> Option<(crate::chunkstage::TraceSummary, usize, usize)> {
         let c = self.chunk.as_ref()?;
@@ -284,7 +290,10 @@ impl Driver<'_> {
                 &crate::chunkstage::FrameFeatures { horizon: cd.horizon, ..Default::default() },
                 &mut cd.counters,
             );
-            cd.trace.prefetch(&step.asked);
+            cd.trace.prefetch(&step.asked, at);
+            if let Some(m) = manager.as_ref() {
+                cd.trace.running(tiles.iter().flat_map(|&t| m.reads(t)).chain(step.asked.iter().copied()), |k| m.is_running(k), at);
+            }
             cd.trace.landed(&step.update.landed, at);
             if cd.horizon {
                 cd.trace.horizon_landed(step.horizon.landed.len());

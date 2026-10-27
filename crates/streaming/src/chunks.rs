@@ -426,6 +426,11 @@ impl ChunkManager {
     }
 
     /// Jobs running or waiting for a worker.
+    /// Whether a job for `key` is running or waiting for a worker now (a scene's trace stamps when a chunk was started).
+    pub fn is_running(&self, key: ChunkKey) -> bool {
+        self.shared.lock().expect("chunk state").running.contains(&key)
+    }
+
     pub fn in_flight(&self) -> usize {
         planet_core::lockprobe::lock(&self.shared, planet_core::lockprobe::Site::ChunkState).running.len()
     }

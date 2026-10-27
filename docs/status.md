@@ -5,7 +5,7 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 ## Waiting for the owner
 - **D3 confirmed (owner, 2026-10-26):** both orders are wanted eventually; M8-7 builds edits under the erosion first (option 2: the edit shows at once, its eroded result follows within 10 s); edits on top (finishing touches) stay a per-layer setting for later. Cost per stamp or brush stroke is M8-7's first measurement.
 - **M8 GO:** decisions D1 to D7 taken (owner, 2026-10-23; `docs/briefings/m8-plan.md`); everything up to M8-6 is independent of D3; the lanes start on the owner's GO.
-- **ADR 0080: acceptance** (SPIKE-45 closed, #783): the step-1 rise is an instability of the fixed uplift on a changing network, not a bug; an area cap holds relief only by making erosion nearly area-independent (about erosion off). Planner recommends accepting point 4 as written; the real fix (uplift not tied to the old network) is M9. ADR 0082 and 0083 accepted (owner, 2026-10-26); 0083's share table is a spec to write.
+- **ADR 0083's share table:** a spec to write (shares on physical cores and core type; owner, 2026-10-27).
 - **Optional, when convenient:** the M6 retest list (`docs/archive/M6/briefings/m6-owner-test-plan.md`, "Retest"); a live check of the flickers (Tracked).
 - **At the laptop (postponed):** the NVIDIA driver update (591.86; device losses under parallel GPU load, Tracked); excluding the repo's `target` folders from Windows Search indexing.
 
@@ -20,7 +20,7 @@ Done before the reset (2026-10-23 and 24; M8-2 archived #621, chunk fade split i
 | # | Step | Lane |
 |---|---|---|
 | M8-R | Plausible relief (owner, 2026-10-25: plausible relief, hydrology and shadows in M8; realism of hill terrain later): the hill band and landform driver in the bake and the uplift that keeps relief in the coupled run (crusader), the field-side creases and bounds (explorer), one rebuild of bake, run, coarse horizon and chunks on `C:/DEV/SeriousPlanetData/global16384` | explorer, crusader |
-| M8-1 (c) rest | the run at 2048 from any bake is done (#638, GEN-056); its first make from the 16384 bake took 9,916 s, likely evaluating the field per vertex instead of reading stored samples: check and add a progress line; re-time the run on the real heights (margin 55 s); the key read of about 25M bake samples even when the run is stored; uplift and erodibility constant until the driver maps (ADR 0076); the K view is coarse (climate shading) | crusader, next (the rebuild re-runs the coupled make) |
+| M8-1 (c) rest | the run at 2048 from any bake is done (#638, GEN-056); its first make from the 16384 bake took 9,916 s (before the progress line, #694): re-time it (criterion 4); the key read of about 25M bake samples even when the run is stored; uplift and erodibility constant until the driver maps (ADR 0076); the K view is coarse (climate shading) | crusader, next (the rebuild re-runs the coupled make) |
 | M8-V | floor 200 m/s at 300 m, met in M8 (owner, 2026-10-26); measured 145, 95, 115, 115 m/s at 30, 100, 300, 1000 m (viewer pools; 300 m horizon off 135; `perf/logs/envelope.json`) | crusader, explorer |
 | R4b | `GeoPoint::of_dir` and `dir` in `editor/polyline.rs` onto the core helpers | crusader, with M8-7 |
 
@@ -32,6 +32,7 @@ Open owner items: the two flickers (Tracked) need a live check (editor off, debu
 - **Hillslope flat patches** (look review 2b): ground beyond a rim is 0.7 m under the base, half as rough, flat in 60-160 m patches.
 - **GEN-052 met, window 2026-10-26** (`perf anet-chunk --store`): 8 m 3.33 / 3.30 s on 4 threads, 5.3 s on one; 4 m 14.8 s; 10 m 2.1 s. Repeat after any change to the base field, the routing or the band (#744).
 - **Driver fade seam** (#716): a tile rebuilt for a neighbour chunk's landing fades its drivers up from neutral again. Trigger: the first look with driver curves. Fix: a driver increment plane on the upload path (crusader). Resolution: 32 m texels (GEN-074); M9: per-vertex.
+- **Flight lead** (criterion 7 margin, met 1.6x): late chunks were asked ~4.7 s before wanted against a 6.4 s median solve (max 10 s); 1-3 chunks wanted at the window's first frame were not asked in the 12 s run-in above 440 m/s. Levers: reach floor of one chunk edge, lead >= solve + margin, trace the run-in.
 - **Steepest river and the 3e7 m2 drop**: at (34.158, 140.835) 519 of 1,344 links climb and 3,491 cells sit at the 300 m bound: the coarse network climbs beyond a 1 km node slide (M9, coarse run). A 3e7 m2 tributary threshold gave a 27.8 m drop; the stage uses 5e7.
 - **Deep cut where the ground along the routed path rises** (river-r1, look review 2): a 40-50 m canyon on a plain, the routed ground +15 m over 3 km, the bed at the least fall (GEN-059); a cut-cap change trades it for a dam (GEN-069). Fix with the M9 coarse/fine network work.
 - **Fine tributary tier is M9** (ADR 0081 point 3): the chunk's drainage gives 0.01-0.43 km per km2 over 1e5 m2, none over 1e6 (SPIKE-40: 0.5-3); flow restarts at a region's edge, a seam at a chunk border.

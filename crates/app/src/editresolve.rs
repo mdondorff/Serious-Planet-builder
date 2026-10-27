@@ -72,7 +72,16 @@ fn settle(world: &Arc<WorldTerrain>, tiles: &[TileId], camera: PlanetFixed, cent
     let start = Instant::now();
     let (mut quiet, mut centre_at) = (0, None);
     loop {
-        let up = world.chunk_frame(tiles, camera, &[]);
+        // A settling loop, not a frame: no travel, so no prefetch; no stale hold; no horizon jobs (TEST-058).
+        let up = crate::chunkstage::frame_step(
+            world,
+            &mut crate::chunkstage::NoLoop,
+            tiles,
+            camera,
+            &crate::chunkstage::settling_features(false),
+            &mut Default::default(),
+        )
+        .update;
         if centre_at.is_none() && up.landed.contains(&centre) {
             centre_at = Some(start.elapsed());
         }
