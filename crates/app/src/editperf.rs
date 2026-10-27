@@ -881,7 +881,9 @@ fn run_once(
         })
         .collect();
     out.locks = planet_core::lockprobe::take();
-    let drawn: HashSet<TileId> = drawn_before.union(&drawn_shown).copied().collect();
+    // Of the tiles the edit named (a drawn tile it did not name refreshes only when a chunk lands: the chunk table below).
+    let named: HashSet<TileId> = tiles.iter().copied().collect();
+    let drawn: HashSet<TileId> = drawn_before.union(&drawn_shown).copied().filter(|t| named.contains(t)).collect();
     let drawn_refreshed_ms = drawn_refreshed_ms(&job_log.since(jobs_before), &drawn, t0_us, out.stages.frame_median_ms);
     // With a chunk stage the plan is not exact until the stale chunks have landed (the tiles' keys follow the chunks), so the frame DrawKind::Exact
     // waits for the eroded result: the M6 budget reads the instant every tile the edit names was refreshed and written (what the editor shows of the
