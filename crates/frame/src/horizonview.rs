@@ -77,9 +77,9 @@ pub fn pack_coarse(bytes: &[u8], m: usize, azimuths: usize) -> Option<Vec<u8>> {
     for face in 0..6 {
         for cell in 0..m * m {
             let record = &bytes[(face * m * m + cell) * width..(face * m * m + cell + 1) * width];
-            for k in 0..2 * azimuths {
+            for (k, &byte) in record[..2 * azimuths].iter().enumerate() {
                 let (layer, channel) = (face * COARSE_LAYERS_PER_FACE + k / AZIMUTHS_PER_LAYER, k % AZIMUTHS_PER_LAYER);
-                out[(layer * m * m + cell) * 4 + channel] = record[k];
+                out[(layer * m * m + cell) * 4 + channel] = byte;
             }
             let layer = face * COARSE_LAYERS_PER_FACE + 2 * LAYERS_PER_SLOT;
             out[(layer * m * m + cell) * 4] = record[2 * azimuths];
