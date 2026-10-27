@@ -62,7 +62,7 @@
 //! step. What a generator reads (kind ids, liquid kinds, thresholds that shape the world) stays in the world definition, never here.
 
 use super::atmosphere::AtmosphereParams;
-use super::materials::{MaterialParams, INPUTS, INPUT_NAMES, MATERIALS, MATERIAL_NAMES, NATURAL_STRENGTH};
+use super::materials::{MaterialParams, INPUT_NAMES, MATERIAL_NAMES, NATURAL_STRENGTH};
 use super::shading::AlbedoParams;
 use super::water::WaterLook;
 use super::{ExposureParams, HistogramParams, SceneUnits, ToneMapMode, DEFAULT_SUN};
@@ -876,11 +876,10 @@ pub fn to_toml(file: &LookFile) -> String {
             out.push_str(&line(name, *v));
         }
         out.push_str(&format!("\n[body.{b}.ground]\n{}", line("detail", p.ground.detail)));
-        for m in 0..MATERIALS {
-            out.push_str(&format!("\n[body.{b}.ground.{}]\n", MATERIAL_NAMES[m]));
-            for i in 0..INPUTS {
-                let [lo, hi] = p.ground.materials.curves[m][i];
-                out.push_str(&format!("{} = [{lo:?}, {hi:?}]\n", INPUT_NAMES[i]));
+        for (material, row) in MATERIAL_NAMES.iter().zip(&p.ground.materials.curves) {
+            out.push_str(&format!("\n[body.{b}.ground.{material}]\n"));
+            for (input, [lo, hi]) in INPUT_NAMES.iter().zip(row) {
+                out.push_str(&format!("{input} = [{lo:?}, {hi:?}]\n"));
             }
         }
     }
