@@ -856,9 +856,11 @@ fn run_once(
         }
         std::thread::sleep(Duration::from_millis(1));
     }
-    let mut jobs: Vec<_> = job_log.since(jobs_before).into_iter().filter(|j| j.refresh).collect();
+    // The first wave only: the jobs that ended within 2.5 s of the edit (later ones follow the chunks that land, the table below).
+    let mut jobs: Vec<_> =
+        job_log.since(jobs_before).into_iter().filter(|j| j.refresh && j.ended_us.saturating_sub(t0_us) <= 2_500_000).collect();
     jobs.sort_by_key(|j| j.ended_us);
-    let from = jobs.len().saturating_sub(8);
+    let from = jobs.len().saturating_sub(10);
     out.stragglers = jobs[from..]
         .iter()
         .map(|j| {
