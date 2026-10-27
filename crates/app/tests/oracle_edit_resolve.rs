@@ -340,3 +340,43 @@ fn brushes_of_every_kind_and_a_second_smoothing_brush_beside_them_re_solve_to_th
     assert_eq!(after_remove, plain, "removed: the chunk is what it was");
     let _ = (std::fs::remove_dir_all(&a), std::fs::remove_dir_all(&b));
 }
+
+// spec: STRM-056, VIEW-056
+#[test]
+fn the_chunk_step_over_new_chunks_with_an_item_in_a_stamp_layer_never_holds_the_calling_thread() {
+    use planet_core::cube::TangentWarp;
+    use planet_core::Side::{East, North, South, West};
+    let a = store_with_run("main-thread");
+    // The viewer's cells (8 m): the read set of a chunk is then a few hundred milliseconds of work, which the update must not do on its thread.
+    let cfg = ChunkConfig { workers: 2, ..ChunkConfig::default() };
+    let spawner = Arc::new(ManualSpawner::default());
+    let world = open(&a);
+    assert_eq!(
+        world.enable_anet_from_store(planet::anetworld::ANET_CELL_M, spawner.clone(), Arc::new(FakeClock::default()), cfg),
+        Ok(true)
+    );
+    let site = TileId::new(Face(0), 15, 16000, 16000).unwrap().center_direction(&TangentWarp);
+    let mut def = (*world.definition()).clone();
+    def.put_item_spec(planet_world_def::BodyId::PLANET, hill_at(site, 1)).unwrap();
+    world.set_definition(Arc::new(def)).unwrap();
+    // The jobs never run (a manual spawner nobody drives): what is timed is what the update itself does on the calling thread.
+    let east = planet_core::Vec3::new(0.0, 0.0, 1.0).cross(site).normalized();
+    let mut slowest = 0.0f64;
+    for k in 0..6 {
+        let along = f64::from(k) * 5_000.0 / R;
+        let dir = (site * libm::cos(along) + east * libm::sin(along)).normalized();
+        let c = TileId::from_direction(&TangentWarp, dir, 15);
+        let mut tiles = vec![c];
+        tiles.extend([East, West, North, South].map(|s| c.neighbor(&TangentWarp, s)));
+        let camera = planet_core::PlanetFixed(dir * R);
+        let started = std::time::Instant::now();
+        world.chunk_frame(&tiles, camera, &[]);
+        slowest = slowest.max(started.elapsed().as_secs_f64() * 1000.0);
+    }
+    assert!(
+        slowest < 100.0,
+        "a chunk frame over new chunks took {slowest:.0} ms on the calling thread (the limit of an editing frame is 100 ms)"
+    );
+    assert!(spawner.pending() > 0, "the new chunks were started");
+    let _ = std::fs::remove_dir_all(&a);
+}
