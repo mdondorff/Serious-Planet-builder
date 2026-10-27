@@ -78,3 +78,15 @@ Gate ok. Files: `edit-latency-w11-6x2.md`, `envelope-w11-steady-300.json`. The f
 - Envelope, steady, 300 m, 12 s run-in then a 60 s window over several chunk edges, 11 trials: highest speed 460 m/s (bound 1 % over every 1 s window). Stand-in share 0 % up to 400 m/s, 0.92 % at 440, 0.98 % at 460, 1.01 % at 480, 96 % at 640; the coarse share is 0 up to 480. The floor of criterion 7 (200 m/s, owner: steady flight) is cleared 2.3 times.
 - Limiter above 460 m/s: the chunk pool. At 480 m/s 28 chunks landed in 72 s, `chunk_jobs_at_end` 4 (the 6 workers busy to the end), median wait 0 s, maximum 5.3 s; about 4 chunks asked per frame. The track needs chunks faster than the pool solves them.
 - Window 9 envelope for comparison (12 s steady window, one edge): steady 95, 110, 155, 78 m/s at 30, 100, 300, 1000 m.
+
+## Window 13 of 2026-10-27 (main at #797: job classes, horizon bake share, base-height reuse)
+Gate ok. Files: `edit-latency-w13-6x2-horizon-reuse.md`, `edit-resolve-w13-phases.log`.
+
+| Run (6 x 2, horizon jobs on) | Eroded result drawn within 10 s (19) | Median drawn | M6 column over (13 gated) |
+|---|---|---|---|
+| Window 10, 1 bake thread | 9 | 9.3 s | 8 |
+| Window 13, with the reuse (GEN-087) | 17 | 6.9 s | 7 |
+
+- Over: the 1 km brushes at 200 m and 2 km (10.7 s; 5 chunks, the last lands at 9.9 and 10.3 s).
+- Per chunk job (`generate --edit-resolve`): network 4.2 s on the first landing, 0.4 to 0.9 s on a re-solve (base heights 2.1 s, then 0.1 to 0.2 s; 92 to 100 % of the region cells reused, one case 85 % with 1.2 s); solve 1.9 to 2.5 s; drivers 0.1 to 0.2 s. The last chunk lands 2.8 to 4.2 s after the edit (4.7 to 6.5 s before).
+- What is left: the solve (about 60 % of a re-solve), the M6 column (plan delivered after 390 to 1030 ms with chunks).
