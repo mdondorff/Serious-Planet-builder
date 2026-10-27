@@ -257,8 +257,7 @@ pub fn variant_solve(
     let hill = v.diffusion > 0.0 || v.slump_rate > 0.0;
     let reach0 = (v.steps as u16).min(reg.halo.saturating_sub(2));
     let inner = if reg.halo < 2 { 0 } else { reg.depth.partition_point(|&d| d <= reach0) };
-    let nd: Vec<[f64; 8]> =
-        if hill { (0..inner).map(|c| core::array::from_fn(|k| dist(c, reg.neighbours[c][k] as usize))).collect() } else { Vec::new() };
+    let nd: Vec<[f64; 8]> = if hill { (0..inner).map(|c| core::array::from_fn(|k| dist(c, reg.neighbours[c][k] as usize))).collect() } else { Vec::new() };
     let cf = (v.diffusion * p.dt_years / (cell_m * cell_m)).min(0.12);
 
     let (mut rec, mut order, mut area) = (Vec::new(), Vec::new(), Vec::new());
@@ -382,15 +381,7 @@ fn slope_stats(z: &[f64], n: usize, b: usize, cell_m: f64) -> (f64, f64) {
 
 /// The census of a height field over the core: the drainage density of cells off the corridor over three thresholds (flow over the filled surface, no inflow),
 /// the share of the core filled by over 0.5 and 5 m, the slope at 32 and 88 m, the relief in windows of 1 km, and the change against the base.
-pub fn census(
-    label: &str,
-    z: &[f64],
-    net: &Network,
-    lat: &ChunkLattice,
-    reg: &Region,
-    radius: f64,
-    cell_area: &dyn Fn(Cell) -> f64,
-) -> String {
+pub fn census(label: &str, z: &[f64], net: &Network, lat: &ChunkLattice, reg: &Region, radius: f64, cell_area: &dyn Fn(Cell) -> f64) -> String {
     let core = reg.core;
     let n = (core as f64).sqrt() as usize;
     let cell_m = lat.cell_m(radius);
@@ -532,10 +523,7 @@ pub fn run_site(stage: &ANet, lat: &ChunkLattice, reg: &Region, variants: &[Vari
             let wall = t1.elapsed().as_secs_f64();
             let same = res.iter().all(|r| r.1 == res[0].1) && res[0].1 == hash_z(&out.z, core);
             let mean = res.iter().map(|r| r.0).sum::<f64>() / res.len() as f64;
-            report += &format!(
-                "  {threads} concurrent copies: mean {mean:.2} s each, wall {wall:.2} s, core hash {:016x}, identical: {same}\n",
-                res[0].1
-            );
+            report += &format!("  {threads} concurrent copies: mean {mean:.2} s each, wall {wall:.2} s, core hash {:016x}, identical: {same}\n", res[0].1);
         }
     }
     if threads > 1 {
@@ -580,10 +568,7 @@ pub fn seam_report(label: &str, z: &[f64], reg: &Region) -> String {
     for (c, cell) in reg.cells.iter().enumerate() {
         grid[(cell.j - j0) as usize * w + (cell.i - i0) as usize] = z[c];
     }
-    let mut out = format!(
-        "{label}: region lattice i {i0}..{i1}, j {j0}..{j1} ({w} x {h}); core starts at i {} j {}\n",
-        reg.cells[0].i, reg.cells[0].j
-    );
+    let mut out = format!("{label}: region lattice i {i0}..{i1}, j {j0}..{j1} ({w} x {h}); core starts at i {} j {}\n", reg.cells[0].i, reg.cells[0].j);
     for (axis, len, other) in [("column", w - 1, h), ("row", h - 1, w)] {
         let at = |a: usize, b: usize| if axis == "column" { grid[b * w + a] } else { grid[a * w + b] };
         let (mut abs, mut signed) = (vec![0.0f64; len], vec![0.0f64; len]);
@@ -610,13 +595,7 @@ pub fn seam_report(label: &str, z: &[f64], reg: &Region) -> String {
         out += &format!("  {axis} steps: median |dz| {median:.3} m per cell; {} boundaries over 2.5x:\n", hits.len());
         for (a, r) in hits.iter().take(24) {
             let step = signed[*a] - 0.5 * (signed[a.saturating_sub(1)] + signed[(*a + 1).min(len - 1)]);
-            out += &format!(
-                "    {axis} {} (between {} and {}): {r:.1}x, step {step:+.2} m, abs {}\n",
-                a,
-                a,
-                a + 1,
-                u64::from(base) + *a as u64
-            );
+            out += &format!("    {axis} {} (between {} and {}): {r:.1}x, step {step:+.2} m, abs {}\n", a, a, a + 1, u64::from(base) + *a as u64);
         }
     }
     out

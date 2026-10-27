@@ -1430,7 +1430,6 @@ dependencies = [
  "planet-streaming",
  "planet-testkit",
  "planet-world-def",
- "png",
  "toml",
  "winit",
 ]
