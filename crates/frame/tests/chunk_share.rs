@@ -409,10 +409,13 @@ fn the_track_set_follows_the_reach_of_the_plan_and_is_empty_without_travel_over_
     let edge_m = R * std::f64::consts::FRAC_PI_2 / f64::from(1u32 << CHUNK_GRID_LEVEL);
     let next = (2u8, 1001u32, 1000u32);
     let beside = [(2u8, 1001u32, 999u32), (2, 1001, 1001)];
-    // A reach of 1.1 chunk edges (the plan reads the neighbours of a chunk): the chunk across the edge, not yet the ones beside it.
-    let near = track_chunks(here, velocity, 1.1 * edge_m, 12.0, R);
+    // A reach below one chunk edge (a low view) is one edge, and the track asks half an edge further than the centres the plan reads: the chunk
+    // across the edge is asked when the camera is still in the current one (window 14: asked 4.7 s before it was wanted, a solve of 6 s).
+    let near = track_chunks(here, velocity, 0.2 * edge_m, 12.0, R);
     assert!(near.contains(&next), "{near:?}");
-    assert!(beside.iter().all(|b| !near.contains(b)), "{near:?}");
+    assert_eq!(near, track_chunks(here, velocity, edge_m, 12.0, R), "a reach under one edge is one edge");
+    let on_entering = track_chunks(here, velocity, 0.2 * edge_m, 0.5, R);
+    assert!(on_entering.contains(&next), "0.5 s at 160 m/s is 80 m: the next chunk is asked at once: {on_entering:?}");
     // A reach of 1.5 edges (a wider view): the pair beside it too, and a wider reach never gives fewer.
     let wide = track_chunks(here, velocity, 1.6 * edge_m, 12.0, R);
     assert!(beside.iter().all(|b| wide.contains(b)) && wide.contains(&next), "{wide:?}");

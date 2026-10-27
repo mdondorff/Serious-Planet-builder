@@ -204,8 +204,8 @@ const MAX_TRACK_M: f64 = 60_000.0;
 const MIN_TRACK_SPEED_MPS: f64 = 0.5;
 
 /// The chunks the plan would read along the camera's travel (STRM-042): samples of the track half a chunk edge apart out to `lead_s` seconds at
-/// `velocity`, and at each every chunk whose centre is within `reach_m` of the sample. `reach_m` is how far from the camera the plan reads chunks
-/// now (the farthest wanted chunk centre), so the set follows the altitude, the view and a turn without a rule of its own. The samples nearest the
+/// `velocity`, and at each every chunk whose centre is within `reach_m` (at least one chunk edge) and half an edge of the sample. `reach_m` is how
+/// far from the camera the plan reads chunks now (the farthest wanted chunk centre), so the set follows the altitude, the view and a turn without a rule of its own. The samples nearest the
 /// camera come first, within a sample the nearest chunk first. Empty when the camera does not travel over the ground (it is still, only
 /// rotates, or only dives: `velocity` has no component along the ground).
 pub fn track_chunks(
@@ -226,6 +226,10 @@ pub fn track_chunks(
     let heading = along * (1.0 / speed);
     let grid = planet_generators::chunk::CHUNK_GRID_LEVEL;
     let edge_m = radius_m * core::f64::consts::FRAC_PI_2 / f64::from(1u32 << grid);
+    // The plan's reach is to the centres of the chunks it reads, but a chunk is wanted when its nearest tile is read, half an edge nearer: asked by
+    // the centre, it was asked half an edge of travel late (window 14: chunks asked 4.7 s before they were wanted against a 12 s lead, a solve of
+    // 6 s). So the track asks half an edge further, and never less than one edge: the next chunk is asked on entering the current one.
+    let reach_m = reach_m.max(edge_m) + 0.5 * edge_m;
     let travel_m = (speed * lead_s).min(MAX_TRACK_M);
     let step_m = 0.5 * edge_m;
     let samples = (travel_m / step_m).ceil().max(1.0) as usize;
