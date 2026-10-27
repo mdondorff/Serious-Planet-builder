@@ -1575,6 +1575,449 @@ mod tests {
         writeln!(out, "B   replace (tuned scale {tuned:.1}): {}", stats(&mut s_rept)).map_err(err).unwrap();
     }
 
+    // spec: GEN-037
+    /// One scale of the depth law for every site, replace mode (ADR 0084 option 1, no pre-solve): the scale of the sweep that minimises the pooled p99 of the height step
+    /// along the rivers between the entry level and the level above, over the 24 trunk chunks, the findings 2 site and the findings 3 sites together, for the
+    /// thresholds 1e8 and 1e7 m2 of the run's drainage area; the step p99 and max per group and the share of river vertices over 2 m.
+    /// `PLANET_ANET_STORE=DIR PLANET_ANET_RES=N cargo test -p planet --release --lib carve_tuned_report -- --ignored --nocapture`. Read only.
+    #[test]
+    #[ignore = "a measurement: it solves chunks several times"]
+    fn carve_tuned_report() {
+        use planet_core::cube::{direction_to_face, TangentWarp};
+        use planet_core::hash::SplitMix64;
+        use planet_generators::anet::{BaseDetail, CoarseRun};
+        use planet_generators::chunkfield::{compute_chunk, halo_rings, ChunkField};
+        use std::collections::HashMap;
+        use std::sync::Arc;
+        let mut out = std::io::stdout();
+        let res: u32 = std::env::var("PLANET_ANET_RES").ok().and_then(|r| r.parse().ok()).unwrap_or(256);
+        let count: usize = std::env::var("PLANET_ANET_CHUNKS").ok().and_then(|r| r.parse().ok()).unwrap_or(24);
+        let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
+        let (world, maps, _) = anet_scene(res, 11, store, &mut out).unwrap();
+        let radius = world.radius_m();
+        let lat = planet_generators::chunkfield::ChunkLattice::new(crate::anetworld::cells_per_chunk_for(radius, 8.0)).unwrap();
+        let top = planet_generators::chunk::CHUNK_GRID_LEVEL;
+        let entry = crate::anetworld::ANET_TOP_LEVEL;
+        let map = &TangentWarp;
+        let coarse = maps.lattice();
+        let depth = |scale: f64, area: f64| (scale * 3.0 * libm::sqrt(area / 1.0e8)).min(100.0 * scale.max(1.0));
+        let cell_key = |f: u8, i: i64, j: i64| {
+            (u64::from(f) << 56)
+                | ((i.clamp(0, i64::from(res) - 1) as u64 & 0x0fff_ffff) << 28)
+                | (j.clamp(0, i64::from(res) - 1) as u64 & 0x0fff_ffff)
+        };
+        // The carve grid of a scale round the given chunks: depth on the bake's lattice along the run's polylines from every cell over `thr`.
+        let carve_grid = |tiles: &[planet_core::TileId], scale: f64, thr: f64| -> HashMap<u64, f32> {
+            let mut grid: HashMap<u64, f32> = HashMap::new();
+            let mut seen = std::collections::HashSet::new();
+            for t in tiles {
+                let mut ring = vec![coarse.cell_at(t.center_direction(map))];
+                let mut all = ring.clone();
+                for _ in 0..4 {
+                    let mut next: Vec<usize> = Vec::new();
+                    for &c in &ring {
+                        for n in coarse.neighbours(c) {
+                            let n = n as usize;
+                            if n != planet_generators::coupled::NONE as usize && !all.contains(&n) && !next.contains(&n) {
+                                next.push(n);
+                            }
+                        }
+                    }
+                    all.extend(next.iter().copied());
+                    ring = next;
+                }
+                for c in all {
+                    if !seen.insert(c) || f64::from(maps.area_m2(c)) < thr {
+                        continue;
+                    }
+                    let r = maps.receiver(c);
+                    if r == planet_generators::coupled::NONE {
+                        continue;
+                    }
+                    let (a, b) = (coarse.direction(c), coarse.direction(r as usize));
+                    let (area_a, area_b) = (f64::from(maps.area_m2(c)), f64::from(maps.area_m2(r as usize)));
+                    let steps = (radius * a.angle_to(b) / 150.0).ceil().max(1.0) as u32;
+                    for k in 0..=steps {
+                        let l = f64::from(k) / f64::from(steps);
+                        let p = (a * (1.0 - l) + b * l).normalized();
+                        let (f, s, t2) = direction_to_face(map, p);
+                        let n = f64::from(res);
+                        let (i, j) = (((s + 1.0) * 0.5 * n) as i64, ((t2 + 1.0) * 0.5 * n) as i64);
+                        let d = depth(scale, area_a * (1.0 - l) + area_b * l) as f32;
+                        let e = grid.entry(cell_key(f.0, i, j)).or_insert(0.0);
+                        *e = e.max(d);
+                    }
+                }
+            }
+            grid
+        };
+        let carve_at = |grid: &HashMap<u64, f32>, d: planet_core::Vec3| -> f64 {
+            if grid.is_empty() {
+                return 0.0;
+            }
+            let (f, s, t) = direction_to_face(map, d);
+            let n = f64::from(res);
+            let (x, y) = ((s + 1.0) * 0.5 * n - 0.5, (t + 1.0) * 0.5 * n - 0.5);
+            let (i0, j0) = (libm::floor(x) as i64, libm::floor(y) as i64);
+            let (wx, wy) = (x - i0 as f64, y - j0 as f64);
+            let at = |i: i64, j: i64| f64::from(grid.get(&cell_key(f.0, i, j)).copied().unwrap_or(0.0));
+            at(i0, j0) * (1.0 - wx) * (1.0 - wy)
+                + at(i0 + 1, j0) * wx * (1.0 - wy)
+                + at(i0, j0 + 1) * (1.0 - wx) * wy
+                + at(i0 + 1, j0 + 1) * wx * wy
+        };
+        struct Carved {
+            inner: crate::anetworld::WorldBase,
+            grid: HashMap<u64, f32>,
+            res: u32,
+        }
+        impl Carved {
+            fn carve(&self, d: planet_core::Vec3) -> f64 {
+                if self.grid.is_empty() {
+                    return 0.0;
+                }
+                let (f, s, t) = direction_to_face(&TangentWarp, d);
+                let n = f64::from(self.res);
+                let (x, y) = ((s + 1.0) * 0.5 * n - 0.5, (t + 1.0) * 0.5 * n - 0.5);
+                let (i0, j0) = (libm::floor(x) as i64, libm::floor(y) as i64);
+                let (wx, wy) = (x - i0 as f64, y - j0 as f64);
+                let key = |i: i64, j: i64| {
+                    (u64::from(f.0) << 56)
+                        | ((i.clamp(0, i64::from(self.res) - 1) as u64 & 0x0fff_ffff) << 28)
+                        | (j.clamp(0, i64::from(self.res) - 1) as u64 & 0x0fff_ffff)
+                };
+                let at = |i: i64, j: i64| f64::from(self.grid.get(&key(i, j)).copied().unwrap_or(0.0));
+                at(i0, j0) * (1.0 - wx) * (1.0 - wy)
+                    + at(i0 + 1, j0) * wx * (1.0 - wy)
+                    + at(i0, j0 + 1) * (1.0 - wx) * wy
+                    + at(i0 + 1, j0 + 1) * wx * wy
+            }
+        }
+        impl BaseDetail for Carved {
+            fn base_height(&self, dir: planet_core::Vec3) -> f64 {
+                self.inner.base_height(dir) - self.carve(dir)
+            }
+            fn base_heights(&self, dirs: &[planet_core::Vec3]) -> Vec<f64> {
+                self.inner.base_heights(dirs).into_iter().zip(dirs).map(|(h, d)| h - self.carve(*d)).collect()
+            }
+            fn coarse_input(&self, dir: planet_core::Vec3) -> f64 {
+                self.inner.coarse_input(dir)
+            }
+            fn region_heights(&self, dirs: &[planet_core::Vec3]) -> Vec<f64> {
+                self.inner.region_heights(dirs).into_iter().zip(dirs).map(|(h, d)| h - self.carve(*d)).collect()
+            }
+            fn identity(&self) -> u64 {
+                self.inner.identity() ^ u64::from(self.res)
+            }
+        }
+        let stage_of = |grid: HashMap<u64, f32>| -> planet_generators::anet::ANet {
+            let mut params = planet_generators::anet::ANetParams::spike(crate::anetworld::ANET_HALO_M, lat.cell_m(radius));
+            params.drivers.seed = world.base_seed();
+            planet_generators::anet::ANet {
+                run: maps.clone(),
+                base: Arc::new(Carved { inner: crate::anetworld::WorldBase::new(&world), grid, res }) as Arc<dyn BaseDetail>,
+                radius_m: radius,
+                params,
+                memo: Default::default(),
+            }
+        };
+        let stats = |v: &mut Vec<f64>| -> String {
+            v.sort_by(f64::total_cmp);
+            let q = |p: f64| v[(((v.len() - 1) as f64) * p) as usize];
+            format!("p50 {:.2}, p99 {:.2}, p99.9 {:.2}, max {:.2} m", q(0.5), q(0.99), q(0.999), v[v.len() - 1])
+        };
+        // The groups: the 24 trunk chunks, the findings 2 site (frame-31358: the 3 chunks under its level-15 nodes) and the findings 3 sites (frames 41356 and
+        // 41595). Per chunk the no-carve change at the entry level (the stage solved once, the pyramid up to `entry`) on a 129 x 129 grid; the variants are
+        // then computed from it: the step against the level above is `|change + min(carve, max(0, -change))|` (replace mode).
+        let per_face = 1u32 << top;
+        let base = world.base_field().unwrap();
+        let mut rng = SplitMix64(0x6368_616e_6765);
+        let mut trunk: Vec<planet_core::TileId> = Vec::new();
+        while trunk.len() < count {
+            let face = planet_core::Face::ALL[(rng.next_u64() % 6) as usize];
+            let (x, y) = ((rng.next_u64() % u64::from(per_face)) as u32, (rng.next_u64() % u64::from(per_face)) as u32);
+            let t = planet_core::TileId::new(face, top, x, y).expect("a tile of the chunk grid");
+            let c = coarse.cell_at(t.center_direction(map));
+            let on_trunk = std::iter::once(c)
+                .chain(coarse.neighbours(c).into_iter().map(|n| n as usize))
+                .any(|n| n < coarse.len() && f64::from(maps.area_m2(n)) >= 1.0e9);
+            if on_trunk && base.height(t.center_direction(map)) > 0.0 {
+                trunk.push(t);
+            }
+        }
+        let chunks_of_bundle = |name: &str| -> Vec<planet_core::TileId> {
+            let path = std::path::Path::new("C:/DEV/SeriousPlanetData/owner-test-2026-10-27").join(name);
+            let b = planet_frame::TerrainBundle::from_text(&std::fs::read_to_string(&path).expect("the bundle reads"))
+                .expect("a terrain bundle");
+            let nodes = planet_frame::select_nodes_in_view_field(map, &b.request.camera, &*world.field().unwrap(), &b.request.lod).nodes;
+            let mut v: Vec<planet_core::TileId> = Vec::new();
+            for n in nodes.iter().filter(|n| n.tile.level() == entry) {
+                let c = planet_core::TileId::from_direction(map, n.tile.center_direction(map), top);
+                if !v.contains(&c) {
+                    v.push(c);
+                }
+            }
+            v
+        };
+        let site2 = chunks_of_bundle("frame-31358.bundle");
+        let mut site3 = chunks_of_bundle("frame-41356.bundle");
+        for c in chunks_of_bundle("frame-41595.bundle") {
+            if !site3.contains(&c) {
+                site3.push(c);
+            }
+        }
+        let groups: Vec<(&str, Vec<planet_core::TileId>)> =
+            vec![("24 trunk chunks", trunk), ("findings 2 site", site2), ("findings 3 sites", site3)];
+        let plain = stage_of(HashMap::new());
+        let mut changes: Vec<Vec<(planet_core::Vec3, f64)>> = Vec::new();
+        for (name, chunks) in &groups {
+            let mut pts = Vec::new();
+            for t in chunks {
+                let Some(r) = compute_chunk(&lat, &plain, radius, entry, *t, halo_rings(&plain)) else { continue };
+                let field = ChunkField::new(world.base_field().unwrap(), lat, radius, &plain).with_top_level(entry).with_ready(Arc::new(r));
+                for l in 0..129u32 {
+                    for k in 0..129u32 {
+                        let d = t.sample_direction(map, 128, k, l);
+                        pts.push((d, field.change_at_level(d, entry)));
+                    }
+                }
+            }
+            writeln!(out, "group {name}: {} chunks, {} points", chunks.len(), pts.len()).map_err(err).unwrap();
+            changes.push(pts);
+        }
+        let all_chunks: Vec<planet_core::TileId> = groups.iter().flat_map(|g| g.1.iter().copied()).collect();
+        let scales = [1.0, 2.0, 3.0, 4.8, 6.0, 8.0, 12.0, 16.0];
+        for thr_v in [1.0e8, 1.0e7] {
+            let line = carve_grid(&all_chunks, 1.0, thr_v);
+            let grids: Vec<HashMap<u64, f32>> = scales.iter().map(|&s| carve_grid(&all_chunks, s, thr_v)).collect();
+            // The river vertices of a group: the points the line of the threshold passes (any depth over 0.1 m at scale 1).
+            let river: Vec<Vec<usize>> = changes
+                .iter()
+                .map(|pts| pts.iter().enumerate().filter(|(_, (d, _))| carve_at(&line, *d) > 0.1).map(|(i, _)| i).collect())
+                .collect();
+            let step = |g: usize, si: Option<usize>| -> Vec<f64> {
+                river[g]
+                    .iter()
+                    .map(|&i| {
+                        let (d, c) = changes[g][i];
+                        match si {
+                            None => c.abs(),
+                            Some(si) => (c + carve_at(&grids[si], d).min((-c).max(0.0))).abs(),
+                        }
+                    })
+                    .collect()
+            };
+            let pooled_p99 = |si: Option<usize>| -> f64 {
+                let mut v: Vec<f64> = (0..groups.len()).flat_map(|g| step(g, si)).collect();
+                v.sort_by(f64::total_cmp);
+                v[(((v.len() - 1) as f64) * 0.99) as usize]
+            };
+            let mut best = (f64::MAX, 0usize);
+            for si in 0..scales.len() {
+                let p = pooled_p99(Some(si));
+                writeln!(out, "  threshold {thr_v:.0e}: scale {:.1}: pooled step p99 {p:.2} m", scales[si]).map_err(err).unwrap();
+                if p < best.0 {
+                    best = (p, si);
+                }
+            }
+            writeln!(
+                out,
+                "threshold {thr_v:.0e}: pooled no carve p99 {:.2} m; best single scale {:.1} (p99 {:.2} m)",
+                pooled_p99(None),
+                scales[best.1],
+                best.0
+            )
+            .map_err(err)
+            .unwrap();
+            for g in 0..groups.len() {
+                for (label, si) in [("no carve", None), ("replace, best scale", Some(best.1))] {
+                    let mut v = step(g, si);
+                    let over2 = v.iter().filter(|x| **x > 2.0).count();
+                    writeln!(
+                        out,
+                        "RESULT threshold {thr_v:.0e} {} [{label}]: {} river vertices, step {}; over 2 m: {:.1} %",
+                        groups[g].0,
+                        v.len(),
+                        stats(&mut v),
+                        100.0 * over2 as f64 / v.len().max(1) as f64
+                    )
+                    .map_err(err)
+                    .unwrap();
+                }
+            }
+        }
+    }
+
+    // spec: GEN-052
+    /// How many chunks of the chunk grid (tile level 11) a river of the coupled run crosses, for thresholds of the drainage area (`PLANET_RIVER_THRESHOLDS`,
+    /// default 1e7, 1e8 and 1e9 m2): every land cell of the run over the threshold, its polyline to its receiver stepped every 2.4 km (half a chunk) and the
+    /// chunks it passes counted once; with the run cells over the threshold. For the cost of a stored incision channel (world-build hours = chunks times the
+    /// solve time over the chunk workers). `PLANET_ANET_STORE=DIR PLANET_ANET_RES=N cargo test -p planet --release --lib river_chunk_count_report -- --ignored
+    /// --nocapture`. Read only.
+    #[test]
+    #[ignore = "a measurement: it walks the run"]
+    fn river_chunk_count_report() {
+        use planet_core::cube::TangentWarp;
+        use planet_generators::anet::CoarseRun;
+        let mut out = std::io::stdout();
+        let res = std::env::var("PLANET_ANET_RES").ok().and_then(|r| r.parse().ok()).unwrap_or(256);
+        let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
+        let (world, maps, _) = anet_scene(res, 11, store, &mut out).unwrap();
+        let radius = world.radius_m();
+        let coarse = maps.lattice();
+        let top = planet_generators::chunk::CHUNK_GRID_LEVEL;
+        let thresholds: Vec<f64> = std::env::var("PLANET_RIVER_THRESHOLDS")
+            .ok()
+            .map(|v| v.split(',').filter_map(|x| x.trim().parse().ok()).collect())
+            .unwrap_or_else(|| vec![1e7, 1e8, 1e9]);
+        let per_face = 1u64 << top;
+        let land = (0..coarse.len()).filter(|&c| maps.z(c) > 0.0).count();
+        writeln!(out, "the run: {} cells, {land} land cells; {} chunks in the grid", coarse.len(), 6 * per_face * per_face)
+            .map_err(err)
+            .unwrap();
+        for thr in thresholds {
+            let mut chunks = std::collections::HashSet::new();
+            let mut cells = 0usize;
+            let mut length_km = 0.0f64;
+            for c in 0..coarse.len() {
+                if maps.z(c) <= 0.0 || f64::from(maps.area_m2(c)) < thr {
+                    continue;
+                }
+                let r = maps.receiver(c);
+                if r == planet_generators::coupled::NONE {
+                    continue;
+                }
+                cells += 1;
+                let (a, b) = (coarse.direction(c), coarse.direction(r as usize));
+                let len = radius * a.angle_to(b);
+                length_km += len / 1e3;
+                let steps = (len / 2_400.0).ceil().max(1.0) as u32;
+                for k in 0..=steps {
+                    let l = f64::from(k) / f64::from(steps);
+                    let t = planet_core::TileId::from_direction(&TangentWarp, (a * (1.0 - l) + b * l).normalized(), top);
+                    chunks.insert((t.face().0, t.x(), t.y()));
+                }
+            }
+            writeln!(out, "RESULT rivers over {thr:.0e} m2: {cells} run cells, {length_km:.0} km of polyline, {} chunks", chunks.len())
+                .map_err(err)
+                .unwrap();
+        }
+    }
+
+    // spec: LOD-013
+    /// The boundary between the chunk's entry level (`ANET_TOP_LEVEL`, level 15: `level_color` (250, 140, 130), the light red of the LOD debug view) and the level
+    /// above it at the pose of an F9 bundle (owner test finding 3, frame-50119): for every level-15 node of the plan with a level-14 neighbour, along the shared
+    /// edge at the level-15 vertices, the difference of the two surfaces (the level-14 tile's linear interpolation of its own vertices, the level-15 tile's
+    /// vertices): the chunk's change (level 15 only), the base's interpolation error (the base is the same field at both levels, a coarser tile samples it
+    /// twice as far apart) and their sum, and the edge samples where the two surfaces lie on different sides of sea level (a shoreline that moves). The chunks
+    /// under the level-15 nodes are landed first. `PLANET_BUNDLE=FILE PLANET_ANET_STORE=DIR PLANET_ANET_RES=N cargo test -p planet --release --lib boundary_report
+    /// -- --ignored --nocapture`. Read only.
+    #[test]
+    #[ignore = "a measurement: it solves the chunks under a view"]
+    fn boundary_report() {
+        use planet_core::cube::TangentWarp;
+        use planet_core::Side;
+        let mut out = std::io::stdout();
+        let bundle = std::env::var_os("PLANET_BUNDLE").map(std::path::PathBuf::from).expect("PLANET_BUNDLE=FILE");
+        let b =
+            planet_frame::TerrainBundle::from_text(&std::fs::read_to_string(&bundle).expect("the bundle reads")).expect("a terrain bundle");
+        let res = std::env::var("PLANET_ANET_RES").ok().and_then(|r| r.parse().ok()).unwrap_or(256);
+        let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
+        let (world, _maps, _tile) = anet_scene(res, 11, store, &mut out).unwrap();
+        let spawner = std::sync::Arc::new(planet_streaming::ThreadPool::new(6));
+        let cfg = planet_streaming::chunks::ChunkConfig { workers: 6, ..Default::default() };
+        assert_eq!(
+            world.enable_anet_from_store_with(
+                crate::anetworld::ANET_CELL_M,
+                spawner,
+                std::sync::Arc::new(planet_streaming::SystemClock::new()),
+                cfg,
+                false
+            ),
+            Ok(true)
+        );
+        let entry = crate::anetworld::ANET_TOP_LEVEL;
+        let lod = b.request.lod.clone();
+        let sel = planet_frame::select_nodes_in_view_field(&TangentWarp, &b.request.camera, &*world.field().unwrap(), &lod);
+        let nodes: std::collections::HashSet<planet_core::TileId> = sel.nodes.iter().map(|n| n.tile).collect();
+        let fine: Vec<planet_core::TileId> = nodes.iter().copied().filter(|t| t.level() >= entry).collect();
+        let manager = world.chunk_manager().unwrap();
+        let camera = b.request.camera.position;
+        let start = std::time::Instant::now();
+        loop {
+            world.chunk_frame(&fine, camera, &[]);
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            if fine.iter().all(|t| manager.reads(*t).iter().all(|k| manager.is_ready(*k))) && manager.in_flight() == 0 {
+                break;
+            }
+            assert!(start.elapsed().as_secs() < 1_800, "the chunks did not land");
+        }
+        let field = world.field().unwrap();
+        let base = world.base_field().unwrap();
+        let level15: Vec<planet_core::TileId> = nodes.iter().copied().filter(|t| t.level() == entry).collect();
+        let (mut geo, mut chunk, mut total) = (Vec::<f64>::new(), Vec::<f64>::new(), Vec::<f64>::new());
+        let (mut edges, mut crossings) = (0usize, 0usize);
+        for t in &level15 {
+            for side in [Side::East, Side::West, Side::North, Side::South] {
+                let nb = t.neighbor(&TangentWarp, side);
+                if nodes.contains(&nb) || !nb.parent().is_some_and(|p| nodes.contains(&p)) {
+                    continue;
+                }
+                edges += 1;
+                // The 33 vertices of the shared edge of `t`.
+                let pts: Vec<planet_core::Vec3> = (0..=32u32)
+                    .map(|k| match side {
+                        Side::West => t.sample_direction(&TangentWarp, 32, 0, k),
+                        Side::East => t.sample_direction(&TangentWarp, 32, 32, k),
+                        Side::North => t.sample_direction(&TangentWarp, 32, k, 0),
+                        Side::South => t.sample_direction(&TangentWarp, 32, k, 32),
+                    })
+                    .collect();
+                let h15: Vec<f64> = pts.iter().map(|d| field.height_at_level(*d, entry)).collect();
+                let h14: Vec<f64> = pts.iter().map(|d| field.height_at_level(*d, entry - 1)).collect();
+                let hb: Vec<f64> = pts.iter().map(|d| base.height(*d)).collect();
+                for k in 0..=32usize {
+                    let (s14, geo_k) =
+                        if k % 2 == 0 { (h14[k], 0.0) } else { (0.5 * (h14[k - 1] + h14[k + 1]), hb[k] - 0.5 * (hb[k - 1] + hb[k + 1])) };
+                    geo.push(geo_k.abs());
+                    chunk.push((h15[k] - h14[k]).abs());
+                    total.push((h15[k] - s14).abs());
+                    if (h15[k] > 0.5 && s14 < -0.5) || (h15[k] < -0.5 && s14 > 0.5) {
+                        crossings += 1;
+                    }
+                }
+            }
+        }
+        writeln!(
+            out,
+            "pose of {}: {} level-{entry} nodes, {edges} edges against a level-{} neighbour",
+            bundle.display(),
+            level15.len(),
+            entry - 1
+        )
+        .map_err(err)
+        .unwrap();
+        let line = |name: &str, v: &mut Vec<f64>| -> String {
+            if v.is_empty() {
+                return format!("{name}: none");
+            }
+            v.sort_by(f64::total_cmp);
+            format!("{name}: p50 {:.3}, p99 {:.3}, max {:.3} m", v[v.len() / 2], v[(v.len() - 1) * 99 / 100], v[v.len() - 1])
+        };
+        writeln!(out, "RESULT  chunk change at the edge: {}", line("step", &mut chunk)).map_err(err).unwrap();
+        writeln!(out, "RESULT  base interpolation error of the coarser tile (odd vertices): {}", line("error", &mut geo))
+            .map_err(err)
+            .unwrap();
+        writeln!(out, "RESULT  total surface difference at the edge vertices: {}", line("total", &mut total)).map_err(err).unwrap();
+        writeln!(
+            out,
+            "RESULT  edge samples where the two surfaces lie on different sides of sea level (beyond 0.5 m): {crossings} of {}",
+            total.len()
+        )
+        .map_err(err)
+        .unwrap();
+    }
+
     // spec: GEN-052
     #[test]
     fn the_chunk_budget_is_four_seconds_at_8_m_and_a_missing_time_never_passes() {
