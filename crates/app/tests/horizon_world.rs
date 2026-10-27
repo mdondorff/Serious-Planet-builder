@@ -130,7 +130,7 @@ fn a_march_the_chunks_cannot_hold_or_the_bake_refuses_is_turned_down_at_once_and
         let r2 = rig();
         ChunkHorizonBaker::new(&r2.world, r2.world.chunk_lattice().unwrap(), params(), 1)
     };
-    let map = gone.bake((2, 1000, 1000), &[]);
+    let map = gone.bake((2, 1000, 1000), &[]).expect("a map");
     assert_eq!(map.len(), (CELLS * CELLS * 8) as usize);
     assert!(map.iter().all(|&b| b == 0));
 }
@@ -322,20 +322,20 @@ fn a_bake_from_shared_height_tiles_equals_the_bake_that_evaluates_its_whole_rast
     let east: ChunkKey = (2, 1001, 1000);
     let reads = shared.reads(own);
     assert!(reads.len() == 9, "the rig's chunks around the tile are all ready: {reads:?}");
-    let first = shared.bake(own, &[]);
-    assert_eq!(first, plain.bake(own, &[]), "the chunk");
+    let first = shared.bake(own, &[]).expect("a map");
+    assert_eq!(first, plain.bake(own, &[]).expect("a map"), "the chunk");
     assert!(first.iter().any(|&b| b > 0), "the stand-in's relief shades something");
     assert_eq!(shared.tile_stats(), planet::horizonworld::TileStats { evaluated: 9, hits: 0, held: 9 });
     // The chunk to the east shares six of its nine tiles with the first: three are new.
-    assert_eq!(shared.bake(east, &[]), plain.bake(east, &[]), "the neighbour");
+    assert_eq!(shared.bake(east, &[]).expect("a map"), plain.bake(east, &[]).expect("a map"), "the neighbour");
     let s = shared.tile_stats();
     assert_eq!((s.evaluated, s.hits), (12, 6), "{s:?}");
     // The same chunk again evaluates nothing.
-    assert_eq!(shared.bake(own, &[]), first);
+    assert_eq!(shared.bake(own, &[]).expect("a map"), first);
     assert_eq!(shared.tile_stats().evaluated, 12);
     // A cache that holds fewer tiles than a bake reads still gives the same map, and never holds more than its bound.
     let tight = ChunkHorizonBaker::new(&r.world, lat, params(), 2).with_tile_cap(4);
-    assert_eq!(tight.bake(own, &[]), first);
+    assert_eq!(tight.bake(own, &[]).expect("a map"), first);
     assert_eq!(tight.tile_stats().held, 4);
 }
 
@@ -350,19 +350,19 @@ fn a_neighbours_edit_replaces_the_tile_it_touches_in_the_halo_and_no_other_and_a
     let plain = ChunkHorizonBaker::new(&r.world, lat, params(), 2).with_tile_cap(0);
     let own: ChunkKey = (2, 1000, 1000);
     // Nothing landed yet: the tiles are the base alone. Then the chunks land: every tile is made again (their key holds the result).
-    let before_landing = shared.bake(own, &[]);
+    let before_landing = shared.bake(own, &[]).expect("a map");
     assert_eq!(shared.tile_stats().evaluated, 9);
     land_chunks(&r);
-    let landed = shared.bake(own, &[]);
-    assert_eq!(landed, plain.bake(own, &[]));
+    let landed = shared.bake(own, &[]).expect("a map");
+    assert_eq!(landed, plain.bake(own, &[]).expect("a map"));
     assert_ne!(landed, before_landing, "the stand-in's change is in the heights");
     assert_eq!(shared.tile_stats().evaluated, 18, "nine tiles held a chunk that was not ready: all nine are made again");
     // An edit inside the chunk to the east, 800 m across and clear of every other chunk of the nine.
     let mut def = (*r.world.definition()).clone();
     def.put_item_spec(BodyId::PLANET, hill_at((1001, 1000), 11)).unwrap();
     r.world.set_definition(Arc::new(def)).unwrap();
-    let edited = shared.bake(own, &[]);
-    assert_eq!(edited, plain.bake(own, &[]), "the edit is in the map, as if nothing had been kept");
+    let edited = shared.bake(own, &[]).expect("a map");
+    assert_eq!(edited, plain.bake(own, &[]).expect("a map"), "the edit is in the map, as if nothing had been kept");
     assert_ne!(edited, landed, "the hill beside the chunk shades its edge");
     let s = shared.tile_stats();
     // (A tile's key holds the items within the stamp stage's halo of it, so the hill, 2.5 km in, also re-keys the tiles beside the east one;
@@ -372,7 +372,7 @@ fn a_neighbours_edit_replaces_the_tile_it_touches_in_the_halo_and_no_other_and_a
         "only the tiles the hill reaches are made again, not the nine: {s:?}"
     );
     // Nothing changes: nothing is made again.
-    let again = shared.bake(own, &[]);
+    let again = shared.bake(own, &[]).expect("a map");
     assert_eq!((again, shared.tile_stats().evaluated), (edited, s.evaluated));
 }
 
@@ -387,11 +387,11 @@ fn a_change_of_the_lens_makes_every_tile_again_and_the_map_still_equals_the_whol
     let shared = ChunkHorizonBaker::new(&r.world, lat, params(), 2);
     let plain = ChunkHorizonBaker::new(&r.world, lat, params(), 2).with_tile_cap(0);
     let own: ChunkKey = (2, 1000, 1000);
-    shared.bake(own, &[]);
+    shared.bake(own, &[]).expect("a map");
     assert_eq!(shared.tile_stats().evaluated, 9);
     // The coupled lens (the field chain does not hash it into a tile key).
     r.world.set_coupled_lens(Some(planet_generators::coupled::CoupledLens::Height));
-    assert_eq!(shared.bake(own, &[]), plain.bake(own, &[]));
+    assert_eq!(shared.bake(own, &[]).expect("a map"), plain.bake(own, &[]).expect("a map"));
     assert_eq!(shared.tile_stats().evaluated, 18, "a lens makes all nine again");
 }
 
@@ -408,10 +408,14 @@ fn a_chunk_that_lands_after_a_neighbours_tile_was_kept_replaces_the_tile_because
     // Only the chunk under the tile lands first (one frame of the chunk jobs for the tile alone), then the rest.
     r.world.chunk_frame(&[tile()], camera(), &[]);
     r.chunk_jobs.run(1);
-    let first = shared.bake(own, &[]);
-    assert_eq!(first, plain.bake(own, &[]));
+    let first = shared.bake(own, &[]).expect("a map");
+    assert_eq!(first, plain.bake(own, &[]).expect("a map"));
     let made = shared.tile_stats().evaluated;
     land_chunks(&r);
-    assert_eq!(shared.bake(own, &[]), plain.bake(own, &[]), "the map equals the whole raster after the neighbours landed");
+    assert_eq!(
+        shared.bake(own, &[]).expect("a map"),
+        plain.bake(own, &[]).expect("a map"),
+        "the map equals the whole raster after the neighbours landed"
+    );
     assert!(shared.tile_stats().evaluated > made, "the tiles were made again");
 }
