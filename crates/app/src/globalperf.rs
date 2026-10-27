@@ -953,6 +953,347 @@ mod tests {
         }
     }
 
+    // spec: LOD-013
+    /// The held-back tiles at the pose of an F9 bundle, whether they sit on a boundary between two levels of the plan, and the base's own step across the
+    /// bake's block seams nearest the pose (owner test finding 3). `PLANET_BUNDLE=FILE PLANET_ANET_STORE=DIR PLANET_ANET_RES=N cargo test -p planet --release
+    /// --lib coast_pose_report -- --ignored --nocapture`. Read only, one thread, no chunks landed (the held count is independent of them, LOD-013).
+    #[test]
+    #[ignore = "a measurement: it plans the view of a bundle twice and samples the base across block seams"]
+    fn coast_pose_report() {
+        use planet_core::cube::{direction_to_face, face_to_direction, TangentWarp};
+        use planet_core::{Side, TileId};
+        let mut out = std::io::stdout();
+        let bundle = std::env::var_os("PLANET_BUNDLE").map(std::path::PathBuf::from).expect("PLANET_BUNDLE=FILE");
+        let text = std::fs::read_to_string(&bundle).expect("the bundle reads");
+        let b = planet_frame::TerrainBundle::from_text(&text).expect("a terrain bundle");
+        let res = std::env::var("PLANET_ANET_RES").ok().and_then(|r| r.parse().ok()).unwrap_or(256);
+        let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
+        let (world, _maps, _tile) = anet_scene(res, 11, store, &mut out).unwrap();
+        let plain = world.field().unwrap();
+        let lod = b.request.lod.clone();
+        let sel_plain = planet_frame::select_nodes_in_view_field(&TangentWarp, &b.request.camera, &*plain, &lod);
+        let held_plain = sel_plain.nodes.iter().filter(|n| n.capped).count();
+        // The seam step first, on the plain base (before the chunk stage is on).
+        let radius = world.radius_m();
+        let pos = b.request.camera.position.0.normalized();
+        let (face, s0, t0) = direction_to_face(&TangentWarp, pos);
+        let cell = 2.0 / f64::from(res);
+        let block = 1024.0f64.min(f64::from(res));
+        let seam_near = |x: f64| -> f64 {
+            let i = (x + 1.0) / cell;
+            ((i / block).round() * block) * cell - 1.0
+        };
+        let (s_seam, t_seam) = (seam_near(s0), seam_near(t0));
+        let metres_per_s = {
+            let a = face_to_direction(&TangentWarp, face, s0, t0);
+            let c = face_to_direction(&TangentWarp, face, s0 + 1e-6, t0);
+            radius * a.angle_to(c) / 1e-6
+        };
+        let h = |s: f64, t: f64| plain.height(face_to_direction(&TangentWarp, face, s, t));
+        // Across the seam: the height difference over 2 m (+-1 m) along the line, at 41 points 2 km apart along the seam, against the same on the control
+        // line half a block away (an interior line).
+        let eps = 1.0 / metres_per_s;
+        let along = 2_000.0 / metres_per_s;
+        let step_at = |line: f64, vertical: bool| -> (f64, f64) {
+            let (mut max, mut sum) = (0.0f64, 0.0f64);
+            for k in -20..=20 {
+                let a = f64::from(k) * along;
+                let d = if vertical {
+                    (h(line + eps, t0 + a) - h(line - eps, t0 + a)).abs()
+                } else {
+                    (h(s0 + a, line + eps) - h(s0 + a, line - eps)).abs()
+                };
+                max = max.max(d);
+                sum += d;
+            }
+            (max, sum / 41.0)
+        };
+        let (sm, ss) = step_at(s_seam, true);
+        let (tm, ts) = step_at(t_seam, false);
+        let (cm, cs) = step_at(seam_near(s0) + 0.5 * block * cell, true);
+        writeln!(
+            out,
+            "pose of {}: nearest seams at {:.1} km (s) and {:.1} km (t); across the s seam over 2 m: max {sm:.3} m, mean {ss:.3}; t seam: max {tm:.3}, mean {ts:.3}; interior control line: max {cm:.3}, mean {cs:.3}",
+            bundle.display(),
+            (s0 - s_seam).abs() * metres_per_s / 1e3,
+            (t0 - t_seam).abs() * metres_per_s / 1e3
+        )
+        .map_err(err)
+        .unwrap();
+        // The held tiles with the chunk stage's widening on.
+        let spawner = std::sync::Arc::new(planet_streaming::ThreadPool::new(2));
+        let cfg = planet_streaming::chunks::ChunkConfig { workers: 2, ..Default::default() };
+        assert_eq!(
+            world.enable_anet_from_store_with(
+                crate::anetworld::ANET_CELL_M,
+                spawner,
+                std::sync::Arc::new(planet_streaming::SystemClock::new()),
+                cfg,
+                false
+            ),
+            Ok(true)
+        );
+        let both = world.field().unwrap();
+        let sel = planet_frame::select_nodes_in_view_field(&TangentWarp, &b.request.camera, &*both, &lod);
+        let held: Vec<TileId> = sel.nodes.iter().filter(|n| n.capped).map(|n| n.tile).collect();
+        // A node is on a level boundary when one of its four side neighbours at its level is not a node of the plan but its parent is (a coarser
+        // neighbour) or its children are (a finer one).
+        let set: std::collections::HashSet<TileId> = sel.nodes.iter().map(|n| n.tile).collect();
+        let on_boundary = |t: &TileId| -> bool {
+            [Side::East, Side::West, Side::North, Side::South].iter().any(|&side| {
+                let nb = t.neighbor(&TangentWarp, side);
+                !set.contains(&nb)
+                    && (nb.parent().is_some_and(|p| set.contains(&p)) || nb.children().is_some_and(|c| c.iter().any(|k| set.contains(k))))
+            })
+        };
+        let all_b = sel.nodes.iter().filter(|n| on_boundary(&n.tile)).count();
+        let held_b = held.iter().filter(|t| on_boundary(t)).count();
+        let mut by_level = std::collections::BTreeMap::<u8, usize>::new();
+        for t in &held {
+            *by_level.entry(t.level()).or_default() += 1;
+        }
+        writeln!(
+            out,
+            "  held back: {} of {} nodes with the widening ({held_plain} of {} without the chunk stage); {held_b} of the held and {all_b} of all {} nodes sit on a level boundary; held by level {:?}",
+            held.len(),
+            sel.nodes.len(),
+            sel_plain.nodes.len(),
+            sel.nodes.len(),
+            by_level
+        )
+        .map_err(err)
+        .unwrap();
+    }
+
+    // spec: GEN-037
+    /// The change the A-net chunks make against a base with a valley carve along the run's trunk chains (ADR 0084 option 1), for thresholds of the
+    /// run's drainage area (`PLANET_CARVE_THRESHOLDS`, default 1e9 and 1e10 m2) and a scale of GEN-057's depth law (`PLANET_CARVE_SCALE`, default 1:
+    /// `d = min(3 m (A / 1e8)^0.5, 100 m)`), over a sample of land chunks (`PLANET_ANET_CHUNKS`, default 24, the same sample as `anet_change_report`):
+    /// the carve is made in memory on the bake's lattice along the polylines from every run cell over the threshold to its receiver (area interpolated
+    /// along it), read bilinearly, and subtracted from the base the stage solves on; the report gives the cells carved, the share of the chunks' cells
+    /// it lowers by more than 1 m, and the change against the carved base (p50, p99, p99.9, max, signed range) beside the one with no carve.
+    /// `PLANET_ANET_STORE=DIR PLANET_ANET_RES=N cargo test -p planet --release --lib carve_threshold_report -- --ignored --nocapture`. Read only.
+    #[test]
+    #[ignore = "a measurement: it solves a sample of real chunks several times"]
+    fn carve_threshold_report() {
+        use planet_core::cube::{direction_to_face, TangentWarp};
+        use planet_core::hash::SplitMix64;
+        use planet_generators::anet::{BaseDetail, CoarseRun};
+        use planet_generators::chunkfield::{compute_chunk, halo_rings, ChunkField};
+        use std::collections::HashMap;
+        use std::sync::Arc;
+        let mut out = std::io::stdout();
+        let res: u32 = std::env::var("PLANET_ANET_RES").ok().and_then(|r| r.parse().ok()).unwrap_or(256);
+        let count: usize = std::env::var("PLANET_ANET_CHUNKS").ok().and_then(|r| r.parse().ok()).unwrap_or(24);
+        let scale: f64 = std::env::var("PLANET_CARVE_SCALE").ok().and_then(|r| r.parse().ok()).unwrap_or(1.0);
+        let thresholds: Vec<f64> = std::env::var("PLANET_CARVE_THRESHOLDS")
+            .ok()
+            .map(|v| v.split(',').filter_map(|x| x.trim().parse().ok()).collect())
+            .unwrap_or_else(|| vec![1e9, 1e10]);
+        let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
+        let (world, maps, _) = anet_scene(res, 11, store, &mut out).unwrap();
+        let radius = world.radius_m();
+        let lat = planet_generators::chunkfield::ChunkLattice::new(crate::anetworld::cells_per_chunk_for(radius, 8.0)).unwrap();
+        let top = planet_generators::chunk::CHUNK_GRID_LEVEL;
+        let per_face = 1u32 << top;
+        let base = world.base_field().unwrap();
+        let mut rng = SplitMix64(0x6368_616e_6765);
+        let mut tiles: Vec<planet_core::TileId> = Vec::new();
+        while tiles.len() < count {
+            let face = planet_core::Face::ALL[(rng.next_u64() % 6) as usize];
+            let (x, y) = ((rng.next_u64() % u64::from(per_face)) as u32, (rng.next_u64() % u64::from(per_face)) as u32);
+            let t = planet_core::TileId::new(face, top, x, y).expect("a tile of the chunk grid");
+            // `PLANET_CARVE_ON_TRUNKS=1`: only chunks whose centre run cell or one of its neighbours drains over 1e9 m2 (the chunks the carve touches).
+            let on_trunk = std::env::var_os("PLANET_CARVE_ON_TRUNKS").is_none() || {
+                let c = maps.lattice().cell_at(t.center_direction(&TangentWarp));
+                std::iter::once(c).chain(maps.lattice().neighbours(c).into_iter().map(|n| n as usize)).any(|n| n < maps.lattice().len() && f64::from(maps.area_m2(n)) >= 1.0e9)
+            };
+            if on_trunk && base.height(t.center_direction(&TangentWarp)) > 0.0 {
+                tiles.push(t);
+            }
+        }
+        let map = &TangentWarp;
+        let coarse = maps.lattice();
+        let depth = |area: f64| (scale * 3.0 * libm::sqrt(area / 1.0e8)).min(100.0 * scale.max(1.0));
+        let cell_key = |res: u32, f: u8, i: i64, j: i64| {
+            (u64::from(f) << 56)
+                | ((i.clamp(0, i64::from(res) - 1) as u64 & 0x0fff_ffff) << 28)
+                | (j.clamp(0, i64::from(res) - 1) as u64 & 0x0fff_ffff)
+        };
+        // The carve grid of a threshold: depth in metres on the cells of the bake's lattice that the polylines of the run's trunks touch, for the
+        // windows round the sample chunks (four rings of run cells round the cell holding each chunk's centre, and every segment those cells start).
+        let carve_grid = |thr: f64| -> HashMap<u64, f32> {
+            let mut grid: HashMap<u64, f32> = HashMap::new();
+            let mut seen = std::collections::HashSet::new();
+            for t in &tiles {
+                let mut ring = vec![coarse.cell_at(t.center_direction(map))];
+                let mut all = ring.clone();
+                for _ in 0..4 {
+                    let mut next: Vec<usize> = Vec::new();
+                    for &c in &ring {
+                        for n in coarse.neighbours(c) {
+                            let n = n as usize;
+                            if n != planet_generators::coupled::NONE as usize && !all.contains(&n) && !next.contains(&n) {
+                                next.push(n);
+                            }
+                        }
+                    }
+                    all.extend(next.iter().copied());
+                    ring = next;
+                }
+                for c in all {
+                    if !seen.insert(c) || f64::from(maps.area_m2(c)) < thr {
+                        continue;
+                    }
+                    let r = maps.receiver(c);
+                    if r == planet_generators::coupled::NONE {
+                        continue;
+                    }
+                    let (a, b) = (coarse.direction(c), coarse.direction(r as usize));
+                    let (area_a, area_b) = (f64::from(maps.area_m2(c)), f64::from(maps.area_m2(r as usize)));
+                    let steps = (radius * a.angle_to(b) / 150.0).ceil().max(1.0) as u32;
+                    for k in 0..=steps {
+                        let l = f64::from(k) / f64::from(steps);
+                        let p = (a * (1.0 - l) + b * l).normalized();
+                        let (f, s, t2) = direction_to_face(map, p);
+                        let n = f64::from(res);
+                        let (i, j) = (((s + 1.0) * 0.5 * n) as i64, ((t2 + 1.0) * 0.5 * n) as i64);
+                        let d = depth(area_a * (1.0 - l) + area_b * l) as f32;
+                        let e = grid.entry(cell_key(res, f.0, i, j)).or_insert(0.0);
+                        *e = e.max(d);
+                    }
+                }
+            }
+            grid
+        };
+        struct Carved {
+            inner: crate::anetworld::WorldBase,
+            grid: HashMap<u64, f32>,
+            res: u32,
+            thr: f64,
+        }
+        impl Carved {
+            fn carve(&self, d: planet_core::Vec3) -> f64 {
+                if self.grid.is_empty() {
+                    return 0.0;
+                }
+                let (f, s, t) = direction_to_face(&TangentWarp, d);
+                let n = f64::from(self.res);
+                let (x, y) = ((s + 1.0) * 0.5 * n - 0.5, (t + 1.0) * 0.5 * n - 0.5);
+                let (i0, j0) = (libm::floor(x) as i64, libm::floor(y) as i64);
+                let (wx, wy) = (x - i0 as f64, y - j0 as f64);
+                let key = |i: i64, j: i64| {
+                    (u64::from(f.0) << 56)
+                        | ((i.clamp(0, i64::from(self.res) - 1) as u64 & 0x0fff_ffff) << 28)
+                        | (j.clamp(0, i64::from(self.res) - 1) as u64 & 0x0fff_ffff)
+                };
+                let at = |i: i64, j: i64| f64::from(self.grid.get(&key(i, j)).copied().unwrap_or(0.0));
+                at(i0, j0) * (1.0 - wx) * (1.0 - wy) + at(i0 + 1, j0) * wx * (1.0 - wy) + at(i0, j0 + 1) * (1.0 - wx) * wy + at(i0 + 1, j0 + 1) * wx * wy
+            }
+        }
+        impl BaseDetail for Carved {
+            fn base_height(&self, dir: planet_core::Vec3) -> f64 {
+                self.inner.base_height(dir) - self.carve(dir)
+            }
+            fn base_heights(&self, dirs: &[planet_core::Vec3]) -> Vec<f64> {
+                self.inner.base_heights(dirs).into_iter().zip(dirs).map(|(h, d)| h - self.carve(*d)).collect()
+            }
+            fn coarse_input(&self, dir: planet_core::Vec3) -> f64 {
+                self.inner.coarse_input(dir)
+            }
+            fn region_heights(&self, dirs: &[planet_core::Vec3]) -> Vec<f64> {
+                self.inner.region_heights(dirs).into_iter().zip(dirs).map(|(h, d)| h - self.carve(*d)).collect()
+            }
+            fn identity(&self) -> u64 {
+                self.inner.identity() ^ self.thr.to_bits() ^ u64::from(self.res)
+            }
+        }
+        let mut variants: Vec<(String, HashMap<u64, f32>, f64)> = vec![("no carve".into(), HashMap::new(), 0.0)];
+        // Where the solve's own channel lies against the carve line (the reference line: threshold 1e9, the law as set): the share of the incision (the sum
+        // of the changes below -5 m) at points the line lowers by more than 1 m, and at points within about two bake cells of it.
+        let ref_line = Carved { inner: crate::anetworld::WorldBase::new(&world), grid: carve_grid(1.0e9), res, thr: 1.0e9 };
+        for &thr in &thresholds {
+            let t = std::time::Instant::now();
+            let g = carve_grid(thr);
+            writeln!(out, "carve at threshold {thr:.0e} m2: {} bake cells carved over the {count} windows ({:.1} s)", g.len(), t.elapsed().as_secs_f64())
+                .map_err(err)
+                .unwrap();
+            variants.push((format!("threshold {thr:.0e} m2, scale {scale}"), g, thr));
+        }
+        for (label, grid, thr) in variants {
+            let carved = Arc::new(Carved { inner: crate::anetworld::WorldBase::new(&world), grid, res, thr });
+            let mut params = planet_generators::anet::ANetParams::spike(crate::anetworld::ANET_HALO_M, lat.cell_m(radius));
+            params.drivers.seed = world.base_seed();
+            let stage = planet_generators::anet::ANet {
+                run: maps.clone(),
+                base: carved.clone() as Arc<dyn BaseDetail>,
+                radius_m: radius,
+                params,
+                memo: Default::default(),
+            };
+            let (mut abs, mut lowered) = (Vec::<f64>::new(), 0usize);
+            let (mut lo, mut hi) = (0.0f64, 0.0f64);
+            let (mut mass_all, mut mass_on, mut mass_near, mut n_on, mut n_near) = (0.0f64, 0.0f64, 0.0f64, 0usize, 0usize);
+            for tile in &tiles {
+                let Some(r) = compute_chunk(&lat, &stage, radius, top, *tile, halo_rings(&stage)) else { continue };
+                let field = ChunkField::new(world.base_field().unwrap(), lat, radius, &stage).with_top_level(top).with_ready(Arc::new(r));
+                for l in 0..65u32 {
+                    for k in 0..65u32 {
+                        let d = tile.sample_direction(map, 64, k, l);
+                        let c = field.change_at_level(d, top + 5);
+                        abs.push(c.abs());
+                        lo = lo.min(c);
+                        hi = hi.max(c);
+                        lowered += usize::from(carved.carve(d) > 1.0);
+                        if thr == 0.0 {
+                            let on = ref_line.carve(d) > 1.0;
+                            let near = !on && {
+                                let (f, s0, t0) = direction_to_face(map, d);
+                                let off = 2.0 * 2.0 / f64::from(res);
+                                [(off, 0.0), (-off, 0.0), (0.0, off), (0.0, -off)]
+                                    .iter()
+                                    .any(|(a, b2)| ref_line.carve(planet_core::cube::face_to_direction(map, f, s0 + a, t0 + b2)) > 1.0)
+                            };
+                            let mass = if c < -5.0 { -c } else { 0.0 };
+                            mass_all += mass;
+                            if on {
+                                mass_on += mass;
+                                n_on += 1;
+                            } else if near {
+                                mass_near += mass;
+                                n_near += 1;
+                            }
+                        }
+                    }
+                }
+            }
+            abs.sort_by(f64::total_cmp);
+            let q = |p: f64| abs[(((abs.len() - 1) as f64) * p) as usize];
+            if thr == 0.0 && mass_all > 0.0 {
+                writeln!(
+                    out,
+                    "  the solve's own incision (sum of the change below -5 m) lies {:.1} % on the carve line ({n_on} points) and {:.1} % within about two bake cells of it ({n_near} points)",
+                    100.0 * mass_on / mass_all,
+                    100.0 * mass_near / mass_all
+                )
+                .map_err(err)
+                .unwrap();
+            }
+            writeln!(
+                out,
+                "{label}: the carve lowers {:.1} % of the chunks' sample points by more than 1 m; |change| over {} points: p50 {:.2}, p99 {:.2}, p99.9 {:.2}, max {:.2} m; signed {lo:.1} to {hi:+.1} m",
+                100.0 * lowered as f64 / abs.len() as f64,
+                abs.len(),
+                q(0.5),
+                q(0.99),
+                q(0.999),
+                abs[abs.len() - 1]
+            )
+            .map_err(err)
+            .unwrap();
+        }
+    }
+
     // spec: GEN-052
     #[test]
     fn the_chunk_budget_is_four_seconds_at_8_m_and_a_missing_time_never_passes() {
