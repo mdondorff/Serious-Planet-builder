@@ -52,6 +52,7 @@ fn main() {
     let field = world.field().expect("the field");
     let m = coarse.m as usize;
     let az = coarse.azimuths as usize;
+    let width = planet_generators::coarsehorizon::record_len(az);
     let obs = Lattice::new(m, R);
     let cell_m = std::f64::consts::FRAC_PI_2 * R / m as f64;
     let sun_idx = ((sun_az / 360.0 * az as f64).round() as usize) % az;
@@ -63,7 +64,7 @@ fn main() {
     let centre = along(camera, heading.to_radians(), dist_km * 1000.0);
     let (clat, clon) = (libm::asin(centre.z).to_degrees(), libm::atan2(centre.y, centre.x).to_degrees());
     println!("the point {dist_km} km along {heading} deg: lat {clat:.3} lon {clon:.3}");
-    println!("horizon angle toward the sun (deg), rows from the near side to the far, columns left to right across the heading:");
+    println!("horizon angle toward the sun (deg) from the cell's lowest / highest ground, rows from the near side to the far, columns left to right across the heading:");
     let mut best = (f64::MIN, 0usize);
     for row in -3i32..=3 {
         let mut line = String::new();
@@ -71,11 +72,13 @@ fn main() {
             let p =
                 along(along(centre, heading.to_radians(), f64::from(row) * cell_m), (heading + 90.0).to_radians(), f64::from(col) * cell_m);
             let cell = obs.cell_at(p);
-            let deg = dequantize(coarse.bytes[cell * az + sun_idx]).to_degrees();
+            // A cell's record: the azimuths from its lowest ground, then from its highest, then the two heights (GEN-045).
+            let record = &coarse.bytes[cell * width..(cell + 1) * width];
+            let (deg, high) = (dequantize(record[sun_idx]).to_degrees(), dequantize(record[az + sun_idx]).to_degrees());
             if deg > best.0 {
                 best = (deg, cell);
             }
-            line += &format!("{deg:6.2}");
+            line += &format!(" {deg:5.2}/{high:4.2}");
         }
         println!("{line}");
     }

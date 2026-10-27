@@ -397,8 +397,8 @@ impl WorldTerrain {
     }
 }
 
-/// The coarse horizon of a world as the renderer reads it (GEN-045, STRM-045): `6 m^2` observer cells of `azimuths` bytes, faces in order, rows
-/// `j` outer, then `i`, then the azimuth.
+/// The coarse horizon of a world as the renderer reads it (GEN-045, STRM-045): `6 m^2` observer cells of `record_len(azimuths)` bytes (the azimuths
+/// from the cell's lowest ground, from its highest, then the two heights), faces in order, rows `j` outer, then `i`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CoarseHorizon {
     pub m: u32,
