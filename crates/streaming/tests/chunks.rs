@@ -509,7 +509,7 @@ impl planet_streaming::chunks::ChunkVersions for ThreadVersions {
     }
 }
 
-// spec: STRM-056
+// spec: STRM-063
 #[test]
 fn the_version_of_a_chunk_that_is_not_ready_is_made_by_its_job_never_on_the_thread_that_updates() {
     let spawner = Arc::new(planet_streaming::ThreadPool::new(2));

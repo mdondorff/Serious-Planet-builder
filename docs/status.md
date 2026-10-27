@@ -27,6 +27,7 @@ Done before the reset (2026-10-23 and 24; M8-2 archived #621, chunk fade split i
 Open owner items: the two flickers (Tracked) need a live check (editor off, debug path L, or a recording or F9 at the moment); P1-5 editing frame rate on a quiet machine; P2-8 missing tiles during an edit's refresh.
 
 ## Tracked
+- **Editor smoke** (`editor --smoke`): does not complete on the real store (17 frames); fix when in that code (the stall gate's home).
 - **Detail blocks** (BUILD-027): 10 requirements in `xtask/src/detail_blocks.txt`: split or shorten each, delete its line; no new blocks.
 - **Frame tail** (SPIKE-44): `draw_plan_transient` 8-14 ms on a plan delivery (24-48 frames/min) + ~9 ms frame work drops a frame at 60 fps; ADR 0083 frame share.
 - **Hillslope flat patches** (look review 2b): ground beyond a rim is 0.7 m under the base, half as rough, flat in 60-160 m patches.

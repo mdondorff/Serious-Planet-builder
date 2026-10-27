@@ -158,3 +158,8 @@ Scope: `edit-latency` with a chunk stage (TEST-056), the M6 and M8 criterion 6 c
 - Every edit names the four level-3 ancestors (6,5), (6,6), (7,5), (7,6) of face 0 (resident only, "change below spacing"); they end last, one at a time. Lock waits are not the cause (windows 18, named: all under 55 ms in all per case).
 - The chunk scene set `drawn exact = uploaded` (every named tile), so those four gated the M6 column (windows 13 to 20: 7 of 13 gated rows over). Window 21 reads ADR 0072 point 1 (the named tiles the plan draws, from the job log): 53 to 758 ms, 1 row over (the preview column). Numbers before window 21 are on the old reading.
 - Obsolete when a coarse tile's refresh is deferred to a lower class or its build gets cheaper.
+
+## 2026-10-27 A scene with few chunks hides main-thread work that a flight over many chunks multiplies
+Scope: `ChunkManager::update_with`, `WorldChunkVersions::version`, the editor's chunk step; `app::globalperf` `chunk_frame_cost_report`.
+- A chunk's version with an item in a stamp layer needs its read set (0.2 to 0.85 s at 8 m cells); it was made on the main thread for every new chunk: 37 stalls of 1 to 15 s in the owner's hour. The edit-latency scene (7 chunks, cached after frame 1) cannot show it; a probe that moves the camera over new chunks can (21 of 30 frames over 20 ms before, none after).
+- Obsolete when the read set takes a few ms.

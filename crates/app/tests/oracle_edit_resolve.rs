@@ -341,7 +341,7 @@ fn brushes_of_every_kind_and_a_second_smoothing_brush_beside_them_re_solve_to_th
     let _ = (std::fs::remove_dir_all(&a), std::fs::remove_dir_all(&b));
 }
 
-// spec: STRM-056, VIEW-056
+// spec: STRM-063, VIEW-056
 #[test]
 fn the_chunk_step_over_new_chunks_with_an_item_in_a_stamp_layer_never_holds_the_calling_thread() {
     use planet_core::cube::TangentWarp;
