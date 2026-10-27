@@ -11,6 +11,13 @@ use std::time::{Duration, Instant};
 
 /// A frame at least this long is a stall.
 pub const STALL: Duration = Duration::from_secs(1);
+
+/// The stall limit of this run: [`STALL`], or `PLANET_STALL_MS` milliseconds when the variable is set (a probe of frames shorter than a second; it
+/// decides nothing but which frames are reported).
+pub fn limit() -> Duration {
+    static LIMIT: std::sync::OnceLock<Duration> = std::sync::OnceLock::new();
+    *LIMIT.get_or_init(|| std::env::var("PLANET_STALL_MS").ok().and_then(|v| v.parse::<u64>().ok()).map_or(STALL, Duration::from_millis))
+}
 /// A lock wait shorter than this is not recorded (an uncontended acquire takes microseconds).
 pub const WAIT_NOTED: Duration = Duration::from_millis(2);
 /// At most one stall report in this time; the others are one line in the log.
@@ -103,7 +110,7 @@ impl StallProbe {
 
     fn end_at(&mut self, now: Instant) -> Option<Stall> {
         let frame = now - self.began;
-        if frame < STALL {
+        if frame < limit() {
             return None;
         }
         self.stalls += 1;
@@ -134,7 +141,7 @@ impl Stall {
     /// The text of the report: the frame, the phases and the lock waits, and what the caller adds (jobs in flight, the tile counts).
     pub fn text(&self, extra: &str) -> String {
         let ms = |d: Duration| format!("{:.0} ms", d.as_secs_f64() * 1e3);
-        let mut s = format!("a frame took {} (the stall limit is {})\nphases of the frame, longest first:\n", ms(self.frame), ms(STALL));
+        let mut s = format!("a frame took {} (the stall limit is {})\nphases of the frame, longest first:\n", ms(self.frame), ms(limit()));
         for (name, d) in &self.phases {
             s += &format!("  {name}: {}\n", ms(*d));
         }

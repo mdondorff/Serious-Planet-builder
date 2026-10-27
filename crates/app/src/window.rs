@@ -770,6 +770,7 @@ impl App<'_> {
                     }
                 }
             }
+            st.stall.mark("chunk frame (frame_step, landings, refresh summary)");
             // A refusal of the plan for the base parameters degrades the frame (it draws the newest plan in hand); it is said once, never fatal.
             // One line, one report file and one title notice per cause (kind and level) in 5 s; the title counts all of them.
             let refusal = st.rig.managed.take_plan_refusal();
@@ -843,6 +844,7 @@ impl App<'_> {
                     e.preview_end();
                 }
             }
+            st.stall.mark("plan refusals, sweep, repro files and the preview end");
             // The editor mode: what the camera shows of the edits, their outlines and handles, the hover, the lists; the resident tiles the
             // edits of the last frame can touch (the footprint find).
             if let Some(e) = st.edit.as_mut().filter(|e| e.on) {
@@ -855,7 +857,7 @@ impl App<'_> {
                 );
                 e.update(&camera, viewport, &wanted, field, &limits, Pointer { cursor: st.cursor, over_ui });
             }
-            st.stall.mark("chunk frame, refusals and editor update");
+            st.stall.mark("editor update (picks, outlines, lists)");
             st.rig.fi.retire_to(st.rig.renderer.retired_frames(ctx));
             while st.rig.fi.is_full() {
                 st.rig.fi.note_wait();

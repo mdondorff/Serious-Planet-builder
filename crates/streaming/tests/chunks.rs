@@ -490,3 +490,87 @@ fn a_prefetched_chunk_is_a_prefetch_job_and_a_wanted_chunk_submitted_later_runs_
     assert!(spawner.run_one());
     assert_eq!(m.update(&[(key(0, 0), 100.0)]).landed, vec![key(0, 0)], "the wanted chunk lands before either prefetched one");
 }
+
+/// A version source that says on which thread each version was asked.
+struct ThreadVersions {
+    caller: std::thread::ThreadId,
+    on_caller: std::sync::Mutex<Vec<ChunkKey>>,
+    elsewhere: std::sync::atomic::AtomicUsize,
+}
+
+impl planet_streaming::chunks::ChunkVersions for ThreadVersions {
+    fn version(&self, key: ChunkKey) -> u64 {
+        if std::thread::current().id() == self.caller {
+            self.on_caller.lock().unwrap().push(key);
+        } else {
+            self.elsewhere.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        5
+    }
+}
+
+// spec: STRM-063
+#[test]
+fn the_version_of_a_chunk_that_is_not_ready_is_made_by_its_job_never_on_the_thread_that_updates() {
+    let spawner = Arc::new(planet_streaming::ThreadPool::new(2));
+    let versions = Arc::new(ThreadVersions { caller: std::thread::current().id(), on_caller: Default::default(), elsewhere: 0.into() });
+    let m = manager(spawner, Arc::new(FakeClock::default()), None, ChunkConfig { workers: 2, ..ChunkConfig::default() })
+        .with_versions(versions.clone());
+    let keys: Vec<(ChunkKey, f64)> = (0..4).map(|x| (key(x, 0), 100.0 * f64::from(x) + 100.0)).collect();
+    let started = std::time::Instant::now();
+    m.update(&keys);
+    assert!(
+        versions.on_caller.lock().unwrap().is_empty(),
+        "the first update, over four new chunks, asked for no version on its own thread"
+    );
+    while m.stats().landed < 4 {
+        m.update(&keys);
+        assert!(started.elapsed().as_secs() < 60, "the chunks did not land");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(versions.on_caller.lock().unwrap().iter().all(|k| m.is_ready(*k)), "the caller asked only for chunks that were ready");
+    assert!(
+        versions.elsewhere.load(std::sync::atomic::Ordering::SeqCst) >= 4,
+        "each new chunk's job asked for its own version on a worker"
+    );
+    // The version a job made is the chunk's: nothing is stale, so a further update starts nothing.
+    assert_eq!(m.update(&keys).started, 0);
+}
+
+/// A version source that lands the pending chunk job while the update is asking for the version of a ready chunk: a chunk that lands between the
+/// ready snapshot and the lock of the update.
+struct LandingVersions {
+    spawner: Arc<ManualSpawner>,
+    armed: std::sync::atomic::AtomicBool,
+}
+
+impl planet_streaming::chunks::ChunkVersions for LandingVersions {
+    fn version(&self, key: ChunkKey) -> u64 {
+        if key == crate::chunks::key(0, 0) && self.armed.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            self.spawner.run_one();
+        }
+        5
+    }
+}
+
+// spec: STRM-063
+#[test]
+fn a_chunk_that_lands_while_the_update_asks_for_versions_is_not_judged_stale_with_a_version_it_was_never_asked() {
+    let (spawner, clock) = (Arc::new(ManualSpawner::default()), Arc::new(FakeClock::default()));
+    let versions = Arc::new(LandingVersions { spawner: spawner.clone(), armed: false.into() });
+    let m = manager(spawner.clone(), clock, None, ChunkConfig { workers: 2, ..ChunkConfig::default() }).with_versions(versions.clone());
+    let first = [(key(0, 0), 100.0)];
+    m.update(&first);
+    spawner.run(1);
+    m.update(&first);
+    assert!(m.is_ready(key(0, 0)));
+    // The second chunk is started; its job waits in the spawner.
+    let both = [(key(0, 0), 100.0), (key(1, 0), 200.0)];
+    assert_eq!(m.update(&both).started, 1);
+    // The next update asks for the version of the ready chunk, and the job of the second lands inside that call.
+    versions.armed.store(true, std::sync::atomic::Ordering::SeqCst);
+    let up = m.update(&both);
+    assert!(m.is_ready(key(1, 0)), "the second chunk landed during the update");
+    assert_eq!(up.started, 0, "the chunk that landed is not stale: its version (5) was made by its job, not 0");
+    assert_eq!(spawner.pending(), 0);
+}

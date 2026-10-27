@@ -223,19 +223,30 @@ impl ChunkManager {
     pub fn update_with(&self, wanted: &[(ChunkKey, f64)], prefetch: &[ChunkKey]) -> ChunkUpdate {
         let now = self.clock.now_ms();
         let mut out = ChunkUpdate::default();
-        // The version of every wanted chunk now, asked before the lock is taken (the source reads the world's definition).
+        // The version of every wanted chunk that is ready, asked before the lock is taken (the source reads the world's definition). A chunk that is not
+        // ready has no version asked here: making one can take the read set of the chunk, a few hundred milliseconds that must not be the main thread's,
+        // so the job of a new chunk asks for it on its worker (`ChunkManager::job`).
+        let ready: HashSet<ChunkKey> = self.shared.lock().expect("chunk state").ready.keys().copied().collect();
         let versions: HashMap<ChunkKey, u64> = match &self.versions {
-            Some(v) => wanted.iter().map(|w| w.0).chain(prefetch.iter().copied()).map(|k| (k, v.version(k))).collect(),
+            Some(v) => wanted
+                .iter()
+                .map(|w| w.0)
+                .chain(prefetch.iter().copied())
+                .filter(|k| ready.contains(k))
+                .map(|k| (k, v.version(k)))
+                .collect(),
             None => HashMap::new(),
         };
         let want_version = |k: &ChunkKey| versions.get(k).copied().unwrap_or(0);
+        // The version a job starts with: none for a chunk without one asked (its job asks), 0 where there is no source of versions.
+        let job_version = |k: &ChunkKey| if self.versions.is_some() { versions.get(k).copied() } else { Some(0) };
         let near: HashMap<ChunkKey, bool> = match &self.versions {
-            Some(v) => wanted.iter().map(|w| w.0).map(|k| (k, v.near_edit(k))).collect(),
+            Some(v) => wanted.iter().map(|w| w.0).filter(|k| ready.contains(k)).map(|k| (k, v.near_edit(k))).collect(),
             None => HashMap::new(),
         };
         // The stage's epoch when the versions were asked: a job that ends under another epoch computed against edits it was not keyed for.
         let epoch0 = self.stage.epoch();
-        let to_start: Vec<(ChunkKey, u64, bool, JobClass)> = {
+        let to_start: Vec<(ChunkKey, Option<u64>, bool, JobClass)> = {
             let mut sh = self.shared.lock().expect("chunk state");
             for key in wanted.iter().map(|w| &w.0).chain(prefetch) {
                 if let Some(e) = sh.ready.get_mut(key) {
@@ -272,8 +283,8 @@ impl ChunkManager {
                 wanted.iter().filter(|(k, _)| !sh.ready.contains_key(k) && !sh.running.contains(k)).map(|&(k, d)| (d, k)).collect();
             candidates.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
             candidates.dedup_by_key(|c| c.1);
-            let mut chosen: Vec<(ChunkKey, u64, bool, JobClass)> =
-                candidates.into_iter().take(free).map(|(_, k)| (k, want_version(&k), false, JobClass::Visible)).collect();
+            let mut chosen: Vec<(ChunkKey, Option<u64>, bool, JobClass)> =
+                candidates.into_iter().take(free).map(|(_, k)| (k, job_version(&k), false, JobClass::Visible)).collect();
             // Then the stale chunks the plan reads (STRM-056), nearest first, at most `stale_workers` at once: a chunk of an older version keeps
             // drawing, so it waits behind the chunks that are missing, and the workers it does not use stay free for new chunks.
             let stale_free = self.cfg.stale_workers.min(self.cfg.workers).saturating_sub(sh.stale_running.len());
@@ -281,7 +292,11 @@ impl ChunkManager {
             // as they were), each group nearest to the camera first.
             let mut stale: Vec<(f64, ChunkKey)> = wanted
                 .iter()
-                .filter(|(k, _)| sh.ready.get(k).is_some_and(|e| e.version != want_version(k)) && !sh.running.contains(k))
+                .filter(|(k, _)| {
+                    // A chunk that landed after the versions were asked has no version here: it is not judged this update (its job made its version).
+                    let known = self.versions.is_none() || versions.contains_key(k);
+                    known && sh.ready.get(k).is_some_and(|e| e.version != want_version(k)) && !sh.running.contains(k)
+                })
                 .map(|&(k, d)| (d, k))
                 .collect();
             let is_near = |k: &ChunkKey| near.get(k).copied().unwrap_or(false);
@@ -302,7 +317,7 @@ impl ChunkManager {
                 if chosen.len() >= free {
                     break;
                 }
-                chosen.push((k, want_version(&k), true, JobClass::Visible));
+                chosen.push((k, Some(want_version(&k)), true, JobClass::Visible));
             }
             // What is left of the workers goes to the prefetch, in the order given (wanted chunks never wait for it).
             for k in prefetch {
@@ -310,7 +325,7 @@ impl ChunkManager {
                     break;
                 }
                 if !sh.ready.contains_key(k) && !sh.running.contains(k) && !chosen.iter().any(|c| c.0 == *k) {
-                    chosen.push((*k, want_version(k), false, JobClass::Prefetch));
+                    chosen.push((*k, job_version(k), false, JobClass::Prefetch));
                 }
             }
             for (k, _, stale, _) in &chosen {
@@ -328,11 +343,14 @@ impl ChunkManager {
         out
     }
 
-    fn job(&self, key: ChunkKey, version: u64, epoch0: u64) -> crate::Job {
+    fn job(&self, key: ChunkKey, version: Option<u64>, epoch0: u64) -> crate::Job {
         let (lat, radius_m, top) = (self.lat, self.radius_m, self.top);
+        let versions = self.versions.clone();
         let (stage, disk, clock, shared) = (self.stage.clone(), self.disk.clone(), self.clock.clone(), self.shared.clone());
         Box::new(move || {
             let tile = tile_of(key);
+            // A new chunk's version is made here, on the worker (its read set is a few hundred ms of work); the staleness check of the ready chunk uses it later.
+            let version = version.unwrap_or_else(|| versions.as_ref().map_or(0, |v| v.version(key)));
             let mut from_disk = None;
             let mut moved = false;
             if let Some(disk) = &disk {
