@@ -93,3 +93,4 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0081 | [Local main-stem routing inside a chunk](0081-local-main-stem-routing-inside-a-chunk.md) | accepted | departs from 0077 point 3 (refines it: topology and border crossings stay global) |
 | 0082 | [The coarse node slides, not the border crossing](0082-the-coarse-node-slides-not-the-border-crossing.md) | accepted | amends 0081 point 1 |
 | 0083 | [Runtime compute budgets](0083-runtime-compute-budgets.md) | accepted | new; numbers in a spec |
+| 0084 | [A coarse valley carve in the base](0084-coarse-valley-carve-in-the-base.md) | proposed | amends 0080 point 4; owner: tackle in M8 |

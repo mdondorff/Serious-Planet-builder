@@ -15,6 +15,7 @@ Source: the owner's session on Rasierklinge, editor and viewer, build `a7e739b5`
 ## Findings, grouped
 | Group | # | Finding | Screenshot | Read | Kind |
 |---|---|---|---|---|---|
+| D0 Coarse levels uneroded | 17 | Erosion reaches only the chunk's levels; coarser levels show uneroded ground: a harsh disconnect between levels (owner, after the test) | frame-41356, frame-50119 | the chunk change stops at the pyramid top; coarse levels cannot read chunk solves (LOD-013) | **M8 (owner, 2026-10-27)**: ADR 0084 (proposed), a coarse valley carve in the base |
 | A Editor stalls | 11 | Main-thread stalls of 1 to 15 s while editing | stall reports | the editor's chunk frame / refusals / editor update phase; the edit-latency scene does not reproduce it | blocker (CON-22, criterion 3) |
 | A | 1 | Editor mode at full-planet view: frames up to 1.3 s on the CPU; viewer mode cheap | | editor per-frame work grows with the visible area | blocker |
 | B Shadows | 16 | No shadow of a plateau on a crater next to it after edits | frame-197238 | no horizon map baked all session (stall reports); also STRM-057 re-bakes only touched chunks, not neighbours whose horizon reads the edit | blocker (M8 delivers shadows) |
@@ -40,6 +41,7 @@ Source: the owner's session on Rasierklinge, editor and viewer, build `a7e739b5`
 | 1 | A: split the stalled phase (chunk frame, refusals, editor update) in the stall probe, find and fix the cause; the 1.3 s full-planet editor frame; add the editor with chunks and a real edit to the stall smoke | crusader | no frame over 100 ms while editing on the 16384 store; smoke test gates it |
 | 2 | B: why no horizon map was baked in the editor (regression since #786/#789/#797/#806?); re-bake the neighbours whose horizon reach an edit enters; zero-count check extended to the viewer and editor (the scenes have it, the window does not) | explorer | a plateau's shadow shows on its neighbour within criterion 6's 10 s; viewer counters checked |
 | 3 | C: K views report their stored-cell reads; a test renders every K view on a store | explorer, with 2 | the test passes, no panic |
+| 3b | D0: ADR 0084's coarse carve: SPIKE-49 sizes the one-pass carve on the real store (coarse-to-fine step at the findings 2 and 3 sites), then the change | spikes, then a lane | entry step and disconnect measured before and after; owner judges the stills |
 | 4 | D: held-back tile count with chunks on vs off and with the asymmetric bound; the entry step at the coast; river imprint beyond the chunk range (coarse network in the base field) vs a wider range | crusader after 1 | a proposal with numbers, then the fix; criterion 3 re-measured |
 | 5 | B6: the coarse horizon map's source and the dark spot | explorer after 2 | cause named, fixed or tracked |
 | 6 | Owner decisions: E (D3 revisit: edits on top as default, erosion keeping mass), F and G scope (M9 or M8), the look, the 1 m / 500 m exception, the drawn-tile reading of criterion 6 (#823) | owner | decisions recorded |
