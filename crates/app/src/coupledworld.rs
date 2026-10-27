@@ -197,7 +197,7 @@ pub fn remake_target(store: &Path, out: &Path) -> Result<std::path::PathBuf, Str
     std::fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
     let out_c = std::fs::canonicalize(out).map_err(|e| format!("{}: {e}", out.display()))?;
     let store_c = std::fs::canonicalize(store).map_err(|e| format!("{}: {e}", store.display()))?;
-    if out_c == store_c {
+    if out_c.starts_with(&store_c) {
         return Err(format!(
             "the re-made run would be written into the store it reads ({}): name a directory under target/",
             store.display()
