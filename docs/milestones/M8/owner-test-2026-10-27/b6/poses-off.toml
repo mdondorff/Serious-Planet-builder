@@ -1,0 +1,26 @@
+# B6 (owner test 2026-10-27): the poses of frame-102263 (35.1 km, lat -27.8368 lon -13.0795, heading 206.8, pitch 41.0 down) and frame-197238
+# (50.6 km, lat -40.8635 lon 9.9876, heading 325.6, pitch 24.1 down) from the F9 bundles, with the coarse horizon map off. The sun time is not in a
+# bundle: 17.85 h gives about 2 degrees of elevation at both sites on the equinox.
+# Run: cargo xtask capture stills --poses docs/milestones/M8/owner-test-2026-10-27/b6/poses-off.toml --store target/accept/global16384 --out-dir docs/milestones/M8/owner-test-2026-10-27/b6/off
+coarse_horizon = false
+chunk_timeout_s = 3600
+
+[place]
+lat = -27.8368
+lon = -13.0795
+
+[[pose]]
+name = "f102263-sun2"
+altitude_m = 34500
+back_m = 0
+heading_deg = 206.8
+pitch_deg = 41.0
+sun_local_hours = 17.85
+
+[[pose]]
+name = "f102263-sun1"
+altitude_m = 34500
+back_m = 0
+heading_deg = 206.8
+pitch_deg = 41.0
+sun_local_hours = 17.93

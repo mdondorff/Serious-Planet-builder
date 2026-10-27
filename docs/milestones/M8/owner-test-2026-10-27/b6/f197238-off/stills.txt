@@ -1,0 +1,3 @@
+# anchor: latitude -40.8635 longitude 9.9876 degrees, ground 76.3 m
+# pose width height eye_lat_deg eye_lon_deg eye_height_m heading_deg pitch_deg sun_local_hours chunks waited_s nodes capped_nodes
+f197238-sun2 2560 1440 -40.86350 9.98760 50076.3 325.6 24.1 17.85 0 0.2 788 0

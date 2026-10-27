@@ -1,0 +1,17 @@
+# B6 (owner test 2026-10-27): the pose of frame-197238 (50.6 km, lat -40.8635 lon 9.9876, heading 325.6, pitch 24.1 down) from its F9 bundle, with the
+# coarse horizon map on. The sun time is not in a bundle: 17.85 h is about 1.7 degrees of elevation at this site on the equinox.
+# Run: cargo xtask capture stills --poses docs/milestones/M8/owner-test-2026-10-27/b6/poses2-on.toml --store target/accept/global16384 --out-dir docs/milestones/M8/owner-test-2026-10-27/b6/f197238-on
+coarse_horizon = true
+chunk_timeout_s = 3600
+
+[place]
+lat = -40.8635
+lon = 9.9876
+
+[[pose]]
+name = "f197238-sun2"
+altitude_m = 50000
+back_m = 0
+heading_deg = 325.6
+pitch_deg = 24.1
+sun_local_hours = 17.85
