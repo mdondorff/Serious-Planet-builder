@@ -63,3 +63,18 @@ Gate ok for every run. Files: `edit-latency-w9-6x2-horizon-jobclasses.md`, `edit
 - One bake thread recovers 6 of the 10 cases the horizon jobs cost; the rest is the bake's field evaluation or `horizon_frame`.
 - Re-solve phases (`generate --edit-resolve`, 6 workers x 2 base threads, per chunk job): network 2.2 to 3.1 s, solve 1.9 to 2.5 s, drivers 0.1 to 0.2 s; the last chunk lands 4.7 to 5.2 s (2 chunks) and 6.2 to 6.5 s (4 chunks). In the scene the same re-solves land at 8 to 9 s with horizon jobs off.
 - Envelope (`envelope-w9-run-in.json`, highest speed in m/s at 30, 100, 300, 1000 m): cold 125, 90, 115, 100; steady after a 12 s run-in 95, 110, 155, 78 (300 m: 145 with horizon off). Limiter of the steady 300 m flight: chunk wait (3 chunks land at 160 m/s after a median 6.3 s; stand-in 4.6 % of the nodes).
+
+## Window 11 of 2026-10-27 (main at #792; track-set prefetch, AVX2 march, 60 s steady window; bake threads and stale cancel of #789 on main)
+Gate ok. Files: `edit-latency-w11-6x2.md`, `envelope-w11-steady-300.json`. The full envelope scene was stopped after the 30 m and 100 m cold curves at the planner's request (it needs 1.5 to 2 h); the steady curve was run for 300 m alone (`--only-steady --altitudes-m 300`, #792 and the next PR); the other altitudes and the 12 s steady quick mode go to a later window.
+
+| Run (6 x 2, horizon jobs on) | Eroded result drawn within 10 s (19) | M6 column over (13 gated) |
+|---|---|---|
+| Window 11, default bake threads, main with #789 | 9 | 8 |
+| Window 10, 4 bake threads | 3 | 7 |
+| Window 10, 1 bake thread | 9 | 8 |
+
+- Last chunk landed 5.8 to 10.4 s, drawn again 6.7 to 11.4 s (1 m: 10.0 to 14.5 s; the 1 m cases are the ones over).
+- Envelope, cold (the first visit after a stop, 12 s with one chunk edge), partial: 30 m 150 m/s, 100 m 65 m/s; 300 m at 80 m/s had 2.44 % chunk stand-in (the same start-up limit as window 9).
+- Envelope, steady, 300 m, 12 s run-in then a 60 s window over several chunk edges, 11 trials: highest speed 460 m/s (bound 1 % over every 1 s window). Stand-in share 0 % up to 400 m/s, 0.92 % at 440, 0.98 % at 460, 1.01 % at 480, 96 % at 640; the coarse share is 0 up to 480. The floor of criterion 7 (200 m/s, owner: steady flight) is cleared 2.3 times.
+- Limiter above 460 m/s: the chunk pool. At 480 m/s 28 chunks landed in 72 s, `chunk_jobs_at_end` 4 (the 6 workers busy to the end), median wait 0 s, maximum 5.3 s; about 4 chunks asked per frame. The track needs chunks faster than the pool solves them.
+- Window 9 envelope for comparison (12 s steady window, one edge): steady 95, 110, 155, 78 m/s at 30, 100, 300, 1000 m.
