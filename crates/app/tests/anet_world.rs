@@ -276,3 +276,47 @@ fn generate_coarse_horizon_makes_the_stored_horizon_from_the_stored_coupled_run_
         }
     }
 }
+
+// spec: GEN-043, STRM-046
+#[test]
+fn the_coupled_views_key_every_tile_of_a_store_backed_world_with_and_without_the_chunk_stage() {
+    use planet_core::cube::TangentWarp;
+    use planet_generators::coupled::CoupledLens;
+    // The owner's session of 2026-10-27: the K views (the run's heights and drainage area) panicked on the pool workers at the mesh key
+    // ("a field that reads cells must report its cell queries in read_records_for"): every tile the view re-keys must have a key.
+    let store = std::env::temp_dir().join(format!("planet-anet-lens-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&store);
+    run(&["generate", "--global-dir", store.to_str().unwrap(), "--global-res", &RES.to_string(), "--threads", "2"]).unwrap();
+    let world = open(&store);
+    wait_for_run(&world);
+    let world = open(&store);
+    let spawner = Arc::new(ManualSpawner::default());
+    let tiles: Vec<TileId> = [0u8, 3, 6, 9, 12, 15]
+        .iter()
+        .flat_map(|&level| {
+            let n = 1u32 << level;
+            [(0u8, n / 2, n / 2), (2, 0, 0), (4, n - 1, n / 3)].map(|(face, x, y)| TileId::new(Face(face), level, x, y).unwrap())
+        })
+        .collect();
+    let keys = |world: &Arc<WorldTerrain>, what: &str| {
+        let field = world.field().expect("the field");
+        for tile in &tiles {
+            let key = planet_cache::key::mesh_key(field.as_ref(), &TangentWarp, *tile, 16, R);
+            assert!(key.0 != [0u8; 16], "{what}: a key for {tile:?}");
+        }
+    };
+    keys(&world, "no lens, no chunk stage");
+    for lens in [CoupledLens::Height, CoupledLens::Area] {
+        world.set_coupled_lens(Some(lens));
+        keys(&world, &format!("{lens:?}, no chunk stage"));
+    }
+    world.set_coupled_lens(None);
+    let cfg = ChunkConfig { workers: 2, ..ChunkConfig::default() };
+    assert_eq!(world.enable_anet_from_store(CELL_M, spawner, Arc::new(FakeClock::default()), cfg), Ok(true));
+    keys(&world, "no lens, chunk stage");
+    for lens in [CoupledLens::Height, CoupledLens::Area] {
+        world.set_coupled_lens(Some(lens));
+        keys(&world, &format!("{lens:?}, chunk stage"));
+    }
+    let _ = std::fs::remove_dir_all(&store);
+}

@@ -488,3 +488,36 @@ fn the_chunk_step_counts_every_enabled_feature_and_a_feature_turned_off_counts_n
     );
     assert!(off.chunks_landed > 0, "the chunks themselves still land: {off:?}");
 }
+
+// spec: STRM-057
+#[test]
+fn an_edit_changes_the_word_of_the_chunk_beside_it_whose_march_reads_it_and_of_no_chunk_two_edges_away() {
+    use planet::horizonworld::ChunkHorizonBaker;
+    use planet_streaming::chunks::HorizonBaker;
+    // The owner's session of 2026-10-27 asked whether an edit re-bakes the neighbours whose horizon reach it: the word of a chunk is the hash of the
+    // items within its march's halo (2 km here, 9 cells), so a hill at the centre of one chunk is in the halo of the chunk beside it (its edge is
+    // 2.4 km from the hill) and out of the halo of the chunk after that (7.3 km).
+    let r = rig();
+    let lat = r.world.chunk_lattice().unwrap();
+    let baker = ChunkHorizonBaker::new(&r.world, lat, params(), 1);
+    let (own, beside, further) = ((2u8, 1000u32, 1000u32), (2u8, 1001u32, 1000u32), (2u8, 1002u32, 1000u32));
+    assert!([own, beside, further].iter().all(|k| baker.edit_word(*k) == 0), "no items, no word");
+    let centre = TileId::new(Face(2), CHUNK_GRID_LEVEL, own.1, own.2).unwrap().center_direction(&TangentWarp);
+    let hill = ItemSpec {
+        id: 1,
+        layer: DEFAULT_ITEM_LAYER.into(),
+        priority: 0,
+        dir: centre,
+        content_hash: 0,
+        reach_m: 800.0,
+        max_delta_m: 60.0,
+        stamp: None,
+    }
+    .with_stamp(Stamp::new(StampKind::Hill, [50.0, 0.0, 0.0]));
+    let mut def = (*r.world.definition()).clone();
+    def.put_item_spec(BodyId::PLANET, hill).unwrap();
+    r.world.set_definition(Arc::new(def)).unwrap();
+    assert!(baker.edit_word(own) != 0, "the chunk the hill stands in");
+    assert!(baker.edit_word(beside) != 0, "the chunk beside it, whose march reads the hill: its map is baked again");
+    assert_eq!(baker.edit_word(further), 0, "two chunks away: out of every halo, no new bake");
+}

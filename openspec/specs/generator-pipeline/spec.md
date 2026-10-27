@@ -1192,7 +1192,7 @@ Status: active
 Source: opus-planner (2026-10-24, M8-1 part c), ADR 0077
 
 #### Detail
-A texel's height is the run's at its cell; its area is the largest in the cells the texel covers, so a river a coarse tile cannot resolve still shows. `generators::chain::CoupledLensField` SHALL put the lens over any field: every height, key and reading is the base's, the climate is the lens's, and the climate version word (hence the mesh key of every tile) carries the run's identifier, the lens and the run's algorithm version. The texture is a pure function of the run, the lens and the tile.
+A texel's height is the run's at its cell; its area is the largest in the cells the texel covers, so a river a coarse tile cannot resolve still shows. `generators::chain::CoupledLensField` SHALL put the lens over any field: every height, key and reading is the base's, the climate is the lens's, and the climate version word (hence the mesh key of every tile) carries the run's identifier, the lens and the run's algorithm version. The texture is a pure function of the run, the lens and the tile. The lens's read records and its answer to whether it reads cells SHALL be those of the layer the key walk reaches below it at the tile (`key_source`, STRM-029), so a tile a stage passes through keys like the base's, never panics the key.
 
 #### Scenario: What a tile shows
 - **WHEN** the lenses are applied to the tiles of a run on a small lattice, to the whole face as one tile and to a fine tile

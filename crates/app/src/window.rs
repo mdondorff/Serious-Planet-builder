@@ -403,7 +403,9 @@ impl App<'_> {
             window.set_title(&planet_frame::viewer::roots_title(done, total));
         })?;
         // A world with a stored coupled channel gets the A-net chunk stage on a thread (STRM-046); the jobs run on a pool of half the generation workers' size.
-        if self.world.has_bake() && !cfg.smoke {
+        // A smoke run skips it (it needs no chunks), unless `PLANET_SMOKE_CHUNKS` asks: the smoke over a store with a coupled run then draws lit over the
+        // stage and its verdict wants the horizon jobs to have run (TEST-058).
+        if self.world.has_bake() && (!cfg.smoke || std::env::var_os("PLANET_SMOKE_CHUNKS").is_some()) {
             // The pool and the knobs of the viewer's chunk stage: one function, which the headless scenes use too (`anetworld::viewer_chunk_stage`).
             let (pool, chunk_cfg) = crate::anetworld::viewer_chunk_stage(cfg.gen);
             self.world.request_anet(pool, self.clock.clone(), chunk_cfg);
@@ -744,7 +746,9 @@ impl App<'_> {
             if st.chunks_on {
                 let tiles: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
                 // The chunk step of the viewer and the scenes (TEST-058); the horizon jobs run for the lit frames only, their maps are uploaded below.
-                let features = crate::chunkstage::FrameFeatures { horizon: frame.pipeline.draw.plan.lit.is_some(), ..Default::default() };
+                // The lit plan is put on a copy of the draw plan later in the frame (`st.viewer.lit`), so the draw plan's own `lit` is always None
+                // here: reading it switched the horizon jobs off for good (the owner's session of 2026-10-27: no map baked in an hour).
+                let features = crate::chunkstage::FrameFeatures { horizon: st.viewer.lit, ..Default::default() };
                 let step = crate::chunkstage::frame_step(
                     self.world,
                     &mut st.rig.managed,
@@ -754,6 +758,7 @@ impl App<'_> {
                     &mut st.chunk_counters,
                 );
                 st.horizon_update = step.horizon;
+                st.counts.horizon_steps = st.chunk_counters.horizon_frames;
                 let update = step.update;
                 st.chunk_acc.0 += update.landed.len() as u64;
                 st.chunk_acc.1 += frame.counts.chunk.chunk_nodes as u64;
@@ -963,6 +968,7 @@ impl App<'_> {
             let drew_lit = lit_plan.is_some();
             if drew_lit {
                 st.counts.lit_frames += 1;
+                st.counts.stage_lit_frames += u64::from(st.chunks_on);
                 st.counts.editing_light_frames += u64::from(st.viewer.editing_light);
                 st.counts.atmosphere_frames += u64::from(plan.lit.is_some_and(|l| l.atmosphere.is_some()));
                 st.counts.water_frames += u64::from(plan.water.as_ref().is_some_and(|w| !w.nodes.is_empty()));
@@ -1353,6 +1359,9 @@ fn smoke_keys(st: &mut Running, cameras: &[Camera], now_ms: u64) -> Result<bool,
         // The editing light is on from key 41 to key 45, over lit frames of the restarted flight (VIEW-042).
         41 => press(st, Command::ToggleEditingLight),
         45 => press(st, Command::ToggleEditingLight),
+        // The K view of the coupled run's heights over a chunk stage (`PLANET_SMOKE_LENS`): the keys of every tile it re-keys are made on the pool
+        // workers (the owner's session of 2026-10-27 panicked there).
+        22 if std::env::var_os("PLANET_SMOKE_LENS").is_some() => press(st, Command::CycleCoupledLens),
         // F9 writes files: the run presses it only where a directory for them was named.
         40 if std::env::var_os("PLANET_REPRO_DIR").is_some() => press(st, Command::SaveRepro),
         _ => {}
@@ -1671,6 +1680,8 @@ fn smoke_summary(st: &Running) -> String {
         + &edit
         + &globe
         + &repro
+        + &format!("
+  chunk step: {}", st.chunk_counters.line(&crate::chunkstage::FrameFeatures::default()))
 }
 
 /// `planet editor`: open the window and run the flight until it is closed (or, for `--smoke`, for a few dozen frames).

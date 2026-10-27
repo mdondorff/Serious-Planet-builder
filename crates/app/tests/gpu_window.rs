@@ -55,6 +55,8 @@ fn run_editor(flags: &[&str], extra: &[&str], envs: &[(&str, &str)]) -> Option<S
         }
         panic!("planet editor {flags:?} {extra:?} failed ({}):\n{stdout}\n{stderr}", out.status);
     }
+    // A panic on a pool worker is caught and reported, and the window goes on: a run with one is not a run that worked.
+    assert!(!stderr.contains("panicked at"), "planet editor {flags:?} {extra:?} panicked on a thread and went on:\n{stdout}\n{stderr}");
     Some(stdout)
 }
 
@@ -490,4 +492,56 @@ fn the_item_sweep_over_a_dense_brush_cluster_a_ridge_a_hill_and_a_crater_has_no_
         return;
     };
     assert!(stdout.contains("[sweep ok]: 34 stops, 17 items x 2 altitudes, 0 stops with a refused plan"), "{stdout}");
+}
+
+/// Run `planet generate <args>` and return its stdout; a failure panics with both streams.
+fn generate(args: &[&str]) -> String {
+    let out = Command::new(env!("CARGO_BIN_EXE_planet")).arg("generate").args(args).output().expect("the planet binary starts");
+    assert!(
+        out.status.success(),
+        "planet generate {args:?} failed:\n{}\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+/// A store of 32 cells with its coupled run and coarse horizon, and the world file the window needs to take that bake size (the default world,
+/// written out): the window over it has the chunk stage (STRM-046). Returns the store, the world file and the arguments that name them.
+fn stage_store(tag: &str) -> (std::path::PathBuf, std::path::PathBuf, Vec<String>) {
+    let store = std::env::temp_dir().join(format!("planet-window-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&store);
+    let world = std::env::temp_dir().join(format!("planet-window-{tag}-{}.toml", std::process::id()));
+    let def = planet_world_def::WorldDefinition::single_planet(planet_core::EARTH_RADIUS_M, 0);
+    std::fs::write(&world, planet_world_def::toml_io::to_toml(&def).unwrap()).unwrap();
+    let (dir, w) = (store.to_str().unwrap().to_string(), world.to_str().unwrap().to_string());
+    generate(&["--global-dir", &dir, "--world", &w, "--global-res", "32", "--threads", "2"]);
+    generate(&["--coupled-run", &dir, "--world", &w, "--global-res", "32"]);
+    generate(&["--coarse-horizon", &dir, "--world", &w, "--global-res", "32", "--threads", "2"]);
+    let args = ["--store", &dir, "--world", &w, "--global-res", "32", "--tau", "0.4"].map(String::from).to_vec();
+    (store, world, args)
+}
+
+// spec: TEST-058, GEN-043, VIEW-005
+#[test]
+fn the_window_over_a_store_with_a_chunk_stage_runs_the_horizon_jobs_and_draws_the_k_view_without_a_panic() {
+    // The owner's session of 2026-10-27: (1) the editor over the production store never baked a horizon map, because the chunk step switched the
+    // jobs off by reading a plan field that is always empty there; the smoke verdict now fails a lit run over a chunk stage whose chunk step never
+    // ran them, and the summary says what the step counted. (2) K (the coupled run's heights) panicked on the pool workers at the mesh key of the
+    // tiles it re-keys ("a field that reads cells must report its cell queries in read_records_for"); a panic there is caught and the window goes
+    // on, so the runner fails on one in stderr. One run, for the cost of one store and one start.
+    let (store, world, args) = stage_store("stage");
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let out = smoke_in(&args, &[("PLANET_SMOKE_CHUNKS", "1"), ("PLANET_SMOKE_LENS", "1")]);
+    let _ = std::fs::remove_file(&world);
+    let _ = std::fs::remove_dir_all(&store);
+    let Some(stdout) = out else { return };
+    let step = stdout.lines().find(|l| l.contains("chunk step:")).unwrap_or_else(|| panic!("no chunk step line: {stdout}"));
+    let frames: u64 = step
+        .split("horizon ")
+        .nth(1)
+        .and_then(|s| s.split(" frames").next())
+        .and_then(|n| n.parse().ok())
+        .unwrap_or_else(|| panic!("no horizon count in '{step}'"));
+    assert!(frames > 0, "the chunk step ran the horizon jobs on no frame: {step}");
 }
