@@ -65,7 +65,10 @@ pub(crate) fn measure_source(source: String, variant: MeasureVariant) -> String 
     };
     let mut out = source;
     if shadow {
-        out = out.replace("shadow_factor(in.node_index, in.aux, up, sun, coarse_fade), g.mode.x == 0u", "1.0, g.mode.x == 0u");
+        out = out.replace(
+            "shadow_factor(in.node_index, in.aux, up, sun, coarse_fade, max(in.height, 0.0)), g.mode.x == 0u",
+            "1.0, g.mode.x == 0u",
+        );
     }
     if material {
         out = out.replace("fn ground_detail(node_index: u32,", "fn ground_detail_full(node_index: u32,");
@@ -716,12 +719,12 @@ fn fs_lit_view(in: VsOut) -> vec4<f32> {
     let gd = ground_detail(in.node_index, in.local, in.normal, up, climate.x, climate.y, in.height - g.extra.x, drv);
     // The horizon shadow multiplies the direct sun term of the views that have one (Lit, Lighting; REND-038): 1.0 where no horizon map is there.
     let coarse_fade = horizon_coarse_fade(camera_distance(nodes[in.node_index].origin_rel, in.local));
-    let sun_vis = select(1.0, shadow_factor(in.node_index, in.aux, up, sun, coarse_fade), g.mode.x == 0u || g.mode.x == 2u);
+    let sun_vis = select(1.0, shadow_factor(in.node_index, in.aux, up, sun, coarse_fade, max(in.height, 0.0)), g.mode.x == 0u || g.mode.x == 2u);
     var rgb = sun_vis * shade_lit(g.mode.x, g.albedo, gd.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), sun, g.range.z) * detail_mul(gd, g.mode.x, g.albedo, climate.x, climate.y, clamp(dot(normalize(gd.normal), up), 0.0, 1.0), in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)));
     // The sum is clamped like the rest of the lit radiance: the scene target is f16.
     rgb = min(rgb + vec3<f32>(ground_gloss(in.node_index, in.local, gd, sun) * (g.range.z * sun_vis)), vec3<f32>(60000.0));
     if (g.mode.x == 5u || g.mode.x == 6u) {
-        rgb = horizon_view_colour(g.mode.x, in.node_index, in.aux, up, sun, coarse_fade) * g.range.z;
+        rgb = horizon_view_colour(g.mode.x, in.node_index, in.aux, up, sun, coarse_fade, max(in.height, 0.0)) * g.range.z;
     }
     if (g.mode.x >= 7u) {
         rgb = clamp(driver_colour(g.mode.x, drv) * 0.31830988618 * g.range.z, vec3<f32>(0.0), vec3<f32>(60000.0));
@@ -3047,7 +3050,7 @@ mod one_shot_tests {
     #[test]
     fn the_measurement_variants_take_out_the_shadow_call_and_the_ground_detail_and_the_product_source_is_untouched() {
         let src = format!("{}{}", crate::compact::compact_terrain_shader(16), crate::atmosphere::terrain_atmosphere_source());
-        let shadow = "shadow_factor(in.node_index, in.aux, up, sun, coarse_fade), g.mode.x == 0u";
+        let shadow = "shadow_factor(in.node_index, in.aux, up, sun, coarse_fade, max(in.height, 0.0)), g.mode.x == 0u";
         assert_eq!(src.matches(shadow).count(), 2, "the lit view and the atmosphere's lit view each call it once");
         assert_eq!(src.matches("fn ground_detail(node_index: u32,").count(), 1);
         assert_eq!(measure_source(src.clone(), MeasureVariant::Product), src);

@@ -9,7 +9,7 @@ use planet_cache::horizon_store::{
 };
 use planet_cache::pack::{TileStore, DEFAULT_MAX_PACK_BYTES};
 use planet_core::{Face, TileId};
-use planet_generators::coarsehorizon::{coarse_horizon, CoarseParams, MAX_AZIMUTHS};
+use planet_generators::coarsehorizon::{coarse_horizon_range, CoarseParams, MAX_AZIMUTHS};
 use planet_generators::coupled::{run, CoupledInput, CoupledParams, Lattice};
 use planet_world_def::WorldDefinition;
 
@@ -47,7 +47,7 @@ fn map() -> Vec<u8> {
         .collect();
     let input = CoupledInput { uplift: vec![1.0e-3; z.len()], erodibility: vec![2.0e-5; z.len()], z };
     let state = run(&lat, &input, &coupled().params, coupled().steps as usize);
-    coarse_horizon(&lat, &state.z, M as usize, &horizon().params, 2).unwrap()
+    coarse_horizon_range(&lat, &state.z, M as usize, &horizon().params, 2).unwrap()
 }
 
 // spec: STRM-045
@@ -71,12 +71,12 @@ fn a_stored_coarse_horizon_reads_back_bit_for_bit() {
 fn the_block_of_a_tile_holds_the_observer_cells_under_it() {
     let w = world(coupled(), horizon());
     let m = map();
-    let (n, a) = (M as usize, 8usize);
+    let (n, a) = (M as usize, planet_generators::coarsehorizon::record_len(8));
     let records = w.horizon_records(&m).unwrap();
     for (face, tx, ty) in [(0u8, 0u32, 0u32), (2, 1, 1), (5, 0, 1), (3, 1, 0)] {
         let tile = TileId::new(Face(face), 1, tx, ty).unwrap();
         let block = decode_horizon_block(&records.iter().find(|r| r.tile == tile).expect("a record per tile").payload).unwrap();
-        assert_eq!((block.cells, block.azimuths), (4, 8));
+        assert_eq!((block.cells, block.azimuths as usize), (4, a), "a cell holds the two horizons and the heights");
         for j in 0..4usize {
             for i in 0..4usize {
                 let cell = usize::from(face) * n * n + (ty as usize * 4 + j) * n + tx as usize * 4 + i;
@@ -141,7 +141,7 @@ fn a_block_round_trips_and_a_bad_payload_is_refused() {
     let mut cells = bytes.clone();
     cells[1..5].copy_from_slice(&8u32.to_le_bytes());
     assert!(matches!(decode_horizon_block(&cells), Err(BlockCodecError::RawLength { .. })));
-    for bad in [0u32, MAX_AZIMUTHS + 1, u32::MAX] {
+    for bad in [0u32, planet_generators::coarsehorizon::record_len(MAX_AZIMUTHS as usize) as u32 + 1, u32::MAX] {
         let mut az = bytes.clone();
         az[5..9].copy_from_slice(&bad.to_le_bytes());
         assert!(matches!(decode_horizon_block(&az), Err(BlockCodecError::HorizonAzimuths(_))), "azimuths {bad}");
@@ -199,4 +199,17 @@ fn a_damaged_stored_block_a_wrong_lattice_and_a_default_that_follows_the_body_ar
     assert_eq!(defaulted.params.radius_m, R);
     assert_eq!(defaulted.m, 512);
     let _ = fs::remove_dir_all(&d);
+}
+
+// spec: STRM-045
+#[test]
+fn a_block_may_hold_the_record_of_the_most_azimuths_a_march_may_have() {
+    use planet_generators::coarsehorizon::record_len;
+    // The block's per-cell width is the record length: a march of the most azimuths (GEN-045) has a record of 2 x 256 + 2 bytes.
+    let width = record_len(MAX_AZIMUTHS as usize) as u32;
+    let block = HorizonBlock { cells: 2, azimuths: width, bytes: (0..2 * 2 * width).map(|i| (i % 251) as u8).collect() };
+    let back = decode_horizon_block(&encode_horizon_block(&block).unwrap()).unwrap();
+    assert_eq!(back, block);
+    let too_wide = HorizonBlock { cells: 2, azimuths: width + 1, bytes: vec![0; (2 * 2 * (width + 1)) as usize] };
+    assert!(matches!(encode_horizon_block(&too_wide), Err(BlockCodecError::HorizonAzimuths(_))));
 }

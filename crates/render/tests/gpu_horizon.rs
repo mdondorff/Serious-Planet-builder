@@ -156,7 +156,7 @@ fn the_shader_factor_of_a_chunk_map_equals_the_cpu_reference_at_texel_centres() 
         let el = h + (-0.6 + 0.04 * q as f64).to_radians();
         let sun = sun_at(up, north * libm::cos(az) + east * libm::sin(az), el);
         nodes.push(HorizonNode { slot: 1, sun_azimuth: az as f32, sun_elevation: 0.0, fade: 1.0, rect });
-        qs.push(HorizonQuery { node: q as u32, tile_uv, up: f3(up), sun: f3(sun), distance_m: 0.0 });
+        qs.push(HorizonQuery { node: q as u32, tile_uv, up: f3(up), sun: f3(sun), distance_m: 0.0, height_m: 0.0 });
         expect.push((h, lit_factor(sun_elevation(sun, up), h)));
     }
     let got = probe_horizon(&ctx, 2, &[(1, slot_bytes)], None, &table_of(&nodes), &qs);
@@ -172,6 +172,12 @@ fn the_shader_factor_of_a_chunk_map_equals_the_cpu_reference_at_texel_centres() 
     assert!(expect.iter().any(|e| e.1 > 0.05 && e.1 < 0.95), "some queries sit on the soft edge");
 }
 
+/// Coarse records (`record_len(AZ)` bytes a cell) from the azimuth bytes of every cell: the same horizon from the cell's lowest and its highest ground,
+/// and a height range of 0 to 10,200 m, so the blend by the point's height gives the same horizon at any height.
+fn records_from(az_bytes: &[u8]) -> Vec<u8> {
+    az_bytes.chunks(AZ).flat_map(|cell| cell.iter().chain(cell.iter()).copied().chain([0u8, 255u8])).collect()
+}
+
 // spec: REND-038
 #[test]
 fn the_shader_factor_of_the_coarse_map_equals_the_cpu_reference_on_every_face_and_the_larger_horizon_wins() {
@@ -185,7 +191,7 @@ fn the_shader_factor_of_the_coarse_map_equals_the_cpu_reference_on_every_face_an
             (10 + 7 * face + 4 * i + 3 * j + 5 * (k % 4) + 2 * (k / 4)) as u8
         })
         .collect();
-    let packed = pack_coarse(&coarse, m, AZ).unwrap();
+    let packed = pack_coarse(&records_from(&coarse), m, AZ).unwrap();
     // A chunk map in slot 0, so for the nodes that have it the larger of the two decides, now one, now the other.
     let n = 256usize;
     let chunk = bytes(n * n * AZ, 5, 160);
@@ -214,7 +220,7 @@ fn the_shader_factor_of_the_coarse_map_equals_the_cpu_reference_on_every_face_an
                     || (phi - azimuth_in_frame(sun, east, north)).rem_euclid(std::f64::consts::TAU) < 1e-9
             );
             nodes.push(HorizonNode { slot: if with { 0 } else { -1 }, sun_azimuth: chunk_az as f32, sun_elevation: 0.0, fade: 1.0, rect });
-            qs.push(HorizonQuery { node: qs.len() as u32, tile_uv, up: f3(up), sun: f3(sun), distance_m: 0.0 });
+            qs.push(HorizonQuery { node: qs.len() as u32, tile_uv, up: f3(up), sun: f3(sun), distance_m: 0.0, height_m: 0.0 });
             expect.push((h, lit_factor(sun_elevation(sun, up), h)));
         }
     }
@@ -247,6 +253,7 @@ fn a_node_with_no_chunk_map_and_no_coarse_map_is_lit_in_full_and_a_coarse_map_al
         up: f3(up),
         sun: f3(sun_at(up, Vec3::new(1.0, 0.0, 0.0), el)),
         distance_m: 0.0,
+        height_m: 0.0,
     };
     let got = probe_horizon(&ctx, 1, &[], None, &table, &[q(-0.5), q(0.0), q(0.3), q(1.5)]);
     for g in &got {
@@ -255,7 +262,7 @@ fn a_node_with_no_chunk_map_and_no_coarse_map_is_lit_in_full_and_a_coarse_map_al
     // A coarse map whose horizon is 10 degrees everywhere: the sun under it is in shadow, the sun well above it is lit.
     let m = 4usize;
     let byte = (10.0f64 / (90.0 / 255.0)).round() as u8;
-    let packed = pack_coarse(&vec![byte; 6 * m * m * AZ], m, AZ).unwrap();
+    let packed = pack_coarse(&records_from(&vec![byte; 6 * m * m * AZ]), m, AZ).unwrap();
     let got = probe_horizon(&ctx, 1, &[], Some((m as u32, &packed)), &table, &[q(5f64.to_radians()), q(30f64.to_radians())]);
     assert!(got[0].present && got[0].factor == 0.0, "{:?}", got[0]);
     assert!(got[1].factor == 1.0, "{:?}", got[1]);
@@ -289,7 +296,7 @@ fn the_shader_azimuth_frame_agrees_with_the_reference_at_a_pole_and_with_the_sun
     let m = 4usize;
     let east_byte = (10.0f64 / (90.0 / 255.0)).round() as u8;
     let cell: Vec<u8> = (0..AZ).map(|k| if (1..=7).contains(&k) { east_byte } else { 0 }).collect();
-    let packed = pack_coarse(&cell.repeat(6 * m * m), m, AZ).unwrap();
+    let packed = pack_coarse(&records_from(&cell.repeat(6 * m * m)), m, AZ).unwrap();
     let mut qs = Vec::new();
     let mut expect = Vec::new();
     // Near a pole (inside the 1e-6 of the old threshold), at the pole's neighbours, and at an ordinary point.
@@ -299,13 +306,13 @@ fn the_shader_azimuth_frame_agrees_with_the_reference_at_a_pole_and_with_the_sun
         for phi in [0.5f64, 1.5, 4.0] {
             let sun = sun_at(up, north * libm::cos(phi) + east * libm::sin(phi), 5f64.to_radians());
             let h = interpolate(&cell, azimuth_in_frame(sun, east, north));
-            qs.push(HorizonQuery { node: 0, tile_uv: [0.5, 0.5], up: f3(up), sun: f3(sun), distance_m: 0.0 });
+            qs.push(HorizonQuery { node: 0, tile_uv: [0.5, 0.5], up: f3(up), sun: f3(sun), distance_m: 0.0, height_m: 0.0 });
             expect.push(lit_factor(sun_elevation(sun, up), h));
         }
     }
     // The sun straight overhead: no horizontal direction, the reference azimuth is 0 and the answer is finite.
     let up = Vec3::new(1.0, 0.0, 0.0);
-    qs.push(HorizonQuery { node: 0, tile_uv: [0.5, 0.5], up: f3(up), sun: f3(up), distance_m: 0.0 });
+    qs.push(HorizonQuery { node: 0, tile_uv: [0.5, 0.5], up: f3(up), sun: f3(up), distance_m: 0.0, height_m: 0.0 });
     expect.push(1.0);
     let got = probe_horizon(&ctx, 1, &[], Some((m as u32, &packed)), &table, &qs);
     for (i, (g, e)) in got.iter().zip(&expect).enumerate() {
@@ -372,11 +379,13 @@ fn the_coarse_map_fades_out_with_the_distance_of_the_camera_the_way_the_cpu_func
     // A coarse map whose horizon is 10 degrees everywhere, the sun at 5 degrees: in shadow near, lit far, in between as the fade says.
     let m = 4usize;
     let byte = (10.0f64 / (90.0 / 255.0)).round() as u8;
-    let packed = pack_coarse(&vec![byte; 6 * m * m * AZ], m, AZ).unwrap();
+    let packed = pack_coarse(&records_from(&vec![byte; 6 * m * m * AZ]), m, AZ).unwrap();
     let h10 = planet_generators::horizon::dequantize(byte);
     let distances = [0.0f64, 5.0e5, 1.0e6, 1.5e6, 2.0e6, 2.5e6, 3.0e6, 6.0e6];
-    let qs: Vec<HorizonQuery> =
-        distances.iter().map(|&d| HorizonQuery { node: 0, tile_uv: [0.5, 0.5], up: f3(up), sun: f3(sun), distance_m: d as f32 }).collect();
+    let qs: Vec<HorizonQuery> = distances
+        .iter()
+        .map(|&d| HorizonQuery { node: 0, tile_uv: [0.5, 0.5], up: f3(up), sun: f3(sun), distance_m: d as f32, height_m: 0.0 })
+        .collect();
     let got = probe_horizon(&ctx, 1, &[], Some((m as u32, &packed)), &table, &qs);
     let el = sun_elevation(up, sun);
     let mut worst = 0.0f64;
@@ -389,4 +398,39 @@ fn the_coarse_map_fades_out_with_the_distance_of_the_camera_the_way_the_cpu_func
     assert_eq!(got[0].factor, 0.0, "near: in shadow");
     assert_eq!(got.last().unwrap().factor, 1.0, "far: the coarse map casts nothing");
     assert!(got.windows(2).all(|w| w[1].factor >= w[0].factor - 1e-6), "monotone in the distance");
+}
+
+// spec: REND-038
+#[test]
+fn a_point_on_a_crest_above_the_cells_mean_ground_stays_lit_at_a_low_sun_and_the_low_ground_of_the_cell_stays_in_the_plateaus_shadow() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let none = HorizonNode { slot: -1, sun_azimuth: 0.0, sun_elevation: 0.0, fade: 1.0, rect: [0.0; 4] };
+    let table = table_of(&[none]);
+    // The owner's frame-102263 (2026-10-27): the cell's horizon from its lowest ground is 5 degrees toward the sun (a plateau sunward), from its
+    // highest ground (a crest of 1,500 m, stored as 38 steps of 40 m) 0; the one horizon of the cell's mean ground blanked the crest at a sun of 0.9 degrees.
+    let m = 4usize;
+    let q5 = (5.0f64 / (90.0 / 255.0)).round() as u8;
+    let rec: Vec<u8> = (0..AZ).map(|_| q5).chain((0..AZ).map(|_| 0u8)).chain([0u8, 38u8]).collect();
+    let packed = pack_coarse(&rec.repeat(6 * m * m), m, AZ).unwrap();
+    let up = Vec3::new(0.0, 1.0, 0.0);
+    let sun = f3(sun_at(up, Vec3::new(1.0, 0.0, 0.0), 0.9f64.to_radians()));
+    let at = |height_m: f32| HorizonQuery { node: 0, tile_uv: [0.5, 0.5], up: f3(up), sun, distance_m: 0.0, height_m };
+    let got = probe_horizon(&ctx, 1, &[], Some((m as u32, &packed)), &table, &[at(0.0), at(760.0), at(1_500.0), at(4_000.0), at(-30.0)]);
+    let expect = |height: f64| {
+        let lo = planet_generators::horizon::dequantize(q5);
+        planet_generators::coarsehorizon::blend_elevation(lo, 0.0, 0.0, 38.0 * 40.0, height)
+    };
+    // The factor of the sun over each horizon, and the horizon itself (the lit factor's soft edge is the reference's own).
+    for (g, height) in got.iter().zip([0.0, 760.0, 1_500.0, 4_000.0, -30.0]) {
+        assert!((f64::from(g.horizon) - expect(height)).abs() < 3e-4, "height {height}: gpu {} cpu {}", g.horizon, expect(height));
+    }
+    assert!(got[0].factor < 0.01, "the cell's low ground is in the plateau's shadow: {:?}", got[0]);
+    assert!(
+        got[2].factor > 0.99 && got[3].factor > 0.99,
+        "the crest and the ground above it are lit at a sun of 0.9 degrees: {:?} {:?}",
+        got[2],
+        got[3]
+    );
+    assert!(got[1].horizon < got[0].horizon && got[1].horizon > got[2].horizon, "between the two the horizon falls with the height");
+    assert!((got[4].horizon - got[0].horizon).abs() < 1e-6, "below the lowest ground the horizon is the low ground's");
 }

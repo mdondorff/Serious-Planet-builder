@@ -13,7 +13,7 @@ use planet_cache::horizon_store::{load_horizon, store_horizon};
 use planet_cache::pack::{TileStore, DEFAULT_MAX_PACK_BYTES};
 use planet_core::{Face, PlanetFixed, TileId};
 use planet_generators::chunkfield::{ChunkKey, ChunkLattice, ChunkResult};
-use planet_generators::coarsehorizon::{coarse_horizon, CoarseParams};
+use planet_generators::coarsehorizon::{coarse_horizon_range, CoarseParams};
 use planet_generators::global::LatticeSource;
 use planet_generators::horizon::{bake_horizon, halo_texels, HeightRaster, HorizonParams};
 use planet_generators::stamp::STAGE_HALO;
@@ -527,7 +527,7 @@ pub fn make_coarse_horizon(
     let world = crate::coupledworld::keyed_world(def, src, n, steps)?.with_horizon(spec);
     let lat = run.maps.lattice();
     let z: Vec<f32> = (0..lat.len()).map(|c| run.maps.z(c)).collect();
-    let map = coarse_horizon(lat, &z, spec.m as usize, &spec.params, threads.max(1))?;
+    let map = coarse_horizon_range(lat, &z, spec.m as usize, &spec.params, threads.max(1))?;
     store_horizon(dir, &world, &map, DEFAULT_MAX_PACK_BYTES).map_err(|e| format!("{}: {e}", dir.display()))
 }
 
