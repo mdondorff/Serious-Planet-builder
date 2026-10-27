@@ -1,0 +1,18 @@
+TRUTH N=10: 1.9 s for 1000000 cells (194 ms/step), relief 1307 m, max A 276 km2, min z 2065
+N= 10 H=0.0 km: |dz| p50 4.87 p90 16.42 p99 57.58 max 180.5 m; |dlnA| mean 0.000 p99 0.00; block ms mean 0
+N= 10 H=0.5 km: |dz| p50 0.02 p90 6.18 p99 38.88 max 166.1 m; |dlnA| mean 0.479 p99 6.87; block ms mean 166
+N= 10 H=1.0 km: |dz| p50 0.01 p90 5.53 p99 35.54 max 166.1 m; |dlnA| mean 0.474 p99 6.91; block ms mean 239
+N= 10 H=2.0 km: |dz| p50 0.00 p90 3.89 p99 32.04 max 122.0 m; |dlnA| mean 0.346 p99 6.16; block ms mean 415
+N= 10 H=5.0 km: |dz| p50 0.00 p90 0.22 p99 10.32 max 80.1 m; |dlnA| mean 0.093 p99 2.66; block ms mean 1313
+TRUTH N=30: 6.0 s for 1000000 cells (200 ms/step), relief 1300 m, max A 279 km2, min z 2068
+N= 30 H=0.0 km: |dz| p50 14.02 p90 44.17 p99 129.79 max 302.9 m; |dlnA| mean 0.000 p99 0.00; block ms mean 0
+N= 30 H=0.5 km: |dz| p50 0.45 p90 19.03 p99 88.71 max 264.8 m; |dlnA| mean 0.602 p99 7.68; block ms mean 609
+N= 30 H=1.0 km: |dz| p50 0.33 p90 18.17 p99 79.43 max 264.7 m; |dlnA| mean 0.599 p99 7.68; block ms mean 880
+N= 30 H=2.0 km: |dz| p50 0.15 p90 14.65 p99 63.82 max 175.8 m; |dlnA| mean 0.454 p99 7.29; block ms mean 1508
+N= 30 H=5.0 km: |dz| p50 0.00 p90 2.19 p99 28.32 max 107.9 m; |dlnA| mean 0.148 p99 4.54; block ms mean 4753
+TRUTH N=100: 20.4 s for 1000000 cells (204 ms/step), relief 1290 m, max A 302 km2, min z 2078
+N=100 H=0.0 km: |dz| p50 60.99 p90 150.39 p99 293.08 max 480.8 m; |dlnA| mean 0.000 p99 0.00; block ms mean 0
+N=100 H=0.5 km: |dz| p50 8.47 p90 95.75 p99 229.25 max 442.5 m; |dlnA| mean 0.722 p99 8.20; block ms mean 1861
+N=100 H=1.0 km: |dz| p50 7.15 p90 89.25 p99 210.76 max 442.3 m; |dlnA| mean 0.708 p99 8.14; block ms mean 2917
+N=100 H=2.0 km: |dz| p50 4.31 p90 62.39 p99 147.13 max 306.1 m; |dlnA| mean 0.532 p99 7.82; block ms mean 4955
+N=100 H=5.0 km: |dz| p50 0.35 p90 16.51 p99 61.94 max 193.2 m; |dlnA| mean 0.200 p99 4.83; block ms mean 13863
