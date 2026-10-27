@@ -179,9 +179,9 @@ fn a_prefetched_chunk_takes_only_the_workers_the_wanted_chunks_leave_and_is_not_
     spawner.run(2);
     assert_eq!(m.update_with(&[(here, 10.0)], &[next]).landed, vec![here, next]);
     // The prefetched chunk is kept while it stays on the prefetch list, past the evict time, and goes once it is on none.
-    clock.advance(6_000);
+    clock.advance(31_000);
     assert!(m.update_with(&[(here, 10.0)], &[next]).evicted.is_empty());
-    clock.advance(6_000);
+    clock.advance(31_000);
     assert_eq!(m.update_with(&[(here, 10.0)], &[]).evicted, vec![next]);
 }
 

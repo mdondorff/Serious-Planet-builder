@@ -1,0 +1,1 @@
+- 2026-10-27 **chunk eviction time** (owner test: 1150 evictions in an hour): `chunk_evict_s` 5 -> 30 (STRM-041); the 512 MiB chunk pool cap is unchanged, so no RAM above it.

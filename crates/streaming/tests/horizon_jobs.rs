@@ -180,7 +180,7 @@ fn a_map_leaves_with_its_chunk() {
     jobs.update(&[(k, 1.0)]);
     assert!(jobs.horizon(k).is_some());
     // Not wanted for longer than the chunk's eviction time: the chunk leaves RAM and the map goes with it.
-    clock.advance(6_000);
+    clock.advance(31_000);
     let evicted = m.update(&[]).evicted;
     assert_eq!(evicted, vec![k]);
     let up = jobs.update(&[(k, 1.0)]);
