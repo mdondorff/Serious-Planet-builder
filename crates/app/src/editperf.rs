@@ -1056,6 +1056,9 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
         if let Some(n) = o.base_threads {
             world.set_base_threads(n);
         }
+        if let Some(n) = o.horizon_threads {
+            world.set_horizon_threads(n);
+        }
         crate::chunkstage::enable_viewer_stage_sized(&world, o.gen_workers(), o.chunk_workers, !o.no_horizon_jobs, false, out)?;
     }
     let size = if smoke { (768u32, 432u32) } else { (2560u32, 1440u32) };
