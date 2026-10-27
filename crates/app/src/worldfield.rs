@@ -193,7 +193,7 @@ pub struct WorldTerrain {
     chunks: std::sync::RwLock<Option<Arc<ChunkWorld>>>,
     /// Whether the A-net stage was asked for ([`WorldTerrain::request_anet`]).
     pub(crate) anet_asked: std::sync::atomic::AtomicBool,
-    /// Threads a batch of base heights of the A-net uses (default 4; a measurement sets it).
+    /// Threads a batch of base heights of the A-net uses (unset: 4 for the headless commands, the viewer's stage takes 2; a measurement sets it).
     base_threads: std::sync::atomic::AtomicUsize,
     /// The horizon jobs of the chunks (M8-5, STRM-049): none until `enable_horizon` (in `horizonworld`).
     pub(crate) horizon: std::sync::RwLock<Option<Arc<planet_streaming::chunks::HorizonJobs>>>,
@@ -300,7 +300,7 @@ impl WorldTerrain {
             coarse: Default::default(),
             chunks: Default::default(),
             anet_asked: Default::default(),
-            base_threads: std::sync::atomic::AtomicUsize::new(4),
+            base_threads: std::sync::atomic::AtomicUsize::new(0),
             horizon: Default::default(),
             coupled_lens: Default::default(),
             store_dir: None,
@@ -384,7 +384,7 @@ impl WorldTerrain {
             coarse: Default::default(),
             chunks: Default::default(),
             anet_asked: Default::default(),
-            base_threads: std::sync::atomic::AtomicUsize::new(4),
+            base_threads: std::sync::atomic::AtomicUsize::new(0),
             horizon: Default::default(),
             coupled_lens: Default::default(),
             store_dir: Some(dir.to_path_buf()),
@@ -819,8 +819,17 @@ impl WorldTerrain {
         self.base_threads.store(n.max(1), std::sync::atomic::Ordering::Relaxed);
     }
 
+    /// Take `n` threads for a batch of base heights unless a measurement set the number (`set_base_threads`).
+    pub(crate) fn default_base_threads(&self, n: usize) {
+        let _ = self.base_threads.compare_exchange(0, n.max(1), std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// The threads of a batch of base heights: the number set, else 4 (the headless commands').
     pub(crate) fn base_threads(&self) -> usize {
-        self.base_threads.load(std::sync::atomic::Ordering::Relaxed)
+        match self.base_threads.load(std::sync::atomic::Ordering::Relaxed) {
+            0 => 4,
+            n => n,
+        }
     }
 
     /// The seed of the planet body (it goes into the chunk cache's keys).

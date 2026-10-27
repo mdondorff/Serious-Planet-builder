@@ -1,0 +1,252 @@
+//! SPIKE-45 diagnostic (throwaway, spike branch only): why the stationary uplift does not hold the coupled run on the real 16384 bake.
+//! `cargo run --release -p planet --example coupled_uplift_diag -- --store DIR [--cache FILE] [--steps 24] [--only NAME]`. Reads the store only.
+
+use planet::coupledworld::{ERODIBILITY, UPLIFT_RHO};
+use planet_cache::global_store::{GlobalWorld, StoreSource};
+use planet_generators::coupled::{accumulate, priority_flood, receivers, stationary_uplift, step, CoupledInput, CoupledParams, Lattice, NONE};
+use planet_generators::coupledinput::reduce_bake;
+use planet_world_def::WorldDefinition;
+
+fn arg(name: &str) -> Option<String> {
+    let a: Vec<String> = std::env::args().collect();
+    a.iter().position(|x| x == name).and_then(|i| a.get(i + 1).cloned())
+}
+
+const BANDS: [(f32, f32); 5] = [(0.0, 500.0), (500.0, 1000.0), (1000.0, 2500.0), (2500.0, 5000.0), (5000.0, 1.0e9)];
+
+fn pct(v: &mut Vec<f32>, q: f64) -> f32 {
+    if v.is_empty() {
+        return f32::NAN;
+    }
+    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    v[((v.len() - 1) as f64 * q) as usize]
+}
+
+/// Median (p10 p90) of run minus input by band of the input.
+fn bands(tag: &str, input: &[f32], run: &[f32]) {
+    let mut line = format!("{tag:<28}");
+    for &(lo, hi) in &BANDS {
+        let mut d: Vec<f32> = input.iter().zip(run).filter(|(a, _)| **a > lo && **a <= hi).map(|(a, b)| b - a).collect();
+        let (m, a, b) = (pct(&mut d, 0.5), pct(&mut d, 0.1), pct(&mut d, 0.9));
+        line += &format!(" {m:8.1} ({a:7.0} {b:6.0}) |");
+    }
+    println!("{line}");
+}
+
+fn load_input(lat: &Lattice, store: &str, cache: &str) -> Result<Vec<f32>, String> {
+    if let Ok(bytes) = std::fs::read(cache) {
+        if bytes.len() == lat.len() * 4 {
+            return Ok(bytes.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect());
+        }
+    }
+    let def = WorldDefinition::single_planet(6_371_000.0, 1);
+    let world = GlobalWorld::from_definition(&def).map_err(|e| format!("{e}"))?;
+    let ts = planet_cache::pack::TileStore::open(std::path::Path::new(store), world.params()).map_err(|e| e.to_string())?;
+    let src = StoreSource::new(&ts, &world, 16384).map_err(|e| format!("{e}"))?;
+    let z = reduce_bake(&src, lat.n() as u32, 8).map_err(|e| e.to_string())?;
+    let bytes: Vec<u8> = z.iter().flat_map(|v| v.to_le_bytes()).collect();
+    std::fs::write(cache, bytes).map_err(|e| e.to_string())?;
+    Ok(z)
+}
+
+fn run_bands(name: &str, lat: &Lattice, z0: &[f32], p: &CoupledParams, steps: usize, uplift: Vec<f32>) {
+    let input = CoupledInput { z: z0.to_vec(), uplift, erodibility: vec![ERODIBILITY; z0.len()] };
+    let mut z = input.z.clone();
+    println!("-- {name}: run minus input, median (p10 p90) by input band 0-500 | 500-1000 | 1000-2500 | 2500-5000 | >5000");
+    let t = std::time::Instant::now();
+    for n in 1..=steps {
+        let (_, _, st) = step(lat, &input, &mut z, p);
+        if [1, 2, 4, 8, 16, 24, 40, 80].contains(&n) && n <= steps {
+            bands(&format!("step {n} (mean|dz| {:.1})", st.mean_dz_m), z0, &z);
+        }
+    }
+    println!("   ({:.0} s)", t.elapsed().as_secs_f64());
+}
+
+fn main() -> Result<(), String> {
+    let store = arg("--store").ok_or("--store DIR needed")?;
+    let cache = arg("--cache").unwrap_or_else(|| "coupled_uplift_z.bin".into());
+    let steps: usize = arg("--steps").map_or(Ok(24), |s| s.parse()).map_err(|e| format!("{e}"))?;
+    let only = arg("--only");
+    let want = |n: &str| only.as_deref().is_none_or(|o| o == n);
+    let lat = Lattice::new(2048, 6_371_000.0);
+    let z0 = load_input(&lat, &store, &cache)?;
+    let ero = vec![ERODIBILITY; z0.len()];
+    let p = CoupledParams { erode: true, ..CoupledParams::default() };
+    let land = z0.iter().filter(|&&v| v > 0.0).count();
+    println!("cells {} land {} ; rho {UPLIFT_RHO}", z0.len(), land);
+
+    let u0 = stationary_uplift(&lat, &z0, &ero, &p, UPLIFT_RHO);
+    let (filled, order) = priority_flood(&lat, &z0);
+    let dep = z0.iter().zip(&filled).filter(|(a, b)| **a > 0.0 && **b > **a).count();
+    let u_zero = z0.iter().zip(&u0).filter(|(a, u)| **a > 0.0 && **u == 0.0).count();
+    println!("land in a depression (filled > z): {dep} ({:.1} %); land with U == 0: {u_zero} ({:.1} %)", 100.0 * dep as f64 / land as f64, 100.0 * u_zero as f64 / land as f64);
+    let mut ur: Vec<f32> = u0.iter().copied().filter(|&u| u > 0.0).collect();
+    println!("U m/yr p10/50/90/max: {:.2e} {:.2e} {:.2e} {:.2e}", pct(&mut ur, 0.1), pct(&mut ur, 0.5), pct(&mut ur, 0.9), pct(&mut ur, 1.0));
+
+    if want("base") {
+        run_bands("base (as the app did)", &lat, &z0, &p, steps, u0.clone());
+    }
+
+    if want("step1") {
+        // What step 1 does, by cause.
+        let input = CoupledInput { z: z0.clone(), uplift: u0.clone(), erodibility: ero.clone() };
+        let mut z = z0.clone();
+        let (rec, _, _) = step(&lat, &input, &mut z, &p);
+        let raised: Vec<bool> = z.iter().zip(&z0).map(|(a, b)| a - b > 1.0).collect();
+        let n_raised = raised.iter().filter(|&&b| b).count();
+        let in_dep = (0..z0.len()).filter(|&c| raised[c] && filled[c] > z0[c]).count();
+        let roots = (0..z0.len()).filter(|&c| raised[c] && filled[c] <= z0[c] && (rec[c] == NONE || !raised[rec[c] as usize])).count();
+        let follow = (0..z0.len()).filter(|&c| raised[c] && filled[c] <= z0[c] && rec[c] != NONE && raised[rec[c] as usize]).count();
+        let floor = (0..z0.len()).filter(|&c| raised[c] && z0[c] < 0.5 + 1.0).count();
+        let fell = z.iter().zip(&z0).filter(|(a, b)| **b > 0.0 && **b - **a > 1.0).count();
+        println!("step 1: raised >1 m {n_raised}: in a depression {in_dep}, not in one and receiver also raised {follow}, not in one and receiver not raised {roots}; near the floor {floor}; fell >1 m {fell}");
+        bands("step 1", &z0, &z);
+    }
+
+    if want("prefilled") {
+        // H1: start from the filled surface (no depressions left), uplift from that surface.
+        let mut zf: Vec<f32> = filled.clone();
+        for (i, v) in zf.iter_mut().enumerate() {
+            if z0[i] <= 0.0 {
+                *v = z0[i];
+            }
+        }
+        let uf = stationary_uplift(&lat, &zf, &ero, &p, UPLIFT_RHO);
+        run_bands("H1: input pre-filled (z := filled)", &lat, &zf, &p, steps, uf);
+    }
+
+    if want("fillonly") {
+        bands("fill only (GEN-065)", &z0, &filled);
+    }
+
+    if want("h12") {
+        // H1 + H2: pre-filled input and plain D8 routing.
+        let mut zf: Vec<f32> = filled.clone();
+        for (i, v) in zf.iter_mut().enumerate() {
+            if z0[i] <= 0.0 {
+                *v = z0[i];
+            }
+        }
+        let p0 = CoupledParams { jitter: 0.0, ..p };
+        let uf = stationary_uplift(&lat, &zf, &ero, &p0, UPLIFT_RHO);
+        run_bands("H12: pre-filled input and jitter 0", &lat, &zf, &p0, steps, uf);
+    }
+
+    if want("h12trace") {
+        let mut zf: Vec<f32> = filled.clone();
+        for (i, v) in zf.iter_mut().enumerate() {
+            if z0[i] <= 0.0 {
+                *v = z0[i];
+            }
+        }
+        let p0 = CoupledParams { jitter: 0.0, ..p };
+        let uf = stationary_uplift(&lat, &zf, &ero, &p0, UPLIFT_RHO);
+        let input = CoupledInput { z: zf.clone(), uplift: uf.clone(), erodibility: ero.clone() };
+        let mut z = zf.clone();
+        let (rec1, _, st1) = step(&lat, &input, &mut z, &p0);
+        let z1 = z.clone();
+        println!("H12 step 1: mean|dz| {:.4} max|dz| {:.3}", st1.mean_dz_m, st1.max_dz_m);
+        let moved: Vec<usize> = (0..z.len()).filter(|&c| zf[c] > 0.0 && (z1[c] - zf[c]).abs() > 0.01).collect();
+        println!("  cells with |dz| > 0.01 m after step 1: {}", moved.len());
+        let (rec2, a2, st2) = step(&lat, &input, &mut z, &p0);
+        println!("H12 step 2: mean|dz| {:.4} max|dz| {:.3}", st2.mean_dz_m, st2.max_dz_m);
+        let mut idx: Vec<usize> = (0..z.len()).filter(|&c| zf[c] > 0.0).collect();
+        idx.sort_by(|&a, &b| (z[b] - z1[b]).abs().partial_cmp(&(z[a] - z1[a]).abs()).unwrap());
+        let n1 = idx.iter().filter(|&&c| (z[c] - z1[c]).abs() > 0.01).count();
+        let n2 = idx.iter().filter(|&&c| (z[c] - z1[c]).abs() > 1.0).count();
+        let chg = (0..z.len()).filter(|&c| zf[c] > 0.0 && rec1[c] != rec2[c]).count();
+        println!("  step 2: |dz|>0.01: {n1}, >1 m: {n2}; receivers changed between step 1 and 2: {chg}");
+        for &c in idx.iter().take(8) {
+            println!("   cell {c}: z_in {:.3} z1 {:.3} z2 {:.3} U {:.3e} rec1 {} rec2 {} A2 {:.3e}", zf[c], z1[c], z[c], uf[c], rec1[c], rec2[c], a2[c]);
+        }
+        let _ = rec1;
+        // The chain of the worst cell downstream, with what each cell would do.
+        let mut c = idx[0];
+        let (filled_in, order_in) = priority_flood(&lat, &zf);
+        let (rin, _) = receivers(&lat, &filled_in, &order_in, &p0);
+        let ain = accumulate(&lat, &zf, &order_in, &rin);
+        for k in 0..40 {
+            let r = rec2[c];
+            let zr = if r == NONE { f32::NAN } else { z1[r as usize] };
+            let km = f64::from(ERODIBILITY) * ain[c].powf(0.45);
+            println!(
+                "   chain {k}: cell {c} z_in {:.2} z1 {:.2} z2 {:.2} U {:.2e} A_in {:.2e} KA^m {:.3e} rec_in {} rec2 {} slope_in {:.5} U/(KA^m) {:.5}",
+                zf[c], z1[c], z[c], uf[c], ain[c], km, rin[c], r, if rin[c] == NONE { f64::NAN } else { (f64::from(zf[c]) - f64::from(zf[rin[c] as usize]).max(0.0)) / 4900.0 }, f64::from(uf[c]) / km
+            );
+            let _ = zr;
+            if r == NONE || z1[c] <= 0.0 {
+                break;
+            }
+            c = r as usize;
+        }
+    }
+
+    for (name, cap, floor) in [("cap3e7", 3.0e7, 0.5), ("cap5e7", 5.0e7, 0.5), ("cap1e8", 1.0e8, 0.5), ("cap1e9", 1.0e9, 0.5), ("cap1e10", 1.0e10, 0.5), ("floor0", f64::INFINITY, 1.0e-4), ("cap1e9+floor0", 1.0e9, 1.0e-4)] {
+        if want(name) {
+            let pc = CoupledParams { area_cap_m2: cap, min_height_m: floor, ..p };
+            let u = stationary_uplift(&lat, &z0, &ero, &pc, UPLIFT_RHO);
+            run_bands(&format!("fix {name}"), &lat, &z0, &pc, steps, u);
+        }
+    }
+
+    if want("d8") {
+        let p0 = CoupledParams { jitter: 0.0, ..p };
+        let u = stationary_uplift(&lat, &z0, &ero, &p0, UPLIFT_RHO);
+        run_bands("H2: jitter 0 (plain D8)", &lat, &z0, &p0, steps, u);
+    }
+
+    if want("trace") {
+        // One high cell: its z, area, receiver and slope per step.
+        let c = (0..z0.len()).filter(|&c| z0[c] > 5000.0).nth(200).or_else(|| (0..z0.len()).find(|&c| z0[c] > 2500.0)).unwrap_or(0);
+        let input = CoupledInput { z: z0.clone(), uplift: u0.clone(), erodibility: ero.clone() };
+        let mut z = z0.clone();
+        println!("trace cell {c}: z0 {:.1} U {:.3e}", z0[c], u0[c]);
+        for n in 1..=10 {
+            let (rec, a, _) = step(&lat, &input, &mut z, &p);
+            let r = rec[c];
+            let (zr, zrr) = if r == NONE { (f32::NAN, f32::NAN) } else { (z[r as usize], z0[r as usize]) };
+            println!("  step {n}: z {:.1} A {:.3e} rec {r} z_rec {zr:.1} (input z_rec {zrr:.1})", z[c], a[c]);
+        }
+    }
+
+    if want("sameu") {
+        // H3: the uplift recomputed from the state after step 1 (is the stationary property stable under one step's receiver change?).
+        let input = CoupledInput { z: z0.clone(), uplift: u0.clone(), erodibility: ero.clone() };
+        let mut z = z0.clone();
+        let _ = step(&lat, &input, &mut z, &p);
+        let u1 = stationary_uplift(&lat, &z, &ero, &p, UPLIFT_RHO);
+        let (mut ratios, mut n) = (Vec::new(), 0usize);
+        for c in 0..z0.len() {
+            if z0[c] > 1000.0 && u0[c] > 0.0 && u1[c] > 0.0 {
+                ratios.push(u1[c] / u0[c]);
+                n += 1;
+            }
+        }
+        println!("H3: U after step 1 over U before, cells above 1000 m ({n}): p10/50/90 {:.2} {:.2} {:.2}", pct(&mut ratios, 0.1), pct(&mut ratios, 0.5), pct(&mut ratios, 0.9));
+        let (rec0, _) = {
+            let (f, o) = priority_flood(&lat, &z0);
+            receivers(&lat, &f, &o, &p)
+        };
+        let (rec1, _) = {
+            let (f, o) = priority_flood(&lat, &z);
+            receivers(&lat, &f, &o, &p)
+        };
+        let changed = (0..z0.len()).filter(|&c| z0[c] > 0.0 && rec0[c] != rec1[c]).count();
+        println!("   receivers changed by step 1: {changed} of {land} land cells ({:.1} %)", 100.0 * changed as f64 / land as f64);
+        let a0 = {
+            let (f, o) = priority_flood(&lat, &z0);
+            let (r, _) = receivers(&lat, &f, &o, &p);
+            accumulate(&lat, &z0, &o, &r)
+        };
+        let a1 = {
+            let (f, o) = priority_flood(&lat, &z);
+            let (r, _) = receivers(&lat, &f, &o, &p);
+            accumulate(&lat, &z, &o, &r)
+        };
+        let mut ar: Vec<f32> = (0..z0.len()).filter(|&c| z0[c] > 1000.0).map(|c| (a1[c] / a0[c]) as f32).collect();
+        println!("   A after / A before, cells above 1000 m: p10/50/90 {:.2} {:.2} {:.2}", pct(&mut ar, 0.1), pct(&mut ar, 0.5), pct(&mut ar, 0.9));
+        let _ = order;
+    }
+    Ok(())
+}

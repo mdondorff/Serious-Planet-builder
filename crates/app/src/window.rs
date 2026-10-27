@@ -741,7 +741,8 @@ impl App<'_> {
                 // The stale chunks wait while the tiles of an edit are still being built (STRM-056), at most the cap.
                 self.world
                     .hold_stale_chunks(!st.rig.managed.pending().is_empty() || st.rig.managed.manager().streamer().unfinished_jobs() > 0);
-                let update = self.world.chunk_frame(&tiles, camera.position, &[]);
+                let ahead = crate::chunkstage::chunk_prefetch(st.rig.managed.travel(), camera.position, self.world.radius_m());
+                let update = self.world.chunk_frame(&tiles, camera.position, &ahead);
                 st.rig.managed.chunk_landed(&update.landed);
                 st.chunk_acc.0 += update.landed.len() as u64;
                 st.chunk_acc.1 += frame.counts.chunk.chunk_nodes as u64;

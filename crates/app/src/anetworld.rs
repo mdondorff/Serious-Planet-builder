@@ -114,8 +114,8 @@ pub fn cells_per_chunk_for(radius_m: f64, cell_m: f64) -> u32 {
 }
 
 /// The pool and the knobs of the viewer's chunk stage for generation workers `gen` (STRM-046, M8-7): half the generation workers, at most
-/// [`planet_streaming::chunks::VIEW_CHUNK_WORKERS`] (the 4 chunks a low view wants; more would oversubscribe: each chunk job reads its base heights on up to 4
-/// threads, ADR 0083), at the generation workers' priority, one pool for the chunk jobs and the horizon jobs. The window and the headless scenes take it
+/// [`planet_streaming::chunks::VIEW_CHUNK_WORKERS`] (the chunks an edit of the view re-solves in one round; more would oversubscribe: each chunk job reads its
+/// base heights on [`planet_streaming::chunks::VIEW_BASE_THREADS`] threads, ADR 0083), at the generation workers' priority, one pool for the chunk jobs and the horizon jobs. The window and the headless scenes take it
 /// from here.
 pub fn viewer_chunk_stage(gen: planet_streaming::GenWorkers) -> (Arc<dyn Spawner>, ChunkConfig) {
     let workers = (gen.workers / 2).clamp(1, planet_streaming::chunks::VIEW_CHUNK_WORKERS);
@@ -304,6 +304,8 @@ impl WorldTerrain {
         horizon: bool,
         use_disk: bool,
     ) -> Result<bool, String> {
+        // The viewer's batch of base heights per chunk job (a measurement that set it before keeps its value).
+        self.default_base_threads(planet_streaming::chunks::VIEW_BASE_THREADS);
         if !self.enable_anet_from_store_with(ANET_CELL_M, spawner.clone(), clock.clone(), cfg, use_disk)? {
             return Ok(false);
         }
@@ -717,11 +719,11 @@ mod tests {
 
     // spec: STRM-046
     #[test]
-    fn the_viewers_chunk_stage_takes_half_the_generation_workers_at_most_four_and_one_shared_pool() {
+    fn the_viewers_chunk_stage_takes_half_the_generation_workers_at_most_six_and_one_shared_pool() {
         let sized = |n: usize| viewer_chunk_stage(planet_streaming::GenWorkers::new(n)).1.workers;
-        assert_eq!((sized(18), sized(8), sized(6), sized(3), sized(2), sized(1)), (4, 4, 3, 1, 1, 1));
+        assert_eq!((sized(18), sized(8), sized(6), sized(3), sized(2), sized(1)), (6, 4, 3, 1, 1, 1));
         // The knobs besides the workers are the defaults of the chunk manager.
         let (_, cfg) = viewer_chunk_stage(planet_streaming::GenWorkers::new(18));
-        assert_eq!(cfg, ChunkConfig { workers: 4, ..Default::default() });
+        assert_eq!(cfg, ChunkConfig { workers: 6, ..Default::default() });
     }
 }

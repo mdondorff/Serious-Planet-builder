@@ -268,9 +268,10 @@ fn stage_json(stage: Option<StageFacts>) -> String {
     match stage {
         None => "null".to_string(),
         Some(f) => format!(
-            "{{\"chunks_landed\": {}, \"horizon_maps_landed\": {}, \"median_wait_s\": {}, \"max_wait_s\": {}, \"chunk_jobs_at_end\": {}, \"horizon_jobs_at_end\": {}}}",
+            "{{\"chunks_landed\": {}, \"horizon_maps_landed\": {}, \"prefetch_asked\": {}, \"median_wait_s\": {}, \"max_wait_s\": {}, \"chunk_jobs_at_end\": {}, \"horizon_jobs_at_end\": {}}}",
             f.trace.chunks_landed,
             f.trace.horizon_maps_landed,
+            f.trace.prefetch_asked,
             number(f.trace.median_wait_s),
             number(f.trace.max_wait_s),
             f.chunk_jobs_at_end,
@@ -779,7 +780,13 @@ mod tests {
     #[test]
     fn the_log_gives_what_the_chunk_stage_did_per_trial_and_the_horizon_off_comparison() {
         let stage = StageFacts {
-            trace: crate::chunkstage::TraceSummary { chunks_landed: 12, horizon_maps_landed: 9, median_wait_s: 2.5, max_wait_s: 6.0 },
+            trace: crate::chunkstage::TraceSummary {
+                chunks_landed: 12,
+                horizon_maps_landed: 9,
+                prefetch_asked: 0,
+                median_wait_s: 2.5,
+                max_wait_s: 6.0,
+            },
             chunk_jobs_at_end: 3,
             horizon_jobs_at_end: 1,
         };

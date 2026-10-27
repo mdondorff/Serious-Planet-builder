@@ -5,7 +5,7 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 ## Waiting for the owner
 - **D3 confirmed (owner, 2026-10-26):** both orders are wanted eventually; M8-7 builds edits under the erosion first (option 2: the edit shows at once, its eroded result follows within 10 s); edits on top (finishing touches) stay a per-layer setting for later. Cost per stamp or brush stroke is M8-7's first measurement.
 - **M8 GO:** decisions D1 to D7 taken (owner, 2026-10-23; `docs/briefings/m8-plan.md`); everything up to M8-6 is independent of D3; the lanes start on the owner's GO.
-- **ADR 0080: held until SPIKE-45 (owner, 2026-10-26):** point 4 (the run without erosion: input plus fill) waits for the cause of step 1 raising 4.24M land cells by over 1 m; then accept as written, or turn erosion on in M8 with a fix. ADR 0082 and 0083 accepted (owner, 2026-10-26); 0083's share table is a spec to write.
+- **ADR 0080: acceptance** (SPIKE-45 closed, #783): the step-1 rise is an instability of the fixed uplift on a changing network, not a bug; an area cap holds relief only by making erosion nearly area-independent (about erosion off). Planner recommends accepting point 4 as written; the real fix (uplift not tied to the old network) is M9. ADR 0082 and 0083 accepted (owner, 2026-10-26); 0083's share table is a spec to write.
 - **Optional, when convenient:** the M6 retest list (`docs/archive/M6/briefings/m6-owner-test-plan.md`, "Retest"); a live check of the flickers (Tracked).
 - **At the laptop (postponed):** the NVIDIA driver update (591.86; device losses under parallel GPU load, Tracked); excluding the repo's `target` folders from Windows Search indexing.
 
