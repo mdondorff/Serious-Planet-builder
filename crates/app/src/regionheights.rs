@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use planet_core::hash::mix64;
 use planet_core::Vec3;
 use planet_world_def::footprint::EditReach;
-use planet_world_def::WorldDefinition;
+use planet_world_def::{ChangedItem, WorldDefinition};
 
 /// The batches kept at most (one per chunk region): a view wants 4 to 9 chunks and the edit's ring a few more.
 pub const MAX_BATCHES: usize = 24;
@@ -45,10 +45,22 @@ pub fn batch_key(dirs: &[Vec3]) -> (u64, u64) {
 }
 
 /// The indices of the directions that an item change can reach: the ones within `reach_m` of the place of any change (widened as every reach test is,
-/// `EditReach::within_angle`, so a direction exactly at the edge counts). Everything else is unchanged by the edit.
-pub fn stale_points(dirs: &[Vec3], changes: &[(Vec3, f64)], radius_m: f64) -> Vec<usize> {
-    let reaches: Vec<EditReach<'_>> = changes.iter().map(|&(dir, reach_m)| EditReach { dir, reach_m, strokes: None }).collect();
-    dirs.iter().enumerate().filter(|(_, d)| reaches.iter().any(|r| r.within_angle(**d, 0.0, radius_m))).map(|(i, _)| i).collect()
+/// `EditReach::within_angle`, so a direction exactly at the edge counts) and, for a brush, within the radius of one of its strokes (WDEF-007: the
+/// strokes bound what the brush changes inside its reach disc, and a stroke changes no bit of a point beyond its radius, GEN-030). Everything else is
+/// unchanged by the edit.
+pub fn stale_points(dirs: &[Vec3], changes: &[ChangedItem], radius_m: f64) -> Vec<usize> {
+    use planet_world_def::footprint::{strokes_touch, Cap};
+    dirs.iter()
+        .enumerate()
+        .filter(|(_, d)| {
+            changes.iter().any(|c| {
+                let reach = EditReach { dir: c.dir, reach_m: c.reach_m, strokes: None };
+                reach.within_angle(**d, 0.0, radius_m)
+                    && (c.strokes.is_empty() || strokes_touch(Cap { centre: **d, angle: 0.0 }, &c.strokes, radius_m))
+            })
+        })
+        .map(|(i, _)| i)
+        .collect()
 }
 
 struct Entry {
@@ -100,6 +112,10 @@ mod tests {
 
     const R: f64 = 6_371_000.0;
 
+    fn changed(dir: Vec3, reach_m: f64) -> ChangedItem {
+        ChangedItem { dir, reach_m, strokes: Vec::new() }
+    }
+
     fn at(angle: f64) -> Vec3 {
         Vec3::new(libm::cos(angle), libm::sin(angle), 0.0)
     }
@@ -111,7 +127,7 @@ mod tests {
         let reach_m = 3_000.0;
         let edge = reach_m / R;
         let dirs = [at(0.0), at(edge), at(edge * 0.5), at(edge * 1.5), at(-edge), at(edge * 3.0)];
-        let stale = stale_points(&dirs, &[(item, reach_m)], R);
+        let stale = stale_points(&dirs, &[changed(item, reach_m)], R);
         assert!(stale.contains(&0) && stale.contains(&2), "inside: {stale:?}");
         assert!(stale.contains(&1) && stale.contains(&4), "exactly at the edge, on both sides: {stale:?}");
         assert!(!stale.contains(&5), "three reaches away: {stale:?}");
@@ -123,7 +139,7 @@ mod tests {
         let reach_m = 40_000.0;
         let (old, new) = (at(0.0), at(0.01));
         let dirs = [at(0.0), at(0.01), at(0.005), at(0.05)];
-        let stale = stale_points(&dirs, &[(new, reach_m), (old, reach_m)], R);
+        let stale = stale_points(&dirs, &[changed(new, reach_m), changed(old, reach_m)], R);
         assert!(stale.contains(&0) && stale.contains(&1) && stale.contains(&2), "{stale:?}");
         assert!(!stale.contains(&3), "{stale:?}");
         assert!(stale_points(&dirs, &[], R).is_empty(), "no change, nothing stale");
@@ -143,6 +159,49 @@ mod tests {
         assert_eq!(cache.len(), MAX_BATCHES);
         assert!(cache.get((5, 5)).is_some(), "the batch read after it was put survived");
         assert!(cache.get((0, 0)).is_none() && cache.get((1, 1)).is_none(), "the unread old batches went first");
+    }
+
+    // spec: GEN-087
+    #[test]
+    fn a_brush_makes_stale_the_points_near_its_stroke_not_the_whole_disc_that_holds_it() {
+        use planet_world_def::stamp::{BrushKind, Stamp, StampKind, Stroke};
+        let radius_m = 400.0;
+        // A stroke of 9 points 100 m apart, running along the equator; the reach holds the stroke and its radius.
+        let step = 100.0 / R;
+        let points: Vec<Vec3> = (0..9).map(|k| at(k as f64 * step)).collect();
+        let stamp = Stamp::new(StampKind::Brush, [0.0; 3]).with_strokes(&[Stroke {
+            kind: BrushKind::Raise,
+            radius_m,
+            strength_m: 20.0,
+            target_m: None,
+            points: points.clone(),
+        }]);
+        let reach_m = 800.0 + radius_m + 2.0;
+        let brush = ChangedItem { dir: points[0], reach_m, strokes: stamp.strokes().to_vec() };
+        let disc = ChangedItem { dir: points[0], reach_m, strokes: Vec::new() };
+        // A grid round the stroke, 50 m apart, 1.6 km either side.
+        let dirs: Vec<Vec3> = (-32..=64)
+            .flat_map(|i| {
+                (-32..=32).map(move |j| {
+                    let (along, across) = (f64::from(i) * 50.0 / R, f64::from(j) * 50.0 / R);
+                    (at(along) + Vec3::new(0.0, 0.0, 1.0) * across).normalized()
+                })
+            })
+            .collect();
+        let by_disc = stale_points(&dirs, &[disc], R);
+        let by_stroke = stale_points(&dirs, &[brush], R);
+        assert!(
+            by_stroke.len() < by_disc.len() / 2,
+            "the stroke's capsule is much less than its disc: {} of {}",
+            by_stroke.len(),
+            by_disc.len()
+        );
+        assert!(by_stroke.iter().all(|i| by_disc.contains(i)), "the stroke test only narrows the disc");
+        // Every point within the stroke's radius of a point of the stroke is stale (a point of the polyline is on it: the capsule holds its discs).
+        for (n, d) in dirs.iter().enumerate() {
+            let near = points.iter().any(|p| R * p.angle_to(*d) < radius_m * 0.99);
+            assert!(!near || by_stroke.contains(&n), "point {n} within the radius of a stroke point is stale");
+        }
     }
 
     // spec: GEN-087

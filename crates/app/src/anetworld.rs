@@ -86,7 +86,7 @@ impl BaseDetail for WorldBase {
         let key = crate::regionheights::batch_key(dirs);
         let reused =
             self.regions.get(key).filter(|(old, heights)| heights.len() == dirs.len() && def.same_but_items(old)).map(|(old, heights)| {
-                let stale = crate::regionheights::stale_points(dirs, &def.item_changes_from(&old), world.radius_m());
+                let stale = crate::regionheights::stale_points(dirs, &def.changed_items_from(&old), world.radius_m());
                 (heights, stale)
             });
         let heights = match reused {

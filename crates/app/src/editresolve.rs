@@ -189,17 +189,15 @@ pub fn edit_resolve(o: &crate::Options, out: &mut dyn Write) -> Result<(), Strin
             let id = (n * radii.len() + k + 1) as u128;
             let before: Vec<Option<u64>> = keys.iter().map(|&k| manager.result_hash(k)).collect();
             let mut def = (*world.definition()).clone();
-            let item = ItemSpec {
-                id,
-                layer: "stamps".into(),
-                priority: 0,
-                dir: site,
-                content_hash: 0,
-                reach_m: r,
-                max_delta_m: 60.0,
-                stamp: None,
-            }
-            .with_stamp(Stamp::new(StampKind::Hill, [30.0, 0.0, 0.0]));
+            let item = if o.brush {
+                // The edit-latency brush case: the stroke is centred on the case's own place (`--site 20,30`).
+                let (mut item, _) = crate::editperf::case_brush(r, world.radius_m());
+                item.id = id;
+                item
+            } else {
+                ItemSpec { id, layer: "stamps".into(), priority: 0, dir: site, content_hash: 0, reach_m: r, max_delta_m: 60.0, stamp: None }
+                    .with_stamp(Stamp::new(StampKind::Hill, [30.0, 0.0, 0.0]))
+            };
             def.put_item_spec(BodyId::PLANET, item).map_err(|e| format!("{e:?}"))?;
             world.set_definition(Arc::new(def.clone()))?;
             let s = settle(&world, &tiles, camera, centre)?;
@@ -208,7 +206,8 @@ pub fn edit_resolve(o: &crate::Options, out: &mut dyn Write) -> Result<(), Strin
             let changed = keys.iter().zip(&before).filter(|(k, b)| manager.result_hash(**k) != **b).count();
             writeln!(
                 out,
-                "  hill reach {r} m: {} of {wanted} wanted chunks re-solved, {changed} of them with other bits than before; the centre chunk landed after {}, the last after {:.1} s{}",
+                "  {} reach {r} m: {} of {wanted} wanted chunks re-solved, {changed} of them with other bits than before; the centre chunk landed after {}, the last after {:.1} s{}",
+                if o.brush { "brush" } else { "hill" },
                 s.landed,
                 fmt_opt(s.centre),
                 secs(s.total),

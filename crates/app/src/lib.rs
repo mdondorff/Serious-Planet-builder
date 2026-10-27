@@ -154,6 +154,9 @@ pub struct Options {
     pub edit_resolve: Option<PathBuf>,
     /// `--radii-m`: the reaches of the hills the measurement puts, in metres separated by commas.
     pub radii_m: Option<String>,
+    /// `--brush`: the `--edit-resolve` measurement puts the brush case of the edit-latency scene (a raise stroke running east, TEST-042) of each radius
+    /// instead of a hill.
+    pub brush: bool,
     /// `--altitudes-m`: cameras at these altitudes (metres separated by commas) in the `--edit-resolve` measurement; none: the low camera.
     pub altitudes_m: Option<String>,
     /// `--stale-workers N`: the chunk workers that may serve stale chunks in the `--edit-resolve` measurement (default: every worker).
@@ -340,6 +343,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         coarse_horizon: None,
         edit_resolve: None,
         radii_m: None,
+        brush: false,
         altitudes_m: None,
         stale_workers: None,
         base_threads: None,
@@ -518,6 +522,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
                     Some(it.next().ok_or("--chunk-workers needs a number")?.parse().map_err(|e| format!("--chunk-workers: {e}"))?)
             }
             "--altitudes-m" => o.altitudes_m = Some(it.next().ok_or("--altitudes-m needs metres separated by commas")?.clone()),
+            "--brush" => o.brush = true,
             "--radii-m" => o.radii_m = Some(it.next().ok_or("--radii-m needs metres separated by commas")?.clone()),
             "--coarse-horizon" => o.coarse_horizon = Some(PathBuf::from(it.next().ok_or("--coarse-horizon needs a store directory")?)),
             "--remake-into" => {
@@ -601,7 +606,8 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
 use planet_cache::tiles::MAX_REGION_LEVEL;
 
 /// Options that only the tile store commands of `generate` understand.
-pub(crate) const STORE_OPTIONS: [&str; 23] = [
+pub(crate) const STORE_OPTIONS: [&str; 24] = [
+    "--brush",
     "--horizon-threads",
     "--base-threads",
     "--stale-workers",
