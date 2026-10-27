@@ -142,3 +142,34 @@ fn the_concurrency_a_load_ran_under_is_the_number_of_loads_inside_the_source_whe
     assert!(samples.iter().all(|j| j.done && (1..=4).contains(&j.running)), "{samples:?}");
     assert_eq!(samples.iter().map(|j| j.running).max(), Some(4), "the last to arrive found the other three inside: {samples:?}");
 }
+
+// spec: STRM-022
+#[test]
+fn a_sample_names_its_tile_and_the_end_instants_never_go_back_on_the_logs_own_clock() {
+    let spawner = Arc::new(ManualSpawner::default());
+    let mut s = Streamer::new(
+        Arc::new(Plain),
+        spawner.clone() as Arc<dyn Spawner>,
+        Arc::new(FakeClock::default()),
+        StreamConfig { max_in_flight: 4, capacity: 1000, record_dispatches: true, ..Default::default() },
+    );
+    s.load_roots_blocking().unwrap();
+    let log = s.job_log();
+    let before = log.now_us();
+    s.set_draw(&[(tile(3, 0), 0.0), (tile(3, 1), 1.0), (tile(3, 2), 2.0)]);
+    for _ in 0..20 {
+        s.step();
+        spawner.run(1);
+    }
+    s.step();
+    let after = log.now_us();
+    let samples = log.since(0);
+    assert!(samples.len() >= 3, "{samples:?}");
+    let mut dispatched = s.dispatch_log.clone();
+    dispatched.sort_unstable();
+    let mut logged: Vec<TileId> = samples.iter().map(|j| j.tile).collect();
+    logged.sort_unstable();
+    assert_eq!(logged, dispatched, "each sample names the tile its job loaded");
+    assert!(samples.windows(2).all(|w| w[0].ended_us <= w[1].ended_us), "the log is in the order the jobs ended: {samples:?}");
+    assert!(samples.iter().all(|j| j.ended_us >= before && j.ended_us <= after), "the end instants lie on the log's clock: {samples:?}");
+}

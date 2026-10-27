@@ -1,0 +1,1 @@
+- 2026-10-27 **windows 16 to 21** (M8 criterion 6): the refresh tail is the four level-3 ancestor tiles (120 to 510 ms, base field at coarse levels; no lock waits). The edit-latency M6 column of the chunk scene now reads ADR 0072's drawn tiles (53 to 758 ms, 1 of 13 gated rows over), not every named tile (347 to 1169 ms): windows before 21 are on the old reading, do not compare.

@@ -93,6 +93,10 @@ pub struct JobSample {
     pub queue_ms: u64,
     /// The job rebuilds a resident tile that was stale (a refresh, STRM-026), not a tile that was missing.
     pub refresh: bool,
+    /// The tile of the job.
+    pub tile: TileId,
+    /// Microseconds from the log's creation to the job's end.
+    pub ended_us: u64,
 }
 
 /// The refresh jobs among `samples` in words (STRM-055): how many, and the median, 90th percentile and largest of the wait in the streamer's queue,
@@ -130,13 +134,24 @@ pub fn refresh_summary(samples: &[JobSample]) -> Option<String> {
 const MAX_JOB_SAMPLES: usize = 1 << 20;
 
 /// The jobs that ran, in the order they ended, and how many run now (STRM-022): recorded only.
-#[derive(Default)]
 pub struct JobLog {
     running: std::sync::atomic::AtomicU32,
     samples: Mutex<Vec<JobSample>>,
+    born: std::time::Instant,
+}
+
+impl Default for JobLog {
+    fn default() -> Self {
+        Self { running: Default::default(), samples: Default::default(), born: std::time::Instant::now() }
+    }
 }
 
 impl JobLog {
+    /// Microseconds since the log was made: the clock of `JobSample::ended_us`.
+    pub fn now_us(&self) -> u64 {
+        u64::try_from(self.born.elapsed().as_micros()).unwrap_or(u64::MAX)
+    }
+
     /// Jobs recorded so far.
     pub fn len(&self) -> usize {
         self.samples.lock().expect("job log").len()
@@ -154,6 +169,7 @@ impl JobLog {
     /// Run `load`, recording its duration, how long the job waited since `queued` and how many loads ran beside it.
     fn timed<R>(
         &self,
+        tile: TileId,
         level: u8,
         (queue_ms, refresh): (u64, bool),
         queued: std::time::Instant,
@@ -166,7 +182,8 @@ impl JobLog {
         let run_us = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
         self.running.fetch_sub(1, Ordering::SeqCst);
         let wait_us = u64::try_from(started.saturating_duration_since(queued).as_micros()).unwrap_or(u64::MAX);
-        let sample = JobSample { wait_us, run_us, running, done: done(&out), level, queue_ms, refresh };
+        let ended_us = u64::try_from(self.born.elapsed().as_micros()).unwrap_or(u64::MAX);
+        let sample = JobSample { wait_us, run_us, running, done: done(&out), level, queue_ms, refresh, tile, ended_us };
         let mut samples = self.samples.lock().expect("job log");
         if samples.len() < MAX_JOB_SAMPLES {
             samples.push(sample);
@@ -1620,6 +1637,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
                 }
                 // A panicking source must not wedge the tile: it becomes a failure with the usual retry delay.
                 let loaded = log.timed(
+                    tile,
                     tile.level(),
                     (queue_ms, refresh),
                     queued,

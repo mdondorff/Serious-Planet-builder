@@ -151,3 +151,10 @@ Scope: `chunkfield` stage bound (`bound_m` 300 m), `ChunkField::height_bounds`, 
 - A tile costs 2 to 3 ms with the chunk layer and 2 ms without (`tile_cost_report`): the 340 to 1100 ms of an edit's tile refresh is not the tile build.
 - Tool: `PLANET_ANET_STORE=DIR PLANET_ANET_RES=N PLANET_ANET_CHUNKS=48 cargo test -p planet --release --lib anet_change_report -- --ignored --nocapture` (read only, about 7 min).
 - Obsolete when the stage states an asymmetric bound or the sample grows past 200 chunks and changes the maximum.
+
+## 2026-10-27 The tail of an edit's tile refresh is four level-3 tiles, and the chunk scene's M6 column had been reading all of them
+Scope: `edit-latency` with a chunk stage (TEST-056), the M6 and M8 criterion 6 comparisons; `app::editperf`, `app::globalperf` `tile_cost_report`.
+- Corrects the line above ("a tile costs 2 to 3 ms"): that was height only at 32 cells, levels 15 to 9. On the mesh path of a real tile job (64 cells) with / without the chunk layer: level 15 12 / 12 ms, 9 20 / 21, 7 40 / 36, 5 56 / 59, 4 103 / 59, 3 96 / 64. The coarse cost is the base field's; under 18 parallel loads a level-3 tile takes 120 to 510 ms.
+- Every edit names the four level-3 ancestors (6,5), (6,6), (7,5), (7,6) of face 0 (resident only, "change below spacing"); they end last, one at a time. Lock waits are not the cause (windows 18, named: all under 55 ms in all per case).
+- The chunk scene set `drawn exact = uploaded` (every named tile), so those four gated the M6 column (windows 13 to 20: 7 of 13 gated rows over). Window 21 reads ADR 0072 point 1 (the named tiles the plan draws, from the job log): 53 to 758 ms, 1 row over (the preview column). Numbers before window 21 are on the old reading.
+- Obsolete when a coarse tile's refresh is deferred to a lower class or its build gets cheaper.
