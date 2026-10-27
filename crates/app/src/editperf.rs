@@ -324,10 +324,8 @@ pub struct CaseRun {
     pub levels: Vec<LevelRow>,
     /// The first frames after the edit: (ms from set_definition, frame ms, tiles refreshed, jobs in flight, tiles waiting for an upload).
     pub trace: Vec<[f64; 5]>,
-    /// The refresh jobs of the case that ended last, by tile (queued behind the streamer, waited for a worker, ran, ended at, jobs beside it), and the
-    /// lock waits of the case in words.
+    /// The refresh jobs of the case that ended last, by tile (queued behind the streamer, waited for a worker, ran, ended at, jobs beside it).
     pub stragglers: Vec<String>,
-    pub locks: Vec<String>,
 }
 
 /// The tiles the edit named at one level (the refreshed set's breakdown, M6 plan E1).
@@ -748,7 +746,6 @@ fn run_once(
     let sampler_started = Instant::now();
     let job_log = h.rig.managed.manager().streamer().job_log();
     let (jobs_before, t0_us) = (job_log.len(), job_log.now_us());
-    let _ = planet_core::lockprobe::take();
     let ms = |t: Instant| t.elapsed().as_secs_f64() * 1000.0;
     // The edit as the editor does it: swap the definition, name the edited tiles, set the preview.
     let call = Instant::now();
@@ -869,7 +866,6 @@ fn run_once(
             )
         })
         .collect();
-    out.locks = planet_core::lockprobe::take();
     // Of the tiles the edit named (a drawn tile it did not name refreshes only when a chunk lands: the chunk table below).
     let named: HashSet<TileId> = tiles.iter().copied().collect();
     let drawn: HashSet<TileId> = drawn_before.union(&drawn_shown).copied().filter(|t| named.contains(t)).collect();
@@ -1278,9 +1274,6 @@ pub fn trace_table(rows: &[CaseRow]) -> String {
             for j in &run.stragglers {
                 s += &format!("- {j}\n");
             }
-        }
-        for l in &run.locks {
-            s += &format!("- lock: {l}\n");
         }
         s.push('\n');
     }

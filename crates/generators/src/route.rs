@@ -79,13 +79,13 @@ impl RouteMemo {
                 law.smooth_max_m.to_bits(),
             ],
         );
-        let mut current = planet_core::lockprobe::lock(&self.law_key, planet_core::lockprobe::Site::RouteMemo);
+        let mut current = self.law_key.lock().expect("memo");
         if *current != Some(key) {
             *current = Some(key);
-            planet_core::lockprobe::lock(&self.nodes, planet_core::lockprobe::Site::RouteMemo).clear();
-            planet_core::lockprobe::lock(&self.reliefs, planet_core::lockprobe::Site::RouteMemo).clear();
-            planet_core::lockprobe::lock(&self.lines, planet_core::lockprobe::Site::RouteMemo).clear();
-            planet_core::lockprobe::lock(&self.raw, planet_core::lockprobe::Site::RouteMemo).clear();
+            self.nodes.lock().expect("memo").clear();
+            self.reliefs.lock().expect("memo").clear();
+            self.lines.lock().expect("memo").clear();
+            self.raw.lock().expect("memo").clear();
         }
     }
 
@@ -96,12 +96,12 @@ impl RouteMemo {
 
     /// The segments the memo holds a routed polyline for.
     pub fn routed_segments(&self) -> usize {
-        planet_core::lockprobe::lock(&self.raw, planet_core::lockprobe::Site::RouteMemo).len()
+        self.raw.lock().expect("memo").len()
     }
 
     /// The points the memo of raster heights holds.
     pub fn raster_heights_held(&self) -> usize {
-        planet_core::lockprobe::lock(&self.heights, planet_core::lockprobe::Site::RouteMemo).len()
+        self.heights.lock().expect("memo").len()
     }
 }
 
@@ -145,7 +145,7 @@ impl<'a> Router<'a> {
         let mut miss: Vec<usize> = Vec::new();
         let mut counts = [0u64; 3];
         {
-            let held = planet_core::lockprobe::lock(&self.memo.heights, planet_core::lockprobe::Site::RouteMemo);
+            let held = self.memo.heights.lock().expect("memo");
             for (k, &(i, j)) in points.iter().enumerate() {
                 let inside = self.known.and_then(|(region, heights)| {
                     if i < 0 || j < 0 || i >= n || j >= n {
@@ -167,7 +167,7 @@ impl<'a> Router<'a> {
         if !miss.is_empty() {
             let dirs: Vec<Vec3> = miss.iter().map(|&k| self.lat.direction_ext(face, points[k].0, points[k].1)).collect();
             let h = crate::anet::timed_base_heights(self.base, &dirs);
-            let mut held = planet_core::lockprobe::lock(&self.memo.heights, planet_core::lockprobe::Site::RouteMemo);
+            let mut held = self.memo.heights.lock().expect("memo");
             let cap = self.memo.height_cap.unwrap_or(MEMO_HEIGHTS);
             if held.len() + miss.len() > cap {
                 held.clear();
@@ -204,7 +204,7 @@ impl<'a> Router<'a> {
 
     /// The relief factor round the coarse cell `c`: the base at its centre and the eight round it.
     pub fn relief_factor(&self, c: usize) -> f64 {
-        if let Some(&r) = planet_core::lockprobe::lock(&self.memo.reliefs, planet_core::lockprobe::Site::RouteMemo).get(&c) {
+        if let Some(&r) = self.memo.reliefs.lock().expect("memo").get(&c) {
             return r;
         }
         let coarse = self.run.lattice();
@@ -213,13 +213,13 @@ impl<'a> Router<'a> {
         let h = crate::anet::timed_base_heights(self.base, &ring);
         let (lo, hi) = h.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, u), &x| (l.min(x), u.max(x)));
         let rf = self.law.relief_factor(hi - lo);
-        planet_core::lockprobe::lock(&self.memo.reliefs, planet_core::lockprobe::Site::RouteMemo).insert(c, rf);
+        self.memo.reliefs.lock().expect("memo").insert(c, rf);
         rf
     }
 
     /// The direction of the node of coarse cell `c` (see the module comment).
     pub fn node(&self, c: usize) -> Vec3 {
-        if let Some(&d) = planet_core::lockprobe::lock(&self.memo.nodes, planet_core::lockprobe::Site::RouteMemo).get(&c) {
+        if let Some(&d) = self.memo.nodes.lock().expect("memo").get(&c) {
             return d;
         }
         let centre = self.run.lattice().direction(c);
@@ -240,7 +240,7 @@ impl<'a> Router<'a> {
                 centre
             }
         };
-        planet_core::lockprobe::lock(&self.memo.nodes, planet_core::lockprobe::Site::RouteMemo).insert(c, d);
+        self.memo.nodes.lock().expect("memo").insert(c, d);
         d
     }
 
@@ -295,7 +295,7 @@ impl<'a> Router<'a> {
         if self.law.smooth_m <= 0.0 || !self.enabled() {
             return self.raw_polyline(from, to);
         }
-        if let Some(l) = planet_core::lockprobe::lock(&self.memo.lines, planet_core::lockprobe::Site::RouteMemo).get(&(from, to)) {
+        if let Some(l) = self.memo.lines.lock().expect("memo").get(&(from, to)) {
             return Arc::clone(l);
         }
         let own = self.raw_polyline(from, to);
@@ -310,7 +310,7 @@ impl<'a> Router<'a> {
             self.law.smooth_m,
             self.law.smooth_max_m,
         ));
-        let mut lines = planet_core::lockprobe::lock(&self.memo.lines, planet_core::lockprobe::Site::RouteMemo);
+        let mut lines = self.memo.lines.lock().expect("memo");
         if lines.len() >= MEMO_SEGMENTS {
             lines.clear();
         }
@@ -320,7 +320,7 @@ impl<'a> Router<'a> {
 
     /// The routed polyline of the coarse segment `from` to `to` before smoothing: the first point is the node of `from`, the last the node of `to`.
     pub fn raw_polyline(&self, from: usize, to: usize) -> Polyline {
-        if let Some(l) = planet_core::lockprobe::lock(&self.memo.raw, planet_core::lockprobe::Site::RouteMemo).get(&(from, to)) {
+        if let Some(l) = self.memo.raw.lock().expect("memo").get(&(from, to)) {
             return Arc::clone(l);
         }
         let coarse = self.run.lattice();
@@ -336,7 +336,7 @@ impl<'a> Router<'a> {
             }
         };
         let line = Arc::new(line);
-        let mut raw = planet_core::lockprobe::lock(&self.memo.raw, planet_core::lockprobe::Site::RouteMemo);
+        let mut raw = self.memo.raw.lock().expect("memo");
         if raw.len() >= MEMO_SEGMENTS {
             raw.clear();
         }

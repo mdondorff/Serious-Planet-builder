@@ -5,7 +5,6 @@
 pub mod cube;
 pub mod frames;
 pub mod hash;
-pub mod lockprobe;
 pub mod math;
 pub mod surface;
 pub mod thread;

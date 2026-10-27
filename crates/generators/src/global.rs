@@ -298,13 +298,11 @@ impl LandformLattice {
 /// A field is made per plan and per tile call, so a lattice per field costs 0.5 s a call; moving its ownership to the bake's owner is tracked in `docs/status.md`.
 pub fn landform_lattice(seed: u64) -> Arc<LandformLattice> {
     static CACHE: Mutex<Vec<(u64, Arc<LandformLattice>)>> = Mutex::new(Vec::new());
-    let mut cache = planet_core::lockprobe::lock(&CACHE, planet_core::lockprobe::Site::Landform);
+    let mut cache = CACHE.lock().expect("landform lattice cache");
     if let Some((_, lattice)) = cache.iter().find(|(k, _)| *k == seed) {
         return Arc::clone(lattice);
     }
-    let built = std::time::Instant::now();
     let lattice = Arc::new(LandformLattice::build(seed));
-    planet_core::lockprobe::built(u64::try_from(built.elapsed().as_micros()).unwrap_or(u64::MAX));
     if cache.len() >= 4 {
         cache.remove(0);
     }

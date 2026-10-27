@@ -349,7 +349,7 @@ impl ThreadPool {
                         }
                         loop {
                             let (class, job) = {
-                                let mut st = planet_core::lockprobe::lock(&shared.state, planet_core::lockprobe::Site::PoolState);
+                                let mut st = shared.state.lock().expect("pool state");
                                 loop {
                                     if let Some(taken) = st.take() {
                                         break taken;
@@ -362,7 +362,7 @@ impl ThreadPool {
                             };
                             job();
                             if class == JobClass::Idle {
-                                planet_core::lockprobe::lock(&shared.state, planet_core::lockprobe::Site::PoolState).idle_running -= 1;
+                                shared.state.lock().expect("pool state").idle_running -= 1;
                                 // A waiting idle job may start now.
                                 shared.wake.notify_one();
                             }
@@ -381,7 +381,7 @@ impl Spawner for ThreadPool {
     }
 
     fn spawn_in(&self, class: JobClass, job: Job) {
-        let mut st = planet_core::lockprobe::lock(&self.shared.state, planet_core::lockprobe::Site::PoolState);
+        let mut st = self.shared.state.lock().expect("pool state");
         if !st.closed {
             st.queues[class as usize].push_back(job);
             self.shared.wake.notify_one();
@@ -391,7 +391,7 @@ impl Spawner for ThreadPool {
 
 impl Drop for ThreadPool {
     fn drop(&mut self) {
-        planet_core::lockprobe::lock(&self.shared.state, planet_core::lockprobe::Site::PoolState).closed = true;
+        self.shared.state.lock().expect("pool state").closed = true;
         self.shared.wake.notify_all();
         for w in self.workers.lock().expect("pool workers").drain(..) {
             let _ = w.join();
