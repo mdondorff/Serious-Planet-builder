@@ -275,6 +275,8 @@ pub struct FeatureCounters {
     pub horizon_landed: u64,
     /// Steps in which the stale chunks were told to wait.
     pub stale_hold_frames: u64,
+    /// Item changes announced to the plan cache (STRM-034).
+    pub plan_cache_announcements: u64,
 }
 
 /// What one step reported: the chunk update, the chunks asked to prefetch and the horizon update.
@@ -307,6 +309,47 @@ impl StepLoop for planet_frame::managed::ManagedLoop {
     }
     fn chunk_evicted(&mut self, evicted: &[ChunkKey]) {
         planet_frame::managed::ManagedLoop::chunk_evicted(self, evicted);
+    }
+}
+
+/// A loop that is not a managed loop (a settling loop of a still or a measurement): it has no travel, no pending edit and takes the landed chunks as they come.
+#[derive(Default)]
+pub struct NoLoop;
+
+impl StepLoop for NoLoop {
+    fn edit_tiles_pending(&self) -> bool {
+        false
+    }
+    fn travel(&self) -> Option<&planet_frame::prefetch::TravelEstimator> {
+        None
+    }
+    fn chunk_landed(&mut self, _: &[ChunkKey]) {}
+    fn chunk_evicted(&mut self, _: &[ChunkKey]) {}
+}
+
+/// The features of a settling loop that is not a frame: no prefetch (the camera does not travel), no stale hold, and the horizon jobs when `horizon`.
+pub fn settling_features(horizon: bool) -> FrameFeatures {
+    FrameFeatures { prefetch: false, horizon, stale_hold: false }
+}
+
+/// Tell the plan cache where the items changed from `old` to the world's definition now, as the viewer does after a swap (STRM-034), so the plan after
+/// the edit keeps what the change cannot reach; `old_revision` is the item revision of the field before the swap.
+pub fn announce_item_change(
+    managed: &mut planet_frame::managed::ManagedLoop,
+    world: &WorldTerrain,
+    old: &planet_world_def::WorldDefinition,
+    old_revision: u64,
+    counters: &mut FeatureCounters,
+) {
+    if let Ok(field) = world.field() {
+        let changes = world
+            .definition()
+            .item_changes_from(old)
+            .into_iter()
+            .map(|(dir, reach_m)| planet_frame::lod::ItemChange { dir, reach_m })
+            .collect();
+        managed.note_item_change(old_revision, field.item_revision(), changes);
+        counters.plan_cache_announcements += 1;
     }
 }
 

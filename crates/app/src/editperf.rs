@@ -584,7 +584,9 @@ struct Harness<'a> {
     /// The world with a chunk stage the frames drive (`chunk_frame`, the landings into the managed loop), as the viewer does.
     chunk_world: Option<Arc<WorldTerrain>>,
     /// Whether the stale chunks wait for the edit's tiles (`ChunkManager::hold_stale`, the viewer's behaviour); `--no-stale-hold` runs without.
-    stale_hold: bool,
+    /// The features of the chunk step this scene runs (`--no-stale-hold`, `--no-horizon-jobs` turn one off and the log says so) and what it counted.
+    features: crate::chunkstage::FrameFeatures,
+    counters: crate::chunkstage::FeatureCounters,
     /// The chunks that landed in the frames since the log was last taken, with the instant, and the time of the slowest `chunk_frame` call.
     landed_log: Vec<(Instant, planet_generators::chunkfield::ChunkKey)>,
     chunk_frame_max_ms: f64,
@@ -601,18 +603,11 @@ impl Harness<'_> {
             // The chunks the plan's tiles read: the version of every wanted chunk is asked, the stale and the missing ones are solved, the
             // landed ones refresh the tiles that read them (the viewer's frame, STRM-040, STRM-056).
             let tiles: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
-            world.hold_stale_chunks(
-                self.stale_hold && (!rig.managed.pending().is_empty() || rig.managed.manager().streamer().unfinished_jobs() > 0),
-            );
             let call = Instant::now();
-            let update = world.chunk_frame(&tiles, req.camera.position, &[]);
+            let update = crate::chunkstage::frame_step(world, &mut rig.managed, &tiles, req.camera.position, &self.features, &mut self.counters).update;
             self.chunk_frame_max_ms = self.chunk_frame_max_ms.max(call.elapsed().as_secs_f64() * 1000.0);
             let now = Instant::now();
             self.landed_log.extend(update.landed.iter().map(|k| (now, *k)));
-            rig.managed.chunk_landed(&update.landed);
-            rig.managed.chunk_evicted(&update.evicted);
-            // The horizon jobs of the chunks the plan reads share the chunk pool, as in the viewer (their maps are not uploaded here).
-            world.horizon_frame(&tiles, req.camera.position);
         }
         rig.fi.retire_to(rig.renderer.retired_frames(ctx));
         while rig.fi.is_full() {
@@ -724,15 +719,7 @@ fn write_report(out: &std::path::Path, text: &str) -> Result<std::path::PathBuf,
 /// Tell the plan cache where the items changed from `old` to the world's definition now, as the viewer does after a swap (STRM-034), so the plan
 /// after the edit keeps what the change cannot reach; `old_revision` is the item revision of the field before the swap.
 fn announce_item_change(h: &mut Harness<'_>, world: &Arc<WorldTerrain>, old: &planet_world_def::WorldDefinition, old_revision: u64) {
-    if let Ok(field) = world.field() {
-        let changes = world
-            .definition()
-            .item_changes_from(old)
-            .into_iter()
-            .map(|(dir, reach_m)| planet_frame::lod::ItemChange { dir, reach_m })
-            .collect();
-        h.rig.managed.note_item_change(old_revision, field.item_revision(), changes);
-    }
+    crate::chunkstage::announce_item_change(&mut h.rig.managed, world, old, old_revision, &mut h.counters);
 }
 
 /// One run of a case on a settled harness: edit, time the preview and the exact frame, take the edit back and settle.
@@ -1139,7 +1126,8 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
             settle_limit: if smoke { Duration::from_secs(120) } else { SETTLE_LIMIT },
             settle_ms: o.settle_ms,
             chunk_world: with_chunks.then(|| Arc::clone(&world)),
-            stale_hold: !o.no_stale_hold,
+            features: crate::chunkstage::FrameFeatures { stale_hold: !o.no_stale_hold, ..Default::default() },
+            counters: Default::default(),
             landed_log: Vec::new(),
             chunk_frame_max_ms: 0.0,
         };
