@@ -377,7 +377,14 @@ fn settle(
         wanted.extend(reads.iter().copied());
         drop(plan);
         drop(field);
-        world.chunk_frame(&tiles, camera.position, &[]);
+        crate::chunkstage::frame_step(
+            world,
+            &mut crate::chunkstage::NoLoop,
+            &tiles,
+            camera.position,
+            &crate::chunkstage::settling_features(false),
+            &mut Default::default(),
+        );
         let waited = started.elapsed().as_secs_f64();
         if waited > timeout_s {
             let still: Vec<ChunkKey> = missing.into_iter().filter(|k| !manager.is_ready(*k)).collect();
@@ -412,8 +419,14 @@ fn settle_horizon(world: &WorldTerrain, pose: &str, tiles: &[TileId], camera: Pl
             .collect()
     };
     loop {
-        world.horizon_frame(tiles, camera);
-        world.chunk_frame(tiles, camera, &[]);
+        crate::chunkstage::frame_step(
+            world,
+            &mut crate::chunkstage::NoLoop,
+            tiles,
+            camera,
+            &crate::chunkstage::settling_features(true),
+            &mut Default::default(),
+        );
         let missing: Vec<&ChunkKey> = keys.iter().filter(|k| world.horizon_map(**k).is_none()).collect();
         if missing.is_empty() {
             return Ok(keys.len());
