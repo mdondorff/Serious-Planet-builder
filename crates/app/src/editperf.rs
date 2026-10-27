@@ -1166,6 +1166,13 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
         if let Some((req, at)) = focus {
             costs.extend(measure_preview_cost(&mut h, &req, at, radius_m, altitude, if smoke { 1 } else { 20 }, smoke)?);
         }
+        // What the chunk step counted at this altitude; the edits announce their item changes and hold the stale chunks, and the camera does not
+        // travel, so the prefetch is on but not expected to ask (TEST-058).
+        if with_chunks {
+            writeln!(out, "  altitude {altitude} m, chunk step: {}", h.counters.line(&h.features)).map_err(err)?;
+            let expect = crate::chunkstage::Expect { horizon: true, stale_hold: true, announcements: true, ..Default::default() };
+            h.counters.check(&h.features, &expect)?;
+        }
     }
     let table = table(&rows);
     let stages = stages_table(&rows);
