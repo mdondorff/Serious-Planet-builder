@@ -475,3 +475,18 @@ fn stale_chunks_wait_while_the_edit_is_being_drawn_and_start_at_the_event_or_at_
     clock.advance(1);
     assert_eq!(m.update(&wanted).started, 3, "the cap ends the hold");
 }
+
+// spec: STRM-042
+#[test]
+fn a_prefetched_chunk_is_a_prefetch_job_and_a_wanted_chunk_submitted_later_runs_before_it() {
+    let (spawner, clock) = (Arc::new(ManualSpawner::default()), Arc::new(FakeClock::default()));
+    let m = manager(spawner.clone(), clock, None, ChunkConfig { workers: 3, ..ChunkConfig::default() });
+    // Two chunks ahead of the camera are prefetched while nothing is wanted...
+    let up = m.update_with(&[], &[key(5, 0), key(6, 0)]);
+    assert_eq!(up.started, 2);
+    // ...then the plan wants a chunk: its job is submitted after theirs and the pool runs it first.
+    assert_eq!(m.update_with(&[(key(0, 0), 100.0)], &[key(5, 0), key(6, 0)]).started, 1);
+    assert_eq!(spawner.pending(), 3);
+    assert!(spawner.run_one());
+    assert_eq!(m.update(&[(key(0, 0), 100.0)]).landed, vec![key(0, 0)], "the wanted chunk lands before either prefetched one");
+}

@@ -235,7 +235,7 @@ impl ChunkManager {
         };
         // The stage's epoch when the versions were asked: a job that ends under another epoch computed against edits it was not keyed for.
         let epoch0 = self.stage.epoch();
-        let to_start: Vec<(ChunkKey, u64, bool)> = {
+        let to_start: Vec<(ChunkKey, u64, bool, JobClass)> = {
             let mut sh = self.shared.lock().expect("chunk state");
             for key in wanted.iter().map(|w| &w.0).chain(prefetch) {
                 if let Some(e) = sh.ready.get_mut(key) {
@@ -272,8 +272,8 @@ impl ChunkManager {
                 wanted.iter().filter(|(k, _)| !sh.ready.contains_key(k) && !sh.running.contains(k)).map(|&(k, d)| (d, k)).collect();
             candidates.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
             candidates.dedup_by_key(|c| c.1);
-            let mut chosen: Vec<(ChunkKey, u64, bool)> =
-                candidates.into_iter().take(free).map(|(_, k)| (k, want_version(&k), false)).collect();
+            let mut chosen: Vec<(ChunkKey, u64, bool, JobClass)> =
+                candidates.into_iter().take(free).map(|(_, k)| (k, want_version(&k), false, JobClass::Visible)).collect();
             // Then the stale chunks the plan reads (STRM-056), nearest first, at most `stale_workers` at once: a chunk of an older version keeps
             // drawing, so it waits behind the chunks that are missing, and the workers it does not use stay free for new chunks.
             let stale_free = self.cfg.stale_workers.min(self.cfg.workers).saturating_sub(sh.stale_running.len());
@@ -302,7 +302,7 @@ impl ChunkManager {
                 if chosen.len() >= free {
                     break;
                 }
-                chosen.push((k, want_version(&k), true));
+                chosen.push((k, want_version(&k), true, JobClass::Visible));
             }
             // What is left of the workers goes to the prefetch, in the order given (wanted chunks never wait for it).
             for k in prefetch {
@@ -310,10 +310,10 @@ impl ChunkManager {
                     break;
                 }
                 if !sh.ready.contains_key(k) && !sh.running.contains(k) && !chosen.iter().any(|c| c.0 == *k) {
-                    chosen.push((*k, want_version(k), false));
+                    chosen.push((*k, want_version(k), false, JobClass::Prefetch));
                 }
             }
-            for (k, _, stale) in &chosen {
+            for (k, _, stale, _) in &chosen {
                 sh.running.insert(*k);
                 if *stale {
                     sh.stale_running.insert(*k);
@@ -322,8 +322,8 @@ impl ChunkManager {
             chosen
         };
         out.started = to_start.len();
-        for (key, version, _) in to_start {
-            self.spawner.spawn(self.job(key, version, epoch0));
+        for (key, version, _, class) in to_start {
+            self.spawner.spawn_in(class, self.job(key, version, epoch0));
         }
         out
     }
