@@ -242,6 +242,110 @@ pub fn chunk_prefetch_track(
         .collect()
 }
 
+/// The features of the per-frame chunk step a caller may turn off on purpose (TEST-058): all on by default, and a scene that turns one off says so in its log.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FrameFeatures {
+    /// The chunks the plan would read along the travel are asked for (STRM-042).
+    pub prefetch: bool,
+    /// The horizon jobs of the chunks the plan reads run (STRM-048).
+    pub horizon: bool,
+    /// The stale chunks wait while the tiles of an edit are being built (STRM-056).
+    pub stale_hold: bool,
+}
+
+impl Default for FrameFeatures {
+    fn default() -> FrameFeatures {
+        FrameFeatures { prefetch: true, horizon: true, stale_hold: true }
+    }
+}
+
+/// What the chunk step did over a run, one counter per feature (TEST-058).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FeatureCounters {
+    /// Steps run.
+    pub frames: u64,
+    /// Steps that asked for at least one chunk to prefetch, and the chunks asked (summed over the steps).
+    pub prefetch_frames: u64,
+    pub prefetch_asked: u64,
+    /// Chunks that landed and chunks evicted.
+    pub chunks_landed: u64,
+    pub chunks_evicted: u64,
+    /// Steps that ran the horizon jobs, and the maps that landed.
+    pub horizon_frames: u64,
+    pub horizon_landed: u64,
+    /// Steps in which the stale chunks were told to wait.
+    pub stale_hold_frames: u64,
+}
+
+/// What one step reported: the chunk update, the chunks asked to prefetch and the horizon update.
+#[derive(Clone, Debug, Default)]
+pub struct StepReport {
+    pub update: planet_streaming::chunks::ChunkUpdate,
+    pub asked: Vec<ChunkKey>,
+    pub horizon: planet_streaming::chunks::HorizonUpdate,
+}
+
+/// What the chunk step needs of the managed loop (the real one, or a test's).
+pub trait StepLoop {
+    /// Whether the tiles of an edit are still being built, so the stale chunks should wait (STRM-056).
+    fn edit_tiles_pending(&self) -> bool;
+    /// The travel estimator of the loop's prefetch source, if prefetch is on.
+    fn travel(&self) -> Option<&planet_frame::prefetch::TravelEstimator>;
+    fn chunk_landed(&mut self, landed: &[ChunkKey]);
+    fn chunk_evicted(&mut self, evicted: &[ChunkKey]);
+}
+
+impl StepLoop for planet_frame::managed::ManagedLoop {
+    fn edit_tiles_pending(&self) -> bool {
+        !self.pending().is_empty() || self.manager().streamer().unfinished_jobs() > 0
+    }
+    fn travel(&self) -> Option<&planet_frame::prefetch::TravelEstimator> {
+        planet_frame::managed::ManagedLoop::travel(self)
+    }
+    fn chunk_landed(&mut self, landed: &[ChunkKey]) {
+        planet_frame::managed::ManagedLoop::chunk_landed(self, landed);
+    }
+    fn chunk_evicted(&mut self, evicted: &[ChunkKey]) {
+        planet_frame::managed::ManagedLoop::chunk_evicted(self, evicted);
+    }
+}
+
+/// The per-frame chunk step of the viewer and of every scene that drives chunks (STRM-039, STRM-040, STRM-042, STRM-048, STRM-056, TEST-058): the stale
+/// hold, the chunks the plan's `tiles` read with the prefetch along the travel, the landed and evicted chunks to the managed loop, and the horizon jobs.
+/// Called after the managed frame of `camera`; the caller does what is its own (the viewer uploads the horizon maps of the report, a scene counts).
+pub fn frame_step(
+    world: &WorldTerrain,
+    managed: &mut impl StepLoop,
+    tiles: &[planet_core::TileId],
+    camera: planet_core::PlanetFixed,
+    features: &FrameFeatures,
+    counters: &mut FeatureCounters,
+) -> StepReport {
+    // The stale chunks wait while the tiles of an edit are still being built (STRM-056), at most the cap.
+    let hold = features.stale_hold && managed.edit_tiles_pending();
+    world.hold_stale_chunks(hold);
+    let (travel, radius_m) = (StepLoop::travel(&*managed), world.radius_m());
+    let (update, asked) = world.chunk_frame_with(tiles, camera, |wanted| {
+        if features.prefetch {
+            chunk_prefetch_track(travel, camera, wanted, radius_m)
+        } else {
+            Vec::new()
+        }
+    });
+    StepLoop::chunk_landed(managed, &update.landed);
+    StepLoop::chunk_evicted(managed, &update.evicted);
+    let horizon = if features.horizon { world.horizon_frame(tiles, camera) } else { Default::default() };
+    counters.frames += 1;
+    counters.prefetch_frames += u64::from(!asked.is_empty());
+    counters.prefetch_asked += asked.len() as u64;
+    counters.chunks_landed += update.landed.len() as u64;
+    counters.chunks_evicted += update.evicted.len() as u64;
+    counters.horizon_frames += u64::from(features.horizon);
+    counters.horizon_landed += horizon.landed.len() as u64;
+    counters.stale_hold_frames += u64::from(hold);
+    StepReport { update, asked, horizon }
+}
+
 /// Whether a frame still waits for the chunk stage: a plan node reads a chunk that is not ready, or a chunk job or horizon job is in flight. A
 /// scene that settles before a flight waits until this is false.
 pub fn chunks_busy(stand_in_nodes: usize, chunk_jobs: usize, horizon_jobs: usize) -> bool {

@@ -53,13 +53,13 @@ fn the_rig_moves_a_landed_map_into_its_slot_one_a_frame_and_the_slot_holds_the_p
     for _ in 0..200 {
         world.chunk_frame(&[tile()], camera(), &[]);
         chunk_jobs.run(64);
-        rig.frame(&world, &ctx, &mut renderer, &[tile()], camera(), sun);
+        rig.frame(&world, &ctx, &mut renderer, &[tile()], &world.horizon_frame(&[tile()], camera()), sun);
         horizon_jobs.run(64);
         clock.advance(100);
         if renderer.horizon_bytes() > 0 && world.horizon_map(key).is_some() {
             // Frames after the landing carry the upload.
             for _ in 0..4 {
-                rig.frame(&world, &ctx, &mut renderer, &[tile()], camera(), sun);
+                rig.frame(&world, &ctx, &mut renderer, &[tile()], &world.horizon_frame(&[tile()], camera()), sun);
             }
             uploaded = true;
             break;

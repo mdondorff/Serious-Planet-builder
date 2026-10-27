@@ -200,6 +200,8 @@ pub(crate) struct ChunkDrive {
     /// Whether the horizon jobs (REND-038) run too.
     horizon: bool,
     trace: crate::chunkstage::ChunkTrace,
+    /// What the chunk step did over the run, per feature (TEST-058).
+    counters: crate::chunkstage::FeatureCounters,
     /// The flight's own clock for the trace.
     started: Instant,
 }
@@ -233,7 +235,7 @@ impl<'a> Driver<'a> {
     /// Drive the chunk jobs of `world` every frame (TEST-054): the chunks the plan reads, nearest first, what landed and what was evicted to the
     /// managed loop, and the horizon jobs when `horizon`.
     pub(crate) fn drive_chunks(&mut self, world: Arc<WorldTerrain>, horizon: bool) {
-        self.chunk = Some(ChunkDrive { world, horizon, trace: Default::default(), started: Instant::now() });
+        self.chunk = Some(ChunkDrive { world, horizon, trace: Default::default(), counters: Default::default(), started: Instant::now() });
     }
 
     /// Restart the pacing: the next iteration is due now.
@@ -274,16 +276,18 @@ impl Driver<'_> {
             if let Some(m) = manager.as_ref() {
                 cd.trace.wanted(tiles.iter().flat_map(|&t| m.reads(t)), at);
             }
-            let (travel, radius_m) = (self.rig.managed.travel(), cd.world.radius_m());
-            let (update, ahead) = cd.world.chunk_frame_with(&tiles, req.camera.position, |wanted| {
-                crate::chunkstage::chunk_prefetch_track(travel, req.camera.position, wanted, radius_m)
-            });
-            cd.trace.prefetch(&ahead);
-            self.rig.managed.chunk_landed(&update.landed);
-            self.rig.managed.chunk_evicted(&update.evicted);
-            cd.trace.landed(&update.landed, at);
+            let step = crate::chunkstage::frame_step(
+                &cd.world,
+                &mut self.rig.managed,
+                &tiles,
+                req.camera.position,
+                &crate::chunkstage::FrameFeatures { horizon: cd.horizon, ..Default::default() },
+                &mut cd.counters,
+            );
+            cd.trace.prefetch(&step.asked);
+            cd.trace.landed(&step.update.landed, at);
             if cd.horizon {
-                cd.trace.horizon_landed(cd.world.horizon_frame(&tiles, req.camera.position).landed.len());
+                cd.trace.horizon_landed(step.horizon.landed.len());
             }
             let jobs = manager.map_or(0, |m| m.in_flight());
             chunk_busy = crate::chunkstage::chunks_busy(frame.counts.chunk.chunk_stand_in, jobs, cd.world.horizon_in_flight());
