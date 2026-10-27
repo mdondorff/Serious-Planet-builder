@@ -36,3 +36,15 @@ Machine and build as above, readiness gate ok for the four runs (6x2 and 8x2 wer
 - 5 to 7 chunks re-solve per edit; a pool of 6 does it in one round: criterion 6 is met in 17 of 19 cases (over: the 1 m 500 m hill at 14.0 s, the 200 m 1 km brush at 10.5 s). 8 workers add nothing over 6.
 - The M6 column is over in 6 to 8 cases in every run (200 m and 2 km, small hills and brushes, 330 to 510 ms against 300; the 200 m 1 km brush at 1003 to 1025 ms against 1000). The plan after an edit is still delivered after 420 to 660 ms (about 100 to 175 ms without chunks) although the scene now announces the item change: the plan worker competes with the chunk jobs, or the cache does not survive the swap; not separated yet.
 - Horizon jobs: no map was baked in any run (0 baked after every edit): the scene's frame loop does not call `horizon_frame`, so the horizon-off line compares nothing. To be added to the scene.
+
+## Window 8 of 2026-10-27 (main at #782; 6 x 2, horizon jobs on and off, 300 m flight with prefetch)
+Readiness gate ok for all three runs. The scene calls `horizon_frame` and `chunk_frame` each step. Tables: `edit-latency-w8-6x2-horizon.md`, `edit-latency-w8-6x2-nohorizon.md`, `envelope-w8-prefetch.json`.
+
+| Run | Eroded result drawn within 10 s (19 cases) | M6 column over (13 gated) |
+|---|---|---|
+| 6 x 2, horizon jobs on | 2 ok | 8 |
+| 6 x 2, `--no-horizon-jobs` | 13 ok | 7 |
+
+- Horizon jobs cost 1 to 3 s per edit: the horizon job is in flight for the whole 10 to 17 s and shares the 6 workers with the 5 to 7 chunk jobs; almost no map finishes in the window (0 baked in 18 of 21 cases).
+- The M6 column is over in 7 to 8 cases with or without horizon jobs: the plan is delivered after 390 to 1030 ms (700 to 1000 ms at 1 m, 200 m), not separated from the chunk jobs.
+- 300 m flight, prefetch on (`prefetch_asked` about 840 per trial): highest speed 115 m/s, as without prefetch (floor 200 m/s). Limiter: chunk wait. Two chunks land per trial, each after a median 5 to 7 s (one solve); the stand-in share past 115 m/s is nodes whose chunk is not ready; the workers are idle at the end of most trials, so the pool and the plan time do not limit.
