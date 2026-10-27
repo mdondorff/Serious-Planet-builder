@@ -772,7 +772,7 @@ Source: REND-038, GEN-045, the owner's frame of 2026-10-25 (dark spots near the 
 - **THEN** the factor is 0 near, 1 far, monotone between, and equal to the CPU reference with `coarse_fade` within 0.02
 
 ### Requirement: REND-044 The shadows and the material map cost at most 1.5 ms of the terrain pass
-At 1440p at each pose of the pose stills (TEST-048), the horizon shadows (REND-038) and the material map (LOOK-008, LOOK-009) together SHALL cost at most 1.5 ms of terrain-pass GPU time, measured by `cargo xtask perf stream shadow-cost` as the median of 41 waited frames of the full draw minus the same draw with both compiled out of the shader (`MeasureVariant`, a measurement build; the product source is unchanged). The runtime-off draws are logged beside it; a pose within 20 % of the budget by them SHALL NOT be called met before the compiled-out draws are measured.
+At 1440p at each pose of the pose stills (TEST-048), the horizon shadows (REND-038) and the material map (LOOK-008, LOOK-009) together SHALL cost at most 1.5 ms of terrain-pass GPU time, measured by `cargo xtask perf stream shadow-cost` as the median over three round-robin rounds of the median of 41 waited frames of the full draw minus the same draw with both compiled out of the shader (`MeasureVariant`, a measurement build; the product source is unchanged). The runtime-off draws are logged beside it; a pose within 20 % of the budget by them SHALL NOT be called met before the compiled-out draws are measured.
 
 Verify: A, C
 Status: active
