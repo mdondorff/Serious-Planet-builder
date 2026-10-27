@@ -1,0 +1,1 @@
+- 2026-10-28 **m8-look-switch** (LOOK-011, VIEW-060): the look file's `ground` table (schema 5) and F8 to switch the default and the file's ground look live; the sample-driver-look file for hills-b.

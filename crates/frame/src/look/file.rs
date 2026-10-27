@@ -47,17 +47,22 @@
 //! [body.0.water]               # schema version 4 (ADR 0041 points 4 to 6): how the water surface is shown
 //! absorption_per_m = 0.5       # fresnel_f0, glint_roughness, shore_fade_m, foam_width_m, foam_strength, choppy,
 //! wave_scale = 1.0             # gravity_m_s2, wave_scale
+//!
+//! [body.0.ground]              # schema version 5 (LOOK-011): the strength of the ground detail and the curves of the ground materials
+//! detail = 0.6                 # 0 to 1
+//! [body.0.ground.rock]         # sand, grass, soil likewise: per input a (lo, hi) pair, slope_cos = [0.86, 0.62]; lo == hi leaves the input out
 //! ```
 //!
 //! Bodies are addressed by id as in the world definition (`body.<n>`). Unknown tables and keys are errors that name them (a typo
 //! must not silently fall back to a default). Extension points for the coming M5 items are new optional tables under `body.<n>`
-//! (`albedo` and `sun` for ADR 0039 since schema version 2, `atmosphere` for ADR 0040 since schema version 3, `water` for ADR 0041 since schema version 4). **Every
+//! (`albedo` and `sun` for ADR 0039 since schema version 2, `atmosphere` for ADR 0040 since schema version 3, `water` for ADR 0041 since schema version 4, `ground` for LOOK-011 since schema version 5). **Every
 //! change that adds a table or a key raises `schema_version` and adds an identity migration step** (the planner's rule after the
 //! review of the look file change): an older build then says "newer schema version N" instead of "unknown key", the clearer failure
 //! under CON-10. Moving or renaming a key needs a real migration step as well. Version 1 files load unchanged through the identity
 //! step. What a generator reads (kind ids, liquid kinds, thresholds that shape the world) stays in the world definition, never here.
 
 use super::atmosphere::AtmosphereParams;
+use super::materials::{MaterialParams, INPUTS, INPUT_NAMES, MATERIALS, MATERIAL_NAMES, NATURAL_STRENGTH};
 use super::shading::AlbedoParams;
 use super::water::WaterLook;
 use super::{ExposureParams, HistogramParams, SceneUnits, ToneMapMode, DEFAULT_SUN};
@@ -66,7 +71,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 /// Schema version this build writes and reads without migration.
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 
 const VERSION_KEY: &str = "schema_version";
 const KIND_KEY: &str = "kind";
@@ -134,6 +139,36 @@ pub struct LookParams {
     /// How the water surface is shown (schema version 4, ADR 0041 points 4 to 6): waves, absorption, glint, foam. What a liquid is
     /// (colour, emission, viscosity, wave height and length) is world data.
     pub water: WaterLook,
+    /// The ground detail and the material curves the window can show beside its defaults (schema version 5, LOOK-011).
+    pub ground: GroundLook,
+}
+
+/// The ground look of a body: the strength of the procedural ground detail (LOOK-009) and the response curves of the ground materials
+/// (LOOK-008). The default is the window's natural detail and the Earth curves, so a file without the table shows what the window shows.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GroundLook {
+    pub detail: f64,
+    pub materials: MaterialParams,
+}
+
+impl Default for GroundLook {
+    fn default() -> Self {
+        Self { detail: NATURAL_STRENGTH, materials: MaterialParams::EARTH }
+    }
+}
+
+impl GroundLook {
+    /// The detail strength is 0 or from 1e-6 to 1 (LOOK-009), the curves are those of LOOK-008; a violation names the key under `ground`.
+    pub fn validate(&self) -> Result<(), ParamError> {
+        if !(self.detail == 0.0 || (1e-6..=1.0).contains(&self.detail)) {
+            return Err(bad("ground.detail", self.detail, "the strength must be 0 or from 1e-6 to 1"));
+        }
+        self.materials.validate().map_err(|(key, value, why)| ParamError {
+            key: leak_key(&key.replacen("materials.", "ground.", 1)),
+            value,
+            why,
+        })
+    }
 }
 
 /// The sun of a body as the file holds it: the unit direction in the planet-fixed axes (`f64`, so the text round-trips; the plan
@@ -184,6 +219,7 @@ impl Default for LookParams {
             sun: SunLook::default(),
             atmosphere: AtmosphereParams::EARTH,
             water: WaterLook::EARTH,
+            ground: GroundLook::default(),
         }
     }
 }
@@ -210,6 +246,7 @@ impl LookParams {
         self.albedo.validate().map_err(|(key, value, why)| ParamError { key: leak_key(&key), value, why })?;
         self.atmosphere.validate().map_err(|(key, value, why)| ParamError { key, value, why })?;
         self.water.validate().map_err(|(key, value, why)| ParamError { key: leak_key(&key), value, why })?;
+        self.ground.validate()?;
         // One unit of radiance written at the highest exposure must stay a normal f16, or the scene target loses it and the
         // adaptation can no longer see light (the histogram counts only pixels above zero).
         let written = self.units.solar_illuminance_lux / (1.2 * libm::exp2(self.exposure.max_ev100));
@@ -395,9 +432,18 @@ fn v3_to_v4(_: &mut toml::Table) -> Result<(), String> {
     Ok(())
 }
 
+/// Version 4 to 5 adds the optional `ground` table (LOOK-011); again no existing key moves.
+fn v4_to_v5(_: &mut toml::Table) -> Result<(), String> {
+    Ok(())
+}
+
 /// Migrations from every older version to the current one.
-pub const MIGRATIONS: &[Migration] =
-    &[Migration { from: 1, apply: v1_to_v2 }, Migration { from: 2, apply: v2_to_v3 }, Migration { from: 3, apply: v3_to_v4 }];
+pub const MIGRATIONS: &[Migration] = &[
+    Migration { from: 1, apply: v1_to_v2 },
+    Migration { from: 2, apply: v2_to_v3 },
+    Migration { from: 3, apply: v3_to_v4 },
+    Migration { from: 4, apply: v4_to_v5 },
+];
 
 /// The look of every body that has an entry. A body without an entry has the Earth default.
 #[derive(Clone, Debug, PartialEq, Default)]
@@ -515,6 +561,7 @@ fn read_body(path: &str, mut t: toml::Table) -> Result<LookParams, LookError> {
     let albedo = section("albedo")?;
     let atmosphere = section("atmosphere")?;
     let water = section("water")?;
+    let ground = section("ground")?;
     if let Some(key) = t.keys().next() {
         return Err(LookError::UnknownKey { key: format!("{path}.{key}") });
     }
@@ -597,8 +644,52 @@ fn read_body(path: &str, mut t: toml::Table) -> Result<LookParams, LookError> {
         }
         no_more(&k, &s)?;
     }
+    if let Some(mut s) = ground {
+        let k = format!("{path}.ground");
+        take_f64(&k, &mut s, "detail", &mut p.ground.detail)?;
+        for (m, material) in MATERIAL_NAMES.iter().enumerate() {
+            let mk = format!("{k}.{material}");
+            match s.remove(*material) {
+                None => {}
+                Some(toml::Value::Table(mut curves)) => {
+                    for (i, input) in INPUT_NAMES.iter().enumerate() {
+                        take_pair(&mk, &mut curves, input, &mut p.ground.materials.curves[m][i])?;
+                    }
+                    no_more(&mk, &curves)?;
+                }
+                Some(other) => return Err(LookError::WrongType { key: mk, expected: "a table", found: other.type_str() }),
+            }
+        }
+        no_more(&k, &s)?;
+    }
     p.validate().map_err(|e| LookError::BadValue { key: format!("{path}.{}", e.key), value: e.value, why: e.why })?;
     Ok(p)
+}
+
+/// Read an array of exactly two numbers into `slot` when the key is present.
+fn take_pair(table_path: &str, t: &mut toml::Table, key: &str, slot: &mut [f64; 2]) -> Result<(), LookError> {
+    let full = format!("{table_path}.{key}");
+    match t.remove(key) {
+        None => Ok(()),
+        Some(toml::Value::Array(items)) => {
+            if items.len() != 2 {
+                return Err(LookError::BadValue {
+                    key: full,
+                    value: format!("{} values", items.len()),
+                    why: "must be an array of exactly two numbers (lo, hi)".into(),
+                });
+            }
+            let mut out = [0.0; 2];
+            for (k, item) in items.into_iter().enumerate() {
+                let mut one = toml::Table::new();
+                one.insert("v".to_string(), item);
+                take_f64(&format!("{full}[{k}]"), &mut one, "v", &mut out[k])?;
+            }
+            *slot = out;
+            Ok(())
+        }
+        Some(other) => Err(LookError::WrongType { key: full, expected: "an array of two numbers", found: other.type_str() }),
+    }
 }
 
 /// The colour-valued keys of the atmosphere table in the order of [`atmosphere_vec3_mut`].
@@ -783,6 +874,14 @@ pub fn to_toml(file: &LookFile) -> String {
         out.push_str(&format!("\n[body.{b}.water]\n"));
         for (name, v) in WaterLook::KEYS.iter().zip(wl.values_mut()) {
             out.push_str(&line(name, *v));
+        }
+        out.push_str(&format!("\n[body.{b}.ground]\n{}", line("detail", p.ground.detail)));
+        for m in 0..MATERIALS {
+            out.push_str(&format!("\n[body.{b}.ground.{}]\n", MATERIAL_NAMES[m]));
+            for i in 0..INPUTS {
+                let [lo, hi] = p.ground.materials.curves[m][i];
+                out.push_str(&format!("{} = [{lo:?}, {hi:?}]\n", INPUT_NAMES[i]));
+            }
         }
     }
     out

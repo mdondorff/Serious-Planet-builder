@@ -124,6 +124,7 @@ pub enum StateKey {
     Overlay,
     CoarseLod,
     GroundDetail,
+    Look,
     ScaleRefs,
     EditingLight,
     CoupledLens,
@@ -218,6 +219,7 @@ pub static KEYS: &[KeyDef] = &[
     k(&["F3"], "F3", View(Command::CycleOverlay), V, Both, "cycles the overlay (off, tiles, mesh, regions, stale tiles; lit path)", Some(StateKey::Overlay)),
     k(&["F4"], "F4", View(Command::ToggleCoarseLod), V, Both, "coarse LOD (error bound x4)", Some(StateKey::CoarseLod)),
     k(&["F6"], "F6", View(Command::CycleGroundDetail), V, Both, "ground detail (natural, full, off; the procedural detail and gloss of the ground, on at the start)", Some(StateKey::GroundDetail)),
+    k(&["F8"], "F8", View(Command::CycleLook), V, Both, "ground look (default, or look file: the detail strength and the material curves of the look file's ground table; with no ground table in the file both are the same)", Some(StateKey::Look)),
     k(&["F7"], "F7", View(Command::ToggleScaleRefs), V, Both, "scale references (drops a chair 0.9 m, a house 8 m, a boat 10 m, a tower 291 m and a block of boxes 1 km across on the ground in front of you; again takes them away; lit path)", Some(StateKey::ScaleRefs)),
     k(&["F9"], "F9", View(Command::SaveRepro), V, Both, "writes the camera path of the last minute and a repro bundle (target/review)", None),
     k(&["KeyT"], "T", View(Command::ToggleVsync), V, Both, "vsync on or off", Some(StateKey::Vsync)),
@@ -294,6 +296,7 @@ pub fn state_text(key: StateKey, v: &crate::viewer::ViewerState, sun_time: Optio
         StateKey::Overlay => v.overlay.name().to_string(),
         StateKey::CoarseLod => on(v.coarse_lod),
         StateKey::GroundDetail => v.ground_detail.name().to_string(),
+        StateKey::Look => v.look_choice.name().to_string(),
         StateKey::ScaleRefs => on(v.scale_refs),
         StateKey::EditingLight => on(v.editing_light),
         StateKey::CoupledLens => match v.coupled_lens {
@@ -343,6 +346,7 @@ mod tests {
             Command::CycleOverlay,
             Command::ToggleCoarseLod,
             Command::CycleGroundDetail,
+            Command::CycleLook,
             Command::ToggleScaleRefs,
             Command::CycleCoupledLens,
             Command::ToggleEditingLight,
@@ -365,6 +369,7 @@ mod tests {
                 | Command::CycleOverlay
                 | Command::ToggleCoarseLod
                 | Command::CycleGroundDetail
+                | Command::CycleLook
                 | Command::ToggleScaleRefs
                 | Command::CycleCoupledLens
                 | Command::ToggleEditingLight

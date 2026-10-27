@@ -1394,6 +1394,19 @@ sun_declination_deg = 10
         assert!(e.contains("coarse_horizon must be true or false"), "{e}");
     }
 
+    // spec: LOOK-011
+    #[test]
+    fn the_sample_look_file_holds_the_ground_look_of_the_sample_poses_files_look_table() {
+        use planet_frame::look::{file::parse_look, LitPlan};
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/milestones/M8/look-review-2b");
+        let poses = std::fs::read_to_string(root.join("hills-b/sample-driver-look/poses.toml")).unwrap();
+        let file = parse_look(&std::fs::read_to_string(root.join("sample-driver-look.look.toml")).unwrap()).unwrap();
+        let mut lit = LitPlan::fixed(12.0);
+        parse_config(&poses).unwrap().look.apply(&mut lit);
+        let g = file.body(planet_world_def::BodyId(0)).ground;
+        assert_eq!((g.detail, g.materials), (lit.ground_detail, lit.materials), "F8 shows what the stills of the sample look show");
+    }
+
     // spec: TEST-053
     #[test]
     fn the_look_table_and_a_poses_view_are_read_and_a_bad_name_is_refused_with_the_names_it_knows() {

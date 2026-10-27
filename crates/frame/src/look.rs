@@ -360,6 +360,24 @@ impl LitPlan {
         self
     }
 
+    /// This plan with the ground look the window shows (VIEW-060): `LookChoice::Default` leaves the plan with the strength `mode` names and the Earth curves;
+    /// `File` takes the curves of the look file's `ground` table, and its detail strength in place of the natural mode's (full and off stay full and off).
+    pub fn with_ground_look(
+        mut self,
+        choice: materials::LookChoice,
+        mode: materials::GroundDetailMode,
+        ground: &file::GroundLook,
+    ) -> LitPlan {
+        self.ground_detail = mode.strength();
+        if choice == materials::LookChoice::File {
+            if mode == materials::GroundDetailMode::Natural {
+                self.ground_detail = ground.detail;
+            }
+            self.materials = ground.materials;
+        }
+        self
+    }
+
     /// This plan with a debug overlay drawn over the terrain.
     pub fn with_overlay(mut self, overlay: Overlay) -> LitPlan {
         self.overlay = overlay;

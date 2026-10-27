@@ -117,6 +117,8 @@ pub enum Command {
     ToggleCoarseLod,
     /// F6: the strength of the procedural ground detail: natural, full, off (VIEW-046).
     CycleGroundDetail,
+    /// F8: the ground look: the Earth default curves, or the look file's `ground` table (detail strength and material curves; VIEW-060).
+    CycleLook,
     /// F7: drop the scale references (a chair, a house, a boat, a tower, a block of boxes) on the ground in front of the camera, or take them away
     /// (VIEW-050).
     ToggleScaleRefs,
@@ -298,6 +300,8 @@ pub struct ViewerState {
     pub sun_offset_h: f64,
     /// The strength of the ground detail the lit frames take (VIEW-046): natural at the start; F6 cycles it. Not part of the headless modes.
     pub ground_detail: crate::look::materials::GroundDetailMode,
+    /// Which ground look the lit plan takes (F8).
+    pub look_choice: crate::look::materials::LookChoice,
     /// The scale references are asked for (VIEW-050): the window drops them where the camera is when this turns on and removes them when it
     /// turns off. Off at the start.
     pub scale_refs: bool,
@@ -333,6 +337,7 @@ impl ViewerState {
             shade_view: crate::look::shading::ShadeView::Lit,
             sun_offset_h: 0.0,
             ground_detail: crate::look::materials::GroundDetailMode::default(),
+            look_choice: crate::look::materials::LookChoice::default(),
             scale_refs: false,
             coupled_lens: None,
             globe: None,
@@ -407,6 +412,7 @@ impl ViewerState {
             Command::SunLater => self.sun_offset_h = (self.sun_offset_h + SUN_STEP_H).rem_euclid(24.0),
             Command::SunReset => self.sun_offset_h = 0.0,
             Command::CycleGroundDetail => self.ground_detail = self.ground_detail.next(),
+            Command::CycleLook => self.look_choice = self.look_choice.next(),
             Command::ToggleScaleRefs => self.scale_refs = !self.scale_refs,
             Command::CycleCoupledLens => {
                 use planet_generators::coupled::CoupledLens::{Area, Height};
@@ -1471,6 +1477,41 @@ mod tests {
         for word in ["F7", "scale references"] {
             assert!(KEYS_HELP.contains(word), "the help names {word}: {}", *KEYS_HELP);
         }
+    }
+
+    // spec: VIEW-060
+    #[test]
+    fn f8_cycles_the_ground_look_between_the_defaults_and_the_look_files_ground_table_and_the_plan_takes_the_one_chosen() {
+        use crate::look::file::GroundLook;
+        use crate::look::materials::{GroundDetailMode, Input, LookChoice, MaterialParams};
+        use crate::look::LitPlan;
+        let c = camera_for_tests();
+        let mut v = ViewerState::new(0, 3, 0, true).with_lit(true);
+        assert_eq!(v.look_choice, LookChoice::Default, "the defaults at the start");
+        let (lit, detail, shade) = (v.lit, v.ground_detail, v.shade_view);
+        let seen: Vec<LookChoice> = (0..3)
+            .map(|i| {
+                assert!(!v.command(Command::CycleLook, 10 * i, &c), "F8 does not quit");
+                v.look_choice
+            })
+            .collect();
+        assert_eq!(seen, [LookChoice::File, LookChoice::Default, LookChoice::File]);
+        assert_eq!((v.lit, v.ground_detail, v.shade_view), (lit, detail, shade), "the other switches are unchanged");
+        for word in ["F8", "ground look"] {
+            assert!(KEYS_HELP.contains(word), "the help names {word}: {}", *KEYS_HELP);
+        }
+        let mut ground = GroundLook { detail: 0.3, materials: MaterialParams::EARTH };
+        ground.materials.curves[3][Input::Moisture as usize] = [0.55, 0.85];
+        let plan = |choice, mode| LitPlan::fixed(0.0).with_ground_look(choice, mode, &ground);
+        let base = plan(LookChoice::Default, GroundDetailMode::Natural);
+        assert_eq!((base.ground_detail, base.materials), (GroundDetailMode::Natural.strength(), MaterialParams::EARTH));
+        let file = plan(LookChoice::File, GroundDetailMode::Natural);
+        assert_eq!((file.ground_detail, file.materials), (0.3, ground.materials), "the file's strength stands for natural");
+        let full = plan(LookChoice::File, GroundDetailMode::Full);
+        let off = plan(LookChoice::File, GroundDetailMode::Off);
+        assert_eq!((full.ground_detail, off.ground_detail), (1.0, 0.0), "full and off stay what F6 says");
+        assert_eq!(full.materials, ground.materials);
+        assert_eq!(plan(LookChoice::Default, GroundDetailMode::Full).materials, MaterialParams::EARTH);
     }
 
     // spec: VIEW-046
