@@ -164,8 +164,8 @@ impl ChunkView for ManagerView {
     }
 }
 
-/// The chunks to prefetch (STRM-042): the chunk one chunk edge ahead of the camera along its travel over the ground, and the chunk the
-/// predicted position is in, when they are not the chunk under the camera; empty when the camera is not predicted to travel (`predicted` is
+/// The chunks to prefetch (STRM-042): the chunk one chunk edge ahead of the camera along its travel over the ground, the chunk the
+/// predicted position is in, and the two chunks beside the one ahead, when they are not the chunk under the camera; empty when the camera is not predicted to travel (`predicted` is
 /// `None`: it is stationary, has just teleported, or only rotates, which the estimator never sees), or only dives. The first is the one the
 /// camera needs next, requested a chunk's travel time before it is wanted (at 100 m/s through a 5 km chunk, about 49 s).
 pub fn prefetch_chunks(position: planet_core::PlanetFixed, predicted: Option<planet_core::PlanetFixed>, radius_m: f64) -> Vec<ChunkKey> {
@@ -184,7 +184,12 @@ pub fn prefetch_chunks(position: planet_core::PlanetFixed, predicted: Option<pla
     let edge_m = radius_m * core::f64::consts::FRAC_PI_2 / f64::from(1u32 << planet_generators::chunk::CHUNK_GRID_LEVEL);
     let own = key_of(position.0);
     let mut out = Vec::new();
-    for p in [position.0 + along.normalized() * edge_m, predicted.0] {
+    // The chunk one edge ahead and the predicted one, then the two beside the one ahead (a track off the grid axis, and the tiles' reads reach the
+    // neighbours of a chunk): one edge to the left and to the right of the track.
+    let heading = along.normalized();
+    let side = up.cross(heading).normalized();
+    let ahead = position.0 + heading * edge_m;
+    for p in [ahead, predicted.0, ahead + side * edge_m, ahead - side * edge_m] {
         let k = key_of(p);
         if k != own && !out.contains(&k) {
             out.push(k);

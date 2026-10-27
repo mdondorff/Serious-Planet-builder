@@ -364,3 +364,30 @@ fn the_landing_note_gives_the_chunks_landed_and_the_stand_in_share_and_zero_with
     assert_eq!(planet_frame::chunkshare::landing_note(6, 200, 170), "6 chunks landed, stand-in share 85.0 %");
     assert_eq!(planet_frame::chunkshare::landing_note(0, 0, 0), "0 chunks landed, stand-in share 0.0 %");
 }
+
+// spec: STRM-042
+#[test]
+fn travel_prefetches_the_chunks_beside_the_one_ahead_too() {
+    use planet_frame::chunkshare::prefetch_chunks;
+    use planet_frame::prefetch::{PrefetchConfig, TravelEstimator};
+    let centre = TileId::new(Face(2), CHUNK_GRID_LEVEL, 1000, 1000).unwrap();
+    let (s0, s1, t0, t1) = centre.bounds();
+    let at = |s: f64| {
+        let d = planet_core::cube::face_to_direction(&TangentWarp, Face(2), s, 0.5 * (t0 + t1));
+        PlanetFixed(d * (R + 300.0))
+    };
+    let mut est = TravelEstimator::new(PrefetchConfig::default(), R);
+    let mut ahead = Vec::new();
+    for frame in 0..10u64 {
+        let s = s0 + (s1 - s0) * 0.1 + 100.0 * (frame as f64 * 0.1) / (R * std::f64::consts::FRAC_PI_2) * 2.0;
+        let pos = at(s);
+        est.observe(frame * 100, pos);
+        ahead = prefetch_chunks(pos, est.predict(), R);
+    }
+    // East along +s: the next chunk first, then its two neighbours across the track (t - 1 and t + 1), and not the one under the camera.
+    assert_eq!(ahead[0], (2, 1001, 1000), "{ahead:?}");
+    for beside in [(2u8, 1001u32, 999u32), (2, 1001, 1001)] {
+        assert!(ahead.contains(&beside), "{beside:?} in {ahead:?}");
+    }
+    assert!(!ahead.contains(&(2, 1000, 1000)));
+}
