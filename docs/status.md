@@ -3,8 +3,8 @@
 Forward state only (owner, 2026-10-16): open owner items, the current queue's open items, the current unanswered stop report, tracked items and quarantines. History goes to the log (`cargo xtask log`). When a change is archived the coder deletes its queue item's text (the log line is the record); when the architect answers a stop report it deletes it. A Tracked entry has at most 3 lines; a finished one is deleted (ADR 0075). Cap: 15 KB. Earlier states: `docs/archive/M4/status-at-m4-acceptance.md`, `docs/archive/M6/status-at-m6-close.md`. M7's queue as executed: `docs/milestones/M7-report.md`.
 
 ## Waiting for the owner
+- **Owner live test 2026-10-27** (`docs/milestones/M8/owner-test-2026-10-27/README.md`): decisions on group E (D3 revisit: edits on top as default, erosion keeping mass), F and G scope (M9 or M8), the look, the 1 m / 500 m exception, and the drawn-tile reading of criterion 6 (#823).
 - **D3 confirmed (owner, 2026-10-26):** both orders are wanted eventually; M8-7 builds edits under the erosion first (option 2: the edit shows at once, its eroded result follows within 10 s); edits on top (finishing touches) stay a per-layer setting for later. Cost per stamp or brush stroke is M8-7's first measurement.
-- **M8 GO:** decisions D1 to D7 taken (owner, 2026-10-23; `docs/briefings/m8-plan.md`); everything up to M8-6 is independent of D3; the lanes start on the owner's GO.
 - **ADR 0083's share table:** a spec to write (shares on physical cores and core type; owner, 2026-10-27).
 - **Optional, when convenient:** the M6 retest list (`docs/archive/M6/briefings/m6-owner-test-plan.md`, "Retest"); a live check of the flickers (Tracked).
 - **At the laptop (postponed):** the NVIDIA driver update (591.86; device losses under parallel GPU load, Tracked); excluding the repo's `target` folders from Windows Search indexing.

@@ -2,6 +2,9 @@
 
 Owner-facing guide to this folder (opus-planner, 2026-10-27). Everything here is evidence, not goldens.
 
+## Owner live test 2026-10-27
+`owner-test-2026-10-27/README.md`: 16 findings in groups A to H and the plan before M8's acceptance (editor stalls, missing shadow bakes, chunk edges and tile cuts first).
+
 ## For the owner's look review (criterion 1)
 Current set: `look-review-2b/` (ANET_VERSION 10, rendered after #757). Later changes up to 2026-10-27 do not change the picture (byte-identical horizon maps, performance only).
 
