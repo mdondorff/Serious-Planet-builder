@@ -1110,7 +1110,7 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
         v.extend(REGIONAL_ALTITUDES_M.iter().filter(|a| !v.contains(a)).copied().collect::<Vec<_>>());
         v
     };
-    let repeats = if smoke { 1 } else { REPEATS };
+    let repeats = if smoke { 1 } else { o.repeats.unwrap_or(REPEATS).max(1) };
     let limit = Duration::from_secs(if smoke { 40 } else { 600 });
     if smoke {
         writeln!(
