@@ -11,7 +11,7 @@ use planet_frame::{plan_terrain, scripted_views, LodParams, TerrainPlan, Terrain
 use planet_generators::compact::compact_tile_field;
 use planet_generators::height::Reference;
 use planet_render::graph::{frame_target_share_bytes, lit_frame_graph, LitShape};
-use planet_render::{AdapterPolicy, ExecError, GpuContext, TerrainRenderer};
+use planet_render::{AdapterPolicy, ExecError, GpuContext, MeasureVariant, TerrainRenderer};
 use planet_streaming::PoolConfig;
 use planet_testkit::{GoldenChecks, Image, Tolerance};
 
@@ -95,6 +95,39 @@ fn an_atmosphere_plan_needs_the_atmosphere_and_names_the_missing_call() {
     let mut r = renderer(&ctx, &[&p], true);
     let e = r.render(&ctx, &lit(p, atmosphere_plan(AtmosphereView::Composite)), false).unwrap_err();
     assert!(matches!(e, ExecError::AtmosphereNotEnabled) && e.to_string().contains("enable_atmosphere"), "{e}");
+}
+
+// spec: REND-044
+#[test]
+fn the_measurement_variants_compile_draw_and_the_product_source_comes_back_pixel_for_pixel() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let base = plan(3);
+    let drawn = lit(base.clone(), atmosphere_plan(AtmosphereView::Composite));
+    let mut r = renderer_atmosphere(&ctx, &[&base]);
+    r.render(&ctx, &drawn, false).unwrap();
+    let product = r.lit_path().unwrap().read_hdr(&ctx);
+    for variant in [MeasureVariant::NoShadow, MeasureVariant::NoMaterial, MeasureVariant::Neither] {
+        r.set_measure_variant(&ctx, variant).unwrap();
+        r.render(&ctx, &drawn, false).unwrap();
+        let hdr = r.lit_path().unwrap().read_hdr(&ctx);
+        assert!(hdr.iter().all(|p| p.iter().all(|v| v.is_finite())), "{variant:?}: finite");
+        let covered = |h: &[[f32; 4]]| h.iter().map(|p| p[3] > 0.0).collect::<Vec<_>>();
+        assert_eq!(covered(&hdr), covered(&product), "{variant:?}: same coverage");
+    }
+    r.set_measure_variant(&ctx, MeasureVariant::Product).unwrap();
+    r.render(&ctx, &drawn, false).unwrap();
+    assert_eq!(r.lit_path().unwrap().read_hdr(&ctx), product, "the product shader again draws what it drew");
+}
+
+// spec: REND-044
+#[test]
+fn a_measurement_variant_is_refused_without_the_atmosphere_instead_of_drawing_the_product_shader() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let base = plan(3);
+    let mut r = renderer(&ctx, &[&base], true);
+    let e = r.set_measure_variant(&ctx, MeasureVariant::Neither).unwrap_err();
+    assert!(e.contains("enable_atmosphere"), "{e}");
+    assert!(r.set_measure_variant(&ctx, MeasureVariant::Product).is_ok(), "the product source needs nothing");
 }
 
 // spec: ATMO-002

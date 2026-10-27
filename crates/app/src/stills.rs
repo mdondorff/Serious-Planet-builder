@@ -1079,7 +1079,7 @@ pub fn is_cost_scene(name: &str) -> bool {
 
 /// The budget of the horizon shadows and the material map together, milliseconds of terrain-pass GPU time at 1440p (REND-044, M8 criterion 5).
 pub const COST_BUDGET_MS: f64 = 1.5;
-/// A share within this fraction of the budget is not called met before the variants without the branch are built (opus-planner, 2026-10-27).
+/// A share within this fraction of the budget is flagged, not called met (the compiled-out variants have no branch left) (opus-planner, 2026-10-27).
 pub const COST_NEAR: f64 = 0.2;
 /// Frames dropped before the timed ones of a variant, and the timed frames whose median is the variant's time.
 const COST_WARM: usize = 8;
@@ -1100,12 +1100,19 @@ pub struct CostRow {
     pub no_material: f64,
     /// Both off.
     pub neither: f64,
+    /// The same three variants with the code compiled out of the shader (`MeasureVariant`: no shadow, no material, neither); no branch is left,
+    /// so the shares from them neither under-read the shadows nor over-read the material map.
+    pub compiled_out: Option<[f64; 3]>,
 }
 
 impl CostRow {
-    /// The shadows' share, the material map's share and both together (full minus the variant without them).
+    /// The shadows' share, the material map's share and both together (full minus the variant without them), from the compiled-out
+    /// variants when the row has them, else from the runtime ones.
     pub fn shares(&self) -> (f64, f64, f64) {
-        (self.full - self.no_shadow, self.full - self.no_material, self.full - self.neither)
+        match self.compiled_out {
+            Some([shadow, material, both]) => (self.full - shadow, self.full - material, self.full - both),
+            None => (self.full - self.no_shadow, self.full - self.no_material, self.full - self.neither),
+        }
     }
 }
 
@@ -1160,6 +1167,17 @@ fn measure_cost(
     };
     detail(plan, 1.0);
     let full = terrain_ms(ctx, r, plan, COST_WARM_FIRST_S)?;
+    // The shader without the code (a measurement build of the same source, REND-044), while the maps and the detail are still on.
+    let mut compiled_out = [0.0; 3];
+    for (slot, variant) in compiled_out.iter_mut().zip([
+        planet_render::MeasureVariant::NoShadow,
+        planet_render::MeasureVariant::NoMaterial,
+        planet_render::MeasureVariant::Neither,
+    ]) {
+        r.set_measure_variant(ctx, variant)?;
+        *slot = terrain_ms(ctx, r, plan, COST_WARM_S)?;
+    }
+    r.set_measure_variant(ctx, planet_render::MeasureVariant::Product)?;
     detail(plan, 0.0);
     let no_material = terrain_ms(ctx, r, plan, COST_WARM_S)?;
     r.clear_horizon();
@@ -1167,11 +1185,11 @@ fn measure_cost(
     let neither = terrain_ms(ctx, r, plan, COST_WARM_S)?;
     detail(plan, 1.0);
     let no_shadow = terrain_ms(ctx, r, plan, COST_WARM_S)?;
-    Ok(CostRow { pose: pose.to_string(), full, no_shadow, no_material, neither })
+    Ok(CostRow { pose: pose.to_string(), full, no_shadow, no_material, neither, compiled_out: Some(compiled_out) })
 }
 
 /// The failures of the budget (the shadows and the material map together at most [`COST_BUDGET_MS`] in every pose) and the poses within
-/// [`COST_NEAR`] of it, which are not called met before the variants without the branch are built (REND-044).
+/// [`COST_NEAR`] of it, which are flagged, not called met (REND-044).
 pub fn cost_verdict(rows: &[CostRow]) -> (Vec<String>, Vec<String>) {
     let (mut over, mut near) = (Vec::new(), Vec::new());
     for r in rows {
@@ -1180,7 +1198,7 @@ pub fn cost_verdict(rows: &[CostRow]) -> (Vec<String>, Vec<String>) {
             over.push(format!("{}: shadows and material map {both:.3} ms exceed {COST_BUDGET_MS} ms (REND-044)", r.pose));
         } else if both > COST_BUDGET_MS * (1.0 - COST_NEAR) {
             near.push(format!(
-                "{}: {both:.3} ms is within 20 % of the {COST_BUDGET_MS} ms budget: build the shader variants before calling it met",
+                "{}: {both:.3} ms is within 20 % of the {COST_BUDGET_MS} ms budget (by the compiled-out shader variants when the row has them): not called met",
                 r.pose
             ));
         }
@@ -1201,14 +1219,19 @@ pub fn perf_shadow_cost(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> R
         let (s, m, both) = r.shares();
         writeln!(
             out,
-            "{}: terrain pass {:.3} ms; shadows {s:.3} ms, material map {m:.3} ms, together {both:.3} ms (without shadows {:.3}, without material {:.3}, without both {:.3})",
-            r.pose, r.full, r.no_shadow, r.no_material, r.neither
+            "{}: terrain pass {:.3} ms; shadows {s:.3} ms, material map {m:.3} ms, together {both:.3} ms (runtime off: without shadows {:.3}, without material {:.3}, without both {:.3}; compiled out: {})",
+            r.pose,
+            r.full,
+            r.no_shadow,
+            r.no_material,
+            r.neither,
+            r.compiled_out.map_or("none".to_string(), |c| format!("{:.3}, {:.3}, {:.3}", c[0], c[1], c[2]))
         )
         .map_err(err)?;
     }
     writeln!(
         out,
-        "the shadow share under-reads by the branch the shader still takes with every node on slot -1; the material share over-reads by the cost of the detail at strength 0; 1440p, medians of {COST_FRAMES} frames"
+        "the shares are full minus the shader with the code compiled out (no branch left; the runtime-off variants under-read the shadows and over-read the material map); 1440p, medians of {COST_FRAMES} frames"
     )
     .map_err(err)?;
     for n in &near {
@@ -1219,8 +1242,13 @@ pub fn perf_shadow_cost(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> R
         .map(|r| {
             let (s, m, both) = r.shares();
             format!(
-                "    {{\"pose\": {:?}, \"full_ms\": {:.4}, \"no_shadow_ms\": {:.4}, \"no_material_ms\": {:.4}, \"neither_ms\": {:.4}, \"shadow_ms\": {s:.4}, \"material_ms\": {m:.4}, \"together_ms\": {both:.4}}}",
-                r.pose, r.full, r.no_shadow, r.no_material, r.neither
+                "    {{\"pose\": {:?}, \"full_ms\": {:.4}, \"no_shadow_ms\": {:.4}, \"no_material_ms\": {:.4}, \"neither_ms\": {:.4}, \"compiled_out_ms\": {}, \"shadow_ms\": {s:.4}, \"material_ms\": {m:.4}, \"together_ms\": {both:.4}}}",
+                r.pose,
+                r.full,
+                r.no_shadow,
+                r.no_material,
+                r.neither,
+                r.compiled_out.map_or("null".to_string(), |c| format!("[{:.4}, {:.4}, {:.4}]", c[0], c[1], c[2]))
             )
         })
         .collect();
@@ -1261,7 +1289,11 @@ mod tests {
             no_shadow: shadow,
             no_material: material,
             neither,
+            compiled_out: None,
         };
+        // The compiled-out variants, when a row has them, are what the shares and the verdict read.
+        let with = CostRow { compiled_out: Some([4.6, 4.2, 3.9]), ..row("w", 5.0, 4.5, 4.6, 4.0) };
+        assert_eq!(with.shares(), (5.0 - 4.6, 5.0 - 4.2, 5.0 - 3.9));
         let ok = row("a", 5.0, 4.5, 4.6, 4.0);
         assert_eq!(ok.shares().2, 1.0);
         assert_eq!(cost_verdict(&[ok]), (vec![], vec![]));
