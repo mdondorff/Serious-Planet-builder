@@ -1214,7 +1214,7 @@ Source: opus-planner (2026-10-24, M8-1 (c) rest, owner: solid software), ADR 007
 - **THEN** every run cell equals the definition's mean, a plane reduces to the plane at the cell centre, all thread counts agree bit for bit, the two runs agree bit for bit in heights, area and receivers, a run that does not divide the bake is refused and a missing vertex is named
 
 ### Requirement: GEN-042 Global coupled run time
-The global coupled run (GEN-040) at 2048 cells per face edge and 100 steps SHALL take no more than ten minutes on the reference machine, measured by the performance harness through the architect and never in a test (CON-20). The `coupled` perf scene (`perf_coupled`) cites this requirement for spec-lint (TEST-001). The harness entry is `cargo xtask perf coupled` (ADR 0020 readiness gate, log `perf/logs/coupled.json` with wall time, steps, seconds per step and threads); the run is single-threaded, so `threads` is 1. `cargo xtask perf coupled --store DIR --global-res N --remake-into OUT` SHALL time the make of the run from the stored bake in `DIR` (the viewer's make: the reduction of the bake, then the steps; any stored channel is ignored), against the same ten minutes, log `perf/logs/coupled-make.json`; `OUT` SHALL be created if missing, SHALL NOT be the store and SHALL lie under a `target` directory (the store is only read).
+The global coupled run (GEN-040) at 2048 cells per face edge and 100 steps SHALL take no more than ten minutes on the reference machine, measured by the performance harness through the architect and never in a test (CON-20). The `coupled` perf scene (`perf_coupled`) cites this requirement for spec-lint (TEST-001). The harness entry is `cargo xtask perf coupled` (ADR 0020 readiness gate, log `perf/logs/coupled.json` with wall time, steps, seconds per step and threads); the run is single-threaded, so `threads` is 1.
 
 Verify: C
 Status: active
@@ -1223,6 +1223,17 @@ Source: opus-planner (2026-10-24), M8 exit criterion 4
 #### Scenario: Coupled run timing
 - **WHEN** the coupled run of 2048 cells per face edge and 100 steps runs on the reference machine in a perf window
 - **THEN** it finishes within ten minutes
+
+### Requirement: GEN-088 The coupled run is timed from a stored bake
+`cargo xtask perf coupled --store DIR --global-res N --remake-into OUT` SHALL time a fresh make of the coupled run from the bake stored in `DIR` (the viewer's make: the reduction of the bake, then the steps; any stored channel is ignored) against the ten minutes of GEN-042, and write `perf/logs/coupled-make.json`. `OUT` SHALL be created if missing, SHALL NOT be inside `DIR` and SHALL lie under a `target` directory (the store is only read).
+
+Verify: A, C
+Status: active
+Source: opus-planner (2026-10-27), M8 exit criterion 4
+
+#### Scenario: The output directory
+- **WHEN** `OUT` is the store, a directory inside it, or a directory with no `target` component
+- **THEN** the make is refused naming the store
 
 ### Requirement: GEN-064 The hill band and the landform driver of the bake
 `global::sample` SHALL add to the elevation of land a hill band: a ridged multifractal of three octaves at the frequencies 796, 1592 and 3184 per unit direction (wavelengths of 8, 4 and 2 km at Earth's radius; they scale with the body's radius) on the warped direction (which stretches them locally), weights 1, 1/2 and 1/4 of `(1 - |n|)^2`, normalised, times an amplitude and times `smoothstep(0, 0.1, land depth)`. The band SHALL be 0 over the sea and at the coast and never negative, and at most `HILL_BAND_MAX_M` (1000 m).
