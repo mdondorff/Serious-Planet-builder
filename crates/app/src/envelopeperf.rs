@@ -564,10 +564,19 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
     .map_err(err)?;
     let flight_s = if smoke { SMOKE_FLIGHT_S } else { FLIGHT_S };
     let frames = (flight_s / FRAME_STEP_S).round() as usize;
-    let altitudes: &[f64] = &ALTITUDES_M;
+    // The altitudes flown: `--altitudes-m` (those of the scene's four), all of them by default; `--only-steady` skips the cold curve and the comparison.
+    let chosen: Vec<f64> = match &o.altitudes_m {
+        Some(s) => s
+            .split(',')
+            .map(|v| v.trim().parse::<f64>().map_err(|_| format!("--altitudes-m {s}: expected metres separated by commas")))
+            .collect::<Result<_, _>>()?,
+        None => ALTITUDES_M.to_vec(),
+    };
+    let altitudes: &[f64] = &chosen;
+    let cold_altitudes: &[f64] = if o.only_steady { &[] } else { altitudes };
     let mut points: Vec<Point> = Vec::new();
     let mut n = 0usize;
-    for &altitude in altitudes {
+    for &altitude in cold_altitudes {
         let point = if smoke {
             // One trial at the start speed: proves the path, decides nothing.
             let (lat, lon) = trial_start(n, START_SPEED_MPS, frames, radius_m, stage.is_some());
@@ -651,7 +660,7 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
     };
     // The comparison line: one altitude (300 m) again with the horizon jobs off, so the log shows what they cost the curve.
     let horizon_off: Option<Point> = match stage {
-        Some(st) => {
+        Some(st) if !o.only_steady => {
             let off = StageSetup { horizon: false, ..st };
             let altitude = COMPARISON_ALTITUDE_M;
             let point = if smoke {
@@ -685,7 +694,7 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
             writeln!(out, "horizon off: {}", summary_line(&point)).map_err(err)?;
             Some(point)
         }
-        None => None,
+        _ => None,
     };
     let adapter = ctx.adapter_name();
     let chunk_field = stage.is_some() && chunk_view_of(&world).is_some();

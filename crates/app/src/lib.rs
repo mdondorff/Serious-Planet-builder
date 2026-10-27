@@ -205,6 +205,8 @@ pub struct Options {
     pub share_bound: f64,
     /// `--steady-window-s S`: the measured window of the `envelope` scene's steady-flight trial after its run-in (TEST-057); 60 s by default, 12 s is the quick single-edge trial.
     pub steady_window_s: f64,
+    /// `--only-steady`: the `envelope` scene runs only the steady-flight curve (no cold curve, no horizon-off comparison), over the `--altitudes-m` it is given (TEST-057).
+    pub only_steady: bool,
     /// `--lit`: the streaming perf scenes draw the lit path with the atmosphere and the water (TEST-025).
     pub lit: bool,
     /// `--flight-frames N`: frames of each coastal flight of the lit perf scenes.
@@ -362,6 +364,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         settle_ms: editwin::REFRESH_SETTLE_MS,
         share_bound: envelopeperf::DEFAULT_BOUND,
         steady_window_s: envelopeperf::STEADY_WINDOW_S,
+        only_steady: false,
         lit: false,
         flight_frames: 240,
         views: None,
@@ -398,6 +401,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--settle-ms" => {
                 o.settle_ms = it.next().ok_or("--settle-ms needs a value")?.parse().map_err(|e| format!("--settle-ms: {e}"))?
             }
+            "--only-steady" => o.only_steady = true,
             "--steady-window-s" => {
                 o.steady_window_s =
                     it.next().ok_or("--steady-window-s needs a value")?.parse().map_err(|e| format!("--steady-window-s: {e}"))?
