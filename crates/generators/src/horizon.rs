@@ -158,7 +158,7 @@ impl Kernel {
 /// scalar march breaks. `idx` of a stopped lane is 0, so the gather stays inside the raster (`n >= 2` and `(n + 1)^2 <= i32::MAX`, checked by the caller).
 ///
 /// # Safety
-/// The CPU must support AVX2.
+/// The CPU must support AVX2 and `r.heights` must hold `r.n * r.n` values (`bake_horizon_with` checks both before any texel).
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn horizon_at4(r: &HeightRaster<'_>, steps: &[(f64, f64)], x: usize, y: usize, dirs: &[(f64, f64); 4]) -> [u8; 4] {
@@ -209,6 +209,7 @@ unsafe fn horizon_at4(r: &HeightRaster<'_>, steps: &[(f64, f64)], x: usize, y: u
 
 /// The horizon bytes of one texel at every azimuth into `out`.
 fn texel_bytes(r: &HeightRaster<'_>, steps: &[(f64, f64)], x: usize, y: usize, dirs: &[(f64, f64)], kernel: Kernel, out: &mut [u8]) {
+    debug_assert_eq!(r.heights.len(), r.n * r.n, "the gather reads inside n x n heights");
     let mut k = 0;
     #[cfg(target_arch = "x86_64")]
     if kernel == Kernel::Avx2 && r.n >= 2 && (r.n + 1).saturating_mul(r.n + 1) <= i32::MAX as usize {
