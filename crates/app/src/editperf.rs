@@ -322,6 +322,8 @@ pub struct CaseRun {
     /// The refreshed set by level: how many of the tiles the edit named the plan drew, and at how many levels the stamp's largest change
     /// is below the sample spacing (the change cannot show there).
     pub levels: Vec<LevelRow>,
+    /// The first frames after the edit: (ms from set_definition, frame ms, tiles refreshed, jobs in flight, tiles waiting for an upload).
+    pub trace: Vec<[f64; 5]>,
 }
 
 /// The tiles the edit named at one level (the refreshed set's breakdown, M6 plan E1).
@@ -792,6 +794,9 @@ fn run_once(
             out.stages.first_dispatch_ms = Some(at);
         }
         let refreshed = stats.refreshed - before_stats.refreshed;
+        if out.trace.len() < 400 && at < 3000.0 {
+            out.trace.push([at, ms(frame_started), refreshed as f64, stats.in_flight as f64, h.rig.managed.pending().len() as f64]);
+        }
         if out.stages.half_refreshed_ms.is_none() && out.refreshed > 0 && refreshed * 2 >= out.refreshed as u64 {
             out.stages.half_refreshed_ms = Some(at);
         }
@@ -1188,6 +1193,15 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
     writeln!(out, "{chunks}").map_err(err)?;
     writeln!(out, "\n{table}\nstages (ms from set_definition; the calls and the frame median are durations):\n\n{stages}").map_err(err)?;
     writeln!(out, "\nthe refreshed set by level (first run of each case):\n\n{levels}").map_err(err)?;
+    writeln!(
+        out,
+        "
+the refresh frame by frame (first run of each case; rows where a count moved or a frame took over 30 ms):
+
+{}",
+        trace_table(&rows)
+    )
+    .map_err(err)?;
     let cost = preview_cost_table(&costs);
     writeln!(
         out,
@@ -1412,4 +1426,29 @@ mod tests {
         assert!(path.ends_with("edit-latency.md"));
         std::fs::remove_dir_all(dir.parent().unwrap().parent().unwrap()).unwrap();
     }
+}
+
+/// The first run of every case frame by frame (the tail of the refresh): ms from `set_definition`, the frame's own ms, tiles refreshed so far, jobs
+/// in flight, tiles waiting for an upload; rows where the refreshed count or the in-flight count moved, plus the slow frames.
+pub fn trace_table(rows: &[CaseRow]) -> String {
+    let mut s = String::new();
+    for r in rows {
+        let Some(run) = r.runs.first().filter(|x| !x.trace.is_empty()) else { continue };
+        s += &format!(
+            "{} m, {}: {} refreshed of {}\n\n| at | frame | refreshed | in flight | pending |\n|---|---|---|---|---|\n",
+            r.altitude_m,
+            r.radius_label(),
+            run.refreshed,
+            run.resident
+        );
+        let mut last = (f64::NAN, f64::NAN);
+        for t in &run.trace {
+            if t[2] != last.0 || t[3] != last.1 || t[1] > 30.0 {
+                s += &format!("| {:.0} | {:.1} | {:.0} | {:.0} | {:.0} |\n", t[0], t[1], t[2], t[3], t[4]);
+            }
+            last = (t[2], t[3]);
+        }
+        s.push('\n');
+    }
+    s
 }
