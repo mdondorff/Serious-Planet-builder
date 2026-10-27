@@ -23,6 +23,16 @@ Generator polish, after M8: why a stamped hill in the ocean ends just below sea 
 
 Data later (owner's idea, 2026-10-25): stores read through a local or remote data server, the local disk a cache, larger bakes streamed on demand; a backend behind the pack store's interface.
 
+## Deferred to M9 (running list, opus-planner)
+- Uplift that does not follow the input network (SPIKE-45; ADR 0080 point 4: the coupled run has no stream-power erosion at M8).
+- Coarse/fine network: the coarse network climbs beyond a 1 km node slide; deep cuts where the routed ground rises (Tracked).
+- Fine tributary tier inside chunks (ADR 0081 point 3; SPIKE-40 drainage density 0.5-3 km per km2).
+- Hill terrain realism against the look reference; slope targets from real elevation samples.
+- An elevation data source and its licence.
+- Edits on top of the erosion (D3, per-layer setting).
+- The photo layer (D6).
+- Flight lead margin (Tracked): ask the next chunk on entering the current one; lead at least the solve time.
+
 ## Game layer: direction
 - One workspace and one technology: the planet crates (`core`, `world-def`, `generators`, `cache`, `streaming`, `frame`, `render`) stay a library without game logic; a game is its own crate and run mode on top.
 - Embedding into another engine (Bevy, Unreal) is not planned: it would give up the frame loop and the test harness.
