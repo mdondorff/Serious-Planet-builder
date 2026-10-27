@@ -266,6 +266,8 @@ struct Running {
     coupled_shown: Option<planet_generators::coupled::CoupledLens>,
     /// Whether the frame loop counts the world's chunk stage (STRM-039): set once the world has one.
     chunks_on: bool,
+    /// The frame a smoke run pressed K at, over a chunk stage (`PLANET_SMOKE_LENS`).
+    smoke_lens_at: Option<u64>,
     /// The sun of the last lit plan before the editing light, for the title's local solar time (VIEW-054).
     sun_dir: [f32; 3],
     /// Where the camera was on the last frame, planet-fixed.
@@ -405,7 +407,9 @@ impl App<'_> {
             window.set_title(&planet_frame::viewer::roots_title(done, total));
         })?;
         // A world with a stored coupled channel gets the A-net chunk stage on a thread (STRM-046); the jobs run on a pool of half the generation workers' size.
-        if self.world.has_bake() && !cfg.smoke {
+        // A smoke run skips it (it needs no chunks), unless `PLANET_SMOKE_CHUNKS` asks: the smoke over a store with a coupled run then draws lit over the
+        // stage and its verdict wants the horizon jobs to have run (TEST-058).
+        if self.world.has_bake() && (!cfg.smoke || std::env::var_os("PLANET_SMOKE_CHUNKS").is_some()) {
             // The pool and the knobs of the viewer's chunk stage: one function, which the headless scenes use too (`anetworld::viewer_chunk_stage`).
             let (pool, chunk_cfg) = crate::anetworld::viewer_chunk_stage(cfg.gen);
             self.world.request_anet(pool, self.clock.clone(), chunk_cfg);
@@ -485,6 +489,7 @@ impl App<'_> {
             coupled_asked: None,
             coupled_shown: None,
             chunks_on: false,
+            smoke_lens_at: None,
             sun_dir: [0.0, 0.0, 1.0],
             camera_position: planet_core::Vec3::new(1.0, 0.0, 0.0),
             horizon: Default::default(),
@@ -778,7 +783,9 @@ impl App<'_> {
             if st.chunks_on {
                 let tiles: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
                 // The chunk step of the viewer and the scenes (TEST-058); the horizon jobs run for the lit frames only, their maps are uploaded below.
-                let features = crate::chunkstage::FrameFeatures { horizon: frame.pipeline.draw.plan.lit.is_some(), ..Default::default() };
+                // The lit plan is put on a copy of the draw plan later in the frame (`st.viewer.lit`), so the draw plan's own `lit` is always None
+                // here: reading it switched the horizon jobs off for good (the owner's session of 2026-10-27: no map baked in an hour).
+                let features = crate::chunkstage::FrameFeatures { horizon: st.viewer.lit, ..Default::default() };
                 let step = crate::chunkstage::frame_step(
                     self.world,
                     &mut st.rig.managed,
@@ -788,6 +795,7 @@ impl App<'_> {
                     &mut st.chunk_counters,
                 );
                 st.horizon_update = step.horizon;
+                st.counts.horizon_steps = st.chunk_counters.horizon_frames;
                 let update = step.update;
                 st.chunk_acc.0 += update.landed.len() as u64;
                 st.chunk_acc.1 += frame.counts.chunk.chunk_nodes as u64;
@@ -999,6 +1007,7 @@ impl App<'_> {
             let drew_lit = lit_plan.is_some();
             if drew_lit {
                 st.counts.lit_frames += 1;
+                st.counts.stage_lit_frames += u64::from(st.chunks_on);
                 st.counts.editing_light_frames += u64::from(st.viewer.editing_light);
                 st.counts.atmosphere_frames += u64::from(plan.lit.is_some_and(|l| l.atmosphere.is_some()));
                 st.counts.water_frames += u64::from(plan.water.as_ref().is_some_and(|w| !w.nodes.is_empty()));
@@ -1095,7 +1104,12 @@ impl App<'_> {
             if cfg.smoke {
                 // The editing script starts once the camera rests, so the run waits for it (at most until the give-up frame).
                 let editing_done = !cfg.edit || st.edit.as_ref().is_none_or(|e| e.smoke_finished()) || st.frames >= SMOKE_GIVE_UP;
-                if st.frames >= cfg.smoke_frames.max(SMOKE_FRAMES) && st.presented > 0 && editing_done {
+                // A smoke run asked for the chunk stage (`PLANET_SMOKE_CHUNKS`) waits for it to come up, and one asked for the K view waits a few
+                // frames after pressing it, so a slow runner cannot end the run before the stage or the lens did anything.
+                let stage_done = st.frames >= SMOKE_GIVE_UP
+                    || ((std::env::var_os("PLANET_SMOKE_CHUNKS").is_none() || st.chunks_on)
+                        && (std::env::var_os("PLANET_SMOKE_LENS").is_none() || st.smoke_lens_at.is_some_and(|f| st.frames >= f + 20)));
+                if st.frames >= cfg.smoke_frames.max(SMOKE_FRAMES) && st.presented > 0 && editing_done && stage_done {
                     // The verdict is on counts: lit frames with the atmosphere drawn and presented, the debug path too, an exposure
                     // reading, and the renderer's own account that the passes ran. No wall-clock (VIEW-005).
                     smoke_verdict(&st.counts, cfg.atmosphere)?;
@@ -1351,6 +1365,12 @@ fn smoke_keys(st: &mut Running, cameras: &[Camera], now_ms: u64) -> Result<bool,
             st.surface.set_vsync(&st.ctx, st.viewer.vsync);
         }
     };
+    // The K view of the coupled run's heights over a chunk stage (`PLANET_SMOKE_LENS`), pressed once the stage is up (it comes on a thread, and the
+    // stage needs the coupled run): the keys of every tile it re-keys are made on the pool workers (the owner's session of 2026-10-27 panicked there).
+    if st.frames >= 22 && st.chunks_on && st.smoke_lens_at.is_none() && std::env::var_os("PLANET_SMOKE_LENS").is_some() {
+        press(st, Command::CycleCoupledLens);
+        st.smoke_lens_at = Some(st.frames);
+    }
     match st.frames {
         // The window starts lit: V does nothing there, L goes to the debug path, V cycles a debug view, L comes back.
         4 => press(st, Command::NextView),
@@ -1708,6 +1728,8 @@ fn smoke_summary(st: &Running) -> String {
         + &edit
         + &globe
         + &repro
+        + &format!("
+  chunk step: {}", st.chunk_counters.line(&crate::chunkstage::FrameFeatures::default()))
 }
 
 /// `planet editor`: open the window and run the flight until it is closed (or, for `--smoke`, for a few dozen frames).

@@ -352,7 +352,7 @@ fn field_inputs(kind: Kind, field: &dyn HeightField, map: &dyn FaceMapping, tile
     );
     let reads: Vec<ReadEntry> = field.read_records_for(tile, map).iter().map(read_entry).collect();
     assert!(
-        !field.reads_cells() || reads.iter().any(|r| matches!(r, ReadEntry::Query { .. })),
+        !field.reads_cells_for(tile, map) || reads.iter().any(|r| matches!(r, ReadEntry::Query { .. })),
         "a field that reads cells must report its cell queries in read_records_for"
     );
     let mut output_params = BTreeMap::new();

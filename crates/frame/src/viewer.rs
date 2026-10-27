@@ -860,6 +860,10 @@ pub struct SmokeCounts {
     pub editing_light_frames: u64,
     /// Lit frames drawn with the stale-tile overlay (VIEW-044); the smoke run's fifth F3 press shows it and the verdict wants them.
     pub stale_overlay_frames: u64,
+    /// Lit frames drawn over a world with a chunk stage, and the frames whose chunk step ran the horizon jobs (TEST-058): the window that
+    /// drew lit over a chunk stage and never ran them baked no shadow (the owner's session of 2026-10-27).
+    pub stage_lit_frames: u64,
+    pub horizon_steps: u64,
 }
 
 /// Frames a smoke run must have drawn lit.
@@ -897,6 +901,13 @@ pub fn smoke_verdict(c: &SmokeCounts, atmosphere_wanted: bool) -> Result<(), Str
     }
     if c.editing_light_frames == 0 {
         return short("lit frames with the editing light", "0".into(), "at least 1 (the H key must switch it on)");
+    }
+    if c.stage_lit_frames > 0 && c.horizon_steps == 0 {
+        return short(
+            "frames whose chunk step ran the horizon jobs",
+            "0".into(),
+            &format!("at least 1 (all {} lit frames had a chunk stage, TEST-058)", c.stage_lit_frames),
+        );
     }
     if !c.renderer_ran_lit || (atmosphere_wanted && !c.renderer_ran_atmosphere) {
         return Err(format!(
@@ -1382,7 +1393,21 @@ mod tests {
             coarse_lod_refusals: 0,
             editing_light_frames: 4,
             stale_overlay_frames: 3,
+            stage_lit_frames: 0,
+            horizon_steps: 0,
         }
+    }
+
+    // spec: TEST-058
+    #[test]
+    fn a_smoke_run_that_drew_lit_over_a_chunk_stage_and_never_ran_the_horizon_jobs_fails_naming_the_count() {
+        let over_a_stage = SmokeCounts { stage_lit_frames: 40, horizon_steps: 40, ..good_counts() };
+        assert_eq!(smoke_verdict(&over_a_stage, true), Ok(()));
+        let never = SmokeCounts { horizon_steps: 0, ..over_a_stage };
+        let e = smoke_verdict(&never, true).unwrap_err();
+        assert!(e.contains("chunk step ran the horizon jobs") && e.contains("0") && e.contains("40 lit frames"), "{e}");
+        // A world without a chunk stage has no horizon jobs to run.
+        assert_eq!(smoke_verdict(&good_counts(), true), Ok(()));
     }
 
     // spec: VIEW-014, VIEW-030

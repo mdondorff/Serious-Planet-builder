@@ -403,6 +403,9 @@ impl crate::height::HeightField for WaterBounded<'_> {
     fn reads_cells(&self) -> bool {
         self.f().reads_cells()
     }
+    fn reads_cells_for(&self, tile: planet_core::TileId, map: &dyn FaceMapping) -> bool {
+        self.f().reads_cells_for(tile, map)
+    }
     fn inputs_hash_for(&self, tile: planet_core::TileId, map: &dyn FaceMapping) -> u64 {
         self.f().inputs_hash_for(tile, map)
     }

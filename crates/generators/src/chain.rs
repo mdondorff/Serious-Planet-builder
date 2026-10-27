@@ -193,14 +193,19 @@ impl HeightField for CoupledLensField<'_> {
     fn read_records(&self) -> Vec<planet_world_def::ReadRecord> {
         self.f().read_records()
     }
+    // The lens stops the key walk at itself (it changes the climate of every tile), but its reads are those of the layer the walk reaches below
+    // it: a stage that passes the tile through reads nothing of its own there (STRM-029), so the key of the tile names the layer under it.
     fn read_records_for(&self, tile: TileId, map: &dyn FaceMapping) -> Vec<planet_world_def::ReadRecord> {
-        self.f().read_records_for(tile, map)
+        crate::height::key_source(self.f(), tile, map).read_records_for(tile, map)
     }
     fn reads_cells(&self) -> bool {
         self.f().reads_cells()
     }
+    fn reads_cells_for(&self, tile: TileId, map: &dyn FaceMapping) -> bool {
+        crate::height::key_source(self.f(), tile, map).reads_cells_for(tile, map)
+    }
     fn inputs_hash_for(&self, tile: TileId, map: &dyn FaceMapping) -> u64 {
-        self.f().inputs_hash_for(tile, map)
+        crate::height::key_source(self.f(), tile, map).inputs_hash_for(tile, map)
     }
     fn body(&self) -> BodyId {
         self.f().body()

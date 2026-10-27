@@ -44,6 +44,7 @@ egui-winit.workspace = true
 
 [dev-dependencies]
 planet-testkit.workspace = true
+png.workspace = true
 planet-generators = { workspace = true, features = ["stress"] }
 # The flight differential draws the same plans with the test-only reference renderer (REND-031).
 planet-render = { workspace = true, features = ["reference-renderer"] }
