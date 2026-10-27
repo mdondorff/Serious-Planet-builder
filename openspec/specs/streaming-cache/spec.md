@@ -1062,7 +1062,7 @@ Source: STRM-018, SPIKE-34 section 7, D7, opus-planner (2026-10-26, criterion 7:
 - **THEN** the next chunk along the travel is requested before it is wanted, and the rotation requests none
 
 ### Requirement: STRM-045 The coarse horizon is stored as a channel
-The coarse horizon (GEN-045) SHALL be stored as a `TileChannel` of kind 9 in blocks of the canonical layout of its observer lattice (`GlobalWorld::layout(m)`): per observer cell one byte per azimuth, one `B x B` block per tile, as an LZ4 block with the azimuth count in its header. The key SHALL carry the observer lattice size, every parameter of the march and its version, and the whole coupled run it is computed from (STRM-043's spec and inputs hash), so a changed value gives every block a new key and no key equals a coupled-run block's.
+The coarse horizon (GEN-045) SHALL be stored as a `TileChannel` of kind 9 in blocks of the canonical layout of its observer lattice (`GlobalWorld::layout(m)`): per observer cell the record of GEN-045 (`2 a + 2` bytes for `a` azimuths), one `B x B` block per tile, as an LZ4 block with the record length in its header. The key SHALL carry the observer lattice size, every parameter of the march and its version, and the whole coupled run it is computed from (STRM-043's spec and inputs hash), so a changed value gives every block a new key and no key equals a coupled-run block's.
 
 Verify: A
 Status: active

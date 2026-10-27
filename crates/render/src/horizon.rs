@@ -3,7 +3,7 @@
 //! this only stores and binds it. Until the first [`HorizonGpu::set_capacity`] with a capacity both textures are 1 x 1 dummies, so the group is
 //! always complete, and a table of slot `-1` everywhere is the identity of the shadow term.
 
-use planet_frame::horizonview::{HorizonFrame, HORIZON_TEXELS, LAYERS_PER_SLOT, NODE_TABLE_FLOATS, SLOT_BYTES};
+use planet_frame::horizonview::{HorizonFrame, COARSE_LAYERS_PER_FACE, HORIZON_TEXELS, LAYERS_PER_SLOT, NODE_TABLE_FLOATS, SLOT_BYTES};
 
 use crate::GpuContext;
 
@@ -110,13 +110,13 @@ impl HorizonGpu {
         HorizonGpu { chunk, chunk_view, coarse, coarse_view, sampler, capacity: 0 }
     }
 
-    /// Give the shader the coarse map (`pack_coarse`: `6 * LAYERS_PER_SLOT` layers of `m x m` texels), or the dummy again with `None`. Always a new
+    /// Give the shader the coarse map (`pack_coarse`: `6 * COARSE_LAYERS_PER_FACE` layers of `m x m` texels), or the dummy again with `None`. Always a new
     /// texture, so the bind groups have to be made again.
     pub(crate) fn set_coarse(&mut self, ctx: &GpuContext, coarse: Option<(u32, &[u8])>) {
         let (texture, view) = match coarse {
             None => make_array(&ctx.device, "horizon-coarse-dummy", 1, 1),
             Some((m, packed)) => {
-                let layers = 6 * LAYERS_PER_SLOT as u32;
+                let layers = 6 * COARSE_LAYERS_PER_FACE as u32;
                 assert_eq!(packed.len() as u64, u64::from(layers) * u64::from(m) * u64::from(m) * 4, "a coarse map of {m} cells a face");
                 let (texture, view) = make_array(&ctx.device, "horizon-coarse", m, layers);
                 ctx.queue.write_texture(
@@ -219,6 +219,8 @@ pub struct HorizonQuery {
     pub sun: [f32; 3],
     /// The distance in metres from the surface point to the camera, for the fade of the coarse map (REND-043); 0 is full strength.
     pub distance_m: f32,
+    /// The height of the surface point above the sea in metres, the height the coarse map blends its two horizons by.
+    pub height_m: f32,
 }
 
 /// What [`probe_horizon`] gives back for a query.
@@ -241,8 +243,8 @@ struct Q { up: vec4<f32>, sun: vec4<f32>, at: vec4<f32> };
 fn probe(@builtin(global_invocation_id) id: vec3<u32>) {
     let q = queries[id.x];
     let fade = horizon_coarse_fade(q.at.w);
-    let h = horizon_at(u32(q.at.z), q.at.xy, q.up.xyz, q.sun.xyz, fade);
-    results[id.x] = vec4<f32>(shadow_factor(u32(q.at.z), q.at.xy, q.up.xyz, q.sun.xyz, fade), h.x, h.y, 0.0);
+    let h = horizon_at(u32(q.at.z), q.at.xy, q.up.xyz, q.sun.xyz, fade, q.up.w);
+    results[id.x] = vec4<f32>(shadow_factor(u32(q.at.z), q.at.xy, q.up.xyz, q.sun.xyz, fade, q.up.w), h.x, h.y, 0.0);
 }
 "#;
 
@@ -274,7 +276,20 @@ pub fn probe_horizon(
     let input: Vec<f32> = queries
         .iter()
         .flat_map(|q| {
-            [q.up[0], q.up[1], q.up[2], 0.0, q.sun[0], q.sun[1], q.sun[2], 0.0, q.tile_uv[0], q.tile_uv[1], q.node as f32, q.distance_m]
+            [
+                q.up[0],
+                q.up[1],
+                q.up[2],
+                q.height_m,
+                q.sun[0],
+                q.sun[1],
+                q.sun[2],
+                0.0,
+                q.tile_uv[0],
+                q.tile_uv[1],
+                q.node as f32,
+                q.distance_m,
+            ]
         })
         .collect();
     let query_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

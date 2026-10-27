@@ -1,11 +1,11 @@
 //! The coarse horizon of the global run as a stored channel (M8-5, STRM-045): blocks of the canonical layout of the observer lattice
-//! (`GlobalWorld::layout(m)`), one byte per observer cell and azimuth, LZ4. The map is a pure function of the coupled run's stored heights and
+//! (`GlobalWorld::layout(m)`), `record_len(azimuths)` bytes per observer cell (the horizons from the cell's lowest and highest ground and the two heights), LZ4. The map is a pure function of the coupled run's stored heights and
 //! the march (`generators::coarsehorizon`), and the key carries both.
 
 use std::path::Path;
 
 use planet_core::{Face, TileId};
-use planet_generators::coarsehorizon::MAX_AZIMUTHS;
+use planet_generators::coarsehorizon::{record_len, MAX_AZIMUTHS};
 use planet_generators::global::MAX_BLOCK_CELLS;
 
 use crate::global_store::{channel_record, stored_channel, BlockCodecError, GlobalBuildError, GlobalWorld, TileChannel};
@@ -16,12 +16,16 @@ use crate::pack::{PackWriter, Record, TileStore};
 pub const KIND_GLOBAL_HORIZON: u8 = Kind::GlobalHorizon as u8;
 
 /// Version of the coarse-horizon block payload layout. History: 1 = `codec version (u8) | B (u32 LE) | azimuths (u32 LE) | raw length (u32 LE)`,
-/// then an LZ4 block of `B x B x azimuths` bytes (row `j` outer, then `i`, then the azimuth).
+/// then an LZ4 block of `B x B x azimuths` bytes (row `j` outer, then `i`, then the azimuth). The `azimuths` field is the bytes of one cell: since the
+/// stored map holds two horizons and the cell's heights (`record_len`) it is `2 a + 2` for `a` marched azimuths, and the key says which (STRM-045).
 pub const HORIZON_CODEC_VERSION: u8 = 1;
 
 const HEADER_LEN: usize = 13;
 
-/// A block of the coarse horizon: `cells x cells` observer cells, `azimuths` bytes each.
+/// The most bytes a cell of a stored block may hold: the record of the most azimuths a march may have (`record_len(MAX_AZIMUTHS)`).
+const MAX_RECORD: u32 = record_len(MAX_AZIMUTHS as usize) as u32;
+
+/// A block of the coarse horizon: `cells x cells` observer cells, `azimuths` bytes each (the bytes of one cell, `record_len` of the marched azimuths).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HorizonBlock {
     pub cells: u32,
@@ -42,7 +46,7 @@ pub fn encode_horizon_block(block: &HorizonBlock) -> Result<Vec<u8>, BlockCodecE
     if !valid_cells(block.cells) {
         return Err(BlockCodecError::Cells(block.cells));
     }
-    if block.azimuths == 0 || block.azimuths > MAX_AZIMUTHS {
+    if block.azimuths == 0 || block.azimuths > MAX_RECORD {
         return Err(BlockCodecError::HorizonAzimuths(block.azimuths));
     }
     let expected = raw_len(block.cells, block.azimuths);
@@ -71,7 +75,7 @@ pub fn decode_horizon_block(bytes: &[u8]) -> Result<HorizonBlock, BlockCodecErro
     if !valid_cells(cells) {
         return Err(BlockCodecError::Cells(cells));
     }
-    if azimuths == 0 || azimuths > MAX_AZIMUTHS {
+    if azimuths == 0 || azimuths > MAX_RECORD {
         return Err(BlockCodecError::HorizonAzimuths(azimuths));
     }
     let claimed = u32::from_le_bytes(bytes[9..13].try_into().expect("4 bytes"));
@@ -104,8 +108,8 @@ impl TileChannel for HorizonChannel {
     }
 }
 
-/// The stored coarse horizon reassembled over the observer lattice: `6 m m azimuths` bytes, faces in order, rows `j` outer, then `i`, then the
-/// azimuth (the layout of `generators::coarsehorizon::coarse_horizon`).
+/// The stored coarse horizon reassembled over the observer lattice: `6 m m` records of `record_len(azimuths)` bytes, faces in order, rows `j` outer,
+/// then `i` (the layout of `generators::coarsehorizon::coarse_horizon_range`); `azimuths` is the marched azimuth count.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoredHorizon {
     pub m: u32,
@@ -114,10 +118,10 @@ pub struct StoredHorizon {
 }
 
 impl GlobalWorld {
-    /// The records of a coarse horizon `map` (the output of `coarse_horizon` for the world's spec): one per tile of the observer lattice's layout.
+    /// The records of a coarse horizon `map` (the output of `coarse_horizon_range` for the world's spec): one per tile of the observer lattice's layout.
     pub fn horizon_records(&self, map: &[u8]) -> Result<Vec<Record>, BlockCodecError> {
         let spec = self.horizon_spec();
-        let (m, a) = (spec.m as usize, spec.params.azimuths as usize);
+        let (m, a) = (spec.m as usize, record_len(spec.params.azimuths as usize));
         // The observer lattice is laid over the coupled run's: its size must divide the run's, and the azimuth count must be one a block holds.
         let run_n = self.coupled_spec().n;
         if spec.m == 0 || spec.m > run_n || !run_n.is_multiple_of(spec.m) {
@@ -138,7 +142,7 @@ impl GlobalWorld {
             for ty in 0..per_edge {
                 for tx in 0..per_edge {
                     let tile = TileId::new(Face(face), level, tx, ty).expect("a tile of the layout");
-                    let mut block = HorizonBlock { cells, azimuths: spec.params.azimuths, bytes: Vec::with_capacity(b * b * a) };
+                    let mut block = HorizonBlock { cells, azimuths: a as u32, bytes: Vec::with_capacity(b * b * a) };
                     for j in 0..b {
                         let row = ((usize::from(face) * m + ty as usize * b + j) * m + tx as usize * b) * a;
                         block.bytes.extend_from_slice(&map[row..row + b * a]);
@@ -165,7 +169,7 @@ pub fn store_horizon(dir: &Path, world: &GlobalWorld, map: &[u8], max_pack_bytes
 /// The stored coarse horizon reassembled: an error naming the block when one is missing, damaged, of another `B` or of another azimuth count.
 pub fn load_horizon(store: &TileStore, world: &GlobalWorld) -> Result<StoredHorizon, GlobalBuildError> {
     let spec = world.horizon_spec();
-    let (m, a) = (spec.m as usize, spec.params.azimuths as usize);
+    let (m, a) = (spec.m as usize, record_len(spec.params.azimuths as usize));
     let (level, cells) = world.layout(spec.m)?;
     let (per_edge, b) = (1u32 << level, cells as usize);
     let mut bytes = vec![0u8; 6 * m * m * a];
@@ -174,13 +178,13 @@ pub fn load_horizon(store: &TileStore, world: &GlobalWorld) -> Result<StoredHori
             for tx in 0..per_edge {
                 let tile = TileId::new(Face(face), level, tx, ty).expect("a tile of the layout");
                 let block = stored_channel::<HorizonChannel>(store, world, tile, cells)?;
-                if block.azimuths != spec.params.azimuths {
+                if block.azimuths != a as u32 {
                     return Err(GlobalBuildError::MissingBlock(format!(
-                        "{} {:#018x}: it has {} azimuths, the spec says {}",
+                        "{} {:#018x}: its cells hold {} bytes, the spec says {}",
                         HorizonChannel::LABEL,
                         tile.raw(),
                         block.azimuths,
-                        spec.params.azimuths
+                        a
                     )));
                 }
                 for j in 0..b {

@@ -230,12 +230,16 @@ fn the_stored_coarse_horizon_is_read_on_a_thread_and_a_world_without_one_says_ho
     wait_for_run(&world);
     let records = world.make_coarse_horizon(2).expect("the horizon is made");
     assert!(records >= 6, "{records} records");
-    // A fresh world over the same store reads it back: observer lattice of the run's size, 16 azimuths, as many bytes as the layout says.
+    // A fresh world over the same store reads it back: observer lattice of the run size, 16 azimuths, as many records as the layout says.
     let again = open(&store);
     match wait(&again) {
         CoarseStanding::Ready(h) => {
             assert_eq!((h.m, h.azimuths), (RES, 16));
-            assert_eq!(h.bytes.len(), 6 * (RES as usize) * (RES as usize) * 16);
+            assert_eq!(
+                h.bytes.len(),
+                6 * (RES as usize) * (RES as usize) * planet_generators::coarsehorizon::record_len(16),
+                "a record a cell: two horizons and the heights"
+            );
         }
         s => panic!("expected Ready, got {s:?}"),
     }

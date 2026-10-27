@@ -59,20 +59,31 @@ pub fn pack_map(bytes: &[u8], n: usize, azimuths: usize) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// The coarse horizon map (GEN-045: faces in order, rows `j` outer, `i`, then azimuth; `m x m` cells a face) packed as the GPU reads it: layer
-/// `4 f + L` of the array holds face `f`, azimuths `4 L .. 4 L + 3` in the four channels of the texel `(i, j)`; a missing azimuth is 0. `None`
-/// for a map that is not `6 m^2` cells (`m >= 2`: a 1 x 1 texture is the shader's "no coarse map") of exactly [`MAX_SLOT_AZIMUTHS`] (16) azimuths.
+/// Layers of the coarse map a face: the horizons from the cell's lowest ground (`LAYERS_PER_SLOT`), from its highest ground (`LAYERS_PER_SLOT`), then
+/// one layer holding the lowest and the highest ground in its red and green channels (GEN-045).
+pub const COARSE_LAYERS_PER_FACE: usize = 2 * LAYERS_PER_SLOT + 1;
+
+/// The coarse horizon map (GEN-045: `6 m^2` records of `record_len(16)` bytes, faces in order, rows `j` outer, then `i`; a record is the 16 azimuths
+/// from the lowest ground, the 16 from the highest, then the two heights) packed as the GPU reads it: layer `9 f + L` of the array holds face `f`,
+/// azimuths `4 L .. 4 L + 3` from the lowest ground in the four channels of the texel `(i, j)` for `L < 4`, from the highest ground for `4 <= L < 8`,
+/// and the heights in red and green for `L = 8`. `None` for a map that is not that many records (`m >= 2`: a 1 x 1 texture is the shader's "no
+/// coarse map") of exactly [`MAX_SLOT_AZIMUTHS`] (16) azimuths.
 pub fn pack_coarse(bytes: &[u8], m: usize, azimuths: usize) -> Option<Vec<u8>> {
-    if m < 2 || azimuths != MAX_SLOT_AZIMUTHS || bytes.len() != 6 * m * m * azimuths {
+    let width = planet_generators::coarsehorizon::record_len(azimuths);
+    if m < 2 || azimuths != MAX_SLOT_AZIMUTHS || bytes.len() != 6 * m * m * width {
         return None;
     }
-    let mut out = vec![0u8; 6 * LAYERS_PER_SLOT * m * m * 4];
+    let mut out = vec![0u8; 6 * COARSE_LAYERS_PER_FACE * m * m * 4];
     for face in 0..6 {
         for cell in 0..m * m {
-            for k in 0..azimuths {
-                let (layer, channel) = (face * LAYERS_PER_SLOT + k / AZIMUTHS_PER_LAYER, k % AZIMUTHS_PER_LAYER);
-                out[(layer * m * m + cell) * 4 + channel] = bytes[(face * m * m + cell) * azimuths + k];
+            let record = &bytes[(face * m * m + cell) * width..(face * m * m + cell + 1) * width];
+            for (k, &byte) in record[..2 * azimuths].iter().enumerate() {
+                let (layer, channel) = (face * COARSE_LAYERS_PER_FACE + k / AZIMUTHS_PER_LAYER, k % AZIMUTHS_PER_LAYER);
+                out[(layer * m * m + cell) * 4 + channel] = byte;
             }
+            let layer = face * COARSE_LAYERS_PER_FACE + 2 * LAYERS_PER_SLOT;
+            out[(layer * m * m + cell) * 4] = record[2 * azimuths];
+            out[(layer * m * m + cell) * 4 + 1] = record[2 * azimuths + 1];
         }
     }
     Some(out)
@@ -270,22 +281,33 @@ mod tests {
 
     // spec: REND-041
     #[test]
-    fn the_coarse_map_is_packed_to_four_layers_a_face_with_four_azimuths_a_texel() {
+    fn the_coarse_map_is_packed_to_nine_layers_a_face_two_of_four_azimuths_a_texel_and_the_heights() {
         let (m, a) = (3usize, 16usize);
-        let bytes: Vec<u8> = (0..6 * m * m * a).map(|i| (i % 251) as u8).collect();
+        let w = planet_generators::coarsehorizon::record_len(a);
+        let bytes: Vec<u8> = (0..6 * m * m * w).map(|i| (i % 251) as u8).collect();
         let packed = pack_coarse(&bytes, m, a).unwrap();
-        assert_eq!(packed.len(), 6 * LAYERS_PER_SLOT * m * m * 4);
-        for (face, cell, k) in [(0usize, 0usize, 0usize), (2, 4, 15), (5, 8, 3), (3, 1, 4)] {
-            let (layer, channel) = (face * LAYERS_PER_SLOT + k / 4, k % 4);
+        assert_eq!(packed.len(), 6 * COARSE_LAYERS_PER_FACE * m * m * 4);
+        // The low-ground azimuths in layers 0 to 3, the high-ground azimuths in layers 4 to 7 (bytes 16 to 31 of the record), the heights in layer 8.
+        for (face, cell, k) in [(0usize, 0usize, 0usize), (2, 4, 15), (5, 8, 3), (3, 1, 4), (1, 7, 16), (4, 2, 31), (0, 5, 20)] {
+            let (layer, channel) = (face * COARSE_LAYERS_PER_FACE + k / 4, k % 4);
             assert_eq!(
                 packed[(layer * m * m + cell) * 4 + channel],
-                bytes[(face * m * m + cell) * a + k],
-                "face {face} cell {cell} azimuth {k}"
+                bytes[(face * m * m + cell) * w + k],
+                "face {face} cell {cell} byte {k}"
+            );
+        }
+        for (face, cell) in [(0usize, 0usize), (2, 4), (5, 8)] {
+            let layer = face * COARSE_LAYERS_PER_FACE + 8;
+            let r = &bytes[(face * m * m + cell) * w..(face * m * m + cell + 1) * w];
+            assert_eq!(
+                &packed[(layer * m * m + cell) * 4..(layer * m * m + cell) * 4 + 4],
+                &[r[32], r[33], 0, 0],
+                "the heights of face {face} cell {cell}"
             );
         }
         // The shader places azimuth k at k / 16 of a turn: any other count, a missing byte and a 1 x 1 map (the shader's "none") are refused.
         assert!(pack_coarse(&bytes[1..], m, a).is_none() && pack_coarse(&bytes, m, 17).is_none());
-        assert!(pack_coarse(&vec![0u8; 6 * m * m * 4], m, 4).is_none() && pack_coarse(&[0u8; 6 * 16], 1, 16).is_none());
+        assert!(pack_coarse(&vec![0u8; 6 * m * m * 4], m, 4).is_none() && pack_coarse(&[0u8; 6 * 34], 1, 16).is_none());
     }
 
     // spec: REND-041

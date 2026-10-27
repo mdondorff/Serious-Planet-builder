@@ -3,8 +3,8 @@
 //! tens of kilometres away reaches a tile before its chunk's own horizon (GEN-044, range 5 km) is there. A pure function of the stored heights
 //! and the parameters, in a fixed order with `libm` (CON-14); rows of cells are independent, so the result does not depend on the thread count.
 //!
-//! The observers sit on a lattice of `m` cells per face edge (a divisor of the run's `n`, so the stored map stays small: 25 MB at 512 for the
-//! 16 azimuths); the heights are read at the run's own resolution through the direction of each sample, which is how a march crosses a cube
+//! The observers sit on a lattice of `m` cells per face edge (a divisor of the run's `n`, so the stored map stays small: 53 MB at 512 for the
+//! 16 azimuths and the two heights of a cell, [`record_len`], and 57 MB as the renderer's texture); the heights are read at the run's own resolution through the direction of each sample, which is how a march crosses a cube
 //! face edge: no face coordinate is carried along the march (the same way the coupled run finds its neighbours).
 
 use crate::coupled::Lattice;
@@ -15,7 +15,39 @@ use planet_core::Vec3;
 pub const MAX_AZIMUTHS: u32 = 256;
 
 /// Version of the march and the byte it stores; it is part of the key of the stored map (STRM-045), so a change to what the march gives must bump it.
-pub const COARSE_HORIZON_VERSION: u32 = 1;
+pub const COARSE_HORIZON_VERSION: u32 = 2;
+
+/// The height step of the stored lowest and highest ground of an observer cell, metres: 8 bits, so up to 10,200 m (a higher cell stores 255 steps).
+pub const HEIGHT_STEP_M: f64 = 40.0;
+
+/// Bytes of one observer cell of the stored map (GEN-045): the elevation toward each azimuth from the cell's lowest ground, the same from its highest
+/// ground, then the lowest and highest ground themselves in [`HEIGHT_STEP_M`] steps.
+pub const fn record_len(azimuths: usize) -> usize {
+    2 * azimuths + 2
+}
+
+/// The height an observer cell's march starts from.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Observer {
+    /// The mean of the `k x k` cells of the run the observer covers (the sea's surface counts 0).
+    Mean,
+    /// The lowest of them: the horizon of a point on the cell's low ground, the highest horizon the cell has.
+    Lowest,
+    /// The highest of them: the horizon of a point on the cell's high ground, the lowest the cell has.
+    Highest,
+    /// A fixed height in metres (a test's exact horizon at an intermediate height).
+    At(f64),
+}
+
+/// The elevation of the horizon at a point at height `h` in a cell whose lowest ground is `lo_h` (elevation `lo`) and highest `hi_h` (elevation `hi`): the
+/// two blended by where the point stands between them, clamped to them. The shader does the same (`horizon_coarse_elevation`). Stated limits: the
+/// exact horizon is convex in the observer's height, so the blend lies at or above it between the two heights (more shadow, never less; about
+/// 1.7 degrees at most in the plateau test); the heights are stored up to 10,200 m; and the shader blends after the bilinear filter of the four
+/// cells, not before.
+pub fn blend_elevation(lo: f64, hi: f64, lo_h: f64, hi_h: f64, h: f64) -> f64 {
+    let t = ((h - lo_h) / (hi_h - lo_h).max(1.0)).clamp(0.0, 1.0);
+    lo + (hi - lo) * t
+}
 
 /// How the coarse horizon is marched.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -63,10 +95,51 @@ pub(crate) fn elevation(r: f64, h0: f64, h: f64, s: f64) -> f64 {
     libm::atan2((r + h) * libm::cos(theta) - (r + h0), (r + h) * libm::sin(theta))
 }
 
-/// The coarse horizon bytes of every cell of an `m x m` lattice per face (faces in order, rows `j` outer, `i`, then azimuth): the stored form of
-/// [`crate::horizon::quantize`]. `z` holds the heights of `run` (`run.len()` values; sea at or below 0 counts as 0, the sea's surface), `m` must
+/// The coarse horizon bytes of every cell of an `m x m` lattice per face (faces in order, rows `j` outer, `i`, then azimuth) from the observer at the
+/// cell's mean ground (the stored map is [`coarse_horizon_range`]): the form of [`crate::horizon::quantize`]. `z` holds the heights of `run` (`run.len()` values; sea at or below 0 counts as 0, the sea's surface), `m` must
 /// divide the run's lattice size. Refused with the cause named on a wrong size, a bad `m` or parameters that are not finite and positive.
 pub fn coarse_horizon(run: &Lattice, z: &[f32], m: usize, p: &CoarseParams, threads: usize) -> Result<Vec<u8>, String> {
+    coarse_horizon_at(run, z, m, p, threads, Observer::Mean)
+}
+
+/// The stored map (GEN-045): per observer cell [`record_len`] bytes, the horizon from the cell's lowest ground, from its highest ground and the two
+/// heights, so a point can take the horizon its own height has in the cell instead of the one of the cell's mean ground (a point on a crest above the
+/// mean was shadowed by a plateau its own height clears). Faces in order, rows `j` outer, `i`, then the record.
+pub fn coarse_horizon_range(run: &Lattice, z: &[f32], m: usize, p: &CoarseParams, threads: usize) -> Result<Vec<u8>, String> {
+    let lo = coarse_horizon_at(run, z, m, p, threads, Observer::Lowest)?;
+    let hi = coarse_horizon_at(run, z, m, p, threads, Observer::Highest)?;
+    let (n, a) = (run.n(), p.azimuths as usize);
+    let k = n / m;
+    let mut out = Vec::with_capacity(6 * m * m * record_len(a));
+    for cell in 0..6 * m * m {
+        out.extend_from_slice(&lo[cell * a..(cell + 1) * a]);
+        out.extend_from_slice(&hi[cell * a..(cell + 1) * a]);
+        let (face, rest) = (cell / (m * m), cell % (m * m));
+        let (i, j) = (rest % m, rest / m);
+        let (mut low, mut high) = (f64::INFINITY, f64::NEG_INFINITY);
+        for dj in 0..k {
+            for di in 0..k {
+                let h = f64::from(z[face * n * n + (j * k + dj) * n + i * k + di]).max(0.0);
+                low = low.min(h);
+                high = high.max(h);
+            }
+        }
+        // The stored heights bracket the true ones: the lowest rounds down, the highest up.
+        out.push((libm::floor(low / HEIGHT_STEP_M).clamp(0.0, 255.0)) as u8);
+        out.push((libm::ceil(high / HEIGHT_STEP_M).clamp(0.0, 255.0)) as u8);
+    }
+    Ok(out)
+}
+
+/// [`coarse_horizon`] with the observer standing at the cell's mean, lowest or highest ground.
+pub fn coarse_horizon_at(
+    run: &Lattice,
+    z: &[f32],
+    m: usize,
+    p: &CoarseParams,
+    threads: usize,
+    observer: Observer,
+) -> Result<Vec<u8>, String> {
     let n = run.n();
     if z.len() != run.len() {
         return Err(format!("the run holds {} heights, not the {} of a lattice of {n} cells per face edge", z.len(), run.len()));
@@ -93,18 +166,27 @@ pub fn coarse_horizon(run: &Lattice, z: &[f32], m: usize, p: &CoarseParams, thre
     // The last sample can fall just short of the range through rounding of the quotient: count it.
     let steps = (p.range_m / p.step_m + 1e-9).floor() as usize;
     let height = |dir: Vec3| f64::from(z[run.cell_at(dir)]).max(0.0);
-    // An observer cell covers `k x k` cells of the run: its height is their mean (the sea's surface counts 0), not one arbitrary corner cell.
+    // An observer cell covers `k x k` cells of the run: its height is their mean, lowest or highest (the sea's surface counts 0), not one arbitrary
+    // corner cell.
     let k = n / m;
     let observer_height = |cell: usize| -> f64 {
         let (face, rest) = (cell / (m * m), cell % (m * m));
         let (i, j) = (rest % m, rest / m);
-        let mut sum = 0.0;
+        let (mut sum, mut low, mut high) = (0.0, f64::INFINITY, f64::NEG_INFINITY);
         for dj in 0..k {
             for di in 0..k {
-                sum += f64::from(z[face * n * n + (j * k + dj) * n + i * k + di]).max(0.0);
+                let h = f64::from(z[face * n * n + (j * k + dj) * n + i * k + di]).max(0.0);
+                sum += h;
+                low = low.min(h);
+                high = high.max(h);
             }
         }
-        sum / (k * k) as f64
+        match observer {
+            Observer::Mean => sum / (k * k) as f64,
+            Observer::Lowest => low,
+            Observer::Highest => high,
+            Observer::At(h) => h,
+        }
     };
     let cells = 6 * m * m;
     let mut out = vec![0u8; cells * a];
@@ -160,6 +242,83 @@ mod tests {
         let north = from.cross(east).normalized();
         let az = libm::atan2(to.dot(east), to.dot(north));
         (az / core::f64::consts::TAU * f64::from(a)).round().rem_euclid(f64::from(a)) as usize % a as usize
+    }
+
+    // spec: GEN-045
+    #[test]
+    fn a_crest_above_the_cells_mean_ground_keeps_the_horizon_its_own_height_has_while_the_low_ground_stays_in_shadow() {
+        // The owner's frame-102263 (2026-10-27): the horizon of a cell, taken from its mean ground and applied to every point of it, blanked the lit
+        // crests of a cell whose mean ground sat below a plateau sunward. One observer cell of 4 x 4 run cells on a flat body: a crest of 1,500 m in
+        // one corner, the rest at 0, and a wide plateau of 450 m some 12 km away.
+        let run = Lattice::new(N, R);
+        let m = 16;
+        let p = params();
+        let (i0, j0) = (8 * 4, 8 * 4);
+        let cell = 8 * m + 8;
+        let mut z = plateau(&run, i0 + 6 + (j0 + 1) * N, 6_000.0, 450.0);
+        z[i0 + j0 * N] = 1_500.0;
+        let obs = Lattice::new(m, R);
+        let toward = azimuth_toward(obs.direction(cell), run.direction(i0 + 6 + (j0 + 1) * N), p.azimuths);
+        let a = p.azimuths as usize;
+        let mean = dequantize(coarse_horizon(&run, &z, m, &p, 2).unwrap()[cell * a + toward]).to_degrees();
+        let rec = coarse_horizon_range(&run, &z, m, &p, 2).unwrap();
+        assert_eq!(rec.len(), 6 * m * m * record_len(a));
+        let r = &rec[cell * record_len(a)..(cell + 1) * record_len(a)];
+        let (lo, hi) = (dequantize(r[toward]).to_degrees(), dequantize(r[a + toward]).to_degrees());
+        let (lo_h, hi_h) = (f64::from(r[2 * a]) * HEIGHT_STEP_M, f64::from(r[2 * a + 1]) * HEIGHT_STEP_M);
+        assert!(mean > 1.0, "from the mean ground the plateau stands over a sun of 0.9 degrees: {mean:.2}");
+        assert!(lo >= mean && lo > 1.0 && hi < 0.4, "low ground {lo:.2}, high ground {hi:.2}, mean {mean:.2}");
+        assert!(lo_h == 0.0 && (1_500.0..=1_500.0 + HEIGHT_STEP_M).contains(&hi_h), "the heights bracket the cell: {lo_h} to {hi_h}");
+        let sun = 0.9;
+        assert!(blend_elevation(lo, hi, lo_h, hi_h, 1_500.0) < sun, "a point on the crest is lit at a sun of {sun} degrees");
+        assert!(blend_elevation(lo, hi, lo_h, hi_h, 0.0) > sun, "a point on the low ground is in the plateau's shadow");
+        // Between the two the horizon falls with the height, and outside them it stays at the ends.
+        let mid = blend_elevation(lo, hi, lo_h, hi_h, 0.5 * (lo_h + hi_h));
+        assert!(mid < lo && mid > hi);
+        assert_eq!(blend_elevation(lo, hi, lo_h, hi_h, -50.0), lo);
+        assert_eq!(blend_elevation(lo, hi, lo_h, hi_h, 5_000.0), hi);
+        // A cell with one ground height has a degenerate range: the low horizon.
+        assert_eq!(blend_elevation(2.0, 2.0, 100.0, 100.0, 100.0), 2.0);
+        // The exact horizon at an intermediate height (a march from that height) is convex in the height, so the blend of the two ends is at or above it:
+        // more shadow, never less, by about 1.7 degrees at most here (the stated limit of GEN-045).
+        let mut worst = 0.0f64;
+        for h in [0.0, 200.0, 450.0, 900.0, 1_500.0] {
+            let at = coarse_horizon_at(&run, &z, m, &p, 2, Observer::At(h)).unwrap();
+            let exact = dequantize(at[cell * a + toward]).to_degrees();
+            let blend = blend_elevation(lo, hi, lo_h, hi_h, h);
+            assert!(blend >= exact - 2.0 * DEGREES_PER_STEP, "height {h}: the blend {blend:.2} is under the exact {exact:.2} degrees");
+            worst = worst.max(blend - exact);
+        }
+        assert!(worst < 2.0, "the blend over-shadows by at most 2 degrees: {worst:.2}");
+    }
+
+    // spec: GEN-045
+    #[test]
+    fn the_stored_record_holds_the_low_and_high_horizons_then_the_bracketing_heights_in_the_order_of_cells() {
+        let run = Lattice::new(16, R);
+        let z: Vec<f32> = (0..run.len())
+            .map(|c| {
+                let d = run.direction(c);
+                (3000.0 * (d.x * d.y + 0.4 * d.z * d.x) + 600.0 * ((c % 3) as f64)) as f32
+            })
+            .collect();
+        let p = CoarseParams { range_m: 30_000.0, step_m: 6_000.0, ..params() };
+        let (m, a) = (4usize, p.azimuths as usize);
+        let rec = coarse_horizon_range(&run, &z, m, &p, 3).unwrap();
+        let (lowest, highest) = (
+            coarse_horizon_at(&run, &z, m, &p, 3, Observer::Lowest).unwrap(),
+            coarse_horizon_at(&run, &z, m, &p, 3, Observer::Highest).unwrap(),
+        );
+        assert_eq!(coarse_horizon_range(&run, &z, m, &p, 1).unwrap(), rec, "the thread count changes nothing");
+        for cell in 0..6 * m * m {
+            let r = &rec[cell * record_len(a)..(cell + 1) * record_len(a)];
+            assert_eq!(&r[..a], &lowest[cell * a..(cell + 1) * a]);
+            assert_eq!(&r[a..2 * a], &highest[cell * a..(cell + 1) * a]);
+            // The lower the observer, the higher the horizon it sees.
+            assert!((0..a).all(|k| r[k] >= r[a + k]), "cell {cell}: the low ground's horizon is the higher");
+            assert!(r[2 * a] <= r[2 * a + 1], "cell {cell}: lowest at most highest");
+        }
+        assert_eq!(coarse_horizon_range(&run, &z, 5, &p, 1).unwrap_err(), coarse_horizon(&run, &z, 5, &p, 1).unwrap_err());
     }
 
     // spec: GEN-045

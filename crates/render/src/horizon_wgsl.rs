@@ -28,6 +28,10 @@ const HORIZON_QUARTER_PI: f32 = 0.7853981633974483;
 // The soft edge in radians of sun elevation over the horizon (GEN-046): fully in shadow 0.35 degrees below, fully lit 0.9 degrees above.
 const HORIZON_SOFT_BELOW: f32 = 0.006108652381980153;
 const HORIZON_SOFT_ABOVE: f32 = 0.015707963267948967;
+// The coarse map's layers a face: the horizons from the cell's lowest ground (4), from its highest ground (4), then the lowest and highest ground in
+// steps of HORIZON_COARSE_STEP_M metres (red and green; GEN-045).
+const HORIZON_COARSE_LAYERS: u32 = 9u;
+const HORIZON_COARSE_STEP_M: f32 = 40.0;
 
 // The horizon elevation in radians at azimuth `az` (radians, any real number) read from the four layers of `maps` starting at `layer0`, at the
 // texel position `uv` in [0, 1]^2: linear between the two nearest azimuths, wrapping from the last to the first.
@@ -61,8 +65,11 @@ fn horizon_face_of(d: vec3<f32>) -> vec3<f32> {
     return vec3<f32>(f32(face), atan(u / w) / HORIZON_QUARTER_PI, atan(v / w) / HORIZON_QUARTER_PI);
 }
 
-// The coarse map's horizon at the sun's azimuth in the geographic frame (north toward +z); 0 where there is no coarse map (a 1 x 1 dummy).
-fn horizon_coarse_elevation(up: vec3<f32>, sun: vec3<f32>) -> f32 {
+// The coarse map's horizon at the sun's azimuth in the geographic frame (north toward +z) for a point `height_m` metres above the sea; 0 where there is no
+// coarse map (a 1 x 1 dummy). The cell stores the horizon from its lowest and its highest ground and those two heights; the point takes the blend its own
+// height has between them (`planet_generators::coarsehorizon::blend_elevation`), so a crest above the cell's mean ground is not shadowed by a plateau its
+// height clears.
+fn horizon_coarse_elevation(up: vec3<f32>, sun: vec3<f32>, height_m: f32) -> f32 {
     if (textureDimensions(horizon_coarse).x <= 1u) {
         return 0.0;
     }
@@ -78,7 +85,14 @@ fn horizon_coarse_elevation(up: vec3<f32>, sun: vec3<f32>) -> f32 {
     let az = select(0.0, atan2(pe, pn), abs(pe) + abs(pn) > 0.0);
     let f = horizon_face_of(up);
     let uv = vec2<f32>(0.5 * (f.y + 1.0), 0.5 * (f.z + 1.0));
-    return horizon_elevation_of(horizon_coarse, uv, u32(f.x) * 4u, az);
+    let layer0 = u32(f.x) * HORIZON_COARSE_LAYERS;
+    let lo = horizon_elevation_of(horizon_coarse, uv, layer0, az);
+    let hi = horizon_elevation_of(horizon_coarse, uv, layer0 + 4u, az);
+    let range = textureSampleLevel(horizon_coarse, horizon_sampler, uv, layer0 + 8u, 0.0);
+    let lo_h = range.x * 255.0 * HORIZON_COARSE_STEP_M;
+    let hi_h = range.y * 255.0 * HORIZON_COARSE_STEP_M;
+    let t = clamp((height_m - lo_h) / max(hi_h - lo_h, 1.0), 0.0, 1.0);
+    return mix(lo, hi, t);
 }
 
 // The strength of the coarse map at `distance` metres from the fragment's surface point (REND-043): full up to 1000 km, gone from 3000 km, a
@@ -92,10 +106,10 @@ fn horizon_coarse_fade(distance: f32) -> f32 {
 
 // The horizon of a fragment: x = the larger of the chunk's (times the node's fade) and the coarse map's elevation (times `coarse_fade`), y = 1
 // when some map is there, else 0 (the horizon is then the sky's own and the shadow term the identity). `tile_uv` is the fragment's tile coordinates.
-fn horizon_at(node_index: u32, tile_uv: vec2<f32>, up: vec3<f32>, sun: vec3<f32>, coarse_fade: f32) -> vec2<f32> {
+fn horizon_at(node_index: u32, tile_uv: vec2<f32>, up: vec3<f32>, sun: vec3<f32>, coarse_fade: f32, height_m: f32) -> vec2<f32> {
     let e0 = horizon_nodes[2u * node_index];
     let e1 = horizon_nodes[2u * node_index + 1u];
-    var h = horizon_coarse_elevation(up, sun) * coarse_fade;
+    var h = horizon_coarse_elevation(up, sun, height_m) * coarse_fade;
     var present = select(0.0, 1.0, textureDimensions(horizon_coarse).x > 1u);
     if (e0.x >= 0.0) {
         let uv = e1.xy + e1.zw * clamp(tile_uv, vec2<f32>(0.0), vec2<f32>(1.0));
@@ -113,8 +127,8 @@ fn horizon_lit(sun: vec3<f32>, up: vec3<f32>, h: f32) -> f32 {
 }
 
 // The factor the direct sun term of a lit fragment is multiplied by (REND-038): 1.0 for a node with no chunk map when there is no coarse map.
-fn shadow_factor(node_index: u32, tile_uv: vec2<f32>, up: vec3<f32>, sun: vec3<f32>, coarse_fade: f32) -> f32 {
-    let h = horizon_at(node_index, tile_uv, up, sun, coarse_fade);
+fn shadow_factor(node_index: u32, tile_uv: vec2<f32>, up: vec3<f32>, sun: vec3<f32>, coarse_fade: f32, height_m: f32) -> f32 {
+    let h = horizon_at(node_index, tile_uv, up, sun, coarse_fade, height_m);
     if (h.y < 0.5) {
         return 1.0;
     }
@@ -123,9 +137,9 @@ fn shadow_factor(node_index: u32, tile_uv: vec2<f32>, up: vec3<f32>, sun: vec3<f
 
 // The two debug views (CON-18, `ShadeView::Horizon` = 5 and `Shadow` = 6) as the radiance of a surface facing the sun (grey / pi, like the climate
 // views): the horizon elevation at the sun's azimuth (white at 30 degrees) and the shadow factor.
-fn horizon_view_colour(view: u32, node_index: u32, tile_uv: vec2<f32>, up: vec3<f32>, sun: vec3<f32>, coarse_fade: f32) -> vec3<f32> {
-    let h = horizon_at(node_index, tile_uv, up, sun, coarse_fade);
-    let grey = select(shadow_factor(node_index, tile_uv, up, sun, coarse_fade), clamp(h.x / 0.5235987755982988, 0.0, 1.0), view == 5u);
+fn horizon_view_colour(view: u32, node_index: u32, tile_uv: vec2<f32>, up: vec3<f32>, sun: vec3<f32>, coarse_fade: f32, height_m: f32) -> vec3<f32> {
+    let h = horizon_at(node_index, tile_uv, up, sun, coarse_fade, height_m);
+    let grey = select(shadow_factor(node_index, tile_uv, up, sun, coarse_fade, height_m), clamp(h.x / 0.5235987755982988, 0.0, 1.0), view == 5u);
     return vec3<f32>(grey * 0.31830988618);
 }
 "#
