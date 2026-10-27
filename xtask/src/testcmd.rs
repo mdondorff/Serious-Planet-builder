@@ -817,8 +817,8 @@ fn perf_stream_args(args: &[String]) -> Result<Vec<String>, String> {
     while let Some(a) = it.next() {
         match a.as_str() {
             "--smoke" => smoke = true,
-            "--machine-ready" | "--allow-memory-bake" | "--lit" | "--no-chunks" | "--no-stale-hold" | "--no-horizon-jobs" => tail.push(a.clone()),
-            "--store" | "--global-res" | "--out" | "--upload" | "--prefill-levels" | "--gen-workers" | "--chunk-workers" | "--base-threads" | "--horizon-threads" | "--gen-ahead" | "--gen-reserve" | "--gen-priority" | "--settle-ms" | "--share-bound" | "--steady-window-s" => {
+            "--machine-ready" | "--allow-memory-bake" | "--lit" | "--no-chunks" | "--no-stale-hold" | "--no-horizon-jobs" | "--only-steady" => tail.push(a.clone()),
+            "--store" | "--global-res" | "--out" | "--upload" | "--prefill-levels" | "--gen-workers" | "--chunk-workers" | "--base-threads" | "--horizon-threads" | "--gen-ahead" | "--gen-reserve" | "--gen-priority" | "--settle-ms" | "--share-bound" | "--steady-window-s" | "--altitudes-m" => {
                 let value = it.next().ok_or_else(|| format!("{a} needs a value"))?;
                 tail.push(a.clone());
                 tail.push(value.clone());
@@ -1083,6 +1083,11 @@ mod tests {
         assert!(smoke.contains(&"--perf-smoke".to_string()) && smoke.contains(&"software".to_string()));
         assert!(!STREAM_SCENES.contains(&ENVELOPE_SCENE), "`perf stream all` does not run it");
         assert!(perf_stream_args(&s(&["envelope", "--share-bound"])).unwrap_err().contains("needs a value"));
+        // The steady curve alone, over chosen altitudes and window (TEST-057).
+        let b = perf_stream_args(&s(&["envelope", "--only-steady", "--altitudes-m", "300", "--steady-window-s", "60"])).unwrap();
+        let at = b.iter().position(|x| x == "--altitudes-m").unwrap();
+        assert_eq!(b[at + 1], "300");
+        assert!(b.contains(&"--only-steady".to_string()) && b.contains(&"--steady-window-s".to_string()));
     }
 
     // spec: TEST-040
