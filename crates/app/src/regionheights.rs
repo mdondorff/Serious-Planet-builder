@@ -101,7 +101,7 @@ mod tests {
     const R: f64 = 6_371_000.0;
 
     fn at(angle: f64) -> Vec3 {
-        Vec3::new(angle.cos(), angle.sin(), 0.0)
+        Vec3::new(libm::cos(angle), libm::sin(angle), 0.0)
     }
 
     // spec: GEN-087
