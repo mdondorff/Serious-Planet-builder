@@ -73,6 +73,9 @@ pub struct Pose {
 pub struct StillsConfig {
     pub anchor: Anchor,
     pub chunk_timeout_s: f64,
+    /// `coarse_horizon = false`: the stills are drawn without the coarse horizon map (the far-field shadows of the global run, REND-043), to tell what
+    /// it adds to a frame; the chunk horizons stay. A diagnostic of the owner's frames, on by default.
+    pub coarse_horizon: bool,
     /// The cell of the chunks in metres (the viewer's 8 m unless the file says otherwise; a test uses coarse chunks to stay quick).
     pub chunk_cell_m: f64,
     /// `[place] snap_to_channel_m`: the anchor moves to the lowest ground of the landed chunks within this distance of it (the channel the
@@ -206,6 +209,10 @@ pub fn parse_config(text: &str) -> Result<StillsConfig, String> {
     if chunk_timeout_s <= 0.0 {
         return Err(format!("chunk_timeout_s must be positive, got {chunk_timeout_s}"));
     }
+    let coarse_horizon = match root.get("coarse_horizon") {
+        None => true,
+        Some(v) => v.as_bool().ok_or_else(|| format!("coarse_horizon must be true or false, got {}", show(v)))?,
+    };
     let chunk_cell_m = number(&root, "chunk_cell_m", "the poses file")?.unwrap_or(crate::anetworld::ANET_CELL_M);
     if chunk_cell_m <= 0.0 {
         return Err(format!("chunk_cell_m must be positive, got {chunk_cell_m}"));
@@ -263,7 +270,16 @@ pub fn parse_config(text: &str) -> Result<StillsConfig, String> {
         Some(k) if k >= 1.0 && k.fract() == 0.0 => Some(k as usize),
         Some(k) => return Err(format!("[place]: slope_table_stride {k} must be a whole number of at least 1")),
     };
-    Ok(StillsConfig { anchor, chunk_timeout_s, chunk_cell_m, snap_to_channel_m, slope_table_stride, poses, look: parse_look(&root)? })
+    Ok(StillsConfig {
+        anchor,
+        chunk_timeout_s,
+        coarse_horizon,
+        chunk_cell_m,
+        snap_to_channel_m,
+        slope_table_stride,
+        poses,
+        look: parse_look(&root)?,
+    })
 }
 
 /// The unit vector towards the sun when it stands at `local_hours` of local solar time (12 is noon) at longitude `lon_deg`, with
@@ -1022,6 +1038,9 @@ fn run_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write, mut cost: Opti
         for _ in 0..horizon_maps {
             horizon.frame(&world, ctx, &mut r, &tiles, &world.horizon_frame(&tiles, camera.position), sun);
         }
+        if !config.coarse_horizon {
+            r.set_horizon_coarse(ctx, None);
+        }
         let mut lit = setup.plan(&world, rig.field, &plan, WATER_T0 + 2.0, 0.5, false)?;
         if let Some(l) = lit.lit.as_mut() {
             l.sun_dir = sun;
@@ -1346,6 +1365,34 @@ pitch_deg = 0
 sun_local_hours = 12
 sun_declination_deg = 10
 "#;
+
+    // spec: TEST-048
+    #[test]
+    fn the_coarse_horizon_is_on_unless_the_file_turns_it_off_and_a_non_boolean_is_refused() {
+        assert!(parse_config(GOOD).unwrap().coarse_horizon, "on by default");
+        assert!(
+            !parse_config(&format!(
+                "coarse_horizon = false
+{GOOD}"
+            ))
+            .unwrap()
+            .coarse_horizon
+        );
+        assert!(
+            parse_config(&format!(
+                "coarse_horizon = true
+{GOOD}"
+            ))
+            .unwrap()
+            .coarse_horizon
+        );
+        let e = parse_config(&format!(
+            "coarse_horizon = 0
+{GOOD}"
+        ))
+        .unwrap_err();
+        assert!(e.contains("coarse_horizon must be true or false"), "{e}");
+    }
 
     // spec: TEST-053
     #[test]
