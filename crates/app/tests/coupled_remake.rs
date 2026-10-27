@@ -3,7 +3,7 @@
 use planet::coupledworld::remake_target;
 use std::path::Path;
 
-// spec: GEN-042
+// spec: GEN-088
 #[test]
 fn a_re_made_run_is_written_under_target_and_never_into_the_store_it_reads() {
     let tmp = Path::new(env!("CARGO_TARGET_TMPDIR")).join("coupled-remake");

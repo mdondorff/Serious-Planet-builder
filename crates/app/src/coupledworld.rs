@@ -190,7 +190,7 @@ fn make(p: Prepared, src: &dyn LatticeSource, dir: Option<&Path>) -> Result<Coup
     Ok(CoupledRun { maps: Arc::new(CoupledMaps::new(p.lat, state.z, state.area_m2, p.id)), origin: Origin::Ran, store_error })
 }
 
-// spec: GEN-042
+// spec: GEN-088
 /// The directory a re-made run is written to: created if it is missing, never the store the bake is read from, and under a `target` directory
 /// (a re-make is a measurement; the shared store stays as it is). Returns the canonical path.
 pub fn remake_target(store: &Path, out: &Path) -> Result<std::path::PathBuf, String> {
@@ -211,7 +211,7 @@ pub fn remake_target(store: &Path, out: &Path) -> Result<std::path::PathBuf, Str
 
 // spec: GEN-042
 /// Make the run of `def` from the bake `src` afresh, ignoring any stored channel, and write it to `out` (checked by [`remake_target`] against
-/// `store`, the directory the bake is read from). Returns the run and the wall time of the make in seconds (GEN-042, criterion 4 of M8).
+/// `store`, the directory the bake is read from). Returns the run and the wall time of the make in seconds (GEN-088, criterion 4 of M8).
 pub fn remake(
     def: &WorldDefinition,
     store: &Path,

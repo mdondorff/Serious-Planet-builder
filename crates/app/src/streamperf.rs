@@ -122,8 +122,11 @@ pub fn check_options(o: &Options) -> Result<(), String> {
         }
     }
     let stream = (o.perf || o.perf_smoke || capture) && (is_stream_scene(&o.scene) || crate::litperf::is_lit_scene(&o.scene) || capture);
-    // The chunk scene reads a stored production bake too (`--store DIR`, the viewer's geometry).
-    let chunk_on_store = o.perf && o.scene == "anet-chunk" && o.store.is_some() && !o.allow_memory_bake;
+    // The chunk scene reads a stored production bake too (`--store DIR`, the viewer's geometry), and so does the coupled scene's re-make (`--remake-into`).
+    let chunk_on_store = o.perf
+        && (o.scene == "anet-chunk" || (o.scene == "coupled" && o.remake_into.is_some()))
+        && o.store.is_some()
+        && !o.allow_memory_bake;
     if !stream && !chunk_on_store && (o.store.is_some() || o.allow_memory_bake) {
         return Err("--store and --allow-memory-bake only apply to the streaming perf scenes (dive, dive-fast, teleport-1m, teleport-2km, look-1m, look-2km, streaming)".into());
     }
@@ -1225,6 +1228,11 @@ mod tests {
         let e = check_options(&opts(&["test-render", "--perf", "--scene", "dive", "--store", "x", "--allow-memory-bake"])).unwrap_err();
         assert!(e.contains("exclude each other"), "{e}");
         assert!(check_options(&opts(&["test-render", "--perf", "--scene", "anet-chunk", "--store", "x", "--global-res", "16384"])).is_ok());
+        // GEN-042: the coupled scene takes the store only to re-make its run from it.
+        let remake = ["test-render", "--perf", "--scene", "coupled", "--store", "x", "--global-res", "16384", "--remake-into", "target/m"];
+        assert!(check_options(&opts(&remake)).is_ok());
+        let e = check_options(&opts(&["test-render", "--perf", "--scene", "coupled", "--store", "x"])).unwrap_err();
+        assert!(e.contains("only apply to the streaming perf scenes"), "{e}");
         let e = check_options(&opts(&["test-render", "--perf", "--scene", "anet-chunk", "--allow-memory-bake"])).unwrap_err();
         assert!(e.contains("only apply to the streaming perf scenes"), "{e}");
         let e = check_options(&opts(&["test-render", "--perf", "--scene", "terrain", "--store", "x"])).unwrap_err();

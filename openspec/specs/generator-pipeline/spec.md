@@ -1224,6 +1224,17 @@ Source: opus-planner (2026-10-24), M8 exit criterion 4
 - **WHEN** the coupled run of 2048 cells per face edge and 100 steps runs on the reference machine in a perf window
 - **THEN** it finishes within ten minutes
 
+### Requirement: GEN-088 The coupled run is timed from a stored bake
+`cargo xtask perf coupled --store DIR --global-res N --remake-into OUT` SHALL time a fresh make of the coupled run from the bake stored in `DIR` (the viewer's make: the reduction of the bake, then the steps; any stored channel is ignored) against the ten minutes of GEN-042, and write `perf/logs/coupled-make.json`. `OUT` SHALL be created if missing, SHALL NOT be inside `DIR` and SHALL lie under a `target` directory (the store is only read).
+
+Verify: A, C
+Status: active
+Source: opus-planner (2026-10-27), M8 exit criterion 4
+
+#### Scenario: The output directory
+- **WHEN** `OUT` is the store, a directory inside it, or a directory with no `target` component
+- **THEN** the make is refused naming the store
+
 ### Requirement: GEN-064 The hill band and the landform driver of the bake
 `global::sample` SHALL add to the elevation of land a hill band: a ridged multifractal of three octaves at the frequencies 796, 1592 and 3184 per unit direction (wavelengths of 8, 4 and 2 km at Earth's radius; they scale with the body's radius) on the warped direction (which stretches them locally), weights 1, 1/2 and 1/4 of `(1 - |n|)^2`, normalised, times an amplitude and times `smoothstep(0, 0.1, land depth)`. The band SHALL be 0 over the sea and at the coast and never negative, and at most `HILL_BAND_MAX_M` (1000 m).
 
