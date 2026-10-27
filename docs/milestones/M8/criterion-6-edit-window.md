@@ -122,3 +122,19 @@ Gate ok. File: `envelope-w14-steady-100-1000.json`. `--only-steady --altitudes-m
   1. Near the limit a late chunk is 1 to 2 s late with stand-in about 0: its solve is 6.1 to 6.8 s but it was asked only 4.4 to 5.2 s before it was wanted (for example asked at 30.5 s, wanted at 35.2 s, solve 6.1 s). The 12 s track lead is not achieved: the reach of the plan (the farthest wanted chunk centre) is small at low altitude, so the track set asks late.
   2. Above 440 m/s at 1000 m and 480 m/s at 100 m, one to three chunks that were wanted at the first frame of the window and were not asked during the 12 s run-in wait 6.6 to 8.3 s (solve = wait); they are the stand-in that fails the bound. Solve times reach 9 to 10 s in three trials.
 - Levers: a reach floor of one chunk edge (the next chunk is asked as soon as the current one is entered), a lead of at least the solve time (7 s) plus a margin, and a trace that also covers the run-in to confirm cause 2.
+
+## Windows 16 to 21 of 2026-10-27 (the tail of the refresh, named)
+Gate ok each. Files: `edit-latency-w18-lock-waits.md`, `edit-latency-w19-stragglers.md`, `edit-latency-w21-drawn-exact.md`.
+- Window 16 (refresh frame by frame): the bulk of the named tiles is refreshed in 60 to 500 ms; the last 1 to 6 tiles end one at a time 50 to 250 ms apart with 1 to 3 jobs in flight, no upload pending, frames of 2 to 5 ms.
+- Window 18 (lock waits by name): over a whole case the chunk-state lock waits 0.1 to 54 ms in all (660k takes), the route memo 7 to 60 ms (longest 6 ms), landform lattice, epoch memo, region cache and pool state under 3 ms. No lock explains a 100 to 300 ms job.
+- Window 19 (stragglers of the first wave): they are the level-3 ancestors (6,5), (6,6), (7,5), (7,6) of face 0 (and (12,11), (12,12) at level 4): 120 to 510 ms each, every other refresh job at levels 5 to 16 takes 8 to 20 ms; worker wait 6 to 30 ms. The edit refreshes these ancestors every time (the refreshed-set table: levels 3 to 14 are resident only, "change below spacing").
+- `tile_cost_report` over the mesh path (one thread, 64 cells; with / without the chunk layer): level 15 12 / 12 ms, 13 12 / 12, 11 13 / 22, 9 20 / 21, 7 40 / 36, 5 56 / 59, 4 103 / 59, 3 96 / 64. The coarse cost is the base field's, the chunk layer adds 0 to 40 ms; the earlier 2 to 3 ms was height only at 32 cells.
+- The M6 column of the chunk scene had been read as the instant every tile the edit names was refreshed and uploaded (`uploaded`, the "all refreshed" instant), so the four level-3 tiles gated it. ADR 0072 point 1 and TEST-042 read "exact" as the tiles the plan draws. Window 21 reads it so: the latest first refresh end of the named tiles that the plan drew before the edit or draws at the first plan after it, plus the upload frame (`editperf::drawn_refreshed_ms`). "all refreshed", "uploaded" and "all exact" stay in the stages table.
+
+| Window | Reading | Gated rows over (13 gated hill and brush rows) | Range of the gated rows |
+|---|---|---|---|
+| 19 (main at #801) | all named tiles refreshed and uploaded | 7 | 347 to 1169 ms |
+| 21 | named tiles the plan draws | 1 (200 m, 1 km brush: 758 ms against 1000, preview 17.3 ms against 16) | 53 to 758 ms |
+
+- Numbers of windows before 21 read the first row; do not compare them with the second.
+- Not part of this reading: the first plan with the chunk stage is delivered after 270 to 1000 ms (stages table, "plan delivered"), and a drawn tile that the edit did not name refreshes when a chunk lands (the chunk table).
