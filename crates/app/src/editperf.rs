@@ -604,7 +604,9 @@ impl Harness<'_> {
             // landed ones refresh the tiles that read them (the viewer's frame, STRM-040, STRM-056).
             let tiles: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
             let call = Instant::now();
-            let update = crate::chunkstage::frame_step(world, &mut rig.managed, &tiles, req.camera.position, &self.features, &mut self.counters).update;
+            let update =
+                crate::chunkstage::frame_step(world, &mut rig.managed, &tiles, req.camera.position, &self.features, &mut self.counters)
+                    .update;
             self.chunk_frame_max_ms = self.chunk_frame_max_ms.max(call.elapsed().as_secs_f64() * 1000.0);
             let now = Instant::now();
             self.landed_log.extend(update.landed.iter().map(|k| (now, *k)));
