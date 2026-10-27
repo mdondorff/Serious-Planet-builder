@@ -197,3 +197,73 @@ pub fn prefetch_chunks(position: planet_core::PlanetFixed, predicted: Option<pla
     }
     out
 }
+
+/// The longest stretch of a track the prefetch looks along, metres.
+const MAX_TRACK_M: f64 = 60_000.0;
+/// Below this speed over the ground (metres per second) the camera does not travel (the estimator's `min_speed_mps`).
+const MIN_TRACK_SPEED_MPS: f64 = 0.5;
+
+/// The chunks the plan would read along the camera's travel (STRM-042): samples of the track half a chunk edge apart out to `lead_s` seconds at
+/// `velocity`, and at each every chunk whose centre is within `reach_m` of the sample. `reach_m` is how far from the camera the plan reads chunks
+/// now (the farthest wanted chunk centre), so the set follows the altitude, the view and a turn without a rule of its own. The samples nearest the
+/// camera come first, within a sample the nearest chunk first. Empty when the camera does not travel over the ground (it is still, only
+/// rotates, or only dives: `velocity` has no component along the ground).
+pub fn track_chunks(
+    position: planet_core::PlanetFixed,
+    velocity: planet_core::Vec3,
+    reach_m: f64,
+    lead_s: f64,
+    radius_m: f64,
+) -> Vec<ChunkKey> {
+    use planet_core::cube::TangentWarp;
+    use planet_core::Side::{East, North, South, West};
+    let up = position.0.normalized();
+    let along = velocity - up * velocity.dot(up);
+    let speed = along.length();
+    if !(speed.is_finite() && speed >= MIN_TRACK_SPEED_MPS && reach_m.is_finite() && lead_s > 0.0) {
+        return Vec::new();
+    }
+    let heading = along * (1.0 / speed);
+    let grid = planet_generators::chunk::CHUNK_GRID_LEVEL;
+    let edge_m = radius_m * core::f64::consts::FRAC_PI_2 / f64::from(1u32 << grid);
+    let travel_m = (speed * lead_s).min(MAX_TRACK_M);
+    let step_m = 0.5 * edge_m;
+    let samples = (travel_m / step_m).ceil().max(1.0) as usize;
+    // Rings of 4-neighbours out to `reach / edge + 1` chunks: a chunk at a distance `reach` along an axis is that many rings away, a diagonal one two.
+    let rings = ((reach_m / edge_m).ceil() as i64 + 1).clamp(1, 4);
+    let mut out: Vec<ChunkKey> = Vec::new();
+    for k in 1..=samples {
+        let along_m = (k as f64 * step_m).min(travel_m);
+        let dir = (up + heading * (along_m / radius_m)).normalized();
+        let here = TileId::from_direction(&TangentWarp, dir, grid);
+        let mut known = std::collections::HashSet::from([here]);
+        let (mut layer, mut found) = (vec![here], vec![here]);
+        for _ in 0..rings {
+            let mut next = Vec::new();
+            for t in layer {
+                for side in [East, West, North, South] {
+                    let n = t.neighbor(&TangentWarp, side);
+                    if known.insert(n) {
+                        next.push(n);
+                        found.push(n);
+                    }
+                }
+            }
+            layer = next;
+        }
+        let mut near: Vec<(f64, ChunkKey)> = found
+            .into_iter()
+            .filter_map(|t| {
+                let d = (t.center_direction(&TangentWarp) - dir).length() * radius_m;
+                (d <= reach_m).then_some((d, (t.face().0, t.x(), t.y())))
+            })
+            .collect();
+        near.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        for (_, key) in near {
+            if !out.contains(&key) {
+                out.push(key);
+            }
+        }
+    }
+    out
+}

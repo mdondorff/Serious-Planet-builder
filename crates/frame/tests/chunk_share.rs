@@ -391,3 +391,38 @@ fn travel_prefetches_the_chunks_beside_the_one_ahead_too() {
     }
     assert!(!ahead.contains(&(2, 1000, 1000)));
 }
+
+// spec: STRM-042
+#[test]
+fn the_track_set_follows_the_reach_of_the_plan_and_is_empty_without_travel_over_the_ground() {
+    use planet_frame::chunkshare::track_chunks;
+    let centre = TileId::new(Face(2), CHUNK_GRID_LEVEL, 1000, 1000).unwrap();
+    let (s0, s1, t0, t1) = centre.bounds();
+    let at = |s: f64| {
+        let d = planet_core::cube::face_to_direction(&TangentWarp, Face(2), s, 0.5 * (t0 + t1));
+        PlanetFixed(d * (R + 300.0))
+    };
+    // Low over the west part of chunk (1000, 1000), 160 m/s east along +s.
+    let here = at(s0 + (s1 - s0) * 0.1);
+    let ahead = at(s0 + (s1 - s0) * 0.1 + 1.0e-4);
+    let velocity = (ahead.0 - here.0).normalized() * 160.0;
+    let edge_m = R * std::f64::consts::FRAC_PI_2 / f64::from(1u32 << CHUNK_GRID_LEVEL);
+    let next = (2u8, 1001u32, 1000u32);
+    let beside = [(2u8, 1001u32, 999u32), (2, 1001, 1001)];
+    // A reach of 1.1 chunk edges (the plan reads the neighbours of a chunk): the chunk across the edge, not yet the ones beside it.
+    let near = track_chunks(here, velocity, 1.1 * edge_m, 12.0, R);
+    assert!(near.contains(&next), "{near:?}");
+    assert!(beside.iter().all(|b| !near.contains(b)), "{near:?}");
+    // A reach of 1.5 edges (a wider view): the pair beside it too, and a wider reach never gives fewer.
+    let wide = track_chunks(here, velocity, 1.6 * edge_m, 12.0, R);
+    assert!(beside.iter().all(|b| wide.contains(b)) && wide.contains(&next), "{wide:?}");
+    assert!(near.iter().all(|k| wide.contains(k)));
+    // The samples nearest the camera come first: the chunk under it is first of all.
+    assert_eq!(wide[0], (2, 1000, 1000));
+    // Standing, rotating or only diving: no track, so nothing. A longer lead reaches further along the track.
+    let up = here.0.normalized();
+    assert!(track_chunks(here, planet_core::Vec3::new(0.0, 0.0, 0.0), 1.6 * edge_m, 12.0, R).is_empty());
+    assert!(track_chunks(here, up * -50.0, 1.6 * edge_m, 12.0, R).is_empty(), "a dive has no component along the ground");
+    let long = track_chunks(here, velocity, 1.1 * edge_m, 60.0, R);
+    assert!(long.contains(&(2, 1002, 1000)), "60 s at 160 m/s is 9.6 km: two chunks along the track: {long:?}");
+}

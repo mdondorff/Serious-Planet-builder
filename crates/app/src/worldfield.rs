@@ -900,6 +900,17 @@ impl WorldTerrain {
         camera: planet_core::PlanetFixed,
         prefetch: &[planet_generators::chunkfield::ChunkKey],
     ) -> planet_streaming::chunks::ChunkUpdate {
+        self.chunk_frame_with(tiles, camera, |_| prefetch.to_vec()).0
+    }
+
+    /// [`WorldTerrain::chunk_frame`] with the prefetch made from the chunks wanted now (`(chunk, distance to the camera)`, nearest not first): the
+    /// plan's reach is what the prefetch follows along the travel (STRM-042). Returns the update and the chunks asked to prefetch.
+    pub fn chunk_frame_with(
+        &self,
+        tiles: &[TileId],
+        camera: planet_core::PlanetFixed,
+        prefetch_of: impl FnOnce(&[(planet_generators::chunkfield::ChunkKey, f64)]) -> Vec<planet_generators::chunkfield::ChunkKey>,
+    ) -> (planet_streaming::chunks::ChunkUpdate, Vec<planet_generators::chunkfield::ChunkKey>) {
         let Some(m) = self.chunk_manager() else { return Default::default() };
         let mut wanted: Vec<(planet_generators::chunkfield::ChunkKey, f64)> = Vec::new();
         let mut seen = std::collections::HashSet::new();
@@ -913,7 +924,8 @@ impl WorldTerrain {
                 }
             }
         }
-        m.update_with(&wanted, prefetch)
+        let prefetch = prefetch_of(&wanted);
+        (m.update_with(&wanted, &prefetch), prefetch)
     }
 
     /// Build the field (a fresh context per field: its key covers what it read).

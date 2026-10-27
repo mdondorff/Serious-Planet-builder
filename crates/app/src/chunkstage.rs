@@ -220,6 +220,28 @@ pub fn chunk_prefetch(
     planet_frame::chunkshare::prefetch_chunks(position, travel.and_then(|e| e.predict()), radius_m)
 }
 
+/// Seconds of travel the chunk prefetch looks ahead: a chunk job takes 5 to 7 s (window 8) and its tiles a few seconds more to refresh.
+pub const PREFETCH_LEAD_S: f64 = 12.0;
+
+// spec: STRM-042
+/// The chunks a frame asks the chunk manager to prefetch: those the plan would read along the camera's travel over the next [`PREFETCH_LEAD_S`]
+/// (`track_chunks`, with the reach of the chunks wanted now), without the ones already wanted; empty when the camera does not travel or prefetch is
+/// off (`travel` is `None`).
+pub fn chunk_prefetch_track(
+    travel: Option<&planet_frame::prefetch::TravelEstimator>,
+    position: planet_core::PlanetFixed,
+    wanted: &[(ChunkKey, f64)],
+    radius_m: f64,
+) -> Vec<ChunkKey> {
+    let Some(velocity) = travel.and_then(|e| e.velocity()) else { return Vec::new() };
+    let reach = wanted.iter().map(|w| w.1).fold(0.0, f64::max);
+    let have: std::collections::HashSet<ChunkKey> = wanted.iter().map(|w| w.0).collect();
+    planet_frame::chunkshare::track_chunks(position, velocity, reach, PREFETCH_LEAD_S, radius_m)
+        .into_iter()
+        .filter(|k| !have.contains(k))
+        .collect()
+}
+
 /// Whether a frame still waits for the chunk stage: a plan node reads a chunk that is not ready, or a chunk job or horizon job is in flight. A
 /// scene that settles before a flight waits until this is false.
 pub fn chunks_busy(stand_in_nodes: usize, chunk_jobs: usize, horizon_jobs: usize) -> bool {
@@ -277,6 +299,36 @@ mod tests {
         let mut t = ChunkTrace::default();
         t.prefetch(&asked);
         assert_eq!(t.summary().prefetch_asked, asked.len() as u64);
+    }
+
+    // spec: STRM-042
+    #[test]
+    fn the_prefetch_follows_the_travel_with_the_reach_of_the_wanted_chunks_and_leaves_out_the_wanted_ones() {
+        use planet_core::{cube::TangentWarp, Face, PlanetFixed, TileId};
+        use planet_frame::prefetch::{PrefetchConfig, TravelEstimator};
+        const R: f64 = 6_371_000.0;
+        let chunk = TileId::new(Face(2), planet_generators::chunk::CHUNK_GRID_LEVEL, 1000, 1000).unwrap();
+        let (s0, s1, t0, t1) = chunk.bounds();
+        let at = |s: f64| PlanetFixed(planet_core::cube::face_to_direction(&TangentWarp, Face(2), s, 0.5 * (t0 + t1)) * (R + 300.0));
+        let mut est = TravelEstimator::new(PrefetchConfig::default(), R);
+        let mut pos = at(s0);
+        for frame in 0..10u64 {
+            pos = at(s0 + (s1 - s0) * 0.1 + 160.0 * (frame as f64 * 0.1) / (R * std::f64::consts::FRAC_PI_2) * 2.0);
+            est.observe(frame * 100, pos);
+        }
+        let edge_m = R * std::f64::consts::FRAC_PI_2 / f64::from(1u32 << planet_generators::chunk::CHUNK_GRID_LEVEL);
+        // The plan reads the chunk under the camera and its western neighbour, 1.1 edges away: the reach follows.
+        let wanted = [((2, 1000, 1000), 0.2 * edge_m), ((2, 999, 1000), 1.1 * edge_m)];
+        let ahead = chunk_prefetch_track(Some(&est), pos, &wanted, R);
+        assert!(ahead.contains(&(2, 1001, 1000)), "the chunk across the edge: {ahead:?}");
+        assert!(wanted.iter().all(|w| !ahead.contains(&w.0)), "wanted chunks are not asked twice: {ahead:?}");
+        // No estimator, or a camera that stands still: nothing.
+        assert!(chunk_prefetch_track(None, pos, &wanted, R).is_empty());
+        let mut still = TravelEstimator::new(PrefetchConfig::default(), R);
+        for frame in 0..10u64 {
+            still.observe(frame * 100, pos);
+        }
+        assert!(chunk_prefetch_track(Some(&still), pos, &wanted, R).is_empty());
     }
 
     // spec: TEST-054

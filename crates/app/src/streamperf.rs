@@ -274,9 +274,11 @@ impl Driver<'_> {
             if let Some(m) = manager.as_ref() {
                 cd.trace.wanted(tiles.iter().flat_map(|&t| m.reads(t)), at);
             }
-            let ahead = crate::chunkstage::chunk_prefetch(self.rig.managed.travel(), req.camera.position, cd.world.radius_m());
+            let (travel, radius_m) = (self.rig.managed.travel(), cd.world.radius_m());
+            let (update, ahead) = cd.world.chunk_frame_with(&tiles, req.camera.position, |wanted| {
+                crate::chunkstage::chunk_prefetch_track(travel, req.camera.position, wanted, radius_m)
+            });
             cd.trace.prefetch(&ahead);
-            let update = cd.world.chunk_frame(&tiles, req.camera.position, &ahead);
             self.rig.managed.chunk_landed(&update.landed);
             self.rig.managed.chunk_evicted(&update.evicted);
             cd.trace.landed(&update.landed, at);
