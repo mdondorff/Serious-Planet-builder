@@ -16,15 +16,15 @@ const R: f64 = 6_371_000.0;
 
 fn dir_of(lat_deg: f64, lon_deg: f64) -> Vec3 {
     let (la, lo) = (lat_deg.to_radians(), lon_deg.to_radians());
-    Vec3::new(la.cos() * lo.cos(), la.cos() * lo.sin(), la.sin())
+    Vec3::new(libm::cos(la) * libm::cos(lo), libm::cos(la) * libm::sin(lo), libm::sin(la))
 }
 
 /// The point `s` metres from `d` along the azimuth `az` (radians from north).
 fn along(d: Vec3, az: f64, s: f64) -> Vec3 {
     let (east, north) = geographic_frame(d);
-    let t = north * az.cos() + east * az.sin();
+    let t = north * libm::cos(az) + east * libm::sin(az);
     let th = s / R;
-    d * th.cos() + t * th.sin()
+    d * libm::cos(th) + t * libm::sin(th)
 }
 
 fn main() {
@@ -61,7 +61,7 @@ fn main() {
     );
     let camera = dir_of(lat, lon);
     let centre = along(camera, heading.to_radians(), dist_km * 1000.0);
-    let (clat, clon) = (centre.z.asin().to_degrees(), centre.y.atan2(centre.x).to_degrees());
+    let (clat, clon) = (libm::asin(centre.z).to_degrees(), libm::atan2(centre.y, centre.x).to_degrees());
     println!("the point {dist_km} km along {heading} deg: lat {clat:.3} lon {clon:.3}");
     println!("horizon angle toward the sun (deg), rows from the near side to the far, columns left to right across the heading:");
     let mut best = (f64::MIN, 0usize);
