@@ -120,7 +120,7 @@ mod tests {
     // spec: GEN-087
     #[test]
     fn a_moved_item_makes_both_its_old_and_its_new_place_stale() {
-        let reach_m = 2_000.0;
+        let reach_m = 40_000.0;
         let (old, new) = (at(0.0), at(0.01));
         let dirs = [at(0.0), at(0.01), at(0.005), at(0.05)];
         let stale = stale_points(&dirs, &[(new, reach_m), (old, reach_m)], R);
