@@ -1,0 +1,35 @@
+# M8 milestone folder: index
+
+Owner-facing guide to this folder (opus-planner, 2026-10-27). Everything here is evidence, not goldens.
+
+## For the owner's look review (criterion 1)
+Current set: `look-review-2b/` (ANET_VERSION 10, rendered after #757). Later changes up to 2026-10-27 do not change the picture (byte-identical horizon maps, performance only).
+
+| Look at | Site | Why |
+|---|---|---|
+| `look-review-2b/hills-b/` | lat 8.972, lon -16.238 | green hill country with a river valley and a cut channel; the main judgement site |
+| `look-review-2b/river-r1/` | lat -11.1657, lon 23.0493 | the large lowland river (review 1's site); channel and valley form |
+
+Each site holds `default/` and `sample-driver-look/` with six stills: 300 m, 30 m and 1.8 m eye, each at midday and sunset.
+
+Questions for the owner:
+1. River and valley forms on plausible relief, with horizon shadows, against the look reference (realism of hill terrain is M9).
+2. Default look or sample driver look (ground detail 0.6, soil and rock curves) as the M8 default.
+
+Known and tracked, not to be judged as new: faint striations on shadowed walls beyond a rim (hillslope flat patches, Tracked in `docs/status.md`).
+
+## Superseded (history, no need to look)
+| Folder | What it was |
+|---|---|
+| `look-review-1/`, `look-review-1-hills*/` | look review 1 and its three fix iterations (2026-10-25), before the relief rebuild |
+| `horizon-shadows-hills/`, `horizon-shadows-lowland/` | first horizon-shadow inspection (2026-10-25) |
+| `look-review-2/`, `look-review-2-hills/` | look review 2 on the rebuilt store; replaced by `look-review-2b/` |
+| `look-review-2b/hills-r1/` | review 1's hills site; snow-covered at 3.8 km after the rebuild, looks indistinguishable |
+
+## Performance records (for the acceptance report, not for review)
+| Files | Criterion |
+|---|---|
+| `criterion-6-edit-window.md` | criterion 6 summary |
+| `edit-latency-w*.md`, `edit-resolve-w*-phases.log`, `edit-latency-chunks-*.md`, `edit-latency-nochunks.md` | criterion 6 windows; the latest is `edit-latency-w13-6x2-horizon-reuse.md` (`w14` is an upper bound of a withdrawn change, not a result) |
+| `envelope-w*.json` | criterion 7 windows; the latest are `envelope-w12-steady-300.json` and `envelope-w12-steady-rest.json` |
+| `anet-change-bound-48-chunks.log` | the chunk stage's measured height change (input to the plan bounds) |
