@@ -50,6 +50,11 @@ pub const SMOKE_RUN_IN_S: f64 = 0.25;
 /// run-in did not cover, crossing several chunk edges, the bound judged over every 1 s window of the whole stretch. `--steady-window-s 12` is the quick
 /// single-edge trial.
 pub const STEADY_WINDOW_S: f64 = 60.0;
+/// The start places a steady search runs at per altitude by default: one place for every trial of a search (a slow chunk at one place would break the
+/// search's assumption that the share rises with the speed), and the lower of the searches is the figure.
+pub const STEADY_PLACES: usize = 2;
+/// The first trial place index of the steady searches (a place index moves the start 0.6 degrees north; the chunk stage is rebuilt per flight, so places the cold curve also flew share nothing).
+const STEADY_PLACE_BASE: usize = 0;
 /// Seconds the settle before a trial may take at most.
 const SETTLE_LIMIT_S: f64 = 900.0;
 
@@ -259,8 +264,9 @@ fn curve_json(points: &[Point]) -> String {
         // The shares of the flight at the highest holding speed.
         let at = p.speed_mps.and_then(|v| p.trials.iter().find(|t| t.speed_mps == v)).map(|t| t.measure);
         s += &format!(
-            "    {{\"altitude_m\": {}, \"highest_speed_mps\": {}, \"share_at_speed\": {}, \"coarse_share\": {}, \"stand_in_share\": {}, \"capped\": {}, \"trials\": [{}]}}{}\n",
+            "    {{\"altitude_m\": {}, \"place\": {}, \"highest_speed_mps\": {}, \"share_at_speed\": {}, \"coarse_share\": {}, \"stand_in_share\": {}, \"capped\": {}, \"trials\": [{}]}}{}\n",
             number(p.altitude_m),
+            points[..i].iter().filter(|q| q.altitude_m == p.altitude_m).count(),
             p.speed_mps.map_or("null".to_string(), number),
             number(p.share),
             opt(at.map(|m| m.coarse_share)),
@@ -273,16 +279,43 @@ fn curve_json(points: &[Point]) -> String {
     s
 }
 
+/// The late chunks of a flight as a log array: key, when it was first wanted, asked, seen running and landed, the wait and the solve (seconds into the flight).
+fn late_json(trace: &crate::chunkstage::TraceSummary) -> String {
+    let opt = |x: Option<f64>| x.map_or("null".to_string(), number);
+    let items: Vec<String> = trace
+        .late
+        .iter()
+        .flatten()
+        .map(|l| {
+            format!(
+                "{{\"chunk\": [{}, {}, {}], \"wanted_s\": {}, \"asked_s\": {}, \"started_s\": {}, \"landed_s\": {}, \"wait_s\": {}, \"solve_s\": {}}}",
+                l.key.0,
+                l.key.1,
+                l.key.2,
+                number(l.wanted_s),
+                opt(l.asked_s),
+                opt(l.started_s),
+                number(l.landed_s),
+                number(l.wait_s()),
+                opt(l.solve_s())
+            )
+        })
+        .collect();
+    format!("[{}]", items.join(", "))
+}
+
 /// What the chunk stage did during a flight, as a log object (`null` without a stage).
 fn stage_json(stage: Option<StageFacts>) -> String {
     match stage {
         None => "null".to_string(),
         Some(f) => format!(
-            "{{\"chunks_landed\": {}, \"horizon_maps_landed\": {}, \"prefetch_asked\": {}, \"first_wanted_s\": {}, \"median_wait_s\": {}, \"max_wait_s\": {}, \"chunk_jobs_at_end\": {}, \"horizon_jobs_at_end\": {}}}",
+            "{{\"chunks_landed\": {}, \"horizon_maps_landed\": {}, \"prefetch_asked\": {}, \"first_wanted_s\": {}, \"late_chunks\": {}, \"late\": {}, \"median_wait_s\": {}, \"max_wait_s\": {}, \"chunk_jobs_at_end\": {}, \"horizon_jobs_at_end\": {}}}",
             f.trace.chunks_landed,
             f.trace.horizon_maps_landed,
             f.trace.prefetch_asked,
             f.trace.first_wanted_s.map_or("null".to_string(), number),
+            f.trace.late_count,
+            late_json(&f.trace),
             number(f.trace.median_wait_s),
             number(f.trace.max_wait_s),
             f.chunk_jobs_at_end,
@@ -621,38 +654,41 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
         let total = run_in + window_frames;
         let edge = (run_in as f64 + EDGE_FRACTION * frames.min(window_frames) as f64) / total as f64;
         let mut points = Vec::new();
-        for &altitude in altitudes {
-            let point = if smoke {
-                let (lat, lon) = trial_start_at(n, START_SPEED_MPS, total, radius_m, true, edge);
-                n += 1;
-                let cameras = level_flight_cameras(radius_m, aspect, field.as_ref(), altitude, START_SPEED_MPS, lat, lon, total);
-                let measure = fly(ctx, &world, &req_of, &cameras, run_in, true, o.gen_workers(), stage, out)?;
-                let share = measure.judged();
-                Point {
-                    altitude_m: altitude,
-                    speed_mps: None,
-                    share,
-                    capped: false,
-                    trials: vec![Trial { speed_mps: START_SPEED_MPS, share, measure }],
-                }
-            } else {
-                search(altitude, o.share_bound, |speed| {
-                    let (lat, lon) = trial_start_at(n, speed, total, radius_m, true, edge);
+        let places = if smoke { 1 } else { o.places };
+        for (ai, &altitude) in altitudes.iter().enumerate() {
+            for pj in 0..places {
+                let place = STEADY_PLACE_BASE + places * ai + pj;
+                let point = if smoke {
+                    let (lat, lon) = trial_start_at(n, START_SPEED_MPS, total, radius_m, true, edge);
                     n += 1;
-                    let cameras = level_flight_cameras(radius_m, aspect, field.as_ref(), altitude, speed, lat, lon, total);
-                    let measure = fly(ctx, &world, &req_of, &cameras, run_in, false, o.gen_workers(), stage, out)?;
-                    writeln!(
+                    let cameras = level_flight_cameras(radius_m, aspect, field.as_ref(), altitude, START_SPEED_MPS, lat, lon, total);
+                    let measure = fly(ctx, &world, &req_of, &cameras, run_in, true, o.gen_workers(), stage, out)?;
+                    let share = measure.judged();
+                    Point {
+                        altitude_m: altitude,
+                        speed_mps: None,
+                        share,
+                        capped: false,
+                        trials: vec![Trial { speed_mps: START_SPEED_MPS, share, measure }],
+                    }
+                } else {
+                    search(altitude, o.share_bound, |speed| {
+                        let (lat, lon) = trial_start_at(place, speed, total, radius_m, true, edge);
+                        let cameras = level_flight_cameras(radius_m, aspect, field.as_ref(), altitude, speed, lat, lon, total);
+                        let measure = fly(ctx, &world, &req_of, &cameras, run_in, false, o.gen_workers(), stage, out)?;
+                        writeln!(
                         out,
-                        "  steady (run-in {run_in_s} s), {altitude:.0} m at {speed:.1} m/s: worst window {:.3} % coarse (pixels){}",
+                        "  steady (run-in {run_in_s} s), {altitude:.0} m place {pj} at {speed:.1} m/s: worst window {:.3} % coarse (pixels){}",
                         100.0 * measure.coarse_share,
                         measure.stand_in_share.map_or(String::new(), |s| format!(", {:.3} % chunk stand-in (nodes)", 100.0 * s))
                     )
                     .map_err(err)?;
-                    Ok(measure)
-                })?
-            };
-            writeln!(out, "steady: {}", summary_line(&point)).map_err(err)?;
-            points.push(point);
+                        Ok(measure)
+                    })?
+                };
+                writeln!(out, "steady (place {pj}): {}", summary_line(&point)).map_err(err)?;
+                points.push(point);
+            }
         }
         points
     } else {
@@ -950,6 +986,18 @@ mod tests {
                 horizon_maps_landed: 9,
                 prefetch_asked: 0,
                 first_wanted_s: Some(0.7),
+                late: [
+                    Some(crate::chunkstage::LateChunk {
+                        key: (4, 799, 9),
+                        wanted_s: 0.9,
+                        asked_s: Some(0.4),
+                        started_s: Some(0.5),
+                        landed_s: 10.8,
+                    }),
+                    None,
+                    None,
+                ],
+                late_count: 1,
                 median_wait_s: 2.5,
                 max_wait_s: 6.0,
             },
@@ -986,6 +1034,9 @@ mod tests {
             "\"median_wait_s\": 2.5",
             "\"max_wait_s\": 6",
             "\"first_wanted_s\": 0.7",
+            "\"late_chunks\": 1",
+            "\"chunk\": [4, 799, 9]",
+            "\"solve_s\": 10.3",
             "\"chunk_jobs_at_end\": 3",
             "\"horizon_jobs_at_end\": 1",
             "\"horizon_off_comparison\"",

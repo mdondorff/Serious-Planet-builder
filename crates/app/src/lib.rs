@@ -208,6 +208,8 @@ pub struct Options {
     pub steady_window_s: f64,
     /// `--only-steady`: the `envelope` scene runs only the steady-flight curve (no cold curve, no horizon-off comparison), over the `--altitudes-m` it is given (TEST-057).
     pub only_steady: bool,
+    /// `--places K`: the start places the steady-flight search runs at per altitude, each with one place for all its trials (default 2; the log gives each and the lowest speed is the figure).
+    pub places: usize,
     /// `--lit`: the streaming perf scenes draw the lit path with the atmosphere and the water (TEST-025).
     pub lit: bool,
     /// `--flight-frames N`: frames of each coastal flight of the lit perf scenes.
@@ -366,6 +368,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         share_bound: envelopeperf::DEFAULT_BOUND,
         steady_window_s: envelopeperf::STEADY_WINDOW_S,
         only_steady: false,
+        places: envelopeperf::STEADY_PLACES,
         lit: false,
         flight_frames: 240,
         views: None,
@@ -401,6 +404,12 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--perf-smoke" => o.perf_smoke = true,
             "--settle-ms" => {
                 o.settle_ms = it.next().ok_or("--settle-ms needs a value")?.parse().map_err(|e| format!("--settle-ms: {e}"))?
+            }
+            "--places" => {
+                o.places = it.next().ok_or("--places needs a value")?.parse().map_err(|e| format!("--places: {e}"))?;
+                if o.places == 0 {
+                    return Err("--places must be at least 1".into());
+                }
             }
             "--only-steady" => o.only_steady = true,
             "--steady-window-s" => {
@@ -734,7 +743,7 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
             // `--prefill-levels`: the levels of the tile pack the gated dives require pre-filled at their start (default 4).
             // `--altitudes-m`: the altitudes of the envelope scene (`--only-steady`, TEST-057).
             // `--base-threads`: the threads of a batch of the A-net's base heights in the edit-latency scene (with `--chunk-workers`).
-            &["--world", "--global-res", "--prefill-levels", "--base-threads", "--horizon-threads", "--altitudes-m"]
+            &["--world", "--global-res", "--prefill-levels", "--base-threads", "--horizon-threads", "--altitudes-m", "--places"]
         } else if window {
             &["--world", "--global-res", "--prefill-levels"]
         } else if terrain_scene {
