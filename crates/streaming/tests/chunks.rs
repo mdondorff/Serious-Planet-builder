@@ -490,3 +490,44 @@ fn a_prefetched_chunk_is_a_prefetch_job_and_a_wanted_chunk_submitted_later_runs_
     assert!(spawner.run_one());
     assert_eq!(m.update(&[(key(0, 0), 100.0)]).landed, vec![key(0, 0)], "the wanted chunk lands before either prefetched one");
 }
+
+/// A version source that says on which thread each version was asked.
+struct ThreadVersions {
+    caller: std::thread::ThreadId,
+    on_caller: std::sync::Mutex<Vec<ChunkKey>>,
+    elsewhere: std::sync::atomic::AtomicUsize,
+}
+
+impl planet_streaming::chunks::ChunkVersions for ThreadVersions {
+    fn version(&self, key: ChunkKey) -> u64 {
+        if std::thread::current().id() == self.caller {
+            self.on_caller.lock().unwrap().push(key);
+        } else {
+            self.elsewhere.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        5
+    }
+}
+
+// spec: STRM-056
+#[test]
+fn the_version_of_a_chunk_that_is_not_ready_is_made_by_its_job_never_on_the_thread_that_updates() {
+    let spawner = Arc::new(planet_streaming::ThreadPool::new(2));
+    let versions = Arc::new(ThreadVersions { caller: std::thread::current().id(), on_caller: Default::default(), elsewhere: 0.into() });
+    let m = manager(spawner, Arc::new(FakeClock::default()), None, ChunkConfig { workers: 2, ..ChunkConfig::default() })
+        .with_versions(versions.clone());
+    let keys: Vec<(ChunkKey, f64)> = (0..4).map(|x| (key(x, 0), 100.0 * f64::from(x) + 100.0)).collect();
+    let started = std::time::Instant::now();
+    while m.stats().landed < 4 {
+        m.update(&keys);
+        assert!(started.elapsed().as_secs() < 60, "the chunks did not land");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(versions.on_caller.lock().unwrap().iter().all(|k| m.is_ready(*k)), "the caller asked only for chunks that were ready");
+    assert!(
+        versions.elsewhere.load(std::sync::atomic::Ordering::SeqCst) >= 4,
+        "each new chunk's job asked for its own version on a worker"
+    );
+    // The version a job made is the chunk's: nothing is stale, so a further update starts nothing.
+    assert_eq!(m.update(&keys).started, 0);
+}

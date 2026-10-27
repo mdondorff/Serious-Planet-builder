@@ -629,6 +629,81 @@ mod tests {
         }
     }
     // spec: GEN-052
+    /// What one `chunk_frame` call costs the calling thread (the main thread of the window) while the camera moves over new chunks, without and
+    /// with an item in a stamp layer under the chunk stage (M8 owner test: stalls of 1 to 15 s in the editor's chunk frame). `PLANET_ANET_STORE=DIR
+    /// PLANET_ANET_RES=N cargo test -p planet --release --lib chunk_frame_cost_report -- --ignored --nocapture`. Times of the call only, a probe.
+    #[test]
+    #[ignore = "a measurement: it flies over chunks and times the chunk frame"]
+    fn chunk_frame_cost_report() {
+        use planet_core::cube::TangentWarp;
+        let mut out = std::io::stdout();
+        let res = std::env::var("PLANET_ANET_RES").ok().and_then(|r| r.parse().ok()).unwrap_or(256);
+        let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
+        let (world, _maps, tile) = anet_scene(res, 11, store, &mut out).unwrap();
+        let spawner = std::sync::Arc::new(planet_streaming::ThreadPool::new(6));
+        let cfg = planet_streaming::chunks::ChunkConfig { workers: 6, ..Default::default() };
+        assert_eq!(
+            world.enable_anet_from_store_with(
+                crate::anetworld::ANET_CELL_M,
+                spawner,
+                std::sync::Arc::new(planet_streaming::SystemClock::new()),
+                cfg,
+                false
+            ),
+            Ok(true)
+        );
+        let radius = world.radius_m();
+        let site = tile.center_direction(&TangentWarp);
+        let east = planet_core::Vec3::new(0.0, 0.0, 1.0).cross(site).normalized();
+        let north = site.cross(east).normalized();
+        // 3 x 3 level-15 tiles round a point of the path: what a low camera wants.
+        let tiles_at = |dir: planet_core::Vec3| -> Vec<planet_core::TileId> {
+            use planet_core::Side::{East, North, South, West};
+            let c = planet_core::TileId::from_direction(&TangentWarp, dir, 15);
+            let mut t = vec![c];
+            for side in [East, West, North, South] {
+                t.push(c.neighbor(&TangentWarp, side));
+            }
+            for (a, b) in [(East, North), (East, South), (West, North), (West, South)] {
+                t.push(c.neighbor(&TangentWarp, a).neighbor(&TangentWarp, b));
+            }
+            t
+        };
+        let fly = |label: &str, origin: planet_core::Vec3, along: planet_core::Vec3, out: &mut dyn Write| {
+            let mut times = Vec::new();
+            for k in 0..30 {
+                let dir = (origin * libm::cos(k as f64 * 3_000.0 / radius) + along * libm::sin(k as f64 * 3_000.0 / radius)).normalized();
+                let tiles = tiles_at(dir);
+                let camera = planet_core::PlanetFixed(dir * radius);
+                let t = std::time::Instant::now();
+                world.chunk_frame(&tiles, camera, &[]);
+                times.push(t.elapsed().as_secs_f64() * 1000.0);
+                std::thread::sleep(std::time::Duration::from_millis(30));
+            }
+            let max = times.iter().cloned().fold(0.0, f64::max);
+            let over: Vec<String> = times.iter().filter(|t| **t > 20.0).map(|t| format!("{t:.0}")).collect();
+            writeln!(out, "{label}: 30 frames 3 km apart, max {max:.0} ms, frames over 20 ms: [{}]", over.join(", ")).map_err(err).unwrap();
+        };
+        fly("no items, east", site, east, &mut out);
+        let mut def = (*world.definition()).clone();
+        let item = planet_world_def::ItemSpec {
+            id: 1,
+            layer: "stamps".into(),
+            priority: 0,
+            dir: site,
+            content_hash: 0,
+            reach_m: 500.0,
+            max_delta_m: 60.0,
+            stamp: None,
+        }
+        .with_stamp(planet_world_def::stamp::Stamp::new(planet_world_def::stamp::StampKind::Hill, [30.0, 0.0, 0.0]));
+        def.put_item_spec(planet_world_def::BodyId::PLANET, item).map_err(|e| format!("{e:?}")).unwrap();
+        world.set_definition(std::sync::Arc::new(def)).unwrap();
+        fly("one hill in the stamp layer, north (new chunks)", site, north, &mut out);
+        fly("one hill in the stamp layer, west (new chunks)", site, east * -1.0, &mut out);
+    }
+
+    // spec: GEN-052
     #[test]
     fn the_chunk_budget_is_four_seconds_at_8_m_and_a_missing_time_never_passes() {
         assert!(anet_chunk_budget_failures(8.0, 3.9).is_empty());
