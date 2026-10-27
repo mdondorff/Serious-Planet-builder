@@ -1,0 +1,16 @@
+$ cargo run --release -p planet --example chunk_tributaries -- --store C:/DEV/SeriousPlanetData/global16384 --lat 8.972 --lon -16.2378 --threads 4 --variant rr5:reroute=5
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+    Finished `release` profile [optimized] target(s) in 0.25s
+     Running `target\release\examples\chunk_tributaries.exe --store 'C:/DEV/SeriousPlanetData/global16384' --lat 8.972 --lon -16.2378 --threads 4 --variant 'rr5:reroute=5'`
+network build 3.71 s, region 1838736 cells, core 608 x 608
+base: dens 1e5: 0.40, dens 3e5: 0.08, dens 1e6: 0.00, filled>0.5m 0.0%, >5m 0.0%; slope 32 m p50 8.0 p90 14.0 deg, slope 88 m p50 7.5 p90 13.1 deg, relief 1 km p50 148 m, core 577 m
+prod solve (without network) 2.14 s
+prod: dens 1e5: 1.77, dens 3e5: 0.67, dens 1e6: 0.04, filled>0.5m 0.0%, >5m 0.0%; slope 32 m p50 8.3 p90 14.8 deg, slope 88 m p50 7.6 p90 13.2 deg, relief 1 km p50 157 m, core 573 m
+prod: lowering off the corridor p50 10.78 m, p90 21.9 m, max 80 m; over 5 m 77.1%, over 50 m 0.2%
+rr5: solve alone 3.27 s (+ network 3.71 s)
+rr5: dens 1e5: 2.23, dens 3e5: 0.94, dens 1e6: 0.27, filled>0.5m 0.0%, >5m 0.0%; slope 32 m p50 8.2 p90 14.5 deg, slope 88 m p50 7.5 p90 13.2 deg, relief 1 km p50 157 m, core 571 m
+rr5: lowering off the corridor p50 12.07 m, p90 22.0 m, max 80 m; over 5 m 88.6%, over 50 m 0.2%
+  own routing: 5357 core cells off the corridor over 1e5 m2
+  4 concurrent copies: mean 4.55 s each, wall 4.63 s, core hash 766c062c471ac343, identical: true
+prod: 4 concurrent copies: mean 3.30 s each, wall 3.34 s, identical: true
+exit 0
