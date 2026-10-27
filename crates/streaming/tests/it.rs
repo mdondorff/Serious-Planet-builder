@@ -6,6 +6,8 @@ mod dispatch_throughput;
 mod floor_roots;
 #[path = "horizon_jobs.rs"]
 mod horizon_jobs;
+#[path = "job_classes.rs"]
+mod job_classes;
 #[path = "job_log.rs"]
 mod job_log;
 #[path = "manager.rs"]

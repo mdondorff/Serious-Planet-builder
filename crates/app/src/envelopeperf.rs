@@ -42,6 +42,10 @@ pub const FLIGHT_S: f64 = 12.0;
 pub const SMOKE_FLIGHT_S: f64 = 0.5;
 /// Degrees of latitude between the start places of consecutive trials (about 67 km, more than a trial flies at the cap: 36 km).
 const PLACE_STEP_DEG: f64 = 0.6;
+/// Seconds a steady-flight trial flies at the speed under test, with the prefetch active, before its measured window starts: the job latency of a
+/// chunk (5 to 7 s, window 8) and 5 s more. The window is [`FLIGHT_S`] long and has the chunk edge half way, over ground the run-in did not cover.
+pub const RUN_IN_S: f64 = 12.0;
+pub const SMOKE_RUN_IN_S: f64 = 0.25;
 /// Seconds the settle before a trial may take at most.
 const SETTLE_LIMIT_S: f64 = 900.0;
 
@@ -211,6 +215,8 @@ pub struct LogFacts<'a> {
     pub horizon_off: Option<&'a Point>,
     /// With a chunk stage, where along each flight the start put a chunk edge (0.5: half way); `None` without one.
     pub edge_fraction: Option<f64>,
+    /// The steady-flight curve (a run-in before the window, `run_in_s` long) next to the cold one; `None` without a chunk stage.
+    pub steady: Option<(&'a [Point], f64)>,
 }
 
 /// Why the chunk stand-in share is `null` in a log of a world without a chunk field.
@@ -268,10 +274,11 @@ fn stage_json(stage: Option<StageFacts>) -> String {
     match stage {
         None => "null".to_string(),
         Some(f) => format!(
-            "{{\"chunks_landed\": {}, \"horizon_maps_landed\": {}, \"prefetch_asked\": {}, \"median_wait_s\": {}, \"max_wait_s\": {}, \"chunk_jobs_at_end\": {}, \"horizon_jobs_at_end\": {}}}",
+            "{{\"chunks_landed\": {}, \"horizon_maps_landed\": {}, \"prefetch_asked\": {}, \"first_wanted_s\": {}, \"median_wait_s\": {}, \"max_wait_s\": {}, \"chunk_jobs_at_end\": {}, \"horizon_jobs_at_end\": {}}}",
             f.trace.chunks_landed,
             f.trace.horizon_maps_landed,
             f.trace.prefetch_asked,
+            f.trace.first_wanted_s.map_or("null".to_string(), number),
             number(f.trace.median_wait_s),
             number(f.trace.max_wait_s),
             f.chunk_jobs_at_end,
@@ -302,6 +309,9 @@ pub fn log_json(points: &[Point], facts: &LogFacts<'_>) -> String {
     s += "  \"curve\": [\n";
     s += &curve_json(points);
     s += "  ],\n";
+    if let Some((steady, run_in_s)) = facts.steady {
+        s += &format!("  \"run_in_s\": {},\n  \"steady_curve\": [\n{}  ],\n", number(run_in_s), curve_json(steady));
+    }
     if let Some(p) = facts.horizon_off {
         s += &format!("  \"horizon_off_comparison\": [\n{}  ],\n", curve_json(std::slice::from_ref(p)));
     }
@@ -358,13 +368,18 @@ pub fn straddling_start_lat(
 /// The place trial `n` starts from: [`start_place`], moved north so that the flight (`speed_mps` for `frames` frames) crosses a chunk edge half way when
 /// the scene runs the chunk stage.
 pub fn trial_start(n: usize, speed_mps: f64, frames: usize, radius_m: f64, chunks: bool) -> (f64, f64) {
+    trial_start_at(n, speed_mps, frames, radius_m, chunks, EDGE_FRACTION)
+}
+
+/// [`trial_start`] with the chunk edge at `edge_fraction` of the flight (a steady-flight trial puts it half way into the measured window, after the run-in).
+pub fn trial_start_at(n: usize, speed_mps: f64, frames: usize, radius_m: f64, chunks: bool, edge_fraction: f64) -> (f64, f64) {
     let (lat, lon) = start_place(n);
     if !chunks {
         return (lat, lon);
     }
     let flight_m = speed_mps * frames.saturating_sub(1) as f64 * FRAME_STEP_S;
     let flight_deg = (flight_m / radius_m).to_degrees();
-    (straddling_start_lat(&chunk_key_at, lat, lon, flight_deg, EDGE_FRACTION), lon)
+    (straddling_start_lat(&chunk_key_at, lat, lon, flight_deg, edge_fraction), lon)
 }
 
 /// The start place of trial `n` (counted over the whole run): the scene's site moved north by [`PLACE_STEP_DEG`] a trial, so no two
@@ -389,6 +404,7 @@ fn fly(
     world: &Arc<WorldTerrain>,
     req_of: &(dyn Fn(Camera) -> TerrainRequest + Sync),
     cameras: &[Camera],
+    run_in: usize,
     smoke: bool,
     gen: planet_streaming::GenWorkers,
     stage: Option<StageSetup>,
@@ -420,6 +436,11 @@ fn fly(
             return Err(format!("the start view did not settle within {SETTLE_LIMIT_S} s"));
         }
     }
+    // The run-in: the first `run_in` cameras are flown with the chunk stage and the prefetch running and are not judged; the window follows.
+    for cam in &cameras[..run_in] {
+        d.tick(&req_of(*cam))?;
+    }
+    let cameras = &cameras[run_in..];
     d.restart_pacing();
     d.restart_chunk_trace();
     let mut draws = Vec::with_capacity(cameras.len());
@@ -543,7 +564,7 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
             let (lat, lon) = trial_start(n, START_SPEED_MPS, frames, radius_m, stage.is_some());
             n += 1;
             let cameras = level_flight_cameras(radius_m, aspect, field.as_ref(), altitude, START_SPEED_MPS, lat, lon, frames);
-            let measure = fly(ctx, &world, &req_of, &cameras, true, o.gen_workers(), stage, out)?;
+            let measure = fly(ctx, &world, &req_of, &cameras, 0, true, o.gen_workers(), stage, out)?;
             let share = measure.judged();
             Point {
                 altitude_m: altitude,
@@ -557,7 +578,7 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
                 let (lat, lon) = trial_start(n, speed, frames, radius_m, stage.is_some());
                 n += 1;
                 let cameras = level_flight_cameras(radius_m, aspect, field.as_ref(), altitude, speed, lat, lon, frames);
-                let measure = fly(ctx, &world, &req_of, &cameras, false, o.gen_workers(), stage, out)?;
+                let measure = fly(ctx, &world, &req_of, &cameras, 0, false, o.gen_workers(), stage, out)?;
                 writeln!(
                     out,
                     "  {altitude:.0} m at {speed:.1} m/s: worst window {:.3} % coarse (pixels){}",
@@ -571,6 +592,51 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
         writeln!(out, "{}", summary_line(&point)).map_err(err)?;
         points.push(point);
     }
+    // The steady flight (STRM-042): the same altitudes with a run-in at the speed under test before the window, so the prefetch has been running for longer than a
+    // chunk takes when the window starts. The cold curve above is the first visit after a stop.
+    let run_in_s = if smoke { SMOKE_RUN_IN_S } else { RUN_IN_S };
+    let steady: Vec<Point> = if stage.is_some() {
+        let run_in = (run_in_s / FRAME_STEP_S).round() as usize;
+        let total = run_in + frames;
+        let edge = (run_in as f64 + EDGE_FRACTION * frames as f64) / total as f64;
+        let mut points = Vec::new();
+        for &altitude in altitudes {
+            let point = if smoke {
+                let (lat, lon) = trial_start_at(n, START_SPEED_MPS, total, radius_m, true, edge);
+                n += 1;
+                let cameras = level_flight_cameras(radius_m, aspect, field.as_ref(), altitude, START_SPEED_MPS, lat, lon, total);
+                let measure = fly(ctx, &world, &req_of, &cameras, run_in, true, o.gen_workers(), stage, out)?;
+                let share = measure.judged();
+                Point {
+                    altitude_m: altitude,
+                    speed_mps: None,
+                    share,
+                    capped: false,
+                    trials: vec![Trial { speed_mps: START_SPEED_MPS, share, measure }],
+                }
+            } else {
+                search(altitude, o.share_bound, |speed| {
+                    let (lat, lon) = trial_start_at(n, speed, total, radius_m, true, edge);
+                    n += 1;
+                    let cameras = level_flight_cameras(radius_m, aspect, field.as_ref(), altitude, speed, lat, lon, total);
+                    let measure = fly(ctx, &world, &req_of, &cameras, run_in, false, o.gen_workers(), stage, out)?;
+                    writeln!(
+                        out,
+                        "  steady (run-in {run_in_s} s), {altitude:.0} m at {speed:.1} m/s: worst window {:.3} % coarse (pixels){}",
+                        100.0 * measure.coarse_share,
+                        measure.stand_in_share.map_or(String::new(), |s| format!(", {:.3} % chunk stand-in (nodes)", 100.0 * s))
+                    )
+                    .map_err(err)?;
+                    Ok(measure)
+                })?
+            };
+            writeln!(out, "steady: {}", summary_line(&point)).map_err(err)?;
+            points.push(point);
+        }
+        points
+    } else {
+        Vec::new()
+    };
     // The comparison line: one altitude (300 m) again with the horizon jobs off, so the log shows what they cost the curve.
     let horizon_off: Option<Point> = match stage {
         Some(st) => {
@@ -579,7 +645,7 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
             let point = if smoke {
                 let (lat, lon) = trial_start(n, START_SPEED_MPS, frames, radius_m, true);
                 let cameras = level_flight_cameras(radius_m, aspect, field.as_ref(), altitude, START_SPEED_MPS, lat, lon, frames);
-                let measure = fly(ctx, &world, &req_of, &cameras, true, o.gen_workers(), Some(off), out)?;
+                let measure = fly(ctx, &world, &req_of, &cameras, 0, true, o.gen_workers(), Some(off), out)?;
                 let share = measure.judged();
                 Point {
                     altitude_m: altitude,
@@ -593,7 +659,7 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
                     let (lat, lon) = trial_start(n, speed, frames, radius_m, true);
                     n += 1;
                     let cameras = level_flight_cameras(radius_m, aspect, field.as_ref(), altitude, speed, lat, lon, frames);
-                    let measure = fly(ctx, &world, &req_of, &cameras, false, o.gen_workers(), Some(off), out)?;
+                    let measure = fly(ctx, &world, &req_of, &cameras, 0, false, o.gen_workers(), Some(off), out)?;
                     writeln!(
                         out,
                         "  horizon off, {altitude:.0} m at {speed:.1} m/s: worst window {:.3} % coarse (pixels){}",
@@ -626,6 +692,7 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
             horizon: true,
             horizon_off: horizon_off.as_ref(),
             edge_fraction: stage.map(|_| EDGE_FRACTION),
+            steady: stage.map(|_| (steady.as_slice(), run_in_s)),
         },
     );
     let path = o.out.clone().unwrap_or_else(|| Path::new("perf").join("logs").join("envelope.json"));
@@ -757,6 +824,7 @@ mod tests {
             horizon: true,
             horizon_off: None,
             edge_fraction: None,
+            steady: None,
         };
         let without = log_json(&[pt(Measure::coarse_only(0.004))], &facts(false));
         assert!(
@@ -776,6 +844,51 @@ mod tests {
         assert!(with.contains("\"coarse_share\": 0.004"), "{with}");
     }
 
+    // spec: TEST-057
+    #[test]
+    fn a_steady_flight_trial_puts_the_chunk_edge_half_way_into_the_window_after_the_run_in_and_the_log_gives_both_curves() {
+        let radius_m = 6_371_000.0;
+        let (frames, run_in) = ((FLIGHT_S / FRAME_STEP_S).round() as usize, (RUN_IN_S / FRAME_STEP_S).round() as usize);
+        let total = run_in + frames;
+        let edge = (run_in as f64 + EDGE_FRACTION * frames as f64) / total as f64;
+        assert!((edge - 0.75).abs() < 1e-9, "12 s of run-in and a 12 s window: the edge is three quarters along: {edge}");
+        for speed in [50.0, 200.0, 600.0] {
+            let (lat, lon) = trial_start_at(3, speed, total, radius_m, true, edge);
+            let flight_deg = (speed * (total - 1) as f64 * FRAME_STEP_S / radius_m).to_degrees();
+            let at = |f: f64| chunk_key_at(lat + f * flight_deg, lon);
+            // The flight crosses a chunk edge at the planned point, inside the measured window (the run-in may cross others on the way).
+            let (before, after) = (at(edge - 0.01), at(edge + 0.01));
+            assert_ne!(before, after, "{speed} m/s: an edge at {edge} of the flight");
+            assert!(edge * (total - 1) as f64 >= run_in as f64, "{speed} m/s: after the run-in");
+        }
+        let steady = Point {
+            altitude_m: 300.0,
+            speed_mps: Some(190.0),
+            share: 0.004,
+            capped: false,
+            trials: vec![Trial { speed_mps: 190.0, share: 0.004, measure: Measure::coarse_only(0.004) }],
+        };
+        let text = log_json(
+            &[],
+            &LogFacts {
+                bound: 0.01,
+                source: "s",
+                adapter: "a",
+                smoke: false,
+                owner_override: &[],
+                chunk_field: false,
+                horizon: true,
+                horizon_off: None,
+                edge_fraction: None,
+                steady: Some((std::slice::from_ref(&steady), RUN_IN_S)),
+            },
+        );
+        assert!(
+            text.contains("\"run_in_s\": 12") && text.contains("\"steady_curve\"") && text.contains("\"highest_speed_mps\": 190"),
+            "{text}"
+        );
+    }
+
     // spec: TEST-055
     #[test]
     fn the_log_gives_what_the_chunk_stage_did_per_trial_and_the_horizon_off_comparison() {
@@ -784,6 +897,7 @@ mod tests {
                 chunks_landed: 12,
                 horizon_maps_landed: 9,
                 prefetch_asked: 0,
+                first_wanted_s: Some(0.7),
                 median_wait_s: 2.5,
                 max_wait_s: 6.0,
             },
@@ -809,6 +923,7 @@ mod tests {
             horizon: true,
             horizon_off,
             edge_fraction: chunk_field.then_some(EDGE_FRACTION),
+            steady: None,
         };
         let off: &'static Point = Box::leak(Box::new(off));
         let with = log_json(&[pt(30.0, measure)], &facts(true, Some(off)));
@@ -818,6 +933,7 @@ mod tests {
             "\"horizon_maps_landed\": 9",
             "\"median_wait_s\": 2.5",
             "\"max_wait_s\": 6",
+            "\"first_wanted_s\": 0.7",
             "\"chunk_jobs_at_end\": 3",
             "\"horizon_jobs_at_end\": 1",
             "\"horizon_off_comparison\"",
@@ -908,6 +1024,7 @@ mod tests {
                 horizon: true,
                 horizon_off: None,
                 edge_fraction: None,
+                steady: None,
             },
         );
         for want in [

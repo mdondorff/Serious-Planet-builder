@@ -6,7 +6,7 @@
 //! a frame reads as a snapshot. A chunk that has not been wanted for `evict_ms` on the injected clock leaves RAM (CON-04: the clock and the
 //! spawner are injected, so a test runs a flight on a fake clock).
 
-use crate::{Clock, Spawner};
+use crate::{Clock, JobClass, Spawner};
 use planet_cache::chunk_store::PackChunkDisk;
 use planet_core::{Face, TileId};
 use planet_generators::chunk::CHUNK_GRID_LEVEL;
@@ -614,7 +614,7 @@ impl HorizonJobs {
         }
         out.started = starts.len();
         for (key, word) in starts {
-            self.spawner.spawn(self.job(key, word));
+            self.spawner.spawn_in(JobClass::Idle, self.job(key, word));
         }
         out
     }

@@ -39,7 +39,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::hash::{BuildHasherDefault, Hasher};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 
 /// A fixed, fast hasher for the scheduler's maps keyed by tile ids (internal; no map's iteration order decides anything, so the
 /// choice affects speed only): one multiply per word and a final mix so that the low bits of structured ids spread.
@@ -216,9 +216,32 @@ impl Clock for FakeClock {
     }
 }
 
+/// The class a background job runs in (ADR 0083 point 2; frame-critical work is not a pool job). A free worker takes the best class that
+/// has a job waiting; within a class jobs run in submission order. A running job is never preempted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum JobClass {
+    /// Visible streaming and edits: the chunks and tiles the view draws.
+    Visible,
+    /// Prefetch: work for where the camera will be.
+    Prefetch,
+    /// Idle: bakes nobody waits for (the chunk horizon maps).
+    Idle,
+}
+
+impl JobClass {
+    const ALL: [JobClass; 3] = [JobClass::Visible, JobClass::Prefetch, JobClass::Idle];
+}
+
 /// Runs jobs somewhere else (thread pool) or on demand (tests).
 pub trait Spawner: Send + Sync {
+    /// A job of the class [`JobClass::Visible`].
     fn spawn(&self, job: Job);
+
+    /// A job of `class`. A spawner without classes (the deterministic ones of tests) runs it as `spawn` does.
+    fn spawn_in(&self, class: JobClass, job: Job) {
+        let _ = class;
+        self.spawn(job);
+    }
 
     /// Run one waiting job on the calling thread; false when this spawner runs its jobs elsewhere (a pool) or none waits.
     /// A caller that must wait for jobs it spawned ([`Streamer::load_roots_blocking`]) calls it so that a spawner which
@@ -242,9 +265,41 @@ pub trait TileSource<T>: Send + Sync {
     }
 }
 
-/// Fixed-size worker pool; jobs run in submission order.
+/// What the workers of a [`ThreadPool`] share: one queue per [`JobClass`], and how many workers run an idle job.
+struct PoolState {
+    queues: [VecDeque<Job>; 3],
+    idle_running: usize,
+    idle_cap: usize,
+    closed: bool,
+}
+
+impl PoolState {
+    /// The next job a free worker may take and its class: the best class with a job waiting; idle jobs only while fewer than `idle_cap`
+    /// workers run one (a closing pool drains them regardless).
+    fn take(&mut self) -> Option<(JobClass, Job)> {
+        for class in JobClass::ALL {
+            if class == JobClass::Idle && self.idle_running >= self.idle_cap && !self.closed {
+                continue;
+            }
+            if let Some(job) = self.queues[class as usize].pop_front() {
+                if class == JobClass::Idle {
+                    self.idle_running += 1;
+                }
+                return Some((class, job));
+            }
+        }
+        None
+    }
+}
+
+struct PoolShared {
+    state: Mutex<PoolState>,
+    wake: Condvar,
+}
+
+/// Fixed-size worker pool; jobs of a class run in submission order, a better class first ([`JobClass`]).
 pub struct ThreadPool {
-    tx: Mutex<Option<Sender<Job>>>,
+    shared: Arc<PoolShared>,
     workers: Mutex<Vec<std::thread::JoinHandle<()>>>,
 }
 
@@ -256,11 +311,19 @@ impl ThreadPool {
     /// `threads` workers, each setting its own thread's `priority` before it takes its first job (STRM-020). A platform that
     /// refuses the request leaves the worker at normal priority; the pool still works.
     pub fn with_priority(threads: usize, priority: Priority) -> Self {
-        let (tx, rx) = channel::<Job>();
-        let rx = Arc::new(Mutex::new(rx));
+        Self::with_classes(threads, priority, usize::MAX)
+    }
+
+    /// Like [`with_priority`](ThreadPool::with_priority), and idle jobs ([`JobClass::Idle`]) run on at most `idle_cap` workers at once: the
+    /// pool sized for its visible work plus `idle_cap` never makes a visible job wait for a bake (STRM-060).
+    pub fn with_classes(threads: usize, priority: Priority, idle_cap: usize) -> Self {
+        let shared = Arc::new(PoolShared {
+            state: Mutex::new(PoolState { queues: Default::default(), idle_running: 0, idle_cap: idle_cap.max(1), closed: false }),
+            wake: Condvar::new(),
+        });
         let workers = (0..threads.max(1))
             .map(|n| {
-                let rx = Arc::clone(&rx);
+                let shared = Arc::clone(&shared);
                 std::thread::Builder::new()
                     .name(format!("pool-worker-{n}"))
                     .spawn(move || {
@@ -268,41 +331,61 @@ impl ThreadPool {
                             priority::set_current(priority);
                         }
                         loop {
-                            let job = rx.lock().expect("pool receiver").recv();
-                            match job {
-                                Ok(j) => j(),
-                                Err(_) => break,
+                            let (class, job) = {
+                                let mut st = shared.state.lock().expect("pool state");
+                                loop {
+                                    if let Some(taken) = st.take() {
+                                        break taken;
+                                    }
+                                    if st.closed {
+                                        return;
+                                    }
+                                    st = shared.wake.wait(st).expect("pool state");
+                                }
+                            };
+                            job();
+                            if class == JobClass::Idle {
+                                shared.state.lock().expect("pool state").idle_running -= 1;
+                                // A waiting idle job may start now.
+                                shared.wake.notify_one();
                             }
                         }
                     })
                     .expect("start a pool worker")
             })
             .collect();
-        Self { tx: Mutex::new(Some(tx)), workers: Mutex::new(workers) }
+        Self { shared, workers: Mutex::new(workers) }
     }
 }
 
 impl Spawner for ThreadPool {
     fn spawn(&self, job: Job) {
-        if let Some(tx) = self.tx.lock().expect("pool sender").as_ref() {
-            let _ = tx.send(job);
+        self.spawn_in(JobClass::Visible, job);
+    }
+
+    fn spawn_in(&self, class: JobClass, job: Job) {
+        let mut st = self.shared.state.lock().expect("pool state");
+        if !st.closed {
+            st.queues[class as usize].push_back(job);
+            self.shared.wake.notify_one();
         }
     }
 }
 
 impl Drop for ThreadPool {
     fn drop(&mut self) {
-        self.tx.lock().expect("pool sender").take();
+        self.shared.state.lock().expect("pool state").closed = true;
+        self.shared.wake.notify_all();
         for w in self.workers.lock().expect("pool workers").drain(..) {
             let _ = w.join();
         }
     }
 }
 
-/// Deterministic spawner: jobs wait in a queue until the test runs them.
+/// Deterministic spawner: jobs wait in a queue until the test runs them (the best class first, submission order within a class, like the pool).
 #[derive(Default)]
 pub struct ManualSpawner {
-    queue: Mutex<VecDeque<Job>>,
+    queue: Mutex<VecDeque<(JobClass, Job)>>,
 }
 
 impl ManualSpawner {
@@ -310,10 +393,14 @@ impl ManualSpawner {
         self.queue.lock().expect("queue").len()
     }
 
-    /// Run the oldest job; false when none was waiting.
+    /// Run the oldest job of the best class; false when none was waiting.
     pub fn run_one(&self) -> bool {
-        let job = self.queue.lock().expect("queue").pop_front();
-        job.map(|j| j()).is_some()
+        let job = {
+            let mut q = self.queue.lock().expect("queue");
+            let best = q.iter().map(|(c, _)| *c).min();
+            best.and_then(|b| q.iter().position(|(c, _)| *c == b)).and_then(|i| q.remove(i))
+        };
+        job.map(|(_, j)| j()).is_some()
     }
 
     pub fn run(&self, n: usize) -> usize {
@@ -323,7 +410,11 @@ impl ManualSpawner {
 
 impl Spawner for ManualSpawner {
     fn spawn(&self, job: Job) {
-        self.queue.lock().expect("queue").push_back(job);
+        self.spawn_in(JobClass::Visible, job);
+    }
+
+    fn spawn_in(&self, class: JobClass, job: Job) {
+        self.queue.lock().expect("queue").push_back((class, job));
     }
 
     fn help(&self) -> bool {
@@ -678,6 +769,13 @@ impl GenWorkers {
     /// The pool: exactly `workers` threads.
     pub fn pool(&self) -> Arc<ThreadPool> {
         Arc::new(ThreadPool::with_priority(self.workers, self.priority))
+    }
+
+    /// The pool for visible work on `workers` threads and `idle` more for the idle class, at most `idle` of which run idle jobs at once, so a
+    /// bake never holds a worker a visible job needs (STRM-060).
+    pub fn pool_with_idle(&self, idle: usize) -> Arc<ThreadPool> {
+        let idle = idle.max(1);
+        Arc::new(ThreadPool::with_classes(self.workers + idle, self.priority, idle))
     }
 
     /// `config` with the in-flight limits of this pool.
