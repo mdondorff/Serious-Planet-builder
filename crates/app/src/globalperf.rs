@@ -1106,7 +1106,9 @@ mod tests {
             // `PLANET_CARVE_ON_TRUNKS=1`: only chunks whose centre run cell or one of its neighbours drains over 1e9 m2 (the chunks the carve touches).
             let on_trunk = std::env::var_os("PLANET_CARVE_ON_TRUNKS").is_none() || {
                 let c = maps.lattice().cell_at(t.center_direction(&TangentWarp));
-                std::iter::once(c).chain(maps.lattice().neighbours(c).into_iter().map(|n| n as usize)).any(|n| n < maps.lattice().len() && f64::from(maps.area_m2(n)) >= 1.0e9)
+                std::iter::once(c)
+                    .chain(maps.lattice().neighbours(c).into_iter().map(|n| n as usize))
+                    .any(|n| n < maps.lattice().len() && f64::from(maps.area_m2(n)) >= 1.0e9)
             };
             if on_trunk && base.height(t.center_direction(&TangentWarp)) > 0.0 {
                 tiles.push(t);
@@ -1188,7 +1190,10 @@ mod tests {
                         | (j.clamp(0, i64::from(self.res) - 1) as u64 & 0x0fff_ffff)
                 };
                 let at = |i: i64, j: i64| f64::from(self.grid.get(&key(i, j)).copied().unwrap_or(0.0));
-                at(i0, j0) * (1.0 - wx) * (1.0 - wy) + at(i0 + 1, j0) * wx * (1.0 - wy) + at(i0, j0 + 1) * (1.0 - wx) * wy + at(i0 + 1, j0 + 1) * wx * wy
+                at(i0, j0) * (1.0 - wx) * (1.0 - wy)
+                    + at(i0 + 1, j0) * wx * (1.0 - wy)
+                    + at(i0, j0 + 1) * (1.0 - wx) * wy
+                    + at(i0 + 1, j0 + 1) * wx * wy
             }
         }
         impl BaseDetail for Carved {
@@ -1215,9 +1220,14 @@ mod tests {
         for &thr in &thresholds {
             let t = std::time::Instant::now();
             let g = carve_grid(thr);
-            writeln!(out, "carve at threshold {thr:.0e} m2: {} bake cells carved over the {count} windows ({:.1} s)", g.len(), t.elapsed().as_secs_f64())
-                .map_err(err)
-                .unwrap();
+            writeln!(
+                out,
+                "carve at threshold {thr:.0e} m2: {} bake cells carved over the {count} windows ({:.1} s)",
+                g.len(),
+                t.elapsed().as_secs_f64()
+            )
+            .map_err(err)
+            .unwrap();
             variants.push((format!("threshold {thr:.0e} m2, scale {scale}"), g, thr));
         }
         for (label, grid, thr) in variants {
@@ -1292,6 +1302,277 @@ mod tests {
             .map_err(err)
             .unwrap();
         }
+    }
+
+    // spec: GEN-037
+    /// "Replace, not stack" (ADR 0084 option 1): the chunk keeps the absolute height of its bed and anchors (the stage solves on the uncarved base), and
+    /// the carve lowers the base only down to the depth the chunk cuts at that place, so the change against the carved base is `change + min(carve,
+    /// max(0, -change))`. Over the 24 trunk chunks of `carve_threshold_report` it gives the change at level 16 for the depth law at scale 1 and at a scale
+    /// tuned to the chunks' median incision on the carve line; and at the site of an F9 bundle (`PLANET_BUNDLE`, the findings 2 site) the height step along
+    /// the river between the coarsest level that has the chunk change (`ANET_TOP_LEVEL`) and the level above it, for no carve, the stacked carve (the
+    /// stage solves on the carved base) and the replace variant. `PLANET_ANET_STORE=DIR PLANET_ANET_RES=N PLANET_BUNDLE=FILE cargo test -p planet --release
+    /// --lib carve_replace_report -- --ignored --nocapture`. Read only.
+    #[test]
+    #[ignore = "a measurement: it solves chunks several times"]
+    fn carve_replace_report() {
+        use planet_core::cube::{direction_to_face, TangentWarp};
+        use planet_core::hash::SplitMix64;
+        use planet_generators::anet::{BaseDetail, CoarseRun};
+        use planet_generators::chunkfield::{compute_chunk, halo_rings, ChunkField};
+        use std::collections::HashMap;
+        use std::sync::Arc;
+        let mut out = std::io::stdout();
+        let res: u32 = std::env::var("PLANET_ANET_RES").ok().and_then(|r| r.parse().ok()).unwrap_or(256);
+        let count: usize = std::env::var("PLANET_ANET_CHUNKS").ok().and_then(|r| r.parse().ok()).unwrap_or(24);
+        let bundle = std::env::var_os("PLANET_BUNDLE").map(std::path::PathBuf::from);
+        let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
+        let (world, maps, _) = anet_scene(res, 11, store, &mut out).unwrap();
+        let radius = world.radius_m();
+        let lat = planet_generators::chunkfield::ChunkLattice::new(crate::anetworld::cells_per_chunk_for(radius, 8.0)).unwrap();
+        let top = planet_generators::chunk::CHUNK_GRID_LEVEL;
+        let entry = crate::anetworld::ANET_TOP_LEVEL;
+        let map = &TangentWarp;
+        let coarse = maps.lattice();
+        let thr = 1.0e9;
+        let depth = |scale: f64, area: f64| (scale * 3.0 * libm::sqrt(area / 1.0e8)).min(100.0 * scale.max(1.0));
+        let cell_key = |f: u8, i: i64, j: i64| {
+            (u64::from(f) << 56)
+                | ((i.clamp(0, i64::from(res) - 1) as u64 & 0x0fff_ffff) << 28)
+                | (j.clamp(0, i64::from(res) - 1) as u64 & 0x0fff_ffff)
+        };
+        // The carve grid of a scale round the given chunks: depth on the bake's lattice along the run's polylines from every cell over `thr`.
+        let carve_grid = |tiles: &[planet_core::TileId], scale: f64, thr: f64| -> HashMap<u64, f32> {
+            let mut grid: HashMap<u64, f32> = HashMap::new();
+            let mut seen = std::collections::HashSet::new();
+            for t in tiles {
+                let mut ring = vec![coarse.cell_at(t.center_direction(map))];
+                let mut all = ring.clone();
+                for _ in 0..4 {
+                    let mut next: Vec<usize> = Vec::new();
+                    for &c in &ring {
+                        for n in coarse.neighbours(c) {
+                            let n = n as usize;
+                            if n != planet_generators::coupled::NONE as usize && !all.contains(&n) && !next.contains(&n) {
+                                next.push(n);
+                            }
+                        }
+                    }
+                    all.extend(next.iter().copied());
+                    ring = next;
+                }
+                for c in all {
+                    if !seen.insert(c) || f64::from(maps.area_m2(c)) < thr {
+                        continue;
+                    }
+                    let r = maps.receiver(c);
+                    if r == planet_generators::coupled::NONE {
+                        continue;
+                    }
+                    let (a, b) = (coarse.direction(c), coarse.direction(r as usize));
+                    let (area_a, area_b) = (f64::from(maps.area_m2(c)), f64::from(maps.area_m2(r as usize)));
+                    let steps = (radius * a.angle_to(b) / 150.0).ceil().max(1.0) as u32;
+                    for k in 0..=steps {
+                        let l = f64::from(k) / f64::from(steps);
+                        let p = (a * (1.0 - l) + b * l).normalized();
+                        let (f, s, t2) = direction_to_face(map, p);
+                        let n = f64::from(res);
+                        let (i, j) = (((s + 1.0) * 0.5 * n) as i64, ((t2 + 1.0) * 0.5 * n) as i64);
+                        let d = depth(scale, area_a * (1.0 - l) + area_b * l) as f32;
+                        let e = grid.entry(cell_key(f.0, i, j)).or_insert(0.0);
+                        *e = e.max(d);
+                    }
+                }
+            }
+            grid
+        };
+        let carve_at = |grid: &HashMap<u64, f32>, d: planet_core::Vec3| -> f64 {
+            if grid.is_empty() {
+                return 0.0;
+            }
+            let (f, s, t) = direction_to_face(map, d);
+            let n = f64::from(res);
+            let (x, y) = ((s + 1.0) * 0.5 * n - 0.5, (t + 1.0) * 0.5 * n - 0.5);
+            let (i0, j0) = (libm::floor(x) as i64, libm::floor(y) as i64);
+            let (wx, wy) = (x - i0 as f64, y - j0 as f64);
+            let at = |i: i64, j: i64| f64::from(grid.get(&cell_key(f.0, i, j)).copied().unwrap_or(0.0));
+            at(i0, j0) * (1.0 - wx) * (1.0 - wy)
+                + at(i0 + 1, j0) * wx * (1.0 - wy)
+                + at(i0, j0 + 1) * (1.0 - wx) * wy
+                + at(i0 + 1, j0 + 1) * wx * wy
+        };
+        struct Carved {
+            inner: crate::anetworld::WorldBase,
+            grid: HashMap<u64, f32>,
+            res: u32,
+        }
+        impl Carved {
+            fn carve(&self, d: planet_core::Vec3) -> f64 {
+                if self.grid.is_empty() {
+                    return 0.0;
+                }
+                let (f, s, t) = direction_to_face(&TangentWarp, d);
+                let n = f64::from(self.res);
+                let (x, y) = ((s + 1.0) * 0.5 * n - 0.5, (t + 1.0) * 0.5 * n - 0.5);
+                let (i0, j0) = (libm::floor(x) as i64, libm::floor(y) as i64);
+                let (wx, wy) = (x - i0 as f64, y - j0 as f64);
+                let key = |i: i64, j: i64| {
+                    (u64::from(f.0) << 56)
+                        | ((i.clamp(0, i64::from(self.res) - 1) as u64 & 0x0fff_ffff) << 28)
+                        | (j.clamp(0, i64::from(self.res) - 1) as u64 & 0x0fff_ffff)
+                };
+                let at = |i: i64, j: i64| f64::from(self.grid.get(&key(i, j)).copied().unwrap_or(0.0));
+                at(i0, j0) * (1.0 - wx) * (1.0 - wy)
+                    + at(i0 + 1, j0) * wx * (1.0 - wy)
+                    + at(i0, j0 + 1) * (1.0 - wx) * wy
+                    + at(i0 + 1, j0 + 1) * wx * wy
+            }
+        }
+        impl BaseDetail for Carved {
+            fn base_height(&self, dir: planet_core::Vec3) -> f64 {
+                self.inner.base_height(dir) - self.carve(dir)
+            }
+            fn base_heights(&self, dirs: &[planet_core::Vec3]) -> Vec<f64> {
+                self.inner.base_heights(dirs).into_iter().zip(dirs).map(|(h, d)| h - self.carve(*d)).collect()
+            }
+            fn coarse_input(&self, dir: planet_core::Vec3) -> f64 {
+                self.inner.coarse_input(dir)
+            }
+            fn region_heights(&self, dirs: &[planet_core::Vec3]) -> Vec<f64> {
+                self.inner.region_heights(dirs).into_iter().zip(dirs).map(|(h, d)| h - self.carve(*d)).collect()
+            }
+            fn identity(&self) -> u64 {
+                self.inner.identity() ^ u64::from(self.res)
+            }
+        }
+        let stage_of = |grid: HashMap<u64, f32>| -> planet_generators::anet::ANet {
+            let mut params = planet_generators::anet::ANetParams::spike(crate::anetworld::ANET_HALO_M, lat.cell_m(radius));
+            params.drivers.seed = world.base_seed();
+            planet_generators::anet::ANet {
+                run: maps.clone(),
+                base: Arc::new(Carved { inner: crate::anetworld::WorldBase::new(&world), grid, res }) as Arc<dyn BaseDetail>,
+                radius_m: radius,
+                params,
+                memo: Default::default(),
+            }
+        };
+        let stats = |v: &mut Vec<f64>| -> String {
+            v.sort_by(f64::total_cmp);
+            let q = |p: f64| v[(((v.len() - 1) as f64) * p) as usize];
+            format!("p50 {:.2}, p99 {:.2}, p99.9 {:.2}, max {:.2} m", q(0.5), q(0.99), q(0.999), v[v.len() - 1])
+        };
+        // Part A: the 24 trunk chunks (the sample of `carve_threshold_report`).
+        let per_face = 1u32 << top;
+        let base = world.base_field().unwrap();
+        let mut rng = SplitMix64(0x6368_616e_6765);
+        let mut tiles: Vec<planet_core::TileId> = Vec::new();
+        while tiles.len() < count {
+            let face = planet_core::Face::ALL[(rng.next_u64() % 6) as usize];
+            let (x, y) = ((rng.next_u64() % u64::from(per_face)) as u32, (rng.next_u64() % u64::from(per_face)) as u32);
+            let t = planet_core::TileId::new(face, top, x, y).expect("a tile of the chunk grid");
+            let c = coarse.cell_at(t.center_direction(map));
+            let on_trunk = std::iter::once(c)
+                .chain(coarse.neighbours(c).into_iter().map(|n| n as usize))
+                .any(|n| n < coarse.len() && f64::from(maps.area_m2(n)) >= thr);
+            if on_trunk && base.height(t.center_direction(map)) > 0.0 {
+                tiles.push(t);
+            }
+        }
+        let plain = stage_of(HashMap::new());
+        let grid1 = carve_grid(&tiles, 1.0, thr);
+        let mut points: Vec<(planet_core::Vec3, f64)> = Vec::new();
+        for tile in &tiles {
+            let Some(r) = compute_chunk(&lat, &plain, radius, top, *tile, halo_rings(&plain)) else { continue };
+            let field = ChunkField::new(world.base_field().unwrap(), lat, radius, &plain).with_top_level(top).with_ready(Arc::new(r));
+            for l in 0..65u32 {
+                for k in 0..65u32 {
+                    let d = tile.sample_direction(map, 64, k, l);
+                    points.push((d, field.change_at_level(d, top + 5)));
+                }
+            }
+        }
+        // The median incision of the chunks on the carve line against the median of the law at scale 1 there.
+        let mut inc: Vec<f64> = points.iter().filter(|(d, c)| *c < -5.0 && carve_at(&grid1, *d) > 1.0).map(|(_, c)| -c).collect();
+        let mut law: Vec<f64> =
+            points.iter().filter(|(d, c)| *c < -5.0 && carve_at(&grid1, *d) > 1.0).map(|(d, _)| carve_at(&grid1, *d)).collect();
+        inc.sort_by(f64::total_cmp);
+        law.sort_by(f64::total_cmp);
+        let (m_inc, m_law) = (inc[inc.len() / 2], law[law.len() / 2].max(1e-6));
+        let tuned = m_inc / m_law;
+        writeln!(
+            out,
+            "median incision on the carve line {m_inc:.1} m, median depth of the law at scale 1 there {m_law:.1} m: tuned scale {tuned:.1}"
+        )
+        .map_err(err)
+        .unwrap();
+        let mut none: Vec<f64> = points.iter().map(|(_, c)| c.abs()).collect();
+        writeln!(out, "A no carve: change {}", stats(&mut none)).map_err(err).unwrap();
+        for (label, scale) in [("scale 1", 1.0), ("tuned scale", tuned)] {
+            let grid = carve_grid(&tiles, scale, thr);
+            let mut v: Vec<f64> = points.iter().map(|(d, c)| (c + carve_at(&grid, *d).min((-c).max(0.0))).abs()).collect();
+            writeln!(out, "A replace, {label}: change {}", stats(&mut v)).map_err(err).unwrap();
+        }
+        // Part B: the step along the river at the bundle's site between level `entry` (with the chunk change) and `entry - 1` (without).
+        let Some(bundle) = bundle else { return };
+        let b =
+            planet_frame::TerrainBundle::from_text(&std::fs::read_to_string(&bundle).expect("the bundle reads")).expect("a terrain bundle");
+        let lod = b.request.lod.clone();
+        let nodes: Vec<planet_core::TileId> =
+            planet_frame::select_nodes_in_view_field(map, &b.request.camera, &*world.field().unwrap(), &lod)
+                .nodes
+                .iter()
+                .map(|n| n.tile)
+                .collect();
+        let nodes15: Vec<planet_core::TileId> = nodes.iter().copied().filter(|t| t.level() == entry).collect();
+        let mut chunks: Vec<planet_core::TileId> = Vec::new();
+        for t in &nodes15 {
+            let c = planet_core::TileId::from_direction(map, t.center_direction(map), top);
+            if !chunks.contains(&c) {
+                chunks.push(c);
+            }
+        }
+        writeln!(out, "B site of {}: {} level-{entry} nodes over {} chunks", bundle.display(), nodes15.len(), chunks.len())
+            .map_err(err)
+            .unwrap();
+        let thr_b: f64 = std::env::var("PLANET_CARVE_B_THRESHOLD").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0e8);
+        writeln!(out, "B carve threshold {thr_b:.0e} m2 at this site").map_err(err).unwrap();
+        let (gridb1, gridbt) = (carve_grid(&chunks, 1.0, thr_b), carve_grid(&chunks, tuned, thr_b));
+        let stacked = stage_of(gridb1.clone());
+        let mut river: Vec<(planet_core::Vec3, f64, f64)> = Vec::new();
+        for t in &chunks {
+            let (Some(r0), Some(r1)) = (
+                compute_chunk(&lat, &plain, radius, entry, *t, halo_rings(&plain)),
+                compute_chunk(&lat, &stacked, radius, entry, *t, halo_rings(&stacked)),
+            ) else {
+                continue;
+            };
+            let f0 = ChunkField::new(world.base_field().unwrap(), lat, radius, &plain).with_top_level(entry).with_ready(Arc::new(r0));
+            let f1 = ChunkField::new(world.base_field().unwrap(), lat, radius, &stacked).with_top_level(entry).with_ready(Arc::new(r1));
+            for nd in nodes15.iter().filter(|n| planet_core::TileId::from_direction(map, n.center_direction(map), top) == *t) {
+                for l in 0..=32u32 {
+                    for k in 0..=32u32 {
+                        let d = nd.sample_direction(map, 32, k, l);
+                        if carve_at(&gridb1, d) > 1.0 {
+                            river.push((d, f0.change_at_level(d, entry), f1.change_at_level(d, entry)));
+                        }
+                    }
+                }
+            }
+        }
+        if river.is_empty() {
+            writeln!(out, "B no river vertex (a vertex the carve line lowers by more than 1 m) among the level-{entry} nodes")
+                .map_err(err)
+                .unwrap();
+            return;
+        }
+        let mut s_none: Vec<f64> = river.iter().map(|r| r.1.abs()).collect();
+        let mut s_stacked: Vec<f64> = river.iter().map(|r| r.2.abs()).collect();
+        let mut s_rep1: Vec<f64> = river.iter().map(|r| (r.1 + carve_at(&gridb1, r.0).min((-r.1).max(0.0))).abs()).collect();
+        let mut s_rept: Vec<f64> = river.iter().map(|r| (r.1 + carve_at(&gridbt, r.0).min((-r.1).max(0.0))).abs()).collect();
+        writeln!(out, "B step level {entry} against {} along the river ({} vertices):", entry - 1, river.len()).map_err(err).unwrap();
+        writeln!(out, "B   no carve: {}", stats(&mut s_none)).map_err(err).unwrap();
+        writeln!(out, "B   stacked carve (scale 1): {}", stats(&mut s_stacked)).map_err(err).unwrap();
+        writeln!(out, "B   replace (scale 1): {}", stats(&mut s_rep1)).map_err(err).unwrap();
+        writeln!(out, "B   replace (tuned scale {tuned:.1}): {}", stats(&mut s_rept)).map_err(err).unwrap();
     }
 
     // spec: GEN-052
