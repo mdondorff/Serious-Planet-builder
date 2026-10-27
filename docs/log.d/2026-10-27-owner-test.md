@@ -1,0 +1,1 @@
+- 2026-10-27 **Owner live test**: 16 findings (editor stalls 1-15 s, no horizon bake in the editor, K view panic, chunk-edge and tile cuts, editing behaviour, river form); plan in `docs/milestones/M8/owner-test-2026-10-27/README.md`.
