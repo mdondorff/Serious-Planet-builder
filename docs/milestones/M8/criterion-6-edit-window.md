@@ -95,3 +95,16 @@ Gate ok. Files: `edit-latency-w13-6x2-horizon-reuse.md`, `edit-resolve-w13-phase
 - Window 14, `edit-latency-w14-x-upper-bound.md`: the plan with the chunk stage's widening taken out of the split and morph bounds (an unsound experiment, withdrawn after review: the camera could be treated as higher than the ground and a morph interval could crack). Plan delivered 58 to 320 ms against 270 to 930 ms in window 13; the M6 column did not improve (`all refreshed` 390 to 1294 ms, 10 of 13 gated over against 7), criterion 6 17 of 19 as before. The plan is at most about 0.5 s of the M6 gap.
 - `tile_cost_report` (one thread, 32 cells, chunks landed): a tile costs 2 to 3 ms with the chunk layer and 2 ms without, at levels 15, 13, 11, 9. The tile build is not the 340 to 1100 ms of the refresh.
 - `anet_change_report` (`anet-change-bound-48-chunks.log`; 48 random land chunks of the 16384 store, 65 x 65 samples a level): the chunk change is almost only incision. Per level 11 to 16: p50 0.9 m, p99 48 to 49 m, p99.9 137 to 138 m, p99.99 190 m, max 201 to 207 m; signed range -206.7 to +1.2 m. The stage states 300 m both ways.
+
+## Window 12 of 2026-10-27 (main at #797; track-set prefetch, the shared chunk step, height reuse #796)
+Gate ok. Files: `envelope-w12-steady-300.json`, `envelope-w12-steady-rest.json`. Steady curve only (`--only-steady`), 60 s window after a 12 s run-in, bound 1 % over every 1 s window of the stretch.
+
+| Altitude | Highest steady speed | Stand-in / coarse at the first failing speed | Notes |
+|---|---|---|---|
+| 30 m | 320 m/s | stand-in 0 %, coarse 1.7 % at 340 (3.8 % at 400) | limited by the coarse share (tile detail lag), not by chunks |
+| 100 m | 78 m/s | stand-in 1.15 %, coarse 0 at 80 | max wait 9.9 s, first wanted chunk 0.9 s into the window |
+| 300 m (repeat) | 480 m/s (window 11: 460) | stand-in 1.19 % at 500, 1.06 % at 520, 87.7 % at 560 | the pool: waits 5 to 8 s, 4 jobs running at the end |
+| 1000 m | 78 m/s | stand-in 1.29 %, coarse 0 at 80 | max wait 9.4 s, first wanted chunk 2.9 s into the window |
+
+- The 100 m and 1000 m figures are place effects, not speed effects: 300 m passes 80 m/s with 0 % stand-in and 30 m passes 160, but each trial flies a start place of its own (`start_place(n)`), and at the places of the 80 m/s trials at 100 m and 1000 m a chunk takes 9 to 10 s to arrive (5 to 7 s is typical). The search assumes the share rises with the speed; a slow chunk at one place breaks that. Fix proposed: one start place per altitude for all trials, two places at 100 m and 1000 m taking the lower, and the late chunks (key, wait) in the trial's log.
+- The 200 m/s floor (steady flight, owner 2026-10-27) is shown at 30 m (320) and 300 m (480); not shown, not refuted, at 100 m and 1000 m.
