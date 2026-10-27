@@ -1,0 +1,18 @@
+{
+  "scene": "shadow-cost",
+  "adapter": "NVIDIA GeForce RTX 3080 Ti Laptop GPU",
+  "owner_override": [],
+  "size": [2560, 1440],
+  "frames": 41,
+  "budget_ms": 1.5,
+  "poses": [
+    {"pose": "300m-sunset", "full_ms": 2.5303, "no_shadow_ms": 1.9988, "no_material_ms": 1.4193, "neither_ms": 1.2104, "compiled_out_ms": [2.1832, 1.4213, 1.1110], "round_spread_ms": [0.1597, 0.0983, 0.1874, 0.1290], "shadow_ms": 0.3471, "material_ms": 1.1090, "together_ms": 1.4193},
+    {"pose": "300m-midday", "full_ms": 2.5528, "no_shadow_ms": 2.2825, "no_material_ms": 1.5913, "neither_ms": 1.2800, "compiled_out_ms": [2.1750, 1.4889, 1.1827], "round_spread_ms": [0.0256, 0.0174, 0.0696, 0.0317], "shadow_ms": 0.3779, "material_ms": 1.0639, "together_ms": 1.3701},
+    {"pose": "30m-sunset", "full_ms": 2.0326, "no_shadow_ms": 1.8678, "no_material_ms": 1.3169, "neither_ms": 1.1387, "compiled_out_ms": [1.7910, 1.2575, 1.0322], "round_spread_ms": [0.0266, 0.0020, 0.0113, 0.0174], "shadow_ms": 0.2417, "material_ms": 0.7752, "together_ms": 1.0004},
+    {"pose": "30m-midday", "full_ms": 2.0593, "no_shadow_ms": 1.8729, "no_material_ms": 1.3210, "neither_ms": 1.1397, "compiled_out_ms": [1.8186, 1.2749, 1.0332], "round_spread_ms": [0.0164, 0.0225, 0.0143, 0.0225], "shadow_ms": 0.2406, "material_ms": 0.7844, "together_ms": 1.0260},
+    {"pose": "1.8m-sunset", "full_ms": 1.9814, "no_shadow_ms": 1.7838, "no_material_ms": 1.2605, "neither_ms": 1.0824, "compiled_out_ms": [1.7500, 1.2216, 1.0168], "round_spread_ms": [0.0451, 0.0184, 0.0143, 0.0184], "shadow_ms": 0.2314, "material_ms": 0.7598, "together_ms": 0.9646},
+    {"pose": "1.8m-midday", "full_ms": 1.9671, "no_shadow_ms": 1.7633, "no_material_ms": 1.2687, "neither_ms": 1.0875, "compiled_out_ms": [1.7183, 1.2012, 0.9953], "round_spread_ms": [0.0317, 0.0399, 0.0174, 0.0215], "shadow_ms": 0.2488, "material_ms": 0.7660, "together_ms": 0.9718}
+  ],
+  "near_budget": ["300m-sunset: 1.419 ms is within 20 % of the 1.5 ms budget (by the compiled-out shader variants when the row has them): not called met", "300m-midday: 1.370 ms is within 20 % of the 1.5 ms budget (by the compiled-out shader variants when the row has them): not called met"],
+  "budget_failures": []
+}
