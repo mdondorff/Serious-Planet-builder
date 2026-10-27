@@ -1434,7 +1434,7 @@ pub struct EpochMemo {
 impl EpochMemo {
     /// The memo of `epoch`: the current one, or a new one when the epoch moved.
     pub fn get(&self, epoch: u64) -> std::sync::Arc<crate::route::RouteMemo> {
-        let mut cur = self.current.lock().expect("epoch memo");
+        let mut cur = planet_core::lockprobe::lock(&self.current, planet_core::lockprobe::Site::EpochMemo);
         if cur.0 != epoch {
             *cur = (epoch, std::sync::Arc::default());
         }

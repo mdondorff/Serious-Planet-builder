@@ -66,7 +66,7 @@ pub struct RegionCache {
 impl RegionCache {
     /// The definition and the heights of the batch `key`, if kept; it becomes the most recently used.
     pub fn get(&self, key: (u64, u64)) -> Option<(Arc<WorldDefinition>, Arc<Vec<f64>>)> {
-        let mut q = self.entries.lock().expect("region cache");
+        let mut q = planet_core::lockprobe::lock(&self.entries, planet_core::lockprobe::Site::RegionCache);
         let at = q.iter().position(|e| e.key == key)?;
         let e = q.remove(at).expect("found");
         let out = (e.def.clone(), e.heights.clone());
@@ -76,7 +76,7 @@ impl RegionCache {
 
     /// Keep `heights` of the batch `key`, made under `def`; the batch of the same key is replaced, the oldest go when over the bounds.
     pub fn put(&self, key: (u64, u64), def: Arc<WorldDefinition>, heights: Arc<Vec<f64>>) {
-        let mut q = self.entries.lock().expect("region cache");
+        let mut q = planet_core::lockprobe::lock(&self.entries, planet_core::lockprobe::Site::RegionCache);
         q.retain(|e| e.key != key);
         q.push_back(Entry { key, def, heights });
         let bytes = |q: &VecDeque<Entry>| q.iter().map(|e| e.heights.len() * 8).sum::<usize>();
@@ -86,7 +86,7 @@ impl RegionCache {
     }
 
     pub fn len(&self) -> usize {
-        self.entries.lock().expect("region cache").len()
+        planet_core::lockprobe::lock(&self.entries, planet_core::lockprobe::Site::RegionCache).len()
     }
 
     pub fn is_empty(&self) -> bool {

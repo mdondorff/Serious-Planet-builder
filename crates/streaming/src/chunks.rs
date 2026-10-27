@@ -236,7 +236,7 @@ impl ChunkManager {
         // The stage's epoch when the versions were asked: a job that ends under another epoch computed against edits it was not keyed for.
         let epoch0 = self.stage.epoch();
         let to_start: Vec<(ChunkKey, u64, bool, JobClass)> = {
-            let mut sh = self.shared.lock().expect("chunk state");
+            let mut sh = planet_core::lockprobe::lock(&self.shared, planet_core::lockprobe::Site::ChunkState);
             for key in wanted.iter().map(|w| &w.0).chain(prefetch) {
                 if let Some(e) = sh.ready.get_mut(key) {
                     e.last_wanted_ms = now;
@@ -340,14 +340,14 @@ impl ChunkManager {
                     Ok(Some(bytes)) => match ChunkResult::from_bytes(tile, &bytes) {
                         Some(r) => from_disk = Some(r),
                         None => {
-                            let mut sh = shared.lock().expect("chunk state");
+                            let mut sh = planet_core::lockprobe::lock(&shared, planet_core::lockprobe::Site::ChunkState);
                             sh.stats.disk_failures += 1;
                             sh.log.push(format!("chunk {key:?}: the stored result does not decode, recomputing"));
                         }
                     },
                     Ok(None) => {}
                     Err(e) => {
-                        let mut sh = shared.lock().expect("chunk state");
+                        let mut sh = planet_core::lockprobe::lock(&shared, planet_core::lockprobe::Site::ChunkState);
                         sh.stats.disk_failures += 1;
                         sh.log.push(format!("chunk {key:?}: disk entry refused ({e}), recomputing"));
                     }
@@ -361,7 +361,7 @@ impl ChunkManager {
                     moved = stage.epoch() != epoch0;
                     if let Some(disk) = disk.as_ref().filter(|_| stage.healthy() && !moved) {
                         if let Err(e) = disk.put_versioned(tile, version, r.to_bytes()) {
-                            shared.lock().expect("chunk state").log.push(format!("chunk {key:?}: not stored ({e})"));
+                            planet_core::lockprobe::lock(&shared, planet_core::lockprobe::Site::ChunkState).log.push(format!("chunk {key:?}: not stored ({e})"));
                         }
                     }
                     (r, false)
@@ -369,7 +369,7 @@ impl ChunkManager {
             };
             // The hash of the pyramid is made here, on the worker and outside every lock: the horizon jobs read it every frame (STRM-048).
             let _ = result.hash();
-            let mut sh = shared.lock().expect("chunk state");
+            let mut sh = planet_core::lockprobe::lock(&shared, planet_core::lockprobe::Site::ChunkState);
             sh.running.remove(&key);
             sh.stale_running.remove(&key);
             sh.stale_since.remove(&key);
@@ -393,7 +393,7 @@ impl ChunkManager {
 
     /// The ready chunks, in key order: what a frame builds its chunk field from.
     pub fn snapshot(&self) -> Vec<Arc<ChunkResult>> {
-        let sh = self.shared.lock().expect("chunk state");
+        let sh = planet_core::lockprobe::lock(&self.shared, planet_core::lockprobe::Site::ChunkState);
         let mut keys: Vec<&ChunkKey> = sh.ready.keys().collect();
         keys.sort_unstable();
         keys.into_iter().map(|k| sh.ready[k].result.clone()).collect()
@@ -410,38 +410,38 @@ impl ChunkManager {
     }
 
     pub fn is_ready(&self, key: ChunkKey) -> bool {
-        self.shared.lock().expect("chunk state").ready.contains_key(&key)
+        planet_core::lockprobe::lock(&self.shared, planet_core::lockprobe::Site::ChunkState).ready.contains_key(&key)
     }
 
     /// The ready result of `key` (what a horizon bake reads of a chunk).
     pub fn result(&self, key: ChunkKey) -> Option<Arc<ChunkResult>> {
-        self.shared.lock().expect("chunk state").ready.get(&key).map(|e| e.result.clone())
+        planet_core::lockprobe::lock(&self.shared, planet_core::lockprobe::Site::ChunkState).ready.get(&key).map(|e| e.result.clone())
     }
 
     /// The hash of the ready result of `key`: the part of a horizon's state word that this chunk contributes.
     pub fn result_hash(&self, key: ChunkKey) -> Option<u64> {
         // The result is taken under the lock and hashed (made once, then read) outside it: a chunk worker landing its result never waits for a hash.
-        let result = self.shared.lock().expect("chunk state").ready.get(&key).map(|e| e.result.clone());
+        let result = planet_core::lockprobe::lock(&self.shared, planet_core::lockprobe::Site::ChunkState).ready.get(&key).map(|e| e.result.clone());
         result.map(|r| r.hash())
     }
 
     /// Jobs running or waiting for a worker.
     pub fn in_flight(&self) -> usize {
-        self.shared.lock().expect("chunk state").running.len()
+        planet_core::lockprobe::lock(&self.shared, planet_core::lockprobe::Site::ChunkState).running.len()
     }
 
     /// The bytes the ready chunks hold (the chunk pool of the RAM caps).
     pub fn pool_bytes(&self) -> u64 {
-        self.shared.lock().expect("chunk state").ready.values().map(|e| e.result.size_bytes() as u64).sum()
+        planet_core::lockprobe::lock(&self.shared, planet_core::lockprobe::Site::ChunkState).ready.values().map(|e| e.result.size_bytes() as u64).sum()
     }
 
     pub fn stats(&self) -> ChunkStats {
-        self.shared.lock().expect("chunk state").stats
+        planet_core::lockprobe::lock(&self.shared, planet_core::lockprobe::Site::ChunkState).stats
     }
 
     /// The failures and notes since the last call, named.
     pub fn take_log(&self) -> Vec<String> {
-        std::mem::take(&mut self.shared.lock().expect("chunk state").log)
+        std::mem::take(&mut planet_core::lockprobe::lock(&self.shared, planet_core::lockprobe::Site::ChunkState).log)
     }
 }
 

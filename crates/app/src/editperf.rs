@@ -324,6 +324,10 @@ pub struct CaseRun {
     pub levels: Vec<LevelRow>,
     /// The first frames after the edit: (ms from set_definition, frame ms, tiles refreshed, jobs in flight, tiles waiting for an upload).
     pub trace: Vec<[f64; 5]>,
+    /// The refresh jobs of the case that ended last, by tile (queued behind the streamer, waited for a worker, ran, ended at, jobs beside it), and the
+    /// lock waits of the case in words.
+    pub stragglers: Vec<String>,
+    pub locks: Vec<String>,
 }
 
 /// The tiles the edit named at one level (the refreshed set's breakdown, M6 plan E1).
@@ -753,6 +757,9 @@ fn run_once(
     let before_stats = h.rig.managed.manager().streamer().stats();
     let old_revision = world.field()?.item_revision();
     let sampler_started = Instant::now();
+    let job_log = h.rig.managed.manager().streamer().job_log();
+    let (jobs_before, t0_us) = (job_log.len(), job_log.now_us());
+    let _ = planet_core::lockprobe::take();
     let ms = |t: Instant| t.elapsed().as_secs_f64() * 1000.0;
     // The edit as the editor does it: swap the definition, name the edited tiles, set the preview.
     let call = Instant::now();
@@ -849,6 +856,25 @@ fn run_once(
         }
         std::thread::sleep(Duration::from_millis(1));
     }
+    let mut jobs: Vec<_> = job_log.since(jobs_before).into_iter().filter(|j| j.refresh).collect();
+    jobs.sort_by_key(|j| j.ended_us);
+    let from = jobs.len().saturating_sub(8);
+    out.stragglers = jobs[from..]
+        .iter()
+        .map(|j| {
+            format!(
+                "{:?} level {}: queued {} ms, worker wait {:.1} ms, ran {:.1} ms, ended {:.0} ms, {} loads beside it",
+                (j.tile.face().0, j.tile.x(), j.tile.y()),
+                j.level,
+                j.queue_ms,
+                j.wait_us as f64 / 1000.0,
+                j.run_us as f64 / 1000.0,
+                j.ended_us.saturating_sub(t0_us) as f64 / 1000.0,
+                j.running
+            )
+        })
+        .collect();
+    out.locks = planet_core::lockprobe::take();
     // With a chunk stage the plan is not exact until the stale chunks have landed (the tiles' keys follow the chunks), so the frame DrawKind::Exact
     // waits for the eroded result: the M6 budget reads the instant every tile the edit names was refreshed and written (what the editor shows of the
     // edit itself), and the chunk table below carries the eroded result (TEST-056).
