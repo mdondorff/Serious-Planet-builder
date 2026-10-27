@@ -1,0 +1,1 @@
+- 2026-10-27 **m8-envelope-late-chunks** (TEST-059): one start place per steady search (--places, default 2), the late chunks of a flight with asked/started/landed times in the log; m8-envelope-steady-60 archived (TEST-057 synced).

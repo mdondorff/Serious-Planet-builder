@@ -78,3 +78,47 @@ Gate ok. Files: `edit-latency-w11-6x2.md`, `envelope-w11-steady-300.json`. The f
 - Envelope, steady, 300 m, 12 s run-in then a 60 s window over several chunk edges, 11 trials: highest speed 460 m/s (bound 1 % over every 1 s window). Stand-in share 0 % up to 400 m/s, 0.92 % at 440, 0.98 % at 460, 1.01 % at 480, 96 % at 640; the coarse share is 0 up to 480. The floor of criterion 7 (200 m/s, owner: steady flight) is cleared 2.3 times.
 - Limiter above 460 m/s: the chunk pool. At 480 m/s 28 chunks landed in 72 s, `chunk_jobs_at_end` 4 (the 6 workers busy to the end), median wait 0 s, maximum 5.3 s; about 4 chunks asked per frame. The track needs chunks faster than the pool solves them.
 - Window 9 envelope for comparison (12 s steady window, one edge): steady 95, 110, 155, 78 m/s at 30, 100, 300, 1000 m.
+
+## Window 13 of 2026-10-27 (main at #797: job classes, horizon bake share, base-height reuse)
+Gate ok. Files: `edit-latency-w13-6x2-horizon-reuse.md`, `edit-resolve-w13-phases.log`.
+
+| Run (6 x 2, horizon jobs on) | Eroded result drawn within 10 s (19) | Median drawn | M6 column over (13 gated) |
+|---|---|---|---|
+| Window 10, 1 bake thread | 9 | 9.3 s | 8 |
+| Window 13, with the reuse (GEN-087) | 17 | 6.9 s | 7 |
+
+- Over: the 1 km brushes at 200 m and 2 km (10.7 s; 5 chunks, the last lands at 9.9 and 10.3 s).
+- Per chunk job (`generate --edit-resolve`): network 4.2 s on the first landing, 0.4 to 0.9 s on a re-solve (base heights 2.1 s, then 0.1 to 0.2 s; 92 to 100 % of the region cells reused, one case 85 % with 1.2 s); solve 1.9 to 2.5 s; drivers 0.1 to 0.2 s. The last chunk lands 2.8 to 4.2 s after the edit (4.7 to 6.5 s before).
+- What is left: the solve (about 60 % of a re-solve), the M6 column (plan delivered after 390 to 1030 ms with chunks).
+
+## Window 14 and two probes of 2026-10-27 (what the plan, the tile build and the stated bound are worth)
+- Window 14, `edit-latency-w14-x-upper-bound.md`: the plan with the chunk stage's widening taken out of the split and morph bounds (an unsound experiment, withdrawn after review: the camera could be treated as higher than the ground and a morph interval could crack). Plan delivered 58 to 320 ms against 270 to 930 ms in window 13; the M6 column did not improve (`all refreshed` 390 to 1294 ms, 10 of 13 gated over against 7), criterion 6 17 of 19 as before. The plan is at most about 0.5 s of the M6 gap.
+- `tile_cost_report` (one thread, 32 cells, chunks landed): a tile costs 2 to 3 ms with the chunk layer and 2 ms without, at levels 15, 13, 11, 9. The tile build is not the 340 to 1100 ms of the refresh.
+- `anet_change_report` (`anet-change-bound-48-chunks.log`; 48 random land chunks of the 16384 store, 65 x 65 samples a level): the chunk change is almost only incision. Per level 11 to 16: p50 0.9 m, p99 48 to 49 m, p99.9 137 to 138 m, p99.99 190 m, max 201 to 207 m; signed range -206.7 to +1.2 m. The stage states 300 m both ways.
+
+## Window 12 of 2026-10-27 (main at #797; track-set prefetch, the shared chunk step, height reuse #796)
+Gate ok. Files: `envelope-w12-steady-300.json`, `envelope-w12-steady-rest.json`. Steady curve only (`--only-steady`), 60 s window after a 12 s run-in, bound 1 % over every 1 s window of the stretch.
+
+| Altitude | Highest steady speed | Stand-in / coarse at the first failing speed | Notes |
+|---|---|---|---|
+| 30 m | 320 m/s | stand-in 0 %, coarse 1.7 % at 340 (3.8 % at 400) | limited by the coarse share (tile detail lag), not by chunks |
+| 100 m | 78 m/s | stand-in 1.15 %, coarse 0 at 80 | max wait 9.9 s, first wanted chunk 0.9 s into the window |
+| 300 m (repeat) | 480 m/s (window 11: 460) | stand-in 1.19 % at 500, 1.06 % at 520, 87.7 % at 560 | the pool: waits 5 to 8 s, 4 jobs running at the end |
+| 1000 m | 78 m/s | stand-in 1.29 %, coarse 0 at 80 | max wait 9.4 s, first wanted chunk 2.9 s into the window |
+
+- The 100 m and 1000 m figures are place effects, not speed effects: 300 m passes 80 m/s with 0 % stand-in and 30 m passes 160, but each trial flies a start place of its own (`start_place(n)`), and at the places of the 80 m/s trials at 100 m and 1000 m a chunk takes 9 to 10 s to arrive (5 to 7 s is typical). The search assumes the share rises with the speed; a slow chunk at one place breaks that. Fix proposed: one start place per altitude for all trials, two places at 100 m and 1000 m taking the lower, and the late chunks (key, wait) in the trial's log.
+- The 200 m/s floor (steady flight, owner 2026-10-27) is shown at 30 m (320) and 300 m (480); not shown, not refuted, at 100 m and 1000 m.
+
+## Window 14 of 2026-10-27 (main at #800; steady curve at two fixed start places per altitude)
+Gate ok. File: `envelope-w14-steady-100-1000.json`. `--only-steady --altitudes-m 100,1000 --steady-window-s 60 --places 2`: each search flies all its trials over one start place; the figure is the lower of the two.
+
+| Altitude | Place 0 | Place 1 | Figure | Limiter |
+|---|---|---|---|---|
+| 100 m | 340 m/s | 360 m/s | 340 m/s | coarse share (tile detail lag); chunk stand-in 0 up to 480 m/s |
+| 1000 m | 460 m/s | 480 m/s | 460 m/s | chunk stand-in 0.78 % / 0.98 % at the limit, coarse 0 |
+
+- The 78 m/s of window 12 at 100 m and 1000 m were place effects: with the start place fixed per search both altitudes clear 340 m/s. With 30 m 320 m/s and 300 m 480 m/s (window 12) every altitude clears the 200 m/s floor by 1.6 times or more.
+- Late chunks (landed more than 1 s after they were first wanted), asked / started / landed times from the trace:
+  1. Near the limit a late chunk is 1 to 2 s late with stand-in about 0: its solve is 6.1 to 6.8 s but it was asked only 4.4 to 5.2 s before it was wanted (for example asked at 30.5 s, wanted at 35.2 s, solve 6.1 s). The 12 s track lead is not achieved: the reach of the plan (the farthest wanted chunk centre) is small at low altitude, so the track set asks late.
+  2. Above 440 m/s at 1000 m and 480 m/s at 100 m, one to three chunks that were wanted at the first frame of the window and were not asked during the 12 s run-in wait 6.6 to 8.3 s (solve = wait); they are the stand-in that fails the bound. Solve times reach 9 to 10 s in three trials.
+- Levers: a reach floor of one chunk edge (the next chunk is asked as soon as the current one is entered), a lead of at least the solve time (7 s) plus a margin, and a trace that also covers the run-in to confirm cause 2.

@@ -284,7 +284,10 @@ impl Driver<'_> {
                 &crate::chunkstage::FrameFeatures { horizon: cd.horizon, ..Default::default() },
                 &mut cd.counters,
             );
-            cd.trace.prefetch(&step.asked);
+            cd.trace.prefetch(&step.asked, at);
+            if let Some(m) = manager.as_ref() {
+                cd.trace.running(tiles.iter().flat_map(|&t| m.reads(t)).chain(step.asked.iter().copied()), |k| m.is_running(k), at);
+            }
             cd.trace.landed(&step.update.landed, at);
             if cd.horizon {
                 cd.trace.horizon_landed(step.horizon.landed.len());

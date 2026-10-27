@@ -146,6 +146,36 @@ pub struct ChunkTrace {
     prefetch_asked: u64,
     /// For every landed chunk the flight asked for: the time it was first wanted.
     wanted_at_landing: Vec<f64>,
+    /// When a chunk was first asked to prefetch and first seen with a job running (seconds into the flight).
+    first_asked: HashMap<ChunkKey, f64>,
+    first_running: HashMap<ChunkKey, f64>,
+    /// The chunks that landed more than [`LATE_WAIT_S`] after they were first wanted.
+    late: Vec<LateChunk>,
+}
+
+/// A chunk that was wanted and not ready for longer than this (seconds) is late.
+pub const LATE_WAIT_S: f64 = 1.0;
+
+/// A chunk that landed late, and what the trace knows of why (seconds into the flight): `asked_s` is when the prefetch first asked for it, `started_s` when a
+/// job for it was first seen running; the solve is `landed_s - started_s` (an upper bound of the job's own time to the frame that saw it land).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct LateChunk {
+    pub key: ChunkKey,
+    pub wanted_s: f64,
+    pub asked_s: Option<f64>,
+    pub started_s: Option<f64>,
+    pub landed_s: f64,
+}
+
+impl LateChunk {
+    /// How long the chunk was wanted before it landed.
+    pub fn wait_s(&self) -> f64 {
+        self.landed_s - self.wanted_s
+    }
+    /// How long its job ran before the landing was seen, when a job was seen.
+    pub fn solve_s(&self) -> Option<f64> {
+        self.started_s.map(|s| self.landed_s - s)
+    }
 }
 
 /// What a flight's [`ChunkTrace`] says.
@@ -158,6 +188,9 @@ pub struct TraceSummary {
     /// The earliest time (seconds into the flight) a chunk that landed in it was first wanted; `None` when no landed chunk was asked for in the flight. In a cold
     /// trial the model says `6 s - D / v` for the chunk past the edge (D the distance at which a chunk is wanted).
     pub first_wanted_s: Option<f64>,
+    /// The three latest chunks of the flight (longest wait first) and how many were late.
+    pub late: [Option<LateChunk>; 3],
+    pub late_count: u32,
     /// The median and the largest wait of a landed chunk that the flight itself asked for, seconds; 0 when none landed.
     pub median_wait_s: f64,
     pub max_wait_s: f64,
@@ -176,6 +209,15 @@ impl ChunkTrace {
     pub fn landed(&mut self, keys: &[ChunkKey], at_s: f64) {
         for k in keys {
             if let Some(t) = self.first_wanted.remove(k) {
+                if at_s - t > LATE_WAIT_S {
+                    self.late.push(LateChunk {
+                        key: *k,
+                        wanted_s: t,
+                        asked_s: self.first_asked.get(k).copied(),
+                        started_s: self.first_running.get(k).copied(),
+                        landed_s: at_s,
+                    });
+                }
                 self.wanted_at_landing.push(t);
                 self.waits.push((at_s - t).max(0.0));
             } else {
@@ -190,11 +232,29 @@ impl ChunkTrace {
     }
 
     /// The chunks a frame asked to prefetch.
-    pub fn prefetch(&mut self, keys: &[ChunkKey]) {
+    pub fn prefetch(&mut self, keys: &[ChunkKey], at_s: f64) {
         self.prefetch_asked += keys.len() as u64;
+        for k in keys {
+            self.first_asked.entry(*k).or_insert(at_s);
+        }
+    }
+
+    /// The chunks whose job runs at `at_s` among `keys` (the wanted and the asked ones of the frame): the first sighting is the job's start.
+    pub fn running(&mut self, keys: impl IntoIterator<Item = ChunkKey>, is_running: impl Fn(ChunkKey) -> bool, at_s: f64) {
+        for k in keys {
+            if !self.first_running.contains_key(&k) && is_running(k) {
+                self.first_running.insert(k, at_s);
+            }
+        }
     }
 
     pub fn summary(&self) -> TraceSummary {
+        let mut late = self.late.clone();
+        late.sort_by(|a, b| b.wait_s().total_cmp(&a.wait_s()));
+        let mut top = [None; 3];
+        for (slot, l) in top.iter_mut().zip(&late) {
+            *slot = Some(*l);
+        }
         let mut w = self.waits.clone();
         w.sort_by(f64::total_cmp);
         TraceSummary {
@@ -202,6 +262,8 @@ impl ChunkTrace {
             horizon_maps_landed: self.horizon_landed,
             prefetch_asked: self.prefetch_asked,
             first_wanted_s: self.wanted_at_landing.iter().copied().min_by(f64::total_cmp),
+            late: top,
+            late_count: late.len() as u32,
             median_wait_s: w.get(w.len() / 2).copied().unwrap_or(0.0),
             max_wait_s: w.last().copied().unwrap_or(0.0),
         }
@@ -444,7 +506,7 @@ mod tests {
         assert!(chunk_prefetch(Some(&still), here, R).is_empty());
         assert!(chunk_prefetch(None, here, R).is_empty());
         let mut t = ChunkTrace::default();
-        t.prefetch(&asked);
+        t.prefetch(&asked, 0.0);
         assert_eq!(t.summary().prefetch_asked, asked.len() as u64);
     }
 
@@ -476,6 +538,25 @@ mod tests {
             still.observe(frame * 100, pos);
         }
         assert!(chunk_prefetch_track(Some(&still), pos, &wanted, R).is_empty());
+    }
+
+    // spec: TEST-059
+    #[test]
+    fn a_chunk_that_lands_more_than_a_second_after_it_was_wanted_is_late_and_says_when_it_was_asked_and_started() {
+        let mut t = ChunkTrace::default();
+        let (slow, quick) = ((4u8, 799u32, 9u32), (4u8, 800u32, 9u32));
+        t.wanted([slow, quick], 1.0);
+        t.prefetch(&[slow], 0.5);
+        t.running([slow, quick], |k| k == slow, 1.5);
+        t.running([slow], |_| true, 2.0);
+        t.landed(&[quick], 1.4);
+        t.landed(&[slow], 9.0);
+        let s = t.summary();
+        assert_eq!(s.late_count, 1, "only the chunk that waited more than a second is late");
+        let l = s.late[0].expect("the late chunk");
+        assert_eq!((l.key, l.wanted_s, l.asked_s, l.started_s, l.landed_s), (slow, 1.0, Some(0.5), Some(1.5), 9.0));
+        assert_eq!((l.wait_s(), l.solve_s()), (8.0, Some(7.5)));
+        assert!(s.late[1].is_none());
     }
 
     // spec: TEST-054
