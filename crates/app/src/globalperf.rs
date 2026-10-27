@@ -567,7 +567,7 @@ mod tests {
             assert!(start.elapsed().as_secs() < 300, "the chunks did not land");
         }
         let def = world.definition();
-        let cells = 32u32;
+        let cells = 64u32;
         fn time<'a>(f: &dyn Fn() -> Box<dyn planet_generators::height::HeightField + 'a>, id: planet_core::TileId, cells: u32) -> f64 {
             let map = &planet_core::cube::TangentWarp;
             let t = std::time::Instant::now();
@@ -575,9 +575,17 @@ mod tests {
                 let field = f();
                 std::hint::black_box(generate_tile_field(&*field, map, id, cells));
             }
+            let height_only = t.elapsed().as_secs_f64() * 1000.0 / 3.0;
+            // The mesh path of a real tile build (batch heights and climate over the lattice and its ring), as the streamer's job runs it.
+            let t = std::time::Instant::now();
+            for _ in 0..3 {
+                let field = f();
+                std::hint::black_box(planet_generators::mesh::tile_mesh_field(&*field, map, id, cells, 6_371_000.0));
+            }
+            let _ = height_only;
             t.elapsed().as_secs_f64() * 1000.0 / 3.0
         }
-        for level in [15u8, 13, 11, 9] {
+        for level in [15u8, 13, 11, 9, 7, 5, 4, 3] {
             let id = planet_core::TileId::from_direction(map, site, level);
             let with = time(&|| world.field().unwrap(), id, cells);
             let without = time(&|| planet_generators::chain::with_stamps(world.base_field().unwrap(), &def).unwrap(), id, cells);
