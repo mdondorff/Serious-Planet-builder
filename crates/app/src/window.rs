@@ -264,6 +264,8 @@ struct Running {
     coupled_shown: Option<planet_generators::coupled::CoupledLens>,
     /// Whether the frame loop counts the world's chunk stage (STRM-039): set once the world has one.
     chunks_on: bool,
+    /// The frame a smoke run pressed K at, over a chunk stage (`PLANET_SMOKE_LENS`).
+    smoke_lens_at: Option<u64>,
     /// The sun of the last lit plan before the editing light, for the title's local solar time (VIEW-054).
     sun_dir: [f32; 3],
     /// Where the camera was on the last frame, planet-fixed.
@@ -484,6 +486,7 @@ impl App<'_> {
             coupled_asked: None,
             coupled_shown: None,
             chunks_on: false,
+            smoke_lens_at: None,
             sun_dir: [0.0, 0.0, 1.0],
             camera_position: planet_core::Vec3::new(1.0, 0.0, 0.0),
             horizon: Default::default(),
@@ -1064,7 +1067,12 @@ impl App<'_> {
             if cfg.smoke {
                 // The editing script starts once the camera rests, so the run waits for it (at most until the give-up frame).
                 let editing_done = !cfg.edit || st.edit.as_ref().is_none_or(|e| e.smoke_finished()) || st.frames >= SMOKE_GIVE_UP;
-                if st.frames >= cfg.smoke_frames.max(SMOKE_FRAMES) && st.presented > 0 && editing_done {
+                // A smoke run asked for the chunk stage (`PLANET_SMOKE_CHUNKS`) waits for it to come up, and one asked for the K view waits a few
+                // frames after pressing it, so a slow runner cannot end the run before the stage or the lens did anything.
+                let stage_done = st.frames >= SMOKE_GIVE_UP
+                    || ((std::env::var_os("PLANET_SMOKE_CHUNKS").is_none() || st.chunks_on)
+                        && (std::env::var_os("PLANET_SMOKE_LENS").is_none() || st.smoke_lens_at.is_some_and(|f| st.frames >= f + 20)));
+                if st.frames >= cfg.smoke_frames.max(SMOKE_FRAMES) && st.presented > 0 && editing_done && stage_done {
                     // The verdict is on counts: lit frames with the atmosphere drawn and presented, the debug path too, an exposure
                     // reading, and the renderer's own account that the passes ran. No wall-clock (VIEW-005).
                     smoke_verdict(&st.counts, cfg.atmosphere)?;
@@ -1320,6 +1328,12 @@ fn smoke_keys(st: &mut Running, cameras: &[Camera], now_ms: u64) -> Result<bool,
             st.surface.set_vsync(&st.ctx, st.viewer.vsync);
         }
     };
+    // The K view of the coupled run's heights over a chunk stage (`PLANET_SMOKE_LENS`), pressed once the stage is up (it comes on a thread, and the
+    // stage needs the coupled run): the keys of every tile it re-keys are made on the pool workers (the owner's session of 2026-10-27 panicked there).
+    if st.frames >= 22 && st.chunks_on && st.smoke_lens_at.is_none() && std::env::var_os("PLANET_SMOKE_LENS").is_some() {
+        press(st, Command::CycleCoupledLens);
+        st.smoke_lens_at = Some(st.frames);
+    }
     match st.frames {
         // The window starts lit: V does nothing there, L goes to the debug path, V cycles a debug view, L comes back.
         4 => press(st, Command::NextView),
@@ -1359,9 +1373,6 @@ fn smoke_keys(st: &mut Running, cameras: &[Camera], now_ms: u64) -> Result<bool,
         // The editing light is on from key 41 to key 45, over lit frames of the restarted flight (VIEW-042).
         41 => press(st, Command::ToggleEditingLight),
         45 => press(st, Command::ToggleEditingLight),
-        // The K view of the coupled run's heights over a chunk stage (`PLANET_SMOKE_LENS`): the keys of every tile it re-keys are made on the pool
-        // workers (the owner's session of 2026-10-27 panicked there).
-        22 if std::env::var_os("PLANET_SMOKE_LENS").is_some() => press(st, Command::CycleCoupledLens),
         // F9 writes files: the run presses it only where a directory for them was named.
         40 if std::env::var_os("PLANET_REPRO_DIR").is_some() => press(st, Command::SaveRepro),
         _ => {}

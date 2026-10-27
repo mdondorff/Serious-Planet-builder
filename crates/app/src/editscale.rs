@@ -409,6 +409,9 @@ impl HeightField for Timed<'_> {
     fn reads_cells(&self) -> bool {
         self.inner.reads_cells()
     }
+    fn reads_cells_for(&self, tile: TileId, map: &dyn FaceMapping) -> bool {
+        self.inner.reads_cells_for(tile, map)
+    }
     fn inputs_hash_for(&self, t: TileId, m: &dyn FaceMapping) -> u64 {
         let start = Instant::now();
         let h = self.timed(2, || self.inner.inputs_hash_for(t, m));

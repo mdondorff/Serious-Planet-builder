@@ -205,7 +205,7 @@ impl HeightField for CoupledLensField<'_> {
         crate::height::key_source(self.f(), tile, map).reads_cells_for(tile, map)
     }
     fn inputs_hash_for(&self, tile: TileId, map: &dyn FaceMapping) -> u64 {
-        self.f().inputs_hash_for(tile, map)
+        crate::height::key_source(self.f(), tile, map).inputs_hash_for(tile, map)
     }
     fn body(&self) -> BodyId {
         self.f().body()

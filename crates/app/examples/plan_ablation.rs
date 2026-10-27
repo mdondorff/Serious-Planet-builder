@@ -104,6 +104,9 @@ impl HeightField for Counting<'_> {
     fn reads_cells(&self) -> bool {
         self.f().reads_cells()
     }
+    fn reads_cells_for(&self, t: TileId, m: &dyn FaceMapping) -> bool {
+        self.f().reads_cells_for(t, m)
+    }
     fn inputs_hash_for(&self, t: TileId, m: &dyn FaceMapping) -> u64 {
         self.inputs.fetch_add(1, Relaxed);
         self.f().inputs_hash_for(t, m)
