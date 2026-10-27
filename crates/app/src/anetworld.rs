@@ -115,11 +115,11 @@ pub fn cells_per_chunk_for(radius_m: f64, cell_m: f64) -> u32 {
 
 /// The pool and the knobs of the viewer's chunk stage for generation workers `gen` (STRM-046, M8-7): half the generation workers, at most
 /// [`planet_streaming::chunks::VIEW_CHUNK_WORKERS`] (the chunks an edit of the view re-solves in one round; more would oversubscribe: each chunk job reads its
-/// base heights on [`planet_streaming::chunks::VIEW_BASE_THREADS`] threads, ADR 0083), at the generation workers' priority, one pool for the chunk jobs and the horizon jobs. The window and the headless scenes take it
+/// base heights on [`planet_streaming::chunks::VIEW_BASE_THREADS`] threads, ADR 0083), at the generation workers' priority, one pool for the chunk jobs and the horizon jobs (the horizon jobs in the idle class on one thread of their own beyond the chunk workers, STRM-060). The window and the headless scenes take it
 /// from here.
 pub fn viewer_chunk_stage(gen: planet_streaming::GenWorkers) -> (Arc<dyn Spawner>, ChunkConfig) {
     let workers = (gen.workers / 2).clamp(1, planet_streaming::chunks::VIEW_CHUNK_WORKERS);
-    let pool = planet_streaming::GenWorkers::new(workers).with_priority(gen.priority).pool();
+    let pool = planet_streaming::GenWorkers::new(workers).with_priority(gen.priority).pool_with_idle(1);
     (pool, ChunkConfig { workers, ..Default::default() })
 }
 
