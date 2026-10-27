@@ -35,6 +35,7 @@ pub fn is_stream_scene(name: &str) -> bool {
         || StreamScene::parse(name).is_some()
         || crate::editperf::is_edit_scene(name)
         || crate::envelopeperf::is_envelope_scene(name)
+        || crate::stills::is_cost_scene(name)
 }
 
 /// The scenes a `--scene` value runs.
@@ -1237,6 +1238,22 @@ mod tests {
         assert!(e.contains("only apply to the streaming perf scenes"), "{e}");
         let e = check_options(&opts(&["test-render", "--perf", "--scene", "terrain", "--store", "x"])).unwrap_err();
         assert!(e.contains("only apply to the streaming perf scenes"), "{e}");
+        // REND-044: the shadow cost scene reads the stored bake with the stills' poses.
+        let sc = [
+            "test-render",
+            "--perf",
+            "--scene",
+            "shadow-cost",
+            "--store",
+            "x",
+            "--global-res",
+            "16384",
+            "--poses",
+            "p.toml",
+            "--out-dir",
+            "d",
+        ];
+        assert!(check_options(&opts(&sc)).is_ok());
         // The terrain scene keeps its default (in-memory 256-cell bake) and needs no store.
         assert!(check_options(&opts(&["test-render", "--perf", "--scene", "terrain"])).is_ok());
     }
