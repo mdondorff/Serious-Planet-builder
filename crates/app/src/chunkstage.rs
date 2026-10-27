@@ -144,6 +144,8 @@ pub struct ChunkTrace {
     waits: Vec<f64>,
     horizon_landed: u64,
     prefetch_asked: u64,
+    /// For every landed chunk the flight asked for: the time it was first wanted.
+    wanted_at_landing: Vec<f64>,
 }
 
 /// What a flight's [`ChunkTrace`] says.
@@ -153,6 +155,9 @@ pub struct TraceSummary {
     pub horizon_maps_landed: u64,
     /// Chunks the flight asked to be prefetched (STRM-042), counted once per frame they were asked in.
     pub prefetch_asked: u64,
+    /// The earliest time (seconds into the flight) a chunk that landed in it was first wanted; `None` when no landed chunk was asked for in the flight. In a cold
+    /// trial the model says `6 s - D / v` for the chunk past the edge (D the distance at which a chunk is wanted).
+    pub first_wanted_s: Option<f64>,
     /// The median and the largest wait of a landed chunk that the flight itself asked for, seconds; 0 when none landed.
     pub median_wait_s: f64,
     pub max_wait_s: f64,
@@ -171,6 +176,7 @@ impl ChunkTrace {
     pub fn landed(&mut self, keys: &[ChunkKey], at_s: f64) {
         for k in keys {
             if let Some(t) = self.first_wanted.remove(k) {
+                self.wanted_at_landing.push(t);
                 self.waits.push((at_s - t).max(0.0));
             } else {
                 self.waits.push(0.0);
@@ -195,6 +201,7 @@ impl ChunkTrace {
             chunks_landed: w.len() as u64,
             horizon_maps_landed: self.horizon_landed,
             prefetch_asked: self.prefetch_asked,
+            first_wanted_s: self.wanted_at_landing.iter().copied().min_by(f64::total_cmp),
             median_wait_s: w.get(w.len() / 2).copied().unwrap_or(0.0),
             max_wait_s: w.last().copied().unwrap_or(0.0),
         }
@@ -237,6 +244,7 @@ mod tests {
         assert_eq!(s.horizon_maps_landed, 2);
         // The waits are 2.5 s, 6 s (asked at 1.0, not again at 2.0) and 0 s (nobody asked in this flight).
         assert_eq!((s.median_wait_s, s.max_wait_s), (2.5, 6.0));
+        assert_eq!(s.first_wanted_s, Some(1.0), "the earliest first-wanted time of the chunks that landed");
         assert_eq!(ChunkTrace::default().summary(), TraceSummary::default());
     }
 
