@@ -10,3 +10,7 @@ Source: m8-edit-latency-chunks, M8 criterion 6, TEST-019, TEST-041
 #### Scenario: The chunk table
 - **WHEN** the table is made from cases whose runs carry chunk readings
 - **THEN** it gives the medians per case, `ok` where the eroded result is drawn within 10 s and `over` where it is not, and `-` for a case without a chunk stage
+
+#### Scenario: Drawn again
+- **WHEN** a case's last chunk lands at 9.1 s, the last refresh job of a tile the plan draws ends at 9.4 s and a resident-only tile ends at 10.0 s
+- **THEN** the chunk table reads 9.4 s plus the frame time as drawn again (the verdict against 10 s reads it) and 10.0 s in the column of the instant nothing was left to do

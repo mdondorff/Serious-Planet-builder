@@ -1122,6 +1122,16 @@ mod tests {
         assert!(STORE_OPTIONS.contains(&"--edit-resolve") && USAGE.contains("--edit-resolve"));
     }
 
+    // spec: TEST-056
+    #[test]
+    fn the_edit_latency_scene_takes_a_number_of_repeats() {
+        let args = |a: &[&str]| parse_args(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        let o = args(&["test-render", "--perf", "--scene", "edit-latency", "--repeats", "5"]).unwrap();
+        assert_eq!(o.repeats, Some(5));
+        assert_eq!(args(&["test-render", "--perf", "--scene", "edit-latency"]).unwrap().repeats, None);
+        assert!(args(&["test-render", "--perf", "--scene", "edit-latency", "--repeats", "x"]).is_err(), "--repeats needs a number");
+    }
+
     // spec: STRM-020, TEST-012
     #[test]
     fn the_generation_pool_defaults_to_the_machine_less_the_reserve_and_the_options_override_it() {
