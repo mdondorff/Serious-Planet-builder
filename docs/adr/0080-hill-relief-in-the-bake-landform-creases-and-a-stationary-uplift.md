@@ -1,5 +1,5 @@
 # 0080 Hill-scale relief: a band in the bake, landform-keyed creases, and a stationary uplift for the coupled run
-Status: proposed (sonnet-explorer, 2026-10-25; the architect's review and the owner's acceptance pending; easy to reverse, implementation may build on it)
+Status: accepted (owner, 2026-10-27, after SPIKE-45; drafted by sonnet-explorer, 2026-10-25; point 4 as written: the run without stream-power erosion at M8, the real fix in M9)
 Date: 2026-10-25
 Source: owner, 2026-10-25 (terrain relief into M8; scope: plausible relief, hydrology and horizon shadows); `openspec/changes/m8-relief/proposal.md`; learnings 2026-10-25; ADR 0022, 0026, 0030, 0076; CON-06, CON-07, CON-14
 
