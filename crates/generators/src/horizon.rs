@@ -214,7 +214,7 @@ fn texel_bytes(r: &HeightRaster<'_>, steps: &[(f64, f64)], x: usize, y: usize, d
     if kernel == Kernel::Avx2 && r.n >= 2 && (r.n + 1).saturating_mul(r.n + 1) <= i32::MAX as usize {
         while k + 4 <= dirs.len() {
             let four = [dirs[k], dirs[k + 1], dirs[k + 2], dirs[k + 3]];
-            // SAFETY: `Kernel::Avx2` is only made by `Kernel::detect` after the feature test (or by a test that tests it first).
+            // SAFETY: `bake_horizon_with` lets `Kernel::Avx2` through only where `Kernel::detect` says the CPU has AVX2; `texel_bytes` is private.
             out[k..k + 4].copy_from_slice(&unsafe { horizon_at4(r, steps, x, y, &four) });
             k += 4;
         }
@@ -262,6 +262,8 @@ pub fn bake_horizon_with(
     threads: usize,
     kernel: Kernel,
 ) -> Result<HorizonMap, String> {
+    // A kernel the CPU cannot run is the scalar one (the enum is public: the feature test is made here, once, not trusted from the caller).
+    let kernel = if kernel == Kernel::detect() || kernel == Kernel::Scalar { kernel } else { Kernel::Scalar };
     let (x0, y0, w, h) = block;
     let n = raster.n;
     if n == 0 || n.checked_mul(n) != Some(raster.heights.len()) {
