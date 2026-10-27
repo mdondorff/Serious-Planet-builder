@@ -142,3 +142,12 @@ Scope: `generators::horizon` march, 8 m raster of 1824^2 texels, 16 azimuths, ra
 - Measured offline (4 threads, busy machine): an exact skip of steps whose block max cannot beat the best slope skipped 60 % of the steps and took 6.5 to 8.7 s against 6.8 s without it.
 - Cause: each step costs two divisions, a floor and a division for the slope; the table of distances and drops and an integer floor take the march to 2.6 s with identical bytes (GEN-085).
 - Obsolete when the march is vectorised over azimuths (then loads may matter again).
+
+## 2026-10-27 The A-net chunk change is almost only incision, up to 207 m; the stated bound of 300 m is two-sided, the data one-sided
+Scope: `chunkfield` stage bound (`bound_m` 300 m), `ChunkField::height_bounds`, the plan's cost with a chunk stage; `app::globalperf` `anet_change_report`.
+- 48 random land chunks of the 16384 store, 65 x 65 samples a level (11 to 16): |change| p50 0.9 m, p99 48 to 49 m, p99.9 137 to 138 m, p99.99 190 m, max 201 to 207 m; signed range -206.7 to +1.2 m. The largest is at face 1, chunk (25, 1968).
+- `height_bounds` widens by `bound_m` on both sides; the upper 300 m is unneeded for this stage (+1.2 m seen). An upper bound of a few metres (with the stage clamping its positive change there) would halve the slack that defeats `certified()` and stays sound; not built (the plan is at most 0.5 s of the M6 gap, window 14).
+- A split or morph on bounds that leave the chunk change out is unsound (numerics review, 2026-10-27): the camera can be treated as higher than the ground, and a border vertex can lie outside the morph margin (a crack). The widening is what keeps both honest, and LOD-013 forbids a widening that depends on readiness.
+- A tile costs 2 to 3 ms with the chunk layer and 2 ms without (`tile_cost_report`): the 340 to 1100 ms of an edit's tile refresh is not the tile build.
+- Tool: `PLANET_ANET_STORE=DIR PLANET_ANET_RES=N PLANET_ANET_CHUNKS=48 cargo test -p planet --release --lib anet_change_report -- --ignored --nocapture` (read only, about 7 min).
+- Obsolete when the stage states an asymmetric bound or the sample grows past 200 chunks and changes the maximum.
