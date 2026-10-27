@@ -525,7 +525,9 @@ pub struct ChunkField<F: HeightField> {
     base: F,
     lat: ChunkLattice,
     radius_m: f64,
-    bound_m: f64,
+    /// How far the field may lie below and above its base (metres): both `bound_m` unless the field is made with [`ChunkField::with_bounds`].
+    bound_down_m: f64,
+    bound_up_m: f64,
     top: u8,
     definition: u64,
     ready: HashMap<(u8, u32, u32), Arc<ChunkResult>>,
@@ -537,11 +539,20 @@ impl<F: HeightField> ChunkField<F> {
             base,
             lat,
             radius_m,
-            bound_m: stage.bound_m(),
+            bound_down_m: stage.bound_m(),
+            bound_up_m: stage.bound_m(),
             top: PYRAMID_TOP_LEVEL,
             definition: stage.definition_hash(),
             ready: HashMap::new(),
         }
+    }
+
+    /// The field whose bounds widen the base's by `down_m` below and `up_m` above instead of the stage's `bound_m` both ways (a measurement of the
+    /// held-back tiles with an asymmetric bound; sound only if the stage's change stays within them).
+    pub fn with_bounds(mut self, down_m: f64, up_m: f64) -> ChunkField<F> {
+        self.bound_down_m = down_m;
+        self.bound_up_m = up_m;
+        self
     }
 
     /// The field whose pyramid reaches up to tile level `top` instead of the default [`PYRAMID_TOP_LEVEL`]; the chunks it is given must have been
@@ -795,13 +806,20 @@ impl<F: HeightField> HeightField for ChunkField<F> {
         CHUNK_STAGE_VERSION
     }
     fn max_abs_height_m(&self) -> f64 {
-        self.base.max_abs_height_m() + self.bound_m
+        self.base.max_abs_height_m() + self.bound_down_m.max(self.bound_up_m)
     }
     /// The stage's own definition (the process, the grid, the top level and its bound): a change re-keys every tile it reads.
     fn inputs_hash(&self) -> u64 {
         planet_core::hash::hash_u64s(
             0x0063_6866,
-            &[self.definition, u64::from(self.lat.cells_per_chunk()), u64::from(self.top), self.bound_m.to_bits(), self.radius_m.to_bits()],
+            &[
+                self.definition,
+                u64::from(self.lat.cells_per_chunk()),
+                u64::from(self.top),
+                self.bound_down_m.to_bits(),
+                self.bound_up_m.to_bits(),
+                self.radius_m.to_bits(),
+            ],
         )
     }
     fn read_records(&self) -> Vec<ReadRecord> {
@@ -862,7 +880,7 @@ impl<F: HeightField> HeightField for ChunkField<F> {
     }
     fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
         let (lo, hi) = self.base.height_bounds(centre, angular_radius);
-        (lo - self.bound_m, hi + self.bound_m)
+        (lo - self.bound_down_m, hi + self.bound_up_m)
     }
     fn bounds_monotone(&self) -> bool {
         self.base.bounds_monotone()
@@ -878,12 +896,17 @@ pub struct ChunkLayer {
     pub top: u8,
     pub stage: Arc<dyn ChunkStage>,
     pub ready: Vec<Arc<ChunkResult>>,
+    /// The bounds below and above the base in metres; `None`: the stage's `bound_m` both ways.
+    pub bounds_m: Option<(f64, f64)>,
 }
 
 impl ChunkLayer {
     /// `base` under the chunk stage with the ready chunks.
     pub fn wrap<'a>(&self, base: Box<dyn HeightField + 'a>) -> Box<dyn HeightField + 'a> {
         let mut field = ChunkField::new(base, self.lat, self.radius_m, &*self.stage).with_top_level(self.top);
+        if let Some((down, up)) = self.bounds_m {
+            field = field.with_bounds(down, up);
+        }
         for r in &self.ready {
             field = field.with_ready(r.clone());
         }

@@ -977,6 +977,11 @@ impl WorldTerrain {
 
     /// Build the field (a fresh context per field: its key covers what it read).
     pub fn field(&self) -> Result<Box<dyn HeightField + '_>, String> {
+        self.field_with_bounds(None)
+    }
+
+    /// [`WorldTerrain::field`] with the chunk stage's bounds below and above the base (metres) instead of its `bound_m` both ways (a measurement).
+    pub fn field_with_bounds(&self, bounds_m: Option<(f64, f64)>) -> Result<Box<dyn HeightField + '_>, String> {
         let started = std::time::Instant::now();
         let def = self.definition();
         let layer =
@@ -986,6 +991,7 @@ impl WorldTerrain {
                 top: c.top,
                 stage: c.stage.clone(),
                 ready: c.manager.snapshot(),
+                bounds_m,
             });
         let built = field_chain_with(self.kind, &def, self.src.as_ref(), self.bake_key, self.bound_water, layer.as_ref());
         // The lens over the whole chain (GEN-043); while the run is not ready the field is the plain one.

@@ -813,6 +813,146 @@ mod tests {
         }
     }
 
+    // spec: LOD-013
+    /// The tiles the plan holds back as too steep to morph (ADR 0074) at the pose of an F9 repro bundle, over the stored bake: with no chunk stage, with the
+    /// chunk stage's widening of 300 m both ways, and with an asymmetric one (`PLANET_HELD_DOWN` and `PLANET_HELD_UP`, default 250 and 10 m). The chunks
+    /// need not be landed: the widening of the bounds is independent of readiness (LOD-013). `PLANET_BUNDLE=FILE PLANET_ANET_STORE=DIR PLANET_ANET_RES=N cargo
+    /// test -p planet --release --lib held_back_report -- --ignored --nocapture`. Read only, one thread.
+    #[test]
+    #[ignore = "a measurement: it plans the view of a bundle three times"]
+    fn held_back_report() {
+        use planet_core::cube::TangentWarp;
+        let mut out = std::io::stdout();
+        let bundle = std::env::var_os("PLANET_BUNDLE").map(std::path::PathBuf::from).expect("PLANET_BUNDLE=FILE");
+        let text = std::fs::read_to_string(&bundle).expect("the bundle reads");
+        let b = planet_frame::TerrainBundle::from_text(&text).expect("a terrain bundle");
+        let res = std::env::var("PLANET_ANET_RES").ok().and_then(|r| r.parse().ok()).unwrap_or(256);
+        let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
+        let (world, _maps, _tile) = anet_scene(res, 11, store, &mut out).unwrap();
+        let env_m = |k: &str, d: f64| std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d);
+        let (down, up) = (env_m("PLANET_HELD_DOWN", 250.0), env_m("PLANET_HELD_UP", 10.0));
+        let spawner = std::sync::Arc::new(planet_streaming::ThreadPool::new(2));
+        let cfg = planet_streaming::chunks::ChunkConfig { workers: 2, ..Default::default() };
+        let plain = world.field().unwrap();
+        let lod = b.request.lod.clone();
+        let count = |field: &dyn planet_generators::height::HeightField| -> (usize, usize) {
+            let sel = planet_frame::select_nodes_in_view_field(&TangentWarp, &b.request.camera, field, &lod);
+            (sel.nodes.iter().filter(|n| n.capped).count(), sel.nodes.len())
+        };
+        let (c0, n0) = count(&*plain);
+        writeln!(out, "pose of {}: no chunk stage: {c0} of {n0} nodes held back", bundle.display()).map_err(err).unwrap();
+        assert_eq!(
+            world.enable_anet_from_store_with(
+                crate::anetworld::ANET_CELL_M,
+                spawner,
+                std::sync::Arc::new(planet_streaming::SystemClock::new()),
+                cfg,
+                false
+            ),
+            Ok(true)
+        );
+        let both = world.field().unwrap();
+        let (c1, n1) = count(&*both);
+        writeln!(out, "  chunk stage, widening 300 m both ways: {c1} of {n1}").map_err(err).unwrap();
+        let asym = world.field_with_bounds(Some((down, up))).unwrap();
+        let (c2, n2) = count(&*asym);
+        writeln!(out, "  asymmetric bound (down {down} m, up {up} m): {c2} of {n2}").map_err(err).unwrap();
+    }
+
+    // spec: LOD-013
+    /// The step at the chunk's apply level at the pose of an F9 repro bundle (owner test finding 3, the coast): the chunks the plan's tiles of level 15 and
+    /// finer read are landed, then the change they make at the entry level (`ANET_TOP_LEVEL`, the coarsest tile level that reads chunk detail) is sampled at
+    /// the 33 x 33 vertices of every plan node of that level: the step between such a tile and its parent, which reads the base. `PLANET_BUNDLE=FILE
+    /// PLANET_ANET_STORE=DIR PLANET_ANET_RES=N cargo test -p planet --release --lib entry_step_report -- --ignored --nocapture`. Lands chunks: minutes.
+    #[test]
+    #[ignore = "a measurement: it solves the chunks under a view and samples their change"]
+    fn entry_step_report() {
+        use planet_core::cube::TangentWarp;
+        let mut out = std::io::stdout();
+        let bundle = std::env::var_os("PLANET_BUNDLE").map(std::path::PathBuf::from).expect("PLANET_BUNDLE=FILE");
+        let text = std::fs::read_to_string(&bundle).expect("the bundle reads");
+        let b = planet_frame::TerrainBundle::from_text(&text).expect("a terrain bundle");
+        let res = std::env::var("PLANET_ANET_RES").ok().and_then(|r| r.parse().ok()).unwrap_or(256);
+        let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
+        let (world, _maps, _tile) = anet_scene(res, 11, store, &mut out).unwrap();
+        let spawner = std::sync::Arc::new(planet_streaming::ThreadPool::new(6));
+        let cfg = planet_streaming::chunks::ChunkConfig { workers: 6, ..Default::default() };
+        assert_eq!(
+            world.enable_anet_from_store_with(
+                crate::anetworld::ANET_CELL_M,
+                spawner,
+                std::sync::Arc::new(planet_streaming::SystemClock::new()),
+                cfg,
+                false
+            ),
+            Ok(true)
+        );
+        let entry = crate::anetworld::ANET_TOP_LEVEL;
+        let lod = b.request.lod.clone();
+        let plan_nodes = |field: &dyn planet_generators::height::HeightField| -> Vec<planet_core::TileId> {
+            planet_frame::select_nodes_in_view_field(&TangentWarp, &b.request.camera, field, &lod).nodes.iter().map(|n| n.tile).collect()
+        };
+        let tiles = plan_nodes(&*world.field().unwrap());
+        let fine: Vec<planet_core::TileId> = tiles.iter().copied().filter(|t| t.level() >= entry).collect();
+        writeln!(
+            out,
+            "pose of {}: {} plan nodes, {} of level {entry} or finer, {} of them level {entry}",
+            bundle.display(),
+            tiles.len(),
+            fine.len(),
+            fine.iter().filter(|t| t.level() == entry).count()
+        )
+        .map_err(err)
+        .unwrap();
+        let manager = world.chunk_manager().unwrap();
+        let camera = b.request.camera.position;
+        let start = std::time::Instant::now();
+        loop {
+            world.chunk_frame(&fine, camera, &[]);
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            let all_ready = fine.iter().all(|t| manager.reads(*t).iter().all(|k| manager.is_ready(*k)));
+            if all_ready && manager.in_flight() == 0 {
+                break;
+            }
+            assert!(start.elapsed().as_secs() < 1_800, "the chunks did not land");
+        }
+        writeln!(out, "  {} chunks landed in {:.0} s", manager.stats().landed, start.elapsed().as_secs_f64()).map_err(err).unwrap();
+        let field = world.field().unwrap();
+        let mut steps: Vec<(f64, planet_core::TileId)> = Vec::new();
+        let mut all: Vec<f64> = Vec::new();
+        for t in tiles.iter().filter(|t| t.level() == entry) {
+            let mut worst = 0.0f64;
+            for l in 0..=32u32 {
+                for k in 0..=32u32 {
+                    let d = t.sample_direction(&TangentWarp, 32, k, l);
+                    let c = (field.height_at_level(d, entry) - field.height_at_level(d, entry - 1)).abs();
+                    all.push(c);
+                    worst = worst.max(c);
+                }
+            }
+            steps.push((worst, *t));
+        }
+        all.sort_by(f64::total_cmp);
+        steps.sort_by(|a, b| b.0.total_cmp(&a.0));
+        if all.is_empty() {
+            writeln!(out, "  no plan node of level {entry} at this pose").map_err(err).unwrap();
+            return;
+        }
+        writeln!(
+            out,
+            "  step at the entry level {entry} (a tile against its parent, at its vertices): p99 {:.2} m, max {:.2} m over {} vertices of {} nodes",
+            all[all.len() * 99 / 100],
+            all[all.len() - 1],
+            all.len(),
+            steps.len()
+        )
+        .map_err(err)
+        .unwrap();
+        for (w, t) in steps.iter().take(3) {
+            writeln!(out, "    worst tile {:?}: {w:.2} m", (t.face().0, t.x(), t.y())).map_err(err).unwrap();
+        }
+    }
+
     // spec: GEN-052
     #[test]
     fn the_chunk_budget_is_four_seconds_at_8_m_and_a_missing_time_never_passes() {
