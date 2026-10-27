@@ -29,7 +29,6 @@ pub mod stall;
 pub mod stills;
 pub mod streamperf;
 pub mod sweep;
-pub mod tribspike;
 pub mod ui;
 pub mod window;
 pub mod worldfield;
