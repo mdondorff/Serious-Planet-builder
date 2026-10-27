@@ -1,5 +1,7 @@
 #[path = "anet_world.rs"]
 mod anet_world;
+#[path = "coupled_remake.rs"]
+mod coupled_remake;
 #[path = "horizon_world.rs"]
 mod horizon_world;
 #[path = "live_definition.rs"]

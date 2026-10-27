@@ -174,6 +174,11 @@ pub fn load_or_run(def: &WorldDefinition, dir: Option<&Path>, src: &dyn LatticeS
     if let Some(r) = p.load(dir) {
         return Ok(r);
     }
+    make(p, src, dir)
+}
+
+/// Make the run (reduce the bake, run the steps) and write it to `dir` when given.
+fn make(p: Prepared, src: &dyn LatticeSource, dir: Option<&Path>) -> Result<CoupledRun, String> {
     let started = std::time::Instant::now();
     let input = bake_input(src, &p.lat, &p.spec.params)?;
     eprintln!("coupled run: bake of {} cells reduced to {} in {:.1} s", src.res(), p.n, started.elapsed().as_secs_f64());
@@ -183,6 +188,46 @@ pub fn load_or_run(def: &WorldDefinition, dir: Option<&Path>, src: &dyn LatticeS
     let store_error =
         dir.and_then(|d| store_coupled(d, &p.world, &state, DEFAULT_MAX_PACK_BYTES).err().map(|e| format!("{}: {e}", d.display())));
     Ok(CoupledRun { maps: Arc::new(CoupledMaps::new(p.lat, state.z, state.area_m2, p.id)), origin: Origin::Ran, store_error })
+}
+
+// spec: GEN-042
+/// The directory a re-made run is written to: created if it is missing, never the store the bake is read from, and under a `target` directory
+/// (a re-make is a measurement; the shared store stays as it is). Returns the canonical path.
+pub fn remake_target(store: &Path, out: &Path) -> Result<std::path::PathBuf, String> {
+    std::fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
+    let out_c = std::fs::canonicalize(out).map_err(|e| format!("{}: {e}", out.display()))?;
+    let store_c = std::fs::canonicalize(store).map_err(|e| format!("{}: {e}", store.display()))?;
+    if out_c == store_c {
+        return Err(format!(
+            "the re-made run would be written into the store it reads ({}): name a directory under target/",
+            store.display()
+        ));
+    }
+    if !out_c.components().any(|c| c.as_os_str().eq_ignore_ascii_case("target")) {
+        return Err(format!("{}: a re-made run is written under a `target` directory, never beside the shared store", out_c.display()));
+    }
+    Ok(out_c)
+}
+
+// spec: GEN-042
+/// Make the run of `def` from the bake `src` afresh, ignoring any stored channel, and write it to `out` (checked by [`remake_target`] against
+/// `store`, the directory the bake is read from). Returns the run and the wall time of the make in seconds (GEN-042, criterion 4 of M8).
+pub fn remake(
+    def: &WorldDefinition,
+    store: &Path,
+    out: &Path,
+    src: &dyn LatticeSource,
+    n: u32,
+    steps: u32,
+) -> Result<(CoupledRun, f64), String> {
+    let out = remake_target(store, out)?;
+    let p = prepare(def, src, n, steps)?;
+    let started = std::time::Instant::now();
+    let run = make(p, src, Some(&out))?;
+    if let Some(e) = &run.store_error {
+        return Err(format!("the run was made but not stored: {e}"));
+    }
+    Ok((run, started.elapsed().as_secs_f64()))
 }
 
 // spec: STRM-051
@@ -230,6 +275,28 @@ pub fn generate_coupled_run(o: &crate::Options, out: &mut dyn std::io::Write) ->
         Origin::Ran => "made and stored",
     };
     writeln!(out, "coupled run: {how} in {} in {:.1} s", dir.display(), started.elapsed().as_secs_f64()).map_err(err)
+}
+
+// spec: GEN-042
+/// The make of `perf coupled --store DIR --global-res N --remake-into OUT`: the coupled run of the bake stored in `DIR` made afresh and written
+/// to `OUT`; the wall seconds of the make (reduction of the bake and the steps, as the viewer's thread makes it) and the cells per face edge.
+pub fn timed_remake(o: &crate::Options, store: &Path, out: &Path) -> Result<(f64, u32), String> {
+    if !o.given.contains("--global-res") {
+        return Err("--remake-into needs --global-res N, the resolution the bake was made at".into());
+    }
+    let def = match &o.world {
+        Some(path) => {
+            let text = std::fs::read_to_string(path).map_err(|e| format!("reading {}: {e}", path.display()))?;
+            planet_world_def::toml_io::parse_definition(&text).map_err(|e| format!("{}: {e}", path.display()))?
+        }
+        None => WorldDefinition::single_planet(crate::skeleton::RADIUS_M, o.seed),
+    };
+    let world = GlobalWorld::from_definition(&def).map_err(|e| format!("the definition cannot be generated: {e}"))?;
+    let bake = TileStore::open(store, world.params()).map_err(|e| e.to_string())?;
+    let src = planet_cache::global_store::StoreSource::new(&bake, &world, o.global_res).map_err(|e| e.to_string())?;
+    let n = run_cells(o.global_res);
+    let (_, secs) = remake(&def, store, out, &src, n, COUPLED_STEPS)?;
+    Ok((secs, n))
 }
 
 /// Where a world's coupled run stands.
