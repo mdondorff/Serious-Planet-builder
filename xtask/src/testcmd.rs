@@ -797,6 +797,8 @@ fn perf_bake_scene_args(scene: &str, args: &[String]) -> Result<Vec<String>, Str
 const EDIT_SCENE: &str = "edit-latency";
 /// The speed-envelope scene (TEST-047): run by name (`perf envelope`), not part of `perf stream all`.
 const ENVELOPE_SCENE: &str = "envelope";
+/// The shadow and material cost scene (REND-044, M8 criterion 5): run by name (`perf stream shadow-cost`), not part of `all`.
+const COST_SCENE: &str = "shadow-cost";
 
 const STREAM_SCENES: [&str; 7] = ["dive", "dive-fast", "teleport-1m", "teleport-2km", "look-1m", "look-2km", "dive-cold"];
 
@@ -809,11 +811,11 @@ fn perf_stream_args(args: &[String]) -> Result<Vec<String>, String> {
     if let Some(first) = args.first().filter(|a| !a.starts_with("--")) {
         if first == "all" {
             scene = "streaming".into();
-        } else if STREAM_SCENES.contains(&first.as_str()) || first == EDIT_SCENE || first == ENVELOPE_SCENE {
+        } else if STREAM_SCENES.contains(&first.as_str()) || first == EDIT_SCENE || first == ENVELOPE_SCENE || first == COST_SCENE {
             scene = first.clone();
         } else {
             return Err(format!(
-                "unknown streaming scene '{first}' (known: {}, {EDIT_SCENE}, {ENVELOPE_SCENE}, all)",
+                "unknown streaming scene '{first}' (known: {}, {EDIT_SCENE}, {ENVELOPE_SCENE}, {COST_SCENE}, all)",
                 STREAM_SCENES.join(", ")
             ));
         }
@@ -826,7 +828,7 @@ fn perf_stream_args(args: &[String]) -> Result<Vec<String>, String> {
         match a.as_str() {
             "--smoke" => smoke = true,
             "--machine-ready" | "--allow-memory-bake" | "--lit" | "--no-chunks" | "--no-stale-hold" | "--no-horizon-jobs" | "--only-steady" => tail.push(a.clone()),
-            "--store" | "--global-res" | "--out" | "--upload" | "--prefill-levels" | "--gen-workers" | "--chunk-workers" | "--base-threads" | "--horizon-threads" | "--gen-ahead" | "--gen-reserve" | "--gen-priority" | "--settle-ms" | "--share-bound" | "--steady-window-s" | "--altitudes-m" | "--places" => {
+            "--store" | "--global-res" | "--out" | "--upload" | "--prefill-levels" | "--gen-workers" | "--chunk-workers" | "--base-threads" | "--horizon-threads" | "--gen-ahead" | "--gen-reserve" | "--gen-priority" | "--settle-ms" | "--share-bound" | "--steady-window-s" | "--altitudes-m" | "--places" | "--poses" | "--out-dir" => {
                 let value = it.next().ok_or_else(|| format!("{a} needs a value"))?;
                 tail.push(a.clone());
                 tail.push(value.clone());
@@ -1060,6 +1062,30 @@ mod tests {
         let (line, over) = edit_to_first_test_line(49.0, 13.2);
         assert!(over && line.starts_with("BUDGET EXCEEDED: edit-to-first-test 62 s > 30 s (build 49.0 s + tests 13.2 s)"), "{line}");
         assert!(line.contains("Tracked item in docs/status.md"), "{line}");
+    }
+
+    // spec: REND-044
+    #[test]
+    fn the_shadow_cost_scene_runs_by_name_with_the_poses_and_the_stream_options_and_is_not_part_of_all() {
+        let a = perf_stream_args(&s(&[
+            "shadow-cost",
+            "--store",
+            "D:/bake",
+            "--global-res",
+            "16384",
+            "--poses",
+            "p.toml",
+            "--out-dir",
+            "target/sc",
+        ]))
+        .unwrap();
+        let at = a.iter().position(|x| x == "--scene").unwrap();
+        assert_eq!(a[at + 1], "shadow-cost");
+        assert!(a.contains(&"--perf".to_string()) && a.contains(&"hardware".to_string()));
+        assert!(
+            a.windows(2).any(|w| w[0] == "--poses" && w[1] == "p.toml") && a.windows(2).any(|w| w[0] == "--out-dir" && w[1] == "target/sc")
+        );
+        assert!(!STREAM_SCENES.contains(&COST_SCENE), "`perf stream all` does not run it");
     }
 
     // spec: TEST-019

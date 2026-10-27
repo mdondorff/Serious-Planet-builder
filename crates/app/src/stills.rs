@@ -832,6 +832,11 @@ fn anchor_cell(
 /// [--views A,B]` (TEST-048): one PNG per pose, `DIR/<pose>.png`, and `DIR/stills.txt` with the camera and sun of each. A tool beside
 /// the harness, never a measurement: no gate, no timestamps, no log; not to be run during a perf window.
 pub fn capture_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<(), String> {
+    run_stills(o, ctx, out, None)
+}
+
+/// The poses of `capture-stills`; with `cost` the terrain pass is timed at each settled pose in four variants (REND-044, the `shadow-cost` scene).
+fn run_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write, mut cost: Option<&mut Vec<CostRow>>) -> Result<(), String> {
     let dir = o.out_dir.clone().ok_or("capture-stills needs --out-dir")?;
     let file = o.poses.clone().ok_or("capture-stills needs --poses FILE")?;
     let text = std::fs::read_to_string(&file).map_err(|e| format!("--poses {}: {e}", file.display()))?;
@@ -852,7 +857,8 @@ pub fn capture_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
     let radius_m = world.radius_m();
     writeln!(
         out,
-        "capture-stills: NOT a measurement (no gate, no timestamps, no log); {}x{}, {} poses, {}{}",
+        "{}: {}x{}, {} poses, {}{}",
+        if cost.is_some() { "shadow-cost" } else { "capture-stills: NOT a measurement (no gate, no timestamps, no log)" },
         size.0,
         size.1,
         config.poses.len(),
@@ -1023,6 +1029,9 @@ pub fn capture_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
             l.view = pose.view.unwrap_or(l.view);
         }
         r.render(ctx, &lit, false).map_err(|e| e.to_string())?;
+        if let Some(rows) = cost.as_deref_mut() {
+            rows.push(measure_cost(ctx, &mut r, &mut lit, &pose.name)?);
+        }
         r.read_color(ctx).write_png(&dir.join(format!("{}.png", pose.name))).map_err(|e| format!("writing {}: {e}", pose.name))?;
         let (eye_lat, _) = camera.position.0.lat_lon();
         let height = camera.position.0.length() - radius_m;
@@ -1063,9 +1072,197 @@ pub fn capture_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
     writeln!(out, "wrote {} (one PNG per pose, stills.txt and sections.txt)", dir.display()).map_err(err)
 }
 
+/// Whether `--scene NAME` names the shadow and material cost scene (REND-044).
+pub fn is_cost_scene(name: &str) -> bool {
+    name == "shadow-cost"
+}
+
+/// The budget of the horizon shadows and the material map together, milliseconds of terrain-pass GPU time at 1440p (REND-044, M8 criterion 5).
+pub const COST_BUDGET_MS: f64 = 1.5;
+/// A share within this fraction of the budget is not called met before the variants without the branch are built (opus-planner, 2026-10-27).
+pub const COST_NEAR: f64 = 0.2;
+/// Frames dropped before the timed ones of a variant, and the timed frames whose median is the variant's time.
+const COST_WARM: usize = 8;
+const COST_FRAMES: usize = 41;
+
+/// The terrain-pass GPU time of one pose, milliseconds, medians of [`COST_FRAMES`] waited frames (REND-044).
+#[derive(Clone, Debug, PartialEq)]
+pub struct CostRow {
+    pub pose: String,
+    /// Shadows on, ground detail at full strength.
+    pub full: f64,
+    /// Horizon maps cleared (every node reads slot -1) and the coarse map off.
+    pub no_shadow: f64,
+    /// Ground detail at strength 0.
+    pub no_material: f64,
+    /// Both off.
+    pub neither: f64,
+}
+
+impl CostRow {
+    /// The shadows' share, the material map's share and both together (full minus the variant without them).
+    pub fn shares(&self) -> (f64, f64, f64) {
+        (self.full - self.no_shadow, self.full - self.no_material, self.full - self.neither)
+    }
+}
+
+/// The median of `v` (even counts: the mean of the middle two); NaN when empty.
+pub fn median(mut v: Vec<f64>) -> f64 {
+    if v.is_empty() {
+        return f64::NAN;
+    }
+    v.sort_by(|a, b| a.total_cmp(b));
+    let n = v.len();
+    if n % 2 == 1 {
+        v[n / 2]
+    } else {
+        0.5 * (v[n / 2 - 1] + v[n / 2])
+    }
+}
+
+/// The median terrain-pass time of [`COST_FRAMES`] timed frames of `plan` after [`COST_WARM`] untimed ones.
+fn terrain_ms(ctx: &GpuContext, r: &mut planet_render::TerrainRenderer, plan: &planet_frame::TerrainPlan) -> Result<f64, String> {
+    for _ in 0..COST_WARM {
+        r.render(ctx, plan, false).map_err(|e| e.to_string())?;
+    }
+    let mut v = Vec::with_capacity(COST_FRAMES);
+    for _ in 0..COST_FRAMES {
+        let (t, _) = r.render(ctx, plan, true).map_err(|e| e.to_string())?;
+        v.push(t.gpu_ms.ok_or("the device gave no terrain-pass timestamp: the cost needs the discrete GPU")?);
+    }
+    Ok(median(v))
+}
+
+/// Time the terrain pass of the settled pose in the four variants. The renderer keeps no way to put the horizon maps back, so the shadows are
+/// cleared after the variants that need them: full, no material, then neither, then no shadow.
+fn measure_cost(
+    ctx: &GpuContext,
+    r: &mut planet_render::TerrainRenderer,
+    plan: &mut planet_frame::TerrainPlan,
+    pose: &str,
+) -> Result<CostRow, String> {
+    let detail = |plan: &mut planet_frame::TerrainPlan, d: f64| {
+        if let Some(l) = plan.lit.as_mut() {
+            l.ground_detail = d;
+        }
+    };
+    detail(plan, 1.0);
+    let full = terrain_ms(ctx, r, plan)?;
+    detail(plan, 0.0);
+    let no_material = terrain_ms(ctx, r, plan)?;
+    r.clear_horizon();
+    r.set_horizon_coarse(ctx, None);
+    let neither = terrain_ms(ctx, r, plan)?;
+    detail(plan, 1.0);
+    let no_shadow = terrain_ms(ctx, r, plan)?;
+    Ok(CostRow { pose: pose.to_string(), full, no_shadow, no_material, neither })
+}
+
+/// The failures of the budget (the shadows and the material map together at most [`COST_BUDGET_MS`] in every pose) and the poses within
+/// [`COST_NEAR`] of it, which are not called met before the variants without the branch are built (REND-044).
+pub fn cost_verdict(rows: &[CostRow]) -> (Vec<String>, Vec<String>) {
+    let (mut over, mut near) = (Vec::new(), Vec::new());
+    for r in rows {
+        let both = r.shares().2;
+        if !(both.is_finite() && both <= COST_BUDGET_MS) {
+            over.push(format!("{}: shadows and material map {both:.3} ms exceed {COST_BUDGET_MS} ms (REND-044)", r.pose));
+        } else if both > COST_BUDGET_MS * (1.0 - COST_NEAR) {
+            near.push(format!(
+                "{}: {both:.3} ms is within 20 % of the {COST_BUDGET_MS} ms budget: build the shader variants before calling it met",
+                r.pose
+            ));
+        }
+    }
+    (over, near)
+}
+
+// spec: REND-044
+/// `test-render --perf --scene shadow-cost --poses FILE --out-dir DIR --store DIR --global-res N`: after the readiness gate, the settled poses of
+/// the stills at 1440p with the terrain pass timed in four variants; the log is `perf/logs/shadow-cost.json`.
+pub fn perf_shadow_cost(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<(), String> {
+    planet_perf::check_reference_adapter(&crate::facts(ctx)).map_err(|r| r.to_string())?;
+    let owner_override = crate::readiness_gate(o, ctx, out)?;
+    let mut rows = Vec::new();
+    run_stills(o, ctx, out, Some(&mut rows))?;
+    let (over, near) = cost_verdict(&rows);
+    for r in &rows {
+        let (s, m, both) = r.shares();
+        writeln!(
+            out,
+            "{}: terrain pass {:.3} ms; shadows {s:.3} ms, material map {m:.3} ms, together {both:.3} ms (without shadows {:.3}, without material {:.3}, without both {:.3})",
+            r.pose, r.full, r.no_shadow, r.no_material, r.neither
+        )
+        .map_err(err)?;
+    }
+    writeln!(
+        out,
+        "the shadow share under-reads by the branch the shader still takes with every node on slot -1; the material share over-reads by the cost of the detail at strength 0; 1440p, medians of {COST_FRAMES} frames"
+    )
+    .map_err(err)?;
+    for n in &near {
+        writeln!(out, "NEAR: {n}").map_err(err)?;
+    }
+    let poses: Vec<String> = rows
+        .iter()
+        .map(|r| {
+            let (s, m, both) = r.shares();
+            format!(
+                "    {{\"pose\": {:?}, \"full_ms\": {:.4}, \"no_shadow_ms\": {:.4}, \"no_material_ms\": {:.4}, \"neither_ms\": {:.4}, \"shadow_ms\": {s:.4}, \"material_ms\": {m:.4}, \"together_ms\": {both:.4}}}",
+                r.pose, r.full, r.no_shadow, r.no_material, r.neither
+            )
+        })
+        .collect();
+    let size = o.size.unwrap_or((2560, 1440));
+    let json = format!(
+        "{{\n  \"scene\": \"shadow-cost\",\n  \"adapter\": \"{}\",\n  \"owner_override\": {:?},\n  \"size\": [{}, {}],\n  \"frames\": {COST_FRAMES},\n  \"budget_ms\": {COST_BUDGET_MS},\n  \"poses\": [\n{}\n  ],\n  \"near_budget\": {:?},\n  \"budget_failures\": {:?}\n}}\n",
+        ctx.adapter_name().replace('"', "'"),
+        owner_override,
+        size.0,
+        size.1,
+        poses.join(",\n"),
+        near,
+        over
+    );
+    let path = o.out.clone().unwrap_or_else(|| std::path::Path::new("perf").join("logs").join("shadow-cost.json"));
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(err)?;
+    }
+    std::fs::write(&path, json).map_err(err)?;
+    writeln!(out, "wrote {}", path.display()).map_err(err)?;
+    if over.is_empty() {
+        Ok(())
+    } else {
+        Err(over.join("; "))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // spec: REND-044
+    #[test]
+    fn the_cost_shares_are_differences_and_a_pose_near_the_budget_is_flagged_not_called_met() {
+        let row = |pose: &str, full: f64, shadow: f64, material: f64, neither: f64| CostRow {
+            pose: pose.into(),
+            full,
+            no_shadow: shadow,
+            no_material: material,
+            neither,
+        };
+        let ok = row("a", 5.0, 4.5, 4.6, 4.0);
+        assert_eq!(ok.shares().2, 1.0);
+        assert_eq!(cost_verdict(&[ok]), (vec![], vec![]));
+        let (over, flagged) = cost_verdict(&[row("b", 5.0, 4.0, 4.0, 3.7)]);
+        assert!(over.is_empty() && flagged.len() == 1 && flagged[0].contains("within 20 %"), "{flagged:?}");
+        let (over, _) = cost_verdict(&[row("c", 5.0, 4.0, 4.0, 3.0)]);
+        assert!(over.len() == 1 && over[0].starts_with("c:") && over[0].contains("REND-044"), "{over:?}");
+        // A pose with no reading is not met.
+        assert_eq!(cost_verdict(&[row("d", f64::NAN, 1.0, 1.0, 1.0)]).0.len(), 1);
+        assert_eq!(median(vec![3.0, 1.0, 2.0]), 2.0);
+        assert_eq!(median(vec![4.0, 1.0, 2.0, 3.0]), 2.5);
+        assert!(median(vec![]).is_nan());
+    }
 
     const GOOD: &str = r#"
 [place]
