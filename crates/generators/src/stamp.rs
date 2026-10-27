@@ -262,7 +262,7 @@ pub fn apply_stamps(items: &[FootprintItem], radius_m: f64, dir: Vec3, base: f64
     apply_stamps_with(items, radius_m, dir, base, &|_| base)
 }
 
-/// [`apply_stamps`] with `base_at`, the stage input (the layers below) at any direction: the brush strokes of a smooth read it on a ring round the
+/// [`apply_stamps`] with `base_at`, the procedural base field at any direction (what a layer reads, never another layer: its key is field-wide, ADR 0066 point 4): the brush strokes of a smooth read it on a ring round the
 /// point (GEN-030). `base` is `base_at(dir)`. [`apply_stamps`] gives a constant input, on which a smooth changes nothing.
 pub fn apply_stamps_with(items: &[FootprintItem], radius_m: f64, dir: Vec3, base: f64, base_at: &dyn Fn(Vec3) -> f64) -> f64 {
     // A region of mode 2 (clip inside) that contains the point cuts every delta of the layer, whatever the order of the items (GEN-029):

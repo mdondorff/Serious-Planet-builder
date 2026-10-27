@@ -86,6 +86,7 @@ fn land(world: &Arc<WorldTerrain>, spawner: &ManualSpawner, tile: TileId) -> (pl
 // spec: GEN-082, STRM-056
 #[test]
 fn an_edit_in_the_read_set_re_solves_the_chunk_to_the_bits_of_a_cold_solve_and_an_edit_outside_it_changes_nothing() {
+    let _serial = REUSE_COUNTERS.lock().unwrap_or_else(|e| e.into_inner());
     let (a, b) = (store_with_run("resolve-a"), store_with_run("resolve-b"));
     let cfg = ChunkConfig { workers: 2, ..ChunkConfig::default() };
     let spawner = Arc::new(ManualSpawner::default());
@@ -248,7 +249,10 @@ fn a_brush_put_extended_and_taken_away_re_solves_to_the_bits_of_a_cold_solve_whi
     assert_ne!(after_put, plain, "the brush changed the chunk");
     assert_eq!(after_put, cold(&put), "put: a re-solve equals a cold solve");
     let (reused, asked) = planet::regionheights::reuse_stats();
-    assert!(asked > 0 && reused * 2 > asked, "put: most heights are beside the stroke and reused ({reused} of {asked})");
+    assert!(
+        asked > 0 && reused * 10 >= asked * 8,
+        "put: the heights beside the stroke (inside its reach disc) are reused, at least 80 % ({reused} of {asked})"
+    );
 
     // Extended: the same item id with more points (the item's record changes: both the old and the new stroke are stale).
     let mut ext = put.clone();
@@ -261,5 +265,78 @@ fn a_brush_put_extended_and_taken_away_re_solves_to_the_bits_of_a_cold_solve_whi
     // Taken away: the first result again.
     let after_remove = resolve(&world, &spawner, tile, &base_def);
     assert_eq!(after_remove, plain, "removed: the chunk is what it was before the brush");
+    let _ = (std::fs::remove_dir_all(&a), std::fs::remove_dir_all(&b));
+}
+
+/// A brush item of mixed strokes: a raise, a smooth and a flatten with a target, and a one-point dab, as one drag of the editor makes them.
+fn mixed_brush_at(dir: planet_core::Vec3, id: u128, layer: &str, flip: bool) -> planet_world_def::ItemSpec {
+    use planet_world_def::stamp::{BrushKind, Stamp, StampKind, Stroke};
+    let north = planet_core::Vec3::new(0.0, 0.0, 1.0);
+    let east = north.cross(dir).normalized();
+    let pt = |m: f64| {
+        let along = m / R;
+        (dir * libm::cos(along) + east * libm::sin(along)).normalized()
+    };
+    let stroke =
+        |kind, radius_m, strength_m, target_m, a: f64, b: f64| Stroke { kind, radius_m, strength_m, target_m, points: vec![pt(a), pt(b)] };
+    let (k0, k1) = if flip { (BrushKind::Lower, BrushKind::Raise) } else { (BrushKind::Raise, BrushKind::Lower) };
+    let strokes = [
+        stroke(k0, 300.0, 25.0, None, 0.0, 600.0),
+        stroke(BrushKind::Smooth, 350.0, 15.0, None, 500.0, 1_100.0),
+        stroke(BrushKind::Flatten, 250.0, 20.0, Some(5.0), 1_000.0, 1_500.0),
+        stroke(k1, 200.0, 10.0, None, 1_500.0, 1_500.0 + 400.0),
+        Stroke { kind: BrushKind::Raise, radius_m: 150.0, strength_m: 10.0, target_m: None, points: vec![pt(1_800.0)] },
+    ];
+    let reach_m = 1_900.0 + 350.0 + 10.0;
+    planet_world_def::ItemSpec {
+        id,
+        layer: layer.into(),
+        priority: 0,
+        dir: strokes[0].points[0],
+        content_hash: 0,
+        reach_m,
+        max_delta_m: 90.0,
+        stamp: None,
+    }
+    .with_stamp(Stamp::new(StampKind::Brush, [0.0; 3]).with_strokes(&strokes))
+}
+
+// spec: GEN-087, GEN-082
+#[test]
+fn brushes_of_every_kind_and_a_second_smoothing_brush_beside_them_re_solve_to_the_bits_of_a_cold_solve() {
+    let _serial = REUSE_COUNTERS.lock().unwrap_or_else(|e| e.into_inner());
+    let (a, b) = (store_with_run("mixed-a"), store_with_run("mixed-b"));
+    let cfg = ChunkConfig { workers: 2, ..ChunkConfig::default() };
+    let spawner = Arc::new(ManualSpawner::default());
+    let tile = TileId::new(Face(0), 15, 16000, 16000).unwrap();
+    let centre = tile.center_direction(&planet_core::cube::TangentWarp);
+    let start = (centre - planet_core::Vec3::new(0.0, 0.0, 1.0).cross(centre).normalized() * (1_000.0 / R)).normalized();
+    let world = open(&a);
+    assert_eq!(world.enable_anet_from_store(CELL_M, spawner.clone(), Arc::new(FakeClock::default()), cfg), Ok(true));
+    let (_, plain) = land(&world, &spawner, tile);
+    let base_def = (*world.definition()).clone();
+    let cold = |def: &WorldDefinition| -> u64 {
+        let w = Arc::new(WorldTerrain::open_store(def.clone(), &b, RES).expect("the store opens"));
+        let s = Arc::new(ManualSpawner::default());
+        assert_eq!(w.enable_anet_from_store(CELL_M, s.clone(), Arc::new(FakeClock::default()), cfg), Ok(true));
+        land(&w, &s, tile).1
+    };
+    // An unchanged smoothing brush of another layer overlaps the one that is edited: the smooth reads the base on a ring, and the running state
+    // of the layers must not leak into the cells beside the edited strokes.
+    let mut with_other = base_def.clone();
+    with_other.put_item_spec(planet_world_def::BodyId::PLANET, mixed_brush_at(start, 20, "other", true)).unwrap();
+    let after_other = resolve(&world, &spawner, tile, &with_other);
+    assert_eq!(after_other, cold(&with_other), "the first brush: a re-solve equals a cold solve");
+    let mut put = with_other.clone();
+    put.put_item_spec(planet_world_def::BodyId::PLANET, mixed_brush_at(start, 21, "brush", false)).unwrap();
+    let after_put = resolve(&world, &spawner, tile, &put);
+    assert_ne!(after_put, after_other, "the second brush changed the chunk");
+    assert_eq!(after_put, cold(&put), "put: a re-solve equals a cold solve");
+    let mut flipped = put.clone();
+    flipped.put_item_spec(planet_world_def::BodyId::PLANET, mixed_brush_at(start, 21, "brush", true)).unwrap();
+    let after_flip = resolve(&world, &spawner, tile, &flipped);
+    assert_eq!(after_flip, cold(&flipped), "changed strokes: a re-solve equals a cold solve");
+    let after_remove = resolve(&world, &spawner, tile, &base_def);
+    assert_eq!(after_remove, plain, "removed: the chunk is what it was");
     let _ = (std::fs::remove_dir_all(&a), std::fs::remove_dir_all(&b));
 }
