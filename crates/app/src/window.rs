@@ -692,6 +692,7 @@ impl App<'_> {
                 &st.last_camera,
                 Viewport { width_px: f64::from(cfg.size.0), height_px: f64::from(cfg.size.1) },
                 radius,
+                lod_max_height_m,
             );
             let ground = |p: planet_core::PlanetFixed| radius + field.height_at_level(p.0.normalized(), ground_level);
             let height = |p: planet_core::PlanetFixed| p.0.length() - ground(p);
@@ -704,16 +705,26 @@ impl App<'_> {
             st.last_camera = camera;
             if st.frames % 6 == 0 {
                 let pos = camera.position.0;
-                let mut dirs = vec![pos.normalized()];
+                let mut dirs = Vec::new();
+                let mut push = |p: planet_core::Vec3| {
+                    if p.length().is_finite() && p.length() > 0.0 {
+                        dirs.push(p.normalized());
+                    }
+                };
+                push(pos);
                 if let Some((t0, p0)) = st.warm_prev {
                     let dt = now_ms.saturating_sub(t0) as f64 / 1000.0;
                     if dt > 0.05 {
                         let v = (pos - p0) * (1.0 / dt);
-                        dirs.extend([1.0, 2.0, 4.0].map(|s| (pos + v * s).normalized()));
+                        for s in [1.0, 2.0, 4.0] {
+                            push(pos + v * s);
+                        }
                     }
                 }
                 st.warm_prev = Some((now_ms, pos));
-                self.world.warm_heights(dirs);
+                if !dirs.is_empty() {
+                    self.world.warm_heights(dirs);
+                }
             }
             st.globe_stats.landings += u64::from(had_globe && st.viewer.globe.is_none() && st.viewer.is_free());
             // The globe overview: the markers it shows (render pixels to window pixels) and the one under the cursor.

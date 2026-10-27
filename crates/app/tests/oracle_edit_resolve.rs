@@ -381,7 +381,7 @@ fn the_chunk_step_over_new_chunks_with_an_item_in_a_stamp_layer_never_holds_the_
     let _ = std::fs::remove_dir_all(&a);
 }
 
-// spec: VIEW-056, CON-22
+// spec: VIEW-059, VIEW-056, CON-22
 #[test]
 fn a_block_of_the_bake_is_decoded_by_the_warm_up_thread_so_the_first_read_on_the_main_thread_decodes_none() {
     use planet_cache::global_store::thread_block_decodes;
