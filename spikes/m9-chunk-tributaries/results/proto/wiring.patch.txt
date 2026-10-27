@@ -1,0 +1,67 @@
+diff --git a/crates/app/Cargo.toml b/crates/app/Cargo.toml
+index 987a8683..08901dcc 100644
+--- a/crates/app/Cargo.toml
++++ b/crates/app/Cargo.toml
+@@ -44,6 +44,7 @@ egui-winit.workspace = true
+ 
+ [dev-dependencies]
+ planet-testkit.workspace = true
++png.workspace = true
+ planet-generators = { workspace = true, features = ["stress"] }
+ # The flight differential draws the same plans with the test-only reference renderer (REND-031).
+ planet-render = { workspace = true, features = ["reference-renderer"] }
+diff --git a/crates/app/src/anetworld.rs b/crates/app/src/anetworld.rs
+index e6fed12e..3a199bbb 100644
+--- a/crates/app/src/anetworld.rs
++++ b/crates/app/src/anetworld.rs
+@@ -775,3 +775,38 @@ mod tests {
+         assert_eq!(cfg, ChunkConfig { workers: 6, ..Default::default() });
+     }
+ }
++
++impl WorldTerrain {
++    /// SPIKE-47 (spike branch only): the tributary variants of the chunk solve over the chunk holding `lat_deg`, `lon_deg`.
++    pub fn tributary_spike(
++        self: &Arc<Self>,
++        lat_deg: f64,
++        lon_deg: f64,
++        variants: &[String],
++        threads: usize,
++    ) -> Result<crate::tribspike::SiteRun, String> {
++        use planet_core::cube::TangentWarp;
++        use planet_core::{TileId, Vec3};
++        use planet_generators::chunkfield::{region, ChunkLattice};
++        let run = crate::coupledworld::load_stored(
++            &self.definition(),
++            self.store_dir(),
++            self.lattice_source(),
++            run_cells(self.res()),
++            COUPLED_STEPS,
++        )?
++        .ok_or("no stored coupled run")?;
++        let radius = self.radius_m();
++        let per = cells_per_chunk_for(radius, ANET_CELL_M);
++        let clat = ChunkLattice::new(per).ok_or("no chunk lattice")?;
++        let mut params = ANetParams::spike(ANET_HALO_M, clat.cell_m(radius));
++        params.drivers.seed = self.base_seed();
++        let halo = params.halo_rings;
++        let vs: Vec<crate::tribspike::Variant> = variants.iter().map(|s| crate::tribspike::Variant::parse(s, &params)).collect();
++        let stage = ANet { run: run.maps, base: Arc::new(WorldBase::new(self)), radius_m: radius, params, memo: Default::default() };
++        let dir = Vec3::from_lat_lon(lat_deg.to_radians(), lon_deg.to_radians());
++        let tile = TileId::from_direction(&TangentWarp, dir, planet_generators::chunk::CHUNK_GRID_LEVEL);
++        let reg = region(&clat, tile, halo);
++        Ok(crate::tribspike::run_site(&stage, &clat, &reg, &vs, threads))
++    }
++}
+diff --git a/crates/app/src/lib.rs b/crates/app/src/lib.rs
+index 2face369..cc2f1e6c 100644
+--- a/crates/app/src/lib.rs
++++ b/crates/app/src/lib.rs
+@@ -29,6 +29,7 @@ pub mod stall;
+ pub mod stills;
+ pub mod streamperf;
+ pub mod sweep;
++pub mod tribspike;
+ pub mod ui;
+ pub mod window;
+ pub mod worldfield;
