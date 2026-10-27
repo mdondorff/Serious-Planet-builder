@@ -518,6 +518,11 @@ fn the_version_of_a_chunk_that_is_not_ready_is_made_by_its_job_never_on_the_thre
         .with_versions(versions.clone());
     let keys: Vec<(ChunkKey, f64)> = (0..4).map(|x| (key(x, 0), 100.0 * f64::from(x) + 100.0)).collect();
     let started = std::time::Instant::now();
+    m.update(&keys);
+    assert!(
+        versions.on_caller.lock().unwrap().is_empty(),
+        "the first update, over four new chunks, asked for no version on its own thread"
+    );
     while m.stats().landed < 4 {
         m.update(&keys);
         assert!(started.elapsed().as_secs() < 60, "the chunks did not land");
@@ -530,4 +535,42 @@ fn the_version_of_a_chunk_that_is_not_ready_is_made_by_its_job_never_on_the_thre
     );
     // The version a job made is the chunk's: nothing is stale, so a further update starts nothing.
     assert_eq!(m.update(&keys).started, 0);
+}
+
+/// A version source that lands the pending chunk job while the update is asking for the version of a ready chunk: a chunk that lands between the
+/// ready snapshot and the lock of the update.
+struct LandingVersions {
+    spawner: Arc<ManualSpawner>,
+    armed: std::sync::atomic::AtomicBool,
+}
+
+impl planet_streaming::chunks::ChunkVersions for LandingVersions {
+    fn version(&self, key: ChunkKey) -> u64 {
+        if key == crate::chunks::key(0, 0) && self.armed.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            self.spawner.run_one();
+        }
+        5
+    }
+}
+
+// spec: STRM-063
+#[test]
+fn a_chunk_that_lands_while_the_update_asks_for_versions_is_not_judged_stale_with_a_version_it_was_never_asked() {
+    let (spawner, clock) = (Arc::new(ManualSpawner::default()), Arc::new(FakeClock::default()));
+    let versions = Arc::new(LandingVersions { spawner: spawner.clone(), armed: false.into() });
+    let m = manager(spawner.clone(), clock, None, ChunkConfig { workers: 2, ..ChunkConfig::default() }).with_versions(versions.clone());
+    let first = [(key(0, 0), 100.0)];
+    m.update(&first);
+    spawner.run(1);
+    m.update(&first);
+    assert!(m.is_ready(key(0, 0)));
+    // The second chunk is started; its job waits in the spawner.
+    let both = [(key(0, 0), 100.0), (key(1, 0), 200.0)];
+    assert_eq!(m.update(&both).started, 1);
+    // The next update asks for the version of the ready chunk, and the job of the second lands inside that call.
+    versions.armed.store(true, std::sync::atomic::Ordering::SeqCst);
+    let up = m.update(&both);
+    assert!(m.is_ready(key(1, 0)), "the second chunk landed during the update");
+    assert_eq!(up.started, 0, "the chunk that landed is not stale: its version (5) was made by its job, not 0");
+    assert_eq!(spawner.pending(), 0);
 }

@@ -292,7 +292,11 @@ impl ChunkManager {
             // as they were), each group nearest to the camera first.
             let mut stale: Vec<(f64, ChunkKey)> = wanted
                 .iter()
-                .filter(|(k, _)| sh.ready.get(k).is_some_and(|e| e.version != want_version(k)) && !sh.running.contains(k))
+                .filter(|(k, _)| {
+                    // A chunk that landed after the versions were asked has no version here: it is not judged this update (its job made its version).
+                    let known = self.versions.is_none() || versions.contains_key(k);
+                    known && sh.ready.get(k).is_some_and(|e| e.version != want_version(k)) && !sh.running.contains(k)
+                })
                 .map(|&(k, d)| (d, k))
                 .collect();
             let is_near = |k: &ChunkKey| near.get(k).copied().unwrap_or(false);
