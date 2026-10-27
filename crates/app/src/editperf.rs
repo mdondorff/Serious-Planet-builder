@@ -772,12 +772,15 @@ fn run_once(
     let tiles = found_tiles(stamp, &resident, world.radius_m());
     out.stages.find_ms = ms(found);
     out.levels = level_rows(&tiles, &h.drawn, &req.lod, stamp.max_delta_m);
+    let drawn_before: HashSet<TileId> = h.drawn.clone();
     out.refreshed = h.rig.managed.edit(&tiles);
     out.stages.edit_ms = ms(call);
     let call = Instant::now();
     h.rig.managed.set_preview(case_preview(&before_def, &edited, stamp, req.camera.position.0, world.radius_m()));
     out.stages.preview_call_ms = ms(call);
     let mut waiting_for_exact = false;
+    // The tiles the plan draws at the frame that first delivers a plan after the edit (the plan can change with the edit).
+    let mut drawn_shown: HashSet<TileId> = HashSet::new();
     let mut frame_ms: Vec<f64> = Vec::new();
     h.landed_log.clear();
     h.chunk_frame_max_ms = 0.0;
@@ -792,6 +795,7 @@ fn run_once(
             if let Some((_, worker_ms)) = frame.pipeline.delivered {
                 out.stages.plan_delivered_ms = Some(at);
                 out.stages.plan_worker_ms = Some(worker_ms);
+                drawn_shown = h.drawn.clone();
             }
         }
         if out.stages.residency_delivered_ms.is_none() && frame.pipeline.residency_delivered.is_some() {
@@ -877,11 +881,13 @@ fn run_once(
         })
         .collect();
     out.locks = planet_core::lockprobe::take();
+    let drawn: HashSet<TileId> = drawn_before.union(&drawn_shown).copied().collect();
+    let drawn_refreshed_ms = drawn_refreshed_ms(&job_log.since(jobs_before), &drawn, t0_us, out.stages.frame_median_ms);
     // With a chunk stage the plan is not exact until the stale chunks have landed (the tiles' keys follow the chunks), so the frame DrawKind::Exact
     // waits for the eroded result: the M6 budget reads the instant every tile the edit names was refreshed and written (what the editor shows of the
     // edit itself), and the chunk table below carries the eroded result (TEST-056).
     if h.chunk_world.is_some() {
-        out.stages.drawn_exact_ms = out.stages.uploaded_ms;
+        out.stages.drawn_exact_ms = drawn_refreshed_ms.or(out.stages.uploaded_ms);
     }
     // The chunk side: the chunks the edit made stale are solved again while the frames go on; the eroded result is on the screen when the
     // tiles that read the last of them are drawn (M8-7, criterion 6).
@@ -1247,6 +1253,52 @@ the refresh frame by frame (first run of each case; rows where a count moved or 
     Ok(())
 }
 
+/// The first run of every case frame by frame (the tail of the refresh): ms from `set_definition`, the frame's own ms, tiles refreshed so far, jobs
+/// in flight, tiles waiting for an upload; rows where the refreshed count or the in-flight count moved, plus the slow frames.
+pub fn trace_table(rows: &[CaseRow]) -> String {
+    let mut s = String::new();
+    for r in rows {
+        let Some(run) = r.runs.first().filter(|x| !x.trace.is_empty()) else { continue };
+        s += &format!(
+            "{} m, {}: {} refreshed of {}\n\n| at | frame | refreshed | in flight | pending |\n|---|---|---|---|---|\n",
+            r.altitude_m,
+            r.radius_label(),
+            run.refreshed,
+            run.resident
+        );
+        let mut last = (f64::NAN, f64::NAN);
+        for t in &run.trace {
+            if t[2] != last.0 || t[3] != last.1 || t[1] > 30.0 {
+                s += &format!("| {:.0} | {:.1} | {:.0} | {:.0} | {:.0} |\n", t[0], t[1], t[2], t[3], t[4]);
+            }
+            last = (t[2], t[3]);
+        }
+        s.push('\n');
+        if !run.stragglers.is_empty() {
+            s += "the last refresh jobs of the case, by their end (face, x, y):\n";
+            for j in &run.stragglers {
+                s += &format!("- {j}\n");
+            }
+        }
+        for l in &run.locks {
+            s += &format!("- lock: {l}\n");
+        }
+        s.push('\n');
+    }
+    s
+}
+
+/// The instant, in ms from `t0_us` of the job log's clock, at which every tile of `drawn` that a refresh job rebuilt had its first refresh job ended
+/// (ADR 0072 point 1: "exact" is the tiles the plan draws), plus `upload_ms` for the frame that uploads the last; `None` when no drawn tile was rebuilt.
+pub fn drawn_refreshed_ms(jobs: &[planet_streaming::JobSample], drawn: &HashSet<TileId>, t0_us: u64, upload_ms: f64) -> Option<f64> {
+    let mut first_end: std::collections::HashMap<TileId, u64> = std::collections::HashMap::new();
+    for j in jobs.iter().filter(|j| j.refresh && drawn.contains(&j.tile)) {
+        let e = first_end.entry(j.tile).or_insert(j.ended_us);
+        *e = (*e).min(j.ended_us);
+    }
+    first_end.values().max().map(|&e| e.saturating_sub(t0_us) as f64 / 1000.0 + upload_ms)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1454,39 +1506,18 @@ mod tests {
         assert!(path.ends_with("edit-latency.md"));
         std::fs::remove_dir_all(dir.parent().unwrap().parent().unwrap()).unwrap();
     }
-}
 
-/// The first run of every case frame by frame (the tail of the refresh): ms from `set_definition`, the frame's own ms, tiles refreshed so far, jobs
-/// in flight, tiles waiting for an upload; rows where the refreshed count or the in-flight count moved, plus the slow frames.
-pub fn trace_table(rows: &[CaseRow]) -> String {
-    let mut s = String::new();
-    for r in rows {
-        let Some(run) = r.runs.first().filter(|x| !x.trace.is_empty()) else { continue };
-        s += &format!(
-            "{} m, {}: {} refreshed of {}\n\n| at | frame | refreshed | in flight | pending |\n|---|---|---|---|---|\n",
-            r.altitude_m,
-            r.radius_label(),
-            run.refreshed,
-            run.resident
-        );
-        let mut last = (f64::NAN, f64::NAN);
-        for t in &run.trace {
-            if t[2] != last.0 || t[3] != last.1 || t[1] > 30.0 {
-                s += &format!("| {:.0} | {:.1} | {:.0} | {:.0} | {:.0} |\n", t[0], t[1], t[2], t[3], t[4]);
-            }
-            last = (t[2], t[3]);
-        }
-        s.push('\n');
-        if !run.stragglers.is_empty() {
-            s += "the last refresh jobs of the case, by their end (face, x, y):\n";
-            for j in &run.stragglers {
-                s += &format!("- {j}\n");
-            }
-        }
-        for l in &run.locks {
-            s += &format!("- lock: {l}\n");
-        }
-        s.push('\n');
+    // spec: TEST-042
+    #[test]
+    fn drawn_exact_is_the_latest_first_refresh_end_of_the_tiles_the_plan_draws() {
+        use planet_streaming::JobSample;
+        let tile = |x| TileId::new(planet_core::Face(0), 16, x, 0).unwrap();
+        let job = |x, ended_us, refresh| JobSample { wait_us: 0, run_us: 0, running: 1, done: true, level: 16, queue_ms: 0, refresh, tile: tile(x), ended_us };
+        // Tile 1 refreshed at 150 ms and again at 4 s (a chunk landed): its first end counts; tile 2 is not drawn (slow, resident only); tile 3 is a
+        // new load, not a refresh.
+        let jobs = [job(1, 1_150_000, true), job(2, 1_900_000, true), job(1, 5_000_000, true), job(3, 9_000_000, false), job(4, 1_300_000, true)];
+        let drawn: HashSet<TileId> = [tile(1), tile(3), tile(4)].into_iter().collect();
+        assert_eq!(drawn_refreshed_ms(&jobs, &drawn, 1_000_000, 5.0), Some(305.0));
+        assert_eq!(drawn_refreshed_ms(&jobs, &HashSet::new(), 1_000_000, 5.0), None);
     }
-    s
 }
