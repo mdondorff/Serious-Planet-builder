@@ -40,6 +40,51 @@ pub fn grid_phases(origin: [f64; 3]) -> [[f32; 3]; 9] {
     })
 }
 
+/// A measurement build of the terrain shader (REND-044): what the lit pipelines with the atmosphere leave out, to time the pass without it.
+/// `Product` is the product source byte for byte and is the default; the others exist only for `shadow-cost` and are never used by a viewer.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MeasureVariant {
+    #[default]
+    Product,
+    /// The horizon shadow factor is the constant 1.
+    NoShadow,
+    /// The ground detail is the neutral value (no weights, no derivative, no specular).
+    NoMaterial,
+    /// Both.
+    Neither,
+}
+
+/// The lit terrain shader with `variant` applied: the call of `shadow_factor` in the lit views is replaced by 1.0 and `ground_detail` by a
+/// function returning the neutral detail (the original is kept under another name, unused). `Product` returns `source` unchanged.
+pub(crate) fn measure_source(source: String, variant: MeasureVariant) -> String {
+    let (shadow, material) = match variant {
+        MeasureVariant::Product => return source,
+        MeasureVariant::NoShadow => (true, false),
+        MeasureVariant::NoMaterial => (false, true),
+        MeasureVariant::Neither => (true, true),
+    };
+    let mut out = source;
+    if shadow {
+        out = out.replace("shadow_factor(in.node_index, in.aux, up, sun, coarse_fade), g.mode.x == 0u", "1.0, g.mode.x == 0u");
+    }
+    if material {
+        out = out.replace("fn ground_detail(node_index: u32,", "fn ground_detail_full(node_index: u32,");
+        out.push_str(
+            "
+fn ground_detail(node_index: u32, local: vec3<f32>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32, drv: vec3<f32>) -> GroundDetail {
+    var out: GroundDetail;
+    out.mul = vec3<f32>(1.0);
+    out.normal = normal;
+    out.rough = -1.0;
+    out.tone = vec3<f32>(0.0);
+    return out;
+}
+",
+        );
+    }
+    out
+}
+
 /// The product shader up to the vertex stage: the globals, the node record, the vertex output and the declarations the stages share.
 /// The vertex stage itself is the compact tile's (`compact_terrain_shader`, REND-016) or the reference renderer's.
 pub(crate) const SHADER_HEAD: &str = concat!(
@@ -1160,6 +1205,8 @@ pub struct TerrainRenderer {
     lit: Option<LitGpu>,
     /// Pipelines and targets made by `enable_lit` (zero before it): fixed once enabled, so no lit frame creates one (REND-017).
     lit_objects: u32,
+    /// The measurement build of the lit shader (REND-044); `Product` unless a measurement scene sets another.
+    measure_variant: MeasureVariant,
     /// The water pass (ADR 0041, ADR 0042 point 2): None until [`enable_water`](TerrainRenderer::enable_water).
     water: Option<WaterGpu>,
 }
@@ -1463,6 +1510,7 @@ impl TerrainRenderer {
             used: UseMasks::default(),
             lit: None,
             lit_objects: 0,
+            measure_variant: MeasureVariant::Product,
             water: None,
         }
     }
@@ -1685,18 +1733,11 @@ impl TerrainRenderer {
         self.lit = Some(LitGpu { path, pipeline, pipeline_cut, atmosphere_pipeline: None, atmosphere_pipeline_cut: None, refs });
     }
 
-    /// Enable the atmosphere (ADR 0040, ADR 0042 point 2) for the body `atmosphere`: its static tables are computed on the CPU in f64
-    /// and uploaded, the products, the scene target, the composite and the terrain's atmosphere pipeline are created. Needs
-    /// [`enable_lit`](TerrainRenderer::enable_lit); call it before the measured frames (REND-017). A plan whose atmosphere differs
-    /// from this body's uploads the new body's tables on its first frame.
-    pub fn enable_atmosphere(&mut self, ctx: &GpuContext, atmosphere: &planet_frame::look::atmosphere::Atmosphere) {
-        let lit = self.lit.as_mut().expect("enable_lit before enable_atmosphere");
-        if lit.path.atmosphere().is_some() {
-            return;
-        }
-        lit.path.enable_atmosphere(ctx, &self.depth_view, atmosphere);
+    /// The terrain's lit pipelines with the atmosphere (whole nodes, nodes over some quadrants), made from the terrain shader with the
+    /// measurement variant of [`set_measure_variant`](TerrainRenderer::set_measure_variant) applied (none: the product source).
+    fn atmosphere_terrain_pipelines(&self, ctx: &GpuContext) -> (wgpu::RenderPipeline, wgpu::RenderPipeline) {
         let device = &ctx.device;
-        let atmo_bgl = lit.path.atmosphere().expect("just enabled").terrain_layout();
+        let atmo_bgl = self.lit.as_ref().and_then(|l| l.path.atmosphere()).expect("the atmosphere is enabled").terrain_layout();
         let depth = wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
             depth_write_enabled: Some(true),
@@ -1708,7 +1749,10 @@ impl TerrainRenderer {
         // The atmosphere's group is 3 (groups 1 and 2 are the tile references and the block), so one bind group set once per pass stays
         // bound for the whole pass.
         let c = &self.compact;
-        let source = format!("{}{}", compact_terrain_shader(self.cells), crate::atmosphere::terrain_atmosphere_source());
+        let source = measure_source(
+            format!("{}{}", compact_terrain_shader(self.cells), crate::atmosphere::terrain_atmosphere_source()),
+            self.measure_variant,
+        );
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("terrain-compact-lit-atmosphere"),
             source: wgpu::ShaderSource::Wgsl(source.into()),
@@ -1741,11 +1785,48 @@ impl TerrainRenderer {
                 cache: None,
             })
         };
-        let (pipeline, pipeline_cut) = (make(false), make(true));
+        (make(false), make(true))
+    }
+
+    /// A measurement build of the terrain shader (REND-044): the horizon shadow or the ground detail compiled out of the lit pipelines with the
+    /// atmosphere, so the pass time without the feature has no branch left. `MeasureVariant::Product` (the default) is the product source,
+    /// byte for byte. Only the pipelines with the atmosphere are rebuilt, so a renderer without them refuses a variant (an error, never a
+    /// silent product frame that a measurement would take for the shader without the code).
+    pub fn set_measure_variant(&mut self, ctx: &GpuContext, variant: MeasureVariant) -> Result<(), String> {
+        if self.lit.as_ref().and_then(|l| l.atmosphere_pipeline.as_ref()).is_none() {
+            return if variant == MeasureVariant::Product {
+                self.measure_variant = variant;
+                Ok(())
+            } else {
+                Err("a measurement variant of the terrain shader needs the lit path with the atmosphere (enable_lit and enable_atmosphere first)".into())
+            };
+        }
+        self.measure_variant = variant;
+        let (pipeline, pipeline_cut) = self.atmosphere_terrain_pipelines(ctx);
+        if let Some(lit) = self.lit.as_mut() {
+            lit.atmosphere_pipeline = Some(pipeline);
+            lit.atmosphere_pipeline_cut = Some(pipeline_cut);
+        }
+        Ok(())
+    }
+
+    /// Enable the atmosphere (ADR 0040, ADR 0042 point 2) for the body `atmosphere`: its static tables are computed on the CPU in f64
+    /// and uploaded, the products, the scene target, the composite and the terrain's atmosphere pipeline are created. Needs
+    /// [`enable_lit`](TerrainRenderer::enable_lit); call it before the measured frames (REND-017). A plan whose atmosphere differs
+    /// from this body's uploads the new body's tables on its first frame.
+    pub fn enable_atmosphere(&mut self, ctx: &GpuContext, atmosphere: &planet_frame::look::atmosphere::Atmosphere) {
+        let lit = self.lit.as_mut().expect("enable_lit before enable_atmosphere");
+        if lit.path.atmosphere().is_some() {
+            return;
+        }
+        lit.path.enable_atmosphere(ctx, &self.depth_view, atmosphere);
+        let (pipeline, pipeline_cut) = self.atmosphere_terrain_pipelines(ctx);
         // Counted by declaration: the atmosphere path's scene target, two tables, two products, the uniform buffer and three
         // pipelines (sky view, aerial perspective, composite) beside the two terrain pipelines made here.
         const ATMOSPHERE_PATH_OBJECTS: u32 = 9;
         self.lit_objects += 2 + ATMOSPHERE_PATH_OBJECTS - 3;
+        let device = &ctx.device;
+        let lit = self.lit.as_mut().expect("enable_lit before enable_atmosphere");
         lit.atmosphere_pipeline = Some(pipeline);
         lit.atmosphere_pipeline_cut = Some(pipeline_cut);
         if let Some(w) = self.water.as_mut() {
@@ -2960,6 +3041,26 @@ mod one_shot_tests {
             assert!(same(record(0), record(r)), "record {r} differs from the settled one only in the fade lane");
         }
         assert_eq!(NODE_BYTES, planet_frame::draw::NODE_RECORD_BYTES, "the record did not grow");
+    }
+
+    // spec: REND-044
+    #[test]
+    fn the_measurement_variants_take_out_the_shadow_call_and_the_ground_detail_and_the_product_source_is_untouched() {
+        let src = format!("{}{}", crate::compact::compact_terrain_shader(16), crate::atmosphere::terrain_atmosphere_source());
+        let shadow = "shadow_factor(in.node_index, in.aux, up, sun, coarse_fade), g.mode.x == 0u";
+        assert_eq!(src.matches(shadow).count(), 2, "the lit view and the atmosphere's lit view each call it once");
+        assert_eq!(src.matches("fn ground_detail(node_index: u32,").count(), 1);
+        assert_eq!(measure_source(src.clone(), MeasureVariant::Product), src);
+        let no_shadow = measure_source(src.clone(), MeasureVariant::NoShadow);
+        assert_eq!(no_shadow.matches(shadow).count(), 0);
+        assert_eq!(no_shadow.matches("1.0, g.mode.x == 0u").count(), 2);
+        assert!(no_shadow.contains("fn ground_detail(node_index: u32,") && !no_shadow.contains("ground_detail_full"));
+        let no_material = measure_source(src.clone(), MeasureVariant::NoMaterial);
+        assert_eq!(no_material.matches("fn ground_detail(node_index: u32,").count(), 1);
+        assert_eq!(no_material.matches("fn ground_detail_full(node_index: u32,").count(), 1);
+        assert_eq!(no_material.matches(shadow).count(), 2);
+        let neither = measure_source(src, MeasureVariant::Neither);
+        assert!(neither.contains("ground_detail_full") && !neither.contains(shadow));
     }
 
     // spec: REND-034
