@@ -902,7 +902,7 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         return Err("--views applies to the scenes `lit` and `capture-flights`, --flight-frames to those".into());
     }
     if o.given.contains("--poses") && !stills::is_stills_scene(&o.scene) && !stills::is_cost_scene(&o.scene) {
-        return Err("--poses applies to the scenes `capture-stills` and `shadow-cost`".into());
+        return Err("--poses applies to the scene `capture-stills` (and to `shadow-cost`)".into());
     }
     if stills::is_stills_scene(&o.scene) && o.given.contains("--flight-frames") {
         return Err("--flight-frames does not apply to `capture-stills` (one frame per pose)".into());
