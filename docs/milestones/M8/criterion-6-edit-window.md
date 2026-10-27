@@ -48,3 +48,18 @@ Readiness gate ok for all three runs. The scene calls `horizon_frame` and `chunk
 - Horizon jobs cost 1 to 3 s per edit: the horizon job is in flight for the whole 10 to 17 s and shares the 6 workers with the 5 to 7 chunk jobs; almost no map finishes in the window (0 baked in 18 of 21 cases).
 - The M6 column is over in 7 to 8 cases with or without horizon jobs: the plan is delivered after 390 to 1030 ms (700 to 1000 ms at 1 m, 200 m), not separated from the chunk jobs.
 - 300 m flight, prefetch on (`prefetch_asked` about 840 per trial): highest speed 115 m/s, as without prefetch (floor 200 m/s). Limiter: chunk wait. Two chunks land per trial, each after a median 5 to 7 s (one solve); the stand-in share past 115 m/s is nodes whose chunk is not ready; the workers are idle at the end of most trials, so the pool and the plan time do not limit.
+
+## Windows 9 and 10 of 2026-10-27 (main at #786 and #787; job classes, run-in envelope, bake threads)
+Gate ok for every run. Files: `edit-latency-w9-6x2-horizon-jobclasses.md`, `edit-latency-w10-ht4.md`, `edit-latency-w10-ht1.md`, `envelope-w9-run-in.json`, `edit-resolve-w9-phases.log`.
+
+| Run (6 x 2, horizon jobs on) | Eroded result drawn within 10 s (19) | Median drawn | M6 column over (13 gated) | Busy cores mean / peak (of 20) |
+|---|---|---|---|---|
+| Window 9, job classes (#786) | 2 | 11 s | 7 | n/a |
+| Window 10, 4 bake threads | 3 | 10.5 s | 7 | 12.0 / 20 |
+| Window 10, 1 bake thread (`--horizon-threads 1`) | 9 | 9.3 s | 8 | 10.7 / 20 |
+| Window 8, horizon jobs off | 13 | n/a | 7 | n/a |
+
+- The job classes alone change nothing (2 of 19 against 2): no queued chunk job waits for a bake in the scene.
+- One bake thread recovers 6 of the 10 cases the horizon jobs cost; the rest is the bake's field evaluation or `horizon_frame`.
+- Re-solve phases (`generate --edit-resolve`, 6 workers x 2 base threads, per chunk job): network 2.2 to 3.1 s, solve 1.9 to 2.5 s, drivers 0.1 to 0.2 s; the last chunk lands 4.7 to 5.2 s (2 chunks) and 6.2 to 6.5 s (4 chunks). In the scene the same re-solves land at 8 to 9 s with horizon jobs off.
+- Envelope (`envelope-w9-run-in.json`, highest speed in m/s at 30, 100, 300, 1000 m): cold 125, 90, 115, 100; steady after a 12 s run-in 95, 110, 155, 78 (300 m: 145 with horizon off). Limiter of the steady 300 m flight: chunk wait (3 chunks land at 160 m/s after a median 6.3 s; stand-in 4.6 % of the nodes).

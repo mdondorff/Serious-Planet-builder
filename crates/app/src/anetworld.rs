@@ -313,7 +313,7 @@ impl WorldTerrain {
             // The horizon shadows (STRM-049, STRM-045): the second job of every chunk and the stored far-field horizon.
             if let Some(lat) = self.chunk_lattice() {
                 let params = crate::horizonworld::chunk_horizon_params(&lat, self.radius_m());
-                let threads = std::thread::available_parallelism().map_or(1, |t| t.get()).min(4);
+                let threads = self.horizon_threads();
                 if let Err(e) = self.enable_horizon(params, spawner, clock, planet_streaming::chunks::HorizonConfig::default(), threads) {
                     eprintln!("horizon: {e}");
                 }

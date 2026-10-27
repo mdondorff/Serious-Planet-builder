@@ -231,9 +231,11 @@ impl HorizonBaker for ChunkHorizonBaker {
 
     /// The map of `key`; a world that is gone or a field that cannot be built gives a map of zeros of the right length (no shadow), never a
     /// short one, so a consumer indexing by cell and azimuth stays inside it.
-    fn bake(&self, key: ChunkKey, _ready: &[(ChunkKey, Arc<ChunkResult>)]) -> Vec<u8> {
+    fn bake(&self, key: ChunkKey, _ready: &[(ChunkKey, Arc<ChunkResult>)]) -> Option<Vec<u8>> {
         let n = self.lat.cells_per_chunk() as usize;
-        let none = || vec![0u8; n * n * self.params.azimuths as usize];
+        let none = || Some(vec![0u8; n * n * self.params.azimuths as usize]);
+        // The edit word the map is made against: a change while it is made drops it (STRM-060), the job bakes it again.
+        let word0 = self.edit_word(key);
         let Some(world) = self.world.upgrade() else { return none() };
         let halo = self.halo_cells();
         let side = n + 2 * halo;
@@ -263,6 +265,9 @@ impl HorizonBaker for ChunkHorizonBaker {
             heights = self.evaluate(&*field, key.0, x0, y0, side);
         } else {
             for (idx, &(bx, by)) in blocks.iter().enumerate() {
+                if self.edit_word(key) != word0 {
+                    return None;
+                }
                 let tile_key = (in_face(bx) && in_face(by) && before[idx] == after[idx]).then(|| {
                     let block = (key.0, bx as u32, by as u32);
                     planet_core::hash::hash_u64s(
@@ -283,8 +288,13 @@ impl HorizonBaker for ChunkHorizonBaker {
                 }
             }
         }
+        if self.edit_word(key) != word0 {
+            return None;
+        }
+        // Chunk jobs are queued or running: the march takes one thread, so a bake never holds cores the visible work needs (STRM-060).
+        let threads = if manager.as_ref().is_some_and(|m| m.in_flight() > 0) { 1 } else { self.threads };
         let raster = HeightRaster { n: side, texel_m: self.lat.cell_m(self.params.radius_m), heights: &heights };
-        bake_horizon(&raster, (halo, halo, n, n), &self.params, self.threads).map_or_else(|_| none(), |m| m.data)
+        bake_horizon(&raster, (halo, halo, n, n), &self.params, threads).map_or_else(|_| none(), |m| Some(m.data))
     }
 
     /// The items of every stamp layer that touch the chunk and the halo the march reads around it (the horizon samples the whole field, so the layers

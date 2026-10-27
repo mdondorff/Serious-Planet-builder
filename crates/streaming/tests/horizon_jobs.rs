@@ -20,6 +20,8 @@ fn key(x: u32, y: u32) -> ChunkKey {
 struct FakeBaker {
     bakes: AtomicU64,
     spec: u64,
+    /// Bakes that report the heights went stale (the next ones this many are dropped).
+    stale: AtomicU64,
 }
 
 impl HorizonBaker for FakeBaker {
@@ -34,9 +36,13 @@ impl HorizonBaker for FakeBaker {
         }
         v
     }
-    fn bake(&self, k: ChunkKey, ready: &[(ChunkKey, Arc<ChunkResult>)]) -> Vec<u8> {
+    fn bake(&self, k: ChunkKey, ready: &[(ChunkKey, Arc<ChunkResult>)]) -> Option<Vec<u8>> {
         self.bakes.fetch_add(1, Ordering::SeqCst);
-        vec![k.1 as u8, k.2 as u8, ready.len() as u8]
+        if self.stale.load(Ordering::SeqCst) > 0 {
+            self.stale.fetch_sub(1, Ordering::SeqCst);
+            return None;
+        }
+        Some(vec![k.1 as u8, k.2 as u8, ready.len() as u8])
     }
     fn spec_hash(&self) -> u64 {
         self.spec
@@ -71,7 +77,7 @@ fn rig(settle_ms: u64, workers: usize) -> Rig {
     let clock = Arc::new(FakeClock::default());
     let (cs, hs) = (Arc::new(ManualSpawner::default()), Arc::new(ManualSpawner::default()));
     let m = chunks(clock.clone(), cs.clone());
-    let baker = Arc::new(FakeBaker { bakes: AtomicU64::new(0), spec: 1 });
+    let baker = Arc::new(FakeBaker { bakes: AtomicU64::new(0), spec: 1, stale: AtomicU64::new(0) });
     let jobs = HorizonJobs::new(m.clone(), baker.clone(), hs.clone(), clock.clone(), None, HorizonConfig { workers, settle_ms });
     (clock, cs, hs, m, baker, jobs)
 }
@@ -192,7 +198,7 @@ fn a_map_made_for_another_march_is_not_taken_from_the_disk_and_a_failing_entry_i
         let clock = Arc::new(FakeClock::default());
         let (cs, hs) = (Arc::new(ManualSpawner::default()), Arc::new(ManualSpawner::default()));
         let m = chunks(clock.clone(), cs.clone());
-        let baker = Arc::new(FakeBaker { bakes: AtomicU64::new(0), spec });
+        let baker = Arc::new(FakeBaker { bakes: AtomicU64::new(0), spec, stale: AtomicU64::new(0) });
         let jobs = HorizonJobs::new(m.clone(), baker.clone(), hs.clone(), clock, Some(disk), HorizonConfig::default());
         land(&m, &cs, &[k]);
         jobs.update(&[(k, 1.0)]);
@@ -258,7 +264,7 @@ fn a_map_stored_for_the_same_neighbourhood_is_read_back_and_one_for_another_is_a
         let clock = Arc::new(FakeClock::default());
         let (cs, hs) = (Arc::new(ManualSpawner::default()), Arc::new(ManualSpawner::default()));
         let m = chunks(clock.clone(), cs.clone());
-        let baker = Arc::new(FakeBaker { bakes: AtomicU64::new(0), spec: 1 });
+        let baker = Arc::new(FakeBaker { bakes: AtomicU64::new(0), spec: 1, stale: AtomicU64::new(0) });
         let jobs =
             HorizonJobs::new(m.clone(), baker.clone(), hs.clone(), clock, Some(disk as Arc<dyn HorizonDisk>), HorizonConfig::default());
         (cs, hs, m, baker, jobs)
@@ -288,4 +294,26 @@ fn a_map_stored_for_the_same_neighbourhood_is_read_back_and_one_for_another_is_a
     assert_eq!((baker.bakes.load(Ordering::SeqCst), jobs.stats().disk_hits), (1, 0));
     assert_eq!(disk.maps.lock().unwrap().len(), 2);
     assert!(disk.gets.load(Ordering::SeqCst) >= 3);
+}
+
+// spec: STRM-061
+#[test]
+fn a_bake_that_went_stale_is_dropped_never_published_and_baked_again() {
+    let (_clock, cs, hs, m, baker, jobs) = rig(1_000, 1);
+    let k = key(0, 0);
+    land(&m, &cs, &[k]);
+    baker.stale.store(1, Ordering::SeqCst);
+    assert_eq!(jobs.update(&[(k, 1.0)]).started, 1);
+    hs.run(1);
+    let up = jobs.update(&[(k, 1.0)]);
+    assert!(up.landed.is_empty(), "a stale bake landed");
+    assert!(jobs.horizon(k).is_none(), "a stale bake was published");
+    let s = jobs.stats();
+    assert_eq!((s.cancelled, s.landed, s.baked), (1, 0, 0));
+    assert_eq!(jobs.in_flight(), 1, "the dropped job gave its slot back and the chunk is baked again");
+    // The next update bakes the chunk again and that one lands.
+    assert_eq!(up.started, 1, "the dropped chunk is baked again");
+    hs.run(1);
+    assert_eq!(jobs.update(&[(k, 1.0)]).landed, vec![k]);
+    assert!(jobs.horizon(k).is_some());
 }

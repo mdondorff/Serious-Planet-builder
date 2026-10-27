@@ -195,6 +195,8 @@ pub struct WorldTerrain {
     pub(crate) anet_asked: std::sync::atomic::AtomicBool,
     /// Threads a batch of base heights of the A-net uses (unset: 4 for the headless commands, the viewer's stage takes 2; a measurement sets it).
     base_threads: std::sync::atomic::AtomicUsize,
+    /// Scoped threads of one horizon bake (0: the cores, at most 4).
+    horizon_threads: std::sync::atomic::AtomicUsize,
     /// The horizon jobs of the chunks (M8-5, STRM-049): none until `enable_horizon` (in `horizonworld`).
     pub(crate) horizon: std::sync::RwLock<Option<Arc<planet_streaming::chunks::HorizonJobs>>>,
 }
@@ -301,6 +303,7 @@ impl WorldTerrain {
             chunks: Default::default(),
             anet_asked: Default::default(),
             base_threads: std::sync::atomic::AtomicUsize::new(0),
+            horizon_threads: std::sync::atomic::AtomicUsize::new(0),
             horizon: Default::default(),
             coupled_lens: Default::default(),
             store_dir: None,
@@ -385,6 +388,7 @@ impl WorldTerrain {
             chunks: Default::default(),
             anet_asked: Default::default(),
             base_threads: std::sync::atomic::AtomicUsize::new(0),
+            horizon_threads: std::sync::atomic::AtomicUsize::new(0),
             horizon: Default::default(),
             coupled_lens: Default::default(),
             store_dir: Some(dir.to_path_buf()),
@@ -828,6 +832,19 @@ impl WorldTerrain {
     pub(crate) fn base_threads(&self) -> usize {
         match self.base_threads.load(std::sync::atomic::Ordering::Relaxed) {
             0 => 4,
+            n => n,
+        }
+    }
+
+    /// Set the scoped threads one horizon bake uses (at least 1); a chunk stage made after the call takes it.
+    pub fn set_horizon_threads(&self, n: usize) {
+        self.horizon_threads.store(n.max(1), std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// The threads of one horizon bake: the number set, else the cores, at most 4.
+    pub(crate) fn horizon_threads(&self) -> usize {
+        match self.horizon_threads.load(std::sync::atomic::Ordering::Relaxed) {
+            0 => std::thread::available_parallelism().map_or(1, |t| t.get()).min(4),
             n => n,
         }
     }

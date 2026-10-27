@@ -454,7 +454,9 @@ pub trait HorizonBaker: Send + Sync {
     /// The chunks the horizon of `key` reads, its own first: the changes of these (where they are ready) are in its heights.
     fn reads(&self, key: ChunkKey) -> Vec<ChunkKey>;
     /// The horizon map of `key`, given the ready results among [`HorizonBaker::reads`] (a chunk that is not ready contributes its base only).
-    fn bake(&self, key: ChunkKey, ready: &[(ChunkKey, Arc<ChunkResult>)]) -> Vec<u8>;
+    /// `None`: an edit changed what the map samples while it was being made ([`HorizonBaker::edit_word`]); the job drops it, nothing is published or stored, and
+    /// the chunk is baked again against the new word once the neighbourhood has settled (STRM-060).
+    fn bake(&self, key: ChunkKey, ready: &[(ChunkKey, Arc<ChunkResult>)]) -> Option<Vec<u8>>;
     /// A hash of everything that defines the march (texel, azimuths, range, version): a change re-keys every stored map.
     fn spec_hash(&self) -> u64;
     /// A word that differs when an edit can change the heights the horizon of `key` samples (the items that touch the chunk and its halo, GEN-082),
@@ -496,6 +498,8 @@ pub struct HorizonStats {
     pub disk_hits: u64,
     /// Landings of a chunk that already had a map (its neighbourhood had changed): the figure the coalescing keeps small.
     pub rebaked: u64,
+    /// Bakes dropped because an edit changed their heights while they ran.
+    pub cancelled: u64,
     pub landed: u64,
     pub evicted: u64,
 }
@@ -631,17 +635,26 @@ impl HorizonJobs {
                 }
             }
             let hit = bytes.is_some();
-            let bytes = bytes.unwrap_or_else(|| {
-                let ready: Vec<(ChunkKey, Arc<ChunkResult>)> =
-                    baker.reads(key).into_iter().filter_map(|r| chunks.result(r).map(|res| (r, res))).collect();
-                let made = baker.bake(key, &ready);
-                if let Some(disk) = &disk {
-                    if let Err(e) = disk.put(tile, word, made.clone()) {
-                        shared.lock().expect("horizon state").log.push(format!("horizon {key:?}: not stored ({e})"));
+            let bytes = match bytes {
+                Some(b) => b,
+                None => {
+                    let ready: Vec<(ChunkKey, Arc<ChunkResult>)> =
+                        baker.reads(key).into_iter().filter_map(|r| chunks.result(r).map(|res| (r, res))).collect();
+                    let Some(made) = baker.bake(key, &ready) else {
+                        // Stale before it was done: nothing is stored or published, the next update bakes it against the new word.
+                        let mut sh = shared.lock().expect("horizon state");
+                        sh.running.remove(&key);
+                        sh.stats.cancelled += 1;
+                        return;
+                    };
+                    if let Some(disk) = &disk {
+                        if let Err(e) = disk.put(tile, word, made.clone()) {
+                            shared.lock().expect("horizon state").log.push(format!("horizon {key:?}: not stored ({e})"));
+                        }
                     }
+                    made
                 }
-                made
-            });
+            };
             let mut sh = shared.lock().expect("horizon state");
             sh.running.remove(&key);
             if !sh.ever_baked.insert(key) {
