@@ -1475,6 +1475,16 @@ pub fn trace_table(rows: &[CaseRow]) -> String {
             last = (t[2], t[3]);
         }
         s.push('\n');
+        if !run.stragglers.is_empty() {
+            s += "the last refresh jobs of the case, by their end (face, x, y):\n";
+            for j in &run.stragglers {
+                s += &format!("- {j}\n");
+            }
+        }
+        for l in &run.locks {
+            s += &format!("- lock: {l}\n");
+        }
+        s.push('\n');
     }
     s
 }
