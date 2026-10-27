@@ -1,0 +1,1 @@
+- 2026-10-27 **m8-envelope-altitudes** (TEST-057): `perf envelope --altitudes-m M,M --only-steady` runs the steady curve alone over chosen altitudes (steady 300 m at 60 s took ~15 min instead of the whole scene).
