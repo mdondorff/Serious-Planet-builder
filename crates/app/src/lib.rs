@@ -165,6 +165,8 @@ pub struct Options {
     pub base_threads: Option<usize>,
     /// `--horizon-threads N`: the scoped threads one horizon bake of the chunk stage uses in the `edit-latency` scene (default: the cores, at most 4).
     pub horizon_threads: Option<usize>,
+    /// `--repeats N`: the runs of every case of the `edit-latency` scene (default 3).
+    pub repeats: Option<usize>,
     /// `--no-chunks`: the `edit-latency` scene without the chunk stage (the comparison line of M8-8); with a store it runs with one.
     pub no_chunks: bool,
     /// `--no-stale-hold`: the `edit-latency` scene's chunk stage without the hold of the stale chunks while the edit's tiles are built (STRM-056).
@@ -348,6 +350,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         stale_workers: None,
         base_threads: None,
         horizon_threads: None,
+        repeats: None,
         no_chunks: false,
         no_stale_hold: false,
         no_horizon_jobs: false,
@@ -506,6 +509,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
                 o.base_threads =
                     Some(it.next().ok_or("--base-threads needs a number")?.parse().map_err(|e| format!("--base-threads: {e}"))?)
             }
+            "--repeats" => o.repeats = Some(it.next().ok_or("--repeats needs a number")?.parse().map_err(|e| format!("--repeats: {e}"))?),
             "--horizon-threads" => {
                 o.horizon_threads =
                     Some(it.next().ok_or("--horizon-threads needs a number")?.parse().map_err(|e| format!("--horizon-threads: {e}"))?)
@@ -606,7 +610,8 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
 use planet_cache::tiles::MAX_REGION_LEVEL;
 
 /// Options that only the tile store commands of `generate` understand.
-pub(crate) const STORE_OPTIONS: [&str; 24] = [
+pub(crate) const STORE_OPTIONS: [&str; 25] = [
+    "--repeats",
     "--brush",
     "--horizon-threads",
     "--base-threads",
@@ -758,7 +763,16 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
             // `--prefill-levels`: the levels of the tile pack the gated dives require pre-filled at their start (default 4).
             // `--altitudes-m`: the altitudes of the envelope scene (`--only-steady`, TEST-057).
             // `--base-threads`: the threads of a batch of the A-net's base heights in the edit-latency scene (with `--chunk-workers`).
-            &["--world", "--global-res", "--prefill-levels", "--base-threads", "--horizon-threads", "--altitudes-m", "--places"]
+            &[
+                "--world",
+                "--global-res",
+                "--prefill-levels",
+                "--base-threads",
+                "--horizon-threads",
+                "--repeats",
+                "--altitudes-m",
+                "--places",
+            ]
         } else if window {
             &["--world", "--global-res", "--prefill-levels"]
         } else if terrain_scene {
@@ -1106,6 +1120,16 @@ mod tests {
         assert_eq!((o.stale_workers, o.base_threads), (Some(4), Some(2)));
         assert!(args(&["generate", "--edit-resolve"]).is_err(), "--edit-resolve needs a directory");
         assert!(STORE_OPTIONS.contains(&"--edit-resolve") && USAGE.contains("--edit-resolve"));
+    }
+
+    // spec: TEST-056
+    #[test]
+    fn the_edit_latency_scene_takes_a_number_of_repeats() {
+        let args = |a: &[&str]| parse_args(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        let o = args(&["test-render", "--perf", "--scene", "edit-latency", "--repeats", "5"]).unwrap();
+        assert_eq!(o.repeats, Some(5));
+        assert_eq!(args(&["test-render", "--perf", "--scene", "edit-latency"]).unwrap().repeats, None);
+        assert!(args(&["test-render", "--perf", "--scene", "edit-latency", "--repeats", "x"]).is_err(), "--repeats needs a number");
     }
 
     // spec: STRM-020, TEST-012

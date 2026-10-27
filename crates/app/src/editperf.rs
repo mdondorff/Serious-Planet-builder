@@ -428,9 +428,13 @@ pub struct ChunkStages {
     pub resolved: u64,
     pub centre_ms: Option<f64>,
     pub last_ms: Option<f64>,
-    /// When the tiles that read the last chunk were drawn again (the plan exact and nothing waiting), which is when the eroded result of
-    /// every touched chunk the view wants is on the screen (the refreshed tiles are drawn at once; the fade over about 1.5 s follows).
+    /// When the tiles that read the last chunk were drawn again: the later of the last chunk landing and the end of the last refresh job of a tile
+    /// the plan draws (ADR 0072 point 1), plus the upload frame; the eroded result of every touched chunk the view wants is then on the screen (the
+    /// fade over about 1.5 s follows). The gated reading of the 10 s criterion.
     pub drawn_ms: Option<f64>,
+    /// When nothing was left to do after the last chunk (the plan exact, every resident tile refreshed and uploaded, nothing in flight): the reading
+    /// of windows before 24, recorded beside the drawn one.
+    pub settled_ms: Option<f64>,
     /// The horizon jobs after the edit (0 without them): maps baked, of them re-bakes of a map that had one, and when the last was in flight.
     pub horizon_baked: u64,
     pub horizon_rebaked: u64,
@@ -913,7 +917,14 @@ fn run_once(
             resolved: h.landed_log.len() as u64,
             centre_ms: h.landed_log.iter().find(|l| l.1 == centre).map(|l| at(l.0)),
             last_ms: h.landed_log.last().map(|l| at(l.0)),
-            drawn_ms: if h.landed_log.is_empty() { None } else { drawn_after_last },
+            drawn_ms: if h.landed_log.is_empty() {
+                None
+            } else {
+                let last = h.landed_log.last().map(|l| at(l.0)).unwrap_or(0.0);
+                let tiles = last_refresh_end_ms(&job_log.since(jobs_before), &h.drawn, t0_us, out.stages.frame_median_ms);
+                Some(tiles.map_or(last, |t| t.max(last)))
+            },
+            settled_ms: if h.landed_log.is_empty() { None } else { drawn_after_last },
             horizon_baked: hz1.baked - hz0.baked,
             horizon_rebaked: hz1.rebaked - hz0.rebaked,
             horizon_last_ms: hz_last,
@@ -939,7 +950,7 @@ fn world_centre_chunk(stamp: &ItemSpec) -> planet_generators::chunkfield::ChunkK
 /// The table of the chunk side of every case (a run with the chunk stage): per case the medians over its repeats.
 pub fn chunks_table(rows: &[CaseRow]) -> String {
     let mut s = String::from(
-        "| altitude | stamp radius | first chunk frame ms (versions) | chunks re-solved | centre chunk landed ms | last chunk landed ms | drawn again ms | verdict (10 s) | horizon maps baked (re-baked) | horizon last in flight ms |\n|---|---|---|---|---|---|---|---|---|---|\n",
+        "| altitude | stamp radius | first chunk frame ms (versions) | chunks re-solved | centre chunk landed ms | last chunk landed ms | drawn again ms (drawn tiles) | all settled ms | verdict (10 s, drawn tiles) | horizon maps baked (re-baked) | horizon last in flight ms |\n|---|---|---|---|---|---|---|---|---|---|\n",
     );
     let cell = |v: Option<f64>| v.map_or("-".to_string(), |x| format!("{x:.1}"));
     for r in rows {
@@ -952,7 +963,7 @@ pub fn chunks_table(rows: &[CaseRow]) -> String {
             Some(_) => "over",
         };
         s += &format!(
-            "| {} m | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
+            "| {} m | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
             r.altitude_m,
             r.radius_label(),
             cell(pick(&|c| Some(c.first_frame_ms))),
@@ -960,6 +971,7 @@ pub fn chunks_table(rows: &[CaseRow]) -> String {
             cell(pick(&|c| c.centre_ms)),
             cell(pick(&|c| c.last_ms)),
             cell(drawn),
+            cell(pick(&|c| c.settled_ms)),
             verdict,
             cell(pick(&|c| Some(c.horizon_baked as f64))) + &format!(" ({})", cell(pick(&|c| Some(c.horizon_rebaked as f64)))),
             cell(pick(&|c| c.horizon_last_ms))
@@ -1110,7 +1122,7 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
         v.extend(REGIONAL_ALTITUDES_M.iter().filter(|a| !v.contains(a)).copied().collect::<Vec<_>>());
         v
     };
-    let repeats = if smoke { 1 } else { REPEATS };
+    let repeats = if smoke { 1 } else { o.repeats.unwrap_or(REPEATS).max(1) };
     let limit = Duration::from_secs(if smoke { 40 } else { 600 });
     if smoke {
         writeln!(
@@ -1280,6 +1292,16 @@ pub fn trace_table(rows: &[CaseRow]) -> String {
     s
 }
 
+/// The instant, in ms from `t0_us` of the job log's clock, at which the last refresh job of a tile of `drawn` ended, plus `upload_ms` for the frame
+/// that uploads it; `None` when no tile of `drawn` was rebuilt.
+pub fn last_refresh_end_ms(jobs: &[planet_streaming::JobSample], drawn: &HashSet<TileId>, t0_us: u64, upload_ms: f64) -> Option<f64> {
+    jobs.iter()
+        .filter(|j| j.refresh && drawn.contains(&j.tile))
+        .map(|j| j.ended_us)
+        .max()
+        .map(|e| e.saturating_sub(t0_us) as f64 / 1000.0 + upload_ms)
+}
+
 /// The instant, in ms from `t0_us` of the job log's clock, at which every tile of `drawn` that a refresh job rebuilt had its first refresh job ended
 /// (ADR 0072 point 1: "exact" is the tiles the plan draws), plus `upload_ms` for the frame that uploads the last; `None` when no drawn tile was rebuilt.
 pub fn drawn_refreshed_ms(jobs: &[planet_streaming::JobSample], drawn: &HashSet<TileId>, t0_us: u64, upload_ms: f64) -> Option<f64> {
@@ -1336,6 +1358,7 @@ mod tests {
                     centre_ms: Some(4_800.0),
                     last_ms: Some(8_800.0),
                     drawn_ms: drawn,
+                    settled_ms: drawn.map(|d| d + 1_000.0),
                     ..ChunkStages::default()
                 }),
                 ..Stages::default()
@@ -1354,10 +1377,15 @@ mod tests {
         ];
         let t = chunks_table(&rows);
         let lines: Vec<&str> = t.lines().collect();
-        assert!(lines[0].contains("first chunk frame ms") && lines[0].contains("verdict (10 s)"), "{t}");
-        assert!(lines[2].contains("| 3.5 | 4.0 | 4800.0 | 8800.0 | 9500.0 | ok |"), "the median of three runs: {}", lines[2]);
-        assert!(lines[3].contains("| 14000.0 | over |"), "{}", lines[3]);
-        assert!(lines[4].ends_with("| - | - | - | - | - | - | - (-) | - |"), "a case without a chunk stage has no cells: {}", lines[4]);
+        assert!(
+            lines[0].contains("first chunk frame ms")
+                && lines[0].contains("verdict (10 s, drawn tiles)")
+                && lines[0].contains("all settled ms"),
+            "{t}"
+        );
+        assert!(lines[2].contains("| 3.5 | 4.0 | 4800.0 | 8800.0 | 9500.0 | 10500.0 | ok |"), "the median of three runs: {}", lines[2]);
+        assert!(lines[3].contains("| 14000.0 | 15000.0 | over |"), "{}", lines[3]);
+        assert!(lines[4].ends_with("| - | - | - | - | - | - | - | - (-) | - |"), "a case without a chunk stage has no cells: {}", lines[4]);
     }
 
     // spec: TEST-044
@@ -1522,5 +1550,28 @@ mod tests {
         let drawn: HashSet<TileId> = [tile(1), tile(3), tile(4)].into_iter().collect();
         assert_eq!(drawn_refreshed_ms(&jobs, &drawn, 1_000_000, 5.0), Some(305.0));
         assert_eq!(drawn_refreshed_ms(&jobs, &HashSet::new(), 1_000_000, 5.0), None);
+    }
+
+    // spec: TEST-056
+    #[test]
+    fn drawn_again_ends_at_the_last_refresh_of_a_tile_the_plan_draws_not_of_a_resident_only_one() {
+        use planet_streaming::JobSample;
+        let tile = |x| TileId::new(planet_core::Face(0), 16, x, 0).unwrap();
+        let job = |x, ended_us, refresh| JobSample {
+            wait_us: 0,
+            run_us: 0,
+            running: 1,
+            done: true,
+            level: 16,
+            queue_ms: 0,
+            refresh,
+            tile: tile(x),
+            ended_us,
+        };
+        // Tile 1 (drawn) refreshed at 150 ms and again at 4 s after a chunk landed; tile 2 is resident only and ends last, at 9 s; tile 3 is a load.
+        let jobs = [job(1, 1_150_000, true), job(1, 5_000_000, true), job(2, 10_000_000, true), job(3, 11_000_000, false)];
+        let drawn: HashSet<TileId> = [tile(1), tile(3)].into_iter().collect();
+        assert_eq!(last_refresh_end_ms(&jobs, &drawn, 1_000_000, 5.0), Some(4_005.0));
+        assert_eq!(last_refresh_end_ms(&jobs, &HashSet::new(), 1_000_000, 5.0), None);
     }
 }
