@@ -1790,17 +1790,24 @@ impl TerrainRenderer {
 
     /// A measurement build of the terrain shader (REND-044): the horizon shadow or the ground detail compiled out of the lit pipelines with the
     /// atmosphere, so the pass time without the feature has no branch left. `MeasureVariant::Product` (the default) is the product source,
-    /// byte for byte. A no-op without the atmosphere.
-    pub fn set_measure_variant(&mut self, ctx: &GpuContext, variant: MeasureVariant) {
-        self.measure_variant = variant;
+    /// byte for byte. Only the pipelines with the atmosphere are rebuilt, so a renderer without them refuses a variant (an error, never a
+    /// silent product frame that a measurement would take for the shader without the code).
+    pub fn set_measure_variant(&mut self, ctx: &GpuContext, variant: MeasureVariant) -> Result<(), String> {
         if self.lit.as_ref().and_then(|l| l.atmosphere_pipeline.as_ref()).is_none() {
-            return;
+            return if variant == MeasureVariant::Product {
+                self.measure_variant = variant;
+                Ok(())
+            } else {
+                Err("a measurement variant of the terrain shader needs the lit path with the atmosphere (enable_lit and enable_atmosphere first)".into())
+            };
         }
+        self.measure_variant = variant;
         let (pipeline, pipeline_cut) = self.atmosphere_terrain_pipelines(ctx);
         if let Some(lit) = self.lit.as_mut() {
             lit.atmosphere_pipeline = Some(pipeline);
             lit.atmosphere_pipeline_cut = Some(pipeline_cut);
         }
+        Ok(())
     }
 
     /// Enable the atmosphere (ADR 0040, ADR 0042 point 2) for the body `atmosphere`: its static tables are computed on the CPU in f64

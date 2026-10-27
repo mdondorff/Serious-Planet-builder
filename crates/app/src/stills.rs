@@ -1079,7 +1079,7 @@ pub fn is_cost_scene(name: &str) -> bool {
 
 /// The budget of the horizon shadows and the material map together, milliseconds of terrain-pass GPU time at 1440p (REND-044, M8 criterion 5).
 pub const COST_BUDGET_MS: f64 = 1.5;
-/// A share within this fraction of the budget is not called met before the variants without the branch are built (opus-planner, 2026-10-27).
+/// A share within this fraction of the budget is flagged, not called met (the compiled-out variants have no branch left) (opus-planner, 2026-10-27).
 pub const COST_NEAR: f64 = 0.2;
 /// Frames dropped before the timed ones of a variant, and the timed frames whose median is the variant's time.
 const COST_WARM: usize = 8;
@@ -1174,10 +1174,10 @@ fn measure_cost(
         planet_render::MeasureVariant::NoMaterial,
         planet_render::MeasureVariant::Neither,
     ]) {
-        r.set_measure_variant(ctx, variant);
+        r.set_measure_variant(ctx, variant)?;
         *slot = terrain_ms(ctx, r, plan, COST_WARM_S)?;
     }
-    r.set_measure_variant(ctx, planet_render::MeasureVariant::Product);
+    r.set_measure_variant(ctx, planet_render::MeasureVariant::Product)?;
     detail(plan, 0.0);
     let no_material = terrain_ms(ctx, r, plan, COST_WARM_S)?;
     r.clear_horizon();
@@ -1189,7 +1189,7 @@ fn measure_cost(
 }
 
 /// The failures of the budget (the shadows and the material map together at most [`COST_BUDGET_MS`] in every pose) and the poses within
-/// [`COST_NEAR`] of it, which are not called met before the variants without the branch are built (REND-044).
+/// [`COST_NEAR`] of it, which are flagged, not called met (REND-044).
 pub fn cost_verdict(rows: &[CostRow]) -> (Vec<String>, Vec<String>) {
     let (mut over, mut near) = (Vec::new(), Vec::new());
     for r in rows {
@@ -1198,7 +1198,7 @@ pub fn cost_verdict(rows: &[CostRow]) -> (Vec<String>, Vec<String>) {
             over.push(format!("{}: shadows and material map {both:.3} ms exceed {COST_BUDGET_MS} ms (REND-044)", r.pose));
         } else if both > COST_BUDGET_MS * (1.0 - COST_NEAR) {
             near.push(format!(
-                "{}: {both:.3} ms is within 20 % of the {COST_BUDGET_MS} ms budget: build the shader variants before calling it met",
+                "{}: {both:.3} ms is within 20 % of the {COST_BUDGET_MS} ms budget (by the compiled-out shader variants when the row has them): not called met",
                 r.pose
             ));
         }
