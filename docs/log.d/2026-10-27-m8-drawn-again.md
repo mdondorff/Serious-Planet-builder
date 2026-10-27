@@ -1,0 +1,1 @@
+- 2026-10-27 **windows 24 and 25** (M8 criterion 6): the 10 s chunk column of edit-latency now reads the drawn tiles (ADR 0072 point 1; 'all settled' beside it): 19 of 20 rows ok, over only 1 m / 500 m (7 chunks, 10.6 s); readings before window 25 are on the all-settled one, do not compare. New `--repeats N`.
