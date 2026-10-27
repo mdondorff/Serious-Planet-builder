@@ -856,16 +856,24 @@ impl WorldTerrain {
 
     /// The field the A-net starts from (GEN-039): the base with the stamps of the layers whose chunk stage is `Under` (the default) over it.
     pub(crate) fn under_field(&self) -> Result<Box<dyn HeightField + '_>, String> {
-        let def = self.definition();
-        let base = self.base_field()?;
+        self.under_field_for(&self.definition())
+    }
+
+    /// [`WorldTerrain::under_field`] built from `def`, not from whatever definition the world holds when it is called: heights kept with `def` are
+    /// those of `def` however the definition moved meanwhile (GEN-087).
+    pub(crate) fn under_field_for(&self, def: &Arc<WorldDefinition>) -> Result<Box<dyn HeightField + '_>, String> {
+        let base = self.base_field_for(def)?;
         let under = |layer: &str| def.chunk_stage(BodyId::PLANET, layer) == planet_world_def::ChunkStagePosition::Under;
-        planet_generators::chain::with_stamps_where(base, &def, &under)
+        planet_generators::chain::with_stamps_where(base, def, &under)
     }
 
     /// The field below the chunk stage and the stamps: the base alone.
     pub(crate) fn base_field(&self) -> Result<Box<dyn HeightField + '_>, String> {
-        let def = self.definition();
-        planet_generators::height_fields::build_field(self.kind, &GenContext::new(&def), BodyId::PLANET, self.src.as_ref(), self.bake_key)
+        self.base_field_for(&self.definition())
+    }
+
+    pub(crate) fn base_field_for(&self, def: &Arc<WorldDefinition>) -> Result<Box<dyn HeightField + '_>, String> {
+        planet_generators::height_fields::build_field(self.kind, &GenContext::new(def), BodyId::PLANET, self.src.as_ref(), self.bake_key)
             .map_err(|e| format!("the definition cannot be generated: {e}"))
     }
 

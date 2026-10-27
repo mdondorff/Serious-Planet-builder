@@ -94,14 +94,14 @@ impl BaseDetail for WorldBase {
                 let mut out = (*old).clone();
                 if !stale.is_empty() {
                     let sub: Vec<Vec3> = stale.iter().map(|&i| dirs[i]).collect();
-                    for (&i, h) in stale.iter().zip(self.base_heights(&sub)) {
+                    for (&i, h) in stale.iter().zip(self.heights_under(&world, &def, &sub)) {
                         out[i] = h;
                     }
                 }
                 crate::regionheights::count(dirs.len() - stale.len(), dirs.len());
                 out
             }
-            _ => self.base_heights(dirs),
+            _ => self.heights_under(&world, &def, dirs),
         };
         // Kept only if the definition did not move while the heights were read and every answer was a real one.
         if self.healthy() && world.definition().revision() == def.revision() {
@@ -139,6 +139,13 @@ impl WorldBase {
     fn lost(&self, n: usize) -> Vec<f64> {
         self.failed.store(true, std::sync::atomic::Ordering::SeqCst);
         vec![0.0; n]
+    }
+
+    /// The heights of `dirs` of the field built from `def`, not from the definition the world holds now: what is kept with `def` is `def`'s (GEN-087).
+    fn heights_under(&self, world: &Arc<WorldTerrain>, def: &Arc<planet_world_def::WorldDefinition>, dirs: &[Vec3]) -> Vec<f64> {
+        let Ok(field) = world.under_field_for(def) else { return self.lost(dirs.len()) };
+        let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(self.threads);
+        field.heights_threaded_until(dirs, &|| false, threads)
     }
 }
 
