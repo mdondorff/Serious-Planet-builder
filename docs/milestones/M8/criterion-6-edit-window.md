@@ -108,3 +108,17 @@ Gate ok. Files: `envelope-w12-steady-300.json`, `envelope-w12-steady-rest.json`.
 
 - The 100 m and 1000 m figures are place effects, not speed effects: 300 m passes 80 m/s with 0 % stand-in and 30 m passes 160, but each trial flies a start place of its own (`start_place(n)`), and at the places of the 80 m/s trials at 100 m and 1000 m a chunk takes 9 to 10 s to arrive (5 to 7 s is typical). The search assumes the share rises with the speed; a slow chunk at one place breaks that. Fix proposed: one start place per altitude for all trials, two places at 100 m and 1000 m taking the lower, and the late chunks (key, wait) in the trial's log.
 - The 200 m/s floor (steady flight, owner 2026-10-27) is shown at 30 m (320) and 300 m (480); not shown, not refuted, at 100 m and 1000 m.
+
+## Window 14 of 2026-10-27 (main at #800; steady curve at two fixed start places per altitude)
+Gate ok. File: `envelope-w14-steady-100-1000.json`. `--only-steady --altitudes-m 100,1000 --steady-window-s 60 --places 2`: each search flies all its trials over one start place; the figure is the lower of the two.
+
+| Altitude | Place 0 | Place 1 | Figure | Limiter |
+|---|---|---|---|---|
+| 100 m | 340 m/s | 360 m/s | 340 m/s | coarse share (tile detail lag); chunk stand-in 0 up to 480 m/s |
+| 1000 m | 460 m/s | 480 m/s | 460 m/s | chunk stand-in 0.78 % / 0.98 % at the limit, coarse 0 |
+
+- The 78 m/s of window 12 at 100 m and 1000 m were place effects: with the start place fixed per search both altitudes clear 340 m/s. With 30 m 320 m/s and 300 m 480 m/s (window 12) every altitude clears the 200 m/s floor by 1.6 times or more.
+- Late chunks (landed more than 1 s after they were first wanted), asked / started / landed times from the trace:
+  1. Near the limit a late chunk is 1 to 2 s late with stand-in about 0: its solve is 6.1 to 6.8 s but it was asked only 4.4 to 5.2 s before it was wanted (for example asked at 30.5 s, wanted at 35.2 s, solve 6.1 s). The 12 s track lead is not achieved: the reach of the plan (the farthest wanted chunk centre) is small at low altitude, so the track set asks late.
+  2. Above 440 m/s at 1000 m and 480 m/s at 100 m, one to three chunks that were wanted at the first frame of the window and were not asked during the 12 s run-in wait 6.6 to 8.3 s (solve = wait); they are the stand-in that fails the bound. Solve times reach 9 to 10 s in three trials.
+- Levers: a reach floor of one chunk edge (the next chunk is asked as soon as the current one is entered), a lead of at least the solve time (7 s) plus a margin, and a trace that also covers the run-in to confirm cause 2.
