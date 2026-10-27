@@ -1,0 +1,18 @@
+[package]
+name = "landscape-evolution-spike"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# SPIKE-33: throwaway prototype, not part of the main workspace.
+[workspace]
+
+[dependencies]
+planet-core = { path = "../../../crates/core" }
+planet-generators = { path = "../../../crates/generators" }
+planet-world-def = { path = "../../../crates/world-def" }
+libm = "=0.2.16"
+png = "0.18.1"
+
+[profile.release]
+debug = false

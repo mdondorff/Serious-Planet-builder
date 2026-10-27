@@ -1,0 +1,14 @@
+DET coarse n=256 threads 1 run 0: hash 884bf9e63df11efd
+DET coarse n=256 threads 1 run 1: hash 884bf9e63df11efd
+DET coarse n=256 threads 4 run 0: hash 884bf9e63df11efd
+DET coarse n=256 threads 4 run 1: hash 884bf9e63df11efd
+DET coarse n=256 threads 16 run 0: hash 884bf9e63df11efd
+DET coarse n=256 threads 16 run 1: hash 884bf9e63df11efd
+DET coarse: PASS (bit-exact)
+DET blocks (4 blocks, H 1 km, N 20) threads 1 run 0: hash 724048678494befd
+DET blocks (4 blocks, H 1 km, N 20) threads 1 run 1: hash 724048678494befd
+DET blocks (4 blocks, H 1 km, N 20) threads 4 run 0: hash 724048678494befd
+DET blocks (4 blocks, H 1 km, N 20) threads 4 run 1: hash 724048678494befd
+DET blocks (4 blocks, H 1 km, N 20) threads 16 run 0: hash 724048678494befd
+DET blocks (4 blocks, H 1 km, N 20) threads 16 run 1: hash 724048678494befd
+DET blocks: PASS (bit-exact)

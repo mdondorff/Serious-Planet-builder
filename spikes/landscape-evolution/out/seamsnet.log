@@ -1,0 +1,41 @@
+COARSE sweep n=2048: base sampled in 7.3s (6 threads)
+COARSE sweep step 0: mean |dz| 37.530 m, max 936.5 m, 2641 ms, peak 1071 MB
+COARSE sweep step 5: mean |dz| 18.625 m, max 862.2 m, 3567 ms, peak 1133 MB
+COARSE sweep step 10: mean |dz| 11.044 m, max 701.7 m, 3617 ms, peak 1133 MB
+COARSE sweep step 15: mean |dz| 6.119 m, max 657.9 m, 3724 ms, peak 1133 MB
+COARSE sweep step 20: mean |dz| 3.461 m, max 605.8 m, 3604 ms, peak 1133 MB
+COARSE sweep step 25: mean |dz| 2.429 m, max 571.7 m, 3691 ms, peak 1133 MB
+COARSE sweep step 30: mean |dz| 1.999 m, max 459.3 m, 3728 ms, peak 1133 MB
+COARSE sweep step 35: mean |dz| 1.724 m, max 429.0 m, 3747 ms, peak 1133 MB
+COARSE sweep step 40: mean |dz| 1.513 m, max 412.7 m, 3710 ms, peak 1133 MB
+COARSE sweep step 45: mean |dz| 1.355 m, max 340.9 m, 3682 ms, peak 1133 MB
+COARSE sweep step 50: mean |dz| 1.211 m, max 440.0 m, 3679 ms, peak 1133 MB
+COARSE sweep step 55: mean |dz| 1.085 m, max 393.2 m, 3739 ms, peak 1133 MB
+COARSE sweep step 60: mean |dz| 0.988 m, max 403.9 m, 3768 ms, peak 1133 MB
+COARSE sweep step 65: mean |dz| 0.897 m, max 278.5 m, 3744 ms, peak 1133 MB
+COARSE sweep step 70: mean |dz| 0.816 m, max 358.3 m, 3787 ms, peak 1133 MB
+COARSE sweep step 75: mean |dz| 0.758 m, max 477.3 m, 3669 ms, peak 1133 MB
+COARSE sweep step 80: mean |dz| 0.704 m, max 355.5 m, 3655 ms, peak 1133 MB
+COARSE sweep step 85: mean |dz| 0.652 m, max 436.5 m, 3689 ms, peak 1133 MB
+COARSE sweep step 90: mean |dz| 0.612 m, max 404.6 m, 3703 ms, peak 1133 MB
+COARSE sweep step 95: mean |dz| 0.571 m, max 367.8 m, 3752 ms, peak 1133 MB
+COARSE sweep step 99: mean |dz| 0.542 m, max 457.6 m, 3709 ms, peak 1133 MB
+SITE face 0 cell (820,1542) of 2048: lat 22.536 lon -8.943, coarse relief 2368 m in 7x7 cells, z 3487 m
+NET 24 coarse river segments (A >= 100 km2) touch the lattice
+NETBLOCK (1,0): 0.4 s, cells cut from cycles 22
+NETBLOCK (0,0): 0.5 s, cells cut from cycles 18
+NET truth (whole 20 km lattice, frozen network): 0.7 s, 8 cycle cells
+NET block 1 against the truth with the same network: |dz| p50 0.000 p90 0.000 p99 0.00 max 0.0 m; |dlnA| mean 0.000 p99 0.00
+NET block 2 against the truth with the same network: |dz| p50 0.000 p90 0.000 p99 0.00 max 0.0 m; |dlnA| mean 0.000 p99 0.00
+SEAMS block 1 core x 250..500, block 2 core x 500..750, y 250..500, H = 5 km, N = 30, ds 20 m, blocks 0.5 s and 0.4 s
+SEAM hard join: height step between neighbouring cells across the seam (m): p50 2.571 p90 8.602 p99 18.888 max 22.136; interior reference p50 1.851 p90 7.408 p99 13.823 max 15.281
+SEAM hard join: slope jump (second difference / ds, 1/m): p50 0.119 p90 0.337 p99 0.561 max 0.837; interior reference p50 0.055 p90 0.193 p99 0.317 max 0.423
+SEAM hard join: of 15 rows where a channel (A > 50000 m2) reaches the seam on either side, 12 have it on one side only
+SEAM hard join: 2 of 42 channel cells within 3 cells of the seam have a receiver higher than the cell in the joined surface
+SEAM overlap blend: height step between neighbouring cells across the seam (m): p50 2.571 p90 8.602 p99 18.888 max 22.136; interior reference p50 1.851 p90 7.408 p99 13.823 max 15.281
+SEAM overlap blend: slope jump (second difference / ds, 1/m): p50 0.119 p90 0.337 p99 0.561 max 0.837; interior reference p50 0.055 p90 0.193 p99 0.317 max 0.423
+SEAM blend zone (x 252..748): the two blocks differ by |dz| p50 0.00 p90 0.09 p99 47.86 max 217.8 m
+SEAM blend zone: 3033 of 9795 channel cells (dominant block, A > 50000 m2) have a receiver higher than the cell in the blended surface (30.96 %)
+SEAM blend zone: of 10626 cells that are a channel in either block, 313 are under 10000 m2 in the other (2.9 %): the channel network does not agree
+wrote ../results/images/seam-net_300m.png (960x270, 48 KB)
+wrote ../results/images/seam-net_30m.png (960x270, 20 KB)

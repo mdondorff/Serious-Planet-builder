@@ -479,6 +479,7 @@ pub fn run_site(stage: &ANet, lat: &ChunkLattice, reg: &Region, variants: &[Vari
     let mut report = format!("network build {net_s:.2} s, region {} cells, core {n} x {n}\n", reg.cells.len());
     let mut cores: Vec<(String, Vec<f64>)> = vec![("base".into(), net.base_z[..core].to_vec())];
     report += &census("base", &net.base_z, &net, lat, reg, radius, &area);
+    report += &crease_report("base", &net.base_z, reg);
 
     // Production.
     let t0 = std::time::Instant::now();
@@ -486,6 +487,7 @@ pub fn run_site(stage: &ANet, lat: &ChunkLattice, reg: &Region, variants: &[Vari
     let prod_s = t0.elapsed().as_secs_f64();
     report += &format!("prod solve (without network) {prod_s:.2} s\n");
     report += &census("prod", &prod.z, &net, lat, reg, radius, &area);
+    report += &crease_report("prod", &prod.z, reg);
     report += &change_line("prod", &prod.z, &net, reg);
     cores.push(("prod".into(), prod.z[..core].to_vec()));
 
@@ -549,4 +551,97 @@ pub fn run_site(stage: &ANet, lat: &ChunkLattice, reg: &Region, variants: &[Vari
         );
     }
     SiteRun { report, cores, n }
+}
+
+/// SPIKE-47 follow-up (seams): over the whole region as a raster of the cube-face lattice, the mean absolute and the mean signed height step across
+/// every column and every row boundary, and the boundaries whose absolute step is over 2.5 times the median (with their absolute lattice index).
+pub fn seam_report(label: &str, z: &[f64], reg: &Region) -> String {
+    let (mut i0, mut j0, mut i1, mut j1) = (u32::MAX, u32::MAX, 0u32, 0u32);
+    for c in &reg.cells {
+        i0 = i0.min(c.i);
+        j0 = j0.min(c.j);
+        i1 = i1.max(c.i);
+        j1 = j1.max(c.j);
+    }
+    let (w, h) = ((i1 - i0 + 1) as usize, (j1 - j0 + 1) as usize);
+    let mut grid = vec![f64::NAN; w * h];
+    for (c, cell) in reg.cells.iter().enumerate() {
+        grid[(cell.j - j0) as usize * w + (cell.i - i0) as usize] = z[c];
+    }
+    let mut out = format!("{label}: region lattice i {i0}..{i1}, j {j0}..{j1} ({w} x {h}); core starts at i {} j {}\n", reg.cells[0].i, reg.cells[0].j);
+    for (axis, len, other) in [("column", w - 1, h), ("row", h - 1, w)] {
+        let at = |a: usize, b: usize| if axis == "column" { grid[b * w + a] } else { grid[a * w + b] };
+        let (mut abs, mut signed) = (vec![0.0f64; len], vec![0.0f64; len]);
+        for a in 0..len {
+            let (mut sa, mut ss, mut n) = (0.0, 0.0, 0usize);
+            for b in 0..other {
+                let (p, q) = (at(a, b), at(a + 1, b));
+                if p.is_finite() && q.is_finite() {
+                    sa += (q - p).abs();
+                    ss += q - p;
+                    n += 1;
+                }
+            }
+            if n > 0 {
+                abs[a] = sa / n as f64;
+                signed[a] = ss / n as f64;
+            }
+        }
+        let mut sorted = abs.clone();
+        let median = percentile(&mut sorted, 0.5);
+        let base = if axis == "column" { i0 } else { j0 };
+        let mut hits: Vec<(usize, f64)> = (0..len).filter(|&a| abs[a] > 2.5 * median).map(|a| (a, abs[a] / median)).collect();
+        hits.sort_by(|a, b| b.1.total_cmp(&a.1));
+        out += &format!("  {axis} steps: median |dz| {median:.3} m per cell; {} boundaries over 2.5x:\n", hits.len());
+        for (a, r) in hits.iter().take(24) {
+            let step = signed[*a] - 0.5 * (signed[a.saturating_sub(1)] + signed[(*a + 1).min(len - 1)]);
+            out += &format!("    {axis} {} (between {} and {}): {r:.1}x, step {step:+.2} m, abs {}\n", a, a, a + 1, u64::from(base) + *a as u64);
+        }
+    }
+    out
+}
+
+/// SPIKE-47 follow-up: the crease detector: the signed mean over a line of the second difference across it (the change of the mean gradient), per column
+/// and per row boundary, against the median absolute of those means; the strongest boundaries with their absolute lattice index and the gradient jump in
+/// metres per cell.
+pub fn crease_report(label: &str, z: &[f64], reg: &Region) -> String {
+    let (mut i0, mut j0, mut i1, mut j1) = (u32::MAX, u32::MAX, 0u32, 0u32);
+    for c in &reg.cells {
+        i0 = i0.min(c.i);
+        j0 = j0.min(c.j);
+        i1 = i1.max(c.i);
+        j1 = j1.max(c.j);
+    }
+    let (w, h) = ((i1 - i0 + 1) as usize, (j1 - j0 + 1) as usize);
+    let mut grid = vec![f64::NAN; w * h];
+    for (c, cell) in reg.cells.iter().enumerate() {
+        grid[(cell.j - j0) as usize * w + (cell.i - i0) as usize] = z[c];
+    }
+    let mut out = String::new();
+    for (axis, len, other, base) in [("column", w, h, i0), ("row", h, w, j0)] {
+        let at = |a: usize, b: usize| if axis == "column" { grid[b * w + a] } else { grid[a * w + b] };
+        let mut d2 = vec![0.0f64; len];
+        for a in 1..len - 1 {
+            let (mut s, mut n) = (0.0, 0usize);
+            for b in 0..other {
+                let (p, q, r) = (at(a - 1, b), at(a, b), at(a + 1, b));
+                if p.is_finite() && q.is_finite() && r.is_finite() {
+                    s += p - 2.0 * q + r;
+                    n += 1;
+                }
+            }
+            if n > 0 {
+                d2[a] = s / n as f64;
+            }
+        }
+        let mut abs: Vec<f64> = d2.iter().map(|x| x.abs()).collect();
+        let med = percentile(&mut abs, 0.5);
+        let mut hits: Vec<(usize, f64)> = (1..len - 1).map(|a| (a, d2[a])).filter(|(_, v)| v.abs() > 6.0 * med).collect();
+        hits.sort_by(|a, b| b.1.abs().total_cmp(&a.1.abs()));
+        out += &format!("{label} {axis} creases: median |mean d2| {med:.4} m; {} over 6x:\n", hits.len());
+        for (a, v) in hits.iter().take(30) {
+            out += &format!("    {axis} {} (abs {}): d2 {v:+.3} m ({:.1}x)\n", a, u64::from(base) + *a as u64, v.abs() / med);
+        }
+    }
+    out
 }
