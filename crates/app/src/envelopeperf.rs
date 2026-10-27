@@ -844,7 +844,7 @@ mod tests {
         assert!(with.contains("\"coarse_share\": 0.004"), "{with}");
     }
 
-    // spec: TEST-047
+    // spec: TEST-057
     #[test]
     fn a_steady_flight_trial_puts_the_chunk_edge_half_way_into_the_window_after_the_run_in_and_the_log_gives_both_curves() {
         let radius_m = 6_371_000.0;
