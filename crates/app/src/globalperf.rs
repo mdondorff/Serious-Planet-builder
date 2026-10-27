@@ -121,6 +121,9 @@ pub(crate) fn time_coupled(res: usize, steps: usize) -> (f64, planet_generators:
 pub fn perf_coupled(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<(), String> {
     planet_perf::check_reference_adapter(&crate::facts(ctx)).map_err(|r| r.to_string())?;
     let owner_override = crate::readiness_gate(o, ctx, out)?;
+    if let Some(into) = &o.remake_into {
+        return perf_coupled_make(o, ctx, out, &owner_override, into);
+    }
     let res = if o.given.contains("--global-res") { o.global_res } else { 2048 };
     writeln!(out, "coupled run perf: {res} cells per face edge, {COUPLED_STEPS} steps, 1 thread").map_err(err)?;
     let (secs, state) = time_coupled(res as usize, COUPLED_STEPS);
@@ -136,6 +139,45 @@ pub fn perf_coupled(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
         failures
     );
     let path = o.out.clone().unwrap_or_else(|| Path::new("perf").join("logs").join("coupled.json"));
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(err)?;
+    }
+    std::fs::write(&path, json).map_err(err)?;
+    writeln!(out, "wrote {}", path.display()).map_err(err)?;
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("; "))
+    }
+}
+
+// spec: GEN-042
+/// The make of the coupled run from the stored bake of `--store` (the viewer's make: reduction of the bake, then the steps), written to `into` under
+/// `target/` and never into the store, after the readiness gate: wall time against the GEN-042 budget, log `perf/logs/coupled-make.json`.
+fn perf_coupled_make(o: &Options, ctx: &GpuContext, out: &mut dyn Write, owner_override: &[String], into: &Path) -> Result<(), String> {
+    let store = o.store.clone().ok_or("--remake-into needs --store DIR, the stored bake to read")?;
+    writeln!(out, "coupled make perf: bake of {} in {}, written to {}", o.global_res, store.display(), into.display()).map_err(err)?;
+    let (secs, res) = crate::coupledworld::timed_remake(o, &store, into)?;
+    let failures = coupled_budget_failures(secs);
+    writeln!(out, "coupled make {secs:.1} s, {res} cells per face edge, {COUPLED_STEPS} steps").map_err(err)?;
+    let json = format!(
+        "{{
+  \"scene\": \"coupled-make\",
+  \"adapter\": \"{}\",
+  \"owner_override\": {:?},
+  \"bake_res\": {},
+  \"res\": {res},
+  \"steps\": {COUPLED_STEPS},
+  \"seconds\": {secs:.3},
+  \"budget_failures\": {:?}
+}}
+",
+        ctx.adapter_name().replace('"', "'"),
+        owner_override,
+        o.global_res,
+        failures
+    );
+    let path = o.out.clone().unwrap_or_else(|| Path::new("perf").join("logs").join("coupled-make.json"));
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(err)?;
     }

@@ -170,6 +170,8 @@ pub struct Options {
     pub no_horizon_jobs: bool,
     /// `--chunk-workers N`: the `edit-latency` scene's chunk pool size (default the viewer's).
     pub chunk_workers: Option<usize>,
+    /// `perf coupled --store DIR --remake-into OUT`: time a fresh make of the coupled run from the stored bake, written to `OUT` under `target/`, never into the store (GEN-042).
+    pub remake_into: Option<PathBuf>,
     /// `generate --coupled-run DIR`: make (or find) the coupled run of the bake stored in `DIR` (STRM-051).
     pub coupled_run: Option<PathBuf>,
     /// `generate`: write the coarse tiles (levels `F..=--prefill-levels`, F the render floor) into the pack of the stored bake in this directory (STRM-021).
@@ -347,6 +349,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         no_horizon_jobs: false,
         chunk_workers: None,
         coupled_run: None,
+        remake_into: None,
         prefill_dir: None,
         prefill_levels: None,
         global_products: None,
@@ -517,6 +520,9 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--altitudes-m" => o.altitudes_m = Some(it.next().ok_or("--altitudes-m needs metres separated by commas")?.clone()),
             "--radii-m" => o.radii_m = Some(it.next().ok_or("--radii-m needs metres separated by commas")?.clone()),
             "--coarse-horizon" => o.coarse_horizon = Some(PathBuf::from(it.next().ok_or("--coarse-horizon needs a store directory")?)),
+            "--remake-into" => {
+                o.remake_into = Some(PathBuf::from(it.next().ok_or("--remake-into needs an output directory under target/")?))
+            }
             "--coupled-run" => o.coupled_run = Some(PathBuf::from(it.next().ok_or("--coupled-run needs a store directory")?)),
             "--plan-check" => o.plan_check = Some(PathBuf::from(it.next().ok_or("--plan-check needs a directory")?)),
             "--prefill-dir" => o.prefill_dir = Some(PathBuf::from(it.next().ok_or("--prefill-dir needs a directory")?)),

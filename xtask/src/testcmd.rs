@@ -769,14 +769,22 @@ fn perf_bake_scene_args(scene: &str, args: &[String]) -> Result<Vec<String>, Str
                 v.push(a.clone());
                 v.push(it.next().ok_or_else(|| format!("{a} needs a value"))?.clone());
             }
-            "--store" if scene == "anet-chunk" => {
+            "--store" if scene == "anet-chunk" || scene == "coupled" => {
                 v.push(a.clone());
                 v.push(it.next().ok_or_else(|| format!("{a} needs the directory of a stored bake"))?.clone());
+            }
+            "--remake-into" if scene == "coupled" => {
+                v.push(a.clone());
+                v.push(it.next().ok_or_else(|| format!("{a} needs an output directory under target/"))?.clone());
             }
             other => {
                 return Err(format!(
                     "unknown perf {scene} option '{other}' (known: --global-res, --machine-ready{}, the owner's override of a failed readiness gate)",
-                    if scene == "anet-chunk" { ", --store" } else { "" }
+                    match scene {
+                        "anet-chunk" => ", --store",
+                        "coupled" => ", --store DIR --remake-into OUT (a fresh make from a stored bake)",
+                        _ => "",
+                    }
                 ))
             }
         }
@@ -1599,7 +1607,10 @@ mod tests {
         // The chunk scene reads a stored production bake (the viewer's geometry); the coupled scene has no store.
         let on_store = perf_bake_scene_args("anet-chunk", &s(&["--store", "target/accept/global16384", "--global-res", "16384"])).unwrap();
         assert!(on_store.windows(2).any(|w| w[0] == "--store" && w[1] == "target/accept/global16384"));
-        assert!(perf_bake_scene_args("coupled", &s(&["--store", "x"])).unwrap_err().contains("unknown perf coupled option"));
+        // The coupled scene re-makes its run from a stored bake into a directory of its own; the other scenes do not take that option.
+        let make = perf_bake_scene_args("coupled", &s(&["--store", "x", "--remake-into", "target/m", "--global-res", "16384"])).unwrap();
+        assert!(make.windows(2).any(|w| w[0] == "--remake-into" && w[1] == "target/m") && make.contains(&"--store".to_string()));
+        assert!(perf_bake_scene_args("anet-chunk", &s(&["--remake-into", "x"])).unwrap_err().contains("unknown perf anet-chunk option"));
     }
 
     // spec: GEN-014, BUILD-002
