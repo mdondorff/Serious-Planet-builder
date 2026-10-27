@@ -166,7 +166,7 @@ impl<'a> Router<'a> {
         }
         if !miss.is_empty() {
             let dirs: Vec<Vec3> = miss.iter().map(|&k| self.lat.direction_ext(face, points[k].0, points[k].1)).collect();
-            let h = self.base.base_heights(&dirs);
+            let h = crate::anet::timed_base_heights(self.base, &dirs);
             let mut held = self.memo.heights.lock().expect("memo");
             let cap = self.memo.height_cap.unwrap_or(MEMO_HEIGHTS);
             if held.len() + miss.len() > cap {
@@ -210,7 +210,7 @@ impl<'a> Router<'a> {
         let coarse = self.run.lattice();
         let mut ring: Vec<Vec3> = vec![coarse.direction(c)];
         ring.extend(coarse.neighbours(c).into_iter().filter(|&x| (x as usize) < coarse.len()).map(|x| coarse.direction(x as usize)));
-        let h = self.base.base_heights(&ring);
+        let h = crate::anet::timed_base_heights(self.base, &ring);
         let (lo, hi) = h.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, u), &x| (l.min(x), u.max(x)));
         let rf = self.law.relief_factor(hi - lo);
         self.memo.reliefs.lock().expect("memo").insert(c, rf);
