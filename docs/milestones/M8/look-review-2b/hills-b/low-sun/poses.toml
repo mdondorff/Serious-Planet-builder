@@ -1,0 +1,33 @@
+# Low-sun check of the 611 m bake-cell creases (SPIKE-47 seams note, #816). Hills B (latitude 8.972, longitude -16.238), default look.
+# Sun 6.5 local hours on the equinox is about 8 degrees above the horizon in the east (the evening sun at 17.5 h leaves the near ground in the hills' shadow); the eye looks north and south, across the sun.
+# Run: cargo xtask capture stills --poses docs/milestones/M8/look-review-2b/hills-b/low-sun/poses.toml --store target/accept/global16384 --out-dir docs/milestones/M8/look-review-2b/hills-b/low-sun
+
+chunk_timeout_s = 3600
+
+[place]
+lat = 8.972
+lon = -16.238
+
+[[pose]]
+name = "300m-am-sun-north"
+altitude_m = 300
+back_m = 1500
+heading_deg = 0
+pitch_deg = 15
+sun_local_hours = 6.5
+
+[[pose]]
+name = "30m-am-sun-north"
+altitude_m = 30
+back_m = 400
+heading_deg = 0
+pitch_deg = 8
+sun_local_hours = 6.5
+
+[[pose]]
+name = "30m-am-sun-south"
+altitude_m = 30
+back_m = 400
+heading_deg = 180
+pitch_deg = 8
+sun_local_hours = 6.5
