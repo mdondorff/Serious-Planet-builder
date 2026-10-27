@@ -703,6 +703,97 @@ mod tests {
         fly("one hill in the stamp layer, west (new chunks)", site, east * -1.0, &mut out);
     }
 
+    // spec: VIEW-056
+    /// What the editor's hover costs a frame (`pick_surface` through the world's field, once a frame under the cursor) with the camera at several
+    /// altitudes over the site, cursors on a grid across the viewport (M8 owner test: editor frames of up to 1.3 s at the full-planet view).
+    /// `PLANET_ANET_STORE=DIR PLANET_ANET_RES=N cargo test -p planet --release --lib pick_cost_report -- --ignored --nocapture`. One thread, a probe.
+    #[test]
+    #[ignore = "a measurement: it ray-marches the field under a grid of cursors"]
+    fn pick_cost_report() {
+        use planet_core::cube::TangentWarp;
+        use planet_frame::pick::{cursor_ray, pick_surface, PickLimits};
+        let mut out = std::io::stdout();
+        let res = std::env::var("PLANET_ANET_RES").ok().and_then(|r| r.parse().ok()).unwrap_or(256);
+        let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
+        let (world, _maps, tile) = anet_scene(res, 11, store, &mut out).unwrap();
+        let radius = world.radius_m();
+        let site = tile.center_direction(&TangentWarp);
+        let field = world.field().unwrap();
+        let limits = PickLimits::new(radius, planet_frame::LodParams::earth_1080p().max_height_m.max(field.max_abs_height_m()));
+        // The first height reads of a field made now, and of one made after an edit of the definition (what the window's ground height under the camera
+        // meets on the first frame after either).
+        let first_reads = |label: &str, field: &dyn planet_generators::height::HeightField, out: &mut dyn Write| {
+            let times: Vec<String> = (0..4)
+                .map(|k| {
+                    let d = (site + planet_core::Vec3::new(0.0, 0.0, 1.0) * (f64::from(k) * 0.01)).normalized();
+                    let t = std::time::Instant::now();
+                    std::hint::black_box(field.height(d));
+                    format!("{:.1}", t.elapsed().as_secs_f64() * 1000.0)
+                })
+                .collect();
+            writeln!(out, "{label}: first four height reads (ms): [{}]", times.join(", ")).map_err(err).unwrap();
+        };
+        first_reads("a field made now", &*field, &mut out);
+        let mut def = (*world.definition()).clone();
+        let item = planet_world_def::ItemSpec {
+            id: 1,
+            layer: "stamps".into(),
+            priority: 0,
+            dir: site,
+            content_hash: 0,
+            reach_m: 500.0,
+            max_delta_m: 60.0,
+            stamp: None,
+        }
+        .with_stamp(planet_world_def::stamp::Stamp::new(planet_world_def::stamp::StampKind::Hill, [30.0, 0.0, 0.0]));
+        def.put_item_spec(planet_world_def::BodyId::PLANET, item).map_err(|e| format!("{e:?}")).unwrap();
+        world.set_definition(std::sync::Arc::new(def)).unwrap();
+        let edited = world.field().unwrap();
+        first_reads("a field made after an edit", &*edited, &mut out);
+        let (w, h) = (2560.0, 1440.0);
+        for altitude in [20_000_000.0, 5_000_000.0, 1_000_000.0, 100_000.0, 10_000.0] {
+            let position = planet_core::PlanetFixed(site * (radius + altitude));
+            let camera = planet_frame::Camera::at_surface_point(
+                position,
+                planet_core::Vec3::new(0.0, 0.0, 1.0),
+                90f64.to_radians(),
+                1.0,
+                w / h,
+                0.5,
+            );
+            let (mut worst, mut sum, mut n, mut hits) = (0.0f64, 0.0f64, 0u32, 0u32);
+            for gx in 0..9 {
+                for gy in 0..5 {
+                    let ray = cursor_ray(&camera, w * (f64::from(gx) + 0.5) / 9.0, h * (f64::from(gy) + 0.5) / 5.0, w, h);
+                    let calls = std::cell::Cell::new(0u64);
+                    let t = std::time::Instant::now();
+                    let hit = pick_surface(&ray, &limits, &|d| {
+                        calls.set(calls.get() + 1);
+                        field.height(d)
+                    });
+                    let ms = t.elapsed().as_secs_f64() * 1000.0;
+                    worst = worst.max(ms);
+                    sum += ms;
+                    n += 1;
+                    hits += u32::from(hit.is_some());
+                    if ms > 100.0 {
+                        writeln!(
+                            out,
+                            "    slow pick at cursor ({gx},{gy}): {ms:.0} ms, {} height calls, hit {}",
+                            calls.get(),
+                            hit.is_some()
+                        )
+                        .map_err(err)
+                        .unwrap();
+                    }
+                }
+            }
+            writeln!(out, "camera {altitude:.0} m up: {n} picks, {hits} hits, mean {:.1} ms, worst {worst:.0} ms", sum / f64::from(n))
+                .map_err(err)
+                .unwrap();
+        }
+    }
+
     // spec: GEN-052
     #[test]
     fn the_chunk_budget_is_four_seconds_at_8_m_and_a_missing_time_never_passes() {

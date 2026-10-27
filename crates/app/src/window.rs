@@ -1020,13 +1020,14 @@ impl App<'_> {
                     }
                     None => ui.frame(&st.window, &status, &layer, None),
                 };
+                st.stall.mark("editor panels (egui frame)");
                 let shown = st.surface.present_with_ui(ctx, &st.rig.renderer, Some((ui.painter(), &mut frame_ui)));
                 ui.reclaim(frame_ui);
                 shown.map_err(|e| e.to_string())?
             } else {
                 st.surface.present(ctx, &st.rig.renderer).map_err(|e| e.to_string())?
             };
-            st.stall.mark("editor panels (egui) and present");
+            st.stall.mark("present (swapchain, tone map, egui paint)");
             // What the panels asked for, and the camera flight to an edit.
             if let Some(e) = st.edit.as_mut() {
                 e.apply(panel_events);
