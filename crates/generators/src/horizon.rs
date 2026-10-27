@@ -134,6 +134,97 @@ fn floor_i64(v: f64) -> i64 {
     }
 }
 
+/// How the march of a texel runs: one azimuth at a time, or four azimuths at once on AVX2 (GEN-086). Both do the same IEEE operations in the
+/// same order on each azimuth, so they give the same bytes; the scalar one is the fallback of a machine without AVX2 and what the other is tested against.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kernel {
+    Scalar,
+    #[cfg(target_arch = "x86_64")]
+    Avx2,
+}
+
+impl Kernel {
+    /// The fastest kernel this machine runs.
+    pub fn detect() -> Kernel {
+        #[cfg(target_arch = "x86_64")]
+        if std::arch::is_x86_feature_detected!("avx2") {
+            return Kernel::Avx2;
+        }
+        Kernel::Scalar
+    }
+}
+
+/// Four azimuths of one texel on AVX2: the lanes of [`horizon_at`], operation for operation. A lane whose sample leaves the raster stops, as the
+/// scalar march breaks. `idx` of a stopped lane is 0, so the gather stays inside the raster (`n >= 2` and `(n + 1)^2 <= i32::MAX`, checked by the caller).
+///
+/// # Safety
+/// The CPU must support AVX2.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn horizon_at4(r: &HeightRaster<'_>, steps: &[(f64, f64)], x: usize, y: usize, dirs: &[(f64, f64); 4]) -> [u8; 4] {
+    use std::arch::x86_64::*;
+    let n = r.n as i32;
+    let h0 = _mm256_set1_pd(f64::from(r.heights[y * r.n + x]));
+    let dx = _mm256_set_pd(dirs[3].0, dirs[2].0, dirs[1].0, dirs[0].0);
+    let dy = _mm256_set_pd(dirs[3].1, dirs[2].1, dirs[1].1, dirs[0].1);
+    let (texel, one) = (_mm256_set1_pd(r.texel_m), _mm256_set1_pd(1.0));
+    let mut best = _mm256_set1_pd(f64::NEG_INFINITY);
+    let mut alive = _mm256_castsi256_pd(_mm256_set1_epi64x(-1));
+    let (xi, yi, nn) = (_mm_set1_epi32(x as i32), _mm_set1_epi32(y as i32), _mm_set1_epi32(n));
+    for &(d, drop) in steps {
+        let dd = _mm256_set1_pd(d);
+        let sx = _mm256_div_pd(_mm256_mul_pd(dd, dx), texel);
+        let sy = _mm256_div_pd(_mm256_mul_pd(dd, dy), texel);
+        let (fx_, fy_) = (_mm256_floor_pd(sx), _mm256_floor_pd(sy));
+        let ix = _mm_add_epi32(xi, _mm256_cvttpd_epi32(fx_));
+        let iy = _mm_add_epi32(yi, _mm256_cvttpd_epi32(fy_));
+        // Inside the raster as `sample` asks: 0 <= i and i + 1 < n on both axes.
+        let low = _mm_and_si128(_mm_cmpgt_epi32(ix, _mm_set1_epi32(-1)), _mm_cmpgt_epi32(iy, _mm_set1_epi32(-1)));
+        let high = _mm_and_si128(
+            _mm_cmpgt_epi32(nn, _mm_add_epi32(ix, _mm_set1_epi32(1))),
+            _mm_cmpgt_epi32(nn, _mm_add_epi32(iy, _mm_set1_epi32(1))),
+        );
+        let inside = _mm_and_si128(low, high);
+        alive = _mm256_and_pd(alive, _mm256_castsi256_pd(_mm256_cvtepi32_epi64(inside)));
+        if _mm256_movemask_pd(alive) == 0 {
+            break;
+        }
+        let idx = _mm_add_epi32(_mm_mullo_epi32(_mm_and_si128(iy, inside), nn), _mm_and_si128(ix, inside));
+        let at = |o: i32| _mm256_cvtps_pd(_mm_i32gather_ps::<4>(r.heights.as_ptr(), _mm_add_epi32(idx, _mm_set1_epi32(o))));
+        let (h00, h10, h01, h11) = (at(0), at(1), at(n), at(n + 1));
+        let (fx, fy) = (_mm256_sub_pd(sx, fx_), _mm256_sub_pd(sy, fy_));
+        let (ofx, ofy) = (_mm256_sub_pd(one, fx), _mm256_sub_pd(one, fy));
+        let a = _mm256_add_pd(_mm256_mul_pd(h00, ofx), _mm256_mul_pd(h10, fx));
+        let b = _mm256_add_pd(_mm256_mul_pd(h01, ofx), _mm256_mul_pd(h11, fx));
+        let h = _mm256_add_pd(_mm256_mul_pd(a, ofy), _mm256_mul_pd(b, fy));
+        let rise = _mm256_sub_pd(_mm256_sub_pd(h, h0), _mm256_set1_pd(drop));
+        // `f64::max` ignores a NaN operand: `_mm256_max_pd(a, b)` returns `b` when either is NaN, so the candidate goes first.
+        let next = _mm256_max_pd(_mm256_div_pd(rise, dd), best);
+        best = _mm256_blendv_pd(best, next, alive);
+    }
+    let mut lanes = [0f64; 4];
+    _mm256_storeu_pd(lanes.as_mut_ptr(), best);
+    lanes.map(|b| if b.is_finite() { quantize(libm::atan(b)) } else { 0 })
+}
+
+/// The horizon bytes of one texel at every azimuth into `out`.
+fn texel_bytes(r: &HeightRaster<'_>, steps: &[(f64, f64)], x: usize, y: usize, dirs: &[(f64, f64)], kernel: Kernel, out: &mut [u8]) {
+    let mut k = 0;
+    #[cfg(target_arch = "x86_64")]
+    if kernel == Kernel::Avx2 && r.n >= 2 && (r.n + 1).saturating_mul(r.n + 1) <= i32::MAX as usize {
+        while k + 4 <= dirs.len() {
+            let four = [dirs[k], dirs[k + 1], dirs[k + 2], dirs[k + 3]];
+            // SAFETY: `Kernel::Avx2` is only made by `Kernel::detect` after the feature test (or by a test that tests it first).
+            out[k..k + 4].copy_from_slice(&unsafe { horizon_at4(r, steps, x, y, &four) });
+            k += 4;
+        }
+    }
+    let _ = kernel;
+    for (j, d) in dirs.iter().enumerate().skip(k) {
+        out[j] = horizon_at(r, steps, x, y, *d);
+    }
+}
+
 /// The unit direction of azimuth `k` of `a` as `(east, north)` in the raster's frame (`i` east, `j` north). Components that are only the
 /// rounding of an exact zero (the cosine of a quarter turn is 6e-17) are snapped to 0, so a cardinal azimuth marches along a row or a column
 /// exactly and reads no neighbouring row with a weight of 1e-16.
@@ -159,6 +250,17 @@ pub fn bake_horizon(
     block: (usize, usize, usize, usize),
     p: &HorizonParams,
     threads: usize,
+) -> Result<HorizonMap, String> {
+    bake_horizon_with(raster, block, p, threads, Kernel::detect())
+}
+
+/// [`bake_horizon`] on a given kernel (the tests run both; the bytes are the same).
+pub fn bake_horizon_with(
+    raster: &HeightRaster<'_>,
+    block: (usize, usize, usize, usize),
+    p: &HorizonParams,
+    threads: usize,
+    kernel: Kernel,
 ) -> Result<HorizonMap, String> {
     let (x0, y0, w, h) = block;
     let n = raster.n;
@@ -206,9 +308,7 @@ pub fn bake_horizon(
                 for (r, row) in part.chunks_mut(row_len).enumerate() {
                     let y = y0 + c * rows_per + r;
                     for i in 0..w {
-                        for (k, d) in dirs.iter().enumerate() {
-                            row[i * a + k] = horizon_at(raster, steps, x0 + i, y, *d);
-                        }
+                        texel_bytes(raster, steps, x0 + i, y, dirs, kernel, &mut row[i * a..(i + 1) * a]);
                     }
                 }
             });
@@ -334,6 +434,59 @@ mod tests {
             let got = bake_horizon(&raster, block, &p, 3).unwrap();
             assert_eq!(got.data, reference_bake(&raster, block, &p), "range {range} growth {growth} radius {radius}");
             assert!(got.data.iter().any(|&q| q > 0) && got.data.contains(&0), "the fixture shades some texels and not others");
+        }
+    }
+
+    // spec: GEN-086
+    #[test]
+    fn the_avx2_kernel_gives_the_bytes_of_the_scalar_one_including_rays_that_leave_the_raster() {
+        let n = 330usize;
+        let heights: Vec<f32> = (0..n * n)
+            .map(|k| {
+                let (i, j) = ((k % n) as f64, (k / n) as f64);
+                (60.0 * libm::sin(0.11 * i) * libm::cos(0.07 * j) + 25.0 * libm::sin(0.31 * i + 0.17 * j)) as f32
+            })
+            .collect();
+        let raster = HeightRaster { n, texel_m: 8.037, heights: &heights };
+        #[allow(unused_mut)]
+        let mut kernels = vec![Kernel::Scalar];
+        #[cfg(target_arch = "x86_64")]
+        if std::arch::is_x86_feature_detected!("avx2") {
+            kernels.push(Kernel::Avx2);
+        }
+        eprintln!("kernels under test: {kernels:?}");
+        // The default 16 azimuths and counts that are not a multiple of four.
+        for azimuths in [16u32, 7, 4, 1] {
+            let p = HorizonParams { azimuths, range_m: 1_200.0, ..HorizonParams::chunk(R) };
+            let halo = halo_texels(&p, 8.037);
+            let block = (halo, halo, n - 2 * halo, n - 2 * halo);
+            let want = bake_horizon_with(&raster, block, &p, 2, Kernel::Scalar).unwrap();
+            for &k in &kernels {
+                assert_eq!(bake_horizon_with(&raster, block, &p, 3, k).unwrap(), want, "{k:?}, {azimuths} azimuths");
+            }
+        }
+        // Rays that run off the raster: texels near the edge, which `bake_horizon` refuses for want of halo, through the texel kernel.
+        let p = HorizonParams { range_m: 2_000.0, ..HorizonParams::chunk(R) };
+        let steps = march_steps(&p, 8.037);
+        let dirs: Vec<(f64, f64)> = (0..p.azimuths).map(|k| azimuth_dir(k, p.azimuths)).collect();
+        for &(x, y) in &[(0usize, 0usize), (3, 200), (n - 2, 5), (n - 1, n - 1), (160, 160), (n - 40, 17)] {
+            let mut want = vec![0u8; dirs.len()];
+            texel_bytes(&raster, &steps, x, y, &dirs, Kernel::Scalar, &mut want);
+            for &k in &kernels {
+                let mut got = vec![0u8; dirs.len()];
+                texel_bytes(&raster, &steps, x, y, &dirs, k, &mut got);
+                assert_eq!(got, want, "{k:?} at ({x}, {y})");
+            }
+        }
+        // A raster of NaN heights: no candidate, the same byte on every kernel.
+        let nan = vec![f32::NAN; 64 * 64];
+        let r = HeightRaster { n: 64, texel_m: 8.0, heights: &nan };
+        let mut want = vec![9u8; dirs.len()];
+        texel_bytes(&r, &steps, 30, 30, &dirs, Kernel::Scalar, &mut want);
+        for &k in &kernels {
+            let mut got = vec![9u8; dirs.len()];
+            texel_bytes(&r, &steps, 30, 30, &dirs, k, &mut got);
+            assert_eq!(got, want, "{k:?} on NaN");
         }
     }
 
