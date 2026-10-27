@@ -155,6 +155,6 @@ Files: scratchpad logs only; numbers here. Not a perf window.
 
 ## Windows 24 and 25 of 2026-10-27 (main at #819, brush re-read by stroke; horizon on)
 Gate ok. Files: `edit-latency-w24-main819-5x.md` (5 repeats, `--repeats 5`), `edit-latency-w25-drawn-again.md` (3 repeats, drawn reading of "drawn again").
-- Window 24: M6 column (drawn tiles) 13 of 13 gated rows ok, 64 to 761 ms; 200 m / 1 km brush preview 13.1 ms over 5 repeats (budget 16). 10 s rows read as "all settled": 18 of 20 ok, over 1 m / 500 m (10.65 s) and 200 m / 1 km brush (11.05 s).
+- Window 24: M6 column (drawn tiles) 13 of 13 gated rows ok, 64 to 761 ms; 200 m / 1 km brush preview 13.1 ms over 5 repeats (budget 16). 10 s rows read as "all settled": 17 of 19 rows with a chunk stage ok, over 1 m / 500 m (10.65 s) and 200 m / 1 km brush (11.05 s).
 - Window 25: "drawn again" ends at the last refresh of a tile the plan draws (ADR 0072 point 1), "all settled" beside it. 200 m / 1 km brush: last chunk 9.10 s, drawn again 9.57 s, all settled 10.01 s: ok. 2 km / 1 km brush 9.27 s. Over: 1 m / 500 m only (7 chunks on 6 workers: last chunk 10.55 s, drawn again 10.60 s). All other rows ok.
-- The gap from the last chunk to the drawn tiles is 0.05 to 0.5 s; to everything settled 0.3 to 1.1 s.
+- The gap from the last chunk to the drawn tiles is 0.05 to 0.5 s; to everything settled 0.2 to 1.3 s.
