@@ -85,7 +85,7 @@ pub struct ChunkConfig {
     pub stale_hold_cap_ms: u64,
     /// Jobs running at once (`chunk_workers`; the default of a viewer is half its worker pool, so tiles are not starved).
     pub workers: usize,
-    /// A chunk not wanted for this long leaves RAM (`chunk_evict_s` 5, in milliseconds).
+    /// A chunk not wanted for this long leaves RAM (`chunk_evict_s` 30, in milliseconds). The byte cap below bounds the pool whatever this is.
     pub evict_ms: u64,
     /// The bytes the ready chunks may hold (their own pool of the RAM caps, STRM-041; 512 MiB by default, about 250 chunks of 8 m cells): the least
     /// recently wanted leave first beyond it.
@@ -98,7 +98,7 @@ impl Default for ChunkConfig {
             workers: VIEW_CHUNK_WORKERS,
             stale_workers: usize::MAX,
             stale_hold_cap_ms: 1_000,
-            evict_ms: 5_000,
+            evict_ms: 30_000,
             cap_bytes: 512 << 20,
         }
     }

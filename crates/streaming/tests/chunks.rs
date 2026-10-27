@@ -57,7 +57,8 @@ fn jobs_start_nearest_first_at_most_workers_at_once_and_no_update_waits_for_one(
 fn a_scripted_flight_and_pan_on_the_fake_clock_lands_every_chunk_and_the_stand_in_share_falls_to_zero() {
     // 6 workers, a chunk of 25 km2 at 0.25 s per km2: 6.25 s per chunk.
     let (spawner, clock) = (Arc::new(TimedSpawner::new(6, 6_250_000)), Arc::new(FakeClock::default()));
-    let m = manager(spawner.clone(), clock.clone(), None, ChunkConfig { workers: 6, ..ChunkConfig::default() });
+    // The pan's chunk must have left RAM by then (unwanted for 20 s): this flight runs with the old 5 s eviction, so that its landing is what is timed.
+    let m = manager(spawner.clone(), clock.clone(), None, ChunkConfig { workers: 6, evict_ms: 5_000, ..ChunkConfig::default() });
     // The view over a flight: from 30 km (many chunks wanted, far ones too) down to 1.8 m (the chunk under the camera), then a pan of one chunk.
     let around = |cx: i64, cy: i64, radius: i64| -> Vec<(ChunkKey, f64)> {
         let mut v = Vec::new();
@@ -112,11 +113,11 @@ fn a_chunk_not_wanted_for_the_evict_time_leaves_ram_and_the_least_recently_wante
     spawner.run(2);
     assert_eq!(m.update(&both).landed.len(), 2);
     assert!(m.pool_bytes() > 0);
-    clock.advance(3_000);
+    clock.advance(16_000);
     m.update(&[(key(0, 0), 10.0)]);
-    clock.advance(3_000);
+    clock.advance(16_000);
     let up = m.update(&[(key(0, 0), 10.0)]);
-    assert_eq!(up.evicted, vec![key(1, 0)], "the one not wanted for 6 s (> 5 s) is gone, the wanted one stays");
+    assert_eq!(up.evicted, vec![key(1, 0)], "the one not wanted for 32 s (> 30 s) is gone, the wanted one stays");
     assert!(m.is_ready(key(0, 0)) && !m.is_ready(key(1, 0)));
     // A byte cap below the pool evicts the least recently wanted first.
     let (spawner2, clock2) = (Arc::new(ManualSpawner::default()), Arc::new(FakeClock::default()));
@@ -157,7 +158,7 @@ fn an_evicted_chunk_wanted_again_comes_back_from_disk_without_computing_and_a_co
     let first = m.snapshot()[0].hash();
     assert_eq!((m.stats().computed, m.stats().disk_hits), (1, 0));
     // Evicted, wanted again: the disk entry is read, nothing is computed.
-    clock.advance(6_000);
+    clock.advance(31_000);
     assert_eq!(m.update(&[]).evicted, vec![key(0, 0)]);
     m.update(&want);
     spawner.run(1);
@@ -171,7 +172,7 @@ fn an_evicted_chunk_wanted_again_comes_back_from_disk_without_computing_and_a_co
     let n = bytes.len();
     bytes[n - 20] ^= 0xff;
     std::fs::write(&pack, bytes).unwrap();
-    clock.advance(6_000);
+    clock.advance(31_000);
     m.update(&[]);
     m.update(&want);
     spawner.run(1);
