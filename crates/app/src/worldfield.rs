@@ -199,6 +199,9 @@ pub struct WorldTerrain {
     horizon_threads: std::sync::atomic::AtomicUsize,
     /// The horizon jobs of the chunks (M8-5, STRM-049): none until `enable_horizon` (in `horizonworld`).
     pub(crate) horizon: std::sync::RwLock<Option<Arc<planet_streaming::chunks::HorizonJobs>>>,
+    /// The queue of the height warm-up thread (made on the first [`WorldTerrain::warm_heights`]) and the batches it has read.
+    warm: std::sync::Mutex<Option<std::sync::mpsc::SyncSender<Vec<planet_core::Vec3>>>>,
+    warmed: std::sync::atomic::AtomicU64,
 }
 
 /// The chunk stage of a world: the process, the lattice, the pyramid's top level and the manager that computes and holds the chunks.
@@ -299,6 +302,8 @@ impl WorldTerrain {
             bound_water: false,
             water_book: Default::default(),
             coupled: Default::default(),
+            warm: Default::default(),
+            warmed: Default::default(),
             coarse: Default::default(),
             chunks: Default::default(),
             anet_asked: Default::default(),
@@ -384,6 +389,8 @@ impl WorldTerrain {
             bound_water: false,
             water_book: Default::default(),
             coupled: Default::default(),
+            warm: Default::default(),
+            warmed: Default::default(),
             coarse: Default::default(),
             chunks: Default::default(),
             anet_asked: Default::default(),
@@ -897,6 +904,38 @@ impl WorldTerrain {
     /// The view a frame counts its stand-in share against (STRM-039): the world's chunks, `None` without a chunk stage.
     pub fn chunk_view(&self) -> Option<Arc<dyn planet_frame::chunkshare::ChunkView>> {
         self.chunk_manager().map(|m| Arc::new(planet_frame::chunkshare::ManagerView(m)) as Arc<dyn planet_frame::chunkshare::ChunkView>)
+    }
+
+    /// Read the heights at `dirs` on a thread of its own, so that the bake blocks under them are decoded and kept before the main thread reads them
+    /// (CON-22: a frame never waits for a block; a block that is cold costs 100 ms and more). Never waits: a batch that finds the queue full is
+    /// dropped (the next frame sends another). The thread ends with the world.
+    pub fn warm_heights(self: &Arc<Self>, dirs: Vec<planet_core::Vec3>) {
+        let mut slot = self.warm.lock().expect("warm queue");
+        let tx = slot.get_or_insert_with(|| {
+            let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<planet_core::Vec3>>(2);
+            let world = Arc::downgrade(self);
+            std::thread::Builder::new()
+                .name("height-warm".into())
+                .spawn(move || {
+                    while let Ok(dirs) = rx.recv() {
+                        let Some(world) = world.upgrade() else { break };
+                        if let Ok(field) = world.field() {
+                            for d in dirs {
+                                std::hint::black_box(field.height(d));
+                            }
+                        }
+                        world.warmed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    }
+                })
+                .expect("spawn the height warm-up thread");
+            tx
+        });
+        let _ = tx.try_send(dirs);
+    }
+
+    /// Batches the warm-up thread has read so far.
+    pub fn warmed_batches(&self) -> u64 {
+        self.warmed.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// One frame of the chunk jobs (STRM-039, STRM-042): the chunks the plan's `tiles` read, nearest to `camera` first, and the chunks to

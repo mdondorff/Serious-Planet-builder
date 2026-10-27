@@ -380,3 +380,35 @@ fn the_chunk_step_over_new_chunks_with_an_item_in_a_stamp_layer_never_holds_the_
     assert!(spawner.pending() > 0, "the new chunks were started");
     let _ = std::fs::remove_dir_all(&a);
 }
+
+// spec: VIEW-059, VIEW-056, CON-22
+#[test]
+fn a_block_of_the_bake_is_decoded_by_the_warm_up_thread_so_the_first_read_on_the_main_thread_decodes_none() {
+    use planet_cache::global_store::thread_block_decodes;
+    let store = std::env::temp_dir().join(format!("planet-warm-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&store);
+    run(&["generate", "--global-dir", store.to_str().unwrap(), "--global-res", &RES.to_string(), "--threads", "2"]).unwrap();
+    let world = open(&store);
+    let field = world.field().expect("a field");
+    // One block per face at 32 cells: a direction on each of two other faces is a block nobody has read.
+    let (cold, warmed) = (planet_core::Vec3::new(0.0, 1.0, 0.0), planet_core::Vec3::new(0.0, 0.0, 1.0));
+    // Without the warm-up the main thread decodes the block itself.
+    let before = thread_block_decodes();
+    std::hint::black_box(field.height(cold));
+    assert!(thread_block_decodes() > before, "a cold block is decoded by the thread that reads it");
+    // With it, the warm-up thread decodes it and the main thread decodes none.
+    world.warm_heights(vec![warmed]);
+    let started = std::time::Instant::now();
+    while world.warmed_batches() < 1 {
+        assert!(started.elapsed().as_secs() < 60, "the warm-up did not finish");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let before = thread_block_decodes();
+    std::hint::black_box(field.height(warmed));
+    assert_eq!(
+        thread_block_decodes(),
+        before,
+        "the block was decoded by the warm-up thread: the main thread read it from the shared cache"
+    );
+    let _ = std::fs::remove_dir_all(&store);
+}

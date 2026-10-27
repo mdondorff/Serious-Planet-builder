@@ -225,6 +225,8 @@ struct Running {
     stats: FrameStats,
     /// The phases of the frame and the lock waits of the main thread (VIEW-056).
     stall: crate::stall::StallProbe,
+    /// The camera's position at the last height warm-up and when (the velocity the next warm-up looks ahead along).
+    warm_prev: Option<(u64, planet_core::Vec3)>,
     /// What the scheduler counted in the last frame, for a stall report.
     last_counts: planet_frame::managed::FrameCounts,
     /// The job log index and the time of the last refresh line (STRM-055).
@@ -459,6 +461,7 @@ impl App<'_> {
             viewer,
             stats: FrameStats::new(now, if cfg.smoke { SMOKE_TITLE_PERIOD_MS } else { TITLE_PERIOD_MS }),
             stall: Default::default(),
+            warm_prev: None,
             last_counts: Default::default(),
             refresh_logged: (0, 0),
             chunk_acc: (0, 0, 0),
@@ -688,7 +691,15 @@ impl App<'_> {
             // A command of this frame (C back to the flight, restart) may have released the mouse.
             apply_grab(&mut st);
             st.stall.mark("input, commands and the smoke script");
-            let ground = |p: planet_core::PlanetFixed| radius + field.height(p.0.normalized());
+            // The ground under the camera reads the height of the tile level a pixel of this view can show, like the pick (VIEW-056); the bake blocks the
+            // camera is about to fly over are read ahead on a thread of their own (CON-22).
+            let ground_level = crate::editwin::EditRuntime::pick_level(
+                &st.last_camera,
+                Viewport { width_px: f64::from(cfg.size.0), height_px: f64::from(cfg.size.1) },
+                radius,
+                lod_max_height_m,
+            );
+            let ground = |p: planet_core::PlanetFixed| radius + field.height_at_level(p.0.normalized(), ground_level);
             let height = |p: planet_core::PlanetFixed| p.0.length() - ground(p);
             let had_globe = st.viewer.globe.is_some();
             let camera = st.viewer.camera(self.cameras, now_ms, dt, &self.params, &height, &ground);
@@ -697,6 +708,29 @@ impl App<'_> {
                 _ => camera,
             };
             st.last_camera = camera;
+            if st.frames % 6 == 0 {
+                let pos = camera.position.0;
+                let mut dirs = Vec::new();
+                let mut push = |p: planet_core::Vec3| {
+                    if p.length().is_finite() && p.length() > 0.0 {
+                        dirs.push(p.normalized());
+                    }
+                };
+                push(pos);
+                if let Some((t0, p0)) = st.warm_prev {
+                    let dt = now_ms.saturating_sub(t0) as f64 / 1000.0;
+                    if dt > 0.05 {
+                        let v = (pos - p0) * (1.0 / dt);
+                        for s in [1.0, 2.0, 4.0] {
+                            push(pos + v * s);
+                        }
+                    }
+                }
+                st.warm_prev = Some((now_ms, pos));
+                if !dirs.is_empty() {
+                    self.world.warm_heights(dirs);
+                }
+            }
             st.globe_stats.landings += u64::from(had_globe && st.viewer.globe.is_none() && st.viewer.is_free());
             // The globe overview: the markers it shows (render pixels to window pixels) and the one under the cursor.
             let viewport = Viewport { width_px: f64::from(cfg.size.0), height_px: f64::from(cfg.size.1) };
@@ -1029,13 +1063,14 @@ impl App<'_> {
                     }
                     None => ui.frame(&st.window, &status, &layer, None),
                 };
+                st.stall.mark("editor panels (egui frame)");
                 let shown = st.surface.present_with_ui(ctx, &st.rig.renderer, Some((ui.painter(), &mut frame_ui)));
                 ui.reclaim(frame_ui);
                 shown.map_err(|e| e.to_string())?
             } else {
                 st.surface.present(ctx, &st.rig.renderer).map_err(|e| e.to_string())?
             };
-            st.stall.mark("editor panels (egui) and present");
+            st.stall.mark("present (swapchain, tone map, egui paint)");
             // What the panels asked for, and the camera flight to an edit.
             if let Some(e) = st.edit.as_mut() {
                 e.apply(panel_events);

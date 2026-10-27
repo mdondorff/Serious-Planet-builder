@@ -67,12 +67,45 @@ pub struct StallProbe {
     last_report: Option<Instant>,
     /// Frames at or over [`STALL`] so far.
     pub stalls: u64,
+    /// Per phase over all frames: the milliseconds summed, the longest, and the frames; printed when the probe ends with `PLANET_STALL_MS` set.
+    totals: Vec<(&'static str, f64, f64)>,
+    frames: u64,
+    last_totals: Instant,
+}
+
+impl StallProbe {
+    /// With `PLANET_STALL_MS` set, the mean and the longest time of every phase over the run so far, every ten seconds (a probe of where frames below
+    /// the limit go too).
+    fn print_totals(&mut self, now: Instant) {
+        if self.frames == 0
+            || now.duration_since(self.last_totals) < Duration::from_secs(10)
+            || std::env::var_os("PLANET_STALL_MS").is_none()
+        {
+            return;
+        }
+        self.last_totals = now;
+        let mut rows = self.totals.clone();
+        rows.sort_by(|a, b| b.1.total_cmp(&a.1));
+        eprintln!("frame phases over {} frames (mean / longest ms):", self.frames);
+        for (name, sum, max) in rows {
+            eprintln!("  {name}: {:.2} / {max:.1}", sum / self.frames as f64);
+        }
+    }
 }
 
 impl Default for StallProbe {
     fn default() -> Self {
         let now = Instant::now();
-        StallProbe { began: now, last: now, phases: Vec::new(), last_report: None, stalls: 0 }
+        StallProbe {
+            began: now,
+            last: now,
+            phases: Vec::new(),
+            last_report: None,
+            stalls: 0,
+            totals: Vec::new(),
+            frames: 0,
+            last_totals: now,
+        }
     }
 }
 
@@ -110,6 +143,18 @@ impl StallProbe {
 
     fn end_at(&mut self, now: Instant) -> Option<Stall> {
         let frame = now - self.began;
+        self.frames += 1;
+        self.print_totals(now);
+        for (name, d) in &self.phases {
+            let ms = d.as_secs_f64() * 1e3;
+            match self.totals.iter_mut().find(|t| t.0 == *name) {
+                Some(t) => {
+                    t.1 += ms;
+                    t.2 = t.2.max(ms);
+                }
+                None => self.totals.push((*name, ms, ms)),
+            }
+        }
         if frame < limit() {
             return None;
         }
