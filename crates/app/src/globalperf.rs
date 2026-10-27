@@ -578,7 +578,6 @@ mod tests {
     #[ignore = "a measurement: it solves two real chunks and builds tiles"]
     fn tile_cost_report() {
         use planet_generators::chunkfield::compute_chunk;
-        use planet_generators::height::generate_tile_field;
         let mut out = std::io::stdout();
         let res = std::env::var("PLANET_ANET_RES").ok().and_then(|r| r.parse().ok()).unwrap_or(256);
         let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
@@ -612,26 +611,19 @@ mod tests {
         let cells = 64u32;
         fn time<'a>(f: &dyn Fn() -> Box<dyn planet_generators::height::HeightField + 'a>, id: planet_core::TileId, cells: u32) -> f64 {
             let map = &planet_core::cube::TangentWarp;
-            let t = std::time::Instant::now();
-            for _ in 0..3 {
-                let field = f();
-                std::hint::black_box(generate_tile_field(&*field, map, id, cells));
-            }
-            let height_only = t.elapsed().as_secs_f64() * 1000.0 / 3.0;
             // The mesh path of a real tile build (batch heights and climate over the lattice and its ring), as the streamer's job runs it.
             let t = std::time::Instant::now();
             for _ in 0..3 {
                 let field = f();
                 std::hint::black_box(planet_generators::mesh::tile_mesh_field(&*field, map, id, cells, 6_371_000.0));
             }
-            let _ = height_only;
             t.elapsed().as_secs_f64() * 1000.0 / 3.0
         }
         for level in [15u8, 13, 11, 9, 7, 5, 4, 3] {
             let id = planet_core::TileId::from_direction(map, site, level);
             let with = time(&|| world.field().unwrap(), id, cells);
             let without = time(&|| planet_generators::chain::with_stamps(world.base_field().unwrap(), &def).unwrap(), id, cells);
-            writeln!(out, "tile level {level} ({cells} cells): {with:.0} ms with the chunk layer, {without:.0} ms without")
+            writeln!(out, "tile level {level} ({cells} cells, mesh path): {with:.0} ms with the chunk layer, {without:.0} ms without")
                 .map_err(err)
                 .unwrap();
         }

@@ -1,3 +1,5 @@
+Reading of the M6 column in this window (and from it on): the latest first refresh end of the named tiles the plan draws, before the edit or at the first plan after it, plus the frame median (TEST-056, ADR 0072 point 1). Windows before 21 read it as the instant every named tile was refreshed and uploaded; do not compare them.
+
 | altitude | stamp radius | preview ms (budget 16) | drawn exact ms (budget) | tiles refreshed / resident | previewed nodes (max) | repeats | verdict |
 |---|---|---|---|---|---|---|---|
 | 1 m | 50 m | 7.4 | 69.1 (1000) | 66 / 7539 | 8 | 3 | ok |

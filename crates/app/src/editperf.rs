@@ -871,8 +871,8 @@ fn run_once(
     let drawn: HashSet<TileId> = drawn_before.union(&drawn_shown).copied().filter(|t| named.contains(t)).collect();
     let drawn_refreshed_ms = drawn_refreshed_ms(&job_log.since(jobs_before), &drawn, t0_us, out.stages.frame_median_ms);
     // With a chunk stage the plan is not exact until the stale chunks have landed (the tiles' keys follow the chunks), so the frame DrawKind::Exact
-    // waits for the eroded result: the M6 budget reads the instant every tile the edit names was refreshed and written (what the editor shows of the
-    // edit itself), and the chunk table below carries the eroded result (TEST-056).
+    // waits for the eroded result: the M6 budget reads the instant the last named tile the plan draws ended its first refresh job (TEST-056,
+    // ADR 0072 point 1), and the chunk table below carries the eroded result.
     if h.chunk_world.is_some() {
         out.stages.drawn_exact_ms = drawn_refreshed_ms.or(out.stages.uploaded_ms);
     }
@@ -1499,15 +1499,26 @@ mod tests {
         std::fs::remove_dir_all(dir.parent().unwrap().parent().unwrap()).unwrap();
     }
 
-    // spec: TEST-042
+    // spec: TEST-056
     #[test]
     fn drawn_exact_is_the_latest_first_refresh_end_of_the_tiles_the_plan_draws() {
         use planet_streaming::JobSample;
         let tile = |x| TileId::new(planet_core::Face(0), 16, x, 0).unwrap();
-        let job = |x, ended_us, refresh| JobSample { wait_us: 0, run_us: 0, running: 1, done: true, level: 16, queue_ms: 0, refresh, tile: tile(x), ended_us };
+        let job = |x, ended_us, refresh| JobSample {
+            wait_us: 0,
+            run_us: 0,
+            running: 1,
+            done: true,
+            level: 16,
+            queue_ms: 0,
+            refresh,
+            tile: tile(x),
+            ended_us,
+        };
         // Tile 1 refreshed at 150 ms and again at 4 s (a chunk landed): its first end counts; tile 2 is not drawn (slow, resident only); tile 3 is a
         // new load, not a refresh.
-        let jobs = [job(1, 1_150_000, true), job(2, 1_900_000, true), job(1, 5_000_000, true), job(3, 9_000_000, false), job(4, 1_300_000, true)];
+        let jobs =
+            [job(1, 1_150_000, true), job(2, 1_900_000, true), job(1, 5_000_000, true), job(3, 9_000_000, false), job(4, 1_300_000, true)];
         let drawn: HashSet<TileId> = [tile(1), tile(3), tile(4)].into_iter().collect();
         assert_eq!(drawn_refreshed_ms(&jobs, &drawn, 1_000_000, 5.0), Some(305.0));
         assert_eq!(drawn_refreshed_ms(&jobs, &HashSet::new(), 1_000_000, 5.0), None);
