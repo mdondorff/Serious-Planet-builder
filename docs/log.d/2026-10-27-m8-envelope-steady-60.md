@@ -1,0 +1,1 @@
+- 2026-10-27 **m8-envelope-steady-60** (TEST-057): the steady trial measures 60 s after the run-in over several chunk edges (`--steady-window-s`, 12 = quick); the floor of criterion 7 applies to it (owner, #790).

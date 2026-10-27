@@ -46,6 +46,10 @@ const PLACE_STEP_DEG: f64 = 0.6;
 /// chunk (5 to 7 s, window 8) and 5 s more. The window is [`FLIGHT_S`] long and has the chunk edge half way, over ground the run-in did not cover.
 pub const RUN_IN_S: f64 = 12.0;
 pub const SMOKE_RUN_IN_S: f64 = 0.25;
+/// Seconds the steady-flight trial measures after its run-in (owner, 2026-10-27: the floor is the speed the flight holds): about 60 s over ground the
+/// run-in did not cover, crossing several chunk edges, the bound judged over every 1 s window of the whole stretch. `--steady-window-s 12` is the quick
+/// single-edge trial.
+pub const STEADY_WINDOW_S: f64 = 60.0;
 /// Seconds the settle before a trial may take at most.
 const SETTLE_LIMIT_S: f64 = 900.0;
 
@@ -216,7 +220,7 @@ pub struct LogFacts<'a> {
     /// With a chunk stage, where along each flight the start put a chunk edge (0.5: half way); `None` without one.
     pub edge_fraction: Option<f64>,
     /// The steady-flight curve (a run-in before the window, `run_in_s` long) next to the cold one; `None` without a chunk stage.
-    pub steady: Option<(&'a [Point], f64)>,
+    pub steady: Option<(&'a [Point], f64, f64)>,
 }
 
 /// Why the chunk stand-in share is `null` in a log of a world without a chunk field.
@@ -309,8 +313,13 @@ pub fn log_json(points: &[Point], facts: &LogFacts<'_>) -> String {
     s += "  \"curve\": [\n";
     s += &curve_json(points);
     s += "  ],\n";
-    if let Some((steady, run_in_s)) = facts.steady {
-        s += &format!("  \"run_in_s\": {},\n  \"steady_curve\": [\n{}  ],\n", number(run_in_s), curve_json(steady));
+    if let Some((steady, run_in_s, window_s)) = facts.steady {
+        s += &format!(
+            "  \"run_in_s\": {},\n  \"steady_window_s\": {},\n  \"steady_curve\": [\n{}  ],\n",
+            number(run_in_s),
+            number(window_s),
+            curve_json(steady)
+        );
     }
     if let Some(p) = facts.horizon_off {
         s += &format!("  \"horizon_off_comparison\": [\n{}  ],\n", curve_json(std::slice::from_ref(p)));
@@ -597,8 +606,11 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
     let run_in_s = if smoke { SMOKE_RUN_IN_S } else { RUN_IN_S };
     let steady: Vec<Point> = if stage.is_some() {
         let run_in = (run_in_s / FRAME_STEP_S).round() as usize;
-        let total = run_in + frames;
-        let edge = (run_in as f64 + EDGE_FRACTION * frames as f64) / total as f64;
+        // The measured stretch: the steady window, as short as a smoke trial in a smoke run. The first chunk edge is half a quick window into it; a
+        // longer stretch crosses more of them.
+        let window_frames = if smoke { frames } else { (o.steady_window_s / FRAME_STEP_S).round() as usize };
+        let total = run_in + window_frames;
+        let edge = (run_in as f64 + EDGE_FRACTION * frames.min(window_frames) as f64) / total as f64;
         let mut points = Vec::new();
         for &altitude in altitudes {
             let point = if smoke {
@@ -692,7 +704,7 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
             horizon: true,
             horizon_off: horizon_off.as_ref(),
             edge_fraction: stage.map(|_| EDGE_FRACTION),
-            steady: stage.map(|_| (steady.as_slice(), run_in_s)),
+            steady: stage.map(|_| (steady.as_slice(), run_in_s, if smoke { SMOKE_FLIGHT_S } else { o.steady_window_s })),
         },
     );
     let path = o.out.clone().unwrap_or_else(|| Path::new("perf").join("logs").join("envelope.json"));
@@ -880,13 +892,44 @@ mod tests {
                 horizon: true,
                 horizon_off: None,
                 edge_fraction: None,
-                steady: Some((std::slice::from_ref(&steady), RUN_IN_S)),
+                steady: Some((std::slice::from_ref(&steady), RUN_IN_S, STEADY_WINDOW_S)),
             },
         );
         assert!(
-            text.contains("\"run_in_s\": 12") && text.contains("\"steady_curve\"") && text.contains("\"highest_speed_mps\": 190"),
+            text.contains("\"run_in_s\": 12")
+                && text.contains("\"steady_window_s\": 60")
+                && text.contains("\"steady_curve\"")
+                && text.contains("\"highest_speed_mps\": 190"),
             "{text}"
         );
+    }
+
+    // spec: TEST-057
+    #[test]
+    fn the_sixty_second_steady_window_crosses_several_chunk_edges_after_the_run_in() {
+        let radius_m = 6_371_000.0;
+        let (quick, window, run_in) = (
+            (FLIGHT_S / FRAME_STEP_S).round() as usize,
+            (STEADY_WINDOW_S / FRAME_STEP_S).round() as usize,
+            (RUN_IN_S / FRAME_STEP_S).round() as usize,
+        );
+        let total = run_in + window;
+        // The first edge is half a quick window into the measured stretch, as for the quick trial.
+        let edge = (run_in as f64 + EDGE_FRACTION * quick.min(window) as f64) / total as f64;
+        for speed in [200.0, 300.0, 600.0] {
+            let (lat, lon) = trial_start_at(5, speed, total, radius_m, true, edge);
+            let flight_deg = (speed * (total - 1) as f64 * FRAME_STEP_S / radius_m).to_degrees();
+            // Chunk edges crossed in the measured stretch: changes of the chunk along the window's frames.
+            let first = run_in as f64 / (total - 1) as f64;
+            let keys: Vec<_> =
+                (0..=600).map(|i| chunk_key_at(lat + (first + (1.0 - first) * f64::from(i) / 600.0) * flight_deg, lon)).collect();
+            let crossings = keys.windows(2).filter(|w| w[0] != w[1]).count();
+            assert!(crossings >= 2, "{speed} m/s over {STEADY_WINDOW_S} s crosses several edges: {crossings}");
+            // 12 s remains the quick single-edge trial: the same start rule with a quick window gives the edge half way.
+            let quick_total = run_in + quick;
+            let quick_edge = (run_in as f64 + EDGE_FRACTION * quick as f64) / quick_total as f64;
+            assert!((quick_edge - 0.75).abs() < 1e-9);
+        }
     }
 
     // spec: TEST-055
