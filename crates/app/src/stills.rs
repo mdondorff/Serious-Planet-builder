@@ -378,7 +378,7 @@ fn settle(
         drop(plan);
         drop(field);
         crate::chunkstage::frame_step(
-            &world,
+            world,
             &mut crate::chunkstage::NoLoop,
             &tiles,
             camera.position,
