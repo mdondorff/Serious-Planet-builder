@@ -97,6 +97,9 @@ pub struct StageFacts {
     pub trace: crate::chunkstage::TraceSummary,
     pub chunk_jobs_at_end: usize,
     pub horizon_jobs_at_end: usize,
+    /// What the chunk step counted over the run (settle, run-in and window) and the features it ran with; a feature turned off is named in the log (TEST-058).
+    pub counters: crate::chunkstage::FeatureCounters,
+    pub features: crate::chunkstage::FrameFeatures,
 }
 
 impl Measure {
@@ -309,7 +312,7 @@ fn stage_json(stage: Option<StageFacts>) -> String {
     match stage {
         None => "null".to_string(),
         Some(f) => format!(
-            "{{\"chunks_landed\": {}, \"horizon_maps_landed\": {}, \"prefetch_asked\": {}, \"first_wanted_s\": {}, \"late_chunks\": {}, \"late\": {}, \"median_wait_s\": {}, \"max_wait_s\": {}, \"chunk_jobs_at_end\": {}, \"horizon_jobs_at_end\": {}}}",
+            "{{\"chunks_landed\": {}, \"horizon_maps_landed\": {}, \"prefetch_asked\": {}, \"first_wanted_s\": {}, \"late_chunks\": {}, \"late\": {}, \"median_wait_s\": {}, \"max_wait_s\": {}, \"chunk_jobs_at_end\": {}, \"horizon_jobs_at_end\": {}, \"counters\": {}}}",
             f.trace.chunks_landed,
             f.trace.horizon_maps_landed,
             f.trace.prefetch_asked,
@@ -319,7 +322,8 @@ fn stage_json(stage: Option<StageFacts>) -> String {
             number(f.trace.median_wait_s),
             number(f.trace.max_wait_s),
             f.chunk_jobs_at_end,
-            f.horizon_jobs_at_end
+            f.horizon_jobs_at_end,
+            f.counters.json(&f.features)
         ),
     }
 }
@@ -492,11 +496,14 @@ fn fly(
         draws.push(FrameDraw { camera: Some(*cam), drawn: t.drawn });
         chunks.push(t.chunk);
     }
-    let stage_facts = d.chunk_summary().map(|(trace, chunk_jobs_at_end, horizon_jobs_at_end)| StageFacts {
-        trace,
-        chunk_jobs_at_end,
-        horizon_jobs_at_end,
-    });
+    let stage_facts =
+        d.chunk_summary().zip(d.chunk_counters()).map(|((trace, chunk_jobs_at_end, horizon_jobs_at_end), (counters, features))| {
+            StageFacts { trace, chunk_jobs_at_end, horizon_jobs_at_end, counters, features }
+        });
+    // A flight travels: the prefetch must have asked and the horizon step run, unless the flight turned them off (TEST-058). A smoke run is too short to travel.
+    if let (false, Some(f)) = (smoke, &stage_facts) {
+        f.counters.check(&f.features, &crate::chunkstage::Expect { prefetch: true, horizon: true, ..Default::default() })?;
+    }
     drop(d);
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
     let lags = lag_post_pass(&draws, req_of, &|| world.field(), threads)?;
@@ -1003,6 +1010,8 @@ mod tests {
             },
             chunk_jobs_at_end: 3,
             horizon_jobs_at_end: 1,
+            counters: crate::chunkstage::FeatureCounters { frames: 700, prefetch_asked: 5, horizon_frames: 700, ..Default::default() },
+            features: crate::chunkstage::FrameFeatures { prefetch: true, horizon: true, stale_hold: false },
         };
         let measure = Measure { coarse_share: 0.004, stand_in_share: Some(0.02), chunk_nodes: 400, chunk_stand_in: 8, stage: Some(stage) };
         let pt = |altitude_m: f64, measure: Measure| Point {
@@ -1040,6 +1049,8 @@ mod tests {
             "\"chunk_jobs_at_end\": 3",
             "\"horizon_jobs_at_end\": 1",
             "\"horizon_off_comparison\"",
+            "\"counters\": {\"frames\": 700, \"prefetch_asked\": 5",
+            "\"stale_hold_frames\": \"off\"",
             "\"edge_fraction\": 0.5",
             "\"horizon_jobs_at_end\": 0",
         ] {

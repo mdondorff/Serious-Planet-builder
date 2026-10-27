@@ -341,6 +341,71 @@ pub struct FeatureCounters {
     pub plan_cache_announcements: u64,
 }
 
+/// Which features a scene expects to have acted over its run (TEST-058); a feature the scene turned off is never checked.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Expect {
+    /// Chunks were asked for ahead of a travelling camera.
+    pub prefetch: bool,
+    /// The horizon step ran.
+    pub horizon: bool,
+    /// The stale chunks were held while an edit's tiles were built.
+    pub stale_hold: bool,
+    /// An item change was announced to the plan cache.
+    pub announcements: bool,
+}
+
+impl FeatureCounters {
+    /// The counters as one log line; a feature the scene turned off is named `off` in place of its count (TEST-058).
+    pub fn line(&self, features: &FrameFeatures) -> String {
+        let on = |enabled: bool, text: String| if enabled { text } else { "off".to_string() };
+        format!(
+            "frames {}, prefetch {}, chunks landed {} evicted {}, horizon {}, stale hold {}, plan-cache announcements {}",
+            self.frames,
+            on(features.prefetch, format!("{} asked in {} frames", self.prefetch_asked, self.prefetch_frames)),
+            self.chunks_landed,
+            self.chunks_evicted,
+            on(features.horizon, format!("{} frames, {} maps landed", self.horizon_frames, self.horizon_landed)),
+            on(features.stale_hold, format!("{} frames", self.stale_hold_frames)),
+            self.plan_cache_announcements
+        )
+    }
+
+    /// The counters as a JSON object; a feature turned off is `"off"` (TEST-058).
+    pub fn json(&self, features: &FrameFeatures) -> String {
+        let on = |enabled: bool, value: String| if enabled { value } else { "\"off\"".to_string() };
+        format!(
+            "{{\"frames\": {}, \"prefetch_asked\": {}, \"prefetch_frames\": {}, \"chunks_landed\": {}, \"chunks_evicted\": {}, \"horizon_frames\": {}, \"horizon_landed\": {}, \"stale_hold_frames\": {}, \"plan_cache_announcements\": {}}}",
+            self.frames,
+            on(features.prefetch, self.prefetch_asked.to_string()),
+            on(features.prefetch, self.prefetch_frames.to_string()),
+            self.chunks_landed,
+            self.chunks_evicted,
+            on(features.horizon, self.horizon_frames.to_string()),
+            on(features.horizon, self.horizon_landed.to_string()),
+            on(features.stale_hold, self.stale_hold_frames.to_string()),
+            self.plan_cache_announcements
+        )
+    }
+
+    /// A scene fails when a feature it enabled and expects to act counted 0 (TEST-058): the message names the feature and the counter table.
+    pub fn check(&self, features: &FrameFeatures, expect: &Expect) -> Result<(), String> {
+        let missing: Vec<&str> = [
+            ("prefetch", features.prefetch && expect.prefetch && self.prefetch_asked == 0),
+            ("horizon", features.horizon && expect.horizon && self.horizon_frames == 0),
+            ("stale hold", features.stale_hold && expect.stale_hold && self.stale_hold_frames == 0),
+            ("plan-cache announcements", expect.announcements && self.plan_cache_announcements == 0),
+        ]
+        .into_iter()
+        .filter_map(|(name, bad)| bad.then_some(name))
+        .collect();
+        if missing.is_empty() {
+            Ok(())
+        } else {
+            Err(format!("an enabled feature counted 0: {} (TEST-058); counters: {}", missing.join(", "), self.line(features)))
+        }
+    }
+}
+
 /// What one step reported: the chunk update, the chunks asked to prefetch and the horizon update.
 #[derive(Clone, Debug, Default)]
 pub struct StepReport {
@@ -462,6 +527,31 @@ mod tests {
     use super::*;
 
     // spec: TEST-055
+    // spec: TEST-058
+    #[test]
+    fn a_scene_fails_naming_the_feature_when_an_enabled_feature_it_expects_counted_zero_and_a_feature_turned_off_is_named_off() {
+        let all = FrameFeatures::default();
+        let expect = Expect { prefetch: true, horizon: true, stale_hold: true, announcements: true };
+        let acted = FeatureCounters {
+            frames: 10,
+            prefetch_asked: 3,
+            prefetch_frames: 2,
+            horizon_frames: 10,
+            stale_hold_frames: 4,
+            plan_cache_announcements: 1,
+            ..Default::default()
+        };
+        assert_eq!(acted.check(&all, &expect), Ok(()));
+        let err = FeatureCounters { prefetch_asked: 0, plan_cache_announcements: 0, ..acted }.check(&all, &expect).unwrap_err();
+        assert!(err.contains("prefetch, plan-cache announcements") && err.contains("frames 10"), "{err}");
+        // Turned off: not checked, and the log says so.
+        let off = FrameFeatures { prefetch: false, ..all };
+        let zero = FeatureCounters { prefetch_asked: 0, ..acted };
+        assert_eq!(zero.check(&off, &expect), Ok(()));
+        assert!(zero.line(&off).contains("prefetch off") && zero.json(&off).contains("\"prefetch_asked\": \"off\""));
+        assert!(acted.line(&all).contains("prefetch 3 asked in 2 frames"));
+    }
+
     #[test]
     fn the_trace_measures_from_the_first_frame_that_wanted_a_chunk_to_the_frame_that_saw_it_land() {
         let mut t = ChunkTrace::default();
