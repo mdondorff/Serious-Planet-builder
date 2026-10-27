@@ -355,6 +355,15 @@ fn canonical_bits(v: f64) -> u64 {
     }
 }
 
+/// An item that differs between two definitions, as the places it had and has: its anchor, its reach and, for a brush, its strokes
+/// ([`WorldDefinition::changed_items_from`]).
+#[derive(Clone, Debug)]
+pub struct ChangedItem {
+    pub dir: Vec3,
+    pub reach_m: f64,
+    pub strokes: Vec<stamp::StrokeBits>,
+}
+
 /// The world: a seed and the parameters of its bodies, as a sorted set of nodes, and the authored items filed in
 /// spatial cells.
 #[derive(Clone, Debug, PartialEq)]
@@ -873,8 +882,18 @@ impl WorldDefinition {
     /// place it has now. What the tiles that read the definition can have to recompute is what these places reach (STRM-034); a change of the
     /// nodes is not among them (the base is the same for the definitions the caller compares).
     pub fn item_changes_from(&self, older: &WorldDefinition) -> Vec<(Vec3, f64)> {
+        self.changed_items_from(older).into_iter().map(|c| (c.dir, c.reach_m)).collect()
+    }
+
+    /// [`item_changes_from`](Self::item_changes_from) with what bounds each change inside its reach disc: the strokes of a brush (WDEF-007), empty for
+    /// every other item. A brush changes nothing beyond the radius of its strokes' polylines (GEN-030), so a read that only needs the points an edit can
+    /// change tests the strokes, not the disc that holds them all (GEN-087).
+    pub fn changed_items_from(&self, older: &WorldDefinition) -> Vec<ChangedItem> {
         let mut out = Vec::new();
-        let mut push = |rec: &ItemRec| out.push((rec.unit(), f64::from_bits(rec.reach_bits)));
+        let mut push = |rec: &ItemRec| {
+            let strokes = rec.stamp.as_ref().filter(|s| s.kind.is_brush()).map(|s| s.strokes().to_vec()).unwrap_or_default();
+            out.push(ChangedItem { dir: rec.unit(), reach_m: f64::from_bits(rec.reach_bits), strokes });
+        };
         let (mut a, mut b) = (self.items.iter().peekable(), older.items.iter().peekable());
         loop {
             match (a.peek(), b.peek()) {

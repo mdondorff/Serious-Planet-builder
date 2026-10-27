@@ -138,3 +138,17 @@ Gate ok each. Files: `edit-latency-w18-lock-waits.md`, `edit-latency-w19-straggl
 
 - Numbers of windows before 21 read the first row; do not compare them with the second.
 - Not part of this reading: the first plan with the chunk stage is delivered after 270 to 1000 ms (stages table, "plan delivered"), and a drawn tile that the edit did not name refreshes when a chunk lands (the chunk table).
+
+## Probe of 2026-10-27 (`generate --edit-resolve --brush`: where the 1 km brush's chunk time goes; site 20,30, camera 200 m, 4 wanted chunks, 6 workers, 2 base threads)
+Files: scratchpad logs only; numbers here. Not a perf window.
+
+| Edit | Chunks re-solved / with other bits | Last chunk lands | Base heights per job | Region cells reused |
+|---|---|---|---|---|
+| hill 150 m | 4 / 1 | 5.1 s | 0.3 s | 100 % |
+| hill 1 km | 4 / 1 | 4.0 s | 0.4 s | 98 % |
+| brush 150 m | 4 / 1 | 5.3 s | 0.4 s | 98 % |
+| brush 1 km, reach disc as the stale set | 4 / 4 | 7.5 s | 1.8 s | 88 % |
+| brush 1 km, stroke capsule as the stale set (GEN-087) | 4 / 4 | 5.4 s | 1.0 s | 94 % |
+
+- A finer chunk read set would remove nothing for the brush: all four chunks change. For a hill, 3 of 4 re-solved chunks come out with the same bits, which costs CPU and not wall time (6 workers in parallel).
+- The reach of a brush item is a disc round its first point that holds the stroke and its radius (about 8 times the capsule of a 20-point 1 km stroke); the re-read set now uses the capsule. Isolated 1 km brush: 7.5 to 5.4 s.

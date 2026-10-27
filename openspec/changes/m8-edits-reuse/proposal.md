@@ -4,7 +4,8 @@ Window 9 and the phase clocks of 2026-10-27 (`docs/milestones/M8/criterion-6-edi
 ## What Changes
 1. `BaseDetail::region_heights(dirs)` (default `base_heights`): the heights of one chunk region. `WorldBase` keeps each batch with the definition it was read under (`RegionCache`, at most 24 batches and 256 MiB, least recently used out) and, for a later definition that differs only in its items (`WorldDefinition::same_but_items`), reads again only the cells within the reach of the items that differ (`item_changes_from`: old and new place of every changed, added, removed or moved item). A change that reaches more than half the batch reads all of it.
 2. The batch is kept only if the definition did not move while it was read and every answer was real.
-3. `generate --edit-resolve` reports the share of region cells reused and the time of the base heights per chunk job.
+3. (2026-10-27, brush) For a brush the cells to read again are the ones within the radius of a stroke (`WorldDefinition::changed_items_from`, `footprint::strokes_touch`), not the reach disc that holds the whole stroke (several times its area): a 1 km brush at the edit-latency site reads 12 % of the cells again instead of 24 to 88 %.
+4. `generate --edit-resolve` (`--brush` puts the brush case) reports the share of region cells reused and the time of the base heights per chunk job.
 
 ## Design notes
 - Exactness rests on WDEF-010 / GEN-026 ("an item changes no output of any stage beyond its `reach_m`") and on point evaluation: the height at a cell is a function of that cell and the items, whatever the batch or the thread count (CON-14). The reach test is the footprint module's one answer (`EditReach::within_angle`, widened; a cell exactly at the edge counts). Line items and brushes take the whole disc.
