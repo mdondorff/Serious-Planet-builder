@@ -90,3 +90,16 @@ Gate ok. Files: `edit-latency-w13-6x2-horizon-reuse.md`, `edit-resolve-w13-phase
 - Over: the 1 km brushes at 200 m and 2 km (10.7 s; 5 chunks, the last lands at 9.9 and 10.3 s).
 - Per chunk job (`generate --edit-resolve`): network 4.2 s on the first landing, 0.4 to 0.9 s on a re-solve (base heights 2.1 s, then 0.1 to 0.2 s; 92 to 100 % of the region cells reused, one case 85 % with 1.2 s); solve 1.9 to 2.5 s; drivers 0.1 to 0.2 s. The last chunk lands 2.8 to 4.2 s after the edit (4.7 to 6.5 s before).
 - What is left: the solve (about 60 % of a re-solve), the M6 column (plan delivered after 390 to 1030 ms with chunks).
+
+## Window 12 of 2026-10-27 (main at #797; track-set prefetch, the shared chunk step, height reuse #796)
+Gate ok. Files: `envelope-w12-steady-300.json`, `envelope-w12-steady-rest.json`. Steady curve only (`--only-steady`), 60 s window after a 12 s run-in, bound 1 % over every 1 s window of the stretch.
+
+| Altitude | Highest steady speed | Stand-in / coarse at the first failing speed | Notes |
+|---|---|---|---|
+| 30 m | 320 m/s | stand-in 0 %, coarse 1.7 % at 340 (3.8 % at 400) | limited by the coarse share (tile detail lag), not by chunks |
+| 100 m | 78 m/s | stand-in 1.15 %, coarse 0 at 80 | max wait 9.9 s, first wanted chunk 0.9 s into the window |
+| 300 m (repeat) | 480 m/s (window 11: 460) | stand-in 1.19 % at 500, 1.06 % at 520, 87.7 % at 560 | the pool: waits 5 to 8 s, 4 jobs running at the end |
+| 1000 m | 78 m/s | stand-in 1.29 %, coarse 0 at 80 | max wait 9.4 s, first wanted chunk 2.9 s into the window |
+
+- The 100 m and 1000 m figures are place effects, not speed effects: 300 m passes 80 m/s with 0 % stand-in and 30 m passes 160, but each trial flies a start place of its own (`start_place(n)`), and at the places of the 80 m/s trials at 100 m and 1000 m a chunk takes 9 to 10 s to arrive (5 to 7 s is typical). The search assumes the share rises with the speed; a slow chunk at one place breaks that. Fix proposed: one start place per altitude for all trials, two places at 100 m and 1000 m taking the lower, and the late chunks (key, wait) in the trial's log.
+- The 200 m/s floor (steady flight, owner 2026-10-27) is shown at 30 m (320) and 300 m (480); not shown, not refuted, at 100 m and 1000 m.

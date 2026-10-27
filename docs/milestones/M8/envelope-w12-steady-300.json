@@ -1,0 +1,28 @@
+{
+  "scene": "envelope",
+  "adapter": "NVIDIA GeForce RTX 3080 Ti Laptop GPU",
+  "source": "store C:/DEV/SeriousPlanetData/global16384, 16384 cells",
+  "smoke": false,
+  "owner_override": [],
+  "bound": 0.01,
+  "window_s": 1,
+  "frame_step_s": 0.016666666666666666,
+  "start_speed_mps": 10,
+  "cap_speed_mps": 3000,
+  "bisections": 4,
+  "judged": "the larger of coarse_share and stand_in_share, the worst 1 s window",
+  "coarse_weighting": "pixels: nodes of the fresh plan weighted by their projected screen pixels (TEST-046)",
+  "stand_in_weighting": "nodes: unweighted share of the plan nodes at or finer than the pyramid top level whose chunk is not ready (STRM-039)",
+  "chunk_field": true,
+  "horizon": true,
+  "edge_fraction": 0.5,
+  "curve": [
+  ],
+  "run_in_s": 12,
+  "steady_window_s": 60,
+  "steady_curve": [
+    {"altitude_m": 300, "highest_speed_mps": 480, "share_at_speed": 0.00040956240389990395, "coarse_share": 0.00015070136273931227, "stand_in_share": 0.00040956240389990395, "capped": false, "trials": [{"speed_mps": 10, "share": 0, "coarse_share": 0, "stand_in_share": 0, "chunk_nodes": 1743270, "chunk_stand_in": 0, "stage": {"chunks_landed": 0, "horizon_maps_landed": 2, "prefetch_asked": 10375, "first_wanted_s": null, "median_wait_s": 0, "max_wait_s": 0, "chunk_jobs_at_end": 0, "horizon_jobs_at_end": 0}}, {"speed_mps": 20, "share": 0, "coarse_share": 0, "stand_in_share": 0, "chunk_nodes": 1763800, "chunk_stand_in": 0, "stage": {"chunks_landed": 0, "horizon_maps_landed": 3, "prefetch_asked": 10348, "first_wanted_s": null, "median_wait_s": 0, "max_wait_s": 0, "chunk_jobs_at_end": 0, "horizon_jobs_at_end": 0}}, {"speed_mps": 40, "share": 0, "coarse_share": 0, "stand_in_share": 0, "chunk_nodes": 1763572, "chunk_stand_in": 0, "stage": {"chunks_landed": 5, "horizon_maps_landed": 12, "prefetch_asked": 10812, "first_wanted_s": 0.0053837, "median_wait_s": 0.2488555, "max_wait_s": 5.0168927, "chunk_jobs_at_end": 0, "horizon_jobs_at_end": 0}}, {"speed_mps": 80, "share": 0, "coarse_share": 0, "stand_in_share": 0, "chunk_nodes": 1753571, "chunk_stand_in": 0, "stage": {"chunks_landed": 5, "horizon_maps_landed": 15, "prefetch_asked": 9663, "first_wanted_s": 0.3037545, "median_wait_s": 3.8661484, "max_wait_s": 5.217475, "chunk_jobs_at_end": 0, "horizon_jobs_at_end": 1}}, {"speed_mps": 160, "share": 0, "coarse_share": 0, "stand_in_share": 0, "chunk_nodes": 1753896, "chunk_stand_in": 0, "stage": {"chunks_landed": 8, "horizon_maps_landed": 19, "prefetch_asked": 11609, "first_wanted_s": 13.352968, "median_wait_s": 0, "max_wait_s": 6.957021900000001, "chunk_jobs_at_end": 0, "horizon_jobs_at_end": 1}}, {"speed_mps": 320, "share": 0, "coarse_share": 0, "stand_in_share": 0, "chunk_nodes": 1753440, "chunk_stand_in": 0, "stage": {"chunks_landed": 19, "horizon_maps_landed": 10, "prefetch_asked": 11893, "first_wanted_s": 9.7272618, "median_wait_s": 0, "max_wait_s": 0.5863316999999952, "chunk_jobs_at_end": 0, "horizon_jobs_at_end": 1}}, {"speed_mps": 640, "share": 0.9584535712338792, "coarse_share": 0.04755049234571607, "stand_in_share": 0.9584535712338792, "chunk_nodes": 1743219, "chunk_stand_in": 116246, "stage": {"chunks_landed": 34, "horizon_maps_landed": 6, "prefetch_asked": 21636, "first_wanted_s": 0.0263871, "median_wait_s": 0.49105730000000136, "max_wait_s": 7.7530263, "chunk_jobs_at_end": 5, "horizon_jobs_at_end": 1}}, {"speed_mps": 480, "share": 0.00040956240389990395, "coarse_share": 0.00015070136273931227, "stand_in_share": 0.00040956240389990395, "chunk_nodes": 1753457, "chunk_stand_in": 12, "stage": {"chunks_landed": 28, "horizon_maps_landed": 8, "prefetch_asked": 19196, "first_wanted_s": 0.0044004, "median_wait_s": 0, "max_wait_s": 1.3787384, "chunk_jobs_at_end": 4, "horizon_jobs_at_end": 1}}, {"speed_mps": 560, "share": 0.876724629315017, "coarse_share": 0.01552294290220107, "stand_in_share": 0.876724629315017, "chunk_nodes": 1757302, "chunk_stand_in": 111100, "stage": {"chunks_landed": 34, "horizon_maps_landed": 7, "prefetch_asked": 21874, "first_wanted_s": 0.0064897, "median_wait_s": 0, "max_wait_s": 8.240279399999999, "chunk_jobs_at_end": 3, "horizon_jobs_at_end": 1}}, {"speed_mps": 520, "share": 0.010631716153288475, "coarse_share": 0.0040121459173166505, "stand_in_share": 0.010631716153288475, "chunk_nodes": 1763773, "chunk_stand_in": 849, "stage": {"chunks_landed": 32, "horizon_maps_landed": 7, "prefetch_asked": 21466, "first_wanted_s": 0.0090304, "median_wait_s": 0, "max_wait_s": 5.285493499999999, "chunk_jobs_at_end": 0, "horizon_jobs_at_end": 1}}, {"speed_mps": 500, "share": 0.011871998701924246, "coarse_share": 0.003860410330961823, "stand_in_share": 0.011871998701924246, "chunk_nodes": 1765436, "chunk_stand_in": 910, "stage": {"chunks_landed": 28, "horizon_maps_landed": 7, "prefetch_asked": 20960, "first_wanted_s": 0.0082311, "median_wait_s": 0, "max_wait_s": 5.1329, "chunk_jobs_at_end": 4, "horizon_jobs_at_end": 1}}]}
+  ],
+  "summary": [
+  ]
+}
