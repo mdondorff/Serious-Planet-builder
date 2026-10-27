@@ -684,7 +684,7 @@ impl HorizonRig {
         (frame, upload)
     }
 
-    /// One frame: run the horizon jobs of the world for the plan tiles `tiles`, hand the renderer the table of the frame, the next map to upload and
+    /// One frame: with the horizon update of the chunk step (`frame_step` ran the jobs for the plan tiles `tiles`), hand the renderer the table of the frame, the next map to upload and
     /// (once) the coarse map. `sun` is the lit plan sun direction. Does nothing without the chunk stage of the world.
     pub fn frame(
         &mut self,
@@ -692,12 +692,11 @@ impl HorizonRig {
         ctx: &planet_render::GpuContext,
         renderer: &mut planet_render::TerrainRenderer,
         tiles: &[TileId],
-        camera: PlanetFixed,
+        update: &HorizonUpdate,
         sun: [f32; 3],
     ) {
         use planet_frame::horizonview::{pack_map, MAX_SLOT_AZIMUTHS};
         let (Some(lat), true) = (world.chunk_lattice(), world.chunk_manager().is_some()) else { return };
-        let update = world.horizon_frame(tiles, camera);
         let (frame, upload) = self.decide(tiles, &update.landed, &|k| world.horizon_map(k).is_some(), sun);
         let mut packed: Vec<(u32, Vec<u8>)> = Vec::new();
         if let Some((key, slot)) = upload {

@@ -997,11 +997,11 @@ pub fn capture_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
                 l.view = pose.view.unwrap_or(l.view);
             }
             // One map is uploaded a frame: the frames of the exposure give the first four, the settling frames the rest.
-            horizon.frame(&world, ctx, &mut r, &tiles, camera.position, sun);
+            horizon.frame(&world, ctx, &mut r, &tiles, &world.horizon_frame(&tiles, camera.position), sun);
             r.render(ctx, &lit, false).map_err(|e| e.to_string())?;
         }
         for _ in 0..horizon_maps {
-            horizon.frame(&world, ctx, &mut r, &tiles, camera.position, sun);
+            horizon.frame(&world, ctx, &mut r, &tiles, &world.horizon_frame(&tiles, camera.position), sun);
         }
         let mut lit = setup.plan(&world, rig.field, &plan, WATER_T0 + 2.0, 0.5, false)?;
         if let Some(l) = lit.lit.as_mut() {

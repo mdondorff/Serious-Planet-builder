@@ -419,3 +419,72 @@ fn a_chunk_that_lands_after_a_neighbours_tile_was_kept_replaces_the_tile_because
     );
     assert!(shared.tile_stats().evaluated > made, "the tiles were made again");
 }
+
+struct FakeLoop {
+    travel: planet_frame::prefetch::TravelEstimator,
+    pending: bool,
+    landed: usize,
+    evicted: usize,
+}
+
+impl planet::chunkstage::StepLoop for FakeLoop {
+    fn edit_tiles_pending(&self) -> bool {
+        self.pending
+    }
+    fn travel(&self) -> Option<&planet_frame::prefetch::TravelEstimator> {
+        Some(&self.travel)
+    }
+    fn chunk_landed(&mut self, landed: &[ChunkKey]) {
+        self.landed += landed.len();
+    }
+    fn chunk_evicted(&mut self, evicted: &[ChunkKey]) {
+        self.evicted += evicted.len();
+    }
+}
+
+/// A flight of 120 frames of 100 ms east over the chunk of `tile()` through the chunk step, with the features given; what the step counted.
+fn fly_through_the_step(features: planet::chunkstage::FrameFeatures, edit_pending: bool) -> (planet::chunkstage::FeatureCounters, usize) {
+    use planet::chunkstage::{frame_step, FeatureCounters};
+    let r = rig();
+    r.world.enable_horizon(params(), r.horizon_jobs.clone(), r.clock.clone(), HorizonConfig { workers: 2, settle_ms: 1_000 }, 2).unwrap();
+    let chunk = TileId::new(Face(2), CHUNK_GRID_LEVEL, 1000, 1000).unwrap();
+    let (s0, s1, t0, t1) = chunk.bounds();
+    let at = |s: f64| PlanetFixed(planet_core::cube::face_to_direction(&TangentWarp, Face(2), s, 0.5 * (t0 + t1)) * (R + 300.0));
+    let mut lp = FakeLoop {
+        travel: planet_frame::prefetch::TravelEstimator::new(planet_frame::prefetch::PrefetchConfig::default(), R),
+        pending: edit_pending,
+        landed: 0,
+        evicted: 0,
+    };
+    let mut counters = FeatureCounters::default();
+    for frame in 0..120u64 {
+        // 800 m a second east: the camera crosses a few of the 300 m cells of this rig's chunks.
+        let pos = at(s0 + (s1 - s0) * 0.1 + 800.0 * (frame as f64 * 0.1) / (R * std::f64::consts::FRAC_PI_2) * 2.0);
+        lp.travel.observe(frame * 100, pos);
+        frame_step(&r.world, &mut lp, &[tile()], pos, &features, &mut counters);
+        r.chunk_jobs.run(64);
+        r.horizon_jobs.run(64);
+        r.clock.advance(100);
+    }
+    (counters, lp.landed)
+}
+
+// spec: TEST-058
+#[test]
+fn the_chunk_step_counts_every_enabled_feature_and_a_feature_turned_off_counts_nothing() {
+    use planet::chunkstage::FrameFeatures;
+    let (on, landed) = fly_through_the_step(FrameFeatures::default(), true);
+    assert_eq!(on.frames, 120);
+    assert!(on.prefetch_frames > 0 && on.prefetch_asked >= on.prefetch_frames, "a travelling camera asks for chunks: {on:?}");
+    assert!(on.chunks_landed > 0 && on.chunks_landed as usize == landed, "{on:?} / {landed}");
+    assert!(on.horizon_frames == 120 && on.horizon_landed > 0, "the horizon jobs ran and landed maps: {on:?}");
+    assert!(on.stale_hold_frames == 120, "an edit pending holds the stale chunks every frame: {on:?}");
+    // The same flight with each feature off: its counters stay 0 and the others do not change their meaning.
+    let (off, _) = fly_through_the_step(FrameFeatures { prefetch: false, horizon: false, stale_hold: false }, true);
+    assert_eq!(
+        (off.prefetch_asked, off.prefetch_frames, off.horizon_frames, off.horizon_landed, off.stale_hold_frames),
+        (0, 0, 0, 0, 0),
+        "{off:?}"
+    );
+    assert!(off.chunks_landed > 0, "the chunks themselves still land: {off:?}");
+}

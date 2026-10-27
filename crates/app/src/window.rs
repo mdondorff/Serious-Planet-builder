@@ -231,6 +231,9 @@ struct Running {
     refresh_logged: (usize, u64),
     /// Since the last refresh line: chunks landed, and the plan's chunk-reading nodes and their stand-ins summed over the frames.
     chunk_acc: (u64, u64, u64),
+    /// What the chunk step did, per feature (TEST-058), and the horizon update of the last step (its maps are uploaded in the horizon frame).
+    chunk_counters: crate::chunkstage::FeatureCounters,
+    horizon_update: planet_streaming::chunks::HorizonUpdate,
     last_ms: Option<u64>,
     last_gpu_sample: Instant,
     gpu_ms: Option<f64>,
@@ -455,6 +458,8 @@ impl App<'_> {
             last_counts: Default::default(),
             refresh_logged: (0, 0),
             chunk_acc: (0, 0, 0),
+            chunk_counters: Default::default(),
+            horizon_update: Default::default(),
             last_ms: None,
             last_gpu_sample: Instant::now(),
             gpu_ms: None,
@@ -738,18 +743,21 @@ impl App<'_> {
             }
             if st.chunks_on {
                 let tiles: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
-                // The stale chunks wait while the tiles of an edit are still being built (STRM-056), at most the cap.
-                self.world
-                    .hold_stale_chunks(!st.rig.managed.pending().is_empty() || st.rig.managed.manager().streamer().unfinished_jobs() > 0);
-                let (travel, radius_m) = (st.rig.managed.travel(), self.world.radius_m());
-                let (update, _) = self.world.chunk_frame_with(&tiles, camera.position, |wanted| {
-                    crate::chunkstage::chunk_prefetch_track(travel, camera.position, wanted, radius_m)
-                });
-                st.rig.managed.chunk_landed(&update.landed);
+                // The chunk step of the viewer and the scenes (TEST-058); the horizon jobs run for the lit frames only, their maps are uploaded below.
+                let features = crate::chunkstage::FrameFeatures { horizon: frame.pipeline.draw.plan.lit.is_some(), ..Default::default() };
+                let step = crate::chunkstage::frame_step(
+                    self.world,
+                    &mut st.rig.managed,
+                    &tiles,
+                    camera.position,
+                    &features,
+                    &mut st.chunk_counters,
+                );
+                st.horizon_update = step.horizon;
+                let update = step.update;
                 st.chunk_acc.0 += update.landed.len() as u64;
                 st.chunk_acc.1 += frame.counts.chunk.chunk_nodes as u64;
                 st.chunk_acc.2 += frame.counts.chunk.chunk_stand_in as u64;
-                st.rig.managed.chunk_evicted(&update.evicted);
                 // One line every 10 s about the refresh jobs since the last: the wait in the queues and the load of the rebuilds that bring a landed
                 // chunk's change to the screen (STRM-055).
                 if now_ms >= st.refresh_logged.1 + 10_000 {
@@ -930,7 +938,7 @@ impl App<'_> {
             // The horizon shadows (REND-038): the chunk maps in their slots and the coarse map, for the lit frames over a world with a chunk stage.
             if let Some(lit) = plan.lit.as_ref().filter(|_| st.chunks_on) {
                 let tiles: Vec<TileId> = plan.nodes.iter().map(|n| n.tile).collect();
-                st.horizon.frame(self.world, ctx, &mut st.rig.renderer, &tiles, plan.camera.position, lit.sun_dir);
+                st.horizon.frame(self.world, ctx, &mut st.rig.renderer, &tiles, &std::mem::take(&mut st.horizon_update), lit.sun_dir);
             }
             st.stall.mark("horizon frame and upload");
             // The regions overlay (VIEW-030): the region items of the editor's definition nearest the camera, decided here, drawn by the renderer.
