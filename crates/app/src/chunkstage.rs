@@ -100,7 +100,7 @@ pub fn enable_viewer_stage_sized(
         Some(n) => {
             let n = n.max(1);
             (
-                planet_streaming::GenWorkers::new(n).with_priority(gen.priority).pool(),
+                planet_streaming::GenWorkers::new(n).with_priority(gen.priority).pool_with_idle(1),
                 planet_streaming::chunks::ChunkConfig { workers: n, ..Default::default() },
             )
         }
