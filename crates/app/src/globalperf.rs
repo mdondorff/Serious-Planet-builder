@@ -791,6 +791,25 @@ mod tests {
             writeln!(out, "camera {altitude:.0} m up: {n} picks, {hits} hits, mean {:.1} ms, worst {worst:.0} ms", sum / f64::from(n))
                 .map_err(err)
                 .unwrap();
+            // The same picks with the height of the tile level whose vertex spacing is about a pixel's footprint at the camera's distance to the surface.
+            let (mut worst_l, mut sum_l, mut hits_l) = (0.0f64, 0.0f64, 0u32);
+            let footprint_m = altitude * 2.0 * libm::tan(45f64.to_radians()) / h;
+            let level =
+                (libm::ceil(libm::log2(radius * core::f64::consts::FRAC_PI_2 / 32.0 / footprint_m.max(1e-3))).clamp(3.0, 22.0)) as u8;
+            for gx in 0..9 {
+                for gy in 0..5 {
+                    let ray = cursor_ray(&camera, w * (f64::from(gx) + 0.5) / 9.0, h * (f64::from(gy) + 0.5) / 5.0, w, h);
+                    let t = std::time::Instant::now();
+                    let hit = pick_surface(&ray, &limits, &|d| field.height_at_level(d, level));
+                    let ms = t.elapsed().as_secs_f64() * 1000.0;
+                    worst_l = worst_l.max(ms);
+                    sum_l += ms;
+                    hits_l += u32::from(hit.is_some());
+                }
+            }
+            writeln!(out, "  at level {level}: {hits_l} hits, mean {:.1} ms, worst {worst_l:.0} ms", sum_l / f64::from(n))
+                .map_err(err)
+                .unwrap();
         }
     }
 

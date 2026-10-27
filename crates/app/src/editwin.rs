@@ -480,6 +480,29 @@ impl EditRuntime {
     }
 
     /// The surface under a cursor (render pixels).
+    /// The tile level whose vertex spacing is about one pixel of the view at the camera's height over the surface: the finest height a pick can use,
+    /// since the screen cannot show more (the hover of the editor reads this level, not the finest one: a ray through the planet-scale view
+    /// takes a thousand times less, VIEW-056). Never below level 3, never above the pyramid's finest level.
+    pub fn pick_level(camera: &Camera, viewport: Viewport, radius_m: f64) -> u8 {
+        let altitude = (camera.position.0.length() - radius_m).max(1.0);
+        let pixel_m = altitude * 2.0 * libm::tan(0.5 * camera.fov_y_rad) / viewport.height_px.max(1.0);
+        let level = libm::ceil(libm::log2(radius_m * core::f64::consts::FRAC_PI_2 / 32.0 / pixel_m.max(1e-3)));
+        level.clamp(3.0, f64::from(planet_core::tile::MAX_LEVEL)) as u8
+    }
+
+    /// [`EditWindow::hit_at`] with the height of tile level `level` (the hover; a click places at [`EditWindow::hit_at`]'s exact surface).
+    pub fn hit_at_level(
+        camera: &Camera,
+        viewport: Viewport,
+        cursor: [f64; 2],
+        limits: &PickLimits,
+        field: &dyn HeightField,
+        level: u8,
+    ) -> Option<SurfaceHit> {
+        let ray = cursor_ray(camera, cursor[0], cursor[1], viewport.width_px, viewport.height_px);
+        pick_surface(&ray, limits, &|d| field.height_at_level(d, level))
+    }
+
     pub fn hit_at(
         camera: &Camera,
         viewport: Viewport,
@@ -529,9 +552,11 @@ impl EditRuntime {
         };
         self.overlay = overlay::build(&self.session, &self.shown, &view, &ground);
         self.handles = overlay::handle_pixels(&self.overlay);
-        self.draft = overlay::draft(&self.session, &view, &|d| field.height(d), (!over_ui).then_some(cursor));
-        let hit = if over_ui { None } else { Self::hit_at(camera, viewport, cursor, limits, field) };
-        self.brush = overlay::brush(&self.session, &view, &|d| field.height(d), hit.map(|h| h.dir));
+        // The hover, the draft and the brush ring read the height of the level a pixel of this view can show.
+        let level = Self::pick_level(camera, viewport, self.radius_m);
+        self.draft = overlay::draft(&self.session, &view, &|d| field.height_at_level(d, level), (!over_ui).then_some(cursor));
+        let hit = if over_ui { None } else { Self::hit_at_level(camera, viewport, cursor, limits, field, level) };
+        self.brush = overlay::brush(&self.session, &view, &|d| field.height_at_level(d, level), hit.map(|h| h.dir));
         if !over_ui {
             let mpp = self.height_mpp(camera, viewport);
             let v = PointerView { cursor, hit, shown: &self.shown, handles: &self.handles, metres_per_pixel: mpp };
@@ -1084,6 +1109,27 @@ mod tests {
         let d = std::env::temp_dir().join(format!("planet-editwin-{tag}-{}-{:?}", std::process::id(), std::thread::current().id()));
         let _ = std::fs::remove_dir_all(&d);
         d
+    }
+
+    // spec: VIEW-059
+    #[test]
+    fn the_pick_level_is_coarse_at_the_planet_view_and_the_finest_close_to_the_ground() {
+        let viewport = Viewport { width_px: 2560.0, height_px: 1440.0 };
+        let at = |altitude_m: f64| {
+            let camera = Camera::at_surface_point(
+                planet_core::PlanetFixed(Vec3::new(1.0, 0.0, 0.0) * (R + altitude_m)),
+                Vec3::new(0.0, 0.0, 1.0),
+                0.3,
+                90f64.to_radians(),
+                16.0 / 9.0,
+                0.5,
+            );
+            EditRuntime::pick_level(&camera, viewport, R)
+        };
+        let (far, mid, near, ground) = (at(20_000_000.0), at(5_000_000.0), at(1_000.0), at(0.01));
+        assert!(far >= 3 && mid <= 6, "planet view: {far}, {mid}");
+        assert!(far <= mid && mid < near && near < ground, "finer as the camera comes down: {far} {mid} {near} {ground}");
+        assert_eq!(ground, planet_core::tile::MAX_LEVEL, "a hand over the ground reads the finest level");
     }
 
     // spec: VIEW-041

@@ -1,0 +1,1 @@
+- 2026-10-27 **editor at the planet view (owner test group A item 2)**: the hover/draft/brush read the tile level a pixel can show (VIEW-059: 3 to 17 ms a pick at planet scale, now 0.0 to 0.1) and a warm-up thread reads the bake blocks ahead of the camera (a cold block was 100 ms to 0.9 s on the main thread); `PLANET_STALL_MS` prints phase means.
