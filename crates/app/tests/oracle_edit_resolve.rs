@@ -122,3 +122,63 @@ fn an_edit_in_the_read_set_re_solves_the_chunk_to_the_bits_of_a_cold_solve_and_a
     assert_eq!(cold, resolved, "a re-solve after an edit equals a cold solve of the new version");
     let _ = (std::fs::remove_dir_all(&a), std::fs::remove_dir_all(&b));
 }
+
+/// Re-solve `tile` on `world` after its definition changed to `def`, until nothing is in flight, and return the result hash of the chunk.
+fn resolve(world: &Arc<WorldTerrain>, spawner: &ManualSpawner, tile: TileId, def: &WorldDefinition) -> u64 {
+    let manager = world.chunk_manager().expect("chunks");
+    let key = manager.reads(tile)[0];
+    let camera = planet_core::PlanetFixed(tile.center_direction(&planet_core::cube::TangentWarp) * R);
+    world.set_definition(Arc::new(def.clone())).unwrap();
+    world.chunk_frame(&[tile], camera, &[]);
+    while manager.in_flight() > 0 {
+        spawner.run_one();
+        world.chunk_frame(&[tile], camera, &[]);
+    }
+    manager.result_hash(key).expect("landed")
+}
+
+// spec: GEN-087, GEN-082
+#[test]
+fn a_hill_put_moved_and_taken_away_re_solves_to_the_bits_of_a_cold_solve_while_the_heights_far_from_it_are_reused() {
+    let (a, b) = (store_with_run("reuse-a"), store_with_run("reuse-b"));
+    let cfg = ChunkConfig { workers: 2, ..ChunkConfig::default() };
+    let spawner = Arc::new(ManualSpawner::default());
+    let tile = TileId::new(Face(0), 15, 16000, 16000).unwrap();
+    let centre = tile.center_direction(&planet_core::cube::TangentWarp);
+    // A second place a little off the first: the moved hill leaves the old place and takes the new one.
+    let moved = (centre + planet_core::Vec3::new(0.0, 0.0, 1.0) * (1_500.0 / R)).normalized();
+
+    let world = open(&a);
+    assert_eq!(world.enable_anet_from_store(CELL_M, spawner.clone(), Arc::new(FakeClock::default()), cfg), Ok(true));
+    let (_, plain) = land(&world, &spawner, tile);
+    let base_def = (*world.definition()).clone();
+    let cold = |def: &WorldDefinition| -> u64 {
+        let w = Arc::new(WorldTerrain::open_store(def.clone(), &b, RES).expect("the store opens"));
+        let s = Arc::new(ManualSpawner::default());
+        assert_eq!(w.enable_anet_from_store(CELL_M, s.clone(), Arc::new(FakeClock::default()), cfg), Ok(true));
+        land(&w, &s, tile).1
+    };
+    let _ = planet::regionheights::reuse_stats();
+
+    // Put.
+    let mut put = base_def.clone();
+    put.put_item_spec(planet_world_def::BodyId::PLANET, hill_at(centre, 7)).unwrap();
+    let after_put = resolve(&world, &spawner, tile, &put);
+    assert_ne!(after_put, plain, "the hill changed the chunk");
+    assert_eq!(after_put, cold(&put), "put: a re-solve equals a cold solve");
+    let (reused, asked) = planet::regionheights::reuse_stats();
+    assert!(asked > 0 && reused > 0, "put: no height was reused ({reused} of {asked})");
+
+    // Moved: the same item id at another place.
+    let mut mv = put.clone();
+    mv.put_item_spec(planet_world_def::BodyId::PLANET, hill_at(moved, 7)).unwrap();
+    let after_move = resolve(&world, &spawner, tile, &mv);
+    assert_eq!(after_move, cold(&mv), "moved: a re-solve equals a cold solve");
+    let (reused, asked) = planet::regionheights::reuse_stats();
+    assert!(asked > 0 && reused > 0, "moved: no height was reused ({reused} of {asked})");
+
+    // Taken away: the first result again.
+    let after_remove = resolve(&world, &spawner, tile, &base_def);
+    assert_eq!(after_remove, plain, "removed: the chunk is what it was before the hill");
+    let _ = (std::fs::remove_dir_all(&a), std::fs::remove_dir_all(&b));
+}

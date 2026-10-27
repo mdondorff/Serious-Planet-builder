@@ -34,6 +34,8 @@ pub struct WorldBase {
     failed: std::sync::atomic::AtomicBool,
     /// Threads a batch of base heights uses.
     threads: usize,
+    /// The heights of the chunk regions across an edit (GEN-087).
+    regions: crate::regionheights::RegionCache,
 }
 
 impl WorldBase {
@@ -52,7 +54,13 @@ impl WorldBase {
             h = mix64(h ^ fold(f.implementation_id()));
             h = mix64(h ^ u64::from(f.version()));
         }
-        WorldBase { world: Arc::downgrade(world), identity: h, failed: Default::default(), threads: world.base_threads() }
+        WorldBase {
+            world: Arc::downgrade(world),
+            identity: h,
+            failed: Default::default(),
+            threads: world.base_threads(),
+            regions: Default::default(),
+        }
     }
 }
 
@@ -67,6 +75,39 @@ impl BaseDetail for WorldBase {
         let Ok(field) = world.under_field() else { return self.lost(dirs.len()) };
         let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(self.threads);
         field.heights_threaded_until(dirs, &|| false, threads)
+    }
+
+    /// The heights of a chunk region. A batch that was read under another definition of the same base is answered from those heights outside the reach
+    /// of the items that differ (GEN-087): only the cells within a changed item's reach are read again. The first read, a base that changed, or a
+    /// change that reaches most of the batch reads every cell.
+    fn region_heights(&self, dirs: &[Vec3]) -> Vec<f64> {
+        let Some(world) = self.world.upgrade() else { return self.lost(dirs.len()) };
+        let def = world.definition();
+        let key = crate::regionheights::batch_key(dirs);
+        let reused =
+            self.regions.get(key).filter(|(old, heights)| heights.len() == dirs.len() && def.same_but_items(old)).map(|(old, heights)| {
+                let stale = crate::regionheights::stale_points(dirs, &def.item_changes_from(&old), world.radius_m());
+                (heights, stale)
+            });
+        let heights = match reused {
+            Some((old, stale)) if stale.len() * 2 <= dirs.len() => {
+                let mut out = (*old).clone();
+                if !stale.is_empty() {
+                    let sub: Vec<Vec3> = stale.iter().map(|&i| dirs[i]).collect();
+                    for (&i, h) in stale.iter().zip(self.heights_under(&world, &def, &sub)) {
+                        out[i] = h;
+                    }
+                }
+                crate::regionheights::count(dirs.len() - stale.len(), dirs.len());
+                out
+            }
+            _ => self.heights_under(&world, &def, dirs),
+        };
+        // Kept only if the definition did not move while the heights were read and every answer was a real one.
+        if self.healthy() && world.definition().revision() == def.revision() {
+            self.regions.put(key, def, Arc::new(heights.clone()));
+        }
+        heights
     }
 
     fn coarse_input(&self, dir: Vec3) -> f64 {
@@ -98,6 +139,13 @@ impl WorldBase {
     fn lost(&self, n: usize) -> Vec<f64> {
         self.failed.store(true, std::sync::atomic::Ordering::SeqCst);
         vec![0.0; n]
+    }
+
+    /// The heights of `dirs` of the field built from `def`, not from the definition the world holds now: what is kept with `def` is `def`'s (GEN-087).
+    fn heights_under(&self, world: &Arc<WorldTerrain>, def: &Arc<planet_world_def::WorldDefinition>, dirs: &[Vec3]) -> Vec<f64> {
+        let Ok(field) = world.under_field_for(def) else { return self.lost(dirs.len()) };
+        let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(self.threads);
+        field.heights_threaded_until(dirs, &|| false, threads)
     }
 }
 

@@ -98,12 +98,20 @@ fn secs(d: Duration) -> f64 {
 /// The per-chunk-job times of the phases of the chunks solved since the last call: the network (base heights, routing, beds), the solve and the
 /// drivers, summed over the jobs and divided by their number; the jobs overlap in wall time when they run in parallel.
 fn phases() -> String {
-    let [network, solve, drivers, solved] = planet_generators::anet::phase_totals_ms();
+    let [network, solve, drivers, solved, base_heights] = planet_generators::anet::phase_totals_ms();
     if solved < 1.0 {
         return String::new();
     }
     let per = |ms: f64| ms / solved / 1000.0;
-    format!(" [per chunk job: network {:.1} s, solve {:.1} s, drivers {:.1} s, {solved:.0} jobs]", per(network), per(solve), per(drivers))
+    let (reused, asked) = crate::regionheights::reuse_stats();
+    let reuse = if asked > 0 { format!("; region cells reused {:.0} %", 100.0 * reused as f64 / asked as f64) } else { String::new() };
+    format!(
+        " [per chunk job: network {:.1} s (base heights {:.1} s), solve {:.1} s, drivers {:.1} s, {solved:.0} jobs{reuse}]",
+        per(network),
+        per(base_heights),
+        per(solve),
+        per(drivers)
+    )
 }
 
 fn fmt_opt(d: Option<Duration>) -> String {

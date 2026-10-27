@@ -94,6 +94,11 @@ pub trait BaseDetail: Send + Sync {
     }
     /// What the coupled run's input held at the direction (the bake's elevation read there), metres.
     fn coarse_input(&self, dir: Vec3) -> f64;
+    /// [`BaseDetail::base_heights`] for the cells of one chunk region, in the order of the lattice: a base that remembers the batch across an edit
+    /// answers it from the previous heights outside the edit's reach (GEN-087). The default is `base_heights`.
+    fn region_heights(&self, dirs: &[Vec3]) -> Vec<f64> {
+        self.base_heights(dirs)
+    }
     /// A hash of the base field and the input the run started from (their keys): part of the stage's definition hash.
     fn identity(&self) -> u64;
     /// A number that differs whenever the base's heights may have changed (an edit under the chunk stage, GEN-082): the routing memo of one
@@ -271,7 +276,7 @@ impl Network {
         // The base heights of the region's cells, read before the routing: the raster of a segment is every few cells of this lattice, so the points of it
         // that lie in the region are these heights (GEN-077).
         let dirs: Vec<Vec3> = region.cells.iter().map(|&c| lat.direction(c)).collect();
-        let heights = base.base_heights(&dirs);
+        let heights = timed_region_heights(base, &dirs);
         if prune {
             segments = segments_reaching(run, &dirs, &segments, lat, radius_m, law);
         }
@@ -883,7 +888,7 @@ fn anchor_profiles(
         dirs.extend(spots.iter().copied());
         samples.insert((from, to), Samples { ts, spots, areas });
     }
-    let heights = base.base_heights(&dirs);
+    let heights = timed_base_heights(base, &dirs);
     let mut ground: BTreeMap<(usize, usize), Vec<f64>> = BTreeMap::new();
     let mut at = 0;
     for (seg, smp) in &samples {
@@ -1038,7 +1043,8 @@ pub struct Solution {
 
 /// Diagnostic clocks of the chunk stage, summed over every chunk since the last [`phase_totals_ms`] (the `generate --edit-resolve` report): the
 /// network (base heights, routing, beds), the solve and the driver channels, in nanoseconds, and the chunks counted. Never read by the stage.
-static PHASE_NS: [std::sync::atomic::AtomicU64; 4] = [
+static PHASE_NS: [std::sync::atomic::AtomicU64; 5] = [
+    std::sync::atomic::AtomicU64::new(0),
     std::sync::atomic::AtomicU64::new(0),
     std::sync::atomic::AtomicU64::new(0),
     std::sync::atomic::AtomicU64::new(0),
@@ -1046,10 +1052,26 @@ static PHASE_NS: [std::sync::atomic::AtomicU64; 4] = [
 ];
 
 /// The summed times in milliseconds of the network, the solve and the drivers, and the number of chunks solved, since the last call (reset).
-pub fn phase_totals_ms() -> [f64; 4] {
+pub fn phase_totals_ms() -> [f64; 5] {
     use std::sync::atomic::Ordering::SeqCst;
     let take = |i: usize| PHASE_NS[i].swap(0, SeqCst);
-    [take(0) as f64 / 1.0e6, take(1) as f64 / 1.0e6, take(2) as f64 / 1.0e6, take(3) as f64]
+    [take(0) as f64 / 1.0e6, take(1) as f64 / 1.0e6, take(2) as f64 / 1.0e6, take(3) as f64, take(4) as f64 / 1.0e6]
+}
+
+/// The base heights of a chunk region ([`BaseDetail::region_heights`]), timed into the fifth clock: the part of the network that is the base field being read.
+pub(crate) fn timed_region_heights(base: &dyn BaseDetail, dirs: &[Vec3]) -> Vec<f64> {
+    let started = std::time::Instant::now();
+    let h = base.region_heights(dirs);
+    phase_add(4, started);
+    h
+}
+
+/// The base heights of `dirs` ([`BaseDetail::base_heights`]), timed into the fifth clock: the router's and the anchors' reads.
+pub(crate) fn timed_base_heights(base: &dyn BaseDetail, dirs: &[Vec3]) -> Vec<f64> {
+    let started = std::time::Instant::now();
+    let h = base.base_heights(dirs);
+    phase_add(4, started);
+    h
 }
 
 fn phase_add(i: usize, started: std::time::Instant) {

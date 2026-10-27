@@ -862,6 +862,12 @@ impl WorldDefinition {
         self.items.get(&(body, id)).map(|rec| (rec.unit(), f64::from_bits(rec.reach_bits)))
     }
 
+    /// Whether `other` differs from this definition at most in its authored items: the same nodes and height field (the procedural base) and the same
+    /// `chunk_stage` settings. What `item_changes_from` reports is then everything that differs for the field below the chunk stage (GEN-087).
+    pub fn same_but_items(&self, other: &WorldDefinition) -> bool {
+        self.base_hash() == other.base_hash() && self.chunk_stages == other.chunk_stages
+    }
+
     /// Where the items that differ between `older` and `self` were and are, as `(unit direction, reach in metres)`: for every item that is in one
     /// and not in the other, or is in both with another record (place, reach, layer, priority, amount or stroke), the place it had in `older` and the
     /// place it has now. What the tiles that read the definition can have to recompute is what these places reach (STRM-034); a change of the
