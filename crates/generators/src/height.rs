@@ -324,6 +324,13 @@ pub trait HeightField: Send + Sync {
     fn reads_cells(&self) -> bool {
         false
     }
+    /// [`reads_cells`](HeightField::reads_cells) for the field a key at `tile` stands for: the same answer, except for a wrapper that stops the
+    /// key walk ([`key_source`]) without being the layer the key names (a lens), which answers for the layer the walk reaches below it. A stage
+    /// that passes the tile through reads no cell of its own there, so the assertion that a cell-reading field reports its queries must not
+    /// meet it (the owner's K views, 2026-10-27).
+    fn reads_cells_for(&self, _tile: TileId, _map: &dyn FaceMapping) -> bool {
+        self.reads_cells()
+    }
     /// [`inputs_hash`](HeightField::inputs_hash) for one tile (WDEF-005): the field-wide hash, or for a field that
     /// [`reads_cells`](HeightField::reads_cells) the hash of its per-tile [`read_records_for`], so an edit in one cell
     /// re-keys the tiles that read it in both key paths. The cell grid is the tangent-warp grid: `map` is the mapping the
@@ -733,6 +740,9 @@ impl<T: HeightField + ?Sized> HeightField for Box<T> {
     }
     fn reads_cells(&self) -> bool {
         (**self).reads_cells()
+    }
+    fn reads_cells_for(&self, tile: TileId, map: &dyn FaceMapping) -> bool {
+        (**self).reads_cells_for(tile, map)
     }
     fn inputs_hash_for(&self, tile: TileId, map: &dyn FaceMapping) -> u64 {
         (**self).inputs_hash_for(tile, map)

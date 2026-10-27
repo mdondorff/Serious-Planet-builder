@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: TEST-058 Every frame loop runs the same chunk step and an enabled feature must act
-The viewer and every perf scene that drives chunks SHALL run the per-frame chunk step through one function (`chunkstage::frame_step`), and each scene SHALL report the counters of its enabled features (prefetch asked, prefetch jobs started, horizon maps baked and landed, stale-hold frames, chunks landed and evicted, plan-cache announcements). A scene SHALL fail, naming the feature and the counter table, when a feature it has enabled counted 0 where the scene expects it to act.
+The viewer and every perf scene that drives chunks SHALL run the per-frame chunk step through one function (`chunkstage::frame_step`), and each scene SHALL report the counters of its enabled features (prefetch asked, prefetch jobs started, horizon maps baked and landed, stale-hold frames, chunks landed and evicted, plan-cache announcements). A scene SHALL fail, naming the feature and the counter table, when a feature it has enabled counted 0 where the scene expects it to act; the window's smoke run SHALL fail when it drew lit over a chunk stage and its chunk step never ran the horizon jobs.
 
 Verify: A, C
 Status: active
@@ -16,7 +16,11 @@ Per-scene table (the counters each scene checks; a scene with the feature off ch
 | envelope flights (not smoke) | > 0 | > 0 | not checked | not checked | `perf/logs/envelope.json`, per trial `stage.counters` |
 | edit latency, with chunks | not checked (the camera does not travel) | > 0 | > 0 | > 0 | report line per altitude |
 | stills and edit-resolve settling loops | off | off or on by call | off | not checked | not logged |
-| viewer window | not checked | not checked | not checked | not checked | counted only |
+| viewer window (`editor --smoke`, over a chunk stage) | not checked | > 0 on the lit frames (the smoke verdict) | not checked | not checked | the smoke summary, `chunk step:` |
+
+#### Scenario: A window that never baked
+- **WHEN** the editor's smoke run draws lit frames over a store with a chunk stage and the horizon feature of its chunk step is off
+- **THEN** the smoke verdict fails naming the horizon jobs and the lit frames that had a stage
 
 #### Scenario: A step left out
 - **WHEN** a frame loop over a travelling camera on the stand-in chunk stage runs the step, and again with the prefetch step left out
