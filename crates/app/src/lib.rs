@@ -509,9 +509,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
                 o.base_threads =
                     Some(it.next().ok_or("--base-threads needs a number")?.parse().map_err(|e| format!("--base-threads: {e}"))?)
             }
-            "--repeats" => {
-                o.repeats = Some(it.next().ok_or("--repeats needs a number")?.parse().map_err(|e| format!("--repeats: {e}"))?)
-            }
+            "--repeats" => o.repeats = Some(it.next().ok_or("--repeats needs a number")?.parse().map_err(|e| format!("--repeats: {e}"))?),
             "--horizon-threads" => {
                 o.horizon_threads =
                     Some(it.next().ok_or("--horizon-threads needs a number")?.parse().map_err(|e| format!("--horizon-threads: {e}"))?)
@@ -765,7 +763,16 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
             // `--prefill-levels`: the levels of the tile pack the gated dives require pre-filled at their start (default 4).
             // `--altitudes-m`: the altitudes of the envelope scene (`--only-steady`, TEST-057).
             // `--base-threads`: the threads of a batch of the A-net's base heights in the edit-latency scene (with `--chunk-workers`).
-            &["--world", "--global-res", "--prefill-levels", "--base-threads", "--horizon-threads", "--repeats", "--altitudes-m", "--places"]
+            &[
+                "--world",
+                "--global-res",
+                "--prefill-levels",
+                "--base-threads",
+                "--horizon-threads",
+                "--repeats",
+                "--altitudes-m",
+                "--places",
+            ]
         } else if window {
             &["--world", "--global-res", "--prefill-levels"]
         } else if terrain_scene {
