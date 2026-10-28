@@ -2112,6 +2112,488 @@ mod tests {
         }
     }
 
+    // spec: GEN-037
+    /// D0 decision measurement (M8-D0, in memory, nothing built): per site (the F9 poses of `PLANET_D0_FRAMES`, the nearest `PLANET_D0_NEAR` chunks of its
+    /// level-15 nodes) and for a random land sample (`PLANET_D0_RANDOM` chunks), the chunk change as the production stage reads it (levels 15 and 16 of the
+    /// raster), then the variant: the coarse carve in replace form (`r = c + min(carve, max(-c, 0))`) and the detail-only correction (`r - S`, S the box mean of
+    /// the replaced level-16 change over 2h+1 raster samples, h = 1, 16, 64 of 4.77 m: 9.5 m = the level-15 vertex spacing, 157 m, 615 m = the bake cell).
+    /// Level 14 reads the carved base, so the entry step is `|r15 - S|` and the step 16/15 is `|r16 - r15|`. Rivers: the coarse polylines at or over
+    /// `PLANET_D0_THR` m2 followed downstream, the bed the lowest of 7 points across 120 m every 20 m, the rises counted over 100 m steps. The channel depth is
+    /// the process's `PLANET_ANCHOR`. `PLANET_ANET_STORE=DIR PLANET_ANET_RES=16384 cargo test -p planet --release --lib d0_variant_report -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "a measurement: it solves the chunks of several poses"]
+    fn d0_variant_report() {
+        use planet_core::cube::{direction_to_face, TangentWarp};
+        use planet_core::hash::SplitMix64;
+        use planet_generators::chunkfield::{compute_chunk, halo_rings, ChunkField};
+        use planet_generators::anet::CoarseRun;
+        use std::collections::{HashMap, HashSet};
+        use std::sync::Arc;
+        const N: u32 = 1024;
+        const M: u32 = 64;
+        const HS: [u32; 3] = [1, 16, 64];
+        const NV: usize = 5;
+        let mut out = std::io::stdout();
+        let res: u32 = std::env::var("PLANET_ANET_RES").ok().and_then(|r| r.parse().ok()).unwrap_or(256);
+        let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
+        let envf = |k: &str, d: f64| std::env::var(k).ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(d);
+        let thr = envf("PLANET_D0_THR", 5.0e7);
+        let near = envf("PLANET_D0_NEAR", 4.0) as usize;
+        let random = envf("PLANET_D0_RANDOM", 0.0) as usize;
+        let frames: Vec<String> = std::env::var("PLANET_D0_FRAMES")
+            .unwrap_or_else(|_| "31358,32034,41356,41595,50119,116591,134050,139490,181555,187750".to_string())
+            .split(',')
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect();
+        let dir = std::env::var("PLANET_D0_DIR").unwrap_or_else(|_| "C:/DEV/SeriousPlanetData/owner-test-2026-10-27".to_string());
+        let (world, maps, _) = anet_scene(res, 11, store, &mut out).unwrap();
+        let radius = world.radius_m();
+        let lat = planet_generators::chunkfield::ChunkLattice::new(crate::anetworld::cells_per_chunk_for(radius, 8.0)).unwrap();
+        let top = planet_generators::chunk::CHUNK_GRID_LEVEL;
+        let entry = crate::anetworld::ANET_TOP_LEVEL;
+        let map = &TangentWarp;
+        let coarse = maps.lattice();
+        let basef = world.base_field().unwrap();
+        let stage = {
+            let mut params = planet_generators::anet::ANetParams::spike(crate::anetworld::ANET_HALO_M, lat.cell_m(radius));
+            params.drivers.seed = world.base_seed();
+            planet_generators::anet::ANet {
+                run: maps.clone(),
+                base: Arc::new(crate::anetworld::WorldBase::new(&world)),
+                radius_m: radius,
+                params,
+                memo: Default::default(),
+            }
+        };
+        writeln!(out, "D0 variant: PLANET_ANCHOR={:?}, river threshold {thr:.0e} m2", std::env::var("PLANET_ANCHOR").ok()).map_err(err).unwrap();
+        // The sets of chunks: one per pose and the random sample.
+        let mut sets: Vec<(String, Vec<planet_core::TileId>)> = Vec::new();
+        let plain = world.field().unwrap();
+        for f in &frames {
+            let path = format!("{dir}/frame-{f}.bundle");
+            let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+            let b = planet_frame::TerrainBundle::from_text(&text).expect("a terrain bundle");
+            let cam = b.request.camera.position.0.normalized();
+            let sel = planet_frame::select_nodes_in_view_field(map, &b.request.camera, &*plain, &b.request.lod.clone());
+            let mut chunks: Vec<planet_core::TileId> = Vec::new();
+            for n in sel.nodes.iter().filter(|n| n.tile.level() >= entry) {
+                let c = planet_core::TileId::from_direction(map, n.tile.center_direction(map), top);
+                if !chunks.contains(&c) {
+                    chunks.push(c);
+                }
+            }
+            chunks.sort_by(|a, b2| cam.dot(b2.center_direction(map)).total_cmp(&cam.dot(a.center_direction(map))));
+            chunks.truncate(near);
+            writeln!(out, "site frame-{f}: {} chunks of the level-{entry} nodes (nearest {near})", chunks.len()).map_err(err).unwrap();
+            sets.push((format!("frame-{f}"), chunks));
+        }
+        if random > 0 {
+            let per_face = 1u32 << top;
+            let mut rng = SplitMix64(0x6368_616e_6765);
+            let mut tiles: Vec<planet_core::TileId> = Vec::new();
+            while tiles.len() < random {
+                let face = planet_core::Face::ALL[(rng.next_u64() % 6) as usize];
+                let (x, y) = ((rng.next_u64() % u64::from(per_face)) as u32, (rng.next_u64() % u64::from(per_face)) as u32);
+                let t = planet_core::TileId::new(face, top, x, y).expect("a tile of the chunk grid");
+                if basef.height(t.center_direction(map)) > 0.0 {
+                    tiles.push(t);
+                }
+            }
+            sets.push(("random".to_string(), tiles));
+        }
+        // The raster of a chunk: sample (k, l) at index l * (N + 1) + k, and the inverse from a direction to the raster position.
+        let np = (N + 1) as usize;
+        let inverse = |tile: planet_core::TileId| {
+            let st = |k: u32, l: u32| {
+                let (_, s, t) = direction_to_face(map, tile.sample_direction(map, N, k, l));
+                (s, t)
+            };
+            let ((s00, t00), (s10, t10), (s01, t01)) = (st(0, 0), st(N, 0), st(0, N));
+            let k_is_s = (s10 - s00).abs() > (t10 - t00).abs();
+            move |d: planet_core::Vec3| -> (f64, f64) {
+                let (_, s, t) = direction_to_face(map, d);
+                if k_is_s {
+                    ((s - s00) / (s10 - s00) * f64::from(N), (t - t00) / (t01 - t00) * f64::from(N))
+                } else {
+                    ((t - t00) / (t10 - t00) * f64::from(N), (s - s00) / (s01 - s00) * f64::from(N))
+                }
+            }
+        };
+        let bil = |g: &[f32], u: f64, v: f64| -> f64 {
+            let (u, v) = (u.clamp(0.0, f64::from(N) - 1e-9), v.clamp(0.0, f64::from(N) - 1e-9));
+            let (i, j) = (libm::floor(u) as usize, libm::floor(v) as usize);
+            let (fx, fy) = (u - i as f64, v - j as f64);
+            let at = |a: usize, b: usize| f64::from(g[b * np + a]);
+            at(i, j) * (1.0 - fx) * (1.0 - fy) + at(i + 1, j) * fx * (1.0 - fy) + at(i, j + 1) * (1.0 - fx) * fy + at(i + 1, j + 1) * fx * fy
+        };
+        let cell_key = |f: u8, i: i64, j: i64| {
+            (u64::from(f) << 56)
+                | ((i.clamp(0, i64::from(res) - 1) as u64 & 0x0fff_ffff) << 28)
+                | (j.clamp(0, i64::from(res) - 1) as u64 & 0x0fff_ffff)
+        };
+        let cells_near = |t: planet_core::TileId| -> Vec<usize> {
+            let mut ring = vec![coarse.cell_at(t.center_direction(map))];
+            let mut all = ring.clone();
+            for _ in 0..4 {
+                let mut next: Vec<usize> = Vec::new();
+                for &c in &ring {
+                    for n in coarse.neighbours(c) {
+                        let n = n as usize;
+                        if n != planet_generators::coupled::NONE as usize && !all.contains(&n) && !next.contains(&n) {
+                            next.push(n);
+                        }
+                    }
+                }
+                all.extend(next.iter().copied());
+                ring = next;
+            }
+            all
+        };
+        let depth = |scale: f64, area: f64| (scale * 3.0 * libm::sqrt(area / 1.0e8)).min(100.0 * scale.max(1.0));
+        let carve_grid = |t: planet_core::TileId, scale: f64| -> HashMap<u64, f32> {
+            let mut grid: HashMap<u64, f32> = HashMap::new();
+            for c in cells_near(t) {
+                if f64::from(maps.area_m2(c)) < thr {
+                    continue;
+                }
+                let r = maps.receiver(c);
+                if r == planet_generators::coupled::NONE {
+                    continue;
+                }
+                let (a, b) = (coarse.direction(c), coarse.direction(r as usize));
+                let (area_a, area_b) = (f64::from(maps.area_m2(c)), f64::from(maps.area_m2(r as usize)));
+                let steps = (radius * a.angle_to(b) / 150.0).ceil().max(1.0) as u32;
+                for k in 0..=steps {
+                    let l = f64::from(k) / f64::from(steps);
+                    let p = (a * (1.0 - l) + b * l).normalized();
+                    let (f, s, t2) = direction_to_face(map, p);
+                    let n = f64::from(res);
+                    let (i, j) = (((s + 1.0) * 0.5 * n) as i64, ((t2 + 1.0) * 0.5 * n) as i64);
+                    let d = depth(scale, area_a * (1.0 - l) + area_b * l) as f32;
+                    let e = grid.entry(cell_key(f.0, i, j)).or_insert(0.0);
+                    *e = e.max(d);
+                }
+            }
+            grid
+        };
+        let carve_at = |grid: &HashMap<u64, f32>, d: planet_core::Vec3| -> f64 {
+            if grid.is_empty() {
+                return 0.0;
+            }
+            let (f, s, t) = direction_to_face(map, d);
+            let n = f64::from(res);
+            let (x, y) = ((s + 1.0) * 0.5 * n - 0.5, (t + 1.0) * 0.5 * n - 0.5);
+            let (i0, j0) = (libm::floor(x) as i64, libm::floor(y) as i64);
+            let (wx, wy) = (x - i0 as f64, y - j0 as f64);
+            let at = |i: i64, j: i64| f64::from(grid.get(&cell_key(f.0, i, j)).copied().unwrap_or(0.0));
+            at(i0, j0) * (1.0 - wx) * (1.0 - wy) + at(i0 + 1, j0) * wx * (1.0 - wy) + at(i0, j0 + 1) * (1.0 - wx) * wy + at(i0 + 1, j0 + 1) * wx * wy
+        };
+        let q = |v: &mut Vec<f32>, p: f64| -> f64 {
+            if v.is_empty() {
+                return f64::NAN;
+            }
+            v.sort_by(f32::total_cmp);
+            f64::from(v[(((v.len() - 1) as f64) * p) as usize])
+        };
+        // Phase 1: the chunks of every set, solved once; the level-15 and level-16 change on the raster.
+        struct Solved {
+            tile: planet_core::TileId,
+            c15: Vec<f32>,
+            c16: Vec<f32>,
+        }
+        let mut solved: HashMap<(u8, u32, u32), Arc<Solved>> = HashMap::new();
+        for (_, chunks) in &sets {
+            for &t in chunks {
+                let key = (t.face().0, t.x(), t.y());
+                if solved.contains_key(&key) {
+                    continue;
+                }
+                let Some(r) = compute_chunk(&lat, &stage, radius, entry, t, halo_rings(&stage)) else { continue };
+                let field = ChunkField::new(world.base_field().unwrap(), lat, radius, &stage).with_top_level(entry).with_ready(Arc::new(r));
+                let (mut c15, mut c16) = (vec![0f32; np * np], vec![0f32; np * np]);
+                for l in 0..=N {
+                    for k in 0..=N {
+                        let d = t.sample_direction(map, N, k, l);
+                        c15[l as usize * np + k as usize] = field.change_at_level(d, entry) as f32;
+                        c16[l as usize * np + k as usize] = field.change_at_level(d, entry + 1) as f32;
+                    }
+                }
+                writeln!(out, "  solved chunk {:?} ({} of the sets' chunks)", key, solved.len() + 1).map_err(err).unwrap();
+                solved.insert(key, Arc::new(Solved { tile: t, c15, c16 }));
+            }
+        }
+        // The scale of the carve law: the median incision of the level-16 change on the carve line over the law's median depth at scale 1 (as SPIKE-49).
+        let mut inc: Vec<f32> = Vec::new();
+        let mut law: Vec<f32> = Vec::new();
+        for s in solved.values() {
+            let g1 = carve_grid(s.tile, 1.0);
+            for l in (0..=N).step_by(8) {
+                for k in (0..=N).step_by(8) {
+                    let c = f64::from(s.c16[l as usize * np + k as usize]);
+                    if c < -5.0 {
+                        let cv = carve_at(&g1, s.tile.sample_direction(map, N, k, l));
+                        if cv > 1.0 {
+                            inc.push(-c as f32);
+                            law.push(cv as f32);
+                        }
+                    }
+                }
+            }
+        }
+        let tuned = match std::env::var("PLANET_D0_SCALE").ok().and_then(|v| v.parse::<f64>().ok()) {
+            Some(v) => v,
+            None if inc.is_empty() => 1.0,
+            None => q(&mut inc, 0.5) / q(&mut law, 0.5).max(1e-6),
+        };
+        writeln!(out, "carve scale {tuned:.2} (median incision on the carve line over the law at scale 1, {} points)", inc.len()).map_err(err).unwrap();
+        // Phase 2: per set the steps, the change, the correction and the rivers.
+        let nw = HS.len();
+        let slots = 8 + 3 * nw;
+        // 0 today 15/14, 1 today 16/15, 2 today |c16|, 3 carve only |r15| (entry step), 4 |r16 - r15|, 5 river-centre today 15/14, 6 river-centre today 16/15, 7 |carve|;
+        // then per h: |r15 - S|, |r16 - S|, |S|.
+        let names: Vec<String> = {
+            let mut v: Vec<String> = vec![
+                "today step 15/14 (change at 15)".into(),
+                "today step 16/15".into(),
+                "today change at 16".into(),
+                "carve only (no correction): entry step |r15|".into(),
+                "variant step 16/15 |r16 - r15|".into(),
+                "today step 15/14 on the river centre".into(),
+                "today step 16/15 on the river centre".into(),
+                "carve depth".into(),
+            ];
+            for h in HS {
+                v.push(format!("h={h}: entry/15/14 step |r15 - S|"));
+                v.push(format!("h={h}: change at 16 |r16 - S|"));
+                v.push(format!("h={h}: correction |S|"));
+            }
+            v
+        };
+        let mut pooled_all: Vec<Vec<f32>> = vec![Vec::new(); slots];
+        let mut max_all = vec![0f64; slots];
+        let mut signed_all: Vec<(f64, f64)> = vec![(0.0, 0.0); nw];
+        for (label, chunks) in &sets {
+            let mut pooled: Vec<Vec<f32>> = vec![Vec::new(); slots];
+            let mut mx = vec![0f64; slots];
+            let mut signed: Vec<(f64, f64)> = vec![(0.0, 0.0); nw];
+            // rivers: per variant (today, replace only, h0, h1, h2): steps, rises, longest climb, runs, km.
+            let nv = 2 + nw;
+            let mut rv: Vec<(u64, u64, f64, u64)> = vec![(0, 0, 0.0, 0); nv];
+            let mut river_km = 0.0f64;
+            let mut done = 0usize;
+            for &t in chunks {
+                let Some(s) = solved.get(&(t.face().0, t.x(), t.y())) else { continue };
+                done += 1;
+                let grid = carve_grid(t, tuned);
+                let mut carve = vec![0f32; np * np];
+                for l in 0..=N {
+                    for k in 0..=N {
+                        carve[l as usize * np + k as usize] = carve_at(&grid, t.sample_direction(map, N, k, l)) as f32;
+                    }
+                }
+                let rep = |c: f32, cv: f32| -> f32 { c + cv.min((-c).max(0.0)) };
+                let r16: Vec<f32> = (0..np * np).map(|i| rep(s.c16[i], carve[i])).collect();
+                // prefix sums of r16 for the box means
+                let mut pre = vec![0f64; (np + 1) * (np + 1)];
+                for l in 0..np {
+                    let mut row = 0.0f64;
+                    for k in 0..np {
+                        row += f64::from(r16[l * np + k]);
+                        pre[(l + 1) * (np + 1) + k + 1] = pre[l * (np + 1) + k + 1] + row;
+                    }
+                }
+                let boxm = |k: usize, l: usize, h: usize| -> f32 {
+                    let (k0, k1, l0, l1) = (k - h, k + h + 1, l - h, l + h + 1);
+                    let w = np + 1;
+                    let sum = pre[l1 * w + k1] - pre[l0 * w + k1] - pre[l1 * w + k0] + pre[l0 * w + k0];
+                    (sum / (((2 * h + 1) * (2 * h + 1)) as f64)) as f32
+                };
+                let mut sw: Vec<Vec<f32>> = vec![vec![0f32; np * np]; nw];
+                for l in M as usize..=(N - M) as usize {
+                    for k in M as usize..=(N - M) as usize {
+                        for (w, h) in HS.iter().enumerate() {
+                            sw[w][l * np + k] = boxm(k, l, *h as usize);
+                        }
+                    }
+                }
+                let push = |slot: usize, v: f64, full: bool, pooled: &mut Vec<Vec<f32>>, mx: &mut Vec<f64>| {
+                    mx[slot] = mx[slot].max(v);
+                    if full {
+                        pooled[slot].push(v as f32);
+                    }
+                };
+                for l in M as usize..=(N - M) as usize {
+                    for k in M as usize..=(N - M) as usize {
+                        let i = l * np + k;
+                        let full = k % 4 == 0 && l % 4 == 0;
+                        let (c15, c16, cv) = (s.c15[i], s.c16[i], carve[i]);
+                        let r15 = rep(c15, cv);
+                        push(0, f64::from(c15.abs()), full, &mut pooled, &mut mx);
+                        push(1, f64::from((c16 - c15).abs()), full, &mut pooled, &mut mx);
+                        push(2, f64::from(c16.abs()), full, &mut pooled, &mut mx);
+                        push(3, f64::from(r15.abs()), full, &mut pooled, &mut mx);
+                        push(4, f64::from((r16[i] - r15).abs()), full, &mut pooled, &mut mx);
+                        push(7, f64::from(cv), full, &mut pooled, &mut mx);
+                        for w in 0..nw {
+                            let sv = sw[w][i];
+                            push(8 + 3 * w, f64::from((r15 - sv).abs()), full, &mut pooled, &mut mx);
+                            push(9 + 3 * w, f64::from((r16[i] - sv).abs()), full, &mut pooled, &mut mx);
+                            push(10 + 3 * w, f64::from(sv.abs()), full, &mut pooled, &mut mx);
+                            let c = f64::from(r16[i] - sv);
+                            signed[w].0 = signed[w].0.min(c);
+                            signed[w].1 = signed[w].1.max(c);
+                        }
+                    }
+                }
+                // rivers
+                let inv = inverse(t);
+                {
+                    let probe = t.sample_direction(map, N, N / 2 + 17, N / 3);
+                    let (u, v) = inv(probe);
+                    assert!((u - f64::from(N / 2 + 17)).abs() < 0.5 && (v - f64::from(N / 3)).abs() < 0.5, "raster inverse: {u} {v}");
+                }
+                let cells: Vec<usize> = cells_near(t).into_iter().filter(|&c| f64::from(maps.area_m2(c)) >= thr).collect();
+                let in_set: HashSet<usize> = cells.iter().copied().collect();
+                let mut donors: HashSet<usize> = HashSet::new();
+                for &c in &cells {
+                    let r = maps.receiver(c);
+                    if r != planet_generators::coupled::NONE && in_set.contains(&(r as usize)) {
+                        donors.insert(r as usize);
+                    }
+                }
+                let inside = |u: f64, v: f64| u >= f64::from(M) && u <= f64::from(N - M) && v >= f64::from(M) && v <= f64::from(N - M);
+                for &head in cells.iter().filter(|c| !donors.contains(c)) {
+                    let mut pts: Vec<(planet_core::Vec3, planet_core::Vec3)> = Vec::new();
+                    let mut cur = head;
+                    for _ in 0..80 {
+                        let r = maps.receiver(cur);
+                        if r == planet_generators::coupled::NONE {
+                            break;
+                        }
+                        let (a, b) = (coarse.direction(cur), coarse.direction(r as usize));
+                        let steps = (radius * a.angle_to(b) / 20.0).ceil().max(1.0) as u32;
+                        let tangent = (b - a).normalized();
+                        for kk in 0..steps {
+                            let l = f64::from(kk) / f64::from(steps);
+                            pts.push(((a * (1.0 - l) + b * l).normalized(), tangent));
+                        }
+                        if !in_set.contains(&(r as usize)) {
+                            break;
+                        }
+                        cur = r as usize;
+                    }
+                    // split into runs inside the interior
+                    let mut run: Vec<[f64; NV]> = Vec::new();
+                    let flush = |run: &mut Vec<[f64; NV]>, rv: &mut Vec<(u64, u64, f64, u64)>, river_km: &mut f64| {
+                        if run.len() >= 6 {
+                            *river_km += (run.len() - 1) as f64 * 0.02;
+                            for v in 0..rv.len() {
+                                let h: Vec<f64> = run.iter().map(|x| x[v]).collect();
+                                let (mut steps, mut rises) = (0u64, 0u64);
+                                let mut idx = 0;
+                                while idx + 5 < h.len() {
+                                    steps += 1;
+                                    if h[idx + 5] - h[idx] > 0.5 {
+                                        rises += 1;
+                                    }
+                                    idx += 5;
+                                }
+                                let mut lowest = h[0];
+                                let mut climb = 0.0f64;
+                                for x in &h {
+                                    lowest = lowest.min(*x);
+                                    climb = climb.max(x - lowest);
+                                }
+                                rv[v].0 += steps;
+                                rv[v].1 += rises;
+                                rv[v].2 = rv[v].2.max(climb);
+                                rv[v].3 += 1;
+                            }
+                        }
+                        run.clear();
+                    };
+                    for (p, tangent) in pts {
+                        let (u, v) = inv(p);
+                        if !inside(u, v) {
+                            flush(&mut run, &mut rv, &mut river_km);
+                            continue;
+                        }
+                        let perp = p.cross(tangent).normalized();
+                        let mut bed = [f64::INFINITY; NV];
+                        for o in -3i32..=3 {
+                            let qd = (p + perp * (f64::from(o) * 20.0 / radius)).normalized();
+                            let (uq, vq) = inv(qd);
+                            if !inside(uq, vq) {
+                                continue;
+                            }
+                            let base_h = basef.height(qd);
+                            let cvq = bil(&carve, uq, vq);
+                            let (c15, c16) = (bil(&s.c15, uq, vq), bil(&s.c16, uq, vq));
+                            let rep_c16 = c16 + cvq.min((-c16).max(0.0));
+                            bed[0] = bed[0].min(base_h + c16);
+                            bed[1] = bed[1].min(base_h - cvq + rep_c16);
+                            for w in 0..nw {
+                                bed[2 + w] = bed[2 + w].min(base_h - cvq + rep_c16 - bil(&sw[w], uq, vq));
+                            }
+                            if o == 0 {
+                                push(5, c15.abs(), true, &mut pooled, &mut mx);
+                                push(6, (c16 - c15).abs(), true, &mut pooled, &mut mx);
+                            }
+                        }
+                        if bed[0].is_finite() {
+                            run.push(bed);
+                        }
+                    }
+                    flush(&mut run, &mut rv, &mut river_km);
+                }
+            }
+            writeln!(out, "RESULT set {label} ({done} chunks):").map_err(err).unwrap();
+            for (slot, name) in names.iter().enumerate() {
+                if pooled[slot].is_empty() {
+                    continue;
+                }
+                writeln!(out, "RESULT   {name}: p50 {:.3}, p99 {:.3}, max {:.3} m", q(&mut pooled[slot], 0.5), q(&mut pooled[slot], 0.99), mx[slot])
+                    .map_err(err)
+                    .unwrap();
+            }
+            for (w, h) in HS.iter().enumerate() {
+                writeln!(out, "RESULT   h={h}: change at 16 signed {:.2} to {:+.2} m", signed[w].0, signed[w].1).map_err(err).unwrap();
+            }
+            let vn = ["today", "carve replace, no correction", "h=1", "h=16", "h=64"];
+            writeln!(out, "RESULT   rivers: {river_km:.1} km of bed followed").map_err(err).unwrap();
+            for v in 0..nv {
+                writeln!(
+                    out,
+                    "RESULT     {}: {} of {} 100 m steps rise over 0.5 m, longest climb {:.2} m, {} runs",
+                    vn[v], rv[v].1, rv[v].0, rv[v].2, rv[v].3
+                )
+                .map_err(err)
+                .unwrap();
+            }
+            for slot in 0..slots {
+                pooled_all[slot].extend(pooled[slot].iter().copied());
+                max_all[slot] = max_all[slot].max(mx[slot]);
+            }
+            for w in 0..nw {
+                signed_all[w].0 = signed_all[w].0.min(signed[w].0);
+                signed_all[w].1 = signed_all[w].1.max(signed[w].1);
+            }
+        }
+        writeln!(out, "RESULT ALL sets pooled:").map_err(err).unwrap();
+        for (slot, name) in names.iter().enumerate() {
+            if pooled_all[slot].is_empty() {
+                continue;
+            }
+            writeln!(out, "RESULT   {name}: p50 {:.3}, p99 {:.3}, max {:.3} m", q(&mut pooled_all[slot], 0.5), q(&mut pooled_all[slot], 0.99), max_all[slot])
+                .map_err(err)
+                .unwrap();
+        }
+        for (w, h) in HS.iter().enumerate() {
+            writeln!(out, "RESULT   h={h}: change at 16 signed {:.2} to {:+.2} m", signed_all[w].0, signed_all[w].1).map_err(err).unwrap();
+        }
+    }
+
     // spec: GEN-052
     #[test]
     fn the_chunk_budget_is_four_seconds_at_8_m_and_a_missing_time_never_passes() {
