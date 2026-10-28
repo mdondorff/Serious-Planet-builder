@@ -55,7 +55,8 @@ Data later (owner's idea, 2026-10-25): stores read through a local or remote dat
 | Decides | whether a game run mode needs new engine seams before M12 |
 
 ## M9 design constraints (owner, 2026-10-28)
-- Offline baking is allowed when it fits Rasierklinge: proposed at most one night (about 10 h) per world version and at most about 50 GB more disk (the 16384 store is 28 GB; 139 GB free); months of laptop compute (SPIKE-52 candidate C: about 240 days, 4.6 TB) is out.
+- Offline bake time: about 10 h per world version on Rasierklinge; longer only when a pre-run (a region or a lower resolution) de-risks the full run first; a long bake resumes from checkpoints, so a late mistake never restarts it from zero. Months of laptop compute (SPIKE-52 candidate C) is out.
+- Disk: a body's data stays about at today's 28 GB (16384 store), soft, so a solar system fits on the laptop (owner's estimate: 500 GB if every body held as much); new baked data replaces, compresses or is regenerated, rather than adds. ADR 0045 (bodies, bake resolution, storage budget) is the place to set the number.
 - No paid cloud compute for bakes.
 - Runtime budgets follow ADR 0083: terrain runs inside its share; reserved shares for sky and weather, physics, game logic and networking are tested under synthetic load, not left implicit.
 
