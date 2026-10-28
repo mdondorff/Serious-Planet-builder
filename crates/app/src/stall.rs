@@ -64,6 +64,10 @@ pub struct StallProbe {
     began: Instant,
     last: Instant,
     phases: Vec<(&'static str, Duration)>,
+    /// The blocks the main thread decoded itself in each phase (parallel to `phases`; a phase beyond the list decoded none): a block decode on the
+    /// main thread is a stall the warm-up thread should have taken (VIEW-059, CON-22).
+    phase_decodes: Vec<u64>,
+    last_decodes: u64,
     last_report: Option<Instant>,
     /// Frames at or over [`STALL`] so far.
     pub stalls: u64,
@@ -100,6 +104,8 @@ impl Default for StallProbe {
             began: now,
             last: now,
             phases: Vec::new(),
+            phase_decodes: Vec::new(),
+            last_decodes: 0,
             last_report: None,
             stalls: 0,
             totals: Vec::new(),
@@ -117,6 +123,8 @@ pub struct Stall {
     pub phases: Vec<(&'static str, Duration)>,
     /// The lock waits of the main thread, longest first.
     pub waits: Vec<(&'static str, Duration)>,
+    /// The phases in which the main thread decoded a bake block itself, with the count (in the order the frame ran them).
+    pub decodes: Vec<(&'static str, u64)>,
 }
 
 impl StallProbe {
@@ -126,6 +134,8 @@ impl StallProbe {
         self.began = now;
         self.last = now;
         self.phases.clear();
+        self.phase_decodes.clear();
+        self.last_decodes = planet_cache::global_store::thread_block_decodes();
         WAITS.with(|w| w.borrow_mut().clear());
     }
 
@@ -134,10 +144,18 @@ impl StallProbe {
         self.phases.iter().map(|(n, d)| (*n, d.as_secs_f64() * 1e3)).collect()
     }
 
+    /// The blocks the main thread decoded in each phase of the frame that ended last, phases with none left out.
+    pub fn main_decodes(&self) -> Vec<(&'static str, u64)> {
+        self.phases.iter().zip(&self.phase_decodes).filter(|(_, d)| **d > 0).map(|((n, _), d)| (*n, *d)).collect()
+    }
+
     /// The phase `name` ended now: the time since the last mark is its.
     pub fn mark(&mut self, name: &'static str) {
         let now = Instant::now();
         self.phases.push((name, now - self.last));
+        let decodes = planet_cache::global_store::thread_block_decodes();
+        self.phase_decodes.push(decodes - self.last_decodes);
+        self.last_decodes = decodes;
         self.last = now;
     }
 
@@ -168,7 +186,8 @@ impl StallProbe {
         phases.sort_by_key(|p| std::cmp::Reverse(p.1));
         let mut waits = WAITS.with(|w| w.borrow().clone());
         waits.sort_by_key(|p| std::cmp::Reverse(p.1));
-        Some(Stall { frame, phases, waits })
+        let decodes = self.main_decodes();
+        Some(Stall { frame, phases, waits, decodes })
     }
 
     /// Whether a report is due for a stall that ended now (at most one in [`REPORT_EVERY`]); it counts the stall it says yes to.
@@ -202,6 +221,10 @@ impl Stall {
             for (name, d) in &self.waits {
                 s += &format!("  {name}: {}\n", ms(*d));
             }
+        }
+        for (name, n) in &self.decodes {
+            s += &format!("blocks the main thread decoded in {name}: {n}
+");
         }
         if !extra.is_empty() {
             s += extra;
