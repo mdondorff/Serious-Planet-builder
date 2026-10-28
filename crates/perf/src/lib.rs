@@ -4,6 +4,7 @@
 
 pub mod accept;
 pub mod accept_m5;
+pub mod accept_m8;
 pub mod calibration;
 pub mod clock;
 pub mod compare;

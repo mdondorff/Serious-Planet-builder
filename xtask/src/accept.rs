@@ -74,6 +74,13 @@ fn manual_criteria(milestone: &str) -> &'static [&'static str] {
             "A discrete-GPU run of the tiers (`cargo xtask test gpu --real`): not run by this command so that acceptance may sit beside the architect's window",
             "The go / no-go for M6 (milestone gate after M5): the owner",
         ],
+        "M8" => &[
+            "Criterion 1: the owner's look review of `docs/milestones/M8/look-review-2b/` (stills rendered after #835; F8 compares the default and the sample look live) and the default look",
+            "Criterion 3: FAILS the between-levels bound (15 against 14 is 0.712 m against 0.25 m, computed 2026-10-28, docs/milestones/M8/acceptance-runbook.md); the owner's D0 decision and the incision depth decide; no rendered-frame measurement exists",
+            "Criterion 6, the drawn-tile reading of 'every touched chunk the view wants' (owner item #823); criteria 4 to 7 above are read from the perf logs only",
+            "CI green on Windows (WARP) and Linux (lavapipe) for the merge commit, and the determinism comparison (criterion 2)",
+            "The owner's live-test items (docs/milestones/M8/owner-test-2026-10-27/README.md) and the M8 report (docs/milestones/M8-report.md): the planner",
+        ],
         _ => &["No automated criteria are defined for this milestone yet"],
     }
 }
@@ -93,6 +100,17 @@ fn read_m4_logs(dir: &Path) -> Vec<SceneFiles> {
             last_valid_present: dir.join(format!("{scene}.last-valid.json")).is_file(),
         })
         .collect()
+}
+
+/// The M8 window's files, read from `dir` (a missing file is `None`; judging is the library's job, TEST-060): what the M8 scenes write by default,
+/// `coupled-make.json`, `shadow-cost.json`, `envelope.json` and, copied from the `--out` directory of `perf stream edit-latency`, `edit-latency.md`.
+fn read_m8_logs(dir: &Path) -> planet_perf::accept_m8::M8Files {
+    planet_perf::accept_m8::M8Files {
+        coupled: std::fs::read(dir.join("coupled-make.json")).ok(),
+        shadow: std::fs::read(dir.join("shadow-cost.json")).ok(),
+        edit: std::fs::read_to_string(dir.join("edit-latency.md")).ok(),
+        envelope: std::fs::read(dir.join("envelope.json")).ok(),
+    }
 }
 
 /// The M5 window's files, read from `dir` (a missing file is `None`; judging is the library's job, TEST-026): `lit.json`,
@@ -149,16 +167,16 @@ pub fn run(root: &Path, args: &[String]) -> Res {
     while let Some(a) = it.next() {
         match a.as_str() {
             "--logs" => logs = Some(PathBuf::from(it.next().ok_or("--logs needs a directory")?)),
-            other if other.starts_with("--") => return Err(format!("unknown option {other} (known: --logs DIR, M4 and M5 only)")),
+            other if other.starts_with("--") => return Err(format!("unknown option {other} (known: --logs DIR, M4, M5 and M8 only)")),
             _ => milestone = Some(a),
         }
     }
     let Some(milestone) = milestone else {
-        return Err("usage: cargo xtask accept <milestone>, e.g. M0 (M4 and M5 also take --logs DIR, default perf/logs)".into());
+        return Err("usage: cargo xtask accept <milestone>, e.g. M0 (M4, M5 and M8 also take --logs DIR, default perf/logs)".into());
     };
     let m = milestone.to_uppercase();
-    if logs.is_some() && m != "M4" && m != "M5" {
-        return Err("--logs only applies to M4 and M5 (the perf logs of a window)".into());
+    if logs.is_some() && m != "M4" && m != "M5" && m != "M8" {
+        return Err("--logs only applies to M4, M5 and M8 (the perf logs of a window)".into());
     }
     let logs_dir = logs.map_or_else(|| root.join(M4_LOGS), |p| if p.is_absolute() { p } else { root.join(p) });
     let logs_shown = logs_dir.strip_prefix(root).unwrap_or(&logs_dir).to_string_lossy().replace('\\', "/");
@@ -166,6 +184,7 @@ pub fn run(root: &Path, args: &[String]) -> Res {
     // the test run. Nothing here measures anything (TEST-021).
     let m4 = (m == "M4").then(|| planet_perf::accept::evaluate(&read_m4_logs(&logs_dir)));
     let m5 = (m == "M5").then(|| planet_perf::accept_m5::evaluate(&read_m5_logs(&logs_dir)));
+    let m8 = (m == "M8").then(|| planet_perf::accept_m8::evaluate(&read_m8_logs(&logs_dir)));
     let mut steps = vec![
         step("check (fmt, clippy, layering)", || crate::testcmd::check(root)),
         step("spec-lint", || crate::speclint::run(root)),
@@ -263,6 +282,17 @@ pub fn run(root: &Path, args: &[String]) -> Res {
             }
         }
     }
+    if let Some(rows) = &m8 {
+        let outcome = planet_perf::accept_m8::outcome(rows);
+        md += &format!(
+            "\nHardware criteria 4 to 7 (perf logs in {logs_shown}/): {}\n\n{}",
+            outcome.word(),
+            planet_perf::accept_m8::render(rows)
+        );
+        if outcome != planet_perf::accept_m8::Outcome::Pass {
+            hardware_error = Some(format!("acceptance M8: the hardware criteria are {} (see the table)", outcome.word()));
+        }
+    }
     md += "\nNeeds CI, the owner or Rasierklinge (not passed by this command):\n\n";
     for c in manual_criteria(&m) {
         md += &format!("- {c}\n");
@@ -321,6 +351,25 @@ mod tests {
             "a failed step never writes the milestone report"
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // spec: TEST-060
+    #[test]
+    fn the_m8_log_reader_takes_the_default_names_of_the_four_scenes_and_no_logs_is_incomplete() {
+        use planet_perf::accept_m8::{evaluate, outcome, Outcome, Verdict};
+        let dir = std::env::temp_dir().join(format!("xtask-m8-logs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("coupled-make.json"), br#"{"scene":"coupled-make","owner_override":[],"bake_res":16384,"seconds":19.7}"#)
+            .unwrap();
+        std::fs::write(dir.join("edit-latency.md"), "| a | verdict |\n|---|---|\n| 1 m | ok |\n").unwrap();
+        let w = read_m8_logs(&dir);
+        assert!(w.coupled.is_some() && w.edit.is_some() && w.shadow.is_none() && w.envelope.is_none());
+        let rows = evaluate(&w);
+        assert!(matches!(rows[0].verdict, Verdict::Pass(_)) && matches!(rows[1].verdict, Verdict::Missing(_)));
+        assert_eq!(outcome(&rows), Outcome::Incomplete);
+        assert_eq!(outcome(&evaluate(&read_m8_logs(&dir.join("absent")))), Outcome::Incomplete);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // spec: TEST-026
