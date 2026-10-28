@@ -1,0 +1,67 @@
+$ cargo test -p planet --release --lib anet_change_report -- --ignored --nocapture
+    Finished `release` profile [optimized] target(s) in 0.23s
+     Running unittests src\lib.rs (target\release\deps\planet-b3cdcc9954cb66b1.exe)
+
+running 1 test
+A-net chunk scene: bake 16384 cells per face edge of the store C:/DEV/SeriousPlanetData/global16384, coupled run 80 steps
+chunk 0x0b000000002bd53a (face 0), the river of 14489279 km2 at its coarse cell
+chunk 1/48 (3, 1148, 1215) done
+chunk 2/48 (0, 512, 502) done
+chunk 3/48 (5, 894, 982) done
+chunk 4/48 (2, 1929, 581) done
+chunk 5/48 (3, 1482, 1275) done
+chunk 6/48 (5, 1019, 827) done
+chunk 7/48 (0, 1696, 812) done
+chunk 8/48 (5, 884, 1277) done
+chunk 9/48 (0, 897, 1323) done
+chunk 10/48 (2, 1854, 1609) done
+chunk 11/48 (3, 684, 1248) done
+chunk 12/48 (2, 1936, 1234) done
+chunk 13/48 (0, 634, 143) done
+chunk 14/48 (3, 1201, 897) done
+test globalperf::tests::anet_change_report has been running for over 60 seconds
+chunk 15/48 (0, 1678, 908) done
+chunk 16/48 (2, 1989, 1448) done
+chunk 17/48 (5, 1612, 946) done
+chunk 18/48 (2, 1888, 803) done
+chunk 19/48 (4, 73, 1949) done
+chunk 20/48 (3, 1486, 1085) done
+chunk 21/48 (3, 288, 525) done
+chunk 22/48 (5, 1987, 855) done
+chunk 23/48 (3, 625, 712) done
+chunk 24/48 (3, 150, 435) done
+chunk 25/48 (2, 2041, 699) done
+chunk 26/48 (0, 1943, 1890) done
+chunk 27/48 (3, 243, 755) done
+chunk 28/48 (1, 324, 2004) done
+chunk 29/48 (0, 1001, 858) done
+chunk 30/48 (1, 1931, 182) done
+chunk 31/48 (0, 1319, 1207) done
+chunk 32/48 (0, 301, 1810) done
+chunk 33/48 (0, 1558, 1091) done
+chunk 34/48 (2, 1850, 850) done
+chunk 35/48 (0, 1668, 1095) done
+chunk 36/48 (1, 71, 849) done
+chunk 37/48 (5, 659, 1341) done
+chunk 38/48 (3, 126, 769) done
+chunk 39/48 (1, 118, 924) done
+chunk 40/48 (1, 25, 1968) done
+chunk 41/48 (5, 1278, 868) done
+chunk 42/48 (1, 1570, 880) done
+chunk 43/48 (3, 22, 124) done
+chunk 44/48 (0, 721, 504) done
+chunk 45/48 (0, 1170, 843) done
+chunk 46/48 (0, 1034, 737) done
+chunk 47/48 (0, 584, 536) done
+chunk 48/48 (5, 762, 1255) done
+the change of the A-net chunks over 48 land chunks of the store, 65 x 65 samples each:
+  level 11: |change| p50 0.89, p99 24.18, p99.9 39.66, p99.99 52.93, max 61.53 m (signed -61.5 to 0.2 m; the largest at (1, 25, 1968))
+  level 12: |change| p50 0.86, p99 25.27, p99.9 40.29, p99.99 55.51, max 64.13 m (signed -64.1 to 0.0 m; the largest at (1, 25, 1968))
+  level 13: |change| p50 0.84, p99 25.50, p99.9 40.93, p99.99 56.68, max 70.24 m (signed -70.2 to 0.4 m; the largest at (4, 73, 1949))
+  level 14: |change| p50 0.83, p99 25.66, p99.9 41.12, p99.99 57.89, max 74.43 m (signed -74.4 to 0.9 m; the largest at (4, 73, 1949))
+  level 15: |change| p50 0.83, p99 25.66, p99.9 40.98, p99.99 58.29, max 75.80 m (signed -75.8 to 1.4 m; the largest at (4, 73, 1949))
+  level 16: |change| p50 0.83, p99 25.66, p99.9 41.09, p99.99 58.47, max 76.03 m (signed -76.0 to 1.5 m; the largest at (4, 73, 1949))
+test globalperf::tests::anet_change_report ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 211 filtered out; finished in 177.89s
+
