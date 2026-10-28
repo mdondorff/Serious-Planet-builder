@@ -21,4 +21,5 @@ Planning unit: lane-hours, PR count and quota share; never "days" for lane work.
 | 2026-10-28 | SPIKE-52 literature study (#846) | spikes (Opus) | 1.5 days | under 0.5 h after restart | quotes not re-checked |
 | 2026-10-28 | M8-F step 1, stage off by default (#851) | explorer | not stated | 0.6 h | |
 | 2026-10-28 | accept M8 to amended criteria (#850, #852) | crusader | not stated | 0.5 h | |
-| 2026-10-28 | M8-F step 2, horizon maps from the base terrain | explorer | about 1 day | open | |
+| 2026-10-28 | M8-F step 2, horizon maps from the base terrain (#853) | explorer | about 1 day | about 2 h to the PR | merge pending |
+| 2026-10-28 | SPIKE-53 LOD, mesh and ground-detail survey | spikes (Opus) | 1 to 2 h | open | |
