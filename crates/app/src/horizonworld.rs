@@ -24,7 +24,7 @@ use planet_world_def::WorldDefinition;
 use crate::worldfield::WorldTerrain;
 
 /// Chunks the horizon jobs want at most when there is no chunk stage: the nearest to the camera (the default `HorizonConfig::keep`).
-pub const BASE_HORIZON_WANTED: usize = 32;
+pub const BASE_HORIZON_WANTED: usize = 24;
 
 /// Version of the world's horizon bake (what it samples and how); part of the march's hash, so a change re-bakes every map.
 pub const BAKE_VERSION: u32 = 1;
@@ -126,7 +126,7 @@ impl ChunkHorizonBaker {
 
     /// What the heights of a block depend on besides its items and its chunk: the base of the definition (seed, radius, height field, stage order), the baked input, the code that makes the chunks and the field above them
     /// (`ANET_VERSION`, the chunk stage, this bake), the lattice, and the coupled lens, which the field chain does not hash into a tile key.
-    fn world_word(&self, world: &WorldTerrain) -> u64 {
+    fn world_state(&self, world: &WorldTerrain) -> u64 {
         let lens = world.coupled_lens().map_or(0, |l| 1 + l as u64);
         let ready = matches!(world.coupled_standing(), crate::coupledworld::Standing::Ready(..));
         let def = world.definition();
@@ -210,6 +210,11 @@ impl ChunkHorizonBaker {
 }
 
 impl HorizonBaker for ChunkHorizonBaker {
+    /// The coupled lens, the base of the definition and the stage: a change bakes every wanted map again (the edits are in [`edit_word`], per chunk).
+    fn world_word(&self) -> u64 {
+        self.world.upgrade().map_or(0, |w| self.world_state(&w))
+    }
+
     /// The chunk and its eight neighbours on the chunk grid (the halo of a chunk is no larger than one chunk edge for the default march; a chunk
     /// two rings away contributes its base only to a horizon past that).
     fn reads(&self, key: ChunkKey) -> Vec<ChunkKey> {
@@ -242,6 +247,8 @@ impl HorizonBaker for ChunkHorizonBaker {
         let Some(world) = self.world.upgrade() else { return none() };
         let halo = self.halo_cells();
         let side = n + 2 * halo;
+        // The definition the field below is built from: a height tile is kept only if no edit was published between this and the block's key.
+        let revision0 = world.definition().revision();
         let manager = world.chunk_manager();
         let per_face = 1i64 << planet_generators::chunk::CHUNK_GRID_LEVEL;
         let in_face = |b: i64| (0..per_face).contains(&b);
@@ -260,7 +267,7 @@ impl HorizonBaker for ChunkHorizonBaker {
         let before = own_hashes(&blocks);
         let Ok(field) = world.field() else { return none() };
         let after = own_hashes(&blocks);
-        let world_word = self.world_word(&world);
+        let world_word = self.world_state(&world);
         let (x0, y0) = (i64::from(key.1) * n as i64 - halo as i64, i64::from(key.2) * n as i64 - halo as i64);
         let mut heights = vec![0.0f32; side * side];
         if halo > n {
@@ -271,7 +278,7 @@ impl HorizonBaker for ChunkHorizonBaker {
                 if self.edit_word(key) != word0 {
                     return None;
                 }
-                let tile_key = (in_face(bx) && in_face(by) && before[idx] == after[idx]).then(|| {
+                let tile_key = tile_cacheable(in_face(bx) && in_face(by), before[idx] == after[idx], revision0, world.definition().revision()).then(|| {
                     let block = (key.0, bx as u32, by as u32);
                     planet_core::hash::hash_u64s(
                         0x4854_494c,
@@ -317,6 +324,12 @@ impl HorizonBaker for ChunkHorizonBaker {
         h = mix64(h ^ u64::from(self.lat.cells_per_chunk()));
         h
     }
+}
+
+/// Whether the heights of a block may be kept under a key: the block is on the face and its chunk results did not change while the field was built, and no
+/// edit was published since the definition the field was built from (else the heights are of one revision and the key of another).
+pub fn tile_cacheable(on_face: bool, results_unchanged: bool, revision_at_field: u64, revision_now: u64) -> bool {
+    on_face && results_unchanged && revision_at_field == revision_now
 }
 
 /// The longest range whose halo (`ceil(range / cell) + 2` cells) fits in one chunk edge: the 3 x 3 chunks a horizon reads then cover it.
@@ -781,6 +794,15 @@ impl HorizonRig {
 
 #[cfg(test)]
 mod rig_tests {
+    // spec: STRM-064
+    #[test]
+    fn a_height_tile_is_kept_only_if_no_edit_was_published_since_the_field_was_built() {
+        assert!(tile_cacheable(true, true, 7, 7));
+        assert!(!tile_cacheable(true, true, 7, 8), "an edit between the field and the block's key: the heights are of one revision, the key of another");
+        assert!(!tile_cacheable(false, true, 7, 7), "off the face");
+        assert!(!tile_cacheable(true, false, 7, 7), "a chunk result changed while the field was built");
+    }
+
     use super::*;
     use planet_generators::chunk::CHUNK_GRID_LEVEL;
 

@@ -222,6 +222,8 @@ struct GateRun {
     edit_done_at: Option<u64>,
     /// Whether any frame drew lit over a chunk stage.
     lit_with_horizon: bool,
+    /// The edit word of each wanted horizon map before the scripted edit.
+    words: HashMap<planet_generators::chunkfield::ChunkKey, u64>,
 }
 
 impl GateRun {
@@ -242,7 +244,31 @@ impl GateRun {
             report: std::env::var_os("PLANET_GATE_REPORT").map(PathBuf::from),
             edit_done_at: None,
             lit_with_horizon: false,
+            words: HashMap::new(),
         }))
+    }
+
+    /// One frame of the horizon side: before the scripted edit the edit word of every wanted map is remembered; at the frame it is published the maps whose word
+    /// changed are the ones it touched; every landing is shown to the gate, which counts only a touched map as the re-bake.
+    fn horizon_step(
+        &mut self,
+        world: &WorldTerrain,
+        wanted: &[planet_generators::chunkfield::ChunkKey],
+        landed: &[planet_generators::chunkfield::ChunkKey],
+        published: bool,
+        now_ms: u64,
+    ) {
+        if self.gate.edit_at.is_none() {
+            if published {
+                let touched = wanted.iter().copied().filter(|k| self.words.get(k).is_some_and(|w| *w != world.horizon_edit_word(*k))).collect();
+                self.gate.edit_published(now_ms, touched);
+            } else {
+                for k in wanted {
+                    self.words.entry(*k).or_insert_with(|| world.horizon_edit_word(*k));
+                }
+            }
+        }
+        self.gate.horizon_landed(now_ms, landed);
     }
 
     /// Whether the edit script ended, the settling frames passed and the path (if any) was replayed to its end.
@@ -904,6 +930,13 @@ impl App<'_> {
                 st.counts.horizon_steps = st.chunk_counters.horizon_frames;
                 st.horizon_update = horizon;
             }
+            if let Some(g) = st.gate.as_mut().filter(|_| self.world.horizon_enabled()) {
+                let tiles: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
+                let wanted: Vec<planet_generators::chunkfield::ChunkKey> =
+                    self.world.horizon_wanted(&tiles, camera.position).into_iter().map(|w| w.0).collect();
+                let published = st.edit.as_ref().is_some_and(|e| e.stats.published >= 1);
+                g.horizon_step(self.world, &wanted, &st.horizon_update.landed, published, now_ms);
+            }
             st.stall.mark("chunk frame (frame_step, landings, refresh summary)");
             // A refusal of the plan for the base parameters degrades the frame (it draws the newest plan in hand); it is said once, never fatal.
             // One line, one report file and one title notice per cause (kind and level) in 5 s; the title counts all of them.
@@ -1080,8 +1113,8 @@ impl App<'_> {
             if let Some(lit) = plan.lit.as_ref().filter(|_| st.chunks_on || self.world.horizon_enabled()) {
                 let tiles: Vec<TileId> = plan.nodes.iter().map(|n| n.tile).collect();
                 st.horizon.frame(self.world, ctx, &mut st.rig.renderer, &tiles, &std::mem::take(&mut st.horizon_update), lit.sun_dir);
-                if let (Some(_), Some(g)) = (st.horizon.last_uploaded, st.gate.as_mut()) {
-                    g.gate.map_uploaded(now_ms, st.frames);
+                if let (Some(key), Some(g)) = (st.horizon.last_uploaded, st.gate.as_mut()) {
+                    g.gate.map_uploaded(key, now_ms, st.frames);
                 }
             }
             st.stall.mark("horizon frame and upload");
@@ -1256,18 +1289,11 @@ impl App<'_> {
     /// A frame that took a second or more (VIEW-056): the phases, the locks the main thread waited on and the jobs in flight go to a report
     /// (at most one in ten seconds, the others to the log) and the title says so.
     fn note_stall(&mut self) {
-        let (now_ms, landed) = (self.clock.now_ms(), self.world.horizon_stats().map_or(0, |h| h.landed));
         let Some(st) = self.state.as_mut() else { return };
         st.stall.mark("the rest of the frame");
         let stall = st.stall.end();
         if let Some(g) = st.gate.as_mut() {
             g.gate.frame(st.frames, &st.stall.phases_ms());
-            let published = st.edit.as_ref().is_some_and(|e| e.stats.published >= 1);
-            if published && g.gate.edit_at.is_none() {
-                g.gate.edit_published(now_ms, landed);
-            } else {
-                g.gate.horizon_landed(now_ms, landed);
-            }
         }
         let Some(stall) = stall else { return };
         let c = st.last_counts;
@@ -1283,6 +1309,7 @@ impl App<'_> {
         }
         extra += &format!("stalls so far: {}\n", st.stall.stalls);
         let text = stall.text(&extra);
+        let now_ms = self.clock.now_ms();
         if st.stall.report_due() {
             crate::crash::set_path_text(st.path.to_text());
             let report = crate::crash::snapshot("stall (the window went on)", &text);

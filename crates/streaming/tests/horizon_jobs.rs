@@ -78,7 +78,7 @@ fn rig(settle_ms: u64, workers: usize) -> Rig {
     let (cs, hs) = (Arc::new(ManualSpawner::default()), Arc::new(ManualSpawner::default()));
     let m = chunks(clock.clone(), cs.clone());
     let baker = Arc::new(FakeBaker { bakes: AtomicU64::new(0), spec: 1, stale: AtomicU64::new(0) });
-    let jobs = HorizonJobs::new(m.clone(), baker.clone(), hs.clone(), clock.clone(), None, HorizonConfig { workers, settle_ms, keep: 32 });
+    let jobs = HorizonJobs::new(m.clone(), baker.clone(), hs.clone(), clock.clone(), None, HorizonConfig { workers, settle_ms, keep: 8 });
     (clock, cs, hs, m, baker, jobs)
 }
 
@@ -363,12 +363,59 @@ fn without_a_chunk_stage_the_wanted_chunks_are_baked_from_the_base_kept_to_the_c
     jobs.update(&[(a, 1.0), (b, 2.0)]);
     assert_eq!(jobs.stats().rebaked, 2);
     assert_eq!(jobs.horizon(a).unwrap().as_slice(), &[(1000 % 256) as u8, 7]);
-    // The camera moves on: the wanted chunks change, the maps beyond the cap (2) of the ones no longer wanted go, the oldest first.
-    let (c, d) = (key(5, 0), key(6, 0));
-    jobs.update(&[(c, 1.0), (d, 2.0)]);
-    hs.run(2);
-    let up = jobs.update(&[(c, 1.0), (d, 2.0)]);
-    assert_eq!(up.landed.len(), 2);
+    // The camera moves on: of the maps no longer wanted the `keep` (2) most recently wanted stay beyond the wanted ones, the older ones go.
+    let (c, d, e, f) = (key(5, 0), key(6, 0), key(7, 0), key(8, 0));
+    let next = |wanted: [(ChunkKey, f64); 2]| {
+        jobs.update(&wanted);
+        hs.run(2);
+        jobs.update(&wanted)
+    };
+    assert_eq!(next([(c, 1.0), (d, 2.0)]).landed.len(), 2);
     assert!(jobs.horizon(c).is_some() && jobs.horizon(d).is_some(), "the wanted maps stay");
-    assert!(jobs.horizon(a).is_none() && jobs.horizon(b).is_none(), "the unwanted maps went beyond the cap");
+    assert!(jobs.horizon(a).is_some() && jobs.horizon(b).is_some(), "a and b are the 2 kept beyond the 2 wanted");
+    assert_eq!(next([(e, 1.0), (f, 2.0)]).landed.len(), 2);
+    assert!(jobs.horizon(e).is_some() && jobs.horizon(f).is_some(), "the wanted maps stay");
+    assert!(jobs.horizon(c).is_some() && jobs.horizon(d).is_some(), "the two most recently wanted are the ones kept");
+    assert!(jobs.horizon(a).is_none() && jobs.horizon(b).is_none(), "the older unwanted maps went");
+}
+
+/// A baker whose world word (the lens, the base, the stage) is set by the test.
+struct WorldBaker {
+    world: AtomicU64,
+}
+
+impl HorizonBaker for WorldBaker {
+    fn reads(&self, k: ChunkKey) -> Vec<ChunkKey> {
+        vec![k]
+    }
+    fn bake(&self, k: ChunkKey, _ready: &[(ChunkKey, Arc<ChunkResult>)]) -> Option<Vec<u8>> {
+        Some(vec![k.1 as u8, self.world.load(Ordering::SeqCst) as u8])
+    }
+    fn spec_hash(&self) -> u64 {
+        1
+    }
+    fn world_word(&self) -> u64 {
+        self.world.load(Ordering::SeqCst)
+    }
+}
+
+// spec: STRM-064
+#[test]
+fn a_change_of_the_world_word_bakes_every_wanted_map_again_after_the_settle_window() {
+    let clock = Arc::new(FakeClock::default());
+    let hs = Arc::new(ManualSpawner::default());
+    let baker = Arc::new(WorldBaker { world: AtomicU64::new(0) });
+    let jobs = HorizonJobs::new(Arc::new(BaseTerrain), baker.clone(), hs.clone(), clock.clone(), None, HorizonConfig::default());
+    let k = key(0, 0);
+    assert_eq!(jobs.update(&[(k, 1.0)]).started, 1);
+    hs.run(1);
+    jobs.update(&[(k, 1.0)]);
+    // The coupled lens is pressed: nothing in the edit word changed, the world word did.
+    baker.world.store(5, Ordering::SeqCst);
+    assert_eq!(jobs.update(&[(k, 1.0)]).started, 0, "settling");
+    clock.advance(1_000);
+    assert_eq!(jobs.update(&[(k, 1.0)]).started, 1, "baked again for the new world");
+    hs.run(1);
+    jobs.update(&[(k, 1.0)]);
+    assert_eq!(jobs.horizon(k).unwrap().as_slice(), &[(1000 % 256) as u8, 5]);
 }

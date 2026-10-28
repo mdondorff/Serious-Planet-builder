@@ -487,6 +487,11 @@ pub trait HorizonBaker: Send + Sync {
     fn edit_word(&self, _key: ChunkKey) -> u64 {
         0
     }
+    /// A word that differs when anything else the heights depend on changes (the coupled lens, the base of the definition, the stage): mixed into every map's
+    /// state word, so such a change bakes every wanted map again after the settle window (STRM-064). Default 0.
+    fn world_word(&self) -> u64 {
+        0
+    }
 }
 
 /// The disk side of the horizon cache: a map by its tile and its state word (the march and the results of the chunk and of the neighbours it
@@ -553,7 +558,7 @@ pub struct HorizonConfig {
 
 impl Default for HorizonConfig {
     fn default() -> Self {
-        HorizonConfig { workers: 1, settle_ms: 1_000, keep: 32 }
+        HorizonConfig { workers: 1, settle_ms: 1_000, keep: 8 }
     }
 }
 
@@ -627,9 +632,10 @@ impl HorizonJobs {
     }
 
     /// The state word of the horizon of `key` now: the march, and the result of every chunk it reads (0 for one that is not ready).
-    fn word(&self, key: ChunkKey) -> u64 {
+    fn word(&self, key: ChunkKey, world: u64) -> u64 {
         let mut h = planet_core::hash::mix64(self.baker.spec_hash() ^ 0x484f_5249_5a4f_4e00);
         h = planet_core::hash::mix64(h ^ self.baker.edit_word(key));
+        h = planet_core::hash::mix64(h ^ world);
         for r in self.baker.reads(key) {
             h = planet_core::hash::mix64(h ^ self.chunks.result_hash(r).unwrap_or(0));
         }
@@ -643,7 +649,8 @@ impl HorizonJobs {
         let mut out = HorizonUpdate::default();
         let mut starts: Vec<(ChunkKey, u64)> = Vec::new();
         // The state word of each wanted chunk that is ready, made before the horizon lock is taken (it reads the chunk manager's state).
-        let words: Vec<Option<u64>> = wanted.iter().map(|&(k, _)| self.chunks.is_ready(k).then(|| self.word(k))).collect();
+        let world_word = self.baker.world_word();
+        let words: Vec<Option<u64>> = wanted.iter().map(|&(k, _)| self.chunks.is_ready(k).then(|| self.word(k, world_word))).collect();
         {
             let mut sh = self.shared.lock().expect("horizon state");
             sh.updates += 1;
@@ -658,7 +665,7 @@ impl HorizonJobs {
                     let mut others: Vec<(u64, ChunkKey)> =
                         sh.ready.keys().filter(|k| sh.wanted_at.get(*k) != Some(&n)).map(|k| (sh.wanted_at.get(k).copied().unwrap_or(0), *k)).collect();
                     others.sort_unstable();
-                    let excess = sh.ready.len().saturating_sub(self.cfg.keep.max(wanted.len()));
+                    let excess = sh.ready.len().saturating_sub(wanted.len() + self.cfg.keep);
                     v.extend(others.into_iter().take(excess).map(|(_, k)| k));
                 }
                 v.sort_unstable();
@@ -670,6 +677,12 @@ impl HorizonJobs {
                 sh.seen.remove(k);
                 sh.wanted_at.remove(k);
                 sh.ever_baked.remove(k);
+            }
+            // The bookkeeping of keys that are neither held, running nor wanted now is dropped (a key wanted once and never baked would stay for ever).
+            {
+                let HorizonShared { ready, running, wanted_at, seen, .. } = &mut *sh;
+                wanted_at.retain(|k, at| *at == n || ready.contains_key(k) || running.contains(k));
+                seen.retain(|k, _| wanted_at.contains_key(k));
             }
             sh.stats.evicted += gone.len() as u64;
             out.evicted = gone;

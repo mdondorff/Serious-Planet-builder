@@ -604,6 +604,8 @@ struct Harness<'a> {
     /// The world whose horizon jobs run without a chunk stage (the default since the owner's fallback, STRM-064), and the maps that landed since the log was cleared.
     horizon_world: Option<Arc<WorldTerrain>>,
     horizon_landed: Vec<(Instant, planet_generators::chunkfield::ChunkKey)>,
+    /// The chunks the horizon jobs were asked for in the last frame (the same tiles and truncation as the jobs see).
+    horizon_wanted: Vec<planet_generators::chunkfield::ChunkKey>,
 }
 
 impl Harness<'_> {
@@ -626,6 +628,7 @@ impl Harness<'_> {
             self.landed_log.extend(update.landed.iter().map(|k| (now, *k)));
         } else if let Some(world) = &self.horizon_world {
             let tiles: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
+            self.horizon_wanted = world.horizon_wanted(&tiles, req.camera.position).into_iter().map(|w| w.0).collect();
             let update = world.horizon_frame(&tiles, req.camera.position);
             let now = Instant::now();
             self.horizon_landed.extend(update.landed.iter().map(|k| (now, *k)));
@@ -757,12 +760,7 @@ fn run_once(
     let edited = Arc::new(edited);
     let mut out = CaseRun { resident: h.rig.managed.resident().len(), ..Default::default() };
     let before_stats = h.rig.managed.manager().streamer().stats();
-    let wanted_keys: Vec<planet_generators::chunkfield::ChunkKey> = if h.horizon_world.is_some() {
-        let drawn: Vec<TileId> = h.drawn.iter().copied().collect();
-        world.horizon_wanted(&drawn, req.camera.position).into_iter().map(|w| w.0).collect()
-    } else {
-        Vec::new()
-    };
+    let wanted_keys: Vec<planet_generators::chunkfield::ChunkKey> = h.horizon_wanted.clone();
     let words_before: Vec<u64> = wanted_keys.iter().map(|k| world.horizon_edit_word(*k)).collect();
     let old_revision = world.field()?.item_revision();
     let sampler_started = Instant::now();
@@ -1255,6 +1253,7 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
             chunk_frame_max_ms: 0.0,
             horizon_world: with_horizon.then(|| Arc::clone(&world)),
             horizon_landed: Vec::new(),
+            horizon_wanted: Vec::new(),
         };
         for case in &cases {
             let rho = (1.5 * case.size_m).max(altitude);

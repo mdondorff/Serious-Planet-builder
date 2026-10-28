@@ -58,33 +58,43 @@ pub struct Gate {
     /// Most tiles held back under an edit at once (reported, not failed).
     pub held_under_edit_max: usize,
     pub held_frames: u64,
-    /// The clock time the scripted edit was published at and the horizon maps that had landed then.
-    pub edit_at: Option<(u64, u64)>,
-    /// Milliseconds from the edit to the first map that landed after it.
+    /// The clock time the scripted edit was published at, and the wanted horizon maps it touched (their edit word changed).
+    pub edit_at: Option<u64>,
+    pub touched: Vec<planet_generators::chunkfield::ChunkKey>,
+    /// The touched maps that landed after the edit.
+    pub rebaked: Vec<planet_generators::chunkfield::ChunkKey>,
+    /// Milliseconds from the edit to the first touched map that landed after it.
     pub rebake_ms: Option<u64>,
-    /// Milliseconds from the edit to the first upload of a map after a re-bake landed, and the frame it was drawn from: the map on screen.
+    /// Milliseconds from the edit to the first upload of a re-baked map, and the frame it was drawn from: the map on screen.
     pub drawn_ms: Option<(u64, u64)>,
 }
 
 impl Gate {
-    /// The scripted edit was published at `now_ms`, with `landed` horizon maps landed so far (once; later calls do nothing).
-    pub fn edit_published(&mut self, now_ms: u64, landed: u64) {
-        self.edit_at.get_or_insert((now_ms, landed));
-    }
-
-    /// A map was put on the GPU at `now_ms` in `frame`: the first one after a re-bake landed is the shadow of the edit on screen.
-    pub fn map_uploaded(&mut self, now_ms: u64, frame: u64) {
-        if let (Some((at, _)), Some(_), None) = (self.edit_at, self.rebake_ms, self.drawn_ms) {
-            self.drawn_ms = Some((now_ms.saturating_sub(at), frame));
+    /// The scripted edit was published at `now_ms` and touched the wanted maps `touched` (once; later calls do nothing).
+    pub fn edit_published(&mut self, now_ms: u64, touched: Vec<planet_generators::chunkfield::ChunkKey>) {
+        if self.edit_at.is_none() {
+            self.edit_at = Some(now_ms);
+            self.touched = touched;
         }
     }
 
-    /// The horizon maps landed so far, at `now_ms`: the first one past the count at the edit is the re-bake.
-    pub fn horizon_landed(&mut self, now_ms: u64, landed: u64) {
-        if let (Some((at, before)), None) = (self.edit_at, self.rebake_ms) {
-            if landed > before {
-                self.rebake_ms = Some(now_ms.saturating_sub(at));
+    /// The map of `key` was put on the GPU at `now_ms` in `frame`: the first re-baked one after the edit is its shadow on screen.
+    pub fn map_uploaded(&mut self, key: planet_generators::chunkfield::ChunkKey, now_ms: u64, frame: u64) {
+        if let (Some(at), None) = (self.edit_at, self.drawn_ms) {
+            if self.rebaked.contains(&key) {
+                self.drawn_ms = Some((now_ms.saturating_sub(at), frame));
             }
+        }
+    }
+
+    /// The maps that landed at `now_ms`: the first touched one after the edit is the re-bake (an unrelated map landing does not count).
+    pub fn horizon_landed(&mut self, now_ms: u64, landed: &[planet_generators::chunkfield::ChunkKey]) {
+        let Some(at) = self.edit_at else { return };
+        for k in landed.iter().filter(|k| self.touched.contains(k)) {
+            if !self.rebaked.contains(k) {
+                self.rebaked.push(*k);
+            }
+            self.rebake_ms.get_or_insert(now_ms.saturating_sub(at));
         }
     }
 
@@ -147,7 +157,7 @@ impl Gate {
         if judge_perf && lit_with_horizon && horizon_baked == 0 {
             f.push("horizon maps baked: 0 over a lit run with the horizon jobs on".to_string());
         }
-        if judge_perf && lit_with_horizon && self.edit_at.is_some() {
+        if judge_perf && lit_with_horizon && self.edit_at.is_some() && !self.touched.is_empty() {
             match self.rebake_ms {
                 Some(ms) if ms <= REBAKE_LIMIT_MS => {}
                 Some(ms) => f.push(format!("no horizon map re-baked within {} s of the edit (the first {ms} ms after it)", REBAKE_LIMIT_MS / 1000)),
@@ -164,7 +174,8 @@ impl Gate {
     pub fn report(&self, horizon_baked: u64, panics: u64) -> String {
         let edit = match (self.edit_at, self.rebake_ms, self.drawn_ms) {
             (None, _, _) => String::new(),
-            (Some(_), None, _) => "; edit: no map re-baked".to_string(),
+            (Some(_), None, _) if self.touched.is_empty() => "; edit: touched no wanted map".to_string(),
+            (Some(_), None, _) => format!("; edit: touched {} maps, none re-baked", self.touched.len()),
             (Some(_), Some(b), None) => format!("; edit: re-bake landed {b} ms after it, not drawn yet"),
             (Some(_), Some(b), Some((d, f))) => format!("; edit: re-bake landed {b} ms after it, first drawn {d} ms after it (frame {f})"),
         };
@@ -273,41 +284,51 @@ mod tests {
     }
 
 
+
     // spec: TEST-065
     #[test]
-    fn a_horizon_map_must_land_within_ten_seconds_of_the_edit() {
+    fn a_touched_horizon_map_must_land_within_ten_seconds_of_the_edit_and_an_unrelated_landing_does_not_count() {
+        let (a, b, other) = ((2, 10, 11), (2, 11, 11), (2, 50, 50));
         let mut g = Gate::default();
         assert!(g.failures(3, true, 0, true).is_empty(), "no edit, nothing to re-bake");
-        g.edit_published(1_000, 3);
-        g.horizon_landed(5_000, 3);
+        g.edit_published(1_000, vec![a, b]);
+        g.horizon_landed(1_300, &[other]);
+        assert_eq!(g.rebake_ms, None, "an initial bake of another chunk is not the re-bake");
         let f = g.failures(3, true, 0, true);
         assert!(f.len() == 1 && f[0].contains("none landed after it"), "{f:?}");
-        g.horizon_landed(12_000, 4);
+        g.horizon_landed(12_000, &[a]);
         assert_eq!(g.rebake_ms, Some(11_000));
         let f = g.failures(4, true, 0, true);
         assert!(f.len() == 1 && f[0].contains("11000 ms"), "{f:?}");
-        let mut ok = Gate::default();
-        ok.edit_published(1_000, 3);
-        ok.horizon_landed(4_000, 4);
-        ok.horizon_landed(20_000, 9);
-        assert!(ok.failures(4, true, 0, true).is_empty() && ok.rebake_ms == Some(3_000), "the first landing counts");
         assert!(g.failures(4, true, 0, false).is_empty(), "software: reported, not judged");
+        let mut ok = Gate::default();
+        ok.edit_published(1_000, vec![a, b]);
+        ok.horizon_landed(4_000, &[b]);
+        ok.horizon_landed(20_000, &[a]);
+        assert!(ok.failures(4, true, 0, true).is_empty() && ok.rebake_ms == Some(3_000), "the first touched landing counts");
+        let mut none = Gate::default();
+        none.edit_published(1_000, Vec::new());
+        assert!(none.failures(4, true, 0, true).is_empty(), "an edit that touched no wanted map has no re-bake to wait for");
+        assert!(none.report(4, 0).contains("touched no wanted map"));
     }
 
     // spec: TEST-065
     #[test]
     fn the_report_says_when_the_rebake_landed_and_when_it_was_first_drawn() {
+        let (a, other) = ((2, 10, 11), (2, 50, 50));
         let mut g = Gate::default();
         assert!(!g.report(3, 0).contains("edit:"), "no edit, nothing to say");
-        g.edit_published(1_000, 3);
-        g.map_uploaded(1_500, 9);
-        assert_eq!(g.drawn_ms, None, "an upload before any re-bake landed is not the edit's map");
-        assert!(g.report(3, 0).contains("edit: no map re-baked"));
-        g.horizon_landed(3_000, 4);
+        g.edit_published(1_000, vec![a]);
+        g.map_uploaded(a, 1_500, 9);
+        assert_eq!(g.drawn_ms, None, "an upload before the re-bake landed is not the edit's map");
+        assert!(g.report(3, 0).contains("touched 1 maps, none re-baked"));
+        g.horizon_landed(3_000, &[a]);
         assert!(g.report(4, 0).contains("re-bake landed 2000 ms after it, not drawn yet"));
-        g.map_uploaded(3_017, 120);
-        g.map_uploaded(3_034, 121);
-        assert_eq!(g.drawn_ms, Some((2_017, 120)), "the first upload after the landing");
+        g.map_uploaded(other, 3_010, 119);
+        assert_eq!(g.drawn_ms, None, "another map's upload is not the re-baked one");
+        g.map_uploaded(a, 3_017, 120);
+        g.map_uploaded(a, 3_034, 121);
+        assert_eq!(g.drawn_ms, Some((2_017, 120)), "the first upload of the re-baked map");
         assert!(g.report(4, 0).contains("first drawn 2017 ms after it (frame 120)"));
     }
     // spec: TEST-061

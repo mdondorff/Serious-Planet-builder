@@ -143,7 +143,7 @@ fn a_chunk_gets_its_horizon_map_after_its_heights_from_the_worlds_own_field_and_
         .map(|_| {
             let r = rig();
             r.world
-                .enable_horizon(params(), r.horizon_jobs.clone(), r.clock.clone(), HorizonConfig { workers: 4, settle_ms: 1_000, keep: 32 }, 2)
+                .enable_horizon(params(), r.horizon_jobs.clone(), r.clock.clone(), HorizonConfig { workers: 4, settle_ms: 1_000, keep: 8 }, 2)
                 .unwrap();
             // Before the heights: the horizon jobs start nothing.
             assert_eq!(r.world.horizon_frame(&[tile()], camera()).started, 0);
@@ -168,7 +168,7 @@ fn a_chunk_gets_its_horizon_map_after_its_heights_from_the_worlds_own_field_and_
 #[test]
 fn a_flight_over_the_chunks_lands_every_map_and_the_rebakes_stay_few_and_an_edit_bakes_again() {
     let r = rig();
-    r.world.enable_horizon(params(), r.horizon_jobs.clone(), r.clock.clone(), HorizonConfig { workers: 2, settle_ms: 1_000, keep: 32 }, 2).unwrap();
+    r.world.enable_horizon(params(), r.horizon_jobs.clone(), r.clock.clone(), HorizonConfig { workers: 2, settle_ms: 1_000, keep: 8 }, 2).unwrap();
     // 100 ms frames for 12 s: the chunks land, then their neighbours, and the horizon jobs follow.
     for _ in 0..120 {
         frame(&r);
@@ -446,7 +446,7 @@ impl planet::chunkstage::StepLoop for FakeLoop {
 fn fly_through_the_step(features: planet::chunkstage::FrameFeatures, edit_pending: bool) -> (planet::chunkstage::FeatureCounters, usize) {
     use planet::chunkstage::{frame_step, FeatureCounters};
     let r = rig();
-    r.world.enable_horizon(params(), r.horizon_jobs.clone(), r.clock.clone(), HorizonConfig { workers: 2, settle_ms: 1_000, keep: 32 }, 2).unwrap();
+    r.world.enable_horizon(params(), r.horizon_jobs.clone(), r.clock.clone(), HorizonConfig { workers: 2, settle_ms: 1_000, keep: 8 }, 2).unwrap();
     let chunk = TileId::new(Face(2), CHUNK_GRID_LEVEL, 1000, 1000).unwrap();
     let (s0, s1, t0, t1) = chunk.bounds();
     let at = |s: f64| PlanetFixed(planet_core::cube::face_to_direction(&TangentWarp, Face(2), s, 0.5 * (t0 + t1)) * (R + 300.0));
