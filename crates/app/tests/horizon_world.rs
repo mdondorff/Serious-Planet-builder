@@ -349,6 +349,28 @@ fn a_bake_from_shared_height_tiles_equals_the_bake_that_evaluates_its_whole_rast
     assert_eq!(tight.tile_stats().held, 4);
 }
 
+// spec: STRM-059, STRM-060
+#[test]
+fn bakes_that_run_at_once_evaluate_a_shared_tile_once_and_give_the_same_maps_as_one_after_the_other() {
+    use planet::horizonworld::ChunkHorizonBaker;
+    use planet_streaming::chunks::HorizonBaker;
+    let r = rig();
+    land_chunks(&r);
+    let lat = r.world.chunk_lattice().unwrap();
+    let keys: Vec<ChunkKey> = (0..4).map(|dx| (2, 1000 + dx, 1000)).collect();
+    let alone = ChunkHorizonBaker::new(&r.world, lat, params(), 1);
+    let expected: Vec<_> = keys.iter().map(|k| alone.bake(*k, &[]).expect("a map")).collect();
+    // Four chunks in a row read 6 x 3 distinct tiles; one after the other that is what is evaluated.
+    assert_eq!(alone.tile_stats().evaluated, 18);
+    let together = ChunkHorizonBaker::new(&r.world, lat, params(), 1);
+    let maps: Vec<_> = std::thread::scope(|s| {
+        let jobs: Vec<_> = keys.iter().map(|k| s.spawn(|| together.bake(*k, &[]).expect("a map"))).collect();
+        jobs.into_iter().map(|j| j.join().unwrap()).collect()
+    });
+    assert_eq!(maps, expected, "the result does not depend on how many bakes run at once (CON-14)");
+    assert_eq!(together.tile_stats().evaluated, 18, "a tile two bakes need at once is evaluated by one of them");
+}
+
 // spec: STRM-059
 #[test]
 fn a_neighbours_edit_replaces_the_tile_it_touches_in_the_halo_and_no_other_and_a_chunk_landing_replaces_its_own() {
@@ -568,4 +590,45 @@ fn a_world_with_a_bake_and_no_chunk_stage_wants_and_bakes_horizon_maps_from_the_
         update.landed.len() as u64 + stats.landed > 0 && world.horizon_map((2, 1000, 1000)).is_some(),
         "the map of the tile's own chunk landed"
     );
+}
+
+/// Throughput of horizon bakes on the real store, `workers` at once with `threads` each over 12 chunks, cold (the height tiles are evaluated by the
+/// bakes) and warm (the march alone). A measurement, not a test of a rule: `cargo test --release -p planet --test it horizon_bake_throughput --
+/// --ignored --nocapture`. Numbers depend on what else runs on the machine.
+#[test]
+#[ignore]
+fn horizon_bake_throughput() {
+    use planet::horizonworld::{chunk_horizon_params, ChunkHorizonBaker};
+    use planet_streaming::chunks::HorizonBaker;
+    let store = std::path::Path::new("C:/DEV/SeriousPlanetData/global16384");
+    let seed = planet::parse_args(&["test-render".to_string(), "--scene".to_string(), "lit".to_string()]).expect("options").seed;
+    let world = Arc::new(WorldTerrain::open_store(WorldDefinition::single_planet(R, seed), store, 16384).unwrap());
+    let lat = world.horizon_lattice().unwrap();
+    let params = chunk_horizon_params(&lat, R);
+    let keys: Vec<(u8, u32, u32)> = (0..4u32).flat_map(|x| (0..3u32).map(move |y| (2u8, 1000 + x, 1000 + y))).collect();
+    for (workers, threads) in [(1usize, 20usize), (1, 4), (4, 5), (8, 1), (12, 1)] {
+        let baker = ChunkHorizonBaker::new(&world, lat, params, threads);
+        for label in ["cold", "warm"] {
+            let next = std::sync::atomic::AtomicUsize::new(0);
+            let t = std::time::Instant::now();
+            std::thread::scope(|s| {
+                for _ in 0..workers {
+                    s.spawn(|| loop {
+                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some(k) = keys.get(i) else { break };
+                        baker.bake(*k, &[]).unwrap();
+                    });
+                }
+            });
+            println!("workers {workers} x threads {threads} {label}: {:.0} ms for {} maps", t.elapsed().as_secs_f64() * 1e3, keys.len());
+        }
+    }
+}
+
+// spec: STRM-064
+#[test]
+fn the_horizon_bakes_without_a_chunk_stage_run_on_half_the_generation_workers_at_most_eight() {
+    use planet::anetworld::{horizon_workers, HORIZON_WORKERS_MAX};
+    use planet_streaming::GenWorkers;
+    assert_eq!([1, 2, 5, 8, 16, 18, 40].map(|n| horizon_workers(GenWorkers::new(n))), [1, 1, 2, 4, 8, 8, HORIZON_WORKERS_MAX]);
 }

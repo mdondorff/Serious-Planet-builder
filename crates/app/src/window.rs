@@ -504,8 +504,7 @@ impl App<'_> {
             && (!cfg.smoke || std::env::var_os("PLANET_SMOKE_CHUNKS").is_some() || std::env::var_os("PLANET_GATE").is_some())
         {
             // No chunk stage: the horizon maps are baked from the base terrain and the stamps (STRM-064), on the idle class of the same pool.
-            let (pool, chunk_cfg) = crate::anetworld::viewer_chunk_stage(cfg.gen);
-            if let Err(e) = self.world.enable_viewer_horizon(pool, self.clock.clone(), chunk_cfg.workers.div_ceil(2)) {
+            if let Err(e) = self.world.enable_viewer_horizon(cfg.gen, self.clock.clone()) {
                 eprintln!("horizon: {e}");
             }
         }
