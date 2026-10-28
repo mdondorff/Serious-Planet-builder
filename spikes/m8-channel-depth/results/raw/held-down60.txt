@@ -1,0 +1,14 @@
+$ cargo test -p planet --release --lib held_back_report -- --ignored --nocapture
+    Finished `release` profile [optimized] target(s) in 0.21s
+     Running unittests src\lib.rs (target\release\deps\planet-b3cdcc9954cb66b1.exe)
+
+running 1 test
+A-net chunk scene: bake 16384 cells per face edge of the store C:/DEV/SeriousPlanetData/global16384, coupled run 80 steps
+chunk 0x0b000000002bd53a (face 0), the river of 14489279 km2 at its coarse cell
+pose of C:/DEV/SeriousPlanetData/owner-test-2026-10-27/frame-116591.bundle: no chunk stage: 0 of 1805 nodes held back
+  chunk stage, widening 300 m both ways: 112 of 1340
+  asymmetric bound (down 60 m, up 10 m): 24 of 1858
+test globalperf::tests::held_back_report ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 211 filtered out; finished in 4.41s
+

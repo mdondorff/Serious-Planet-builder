@@ -1,0 +1,20 @@
+$ cargo test -p planet --release --lib anet_steps_report -- --ignored --nocapture
+    Finished `release` profile [optimized] target(s) in 0.22s
+     Running unittests src\lib.rs (target\release\deps\planet-b3cdcc9954cb66b1.exe)
+
+running 1 test
+A-net chunk scene: bake 16384 cells per face edge of the store C:/DEV/SeriousPlanetData/global16384, coupled run 80 steps
+chunk 0x0b000000002bd53a (face 0), the river of 14489279 km2 at its coarse cell
+steps against the parent (tile level L vs its parent, at the parent's vertices, inside the chunk), 8 m cells:
+  level 11: against the parent p99 77.894 m, max 78.327 m (the change itself at this level: p99 77.894 m) over 1089 vertices, fade of the max at 0.25 m per frame, 60 fps: 5.22 s
+  level 12: against the parent p99 2.269 m, max 4.496 m (the change itself at this level: p99 77.951 m) over 1089 vertices, fade of the max at 0.25 m per frame, 60 fps: 0.30 s
+  level 13: against the parent p99 0.952 m, max 6.224 m (the change itself at this level: p99 77.981 m) over 4356 vertices, fade of the max at 0.25 m per frame, 60 fps: 0.41 s
+  level 14: against the parent p99 0.375 m, max 5.468 m (the change itself at this level: p99 77.976 m) over 17424 vertices, fade of the max at 0.25 m per frame, 60 fps: 0.36 s
+  level 15: against the parent p99 0.197 m, max 9.512 m (the change itself at this level: p99 77.975 m) over 69696 vertices, fade of the max at 0.25 m per frame, 60 fps: 0.63 s
+  level 16: against the parent p99 0.045 m, max 3.278 m (the change itself at this level: p99 77.973 m) over 278784 vertices, fade of the max at 0.25 m per frame, 60 fps: 0.22 s
+the change at the entry level, signed: p0 -78.59, p1 -77.97, p10 -75.49, p50 -56.59, p90 -0.35, p99 -0.01, p100 0.10 m
+entry step at the A-net top level 15 against the base (pyramid up to 15 only): p99 77.975 m, max 78.594 m over 69696 vertices
+test globalperf::tests::anet_steps_report ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 211 filtered out; finished in 9.57s
+
