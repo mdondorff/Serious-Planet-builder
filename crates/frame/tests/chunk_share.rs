@@ -409,10 +409,13 @@ fn the_track_set_follows_the_reach_of_the_plan_and_is_empty_without_travel_over_
     let edge_m = R * std::f64::consts::FRAC_PI_2 / f64::from(1u32 << CHUNK_GRID_LEVEL);
     let next = (2u8, 1001u32, 1000u32);
     let beside = [(2u8, 1001u32, 999u32), (2, 1001, 1001)];
-    // A reach of 1.1 chunk edges (the plan reads the neighbours of a chunk): the chunk across the edge, not yet the ones beside it.
-    let near = track_chunks(here, velocity, 1.1 * edge_m, 12.0, R);
+    // A reach below one chunk edge (a low view) is one edge, and the track asks half an edge further than the centres the plan reads: the chunk
+    // across the edge is asked when the camera is still in the current one (window 14: asked 4.7 s before it was wanted, a solve of 6 s).
+    let near = track_chunks(here, velocity, 0.2 * edge_m, 12.0, R);
     assert!(near.contains(&next), "{near:?}");
-    assert!(beside.iter().all(|b| !near.contains(b)), "{near:?}");
+    assert_eq!(near, track_chunks(here, velocity, edge_m, 12.0, R), "a reach under one edge is one edge");
+    let on_entering = track_chunks(here, velocity, 0.2 * edge_m, 0.5, R);
+    assert!(on_entering.contains(&next), "0.5 s at 160 m/s is 80 m: the next chunk is asked at once: {on_entering:?}");
     // A reach of 1.5 edges (a wider view): the pair beside it too, and a wider reach never gives fewer.
     let wide = track_chunks(here, velocity, 1.6 * edge_m, 12.0, R);
     assert!(beside.iter().all(|b| wide.contains(b)) && wide.contains(&next), "{wide:?}");
@@ -425,4 +428,69 @@ fn the_track_set_follows_the_reach_of_the_plan_and_is_empty_without_travel_over_
     assert!(track_chunks(here, up * -50.0, 1.6 * edge_m, 12.0, R).is_empty(), "a dive has no component along the ground");
     let long = track_chunks(here, velocity, 1.1 * edge_m, 60.0, R);
     assert!(long.contains(&(2, 1002, 1000)), "60 s at 160 m/s is 9.6 km: two chunks along the track: {long:?}");
+}
+
+// spec: STRM-042
+#[test]
+fn a_chunk_is_asked_at_least_a_solve_and_a_margin_before_the_plan_wants_it_at_every_flight_speed_and_the_first_frame_chunks_are_asked_during_the_run_in(
+) {
+    use planet_frame::chunkshare::track_chunks;
+    // The solve of a chunk is 6.4 s at the median and 10 s at the most (window 14); the margin is a second of the frame loop's own lag.
+    const SOLVE_MAX_S: f64 = 10.0;
+    const MARGIN_S: f64 = 1.0;
+    const LEAD_S: f64 = 12.0;
+    const STEP_S: f64 = 0.25;
+    let edge_m = R * std::f64::consts::FRAC_PI_2 / f64::from(1u32 << CHUNK_GRID_LEVEL);
+    let start = TileId::new(Face(2), CHUNK_GRID_LEVEL, 1000, 1000).unwrap().center_direction(&TangentWarp);
+    let tangent = {
+        let east = TileId::new(Face(2), CHUNK_GRID_LEVEL, 1001, 1000).unwrap().center_direction(&TangentWarp);
+        (east - start * east.dot(start)).normalized()
+    };
+    let at = |along_m: f64| (start + tangent * (along_m / R)).normalized();
+    let centres: Vec<((u8, u32, u32), planet_core::Vec3)> = (990..1030u32)
+        .flat_map(|x| (994..1007u32).map(move |y| (x, y)))
+        .map(|(x, y)| ((2u8, x, y), TileId::new(Face(2), CHUNK_GRID_LEVEL, x, y).unwrap().center_direction(&TangentWarp)))
+        .collect();
+    for speed in [100.0, 200.0, 340.0, 440.0, 500.0] {
+        // The plan reads the chunks whose centres are within its reach (a reach under one edge is one edge): a chunk is wanted the moment its centre is.
+        for reach_m in [0.2 * edge_m, 1.6 * edge_m, 2.6 * edge_m] {
+            let wanted_within_m = reach_m.max(edge_m);
+            let (mut asked, mut wanted): (std::collections::HashMap<_, f64>, std::collections::HashMap<_, f64>) = Default::default();
+            let steps = ((LEAD_S + 40.0) / STEP_S) as usize;
+            for k in 0..steps {
+                let t = k as f64 * STEP_S;
+                let dir = at(speed * t);
+                let velocity = (at(speed * (t + 0.01)) - dir).normalized() * speed;
+                let position = PlanetFixed(dir * (R + 300.0));
+                for key in track_chunks(position, velocity, reach_m, LEAD_S, R) {
+                    asked.entry(key).or_insert(t);
+                }
+                for (key, c) in &centres {
+                    if (*c - dir).length() * R <= wanted_within_m {
+                        wanted.entry(*key).or_insert(t);
+                    }
+                }
+            }
+            for (key, &t_wanted) in &wanted {
+                if t_wanted < LEAD_S {
+                    // Wanted inside the first lead: asked at the first frame (t = 0), as early as the track can.
+                    assert!(
+                        asked.get(key).is_some_and(|&a| a <= 0.0 + STEP_S),
+                        "{speed} m/s reach {reach_m}: {key:?} wanted at {t_wanted:.1} s, asked {:?}",
+                        asked.get(key)
+                    );
+                    continue;
+                }
+                let a = *asked
+                    .get(key)
+                    .unwrap_or_else(|| panic!("{speed} m/s reach {reach_m}: {key:?} wanted at {t_wanted:.1} s was never asked"));
+                assert!(
+                    t_wanted - a >= SOLVE_MAX_S + MARGIN_S,
+                    "{speed} m/s reach {:.1} edges: {key:?} asked {a:.1} s, wanted {t_wanted:.1} s: only {:.1} s ahead of a solve of {SOLVE_MAX_S} s and a margin of {MARGIN_S} s",
+                    reach_m / edge_m,
+                    t_wanted - a
+                );
+            }
+        }
+    }
 }
