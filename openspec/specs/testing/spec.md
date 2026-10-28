@@ -1182,7 +1182,7 @@ Verify: A
 Status: active
 Source: opus-planner (2026-10-28), TEST-026, GEN-042, REND-044, TEST-042, TEST-047, TEST-061 to TEST-063, owner fallback 2026-10-28
 
-Detail: The logs in `perf/logs/` or `--logs DIR`: `coupled-make.json` (at most 600 s from the 16384 bake), `shadow-cost.json` (every pose at most 1.5 ms by the compiled-out draws), `edit-latency.md` (criterion 6: no row over in the M6 table headed `verdict` and none in the horizon table headed `verdict (10 s, horizon maps)`; the chunk table `verdict (10 s, drawn tiles)` is not judged) and `envelope.json` (steady speed at 300 m at least 200 m/s).
+Detail: The logs in `perf/logs/` or `--logs DIR`: `coupled-make.json` (at most 600 s from the 16384 bake), `shadow-cost.json` (every pose at most 1.5 ms by the compiled-out draws), `edit-latency.md` (criterion 6: no row over in the M6 table headed `verdict` and none in the horizon table headed `verdict (10 s, horizon maps)`; the chunk table `verdict (10 s, drawn tiles)` is not judged) and `envelope.json` (steady speed at 300 m at least 200 m/s; its `chunk_stage` SHALL be false: a log with it true, or without the field, is MISSING).
 
 #### Scenario: Logs against the budgets
 - **WHEN** the four logs are within their budgets, then one is over, then they are missing, smoke or of another scene
