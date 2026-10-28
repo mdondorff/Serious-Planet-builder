@@ -1257,6 +1257,7 @@ impl App<'_> {
                 // [`GATE_BAKE_GIVE_UP`] frames: the verdict then says no map was baked.
                 let maps_baked = self.world.horizon_stats().is_some_and(|h| h.baked + h.disk_hits > 0);
                 let horizon_waits = self.world.horizon_enabled()
+                    && std::env::var_os("PLANET_GATE_SOFTWARE").is_none()
                     && self.world.chunk_manager().is_none()
                     && st.viewer.lit
                     && !maps_baked

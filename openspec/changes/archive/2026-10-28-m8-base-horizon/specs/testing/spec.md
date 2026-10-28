@@ -3,7 +3,7 @@
 ### Requirement: TEST-065 The gate judges horizon bakes at every site and the re-bake after its edit
 The gate SHALL fail a lit run with the horizon jobs on when no horizon map was baked, or when no map the edit touched landed within 10 s of its scripted edit (M8 criterion 6); on the software adapter both are reported and not judged. The edit-latency scene SHALL print a table headed `verdict (10 s, horizon maps)`, one row per touched map.
 
-Verify: A, C
+Verify: A
 Status: active
 Source: opus-planner M8-F step 2, TEST-061
 

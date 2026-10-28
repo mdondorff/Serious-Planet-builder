@@ -1270,7 +1270,7 @@ Detail: Blocks inside the face are kept; a block past a face edge is evaluated e
 ### Requirement: STRM-064 The horizon maps are baked without a chunk stage
 With no chunk stage the horizon jobs SHALL bake the maps of the chunks of the plan's tiles (chunk-grid level 11 and finer) from the base terrain and the stamps, in the format, march and slots of a run with a stage, and SHALL bake a map again when an edit or a change of the world word reaches it.
 
-Verify: A, C
+Verify: A
 Status: active
 Source: owner fallback 2026-10-28, opus-planner M8-F step 2, STRM-048, STRM-060, finding 16 of the owner test 2026-10-27
 
@@ -1282,4 +1282,4 @@ Detail: Every chunk counts as ready with no change. The jobs keep the maps of th
 
 #### Scenario: Window without a stage
 - **WHEN** the window runs lit over a store without `--chunks`
-- **THEN** the horizon jobs bake at least one map and `chunk jobs` stays `None`
+- **THEN** `chunk jobs` stays `None` and the horizon jobs bake at least one map (judged by the real-store gate `cargo xtask gate`; the small-world run reports it, because a software adapter is too slow to wait for a bake)
