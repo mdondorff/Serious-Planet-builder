@@ -480,7 +480,7 @@ mod tests {
     }
 
     // spec: TEST-064
-    /// The steps of the base field alone (no chunk stage) between a tile level and its parent at the levels 11 to 16, over the vertices of the
+    /// The steps of the base field alone (no chunk stage) between a tile level and its parent (0 by construction at shared vertices: a child tile's vertices include the parent's and the base height does not depend on the level; the measurement guards that) at the levels 11 to 16, over the vertices of the
     /// parents inside the same chunk as `anet_steps_report`, printed: `PLANET_ANET_STORE=DIR PLANET_ANET_RES=N cargo test -p planet --release --lib
     /// base_steps_report -- --ignored --nocapture`. A measurement of values, read only.
     #[test]
