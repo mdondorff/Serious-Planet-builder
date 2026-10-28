@@ -11,12 +11,14 @@ use std::sync::{Arc, Mutex};
 pub type PickSource = Arc<dyn Fn(Ray, PickLimits, u8) -> Option<SurfaceHit> + Send + Sync>;
 
 type Request = (Ray, PickLimits, u8);
+/// A finished pick: the epoch it started in and what it found.
+type Finished = Option<(u64, Option<SurfaceHit>)>;
 
 /// A pick thread and the last hit it found.
 pub struct HoverPicker {
     tx: Sender<(u64, Request)>,
     /// The last finished pick, with the epoch it started in.
-    done: Arc<Mutex<Option<(u64, Option<SurfaceHit>)>>>,
+    done: Arc<Mutex<Finished>>,
     busy: Arc<AtomicBool>,
     /// Counts the clears: a pick that started before one is dropped.
     epoch: Arc<AtomicU64>,
@@ -27,7 +29,7 @@ impl HoverPicker {
     /// The thread ends when the picker is dropped.
     pub fn new(source: PickSource) -> HoverPicker {
         let (tx, rx) = channel::<(u64, Request)>();
-        let done: Arc<Mutex<Option<(u64, Option<SurfaceHit>)>>> = Arc::new(Mutex::new(None));
+        let done: Arc<Mutex<Finished>> = Arc::new(Mutex::new(None));
         let busy = Arc::new(AtomicBool::new(false));
         let epoch = Arc::new(AtomicU64::new(0));
         let (slot, flag) = (Arc::clone(&done), Arc::clone(&busy));
