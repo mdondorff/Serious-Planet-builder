@@ -59,16 +59,18 @@ fn frame(r: &Rig) {
     r.horizon_jobs.run(64);
 }
 
-// spec: STRM-049
+// spec: STRM-049, STRM-064
 #[test]
-fn the_horizon_jobs_need_the_chunk_stage_and_a_world_without_them_does_nothing() {
+fn a_world_without_a_bake_has_no_horizon_jobs_and_does_nothing() {
     let mut def = WorldDefinition::single_planet(R, 5);
     def.set_height_field(REFERENCE_ID);
     let world = Arc::new(WorldTerrain::open(def, 16).unwrap());
+    assert!(!world.has_bake(), "a seed-only world has no bake to cut chunks from");
     let err = world
         .enable_horizon(params(), Arc::new(ManualSpawner::default()), Arc::new(FakeClock::default()), HorizonConfig::default(), 2)
         .unwrap_err();
-    assert!(err.contains("enable_chunks"), "{err}");
+    assert!(err.contains("no chunk lattice"), "{err}");
+    assert!(!world.horizon_enabled());
     assert_eq!(world.horizon_frame(&[tile()], camera()), Default::default());
     assert!(world.horizon_map((2, 1000, 1000)).is_none() && world.horizon_stats().is_none());
 }
