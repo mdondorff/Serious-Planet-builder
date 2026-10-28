@@ -560,3 +560,17 @@ fn the_gate_passes_on_a_small_world_with_a_large_edit_and_the_chunk_stage() {
     let Some(stdout) = out else { return };
     assert!(stdout.lines().any(|l| l.starts_with("gate: ") && l.contains("held back:")), "no gate line: {stdout}");
 }
+
+// spec: TEST-064
+#[test]
+fn the_window_without_the_chunk_stage_computes_no_chunk() {
+    let (store, world, args) = stage_store("nochunks");
+    let mut args: Vec<&str> = args.iter().map(String::as_str).collect();
+    args.extend(["--edit", "--no-vsync", "--size", "480x270", "--no-chunks"]);
+    let out = smoke_in(&args, &[("PLANET_GATE", "1"), ("PLANET_GATE_SETTLE", "10"), ("PLANET_GATE_SOFTWARE", "1")]);
+    let _ = std::fs::remove_file(&world);
+    let _ = std::fs::remove_dir_all(&store);
+    let Some(stdout) = out else { return };
+    let line = stdout.lines().find(|l| l.starts_with("gate: ")).unwrap_or_else(|| panic!("no gate line: {stdout}"));
+    assert!(line.contains("chunk jobs: None"), "the stage was on: {line}");
+}

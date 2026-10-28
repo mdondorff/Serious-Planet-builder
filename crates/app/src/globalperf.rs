@@ -479,6 +479,52 @@ mod tests {
         anet_steps(&world, &maps, &stage, &lat, tile, &mut out).unwrap();
     }
 
+    // spec: TEST-064
+    /// The steps of the base field alone (no chunk stage) between a tile level and its parent (0 by construction at shared vertices: a child tile's vertices include the parent's and the base height does not depend on the level; the measurement guards that) at the levels 11 to 16, over the vertices of the
+    /// parents inside the same chunk as `anet_steps_report`, printed: `PLANET_ANET_STORE=DIR PLANET_ANET_RES=N cargo test -p planet --release --lib
+    /// base_steps_report -- --ignored --nocapture`. A measurement of values, read only.
+    #[test]
+    #[ignore = "a measurement: it prints the steps of the base field in one real chunk"]
+    fn base_steps_report() {
+        let mut out = std::io::stdout();
+        let res = std::env::var("PLANET_ANET_RES").ok().and_then(|r| r.parse().ok()).unwrap_or(256);
+        let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
+        let (world, _maps, tile) = anet_scene(res, 11, store, &mut out).unwrap();
+        let base = world.base_field().unwrap();
+        let map = &planet_core::cube::TangentWarp;
+        let cells = planet_generators::chunk::TILE_CELLS;
+        let top = planet_generators::chunk::CHUNK_GRID_LEVEL;
+        writeln!(
+            out,
+            "steps of the base field alone against the parent (tile level L vs L - 1, at the parent's vertices, inside the chunk):"
+        )
+        .unwrap();
+        for level in top + 1..=top + 5 {
+            let mut tiles = vec![tile];
+            for _ in top..level - 1 {
+                tiles = tiles.iter().flat_map(|t| t.children().expect("children")).collect();
+            }
+            let mut d: Vec<f64> = Vec::new();
+            for t in &tiles {
+                for l in 0..=cells {
+                    for k in 0..=cells {
+                        let dir = t.sample_direction(map, cells, k, l);
+                        d.push((base.height_at_level(dir, level) - base.height_at_level(dir, level - 1)).abs());
+                    }
+                }
+            }
+            d.sort_by(f64::total_cmp);
+            writeln!(
+                out,
+                "  level {level}: base field against the parent p99 {:.3} m, max {:.3} m over {} vertices",
+                d[d.len() * 99 / 100],
+                d[d.len() - 1],
+                d.len()
+            )
+            .unwrap();
+        }
+    }
+
     // spec: GEN-037
     /// The change the A-net chunks make, by tile level, over a sample of land chunks of the store (the stated bound of the stage, GEN-039): the
     /// maximum and the p99.9 of its absolute value at each level 11 to 16, and the signed extremes. `PLANET_ANET_STORE=DIR PLANET_ANET_RES=N
