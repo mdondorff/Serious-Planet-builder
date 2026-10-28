@@ -1,0 +1,1 @@
+- 2026-10-28 M8-G follow-up: editor --no-chunks and xtask gate --no-chunks (stage off: 0 held-back tiles, no chunk-frame stalls, the 12/11 to 15/14 steps exist only with the stage on) (TEST-064)
