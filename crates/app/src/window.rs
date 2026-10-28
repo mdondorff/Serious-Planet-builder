@@ -496,6 +496,12 @@ impl App<'_> {
             if std::env::var_os("PLANET_GATE").is_some() {
                 e.set_gate();
             }
+            // The hover pick runs on a thread of its own against a field it makes (the current definition and stamps): a cold bake block is decoded there (VIEW-059).
+            let world = self.world.clone();
+            e.set_hover_source(std::sync::Arc::new(move |ray, limits, level| {
+                let field = world.field().ok()?;
+                planet_frame::pick::pick_surface(&ray, &limits, &|d| field.height_at_level(d, level))
+            }));
             // The brush guard limits the stack of strokes by what these parameters can draw (VIEW-043).
             e.session.set_drawable_slope(cfg.lod.drawable_slope());
             Some(e)

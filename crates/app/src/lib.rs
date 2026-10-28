@@ -13,6 +13,7 @@ pub mod envelopeperf;
 pub mod gate;
 pub mod globalperf;
 pub mod horizonworld;
+pub mod hoverpick;
 pub mod litperf;
 pub mod lookload;
 pub mod manifest;
