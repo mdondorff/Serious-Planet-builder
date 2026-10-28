@@ -412,3 +412,48 @@ fn a_block_of_the_bake_is_decoded_by_the_warm_up_thread_so_the_first_read_on_the
     );
     let _ = std::fs::remove_dir_all(&store);
 }
+
+// spec: VIEW-061, CON-22
+#[test]
+fn the_hover_pick_decodes_its_cold_block_on_its_own_thread_and_the_stall_probe_names_a_phase_that_decodes() {
+    use planet::hoverpick::{HoverPicker, PickSource};
+    use planet_cache::global_store::thread_block_decodes;
+    use planet_frame::pick::{PickLimits, Ray};
+    let store = std::env::temp_dir().join(format!("planet-hover-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&store);
+    run(&["generate", "--global-dir", store.to_str().unwrap(), "--global-res", &RES.to_string(), "--threads", "2"]).unwrap();
+    let world = open(&store);
+    let radius = world.radius_m();
+    // A ray from above a block nobody has read, straight down at it.
+    let (cold, other) = (planet_core::Vec3::new(0.0, 1.0, 0.0), planet_core::Vec3::new(0.0, 0.0, -1.0));
+    let ray = |dir: planet_core::Vec3| Ray { origin: dir * (radius + 100_000.0), dir: dir * -1.0 };
+    let limits = PickLimits::new(radius, 9_000.0);
+    let source: PickSource = {
+        let world = world.clone();
+        std::sync::Arc::new(move |ray, limits, level| {
+            let field = world.field().ok()?;
+            planet_frame::pick::pick_surface(&ray, &limits, &|d| field.height_at_level(d, level))
+        })
+    };
+    let mut picker = HoverPicker::new(source);
+    // The frame polls: the pick is another thread's, so this thread decodes no block, and the pick finds the ground once it has finished.
+    let before = thread_block_decodes();
+    let mut hit = picker.poll((ray(cold), limits, 5));
+    assert_eq!(thread_block_decodes(), before, "the main thread decoded a block for the hover pick");
+    let started = std::time::Instant::now();
+    while hit.is_none() {
+        assert!(started.elapsed().as_secs() < 60, "the hover pick never finished");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        hit = picker.poll((ray(cold), limits, 5));
+    }
+    assert_eq!(thread_block_decodes(), before, "polling the finished pick decoded nothing on this thread");
+    // A phase that reads a cold block on the main thread is named with its count by the probe.
+    let mut probe = planet::stall::StallProbe::default();
+    probe.begin();
+    probe.mark("a phase that reads nothing new");
+    let field = world.field().expect("a field");
+    std::hint::black_box(field.height(other));
+    probe.mark("a phase that reads a cold block");
+    assert_eq!(probe.main_decodes(), vec![("a phase that reads a cold block", 1)]);
+    let _ = std::fs::remove_dir_all(&store);
+}
