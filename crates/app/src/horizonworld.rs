@@ -383,9 +383,13 @@ impl WorldTerrain {
     /// One frame of the horizon jobs: the chunks the plan's `tiles` read, nearest to `camera` first. Returns what landed and what was dropped
     /// (the tiles of a landed map want their horizon texture refreshed); without the jobs nothing happens. Never waits for a job.
     pub fn horizon_frame(&self, tiles: &[TileId], camera: PlanetFixed) -> HorizonUpdate {
-        let (Some(jobs), Some(lat)) = (crate::stall::read(&self.horizon, "horizon jobs lock (read)").clone(), self.horizon_lattice()) else {
-            return Default::default();
-        };
+        let Some(jobs) = crate::stall::read(&self.horizon, "horizon jobs lock (read)").clone() else { return Default::default() };
+        jobs.update(&self.horizon_wanted(tiles, camera))
+    }
+
+    /// The chunks whose horizon maps the plan's `tiles` want, nearest to `camera` first (without a chunk stage the nearest [`BASE_HORIZON_WANTED`]).
+    pub fn horizon_wanted(&self, tiles: &[TileId], camera: PlanetFixed) -> Vec<(ChunkKey, f64)> {
+        let Some(lat) = self.horizon_lattice() else { return Vec::new() };
         let manager = self.chunk_manager();
         let mut wanted: Vec<(ChunkKey, f64)> = Vec::new();
         let mut seen = std::collections::HashSet::new();
@@ -408,7 +412,12 @@ impl WorldTerrain {
             wanted.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
             wanted.truncate(BASE_HORIZON_WANTED);
         }
-        jobs.update(&wanted)
+        wanted
+    }
+
+    /// The edit word of the horizon of `key` (see `HorizonBaker::edit_word`), 0 without the jobs.
+    pub fn horizon_edit_word(&self, key: ChunkKey) -> u64 {
+        crate::stall::read(&self.horizon, "horizon jobs lock (read)").as_ref().map_or(0, |j| j.edit_word(key))
     }
 
     /// The horizon map of a chunk, if one has landed (`None`: the tile reads the coarse horizon alone).
@@ -650,6 +659,8 @@ pub struct HorizonRig {
     frame: u64,
     coarse_done: bool,
     warned_azimuths: bool,
+    /// The chunk whose map the last [`HorizonRig::frame`] put on the GPU (one map a frame, the oldest pending first): the window's gate reads when a re-baked map is first drawn.
+    pub last_uploaded: Option<ChunkKey>,
 }
 
 /// Slots of the viewer array of chunk horizons (one MiB each).
@@ -664,6 +675,7 @@ impl Default for HorizonRig {
             frame: 0,
             coarse_done: false,
             warned_azimuths: false,
+            last_uploaded: None,
         }
     }
 }
@@ -728,12 +740,16 @@ impl HorizonRig {
         use planet_frame::horizonview::{pack_map, MAX_SLOT_AZIMUTHS};
         let (Some(lat), true) = (world.horizon_lattice(), world.horizon_enabled()) else { return };
         let (frame, upload) = self.decide(tiles, &update.landed, &|k| world.horizon_map(k).is_some(), sun);
+        self.last_uploaded = None;
         let mut packed: Vec<(u32, Vec<u8>)> = Vec::new();
         if let Some((key, slot)) = upload {
             if let Some(map) = world.horizon_map(key) {
                 let n = lat.cells_per_chunk() as usize;
                 match pack_map(&map, n, map.len() / (n * n).max(1)) {
-                    Some(bytes) => packed.push((slot, bytes)),
+                    Some(bytes) => {
+                        packed.push((slot, bytes));
+                        self.last_uploaded = Some(key);
+                    }
                     None => {
                         if !self.warned_azimuths {
                             self.warned_azimuths = true;

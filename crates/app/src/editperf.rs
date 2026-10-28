@@ -416,6 +416,9 @@ pub struct Stages {
     pub dropped: u64,
     /// The chunk side of the edit (a run with the chunk stage): `None` without one.
     pub chunks: Option<ChunkStages>,
+    /// The horizon maps the edit touched (a run with the horizon jobs and no chunk stage): per map the chunk and the milliseconds from `set_definition` to the
+    /// first landing after it (`None`: it had not landed when the run stopped waiting). `None` without the jobs.
+    pub horizon: Option<Vec<(planet_generators::chunkfield::ChunkKey, Option<f64>)>>,
 }
 
 /// What the chunk stage did after an edit (M8-7, criterion 6), in milliseconds from `set_definition`.
@@ -598,6 +601,9 @@ struct Harness<'a> {
     /// The chunks that landed in the frames since the log was last taken, with the instant, and the time of the slowest `chunk_frame` call.
     landed_log: Vec<(Instant, planet_generators::chunkfield::ChunkKey)>,
     chunk_frame_max_ms: f64,
+    /// The world whose horizon jobs run without a chunk stage (the default since the owner's fallback, STRM-064), and the maps that landed since the log was cleared.
+    horizon_world: Option<Arc<WorldTerrain>>,
+    horizon_landed: Vec<(Instant, planet_generators::chunkfield::ChunkKey)>,
 }
 
 impl Harness<'_> {
@@ -618,6 +624,11 @@ impl Harness<'_> {
             self.chunk_frame_max_ms = self.chunk_frame_max_ms.max(call.elapsed().as_secs_f64() * 1000.0);
             let now = Instant::now();
             self.landed_log.extend(update.landed.iter().map(|k| (now, *k)));
+        } else if let Some(world) = &self.horizon_world {
+            let tiles: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
+            let update = world.horizon_frame(&tiles, req.camera.position);
+            let now = Instant::now();
+            self.horizon_landed.extend(update.landed.iter().map(|k| (now, *k)));
         }
         rig.fi.retire_to(rig.renderer.retired_frames(ctx));
         while rig.fi.is_full() {
@@ -746,6 +757,13 @@ fn run_once(
     let edited = Arc::new(edited);
     let mut out = CaseRun { resident: h.rig.managed.resident().len(), ..Default::default() };
     let before_stats = h.rig.managed.manager().streamer().stats();
+    let wanted_keys: Vec<planet_generators::chunkfield::ChunkKey> = if h.horizon_world.is_some() {
+        let drawn: Vec<TileId> = h.drawn.iter().copied().collect();
+        world.horizon_wanted(&drawn, req.camera.position).into_iter().map(|w| w.0).collect()
+    } else {
+        Vec::new()
+    };
+    let words_before: Vec<u64> = wanted_keys.iter().map(|k| world.horizon_edit_word(*k)).collect();
     let old_revision = world.field()?.item_revision();
     let sampler_started = Instant::now();
     let job_log = h.rig.managed.manager().streamer().job_log();
@@ -774,6 +792,7 @@ fn run_once(
     let mut frame_ms: Vec<f64> = Vec::new();
     h.landed_log.clear();
     h.chunk_frame_max_ms = 0.0;
+    h.horizon_landed.clear();
     loop {
         let frame_started = Instant::now();
         let frame = h.step(req)?;
@@ -930,6 +949,27 @@ fn run_once(
             horizon_last_ms: hz_last,
         });
     }
+    // The horizon side without a chunk stage: the maps the edit touched (their edit word changed, the maps of the chunks it reaches and of the neighbours inside
+    // the march's halo) are baked again after the settle window; each one's time from the edit to its landing is the shadow of the edit on screen (M8 criterion 6).
+    if h.horizon_world.is_some() {
+        let touched: Vec<planet_generators::chunkfield::ChunkKey> =
+            wanted_keys.iter().zip(&words_before).filter(|(k, w0)| world.horizon_edit_word(**k) != **w0).map(|(k, _)| *k).collect();
+        let limit = Duration::from_secs(60);
+        loop {
+            let all = touched.iter().all(|k| h.horizon_landed.iter().any(|l| l.1 == *k));
+            if all || sampler_started.elapsed() > limit {
+                break;
+            }
+            h.step(req)?;
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        out.stages.horizon = Some(
+            touched
+                .into_iter()
+                .map(|k| (k, h.horizon_landed.iter().find(|l| l.1 == k).map(|l| l.0.duration_since(sampler_started).as_secs_f64() * 1000.0)))
+                .collect(),
+        );
+    }
     // Take the edit back: the old definition, the same tiles refreshed, no preview, settled.
     let edited_revision = world.field()?.item_revision();
     world.set_definition(Arc::clone(&before_def))?;
@@ -976,6 +1016,30 @@ pub fn chunks_table(rows: &[CaseRow]) -> String {
             cell(pick(&|c| Some(c.horizon_baked as f64))) + &format!(" ({})", cell(pick(&|c| Some(c.horizon_rebaked as f64)))),
             cell(pick(&|c| c.horizon_last_ms))
         );
+    }
+    s
+}
+
+/// The table of the horizon side of every case (a run with the horizon jobs and no chunk stage, M8 criterion 6): per case one row per wanted map the
+/// edit touched (the first run of the case), the milliseconds from the edit to the map's landing and the ten-second verdict. The header of the last
+/// column is read by `accept M8` (TEST-060).
+pub fn horizon_table(rows: &[CaseRow]) -> String {
+    let mut s = String::from("| altitude | stamp radius | map (face, x, y) | edit to map ms | verdict (10 s, horizon maps) |\n|---|---|---|---|---|\n");
+    for r in rows {
+        let maps = r.runs.first().and_then(|x| x.stages.horizon.as_ref());
+        match maps.filter(|m| !m.is_empty()) {
+            None => s += &format!("| {} m | {} | - | - | - |\n", r.altitude_m, r.radius_label()),
+            Some(maps) => {
+                for (k, t) in maps {
+                    let (ms, verdict) = match t {
+                        None => ("-".to_string(), "over"),
+                        Some(t) if *t <= 10_000.0 => (format!("{t:.1}"), "ok"),
+                        Some(t) => (format!("{t:.1}"), "over"),
+                    };
+                    s += &format!("| {} m | {} | {:?} | {ms} | {verdict} |\n", r.altitude_m, r.radius_label(), k);
+                }
+            }
+        }
     }
     s
 }
@@ -1088,7 +1152,9 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
         crate::readiness_gate(o, ctx, out)?;
     }
     // The chunk stage on the M8 default (Under, versions, stale marking): with a store and not smoke, unless `--no-chunks` asks for the comparison.
-    let with_chunks = !smoke && !o.no_chunks && o.store.is_some() && !o.allow_memory_bake;
+    let with_chunks = !smoke && o.chunks && o.store.is_some() && !o.allow_memory_bake;
+    // Without it (the default since the owner's fallback of 2026-10-28) the horizon jobs bake the maps from the base terrain (STRM-064, TEST-065).
+    let with_horizon = !smoke && !with_chunks && !o.no_horizon_jobs && o.store.is_some() && !o.allow_memory_bake;
     if with_chunks {
         // The viewer's own pools and chunk configuration, with its horizon jobs (the shared stage of `anetworld::viewer_chunk_stage`), no disk cache.
         if let Some(n) = o.base_threads {
@@ -1098,6 +1164,12 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
             world.set_horizon_threads(n);
         }
         crate::chunkstage::enable_viewer_stage_sized(&world, o.gen_workers(), o.chunk_workers, !o.no_horizon_jobs, false, out)?;
+    } else if with_horizon {
+        if let Some(n) = o.horizon_threads {
+            world.set_horizon_threads(n);
+        }
+        let (pool, chunk_cfg) = crate::anetworld::viewer_chunk_stage(o.gen_workers());
+        world.enable_viewer_horizon(pool, Arc::new(planet_streaming::SystemClock::new()), chunk_cfg.workers.div_ceil(2))?;
     }
     let size = if smoke { (768u32, 432u32) } else { (2560u32, 1440u32) };
     let tau = o.tau;
@@ -1181,6 +1253,8 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
             counters: Default::default(),
             landed_log: Vec::new(),
             chunk_frame_max_ms: 0.0,
+            horizon_world: with_horizon.then(|| Arc::clone(&world)),
+            horizon_landed: Vec::new(),
         };
         for case in &cases {
             let rho = (1.5 * case.size_m).max(altitude);
@@ -1231,7 +1305,16 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
     } else {
         String::from("\n(no chunk stage in this run: the comparison line, or a smoke or memory-bake run)\n")
     };
+    let horizon = if with_horizon {
+        format!("
+the horizon side of every case (ms from set_definition to the landing of each map the edit touched; the maps baked from the base terrain, no chunk stage). On screen is landing plus the upload: the window uploads one landed map per frame (`HorizonRig::decide`, horizonworld.rs), so a map is drawn within one frame of landing when it is the only one pending, and the window gate logs the frame a re-baked map is first drawn:
+
+{}", horizon_table(&rows))
+    } else {
+        String::new()
+    };
     writeln!(out, "{chunks}").map_err(err)?;
+    writeln!(out, "{horizon}").map_err(err)?;
     writeln!(out, "\n{table}\nstages (ms from set_definition; the calls and the frame median are durations):\n\n{stages}").map_err(err)?;
     writeln!(out, "\nthe refreshed set by level (first run of each case):\n\n{levels}").map_err(err)?;
     writeln!(
@@ -1251,7 +1334,7 @@ the refresh frame by frame (first run of each case; rows where a count moved or 
     )
     .map_err(err)?;
     if let Some(dir) = &o.out {
-        let path = write_report(dir, &format!("{table}\n{stages}\n{levels}\n{chunks}\n{cost}"))?;
+        let path = write_report(dir, &format!("{table}\n{stages}\n{levels}\n{chunks}\n{horizon}\n{cost}"))?;
         writeln!(out, "table written to {}", path.display()).map_err(err)?;
     }
     if smoke && rows.iter().any(|r| r.runs.iter().any(|x| x.exact_ms.is_none())) {
@@ -1550,6 +1633,32 @@ mod tests {
         let drawn: HashSet<TileId> = [tile(1), tile(3), tile(4)].into_iter().collect();
         assert_eq!(drawn_refreshed_ms(&jobs, &drawn, 1_000_000, 5.0), Some(305.0));
         assert_eq!(drawn_refreshed_ms(&jobs, &HashSet::new(), 1_000_000, 5.0), None);
+    }
+
+    // spec: TEST-065
+    #[test]
+    fn the_horizon_table_has_a_row_per_touched_map_with_its_time_and_the_ten_second_verdict() {
+        let run = |maps: Vec<((u8, u32, u32), Option<f64>)>| CaseRun {
+            stages: Stages { horizon: Some(maps), ..Stages::default() },
+            ..CaseRun::default()
+        };
+        let rows = vec![
+            CaseRow {
+                kind: CaseKind::Stamp,
+                altitude_m: 200.0,
+                radius_m: 400.0,
+                runs: vec![run(vec![((2, 10, 11), Some(2_500.0)), ((2, 11, 11), Some(12_000.0)), ((2, 10, 12), None)])],
+            },
+            CaseRow { kind: CaseKind::Stamp, altitude_m: 2_000.0, radius_m: 50.0, runs: vec![run(Vec::new())] },
+            CaseRow { kind: CaseKind::Stamp, altitude_m: 2_000.0, radius_m: 100.0, runs: vec![CaseRun::default()] },
+        ];
+        let t = horizon_table(&rows);
+        let lines: Vec<&str> = t.lines().collect();
+        assert!(lines[0].ends_with("| verdict (10 s, horizon maps) |"), "{t}");
+        assert!(lines[2].contains("(2, 10, 11)") && lines[2].contains("2500.0") && lines[2].ends_with("| ok |"), "{t}");
+        assert!(lines[3].contains("12000.0") && lines[3].ends_with("| over |"), "{t}");
+        assert!(lines[4].contains("| - | over |"), "a map that never landed is over: {t}");
+        assert!(lines[5].ends_with("| - | - | - |") && lines[6].ends_with("| - | - | - |"), "a case that touched no map: {t}");
     }
 
     // spec: TEST-056

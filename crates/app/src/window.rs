@@ -1080,6 +1080,9 @@ impl App<'_> {
             if let Some(lit) = plan.lit.as_ref().filter(|_| st.chunks_on || self.world.horizon_enabled()) {
                 let tiles: Vec<TileId> = plan.nodes.iter().map(|n| n.tile).collect();
                 st.horizon.frame(self.world, ctx, &mut st.rig.renderer, &tiles, &std::mem::take(&mut st.horizon_update), lit.sun_dir);
+                if let (Some(_), Some(g)) = (st.horizon.last_uploaded, st.gate.as_mut()) {
+                    g.gate.map_uploaded(now_ms, st.frames);
+                }
             }
             st.stall.mark("horizon frame and upload");
             // The regions overlay (VIEW-030): the region items of the editor's definition nearest the camera, decided here, drawn by the renderer.

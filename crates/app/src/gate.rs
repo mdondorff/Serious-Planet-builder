@@ -62,12 +62,21 @@ pub struct Gate {
     pub edit_at: Option<(u64, u64)>,
     /// Milliseconds from the edit to the first map that landed after it.
     pub rebake_ms: Option<u64>,
+    /// Milliseconds from the edit to the first upload of a map after a re-bake landed, and the frame it was drawn from: the map on screen.
+    pub drawn_ms: Option<(u64, u64)>,
 }
 
 impl Gate {
     /// The scripted edit was published at `now_ms`, with `landed` horizon maps landed so far (once; later calls do nothing).
     pub fn edit_published(&mut self, now_ms: u64, landed: u64) {
         self.edit_at.get_or_insert((now_ms, landed));
+    }
+
+    /// A map was put on the GPU at `now_ms` in `frame`: the first one after a re-bake landed is the shadow of the edit on screen.
+    pub fn map_uploaded(&mut self, now_ms: u64, frame: u64) {
+        if let (Some((at, _)), Some(_), None) = (self.edit_at, self.rebake_ms, self.drawn_ms) {
+            self.drawn_ms = Some((now_ms.saturating_sub(at), frame));
+        }
     }
 
     /// The horizon maps landed so far, at `now_ms`: the first one past the count at the edit is the re-bake.
@@ -153,8 +162,14 @@ impl Gate {
 
     /// The counters, a few lines, for the smoke summary and the report file.
     pub fn report(&self, horizon_baked: u64, panics: u64) -> String {
+        let edit = match (self.edit_at, self.rebake_ms, self.drawn_ms) {
+            (None, _, _) => String::new(),
+            (Some(_), None, _) => "; edit: no map re-baked".to_string(),
+            (Some(_), Some(b), None) => format!("; edit: re-bake landed {b} ms after it, not drawn yet"),
+            (Some(_), Some(b), Some((d, f))) => format!("; edit: re-bake landed {b} ms after it, first drawn {d} ms after it (frame {f})"),
+        };
         format!(
-            "gate: {} frames, longest {:.0} ms, {} over {FRAME_LIMIT_MS:.0} ms; held back: {} frames, {} with no edit in reach, up to {} under an edit; horizon maps baked {horizon_baked}; panics {panics}",
+            "gate: {} frames, longest {:.0} ms, {} over {FRAME_LIMIT_MS:.0} ms; held back: {} frames, {} with no edit in reach, up to {} under an edit; horizon maps baked {horizon_baked}; panics {panics}{edit}",
             self.frames,
             self.longest_ms,
             self.slow.len(),
@@ -277,6 +292,23 @@ mod tests {
         ok.horizon_landed(20_000, 9);
         assert!(ok.failures(4, true, 0, true).is_empty() && ok.rebake_ms == Some(3_000), "the first landing counts");
         assert!(g.failures(4, true, 0, false).is_empty(), "software: reported, not judged");
+    }
+
+    // spec: TEST-065
+    #[test]
+    fn the_report_says_when_the_rebake_landed_and_when_it_was_first_drawn() {
+        let mut g = Gate::default();
+        assert!(!g.report(3, 0).contains("edit:"), "no edit, nothing to say");
+        g.edit_published(1_000, 3);
+        g.map_uploaded(1_500, 9);
+        assert_eq!(g.drawn_ms, None, "an upload before any re-bake landed is not the edit's map");
+        assert!(g.report(3, 0).contains("edit: no map re-baked"));
+        g.horizon_landed(3_000, 4);
+        assert!(g.report(4, 0).contains("re-bake landed 2000 ms after it, not drawn yet"));
+        g.map_uploaded(3_017, 120);
+        g.map_uploaded(3_034, 121);
+        assert_eq!(g.drawn_ms, Some((2_017, 120)), "the first upload after the landing");
+        assert!(g.report(4, 0).contains("first drawn 2017 ms after it (frame 120)"));
     }
     // spec: TEST-061
     #[test]

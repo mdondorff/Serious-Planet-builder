@@ -757,6 +757,11 @@ impl HorizonJobs {
         })
     }
 
+    /// The edit word of `key` now (0: no edit reaches the chunk or the halo of its march).
+    pub fn edit_word(&self, key: ChunkKey) -> u64 {
+        self.baker.edit_word(key)
+    }
+
     /// The horizon map of `key`, if one has landed (`None`: the tile reads the coarse horizon alone).
     pub fn horizon(&self, key: ChunkKey) -> Option<Arc<Vec<u8>>> {
         self.shared.lock().expect("horizon state").ready.get(&key).map(|e| e.bytes.clone())
