@@ -1028,6 +1028,29 @@ impl ANetParams {
         params.anchor.smooth_max_m = 64.0;
         // The tributaries of the coarse run (GEN-068): every coarse link of two cells' area and over is routed like a stem.
         params.anchor.river_area_m2 = 5.0e7;
+        // SPIKE-50 (spike branch only): PLANET_ANCHOR="key=val,..." overrides the anchor law.
+        if let Ok(v) = std::env::var("PLANET_ANCHOR") {
+            for kv in v.split(',') {
+                let Some((k, x)) = kv.split_once('=') else { continue };
+                let Ok(x) = x.trim().parse::<f64>() else { continue };
+                let a = &mut params.anchor;
+                match k.trim() {
+                    "depth_m" => a.depth_m = x,
+                    "exponent" => a.exponent = x,
+                    "cap_m" => a.cap_m = x,
+                    "cap_low_m" => a.cap_low_m = x,
+                    "cut_cap_m" => a.cut_cap_m = x,
+                    "floor_low" => a.floor_low = x,
+                    "floor_high" => a.floor_high = x,
+                    "w_coef" => a.w_coef = x,
+                    "d_coef" => a.d_coef = x,
+                    "d_exp" => a.d_exp = x,
+                    "side_low" => a.side_low = x,
+                    "side_high" => a.side_high = x,
+                    _ => {}
+                }
+            }
+        }
         params
     }
 }
