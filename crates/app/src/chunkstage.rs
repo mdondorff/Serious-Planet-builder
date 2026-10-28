@@ -53,7 +53,7 @@ pub fn enable_chunks(
         params,
         horizon_pool,
         Arc::new(planet_streaming::SystemClock::new()),
-        planet_streaming::chunks::HorizonConfig { workers, settle_ms: 1_000 },
+        planet_streaming::chunks::HorizonConfig { workers, settle_ms: 1_000, keep: 8 },
         workers,
     )?;
     world.request_coarse_horizon();

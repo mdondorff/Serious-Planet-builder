@@ -44,7 +44,7 @@ fn the_rig_moves_a_landed_map_into_its_slot_one_a_frame_and_the_slot_holds_the_p
         .unwrap();
     // 16 azimuths: what the shader reads.
     let params = HorizonParams { azimuths: 16, range_m: 2_000.0, ..HorizonParams::chunk(R) };
-    world.enable_horizon(params, horizon_jobs.clone(), clock.clone(), HorizonConfig { workers: 4, settle_ms: 1_000 }, 2).unwrap();
+    world.enable_horizon(params, horizon_jobs.clone(), clock.clone(), HorizonConfig { workers: 4, settle_ms: 1_000, keep: 8 }, 2).unwrap();
     let mut renderer = TerrainRenderer::new(&ctx, (64, 48), 16);
     let mut rig = HorizonRig::default();
     let key: ChunkKey = (2, 1000, 1000);

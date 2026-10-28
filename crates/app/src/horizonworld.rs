@@ -23,6 +23,9 @@ use planet_world_def::WorldDefinition;
 
 use crate::worldfield::WorldTerrain;
 
+/// Chunks the horizon jobs want at most when there is no chunk stage: the nearest to the camera (the default `HorizonConfig::keep`).
+pub const BASE_HORIZON_WANTED: usize = 24;
+
 /// Version of the world's horizon bake (what it samples and how); part of the march's hash, so a change re-bakes every map.
 pub const BAKE_VERSION: u32 = 1;
 
@@ -123,7 +126,7 @@ impl ChunkHorizonBaker {
 
     /// What the heights of a block depend on besides its items and its chunk: the base of the definition (seed, radius, height field, stage order), the baked input, the code that makes the chunks and the field above them
     /// (`ANET_VERSION`, the chunk stage, this bake), the lattice, and the coupled lens, which the field chain does not hash into a tile key.
-    fn world_word(&self, world: &WorldTerrain) -> u64 {
+    fn world_state(&self, world: &WorldTerrain) -> u64 {
         let lens = world.coupled_lens().map_or(0, |l| 1 + l as u64);
         let ready = matches!(world.coupled_standing(), crate::coupledworld::Standing::Ready(..));
         let def = world.definition();
@@ -207,6 +210,11 @@ impl ChunkHorizonBaker {
 }
 
 impl HorizonBaker for ChunkHorizonBaker {
+    /// The coupled lens, the base of the definition and the stage: a change bakes every wanted map again (the edits are in [`edit_word`], per chunk).
+    fn world_word(&self) -> u64 {
+        self.world.upgrade().map_or(0, |w| self.world_state(&w))
+    }
+
     /// The chunk and its eight neighbours on the chunk grid (the halo of a chunk is no larger than one chunk edge for the default march; a chunk
     /// two rings away contributes its base only to a horizon past that).
     fn reads(&self, key: ChunkKey) -> Vec<ChunkKey> {
@@ -239,6 +247,8 @@ impl HorizonBaker for ChunkHorizonBaker {
         let Some(world) = self.world.upgrade() else { return none() };
         let halo = self.halo_cells();
         let side = n + 2 * halo;
+        // The definition the field below is built from: a height tile is kept only if no edit was published between this and the block's key.
+        let revision0 = world.definition().revision();
         let manager = world.chunk_manager();
         let per_face = 1i64 << planet_generators::chunk::CHUNK_GRID_LEVEL;
         let in_face = |b: i64| (0..per_face).contains(&b);
@@ -257,7 +267,7 @@ impl HorizonBaker for ChunkHorizonBaker {
         let before = own_hashes(&blocks);
         let Ok(field) = world.field() else { return none() };
         let after = own_hashes(&blocks);
-        let world_word = self.world_word(&world);
+        let world_word = self.world_state(&world);
         let (x0, y0) = (i64::from(key.1) * n as i64 - halo as i64, i64::from(key.2) * n as i64 - halo as i64);
         let mut heights = vec![0.0f32; side * side];
         if halo > n {
@@ -268,13 +278,16 @@ impl HorizonBaker for ChunkHorizonBaker {
                 if self.edit_word(key) != word0 {
                     return None;
                 }
-                let tile_key = (in_face(bx) && in_face(by) && before[idx] == after[idx]).then(|| {
-                    let block = (key.0, bx as u32, by as u32);
-                    planet_core::hash::hash_u64s(
-                        0x4854_494c,
-                        &[world_word, self.items_word(block, STAGE_HALO * f64::from(self.lat.cells_per_chunk())), before[idx]],
-                    )
-                });
+                let tile_key =
+                    tile_cacheable(in_face(bx) && in_face(by), before[idx] == after[idx], revision0, world.definition().revision()).then(
+                        || {
+                            let block = (key.0, bx as u32, by as u32);
+                            planet_core::hash::hash_u64s(
+                                0x4854_494c,
+                                &[world_word, self.items_word(block, STAGE_HALO * f64::from(self.lat.cells_per_chunk())), before[idx]],
+                            )
+                        },
+                    );
                 let tile = self.block_heights(&*field, key.0, (bx, by), n, tile_key);
                 // The rows of the block inside the raster: the block's cells are [bx n, bx n + n), the raster's [x0, x0 + side).
                 let (cx, cy) = (bx * n as i64 - x0, by * n as i64 - y0);
@@ -316,6 +329,12 @@ impl HorizonBaker for ChunkHorizonBaker {
     }
 }
 
+/// Whether the heights of a block may be kept under a key: the block is on the face and its chunk results did not change while the field was built, and no
+/// edit was published since the definition the field was built from (else the heights are of one revision and the key of another).
+pub fn tile_cacheable(on_face: bool, results_unchanged: bool, revision_at_field: u64, revision_now: u64) -> bool {
+    on_face && results_unchanged && revision_at_field == revision_now
+}
+
 /// The longest range whose halo (`ceil(range / cell) + 2` cells) fits in one chunk edge: the 3 x 3 chunks a horizon reads then cover it.
 pub fn max_range_m(lat: &ChunkLattice, radius_m: f64) -> f64 {
     (f64::from(lat.cells_per_chunk()) - 2.0).max(0.0) * lat.cell_m(radius_m)
@@ -339,8 +358,13 @@ impl WorldTerrain {
         cfg: HorizonConfig,
         threads: usize,
     ) -> Result<(), String> {
-        let chunks = self.chunk_manager().ok_or("the horizon jobs need the world's chunk stage: enable_chunks first")?;
-        let lat = self.chunk_lattice().ok_or("the world has no chunk lattice")?;
+        // With a chunk stage the maps are baked once their chunk is ready and again as neighbours land; without one (the default since the owner's
+        // fallback of 2026-10-28) every chunk is ready with no change and the maps are baked from the base terrain and the stamps (STRM-064).
+        let chunks: Arc<dyn planet_streaming::chunks::ChunkSource> = match self.chunk_manager() {
+            Some(m) => m,
+            None => Arc::new(planet_streaming::chunks::BaseTerrain),
+        };
+        let lat = self.horizon_lattice().ok_or("the world has no chunk lattice")?;
         let baker = Arc::new(ChunkHorizonBaker::new(self, lat, params, threads));
         // The march must be one the bake accepts, and its halo must fit in the ring of neighbours the state word reads (a chunk edge): refused
         // here, not as a panic in a worker.
@@ -360,16 +384,39 @@ impl WorldTerrain {
         Ok(())
     }
 
+    /// The chunk lattice the horizon maps are baked on: the chunk stage's, else the one it would have (the A-net's 8 m cell), for a world with a bake.
+    pub fn horizon_lattice(&self) -> Option<ChunkLattice> {
+        self.chunk_lattice().or_else(|| {
+            self.has_bake()
+                .then(|| ChunkLattice::new(crate::anetworld::cells_per_chunk_for(self.radius_m(), crate::anetworld::ANET_CELL_M)))
+                .flatten()
+        })
+    }
+
+    /// Whether the horizon jobs are enabled (with or without a chunk stage).
+    pub fn horizon_enabled(&self) -> bool {
+        crate::stall::read(&self.horizon, "horizon jobs lock (read)").is_some()
+    }
+
     /// One frame of the horizon jobs: the chunks the plan's `tiles` read, nearest to `camera` first. Returns what landed and what was dropped
     /// (the tiles of a landed map want their horizon texture refreshed); without the jobs nothing happens. Never waits for a job.
     pub fn horizon_frame(&self, tiles: &[TileId], camera: PlanetFixed) -> HorizonUpdate {
-        let (Some(jobs), Some(m)) = (crate::stall::read(&self.horizon, "horizon jobs lock (read)").clone(), self.chunk_manager()) else {
-            return Default::default();
-        };
+        let Some(jobs) = crate::stall::read(&self.horizon, "horizon jobs lock (read)").clone() else { return Default::default() };
+        jobs.update(&self.horizon_wanted(tiles, camera))
+    }
+
+    /// The chunks whose horizon maps the plan's `tiles` want, nearest to `camera` first (without a chunk stage the nearest [`BASE_HORIZON_WANTED`]).
+    pub fn horizon_wanted(&self, tiles: &[TileId], camera: PlanetFixed) -> Vec<(ChunkKey, f64)> {
+        let Some(lat) = self.horizon_lattice() else { return Vec::new() };
+        let manager = self.chunk_manager();
         let mut wanted: Vec<(ChunkKey, f64)> = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for &t in tiles {
-            for k in m.reads(t) {
+            let reads = match manager.as_ref() {
+                Some(m) => m.reads(t),
+                None => planet_generators::chunkfield::chunks_read_by(&lat, planet_generators::chunk::CHUNK_GRID_LEVEL, 0, t),
+            };
+            for k in reads {
                 if seen.insert(k) {
                     let tile = TileId::new(Face(k.0), planet_generators::chunk::CHUNK_GRID_LEVEL, k.1, k.2)
                         .expect("a chunk of the grid is a tile");
@@ -378,7 +425,17 @@ impl WorldTerrain {
                 }
             }
         }
-        jobs.update(&wanted)
+        if manager.is_none() {
+            // No chunk stage to evict: the maps held are the nearest chunks of the plan, at most [`BASE_HORIZON_WANTED`] (about 6 MB each).
+            wanted.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
+            wanted.truncate(BASE_HORIZON_WANTED);
+        }
+        wanted
+    }
+
+    /// The edit word of the horizon of `key` (see `HorizonBaker::edit_word`), 0 without the jobs.
+    pub fn horizon_edit_word(&self, key: ChunkKey) -> u64 {
+        crate::stall::read(&self.horizon, "horizon jobs lock (read)").as_ref().map_or(0, |j| j.edit_word(key))
     }
 
     /// The horizon map of a chunk, if one has landed (`None`: the tile reads the coarse horizon alone).
@@ -620,6 +677,8 @@ pub struct HorizonRig {
     frame: u64,
     coarse_done: bool,
     warned_azimuths: bool,
+    /// The chunk whose map the last [`HorizonRig::frame`] put on the GPU (one map a frame, the oldest pending first): the window's gate reads when a re-baked map is first drawn.
+    pub last_uploaded: Option<ChunkKey>,
 }
 
 /// Slots of the viewer array of chunk horizons (one MiB each).
@@ -634,6 +693,7 @@ impl Default for HorizonRig {
             frame: 0,
             coarse_done: false,
             warned_azimuths: false,
+            last_uploaded: None,
         }
     }
 }
@@ -696,14 +756,18 @@ impl HorizonRig {
         sun: [f32; 3],
     ) {
         use planet_frame::horizonview::{pack_map, MAX_SLOT_AZIMUTHS};
-        let (Some(lat), true) = (world.chunk_lattice(), world.chunk_manager().is_some()) else { return };
+        let (Some(lat), true) = (world.horizon_lattice(), world.horizon_enabled()) else { return };
         let (frame, upload) = self.decide(tiles, &update.landed, &|k| world.horizon_map(k).is_some(), sun);
+        self.last_uploaded = None;
         let mut packed: Vec<(u32, Vec<u8>)> = Vec::new();
         if let Some((key, slot)) = upload {
             if let Some(map) = world.horizon_map(key) {
                 let n = lat.cells_per_chunk() as usize;
                 match pack_map(&map, n, map.len() / (n * n).max(1)) {
-                    Some(bytes) => packed.push((slot, bytes)),
+                    Some(bytes) => {
+                        packed.push((slot, bytes));
+                        self.last_uploaded = Some(key);
+                    }
                     None => {
                         if !self.warned_azimuths {
                             self.warned_azimuths = true;
@@ -735,6 +799,18 @@ impl HorizonRig {
 
 #[cfg(test)]
 mod rig_tests {
+    // spec: STRM-064
+    #[test]
+    fn a_height_tile_is_kept_only_if_no_edit_was_published_since_the_field_was_built() {
+        assert!(tile_cacheable(true, true, 7, 7));
+        assert!(
+            !tile_cacheable(true, true, 7, 8),
+            "an edit between the field and the block's key: the heights are of one revision, the key of another"
+        );
+        assert!(!tile_cacheable(false, true, 7, 7), "off the face");
+        assert!(!tile_cacheable(true, false, 7, 7), "a chunk result changed while the field was built");
+    }
+
     use super::*;
     use planet_generators::chunk::CHUNK_GRID_LEVEL;
 

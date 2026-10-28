@@ -212,6 +212,9 @@ fn gate_settle_frames() -> u64 {
 /// Frames after which a gate run that has not finished fails (a hung edit script or path).
 const GATE_GIVE_UP: u64 = 400_000;
 
+/// Frames after which a gate run stops waiting for the first horizon map.
+const GATE_BAKE_GIVE_UP: u64 = 6_000;
+
 /// The no-degradation gate of a window run (`PLANET_GATE`, TEST-061): the counters, the camera path of `PLANET_GATE_PATH` and the file of
 /// `PLANET_GATE_REPORT` the report goes to.
 struct GateRun {
@@ -221,7 +224,9 @@ struct GateRun {
     /// The frame the edit script ended at.
     edit_done_at: Option<u64>,
     /// Whether any frame drew lit over a chunk stage.
-    lit_with_stage: bool,
+    lit_with_horizon: bool,
+    /// The edit word of each wanted horizon map before the scripted edit.
+    words: HashMap<planet_generators::chunkfield::ChunkKey, u64>,
 }
 
 impl GateRun {
@@ -241,13 +246,39 @@ impl GateRun {
             replay,
             report: std::env::var_os("PLANET_GATE_REPORT").map(PathBuf::from),
             edit_done_at: None,
-            lit_with_stage: false,
+            lit_with_horizon: false,
+            words: HashMap::new(),
         }))
     }
 
+    /// One frame of the horizon side: before the scripted edit the edit word of every wanted map is remembered; at the frame it is published the maps whose word
+    /// changed are the ones it touched; every landing is shown to the gate, which counts only a touched map as the re-bake.
+    fn horizon_step(
+        &mut self,
+        world: &WorldTerrain,
+        wanted: &[planet_generators::chunkfield::ChunkKey],
+        landed: &[planet_generators::chunkfield::ChunkKey],
+        published: bool,
+        now_ms: u64,
+    ) {
+        if self.gate.edit_at.is_none() {
+            if published {
+                let touched =
+                    wanted.iter().copied().filter(|k| self.words.get(k).is_some_and(|w| *w != world.horizon_edit_word(*k))).collect();
+                self.gate.edit_published(now_ms, touched);
+            } else {
+                for k in wanted {
+                    self.words.entry(*k).or_insert_with(|| world.horizon_edit_word(*k));
+                }
+            }
+        }
+        self.gate.horizon_landed(now_ms, landed);
+    }
+
     /// Whether the edit script ended, the settling frames passed and the path (if any) was replayed to its end.
-    fn finished(&self, frames: u64, now_ms: u64) -> bool {
+    fn finished(&self, frames: u64, now_ms: u64, horizon_waits: bool) -> bool {
         self.edit_done_at.is_some_and(|at| frames >= at + gate_settle_frames())
+            && !horizon_waits
             && self.replay.as_ref().is_none_or(|r| r.started() && r.pose(now_ms).1)
     }
 }
@@ -468,6 +499,15 @@ impl App<'_> {
             // The pool and the knobs of the viewer's chunk stage: one function, which the headless scenes use too (`anetworld::viewer_chunk_stage`).
             let (pool, chunk_cfg) = crate::anetworld::viewer_chunk_stage(cfg.gen);
             self.world.request_anet(pool, self.clock.clone(), chunk_cfg);
+        } else if self.world.has_bake()
+            && self.world.store_dir().is_some()
+            && (!cfg.smoke || std::env::var_os("PLANET_SMOKE_CHUNKS").is_some() || std::env::var_os("PLANET_GATE").is_some())
+        {
+            // No chunk stage: the horizon maps are baked from the base terrain and the stamps (STRM-064), on the idle class of the same pool.
+            let (pool, chunk_cfg) = crate::anetworld::viewer_chunk_stage(cfg.gen);
+            if let Err(e) = self.world.enable_viewer_horizon(pool, self.clock.clone(), chunk_cfg.workers.div_ceil(2)) {
+                eprintln!("horizon: {e}");
+            }
         }
         // `enable_lit` is not part of `warm_up`: the lit and atmosphere passes are enabled and used once per ring set here, before the
         // first measured frame, whether the window starts lit or on the debug path (REND-017, VIEW-007).
@@ -895,6 +935,21 @@ impl App<'_> {
                         crate::crash::note(&format!("{line}; {}", planet_frame::chunkshare::landing_note(landed, nodes, stand_in)));
                     }
                 }
+            } else if st.viewer.lit && self.world.horizon_enabled() {
+                // No chunk stage: the horizon jobs alone bake the maps of the plan's chunks from the base terrain (STRM-064).
+                let tiles: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
+                let horizon = self.world.horizon_frame(&tiles, camera.position);
+                st.chunk_counters.horizon_frames += 1;
+                st.chunk_counters.horizon_landed += horizon.landed.len() as u64;
+                st.counts.horizon_steps = st.chunk_counters.horizon_frames;
+                st.horizon_update = horizon;
+            }
+            if let Some(g) = st.gate.as_mut().filter(|_| self.world.horizon_enabled()) {
+                let tiles: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
+                let wanted: Vec<planet_generators::chunkfield::ChunkKey> =
+                    self.world.horizon_wanted(&tiles, camera.position).into_iter().map(|w| w.0).collect();
+                let published = st.edit.as_ref().is_some_and(|e| e.stats.published >= 1);
+                g.horizon_step(self.world, &wanted, &st.horizon_update.landed, published, now_ms);
             }
             st.stall.mark("chunk frame (frame_step, landings, refresh summary)");
             // A refusal of the plan for the base parameters degrades the frame (it draws the newest plan in hand); it is said once, never fatal.
@@ -1069,9 +1124,12 @@ impl App<'_> {
             st.rig.renderer.set_scale_refs(&st.scale_refs);
             st.stall.mark("scale references");
             // The horizon shadows (REND-038): the chunk maps in their slots and the coarse map, for the lit frames over a world with a chunk stage.
-            if let Some(lit) = plan.lit.as_ref().filter(|_| st.chunks_on) {
+            if let Some(lit) = plan.lit.as_ref().filter(|_| st.chunks_on || self.world.horizon_enabled()) {
                 let tiles: Vec<TileId> = plan.nodes.iter().map(|n| n.tile).collect();
                 st.horizon.frame(self.world, ctx, &mut st.rig.renderer, &tiles, &std::mem::take(&mut st.horizon_update), lit.sun_dir);
+                if let (Some(key), Some(g)) = (st.horizon.last_uploaded, st.gate.as_mut()) {
+                    g.gate.map_uploaded(key, now_ms, st.frames);
+                }
             }
             st.stall.mark("horizon frame and upload");
             // The regions overlay (VIEW-030): the region items of the editor's definition nearest the camera, decided here, drawn by the renderer.
@@ -1183,8 +1241,8 @@ impl App<'_> {
                     st.presented += 1;
                     if drew_lit {
                         st.counts.lit_presented += 1;
-                        if let (true, Some(g)) = (st.chunks_on, st.gate.as_mut()) {
-                            g.lit_with_stage = true;
+                        if let (true, Some(g)) = (st.chunks_on || self.world.horizon_enabled(), st.gate.as_mut()) {
+                            g.lit_with_horizon = true;
                         }
                     } else {
                         st.counts.debug_presented += 1;
@@ -1201,7 +1259,16 @@ impl App<'_> {
                 let stage_done = st.frames >= SMOKE_GIVE_UP
                     || (((std::env::var_os("PLANET_SMOKE_CHUNKS").is_none() && !cfg.chunks) || st.chunks_on)
                         && (std::env::var_os("PLANET_SMOKE_LENS").is_none() || st.smoke_lens_at.is_some_and(|f| st.frames >= f + 20)));
-                let gate_done = st.gate.as_ref().is_none_or(|g| g.finished(st.frames, now_ms));
+                // A run with the horizon jobs on also waits for the first map to be baked (a slow adapter bakes in seconds of wall time, not in a count of frames), but not past
+                // [`GATE_BAKE_GIVE_UP`] frames: the verdict then says no map was baked.
+                let maps_baked = self.world.horizon_stats().is_some_and(|h| h.baked + h.disk_hits > 0);
+                let horizon_waits = self.world.horizon_enabled()
+                    && std::env::var_os("PLANET_GATE_SOFTWARE").is_none()
+                    && self.world.chunk_manager().is_none()
+                    && st.viewer.lit
+                    && !maps_baked
+                    && st.frames < GATE_BAKE_GIVE_UP;
+                let gate_done = st.gate.as_ref().is_none_or(|g| g.finished(st.frames, now_ms, horizon_waits));
                 if st.gate.is_some() && st.frames > GATE_GIVE_UP {
                     return Err(format!(
                         "gate: the run did not finish in {GATE_GIVE_UP} frames (edit script done at {:?})",
@@ -2020,7 +2087,7 @@ fn gate_finish(g: &GateRun, horizon_maps: u64, extra: &str) -> Result<(), String
     if let Some(p) = &g.report {
         std::fs::write(p, format!("{line}\n")).map_err(|e| format!("gate report {}: {e}", p.display()))?;
     }
-    let failures = g.gate.failures(horizon_maps, g.lit_with_stage, panics, std::env::var_os("PLANET_GATE_SOFTWARE").is_none());
+    let failures = g.gate.failures(horizon_maps, g.lit_with_horizon, panics, std::env::var_os("PLANET_GATE_SOFTWARE").is_none());
     if failures.is_empty() {
         Ok(())
     } else {
