@@ -352,7 +352,6 @@ mod tests {
         assert_eq!(outcome(&rows), Outcome::Fail);
     }
 
-
     // spec: TEST-060
     #[test]
     fn criterion_6_judges_the_m6_table_and_the_horizon_table_and_not_the_chunk_table() {
@@ -363,7 +362,9 @@ mod tests {
         f.edit = Some(m6.into());
         assert!(matches!(&evaluate(&f)[2].verdict, Verdict::Missing(m) if m.contains("horizon")), "no horizon table is not a pass");
         f.edit = Some(format!("{m6}| altitude | stamp radius | verdict (10 s, horizon maps) |\n|---|---|---|\n| 1 m | 50 m | OVER |\n"));
-        assert!(matches!(&evaluate(&f)[2].verdict, Verdict::Fail(m) if m.contains("horizon maps in 10 s") && m.contains("1 of 2 rows over")));
+        assert!(
+            matches!(&evaluate(&f)[2].verdict, Verdict::Fail(m) if m.contains("horizon maps in 10 s") && m.contains("1 of 2 rows over"))
+        );
         f.edit = Some("| altitude | stamp radius | verdict (10 s, horizon maps) |\n|---|---|---|\n| 1 m | 50 m | ok |\n".into());
         assert!(matches!(&evaluate(&f)[2].verdict, Verdict::Missing(m) if m.contains("verdict column")), "no M6 table is not a pass");
     }
