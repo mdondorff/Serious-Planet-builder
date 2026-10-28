@@ -913,7 +913,7 @@ impl App<'_> {
                 let mut lit = viewer_lit_plan(&cfg.look, cfg.radius_m, dt as f32, reset, cfg.atmosphere)?
                     .with_water_level(cfg.water_level_m)
                     .with_overlay(st.viewer.overlay)
-                    .with_ground_detail(st.viewer.ground_detail.strength());
+                    .with_ground_look(st.viewer.look_choice, st.viewer.ground_detail, &cfg.look.ground);
                 // The coupled lens shows through the climate views (VIEW-053).
                 lit.view = match st.viewer.coupled_lens {
                     Some(planet_generators::coupled::CoupledLens::Height) => planet_frame::look::shading::ShadeView::Temperature,
@@ -1334,6 +1334,9 @@ fn title_text(st: &Running, now_ms: u64) -> String {
         input += &lit_extras_text(&st.viewer, st.chunks_on, st.sun_dir, st.camera_position);
     }
     input += &format!(" | detail {}", st.viewer.ground_detail.name());
+    if st.viewer.look_choice != planet_frame::look::materials::LookChoice::default() {
+        input += &format!(" | look {}", st.viewer.look_choice.name());
+    }
     input += &format!(" | {}", st.world_label);
     if st.viewer.scale_refs {
         input += " | scale references";
@@ -1957,6 +1960,7 @@ mod tests {
             (KeyCode::F4, "F4"),
             (KeyCode::F6, "F6"),
             (KeyCode::F7, "F7"),
+            (KeyCode::F8, "F8"),
             (KeyCode::F9, "F9"),
             (KeyCode::Escape, "Esc"),
             (KeyCode::Tab, "Tab"),
@@ -2001,7 +2005,6 @@ mod tests {
             KeyCode::KeyZ,
             KeyCode::F2,
             KeyCode::F5,
-            KeyCode::F8,
             KeyCode::F10,
             KeyCode::F11,
             KeyCode::F12,
@@ -2063,6 +2066,7 @@ mod tests {
             (KeyCode::F4, Command::ToggleCoarseLod),
             (KeyCode::F6, Command::CycleGroundDetail),
             (KeyCode::F7, Command::ToggleScaleRefs),
+            (KeyCode::F8, Command::CycleLook),
             (KeyCode::KeyH, Command::ToggleEditingLight),
             (KeyCode::KeyJ, Command::CycleShadeView),
             (KeyCode::BracketLeft, Command::SunEarlier),
@@ -2379,6 +2383,7 @@ mod tests {
             Command::CycleOverlay,
             Command::ToggleCoarseLod,
             Command::CycleGroundDetail,
+            Command::CycleLook,
             Command::ToggleScaleRefs,
             Command::ToggleEditingLight,
             Command::CycleShadeView,

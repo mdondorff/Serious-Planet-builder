@@ -1,0 +1,14 @@
+# A hand-written look file, schema version 5 (the version that added the `ground` table, LOOK-011): comments, key order and spacing never
+# matter. Body 1 shows the ground detail at 0.6 and gives soil two curves; every key and material it leaves out is the Earth default.
+schema_version = 5
+kind = "look"
+
+[body.1.ground]
+detail = 0.6
+
+[body.1.ground.soil]
+moisture = [0.55, 0.85]
+soil_depth = [0.5, 1.2]
+
+[body.1.units]
+solar_illuminance_lux = 90000.0

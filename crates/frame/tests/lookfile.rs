@@ -3,6 +3,7 @@
 
 use planet_frame::look::atmosphere::AtmosphereParams;
 use planet_frame::look::file::*;
+use planet_frame::look::materials::{Input, MaterialParams};
 use planet_frame::look::shading::AlbedoParams;
 use planet_frame::look::water::WaterLook;
 use planet_frame::look::{self, ExposureMode, HistogramParams, LitPlan, SceneUnits, ToneMapMode};
@@ -12,6 +13,7 @@ const FIXTURE_V1: &str = include_str!("data/look_v1_moon_and_earth.toml");
 const FIXTURE_V2: &str = include_str!("data/look_v2_albedo_and_sun.toml");
 const FIXTURE_V3: &str = include_str!("data/look_v3_atmosphere.toml");
 const FIXTURE_V4: &str = include_str!("data/look_v4_water.toml");
+const FIXTURE_V5: &str = include_str!("data/look_v5_ground.toml");
 
 fn err(text: &str) -> String {
     parse_look(text).unwrap_err().to_string()
@@ -27,7 +29,16 @@ fn custom() -> LookParams {
         sun: SunLook { direction: [0.0, 1.0, 0.0] },
         atmosphere: AtmosphereParams { mie_g: 0.55, top_height_m: 80_000.0, ..AtmosphereParams::EARTH },
         water: WaterLook { absorption_per_m: 0.35, foam_width_m: 0.6, wave_scale: 1.5, ..WaterLook::EARTH },
+        ground: GroundLook { detail: 0.8, materials: ground_curves() },
     }
+}
+
+/// The Earth curves with one soil curve (moisture rising 0.55 to 0.85) and the rock curve on the slope moved.
+fn ground_curves() -> MaterialParams {
+    let mut m = MaterialParams::EARTH;
+    m.curves[3][Input::Moisture as usize] = [0.55, 0.85];
+    m.curves[0][Input::SlopeCos as usize] = [0.9, 0.7];
+    m
 }
 
 // spec: LOOK-001
@@ -61,7 +72,7 @@ fn canonical_text_is_deterministic_and_round_trips_bit_for_bit() {
     let text = to_toml(&f);
     assert_eq!(parse_look(&text).unwrap(), f);
     assert_eq!(to_toml(&parse_look(&text).unwrap()), text, "writing what was read gives the same text");
-    assert!(text.starts_with("schema_version = 4\nkind = \"look\"\n"));
+    assert!(text.starts_with("schema_version = 5\nkind = \"look\"\n"));
     let order: Vec<usize> = ["[body.0.units]", "[body.7.units]", "[body.12.units]"].iter().map(|k| text.find(k).unwrap()).collect();
     assert!(order[0] < order[1] && order[1] < order[2], "bodies are written in id order");
     // The same content from a differently formatted file writes the same text.
@@ -240,11 +251,11 @@ fn migration_failures_name_the_step_and_the_gap() {
 #[test]
 fn the_production_chain_reads_the_version_1_fixture_and_writes_the_current_layout() {
     assert_eq!(
-        SCHEMA_VERSION, 4,
+        SCHEMA_VERSION, 5,
         "a new table or key needs a new version, an identity step in MIGRATIONS and a fixture of this version kept"
     );
     assert_eq!(MIGRATIONS.len() as u32, SCHEMA_VERSION - 1, "one step per older version");
-    assert_eq!(MIGRATIONS.iter().map(|m| m.from).collect::<Vec<_>>(), [1, 2, 3], "the steps run from version 1 up without a gap");
+    assert_eq!(MIGRATIONS.iter().map(|m| m.from).collect::<Vec<_>>(), [1, 2, 3, 4], "the steps run from version 1 up without a gap");
     // The version 1 fixture goes through the real chain (the identity step 1 to 2) and reads as written.
     let f = parse_look(FIXTURE_V1).unwrap();
     assert_eq!(f.body(BodyId(3)).units.solar_illuminance_lux, 25_000.0);
@@ -295,6 +306,55 @@ fn the_production_chain_reads_the_version_1_fixture_and_writes_the_current_layou
     assert_eq!(w.body(BodyId(1)).units.solar_illuminance_lux, 90_000.0);
     assert_eq!(parse_look(&to_toml(&w)).unwrap(), w);
     assert_eq!(to_toml(&parse_look(&to_toml(&w)).unwrap()), to_toml(&w));
+    assert_eq!(
+        w.body(BodyId(1)).ground,
+        GroundLook::default(),
+        "a version 4 file has no ground table: the window's natural detail and the Earth curves"
+    );
+    // The same content as a version 5 file reads equal (the identity step 4 to 5).
+    let w5 = FIXTURE_V4.replacen("schema_version = 4", "schema_version = 5", 1);
+    assert_eq!(parse_look(&w5).unwrap(), w);
+    // The fixture of version 5 carries the ground table; the keys it leaves out are the Earth default.
+    let g = parse_look(FIXTURE_V5).unwrap().body(BodyId(1)).ground;
+    assert_eq!(g.detail, 0.6);
+    assert_eq!(g.materials.curves[3][Input::Moisture as usize], [0.55, 0.85]);
+    assert_eq!(g.materials.curves[3][Input::SoilDepth as usize], [0.5, 1.2]);
+    assert_eq!(g.materials.curves[0][Input::SlopeCos as usize], [0.86, 0.62], "a curve left out is the Earth default");
+    assert_eq!(g.materials.curves[2], MaterialParams::EARTH.curves[2], "a material left out is the Earth default");
+    let f = parse_look(FIXTURE_V5).unwrap();
+    assert_eq!(parse_look(&to_toml(&f)).unwrap(), f);
+    assert_eq!(to_toml(&parse_look(&to_toml(&f)).unwrap()), to_toml(&f));
+}
+
+// spec: LOOK-002, LOOK-011
+#[test]
+fn an_older_build_refuses_the_ground_table_as_a_newer_schema_and_ground_values_outside_their_range_are_refused_naming_the_key() {
+    let e = parse_with(FIXTURE_V5, 4, &MIGRATIONS[..3]).unwrap_err().to_string();
+    assert!(e.contains("newer") && e.contains('5') && e.contains('4') && e.contains("update the program"), "{e}");
+    let head = "schema_version = 5\nkind = \"look\"\n";
+    for (text, key, value) in [
+        ("[body.0.ground]\ndetail = 1.5\n", "body.0.ground.detail", "1.5"),
+        ("[body.0.ground]\ndetail = 1e-9\n", "body.0.ground.detail", "1e-9"),
+        ("[body.0.ground.rock]\nslope_cos = [0.9]\n", "body.0.ground.rock.slope_cos", "1 values"),
+        ("[body.0.ground.rock]\nslope_cos = [0.9, \"x\"]\n", "body.0.ground.rock.slope_cos[1]", "string"),
+        ("[body.0.ground.rock]\nslope_cos = [0.9, 0.9000000000000001]\n", "ground.rock.slope_cos", "0.9000000000000001"),
+        ("[body.0.ground.rock]\nslop_cos = [0.9, 0.7]\n", "body.0.ground.rock.slop_cos", ""),
+        ("[body.0.ground.gravel]\nslope_cos = [0.9, 0.7]\n", "body.0.ground.gravel", ""),
+        ("[body.0.ground]\nrock = 1.0\n", "body.0.ground.rock", "table"),
+    ] {
+        let e = err(&format!("{head}{text}"));
+        assert!(e.contains(key) && e.contains(value), "{text}: {e}");
+    }
+}
+
+// spec: LOOK-011
+#[test]
+fn a_look_without_a_ground_table_has_the_windows_natural_detail_and_the_earth_curves_and_a_written_default_reads_back() {
+    let f = parse_look("schema_version = 5\nkind = \"look\"\n[body.0.units]\nsolar_illuminance_lux = 126600.0\n").unwrap();
+    let g = f.body(BodyId(0)).ground;
+    assert_eq!((g.detail, g.materials), (planet_frame::look::materials::NATURAL_STRENGTH, MaterialParams::EARTH));
+    assert_eq!(parse_look(&to_toml(&f)).unwrap(), f);
+    assert!(to_toml(&f).contains("[body.0.ground.soil]\n"), "every material is written");
 }
 
 // spec: LOOK-001, LOOK-002

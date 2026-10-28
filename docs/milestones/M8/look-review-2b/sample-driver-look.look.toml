@@ -1,0 +1,20 @@
+# The sample driver look of look review 2 as a look file (LOOK-011; a proposal for the owner's review, not a decision). Every other table is the Earth default.
+# Use: `planet editor --store <dir> --look docs/milestones/M8/look-review-2b/sample-driver-look.look.toml`, then F8 switches between the default ground look and this one.
+# The ground detail is 0.6 and the curves sit on the driver inputs: soil depth in metres, moisture in 0..1 (the neutral values are 1 m and 0.5).
+# A curve is a smoothstep from lo to hi (lo > hi falls); the weights are normalised over the materials. A material or input left out keeps its Earth curve.
+schema_version = 5
+kind = "look"
+
+[body.0.ground]
+detail = 0.6
+
+# Soil: wet (moisture rising 0.55 to 0.85), deep (0.5 to 1.2 m) and flat ground (slope cosine rising 0.7 to 0.9). The hollows the wetness map finds.
+[body.0.ground.soil]
+moisture = [0.55, 0.85]
+soil_depth = [0.5, 1.2]
+slope_cos = [0.7, 0.9]
+
+# Rock: dry (moisture falling 0.8 to 0.3) and thin soil (depth falling 1.6 to 0.8 m) on top of its slope curve, so the dry steep flanks go bare first.
+[body.0.ground.rock]
+moisture = [0.8, 0.3]
+soil_depth = [1.6, 0.8]

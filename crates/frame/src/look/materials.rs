@@ -23,6 +23,9 @@ pub const MATERIALS: usize = 4;
 pub const MATERIAL_NAMES: [&str; MATERIALS] = ["rock", "sand", "grass", "soil"];
 /// The inputs of the weight function.
 pub const INPUTS: usize = 8;
+/// The names of the inputs in the order of [`Input`], as the look file and the poses file write them.
+pub const INPUT_NAMES: [&str; INPUTS] =
+    ["slope_cos", "height", "temperature", "precipitation", "surface_type", "soil_depth", "moisture", "insolation"];
 /// Number of `vec4<f32>` words the curve table occupies: per material, four words of two `(lo, hi)` pairs each.
 pub const MATERIAL_VEC4S: usize = MATERIALS * INPUTS / 2;
 
@@ -181,8 +184,6 @@ impl MaterialParams {
 
     /// Every value must be finite; the first violation names the key (`materials.<material>.<input>`) and the value.
     pub fn validate(&self) -> Result<(), (String, String, String)> {
-        const INPUT_NAMES: [&str; INPUTS] =
-            ["slope_cos", "height", "temperature", "precipitation", "surface_type", "soil_depth", "moisture", "insolation"];
         for (material, row) in MATERIAL_NAMES.iter().zip(&self.curves) {
             for (input, pair) in INPUT_NAMES.iter().zip(row) {
                 if !(pair[0].is_finite() && pair[1].is_finite() && (pair[0] as f32).is_finite() && (pair[1] as f32).is_finite()) {
@@ -208,6 +209,31 @@ impl MaterialParams {
 
 /// The strength of the ground detail the window starts with and F6 calls "natural" (the owner's tuning pass sets it; 1 is full).
 pub const NATURAL_STRENGTH: f64 = 0.6;
+
+/// Which ground look the window shows (VIEW-060): the Earth default curves at the detail strength F6 names, or the look file's `ground` table.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LookChoice {
+    #[default]
+    Default,
+    File,
+}
+
+impl LookChoice {
+    /// The other one.
+    pub fn next(self) -> LookChoice {
+        match self {
+            LookChoice::Default => LookChoice::File,
+            LookChoice::File => LookChoice::Default,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            LookChoice::Default => "default",
+            LookChoice::File => "look file",
+        }
+    }
+}
 
 /// Number of roughness modifiers (the wet and the icy ground).
 pub const GLOSS_MODIFIERS: usize = 2;
