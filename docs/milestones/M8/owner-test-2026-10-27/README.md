@@ -35,6 +35,22 @@ Source: the owner's session on Rasierklinge, editor and viewer, build `a7e739b5`
 | G Resolution | 13 | Walking height looks low-res; high altitudes look dense | | refinement ends at the data's 8 m; ground detail is shading only | M9/M10 |
 | H Look | look review | default vs sample driver look; brightness | look-review-2b | default has ground detail 0; adaptive exposure | owner decision |
 
+## Decisions (owner, 2026-10-28)
+1. **No degradation at every change.** A gate on the real store runs before each merge that touches generators, streaming, render or the editor (editor with chunks, one large edit, a short flight); CI runs the same counters on a small world. Known failures at its landing are quarantined with Tracked entries, never weakened.
+2. **Gate checks:** no frame over 100 ms; 0 held-back tiles (ADR 0074) on procedural ground without edits (any held-back tile there is a generator or bounds bug; the hold-back stays as the safety net; under an edit it is a flagged problem edit for the user); horizon bakes above 0; no worker panic; the step between levels within criterion 3's bound.
+3. **M8 acceptance case for rivers and erosion:** no visible pop at any level boundary, in the viewer above all; judged on a fixed descent from orbit to 1.8 m at the capture sites.
+4. **Rivers run downhill on the drawn ground:** along every river in a chunk the drawn bed rises downstream by at most 0.5 m (frame-139490: uphill and sideways rivers).
+5. **Decision measurement before any build** (1 to 2 days, in memory): realistic channel depth (SPIKE-50 d1) with the coarse carve in replace form and a detail-only correction (the chunk change filtered to the apply level adds nothing beyond the coarse carve). Stop rule, all three to pass on the real store:
+
+| Condition | Pass |
+|---|---|
+| Level boundaries | step 15/14 and the entry step under 0.25 m p99; no visible pop in the owner's descent |
+| Rivers | no bed rise over 0.5 m downstream |
+| Chunk change | bounds margin of tens of metres; held-back tiles 0 at the capture sites without edits; the correction small against the erosion's detail |
+
+6. **Pass:** build it in M8 (about a week). **Fail:** runtime erosion is a failed experiment for now: the chunk stage off by default, M8 closes on what works (coarse relief, shadows, flight, look), hydrology redone in M9.
+7. No other hydrology or erosion work until the decision; option A (soft hand-over) is not built.
+
 ## Plan (proposed; M8 does not close with groups A to D open)
 | Step | Work | Lane | Done when |
 |---|---|---|---|
