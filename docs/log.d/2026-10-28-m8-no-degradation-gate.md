@@ -1,0 +1,1 @@
+- 2026-10-28 M8-G the no-degradation gate: window counters (frames over 100 ms, held-back tiles, horizon maps, panics), camera-path replay after a 400 m hill, cargo xtask gate (real store) and gate --small (prepush, CI), known failures quarantined with ceilings (TEST-061 to TEST-063)

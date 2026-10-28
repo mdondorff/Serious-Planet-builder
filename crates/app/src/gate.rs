@@ -10,7 +10,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// A frame over this many milliseconds fails the gate.
 pub const FRAME_LIMIT_MS: f64 = 100.0;
 
-/// The frame phases that wait for the GPU (by the start of their names in the window's stall probe); they are not counted in a frame's time.
 /// Frames at the start of a run that are not judged: shaders and pipelines compile on the first frames.
 pub const WARMUP_FRAMES: u64 = 20;
 
@@ -90,6 +89,7 @@ impl Gate {
 
     /// With `judge_perf` false (the software adapter: its rendering shares the CPU with the main thread, and a 32-cell world lands too few chunks to bake a map) the
     /// frame time and the horizon maps are reported and not judged; held-back tiles and panics always are.
+    ///
     /// The reasons the run fails, each naming the counter, the frame and the phase or the tiles; empty when it passes. `horizon_baked` is the
     /// maps baked over the run and `lit_with_stage` whether the run drew lit over a chunk stage (where none baked is a failure).
     pub fn failures(&self, horizon_baked: u64, lit_with_stage: bool, panics: u64, judge_perf: bool) -> Vec<String> {
