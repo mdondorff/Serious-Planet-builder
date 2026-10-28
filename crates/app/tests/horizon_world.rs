@@ -533,3 +533,39 @@ fn an_edit_changes_the_word_of_the_chunk_beside_it_whose_march_reads_it_and_of_n
     assert!(baker.edit_word(beside) != 0, "the chunk beside it, whose march reads the hill: its map is baked again");
     assert_eq!(baker.edit_word(further), 0, "two chunks away: out of every halo, no new bake");
 }
+
+// spec: STRM-064
+#[test]
+fn a_world_with_a_bake_and_no_chunk_stage_wants_and_bakes_horizon_maps_from_the_base_terrain() {
+    use planet::horizonworld::chunk_horizon_params;
+    // The wiring of the default viewer since the owner's fallback of 2026-10-28: a stored (here in-memory) bake, no chunk stage, the horizon jobs
+    // on the base terrain. The streaming tests cover `BaseTerrain` with a fake baker; this is the world's own lattice, wanted set and baker.
+    let world = Arc::new(WorldTerrain::open(WorldDefinition::single_planet(R, 5), 32).unwrap());
+    assert!(world.has_bake() && world.chunk_manager().is_none(), "a bake and no chunk stage");
+    let lat = world.horizon_lattice().expect("a world with a bake has the lattice its maps would be baked on");
+    let (spawner, clock) = (Arc::new(ManualSpawner::default()), Arc::new(FakeClock::default()));
+    world
+        .enable_horizon(
+            chunk_horizon_params(&lat, R),
+            spawner.clone(),
+            clock.clone(),
+            HorizonConfig { workers: 1, settle_ms: 0, keep: 8 },
+            2,
+        )
+        .expect("the horizon starts without a chunk stage");
+    assert!(world.horizon_enabled());
+    let chunk = TileId::new(Face(2), CHUNK_GRID_LEVEL, 1000, 1000).unwrap();
+    let camera = PlanetFixed(chunk.center_direction(&TangentWarp) * (R + 300.0));
+    let wanted = world.horizon_wanted(&[chunk], camera);
+    assert!(wanted.iter().any(|(k, _)| *k == (2, 1000, 1000)), "the chunk of a level-11 tile is wanted: {wanted:?}");
+    assert!(wanted.windows(2).all(|w| w[0].1 <= w[1].1), "nearest first");
+    world.horizon_frame(&[chunk], camera);
+    spawner.run(64);
+    let update = world.horizon_frame(&[chunk], camera);
+    let stats = world.horizon_stats().expect("stats");
+    assert!(stats.baked > 0, "a map was baked from the base terrain: {stats:?}");
+    assert!(
+        update.landed.len() as u64 + stats.landed > 0 && world.horizon_map((2, 1000, 1000)).is_some(),
+        "the map of the tile's own chunk landed"
+    );
+}
