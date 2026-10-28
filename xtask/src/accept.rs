@@ -76,7 +76,7 @@ fn manual_criteria(milestone: &str) -> &'static [&'static str] {
         ],
         "M8" => &[
             "Criterion 1: the owner's look review of `docs/milestones/M8/look-review-2b/` (stills rendered after #835; F8 compares the default and the sample look live) and the default look",
-            "Criterion 3: the entry step and the steps between levels on the rebuilt store (`anet_steps_report`, see docs/milestones/M8/acceptance-runbook.md); no rendered-frame step measurement exists",
+            "Criterion 3: FAILS the between-levels bound (15 against 14 is 0.712 m against 0.25 m, computed 2026-10-28, docs/milestones/M8/acceptance-runbook.md); the owner's D0 decision and the incision depth decide; no rendered-frame measurement exists",
             "Criterion 6, the drawn-tile reading of 'every touched chunk the view wants' (owner item #823); criteria 4 to 7 above are read from the perf logs only",
             "CI green on Windows (WARP) and Linux (lavapipe) for the merge commit, and the determinism comparison (criterion 2)",
             "The owner's live-test items (docs/milestones/M8/owner-test-2026-10-27/README.md) and the M8 report (docs/milestones/M8-report.md): the planner",
