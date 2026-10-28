@@ -185,6 +185,8 @@ pub struct EditRuntime {
     /// The no-degradation gate is on (TEST-061): the smoke script places the large hill and keeps it, and the update finds which held-back tiles an edit reaches.
     gate: bool,
     capped_under_edit: Vec<TileId>,
+    /// The hover pick on a thread of its own (VIEW-059); none in the tests that pick on the spot.
+    hover: Option<crate::hoverpick::HoverPicker>,
 }
 
 /// The footprint items of the whole body, layer by layer in stack order (the order the stamp stages are stacked in, ADR 0007): what the
@@ -287,6 +289,7 @@ impl EditRuntime {
             marker_ids: Vec::new(),
             capped_tiles: Vec::new(),
             gate: false,
+            hover: None,
             capped_under_edit: Vec::new(),
         })
     }
@@ -572,7 +575,20 @@ impl EditRuntime {
         // The hover, the draft and the brush ring read the height of the level a pixel of this view can show.
         let level = Self::pick_level(camera, viewport, self.radius_m, limits.max_height_m);
         self.draft = overlay::draft(&self.session, &view, &|d| field.height_at_level(d, level), (!over_ui).then_some(cursor));
-        let hit = if over_ui { None } else { Self::hit_at_level(camera, viewport, cursor, limits, field, level) };
+        // The hover pick finds the ground along the whole ray: its first read of a bake block nobody has touched decodes it, so with a source it runs on its own
+        // thread and the frame takes the last pick that finished (VIEW-059, CON-22).
+        let hit = match (over_ui, self.hover.as_mut()) {
+            (true, Some(h)) => {
+                h.clear();
+                None
+            }
+            (true, None) => None,
+            (false, Some(h)) => {
+                let ray = cursor_ray(camera, cursor[0], cursor[1], viewport.width_px, viewport.height_px);
+                h.poll((ray, *limits, level))
+            }
+            (false, None) => Self::hit_at_level(camera, viewport, cursor, limits, field, level),
+        };
         self.brush = overlay::brush(&self.session, &view, &|d| field.height_at_level(d, level), hit.map(|h| h.dir));
         if !over_ui {
             let mpp = self.height_mpp(camera, viewport);
@@ -606,6 +622,11 @@ impl EditRuntime {
             hidden: s.editor().items().filter(|i| s.is_hidden(i.id)).map(|i| i.id).collect(),
             inspector: s.inspector(cam),
         };
+    }
+
+    /// Run the hover pick on a thread of its own: `source` makes the field and picks against it.
+    pub fn set_hover_source(&mut self, source: crate::hoverpick::PickSource) {
+        self.hover = Some(crate::hoverpick::HoverPicker::new(source));
     }
 
     /// Metres one pixel spans at the selected edit's height handle.
@@ -1289,6 +1310,30 @@ mod tests {
         // The field's items change (an edit reached it): the ground is read again.
         field.revision.store(8, std::sync::atomic::Ordering::Relaxed);
         assert!(frame_with(&mut e, &cam) >= 5, "a new revision reads the ground again");
+    }
+
+    // spec: VIEW-059
+    #[test]
+    fn the_hover_pick_on_its_own_thread_never_holds_the_frame() {
+        let at = unit(47.2, 8.55);
+        let cam = above(at, 3_000.0);
+        let mut e = runtime(None);
+        e.toggle();
+        let (release, wait) = std::sync::mpsc::sync_channel::<()>(0);
+        let wait = std::sync::Mutex::new(wait);
+        e.set_hover_source(Arc::new(move |_, _, _| {
+            wait.lock().unwrap().recv_timeout(std::time::Duration::from_secs(3)).ok();
+            None
+        }));
+        let t = std::time::Instant::now();
+        frame(&mut e, &cam, false);
+        frame(&mut e, &cam, false);
+        assert!(t.elapsed() < std::time::Duration::from_millis(1500), "two frames with the pick blocked took {:?}", t.elapsed());
+        release.send(()).unwrap();
+        // A click still picks on the spot, on the exact surface.
+        let field = Flat;
+        let hit = EditRuntime::hit_at(&cam, VIEWPORT, CENTRE, &limits(), &field);
+        assert!(hit.is_some(), "a click reads the surface itself");
     }
 
     // spec: VIEW-047

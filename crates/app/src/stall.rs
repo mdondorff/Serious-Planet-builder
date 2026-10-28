@@ -223,8 +223,10 @@ impl Stall {
             }
         }
         for (name, n) in &self.decodes {
-            s += &format!("blocks the main thread decoded in {name}: {n}
-");
+            s += &format!(
+                "blocks the main thread decoded in {name}: {n}
+"
+            );
         }
         if !extra.is_empty() {
             s += extra;
