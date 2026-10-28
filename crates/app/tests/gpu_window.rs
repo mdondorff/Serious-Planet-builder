@@ -545,3 +545,18 @@ fn the_window_over_a_store_with_a_chunk_stage_runs_the_horizon_jobs_and_draws_th
         .unwrap_or_else(|| panic!("no horizon count in '{step}'"));
     assert!(frames > 0, "the chunk step ran the horizon jobs on no frame: {step}");
 }
+
+// spec: TEST-061, TEST-062
+#[test]
+fn the_gate_passes_on_a_small_world_with_a_large_edit_and_the_chunk_stage() {
+    // The owner's session of 2026-10-27 as counters (TEST-061): the editor window over a chunk stage, one large hill, then the settling frames; the
+    // run fails on a frame over 100 ms of main-thread time, a held-back tile no edit reaches, no horizon map, or a caught panic.
+    let (store, world, args) = stage_store("gate");
+    let mut args: Vec<&str> = args.iter().map(String::as_str).collect();
+    args.extend(["--edit", "--no-vsync", "--size", "480x270"]);
+    let out = smoke_in(&args, &[("PLANET_GATE", "1"), ("PLANET_GATE_SETTLE", "30"), ("PLANET_GATE_SOFTWARE", "1")]);
+    let _ = std::fs::remove_file(&world);
+    let _ = std::fs::remove_dir_all(&store);
+    let Some(stdout) = out else { return };
+    assert!(stdout.lines().any(|l| l.starts_with("gate: ") && l.contains("held back:")), "no gate line: {stdout}");
+}

@@ -10,6 +10,7 @@ pub mod editresolve;
 pub mod editscale;
 pub mod editwin;
 pub mod envelopeperf;
+pub mod gate;
 pub mod globalperf;
 pub mod horizonworld;
 pub mod litperf;

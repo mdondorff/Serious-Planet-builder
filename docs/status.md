@@ -15,7 +15,6 @@ Dormant (no near trigger; not asked now):
 - **Coarse-first refinement of an edit** (owner, 2026-10-20): parked. Trigger: a brush case of the edit-latency scene that misses its budget.
 
 ## M8 queue (plan: `docs/briefings/m8-plan.md`; next week's start: `docs/briefings/week-2026-10-25.md`)
-Done before the reset (2026-10-23 and 24; M8-2 archived #621, chunk fade split into `m8-chunk-fade`): decisions D1 to D7, R1, R2a, R5, R4, R6, the coupled run (#596), constitution v1.6, ADR 0077 to 0079, SPIKE-35 (#590), the M8-2 proposal (#588), M8-2 3a (#600) and 3b (#606), M8-1 (c) stored run (#601) and wiring with the K view (#603), the run's timing (#602) and speed-up (#604: 545 s for 100 steps at 2048, 1 thread, synthetic world; criterion 4 met with 9 % margin).
 
 | # | Step | Lane |
 |---|---|---|
@@ -27,8 +26,11 @@ Done before the reset (2026-10-23 and 24; M8-2 archived #621, chunk fade split i
 Open owner items: the two flickers (Tracked) need a live check (editor off, debug path L, or a recording or F9 at the moment); P1-5 editing frame rate on a quiet machine; P2-8 missing tiles during an edit's refresh.
 
 ## Tracked
+- **Gate held-back tiles** (`xtask gate`, 2026-10-28): tiles held back (ADR 0074), no edit in reach, most at once: 116591 152, 134050 165, 139490 153, 181555 140, 187750 137, 197238 170, 72408 111, 78773 127, 50119 91, 31358 10, 32034 9, 41356 8, 41595 12. Ceilings: gate.rs KNOWN.
+- **Gate slow frames** (any site, ceiling 3 s): "chunk frame" up to 2.8 s, mostly at frame ~64; "editor update" 139 ms at 102263. **Gate horizon**: 0 maps at 102263.
+- **Gate level steps** (p99, bound 0.25 m): 12/11 8.961 m, 13/12 3.825, 14/13 1.850, 15/14 0.712.
 - **Editor smoke** (`editor --smoke`): does not complete on the real store (17 frames); fix when in that code (the stall gate's home).
-- **Detail blocks** (BUILD-027): 10 requirements in `xtask/src/detail_blocks.txt`: split or shorten each, delete its line; no new blocks.
+- **Detail blocks** (BUILD-027): 10 in `xtask/src/detail_blocks.txt`: split or shorten each, delete its line; no new blocks.
 - **Frame tail** (SPIKE-44): `draw_plan_transient` 8-14 ms on a plan delivery (24-48 frames/min) + ~9 ms frame work drops a frame at 60 fps; ADR 0083 frame share.
 - **Hillslope flat patches** (look review 2b): ground beyond a rim is 0.7 m under the base, half as rough, flat in 60-160 m patches.
 - **GEN-052 met, window 2026-10-26** (`perf anet-chunk --store`): 8 m 3.33 / 3.30 s on 4 threads, 5.3 s on one; 4 m 14.8 s; 10 m 2.1 s. Repeat after any change to the base field, the routing or the band (#744).
