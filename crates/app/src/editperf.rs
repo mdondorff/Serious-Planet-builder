@@ -964,7 +964,9 @@ fn run_once(
         out.stages.horizon = Some(
             touched
                 .into_iter()
-                .map(|k| (k, h.horizon_landed.iter().find(|l| l.1 == k).map(|l| l.0.duration_since(sampler_started).as_secs_f64() * 1000.0)))
+                .map(|k| {
+                    (k, h.horizon_landed.iter().find(|l| l.1 == k).map(|l| l.0.duration_since(sampler_started).as_secs_f64() * 1000.0))
+                })
                 .collect(),
         );
     }
@@ -1022,7 +1024,9 @@ pub fn chunks_table(rows: &[CaseRow]) -> String {
 /// edit touched (the first run of the case), the milliseconds from the edit to the map's landing and the ten-second verdict. The header of the last
 /// column is read by `accept M8` (TEST-060).
 pub fn horizon_table(rows: &[CaseRow]) -> String {
-    let mut s = String::from("| altitude | stamp radius | map (face, x, y) | edit to map ms | verdict (10 s, horizon maps) |\n|---|---|---|---|---|\n");
+    let mut s = String::from(
+        "| altitude | stamp radius | map (face, x, y) | edit to map ms | verdict (10 s, horizon maps) |\n|---|---|---|---|---|\n",
+    );
     for r in rows {
         let maps = r.runs.first().and_then(|x| x.stages.horizon.as_ref());
         match maps.filter(|m| !m.is_empty()) {

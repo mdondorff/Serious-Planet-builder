@@ -662,8 +662,12 @@ impl HorizonJobs {
                 let mut v: Vec<ChunkKey> = sh.ready.keys().filter(|k| !self.chunks.is_ready(**k)).copied().collect();
                 if !self.chunks.evicts() {
                     // The source never evicts: keep the wanted maps and the most recently wanted of the others, up to the cap.
-                    let mut others: Vec<(u64, ChunkKey)> =
-                        sh.ready.keys().filter(|k| sh.wanted_at.get(*k) != Some(&n)).map(|k| (sh.wanted_at.get(k).copied().unwrap_or(0), *k)).collect();
+                    let mut others: Vec<(u64, ChunkKey)> = sh
+                        .ready
+                        .keys()
+                        .filter(|k| sh.wanted_at.get(*k) != Some(&n))
+                        .map(|k| (sh.wanted_at.get(k).copied().unwrap_or(0), *k))
+                        .collect();
                     others.sort_unstable();
                     let excess = sh.ready.len().saturating_sub(wanted.len() + self.cfg.keep);
                     v.extend(others.into_iter().take(excess).map(|(_, k)| k));

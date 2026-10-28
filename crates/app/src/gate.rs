@@ -160,7 +160,9 @@ impl Gate {
         if judge_perf && lit_with_horizon && self.edit_at.is_some() && !self.touched.is_empty() {
             match self.rebake_ms {
                 Some(ms) if ms <= REBAKE_LIMIT_MS => {}
-                Some(ms) => f.push(format!("no horizon map re-baked within {} s of the edit (the first {ms} ms after it)", REBAKE_LIMIT_MS / 1000)),
+                Some(ms) => {
+                    f.push(format!("no horizon map re-baked within {} s of the edit (the first {ms} ms after it)", REBAKE_LIMIT_MS / 1000))
+                }
                 None => f.push(format!("no horizon map re-baked within {} s of the edit (none landed after it)", REBAKE_LIMIT_MS / 1000)),
             }
         }
@@ -282,8 +284,6 @@ mod tests {
         assert_eq!(f.len(), 2, "{f:?}");
         assert!(f[0].contains("horizon") && f[1].contains("panics caught: 2"));
     }
-
-
 
     // spec: TEST-065
     #[test]

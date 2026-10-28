@@ -278,13 +278,16 @@ impl HorizonBaker for ChunkHorizonBaker {
                 if self.edit_word(key) != word0 {
                     return None;
                 }
-                let tile_key = tile_cacheable(in_face(bx) && in_face(by), before[idx] == after[idx], revision0, world.definition().revision()).then(|| {
-                    let block = (key.0, bx as u32, by as u32);
-                    planet_core::hash::hash_u64s(
-                        0x4854_494c,
-                        &[world_word, self.items_word(block, STAGE_HALO * f64::from(self.lat.cells_per_chunk())), before[idx]],
-                    )
-                });
+                let tile_key =
+                    tile_cacheable(in_face(bx) && in_face(by), before[idx] == after[idx], revision0, world.definition().revision()).then(
+                        || {
+                            let block = (key.0, bx as u32, by as u32);
+                            planet_core::hash::hash_u64s(
+                                0x4854_494c,
+                                &[world_word, self.items_word(block, STAGE_HALO * f64::from(self.lat.cells_per_chunk())), before[idx]],
+                            )
+                        },
+                    );
                 let tile = self.block_heights(&*field, key.0, (bx, by), n, tile_key);
                 // The rows of the block inside the raster: the block's cells are [bx n, bx n + n), the raster's [x0, x0 + side).
                 let (cx, cy) = (bx * n as i64 - x0, by * n as i64 - y0);
@@ -384,7 +387,9 @@ impl WorldTerrain {
     /// The chunk lattice the horizon maps are baked on: the chunk stage's, else the one it would have (the A-net's 8 m cell), for a world with a bake.
     pub fn horizon_lattice(&self) -> Option<ChunkLattice> {
         self.chunk_lattice().or_else(|| {
-            self.has_bake().then(|| ChunkLattice::new(crate::anetworld::cells_per_chunk_for(self.radius_m(), crate::anetworld::ANET_CELL_M))).flatten()
+            self.has_bake()
+                .then(|| ChunkLattice::new(crate::anetworld::cells_per_chunk_for(self.radius_m(), crate::anetworld::ANET_CELL_M)))
+                .flatten()
         })
     }
 
@@ -798,7 +803,10 @@ mod rig_tests {
     #[test]
     fn a_height_tile_is_kept_only_if_no_edit_was_published_since_the_field_was_built() {
         assert!(tile_cacheable(true, true, 7, 7));
-        assert!(!tile_cacheable(true, true, 7, 8), "an edit between the field and the block's key: the heights are of one revision, the key of another");
+        assert!(
+            !tile_cacheable(true, true, 7, 8),
+            "an edit between the field and the block's key: the heights are of one revision, the key of another"
+        );
         assert!(!tile_cacheable(false, true, 7, 7), "off the face");
         assert!(!tile_cacheable(true, false, 7, 7), "a chunk result changed while the field was built");
     }

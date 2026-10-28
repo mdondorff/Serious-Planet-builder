@@ -212,6 +212,9 @@ fn gate_settle_frames() -> u64 {
 /// Frames after which a gate run that has not finished fails (a hung edit script or path).
 const GATE_GIVE_UP: u64 = 400_000;
 
+/// Frames after which a gate run stops waiting for the first horizon map.
+const GATE_BAKE_GIVE_UP: u64 = 6_000;
+
 /// The no-degradation gate of a window run (`PLANET_GATE`, TEST-061): the counters, the camera path of `PLANET_GATE_PATH` and the file of
 /// `PLANET_GATE_REPORT` the report goes to.
 struct GateRun {
@@ -260,7 +263,8 @@ impl GateRun {
     ) {
         if self.gate.edit_at.is_none() {
             if published {
-                let touched = wanted.iter().copied().filter(|k| self.words.get(k).is_some_and(|w| *w != world.horizon_edit_word(*k))).collect();
+                let touched =
+                    wanted.iter().copied().filter(|k| self.words.get(k).is_some_and(|w| *w != world.horizon_edit_word(*k))).collect();
                 self.gate.edit_published(now_ms, touched);
             } else {
                 for k in wanted {
@@ -272,8 +276,9 @@ impl GateRun {
     }
 
     /// Whether the edit script ended, the settling frames passed and the path (if any) was replayed to its end.
-    fn finished(&self, frames: u64, now_ms: u64) -> bool {
+    fn finished(&self, frames: u64, now_ms: u64, horizon_waits: bool) -> bool {
         self.edit_done_at.is_some_and(|at| frames >= at + gate_settle_frames())
+            && !horizon_waits
             && self.replay.as_ref().is_none_or(|r| r.started() && r.pose(now_ms).1)
     }
 }
@@ -494,7 +499,9 @@ impl App<'_> {
             // The pool and the knobs of the viewer's chunk stage: one function, which the headless scenes use too (`anetworld::viewer_chunk_stage`).
             let (pool, chunk_cfg) = crate::anetworld::viewer_chunk_stage(cfg.gen);
             self.world.request_anet(pool, self.clock.clone(), chunk_cfg);
-        } else if self.world.has_bake() {
+        } else if self.world.has_bake()
+            && (!cfg.smoke || std::env::var_os("PLANET_SMOKE_CHUNKS").is_some() || std::env::var_os("PLANET_GATE").is_some())
+        {
             // No chunk stage: the horizon maps are baked from the base terrain and the stamps (STRM-064), on the idle class of the same pool.
             let (pool, chunk_cfg) = crate::anetworld::viewer_chunk_stage(cfg.gen);
             if let Err(e) = self.world.enable_viewer_horizon(pool, self.clock.clone(), chunk_cfg.workers.div_ceil(2)) {
@@ -1245,7 +1252,15 @@ impl App<'_> {
                 let stage_done = st.frames >= SMOKE_GIVE_UP
                     || (((std::env::var_os("PLANET_SMOKE_CHUNKS").is_none() && !cfg.chunks) || st.chunks_on)
                         && (std::env::var_os("PLANET_SMOKE_LENS").is_none() || st.smoke_lens_at.is_some_and(|f| st.frames >= f + 20)));
-                let gate_done = st.gate.as_ref().is_none_or(|g| g.finished(st.frames, now_ms));
+                // A run with the horizon jobs on also waits for the first map to be baked (a slow adapter bakes in seconds of wall time, not in a count of frames), but not past
+                // [`GATE_BAKE_GIVE_UP`] frames: the verdict then says no map was baked.
+                let maps_baked = self.world.horizon_stats().is_some_and(|h| h.baked + h.disk_hits > 0);
+                let horizon_waits = self.world.horizon_enabled()
+                    && self.world.chunk_manager().is_none()
+                    && st.viewer.lit
+                    && !maps_baked
+                    && st.frames < GATE_BAKE_GIVE_UP;
+                let gate_done = st.gate.as_ref().is_none_or(|g| g.finished(st.frames, now_ms, horizon_waits));
                 if st.gate.is_some() && st.frames > GATE_GIVE_UP {
                     return Err(format!(
                         "gate: the run did not finish in {GATE_GIVE_UP} frames (edit script done at {:?})",
