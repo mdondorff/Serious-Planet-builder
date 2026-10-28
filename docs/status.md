@@ -28,7 +28,7 @@ Open owner items: the two flickers (Tracked) need a live check (editor off, debu
 
 ## Tracked
 - **Gate held-back tiles** (`xtask gate`, 2026-10-28): tiles held back (ADR 0074), no edit in reach, most at once: 116591 152, 134050 165, 139490 153, 181555 140, 187750 137, 197238 170, 72408 111, 78773 127, 50119 91, 31358 10, 32034 9, 41356 8, 41595 12. Ceilings: gate.rs KNOWN.
-- **Gate slow frames** (any site, ceiling 3 s): "chunk frame" up to 2.8 s, mostly at frame ~64; "editor update" 139 ms at 102263. **Gate horizon**: 0 maps at 102263.
+- **Gate slow frames** (any site, ceiling 3 s): "chunk frame" up to 2.8 s, mostly at frame ~64; "editor update" 139 ms at 102263. **Gate horizon anomaly** (102263): 25-33 chunks land, no map lands (others 2-9); cause open.
 - **Gate level steps** (p99, bound 0.25 m): 12/11 8.961 m, 13/12 3.825, 14/13 1.850, 15/14 0.712.
 - **Editor smoke** (`editor --smoke`): does not complete on the real store (17 frames); fix when in that code (the stall gate's home).
 - **Detail blocks** (BUILD-027): 10 in `xtask/src/detail_blocks.txt`: split or shorten each, delete its line; no new blocks.
