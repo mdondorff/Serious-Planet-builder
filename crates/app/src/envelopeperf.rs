@@ -440,6 +440,37 @@ pub fn start_place(n: usize) -> (f64, f64) {
 struct StageSetup {
     gen: planet_streaming::GenWorkers,
     horizon: bool,
+    /// The A-net chunk stage runs (`--chunks`, STRM-046); without it the flight is tiles and horizon maps from the base terrain (the M8 default, owner 2026-10-28).
+    chunks: bool,
+}
+
+/// The stage a flight runs: none without a store, the chunk stage and its horizon jobs with `--chunks`, the horizon jobs alone otherwise (STRM-046).
+fn stage_setup(o: &Options) -> Option<StageSetup> {
+    (o.store.is_some() && !o.allow_memory_bake).then(|| StageSetup {
+        gen: crate::chunkstage::stage_gen(o),
+        horizon: true,
+        chunks: o.chunks,
+    })
+}
+
+/// Start the stage of `st` on `world`: the viewer's chunk stage, or the horizon jobs alone (as the window does without `--chunks`), or nothing.
+fn enable_stage(world: &Arc<WorldTerrain>, st: StageSetup, out: &mut dyn Write) -> Result<(), String> {
+    if st.chunks {
+        crate::chunkstage::enable_viewer_stage(world, st.gen, st.horizon, false, out)
+    } else if st.horizon {
+        let (pool, chunk_cfg) = crate::anetworld::viewer_chunk_stage(st.gen);
+        world.enable_viewer_horizon(pool, Arc::new(planet_streaming::SystemClock::new()), chunk_cfg.workers.div_ceil(2))
+    } else {
+        Ok(())
+    }
+}
+
+/// The log file of the scene for `--out` (a directory gets `envelope.json`, a path ending in `.json` is the file; without `--out`, `perf/logs/envelope.json`).
+fn log_path(o: &Options) -> Result<std::path::PathBuf, String> {
+    match &o.out {
+        Some(out) => crate::streamperf::out_log_path(out, "envelope.json"),
+        None => Ok(Path::new("perf").join("logs").join("envelope.json")),
+    }
 }
 
 /// One flight on the real streaming rig from an empty tile cache: settle at the start view, fly `cameras`, and return the coarse share of
@@ -458,7 +489,7 @@ fn fly(
 ) -> Result<Measure, String> {
     // A flight starts with a chunk stage of its own and nothing resident: no disk cache, an empty chunk cache (TEST-054).
     if let Some(st) = stage {
-        crate::chunkstage::enable_viewer_stage(world, st.gen, st.horizon, false, out)?;
+        enable_stage(world, st, out)?;
     }
     let chunk_view = chunk_view_of(world);
     let first = req_of(cameras[0]);
@@ -502,7 +533,8 @@ fn fly(
         });
     // A flight travels: the prefetch must have asked and the horizon step run, unless the flight turned them off (TEST-058). A smoke run is too short to travel.
     if let (false, Some(f)) = (smoke, &stage_facts) {
-        f.counters.check(&f.features, &crate::chunkstage::Expect { prefetch: true, horizon: true, ..Default::default() })?;
+        let chunks = stage.is_some_and(|s| s.chunks);
+        f.counters.check(&f.features, &crate::chunkstage::Expect { prefetch: chunks, horizon: true, ..Default::default() })?;
     }
     drop(d);
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
@@ -558,11 +590,11 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
     let tau = if smoke { o.tau * f64::from(size.1) / 1440.0 } else { o.tau };
     // With a stored world the scene runs the chunk stage, horizon jobs included, as the viewer does (TEST-054); a world of an in-memory bake has no
     // stored coupled run to start from and keeps the tile-only scene.
-    let stage = (o.store.is_some() && !o.allow_memory_bake).then(|| StageSetup { gen: crate::chunkstage::stage_gen(o), horizon: true });
+    let stage = stage_setup(o);
     // The plan's height bound has to include the change of the chunk stage (as the window does), so the stage exists before the LOD parameters are
     // made; every flight then starts one of its own.
     if let Some(st) = stage {
-        crate::chunkstage::enable_viewer_stage(&world, st.gen, st.horizon, false, out)?;
+        enable_stage(&world, st, out)?;
     }
     let field = world.field()?;
     let lod = LodParams {
@@ -703,7 +735,7 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
     };
     // The comparison line: one altitude (300 m) again with the horizon jobs off, so the log shows what they cost the curve.
     let horizon_off: Option<Point> = match stage {
-        Some(st) if !o.only_steady => {
+        Some(st) if !o.only_steady && st.chunks => {
             let off = StageSetup { horizon: false, ..st };
             let altitude = COMPARISON_ALTITUDE_M;
             let point = if smoke {
@@ -759,7 +791,7 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
             steady: stage.map(|_| (steady.as_slice(), run_in_s, if smoke { SMOKE_FLIGHT_S } else { o.steady_window_s })),
         },
     );
-    let path = o.out.clone().unwrap_or_else(|| Path::new("perf").join("logs").join("envelope.json"));
+    let path = log_path(o)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(err)?;
     }
@@ -770,6 +802,41 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn opts(args: &[&str]) -> Options {
+        let args: Vec<String> = args.iter().map(|s| (*s).to_string()).collect();
+        crate::parse_args(&args).unwrap()
+    }
+
+    // spec: STRM-046
+    #[test]
+    fn the_envelope_scene_runs_the_chunk_stage_only_when_asked_and_its_horizon_jobs_either_way() {
+        let base = ["test-render", "--perf", "--scene", "envelope", "--store", "S"];
+        let off = stage_setup(&opts(&base)).expect("a store gives a stage");
+        assert!(!off.chunks && off.horizon, "the default is the horizon jobs from the base terrain, no chunk stage");
+        let mut with = base.to_vec();
+        with.push("--chunks");
+        let on = stage_setup(&opts(&with)).expect("a store gives a stage");
+        assert!(on.chunks && on.horizon, "--chunks asks for the chunk stage");
+        let none = stage_setup(&opts(&["test-render", "--perf", "--scene", "envelope", "--allow-memory-bake"]));
+        assert!(none.is_none(), "an in-memory bake has no stored run: no stage");
+    }
+
+    // spec: TEST-047
+    #[test]
+    fn the_log_goes_where_out_says_a_directory_gets_the_file_and_a_json_path_is_the_file() {
+        let dir = std::env::temp_dir().join(format!("planet-envelope-out-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut o = opts(&["test-render", "--perf", "--scene", "envelope"]);
+        assert_eq!(log_path(&o).unwrap(), Path::new("perf").join("logs").join("envelope.json"));
+        o.out = Some(dir.clone());
+        assert_eq!(log_path(&o).unwrap(), dir.join("envelope.json"), "a directory is not a file to write (Windows: os error 5)");
+        o.out = Some(dir.join("curve.json"));
+        assert_eq!(log_path(&o).unwrap(), dir.join("curve.json"));
+        o.out = Some(dir.join("curve.txt"));
+        assert!(log_path(&o).is_err(), "a name that is neither a directory nor a .json path is refused");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// A fake trial that holds up to `limit` and fails above it; its share rises with the speed.
     fn fake(limit: f64, bound: f64, log: &std::cell::RefCell<Vec<f64>>) -> impl FnMut(f64) -> Result<Measure, String> + '_ {
