@@ -227,6 +227,8 @@ pub struct LogFacts<'a> {
     pub horizon_off: Option<&'a Point>,
     /// With a chunk stage, where along each flight the start put a chunk edge (0.5: half way); `None` without one.
     pub edge_fraction: Option<f64>,
+    /// Whether the A-net chunk stage ran (`--chunks`, STRM-046): criterion 7 is measured with it off (tiles and horizon maps only); a log without this field is from before.
+    pub chunk_stage: bool,
     /// The steady-flight curve (a run-in before the window, `run_in_s` long) next to the cold one; `None` without a chunk stage.
     pub steady: Option<(&'a [Point], f64, f64)>,
 }
@@ -342,6 +344,7 @@ pub fn log_json(points: &[Point], facts: &LogFacts<'_>) -> String {
     s += "  \"coarse_weighting\": \"pixels: nodes of the fresh plan weighted by their projected screen pixels (TEST-046)\",\n";
     s += "  \"stand_in_weighting\": \"nodes: unweighted share of the plan nodes at or finer than the pyramid top level whose chunk is not ready (STRM-039)\",\n";
     s += &format!("  \"chunk_field\": {},\n", facts.chunk_field);
+    s += &format!("  \"chunk_stage\": {},\n", facts.chunk_stage);
     s += &format!("  \"horizon\": {},\n", facts.chunk_field && facts.horizon);
     s += &format!("  \"edge_fraction\": {},\n", facts.edge_fraction.map_or("null".to_string(), number));
     if !facts.chunk_field {
@@ -591,6 +594,7 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
     // With a stored world the scene runs the chunk stage, horizon jobs included, as the viewer does (TEST-054); a world of an in-memory bake has no
     // stored coupled run to start from and keeps the tile-only scene.
     let stage = stage_setup(o);
+    let chunks = stage.is_some_and(|s| s.chunks);
     // The plan's height bound has to include the change of the chunk stage (as the window does), so the stage exists before the LOD parameters are
     // made; every flight then starts one of its own.
     if let Some(st) = stage {
@@ -651,7 +655,7 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
     for &altitude in cold_altitudes {
         let point = if smoke {
             // One trial at the start speed: proves the path, decides nothing.
-            let (lat, lon) = trial_start(n, START_SPEED_MPS, frames, radius_m, stage.is_some());
+            let (lat, lon) = trial_start(n, START_SPEED_MPS, frames, radius_m, chunks);
             n += 1;
             let cameras = level_flight_cameras(radius_m, aspect, field.as_ref(), altitude, START_SPEED_MPS, lat, lon, frames);
             let measure = fly(ctx, &world, &req_of, &cameras, 0, true, o.gen_workers(), stage, out)?;
@@ -665,7 +669,7 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
             }
         } else {
             search(altitude, o.share_bound, |speed| {
-                let (lat, lon) = trial_start(n, speed, frames, radius_m, stage.is_some());
+                let (lat, lon) = trial_start(n, speed, frames, radius_m, chunks);
                 n += 1;
                 let cameras = level_flight_cameras(radius_m, aspect, field.as_ref(), altitude, speed, lat, lon, frames);
                 let measure = fly(ctx, &world, &req_of, &cameras, 0, false, o.gen_workers(), stage, out)?;
@@ -698,7 +702,7 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
             for pj in 0..places {
                 let place = STEADY_PLACE_BASE + places * ai + pj;
                 let point = if smoke {
-                    let (lat, lon) = trial_start_at(n, START_SPEED_MPS, total, radius_m, true, edge);
+                    let (lat, lon) = trial_start_at(n, START_SPEED_MPS, total, radius_m, chunks, edge);
                     n += 1;
                     let cameras = level_flight_cameras(radius_m, aspect, field.as_ref(), altitude, START_SPEED_MPS, lat, lon, total);
                     let measure = fly(ctx, &world, &req_of, &cameras, run_in, true, o.gen_workers(), stage, out)?;
@@ -712,7 +716,7 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
                     }
                 } else {
                     search(altitude, o.share_bound, |speed| {
-                        let (lat, lon) = trial_start_at(place, speed, total, radius_m, true, edge);
+                        let (lat, lon) = trial_start_at(place, speed, total, radius_m, chunks, edge);
                         let cameras = level_flight_cameras(radius_m, aspect, field.as_ref(), altitude, speed, lat, lon, total);
                         let measure = fly(ctx, &world, &req_of, &cameras, run_in, false, o.gen_workers(), stage, out)?;
                         writeln!(
@@ -787,7 +791,8 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
             chunk_field,
             horizon: true,
             horizon_off: horizon_off.as_ref(),
-            edge_fraction: stage.map(|_| EDGE_FRACTION),
+            edge_fraction: chunks.then_some(EDGE_FRACTION),
+            chunk_stage: chunks,
             steady: stage.map(|_| (steady.as_slice(), run_in_s, if smoke { SMOKE_FLIGHT_S } else { o.steady_window_s })),
         },
     );
@@ -822,6 +827,25 @@ mod tests {
         assert!(none.is_none(), "an in-memory bake has no stored run: no stage");
     }
 
+    // spec: STRM-046
+    #[test]
+    fn the_log_records_whether_the_chunk_stage_ran() {
+        let facts = |chunk_stage| LogFacts {
+            bound: 0.01,
+            source: "s",
+            adapter: "a",
+            smoke: false,
+            owner_override: &[],
+            chunk_field: chunk_stage,
+            horizon: true,
+            horizon_off: None,
+            edge_fraction: None,
+            chunk_stage,
+            steady: None,
+        };
+        assert!(log_json(&[], &facts(false)).contains("\"chunk_stage\": false,"));
+        assert!(log_json(&[], &facts(true)).contains("\"chunk_stage\": true,"));
+    }
     // spec: TEST-047
     #[test]
     fn the_log_goes_where_out_says_a_directory_gets_the_file_and_a_json_path_is_the_file() {
@@ -955,6 +979,7 @@ mod tests {
             horizon: true,
             horizon_off: None,
             edge_fraction: None,
+            chunk_stage: false,
             steady: None,
         };
         let without = log_json(&[pt(Measure::coarse_only(0.004))], &facts(false));
@@ -1011,6 +1036,7 @@ mod tests {
                 horizon: true,
                 horizon_off: None,
                 edge_fraction: None,
+                chunk_stage: false,
                 steady: Some((std::slice::from_ref(&steady), RUN_IN_S, STEADY_WINDOW_S)),
             },
         );
@@ -1099,6 +1125,7 @@ mod tests {
             horizon: true,
             horizon_off,
             edge_fraction: chunk_field.then_some(EDGE_FRACTION),
+            chunk_stage: false,
             steady: None,
         };
         let off: &'static Point = Box::leak(Box::new(off));
@@ -1205,6 +1232,7 @@ mod tests {
                 horizon: true,
                 horizon_off: None,
                 edge_fraction: None,
+                chunk_stage: false,
                 steady: None,
             },
         );
