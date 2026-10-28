@@ -496,6 +496,49 @@ pub trait HorizonDisk: Send + Sync {
     fn put(&self, tile: TileId, word: u64, bytes: Vec<u8>) -> Result<(), String>;
 }
 
+/// What the horizon jobs need to know of the chunk stage: which chunks are ready and their results. The chunk manager is one source; [`BaseTerrain`]
+/// is the world with no chunk stage (every chunk is ready and has no change), so the maps are baked from the base terrain and the stamps alone (STRM-064).
+pub trait ChunkSource: Send + Sync {
+    fn is_ready(&self, key: ChunkKey) -> bool;
+    fn result(&self, key: ChunkKey) -> Option<Arc<ChunkResult>>;
+    fn result_hash(&self, key: ChunkKey) -> Option<u64>;
+    /// Whether chunks leave this source on their own (then the horizon drops the maps of chunks that left); `false` makes the jobs keep the
+    /// [`HorizonConfig::keep`] most recently wanted maps beyond the wanted ones.
+    fn evicts(&self) -> bool {
+        true
+    }
+}
+
+impl ChunkSource for ChunkManager {
+    fn is_ready(&self, key: ChunkKey) -> bool {
+        ChunkManager::is_ready(self, key)
+    }
+    fn result(&self, key: ChunkKey) -> Option<Arc<ChunkResult>> {
+        ChunkManager::result(self, key)
+    }
+    fn result_hash(&self, key: ChunkKey) -> Option<u64> {
+        ChunkManager::result_hash(self, key)
+    }
+}
+
+/// No chunk stage: every chunk is ready with no change, nothing is ever evicted by the source.
+pub struct BaseTerrain;
+
+impl ChunkSource for BaseTerrain {
+    fn is_ready(&self, _key: ChunkKey) -> bool {
+        true
+    }
+    fn result(&self, _key: ChunkKey) -> Option<Arc<ChunkResult>> {
+        None
+    }
+    fn result_hash(&self, _key: ChunkKey) -> Option<u64> {
+        None
+    }
+    fn evicts(&self) -> bool {
+        false
+    }
+}
+
 /// The knobs of the horizon jobs.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct HorizonConfig {
@@ -504,11 +547,13 @@ pub struct HorizonConfig {
     /// A map made against a neighbourhood that has since changed is baked again only once the neighbourhood has been unchanged for this long
     /// (milliseconds of the injected clock), so the landing of the eight neighbours one after another costs one or two bakes, not eight.
     pub settle_ms: u64,
+    /// Maps kept beyond the wanted ones when the source does not evict (a map is about 6 MB at the 8 m lattice): the most recently wanted.
+    pub keep: usize,
 }
 
 impl Default for HorizonConfig {
     fn default() -> Self {
-        HorizonConfig { workers: 1, settle_ms: 1_000 }
+        HorizonConfig { workers: 1, settle_ms: 1_000, keep: 32 }
     }
 }
 
@@ -549,6 +594,9 @@ struct HorizonShared {
     /// The state word last seen for a chunk and since when (the settle window starts at a change).
     seen: HashMap<ChunkKey, (u64, u64)>,
     ever_baked: HashSet<ChunkKey>,
+    /// The update counter at which a chunk was last wanted (the order maps are dropped in when the source does not evict).
+    wanted_at: HashMap<ChunkKey, u64>,
+    updates: u64,
     landed: Vec<ChunkKey>,
     stats: HorizonStats,
     log: Vec<String>,
@@ -557,7 +605,7 @@ struct HorizonShared {
 /// The horizon maps of the ready chunks: a map is baked once its chunk is ready, and again when the chunks it read have changed (a neighbour
 /// landed), after the neighbourhood has settled. Never waits for a job (CON-22): a tile whose map is not there reads the coarse horizon alone.
 pub struct HorizonJobs {
-    chunks: Arc<ChunkManager>,
+    chunks: Arc<dyn ChunkSource>,
     baker: Arc<dyn HorizonBaker>,
     spawner: Arc<dyn Spawner>,
     clock: Arc<dyn Clock>,
@@ -568,7 +616,7 @@ pub struct HorizonJobs {
 
 impl HorizonJobs {
     pub fn new(
-        chunks: Arc<ChunkManager>,
+        chunks: Arc<dyn ChunkSource>,
         baker: Arc<dyn HorizonBaker>,
         spawner: Arc<dyn Spawner>,
         clock: Arc<dyn Clock>,
@@ -598,14 +646,29 @@ impl HorizonJobs {
         let words: Vec<Option<u64>> = wanted.iter().map(|&(k, _)| self.chunks.is_ready(k).then(|| self.word(k))).collect();
         {
             let mut sh = self.shared.lock().expect("horizon state");
+            sh.updates += 1;
+            let n = sh.updates;
+            for &(k, _) in wanted {
+                sh.wanted_at.insert(k, n);
+            }
             let gone: Vec<ChunkKey> = {
                 let mut v: Vec<ChunkKey> = sh.ready.keys().filter(|k| !self.chunks.is_ready(**k)).copied().collect();
+                if !self.chunks.evicts() {
+                    // The source never evicts: keep the wanted maps and the most recently wanted of the others, up to the cap.
+                    let mut others: Vec<(u64, ChunkKey)> =
+                        sh.ready.keys().filter(|k| sh.wanted_at.get(*k) != Some(&n)).map(|k| (sh.wanted_at.get(k).copied().unwrap_or(0), *k)).collect();
+                    others.sort_unstable();
+                    let excess = sh.ready.len().saturating_sub(self.cfg.keep.max(wanted.len()));
+                    v.extend(others.into_iter().take(excess).map(|(_, k)| k));
+                }
                 v.sort_unstable();
+                v.dedup();
                 v
             };
             for k in &gone {
                 sh.ready.remove(k);
                 sh.seen.remove(k);
+                sh.wanted_at.remove(k);
                 sh.ever_baked.remove(k);
             }
             sh.stats.evicted += gone.len() as u64;

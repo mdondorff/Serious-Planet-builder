@@ -371,6 +371,17 @@ impl WorldTerrain {
         Ok(true)
     }
 
+    /// The viewer without a chunk stage (the default since the owner's fallback of 2026-10-28, STRM-064): the horizon jobs bake the maps from the
+    /// base terrain and the stamps, and the stored far-field horizon is requested. `workers` is the horizon jobs' share of the pool.
+    pub fn enable_viewer_horizon(self: &Arc<Self>, spawner: Arc<dyn Spawner>, clock: Arc<dyn Clock>, workers: usize) -> Result<(), String> {
+        let lat = self.horizon_lattice().ok_or("the world has no bake: no horizon shadows")?;
+        let params = crate::horizonworld::chunk_horizon_params(&lat, self.radius_m());
+        let cfg = planet_streaming::chunks::HorizonConfig { workers: workers.max(1), ..Default::default() };
+        self.enable_horizon(params, spawner, clock, cfg, self.horizon_threads())?;
+        self.request_coarse_horizon();
+        Ok(())
+    }
+
     /// [`WorldTerrain::enable_anet`] from the stored channel beside the store; `Ok(false)` when the store holds none for this world.
     pub fn enable_anet_from_store(
         self: &Arc<Self>,

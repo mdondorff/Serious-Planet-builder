@@ -468,6 +468,12 @@ impl App<'_> {
             // The pool and the knobs of the viewer's chunk stage: one function, which the headless scenes use too (`anetworld::viewer_chunk_stage`).
             let (pool, chunk_cfg) = crate::anetworld::viewer_chunk_stage(cfg.gen);
             self.world.request_anet(pool, self.clock.clone(), chunk_cfg);
+        } else if self.world.has_bake() {
+            // No chunk stage: the horizon maps are baked from the base terrain and the stamps (STRM-064), on the idle class of the same pool.
+            let (pool, chunk_cfg) = crate::anetworld::viewer_chunk_stage(cfg.gen);
+            if let Err(e) = self.world.enable_viewer_horizon(pool, self.clock.clone(), chunk_cfg.workers.div_ceil(2)) {
+                eprintln!("horizon: {e}");
+            }
         }
         // `enable_lit` is not part of `warm_up`: the lit and atmosphere passes are enabled and used once per ring set here, before the
         // first measured frame, whether the window starts lit or on the debug path (REND-017, VIEW-007).
@@ -889,6 +895,14 @@ impl App<'_> {
                         crate::crash::note(&format!("{line}; {}", planet_frame::chunkshare::landing_note(landed, nodes, stand_in)));
                     }
                 }
+            } else if st.viewer.lit && self.world.horizon_enabled() {
+                // No chunk stage: the horizon jobs alone bake the maps of the plan's chunks from the base terrain (STRM-064).
+                let tiles: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
+                let horizon = self.world.horizon_frame(&tiles, camera.position);
+                st.chunk_counters.horizon_frames += 1;
+                st.chunk_counters.horizon_landed += horizon.landed.len() as u64;
+                st.counts.horizon_steps = st.chunk_counters.horizon_frames;
+                st.horizon_update = horizon;
             }
             st.stall.mark("chunk frame (frame_step, landings, refresh summary)");
             // A refusal of the plan for the base parameters degrades the frame (it draws the newest plan in hand); it is said once, never fatal.
@@ -1063,7 +1077,7 @@ impl App<'_> {
             st.rig.renderer.set_scale_refs(&st.scale_refs);
             st.stall.mark("scale references");
             // The horizon shadows (REND-038): the chunk maps in their slots and the coarse map, for the lit frames over a world with a chunk stage.
-            if let Some(lit) = plan.lit.as_ref().filter(|_| st.chunks_on) {
+            if let Some(lit) = plan.lit.as_ref().filter(|_| st.chunks_on || self.world.horizon_enabled()) {
                 let tiles: Vec<TileId> = plan.nodes.iter().map(|n| n.tile).collect();
                 st.horizon.frame(self.world, ctx, &mut st.rig.renderer, &tiles, &std::mem::take(&mut st.horizon_update), lit.sun_dir);
             }
@@ -1177,7 +1191,7 @@ impl App<'_> {
                     st.presented += 1;
                     if drew_lit {
                         st.counts.lit_presented += 1;
-                        if let (true, Some(g)) = (st.chunks_on, st.gate.as_mut()) {
+                        if let (true, Some(g)) = (st.chunks_on || self.world.horizon_enabled(), st.gate.as_mut()) {
                             g.lit_with_stage = true;
                         }
                     } else {

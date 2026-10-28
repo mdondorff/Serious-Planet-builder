@@ -339,8 +339,13 @@ impl WorldTerrain {
         cfg: HorizonConfig,
         threads: usize,
     ) -> Result<(), String> {
-        let chunks = self.chunk_manager().ok_or("the horizon jobs need the world's chunk stage: enable_chunks first")?;
-        let lat = self.chunk_lattice().ok_or("the world has no chunk lattice")?;
+        // With a chunk stage the maps are baked once their chunk is ready and again as neighbours land; without one (the default since the owner's
+        // fallback of 2026-10-28) every chunk is ready with no change and the maps are baked from the base terrain and the stamps (STRM-064).
+        let chunks: Arc<dyn planet_streaming::chunks::ChunkSource> = match self.chunk_manager() {
+            Some(m) => m,
+            None => Arc::new(planet_streaming::chunks::BaseTerrain),
+        };
+        let lat = self.horizon_lattice().ok_or("the world has no chunk lattice")?;
         let baker = Arc::new(ChunkHorizonBaker::new(self, lat, params, threads));
         // The march must be one the bake accepts, and its halo must fit in the ring of neighbours the state word reads (a chunk edge): refused
         // here, not as a panic in a worker.
@@ -360,16 +365,33 @@ impl WorldTerrain {
         Ok(())
     }
 
+    /// The chunk lattice the horizon maps are baked on: the chunk stage's, else the one it would have (the A-net's 8 m cell), for a world with a bake.
+    pub fn horizon_lattice(&self) -> Option<ChunkLattice> {
+        self.chunk_lattice().or_else(|| {
+            self.has_bake().then(|| ChunkLattice::new(crate::anetworld::cells_per_chunk_for(self.radius_m(), crate::anetworld::ANET_CELL_M))).flatten()
+        })
+    }
+
+    /// Whether the horizon jobs are enabled (with or without a chunk stage).
+    pub fn horizon_enabled(&self) -> bool {
+        crate::stall::read(&self.horizon, "horizon jobs lock (read)").is_some()
+    }
+
     /// One frame of the horizon jobs: the chunks the plan's `tiles` read, nearest to `camera` first. Returns what landed and what was dropped
     /// (the tiles of a landed map want their horizon texture refreshed); without the jobs nothing happens. Never waits for a job.
     pub fn horizon_frame(&self, tiles: &[TileId], camera: PlanetFixed) -> HorizonUpdate {
-        let (Some(jobs), Some(m)) = (crate::stall::read(&self.horizon, "horizon jobs lock (read)").clone(), self.chunk_manager()) else {
+        let (Some(jobs), Some(lat)) = (crate::stall::read(&self.horizon, "horizon jobs lock (read)").clone(), self.horizon_lattice()) else {
             return Default::default();
         };
+        let manager = self.chunk_manager();
         let mut wanted: Vec<(ChunkKey, f64)> = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for &t in tiles {
-            for k in m.reads(t) {
+            let reads = match manager.as_ref() {
+                Some(m) => m.reads(t),
+                None => planet_generators::chunkfield::chunks_read_by(&lat, crate::anetworld::ANET_TOP_LEVEL, 0, t),
+            };
+            for k in reads {
                 if seen.insert(k) {
                     let tile = TileId::new(Face(k.0), planet_generators::chunk::CHUNK_GRID_LEVEL, k.1, k.2)
                         .expect("a chunk of the grid is a tile");
@@ -696,7 +718,7 @@ impl HorizonRig {
         sun: [f32; 3],
     ) {
         use planet_frame::horizonview::{pack_map, MAX_SLOT_AZIMUTHS};
-        let (Some(lat), true) = (world.chunk_lattice(), world.chunk_manager().is_some()) else { return };
+        let (Some(lat), true) = (world.horizon_lattice(), world.horizon_enabled()) else { return };
         let (frame, upload) = self.decide(tiles, &update.landed, &|k| world.horizon_map(k).is_some(), sun);
         let mut packed: Vec<(u32, Vec<u8>)> = Vec::new();
         if let Some((key, slot)) = upload {

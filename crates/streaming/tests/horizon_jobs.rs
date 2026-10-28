@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use planet_core::TileId;
 use planet_generators::chunkfield::{ChunkKey, ChunkLattice, ChunkResult, StandIn, PYRAMID_TOP_LEVEL};
-use planet_streaming::chunks::{ChunkConfig, ChunkManager, HorizonBaker, HorizonConfig, HorizonDisk, HorizonJobs};
+use planet_streaming::chunks::{BaseTerrain, ChunkConfig, ChunkManager, HorizonBaker, HorizonConfig, HorizonDisk, HorizonJobs};
 use planet_streaming::{FakeClock, ManualSpawner};
 
 const R: f64 = 6_371_000.0;
@@ -78,7 +78,7 @@ fn rig(settle_ms: u64, workers: usize) -> Rig {
     let (cs, hs) = (Arc::new(ManualSpawner::default()), Arc::new(ManualSpawner::default()));
     let m = chunks(clock.clone(), cs.clone());
     let baker = Arc::new(FakeBaker { bakes: AtomicU64::new(0), spec: 1, stale: AtomicU64::new(0) });
-    let jobs = HorizonJobs::new(m.clone(), baker.clone(), hs.clone(), clock.clone(), None, HorizonConfig { workers, settle_ms });
+    let jobs = HorizonJobs::new(m.clone(), baker.clone(), hs.clone(), clock.clone(), None, HorizonConfig { workers, settle_ms, keep: 32 });
     (clock, cs, hs, m, baker, jobs)
 }
 
@@ -316,4 +316,59 @@ fn a_bake_that_went_stale_is_dropped_never_published_and_baked_again() {
     hs.run(1);
     assert_eq!(jobs.update(&[(k, 1.0)]).landed, vec![k]);
     assert!(jobs.horizon(k).is_some());
+}
+
+/// A baker whose heights an edit changes: its edit word is set by the test.
+struct EditBaker {
+    word: AtomicU64,
+}
+
+impl HorizonBaker for EditBaker {
+    fn reads(&self, k: ChunkKey) -> Vec<ChunkKey> {
+        vec![k]
+    }
+    fn bake(&self, k: ChunkKey, ready: &[(ChunkKey, Arc<ChunkResult>)]) -> Option<Vec<u8>> {
+        assert!(ready.is_empty(), "no chunk stage: no chunk results");
+        Some(vec![k.1 as u8, self.word.load(Ordering::SeqCst) as u8])
+    }
+    fn spec_hash(&self) -> u64 {
+        1
+    }
+    fn edit_word(&self, _k: ChunkKey) -> u64 {
+        self.word.load(Ordering::SeqCst)
+    }
+}
+
+// spec: STRM-064
+#[test]
+fn without_a_chunk_stage_the_wanted_chunks_are_baked_from_the_base_kept_to_the_cap_and_baked_again_when_an_edit_reaches_them() {
+    let clock = Arc::new(FakeClock::default());
+    let hs = Arc::new(ManualSpawner::default());
+    let baker = Arc::new(EditBaker { word: AtomicU64::new(0) });
+    let cfg = HorizonConfig { workers: 4, settle_ms: 1_000, keep: 2 };
+    let jobs = HorizonJobs::new(Arc::new(BaseTerrain), baker.clone(), hs.clone(), clock.clone(), None, cfg);
+    let (a, b) = (key(0, 0), key(1, 0));
+    assert_eq!(jobs.update(&[(a, 1.0), (b, 2.0)]).started, 2, "every chunk is ready with no chunk stage: both start at once");
+    hs.run(2);
+    let up = jobs.update(&[(a, 1.0), (b, 2.0)]);
+    assert_eq!(up.landed.len(), 2);
+    assert!(jobs.horizon(a).is_some() && jobs.horizon(b).is_some());
+    assert_eq!(jobs.stats().baked, 2);
+    // An edit reaches both: their words change; the maps are baked again once the word has been unchanged for the settle window.
+    baker.word.store(7, Ordering::SeqCst);
+    assert_eq!(jobs.update(&[(a, 1.0), (b, 2.0)]).started, 0, "settling");
+    clock.advance(1_000);
+    assert_eq!(jobs.update(&[(a, 1.0), (b, 2.0)]).started, 2);
+    hs.run(2);
+    jobs.update(&[(a, 1.0), (b, 2.0)]);
+    assert_eq!(jobs.stats().rebaked, 2);
+    assert_eq!(jobs.horizon(a).unwrap().as_slice(), &[(1000 % 256) as u8, 7]);
+    // The camera moves on: the wanted chunks change, the maps beyond the cap (2) of the ones no longer wanted go, the oldest first.
+    let (c, d) = (key(5, 0), key(6, 0));
+    jobs.update(&[(c, 1.0), (d, 2.0)]);
+    hs.run(2);
+    let up = jobs.update(&[(c, 1.0), (d, 2.0)]);
+    assert_eq!(up.landed.len(), 2);
+    assert!(jobs.horizon(c).is_some() && jobs.horizon(d).is_some(), "the wanted maps stay");
+    assert!(jobs.horizon(a).is_none() && jobs.horizon(b).is_none(), "the unwanted maps went beyond the cap");
 }
