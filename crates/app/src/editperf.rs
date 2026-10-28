@@ -1646,7 +1646,7 @@ mod tests {
     // spec: TEST-065
     #[test]
     fn the_horizon_table_has_a_row_per_touched_map_with_its_time_and_the_ten_second_verdict() {
-        let run = |maps: Vec<((u8, u32, u32), Option<f64>, f64)>| CaseRun {
+        let run = |maps: Vec<(planet_generators::chunkfield::ChunkKey, Option<f64>, f64)>| CaseRun {
             stages: Stages { horizon: Some(maps), ..Stages::default() },
             ..CaseRun::default()
         };
