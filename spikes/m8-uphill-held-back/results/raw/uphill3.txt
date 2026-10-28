@@ -1,0 +1,22 @@
+RESULT [random] 48 chunks, 26098 river cells (12751 on the corridor), 209.7 km of river, drawn vs solution max 0.000 m, cells at the change clamp 0
+RESULT [random] rises over 0.5 m: 209 (99.64 per 100 km), 1.00 km long, size p50 0.69, p99 19.26, max 19.50 m
+RESULT [random] rises over 2 m: 36 (17.16 per 100 km), 0.15 km long, size p50 13.57, p99 19.38, max 19.50 m
+RESULT [random] rises over 10 m: 25 (11.92 per 100 km), 0.10 km long, size p50 16.63, p99 19.38, max 19.50 m
+RESULT [random] class chunk border: 6 rises, 0.03 km, size p50 1.01, max 1.23 m, 0 over 2 m
+RESULT [random] class the ground's own relief between cells (the base rises, the chunk change does not): 18 rises, 0.10 km, size p50 0.61, max 0.82 m, 0 over 2 m
+RESULT [random] class the chunk change rises along the path (solve, bank settle, slump): 175 rises, 0.82 km, size p50 0.74, max 19.50 m, 36 over 2 m
+RESULT [random] class neither alone (sum of small parts): 10 rises, 0.06 km, size p50 0.56, max 0.71 m, 0 over 2 m
+RESULT [random] rises with a flag (a rise can have several): chunk border 6, base rises 18, chunk change rises 181, coarse grid rises 0, cut cap on the path 0, corridor edge in the run 0
+RESULT [random] erosion step: bed before it (the lower of the base and the anchor) has 7 rises over 0.5 m; 3 of them are gone after; drawn bed has 209 rises, 175 of them not there before
+RESULT [site] 9 chunks, 26047 river cells (1241 on the corridor), 209.3 km of river, drawn vs solution max 0.000 m, cells at the change clamp 0
+RESULT [site] rises over 0.5 m: 476 (227.38 per 100 km), 2.44 km long, size p50 0.61, p99 1.22, max 1.59 m
+RESULT [site] rises over 2 m: 0 (0.00 per 100 km), -0.00 km long, size p50 0.00, p99 0.00, max 0.00 m
+RESULT [site] rises over 10 m: 0 (0.00 per 100 km), -0.00 km long, size p50 0.00, p99 0.00, max 0.00 m
+RESULT [site] class chunk border: 10 rises, 0.06 km, size p50 0.69, max 1.13 m, 0 over 2 m
+RESULT [site] class the ground's own relief between cells (the base rises, the chunk change does not): 17 rises, 0.08 km, size p50 0.62, max 1.04 m, 0 over 2 m
+RESULT [site] class the chunk change rises along the path (solve, bank settle, slump): 377 rises, 1.94 km, size p50 0.61, max 1.59 m, 0 over 2 m
+RESULT [site] class both rise: 3 rises, 0.02 km, size p50 1.24, max 1.34 m, 0 over 2 m
+RESULT [site] class neither alone (sum of small parts): 69 rises, 0.34 km, size p50 0.55, max 0.81 m, 0 over 2 m
+RESULT [site] rises with a flag (a rise can have several): chunk border 10, base rises 20, chunk change rises 389, coarse grid rises 0, cut cap on the path 0, corridor edge in the run 2
+RESULT [site] erosion step: bed before it (the lower of the base and the anchor) has 25 rises over 0.5 m; 10 of them are gone after; drawn bed has 476 rises, 377 of them not there before
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 213 filtered out; finished in 534.22s
