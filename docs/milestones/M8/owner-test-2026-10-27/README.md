@@ -51,6 +51,11 @@ Source: the owner's session on Rasierklinge, editor and viewer, build `a7e739b5`
 6. **Pass:** build it in M8 (about a week). **Fail:** runtime erosion is a failed experiment for now: the chunk stage off by default, M8 closes on what works (coarse relief, shadows, flight, look), hydrology redone in M9.
 7. No other hydrology or erosion work until the decision; option A (soft hand-over) is not built.
 
+8. **D0 measurement failed the stop rule** (crusader, 2026-10-28, `docs/milestones/M8/d0/README.md` on `change/m8-group-d`): rivers 275 to 367 rises per 100 km against 90 today; held-back tiles 50 to 59 at two sites with the smallest margin; the level step passes only when the chunk keeps detail under 9.5 m.
+9. **Fallback (owner, 2026-10-28):** hydrology and erosion are out of M8's acceptance; the final call waits for the gate run with the chunk stage off (explorer).
+10. **If the chunk stage is off in M8:** keep the code that serves the learning and the redesign; during M9 the code that did not work is removed and its learnings recorded (`docs/learnings.md`, the spike results).
+11. **M9 starts with a literature study** (owner, 2026-10-28): runtime hydrology and erosion with a level-of-detail pyramid and editing, compared against this architecture (readiness independence, determinism, plan-based renderer); it asks whether the chunk approach does not fit this application or was implemented wrongly. Design and execution follow it.
+
 ## Plan (proposed; M8 does not close with groups A to D open)
 | Step | Work | Lane | Done when |
 |---|---|---|---|
