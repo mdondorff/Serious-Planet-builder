@@ -2534,7 +2534,8 @@ mod tests {
     fn d0_variant_report() {
         use planet_core::cube::{direction_to_face, TangentWarp};
         use planet_core::hash::SplitMix64;
-        use planet_generators::chunkfield::{compute_chunk, halo_rings, ChunkField};
+        use planet_generators::chunkfield::{compute_chunk, halo_rings, region, ChunkField};
+        use planet_generators::height::HeightField as _;
         use planet_generators::anet::CoarseRun;
         use std::collections::{HashMap, HashSet};
         use std::sync::Arc;
@@ -2597,6 +2598,15 @@ mod tests {
             writeln!(out, "site frame-{f}: {} chunks of the level-{entry} nodes (nearest {near})", chunks.len()).map_err(err).unwrap();
             sets.push((format!("frame-{f}"), chunks));
         }
+        {
+            let path = format!("{dir}/frame-139490.bundle");
+            let b = planet_frame::TerrainBundle::from_text(&std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"))).expect("a terrain bundle");
+            let site = planet_core::TileId::from_direction(map, b.request.camera.position.0.normalized(), top);
+            let mut v = vec![site];
+            v.extend(site.neighbors8());
+            sets.push(("site9".to_string(), v));
+        }
+        let rivers_on: HashSet<&str> = ["random", "site9"].into_iter().collect();
         if random > 0 {
             let per_face = 1u32 << top;
             let mut rng = SplitMix64(0x6368_616e_6765);
@@ -2710,6 +2720,7 @@ mod tests {
             tile: planet_core::TileId,
             c15: Vec<f32>,
             c16: Vec<f32>,
+            result: Arc<planet_generators::chunkfield::ChunkResult>,
         }
         let mut solved: HashMap<(u8, u32, u32), Arc<Solved>> = HashMap::new();
         for (_, chunks) in &sets {
@@ -2719,7 +2730,8 @@ mod tests {
                     continue;
                 }
                 let Some(r) = compute_chunk(&lat, &stage, radius, entry, t, halo_rings(&stage)) else { continue };
-                let field = ChunkField::new(world.base_field().unwrap(), lat, radius, &stage).with_top_level(entry).with_ready(Arc::new(r));
+                let r = Arc::new(r);
+                let field = ChunkField::new(world.base_field().unwrap(), lat, radius, &stage).with_top_level(entry).with_ready(r.clone());
                 let (mut c15, mut c16) = (vec![0f32; np * np], vec![0f32; np * np]);
                 for l in 0..=N {
                     for k in 0..=N {
@@ -2729,7 +2741,7 @@ mod tests {
                     }
                 }
                 writeln!(out, "  solved chunk {:?} ({} of the sets' chunks)", key, solved.len() + 1).map_err(err).unwrap();
-                solved.insert(key, Arc::new(Solved { tile: t, c15, c16 }));
+                solved.insert(key, Arc::new(Solved { tile: t, c15, c16, result: r }));
             }
         }
         // The scale of the carve law: the median incision of the level-16 change on the carve line over the law's median depth at scale 1 (as SPIKE-49).
@@ -2788,7 +2800,7 @@ mod tests {
             let mut signed: Vec<(f64, f64)> = vec![(0.0, 0.0); nw];
             // rivers: per variant (today, replace only, h0, h1, h2): steps, rises, longest climb, runs, km.
             let nv = 2 + nw;
-            let mut rv: Vec<(u64, u64, f64, u64)> = vec![(0, 0, 0.0, 0); nv];
+            let mut rv: Vec<(u64, f64, u64)> = vec![(0, 0.0, 0); nv];
             let mut river_km = 0.0f64;
             let mut done = 0usize;
             for &t in chunks {
@@ -2813,14 +2825,14 @@ mod tests {
                     }
                 }
                 let boxm = |k: usize, l: usize, h: usize| -> f32 {
-                    let (k0, k1, l0, l1) = (k - h, k + h + 1, l - h, l + h + 1);
+                    let (k0, k1, l0, l1) = (k.saturating_sub(h), (k + h + 1).min(np), l.saturating_sub(h), (l + h + 1).min(np));
                     let w = np + 1;
                     let sum = pre[l1 * w + k1] - pre[l0 * w + k1] - pre[l1 * w + k0] + pre[l0 * w + k0];
-                    (sum / (((2 * h + 1) * (2 * h + 1)) as f64)) as f32
+                    (sum / (((k1 - k0) * (l1 - l0)) as f64)) as f32
                 };
                 let mut sw: Vec<Vec<f32>> = vec![vec![0f32; np * np]; nw];
-                for l in M as usize..=(N - M) as usize {
-                    for k in M as usize..=(N - M) as usize {
+                for l in 0..np {
+                    for k in 0..np {
                         for (w, h) in HS.iter().enumerate() {
                             sw[w][l * np + k] = boxm(k, l, *h as usize);
                         }
@@ -2862,99 +2874,97 @@ mod tests {
                     let (u, v) = inv(probe);
                     assert!((u - f64::from(N / 2 + 17)).abs() < 0.5 && (v - f64::from(N / 3)).abs() < 0.5, "raster inverse: {u} {v}");
                 }
-                let cells: Vec<usize> = cells_near(t).into_iter().filter(|&c| f64::from(maps.area_m2(c)) >= thr).collect();
-                let in_set: HashSet<usize> = cells.iter().copied().collect();
-                let mut donors: HashSet<usize> = HashSet::new();
-                for &c in &cells {
-                    let r = maps.receiver(c);
-                    if r != planet_generators::coupled::NONE && in_set.contains(&(r as usize)) {
-                        donors.insert(r as usize);
+                if rivers_on.contains(label.as_str()) {
+                    // SPIKE-51's metric (uphill_report): the stage's own river cells (corridor, or area over channel_area_m2) of the core, followed downstream by
+                    // the solution's receivers from every head; the drawn bed at 8 samples per link; a rise is a maximal run of non-falling samples gaining over 0.5 m.
+                    let halo = halo_rings(&stage);
+                    let reg = region(&lat, t, halo);
+                    let net = planet_generators::anet::Network::build_with_memo(
+                        &*stage.run,
+                        &*stage.base,
+                        &lat,
+                        &reg,
+                        radius,
+                        &stage.params.anchor,
+                        &stage.memo.get(stage.base.epoch()),
+                    );
+                    let sol = stage.solve(&lat, &reg);
+                    let field = ChunkField::new(world.base_field().unwrap(), lat, radius, &stage).with_top_level(entry).with_ready(s.result.clone());
+                    let core = reg.core;
+                    let is_river = |c: usize| c < core && (net.corridor[c] || sol.area_m2[c] > stage.params.channel_area_m2);
+                    let mut has_donor = vec![false; core];
+                    for c in 0..core {
+                        if is_river(c) && sol.receiver[c] != u32::MAX && (sol.receiver[c] as usize) < core && is_river(sol.receiver[c] as usize) {
+                            has_donor[sol.receiver[c] as usize] = true;
+                        }
                     }
-                }
-                let inside = |u: f64, v: f64| u >= f64::from(M) && u <= f64::from(N - M) && v >= f64::from(M) && v <= f64::from(N - M);
-                for &head in cells.iter().filter(|c| !donors.contains(c)) {
-                    let mut pts: Vec<(planet_core::Vec3, planet_core::Vec3)> = Vec::new();
-                    let mut cur = head;
-                    for _ in 0..80 {
-                        let r = maps.receiver(cur);
-                        if r == planet_generators::coupled::NONE {
-                            break;
-                        }
-                        let (a, b) = (coarse.direction(cur), coarse.direction(r as usize));
-                        let steps = (radius * a.angle_to(b) / 20.0).ceil().max(1.0) as u32;
-                        let tangent = (b - a).normalized();
-                        for kk in 0..steps {
-                            let l = f64::from(kk) / f64::from(steps);
-                            pts.push(((a * (1.0 - l) + b * l).normalized(), tangent));
-                        }
-                        if !in_set.contains(&(r as usize)) {
-                            break;
-                        }
-                        cur = r as usize;
-                    }
-                    // split into runs inside the interior
-                    let mut run: Vec<[f64; NV]> = Vec::new();
-                    let flush = |run: &mut Vec<[f64; NV]>, rv: &mut Vec<(u64, u64, f64, u64)>, river_km: &mut f64| {
-                        if run.len() >= 6 {
-                            *river_km += (run.len() - 1) as f64 * 0.02;
-                            for v in 0..rv.len() {
-                                let h: Vec<f64> = run.iter().map(|x| x[v]).collect();
-                                let (mut steps, mut rises) = (0u64, 0u64);
-                                let mut idx = 0;
-                                while idx + 5 < h.len() {
-                                    steps += 1;
-                                    if h[idx + 5] - h[idx] > 0.5 {
-                                        rises += 1;
-                                    }
-                                    idx += 5;
-                                }
-                                let mut lowest = h[0];
-                                let mut climb = 0.0f64;
-                                for x in &h {
-                                    lowest = lowest.min(*x);
-                                    climb = climb.max(x - lowest);
-                                }
-                                rv[v].0 += steps;
-                                rv[v].1 += rises;
-                                rv[v].2 = rv[v].2.max(climb);
-                                rv[v].3 += 1;
-                            }
-                        }
-                        run.clear();
-                    };
-                    for (p, tangent) in pts {
-                        let (u, v) = inv(p);
-                        if !inside(u, v) {
-                            flush(&mut run, &mut rv, &mut river_km);
+                    let mut seen = vec![false; core];
+                    const SUB: usize = 8;
+                    for head in 0..core {
+                        if !is_river(head) || has_donor[head] || seen[head] {
                             continue;
                         }
-                        let perp = p.cross(tangent).normalized();
-                        let mut bed = [f64::INFINITY; NV];
-                        for o in -3i32..=3 {
-                            let qd = (p + perp * (f64::from(o) * 20.0 / radius)).normalized();
-                            let (uq, vq) = inv(qd);
-                            if !inside(uq, vq) {
-                                continue;
+                        let mut path = vec![head];
+                        seen[head] = true;
+                        loop {
+                            let c = *path.last().unwrap();
+                            let rcv = sol.receiver[c];
+                            if rcv == u32::MAX || rcv as usize >= core || !is_river(rcv as usize) {
+                                break;
                             }
-                            let base_h = basef.height(qd);
-                            let cvq = bil(&carve, uq, vq);
-                            let (c15, c16) = (bil(&s.c15, uq, vq), bil(&s.c16, uq, vq));
-                            let rep_c16 = c16 + cvq.min((-c16).max(0.0));
-                            bed[0] = bed[0].min(base_h + c16);
-                            bed[1] = bed[1].min(base_h - cvq + rep_c16);
-                            for w in 0..nw {
-                                bed[2 + w] = bed[2 + w].min(base_h - cvq + rep_c16 - bil(&sw[w], uq, vq));
+                            path.push(rcv as usize);
+                            if seen[rcv as usize] {
+                                break;
                             }
-                            if o == 0 {
-                                push(5, c15.abs(), true, &mut pooled, &mut mx);
-                                push(6, (c16 - c15).abs(), true, &mut pooled, &mut mx);
+                            seen[rcv as usize] = true;
+                        }
+                        river_km += path.len() as f64 * lat.cell_m(radius) / 1e3;
+                        let mut dirs_s: Vec<planet_core::Vec3> = Vec::new();
+                        for w in 0..path.len() {
+                            let last = w + 1 == path.len();
+                            for tt in 0..(if last { 1 } else { SUB }) {
+                                let f = tt as f64 / SUB as f64;
+                                if last || tt == 0 {
+                                    dirs_s.push(net.dirs[path[w]]);
+                                } else {
+                                    dirs_s.push((net.dirs[path[w]] * (1.0 - f) + net.dirs[path[w + 1]] * f).normalized());
+                                }
                             }
                         }
-                        if bed[0].is_finite() {
-                            run.push(bed);
+                        let mut beds: Vec<Vec<f64>> = vec![Vec::new(); nv];
+                        for &d in &dirs_s {
+                            let (u, v) = inv(d);
+                            let bh = basef.height(d);
+                            let cvq = bil(&carve, u, v);
+                            let (c16, c15) = (bil(&s.c16, u, v), bil(&s.c15, u, v));
+                            let _ = c15;
+                            let rep16 = c16 + cvq.min((-c16).max(0.0));
+                            beds[0].push(field.height_at_level(d, entry + 1));
+                            beds[1].push(bh - cvq + rep16);
+                            for w in 0..nw {
+                                beds[2 + w].push(bh - cvq + rep16 - bil(&sw[w], u, v));
+                            }
+                        }
+                        for (vi, h) in beds.iter().enumerate() {
+                            let mut i = 0;
+                            while i + 1 < h.len() {
+                                if h[i + 1] > h[i] + 1e-6 {
+                                    let s0 = i;
+                                    while i + 1 < h.len() && h[i + 1] >= h[i] - 1e-6 {
+                                        i += 1;
+                                    }
+                                    let gain = h[i] - h[s0];
+                                    if gain > 0.5 {
+                                        rv[vi].0 += 1;
+                                        rv[vi].1 = rv[vi].1.max(gain);
+                                        rv[vi].2 += u64::from(gain > 10.0);
+                                    }
+                                } else {
+                                    i += 1;
+                                }
+                            }
                         }
                     }
-                    flush(&mut run, &mut rv, &mut river_km);
                 }
             }
             writeln!(out, "RESULT set {label} ({done} chunks):").map_err(err).unwrap();
@@ -2970,15 +2980,21 @@ mod tests {
                 writeln!(out, "RESULT   h={h}: change at 16 signed {:.2} to {:+.2} m", signed[w].0, signed[w].1).map_err(err).unwrap();
             }
             let vn = ["today", "carve replace, no correction", "h=1", "h=16", "h=64"];
-            writeln!(out, "RESULT   rivers: {river_km:.1} km of bed followed").map_err(err).unwrap();
-            for v in 0..nv {
-                writeln!(
-                    out,
-                    "RESULT     {}: {} of {} 100 m steps rise over 0.5 m, longest climb {:.2} m, {} runs",
-                    vn[v], rv[v].1, rv[v].0, rv[v].2, rv[v].3
-                )
-                .map_err(err)
-                .unwrap();
+            if river_km > 0.0 {
+                writeln!(out, "RESULT   rivers (SPIKE-51 metric): {river_km:.1} km of path").map_err(err).unwrap();
+                for v in 0..nv {
+                    writeln!(
+                        out,
+                        "RESULT     {}: {} rises over 0.5 m ({:.1} per 100 km), max {:.2} m, {} over 10 m",
+                        vn[v],
+                        rv[v].0,
+                        100.0 * rv[v].0 as f64 / river_km,
+                        rv[v].1,
+                        rv[v].2
+                    )
+                    .map_err(err)
+                    .unwrap();
+                }
             }
             for slot in 0..slots {
                 pooled_all[slot].extend(pooled[slot].iter().copied());
@@ -3000,6 +3016,80 @@ mod tests {
         }
         for (w, h) in HS.iter().enumerate() {
             writeln!(out, "RESULT   h={h}: change at 16 signed {:.2} to {:+.2} m", signed_all[w].0, signed_all[w].1).map_err(err).unwrap();
+        }
+    }
+
+    // spec: GEN-037
+    /// Where the largest change of a chunk sits and which process makes it (D0 condition 5, the residual 76 m of SPIKE-50): the cells of the chunk
+    /// (`PLANET_RES_FACE`, `PLANET_RES_X`, `PLANET_RES_Y`, default 4, 73, 1949) lowered or raised most, with the cell's role in the solve. `PLANET_ANET_STORE=DIR
+    /// PLANET_ANET_RES=N [PLANET_ANCHOR=...] cargo test -p planet --release --lib residual_change_report -- --ignored --nocapture`. Read only.
+    #[test]
+    #[ignore = "a measurement: it solves one chunk"]
+    fn residual_change_report() {
+        use planet_generators::chunkfield::{halo_rings, region};
+        let mut out = std::io::stdout();
+        let res = std::env::var("PLANET_ANET_RES").ok().and_then(|r| r.parse().ok()).unwrap_or(256);
+        let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
+        let (world, maps, _) = anet_scene(res, 11, store, &mut out).unwrap();
+        let radius = world.radius_m();
+        let lat = planet_generators::chunkfield::ChunkLattice::new(crate::anetworld::cells_per_chunk_for(radius, 8.0)).unwrap();
+        let stage = {
+            let mut params = planet_generators::anet::ANetParams::spike(crate::anetworld::ANET_HALO_M, lat.cell_m(radius));
+            params.drivers.seed = world.base_seed();
+            planet_generators::anet::ANet {
+                run: maps.clone(),
+                base: std::sync::Arc::new(crate::anetworld::WorldBase::new(&world)),
+                radius_m: radius,
+                params,
+                memo: Default::default(),
+            }
+        };
+        let env = |k: &str, d: u32| std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d);
+        let tile = planet_core::TileId::new(planet_core::Face::ALL[env("PLANET_RES_FACE", 4) as usize], planet_generators::chunk::CHUNK_GRID_LEVEL, env("PLANET_RES_X", 73), env("PLANET_RES_Y", 1949))
+            .expect("a chunk tile");
+        let reg = region(&lat, tile, halo_rings(&stage));
+        let net = planet_generators::anet::Network::build_with_memo(
+            &*stage.run,
+            &*stage.base,
+            &lat,
+            &reg,
+            radius,
+            &stage.params.anchor,
+            &stage.memo.get(stage.base.epoch()),
+        );
+        let sol = stage.solve(&lat, &reg);
+        let core = reg.core;
+        let n = lat.cells_per_chunk() as usize;
+        let mut order: Vec<usize> = (0..core).collect();
+        order.sort_by(|&a, &b| (sol.z[b] - sol.z_base[b]).abs().total_cmp(&(sol.z[a] - sol.z_base[a]).abs()));
+        writeln!(out, "chunk {:?}, {core} core cells ({n} an edge), anchor cut cap {} m, talus {}, bank_rounds {}", (tile.face().0, tile.x(), tile.y()), stage.params.anchor.cut_cap_m, stage.params.talus, stage.params.bank_rounds).map_err(err).unwrap();
+        let big = |t: f64| (0..core).filter(|&c| (sol.z[c] - sol.z_base[c]).abs() > t).count();
+        writeln!(out, "RESULT cells over 20 m {}, over 40 m {}, over 60 m {}", big(20.0), big(40.0), big(60.0)).map_err(err).unwrap();
+        let chan = |c: usize| net.corridor[c] || sol.area_m2[c] > stage.params.channel_area_m2;
+        for &c in order.iter().take(8) {
+            let (ci, cj) = (c % n, c / n);
+            // the nearest protected or channel cell within the core, in cells
+            let mut best = usize::MAX;
+            for q in 0..core {
+                if chan(q) || !net.anchor_z[q].is_nan() {
+                    let (qi, qj) = (q % n, q / n);
+                    best = best.min(qi.abs_diff(ci).max(qj.abs_diff(cj)));
+                }
+            }
+            writeln!(
+                out,
+                "RESULT cell ({ci},{cj}): base {:.1} m, solved {:.1} m, change {:+.1} m, corridor {}, area {:.2e} m2, anchor {:.1}, nearest channel/anchor cell {} cells away, edge distance {}",
+                sol.z_base[c],
+                sol.z[c],
+                sol.z[c] - sol.z_base[c],
+                net.corridor[c],
+                sol.area_m2[c],
+                net.anchor_z[c],
+                if best == usize::MAX { -1 } else { best as i64 },
+                ci.min(cj).min(n - 1 - ci).min(n - 1 - cj)
+            )
+            .map_err(err)
+            .unwrap();
         }
     }
 
