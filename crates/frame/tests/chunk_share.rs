@@ -452,9 +452,9 @@ fn a_chunk_is_asked_at_least_a_solve_and_a_margin_before_the_plan_wants_it_at_ev
         .map(|(x, y)| ((2u8, x, y), TileId::new(Face(2), CHUNK_GRID_LEVEL, x, y).unwrap().center_direction(&TangentWarp)))
         .collect();
     for speed in [100.0, 200.0, 340.0, 440.0, 500.0] {
-        // A low view reads the chunks within 1.6 edges of the camera's chunk centres, the nearest tile half an edge nearer.
+        // The plan reads the chunks whose centres are within its reach (a reach under one edge is one edge): a chunk is wanted the moment its centre is.
         for reach_m in [0.2 * edge_m, 1.6 * edge_m, 2.6 * edge_m] {
-            let wanted_within_m = reach_m.max(edge_m) - 0.5 * edge_m;
+            let wanted_within_m = reach_m.max(edge_m);
             let (mut asked, mut wanted): (std::collections::HashMap<_, f64>, std::collections::HashMap<_, f64>) = Default::default();
             let steps = ((LEAD_S + 40.0) / STEP_S) as usize;
             for k in 0..steps {
