@@ -1,0 +1,1 @@
+- 2026-10-28 **m8-accept-arm** (TEST-060): `cargo xtask accept M8` judges criteria 4 to 7 from the perf logs (coupled-make, shadow-cost, edit-latency, envelope); criterion 3 re-measured on the rebuilt store: entry step 126.9 m p99, level 15 against 14 0.712 m (bound 0.25 m).
