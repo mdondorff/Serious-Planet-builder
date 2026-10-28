@@ -222,7 +222,7 @@ pub struct LogFacts<'a> {
     pub owner_override: &'a [String],
     /// Whether the scene counted against a chunk field; when not, the log says why `stand_in_share` is `null`.
     pub chunk_field: bool,
-    /// Whether the curve ran with the horizon jobs (REND-038) and, with a chunk stage, the comparison point of one altitude without them.
+    /// Whether the curve ran with the horizon jobs (REND-038: from the base terrain without the chunk stage, STRM-064) and, with a chunk stage, the comparison point of one altitude without them.
     pub horizon: bool,
     pub horizon_off: Option<&'a Point>,
     /// With a chunk stage, where along each flight the start put a chunk edge (0.5: half way); `None` without one.
@@ -345,9 +345,9 @@ pub fn log_json(points: &[Point], facts: &LogFacts<'_>) -> String {
     s += "  \"stand_in_weighting\": \"nodes: unweighted share of the plan nodes at or finer than the pyramid top level whose chunk is not ready (STRM-039)\",\n";
     s += &format!("  \"chunk_field\": {},\n", facts.chunk_field);
     s += &format!("  \"chunk_stage\": {},\n", facts.chunk_stage);
-    s += &format!("  \"horizon\": {},\n", facts.chunk_field && facts.horizon);
+    s += &format!("  \"horizon\": {},\n", facts.horizon);
     s += &format!("  \"edge_fraction\": {},\n", facts.edge_fraction.map_or("null".to_string(), number));
-    if !facts.chunk_field {
+    if !facts.chunk_field && !facts.horizon {
         s += &format!("  \"stand_in_reason\": {NO_CHUNK_FIELD:?},\n");
     }
     s += "  \"curve\": [\n";
@@ -789,7 +789,7 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
             smoke,
             owner_override: &owner_override,
             chunk_field,
-            horizon: true,
+            horizon: stage.is_some_and(|s| s.horizon),
             horizon_off: horizon_off.as_ref(),
             edge_fraction: chunks.then_some(EDGE_FRACTION),
             chunk_stage: chunks,
@@ -845,6 +845,28 @@ mod tests {
         };
         assert!(log_json(&[], &facts(false)).contains("\"chunk_stage\": false,"));
         assert!(log_json(&[], &facts(true)).contains("\"chunk_stage\": true,"));
+    }
+
+    // spec: STRM-046
+    #[test]
+    fn a_stage_off_log_over_a_store_says_the_horizon_jobs_ran_and_gives_no_stand_in_reason() {
+        let facts = |horizon| LogFacts {
+            bound: 0.01,
+            source: "store S",
+            adapter: "a",
+            smoke: false,
+            owner_override: &[],
+            chunk_field: false,
+            horizon,
+            horizon_off: None,
+            edge_fraction: None,
+            chunk_stage: false,
+            steady: None,
+        };
+        let ran = log_json(&[], &facts(true));
+        assert!(ran.contains("\"horizon\": true,") && ran.contains("\"chunk_stage\": false,") && !ran.contains("stand_in_reason"), "{ran}");
+        let none = log_json(&[], &facts(false));
+        assert!(none.contains("\"horizon\": false,") && none.contains("stand_in_reason"), "{none}");
     }
     // spec: TEST-047
     #[test]
@@ -976,7 +998,7 @@ mod tests {
             smoke: false,
             owner_override: &[],
             chunk_field,
-            horizon: true,
+            horizon: chunk_field,
             horizon_off: None,
             edge_fraction: None,
             chunk_stage: false,
@@ -1122,7 +1144,7 @@ mod tests {
             smoke: false,
             owner_override: &[],
             chunk_field,
-            horizon: true,
+            horizon: chunk_field,
             horizon_off,
             edge_fraction: chunk_field.then_some(EDGE_FRACTION),
             chunk_stage: false,
@@ -1229,7 +1251,7 @@ mod tests {
                 smoke: false,
                 owner_override: &[],
                 chunk_field: false,
-                horizon: true,
+                horizon: false,
                 horizon_off: None,
                 edge_fraction: None,
                 chunk_stage: false,

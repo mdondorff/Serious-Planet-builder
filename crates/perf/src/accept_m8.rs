@@ -245,6 +245,15 @@ fn criterion7(files: &M8Files) -> Verdict {
         }
         _ => return Verdict::Missing("envelope.json: no chunk_stage field (a log from before it was recorded)".into()),
     }
+    // A run over the production store with the horizon jobs running: the tiles and horizon maps the view wants are what is measured; an in-memory bake
+    // (`--allow-memory-bake`) or a run without the jobs is not.
+    if !matches!(j.get("horizon"), Some(Json::Bool(true))) {
+        return Verdict::Missing("envelope.json: the run had no horizon jobs (criterion 7 is measured on tiles and horizon maps)".into());
+    }
+    match j.get("source") {
+        Some(Json::Str(s)) if !s.contains("NOT the production source") => {}
+        _ => return Verdict::Missing("envelope.json: not a run over the production store".into()),
+    }
     let Some(Json::Arr(curve)) = j.get("steady_curve") else {
         return Verdict::Missing("envelope.json: no steady_curve (run `perf stream envelope --only-steady`)".into());
     };
@@ -324,7 +333,7 @@ mod tests {
                     .into(),
             ),
             envelope: bytes(
-                r#"{"scene":"envelope","smoke":false,"chunk_stage":false,"owner_override":[],"steady_curve":[{"altitude_m":300,"highest_speed_mps":480},{"altitude_m":100,"highest_speed_mps":340}]}"#,
+                r#"{"scene":"envelope","smoke":false,"chunk_stage":false,"horizon":true,"source":"store S","owner_override":[],"steady_curve":[{"altitude_m":300,"highest_speed_mps":480},{"altitude_m":100,"highest_speed_mps":340}]}"#,
             ),
         }
     }
@@ -352,7 +361,7 @@ mod tests {
         f.edit =
             Some("| a | b | verdict |\n|---|---|---|\n| 1 m | 500 m hill | over |\n| 1 m | 50 m | OVER |\n| 2 m | 1 m | ok |\n".into());
         f.envelope = bytes(
-            r#"{"scene":"envelope","owner_override":[],"chunk_stage":false,"steady_curve":[{"altitude_m":300,"highest_speed_mps":150}]}"#,
+            r#"{"scene":"envelope","owner_override":[],"chunk_stage":false,"horizon":true,"source":"store S","steady_curve":[{"altitude_m":300,"highest_speed_mps":150}]}"#,
         );
         let rows = evaluate(&f);
         for r in &rows {
@@ -389,7 +398,24 @@ mod tests {
         assert!(matches!(&evaluate(&f)[3].verdict, Verdict::Missing(m) if m.contains("chunk stage on")));
         f.envelope = bytes(&format!(r#"{{"scene":"envelope","owner_override":[],{curve}}}"#));
         assert!(matches!(&evaluate(&f)[3].verdict, Verdict::Missing(m) if m.contains("no chunk_stage field")));
-        f.envelope = bytes(&format!(r#"{{"scene":"envelope","owner_override":[],"chunk_stage":false,{curve}}}"#));
+        f.envelope =
+            bytes(&format!(r#"{{"scene":"envelope","owner_override":[],"chunk_stage":false,"horizon":true,"source":"store S",{curve}}}"#));
+        assert!(matches!(&evaluate(&f)[3].verdict, Verdict::Pass(_)));
+    }
+
+    // spec: TEST-060
+    #[test]
+    fn criterion_7_is_missing_for_a_log_of_an_in_memory_bake_or_a_run_without_horizon_jobs() {
+        let mut f = good();
+        let curve = r#""steady_curve":[{"altitude_m":300,"highest_speed_mps":480}]"#;
+        let head = r#""scene":"envelope","owner_override":[],"chunk_stage":false"#;
+        f.envelope = bytes(&format!(r#"{{{head},"horizon":true,"source":"store S (NOT the production source)",{curve}}}"#));
+        assert!(matches!(&evaluate(&f)[3].verdict, Verdict::Missing(m) if m.contains("production store")));
+        f.envelope = bytes(&format!(r#"{{{head},"horizon":false,"source":"store S",{curve}}}"#));
+        assert!(matches!(&evaluate(&f)[3].verdict, Verdict::Missing(m) if m.contains("no horizon jobs")));
+        f.envelope = bytes(&format!(r#"{{{head},{curve}}}"#));
+        assert!(matches!(&evaluate(&f)[3].verdict, Verdict::Missing(_)), "a log without the fields is from before");
+        f.envelope = bytes(&format!(r#"{{{head},"horizon":true,"source":"store S",{curve}}}"#));
         assert!(matches!(&evaluate(&f)[3].verdict, Verdict::Pass(_)));
     }
     // spec: TEST-060
@@ -413,11 +439,11 @@ mod tests {
         assert!(matches!(&rows[3].verdict, Verdict::Missing(m) if m.contains("smoke")));
         assert_eq!(outcome(&rows), Outcome::Incomplete);
         f.envelope = bytes(
-            r#"{"scene":"envelope","owner_override":[],"chunk_stage":false,"steady_curve":[{"altitude_m":300,"highest_speed_mps":100}]}"#,
+            r#"{"scene":"envelope","owner_override":[],"chunk_stage":false,"horizon":true,"source":"store S","steady_curve":[{"altitude_m":300,"highest_speed_mps":100}]}"#,
         );
         assert_eq!(outcome(&evaluate(&f)), Outcome::Fail);
         // The cold curve alone (no steady_curve) cannot judge the floor; another scene's log and an override are refused.
-        f.envelope = bytes(r#"{"scene":"envelope","owner_override":[],"chunk_stage":false,"curve":[]}"#);
+        f.envelope = bytes(r#"{"scene":"envelope","owner_override":[],"chunk_stage":false,"horizon":true,"source":"store S","curve":[]}"#);
         assert!(matches!(&evaluate(&f)[3].verdict, Verdict::Missing(m) if m.contains("steady_curve")));
         f.envelope = bytes(r#"{"scene":"lit","owner_override":[]}"#);
         assert!(matches!(&evaluate(&f)[3].verdict, Verdict::Missing(m) if m.contains("not the log")));
