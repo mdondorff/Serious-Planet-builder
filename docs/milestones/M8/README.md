@@ -29,6 +29,9 @@ Known and tracked, not to be judged as new: faint striations on shadowed walls b
 | `look-review-2/`, `look-review-2-hills/` | look review 2 on the rebuilt store; replaced by `look-review-2b/` |
 | `look-review-2b/hills-r1/` | review 1's hills site; snow-covered at 3.8 km after the rebuild, looks indistinguishable |
 
+## Acceptance
+`acceptance-runbook.md`: what `cargo xtask accept M8` runs, per criterion the command, the latest number and what is missing, and the order of the runs for one window.
+
 ## Performance records (for the acceptance report, not for review)
 | Files | Criterion |
 |---|---|
