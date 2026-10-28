@@ -122,11 +122,12 @@ pub fn run_small(root: &Path) -> Res {
 }
 
 pub fn run_gate(root: &Path, args: &[String]) -> Res {
-    let (mut small, mut only, mut paths, mut store) = (false, Vec::new(), PATHS.to_string(), STORE.to_string());
+    let (mut small, mut no_chunks, mut only, mut paths, mut store) = (false, false, Vec::new(), PATHS.to_string(), STORE.to_string());
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--small" => small = true,
+            "--no-chunks" => no_chunks = true,
             "--site" => only.push(it.next().ok_or("--site needs a site id (frame-<n>)")?.clone()),
             "--paths" => paths = it.next().ok_or("--paths needs a directory")?.clone(),
             "--store" => store = it.next().ok_or("--store needs a directory")?.clone(),
@@ -149,10 +150,11 @@ pub fn run_gate(root: &Path, args: &[String]) -> Res {
     let mut new_failures = 0usize;
     let mut table = Vec::new();
     for (id, path) in chosen {
-        let report = out_dir.join(format!("{id}.txt"));
+        let report = out_dir.join(format!("{id}{}.txt", if no_chunks { "-no-chunks" } else { "" }));
         eprintln!("gate: {id} ...");
         let out = Command::new(&exe)
             .args(["editor", "--smoke", "--edit", "--no-vsync", "--adapter", "hardware", "--store", &store])
+            .args(no_chunks.then_some("--no-chunks"))
             .current_dir(root)
             .env("PLANET_GATE", "1")
             .env("PLANET_GATE_PATH", path)
@@ -186,7 +188,17 @@ pub fn run_gate(root: &Path, args: &[String]) -> Res {
     // The step between levels (criterion 3): the field-side measurement of one real chunk, read only.
     eprintln!("gate: the step between levels ...");
     let steps = Command::new("cargo")
-        .args(["test", "-p", "planet", "--release", "--lib", "anet_steps_report", "--", "--ignored", "--nocapture"])
+        .args([
+            "test",
+            "-p",
+            "planet",
+            "--release",
+            "--lib",
+            if no_chunks { "base_steps_report" } else { "anet_steps_report" },
+            "--",
+            "--ignored",
+            "--nocapture",
+        ])
         .current_dir(root)
         .env("PLANET_ANET_STORE", &store)
         .env("PLANET_ANET_RES", "16384")
