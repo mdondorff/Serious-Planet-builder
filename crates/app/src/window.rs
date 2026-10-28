@@ -221,7 +221,7 @@ struct GateRun {
     /// The frame the edit script ended at.
     edit_done_at: Option<u64>,
     /// Whether any frame drew lit over a chunk stage.
-    lit_with_stage: bool,
+    lit_with_horizon: bool,
 }
 
 impl GateRun {
@@ -241,7 +241,7 @@ impl GateRun {
             replay,
             report: std::env::var_os("PLANET_GATE_REPORT").map(PathBuf::from),
             edit_done_at: None,
-            lit_with_stage: false,
+            lit_with_horizon: false,
         }))
     }
 
@@ -1192,7 +1192,7 @@ impl App<'_> {
                     if drew_lit {
                         st.counts.lit_presented += 1;
                         if let (true, Some(g)) = (st.chunks_on || self.world.horizon_enabled(), st.gate.as_mut()) {
-                            g.lit_with_stage = true;
+                            g.lit_with_horizon = true;
                         }
                     } else {
                         st.counts.debug_presented += 1;
@@ -1253,11 +1253,18 @@ impl App<'_> {
     /// A frame that took a second or more (VIEW-056): the phases, the locks the main thread waited on and the jobs in flight go to a report
     /// (at most one in ten seconds, the others to the log) and the title says so.
     fn note_stall(&mut self) {
+        let (now_ms, landed) = (self.clock.now_ms(), self.world.horizon_stats().map_or(0, |h| h.landed));
         let Some(st) = self.state.as_mut() else { return };
         st.stall.mark("the rest of the frame");
         let stall = st.stall.end();
         if let Some(g) = st.gate.as_mut() {
             g.gate.frame(st.frames, &st.stall.phases_ms());
+            let published = st.edit.as_ref().is_some_and(|e| e.stats.published >= 1);
+            if published && g.gate.edit_at.is_none() {
+                g.gate.edit_published(now_ms, landed);
+            } else {
+                g.gate.horizon_landed(now_ms, landed);
+            }
         }
         let Some(stall) = stall else { return };
         let c = st.last_counts;
@@ -1273,7 +1280,6 @@ impl App<'_> {
         }
         extra += &format!("stalls so far: {}\n", st.stall.stalls);
         let text = stall.text(&extra);
-        let now_ms = self.clock.now_ms();
         if st.stall.report_due() {
             crate::crash::set_path_text(st.path.to_text());
             let report = crate::crash::snapshot("stall (the window went on)", &text);
@@ -2028,7 +2034,7 @@ fn gate_finish(g: &GateRun, horizon_maps: u64, extra: &str) -> Result<(), String
     if let Some(p) = &g.report {
         std::fs::write(p, format!("{line}\n")).map_err(|e| format!("gate report {}: {e}", p.display()))?;
     }
-    let failures = g.gate.failures(horizon_maps, g.lit_with_stage, panics, std::env::var_os("PLANET_GATE_SOFTWARE").is_none());
+    let failures = g.gate.failures(horizon_maps, g.lit_with_horizon, panics, std::env::var_os("PLANET_GATE_SOFTWARE").is_none());
     if failures.is_empty() {
         Ok(())
     } else {

@@ -10,6 +10,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// A frame over this many milliseconds fails the gate.
 pub const FRAME_LIMIT_MS: f64 = 100.0;
 
+/// A horizon map must be baked again within this many milliseconds of the scripted edit (M8 criterion 6, the shadow of a plateau on its neighbour).
+pub const REBAKE_LIMIT_MS: u64 = 10_000;
+
 /// Frames at the start of a run that are not judged: shaders and pipelines compile on the first frames.
 pub const WARMUP_FRAMES: u64 = 20;
 
@@ -55,9 +58,27 @@ pub struct Gate {
     /// Most tiles held back under an edit at once (reported, not failed).
     pub held_under_edit_max: usize,
     pub held_frames: u64,
+    /// The clock time the scripted edit was published at and the horizon maps that had landed then.
+    pub edit_at: Option<(u64, u64)>,
+    /// Milliseconds from the edit to the first map that landed after it.
+    pub rebake_ms: Option<u64>,
 }
 
 impl Gate {
+    /// The scripted edit was published at `now_ms`, with `landed` horizon maps landed so far (once; later calls do nothing).
+    pub fn edit_published(&mut self, now_ms: u64, landed: u64) {
+        self.edit_at.get_or_insert((now_ms, landed));
+    }
+
+    /// The horizon maps landed so far, at `now_ms`: the first one past the count at the edit is the re-bake.
+    pub fn horizon_landed(&mut self, now_ms: u64, landed: u64) {
+        if let (Some((at, before)), None) = (self.edit_at, self.rebake_ms) {
+            if landed > before {
+                self.rebake_ms = Some(now_ms.saturating_sub(at));
+            }
+        }
+    }
+
     /// One finished frame: its phases (name, milliseconds). The frame's time is the sum of the phases that are not a wait for the GPU, so a slow
     /// adapter (the software one in CI) does not fail the gate for drawing slowly; a stall on the main thread does.
     pub fn frame(&mut self, frame: u64, phases: &[(&str, f64)]) {
@@ -91,8 +112,8 @@ impl Gate {
     /// frame time and the horizon maps are reported and not judged; held-back tiles and panics always are.
     ///
     /// The reasons the run fails, each naming the counter, the frame and the phase or the tiles; empty when it passes. `horizon_baked` is the
-    /// maps baked over the run and `lit_with_stage` whether the run drew lit over a chunk stage (where none baked is a failure).
-    pub fn failures(&self, horizon_baked: u64, lit_with_stage: bool, panics: u64, judge_perf: bool) -> Vec<String> {
+    /// maps baked over the run and `lit_with_horizon` whether the run drew lit with the horizon jobs on (where none baked is a failure).
+    pub fn failures(&self, horizon_baked: u64, lit_with_horizon: bool, panics: u64, judge_perf: bool) -> Vec<String> {
         let mut f = Vec::new();
         if let Some(s) = self.slow.iter().filter(|_| judge_perf).max_by(|a, b| a.ms.total_cmp(&b.ms)) {
             f.push(format!(
@@ -114,8 +135,15 @@ impl Gate {
                 ids.join(", ")
             ));
         }
-        if judge_perf && lit_with_stage && horizon_baked == 0 {
-            f.push("horizon maps baked: 0 over a lit run with a chunk stage".to_string());
+        if judge_perf && lit_with_horizon && horizon_baked == 0 {
+            f.push("horizon maps baked: 0 over a lit run with the horizon jobs on".to_string());
+        }
+        if judge_perf && lit_with_horizon && self.edit_at.is_some() {
+            match self.rebake_ms {
+                Some(ms) if ms <= REBAKE_LIMIT_MS => {}
+                Some(ms) => f.push(format!("no horizon map re-baked within {} s of the edit (the first {ms} ms after it)", REBAKE_LIMIT_MS / 1000)),
+                None => f.push(format!("no horizon map re-baked within {} s of the edit (none landed after it)", REBAKE_LIMIT_MS / 1000)),
+            }
         }
         if panics > 0 {
             f.push(format!("panics caught: {panics}"));
@@ -229,6 +257,27 @@ mod tests {
         assert!(f[0].contains("horizon") && f[1].contains("panics caught: 2"));
     }
 
+
+    // spec: TEST-065
+    #[test]
+    fn a_horizon_map_must_land_within_ten_seconds_of_the_edit() {
+        let mut g = Gate::default();
+        assert!(g.failures(3, true, 0, true).is_empty(), "no edit, nothing to re-bake");
+        g.edit_published(1_000, 3);
+        g.horizon_landed(5_000, 3);
+        let f = g.failures(3, true, 0, true);
+        assert!(f.len() == 1 && f[0].contains("none landed after it"), "{f:?}");
+        g.horizon_landed(12_000, 4);
+        assert_eq!(g.rebake_ms, Some(11_000));
+        let f = g.failures(4, true, 0, true);
+        assert!(f.len() == 1 && f[0].contains("11000 ms"), "{f:?}");
+        let mut ok = Gate::default();
+        ok.edit_published(1_000, 3);
+        ok.horizon_landed(4_000, 4);
+        ok.horizon_landed(20_000, 9);
+        assert!(ok.failures(4, true, 0, true).is_empty() && ok.rebake_ms == Some(3_000), "the first landing counts");
+        assert!(g.failures(4, true, 0, false).is_empty(), "software: reported, not judged");
+    }
     // spec: TEST-061
     #[test]
     fn on_the_software_adapter_frame_time_and_horizon_maps_are_reported_and_held_tiles_and_panics_still_fail() {

@@ -23,6 +23,9 @@ use planet_world_def::WorldDefinition;
 
 use crate::worldfield::WorldTerrain;
 
+/// Chunks the horizon jobs want at most when there is no chunk stage: the nearest to the camera (the default `HorizonConfig::keep`).
+pub const BASE_HORIZON_WANTED: usize = 32;
+
 /// Version of the world's horizon bake (what it samples and how); part of the march's hash, so a change re-bakes every map.
 pub const BAKE_VERSION: u32 = 1;
 
@@ -389,7 +392,7 @@ impl WorldTerrain {
         for &t in tiles {
             let reads = match manager.as_ref() {
                 Some(m) => m.reads(t),
-                None => planet_generators::chunkfield::chunks_read_by(&lat, crate::anetworld::ANET_TOP_LEVEL, 0, t),
+                None => planet_generators::chunkfield::chunks_read_by(&lat, planet_generators::chunk::CHUNK_GRID_LEVEL, 0, t),
             };
             for k in reads {
                 if seen.insert(k) {
@@ -399,6 +402,11 @@ impl WorldTerrain {
                     wanted.push((k, d));
                 }
             }
+        }
+        if manager.is_none() {
+            // No chunk stage to evict: the maps held are the nearest chunks of the plan, at most [`BASE_HORIZON_WANTED`] (about 6 MB each).
+            wanted.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
+            wanted.truncate(BASE_HORIZON_WANTED);
         }
         jobs.update(&wanted)
     }
