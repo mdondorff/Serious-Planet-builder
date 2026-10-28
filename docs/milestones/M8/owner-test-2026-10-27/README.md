@@ -55,6 +55,7 @@ Source: the owner's session on Rasierklinge, editor and viewer, build `a7e739b5`
 9. **Fallback (owner, 2026-10-28):** hydrology and erosion are out of M8's acceptance; the final call waits for the gate run with the chunk stage off (explorer).
 10. **If the chunk stage is off in M8:** keep the code that serves the learning and the redesign; during M9 the code that did not work is removed and its learnings recorded (`docs/learnings.md`, the spike results).
 11. **M9 starts with a literature study** (owner, 2026-10-28): runtime hydrology and erosion with a level-of-detail pyramid and editing, compared against this architecture (readiness independence, determinism, plan-based renderer); it asks whether the chunk approach does not fit this application or was implemented wrongly. Design and execution follow it.
+12. **Fallback applied** (2026-10-28, the owner's 15 minutes passed without an answer): the chunk stage is off by default in the viewer and the editor; its code stays behind a switch for M9's learning and is cleaned in M9. With it off the gate measured 0 held-back tiles, no stage stalls and no level steps at all 14 sites. The horizon maps, which lived in the chunk stage, are baked from the base terrain so M8 keeps its shadows. Criteria amended in `docs/briefings/m8-plan.md` (amendment 2026-10-28). SPIKE-52 recommends for M9: a bake plus per-point channels with monotone beds.
 
 ## Plan (proposed; M8 does not close with groups A to D open)
 | Step | Work | Lane | Done when |
