@@ -1234,13 +1234,13 @@ Source: owner (2026-10-28), CLAUDE.md prepush rule
 - **WHEN** the changed paths include `crates/streaming/src/chunks.rs`
 - **THEN** the pre-push run includes the small gate; for `docs/status.md` alone it does not
 
-### Requirement: TEST-064 The gate compares with the chunk stage off
-`planet editor --no-chunks` SHALL run the window without the chunk stage, and `cargo xtask gate --no-chunks` SHALL run the sites of TEST-062 that way and report the step between levels of the base field alone in place of the chunk change's.
+### Requirement: TEST-064 The gate runs without the chunk stage by default
+`cargo xtask gate` SHALL run the sites of TEST-062 without the chunk stage and report the step between levels of the base field alone; `cargo xtask gate --chunks` SHALL run them with the stage and the chunk change's step. `gate --small` SHALL run the small world both ways.
 
 Verify: C
 Status: active
-Source: opus-planner (2026-10-28), TEST-061, TEST-062
+Source: opus-planner (2026-10-28), owner fallback 2026-10-28, TEST-061, TEST-062
 
 #### Scenario: Stage off
-- **WHEN** the window runs with `--no-chunks` over a store with a coupled run
-- **THEN** no chunk job is computed and the chunk stage's counters stay 0
+- **WHEN** the window runs over a store with a coupled run without `--chunks`
+- **THEN** no chunk job is computed and the gate line reports `chunk jobs: None`
