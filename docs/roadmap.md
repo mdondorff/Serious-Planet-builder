@@ -53,3 +53,10 @@ Data later (owner's idea, 2026-10-25): stores read through a local or remote dat
 | Measures | contact jitter at chunk borders and frame rebases, collision patch build time, step time, height difference between collision and the drawn surface |
 | Time box | 1 day, on a spike branch; no merge into the main crates |
 | Decides | whether a game run mode needs new engine seams before M12 |
+
+## M9 design constraints (owner, 2026-10-28)
+- Offline bake time: about 10 h per world version on Rasierklinge; longer only when a pre-run (a region or a lower resolution) de-risks the full run first; a long bake resumes from checkpoints, so a late mistake never restarts it from zero. Months of laptop compute (SPIKE-52 candidate C) is out.
+- Disk: a body's data stays about at today's 28 GB (16384 store), soft, so a solar system fits on the laptop (owner's estimate: 500 GB if every body held as much); new baked data replaces, compresses or is regenerated, rather than adds. ADR 0045 (bodies, bake resolution, storage budget) is the place to set the number.
+- No paid cloud compute for bakes.
+- Runtime budgets follow ADR 0083: terrain runs inside its share; reserved shares for sky and weather, physics, game logic and networking are tested under synthetic load, not left implicit.
+- Ground detail at walking height anywhere (owner, 2026-10-28; finding 13): the ground looks right at 1.8 m everywhere within the frame budget; geometric relief below today's finest octave (about 12 m wavelength) down to about 0.5 to 1 m, finer through the shader; deterministic; judged on 1.8 m stills at fixed sites. Geometry already reaches 7.46 cm vertex spacing (LOD-010); the gap is the height function. Scales and cost: SPIKE-53.
