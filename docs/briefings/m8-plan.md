@@ -20,6 +20,17 @@ Scope (owner, 2026-10-25): M8 delivers plausible relief, hydrology and horizon s
 | 6 | An edit over a chunk shows within the M6 budgets, and its eroded result within 10 s on screen for every touched chunk the view wants, not only the chunk under the edit (owner, 2026-10-26) | A, perf |
 | 7 | Speed envelope (owner, 2026-10-23): a perf scene flies level over unvisited ground at fixed altitudes (30 m, 100 m, 300 m, 1 km) and raises the speed until the stand-in share of the screen at the chunk's apply level exceeds a bound; it reports the highest speed per altitude on Rasierklinge. M8 records the curve; floor at 300 m: 200 m/s, met in M8 (owner, 2026-10-26: faster is better; no deferred optimization); the floor applies to steady flight: once streaming has settled along the track, the highest speed the flight holds with all wanted data landing inside the bound (owner, 2026-10-27; the cold first-visit curve is recorded, not gated); later milestones keep it as a regression check | perf |
 
+### Amendment 2026-10-28: hydrology and erosion out of M8 (owner's fallback, applied by opus-planner after the owner's 15-minute window; the owner confirms on return)
+Source: `docs/milestones/M8/owner-test-2026-10-27/README.md` "Decisions" 8 to 12; SPIKE-51, SPIKE-52, the D0 measurement, the gate with the chunk stage off.
+| # | Amended criterion |
+|---|---|
+| 1 | Look review on plausible relief with horizon shadows; river and valley forms are not judged in M8 |
+| 2 | Unchanged for the chunk stage's code, which stays behind a switch (default off) |
+| 3 | No frame waits (CON-22): the gate (TEST-061 to 063) on the real store with the chunk stage off: no frame over 100 ms, 0 held-back tiles without edits, no step between levels, no panic |
+| 6 | An edit shows within the M6 budgets; its horizon shadows update within 10 s on screen for every map the view wants |
+| 7 | Unchanged floor and method; the stand-in share is measured on the tiles and horizon maps the view wants (no chunk change) |
+Criteria 4 and 5 are unchanged (5 is re-measured with the base-terrain bake).
+
 ## Steps
 | # | Step | Depends on | Lane |
 |---|---|---|---|
