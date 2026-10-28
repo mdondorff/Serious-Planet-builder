@@ -79,7 +79,7 @@ mod tests {
         SurfaceHit { point: Vec3::new(1.0, 0.0, 0.0), dir: Vec3::new(1.0, 0.0, 0.0), height_m: 0.0, distance_m }
     }
 
-    // spec: VIEW-059
+    // spec: VIEW-061
     #[test]
     fn a_pick_that_blocks_never_holds_the_frame_and_its_hit_arrives_on_a_later_poll() {
         let (release, wait) = sync_channel::<()>(0);
@@ -105,7 +105,7 @@ mod tests {
         assert_eq!(got.distance_m, 5.0);
     }
 
-    // spec: VIEW-059
+    // spec: VIEW-061
     #[test]
     fn a_pick_that_started_before_a_clear_is_dropped_when_it_finishes() {
         let (release, wait) = sync_channel::<()>(0);

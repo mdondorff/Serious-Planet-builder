@@ -1312,7 +1312,7 @@ mod tests {
         assert!(frame_with(&mut e, &cam) >= 5, "a new revision reads the ground again");
     }
 
-    // spec: VIEW-059
+    // spec: VIEW-061
     #[test]
     fn the_hover_pick_on_its_own_thread_never_holds_the_frame() {
         let at = unit(47.2, 8.55);
