@@ -1848,6 +1848,415 @@ mod tests {
         }
     }
 
+    // spec: LOD-013
+    /// SPIKE-51 part 2: the tiles held back as too steep to morph (ADR 0074) without any edit, at chunk margins of 0 and 10 m (the chunk stage's widening of the plan's
+    /// bounds, both ways), against none (no chunk stage) and the built 300 m, along (a) the standard envelope flights (four altitudes, `PLANET_HELD_PLACES` start
+    /// places 0.6 degrees apart, a pose every 2 s of a 12 s flight at 300 m/s, the envelope's LOD parameters), (b) the owner test's F9 bundles (each with its own
+    /// LOD parameters) and (c) the last pose of each stall report in `PLANET_OWNER_DIR/crashes` (the bundle's LOD parameters). Nonzero poses are listed with their
+    /// held tiles. `PLANET_OWNER_DIR=DIR PLANET_ANET_STORE=DIR PLANET_ANET_RES=N cargo test -p planet --release --lib held_flights_report -- --ignored
+    /// --nocapture`. Read only, no chunks landed (the held count is independent of them, LOD-013).
+    #[test]
+    #[ignore = "a measurement: it plans a few hundred views four times"]
+    fn held_flights_report() {
+        use planet_core::cube::TangentWarp;
+        use planet_frame::{Camera, LodParams};
+        let mut out = std::io::stdout();
+        let dir = std::path::PathBuf::from(std::env::var_os("PLANET_OWNER_DIR").expect("PLANET_OWNER_DIR=DIR"));
+        let res = std::env::var("PLANET_ANET_RES").ok().and_then(|r| r.parse().ok()).unwrap_or(256);
+        let places: usize = std::env::var("PLANET_HELD_PLACES").ok().and_then(|r| r.parse().ok()).unwrap_or(8);
+        let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
+        let (world, _maps, _tile) = anet_scene(res, 11, store, &mut out).unwrap();
+        let radius = world.radius_m();
+        let mut bundle_files: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.extension().is_some_and(|x| x == "bundle"))
+            .collect();
+        bundle_files.sort();
+        let bundles: Vec<(String, planet_frame::TerrainBundle)> = bundle_files
+            .iter()
+            .map(|p| {
+                let b = planet_frame::TerrainBundle::from_text(&std::fs::read_to_string(p).unwrap()).expect("a terrain bundle");
+                (p.file_stem().unwrap().to_string_lossy().into_owned(), b)
+            })
+            .collect();
+        let tmpl = &bundles[0].1.request;
+        struct Pose {
+            set: &'static str,
+            name: String,
+            camera: Camera,
+            lod: LodParams,
+        }
+        let mut poses: Vec<Pose> = Vec::new();
+        for (name, b) in &bundles {
+            poses.push(Pose { set: "owner bundles", name: name.clone(), camera: b.request.camera.clone(), lod: b.request.lod.clone() });
+        }
+        let mut crash_files: Vec<std::path::PathBuf> = std::fs::read_dir(dir.join("crashes"))
+            .unwrap()
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.extension().is_some_and(|x| x == "txt"))
+            .collect();
+        crash_files.sort();
+        for p in &crash_files {
+            let text = std::fs::read_to_string(p).unwrap();
+            let Some(tail) = text.split("camera path of the last minute").nth(1) else { continue };
+            let Some(line) = tail.lines().filter(|l| l.split_whitespace().count() >= 10 && l.split_whitespace().all(|w| w.parse::<f64>().is_ok())).last() else {
+                continue;
+            };
+            let v: Vec<f64> = line.split_whitespace().map(|w| w.parse().unwrap()).collect();
+            let mut camera = tmpl.camera.clone();
+            camera.position = planet_core::PlanetFixed(planet_core::Vec3::new(v[1], v[2], v[3]));
+            camera.forward = planet_core::Vec3::new(v[4], v[5], v[6]);
+            camera.up = planet_core::Vec3::new(v[7], v[8], v[9]);
+            poses.push(Pose { set: "stall report poses", name: p.file_stem().unwrap().to_string_lossy().into_owned(), camera, lod: tmpl.lod.clone() });
+        }
+        let plain = world.field().unwrap();
+        let aspect = 2560.0 / 1440.0;
+        let flight_lod = LodParams {
+            cells: 32,
+            viewport_h_px: 1440.0,
+            tau_px: 6.0,
+            max_level: planet_frame::production_finest_level(32),
+            min_level: planet_frame::DEFAULT_RENDER_FLOOR,
+            radius_m: radius,
+            max_height_m: LodParams::earth_1080p().max_height_m.max(plain.max_abs_height_m()),
+            ..LodParams::earth_1080p()
+        };
+        for altitude in crate::envelopeperf::ALTITUDES_M {
+            for n in 0..places {
+                let (lat, lon) = crate::envelopeperf::start_place(n);
+                let cams = planet_frame::scenes::level_flight_cameras(radius, aspect, &*plain, altitude, 300.0, lat, lon, 121);
+                for (k, camera) in cams.into_iter().enumerate().step_by(20) {
+                    poses.push(Pose { set: "envelope flights", name: format!("alt {altitude} place {n} t {} s", k / 10), camera, lod: flight_lod.clone() });
+                }
+            }
+        }
+        writeln!(out, "{} poses: {} bundles, {} stall reports, flights {} altitudes x {places} places", poses.len(), bundles.len(), crash_files.len(), crate::envelopeperf::ALTITUDES_M.len())
+            .map_err(err)
+            .unwrap();
+        let spawner = std::sync::Arc::new(planet_streaming::ThreadPool::new(2));
+        let cfg = planet_streaming::chunks::ChunkConfig { workers: 2, ..Default::default() };
+        let count = |field: &dyn planet_generators::height::HeightField, p: &Pose| -> (Vec<planet_core::TileId>, usize) {
+            let sel = planet_frame::select_nodes_in_view_field(&TangentWarp, &p.camera, field, &p.lod);
+            (sel.nodes.iter().filter(|n| n.capped).map(|n| n.tile).collect(), sel.nodes.len())
+        };
+        let mut results: Vec<(&str, Vec<(Vec<planet_core::TileId>, usize)>)> = Vec::new();
+        results.push(("no chunk stage", poses.iter().map(|p| count(&*plain, p)).collect()));
+        drop(plain);
+        assert_eq!(
+            world.enable_anet_from_store_with(
+                crate::anetworld::ANET_CELL_M,
+                spawner,
+                std::sync::Arc::new(planet_streaming::SystemClock::new()),
+                cfg,
+                false
+            ),
+            Ok(true)
+        );
+        for (label, bounds) in [("margin 0 m", Some((0.0, 0.0))), ("margin 10 m", Some((10.0, 10.0))), ("margin 300 m (as built)", None)] {
+            let f = world.field_with_bounds(bounds).unwrap();
+            results.push((label, poses.iter().map(|p| count(&*f, p)).collect()));
+        }
+        for set in ["envelope flights", "owner bundles", "stall report poses"] {
+            let idx: Vec<usize> = (0..poses.len()).filter(|&i| poses[i].set == set).collect();
+            for (label, r) in &results {
+                let held: Vec<usize> = idx.iter().map(|&i| r[i].0.len()).collect();
+                let nonzero = held.iter().filter(|&&h| h > 0).count();
+                writeln!(
+                    out,
+                    "RESULT [{set}] {label}: {} poses, {nonzero} with held-back tiles, held total {}, max {}, mean {:.2}",
+                    idx.len(),
+                    held.iter().sum::<usize>(),
+                    held.iter().max().copied().unwrap_or(0),
+                    held.iter().sum::<usize>() as f64 / idx.len().max(1) as f64
+                )
+                .map_err(err)
+                .unwrap();
+            }
+        }
+        for (label, r) in results.iter().skip(1) {
+            for (i, p) in poses.iter().enumerate() {
+                if r[i].0.is_empty() || (*label == "margin 300 m (as built)" && p.set != "stall report poses") {
+                    continue;
+                }
+                let tiles: Vec<String> = r[i].0.iter().take(4).map(|t| format!("(f{} l{} {},{})", t.face().0, t.level(), t.x(), t.y())).collect();
+                writeln!(out, "NONZERO [{label}] {} / {}: {} of {} nodes held, e.g. {}", p.set, p.name, r[i].0.len(), r[i].1, tiles.join(" ")).map_err(err).unwrap();
+            }
+        }
+    }
+
+    // spec: GEN-048
+    /// SPIKE-51 part 1: the rises along the rivers of a chunk. For every chunk of the sample (the 48 random land chunks of `anet_change_report` and, with
+    /// `PLANET_BUNDLE`, the chunk under that pose and its 8 neighbours) the stage is solved; the rivers are the corridor cells and the channel cells (area over
+    /// `channel_area_m2`) of the core, followed downstream by the solution's receivers from every head; the drawn bed is the base plus the chunk change at level 16
+    /// (`ChunkField`). A rise is a maximal run of non-falling steps downstream that gains over 0.5 m; it is classed by the first cause that holds: chunk border (a cell
+    /// within 2 cells of the core's edge), created by the solve (the bed before the erosion step, the lower of the base and the corridor anchor, has no such rise over
+    /// the same cells), the cut cap (GEN-069: anchor at the cap under the base), the corridor edge (anchored and free cells in the run), the coarse path (the coarse
+    /// grid rises over the run), finer relief (the base rises, the coarse grid does not), other. `PLANET_ANET_STORE=DIR PLANET_ANET_RES=N [PLANET_BUNDLE=FILE]
+    /// [PLANET_ANET_CHUNKS=48] cargo test -p planet --release --lib uphill_report -- --ignored --nocapture`. Read only.
+    #[test]
+    #[ignore = "a measurement: it solves a sample of real chunks"]
+    fn uphill_report() {
+        use planet_core::cube::TangentWarp;
+        use planet_core::hash::SplitMix64;
+        use planet_generators::anet::{coarse_z_at, Network};
+        use planet_generators::height::HeightField as _;
+        use planet_generators::chunkfield::{compute_chunk, halo_rings, region, ChunkField};
+        let mut out = std::io::stdout();
+        let res = std::env::var("PLANET_ANET_RES").ok().and_then(|r| r.parse().ok()).unwrap_or(256);
+        let count: usize = std::env::var("PLANET_ANET_CHUNKS").ok().and_then(|r| r.parse().ok()).unwrap_or(48);
+        let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
+        let (world, maps, _) = anet_scene(res, 11, store, &mut out).unwrap();
+        let radius = world.radius_m();
+        let lat = planet_generators::chunkfield::ChunkLattice::new(crate::anetworld::cells_per_chunk_for(radius, 8.0)).unwrap();
+        let stage = planet_generators::anet::ANet {
+            run: maps.clone(),
+            base: std::sync::Arc::new(crate::anetworld::WorldBase::new(&world)),
+            radius_m: radius,
+            params: {
+                let mut params = planet_generators::anet::ANetParams::spike(crate::anetworld::ANET_HALO_M, lat.cell_m(radius));
+                params.drivers.seed = world.base_seed();
+                params
+            },
+            memo: Default::default(),
+        };
+        let top = planet_generators::chunk::CHUNK_GRID_LEVEL;
+        let per_face = 1u32 << top;
+        let base = world.base_field().unwrap();
+        let mut rng = SplitMix64(0x6368_616e_6765);
+        let mut tiles: Vec<(&str, planet_core::TileId)> = Vec::new();
+        let mut random = 0;
+        while random < count {
+            let face = planet_core::Face::ALL[(rng.next_u64() % 6) as usize];
+            let (x, y) = ((rng.next_u64() % u64::from(per_face)) as u32, (rng.next_u64() % u64::from(per_face)) as u32);
+            let t = planet_core::TileId::new(face, top, x, y).expect("a tile of the chunk grid");
+            if base.height(t.center_direction(&TangentWarp)) > 0.0 {
+                tiles.push(("random", t));
+                random += 1;
+            }
+        }
+        if let Some(bundle) = std::env::var_os("PLANET_BUNDLE").map(std::path::PathBuf::from) {
+            let b = planet_frame::TerrainBundle::from_text(&std::fs::read_to_string(&bundle).expect("the bundle reads")).expect("a terrain bundle");
+            let site = planet_core::TileId::from_direction(&TangentWarp, b.request.camera.position.0.normalized(), top);
+            tiles.push(("site", site));
+            for n in site.neighbors8() {
+                tiles.push(("site", n));
+            }
+        }
+        let n_core = lat.cells_per_chunk() as usize;
+        let cell_len = lat.cell_m(radius);
+        #[derive(Default)]
+        struct Acc {
+            chunks: usize,
+            river_cells: usize,
+            main_cells: usize,
+            rises: Vec<(f64, f64, &'static str, u8)>,
+            before_rises: usize,
+            before_removed: usize,
+            drawn_vs_solution: f64,
+            clamp_cells: usize,
+            flags: [usize; 6],
+        }
+        let mut accs: std::collections::BTreeMap<&str, Acc> = std::collections::BTreeMap::new();
+        let ascents = |h: &[f64], min: f64| -> Vec<(usize, usize)> {
+            let mut v = Vec::new();
+            let mut i = 0;
+            while i + 1 < h.len() {
+                if h[i + 1] > h[i] + 1e-6 {
+                    let s = i;
+                    while i + 1 < h.len() && h[i + 1] >= h[i] - 1e-6 {
+                        i += 1;
+                    }
+                    if h[i] - h[s] > min {
+                        v.push((s, i));
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+            v
+        };
+        let cap = stage.params.anchor.cut_cap_m;
+        let bound = planet_generators::chunkfield::ChunkStage::bound_m(&stage);
+        for (n, &(pop, tile)) in tiles.iter().enumerate() {
+            let halo = halo_rings(&stage);
+            let reg = region(&lat, tile, halo);
+            let Some(r) = compute_chunk(&lat, &stage, radius, top, tile, halo) else { continue };
+            let net = Network::build_with_memo(&*stage.run, &*stage.base, &lat, &reg, radius, &stage.params.anchor, &stage.memo.get(stage.base.epoch()));
+            let sol = stage.solve(&lat, &reg);
+            let field = ChunkField::new(world.base_field().unwrap(), lat, radius, &stage).with_top_level(top).with_ready(std::sync::Arc::new(r));
+            let acc = accs.entry(pop).or_default();
+            acc.chunks += 1;
+            let core = reg.core;
+            let is_river = |c: usize| c < core && (net.corridor[c] || sol.area_m2[c] > stage.params.channel_area_m2);
+            let has_donor: Vec<bool> = {
+                let mut d = vec![false; core];
+                for c in 0..core {
+                    if is_river(c) && sol.receiver[c] != u32::MAX && (sol.receiver[c] as usize) < core && is_river(sol.receiver[c] as usize) {
+                        d[sol.receiver[c] as usize] = true;
+                    }
+                }
+                d
+            };
+            let mut seen = vec![false; core];
+            for head in 0..core {
+                if !is_river(head) || has_donor[head] || seen[head] {
+                    continue;
+                }
+                let mut path = vec![head];
+                seen[head] = true;
+                loop {
+                    let c = *path.last().unwrap();
+                    let rcv = sol.receiver[c];
+                    if rcv == u32::MAX || rcv as usize >= core || !is_river(rcv as usize) {
+                        break;
+                    }
+                    path.push(rcv as usize);
+                    if seen[rcv as usize] {
+                        break;
+                    }
+                    seen[rcv as usize] = true;
+                }
+                acc.river_cells += path.len();
+                acc.main_cells += path.iter().filter(|&&c| net.corridor[c]).count();
+                // Samples along the links, SUB per link (the drawn ground at the finest level is finer than the cell): position along the path, the cell it belongs to.
+                const SUB: usize = 8;
+                let mut dirs_s: Vec<planet_core::Vec3> = Vec::new();
+                let mut before_s: Vec<f64> = Vec::new();
+                for w in 0..path.len() {
+                    let last = w + 1 == path.len();
+                    for t in 0..(if last { 1 } else { SUB }) {
+                        let f = t as f64 / SUB as f64;
+                        if last || t == 0 {
+                            dirs_s.push(net.dirs[path[w]]);
+                            before_s.push(net.anchor_z[path[w]]);
+                        } else {
+                            dirs_s.push((net.dirs[path[w]] * (1.0 - f) + net.dirs[path[w + 1]] * f).normalized());
+                            before_s.push(net.anchor_z[path[w]] * (1.0 - f) + net.anchor_z[path[w + 1]] * f);
+                        }
+                    }
+                }
+                let hd: Vec<f64> = dirs_s.iter().map(|&d| field.height_at_level(d, top + 5)).collect();
+                let hs: Vec<f64> = path.iter().map(|&c| sol.z[c]).collect();
+                let hz: Vec<f64> = dirs_s.iter().map(|&d| base.height(d)).collect();
+                let hb: Vec<f64> = before_s.iter().zip(&hz).map(|(a, z)| if a.is_nan() { *z } else { z.min(*a) }).collect();
+                let hc: Vec<f64> = dirs_s.iter().map(|&d| coarse_z_at(&*stage.run, d)).collect();
+                for (w, &s) in hs.iter().enumerate() {
+                    acc.drawn_vs_solution = acc.drawn_vs_solution.max((hd[w * SUB] - s).abs());
+                }
+                acc.clamp_cells += path.iter().filter(|&&c| (sol.z[c] - sol.z_base[c]).abs() >= bound).count();
+                let rises = ascents(&hd, 0.5);
+                let before_rises = ascents(&hb, 0.5);
+                acc.before_rises += before_rises.len();
+                for &(s, e) in &before_rises {
+                    if ascents(&hd[s..=e], 0.5).is_empty() {
+                        acc.before_removed += 1;
+                    }
+                }
+                for (s, e) in rises {
+                    let size = hd[e] - hd[s];
+                    let length = (e - s) as f64 * cell_len / SUB as f64;
+                    let cells = &path[s / SUB..=(e / SUB + 1).min(path.len() - 1)];
+                    let border = cells.iter().any(|&c| {
+                        let (ci, cj) = (c % n_core, c / n_core);
+                        ci <= 2 || cj <= 2 || ci + 3 >= n_core || cj + 3 >= n_core
+                    });
+                    let hch: Vec<f64> = (s..=e).map(|i| hd[i] - hz[i]).collect();
+                    let capped = cells.iter().any(|&c| !net.anchor_z[c].is_nan() && net.base_z[c] - net.anchor_z[c] >= 0.97 * cap);
+                    let anch = cells.iter().filter(|&&c| !net.anchor_z[c].is_nan()).count();
+                    let edge = anch > 0 && anch < cells.len();
+                    let coarse_up = !ascents(&hc[s..=e], 0.5).is_empty();
+                    let base_up = !ascents(&hz[s..=e], 0.5).is_empty();
+                    let change_up = !ascents(&hch, 0.5).is_empty();
+                    acc.flags[0] += usize::from(border);
+                    acc.flags[1] += usize::from(base_up);
+                    acc.flags[2] += usize::from(change_up);
+                    acc.flags[3] += usize::from(coarse_up);
+                    acc.flags[4] += usize::from(capped);
+                    acc.flags[5] += usize::from(edge);
+                    let (class, code) = if border {
+                        ("chunk border", 0)
+                    } else if base_up && !change_up {
+                        ("the ground's own relief between cells (the base rises, the chunk change does not)", 1)
+                    } else if change_up && !base_up {
+                        ("the chunk change rises along the path (solve, bank settle, slump)", 2)
+                    } else if base_up && change_up {
+                        ("both rise", 3)
+                    } else {
+                        ("neither alone (sum of small parts)", 4)
+                    };
+                    acc.rises.push((size, length, class, code));
+                }
+            }
+            writeln!(out, "chunk {}/{} {pop} {:?} done", n + 1, tiles.len(), (tile.face().0, tile.x(), tile.y())).map_err(err).unwrap();
+        }
+        for (pop, acc) in &accs {
+            let km = acc.river_cells as f64 * cell_len / 1e3;
+            writeln!(
+                out,
+                "RESULT [{pop}] {} chunks, {} river cells ({} on the corridor), {km:.1} km of river, drawn vs solution max {:.3} m, cells at the change clamp {}",
+                acc.chunks, acc.river_cells, acc.main_cells, acc.drawn_vs_solution, acc.clamp_cells
+            )
+            .map_err(err)
+            .unwrap();
+            for (label, min) in [("over 0.5 m", 0.5), ("over 2 m", 2.0), ("over 10 m", 10.0)] {
+                let sel: Vec<&(f64, f64, &str, u8)> = acc.rises.iter().filter(|r| r.0 > min).collect();
+                let len: f64 = sel.iter().map(|r| r.1).sum::<f64>() / 1e3;
+                let mut sizes: Vec<f64> = sel.iter().map(|r| r.0).collect();
+                sizes.sort_by(f64::total_cmp);
+                let q = |p: f64| if sizes.is_empty() { 0.0 } else { sizes[((sizes.len() - 1) as f64 * p) as usize] };
+                writeln!(
+                    out,
+                    "RESULT [{pop}] rises {label}: {} ({:.2} per 100 km), {len:.2} km long, size p50 {:.2}, p99 {:.2}, max {:.2} m",
+                    sel.len(),
+                    sel.len() as f64 / km * 100.0,
+                    q(0.5),
+                    q(0.99),
+                    sizes.last().copied().unwrap_or(0.0)
+                )
+                .map_err(err)
+                .unwrap();
+            }
+            for code in 0..=4u8 {
+                let sel: Vec<&(f64, f64, &str, u8)> = acc.rises.iter().filter(|r| r.3 == code).collect();
+                if sel.is_empty() {
+                    continue;
+                }
+                let mut sizes: Vec<f64> = sel.iter().map(|r| r.0).collect();
+                sizes.sort_by(f64::total_cmp);
+                writeln!(
+                    out,
+                    "RESULT [{pop}] class {}: {} rises, {:.2} km, size p50 {:.2}, max {:.2} m, {} over 2 m",
+                    sel[0].2,
+                    sel.len(),
+                    sel.iter().map(|r| r.1).sum::<f64>() / 1e3,
+                    sizes[sizes.len() / 2],
+                    sizes[sizes.len() - 1],
+                    sel.iter().filter(|r| r.0 > 2.0).count()
+                )
+                .map_err(err)
+                .unwrap();
+            }
+            writeln!(
+                out,
+                "RESULT [{pop}] rises with a flag (a rise can have several): chunk border {}, base rises {}, chunk change rises {}, coarse grid rises {}, cut cap on the path {}, corridor edge in the run {}",
+                acc.flags[0], acc.flags[1], acc.flags[2], acc.flags[3], acc.flags[4], acc.flags[5]
+            )
+            .map_err(err)
+            .unwrap();
+            writeln!(
+                out,
+                "RESULT [{pop}] erosion step: bed before it (the lower of the base and the anchor) has {} rises over 0.5 m; {} of them are gone after; drawn bed has {} rises, {} of them not there before",
+                acc.before_rises,
+                acc.before_removed,
+                acc.rises.len(),
+                acc.rises.iter().filter(|r| r.3 == 2).count()
+            )
+            .map_err(err)
+            .unwrap();
+        }
+    }
+
     // spec: GEN-052
     /// How many chunks of the chunk grid (tile level 11) a river of the coupled run crosses, for thresholds of the drainage area (`PLANET_RIVER_THRESHOLDS`,
     /// default 1e7, 1e8 and 1e9 m2): every land cell of the run over the threshold, its polyline to its receiver stepped every 2.4 km (half a chunk) and the
