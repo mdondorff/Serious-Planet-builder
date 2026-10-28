@@ -568,7 +568,10 @@ fn the_gate_passes_on_a_small_world_without_the_chunk_stage_which_is_the_default
     let (store, world, args) = stage_store("nochunks");
     let mut args: Vec<&str> = args.iter().map(String::as_str).collect();
     args.extend(["--edit", "--no-vsync", "--size", "480x270"]);
-    let out = smoke_in(&args, &[("PLANET_GATE", "1"), ("PLANET_GATE_SETTLE", "10"), ("PLANET_GATE_SOFTWARE", "1")]);
+    let out = smoke_in(
+        &args,
+        &[("PLANET_GATE", "1"), ("PLANET_GATE_SETTLE", "10"), ("PLANET_GATE_SOFTWARE", "1"), ("PLANET_HORIZON_RANGE_M", "400")],
+    );
     let _ = std::fs::remove_file(&world);
     let _ = std::fs::remove_dir_all(&store);
     let Some(stdout) = out else { return };

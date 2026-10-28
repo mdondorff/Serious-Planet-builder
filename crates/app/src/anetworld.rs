@@ -375,7 +375,11 @@ impl WorldTerrain {
     /// base terrain and the stamps, and the stored far-field horizon is requested. `workers` is the horizon jobs' share of the pool.
     pub fn enable_viewer_horizon(self: &Arc<Self>, spawner: Arc<dyn Spawner>, clock: Arc<dyn Clock>, workers: usize) -> Result<(), String> {
         let lat = self.horizon_lattice().ok_or("the world has no bake: no horizon shadows")?;
-        let params = crate::horizonworld::chunk_horizon_params(&lat, self.radius_m());
+        let mut params = crate::horizonworld::chunk_horizon_params(&lat, self.radius_m());
+        // A test run (the software adapter in CI) asks for a short march so that a map is a small raster: `PLANET_HORIZON_RANGE_M`, never below one chunk cell.
+        if let Some(r) = std::env::var("PLANET_HORIZON_RANGE_M").ok().and_then(|v| v.parse::<f64>().ok()) {
+            params.range_m = params.range_m.min(r.max(lat.cell_m(self.radius_m()) * 4.0));
+        }
         let cfg = planet_streaming::chunks::HorizonConfig { workers: workers.max(1), ..Default::default() };
         self.enable_horizon(params, spawner, clock, cfg, self.horizon_threads())?;
         self.request_coarse_horizon();
