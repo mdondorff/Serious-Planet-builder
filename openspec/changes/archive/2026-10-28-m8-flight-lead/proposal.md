@@ -3,7 +3,7 @@ The speed-envelope trace of window 14 (`target/perf-w14`, criterion 7) shows lat
 
 ## What Changes
 - `track_chunks` asks every chunk whose centre is within `max(reach, one chunk edge) + half an edge` of a track sample: half an edge further than the plan's reach (the lead is the 12 s it was meant to be), and the next chunk is asked on entering the current one.
-- Tier A test of the floor and of the asked-at-once case; the effect on the late chunks is measured in the acceptance window (`perf stream envelope --only-steady`).
+- Tier A tests of the floor, of the asked-at-once case and of the lead (a chunk is asked a solve and a margin before it is wanted at 100 to 500 m/s; the first-frame chunks are asked in the run-in); the effect on the late chunks is measured in the acceptance window (`perf stream envelope --only-steady`).
 
 ## Impact
 - Spec: STRM-042 (the ask distance); a larger prefetch set (about one more ring of chunks along the track), within the prefetch class of STRM-060.

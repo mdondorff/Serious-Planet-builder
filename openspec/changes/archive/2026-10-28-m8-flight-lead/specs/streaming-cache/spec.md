@@ -14,3 +14,7 @@ Source: STRM-018, SPIKE-34 section 7, D7, opus-planner (2026-10-26, criterion 7:
 #### Scenario: A low view
 - **WHEN** the plan's reach is a fraction of one chunk edge and the camera has just entered a chunk
 - **THEN** the chunk across the nearest edge is asked at once, and the set equals the one for a reach of one edge
+
+#### Scenario: A solve ahead
+- **WHEN** the camera flies straight at 100 to 500 m/s over ground the prefetch has not covered, with a plan reach under one chunk edge, 1.6 edges and 2.6 edges
+- **THEN** every chunk the plan later wants is asked at least the longest solve (10 s) and a second before it is wanted, and the chunks wanted within the first 12 s of the flight are asked in its first frame

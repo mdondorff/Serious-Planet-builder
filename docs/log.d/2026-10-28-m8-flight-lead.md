@@ -1,0 +1,1 @@
+- 2026-10-28 **m8-flight-lead** (STRM-042): the prefetch track asks half an edge further and never less than one edge; tier A: asked a solve plus a margin before wanted at 100-500 m/s.
