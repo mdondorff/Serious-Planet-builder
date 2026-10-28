@@ -39,6 +39,8 @@ pub struct ChunkHorizonBaker {
     words: Mutex<std::collections::HashMap<(ChunkKey, u64), (u64, u64)>>,
     /// The heights of the chunk-sized blocks of the raster, shared by the chunks that read them (STRM-059).
     tiles: Mutex<HeightTiles>,
+    /// One gate a chunk: bakes that need the same height tile at once wait for the first to evaluate it instead of each evaluating it.
+    building: Mutex<std::collections::HashMap<ChunkKey, Arc<Mutex<()>>>>,
     tile_cap: usize,
 }
 
@@ -75,6 +77,7 @@ impl ChunkHorizonBaker {
             threads: threads.max(1),
             words: Default::default(),
             tiles: Default::default(),
+            building: Default::default(),
             tile_cap: HEIGHT_TILES_MAX,
         }
     }
@@ -177,6 +180,9 @@ impl ChunkHorizonBaker {
         tile_key: Option<u64>,
     ) -> Arc<Vec<f32>> {
         let chunk = (face, bx as u32, by as u32);
+        let gate =
+            tile_key.filter(|_| self.tile_cap > 0).map(|_| self.building.lock().expect("tile gates").entry(chunk).or_default().clone());
+        let _held = gate.as_ref().map(|g| g.lock().expect("tile gate"));
         if let Some(k) = tile_key.filter(|_| self.tile_cap > 0) {
             let mut t = self.tiles.lock().expect("height tiles");
             t.uses += 1;

@@ -1170,8 +1170,7 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
         if let Some(n) = o.horizon_threads {
             world.set_horizon_threads(n);
         }
-        let (pool, chunk_cfg) = crate::anetworld::viewer_chunk_stage(o.gen_workers());
-        world.enable_viewer_horizon(pool, Arc::new(planet_streaming::SystemClock::new()), chunk_cfg.workers.div_ceil(2))?;
+        world.enable_viewer_horizon(o.gen_workers(), Arc::new(planet_streaming::SystemClock::new()))?;
     }
     let size = if smoke { (768u32, 432u32) } else { (2560u32, 1440u32) };
     let tau = o.tau;
