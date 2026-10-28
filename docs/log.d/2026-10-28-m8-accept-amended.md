@@ -1,0 +1,1 @@
+- 2026-10-28 **m8-accept-amended** (TEST-060, owner fallback): criterion 6 judges the M6 table and a horizon table (the chunk table is not judged), `accept M8` runs `gate --small`, the manual list and the runbook follow the amended criteria 1, 3, 6, 7; the criterion 6 horizon table is MISSING until the edit scene logs it

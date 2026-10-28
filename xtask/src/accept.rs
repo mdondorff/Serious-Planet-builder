@@ -75,9 +75,9 @@ fn manual_criteria(milestone: &str) -> &'static [&'static str] {
             "The go / no-go for M6 (milestone gate after M5): the owner",
         ],
         "M8" => &[
-            "Criterion 1: the owner's look review of `docs/milestones/M8/look-review-2b/` (stills rendered after #835; F8 compares the default and the sample look live) and the default look",
-            "Criterion 3: FAILS the between-levels bound (15 against 14 is 0.712 m against 0.25 m, computed 2026-10-28, docs/milestones/M8/acceptance-runbook.md); the owner's D0 decision and the incision depth decide; no rendered-frame measurement exists",
-            "Criterion 6, the drawn-tile reading of 'every touched chunk the view wants' (owner item #823); criteria 4 to 7 above are read from the perf logs only",
+            "Criterion 1: the owner's look review of `docs/milestones/M8/look-review-2b/` on plausible relief with horizon shadows (river and valley forms are not judged in M8; F8 compares the default and the sample look live) and the default look",
+            "Criterion 3: `cargo xtask gate` on the real store with the chunk stage at its default (off) (TEST-061, TEST-062): no frame over 100 ms, 0 held-back tiles without edits, no step between levels, no panic; run it before the window, never inside one (`gate --small` is an automated step above)",
+            "Criteria 4 to 7 are read from the perf logs only; criterion 6 needs the horizon table `verdict (10 s, horizon maps)` in `edit-latency.md`, and criterion 7's envelope log must come from a run with the chunk stage off",
             "CI green on Windows (WARP) and Linux (lavapipe) for the merge commit, and the determinism comparison (criterion 2)",
             "The owner's live-test items (docs/milestones/M8/owner-test-2026-10-27/README.md) and the M8 report (docs/milestones/M8-report.md): the planner",
         ],
@@ -193,6 +193,10 @@ pub fn run(root: &Path, args: &[String]) -> Res {
     ];
     // M4 leaves the discrete GPU out of the automated steps: acceptance may run next to the architect's window and
     // `test gpu --real` never runs during one (CLAUDE.md); it is listed under the manual criteria instead.
+    // M8: the no-degradation gate on the generated small world (TEST-063); the real-store gate stays on the manual list.
+    if m == "M8" {
+        steps.push(step("gate --small (TEST-061 to TEST-063)", || crate::gate::run_gate(root, &["--small".to_string()])));
+    }
     if m != "M4" && m != "M5" {
         steps.push(step("test gpu --real (tier C, discrete GPU)", || {
             crate::testcmd::test(root, &["gpu".to_string(), "--real".to_string()])
