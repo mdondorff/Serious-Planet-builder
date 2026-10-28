@@ -1,0 +1,354 @@
+
+running 1 test
+A-net chunk scene: bake 16384 cells per face edge of the store C:/DEV/SeriousPlanetData/global16384, coupled run 80 steps
+chunk 0x0b000000002bd53a (face 0), the river of 14489279 km2 at its coarse cell
+D0 variant: PLANET_ANCHOR=None, river threshold 5e7 m2
+site frame-31358: 3 chunks of the level-15 nodes (nearest 4)
+site frame-32034: 3 chunks of the level-15 nodes (nearest 4)
+site frame-41356: 2 chunks of the level-15 nodes (nearest 4)
+site frame-41595: 4 chunks of the level-15 nodes (nearest 4)
+site frame-50119: 4 chunks of the level-15 nodes (nearest 4)
+site frame-116591: 3 chunks of the level-15 nodes (nearest 4)
+site frame-134050: 4 chunks of the level-15 nodes (nearest 4)
+site frame-139490: 4 chunks of the level-15 nodes (nearest 4)
+site frame-181555: 4 chunks of the level-15 nodes (nearest 4)
+site frame-187750: 4 chunks of the level-15 nodes (nearest 4)
+  solved chunk (0, 557, 1168) (1 of the sets' chunks)
+  solved chunk (0, 558, 1167) (2 of the sets' chunks)
+  solved chunk (0, 558, 1168) (3 of the sets' chunks)
+  solved chunk (0, 557, 1166) (4 of the sets' chunks)
+  solved chunk (0, 556, 1166) (5 of the sets' chunks)
+test globalperf::tests::d0_variant_report has been running for over 60 seconds
+  solved chunk (0, 557, 1167) (6 of the sets' chunks)
+  solved chunk (0, 556, 1167) (7 of the sets' chunks)
+  solved chunk (0, 740, 357) (8 of the sets' chunks)
+  solved chunk (0, 740, 358) (9 of the sets' chunks)
+  solved chunk (0, 741, 357) (10 of the sets' chunks)
+  solved chunk (0, 743, 358) (11 of the sets' chunks)
+  solved chunk (0, 742, 358) (12 of the sets' chunks)
+  solved chunk (0, 743, 359) (13 of the sets' chunks)
+  solved chunk (0, 742, 359) (14 of the sets' chunks)
+  solved chunk (0, 744, 360) (15 of the sets' chunks)
+  solved chunk (0, 743, 360) (16 of the sets' chunks)
+  solved chunk (0, 745, 360) (17 of the sets' chunks)
+  solved chunk (0, 744, 361) (18 of the sets' chunks)
+  solved chunk (0, 1263, 91) (19 of the sets' chunks)
+  solved chunk (0, 1262, 91) (20 of the sets' chunks)
+  solved chunk (0, 1263, 92) (21 of the sets' chunks)
+  solved chunk (0, 1262, 92) (22 of the sets' chunks)
+  solved chunk (0, 744, 359) (23 of the sets' chunks)
+  solved chunk (0, 745, 359) (24 of the sets' chunks)
+  solved chunk (0, 743, 361) (25 of the sets' chunks)
+  solved chunk (0, 745, 361) (26 of the sets' chunks)
+  solved chunk (3, 1148, 1215) (27 of the sets' chunks)
+  solved chunk (0, 512, 502) (28 of the sets' chunks)
+  solved chunk (5, 894, 982) (29 of the sets' chunks)
+  solved chunk (2, 1929, 581) (30 of the sets' chunks)
+  solved chunk (3, 1482, 1275) (31 of the sets' chunks)
+  solved chunk (5, 1019, 827) (32 of the sets' chunks)
+  solved chunk (0, 1696, 812) (33 of the sets' chunks)
+  solved chunk (5, 884, 1277) (34 of the sets' chunks)
+  solved chunk (0, 897, 1323) (35 of the sets' chunks)
+  solved chunk (2, 1854, 1609) (36 of the sets' chunks)
+  solved chunk (3, 684, 1248) (37 of the sets' chunks)
+  solved chunk (2, 1936, 1234) (38 of the sets' chunks)
+  solved chunk (0, 634, 143) (39 of the sets' chunks)
+  solved chunk (3, 1201, 897) (40 of the sets' chunks)
+  solved chunk (0, 1678, 908) (41 of the sets' chunks)
+  solved chunk (2, 1989, 1448) (42 of the sets' chunks)
+  solved chunk (5, 1612, 946) (43 of the sets' chunks)
+  solved chunk (2, 1888, 803) (44 of the sets' chunks)
+  solved chunk (4, 73, 1949) (45 of the sets' chunks)
+  solved chunk (3, 1486, 1085) (46 of the sets' chunks)
+  solved chunk (3, 288, 525) (47 of the sets' chunks)
+  solved chunk (5, 1987, 855) (48 of the sets' chunks)
+  solved chunk (3, 625, 712) (49 of the sets' chunks)
+  solved chunk (3, 150, 435) (50 of the sets' chunks)
+  solved chunk (2, 2041, 699) (51 of the sets' chunks)
+  solved chunk (0, 1943, 1890) (52 of the sets' chunks)
+  solved chunk (3, 243, 755) (53 of the sets' chunks)
+  solved chunk (1, 324, 2004) (54 of the sets' chunks)
+  solved chunk (0, 1001, 858) (55 of the sets' chunks)
+  solved chunk (1, 1931, 182) (56 of the sets' chunks)
+  solved chunk (0, 1319, 1207) (57 of the sets' chunks)
+  solved chunk (0, 301, 1810) (58 of the sets' chunks)
+  solved chunk (0, 1558, 1091) (59 of the sets' chunks)
+  solved chunk (2, 1850, 850) (60 of the sets' chunks)
+  solved chunk (0, 1668, 1095) (61 of the sets' chunks)
+  solved chunk (1, 71, 849) (62 of the sets' chunks)
+  solved chunk (5, 659, 1341) (63 of the sets' chunks)
+  solved chunk (3, 126, 769) (64 of the sets' chunks)
+  solved chunk (1, 118, 924) (65 of the sets' chunks)
+  solved chunk (1, 25, 1968) (66 of the sets' chunks)
+  solved chunk (5, 1278, 868) (67 of the sets' chunks)
+  solved chunk (1, 1570, 880) (68 of the sets' chunks)
+  solved chunk (3, 22, 124) (69 of the sets' chunks)
+  solved chunk (0, 721, 504) (70 of the sets' chunks)
+  solved chunk (0, 1170, 843) (71 of the sets' chunks)
+  solved chunk (0, 1034, 737) (72 of the sets' chunks)
+  solved chunk (0, 584, 536) (73 of the sets' chunks)
+  solved chunk (5, 762, 1255) (74 of the sets' chunks)
+carve scale 5.23 (median incision on the carve line over the law at scale 1, 37528 points)
+RESULT set frame-31358 (3 chunks):
+RESULT   today step 15/14 (change at 15): p50 0.499, p99 4.510, max 30.808 m
+RESULT   today step 16/15: p50 0.004, p99 0.027, max 0.237 m
+RESULT   today change at 16: p50 0.500, p99 4.522, max 30.821 m
+RESULT   carve only (no correction): entry step |r15|: p50 0.411, p99 1.665, max 7.822 m
+RESULT   variant step 16/15 |r16 - r15|: p50 0.003, p99 0.018, max 0.126 m
+RESULT   carve depth: p50 0.000, p99 20.905, max 152.046 m
+RESULT   h=1: entry/15/14 step |r15 - S|: p50 0.004, p99 0.030, max 0.386 m
+RESULT   h=1: change at 16 |r16 - S|: p50 0.006, p99 0.045, max 0.386 m
+RESULT   h=1: correction |S|: p50 0.410, p99 1.660, max 7.673 m
+RESULT   h=16: entry/15/14 step |r15 - S|: p50 0.107, p99 0.556, max 4.239 m
+RESULT   h=16: change at 16 |r16 - S|: p50 0.108, p99 0.562, max 4.290 m
+RESULT   h=16: correction |S|: p50 0.437, p99 1.460, max 3.733 m
+RESULT   h=64: entry/15/14 step |r15 - S|: p50 0.194, p99 0.897, max 7.182 m
+RESULT   h=64: change at 16 |r16 - S|: p50 0.195, p99 0.900, max 7.233 m
+RESULT   h=64: correction |S|: p50 0.495, p99 1.101, max 1.964 m
+RESULT   h=1: change at 16 signed -0.33 to +0.39 m
+RESULT   h=16: change at 16 signed -4.29 to +2.32 m
+RESULT   h=64: change at 16 signed -7.23 to +1.96 m
+RESULT set frame-32034 (3 chunks):
+RESULT   today step 15/14 (change at 15): p50 0.499, p99 4.510, max 30.808 m
+RESULT   today step 16/15: p50 0.004, p99 0.027, max 0.237 m
+RESULT   today change at 16: p50 0.500, p99 4.522, max 30.821 m
+RESULT   carve only (no correction): entry step |r15|: p50 0.411, p99 1.665, max 7.822 m
+RESULT   variant step 16/15 |r16 - r15|: p50 0.003, p99 0.018, max 0.126 m
+RESULT   carve depth: p50 0.000, p99 20.905, max 152.046 m
+RESULT   h=1: entry/15/14 step |r15 - S|: p50 0.004, p99 0.030, max 0.386 m
+RESULT   h=1: change at 16 |r16 - S|: p50 0.006, p99 0.045, max 0.386 m
+RESULT   h=1: correction |S|: p50 0.410, p99 1.660, max 7.673 m
+RESULT   h=16: entry/15/14 step |r15 - S|: p50 0.107, p99 0.556, max 4.239 m
+RESULT   h=16: change at 16 |r16 - S|: p50 0.108, p99 0.562, max 4.290 m
+RESULT   h=16: correction |S|: p50 0.437, p99 1.460, max 3.733 m
+RESULT   h=64: entry/15/14 step |r15 - S|: p50 0.194, p99 0.897, max 7.182 m
+RESULT   h=64: change at 16 |r16 - S|: p50 0.195, p99 0.900, max 7.233 m
+RESULT   h=64: correction |S|: p50 0.495, p99 1.101, max 1.964 m
+RESULT   h=1: change at 16 signed -0.33 to +0.39 m
+RESULT   h=16: change at 16 signed -4.29 to +2.32 m
+RESULT   h=64: change at 16 signed -7.23 to +1.96 m
+RESULT set frame-41356 (2 chunks):
+RESULT   today step 15/14 (change at 15): p50 0.383, p99 1.234, max 31.819 m
+RESULT   today step 16/15: p50 0.003, p99 0.016, max 0.155 m
+RESULT   today change at 16: p50 0.383, p99 1.234, max 31.828 m
+RESULT   carve only (no correction): entry step |r15|: p50 0.377, p99 1.198, max 1.896 m
+RESULT   variant step 16/15 |r16 - r15|: p50 0.003, p99 0.015, max 0.047 m
+RESULT   carve depth: p50 0.000, p99 0.922, max 157.376 m
+RESULT   h=1: entry/15/14 step |r15 - S|: p50 0.004, p99 0.022, max 0.409 m
+RESULT   h=1: change at 16 |r16 - S|: p50 0.007, p99 0.034, max 0.418 m
+RESULT   h=1: correction |S|: p50 0.376, p99 1.195, max 1.872 m
+RESULT   h=16: entry/15/14 step |r15 - S|: p50 0.106, p99 0.403, max 0.803 m
+RESULT   h=16: change at 16 |r16 - S|: p50 0.107, p99 0.408, max 0.815 m
+RESULT   h=16: correction |S|: p50 0.384, p99 1.019, max 1.440 m
+RESULT   h=64: entry/15/14 step |r15 - S|: p50 0.172, p99 0.649, max 1.137 m
+RESULT   h=64: change at 16 |r16 - S|: p50 0.173, p99 0.651, max 1.141 m
+RESULT   h=64: correction |S|: p50 0.409, p99 0.739, max 0.887 m
+RESULT   h=1: change at 16 signed -0.42 to +0.37 m
+RESULT   h=16: change at 16 signed -0.79 to +0.81 m
+RESULT   h=64: change at 16 signed -1.14 to +0.82 m
+RESULT set frame-41595 (4 chunks):
+RESULT   today step 15/14 (change at 15): p50 0.389, p99 4.871, max 31.819 m
+RESULT   today step 16/15: p50 0.003, p99 0.026, max 0.183 m
+RESULT   today change at 16: p50 0.389, p99 4.893, max 31.828 m
+RESULT   carve only (no correction): entry step |r15|: p50 0.310, p99 1.316, max 5.888 m
+RESULT   variant step 16/15 |r16 - r15|: p50 0.002, p99 0.016, max 0.172 m
+RESULT   carve depth: p50 0.000, p99 24.791, max 157.376 m
+RESULT   h=1: entry/15/14 step |r15 - S|: p50 0.003, p99 0.029, max 0.409 m
+RESULT   h=1: change at 16 |r16 - S|: p50 0.006, p99 0.042, max 0.461 m
+RESULT   h=1: correction |S|: p50 0.309, p99 1.313, max 5.856 m
+RESULT   h=16: entry/15/14 step |r15 - S|: p50 0.089, p99 0.512, max 2.687 m
+RESULT   h=16: change at 16 |r16 - S|: p50 0.090, p99 0.517, max 2.755 m
+RESULT   h=16: correction |S|: p50 0.337, p99 1.247, max 3.534 m
+RESULT   h=64: entry/15/14 step |r15 - S|: p50 0.152, p99 0.846, max 4.832 m
+RESULT   h=64: change at 16 |r16 - S|: p50 0.153, p99 0.848, max 4.845 m
+RESULT   h=64: correction |S|: p50 0.373, p99 1.004, max 1.462 m
+RESULT   h=1: change at 16 signed -0.42 to +0.46 m
+RESULT   h=16: change at 16 signed -2.75 to +2.47 m
+RESULT   h=64: change at 16 signed -4.84 to +1.52 m
+RESULT set frame-50119 (4 chunks):
+RESULT   today step 15/14 (change at 15): p50 0.389, p99 4.871, max 31.819 m
+RESULT   today step 16/15: p50 0.003, p99 0.026, max 0.183 m
+RESULT   today change at 16: p50 0.389, p99 4.893, max 31.828 m
+RESULT   carve only (no correction): entry step |r15|: p50 0.310, p99 1.316, max 5.888 m
+RESULT   variant step 16/15 |r16 - r15|: p50 0.002, p99 0.016, max 0.172 m
+RESULT   carve depth: p50 0.000, p99 24.791, max 157.376 m
+RESULT   h=1: entry/15/14 step |r15 - S|: p50 0.003, p99 0.029, max 0.409 m
+RESULT   h=1: change at 16 |r16 - S|: p50 0.006, p99 0.042, max 0.461 m
+RESULT   h=1: correction |S|: p50 0.309, p99 1.313, max 5.856 m
+RESULT   h=16: entry/15/14 step |r15 - S|: p50 0.089, p99 0.512, max 2.687 m
+RESULT   h=16: change at 16 |r16 - S|: p50 0.090, p99 0.517, max 2.755 m
+RESULT   h=16: correction |S|: p50 0.337, p99 1.247, max 3.534 m
+RESULT   h=64: entry/15/14 step |r15 - S|: p50 0.152, p99 0.846, max 4.832 m
+RESULT   h=64: change at 16 |r16 - S|: p50 0.153, p99 0.848, max 4.845 m
+RESULT   h=64: correction |S|: p50 0.373, p99 1.004, max 1.462 m
+RESULT   h=1: change at 16 signed -0.42 to +0.46 m
+RESULT   h=16: change at 16 signed -2.75 to +2.47 m
+RESULT   h=64: change at 16 signed -4.84 to +1.52 m
+RESULT set frame-116591 (3 chunks):
+RESULT   today step 15/14 (change at 15): p50 11.584, p99 46.094, max 68.359 m
+RESULT   today step 16/15: p50 0.039, p99 0.321, max 1.527 m
+RESULT   today change at 16: p50 11.588, p99 46.110, max 69.242 m
+RESULT   carve only (no correction): entry step |r15|: p50 11.584, p99 46.094, max 68.359 m
+RESULT   variant step 16/15 |r16 - r15|: p50 0.039, p99 0.321, max 1.527 m
+RESULT   carve depth: p50 0.000, p99 0.000, max 0.000 m
+RESULT   h=1: entry/15/14 step |r15 - S|: p50 0.051, p99 0.400, max 2.222 m
+RESULT   h=1: change at 16 |r16 - S|: p50 0.084, p99 0.625, max 3.563 m
+RESULT   h=1: correction |S|: p50 11.582, p99 46.051, max 67.319 m
+RESULT   h=16: entry/15/14 step |r15 - S|: p50 1.218, p99 6.866, max 21.673 m
+RESULT   h=16: change at 16 |r16 - S|: p50 1.232, p99 6.999, max 22.638 m
+RESULT   h=16: correction |S|: p50 11.309, p99 44.766, max 52.687 m
+RESULT   h=64: entry/15/14 step |r15 - S|: p50 2.602, p99 11.815, max 27.911 m
+RESULT   h=64: change at 16 |r16 - S|: p50 2.610, p99 11.880, max 28.793 m
+RESULT   h=64: correction |S|: p50 11.765, p99 40.565, max 44.738 m
+RESULT   h=1: change at 16 signed -3.14 to +3.56 m
+RESULT   h=16: change at 16 signed -22.64 to +13.63 m
+RESULT   h=64: change at 16 signed -28.79 to +21.66 m
+RESULT set frame-134050 (4 chunks):
+RESULT   today step 15/14 (change at 15): p50 9.805, p99 153.530, max 195.040 m
+RESULT   today step 16/15: p50 0.035, p99 0.224, max 14.749 m
+RESULT   today change at 16: p50 9.807, p99 153.494, max 195.247 m
+RESULT   carve only (no correction): entry step |r15|: p50 7.690, p99 119.290, max 161.699 m
+RESULT   variant step 16/15 |r16 - r15|: p50 0.027, p99 0.211, max 14.749 m
+RESULT   carve depth: p50 0.000, p99 41.996, max 44.792 m
+RESULT   h=1: entry/15/14 step |r15 - S|: p50 0.038, p99 0.302, max 22.192 m
+RESULT   h=1: change at 16 |r16 - S|: p50 0.061, p99 0.453, max 31.138 m
+RESULT   h=1: correction |S|: p50 7.685, p99 119.293, max 161.651 m
+RESULT   h=16: entry/15/14 step |r15 - S|: p50 1.016, p99 8.973, max 76.426 m
+RESULT   h=16: change at 16 |r16 - S|: p50 1.026, p99 9.049, max 83.193 m
+RESULT   h=16: correction |S|: p50 7.822, p99 115.040, max 154.134 m
+RESULT   h=64: entry/15/14 step |r15 - S|: p50 2.539, p99 41.584, max 77.675 m
+RESULT   h=64: change at 16 |r16 - S|: p50 2.544, p99 41.608, max 77.864 m
+RESULT   h=64: correction |S|: p50 9.120, p99 91.054, max 116.664 m
+RESULT   h=1: change at 16 signed -27.10 to +31.14 m
+RESULT   h=16: change at 16 signed -61.05 to +83.19 m
+RESULT   h=64: change at 16 signed -77.86 to +60.73 m
+RESULT set frame-139490 (4 chunks):
+RESULT   today step 15/14 (change at 15): p50 9.530, p99 28.943, max 46.946 m
+RESULT   today step 16/15: p50 0.034, p99 0.217, max 1.738 m
+RESULT   today change at 16: p50 9.531, p99 28.980, max 47.396 m
+RESULT   carve only (no correction): entry step |r15|: p50 9.250, p99 28.898, max 46.946 m
+RESULT   variant step 16/15 |r16 - r15|: p50 0.034, p99 0.216, max 1.547 m
+RESULT   carve depth: p50 0.000, p99 7.968, max 15.076 m
+RESULT   h=1: entry/15/14 step |r15 - S|: p50 0.046, p99 0.279, max 2.959 m
+RESULT   h=1: change at 16 |r16 - S|: p50 0.075, p99 0.442, max 4.001 m
+RESULT   h=1: correction |S|: p50 9.242, p99 28.870, max 46.206 m
+RESULT   h=16: entry/15/14 step |r15 - S|: p50 1.139, p99 5.629, max 17.373 m
+RESULT   h=16: change at 16 |r16 - S|: p50 1.150, p99 5.729, max 18.279 m
+RESULT   h=16: correction |S|: p50 8.953, p99 27.578, max 37.272 m
+RESULT   h=64: entry/15/14 step |r15 - S|: p50 2.429, p99 10.192, max 21.062 m
+RESULT   h=64: change at 16 |r16 - S|: p50 2.434, p99 10.238, max 21.404 m
+RESULT   h=64: correction |S|: p50 9.229, p99 24.393, max 28.907 m
+RESULT   h=1: change at 16 signed -2.70 to +4.00 m
+RESULT   h=16: change at 16 signed -13.66 to +18.28 m
+RESULT   h=64: change at 16 signed -21.40 to +21.25 m
+RESULT set frame-181555 (4 chunks):
+RESULT   today step 15/14 (change at 15): p50 0.421, p99 1.761, max 15.896 m
+RESULT   today step 16/15: p50 0.004, p99 0.021, max 0.178 m
+RESULT   today change at 16: p50 0.422, p99 1.763, max 15.892 m
+RESULT   carve only (no correction): entry step |r15|: p50 0.348, p99 1.516, max 5.396 m
+RESULT   variant step 16/15 |r16 - r15|: p50 0.003, p99 0.018, max 0.171 m
+RESULT   carve depth: p50 0.000, p99 10.939, max 14.126 m
+RESULT   h=1: entry/15/14 step |r15 - S|: p50 0.004, p99 0.027, max 0.326 m
+RESULT   h=1: change at 16 |r16 - S|: p50 0.007, p99 0.040, max 0.423 m
+RESULT   h=1: correction |S|: p50 0.347, p99 1.514, max 5.307 m
+RESULT   h=16: entry/15/14 step |r15 - S|: p50 0.105, p99 0.476, max 3.315 m
+RESULT   h=16: change at 16 |r16 - S|: p50 0.106, p99 0.482, max 3.386 m
+RESULT   h=16: correction |S|: p50 0.372, p99 1.322, max 2.080 m
+RESULT   h=64: entry/15/14 step |r15 - S|: p50 0.170, p99 0.794, max 4.857 m
+RESULT   h=64: change at 16 |r16 - S|: p50 0.170, p99 0.797, max 4.928 m
+RESULT   h=64: correction |S|: p50 0.412, p99 0.931, max 1.146 m
+RESULT   h=1: change at 16 signed -0.23 to +0.42 m
+RESULT   h=16: change at 16 signed -3.39 to +1.91 m
+RESULT   h=64: change at 16 signed -4.93 to +1.15 m
+RESULT set frame-187750 (4 chunks):
+RESULT   today step 15/14 (change at 15): p50 0.421, p99 1.761, max 15.896 m
+RESULT   today step 16/15: p50 0.004, p99 0.021, max 0.178 m
+RESULT   today change at 16: p50 0.422, p99 1.763, max 15.892 m
+RESULT   carve only (no correction): entry step |r15|: p50 0.348, p99 1.516, max 5.396 m
+RESULT   variant step 16/15 |r16 - r15|: p50 0.003, p99 0.018, max 0.171 m
+RESULT   carve depth: p50 0.000, p99 10.939, max 14.126 m
+RESULT   h=1: entry/15/14 step |r15 - S|: p50 0.004, p99 0.027, max 0.326 m
+RESULT   h=1: change at 16 |r16 - S|: p50 0.007, p99 0.040, max 0.423 m
+RESULT   h=1: correction |S|: p50 0.347, p99 1.514, max 5.307 m
+RESULT   h=16: entry/15/14 step |r15 - S|: p50 0.105, p99 0.476, max 3.315 m
+RESULT   h=16: change at 16 |r16 - S|: p50 0.106, p99 0.482, max 3.386 m
+RESULT   h=16: correction |S|: p50 0.372, p99 1.322, max 2.080 m
+RESULT   h=64: entry/15/14 step |r15 - S|: p50 0.170, p99 0.794, max 4.857 m
+RESULT   h=64: change at 16 |r16 - S|: p50 0.170, p99 0.797, max 4.928 m
+RESULT   h=64: correction |S|: p50 0.412, p99 0.931, max 1.146 m
+RESULT   h=1: change at 16 signed -0.23 to +0.42 m
+RESULT   h=16: change at 16 signed -3.39 to +1.91 m
+RESULT   h=64: change at 16 signed -4.93 to +1.15 m
+RESULT set site9 (9 chunks):
+RESULT   today step 15/14 (change at 15): p50 8.807, p99 34.027, max 57.222 m
+RESULT   today step 16/15: p50 0.034, p99 0.222, max 1.738 m
+RESULT   today change at 16: p50 8.809, p99 34.046, max 57.816 m
+RESULT   carve only (no correction): entry step |r15|: p50 8.448, p99 34.007, max 57.222 m
+RESULT   variant step 16/15 |r16 - r15|: p50 0.034, p99 0.220, max 1.547 m
+RESULT   carve depth: p50 0.000, p99 11.235, max 29.612 m
+RESULT   h=1: entry/15/14 step |r15 - S|: p50 0.045, p99 0.285, max 2.959 m
+RESULT   h=1: change at 16 |r16 - S|: p50 0.074, p99 0.449, max 4.001 m
+RESULT   h=1: correction |S|: p50 8.445, p99 34.004, max 56.512 m
+RESULT   h=16: entry/15/14 step |r15 - S|: p50 1.140, p99 5.843, max 17.373 m
+RESULT   h=16: change at 16 |r16 - S|: p50 1.152, p99 5.945, max 18.279 m
+RESULT   h=16: correction |S|: p50 8.188, p99 32.951, max 45.133 m
+RESULT   h=64: entry/15/14 step |r15 - S|: p50 2.410, p99 10.916, max 30.304 m
+RESULT   h=64: change at 16 |r16 - S|: p50 2.416, p99 10.970, max 30.878 m
+RESULT   h=64: correction |S|: p50 8.393, p99 30.051, max 37.410 m
+RESULT   h=1: change at 16 signed -2.73 to +4.00 m
+RESULT   h=16: change at 16 signed -17.06 to +18.28 m
+RESULT   h=64: change at 16 signed -30.88 to +24.55 m
+RESULT   rivers (SPIKE-51 metric): 209.3 km of path
+RESULT     today: 476 rises over 0.5 m (227.4 per 100 km), max 1.59 m, 0 over 10 m
+RESULT     carve replace, no correction: 381 rises over 0.5 m (182.0 per 100 km), max 5.46 m, 0 over 10 m
+RESULT     h=1: 436 rises over 0.5 m (208.3 per 100 km), max 7.19 m, 0 over 10 m
+RESULT     h=16: 355 rises over 0.5 m (169.6 per 100 km), max 5.48 m, 0 over 10 m
+RESULT     h=64: 319 rises over 0.5 m (152.4 per 100 km), max 5.48 m, 0 over 10 m
+RESULT set random (48 chunks):
+RESULT   today step 15/14 (change at 15): p50 0.880, p99 49.664, max 195.542 m
+RESULT   today step 16/15: p50 0.007, p99 0.093, max 9.926 m
+RESULT   today change at 16: p50 0.881, p99 49.671, max 195.630 m
+RESULT   carve only (no correction): entry step |r15|: p50 0.745, p99 31.984, max 172.621 m
+RESULT   variant step 16/15 |r16 - r15|: p50 0.006, p99 0.088, max 6.307 m
+RESULT   carve depth: p50 0.000, p99 54.126, max 188.576 m
+RESULT   h=1: entry/15/14 step |r15 - S|: p50 0.008, p99 0.129, max 14.055 m
+RESULT   h=1: change at 16 |r16 - S|: p50 0.013, p99 0.198, max 14.055 m
+RESULT   h=1: correction |S|: p50 0.745, p99 31.986, max 172.120 m
+RESULT   h=16: entry/15/14 step |r15 - S|: p50 0.205, p99 2.963, max 28.249 m
+RESULT   h=16: change at 16 |r16 - S|: p50 0.207, p99 2.989, max 34.556 m
+RESULT   h=16: correction |S|: p50 0.807, p99 31.411, max 165.582 m
+RESULT   h=64: entry/15/14 step |r15 - S|: p50 0.369, p99 11.031, max 55.252 m
+RESULT   h=64: change at 16 |r16 - S|: p50 0.370, p99 11.037, max 55.224 m
+RESULT   h=64: correction |S|: p50 0.906, p99 27.922, max 137.682 m
+RESULT   h=1: change at 16 signed -12.41 to +14.06 m
+RESULT   h=16: change at 16 signed -24.86 to +34.56 m
+RESULT   h=64: change at 16 signed -48.75 to +55.22 m
+RESULT   rivers (SPIKE-51 metric): 209.7 km of path
+RESULT     today: 209 rises over 0.5 m (99.6 per 100 km), max 19.50 m, 25 over 10 m
+RESULT     carve replace, no correction: 537 rises over 0.5 m (256.0 per 100 km), max 64.95 m, 23 over 10 m
+RESULT     h=1: 1175 rises over 0.5 m (560.2 per 100 km), max 91.13 m, 49 over 10 m
+RESULT     h=16: 1003 rises over 0.5 m (478.2 per 100 km), max 78.07 m, 43 over 10 m
+RESULT     h=64: 628 rises over 0.5 m (299.4 per 100 km), max 94.09 m, 28 over 10 m
+RESULT ALL sets pooled:
+RESULT   today step 15/14 (change at 15): p50 0.907, p99 43.712, max 195.542 m
+RESULT   today step 16/15: p50 0.007, p99 0.146, max 14.749 m
+RESULT   today change at 16: p50 0.907, p99 43.730, max 195.630 m
+RESULT   carve only (no correction): entry step |r15|: p50 0.773, p99 34.961, max 172.621 m
+RESULT   variant step 16/15 |r16 - r15|: p50 0.006, p99 0.144, max 14.749 m
+RESULT   carve depth: p50 0.000, p99 39.178, max 188.576 m
+RESULT   h=1: entry/15/14 step |r15 - S|: p50 0.008, p99 0.196, max 22.192 m
+RESULT   h=1: change at 16 |r16 - S|: p50 0.013, p99 0.306, max 31.138 m
+RESULT   h=1: correction |S|: p50 0.773, p99 34.945, max 172.120 m
+RESULT   h=16: entry/15/14 step |r15 - S|: p50 0.210, p99 4.266, max 76.426 m
+RESULT   h=16: change at 16 |r16 - S|: p50 0.212, p99 4.313, max 83.193 m
+RESULT   h=16: correction |S|: p50 0.804, p99 34.186, max 165.582 m
+RESULT   h=64: entry/15/14 step |r15 - S|: p50 0.374, p99 11.503, max 77.675 m
+RESULT   h=64: change at 16 |r16 - S|: p50 0.376, p99 11.529, max 77.864 m
+RESULT   h=64: correction |S|: p50 0.863, p99 31.256, max 137.682 m
+RESULT   h=1: change at 16 signed -27.10 to +31.14 m
+RESULT   h=16: change at 16 signed -61.05 to +83.19 m
+RESULT   h=64: change at 16 signed -77.86 to +60.73 m
+test globalperf::tests::d0_variant_report ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 214 filtered out; finished in 1108.39s
+
