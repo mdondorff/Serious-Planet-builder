@@ -1,0 +1,12 @@
+A-net chunk scene: bake 16384 cells per face edge of the store C:/DEV/SeriousPlanetData/global16384, coupled run 80 steps
+chunk 0x0b000000002bd53a (face 0), the river of 14489279 km2 at its coarse cell
+chunk (4, 73, 1949), 369664 core cells (608 an edge), anchor cut cap 15 m, talus 0.9, bank_rounds 48
+RESULT cells over 20 m 100187, over 40 m 12541, over 60 m 540
+RESULT cell (167,54): base 4925.2 m, solved 4844.9 m, change -80.3 m, corridor false, area 7.24e4 m2, anchor NaN, nearest channel/anchor cell 0 cells away, edge distance 54
+RESULT cell (169,53): base 4915.7 m, solved 4835.6 m, change -80.1 m, corridor false, area 7.25e4 m2, anchor NaN, nearest channel/anchor cell 0 cells away, edge distance 53
+RESULT cell (165,55): base 4934.8 m, solved 4854.9 m, change -79.9 m, corridor false, area 7.23e4 m2, anchor NaN, nearest channel/anchor cell 0 cells away, edge distance 55
+RESULT cell (168,53): base 4919.8 m, solved 4840.2 m, change -79.6 m, corridor false, area 7.25e4 m2, anchor NaN, nearest channel/anchor cell 0 cells away, edge distance 53
+RESULT cell (166,54): base 4929.3 m, solved 4849.8 m, change -79.4 m, corridor false, area 7.23e4 m2, anchor NaN, nearest channel/anchor cell 0 cells away, edge distance 54
+RESULT cell (170,53): base 4910.4 m, solved 4831.3 m, change -79.0 m, corridor false, area 7.27e4 m2, anchor NaN, nearest channel/anchor cell 0 cells away, edge distance 53
+RESULT cell (164,55): base 4938.9 m, solved 4860.1 m, change -78.8 m, corridor false, area 7.22e4 m2, anchor NaN, nearest channel/anchor cell 0 cells away, edge distance 55
+RESULT cell (166,55): base 4930.2 m, solved 4852.0 m, change -78.2 m, corridor false, area 7.00e2 m2, anchor NaN, nearest channel/anchor cell 1 cells away, edge distance 55
