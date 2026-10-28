@@ -5,7 +5,7 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 ## Waiting for the owner
 - **Owner live test 2026-10-27** (`docs/milestones/M8/owner-test-2026-10-27/README.md`): open: group E (edits on top as default, erosion keeping mass), F and G scope, the look, the 1 m / 500 m exception, the drawn-tile reading of criterion 6 (#823). Decided 2026-10-28: the no-degradation gate first, then the D0 decision measurement with its stop rule (README "Decisions").
 - **D3 confirmed (owner, 2026-10-26):** both orders are wanted eventually; M8-7 builds edits under the erosion first (option 2: the edit shows at once, its eroded result follows within 10 s); edits on top (finishing touches) stay a per-layer setting for later. Cost per stamp or brush stroke is M8-7's first measurement.
-- **ADR 0083's share table:** a spec to write (shares on physical cores and core type; owner, 2026-10-27).
+- **ADR 0083 (compute budgets) is accepted but not built:** no share-table spec, pools not on one job system, no reserve test. Candidate for the owner's away week (decided Friday 2026-10-30): share spec with reserves (sky and weather, physics, game logic, networking), one job system, a synthetic-load reserve test in the perf harness.
 - **Optional, when convenient:** the M6 retest list (`docs/archive/M6/briefings/m6-owner-test-plan.md`, "Retest"); a live check of the flickers (Tracked).
 - **At the laptop (postponed):** the NVIDIA driver update (591.86; device losses under parallel GPU load, Tracked); excluding the repo's `target` folders from Windows Search indexing.
 
