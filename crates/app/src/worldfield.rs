@@ -848,6 +848,11 @@ impl WorldTerrain {
         self.horizon_threads.store(n.max(1), std::sync::atomic::Ordering::Relaxed);
     }
 
+    /// The threads a measurement set for one horizon bake, `None` for the default.
+    pub(crate) fn horizon_threads_set(&self) -> Option<usize> {
+        Some(self.horizon_threads.load(std::sync::atomic::Ordering::Relaxed)).filter(|&n| n != 0)
+    }
+
     /// The threads of one horizon bake: the number set, else the cores, at most 4.
     pub(crate) fn horizon_threads(&self) -> usize {
         match self.horizon_threads.load(std::sync::atomic::Ordering::Relaxed) {

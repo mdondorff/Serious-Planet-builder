@@ -461,8 +461,7 @@ fn enable_stage(world: &Arc<WorldTerrain>, st: StageSetup, out: &mut dyn Write) 
     if st.chunks {
         crate::chunkstage::enable_viewer_stage(world, st.gen, st.horizon, false, out)
     } else if st.horizon {
-        let (pool, chunk_cfg) = crate::anetworld::viewer_chunk_stage(st.gen);
-        world.enable_viewer_horizon(pool, Arc::new(planet_streaming::SystemClock::new()), chunk_cfg.workers.div_ceil(2))
+        world.enable_viewer_horizon(st.gen, Arc::new(planet_streaming::SystemClock::new()))
     } else {
         Ok(())
     }

@@ -1,0 +1,18 @@
+## MODIFIED Requirements
+
+### Requirement: STRM-064 The horizon maps are baked without a chunk stage
+With no chunk stage the horizon jobs SHALL bake the maps of the chunks of the plan's tiles (chunk-grid level 11 and finer) from the base terrain and the stamps, in the format, march and slots of a run with a stage, and SHALL bake a map again when an edit or a change of the world word reaches it.
+
+Verify: A
+Status: active
+Source: owner fallback 2026-10-28, opus-planner M8-F step 2, STRM-048, STRM-060, finding 16 of the owner test 2026-10-27
+
+Detail: Every chunk counts as ready with no change. The bakes run on a pool of their own in the idle class, at most 8 at once (half the generation workers) and one thread a bake: a map takes about 6 s on one thread and the march scales poorly inside a map (4 threads: 1.5x) and linearly across maps; bakes that need the same height tile at once wait for the first to evaluate it. The result does not depend on how many bakes run at once (CON-14). The jobs keep the maps of the wanted chunks (at most 24) and, of the others, the most recently wanted up to the configured number beyond them. An edit that reaches a chunk or the halo of its march, a neighbour included, changes its edit word; a change of the world word (the coupled lens, the base of the definition, the stage) changes every word; the map is baked again once its word has been unchanged for the settle window. A height tile of the bake is kept only if no edit was published since the field it was evaluated from was built.
+
+#### Scenario: Base-only maps
+- **WHEN** the horizon jobs run over a source with no chunk stage and two chunks are wanted
+- **THEN** both start at once, land, and are baked again after an edit word change and the settle window; maps of chunks no longer wanted go beyond the cap, the oldest first
+
+#### Scenario: Window without a stage
+- **WHEN** the window runs lit over a store without `--chunks`
+- **THEN** `chunk jobs` stays `None` and the horizon jobs bake at least one map (judged by the real-store gate `cargo xtask gate`; the small-world run reports it, because a software adapter is too slow to wait for a bake)
