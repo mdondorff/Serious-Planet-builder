@@ -1,0 +1,72 @@
+275 poses: 14 bundles, 37 stall reports, flights 4 altitudes x 8 places
+RESULT [envelope flights] no chunk stage: 224 poses, 0 with held-back tiles, held total 0, max 0, mean 0.00
+RESULT [envelope flights] margin 0 m: 224 poses, 0 with held-back tiles, held total 0, max 0, mean 0.00
+RESULT [envelope flights] margin 10 m: 224 poses, 56 with held-back tiles, held total 922, max 27, mean 4.12
+RESULT [envelope flights] margin 300 m (as built): 224 poses, 224 with held-back tiles, held total 20374, max 127, mean 90.96
+RESULT [owner bundles] no chunk stage: 14 poses, 0 with held-back tiles, held total 0, max 0, mean 0.00
+RESULT [owner bundles] margin 0 m: 14 poses, 0 with held-back tiles, held total 0, max 0, mean 0.00
+RESULT [owner bundles] margin 10 m: 14 poses, 2 with held-back tiles, held total 202, max 104, mean 14.43
+RESULT [owner bundles] margin 300 m (as built): 14 poses, 7 with held-back tiles, held total 871, max 141, mean 62.21
+RESULT [stall report poses] no chunk stage: 37 poses, 0 with held-back tiles, held total 0, max 0, mean 0.00
+RESULT [stall report poses] margin 0 m: 37 poses, 0 with held-back tiles, held total 0, max 0, mean 0.00
+RESULT [stall report poses] margin 10 m: 37 poses, 0 with held-back tiles, held total 0, max 0, mean 0.00
+RESULT [stall report poses] margin 300 m (as built): 37 poses, 15 with held-back tiles, held total 880, max 125, mean 23.78
+NONZERO [margin 10 m] owner bundles / frame-134050: 98 of 2244 nodes held, e.g. (f0 l20 380657,183563) (f0 l20 380658,183562) (f0 l20 380658,183563) (f0 l20 380659,183562)
+NONZERO [margin 10 m] owner bundles / frame-139490: 104 of 2293 nodes held, e.g. (f0 l20 380998,184442) (f0 l20 380999,184442) (f0 l20 380996,184444) (f0 l20 380997,184444)
+NONZERO [margin 10 m] envelope flights / alt 30 place 0 t 0 s: 18 of 2301 nodes held, e.g. (f0 l21 1747622,1579762) (f0 l21 1747623,1579762) (f0 l21 1747623,1579763) (f0 l21 1747624,1579763)
+NONZERO [margin 10 m] envelope flights / alt 30 place 0 t 2 s: 22 of 2311 nodes held, e.g. (f0 l21 1747622,1579785) (f0 l21 1747623,1579786) (f0 l21 1747624,1579786) (f0 l21 1747624,1579787)
+NONZERO [margin 10 m] envelope flights / alt 30 place 0 t 4 s: 17 of 2312 nodes held, e.g. (f0 l21 1747623,1579809) (f0 l21 1747624,1579809) (f0 l21 1747625,1579809) (f0 l21 1747624,1579810)
+NONZERO [margin 10 m] envelope flights / alt 30 place 0 t 6 s: 21 of 2303 nodes held, e.g. (f0 l21 1747622,1579832) (f0 l21 1747623,1579832) (f0 l21 1747623,1579833) (f0 l21 1747624,1579832)
+NONZERO [margin 10 m] envelope flights / alt 30 place 0 t 8 s: 16 of 2310 nodes held, e.g. (f0 l21 1747622,1579855) (f0 l21 1747623,1579855) (f0 l21 1747623,1579856) (f0 l21 1747624,1579856)
+NONZERO [margin 10 m] envelope flights / alt 30 place 0 t 10 s: 11 of 2296 nodes held, e.g. (f0 l21 1747623,1579879) (f0 l21 1747624,1579879) (f0 l21 1747625,1579879) (f0 l21 1747624,1579880)
+NONZERO [margin 10 m] envelope flights / alt 30 place 0 t 12 s: 21 of 2315 nodes held, e.g. (f0 l21 1747621,1579901) (f0 l21 1747622,1579902) (f0 l21 1747623,1579902) (f0 l21 1747623,1579903)
+NONZERO [margin 10 m] envelope flights / alt 30 place 1 t 0 s: 22 of 2329 nodes held, e.g. (f0 l21 1747622,1595283) (f0 l21 1747623,1595283) (f0 l21 1747623,1595284) (f0 l21 1747624,1595283)
+NONZERO [margin 10 m] envelope flights / alt 30 place 1 t 2 s: 16 of 2314 nodes held, e.g. (f0 l21 1747622,1595306) (f0 l21 1747623,1595307) (f0 l21 1747624,1595307) (f0 l21 1747625,1595307)
+NONZERO [margin 10 m] envelope flights / alt 30 place 1 t 4 s: 12 of 2323 nodes held, e.g. (f0 l21 1747623,1595330) (f0 l21 1747624,1595330) (f0 l21 1747624,1595331) (f0 l21 1747625,1595331)
+NONZERO [margin 10 m] envelope flights / alt 30 place 1 t 6 s: 27 of 2344 nodes held, e.g. (f0 l21 1747621,1595352) (f0 l21 1747622,1595353) (f0 l21 1747623,1595353) (f0 l21 1747623,1595354)
+NONZERO [margin 10 m] envelope flights / alt 30 place 1 t 8 s: 18 of 2314 nodes held, e.g. (f0 l21 1747622,1595376) (f0 l21 1747623,1595376) (f0 l21 1747623,1595377) (f0 l21 1747624,1595376)
+NONZERO [margin 10 m] envelope flights / alt 30 place 1 t 10 s: 18 of 2307 nodes held, e.g. (f0 l21 1747622,1595399) (f0 l21 1747623,1595400) (f0 l21 1747624,1595400) (f0 l21 1747624,1595401)
+NONZERO [margin 10 m] envelope flights / alt 30 place 1 t 12 s: 15 of 2304 nodes held, e.g. (f0 l21 1747623,1595423) (f0 l21 1747624,1595423) (f0 l21 1747625,1595423) (f0 l21 1747624,1595424)
+NONZERO [margin 10 m] envelope flights / alt 30 place 2 t 0 s: 24 of 2336 nodes held, e.g. (f0 l21 1747622,1610770) (f0 l21 1747623,1610770) (f0 l21 1747623,1610771) (f0 l21 1747624,1610770)
+NONZERO [margin 10 m] envelope flights / alt 30 place 2 t 2 s: 24 of 2317 nodes held, e.g. (f0 l21 1747622,1610793) (f0 l21 1747623,1610793) (f0 l21 1747623,1610794) (f0 l21 1747624,1610793)
+NONZERO [margin 10 m] envelope flights / alt 30 place 2 t 4 s: 19 of 2336 nodes held, e.g. (f0 l21 1747623,1610817) (f0 l21 1747624,1610817) (f0 l21 1747625,1610817) (f0 l21 1747624,1610818)
+NONZERO [margin 10 m] envelope flights / alt 30 place 2 t 6 s: 18 of 2311 nodes held, e.g. (f0 l21 1747623,1610840) (f0 l21 1747624,1610840) (f0 l21 1747624,1610841) (f0 l21 1747625,1610840)
+NONZERO [margin 10 m] envelope flights / alt 30 place 2 t 8 s: 24 of 2343 nodes held, e.g. (f0 l21 1747622,1610863) (f0 l21 1747623,1610863) (f0 l21 1747624,1610863) (f0 l21 1747625,1610863)
+NONZERO [margin 10 m] envelope flights / alt 30 place 2 t 10 s: 22 of 2304 nodes held, e.g. (f0 l21 1747622,1610886) (f0 l21 1747623,1610886) (f0 l21 1747623,1610887) (f0 l21 1747624,1610886)
+NONZERO [margin 10 m] envelope flights / alt 30 place 2 t 12 s: 17 of 2305 nodes held, e.g. (f0 l21 1747622,1610909) (f0 l21 1747623,1610909) (f0 l21 1747623,1610910) (f0 l21 1747624,1610910)
+NONZERO [margin 10 m] envelope flights / alt 30 place 3 t 0 s: 14 of 2279 nodes held, e.g. (f0 l21 1747622,1626222) (f0 l21 1747623,1626222) (f0 l21 1747623,1626223) (f0 l21 1747624,1626223)
+NONZERO [margin 10 m] envelope flights / alt 30 place 3 t 2 s: 11 of 2284 nodes held, e.g. (f0 l21 1747622,1626245) (f0 l21 1747623,1626246) (f0 l21 1747624,1626246) (f0 l21 1747625,1626246)
+NONZERO [margin 10 m] envelope flights / alt 30 place 3 t 4 s: 14 of 2275 nodes held, e.g. (f0 l21 1747622,1626268) (f0 l21 1747623,1626269) (f0 l21 1747624,1626269) (f0 l21 1747625,1626269)
+NONZERO [margin 10 m] envelope flights / alt 30 place 3 t 6 s: 14 of 2306 nodes held, e.g. (f0 l21 1747623,1626292) (f0 l21 1747624,1626292) (f0 l21 1747624,1626293) (f0 l21 1747625,1626292)
+NONZERO [margin 10 m] envelope flights / alt 30 place 3 t 8 s: 14 of 2311 nodes held, e.g. (f0 l21 1747623,1626315) (f0 l21 1747624,1626315) (f0 l21 1747625,1626315) (f0 l21 1747624,1626316)
+NONZERO [margin 10 m] envelope flights / alt 30 place 3 t 10 s: 19 of 2319 nodes held, e.g. (f0 l21 1747622,1626338) (f0 l21 1747623,1626338) (f0 l21 1747624,1626338) (f0 l21 1747624,1626339)
+NONZERO [margin 10 m] envelope flights / alt 30 place 3 t 12 s: 16 of 2319 nodes held, e.g. (f0 l21 1747622,1626361) (f0 l21 1747623,1626361) (f0 l21 1747623,1626362) (f0 l21 1747624,1626361)
+NONZERO [margin 10 m] envelope flights / alt 30 place 4 t 0 s: 17 of 2285 nodes held, e.g. (f0 l21 1747623,1641639) (f0 l21 1747624,1641639) (f0 l21 1747625,1641639) (f0 l21 1747626,1641639)
+NONZERO [margin 10 m] envelope flights / alt 30 place 4 t 2 s: 15 of 2294 nodes held, e.g. (f0 l21 1747623,1641662) (f0 l21 1747624,1641662) (f0 l21 1747624,1641663) (f0 l21 1747625,1641662)
+NONZERO [margin 10 m] envelope flights / alt 30 place 4 t 4 s: 16 of 2304 nodes held, e.g. (f0 l21 1747622,1641685) (f0 l21 1747623,1641685) (f0 l21 1747624,1641685) (f0 l21 1747625,1641685)
+NONZERO [margin 10 m] envelope flights / alt 30 place 4 t 6 s: 16 of 2295 nodes held, e.g. (f0 l21 1747622,1641708) (f0 l21 1747623,1641708) (f0 l21 1747624,1641708) (f0 l21 1747624,1641709)
+NONZERO [margin 10 m] envelope flights / alt 30 place 4 t 8 s: 16 of 2317 nodes held, e.g. (f0 l21 1747622,1641731) (f0 l21 1747623,1641731) (f0 l21 1747623,1641732) (f0 l21 1747624,1641731)
+NONZERO [margin 10 m] envelope flights / alt 30 place 4 t 10 s: 17 of 2295 nodes held, e.g. (f0 l21 1747622,1641754) (f0 l21 1747623,1641754) (f0 l21 1747623,1641755) (f0 l21 1747624,1641754)
+NONZERO [margin 10 m] envelope flights / alt 30 place 4 t 12 s: 15 of 2300 nodes held, e.g. (f0 l21 1747622,1641777) (f0 l21 1747623,1641777) (f0 l21 1747623,1641778) (f0 l21 1747624,1641777)
+NONZERO [margin 10 m] envelope flights / alt 30 place 5 t 0 s: 15 of 2304 nodes held, e.g. (f0 l21 1747622,1657019) (f0 l21 1747623,1657019) (f0 l21 1747623,1657020) (f0 l21 1747624,1657019)
+NONZERO [margin 10 m] envelope flights / alt 30 place 5 t 2 s: 15 of 2296 nodes held, e.g. (f0 l21 1747622,1657042) (f0 l21 1747623,1657042) (f0 l21 1747623,1657043) (f0 l21 1747624,1657042)
+NONZERO [margin 10 m] envelope flights / alt 30 place 5 t 4 s: 16 of 2283 nodes held, e.g. (f0 l21 1747622,1657065) (f0 l21 1747623,1657065) (f0 l21 1747623,1657066) (f0 l21 1747624,1657065)
+NONZERO [margin 10 m] envelope flights / alt 30 place 5 t 6 s: 15 of 2305 nodes held, e.g. (f0 l21 1747622,1657088) (f0 l21 1747623,1657088) (f0 l21 1747623,1657089) (f0 l21 1747624,1657088)
+NONZERO [margin 10 m] envelope flights / alt 30 place 5 t 8 s: 15 of 2291 nodes held, e.g. (f0 l21 1747622,1657111) (f0 l21 1747623,1657111) (f0 l21 1747623,1657112) (f0 l21 1747624,1657111)
+NONZERO [margin 10 m] envelope flights / alt 30 place 5 t 10 s: 15 of 2249 nodes held, e.g. (f0 l21 1747622,1657134) (f0 l21 1747623,1657134) (f0 l21 1747623,1657135) (f0 l21 1747624,1657134)
+NONZERO [margin 10 m] envelope flights / alt 30 place 5 t 12 s: 15 of 2275 nodes held, e.g. (f0 l21 1747622,1657157) (f0 l21 1747623,1657157) (f0 l21 1747623,1657158) (f0 l21 1747624,1657157)
+NONZERO [margin 10 m] envelope flights / alt 30 place 6 t 0 s: 14 of 2260 nodes held, e.g. (f0 l21 1747623,1672363) (f0 l21 1747624,1672363) (f0 l21 1747625,1672363) (f0 l21 1747624,1672364)
+NONZERO [margin 10 m] envelope flights / alt 30 place 6 t 2 s: 15 of 2291 nodes held, e.g. (f0 l21 1747623,1672386) (f0 l21 1747624,1672386) (f0 l21 1747624,1672387) (f0 l21 1747625,1672386)
+NONZERO [margin 10 m] envelope flights / alt 30 place 6 t 4 s: 15 of 2275 nodes held, e.g. (f0 l21 1747623,1672409) (f0 l21 1747624,1672409) (f0 l21 1747625,1672409) (f0 l21 1747624,1672410)
+NONZERO [margin 10 m] envelope flights / alt 30 place 6 t 6 s: 15 of 2287 nodes held, e.g. (f0 l21 1747623,1672432) (f0 l21 1747624,1672432) (f0 l21 1747624,1672433) (f0 l21 1747625,1672432)
+NONZERO [margin 10 m] envelope flights / alt 30 place 6 t 8 s: 15 of 2266 nodes held, e.g. (f0 l21 1747623,1672455) (f0 l21 1747624,1672455) (f0 l21 1747625,1672455) (f0 l21 1747626,1672455)
+NONZERO [margin 10 m] envelope flights / alt 30 place 6 t 10 s: 16 of 2269 nodes held, e.g. (f0 l21 1747622,1672477) (f0 l21 1747623,1672478) (f0 l21 1747624,1672478) (f0 l21 1747624,1672479)
+NONZERO [margin 10 m] envelope flights / alt 30 place 6 t 12 s: 15 of 2274 nodes held, e.g. (f0 l21 1747623,1672501) (f0 l21 1747624,1672501) (f0 l21 1747625,1672501) (f0 l21 1747624,1672502)
+NONZERO [margin 10 m] envelope flights / alt 30 place 7 t 0 s: 15 of 2265 nodes held, e.g. (f0 l21 1747622,1687669) (f0 l21 1747623,1687669) (f0 l21 1747623,1687670) (f0 l21 1747624,1687669)
+NONZERO [margin 10 m] envelope flights / alt 30 place 7 t 2 s: 13 of 2254 nodes held, e.g. (f0 l21 1747623,1687692) (f0 l21 1747624,1687692) (f0 l21 1747624,1687693) (f0 l21 1747625,1687693)
+NONZERO [margin 10 m] envelope flights / alt 30 place 7 t 4 s: 13 of 2255 nodes held, e.g. (f0 l21 1747623,1687715) (f0 l21 1747624,1687715) (f0 l21 1747624,1687716) (f0 l21 1747625,1687716)
+NONZERO [margin 10 m] envelope flights / alt 30 place 7 t 6 s: 13 of 2262 nodes held, e.g. (f0 l21 1747623,1687738) (f0 l21 1747624,1687738) (f0 l21 1747624,1687739) (f0 l21 1747625,1687738)
+NONZERO [margin 10 m] envelope flights / alt 30 place 7 t 8 s: 13 of 2277 nodes held, e.g. (f0 l21 1747623,1687761) (f0 l21 1747624,1687761) (f0 l21 1747625,1687761) (f0 l21 1747624,1687762)
+NONZERO [margin 10 m] envelope flights / alt 30 place 7 t 10 s: 14 of 2264 nodes held, e.g. (f0 l21 1747623,1687784) (f0 l21 1747624,1687784) (f0 l21 1747624,1687785) (f0 l21 1747625,1687784)
+NONZERO [margin 10 m] envelope flights / alt 30 place 7 t 12 s: 14 of 2249 nodes held, e.g. (f0 l21 1747622,1687806) (f0 l21 1747623,1687807) (f0 l21 1747624,1687807) (f0 l21 1747625,1687807)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 213 filtered out; finished in 406.97s
