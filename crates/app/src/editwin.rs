@@ -182,6 +182,9 @@ pub struct EditRuntime {
     /// The tiles the last plan holds back (ADR 0074, `TileState::Capped`), given by the window before each update: the edits over them are
     /// listed as problems (VIEW-047).
     capped_tiles: Vec<TileId>,
+    /// The no-degradation gate is on (TEST-061): the smoke script places the large hill and keeps it, and the update finds which held-back tiles an edit reaches.
+    gate: bool,
+    capped_under_edit: Vec<TileId>,
 }
 
 /// The footprint items of the whole body, layer by layer in stack order (the order the stamp stages are stacked in, ADR 0007): what the
@@ -283,12 +286,24 @@ impl EditRuntime {
             refresh_all: false,
             marker_ids: Vec::new(),
             capped_tiles: Vec::new(),
+            gate: false,
+            capped_under_edit: Vec::new(),
         })
     }
 
     /// The tiles the last plan holds back, for the problems list (VIEW-047); call before [`update`](EditRuntime::update).
     pub fn set_capped_tiles(&mut self, tiles: Vec<TileId>) {
         self.capped_tiles = tiles;
+    }
+
+    /// Turns the gate on (TEST-061): the smoke script places a 400 m hill of 400 m radius and leaves it, and the update records which held-back tiles an edit reaches.
+    pub fn set_gate(&mut self) {
+        self.gate = true;
+    }
+
+    /// The held-back tiles of the last update that an edit reaches (empty unless the gate is on).
+    pub fn capped_under_edit(&self) -> &[TileId] {
+        &self.capped_under_edit
     }
 
     pub fn edit_count(&self) -> usize {
@@ -577,6 +592,11 @@ impl EditRuntime {
         // The edits over the tiles the plan holds back: the footprint find over those tiles.
         let capped: Vec<ItemId> =
             if self.capped_tiles.is_empty() { Vec::new() } else { s.items_over(&self.capped_tiles, &view).unwrap_or_default() };
+        self.capped_under_edit = if self.gate && !self.capped_tiles.is_empty() {
+            self.capped_tiles.iter().copied().filter(|t| s.items_over(&[*t], &view).is_ok_and(|items| !items.is_empty())).collect()
+        } else {
+            Vec::new()
+        };
         self.lists = Lists {
             problems: s.problems(&capped, cam),
             near: s.near(&self.shown, cam),
@@ -928,6 +948,8 @@ impl EditRuntime {
                     return Err(format!("edit smoke: the click at {c:?} placed nothing ({})", self.session.status()));
                 }
             }
+            // The gate places the hill and sets its size: the drag of the handle is the editing smoke's, and a handle can be off the screen at a high site.
+            f if self.gate && f == SMOKE_FIRST_FRAME + 4 => {}
             f if f == SMOKE_FIRST_FRAME + 4 => {
                 let dbg = || {
                     let sel = self
@@ -960,6 +982,14 @@ impl EditRuntime {
                 self.moved(camera, viewport, [h[0] + 12.0, h[1]], limits, field);
                 self.release();
             }
+            // The gate keeps a large hill (400 m high, 400 m radius) on the ground and ends the script there.
+            f if self.gate && f == SMOKE_FIRST_FRAME + 8 => {
+                self.apply(vec![
+                    Event::Param { key: "radius_m".to_string(), text: "400".to_string() },
+                    Event::Param { key: "height_m".to_string(), text: "400".to_string() },
+                ]);
+                self.smoke_done = true;
+            }
             f if f == SMOKE_FIRST_FRAME + 8 => self.apply(vec![Event::Param { key: "radius_m".to_string(), text: "300".to_string() }]),
             f if f == SMOKE_FIRST_FRAME + 10 => self.key(EditKey::Undo),
             f if f == SMOKE_FIRST_FRAME + 12 => self.key(EditKey::Redo),
@@ -981,6 +1011,13 @@ impl EditRuntime {
     /// The verdict of the editing script: everything it drove happened and nothing was refused.
     pub fn smoke_verdict(&self) -> Result<(), String> {
         let s = &self.stats;
+        if self.gate {
+            return if s.placed >= 1 && s.refused == 0 && s.published >= 1 && self.edit_count() == 1 {
+                Ok(())
+            } else {
+                Err(format!("edit gate: the hill was not placed and published: {}", self.summary()))
+            };
+        }
         let ok = s.placed >= 1
             && s.dragged >= 1
             && s.typed >= 1

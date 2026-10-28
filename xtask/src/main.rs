@@ -4,6 +4,7 @@ mod accept;
 mod blesscmd;
 mod cistats;
 mod detdiff;
+mod gate;
 mod heavy;
 mod layering;
 mod logcmd;
@@ -23,6 +24,7 @@ const USAGE: &str = "cargo xtask <command>
   test                 tiers A + B on the software adapter
   test gpu             tier C goldens and debug views (software adapter; --real for the GPU, which also runs the tier-B oracles)
   check                rustfmt --check, clippy -D warnings, layering
+  gate [--small] [--site frame-N]... [--paths DIR] [--store DIR]   the no-degradation gate (TEST-061 to TEST-063): the editor window with the chunk stage on over the real store, a scripted 400 m hill and the camera path of each capture site of the owner test (outputs under target/gate/), judged on frames over 100 ms, held-back tiles no edit reaches, horizon maps, caught panics and the step between levels; --small is the same counters on a generated world on the software adapter
   prepush              before every push to a PR branch: check, test fast, and test gpu when the diff against origin/main touches a golden-producing path (render, frame, shaders, generators, ...); prints each step's time and one verdict line (BUILD-016)
   layering             crate layering and GPU-free dependency check (CON-02)
   spec-lint            trace IDs, tiers, requirement coverage (CON-16)
@@ -61,6 +63,7 @@ fn main() -> ExitCode {
         Some("test") => heavy::with(&format!("test {}", args[1..].join(" ")), || testcmd::test(&root, &args[1..])),
         Some("check") => testcmd::check(&root),
         Some("prepush") => heavy::with("prepush", || prepush::run(&root)),
+        Some("gate") => heavy::with(&format!("gate {}", args[1..].join(" ")), || gate::run_gate(&root, &args[1..])),
         Some("layering") => layering::run(&root),
         Some("spec-lint") => speclint::run(&root),
         Some("log") => logcmd::run(&root, &args[1..]),

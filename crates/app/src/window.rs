@@ -199,6 +199,57 @@ struct GlobeStats {
     landings: u64,
 }
 
+/// Frames the gate waits after its edit script ends, before the camera path starts: the hill's chunks are asked for and the first of them land.
+const GATE_SETTLE_FRAMES: u64 = 240;
+
+/// The settling frames of this run: `PLANET_GATE_SETTLE` frames, else [`GATE_SETTLE_FRAMES`] (the small world in CI uses fewer: its software frames are slow).
+fn gate_settle_frames() -> u64 {
+    std::env::var("PLANET_GATE_SETTLE").ok().and_then(|v| v.parse().ok()).unwrap_or(GATE_SETTLE_FRAMES)
+}
+
+/// Frames after which a gate run that has not finished fails (a hung edit script or path).
+const GATE_GIVE_UP: u64 = 400_000;
+
+/// The no-degradation gate of a window run (`PLANET_GATE`, TEST-061): the counters, the camera path of `PLANET_GATE_PATH` and the file of
+/// `PLANET_GATE_REPORT` the report goes to.
+struct GateRun {
+    gate: crate::gate::Gate,
+    replay: Option<crate::gate::Replay>,
+    report: Option<PathBuf>,
+    /// The frame the edit script ended at.
+    edit_done_at: Option<u64>,
+    /// Whether any frame drew lit over a chunk stage.
+    lit_with_stage: bool,
+}
+
+impl GateRun {
+    fn from_env() -> Result<Option<GateRun>, String> {
+        if std::env::var_os("PLANET_GATE").is_none() {
+            return Ok(None);
+        }
+        let replay = match std::env::var_os("PLANET_GATE_PATH") {
+            Some(p) => {
+                let text = std::fs::read_to_string(&p).map_err(|e| format!("PLANET_GATE_PATH {}: {e}", PathBuf::from(&p).display()))?;
+                Some(crate::gate::Replay::from_text(&text).map_err(|e| format!("PLANET_GATE_PATH {}: {e}", PathBuf::from(&p).display()))?)
+            }
+            None => None,
+        };
+        Ok(Some(GateRun {
+            gate: Default::default(),
+            replay,
+            report: std::env::var_os("PLANET_GATE_REPORT").map(PathBuf::from),
+            edit_done_at: None,
+            lit_with_stage: false,
+        }))
+    }
+
+    /// Whether the edit script ended, the settling frames passed and the path (if any) was replayed to its end.
+    fn finished(&self, frames: u64, now_ms: u64) -> bool {
+        self.edit_done_at.is_some_and(|at| frames >= at + gate_settle_frames())
+            && self.replay.as_ref().is_none_or(|r| r.started() && r.pose(now_ms).1)
+    }
+}
+
 /// Everything that exists once the window does.
 struct Running {
     /// The editor UI (VIEW-011): egui in the frame after the tone map; `None` with `--no-ui`.
@@ -268,6 +319,8 @@ struct Running {
     chunks_on: bool,
     /// The frame a smoke run pressed K at, over a chunk stage (`PLANET_SMOKE_LENS`).
     smoke_lens_at: Option<u64>,
+    /// The no-degradation gate (`PLANET_GATE`, TEST-061): its counters, the camera path to replay and the file the report goes to.
+    gate: Option<GateRun>,
     /// The sun of the last lit plan before the editing light, for the title's local solar time (VIEW-054).
     sun_dir: [f32; 3],
     /// Where the camera was on the last frame, planet-fixed.
@@ -409,7 +462,9 @@ impl App<'_> {
         // A world with a stored coupled channel gets the A-net chunk stage on a thread (STRM-046); the jobs run on a pool of half the generation workers' size.
         // A smoke run skips it (it needs no chunks), unless `PLANET_SMOKE_CHUNKS` asks: the smoke over a store with a coupled run then draws lit over the
         // stage and its verdict wants the horizon jobs to have run (TEST-058).
-        if self.world.has_bake() && (!cfg.smoke || std::env::var_os("PLANET_SMOKE_CHUNKS").is_some()) {
+        if self.world.has_bake()
+            && (!cfg.smoke || std::env::var_os("PLANET_SMOKE_CHUNKS").is_some() || std::env::var_os("PLANET_GATE").is_some())
+        {
             // The pool and the knobs of the viewer's chunk stage: one function, which the headless scenes use too (`anetworld::viewer_chunk_stage`).
             let (pool, chunk_cfg) = crate::anetworld::viewer_chunk_stage(cfg.gen);
             self.world.request_anet(pool, self.clock.clone(), chunk_cfg);
@@ -438,6 +493,9 @@ impl App<'_> {
             let mut e = EditRuntime::new(self.world.definition().as_ref().clone(), cfg.radius_m, cfg.items.as_ref(), cfg.layout.clone())?;
             // A smoke run turns the mode on itself, at the frame its script says, after the overview phases.
             e.on = cfg.edit && !cfg.smoke;
+            if std::env::var_os("PLANET_GATE").is_some() {
+                e.set_gate();
+            }
             // The brush guard limits the stack of strokes by what these parameters can draw (VIEW-043).
             e.session.set_drawable_slope(cfg.lod.drawable_slope());
             Some(e)
@@ -490,6 +548,7 @@ impl App<'_> {
             coupled_shown: None,
             chunks_on: false,
             smoke_lens_at: None,
+            gate: GateRun::from_env()?,
             sun_dir: [0.0, 0.0, 1.0],
             camera_position: planet_core::Vec3::new(1.0, 0.0, 0.0),
             horizon: Default::default(),
@@ -707,6 +766,25 @@ impl App<'_> {
                 Some(s) if !s.done() => s.camera(&|d| field.height(d), radius, f64::from(cfg.size.0) / f64::from(cfg.size.1)),
                 _ => camera,
             };
+            // The gate holds the first pose of its path while the edit script runs, then replays the path in real time.
+            let camera = match st.gate.as_mut() {
+                Some(g) => {
+                    let edit_done = st.edit.as_ref().is_none_or(|e| e.smoke_finished());
+                    if edit_done {
+                        let at = *g.edit_done_at.get_or_insert(st.frames);
+                        if st.frames >= at + gate_settle_frames() {
+                            if let Some(r) = g.replay.as_mut() {
+                                r.start(now_ms);
+                            }
+                        }
+                    }
+                    match g.replay.as_ref() {
+                        Some(r) => r.pose(now_ms).0.camera(&camera),
+                        None => camera,
+                    }
+                }
+                None => camera,
+            };
             st.last_camera = camera;
             if st.frames % 6 == 0 {
                 let pos = camera.position.0;
@@ -824,6 +902,11 @@ impl App<'_> {
                     let text = report.map_or_else(|| why.clone(), |p| format!("plan refused, report {}", p.display()));
                     st.notice = Some((text, now_ms + NOTICE_MS));
                 }
+            }
+            if let Some(g) = st.gate.as_mut() {
+                let held: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().filter(|n| n.capped).map(|n| n.tile).collect();
+                let under = st.edit.as_ref().map_or(&[][..], |e| e.capped_under_edit());
+                g.gate.held(st.frames, &held, under);
             }
             let capped = frame.pipeline.draw.plan.nodes.iter().filter(|n| n.capped).count();
             if let Some(line) = st.capped_log.observe(capped, now_ms) {
@@ -1094,6 +1177,9 @@ impl App<'_> {
                     st.presented += 1;
                     if drew_lit {
                         st.counts.lit_presented += 1;
+                        if let (true, Some(g)) = (st.chunks_on, st.gate.as_mut()) {
+                            g.lit_with_stage = true;
+                        }
                     } else {
                         st.counts.debug_presented += 1;
                     }
@@ -1107,9 +1193,16 @@ impl App<'_> {
                 // A smoke run asked for the chunk stage (`PLANET_SMOKE_CHUNKS`) waits for it to come up, and one asked for the K view waits a few
                 // frames after pressing it, so a slow runner cannot end the run before the stage or the lens did anything.
                 let stage_done = st.frames >= SMOKE_GIVE_UP
-                    || ((std::env::var_os("PLANET_SMOKE_CHUNKS").is_none() || st.chunks_on)
+                    || (((std::env::var_os("PLANET_SMOKE_CHUNKS").is_none() && st.gate.is_none()) || st.chunks_on)
                         && (std::env::var_os("PLANET_SMOKE_LENS").is_none() || st.smoke_lens_at.is_some_and(|f| st.frames >= f + 20)));
-                if st.frames >= cfg.smoke_frames.max(SMOKE_FRAMES) && st.presented > 0 && editing_done && stage_done {
+                let gate_done = st.gate.as_ref().is_none_or(|g| g.finished(st.frames, now_ms));
+                if st.gate.is_some() && st.frames > GATE_GIVE_UP {
+                    return Err(format!(
+                        "gate: the run did not finish in {GATE_GIVE_UP} frames (edit script done at {:?})",
+                        st.gate.as_ref().and_then(|g| g.edit_done_at)
+                    ));
+                }
+                if st.frames >= cfg.smoke_frames.max(SMOKE_FRAMES) && st.presented > 0 && editing_done && stage_done && gate_done {
                     // The verdict is on counts: lit frames with the atmosphere drawn and presented, the debug path too, an exposure
                     // reading, and the renderer's own account that the passes ran. No wall-clock (VIEW-005).
                     smoke_verdict(&st.counts, cfg.atmosphere)?;
@@ -1117,6 +1210,15 @@ impl App<'_> {
                         if let Some(e) = st.edit.as_ref() {
                             e.smoke_verdict()?;
                         }
+                    }
+                    if let Some(g) = st.gate.as_ref() {
+                        let maps = self.world.horizon_stats().map_or(0, |h| h.baked + h.disk_hits);
+                        let extra = format!(
+                            "horizon jobs: {:?}; chunk jobs: {:?}",
+                            self.world.horizon_stats(),
+                            self.world.chunk_manager().map(|m| m.stats())
+                        );
+                        gate_finish(g, maps, &extra)?;
                     }
                     quit = true;
                 } else if st.presented == 0 && st.frames >= SMOKE_GIVE_UP {
@@ -1139,7 +1241,11 @@ impl App<'_> {
     fn note_stall(&mut self) {
         let Some(st) = self.state.as_mut() else { return };
         st.stall.mark("the rest of the frame");
-        let Some(stall) = st.stall.end() else { return };
+        let stall = st.stall.end();
+        if let Some(g) = st.gate.as_mut() {
+            g.gate.frame(st.frames, &st.stall.phases_ms());
+        }
+        let Some(stall) = stall else { return };
         let c = st.last_counts;
         let mut extra = format!(
             "jobs in flight in the tile streamer: {} in flight, {} queued, {} dispatched this frame, {} blocked; resident {}, slots in use {}\n",
@@ -1898,6 +2004,22 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     }
 }
 
+/// The gate's verdict at the end of the run (TEST-061): the counters line to stdout and to the report file, and an error naming every failed
+/// counter when the run fails.
+fn gate_finish(g: &GateRun, horizon_maps: u64, extra: &str) -> Result<(), String> {
+    let panics = crate::gate::panics();
+    let line = format!("{}; {extra}", g.gate.report(horizon_maps, panics));
+    println!("{line}");
+    if let Some(p) = &g.report {
+        std::fs::write(p, format!("{line}\n")).map_err(|e| format!("gate report {}: {e}", p.display()))?;
+    }
+    let failures = g.gate.failures(horizon_maps, g.lit_with_stage, panics, std::env::var_os("PLANET_GATE_SOFTWARE").is_none());
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("gate FAILED:\n  {}", failures.join("\n  ")))
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

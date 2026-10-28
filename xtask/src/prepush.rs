@@ -25,6 +25,16 @@ pub fn touches_goldens(path: &str) -> bool {
     p.strip_prefix("crates/").and_then(|rest| rest.split('/').next()).is_some_and(|dir| GOLDEN_CRATES.contains(&dir))
 }
 
+/// Directories under `crates/` whose changes can degrade what the owner saw on 2026-10-27 (TEST-063): generation, streaming, rendering, the editor
+/// and the window that joins them (the shaders live under `render`).
+const GATE_CRATES: [&str; 7] = ["generators", "streaming", "render", "editor", "frame", "app", "cache"];
+
+/// True when a changed path makes `gate --small` part of the pre-push run.
+pub fn touches_gate(path: &str) -> bool {
+    let p = path.replace('\\', "/");
+    p.strip_prefix("crates/").and_then(|rest| rest.split('/').next()).is_some_and(|dir| GATE_CRATES.contains(&dir))
+}
+
 /// The paths among `changed` that make `test gpu` part of the run, in the order given.
 pub fn golden_triggers(changed: &[String]) -> Vec<&str> {
     changed.iter().map(String::as_str).filter(|p| touches_goldens(p)).collect()
@@ -128,6 +138,9 @@ pub fn plan_steps(changed: &[String]) -> Vec<&'static str> {
     if !golden_triggers(changed).is_empty() {
         steps.push("test gpu");
     }
+    if changed.iter().any(|p| touches_gate(p)) {
+        steps.push("gate --small");
+    }
     steps
 }
 
@@ -153,6 +166,7 @@ pub fn run(root: &Path) -> Res {
             }
             "check" => Box::new(|| testcmd::check(root)),
             "test fast" => Box::new(|| testcmd::test(root, &["fast".to_string()])),
+            "gate --small" => Box::new(|| crate::gate::run_small(root)),
             _ => Box::new(|| testcmd::test(root, &["gpu".to_string()])),
         };
         plan.push((name, action));
@@ -182,15 +196,28 @@ mod tests {
     // spec: BUILD-016
     // spec: BUILD-021
     // spec: BUILD-022
+    // spec: TEST-063
     #[test]
     fn the_plan_of_a_diff_is_spec_lint_alone_for_docs_and_the_gpu_tier_follows_a_golden_path() {
         assert_eq!(plan_steps(&paths(&["docs/status.md"])), ["merged spec-lint", "spec-lint"]);
-        assert_eq!(plan_steps(&paths(&["docs/status.md", "crates/editor/src/lib.rs"])), ["merged spec-lint", "check", "test fast"]);
-        assert_eq!(plan_steps(&paths(&["crates/render/src/terrain.rs"])), ["merged spec-lint", "check", "test fast", "test gpu"]);
+        assert_eq!(
+            plan_steps(&paths(&["docs/status.md", "crates/editor/src/lib.rs"])),
+            ["merged spec-lint", "check", "test fast", "gate --small"]
+        );
+        assert_eq!(
+            plan_steps(&paths(&["crates/render/src/terrain.rs"])),
+            ["merged spec-lint", "check", "test fast", "test gpu", "gate --small"]
+        );
         assert_eq!(
             plan_steps(&paths(&["spikes/x/shader.wgsl", "docs/a.md"])),
             ["merged spec-lint", "spec-lint", "test gpu"],
             "a golden path outside the crates"
+        );
+        assert!(
+            touches_gate("crates/streaming/src/chunks.rs")
+                && touches_gate("crates/render/src/x.wgsl")
+                && !touches_gate("docs/status.md")
+                && !touches_gate("crates/core/src/lib.rs")
         );
         assert_eq!(plan_steps(&[]), ["merged spec-lint", "check", "test fast"], "nothing changed is the whole workspace");
 

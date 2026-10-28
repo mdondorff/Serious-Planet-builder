@@ -34,6 +34,7 @@ pub fn install(args: &[String]) {
     with(|c| c.args = args.to_vec());
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        crate::gate::note_panic();
         previous(info);
         let location = info.location().map_or_else(|| "unknown location".to_string(), ToString::to_string);
         let payload = info.payload();

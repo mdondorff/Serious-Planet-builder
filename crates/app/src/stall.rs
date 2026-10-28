@@ -129,6 +129,11 @@ impl StallProbe {
         WAITS.with(|w| w.borrow_mut().clear());
     }
 
+    /// The phases of the frame that ended last, in the order they ran, in milliseconds (the gate's frame time, TEST-061).
+    pub fn phases_ms(&self) -> Vec<(&'static str, f64)> {
+        self.phases.iter().map(|(n, d)| (*n, d.as_secs_f64() * 1e3)).collect()
+    }
+
     /// The phase `name` ended now: the time since the last mark is its.
     pub fn mark(&mut self, name: &'static str) {
         let now = Instant::now();
