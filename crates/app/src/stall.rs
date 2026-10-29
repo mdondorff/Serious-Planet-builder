@@ -23,6 +23,31 @@ pub const WAIT_NOTED: Duration = Duration::from_millis(2);
 /// At most one stall report in this time; the others are one line in the log.
 pub const REPORT_EVERY: Duration = Duration::from_secs(10);
 
+/// The start of a run's phase clock and its marks (milliseconds since the first mark): where a run spends its startup (the process, the event loop, the world, the device,
+/// the floor tiles, the frames). Recorded always (a few pushes), printed only under `PLANET_TIMING` by [`phase_report`].
+static PHASE_START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+static PHASE_MARKS: Mutex<Vec<(&'static str, f64)>> = Mutex::new(Vec::new());
+
+/// A phase of the run is reached now.
+pub fn phase_mark(label: &'static str) {
+    let ms = PHASE_START.get_or_init(Instant::now).elapsed().as_secs_f64() * 1e3;
+    if let Ok(mut m) = PHASE_MARKS.lock() {
+        m.push((label, ms));
+    }
+}
+
+/// The marks as one line, each with the time since the previous one: `world 340 ms, device 1500 ms, ...`.
+pub fn phase_report() -> String {
+    let marks = PHASE_MARKS.lock().map(|m| m.clone()).unwrap_or_default();
+    let mut prev = 0.0;
+    let mut parts: Vec<String> = Vec::new();
+    for (label, at) in &marks {
+        parts.push(format!("{label} +{:.0} ms", at - prev));
+        prev = *at;
+    }
+    format!("{} (total {:.0} ms since the first mark)", parts.join(", "), prev)
+}
+
 thread_local! {
     static WAITS: RefCell<Vec<(&'static str, Duration)>> = const { RefCell::new(Vec::new()) };
 }

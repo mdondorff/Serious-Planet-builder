@@ -28,16 +28,22 @@ fn smoke_in(extra: &[&str], envs: &[(&str, &str)]) -> Option<String> {
 
 /// Run `planet editor <flags> <extra>` with the run's adapter; `None` is the declared skip, a failure panics.
 fn run_editor(flags: &[&str], extra: &[&str], envs: &[(&str, &str)]) -> Option<String> {
+    let started = std::time::Instant::now();
     let adapter = adapter();
     let out = Command::new(env!("CARGO_BIN_EXE_planet"))
         .arg("editor")
         .args(flags)
         .args(extra)
         .env("PLANET_ADAPTER", &adapter)
+        .env("PLANET_TIMING", "1")
         .envs(envs.iter().copied())
         .output()
         .expect("the planet binary starts");
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    // The phases of the run (process start to the last frame), for the CI log: where a window test spends its time (shown for passing tests by the nextest override).
+    if let Some(line) = stdout.lines().find(|l| l.contains("[timing]")) {
+        println!("TIMING editor {flags:?} {extra:?}: wall {:.0} ms; {line}", started.elapsed().as_secs_f64() * 1e3);
+    }
     let stderr = String::from_utf8_lossy(&out.stderr);
     if !out.status.success() {
         if stderr.contains(NO_DISPLAY) {

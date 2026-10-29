@@ -475,11 +475,13 @@ impl App<'_> {
         let cfg = self.cfg;
         let attrs = Window::default_attributes().with_title("planet").with_inner_size(PhysicalSize::new(cfg.size.0, cfg.size.1));
         let window = Arc::new(el.create_window(attrs).map_err(|e| format!("{NO_DISPLAY}the window could not be created: {e}"))?);
+        crate::stall::phase_mark("window");
         let inner = window.inner_size();
         // The gate runs here, before the device: an integrated or software adapter, or one missing a feature or limit, is a
         // message that names the reason (VIEW-001).
         let (ctx, surface) =
             GpuContext::for_window(Arc::clone(&window), (inner.width, inner.height), cfg.policy, cfg.vsync).map_err(|e| e.to_string())?;
+        crate::stall::phase_mark("device");
         let adapter_line = ctx.adapter_log_line();
         if let Some(mode) = cfg.draw {
             ctx.prefer_draw_mode(mode);
@@ -492,6 +494,7 @@ impl App<'_> {
         let mut rig = Rig::new_with_progress(&ctx, self.world, &first, cfg.gen, &mut |done, total| {
             window.set_title(&planet_frame::viewer::roots_title(done, total));
         })?;
+        crate::stall::phase_mark("floor tiles");
         // A world with a stored coupled channel gets the A-net chunk stage on a thread (STRM-046); the jobs run on a pool of half the generation workers' size.
         // Only with `--chunks` (off by default since the owner's fallback of 2026-10-28, TEST-064); `PLANET_SMOKE_CHUNKS` asks for it in a smoke run: the smoke over
         // a store with a coupled run then draws lit over the stage and its verdict wants the horizon jobs to have run (TEST-058).
@@ -1250,6 +1253,9 @@ impl App<'_> {
                 Presented::Skipped(why) => st.skipped = Some(why),
             }
             st.frames += 1;
+            if st.frames == 1 {
+                crate::stall::phase_mark("first frame");
+            }
             if cfg.smoke {
                 // The editing script starts once the camera rests, so the run waits for it (at most until the give-up frame).
                 let editing_done = !cfg.edit || st.edit.as_ref().is_none_or(|e| e.smoke_finished()) || st.frames >= SMOKE_GIVE_UP;
@@ -1277,6 +1283,7 @@ impl App<'_> {
                 if st.frames >= cfg.smoke_frames.max(SMOKE_FRAMES) && st.presented > 0 && editing_done && stage_done && gate_done {
                     // The verdict is on counts: lit frames with the atmosphere drawn and presented, the debug path too, an exposure
                     // reading, and the renderer's own account that the passes ran. No wall-clock (VIEW-005).
+                    crate::stall::phase_mark("last frame");
                     smoke_verdict(&st.counts, cfg.atmosphere)?;
                     if cfg.edit {
                         if let Some(e) = st.edit.as_ref() {
@@ -1915,6 +1922,7 @@ fn smoke_summary(st: &Running) -> String {
 
 /// `planet editor`: open the window and run the flight until it is closed (or, for `--smoke`, for a few dozen frames).
 pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
+    crate::stall::phase_mark("start");
     crate::worldfield::check_options(o)?;
     if o.edit && o.no_ui {
         return Err("--edit needs the editor UI: drop --no-ui".into());
@@ -1930,6 +1938,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     };
     // The display first: a machine without one is told so before any world is baked.
     let event_loop = EventLoop::new().map_err(|e| format!("{NO_DISPLAY}the event loop could not start: {e}"))?;
+    crate::stall::phase_mark("event loop");
 
     // The production store when one is configured or found (VIEW-051); otherwise the in-memory preview bake, which the title says.
     let store = match &o.store {
@@ -1957,7 +1966,9 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         // The viewer's plans keep the tiles whose water the view sees even where their terrain is culled (ADR 0053).
         .bounding_water(),
     );
+    crate::stall::phase_mark("world");
     let field = world.field()?;
+    crate::stall::phase_mark("field");
     let radius_m = world.radius_m();
     let size = o.size.unwrap_or((1280, 720));
     // The same viewport-to-tolerance ratio as the 1440p runs (the plan's steepness check depends on it).
@@ -2065,6 +2076,9 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         summary: None,
     };
     event_loop.run_app(&mut app).map_err(|e| format!("{NO_DISPLAY}the event loop failed: {e}"))?;
+    if std::env::var_os("PLANET_TIMING").is_some() {
+        writeln!(out, "planet editor [timing]: {}", crate::stall::phase_report()).map_err(err)?;
+    }
     if let Some(e) = app.error {
         return Err(e);
     }
