@@ -1,1 +1,0 @@
-- 2026-10-29 **m8-window-path-world** (BUILD-003, VIEW-005): the CI phase timing (`PLANET_TIMING`, #881) showed 142 s of the 261 s of `gpu_window::the_window_path_opens...` in the floor tiles of the default 256-cell bake; its two smokes now run at `--global-res 128` (the asserts are frame and view counts)
