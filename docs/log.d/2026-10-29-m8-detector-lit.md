@@ -1,0 +1,1 @@
+- 2026-10-29 m8-detector-lit: tier C detector on the lit path: the coast view (plain, sun ahead, overlay on) draws identical pixels for a still camera once the exposure has adapted (TEST-069); passes on main.

@@ -6,6 +6,8 @@ mod gpu_envelope_perf;
 mod gpu_flight;
 #[path = "gpu_horizon_rig.rs"]
 mod gpu_horizon_rig;
+#[path = "gpu_lit_still_flicker.rs"]
+mod gpu_lit_still_flicker;
 #[path = "gpu_modes.rs"]
 mod gpu_modes;
 #[path = "gpu_preflight.rs"]

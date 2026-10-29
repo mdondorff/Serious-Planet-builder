@@ -11,6 +11,15 @@ slow-timeout = { period = "60s", terminate-after = 3 }
 filter = 'binary(gpu_all) and test(the_window_path_opens_runs_the_flight_lit_with_the_atmosphere_and_closes)'
 slow-timeout = { period = "90s", terminate-after = 5 }
 
+# Declared limit (approved by the planner, 2026-10-29, BUILD-003). `gpu_water::a_coastal_flight_at_low_altitude_flickers_within_the_budget_while_the_lod_changes_under_it`
+# flies a coastal descent on the lit path and is the last test of the Windows CI partition `C 1/2`, running alone. Its durations on the Windows CI
+# runner: 95.7 s (#887), 180.0 s (#888), then more than 300 s in three runs of #889 (300.2 s, 300.1 s, 300.1 s, the limit of the `gpu_` tier), while the
+# rest of that partition passed. A declared 450 s (5 x 90 s) is the limit that is not a budget: it still catches a hang. The first matching override
+# sets a value, so this one comes before the `gpu_` one. No test is skipped, retried or changed.
+[[profile.default.overrides]]
+filter = 'binary(gpu_all) and test(a_coastal_flight_at_low_altitude_flickers_within_the_budget_while_the_lod_changes_under_it)'
+slow-timeout = { period = "90s", terminate-after = 5 }
+
 # The software-adapter GPU tier (BUILD-003): the heavy `gpu_*` tests take 40 to 66 s alone and up to 144 s beside the other processes of
 # a full `cargo xtask test gpu` (about 20 at once, each software rasteriser multi-threaded), so they reach the 120 s mark of the default
 # limit. The limit is there to catch a hang, not to budget a test: these binaries terminate after 300 s (5 x 60 s). Grouping the heavy

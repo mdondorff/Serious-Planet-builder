@@ -882,6 +882,117 @@ pub fn capture_flights(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Re
     writeln!(out, "wrote {} (frames of each flight and shore filter, and capture.txt)", dir.display()).map_err(err)
 }
 
+/// One lit still: the frames of a held camera drawn on the lit path (atmosphere, water, exposure), read back, and how the exposure ended (TEST-069).
+pub struct LitStillRun {
+    pub name: String,
+    /// The adapted EV100 and its target when the frames were drawn, and the frames the exposure needed to reach it.
+    pub exposure_ev100: f32,
+    pub exposure_target_ev100: f32,
+    pub warm_frames: usize,
+    /// Plan nodes that carry water (a coast view without any proves nothing).
+    pub water_nodes: usize,
+    pub frames: Vec<crate::editperf::StillFrame>,
+}
+
+/// The lit stills of the coast view at 2 km on a bake with a sea (TEST-069): per case `frames` consecutive frames of the same plan at the same water time,
+/// after the exposure has adapted to its target (the state is read back; it is not hidden). The cases are the plain view, the sun ahead (the glint
+/// report) and the terrain debug overlay on the tiles; the world is the in-memory bake of the options.
+pub fn lit_still_frames(o: &Options, ctx: &GpuContext, size: (u32, u32), frames: usize) -> Result<Vec<LitStillRun>, String> {
+    let world = crate::streamperf::open_world(o, false)?.bounding_water();
+    if !world.has_water() {
+        return Err("the lit stills need the water: this world has no ocean channel".into());
+    }
+    let field = world.field()?;
+    let radius_m = world.radius_m();
+    let lod = capture_lod(o, size, radius_m, field.as_ref())?;
+    let aspect = f64::from(size.0) / f64::from(size.1);
+    let mut setup = LitSetup::new(o, &world, &lod)?;
+    let is_sea = |d: planet_core::Vec3| carries_sea(&world, d);
+    let views = lit_views(radius_m, aspect, field.as_ref(), setup.level_m, &is_sea, 1)?;
+    let camera = views.iter().find(|v| v.name == "coast-2km").ok_or("no coast-2km view")?.cameras[0];
+    let rig = Rig {
+        ctx,
+        world: &world,
+        field: field.as_ref(),
+        lod: &lod,
+        size,
+        smoke: true,
+        calibrate: false,
+        frames: 0,
+        cells: o.cells,
+        radius_m,
+    };
+    let mut r = new_renderer(&rig, &setup, camera)?;
+    let mut cache = SelectionCache::new();
+    let base = planet_frame::plan_terrain_cached(&request(&rig, camera), rig.field, &mut cache).map_err(|e| e.to_string())?;
+    crate::skeleton::upload_missing_meshes(ctx, Some(rig.world), &mut r, &base, rig.field, radius_m, o.cells)?;
+    let ahead = {
+        let (f, u) = (camera.forward, camera.up);
+        let v = f * libm::cos(0.3) + u * libm::sin(0.3);
+        let v = v.normalized();
+        [v.x as f32, v.y as f32, v.z as f32]
+    };
+    let cases: [(&str, Option<[f32; 3]>, planet_frame::look::Overlay); 3] = [
+        ("coast-2km", None, planet_frame::look::Overlay::None),
+        ("coast-2km-sun-ahead", Some(ahead), planet_frame::look::Overlay::None),
+        ("coast-2km-overlay-tiles", None, planet_frame::look::Overlay::Tiles),
+    ];
+    let mut runs = Vec::new();
+    for (name, sun, overlay) in cases {
+        // The same plan every frame: water time held, exposure stepping by one second so that it reaches its target (the EV range is 18 stops).
+        let mut lit = setup.plan(rig.world, rig.field, &base, WATER_T0, 1.0, false)?;
+        if let Some(l) = lit.lit.as_mut() {
+            if let Some(s) = sun {
+                l.sun_dir = s;
+            }
+            l.overlay = overlay;
+            l.reset_exposure = false;
+        }
+        let water_nodes = count_water(&lit) as usize;
+        // The first case snaps the exposure to its view; the next ones start from the exposure the case before left, so that it has to adapt (and stop) on its own.
+        if runs.is_empty() {
+            let mut seed = lit.clone();
+            if let Some(l) = seed.lit.as_mut() {
+                l.reset_exposure = true;
+            }
+            r.render(ctx, &seed, true).map_err(|e| e.to_string())?;
+        }
+        let mut warm_frames = 0;
+        let state = loop {
+            r.render(ctx, &lit, true).map_err(|e| e.to_string())?;
+            warm_frames += 1;
+            let s = r.lit_path().ok_or("no lit path")?.read_exposure(ctx);
+            if (s.ev100 - s.target_ev100).abs() < 1e-6 {
+                break s;
+            }
+            if warm_frames >= 60 {
+                return Err(format!(
+                    "{name}: the exposure did not reach its target in 60 one-second steps: ev100 {} target {}",
+                    s.ev100, s.target_ev100
+                ));
+            }
+        };
+        let mut out = Vec::with_capacity(frames);
+        for _ in 0..frames {
+            r.render(ctx, &lit, false).map_err(|e| e.to_string())?;
+            let px = r.read_color(ctx);
+            let mut nodes: Vec<(planet_core::TileId, u8, String)> =
+                base.nodes.iter().map(|n| (n.tile, n.level, format!("{:?}", n.state))).collect();
+            nodes.sort();
+            out.push(crate::editperf::StillFrame { width: px.width, height: px.height, rgba: px.rgba, nodes });
+        }
+        runs.push(LitStillRun {
+            name: name.to_string(),
+            exposure_ev100: state.ev100,
+            exposure_target_ev100: state.target_ev100,
+            warm_frames,
+            water_nodes,
+            frames: out,
+        });
+    }
+    Ok(runs)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
