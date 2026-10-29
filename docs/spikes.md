@@ -9,6 +9,7 @@ Per-spike register sections of M5 and M6: `docs/archive/M6/spikes.md`. Closed sp
 ## Index of open and M8 spikes
 | Id | Title | Status | Results |
 |---|---|---|---|
+| SPIKE-56 | Shadow architecture: terrain and object occluders (opus-planner, 2026-10-29) | open | `spikes/m9-shadow-architecture/results/` |
 | SPIKE-49 | One-pass coarse valley carve (ADR 0084): fill, accumulate, carve by GEN-057's depth law, one re-route, on the 16384 store; the coarse-to-fine step at the owner test's findings 2 and 3 sites before and after, the run's time, relief kept per band (opus-planner, 2026-10-27; owner: tackle in M8) | closed 2026-10-27: the 2048 carve is 2.6 s but holds none of the chunk's change (a constant per 4.9 km cell, 1.4 to 21 m); needs the base's resolution | `spikes/m8-coarse-carve/results/` |
 | SPIKE-55 | M9 realism targets from GLO-30: slope and relief per landform against the generator (opus-planner, 2026-10-29) | closed 2026-10-29: hills and mountains 4 to 9 times too gentle in relief and slope; Badlands match; no cell has Himalayan spread | `spikes/m9-glo30-targets/results/results.md` |
 | SPIKE-54 | M9 G1 cost: CPU octaves to 0.5 m | closed 2026-10-29: +13 to 17 % per tile, at most 3 cm relief | `spikes/m9-g1-octave-cost/results/results.md` |
