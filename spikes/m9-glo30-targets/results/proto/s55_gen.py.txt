@@ -1,0 +1,25 @@
+import json, os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import numpy as np
+from s55_metrics import metrics
+W = 'C:/DEV/Serious-Planet-Builder/.claude/worktrees/spike-m9-glo30/crates/app/target/spike55/'
+real = json.load(open('s55_real.json')); sites = json.load(open('s55_sites.json'))
+gen = {}; k = 0
+for key in sorted(sites):
+    gen[key] = []
+    for site in sites[key]:
+        raw = np.fromfile(W + 'win_%d.f32' % k, dtype='<f4')
+        w = int(open(W + 'win_%d.txt' % k).read().split()[2])
+        h = raw.reshape(w, w)
+        m = metrics(h, 30.0, 30.0); m['site'] = [site['lat'], site['lon']]; m['dist'] = site['dist']
+        gen[key].append(m); k += 1
+json.dump(gen, open('s55_gen.json', 'w'), indent=1)
+def f(v, d=1): return '/'.join(('%.*f' % (d, x)) for x in v)
+order = ['N52E012', 'N41W096', 'N43W102', 'N31W004', 'N40W078', 'N48E008', 'N57W005', 'N47E011', 'N27E086']
+print('| Landform (tile) | | slope deg p50/p90/p99 | relief 1 km p50/p90/p99 (m) | relief 5 km p50/p90/p99 (m) |')
+print('|---|---|---|---|---|')
+for key in order:
+    r = real[key]
+    print('| %s (%s) | real | %s | %s | %s |' % (r['landform'], key, f(r['slope_deg_p50_p90_p99']), f(r['relief_1km_m_p50_p90_p99'], 0), f(r['relief_5km_m_p50_p90_p99'], 0)))
+    for g in gen[key]:
+        print('| | generator (%.1f, %.1f) | %s | %s | %s |' % (g['site'][0], g['site'][1], f(g['slope_deg_p50_p90_p99']), f(g['relief_1km_m_p50_p90_p99'], 0), f(g['relief_5km_m_p50_p90_p99'], 0)))
