@@ -302,13 +302,14 @@ heading = 0.0
     )
 }
 
-// spec: VIEW-040
-#[test]
-fn the_item_sweep_visits_ten_large_plateaus_and_craters_at_three_altitudes_without_a_refused_plan() {
-    let dir = std::env::temp_dir().join(format!("planet-sweep-items-{}", std::process::id()));
+/// The item sweep at one altitude (VIEW-040): ten synthetic plateaus and craters, one stop each, no refused plan. One altitude per test keeps each
+/// run (a window opened on the software adapter, ten still frames per stop) well inside the limit of a `gpu_` test; the three tests together
+/// are the 30 stops of the sweep.
+fn item_sweep_at(alt: &str) {
+    let dir = std::env::temp_dir().join(format!("planet-sweep-items-{alt}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("0")).unwrap();
-    let report = std::env::temp_dir().join(format!("planet-sweep-report-{}.txt", std::process::id()));
+    let report = std::env::temp_dir().join(format!("planet-sweep-report-{alt}-{}.txt", std::process::id()));
     let _ = std::fs::remove_file(&report);
     for n in 1..=10usize {
         let kind = if n % 2 == 1 { "plateau" } else { "crater" };
@@ -318,18 +319,34 @@ fn the_item_sweep_visits_ten_large_plateaus_and_craters_at_three_altitudes_witho
     let Some(stdout) = run_editor(
         &[],
         &["--edit", "--size", "480x270", "--items", dir.to_str().unwrap()],
-        &[("PLANET_SWEEP", report.to_str().unwrap()), ("PLANET_SWEEP_HOLD", "4")],
+        &[("PLANET_SWEEP", report.to_str().unwrap()), ("PLANET_SWEEP_ALTS", alt), ("PLANET_SWEEP_HOLD", "4")],
     ) else {
         return;
     };
-    assert!(stdout.contains("[sweep ok]: 30 stops, 10 items x 3 altitudes, 0 stops with a refused plan"), "{stdout}");
+    assert!(stdout.contains("[sweep ok]: 10 stops, 10 items x 1 altitudes, 0 stops with a refused plan"), "{stdout}");
     let text = std::fs::read_to_string(&report).expect("the sweep wrote its report");
     for n in 1..=10 {
         let kind = if n % 2 == 1 { "plateau" } else { "crater" };
-        for alt in ["2000", "200", "30"] {
-            assert!(text.lines().any(|l| l.contains(&format!(" {kind}_{n} {kind} {alt} 4 "))), "no stop for {kind} {n} at {alt} m: {text}");
-        }
+        assert!(text.lines().any(|l| l.contains(&format!(" {kind}_{n} {kind} {alt} 4 "))), "no stop for {kind} {n} at {alt} m: {text}");
     }
+}
+
+// spec: VIEW-040
+#[test]
+fn the_item_sweep_visits_ten_large_plateaus_and_craters_at_2000_m_without_a_refused_plan() {
+    item_sweep_at("2000");
+}
+
+// spec: VIEW-040
+#[test]
+fn the_item_sweep_visits_ten_large_plateaus_and_craters_at_200_m_without_a_refused_plan() {
+    item_sweep_at("200");
+}
+
+// spec: VIEW-040
+#[test]
+fn the_item_sweep_visits_ten_large_plateaus_and_craters_at_30_m_without_a_refused_plan() {
+    item_sweep_at("30");
 }
 
 /// A tiny deterministic generator (SplitMix64) so the synthetic strokes are the same on every run.
