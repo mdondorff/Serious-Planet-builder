@@ -14,7 +14,7 @@ use crate::worldfield::WorldTerrain;
 use crate::{err, Options};
 use planet_core::cube::{FaceMapping, TangentWarp};
 use planet_core::{PlanetFixed, TileId, Vec3};
-use planet_frame::preview::{preview_delta_on, PreviewStamp};
+use planet_frame::preview::preview_delta_on;
 use planet_frame::{Camera, LodParams, TerrainRequest, TerrainView};
 use planet_render::GpuContext;
 use planet_world_def::footprint::Cap;
@@ -754,15 +754,26 @@ fn items_near(def: &WorldDefinition, layer: &str, at: Vec3) -> Vec<planet_world_
 
 /// The preview stamps the editor sets for the edit of `stamp` from `before` to `edited`, seen from `camera` on a body of `planet_radius_m`:
 /// the footprint delta with the brushes (VIEW-036), so a brush stroke is previewed as its chain of stamps as in the editor.
+#[cfg(test)]
 fn case_preview(
     before: &WorldDefinition,
     edited: &WorldDefinition,
     stamp: &ItemSpec,
     camera: Vec3,
     planet_radius_m: f64,
-) -> Vec<PreviewStamp> {
+) -> Vec<planet_frame::preview::PreviewStamp> {
+    case_preview_list(before, edited, stamp, camera, planet_radius_m).stamps
+}
+
+/// [`case_preview`] with the stamps the delta left out at the cap, for `ManagedLoop::set_preview_list`.
+fn case_preview_list(
+    before: &WorldDefinition,
+    edited: &WorldDefinition,
+    stamp: &ItemSpec,
+    camera: Vec3,
+    planet_radius_m: f64,
+) -> planet_frame::preview::PreviewList {
     preview_delta_on(&items_near(before, &stamp.layer, stamp.dir), &items_near(edited, &stamp.layer, stamp.dir), camera, planet_radius_m)
-        .stamps
 }
 
 /// Writes the report as `edit-latency.md` under `out` (or at `out` when it names a `.json` file), creating the directory that is missing.
@@ -824,7 +835,7 @@ fn run_once(
     out.refreshed = h.rig.managed.edit(&tiles);
     out.stages.edit_ms = ms(call);
     let call = Instant::now();
-    h.rig.managed.set_preview(case_preview(&before_def, &edited, stamp, req.camera.position.0, world.radius_m()));
+    h.rig.managed.set_preview_list(case_preview_list(&before_def, &edited, stamp, req.camera.position.0, world.radius_m()));
     out.stages.preview_call_ms = ms(call);
     let mut waiting_for_exact = false;
     // The tiles the plan draws at the frame that first delivers a plan after the edit (the plan can change with the edit).

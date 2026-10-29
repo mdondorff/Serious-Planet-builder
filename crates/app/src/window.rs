@@ -726,8 +726,8 @@ impl App<'_> {
                             st.rig.managed.edit(&tiles);
                             // The edit in flight is drawn at once from the stale tiles, displaced by the change (VIEW-023).
                             e.preview_begin(&def);
-                            let stamps = e.preview_stamps(st.last_camera.position.0);
-                            st.rig.managed.set_preview(stamps);
+                            let list = e.preview_list(st.last_camera.position.0);
+                            st.rig.managed.set_preview_list(list);
                             republished = true;
                         }
                         Err(why) => {

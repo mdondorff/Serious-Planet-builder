@@ -271,6 +271,35 @@ pub fn draw_plan_transient(
     edited: &BTreeSet<TileId>,
     transient: &[PreviewStamp],
 ) -> Result<DrawPlan, PlanError> {
+    draw_plan_states(req, base, resident, bounds, preview, edited, transient, None)
+}
+
+/// What the loop knows of the states of the stale tiles while an edit is in flight (REND-033): the key every tile had when the edit began, and
+/// the stamps the delta had to leave out at the cap.
+#[derive(Clone, Copy, Debug)]
+pub struct TileStates<'a> {
+    /// Per tile, the mesh key it had when the preview began: the oldest state, the one the delta runs from.
+    pub oldest: &'a HashMap<TileId, u64>,
+    /// The stamps of the dropped delta entries ([`crate::preview::PreviewList::left_out`]).
+    pub left_out: &'a [PreviewStamp],
+}
+
+/// [`draw_plan_transient`] that knows the state of every stale tile (REND-033, the drag). The delta runs from the oldest state to the current
+/// one, so it is the right delta only for a tile still at the oldest state; a stale tile with `states` is flagged by the delta only when its
+/// resident key is its key in `states.oldest` and no stamp left out at the cap touches it. A tile refreshed at an intermediate state of a drag,
+/// one loaded since the edit began and one that a left-out stamp touches are drawn as they are, never with a delta that is not theirs. `None`
+/// is [`draw_plan_transient`]: every stale tile under a stamp is flagged.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_plan_states(
+    req: &TerrainRequest,
+    base: Option<(&TerrainRequest, &TerrainPlan)>,
+    resident: &dyn ResidentSet,
+    bounds: &TileBounds,
+    preview: &[PreviewStamp],
+    edited: &BTreeSet<TileId>,
+    transient: &[PreviewStamp],
+    states: Option<TileStates<'_>>,
+) -> Result<DrawPlan, PlanError> {
     // The delta's stamps are at most `MAX_DELTA_STAMPS` (`preview_delta` keeps whole units to that) and a transient preview at most
     // `BRUSH_CHAIN_STAMPS`, so both fit the table whole; a longer list from another caller is cut at the end, the transient ones kept.
     let max = crate::preview::MAX_PREVIEW_STAMPS;
@@ -312,7 +341,11 @@ pub fn draw_plan_transient(
                 // A stale tile keeps the edge masks of its place in the plan (ADR 0074): next to a capped leaf its edge must still meet the
                 // capped leaf's grid while its refresh is on the way.
                 (node.stitch, node.fine) = (d.stitch, d.fine);
-                let by_delta = previewed(preview, map.as_ref(), d.tile, req.lod.radius_m);
+                // The delta is the one of the oldest state: right for a tile still at that state, wrong for any other (REND-033).
+                let delta_fits = states.is_none_or(|s| {
+                    s.oldest.get(&d.tile) == Some(&r.mesh_key) && !previewed(s.left_out, map.as_ref(), d.tile, req.lod.radius_m)
+                });
+                let by_delta = delta_fits && previewed(preview, map.as_ref(), d.tile, req.lod.radius_m);
                 let by_transient = previewed(transient, map.as_ref(), d.tile, req.lod.radius_m);
                 node.preview = by_delta || by_transient;
                 // A stale tile under both gets the delta's stamps and the transient ones; under the transient ones alone, only those.
@@ -955,6 +988,10 @@ pub struct PlanPipeline {
     preview: Vec<PreviewStamp>,
     /// The transient preview of something being made (VIEW-036); empty when there is none.
     transient: Vec<PreviewStamp>,
+    /// The key every tile had when the preview began (the oldest state, REND-033) and the stamps the delta left out at the cap; `None` when the caller
+    /// gave no states (every stale tile under a stamp is then flagged).
+    oldest: Option<HashMap<TileId, u64>>,
+    left_out: Vec<PreviewStamp>,
     /// The tiles named by the edits since the last plan made after one was delivered, and the request number of the first plan that is
     /// made after the latest edit (a plan with a lower number predates it).
     edited: BTreeSet<TileId>,
@@ -977,6 +1014,8 @@ impl PlanPipeline {
             frame: 0,
             preview: Vec::new(),
             transient: Vec::new(),
+            oldest: None,
+            left_out: Vec::new(),
             edited: BTreeSet::new(),
             edit_seq: 0,
             dropped_plan_errors: 0,
@@ -1014,6 +1053,26 @@ impl PlanPipeline {
     /// tiles are resident.
     pub fn set_preview(&mut self, preview: Vec<PreviewStamp>) {
         self.preview = preview;
+        self.oldest = None;
+        self.left_out.clear();
+    }
+
+    /// [`PlanPipeline::set_preview`] that knows the states of the tiles (REND-033, the drag): the first non-empty list since the preview ended records the
+    /// key of every resident tile (the oldest state, the one the delta runs from), the next ones keep it, and `left_out` are the stamps the delta had to
+    /// drop at the cap. A stale tile is flagged by the delta only while it still has its oldest key and no left-out stamp touches it. An empty list
+    /// in the middle of a drag (an undo back to the start, a change nothing can show) keeps the states; [`PlanPipeline::set_preview`] with an empty
+    /// list ends the preview and forgets them. Call after [`ManagedLoop::edit`], before any frame has uploaded a refreshed tile.
+    pub fn set_preview_states(
+        &mut self,
+        preview: Vec<PreviewStamp>,
+        left_out: Vec<PreviewStamp>,
+        resident: &HashMap<TileId, ResidentTile>,
+    ) {
+        if self.oldest.is_none() && !preview.is_empty() {
+            self.oldest = Some(resident.iter().map(|(t, r)| (*t, r.mesh_key)).collect());
+        }
+        self.preview = preview;
+        self.left_out = left_out;
     }
 
     /// Set the transient preview (VIEW-036): stamps of something being made, flagged on every node they touch whether or not its tile is
@@ -1103,7 +1162,8 @@ impl PlanPipeline {
         let base = self.current.as_ref().filter(|c| c.request == *req || plan_usable(&c.plan, req));
         let empty = TileBounds::default();
         let bounds = self.residency.as_ref().map_or(&empty, |r| &r.residency.bounds);
-        let draw = draw_plan_transient(
+        let states = self.oldest.as_ref().map(|oldest| TileStates { oldest, left_out: &self.left_out });
+        let draw = draw_plan_states(
             req,
             base.map(|c| (&c.request, c.plan.as_ref())),
             resident,
@@ -1111,6 +1171,7 @@ impl PlanPipeline {
             &self.preview,
             &self.edited,
             &self.transient,
+            states,
         )
         .map_err(|e| e.to_string())?;
         let wanted =

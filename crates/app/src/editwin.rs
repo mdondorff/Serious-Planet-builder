@@ -397,10 +397,15 @@ impl EditRuntime {
 
     /// The stamps to give `ManagedLoop::set_preview` for the camera at `camera` (planet-fixed); empty when no edit is in flight. Counted.
     pub fn preview_stamps(&mut self, camera: Vec3) -> Vec<PreviewStamp> {
-        let Some(oldest) = &self.feed.oldest else { return Vec::new() };
-        let stamps = preview_delta_on(oldest, &self.feed.current, camera, self.radius_m).stamps;
-        self.stats.previews += u64::from(!stamps.is_empty());
-        stamps
+        self.preview_list(camera).stamps
+    }
+
+    /// [`EditRuntime::preview_stamps`] with the stamps the delta left out at the cap, for `ManagedLoop::set_preview_list`.
+    pub fn preview_list(&mut self, camera: Vec3) -> planet_frame::preview::PreviewList {
+        let Some(oldest) = &self.feed.oldest else { return Default::default() };
+        let list = preview_delta_on(oldest, &self.feed.current, camera, self.radius_m);
+        self.stats.previews += u64::from(!list.stamps.is_empty());
+        list
     }
 
     /// The transient preview of the brush stroke under the pointer (VIEW-036), for `ManagedLoop::set_transient_preview`: the chain of the
