@@ -1176,32 +1176,55 @@ pub fn lit_stream_stills(o: &Options, ctx: &GpuContext, size: (u32, u32), frames
     // The first settle is the streaming settle (a second of frame steps); after the turn the tiles are resident and the loop only has to be quiet again.
     let resettle = need / 3;
     let limit = Duration::from_secs(if o.perf_smoke { 300 } else { 900 });
-    // Ticks until the loop has been exact and idle for `need` ticks in a row.
-    let settle = |d: &mut Driver<'_>, req: &TerrainRequest, need: usize| -> Result<usize, String> {
+    let run_started = Instant::now();
+    // Frames a settle may run before it fails with its numbers (a loop that never goes quiet must not end as a timeout).
+    const SETTLE_CAP_TICKS: usize = 900;
+    let ev = |d: &Driver<'_>| d.rig.renderer.lit_path().map_or(f32::NAN, |p| p.read_exposure(ctx).ev100);
+    // Ticks until the loop has been exact and idle for `need` ticks in a row; a progress line per phase says where the time goes.
+    let settle = |d: &mut Driver<'_>, req: &TerrainRequest, need: usize, phase: &str| -> Result<usize, String> {
         let started = Instant::now();
         let (mut quiet, mut ticks) = (0usize, 0usize);
         while quiet < need {
             let t = d.tick(req)?;
             ticks += 1;
             quiet = if t.settled { quiet + 1 } else { 0 };
-            if started.elapsed() > limit {
-                return Err(format!("the lit view did not settle in {} s ({ticks} ticks)", limit.as_secs()));
+            if ticks >= SETTLE_CAP_TICKS || started.elapsed() > limit {
+                return Err(format!(
+                    "{phase}: the lit view did not settle after {ticks} ticks in {:.0} s: {} in flight, {} queued, {} resident, EV {}",
+                    started.elapsed().as_secs_f64(),
+                    t.record.in_flight,
+                    t.record.queued,
+                    t.record.resident,
+                    ev(d)
+                ));
             }
         }
+        eprintln!(
+            "lit-stream {phase}: settled in {ticks} ticks, {:.1} s ({:.1} s into the run)",
+            started.elapsed().as_secs_f64(),
+            run_started.elapsed().as_secs_f64()
+        );
         Ok(ticks)
     };
     // The exposure steps one second a tick (the water time held) until it is at its target; the loop must stay settled.
-    let exposure = |d: &mut Driver<'_>, req: &TerrainRequest| -> Result<(usize, f32, f32), String> {
+    let exposure = |d: &mut Driver<'_>, req: &TerrainRequest, phase: &str| -> Result<(usize, f32, f32), String> {
+        let started = Instant::now();
         d.hold = Some((100.0, 1.0));
         for steps in 1..=60 {
             let t = d.tick(req)?;
             let s = d.rig.renderer.lit_path().ok_or("no lit path")?.read_exposure(ctx);
             if t.settled && (s.ev100 - s.target_ev100).abs() < 1e-6 {
+                eprintln!(
+                    "lit-stream {phase}: exposure {:.2} EV in {steps} steps, {:.1} s ({:.1} s into the run)",
+                    s.ev100,
+                    started.elapsed().as_secs_f64(),
+                    run_started.elapsed().as_secs_f64()
+                );
                 return Ok((steps, s.ev100, s.target_ev100));
             }
         }
         let s = d.rig.renderer.lit_path().ok_or("no lit path")?.read_exposure(ctx);
-        Err(format!("the exposure did not reach its target in 60 one-second steps: ev100 {} target {}", s.ev100, s.target_ev100))
+        Err(format!("{phase}: the exposure did not reach its target in 60 one-second steps: ev100 {} target {}", s.ev100, s.target_ev100))
     };
     let water_nodes = std::cell::Cell::new(0usize);
     let read = |d: &mut Driver<'_>, req: &TerrainRequest| -> Result<crate::editperf::StillFrame, String> {
@@ -1213,22 +1236,24 @@ pub fn lit_stream_stills(o: &Options, ctx: &GpuContext, size: (u32, u32), frames
         nodes.sort();
         Ok(crate::editperf::StillFrame { width: px.width, height: px.height, rgba: px.rgba, nodes })
     };
-    let settle_ticks = settle(&mut d, &held, need)?;
-    let (exposure_steps, exposure_ev100, exposure_target_ev100) = exposure(&mut d, &held)?;
+    let settle_ticks = settle(&mut d, &held, need, "streaming settle")?;
+    let (exposure_steps, exposure_ev100, exposure_target_ev100) = exposure(&mut d, &held, "held view")?;
     let mut still = Vec::with_capacity(frames);
     for _ in 0..frames {
         still.push(read(&mut d, &held)?);
     }
+    eprintln!("lit-stream {frames} still frames read ({:.1} s into the run)", run_started.elapsed().as_secs_f64());
     let hdr = d.rig.renderer.lit_path().ok_or("no lit path")?.read_hdr(ctx);
     let lit_share = hdr.iter().filter(|p| p[0] > 0.0 || p[1] > 0.0 || p[2] > 0.0).count() as f64 / hdr.len().max(1) as f64;
     // Turn and back; the exposure follows the scene both ways and is brought to its target again.
-    let first_turn = settle(&mut d, &turned, resettle)?;
-    exposure(&mut d, &turned)?;
+    let first_turn = settle(&mut d, &turned, resettle, "turned view")?;
+    exposure(&mut d, &turned, "turned view")?;
     let turned_frame = read(&mut d, &turned)?;
     d.hold = None;
-    let back = settle(&mut d, &held, resettle)?;
-    exposure(&mut d, &held)?;
+    let back = settle(&mut d, &held, resettle, "back to the held view")?;
+    exposure(&mut d, &held, "back to the held view")?;
     let after_turn = read(&mut d, &held)?;
+    eprintln!("lit-stream done in {:.1} s", run_started.elapsed().as_secs_f64());
     Ok(LitStreamStills {
         still,
         settle_ticks,
