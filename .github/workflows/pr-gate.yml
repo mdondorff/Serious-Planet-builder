@@ -1,0 +1,23 @@
+name: pr-gate
+
+# This workflow exists so that the repository ruleset's "require branches to be up to date before merging" has a
+# required check that runs on every pull request: `ci` and `docs` are path-filtered, so neither runs on every PR.
+# It proves nothing about the code. Lanes still read every check's state before merging (`gh pr checks <n>
+# --json name,state`) and check that main has not moved.
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pr-gate:
+    name: pr-gate
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: print the commits
+        run: |
+          echo "head: ${{ github.event.pull_request.head.sha || github.sha }}"
+          echo "base:  ${{ github.event.pull_request.base.sha || 'n/a (manual run)' }}"
