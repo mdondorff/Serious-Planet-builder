@@ -19,7 +19,7 @@ const PATHS: &str = "C:/DEV/SeriousPlanetData/owner-test-2026-10-27";
 /// new. Never a weakened limit: the table only keeps the run from failing on what the baseline already shows.
 pub type Known = (&'static str, &'static str, &'static str, f64);
 
-pub const KNOWN: [Known; 19] = [
+pub const KNOWN: [Known; 20] = [
     ("frame-116591", "held-back tiles", "Tracked: gate held-back tiles", 170.0),
     ("frame-134050", "held-back tiles", "Tracked: gate held-back tiles", 185.0),
     ("frame-139490", "held-back tiles", "Tracked: gate held-back tiles", 170.0),
@@ -34,6 +34,7 @@ pub const KNOWN: [Known; 19] = [
     ("frame-72408", "held-back tiles", "Tracked: gate held-back tiles", 125.0),
     ("frame-78773", "held-back tiles", "Tracked: gate held-back tiles", 140.0),
     ("*", "frames over", "Tracked: gate slow frames", 3000.0),
+    ("*", "bake blocks decoded", "Tracked: gate main-thread decodes", 6.0),
     ("frame-102263", "horizon maps baked", "Tracked: gate no horizon map at frame-102263", 0.0),
     ("levels", "level 12/11", "Tracked: gate level steps", 9.0),
     ("levels", "level 13/12", "Tracked: gate level steps", 3.85),
@@ -41,7 +42,7 @@ pub const KNOWN: [Known; 19] = [
     ("levels", "level 15/14", "Tracked: gate level steps", 0.72),
 ];
 
-/// The number a ceiling bounds: the most tiles held back at once, the longest frame in ms, or a level step's p99 in m; 0 for a failure without one.
+/// The number a ceiling bounds: the most tiles held back at once, the longest frame in ms, the bake blocks the main thread decoded, or a level step's p99 in m; 0 for a failure without one.
 pub fn key_number(failure: &str) -> f64 {
     let after = |marker: &str, end: &str| -> f64 {
         failure.split(marker).nth(1).and_then(|s| s.split(end).next()).and_then(|n| n.trim().parse().ok()).unwrap_or(0.0)
@@ -56,6 +57,8 @@ pub fn key_number(failure: &str) -> f64 {
             .and_then(|s| s.split(" ms").next())
             .and_then(|n| n.trim().parse().ok())
             .unwrap_or(0.0)
+    } else if failure.starts_with("bake blocks decoded") {
+        after("VIEW-061): ", " in ")
     } else if failure.starts_with("level ") {
         after("p99 ", " m")
     } else {
@@ -280,6 +283,20 @@ mod tests {
         assert!(failures_in("all fine\n").is_empty());
     }
 
+    // spec: TEST-063
+    #[test]
+    fn main_thread_block_decodes_are_known_up_to_their_ceiling_at_every_site() {
+        let decodes = |n: u32| {
+            format!("bake blocks decoded on the main thread (VIEW-061): {n} in 3 frames; first in frame 25 in \"camera\" (1 blocks)")
+        };
+        assert_eq!(key_number(&decodes(4)), 4.0);
+        let ok = [decodes(4)];
+        let (k, n) = split_known("frame-102263", &ok, &KNOWN);
+        assert_eq!((k.len(), n.len()), (1, 0));
+        let over = [decodes(40)];
+        let (k, n) = split_known("frame-139490", &over, &KNOWN);
+        assert_eq!((k.len(), n.len()), (0, 1), "{n:?}");
+    }
     // spec: TEST-063
     #[test]
     fn a_known_failure_over_its_ceiling_is_new() {

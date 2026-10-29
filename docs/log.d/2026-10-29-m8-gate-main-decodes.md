@@ -1,0 +1,1 @@
+- 2026-10-29 **m8-gate-main-decodes** (TEST-061, VIEW-061): the gate counts the bake blocks the main thread decodes per phase and fails on them (judged where frame time is); `xtask gate` lists the failure as known up to 6 per run (Tracked: gate main-thread decodes); 8 runs at frame-102263: 1 to 4 per run, the first at frame 25 in the camera ground-height phase

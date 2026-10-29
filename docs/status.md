@@ -28,7 +28,8 @@ Open owner items: the two flickers (Tracked) need a live check (editor off, debu
 
 ## Tracked
 - **Gate held-back tiles** (`xtask gate`, 2026-10-28): tiles held back (ADR 0074), no edit in reach, most at once: 116591 152, 134050 165, 139490 153, 181555 140, 187750 137, 197238 170, 72408 111, 78773 127, 50119 91, 31358 10, 32034 9, 41356 8, 41595 12. Ceilings: gate.rs KNOWN.
-- **Gate slow frames** (any site, ceiling 3 s): "chunk frame" up to 2.8 s, mostly at frame ~64; "editor update" 139 ms at 102263. **Gate horizon anomaly** (102263): 25-33 chunks land, no map lands (others 2-9); cause open.
+- **Gate slow frames** (any site, ceiling 3 s): "chunk frame" up to 2.8 s, mostly at frame ~64; "editor update" 139 ms at 102263 (fixed in #858: the hover pick runs off the main thread). **Gate horizon anomaly** (102263): 25-33 chunks land, no map lands (others 2-9); cause open.
+- **Gate main-thread decodes** (VIEW-061, ceiling 6 per run): the stage-off gate at frame-102263 (8 runs, 2026-10-29, explorer's tests on the machine) counts the bake blocks the main thread decodes itself: 1 to 4 per run (4, 1, 2, 1, 2, 2, 2, 2), each run's first at frame 25 in "camera, ground heights and the globe overview" (the replay places its first pose; the warm-up covers the camera now and 1, 2 and 4 s ahead, not a jump). Frames over 100 ms: 2 to 5 per run, the longest 248 to 372 ms, 6 of 8 in "plan and residency (begin_frame)" near frame 1500 (one of them decoded a block; the others 0). Fix: warm the replay's first pose before the run starts, then find the begin_frame stall.
 - **Gate level steps** (p99, bound 0.25 m): 12/11 8.961 m, 13/12 3.825, 14/13 1.850, 15/14 0.712.
 - **Editor smoke** (`editor --smoke`): does not complete on the real store (17 frames); fix when in that code (the stall gate's home).
 - **Detail blocks** (BUILD-027): 10 in `xtask/src/detail_blocks.txt`: split or shorten each, delete its line; no new blocks.
