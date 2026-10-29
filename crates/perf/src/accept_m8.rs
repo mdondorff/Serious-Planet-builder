@@ -3,7 +3,7 @@
 //!
 //! The rows: criterion 4 (`coupled-make.json`: a fresh make of the coupled run from the 16384 bake in at most 600 s, GEN-042), criterion 5
 //! (`shadow-cost.json`: shadows and material map together at most 1.5 ms of terrain-pass GPU at every pose, from the compiled-out draws,
-//! REND-044), criterion 6 (`edit-latency.md`: no `OVER` and no `over` row of the M6 table and of the horizon table `verdict (10 s, horizon maps)`; the chunk table is not judged, TEST-042 and TEST-056) and
+//! REND-044), criterion 6 (`edit-latency.md`: no `OVER` and no `over` row of the M6 table, the drawn tiles within budget; the horizon and chunk tables are not judged, owner decision 2026-10-29, TEST-042, TEST-056 and TEST-065) and
 //! criterion 7 (`envelope.json`: the highest steady speed at 300 m is at least 200 m/s; the curve of the other altitudes is reported).
 //! A smoke log, a log without the production store or a log of another scene is refused as a source of a verdict.
 
@@ -148,18 +148,12 @@ struct EditTable {
     bad: Vec<String>,
 }
 
-/// The verdict columns of the edit scene's tables (cell `OVER`, `OVER (no preview)`, `no result` or `over` fails; `ok`, `ok (no preview)`, `recorded` and `-` do not),
-/// by the header of the column: `verdict` is the M6 budgets, `verdict (10 s, horizon maps)` the horizon shadows of an edit within 10 s, and `verdict (10 s, drawn tiles)`
-/// the eroded chunk result, which is no longer judged (M8 amendment 2026-10-28).
-fn edit_tables(text: &str) -> (Option<EditTable>, Option<EditTable>) {
-    #[derive(Clone, Copy, PartialEq)]
-    enum Kind {
-        M6,
-        Horizon,
-        Ignored,
-    }
-    let (mut m6, mut horizon): (Option<EditTable>, Option<EditTable>) = (None, None);
-    let mut col: Option<(usize, Kind)> = None;
+/// The M6 table of the edit scene (the column headed exactly `verdict`; cell `OVER`, `OVER (no preview)`, `no result` or `over` fails; `ok`, `ok (no preview)`,
+/// `recorded` and `-` do not). Other verdict columns are not judged: `verdict (10 s, drawn tiles)` (the eroded chunk result, M8 amendment 2026-10-28) and
+/// `verdict (10 s, horizon maps)` (logs before the owner decision of 2026-10-29; later logs have no verdict on the horizon table).
+fn edit_table(text: &str) -> Option<EditTable> {
+    let mut m6: Option<EditTable> = None;
+    let mut col: Option<usize> = None;
     for line in text.lines() {
         if !line.starts_with('|') {
             col = None;
@@ -167,67 +161,34 @@ fn edit_tables(text: &str) -> (Option<EditTable>, Option<EditTable>) {
         }
         let cells: Vec<&str> = line.trim_matches('|').split('|').map(str::trim).collect();
         if let Some(c) = cells.iter().position(|c| c.starts_with("verdict")) {
-            let kind = if cells[c].contains("horizon") {
-                Kind::Horizon
-            } else if cells[c].contains("drawn tiles") {
-                Kind::Ignored
-            } else {
-                Kind::M6
-            };
-            col = Some((c, kind));
-            match kind {
-                Kind::M6 => {
-                    m6.get_or_insert_with(EditTable::default);
-                }
-                Kind::Horizon => {
-                    horizon.get_or_insert_with(EditTable::default);
-                }
-                Kind::Ignored => {}
+            col = (cells[c] == "verdict").then_some(c);
+            if col.is_some() {
+                m6.get_or_insert_with(EditTable::default);
             }
             continue;
         }
-        let Some((c, kind)) = col else { continue };
+        let Some(c) = col else { continue };
         if cells.iter().all(|c| c.chars().all(|ch| ch == '-' || ch == ':')) {
             continue;
         }
-        let table = match kind {
-            Kind::M6 => m6.as_mut(),
-            Kind::Horizon => horizon.as_mut(),
-            Kind::Ignored => None,
-        };
-        if let (Some(t), Some(v)) = (table, cells.get(c)) {
+        if let (Some(t), Some(v)) = (m6.as_mut(), cells.get(c)) {
             t.rows += 1;
             if v.starts_with("OVER") || *v == "over" || *v == "no result" {
                 t.bad.push(format!("{} {} ({v})", cells.first().copied().unwrap_or("?"), cells.get(1).copied().unwrap_or("?")));
             }
         }
     }
-    (m6.filter(|t| t.rows > 0), horizon.filter(|t| t.rows > 0))
+    m6.filter(|t| t.rows > 0)
 }
 
-/// Criterion 6 (amended 2026-10-28): an edit shows within the M6 budgets and its horizon shadows update within 10 s for every map the view wants. A table
-/// that is not in the log is MISSING; a failure in either wins.
+/// Criterion 6 (amended by the owner 2026-10-29): an edit shows within the M6 budgets, the drawn tiles decide. The horizon-map tables and the chunk table are
+/// reported in `edit-latency.md` and not judged. No M6 table is MISSING.
 fn criterion6(files: &M8Files) -> Verdict {
     let Some(text) = &files.edit else { return Verdict::Missing("edit-latency.md: no log".into()) };
-    let (m6, horizon) = edit_tables(text);
-    let mut bad: Vec<String> = Vec::new();
-    let mut summary: Vec<String> = Vec::new();
-    for (name, t) in [("M6 budgets", &m6), ("horizon maps in 10 s", &horizon)] {
-        if let Some(t) = t {
-            bad.extend(t.bad.iter().map(|b| format!("{name}: {b}")));
-            summary.push(format!("{name} {} rows", t.rows));
-        }
-    }
-    if !bad.is_empty() {
-        let rows: usize = [&m6, &horizon].iter().filter_map(|t| t.as_ref()).map(|t| t.rows).sum();
-        return Verdict::Fail(format!("{} of {rows} rows over: {}", bad.len(), bad.join("; ")));
-    }
-    match (m6, horizon) {
-        (None, _) => Verdict::Missing("edit-latency.md: no verdict column found (the M6 table)".into()),
-        (Some(_), None) => Verdict::Missing(
-            "edit-latency.md: no `verdict (10 s, horizon maps)` table: the horizon shadows of an edit are not logged".into(),
-        ),
-        (Some(_), Some(_)) => Verdict::Pass(format!("{}, none over", summary.join(", "))),
+    match edit_table(text) {
+        None => Verdict::Missing("edit-latency.md: no verdict column found (the M6 table)".into()),
+        Some(t) if !t.bad.is_empty() => Verdict::Fail(format!("{} of {} rows over: M6 budgets: {}", t.bad.len(), t.rows, t.bad.join("; "))),
+        Some(t) => Verdict::Pass(format!("M6 budgets {} rows, none over; horizon maps and chunk table reported, not judged", t.rows)),
     }
 }
 
@@ -285,7 +246,7 @@ pub fn evaluate(files: &M8Files) -> Vec<Row> {
     vec![
         Row { criterion: 4, what: "global coupled run at most 10 min", verdict: criterion4(files) },
         Row { criterion: 5, what: "shadows and material map at most 1.5 ms (1440p)", verdict: criterion5(files) },
-        Row { criterion: 6, what: "an edit shows within the M6 budgets, its horizon shadows within 10 s", verdict: criterion6(files) },
+        Row { criterion: 6, what: "an edit shows within the M6 budgets (drawn tiles)", verdict: criterion6(files) },
         Row { criterion: 7, what: "steady speed envelope, floor 200 m/s at 300 m", verdict: criterion7(files) },
     ]
 }
@@ -374,18 +335,46 @@ mod tests {
 
     // spec: TEST-060
     #[test]
-    fn criterion_6_judges_the_m6_table_and_the_horizon_table_and_not_the_chunk_table() {
+    fn criterion_6_judges_the_m6_table_only_and_reports_the_horizon_and_chunk_tables() {
         let mut f = good();
-        // good() has a chunk table with an OVER row: it is not judged.
-        assert!(matches!(&evaluate(&f)[2].verdict, Verdict::Pass(m) if m.contains("M6 budgets") && m.contains("horizon maps in 10 s")));
-        let m6 = "| altitude | stamp radius | verdict |\n|---|---|---|\n| 1 m | 50 m | ok |\n\n";
+        // good() has a chunk table and a horizon table with OVER rows: neither is judged.
+        assert!(matches!(&evaluate(&f)[2].verdict, Verdict::Pass(m) if m.contains("M6 budgets") && m.contains("not judged")));
+        let m6 = "| altitude | stamp radius | verdict |
+|---|---|---|
+| 1 m | 50 m | ok |
+
+";
         f.edit = Some(m6.into());
-        assert!(matches!(&evaluate(&f)[2].verdict, Verdict::Missing(m) if m.contains("horizon")), "no horizon table is not a pass");
-        f.edit = Some(format!("{m6}| altitude | stamp radius | verdict (10 s, horizon maps) |\n|---|---|---|\n| 1 m | 50 m | OVER |\n"));
-        assert!(
-            matches!(&evaluate(&f)[2].verdict, Verdict::Fail(m) if m.contains("horizon maps in 10 s") && m.contains("1 of 2 rows over"))
+        assert!(matches!(&evaluate(&f)[2].verdict, Verdict::Pass(_)), "no horizon table is not missing");
+        f.edit = Some(format!(
+            "{m6}| altitude | stamp radius | verdict (10 s, horizon maps) |
+|---|---|---|
+| 1 m | 50 m | OVER |
+"
+        ));
+        assert!(matches!(&evaluate(&f)[2].verdict, Verdict::Pass(_)), "an old log's over horizon row is information");
+        f.edit = Some(format!(
+            "{m6}| altitude | stamp radius | map | edit to map ms |
+|---|---|---|---|
+| 1 m | 50 m | (0, 1, 1) | 21000.0 |
+"
+        ));
+        assert!(matches!(&evaluate(&f)[2].verdict, Verdict::Pass(_)));
+        f.edit = Some(
+            "| altitude | stamp radius | verdict |
+|---|---|---|
+| 1 m | 50 m | OVER |
+"
+            .into(),
         );
-        f.edit = Some("| altitude | stamp radius | verdict (10 s, horizon maps) |\n|---|---|---|\n| 1 m | 50 m | ok |\n".into());
+        assert!(matches!(&evaluate(&f)[2].verdict, Verdict::Fail(m) if m.contains("1 of 1 rows over")));
+        f.edit = Some(
+            "| altitude | stamp radius | verdict (10 s, horizon maps) |
+|---|---|---|
+| 1 m | 50 m | ok |
+"
+            .into(),
+        );
         assert!(matches!(&evaluate(&f)[2].verdict, Verdict::Missing(m) if m.contains("verdict column")), "no M6 table is not a pass");
     }
 

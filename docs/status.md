@@ -20,7 +20,6 @@ Dormant (no near trigger; not asked now):
 |---|---|---|
 | M8-1 (c) rest | open: the key read of about 25M bake samples even when the run is stored; uplift and erodibility constant until the driver maps (ADR 0076); the K view is coarse (climate shading). Done: the run at 2048 from any bake (#638, GEN-056); criterion 4 (window 21: a fresh make from the 16384 bake took 19.7 s) | crusader |
 | R4b | `GeoPoint::of_dir` and `dir` in `editor/polyline.rs` onto the core helpers | crusader, with M8-7 |
-| C6 | Criterion 6 amended (owner, 2026-10-29): the drawn tiles within budget decide it (window 28: every case within budget); the horizon-map table is reported, not judged (TEST-065, `accept`) | explorer |
 | CS | After M8's acceptance: remove the chunk stage (`--chunks`, chunk erosion and routing, chunk jobs) from the code; git keeps the history (owner, 2026-10-29); horizon maps stay until SPIKE-56's ADR replaces them | crusader |
 
 Open owner items: the two flickers (Tracked) need a live check (editor off, debug path L, or a recording or F9 at the moment); P1-5 editing frame rate on a quiet machine; P2-8 missing tiles during an edit's refresh.

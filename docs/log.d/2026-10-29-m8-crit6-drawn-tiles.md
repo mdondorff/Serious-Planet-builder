@@ -1,0 +1,1 @@
+- 2026-10-29 **m8-crit6-drawn-tiles** (owner decision 2026-10-29, window 28): M8 criterion 6 is decided by the M6 drawn-tile table; the horizon tables are reported without a verdict (TEST-060, TEST-065, TEST-066); the gate reports the re-bake time and no longer fails on it.
