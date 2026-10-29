@@ -1,0 +1,14 @@
+adapter: Microsoft Basic Render Driver (Dx12)  timestamps: true
+gorge mode 1: cpu setup 282 ms, anchor [0.0, 0.0]
+  terrain pixels 71.9 %
+  gather+mips                    median 4302.209 ms  spread 4302.209-4302.209  rounds [4302.209]
+  primary (stand-in for depth)   median 5267.767 ms  spread 5267.767-5267.767  rounds [5267.767]
+  shadow full                    median 2108.556 ms  spread 2108.556-2108.556  rounds [2108.556]
+  shadow half                    median 337.620 ms  spread 337.620-337.620  rounds [337.62]
+  shadow full, penumbra 2 km     median 1288.634 ms  spread 1288.634-1288.634  rounds [1288.634]
+  shadow half, penumbra 2 km     median 325.807 ms  spread 325.807-325.807  rounds [325.807]
+  upsample                       median 1448.768 ms  spread 1448.768-1448.768  rounds [1448.768]
+  penumbra 2 km: steps mean 33.6 p95 64; vs uncapped mean |d| 0.0002, pixels off by > 0.25: 0.03 %
+  full: steps mean 34.0 p95 65 (marched 55.8 % of pixels), mean visibility 0.667
+  half+upsample vs full: mean |d| 0.0020, pixels off by > 0.25: 0.29 %
+  software frame (gather, primary, half shadow, upsample, shade) wall 11814 ms

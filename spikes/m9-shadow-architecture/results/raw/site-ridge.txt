@@ -1,0 +1,25 @@
+adapter: NVIDIA GeForce RTX 3080 Ti Laptop GPU (Vulkan)  timestamps: true
+ridge mode 1: cpu setup 341 ms, anchor [-0.0, -0.0]
+  terrain pixels 69.2 %
+  gather+mips                    median 1.293 ms  spread 1.293-1.294  rounds [1.294, 1.293, 1.293]
+  primary (stand-in for depth)   median 5.584 ms  spread 5.584-5.933  rounds [5.933, 5.584, 5.584]
+  shadow full                    median 5.672 ms  spread 4.972-6.090  rounds [5.672, 6.09, 4.972]
+  shadow half                    median 1.860 ms  spread 1.854-1.883  rounds [1.86, 1.883, 1.854]
+  shadow full, penumbra 2 km     median 4.504 ms  spread 4.383-4.806  rounds [4.504, 4.383, 4.806]
+  shadow half, penumbra 2 km     median 1.673 ms  spread 1.672-1.723  rounds [1.672, 1.673, 1.723]
+  upsample                       median 0.189 ms  spread 0.182-0.194  rounds [0.189, 0.194, 0.182]
+  penumbra 2 km: steps mean 79.6 p95 216; vs uncapped mean |d| 0.0037, pixels off by > 0.25: 0.51 %
+  full: steps mean 86.8 p95 246 (marched 43.2 % of pixels), mean visibility 0.024
+  half+upsample vs full: mean |d| 0.0004, pixels off by > 0.25: 0.04 %
+ridge mode 0: cpu setup 228 ms, anchor [-0.0, -0.0]
+  terrain pixels 69.2 %
+  gather+mips                    median 1.239 ms  spread 1.236-6.937  rounds [1.236, 1.239, 6.937]
+  primary (stand-in for depth)   median 7.021 ms  spread 5.757-9.227  rounds [9.227, 7.021, 5.757]
+  shadow full                    median 5.275 ms  spread 4.932-7.234  rounds [4.932, 5.275, 7.234]
+  shadow half                    median 2.222 ms  spread 2.189-2.737  rounds [2.189, 2.222, 2.737]
+  shadow full, penumbra 2 km     median 5.060 ms  spread 4.983-5.161  rounds [5.161, 4.983, 5.06]
+  shadow half, penumbra 2 km     median 1.734 ms  spread 1.728-1.735  rounds [1.734, 1.728, 1.735]
+  upsample                       median 0.177 ms  spread 0.157-0.182  rounds [0.157, 0.177, 0.182]
+  penumbra 2 km: steps mean 80.1 p95 217; vs uncapped mean |d| 0.0037, pixels off by > 0.25: 0.51 %
+  full: steps mean 87.4 p95 247 (marched 42.9 % of pixels), mean visibility 0.024
+  half+upsample vs full: mean |d| 0.0004, pixels off by > 0.25: 0.04 %
