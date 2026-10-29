@@ -1173,9 +1173,11 @@ pub fn lit_stream_stills(o: &Options, ctx: &GpuContext, size: (u32, u32), frames
         .normalized();
     d.sun = Some([side.x as f32, side.y as f32, side.z as f32]);
     let need = (SETTLE_S / FRAME_STEP_S).round() as usize;
+    // The first settle is the streaming settle (a second of frame steps); after the turn the tiles are resident and the loop only has to be quiet again.
+    let resettle = need / 3;
     let limit = Duration::from_secs(if o.perf_smoke { 300 } else { 900 });
     // Ticks until the loop has been exact and idle for `need` ticks in a row.
-    let settle = |d: &mut Driver<'_>, req: &TerrainRequest| -> Result<usize, String> {
+    let settle = |d: &mut Driver<'_>, req: &TerrainRequest, need: usize| -> Result<usize, String> {
         let started = Instant::now();
         let (mut quiet, mut ticks) = (0usize, 0usize);
         while quiet < need {
@@ -1211,7 +1213,7 @@ pub fn lit_stream_stills(o: &Options, ctx: &GpuContext, size: (u32, u32), frames
         nodes.sort();
         Ok(crate::editperf::StillFrame { width: px.width, height: px.height, rgba: px.rgba, nodes })
     };
-    let settle_ticks = settle(&mut d, &held)?;
+    let settle_ticks = settle(&mut d, &held, need)?;
     let (exposure_steps, exposure_ev100, exposure_target_ev100) = exposure(&mut d, &held)?;
     let mut still = Vec::with_capacity(frames);
     for _ in 0..frames {
@@ -1220,11 +1222,11 @@ pub fn lit_stream_stills(o: &Options, ctx: &GpuContext, size: (u32, u32), frames
     let hdr = d.rig.renderer.lit_path().ok_or("no lit path")?.read_hdr(ctx);
     let lit_share = hdr.iter().filter(|p| p[0] > 0.0 || p[1] > 0.0 || p[2] > 0.0).count() as f64 / hdr.len().max(1) as f64;
     // Turn and back; the exposure follows the scene both ways and is brought to its target again.
-    let first_turn = settle(&mut d, &turned)?;
+    let first_turn = settle(&mut d, &turned, resettle)?;
     exposure(&mut d, &turned)?;
     let turned_frame = read(&mut d, &turned)?;
     d.hold = None;
-    let back = settle(&mut d, &held)?;
+    let back = settle(&mut d, &held, resettle)?;
     exposure(&mut d, &held)?;
     let after_turn = read(&mut d, &held)?;
     Ok(LitStreamStills {

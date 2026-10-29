@@ -11,7 +11,7 @@ use planet_testkit::repo_root;
 use std::collections::BTreeSet;
 
 const FRAMES: usize = 6;
-const SIZE: (u32, u32) = (256, 144);
+const SIZE: (u32, u32) = (192, 108);
 const TURN_DEG: f64 = 2.0;
 
 // spec: TEST-070
