@@ -655,3 +655,89 @@ fn horizon_march_time() {
         }
     }
 }
+
+/// Where the bakes spend their time after an edit, on the real store (`cargo test --release -p planet --test it horizon_bake_split -- --ignored
+/// --nocapture`): 12 maps, 8 at once with one thread each, cold, warm, then after hill edits of growing reach in the middle of the 12 chunks.
+/// Prints the wall time and the thread-summed milliseconds of the edit words, the field build, the height tiles (look-up, gate wait, evaluation) and
+/// the march. A diagnosis: the edit-latency table's 500 m rows against the march's 2 s a map.
+#[test]
+#[ignore]
+fn horizon_bake_split() {
+    use planet::horizonworld::{chunk_horizon_params, ChunkHorizonBaker};
+    use planet_streaming::chunks::HorizonBaker;
+    let store = std::path::Path::new("C:/DEV/SeriousPlanetData/global16384");
+    let seed = planet::parse_args(&["test-render".to_string(), "--scene".to_string(), "lit".to_string()]).expect("options").seed;
+    let world = Arc::new(WorldTerrain::open_store(WorldDefinition::single_planet(R, seed), store, 16384).unwrap());
+    let lat = world.horizon_lattice().unwrap();
+    let baker = ChunkHorizonBaker::new(&world, lat, chunk_horizon_params(&lat, R), 1);
+    let keys: Vec<(u8, u32, u32)> = (0..4u32).flat_map(|x| (0..3u32).map(move |y| (2u8, 1000 + x, 1000 + y))).collect();
+    let run = |label: &str| {
+        let before = baker.bake_times();
+        let stats = baker.tile_stats();
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let t = std::time::Instant::now();
+        std::thread::scope(|s| {
+            for _ in 0..8 {
+                s.spawn(|| loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(k) = keys.get(i) else { break };
+                    baker.bake(*k, &[]).unwrap();
+                });
+            }
+        });
+        let (a, b, s) = (baker.bake_times(), before, baker.tile_stats());
+        println!(
+            "{label:>22}: wall {:6.0} ms | thread-summed ms: words {:7.0} field {:7.0} tiles {:7.0} march {:7.0} | tiles evaluated {} hits {}",
+            t.elapsed().as_secs_f64() * 1e3,
+            a.words_ms - b.words_ms,
+            a.field_ms - b.field_ms,
+            a.tiles_ms - b.tiles_ms,
+            a.march_ms - b.march_ms,
+            s.evaluated - stats.evaluated,
+            s.hits - stats.hits,
+        );
+    };
+    run("cold");
+    run("warm");
+    let at = TileId::new(Face(2), CHUNK_GRID_LEVEL, 1001, 1001).unwrap().center_direction(&TangentWarp);
+    let mut def = (*world.definition()).clone();
+    for (n, reach) in [150.0f64, 500.0, 2000.0].into_iter().enumerate() {
+        let item = ItemSpec {
+            id: 100 + n as u128,
+            layer: DEFAULT_ITEM_LAYER.into(),
+            priority: 0,
+            dir: at,
+            content_hash: 0,
+            reach_m: reach,
+            max_delta_m: 60.0,
+            stamp: None,
+        }
+        .with_stamp(Stamp::new(StampKind::Hill, [50.0, 0.0, 0.0]));
+        def.put_item_spec(BodyId::PLANET, item).unwrap();
+        world.set_definition(Arc::new(def.clone())).unwrap();
+        run(&format!("edit reach {reach:.0} m"));
+        run("  same, warm");
+    }
+}
+
+// spec: STRM-059
+#[test]
+fn a_bake_times_its_steps_and_the_diagnosis_log_holds_it_when_started() {
+    use planet::horizonworld::{bake_log_start, bake_log_take, ChunkHorizonBaker};
+    use planet_streaming::chunks::HorizonBaker;
+    let r = rig();
+    land_chunks(&r);
+    let lat = r.world.chunk_lattice().unwrap();
+    let baker = ChunkHorizonBaker::new(&r.world, lat, params(), 1);
+    let key: ChunkKey = (2, 1000, 1000);
+    bake_log_start();
+    baker.bake(key, &[]).expect("a map");
+    let t = baker.bake_times();
+    assert_eq!(t.bakes, 1);
+    assert!(t.tiles_ms > 0.0 && t.march_ms > 0.0, "{t:?}");
+    // Other bakes of the test binary may log too: this baker's is the one of its key with a march.
+    let log = bake_log_take();
+    let mine = log.iter().find(|b| b.key == key && b.made && b.step_ms[3] > 0.0).expect("the bake is in the log");
+    assert!(mine.ended.expect("the bake ended") > mine.started);
+    assert!(bake_log_take().is_empty() || bake_log_take().iter().all(|b| b.key != (9, 9, 9)), "the log goes on, emptied");
+}
