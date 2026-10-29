@@ -24,7 +24,7 @@ Dormant (no near trigger; not asked now):
 Open owner items: the two flickers (Tracked) need a live check (editor off, debug path L, or a recording or F9 at the moment); P1-5 editing frame rate on a quiet machine; P2-8 missing tiles during an edit's refresh.
 
 ## Tracked
-- **Gate known failures with the stage on** (`xtask gate --chunks`, 2026-10-28; ceilings in gate.rs KNOWN): most held-back tiles at once 8 to 170 per site (197238 170, 134050 165); "chunk frame" up to 2.8 s; level steps p99 12/11 8.961 m to 15/14 0.712 m (bound 0.25 m); at 102263 25-33 chunks land, no horizon map. With the stage off (the default): 0 held-back tiles, no steps.
+- **Gate known failures with the stage on** (`xtask gate --chunks`, 2026-10-28; ceilings in gate.rs KNOWN): most held-back tiles at once 8 to 170 per site (197238 170, 134050 165); "chunk frame" up to 2.8 s; level steps p99 12/11 8.961 m to 15/14 0.712 m (bound 0.25 m); at 102263 25-33 chunks land, no horizon map. With the stage off (the default): 0 held-back tiles, no steps. Main-thread block decodes (VIEW-061, ceiling 6 a run; stage off, 102263): 1-4 a run, the first at frame 25 (unwarmed pose).
 - **Editor smoke** (`editor --smoke`): does not complete on the real store (17 frames); fix when in that code (the stall gate's home).
 - **Detail blocks** (BUILD-027): 10 in `xtask/src/detail_blocks.txt`: split or shorten each, delete its line; no new blocks.
 - **Frame tail** (SPIKE-44): `draw_plan_transient` 8-14 ms on a plan delivery (24-48 frames/min) + ~9 ms frame work drops a frame at 60 fps; ADR 0083 frame share.
