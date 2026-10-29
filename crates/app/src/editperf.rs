@@ -1160,19 +1160,15 @@ pub fn chunks_table(rows: &[CaseRow]) -> String {
 /// The table of the horizon side of every case (a run with the horizon jobs and no chunk stage): per case one row per wanted map the edit touched
 /// (the first run of the case) and the milliseconds from the edit to the map's landing. Reported, not judged (M8 criterion 6 amended 2026-10-29, TEST-065).
 pub fn horizon_table(rows: &[CaseRow]) -> String {
-    let mut s = String::from("| altitude | stamp radius | map (face, x, y) | distance m | edit to map ms |
-|---|---|---|---|---|
-");
+    let mut s = String::from("| altitude | stamp radius | map (face, x, y) | distance m | edit to map ms |\n|---|---|---|---|---|\n");
     for r in rows {
         let maps = r.runs.first().and_then(|x| x.stages.horizon.as_ref());
         match maps.filter(|m| !m.is_empty()) {
-            None => s += &format!("| {} m | {} | - | - | - |
-", r.altitude_m, r.radius_label()),
+            None => s += &format!("| {} m | {} | - | - | - |\n", r.altitude_m, r.radius_label()),
             Some(maps) => {
                 for (k, t, dist) in maps {
                     let ms = t.map_or("-".to_string(), |t| format!("{t:.1}"));
-                    s += &format!("| {} m | {} | {:?} | {dist:.0} | {ms} |
-", r.altitude_m, r.radius_label(), k);
+                    s += &format!("| {} m | {} | {:?} | {dist:.0} | {ms} |\n", r.altitude_m, r.radius_label(), k);
                 }
             }
         }
