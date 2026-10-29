@@ -42,14 +42,14 @@ Top-down: users first, producers last, so every PR compiles and `test gpu` still
 | 7 | `rm-chunks-leftovers` | dead code, examples, docs, perf scenes (`residency_counts`, `scheduler_ablation`), status Tracked rows, learnings kept | none | none |
 Reasons for the order: PR 1 changes no default (the stage is already off), so it needs no golden and no look review. PRs 2 and 3 remove what only PR 1's callers fed. PR 5 and 6 are the bulk and only compile once nothing above calls them.
 
-## Decisions the plan needs from the planner or owner
-| # | Question | Default taken here |
-|---|---|---|
-| 1 | The tile driver block and driver views (GEN-071 to GEN-074, VIEW debug views): they read chunk drivers. Remove with the stage, or keep as a base-terrain feature? | Remove; they have no source without chunks |
-| 2 | `WDEF-018` and the `chunk_stage` setting change the definition hash; removing it changes keys of worlds with items. Cache invalidation is allowed (CON-05) but old stores rebuild | Remove; rebuild |
-| 3 | The M8-7 "edits under the erosion" path (re-solve within 10 s, criterion 6) is built on chunk re-solve. Its removal drops that feature: edits show only the base terrain until a new erosion design exists | Needs the owner: confirm that criterion 6 is retired or re-based |
-| 4 | Do `Static memos` (Tracked: `landform_lattice`) and the coupled run's erodibility inputs stay for the global run only? | Stay |
-| 5 | An ADR: 0077 (chunk stage) and the ones built on it are superseded in part; ADR 0078 allows only a status line | One ADR "chunk stage removed", status lines on 0077 and followers, in PR 1 |
+## Decisions (opus-planner, 2026-10-29)
+| # | Decision |
+|---|---|
+| 1 | The chunk re-solve is retired. Edits under the erosion (owner D3) go on the M9 deferred list, to be rebuilt on M9's erosion design; the ADR says so |
+| 2 | Driver channels (GEN-070 to GEN-076) go if and only if the default (stage-off) path draws identical pixels without them. Every PR's acceptance: no golden change on the default path; any golden diff stops the PR and goes to the planner. M9 re-adds drivers from the stored bake |
+| 3 | The definition hash must not change so that `C:/DEV/SeriousPlanetData/global16384` (read-only, rebuild about 10 h) is invalidated. A removed setting hashes as its old default. A tier-A test shows the 16384 store's definition still opens without a rebuild. If impossible: stop and report |
+| 4 | One new ADR "chunk stage removed" in PR 1, superseding 0077 and its followers, with status lines only on them (ADR 0078) |
+| 5 | Timing: PR 1 starts only after M8's acceptance and on the planner's go |
 
 ## Risks
 | Risk | Control |
