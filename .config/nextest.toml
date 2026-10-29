@@ -44,6 +44,7 @@ path = "junit.xml"
 # default profile.
 [test-groups]
 real-gpu-heavy = { max-threads = 2 }
+heavy-window = { max-threads = 2 }
 
 [profile.real-gpu]
 inherits = "default"
@@ -60,8 +61,11 @@ or (package(=planet-cache) and binary(oracle_all) and test(/^oracle_concurrent_s
 '''
 test-group = "real-gpu-heavy"
 
-# Diagnostic (the planner's timeout item, 2026-10-29): the window tests print where a run spends its time (`TIMING editor ...`, the phases of
-# `PLANET_TIMING`) even when they pass, so that the CI log sizes a cheaper form. Remove with the diagnostic.
+# The heavy software-adapter window and scene tests (the tracked tier-C timeouts: `gpu_window`, `gpu_water_coverage`, `gpu_stream_perf`,
+# `gpu_envelope_perf`) are CPU-bound (each software rasteriser uses every core) and their wall time swings 2 to 5 times with how many of them run
+# beside each other: the same sweep took 72 s in one job of one CI run and 215 s in the other (`TIMING` of #881 and #883, Windows WARP, 4 threads).
+# They share a group that runs at most 2 at once; the lighter tests still fill the other threads. Only the overlap changes: no test is skipped,
+# retried or changed (the planner's proposal, 2026-10-29; CI is the judge of what it does to the per-test and the job time).
 [[profile.default.overrides]]
-filter = 'binary(gpu_all) and test(/^gpu_window::/)'
-success-output = "final"
+filter = 'binary(gpu_all) and (test(/^gpu_window::/) or test(/^gpu_water_coverage::/) or test(/^gpu_stream_perf::/) or test(/^gpu_envelope_perf::/))'
+test-group = "heavy-window"

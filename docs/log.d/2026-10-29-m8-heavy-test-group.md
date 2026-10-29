@@ -1,0 +1,1 @@
+- 2026-10-29 **m8-heavy-test-group** (BUILD-003, trial): the heavy software-adapter window and scene tests (`gpu_window`, `gpu_water_coverage`, `gpu_stream_perf`, `gpu_envelope_perf`) share a nextest group that runs at most 2 at once, to limit the contention that swings their wall time 2 to 5 times on the CI runner; #881's output override is removed
