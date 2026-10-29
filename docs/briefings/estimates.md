@@ -21,5 +21,13 @@ Planning unit: lane-hours, PR count and quota share; never "days" for lane work.
 | 2026-10-28 | SPIKE-52 literature study (#846) | spikes (Opus) | 1.5 days | under 0.5 h after restart | quotes not re-checked |
 | 2026-10-28 | M8-F step 1, stage off by default (#851) | explorer | not stated | 0.6 h | |
 | 2026-10-28 | accept M8 to amended criteria (#850, #852) | crusader | not stated | 0.5 h | |
-| 2026-10-28 | M8-F step 2, horizon maps from the base terrain (#853) | explorer | about 1 day | about 2 h to the PR | merge pending |
-| 2026-10-28 | SPIKE-53 LOD, mesh and ground-detail survey | spikes (Opus) | 1 to 2 h | open | |
+| 2026-10-28 | M8-F step 2, horizon maps from the base terrain (#853) | explorer | about 1 day | about 2 h to the PR | merged |
+| 2026-10-28 | SPIKE-53 LOD, mesh and ground-detail survey | spikes (Opus) | 1 to 2 h | 1.5 h | |
+| 2026-10-28 | Perf window 26 (criteria 4 to 7) | explorer | 1 to 1.5 h | 2.5 h wall | edit-latency 1.5 h; GPU cooldown retry |
+| 2026-10-28 | Tier B stage-off horizon test (#860) | explorer | small | 1.3 h | |
+| 2026-10-28 | Parallel horizon bakes (#862) | explorer | not stated | 2.2 h | |
+| 2026-10-28 | Horizon march speed-up (rejected) | explorer | box 2 h | 1.2 h | no gain; cache-bound |
+| 2026-10-28 | Envelope stage default, log path, chunk_stage (#861, #863, #864, #868) | crusader | not stated | 1.2 h + 1.2 h | prepush 11 to 15 min, CI 25 min per round |
+| 2026-10-28 | Main build fix and distance column (#865, #866) | explorer | not stated | 1.5 h | #861 and #862 clashed on main |
+| 2026-10-29 | Perf window 27 (criteria 6, 7) | explorer | 1 to 1.5 h | 4.8 h wall, 0.3 h active | edit-latency 5 repeats dominates |
+| 2026-10-29 | SPIKE-54 G1 octave cost (#867) | spikes | box 2 h | 1.1 h | plus 6 h waiting for a quiet slot |
