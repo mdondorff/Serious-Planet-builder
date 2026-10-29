@@ -2,7 +2,7 @@
 [profile.default]
 slow-timeout = { period = "60s", terminate-after = 3 }
 
-# PROPOSED (planner approves before this merges). `gpu_window::the_window_path_opens_runs_the_flight_lit_with_the_atmosphere_and_closes` opens the
+# Declared limit (approved by the planner, 2026-10-29). `gpu_window::the_window_path_opens_runs_the_flight_lit_with_the_atmosphere_and_closes` opens the
 # window on the default 256-cell world twice at once (a plain run and a look-file run), and is the one test that does. On the Windows CI runner it
 # took 162 s, 250 s and 262 s in three runs, 142 s of the last one in the floor tiles of the default bake (`TIMING` of #881); the limit of the
 # `gpu_` tier (300 s) is 15 % over the slowest. A declared 450 s (5 x 90 s) is the slowest seen plus 70 %: it still catches a hang. The first
