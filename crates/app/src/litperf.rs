@@ -891,12 +891,14 @@ pub struct LitStillRun {
     pub warm_frames: usize,
     /// Plan nodes that carry water (a coast view without any proves nothing).
     pub water_nodes: usize,
+    /// The share of the lit target's pixels that carry any light (zero: night, or nothing drawn).
+    pub lit_share: f64,
     pub frames: Vec<crate::editperf::StillFrame>,
 }
 
 /// The lit stills of the coast view at 2 km on a bake with a sea (TEST-069): per case `frames` consecutive frames of the same plan at the same water time,
 /// after the exposure has adapted to its target (the state is read back; it is not hidden). The cases are the plain view, the sun ahead (the glint
-/// report) and the terrain debug overlay on the tiles; the world is the in-memory bake of the options.
+/// report) and the terrain debug overlay on the tiles (each with a sun above the horizon: the look's own sun is below it at this coast); the world is the in-memory bake of the options.
 pub fn lit_still_frames(o: &Options, ctx: &GpuContext, size: (u32, u32), frames: usize) -> Result<Vec<LitStillRun>, String> {
     let world = crate::streamperf::open_world(o, false)?.bounding_water();
     if !world.has_water() {
@@ -926,25 +928,26 @@ pub fn lit_still_frames(o: &Options, ctx: &GpuContext, size: (u32, u32), frames:
     let mut cache = SelectionCache::new();
     let base = planet_frame::plan_terrain_cached(&request(&rig, camera), rig.field, &mut cache).map_err(|e| e.to_string())?;
     crate::skeleton::upload_missing_meshes(ctx, Some(rig.world), &mut r, &base, rig.field, radius_m, o.cells)?;
-    let ahead = {
-        let (f, u) = (camera.forward, camera.up);
-        let v = f * libm::cos(0.3) + u * libm::sin(0.3);
-        let v = v.normalized();
+    // The look's own sun is below the horizon at this coast (night: the lit target is all zeros and the picture black), so every case sets a sun above it:
+    // from the side at 35 degrees for the plain and the overlay cases, and ahead of the camera at 17 degrees for the glint.
+    let dir = |toward: planet_core::Vec3, deg: f64| {
+        let a = deg.to_radians();
+        let v = (toward * libm::cos(a) + camera.up * libm::sin(a)).normalized();
         [v.x as f32, v.y as f32, v.z as f32]
     };
-    let cases: [(&str, Option<[f32; 3]>, planet_frame::look::Overlay); 3] = [
-        ("coast-2km", None, planet_frame::look::Overlay::None),
-        ("coast-2km-sun-ahead", Some(ahead), planet_frame::look::Overlay::None),
-        ("coast-2km-overlay-tiles", None, planet_frame::look::Overlay::Tiles),
+    let side = dir(camera.forward.cross(camera.up).normalized(), 35.0);
+    let ahead = dir(camera.forward, 17.0);
+    let cases: [(&str, [f32; 3], planet_frame::look::Overlay); 3] = [
+        ("coast-2km", side, planet_frame::look::Overlay::None),
+        ("coast-2km-sun-ahead", ahead, planet_frame::look::Overlay::None),
+        ("coast-2km-overlay-tiles", side, planet_frame::look::Overlay::Tiles),
     ];
     let mut runs = Vec::new();
     for (name, sun, overlay) in cases {
         // The same plan every frame: water time held, exposure stepping by one second so that it reaches its target (the EV range is 18 stops).
         let mut lit = setup.plan(rig.world, rig.field, &base, WATER_T0, 1.0, false)?;
         if let Some(l) = lit.lit.as_mut() {
-            if let Some(s) = sun {
-                l.sun_dir = s;
-            }
+            l.sun_dir = sun;
             l.overlay = overlay;
             l.reset_exposure = false;
         }
@@ -981,12 +984,16 @@ pub fn lit_still_frames(o: &Options, ctx: &GpuContext, size: (u32, u32), frames:
             nodes.sort();
             out.push(crate::editperf::StillFrame { width: px.width, height: px.height, rgba: px.rgba, nodes });
         }
+        // The lit target of the last frame: the share of its pixels with any light in them (an empty target is a night or nothing drawn, and an empty exposure histogram).
+        let hdr = r.lit_path().ok_or("no lit path")?.read_hdr(ctx);
+        let lit_share = hdr.iter().filter(|p| p[0] > 0.0 || p[1] > 0.0 || p[2] > 0.0).count() as f64 / hdr.len().max(1) as f64;
         runs.push(LitStillRun {
             name: name.to_string(),
             exposure_ev100: state.ev100,
             exposure_target_ev100: state.target_ev100,
             warm_frames,
             water_nodes,
+            lit_share,
             frames: out,
         });
     }
