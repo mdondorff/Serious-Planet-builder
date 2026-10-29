@@ -196,6 +196,8 @@ pub(crate) struct Tick {
     /// Whether the chunk stage still has work for the frame's plan (TEST-054): a stand-in node or a chunk or horizon job in flight; false without
     /// a chunk stage.
     pub(crate) chunk_busy: bool,
+    /// Plan nodes of the frame that carry water (zero without the lit path).
+    pub(crate) water_nodes: usize,
 }
 
 /// The chunk stage a driver runs every frame (TEST-054): what the viewer's window does after the plan of a frame.
@@ -223,12 +225,16 @@ pub(crate) struct Driver<'a> {
     ticks: u64,
     /// The chunk stage the frames drive; `None` leaves the chunk jobs alone (the scene has no stage).
     chunk: Option<ChunkDrive>,
+    /// Hold the lit frames still (a still-camera check, TEST-070): the water time and the exposure step in seconds every tick uses instead of the frame clock.
+    hold: Option<(f64, f32)>,
+    /// The sun direction every lit frame uses instead of the look's (a still-camera check sets one above the horizon).
+    sun: Option<[f32; 3]>,
 }
 
 impl<'a> Driver<'a> {
     /// A driver of the debug path (no lit plan) over `rig`, paced from now.
     pub(crate) fn plain(ctx: &'a GpuContext, rig: Rig) -> Driver<'a> {
-        Driver { ctx, rig, next_deadline: Instant::now(), lit: None, cut_field: None, ticks: 0, chunk: None }
+        Driver { ctx, rig, next_deadline: Instant::now(), lit: None, cut_field: None, ticks: 0, chunk: None, hold: None, sun: None }
     }
 
     /// The chunk field the frames count their stand-in share against (STRM-039); `None` counts nothing.
@@ -316,19 +322,24 @@ impl Driver<'_> {
         let (lit_plan, water) = match self.lit.as_mut() {
             Some((setup, world)) => {
                 let before = setup.water_counters();
-                let plan = setup.plan(
+                let (time_s, dt_s) = self.hold.unwrap_or((100.0 + self.ticks as f64 * FRAME_STEP_S, FRAME_STEP_S as f32));
+                let mut plan = setup.plan(
                     world,
                     self.cut_field.as_deref().ok_or("the lit path has no height field")?,
                     &frame.pipeline.draw.plan,
-                    100.0 + self.ticks as f64 * FRAME_STEP_S,
-                    FRAME_STEP_S as f32,
+                    time_s,
+                    dt_s,
                     self.ticks == 0,
                 )?;
+                if let (Some(s), Some(l)) = (self.sun, plan.lit.as_mut()) {
+                    l.sun_dir = s;
+                }
                 (Some(plan), setup.water_counters().since(before))
             }
             None => (None, planet_frame::water::WaterCounters::default()),
         };
         let lit_plan_ms = lit_started.elapsed().as_secs_f64() * 1000.0;
+        let water_nodes = lit_plan.as_ref().and_then(|p| p.water.as_ref()).map_or(0, |w| w.nodes.len());
         self.ticks += 1;
         self.rig.renderer.set_preview_of(&frame.pipeline.draw);
         let (timing, _) =
@@ -377,7 +388,7 @@ impl Driver<'_> {
             lit_plan_ms,
         };
         self.pace();
-        Ok(Tick { record, settled, drawn, chunk: c.chunk, chunk_busy })
+        Ok(Tick { record, settled, drawn, chunk: c.chunk, chunk_busy, water_nodes })
     }
 
     /// Hold the loop to the frame step of script time: the next iteration starts one step after this one was due (a late frame
@@ -486,8 +497,17 @@ fn run_case(
             .map_err(|e| format!("warming the lit path: {e}"))?;
     }
     let cut_field = if lit.is_some() { Some(world.field()?) } else { None };
-    let mut d =
-        Driver { ctx, rig, next_deadline: Instant::now(), lit: lit.map(|s| (s, Arc::clone(world))), cut_field, ticks: 0, chunk: None };
+    let mut d = Driver {
+        ctx,
+        rig,
+        next_deadline: Instant::now(),
+        lit: lit.map(|s| (s, Arc::clone(world))),
+        cut_field,
+        ticks: 0,
+        chunk: None,
+        hold: None,
+        sun: None,
+    };
     // The machine's state as a fixed job sees it, alone and with the pool's thread count at once, before and after the case (STRM-022:
     // recorded only, never judged; the per-tile times of the log read against it). Nothing of the case runs yet.
     let calib_threads = gen.workers;
@@ -1075,6 +1095,151 @@ fn columns_line(frames: &[FrameRecord]) -> String {
         })
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// What the lit path drew for a still camera over streamed tiles (TEST-070): the frames of the held view, and the view after a small yaw step and back.
+pub struct LitStreamStills {
+    /// Consecutive frames of the held view, once streaming has settled and the exposure is at its target.
+    pub still: Vec<crate::editperf::StillFrame>,
+    /// Ticks the settle took, and the one-second exposure steps after it.
+    pub settle_ticks: usize,
+    pub exposure_steps: usize,
+    pub exposure_ev100: f32,
+    pub exposure_target_ev100: f32,
+    /// The most plan nodes that carried water in one frame of the held view (a coast view without any proves nothing).
+    pub water_nodes: usize,
+    /// The share of the lit target's pixels that carry any light after the held frames (zero: night, or nothing drawn).
+    pub lit_share: f64,
+    /// The held view again after turning `turn_deg` and back, settled the same way.
+    pub turn_deg: f64,
+    pub after_turn: crate::editperf::StillFrame,
+    /// The view while turned, settled: it must differ from the held one, or the turn proved nothing.
+    pub turned: crate::editperf::StillFrame,
+    /// Ticks the settle after the turn and after the turn back took.
+    pub turn_settle_ticks: usize,
+}
+
+/// `camera` turned `deg` degrees about its up axis.
+fn yawed(camera: planet_frame::Camera, deg: f64) -> planet_frame::Camera {
+    let a = deg.to_radians();
+    let right = camera.forward.cross(camera.up).normalized();
+    planet_frame::Camera { forward: (camera.forward * libm::cos(a) - right * libm::sin(a)).normalized(), ..camera }
+}
+
+/// The lit coast view at 2 km over streamed tiles (TEST-070): the rig of the streaming scenes with the lit path, the in-memory bake, the water time and the
+/// exposure step held. Settles (the loop is exact and idle for 1.5 s of frame steps), brings the exposure to its target, reads `frames` frames of the held
+/// camera; then turns the camera `turn_deg` degrees and back, settles, brings the exposure to its target again and reads one more frame.
+pub fn lit_stream_stills(o: &Options, ctx: &GpuContext, size: (u32, u32), frames: usize, turn_deg: f64) -> Result<LitStreamStills, String> {
+    let world = Arc::new(open_world(o, false)?.bounding_water());
+    if !world.has_water() {
+        return Err("the lit stills need the water: this world has no ocean channel".into());
+    }
+    let field = world.field()?;
+    let radius_m = world.radius_m();
+    let lod = crate::litperf::capture_lod(o, size, radius_m, field.as_ref())?;
+    let aspect = f64::from(size.0) / f64::from(size.1);
+    let setup = crate::litperf::LitSetup::new(o, &world, &lod)?;
+    let is_sea = |d: planet_core::Vec3| crate::litperf::carries_sea(&world, d);
+    let views = planet_frame::litscenes::lit_views(radius_m, aspect, field.as_ref(), setup.level_m, &is_sea, 1)?;
+    let camera = views.iter().find(|v| v.name == "coast-2km").ok_or("no coast-2km view")?.cameras[0];
+    let seed = field.seed();
+    let req_of = |camera| TerrainRequest {
+        camera,
+        size,
+        view: TerrainView::Level,
+        lod: lod.clone(),
+        face_mapping: TangentWarp.id().to_string(),
+        seed,
+    };
+    let (held, turned) = (req_of(camera), req_of(yawed(camera, turn_deg)));
+    let mut rig = Rig::new(ctx, &world, &held, o.gen_workers())?;
+    rig.renderer
+        .warm_up_lit(ctx, &setup.warm_plan(held.camera, held.size, held.lod.cells)?)
+        .map_err(|e| format!("warming the lit path: {e}"))?;
+    let cut_field = Some(world.field()?);
+    let mut d = Driver {
+        ctx,
+        rig,
+        next_deadline: Instant::now(),
+        lit: Some((setup, Arc::clone(&world))),
+        cut_field,
+        ticks: 0,
+        chunk: None,
+        hold: None,
+        sun: None,
+    };
+    // The look's own sun is below the horizon at this coast (night, a black picture): a sun from the side at 35 degrees.
+    let side = (camera.forward.cross(camera.up).normalized() * libm::cos(35f64.to_radians()) + camera.up * libm::sin(35f64.to_radians()))
+        .normalized();
+    d.sun = Some([side.x as f32, side.y as f32, side.z as f32]);
+    let need = (SETTLE_S / FRAME_STEP_S).round() as usize;
+    let limit = Duration::from_secs(if o.perf_smoke { 300 } else { 900 });
+    // Ticks until the loop has been exact and idle for `need` ticks in a row.
+    let settle = |d: &mut Driver<'_>, req: &TerrainRequest| -> Result<usize, String> {
+        let started = Instant::now();
+        let (mut quiet, mut ticks) = (0usize, 0usize);
+        while quiet < need {
+            let t = d.tick(req)?;
+            ticks += 1;
+            quiet = if t.settled { quiet + 1 } else { 0 };
+            if started.elapsed() > limit {
+                return Err(format!("the lit view did not settle in {} s ({ticks} ticks)", limit.as_secs()));
+            }
+        }
+        Ok(ticks)
+    };
+    // The exposure steps one second a tick (the water time held) until it is at its target; the loop must stay settled.
+    let exposure = |d: &mut Driver<'_>, req: &TerrainRequest| -> Result<(usize, f32, f32), String> {
+        d.hold = Some((100.0, 1.0));
+        for steps in 1..=60 {
+            let t = d.tick(req)?;
+            let s = d.rig.renderer.lit_path().ok_or("no lit path")?.read_exposure(ctx);
+            if t.settled && (s.ev100 - s.target_ev100).abs() < 1e-6 {
+                return Ok((steps, s.ev100, s.target_ev100));
+            }
+        }
+        let s = d.rig.renderer.lit_path().ok_or("no lit path")?.read_exposure(ctx);
+        Err(format!("the exposure did not reach its target in 60 one-second steps: ev100 {} target {}", s.ev100, s.target_ev100))
+    };
+    let water_nodes = std::cell::Cell::new(0usize);
+    let read = |d: &mut Driver<'_>, req: &TerrainRequest| -> Result<crate::editperf::StillFrame, String> {
+        let t = d.tick(req)?;
+        water_nodes.set(water_nodes.get().max(t.water_nodes));
+        d.rig.fi.retire_to(d.rig.renderer.wait_oldest(ctx));
+        let px = d.rig.renderer.read_color(ctx);
+        let mut nodes: Vec<(TileId, u8, String)> = t.drawn.iter().map(|&t| (t, t.level(), String::new())).collect();
+        nodes.sort();
+        Ok(crate::editperf::StillFrame { width: px.width, height: px.height, rgba: px.rgba, nodes })
+    };
+    let settle_ticks = settle(&mut d, &held)?;
+    let (exposure_steps, exposure_ev100, exposure_target_ev100) = exposure(&mut d, &held)?;
+    let mut still = Vec::with_capacity(frames);
+    for _ in 0..frames {
+        still.push(read(&mut d, &held)?);
+    }
+    let hdr = d.rig.renderer.lit_path().ok_or("no lit path")?.read_hdr(ctx);
+    let lit_share = hdr.iter().filter(|p| p[0] > 0.0 || p[1] > 0.0 || p[2] > 0.0).count() as f64 / hdr.len().max(1) as f64;
+    // Turn and back; the exposure follows the scene both ways and is brought to its target again.
+    let first_turn = settle(&mut d, &turned)?;
+    exposure(&mut d, &turned)?;
+    let turned_frame = read(&mut d, &turned)?;
+    d.hold = None;
+    let back = settle(&mut d, &held)?;
+    exposure(&mut d, &held)?;
+    let after_turn = read(&mut d, &held)?;
+    Ok(LitStreamStills {
+        still,
+        settle_ticks,
+        exposure_steps,
+        exposure_ev100,
+        exposure_target_ev100,
+        water_nodes: water_nodes.get(),
+        lit_share,
+        turn_deg,
+        after_turn,
+        turned: turned_frame,
+        turn_settle_ticks: first_turn + back,
+    })
 }
 
 #[cfg(test)]
