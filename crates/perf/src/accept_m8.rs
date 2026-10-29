@@ -346,25 +346,35 @@ mod tests {
 ";
         f.edit = Some(m6.into());
         assert!(matches!(&evaluate(&f)[2].verdict, Verdict::Pass(_)), "no horizon table is not missing");
-        f.edit = Some(format!("{m6}| altitude | stamp radius | verdict (10 s, horizon maps) |
+        f.edit = Some(format!(
+            "{m6}| altitude | stamp radius | verdict (10 s, horizon maps) |
 |---|---|---|
 | 1 m | 50 m | OVER |
-"));
+"
+        ));
         assert!(matches!(&evaluate(&f)[2].verdict, Verdict::Pass(_)), "an old log's over horizon row is information");
-        f.edit = Some(format!("{m6}| altitude | stamp radius | map | edit to map ms |
+        f.edit = Some(format!(
+            "{m6}| altitude | stamp radius | map | edit to map ms |
 |---|---|---|---|
 | 1 m | 50 m | (0, 1, 1) | 21000.0 |
-"));
+"
+        ));
         assert!(matches!(&evaluate(&f)[2].verdict, Verdict::Pass(_)));
-        f.edit = Some("| altitude | stamp radius | verdict |
+        f.edit = Some(
+            "| altitude | stamp radius | verdict |
 |---|---|---|
 | 1 m | 50 m | OVER |
-".into());
+"
+            .into(),
+        );
         assert!(matches!(&evaluate(&f)[2].verdict, Verdict::Fail(m) if m.contains("1 of 1 rows over")));
-        f.edit = Some("| altitude | stamp radius | verdict (10 s, horizon maps) |
+        f.edit = Some(
+            "| altitude | stamp radius | verdict (10 s, horizon maps) |
 |---|---|---|
 | 1 m | 50 m | ok |
-".into());
+"
+            .into(),
+        );
         assert!(matches!(&evaluate(&f)[2].verdict, Verdict::Missing(m) if m.contains("verdict column")), "no M6 table is not a pass");
     }
 
