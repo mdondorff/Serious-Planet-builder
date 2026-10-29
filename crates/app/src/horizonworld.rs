@@ -42,6 +42,112 @@ pub struct ChunkHorizonBaker {
     /// One gate a chunk: bakes that need the same height tile at once wait for the first to evaluate it instead of each evaluating it.
     building: Mutex<std::collections::HashMap<ChunkKey, Arc<Mutex<()>>>>,
     tile_cap: usize,
+    /// Where the bakes spent their time (summed over threads), for the diagnosis tests.
+    times: BakeTimesAtomic,
+}
+
+#[derive(Default)]
+struct BakeTimesAtomic {
+    words: std::sync::atomic::AtomicU64,
+    field: std::sync::atomic::AtomicU64,
+    tiles: std::sync::atomic::AtomicU64,
+    march: std::sync::atomic::AtomicU64,
+    bakes: std::sync::atomic::AtomicU64,
+}
+
+thread_local! {
+    /// The step times of the bake running on this thread, nanoseconds (see [`ChunkHorizonBaker::timed`]).
+    static STEP_NS: std::cell::RefCell<[u64; 4]> = const { std::cell::RefCell::new([0; 4]) };
+}
+
+/// One bake as the diagnosis log holds it (a diagnosis, off unless [`bake_log_start`] was called).
+#[derive(Clone, Copy, Debug)]
+pub struct BakeRecord {
+    pub key: ChunkKey,
+    pub started: std::time::Instant,
+    /// `None`: the bake was still running when the log was taken (its step times are 0).
+    pub ended: Option<std::time::Instant>,
+    /// Milliseconds in the edit words, the field build, the height tiles (look-up, gate wait, evaluation) and the march.
+    pub step_ms: [f64; 4],
+    /// The map was made; false: the bake was dropped because an edit changed its word while it ran (STRM-060), or is still running.
+    pub made: bool,
+}
+
+#[derive(Default)]
+struct BakeLog {
+    done: Vec<BakeRecord>,
+    /// The bakes running now, by the id of their guard.
+    running: Vec<(u64, ChunkKey, std::time::Instant)>,
+    next_id: u64,
+}
+
+static BAKE_LOG: Mutex<Option<BakeLog>> = Mutex::new(None);
+
+/// Starts (or clears) the diagnosis log of bakes: every bake after this call is recorded until [`bake_log_take`].
+pub fn bake_log_start() {
+    *BAKE_LOG.lock().expect("bake log") = Some(BakeLog::default());
+}
+
+/// The bakes recorded since [`bake_log_start`] or the last call, those that ended and those still running (the log goes on, with the running ones).
+pub fn bake_log_take() -> Vec<BakeRecord> {
+    let mut log = BAKE_LOG.lock().expect("bake log");
+    let Some(log) = log.as_mut() else { return Vec::new() };
+    let mut out = std::mem::take(&mut log.done);
+    out.extend(log.running.iter().map(|&(_, key, started)| BakeRecord { key, started, ended: None, step_ms: [0.0; 4], made: false }));
+    out
+}
+
+/// Records a bake into the log when it starts and when it ends, whatever way `bake` returns.
+struct BakeGuard {
+    key: ChunkKey,
+    started: std::time::Instant,
+    made: std::cell::Cell<bool>,
+    id: Option<u64>,
+}
+
+impl BakeGuard {
+    fn new(key: ChunkKey) -> BakeGuard {
+        STEP_NS.with(|s| *s.borrow_mut() = [0; 4]);
+        let started = std::time::Instant::now();
+        let id = BAKE_LOG.lock().expect("bake log").as_mut().map(|log| {
+            log.next_id += 1;
+            log.running.push((log.next_id, key, started));
+            log.next_id
+        });
+        BakeGuard { key, started, made: std::cell::Cell::new(false), id }
+    }
+}
+
+impl Drop for BakeGuard {
+    fn drop(&mut self) {
+        let mut log = BAKE_LOG.lock().expect("bake log");
+        let Some(log) = log.as_mut() else { return };
+        // A log started after this bake began has no entry of it: its start is still true, so it is recorded all the same.
+        log.running.retain(|r| Some(r.0) != self.id);
+        let ns = STEP_NS.with(|s| *s.borrow());
+        log.done.push(BakeRecord {
+            key: self.key,
+            started: self.started,
+            ended: Some(std::time::Instant::now()),
+            step_ms: ns.map(|n| n as f64 / 1e6),
+            made: self.made.get(),
+        });
+    }
+}
+
+/// Milliseconds the bakes of a baker spent in each step, summed over all threads (a diagnosis, not a rule).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct BakeTimes {
+    /// The edit words of the chunk and its blocks (footprint queries of the stamp layers).
+    pub words_ms: f64,
+    /// Building the field from the definition and the ready chunks.
+    pub field_ms: f64,
+    /// Height tiles: the cache look-up, the wait on a tile gate and the evaluation.
+    pub tiles_ms: f64,
+    /// The horizon march.
+    pub march_ms: f64,
+    /// Maps made.
+    pub bakes: u64,
 }
 
 /// Most height tiles a baker keeps (STRM-059): 64 tiles of 614 x 614 f32 are 96.5 MB, the horizon's share of RAM (ADR 0083 point 4). The nine tiles
@@ -79,7 +185,32 @@ impl ChunkHorizonBaker {
             tiles: Default::default(),
             building: Default::default(),
             tile_cap: HEIGHT_TILES_MAX,
+            times: Default::default(),
         }
+    }
+
+    /// Where the bakes so far spent their time.
+    pub fn bake_times(&self) -> BakeTimes {
+        use std::sync::atomic::Ordering::Relaxed;
+        let ms = |a: &std::sync::atomic::AtomicU64| a.load(Relaxed) as f64 / 1e6;
+        BakeTimes {
+            words_ms: ms(&self.times.words),
+            field_ms: ms(&self.times.field),
+            tiles_ms: ms(&self.times.tiles),
+            march_ms: ms(&self.times.march),
+            bakes: self.times.bakes.load(Relaxed),
+        }
+    }
+
+    /// Runs `f` and adds its time to step `slot` (0 edit words, 1 field, 2 tiles, 3 march) of the baker and of the bake running on this thread.
+    fn timed<T>(&self, slot: usize, f: impl FnOnce() -> T) -> T {
+        let t = std::time::Instant::now();
+        let out = f();
+        let ns = t.elapsed().as_nanos() as u64;
+        [&self.times.words, &self.times.field, &self.times.tiles, &self.times.march][slot]
+            .fetch_add(ns, std::sync::atomic::Ordering::Relaxed);
+        STEP_NS.with(|s| s.borrow_mut()[slot] += ns);
+        out
     }
 
     /// The hash of the items of every stamp layer that touch the chunk and `halo_cells` cells around it, 0 for none (the edit word of a horizon,
@@ -248,8 +379,9 @@ impl HorizonBaker for ChunkHorizonBaker {
     fn bake(&self, key: ChunkKey, _ready: &[(ChunkKey, Arc<ChunkResult>)]) -> Option<Vec<u8>> {
         let n = self.lat.cells_per_chunk() as usize;
         let none = || Some(vec![0u8; n * n * self.params.azimuths as usize]);
+        let record = BakeGuard::new(key);
         // The edit word the map is made against: a change while it is made drops it (STRM-060), the job bakes it again.
-        let word0 = self.edit_word(key);
+        let word0 = self.timed(0, || self.edit_word(key));
         let Some(world) = self.world.upgrade() else { return none() };
         let halo = self.halo_cells();
         let side = n + 2 * halo;
@@ -271,7 +403,7 @@ impl HorizonBaker for ChunkHorizonBaker {
         // The result each block holds now, read before the field is built: a tile is kept only if it is still that result after (the field takes
         // its own snapshot of the ready chunks in between).
         let before = own_hashes(&blocks);
-        let Ok(field) = world.field() else { return none() };
+        let Ok(field) = self.timed(1, || world.field()) else { return none() };
         let after = own_hashes(&blocks);
         let world_word = self.world_state(&world);
         let (x0, y0) = (i64::from(key.1) * n as i64 - halo as i64, i64::from(key.2) * n as i64 - halo as i64);
@@ -281,10 +413,10 @@ impl HorizonBaker for ChunkHorizonBaker {
             heights = self.evaluate(&*field, key.0, x0, y0, side);
         } else {
             for (idx, &(bx, by)) in blocks.iter().enumerate() {
-                if self.edit_word(key) != word0 {
+                if self.timed(0, || self.edit_word(key)) != word0 {
                     return None;
                 }
-                let tile_key =
+                let tile_key = self.timed(0, || {
                     tile_cacheable(in_face(bx) && in_face(by), before[idx] == after[idx], revision0, world.definition().revision()).then(
                         || {
                             let block = (key.0, bx as u32, by as u32);
@@ -293,8 +425,9 @@ impl HorizonBaker for ChunkHorizonBaker {
                                 &[world_word, self.items_word(block, STAGE_HALO * f64::from(self.lat.cells_per_chunk())), before[idx]],
                             )
                         },
-                    );
-                let tile = self.block_heights(&*field, key.0, (bx, by), n, tile_key);
+                    )
+                });
+                let tile = self.timed(2, || self.block_heights(&*field, key.0, (bx, by), n, tile_key));
                 // The rows of the block inside the raster: the block's cells are [bx n, bx n + n), the raster's [x0, x0 + side).
                 let (cx, cy) = (bx * n as i64 - x0, by * n as i64 - y0);
                 let (i0, i1) = (cx.max(0), (cx + n as i64).min(side as i64));
@@ -313,7 +446,10 @@ impl HorizonBaker for ChunkHorizonBaker {
         // Chunk jobs are queued or running: the march takes one thread, so a bake never holds cores the visible work needs (STRM-060).
         let threads = if manager.as_ref().is_some_and(|m| m.in_flight() > 0) { 1 } else { self.threads };
         let raster = HeightRaster { n: side, texel_m: self.lat.cell_m(self.params.radius_m), heights: &heights };
-        bake_horizon(&raster, (halo, halo, n, n), &self.params, threads).map_or_else(|_| none(), |m| Some(m.data))
+        let map = self.timed(3, || bake_horizon(&raster, (halo, halo, n, n), &self.params, threads));
+        self.times.bakes.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        record.made.set(true);
+        map.map_or_else(|_| none(), |m| Some(m.data))
     }
 
     /// The items of every stamp layer that touch the chunk and the halo the march reads around it (the horizon samples the whole field, so the layers
