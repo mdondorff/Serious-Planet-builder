@@ -418,7 +418,7 @@ pub struct Stages {
     pub chunks: Option<ChunkStages>,
     /// The horizon maps the edit touched (a run with the horizon jobs and no chunk stage): per map the chunk and the milliseconds from `set_definition` to the
     /// first landing after it (`None`: it had not landed when the run stopped waiting). `None` without the jobs.
-    pub horizon: Option<Vec<(planet_generators::chunkfield::ChunkKey, Option<f64>)>>,
+    pub horizon: Option<Vec<(planet_generators::chunkfield::ChunkKey, Option<f64>, f64)>>,
 }
 
 /// What the chunk stage did after an edit (M8-7, criterion 6), in milliseconds from `set_definition`.
@@ -605,7 +605,7 @@ struct Harness<'a> {
     horizon_world: Option<Arc<WorldTerrain>>,
     horizon_landed: Vec<(Instant, planet_generators::chunkfield::ChunkKey)>,
     /// The chunks the horizon jobs were asked for in the last frame (the same tiles and truncation as the jobs see).
-    horizon_wanted: Vec<planet_generators::chunkfield::ChunkKey>,
+    horizon_wanted: Vec<(planet_generators::chunkfield::ChunkKey, f64)>,
 }
 
 impl Harness<'_> {
@@ -628,7 +628,7 @@ impl Harness<'_> {
             self.landed_log.extend(update.landed.iter().map(|k| (now, *k)));
         } else if let Some(world) = &self.horizon_world {
             let tiles: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
-            self.horizon_wanted = world.horizon_wanted(&tiles, req.camera.position).into_iter().map(|w| w.0).collect();
+            self.horizon_wanted = world.horizon_wanted(&tiles, req.camera.position);
             let update = world.horizon_frame(&tiles, req.camera.position);
             let now = Instant::now();
             self.horizon_landed.extend(update.landed.iter().map(|k| (now, *k)));
@@ -760,7 +760,8 @@ fn run_once(
     let edited = Arc::new(edited);
     let mut out = CaseRun { resident: h.rig.managed.resident().len(), ..Default::default() };
     let before_stats = h.rig.managed.manager().streamer().stats();
-    let wanted_keys: Vec<planet_generators::chunkfield::ChunkKey> = h.horizon_wanted.clone();
+    let wanted_keys: Vec<planet_generators::chunkfield::ChunkKey> = h.horizon_wanted.iter().map(|w| w.0).collect();
+    let wanted_dist: Vec<f64> = h.horizon_wanted.iter().map(|w| w.1).collect();
     let words_before: Vec<u64> = wanted_keys.iter().map(|k| world.horizon_edit_word(*k)).collect();
     let old_revision = world.field()?.item_revision();
     let sampler_started = Instant::now();
@@ -950,11 +951,16 @@ fn run_once(
     // The horizon side without a chunk stage: the maps the edit touched (their edit word changed, the maps of the chunks it reaches and of the neighbours inside
     // the march's halo) are baked again after the settle window; each one's time from the edit to its landing is the shadow of the edit on screen (M8 criterion 6).
     if h.horizon_world.is_some() {
-        let touched: Vec<planet_generators::chunkfield::ChunkKey> =
-            wanted_keys.iter().zip(&words_before).filter(|(k, w0)| world.horizon_edit_word(**k) != **w0).map(|(k, _)| *k).collect();
+        let touched: Vec<(planet_generators::chunkfield::ChunkKey, f64)> = wanted_keys
+            .iter()
+            .zip(&words_before)
+            .zip(&wanted_dist)
+            .filter(|((k, w0), _)| world.horizon_edit_word(**k) != **w0)
+            .map(|((k, _), d)| (*k, *d))
+            .collect();
         let limit = Duration::from_secs(60);
         loop {
-            let all = touched.iter().all(|k| h.horizon_landed.iter().any(|l| l.1 == *k));
+            let all = touched.iter().all(|(k, _)| h.horizon_landed.iter().any(|l| l.1 == *k));
             if all || sampler_started.elapsed() > limit {
                 break;
             }
@@ -964,8 +970,8 @@ fn run_once(
         out.stages.horizon = Some(
             touched
                 .into_iter()
-                .map(|k| {
-                    (k, h.horizon_landed.iter().find(|l| l.1 == k).map(|l| l.0.duration_since(sampler_started).as_secs_f64() * 1000.0))
+                .map(|(k, d)| {
+                    (k, h.horizon_landed.iter().find(|l| l.1 == k).map(|l| l.0.duration_since(sampler_started).as_secs_f64() * 1000.0), d)
                 })
                 .collect(),
         );
@@ -1025,20 +1031,20 @@ pub fn chunks_table(rows: &[CaseRow]) -> String {
 /// column is read by `accept M8` (TEST-060).
 pub fn horizon_table(rows: &[CaseRow]) -> String {
     let mut s = String::from(
-        "| altitude | stamp radius | map (face, x, y) | edit to map ms | verdict (10 s, horizon maps) |\n|---|---|---|---|---|\n",
+        "| altitude | stamp radius | map (face, x, y) | distance m | edit to map ms | verdict (10 s, horizon maps) |\n|---|---|---|---|---|---|\n",
     );
     for r in rows {
         let maps = r.runs.first().and_then(|x| x.stages.horizon.as_ref());
         match maps.filter(|m| !m.is_empty()) {
-            None => s += &format!("| {} m | {} | - | - | - |\n", r.altitude_m, r.radius_label()),
+            None => s += &format!("| {} m | {} | - | - | - | - |\n", r.altitude_m, r.radius_label()),
             Some(maps) => {
-                for (k, t) in maps {
+                for (k, t, dist) in maps {
                     let (ms, verdict) = match t {
                         None => ("-".to_string(), "over"),
                         Some(t) if *t <= 10_000.0 => (format!("{t:.1}"), "ok"),
                         Some(t) => (format!("{t:.1}"), "over"),
                     };
-                    s += &format!("| {} m | {} | {:?} | {ms} | {verdict} |\n", r.altitude_m, r.radius_label(), k);
+                    s += &format!("| {} m | {} | {:?} | {dist:.0} | {ms} | {verdict} |\n", r.altitude_m, r.radius_label(), k);
                 }
             }
         }
@@ -1640,7 +1646,7 @@ mod tests {
     // spec: TEST-065
     #[test]
     fn the_horizon_table_has_a_row_per_touched_map_with_its_time_and_the_ten_second_verdict() {
-        let run = |maps: Vec<((u8, u32, u32), Option<f64>)>| CaseRun {
+        let run = |maps: Vec<(planet_generators::chunkfield::ChunkKey, Option<f64>, f64)>| CaseRun {
             stages: Stages { horizon: Some(maps), ..Stages::default() },
             ..CaseRun::default()
         };
@@ -1649,7 +1655,11 @@ mod tests {
                 kind: CaseKind::Stamp,
                 altitude_m: 200.0,
                 radius_m: 400.0,
-                runs: vec![run(vec![((2, 10, 11), Some(2_500.0)), ((2, 11, 11), Some(12_000.0)), ((2, 10, 12), None)])],
+                runs: vec![run(vec![
+                    ((2, 10, 11), Some(2_500.0), 120.0),
+                    ((2, 11, 11), Some(12_000.0), 5_100.0),
+                    ((2, 10, 12), None, 9_800.0),
+                ])],
             },
             CaseRow { kind: CaseKind::Stamp, altitude_m: 2_000.0, radius_m: 50.0, runs: vec![run(Vec::new())] },
             CaseRow { kind: CaseKind::Stamp, altitude_m: 2_000.0, radius_m: 100.0, runs: vec![CaseRun::default()] },
@@ -1657,7 +1667,7 @@ mod tests {
         let t = horizon_table(&rows);
         let lines: Vec<&str> = t.lines().collect();
         assert!(lines[0].ends_with("| verdict (10 s, horizon maps) |"), "{t}");
-        assert!(lines[2].contains("(2, 10, 11)") && lines[2].contains("2500.0") && lines[2].ends_with("| ok |"), "{t}");
+        assert!(lines[2].contains("(2, 10, 11)") && lines[2].contains("| 120 | 2500.0") && lines[2].ends_with("| ok |"), "{t}");
         assert!(lines[3].contains("12000.0") && lines[3].ends_with("| over |"), "{t}");
         assert!(lines[4].contains("| - | over |"), "a map that never landed is over: {t}");
         assert!(lines[5].ends_with("| - | - | - |") && lines[6].ends_with("| - | - | - |"), "a case that touched no map: {t}");

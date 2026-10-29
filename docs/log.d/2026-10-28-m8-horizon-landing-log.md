@@ -1,0 +1,1 @@
+- 2026-10-28 m8-horizon-landing-log: the edit-latency horizon table has a distance column; learning amended: the mip skip on the vectorised march, still no gain.

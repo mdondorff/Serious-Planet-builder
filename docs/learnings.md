@@ -141,7 +141,7 @@ Scope: m8-chunk-fade (STRM-052, STRM-053), the closed `m8-chunk-fade-publish` (b
 Scope: `generators::horizon` march, 8 m raster of 1824^2 texels, 16 azimuths, range 4.8 km.
 - Measured offline (4 threads, busy machine): an exact skip of steps whose block max cannot beat the best slope skipped 60 % of the steps and took 6.5 to 8.7 s against 6.8 s without it.
 - Cause: each step costs two divisions, a floor and a division for the slope; the table of distances and drops and an integer floor take the march to 2.6 s with identical bytes (GEN-085).
-- Obsolete when the march is vectorised over azimuths (then loads may matter again).
+- 2026-10-28, vectorised (GEN-086): the same exact skip drops 45 % of the 4-lane steps, a map stays 2.06 to 2.3 s on one thread; now bound by the raster reads. Faster: cache-blocked or per-azimuth sweep.
 
 ## 2026-10-27 The A-net chunk change is almost only incision, up to 207 m; the stated bound of 300 m is two-sided, the data one-sided
 Scope: `chunkfield` stage bound (`bound_m` 300 m), `ChunkField::height_bounds`, the plan's cost with a chunk stage; `app::globalperf` `anet_change_report`.

@@ -632,3 +632,26 @@ fn the_horizon_bakes_without_a_chunk_stage_run_on_half_the_generation_workers_at
     use planet_streaming::GenWorkers;
     assert_eq!([1, 2, 5, 8, 16, 18, 40].map(|n| horizon_workers(GenWorkers::new(n))), [1, 1, 2, 4, 8, 8, HORIZON_WORKERS_MAX]);
 }
+
+/// The march of one map on the real store, one thread, tiles cached (`cargo test --release -p planet --test it horizon_march_time -- --ignored
+/// --nocapture`): the seconds a map costs, and a hash of its bytes so a change of the march shows whether the bytes moved.
+#[test]
+#[ignore]
+fn horizon_march_time() {
+    use planet::horizonworld::{chunk_horizon_params, ChunkHorizonBaker};
+    use planet_streaming::chunks::HorizonBaker;
+    let store = std::path::Path::new("C:/DEV/SeriousPlanetData/global16384");
+    let seed = planet::parse_args(&["test-render".to_string(), "--scene".to_string(), "lit".to_string()]).expect("options").seed;
+    let world = Arc::new(WorldTerrain::open_store(WorldDefinition::single_planet(R, seed), store, 16384).unwrap());
+    let lat = world.horizon_lattice().unwrap();
+    let baker = ChunkHorizonBaker::new(&world, lat, chunk_horizon_params(&lat, R), 1);
+    for key in [(2u8, 1000u32, 1000u32), (2, 1500, 1200)] {
+        baker.bake(key, &[]).unwrap();
+        for rep in 0..3 {
+            let t = std::time::Instant::now();
+            let map = baker.bake(key, &[]).unwrap();
+            let hash = planet_core::hash::hash_u64s(1, &map.iter().map(|&b| u64::from(b)).collect::<Vec<_>>());
+            println!("{key:?} rep {rep}: {:.0} ms, hash {hash:016x}", t.elapsed().as_secs_f64() * 1e3);
+        }
+    }
+}
