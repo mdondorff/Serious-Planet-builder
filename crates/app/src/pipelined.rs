@@ -113,10 +113,12 @@ impl Rig {
         gen: planet_streaming::GenWorkers,
         progress: &mut dyn FnMut(usize, usize),
     ) -> Result<Rig, String> {
+        crate::stall::phase_mark("rig start");
         let mut renderer = TerrainRenderer::with_frames_in_flight(ctx, first.size, first.lod.cells, u64::from(MAX_FRAMES_IN_FLIGHT));
         // REND-013: the pools' first block, the ring and every pipeline's first draw happen here, before frame 0 (frame 0 stays
         // a measured frame, ADR 0032).
         renderer.warm_up(ctx);
+        crate::stall::phase_mark("renderer warm-up");
         let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
         let plan_pool = Arc::new(ThreadPool::new(1));
         let pipe = PlanPipeline::new(PlanWorker::new(plan_pool, Arc::new(WorldPlanner(Arc::clone(world))), threads));
@@ -142,6 +144,7 @@ impl Rig {
         // so there is always something to draw; a load step of the body, not a steady frame (STRM-001).
         let roots_started = Instant::now();
         streamer.load_roots_blocking_with(progress)?;
+        crate::stall::phase_mark("root tiles");
         let roots = (streamer.stats().resident, roots_started.elapsed());
         // Prefetch along the camera's translation (STRM-018, ADR 0031): the same clock as the streamer's.
         let managed = ManagedLoop::new(pipe, ResidencyManager::new(streamer)).with_prefetch(

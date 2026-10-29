@@ -1,0 +1,21 @@
+import glob, json, math, os, re, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import numpy as np
+from glo30 import read_tile
+from s55_metrics import metrics, descriptor
+D = 'C:/DEV/SeriousPlanetData/dem/glo30-samples/'
+land = {'N47E011': 'Alps (Tyrol)', 'N48E008': 'Black Forest', 'N52E012': 'Brandenburg plain', 'N43W102': 'Badlands', 'N31W004': 'Erg Chebbi desert', 'N40W078': 'Valley and Ridge', 'N27E086': 'Himalaya (Everest)', 'N57W005': 'Scottish Highlands', 'N41W096': 'Loess hills and plains'}
+res = {}
+for f in sorted(glob.glob(D + '*.tif')):
+    m = re.search(r'_(N|S)(\d+)_00_(E|W)(\d+)_00_DEM', f)
+    lat = int(m.group(2)) * (1 if m.group(1) == 'N' else -1); lon = int(m.group(4)) * (1 if m.group(3) == 'E' else -1)
+    key = '%s%02d%s%03d' % (m.group(1), int(m.group(2)), m.group(3), int(m.group(4)))
+    a, sc, tie, meta = read_tile(f)
+    dy = sc[1] * 111195.0
+    dx = sc[0] * 111195.0 * math.cos(math.radians(lat + 0.5))
+    r = metrics(a, dx, dy)
+    mean, std = descriptor(a)
+    r.update({'landform': land[key], 'lat': lat, 'lon': lon, 'shape': list(a.shape), 'dx_m': dx, 'dy_m': dy, 'desc_mean': mean, 'desc_std': std})
+    res[key] = r
+    print(key, land[key], 'slope p50/p90/p99 %.1f/%.1f/%.1f' % tuple(r['slope_deg_p50_p90_p99']), 'relief1km p50/p90/p99 %.0f/%.0f/%.0f' % tuple(r['relief_1km_m_p50_p90_p99']), 'relief5km %.0f/%.0f/%.0f' % tuple(r['relief_5km_m_p50_p90_p99']), 'desc mean %.0f std %.0f' % (mean, std), flush=True)
+json.dump(res, open('s55_real.json', 'w'), indent=1)

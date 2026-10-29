@@ -2,6 +2,15 @@
 [profile.default]
 slow-timeout = { period = "60s", terminate-after = 3 }
 
+# Declared limit (approved by the planner, 2026-10-29). `gpu_window::the_window_path_opens_runs_the_flight_lit_with_the_atmosphere_and_closes` opens the
+# window on the default 256-cell world twice at once (a plain run and a look-file run), and is the one test that does. On the Windows CI runner it
+# took 162 s, 250 s and 262 s in three runs, 142 s of the last one in the floor tiles of the default bake (`TIMING` of #881); the limit of the
+# `gpu_` tier (300 s) is 15 % over the slowest. A declared 450 s (5 x 90 s) is the slowest seen plus 70 %: it still catches a hang. The first
+# matching override sets a value, so this one comes before the `gpu_` one. No test is skipped, retried or changed.
+[[profile.default.overrides]]
+filter = 'binary(gpu_all) and test(the_window_path_opens_runs_the_flight_lit_with_the_atmosphere_and_closes)'
+slow-timeout = { period = "90s", terminate-after = 5 }
+
 # The software-adapter GPU tier (BUILD-003): the heavy `gpu_*` tests take 40 to 66 s alone and up to 144 s beside the other processes of
 # a full `cargo xtask test gpu` (about 20 at once, each software rasteriser multi-threaded), so they reach the 120 s mark of the default
 # limit. The limit is there to catch a hang, not to budget a test: these binaries terminate after 300 s (5 x 60 s). Grouping the heavy
