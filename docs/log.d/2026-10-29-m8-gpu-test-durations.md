@@ -1,0 +1,1 @@
+- 2026-10-29 **m8-gpu-test-durations** (BUILD-003, VIEW-040): the CI durations of the 12 tracked tier-C tests are in the Tracked entry (Windows WARP 25 to 250 s, item_sweep 192 s and a 300.6 s timeout); `gpu_window::the_item_sweep...` is split into one test per altitude (2000, 200, 30 m; `PLANET_SWEEP_ALTS`), the assertion is the same 30 stops
