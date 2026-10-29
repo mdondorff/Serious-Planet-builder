@@ -1157,25 +1157,22 @@ pub fn chunks_table(rows: &[CaseRow]) -> String {
     s
 }
 
-/// The table of the horizon side of every case (a run with the horizon jobs and no chunk stage, M8 criterion 6): per case one row per wanted map the
-/// edit touched (the first run of the case), the milliseconds from the edit to the map's landing and the ten-second verdict. The header of the last
-/// column is read by `accept M8` (TEST-060).
+/// The table of the horizon side of every case (a run with the horizon jobs and no chunk stage): per case one row per wanted map the edit touched
+/// (the first run of the case) and the milliseconds from the edit to the map's landing. Reported, not judged (M8 criterion 6 amended 2026-10-29, TEST-065).
 pub fn horizon_table(rows: &[CaseRow]) -> String {
-    let mut s = String::from(
-        "| altitude | stamp radius | map (face, x, y) | distance m | edit to map ms | verdict (10 s, horizon maps) |\n|---|---|---|---|---|---|\n",
-    );
+    let mut s = String::from("| altitude | stamp radius | map (face, x, y) | distance m | edit to map ms |
+|---|---|---|---|---|
+");
     for r in rows {
         let maps = r.runs.first().and_then(|x| x.stages.horizon.as_ref());
         match maps.filter(|m| !m.is_empty()) {
-            None => s += &format!("| {} m | {} | - | - | - | - |\n", r.altitude_m, r.radius_label()),
+            None => s += &format!("| {} m | {} | - | - | - |
+", r.altitude_m, r.radius_label()),
             Some(maps) => {
                 for (k, t, dist) in maps {
-                    let (ms, verdict) = match t {
-                        None => ("-".to_string(), "over"),
-                        Some(t) if *t <= 10_000.0 => (format!("{t:.1}"), "ok"),
-                        Some(t) => (format!("{t:.1}"), "over"),
-                    };
-                    s += &format!("| {} m | {} | {:?} | {dist:.0} | {ms} | {verdict} |\n", r.altitude_m, r.radius_label(), k);
+                    let ms = t.map_or("-".to_string(), |t| format!("{t:.1}"));
+                    s += &format!("| {} m | {} | {:?} | {dist:.0} | {ms} |
+", r.altitude_m, r.radius_label(), k);
                 }
             }
         }
@@ -1941,12 +1938,12 @@ mod tests {
         assert!(t.contains("informational, not judged"), "{t}");
         assert!(t.contains("| 1 m | 500 m | (0, 1, 1) | 1800 | 41000.0 |"), "{t}");
         assert!(t.contains("| 1 m | 500 m | (0, 2, 1) | 4600 | - |"), "{t}");
-        assert!(!t.contains("verdict"), "accept M8 reads the table headed `verdict (10 s, horizon maps)` only: {t}");
+        assert!(!t.contains("verdict"), "no horizon table carries a verdict: {t}");
     }
 
     // spec: TEST-065
     #[test]
-    fn the_horizon_table_has_a_row_per_touched_map_with_its_time_and_the_ten_second_verdict() {
+    fn the_horizon_table_has_a_row_per_touched_map_with_its_time_and_no_verdict() {
         let run = |maps: Vec<(planet_generators::chunkfield::ChunkKey, Option<f64>, f64)>| CaseRun {
             stages: Stages { horizon: Some(maps), ..Stages::default() },
             ..CaseRun::default()
@@ -1967,10 +1964,10 @@ mod tests {
         ];
         let t = horizon_table(&rows);
         let lines: Vec<&str> = t.lines().collect();
-        assert!(lines[0].ends_with("| verdict (10 s, horizon maps) |"), "{t}");
-        assert!(lines[2].contains("(2, 10, 11)") && lines[2].contains("| 120 | 2500.0") && lines[2].ends_with("| ok |"), "{t}");
-        assert!(lines[3].contains("12000.0") && lines[3].ends_with("| over |"), "{t}");
-        assert!(lines[4].contains("| - | over |"), "a map that never landed is over: {t}");
+        assert!(lines[0].ends_with("| edit to map ms |") && !t.contains("verdict"), "{t}");
+        assert!(lines[2].contains("(2, 10, 11)") && lines[2].ends_with("| 120 | 2500.0 |"), "{t}");
+        assert!(lines[3].ends_with("| 5100 | 12000.0 |"), "a slow map is a number, not a verdict: {t}");
+        assert!(lines[4].ends_with("| 9800 | - |"), "a map that never landed: {t}");
         assert!(lines[5].ends_with("| - | - | - |") && lines[6].ends_with("| - | - | - |"), "a case that touched no map: {t}");
     }
 

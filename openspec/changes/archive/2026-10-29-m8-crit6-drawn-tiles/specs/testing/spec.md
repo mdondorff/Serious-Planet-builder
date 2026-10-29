@@ -1,3 +1,7 @@
+## RENAMED Requirements
+- FROM: `### Requirement: TEST-065 The gate judges horizon bakes at every site and the re-bake after its edit`
+- TO: `### Requirement: TEST-065 The gate reports the horizon re-bake after its edit; the edit-latency scene tabulates it`
+
 ## MODIFIED Requirements
 
 ### Requirement: TEST-060 Milestone M8 acceptance
