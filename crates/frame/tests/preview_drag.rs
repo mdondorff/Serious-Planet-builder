@@ -1,4 +1,4 @@
-//! REND-033, the drag: the delta of the preview runs from the oldest state to the current one, so it is right only for a tile still at the oldest
+//! REND-045 (REND-033, the drag): the delta of the preview runs from the oldest state to the current one, so it is right only for a tile still at the oldest
 //! state. A tile refreshed at an intermediate state of a drag, one loaded since the edit began, one a stamp left out at the cap touches and one
 //! refreshed ahead of the plan are drawn as they are, never with a delta that is not theirs.
 
@@ -147,7 +147,7 @@ impl Scene {
     }
 }
 
-// spec: REND-033
+// spec: REND-045
 #[test]
 fn a_tile_refreshed_at_an_intermediate_state_of_a_drag_is_drawn_as_it_is_and_one_at_the_oldest_state_gets_the_delta() {
     let s = scene();
@@ -174,7 +174,7 @@ fn a_tile_refreshed_at_an_intermediate_state_of_a_drag_is_drawn_as_it_is_and_one
     assert!(flagged.is_empty() && d.substituted == 0);
 }
 
-// spec: REND-033
+// spec: REND-045
 #[test]
 fn a_tile_a_stamp_left_out_at_the_cap_touches_is_drawn_without_the_preview() {
     let s = scene();
@@ -189,7 +189,7 @@ fn a_tile_a_stamp_left_out_at_the_cap_touches_is_drawn_without_the_preview() {
     assert_eq!(flagged, [s.near]);
 }
 
-// spec: REND-033
+// spec: REND-045
 #[test]
 fn the_cap_reports_the_stamps_it_leaves_out() {
     let specs: Vec<ItemSpec> = (1..=40u128).map(|id| hill_item(id, 100.0 * id as f64, 50.0, 5.0)).collect();
@@ -199,7 +199,7 @@ fn the_cap_reports_the_stamps_it_leaves_out() {
     assert!(list.dropped > 0 && list.stamps.iter().all(|k| !list.left_out.contains(k)));
 }
 
-// spec: REND-033
+// spec: REND-045
 #[test]
 fn every_drawn_stale_tile_shows_its_own_state_or_the_current_one_never_a_mixture() {
     // A hill dragged in three steps (0, 300, 500 m east); the delta runs from the oldest state (hill at 0) to the current one (hill at 500).

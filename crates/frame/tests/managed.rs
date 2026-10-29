@@ -1716,7 +1716,7 @@ fn the_edited_tiles_are_previewed_in_the_frame_after_the_edit_before_any_new_pla
     assert!(f.pipeline.draw.plan.nodes.iter().all(|n| !n.preview), "the exact tiles end the preview");
 }
 
-// spec: REND-033
+// spec: REND-045
 #[test]
 fn a_tile_refreshed_in_the_first_step_of_a_drag_is_not_previewed_with_the_delta_of_the_oldest_state_in_the_second() {
     let rev = Arc::new(std::sync::atomic::AtomicU64::new(0));
