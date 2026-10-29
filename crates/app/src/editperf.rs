@@ -1563,6 +1563,7 @@ pub fn drawn_refreshed_ms(jobs: &[planet_streaming::JobSample], drawn: &HashSet<
 }
 
 /// One frame of a still camera, read back (the still-flicker detector, TEST-068).
+#[derive(Clone)]
 pub struct StillFrame {
     pub width: u32,
     pub height: u32,

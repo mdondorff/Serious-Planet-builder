@@ -8,6 +8,8 @@ mod gpu_flight;
 mod gpu_horizon_rig;
 #[path = "gpu_lit_still_flicker.rs"]
 mod gpu_lit_still_flicker;
+#[path = "gpu_lit_stream_flicker.rs"]
+mod gpu_lit_stream_flicker;
 #[path = "gpu_modes.rs"]
 mod gpu_modes;
 #[path = "gpu_preflight.rs"]

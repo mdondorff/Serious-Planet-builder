@@ -1,0 +1,1 @@
+- 2026-10-29 m8-detector-lit-stream: tier C detector: the lit coast view over streamed tiles draws identical pixels for a still camera and after a 2 degree turn and back (TEST-070); passes on main; settled frames only, the turn's intermediate frames are not compared.
