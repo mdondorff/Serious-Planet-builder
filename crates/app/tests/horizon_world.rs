@@ -741,3 +741,50 @@ fn a_bake_times_its_steps_and_the_diagnosis_log_holds_it_when_started() {
     assert!(mine.ended.expect("the bake ended") > mine.started);
     assert!(bake_log_take().is_empty() || bake_log_take().iter().all(|b| b.key != (9, 9, 9)), "the log goes on, emptied");
 }
+
+/// How a map's march slows when several run at once, on the real store (`cargo test --release -p planet --test it horizon_march_concurrency -- --ignored
+/// --nocapture`): the height tiles of 12 chunks are warmed, then `c` threads of one thread per bake each make 2 maps of their own; the mean milliseconds a
+/// map takes at 1, 2, 4 and 7 at once, with the threads at normal and at below-normal priority (the viewer's horizon pool runs below normal, ADR 0046).
+/// A measurement, not a rule: it needs a quiet machine.
+#[test]
+#[ignore]
+fn horizon_march_concurrency() {
+    use planet::horizonworld::{chunk_horizon_params, ChunkHorizonBaker};
+    use planet_streaming::chunks::HorizonBaker;
+    use planet_streaming::priority::{set_current, Priority};
+    let store = std::path::Path::new("C:/DEV/SeriousPlanetData/global16384");
+    let seed = planet::parse_args(&["test-render".to_string(), "--scene".to_string(), "lit".to_string()]).expect("options").seed;
+    let world = Arc::new(WorldTerrain::open_store(WorldDefinition::single_planet(R, seed), store, 16384).unwrap());
+    let lat = world.horizon_lattice().unwrap();
+    let baker = ChunkHorizonBaker::new(&world, lat, chunk_horizon_params(&lat, R), 1);
+    let keys: Vec<(u8, u32, u32)> = (0..4u32).flat_map(|x| (0..3u32).map(move |y| (2u8, 1000 + x, 1000 + y))).collect();
+    for k in &keys {
+        baker.bake(*k, &[]).unwrap();
+    }
+    for priority in [Priority::Normal, Priority::BelowNormal] {
+        for c in [1usize, 2, 4, 7] {
+            let before = baker.bake_times();
+            let t = std::time::Instant::now();
+            std::thread::scope(|s| {
+                for i in 0..c {
+                    let (baker, keys) = (&baker, &keys);
+                    s.spawn(move || {
+                        let applied = set_current(priority);
+                        assert!(applied || cfg!(not(any(windows, target_os = "linux"))), "the priority was not applied");
+                        for rep in 0..2 {
+                            baker.bake(keys[(i * 2 + rep) % keys.len()], &[]).unwrap();
+                        }
+                    });
+                }
+            });
+            let after = baker.bake_times();
+            println!(
+                "{:>12} x {c}: wall {:6.0} ms, march per map {:6.0} ms ({} maps)",
+                priority.name(),
+                t.elapsed().as_secs_f64() * 1e3,
+                (after.march_ms - before.march_ms) / (after.bakes - before.bakes) as f64,
+                after.bakes - before.bakes
+            );
+        }
+    }
+}

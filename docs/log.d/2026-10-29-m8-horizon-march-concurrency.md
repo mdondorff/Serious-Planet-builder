@@ -1,0 +1,1 @@
+- 2026-10-29 m8-horizon-march-concurrency: ignored measurement of one march at 1, 2, 4 and 7 bakes at once and two thread priorities; no timing claim (the CPU was throttled that day).
