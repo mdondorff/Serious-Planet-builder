@@ -1,0 +1,95 @@
+diff --git a/crates/app/src/globalperf.rs b/crates/app/src/globalperf.rs
+index 5d7f895a..e0a1421b 100644
+--- a/crates/app/src/globalperf.rs
++++ b/crates/app/src/globalperf.rs
+@@ -616,6 +616,90 @@ mod tests {
+         }
+     }
+ 
++    // spec: GEN-052
++    /// SPIKE-55: the generator's heights for the comparison with GLO-30 (read only, no chunk stage). Mode `PLANET_S55_SCAN=lat0,lat1`: for every 1 degree cell between the
++    /// latitudes, `PLANET_S55_N` x `PLANET_S55_N` (default 12) samples on a regular grid in the cell, written as `lat,lon,mean,std,min,max` to `target/spike55/scan.csv`. Mode
++    /// `PLANET_S55_WINDOWS="lat,lon;lat,lon"` with `PLANET_S55_HALF_DEG` (default 0.25): a square window round each centre on a 30 m east-north grid (`PLANET_S55_STEP_M`),
++    /// heights as raw little-endian f32, row 0 the north edge, to `target/spike55/win_<i>.f32` with `win_<i>.txt` (lat, lon, width, height, step). `PLANET_ANET_STORE=DIR
++    /// PLANET_ANET_RES=N cargo test -p planet --release --lib glo30_generator_report -- --ignored --nocapture`. Correctness only: the CPU may be throttled.
++    #[test]
++    #[ignore = "a measurement: it samples the field over tens of thousands of cells"]
++    fn glo30_generator_report() {
++        use planet_core::Vec3;
++        use std::io::Write as _;
++        let mut out = std::io::stdout();
++        let res = std::env::var("PLANET_ANET_RES").ok().and_then(|r| r.parse().ok()).unwrap_or(256);
++        let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
++        let (world, _maps, _tile) = anet_scene(res, 11, store, &mut out).unwrap();
++        let field = world.field().unwrap();
++        let r = world.radius_m();
++        std::fs::create_dir_all("target/spike55").unwrap();
++        let dir_of = |lat: f64, lon: f64| -> Vec3 {
++            let (la, lo) = (lat.to_radians(), lon.to_radians());
++            Vec3::new(la.cos() * lo.cos(), la.cos() * lo.sin(), la.sin())
++        };
++        if let Ok(range) = std::env::var("PLANET_S55_SCAN") {
++            let (lat0, lat1): (i32, i32) = {
++                let mut it = range.split(',').map(|v| v.trim().parse::<i32>().unwrap());
++                (it.next().unwrap(), it.next().unwrap())
++            };
++            let n: usize = std::env::var("PLANET_S55_N").ok().and_then(|v| v.parse().ok()).unwrap_or(12);
++            let mut csv = String::from("lat,lon,mean,std,min,max\n");
++            for lat in lat0..lat1 {
++                let mut dirs = Vec::with_capacity(360 * n * n);
++                for lon in -180..180 {
++                    for j in 0..n {
++                        for i in 0..n {
++                            let (la, lo) = (f64::from(lat) + (j as f64 + 0.5) / n as f64, f64::from(lon) + (i as f64 + 0.5) / n as f64);
++                            dirs.push(dir_of(la, lo));
++                        }
++                    }
++                }
++                let h = field.heights_threaded(&dirs, 4);
++                for (c, lon) in (-180..180).enumerate() {
++                    let s = &h[c * n * n..(c + 1) * n * n];
++                    let mean = s.iter().sum::<f64>() / s.len() as f64;
++                    let var = s.iter().map(|v| (v - mean) * (v - mean)).sum::<f64>() / s.len() as f64;
++                    let (mn, mx) = s.iter().fold((f64::MAX, f64::MIN), |(a, b), &v| (a.min(v), b.max(v)));
++                    csv.push_str(&format!("{lat},{lon},{mean:.2},{:.2},{mn:.1},{mx:.1}\n", var.sqrt()));
++                }
++                writeln!(out, "scan latitude {lat} done").map_err(err).unwrap();
++            }
++            std::fs::write("target/spike55/scan.csv", csv).unwrap();
++        }
++        if let Ok(list) = std::env::var("PLANET_S55_WINDOWS") {
++            let half: f64 = std::env::var("PLANET_S55_HALF_DEG").ok().and_then(|v| v.parse().ok()).unwrap_or(0.25);
++            let step: f64 = std::env::var("PLANET_S55_STEP_M").ok().and_then(|v| v.parse().ok()).unwrap_or(30.0);
++            for (k, item) in list.split(';').filter(|s| !s.trim().is_empty()).enumerate() {
++                let mut it = item.split(',').map(|v| v.trim().parse::<f64>().unwrap());
++                let (lat, lon) = (it.next().unwrap(), it.next().unwrap());
++                let c = dir_of(lat, lon);
++                let (lo, la) = (lon.to_radians(), lat.to_radians());
++                let east = Vec3::new(-lo.sin(), lo.cos(), 0.0);
++                let north = Vec3::new(-la.sin() * lo.cos(), -la.sin() * lo.sin(), la.cos());
++                let half_m = half.to_radians() * r;
++                let w = (2.0 * half_m / step).round() as usize;
++                let mut dirs = Vec::with_capacity(w * w);
++                for row in 0..w {
++                    let y = half_m - (row as f64 + 0.5) * step;
++                    for col in 0..w {
++                        let x = -half_m + (col as f64 + 0.5) * step;
++                        let p = c * r + east * x + north * y;
++                        dirs.push(p * (1.0 / (p.x * p.x + p.y * p.y + p.z * p.z).sqrt()));
++                    }
++                }
++                let h = field.heights_threaded(&dirs, 4);
++                let mut bytes = Vec::with_capacity(h.len() * 4);
++                for v in &h {
++                    bytes.extend_from_slice(&(*v as f32).to_le_bytes());
++                }
++                std::fs::write(format!("target/spike55/win_{k}.f32"), bytes).unwrap();
++                std::fs::write(format!("target/spike55/win_{k}.txt"), format!("{lat} {lon} {w} {w} {step}\n")).unwrap();
++                writeln!(out, "window {k} ({lat}, {lon}) {w} x {w} samples written").map_err(err).unwrap();
++            }
++        }
++    }
++
+     // spec: GEN-052
+     /// What building one tile costs with the chunk layer (chunks ready under it, an edit in the definition) and without it (base and stamps only),
+     /// per level (M8-7, criterion 6: the tile refresh of an edit). `PLANET_ANET_STORE=DIR PLANET_ANET_RES=N cargo test -p planet --release --lib
