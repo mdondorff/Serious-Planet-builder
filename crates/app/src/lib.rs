@@ -769,6 +769,7 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
             // `--prefill-levels`: the levels of the tile pack the gated dives require pre-filled at their start (default 4).
             // `--altitudes-m`: the altitudes of the envelope scene (`--only-steady`, TEST-057).
             // `--base-threads`: the threads of a batch of the A-net's base heights in the edit-latency scene (with `--chunk-workers`).
+            // `--radii-m`: with `--altitudes-m`, the hill stamps of the edit-latency scene to run (a diagnosis of one case).
             &[
                 "--world",
                 "--global-res",
@@ -777,6 +778,7 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
                 "--horizon-threads",
                 "--repeats",
                 "--altitudes-m",
+                "--radii-m",
                 "--places",
             ]
         } else if window {
