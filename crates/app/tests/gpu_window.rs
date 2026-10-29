@@ -80,6 +80,7 @@ fn count_before(stdout: &str, after: &str) -> u64 {
 // spec: VIEW-005, VIEW-007, LOOK-005
 #[test]
 fn the_window_path_opens_runs_the_flight_lit_with_the_atmosphere_and_closes() {
+    // `--global-res 128`: the default bake (256 cells) costs the floor tiles 142 s on the CI runner (Windows WARP, `TIMING` of #881) against 16 s at 128 (the sea test); the asserts are counts of frames and views, which the world's resolution does not change.
     // The two runs are separate processes (two WARP devices in one process crash it, docs/status.md) and judge frame counts, never
     // wall-clock, so they run at the same time: on the software adapter each run is dominated by the adapter's own frame time and
     // together they take little more than one (measured on a 20-core machine only: 2 x 30 s alone, 32 s together; 110 s to 90 s inside the whole `test gpu` run).
@@ -102,8 +103,8 @@ max_ev100 = 16.0
     )
     .unwrap();
     let (first, second) = std::thread::scope(|s| {
-        let first = s.spawn(|| smoke(&[]));
-        let second = s.spawn(|| smoke(&["--look", look.to_str().unwrap(), "--no-ui"]));
+        let first = s.spawn(|| smoke(&["--global-res", "128"]));
+        let second = s.spawn(|| smoke(&["--look", look.to_str().unwrap(), "--no-ui", "--global-res", "128"]));
         (first.join(), second.join())
     });
     let _ = std::fs::remove_dir_all(&dir);
