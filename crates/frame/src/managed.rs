@@ -443,9 +443,24 @@ impl ManagedLoop {
         self.manager.streamer_mut().set_refresh_settle(ms);
     }
 
-    /// Set the preview of the edit in flight (REND-033, from `preview_delta`); an empty list ends it. Call after [`ManagedLoop::edit`].
+    /// Set the preview of the edit in flight (REND-033, from `preview_delta`); an empty list ends it. Call after [`ManagedLoop::edit`]. The first
+    /// non-empty list records the key of every resident tile, and a stale tile is flagged only while it still has that key (see
+    /// [`ManagedLoop::set_preview_list`]).
     pub fn set_preview(&mut self, stamps: Vec<crate::preview::PreviewStamp>) {
-        self.pipe.set_preview(stamps);
+        if stamps.is_empty() {
+            self.pipe.set_preview(stamps);
+        } else {
+            self.pipe.set_preview_states(stamps, Vec::new(), &self.resident);
+        }
+    }
+
+    /// [`ManagedLoop::set_preview`] for the list of a delta that may have left stamps out at the cap: a tile one of them touches is drawn without the
+    /// preview, never with a delta that is not its own (REND-033). The tiles that are stale when the first list is set are the ones the delta fits; a
+    /// tile refreshed at an intermediate state of a drag, or loaded since, is drawn as it is until the exact one arrives. An empty list keeps those
+    /// states (a drag that returns to its start); [`ManagedLoop::set_preview`] with an empty list ends the preview. Only the changes the delta lists
+    /// are covered: a removed plateau or a line is not in it (REND-033).
+    pub fn set_preview_list(&mut self, list: crate::preview::PreviewList) {
+        self.pipe.set_preview_states(list.stamps, list.left_out, &self.resident);
     }
 
     /// Set the transient preview (VIEW-036, REND-033): the stamps of something being made, such as a brush stroke under the pointer, shown on

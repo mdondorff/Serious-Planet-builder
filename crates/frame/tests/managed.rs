@@ -1716,6 +1716,91 @@ fn the_edited_tiles_are_previewed_in_the_frame_after_the_edit_before_any_new_pla
     assert!(f.pipeline.draw.plan.nodes.iter().all(|n| !n.preview), "the exact tiles end the preview");
 }
 
+// spec: REND-045
+#[test]
+fn a_tile_refreshed_in_the_first_step_of_a_drag_is_not_previewed_with_the_delta_of_the_oldest_state_in_the_second() {
+    let rev = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let req = request(here(), 0.0, -0.4);
+    let region = TileId::from_direction(&TangentWarp, here().0.normalized(), 6);
+    let field = Arc::new(EditField { inner: Reference(1), rev: Arc::clone(&rev), region });
+    let mut rig = Rig::build_edited(1_000_000, false, 0, UploadBudget::default(), 64, Some(Arc::clone(&field)));
+    rig.settle(&req);
+    let affected: Vec<TileId> = rig.lp.resident().keys().filter(|t| field.touches(**t)).copied().collect();
+    let oldest: std::collections::HashMap<TileId, u64> = rig.lp.resident().iter().map(|(t, r)| (*t, r.mesh_key)).collect();
+    let stamp = planet_frame::preview::PreviewStamp {
+        sign: 1,
+        kind: planet_world_def::stamp::StampKind::Hill,
+        amount_m: 30.0,
+        dir: region.center_direction(&TangentWarp),
+        reach_m: 5_000_000.0,
+        max_delta_m: 60.0,
+    };
+
+    // Step one of the drag: the edit, its preview, and the jobs finish for some of the tiles (they are refreshed at the middle state).
+    rev.store(1, Ordering::SeqCst);
+    rig.lp.edit(&affected);
+    rig.lp.set_preview(vec![stamp]);
+    rig.tile_jobs_per_frame = 3;
+    let refreshed = |rig: &Rig, f: &ManagedFrame| -> Vec<TileId> {
+        f.pipeline
+            .draw
+            .plan
+            .nodes
+            .iter()
+            .map(|n| n.tile)
+            .filter(|t| affected.contains(t) && rig.lp.resident().get(t).is_some_and(|r| r.mesh_key != oldest[t]))
+            .collect()
+    };
+    let mut middle = Vec::new();
+    for _ in 0..200 {
+        let f = rig.step(&req);
+        middle = refreshed(&rig, &f);
+        if !middle.is_empty() {
+            break;
+        }
+    }
+    assert!(!middle.is_empty(), "some drawn tiles were refreshed at the middle state");
+
+    // Step two: another edit, the same delta from the oldest state, and the jobs wait.
+    rev.store(2, Ordering::SeqCst);
+    rig.lp.edit(&affected);
+    rig.lp.set_preview(vec![stamp]);
+    rig.tile_jobs_per_frame = 0;
+    let f = rig.step(&req);
+    let flagged: BTreeSet<TileId> = f.pipeline.draw.plan.nodes.iter().filter(|n| n.preview).map(|n| n.tile).collect();
+    for t in &flagged {
+        assert_eq!(
+            rig.lp.resident().get(t).map(|r| r.mesh_key),
+            oldest.get(t).copied(),
+            "{t:?}: a previewed tile is still at the oldest state"
+        );
+    }
+    assert!(flagged.iter().all(|t| !middle.contains(t)), "a tile at the middle state is not previewed");
+
+    // The drag returns to its start: an empty list in the middle of the drag keeps the oldest states, so the tiles refreshed at the middle state are
+    // still not given the next delta.
+    rig.lp.set_preview_list(planet_frame::preview::PreviewList::default());
+    rig.lp.edit(&affected);
+    rig.lp.set_preview_list(planet_frame::preview::PreviewList { stamps: vec![stamp], ..Default::default() });
+    let f = rig.step(&req);
+    for n in f.pipeline.draw.plan.nodes.iter().filter(|n| n.preview) {
+        assert_eq!(
+            rig.lp.resident().get(&n.tile).map(|r| r.mesh_key),
+            oldest.get(&n.tile).copied(),
+            "{:?}: still at the oldest state after an empty list",
+            n.tile
+        );
+    }
+
+    // The jobs finish: exact, nothing previewed; the end of the preview forgets the states.
+    rig.tile_jobs_per_frame = 10_000;
+    rig.settle_view(&req);
+    rig.lp.set_preview(Vec::new());
+    let f = rig.step(&req);
+    assert_eq!(f.pipeline.draw.kind, DrawKind::Exact);
+    assert!(f.pipeline.draw.plan.nodes.iter().all(|n| !n.preview));
+}
+
 // spec: STRM-030
 #[test]
 fn the_roots_are_written_to_the_sink_before_frame_zero_and_the_first_frame_uploads_none_of_them() {

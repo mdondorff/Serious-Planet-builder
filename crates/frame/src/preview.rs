@@ -57,6 +57,8 @@ pub struct PreviewList {
     pub stamps: Vec<PreviewStamp>,
     /// Entries beyond [`MAX_PREVIEW_STAMPS`] that were dropped (the farthest from the camera go first).
     pub dropped: usize,
+    /// The stamps of the dropped entries: a tile one of them touches cannot get a correct delta and is drawn without the preview (REND-033).
+    pub left_out: Vec<PreviewStamp>,
 }
 
 /// The unit direction `t` (0 to 1) of the way from `a` to `b` along the great circle.
@@ -267,6 +269,7 @@ fn delta(before: &[FootprintItem], after: &[FootprintItem], camera: Vec3, brush_
         }
     }
     let total = entries.len();
+    let mut left_out: Vec<PreviewStamp> = Vec::new();
     if total > MAX_DELTA_STAMPS {
         // Whole units, nearest first: the angle between the unit's nearest entry and the camera direction (larger cosine = nearer), ties by
         // id and unit. A unit is an item's stamp, or one stroke of a brush item, so that one large brush item is not dropped whole.
@@ -288,10 +291,12 @@ fn delta(before: &[FootprintItem], after: &[FootprintItem], camera: Vec3, brush_
             count += n;
             kept.push(u);
         }
-        entries.retain(|e| kept.iter().any(|u| in_unit(e, u)));
+        let (keep, out): (Vec<Entry>, Vec<Entry>) = entries.into_iter().partition(|e| kept.iter().any(|u| in_unit(e, u)));
+        entries = keep;
+        left_out = out.into_iter().map(|e| e.stamp).collect();
     }
     let dropped = total - entries.len();
     // Application order: by item; a changed item's removals before its additions; a brush item's strokes in file order.
     entries.sort_by_key(|e| (e.priority, e.id, e.addition, e.unit));
-    PreviewList { stamps: entries.into_iter().map(|e| e.stamp).collect(), dropped }
+    PreviewList { stamps: entries.into_iter().map(|e| e.stamp).collect(), dropped, left_out }
 }

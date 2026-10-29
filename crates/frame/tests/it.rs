@@ -78,6 +78,8 @@ mod prefetch;
 mod preview;
 #[path = "preview_brush.rs"]
 mod preview_brush;
+#[path = "preview_drag.rs"]
+mod preview_drag;
 #[path = "preview_lines.rs"]
 mod preview_lines;
 #[path = "regions.rs"]
