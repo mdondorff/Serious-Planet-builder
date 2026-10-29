@@ -4,6 +4,8 @@ mod atmosphere;
 mod chunk_plan;
 #[path = "chunk_share.rs"]
 mod chunk_share;
+#[path = "coarsening_loop.rs"]
+mod coarsening_loop;
 #[path = "compact_pool.rs"]
 mod compact_pool;
 #[path = "controller.rs"]
