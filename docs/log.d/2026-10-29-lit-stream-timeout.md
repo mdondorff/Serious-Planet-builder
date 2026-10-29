@@ -1,0 +1,1 @@
+- 2026-10-29 nextest: a declared 450 s limit (5 x 90 s) for gpu_lit_stream_flicker::the_lit_coast_view_over_streamed... (cut off at 300 s three times on the Windows CI runner while progressing: streaming settle 213.8 s; BUILD-003, planner approved); no test skipped, retried or changed.

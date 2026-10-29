@@ -20,6 +20,17 @@ slow-timeout = { period = "90s", terminate-after = 5 }
 filter = 'binary(gpu_all) and test(a_coastal_flight_at_low_altitude_flickers_within_the_budget_while_the_lod_changes_under_it)'
 slow-timeout = { period = "90s", terminate-after = 5 }
 
+# Declared limit (approved by the planner, 2026-10-29, BUILD-003). `gpu_lit_stream_flicker::the_lit_coast_view_over_streamed_tiles_draws_the_same_pixels_still_and_after_a_small_turn_and_back`
+# (TEST-070) draws the lit coast view with the streaming loop and settles three times. It does not hang: on the Windows CI runner it was cut off at
+# 300.2 s, 300.3 s and 300.3 s while progressing. Phase times of the last cut-off run (progress lines of the test): streaming settle 213.8 s (291 ticks;
+# 76.4 s and 88 ticks on the throttled laptop, whose local run takes 188 s in all), exposure 2.5 s, 6 frames 8.1 s, turn settle 17.7 s, exposure 2.4 s,
+# and the back settle and exposure still to come at about 20 s each. A declared 450 s (5 x 90 s) is the cut-off plus 50 %: it still catches a hang (every
+# settle fails with numbers after 900 ticks). The first matching override sets a value, so this one comes before the `gpu_` one. No test is skipped,
+# retried or changed.
+[[profile.default.overrides]]
+filter = 'binary(gpu_all) and test(the_lit_coast_view_over_streamed_tiles_draws_the_same_pixels_still_and_after_a_small_turn_and_back)'
+slow-timeout = { period = "90s", terminate-after = 5 }
+
 # The software-adapter GPU tier (BUILD-003): the heavy `gpu_*` tests take 40 to 66 s alone and up to 144 s beside the other processes of
 # a full `cargo xtask test gpu` (about 20 at once, each software rasteriser multi-threaded), so they reach the 120 s mark of the default
 # limit. The limit is there to catch a hang, not to budget a test: these binaries terminate after 300 s (5 x 60 s). Grouping the heavy
