@@ -42,6 +42,18 @@ fn the_lit_coast_view_draws_the_same_pixels_frame_after_frame_with_the_exposure_
         // The test can only falsify if there is a sea to glint on, a picture, and an exposure that stands still.
         assert!(run.water_nodes > 0, "{}: no plan node carries water: the coast view proves nothing", run.name);
         assert!(run.frames[0].nodes.len() > 4, "{}: only {} tiles were drawn", run.name, run.frames[0].nodes.len());
+        // A picture to look at, and the guards that equality means something: colours in it, light in the lit target (a night is all zeros and a black
+        // picture, and an empty exposure histogram that holds the EV where it started).
+        let first = planet_testkit::Image::new(run.frames[0].width, run.frames[0].height, run.frames[0].rgba.clone());
+        planet_testkit::write_png(&dir.join(format!("{}-first.png", run.name)), &first).unwrap();
+        let colours: std::collections::BTreeSet<[u8; 4]> = first.pixels().collect();
+        assert!(colours.len() > 16, "{}: the lit frame has {} colours: nothing was drawn", run.name, colours.len());
+        assert!(
+            run.lit_share > 0.5,
+            "{}: only {:.0} % of the lit target carries light: a night or nothing drawn",
+            run.name,
+            run.lit_share * 100.0
+        );
         assert!(
             (run.exposure_ev100 - run.exposure_target_ev100).abs() < 1e-6,
             "{}: the exposure was still adapting ({} of {})",

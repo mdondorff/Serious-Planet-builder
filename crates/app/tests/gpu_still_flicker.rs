@@ -76,6 +76,9 @@ fn a_still_camera_after_streaming_settles_draws_the_same_pixels_frame_after_fram
         // The test can only falsify if there is something to see: more than one colour in the picture, and tiles drawn.
         let first = Image::new(frames[0].width, frames[0].height, frames[0].rgba.clone());
         let colours: BTreeSet<[u8; 4]> = first.pixels().collect();
+        // A picture to look at: the first frame of each view is kept beside the failures (CI uploads `target/review/`).
+        write_png(&dir.join(format!("{name}-first.png")), &first).unwrap();
+        eprintln!("{name}: {} colours, {} tiles in the first frame", colours.len(), frames[0].nodes.len());
         assert!(colours.len() > 2, "{name}: the still frame has {} colours: nothing was drawn", colours.len());
         assert!(frames[0].nodes.len() > 8, "{name}: only {} tiles were drawn", frames[0].nodes.len());
         failures.extend(changes(&name, &frames, &dir));
