@@ -1,0 +1,5 @@
+RESULT extra 4 level 22: mesh path per tile median 15.044 ms, mean 15.197, p90 15.995; 1089 serial reads median 12.623 ms, mean 12.841, p90 13.542 (9 tiles x 5)
+RESULT extra 4 level 20: mesh path per tile median 14.760 ms, mean 14.861, p90 15.552; 1089 serial reads median 12.676 ms, mean 12.830, p90 13.325 (9 tiles x 5)
+RESULT extra 4 level 18: mesh path per tile median 14.761 ms, mean 14.902, p90 15.518; 1089 serial reads median 12.685 ms, mean 12.779, p90 13.265 (9 tiles x 5)
+RESULT extra 4: 235224 bytes of heights written
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 221 filtered out; finished in 19.83s
