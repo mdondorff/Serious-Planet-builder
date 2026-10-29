@@ -31,6 +31,10 @@ pub const SCENE: &str = "edit-latency";
 /// A settle that has not happened within this long is an error, not a hang.
 const SETTLE_LIMIT: Duration = Duration::from_secs(900);
 
+/// How long the horizon jobs must have neither a bake in flight nor a start before an edit is made (TEST-066): longer than their settle window (1 s), so a
+/// map waiting for its neighbourhood to settle has started by then.
+const HORIZON_QUIET: Duration = Duration::from_millis(1_500);
+
 /// Targets of the M6 exit criterion (SPIKE-13): the preview, and the exact tiles for a stamp up to 150 m, up to 500 m and at 1 m altitude.
 pub const PREVIEW_BUDGET_MS: f64 = 16.0;
 pub const EXACT_BUDGET_SMALL_MS: f64 = 300.0;
@@ -608,6 +612,8 @@ struct Harness<'a> {
     horizon_landed: Vec<(Instant, planet_generators::chunkfield::ChunkKey)>,
     /// The chunks the horizon jobs were asked for in the last frame (the same tiles and truncation as the jobs see).
     horizon_wanted: Vec<(planet_generators::chunkfield::ChunkKey, f64)>,
+    /// The horizon jobs the last frame started (0 once the wave is over, see `settle_horizon`).
+    horizon_started: usize,
 }
 
 impl Harness<'_> {
@@ -632,6 +638,7 @@ impl Harness<'_> {
             let tiles: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
             self.horizon_wanted = world.horizon_wanted(&tiles, req.camera.position);
             let update = world.horizon_frame(&tiles, req.camera.position);
+            self.horizon_started = update.started;
             let now = Instant::now();
             self.horizon_landed.extend(update.landed.iter().map(|k| (now, *k)));
         }
@@ -668,6 +675,32 @@ impl Harness<'_> {
             }
             if started.elapsed() > Duration::from_secs(600) {
                 return Err("the chunks did not settle in 600 s".into());
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    /// Frames with the camera still until the horizon jobs are quiet (a no-op without them): no bake in flight and none started for longer than the jobs'
+    /// settle window, so an edit that follows is not made during the wave of bakes the last edit, the revert or the first view started (TEST-066).
+    /// Returns the seconds it took.
+    fn settle_horizon(&mut self, req: &TerrainRequest) -> Result<f64, String> {
+        let Some(world) = self.horizon_world.clone() else { return Ok(0.0) };
+        let started = Instant::now();
+        let mut quiet_since: Option<Instant> = None;
+        loop {
+            self.step(req)?;
+            let busy = world.horizon_in_flight() > 0 || self.horizon_started > 0;
+            if busy {
+                quiet_since = None;
+            } else if horizon_quiet_over(&mut quiet_since, Instant::now()) {
+                return Ok(started.elapsed().as_secs_f64());
+            }
+            if started.elapsed() > Duration::from_secs(600) {
+                return Err(format!(
+                    "the horizon jobs were not quiet in 600 s: {} in flight, {} started in the last frame",
+                    world.horizon_in_flight(),
+                    self.horizon_started
+                ));
             }
             std::thread::sleep(Duration::from_millis(2));
         }
@@ -748,14 +781,17 @@ fn announce_item_change(h: &mut Harness<'_>, world: &Arc<WorldTerrain>, old: &pl
     crate::chunkstage::announce_item_change(&mut h.rig.managed, world, old, old_revision, &mut h.counters);
 }
 
-/// One run of a case on a settled harness: edit, time the preview and the exact frame, take the edit back and settle.
+/// One run of a case on a settled harness: edit, time the preview and the exact frame, take the edit back and settle. `quiet`: wait for the horizon jobs to be
+/// quiet first (TEST-066); false is the informational run that edits during a wave of bakes.
 fn run_once(
     h: &mut Harness<'_>,
     world: &Arc<WorldTerrain>,
     req: &TerrainRequest,
     stamp: &ItemSpec,
     limit: Duration,
+    quiet: bool,
 ) -> Result<CaseRun, String> {
+    let waited_s = if quiet { h.settle_horizon(req)? } else { 0.0 };
     let before_def = world.definition();
     let mut edited = (*before_def).clone();
     edited.put_item_spec(BodyId::PLANET, stamp.clone()).map_err(|e| format!("the case's stamp: {e:?}"))?;
@@ -972,7 +1008,10 @@ fn run_once(
             h.step(req)?;
             std::thread::sleep(Duration::from_millis(1));
         }
-        out.stages.horizon_diag = Some(horizon_diag(&crate::horizonworld::bake_log_take(), sampler_started, out.exact_ms));
+        out.stages.horizon_diag = Some(format!(
+            "waited {waited_s:.1} s for a quiet horizon before the edit; {}",
+            horizon_diag(&crate::horizonworld::bake_log_take(), sampler_started, out.exact_ms)
+        ));
         out.stages.horizon = Some(
             touched
                 .into_iter()
@@ -990,6 +1029,8 @@ fn run_once(
     h.rig.managed.set_preview(Vec::new());
     h.settle(req, 20)?;
     h.settle_chunks(req, 20)?;
+    // The revert changed the edit words of the touched maps: they are baked again, and the next edit waits for that wave to be over.
+    h.settle_horizon(req)?;
     Ok(out)
 }
 
@@ -1001,9 +1042,11 @@ pub fn horizon_diag(log: &[crate::horizonworld::BakeRecord], t0: Instant, exact_
     bakes.sort_by_key(|b| b.started);
     let made = bakes.iter().filter(|b| b.made).count();
     let running = bakes.iter().filter(|b| b.ended.is_none()).count();
+    let before_edit = bakes.iter().filter(|b| b.started < t0).count();
     let mut s = format!(
-        "edit to exact frame {} ms; first bake started {} ms after the edit; {} bakes, {} made, {} dropped by a later edit (started again), {} still running\n\n",
+        "edit to exact frame {} ms; {} bakes already running when the edit landed; first bake started {} ms after the edit; {} bakes, {} made, {} dropped by a later edit (started again), {} still running\n\n",
         exact_ms.map_or("-".to_string(), |v| format!("{v:.0}")),
+        before_edit,
         bakes.first().map_or("-".to_string(), |b| format!("{:.0}", at(b.started))),
         bakes.len(),
         made,
@@ -1026,6 +1069,41 @@ pub fn horizon_diag(log: &[crate::horizonworld::BakeRecord], t0: Instant, exact_
     }
     let sum = |i: usize| bakes.iter().map(|b| b.step_ms[i]).sum::<f64>();
     s += &format!("| sum | | | | {:.0} | {:.0} | {:.0} | {:.0} |\n", sum(0), sum(1), sum(2), sum(3));
+    s
+}
+
+/// One step of the wait for a quiet horizon (TEST-066): `quiet_since` is when the quiet began (`None`: busy now); true once it has lasted [`HORIZON_QUIET`].
+fn horizon_quiet_over(quiet_since: &mut Option<Instant>, now: Instant) -> bool {
+    now.saturating_duration_since(*quiet_since.get_or_insert(now)) >= HORIZON_QUIET
+}
+
+/// The informational runs that edit while the first wave of bakes is still running (TEST-066): per altitude the first case once, with no verdict (the
+/// header carries no `verdict` column, so `accept M8` does not read it) and the bake diagnosis of that edit. Empty without such a run.
+pub fn horizon_wave_section(waves: &[(f64, f64, CaseRun)]) -> String {
+    if waves.is_empty() {
+        return String::new();
+    }
+    let mut s = String::from(
+        "\nthe same edit made right after the view settled, during the wave of bakes the view started (informational, not judged; the rows above wait for the horizon to be quiet):\n\n| altitude | stamp radius | map (face, x, y) | distance m | edit to map ms (edit during a bake wave) |\n|---|---|---|---|---|\n",
+    );
+    for (altitude, radius, run) in waves {
+        match run.stages.horizon.as_ref().filter(|m| !m.is_empty()) {
+            None => s += &format!("| {altitude} m | {radius} m | - | - | - |\n"),
+            Some(maps) => {
+                for (k, t, dist) in maps {
+                    s += &format!(
+                        "| {altitude} m | {radius} m | {k:?} | {dist:.0} | {} |\n",
+                        t.map_or("-".to_string(), |t| format!("{t:.1}"))
+                    );
+                }
+            }
+        }
+    }
+    for (altitude, radius, run) in waves {
+        if let Some(d) = &run.stages.horizon_diag {
+            s += &format!("\nthe horizon bakes of that edit, {altitude} m altitude, {radius} m stamp:\n\n{d}");
+        }
+    }
     s
 }
 
@@ -1299,6 +1377,7 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
     };
     let mut rows = Vec::new();
     let mut costs: Vec<PreviewCost> = Vec::new();
+    let mut waves: Vec<(f64, f64, CaseRun)> = Vec::new();
     for &altitude in &altitudes {
         let mut cases = cases_at(altitude, smoke, radius_m);
         if let Some(radii) = &only_radii {
@@ -1333,7 +1412,9 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
             horizon_world: with_horizon.then(|| Arc::clone(&world)),
             horizon_landed: Vec::new(),
             horizon_wanted: Vec::new(),
+            horizon_started: 0,
         };
+        let mut first_case = true;
         for case in &cases {
             let rho = (1.5 * case.size_m).max(altitude);
             let req = req_of(camera_for(case.centre, &ground, radius_m, rho, altitude, aspect));
@@ -1352,8 +1433,15 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
             h.settle_chunks(&req, if smoke { 3 } else { 20 })?;
             writeln!(out, "  altitude {altitude} m, {}: settled in {settle:.1} s", case.name).map_err(err)?;
             let mut runs = Vec::new();
+            // The first case of an altitude is also edited once right after the view settled, while the first wave of bakes is still running: an
+            // informational run, kept out of the verdict (TEST-066).
+            if with_horizon && !smoke && first_case {
+                let wave = run_once(&mut h, &world, &req, &case.spec, limit, false)?;
+                waves.push((altitude, case.size_m, wave));
+            }
+            first_case = false;
             for _ in 0..repeats {
-                runs.push(run_once(&mut h, &world, &req, &case.spec, limit)?);
+                runs.push(run_once(&mut h, &world, &req, &case.spec, limit, true)?);
             }
             world.set_definition(original)?;
             if let Some(base) = &case.base {
@@ -1387,7 +1475,7 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
         format!("
 the horizon side of every case (ms from set_definition to the landing of each map the edit touched; the maps baked from the base terrain, no chunk stage). On screen is landing plus the upload: the window uploads one landed map per frame (`HorizonRig::decide`, horizonworld.rs), so a map is drawn within one frame of landing when it is the only one pending, and the window gate logs the frame a re-baked map is first drawn:
 
-{}{}", horizon_table(&rows), horizon_diag_section(&rows))
+{}{}{}", horizon_table(&rows), horizon_wave_section(&waves), horizon_diag_section(&rows))
     } else {
         String::new()
     };
@@ -1733,12 +1821,44 @@ mod tests {
             ..rec((0, 2, 1), 900, 0, false, [0.0; 4])
         });
         let d = horizon_diag(&log, t0, Some(120.0));
-        assert!(d.starts_with("edit to exact frame 120 ms; first bake started 5 ms after the edit; 3 bakes, 1 made, 1 dropped"), "{d}");
+        assert!(d.starts_with("edit to exact frame 120 ms; 0 bakes already running when the edit landed; first bake started 5 ms after the edit; 3 bakes, 1 made, 1 dropped"), "{d}");
         assert!(d.contains("still running\n"), "{d}");
         assert!(d.contains("| (0, 2, 1) | 900 | running | false |"), "{d}");
         assert!(d.contains("| (0, 1, 1) | 900 | 2900 | true | 1 | 2 | 300 | 1500 |"), "{d}");
         assert!(d.ends_with("| sum | | | | 2 | 2 | 1100 | 1500 |\n"), "{d}");
         assert!(horizon_diag(&[], t0, None).contains("0 bakes, 0 made, 0 dropped"));
+    }
+
+    // spec: TEST-066
+    #[test]
+    fn the_wait_for_a_quiet_horizon_ends_after_the_quiet_window_and_the_window_exceeds_the_jobs_settle_window() {
+        assert!(HORIZON_QUIET.as_millis() as u64 > planet_streaming::chunks::HorizonConfig::default().settle_ms);
+        let t0 = Instant::now();
+        let mut since = None;
+        assert!(!horizon_quiet_over(&mut since, t0), "the first quiet frame starts the window");
+        assert!(!horizon_quiet_over(&mut since, t0 + HORIZON_QUIET - Duration::from_millis(1)));
+        assert!(horizon_quiet_over(&mut since, t0 + HORIZON_QUIET), "quiet for the whole window");
+        since = None; // a bake in flight or a start resets it
+        assert!(!horizon_quiet_over(&mut since, t0 + HORIZON_QUIET));
+    }
+
+    // spec: TEST-066
+    #[test]
+    fn the_wave_rows_are_informational_and_carry_no_verdict_column() {
+        assert_eq!(horizon_wave_section(&[]), "");
+        let run = CaseRun {
+            stages: Stages {
+                horizon: Some(vec![((0, 1, 1), Some(41_000.0), 1800.0), ((0, 2, 1), None, 4600.0)]),
+                horizon_diag: Some(horizon_diag(&[], Instant::now(), Some(3000.0))),
+                ..Stages::default()
+            },
+            ..CaseRun::default()
+        };
+        let t = horizon_wave_section(&[(1.0, 500.0, run)]);
+        assert!(t.contains("informational, not judged"), "{t}");
+        assert!(t.contains("| 1 m | 500 m | (0, 1, 1) | 1800 | 41000.0 |"), "{t}");
+        assert!(t.contains("| 1 m | 500 m | (0, 2, 1) | 4600 | - |"), "{t}");
+        assert!(!t.contains("verdict"), "accept M8 reads the table headed `verdict (10 s, horizon maps)` only: {t}");
     }
 
     // spec: TEST-065
