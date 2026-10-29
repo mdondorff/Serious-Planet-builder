@@ -15,7 +15,7 @@ const VIEWS: [TerrainView; 3] = [TerrainView::Level, TerrainView::Relief, Terrai
 
 /// The changes between consecutive frames of a still camera: one message per changed pair naming the pixels, their box and the drawn tiles that differ;
 /// both frames and the diff image of each go to `dir`. Empty when every pair is identical.
-fn changes(name: &str, frames: &[StillFrame], dir: &Path) -> Vec<String> {
+pub(crate) fn changes(name: &str, frames: &[StillFrame], dir: &Path) -> Vec<String> {
     let images: Vec<Image> = frames.iter().map(|f| Image::new(f.width, f.height, f.rgba.clone())).collect();
     let mut failures = Vec::new();
     for i in 1..frames.len() {
