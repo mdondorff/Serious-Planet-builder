@@ -39,6 +39,8 @@ pub struct SlowFrame {
     pub ms: f64,
     pub phase: String,
     pub phase_ms: f64,
+    /// Bake blocks the main thread decoded in this frame (VIEW-061).
+    pub decodes: u64,
 }
 
 /// A frame whose plan held back tiles with no edit in reach.
@@ -48,12 +50,23 @@ pub struct HeldFrame {
     pub tiles: Vec<TileId>,
 }
 
+/// A frame in which the main thread decoded bake blocks itself (VIEW-061).
+#[derive(Clone, Debug, PartialEq)]
+pub struct DecodeFrame {
+    pub frame: u64,
+    pub phase: String,
+    pub blocks: u64,
+}
+
 /// What a run counted.
 #[derive(Clone, Debug, Default)]
 pub struct Gate {
     pub frames: u64,
     pub longest_ms: f64,
     pub slow: Vec<SlowFrame>,
+    /// The frames in which the main thread decoded a bake block, the first phase of each (a decode waits for the disk and the codec: a stall the warm-up thread should take).
+    pub decoded: Vec<DecodeFrame>,
+    pub main_decodes: u64,
     pub held_free: Vec<HeldFrame>,
     /// Most tiles held back under an edit at once (reported, not failed).
     pub held_under_edit_max: usize,
@@ -100,9 +113,17 @@ impl Gate {
 
     /// One finished frame: its phases (name, milliseconds). The frame's time is the sum of the phases that are not a wait for the GPU, so a slow
     /// adapter (the software one in CI) does not fail the gate for drawing slowly; a stall on the main thread does.
-    pub fn frame(&mut self, frame: u64, phases: &[(&str, f64)]) {
+    ///
+    /// `decodes` are the bake blocks the main thread decoded itself in each phase of the frame (the stall probe's count, phases with none left out): a block is
+    /// decoded off the main thread by the warm-up and the hover threads (VIEW-059, VIEW-061), so any count here is a read that waited for the disk.
+    pub fn frame(&mut self, frame: u64, phases: &[(&str, f64)], decodes: &[(&str, u64)]) {
         if frame < WARMUP_FRAMES {
             return;
+        }
+        let blocks: u64 = decodes.iter().map(|d| d.1).sum();
+        if let Some((phase, _)) = decodes.iter().max_by_key(|d| d.1) {
+            self.main_decodes += blocks;
+            self.decoded.push(DecodeFrame { frame, phase: (*phase).to_string(), blocks });
         }
         let phases: Vec<(&str, f64)> = phases.iter().copied().filter(|(name, _)| !GPU_PHASES.iter().any(|g| name.starts_with(g))).collect();
         let ms: f64 = phases.iter().map(|p| p.1).sum();
@@ -110,7 +131,7 @@ impl Gate {
         self.longest_ms = self.longest_ms.max(ms);
         if ms > FRAME_LIMIT_MS {
             let (phase, phase_ms) = phases.iter().copied().max_by(|a, b| a.1.total_cmp(&b.1)).unwrap_or(("(no phase)", 0.0));
-            self.slow.push(SlowFrame { frame, ms, phase: phase.to_string(), phase_ms });
+            self.slow.push(SlowFrame { frame, ms, phase: phase.to_string(), phase_ms, decodes: blocks });
         }
     }
 
@@ -135,13 +156,26 @@ impl Gate {
     pub fn failures(&self, horizon_baked: u64, lit_with_horizon: bool, panics: u64, judge_perf: bool) -> Vec<String> {
         let mut f = Vec::new();
         if let Some(s) = self.slow.iter().filter(|_| judge_perf).max_by(|a, b| a.ms.total_cmp(&b.ms)) {
+            let decoded =
+                if s.decodes > 0 { format!(", {} bake blocks decoded on the main thread in that frame", s.decodes) } else { String::new() };
             f.push(format!(
-                "frames over {FRAME_LIMIT_MS:.0} ms: {} (longest frame {}: {:.0} ms, most of it in \"{}\" at {:.0} ms)",
+                "frames over {FRAME_LIMIT_MS:.0} ms: {} (longest frame {}: {:.0} ms, most of it in \"{}\" at {:.0} ms{decoded}; {} of them decoded a block)",
                 self.slow.len(),
                 s.frame,
                 s.ms,
                 s.phase,
-                s.phase_ms
+                s.phase_ms,
+                self.slow.iter().filter(|s| s.decodes > 0).count()
+            ));
+        }
+        if let (true, Some(first)) = (judge_perf, self.decoded.first()) {
+            f.push(format!(
+                "bake blocks decoded on the main thread (VIEW-061): {} in {} frames; first in frame {} in \"{}\" ({} blocks)",
+                self.main_decodes,
+                self.decoded.len(),
+                first.frame,
+                first.phase,
+                first.blocks
             ));
         }
         if let Some(first) = self.held_free.first() {
@@ -182,10 +216,12 @@ impl Gate {
             (Some(_), Some(b), Some((d, f))) => format!("; edit: re-bake landed {b} ms after it, first drawn {d} ms after it (frame {f})"),
         };
         format!(
-            "gate: {} frames, longest {:.0} ms, {} over {FRAME_LIMIT_MS:.0} ms; held back: {} frames, {} with no edit in reach, up to {} under an edit; horizon maps baked {horizon_baked}; panics {panics}{edit}",
+            "gate: {} frames, longest {:.0} ms, {} over {FRAME_LIMIT_MS:.0} ms; main-thread block decodes {} in {} frames; held back: {} frames, {} with no edit in reach, up to {} under an edit; horizon maps baked {horizon_baked}; panics {panics}{edit}",
             self.frames,
             self.longest_ms,
             self.slow.len(),
+            self.main_decodes,
+            self.decoded.len(),
             self.held_frames,
             self.held_free.len(),
             self.held_under_edit_max
@@ -244,6 +280,34 @@ mod tests {
 
     // spec: TEST-061
     #[test]
+    fn a_block_decoded_by_the_main_thread_fails_and_names_the_frame_the_phase_and_the_count() {
+        let mut g = Gate::default();
+        g.frame(30, &[("draw", 12.0)], &[]);
+        g.frame(31, &[("plan and residency (begin_frame)", 20.0)], &[("plan and residency (begin_frame)", 1)]);
+        g.frame(3, &[("compile", 900.0)], &[("compile", 5)]);
+        let f = g.failures(5, true, 0, true);
+        assert_eq!(f.len(), 1, "{f:?}");
+        assert!(
+            f[0].contains("VIEW-061") && f[0].contains("1 in 1 frames") && f[0].contains("frame 31") && f[0].contains("begin_frame"),
+            "{f:?} (frame 3 is a warm-up frame and is not counted)"
+        );
+        assert!(g.report(5, 0).contains("main-thread block decodes 1 in 1 frames"), "{}", g.report(5, 0));
+        assert!(g.failures(5, true, 0, false).is_empty(), "not judged where the frame time is not (the software adapter)");
+    }
+
+    // spec: TEST-061
+    #[test]
+    fn a_slow_frame_that_decoded_a_block_says_so() {
+        let mut g = Gate::default();
+        g.frame(40, &[("editor update (picks, outlines, lists)", 140.0)], &[("editor update (picks, outlines, lists)", 2)]);
+        let f = g.failures(5, true, 0, true);
+        assert!(
+            f.iter().any(|m| m.contains("2 bake blocks decoded on the main thread in that frame") && m.contains("1 of them decoded")),
+            "{f:?}"
+        );
+    }
+    // spec: TEST-061
+    #[test]
     fn a_held_back_tile_away_from_an_edit_fails_and_names_the_tiles_and_the_frame() {
         let mut g = Gate::default();
         g.held(7, &[tile(3), tile(3), tile(2)], &[]);
@@ -266,9 +330,9 @@ mod tests {
     #[test]
     fn a_slow_frame_fails_naming_its_longest_phase() {
         let mut g = Gate::default();
-        g.frame(30, &[("draw", 12.0)]);
-        g.frame(3, &[("compile", 900.0)]);
-        g.frame(39, &[("input", 2.0), ("chunk frame", 120.0), ("wait for the GPU (x)", 900.0), ("present (swapchain)", 50.0)]);
+        g.frame(30, &[("draw", 12.0)], &[]);
+        g.frame(3, &[("compile", 900.0)], &[]);
+        g.frame(39, &[("input", 2.0), ("chunk frame", 120.0), ("wait for the GPU (x)", 900.0), ("present (swapchain)", 50.0)], &[]);
         let f = g.failures(1, true, 0, true);
         assert_eq!(f.len(), 1);
         assert!(f[0].contains("frame 39") && f[0].contains("122 ms") && f[0].contains("chunk frame"), "{f:?}");
@@ -335,7 +399,7 @@ mod tests {
     #[test]
     fn on_the_software_adapter_frame_time_and_horizon_maps_are_reported_and_held_tiles_and_panics_still_fail() {
         let mut g = Gate::default();
-        g.frame(30, &[("chunk frame", 900.0)]);
+        g.frame(30, &[("chunk frame", 900.0)], &[]);
         g.held(31, &[tile(1)], &[]);
         let f = g.failures(0, true, 1, false);
         assert_eq!(f.len(), 2, "{f:?}");
