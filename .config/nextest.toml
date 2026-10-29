@@ -75,6 +75,9 @@ test-group = "real-gpu-heavy"
 # beside each other: the same sweep took 72 s in one job of one CI run and 215 s in the other (`TIMING` of #881 and #883, Windows WARP, 4 threads).
 # They share a group that runs at most 2 at once; the lighter tests still fill the other threads. Only the overlap changes: no test is skipped,
 # retried or changed (the planner's proposal, 2026-10-29; CI is the judge of what it does to the per-test and the job time).
+# BUILD-003, planner approved 2026-10-29: the coastal flight test of `gpu_water` (only that one, not its siblings) joins the group. It took 94 to
+# 145 s over 26 Windows CI runs before the partition `C 1/2` grew to 88 tests, then 180 s and over 300 s twice after it, while `window_path` ran in
+# the same partition; it keeps its own declared limit above (a different setting, so both overrides apply).
 [[profile.default.overrides]]
-filter = 'binary(gpu_all) and (test(/^gpu_window::/) or test(/^gpu_water_coverage::/) or test(/^gpu_stream_perf::/) or test(/^gpu_envelope_perf::/))'
+filter = 'binary(gpu_all) and (test(/^gpu_window::/) or test(/^gpu_water_coverage::/) or test(/^gpu_stream_perf::/) or test(/^gpu_envelope_perf::/) or test(a_coastal_flight_at_low_altitude_flickers_within_the_budget_while_the_lod_changes_under_it))'
 test-group = "heavy-window"

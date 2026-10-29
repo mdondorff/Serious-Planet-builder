@@ -1,0 +1,1 @@
+- 2026-10-29 **m8-coastal-heavy-group** (BUILD-003, planner approved): the coastal flight test of `gpu_water` joins the heavy-window group (at most 2 at once); its 450 s declared limit stays; it took 94 to 145 s in 26 Windows CI runs, then 180 s and over 300 s twice once the partition `C 1/2` grew to 88 tests
