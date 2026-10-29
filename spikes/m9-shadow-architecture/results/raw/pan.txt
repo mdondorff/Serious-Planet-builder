@@ -1,0 +1,15 @@
+adapter: NVIDIA GeForce RTX 3080 Ti Laptop GPU (Vulkan)  timestamps: true
+pan ridge, camera at the anchor, mode 0: receivers 65536, shadowed 100.0 %, over 100 steps of 1 cm: max |dvis| 0.0010, receiver-steps changed > 1/255: 0 of 6553600, > 0.5: 0
+pan ridge, camera at the anchor, mode 1: receivers 65536, shadowed 100.0 %, over 100 steps of 1 cm: max |dvis| 0.0010, receiver-steps changed > 1/255: 0 of 6553600, > 0.5: 0
+pan ridge, camera at the anchor: mode 0 vs mode 1 at step 0: mean |d| 0.00000, receivers differing > 0.5: 0
+pan ridge, camera 30 km from the anchor, mode 0: receivers 65536, shadowed 96.0 %, over 100 steps of 1 cm: max |dvis| 0.0001, receiver-steps changed > 1/255: 0 of 6553600, > 0.5: 0
+pan ridge, camera 30 km from the anchor, mode 1: receivers 65536, shadowed 96.0 %, over 100 steps of 1 cm: max |dvis| 0.0001, receiver-steps changed > 1/255: 0 of 6553600, > 0.5: 0
+pan ridge, camera 30 km from the anchor: mode 0 vs mode 1 at step 0: mean |d| 0.00000, receivers differing > 0.5: 0
+adapter: NVIDIA GeForce RTX 3080 Ti Laptop GPU (Vulkan)  timestamps: true
+pan gorge, camera at the anchor, mode 0: receivers 65536, shadowed 63.9 %, over 100 steps of 1 cm: max |dvis| 0.0012, receiver-steps changed > 1/255: 0 of 6553600, > 0.5: 0
+pan gorge, camera at the anchor, mode 1: receivers 65536, shadowed 63.9 %, over 100 steps of 1 cm: max |dvis| 0.0012, receiver-steps changed > 1/255: 0 of 6553600, > 0.5: 0
+pan gorge, camera at the anchor: mode 0 vs mode 1 at step 0: mean |d| 0.00000, receivers differing > 0.5: 0
+pan gorge, camera 30 km from the anchor, mode 0: receivers 65536, shadowed 21.5 %, over 100 steps of 1 cm: max |dvis| 0.0022, receiver-steps changed > 1/255: 0 of 6553600, > 0.5: 0
+pan gorge, camera 30 km from the anchor, mode 1: receivers 65536, shadowed 21.5 %, over 100 steps of 1 cm: max |dvis| 0.0022, receiver-steps changed > 1/255: 0 of 6553600, > 0.5: 0
+pan gorge, camera 30 km from the anchor: mode 0 vs mode 1 at step 0: mean |d| 0.00000, receivers differing > 0.5: 0
+adapter: NVIDIA GeForce RTX 3080 Ti Laptop GPU (Vulkan)  timestamps: true
