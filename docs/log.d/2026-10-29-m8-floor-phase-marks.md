@@ -1,0 +1,1 @@
+- 2026-10-29 **m8-floor-phase-marks** (diagnostic, planner's timeout item): the `TIMING` line splits the floor-tiles phase into the rig start (renderer creation), the renderer warm-up (pipelines, shaders) and the 384 root tiles, to tell a cold shader cache from tile generation on the CI runner
