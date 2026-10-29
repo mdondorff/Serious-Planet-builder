@@ -1562,6 +1562,88 @@ pub fn drawn_refreshed_ms(jobs: &[planet_streaming::JobSample], drawn: &HashSet<
     first_end.values().max().map(|&e| e.saturating_sub(t0_us) as f64 / 1000.0 + upload_ms)
 }
 
+/// One frame of a still camera, read back (the still-flicker detector, TEST-068).
+pub struct StillFrame {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+    /// The drawn nodes: tile, level and state, sorted.
+    pub nodes: Vec<(TileId, u8, String)>,
+}
+
+/// The pictures of a still camera after streaming has settled (TEST-068): `--perf-smoke`'s world (a stored or memory bake), one view of the edit-latency
+/// scene's first case at 200 m on one rig; per debug view in `views`, settled as the scene settles, then `frames` more frames of the same request, each read back once the GPU has finished it.
+/// The detector (`tests/gpu_still_flicker.rs`) compares them; nothing here is a measurement.
+pub fn still_frames(
+    o: &Options,
+    ctx: &GpuContext,
+    views: &[TerrainView],
+    frames: usize,
+) -> Result<Vec<(TerrainView, Vec<StillFrame>)>, String> {
+    let world = Arc::new(crate::streamperf::open_world(o, false)?);
+    let radius_m = world.radius_m();
+    let size = (768u32, 432u32);
+    let field = world.field()?;
+    let lod = LodParams {
+        cells: o.cells,
+        viewport_h_px: f64::from(size.1),
+        tau_px: o.tau,
+        max_level: o.finest_level_for(o.cells),
+        min_level: o.min_level(),
+        radius_m,
+        max_height_m: LodParams::earth_1080p().max_height_m.max(field.max_abs_height_m() + 200.0),
+        ..LodParams::earth_1080p()
+    };
+    lod.validate().map_err(|e| format!("--cells {} --tau {}: {e}", o.cells, o.tau))?;
+    let ground = |d: Vec3| field.height(d);
+    let case = cases_at(200.0, true, radius_m).into_iter().next().ok_or("the scene has no case at 200 m")?;
+    let aspect = f64::from(size.0) / f64::from(size.1);
+    let rho = (1.5 * case.size_m).max(200.0);
+    let req = TerrainRequest {
+        camera: camera_for(case.centre, &ground, radius_m, rho, 200.0, aspect),
+        size,
+        view: TerrainView::Level,
+        lod,
+        face_mapping: TangentWarp.id().to_string(),
+        seed: field.seed(),
+    };
+    let rig = Rig::new(ctx, &world, &req, o.gen_workers())?;
+    let mut h = Harness {
+        ctx,
+        rig,
+        iteration: 0,
+        drawn: HashSet::new(),
+        settle_limit: Duration::from_secs(120),
+        settle_ms: o.settle_ms,
+        chunk_world: None,
+        features: crate::chunkstage::FrameFeatures { stale_hold: !o.no_stale_hold, ..Default::default() },
+        counters: Default::default(),
+        landed_log: Vec::new(),
+        chunk_frame_max_ms: 0.0,
+        horizon_world: None,
+        horizon_landed: Vec::new(),
+        horizon_wanted: Vec::new(),
+        horizon_started: 0,
+    };
+    let mut all = Vec::with_capacity(views.len());
+    for &view in views {
+        let req = TerrainRequest { view, ..req.clone() };
+        h.settle(&req, 20)?;
+        let mut out = Vec::with_capacity(frames);
+        for _ in 0..frames {
+            let frame = h.step(&req)?;
+            h.rig.fi.retire_to(h.rig.renderer.wait_oldest(h.ctx));
+            let px = h.rig.renderer.read_color(h.ctx);
+            let mut nodes: Vec<(TileId, u8, String)> =
+                frame.pipeline.draw.plan.nodes.iter().map(|n| (n.tile, n.level, format!("{:?}", n.state))).collect();
+            nodes.sort();
+            out.push(StillFrame { width: px.width, height: px.height, rgba: px.rgba, nodes });
+        }
+        all.push((view, out));
+    }
+    Ok(all)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

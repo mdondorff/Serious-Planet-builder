@@ -12,6 +12,8 @@ mod gpu_modes;
 mod gpu_preflight;
 #[path = "gpu_skeleton.rs"]
 mod gpu_skeleton;
+#[path = "gpu_still_flicker.rs"]
+mod gpu_still_flicker;
 #[path = "gpu_stills.rs"]
 mod gpu_stills;
 #[path = "gpu_stream_perf.rs"]
