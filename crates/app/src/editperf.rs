@@ -419,6 +419,8 @@ pub struct Stages {
     /// The horizon maps the edit touched (a run with the horizon jobs and no chunk stage): per map the chunk and the milliseconds from `set_definition` to the
     /// first landing after it (`None`: it had not landed when the run stopped waiting). `None` without the jobs.
     pub horizon: Option<Vec<(planet_generators::chunkfield::ChunkKey, Option<f64>, f64)>>,
+    /// The horizon bakes after the edit, one line each with the start, the end and the step times (see `horizon_diag`).
+    pub horizon_diag: Option<String>,
 }
 
 /// What the chunk stage did after an edit (M8-7, criterion 6), in milliseconds from `set_definition`.
@@ -769,6 +771,9 @@ fn run_once(
     let (jobs_before, t0_us) = (job_log.len(), job_log.now_us());
     let ms = |t: Instant| t.elapsed().as_secs_f64() * 1000.0;
     // The edit as the editor does it: swap the definition, name the edited tiles, set the preview.
+    if h.horizon_world.is_some() {
+        crate::horizonworld::bake_log_start();
+    }
     let call = Instant::now();
     world.set_definition(Arc::clone(&edited))?;
     out.stages.set_definition_ms = ms(call);
@@ -967,6 +972,7 @@ fn run_once(
             h.step(req)?;
             std::thread::sleep(Duration::from_millis(1));
         }
+        out.stages.horizon_diag = Some(horizon_diag(&crate::horizonworld::bake_log_take(), sampler_started, out.exact_ms));
         out.stages.horizon = Some(
             touched
                 .into_iter()
@@ -985,6 +991,53 @@ fn run_once(
     h.settle(req, 20)?;
     h.settle_chunks(req, 20)?;
     Ok(out)
+}
+
+/// Where the time of the horizon bakes after one edit went (markdown): the edit's exact frame, the first bake's start, the bakes dropped by a later edit
+/// (and so started again), and per bake its start, end and the thread time in the edit words, the field build, the height tiles and the march.
+pub fn horizon_diag(log: &[crate::horizonworld::BakeRecord], t0: Instant, exact_ms: Option<f64>) -> String {
+    let at = |t: Instant| t.saturating_duration_since(t0).as_secs_f64() * 1000.0;
+    let mut bakes = log.to_vec();
+    bakes.sort_by_key(|b| b.started);
+    let made = bakes.iter().filter(|b| b.made).count();
+    let running = bakes.iter().filter(|b| b.ended.is_none()).count();
+    let mut s = format!(
+        "edit to exact frame {} ms; first bake started {} ms after the edit; {} bakes, {} made, {} dropped by a later edit (started again), {} still running\n\n",
+        exact_ms.map_or("-".to_string(), |v| format!("{v:.0}")),
+        bakes.first().map_or("-".to_string(), |b| format!("{:.0}", at(b.started))),
+        bakes.len(),
+        made,
+        bakes.len() - made - running,
+        running
+    );
+    s += "| map (face, x, y) | started ms | ended ms | made | edit words ms | field ms | height tiles ms | march ms |\n|---|---|---|---|---|---|---|---|\n";
+    for b in &bakes {
+        s += &format!(
+            "| {:?} | {:.0} | {} | {} | {:.0} | {:.0} | {:.0} | {:.0} |\n",
+            b.key,
+            at(b.started),
+            b.ended.map_or("running".to_string(), |e| format!("{:.0}", at(e))),
+            b.made,
+            b.step_ms[0],
+            b.step_ms[1],
+            b.step_ms[2],
+            b.step_ms[3]
+        );
+    }
+    let sum = |i: usize| bakes.iter().map(|b| b.step_ms[i]).sum::<f64>();
+    s += &format!("| sum | | | | {:.0} | {:.0} | {:.0} | {:.0} |\n", sum(0), sum(1), sum(2), sum(3));
+    s
+}
+
+/// The first run of every case with its horizon bake diagnosis (`horizon_diag`), empty when no run has one.
+fn horizon_diag_section(rows: &[CaseRow]) -> String {
+    let mut s = String::new();
+    for r in rows {
+        if let Some(d) = r.runs.first().and_then(|x| x.stages.horizon_diag.as_ref()) {
+            s += &format!("\nthe horizon bakes after the edit, first run, {} m altitude, {} m stamp:\n\n{d}", r.altitude_m, r.radius_m);
+        }
+    }
+    s
 }
 
 /// The chunk under the centre of the edit (the item's anchor).
@@ -1194,8 +1247,22 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
     lod.validate().map_err(|e| format!("--cells {} --tau {}: {e}", o.cells, tau))?;
     let aspect = f64::from(size.0) / f64::from(size.1);
     let seed = field.seed();
+    // `--altitudes-m` and `--radii-m` narrow a run to the named altitudes and hill stamps (a diagnosis of one case; the full run takes neither).
+    let parse_list = |what: &str, s: &Option<String>| -> Result<Option<Vec<f64>>, String> {
+        s.as_ref()
+            .map(|s| {
+                s.split(',')
+                    .map(|x| x.trim().parse::<f64>().map_err(|_| format!("{what} {s}: expected metres separated by commas")))
+                    .collect()
+            })
+            .transpose()
+    };
+    let only_altitudes = parse_list("--altitudes-m", &o.altitudes_m)?;
+    let only_radii = parse_list("--radii-m", &o.radii_m)?;
     let altitudes: Vec<f64> = if smoke {
         vec![200.0]
+    } else if let Some(a) = only_altitudes {
+        a
     } else {
         let mut v = ALTITUDES_M.to_vec();
         v.extend(REGIONAL_ALTITUDES_M.iter().filter(|a| !v.contains(a)).copied().collect::<Vec<_>>());
@@ -1233,7 +1300,10 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
     let mut rows = Vec::new();
     let mut costs: Vec<PreviewCost> = Vec::new();
     for &altitude in &altitudes {
-        let cases = cases_at(altitude, smoke, radius_m);
+        let mut cases = cases_at(altitude, smoke, radius_m);
+        if let Some(radii) = &only_radii {
+            cases.retain(|c| c.kind == CaseKind::Stamp && radii.contains(&c.size_m));
+        }
         if cases.is_empty() {
             continue;
         }
@@ -1317,7 +1387,7 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
         format!("
 the horizon side of every case (ms from set_definition to the landing of each map the edit touched; the maps baked from the base terrain, no chunk stage). On screen is landing plus the upload: the window uploads one landed map per frame (`HorizonRig::decide`, horizonworld.rs), so a map is drawn within one frame of landing when it is the only one pending, and the window gate logs the frame a re-baked map is first drawn:
 
-{}", horizon_table(&rows))
+{}{}", horizon_table(&rows), horizon_diag_section(&rows))
     } else {
         String::new()
     };
@@ -1641,6 +1711,34 @@ mod tests {
         let drawn: HashSet<TileId> = [tile(1), tile(3), tile(4)].into_iter().collect();
         assert_eq!(drawn_refreshed_ms(&jobs, &drawn, 1_000_000, 5.0), Some(305.0));
         assert_eq!(drawn_refreshed_ms(&jobs, &HashSet::new(), 1_000_000, 5.0), None);
+    }
+
+    // spec: TEST-065
+    #[test]
+    fn the_horizon_diagnosis_counts_the_dropped_bakes_and_sums_the_steps() {
+        let t0 = Instant::now();
+        let rec = |key, start_ms: u64, end_ms: u64, made, step_ms| crate::horizonworld::BakeRecord {
+            key,
+            started: t0 + Duration::from_millis(start_ms),
+            ended: Some(t0 + Duration::from_millis(end_ms)),
+            step_ms,
+            made,
+        };
+        let mut log =
+            vec![rec((0, 1, 1), 5, 900, false, [1.0, 0.0, 800.0, 0.0]), rec((0, 1, 1), 900, 2900, true, [1.0, 2.0, 300.0, 1500.0])];
+        log.push(crate::horizonworld::BakeRecord {
+            ended: None,
+            made: false,
+            step_ms: [0.0; 4],
+            ..rec((0, 2, 1), 900, 0, false, [0.0; 4])
+        });
+        let d = horizon_diag(&log, t0, Some(120.0));
+        assert!(d.starts_with("edit to exact frame 120 ms; first bake started 5 ms after the edit; 3 bakes, 1 made, 1 dropped"), "{d}");
+        assert!(d.contains("still running\n"), "{d}");
+        assert!(d.contains("| (0, 2, 1) | 900 | running | false |"), "{d}");
+        assert!(d.contains("| (0, 1, 1) | 900 | 2900 | true | 1 | 2 | 300 | 1500 |"), "{d}");
+        assert!(d.ends_with("| sum | | | | 2 | 2 | 1100 | 1500 |\n"), "{d}");
+        assert!(horizon_diag(&[], t0, None).contains("0 bakes, 0 made, 0 dropped"));
     }
 
     // spec: TEST-065
