@@ -32,6 +32,7 @@ Scope: project (perf comparisons)
 Scope: project (tests on the software adapter)
 - About 1 in 3 plain `cargo test` runs with 5 WARP devices end in an access violation inside `d3d10warp.dll`; rare under nextest (one process per test): 2 of 177 aborted in `test gpu` on 2026-10-30, after the Windows update; never on the RTX. Details: `spikes/warp-crash/results/results.md`.
 - Keep nextest isolation; plain `cargo test` needs `--test-threads=2` or less; share one device per test binary.
+- 2026-10-30 (explorer): the local rate is 2 aborts in 3 full `test gpu` runs (about 1 test in 90; the aborted test differs per run: `gpu_skeleton::the_draw_flag...` at 99 s, `gpu_world_field::a_world_bundle_replays...` at 56 s) and 0 in a fourth. Targeted stress of both crashing test groups (12 tests, nextest, one process each) at `-j 1`, 8 and 20: 132 runs, 0 aborts: not reproduced outside the full mix. `cargo xtask test*` names such an abort as `WARP crash (d3d10warp), CI judges`; the step still fails.
 - Obsolete when: a Windows WARP passes `spikes/warp-crash` level 7 with 6 threads in 100 runs.
 
 ## 2026-10-16 Reviewing goldens needs CI's WARP, and nextest overwrites its JUnit report
