@@ -109,12 +109,15 @@ A tile is what the camera sees and changes with distance; a fixed grid (CON-08's
 | summary node | a hash over the items in a quadtree cell; makes coarse tiles' keys change when an item inside changes | world-def | accepted |
 | global bake | the planet-wide coarse lattice, a pure function of the seed (channels in section 1) | generators, cache | accepted |
 | global coupled run | drainage and the river network over time on the bake lattice, stored beside the bake (ADR 0077) | generators | accepted |
+| hill band | a ridged three-octave band (8, 4 and 2 km wavelengths) the bake adds to land elevation, 0 at the coast, at most 1,000 m (GEN-064) | generators | accepted |
+| landform driver | a 0..1 value per bake direction that sets how much fine relief the hill band and the detail octaves get (GEN-062, GEN-064) | generators | accepted |
 | store | a directory holding a stored bake, its coupled run and pre-filled coarse tiles | cache | accepted |
 | tile pack | append-only file of cached records (tiles, bake blocks) keyed by cache key | cache | accepted |
 | cache key | a hash of everything a result depends on: field, version, implementation, read set, upstream keys | cache, generators | accepted |
 | field | a pure function from a direction on the sphere to a value (height in metres for `HeightField`) | generators | accepted |
 | HeightField | the interface every height function implements: value, key parts, bounds | generators | accepted |
 | erosion field | the default base field: bake elevation plus ridged creases where the bake is steep | generators | accepted |
+| coupled lens | the K view: shows the global coupled run's channels (heights, drainage area) instead of the shaded terrain | app, frame | accepted |
 | stamp stage | adds one layer's items to a base field, stamps then lines | generators | accepted |
 | field chain | base field, then stamp stages per layer, then the water bound; assembled in `app` today (SPIKE-37) | generators, app | accepted |
 | stage | global-coarse, regional or local (CON-08); in production only the global-coarse graph is registered | generators | accepted |
@@ -137,6 +140,8 @@ A tile is what the camera sees and changes with distance; a fixed grid (CON-08's
 | compute share, reserve | a subsystem's budget of main-thread time, GPU time, cores and memory per frame; a reserve is a share held for a subsystem not built yet (ADR 0083, BUDG-001 to BUDG-007) | perf, frame | accepted, not built |
 | job system | the one worker pool with priority classes that every background job runs on (ADR 0083, BUDG-004) | streaming | accepted, not built |
 | perf window | a measurement on Rasierklinge with the other lanes stopped, authorised by the architect (ADR 0020) | perf | accepted |
+| heavy lock, quiet flag | one machine-wide lock that heavy xtask commands (test, prepush, perf, capture, accept, store) queue on; the owner's quiet flag file holds them until it is removed (BUILD-026) | xtask | accepted |
+| no-degradation gate | `cargo xtask gate`: counters on the real store (frames over 100 ms, held-back tiles, steps between levels, panics), `gate --small` in CI (TEST-061 to TEST-063) | xtask, app | accepted |
 | loaded pass | a perf verdict taken while other work runs, valid only as a pass with margin (SPIKE-58) | perf | proposed |
 | driver map | a physical field (soil depth, wetness, drainage) that materials and plants read through suitability rules (ADR 0076); the chunk stage's driver channels leave with it, M9 re-adds drivers from the stored bake | generators, render | proposed |
 | coarse valley carve | a valley cut into the base field along the coupled run's network (ADR 0084) | generators | proposed |
@@ -152,6 +157,7 @@ A tile is what the camera sees and changes with distance; a fixed grid (CON-08's
 | summary | the item hash tree; the bake's water summary channel; the editor's health summary |
 | plan | `TerrainPlan` (production); `FramePlan` (M1 debug views) |
 | window | the editor or viewer window; a perf window (section 3) |
+| gate | the no-degradation gate (section 3); a perf readiness gate (ADR 0020) |
 
 ## 5. What runs where
 | When | What | Editor-off viewer |
