@@ -1,0 +1,16 @@
+    Finished `release` profile [optimized] target(s) in 0.54s
+     Running unittests src\lib.rs (target\release\deps\planet-b3cdcc9954cb66b1.exe)
+
+running 1 test
+A-net chunk scene: bake 16384 cells per face edge of the store C:/DEV/SeriousPlanetData/global16384, coupled run 80 steps
+chunk 0x0b000000002bd53a (face 0), the river of 14489279 km2 at its coarse cell
+steps of the base field alone against the parent (tile level L vs L - 1, at the parent's vertices, inside the chunk):
+  level 12: base field against the parent p99 0.000 m, max 0.000 m over 1089 vertices
+  level 13: base field against the parent p99 0.000 m, max 0.000 m over 4356 vertices
+  level 14: base field against the parent p99 0.000 m, max 0.000 m over 17424 vertices
+  level 15: base field against the parent p99 0.000 m, max 0.000 m over 69696 vertices
+  level 16: base field against the parent p99 0.000 m, max 0.000 m over 278784 vertices
+test globalperf::tests::base_steps_report ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 227 filtered out; finished in 6.08s
+
