@@ -1107,11 +1107,15 @@ Source: TEST-048, STRM-039
 - **THEN** the chunk share of its plan has no stand-in node and the eye is `altitude_m` over the ground of the field with the chunks
 
 ### Requirement: TEST-054 The envelope scene runs the chunk stage
-When its world has a stored coupled run, the envelope scene (TEST-047) SHALL give the world the A-net chunk stage exactly as the viewer's window does (the same function, STRM-046), drive the chunk jobs every frame from the plan's tiles and pass what landed and what was evicted to the managed loop, and start every flight with no chunk resident, the chunks of the start view ready and a chunk edge half way along the flight (the worst phase: fresh chunks ahead of the eye). The stand-in share (STRM-039) SHALL count in the judged share. A world without a stored run SHALL keep the tile-only scene.
+The envelope scene (TEST-047) SHALL run the horizon jobs from the base terrain when its world has a store, and no chunk stage (ADR 0086: the stage is removed). The jobs are driven every frame from the plan's tiles and every flight starts with no horizon map resident. A world without a store SHALL keep the tile-only scene.
 
 Verify: A
 Status: active
-Source: M8 exit criterion 7 (owner, 2026-10-23, D4), TEST-047, STRM-039, STRM-046
+Source: M8 plan, TEST-047, STRM-064, ADR 0086
+
+#### Scenario: The stage of a flight
+- **WHEN** the envelope scene is set up with a store and with an in-memory bake
+- **THEN** the first runs the horizon jobs and no chunk stage, and the second has none
 
 #### Scenario: The start crosses an edge half way
 - **WHEN** the start of a flight of any length is searched over a chunk grid with edges at fixed latitudes, from starts at many phases
@@ -1240,14 +1244,14 @@ Source: owner (2026-10-28), CLAUDE.md prepush rule
 - **THEN** the pre-push run includes the small gate; for `docs/status.md` alone it does not
 
 ### Requirement: TEST-064 The gate runs without the chunk stage by default
-`cargo xtask gate` SHALL run the sites of TEST-062 without the chunk stage and report the step between levels of the base field alone; `cargo xtask gate --chunks` SHALL run them with the stage and the chunk change's step. `gate --small` SHALL run the small world both ways.
+`cargo xtask gate` SHALL run the sites of TEST-062 over the base terrain and report the step between levels of the base field alone; the stage-on run (`gate --chunks`) no longer exists (ADR 0086). `gate --small` SHALL run the small world once.
 
 Verify: C
 Status: active
-Source: opus-planner (2026-10-28), owner fallback 2026-10-28, TEST-061, TEST-062
+Source: opus-planner (2026-10-28), owner fallback 2026-10-28, TEST-061, TEST-062, ADR 0086
 
 #### Scenario: Stage off
-- **WHEN** the window runs over a store with a coupled run without `--chunks`
+- **WHEN** the window runs over a store with a coupled run
 - **THEN** no chunk job is computed and the gate line reports `chunk jobs: None`
 
 ### Requirement: TEST-065 The gate reports the horizon re-bake after its edit; the edit-latency scene tabulates it

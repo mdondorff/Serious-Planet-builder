@@ -9,6 +9,8 @@ Follow-up to `look-review-2/` (planner's request, 2026-10-26). Same poses, same 
 | `hills-r1/` | lat -37.6958, lon 3.1397 (look review 1's hills anchor, after the snap) | 145 (its downstream bearing) | 3,810 m (2,907 m in review 1) | the side-by-side with `look-review-1-hills/`; the rebuilt run's ground there is 900 m higher and snow-covered |
 | `hills-b/` | lat 8.972, lon -16.238 (hills B) | 90 | 3,755 m | snow-free, rolling hills with a river valley and a cut channel in the near field |
 
+`hills-r1/` was deleted at M8's housekeeping (2026-10-30, superseded); its stills are in the git history, as are `look-review-1*/` and `look-review-2/`.
+
 Hills A (lat 37.72, lon 134.03) was scouted and dropped: 4,725 m, snow-covered at 500 m eye height in all four headings. Hills B at the same test is green hill country with a river valley, which `hills-b/` shows.
 
 Place by latitude and longitude (`[place] lat, lon`): the anchor is the ground there, not a river cell, so the poses stand over the given point and look along the heading. The river at `river-r1` is the one the review 1 coordinates lay on; the rebuilt run's channel may not pass exactly through the point.

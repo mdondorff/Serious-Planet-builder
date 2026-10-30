@@ -1,1 +1,0 @@
-- 2026-10-26 **viewer-sun-shade** (VIEW-054): archived; J cycles the shade view, [ ] move the sun in local solar time, the title says when there is no chunk stage (#669, #722).

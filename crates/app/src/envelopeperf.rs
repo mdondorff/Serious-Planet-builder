@@ -227,7 +227,7 @@ pub struct LogFacts<'a> {
     pub horizon_off: Option<&'a Point>,
     /// With a chunk stage, where along each flight the start put a chunk edge (0.5: half way); `None` without one.
     pub edge_fraction: Option<f64>,
-    /// Whether the A-net chunk stage ran (`--chunks`, STRM-046): criterion 7 is measured with it off (tiles and horizon maps only); a log without this field is from before.
+    /// Whether the A-net chunk stage ran (removed, ADR 0086; always false): criterion 7 is measured with it off (tiles and horizon maps only); a log without this field is from before.
     pub chunk_stage: bool,
     /// The steady-flight curve (a run-in before the window, `run_in_s` long) next to the cold one; `None` without a chunk stage.
     pub steady: Option<(&'a [Point], f64, f64)>,
@@ -443,20 +443,16 @@ pub fn start_place(n: usize) -> (f64, f64) {
 struct StageSetup {
     gen: planet_streaming::GenWorkers,
     horizon: bool,
-    /// The A-net chunk stage runs (`--chunks`, STRM-046); without it the flight is tiles and horizon maps from the base terrain (the M8 default, owner 2026-10-28).
+    /// The A-net chunk stage (removed, ADR 0086; always false); the flight is tiles and horizon maps from the base terrain (the M8 default, owner 2026-10-28).
     chunks: bool,
 }
 
-/// The stage a flight runs: none without a store, the chunk stage and its horizon jobs with `--chunks`, the horizon jobs alone otherwise (STRM-046).
+/// The stage a flight runs: none without a store, the horizon jobs from the base terrain with one (the chunk stage is removed).
 fn stage_setup(o: &Options) -> Option<StageSetup> {
-    (o.store.is_some() && !o.allow_memory_bake).then(|| StageSetup {
-        gen: crate::chunkstage::stage_gen(o),
-        horizon: true,
-        chunks: o.chunks,
-    })
+    (o.store.is_some() && !o.allow_memory_bake).then(|| StageSetup { gen: crate::chunkstage::stage_gen(o), horizon: true, chunks: false })
 }
 
-/// Start the stage of `st` on `world`: the viewer's chunk stage, or the horizon jobs alone (as the window does without `--chunks`), or nothing.
+/// Start the stage of `st` on `world`: the viewer's chunk stage, or the horizon jobs alone (as the window does), or nothing.
 fn enable_stage(world: &Arc<WorldTerrain>, st: StageSetup, out: &mut dyn Write) -> Result<(), String> {
     if st.chunks {
         crate::chunkstage::enable_viewer_stage(world, st.gen, st.horizon, false, out)
@@ -812,16 +808,16 @@ mod tests {
         crate::parse_args(&args).unwrap()
     }
 
-    // spec: STRM-046
+    // spec: STRM-064, TEST-054
     #[test]
-    fn the_envelope_scene_runs_the_chunk_stage_only_when_asked_and_its_horizon_jobs_either_way() {
+    fn the_envelope_scene_runs_the_horizon_jobs_from_the_base_terrain_with_a_store_and_no_chunk_stage() {
         let base = ["test-render", "--perf", "--scene", "envelope", "--store", "S"];
         let off = stage_setup(&opts(&base)).expect("a store gives a stage");
-        assert!(!off.chunks && off.horizon, "the default is the horizon jobs from the base terrain, no chunk stage");
-        let mut with = base.to_vec();
-        with.push("--chunks");
-        let on = stage_setup(&opts(&with)).expect("a store gives a stage");
-        assert!(on.chunks && on.horizon, "--chunks asks for the chunk stage");
+        assert!(!off.chunks && off.horizon, "the horizon jobs from the base terrain, no chunk stage");
+        assert!(
+            crate::parse_args(&base.iter().chain(&["--chunks"]).map(|s| s.to_string()).collect::<Vec<_>>()).is_err(),
+            "--chunks is gone"
+        );
         let none = stage_setup(&opts(&["test-render", "--perf", "--scene", "envelope", "--allow-memory-bake"]));
         assert!(none.is_none(), "an in-memory bake has no stored run: no stage");
     }

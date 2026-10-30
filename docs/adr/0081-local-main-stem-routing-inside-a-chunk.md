@@ -1,5 +1,5 @@
 # 0081 Local main-stem routing inside a chunk
-Status: accepted (owner, 2026-10-25; drafted by opus-planner; point 1 amended before acceptance with the sliding border points of the SPIKE-42 re-run)
+Status: accepted (owner, 2026-10-25; drafted by opus-planner; point 1 amended before acceptance with the sliding border points of the SPIKE-42 re-run); superseded in part by 0086 (chunk stage removed)
 Date: 2026-10-25
 Source: SPIKE-42 (`spikes/local-routing/results/results.md`, #676); SPIKE-40 and 41; `openspec/changes/m8-anet-chunk/design.md` sections 17 to 20; owner, 2026-10-25 (M8: hydrology right); ADR 0077 point 3
 
@@ -25,3 +25,5 @@ Source: SPIKE-42 (`spikes/local-routing/results/results.md`, #676); SPIKE-40 and
 
 ## Licences of adopted code or techniques
 None.
+
+Maintained: 2026-10-30, links: superseded in part by 0086 (the chunk stage is removed from the code).

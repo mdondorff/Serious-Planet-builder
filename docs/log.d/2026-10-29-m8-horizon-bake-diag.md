@@ -1,1 +1,0 @@
-- 2026-10-29 m8-horizon-bake-diag: per-step and per-bake timers of the horizon bakes, a per-case bake section in edit-latency.md, one-case narrowing of the edit-latency scene; diagnosis only.

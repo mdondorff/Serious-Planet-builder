@@ -1,1 +1,0 @@
-- 2026-10-28 m8-horizon-parallel: horizon bakes without a chunk stage run on 8 idle-class threads of their own, one thread a bake (2.5 to 3x faster re-bake), shared tiles evaluated once (STRM-064).

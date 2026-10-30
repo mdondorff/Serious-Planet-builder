@@ -1,1 +1,0 @@
-- 2026-10-29 **m8-window-path-timeout** (BUILD-003, PROPOSED): `gpu_window::the_window_path_opens...` (two window smokes on the default 256-cell world) took 162, 250 and 262 s on the Windows CI runner, 142 s of the last in floor tiles (`TIMING`, #881); it gets a declared timeout of 450 s (5 x 90 s) in `.config/nextest.toml`

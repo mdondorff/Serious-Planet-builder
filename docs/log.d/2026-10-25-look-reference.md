@@ -1,1 +1,0 @@
-- 2026-10-25 **look reference named neutrally** (owner; opus-planner): M8 plan, roadmap and spike results name the owner's look reference instead of a product; technical citations in the background report and ADR 0002 stay as attributions.

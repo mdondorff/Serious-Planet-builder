@@ -1,1 +1,0 @@
-- 2026-10-23 **adr-maintenance-lint** (sonnet-crusader; BUILD-025 added): `cargo xtask spec-lint` fails when a branch changes an accepted ADR beyond its status line and the ADR gains no `Maintained: <date>, <links|values|terms|erratum>: <what>` line (ADR 0078 point 7); it compares `HEAD` with the merge base with origin/main and passes without git or a base

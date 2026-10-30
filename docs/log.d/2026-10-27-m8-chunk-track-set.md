@@ -1,1 +1,0 @@
-- 2026-10-27 **m8-chunk-prefetch-wire, m8-envelope-run-in** (STRM-042, TEST-057): archived with the track-set change (#782, #787); the prefetch is the chunks the plan reads along the predicted track.

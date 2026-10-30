@@ -600,8 +600,8 @@ struct Harness<'a> {
     settle_ms: u64,
     /// The world with a chunk stage the frames drive (`chunk_frame`, the landings into the managed loop), as the viewer does.
     chunk_world: Option<Arc<WorldTerrain>>,
-    /// Whether the stale chunks wait for the edit's tiles (`ChunkManager::hold_stale`, the viewer's behaviour); `--no-stale-hold` runs without.
-    /// The features of the chunk step this scene runs (`--no-stale-hold`, `--no-horizon-jobs` turn one off and the log says so) and what it counted.
+    /// Whether the stale chunks wait for the edit's tiles (`ChunkManager::hold_stale`, the viewer's behaviour);
+    /// The features of the chunk step this scene runs (`--no-horizon-jobs` turns one off and the log says so) and what it counted.
     features: crate::chunkstage::FrameFeatures,
     counters: crate::chunkstage::FeatureCounters,
     /// The chunks that landed in the frames since the log was last taken, with the instant, and the time of the slowest `chunk_frame` call.
@@ -1294,20 +1294,9 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
         planet_perf::check_reference_adapter(&crate::facts(ctx)).map_err(|r| r.to_string())?;
         crate::readiness_gate(o, ctx, out)?;
     }
-    // The chunk stage on the M8 default (Under, versions, stale marking): with a store and not smoke, unless `--no-chunks` asks for the comparison.
-    let with_chunks = !smoke && o.chunks && o.store.is_some() && !o.allow_memory_bake;
-    // Without it (the default since the owner's fallback of 2026-10-28) the horizon jobs bake the maps from the base terrain (STRM-064, TEST-065).
-    let with_horizon = !smoke && !with_chunks && !o.no_horizon_jobs && o.store.is_some() && !o.allow_memory_bake;
-    if with_chunks {
-        // The viewer's own pools and chunk configuration, with its horizon jobs (the shared stage of `anetworld::viewer_chunk_stage`), no disk cache.
-        if let Some(n) = o.base_threads {
-            world.set_base_threads(n);
-        }
-        if let Some(n) = o.horizon_threads {
-            world.set_horizon_threads(n);
-        }
-        crate::chunkstage::enable_viewer_stage_sized(&world, o.gen_workers(), o.chunk_workers, !o.no_horizon_jobs, false, out)?;
-    } else if with_horizon {
+    // The horizon jobs bake the maps from the base terrain (STRM-064, TEST-065); the chunk stage is removed.
+    let with_horizon = !smoke && !o.no_horizon_jobs && o.store.is_some() && !o.allow_memory_bake;
+    if with_horizon {
         if let Some(n) = o.horizon_threads {
             world.set_horizon_threads(n);
         }
@@ -1396,9 +1385,6 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
         let rho = (1.5 * first.size_m).max(altitude);
         let first_req = req_of(camera_for(first.centre, &ground, radius_m, rho, altitude, aspect));
         let mut rig = Rig::new(ctx, &world, &first_req, o.gen_workers())?;
-        if with_chunks {
-            rig.managed.set_chunk_view(world.chunk_view());
-        }
         // The editor's refresh settle window, or the one the run names (ADR 0072): a run at 0 and a run at 40 show its share of a case.
         rig.managed.set_refresh_settle(o.settle_ms);
         let mut h = Harness {
@@ -1408,8 +1394,8 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
             drawn: HashSet::new(),
             settle_limit: if smoke { Duration::from_secs(120) } else { SETTLE_LIMIT },
             settle_ms: o.settle_ms,
-            chunk_world: with_chunks.then(|| Arc::clone(&world)),
-            features: crate::chunkstage::FrameFeatures { stale_hold: !o.no_stale_hold, ..Default::default() },
+            chunk_world: None,
+            features: crate::chunkstage::FrameFeatures::default(),
             counters: Default::default(),
             landed_log: Vec::new(),
             chunk_frame_max_ms: 0.0,
@@ -1459,22 +1445,11 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
         if let Some((req, at)) = focus {
             costs.extend(measure_preview_cost(&mut h, &req, at, radius_m, altitude, if smoke { 1 } else { 20 }, smoke)?);
         }
-        // What the chunk step counted at this altitude; the edits announce their item changes and hold the stale chunks, and the camera does not
-        // travel, so the prefetch is on but not expected to ask (TEST-058).
-        if with_chunks {
-            writeln!(out, "  altitude {altitude} m, chunk step: {}", h.counters.line(&h.features)).map_err(err)?;
-            let expect = crate::chunkstage::Expect { horizon: true, stale_hold: true, announcements: true, ..Default::default() };
-            h.counters.check(&h.features, &expect)?;
-        }
     }
     let table = table(&rows);
     let stages = stages_table(&rows);
     let levels = levels_table(&rows);
-    let chunks = if with_chunks {
-        format!("\nthe chunk side of every case (ms from set_definition; the chunk stage on the M8 default, the first frame is a duration):\n\n{}", chunks_table(&rows))
-    } else {
-        String::from("\n(no chunk stage in this run: the comparison line, or a smoke or memory-bake run)\n")
-    };
+    let chunks = String::from("\n(no chunk stage in this run: the comparison line, or a smoke or memory-bake run)\n");
     let horizon = if with_horizon {
         format!("
 the horizon side of every case (ms from set_definition to the landing of each map the edit touched; the maps baked from the base terrain, no chunk stage). On screen is landing plus the upload: the window uploads one landed map per frame (`HorizonRig::decide`, horizonworld.rs), so a map is drawn within one frame of landing when it is the only one pending, and the window gate logs the frame a re-baked map is first drawn:
@@ -1621,7 +1596,7 @@ pub fn still_frames(
         settle_limit: Duration::from_secs(120),
         settle_ms: o.settle_ms,
         chunk_world: None,
-        features: crate::chunkstage::FrameFeatures { stale_hold: !o.no_stale_hold, ..Default::default() },
+        features: crate::chunkstage::FrameFeatures::default(),
         counters: Default::default(),
         landed_log: Vec::new(),
         chunk_frame_max_ms: 0.0,

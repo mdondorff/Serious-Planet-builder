@@ -1,1 +1,0 @@
-- 2026-10-28 **m8-envelope-log-horizon** (TEST-060, STRM-046): a stage-off `envelope.json` says `horizon: true` when the base-terrain horizon jobs ran (no `stand_in_reason` then); `accept M8` reads criterion 7 as MISSING unless the log shows a production-store run with horizon jobs and the chunk stage off

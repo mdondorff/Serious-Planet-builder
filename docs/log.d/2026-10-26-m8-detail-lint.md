@@ -1,1 +1,0 @@
-- 2026-10-26 **m8-detail-lint** (BUILD-027): spec-lint fails a `#### Detail` block outside the ten listed requirements of the archive sweep; the list only shrinks.
