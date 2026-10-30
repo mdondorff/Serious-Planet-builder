@@ -1,5 +1,5 @@
 # 0082 The coarse node slides, not the border crossing
-Status: accepted (owner, 2026-10-26; drafted by opus-planner; built in #692 before acceptance)
+Status: accepted (owner, 2026-10-26; drafted by opus-planner; built in #692 before acceptance); superseded in part by 0086 (chunk stage removed)
 Date: 2026-10-25
 Source: #692 (sonnet-explorer); ADR 0081 point 1; GEN-066, GEN-067
 
@@ -22,3 +22,5 @@ Source: #692 (sonnet-explorer); ADR 0081 point 1; GEN-066, GEN-067
 
 ## Licences of adopted code or techniques
 None.
+
+Maintained: 2026-10-30, status: superseded in part by 0086 (the chunk stage is removed from the code).

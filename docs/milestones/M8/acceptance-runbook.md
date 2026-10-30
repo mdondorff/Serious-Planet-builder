@@ -42,7 +42,7 @@ No perf run starts without the planner's go; the first four are not perf and can
 | 3 | Look stills after #835 (`cargo xtask capture stills --poses ... --store ...`) for criterion 1 | no (GPU, but not a measurement) | 5 to 10 min |
 | 4 | `perf coupled --remake-into` (criterion 4) | yes | about 1 min |
 | 5 | `perf stream shadow-cost`, river-r1 poses, then hills-b poses (criterion 5) | yes | about 5 min each |
-| 6 | `perf stream edit-latency --chunk-workers 6 --base-threads 2 --repeats 5` (criterion 6) | yes | about 30 min (guess, 19 cases times 5 repeats) |
+| 6 | `perf stream edit-latency --repeats 5` (criterion 6) | yes | about 30 min (guess, 19 cases times 5 repeats) |
 | 7 | `perf stream envelope --only-steady --altitudes-m 300` (criterion 7 floor) | yes | 11 trials of 72 s: about 14 min |
 | 8 | `perf stream envelope --only-steady` at 100 m and 1000 m, two places (flight lead) | yes | 4 curves of 11 trials: about 55 min |
 | 9 | Write `docs/milestones/M8-report.md`: criteria table, the logs copied to `docs/milestones/M8/`, owner items | no | planner |

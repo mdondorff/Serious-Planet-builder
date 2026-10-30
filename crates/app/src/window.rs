@@ -166,8 +166,6 @@ struct Config {
     layout: Layout,
     /// Frames a smoke run drives before it closes the window (`--frames`, default [`SMOKE_FRAMES`]).
     smoke_frames: u64,
-    /// `--chunks`: the window with the chunk stage (STRM-046); off by default since the owner's fallback of 2026-10-28 (TEST-064).
-    chunks: bool,
     vsync: bool,
     policy: AdapterPolicy,
     gen: planet_streaming::GenWorkers,
@@ -350,8 +348,6 @@ struct Running {
     coupled_shown: Option<planet_generators::coupled::CoupledLens>,
     /// Whether the frame loop counts the world's chunk stage (STRM-039): set once the world has one.
     chunks_on: bool,
-    /// The frame a smoke run pressed K at, over a chunk stage (`PLANET_SMOKE_LENS`).
-    smoke_lens_at: Option<u64>,
     /// The no-degradation gate (`PLANET_GATE`, TEST-061): its counters, the camera path to replay and the file the report goes to.
     gate: Option<GateRun>,
     /// The sun of the last lit plan before the editing light, for the title's local solar time (VIEW-054).
@@ -495,18 +491,8 @@ impl App<'_> {
             window.set_title(&planet_frame::viewer::roots_title(done, total));
         })?;
         crate::stall::phase_mark("floor tiles");
-        // A world with a stored coupled channel gets the A-net chunk stage on a thread (STRM-046); the jobs run on a pool of half the generation workers' size.
-        // Only with `--chunks` (off by default since the owner's fallback of 2026-10-28, TEST-064); `PLANET_SMOKE_CHUNKS` asks for it in a smoke run: the smoke over
-        // a store with a coupled run then draws lit over the stage and its verdict wants the horizon jobs to have run (TEST-058).
-        if self.world.has_bake() && (cfg.chunks || (cfg.smoke && std::env::var_os("PLANET_SMOKE_CHUNKS").is_some())) {
-            // The pool and the knobs of the viewer's chunk stage: one function, which the headless scenes use too (`anetworld::viewer_chunk_stage`).
-            let (pool, chunk_cfg) = crate::anetworld::viewer_chunk_stage(cfg.gen);
-            self.world.request_anet(pool, self.clock.clone(), chunk_cfg);
-        } else if self.world.has_bake()
-            && self.world.store_dir().is_some()
-            && (!cfg.smoke || std::env::var_os("PLANET_SMOKE_CHUNKS").is_some() || std::env::var_os("PLANET_GATE").is_some())
-        {
-            // No chunk stage: the horizon maps are baked from the base terrain and the stamps (STRM-064), on the idle class of the same pool.
+        // The horizon maps are baked from the base terrain and the stamps (STRM-064), on the idle class of the same pool (the chunk stage is removed).
+        if self.world.has_bake() && self.world.store_dir().is_some() && (!cfg.smoke || std::env::var_os("PLANET_GATE").is_some()) {
             if let Err(e) = self.world.enable_viewer_horizon(cfg.gen, self.clock.clone()) {
                 eprintln!("horizon: {e}");
             }
@@ -595,7 +581,6 @@ impl App<'_> {
             coupled_asked: None,
             coupled_shown: None,
             chunks_on: false,
-            smoke_lens_at: None,
             gate: GateRun::from_env()?,
             sun_dir: [0.0, 0.0, 1.0],
             camera_position: planet_core::Vec3::new(1.0, 0.0, 0.0),
@@ -1259,11 +1244,6 @@ impl App<'_> {
             if cfg.smoke {
                 // The editing script starts once the camera rests, so the run waits for it (at most until the give-up frame).
                 let editing_done = !cfg.edit || st.edit.as_ref().is_none_or(|e| e.smoke_finished()) || st.frames >= SMOKE_GIVE_UP;
-                // A smoke run asked for the chunk stage (`PLANET_SMOKE_CHUNKS`) waits for it to come up, and one asked for the K view waits a few
-                // frames after pressing it, so a slow runner cannot end the run before the stage or the lens did anything.
-                let stage_done = st.frames >= SMOKE_GIVE_UP
-                    || (((std::env::var_os("PLANET_SMOKE_CHUNKS").is_none() && !cfg.chunks) || st.chunks_on)
-                        && (std::env::var_os("PLANET_SMOKE_LENS").is_none() || st.smoke_lens_at.is_some_and(|f| st.frames >= f + 20)));
                 // A run with the horizon jobs on also waits for the first map to be baked (a slow adapter bakes in seconds of wall time, not in a count of frames), but not past
                 // [`GATE_BAKE_GIVE_UP`] frames: the verdict then says no map was baked.
                 let maps_baked = self.world.horizon_stats().is_some_and(|h| h.baked + h.disk_hits > 0);
@@ -1280,7 +1260,7 @@ impl App<'_> {
                         st.gate.as_ref().and_then(|g| g.edit_done_at)
                     ));
                 }
-                if st.frames >= cfg.smoke_frames.max(SMOKE_FRAMES) && st.presented > 0 && editing_done && stage_done && gate_done {
+                if st.frames >= cfg.smoke_frames.max(SMOKE_FRAMES) && st.presented > 0 && editing_done && gate_done {
                     // The verdict is on counts: lit frames with the atmosphere drawn and presented, the debug path too, an exposure
                     // reading, and the renderer's own account that the passes ran. No wall-clock (VIEW-005).
                     crate::stall::phase_mark("last frame");
@@ -1553,12 +1533,6 @@ fn smoke_keys(st: &mut Running, cameras: &[Camera], now_ms: u64) -> Result<bool,
             st.surface.set_vsync(&st.ctx, st.viewer.vsync);
         }
     };
-    // The K view of the coupled run's heights over a chunk stage (`PLANET_SMOKE_LENS`), pressed once the stage is up (it comes on a thread, and the
-    // stage needs the coupled run): the keys of every tile it re-keys are made on the pool workers (the owner's session of 2026-10-27 panicked there).
-    if st.frames >= 22 && st.chunks_on && st.smoke_lens_at.is_none() && std::env::var_os("PLANET_SMOKE_LENS").is_some() {
-        press(st, Command::CycleCoupledLens);
-        st.smoke_lens_at = Some(st.frames);
-    }
     match st.frames {
         // The window starts lit: V does nothing there, L goes to the debug path, V cycles a debug view, L comes back.
         4 => press(st, Command::NextView),
@@ -2025,7 +1999,6 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
                 .map_err(|e| format!("--editor-layout {}: {e}", p.display()))?,
             None => Layout::default(),
         },
-        chunks: o.chunks,
         smoke_frames: if o.given.contains("--frames") {
             o.frames as u64
         } else if o.smoke && o.edit {
