@@ -1447,6 +1447,40 @@ Detail:
 - **WHEN** the scene runs with `--smoke` over an in-memory bake
 - **THEN** it ends without error, writes the log with four altitudes, and says it is not a measurement
 
+### Requirement: TEST-077 The preview pair comparison
+`planet_testkit::pair::compare_pair` SHALL take the stale frame, the preview frame and the exact frame of one pose and a grey threshold, and SHALL report the pixels the stale frame has more than the threshold from the exact frame, the pixels the preview frame has, the mean and largest channel difference of the preview and the bounding box of its differing pixels. The verdict SHALL be Within when the preview leaves at most a twentieth of the changed pixels, Over otherwise, and TooSmall, never a pass, when the edit changes 50 pixels or fewer. Frames of different sizes SHALL be refused.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-30), REND-033, B4-4
+
+Detail: The bound and the 50 pixels are those of `gpu_preview.rs`. A difference is the largest of the three colour channel differences of a pixel. `first_over` gives the first view of a list, in the order given, whose pair is Over; the pair scene (TEST-076) draws the normals, relief and lit views to name the cause.
+
+#### Scenario: At the bound
+- **WHEN** an edit changes 400 pixels and the preview leaves 20, then 21
+- **THEN** the verdict is Within, then Over
+
+#### Scenario: Nothing to judge
+- **WHEN** the edit changes 49 pixels
+- **THEN** the verdict is TooSmall
+
+### Requirement: TEST-074 The owner package says what ran
+`cargo xtask package` SHALL run the `capture stills` of the default look of each look-review site and `capture flights` into `target/review/owner-package/<date>/` and SHALL write `package.md` there with one row per item: PASS, FAIL or NOT RUN, with its reason, and its files. An item with no store SHALL be NOT RUN, a failed command FAIL with its message, a command that wrote no file FAIL. A failed item SHALL NOT stop the others, and the command SHALL fail when an item failed.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-30), B4-5
+
+Detail: The command is a tool, never a measurement. `package.md` ends with the counts and says a NOT RUN item is not a pass. `--dry-run` prints the steps without running them. The directory is sent to the owner by the planner; the command has no upload.
+
+#### Scenario: No store
+- **WHEN** no `--store` is given
+- **THEN** every item is NOT RUN, none is PASS, and no capture command runs
+
+#### Scenario: A failed step
+- **WHEN** one capture command fails
+- **THEN** its row is FAIL with its message, the other steps run, and the command fails
+
 ### Requirement: TEST-073 Real-GPU window checks are NOT RUN on a locked desktop
 While the Windows session is locked (the lock screen process `LogonUI.exe` is running), a real-GPU window check (the `gpu_window` tests on the hardware adapter, `editor --smoke` on the discrete GPU, `cargo xtask gate` on the real store) SHALL print a `NOT RUN` line with the reason and the time, leave a marker, and return, never a pass. A failure of such a check with the desktop locked by the end of the run SHALL be a NOT RUN with the times. `cargo xtask` SHALL count the NOT RUN checks of a run, and `accept` SHALL mark a step with any INCOMPLETE and fail. The software adapter, headless scenes and CI are not affected.
 

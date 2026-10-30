@@ -193,7 +193,7 @@ fn milestone_report_path(root: &Path, milestone: &str, steps_failed: bool) -> Pa
 }
 
 /// `YYYY-MM-DD` (UTC) of a unix time in seconds (civil-from-days).
-fn utc_date(secs: u64) -> String {
+pub(crate) fn utc_date(secs: u64) -> String {
     let z = (secs / 86400) as i64 + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z.rem_euclid(146_097);

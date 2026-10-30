@@ -1,5 +1,5 @@
 # 0084 A coarse valley carve in the base
-Status: proposed (drafted by opus-planner, 2026-10-27; owner, 2026-10-27: the disconnect between eroded and uneroded levels is tackled in M8); superseded in part by 0086 (chunk stage removed)
+Status: not pursued (opus-planner, 2026-10-30): SPIKE-49 was negative and the chunk stage it served is removed (ADR 0086); M9's bake decides valley carving (SPIKE-60)
 Date: 2026-10-27
 Source: owner live test 2026-10-27 (`docs/milestones/M8/owner-test-2026-10-27/README.md`, D0, findings 2 and 3); SPIKE-48 (`spikes/m9-uplift/results/results.md`)
 
@@ -23,4 +23,3 @@ Source: owner live test 2026-10-27 (`docs/milestones/M8/owner-test-2026-10-27/RE
 ## Licences of adopted code or techniques
 None.
 
-Maintained: 2026-10-30, links: superseded in part by 0086 (the chunk stage is removed from the code).
