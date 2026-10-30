@@ -3,10 +3,10 @@
 Forward state only (owner, 2026-10-16): open owner items, the current queue's open items, the current unanswered stop report, tracked items and quarantines. History goes to the log (`cargo xtask log`). When a change is archived the coder deletes its queue item's text (the log line is the record); when the architect answers a stop report it deletes it. A Tracked entry has at most 3 lines; a finished one is deleted (ADR 0075). Cap: 15 KB. Earlier states: `docs/archive/M4/status-at-m4-acceptance.md`, `docs/archive/M6/status-at-m6-close.md`. M7's queue as executed: `docs/milestones/M7-report.md`.
 
 ## Waiting for the owner
-- **Friday 2026-10-30 hour** (`docs/briefings/morning-2026-10-30.md`): `/bless` of 10 RTX golden candidates on driver 621.01 (the device loss is gone); week plan decisions; the GitHub ruleset.
-- **Owner live test 2026-10-27** (`docs/milestones/M8/owner-test-2026-10-27/README.md`): open: group E (edits on top as default, erosion keeping mass), F and G scope, the look, the 1 m / 500 m exception, the drawn-tile reading of criterion 6 (#823). Decided 2026-10-28: the no-degradation gate first, then the D0 decision measurement with its stop rule (README "Decisions").
+- **`/bless`** of 10 RTX golden candidates on driver 621.01 (`target/review/golden-review/report.md`); then explorer re-runs `accept M8`. Owner test 2 (2026-10-30): done, nothing blocking; criterion 1 PASS (relief plausible enough for M8); the default look stays, the driver look is revisited with M9's driver maps.
+- **Owner live test 2026-10-27** (`docs/milestones/M8/owner-test-2026-10-27/README.md`): open for M9 planning: group E (edits on top as default, erosion keeping mass), F and G scope, the 1 m / 500 m exception. Decided 2026-10-28: the no-degradation gate first, then the D0 decision measurement with its stop rule (README "Decisions").
 - **D3 confirmed (owner, 2026-10-26):** both orders are wanted eventually; M8-7 builds edits under the erosion first (option 2: the edit shows at once, its eroded result follows within 10 s); edits on top (finishing touches) stay a per-layer setting for later. Cost per stamp or brush stroke is M8-7's first measurement.
-- **ADR 0083 (compute budgets):** the share table is a spec (`compute-budgets`, BUDG-001 to BUDG-007, all planned; initial values drafted 2026-10-30 for the owner and opus-planner to ratify). Not built: pools not on one job system (B2), no reserve test (B3).
+- **ADR 0083 (compute budgets):** the share table is a spec (`compute-budgets`, BUDG-001 to BUDG-007, all planned; initial values ratified provisionally by opus-planner, 2026-10-30; the owner may override). Not built: pools not on one job system (B2), no reserve test (B3).
 - **Optional, when convenient:** the M6 retest list (`docs/archive/M6/briefings/m6-owner-test-plan.md`, "Retest"); a live check of the flickers (Tracked).
 - **At the laptop (postponed):** excluding the repo's `target` folders from Windows Search indexing.
 
@@ -59,6 +59,10 @@ Open owner items: the two flickers (Tracked) need a live check (editor off, debu
 - **Item store revisit trigger** (ADR 0066 point 6): more than 20,000 items in a body or a load over 2 s decides the backend. Nothing counts or times it yet.
 - **M3 gate condition 2**: the declared-versus-recorded reads contract test (ADR 0021 point 7) and a tile-level GEN-017 test are approved, not written; the per-tile node set id waits for the first stored regional field.
 - **Device loss on the RTX**: gone with driver 621.01 (2026-10-30: the item sweeps 16 of 16, full `test gpu --real` without a loss; on 591.86 9 of 16 failed). Delete after a week without a recurrence.
+- **Drag residuals** (owner test 2, 2026-10-30): after #900 some tiles are clipped or not drawn while dragging an edit and settle at rest; collect F9 captures over time; no fix scheduled.
+- **`--site` in the editor** (owner, 2026-10-30): no descent, the window opens at the default view; a debug aid; `--marker` with G works.
+- **Window resize (P2)** (owner, 2026-10-30): the 3D target keeps its size after a resize, the world pixelates while the UI stays sharp; `--size WxH` at start works around it.
+- **K view stall at orbit** (owner, 2026-10-30, report `20261030-110527Z`, build 79653500): 1.3 s frame, 1,063 ms in camera, ground heights and overview with 4 main-thread block decodes (within VIEW-061's ceiling); no panic any more.
 - **Flaky `gpu_window` flight test**: one failure after 7.5 s, 0 of 5 since. On a second failure keep the full output before any rerun.
 - **WARP device removal with the compact format and the atmosphere**: test-only, accepted; the software smoke stays on the vertex format. Re-test when WARP, wgpu or Windows changes.
 - **Beach shading flashes on WARP** (36.8 % of shore-band pixels on the coastal descent): unchecked since REND-030; check with the next look review.
