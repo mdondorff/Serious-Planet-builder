@@ -1,1 +1,0 @@
-- 2026-10-30 **gpu-not-run-locked** (TEST-073): real-GPU window checks report NOT RUN while the desktop is locked (gpu_window on hardware, editor --smoke, gate on the real store); xtask counts them and accept marks the step INCOMPLETE

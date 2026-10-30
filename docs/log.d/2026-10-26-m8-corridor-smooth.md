@@ -1,1 +1,0 @@
-- 2026-10-26 **m8-corridor-smooth** (GEN-084, GEN-078, GEN-081): the routed corridor is smoothed across its joints (256 m tent, at most 64 m; sources, outlets and confluences keep their node) and the read set takes one more segment upstream; ANET_VERSION 10; the stepped benches of river-r1 at 300 m are gone.

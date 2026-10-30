@@ -1,1 +1,0 @@
-- 2026-10-26 **viewer-key-table** (VIEW-055): archived; one key table drives the key handling, the usage text and the F1 list (#686).

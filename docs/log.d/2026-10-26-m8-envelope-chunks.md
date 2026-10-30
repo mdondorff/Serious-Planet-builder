@@ -1,1 +1,0 @@
-- 2026-10-26 **m8-envelope-chunks** (TEST-054, TEST-055): the envelope scene runs the chunk stage over a `--store` world (horizon jobs on, cold per flight, settle waits for the first plan's chunks), the log gives landings, waits and jobs in flight and a 300 m comparison with the horizon off; for M8-8's window.

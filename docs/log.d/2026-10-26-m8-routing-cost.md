@@ -1,1 +1,0 @@
-- 2026-10-26 **m8-routing-cost** (GEN-066 stride 8, GEN-077, GEN-078): routing raster reads the region's heights and a stage memo, segments that cannot reach the region are not routed (both bit-neutral), raster stride 8; network build 4.4-5.4 s to 3.4-3.8 s per cold chunk, climbing links at the four sites 0, 0, 0 and 411 (was 0, 7, 0, 519).

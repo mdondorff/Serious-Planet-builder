@@ -21,7 +21,7 @@ Questions for the owner:
 
 Known and tracked, not to be judged as new: faint striations on shadowed walls beyond a rim (hillslope flat patches, Tracked in `docs/status.md`).
 
-## Superseded (history, no need to look)
+## Superseded (deleted at M8's housekeeping, 2026-10-30; in the git history)
 | Folder | What it was |
 |---|---|
 | `look-review-1/`, `look-review-1-hills*/` | look review 1 and its three fix iterations (2026-10-25), before the relief rebuild |

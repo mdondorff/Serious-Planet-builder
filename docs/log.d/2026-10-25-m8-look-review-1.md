@@ -1,1 +1,0 @@
-- 2026-10-25 **m8-look-review-1** (M8-3 step 5): six stills (300 m, 30 m, 1.8 m; sunset, midday) over the largest river with the A-net chunk stage on the 16384 store, `docs/milestones/M8/look-review-1/`; `capture-stills` anchor takes `min_height_m`; the first make of the 2048 run from the 16384 bake took 9916 s

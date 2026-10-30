@@ -1,8 +1,0 @@
-# anchor: latitude -11.1657 longitude 23.0493 degrees, ground 279.2 m, the river flows towards bearing 131 degrees
-# pose width height eye_lat_deg eye_lon_deg eye_height_m heading_deg pitch_deg sun_local_hours chunks waited_s nodes capped_nodes
-300m-sunset 2560 1440 -11.15686 23.03894 587.9 131 15 17.5 4 5.5 1433 105
-300m-midday 2560 1440 -11.15686 23.03894 587.9 131 15 12 4 3.3 1433 105
-30m-sunset 2560 1440 -11.16335 23.04655 294.8 131 8 17.5 4 3.3 1419 107
-30m-midday 2560 1440 -11.16335 23.04655 294.8 131 8 12 4 3.0 1419 107
-1.8m-sunset 2560 1440 -11.16535 23.04890 182.8 131 0 17.5 4 3.2 1440 112
-1.8m-midday 2560 1440 -11.16535 23.04890 182.8 131 0 12 4 3.2 1440 112

@@ -1,1 +1,0 @@
-- 2026-10-26 **m8-base-gather** (GEN-079, GEN-052 on the production threads): a compact batch takes its gather footprint from a hint instead of the second pass of reads; network build 3.4 s to 1.4 s, chunk solve 6.5 s to 4.5-5.0 s (one thread), compact tile 2.7-3.1 ms to 1.6-2.2 ms; bits unchanged.

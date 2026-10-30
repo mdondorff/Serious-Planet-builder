@@ -1,0 +1,1 @@
+- 2026-10-30 **b4-edit-pair-frames** (B4-4 step 2, TEST-076): `editperf::pair_frames` draws the stale, preview, exact and control frames of an edit per view; smoke world: normals Within (0 px left), relief Over (2836 of 7152 px left, bound 5 %), control 0 px; real-store scene next.

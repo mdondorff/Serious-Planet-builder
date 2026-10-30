@@ -1,1 +1,0 @@
-- 2026-10-27 **m8-shared-frame-loop**: proposal (TEST-058): one chunk step for the viewer and every scene, counters per enabled feature, a scene fails when an enabled feature counts 0.

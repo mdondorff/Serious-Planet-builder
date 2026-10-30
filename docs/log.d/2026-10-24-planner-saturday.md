@@ -1,1 +1,0 @@
-- 2026-10-24 **status** (opus-planner): M8-2 3a/3b, M8-1 (c) stored and wired (K view), coupled run 545 s for 100 steps (criterion 4 met); pyramid top level 14 provisional.

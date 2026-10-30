@@ -1,3 +1,5 @@
+#[path = "gpu_edit_pair.rs"]
+mod gpu_edit_pair;
 #[path = "gpu_edit_perf.rs"]
 mod gpu_edit_perf;
 #[path = "gpu_envelope_perf.rs"]
