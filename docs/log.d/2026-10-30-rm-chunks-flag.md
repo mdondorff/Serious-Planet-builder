@@ -1,0 +1,1 @@
+- 2026-10-30 **rm-chunks-flag** (ADR 0086, B6 PR 1): nothing starts the chunk stage: --chunks, --no-chunks, --no-stale-hold, --chunk-workers, gate --chunks and the smoke hooks are removed; STRM-046, TEST-054, TEST-064 reworded; no default-path change
