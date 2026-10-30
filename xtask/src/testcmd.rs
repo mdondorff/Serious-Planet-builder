@@ -44,6 +44,27 @@ pub fn slowest_tests(junit: &str, n: usize) -> Vec<(f64, String)> {
     all
 }
 
+/// The tests a nextest log reports as aborted with an access violation (`ABORT ... test` followed by `with code 0xc0000005`), each once, in order: on the software adapter
+/// that is the WARP crash in `d3d10warp.dll` (docs/learnings.md, "WARP crashes in its own code").
+pub fn access_violation_aborts(log: &str) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    let mut lines = log.lines();
+    while let Some(l) = lines.next() {
+        let Some(at) = l.find("ABORT [") else { continue };
+        if !lines.clone().next().is_some_and(|n| n.contains("0xc0000005")) {
+            continue;
+        }
+        // `ABORT [  99.507s] ( 26/176) binary test`: the name follows the progress counter.
+        let rest = &l[at..];
+        let Some(close) = rest.find(')') else { continue };
+        let name = rest[close + 1..].trim().to_string();
+        if !name.is_empty() && !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    names
+}
+
 fn package(dir: &str) -> String {
     match dir {
         "app" => "planet".into(),
@@ -357,6 +378,16 @@ pub fn test_timed(root: &Path, args: &[String]) -> Result<TestTiming, String> {
         let pending = candidates(root);
         if !pending.is_empty() {
             eprintln!("{} candidate golden(s) wait for the owner's /bless (`cargo xtask bless` lists them)", pending.len());
+        }
+    }
+    // An access violation of a test process on the software adapter is the WARP crash (d3d10warp.dll): named, so that a reader sees it at once and CI judges. The run
+    // still counts as failed: no retry, no skip, the exit code is unchanged (BUILD-003).
+    if !real && result.is_err() {
+        let aborts = log.as_ref().and_then(|l| std::fs::read_to_string(l).ok()).map(|t| access_violation_aborts(&t)).unwrap_or_default();
+        for name in &aborts {
+            eprintln!(
+                "WARP crash (d3d10warp), CI judges: {name} aborted with 0xc0000005; the step still counts as failed (docs/learnings.md)"
+            );
         }
     }
     say_log();
@@ -781,7 +812,7 @@ fn perf_coupled_args(args: &[String]) -> Result<Vec<String>, String> {
     perf_bake_scene_args("coupled", args)
 }
 
-/// The `cargo` arguments of a perf scene that takes `--global-res`, `--machine-ready` and, for `anet-chunk`, `--store DIR` (`coupled`, `anet-chunk`).
+/// The `cargo` arguments of a perf scene that takes `--global-res`, `--machine-ready` and, for `coupled`, `--store DIR` (`coupled`).
 fn perf_bake_scene_args(scene: &str, args: &[String]) -> Result<Vec<String>, String> {
     let mut v: Vec<String> = ["run", "--release", "-p", "planet", "--", "test-render", "--perf", "--scene", scene, "--adapter", "hardware"]
         .iter()
@@ -795,7 +826,7 @@ fn perf_bake_scene_args(scene: &str, args: &[String]) -> Result<Vec<String>, Str
                 v.push(a.clone());
                 v.push(it.next().ok_or_else(|| format!("{a} needs a value"))?.clone());
             }
-            "--store" if scene == "anet-chunk" || scene == "coupled" => {
+            "--store" if scene == "coupled" => {
                 v.push(a.clone());
                 v.push(it.next().ok_or_else(|| format!("{a} needs the directory of a stored bake"))?.clone());
             }
@@ -807,7 +838,6 @@ fn perf_bake_scene_args(scene: &str, args: &[String]) -> Result<Vec<String>, Str
                 return Err(format!(
                     "unknown perf {scene} option '{other}' (known: --global-res, --machine-ready{}, the owner's override of a failed readiness gate)",
                     match scene {
-                        "anet-chunk" => ", --store",
                         "coupled" => ", --store DIR --remake-into OUT (a fresh make from a stored bake)",
                         _ => "",
                     }
@@ -1061,11 +1091,6 @@ pub fn perf(root: &Path, args: &[String]) -> Res {
         let refs: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
         return run(root, "cargo", &refs, &[]);
     }
-    if args.first().map(String::as_str) == Some("anet-chunk") {
-        let cargo_args = perf_bake_scene_args("anet-chunk", &args[1..])?;
-        let refs: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
-        return run(root, "cargo", &refs, &[]);
-    }
     let cargo_args = perf_cargo_args(args)?;
     run(root, "cargo", &cargo_args, &[])
 }
@@ -1213,6 +1238,22 @@ mod tests {
         let smoke = perf_stream_child_args("dive", &s(&["--smoke", "--allow-memory-bake"])).unwrap();
         assert!(smoke.contains(&"--perf-smoke".to_string()) && !smoke.contains(&"--out".to_string()));
         assert!(perf_stream_child_args("dive", &s(&["--out"])).unwrap_err().contains("needs a value"));
+    }
+
+    // spec: BUILD-003
+    #[test]
+    fn an_access_violation_abort_in_a_nextest_log_is_named_once_and_other_failures_are_not() {
+        let log = "        PASS [   1.0s] ( 1/3) planet::gpu_all a::ok\n\
+                   \x20      ABORT [  99.507s] ( 26/176) planet::gpu_all gpu_skeleton::the_draw_flag\n\
+                   \x20          - with code 0xc0000005: Unzulaessiger Zugriff (os error 998)\n\
+                   \x20       FAIL [   2.0s] ( 27/176) planet::gpu_all b::fails\n\
+                   \x20      ABORT [  50.0s] ( 28/176) planet::gpu_all c::other_abort\n\
+                   \x20          - with code 1: something else\n\
+                   ------------\n\
+                   \x20      ABORT [  99.507s] ( 26/176) planet::gpu_all gpu_skeleton::the_draw_flag\n\
+                   \x20          - with code 0xc0000005: Unzulaessiger Zugriff (os error 998)\n";
+        assert_eq!(access_violation_aborts(log), ["planet::gpu_all gpu_skeleton::the_draw_flag".to_string()]);
+        assert!(access_violation_aborts("all passed").is_empty());
     }
 
     // spec: BUILD-003
@@ -1653,16 +1694,12 @@ mod tests {
         assert!(a.contains(&"coupled".to_string()) && a.contains(&"hardware".to_string()) && a.contains(&"--machine-ready".to_string()));
         assert!(perf_coupled_args(&s(&["--global-res"])).unwrap_err().contains("needs a value"));
         assert!(perf_coupled_args(&s(&["--force"])).unwrap_err().contains("unknown perf coupled option"));
-        let chunk = perf_bake_scene_args("anet-chunk", &s(&["--global-res", "64"])).unwrap();
-        assert!(chunk.contains(&"anet-chunk".to_string()) && chunk.contains(&"hardware".to_string()) && chunk.contains(&"64".to_string()));
-        assert!(!chunk.contains(&"--machine-ready".to_string()), "the owner's override is never added by default");
-        // The chunk scene reads a stored production bake (the viewer's geometry); the coupled scene has no store.
-        let on_store = perf_bake_scene_args("anet-chunk", &s(&["--store", "target/accept/global16384", "--global-res", "16384"])).unwrap();
-        assert!(on_store.windows(2).any(|w| w[0] == "--store" && w[1] == "target/accept/global16384"));
+        let plain = perf_bake_scene_args("coupled", &s(&["--global-res", "64"])).unwrap();
+        assert!(!plain.contains(&"--machine-ready".to_string()), "the owner's override is never added by default");
         // The coupled scene re-makes its run from a stored bake into a directory of its own; the other scenes do not take that option.
         let make = perf_bake_scene_args("coupled", &s(&["--store", "x", "--remake-into", "target/m", "--global-res", "16384"])).unwrap();
         assert!(make.windows(2).any(|w| w[0] == "--remake-into" && w[1] == "target/m") && make.contains(&"--store".to_string()));
-        assert!(perf_bake_scene_args("anet-chunk", &s(&["--remake-into", "x"])).unwrap_err().contains("unknown perf anet-chunk option"));
+        assert!(perf_bake_scene_args("global-bake", &s(&["--remake-into", "x"])).unwrap_err().contains("unknown perf global-bake option"));
     }
 
     // spec: GEN-014, BUILD-002

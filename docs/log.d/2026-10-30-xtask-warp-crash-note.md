@@ -1,0 +1,1 @@
+- 2026-10-30 xtask-warp-crash-note: xtask names a 0xc0000005 software abort as a WARP crash for CI to judge (BUILD-003); the learning records the rate

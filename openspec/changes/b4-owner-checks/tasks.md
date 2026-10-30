@@ -1,10 +1,23 @@
 ## 1. Design
-- [x] 1.1 Gap table against the existing detectors (design.md)
-- [ ] 1.2 Planner's read of the decisions and open questions
+- [x] 1.1 Gap table against the existing detectors (design.md; PR #910)
+- [x] 1.2 Planner's read: delivery is the planner's SendUserFile of `target/review/owner-package/<date>/`; the owner's eye list is owner tests 1 and 2 plus the look reviews
 
-## 2. Steps (each its own change)
-- [ ] B4-2 moving level-pop detector
-- [ ] B4-3 river bed-rise detector
-- [ ] B4-4 edit scenario with the preview-versus-refresh pair
-- [ ] B4-5 the package command
-- [ ] B4-6 delivery
+## 2. Steps (state at the handover, 2026-10-30; main 318a7e74 or later)
+- [x] B4-2 level-pop detector: `planet_frame::popcheck`, TEST-072 (#923). Descent test through the morph model passes, the no-morph descent fails. The pixel bounds (0.5 px p99, 2 px max) are a proposal. Not done: feeding it from the real plan on the real store (design.md risk: the real plan chooses levels by distance to the bounding volume; rugged sites only, a hard switch on gentle ground stays under 0.5 px).
+- [ ] B4-3 river bed-rise detector: later, against a generated world (the default world draws no rivers until M9's channels).
+- [~] B4-4 the preview pair (design #928):
+  - [x] TEST-077 `planet_testkit::pair::compare_pair` (#930); bound 1/20 of the changed pixels, TooSmall at 50 pixels or fewer.
+  - [x] TEST-076 `editperf::pair_frames` and the tier-C smoke test (#937): stale, preview, exact and control frames per debug view; control bit exact.
+  - First finding (software adapter, smoke memory bake, 50 m hill at 200 m): normals Within (0 of 9381 pixels left), relief Over (2836 of 7152 left, largest 76); the control is 0 bytes; the preview, exact and stale frames draw the same 170 tiles (0 differing), so the relief difference is not a different level choice; it is in the previewed nodes' heights (contour lines are displaced), size in metres not measured.
+  - [~] Real-store run (software adapter; real GPU NOT RUN, desktop locked/standby, 2026-10-30): branch `change/b4-edit-pair-scene` (commit 9a776f74, then the fix below; pushed, no PR) holds the ignored tests `gpu_edit_pair::the_pair_over_a_real_store` (`PLANET_PAIR_STORE=C:/DEV/SeriousPlanetData/global16384 PLANET_ADAPTER=software [PLANET_PAIR_SITE=lat,lon] cargo nextest run -p planet -E 'test(/gpu_edit_pair::the_pair_over_a_real_store/)' --run-ignored only --no-capture`, about 75 s per site) and `the_plan_over_a_real_store_is_reported_per_parameter_set` (CPU plan per LOD parameter set).
+  - Cause of the 0 changed pixels: the pair's viewport/tau of 72 (432 px, tau 6) held the plan at level 8 over the real store (13 of 38 nodes `Capped`, ADR 0074; a level-8 cell is 1.2 km): harness-only. The field has the hill (+10.0 m at the centre, +5.6 m at 0.5 r, 0 at 1 r; 407.3 m before). Plans of the same field and camera at 200 m: 432 px/tau 6 gives 38 nodes, deepest 8; 432/4.5, 720/6, 1080/6 and 1440/6 give 208 to 533 nodes, deepest 18 to 19, 0 capped; `generate --plan-check` agrees. The pair's tau must scale with its viewport: the real-store test passes `--tau 2.4` (ratio 180).
+  - Result at tau 2.4 (3 sites, 200 m / 2 km, stamp 50 m, edit changes 7000 to 9300 px at 200 m and 170 to 300 px at 2 km): the preview leaves 0 to 366 of them, mostly Within (1/20 bound); Over at (20, 30) relief 200 m (366 of 6989 = 5.2 %, max 68 grey levels at x 272..493 y 143..245) and normals 2 km (18 of 301). At hills-b and river-r1 only the 2 km normals pair is Over (16 of 302). Node sets preview/exact identical (0 differing). The residue is a few pixels of contour lines; the height error in metres is not measured (needs the lit rig for REND-033; the numbers say the breach is small).
+  - The earlier hills-b finding (preview differs from exact over the whole frame, 324922 of 331776 px) did not survive the fix: it was an artefact of the level-8 cap.
+  - Next: the metres (preview node heights against exact tile heights at the case centre, CPU); the lit frame and horizon on the real GPU when the desktop is unlocked; a PR for the ignored tests once prepush is run.
+- [x] B4-5 the package command: `cargo xtask package`, TEST-074 (#927): stills of hills-b, river-r1, hills-r1 (default look) and the coastal flights into `target/review/owner-package/<date>/` with `package.md` (PASS, FAIL, NOT RUN). Not run on the real store yet; stills still draw over the chunk stage until B6 removes it. Detectors are not items yet.
+- [ ] B4-6 delivery: the planner sends the directory with SendUserFile; nothing to build beyond a one-line pointer in the usage text.
+
+## 3. Notes for the next session
+- Requirement IDs are reserved by the planner: ask before writing a spec (TEST-072, 074, 076, 077 are taken by B4).
+- The local WARP crash (0xc0000005 in one tier-C test per run since the Windows update; learnings.md 33) is the planner's open item for a fresh session; two prepush runs of mine failed on it in unrelated tests (logs `target/test-logs/test-gpu-20261030-171947.log` and `-173204.log`); CI's WARP and lavapipe passed.
+- Window runs need the desktop unlocked (Kernel-Power and LogonUI evidence in the planner's report); the owner's laptop time blocks window runs.

@@ -1,15 +1,13 @@
 //! The pose stills (TEST-048): `test-render --scene capture-stills --poses FILE --out-dir DIR`, the lit path drawn at fixed poses over a
-//! world with its A-net chunk stage, for the owner's look reviews (M8-4, M8-8) and later regression checks.
+//! world from the base terrain, for the owner's look reviews (M8-4, M8-8) and later regression checks.
 //!
-//! A still waits for its chunks: the loop plans the pose, asks the chunk manager for every chunk the plan's tiles read, and plans again
-//! over the field that includes what landed until every tile of the plan reads only ready chunks. So no tile of the image is a
-//! stand-in; when the chunks are not all ready within the timeout the run fails and names what was missing.
+//! A still waits for the horizon maps of the chunks near its eye (REND-038): when they are not all baked within the timeout the run fails and
+//! names what was missing.
 
 use crate::litperf::{capture_lod, new_renderer, request, LitSetup, Rig, WATER_T0};
 use crate::worldfield::WorldTerrain;
 use crate::{err, Options};
 use planet_core::{PlanetFixed, TileId, Vec3};
-use planet_frame::chunkshare::ChunkShare;
 use planet_frame::{Camera, SelectionCache};
 use planet_generators::chunkfield::ChunkKey;
 use planet_render::GpuContext;
@@ -23,10 +21,7 @@ pub fn is_stills_scene(name: &str) -> bool {
     name == "capture-stills"
 }
 
-/// Rounds of settling the chunks and moving the eye to the ground they give that a pose may take.
-const MAX_CAMERA_ROUNDS: usize = 4;
-
-/// Seconds a pose may wait for its chunks when the file gives no `chunk_timeout_s`.
+/// Seconds a pose may wait for its horizon maps when the file gives no `chunk_timeout_s`.
 pub const DEFAULT_CHUNK_TIMEOUT_S: f64 = 900.0;
 
 /// The local relief an anchor must stand in: the highest minus the lowest coupled-run height within `radius_m` of the cell.
@@ -73,14 +68,11 @@ pub struct Pose {
 pub struct StillsConfig {
     pub anchor: Anchor,
     pub chunk_timeout_s: f64,
+    /// The cell of the horizon chunks in metres (the viewer's 8 m unless the file says otherwise, `horizon_cell_m`; a test uses coarse chunks to stay quick).
+    pub horizon_cell_m: f64,
     /// `coarse_horizon = false`: the stills are drawn without the coarse horizon map (the far-field shadows of the global run, REND-043), to tell what
     /// it adds to a frame; the chunk horizons stay. A diagnostic of the owner's frames, on by default.
     pub coarse_horizon: bool,
-    /// The cell of the chunks in metres (the viewer's 8 m unless the file says otherwise; a test uses coarse chunks to stay quick).
-    pub chunk_cell_m: f64,
-    /// `[place] snap_to_channel_m`: the anchor moves to the lowest ground of the landed chunks within this distance of it (the channel the
-    /// chunk stage cut), and a pose's `heading_deg` is then relative to the channel's downstream bearing (0: downstream).
-    pub snap_to_channel_m: Option<f64>,
     /// `[place] slope_table_stride`: write `slopes.txt` ([`slope_table`]) over every this-many-th cell of the coupled lattice before the poses.
     pub slope_table_stride: Option<usize>,
     pub poses: Vec<Pose>,
@@ -213,9 +205,9 @@ pub fn parse_config(text: &str) -> Result<StillsConfig, String> {
         None => true,
         Some(v) => v.as_bool().ok_or_else(|| format!("coarse_horizon must be true or false, got {}", show(v)))?,
     };
-    let chunk_cell_m = number(&root, "chunk_cell_m", "the poses file")?.unwrap_or(crate::anetworld::ANET_CELL_M);
-    if chunk_cell_m <= 0.0 {
-        return Err(format!("chunk_cell_m must be positive, got {chunk_cell_m}"));
+    let horizon_cell_m = number(&root, "horizon_cell_m", "the poses file")?.unwrap_or(crate::horizonworld::HORIZON_CELL_M);
+    if horizon_cell_m <= 0.0 {
+        return Err(format!("horizon_cell_m must be positive, got {horizon_cell_m}"));
     }
     let list = root.get("pose").and_then(|v| v.as_array()).ok_or("the poses file: no [[pose]]")?;
     let mut poses: Vec<Pose> = Vec::new();
@@ -261,25 +253,12 @@ pub fn parse_config(text: &str) -> Result<StillsConfig, String> {
     if poses.is_empty() {
         return Err("the poses file: no [[pose]]".into());
     }
-    let snap_to_channel_m = number(place, "snap_to_channel_m", "[place]")?;
-    if snap_to_channel_m.is_some_and(|m| m <= 0.0) {
-        return Err(format!("[place]: snap_to_channel_m {} must be positive", snap_to_channel_m.unwrap_or(0.0)));
-    }
     let slope_table_stride = match number(place, "slope_table_stride", "[place]")? {
         None => None,
         Some(k) if k >= 1.0 && k.fract() == 0.0 => Some(k as usize),
         Some(k) => return Err(format!("[place]: slope_table_stride {k} must be a whole number of at least 1")),
     };
-    Ok(StillsConfig {
-        anchor,
-        chunk_timeout_s,
-        coarse_horizon,
-        chunk_cell_m,
-        snap_to_channel_m,
-        slope_table_stride,
-        poses,
-        look: parse_look(&root)?,
-    })
+    Ok(StillsConfig { anchor, chunk_timeout_s, horizon_cell_m, coarse_horizon, slope_table_stride, poses, look: parse_look(&root)? })
 }
 
 /// The unit vector towards the sun when it stands at `local_hours` of local solar time (12 is noon) at longitude `lon_deg`, with
@@ -325,93 +304,18 @@ pub fn pose_camera(
     Camera::at_surface_point(PlanetFixed(eye_dir * (radius_m + eye_alt)), ahead, pose.pitch_deg.to_radians(), fov_y_rad, aspect, near)
 }
 
-/// The chunk keys the tiles of a plan read.
-fn needed(world: &WorldTerrain, tiles: &[TileId]) -> Vec<ChunkKey> {
-    let Some(m) = world.chunk_manager() else { return Vec::new() };
-    let mut seen = HashSet::new();
-    tiles.iter().flat_map(|&t| m.reads(t)).filter(|k| seen.insert(*k)).collect()
-}
+/// How far from the eye a still waits for chunk horizon maps, metres (two chunk edges and a bit).
+const HORIZON_WAIT_M: f64 = 12_000.0;
 
-/// A still waited too long for its chunks.
-fn not_ready(pose: &str, secs: f64, missing: &[ChunkKey], needed_n: usize, in_flight: usize) -> String {
+/// A still waited too long for the horizon maps of the chunks near its eye.
+fn no_map_message(pose: &str, secs: f64, missing: &[ChunkKey], wanted: usize) -> String {
     let some: Vec<String> = missing.iter().take(4).map(|k| format!("face {} x {} y {}", k.0, k.1, k.2)).collect();
     format!(
-        "pose '{pose}': {} of {needed_n} chunks were not ready after {secs:.0} s ({in_flight} jobs in flight; first missing: {}); raise chunk_timeout_s, or check the chunk cache's byte cap",
+        "pose '{pose}': {} of {wanted} chunks had no horizon map after {secs:.0} s (first missing: {}); raise chunk_timeout_s",
         missing.len(),
         some.join(", ")
     )
 }
-
-/// The result of waiting for one pose: the field is rebuilt by the caller from the world; the number of rounds and the chunks it read.
-struct Settled {
-    rounds: usize,
-    chunks: usize,
-    waited_s: f64,
-}
-
-/// Plan `camera` until every tile of the plan reads only chunks that were ready before the plan's field was built, driving the chunk
-/// jobs nearest first. Fails with [`not_ready`] after `timeout_s`.
-fn settle(
-    o: &Options,
-    ctx: &GpuContext,
-    world: &WorldTerrain,
-    pose: &Pose,
-    camera: Camera,
-    size: (u32, u32),
-    timeout_s: f64,
-) -> Result<Settled, String> {
-    let manager = world.chunk_manager().ok_or("the world has no chunk stage")?;
-    let started = Instant::now();
-    let mut wanted: HashSet<ChunkKey> = HashSet::new();
-    let mut rounds = 0;
-    loop {
-        rounds += 1;
-        // Ready is monotonic while the chunks are wanted, so what is ready now is in the snapshot of the field built after this line.
-        let ready: HashSet<ChunkKey> = wanted.iter().copied().filter(|k| manager.is_ready(*k)).collect();
-        let field = world.field()?;
-        let lod = capture_lod(o, size, world.radius_m(), field.as_ref())?;
-        let rig = Rig {
-            ctx,
-            world,
-            field: field.as_ref(),
-            lod: &lod,
-            size,
-            smoke: true,
-            calibrate: false,
-            frames: 0,
-            cells: o.cells,
-            radius_m: world.radius_m(),
-        };
-        let plan = planet_frame::plan_terrain_cached(&request(&rig, camera), field.as_ref(), &mut SelectionCache::new())
-            .map_err(|e| format!("pose '{}': {e}", pose.name))?;
-        let tiles: Vec<TileId> = plan.nodes.iter().map(|n| n.tile).collect();
-        let reads = needed(world, &tiles);
-        let missing: Vec<ChunkKey> = reads.iter().copied().filter(|k| !ready.contains(k)).collect();
-        if missing.is_empty() {
-            return Ok(Settled { rounds, chunks: reads.len(), waited_s: started.elapsed().as_secs_f64() });
-        }
-        wanted.extend(reads.iter().copied());
-        drop(plan);
-        drop(field);
-        crate::chunkstage::frame_step(
-            world,
-            &mut crate::chunkstage::NoLoop,
-            &tiles,
-            camera.position,
-            &crate::chunkstage::settling_features(false),
-            &mut Default::default(),
-        );
-        let waited = started.elapsed().as_secs_f64();
-        if waited > timeout_s {
-            let still: Vec<ChunkKey> = missing.into_iter().filter(|k| !manager.is_ready(*k)).collect();
-            return Err(not_ready(&pose.name, waited, &still, reads.len(), manager.in_flight()));
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-}
-
-/// How far from the eye a still waits for chunk horizon maps, metres (two chunk edges and a bit).
-const HORIZON_WAIT_M: f64 = 12_000.0;
 
 /// Run the horizon jobs for the plan `tiles` until every chunk a tile lies in has its map and no job is in flight, or `timeout_s` passes
 /// (an error naming the chunks that have none). Returns the number of maps.
@@ -425,8 +329,6 @@ fn settle_horizon(world: &WorldTerrain, pose: &str, tiles: &[TileId], camera: Pl
             .iter()
             .filter_map(|&t| planet_frame::horizonview::tile_in_chunk(t).map(|(k, _)| k))
             .filter(|k| seen.insert(*k))
-            // A chunk no tile reads is not made (a coarse tile lies in it): its tiles read the coarse horizon.
-            .filter(|k| world.chunk_manager().is_some_and(|m| m.is_ready(*k)))
             .filter(|k| {
                 let tile =
                     TileId::new(planet_core::Face(k.0), planet_generators::chunk::CHUNK_GRID_LEVEL, k.1, k.2).expect("a chunk of the grid");
@@ -435,27 +337,15 @@ fn settle_horizon(world: &WorldTerrain, pose: &str, tiles: &[TileId], camera: Pl
             .collect()
     };
     loop {
-        crate::chunkstage::frame_step(
-            world,
-            &mut crate::chunkstage::NoLoop,
-            tiles,
-            camera,
-            &crate::chunkstage::settling_features(true),
-            &mut Default::default(),
-        );
+        crate::horizonstep::frame_step(world, tiles, camera, &crate::horizonstep::settling_features(true), &mut Default::default());
         let missing: Vec<&ChunkKey> = keys.iter().filter(|k| world.horizon_map(**k).is_none()).collect();
         if missing.is_empty() {
             return Ok(keys.len());
         }
         let waited = started.elapsed().as_secs_f64();
         if waited > timeout_s {
-            let some: Vec<String> = missing.iter().take(4).map(|k| format!("face {} x {} y {}", k.0, k.1, k.2)).collect();
-            return Err(format!(
-                "pose '{pose}': {} of {} chunks had no horizon map after {waited:.0} s (first missing: {}); raise chunk_timeout_s",
-                missing.len(),
-                keys.len(),
-                some.join(", ")
-            ));
+            let missing: Vec<ChunkKey> = missing.into_iter().copied().collect();
+            return Err(no_map_message(pose, waited, &missing, keys.len()));
         }
         std::thread::sleep(Duration::from_millis(50));
     }
@@ -507,88 +397,6 @@ fn anchor_direction(
         _ => String::new(),
     };
     Ok((dir, flow, note))
-}
-
-/// Sections of the ground across `heading` at 0 to 2000 m downstream of `anchor` every 100 m, `+-1000 m` every 8 m (the chunk cell): per section
-/// the median height (the ground the channel is cut into), the lowest point and its offset from the anchor's line (positive to the right of
-/// the heading), the width of what lies more than 20 m under the median, and the highest point over the median with its offset. One line per
-/// section.
-pub fn channel_sections(ground: &dyn Fn(Vec3) -> f64, anchor: Vec3, heading_deg: f64, planet_radius_m: f64) -> String {
-    let mut out = String::from(
-        "# downstream_m median_m lowest_m lowest_offset_m cut_width_m highest_over_median_m highest_offset_m
-",
-    );
-    let ahead = heading_vector(anchor, heading_deg);
-    for k in 0..=20 {
-        let along = f64::from(k) * 100.0;
-        // The point `along` downstream on the great circle through the anchor, and the tangent across the heading there.
-        let theta = along / planet_radius_m;
-        let here = (anchor * libm::cos(theta) + ahead * libm::sin(theta)).normalized();
-        let forward = (ahead * libm::cos(theta) - anchor * libm::sin(theta)).normalized();
-        let right = forward.cross(here).normalized();
-        let row: Vec<(f64, f64)> = (-125..=125)
-            .map(|i| (f64::from(i) * 8.0, ground((here * planet_radius_m + right * (f64::from(i) * 8.0)).normalized())))
-            .collect();
-        let mut sorted: Vec<f64> = row.iter().map(|r| r.1).collect();
-        sorted.sort_by(f64::total_cmp);
-        let median = sorted[sorted.len() / 2];
-        let low = row.iter().copied().min_by(|a, b| a.1.total_cmp(&b.1)).unwrap_or((0.0, median));
-        let high = row.iter().copied().max_by(|a, b| a.1.total_cmp(&b.1)).unwrap_or((0.0, median));
-        let width = row.iter().filter(|r| r.1 < median - 20.0).count() as f64 * 8.0;
-        out.push_str(&format!(
-            "{along:.0} {median:.1} {:.1} {:.0} {width:.0} {:.1} {:.0}
-",
-            low.1,
-            low.0,
-            high.1 - median,
-            high.0
-        ));
-    }
-    out
-}
-
-/// The channel nearest the coupled run's anchor as the chunks cut it: the lowest ground within `radius_m` of `anchor` (sampled every `step_m`),
-/// which must lie at least 50 m under the median of the samples, and the bearing of the channel's floor downstream there (degrees clockwise
-/// from north): the lowest point of a ring 500 m round it, among the points within 90 degrees of `prior_bearing` when there is one.
-pub fn snap_to_channel(
-    ground: &dyn Fn(Vec3) -> f64,
-    anchor: Vec3,
-    prior_bearing: Option<f64>,
-    radius_m: f64,
-    step_m: f64,
-    planet_radius_m: f64,
-) -> Result<(Vec3, f64), String> {
-    let (north, east) = (heading_vector(anchor, 0.0), heading_vector(anchor, 90.0));
-    let n = (radius_m / step_m).floor() as i64;
-    let mut samples = Vec::new();
-    for j in -n..=n {
-        for i in -n..=n {
-            let (x, y) = (i as f64 * step_m, j as f64 * step_m);
-            if x * x + y * y <= radius_m * radius_m {
-                let d = (anchor * planet_radius_m + east * x + north * y).normalized();
-                samples.push((ground(d), d));
-            }
-        }
-    }
-    let mut heights: Vec<f64> = samples.iter().map(|s| s.0).collect();
-    heights.sort_by(f64::total_cmp);
-    let median = heights[heights.len() / 2];
-    let (low, at) = samples.iter().copied().min_by(|a, b| a.0.total_cmp(&b.0)).ok_or("no ground to look for a channel in")?;
-    if low > median - 50.0 {
-        return Err(format!("no channel within {radius_m} m of the anchor: the lowest ground is {low:.0} m, the median {median:.0} m"));
-    }
-    let (n2, e2) = (heading_vector(at, 0.0), heading_vector(at, 90.0));
-    let ring = (0..72)
-        .map(|k| f64::from(k) * 5.0)
-        .filter(|b| prior_bearing.is_none_or(|p| ((b - p + 540.0).rem_euclid(360.0) - 180.0).abs() <= 90.0))
-        .map(|b| {
-            let h = b.to_radians();
-            let d = (at * planet_radius_m + (n2 * libm::cos(h) + e2 * libm::sin(h)) * 500.0).normalized();
-            (ground(d), b)
-        })
-        .min_by(|a, b| a.0.total_cmp(&b.0))
-        .ok_or("no direction to follow the channel in")?;
-    Ok((at, ring.1))
 }
 
 /// Where the capped nodes of a plan sit (ADR 0074), one line per capped node: its level and edge, the height range and the steepest slope (rise over
@@ -866,7 +674,7 @@ fn run_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write, mut cost: Opti
     }
     let world = Arc::new(crate::streamperf::open_world(o, false)?.bounding_water());
     if !world.has_bake() {
-        return Err("the stills need a world with a bake (--store DIR, or --allow-memory-bake with --global-res N): the chunk stage reads the coupled run".into());
+        return Err("the stills need a world with a bake (--store DIR, or --allow-memory-bake with --global-res N): the anchor reads the coupled run".into());
     }
     let size = o.size.unwrap_or((2560, 1440));
     let aspect = f64::from(size.0) / f64::from(size.1);
@@ -882,17 +690,13 @@ fn run_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write, mut cost: Opti
         if o.store.is_some() { "" } else { " (in-memory bake)" }
     )
     .map_err(err)?;
-    let workers = o.gen_workers().workers.max(1);
-    let maps = crate::chunkstage::enable_chunks(
-        &world,
-        config.chunk_cell_m,
-        workers,
-        crate::chunkstage::StageOptions { horizon: true, disk: true },
-        out,
-    )?;
+    let maps = crate::horizonstep::wait_coupled(&world, out)?;
+    world.set_horizon_cells(crate::horizonworld::cells_per_chunk_for(radius_m, config.horizon_cell_m));
+    world.enable_viewer_horizon(o.gen_workers(), Arc::new(planet_streaming::SystemClock::new()))?;
+    crate::horizonstep::wait_coarse_horizon(&world, out)?;
     let base = world.field()?;
     let step_m = std::f64::consts::FRAC_PI_2 * radius_m / f64::from(world.global_res());
-    let (mut anchor, flow, measured) = anchor_direction(config.anchor, &maps, &|d| base.height(d), step_m)?;
+    let (anchor, flow, measured) = anchor_direction(config.anchor, &maps, &|d| base.height(d), step_m)?;
     let (lat, lon) = anchor.lat_lon();
     let ground = base.height(anchor);
     let anchor_line = format!(
@@ -902,7 +706,7 @@ fn run_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write, mut cost: Opti
         flow.map_or(String::new(), |b| format!(", the river flows towards bearing {b:.0} degrees{measured}"))
     );
     writeln!(out, "{anchor_line}").map_err(err)?;
-    let mut notes = format!(
+    let notes = format!(
         "# {anchor_line}
 "
     );
@@ -920,66 +724,18 @@ fn run_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write, mut cost: Opti
         std::fs::write(dir.join("slopes.txt"), &table).map_err(err)?;
         writeln!(out, "slopes.txt written in {:.0} s", started.elapsed().as_secs_f64()).map_err(err)?;
     }
-    // The chunk stage cuts its channel within a cell of the coupled run's anchor, not through it: with `snap_to_channel_m` the anchor moves onto the
-    // channel once the chunks under the first pose have landed, and the headings are read from the channel's downstream bearing.
-    let mut heading_base = 0.0;
-    if let Some(snap_m) = config.snap_to_channel_m {
-        let first = &config.poses[0];
-        let fov = planet_frame::litscenes::FOV_DEG.to_radians();
-        let camera = {
-            let f = world.field()?;
-            pose_camera(anchor, first, &|d| f.height(d), radius_m, level_m, aspect, fov)
-        };
-        settle(o, ctx, &world, first, camera, size, config.chunk_timeout_s)?;
-        let f = world.field()?;
-        let level = crate::anetworld::ANET_TOP_LEVEL;
-        let (at, bearing) = snap_to_channel(&|d| f.height_at_level(d, level), anchor, flow, snap_m, 16.0, radius_m)?;
-        let (lat, lon) = at.lat_lon();
-        let snap_line = format!(
-            "snapped to the channel, {:.0} m from the anchor: latitude {:.4} longitude {:.4} degrees, ground {:.1} m, downstream bearing {bearing:.0} degrees",
-            libm::acos(anchor.dot(at).clamp(-1.0, 1.0)) * radius_m,
-            lat.to_degrees(),
-            lon.to_degrees(),
-            f.height_at_level(at, level)
-        );
-        writeln!(out, "{snap_line}").map_err(err)?;
-        notes += &format!(
-            "# {snap_line}
-"
-        );
-        (anchor, heading_base) = (at, bearing);
-    }
     std::fs::create_dir_all(&dir).map_err(err)?;
     let mut index =
-        notes + "# pose width height eye_lat_deg eye_lon_deg eye_height_m heading_deg pitch_deg sun_local_hours chunks waited_s nodes capped_nodes\n";
+        notes + "# pose width height eye_lat_deg eye_lon_deg eye_height_m heading_deg pitch_deg sun_local_hours horizon_maps horizon_s nodes capped_nodes\n";
     for pose in &config.poses {
-        let pose = &Pose { heading_deg: (pose.heading_deg + heading_base).rem_euclid(360.0), ..pose.clone() };
+        let pose = &Pose { heading_deg: pose.heading_deg.rem_euclid(360.0), ..pose.clone() };
         let started = Instant::now();
-        // The eye is `altitude_m` above the ground the chunks give, so the camera follows the field as chunks land: settle, move the
-        // camera to the new ground, and settle again until the camera stays.
-        let camera_over = |world: &WorldTerrain| -> Result<Camera, String> {
+        // The eye is `altitude_m` above the ground of the base terrain.
+        let camera = {
             let field = world.field()?;
             let fov = planet_frame::litscenes::FOV_DEG.to_radians();
-            Ok(pose_camera(anchor, pose, &|d| field.height(d), radius_m, level_m, aspect, fov))
+            pose_camera(anchor, pose, &|d| field.height(d), radius_m, level_m, aspect, fov)
         };
-        let mut camera = camera_over(&world)?;
-        let mut settled = settle(o, ctx, &world, pose, camera, size, config.chunk_timeout_s)?;
-        for attempt in 1.. {
-            let next = camera_over(&world)?;
-            if next.position == camera.position {
-                break;
-            }
-            if attempt > MAX_CAMERA_ROUNDS {
-                return Err(format!(
-                    "pose '{}': the eye did not stay over the ground after {MAX_CAMERA_ROUNDS} rounds of chunks",
-                    pose.name
-                ));
-            }
-            camera = next;
-            let again = settle(o, ctx, &world, pose, camera, size, config.chunk_timeout_s)?;
-            settled = Settled { rounds: settled.rounds + again.rounds, chunks: again.chunks, waited_s: settled.waited_s + again.waited_s };
-        }
-        // The field of the settled round includes every chunk the plan reads.
         let field = world.field()?;
         let lod = capture_lod(o, size, radius_m, field.as_ref())?;
         let mut setup = LitSetup::new(o, &world, &lod)?;
@@ -998,22 +754,10 @@ fn run_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write, mut cost: Opti
         let plan =
             planet_frame::plan_terrain_cached(&request(&rig, camera), rig.field, &mut SelectionCache::new()).map_err(|e| e.to_string())?;
         if std::ptr::eq(pose, &config.poses[0]) || pose.name == config.poses[0].name {
-            let level = crate::anetworld::ANET_TOP_LEVEL;
-            let report = capped_report(&plan.nodes, &|d| field.height_at_level(d, level), radius_m);
+            let report = capped_report(&plan.nodes, &|d| field.height(d), radius_m);
             std::fs::write(dir.join("capped.txt"), report).map_err(err)?;
         }
         let tiles: Vec<TileId> = plan.nodes.iter().map(|n| n.tile).collect();
-        let missing = needed(&world, &tiles).into_iter().filter(|k| !world.chunk_manager().is_some_and(|m| m.is_ready(*k))).count();
-        if missing > 0 {
-            return Err(format!(
-                "pose '{}': {missing} chunks left the cache between the plan and the draw (the byte cap is too small)",
-                pose.name
-            ));
-        }
-        let share = world.chunk_view().map(|v| ChunkShare::of(tiles.iter().copied(), v.as_ref()));
-        if let Some(s) = share.filter(|s| s.chunk_stand_in > 0) {
-            return Err(format!("pose '{}': {} of {} chunk nodes are stand-in", pose.name, s.chunk_stand_in, s.chunk_nodes));
-        }
         // The horizon maps of the chunks the tiles lie in (REND-038): a still shows the shadows, never the stand-in.
         let horizon_started = Instant::now();
         let horizon_maps = settle_horizon(&world, &pose.name, &tiles, camera.position, config.chunk_timeout_s)?;
@@ -1056,11 +800,8 @@ fn run_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write, mut cost: Opti
         let height = camera.position.0.length() - radius_m;
         writeln!(
             out,
-            "{}: {} chunks after {} rounds and {:.1} s, {horizon_maps} horizon maps in {horizon_s:.1} s, drawn in {:.1} s -> {}",
+            "{}: {horizon_maps} horizon maps in {horizon_s:.1} s, drawn in {:.1} s -> {}",
             pose.name,
-            settled.chunks,
-            settled.rounds,
-            settled.waited_s,
             started.elapsed().as_secs_f64(),
             dir.join(format!("{}.png", pose.name)).display()
         )
@@ -1076,19 +817,14 @@ fn run_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write, mut cost: Opti
             pose.heading_deg,
             pose.pitch_deg,
             pose.sun_local_hours,
-            settled.chunks,
-            settled.waited_s,
+            horizon_maps,
+            horizon_s,
             plan.nodes.len(),
             plan.nodes.iter().filter(|n| n.capped).count()
         );
     }
     std::fs::write(dir.join("stills.txt"), index).map_err(err)?;
-    // The channel below the anchor as the landed chunks give it: sections across the heading, 8 m apart (the chunk cell), every 100 m downstream.
-    let heading = config.poses.first().map_or(0.0, |p| p.heading_deg + heading_base);
-    let field = world.field()?;
-    let sections = channel_sections(&|d| field.height_at_level(d, crate::anetworld::ANET_TOP_LEVEL), anchor, heading, radius_m);
-    std::fs::write(dir.join("sections.txt"), sections).map_err(err)?;
-    writeln!(out, "wrote {} (one PNG per pose, stills.txt and sections.txt)", dir.display()).map_err(err)
+    writeln!(out, "wrote {} (one PNG per pose and stills.txt)", dir.display()).map_err(err)
 }
 
 /// Whether `--scene NAME` names the shadow and material cost scene (REND-044).
@@ -1551,52 +1287,6 @@ min_area_m2 = 1e9",
 
     // spec: TEST-052
     #[test]
-    fn the_anchor_snaps_to_the_channel_the_chunks_cut_and_the_sections_show_its_depth() {
-        let radius = 6.0e6;
-        let at = direction_of(10.0, 10.0);
-        let (north, east) = (heading_vector(at, 0.0), heading_vector(at, 90.0));
-        // A trench 300 m deep and 100 m wide along bearing 100 degrees, 600 m south-east of the anchor, whose floor falls 2 m per 100 m towards it.
-        let bearing = 100.0f64.to_radians();
-        let axis = north * libm::cos(bearing) + east * libm::sin(bearing);
-        let side = axis.cross(at).normalized();
-        let origin = at + (east * 400.0 - north * 450.0) * (1.0 / radius);
-        let ground = move |d: Vec3| {
-            let rel = (d - origin) * radius;
-            let (along, across) = (rel.dot(axis), rel.dot(side));
-            let floor = -0.02 * along;
-            100.0 - if across.abs() < 50.0 { 300.0 + floor } else { 0.0 }
-        };
-        let (snapped, found) = snap_to_channel(&ground, at, Some(110.0), 1200.0, 16.0, radius).unwrap();
-        let (rel, across) = ((snapped - origin) * radius, ((snapped - origin) * radius).dot(side));
-        assert!(across.abs() < 50.0 && rel.length() < 2000.0, "{across}");
-        assert!((found - 100.0).abs() <= 10.0, "downstream bearing {found}");
-        let flat = snap_to_channel(&|_| 5.0, at, None, 1200.0, 16.0, radius).unwrap_err();
-        assert!(flat.contains("no channel within 1200"), "{flat}");
-        let sections = channel_sections(&ground, snapped, found, radius);
-        let first: Vec<&str> = sections.lines().nth(1).unwrap().split(' ').collect();
-        assert!(first[2].parse::<f64>().unwrap() < -150.0 && first[4].parse::<f64>().unwrap() > 50.0, "{sections}");
-        assert_eq!(sections.lines().count(), 22, "a header and 21 sections");
-        assert_eq!(
-            parse_config(&GOOD.replace(
-                "anchor = \"largest-river\"",
-                "anchor = \"largest-river\"
-snap_to_channel_m = 1200"
-            ))
-            .unwrap()
-            .snap_to_channel_m,
-            Some(1200.0)
-        );
-        assert!(parse_config(&GOOD.replace(
-            "anchor = \"largest-river\"",
-            "anchor = \"largest-river\"
-snap_to_channel_m = 0"
-        ))
-        .unwrap_err()
-        .contains("must be positive"));
-    }
-
-    // spec: TEST-052
-    #[test]
     fn the_slope_table_counts_the_land_by_band_and_leaves_out_the_sea() {
         use planet_generators::coupled::{CoupledMaps, Lattice};
         let radius = 6.0e6;
@@ -1622,7 +1312,7 @@ snap_to_channel_m = 0"
         let c = parse_config(GOOD).unwrap();
         assert_eq!(c.anchor, Anchor::LargestRiver { min_height_m: 0.0, relief: None });
         assert_eq!(c.chunk_timeout_s, DEFAULT_CHUNK_TIMEOUT_S);
-        assert_eq!(c.chunk_cell_m, 8.0);
+        assert_eq!(c.horizon_cell_m, 8.0);
         assert_eq!(c.poses.len(), 2);
         assert_eq!(c.poses[0].sun_declination_deg, 0.0);
         assert_eq!(c.poses[1].sun_declination_deg, 10.0);
@@ -1706,10 +1396,10 @@ snap_to_channel_m = 0"
         assert!((sea.position.0.length() - radius - 300.0).abs() < 1e-6);
     }
 
-    // spec: TEST-049
+    // spec: TEST-048
     #[test]
-    fn the_wait_names_the_pose_and_the_missing_chunks() {
-        let m = not_ready("300m-sunset", 900.4, &[(2, 5, 7), (2, 5, 8)], 12, 3);
+    fn the_wait_names_the_pose_and_the_chunks_without_a_horizon_map() {
+        let m = no_map_message("300m-sunset", 900.4, &[(2, 5, 7), (2, 5, 8)], 12);
         assert!(
             m.contains("pose '300m-sunset'") && m.contains("2 of 12 chunks") && m.contains("900 s") && m.contains("face 2 x 5 y 7"),
             "{m}"

@@ -183,46 +183,20 @@ fn the_seed_only_world_plans_with_the_hash_of_the_direct_reference_plan() {
     assert_eq!(field.read_records(), Reference(7).read_records());
 }
 
-// spec: GEN-039, GEN-055, STRM-039
+// spec: GEN-018
 #[test]
-fn a_world_with_a_chunk_stage_builds_its_fields_over_the_ready_chunks_and_counts_the_stand_in_share() {
-    use std::sync::Arc;
-
-    use planet_core::{Face, PlanetFixed, TileId};
-    use planet_frame::chunkshare::ChunkShare;
+fn a_world_builds_its_fields_from_the_base_terrain_at_every_level() {
+    use planet_core::{Face, TileId};
     use planet_generators::chunk::CHUNK_GRID_LEVEL;
-    use planet_generators::chunkfield::{StandIn, PYRAMID_TOP_LEVEL};
-    use planet_streaming::chunks::ChunkConfig;
-    use planet_streaming::{FakeClock, ManualSpawner};
+    use planet_generators::chunkfield::PYRAMID_TOP_LEVEL;
 
     let terrain = WorldTerrain::open(world(Some(REFERENCE_ID)), RES).unwrap();
-    assert!(terrain.chunk_view().is_none() && terrain.chunk_manager().is_none(), "no chunk stage until the world gets one");
-    assert_eq!(terrain.field().unwrap().implementation_id(), REFERENCE_ID);
-    assert_eq!(terrain.chunk_frame(&[], PlanetFixed(planet_core::Vec3::new(R, 0.0, 0.0)), &[]), Default::default());
-
-    let spawner = Arc::new(ManualSpawner::default());
-    let stage = Arc::new(StandIn { seed: 7, radius_m: R, amplitude_m: 30.0, steps: 3 });
-    terrain.enable_chunks(stage, 16, spawner.clone(), Arc::new(FakeClock::default()), None, ChunkConfig::default()).unwrap();
-    // The field is the chunk stage over the base now; below the pyramid's top it is the base.
     let field = terrain.field().unwrap();
-    assert_eq!(field.implementation_id(), planet_generators::chunkfield::CHUNK_STAGE_ID);
+    assert_eq!(field.implementation_id(), REFERENCE_ID);
     let chunk = TileId::new(Face(2), CHUNK_GRID_LEVEL, 1000, 1000).unwrap();
     let centre = chunk.center_direction(&TangentWarp);
     let base = Reference(5).height(centre);
-    assert_eq!(field.height_at_level(centre, PYRAMID_TOP_LEVEL - 1).to_bits(), base.to_bits());
-    assert_eq!(field.height_at_level(centre, 18).to_bits(), base.to_bits(), "no chunk ready: the base at every level");
-    drop(field);
-    // A frame over tiles at the top level: every one reads a chunk that is not ready, the jobs start, and once they land the share is zero.
-    let tile = TileId::new(Face(2), PYRAMID_TOP_LEVEL, 8 * 1000 + 3, 8 * 1000 + 3).unwrap();
-    let view = terrain.chunk_view().unwrap();
-    let camera = PlanetFixed(centre * (R + 300.0));
-    assert_eq!(ChunkShare::of([tile], view.as_ref()), ChunkShare { chunk_nodes: 1, chunk_stand_in: 1 });
-    let up = terrain.chunk_frame(&[tile], camera, &[]);
-    assert!(up.started >= 1 && up.landed.is_empty());
-    spawner.run(16);
-    let up = terrain.chunk_frame(&[tile], camera, &[]);
-    assert!(!up.landed.is_empty());
-    assert_eq!(ChunkShare::of([tile], view.as_ref()), ChunkShare { chunk_nodes: 1, chunk_stand_in: 0 });
-    let field = terrain.field().unwrap();
-    assert_ne!(field.height_at_level(centre, 18).to_bits(), base.to_bits(), "the landed chunk is in the field the world builds");
+    for level in [PYRAMID_TOP_LEVEL - 1, PYRAMID_TOP_LEVEL, 18] {
+        assert_eq!(field.height_at_level(centre, level).to_bits(), base.to_bits(), "the base at level {level}");
+    }
 }
