@@ -100,7 +100,7 @@ pub fn render_offscreen(o: &Options, out: &mut dyn Write) -> Result<(), String> 
     let ctx = GpuContext::new(o.adapter.unwrap_or(AdapterPolicy::Software)).map_err(|e| e.to_string())?;
     writeln!(out, "{}", ctx.adapter_log_line()).map_err(err)?;
     if let Some(bundle) = &o.repro {
-        return replay(&ctx, bundle, o.out.as_deref(), out);
+        return replay(&ctx, bundle, o.out.as_deref(), o.store.as_deref(), out);
     }
     render_tiles(&ctx, o, out)
 }
@@ -130,10 +130,10 @@ fn check_definition(recorded: u64, seed: u64, radius_m: f64) -> Result<(), Strin
 }
 
 /// Replay a repro bundle: refuse on version mismatch, rebuild the plan from the recorded request, compare, render.
-pub fn replay(ctx: &GpuContext, path: &Path, png: Option<&Path>, out: &mut dyn Write) -> Result<(), String> {
+pub fn replay(ctx: &GpuContext, path: &Path, png: Option<&Path>, store: Option<&Path>, out: &mut dyn Write) -> Result<(), String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("reading {}: {e}", path.display()))?;
     if text.starts_with("planet-terrain-repro") {
-        return replay_terrain(ctx, &text, path, png, out);
+        return replay_terrain(ctx, &text, path, png, store, out);
     }
     let b = ReproBundle::from_text(&text).map_err(|e| format!("{}: {e}", path.display()))?;
     if b.generator_version != GENERATOR_VERSION || b.implementation_id != IMPLEMENTATION_ID {
@@ -735,7 +735,11 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
 }
 
 /// Read a terrain repro bundle and refuse it on a version mismatch; rebuild the world it recorded (none for a seed-only bundle).
-pub(crate) fn open_terrain_bundle(text: &str, path: &Path) -> Result<(planet_frame::TerrainBundle, Option<WorldTerrain>), String> {
+pub(crate) fn open_terrain_bundle(
+    text: &str,
+    path: &Path,
+    store: Option<&Path>,
+) -> Result<(planet_frame::TerrainBundle, Option<WorldTerrain>), String> {
     use planet_frame::TerrainBundle;
     let b = TerrainBundle::from_text(text).map_err(|e| format!("{}: {e}", path.display()))?;
     let mesh_version = planet_generators::mesh::MESH_VERSION;
@@ -748,7 +752,7 @@ pub(crate) fn open_terrain_bundle(text: &str, path: &Path) -> Result<(planet_fra
     // A bundle that recorded a world rebuilds its field from the recorded definition and bake size; one that recorded none is
     // the seed-only reference field of its seed (version 1 bundles and runs without `--world`).
     let world = match &b.world {
-        Some(w) => Some(world_of_bundle(w, &b)?),
+        Some(w) => Some(world_of_bundle(w, &b, store)?),
         None => {
             check_definition(b.definition_hash, b.request.seed, b.request.lod.radius_m)?;
             None
@@ -759,9 +763,16 @@ pub(crate) fn open_terrain_bundle(text: &str, path: &Path) -> Result<(planet_fra
 
 /// Replay a terrain repro bundle: refuse on version mismatch, replan from the recorded request, compare every field of
 /// the plan, then render with meshes generated from the recorded seed.
-fn replay_terrain(ctx: &GpuContext, text: &str, path: &Path, png: Option<&Path>, out: &mut dyn Write) -> Result<(), String> {
+fn replay_terrain(
+    ctx: &GpuContext,
+    text: &str,
+    path: &Path,
+    png: Option<&Path>,
+    store: Option<&Path>,
+    out: &mut dyn Write,
+) -> Result<(), String> {
     use planet_frame::plan_terrain;
-    let (b, world) = open_terrain_bundle(text, path)?;
+    let (b, world) = open_terrain_bundle(text, path, store)?;
     let field = world.as_ref().map(|w| w.field()).transpose()?;
     let rebuilt = match &field {
         Some(f) => planet_frame::plan_terrain_field(&b.request, f.as_ref()),
@@ -809,9 +820,9 @@ fn replay_terrain(ctx: &GpuContext, text: &str, path: &Path, png: Option<&Path>,
 }
 
 /// Rebuild the terrain a bundle recorded: parse the recorded definition, check it against the recorded hash, field id and
-/// radius, and bake the field's input again at the recorded size. Everything is refused with the recorded and the rebuilt
-/// values, before any replanning (CON-19).
-fn world_of_bundle(w: &planet_frame::BundleWorld, b: &planet_frame::TerrainBundle) -> Result<WorldTerrain, String> {
+/// radius, and bake the field's input again at the recorded size (in memory up to `MAX_RUN_BAKE_RES` cells, else from `store`, a stored bake of that
+/// size opened read-only). Everything is refused with the recorded and the rebuilt values, before any replanning (CON-19).
+fn world_of_bundle(w: &planet_frame::BundleWorld, b: &planet_frame::TerrainBundle, store: Option<&Path>) -> Result<WorldTerrain, String> {
     let def = crate::reproworld::rebuild_world(&w.definition_toml, &w.items)?;
     if def.hash() != b.definition_hash {
         return Err(format!(
@@ -820,7 +831,17 @@ fn world_of_bundle(w: &planet_frame::BundleWorld, b: &planet_frame::TerrainBundl
             def.hash()
         ));
     }
-    let terrain = WorldTerrain::open(def, w.global_res)?;
+    let terrain = match store {
+        Some(dir) => WorldTerrain::open_store(def, dir, w.global_res)?,
+        None if w.global_res > crate::worldfield::MAX_RUN_BAKE_RES => {
+            return Err(format!(
+                "bundle records a bake of {} cells, more than a run bakes in memory ({}): replay it with --store DIR, the stored bake of that size (opened read-only)",
+                w.global_res,
+                crate::worldfield::MAX_RUN_BAKE_RES
+            ))
+        }
+        None => WorldTerrain::open(def, w.global_res)?,
+    };
     if terrain.id() != w.height_field {
         return Err(format!(
             "bundle records height field {}, but its recorded world resolves to {} in this build",
@@ -1720,13 +1741,65 @@ mod tests {
             request,
             plan,
         };
-        assert!(world_of_bundle(&world, &bundle).is_ok(), "the canonical text round-trips to the recorded hash");
-        let e = world_of_bundle(&world, &TerrainBundle { definition_hash: def.hash() ^ 1, ..bundle.clone() }).err().unwrap();
+        assert!(world_of_bundle(&world, &bundle, None).is_ok(), "the canonical text round-trips to the recorded hash");
+        let e = world_of_bundle(&world, &TerrainBundle { definition_hash: def.hash() ^ 1, ..bundle.clone() }, None).err().unwrap();
         assert!(e.contains("its recorded world hashes to"), "{e}");
         let wrong_field = BundleWorld { height_field: "cpu-terrain-v1".into(), ..world.clone() };
-        assert!(world_of_bundle(&wrong_field, &bundle).err().unwrap().contains("cpu-erosion-v1"));
+        assert!(world_of_bundle(&wrong_field, &bundle, None).err().unwrap().contains("cpu-erosion-v1"));
         let mut other_radius = bundle.clone();
         other_radius.request.lod.radius_m += 1.0;
-        assert!(world_of_bundle(&world, &other_radius).err().unwrap().contains("radius"));
+        assert!(world_of_bundle(&world, &other_radius, None).err().unwrap().contains("radius"));
+    }
+
+    // spec: TEST-071
+    #[test]
+    fn a_bundle_of_a_stored_bake_replays_from_the_store_and_a_bake_beyond_the_memory_limit_without_one_says_so() {
+        use planet_frame::{plan_terrain, BundleWorld, TerrainBundle, TerrainRequest, TerrainView};
+        use planet_generators::height::HeightField;
+        let seed = crate::parse_args(&["test-render".to_string(), "--scene".to_string(), "lit".to_string()]).expect("options").seed;
+        let def = planet_world_def::WorldDefinition::single_planet(RADIUS_M, seed);
+        let toml = planet_world_def::toml_io::to_toml(&def).unwrap();
+        let (_, camera) = planet_frame::scripted_views(RADIUS_M, 4.0 / 3.0, seed)[3];
+        let lod = planet_frame::LodParams { cells: 16, viewport_h_px: 192.0, tau_px: 4.0, ..planet_frame::LodParams::earth_1080p() };
+        let request = TerrainRequest { camera, size: (256, 192), view: TerrainView::Level, lod, face_mapping: "tangent-v1".into(), seed };
+        let plan = plan_terrain(&request).unwrap();
+        let bundle_of = |global_res: u32| {
+            let world = BundleWorld { height_field: "cpu-erosion-v1".into(), global_res, definition_toml: toml.clone(), items: Vec::new() };
+            let bundle = TerrainBundle {
+                generator_version: 2,
+                implementation_id: "x".into(),
+                mesh_version: 1,
+                definition_hash: def.hash(),
+                adapter: "a".into(),
+                world: Some(world.clone()),
+                request: request.clone(),
+                plan: plan.clone(),
+            };
+            (world, bundle)
+        };
+        // A bake of 4096 cells is not made in memory: the replay says to name the stored bake.
+        let (big, big_bundle) = bundle_of(4096);
+        let e = world_of_bundle(&big, &big_bundle, None).err().unwrap();
+        assert!(e.contains("--store DIR") && e.contains("4096"), "{e}");
+        // A stored bake of 32 cells gives the heights of the same bake made in memory, bit for bit.
+        let dir = std::env::temp_dir().join(format!("planet-bundle-store-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let args: Vec<String> = ["generate", "--global-dir", dir.to_str().unwrap(), "--global-res", "32", "--threads", "2"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        crate::run(&args, &mut Vec::new()).unwrap();
+        let (small, small_bundle) = bundle_of(32);
+        let memory = world_of_bundle(&small, &small_bundle, None).unwrap();
+        let stored = world_of_bundle(&small, &small_bundle, Some(&dir)).unwrap();
+        let (a, b) = (memory.field().unwrap(), stored.field().unwrap());
+        for k in 0..16 {
+            let d = planet_core::Vec3::from_lat_lon(0.3 * f64::from(k) - 2.0, 0.7 * f64::from(k));
+            assert_eq!(a.height(d).to_bits(), b.height(d).to_bits(), "direction {k}");
+        }
+        // A directory that is no store refuses to open, naming it.
+        let e = world_of_bundle(&small, &small_bundle, Some(&dir.join("nothing"))).err().unwrap();
+        assert!(e.contains("no such store directory"), "{e}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

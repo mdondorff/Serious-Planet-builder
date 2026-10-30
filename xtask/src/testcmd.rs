@@ -429,17 +429,20 @@ fn repro_pair(file: &str) -> (String, Option<String>) {
 pub fn repro(root: &Path, args: &[String]) -> Res {
     let mut it = args.iter();
     let mut file = None;
-    let (mut every, mut real) = (None, false);
+    let (mut every, mut real, mut store) = (None, false, None);
     while let Some(a) = it.next() {
         match a.as_str() {
             "--real" => real = true,
             "--every" => every = Some(it.next().ok_or("--every needs a count")?.clone()),
-            other if other.starts_with("--") => return Err(format!("unknown repro option '{other}' (known: --real, --every N)")),
+            "--store" => store = Some(it.next().ok_or("--store needs a directory")?.clone()),
+            other if other.starts_with("--") => {
+                return Err(format!("unknown repro option '{other}' (known: --real, --every N, --store DIR)"))
+            }
             other => file = Some(other.to_string()),
         }
     }
     let Some(file) = file else {
-        return Err("usage: cargo xtask repro <bundle | frame-N-path.txt> [--real] [--every N]".into());
+        return Err("usage: cargo xtask repro <bundle | frame-N-path.txt> [--real] [--every N] [--store DIR]".into());
     };
     let resolve = |name: &str| {
         std::fs::canonicalize(name)
@@ -473,6 +476,9 @@ pub fn repro(root: &Path, args: &[String]) -> Res {
         if let Some(n) = every {
             cargo.extend(["--replay-every".to_string(), n]);
         }
+        if let Some(dir) = &store {
+            cargo.extend(["--store".to_string(), dir.clone()]);
+        }
         let refs: Vec<&str> = cargo.iter().map(String::as_str).collect();
         return run(root, "cargo", &refs, &[]);
     }
@@ -483,7 +489,11 @@ pub fn repro(root: &Path, args: &[String]) -> Res {
         println!("a camera path lies beside this bundle: cargo xtask repro {p} replays it pose by pose");
     }
     let out = "target/review/repro.png";
-    run(root, "cargo", &["run", "-q", "-p", "planet", "--", "test-render", "--adapter", adapter, "--repro", &bundle, "--out", out], &[])
+    let mut cargo = vec!["run", "-q", "-p", "planet", "--", "test-render", "--adapter", adapter, "--repro", &bundle, "--out", out];
+    if let Some(dir) = &store {
+        cargo.extend(["--store", dir]);
+    }
+    run(root, "cargo", &cargo, &[])
 }
 
 /// The `cargo` arguments of a perf run. The harness decides readiness itself (ADR 0020: AC power, performance scheme,
@@ -1676,6 +1686,7 @@ mod repro_tests {
         assert_eq!(repro_pair("old.repro"), ("old.repro".to_string(), None), "an older bundle has no path file");
         assert!(repro(Path::new("."), &["x-path.txt".to_string(), "--every".to_string()]).unwrap_err().contains("--every needs"));
         assert!(repro(Path::new("."), &["x.bundle".to_string(), "--bogus".to_string()]).unwrap_err().contains("unknown repro option"));
+        assert!(repro(Path::new("."), &["x.bundle".to_string(), "--store".to_string()]).unwrap_err().contains("--store needs"));
         assert!(repro(Path::new("."), &["no-such-path.txt".to_string()]).unwrap_err().contains("not found"));
     }
 }

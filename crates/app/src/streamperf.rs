@@ -128,7 +128,9 @@ pub fn check_options(o: &Options) -> Result<(), String> {
         && (o.scene == "anet-chunk" || (o.scene == "coupled" && o.remake_into.is_some()))
         && o.store.is_some()
         && !o.allow_memory_bake;
-    if !stream && !chunk_on_store && (o.store.is_some() || o.allow_memory_bake) {
+    // A bundle of a world with a stored bake replays from the store (`--repro BUNDLE --store DIR`, CON-19): the bake of that size is not made in memory.
+    let replay_on_store = o.repro.is_some() && o.store.is_some() && !o.allow_memory_bake;
+    if !stream && !chunk_on_store && !replay_on_store && (o.store.is_some() || o.allow_memory_bake) {
         return Err("--store and --allow-memory-bake only apply to the streaming perf scenes (dive, dive-fast, teleport-1m, teleport-2km, look-1m, look-2km, streaming)".into());
     }
     if o.store.is_some() && o.allow_memory_bake {
