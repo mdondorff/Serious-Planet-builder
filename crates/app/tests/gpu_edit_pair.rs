@@ -36,7 +36,7 @@ fn the_pair_of_an_edit_is_trustworthy_and_its_verdict_per_view_is_reported() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let dir = repo_root().join("target").join("review").join("edit-pair");
     std::fs::create_dir_all(&dir).unwrap();
-    let pairs = pair_frames(&o, &ctx, &VIEWS, 200.0, 50.0).expect("the pair frames");
+    let pairs = pair_frames(&o, &ctx, &VIEWS, 200.0, 50.0, None).expect("the pair frames");
     assert_eq!(pairs.len(), VIEWS.len());
     let mut seen = 0;
     for p in &pairs {
@@ -90,10 +90,15 @@ fn the_pair_over_a_real_store() {
             .collect();
     let o = planet::parse_args(&args).expect("options");
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    // PLANET_PAIR_SITE="lat,lon" moves the case from the scene's centre (latitude 20, longitude 30) to another place.
+    let site = std::env::var("PLANET_PAIR_SITE").ok().map(|s| {
+        let (a, b) = s.split_once(',').expect("PLANET_PAIR_SITE is lat,lon");
+        (a.trim().parse::<f64>().expect("lat"), b.trim().parse::<f64>().expect("lon"))
+    });
     for (altitude, radius) in [(200.0, 50.0), (200.0, 500.0), (2000.0, 50.0), (2000.0, 500.0)] {
         let dir = repo_root().join("target").join("review").join("edit-pair").join(format!("{altitude}m-{radius}m"));
         std::fs::create_dir_all(&dir).unwrap();
-        let pairs = match pair_frames(&o, &ctx, &VIEWS, altitude, radius) {
+        let pairs = match pair_frames(&o, &ctx, &VIEWS, altitude, radius, site) {
             Ok(p) => p,
             Err(e) => {
                 println!("{altitude} m, stamp {radius} m: NOT RUN: {e}");
@@ -112,6 +117,11 @@ fn the_pair_over_a_real_store() {
             let nodes =
                 |f: &planet::editperf::StillFrame| f.nodes.iter().map(|(t, l, _)| (*t, *l)).collect::<std::collections::BTreeSet<_>>();
             let differ = nodes(&p.preview).symmetric_difference(&nodes(&p.exact)).count();
+            let mut states = std::collections::BTreeMap::<String, usize>::new();
+            for (_, l, s) in &p.stale.nodes {
+                *states.entry(format!("L{l} {s}")).or_default() += 1;
+            }
+            println!("  drawn nodes of the stale frame: {states:?}");
             println!(
                 "{altitude} m, stamp {radius} m, {name}: control {} | tiles differing preview/exact {differ} | {}",
                 if control { "exact" } else { "DIFFERS" },

@@ -1656,6 +1656,7 @@ pub fn pair_frames(
     views: &[TerrainView],
     altitude_m: f64,
     radius_m: f64,
+    site: Option<(f64, f64)>,
 ) -> Result<Vec<PairFrames>, String> {
     let world = Arc::new(crate::streamperf::open_world(o, false)?);
     let planet_m = world.radius_m();
@@ -1673,10 +1674,15 @@ pub fn pair_frames(
     };
     lod.validate().map_err(|e| format!("--cells {} --tau {}: {e}", o.cells, o.tau))?;
     let ground = |d: Vec3| field.height(d);
-    let case = cases_at(altitude_m, true, planet_m)
+    let mut case = cases_at(altitude_m, true, planet_m)
         .into_iter()
         .find(|c| c.kind == CaseKind::Stamp && (c.size_m - radius_m).abs() < 1e-6)
         .ok_or_else(|| format!("the scene has no stamp case of radius {radius_m} m at {altitude_m} m"))?;
+    if let Some((lat, lon)) = site {
+        let d = Vec3::from_lat_lon(lat.to_radians(), lon.to_radians());
+        case.centre = d;
+        case.spec.dir = d;
+    }
     let aspect = f64::from(size.0) / f64::from(size.1);
     let rho = (1.5 * case.size_m).max(200.0);
     let req = TerrainRequest {
