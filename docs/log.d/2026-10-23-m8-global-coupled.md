@@ -1,1 +1,0 @@
-- 2026-10-23 **m8-global-coupled** (sonnet-crusader; GEN-040; M8-1 part 1): `generators::coupled` is the global coupled run on the cube-sphere bake lattice: priority flood, a jittered D8 receiver, drainage area and the implicit stream-power update, single-threaded and bit-identical (CON-14); R5 added `TileChannel` to the global store. Not wired into the world yet (waits for R1)

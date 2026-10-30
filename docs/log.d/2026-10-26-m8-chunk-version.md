@@ -1,1 +1,0 @@
-- 2026-10-26 **m8-chunk-version** (GEN-081, GEN-082, STRM-056, STRM-057; GEN-039 default Under): an edit re-keys the chunks whose read set it touches; a stale chunk keeps drawing and is re-solved when wanted, bit for bit as a cold solve; the horizon bakes only the maps an edit touches.

@@ -1,1 +1,0 @@
-- 2026-10-30 **compute-share-table** (BUDG-001 to BUDG-007, ADR 0083 point 5, all planned): the share table as a spec, initial values drafted from SPIKE-44 and CON-21 for ratification

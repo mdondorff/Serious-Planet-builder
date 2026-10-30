@@ -1,1 +1,0 @@
-- 2026-10-27 **editor stalls (owner test group A)**: the editor's chunk step made each new chunk's version (its read set, 0.2 to 0.85 s) on the main thread when an item sat in a stamp layer: stalls of 1 to 15 s; the job makes it now (STRM-063); the probe fell from 2.3 s to 0 ms a frame.

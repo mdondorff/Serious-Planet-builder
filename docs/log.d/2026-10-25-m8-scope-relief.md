@@ -1,1 +1,0 @@
-- 2026-10-25 **M8 scope** (owner; opus-planner): M8 delivers plausible relief, hydrology and horizon shadows; realism of hill terrain becomes a later milestone; plausible relief is M8-R (`m8-relief`, #658); criterion 1 judges river and valley forms on plausible relief; the shared store moved to `C:/DEV/SeriousPlanetData/global16384`

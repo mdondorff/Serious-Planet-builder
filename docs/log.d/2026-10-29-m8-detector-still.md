@@ -1,1 +1,0 @@
-- 2026-10-29 m8-detector-still: tier C detector: a still camera after streaming settles draws identical pixels in the level, relief and normals views (TEST-068); passes on main; the lit path is not covered.

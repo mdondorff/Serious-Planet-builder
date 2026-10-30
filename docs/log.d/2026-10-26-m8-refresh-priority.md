@@ -1,1 +1,0 @@
-- 2026-10-26 **m8-refresh-priority**: measure-only: the refresh queue waits at most 1.8 s (median 0.25-0.66 s), so the long waits are the chunk compute; no order change; the viewer logs the refresh wait, chunks landed and stand-in share; `--site LAT,LON` (VIEW-058).

@@ -1,1 +1,0 @@
-- 2026-10-28 m8-horizon-stage-off-test: tier B test of the stage-off horizon wiring (STRM-064): a world with a bake and no chunk stage wants and bakes its maps.
