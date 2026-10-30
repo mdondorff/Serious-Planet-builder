@@ -26,6 +26,7 @@ use planet_frame::viewer::{
 };
 use planet_frame::water::{empty_water_plan, plan_water, WaterRequest, WaterTileCache, WaterView};
 use planet_frame::{Camera, ControllerParams, LodParams, TerrainRequest, TerrainView};
+use planet_generators::chunkfield::ChunkKey;
 use planet_generators::height::HeightField;
 use planet_render::{AdapterPolicy, GpuContext, Presented, WindowSurface};
 use planet_streaming::{Clock, SystemClock};
@@ -199,7 +200,7 @@ struct GlobeStats {
     landings: u64,
 }
 
-/// Frames the gate waits after its edit script ends, before the camera path starts: the hill's chunks are asked for and the first of them land.
+/// Frames the gate waits after its edit script ends, before the camera path starts: the hill's horizon maps are asked for and the first of them land.
 const GATE_SETTLE_FRAMES: u64 = 240;
 
 /// The settling frames of this run: `PLANET_GATE_SETTLE` frames, else [`GATE_SETTLE_FRAMES`] (the small world in CI uses fewer: its software frames are slow).
@@ -221,10 +222,10 @@ struct GateRun {
     report: Option<PathBuf>,
     /// The frame the edit script ended at.
     edit_done_at: Option<u64>,
-    /// Whether any frame drew lit over a chunk stage.
+    /// Whether any frame drew lit with the horizon jobs on.
     lit_with_horizon: bool,
     /// The edit word of each wanted horizon map before the scripted edit.
-    words: HashMap<planet_generators::chunkfield::ChunkKey, u64>,
+    words: HashMap<ChunkKey, u64>,
 }
 
 impl GateRun {
@@ -251,14 +252,7 @@ impl GateRun {
 
     /// One frame of the horizon side: before the scripted edit the edit word of every wanted map is remembered; at the frame it is published the maps whose word
     /// changed are the ones it touched; every landing is shown to the gate, which counts only a touched map as the re-bake.
-    fn horizon_step(
-        &mut self,
-        world: &WorldTerrain,
-        wanted: &[planet_generators::chunkfield::ChunkKey],
-        landed: &[planet_generators::chunkfield::ChunkKey],
-        published: bool,
-        now_ms: u64,
-    ) {
+    fn horizon_step(&mut self, world: &WorldTerrain, wanted: &[ChunkKey], landed: &[ChunkKey], published: bool, now_ms: u64) {
         if self.gate.edit_at.is_none() {
             if published {
                 let touched =
@@ -311,12 +305,8 @@ struct Running {
     warm_prev: Option<(u64, planet_core::Vec3)>,
     /// What the scheduler counted in the last frame, for a stall report.
     last_counts: planet_frame::managed::FrameCounts,
-    /// The job log index and the time of the last refresh line (STRM-055).
-    refresh_logged: (usize, u64),
-    /// Since the last refresh line: chunks landed, and the plan's chunk-reading nodes and their stand-ins summed over the frames.
-    chunk_acc: (u64, u64, u64),
-    /// What the chunk step did, per feature (TEST-058), and the horizon update of the last step (its maps are uploaded in the horizon frame).
-    chunk_counters: crate::chunkstage::FeatureCounters,
+    /// What the horizon step did, per feature (TEST-058), and the horizon update of the last step (its maps are uploaded in the horizon frame).
+    chunk_counters: crate::horizonstep::FeatureCounters,
     horizon_update: planet_streaming::chunks::HorizonUpdate,
     last_ms: Option<u64>,
     last_gpu_sample: Instant,
@@ -346,8 +336,8 @@ struct Running {
     /// The lens the world was asked for and the one the resident tiles were last refreshed with (VIEW-053).
     coupled_asked: Option<planet_generators::coupled::CoupledLens>,
     coupled_shown: Option<planet_generators::coupled::CoupledLens>,
-    /// Whether the frame loop counts the world's chunk stage (STRM-039): set once the world has one.
-    chunks_on: bool,
+    /// Whether the world has the horizon jobs (REND-038): the title says so when it has none.
+    horizon_on: bool,
     /// The no-degradation gate (`PLANET_GATE`, TEST-061): its counters, the camera path to replay and the file the report goes to.
     gate: Option<GateRun>,
     /// The sun of the last lit plan before the editing light, for the title's local solar time (VIEW-054).
@@ -391,7 +381,7 @@ struct App<'w> {
     /// The height field the window picks and reads the ground from; rebuilt when the edits change the definition.
     field: Box<dyn HeightField + 'w>,
     /// What the world's field was built from ([`WorldTerrain::field_stage`]); a change builds `field` and the plan's height bound again.
-    field_stage: (bool, Option<planet_generators::coupled::CoupledLens>),
+    field_stage: Option<planet_generators::coupled::CoupledLens>,
     /// The plan parameters: the configured ones, with the height bound raised to the field's maximum when the stamps lift it (VIEW-022).
     lod: LodParams,
     cameras: &'w [Camera],
@@ -555,8 +545,6 @@ impl App<'_> {
             stall: Default::default(),
             warm_prev: None,
             last_counts: Default::default(),
-            refresh_logged: (0, 0),
-            chunk_acc: (0, 0, 0),
             chunk_counters: Default::default(),
             horizon_update: Default::default(),
             last_ms: None,
@@ -580,7 +568,7 @@ impl App<'_> {
             scale_refs_on: false,
             coupled_asked: None,
             coupled_shown: None,
-            chunks_on: false,
+            horizon_on: false,
             gate: GateRun::from_env()?,
             sun_dir: [0.0, 0.0, 1.0],
             camera_position: planet_core::Vec3::new(1.0, 0.0, 0.0),
@@ -732,18 +720,18 @@ impl App<'_> {
                 st.rig.managed.set_transient_preview(stamps);
             }
         }
-        // The chunk stage arriving (STRM-046) and the coupled lens change what the world's field reads, as an edit does.
+        // The coupled lens changes what the world's field reads, as an edit does.
         let stage = self.world.field_stage();
         if republished || stage != self.field_stage {
             self.field_stage = stage;
             let world = self.world;
             self.field = world.field()?;
-            // The stamps and the chunk stage lift the field: the plan's bound for the horizon, the frustum and the morph follows the field's
-            // maximum, and is never below the configured one (a run with no edits and no chunk stage plans as it did).
+            // The stamps lift the field: the plan's bound for the horizon, the frustum and the morph follows the field's
+            // maximum, and is never below the configured one (a run with no edits plans as it did).
             self.lod.max_height_m = cfg.lod.max_height_m.max(self.field.max_abs_height_m());
         }
         if let Some(st) = self.state.as_mut() {
-            st.stall.mark("field rebuild (a new stage or lens)");
+            st.stall.mark("field rebuild (a new lens)");
         }
         let lod_max_height_m = self.lod.max_height_m;
         let (field, radius) = (self.field.as_ref(), cfg.radius_m);
@@ -884,61 +872,24 @@ impl App<'_> {
             st.counts.coarse_lod_frames += u64::from(st.viewer.coarse_lod);
             st.last_counts = frame.counts;
             st.stall.mark("plan and residency (begin_frame)");
-            // The chunks the plan's tiles read, nearest first; the tiles that read a landed one are refreshed (STRM-039, STRM-040).
-            if !st.chunks_on && self.world.chunk_manager().is_some() {
-                st.chunks_on = true;
-                st.rig.managed.set_chunk_view(self.world.chunk_view());
-                // The change of a landing chunk fades in over 1.5 s (STRM-047, criterion 3), on the window's clock.
-                st.rig.managed.set_chunk_fade(planet_frame::chunkshare::ChunkFade::DEFAULT_FADE_MS, self.clock.clone());
-            }
-            if st.chunks_on {
+            // The horizon jobs bake the maps of the plan's chunks from the base terrain (STRM-064); they run for the lit frames only, their maps are
+            // uploaded below. The lit plan is put on a copy of the draw plan later in the frame (`st.viewer.lit`), so the draw plan's own `lit` is
+            // always None here: reading it switched the horizon jobs off for good (the owner's session of 2026-10-27: no map baked in an hour).
+            st.horizon_on = self.world.horizon_enabled();
+            if st.viewer.lit && st.horizon_on {
                 let tiles: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
-                // The chunk step of the viewer and the scenes (TEST-058); the horizon jobs run for the lit frames only, their maps are uploaded below.
-                // The lit plan is put on a copy of the draw plan later in the frame (`st.viewer.lit`), so the draw plan's own `lit` is always None
-                // here: reading it switched the horizon jobs off for good (the owner's session of 2026-10-27: no map baked in an hour).
-                let features = crate::chunkstage::FrameFeatures { horizon: st.viewer.lit, ..Default::default() };
-                let step = crate::chunkstage::frame_step(
-                    self.world,
-                    &mut st.rig.managed,
-                    &tiles,
-                    camera.position,
-                    &features,
-                    &mut st.chunk_counters,
-                );
+                let features = crate::horizonstep::FrameFeatures::default();
+                let step = crate::horizonstep::frame_step(self.world, &tiles, camera.position, &features, &mut st.chunk_counters);
+                st.counts.horizon_steps = st.chunk_counters.horizon_frames;
                 st.horizon_update = step.horizon;
-                st.counts.horizon_steps = st.chunk_counters.horizon_frames;
-                let update = step.update;
-                st.chunk_acc.0 += update.landed.len() as u64;
-                st.chunk_acc.1 += frame.counts.chunk.chunk_nodes as u64;
-                st.chunk_acc.2 += frame.counts.chunk.chunk_stand_in as u64;
-                // One line every 10 s about the refresh jobs since the last: the wait in the queues and the load of the rebuilds that bring a landed
-                // chunk's change to the screen (STRM-055).
-                if now_ms >= st.refresh_logged.1 + 10_000 {
-                    let log = st.rig.managed.manager().streamer().job_log();
-                    let samples = log.since(st.refresh_logged.0);
-                    st.refresh_logged = (st.refresh_logged.0 + samples.len(), now_ms);
-                    let (landed, nodes, stand_in) = std::mem::take(&mut st.chunk_acc);
-                    if let Some(line) = planet_streaming::refresh_summary(&samples) {
-                        crate::crash::note(&format!("{line}; {}", planet_frame::chunkshare::landing_note(landed, nodes, stand_in)));
-                    }
-                }
-            } else if st.viewer.lit && self.world.horizon_enabled() {
-                // No chunk stage: the horizon jobs alone bake the maps of the plan's chunks from the base terrain (STRM-064).
-                let tiles: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
-                let horizon = self.world.horizon_frame(&tiles, camera.position);
-                st.chunk_counters.horizon_frames += 1;
-                st.chunk_counters.horizon_landed += horizon.landed.len() as u64;
-                st.counts.horizon_steps = st.chunk_counters.horizon_frames;
-                st.horizon_update = horizon;
             }
             if let Some(g) = st.gate.as_mut().filter(|_| self.world.horizon_enabled()) {
                 let tiles: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
-                let wanted: Vec<planet_generators::chunkfield::ChunkKey> =
-                    self.world.horizon_wanted(&tiles, camera.position).into_iter().map(|w| w.0).collect();
+                let wanted: Vec<ChunkKey> = self.world.horizon_wanted(&tiles, camera.position).into_iter().map(|w| w.0).collect();
                 let published = st.edit.as_ref().is_some_and(|e| e.stats.published >= 1);
                 g.horizon_step(self.world, &wanted, &st.horizon_update.landed, published, now_ms);
             }
-            st.stall.mark("chunk frame (frame_step, landings, refresh summary)");
+            st.stall.mark("horizon frame (frame_step)");
             // A refusal of the plan for the base parameters degrades the frame (it draws the newest plan in hand); it is said once, never fatal.
             // One line, one report file and one title notice per cause (kind and level) in 5 s; the title counts all of them.
             let refusal = st.rig.managed.take_plan_refusal();
@@ -1110,8 +1061,8 @@ impl App<'_> {
             }
             st.rig.renderer.set_scale_refs(&st.scale_refs);
             st.stall.mark("scale references");
-            // The horizon shadows (REND-038): the chunk maps in their slots and the coarse map, for the lit frames over a world with a chunk stage.
-            if let Some(lit) = plan.lit.as_ref().filter(|_| st.chunks_on || self.world.horizon_enabled()) {
+            // The horizon shadows (REND-038): the chunk maps in their slots and the coarse map, for the lit frames over a world with the horizon jobs.
+            if let Some(lit) = plan.lit.as_ref().filter(|_| self.world.horizon_enabled()) {
                 let tiles: Vec<TileId> = plan.nodes.iter().map(|n| n.tile).collect();
                 st.horizon.frame(self.world, ctx, &mut st.rig.renderer, &tiles, &std::mem::take(&mut st.horizon_update), lit.sun_dir);
                 if let (Some(key), Some(g)) = (st.horizon.last_uploaded, st.gate.as_mut()) {
@@ -1141,7 +1092,6 @@ impl App<'_> {
             let drew_lit = lit_plan.is_some();
             if drew_lit {
                 st.counts.lit_frames += 1;
-                st.counts.stage_lit_frames += u64::from(st.chunks_on);
                 st.counts.editing_light_frames += u64::from(st.viewer.editing_light);
                 st.counts.atmosphere_frames += u64::from(plan.lit.is_some_and(|l| l.atmosphere.is_some()));
                 st.counts.water_frames += u64::from(plan.water.as_ref().is_some_and(|w| !w.nodes.is_empty()));
@@ -1228,7 +1178,7 @@ impl App<'_> {
                     st.presented += 1;
                     if drew_lit {
                         st.counts.lit_presented += 1;
-                        if let (true, Some(g)) = (st.chunks_on || self.world.horizon_enabled(), st.gate.as_mut()) {
+                        if let (true, Some(g)) = (self.world.horizon_enabled(), st.gate.as_mut()) {
                             g.lit_with_horizon = true;
                         }
                     } else {
@@ -1249,7 +1199,6 @@ impl App<'_> {
                 let maps_baked = self.world.horizon_stats().is_some_and(|h| h.baked + h.disk_hits > 0);
                 let horizon_waits = self.world.horizon_enabled()
                     && std::env::var_os("PLANET_GATE_SOFTWARE").is_none()
-                    && self.world.chunk_manager().is_none()
                     && st.viewer.lit
                     && !maps_baked
                     && st.frames < GATE_BAKE_GIVE_UP;
@@ -1272,11 +1221,7 @@ impl App<'_> {
                     }
                     if let Some(g) = st.gate.as_ref() {
                         let maps = self.world.horizon_stats().map_or(0, |h| h.baked + h.disk_hits);
-                        let extra = format!(
-                            "horizon jobs: {:?}; chunk jobs: {:?}",
-                            self.world.horizon_stats(),
-                            self.world.chunk_manager().map(|m| m.stats())
-                        );
+                        let extra = format!("horizon jobs: {:?}", self.world.horizon_stats());
                         gate_finish(g, maps, &extra)?;
                     }
                     quit = true;
@@ -1310,9 +1255,6 @@ impl App<'_> {
             "jobs in flight in the tile streamer: {} in flight, {} queued, {} dispatched this frame, {} blocked; resident {}, slots in use {}\n",
             c.in_flight, c.queued, c.dispatched, c.blocked, c.resident, c.slots_in_use
         );
-        if let Some(m) = self.world.chunk_manager() {
-            extra += &format!("chunk jobs: {:?}\n", m.stats());
-        }
         if let Some(h) = self.world.horizon_stats() {
             extra += &format!("horizon jobs: {h:?}\n");
         }
@@ -1453,8 +1395,8 @@ fn sun_time_text(sun: [f32; 3], camera: planet_core::Vec3) -> String {
     format!("{:02}:{:02} local solar time", minutes / 60, minutes % 60)
 }
 
-/// What the title adds for the shade view, the moved sun and a world without a chunk stage (VIEW-054): empty at the start.
-pub fn lit_extras_text(v: &ViewerState, chunks_on: bool, sun: [f32; 3], camera: planet_core::Vec3) -> String {
+/// What the title adds for the shade view, the moved sun and a world without the horizon jobs (VIEW-054): empty at the start.
+pub fn lit_extras_text(v: &ViewerState, horizon_on: bool, sun: [f32; 3], camera: planet_core::Vec3) -> String {
     let mut out = String::new();
     if v.shade_view != planet_frame::look::shading::ShadeView::Lit {
         out += &format!(" | shade view {}", v.shade_view.name());
@@ -1464,8 +1406,8 @@ pub fn lit_extras_text(v: &ViewerState, chunks_on: bool, sun: [f32; 3], camera: 
         let minutes = (t * 60.0).round() as u32 % 1440;
         out += &format!(" | sun {:02}:{:02} local solar time", minutes / 60, minutes % 60);
     }
-    if !chunks_on {
-        out += " | no chunk stage: no horizon shadows (open a store with a coupled run)";
+    if !horizon_on {
+        out += " | no horizon shadows (open a store with a coupled run)";
     }
     out
 }
@@ -1496,7 +1438,7 @@ fn title_text(st: &Running, now_ms: u64) -> String {
         input += " | editing light";
     }
     if st.viewer.lit {
-        input += &lit_extras_text(&st.viewer, st.chunks_on, st.sun_dir, st.camera_position);
+        input += &lit_extras_text(&st.viewer, st.horizon_on, st.sun_dir, st.camera_position);
     }
     input += &format!(" | detail {}", st.viewer.ground_detail.name());
     if st.viewer.look_choice != planet_frame::look::materials::LookChoice::default() {
@@ -1891,7 +1833,7 @@ fn smoke_summary(st: &Running) -> String {
         + &globe
         + &repro
         + &format!("
-  chunk step: {}", st.chunk_counters.line(&crate::chunkstage::FrameFeatures::default()))
+  horizon step: {}", st.chunk_counters.line(&crate::horizonstep::FrameFeatures::default()))
 }
 
 /// `planet editor`: open the window and run the flight until it is closed (or, for `--smoke`, for a few dozen frames).
@@ -2295,13 +2237,13 @@ mod tests {
 
     // spec: VIEW-054
     #[test]
-    fn the_title_names_the_shade_view_the_moved_sun_and_a_world_without_a_chunk_stage() {
+    fn the_title_names_the_shade_view_the_moved_sun_and_a_world_without_the_horizon_jobs() {
         use planet_frame::look::shading::{sun_direction, ShadeView};
         let at = planet_core::Vec3::new(6_371_000.0, 0.0, 0.0);
         let sun = sun_direction(12.0, 0.0);
         let mut v = ViewerState::new(0, 3, 0, false);
-        assert_eq!(lit_extras_text(&v, true, sun, at), "", "nothing at the start over a world with a chunk stage");
-        assert!(lit_extras_text(&v, false, sun, at).contains("no chunk stage: no horizon shadows (open a store with a coupled run)"));
+        assert_eq!(lit_extras_text(&v, true, sun, at), "", "nothing at the start over a world with the horizon jobs");
+        assert!(lit_extras_text(&v, false, sun, at).contains("no horizon shadows (open a store with a coupled run)"));
         v.shade_view = ShadeView::Horizon;
         v.sun_offset_h = 6.0;
         let moved = planet_frame::viewer::sun_with_offset(sun, v.sun_offset_h);

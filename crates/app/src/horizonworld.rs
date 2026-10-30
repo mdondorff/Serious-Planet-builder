@@ -23,8 +23,28 @@ use planet_world_def::WorldDefinition;
 
 use crate::worldfield::WorldTerrain;
 
-/// Chunks the horizon jobs want at most when there is no chunk stage: the nearest to the camera (the default `HorizonConfig::keep`).
+/// Chunks the horizon jobs want at most: the nearest to the camera (the default `HorizonConfig::keep`).
 pub const BASE_HORIZON_WANTED: usize = 24;
+
+/// The default cell size of a horizon chunk in metres (planner decision 2026-10-24; the lattice of the maps and the chunk grid, GEN-034).
+pub const HORIZON_CELL_M: f64 = 8.0;
+
+/// Cells per chunk edge for chunks of about `cell_m` metres on a body of `radius_m` (608 at 8 m, 1216 at 4 m, 496 at 10 m on Earth).
+pub fn cells_per_chunk_for(radius_m: f64, cell_m: f64) -> u32 {
+    let edge = radius_m * core::f64::consts::FRAC_PI_2 / f64::from(1u32 << planet_generators::chunk::CHUNK_GRID_LEVEL);
+    // A multiple of 16: the chunk's pyramid halves the edge once per level it carries (up to 4 levels, cells down to about 1.2 m).
+    ((edge / cell_m / 16.0).round().max(1.0) as u32) * 16
+}
+
+/// Horizon bakes at once of a viewer: half the generation workers, at most [`HORIZON_WORKERS_MAX`] (ADR 0083: the idle class, busy only for the
+/// seconds after an edit or a move into new chunks).
+pub fn horizon_workers(gen: planet_streaming::GenWorkers) -> usize {
+    (gen.workers / 2).clamp(1, HORIZON_WORKERS_MAX)
+}
+
+/// Most horizon bakes at once. Measured on Rasierklinge (12 warm maps): 1 bake at a time on 20 threads 24.1 s, 4 x 5 threads
+/// 9.9 s, 6 x 3 7.4 s, 12 x 1 6.4 s; 8 leaves cores to the frame.
+pub const HORIZON_WORKERS_MAX: usize = 8;
 
 /// Version of the world's horizon bake (what it samples and how); part of the march's hash, so a change re-bakes every map.
 pub const BAKE_VERSION: u32 = 1;
@@ -387,24 +407,11 @@ impl HorizonBaker for ChunkHorizonBaker {
         let side = n + 2 * halo;
         // The definition the field below is built from: a height tile is kept only if no edit was published between this and the block's key.
         let revision0 = world.definition().revision();
-        let manager = world.chunk_manager();
         let per_face = 1i64 << planet_generators::chunk::CHUNK_GRID_LEVEL;
         let in_face = |b: i64| (0..per_face).contains(&b);
-        // The state of a block: the results of the chunks its heights read (its own and the cells of its neighbours across the edge, GEN-039).
-        let state = |bx: i64, by: i64| -> u64 {
-            let Some(m) = manager.as_ref().filter(|_| in_face(bx) && in_face(by)) else { return 0 };
-            self.reads((key.0, bx as u32, by as u32))
-                .into_iter()
-                .fold(0x4854_5354, |h, k| planet_core::hash::mix64(h ^ m.result_hash(k).unwrap_or(0)))
-        };
-        let own_hashes = |blocks: &[(i64, i64)]| -> Vec<u64> { blocks.iter().map(|&(bx, by)| state(bx, by)).collect() };
         let blocks: Vec<(i64, i64)> =
             (-1..=1i64).flat_map(|dy| (-1..=1i64).map(move |dx| (i64::from(key.1) + dx, i64::from(key.2) + dy))).collect();
-        // The result each block holds now, read before the field is built: a tile is kept only if it is still that result after (the field takes
-        // its own snapshot of the ready chunks in between).
-        let before = own_hashes(&blocks);
         let Ok(field) = self.timed(1, || world.field()) else { return none() };
-        let after = own_hashes(&blocks);
         let world_word = self.world_state(&world);
         let (x0, y0) = (i64::from(key.1) * n as i64 - halo as i64, i64::from(key.2) * n as i64 - halo as i64);
         let mut heights = vec![0.0f32; side * side];
@@ -412,20 +419,18 @@ impl HorizonBaker for ChunkHorizonBaker {
             // A halo wider than a chunk edge reaches past the nine blocks: the whole raster from the field, as before the tiles.
             heights = self.evaluate(&*field, key.0, x0, y0, side);
         } else {
-            for (idx, &(bx, by)) in blocks.iter().enumerate() {
+            for &(bx, by) in &blocks {
                 if self.timed(0, || self.edit_word(key)) != word0 {
                     return None;
                 }
                 let tile_key = self.timed(0, || {
-                    tile_cacheable(in_face(bx) && in_face(by), before[idx] == after[idx], revision0, world.definition().revision()).then(
-                        || {
-                            let block = (key.0, bx as u32, by as u32);
-                            planet_core::hash::hash_u64s(
-                                0x4854_494c,
-                                &[world_word, self.items_word(block, STAGE_HALO * f64::from(self.lat.cells_per_chunk())), before[idx]],
-                            )
-                        },
-                    )
+                    tile_cacheable(in_face(bx) && in_face(by), true, revision0, world.definition().revision()).then(|| {
+                        let block = (key.0, bx as u32, by as u32);
+                        planet_core::hash::hash_u64s(
+                            0x4854_494c,
+                            &[world_word, self.items_word(block, STAGE_HALO * f64::from(self.lat.cells_per_chunk())), 0],
+                        )
+                    })
                 });
                 let tile = self.timed(2, || self.block_heights(&*field, key.0, (bx, by), n, tile_key));
                 // The rows of the block inside the raster: the block's cells are [bx n, bx n + n), the raster's [x0, x0 + side).
@@ -443,8 +448,7 @@ impl HorizonBaker for ChunkHorizonBaker {
         if self.edit_word(key) != word0 {
             return None;
         }
-        // Chunk jobs are queued or running: the march takes one thread, so a bake never holds cores the visible work needs (STRM-060).
-        let threads = if manager.as_ref().is_some_and(|m| m.in_flight() > 0) { 1 } else { self.threads };
+        let threads = self.threads;
         let raster = HeightRaster { n: side, texel_m: self.lat.cell_m(self.params.radius_m), heights: &heights };
         let map = self.timed(3, || bake_horizon(&raster, (halo, halo, n, n), &self.params, threads));
         self.times.bakes.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -500,12 +504,8 @@ impl WorldTerrain {
         cfg: HorizonConfig,
         threads: usize,
     ) -> Result<(), String> {
-        // With a chunk stage the maps are baked once their chunk is ready and again as neighbours land; without one (the default since the owner's
-        // fallback of 2026-10-28) every chunk is ready with no change and the maps are baked from the base terrain and the stamps (STRM-064).
-        let chunks: Arc<dyn planet_streaming::chunks::ChunkSource> = match self.chunk_manager() {
-            Some(m) => m,
-            None => Arc::new(planet_streaming::chunks::BaseTerrain),
-        };
+        // Every chunk is ready with no change: the maps are baked from the base terrain and the stamps (STRM-064).
+        let chunks: Arc<dyn planet_streaming::chunks::ChunkSource> = Arc::new(planet_streaming::chunks::BaseTerrain);
         let lat = self.horizon_lattice().ok_or("the world has no chunk lattice")?;
         let baker = Arc::new(ChunkHorizonBaker::new(self, lat, params, threads));
         // The march must be one the bake accepts, and its halo must fit in the ring of neighbours the state word reads (a chunk edge): refused
@@ -526,16 +526,40 @@ impl WorldTerrain {
         Ok(())
     }
 
-    /// The chunk lattice the horizon maps are baked on: the chunk stage's, else the one it would have (the A-net's 8 m cell), for a world with a bake.
+    /// The chunk lattice the horizon maps are baked on (the 8 m cell, [`HORIZON_CELL_M`]), for a world with a bake.
     pub fn horizon_lattice(&self) -> Option<ChunkLattice> {
-        self.chunk_lattice().or_else(|| {
-            self.has_bake()
-                .then(|| ChunkLattice::new(crate::anetworld::cells_per_chunk_for(self.radius_m(), crate::anetworld::ANET_CELL_M)))
-                .flatten()
-        })
+        let cells = match self.horizon_cells.load(std::sync::atomic::Ordering::Relaxed) {
+            0 => cells_per_chunk_for(self.radius_m(), HORIZON_CELL_M),
+            n => n,
+        };
+        self.has_bake().then(|| ChunkLattice::new(cells)).flatten()
     }
 
-    /// Whether the horizon jobs are enabled (with or without a chunk stage).
+    /// Bake the horizon maps on chunks of `cells` cells an edge instead of the 8 m default (a test uses a coarse lattice to stay quick); call it
+    /// before the horizon jobs start.
+    pub fn set_horizon_cells(&self, cells: u32) {
+        self.horizon_cells.store(cells, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// The viewer's horizon (the default since the owner's fallback of 2026-10-28, STRM-064): the horizon jobs bake the maps from the base terrain and
+    /// the stamps on a pool of their own ([`horizon_workers`] threads, all in the idle class, one thread a bake: the march scales poorly inside a map
+    /// and linearly across maps), and the stored far-field horizon is requested.
+    pub fn enable_viewer_horizon(self: &Arc<Self>, gen: planet_streaming::GenWorkers, clock: Arc<dyn Clock>) -> Result<(), String> {
+        let lat = self.horizon_lattice().ok_or("the world has no bake: no horizon shadows")?;
+        let mut params = chunk_horizon_params(&lat, self.radius_m());
+        // A test run (the software adapter in CI) asks for a short march so that a map is a small raster: `PLANET_HORIZON_RANGE_M`, never below one chunk cell.
+        if let Some(r) = std::env::var("PLANET_HORIZON_RANGE_M").ok().and_then(|v| v.parse::<f64>().ok()) {
+            params.range_m = params.range_m.min(r.max(lat.cell_m(self.radius_m()) * 4.0));
+        }
+        let workers = horizon_workers(gen);
+        let pool: Arc<dyn Spawner> = planet_streaming::GenWorkers::new(1).with_priority(gen.priority).pool_with_idle(workers);
+        let cfg = HorizonConfig { workers, ..Default::default() };
+        self.enable_horizon(params, pool, clock, cfg, self.horizon_threads_set().unwrap_or(1))?;
+        self.request_coarse_horizon();
+        Ok(())
+    }
+
+    /// Whether the horizon jobs are enabled.
     pub fn horizon_enabled(&self) -> bool {
         crate::stall::read(&self.horizon, "horizon jobs lock (read)").is_some()
     }
@@ -547,18 +571,13 @@ impl WorldTerrain {
         jobs.update(&self.horizon_wanted(tiles, camera))
     }
 
-    /// The chunks whose horizon maps the plan's `tiles` want, nearest to `camera` first (without a chunk stage the nearest [`BASE_HORIZON_WANTED`]).
+    /// The chunks whose horizon maps the plan's `tiles` want, nearest to `camera` first (the nearest [`BASE_HORIZON_WANTED`]).
     pub fn horizon_wanted(&self, tiles: &[TileId], camera: PlanetFixed) -> Vec<(ChunkKey, f64)> {
         let Some(lat) = self.horizon_lattice() else { return Vec::new() };
-        let manager = self.chunk_manager();
         let mut wanted: Vec<(ChunkKey, f64)> = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for &t in tiles {
-            let reads = match manager.as_ref() {
-                Some(m) => m.reads(t),
-                None => planet_generators::chunkfield::chunks_read_by(&lat, planet_generators::chunk::CHUNK_GRID_LEVEL, 0, t),
-            };
-            for k in reads {
+            for k in planet_generators::chunkfield::chunks_read_by(&lat, planet_generators::chunk::CHUNK_GRID_LEVEL, 0, t) {
                 if seen.insert(k) {
                     let tile = TileId::new(Face(k.0), planet_generators::chunk::CHUNK_GRID_LEVEL, k.1, k.2)
                         .expect("a chunk of the grid is a tile");
@@ -567,11 +586,9 @@ impl WorldTerrain {
                 }
             }
         }
-        if manager.is_none() {
-            // No chunk stage to evict: the maps held are the nearest chunks of the plan, at most [`BASE_HORIZON_WANTED`] (about 6 MB each).
-            wanted.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
-            wanted.truncate(BASE_HORIZON_WANTED);
-        }
+        // The maps held are the nearest chunks of the plan, at most [`BASE_HORIZON_WANTED`] (about 6 MB each).
+        wanted.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
+        wanted.truncate(BASE_HORIZON_WANTED);
         wanted
     }
 

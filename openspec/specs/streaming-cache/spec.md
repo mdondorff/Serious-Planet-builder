@@ -1055,7 +1055,7 @@ Source: ADR 0077, D7 (runtime generation, disk cache), CON-05, STRM-033, opus-pl
 - **THEN** the first is evicted and the second stays, and the pool's bytes never pass the cap
 
 ### Requirement: STRM-042 Chunk prefetch along travel
-The chunks needed by the camera predicted by STRM-018's velocity, one chunk ahead along the direction of travel, SHALL be requested below the wanted set in priority, and a camera that only rotates SHALL prefetch no chunk. The viewer and the flight scenes SHALL make that request every frame from the managed loop's travel estimator (`chunkstage::chunk_prefetch`). The track SHALL ask the chunks whose centre lies within the larger of the plan's reach and one chunk edge, plus half an edge, of its samples: the next chunk is asked on entering the current one, and a chunk is asked as early before it is wanted as the lead says.
+The chunks needed by the camera predicted by STRM-018's velocity, one chunk ahead along the direction of travel, SHALL be requested below the wanted set in priority, and a camera that only rotates SHALL prefetch no chunk. The frame crate computes the set (`prefetch_chunks`, `track_chunks`); no app code asks a chunk manager for it since ADR 0086 (the requirement goes with the frame side). The track SHALL ask the chunks whose centre lies within the larger of the plan's reach and one chunk edge, plus half an edge, of its samples: the next chunk is asked on entering the current one, and a chunk is asked as early before it is wanted as the lead says.
 
 Verify: A, B
 Status: active
@@ -1128,7 +1128,7 @@ Source: opus-planner (2026-10-24, M8-5), STRM-048
 - **THEN** the second run reads the maps from the pack and bakes none
 
 ### Requirement: STRM-046 The viewer runs A-net chunks at runtime when asked
-A world that has a stored coupled channel MAY be given a chunk stage by a caller (`WorldTerrain::enable_anet_from_store`): the A-net process on the chunk manager (jobs on the injected spawner, at most half the worker pool), the pyramid top level the measurement chose, and a disk cache of landed chunks in the store's directory. The viewer, the editor and the scenes do not ask for it (the flag `--chunks` is removed, ADR 0086), so every tile they draw SHALL be the base, and for a world without the channel there SHALL be none. No frame SHALL wait for a chunk (STRM-039).
+No app code starts a chunk stage (the flag `--chunks` and the world's stage are removed, ADR 0086), so every tile the viewer, the editor and the scenes draw SHALL be the base. No frame SHALL wait for a chunk (STRM-039).
 
 Verify: A
 Status: active

@@ -188,28 +188,15 @@ pub struct WorldTerrain {
     coupled_lens: std::sync::atomic::AtomicU8,
     /// The directory of the stored bake the coupled channel lives beside; none for an in-memory bake.
     store_dir: Option<std::path::PathBuf>,
-    /// The chunk stage of this world (M8-2, GEN-039 `on-top`): none until [`WorldTerrain::enable_chunks`]; then every field this world builds has
-    /// the chunk stage over its base with the chunks ready at the time.
-    chunks: std::sync::RwLock<Option<Arc<ChunkWorld>>>,
-    /// Whether the A-net stage was asked for ([`WorldTerrain::request_anet`]).
-    pub(crate) anet_asked: std::sync::atomic::AtomicBool,
-    /// Threads a batch of base heights of the A-net uses (unset: 4 for the headless commands, the viewer's stage takes 2; a measurement sets it).
-    base_threads: std::sync::atomic::AtomicUsize,
     /// Scoped threads of one horizon bake (0: the cores, at most 4).
     horizon_threads: std::sync::atomic::AtomicUsize,
+    /// Cells per chunk edge of the horizon lattice (0: the default of [`crate::horizonworld::HORIZON_CELL_M`]); a test sets a coarse one to stay quick.
+    pub(crate) horizon_cells: std::sync::atomic::AtomicU32,
     /// The horizon jobs of the chunks (M8-5, STRM-049): none until `enable_horizon` (in `horizonworld`).
     pub(crate) horizon: std::sync::RwLock<Option<Arc<planet_streaming::chunks::HorizonJobs>>>,
     /// The queue of the height warm-up thread (made on the first [`WorldTerrain::warm_heights`]) and the batches it has read.
     warm: std::sync::Mutex<Option<std::sync::mpsc::SyncSender<Vec<planet_core::Vec3>>>>,
     warmed: std::sync::atomic::AtomicU64,
-}
-
-/// The chunk stage of a world: the process, the lattice, the pyramid's top level and the manager that computes and holds the chunks.
-struct ChunkWorld {
-    lat: planet_generators::chunkfield::ChunkLattice,
-    top: u8,
-    stage: Arc<dyn planet_generators::chunkfield::ChunkStage>,
-    manager: Arc<planet_streaming::chunks::ChunkManager>,
 }
 
 /// The ocean channel of a stored bake as the water field's lattice.
@@ -305,10 +292,8 @@ impl WorldTerrain {
             warm: Default::default(),
             warmed: Default::default(),
             coarse: Default::default(),
-            chunks: Default::default(),
-            anet_asked: Default::default(),
-            base_threads: std::sync::atomic::AtomicUsize::new(0),
             horizon_threads: std::sync::atomic::AtomicUsize::new(0),
+            horizon_cells: std::sync::atomic::AtomicU32::new(0),
             horizon: Default::default(),
             coupled_lens: Default::default(),
             store_dir: None,
@@ -392,10 +377,8 @@ impl WorldTerrain {
             warm: Default::default(),
             warmed: Default::default(),
             coarse: Default::default(),
-            chunks: Default::default(),
-            anet_asked: Default::default(),
-            base_threads: std::sync::atomic::AtomicUsize::new(0),
             horizon_threads: std::sync::atomic::AtomicUsize::new(0),
+            horizon_cells: std::sync::atomic::AtomicU32::new(0),
             horizon: Default::default(),
             coupled_lens: Default::default(),
             store_dir: Some(dir.to_path_buf()),
@@ -677,10 +660,10 @@ impl WorldTerrain {
         Ok(Some(f(&field)))
     }
 
-    /// What the next [`WorldTerrain::field`] is built from besides the definition: whether the chunk stage is on, and the coupled lens. A viewer
-    /// that keeps a field and the plan bound taken from it builds them again when this changes.
-    pub fn field_stage(&self) -> (bool, Option<CoupledLens>) {
-        (self.chunk_manager().is_some(), self.coupled_lens())
+    /// What the next [`WorldTerrain::field`] is built from besides the definition: the coupled lens. A viewer that keeps a field and the plan
+    /// bound taken from it builds them again when this changes.
+    pub fn field_stage(&self) -> Option<CoupledLens> {
+        self.coupled_lens()
     }
 
     /// The lens the fields are built with, if one is on.
@@ -749,61 +732,6 @@ impl WorldTerrain {
         )
     }
 
-    /// Give this world a chunk stage (GEN-039 `on-top`): the process `stage` over a lattice of `cells_per_chunk` cells per chunk edge, its jobs
-    /// on `spawner` and its eviction on `clock` (CON-04), `disk` the cache of landed chunks. From now on every field the world builds is the
-    /// base, the chunk stage over it with the chunks ready at that moment, then the stamps. A second call replaces the first.
-    pub fn enable_chunks(
-        &self,
-        stage: Arc<dyn planet_generators::chunkfield::ChunkStage>,
-        cells_per_chunk: u32,
-        spawner: Arc<dyn planet_streaming::Spawner>,
-        clock: Arc<dyn planet_streaming::Clock>,
-        disk: Option<Arc<dyn planet_streaming::chunks::ChunkDisk>>,
-        cfg: planet_streaming::chunks::ChunkConfig,
-    ) -> Result<(), String> {
-        self.enable_chunks_at(stage, cells_per_chunk, planet_generators::chunkfield::PYRAMID_TOP_LEVEL, spawner, clock, disk, cfg)
-    }
-
-    /// [`WorldTerrain::enable_chunks`] with the pyramid's top level `top` (the coarsest tile level that reads chunk detail).
-    #[allow(clippy::too_many_arguments)]
-    pub fn enable_chunks_at(
-        &self,
-        stage: Arc<dyn planet_generators::chunkfield::ChunkStage>,
-        cells_per_chunk: u32,
-        top: u8,
-        spawner: Arc<dyn planet_streaming::Spawner>,
-        clock: Arc<dyn planet_streaming::Clock>,
-        disk: Option<Arc<dyn planet_streaming::chunks::ChunkDisk>>,
-        cfg: planet_streaming::chunks::ChunkConfig,
-    ) -> Result<(), String> {
-        self.enable_chunks_versioned(stage, cells_per_chunk, top, spawner, clock, disk, cfg, None)
-    }
-
-    /// [`WorldTerrain::enable_chunks_at`] with a source of chunk versions (GEN-082): the chunks the edits reach are re-solved when wanted.
-    #[allow(clippy::too_many_arguments)]
-    pub fn enable_chunks_versioned(
-        &self,
-        stage: Arc<dyn planet_generators::chunkfield::ChunkStage>,
-        cells_per_chunk: u32,
-        top: u8,
-        spawner: Arc<dyn planet_streaming::Spawner>,
-        clock: Arc<dyn planet_streaming::Clock>,
-        disk: Option<Arc<dyn planet_streaming::chunks::ChunkDisk>>,
-        cfg: planet_streaming::chunks::ChunkConfig,
-        versions: Option<Arc<dyn planet_streaming::chunks::ChunkVersions>>,
-    ) -> Result<(), String> {
-        let lat = planet_generators::chunkfield::ChunkLattice::new(cells_per_chunk).ok_or_else(|| {
-            format!("{cells_per_chunk} cells per chunk edge: the lattice needs at least one cell and fits 2^27 per face edge")
-        })?;
-        let mut manager = planet_streaming::chunks::ChunkManager::new(lat, self.radius_m, top, stage.clone(), spawner, clock, disk, cfg);
-        if let Some(v) = versions {
-            manager = manager.with_versions(v);
-        }
-        let manager = Arc::new(manager);
-        *self.chunks.write().expect("chunk stage") = Some(Arc::new(ChunkWorld { lat, top, stage, manager }));
-        Ok(())
-    }
-
     /// The key of the bake behind the world (zeros without one).
     pub fn has_bake(&self) -> bool {
         self.has_bake
@@ -813,37 +741,11 @@ impl WorldTerrain {
         self.bake_key
     }
 
-    pub(crate) fn res(&self) -> u32 {
-        self.res
-    }
-
     pub(crate) fn store_dir(&self) -> Option<&Path> {
         self.store_dir.as_deref()
     }
 
-    pub(crate) fn lattice_source(&self) -> &dyn LatticeSource {
-        self.src.as_ref()
-    }
-
-    /// Set the threads a batch of the A-net base heights uses (at least 1); a chunk stage made after the call takes it.
-    pub fn set_base_threads(&self, n: usize) {
-        self.base_threads.store(n.max(1), std::sync::atomic::Ordering::Relaxed);
-    }
-
-    /// Take `n` threads for a batch of base heights unless a measurement set the number (`set_base_threads`).
-    pub(crate) fn default_base_threads(&self, n: usize) {
-        let _ = self.base_threads.compare_exchange(0, n.max(1), std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed);
-    }
-
-    /// The threads of a batch of base heights: the number set, else 4 (the headless commands').
-    pub(crate) fn base_threads(&self) -> usize {
-        match self.base_threads.load(std::sync::atomic::Ordering::Relaxed) {
-            0 => 4,
-            n => n,
-        }
-    }
-
-    /// Set the scoped threads one horizon bake uses (at least 1); a chunk stage made after the call takes it.
+    /// Set the scoped threads one horizon bake uses (at least 1).
     pub fn set_horizon_threads(&self, n: usize) {
         self.horizon_threads.store(n.max(1), std::sync::atomic::Ordering::Relaxed);
     }
@@ -851,64 +753,6 @@ impl WorldTerrain {
     /// The threads a measurement set for one horizon bake, `None` for the default.
     pub(crate) fn horizon_threads_set(&self) -> Option<usize> {
         Some(self.horizon_threads.load(std::sync::atomic::Ordering::Relaxed)).filter(|&n| n != 0)
-    }
-
-    /// The threads of one horizon bake: the number set, else the cores, at most 4.
-    pub(crate) fn horizon_threads(&self) -> usize {
-        match self.horizon_threads.load(std::sync::atomic::Ordering::Relaxed) {
-            0 => std::thread::available_parallelism().map_or(1, |t| t.get()).min(4),
-            n => n,
-        }
-    }
-
-    /// The seed of the planet body (it goes into the chunk cache's keys).
-    pub(crate) fn base_seed(&self) -> u64 {
-        GenContext::new(&self.definition()).body_seed(BodyId::PLANET).unwrap_or(0)
-    }
-
-    /// The field the A-net starts from (GEN-039): the base with the stamps of the layers whose chunk stage is `Under` (the default) over it.
-    pub(crate) fn under_field(&self) -> Result<Box<dyn HeightField + '_>, String> {
-        self.under_field_for(&self.definition())
-    }
-
-    /// [`WorldTerrain::under_field`] built from `def`, not from whatever definition the world holds when it is called: heights kept with `def` are
-    /// those of `def` however the definition moved meanwhile (GEN-087).
-    pub(crate) fn under_field_for(&self, def: &Arc<WorldDefinition>) -> Result<Box<dyn HeightField + '_>, String> {
-        let base = self.base_field_for(def)?;
-        let under = |layer: &str| def.chunk_stage(BodyId::PLANET, layer) == planet_world_def::ChunkStagePosition::Under;
-        planet_generators::chain::with_stamps_where(base, def, &under)
-    }
-
-    /// The field below the chunk stage and the stamps: the base alone.
-    pub(crate) fn base_field(&self) -> Result<Box<dyn HeightField + '_>, String> {
-        self.base_field_for(&self.definition())
-    }
-
-    pub(crate) fn base_field_for(&self, def: &Arc<WorldDefinition>) -> Result<Box<dyn HeightField + '_>, String> {
-        planet_generators::height_fields::build_field(self.kind, &GenContext::new(def), BodyId::PLANET, self.src.as_ref(), self.bake_key)
-            .map_err(|e| format!("the definition cannot be generated: {e}"))
-    }
-
-    /// The lattice of this world's chunks, if it has a chunk stage.
-    pub fn chunk_lattice(&self) -> Option<planet_generators::chunkfield::ChunkLattice> {
-        crate::stall::read(&self.chunks, "chunk stage lock (read)").as_ref().map(|c| c.lat)
-    }
-
-    /// Tell the chunk manager whether the visible edit is still being drawn (`ChunkManager::hold_stale`); without a chunk stage nothing happens.
-    pub fn hold_stale_chunks(&self, hold: bool) {
-        if let Some(m) = self.chunk_manager() {
-            m.hold_stale(hold);
-        }
-    }
-
-    /// The manager of this world's chunks, if it has a chunk stage.
-    pub fn chunk_manager(&self) -> Option<Arc<planet_streaming::chunks::ChunkManager>> {
-        crate::stall::read(&self.chunks, "chunk stage lock (read)").as_ref().map(|c| c.manager.clone())
-    }
-
-    /// The view a frame counts its stand-in share against (STRM-039): the world's chunks, `None` without a chunk stage.
-    pub fn chunk_view(&self) -> Option<Arc<dyn planet_frame::chunkshare::ChunkView>> {
-        self.chunk_manager().map(|m| Arc::new(planet_frame::chunkshare::ManagerView(m)) as Arc<dyn planet_frame::chunkshare::ChunkView>)
     }
 
     /// Read the heights at `dirs` on a thread of its own, so that the bake blocks under them are decoded and kept before the main thread reads them
@@ -943,56 +787,11 @@ impl WorldTerrain {
         self.warmed.load(std::sync::atomic::Ordering::SeqCst)
     }
 
-    /// One frame of the chunk jobs (STRM-039, STRM-042): the chunks the plan's `tiles` read, nearest to `camera` first, and the chunks to
-    /// prefetch. Returns what landed (the tiles that read it want a refresh: [`planet_frame::ManagedLoop::chunk_landed`]) and what was
-    /// evicted; without a chunk stage nothing happens. Never waits for a job.
-    pub fn chunk_frame(
-        &self,
-        tiles: &[TileId],
-        camera: planet_core::PlanetFixed,
-        prefetch: &[planet_generators::chunkfield::ChunkKey],
-    ) -> planet_streaming::chunks::ChunkUpdate {
-        self.chunk_frame_with(tiles, camera, |_| prefetch.to_vec()).0
-    }
-
-    /// [`WorldTerrain::chunk_frame`] with the prefetch made from the chunks wanted now (`(chunk, distance to the camera)`, nearest not first): the
-    /// plan's reach is what the prefetch follows along the travel (STRM-042). Returns the update and the chunks asked to prefetch.
-    pub fn chunk_frame_with(
-        &self,
-        tiles: &[TileId],
-        camera: planet_core::PlanetFixed,
-        prefetch_of: impl FnOnce(&[(planet_generators::chunkfield::ChunkKey, f64)]) -> Vec<planet_generators::chunkfield::ChunkKey>,
-    ) -> (planet_streaming::chunks::ChunkUpdate, Vec<planet_generators::chunkfield::ChunkKey>) {
-        let Some(m) = self.chunk_manager() else { return Default::default() };
-        let mut wanted: Vec<(planet_generators::chunkfield::ChunkKey, f64)> = Vec::new();
-        let mut seen = std::collections::HashSet::new();
-        for &t in tiles {
-            for k in m.reads(t) {
-                if seen.insert(k) {
-                    let tile = TileId::new(Face(k.0), planet_generators::chunk::CHUNK_GRID_LEVEL, k.1, k.2)
-                        .expect("a chunk of the grid is a tile");
-                    let d = (tile.center_direction(&planet_core::cube::TangentWarp) * self.radius_m - camera.0).length();
-                    wanted.push((k, d));
-                }
-            }
-        }
-        let prefetch = prefetch_of(&wanted);
-        (m.update_with(&wanted, &prefetch), prefetch)
-    }
-
     /// Build the field (a fresh context per field: its key covers what it read).
     pub fn field(&self) -> Result<Box<dyn HeightField + '_>, String> {
         let started = std::time::Instant::now();
         let def = self.definition();
-        let layer =
-            crate::stall::read(&self.chunks, "chunk stage lock (read)").as_ref().map(|c| planet_generators::chunkfield::ChunkLayer {
-                lat: c.lat,
-                radius_m: self.radius_m,
-                top: c.top,
-                stage: c.stage.clone(),
-                ready: c.manager.snapshot(),
-            });
-        let built = field_chain_with(self.kind, &def, self.src.as_ref(), self.bake_key, self.bound_water, layer.as_ref());
+        let built = field_chain_with(self.kind, &def, self.src.as_ref(), self.bake_key, self.bound_water, None);
         // The lens over the whole chain (GEN-043); while the run is not ready the field is the plain one.
         let built = match (self.coupled_lens(), self.coupled.standing()) {
             (Some(lens), Standing::Ready(maps, _)) => {
@@ -1014,7 +813,7 @@ impl WorldTerrain {
 /// is refused here with the known ids.
 pub fn check_options(o: &Options) -> Result<(), String> {
     // The global-bake perf scene takes the --world and --global-res of the global commands (its own checks).
-    if o.perf && matches!(o.scene.as_str(), "global-bake" | "coupled" | "anet-chunk") {
+    if o.perf && matches!(o.scene.as_str(), "global-bake" | "coupled") {
         return Ok(());
     }
     let perf_terrain = (o.perf || o.perf_smoke)
