@@ -6,8 +6,8 @@ Status: direction, not a plan (owner and opus-planner, 2026-10-23). Each milesto
 | # | Milestone | Content | Status |
 |---|---|---|---|
 | M0 to M7 | Foundations to cities | coordinates, LOD, fields and cache, streaming, atmosphere and ocean, editor, cities | done |
-| M8 | Natural landscape | global coupled river network, chunk erosion at 4 to 10 m (ADR 0077), plausible relief, horizon shadows, driver maps to materials; the speed envelope (`docs/briefings/m8-plan.md`) | running |
-| M9 | Realistic terrain | hill terrain against the owner's look reference: erosion that shapes hills and forms its own tributaries inside chunks; slope targets checked on real elevation samples (owner, 2026-10-25: likely M9's main focus; hydrology and relief together were too much for one milestone) | next |
+| M8 | Natural landscape | global coupled river network, plausible relief, horizon shadows, the speed envelope, the no-degradation gate; fine erosion per 5 km square failed its stop rule and moved to M9 (`docs/milestones/M8-report.md`) | done 2026-10-30 |
+| M9 | Realistic terrain | hill terrain against the owner's look reference: erosion that shapes hills and forms its own tributaries, baked (SPIKE-57, SPIKE-60); slope targets checked on real elevation samples (owner, 2026-10-25: likely M9's main focus; hydrology and relief together were too much for one milestone) | next |
 | M10 | Living surface | vegetation, rocks and ground cover placed from the driver maps (wetness, soil depth); GPU instancing (SPIKE-28); the speed envelope stays a regression check | open |
 | M11 | Water and sky | rivers and lakes as water surfaces from the global network, FFT ocean, clouds, weather light | open |
 | M12 | Settled world | cities on the natural landscape: roads follow terrain and cross rivers, settlement placement from the driver maps, night lights | open |
