@@ -26,8 +26,21 @@ fn smoke_in(extra: &[&str], envs: &[(&str, &str)]) -> Option<String> {
     run_editor(&["--smoke"], extra, envs)
 }
 
-/// Run `planet editor <flags> <extra>` with the run's adapter; `None` is the declared skip, a failure panics.
+/// Run `planet editor <flags> <extra>` with the run's adapter; `None` is the declared skip or a NOT RUN, a failure panics. On the discrete GPU a
+/// locked desktop is a NOT RUN (TEST-073): the binary says so itself, and a failure with the desktop locked by the end of the run is the lock's.
 fn run_editor(flags: &[&str], extra: &[&str], envs: &[(&str, &str)]) -> Option<String> {
+    let name = format!("gpu_window editor {flags:?} {extra:?}");
+    let hardware = adapter() != "software";
+    // A nextest timeout kills the test process and nothing can look at the desktop afterwards: the watchdog looks while it runs and ends the process as
+    // a NOT RUN before the shortest timeout (300 s) when the desktop was locked.
+    planet_perf::desktop::start_watchdog(&name, hardware, std::time::Duration::from_secs(240));
+    planet_perf::desktop::guarded(&name, hardware, &planet_perf::desktop::detect, planet_perf::desktop::marker_dir().as_deref(), || {
+        run_editor_unguarded(flags, extra, envs)
+    })
+    .flatten()
+}
+
+fn run_editor_unguarded(flags: &[&str], extra: &[&str], envs: &[(&str, &str)]) -> Option<String> {
     let started = std::time::Instant::now();
     let adapter = adapter();
     let out = Command::new(env!("CARGO_BIN_EXE_planet"))
@@ -40,6 +53,10 @@ fn run_editor(flags: &[&str], extra: &[&str], envs: &[(&str, &str)]) -> Option<S
         .output()
         .expect("the planet binary starts");
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    if out.status.success() && stdout.lines().any(|l| l.starts_with("NOT RUN ")) {
+        println!("{}", stdout.lines().find(|l| l.starts_with("NOT RUN ")).unwrap_or(""));
+        return None;
+    }
     // The phases of the run (process start to the last frame), for the CI log: where a window test spends its time (shown for passing tests by the nextest override).
     if let Some(line) = stdout.lines().find(|l| l.contains("[timing]")) {
         println!("TIMING editor {flags:?} {extra:?}: wall {:.0} ms; {line}", started.elapsed().as_secs_f64() * 1e3);
