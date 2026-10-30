@@ -44,6 +44,27 @@ pub fn slowest_tests(junit: &str, n: usize) -> Vec<(f64, String)> {
     all
 }
 
+/// The tests a nextest log reports as aborted with an access violation (`ABORT ... test` followed by `with code 0xc0000005`), each once, in order: on the software adapter
+/// that is the WARP crash in `d3d10warp.dll` (docs/learnings.md, "WARP crashes in its own code").
+pub fn access_violation_aborts(log: &str) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    let mut lines = log.lines();
+    while let Some(l) = lines.next() {
+        let Some(at) = l.find("ABORT [") else { continue };
+        if !lines.clone().next().is_some_and(|n| n.contains("0xc0000005")) {
+            continue;
+        }
+        // `ABORT [  99.507s] ( 26/176) binary test`: the name follows the progress counter.
+        let rest = &l[at..];
+        let Some(close) = rest.find(')') else { continue };
+        let name = rest[close + 1..].trim().to_string();
+        if !name.is_empty() && !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    names
+}
+
 fn package(dir: &str) -> String {
     match dir {
         "app" => "planet".into(),
@@ -357,6 +378,16 @@ pub fn test_timed(root: &Path, args: &[String]) -> Result<TestTiming, String> {
         let pending = candidates(root);
         if !pending.is_empty() {
             eprintln!("{} candidate golden(s) wait for the owner's /bless (`cargo xtask bless` lists them)", pending.len());
+        }
+    }
+    // An access violation of a test process on the software adapter is the WARP crash (d3d10warp.dll): named, so that a reader sees it at once and CI judges. The run
+    // still counts as failed: no retry, no skip, the exit code is unchanged (BUILD-003).
+    if !real && result.is_err() {
+        let aborts = log.as_ref().and_then(|l| std::fs::read_to_string(l).ok()).map(|t| access_violation_aborts(&t)).unwrap_or_default();
+        for name in &aborts {
+            eprintln!(
+                "WARP crash (d3d10warp), CI judges: {name} aborted with 0xc0000005; the step still counts as failed (docs/learnings.md)"
+            );
         }
     }
     say_log();
@@ -1213,6 +1244,22 @@ mod tests {
         let smoke = perf_stream_child_args("dive", &s(&["--smoke", "--allow-memory-bake"])).unwrap();
         assert!(smoke.contains(&"--perf-smoke".to_string()) && !smoke.contains(&"--out".to_string()));
         assert!(perf_stream_child_args("dive", &s(&["--out"])).unwrap_err().contains("needs a value"));
+    }
+
+    // spec: BUILD-003
+    #[test]
+    fn an_access_violation_abort_in_a_nextest_log_is_named_once_and_other_failures_are_not() {
+        let log = "        PASS [   1.0s] ( 1/3) planet::gpu_all a::ok\n\
+                   \x20      ABORT [  99.507s] ( 26/176) planet::gpu_all gpu_skeleton::the_draw_flag\n\
+                   \x20          - with code 0xc0000005: Unzulaessiger Zugriff (os error 998)\n\
+                   \x20       FAIL [   2.0s] ( 27/176) planet::gpu_all b::fails\n\
+                   \x20      ABORT [  50.0s] ( 28/176) planet::gpu_all c::other_abort\n\
+                   \x20          - with code 1: something else\n\
+                   ------------\n\
+                   \x20      ABORT [  99.507s] ( 26/176) planet::gpu_all gpu_skeleton::the_draw_flag\n\
+                   \x20          - with code 0xc0000005: Unzulaessiger Zugriff (os error 998)\n";
+        assert_eq!(access_violation_aborts(log), ["planet::gpu_all gpu_skeleton::the_draw_flag".to_string()]);
+        assert!(access_violation_aborts("all passed").is_empty());
     }
 
     // spec: BUILD-003
