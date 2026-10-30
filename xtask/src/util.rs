@@ -17,14 +17,17 @@ pub fn repo_root() -> PathBuf {
     }
 }
 
-/// Where checks that were NOT RUN (a locked desktop, TEST-072) leave their markers, relative to the repository root.
+/// The start of an `Err` that means "incomplete, not a pass" (checks were NOT RUN): `main` exits with code 3 for it, failures keep code 1.
+pub const INCOMPLETE: &str = "INCOMPLETE:";
+
+/// Where checks that were NOT RUN (a locked desktop, TEST-073) leave their markers, relative to the repository root.
 pub const NOT_RUN_DIR: &str = "target/review/not-run";
 
 /// The NOT RUN lines the markers hold, printed under `what` (nothing when there are none); returns how many.
 pub fn say_not_run(root: &Path, what: &str) -> usize {
     let lines = planet_perf::desktop::markers(&root.join(NOT_RUN_DIR));
     if !lines.is_empty() {
-        eprintln!("{what}: {} real-GPU check(s) NOT RUN while the desktop was locked (TEST-072); a NOT RUN is not a pass:", lines.len());
+        eprintln!("{what}: {} real-GPU check(s) NOT RUN while the desktop was locked (TEST-073); a NOT RUN is not a pass:", lines.len());
         for l in &lines {
             eprintln!("  {l}");
         }
@@ -78,7 +81,7 @@ pub fn files_with_ext(dir: &Path, ext: &str, out: &mut Vec<PathBuf>) {
 mod not_run_tests {
     use super::*;
 
-    // spec: TEST-072
+    // spec: TEST-073
     #[test]
     fn the_xtask_summary_counts_the_markers_of_checks_that_were_not_run() {
         let root = std::env::temp_dir().join(format!("xtask-notrun-{}", std::process::id()));

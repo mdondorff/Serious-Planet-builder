@@ -14,7 +14,7 @@ struct Step {
     outcome: Result<f64, String>,
     /// Said beside `pass` in the table (a number the step reports).
     note: String,
-    /// The checks of the step that were NOT RUN on a locked desktop (TEST-072): the step is INCOMPLETE, never a pass.
+    /// The checks of the step that were NOT RUN on a locked desktop (TEST-073): the step is INCOMPLETE, never a pass.
     not_run: Vec<String>,
 }
 
@@ -39,6 +39,7 @@ fn step(name: &'static str, f: impl FnOnce() -> Res) -> Step {
     clear_markers();
     let t = Instant::now();
     let outcome = f().map(|_| t.elapsed().as_secs_f64());
+    let outcome = incomplete_is_not_a_failure(outcome, t.elapsed().as_secs_f64());
     Step { name, outcome, note: String::new(), not_run: read_markers() }
 }
 
@@ -48,15 +49,28 @@ fn step_with_note(name: &'static str, f: impl FnOnce() -> Result<String, String>
     let t = Instant::now();
     match f() {
         Ok(note) => Step { name, outcome: Ok(t.elapsed().as_secs_f64()), note, not_run: read_markers() },
-        Err(e) => Step { name, outcome: Err(e), note: String::new(), not_run: read_markers() },
+        Err(e) => Step {
+            name,
+            outcome: incomplete_is_not_a_failure(Err(e), t.elapsed().as_secs_f64()),
+            note: String::new(),
+            not_run: read_markers(),
+        },
     }
 }
 
-/// The table row of a step: a step with checks NOT RUN is INCOMPLETE and never a pass (TEST-072).
+/// A step that ended `INCOMPLETE:` (checks NOT RUN, exit code 3) is not a failure: its row says INCOMPLETE through the markers (TEST-073).
+fn incomplete_is_not_a_failure(outcome: Result<f64, String>, secs: f64) -> Result<f64, String> {
+    match outcome {
+        Err(e) if e.starts_with(crate::util::INCOMPLETE) => Ok(secs),
+        other => other,
+    }
+}
+
+/// The table row of a step: a step with checks NOT RUN is INCOMPLETE and never a pass (TEST-073).
 fn step_row(s: &Step) -> String {
     match &s.outcome {
         Ok(secs) if !s.not_run.is_empty() => {
-            format!("| {} | INCOMPLETE: {} check(s) NOT RUN, desktop locked (TEST-072) | {secs:.1} |\n", s.name, s.not_run.len())
+            format!("| {} | INCOMPLETE: {} check(s) NOT RUN, desktop locked (TEST-073) | {secs:.1} |\n", s.name, s.not_run.len())
         }
         Ok(secs) => format!("| {} | pass{} | {secs:.1} |\n", s.name, s.note),
         Err(e) => format!("| {} | FAIL: {} | |\n", s.name, e.lines().next().unwrap_or("")),
@@ -264,7 +278,7 @@ pub fn run(root: &Path, args: &[String]) -> Res {
     let not_run: Vec<&String> = steps.iter().flat_map(|s| s.not_run.iter()).collect();
     if !not_run.is_empty() {
         md += &format!(
-            "\nINCOMPLETE: {} real-GPU check(s) were NOT RUN while the desktop was locked (owner decision 2026-10-30, TEST-072); run them again with the desktop unlocked:\n\n",
+            "\nINCOMPLETE: {} real-GPU check(s) were NOT RUN while the desktop was locked (owner decision 2026-10-30, TEST-073); run them again with the desktop unlocked:\n\n",
             not_run.len()
         );
         for l in &not_run {
@@ -371,7 +385,16 @@ pub fn run(root: &Path, args: &[String]) -> Res {
 mod tests {
     use super::*;
 
-    // spec: TEST-072
+    // spec: TEST-073
+    #[test]
+    fn an_incomplete_error_of_a_step_is_not_a_failure_and_any_other_error_is() {
+        let incomplete = format!("{} 2 real-GPU check(s) were NOT RUN", crate::util::INCOMPLETE);
+        assert_eq!(incomplete_is_not_a_failure(Err(incomplete), 4.0), Ok(4.0));
+        assert_eq!(incomplete_is_not_a_failure(Err("boom".into()), 4.0), Err("boom".into()));
+        assert_eq!(incomplete_is_not_a_failure(Ok(1.0), 4.0), Ok(1.0));
+    }
+
+    // spec: TEST-073
     #[test]
     fn a_step_with_checks_not_run_is_incomplete_and_never_a_pass() {
         let step =

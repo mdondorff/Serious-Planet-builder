@@ -27,7 +27,7 @@ fn smoke_in(extra: &[&str], envs: &[(&str, &str)]) -> Option<String> {
 }
 
 /// Run `planet editor <flags> <extra>` with the run's adapter; `None` is the declared skip or a NOT RUN, a failure panics. On the discrete GPU a
-/// locked desktop is a NOT RUN (TEST-072): the binary says so itself, and a failure with the desktop locked by the end of the run is the lock's.
+/// locked desktop is a NOT RUN (TEST-073): the binary says so itself, and a failure with the desktop locked by the end of the run is the lock's.
 fn run_editor(flags: &[&str], extra: &[&str], envs: &[(&str, &str)]) -> Option<String> {
     let name = format!("gpu_window editor {flags:?} {extra:?}");
     let hardware = adapter() != "software";

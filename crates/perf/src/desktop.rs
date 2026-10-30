@@ -1,4 +1,4 @@
-//! A locked desktop (TEST-072, owner decision 2026-10-30): real-GPU window checks report NOT RUN while the Windows session is locked, instead of
+//! A locked desktop (TEST-073, owner decision 2026-10-30): real-GPU window checks report NOT RUN while the Windows session is locked, instead of
 //! failing or timing out. With the session locked the present and acquire calls of a window stall for seconds and the device is lost (measured:
 //! the dense-cluster sweep takes 26 s unlocked and times out at 300 s locked), so the result says nothing about the code.
 //!
@@ -108,7 +108,7 @@ pub fn guarded<R>(name: &str, hardware: bool, detect: Detector<'_>, dir: Option<
     }
 }
 
-/// Watch a test that a nextest timeout would kill (TEST-072): poll the desktop every `poll`; once it has been seen locked and `fire_after` has passed since
+/// Watch a test that a nextest timeout would kill (TEST-073): poll the desktop every `poll`; once it has been seen locked and `fire_after` has passed since
 /// `started`, report a NOT RUN with the times and return true. Returns false when `stop` is set first. A timeout that kills the process leaves no
 /// chance to look at the desktop afterwards, so the look is taken while the test runs.
 pub fn watch_until(
@@ -189,7 +189,7 @@ mod tests {
         p
     }
 
-    // spec: TEST-072
+    // spec: TEST-073
     #[test]
     fn the_lock_screen_is_found_in_tasklist_output_in_any_locale() {
         assert!(lists_lock_screen("\"LogonUI.exe\",\"1234\",\"Console\",\"1\",\"35.000 K\"\r\n"));
@@ -201,7 +201,7 @@ mod tests {
         assert!(!lists_lock_screen(""));
     }
 
-    // spec: TEST-072
+    // spec: TEST-073
     #[test]
     fn a_locked_desktop_is_a_not_run_with_its_reason_and_a_marker_and_an_unlocked_one_runs_the_check() {
         let dir = temp("locked");
@@ -223,7 +223,7 @@ mod tests {
         clear(&dir);
     }
 
-    // spec: TEST-072
+    // spec: TEST-073
     #[test]
     fn the_watchdog_reports_a_not_run_when_the_desktop_was_seen_locked_and_the_test_is_still_running_at_the_time_it_would_be_cut_off() {
         use std::sync::atomic::AtomicBool;
@@ -251,7 +251,7 @@ mod tests {
         clear(&dir);
     }
 
-    // spec: TEST-072
+    // spec: TEST-073
     #[test]
     fn a_failure_after_the_desktop_locked_mid_run_is_a_not_run_with_the_times_and_any_other_failure_goes_on() {
         let dir = temp("mid");

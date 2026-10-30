@@ -1936,7 +1936,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         }
         AdapterPolicy::HighPerformance
     };
-    // A smoke run on the discrete GPU is NOT RUN while the Windows session is locked (TEST-072, owner 2026-10-30): the present and acquire calls stall for
+    // A smoke run on the discrete GPU is NOT RUN while the Windows session is locked (TEST-073, owner 2026-10-30): the present and acquire calls stall for
     // seconds and the device is lost, so the result would say nothing about the code. Reported, never a pass; the marker is counted by `cargo xtask`.
     if o.smoke && matches!(policy, AdapterPolicy::HighPerformance) {
         if let planet_perf::desktop::Desktop::Locked(reason) = planet_perf::desktop::detect() {

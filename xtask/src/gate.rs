@@ -140,11 +140,11 @@ pub fn run_gate(root: &Path, args: &[String]) -> Res {
     if small {
         return run_small(root);
     }
-    // A locked desktop makes the window stall and lose its device: NOT RUN, reported and counted, never a pass (TEST-072).
+    // A locked desktop makes the window stall and lose its device: NOT RUN, reported and counted, never a pass (TEST-073).
     if let planet_perf::desktop::Desktop::Locked(reason) = planet_perf::desktop::detect() {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
         planet_perf::desktop::report("gate", &reason, now, now, false, Some(&root.join(crate::util::NOT_RUN_DIR)));
-        return Ok(());
+        return Err(format!("{} the gate was NOT RUN (desktop locked); the run is incomplete, not a pass", crate::util::INCOMPLETE));
     }
     let all = sites(Path::new(&paths));
     let chosen: Vec<_> =
