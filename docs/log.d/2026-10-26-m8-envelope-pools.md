@@ -1,1 +1,0 @@
-- 2026-10-26 **m8-envelope-pools** (TEST-054, STRM-046): the window and the headless scenes share the viewer's chunk stage (anetworld::viewer_chunk_stage and enable_viewer_chunks: half the generation workers, at most 4, one pool for chunk and horizon jobs); the envelope scene uses it; the first two envelope windows ran 18 + 18 workers.

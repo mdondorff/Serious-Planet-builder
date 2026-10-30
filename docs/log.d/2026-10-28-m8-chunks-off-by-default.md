@@ -1,1 +1,0 @@
-- 2026-10-28 M8-F step 1: the chunk stage is off by default in the viewer and the editor, `--chunks` turns it on; `xtask gate` runs stage-off by default, `gate --chunks` keeps the stage-on KNOWN ceilings (STRM-046, TEST-064)

@@ -1,1 +1,0 @@
-- 2026-10-29 nextest: a declared 450 s limit (5 x 90 s) for gpu_water::a_coastal_flight_at_low_altitude... (95.7 / 180.0 / >300 s x3 on the Windows CI runner; BUILD-003, planner approved); no test skipped, retried or changed.

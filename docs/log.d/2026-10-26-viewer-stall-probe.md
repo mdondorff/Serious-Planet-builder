@@ -1,1 +1,0 @@
-- 2026-10-26 **viewer-stall-probe** (VIEW-056): archived; a stall report names its culprit: phase times, lock waits, jobs in flight, named threads (#689, #693).

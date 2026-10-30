@@ -95,3 +95,4 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0083 | [Runtime compute budgets](0083-runtime-compute-budgets.md) | accepted | new; numbers in a spec |
 | 0084 | [A coarse valley carve in the base](0084-coarse-valley-carve-in-the-base.md) | not pursued | SPIKE-49 negative; M9's bake decides valley carving |
 | 0085 | [Shadows from a height clipmap march, objects by cascades](0085-shadows-from-a-height-clipmap-march-objects-by-cascades.md) | accepted | replaces the horizon-map shadows (GEN-044/045, REND-038); SPIKE-56 |
+| 0086 | [Chunk stage removed](0086-chunk-stage-removed.md) | accepted (owner) | supersedes 0077 (except the global coupled run), 0081, 0082 and 0084 points 3 and 4 |

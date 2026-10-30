@@ -547,7 +547,7 @@ fn generate(args: &[&str]) -> String {
 }
 
 /// A store of 32 cells with its coupled run and coarse horizon, and the world file the window needs to take that bake size (the default world,
-/// written out): the window over it has the chunk stage (STRM-046). Returns the store, the world file and the arguments that name them.
+/// written out): the chunk stage of the window is removed, so the world is the base. Returns the store, the world file and the arguments that name them.
 fn stage_store(tag: &str) -> (std::path::PathBuf, std::path::PathBuf, Vec<String>) {
     let store = std::env::temp_dir().join(format!("planet-window-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&store);
@@ -562,46 +562,7 @@ fn stage_store(tag: &str) -> (std::path::PathBuf, std::path::PathBuf, Vec<String
     (store, world, args)
 }
 
-// spec: TEST-058, GEN-043, VIEW-005
-#[test]
-fn the_window_over_a_store_with_a_chunk_stage_runs_the_horizon_jobs_and_draws_the_k_view_without_a_panic() {
-    // The owner's session of 2026-10-27: (1) the editor over the production store never baked a horizon map, because the chunk step switched the
-    // jobs off by reading a plan field that is always empty there; the smoke verdict now fails a lit run over a chunk stage whose chunk step never
-    // ran them, and the summary says what the step counted. (2) K (the coupled run's heights) panicked on the pool workers at the mesh key of the
-    // tiles it re-keys ("a field that reads cells must report its cell queries in read_records_for"); a panic there is caught and the window goes
-    // on, so the runner fails on one in stderr. One run, for the cost of one store and one start.
-    let (store, world, args) = stage_store("stage");
-    let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    let out = smoke_in(&args, &[("PLANET_SMOKE_CHUNKS", "1"), ("PLANET_SMOKE_LENS", "1")]);
-    let _ = std::fs::remove_file(&world);
-    let _ = std::fs::remove_dir_all(&store);
-    let Some(stdout) = out else { return };
-    let step = stdout.lines().find(|l| l.contains("chunk step:")).unwrap_or_else(|| panic!("no chunk step line: {stdout}"));
-    let frames: u64 = step
-        .split("horizon ")
-        .nth(1)
-        .and_then(|s| s.split(" frames").next())
-        .and_then(|n| n.parse().ok())
-        .unwrap_or_else(|| panic!("no horizon count in '{step}'"));
-    assert!(frames > 0, "the chunk step ran the horizon jobs on no frame: {step}");
-}
-
-// spec: TEST-061, TEST-062
-#[test]
-fn the_gate_passes_on_a_small_world_with_a_large_edit_and_the_chunk_stage_on() {
-    // The owner's session of 2026-10-27 as counters (TEST-061): the editor window over a chunk stage, one large hill, then the settling frames; the
-    // run fails on a frame over 100 ms of main-thread time, a held-back tile no edit reaches, no horizon map, or a caught panic.
-    let (store, world, args) = stage_store("gate");
-    let mut args: Vec<&str> = args.iter().map(String::as_str).collect();
-    args.extend(["--edit", "--no-vsync", "--size", "480x270", "--chunks"]);
-    let out = smoke_in(&args, &[("PLANET_GATE", "1"), ("PLANET_GATE_SETTLE", "30"), ("PLANET_GATE_SOFTWARE", "1")]);
-    let _ = std::fs::remove_file(&world);
-    let _ = std::fs::remove_dir_all(&store);
-    let Some(stdout) = out else { return };
-    assert!(stdout.lines().any(|l| l.starts_with("gate: ") && l.contains("held back:")), "no gate line: {stdout}");
-}
-
-// spec: TEST-064
+// spec: TEST-061, TEST-062, TEST-064
 #[test]
 fn the_gate_passes_on_a_small_world_without_the_chunk_stage_which_is_the_default() {
     // The default since the owner's fallback of 2026-10-28: no chunk stage, so no chunk job is computed.

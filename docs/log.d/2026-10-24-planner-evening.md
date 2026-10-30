@@ -1,1 +1,0 @@
-- 2026-10-24 **status** (opus-planner): M8-2 archived, M8-3 steps 1 to 4, M8-5 to frame data, M8-V tile-streaming curve; criterion 3 entry step found (owner decision open).

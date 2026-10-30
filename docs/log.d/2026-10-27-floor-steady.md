@@ -1,1 +1,0 @@
-- 2026-10-27 **Criterion 7 floor applies to steady flight** (owner): 200 m/s at 300 m once streaming has settled; the cold first-visit curve is recorded, not gated.
