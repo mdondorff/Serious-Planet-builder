@@ -1,6 +1,6 @@
 # Look review 1 (M8-4): engine renders of landforms with the A-net chunk stage
 
-Owner's review of the base layer's landforms at the fixed poses of `docs/briefings/m8-plan.md` (exit criterion 1). Not goldens.
+Owner's review of the base layer's landforms at the fixed poses of `docs/archive/M8/briefings/m8-plan.md` (exit criterion 1). Not goldens.
 
 ## Setup
 | Item | Value |
