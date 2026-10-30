@@ -983,7 +983,7 @@ Every corridor cell of an A-net chunk SHALL be held at a bed interpolated along 
 
 Verify: A
 Status: active
-Source: SPIKE-40, SPIKE-42, ADR 0081, ADR 0082 (proposed), GEN-057
+Source: SPIKE-40, SPIKE-42, ADR 0081, ADR 0082, GEN-057
 
 #### Scenario: A ridge across the river
 - **WHEN** a chunk of a river over a base with a ridge across its path runs
@@ -1038,7 +1038,7 @@ The A-net chunk stage SHALL route a river segment over the base. The node of a r
 
 Verify: A
 Status: active
-Source: ADR 0081, ADR 0082 (proposed), SPIKE-42
+Source: ADR 0081, ADR 0082, SPIKE-42
 
 #### Scenario: A ridge across the coarse path
 - **WHEN** a river's coarse path crosses a ridge that a path within the band avoids
