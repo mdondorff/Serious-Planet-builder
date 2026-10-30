@@ -1420,6 +1420,7 @@ dependencies = [
  "egui",
  "egui-winit",
  "libm",
+ "miniz_oxide 0.8.9",
  "planet-cache",
  "planet-core",
  "planet-editor",

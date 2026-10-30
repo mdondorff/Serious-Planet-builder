@@ -901,4 +901,302 @@ mod tests {
         assert_eq!(budget_failures(1.0, (8 << 30) + 1).len(), 1);
         assert_eq!(budget_failures(f64::NAN, 0).len(), 1, "a missing time never passes");
     }
+
+    /// SPIKE-61 (spike code, never merged): M9 R3 bake pre-run. Tiles of one cube face at about 100 m (98,304 cells per face edge, 48 per coupled
+    /// cell), each sampled from the store's field, routed on its own ground (priority flood, steepest descent on the filled surface, D8 area with
+    /// the coupled network's inflow at the window's edge) and carved by implicit stream power capped by local relief; timing per phase and the
+    /// deflated size of the carve delta. `PLANET_ANET_STORE=DIR PLANET_ANET_RES=16384 PRERUN_FACE=f PRERUN_STRIDE=k PRERUN_PAR=p PRERUN_STEPS=s
+    /// PRERUN_OUT=FILE cargo test -p planet --release --lib bake_prerun_report -- --ignored --nocapture`. Read only on the store.
+    #[test]
+    #[ignore = "a spike measurement"]
+    fn bake_prerun_report() {
+        use planet_core::cube::{face_to_direction, Face, TangentWarp};
+        use std::cmp::Reverse;
+        use std::collections::BinaryHeap;
+        use std::io::Write as _;
+        use std::time::Instant;
+        let env = |k: &str, d: usize| std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d);
+        let face = env("PRERUN_FACE", 0);
+        let stride = env("PRERUN_STRIDE", 8);
+        let par = env("PRERUN_PAR", 4);
+        let sample_threads = env("PRERUN_SAMPLE_THREADS", 4);
+        let steps = env("PRERUN_STEPS", 10);
+        let max_tiles = env("PRERUN_MAX_TILES", usize::MAX);
+        let offset = env("PRERUN_OFFSET", 0);
+        let out_path = std::env::var("PRERUN_OUT").unwrap_or_else(|_| "../../target/spike61/prerun.txt".into());
+        let dump_dir = std::env::var("PRERUN_DUMP_DIR").ok();
+        let dump: Vec<usize> = std::env::var("PRERUN_DUMP").ok().map(|v| v.split(',').filter_map(|x| x.parse().ok()).collect()).unwrap_or_default();
+        let res = env("PLANET_ANET_RES", 256) as u32;
+        let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
+        let mut so = std::io::stdout();
+        let (world, maps, _tile) = anet_scene(res, 11, store, &mut so).unwrap();
+        let field = world.field().unwrap();
+        let lat_c = maps.lattice();
+        let nc = lat_c.n();
+        const PER: usize = 48; // fine cells per coupled cell
+        let m = nc * PER; // fine cells per face edge
+        const CORE: usize = 3072; // 64 coupled cells
+        const HALO: usize = 256;
+        let tiles_per_edge = m / CORE;
+        let rec_c = maps.receivers();
+        let fc0 = face * nc * nc;
+        // Tiles: every `stride`-th along both axes, from `offset`.
+        let mut tiles: Vec<(usize, usize)> = Vec::new();
+        for tj in (offset..tiles_per_edge).step_by(stride) {
+            for ti in (offset..tiles_per_edge).step_by(stride) {
+                tiles.push((ti, tj));
+            }
+        }
+        tiles.truncate(max_tiles);
+        let mut out = std::fs::File::create(&out_path).unwrap();
+        writeln!(out, "face {face} fine {m} per edge ({:.1} m mean), core {CORE} halo {HALO}, {} tiles of {} per face, stride {stride}, par {par}, sample threads {sample_threads}, steps {steps}", 2.0 * std::f64::consts::FRAC_PI_4 * 2.0 * world.radius_m() / m as f64 / 2.0, tiles.len(), tiles_per_edge * tiles_per_edge).unwrap();
+        // Land tiles of every face from the coupled run (a tile with any coupled cell above 0 in its window counts).
+        for f in 0..6 {
+            let (mut any, mut frac) = (0usize, 0.0f64);
+            let cpt = CORE / PER;
+            for tj in 0..tiles_per_edge {
+                for ti in 0..tiles_per_edge {
+                    let mut land = 0usize;
+                    for cj in tj * cpt..(tj + 1) * cpt {
+                        for ci in ti * cpt..(ti + 1) * cpt {
+                            land += usize::from(maps.z(f * nc * nc + cj * nc + ci) > 0.0);
+                        }
+                    }
+                    any += usize::from(land > 0);
+                    frac += land as f64 / (cpt * cpt) as f64;
+                }
+            }
+            writeln!(out, "face {f}: {any} of {} tiles hold land; land share {:.3}", tiles_per_edge * tiles_per_edge, frac / (tiles_per_edge * tiles_per_edge) as f64).unwrap();
+        }
+        writeln!(out, "tile ti tj land_frac skip dirs_s sample_s route_s carve_s total_s max_cut_m p50_cut_chan_m chan_cells core_cells delta_bytes h16_bytes inflow_cells").unwrap();
+        out.flush().unwrap();
+        let out = std::sync::Mutex::new(out);
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let dir_of = |i: usize, j: usize| {
+            face_to_direction(&TangentWarp, Face(face as u8), -1.0 + (2.0 * i as f64 + 1.0) / m as f64, -1.0 + (2.0 * j as f64 + 1.0) / m as f64)
+        };
+        std::thread::scope(|sc| {
+            for _ in 0..par {
+                sc.spawn(|| loop {
+                    let k = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if k >= tiles.len() {
+                        break;
+                    }
+                    let (ti, tj) = tiles[k];
+                    let t_all = Instant::now();
+                    let (ci0, cj0) = (ti * CORE, tj * CORE);
+                    let wi0 = ci0.saturating_sub(HALO);
+                    let wj0 = cj0.saturating_sub(HALO);
+                    let wi1 = (ci0 + CORE + HALO).min(m);
+                    let wj1 = (cj0 + CORE + HALO).min(m);
+                    let (w, hgt) = (wi1 - wi0, wj1 - wj0);
+                    // Ocean tiles (every coupled cell of the window at or below 0) are skipped.
+                    let (cwi0, cwj0, cwi1, cwj1) = (wi0 / PER, wj0 / PER, wi1.div_ceil(PER), wj1.div_ceil(PER));
+                    let mut land = 0usize;
+                    let mut tot = 0usize;
+                    for cj in cwj0..cwj1 {
+                        for ci in cwi0..cwi1 {
+                            tot += 1;
+                            land += usize::from(maps.z(fc0 + cj * nc + ci) > 0.0);
+                        }
+                    }
+                    let land_frac = land as f64 / tot as f64;
+                    if land == 0 {
+                        writeln!(out.lock().unwrap(), "{k} {ti} {tj} {land_frac:.3} 1 0 0 0 0 {:.3} 0 0 0 {} 0 0 0", t_all.elapsed().as_secs_f64(), CORE * CORE).unwrap();
+                        continue;
+                    }
+                    let n = w * hgt;
+                    let t = Instant::now();
+                    let mut dirs = Vec::with_capacity(n);
+                    for j in wj0..wj1 {
+                        for i in wi0..wi1 {
+                            dirs.push(dir_of(i, j));
+                        }
+                    }
+                    let dirs_s = t.elapsed().as_secs_f64();
+                    let t = Instant::now();
+                    let orig: Vec<f32> = field.heights_threaded(&dirs, sample_threads).into_iter().map(|h| h as f32).collect();
+                    let sample_s = t.elapsed().as_secs_f64();
+                    // Local spacing at the window's centre.
+                    let (mi, mj) = ((wi0 + wi1) / 2, (wj0 + wj1) / 2);
+                    let dx = world.radius_m() * libm::acos(dir_of(mi, mj).dot(dir_of(mi + 1, mj)).min(1.0));
+                    let cell_a = dx * dx;
+                    drop(dirs);
+                    // Inflow: coupled cells outside the window whose receiver lies inside it, at the window cell nearest them.
+                    let mut inflow: Vec<(usize, f64)> = Vec::new();
+                    let margin = 3;
+                    for cj in cwj0.saturating_sub(margin)..(cwj1 + margin).min(nc) {
+                        for ci in cwi0.saturating_sub(margin)..(cwi1 + margin).min(nc) {
+                            let c = fc0 + cj * nc + ci;
+                            let r = rec_c[c];
+                            if r == planet_generators::coupled::NONE || (r as usize) / (nc * nc) != face {
+                                continue;
+                            }
+                            let (fi, fj) = (ci * PER + PER / 2, cj * PER + PER / 2);
+                            let inside = |a: usize, b: usize| a >= wi0 && a < wi1 && b >= wj0 && b < wj1;
+                            let rr = r as usize - fc0;
+                            let (ri, rj) = ((rr % nc) * PER + PER / 2, (rr / nc) * PER + PER / 2);
+                            if !inside(fi, fj) && inside(ri, rj) && maps.z(c) > 0.0 {
+                                let (ei, ej) = (fi.clamp(wi0, wi1 - 1) - wi0, fj.clamp(wj0, wj1 - 1) - wj0);
+                                inflow.push((ej * w + ei, maps.network_area_m2(c) as f64));
+                            }
+                        }
+                    }
+                    // Cap: half the 5 km block relief, at most 100 m.
+                    let blk = (5000.0 / dx).round().max(1.0) as usize;
+                    let (bw, bh) = (w.div_ceil(blk), hgt.div_ceil(blk));
+                    let mut bmin = vec![f32::MAX; bw * bh];
+                    let mut bmax = vec![f32::MIN; bw * bh];
+                    for j in 0..hgt {
+                        for i in 0..w {
+                            let b = (j / blk) * bw + i / blk;
+                            let h = orig[j * w + i];
+                            bmin[b] = bmin[b].min(h);
+                            bmax[b] = bmax[b].max(h);
+                        }
+                    }
+                    let cap = |p: usize| -> f32 {
+                        let b = ((p / w) / blk) * bw + (p % w) / blk;
+                        (0.5 * (bmax[b] - bmin[b])).min(100.0)
+                    };
+                    let key = |h: f32| -> u32 {
+                        let b = h.to_bits();
+                        if b & 0x8000_0000 != 0 { !b } else { b | 0x8000_0000 }
+                    };
+                    const NB: [(i64, i64); 8] = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)];
+                    let mut h = orig.clone();
+                    let mut route_s = 0.0;
+                    let mut carve_s = 0.0;
+                    let kdt = 0.01f64;
+                    let mut filled = vec![0f32; n];
+                    let mut order: Vec<u32> = Vec::with_capacity(n);
+                    let mut rec = vec![u32::MAX; n];
+                    let mut area = vec![0f64; n];
+                    let mut seen = vec![false; n];
+                    for _step in 0..steps {
+                        let t = Instant::now();
+                        // Priority flood with epsilon from the window border and the sea.
+                        order.clear();
+                        seen.iter_mut().for_each(|s| *s = false);
+                        let mut heap: BinaryHeap<Reverse<(u32, u32)>> = BinaryHeap::new();
+                        for p in 0..n {
+                            let (i, j) = (p % w, p / w);
+                            if i == 0 || j == 0 || i == w - 1 || j == hgt - 1 || h[p] <= 0.0 {
+                                filled[p] = h[p];
+                                seen[p] = true;
+                                heap.push(Reverse((key(h[p]), p as u32)));
+                            }
+                        }
+                        while let Some(Reverse((_, p))) = heap.pop() {
+                            let p = p as usize;
+                            order.push(p as u32);
+                            let (i, j) = ((p % w) as i64, (p / w) as i64);
+                            for (di, dj) in NB {
+                                let (a, b) = (i + di, j + dj);
+                                if a < 0 || b < 0 || a >= w as i64 || b >= hgt as i64 {
+                                    continue;
+                                }
+                                let q = b as usize * w + a as usize;
+                                if seen[q] {
+                                    continue;
+                                }
+                                seen[q] = true;
+                                let lo = filled[p] + 1e-3;
+                                filled[q] = h[q].max(lo);
+                                heap.push(Reverse((key(filled[q]), q as u32)));
+                            }
+                        }
+                        // Steepest descent on the filled surface; outlets have none.
+                        for p in 0..n {
+                            let (i, j) = ((p % w) as i64, (p / w) as i64);
+                            if i == 0 || j == 0 || i == w as i64 - 1 || j == hgt as i64 - 1 || h[p] <= 0.0 {
+                                rec[p] = u32::MAX;
+                                continue;
+                            }
+                            let mut best = (0.0f64, u32::MAX);
+                            for (k2, (di, dj)) in NB.iter().enumerate() {
+                                let q = (j + dj) as usize * w + (i + di) as usize;
+                                let d = if k2 < 4 { dx } else { dx * std::f64::consts::SQRT_2 };
+                                let s = f64::from(filled[p] - filled[q]) / d;
+                                if s > best.0 {
+                                    best = (s, q as u32);
+                                }
+                            }
+                            rec[p] = best.1;
+                        }
+                        area.iter_mut().for_each(|a| *a = cell_a);
+                        for &(p, a) in &inflow {
+                            area[p] += a;
+                        }
+                        for &p in order.iter().rev() {
+                            let r = rec[p as usize];
+                            if r != u32::MAX {
+                                area[r as usize] += area[p as usize];
+                            }
+                        }
+                        route_s += t.elapsed().as_secs_f64();
+                        // Implicit stream power (n = 1, m = 0.5), outlets first, capped by local relief.
+                        let t = Instant::now();
+                        for &p in &order {
+                            let p = p as usize;
+                            let r = rec[p];
+                            if r == u32::MAX {
+                                continue;
+                            }
+                            let r = r as usize;
+                            let d = if (p % w) == (r % w) || (p / w) == (r / w) { dx } else { dx * std::f64::consts::SQRT_2 };
+                            let f = kdt * area[p].sqrt() / d;
+                            let hn = ((f64::from(h[p]) + f * f64::from(h[r])) / (1.0 + f)) as f32;
+                            h[p] = hn.max(orig[p] - cap(p)).min(h[p]);
+                        }
+                        carve_s += t.elapsed().as_secs_f64();
+                    }
+                    // Core statistics and the deflated carve delta (0.25 m steps, u16) and heights (0.5 m, i16).
+                    let mut cuts: Vec<f32> = Vec::new();
+                    let mut max_cut = 0f32;
+                    let mut delta = Vec::with_capacity(CORE * CORE * 2);
+                    let mut h16 = Vec::with_capacity(CORE * CORE * 2);
+                    let mut core_cells = 0usize;
+                    for j in (cj0 - wj0)..(cj0 - wj0 + CORE).min(hgt) {
+                        for i in (ci0 - wi0)..(ci0 - wi0 + CORE).min(w) {
+                            let p = j * w + i;
+                            core_cells += 1;
+                            let cut = orig[p] - h[p];
+                            max_cut = max_cut.max(cut);
+                            if area[p] >= 1e6 {
+                                cuts.push(cut);
+                            }
+                            delta.extend_from_slice(&((cut / 0.25).round().clamp(0.0, 65535.0) as u16).to_le_bytes());
+                            h16.extend_from_slice(&((h[p] / 0.5).round().clamp(-32768.0, 32767.0) as i16).to_le_bytes());
+                        }
+                    }
+                    cuts.sort_by(f32::total_cmp);
+                    let p50 = cuts.get(cuts.len() / 2).copied().unwrap_or(0.0);
+                    let delta_bytes = miniz_oxide::deflate::compress_to_vec(&delta, 6).len();
+                    let h16_bytes = miniz_oxide::deflate::compress_to_vec(&h16, 6).len();
+                    if let Some(dd) = &dump_dir {
+                        if dump.contains(&k) {
+                            let wr = |name: &str, v: &[f32]| {
+                                let b: Vec<u8> = v.iter().flat_map(|x| x.to_le_bytes()).collect();
+                                std::fs::write(format!("{dd}/tile{k}-{name}-{w}x{hgt}.f32"), b).unwrap();
+                            };
+                            wr("orig", &orig);
+                            wr("carved", &h);
+                            let a: Vec<f32> = area.iter().map(|&x| x as f32).collect();
+                            wr("area", &a);
+                        }
+                    }
+                    writeln!(
+                        out.lock().unwrap(),
+                        "{k} {ti} {tj} {land_frac:.3} 0 {dirs_s:.2} {sample_s:.2} {route_s:.2} {carve_s:.2} {:.2} {max_cut:.1} {p50:.2} {} {core_cells} {delta_bytes} {h16_bytes} {}",
+                        t_all.elapsed().as_secs_f64(),
+                        cuts.len(),
+                        inflow.len()
+                    )
+                    .unwrap();
+                    out.lock().unwrap().flush().unwrap();
+                });
+            }
+        });
+    }
 }
