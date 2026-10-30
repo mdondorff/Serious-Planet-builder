@@ -8,6 +8,7 @@ pub mod accept_m8;
 pub mod calibration;
 pub mod clock;
 pub mod compare;
+pub mod desktop;
 pub mod gate;
 pub mod host;
 pub mod lit;

@@ -1936,6 +1936,15 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         }
         AdapterPolicy::HighPerformance
     };
+    // A smoke run on the discrete GPU is NOT RUN while the Windows session is locked (TEST-073, owner 2026-10-30): the present and acquire calls stall for
+    // seconds and the device is lost, so the result would say nothing about the code. Reported, never a pass; the marker is counted by `cargo xtask`.
+    if o.smoke && matches!(policy, AdapterPolicy::HighPerformance) {
+        if let planet_perf::desktop::Desktop::Locked(reason) = planet_perf::desktop::detect() {
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+            planet_perf::desktop::report("editor --smoke", &reason, now, now, false, planet_perf::desktop::marker_dir().as_deref());
+            return Ok(());
+        }
+    }
     // The display first: a machine without one is told so before any world is baked.
     let event_loop = EventLoop::new().map_err(|e| format!("{NO_DISPLAY}the event loop could not start: {e}"))?;
     crate::stall::phase_mark("event loop");
