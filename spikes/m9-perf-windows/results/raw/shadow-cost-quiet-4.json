@@ -1,0 +1,13 @@
+{
+  "scene": "shadow-cost",
+  "adapter": "NVIDIA GeForce RTX 3080 Ti Laptop GPU",
+  "owner_override": [],
+  "size": [2560, 1440],
+  "frames": 41,
+  "budget_ms": 1.5,
+  "poses": [
+    {"pose": "300m-sunset", "full_ms": 2.3818, "no_shadow_ms": 2.1514, "no_material_ms": 1.5237, "neither_ms": 1.2677, "compiled_out_ms": [1.9958, 1.4418, 1.0916], "round_spread_ms": [0.0143, 0.0707, 0.0328, 0.0031], "shadow_ms": 0.3860, "material_ms": 0.9400, "together_ms": 1.2902}
+  ],
+  "near_budget": ["300m-sunset: 1.290 ms is within 20 % of the 1.5 ms budget (by the compiled-out shader variants when the row has them): not called met"],
+  "budget_failures": []
+}

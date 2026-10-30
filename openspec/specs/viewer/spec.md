@@ -1211,7 +1211,7 @@ Status: active
 Source: opus-planner (2026-10-25), owner: horizon shadows cannot be seen in the viewer; REND-038, VIEW-042
 
 #### Detail
-The title SHALL name a shade view other than normal, the local solar time at the camera of a moved sun (`local_solar_hours`: 12 when the sun is on the camera's meridian) while the editing light is off, and, on the lit path, a window without a chunk stage with "no chunk stage: no horizon shadows (open a store with a coupled run)". The usage and editor help texts SHALL name J, `[`, `]` and Backslash.
+The title SHALL name a shade view other than normal, the local solar time at the camera of a moved sun (`local_solar_hours`: 12 when the sun is on the camera's meridian) while the editing light is off, and, on the lit path, a window without the horizon jobs with "no horizon shadows (open a store with a coupled run)". The usage and editor help texts SHALL name J, `[`, `]` and Backslash.
 
 #### Scenario: Keys and sun
 - **WHEN** J is pressed seven times, then `]` twice and `[` once, then `[` twice more, then Backslash
