@@ -69,7 +69,7 @@ modes:
     --look <look.toml>       the presentation parameters per body (LOOK-001..005; exposure, scene units, histogram, tone curve; the file is outside the world definition and every cache key, so it never changes a tile): default the `<world stem>.look.toml` beside --world when it exists, else the Earth defaults; a bad file is refused naming the key and the value
     --world <definition.toml> [--global-res N]   terrain scene (a view, --stream, --bundle, --flight, --perf, --perf-smoke): the world's height field (world.height_field, default the eroded field) over an in-memory bake of N cells per face edge (default 256, at most 1024); without it a view, stream or bundle is the seed-only reference field and --perf is the default world of --seed; a bundle records the world, --repro reads it back
     --bundle <file>          write a repro bundle of the render
-    --repro <file>           replay a repro bundle (see cargo xtask repro)
+    --repro <file> [--store DIR]   replay a repro bundle (see cargo xtask repro); a bundle of a bake beyond the in-memory limit replays from its stored bake (read-only)
     --out <file.png>         write the image
     --adapter software|hardware   adapter policy (default: PLANET_ADAPTER or software)
     --draw per-draw|indirect   how the terrain renderer submits draws (REND-015): per-draw is the reference loop, indirect one multi-draw per buffer run from a CPU-built argument buffer (default indirect where the adapter supports it, else per-draw)
@@ -965,7 +965,7 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         if o.replay_path.is_some() {
             return pathreplay::replay_path(&ctx, o, bundle, out);
         }
-        return skeleton::replay(&ctx, bundle, o.out.as_deref(), out);
+        return skeleton::replay(&ctx, bundle, o.out.as_deref(), o.store.as_deref(), out);
     }
     match o.scene.as_str() {
         "tiles" => skeleton::render_tiles(&ctx, o, out),
