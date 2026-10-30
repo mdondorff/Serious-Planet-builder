@@ -13,6 +13,7 @@ Closed: 2026-10-30
 - Read: the publication list and the six project pages (h-schott.github.io/p/...); the MIT-licensed reference code on GitHub (READMEs and the compute shaders and headers named below); SPIKE-52, which had a helper read the full texts of the 2023 and 2024 erosion papers (timings quoted from it).
 - **Not read: the paper PDFs.** Every HAL link (hal.science/.../document) returned a bot-check page to the fetcher. Getting past bot checks is out of bounds, so nothing was downloaded and nothing was stored in `C:/DEV/SeriousPlanetData/papers/schott/`. Missing as a result: the descriptors paper's timing table, its correlation matrix and its artist study, and the PhaseTree, iso-contour and sphere-carving papers' numbers.
 - Next step if wanted: the owner downloads the descriptors PDF by hand into that folder, and a short follow-up adds the correlation matrix (which cheap descriptor stands in for which expensive one).
+- **Follow-up, 2026-10-30:** the owner downloaded the descriptors and the 2024 multi-scale erosion papers by hand (to `C:/DEV/SeriousPlanetData/papers/`, outside the repo). Both were read; the section "Follow-up: the two full texts" at the end holds what they change. They correct the scorecard design and the per-chunk estimate of the sections below.
 - Licences, checked through the GitHub API: Contours, SphereCarvingRelease, terrain-descriptors, MultiScaleErosion and StreamPowerErosion are MIT. The PhaseTree has no code link.
 
 ## Publications
@@ -70,6 +71,87 @@ What descriptors could control in the generator:
 2. Adapt Multi-Scale Erosion's thermal and deposition kernels as CPU Jacobi passes with a bounded halo, first as a spike on one chunk against the scorecard (cost per chunk, slope distribution at the angle of repose).
 3. Keep a stored global x2 amplification as an option only with an ADR for a GPU bake whose stored output is the canonical field (CON-07, CON-14); disk and bake time fit at x2, not at x4.
 4. The uplift paper stays a reference (GEN-063 has taken its idea; the A-net decision stands). The iso-contour, sphere-carving and PhaseTree papers do not apply to M9.
+
+## Follow-up: the two full texts (2026-10-30)
+Read as untrusted data (text extracted to a temporary folder outside the repo; the correlation figure viewed as an image). Neither the PDFs nor the text are in git.
+- Terrain descriptors for landscape synthesis, analysis and simulation, CGF 44(2), https://doi.org/10.1111/cgf.70080
+- Terrain Amplification using Multi-Scale Erosion, TOG 43(4), https://doi.org/10.1145/3658200
+
+### Descriptors paper: timing table (its Tables 1 and 2)
+- Method: C++, **one CPU thread**, a 1024^2 height field of 952 km2 in the Alps (about 30 m cells), mean of five runs. Every cost is a factor of the average slope's time, **18 ms** (about 17 ns a cell). Metrics with a radius were timed at 100, 500, 1,500 and 5,000 m and cost grows with the square of the radius.
+
+| Descriptor | Cost factor (radius 100 / 500 / 1,500 / 5,000 m) |
+|---|---|
+| Average slope | 1 |
+| Laplacian | 1 |
+| Curvatures (min, max, mean, profile, contour, tangential; quadric fit) | 4 / 23 / 175 / 1,800 |
+| Local relief | 1 / 5 / 50 / 530 |
+| Local mean and variance | 1 / 5 / 30 / 340 |
+| TPI | 1 / 4 / 27 / 300 (8 at any radius with summed-area tables) |
+| TRI / rugosity / roughness | 1-6 at 100 m, 400-960 at 5 km |
+| Hillslope asymmetry | 12 / 18 / 120 / 950 |
+| Openness (positive, negative) | 8 / 20 / 48 / 130 |
+| Geomorphons | 6 / 15 / 41 / 130 |
+| Sky-view factor, accessibility | 120-150 per ray direction |
+| Approximate sky-view factor | 2 |
+| Viewshed (one point) / visibility index | 2e5 / 1e11 |
+| Drainage area D8 / MFD | 7 / 13 |
+| Stream power index | 9 |
+| Height above nearest drainage | 11 |
+| Prominence, dominance (incl. divide tree) | 20, 15 |
+| Max branch length | 75 |
+
+### Descriptors paper: correlation matrix (its Figure 52, one example terrain; values read from the figure, about ±0.1)
+| Group | Strongly correlated (about 0.7-0.95) | What it means for a scorecard |
+|---|---|---|
+| Relief and roughness | local variance, TRI, rugosity with each other; all moderately with slope (about 0.5) | local relief stands for the group |
+| Curvatures | max, mean, min, tangential and profile with each other; contour less; Gaussian apart | keep profile and contour; mean adds nothing |
+| Position | fractional Laplacian, TPI, percentile, ORS, Jut with each other (about 0.8-0.9), and with distance and depth to water (about 0.7) | TPI stands for the group; the authors name TPI, fractional Laplacian, ORS and Jut as cheap proxies of the visibility index |
+| Sky | accessibility, sky-view factor and its approximation with each other; the approximation strongly anti-correlated with slope | the cheap approximation (factor 2) replaces the ray-cast ones |
+| Hydrology | drainage area D8 and MFD (about 0.95), stream power (m = n = 1) with them; wetness index weaker | one drainage-area variant suffices |
+| Light | irradiance at 45 degrees N with northness | GEN-076's insolation already covers it |
+- Geomorphons, drainage density and HAND are not in the matrix.
+
+### Descriptors paper: artist study
+- Professional artists from the games industry rated grey-scale maps of the metrics on their own synthetic terrains.
+- Useful in their eyes:
+  - maximum branch length for mountain ridges;
+  - curvature variants for detail on bare bedrock;
+  - openness for snow patterns;
+  - drainage area as the flow map;
+  - the fractional Laplacian as a proxy for sediment deposition;
+  - viewsheds for placing villages or castles.
+- Too imprecise for a pipeline: hillslope asymmetry, distance to a river (HAND's relative), roughness.
+
+### What changes in the scorecard (the minimal prototype above)
+- **Descriptors, 8 become 7.**
+  - Kept: slope; profile and contour curvature; local relief at 1 and 5 km; TPI at 300 m and 2 km; geomorphons at 1 km; D8 drainage area with drainage density.
+  - Dropped: hillslope asymmetry (rated imprecise, factor 12-950); HAND (correlated with TPI through depth to water, factor 11).
+  - Local variance, TRI and rugosity stay out: local relief stands for them.
+- **Cost, revised from the paper's factors.** Per 3600^2 raster on one thread: about 75 slope-times = 75 x 0.22 s, about 16 s. The terms: slope 1, two curvatures 8, relief by blocks about 2, two TPIs with summed-area tables 16, geomorphons at 1-1.5 km about 41, D8 7. Geomorphons are half the cost.
+  - For 9 tiles and 18 sites (27 rasters): about 7 min on one thread, **about 1 min** with one raster per thread. The earlier "under 30 s" was low. Generator sampling time is extra (SPIKE-55).
+- **M10 drivers.** Openness and the approximate sky-view factor are cheap (2-48) and artist-endorsed for snow and ambient terms: candidates beside GEN-076. Not scorecard items.
+
+### Multi-scale erosion paper: what changes
+- **Timings (its Table 2, ms per iteration on an RTX 3080, GLSL compute):**
+
+| Resolution | Erosion | Thermal | Deposition |
+|---|---|---|---|
+| 1024^2 | 0.33 | 0.06 | 0.69 |
+| 2048^2 | 1.27 | 0.23 | 2.70 |
+| 8192^2 | 19.2 | 3.51 | 41.5 |
+
+  Deposition costs about twice erosion; thermal a fifth. Height retargeting and multi-scale breaching run on the CPU and take "a few seconds" at 4096^2.
+- **Iteration counts (its Table 1):** 300-1,700 erosion iterations per level at 1024-2048, 400-6,000 at 128-512; deposition is controlled by its step count (400 and 800 steps illustrated).
+- **Drainage is one routing step per erosion iteration**, reusing the previous step's area. Flow therefore spreads only as far as the iteration count reaches. The authors' limitations say the method needs the whole map at every step, and that patches beyond 8,192^2 leave drainage across patch borders as an open challenge. That is this engine's chunk problem, which the A-net solves with a global network (ADR 0077).
+- **Revised per-chunk estimate** for a 5 km chunk at 4 m (about 1.5 M cells, 1.5x the 1024^2 timings):
+  - Full E+T+D at about 1,000 iterations: 1.6 ms a GPU iteration, so 20-50x on the CPU gives **30-80 s**. The 30-90 s range holds.
+  - Thermal and deposition only, with drainage seeded from the A-net: 1.1 ms GPU, 23-56 ms CPU an iteration. At 400-800 deposition steps that is **9-45 s**, still far over GEN-052's 4 s.
+  - Thermal alone is cheap: about 2-5 ms CPU a pass, so 100 passes take 0.2-0.5 s.
+- **Verdict stays ADAPT, with a narrower runtime scope:**
+  - In the chunk stage only thermal stabilisation with a noise-perturbed critical slope (the paper perturbs it to avoid uniform slopes), about 100 passes.
+  - Deposition and fluvial erosion belong in the bake, with the drainage area seeded from the A-net instead of iterated.
+  - Recommendation 2 changes accordingly: the one-chunk spike tests thermal passes in the chunk stage, and deposition on a bake region.
 
 ## Visuals
 A desk study: nothing rendered.
