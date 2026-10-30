@@ -40,6 +40,7 @@ Sources: roadmap M9 and its design constraints (2026-10-28); `docs/briefings/wee
 | R8 | Switch the default store; retire the M8 store's channels nobody reads | 1-2 PRs | explorer | criteria 1, 2, 6 |
 - Total: about 30-45 PRs, 50-75 lane-hours, one overnight bake (two if the first fails), 4-6 perf windows.
 - Calendar (owner back 2026-11-09): R0 and R1 in the first week; R3, R3b and R4 by the end of the second; R5 to R7 in weeks three and four; acceptance about 2026-12-04, at full quota.
+- The week plan's month table hoped for M9's acceptance by about 2026-11-22; 2026-12-04 is the realistic figure. The owner picks.
 
 ## What needs the owner's eye, and when
 | When | What | Form |
