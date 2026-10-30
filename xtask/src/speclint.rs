@@ -704,6 +704,30 @@ pub fn run(root: &Path) -> Res {
     report.errors.extend(adr_maintenance_errors(&adr_changes_against_base(root)));
     // BUILD-010: every log fragment is one well-formed entry.
     report.errors.extend(crate::logcmd::fragment_errors(&crate::logcmd::read_fragments(root)?));
+    // BUILD-028: the retired terms of docs/domain.md section 8 stay out of the current specs and working docs.
+    {
+        let read = |rel: &str| std::fs::read_to_string(root.join(rel)).ok();
+        let domain = read("docs/domain.md").unwrap_or_default();
+        let terms = crate::retired::retired_terms(&domain);
+        let mut checked: Vec<(String, String)> = specs
+            .iter()
+            .filter(|(n, _)| !n.starts_with("change:"))
+            .map(|(n, t)| (format!("openspec/specs/{n}/spec.md"), t.clone()))
+            .collect();
+        let mut docs: Vec<String> =
+            ["docs/domain.md", "docs/status.md", "docs/roadmap.md", "docs/README.md"].iter().map(|s| s.to_string()).collect();
+        if let Ok(rd) = std::fs::read_dir(root.join("docs").join("briefings")) {
+            docs.extend(rd.flatten().filter(|e| e.path().is_file()).map(|e| format!("docs/briefings/{}", e.file_name().to_string_lossy())));
+        }
+        for rel in docs.into_iter().filter(|p| crate::retired::is_checked(p)) {
+            if let Some(text) = read(&rel) {
+                checked.push((rel.clone(), crate::retired::checked_text(&rel, &text)));
+            }
+        }
+        let found = crate::retired::findings(&terms, &checked);
+        report.errors.extend(found.errors.clone());
+        report.summary.push_str(&crate::retired::pending_summary(&found));
+    }
     eprint!("{}", report.summary);
     if report.errors.is_empty() {
         eprintln!("spec-lint ok");

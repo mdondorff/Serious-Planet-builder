@@ -75,5 +75,15 @@ Items the plan above misses, by the PR that takes them. Each is confirmed by the
 - Archived changes `m8-chunk-evict`, `m8-chunk-track-set`, `m8-edits-one-round`, `m8-edits-over-chunks`, `m8-edits-reuse`, `m8-editor-stalls`, `m8-envelope-late-chunks`, `m8-edit-latency-chunks` are archived without syncing their deltas (the audit's docs PR 1); B6 removes their subject.
 - `spec-lint` now fails a retired term of `docs/domain.md` section 8 (BUILD-028) once a row loses its *code removal pending* marker, so the removal PRs end with the marker gone and no mention left in the current specs and docs.
 
+## Merged changes that stay active until their code goes (declutter batch 1, opus-planner 2026-10-30)
+Four merged changes are still in `openspec/changes/` because chunk code cites their IDs. Each is archived without syncing its delta in the PR that removes the citing code:
+| Change | ID cited | Archived in |
+|---|---|---|
+| `m8-edits-reuse` | GEN-087 | PR 4 `rm-chunks-edit` (`regionheights.rs`, `editresolve.rs`) |
+| `m8-editor-stalls` | STRM-063 (chunk-only: the main thread never makes the version of a chunk that is not ready; cited by `streaming/tests/chunks.rs` and `oracle_edit_resolve.rs`) | PR 5 `rm-chunks-streaming` |
+| `m8-edit-latency-chunks` | TEST-056 | PR 1 `rm-chunks-flag` (the chunk side of the edit-latency scene) |
+| `m8-envelope-late-chunks` | TEST-059 | PR 1 `rm-chunks-flag` (the envelope scene's chunk step) |
+`m8-horizon-march-simd` (GEN-086) and `m8-horizon-share` (STRM-061) belong to the ADR 0085 build, not to this removal.
+
 ## Out of scope
 Horizon maps and jobs (SPIKE-56). The global coupled run and its store. The base terrain, tiles, stamps and brushes. Any new erosion design.
