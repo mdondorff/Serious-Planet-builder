@@ -34,6 +34,8 @@ mod globe;
 mod globe_session;
 #[path = "height_aware.rs"]
 mod height_aware;
+#[path = "level_pop.rs"]
+mod level_pop;
 #[path = "lod.rs"]
 mod lod;
 #[path = "lod_capping.rs"]
