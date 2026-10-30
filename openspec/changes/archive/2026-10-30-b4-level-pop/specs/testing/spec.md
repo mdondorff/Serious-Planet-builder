@@ -1,6 +1,6 @@
 ## ADDED Requirements
 
-### Requirement: TEST-071 A descent draws no level pop
+### Requirement: TEST-072 A descent draws no level pop
 `planet_frame::popcheck::judge` SHALL take the per-frame trace of fixed probes (level, drawn height, distance to the eye) and the focal length in pixels, and SHALL measure the jump of a probe's drawn height, in pixels, at every level change. The verdict SHALL be FAIL when the p99 is over 0.5 px or the largest over 2 px, NOT EXERCISED when fewer than 10 level changes occurred, PASS otherwise. A failure SHALL name the frame, the probe, both levels and the jump in metres and pixels. A scripted descent over the morph model of `LodParams` (3000 km to 2 m, 2 % a frame) SHALL pass, and the same descent without morphing SHALL fail.
 
 Verify: A

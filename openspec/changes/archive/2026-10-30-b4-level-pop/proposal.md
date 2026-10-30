@@ -7,5 +7,5 @@ Option B item B4-2 (design PR #910, planner order 2026-10-30): the owner's pass 
 3. The GPU and real-store run of the same detector is a later step (it waits for the owner's test to be done).
 
 ## Impact
-- Spec: `testing` gains TEST-071.
+- Spec: `testing` gains TEST-072.
 - Code: `crates/frame/src/popcheck.rs`, `crates/frame/tests/level_pop.rs`. No change to what is drawn.

@@ -1,4 +1,4 @@
-//! The level-pop detector of a descent (TEST-071): pure over a trace of the drawn heights of fixed probes, no GPU. A probe whose drawn level
+//! The level-pop detector of a descent (TEST-072): pure over a trace of the drawn heights of fixed probes, no GPU. A probe whose drawn level
 //! changes between two frames must not jump on screen; the morph (LOD-008) is what hides the switch.
 
 /// One probe in one frame: the level of the node that draws it, the height that node draws there and the distance from the eye.
@@ -80,7 +80,7 @@ fn valid(s: &Sample) -> bool {
     s.height_m.is_finite() && s.distance_m.is_finite() && s.distance_m > 0.0
 }
 
-/// The verdict of a descent (TEST-071).
+/// The verdict of a descent (TEST-072).
 pub fn judge(trace: &[Vec<Option<Sample>>], focal_px: f64) -> Verdict {
     let jumps = level_change_jumps(trace, focal_px);
     let changes = jumps.len();
@@ -114,7 +114,7 @@ mod tests {
         vec![vec![s(3, 10.0); 12], vec![s(4, 10.0 + jump); 12]]
     }
 
-    // spec: TEST-071
+    // spec: TEST-072
     #[test]
     fn a_smooth_trace_passes_and_a_planted_jump_fails_naming_the_frame_probe_and_levels() {
         assert!(matches!(judge(&trace(0.0), 1000.0), Verdict::Pass { changes: 12, .. }));
@@ -130,7 +130,7 @@ mod tests {
         }
     }
 
-    // spec: TEST-071
+    // spec: TEST-072
     #[test]
     fn too_few_level_changes_prove_nothing() {
         let mut t = trace(0.0);
@@ -142,7 +142,7 @@ mod tests {
         assert_eq!(judge(&none, 1000.0), Verdict::NotExercised { changes: 0 });
     }
 
-    // spec: TEST-071
+    // spec: TEST-072
     #[test]
     fn an_uncovered_probe_and_a_jump_without_a_level_change_are_not_level_pops() {
         let mut t = trace(0.0);
@@ -153,7 +153,7 @@ mod tests {
         assert!(jumps.iter().all(|p| p.jump_m == 0.0));
     }
 
-    // spec: TEST-071
+    // spec: TEST-072
     #[test]
     fn a_change_across_frames_in_which_the_probe_was_not_covered_counts() {
         let t: Vec<Vec<Option<Sample>>> = vec![vec![s(3, 10.0); 12], vec![None; 12], vec![s(4, 13.0); 12]];
@@ -162,7 +162,7 @@ mod tests {
         assert!(jumps.iter().all(|p| p.frame == 2 && (p.jump_m - 3.0).abs() < 1e-12));
     }
 
-    // spec: TEST-071
+    // spec: TEST-072
     #[test]
     fn a_sample_that_is_not_a_number_or_has_no_distance_fails_and_never_passes() {
         let mut bad = trace(0.0);

@@ -1,4 +1,4 @@
-//! A scripted descent draws no level pop (TEST-071). Tier A, no GPU: the drawn height of fixed probes over a synthetic height pyramid, through the morph model
+//! A scripted descent draws no level pop (TEST-072). Tier A, no GPU: the drawn height of fixed probes over a synthetic height pyramid, through the morph model
 //! of `LodParams` (LOD-008), judged by `popcheck`; the same descent without morphing is the planted failure the detector must catch.
 
 use planet_frame::popcheck::{judge, Sample, Verdict};
@@ -63,7 +63,7 @@ fn descent(morph: bool) -> (Vec<Vec<Option<Sample>>>, f64) {
     (trace, focal_px)
 }
 
-// spec: TEST-071
+// spec: TEST-072
 #[test]
 fn a_descent_through_the_morph_draws_no_level_pop() {
     let (trace, focal_px) = descent(true);
@@ -71,7 +71,7 @@ fn a_descent_through_the_morph_draws_no_level_pop() {
     assert!(matches!(v, Verdict::Pass { .. }), "{}", v.line());
 }
 
-// spec: TEST-071
+// spec: TEST-072
 #[test]
 fn the_same_descent_without_morphing_fails_naming_a_frame_probe_and_levels() {
     let (trace, focal_px) = descent(false);

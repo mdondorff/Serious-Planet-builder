@@ -1,0 +1,15 @@
+   Compiling planet v0.0.0 (C:\DEV\Serious-Planet-Builder\.claude\worktrees\sonnet-spikes-36fc88\crates\app)
+    Finished `release` profile [optimized] target(s) in 33.14s
+     Running unittests src\lib.rs (target\release\deps\planet-b3cdcc9954cb66b1.exe)
+
+running 1 test
+A-net chunk scene: bake 16384 cells per face edge of the store C:/DEV/SeriousPlanetData/global16384, coupled run 80 steps
+chunk 0x0b000000002bd53a (face 0), the river of 14489279 km2 at its coarse cell
+275 poses: 14 bundles, 37 stall reports, flights 4 altitudes x 8 places; field: the world's default (no chunk stage)
+RESULT [envelope flights] 224 poses, 0 with held-back tiles, held total 0 of 394932 selected nodes
+RESULT [owner bundles] 14 poses, 0 with held-back tiles, held total 0 of 18714 selected nodes
+RESULT [stall report poses] 37 poses, 0 with held-back tiles, held total 0 of 39198 selected nodes
+test globalperf::tests::held_nochunk_report ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 228 filtered out; finished in 37.29s
+

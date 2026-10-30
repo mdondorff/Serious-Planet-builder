@@ -77,7 +77,7 @@ pub fn replay_path(ctx: &GpuContext, o: &Options, bundle: &Path, out: &mut dyn W
     if !text.starts_with("planet-terrain-repro") {
         return Err(format!("{}: --replay-path replays a terrain repro bundle (planet-terrain-repro)", bundle.display()));
     }
-    let (b, world) = open_terrain_bundle(&text, bundle)?;
+    let (b, world) = open_terrain_bundle(&text, bundle, o.store.as_deref())?;
     let log = PathLog::from_text(&std::fs::read_to_string(path).map_err(|e| format!("reading {}: {e}", path.display()))?)
         .map_err(|e| format!("{}: {e}", path.display()))?;
     if log.is_empty() {
