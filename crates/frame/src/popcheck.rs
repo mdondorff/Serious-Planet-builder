@@ -50,33 +50,43 @@ impl Verdict {
     }
 }
 
-/// The jumps at the level changes of `trace[frame][probe]` (`None`: the probe is not covered that frame), in pixels at `focal_px`.
+/// The jumps at the level changes of `trace[frame][probe]` (`None`: the probe is not covered that frame), in pixels at `focal_px`. A probe is compared with
+/// its last covered frame, so a change across frames in which it was not covered counts. A sample whose distance is not positive and finite, or whose
+/// height is not finite, gives a jump of NaN pixels: [`judge`] fails on it rather than leave it out.
 pub fn level_change_jumps(trace: &[Vec<Option<Sample>>], focal_px: f64) -> Vec<Pop> {
+    let probes = trace.first().map_or(0, Vec::len);
+    let mut last: Vec<Option<Sample>> = vec![None; probes];
     let mut out = Vec::new();
-    for (frame, pair) in trace.windows(2).enumerate() {
-        for (probe, (a, b)) in pair[0].iter().zip(&pair[1]).enumerate() {
-            if let (Some(a), Some(b)) = (a, b) {
-                if a.level != b.level {
+    for (frame, row) in trace.iter().enumerate() {
+        assert_eq!(row.len(), probes, "frame {frame} has {} probes, the first has {probes}", row.len());
+        for (probe, (prev, now)) in last.iter_mut().zip(row).enumerate() {
+            let Some(b) = *now else { continue };
+            if let Some(a) = *prev {
+                if a.level != b.level || !valid(&a) || !valid(&b) {
                     let jump_m = (b.height_m - a.height_m).abs();
-                    out.push(Pop {
-                        frame: frame + 1,
-                        probe,
-                        level_before: a.level,
-                        level_after: b.level,
-                        jump_m,
-                        jump_px: jump_m * focal_px / b.distance_m,
-                    });
+                    let jump_px = if valid(&a) && valid(&b) { jump_m * focal_px / b.distance_m } else { f64::NAN };
+                    if a.level != b.level || jump_px.is_nan() {
+                        out.push(Pop { frame, probe, level_before: a.level, level_after: b.level, jump_m, jump_px });
+                    }
                 }
             }
+            *prev = Some(b);
         }
     }
     out
+}
+
+fn valid(s: &Sample) -> bool {
+    s.height_m.is_finite() && s.distance_m.is_finite() && s.distance_m > 0.0
 }
 
 /// The verdict of a descent (TEST-071).
 pub fn judge(trace: &[Vec<Option<Sample>>], focal_px: f64) -> Verdict {
     let jumps = level_change_jumps(trace, focal_px);
     let changes = jumps.len();
+    if let Some(bad) = jumps.iter().find(|p| !p.jump_px.is_finite()) {
+        return Verdict::Fail { changes, p99_px: f64::NAN, worst: *bad };
+    }
     if changes < MIN_CHANGES {
         return Verdict::NotExercised { changes };
     }
@@ -139,7 +149,34 @@ mod tests {
         t[0][0] = None;
         t[1][1] = s(3, 99.0);
         let jumps = level_change_jumps(&t, 1000.0);
-        assert_eq!(jumps.len(), 10, "the uncovered probe and the unchanged level are left out");
+        assert_eq!(jumps.len(), 10, "the uncovered first sample and the unchanged level are left out");
         assert!(jumps.iter().all(|p| p.jump_m == 0.0));
+    }
+
+    // spec: TEST-071
+    #[test]
+    fn a_change_across_frames_in_which_the_probe_was_not_covered_counts() {
+        let t: Vec<Vec<Option<Sample>>> = vec![vec![s(3, 10.0); 12], vec![None; 12], vec![s(4, 13.0); 12]];
+        let jumps = level_change_jumps(&t, 1000.0);
+        assert_eq!(jumps.len(), 12);
+        assert!(jumps.iter().all(|p| p.frame == 2 && (p.jump_m - 3.0).abs() < 1e-12));
+    }
+
+    // spec: TEST-071
+    #[test]
+    fn a_sample_that_is_not_a_number_or_has_no_distance_fails_and_never_passes() {
+        let mut bad = trace(0.0);
+        bad[1][5] = s(4, 13.0); // a real 3 px pop beside the invalid samples
+        bad[1][6] = Some(Sample { level: 4, height_m: f64::NAN, distance_m: 1000.0 });
+        assert!(matches!(judge(&bad, 1000.0), Verdict::Fail { .. }), "a NaN height");
+        let mut zero = trace(0.0);
+        zero[1][2] = Some(Sample { level: 4, height_m: 10.0, distance_m: 0.0 });
+        assert!(matches!(judge(&zero, 1000.0), Verdict::Fail { .. }), "no distance");
+        let mut neg = trace(0.0);
+        neg[1][2] = Some(Sample { level: 4, height_m: 10.0, distance_m: -5.0 });
+        assert!(matches!(judge(&neg, 1000.0), Verdict::Fail { .. }), "a negative distance");
+        // Too few changes but one invalid sample: still a failure, not NOT EXERCISED.
+        let few = vec![vec![s(3, 1.0); 2], vec![Some(Sample { level: 3, height_m: f64::NAN, distance_m: 10.0 }), s(3, 1.0)]];
+        assert!(matches!(judge(&few, 1000.0), Verdict::Fail { .. }));
     }
 }

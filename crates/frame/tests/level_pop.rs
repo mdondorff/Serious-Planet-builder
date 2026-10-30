@@ -77,8 +77,12 @@ fn the_same_descent_without_morphing_fails_naming_a_frame_probe_and_levels() {
     let (trace, focal_px) = descent(false);
     let v = judge(&trace, focal_px);
     match v {
-        Verdict::Fail { changes, worst, .. } => {
-            assert!(changes >= 10 && worst.level_before != worst.level_after && worst.jump_px > 2.0, "{}", v.line());
+        Verdict::Fail { changes, p99_px, worst } => {
+            assert!(
+                changes >= 10 && worst.level_before != worst.level_after && p99_px > planet_frame::popcheck::P99_LIMIT_PX,
+                "{}",
+                v.line()
+            );
         }
         other => panic!("a hard switch must fail: {}", other.line()),
     }
