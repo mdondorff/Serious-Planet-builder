@@ -1,1 +1,0 @@
-- 2026-10-28 M8-F step 2: horizon maps baked from the base terrain without the chunk stage (ChunkSource, BaseTerrain), the gate judges bakes at every site and the re-bake within 10 s of its edit, the edit-latency scene prints verdict (10 s, horizon maps) (STRM-064, TEST-065)

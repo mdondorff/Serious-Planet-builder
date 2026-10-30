@@ -1,1 +1,0 @@
-- 2026-10-30 **preview-drag-state** (REND-033): during a drag the preview delta is applied only to stale tiles still at the oldest state (their key when the preview began) and not to tiles a cap-dropped stamp touches; tiles refreshed at an intermediate state are drawn as they are; no golden changed
