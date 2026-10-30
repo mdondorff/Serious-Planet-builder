@@ -1,0 +1,85 @@
+   Compiling planet v0.0.0 (C:\DEV\Serious-Planet-Builder\.claude\worktrees\sonnet-spikes-36fc88\crates\app)
+    Finished `release` profile [optimized] target(s) in 32.02s
+     Running unittests src\lib.rs (target\release\deps\planet-b3cdcc9954cb66b1.exe)
+
+running 1 test
+A-net chunk scene: bake 16384 cells per face edge of the store C:/DEV/SeriousPlanetData/global16384, coupled run 80 steps
+chunk 0x0b000000002bd53a (face 0), the river of 14489279 km2 at its coarse cell
+coupled lattice n 2048, cell about 4287 m, rivers from 100 km2
+chunk 1/57 random (3, 1148, 1215): 15 river cells, 15 segments
+chunk 2/57 random (0, 512, 502): 16 river cells, 16 segments
+chunk 3/57 random (5, 894, 982): 14 river cells, 14 segments
+chunk 4/57 random (2, 1929, 581): 14 river cells, 14 segments
+chunk 5/57 random (3, 1482, 1275): 18 river cells, 18 segments
+chunk 6/57 random (5, 1019, 827): 15 river cells, 15 segments
+chunk 7/57 random (0, 1696, 812): 18 river cells, 18 segments
+chunk 8/57 random (5, 884, 1277): 14 river cells, 14 segments
+chunk 9/57 random (0, 897, 1323): 23 river cells, 23 segments
+chunk 10/57 random (2, 1854, 1609): 18 river cells, 18 segments
+chunk 11/57 random (3, 684, 1248): 16 river cells, 16 segments
+chunk 12/57 random (2, 1936, 1234): 16 river cells, 16 segments
+chunk 13/57 random (0, 634, 143): 20 river cells, 20 segments
+chunk 14/57 random (3, 1201, 897): 17 river cells, 17 segments
+chunk 15/57 random (0, 1678, 908): 15 river cells, 15 segments
+chunk 16/57 random (2, 1989, 1448): 17 river cells, 17 segments
+chunk 17/57 random (5, 1612, 946): 26 river cells, 26 segments
+chunk 18/57 random (2, 1888, 803): 11 river cells, 11 segments
+chunk 19/57 random (4, 73, 1949): 11 river cells, 11 segments
+chunk 20/57 random (3, 1486, 1085): 16 river cells, 16 segments
+chunk 21/57 random (3, 288, 525): 16 river cells, 16 segments
+chunk 22/57 random (5, 1987, 855): 14 river cells, 14 segments
+chunk 23/57 random (3, 625, 712): 19 river cells, 19 segments
+chunk 24/57 random (3, 150, 435): 13 river cells, 13 segments
+chunk 25/57 random (2, 2041, 699): 15 river cells, 15 segments
+chunk 26/57 random (0, 1943, 1890): 14 river cells, 14 segments
+chunk 27/57 random (3, 243, 755): 14 river cells, 14 segments
+chunk 28/57 random (1, 324, 2004): 21 river cells, 21 segments
+chunk 29/57 random (0, 1001, 858): 17 river cells, 17 segments
+chunk 30/57 random (1, 1931, 182): 10 river cells, 10 segments
+chunk 31/57 random (0, 1319, 1207): 20 river cells, 20 segments
+chunk 32/57 random (0, 301, 1810): 21 river cells, 21 segments
+chunk 33/57 random (0, 1558, 1091): 10 river cells, 10 segments
+chunk 34/57 random (2, 1850, 850): 14 river cells, 14 segments
+chunk 35/57 random (0, 1668, 1095): 27 river cells, 27 segments
+chunk 36/57 random (1, 71, 849): 12 river cells, 12 segments
+chunk 37/57 random (5, 659, 1341): 15 river cells, 15 segments
+chunk 38/57 random (3, 126, 769): 10 river cells, 10 segments
+chunk 39/57 random (1, 118, 924): 15 river cells, 15 segments
+chunk 40/57 random (1, 25, 1968): 14 river cells, 14 segments
+chunk 41/57 random (5, 1278, 868): 11 river cells, 11 segments
+chunk 42/57 random (1, 1570, 880): 8 river cells, 8 segments
+chunk 43/57 random (3, 22, 124): 9 river cells, 9 segments
+chunk 44/57 random (0, 721, 504): 21 river cells, 21 segments
+chunk 45/57 random (0, 1170, 843): 18 river cells, 18 segments
+chunk 46/57 random (0, 1034, 737): 12 river cells, 12 segments
+chunk 47/57 random (0, 584, 536): 14 river cells, 14 segments
+chunk 48/57 random (5, 762, 1255): 14 river cells, 14 segments
+chunk 49/57 site (0, 744, 360): 18 river cells, 18 segments
+chunk 50/57 site (0, 743, 359): 13 river cells, 13 segments
+chunk 51/57 site (0, 744, 359): 16 river cells, 16 segments
+chunk 52/57 site (0, 745, 359): 13 river cells, 13 segments
+chunk 53/57 site (0, 743, 360): 15 river cells, 15 segments
+chunk 54/57 site (0, 745, 360): 13 river cells, 13 segments
+chunk 55/57 site (0, 743, 361): 14 river cells, 14 segments
+chunk 56/57 site (0, 744, 361): 17 river cells, 17 segments
+chunk 57/57 site (0, 745, 361): 12 river cells, 12 segments
+RESULT [random] 48 chunks, 74.5 km of river inside them; rises of the exact centre line over 0.5 m: 0
+RESULT [random] channel width p50 17.5 p99 86.3 m; cut (ground minus bed on the centre line) p50 39.1 p90 65.0 p99 197.0 max 229.1 m
+RESULT [random] cut beyond the valley law (running-minimum excess) p50 29.7 p99 159.1 m; centre line with excess over 20 m 64.5 %, over 50 m 22.0 %
+RESULT [random] bank clamp lifted 1681 of 316116 evaluated vertices, by at most 0.0 m
+RESULT [random] level 12 (spacing 76.4 m): rises over 0.5 m 181 (242.8 per 100 km), over 2 m 12, over 10 m 0, size p50 1.08 p99 2.10 max 2.10 m, 9.19 km long; morph amplitude near the river p99 6.63 max 13.89 m (ground alone p99 3.70 max 4.79)
+RESULT [random] level 14 (spacing 19.1 m): rises over 0.5 m 0 (0.0 per 100 km), over 2 m 0, over 10 m 0, size p50 0.00 p99 0.00 max 0.00 m, -0.00 km long; morph amplitude near the river p99 1.63 max 13.89 m (ground alone p99 1.22 max 2.65)
+RESULT [random] level 16 (spacing 4.8 m): rises over 0.5 m 0 (0.0 per 100 km), over 2 m 0, over 10 m 0, size p50 0.00 p99 0.00 max 0.00 m, -0.00 km long; morph amplitude near the river p99 0.20 max 13.89 m (ground alone p99 0.30 max 1.04)
+RESULT [random] level 18 (spacing 1.2 m): rises over 0.5 m 0 (0.0 per 100 km), over 2 m 0, over 10 m 0, size p50 0.00 p99 0.00 max 0.00 m, -0.00 km long; morph amplitude near the river p99 0.01 max 6.95 m (ground alone p99 0.06 max 0.25)
+RESULT [site] 9 chunks, 3.1 km of river inside them; rises of the exact centre line over 0.5 m: 0
+RESULT [site] channel width p50 8.0 p99 8.0 m; cut (ground minus bed on the centre line) p50 119.3 p90 206.0 p99 212.6 max 213.2 m
+RESULT [site] cut beyond the valley law (running-minimum excess) p50 115.7 p99 209.0 m; centre line with excess over 20 m 91.1 %, over 50 m 73.4 %
+RESULT [site] bank clamp lifted 0 of 15301 evaluated vertices, by at most 0.0 m
+RESULT [site] level 12 (spacing 76.4 m): rises over 0.5 m 32 (1044.4 per 100 km), over 2 m 32, over 10 m 0, size p50 5.89 p99 6.14 max 6.15 m, 1.53 km long; morph amplitude near the river p99 14.98 max 14.98 m (ground alone p99 7.28 max 9.69)
+RESULT [site] level 14 (spacing 19.1 m): rises over 0.5 m 0 (0.0 per 100 km), over 2 m 0, over 10 m 0, size p50 0.00 p99 0.00 max 0.00 m, -0.00 km long; morph amplitude near the river p99 1.80 max 2.39 m (ground alone p99 1.98 max 2.19)
+RESULT [site] level 16 (spacing 4.8 m): rises over 0.5 m 0 (0.0 per 100 km), over 2 m 0, over 10 m 0, size p50 0.00 p99 0.00 max 0.00 m, -0.00 km long; morph amplitude near the river p99 0.10 max 0.10 m (ground alone p99 0.65 max 1.55)
+RESULT [site] level 18 (spacing 1.2 m): rises over 0.5 m 0 (0.0 per 100 km), over 2 m 0, over 10 m 0, size p50 0.00 p99 0.00 max 0.00 m, -0.00 km long; morph amplitude near the river p99 0.00 max 0.00 m (ground alone p99 0.17 max 0.29)
+test globalperf::tests::channel_a1_report ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 227 filtered out; finished in 27.51s
+

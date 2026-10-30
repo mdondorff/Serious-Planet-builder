@@ -5,4 +5,4 @@ A non-binding design exploration: the interactive editor MVP mock from the owner
 - Published as a private Design artifact (https://claude.ai/artifact/Srj3NGEYUkGQsfhne7kdCs); `Main.dc.html` is its source and needs the artifact's runtime (`support.js`), so it does not open standalone.
 - Some data in it still names continental edits, which are out of the MVP.
 - Later decisions supersede it: camera-driven relevance and handle-first stamp editing (2026-10-19).
-- Moved from `docs/explorations/` on 2026-10-23 (one home for explorations: `spikes/`).
+- Moved from `docs/explorations/` on 2026-10-23 (one home for explorations: `spikes/`); into `results/` with register row SPIKE-59 on 2026-10-30.
