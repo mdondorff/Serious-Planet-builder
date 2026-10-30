@@ -94,4 +94,4 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0082 | [The coarse node slides, not the border crossing](0082-the-coarse-node-slides-not-the-border-crossing.md) | accepted | amends 0081 point 1 |
 | 0083 | [Runtime compute budgets](0083-runtime-compute-budgets.md) | accepted | new; numbers in a spec |
 | 0084 | [A coarse valley carve in the base](0084-coarse-valley-carve-in-the-base.md) | proposed | amends 0080 point 4; owner: tackle in M8 |
-| 0085 | [Shadows from a height clipmap march, objects by cascades](0085-shadows-from-a-height-clipmap-march-objects-by-cascades.md) | proposed | replaces the horizon-map shadows (GEN-044/045, REND-038); SPIKE-56 |
+| 0085 | [Shadows from a height clipmap march, objects by cascades](0085-shadows-from-a-height-clipmap-march-objects-by-cascades.md) | accepted | replaces the horizon-map shadows (GEN-044/045, REND-038); SPIKE-56 |
