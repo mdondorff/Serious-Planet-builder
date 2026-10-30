@@ -227,7 +227,7 @@ pub struct LogFacts<'a> {
     pub horizon_off: Option<&'a Point>,
     /// With a chunk stage, where along each flight the start put a chunk edge (0.5: half way); `None` without one.
     pub edge_fraction: Option<f64>,
-    /// Whether the A-net chunk stage ran (`--chunks`, STRM-046): criterion 7 is measured with it off (tiles and horizon maps only); a log without this field is from before.
+    /// Whether the A-net chunk stage ran (removed, ADR 0086; always false): criterion 7 is measured with it off (tiles and horizon maps only); a log without this field is from before.
     pub chunk_stage: bool,
     /// The steady-flight curve (a run-in before the window, `run_in_s` long) next to the cold one; `None` without a chunk stage.
     pub steady: Option<(&'a [Point], f64, f64)>,
@@ -443,7 +443,7 @@ pub fn start_place(n: usize) -> (f64, f64) {
 struct StageSetup {
     gen: planet_streaming::GenWorkers,
     horizon: bool,
-    /// The A-net chunk stage runs (`--chunks`, STRM-046); without it the flight is tiles and horizon maps from the base terrain (the M8 default, owner 2026-10-28).
+    /// The A-net chunk stage (removed, ADR 0086; always false); the flight is tiles and horizon maps from the base terrain (the M8 default, owner 2026-10-28).
     chunks: bool,
 }
 
@@ -452,7 +452,7 @@ fn stage_setup(o: &Options) -> Option<StageSetup> {
     (o.store.is_some() && !o.allow_memory_bake).then(|| StageSetup { gen: crate::chunkstage::stage_gen(o), horizon: true, chunks: false })
 }
 
-/// Start the stage of `st` on `world`: the viewer's chunk stage, or the horizon jobs alone (as the window does without `--chunks`), or nothing.
+/// Start the stage of `st` on `world`: the viewer's chunk stage, or the horizon jobs alone (as the window does), or nothing.
 fn enable_stage(world: &Arc<WorldTerrain>, st: StageSetup, out: &mut dyn Write) -> Result<(), String> {
     if st.chunks {
         crate::chunkstage::enable_viewer_stage(world, st.gen, st.horizon, false, out)

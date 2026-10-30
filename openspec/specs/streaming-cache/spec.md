@@ -1285,7 +1285,7 @@ Detail: Every chunk counts as ready with no change. The bakes run on a pool of t
 - **THEN** both start at once, land, and are baked again after an edit word change and the settle window; maps of chunks no longer wanted go beyond the cap, the oldest first
 
 #### Scenario: Window without a stage
-- **WHEN** the window runs lit over a store without `--chunks`
+- **WHEN** the window runs lit over a store
 - **THEN** `chunk jobs` stays `None` and the horizon jobs bake at least one map (judged by the real-store gate `cargo xtask gate`; the small-world run reports it, because a software adapter is too slow to wait for a bake)
 
 ### Requirement: STRM-060 Background jobs run in classes and a bake never holds a chunk worker

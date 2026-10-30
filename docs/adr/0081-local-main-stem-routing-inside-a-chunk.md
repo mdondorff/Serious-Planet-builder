@@ -26,4 +26,4 @@ Source: SPIKE-42 (`spikes/local-routing/results/results.md`, #676); SPIKE-40 and
 ## Licences of adopted code or techniques
 None.
 
-Maintained: 2026-10-30, status: superseded in part by 0086 (the chunk stage is removed from the code).
+Maintained: 2026-10-30, links: superseded in part by 0086 (the chunk stage is removed from the code).

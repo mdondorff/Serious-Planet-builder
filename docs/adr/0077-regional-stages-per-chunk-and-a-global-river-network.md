@@ -30,4 +30,4 @@ Source: owner, 2026-10-23 (the stage model for M8; erosion and hydrology as one 
 ## Licences of adopted code or techniques
 None yet. The implicit stream-power solver (Braun and Willett 2013) is a published method; any adopted implementation is recorded here.
 
-Maintained: 2026-10-30, status: superseded in part by 0086 (the chunk stage is removed from the code).
+Maintained: 2026-10-30, links: superseded in part by 0086 (the chunk stage is removed from the code).
