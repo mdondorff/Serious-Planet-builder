@@ -116,6 +116,7 @@ mod tests {
         let over = compare_pair(&stale, &stale, &exact, 3).unwrap();
         assert_eq!((over.left_after_preview, over.max_diff, over.verdict), (100, 60, PairVerdict::Over));
         assert_eq!(over.bbox, Some((0, 0, 9, 9)));
+        assert!((over.mean_diff - 5.0).abs() < 1e-12, "100 pixels off by 60 over 1200: {}", over.mean_diff);
         assert!(over.line().starts_with("Over: the edit changes 100 of 1200 pixels, the preview leaves 100"), "{}", over.line());
     }
 
