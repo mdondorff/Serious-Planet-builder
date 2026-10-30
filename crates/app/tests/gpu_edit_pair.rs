@@ -83,11 +83,21 @@ fn the_pair_of_an_edit_is_trustworthy_and_its_verdict_per_view_is_reported() {
 fn the_pair_over_a_real_store() {
     let store = std::env::var("PLANET_PAIR_STORE").expect("PLANET_PAIR_STORE names the store");
     let adapter = std::env::var("PLANET_ADAPTER").unwrap_or_else(|_| "hardware".into());
-    let args: Vec<String> =
-        ["test-render", "--perf-smoke", "--scene", "edit-latency", "--adapter", adapter.as_str(), "--store", store.as_str()]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+    let args: Vec<String> = [
+        "test-render",
+        "--perf-smoke",
+        "--scene",
+        "edit-latency",
+        "--adapter",
+        adapter.as_str(),
+        "--store",
+        store.as_str(),
+        "--tau",
+        "2.4",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
     let o = planet::parse_args(&args).expect("options");
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     // PLANET_PAIR_SITE="lat,lon" moves the case from the scene's centre (latitude 20, longitude 30) to another place.
@@ -128,5 +138,26 @@ fn the_pair_over_a_real_store() {
                 r.line()
             );
         }
+    }
+}
+
+/// The CPU plans of the case view over a real store (no GPU): how deep the plan goes and how much it holds back, with the pair's parameters and with plan-check's.
+/// `PLANET_PAIR_STORE=... [PLANET_PAIR_SITE=lat,lon] cargo nextest run -p planet -E 'test(/gpu_edit_pair::the_plan_over_a_real_store/)' --run-ignored only --no-capture`.
+// spec: TEST-076
+#[test]
+#[ignore = "needs a real store (PLANET_PAIR_STORE)"]
+fn the_plan_over_a_real_store_is_reported_per_parameter_set() {
+    let store = std::env::var("PLANET_PAIR_STORE").expect("PLANET_PAIR_STORE names the store");
+    let args: Vec<String> = ["test-render", "--perf-smoke", "--scene", "edit-latency", "--adapter", "software", "--store", store.as_str()]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let o = planet::parse_args(&args).expect("options");
+    let site = std::env::var("PLANET_PAIR_SITE").ok().map(|s| {
+        let (a, b) = s.split_once(',').expect("PLANET_PAIR_SITE is lat,lon");
+        (a.trim().parse::<f64>().expect("lat"), b.trim().parse::<f64>().expect("lon"))
+    });
+    for altitude in [200.0, 2000.0] {
+        println!("at {altitude} m:\n{}", planet::editperf::plan_probe(&o, altitude, site).unwrap_or_else(|e| e));
     }
 }
