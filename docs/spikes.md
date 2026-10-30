@@ -9,6 +9,7 @@ Per-spike register sections of M5 and M6: `docs/archive/M6/spikes.md`. Closed sp
 ## Index of open spikes
 | Id | Title | Status | Results |
 |---|---|---|---|
+| SPIKE-61 | M9 R3: bake pre-run at 100 m | closed 2026-10-30 (10 steps: 9.2-13.6 h planet, routing 60 %; delta 7-10 GB; fits with re-routing every 5th step and replaced channels) | `spikes/m9-bake-prerun/results/` |
 | SPIKE-58 | Perf windows that block less (B9) | closed 2026-10-30 (loaded readings never faster; loaded pass at 5 % margin; pinned CPU +27 %, GPU +14 %; ADR 0087) | `spikes/m9-perf-windows/results/` |
 
 Every exploration gets a `SPIKE-NN` entry.
