@@ -1,0 +1,8 @@
+{
+  "scene": "anet-chunk",
+  "adapter": "NVIDIA GeForce RTX 3080 Ti Laptop GPU",
+  "owner_override": ["quiet machine: no build or test processes: cargo.exe (pid 10040), cargo.exe (pid 21352), rustc.exe (pid 11116), rustc.exe (pid 15428), rustc.exe (pid 20544), rustc.exe (pid 21464), rustc.exe (pid 24736), rustc.exe (pid 25632), rustc.exe (pid 26024), rustc.exe (pid 26104), rustc.exe (pid 26448), rustc.exe (pid 26620), rustc.exe (pid 27548)", "CPU load: 48.8 % competing load, mean over 10 s (limit 15 %)"],
+  "res": 16384,
+  "chunks": [{"cell_m": 8, "threads": "production", "cells_per_chunk": 608, "halo_rings": 374, "seconds": 13.576}, {"cell_m": 8, "threads": "1", "cells_per_chunk": 608, "halo_rings": 374, "seconds": 13.046}, {"cell_m": 4, "threads": "production", "cells_per_chunk": 1216, "halo_rings": 747, "seconds": 45.773}, {"cell_m": 10, "threads": "production", "cells_per_chunk": 496, "halo_rings": 305, "seconds": 10.033}],
+  "budget_failures": ["A-net chunk time 13.58 s at 8 m exceeds 4 s (GEN-052)"]
+}

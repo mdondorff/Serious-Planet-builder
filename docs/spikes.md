@@ -9,6 +9,6 @@ Per-spike register sections of M5 and M6: `docs/archive/M6/spikes.md`. Closed sp
 ## Index of open spikes
 | Id | Title | Status | Results |
 |---|---|---|---|
-| SPIKE-58 | Perf windows that block less (B9) | open | `spikes/m9-perf-windows/results/` |
+| SPIKE-58 | Perf windows that block less (B9) | closed 2026-10-30 (loaded readings never faster; loaded pass at 5 % margin; pinned CPU +27 %, GPU +14 %; ADR 0087) | `spikes/m9-perf-windows/results/` |
 
 Every exploration gets a `SPIKE-NN` entry.

@@ -6,9 +6,9 @@ Why it matters: Option B item B9 (owner, 2026-10-30). M8 windows took 1-5 h each
 Time box: phase 1 (desk) about 2 h; phase 2 (noise measurement) about 1 h of machine time, only on opus-planner's go.
 Success criteria: phase 1: an inventory of M8's windows; options (a)-(e) evaluated with numbers; a process with an estimated cut of at least 50 %; a proposed ADR. Phase 2: measured noise of one GPU-timestamp scene and one CPU-timed scene, quiet against loaded, with and without core pinning.
 Fallback if it fails: if loaded measurements are too noisy to trust at all, keep exclusive windows and cut their length only (options b and d).
-Code location: none in phase 1 (desk only).
+Code location: none in the repo; phase 2 drove the existing scenes with scratch scripts (process list, affinity, priority, CPU sampler), not committed.
 
-Status: phase 1 done. Phase 2 waits for opus-planner's go.
+Closed: 2026-10-30 (phase 2: about 1.5 h of machine time, 18:44 to 19:54).
 
 ## Inputs read
 - `cargo xtask log` (M8), `git log` of main since 2026-10-20 (window commits with times), `docs/briefings/estimates.md` (planned against actual), `docs/milestones/M8/` (`criterion-6-edit-window.md`, `acceptance-runbook.md`, 20 edit-latency tables, envelope logs), `docs/status.md`, `docs/learnings.md`, `perf/logs/*.json`.
@@ -104,16 +104,57 @@ Estimated effect on M8's pattern:
 | 4: batching | the remaining 8-12 windows become about 5 | 3-5 h of overhead |
 | 3: counts | the 8 superseded criterion 6 windows (regression and reading hunts) move to tier B | about 8 windows |
 
-Together: from about 35-45 h of blocked time in M8 to about 10-15 h, **a 60-75 % cut**. The estimate depends on phase 2 confirming that loaded measurements only add time on this machine, and on the size of that added time.
+Together: from about 35-45 h of blocked time in M8 to about 10-15 h, **a 60-75 % cut**. Phase 2 confirmed the one-sided rule and measured the added time (below). The estimate depended on phase 2 confirming that loaded measurements only add time on this machine, and on the size of that added time.
 
-## Phase 2 plan (on opus-planner's go; about 1 h of machine time)
-- Scenes: one GPU-timestamp scene (`perf stream shadow-cost`, one pose, 1440p) and one CPU-timed scene (`perf anet-chunk --store`, the GEN-052 8 m chunk), plus the TEST-039 calibration kernel.
-- Conditions, each three rounds:
-  1. quiet;
-  2. under a parallel `cargo build` of the workspace (a clean `target` in another directory) and `cargo xtask test fast`, at normal priority;
-  3. the same load, with the perf process pinned to the P-cores at High priority and the load pinned to the E-cores at BelowNormal.
-- Numbers per condition: the median and spread of the GPU ms, wall and thread-CPU seconds of the chunk, and the calibration ratio. Questions: does the load ever make a reading faster (the one-sided rule)? How large is the added time (the 20 % margin)? Does the calibration ratio cancel it? What does pinning buy, and what does it cost the build?
-- Outputs: `raw/` logs and a table in this file; the ADR draft's numbers updated.
+## Phase 2: noise under load (2026-10-30, 19:11 to 19:54)
+### Method
+- Binary: `target/release/planet.exe` of this worktree, main 10db3b63, release. Each run under `cargo xtask heavy`; one round = `perf preflight` (the TEST-039 kernel, 3 calibrations), `perf stream shadow-cost` (river-r1, pose 300m-sunset, 1440p, 3 interleaved rounds of the compiled-out variants), `perf anet-chunk --store C:/DEV/SeriousPlanetData/global16384` (8 m production threads, 8 m one thread, 4 m, 10 m).
+- Conditions, 3 rounds each:
+  - **quiet:** nothing beside (process list at start and end of every run: no cargo, rustc or nextest); rounds 1-3 at 19:11-19:20, round 4 at 19:51-19:54 with the CPU sampler on.
+  - **loaded:** one loop of clean `cargo build --workspace --all-targets` (debug, own target directory) at normal priority on all 20 logical CPUs.
+  - **pinned:** the same loop on the E-cores (logical CPUs 12-19, BelowNormal); `planet.exe` on the P-cores (0-11, High).
+- `--machine-ready` on the loaded and pinned rounds only: owner's approval for tonight's SPIKE-58 phase 2 (relayed by opus-planner, 2026-10-30: "This is ok for tonights test"); these logs are spike measurements, never verdicts; the approval does not carry over.
+- GPU state: NVIDIA power management "Prefer maximum performance" globally and `planet.exe` at High performance in Windows Graphics (owner, 2026-10-30 about 18:30). Earlier windows' GPU numbers are the old baseline (ADR 0034).
+- CPU state: `PercentProcessorPerformance` (_Total) sampled every 10 s from 19:21 (`raw/cpuperf.txt`); the frequency counter reads a fixed 2,160 MHz and is not used.
+- Not run: `cargo xtask test fast` as load (it waits on the heavy lock the perf run holds); a debug build loop stands in.
+- Raw: `raw/table.txt` (every run), `raw/runs.jsonl` (process lists, process CPU time, affinity, priority), the scene logs `raw/*.json`, the build times `raw/load-*.txt`.
+
+### Results
+| Measure | Quiet (4 rounds) | Loaded (3) | Pinned (3) |
+|---|---|---|---|
+| Shadows + material, together (GPU ms) | 1.236-1.290, median 1.26 | 1.276, 1.485, 1.478 (+1 to +18 %) | 1.375, 1.434, 1.378 (+9 to +14 %) |
+| Terrain pass, full (GPU ms) | 2.36-2.38 | 2.46-2.91 | 2.53-2.66 |
+| Spread across the scene's 3 rounds (GPU ms) | 0.003-0.095 | up to 0.66 | up to 0.14 |
+| Chunk 8 m, production threads (s) | 3.74-3.84, median 3.82 | 13.6, 17.8, 21.3 (3.6-5.6x) | 4.80-4.88 (+26-28 %) |
+| Chunk 8 m, one thread (s) | 5.81-5.93 | 13.0-20.5 (2.2-3.5x) | 7.31-7.39 (+25-27 %) |
+| Chunk 4 m (s) | 16.0-16.3 | 45.8-63.1 | 19.6-19.8 (+22 %) |
+| Process CPU time of the chunk scene (s) | 77.5-78.0 | 155-159 | 100-101 |
+| Calibration single (ms; limit 52) | 47-55 | 100-344 | 65-79 |
+| Calibration parallel median (ms; limit 112) | 85-129 | 145-228 | 109-120 |
+| Processor performance (%) | 113-147 (round 4) | 71-75 (brief 123-126) | 78-95 |
+| Wall time of a round (s): preflight, shadow-cost, chunk | 73, 40, 60 | 93-97, 74-134, 149-201 | 75, 45, 72 |
+| Debug clean build beside (s) | none | 221-243 | 357 (+50 %) |
+
+- **One-sided rule holds:** no loaded or pinned reading is below the quiet minimum (GPU: loaded minimum 1.276 against quiet 1.236 to 1.290; CPU: every loaded reading above).
+- **GPU timestamps are not load-immune here:** full CPU load adds up to 18 % to the terrain pass's shadow and material share, pinned load 9-14 %. Processor performance falls from about 140 % to 73 % under full load (all cores busy, not the 2026-10-29 latch: 132 % on a short load afterwards, opus-planner); the GPU on the shared laptop power budget runs the pass slower. Phase 1's "immune to CPU load" is withdrawn.
+- **CPU wall time under full load is useless for verdicts** (3.6-5.6x, and the rounds differ by 1.6x). Pinned load costs 22-28 % and repeats within 2 %.
+- **Process CPU time is not a load-immune substitute:** it doubles under load (hyper-thread sharing and the lower clock) and rises 29 % pinned.
+- **The calibration ratio does not cancel load:** pinned, the single kernel rises 44 % while the chunk rises 27 %; loaded, the single kernel varies 2-7x between calibrations of one round.
+- **The calibration gate refuses a quiet machine:** 2 of 4 quiet preflights were refused (round 1: single 55.5 ms over 52; round 4: parallel median 129 ms over 112, at 137-147 % processor performance). The limits sit within this machine's quiet noise.
+- **Overload breaks the scene:** a first loaded block (18:47-19:11) ran two clean builds at once (debug and release, about 34 rustc processes): the chunk scene panicked twice spawning a thread (`PermissionDenied`, Windows error 5), the preflight and shadow-cost crashed with 0xc0000005, the gate could not read the process list; the 2 completed shadow-cost runs read 1.485 ms and the chunk 55.8 s (`raw/overload-*`). Not investigated (time box); filed as an overload case, not as data.
+- Side reading, 18:44, under crusader's `test fast`: calibration single 49.7, 60.5, 52.6 ms (2 of 3 over the limit), parallel median 94-97 ms.
+
+### Margin and consequences for the process
+| Question | Answer |
+|---|---|
+| Does load ever make a reading faster? | No (30 loaded and pinned readings: 6 GPU, 24 chunk). The one-sided rule stands. |
+| Validity margin of a loaded pass | The quiet noise: 4.4 % (GPU, 4 rounds), 2.7 % (CPU). A loaded reading at least **5 %** under budget is a valid PASS. Phase 1's 20 % was a guess for the added time, not for validity. |
+| When is a loaded run worth starting? | GPU verdicts with at least 20 % margin (the pass's added time under full load is up to 18 %). CPU wall-time verdicts only with at least 6x margin under full load, or 30 % with the load pinned to the E-cores. |
+| What pinning buys and costs | CPU added time from 3.6-5.6x to 1.27x, GPU from 18 % to 14 %; the parallel build takes 1.5x as long. |
+| Calibration ratio as a normaliser | No: it over-corrects pinned and is erratic loaded. |
+| CPU-timed scene after B6 | `anet-chunk` is removed by B6 PR 2; the rules above are per measure kind (GPU timestamps, CPU wall time), and the next CPU-timed scene inherits them; its noise is measured once in its first window. |
+
+Effect on the estimate: criterion 4 (30x) and the GPU verdicts with 20 % margin pass loaded as estimated; criterion 5 (shadows within 1.5 ms) needs a window at today's 1.26 ms (16 % margin); GEN-052 type CPU budgets near 17 % margin need a window or a pinned run. The 60-75 % cut stands, with pinned runs as the means for CPU scenes.
 
 ## Visuals
-Phase 1 is a desk study: nothing rendered.
+None: both phases are measurement tables; the shadow-cost stills of phase 2 show one pose and are not evidence.

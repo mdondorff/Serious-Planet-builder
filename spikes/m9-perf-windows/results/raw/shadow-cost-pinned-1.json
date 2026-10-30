@@ -1,0 +1,13 @@
+{
+  "scene": "shadow-cost",
+  "adapter": "NVIDIA GeForce RTX 3080 Ti Laptop GPU",
+  "owner_override": ["quiet machine: no build or test processes: cargo.exe (pid 23296), cargo.exe (pid 25840), rustc.exe (pid 12532), rustc.exe (pid 16976), rustc.exe (pid 17576), rustc.exe (pid 18388), rustc.exe (pid 23420), rustc.exe (pid 24420), rustc.exe (pid 24440), rustc.exe (pid 27808), rustc.exe (pid 28492), rustc.exe (pid 29100), rustc.exe (pid 29348), rustc.exe (pid 4524), rustc.exe (pid 5720), rustc.exe (pid 6580), rustc.exe (pid 9276)", "CPU load: 34.7 % competing load, mean over 10 s (limit 15 %)"],
+  "size": [2560, 1440],
+  "frames": 41,
+  "budget_ms": 1.5,
+  "poses": [
+    {"pose": "300m-sunset", "full_ms": 2.5313, "no_shadow_ms": 2.2036, "no_material_ms": 1.5534, "neither_ms": 1.3322, "compiled_out_ms": [2.0992, 1.5237, 1.1561], "round_spread_ms": [0.0461, 0.0246, 0.0195, 0.0420], "shadow_ms": 0.4321, "material_ms": 1.0076, "together_ms": 1.3752}
+  ],
+  "near_budget": ["300m-sunset: 1.375 ms is within 20 % of the 1.5 ms budget (by the compiled-out shader variants when the row has them): not called met"],
+  "budget_failures": []
+}
