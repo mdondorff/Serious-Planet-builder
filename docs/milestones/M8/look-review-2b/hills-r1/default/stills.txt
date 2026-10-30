@@ -1,8 +1,0 @@
-# anchor: latitude -37.6958 longitude 3.1397 degrees, ground 3810.1 m
-# pose width height eye_lat_deg eye_lon_deg eye_height_m heading_deg pitch_deg sun_local_hours chunks waited_s nodes capped_nodes
-300m-sunset 2560 1440 -37.68475 3.12992 4085.7 145 15 17.5 6 11.0 1693 165
-300m-midday 2560 1440 -37.68475 3.12992 4085.7 145 15 12 6 0.8 1693 165
-30m-sunset 2560 1440 -37.69285 3.13709 3867.2 145 8 17.5 5 1.2 1690 121
-30m-midday 2560 1440 -37.69285 3.13709 3867.2 145 8 12 5 1.2 1690 121
-1.8m-sunset 2560 1440 -37.69536 3.13931 3801.3 145 0 17.5 4 1.2 1673 119
-1.8m-midday 2560 1440 -37.69536 3.13931 3801.3 145 0 12 4 1.2 1673 119
