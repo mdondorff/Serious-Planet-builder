@@ -1,1 +1,0 @@
-- 2026-10-29 m8-detector-lit-fix: TEST-069 compared black frames in two of three cases (the look's sun is below the horizon at the coast); every case now has a sun above it and the test asserts content (colours, light in the lit target); the earlier PASS for plain and overlay was vacuous.

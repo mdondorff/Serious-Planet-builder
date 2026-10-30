@@ -1,1 +1,0 @@
-- 2026-10-24 **m8-capture-stills** (TEST-048): `capture-stills` draws the poses of a TOML file over a world with its A-net chunk stage, waits until every chunk the plan reads has landed, follows the ground with the eye; `cargo xtask capture stills`; the 8 m chunk time re-measured at 4.36 s (over the 4 s budget, perf log in this PR)

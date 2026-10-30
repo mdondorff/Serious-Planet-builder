@@ -22,3 +22,4 @@ Source: owner live test 2026-10-27 (`docs/milestones/M8/owner-test-2026-10-27/RE
 
 ## Licences of adopted code or techniques
 None.
+

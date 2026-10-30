@@ -1,1 +1,0 @@
-- 2026-10-25 **anet-anchor-depth** (R-a, owner decision: relief into M8, part 1): corridor anchors = base height minus 3 m (A/1e8)^0.5 capped at 100 m, running maximum from downstream; 0 cells at the 300 m clamp at both review sites (was 15,000), gorge 30-90 m instead of a 300 m slot; ANET_VERSION 2, GEN-057

@@ -1,1 +1,0 @@
-- 2026-10-25 **anet-channel-valley** (H2): the bankfull channel from discharge (w 7.2 Q^0.5, d 0.18 Q^0.47) in a valley from a relief factor (floor 5 to 1 widths, sides 0.15 to 0.9, depth cap 30 to 100 m), painted round the corridor (GEN-060, ANET_VERSION 5); synthetic lowland river: width at half depth 1832 m vs law 1576 m, depth 39.3 vs 39.5 m

@@ -1,1 +1,0 @@
-- 2026-10-25 **capped-report**: capped.txt (where the capped nodes sit and their 8 m slopes) in the stills tool, pair census with slump-rate and steps arguments in chunk_incision_report, learning: walls exceed repose because hillslope steps skip protected pairs; no behaviour change
