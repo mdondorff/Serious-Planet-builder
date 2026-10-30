@@ -46,15 +46,14 @@ fn the_pair_of_an_edit_is_trustworthy_and_its_verdict_per_view_is_reported() {
         for (tag, i) in [("stale", &stale), ("preview", &preview), ("exact", &exact)] {
             write_png(&dir.join(format!("{name}-{tag}.png")), i).unwrap();
         }
-        let restored = img(&p.restored);
-        let control = compare_pair(&stale, &stale, &restored, GREY).expect("frames of one size");
-        println!(
-            "{name}: control, the world after taking the edit back against the stale frame: {} pixels differ",
-            control.changed_by_edit
+        let differing = p.stale.rgba.iter().zip(&p.restored.rgba).filter(|(a, b)| a != b).count();
+        println!("{name}: control, the world after taking the edit back against the stale frame: {differing} bytes differ");
+        assert_eq!(
+            p.stale.rgba, p.restored.rgba,
+            "{name}: the world after taking the edit back differs from the stale frame ({differing} bytes)"
         );
         let r = compare_pair(&stale, &preview, &exact, GREY).expect("frames of one size");
         println!("{name}: {}", r.line());
-        assert_eq!(control.changed_by_edit, 0, "{name}: the world after taking the edit back differs from the stale frame");
         seen += usize::from(r.verdict != PairVerdict::TooSmall);
     }
     assert!(seen > 0, "no view shows the edit (every pair is TooSmall): the pair proves nothing");
