@@ -9,6 +9,7 @@ Per-spike register sections of M5 and M6: `docs/archive/M6/spikes.md`. Closed sp
 ## Index of open and M8 spikes
 | Id | Title | Status | Results |
 |---|---|---|---|
+| SPIKE-57 | H. Schott's publications for M9 (desk; opus-planner, 2026-10-30) | closed 2026-10-30 (adopt descriptors as M9 scorecard; adapt thermal and deposition on CPU; rest reference) | `spikes/m9-schott-publications/results/` |
 | SPIKE-56 | Shadow architecture: terrain and object occluders (opus-planner, 2026-10-29) | closed 2026-10-29 (clipmap march from R; half res 0.8-1.2 ms, 1.7-2.2 ms at 2° sun; share 1.5 ms; coarse layer max heights) | `spikes/m9-shadow-architecture/results/` |
 | SPIKE-49 | One-pass coarse valley carve (ADR 0084): fill, accumulate, carve by GEN-057's depth law, one re-route, on the 16384 store; the coarse-to-fine step at the owner test's findings 2 and 3 sites before and after, the run's time, relief kept per band (opus-planner, 2026-10-27; owner: tackle in M8) | closed 2026-10-27: the 2048 carve is 2.6 s but holds none of the chunk's change (a constant per 4.9 km cell, 1.4 to 21 m); needs the base's resolution | `spikes/m8-coarse-carve/results/` |
 | SPIKE-55 | M9 realism targets from GLO-30: slope and relief per landform against the generator (opus-planner, 2026-10-29) | closed 2026-10-29: hills and mountains 4 to 9 times too gentle in relief and slope; Badlands match; no cell has Himalayan spread | `spikes/m9-glo30-targets/results/results.md` |
