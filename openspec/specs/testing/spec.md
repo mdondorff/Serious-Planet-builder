@@ -1443,7 +1443,7 @@ Detail:
 - **WHEN** the scene runs with `--smoke` over an in-memory bake
 - **THEN** it ends without error, writes the log with four altitudes, and says it is not a measurement
 
-### Requirement: TEST-073 The owner package says what ran
+### Requirement: TEST-074 The owner package says what ran
 `cargo xtask package` SHALL run the `capture stills` of the default look of each look-review site and `capture flights` into `target/review/owner-package/<date>/` and SHALL write `package.md` there with one row per item: PASS, FAIL or NOT RUN, with its reason, and its files. An item with no store SHALL be NOT RUN, a failed command FAIL with its message, a command that wrote no file FAIL. A failed item SHALL NOT stop the others, and the command SHALL fail when an item failed.
 
 Verify: A

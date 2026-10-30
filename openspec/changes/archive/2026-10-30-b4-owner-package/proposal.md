@@ -7,6 +7,6 @@ Option B item B4-5 (design PR #910; planner order 2026-10-30): the owner reads r
 3. Detectors (B4-2 and later) join as items when they have a log; that is a later change.
 
 ## Impact
-- Spec: `testing` gains TEST-073.
+- Spec: `testing` gains TEST-074.
 - Code: `xtask/src/package.rs` (new), `main.rs` (subcommand, usage), `accept.rs` (`utc_date` crate-visible).
 - No GPU needed for the tests; the real run needs the real store on a quiet, unlocked machine.

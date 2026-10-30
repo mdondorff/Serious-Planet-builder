@@ -1,4 +1,4 @@
-//! `cargo xtask package`: the owner package (TEST-073), the stills and short videos of the owner's pose sites and a `package.md` that says, per item,
+//! `cargo xtask package`: the owner package (TEST-074), the stills and short videos of the owner's pose sites and a `package.md` that says, per item,
 //! PASS, FAIL or NOT RUN, in `target/review/owner-package/<date>/`. A step that cannot run is NOT RUN with its reason, never a silent pass; a failed
 //! step does not stop the others. The steps run the existing `capture` commands (never a measurement); detectors join as items when they have a log.
 
@@ -228,7 +228,7 @@ mod tests {
         Step { name: name.into(), capture_args: args.iter().map(|s| s.to_string()).collect(), dir: name.into() }
     }
 
-    // spec: TEST-073
+    // spec: TEST-074
     #[test]
     fn without_a_store_every_step_is_not_run_and_never_a_pass() {
         let steps = plan(None, "target/p");
@@ -238,7 +238,7 @@ mod tests {
         assert!(render("2026-10-30", "abc", &items).contains("4 items: 0 PASS, 0 FAIL, 4 NOT RUN"));
     }
 
-    // spec: TEST-073
+    // spec: TEST-074
     #[test]
     fn a_failed_step_is_a_fail_with_its_message_and_the_others_still_run() {
         let steps = vec![step("a", &["x"]), step("b", &["y"]), step("c", &["z"])];
@@ -259,7 +259,7 @@ mod tests {
         assert!(md.contains("| b | FAIL | no chunk landed in 60 s |") && md.contains("2 PASS, 1 FAIL, 0 NOT RUN"), "{md}");
     }
 
-    // spec: TEST-073
+    // spec: TEST-074
     #[test]
     fn a_command_that_wrote_nothing_is_a_fail_and_the_files_are_listed_sorted_and_relative() {
         let steps = vec![step("a", &["x"])];
@@ -273,7 +273,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
-    // spec: TEST-073
+    // spec: TEST-074
     #[test]
     fn a_step_starts_from_an_empty_directory_so_files_of_an_earlier_run_never_count() {
         let dir = std::env::temp_dir().join(format!("planet-package-fresh-{}", std::process::id()));
@@ -285,7 +285,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
-    // spec: TEST-073
+    // spec: TEST-074
     #[test]
     fn the_options_are_parsed_and_an_unknown_one_is_refused() {
         let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
