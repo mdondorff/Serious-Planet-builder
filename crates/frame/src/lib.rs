@@ -21,6 +21,7 @@ pub mod pick;
 pub mod pipeline;
 pub mod plan;
 pub mod pool;
+pub mod popcheck;
 pub mod prefetch;
 pub mod preview;
 pub mod regions;
