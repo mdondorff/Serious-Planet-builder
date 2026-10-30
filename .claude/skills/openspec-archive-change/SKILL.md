@@ -166,6 +166,8 @@ In both branches, never create the root as a side effect: do not run `openspec i
 
    If the sync failed, or any capability does not match, report what differs and stop — do not archive. Nothing has moved and `changeRoot` is intact, so the user can fix the mismatch or re-run the sync and start the archive again.
 
+4a. **Domain terms** (owner, 2026-10-30). If the change's specs accept, rename or remove a term, update `docs/domain.md` in the same PR: proposed becomes accepted; a term whose code this change removes moves to section 8 (former terms, non-normative). `cargo xtask spec-lint` flags retired terms in current text.
+
 5. **Perform the archive**
 
    Create an `archive` directory under `planningHome.changesDir` if it doesn't exist:
