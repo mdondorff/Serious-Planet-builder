@@ -252,7 +252,15 @@ pub fn test_timed(root: &Path, args: &[String]) -> Result<TestTiming, String> {
     }
     let adapter = if real { "hardware" } else { "software" };
     let env_strict = std::env::var("PLANET_GOLDEN_STRICT").unwrap_or_default() == "1";
-    let env = [("PLANET_ADAPTER", adapter), ("PLANET_GOLDEN_STRICT", if strict || env_strict { "1" } else { "0" })];
+    // The marker directory of checks that are NOT RUN on a locked desktop (TEST-073): cleared before the run, counted after it.
+    let not_run_dir = root.join(crate::util::NOT_RUN_DIR);
+    planet_perf::desktop::clear(&not_run_dir);
+    let not_run_dir = not_run_dir.to_string_lossy().into_owned();
+    let env = [
+        ("PLANET_ADAPTER", adapter),
+        ("PLANET_GOLDEN_STRICT", if strict || env_strict { "1" } else { "0" }),
+        (planet_perf::desktop::MARKER_ENV, not_run_dir.as_str()),
+    ];
     // A report left by an earlier run must not be taken for this one's.
     let _ = std::fs::remove_file(root.join(if real { JUNIT_REAL } else { JUNIT }));
 
@@ -317,6 +325,7 @@ pub fn test_timed(root: &Path, args: &[String]) -> Result<TestTiming, String> {
 
     let secs = started.elapsed().as_secs_f64();
     eprintln!("elapsed {secs:.1}s (tests; build {build_secs:.1}s)");
+    let not_run = crate::util::say_not_run(root, if real { "test gpu --real" } else { "test" });
     if sub == Some("fast") {
         eprintln!("{}", edit_to_first_test_line(build_secs, secs).0);
         // The series of these times (BUILD-019): a warning when it cannot be written, never a failure.
@@ -351,6 +360,13 @@ pub fn test_timed(root: &Path, args: &[String]) -> Result<TestTiming, String> {
         }
     }
     say_log();
+    // Checks NOT RUN on a locked desktop leave the run incomplete, not a pass (TEST-073): exit code 3 after the summary and the candidates above; a failure keeps its own.
+    if real && not_run > 0 && result.is_ok() {
+        return Err(format!(
+            "{} {not_run} real-GPU check(s) were NOT RUN (desktop locked); the run is incomplete, not a pass",
+            crate::util::INCOMPLETE
+        ));
+    }
     result.map(|()| TestTiming { test_secs: secs, whole })
 }
 

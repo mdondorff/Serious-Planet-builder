@@ -85,7 +85,7 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0073 | [Normals from the tile's height lattice](0073-normals-from-the-tile-height-lattice.md) | accepted | amends GEN-019 and GEN-010; extends 0033 point 4 |
 | 0074 | [A tile too steep to morph is not refined; the plan degrades locally](0074-a-tile-too-steep-to-morph-is-not-refined.md) | accepted | amends LOD-008; extends 0016 and 0014; built (#505, #523, #524) |
 | 0075 | [Documentation budget: the hot files stay small and current](0075-documentation-budget.md) | accepted (opus-planner; owner approved) | amends 0055 point 5 |
-| 0076 | [Driver maps: physical fields decide materials, plants and shapes through suitability rules](0076-driver-maps-suitability-and-consumers.md) | proposed | owner review before M8; D1 measures costs |
+| 0076 | [Driver maps: physical fields decide materials, plants and shapes through suitability rules](0076-driver-maps-suitability-and-consumers.md) | proposed, open | chunk driver channels leave with the chunk stage; driver maps decided with M9's bake |
 | 0077 | [Regional stages run per chunk of a fixed grid; the global coupled run fixes the river network](0077-regional-stages-per-chunk-and-a-global-river-network.md) | accepted (owner) | CON-08 amended to name chunks (constitution v1.6); extends 0022 and 0030; built in M8 |
 | 0078 | [Maintenance of accepted ADRs: links, spec-owned values, domain terms, errata](0078-maintenance-of-accepted-adrs.md) | accepted (owner) | amends CON-23 (constitution v1.5); spec-lint check queued |
 | 0079 | [The constitution's size cap follows the owner's amendments](0079-constitution-cap-follows-owner-amendments.md) | accepted (owner) | amends 0075 point 1 for the constitution |
@@ -93,5 +93,5 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0081 | [Local main-stem routing inside a chunk](0081-local-main-stem-routing-inside-a-chunk.md) | accepted | departs from 0077 point 3 (refines it: topology and border crossings stay global) |
 | 0082 | [The coarse node slides, not the border crossing](0082-the-coarse-node-slides-not-the-border-crossing.md) | accepted | amends 0081 point 1 |
 | 0083 | [Runtime compute budgets](0083-runtime-compute-budgets.md) | accepted | new; numbers in a spec |
-| 0084 | [A coarse valley carve in the base](0084-coarse-valley-carve-in-the-base.md) | proposed | amends 0080 point 4; owner: tackle in M8 |
+| 0084 | [A coarse valley carve in the base](0084-coarse-valley-carve-in-the-base.md) | not pursued | SPIKE-49 negative; M9's bake decides valley carving |
 | 0085 | [Shadows from a height clipmap march, objects by cascades](0085-shadows-from-a-height-clipmap-march-objects-by-cascades.md) | accepted | replaces the horizon-map shadows (GEN-044/045, REND-038); SPIKE-56 |
