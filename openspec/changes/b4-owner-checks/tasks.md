@@ -1,10 +1,19 @@
 ## 1. Design
-- [x] 1.1 Gap table against the existing detectors (design.md)
-- [ ] 1.2 Planner's read of the decisions and open questions
+- [x] 1.1 Gap table against the existing detectors (design.md; PR #910)
+- [x] 1.2 Planner's read: delivery is the planner's SendUserFile of `target/review/owner-package/<date>/`; the owner's eye list is owner tests 1 and 2 plus the look reviews
 
-## 2. Steps (each its own change)
-- [ ] B4-2 moving level-pop detector
-- [ ] B4-3 river bed-rise detector
-- [ ] B4-4 edit scenario with the preview-versus-refresh pair
-- [ ] B4-5 the package command
-- [ ] B4-6 delivery
+## 2. Steps (state at the handover, 2026-10-30; main 318a7e74 or later)
+- [x] B4-2 level-pop detector: `planet_frame::popcheck`, TEST-072 (#923). Descent test through the morph model passes, the no-morph descent fails. The pixel bounds (0.5 px p99, 2 px max) are a proposal. Not done: feeding it from the real plan on the real store (design.md risk: the real plan chooses levels by distance to the bounding volume; rugged sites only, a hard switch on gentle ground stays under 0.5 px).
+- [ ] B4-3 river bed-rise detector: later, against a generated world (the default world draws no rivers until M9's channels).
+- [~] B4-4 the preview pair (design #928):
+  - [x] TEST-077 `planet_testkit::pair::compare_pair` (#930); bound 1/20 of the changed pixels, TooSmall at 50 pixels or fewer.
+  - [x] TEST-076 `editperf::pair_frames` and the tier-C smoke test (#937): stale, preview, exact and control frames per debug view; control bit exact.
+  - First finding (software adapter, smoke memory bake, 50 m hill at 200 m): normals Within (0 of 9381 pixels left), relief Over (2836 of 7152 left, largest 76); the control is 0 bytes; the preview, exact and stale frames draw the same 170 tiles (0 differing), so the relief difference is not a different level choice; it is in the previewed nodes' heights (contour lines are displaced), size in metres not measured.
+  - [ ] Real-store run, started: branch `change/b4-edit-pair-scene` (commit 9a776f74, pushed, no PR) holds an ignored test `gpu_edit_pair::the_pair_over_a_real_store` (`PLANET_PAIR_STORE=C:/DEV/SeriousPlanetData/global16384 PLANET_ADAPTER=hardware cargo nextest run -p planet -E 'test(/gpu_edit_pair::the_pair_over_a_real_store/)' --run-ignored only --no-capture`, desktop unlocked: check LogonUI). It runs end to end on the RTX (about 50 s), but on the real store the 50 m hill changes 0 pixels in both views at 200 m and 2 km (TooSmall, no verdict). Radius 500 m has no stamp case at those altitudes (`cases_at`). Not determined why the edit is invisible: suspects are the case centre `case_centre()` (not where the real store has relief in view), tiles under the stamp not named, or the stamp lying inside the real store's base field resolution. Next: print the ground height and the tiles named at the case centre, choose a lowland and a hill site by lat/lon (the stills poses file, TEST-050) instead of `case_centre()`, then the lit frame (needs the lit rig, not `Harness`), horizon off and on, and the height error in metres (the planner's question: REND-033 breach or contour sensitivity). That branch needs prepush and a PR (tier C, ignored test only) once it is more than a diagnostic.
+- [x] B4-5 the package command: `cargo xtask package`, TEST-074 (#927): stills of hills-b, river-r1, hills-r1 (default look) and the coastal flights into `target/review/owner-package/<date>/` with `package.md` (PASS, FAIL, NOT RUN). Not run on the real store yet; stills still draw over the chunk stage until B6 removes it. Detectors are not items yet.
+- [ ] B4-6 delivery: the planner sends the directory with SendUserFile; nothing to build beyond a one-line pointer in the usage text.
+
+## 3. Notes for the next session
+- Requirement IDs are reserved by the planner: ask before writing a spec (TEST-072, 074, 076, 077 are taken by B4).
+- The local WARP crash (0xc0000005 in one tier-C test per run since the Windows update; learnings.md 33) is the planner's open item for a fresh session; two prepush runs of mine failed on it in unrelated tests (logs `target/test-logs/test-gpu-20261030-171947.log` and `-173204.log`); CI's WARP and lavapipe passed.
+- Window runs need the desktop unlocked (Kernel-Power and LogonUI evidence in the planner's report); the owner's laptop time blocks window runs.
