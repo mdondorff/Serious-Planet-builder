@@ -1107,11 +1107,11 @@ Source: M8 plan, TEST-047, STRM-064, ADR 0086
 - **THEN** the first runs the horizon jobs and no chunk stage, and the second has none
 
 #### Scenario: A frame waits for the horizon jobs
-- **WHEN** a frame has a plan node that stands in for a chunk or a horizon job in flight, and when it has neither
-- **THEN** the frame is busy in the first two cases and not in the last, and the settle before a flight waits for a frame that is not busy
+- **WHEN** a frame has a horizon job in flight, and when it has none
+- **THEN** the frame is busy in the first case and not in the second, and the settle before a flight waits for a frame that is not busy
 
 ### Requirement: TEST-055 The envelope log gives what the horizon jobs did
-The log of the envelope scene (TEST-047) SHALL say `"chunk_stage": false` (the stage is removed, ADR 0086; `accept M8` reads the field) and, for each trial, give the horizon maps landed, the horizon jobs in flight at the end and the counters of the horizon step (TEST-058). A log of a world without the horizon jobs SHALL say why the stand-in share is missing.
+The log of the envelope scene (TEST-047) SHALL say `"chunk_stage": false` (the stage is removed, ADR 0086; `accept M8` reads the field) and, for each trial, give the horizon maps landed, the horizon jobs in flight at the end and the counters of the horizon step (TEST-058).
 
 Verify: A
 Status: active
@@ -1119,7 +1119,7 @@ Source: M8 exit criterion 7 (owner, 2026-10-23, D4), TEST-054, planner decision 
 
 #### Scenario: The log
 - **WHEN** the scene's log is written for a flight with the horizon jobs and for one without them
-- **THEN** the first holds the per-trial facts and `"chunk_stage": false`, and the second says `stage: null` and the reason
+- **THEN** the first holds the per-trial facts and `"chunk_stage": false`, and the second says `stage: null`
 
 ### Requirement: TEST-057 The envelope scene flies a steady curve beside the cold one
 With the horizon jobs the envelope scene (TEST-047) SHALL search each altitude twice: the cold trial of TEST-054 (the first visit after a stop) and a steady-flight trial that flies a run-in at the speed under test before its measured stretch, with the horizon jobs running. The stretch SHALL be `--steady-window-s` long (60 s by default) over ground the run-in did not cover, and the bound SHALL be judged over every 1 s window of the whole stretch. The log SHALL give both curves, the run-in and the stretch.
@@ -1150,7 +1150,7 @@ Per-scene table (the counters each scene checks; a scene with the feature off ch
 | envelope flights (not smoke) | > 0 | not checked | `perf/logs/envelope.json`, per trial `stage.counters` |
 | edit latency | > 0 | > 0 | report line per altitude |
 | stills settling loop | on | not checked | not logged |
-| viewer window (`editor --smoke`) | > 0 on the lit frames (the smoke verdict) | not checked | the smoke summary, `horizon step:` |
+| viewer window (`editor --smoke`) | reported, not judged | not checked | the smoke summary, `horizon step:` |
 
 #### Scenario: A feature that never acted
 - **WHEN** a scene enabled the horizon step and its counters show 0 horizon frames, and again with the feature turned off
@@ -1199,7 +1199,7 @@ Detail: A frame's time is its phases without the waits for the GPU, and the phas
 - **THEN** the verdict fails naming the count, frame 31 and the phase
 
 ### Requirement: TEST-062 The gate runs the real window path
-`cargo xtask gate` SHALL run the editor window path with the chunk stage on over `C:/DEV/SeriousPlanetData/global16384` (opened read-only, outputs under `target/gate/`), script one large edit (a 400 m hill), and replay the camera paths of the owner test (`frame-*-path.txt`) over the capture sites, reporting the counters of TEST-061 per site. `cargo xtask gate --small` SHALL run the same counters and verdict on a generated 32-cell world with its coupled run and coarse horizon on the software adapter. Neither SHALL run a perf measurement.
+`cargo xtask gate` SHALL run the editor window path over `C:/DEV/SeriousPlanetData/global16384` (opened read-only, outputs under `target/gate/`), script one large edit (a 400 m hill), and replay the camera paths of the owner test (`frame-*-path.txt`) over the capture sites, reporting the counters of TEST-061 per site. `cargo xtask gate --small` SHALL run the same counters and verdict on a generated 32-cell world with its coupled run and coarse horizon on the software adapter. Neither SHALL run a perf measurement.
 
 Verify: C
 Status: active
@@ -1384,7 +1384,7 @@ Source: opus-planner (2026-10-24, M8-V), M8 exit criterion 7
 - **THEN** the shares are 0, the weight of that node over the total, 0, and 1
 
 ### Requirement: TEST-047 The speed-envelope scene
-`planet test-render --scene envelope` (`cargo xtask perf envelope`) SHALL, for each altitude of the table below, fly level over ground that is not in the cache at a constant speed along a meridian, 8 degrees below the horizon, and find the highest speed whose worst window of 1 s of frames has a coarse share (TEST-046) of at most the bound. It SHALL search the speed as the table states, write the log named below, and judge the larger of the coarse share and the chunk stand-in share. The scene runs the readiness gate and the reference-adapter check (ADR 0020), and is never run by an agent without the architect's window.
+`planet test-render --scene envelope` (`cargo xtask perf envelope`) SHALL, for each altitude of the table below, fly level over ground that is not in the cache at a constant speed along a meridian, 8 degrees below the horizon, and find the highest speed whose worst window of 1 s of frames has a coarse share (TEST-046) of at most the bound. It SHALL search the speed as the table states, write the log named below, and judge the coarse share. The scene runs the readiness gate and the reference-adapter check (ADR 0020), and is never run by an agent without the architect's window.
 
 Verify: A
 Status: active
@@ -1399,9 +1399,7 @@ Detail:
 | Bound | default 1 % (`--share-bound`) |
 | Search | start at 10 m/s; double while a trial passes, up to 3,000 m/s; then halve the gap between the highest passing and the lowest failing speed four times; a trial that fails at the first speed reports no speed |
 | Log | `perf/logs/envelope.json` (or `--out`): per altitude the highest speed, the worst window's share at it, the trials (speed and share), whether the cap was reached, the bound, the window, the frame step, the source and the adapter; a one-line summary per altitude on the output |
-| Chunk stand-in share | STRM-039: the plan nodes at or finer than the pyramid top level whose own chunk is not ready, over those nodes, node-weighted; worst 1 s window like the coarse share |
-| Log fields | `coarse_share` (pixel-weighted), `stand_in_share` (node-weighted), `chunk_nodes`, `chunk_stand_in`, the two weightings in words |
-| World without a chunk field | `stand_in_share` `null`, `chunk_field` false and the reason in the log |
+| Log fields | `coarse_share` (pixel-weighted) and its weighting in words |
 | `--smoke` | one short trial per altitude on the software adapter; measures nothing |
 
 #### Scenario: The search
@@ -1416,9 +1414,9 @@ Detail:
 - **WHEN** the cameras of a flight are built at an altitude and a speed from two start places
 - **THEN** consecutive cameras are the speed times the frame step apart along the surface, each stands the altitude above the field, the two flights share no place, and the log text holds every altitude with its speed, share, trials and the bound
 
-#### Scenario: The chunk stand-in share
-- **WHEN** the measure of a flight is made from per-frame coarse shares and per-frame chunk shares, with and without a chunk field, and the log is written for both
-- **THEN** the stand-in share is the worst window of the node fraction, the node counts are summed over the frames, the judged share is the larger of the two (NaN when either is missing), and the log without a chunk field says `null`, false and why, and names both weightings
+#### Scenario: The judged share
+- **WHEN** the measure of a flight is made from per-frame coarse shares, with a missing value among them, and the log is written
+- **THEN** the judged share is the worst window of the coarse share (NaN when a value is missing), and the log names the pixel weighting and holds no chunk share
 
 #### Scenario: The scene on the software adapter
 - **WHEN** the scene runs with `--smoke` over an in-memory bake

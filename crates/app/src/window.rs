@@ -880,7 +880,6 @@ impl App<'_> {
                 let tiles: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
                 let features = crate::horizonstep::FrameFeatures::default();
                 let step = crate::horizonstep::frame_step(self.world, &tiles, camera.position, &features, &mut st.chunk_counters);
-                st.counts.horizon_steps = st.chunk_counters.horizon_frames;
                 st.horizon_update = step.horizon;
             }
             if let Some(g) = st.gate.as_mut().filter(|_| self.world.horizon_enabled()) {

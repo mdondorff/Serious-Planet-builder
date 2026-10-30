@@ -3,7 +3,6 @@
 
 pub mod adapter;
 pub mod camera;
-pub mod chunkshare;
 pub mod controller;
 pub mod draw;
 pub mod freecam;

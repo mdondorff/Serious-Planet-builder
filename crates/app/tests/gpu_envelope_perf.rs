@@ -36,7 +36,7 @@ fn the_envelope_scene_runs_end_to_end_in_smoke_mode_and_writes_its_log_with_ever
     for a in ["30", "100", "300", "1000"] {
         assert!(text.contains(&format!("\"altitude_m\": {a},")), "altitude {a} in {text}");
     }
-    assert!(text.contains("\"smoke\": true") && text.contains("\"bound\": 0.01") && text.contains("\"stand_in_share\": null"), "{text}");
+    assert!(text.contains("\"smoke\": true") && text.contains("\"bound\": 0.01") && text.contains("\"coarse_share\""), "{text}");
     let bad = run(&["test-render", "--perf-smoke", "--scene", "envelope", "--adapter", "software", "--share-bound", "2"]);
     assert!(bad.unwrap_err().contains("--share-bound"), "a bound outside (0, 1) is refused");
     let _ = std::fs::remove_dir_all(&dir);

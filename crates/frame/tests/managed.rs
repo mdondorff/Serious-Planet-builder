@@ -1857,76 +1857,6 @@ fn a_run_without_a_refusal_is_not_invalid() {
     }
 }
 
-/// A chunk view whose tiles of level 6 and finer read one chunk each (their ancestor at level 6), ready all at once when `ready` is set.
-struct StubView {
-    ready: std::sync::atomic::AtomicBool,
-}
-
-impl planet_frame::chunkshare::ChunkView for StubView {
-    fn top_level(&self) -> u8 {
-        6
-    }
-    fn reads(&self, tile: TileId) -> Vec<planet_generators::chunkfield::ChunkKey> {
-        if tile.level() < 6 {
-            return Vec::new();
-        }
-        let shift = tile.level() - 6;
-        vec![(tile.face().0, tile.x() >> shift, tile.y() >> shift)]
-    }
-    fn is_ready(&self, _key: planet_generators::chunkfield::ChunkKey) -> bool {
-        self.ready.load(std::sync::atomic::Ordering::SeqCst)
-    }
-}
-
-// spec: STRM-039
-#[test]
-fn the_loops_frame_counts_carry_the_stand_in_share_of_its_plan() {
-    let mut rig = Rig::new(1_000_000);
-    let req = request(here(), 0.0, -0.4);
-    rig.settle(&req);
-    assert_eq!(rig.step(&req).counts.chunk, planet_frame::chunkshare::ChunkShare::default(), "without a chunk view nothing is counted");
-    let view = Arc::new(StubView { ready: std::sync::atomic::AtomicBool::new(false) });
-    rig.lp.set_chunk_view(Some(view.clone()));
-    let f = rig.step(&req);
-    let fine = f.pipeline.draw.plan.nodes.iter().filter(|n| n.tile.level() >= 6).count();
-    assert!(fine > 0, "the view sees nodes that read chunk detail");
-    assert_eq!((f.counts.chunk.chunk_nodes, f.counts.chunk.chunk_stand_in), (fine, fine), "nothing ready: all of them are the stand-in");
-    view.ready.store(true, std::sync::atomic::Ordering::SeqCst);
-    let f = rig.step(&req);
-    assert_eq!((f.counts.chunk.chunk_nodes, f.counts.chunk.chunk_stand_in), (fine, 0));
-    assert_eq!(f.counts.chunk.values(), [fine as u64, 0]);
-}
-
-// spec: STRM-040
-#[test]
-fn a_landed_chunk_refreshes_exactly_the_resident_tiles_that_read_it() {
-    let mut rig = Rig::new(1_000_000);
-    let req = request(here(), 0.0, -0.4);
-    rig.settle(&req);
-    let view = Arc::new(StubView { ready: std::sync::atomic::AtomicBool::new(true) });
-    assert_eq!(rig.lp.chunk_landed(&[(0, 0, 0)]), 0, "without a view nothing is refreshed");
-    rig.lp.set_chunk_view(Some(view));
-    assert_eq!(rig.lp.chunk_landed(&[]), 0);
-    let resident: Vec<TileId> = rig.lp.resident().keys().copied().collect();
-    // The chunk (face, x, y at level 6) of some resident tile of level 6 or finer: its readers are all the resident tiles under it.
-    let target = resident.iter().find(|t| t.level() >= 6).map(|t| {
-        let s = t.level() - 6;
-        (t.face().0, t.x() >> s, t.y() >> s)
-    });
-    let target = target.expect("the settled view has fine tiles");
-    let readers = rig
-        .lp
-        .resident()
-        .keys()
-        .copied()
-        .filter(|t| t.level() >= 6 && (t.face().0, t.x() >> (t.level() - 6), t.y() >> (t.level() - 6)) == target)
-        .count();
-    assert!(readers > 0);
-    let queued = rig.lp.chunk_landed(&[target]);
-    assert_eq!(queued, readers, "exactly the resident tiles that read the chunk are queued for a refresh");
-    assert_eq!(rig.lp.chunk_landed(&[(5, 63, 63)]), 0, "a chunk nobody resident reads refreshes nothing");
-}
-
 /// A plan field that plans nothing and records, when a plan starts, whether the cache still holds an origin height for each of its `tiles`.
 struct CacheWatcher {
     tiles: Vec<TileId>,
@@ -1951,224 +1881,34 @@ impl PlanField for CacheWatcher {
     }
 }
 
-// spec: STRM-040, STRM-058
-#[test]
-fn a_landing_only_queues_the_drop_and_no_plan_that_starts_after_it_reads_a_tile_that_reads_the_landed_chunk() {
-    let spawner = Arc::new(ManualSpawner::default());
-    // 64 tiles of level 8 over one face: the stub view gives each the chunk of its level 6 ancestor, so 4 chunks of 16 tiles each.
-    let tiles: Vec<TileId> = (0..8).flat_map(|x| (0..8).map(move |y| TileId::new(planet_core::Face(0), 8, x, y).unwrap())).collect();
-    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let worker = PlanWorker::new(spawner.clone(), Arc::new(CacheWatcher { tiles: tiles.clone(), seen: seen.clone() }), 1);
-    worker.with_cache_for_test(|c| tiles.iter().for_each(|&t| c.origin_height_for_test(t, 1.0)));
-    let view = Arc::new(StubView { ready: std::sync::atomic::AtomicBool::new(true) });
-    let reads = |t: TileId| planet_frame::chunkshare::ChunkView::reads(&*view, t);
-    let (first, second) = (reads(tiles[0])[0], reads(tiles[63])[0]);
-    assert_ne!(first, second);
-    let readers = |k| tiles.iter().filter(|&&t| reads(t).contains(&k)).count();
-    assert_eq!((readers(first), readers(second)), (16, 16));
-    // The landing runs nothing on the calling thread: the cache is untouched until a plan job takes it.
-    worker.invalidate_chunk_later(first, view.clone());
-    assert!(worker.with_cache_for_test(|c| tiles.iter().all(|&t| c.has_origin_for_test(t))), "the landing scanned nothing");
-    // The next plan starts after the landing: it sees no origin height of a tile that reads the chunk, and keeps the others.
-    worker.submit(1, request(here(), 0.0, -0.4));
-    spawner.run(1);
-    let first_plan = seen.lock().unwrap()[0].clone();
-    for (t, has) in &first_plan {
-        assert_eq!(*has, !reads(*t).contains(&first), "tile {t:?} after the landing of {first:?}");
-    }
-    // Two landings together: one pass drops both chunks' tiles, and a plan after it sees neither.
-    worker.with_cache_for_test(|c| tiles.iter().for_each(|&t| c.origin_height_for_test(t, 1.0)));
-    worker.invalidate_chunk_later(first, view.clone());
-    worker.invalidate_chunk_later(second, view.clone());
-    worker.submit(2, request(here(), 1.0, -0.4));
-    spawner.run(1);
-    let second_plan = seen.lock().unwrap()[1].clone();
-    let dropped = second_plan.iter().filter(|(_, has)| !*has).count();
-    assert_eq!(dropped, 32, "the 16 readers of each of the two landed chunks");
-    assert!(second_plan.iter().all(|(t, has)| *has != (reads(*t).contains(&first) || reads(*t).contains(&second))));
-}
-
 // spec: STRM-058
 #[test]
 fn the_queue_of_cache_changes_stays_bounded_and_means_what_the_asks_meant() {
     let spawner = Arc::new(ManualSpawner::default());
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let w = PlanWorker::new(spawner.clone(), Arc::new(CacheWatcher { tiles: Vec::new(), seen }), 1);
-    let view: Arc<dyn planet_frame::chunkshare::ChunkView> = Arc::new(StubView { ready: std::sync::atomic::AtomicBool::new(true) });
     let tile = |x: u32, y: u32| TileId::new(planet_core::Face(0), 12, x, y).unwrap();
-    // The same chunk a thousand times is one entry; a thousand overlapping tile drops are one entry with each tile once the list outgrows 4,096.
-    for _ in 0..1000 {
-        w.invalidate_chunk_later((0, 1, 1), view.clone());
-    }
-    assert_eq!(w.queued_for_test().0, 1, "a chunk is queued once");
+    // A thousand overlapping tile drops are one entry with each tile once the list outgrows 4,096.
     for k in 0..2000u32 {
         let batch: Vec<TileId> = (0..10).map(|i| tile((k + i) % 300, 7)).collect();
         w.invalidate_cache(Some(&batch));
     }
     let (ops, tiles) = w.queued_for_test();
-    assert_eq!(ops, 2, "the chunk and one merged tile drop");
+    assert_eq!(ops, 1, "one merged tile drop");
     assert!(tiles <= 4096 + 10, "{tiles} tiles queued for 300 distinct ones");
-    // A landing storm of distinct chunks collapses into a clear instead of growing.
-    for k in 0..6000u32 {
-        w.invalidate_chunk_later((0, k, 1), view.clone());
-    }
-    assert!(w.queued_for_test().0 <= 4097, "{} operations queued", w.queued_for_test().0);
     // More item changes than the cache keeps drop the oldest; a clear makes what was queued before it moot and what is asked of tiles after it.
     for k in 0..100u64 {
         w.note_item_change(k + 1, k + 2, Vec::new());
     }
-    assert!(w.queued_for_test().0 <= 4097 + 32);
+    assert!(w.queued_for_test().0 <= 1 + 32);
     w.invalidate_cache(None);
     assert_eq!(w.queued_for_test(), (1, 0), "a clear replaces everything before it");
     w.invalidate_cache(Some(&[tile(1, 1)]));
-    w.invalidate_chunk_later((0, 2, 2), view.clone());
-    assert_eq!(w.queued_for_test(), (1, 0), "after a clear a tile drop and a landing are moot");
+    assert_eq!(w.queued_for_test(), (1, 0), "after a clear a tile drop is moot");
     w.note_item_change(1, 2, Vec::new());
     assert_eq!(w.queued_for_test().0, 2, "an item change after a clear is still queued, in order");
     // The queue empties when a plan job runs.
     w.submit(1, request(here(), 0.0, -0.4));
     spawner.run(1);
     assert_eq!(w.queued_for_test(), (0, 0));
-}
-
-// spec: STRM-047
-#[test]
-fn the_loop_gives_every_node_the_fade_weight_of_the_chunks_it_reads() {
-    let mut rig = Rig::new(1_000_000);
-    let req = request(here(), 0.0, -0.4);
-    rig.settle(&req);
-    let view = Arc::new(StubView { ready: std::sync::atomic::AtomicBool::new(true) });
-    let clock = Arc::new(planet_streaming::FakeClock::default());
-    // Without a fade every node is at weight 1: the plan is what it was.
-    assert!(rig.step(&req).pipeline.draw.plan.nodes.iter().all(|n| n.chunk_weight == 1.0));
-    rig.lp.set_chunk_view(Some(view));
-    rig.lp.set_chunk_fade(1_500, clock.clone());
-    // The chunk of the first drawn node that reads one (the plan's order is fixed, a hash map's is not).
-    let drawn = rig.step(&req).pipeline.draw.plan.nodes.iter().map(|n| n.tile).find(|t| t.level() >= 6).expect("the plan draws fine tiles");
-    let target = (drawn.face().0, drawn.x() >> (drawn.level() - 6), drawn.y() >> (drawn.level() - 6));
-    rig.lp.chunk_landed(&[target]);
-    // The fade of a landed chunk starts when the rebuilt tiles reach the renderer (STRM-047), not at the landing: let the refresh finish first.
-    rig.settle(&req);
-    let reads_target = |t: TileId| t.level() >= 6 && (t.face().0, t.x() >> (t.level() - 6), t.y() >> (t.level() - 6)) == target;
-    let mut now = 0u64;
-    for (ms, want) in [(0u64, 0.0f32), (750, 0.5), (1_500, 1.0), (4_000, 1.0)] {
-        clock.advance(ms - now);
-        now = ms;
-        let f = rig.step(&req);
-        let mut seen = 0;
-        for n in &f.pipeline.draw.plan.nodes {
-            if reads_target(n.tile) {
-                assert!((n.chunk_weight - want).abs() < 1e-6, "{ms} ms: {:?} weighs {}", n.tile, n.chunk_weight);
-                seen += 1;
-            } else {
-                assert_eq!(n.chunk_weight, 1.0, "{ms} ms: {:?} reads no chunk that landed", n.tile);
-            }
-        }
-        assert!(seen > 0, "the plan draws tiles that read the chunk that landed");
-    }
-}
-
-// spec: STRM-052, STRM-054
-#[test]
-fn a_rebuild_slower_than_the_fade_still_fades_and_neither_a_neighbour_nor_a_new_version_drops_the_tiles_under_a_faded_chunk() {
-    let mut rig = Rig::new(1_000_000);
-    let req = request(here(), 0.0, -0.4);
-    rig.settle(&req);
-    let view = Arc::new(StubView { ready: std::sync::atomic::AtomicBool::new(true) });
-    let clock = Arc::new(planet_streaming::FakeClock::default());
-    rig.lp.set_chunk_view(Some(view));
-    rig.lp.set_chunk_fade(1_500, clock.clone());
-    let drawn = rig.step(&req).pipeline.draw.plan.nodes.iter().map(|n| n.tile).find(|t| t.level() >= 6).expect("the plan draws fine tiles");
-    let key_of = |t: TileId| (t.face().0, t.x() >> (t.level() - 6), t.y() >> (t.level() - 6));
-    let target = key_of(drawn);
-    let reads_target = |t: TileId| t.level() >= 6 && key_of(t) == target;
-    let weights = |rig: &mut Rig| -> Vec<f32> {
-        let f = rig.step(&req);
-        f.pipeline.draw.plan.nodes.iter().filter(|n| reads_target(n.tile)).map(|n| n.chunk_weight).collect()
-    };
-    // The chunk lands and the rebuild takes 2 s, longer than the fade: nothing of the change is drawn before the rebuilt tiles arrive, and
-    // the first frame that draws them starts at the base, not at the whole change.
-    rig.lp.chunk_landed(&[target]);
-    // The frames after the landing draw the tiles built before it as stale tiles, whose node carries the resident key: no clock starts.
-    // The stale tiles keep the weight they had (1: nothing of the landed chunk was in them) and the clock does not run.
-    assert!(weights(&mut rig).iter().all(|&w| w == 1.0), "the frame after the landing");
-    // The rebuild is delivered 2 s after the landing, longer than the fade: the first frame that draws the rebuilt tiles starts at weight 0.
-    clock.advance(2_000);
-    {
-        // A tile still waiting for its rebuild keeps the weight it had; one that has been rebuilt starts at the base, not at the whole change.
-        let f = rig.step(&req);
-        for n in f.pipeline.draw.plan.nodes.iter().filter(|n| reads_target(n.tile)) {
-            let want = if n.state == planet_frame::TileState::Stale { 1.0 } else { 0.0 };
-            assert_eq!(n.chunk_weight, want, "2 s after the landing: {:?} is {:?}", n.tile, n.state);
-        }
-    }
-    rig.settle(&req);
-    let w0 = weights(&mut rig);
-    assert!(!w0.is_empty() && w0.iter().all(|&w| w == 0.0), "the first frame that draws the rebuilt tiles: {w0:?}");
-    clock.advance(750);
-    assert!(weights(&mut rig).iter().all(|&w| (w - 0.5).abs() < 1e-6));
-    clock.advance(1_000);
-    assert!(weights(&mut rig).iter().all(|&w| w == 1.0));
-    // A chunk that nobody under the target reads lands: the tiles under the target keep weight 1 through the refresh of the others.
-    let other = resident_chunk_other_than(&rig, target);
-    rig.lp.chunk_landed(&[other]);
-    rig.settle(&req);
-    assert!(weights(&mut rig).iter().all(|&w| w == 1.0), "a neighbour landing leaves the tiles under the faded chunk alone");
-    // The target lands again as a new version: its tiles are rebuilt and keep their weight (no drop to the base, no second fade).
-    rig.lp.chunk_landed(&[target]);
-    assert!(weights(&mut rig).iter().all(|&w| w == 1.0), "before the rebuilt tiles arrive");
-    rig.settle(&req);
-    assert!(weights(&mut rig).iter().all(|&w| w == 1.0), "after");
-}
-
-/// The key of another chunk some resident tile of level 6 or finer lies in.
-fn resident_chunk_other_than(rig: &Rig, target: (u8, u32, u32)) -> (u8, u32, u32) {
-    rig.lp
-        .resident()
-        .keys()
-        .filter(|t| t.level() >= 6)
-        .map(|t| (t.face().0, t.x() >> (t.level() - 6), t.y() >> (t.level() - 6)))
-        .find(|k| *k != target)
-        .expect("the settled view reads more than one chunk")
-}
-
-// spec: STRM-053
-#[test]
-fn a_drawn_tile_that_reads_a_chunk_is_never_stale_while_that_chunks_clock_runs() {
-    use planet_frame::TileState;
-    let mut rig = Rig::new(1_000_000);
-    let req = request(here(), 0.0, -0.4);
-    rig.settle(&req);
-    let view = Arc::new(StubView { ready: std::sync::atomic::AtomicBool::new(true) });
-    let clock = Arc::new(planet_streaming::FakeClock::default());
-    rig.lp.set_chunk_view(Some(view));
-    rig.lp.set_chunk_fade(1_500, clock.clone());
-    let drawn = rig.step(&req).pipeline.draw.plan.nodes.iter().map(|n| n.tile).find(|t| t.level() >= 6).expect("the plan draws fine tiles");
-    let key_of = |t: TileId| (t.face().0, t.x() >> (t.level() - 6), t.y() >> (t.level() - 6));
-    let target = key_of(drawn);
-    rig.lp.chunk_landed(&[target]);
-    // The rule that makes the increment planes right: a rebuilt tile is drawn at weight 0 while any tile that reads the chunk is still the
-    // stale one, because the clock of the chunk waits for it. Frame by frame, 100 ms apart, through the refresh of the landing.
-    let (mut saw_stale, mut saw_clock) = (false, false);
-    let mut last = 0.0f32;
-    for _ in 0..40 {
-        let f = rig.step(&req);
-        let readers: Vec<_> = f.pipeline.draw.plan.nodes.iter().filter(|n| n.tile.level() >= 6 && key_of(n.tile) == target).collect();
-        if readers.iter().any(|n| n.state == TileState::Stale) {
-            saw_stale = true;
-            assert!(
-                readers.iter().filter(|n| n.state == TileState::Exact).all(|n| n.chunk_weight == 0.0),
-                "a rebuilt tile moved while a stale tile that reads the chunk was still drawn"
-            );
-        } else if readers.iter().all(|n| n.state == TileState::Exact) {
-            let w = readers.iter().map(|n| n.chunk_weight).fold(1.0, f32::min);
-            if w > 0.0 {
-                saw_clock = true;
-            }
-            assert!(w >= last, "the weight fell from {last} to {w}");
-            last = w;
-        }
-        clock.advance(100);
-    }
-    assert!(saw_clock, "the fade ran once the stale tiles were rebuilt (stale seen: {saw_stale})");
 }
