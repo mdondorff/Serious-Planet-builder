@@ -14,20 +14,52 @@ struct Step {
     outcome: Result<f64, String>,
     /// Said beside `pass` in the table (a number the step reports).
     note: String,
+    /// The checks of the step that were NOT RUN on a locked desktop (TEST-072): the step is INCOMPLETE, never a pass.
+    not_run: Vec<String>,
+}
+
+/// The repository root, for the marker directory of NOT RUN checks (set once by [`run`]).
+static ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+fn marker_dir() -> Option<PathBuf> {
+    ROOT.get().map(|r| r.join(crate::util::NOT_RUN_DIR))
+}
+
+fn clear_markers() {
+    if let Some(d) = marker_dir() {
+        planet_perf::desktop::clear(&d);
+    }
+}
+
+fn read_markers() -> Vec<String> {
+    marker_dir().map(|d| planet_perf::desktop::markers(&d)).unwrap_or_default()
 }
 
 fn step(name: &'static str, f: impl FnOnce() -> Res) -> Step {
+    clear_markers();
     let t = Instant::now();
     let outcome = f().map(|_| t.elapsed().as_secs_f64());
-    Step { name, outcome, note: String::new() }
+    Step { name, outcome, note: String::new(), not_run: read_markers() }
 }
 
 /// A step whose result carries a note for its row.
 fn step_with_note(name: &'static str, f: impl FnOnce() -> Result<String, String>) -> Step {
+    clear_markers();
     let t = Instant::now();
     match f() {
-        Ok(note) => Step { name, outcome: Ok(t.elapsed().as_secs_f64()), note },
-        Err(e) => Step { name, outcome: Err(e), note: String::new() },
+        Ok(note) => Step { name, outcome: Ok(t.elapsed().as_secs_f64()), note, not_run: read_markers() },
+        Err(e) => Step { name, outcome: Err(e), note: String::new(), not_run: read_markers() },
+    }
+}
+
+/// The table row of a step: a step with checks NOT RUN is INCOMPLETE and never a pass (TEST-072).
+fn step_row(s: &Step) -> String {
+    match &s.outcome {
+        Ok(secs) if !s.not_run.is_empty() => {
+            format!("| {} | INCOMPLETE: {} check(s) NOT RUN, desktop locked (TEST-072) | {secs:.1} |\n", s.name, s.not_run.len())
+        }
+        Ok(secs) => format!("| {} | pass{} | {secs:.1} |\n", s.name, s.note),
+        Err(e) => format!("| {} | FAIL: {} | |\n", s.name, e.lines().next().unwrap_or("")),
     }
 }
 
@@ -175,6 +207,7 @@ pub fn run(root: &Path, args: &[String]) -> Res {
         return Err("usage: cargo xtask accept <milestone>, e.g. M0 (M4, M5 and M8 also take --logs DIR, default perf/logs)".into());
     };
     let m = milestone.to_uppercase();
+    let _ = ROOT.set(root.to_path_buf());
     if logs.is_some() && m != "M4" && m != "M5" && m != "M8" {
         return Err("--logs only applies to M4, M5 and M8 (the perf logs of a window)".into());
     }
@@ -203,7 +236,15 @@ pub fn run(root: &Path, args: &[String]) -> Res {
         }));
     }
     steps.extend([
-        step("run mode editor --smoke", || exec(root, "cargo", &["run", "-q", "-p", "planet", "--", "editor", "--smoke"], &[])),
+        step("run mode editor --smoke", || {
+            let dir = root.join(crate::util::NOT_RUN_DIR).to_string_lossy().into_owned();
+            exec(
+                root,
+                "cargo",
+                &["run", "-q", "-p", "planet", "--", "editor", "--smoke"],
+                &[(planet_perf::desktop::MARKER_ENV, dir.as_str())],
+            )
+        }),
         step("run mode generate --smoke", || exec(root, "cargo", &["run", "-q", "-p", "planet", "--", "generate", "--smoke"], &[])),
         step("run mode test-render --smoke", || exec(root, "cargo", &["run", "-q", "-p", "planet", "--", "test-render", "--smoke"], &[])),
         // BUILD-003: the budget is the test time (not the compile) of a selection of changed crates (owner, 2026-10-16); a run of every
@@ -216,15 +257,20 @@ pub fn run(root: &Path, args: &[String]) -> Res {
     let mut steps_md = String::from("| Step | Result | Seconds |\n|---|---|---|\n");
     let mut failed = false;
     for s in &steps {
-        match &s.outcome {
-            Ok(secs) => steps_md += &format!("| {} | pass{} | {secs:.1} |\n", s.name, s.note),
-            Err(e) => {
-                failed = true;
-                steps_md += &format!("| {} | FAIL: {} | |\n", s.name, e.lines().next().unwrap_or(""));
-            }
-        }
+        failed |= s.outcome.is_err();
+        steps_md += &step_row(s);
     }
     let mut md = format!("# Acceptance run {m}\n\n{steps_md}");
+    let not_run: Vec<&String> = steps.iter().flat_map(|s| s.not_run.iter()).collect();
+    if !not_run.is_empty() {
+        md += &format!(
+            "\nINCOMPLETE: {} real-GPU check(s) were NOT RUN while the desktop was locked (owner decision 2026-10-30, TEST-072); run them again with the desktop unlocked:\n\n",
+            not_run.len()
+        );
+        for l in &not_run {
+            md += &format!("- {l}\n");
+        }
+    }
     let mut hardware_error: Option<String> = None;
     match &m4 {
         None => {}
@@ -305,6 +351,12 @@ pub fn run(root: &Path, args: &[String]) -> Res {
     std::fs::create_dir_all(out.parent().unwrap()).map_err(|e| e.to_string())?;
     std::fs::write(&out, &md).map_err(|e| e.to_string())?;
     eprintln!("\n{md}\nwrote {}", out.display());
+    if !not_run.is_empty() && !failed && hardware_error.is_none() {
+        return Err(format!(
+            "acceptance {m} is INCOMPLETE: {} real-GPU check(s) were NOT RUN (desktop locked); see the table",
+            not_run.len()
+        ));
+    }
     if let Some(e) = hardware_error {
         return Err(if failed { format!("{e}; and at least one automated step failed (see above)") } else { e });
     }
@@ -318,6 +370,17 @@ pub fn run(root: &Path, args: &[String]) -> Res {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // spec: TEST-072
+    #[test]
+    fn a_step_with_checks_not_run_is_incomplete_and_never_a_pass() {
+        let step =
+            |outcome: Result<f64, String>, not_run: Vec<String>| Step { name: "test gpu --real", outcome, note: String::new(), not_run };
+        let row = step_row(&step(Ok(3.0), vec!["NOT RUN x: desktop locked".into()]));
+        assert!(row.contains("INCOMPLETE: 1 check(s) NOT RUN") && !row.contains("pass"), "{row}");
+        assert!(step_row(&step(Ok(3.0), vec![])).contains("| pass |"));
+        assert!(step_row(&step(Err("boom".into()), vec![])).contains("FAIL: boom"));
+    }
 
     // spec: TEST-021
     #[test]
