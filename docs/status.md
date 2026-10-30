@@ -57,7 +57,7 @@ Open owner items: the two flickers (Tracked) need a live check (editor off, debu
 - **RTX known-answer hashes** in `gpu_compact_blocks.rs` and `gpu_water.rs` removed under MESH_VERSION 8: re-record with `test gpu --real` (now MESH_VERSION 9).
 - **Item store revisit trigger** (ADR 0066 point 6): more than 20,000 items in a body or a load over 2 s decides the backend. Nothing counts or times it yet.
 - **M3 gate condition 2**: the declared-versus-recorded reads contract test (ADR 0021 point 7) and a tile-level GEN-017 test are approved, not written; the per-tile node set id waits for the first stored regional field.
-- **Device loss on the RTX** (windows 8, 2026-10-18): in the lit dive and in parallel `test gpu --real` runs; passes alone. A recurrence prints `wgpu device lost`; stop and investigate. Driver update is the owner's.
+- **Device loss on the RTX** (2026-10-18; again 2026-10-30): `gpu_window` item sweeps under `test gpu --real`, alone and single-threaded: dense cluster 4/4, altitude sweeps about 1/2, same rate at 092867a3 and d4998480 (`target/hunt/`). A 1 s stall in present/acquire, then `wgpu device lost`; no TDR in the System log. Next: the driver update (owner), then rerun.
 - **Flaky `gpu_window` flight test**: one failure after 7.5 s, 0 of 5 since. On a second failure keep the full output before any rerun.
 - **WARP device removal with the compact format and the atmosphere**: test-only, accepted; the software smoke stays on the vertex format. Re-test when WARP, wgpu or Windows changes.
 - **Beach shading flashes on WARP** (36.8 % of shore-band pixels on the coastal descent): unchecked since REND-030; check with the next look review.
