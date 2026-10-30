@@ -12,7 +12,7 @@ Closed: 2026-10-25 (used about 2 h)
 - Ours, read-only on `C:/DEV/SeriousPlanetData/global16384`:
   - the stored coupled run on its 2048 lattice (4.9 km cells, 30 % land), receivers and areas as the engine derives them;
   - the A-net solve (8.04 m cells, 608 x 608 core, 3 km halo) of the chunk at each review site: hills site (-37.689, 3.140; corridor area 1.2e10 to 1.3e10 m2) and lowland site (-11.166, 23.049; corridor area 9.45e12 m2).
-- Raw output: `measurements.txt`, `run_vs_base.txt`. Tool: `proto/hydrospike.rs` and `proto/hydro_targets.rs` (copy into `crates/app/src/` and `crates/app/examples/`, add `pub mod hydrospike;`; not in the crates). Runs: coupled report 34 s, both chunks 2 min, CPU only.
+- Raw output: `measurements.txt`, `run_vs_base.txt`. Tool: `proto/hydrospike.rs` and `proto/hydro_targets.rs` on branch `spike/hydrology-targets` (removed from main 2026-10-30; copy into `crates/app/src/` and `crates/app/examples/`, add `pub mod hydrospike;`; not in the crates). Runs: coupled report 34 s, both chunks 2 min, CPU only.
 
 ## Table
 | Measure | Real range | Ours today | Proposed M8 target | What moves it |
