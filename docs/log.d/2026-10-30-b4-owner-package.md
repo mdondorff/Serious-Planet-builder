@@ -1,0 +1,1 @@
+- 2026-10-30 **b4-owner-package** (B4-5, TEST-074): `cargo xtask package` runs the look-review-site stills and the coastal flights into target/review/owner-package/<date>/ with a package.md of PASS, FAIL or NOT RUN per item; no store means NOT RUN, never a pass; detectors join later.

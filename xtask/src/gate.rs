@@ -1,4 +1,4 @@
-//! `cargo xtask gate [--small] [--chunks] [--site ID]... [--paths DIR] [--store DIR]`: the no-degradation gate (TEST-062, TEST-063).
+//! `cargo xtask gate [--small] [--site ID]... [--paths DIR] [--store DIR]`: the no-degradation gate (TEST-062, TEST-063).
 //!
 //! `--small` runs the window gate on a generated 32-cell world on the software adapter (the tier C test `the_gate_passes_on_a_small_world...`);
 //! without it the editor window runs over the real store (read only; outputs under `target/gate/`) once per capture site of the owner test,
@@ -125,12 +125,11 @@ pub fn run_small(root: &Path) -> Res {
 }
 
 pub fn run_gate(root: &Path, args: &[String]) -> Res {
-    let (mut small, mut chunks, mut only, mut paths, mut store) = (false, false, Vec::new(), PATHS.to_string(), STORE.to_string());
+    let (mut small, mut only, mut paths, mut store) = (false, Vec::new(), PATHS.to_string(), STORE.to_string());
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--small" => small = true,
-            "--chunks" => chunks = true,
             "--site" => only.push(it.next().ok_or("--site needs a site id (frame-<n>)")?.clone()),
             "--paths" => paths = it.next().ok_or("--paths needs a directory")?.clone(),
             "--store" => store = it.next().ok_or("--store needs a directory")?.clone(),
@@ -159,11 +158,10 @@ pub fn run_gate(root: &Path, args: &[String]) -> Res {
     let mut new_failures = 0usize;
     let mut table = Vec::new();
     for (id, path) in chosen {
-        let report = out_dir.join(format!("{id}{}.txt", if chunks { "-chunks" } else { "" }));
+        let report = out_dir.join(format!("{id}.txt"));
         eprintln!("gate: {id} ...");
         let out = Command::new(&exe)
             .args(["editor", "--smoke", "--edit", "--no-vsync", "--adapter", "hardware", "--store", &store])
-            .args(chunks.then_some("--chunks"))
             .current_dir(root)
             .env("PLANET_GATE", "1")
             .env("PLANET_GATE_PATH", path)
@@ -197,17 +195,7 @@ pub fn run_gate(root: &Path, args: &[String]) -> Res {
     // The step between levels (criterion 3): the field-side measurement of one real chunk, read only.
     eprintln!("gate: the step between levels ...");
     let steps = Command::new("cargo")
-        .args([
-            "test",
-            "-p",
-            "planet",
-            "--release",
-            "--lib",
-            if !chunks { "base_steps_report" } else { "anet_steps_report" },
-            "--",
-            "--ignored",
-            "--nocapture",
-        ])
+        .args(["test", "-p", "planet", "--release", "--lib", "base_steps_report", "--", "--ignored", "--nocapture"])
         .current_dir(root)
         .env("PLANET_ANET_STORE", &store)
         .env("PLANET_ANET_RES", "16384")

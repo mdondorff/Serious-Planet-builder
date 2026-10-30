@@ -8,6 +8,7 @@ mod gate;
 mod heavy;
 mod layering;
 mod logcmd;
+mod package;
 mod prepush;
 mod repocheck;
 mod retired;
@@ -25,7 +26,7 @@ const USAGE: &str = "cargo xtask <command>
   test                 tiers A + B on the software adapter
   test gpu             tier C goldens and debug views (software adapter; --real for the GPU, which also runs the tier-B oracles)
   check                rustfmt --check, clippy -D warnings, layering
-  gate [--small] [--chunks] [--site frame-N]... [--paths DIR] [--store DIR]   the no-degradation gate (TEST-061 to TEST-063): the editor window over the real store with the chunk stage off (on with --chunks), a scripted 400 m hill and the camera path of each capture site of the owner test (outputs under target/gate/), judged on frames over 100 ms, held-back tiles no edit reaches, horizon maps, caught panics and the step between levels; --small is the same counters on a generated world on the software adapter
+  gate [--small] [--site frame-N]... [--paths DIR] [--store DIR]   the no-degradation gate (TEST-061 to TEST-063): the editor window over the real store, a scripted 400 m hill and the camera path of each capture site of the owner test (outputs under target/gate/), judged on frames over 100 ms, held-back tiles no edit reaches, horizon maps, caught panics and the step between levels; --small is the same counters on a generated world on the software adapter
   prepush              before every push to a PR branch: check, test fast, and test gpu when the diff against origin/main touches a golden-producing path (render, frame, shaders, generators, ...); prints each step's time and one verdict line (BUILD-016)
   layering             crate layering and GPU-free dependency check (CON-02)
   spec-lint            trace IDs, tiers, requirement coverage (CON-16)
@@ -38,6 +39,7 @@ const USAGE: &str = "cargo xtask <command>
                            --machine-ready is the owner's override. Only the architect session runs it
   perf stream [SCENE|all] --store DIR   the streaming scenes dive, dive-fast, teleport-1m, teleport-2km, look-1m, look-2km (ADR 0032) and dive-cold (the dive over a reader that ignores the pre-filled coarse tiles, report-only) over a stored 16384-cell bake; --allow-memory-bake runs over an in-memory bake labelled NOT the production source; `all` runs one child process per scene (the scene's own RAM peak, gate per child);
                            --smoke proves the scenes on the software adapter (never a measurement) and, with --store, first checks the store read-only (ocean channel, pre-filled compact tiles of levels F-4 (F the render floor, default 3), TEST-024; --prefill-levels N changes N and --floor-level F the floor, both passed through test-render); also --global-res N, --out PATH, --machine-ready, --gen-workers N (tile generation threads, default the machine's), --gen-ahead N, --gen-reserve N, --gen-priority below-normal|normal (STRM-020)
+  package [--store DIR] [--date YYYY-MM-DD] [--out DIR] [--dry-run]   the owner package (TEST-074): the default-look stills of the three look-review sites and the coastal flights over the store, and a package.md with PASS, FAIL or NOT RUN per item, in target/review/owner-package/<date>/; never a measurement
   capture flights [--store DIR | --allow-memory-bake --global-res N] [--out-dir DIR] [--size WxH] [--flight-frames N] [--smoke]   the two coastal flights as PNG sequences at 1440p with shore_filter 1 and 0 in target/review/m5-flights (and mp4 videos when ffmpeg is on the PATH) for the owner's look review (TEST-027); never a measurement, never during a perf window; --smoke uses the software adapter
   perf lit [--store DIR] [--out PATH] [--frames N] [--flight-frames N] [--views a,b,c] [--smoke] [--machine-ready]   the M5 lit perf scenes (TEST-025): per-pass GPU time over the viewer's views and the coastal flights
   perf m5 --store DIR [--out DIR] [--machine-ready]   the first M5 window in order: lit and the seven streaming scenes with --lit (one child per streaming scene); `cargo xtask accept M5` judges the logs
@@ -73,6 +75,7 @@ fn main() -> ExitCode {
         Some("store") => heavy::with("store", || storecmd::run_store(&root, &args[1..])),
         Some("perf") => heavy::with(&format!("perf {}", args[1..].join(" ")), || testcmd::perf(&root, &args[1..])),
         Some("capture") => heavy::with(&format!("capture {}", args[1..].join(" ")), || testcmd::capture_cmd(&root, &args[1..])),
+        Some("package") => heavy::with(&format!("package {}", args[1..].join(" ")), || package::run(&root, &args[1..])),
         Some("heavy") => heavy::run_wrapped(&root, &args[1..]),
         Some("quiet") => heavy::quiet(&args[1..]),
         Some("cache-verify") => testcmd::cache_verify(&root, &args[1..]),

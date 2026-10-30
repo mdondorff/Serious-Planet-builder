@@ -1128,18 +1128,18 @@ Source: opus-planner (2026-10-24, M8-5), STRM-048
 - **THEN** the second run reads the maps from the pack and bakes none
 
 ### Requirement: STRM-046 The viewer runs A-net chunks at runtime when asked
-A world that has a stored coupled channel SHALL have a chunk stage when it is opened for viewing with `--chunks`: the A-net process on the chunk manager (jobs on the injected spawner, at most half the worker pool), the pyramid top level the measurement chose, and a disk cache of landed chunks in the store's directory. Without `--chunks`, and for a world without the channel, there SHALL be none and every tile SHALL be the base. No frame SHALL wait for a chunk (STRM-039).
+A world that has a stored coupled channel MAY be given a chunk stage by a caller (`WorldTerrain::enable_anet_from_store`): the A-net process on the chunk manager (jobs on the injected spawner, at most half the worker pool), the pyramid top level the measurement chose, and a disk cache of landed chunks in the store's directory. The viewer, the editor and the scenes do not ask for it (the flag `--chunks` is removed, ADR 0086), so every tile they draw SHALL be the base, and for a world without the channel there SHALL be none. No frame SHALL wait for a chunk (STRM-039).
 
 Verify: A
 Status: active
-Source: D7 (runtime generation, disk cache), ADR 0077 point 7, STRM-039, STRM-041, STRM-043, owner fallback 2026-10-28
+Source: D7 (runtime generation, disk cache), ADR 0077 point 7, STRM-039, STRM-041, STRM-043, owner fallback 2026-10-28, ADR 0086
 
 #### Scenario: Enabled by the channel
-- **WHEN** a world with a stored coupled channel and a world without one are opened with the stage asked for
+- **WHEN** a world with a stored coupled channel and a world without one are opened with the stage asked for by a caller
 - **THEN** the first has a chunk manager whose fields carry the chunk stage and the second has none, and a chunk landed in the first is read from the disk cache after a restart without computing
 
 #### Scenario: Off by default
-- **WHEN** the window opens a world with a stored coupled channel without `--chunks`
+- **WHEN** the window opens a world with a stored coupled channel
 - **THEN** it has no chunk manager and computes no chunk
 
 ### Requirement: STRM-047 The change and its weight reach the draw
@@ -1285,7 +1285,7 @@ Detail: Every chunk counts as ready with no change. The bakes run on a pool of t
 - **THEN** both start at once, land, and are baked again after an edit word change and the settle window; maps of chunks no longer wanted go beyond the cap, the oldest first
 
 #### Scenario: Window without a stage
-- **WHEN** the window runs lit over a store without `--chunks`
+- **WHEN** the window runs lit over a store
 - **THEN** `chunk jobs` stays `None` and the horizon jobs bake at least one map (judged by the real-store gate `cargo xtask gate`; the small-world run reports it, because a software adapter is too slow to wait for a bake)
 
 ### Requirement: STRM-060 Background jobs run in classes and a bake never holds a chunk worker

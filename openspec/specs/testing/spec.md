@@ -1107,11 +1107,15 @@ Source: TEST-048, STRM-039
 - **THEN** the chunk share of its plan has no stand-in node and the eye is `altitude_m` over the ground of the field with the chunks
 
 ### Requirement: TEST-054 The envelope scene runs the chunk stage
-When its world has a stored coupled run, the envelope scene (TEST-047) SHALL give the world the A-net chunk stage exactly as the viewer's window does (the same function, STRM-046), drive the chunk jobs every frame from the plan's tiles and pass what landed and what was evicted to the managed loop, and start every flight with no chunk resident, the chunks of the start view ready and a chunk edge half way along the flight (the worst phase: fresh chunks ahead of the eye). The stand-in share (STRM-039) SHALL count in the judged share. A world without a stored run SHALL keep the tile-only scene.
+The envelope scene (TEST-047) SHALL run the horizon jobs from the base terrain when its world has a store, and no chunk stage (ADR 0086: the stage is removed). The jobs are driven every frame from the plan's tiles and every flight starts with no horizon map resident. A world without a store SHALL keep the tile-only scene.
 
 Verify: A
 Status: active
-Source: M8 exit criterion 7 (owner, 2026-10-23, D4), TEST-047, STRM-039, STRM-046
+Source: M8 plan, TEST-047, STRM-064, ADR 0086
+
+#### Scenario: The stage of a flight
+- **WHEN** the envelope scene is set up with a store and with an in-memory bake
+- **THEN** the first runs the horizon jobs and no chunk stage, and the second has none
 
 #### Scenario: The start crosses an edge half way
 - **WHEN** the start of a flight of any length is searched over a chunk grid with edges at fixed latitudes, from starts at many phases
@@ -1240,14 +1244,14 @@ Source: owner (2026-10-28), CLAUDE.md prepush rule
 - **THEN** the pre-push run includes the small gate; for `docs/status.md` alone it does not
 
 ### Requirement: TEST-064 The gate runs without the chunk stage by default
-`cargo xtask gate` SHALL run the sites of TEST-062 without the chunk stage and report the step between levels of the base field alone; `cargo xtask gate --chunks` SHALL run them with the stage and the chunk change's step. `gate --small` SHALL run the small world both ways.
+`cargo xtask gate` SHALL run the sites of TEST-062 over the base terrain and report the step between levels of the base field alone; the stage-on run (`gate --chunks`) no longer exists (ADR 0086). `gate --small` SHALL run the small world once.
 
 Verify: C
 Status: active
-Source: opus-planner (2026-10-28), owner fallback 2026-10-28, TEST-061, TEST-062
+Source: opus-planner (2026-10-28), owner fallback 2026-10-28, TEST-061, TEST-062, ADR 0086
 
 #### Scenario: Stage off
-- **WHEN** the window runs over a store with a coupled run without `--chunks`
+- **WHEN** the window runs over a store with a coupled run
 - **THEN** no chunk job is computed and the gate line reports `chunk jobs: None`
 
 ### Requirement: TEST-065 The gate reports the horizon re-bake after its edit; the edit-latency scene tabulates it
@@ -1442,6 +1446,40 @@ Detail:
 #### Scenario: The scene on the software adapter
 - **WHEN** the scene runs with `--smoke` over an in-memory bake
 - **THEN** it ends without error, writes the log with four altitudes, and says it is not a measurement
+
+### Requirement: TEST-077 The preview pair comparison
+`planet_testkit::pair::compare_pair` SHALL take the stale frame, the preview frame and the exact frame of one pose and a grey threshold, and SHALL report the pixels the stale frame has more than the threshold from the exact frame, the pixels the preview frame has, the mean and largest channel difference of the preview and the bounding box of its differing pixels. The verdict SHALL be Within when the preview leaves at most a twentieth of the changed pixels, Over otherwise, and TooSmall, never a pass, when the edit changes 50 pixels or fewer. Frames of different sizes SHALL be refused.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-30), REND-033, B4-4
+
+Detail: The bound and the 50 pixels are those of `gpu_preview.rs`. A difference is the largest of the three colour channel differences of a pixel. `first_over` gives the first view of a list, in the order given, whose pair is Over; the pair scene (TEST-076) draws the normals, relief and lit views to name the cause.
+
+#### Scenario: At the bound
+- **WHEN** an edit changes 400 pixels and the preview leaves 20, then 21
+- **THEN** the verdict is Within, then Over
+
+#### Scenario: Nothing to judge
+- **WHEN** the edit changes 49 pixels
+- **THEN** the verdict is TooSmall
+
+### Requirement: TEST-074 The owner package says what ran
+`cargo xtask package` SHALL run the `capture stills` of the default look of each look-review site and `capture flights` into `target/review/owner-package/<date>/` and SHALL write `package.md` there with one row per item: PASS, FAIL or NOT RUN, with its reason, and its files. An item with no store SHALL be NOT RUN, a failed command FAIL with its message, a command that wrote no file FAIL. A failed item SHALL NOT stop the others, and the command SHALL fail when an item failed.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-30), B4-5
+
+Detail: The command is a tool, never a measurement. `package.md` ends with the counts and says a NOT RUN item is not a pass. `--dry-run` prints the steps without running them. The directory is sent to the owner by the planner; the command has no upload.
+
+#### Scenario: No store
+- **WHEN** no `--store` is given
+- **THEN** every item is NOT RUN, none is PASS, and no capture command runs
+
+#### Scenario: A failed step
+- **WHEN** one capture command fails
+- **THEN** its row is FAIL with its message, the other steps run, and the command fails
 
 ### Requirement: TEST-073 Real-GPU window checks are NOT RUN on a locked desktop
 While the Windows session is locked (the lock screen process `LogonUI.exe` is running), a real-GPU window check (the `gpu_window` tests on the hardware adapter, `editor --smoke` on the discrete GPU, `cargo xtask gate` on the real store) SHALL print a `NOT RUN` line with the reason and the time, leave a marker, and return, never a pass. A failure of such a check with the desktop locked by the end of the run SHALL be a NOT RUN with the times. `cargo xtask` SHALL count the NOT RUN checks of a run, and `accept` SHALL mark a step with any INCOMPLETE and fail. The software adapter, headless scenes and CI are not affected.
