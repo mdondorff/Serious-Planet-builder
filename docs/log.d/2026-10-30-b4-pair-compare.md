@@ -1,0 +1,1 @@
+- 2026-10-30 **b4-pair-compare** (B4-4 step 1, TEST-077): `planet_testkit::pair` compares the stale, preview and exact frames of an edit (Within, Over or TooSmall against a twentieth of the changed pixels, mean and max difference, bounding box); the real-store pair scene follows.
