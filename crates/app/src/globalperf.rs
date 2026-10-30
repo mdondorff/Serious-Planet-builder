@@ -1199,4 +1199,445 @@ mod tests {
             }
         });
     }
+
+    /// SPIKE-62 (spike code, never merged): R4 routing cost and flow direction, on the tiles of SPIKE-61's grid. Per tile: (a) re-routing every
+    /// k of 10 stream-power steps against k = 1; (b) the heap flood against Barnes' improved flood (a plain queue for depression cells) and a
+    /// bucket queue at 5 cm, with the topological order from the receivers; (c) D8, jittered D8 and MFD: a straight-run metric of the channels.
+    /// `PLANET_ANET_STORE=DIR PLANET_ANET_RES=16384 CADENCE_TILES=f:ti:tj,... CADENCE_PAR=4 CADENCE_OUT=FILE [CADENCE_DUMP_DIR=DIR]
+    /// cargo test -p planet --release --lib route_cadence_report -- --ignored --nocapture`. Read only on the store.
+    #[test]
+    #[ignore = "a spike measurement"]
+    fn route_cadence_report() {
+        use planet_core::cube::{face_to_direction, Face, TangentWarp};
+        use std::cmp::Reverse;
+        use std::collections::{BinaryHeap, VecDeque};
+        use std::io::Write as _;
+        use std::time::Instant;
+        let par: usize = std::env::var("CADENCE_PAR").ok().and_then(|v| v.parse().ok()).unwrap_or(4);
+        let tiles: Vec<(usize, usize, usize)> = std::env::var("CADENCE_TILES")
+            .expect("CADENCE_TILES=f:ti:tj,...")
+            .split(',')
+            .map(|t| {
+                let v: Vec<usize> = t.split(':').map(|x| x.parse().unwrap()).collect();
+                (v[0], v[1], v[2])
+            })
+            .collect();
+        let out_path = std::env::var("CADENCE_OUT").unwrap();
+        let dump_dir = std::env::var("CADENCE_DUMP_DIR").ok();
+        let res: u32 = std::env::var("PLANET_ANET_RES").ok().and_then(|v| v.parse().ok()).unwrap_or(256);
+        let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
+        let mut so = std::io::stdout();
+        let (world, maps, _tile) = anet_scene(res, 11, store, &mut so).unwrap();
+        let field = world.field().unwrap();
+        let nc = maps.lattice().n();
+        const PER: usize = 48;
+        const CORE: usize = 3072;
+        const HALO: usize = 256;
+        const STEPS: usize = 10;
+        let m = nc * PER;
+        let rec_c = maps.receivers();
+        let out = std::sync::Mutex::new(std::fs::File::create(&out_path).unwrap());
+        writeln!(out.lock().unwrap(), "SPIKE-62: {} tiles, par {par}, {STEPS} steps; rows: tile f ti tj relief5_p50 then per item", tiles.len()).unwrap();
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        const NB: [(i64, i64); 8] = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)];
+        let key = |h: f32| -> u32 {
+            let b = h.to_bits();
+            if b & 0x8000_0000 != 0 { !b } else { b | 0x8000_0000 }
+        };
+        std::thread::scope(|sc| {
+            for _ in 0..par {
+                sc.spawn(|| loop {
+                    let k = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if k >= tiles.len() {
+                        break;
+                    }
+                    let (face, ti, tj) = tiles[k];
+                    let fc0 = face * nc * nc;
+                    let dir_of = |i: usize, j: usize| {
+                        face_to_direction(&TangentWarp, Face(face as u8), -1.0 + (2.0 * i as f64 + 1.0) / m as f64, -1.0 + (2.0 * j as f64 + 1.0) / m as f64)
+                    };
+                    let (ci0, cj0) = (ti * CORE, tj * CORE);
+                    let (wi0, wj0) = (ci0.saturating_sub(HALO), cj0.saturating_sub(HALO));
+                    let (wi1, wj1) = ((ci0 + CORE + HALO).min(m), (cj0 + CORE + HALO).min(m));
+                    let (w, hgt) = (wi1 - wi0, wj1 - wj0);
+                    let n = w * hgt;
+                    let mut dirs = Vec::with_capacity(n);
+                    for j in wj0..wj1 {
+                        for i in wi0..wi1 {
+                            dirs.push(dir_of(i, j));
+                        }
+                    }
+                    let orig: Vec<f32> = field.heights_threaded(&dirs, 4).into_iter().map(|h| h as f32).collect();
+                    drop(dirs);
+                    let (mi, mj) = ((wi0 + wi1) / 2, (wj0 + wj1) / 2);
+                    let dx = world.radius_m() * libm::acos(dir_of(mi, mj).dot(dir_of(mi + 1, mj)).min(1.0));
+                    let cell_a = dx * dx;
+                    let (cwi0, cwj0, cwi1, cwj1) = (wi0 / PER, wj0 / PER, wi1.div_ceil(PER), wj1.div_ceil(PER));
+                    let mut inflow: Vec<(usize, f64)> = Vec::new();
+                    for cj in cwj0.saturating_sub(3)..(cwj1 + 3).min(nc) {
+                        for ci in cwi0.saturating_sub(3)..(cwi1 + 3).min(nc) {
+                            let c = fc0 + cj * nc + ci;
+                            let r = rec_c[c];
+                            if r == planet_generators::coupled::NONE || (r as usize) / (nc * nc) != face {
+                                continue;
+                            }
+                            let (fi, fj) = (ci * PER + PER / 2, cj * PER + PER / 2);
+                            let inside = |a: usize, b: usize| a >= wi0 && a < wi1 && b >= wj0 && b < wj1;
+                            let rr = r as usize - fc0;
+                            let (ri, rj) = ((rr % nc) * PER + PER / 2, (rr / nc) * PER + PER / 2);
+                            if !inside(fi, fj) && inside(ri, rj) && maps.z(c) > 0.0 {
+                                inflow.push(((fj.clamp(wj0, wj1 - 1) - wj0) * w + fi.clamp(wi0, wi1 - 1) - wi0, maps.network_area_m2(c) as f64));
+                            }
+                        }
+                    }
+                    let blk = (5000.0 / dx).round().max(1.0) as usize;
+                    let (bw, bh) = (w.div_ceil(blk), hgt.div_ceil(blk));
+                    let (mut bmin, mut bmax) = (vec![f32::MAX; bw * bh], vec![f32::MIN; bw * bh]);
+                    for p in 0..n {
+                        let b = ((p / w) / blk) * bw + (p % w) / blk;
+                        bmin[b] = bmin[b].min(orig[p]);
+                        bmax[b] = bmax[b].max(orig[p]);
+                    }
+                    let mut rel: Vec<f32> = (0..bw * bh).filter(|&b| bmax[b] > 0.0).map(|b| bmax[b] - bmin[b]).collect();
+                    rel.sort_by(f32::total_cmp);
+                    let relief_p50 = rel.get(rel.len() / 2).copied().unwrap_or(0.0);
+                    let cap = |p: usize| -> f32 {
+                        let b = ((p / w) / blk) * bw + (p % w) / blk;
+                        (0.5 * (bmax[b] - bmin[b])).min(100.0)
+                    };
+                    let border = |p: usize, h: &[f32]| {
+                        let (i, j) = (p % w, p / w);
+                        i == 0 || j == 0 || i == w - 1 || j == hgt - 1 || h[p] <= 0.0
+                    };
+                    let nbr = |p: usize, d: usize| -> Option<usize> {
+                        let (i, j) = ((p % w) as i64 + NB[d].0, (p / w) as i64 + NB[d].1);
+                        (i >= 0 && j >= 0 && i < w as i64 && j < hgt as i64).then(|| j as usize * w + i as usize)
+                    };
+                    // Floods. 0: heap; 1: Barnes improved (plain queue for cells raised to the spill level); 2: bucket queue at 5 cm.
+                    let flood = |h: &[f32], kind: u8| -> Vec<f32> {
+                        let mut filled = vec![0f32; n];
+                        let mut seen = vec![false; n];
+                        match kind {
+                            0 | 1 => {
+                                let mut heap: BinaryHeap<Reverse<(u32, u32)>> = BinaryHeap::new();
+                                let mut pit: VecDeque<u32> = VecDeque::new();
+                                for p in 0..n {
+                                    if border(p, h) {
+                                        filled[p] = h[p];
+                                        seen[p] = true;
+                                        heap.push(Reverse((key(h[p]), p as u32)));
+                                    }
+                                }
+                                loop {
+                                    let p = if let Some(p) = pit.pop_front() {
+                                        p as usize
+                                    } else if let Some(Reverse((_, p))) = heap.pop() {
+                                        p as usize
+                                    } else {
+                                        break;
+                                    };
+                                    for d in 0..8 {
+                                        let Some(q) = nbr(p, d) else { continue };
+                                        if seen[q] {
+                                            continue;
+                                        }
+                                        seen[q] = true;
+                                        let lo = filled[p] + 1e-3;
+                                        if kind == 1 && h[q] <= lo {
+                                            filled[q] = lo;
+                                            pit.push_back(q as u32);
+                                        } else {
+                                            filled[q] = h[q].max(lo);
+                                            heap.push(Reverse((key(filled[q]), q as u32)));
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {
+                                const B: f32 = 0.05;
+                                let lo_h = h.iter().fold(f32::MAX, |a, &b| a.min(b)).min(0.0);
+                                let hi_h = h.iter().fold(f32::MIN, |a, &b| a.max(b));
+                                let nb = ((hi_h - lo_h) / B) as usize + 2 + (n as f32 * 1e-3 / B) as usize;
+                                let mut buckets: Vec<Vec<u32>> = vec![Vec::new(); nb];
+                                let bi = |v: f32| (((v - lo_h) / B) as usize).min(nb - 1);
+                                for p in 0..n {
+                                    if border(p, h) {
+                                        filled[p] = h[p];
+                                        seen[p] = true;
+                                        buckets[bi(h[p])].push(p as u32);
+                                    }
+                                }
+                                let mut b = 0;
+                                while b < nb {
+                                    let Some(p) = buckets[b].pop() else {
+                                        b += 1;
+                                        continue;
+                                    };
+                                    let p = p as usize;
+                                    for d in 0..8 {
+                                        let Some(q) = nbr(p, d) else { continue };
+                                        if seen[q] {
+                                            continue;
+                                        }
+                                        seen[q] = true;
+                                        filled[q] = h[q].max(filled[p] + 1e-3);
+                                        let qb = bi(filled[q]).max(b);
+                                        buckets[qb].push(q as u32);
+                                    }
+                                }
+                            }
+                        }
+                        filled
+                    };
+                    // Receivers on the filled surface: 0 steepest descent, 1 jittered (slope x (1 + 0.5 u), u a hash in [-1, 1]).
+                    let receivers = |h: &[f32], filled: &[f32], jitter: bool| -> Vec<u32> {
+                        let mut rec = vec![u32::MAX; n];
+                        for p in 0..n {
+                            if border(p, h) {
+                                continue;
+                            }
+                            let mut best = (0.0f64, u32::MAX);
+                            for d in 0..8 {
+                                let q = nbr(p, d).unwrap();
+                                let dd = if d < 4 { dx } else { dx * std::f64::consts::SQRT_2 };
+                                let mut s = f64::from(filled[p] - filled[q]) / dd;
+                                if jitter && s > 0.0 {
+                                    let x = (p as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (d as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
+                                    let x = (x ^ (x >> 31)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+                                    let u = (x >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0;
+                                    s *= 1.0 + 0.5 * u;
+                                }
+                                if s > best.0 {
+                                    best = (s, q as u32);
+                                }
+                            }
+                            rec[p] = best.1;
+                        }
+                        rec
+                    };
+                    // Topological order (outlets first) from the receivers: a stack over donor lists (Braun and Willett).
+                    let topo = |rec: &[u32]| -> Vec<u32> {
+                        let mut ndon = vec![0u32; n + 1];
+                        for &r in rec {
+                            if r != u32::MAX {
+                                ndon[r as usize + 1] += 1;
+                            }
+                        }
+                        for i in 0..n {
+                            ndon[i + 1] += ndon[i];
+                        }
+                        let mut fill = ndon.clone();
+                        let mut don = vec![0u32; n];
+                        for (p, &r) in rec.iter().enumerate() {
+                            if r != u32::MAX {
+                                don[fill[r as usize] as usize] = p as u32;
+                                fill[r as usize] += 1;
+                            }
+                        }
+                        let mut order = Vec::with_capacity(n);
+                        let mut stack: Vec<u32> = (0..n as u32).filter(|&p| rec[p as usize] == u32::MAX).collect();
+                        while let Some(p) = stack.pop() {
+                            order.push(p);
+                            for &d in &don[ndon[p as usize] as usize..ndon[p as usize + 1] as usize] {
+                                stack.push(d);
+                            }
+                        }
+                        order
+                    };
+                    let accumulate = |rec: &[u32], order: &[u32]| -> Vec<f64> {
+                        let mut area = vec![cell_a; n];
+                        for &(p, a) in &inflow {
+                            area[p] += a;
+                        }
+                        for &p in order.iter().rev() {
+                            let r = rec[p as usize];
+                            if r != u32::MAX {
+                                area[r as usize] += area[p as usize];
+                            }
+                        }
+                        area
+                    };
+                    let carve = |h: &mut [f32], rec: &[u32], order: &[u32], area: &[f64]| {
+                        for &p in order {
+                            let p = p as usize;
+                            let r = rec[p];
+                            if r == u32::MAX {
+                                continue;
+                            }
+                            let r = r as usize;
+                            let d = if (p % w) == (r % w) || (p / w) == (r / w) { dx } else { dx * std::f64::consts::SQRT_2 };
+                            let f = 0.01 * area[p].sqrt() / d;
+                            let hn = ((f64::from(h[p]) + f * f64::from(h[r])) / (1.0 + f)) as f32;
+                            h[p] = hn.max(orig[p] - cap(p)).min(h[p]);
+                        }
+                    };
+                    let mut line = format!("{k} {face} {ti} {tj} {relief_p50:.0}");
+                    // (b) Floods on the original ground.
+                    let mut fl = Vec::new();
+                    for kind in 0..3u8 {
+                        let t = Instant::now();
+                        let f = flood(&orig, kind);
+                        fl.push((t.elapsed().as_secs_f64(), f));
+                    }
+                    let maxd = |a: &[f32], b: &[f32]| a.iter().zip(b).fold(0f32, |m, (x, y)| m.max((x - y).abs()));
+                    line += &format!(" | flood heap {:.2} s barnes {:.2} s (max diff {:.4} m) bucket5cm {:.2} s (max diff {:.3} m)", fl[0].0, fl[1].0, maxd(&fl[0].1, &fl[1].1), fl[2].0, maxd(&fl[0].1, &fl[2].1));
+                    let t = Instant::now();
+                    let rec0 = receivers(&orig, &fl[0].1, false);
+                    let rs = t.elapsed().as_secs_f64();
+                    let t = Instant::now();
+                    let ord0 = topo(&rec0);
+                    let ts = t.elapsed().as_secs_f64();
+                    let t = Instant::now();
+                    let _a0 = accumulate(&rec0, &ord0);
+                    let acs = t.elapsed().as_secs_f64();
+                    line += &format!(" | receivers {rs:.2} s topo {ts:.2} s accumulate {acs:.2} s");
+                    drop(fl);
+                    // (a) Cadence, with the Barnes flood and the topological order from the receivers.
+                    let mut ref_h: Option<Vec<f32>> = None;
+                    for kk in [1usize, 3, 5, 10] {
+                        let mut h = orig.clone();
+                        let (mut route_s, mut carve_s) = (0.0, 0.0);
+                        let (mut rec, mut ord, mut area) = (Vec::new(), Vec::new(), Vec::new());
+                        for step in 0..STEPS {
+                            if step % kk == 0 {
+                                let t = Instant::now();
+                                let f = flood(&h, 1);
+                                rec = receivers(&h, &f, false);
+                                ord = topo(&rec);
+                                area = accumulate(&rec, &ord);
+                                route_s += t.elapsed().as_secs_f64();
+                            }
+                            let t = Instant::now();
+                            carve(&mut h, &rec, &ord, &area);
+                            carve_s += t.elapsed().as_secs_f64();
+                        }
+                        match &ref_h {
+                            None => {
+                                line += &format!(" | k1 route {route_s:.2} carve {carve_s:.2}");
+                                ref_h = Some(h);
+                            }
+                            Some(r) => {
+                                // Difference over cells that k = 1 cut by more than 1 cm, in the core.
+                                let mut d: Vec<f32> = Vec::new();
+                                for j in (cj0 - wj0)..(cj0 - wj0 + CORE).min(hgt) {
+                                    for i in (ci0 - wi0)..(ci0 - wi0 + CORE).min(w) {
+                                        let p = j * w + i;
+                                        if orig[p] - r[p] > 0.01 {
+                                            d.push((h[p] - r[p]).abs());
+                                        }
+                                    }
+                                }
+                                d.sort_by(f32::total_cmp);
+                                let q = |f: f64| d.get(((d.len() as f64 - 1.0) * f) as usize).copied().unwrap_or(0.0);
+                                line += &format!(" | k{kk} route {route_s:.2} carve {carve_s:.2} diff p50 {:.3} p95 {:.3} max {:.2} over {} cells", q(0.5), q(0.95), q(1.0), d.len());
+                            }
+                        }
+                    }
+                    // (c) Flow direction: straight-run share of channel cells (area at least 1e7 m2) in the core: a channel cell with exactly two
+                    // channel neighbours, opposite along an axis, counts as straight; runs of at least 20 such cells (2 km) counted separately.
+                    let f = flood(&orig, 1);
+                    let mut chans: Vec<(String, Vec<bool>)> = Vec::new();
+                    for (name, jit) in [("d8", false), ("jd8", true)] {
+                        let rec = receivers(&orig, &f, jit);
+                        let ord = topo(&rec);
+                        let a = accumulate(&rec, &ord);
+                        chans.push((name.into(), a.iter().map(|&x| x >= 1e7).collect()));
+                    }
+                    {
+                        // MFD (Quinn): area to every lower neighbour by slope^1.1 x contour length, in decreasing filled height.
+                        let mut idx: Vec<u32> = (0..n as u32).collect();
+                        idx.sort_by(|&a, &b| f[b as usize].total_cmp(&f[a as usize]).then(a.cmp(&b)));
+                        let mut a = vec![cell_a; n];
+                        for &(p, x) in &inflow {
+                            a[p] += x;
+                        }
+                        for &p in &idx {
+                            let p = p as usize;
+                            if border(p, &orig) {
+                                continue;
+                            }
+                            let mut ws = [0f64; 8];
+                            let mut tot = 0.0;
+                            for d in 0..8 {
+                                let q = nbr(p, d).unwrap();
+                                let dd = if d < 4 { dx } else { dx * std::f64::consts::SQRT_2 };
+                                let s = f64::from(f[p] - f[q]) / dd;
+                                if s > 0.0 {
+                                    ws[d] = libm::pow(s, 1.1) * if d < 4 { 0.5 } else { 0.354 };
+                                    tot += ws[d];
+                                }
+                            }
+                            if tot > 0.0 {
+                                for d in 0..8 {
+                                    if ws[d] > 0.0 {
+                                        let q = nbr(p, d).unwrap();
+                                        a[q] += a[p] * ws[d] / tot;
+                                    }
+                                }
+                            }
+                        }
+                        chans.push(("mfd".into(), a.iter().map(|&x| x >= 1e7).collect()));
+                    }
+                    for (name, ch) in &chans {
+                        let (mut cells, mut straight) = (0usize, 0usize);
+                        let mut st = vec![false; n];
+                        for j in (cj0 - wj0)..(cj0 - wj0 + CORE).min(hgt) {
+                            for i in (ci0 - wi0)..(ci0 - wi0 + CORE).min(w) {
+                                let p = j * w + i;
+                                if !ch[p] || border(p, &orig) {
+                                    continue;
+                                }
+                                cells += 1;
+                                let c: Vec<usize> = (0..8).filter(|&d| ch[nbr(p, d).unwrap()]).collect();
+                                if c == [0, 1] || c == [2, 3] {
+                                    straight += 1;
+                                    st[p] = true;
+                                }
+                            }
+                        }
+                        // Long runs: straight cells in axis lines of at least 20.
+                        let mut long = 0usize;
+                        for j in 0..hgt {
+                            let mut run = 0;
+                            for i in 0..=w {
+                                if i < w && st[j * w + i] {
+                                    run += 1;
+                                } else {
+                                    if run >= 20 {
+                                        long += run;
+                                    }
+                                    run = 0;
+                                }
+                            }
+                        }
+                        for i in 0..w {
+                            let mut run = 0;
+                            for j in 0..=hgt {
+                                if j < hgt && st[j * w + i] {
+                                    run += 1;
+                                } else {
+                                    if run >= 20 {
+                                        long += run;
+                                    }
+                                    run = 0;
+                                }
+                            }
+                        }
+                        line += &format!(" | {name} chan {cells} straight {:.3} long {:.3}", straight as f64 / cells.max(1) as f64, long as f64 / cells.max(1) as f64);
+                        if let Some(dd) = &dump_dir {
+                            let b: Vec<u8> = ch.iter().map(|&x| u8::from(x)).collect();
+                            std::fs::write(format!("{dd}/t{face}-{ti}-{tj}-{name}-{w}x{hgt}.u8"), b).unwrap();
+                        }
+                    }
+                    if let Some(dd) = &dump_dir {
+                        let b: Vec<u8> = orig.iter().flat_map(|x| x.to_le_bytes()).collect();
+                        std::fs::write(format!("{dd}/t{face}-{ti}-{tj}-orig-{w}x{hgt}.f32"), b).unwrap();
+                    }
+                    let mut o = out.lock().unwrap();
+                    writeln!(o, "{line}").unwrap();
+                    o.flush().unwrap();
+                });
+            }
+        });
+    }
 }
