@@ -1,1 +1,0 @@
-- 2026-10-27 **m8-coupled-make** (GEN-042, criterion 4): `perf coupled --remake-into` made the coupled run from the 16384 bake in 19.7 s (reduction 17.0 s, 100 steps 2.7 s; budget 600 s; window 21, log perf/logs/coupled-make.json); the `coupled` scene takes `--store` again (#809 missed the option check).

@@ -1,1 +1,0 @@
-- 2026-10-23 **M8 decisions** (owner; opus-planner): ADR 0077 accepted (chunks; the global coupled run fixes the river network); CON-08 read so that a chunk is a regional stage's tile; edits show at once and the eroded result follows; exit criteria with the speed envelope; three lanes; chunks at runtime; the photo layer later (`docs/briefings/m8-plan.md`).

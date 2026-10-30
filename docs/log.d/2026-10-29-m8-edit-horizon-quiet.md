@@ -1,1 +1,0 @@
-- 2026-10-29 m8-edit-horizon-quiet: the edit-latency scene edits on a quiet horizon (waits before each edit and after each revert), plus one informational edit during the bake wave per altitude (TEST-066).

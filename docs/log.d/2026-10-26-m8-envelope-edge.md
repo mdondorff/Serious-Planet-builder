@@ -1,1 +1,0 @@
-- 2026-10-26 **m8-envelope-edge** (TEST-054, TEST-055): the envelope scene starts each flight so that it crosses one chunk edge half way (the worst phase), so the curve with chunks is a floor; the log gives edge_fraction.

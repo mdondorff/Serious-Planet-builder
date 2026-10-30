@@ -1,1 +1,0 @@
-- 2026-10-26 **m8-look-review-2b**: look review 2b stills, review 1's exact coordinates (river and hills) and a snow-free hilly site (hills B), default and sample driver look (docs/milestones/M8/look-review-2b).

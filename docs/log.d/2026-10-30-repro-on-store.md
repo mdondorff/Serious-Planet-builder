@@ -1,1 +1,0 @@
-- 2026-10-30 **repro-on-store** (TEST-071, CON-19): `--repro BUNDLE --store DIR` replays a bundle of a stored bake read-only; a bake beyond 1024 cells without a store is refused naming the flag

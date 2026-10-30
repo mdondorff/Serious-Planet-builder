@@ -1,1 +1,0 @@
-- 2026-10-26 **m8-driver-maps proposed** (M8-6; ADR 0076 slots soil depth, moisture, insolation from the chunk stage, GEN-070..073): proposal and deltas for the planner's review, no code

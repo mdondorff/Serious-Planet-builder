@@ -1,1 +1,0 @@
-- 2026-10-27 **m8-edits-reuse (brush)**: a brush re-reads only the base heights within its strokes' radius, not its reach disc (GEN-087): isolated 1 km brush chunks land after 5.4 s, not 7.5 s; hill edits unchanged.
