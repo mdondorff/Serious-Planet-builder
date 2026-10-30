@@ -149,6 +149,16 @@ pub fn render(date: &str, commit: &str, items: &[Item]) -> String {
     out
 }
 
+/// Empty the directory of a step before it runs, so files of an earlier run of the same date never count as this run's.
+pub fn fresh_dir(base: &Path, dir: &str) -> Res {
+    let d = base.join(dir);
+    match std::fs::remove_dir_all(&d) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("{}: {e}", d.display())),
+    }
+}
+
 /// The files under `dir`, relative to `base`, with `/` separators, sorted.
 pub fn list_files(base: &Path, dir: &str) -> Vec<String> {
     fn walk(base: &Path, d: &Path, out: &mut Vec<String>) {
@@ -192,7 +202,10 @@ pub fn run(root: &Path, args: &[String]) -> Res {
         return Ok(());
     }
     std::fs::create_dir_all(&base).map_err(|e| format!("{}: {e}", base.display()))?;
-    let mut runner = |st: &Step| crate::testcmd::capture_cmd(root, &st.capture_args);
+    let mut runner = |st: &Step| {
+        fresh_dir(&base, &st.dir)?;
+        crate::testcmd::capture_cmd(root, &st.capture_args)
+    };
     let items = run_steps(&steps, &mut runner, &|d| list_files(&base, d));
     let commit = crate::util::capture(root, "git", &["rev-parse", "--short", "HEAD"])
         .map(|s| s.trim().to_string())
@@ -257,6 +270,18 @@ mod tests {
         std::fs::write(dir.join("stills/s/b.png"), b"1").unwrap();
         std::fs::write(dir.join("stills/s/a.png"), b"1").unwrap();
         assert_eq!(list_files(&dir, "stills"), ["stills/s/a.png", "stills/s/b.png"]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // spec: TEST-073
+    #[test]
+    fn a_step_starts_from_an_empty_directory_so_files_of_an_earlier_run_never_count() {
+        let dir = std::env::temp_dir().join(format!("planet-package-fresh-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("flights")).unwrap();
+        std::fs::write(dir.join("flights/old.png"), b"1").unwrap();
+        fresh_dir(&dir, "flights").unwrap();
+        assert!(list_files(&dir, "flights").is_empty());
+        fresh_dir(&dir, "never-made").unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
