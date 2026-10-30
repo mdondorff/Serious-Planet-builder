@@ -781,7 +781,7 @@ fn perf_coupled_args(args: &[String]) -> Result<Vec<String>, String> {
     perf_bake_scene_args("coupled", args)
 }
 
-/// The `cargo` arguments of a perf scene that takes `--global-res`, `--machine-ready` and, for `anet-chunk`, `--store DIR` (`coupled`, `anet-chunk`).
+/// The `cargo` arguments of a perf scene that takes `--global-res`, `--machine-ready` and, for `coupled`, `--store DIR` (`coupled`).
 fn perf_bake_scene_args(scene: &str, args: &[String]) -> Result<Vec<String>, String> {
     let mut v: Vec<String> = ["run", "--release", "-p", "planet", "--", "test-render", "--perf", "--scene", scene, "--adapter", "hardware"]
         .iter()
@@ -795,7 +795,7 @@ fn perf_bake_scene_args(scene: &str, args: &[String]) -> Result<Vec<String>, Str
                 v.push(a.clone());
                 v.push(it.next().ok_or_else(|| format!("{a} needs a value"))?.clone());
             }
-            "--store" if scene == "anet-chunk" || scene == "coupled" => {
+            "--store" if scene == "coupled" => {
                 v.push(a.clone());
                 v.push(it.next().ok_or_else(|| format!("{a} needs the directory of a stored bake"))?.clone());
             }
@@ -807,7 +807,6 @@ fn perf_bake_scene_args(scene: &str, args: &[String]) -> Result<Vec<String>, Str
                 return Err(format!(
                     "unknown perf {scene} option '{other}' (known: --global-res, --machine-ready{}, the owner's override of a failed readiness gate)",
                     match scene {
-                        "anet-chunk" => ", --store",
                         "coupled" => ", --store DIR --remake-into OUT (a fresh make from a stored bake)",
                         _ => "",
                     }
@@ -1058,11 +1057,6 @@ pub fn perf(root: &Path, args: &[String]) -> Res {
     }
     if args.first().map(String::as_str) == Some("coupled") {
         let cargo_args = perf_coupled_args(&args[1..])?;
-        let refs: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
-        return run(root, "cargo", &refs, &[]);
-    }
-    if args.first().map(String::as_str) == Some("anet-chunk") {
-        let cargo_args = perf_bake_scene_args("anet-chunk", &args[1..])?;
         let refs: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
         return run(root, "cargo", &refs, &[]);
     }
@@ -1653,16 +1647,12 @@ mod tests {
         assert!(a.contains(&"coupled".to_string()) && a.contains(&"hardware".to_string()) && a.contains(&"--machine-ready".to_string()));
         assert!(perf_coupled_args(&s(&["--global-res"])).unwrap_err().contains("needs a value"));
         assert!(perf_coupled_args(&s(&["--force"])).unwrap_err().contains("unknown perf coupled option"));
-        let chunk = perf_bake_scene_args("anet-chunk", &s(&["--global-res", "64"])).unwrap();
-        assert!(chunk.contains(&"anet-chunk".to_string()) && chunk.contains(&"hardware".to_string()) && chunk.contains(&"64".to_string()));
-        assert!(!chunk.contains(&"--machine-ready".to_string()), "the owner's override is never added by default");
-        // The chunk scene reads a stored production bake (the viewer's geometry); the coupled scene has no store.
-        let on_store = perf_bake_scene_args("anet-chunk", &s(&["--store", "target/accept/global16384", "--global-res", "16384"])).unwrap();
-        assert!(on_store.windows(2).any(|w| w[0] == "--store" && w[1] == "target/accept/global16384"));
+        let plain = perf_bake_scene_args("coupled", &s(&["--global-res", "64"])).unwrap();
+        assert!(!plain.contains(&"--machine-ready".to_string()), "the owner's override is never added by default");
         // The coupled scene re-makes its run from a stored bake into a directory of its own; the other scenes do not take that option.
         let make = perf_bake_scene_args("coupled", &s(&["--store", "x", "--remake-into", "target/m", "--global-res", "16384"])).unwrap();
         assert!(make.windows(2).any(|w| w[0] == "--remake-into" && w[1] == "target/m") && make.contains(&"--store".to_string()));
-        assert!(perf_bake_scene_args("anet-chunk", &s(&["--remake-into", "x"])).unwrap_err().contains("unknown perf anet-chunk option"));
+        assert!(perf_bake_scene_args("global-bake", &s(&["--remake-into", "x"])).unwrap_err().contains("unknown perf global-bake option"));
     }
 
     // spec: GEN-014, BUILD-002

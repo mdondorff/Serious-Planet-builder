@@ -12,10 +12,10 @@ fn tmp(name: &str) -> std::path::PathBuf {
     d
 }
 
-/// Coarse chunks (about 80 cells an edge, over a run of 32 cells per face edge) keep the test quick; the poses are on the ground, where
+/// Coarse horizon chunks (about 80 cells an edge, over a run of 32 cells per face edge) keep the test quick; the poses are on the ground, where
 /// a frame reads only a few chunks.
 const POSES: &str = r#"
-chunk_cell_m = 300
+horizon_cell_m = 300
 chunk_timeout_s = 300
 
 [place]
@@ -94,9 +94,9 @@ impl Drop for Fixture {
     }
 }
 
-// spec: TEST-048, TEST-049
+// spec: TEST-048
 #[test]
-fn the_stills_scene_draws_each_pose_with_its_chunks_landed() {
+fn the_stills_scene_draws_each_pose_with_its_horizon_maps_baked() {
     let f = Fixture::new("all");
     let dir = &f.dir;
     let out = f.call(&[]).unwrap();
@@ -110,17 +110,17 @@ fn the_stills_scene_draws_each_pose_with_its_chunks_landed() {
     for n in &names {
         assert_eq!(png_size(&dir.join(format!("{n}.png"))), (160, 90));
     }
-    // Each pose read at least one chunk, and every one of them had landed.
+    // Each pose waited for at least one horizon map.
     for line in index.lines().filter(|l| !l.starts_with('#')) {
-        let chunks: usize = line.split_whitespace().nth(9).unwrap().parse().unwrap();
-        assert!(chunks >= 1, "{line}");
+        let maps: usize = line.split_whitespace().nth(9).unwrap().parse().unwrap();
+        assert!(maps >= 1, "{line}");
     }
     // The sun differs between the two poses: the images differ.
     assert_ne!(std::fs::read(dir.join("ground-sunset.png")).unwrap(), std::fs::read(dir.join("ground-midday.png")).unwrap());
     assert!(!dir.join("lit.json").exists() && !out.contains("budget"), "a tool: no perf log, no budget row: {out}");
 }
 
-// spec: TEST-048, TEST-049
+// spec: TEST-048
 #[test]
 fn the_stills_scene_draws_one_pose_by_name_and_refuses_a_bad_call() {
     let f = Fixture::new("one");

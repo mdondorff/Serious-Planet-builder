@@ -1016,19 +1016,23 @@ Source: opus-planner (2026-10-22, SPIKE-29: the owner asked how far authored edi
 - **THEN** the values are those of the field and the counts and times of each kind of call are reported
 
 ### Requirement: TEST-048 Pose stills
-`test-render --scene capture-stills --poses FILE --out-dir DIR` (a world source as in TEST-027; `--size WxH` default 2560x1440; `--views A,B` selects poses by name) SHALL draw each pose on the lit path over a world with its A-net chunk stage on and write `DIR/<pose>.png` and `DIR/stills.txt` (pose, size, eye latitude, longitude and height, heading, pitch, sun hours, chunks read, seconds waited). A bad file or call SHALL be refused before it draws. The tool is not a measurement: no gate, no timestamp query, no perf log.
+`test-render --scene capture-stills --poses FILE --out-dir DIR` (a world source as in TEST-027; `--size WxH` default 2560x1440; `--views A,B` selects poses by name) SHALL draw each pose on the lit path over the base terrain of the world, with the horizon maps of the chunks near the eye baked first (REND-038), and write `DIR/<pose>.png` and `DIR/stills.txt` (pose, size, eye latitude, longitude and height, heading, pitch, sun hours, horizon maps waited for, seconds waited). A bad file or call SHALL be refused before it draws. The tool is not a measurement: no gate, no timestamp query, no perf log. The eye SHALL be `altitude_m` over the ground of the world's field.
 
 Verify: A, C
 Status: active
-Source: opus-planner (2026-10-24), M8-4 and M8-8 look reviews, TEST-027, STRM-046
+Source: opus-planner (2026-10-24), M8-4 and M8-8 look reviews, TEST-027, ADR 0086
 
 #### Scenario: Two poses
 - **WHEN** the scene runs on the software adapter over a small store with two poses on the ground
-- **THEN** it writes one PNG of the requested size per pose and `stills.txt` with at least one chunk read per pose, and the two images differ in their sun
+- **THEN** it writes one PNG of the requested size per pose and `stills.txt` with at least one horizon map per pose, and the two images differ in their sun
 
 #### Scenario: A bad call
 - **WHEN** `--poses` is missing, `--views` names no pose, or `--poses` is given to another scene
 - **THEN** the run is refused before it draws
+
+#### Scenario: Maps that do not bake
+- **WHEN** the horizon maps of a pose are not baked within `chunk_timeout_s`
+- **THEN** the run fails naming the pose, the number of chunks without a map and the first of them
 
 ### Requirement: TEST-050 Poses file
 The poses file (TOML) SHALL hold the keys of the table; a bad value SHALL be refused naming the key and the value.
@@ -1037,7 +1041,7 @@ The poses file (TOML) SHALL hold the keys of the table; a bad value SHALL be ref
 |---|---|---|
 | `[place]` `anchor = "largest-river"` | largest river, at least `min_height_m` high (0) | or `lat`, `lon` |
 | `chunk_timeout_s` | wait per pose, seconds | 900 |
-| `chunk_cell_m` | chunk cell, metres | 8 |
+| `horizon_cell_m` | horizon chunk cell, metres | 8 |
 | `[[pose]]` `name` | names the PNG | required |
 | `altitude_m`, `back_m` | eye over the ground; behind the anchor | required |
 | `heading_deg`, `pitch_deg` | clockwise from north; down | required |
@@ -1080,33 +1084,18 @@ Source: opus-planner (2026-10-25), look review 1 second site, TEST-050
 - **WHEN** the `[place]` table gives `relief_radius_m`, `relief_min_m` and `relief_max_m`, or only one of the pair
 - **THEN** the `largest-river` anchor is the largest river among the cells whose heights within the radius span the window, and a lone limit is refused
 
-### Requirement: TEST-052 Anchor on the steepest river and the chunk channel
-`[place] anchor = "steepest-river"` (`slope_radius_m`; optional `ground_min_m`, `ground_max_m`, `min_area_m2`) SHALL anchor on the coupled run's river cell of at least that drainage area, with ground on the base field in the range, whose surroundings within the radius have the steepest slope; it prints the slope. `snap_to_channel_m` SHALL, once the first pose's chunks have landed, move the anchor to the lowest chunk ground within that distance (refused when it lies under 50 m below the median) and make every `heading_deg` relative to the channel's downstream bearing. `sections.txt` SHALL list sections across the channel every 100 m. `slope_table_stride` SHALL write `slopes.txt`: per ground band, the land share and the slope percentiles of land and river cells.
+### Requirement: TEST-052 Anchor on the steepest river
+`[place] anchor = "steepest-river"` (`slope_radius_m`; optional `ground_min_m`, `ground_max_m`, `min_area_m2`) SHALL anchor on the coupled run's river cell of at least that drainage area, with ground on the base field in the range, whose surroundings within the radius have the steepest slope; it prints the slope. `slope_table_stride` SHALL write `slopes.txt`: per ground band, the land share and the slope percentiles of land and river cells.
 
 Verify: A
 Status: active
-Source: opus-planner (2026-10-25), look review 1 second site, TEST-050
+Source: opus-planner (2026-10-25), look review 1 second site, TEST-050, ADR 0086
 
-#### Scenario: A trench off the anchor
-- **WHEN** the ground has a trench 300 m deep 600 m from the anchor
-- **THEN** the snap lands in the trench and reads its bearing, and a flat ground is refused
+#### Scenario: The slope table
+- **WHEN** the northern half of the ground is a plateau of 600 m and the southern half is sea
+- **THEN** all the land is in the band of 600 m with no slope, and the same table comes out every time
 
-### Requirement: TEST-049 Stills wait for their chunks
-A still SHALL be drawn only when every chunk read by the tiles of its plan is ready and the plan was made over the field that includes those chunks, so that no tile of the image is a stand-in (STRM-039); the eye SHALL be placed over the ground of that field. When the chunks are not ready within `chunk_timeout_s` the run SHALL fail naming the pose, the number of chunks missing and the first missing keys.
-
-Verify: A, C
-Status: active
-Source: TEST-048, STRM-039
-
-#### Scenario: Chunks that do not land
-- **WHEN** a pose's chunks are not ready within `chunk_timeout_s`
-- **THEN** the run fails naming the pose, the count of chunks missing and the first missing keys
-
-#### Scenario: Landed chunks
-- **WHEN** a pose is drawn
-- **THEN** the chunk share of its plan has no stand-in node and the eye is `altitude_m` over the ground of the field with the chunks
-
-### Requirement: TEST-054 The envelope scene runs the chunk stage
+### Requirement: TEST-054 The envelope scene runs the horizon jobs
 The envelope scene (TEST-047) SHALL run the horizon jobs from the base terrain when its world has a store, and no chunk stage (ADR 0086: the stage is removed). The jobs are driven every frame from the plan's tiles and every flight starts with no horizon map resident. A world without a store SHALL keep the tile-only scene.
 
 Verify: A
@@ -1117,67 +1106,55 @@ Source: M8 plan, TEST-047, STRM-064, ADR 0086
 - **WHEN** the envelope scene is set up with a store and with an in-memory bake
 - **THEN** the first runs the horizon jobs and no chunk stage, and the second has none
 
-#### Scenario: The start crosses an edge half way
-- **WHEN** the start of a flight of any length is searched over a chunk grid with edges at fixed latitudes, from starts at many phases
-- **THEN** the flight starts in one chunk, crosses exactly one edge at half its length and ends in the next, and a start with no edge within 0.2 degrees stays where it is
+#### Scenario: A frame waits for the horizon jobs
+- **WHEN** a frame has a plan node that stands in for a chunk or a horizon job in flight, and when it has neither
+- **THEN** the frame is busy in the first two cases and not in the last, and the settle before a flight waits for a frame that is not busy
 
-#### Scenario: A frame waits for the stage
-- **WHEN** a frame has a plan node that stands in for a chunk, a chunk job in flight or a horizon job in flight, and when it has none of them
-- **THEN** the frame is busy in the first three cases and not in the last, and the settle before a flight waits for a frame that is not busy
-
-### Requirement: TEST-055 The envelope log gives what the chunk stage did
-The log of the envelope scene (TEST-047) SHALL say whether the chunk stage ran, where along the flights the start put a chunk edge and, for each trial, give the chunks landed, the horizon maps landed, the median and the largest wait of a landed chunk (from the first frame that wanted it to the frame that saw it land), and the chunk and horizon jobs in flight at the end. One altitude (300 m) SHALL be flown again with the horizon jobs off and given as a comparison line. A log without a chunk stage SHALL say why.
+### Requirement: TEST-055 The envelope log gives what the horizon jobs did
+The log of the envelope scene (TEST-047) SHALL say `"chunk_stage": false` (the stage is removed, ADR 0086; `accept M8` reads the field) and, for each trial, give the horizon maps landed, the horizon jobs in flight at the end and the counters of the horizon step (TEST-058). A log of a world without the horizon jobs SHALL say why the stand-in share is missing.
 
 Verify: A
 Status: active
-Source: M8 exit criterion 7 (owner, 2026-10-23, D4), TEST-054, planner decision 2026-10-26
-
-#### Scenario: The wait of a chunk
-- **WHEN** a chunk is first wanted by a frame at 1.0 s and seen landing by a frame at 3.5 s, another is wanted at 1.0 s and again at 2.0 s and lands at 7.0 s, and a third lands that the flight never asked for
-- **THEN** the waits are 2.5 s, 6 s and 0 s, the median is 2.5 s and the largest 6 s
+Source: M8 exit criterion 7 (owner, 2026-10-23, D4), TEST-054, planner decision 2026-10-26, ADR 0086
 
 #### Scenario: The log
-- **WHEN** the scene's log is written for a flight with a chunk stage and a comparison point, and for one without a stage
-- **THEN** the first holds the per-trial stage facts and the comparison, and the second says `stage: null`, no comparison and the reason
+- **WHEN** the scene's log is written for a flight with the horizon jobs and for one without them
+- **THEN** the first holds the per-trial facts and `"chunk_stage": false`, and the second says `stage: null` and the reason
 
 ### Requirement: TEST-057 The envelope scene flies a steady curve beside the cold one
-With a chunk stage the envelope scene (TEST-047) SHALL search each altitude twice: the cold trial of TEST-054 (the first visit after a stop) and a steady-flight trial that flies a run-in at the speed under test before its measured stretch, with the chunk stage and the prefetch running. The stretch SHALL be `--steady-window-s` long (60 s by default) over ground the run-in did not cover and cross several chunk edges, and the bound SHALL be judged over every 1 s window of the whole stretch. The log SHALL give both curves, the run-in, the stretch and, per trial, the earliest time a chunk that landed was first wanted.
+With the horizon jobs the envelope scene (TEST-047) SHALL search each altitude twice: the cold trial of TEST-054 (the first visit after a stop) and a steady-flight trial that flies a run-in at the speed under test before its measured stretch, with the horizon jobs running. The stretch SHALL be `--steady-window-s` long (60 s by default) over ground the run-in did not cover, and the bound SHALL be judged over every 1 s window of the whole stretch. The log SHALL give both curves, the run-in and the stretch.
 
 Verify: A, C
 Status: active
-Source: opus-planner (2026-10-27, m8-chunk-lead: the cold trial measures the start-up), owner (2026-10-27, #790: the floor applies to steady flight), TEST-047, TEST-054, STRM-042
+Source: opus-planner (2026-10-27, m8-chunk-lead: the cold trial measures the start-up), owner (2026-10-27, #790: the floor applies to steady flight), TEST-047, TEST-054, ADR 0086
 
-Detail: The run-in is 12 s (a job latency of 5 to 7 s and 5 s more) and is not judged. A stretch of 12 s is the quick single-edge trial, with the chunk edge half way into it. The steady curve is not part of the smoke run beyond one short trial per altitude. The owner decides the floor applies to the steady curve.
+Detail: The run-in is 12 s and is not judged. A stretch of 12 s is the quick trial. The steady curve is not part of the smoke run beyond one short trial per altitude. The owner decides the floor applies to the steady curve.
 
 #### Scenario: Steady and cold
-- **WHEN** the scene runs with a chunk stage
-- **THEN** the log holds the cold curve, the steady curve with its run-in and stretch, and the first-wanted time of each trial, and every steady trial crosses a chunk edge inside the measured stretch
+- **WHEN** the scene runs with the horizon jobs
+- **THEN** the log holds the cold curve and the steady curve with its run-in and stretch
 
-### Requirement: TEST-058 Every frame loop runs the same chunk step and an enabled feature must act
-The viewer and every perf scene that drives chunks SHALL run the per-frame chunk step through one function (`chunkstage::frame_step`), and each scene SHALL report the counters of its enabled features (prefetch asked, prefetch jobs started, horizon maps baked and landed, stale-hold frames, chunks landed and evicted, plan-cache announcements). A scene SHALL fail, naming the feature and the counter table, when a feature it has enabled counted 0 where the scene expects it to act; the window's smoke run SHALL fail when it drew lit over a chunk stage and its chunk step never ran the horizon jobs.
+### Requirement: TEST-058 Every frame loop runs the same horizon step and an enabled feature must act
+The viewer and every perf scene that drives the horizon jobs SHALL run the per-frame step through one function (`horizonstep::frame_step`), and each scene SHALL report the counters of its enabled features (horizon maps baked and landed, plan-cache announcements). A scene SHALL fail, naming the feature and the counter table, when a feature it has enabled counted 0 where the scene expects it to act.
 
 Verify: A, C
 Status: active
-Source: owner (2026-10-27: one frame loop for the viewer and the scenes), STRM-042, STRM-056, TEST-047, TEST-056
+Source: owner (2026-10-27: one frame loop for the viewer and the scenes), TEST-047, ADR 0086
 
-Detail: A scene MAY turn a feature off (`prefetch`, `horizon`, `stale_hold`) and says so in its log; an off feature is not checked. Which counters a scene expects is a table in this requirement's design: flights expect prefetch and, with horizon on, horizon bakes; the edit scenes expect plan-cache announcements and stale-hold frames; a settling loop that is not a frame runs the step with the prefetch off.
+Detail: A scene MAY turn the `horizon` feature off and says so in its log; an off feature is not checked. Which counters a scene expects is a table in this requirement's design: flights expect horizon bakes; the edit scenes expect plan-cache announcements; a settling loop that is not a frame runs the step with the horizon on or off by call.
 
 Per-scene table (the counters each scene checks; a scene with the feature off checks nothing for it and logs `off`):
 
-| Scene | Prefetch asked | Horizon step ran | Stale-hold frames | Plan-cache announcements | Where logged |
-|---|---|---|---|---|---|
-| envelope flights (not smoke) | > 0 | > 0 | not checked | not checked | `perf/logs/envelope.json`, per trial `stage.counters` |
-| edit latency, with chunks | not checked (the camera does not travel) | > 0 | > 0 | > 0 | report line per altitude |
-| stills and edit-resolve settling loops | off | off or on by call | off | not checked | not logged |
-| viewer window (`editor --smoke`, over a chunk stage) | not checked | > 0 on the lit frames (the smoke verdict) | not checked | not checked | the smoke summary, `chunk step:` |
+| Scene | Horizon step ran | Plan-cache announcements | Where logged |
+|---|---|---|---|
+| envelope flights (not smoke) | > 0 | not checked | `perf/logs/envelope.json`, per trial `stage.counters` |
+| edit latency | > 0 | > 0 | report line per altitude |
+| stills settling loop | on | not checked | not logged |
+| viewer window (`editor --smoke`) | > 0 on the lit frames (the smoke verdict) | not checked | the smoke summary, `horizon step:` |
 
-#### Scenario: A window that never baked
-- **WHEN** the editor's smoke run draws lit frames over a store with a chunk stage and the horizon feature of its chunk step is off
-- **THEN** the smoke verdict fails naming the horizon jobs and the lit frames that had a stage
-
-#### Scenario: A step left out
-- **WHEN** a frame loop over a travelling camera on the stand-in chunk stage runs the step, and again with the prefetch step left out
-- **THEN** the first run counts prefetch, horizon bakes and announcements, and the second fails the check naming the prefetch
+#### Scenario: A feature that never acted
+- **WHEN** a scene enabled the horizon step and its counters show 0 horizon frames, and again with the feature turned off
+- **THEN** the first fails the check naming the horizon and the counter table, and the second is not checked and logs `off`
 
 ### Requirement: TEST-060 Milestone M8 acceptance
 `cargo xtask accept M8` SHALL run the automated steps of `accept M5`, the discrete-GPU tier C run and `gate --small` (TEST-063), and SHALL judge M8's criteria 4 to 7 only from the logs of a valid window, never from a measurement of its own. A missing, smoke, other-scene or overridden log SHALL be MISSING, not a pass; a failed row fails the command, otherwise a MISSING row makes it incomplete. Criterion 3 (`cargo xtask gate` on the real store, chunk stage off) SHALL be listed as a manual item.
@@ -1252,7 +1229,7 @@ Source: opus-planner (2026-10-28), owner fallback 2026-10-28, TEST-061, TEST-062
 
 #### Scenario: Stage off
 - **WHEN** the window runs over a store with a coupled run
-- **THEN** no chunk job is computed and the gate line reports `chunk jobs: None`
+- **THEN** no chunk job is computed and the gate line names the horizon jobs and no chunk jobs
 
 ### Requirement: TEST-065 The gate reports the horizon re-bake after its edit; the edit-latency scene tabulates it
 The gate SHALL fail a lit run with the horizon jobs on when no horizon map was baked. It SHALL report, and not judge, the time from the scripted edit to the first landing of a map the edit touched, or that none landed (owner decision 2026-10-29: the horizon-map shadows are redone after SPIKE-56, M8 criterion 6 is decided by the drawn tiles). The edit-latency scene SHALL print a table headed `edit to map ms`, one row per touched map, with no verdict column.

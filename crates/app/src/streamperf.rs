@@ -123,11 +123,8 @@ pub fn check_options(o: &Options) -> Result<(), String> {
         }
     }
     let stream = (o.perf || o.perf_smoke || capture) && (is_stream_scene(&o.scene) || crate::litperf::is_lit_scene(&o.scene) || capture);
-    // The chunk scene reads a stored production bake too (`--store DIR`, the viewer's geometry), and so does the coupled scene's re-make (`--remake-into`).
-    let chunk_on_store = o.perf
-        && (o.scene == "anet-chunk" || (o.scene == "coupled" && o.remake_into.is_some()))
-        && o.store.is_some()
-        && !o.allow_memory_bake;
+    // The coupled scene's re-make (`--remake-into`) reads a stored production bake (`--store DIR`).
+    let chunk_on_store = o.perf && o.scene == "coupled" && o.remake_into.is_some() && o.store.is_some() && !o.allow_memory_bake;
     // A bundle of a world with a stored bake replays from the store (`--repro BUNDLE --store DIR`, CON-19): the bake of that size is not made in memory.
     let replay_on_store = o.repro.is_some() && o.store.is_some() && !o.allow_memory_bake;
     if !stream && !chunk_on_store && !replay_on_store && (o.store.is_some() || o.allow_memory_bake) {
@@ -193,25 +190,21 @@ pub(crate) struct Tick {
     pub(crate) settled: bool,
     /// The tiles of the plan this frame drew (resident and drawn): what the lag post-pass needs besides the camera.
     pub(crate) drawn: Vec<TileId>,
-    /// The frame's chunk stand-in share (STRM-039): all zero without a chunk view.
-    pub(crate) chunk: planet_frame::chunkshare::ChunkShare,
-    /// Whether the chunk stage still has work for the frame's plan (TEST-054): a stand-in node or a chunk or horizon job in flight; false without
-    /// a chunk stage.
+    /// Whether the horizon jobs still have work for the frame's plan (TEST-054): a stand-in node or a horizon job in flight; false without them.
     pub(crate) chunk_busy: bool,
     /// Plan nodes of the frame that carry water (zero without the lit path).
     pub(crate) water_nodes: usize,
 }
 
-/// The chunk stage a driver runs every frame (TEST-054): what the viewer's window does after the plan of a frame.
-pub(crate) struct ChunkDrive {
+/// The horizon jobs a driver runs every frame (TEST-054): what the viewer's window does after the plan of a frame.
+pub(crate) struct HorizonDrive {
     world: Arc<WorldTerrain>,
-    /// Whether the horizon jobs (REND-038) run too.
+    /// Whether the horizon jobs (REND-038) run.
     horizon: bool,
-    trace: crate::chunkstage::ChunkTrace,
-    /// What the chunk step did over the run, per feature (TEST-058).
-    counters: crate::chunkstage::FeatureCounters,
-    /// The flight's own clock for the trace.
-    started: Instant,
+    /// The horizon maps that landed since the count restarted.
+    landed: u64,
+    /// What the step did over the run, per feature (TEST-058).
+    counters: crate::horizonstep::FeatureCounters,
 }
 
 /// The rig and the pacing of one case.
@@ -225,8 +218,8 @@ pub(crate) struct Driver<'a> {
     cut_field: Option<Box<dyn planet_generators::height::HeightField + 'a>>,
     /// Frames ticked, for the clock of the waves and the exposure's first frame.
     ticks: u64,
-    /// The chunk stage the frames drive; `None` leaves the chunk jobs alone (the scene has no stage).
-    chunk: Option<ChunkDrive>,
+    /// The horizon jobs the frames drive; `None` leaves them alone (the scene has none).
+    horizon: Option<HorizonDrive>,
     /// Hold the lit frames still (a still-camera check, TEST-070): the water time and the exposure step in seconds every tick uses instead of the frame clock.
     hold: Option<(f64, f32)>,
     /// The sun direction every lit frame uses instead of the look's (a still-camera check sets one above the horizon).
@@ -236,18 +229,12 @@ pub(crate) struct Driver<'a> {
 impl<'a> Driver<'a> {
     /// A driver of the debug path (no lit plan) over `rig`, paced from now.
     pub(crate) fn plain(ctx: &'a GpuContext, rig: Rig) -> Driver<'a> {
-        Driver { ctx, rig, next_deadline: Instant::now(), lit: None, cut_field: None, ticks: 0, chunk: None, hold: None, sun: None }
+        Driver { ctx, rig, next_deadline: Instant::now(), lit: None, cut_field: None, ticks: 0, horizon: None, hold: None, sun: None }
     }
 
-    /// The chunk field the frames count their stand-in share against (STRM-039); `None` counts nothing.
-    pub(crate) fn set_chunk_view(&mut self, view: Option<Arc<dyn planet_frame::chunkshare::ChunkView>>) {
-        self.rig.managed.set_chunk_view(view);
-    }
-
-    /// Drive the chunk jobs of `world` every frame (TEST-054): the chunks the plan reads, nearest first, what landed and what was evicted to the
-    /// managed loop, and the horizon jobs when `horizon`.
-    pub(crate) fn drive_chunks(&mut self, world: Arc<WorldTerrain>, horizon: bool) {
-        self.chunk = Some(ChunkDrive { world, horizon, trace: Default::default(), counters: Default::default(), started: Instant::now() });
+    /// Drive the horizon jobs of `world` every frame (TEST-054): the maps of the chunks the plan reads, nearest first, when `horizon`.
+    pub(crate) fn drive_horizon(&mut self, world: Arc<WorldTerrain>, horizon: bool) {
+        self.horizon = Some(HorizonDrive { world, horizon, landed: 0, counters: Default::default() });
     }
 
     /// Restart the pacing: the next iteration is due now.
@@ -255,25 +242,23 @@ impl<'a> Driver<'a> {
         self.next_deadline = Instant::now();
     }
 
-    /// Start the chunk trace afresh (the flight begins): what landed during the settle is not the flight's.
-    pub(crate) fn restart_chunk_trace(&mut self) {
-        if let Some(c) = self.chunk.as_mut() {
-            c.trace = Default::default();
-            c.started = Instant::now();
+    /// Start the count of landed maps afresh (the flight begins): what landed during the settle is not the flight's.
+    pub(crate) fn restart_horizon_count(&mut self) {
+        if let Some(h) = self.horizon.as_mut() {
+            h.landed = 0;
         }
     }
 
-    /// What the chunk step counted over the run and the features it ran with (TEST-058); `None` without a chunk stage.
-    pub(crate) fn chunk_counters(&self) -> Option<(crate::chunkstage::FeatureCounters, crate::chunkstage::FrameFeatures)> {
-        let c = self.chunk.as_ref()?;
-        Some((c.counters, crate::chunkstage::FrameFeatures { horizon: c.horizon, ..Default::default() }))
+    /// What the step counted over the run and the features it ran with (TEST-058); `None` without the horizon jobs.
+    pub(crate) fn horizon_counters(&self) -> Option<(crate::horizonstep::FeatureCounters, crate::horizonstep::FrameFeatures)> {
+        let h = self.horizon.as_ref()?;
+        Some((h.counters, crate::horizonstep::FrameFeatures { horizon: h.horizon }))
     }
 
-    /// What the chunk stage did since the trace restarted and the jobs still in flight (chunk, horizon); `None` without a chunk stage.
-    pub(crate) fn chunk_summary(&self) -> Option<(crate::chunkstage::TraceSummary, usize, usize)> {
-        let c = self.chunk.as_ref()?;
-        let jobs = c.world.chunk_manager().map_or(0, |m| m.in_flight());
-        Some((c.trace.summary(), jobs, c.world.horizon_in_flight()))
+    /// The horizon maps that landed since the count restarted and the horizon jobs still in flight; `None` without the horizon jobs.
+    pub(crate) fn horizon_summary(&self) -> Option<(u64, usize)> {
+        let h = self.horizon.as_ref()?;
+        Some((h.landed, h.world.horizon_in_flight()))
     }
 }
 
@@ -284,34 +269,21 @@ impl Driver<'_> {
         let started = Instant::now();
         let ctx = self.ctx;
         let frame = self.rig.managed.begin_frame_strict(req, &mut RendererSink { ctx, renderer: &mut self.rig.renderer })?;
-        // The chunk stage, as the window does after the plan (STRM-039, STRM-040): the chunks the plan's tiles read, nearest first; the tiles that read a
-        // landed chunk are refreshed.
+        // The horizon jobs, as the window does after the plan (STRM-049): the maps of the chunks the plan's tiles read, nearest first.
         let mut chunk_busy = false;
-        if let Some(cd) = self.chunk.as_mut() {
+        if let Some(hd) = self.horizon.as_mut() {
             let tiles: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
-            let at = cd.started.elapsed().as_secs_f64();
-            let manager = cd.world.chunk_manager();
-            if let Some(m) = manager.as_ref() {
-                cd.trace.wanted(tiles.iter().flat_map(|&t| m.reads(t)), at);
-            }
-            let step = crate::chunkstage::frame_step(
-                &cd.world,
-                &mut self.rig.managed,
+            let step = crate::horizonstep::frame_step(
+                &hd.world,
                 &tiles,
                 req.camera.position,
-                &crate::chunkstage::FrameFeatures { horizon: cd.horizon, ..Default::default() },
-                &mut cd.counters,
+                &crate::horizonstep::FrameFeatures { horizon: hd.horizon },
+                &mut hd.counters,
             );
-            cd.trace.prefetch(&step.asked, at);
-            if let Some(m) = manager.as_ref() {
-                cd.trace.running(tiles.iter().flat_map(|&t| m.reads(t)).chain(step.asked.iter().copied()), |k| m.is_running(k), at);
+            if hd.horizon {
+                hd.landed += step.horizon.landed.len() as u64;
             }
-            cd.trace.landed(&step.update.landed, at);
-            if cd.horizon {
-                cd.trace.horizon_landed(step.horizon.landed.len());
-            }
-            let jobs = manager.map_or(0, |m| m.in_flight());
-            chunk_busy = crate::chunkstage::chunks_busy(frame.counts.chunk.chunk_stand_in, jobs, cd.world.horizon_in_flight());
+            chunk_busy = crate::horizonstep::chunks_busy(frame.counts.chunk.chunk_stand_in, hd.world.horizon_in_flight());
         }
         self.rig.fi.retire_to(self.rig.renderer.retired_frames(ctx));
         while self.rig.fi.is_full() {
@@ -390,7 +362,7 @@ impl Driver<'_> {
             lit_plan_ms,
         };
         self.pace();
-        Ok(Tick { record, settled, drawn, chunk: c.chunk, chunk_busy, water_nodes })
+        Ok(Tick { record, settled, drawn, chunk_busy, water_nodes })
     }
 
     /// Hold the loop to the frame step of script time: the next iteration starts one step after this one was due (a late frame
@@ -506,7 +478,7 @@ fn run_case(
         lit: lit.map(|s| (s, Arc::clone(world))),
         cut_field,
         ticks: 0,
-        chunk: None,
+        horizon: None,
         hold: None,
         sun: None,
     };
@@ -1166,7 +1138,7 @@ pub fn lit_stream_stills(o: &Options, ctx: &GpuContext, size: (u32, u32), frames
         lit: Some((setup, Arc::clone(&world))),
         cut_field,
         ticks: 0,
-        chunk: None,
+        horizon: None,
         hold: None,
         sun: None,
     };
@@ -1422,13 +1394,10 @@ mod tests {
         );
         let e = check_options(&opts(&["test-render", "--perf", "--scene", "dive", "--store", "x", "--allow-memory-bake"])).unwrap_err();
         assert!(e.contains("exclude each other"), "{e}");
-        assert!(check_options(&opts(&["test-render", "--perf", "--scene", "anet-chunk", "--store", "x", "--global-res", "16384"])).is_ok());
         // GEN-042: the coupled scene takes the store only to re-make its run from it.
         let remake = ["test-render", "--perf", "--scene", "coupled", "--store", "x", "--global-res", "16384", "--remake-into", "target/m"];
         assert!(check_options(&opts(&remake)).is_ok());
         let e = check_options(&opts(&["test-render", "--perf", "--scene", "coupled", "--store", "x"])).unwrap_err();
-        assert!(e.contains("only apply to the streaming perf scenes"), "{e}");
-        let e = check_options(&opts(&["test-render", "--perf", "--scene", "anet-chunk", "--allow-memory-bake"])).unwrap_err();
         assert!(e.contains("only apply to the streaming perf scenes"), "{e}");
         let e = check_options(&opts(&["test-render", "--perf", "--scene", "terrain", "--store", "x"])).unwrap_err();
         assert!(e.contains("only apply to the streaming perf scenes"), "{e}");

@@ -8,7 +8,7 @@ use crate::streamperf::Driver;
 use crate::worldfield::WorldTerrain;
 use crate::{err, Options};
 use planet_core::cube::{FaceMapping, TangentWarp};
-use planet_frame::chunkshare::{ChunkShare, ChunkView};
+use planet_frame::chunkshare::ChunkShare;
 use planet_frame::scenes::{lag_post_pass, level_flight_cameras, FrameDraw, FRAME_STEP_S, SETTLE_S, SITE_LAT_DEG, SITE_LON_DEG};
 use planet_frame::{Camera, LodParams, TerrainRequest, TerrainView};
 use planet_render::GpuContext;
@@ -87,19 +87,18 @@ pub struct Measure {
     /// Sums over the frames of the flight: plan nodes at or finer than the pyramid top level, and those whose own chunk was not ready.
     pub chunk_nodes: u64,
     pub chunk_stand_in: u64,
-    /// What the chunk stage did during the flight (TEST-054); `None` without a chunk stage.
+    /// What the horizon jobs did during the flight (TEST-054); `None` without them.
     pub stage: Option<StageFacts>,
 }
 
-/// What the chunk stage did during one flight: the landings and their waits, and the jobs still in flight at its end.
+/// What the horizon jobs did during one flight: the maps that landed and the jobs still in flight at its end.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StageFacts {
-    pub trace: crate::chunkstage::TraceSummary,
-    pub chunk_jobs_at_end: usize,
+    pub horizon_maps_landed: u64,
     pub horizon_jobs_at_end: usize,
-    /// What the chunk step counted over the run (settle, run-in and window) and the features it ran with; a feature turned off is named in the log (TEST-058).
-    pub counters: crate::chunkstage::FeatureCounters,
-    pub features: crate::chunkstage::FrameFeatures,
+    /// What the horizon step counted over the run (settle, run-in and window) and the features it ran with; a feature turned off is named in the log (TEST-058).
+    pub counters: crate::horizonstep::FeatureCounters,
+    pub features: crate::horizonstep::FrameFeatures,
 }
 
 impl Measure {
@@ -222,14 +221,9 @@ pub struct LogFacts<'a> {
     pub owner_override: &'a [String],
     /// Whether the scene counted against a chunk field; when not, the log says why `stand_in_share` is `null`.
     pub chunk_field: bool,
-    /// Whether the curve ran with the horizon jobs (REND-038: from the base terrain without the chunk stage, STRM-064) and, with a chunk stage, the comparison point of one altitude without them.
+    /// Whether the curve ran with the horizon jobs (REND-038: from the base terrain, STRM-064).
     pub horizon: bool,
-    pub horizon_off: Option<&'a Point>,
-    /// With a chunk stage, where along each flight the start put a chunk edge (0.5: half way); `None` without one.
-    pub edge_fraction: Option<f64>,
-    /// Whether the A-net chunk stage ran (removed, ADR 0086; always false): criterion 7 is measured with it off (tiles and horizon maps only); a log without this field is from before.
-    pub chunk_stage: bool,
-    /// The steady-flight curve (a run-in before the window, `run_in_s` long) next to the cold one; `None` without a chunk stage.
+    /// The steady-flight curve (a run-in before the window, `run_in_s` long) next to the cold one; `None` without the horizon jobs.
     pub steady: Option<(&'a [Point], f64, f64)>,
 }
 
@@ -284,46 +278,13 @@ fn curve_json(points: &[Point]) -> String {
     s
 }
 
-/// The late chunks of a flight as a log array: key, when it was first wanted, asked, seen running and landed, the wait and the solve (seconds into the flight).
-fn late_json(trace: &crate::chunkstage::TraceSummary) -> String {
-    let opt = |x: Option<f64>| x.map_or("null".to_string(), number);
-    let items: Vec<String> = trace
-        .late
-        .iter()
-        .flatten()
-        .map(|l| {
-            format!(
-                "{{\"chunk\": [{}, {}, {}], \"wanted_s\": {}, \"asked_s\": {}, \"started_s\": {}, \"landed_s\": {}, \"wait_s\": {}, \"solve_s\": {}}}",
-                l.key.0,
-                l.key.1,
-                l.key.2,
-                number(l.wanted_s),
-                opt(l.asked_s),
-                opt(l.started_s),
-                number(l.landed_s),
-                number(l.wait_s()),
-                opt(l.solve_s())
-            )
-        })
-        .collect();
-    format!("[{}]", items.join(", "))
-}
-
-/// What the chunk stage did during a flight, as a log object (`null` without a stage).
+/// What the horizon jobs did during a flight, as a log object (`null` without them).
 fn stage_json(stage: Option<StageFacts>) -> String {
     match stage {
         None => "null".to_string(),
         Some(f) => format!(
-            "{{\"chunks_landed\": {}, \"horizon_maps_landed\": {}, \"prefetch_asked\": {}, \"first_wanted_s\": {}, \"late_chunks\": {}, \"late\": {}, \"median_wait_s\": {}, \"max_wait_s\": {}, \"chunk_jobs_at_end\": {}, \"horizon_jobs_at_end\": {}, \"counters\": {}}}",
-            f.trace.chunks_landed,
-            f.trace.horizon_maps_landed,
-            f.trace.prefetch_asked,
-            f.trace.first_wanted_s.map_or("null".to_string(), number),
-            f.trace.late_count,
-            late_json(&f.trace),
-            number(f.trace.median_wait_s),
-            number(f.trace.max_wait_s),
-            f.chunk_jobs_at_end,
+            "{{\"horizon_maps_landed\": {}, \"horizon_jobs_at_end\": {}, \"counters\": {}}}",
+            f.horizon_maps_landed,
             f.horizon_jobs_at_end,
             f.counters.json(&f.features)
         ),
@@ -344,9 +305,9 @@ pub fn log_json(points: &[Point], facts: &LogFacts<'_>) -> String {
     s += "  \"coarse_weighting\": \"pixels: nodes of the fresh plan weighted by their projected screen pixels (TEST-046)\",\n";
     s += "  \"stand_in_weighting\": \"nodes: unweighted share of the plan nodes at or finer than the pyramid top level whose chunk is not ready (STRM-039)\",\n";
     s += &format!("  \"chunk_field\": {},\n", facts.chunk_field);
-    s += &format!("  \"chunk_stage\": {},\n", facts.chunk_stage);
+    // The A-net chunk stage is removed (ADR 0086): criterion 7 is measured with it off (tiles and horizon maps only); a log without this field is from before.
+    s += "  \"chunk_stage\": false,\n";
     s += &format!("  \"horizon\": {},\n", facts.horizon);
-    s += &format!("  \"edge_fraction\": {},\n", facts.edge_fraction.map_or("null".to_string(), number));
     if !facts.chunk_field && !facts.horizon {
         s += &format!("  \"stand_in_reason\": {NO_CHUNK_FIELD:?},\n");
     }
@@ -361,9 +322,6 @@ pub fn log_json(points: &[Point], facts: &LogFacts<'_>) -> String {
             curve_json(steady)
         );
     }
-    if let Some(p) = facts.horizon_off {
-        s += &format!("  \"horizon_off_comparison\": [\n{}  ],\n", curve_json(std::slice::from_ref(p)));
-    }
     s += "  \"summary\": [\n";
     for (i, p) in points.iter().enumerate() {
         s += &format!("    {:?}{}\n", summary_line(p), if i + 1 < points.len() { "," } else { "" });
@@ -372,91 +330,27 @@ pub fn log_json(points: &[Point], facts: &LogFacts<'_>) -> String {
     s
 }
 
-/// Where along a flight with a chunk stage the start puts a chunk edge: half way (TEST-054).
-pub const EDGE_FRACTION: f64 = 0.5;
-
-/// The key of the chunk that holds the point (`lat_deg`, `lon_deg`).
-pub fn chunk_key_at(lat_deg: f64, lon_deg: f64) -> (u8, u32, u32) {
-    let d = planet_core::Vec3::from_lat_lon(lat_deg.to_radians(), lon_deg.to_radians());
-    let t = planet_core::TileId::from_direction(&TangentWarp, d, planet_generators::chunk::CHUNK_GRID_LEVEL);
-    (t.face().0, t.x(), t.y())
-}
-
-/// The latitude to start a flight due north of (`lat0_deg`, `lon_deg`) so that it crosses the first chunk edge north of `lat0_deg` at `fraction` of its
-/// length `flight_deg` (TEST-054): every flight then has fresh chunks ahead of the eye, the worst phase, and the curve is a floor that does not depend on
-/// where an edge happens to fall. `key_at` gives the chunk key of a point; the edge is found by walking north in steps of at most a quarter of the
-/// flight and bisecting to a micro-degree. No edge within 0.2 degrees (22 km) leaves the start where it is.
-pub fn straddling_start_lat(
-    key_at: &dyn Fn(f64, f64) -> (u8, u32, u32),
-    lat0_deg: f64,
-    lon_deg: f64,
-    flight_deg: f64,
-    fraction: f64,
-) -> f64 {
-    let first = key_at(lat0_deg, lon_deg);
-    let step = (flight_deg / 4.0).clamp(0.001, 0.05);
-    let (mut below, mut above) = (lat0_deg, lat0_deg + step);
-    while key_at(above, lon_deg) == first {
-        below = above;
-        above = below + step;
-        if above - lat0_deg > 0.2 {
-            return lat0_deg;
-        }
-    }
-    for _ in 0..40 {
-        let mid = 0.5 * (below + above);
-        if key_at(mid, lon_deg) == first {
-            below = mid;
-        } else {
-            above = mid;
-        }
-    }
-    above - fraction * flight_deg
-}
-
-/// The place trial `n` starts from: [`start_place`], moved north so that the flight (`speed_mps` for `frames` frames) crosses a chunk edge half way when
-/// the scene runs the chunk stage.
-pub fn trial_start(n: usize, speed_mps: f64, frames: usize, radius_m: f64, chunks: bool) -> (f64, f64) {
-    trial_start_at(n, speed_mps, frames, radius_m, chunks, EDGE_FRACTION)
-}
-
-/// [`trial_start`] with the chunk edge at `edge_fraction` of the flight (a steady-flight trial puts it half way into the measured window, after the run-in).
-pub fn trial_start_at(n: usize, speed_mps: f64, frames: usize, radius_m: f64, chunks: bool, edge_fraction: f64) -> (f64, f64) {
-    let (lat, lon) = start_place(n);
-    if !chunks {
-        return (lat, lon);
-    }
-    let flight_m = speed_mps * frames.saturating_sub(1) as f64 * FRAME_STEP_S;
-    let flight_deg = (flight_m / radius_m).to_degrees();
-    (straddling_start_lat(&chunk_key_at, lat, lon, flight_deg, edge_fraction), lon)
-}
-
 /// The start place of trial `n` (counted over the whole run): the scene's site moved north by [`PLACE_STEP_DEG`] a trial, so no two
 /// trials fly over the same ground.
 pub fn start_place(n: usize) -> (f64, f64) {
     (SITE_LAT_DEG + PLACE_STEP_DEG * n as f64, SITE_LON_DEG)
 }
 
-/// The chunk stage a flight runs (TEST-054): the generation workers the viewer's pool size comes from (`anetworld::viewer_chunk_stage`) and whether the
-/// horizon jobs run.
+/// The horizon jobs a flight runs (TEST-054): the generation workers the viewer's pool size comes from and whether the jobs run.
 #[derive(Clone, Copy, Debug)]
 struct StageSetup {
     gen: planet_streaming::GenWorkers,
     horizon: bool,
-    /// The A-net chunk stage (removed, ADR 0086; always false); the flight is tiles and horizon maps from the base terrain (the M8 default, owner 2026-10-28).
-    chunks: bool,
 }
 
 /// The stage a flight runs: none without a store, the horizon jobs from the base terrain with one (the chunk stage is removed).
 fn stage_setup(o: &Options) -> Option<StageSetup> {
-    (o.store.is_some() && !o.allow_memory_bake).then(|| StageSetup { gen: crate::chunkstage::stage_gen(o), horizon: true, chunks: false })
+    (o.store.is_some() && !o.allow_memory_bake).then(|| StageSetup { gen: crate::horizonstep::stage_gen(o), horizon: true })
 }
 
-/// Start the stage of `st` on `world`: the viewer's chunk stage, or the horizon jobs alone (as the window does), or nothing.
-fn enable_stage(world: &Arc<WorldTerrain>, st: StageSetup, out: &mut dyn Write) -> Result<(), String> {
-    if st.chunks {
-        crate::chunkstage::enable_viewer_stage(world, st.gen, st.horizon, false, out)
-    } else if st.horizon {
+/// Start the stage of `st` on `world`: the horizon jobs as the window does, or nothing.
+fn enable_stage(world: &Arc<WorldTerrain>, st: StageSetup) -> Result<(), String> {
+    if st.horizon {
         world.enable_viewer_horizon(st.gen, Arc::new(planet_streaming::SystemClock::new()))
     } else {
         Ok(())
@@ -483,19 +377,16 @@ fn fly(
     smoke: bool,
     gen: planet_streaming::GenWorkers,
     stage: Option<StageSetup>,
-    out: &mut dyn Write,
 ) -> Result<Measure, String> {
-    // A flight starts with a chunk stage of its own and nothing resident: no disk cache, an empty chunk cache (TEST-054).
+    // A flight starts with horizon jobs of its own and nothing resident (TEST-054).
     if let Some(st) = stage {
-        enable_stage(world, st, out)?;
+        enable_stage(world, st)?;
     }
-    let chunk_view = chunk_view_of(world);
     let first = req_of(cameras[0]);
     let rig = Rig::new(ctx, world, &first, gen)?;
     let mut d = Driver::plain(ctx, rig);
-    d.set_chunk_view(chunk_view.clone());
     if let Some(st) = stage {
-        d.drive_chunks(world.clone(), st.horizon);
+        d.drive_horizon(world.clone(), st.horizon);
     }
     let started = Instant::now();
     let need = (SETTLE_S / FRAME_STEP_S).round() as usize;
@@ -511,40 +402,31 @@ fn fly(
             return Err(format!("the start view did not settle within {SETTLE_LIMIT_S} s"));
         }
     }
-    // The run-in: the first `run_in` cameras are flown with the chunk stage and the prefetch running and are not judged; the window follows.
+    // The run-in: the first `run_in` cameras are flown with the horizon jobs running and are not judged; the window follows.
     for cam in &cameras[..run_in] {
         d.tick(&req_of(*cam))?;
     }
     let cameras = &cameras[run_in..];
     d.restart_pacing();
-    d.restart_chunk_trace();
+    d.restart_horizon_count();
     let mut draws = Vec::with_capacity(cameras.len());
-    let mut chunks = Vec::with_capacity(cameras.len());
     for cam in cameras {
         let t = d.tick(&req_of(*cam))?;
         draws.push(FrameDraw { camera: Some(*cam), drawn: t.drawn });
-        chunks.push(t.chunk);
     }
     let stage_facts =
-        d.chunk_summary().zip(d.chunk_counters()).map(|((trace, chunk_jobs_at_end, horizon_jobs_at_end), (counters, features))| {
-            StageFacts { trace, chunk_jobs_at_end, horizon_jobs_at_end, counters, features }
+        d.horizon_summary().zip(d.horizon_counters()).map(|((horizon_maps_landed, horizon_jobs_at_end), (counters, features))| {
+            StageFacts { horizon_maps_landed, horizon_jobs_at_end, counters, features }
         });
-    // A flight travels: the prefetch must have asked and the horizon step run, unless the flight turned them off (TEST-058). A smoke run is too short to travel.
+    // A flight travels: the horizon step must have run, unless the flight turned it off (TEST-058). A smoke run is too short to travel.
     if let (false, Some(f)) = (smoke, &stage_facts) {
-        let chunks = stage.is_some_and(|s| s.chunks);
-        f.counters.check(&f.features, &crate::chunkstage::Expect { prefetch: chunks, horizon: true, ..Default::default() })?;
+        f.counters.check(&f.features, &crate::horizonstep::Expect { horizon: true, ..Default::default() })?;
     }
     drop(d);
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
     let lags = lag_post_pass(&draws, req_of, &|| world.field(), threads)?;
     let coarse: Vec<f64> = lags.iter().map(|l| l.coarse_share).collect();
-    Ok(measure_of(&coarse, chunk_view.is_some().then_some(chunks.as_slice())).with_stage(stage_facts))
-}
-
-/// The chunk field the scene counts its stand-in share against (STRM-039): the world's, `None` while the app builds no chunk manager for a
-/// world. The one place to give the scene a [`ManagerView`] when a world gets a chunk field; the log says it had none.
-fn chunk_view_of(world: &WorldTerrain) -> Option<Arc<dyn ChunkView>> {
-    world.chunk_view()
+    Ok(measure_of(&coarse, None).with_stage(stage_facts))
 }
 
 /// The measure of a flight from the per-frame coarse shares and, with a chunk field, the per-frame chunk shares: each judged as its worst
@@ -586,14 +468,11 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
     let size = if smoke { (640u32, 360u32) } else { (2560u32, 1440u32) };
     // The same viewport-to-tolerance ratio as the real run (240 at the defaults): the plan's steepness check depends on it.
     let tau = if smoke { o.tau * f64::from(size.1) / 1440.0 } else { o.tau };
-    // With a stored world the scene runs the chunk stage, horizon jobs included, as the viewer does (TEST-054); a world of an in-memory bake has no
-    // stored coupled run to start from and keeps the tile-only scene.
+    // With a stored world the scene runs the horizon jobs as the viewer does (TEST-054); a world of an in-memory bake keeps the tile-only scene.
     let stage = stage_setup(o);
-    let chunks = stage.is_some_and(|s| s.chunks);
-    // The plan's height bound has to include the change of the chunk stage (as the window does), so the stage exists before the LOD parameters are
-    // made; every flight then starts one of its own.
+    // The stage exists before the LOD parameters are made, as in the window; every flight then starts one of its own.
     if let Some(st) = stage {
-        enable_stage(&world, st, out)?;
+        enable_stage(&world, st)?;
     }
     let field = world.field()?;
     let lod = LodParams {
@@ -650,10 +529,10 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
     for &altitude in cold_altitudes {
         let point = if smoke {
             // One trial at the start speed: proves the path, decides nothing.
-            let (lat, lon) = trial_start(n, START_SPEED_MPS, frames, radius_m, chunks);
+            let (lat, lon) = start_place(n);
             n += 1;
             let cameras = level_flight_cameras(radius_m, aspect, field.as_ref(), altitude, START_SPEED_MPS, lat, lon, frames);
-            let measure = fly(ctx, &world, &req_of, &cameras, 0, true, o.gen_workers(), stage, out)?;
+            let measure = fly(ctx, &world, &req_of, &cameras, 0, true, o.gen_workers(), stage)?;
             let share = measure.judged();
             Point {
                 altitude_m: altitude,
@@ -664,10 +543,10 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
             }
         } else {
             search(altitude, o.share_bound, |speed| {
-                let (lat, lon) = trial_start(n, speed, frames, radius_m, chunks);
+                let (lat, lon) = start_place(n);
                 n += 1;
                 let cameras = level_flight_cameras(radius_m, aspect, field.as_ref(), altitude, speed, lat, lon, frames);
-                let measure = fly(ctx, &world, &req_of, &cameras, 0, false, o.gen_workers(), stage, out)?;
+                let measure = fly(ctx, &world, &req_of, &cameras, 0, false, o.gen_workers(), stage)?;
                 writeln!(
                     out,
                     "  {altitude:.0} m at {speed:.1} m/s: worst window {:.3} % coarse (pixels){}",
@@ -686,21 +565,19 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
     let run_in_s = if smoke { SMOKE_RUN_IN_S } else { RUN_IN_S };
     let steady: Vec<Point> = if stage.is_some() {
         let run_in = (run_in_s / FRAME_STEP_S).round() as usize;
-        // The measured stretch: the steady window, as short as a smoke trial in a smoke run. The first chunk edge is half a quick window into it; a
-        // longer stretch crosses more of them.
+        // The measured stretch: the steady window, as short as a smoke trial in a smoke run.
         let window_frames = if smoke { frames } else { (o.steady_window_s / FRAME_STEP_S).round() as usize };
         let total = run_in + window_frames;
-        let edge = (run_in as f64 + EDGE_FRACTION * frames.min(window_frames) as f64) / total as f64;
         let mut points = Vec::new();
         let places = if smoke { 1 } else { o.places };
         for (ai, &altitude) in altitudes.iter().enumerate() {
             for pj in 0..places {
                 let place = STEADY_PLACE_BASE + places * ai + pj;
                 let point = if smoke {
-                    let (lat, lon) = trial_start_at(n, START_SPEED_MPS, total, radius_m, chunks, edge);
+                    let (lat, lon) = start_place(n);
                     n += 1;
                     let cameras = level_flight_cameras(radius_m, aspect, field.as_ref(), altitude, START_SPEED_MPS, lat, lon, total);
-                    let measure = fly(ctx, &world, &req_of, &cameras, run_in, true, o.gen_workers(), stage, out)?;
+                    let measure = fly(ctx, &world, &req_of, &cameras, run_in, true, o.gen_workers(), stage)?;
                     let share = measure.judged();
                     Point {
                         altitude_m: altitude,
@@ -711,9 +588,9 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
                     }
                 } else {
                     search(altitude, o.share_bound, |speed| {
-                        let (lat, lon) = trial_start_at(place, speed, total, radius_m, chunks, edge);
+                        let (lat, lon) = start_place(place);
                         let cameras = level_flight_cameras(radius_m, aspect, field.as_ref(), altitude, speed, lat, lon, total);
-                        let measure = fly(ctx, &world, &req_of, &cameras, run_in, false, o.gen_workers(), stage, out)?;
+                        let measure = fly(ctx, &world, &req_of, &cameras, run_in, false, o.gen_workers(), stage)?;
                         writeln!(
                         out,
                         "  steady (run-in {run_in_s} s), {altitude:.0} m place {pj} at {speed:.1} m/s: worst window {:.3} % coarse (pixels){}",
@@ -732,49 +609,8 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
     } else {
         Vec::new()
     };
-    // The comparison line: one altitude (300 m) again with the horizon jobs off, so the log shows what they cost the curve.
-    let horizon_off: Option<Point> = match stage {
-        Some(st) if !o.only_steady && st.chunks => {
-            let off = StageSetup { horizon: false, ..st };
-            let altitude = COMPARISON_ALTITUDE_M;
-            let point = if smoke {
-                let (lat, lon) = trial_start(n, START_SPEED_MPS, frames, radius_m, true);
-                let cameras = level_flight_cameras(radius_m, aspect, field.as_ref(), altitude, START_SPEED_MPS, lat, lon, frames);
-                let measure = fly(ctx, &world, &req_of, &cameras, 0, true, o.gen_workers(), Some(off), out)?;
-                let share = measure.judged();
-                Point {
-                    altitude_m: altitude,
-                    speed_mps: None,
-                    share,
-                    capped: false,
-                    trials: vec![Trial { speed_mps: START_SPEED_MPS, share, measure }],
-                }
-            } else {
-                search(altitude, o.share_bound, |speed| {
-                    let (lat, lon) = trial_start(n, speed, frames, radius_m, true);
-                    n += 1;
-                    let cameras = level_flight_cameras(radius_m, aspect, field.as_ref(), altitude, speed, lat, lon, frames);
-                    let measure = fly(ctx, &world, &req_of, &cameras, 0, false, o.gen_workers(), Some(off), out)?;
-                    writeln!(
-                        out,
-                        "  horizon off, {altitude:.0} m at {speed:.1} m/s: worst window {:.3} % coarse (pixels){}",
-                        100.0 * measure.coarse_share,
-                        measure.stand_in_share.map_or(String::new(), |s| format!(", {:.3} % chunk stand-in (nodes)", 100.0 * s))
-                    )
-                    .map_err(err)?;
-                    Ok(measure)
-                })?
-            };
-            writeln!(out, "horizon off: {}", summary_line(&point)).map_err(err)?;
-            Some(point)
-        }
-        _ => None,
-    };
     let adapter = ctx.adapter_name();
-    let chunk_field = stage.is_some() && chunk_view_of(&world).is_some();
-    if !chunk_field {
-        writeln!(out, "stand-in share: {NO_CHUNK_FIELD}").map_err(err)?;
-    }
+    writeln!(out, "stand-in share: {NO_CHUNK_FIELD}").map_err(err)?;
     let json = log_json(
         &points,
         &LogFacts {
@@ -783,11 +619,8 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
             adapter,
             smoke,
             owner_override: &owner_override,
-            chunk_field,
+            chunk_field: false,
             horizon: stage.is_some_and(|s| s.horizon),
-            horizon_off: horizon_off.as_ref(),
-            edge_fraction: chunks.then_some(EDGE_FRACTION),
-            chunk_stage: chunks,
             steady: stage.map(|_| (steady.as_slice(), run_in_s, if smoke { SMOKE_FLIGHT_S } else { o.steady_window_s })),
         },
     );
@@ -813,7 +646,7 @@ mod tests {
     fn the_envelope_scene_runs_the_horizon_jobs_from_the_base_terrain_with_a_store_and_no_chunk_stage() {
         let base = ["test-render", "--perf", "--scene", "envelope", "--store", "S"];
         let off = stage_setup(&opts(&base)).expect("a store gives a stage");
-        assert!(!off.chunks && off.horizon, "the horizon jobs from the base terrain, no chunk stage");
+        assert!(off.horizon, "the horizon jobs from the base terrain, no chunk stage");
         assert!(
             crate::parse_args(&base.iter().chain(&["--chunks"]).map(|s| s.to_string()).collect::<Vec<_>>()).is_err(),
             "--chunks is gone"
@@ -824,22 +657,19 @@ mod tests {
 
     // spec: STRM-046
     #[test]
-    fn the_log_records_whether_the_chunk_stage_ran() {
-        let facts = |chunk_stage| LogFacts {
+    fn the_log_says_the_chunk_stage_did_not_run() {
+        let facts = |chunk_field| LogFacts {
             bound: 0.01,
             source: "s",
             adapter: "a",
             smoke: false,
             owner_override: &[],
-            chunk_field: chunk_stage,
+            chunk_field,
             horizon: true,
-            horizon_off: None,
-            edge_fraction: None,
-            chunk_stage,
             steady: None,
         };
         assert!(log_json(&[], &facts(false)).contains("\"chunk_stage\": false,"));
-        assert!(log_json(&[], &facts(true)).contains("\"chunk_stage\": true,"));
+        assert!(log_json(&[], &facts(true)).contains("\"chunk_stage\": false,"), "removed, ADR 0086: always false");
     }
 
     // spec: STRM-046
@@ -853,9 +683,6 @@ mod tests {
             owner_override: &[],
             chunk_field: false,
             horizon,
-            horizon_off: None,
-            edge_fraction: None,
-            chunk_stage: false,
             steady: None,
         };
         let ran = log_json(&[], &facts(true));
@@ -994,9 +821,6 @@ mod tests {
             owner_override: &[],
             chunk_field,
             horizon: chunk_field,
-            horizon_off: None,
-            edge_fraction: None,
-            chunk_stage: false,
             steady: None,
         };
         let without = log_json(&[pt(Measure::coarse_only(0.004))], &facts(false));
@@ -1019,21 +843,7 @@ mod tests {
 
     // spec: TEST-057
     #[test]
-    fn a_steady_flight_trial_puts_the_chunk_edge_half_way_into_the_window_after_the_run_in_and_the_log_gives_both_curves() {
-        let radius_m = 6_371_000.0;
-        let (frames, run_in) = ((FLIGHT_S / FRAME_STEP_S).round() as usize, (RUN_IN_S / FRAME_STEP_S).round() as usize);
-        let total = run_in + frames;
-        let edge = (run_in as f64 + EDGE_FRACTION * frames as f64) / total as f64;
-        assert!((edge - 0.75).abs() < 1e-9, "12 s of run-in and a 12 s window: the edge is three quarters along: {edge}");
-        for speed in [50.0, 200.0, 600.0] {
-            let (lat, lon) = trial_start_at(3, speed, total, radius_m, true, edge);
-            let flight_deg = (speed * (total - 1) as f64 * FRAME_STEP_S / radius_m).to_degrees();
-            let at = |f: f64| chunk_key_at(lat + f * flight_deg, lon);
-            // The flight crosses a chunk edge at the planned point, inside the measured window (the run-in may cross others on the way).
-            let (before, after) = (at(edge - 0.01), at(edge + 0.01));
-            assert_ne!(before, after, "{speed} m/s: an edge at {edge} of the flight");
-            assert!(edge * (total - 1) as f64 >= run_in as f64, "{speed} m/s: after the run-in");
-        }
+    fn the_log_gives_both_curves_after_a_run_in_and_the_steady_window() {
         let steady = Point {
             altitude_m: 300.0,
             speed_mps: Some(190.0),
@@ -1051,9 +861,6 @@ mod tests {
                 owner_override: &[],
                 chunk_field: false,
                 horizon: true,
-                horizon_off: None,
-                edge_fraction: None,
-                chunk_stage: false,
                 steady: Some((std::slice::from_ref(&steady), RUN_IN_S, STEADY_WINDOW_S)),
             },
         );
@@ -1066,64 +873,15 @@ mod tests {
         );
     }
 
-    // spec: TEST-057
-    #[test]
-    fn the_sixty_second_steady_window_crosses_several_chunk_edges_after_the_run_in() {
-        let radius_m = 6_371_000.0;
-        let (quick, window, run_in) = (
-            (FLIGHT_S / FRAME_STEP_S).round() as usize,
-            (STEADY_WINDOW_S / FRAME_STEP_S).round() as usize,
-            (RUN_IN_S / FRAME_STEP_S).round() as usize,
-        );
-        let total = run_in + window;
-        // The first edge is half a quick window into the measured stretch, as for the quick trial.
-        let edge = (run_in as f64 + EDGE_FRACTION * quick.min(window) as f64) / total as f64;
-        for speed in [200.0, 300.0, 600.0] {
-            let (lat, lon) = trial_start_at(5, speed, total, radius_m, true, edge);
-            let flight_deg = (speed * (total - 1) as f64 * FRAME_STEP_S / radius_m).to_degrees();
-            // Chunk edges crossed in the measured stretch: changes of the chunk along the window's frames.
-            let first = run_in as f64 / (total - 1) as f64;
-            let keys: Vec<_> =
-                (0..=600).map(|i| chunk_key_at(lat + (first + (1.0 - first) * f64::from(i) / 600.0) * flight_deg, lon)).collect();
-            let crossings = keys.windows(2).filter(|w| w[0] != w[1]).count();
-            assert!(crossings >= 2, "{speed} m/s over {STEADY_WINDOW_S} s crosses several edges: {crossings}");
-            // 12 s remains the quick single-edge trial: the same start rule with a quick window gives the edge half way.
-            let quick_total = run_in + quick;
-            let quick_edge = (run_in as f64 + EDGE_FRACTION * quick as f64) / quick_total as f64;
-            assert!((quick_edge - 0.75).abs() < 1e-9);
-        }
-    }
-
     // spec: TEST-055
     #[test]
-    fn the_log_gives_what_the_chunk_stage_did_per_trial_and_the_horizon_off_comparison() {
+    fn the_log_gives_what_the_horizon_jobs_did_per_trial() {
         let stage = StageFacts {
-            trace: crate::chunkstage::TraceSummary {
-                chunks_landed: 12,
-                horizon_maps_landed: 9,
-                prefetch_asked: 0,
-                first_wanted_s: Some(0.7),
-                late: [
-                    Some(crate::chunkstage::LateChunk {
-                        key: (4, 799, 9),
-                        wanted_s: 0.9,
-                        asked_s: Some(0.4),
-                        started_s: Some(0.5),
-                        landed_s: 10.8,
-                    }),
-                    None,
-                    None,
-                ],
-                late_count: 1,
-                median_wait_s: 2.5,
-                max_wait_s: 6.0,
-            },
-            chunk_jobs_at_end: 3,
+            horizon_maps_landed: 9,
             horizon_jobs_at_end: 1,
-            counters: crate::chunkstage::FeatureCounters { frames: 700, prefetch_asked: 5, horizon_frames: 700, ..Default::default() },
-            features: crate::chunkstage::FrameFeatures { prefetch: true, horizon: true, stale_hold: false },
+            counters: crate::horizonstep::FeatureCounters { frames: 700, horizon_frames: 700, ..Default::default() },
+            features: crate::horizonstep::FrameFeatures { horizon: true },
         };
-        let measure = Measure { coarse_share: 0.004, stand_in_share: Some(0.02), chunk_nodes: 400, chunk_stand_in: 8, stage: Some(stage) };
         let pt = |altitude_m: f64, measure: Measure| Point {
             altitude_m,
             speed_mps: Some(80.0),
@@ -1131,89 +889,28 @@ mod tests {
             capped: false,
             trials: vec![Trial { speed_mps: 80.0, share: measure.judged(), measure }],
         };
-        let off = pt(300.0, Measure { stage: Some(StageFacts { horizon_jobs_at_end: 0, ..stage }), ..measure });
-        let facts = |chunk_field: bool, horizon_off: Option<&'static Point>| LogFacts {
+        let facts = |horizon: bool| LogFacts {
             bound: 0.01,
             source: "s",
             adapter: "a",
             smoke: false,
             owner_override: &[],
-            chunk_field,
-            horizon: chunk_field,
-            horizon_off,
-            edge_fraction: chunk_field.then_some(EDGE_FRACTION),
-            chunk_stage: false,
+            chunk_field: false,
+            horizon,
             steady: None,
         };
-        let off: &'static Point = Box::leak(Box::new(off));
-        let with = log_json(&[pt(30.0, measure)], &facts(true, Some(off)));
+        let with = log_json(&[pt(30.0, Measure::coarse_only(0.004).with_stage(Some(stage)))], &facts(true));
         for want in [
             "\"horizon\": true",
-            "\"chunks_landed\": 12",
             "\"horizon_maps_landed\": 9",
-            "\"median_wait_s\": 2.5",
-            "\"max_wait_s\": 6",
-            "\"first_wanted_s\": 0.7",
-            "\"late_chunks\": 1",
-            "\"chunk\": [4, 799, 9]",
-            "\"solve_s\": 10.3",
-            "\"chunk_jobs_at_end\": 3",
             "\"horizon_jobs_at_end\": 1",
-            "\"horizon_off_comparison\"",
-            "\"counters\": {\"frames\": 700, \"prefetch_asked\": 5",
-            "\"stale_hold_frames\": \"off\"",
-            "\"edge_fraction\": 0.5",
-            "\"horizon_jobs_at_end\": 0",
+            "\"counters\": {\"frames\": 700, \"horizon_frames\": 700",
         ] {
             assert!(with.contains(want), "missing {want}: {with}");
         }
-        // Without a chunk stage the trials say `null` and there is no comparison.
-        let without = log_json(&[pt(30.0, Measure::coarse_only(0.004))], &facts(false, None));
-        assert!(
-            without.contains("\"stage\": null")
-                && !without.contains("horizon_off_comparison")
-                && without.contains("\"horizon\": false")
-                && without.contains("\"edge_fraction\": null")
-        );
-    }
-
-    // spec: TEST-054
-    #[test]
-    fn the_start_puts_a_chunk_edge_half_way_along_the_flight_whichever_the_speed_and_the_phase() {
-        // Chunks of 0.04 degrees of latitude, edges at multiples of it; a fake key, a function of the point alone.
-        let key = |lat: f64, _lon: f64| (0u8, (lat / 0.04).floor() as u32, 7u32);
-        let edge_of = |lat0: f64| ((lat0 / 0.04).floor() + 1.0) * 0.04;
-        for flight_deg in [0.003, 0.011, 0.019, 0.05] {
-            for k in 0..40 {
-                let lat0 = 3.0 + 0.0093 * f64::from(k);
-                let start = straddling_start_lat(&key, lat0, 20.0, flight_deg, 0.5);
-                let crossing = start + 0.5 * flight_deg;
-                assert!(
-                    (crossing - edge_of(lat0)).abs() < 1e-6,
-                    "flight {flight_deg}, start {lat0}: the edge is {} deg along",
-                    crossing - lat0
-                );
-                // The flight starts in the chunk before the edge and ends in the one after it: exactly one edge crossed.
-                assert_ne!(key(start, 20.0), key(start + flight_deg, 20.0));
-                assert_eq!(key(start, 20.0).1 + 1, key(start + flight_deg, 20.0).1);
-            }
-        }
-        // No edge within reach leaves the start where it is.
-        assert_eq!(straddling_start_lat(&|_, _| (0, 0, 0), 3.0, 20.0, 0.01, 0.5), 3.0);
-    }
-
-    // spec: TEST-054
-    #[test]
-    fn the_real_chunk_grid_has_an_edge_within_reach_of_every_trial_start_and_the_trial_start_keeps_the_site_without_chunks() {
-        for n in 0..12 {
-            let (lat, lon) = trial_start(n, 150.0, 721, 6_371_000.0, true);
-            let flight_deg = (150.0 * 720.0 * FRAME_STEP_S / 6_371_000.0).to_degrees();
-            // The flight starts in one chunk and ends in the next.
-            assert_ne!(chunk_key_at(lat, lon), chunk_key_at(lat + flight_deg, lon), "trial {n} crosses no chunk edge");
-            // A start stays within one chunk edge (about 5 km) of the site's place.
-            assert!((lat - start_place(n).0).abs() < 0.1, "trial {n} moved {} degrees", lat - start_place(n).0);
-            assert_eq!(trial_start(n, 150.0, 721, 6_371_000.0, false), start_place(n));
-        }
+        // Without the horizon jobs the trials say `null`.
+        let without = log_json(&[pt(30.0, Measure::coarse_only(0.004))], &facts(false));
+        assert!(without.contains("\"stage\": null") && without.contains("\"horizon\": false"), "{without}");
     }
 
     // spec: TEST-047
@@ -1247,9 +944,6 @@ mod tests {
                 owner_override: &[],
                 chunk_field: false,
                 horizon: false,
-                horizon_off: None,
-                edge_fraction: None,
-                chunk_stage: false,
                 steady: None,
             },
         );

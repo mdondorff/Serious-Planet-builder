@@ -836,17 +836,6 @@ Source: GEN-036, GEN-016, GEN-020, LOD-009
 - **WHEN** a chunk field's tile, its batch heights and its plan origin are compared with `height_at_level` at the tile's level
 - **THEN** they are equal bit for bit, and a field without chunk detail gives the same values at every level
 
-### Requirement: GEN-055 A field with a chunk stage names it
-The field built for a world with a chunk stage in its chain (GEN-039) SHALL report the implementation id `chunk-stage` (as a stamp stage reports its own, CON-07); tiles at or finer than the pyramid's top level SHALL be keyed by the chain (STRM-038), and a world without a chunk stage SHALL build the field GEN-018 describes.
-
-Verify: A
-Status: active
-Source: GEN-018, CON-07, STRM-038
-
-#### Scenario: Id
-- **WHEN** a world's field is built without and with a chunk stage
-- **THEN** the first reports the resolved id and the second `chunk-stage`
-
 ### Requirement: GEN-044 The chunk horizon map
 `generators` SHALL bake, for a raster of heights with its halo, the horizon map of the chunk: per texel and per azimuth `k` of `A` evenly spaced azimuths from north, the elevation angle of the highest terrain along that azimuth out to the range, found by marching with steps that grow 4.5 % plus 2 m. The bake SHALL be a pure function of the raster, the halo and the parameters, independent of the thread count (CON-14).
 
@@ -944,17 +933,6 @@ Source: SPIKE-33 stage model, ADR 0077 point 3, CON-14
 #### Scenario: Hillslopes
 - **WHEN** a chunk with steep slopes and a channel runs the processes
 - **THEN** the channel cells are unchanged, no non-channel cell exceeds the angle of repose by more than one pass can move, the volume moved equals the volume received, and the hash is the same on 1, 2 and 8 threads
-
-### Requirement: GEN-052 A-net chunk time
-An A-net chunk of 24 km2 of core SHALL take at most 4 s at 8 m cells with the 3 km halo (1.8 million cells) on the reference machine with the stage's production thread setting (the viewer's chunk workers), measured by the performance harness through the architect on the production geometry (the stored bake) and never in a test (CON-20); the one-thread time and the times at 4 and 10 m are recorded with the run (4 m was about 55 s per chunk on one thread: not met, ADR 0077 allows 4 to 10 m).
-
-Verify: C
-Status: active
-Source: SPIKE-33, M8 plan risks, CON-22, planner decision 2026-10-24 (8 m default), planner decision 2026-10-26 (production threads), perf window 2026-10-26, production geometry, 3.30/3.33 s at 4 threads
-
-#### Scenario: Chunk time
-- **WHEN** a chunk of 24 km2 at 8 m cells runs on the reference machine in a perf window on the production threads
-- **THEN** it finishes within 4 s at 8 m cells and the log holds the one-thread time and the times at 4 and 10 m
 
 ### Requirement: GEN-057 Corridor anchors follow the drawn ground
 The corridor of an A-net chunk SHALL be anchored at every polyline point at the base field's height there minus the valley depth `depth_m (A / area_ref_m2)^exponent` for the river's area `A` at that point, at most `lerp(cap_low_m, cap_m, rf)` with `rf` the relief factor (GEN-060; defaults: 3 m at 100 km2, exponent 0.5, `cap_m` 100 m, `cap_low_m` 30 m, so the cap is at most a third of `bound_m`, 300 m), and GEN-059 sets the bed from these raw anchors. The coupled run's absolute height SHALL not set an anchor. The law's constants are part of the stage's definition hash.

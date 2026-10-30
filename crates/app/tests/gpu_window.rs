@@ -574,5 +574,5 @@ fn the_gate_passes_on_a_small_world_without_the_chunk_stage_which_is_the_default
     let _ = std::fs::remove_dir_all(&store);
     let Some(stdout) = out else { return };
     let line = stdout.lines().find(|l| l.starts_with("gate: ")).unwrap_or_else(|| panic!("no gate line: {stdout}"));
-    assert!(line.contains("chunk jobs: None"), "the stage was on: {line}");
+    assert!(line.contains("horizon jobs: Some(") && !line.contains("chunk jobs"), "the stage was on: {line}");
 }
