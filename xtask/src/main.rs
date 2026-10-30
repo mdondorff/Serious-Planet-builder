@@ -94,7 +94,12 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("xtask: {e}");
-            ExitCode::FAILURE
+            // Checks NOT RUN on a locked desktop: incomplete, not a pass, and not a failure (TEST-073).
+            if e.starts_with(util::INCOMPLETE) {
+                ExitCode::from(3)
+            } else {
+                ExitCode::FAILURE
+            }
         }
     }
 }

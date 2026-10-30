@@ -1359,6 +1359,27 @@ Detail: The rig is the streaming scenes' with the lit path (`streamperf::Driver`
 - **WHEN** the camera turns 2 degrees and back and the loop settles again
 - **THEN** the frame has zero differing pixels from the frame before the turn
 
+### Requirement: TEST-072 A descent draws no level pop
+`planet_frame::popcheck::judge` SHALL take the per-frame trace of fixed probes (level, drawn height, distance to the eye) and the focal length in pixels, and SHALL measure the jump of a probe's drawn height, in pixels, at every level change. The verdict SHALL be FAIL when the p99 is over 0.5 px or the largest over 2 px, NOT EXERCISED when fewer than 10 level changes occurred, PASS otherwise. A failure SHALL name the frame, the probe, both levels and the jump in metres and pixels. A scripted descent over the morph model of `LodParams` (3000 km to 2 m, 2 % a frame) SHALL pass, and the same descent without morphing SHALL fail.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-30), owner test 2026-10-27 (level boundaries), B4-2
+
+Detail: The pixel bounds are proposed from the morph design (LOD-008: a node is fully morphed into its parent where the parent stops splitting) and are not an owner number: the owner's metre condition (step under 0.25 m p99) is the gate's, at its sites. The drawn height of a probe is `(1 - m) * h_own + m * h_parent` with `m = clamp((d - start) / (end - start), 0, 1)` over `LodParams::morph_interval`. A sample with a NaN or infinite height, or a distance that is not positive and finite, FAILS the verdict (it never passes by being skipped); a probe is compared with its last covered frame. A later change feeds the trace from the real plan on the real store.
+
+#### Scenario: Morphing hides the switch
+- **WHEN** a descent runs through the morph model
+- **THEN** at least 10 level changes occur and the verdict is PASS
+
+#### Scenario: A hard switch
+- **WHEN** the same descent draws each level on its own grid without morphing
+- **THEN** the verdict is FAIL naming a frame, a probe and the levels
+
+#### Scenario: Nothing exercised
+- **WHEN** a trace has fewer than 10 level changes
+- **THEN** the verdict is NOT EXERCISED, never PASS
+
 ### Requirement: TEST-071 A bundle of a stored bake replays from the store
 A terrain bundle that records a bake of more cells than a run makes in memory (1024 per face edge) SHALL replay with `--store DIR`, the stored bake of that size opened read-only, and SHALL be refused without it, naming the recorded size and `--store DIR`. The replay SHALL check the recorded definition hash, field id and radius as for any recorded world (TEST-008).
 
@@ -1425,3 +1446,34 @@ Detail:
 #### Scenario: The scene on the software adapter
 - **WHEN** the scene runs with `--smoke` over an in-memory bake
 - **THEN** it ends without error, writes the log with four altitudes, and says it is not a measurement
+
+### Requirement: TEST-073 Real-GPU window checks are NOT RUN on a locked desktop
+While the Windows session is locked (the lock screen process `LogonUI.exe` is running), a real-GPU window check (the `gpu_window` tests on the hardware adapter, `editor --smoke` on the discrete GPU, `cargo xtask gate` on the real store) SHALL print a `NOT RUN` line with the reason and the time, leave a marker, and return, never a pass. A failure of such a check with the desktop locked by the end of the run SHALL be a NOT RUN with the times. `cargo xtask` SHALL count the NOT RUN checks of a run, and `accept` SHALL mark a step with any INCOMPLETE and fail. The software adapter, headless scenes and CI are not affected.
+
+Verify: A
+Status: active
+Source: owner (2026-10-30), explorer's measurement of the locked-session stalls, CLAUDE.md
+
+#### Scenario: Locked at the start
+- **WHEN** the detector says the desktop is locked and a hardware check is guarded
+- **THEN** the check does not run, a NOT RUN line with the reason and a marker are written, and the software adapter runs the check as usual
+
+#### Scenario: Locked mid-run
+- **WHEN** the desktop is unlocked at the start, the check fails and the desktop is locked at the end
+- **THEN** the result is a NOT RUN naming when the run started and ended, and a failure with the desktop unlocked stays a failure
+
+#### Scenario: Cut off by the timeout
+- **WHEN** a hardware window test is still running after 240 s and the desktop has been seen locked meanwhile
+- **THEN** a watchdog reports the NOT RUN with the times and ends the process with success before nextest's timeout kills it; a desktop never seen locked leaves the test to its own limit
+
+#### Scenario: Exit code
+- **WHEN** `cargo xtask test gpu --real` or `cargo xtask gate` on the real store has NOT RUN checks and nothing failed
+- **THEN** it prints the summary and exits with code 3, incomplete and not a pass, while a failure keeps code 1
+
+#### Scenario: Known limits
+- **WHEN** a UAC or sign-in prompt shows the lock screen process, or the display is off without the lock screen
+- **THEN** the first is a NOT RUN, which errs towards reporting, and the second is not detected and the check fails as before
+
+#### Scenario: Accept
+- **WHEN** an acceptance step has NOT RUN checks
+- **THEN** its row says INCOMPLETE and not pass, and the acceptance run returns an error
