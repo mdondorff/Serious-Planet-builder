@@ -1040,15 +1040,19 @@ Source: SPIKE-34 sections 1 and 4, REND-032, LOD-009
 - **THEN** exactly the tiles at or above the apply level under it are refreshed and their cached origin heights dropped, and no chunk is requested by sampling
 
 ### Requirement: STRM-041 Chunk residency, eviction and disk cache
-A chunk not wanted for `chunk_evict_s` (default 5) on the injected clock SHALL be evicted from RAM, and its bytes SHALL count toward the RAM caps as a pool of their own, 512 MiB by default, the least recently wanted leaving first beyond it. A landed chunk SHALL be stored in the pack store under a key that covers the body, the process hash, the chunk grid, the pyramid top level, the radius, the key of the field below the chunk stage and the chunk, and verified on read (CON-05); a verification failure SHALL be a miss and the chunk recomputed, with the failure named in the log.
+A chunk not wanted for `chunk_evict_s` (default 30) on the injected clock SHALL be evicted from RAM, and its bytes SHALL count toward the RAM caps as a pool of their own, 512 MiB by default, the least recently wanted leaving first beyond it. A landed chunk SHALL be stored in the pack store under a key that covers the body, the process hash, the chunk grid, the pyramid top level, the radius, the key of the field below the chunk stage and the chunk, and verified on read (CON-05); a verification failure SHALL be a miss and the chunk recomputed, with the failure named in the log.
 
 Verify: A
 Status: active
-Source: ADR 0077, D7 (runtime generation, disk cache), CON-05, STRM-033
+Source: ADR 0077, D7 (runtime generation, disk cache), CON-05, STRM-033, opus-planner (2026-10-27: the default was 5; owner test, 1150 evictions in an hour)
 
 #### Scenario: Evict and reload
 - **WHEN** a chunk is evicted and wanted again, with its disk entry intact, then with a corrupted entry
 - **THEN** the first reload reads the disk entry without computing, the second recomputes and logs the failure, and both give the identical result
+
+#### Scenario: Not wanted for 32 s
+- **WHEN** one of two ready chunks is not wanted for 32 s of the injected clock and the other is
+- **THEN** the first is evicted and the second stays, and the pool's bytes never pass the cap
 
 ### Requirement: STRM-042 Chunk prefetch along travel
 The chunks needed by the camera predicted by STRM-018's velocity, one chunk ahead along the direction of travel, SHALL be requested below the wanted set in priority, and a camera that only rotates SHALL prefetch no chunk. The viewer and the flight scenes SHALL make that request every frame from the managed loop's travel estimator (`chunkstage::chunk_prefetch`). The track SHALL ask the chunks whose centre lies within the larger of the plan's reach and one chunk edge, plus half an edge, of its samples: the next chunk is asked on entering the current one, and a chunk is asked as early before it is wanted as the lead says.
@@ -1283,3 +1287,14 @@ Detail: Every chunk counts as ready with no change. The bakes run on a pool of t
 #### Scenario: Window without a stage
 - **WHEN** the window runs lit over a store without `--chunks`
 - **THEN** `chunk jobs` stays `None` and the horizon jobs bake at least one map (judged by the real-store gate `cargo xtask gate`; the small-world run reports it, because a software adapter is too slow to wait for a bake)
+
+### Requirement: STRM-060 Background jobs run in classes and a bake never holds a chunk worker
+The shared job pool SHALL run a waiting job of a better class before any waiting job of a worse class (`JobClass`: visible streaming and edits, prefetch, idle; ADR 0083 point 2), in submission order within a class, and SHALL NOT preempt a running job. Idle jobs SHALL run on at most `idle_cap` workers of the pool. The viewer's chunk pool SHALL have `VIEW_CHUNK_WORKERS` threads for chunk jobs plus `idle_cap` (1) for the idle class, and the chunk horizon jobs (STRM-049) SHALL be idle jobs, so that no chunk job waits for a horizon bake.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-27, window 8), ADR 0083 point 2, STRM-049, STRM-056
+
+#### Scenario: A queued chunk job against waiting bakes
+- **WHEN** a one-worker pool is busy and idle, prefetch and visible jobs are submitted in that order
+- **THEN** the visible jobs start first, then the prefetch job, then the idle jobs; with an idle cap of 1 on three workers, a second idle job does not start while the first runs and two visible jobs run beside it
