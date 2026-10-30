@@ -1624,6 +1624,120 @@ pub fn still_frames(
     Ok(all)
 }
 
+/// The three frames of one edit in one view (TEST-076): the stale frame before the edit, the preview frame (the first frame after the edit, the stale tiles with
+/// the REND-033 preview) and the exact frame once the refresh has settled.
+#[derive(Clone)]
+pub struct PairFrames {
+    pub view: TerrainView,
+    pub stale: StillFrame,
+    pub preview: StillFrame,
+    pub exact: StillFrame,
+    /// The control: the frame after the edit was taken back and the world settled again, which must equal the stale frame.
+    pub restored: StillFrame,
+}
+
+/// One frame of the loop read back once the GPU has finished it.
+fn frame_read(h: &mut Harness<'_>, req: &TerrainRequest) -> Result<StillFrame, String> {
+    let frame = h.step(req)?;
+    h.rig.fi.retire_to(h.rig.renderer.wait_oldest(h.ctx));
+    let px = h.rig.renderer.read_color(h.ctx);
+    let mut nodes: Vec<(TileId, u8, String)> =
+        frame.pipeline.draw.plan.nodes.iter().map(|n| (n.tile, n.level, format!("{:?}", n.state))).collect();
+    nodes.sort();
+    Ok(StillFrame { width: px.width, height: px.height, rgba: px.rgba, nodes })
+}
+
+/// The pairs of the edit of the case with the stamp radius `radius_m` at `altitude_m` (TEST-076): per debug view in `views`, the stale frame, the edit as the editor
+/// makes it (definition swap, the edited tiles named, the preview set), the first frame after it, then the exact frame once everything has settled, and the
+/// edit taken back so the next view starts from the same world. A world source as in `still_frames`; nothing here is a measurement.
+pub fn pair_frames(
+    o: &Options,
+    ctx: &GpuContext,
+    views: &[TerrainView],
+    altitude_m: f64,
+    radius_m: f64,
+) -> Result<Vec<PairFrames>, String> {
+    let world = Arc::new(crate::streamperf::open_world(o, false)?);
+    let planet_m = world.radius_m();
+    let size = (768u32, 432u32);
+    let field = world.field()?;
+    let lod = LodParams {
+        cells: o.cells,
+        viewport_h_px: f64::from(size.1),
+        tau_px: o.tau,
+        max_level: o.finest_level_for(o.cells),
+        min_level: o.min_level(),
+        radius_m: planet_m,
+        max_height_m: LodParams::earth_1080p().max_height_m.max(field.max_abs_height_m() + 200.0),
+        ..LodParams::earth_1080p()
+    };
+    lod.validate().map_err(|e| format!("--cells {} --tau {}: {e}", o.cells, o.tau))?;
+    let ground = |d: Vec3| field.height(d);
+    let case = cases_at(altitude_m, true, planet_m)
+        .into_iter()
+        .find(|c| c.kind == CaseKind::Stamp && (c.size_m - radius_m).abs() < 1e-6)
+        .ok_or_else(|| format!("the scene has no stamp case of radius {radius_m} m at {altitude_m} m"))?;
+    let aspect = f64::from(size.0) / f64::from(size.1);
+    let rho = (1.5 * case.size_m).max(200.0);
+    let req = TerrainRequest {
+        camera: camera_for(case.centre, &ground, planet_m, rho, altitude_m, aspect),
+        size,
+        view: TerrainView::Level,
+        lod,
+        face_mapping: TangentWarp.id().to_string(),
+        seed: field.seed(),
+    };
+    let rig = Rig::new(ctx, &world, &req, o.gen_workers())?;
+    let mut h = Harness {
+        ctx,
+        rig,
+        iteration: 0,
+        drawn: HashSet::new(),
+        settle_limit: Duration::from_secs(120),
+        settle_ms: o.settle_ms,
+        chunk_world: None,
+        features: crate::chunkstage::FrameFeatures::default(),
+        counters: Default::default(),
+        landed_log: Vec::new(),
+        chunk_frame_max_ms: 0.0,
+        horizon_world: None,
+        horizon_landed: Vec::new(),
+        horizon_wanted: Vec::new(),
+        horizon_started: 0,
+    };
+    let mut all = Vec::with_capacity(views.len());
+    for &view in views {
+        let req = TerrainRequest { view, ..req.clone() };
+        h.settle(&req, 20)?;
+        let stale = frame_read(&mut h, &req)?;
+        // The edit as the editor does it.
+        let before_def = world.definition();
+        let mut edited = (*before_def).clone();
+        edited.put_item_spec(BodyId::PLANET, case.spec.clone()).map_err(|e| format!("the case's stamp: {e:?}"))?;
+        let edited = Arc::new(edited);
+        let old_revision = world.field()?.item_revision();
+        world.set_definition(Arc::clone(&edited))?;
+        announce_item_change(&mut h, &world, &before_def, old_revision);
+        let resident: Vec<TileId> = h.rig.managed.resident().keys().copied().collect();
+        let tiles = found_tiles(&case.spec, &resident, planet_m);
+        h.rig.managed.edit(&tiles);
+        h.rig.managed.set_preview_list(case_preview_list(&before_def, &edited, &case.spec, req.camera.position.0, planet_m));
+        let preview = frame_read(&mut h, &req)?;
+        h.settle(&req, 20)?;
+        let exact = frame_read(&mut h, &req)?;
+        // Take the edit back.
+        let edited_revision = world.field()?.item_revision();
+        world.set_definition(Arc::clone(&before_def))?;
+        announce_item_change(&mut h, &world, &edited, edited_revision);
+        h.rig.managed.edit(&tiles);
+        h.rig.managed.set_preview(Vec::new());
+        h.settle(&req, 20)?;
+        let restored = frame_read(&mut h, &req)?;
+        all.push(PairFrames { view, stale, preview, exact, restored });
+    }
+    Ok(all)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
