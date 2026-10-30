@@ -1,0 +1,1 @@
+- 2026-10-30 **rm-chunks-app** (ADR 0086, B6 PR 2): the app has no chunk stage: anetworld, regionheights, editresolve, the stage in WorldTerrain and its scene branches removed; chunkstage is horizonstep; TEST-049, GEN-052, GEN-055 removed; no default-path change

@@ -190,100 +190,10 @@ fn perf_coupled_make(o: &Options, ctx: &GpuContext, out: &mut dyn Write, owner_o
     }
 }
 
-/// The GEN-052 budget: an A-net chunk of 24 km2 takes at most 4 s at 8 m cells on the stage's production thread setting.
-pub(crate) fn anet_chunk_budget_failures(cell_m: f64, secs: f64) -> Vec<String> {
-    if cell_m == 8.0 && !(secs.is_finite() && secs <= 4.0) {
-        vec![format!("A-net chunk time {secs:.2} s at 8 m exceeds 4 s (GEN-052)")]
-    } else {
-        Vec::new()
-    }
-}
-
-// spec: GEN-052
-/// Time one A-net chunk (the chunk of the coupled run's largest land river) at 8, 4 and 10 m with the 3 km halo after the ADR 0020 readiness gate, on the
-/// stage's production thread setting (`WorldBase`'s default), and once more at 8 m on one thread (recorded, not judged). The world is the default eroded one
-/// over a bake of `--global-res` cells (default 256, which makes the coarse segments 8 times longer than the production run's) or the stored production
-/// bake of `--store DIR` (then `--global-res 16384`: the geometry of the viewer).
-pub fn perf_anet_chunk(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<(), String> {
-    use crate::anetworld::ANET_TOP_LEVEL;
-    use crate::anetworld::{cells_per_chunk_for, WorldBase, ANET_HALO_M};
-    use planet_generators::anet::{ANet, ANetParams};
-    use planet_generators::chunkfield::{compute_chunk, halo_rings, ChunkLattice};
-    use std::sync::Arc;
-    planet_perf::check_reference_adapter(&crate::facts(ctx)).map_err(|r| r.to_string())?;
-    let owner_override = crate::readiness_gate(o, ctx, out)?;
-    let res = if o.given.contains("--global-res") { o.global_res } else { 256 };
-    let store = o.store.clone().or_else(|| std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from));
-    let (world, maps, tile) = anet_scene(res, o.seed, store, out)?;
-    let radius = world.radius_m();
-    let mut failures = Vec::new();
-    let mut rows = Vec::new();
-    for (cell_m, one_thread) in [(8.0, false), (8.0, true), (4.0, false), (10.0, false)] {
-        let per = cells_per_chunk_for(radius, cell_m);
-        let lat = ChunkLattice::new(per).ok_or("no lattice")?;
-        let stage = ANet {
-            run: maps.clone(),
-            base: Arc::new(if one_thread { WorldBase::new(&world).with_threads(1) } else { WorldBase::new(&world) }),
-            radius_m: radius,
-            params: {
-                let mut params = ANetParams::spike(ANET_HALO_M, lat.cell_m(radius));
-                params.drivers.seed = world.base_seed();
-                params
-            },
-            memo: Default::default(),
-        };
-        let halo = halo_rings(&stage);
-        // The share of the base field: its heights over the region, on the same thread setting.
-        let reg = planet_generators::chunkfield::region(&lat, tile, halo);
-        let dirs: Vec<planet_core::Vec3> = reg.cells.iter().map(|&c| lat.direction(c)).collect();
-        let t0 = Instant::now();
-        let _ = planet_generators::anet::BaseDetail::base_heights(&*stage.base, &dirs);
-        let base_secs = t0.elapsed().as_secs_f64();
-        let start = Instant::now();
-        let r = compute_chunk(&lat, &stage, radius, ANET_TOP_LEVEL, tile, halo).ok_or("the chunk was refused")?;
-        let secs = start.elapsed().as_secs_f64();
-        let cells = (per as usize + 2 * halo as usize).pow(2);
-        writeln!(
-            out,
-            "{cell_m} m, {}: {per} cells per chunk, halo {halo} rings, about {cells} cells with the halo: {secs:.2} s, the base field of it {base_secs:.2} s (hash {:016x})",
-            if one_thread { "one thread (recorded)" } else { "production threads" },
-            r.hash()
-        )
-        .map_err(err)?;
-        if cell_m == 8.0 && !one_thread {
-            anet_steps(&world, &maps, &stage, &lat, tile, out)?;
-        }
-        if !one_thread {
-            failures.extend(anet_chunk_budget_failures(cell_m, secs));
-        }
-        rows.push(format!(
-            "{{\"cell_m\": {cell_m}, \"threads\": \"{}\", \"cells_per_chunk\": {per}, \"halo_rings\": {halo}, \"seconds\": {secs:.3}}}",
-            if one_thread { "1" } else { "production" }
-        ));
-    }
-    let json = format!(
-        "{{\n  \"scene\": \"anet-chunk\",\n  \"adapter\": \"{}\",\n  \"owner_override\": {:?},\n  \"res\": {res},\n  \"chunks\": [{}],\n  \"budget_failures\": {:?}\n}}\n",
-        ctx.adapter_name().replace('"', "'"),
-        owner_override,
-        rows.join(", "),
-        failures
-    );
-    let path = o.out.clone().unwrap_or_else(|| Path::new("perf").join("logs").join("anet-chunk.json"));
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(err)?;
-    }
-    std::fs::write(&path, json).map_err(err)?;
-    writeln!(out, "wrote {}", path.display()).map_err(err)?;
-    if failures.is_empty() {
-        Ok(())
-    } else {
-        Err(failures.join("; "))
-    }
-}
-
-/// The world of the chunk scenes: the default eroded world over a bake of `res` cells, its coupled run, and the chunk of the land cell with the
+/// The world of the reports: the default eroded world over a bake of `res` cells, its coupled run, and the chunk of the land cell with the
 /// largest drainage area that drains on, with that area in m2.
-fn anet_scene(
+#[cfg(test)]
+fn river_scene(
     res: u32,
     seed: u64,
     store: Option<std::path::PathBuf>,
@@ -304,7 +214,7 @@ fn anet_scene(
     });
     writeln!(
         out,
-        "A-net chunk scene: bake {res} cells per face edge{}, coupled run {} steps",
+        "report scene: bake {res} cells per face edge{}, coupled run {} steps",
         store.as_ref().map_or(String::new(), |d| format!(" of the store {}", d.display())),
         crate::coupledworld::COUPLED_STEPS
     )
@@ -339,103 +249,6 @@ fn anet_scene(
     Ok((world, maps, tile))
 }
 
-/// The steps of the A-net chunk against the parent, per tile level (criterion 3): for each tile level `L` from 11 to 16, over the vertices of the
-/// tiles of level `L - 1` inside the chunk, the difference of the change a tile of level `L` reads and the one its parent reads (the base for the
-/// level above the pyramid's top), as p99 and maximum in metres, and the fade time a limit of 0.25 m per frame at 60 frames needs.
-fn anet_steps(
-    world: &std::sync::Arc<crate::worldfield::WorldTerrain>,
-    _maps: &std::sync::Arc<planet_generators::coupled::CoupledMaps>,
-    stage: &planet_generators::anet::ANet,
-    lat: &planet_generators::chunkfield::ChunkLattice,
-    tile: planet_core::TileId,
-    out: &mut dyn Write,
-) -> Result<(), String> {
-    use planet_generators::chunkfield::{compute_chunk, halo_rings, ChunkField};
-    let radius = world.radius_m();
-    let top = planet_generators::chunk::CHUNK_GRID_LEVEL;
-    let r = compute_chunk(lat, stage, radius, top, tile, halo_rings(stage)).ok_or("the chunk for the steps was refused")?;
-    let base = world.base_field()?;
-    let field = ChunkField::new(base, *lat, radius, stage).with_top_level(top).with_ready(std::sync::Arc::new(r));
-    let map = &planet_core::cube::TangentWarp;
-    let res = planet_generators::chunk::TILE_CELLS;
-    writeln!(out, "steps against the parent (tile level L vs its parent, at the parent's vertices, inside the chunk), 8 m cells:")
-        .map_err(err)?;
-    for level in top..=top + 5 {
-        let mut tiles = vec![tile];
-        for _ in top..level.saturating_sub(1).max(top) {
-            tiles = tiles.iter().flat_map(|t| t.children().expect("children")).collect();
-        }
-        let mut d: Vec<f64> = Vec::new();
-        let mut abs: Vec<f64> = Vec::new();
-        for t in &tiles {
-            for l in 0..=res {
-                for k in 0..=res {
-                    let dir = t.sample_direction(map, res, k, l);
-                    let own = field.change_at_level(dir, level);
-                    abs.push(own.abs());
-                    let parent = if level == top { 0.0 } else { field.change_at_level(dir, level - 1) };
-                    d.push((own - parent).abs());
-                }
-            }
-        }
-        d.sort_by(f64::total_cmp);
-        abs.sort_by(f64::total_cmp);
-        let (p99, max) = (d[d.len() * 99 / 100], d[d.len() - 1]);
-        let abs99 = abs[abs.len() * 99 / 100];
-        writeln!(
-            out,
-            "  level {level}: against the parent p99 {p99:.3} m, max {max:.3} m (the change itself at this level: p99 {abs99:.3} m) over {} vertices, fade of the max at 0.25 m per frame, 60 fps: {:.2} s",
-            d.len(),
-            max / 15.0
-        )
-        .map_err(err)?;
-    }
-    // The entry step of the A-net's own top level: a pyramid reaching up to ANET_TOP_LEVEL only, so the parent of a tile of that level is the
-    // base (no pyramid above it): the change a tile of the top level reads, at the vertices of the tiles of the level above.
-    let entry = crate::anetworld::ANET_TOP_LEVEL;
-    let r = compute_chunk(lat, stage, radius, entry, tile, halo_rings(stage)).ok_or("the chunk for the entry step was refused")?;
-    let field = ChunkField::new(world.base_field()?, *lat, radius, stage).with_top_level(entry).with_ready(std::sync::Arc::new(r));
-    let mut tiles = vec![tile];
-    for _ in top..entry - 1 {
-        tiles = tiles.iter().flat_map(|t| t.children().expect("children")).collect();
-    }
-    let mut d: Vec<f64> = Vec::new();
-    let mut signed: Vec<f64> = Vec::new();
-    for t in &tiles {
-        for l in 0..=res {
-            for k in 0..=res {
-                let c = field.change_at_level(t.sample_direction(map, res, k, l), entry);
-                signed.push(c);
-                d.push(c.abs());
-            }
-        }
-    }
-    signed.sort_by(f64::total_cmp);
-    let q = |f: usize| signed[(signed.len() - 1) * f / 100];
-    writeln!(
-        out,
-        "the change at the entry level, signed: p0 {:.2}, p1 {:.2}, p10 {:.2}, p50 {:.2}, p90 {:.2}, p99 {:.2}, p100 {:.2} m",
-        q(0),
-        q(1),
-        q(10),
-        q(50),
-        q(90),
-        q(99),
-        q(100)
-    )
-    .map_err(err)?;
-    d.sort_by(f64::total_cmp);
-    writeln!(
-        out,
-        "entry step at the A-net top level {entry} against the base (pyramid up to {entry} only): p99 {:.3} m, max {:.3} m over {} vertices",
-        d[d.len() * 99 / 100],
-        d[d.len() - 1],
-        d.len()
-    )
-    .map_err(err)?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -453,35 +266,9 @@ mod tests {
         assert!(a.z.iter().zip(&b.z).all(|(x, y)| x.to_bits() == y.to_bits()), "the fixed input gives the same run");
     }
 
-    // spec: GEN-037
-    /// The steps of the A-net chunk against the parent at the tile levels 11 to 16 (criterion 3), printed: `cargo test -p planet --release --lib
-    /// anet_steps_report -- --ignored --nocapture`. A measurement of values, not of time.
-    #[test]
-    #[ignore = "a measurement: it prints the steps of one real chunk"]
-    fn anet_steps_report() {
-        let mut out = std::io::stdout();
-        let res = std::env::var("PLANET_ANET_RES").ok().and_then(|r| r.parse().ok()).unwrap_or(256);
-        let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
-        let (world, maps, tile) = anet_scene(res, 11, store, &mut out).unwrap();
-        let radius = world.radius_m();
-        let lat = planet_generators::chunkfield::ChunkLattice::new(crate::anetworld::cells_per_chunk_for(radius, 8.0)).unwrap();
-        let stage = planet_generators::anet::ANet {
-            run: maps.clone(),
-            base: std::sync::Arc::new(crate::anetworld::WorldBase::new(&world)),
-            radius_m: radius,
-            params: {
-                let mut params = planet_generators::anet::ANetParams::spike(crate::anetworld::ANET_HALO_M, lat.cell_m(radius));
-                params.drivers.seed = world.base_seed();
-                params
-            },
-            memo: Default::default(),
-        };
-        anet_steps(&world, &maps, &stage, &lat, tile, &mut out).unwrap();
-    }
-
     // spec: TEST-064
-    /// The steps of the base field alone (no chunk stage) between a tile level and its parent (0 by construction at shared vertices: a child tile's vertices include the parent's and the base height does not depend on the level; the measurement guards that) at the levels 11 to 16, over the vertices of the
-    /// parents inside the same chunk as `anet_steps_report`, printed: `PLANET_ANET_STORE=DIR PLANET_ANET_RES=N cargo test -p planet --release --lib
+    /// The steps of the base field alone between a tile level and its parent (0 by construction at shared vertices: a child tile's vertices include the parent's and the base height does not depend on the level; the measurement guards that) at the levels 11 to 16, over the vertices of the
+    /// parents inside the chunk of the largest river, printed: `PLANET_ANET_STORE=DIR PLANET_ANET_RES=N cargo test -p planet --release --lib
     /// base_steps_report -- --ignored --nocapture`. A measurement of values, read only.
     #[test]
     #[ignore = "a measurement: it prints the steps of the base field in one real chunk"]
@@ -489,8 +276,8 @@ mod tests {
         let mut out = std::io::stdout();
         let res = std::env::var("PLANET_ANET_RES").ok().and_then(|r| r.parse().ok()).unwrap_or(256);
         let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
-        let (world, _maps, tile) = anet_scene(res, 11, store, &mut out).unwrap();
-        let base = world.base_field().unwrap();
+        let (world, _maps, tile) = river_scene(res, 11, store, &mut out).unwrap();
+        let base = world.field().unwrap();
         let map = &planet_core::cube::TangentWarp;
         let cells = planet_generators::chunk::TILE_CELLS;
         let top = planet_generators::chunk::CHUNK_GRID_LEVEL;
@@ -525,230 +312,6 @@ mod tests {
         }
     }
 
-    // spec: GEN-037
-    /// The change the A-net chunks make, by tile level, over a sample of land chunks of the store (the stated bound of the stage, GEN-039): the
-    /// maximum and the p99.9 of its absolute value at each level 11 to 16, and the signed extremes. `PLANET_ANET_STORE=DIR PLANET_ANET_RES=N
-    /// PLANET_ANET_CHUNKS=48 cargo test -p planet --release --lib anet_change_report -- --ignored --nocapture`. A measurement of values, read only.
-    #[test]
-    #[ignore = "a measurement: it solves a sample of real chunks"]
-    fn anet_change_report() {
-        use planet_core::hash::SplitMix64;
-        use planet_generators::chunkfield::{compute_chunk, halo_rings, ChunkField};
-        let mut out = std::io::stdout();
-        let res = std::env::var("PLANET_ANET_RES").ok().and_then(|r| r.parse().ok()).unwrap_or(256);
-        let count: usize = std::env::var("PLANET_ANET_CHUNKS").ok().and_then(|r| r.parse().ok()).unwrap_or(48);
-        let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
-        let (world, maps, _) = anet_scene(res, 11, store, &mut out).unwrap();
-        let radius = world.radius_m();
-        let lat = planet_generators::chunkfield::ChunkLattice::new(crate::anetworld::cells_per_chunk_for(radius, 8.0)).unwrap();
-        let stage = planet_generators::anet::ANet {
-            run: maps.clone(),
-            base: std::sync::Arc::new(crate::anetworld::WorldBase::new(&world)),
-            radius_m: radius,
-            params: {
-                let mut params = planet_generators::anet::ANetParams::spike(crate::anetworld::ANET_HALO_M, lat.cell_m(radius));
-                params.drivers.seed = world.base_seed();
-                params
-            },
-            memo: Default::default(),
-        };
-        let top = planet_generators::chunk::CHUNK_GRID_LEVEL;
-        let per_face = 1u32 << top;
-        let base = world.base_field().unwrap();
-        // A sample of land chunks: random tiles of the chunk grid whose centre is above sea level, the same ones on every run.
-        let mut rng = SplitMix64(0x6368_616e_6765);
-        let mut tiles: Vec<planet_core::TileId> = Vec::new();
-        while tiles.len() < count {
-            let face = planet_core::Face::ALL[(rng.next_u64() % 6) as usize];
-            let (x, y) = ((rng.next_u64() % u64::from(per_face)) as u32, (rng.next_u64() % u64::from(per_face)) as u32);
-            let t = planet_core::TileId::new(face, top, x, y).expect("a tile of the chunk grid");
-            if base.height(t.center_direction(&planet_core::cube::TangentWarp)) > 0.0 {
-                tiles.push(t);
-            }
-        }
-        let map = &planet_core::cube::TangentWarp;
-        let samples = 65u32;
-        // Per level: every absolute change seen, and the signed extremes.
-        let levels: Vec<u8> = (top..=top + 5).collect();
-        let mut abs: Vec<Vec<f64>> = vec![Vec::new(); levels.len()];
-        let mut lo_hi: Vec<(f64, f64)> = vec![(0.0, 0.0); levels.len()];
-        let mut worst: Vec<(f64, planet_core::TileId)> = vec![(0.0, tiles[0]); levels.len()];
-        for (n, &tile) in tiles.iter().enumerate() {
-            let Some(r) = compute_chunk(&lat, &stage, radius, top, tile, halo_rings(&stage)) else { continue };
-            let field =
-                ChunkField::new(world.base_field().unwrap(), lat, radius, &stage).with_top_level(top).with_ready(std::sync::Arc::new(r));
-            for (i, &level) in levels.iter().enumerate() {
-                for l in 0..samples {
-                    for k in 0..samples {
-                        let c = field.change_at_level(tile.sample_direction(map, samples - 1, k, l), level);
-                        abs[i].push(c.abs());
-                        lo_hi[i].0 = lo_hi[i].0.min(c);
-                        lo_hi[i].1 = lo_hi[i].1.max(c);
-                        if c.abs() > worst[i].0 {
-                            worst[i] = (c.abs(), tile);
-                        }
-                    }
-                }
-            }
-            writeln!(out, "chunk {}/{} {:?} done", n + 1, tiles.len(), (tile.face().0, tile.x(), tile.y())).map_err(err).unwrap();
-        }
-        writeln!(out, "the change of the A-net chunks over {} land chunks of the store, {samples} x {samples} samples each:", tiles.len())
-            .map_err(err)
-            .unwrap();
-        for (i, level) in levels.iter().enumerate() {
-            abs[i].sort_by(f64::total_cmp);
-            let a = &abs[i];
-            let q = |p: f64| a[(((a.len() - 1) as f64) * p) as usize];
-            writeln!(
-                out,
-                "  level {level}: |change| p50 {:.2}, p99 {:.2}, p99.9 {:.2}, p99.99 {:.2}, max {:.2} m (signed {:.1} to {:.1} m; the largest at {:?})",
-                q(0.5),
-                q(0.99),
-                q(0.999),
-                q(0.9999),
-                a[a.len() - 1],
-                lo_hi[i].0,
-                lo_hi[i].1,
-                (worst[i].1.face().0, worst[i].1.x(), worst[i].1.y())
-            )
-            .map_err(err)
-            .unwrap();
-        }
-    }
-
-    // spec: GEN-052
-    /// What building one tile costs with the chunk layer (chunks ready under it, an edit in the definition) and without it (base and stamps only),
-    /// per level (M8-7, criterion 6: the tile refresh of an edit). `PLANET_ANET_STORE=DIR PLANET_ANET_RES=N cargo test -p planet --release --lib
-    /// tile_cost_report -- --ignored --nocapture`. Times of one thread, a probe, not a perf measurement.
-    #[test]
-    #[ignore = "a measurement: it solves two real chunks and builds tiles"]
-    fn tile_cost_report() {
-        use planet_generators::chunkfield::compute_chunk;
-        let mut out = std::io::stdout();
-        let res = std::env::var("PLANET_ANET_RES").ok().and_then(|r| r.parse().ok()).unwrap_or(256);
-        let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
-        let (world, _maps, tile) = anet_scene(res, 11, store, &mut out).unwrap();
-        let _ = compute_chunk;
-        // The viewer's chunk stage on this world, the chunks around the site landed on a manual spawner.
-        let spawner = std::sync::Arc::new(planet_streaming::ThreadPool::new(6));
-        let cfg = planet_streaming::chunks::ChunkConfig { workers: 6, ..Default::default() };
-        assert_eq!(
-            world.enable_anet_from_store_with(
-                crate::anetworld::ANET_CELL_M,
-                spawner,
-                std::sync::Arc::new(planet_streaming::SystemClock::new()),
-                cfg,
-                false
-            ),
-            Ok(true)
-        );
-        let manager = world.chunk_manager().unwrap();
-        let map = &planet_core::cube::TangentWarp;
-        let site = tile.center_direction(map);
-        let t15 = planet_core::TileId::from_direction(map, site, 15);
-        let camera = planet_core::PlanetFixed(site * world.radius_m());
-        let start = std::time::Instant::now();
-        while manager.in_flight() > 0 || manager.result_hash(manager.reads(t15)[0]).is_none() {
-            world.chunk_frame(&[t15], camera, &[]);
-            std::thread::sleep(std::time::Duration::from_millis(50));
-            assert!(start.elapsed().as_secs() < 300, "the chunks did not land");
-        }
-        let def = world.definition();
-        let cells = 64u32;
-        fn time<'a>(f: &dyn Fn() -> Box<dyn planet_generators::height::HeightField + 'a>, id: planet_core::TileId, cells: u32) -> f64 {
-            let map = &planet_core::cube::TangentWarp;
-            // The mesh path of a real tile build (batch heights and climate over the lattice and its ring), as the streamer's job runs it.
-            let t = std::time::Instant::now();
-            for _ in 0..3 {
-                let field = f();
-                std::hint::black_box(planet_generators::mesh::tile_mesh_field(&*field, map, id, cells, 6_371_000.0));
-            }
-            t.elapsed().as_secs_f64() * 1000.0 / 3.0
-        }
-        for level in [15u8, 13, 11, 9, 7, 5, 4, 3] {
-            let id = planet_core::TileId::from_direction(map, site, level);
-            let with = time(&|| world.field().unwrap(), id, cells);
-            let without = time(&|| planet_generators::chain::with_stamps(world.base_field().unwrap(), &def).unwrap(), id, cells);
-            writeln!(out, "tile level {level} ({cells} cells, mesh path): {with:.0} ms with the chunk layer, {without:.0} ms without")
-                .map_err(err)
-                .unwrap();
-        }
-    }
-    // spec: GEN-052
-    /// What one `chunk_frame` call costs the calling thread (the main thread of the window) while the camera moves over new chunks, without and
-    /// with an item in a stamp layer under the chunk stage (M8 owner test: stalls of 1 to 15 s in the editor's chunk frame). `PLANET_ANET_STORE=DIR
-    /// PLANET_ANET_RES=N cargo test -p planet --release --lib chunk_frame_cost_report -- --ignored --nocapture`. Times of the call only, a probe.
-    #[test]
-    #[ignore = "a measurement: it flies over chunks and times the chunk frame"]
-    fn chunk_frame_cost_report() {
-        use planet_core::cube::TangentWarp;
-        let mut out = std::io::stdout();
-        let res = std::env::var("PLANET_ANET_RES").ok().and_then(|r| r.parse().ok()).unwrap_or(256);
-        let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
-        let (world, _maps, tile) = anet_scene(res, 11, store, &mut out).unwrap();
-        let spawner = std::sync::Arc::new(planet_streaming::ThreadPool::new(6));
-        let cfg = planet_streaming::chunks::ChunkConfig { workers: 6, ..Default::default() };
-        assert_eq!(
-            world.enable_anet_from_store_with(
-                crate::anetworld::ANET_CELL_M,
-                spawner,
-                std::sync::Arc::new(planet_streaming::SystemClock::new()),
-                cfg,
-                false
-            ),
-            Ok(true)
-        );
-        let radius = world.radius_m();
-        let site = tile.center_direction(&TangentWarp);
-        let east = planet_core::Vec3::new(0.0, 0.0, 1.0).cross(site).normalized();
-        let north = site.cross(east).normalized();
-        // 3 x 3 level-15 tiles round a point of the path: what a low camera wants.
-        let tiles_at = |dir: planet_core::Vec3| -> Vec<planet_core::TileId> {
-            use planet_core::Side::{East, North, South, West};
-            let c = planet_core::TileId::from_direction(&TangentWarp, dir, 15);
-            let mut t = vec![c];
-            for side in [East, West, North, South] {
-                t.push(c.neighbor(&TangentWarp, side));
-            }
-            for (a, b) in [(East, North), (East, South), (West, North), (West, South)] {
-                t.push(c.neighbor(&TangentWarp, a).neighbor(&TangentWarp, b));
-            }
-            t
-        };
-        let fly = |label: &str, origin: planet_core::Vec3, along: planet_core::Vec3, out: &mut dyn Write| {
-            let mut times = Vec::new();
-            for k in 0..30 {
-                let dir = (origin * libm::cos(k as f64 * 3_000.0 / radius) + along * libm::sin(k as f64 * 3_000.0 / radius)).normalized();
-                let tiles = tiles_at(dir);
-                let camera = planet_core::PlanetFixed(dir * radius);
-                let t = std::time::Instant::now();
-                world.chunk_frame(&tiles, camera, &[]);
-                times.push(t.elapsed().as_secs_f64() * 1000.0);
-                std::thread::sleep(std::time::Duration::from_millis(30));
-            }
-            let max = times.iter().cloned().fold(0.0, f64::max);
-            let over: Vec<String> = times.iter().filter(|t| **t > 20.0).map(|t| format!("{t:.0}")).collect();
-            writeln!(out, "{label}: 30 frames 3 km apart, max {max:.0} ms, frames over 20 ms: [{}]", over.join(", ")).map_err(err).unwrap();
-        };
-        fly("no items, east", site, east, &mut out);
-        let mut def = (*world.definition()).clone();
-        let item = planet_world_def::ItemSpec {
-            id: 1,
-            layer: "stamps".into(),
-            priority: 0,
-            dir: site,
-            content_hash: 0,
-            reach_m: 500.0,
-            max_delta_m: 60.0,
-            stamp: None,
-        }
-        .with_stamp(planet_world_def::stamp::Stamp::new(planet_world_def::stamp::StampKind::Hill, [30.0, 0.0, 0.0]));
-        def.put_item_spec(planet_world_def::BodyId::PLANET, item).map_err(|e| format!("{e:?}")).unwrap();
-        world.set_definition(std::sync::Arc::new(def)).unwrap();
-        fly("one hill in the stamp layer, north (new chunks)", site, north, &mut out);
-        fly("one hill in the stamp layer, west (new chunks)", site, east * -1.0, &mut out);
-    }
-
     // spec: VIEW-056
     /// What the editor's hover costs a frame (`pick_surface` through the world's field, once a frame under the cursor) with the camera at several
     /// altitudes over the site, cursors on a grid across the viewport (M8 owner test: editor frames of up to 1.3 s at the full-planet view).
@@ -761,7 +324,7 @@ mod tests {
         let mut out = std::io::stdout();
         let res = std::env::var("PLANET_ANET_RES").ok().and_then(|r| r.parse().ok()).unwrap_or(256);
         let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
-        let (world, _maps, tile) = anet_scene(res, 11, store, &mut out).unwrap();
+        let (world, _maps, tile) = river_scene(res, 11, store, &mut out).unwrap();
         let radius = world.radius_m();
         let site = tile.center_direction(&TangentWarp);
         let field = world.field().unwrap();
@@ -857,15 +420,6 @@ mod tests {
                 .map_err(err)
                 .unwrap();
         }
-    }
-
-    // spec: GEN-052
-    #[test]
-    fn the_chunk_budget_is_four_seconds_at_8_m_and_a_missing_time_never_passes() {
-        assert!(anet_chunk_budget_failures(8.0, 3.9).is_empty());
-        assert_eq!(anet_chunk_budget_failures(8.0, 4.1).len(), 1);
-        assert_eq!(anet_chunk_budget_failures(8.0, f64::NAN).len(), 1);
-        assert!(anet_chunk_budget_failures(4.0, 41.0).is_empty(), "the times at 4 and 10 m are recorded, not budgeted");
     }
 
     // spec: GEN-042

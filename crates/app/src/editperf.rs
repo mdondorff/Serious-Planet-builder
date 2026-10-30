@@ -418,36 +418,11 @@ pub struct Stages {
     pub coalesced: u64,
     pub cancelled: u64,
     pub dropped: u64,
-    /// The chunk side of the edit (a run with the chunk stage): `None` without one.
-    pub chunks: Option<ChunkStages>,
     /// The horizon maps the edit touched (a run with the horizon jobs and no chunk stage): per map the chunk and the milliseconds from `set_definition` to the
     /// first landing after it (`None`: it had not landed when the run stopped waiting). `None` without the jobs.
     pub horizon: Option<Vec<(planet_generators::chunkfield::ChunkKey, Option<f64>, f64)>>,
     /// The horizon bakes after the edit, one line each with the start, the end and the step times (see `horizon_diag`).
     pub horizon_diag: Option<String>,
-}
-
-/// What the chunk stage did after an edit (M8-7, criterion 6), in milliseconds from `set_definition`.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct ChunkStages {
-    /// The longest `chunk_frame` call of the frames up to the exact one: what the versions of the wanted chunks cost on the first frames
-    /// after the edit (a duration).
-    pub first_frame_ms: f64,
-    /// Chunks that landed again after the edit, and when the one under the edit centre and the last one did (`None`: none did).
-    pub resolved: u64,
-    pub centre_ms: Option<f64>,
-    pub last_ms: Option<f64>,
-    /// When the tiles that read the last chunk were drawn again: the later of the last chunk landing and the end of the last refresh job of a tile
-    /// the plan draws (ADR 0072 point 1), plus the upload frame; the eroded result of every touched chunk the view wants is then on the screen (the
-    /// fade over about 1.5 s follows). The gated reading of the 10 s criterion.
-    pub drawn_ms: Option<f64>,
-    /// When nothing was left to do after the last chunk (the plan exact, every resident tile refreshed and uploaded, nothing in flight): the reading
-    /// of windows before 24, recorded beside the drawn one.
-    pub settled_ms: Option<f64>,
-    /// The horizon jobs after the edit (0 without them): maps baked, of them re-bakes of a map that had one, and when the last was in flight.
-    pub horizon_baked: u64,
-    pub horizon_rebaked: u64,
-    pub horizon_last_ms: Option<f64>,
 }
 
 /// What a case edits: a hill stamp, or a brush stroke (TEST-042).
@@ -598,16 +573,9 @@ struct Harness<'a> {
     settle_limit: Duration,
     /// The refresh settle window of the run (ADR 0072), for the report.
     settle_ms: u64,
-    /// The world with a chunk stage the frames drive (`chunk_frame`, the landings into the managed loop), as the viewer does.
-    chunk_world: Option<Arc<WorldTerrain>>,
-    /// Whether the stale chunks wait for the edit's tiles (`ChunkManager::hold_stale`, the viewer's behaviour);
-    /// The features of the chunk step this scene runs (`--no-horizon-jobs` turns one off and the log says so) and what it counted.
-    features: crate::chunkstage::FrameFeatures,
-    counters: crate::chunkstage::FeatureCounters,
-    /// The chunks that landed in the frames since the log was last taken, with the instant, and the time of the slowest `chunk_frame` call.
-    landed_log: Vec<(Instant, planet_generators::chunkfield::ChunkKey)>,
-    chunk_frame_max_ms: f64,
-    /// The world whose horizon jobs run without a chunk stage (the default since the owner's fallback, STRM-064), and the maps that landed since the log was cleared.
+    /// What the horizon step counted (the announcements of item changes, TEST-058).
+    counters: crate::horizonstep::FeatureCounters,
+    /// The world whose horizon jobs run (the default since the owner's fallback, STRM-064), and the maps that landed since the log was cleared.
     horizon_world: Option<Arc<WorldTerrain>>,
     horizon_landed: Vec<(Instant, planet_generators::chunkfield::ChunkKey)>,
     /// The chunks the horizon jobs were asked for in the last frame (the same tiles and truncation as the jobs see).
@@ -623,18 +591,7 @@ impl Harness<'_> {
         let ctx = self.ctx;
         let rig = &mut self.rig;
         let frame = rig.managed.begin_frame_strict(req, &mut RendererSink { ctx, renderer: &mut rig.renderer })?;
-        if let Some(world) = &self.chunk_world {
-            // The chunks the plan's tiles read: the version of every wanted chunk is asked, the stale and the missing ones are solved, the
-            // landed ones refresh the tiles that read them (the viewer's frame, STRM-040, STRM-056).
-            let tiles: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
-            let call = Instant::now();
-            let update =
-                crate::chunkstage::frame_step(world, &mut rig.managed, &tiles, req.camera.position, &self.features, &mut self.counters)
-                    .update;
-            self.chunk_frame_max_ms = self.chunk_frame_max_ms.max(call.elapsed().as_secs_f64() * 1000.0);
-            let now = Instant::now();
-            self.landed_log.extend(update.landed.iter().map(|k| (now, *k)));
-        } else if let Some(world) = &self.horizon_world {
+        if let Some(world) = &self.horizon_world {
             let tiles: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
             self.horizon_wanted = world.horizon_wanted(&tiles, req.camera.position);
             let update = world.horizon_frame(&tiles, req.camera.position);
@@ -657,27 +614,6 @@ impl Harness<'_> {
     /// Whether nothing is left to do: the plan is the exact one, nothing generates, nothing waits for an upload.
     fn idle(&self, frame: &planet_frame::managed::ManagedFrame) -> bool {
         crate::editwin::exact_and_idle(&self.rig.managed, frame)
-    }
-
-    /// Frames with the camera still until the chunks the view wants are all landed and nothing is in flight for `calm` frames, then the
-    /// tiles that read them are drawn and idle (a no-op without a chunk stage).
-    fn settle_chunks(&mut self, req: &TerrainRequest, calm: usize) -> Result<(), String> {
-        let Some(manager) = self.chunk_world.as_ref().and_then(|w| w.chunk_manager()) else { return Ok(()) };
-        let started = Instant::now();
-        let mut quiet = 0;
-        loop {
-            let frame = self.step(req)?;
-            let busy = manager.in_flight() > 0 || !self.idle(&frame);
-            quiet = if busy { 0 } else { quiet + 1 };
-            if quiet >= calm {
-                self.landed_log.clear();
-                return Ok(());
-            }
-            if started.elapsed() > Duration::from_secs(600) {
-                return Err("the chunks did not settle in 600 s".into());
-            }
-            std::thread::sleep(Duration::from_millis(2));
-        }
     }
 
     /// Frames with the camera still until the horizon jobs are quiet (a no-op without them): no bake in flight and none started for longer than the jobs'
@@ -789,7 +725,7 @@ fn write_report(out: &std::path::Path, text: &str) -> Result<std::path::PathBuf,
 /// Tell the plan cache where the items changed from `old` to the world's definition now, as the viewer does after a swap (STRM-034), so the plan
 /// after the edit keeps what the change cannot reach; `old_revision` is the item revision of the field before the swap.
 fn announce_item_change(h: &mut Harness<'_>, world: &Arc<WorldTerrain>, old: &planet_world_def::WorldDefinition, old_revision: u64) {
-    crate::chunkstage::announce_item_change(&mut h.rig.managed, world, old, old_revision, &mut h.counters);
+    crate::horizonstep::announce_item_change(&mut h.rig.managed, world, old, old_revision, &mut h.counters);
 }
 
 /// One run of a case on a settled harness: edit, time the preview and the exact frame, take the edit back and settle. `quiet`: wait for the horizon jobs to be
@@ -831,18 +767,13 @@ fn run_once(
     let tiles = found_tiles(stamp, &resident, world.radius_m());
     out.stages.find_ms = ms(found);
     out.levels = level_rows(&tiles, &h.drawn, &req.lod, stamp.max_delta_m);
-    let drawn_before: HashSet<TileId> = h.drawn.clone();
     out.refreshed = h.rig.managed.edit(&tiles);
     out.stages.edit_ms = ms(call);
     let call = Instant::now();
     h.rig.managed.set_preview_list(case_preview_list(&before_def, &edited, stamp, req.camera.position.0, world.radius_m()));
     out.stages.preview_call_ms = ms(call);
     let mut waiting_for_exact = false;
-    // The tiles the plan draws at the frame that first delivers a plan after the edit (the plan can change with the edit).
-    let mut drawn_shown: HashSet<TileId> = HashSet::new();
     let mut frame_ms: Vec<f64> = Vec::new();
-    h.landed_log.clear();
-    h.chunk_frame_max_ms = 0.0;
     h.horizon_landed.clear();
     loop {
         let frame_started = Instant::now();
@@ -855,7 +786,6 @@ fn run_once(
             if let Some((_, worker_ms)) = frame.pipeline.delivered {
                 out.stages.plan_delivered_ms = Some(at);
                 out.stages.plan_worker_ms = Some(worker_ms);
-                drawn_shown = h.drawn.clone();
             }
         }
         if out.stages.residency_delivered_ms.is_none() && frame.pipeline.residency_delivered.is_some() {
@@ -940,67 +870,7 @@ fn run_once(
             )
         })
         .collect();
-    // Of the tiles the edit named (a drawn tile it did not name refreshes only when a chunk lands: the chunk table below).
-    let named: HashSet<TileId> = tiles.iter().copied().collect();
-    let drawn: HashSet<TileId> = drawn_before.union(&drawn_shown).copied().filter(|t| named.contains(t)).collect();
-    let drawn_refreshed_ms = drawn_refreshed_ms(&job_log.since(jobs_before), &drawn, t0_us, out.stages.frame_median_ms);
-    // With a chunk stage the plan is not exact until the stale chunks have landed (the tiles' keys follow the chunks), so the frame DrawKind::Exact
-    // waits for the eroded result: the M6 budget reads the instant the last named tile the plan draws ended its first refresh job (TEST-056,
-    // ADR 0072 point 1), and the chunk table below carries the eroded result.
-    if h.chunk_world.is_some() {
-        out.stages.drawn_exact_ms = drawn_refreshed_ms.or(out.stages.uploaded_ms);
-    }
-    // The chunk side: the chunks the edit made stale are solved again while the frames go on; the eroded result is on the screen when the
-    // tiles that read the last of them are drawn (M8-7, criterion 6).
-    if let Some(manager) = h.chunk_world.as_ref().and_then(|w| w.chunk_manager()) {
-        let first_frame_ms = h.chunk_frame_max_ms;
-        let hz0 = h.chunk_world.as_ref().and_then(|w| w.horizon_stats()).unwrap_or_default();
-        let mut hz_last: Option<f64> = None;
-        let limit = Duration::from_secs(120);
-        let mut quiet = 0;
-        let mut drawn_after_last: Option<f64> = None;
-        loop {
-            let frame = h.step(req)?;
-            let busy = manager.in_flight() > 0 || !h.idle(&frame);
-            if h.chunk_world.as_ref().is_some_and(|w| w.horizon_in_flight() > 0) {
-                hz_last = Some(ms(sampler_started));
-            }
-            if !busy {
-                quiet += 1;
-                if drawn_after_last.is_none() {
-                    drawn_after_last = Some(ms(sampler_started));
-                }
-            } else {
-                quiet = 0;
-                drawn_after_last = None;
-            }
-            if quiet >= 3 || sampler_started.elapsed() > limit + Duration::from_secs(60) {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(1));
-        }
-        let hz1 = h.chunk_world.as_ref().and_then(|w| w.horizon_stats()).unwrap_or_default();
-        let centre = world_centre_chunk(stamp);
-        let at = |t: Instant| t.duration_since(sampler_started).as_secs_f64() * 1000.0;
-        out.stages.chunks = Some(ChunkStages {
-            first_frame_ms,
-            resolved: h.landed_log.len() as u64,
-            centre_ms: h.landed_log.iter().find(|l| l.1 == centre).map(|l| at(l.0)),
-            last_ms: h.landed_log.last().map(|l| at(l.0)),
-            drawn_ms: if h.landed_log.is_empty() {
-                None
-            } else {
-                let last = h.landed_log.last().map(|l| at(l.0)).unwrap_or(0.0);
-                let tiles = last_refresh_end_ms(&job_log.since(jobs_before), &h.drawn, t0_us, out.stages.frame_median_ms);
-                Some(tiles.map_or(last, |t| t.max(last)))
-            },
-            settled_ms: if h.landed_log.is_empty() { None } else { drawn_after_last },
-            horizon_baked: hz1.baked - hz0.baked,
-            horizon_rebaked: hz1.rebaked - hz0.rebaked,
-            horizon_last_ms: hz_last,
-        });
-    }
-    // The horizon side without a chunk stage: the maps the edit touched (their edit word changed, the maps of the chunks it reaches and of the neighbours inside
+    // The horizon side: the maps the edit touched (their edit word changed, the maps of the chunks it reaches and of the neighbours inside
     // the march's halo) are baked again after the settle window; each one's time from the edit to its landing is the shadow of the edit on screen (M8 criterion 6).
     if h.horizon_world.is_some() {
         let touched: Vec<(planet_generators::chunkfield::ChunkKey, f64)> = wanted_keys
@@ -1039,7 +909,6 @@ fn run_once(
     h.rig.managed.edit(&tiles);
     h.rig.managed.set_preview(Vec::new());
     h.settle(req, 20)?;
-    h.settle_chunks(req, 20)?;
     // The revert changed the edit words of the touched maps: they are baked again, and the next edit waits for that wave to be over.
     h.settle_horizon(req)?;
     Ok(out)
@@ -1125,45 +994,6 @@ fn horizon_diag_section(rows: &[CaseRow]) -> String {
         if let Some(d) = r.runs.first().and_then(|x| x.stages.horizon_diag.as_ref()) {
             s += &format!("\nthe horizon bakes after the edit, first run, {} m altitude, {} m stamp:\n\n{d}", r.altitude_m, r.radius_m);
         }
-    }
-    s
-}
-
-/// The chunk under the centre of the edit (the item's anchor).
-fn world_centre_chunk(stamp: &ItemSpec) -> planet_generators::chunkfield::ChunkKey {
-    let t = TileId::from_direction(&TangentWarp, stamp.dir, planet_generators::chunk::CHUNK_GRID_LEVEL);
-    (t.face().0, t.x(), t.y())
-}
-
-/// The table of the chunk side of every case (a run with the chunk stage): per case the medians over its repeats.
-pub fn chunks_table(rows: &[CaseRow]) -> String {
-    let mut s = String::from(
-        "| altitude | stamp radius | first chunk frame ms (versions) | chunks re-solved | centre chunk landed ms | last chunk landed ms | drawn again ms (drawn tiles) | all settled ms | verdict (10 s, drawn tiles) | horizon maps baked (re-baked) | horizon last in flight ms |\n|---|---|---|---|---|---|---|---|---|---|\n",
-    );
-    let cell = |v: Option<f64>| v.map_or("-".to_string(), |x| format!("{x:.1}"));
-    for r in rows {
-        let pick =
-            |f: &dyn Fn(&ChunkStages) -> Option<f64>| median(r.runs.iter().filter_map(|x| x.stages.chunks.as_ref().and_then(f)).collect());
-        let drawn = pick(&|c| c.drawn_ms);
-        let verdict = match drawn {
-            None => "-",
-            Some(d) if d <= 10_000.0 => "ok",
-            Some(_) => "over",
-        };
-        s += &format!(
-            "| {} m | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
-            r.altitude_m,
-            r.radius_label(),
-            cell(pick(&|c| Some(c.first_frame_ms))),
-            cell(pick(&|c| Some(c.resolved as f64))),
-            cell(pick(&|c| c.centre_ms)),
-            cell(pick(&|c| c.last_ms)),
-            cell(drawn),
-            cell(pick(&|c| c.settled_ms)),
-            verdict,
-            cell(pick(&|c| Some(c.horizon_baked as f64))) + &format!(" ({})", cell(pick(&|c| Some(c.horizon_rebaked as f64)))),
-            cell(pick(&|c| c.horizon_last_ms))
-        );
     }
     s
 }
@@ -1394,11 +1224,7 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
             drawn: HashSet::new(),
             settle_limit: if smoke { Duration::from_secs(120) } else { SETTLE_LIMIT },
             settle_ms: o.settle_ms,
-            chunk_world: None,
-            features: crate::chunkstage::FrameFeatures::default(),
             counters: Default::default(),
-            landed_log: Vec::new(),
-            chunk_frame_max_ms: 0.0,
             horizon_world: with_horizon.then(|| Arc::clone(&world)),
             horizon_landed: Vec::new(),
             horizon_wanted: Vec::new(),
@@ -1420,7 +1246,6 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
             }
             // A smoke run needs the frames to be exact once, not a long calm: every frame is slow on the software adapter.
             let settle = h.settle(&req, if smoke { 3 } else { 20 })?;
-            h.settle_chunks(&req, if smoke { 3 } else { 20 })?;
             writeln!(out, "  altitude {altitude} m, {}: settled in {settle:.1} s", case.name).map_err(err)?;
             let mut runs = Vec::new();
             // The first case of an altitude is also edited once right after the view settled, while the first wave of bakes is still running: an
@@ -1449,16 +1274,14 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
     let table = table(&rows);
     let stages = stages_table(&rows);
     let levels = levels_table(&rows);
-    let chunks = String::from("\n(no chunk stage in this run: the comparison line, or a smoke or memory-bake run)\n");
     let horizon = if with_horizon {
         format!("
-the horizon side of every case (ms from set_definition to the landing of each map the edit touched; the maps baked from the base terrain, no chunk stage). On screen is landing plus the upload: the window uploads one landed map per frame (`HorizonRig::decide`, horizonworld.rs), so a map is drawn within one frame of landing when it is the only one pending, and the window gate logs the frame a re-baked map is first drawn:
+the horizon side of every case (ms from set_definition to the landing of each map the edit touched; the maps baked from the base terrain). On screen is landing plus the upload: the window uploads one landed map per frame (`HorizonRig::decide`, horizonworld.rs), so a map is drawn within one frame of landing when it is the only one pending, and the window gate logs the frame a re-baked map is first drawn:
 
 {}{}{}", horizon_table(&rows), horizon_wave_section(&waves), horizon_diag_section(&rows))
     } else {
         String::new()
     };
-    writeln!(out, "{chunks}").map_err(err)?;
     writeln!(out, "{horizon}").map_err(err)?;
     writeln!(out, "\n{table}\nstages (ms from set_definition; the calls and the frame median are durations):\n\n{stages}").map_err(err)?;
     writeln!(out, "\nthe refreshed set by level (first run of each case):\n\n{levels}").map_err(err)?;
@@ -1479,7 +1302,7 @@ the refresh frame by frame (first run of each case; rows where a count moved or 
     )
     .map_err(err)?;
     if let Some(dir) = &o.out {
-        let path = write_report(dir, &format!("{table}\n{stages}\n{levels}\n{chunks}\n{horizon}\n{cost}"))?;
+        let path = write_report(dir, &format!("{table}\n{stages}\n{levels}\n{horizon}\n{cost}"))?;
         writeln!(out, "table written to {}", path.display()).map_err(err)?;
     }
     if smoke && rows.iter().any(|r| r.runs.iter().any(|x| x.exact_ms.is_none())) {
@@ -1518,27 +1341,6 @@ pub fn trace_table(rows: &[CaseRow]) -> String {
         s.push('\n');
     }
     s
-}
-
-/// The instant, in ms from `t0_us` of the job log's clock, at which the last refresh job of a tile of `drawn` ended, plus `upload_ms` for the frame
-/// that uploads it; `None` when no tile of `drawn` was rebuilt.
-pub fn last_refresh_end_ms(jobs: &[planet_streaming::JobSample], drawn: &HashSet<TileId>, t0_us: u64, upload_ms: f64) -> Option<f64> {
-    jobs.iter()
-        .filter(|j| j.refresh && drawn.contains(&j.tile))
-        .map(|j| j.ended_us)
-        .max()
-        .map(|e| e.saturating_sub(t0_us) as f64 / 1000.0 + upload_ms)
-}
-
-/// The instant, in ms from `t0_us` of the job log's clock, at which every tile of `drawn` that a refresh job rebuilt had its first refresh job ended
-/// (ADR 0072 point 1: "exact" is the tiles the plan draws), plus `upload_ms` for the frame that uploads the last; `None` when no drawn tile was rebuilt.
-pub fn drawn_refreshed_ms(jobs: &[planet_streaming::JobSample], drawn: &HashSet<TileId>, t0_us: u64, upload_ms: f64) -> Option<f64> {
-    let mut first_end: std::collections::HashMap<TileId, u64> = std::collections::HashMap::new();
-    for j in jobs.iter().filter(|j| j.refresh && drawn.contains(&j.tile)) {
-        let e = first_end.entry(j.tile).or_insert(j.ended_us);
-        *e = (*e).min(j.ended_us);
-    }
-    first_end.values().max().map(|&e| e.saturating_sub(t0_us) as f64 / 1000.0 + upload_ms)
 }
 
 /// One frame of a still camera, read back (the still-flicker detector, TEST-068).
@@ -1595,11 +1397,7 @@ pub fn still_frames(
         drawn: HashSet::new(),
         settle_limit: Duration::from_secs(120),
         settle_ms: o.settle_ms,
-        chunk_world: None,
-        features: crate::chunkstage::FrameFeatures::default(),
         counters: Default::default(),
-        landed_log: Vec::new(),
-        chunk_frame_max_ms: 0.0,
         horizon_world: None,
         horizon_landed: Vec::new(),
         horizon_wanted: Vec::new(),
@@ -1695,11 +1493,7 @@ pub fn pair_frames(
         drawn: HashSet::new(),
         settle_limit: Duration::from_secs(120),
         settle_ms: o.settle_ms,
-        chunk_world: None,
-        features: crate::chunkstage::FrameFeatures::default(),
         counters: Default::default(),
-        landed_log: Vec::new(),
-        chunk_frame_max_ms: 0.0,
         horizon_world: None,
         horizon_landed: Vec::new(),
         horizon_wanted: Vec::new(),
@@ -1770,47 +1564,6 @@ mod tests {
             let mut def = WorldDefinition::single_planet(R, 7);
             def.put_item_spec(BodyId::PLANET, spec).unwrap_or_else(|e| panic!("radius {radius}: {e:?}"));
         }
-    }
-
-    // spec: TEST-056
-    #[test]
-    fn the_chunks_table_gives_the_medians_of_the_chunk_side_per_case_and_the_ten_second_verdict() {
-        let run = |drawn: Option<f64>, resolved: u64| CaseRun {
-            stages: Stages {
-                chunks: Some(ChunkStages {
-                    first_frame_ms: 3.5,
-                    resolved,
-                    centre_ms: Some(4_800.0),
-                    last_ms: Some(8_800.0),
-                    drawn_ms: drawn,
-                    settled_ms: drawn.map(|d| d + 1_000.0),
-                    ..ChunkStages::default()
-                }),
-                ..Stages::default()
-            },
-            ..CaseRun::default()
-        };
-        let rows = vec![
-            CaseRow {
-                kind: CaseKind::Stamp,
-                altitude_m: 200.0,
-                radius_m: 2_000.0,
-                runs: vec![run(Some(9_000.0), 4), run(Some(9_500.0), 4), run(Some(30_000.0), 4)],
-            },
-            CaseRow { kind: CaseKind::Stamp, altitude_m: 200.0, radius_m: 5_000.0, runs: vec![run(Some(14_000.0), 4)] },
-            CaseRow { kind: CaseKind::Stamp, altitude_m: 2_000.0, radius_m: 50.0, runs: vec![CaseRun::default()] },
-        ];
-        let t = chunks_table(&rows);
-        let lines: Vec<&str> = t.lines().collect();
-        assert!(
-            lines[0].contains("first chunk frame ms")
-                && lines[0].contains("verdict (10 s, drawn tiles)")
-                && lines[0].contains("all settled ms"),
-            "{t}"
-        );
-        assert!(lines[2].contains("| 3.5 | 4.0 | 4800.0 | 8800.0 | 9500.0 | 10500.0 | ok |"), "the median of three runs: {}", lines[2]);
-        assert!(lines[3].contains("| 14000.0 | 15000.0 | over |"), "{}", lines[3]);
-        assert!(lines[4].ends_with("| - | - | - | - | - | - | - | - (-) | - |"), "a case without a chunk stage has no cells: {}", lines[4]);
     }
 
     // spec: TEST-044
@@ -1952,31 +1705,6 @@ mod tests {
         std::fs::remove_dir_all(dir.parent().unwrap().parent().unwrap()).unwrap();
     }
 
-    // spec: TEST-056
-    #[test]
-    fn drawn_exact_is_the_latest_first_refresh_end_of_the_tiles_the_plan_draws() {
-        use planet_streaming::JobSample;
-        let tile = |x| TileId::new(planet_core::Face(0), 16, x, 0).unwrap();
-        let job = |x, ended_us, refresh| JobSample {
-            wait_us: 0,
-            run_us: 0,
-            running: 1,
-            done: true,
-            level: 16,
-            queue_ms: 0,
-            refresh,
-            tile: tile(x),
-            ended_us,
-        };
-        // Tile 1 refreshed at 150 ms and again at 4 s (a chunk landed): its first end counts; tile 2 is not drawn (slow, resident only); tile 3 is a
-        // new load, not a refresh.
-        let jobs =
-            [job(1, 1_150_000, true), job(2, 1_900_000, true), job(1, 5_000_000, true), job(3, 9_000_000, false), job(4, 1_300_000, true)];
-        let drawn: HashSet<TileId> = [tile(1), tile(3), tile(4)].into_iter().collect();
-        assert_eq!(drawn_refreshed_ms(&jobs, &drawn, 1_000_000, 5.0), Some(305.0));
-        assert_eq!(drawn_refreshed_ms(&jobs, &HashSet::new(), 1_000_000, 5.0), None);
-    }
-
     // spec: TEST-065
     #[test]
     fn the_horizon_diagnosis_counts_the_dropped_bakes_and_sums_the_steps() {
@@ -2065,28 +1793,5 @@ mod tests {
         assert!(lines[3].ends_with("| 5100 | 12000.0 |"), "a slow map is a number, not a verdict: {t}");
         assert!(lines[4].ends_with("| 9800 | - |"), "a map that never landed: {t}");
         assert!(lines[5].ends_with("| - | - | - |") && lines[6].ends_with("| - | - | - |"), "a case that touched no map: {t}");
-    }
-
-    // spec: TEST-056
-    #[test]
-    fn drawn_again_ends_at_the_last_refresh_of_a_tile_the_plan_draws_not_of_a_resident_only_one() {
-        use planet_streaming::JobSample;
-        let tile = |x| TileId::new(planet_core::Face(0), 16, x, 0).unwrap();
-        let job = |x, ended_us, refresh| JobSample {
-            wait_us: 0,
-            run_us: 0,
-            running: 1,
-            done: true,
-            level: 16,
-            queue_ms: 0,
-            refresh,
-            tile: tile(x),
-            ended_us,
-        };
-        // Tile 1 (drawn) refreshed at 150 ms and again at 4 s after a chunk landed; tile 2 is resident only and ends last, at 9 s; tile 3 is a load.
-        let jobs = [job(1, 1_150_000, true), job(1, 5_000_000, true), job(2, 10_000_000, true), job(3, 11_000_000, false)];
-        let drawn: HashSet<TileId> = [tile(1), tile(3)].into_iter().collect();
-        assert_eq!(last_refresh_end_ms(&jobs, &drawn, 1_000_000, 5.0), Some(4_005.0));
-        assert_eq!(last_refresh_end_ms(&jobs, &HashSet::new(), 1_000_000, 5.0), None);
     }
 }
