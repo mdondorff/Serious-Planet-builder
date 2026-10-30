@@ -4,3 +4,7 @@
 *.pdb
 .claude/settings.local.json
 .claude/worktrees/
+
+# Spike prototypes and their build output stay on spike branches, never on main (spike skill)
+spikes/*/proto/
+spikes/*/out/
