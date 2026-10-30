@@ -1,0 +1,1 @@
+- 2026-10-30 **spec-lint-retired-terms** (BUILD-028): spec-lint fails a retired term of docs/domain.md section 8 in the current specs and docs, naming file, line, term and the replacement; rows with code removal pending only warn

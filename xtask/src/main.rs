@@ -10,6 +10,7 @@ mod layering;
 mod logcmd;
 mod prepush;
 mod repocheck;
+mod retired;
 mod speclint;
 mod storecmd;
 mod testcmd;
