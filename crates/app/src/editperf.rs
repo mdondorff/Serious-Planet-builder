@@ -1696,7 +1696,7 @@ pub fn pair_frames(
         settle_limit: Duration::from_secs(120),
         settle_ms: o.settle_ms,
         chunk_world: None,
-        features: crate::chunkstage::FrameFeatures { stale_hold: !o.no_stale_hold, ..Default::default() },
+        features: crate::chunkstage::FrameFeatures::default(),
         counters: Default::default(),
         landed_log: Vec::new(),
         chunk_frame_max_ms: 0.0,
