@@ -119,7 +119,7 @@ impl FeatureCounters {
 /// What one step reported: the horizon update.
 #[derive(Clone, Debug, Default)]
 pub struct StepReport {
-    pub horizon: planet_streaming::chunks::HorizonUpdate,
+    pub horizon: planet_streaming::horizonjobs::HorizonUpdate,
 }
 
 /// Tell the plan cache where the items changed from `old` to the world's definition now, as the viewer does after a swap (STRM-034), so the plan after
