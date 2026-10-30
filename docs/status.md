@@ -3,12 +3,12 @@
 Forward state only (owner, 2026-10-16): open owner items, the current queue's open items, the current unanswered stop report, tracked items and quarantines. History goes to the log (`cargo xtask log`). When a change is archived the coder deletes its queue item's text (the log line is the record); when the architect answers a stop report it deletes it. A Tracked entry has at most 3 lines; a finished one is deleted (ADR 0075). Cap: 15 KB. Earlier states: `docs/archive/M4/status-at-m4-acceptance.md`, `docs/archive/M6/status-at-m6-close.md`. M7's queue as executed: `docs/milestones/M7-report.md`.
 
 ## Waiting for the owner
-- **Friday 2026-10-30 hour** (`docs/briefings/morning-2026-10-30.md`): `/bless` of 7 RTX golden candidates (`target/review/golden-review/report.md`; driver unchanged); ADR 0085 acceptance; week plan decisions; the GitHub ruleset.
+- **Friday 2026-10-30 hour** (`docs/briefings/morning-2026-10-30.md`): `/bless` of 10 RTX golden candidates on driver 621.01 (the device loss is gone); week plan decisions; the GitHub ruleset.
 - **Owner live test 2026-10-27** (`docs/milestones/M8/owner-test-2026-10-27/README.md`): open: group E (edits on top as default, erosion keeping mass), F and G scope, the look, the 1 m / 500 m exception, the drawn-tile reading of criterion 6 (#823). Decided 2026-10-28: the no-degradation gate first, then the D0 decision measurement with its stop rule (README "Decisions").
 - **D3 confirmed (owner, 2026-10-26):** both orders are wanted eventually; M8-7 builds edits under the erosion first (option 2: the edit shows at once, its eroded result follows within 10 s); edits on top (finishing touches) stay a per-layer setting for later. Cost per stamp or brush stroke is M8-7's first measurement.
 - **ADR 0083 (compute budgets) is accepted but not built:** no share-table spec, pools not on one job system, no reserve test. Candidate for the owner's away week (decided Friday 2026-10-30): share spec with reserves (sky and weather, physics, game logic, networking), one job system, a synthetic-load reserve test in the perf harness.
 - **Optional, when convenient:** the M6 retest list (`docs/archive/M6/briefings/m6-owner-test-plan.md`, "Retest"); a live check of the flickers (Tracked).
-- **At the laptop (postponed):** the NVIDIA driver update (591.86; device losses under parallel GPU load, Tracked); excluding the repo's `target` folders from Windows Search indexing.
+- **At the laptop (postponed):** excluding the repo's `target` folders from Windows Search indexing.
 
 Dormant (no near trigger; not asked now):
 - **ADR 0045** (bodies, bake resolution, storage budget): proposed. Trigger: multi-body work.
@@ -58,7 +58,7 @@ Open owner items: the two flickers (Tracked) need a live check (editor off, debu
 - **RTX known-answer hashes** in `gpu_compact_blocks.rs` and `gpu_water.rs` removed under MESH_VERSION 8: re-record with `test gpu --real` (now MESH_VERSION 9).
 - **Item store revisit trigger** (ADR 0066 point 6): more than 20,000 items in a body or a load over 2 s decides the backend. Nothing counts or times it yet.
 - **M3 gate condition 2**: the declared-versus-recorded reads contract test (ADR 0021 point 7) and a tile-level GEN-017 test are approved, not written; the per-tile node set id waits for the first stored regional field.
-- **Device loss on the RTX** (2026-10-18; again 2026-10-30): `gpu_window` item sweeps under `test gpu --real`, alone and single-threaded: dense cluster 4/4, altitude sweeps about 1/2, same rate at 092867a3 and d4998480 (`target/hunt/`). A 1 s stall in present/acquire, then `wgpu device lost`; no TDR in the System log. Next: the driver update (owner), then rerun; if it persists, investigate the load pattern (VRAM at the stall) before M8 closes, no quarantine (owner, 2026-10-30).
+- **Device loss on the RTX**: gone with driver 621.01 (2026-10-30: the item sweeps 16 of 16, full `test gpu --real` without a loss; on 591.86 9 of 16 failed). Delete after a week without a recurrence.
 - **Flaky `gpu_window` flight test**: one failure after 7.5 s, 0 of 5 since. On a second failure keep the full output before any rerun.
 - **WARP device removal with the compact format and the atmosphere**: test-only, accepted; the software smoke stays on the vertex format. Re-test when WARP, wgpu or Windows changes.
 - **Beach shading flashes on WARP** (36.8 % of shore-band pixels on the coastal descent): unchecked since REND-030; check with the next look review.
