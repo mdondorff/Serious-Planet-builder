@@ -84,6 +84,21 @@ Closed: 2026-10-30
 | 4 | Fix the step count and erodibility against the scorecard on a few tiles before the full bake. The cost in finding 1 scales with the step count. |
 | 5 | Cross-face routing and the plains' straight runs are open items for R4's design. |
 
+## Handover
+- **Code:** branch `spike/m9-bake-prerun` (pushed, no PR; commit 51b0a191). It holds the ignored test `bake_prerun_report` at the end of `crates/app/src/globalperf.rs`'s test module, and `miniz_oxide = "0.8.9"` as a dev-dependency of `planet` (already in the lockfile).
+- **Rerun:** run from the worktree root at BelowNormal; the output is one line per tile (columns in the file's second header line):
+  ```
+  PLANET_ANET_STORE=C:/DEV/SeriousPlanetData/global16384 PLANET_ANET_RES=16384 PRERUN_FACE=0 PRERUN_STRIDE=3 PRERUN_OFFSET=1 PRERUN_PAR=4 PRERUN_SAMPLE_THREADS=4 PRERUN_STEPS=10 PRERUN_OUT=<abs path> cmd //c start "" //b //wait //belownormal cargo test -p planet --release --lib bake_prerun_report -- --ignored --nocapture
+  ```
+- **Options:**
+
+  | Variable | Meaning |
+  |---|---|
+  | `PRERUN_MAX_TILES` | caps the tile list (0 prints only the land tiles per face) |
+  | `PRERUN_DUMP=k,k` with `PRERUN_DUMP_DIR` | writes `orig`, `carved` and `area` f32 rasters of those tiles |
+- **CPU sampler:** a PowerShell loop reading `Win32_PerfFormattedData_Counters_ProcessorInformation` (_Total) every 10 s, as in SPIKE-58; not committed.
+- **Tile dumps:** `C:/DEV/SeriousPlanetData/spike-r3/` holds tiles 1, 2 and 4 of run b (3,584^2 f32 each, about 400 MB). They are not in git and are kept until R4's tuning starts (opus-planner, 2026-10-30).
+
 ## Limits
 - Tiles at a face edge do not route across faces (the global inflow covers only the coupled network).
 - Halo 256 cells (26 km); the inflow enters at the window cell nearest the coupled source, not along the true path.
