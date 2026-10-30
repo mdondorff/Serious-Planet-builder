@@ -141,6 +141,8 @@ In both branches, never create the root as a side effect: do not run `openspec i
       - Ask the user to clarify
       - Then continue with creation
 
+6a. **Domain terms** (owner, 2026-10-30). If the change adds, renames or retires a term, update `docs/domain.md` in the same change: a new term enters as proposed with this change as its source; a retired one becomes retiring. Use only current terms (never section 8's).
+
 7. **Show final status**
    ```bash
    openspec status --change "<name>"

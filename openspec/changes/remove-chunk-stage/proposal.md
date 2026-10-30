@@ -60,5 +60,20 @@ Reasons for the order: PR 1 changes no default (the stage is already off), so it
 | Horizon jobs lean on `ChunkManager` types more than the grep shows | PR 5 first moves `HorizonJobs` and `ChunkSource` out as a pure move, then deletes |
 | Spec removal order trips `spec-lint` requirement coverage | Each PR removes the requirement and its tests together |
 
+## Additions from the declutter audit (spikes lane, 2026-10-30; opus-planner)
+Items the plan above misses, by the PR that takes them. Each is confirmed by the compiler or `spec-lint` in its PR.
+| PR | Add |
+|---|---|
+| 1 `rm-chunks-flag` | flags `--no-chunks` (parsed, never read), `--chunk-workers`, `--base-threads` (chunk branch), `--stale-workers`, `--no-stale-hold`, `--brush`, `--edit-resolve`; `PLANET_SMOKE_LENS`, `PLANET_ANET_CHUNKS`; the help texts that name them (`capture stills`, `gate`, xtask help); `docs/milestones/M8/acceptance-runbook.md` row 6 (`--chunk-workers 6 --base-threads 2`); TEST-057 chunk part; rewording of TEST-048 and TEST-050 (`chunk_timeout_s`, `chunk_cell_m`), TEST-060 and TEST-061 (chunk mentions); the 7 chunk-scoped entries of `docs/learnings.md` archived; the new ADR takes the next free number after 0085 |
+| 2 `rm-chunks-frame` | STRM-047 (the change and its weight reach the draw), STRM-053 (a rebuilt tile carries the increment), STRM-054 (a replaced tile keeps its weight until the swap) |
+| 3 `rm-chunks-render` | REND-042 (fade planes) |
+| 4 `rm-chunks-edit` | rewording of STRM-058 (chunk-landing scenarios) |
+| 5 `rm-chunks-streaming` | STRM-040 (landing refreshes and invalidates); `app/tests/gpu_horizon_rig.rs` rebuilt on the base terrain; the 3 ignored report tests that read chunk code (`anet_steps_report`, `anet_change_report`, `chunk_frame_cost_report`) go with their modules |
+| 6 `rm-chunks-generators` | GEN-048, GEN-050, GEN-051, GEN-057, GEN-058, GEN-060, GEN-066, GEN-083, GEN-084; `xtask perf anet-chunk`, the scene `anet-chunk`, `globalperf::perf_anet_chunk`, `perf/logs/anet-chunk.json`; `world-def/tests/chunk_stage.rs` reworded, not deleted (decision 3: the setting stays parseable and hashes as its old default); rewording of VIEW-054 (driver views) |
+| 7 `rm-chunks-leftovers` | batch 7 of the audit (one-off examples, dead env hooks, the "format arrives in M1" help text, the root `.code-workspace` file); deleting `plan_ablation` lowers the wrapper count at `stamp_keys.rs:259` in the same PR |
+
+- Archived changes `m8-chunk-evict`, `m8-chunk-track-set`, `m8-edits-one-round`, `m8-edits-over-chunks`, `m8-edits-reuse`, `m8-editor-stalls`, `m8-envelope-late-chunks`, `m8-edit-latency-chunks` are archived without syncing their deltas (the audit's docs PR 1); B6 removes their subject.
+- `spec-lint` now fails a retired term of `docs/domain.md` section 8 (BUILD-028) once a row loses its *code removal pending* marker, so the removal PRs end with the marker gone and no mention left in the current specs and docs.
+
 ## Out of scope
 Horizon maps and jobs (SPIKE-56). The global coupled run and its store. The base terrain, tiles, stamps and brushes. Any new erosion design.

@@ -4,7 +4,7 @@ Why it matters: the corridor follows the coupled run's 4.9 km network exactly, t
 Time box: about 4 h (used about 2.5 h); prototype only
 Success criteria: per variant: climbing links, cut depth and length, sinuosity at 1 and 4 km, tributaries per km2, same bits on 1 and 8 threads, border agreement, cost per chunk
 Fallback if it fails: report what the data could not settle
-Code location: `spikes/local-routing/proto/` (the dumper `routespike.rs` and `route_dump.rs` were built inside `crates/app` on the spike branch and are not committed there; `router/` is a standalone crate; `render.py`)
+Code location: `spikes/local-routing/proto/` on branch `spike/local-routing` (removed from main 2026-10-30; the dumper `routespike.rs` and `route_dump.rs` were built inside `crates/app` on the spike branch and are not committed there; `router/` is a standalone crate; `render.py`)
 Closed: 2026-10-25
 
 ## Data and its limit

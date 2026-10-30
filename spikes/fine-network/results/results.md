@@ -6,7 +6,7 @@ Why it matters: ADR 0081 point 3 moved the fine tier to M9; `m8-tributary-tier` 
 Time box: 1 day of agent work (opus-planner, 2026-10-25); step 2 half a day (2026-10-26)
 Success criteria: density, border mismatch of channel area at shared edges, cost per chunk and thread identity, measured per scheme.
 Fallback if it fails: the fine tier waits for a block stage (ADR 0077 point 2).
-Code location: `spikes/fine-network/results/proto/` (throwaway; `finespike.rs` and `fine_dump.rs` were copied into `crates/app` for the dump and removed; `fine/` is a standalone crate).
+Code location: `spikes/fine-network/results/proto/` on branches `spike/fine-network` and `spike/fine-network-2` (removed from main 2026-10-30; throwaway; `finespike.rs` and `fine_dump.rs` were copied into `crates/app` for the dump and removed; `fine/` is a standalone crate).
 
 ## Method
 - Windows of base heights (the 8.04 m chunk cells, `WorldBase`, shared store `global16384`, read-only, the rebuilt run of #681/#683): the chunk's 608x608 core plus 1400 cells each side (3408 x 3408, about 27 km) at four sites: lowland (-11.1657, 23.0493), site 2 (10.4575, -19.1001), hillsA (37.7175, 134.0294), hillsB (8.972, -16.2378).
