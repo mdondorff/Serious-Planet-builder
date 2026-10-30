@@ -1,6 +1,6 @@
 # M8 Natural landscape: report (2026-10-30)
 
-Drafted by opus-planner from `cargo xtask accept M8` (main 3ecfaee1, 2026-10-30 14:52 to 15:18, desktop unlocked), perf windows 21 to 29, the owner's live tests (2026-10-27, 2026-10-30) and the log (`cargo xtask log`). Criteria: `docs/briefings/m8-plan.md`, "Exit criteria", as amended 2026-10-28 (owner's fallback: hydrology and erosion out of M8) and 2026-10-29 (criterion 6 judged on the drawn tiles).
+Drafted by opus-planner from `cargo xtask accept M8` (main 3ecfaee1, 2026-10-30 14:52 to 15:18, desktop unlocked), perf windows 21 to 29, the owner's live tests (2026-10-27, 2026-10-30) and the log (`cargo xtask log`). Criteria: `docs/archive/M8/briefings/m8-plan.md`, "Exit criteria", as amended 2026-10-28 (owner's fallback: hydrology and erosion out of M8) and 2026-10-29 (criterion 6 judged on the drawn tiles).
 
 ## Verdict: accepted (opus-planner, 2026-10-30)
 - Criteria 1 to 7 pass (section 1). Not a go/no-go gate (CLAUDE.md: after M2 and M5 only).
