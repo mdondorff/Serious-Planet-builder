@@ -1,1 +1,0 @@
-- 2026-10-26 **D3 confirmed** (owner): M8-7 builds edits under the erosion first (the edit shows at once, its eroded result within 10 s); edits on top stay a per-layer setting for later

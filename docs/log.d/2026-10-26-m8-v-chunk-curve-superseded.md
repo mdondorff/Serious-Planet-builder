@@ -1,1 +1,0 @@
-- 2026-10-26 **M8-V chunk curve superseded**: the floors of #752 and #763 (145, 78, 73, 135 m/s; 300 m horizon off 140) were measured with 18 chunk and 18 horizon workers, the viewer's setup is 4 on one shared pool (window.rs, VIEW_CHUNK_WORKERS): do not quote them, and not the horizon-halves-the-floor claim; to be re-run on the viewer's pools.

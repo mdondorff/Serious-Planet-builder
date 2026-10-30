@@ -1,1 +1,0 @@
-- 2026-10-24 **m8-chunk-fade** (proposal, docs): the shader fade of a landed chunk's change split from M8-2 (criterion 3): a change plane beside the compact slots, a node weight, REND-039 and STRM-047; its length comes from M8-3's measurement

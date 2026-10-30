@@ -1,1 +1,0 @@
-- 2026-10-29 m8-detector-coarsening: tier A detector through the managed loop (slow streaming, tight pool): no point drawn coarser than the frame before while the camera nears it (TEST-067); passes on main.
