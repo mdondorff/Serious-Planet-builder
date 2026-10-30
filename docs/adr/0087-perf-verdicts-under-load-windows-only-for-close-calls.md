@@ -1,5 +1,5 @@
 # 0087 Perf verdicts under load, windows only for close calls
-Status: proposed (drafted by the spike session for opus-planner, 2026-10-30; owner, 2026-10-30: Option B item B9)
+Status: accepted (opus-planner, under owner delegation 2026-10-30; drafted by the spike session, SPIKE-58; owner, 2026-10-30: Option B item B9); open: the calibration limits (ADR 0065) refuse a quiet machine
 Date: 2026-10-30
 Source: SPIKE-58 phases 1 and 2 (`spikes/m9-perf-windows/results/results.md`); ADR 0020, ADR 0034, ADR 0036, ADR 0065; TEST-012, TEST-023, TEST-039; CON-20, CON-21
 
