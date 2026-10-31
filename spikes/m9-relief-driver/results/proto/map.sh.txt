@@ -1,0 +1,6 @@
+#!/bin/bash
+cd C:/DEV/Serious-Planet-Builder/.claude/worktrees/sonnet-spikes-36fc88
+cpu=$(powershell -NoProfile -Command "(Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average")
+echo "=== map2 $(date +%H:%M:%S) cpu ${cpu}%"
+PLANET_ANET_STORE=C:/DEV/SeriousPlanetData/global16384 PLANET_ANET_RES=16384 S69_OUT=C:/DEV/Serious-Planet-Builder/.claude/worktrees/sonnet-spikes-36fc88/target/s69/map13.f32 S69_SITES=alps:11.5:-18.5,blackforest:2.5:-124.5,highlands:10.5:-122.5,valleyridge:16.5:-111.5 cmd //c start "" //b //wait //belownormal cargo test -p planet --release --lib relief_driver_map -- --ignored --nocapture 2>&1 | grep -E "S69|test result|panicked|error"
+echo "=== done $(date +%H:%M:%S)"

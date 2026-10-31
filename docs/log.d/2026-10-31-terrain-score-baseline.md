@@ -1,0 +1,1 @@
+- 2026-10-31 **terrain-score-baseline** (M9 R1): the first terrain scorecard of the generator against nine GLO-30 landforms, committed as `docs/milestones/M9/terrain-score-baseline.md` with the Copernicus notice; derived statistics only, no tiles; docs only

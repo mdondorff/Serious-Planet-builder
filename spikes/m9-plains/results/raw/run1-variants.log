@@ -1,0 +1,59 @@
+=== s73 18:14:03 cpu 3%
+S73 N52E012 real                             flat  22.6% | flat 23%, valley 16%, footslope 14% | slope p50 1.15 | relief1 p50 22.9 | vs real: classes L1 - relief1 -
+S73 N52E012 real box 3x3                     flat  30.8% | flat 31%, slope 15%, footslope 13% | slope p50 0.95 | relief1 p50 20.8 | vs real: classes L1 0.22 relief1 0.05
+S73 N52E012 real box 5x5                     flat  37.4% | flat 37%, slope 17%, footslope 12% | slope p50 0.81 | relief1 p50 19.0 | vs real: classes L1 0.39 relief1 0.10
+S73 N52E012 site1 base                       flat  91.0% | flat 91%, shoulder 3%, slope 3% | slope p50 0.56 | relief1 p50 8.6 | vs real: classes L1 1.39 relief1 0.35
+S73 N52E012 site1 k 1.5                      flat  55.5% | flat 56%, slope 17%, shoulder 14% | slope p50 0.83 | relief1 p50 12.5 | vs real: classes L1 0.98 relief1 0.26
+S73 N52E012 site1 k 2                        flat  22.7% | slope 32%, flat 23%, shoulder 19% | slope p50 1.10 | relief1 p50 16.5 | vs real: classes L1 0.74 relief1 0.17
+S73 N52E012 site1 k 2.5                      flat   6.9% | slope 41%, shoulder 15%, spur 10% | slope p50 1.38 | relief1 p50 20.5 | vs real: classes L1 0.91 relief1 0.09
+S73 N52E012 site1 k 3                        flat   1.7% | slope 45%, spur 14%, hollow 10% | slope p50 1.65 | relief1 p50 24.6 | vs real: classes L1 0.98 relief1 0.08
+S73 N52E012 site1 noise 0.1 m                flat  87.7% | flat 88%, shoulder 5%, footslope 4% | slope p50 0.58 | relief1 p50 8.7 | vs real: classes L1 1.36 relief1 0.35
+S73 N52E012 site1 noise 0.3 m                flat  56.0% | flat 56%, shoulder 16%, footslope 15% | slope p50 0.74 | relief1 p50 9.2 | vs real: classes L1 0.98 relief1 0.34
+S73 N52E012 site1 noise 1 m                  flat   0.2% | ridge 22%, valley 22%, slope 15% | slope p50 1.69 | relief1 p50 12.1 | vs real: classes L1 0.64 relief1 0.28
+S73 N52E012 site2 base                       flat  89.6% | flat 90%, shoulder 4%, footslope 3% | slope p50 0.56 | relief1 p50 8.2 | vs real: classes L1 1.38 relief1 0.36
+S73 N52E012 site2 k 1.5                      flat  53.7% | flat 54%, slope 16%, shoulder 15% | slope p50 0.84 | relief1 p50 11.8 | vs real: classes L1 0.95 relief1 0.27
+S73 N52E012 site2 k 2                        flat  22.6% | slope 30%, flat 23%, shoulder 19% | slope p50 1.11 | relief1 p50 15.6 | vs real: classes L1 0.69 relief1 0.18
+S73 N52E012 site2 k 2.5                      flat   7.4% | slope 38%, shoulder 15%, spur 10% | slope p50 1.38 | relief1 p50 19.3 | vs real: classes L1 0.85 relief1 0.11
+S73 N52E012 site2 k 3                        flat   2.0% | slope 41%, spur 15%, ridge 10% | slope p50 1.66 | relief1 p50 23.1 | vs real: classes L1 0.92 relief1 0.06
+S73 N52E012 site2 noise 0.1 m                flat  86.2% | flat 86%, shoulder 5%, footslope 5% | slope p50 0.59 | relief1 p50 8.3 | vs real: classes L1 1.34 relief1 0.36
+S73 N52E012 site2 noise 0.3 m                flat  55.0% | flat 55%, shoulder 17%, footslope 15% | slope p50 0.75 | relief1 p50 8.7 | vs real: classes L1 0.97 relief1 0.35
+S73 N52E012 site2 noise 1 m                  flat   0.2% | ridge 22%, valley 22%, slope 15% | slope p50 1.69 | relief1 p50 11.6 | vs real: classes L1 0.64 relief1 0.29
+S73 N41W096 real                             flat   1.0% | valley 23%, slope 22%, ridge 16% | slope p50 3.88 | relief1 p50 38.2 | vs real: classes L1 - relief1 -
+S73 N41W096 real box 3x3                     flat   1.5% | slope 25%, valley 22%, ridge 15% | slope p50 3.48 | relief1 p50 36.5 | vs real: classes L1 0.09 relief1 0.06
+S73 N41W096 real box 5x5                     flat   2.1% | slope 28%, valley 20%, ridge 15% | slope p50 3.06 | relief1 p50 34.9 | vs real: classes L1 0.19 relief1 0.11
+S73 N41W096 site1 base                       flat  52.4% | flat 52%, slope 18%, shoulder 15% | slope p50 0.85 | relief1 p50 12.6 | vs real: classes L1 1.48 relief1 0.78
+S73 N41W096 site1 k 1.5                      flat  10.9% | slope 39%, shoulder 19%, flat 11% | slope p50 1.26 | relief1 p50 18.5 | vs real: classes L1 1.01 relief1 0.59
+S73 N41W096 site1 k 2                        flat   1.2% | slope 44%, spur 15%, hollow 10% | slope p50 1.68 | relief1 p50 24.4 | vs real: classes L1 0.65 relief1 0.39
+S73 N41W096 site1 k 2.5                      flat   0.1% | slope 42%, spur 20%, hollow 13% | slope p50 2.09 | relief1 p50 30.5 | vs real: classes L1 0.57 relief1 0.19
+S73 N41W096 site1 k 3                        flat   0.0% | slope 39%, spur 22%, hollow 14% | slope p50 2.51 | relief1 p50 36.4 | vs real: classes L1 0.52 relief1 0.09
+S73 N41W096 site1 noise 0.1 m                flat  48.3% | flat 48%, slope 19%, shoulder 17% | slope p50 0.87 | relief1 p50 12.7 | vs real: classes L1 1.46 relief1 0.78
+S73 N41W096 site1 noise 0.3 m                flat  25.3% | flat 25%, shoulder 21%, slope 20% | slope p50 0.98 | relief1 p50 13.1 | vs real: classes L1 1.18 relief1 0.77
+S73 N41W096 site1 noise 1 m                  flat   0.1% | ridge 21%, valley 21%, slope 18% | slope p50 1.81 | relief1 p50 15.7 | vs real: classes L1 0.32 relief1 0.69
+S73 N41W096 site2 base                       flat  48.9% | flat 49%, slope 21%, shoulder 16% | slope p50 0.88 | relief1 p50 13.3 | vs real: classes L1 1.43 relief1 0.76
+S73 N41W096 site2 k 1.5                      flat   9.1% | slope 41%, shoulder 17%, flat 9% | slope p50 1.30 | relief1 p50 19.5 | vs real: classes L1 0.99 relief1 0.55
+S73 N41W096 site2 k 2                        flat   0.9% | slope 46%, spur 16%, hollow 10% | slope p50 1.73 | relief1 p50 25.8 | vs real: classes L1 0.66 relief1 0.34
+S73 N41W096 site2 k 2.5                      flat   0.1% | slope 44%, spur 20%, hollow 13% | slope p50 2.16 | relief1 p50 32.2 | vs real: classes L1 0.60 relief1 0.14
+S73 N41W096 site2 k 3                        flat   0.0% | slope 40%, spur 22%, hollow 14% | slope p50 2.59 | relief1 p50 38.6 | vs real: classes L1 0.55 relief1 0.11
+S73 N41W096 site2 noise 0.1 m                flat  44.8% | flat 45%, slope 21%, shoulder 17% | slope p50 0.89 | relief1 p50 13.4 | vs real: classes L1 1.40 relief1 0.76
+S73 N41W096 site2 noise 0.3 m                flat  23.1% | flat 23%, slope 22%, shoulder 21% | slope p50 1.00 | relief1 p50 13.7 | vs real: classes L1 1.12 relief1 0.74
+S73 N41W096 site2 noise 1 m                  flat   0.0% | ridge 21%, valley 21%, slope 18% | slope p50 1.82 | relief1 p50 16.2 | vs real: classes L1 0.31 relief1 0.67
+S73 N31W004 real                             flat  47.9% | flat 48%, slope 16%, shoulder 9% | slope p50 0.86 | relief1 p50 11.8 | vs real: classes L1 - relief1 -
+S73 N31W004 real box 3x3                     flat  56.4% | flat 56%, slope 16%, shoulder 7% | slope p50 0.78 | relief1 p50 11.3 | vs real: classes L1 0.17 relief1 0.01
+S73 N31W004 real box 5x5                     flat  63.4% | flat 63%, slope 14%, shoulder 6% | slope p50 0.70 | relief1 p50 10.9 | vs real: classes L1 0.31 relief1 0.02
+S73 N31W004 site1 base                       flat   0.0% | slope 38%, spur 21%, hollow 14% | slope p50 2.37 | relief1 p50 33.5 | vs real: classes L1 1.28 relief1 0.26
+S73 N31W004 site1 k 1.5                      flat   0.0% | slope 32%, spur 23%, hollow 15% | slope p50 3.53 | relief1 p50 49.9 | vs real: classes L1 1.30 relief1 0.43
+S73 N31W004 site1 k 2                        flat   0.0% | slope 31%, spur 24%, hollow 15% | slope p50 4.69 | relief1 p50 66.2 | vs real: classes L1 1.30 relief1 0.64
+S73 N31W004 site1 k 2.5                      flat   0.0% | slope 31%, spur 24%, hollow 15% | slope p50 5.85 | relief1 p50 82.5 | vs real: classes L1 1.30 relief1 0.86
+S73 N31W004 site1 k 3                        flat   0.0% | slope 30%, spur 24%, hollow 15% | slope p50 7.01 | relief1 p50 98.9 | vs real: classes L1 1.30 relief1 1.08
+S73 N31W004 site1 noise 0.1 m                flat   0.0% | slope 38%, spur 21%, hollow 14% | slope p50 2.37 | relief1 p50 33.5 | vs real: classes L1 1.28 relief1 0.26
+S73 N31W004 site1 noise 0.3 m                flat   0.0% | slope 36%, spur 21%, hollow 14% | slope p50 2.42 | relief1 p50 33.7 | vs real: classes L1 1.29 relief1 0.27
+S73 N31W004 site1 noise 1 m                  flat   0.0% | slope 24%, spur 18%, ridge 17% | slope p50 2.86 | relief1 p50 35.1 | vs real: classes L1 1.30 relief1 0.28
+S73 N31W004 site2 base                       flat   0.0% | slope 32%, spur 23%, hollow 15% | slope p50 3.15 | relief1 p50 43.2 | vs real: classes L1 1.30 relief1 0.37
+S73 N31W004 site2 k 1.5                      flat   0.0% | slope 30%, spur 23%, hollow 15% | slope p50 4.71 | relief1 p50 64.7 | vs real: classes L1 1.30 relief1 0.62
+S73 N31W004 site2 k 2                        flat   0.0% | slope 30%, spur 23%, hollow 15% | slope p50 6.26 | relief1 p50 86.2 | vs real: classes L1 1.30 relief1 0.91
+S73 N31W004 site2 k 2.5                      flat   0.0% | slope 29%, spur 23%, hollow 15% | slope p50 7.81 | relief1 p50 107.8 | vs real: classes L1 1.30 relief1 1.20
+S73 N31W004 site2 k 3                        flat   0.0% | slope 29%, spur 23%, hollow 15% | slope p50 9.34 | relief1 p50 129.2 | vs real: classes L1 1.30 relief1 1.50
+S73 N31W004 site2 noise 0.1 m                flat   0.0% | slope 32%, spur 23%, hollow 15% | slope p50 3.15 | relief1 p50 43.2 | vs real: classes L1 1.30 relief1 0.37
+S73 N31W004 site2 noise 0.3 m                flat   0.0% | slope 31%, spur 22%, hollow 15% | slope p50 3.19 | relief1 p50 43.5 | vs real: classes L1 1.30 relief1 0.37
+S73 N31W004 site2 noise 1 m                  flat   0.0% | slope 25%, spur 20%, ridge 16% | slope p50 3.54 | relief1 p50 44.8 | vs real: classes L1 1.30 relief1 0.38
+=== done 18:15:52

@@ -10,6 +10,8 @@ mod live_definition;
 mod real_store;
 #[path = "residency_headroom.rs"]
 mod residency_headroom;
+#[path = "ts_reproduce.rs"]
+mod ts_reproduce;
 #[path = "water_reach.rs"]
 mod water_reach;
 #[path = "world_field.rs"]
