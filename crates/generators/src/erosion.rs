@@ -228,16 +228,6 @@ impl ErosionField<'_> {
     }
 }
 
-impl ErosionField<'_> {
-    /// The height as version 1 made it (the landform taken as 0): for the cost comparison of the landform term (`examples/erosion_cost.rs`), not a field.
-    #[doc(hidden)]
-    pub fn height_without_landform(&self, dir: Vec3) -> f64 {
-        let e = self.base_via(&self.src, dir);
-        let slope = self.gradient_via(&self.src, dir) / self.radius_m;
-        e + detail_m(self.seed, dir, e, carve(slope), 0.0)
-    }
-}
-
 impl HeightField for ErosionField<'_> {
     fn height(&self, dir: Vec3) -> f64 {
         self.height_via(&self.src, dir)
