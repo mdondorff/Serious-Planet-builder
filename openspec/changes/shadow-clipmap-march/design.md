@@ -22,6 +22,16 @@
 | Drop | per tile, `c0 + c1 x + c2 y + c3 (x^2 + y^2)` in the anchor frame, fitted in f64; the height stored is height above the sphere minus the drop (SPIKE-56 P2 mode 1) |
 | Dirty regions | rectangles per level: tiles landed, evicted to an ancestor, refreshed by an edit, scrolled strips, and the footprint (reach) of each preview stamp of the frame |
 
+### 1a. Plan cost (measured 2026-10-31, `clipmap::incremental_plan_times` and `plan_time_for_a_large_r`, ignored probes)
+| Case | Time | Notes |
+|---|---|---|
+| First plan, or after a re-anchor, 1024^2 levels, R of about 1,600 tiles (32 cells) | 100-350 ms | block fits at coarse levels dominate; never on the frame thread |
+| Steady frame, R unchanged | 3-5 us | blocks shared by `Arc` |
+| One tile landed or evicted | 60-110 us | only the tile and its parent are refitted |
+| Scroll by one level-0 texel (mean of 20) | 0.8 ms | tiles straddling a window edge are re-clipped; target 0.1 ms not met |
+- The first plan and a re-anchor run off the frame thread (opus-planner, inbox #13), the old clipmap drawn until it lands.
+- A different finest level under the camera changes level 0's texel; the clipmap re-anchors only after the change has held `TEXEL_CHANGE_HYSTERESIS_FRAMES` (30) frames.
+
 ### 2. Gather (render, compute)
 - Reads the compact slot (dequantize plus the biquadratic base, as the vertex stage does), bilinear in `(u, v)`, subtracts the drop, writes `R32Float`.
 - Applies the frame's preview stamps with the vertex stage's rule (REND-033, REND-045): a texel takes a stamp's delta only if its tile's node is flagged; the stamp evaluation is the same WGSL function the vertex stage calls, so drawn ground and shadow agree.
