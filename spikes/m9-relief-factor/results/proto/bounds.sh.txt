@@ -1,0 +1,7 @@
+#!/bin/bash
+# SPIKE-66 (b): level error and the bound against the sampled range, without the factor, x6 on all land, hills x6 / mountains x10.
+for v in base k6all k6m10; do
+  case $v in base) E="";; k6all) E="PLANET_RELIEF_K=6 PLANET_RELIEF_W=1";; k6m10) E="PLANET_RELIEF_K=6 PLANET_RELIEF_KM=10";; esac
+  echo "=== $v $(date +%T) cpu $(powershell -NoProfile -Command '(Get-CimInstance Win32_Processor).LoadPercentage')%"
+  env $E PLANET_ANET_STORE=C:/DEV/SeriousPlanetData/global16384 PLANET_ANET_RES=16384 RELIEF_SITES=alps:11.5:-18.5,blackforest:2.5:-124.5 cmd //c start "" //b //wait //belownormal cargo test -p planet --release --lib relief_level_error -- --ignored --nocapture 2>&1 | grep -E "LEVELERR|panicked|error\["
+done

@@ -1,0 +1,14 @@
+#!/bin/bash
+# SPIKE-66: window dumps with the relief factor in the generator, one process per setting.
+SITES=alps:11.5:-18.5,blackforest:2.5:-124.5,highlands:10.5:-122.5,valleyridge:16.5:-111.5
+OUT=C:/DEV/SeriousPlanetData/spike-r3/relief66
+run() { # name K KM W
+  echo "=== $1 K=$2 KM=$3 W=$4 $(date +%T) cpu $(powershell -NoProfile -Command '(Get-CimInstance Win32_Processor).LoadPercentage')%"
+  env PLANET_RELIEF_K=$2 PLANET_RELIEF_KM=$3 PLANET_RELIEF_W=$4 PLANET_ANET_STORE=C:/DEV/SeriousPlanetData/global16384 PLANET_ANET_RES=16384 RELIEF_SITES=$SITES RELIEF_W=2560 RELIEF_DIR=$OUT/$1 cmd //c start "" //b //wait //belownormal cargo test -p planet --release --lib relief_window_dump -- --ignored --nocapture 2>&1 | grep -E "RELIEF|panicked|error"
+}
+run k4 4 4 0
+run k6 6 6 0
+run k4all 4 4 1
+run k6m10 6 10 0
+run k6m14 6 14 0
+echo "=== done $(date +%T)"
