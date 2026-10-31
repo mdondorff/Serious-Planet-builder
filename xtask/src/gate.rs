@@ -150,6 +150,7 @@ pub fn run_gate(root: &Path, args: &[String]) -> Res {
     run(root, "cargo", &["build", "--release", "-p", "planet"], &[])?;
     let exe = root.join("target").join("release").join(if cfg!(windows) { "planet.exe" } else { "planet" });
     let mut new_failures = 0usize;
+    let mut not_run = 0usize;
     let mut table = Vec::new();
     for (id, path) in chosen {
         let report = out_dir.join(format!("{id}.txt"));
@@ -231,7 +232,10 @@ pub fn run_gate(root: &Path, args: &[String]) -> Res {
     let text = String::from_utf8_lossy(&open.stdout).into_owned();
     match text.lines().find(|l| l.starts_with("real store: ")) {
         Some(l) if open.status.success() && l.starts_with("real store: MATCH") => table.push(format!("store: PASS ({l})")),
-        Some(l) if l.starts_with("real store: NOT RUN") => table.push(format!("store: NOT RUN, not a pass ({l})")),
+        Some(l) if l.starts_with("real store: NOT RUN") => {
+            table.push(format!("store: NOT RUN, not a pass ({l})"));
+            not_run += 1;
+        }
         _ => {
             table.push("store: FAIL the store does not open with this build (run the test for the message)".to_string());
             new_failures += 1;
@@ -240,10 +244,17 @@ pub fn run_gate(root: &Path, args: &[String]) -> Res {
     let summary = table.join("\n");
     let _ = std::fs::write(out_dir.join("summary.txt"), &summary);
     println!("{summary}");
-    if new_failures == 0 {
-        Ok(())
-    } else {
+    verdict(new_failures, not_run)
+}
+
+/// The end of a gate run: a failure is code 1; a check that was NOT RUN with nothing failed is incomplete (code 3), never a pass (TEST-073, TEST-075).
+fn verdict(new_failures: usize, not_run: usize) -> Result<(), String> {
+    if new_failures > 0 {
         Err(format!("gate: {new_failures} failure(s) not in the known list"))
+    } else if not_run > 0 {
+        Err(format!("{} the gate had {not_run} check(s) NOT RUN; the run is incomplete, not a pass", crate::util::INCOMPLETE))
+    } else {
+        Ok(())
     }
 }
 
@@ -270,6 +281,16 @@ const LEVEL_STEP_BOUND_M: f64 = 0.25;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // spec: TEST-075
+    #[test]
+    fn a_gate_with_a_check_not_run_and_no_failure_is_incomplete_and_a_failure_stays_a_failure() {
+        assert!(verdict(0, 0).is_ok());
+        let e = verdict(0, 1).unwrap_err();
+        assert!(e.starts_with(crate::util::INCOMPLETE), "{e}");
+        let e = verdict(2, 1).unwrap_err();
+        assert!(!e.starts_with(crate::util::INCOMPLETE) && e.contains("2 failure"), "{e}");
+    }
 
     // spec: TEST-063
     #[test]

@@ -1457,7 +1457,7 @@ Detail: The pair is a measurement of the preview, not a gate: a pair over the bo
 - **THEN** the test still passes and the verdict is printed
 
 ### Requirement: TEST-075 The definition hash and the production store survive the removal
-A world definition SHALL hash to the value it had before ADR 0086's removal: without items, with an item and the default `Under` setting, and with the layer set `OnTop`. The `chunk_stage` setting SHALL stay parseable and hashed, so a store built before the removal opens without a rebuild. The production store (`C:/DEV/SeriousPlanetData/global16384`) SHALL open with the current build, read only: `cargo xtask gate` runs the ignored `the_real_store_opens_without_a_rebuild` and prints MATCH, NOT RUN (the store is absent; never a pass) or a failure.
+A world definition SHALL hash to the value it had before ADR 0086's removal: without items, with an item and the default `Under` setting, and with the layer set `OnTop`. The `chunk_stage` setting SHALL stay parseable and hashed, so a store built before the removal opens without a rebuild. The production store (`C:/DEV/SeriousPlanetData/global16384`) SHALL open with the current build, read only: `cargo xtask gate` runs the ignored `the_real_store_opens_without_a_rebuild` and prints MATCH, NOT RUN (the store is absent; the gate is then incomplete, exit code 3, never a pass) or a failure.
 
 Verify: A
 Status: active
@@ -1471,7 +1471,7 @@ Detail: The expected values were computed on main before the generator cut; the 
 
 #### Scenario: The production store
 - **WHEN** the default world (seed 1, Earth radius) is opened over the store of 16384 cells and its coupled run is loaded by key
-- **THEN** both succeed with no rebuild, or the check says NOT RUN when the store is absent
+- **THEN** both succeed with no rebuild, or the check says NOT RUN when the store is absent and the gate exits as incomplete
 
 ### Requirement: TEST-074 The owner package says what ran
 `cargo xtask package` SHALL run the `capture stills` of the default look of each look-review site and `capture flights` into `target/review/owner-package/<date>/` and SHALL write `package.md` there with one row per item: PASS, FAIL or NOT RUN, with its reason, and its files. An item with no store SHALL be NOT RUN, a failed command FAIL with its message, a command that wrote no file FAIL. A failed item SHALL NOT stop the others, and the command SHALL fail when an item failed.
