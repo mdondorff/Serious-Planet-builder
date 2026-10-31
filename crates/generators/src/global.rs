@@ -352,6 +352,20 @@ pub fn hill_band_m(seed: u64, d: Vec3) -> f64 {
 }
 
 /// SPIKE-69/75 (spike code, never merged): the structure terms at `d`: continent, range zone, inland ramp, ridge and hill band (m).
+/// SPIKE-80 (spike code, never merged): the hill band's ridged pattern in `[0, 1]` at `d`, without its amplitude or coast ramp.
+pub fn spike80_hill_pattern(seed: u64, d: Vec3) -> f64 {
+    let t = terrain(seed, d);
+    let (mut sum, mut amp, mut norm, mut freq) = (0.0, 1.0, 0.0, HILL_BAND_FREQ);
+    for o in 0..HILL_BAND_OCTAVES {
+        let r = 1.0 - libm::fabs(layer_noise(seed, LAYER_HILL, o, t.warped * freq));
+        sum += amp * r * r;
+        norm += amp;
+        amp *= 0.5;
+        freq *= 2.0;
+    }
+    sum / norm
+}
+
 pub fn spike69_parts(seed: u64, d: Vec3) -> [f64; 5] {
     let t = terrain(seed, d);
     let ridge = ridge_at(seed, t.warped);
