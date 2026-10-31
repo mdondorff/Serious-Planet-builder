@@ -1,0 +1,8 @@
+cpu 1% 08:58:17
+RELIEF alps: face 0 cells i 27665 j 61097 (2560^2), dx 99.98 m, land 99.0 %, min -26 max 4217 m, sampled in 4.3 s
+RELIEF blackforest: face 3 cells i 10188 j 51184 (2560^2), dx 101.75 m, land 100.0 %, min 5 max 1978 m, sampled in 4.3 s
+RELIEF highlands: face 3 cells i 12373 j 61409 (2560^2), dx 100.77 m, land 88.9 %, min -41 max 2058 m, sampled in 5.0 s
+RELIEF valleyridge: face 3 cells i 24388 j 67161 (2560^2), dx 98.22 m, land 95.5 %, min -38 max 802 m, sampled in 4.3 s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 230 filtered out; finished in 20.33s
+
+[exited with code 0]

@@ -1,0 +1,315 @@
+//! SPIKE-65 (spike code, never merged): where M9's relief comes from, on windows of the base field at 101.8 m (2,560^2).
+//! (a) amplitude: land heights scaled by k about the 20 km box mean (the mean elevation and the coast stay);
+//! (b) stream power with uplift (implicit, Braun and Willett, m 0.5, n 1) from the base for 60 steps, K dt 1, U dt = (U/K) K dt,
+//!     re-routed every 5th step (Barnes flood, jittered D8, order from the receivers; SPIKE-62); the window edge and the sea are base level;
+//! (c) (a) at k 2 then (b) at U/K 10.
+//! Writes `<out>/<site>-<variant>.f32` (the full window) and one line of timings per variant.
+//! Usage: `s65 <dir> <out> <site,...>`
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, VecDeque};
+use std::time::Instant;
+
+const W: usize = 2560;
+const DX: f64 = 101.8;
+const NB: [(i64, i64); 8] = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)];
+
+fn read(path: &str) -> Vec<f32> {
+    let b = std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    b.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()
+}
+
+fn write(path: &str, h: &[f32]) {
+    let b: Vec<u8> = h.iter().flat_map(|v| v.to_le_bytes()).collect();
+    std::fs::write(path, b).unwrap();
+}
+
+fn nbr(p: usize, d: usize) -> Option<usize> {
+    let (i, j) = ((p % W) as i64 + NB[d].0, (p / W) as i64 + NB[d].1);
+    (i >= 0 && j >= 0 && i < W as i64 && j < W as i64).then(|| j as usize * W + i as usize)
+}
+
+fn border(p: usize, h: &[f32]) -> bool {
+    let (i, j) = (p % W, p / W);
+    i == 0 || j == 0 || i == W - 1 || j == W - 1 || h[p] <= 0.0
+}
+
+/// A hash in [-1, 1] of the unordered pair (p, q): both cells of a pair see the same critical slope, so a transfer leaves one and enters the other.
+fn pair_u(p: usize, q: usize) -> f64 {
+    let (a, b) = if p < q { (p, q) } else { (q, p) };
+    let x = (a as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (b as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
+    let x = (x ^ (x >> 31)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    let x = x ^ (x >> 29);
+    (x >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0
+}
+
+/// Thermal stabilisation (after Schott et al. 2024's thermal pass, as a CPU Jacobi gather): each pass every interior cell gives each lower
+/// neighbour `K` of the height difference above the critical one (`tan(theta) (1 + 0.25 u)` times the distance, `u` the pair hash) and
+/// takes the same from each higher one, read from the previous pass: mass is kept and the result does not depend on the thread count.
+/// Sea cells (h <= 0) and the window's edge take part as receivers only. Returns the cells moved in the last pass.
+fn thermal(h: &mut Vec<f32>, theta_deg: f64, passes: usize, threads: usize) -> (usize, f64) {
+    const K: f64 = 0.0625;
+    let t = theta_deg.to_radians().tan();
+    let mut next = h.clone();
+    let mut moved_last = 0;
+    let mut moved_vol = 0.0;
+    for pass in 0..passes {
+        let rows_per = W.div_ceil(threads);
+        let cur = &*h;
+        let counts: Vec<(usize, f64)> = std::thread::scope(|sc| {
+            let hs: Vec<_> = next
+                .chunks_mut(rows_per * W)
+                .enumerate()
+                .map(|(k, out)| {
+                    sc.spawn(move || {
+                        let mut moved = 0usize;
+                        let mut vol = 0.0f64;
+                        for (o, v) in out.iter_mut().enumerate() {
+                            let p = k * rows_per * W + o;
+                            let hp = f64::from(cur[p]);
+                            let mut dh = 0.0;
+                            let (i, j) = (p % W, p / W);
+                            let edge = i == 0 || j == 0 || i == W - 1 || j == W - 1;
+                            for d in 0..8 {
+                                let Some(q) = nbr(p, d) else { continue };
+                                let hq = f64::from(cur[q]);
+                                let dist = if d < 4 { DX } else { DX * std::f64::consts::SQRT_2 };
+                                let crit = t * (1.0 + 0.25 * pair_u(p, q)) * dist;
+                                let diff = hp - hq;
+                                // p gives to a lower q (p must be land and inside); takes from a higher land q off the edge.
+                                if diff > crit && hp > 0.0 && !edge {
+                                    dh -= K * (diff - crit);
+                                } else if -diff > crit && hq > 0.0 {
+                                    let (qi, qj) = (q % W, q / W);
+                                    if !(qi == 0 || qj == 0 || qi == W - 1 || qj == W - 1) {
+                                        dh += K * (-diff - crit);
+                                    }
+                                }
+                            }
+                            if dh < 0.0 {
+                                moved += 1;
+                                vol -= dh;
+                            }
+                            *v = (hp + dh) as f32;
+                        }
+                        (moved, vol)
+                    })
+                })
+                .collect();
+            hs.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        std::mem::swap(h, &mut next);
+        moved_last = counts.iter().map(|c| c.0).sum();
+        if pass == 0 {
+            moved_vol = counts.iter().map(|c| c.1).sum::<f64>() * DX * DX;
+        }
+    }
+    (moved_last, moved_vol)
+}
+
+fn flood(h: &[f32]) -> Vec<f32> {
+    let key = |v: f32| -> u32 {
+        let b = v.to_bits();
+        if b & 0x8000_0000 != 0 { !b } else { b | 0x8000_0000 }
+    };
+    let n = W * W;
+    let mut filled = vec![0f32; n];
+    let mut seen = vec![false; n];
+    let mut heap: BinaryHeap<Reverse<(u32, u32)>> = BinaryHeap::new();
+    let mut pit: VecDeque<u32> = VecDeque::new();
+    for p in 0..n {
+        if border(p, h) {
+            filled[p] = h[p];
+            seen[p] = true;
+            heap.push(Reverse((key(h[p]), p as u32)));
+        }
+    }
+    loop {
+        let p = if let Some(p) = pit.pop_front() {
+            p as usize
+        } else if let Some(Reverse((_, p))) = heap.pop() {
+            p as usize
+        } else {
+            break;
+        };
+        for d in 0..8 {
+            let Some(q) = nbr(p, d) else { continue };
+            if seen[q] {
+                continue;
+            }
+            seen[q] = true;
+            let lo = filled[p] + 1e-3;
+            if h[q] <= lo {
+                filled[q] = lo;
+                pit.push_back(q as u32);
+            } else {
+                filled[q] = h[q];
+                heap.push(Reverse((key(filled[q]), q as u32)));
+            }
+        }
+    }
+    filled
+}
+
+/// Receivers (jittered D8 on the filled surface), the order outlets first, and the drainage area (m2).
+fn route(h: &[f32]) -> (Vec<u32>, Vec<u32>, Vec<f64>) {
+    let filled = flood(h);
+    let n = W * W;
+    let mut rec = vec![u32::MAX; n];
+    for p in 0..n {
+        if border(p, h) {
+            continue;
+        }
+        let mut best = (0.0f64, u32::MAX);
+        for d in 0..8 {
+            let q = nbr(p, d).unwrap();
+            let dd = if d < 4 { DX } else { DX * std::f64::consts::SQRT_2 };
+            let mut s = f64::from(filled[p] - filled[q]) / dd;
+            if s > 0.0 {
+                let x = (p as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (d as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
+                let x = (x ^ (x >> 31)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+                s *= 1.0 + 0.5 * ((x >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0);
+            }
+            if s > best.0 {
+                best = (s, q as u32);
+            }
+        }
+        rec[p] = best.1;
+    }
+    let mut ndon = vec![0u32; n + 1];
+    for &r in &rec {
+        if r != u32::MAX {
+            ndon[r as usize + 1] += 1;
+        }
+    }
+    for i in 0..n {
+        ndon[i + 1] += ndon[i];
+    }
+    let mut fill = ndon.clone();
+    let mut don = vec![0u32; n];
+    for (p, &r) in rec.iter().enumerate() {
+        if r != u32::MAX {
+            don[fill[r as usize] as usize] = p as u32;
+            fill[r as usize] += 1;
+        }
+    }
+    let mut order = Vec::with_capacity(n);
+    let mut stack: Vec<u32> = (0..n as u32).filter(|&p| rec[p as usize] == u32::MAX).collect();
+    while let Some(p) = stack.pop() {
+        order.push(p);
+        stack.extend_from_slice(&don[ndon[p as usize] as usize..ndon[p as usize + 1] as usize]);
+    }
+    let mut area = vec![DX * DX; n];
+    for &p in order.iter().rev() {
+        let r = rec[p as usize];
+        if r != u32::MAX {
+            area[r as usize] += area[p as usize];
+        }
+    }
+    (rec, order, area)
+}
+
+/// (a): land heights `m + k (h - m)`, `m` the box mean over 20 km (radius 98 cells, clamped to the window), at least 1 m (land stays land).
+fn amplify(h: &[f32], k: f64) -> Vec<f32> {
+    const R: usize = 98;
+    let mut sat = vec![0f64; (W + 1) * (W + 1)];
+    for j in 0..W {
+        let mut row = 0.0;
+        for i in 0..W {
+            row += f64::from(h[j * W + i]);
+            sat[(j + 1) * (W + 1) + i + 1] = sat[j * (W + 1) + i + 1] + row;
+        }
+    }
+    let mut out = h.to_vec();
+    for j in 0..W {
+        for i in 0..W {
+            let p = j * W + i;
+            if h[p] <= 0.0 {
+                continue;
+            }
+            let (i0, i1, j0, j1) = (i.saturating_sub(R), (i + R + 1).min(W), j.saturating_sub(R), (j + R + 1).min(W));
+            let s = sat[j1 * (W + 1) + i1] - sat[j0 * (W + 1) + i1] - sat[j1 * (W + 1) + i0] + sat[j0 * (W + 1) + i0];
+            let m = s / ((i1 - i0) * (j1 - j0)) as f64;
+            out[p] = (m + k * (f64::from(h[p]) - m)).max(1.0) as f32;
+        }
+    }
+    out
+}
+
+/// (b): `steps` implicit stream-power steps with uplift on land: `h' = (h + U dt + F h'_rec) / (1 + F)`, `F = K dt A^0.5 / dist`.
+fn uplift_stream_power(h: &mut [f32], u_over_k: f64, kdt: f64, steps: usize, reroute: usize) -> (f64, f64) {
+    let (mut t_route, mut t_step) = (0.0, 0.0);
+    let udt = u_over_k * kdt;
+    let mut routed = None;
+    for s in 0..steps {
+        if s % reroute == 0 {
+            let t = Instant::now();
+            routed = Some(route(h));
+            t_route += t.elapsed().as_secs_f64();
+        }
+        let (rec, order, area) = routed.as_ref().unwrap();
+        let t = Instant::now();
+        for &p in order.iter() {
+            let p = p as usize;
+            let r = rec[p];
+            if r == u32::MAX {
+                continue;
+            }
+            let r = r as usize;
+            let dist = if (p % W) == (r % W) || (p / W) == (r / W) { DX } else { DX * std::f64::consts::SQRT_2 };
+            let f = kdt * area[p].sqrt() / dist;
+            let hr = f64::from(h[r]);
+            let hn = (f64::from(h[p]) + udt + f * hr) / (1.0 + f);
+            // A cell never goes below its receiver (no new pits from the implicit step).
+            h[p] = hn.max(hr + 1e-3) as f32;
+        }
+        t_step += t.elapsed().as_secs_f64();
+    }
+    (t_route, t_step)
+}
+
+fn main() {
+    let a: Vec<String> = std::env::args().collect();
+    let (dir, outd) = (&a[1], &a[2]);
+    std::fs::create_dir_all(outd).unwrap();
+    let steps: usize = std::env::var("S65_STEPS").ok().and_then(|v| v.parse().ok()).unwrap_or(60);
+    let kdt: f64 = std::env::var("S65_KDT").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0);
+    println!("SPIKE-65: window {W}^2 at {DX} m; stream power {steps} steps, K dt {kdt}, re-route every 5th");
+    let mode2 = std::env::var("S65_MODE").as_deref() == Ok("2");
+    for site in a[3].split(',') {
+        let orig = read(&format!("{dir}/{site}-orig-{W}x{W}.f32"));
+        if mode2 {
+            // (c) transient: amplitude k, then 20 stream-power steps at U/K 20 with K dt 0.05 (K t = 1, far from steady state), then thermal 33.
+            for k in [3.0, 4.0, 6.0] {
+                let mut h = amplify(&orig, k);
+                let (tr, ts) = uplift_stream_power(&mut h, 20.0, 0.05, 20, 5);
+                println!("{site} amp{k:.0}-spt: route {tr:.1} s, steps {ts:.1} s");
+                write(&format!("{outd}/{site}-amp{k:.0}-spt.f32"), &h);
+                let t = Instant::now();
+                thermal(&mut h, 33.0, 100, 4);
+                println!("{site} amp{k:.0}-spt-th: thermal {:.1} s", t.elapsed().as_secs_f64());
+                write(&format!("{outd}/{site}-amp{k:.0}-spt-th.f32"), &h);
+                let mut h = amplify(&orig, k);
+                thermal(&mut h, 33.0, 100, 4);
+                write(&format!("{outd}/{site}-amp{k:.0}-th.f32"), &h);
+            }
+            continue;
+        }
+        write(&format!("{outd}/{site}-orig.f32"), &orig);
+        for k in [2.0, 4.0, 6.0] {
+            let t = Instant::now();
+            let h = amplify(&orig, k);
+            println!("{site} amp{k:.0}: {:.2} s", t.elapsed().as_secs_f64());
+            write(&format!("{outd}/{site}-amp{k:.0}.f32"), &h);
+        }
+        for uk in [5.0, 10.0, 20.0, 40.0] {
+            let mut h = orig.clone();
+            let (tr, ts) = uplift_stream_power(&mut h, uk, kdt, steps, 5);
+            println!("{site} spu{uk:.0}: route {tr:.1} s, steps {ts:.1} s");
+            write(&format!("{outd}/{site}-spu{uk:.0}.f32"), &h);
+        }
+        let mut h = amplify(&orig, 2.0);
+        let (tr, ts) = uplift_stream_power(&mut h, 10.0, kdt, steps, 5);
+        println!("{site} amp2-spu10: route {tr:.1} s, steps {ts:.1} s");
+        write(&format!("{outd}/{site}-amp2-spu10.f32"), &h);
+    }
+}
