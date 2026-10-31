@@ -20,7 +20,7 @@ With decisions 1, 2 and 5 together (class map and plateau rule, plate-margin bel
   - active-cell thermal and deposition;
   - the erosion layer as a separate store.
   Take decision 1's relief driver from decision 2 below (`k` from the relief class, not from L alone).
-- **Bounds:** the layer stores a min/max pyramid per 32 x 32 block (about 0.2-0.3 % of the layer). Without it the steep classes stop refining at level 13-15; with near-exact bounds they plan to level 18 at today's node count ([SPIKE-82](../../spikes/m9-lod-steep/results/results.md)).
+- **Bounds:** the layer stores a min/max pyramid per 32 x 32 block: about 90 MB for the planet (1-2.5 % of the layer), seconds to build, 2.5-4 us a lookup. Without it the steep classes stop refining at level 13-15 ([SPIKE-82](../../spikes/m9-lod-steep/results/results.md)); with it they plan to level 18 with no capped tile at 5-8 % more nodes ([SPIKE-83](../../spikes/m9-bounds-pyramid/results/results.md)).
 - **Cost to reverse:** low. The layer is separate and switched; turning it off restores today's field. The bake is re-run, not migrated.
 
 ## 2. Relief classes drive the terrain's amplitude (a new ADR; outline in SPIKE-76 section 5)

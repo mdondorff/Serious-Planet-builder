@@ -1,0 +1,7 @@
+#!/bin/bash
+# SPIKE-83: the bounds pyramid on a baked stand-in layer (branch spike/m9-plains, plancheck.rs spike83_pyramid); needs SPIKE-81's fields.
+cd C:/DEV/Serious-Planet-Builder/.claude/worktrees/sonnet-spikes-36fc88
+echo "=== s83 $(date +%H:%M:%S)"
+S82_FIELDS=target/s81/s81-fields.f32 S82_NCH=4 S83_N=${S83_N:-2048} S83_SITES=himalaya:11.75:-111.25,alps:13.5:-117.25 \
+  cargo xtask heavy cmd //c start "" //b //wait //belownormal target/release/deps/planet-f7ec3bd3dbee2d4c.exe spike83_pyramid --ignored --nocapture 2>&1
+echo "=== done $(date +%H:%M:%S)"
