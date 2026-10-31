@@ -31,7 +31,7 @@
 | Receivers | jittered D8 on the filled surface (SPIKE-62) | slope x (1 + 0.5 u), `u` an integer hash of cell and direction |
 | Order | donor stack from the receivers (Braun and Willett) | none |
 | Carve | implicit stream power with uplift, n 1, m 0.5 (SPIKE-65); per face at about 800 m (SPIKE-70) | U/K 20, K dt 0.05, 20 steps (K t 1), re-route every 5th step |
-| Local carve | the same kernel per tile at 100 m with the drainage area capped (SPIKE-70 hybrid) | cap about 1 km^2 |
+| Local carve | the same kernel per tile at 100 m with the drainage area capped (SPIKE-70 hybrid); it only incises: no fill, no breach (SPIKE-72) | cap about 1 km^2 |
 | Breach | before each fill: a receiver at most 0.1 % below its donor, by at most 50 m (SPIKE-66) | as stated |
 | Thermal | Jacobi gather at repose (SPIKE-64), on active cells (a full Jacobi costs about 13 h for the planet, SPIKE-70) | 33 degrees x (1 + 0.25 u), 1/16 per pass, until no cell moves or 100 passes |
 | Deposition | one sweep on the last route (SPIKE-64) | `kc` 1e5, `zeta` 0.5 |
@@ -44,7 +44,7 @@
 - Grid: 98,304 cells per face edge (101.8 m at 16384, 48 per coupled cell), tiles of 3,072^2 core cells with a 256-cell halo (SPIKE-61); 2,140 land tiles.
 - Content: the core's change against the sampled base (decision 2 without the layer), quantised (proposed 0.25 m, i16) and compressed per block, about 0.34-0.42 bytes per land cell (SPIKE-61); about 7-10 GB.
 - Inflow: not needed per tile (the face carve holds the large rivers); faces do not route across cube edges (a known limit).
-- Seams: core edges show none at three of four sites (SPIKE-70); the coastal Highlands window keeps one that a 1 m land floor does not remove (SPIKE-71). PR 5 measures it, and PR 4 measures the cube-edge step of the face carve. A halo blend hides a step but does not fix routing (SPIKE-68).
+- Seams: core edges show none at four of four sites with the incising local carve (SPIKE-72). Without it, basins crossing a core edge fill to window-dependent levels. PR 5 re-measures the seam with the deposition sweep in place (it restores the flats the unfilled pits lose: 0.9-2.5 % against real 6-9 %), and PR 4 measures the cube-edge step of the face carve. A halo blend hides a step but does not fix routing (SPIKE-68).
 - Checkpoints: one file per finished tile plus an index; `--resume` skips finished tiles; a key mismatch (bake, channel versions, kernel parameters) refuses to resume.
 - Read: a block cache like the bake's; bilinear at 100 m.
 
