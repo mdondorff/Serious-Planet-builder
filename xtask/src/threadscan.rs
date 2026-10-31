@@ -37,7 +37,7 @@ mod tests {
         (
             "crates/streaming/src/lib.rs",
             1,
-            "moves in PR 3: `ThreadPool`, still the plan worker's pool (the tile pool is a share since PR 2)",
+            "`ThreadPool`: no production caller since PR 3a; the spawner of tests and examples (remove when they use the job system)",
         ),
         ("xtask/src/testlog.rs", 1, "tool: the log pump; stays"),
     ];
