@@ -1,0 +1,1 @@
+- 2026-10-30 **rm-chunks-frame** (ADR 0086, B6 PR 3): the frame and render have no chunk stage: chunkshare, the chunk view, fade and stand-in of the managed loop, the render fade lane and planes removed; LOD-013, LOD-014, STRM-040, STRM-052 to STRM-054, REND-039, REND-042 removed; no default-path change

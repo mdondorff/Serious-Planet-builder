@@ -217,7 +217,7 @@ impl HorizonSlots {
 pub const NODE_TABLE_FLOATS: usize = 8;
 
 /// What the renderer reads for one plan node: the slot of its chunk's horizon map (`-1`: none, the term is the identity), the sun's azimuth
-/// (radians from the chunk's `+j` through `+i`) and elevation at the chunk centre, the chunk fade's weight (REND-039; `1.0` until that lands,
+/// (radians from the chunk's `+j` through `+i`) and elevation at the chunk centre, the node's fade weight (`1.0`,
 /// the identity) and the tile's rectangle inside the chunk, `[u0, v0, du, dv]`. A node without a slot is zero beyond the slot.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct HorizonNode {

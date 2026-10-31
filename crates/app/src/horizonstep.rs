@@ -160,10 +160,9 @@ pub fn frame_step(
     StepReport { horizon }
 }
 
-/// Whether a frame still waits for the horizon jobs: a plan node reads a chunk that is not ready, or a horizon job is in flight. A scene that
-/// settles before a flight waits until this is false.
-pub fn chunks_busy(stand_in_nodes: usize, horizon_jobs: usize) -> bool {
-    stand_in_nodes > 0 || horizon_jobs > 0
+/// Whether a frame still waits for the horizon jobs: a horizon job is in flight. A scene that settles before a flight waits until this is false.
+pub fn horizon_busy(horizon_jobs: usize) -> bool {
+    horizon_jobs > 0
 }
 
 /// The features of a settling loop that is not a frame: the horizon jobs when `horizon`.
@@ -196,7 +195,7 @@ mod tests {
     // spec: TEST-054
     #[test]
     fn a_frame_waits_for_the_horizon_jobs_while_a_node_stands_in_or_a_job_runs() {
-        assert!(!chunks_busy(0, 0));
-        assert!(chunks_busy(1, 0) && chunks_busy(0, 1));
+        assert!(!horizon_busy(0));
+        assert!(horizon_busy(1));
     }
 }
