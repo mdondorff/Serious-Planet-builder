@@ -69,7 +69,7 @@ Sources: roadmap M9 and its design constraints (2026-10-28); `docs/briefings/wee
 4. **Scope of groups F and G.** Proposal: F (river form) in M9 through R4 and R5; G (resolution at walking height) in M9 through R6.
 5. **The 1 m / 500 m exception.** Proposal: close it; it was the chunk re-solve's 10 s column, removed with the chunk stage.
 6. **Criterion 1's bound.** Proposal: 0.6 of real at p50 for slope and 1 km relief at the hill and mountain tiles; another number is the owner's call.
-7. **Disk.** Proposal: the new store replaces `global16384` once criterion 6 passes, and stays within about 28 GB; the old store is kept until then.
+7. **Disk.** Decided (owner, 2026-10-31): R4 first writes the erosion result as a separate layer beside `global16384` (easy to reverse), only if reads meet criterion 6's speed; once the erosion result is accepted, it is folded into one store (no paired reads of two files), and its size is optimised then. SPIKE-61: the layer is about 7-10 GB.
 8. **GPU bake.** Proposal: not now; the CPU bake must fit 10 h first (R3 decides). A GPU bake with a stored canonical output needs an ADR (candidate below).
 9. **Driver maps (ADR 0076, open).** Proposal: soil depth and wetness become baked channels in R4 if they cost under 10 % of the bake; their use (materials, plants) stays M10.
 
