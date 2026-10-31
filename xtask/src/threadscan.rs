@@ -10,7 +10,7 @@ mod tests {
     const CALLS: [&str; 5] = ["thread::spawn(", "thread::Builder::new(", "thread::scope(", "spawn_named(", "spawn_scoped("];
 
     /// (file, calls, reason). The pools of the job system and the scoped workers still to move are marked `moves in PR n` (openspec/changes/job-system).
-    const ALLOWED: [(&str, usize, &str); 26] = [
+    const ALLOWED: [(&str, usize, &str); 27] = [
         ("crates/app/src/coupledworld.rs", 1, "driver: the coupled run's one thread; stays"),
         ("crates/app/src/horizonworld.rs", 1, "moves in PR 4: the horizon bake coordinator"),
         ("crates/app/src/hoverpick.rs", 1, "driver: the hover pick's one thread; stays"),
@@ -26,6 +26,7 @@ mod tests {
         ("crates/frame/src/water.rs", 2, "moves in PR 4: the water heights"),
         ("crates/generators/src/coarsehorizon.rs", 2, "moves in PR 4: the coarse horizon"),
         ("crates/generators/src/coupledinput.rs", 2, "moves in PR 4: the bake reduction"),
+        ("crates/generators/src/descriptors.rs", 2, "tool: the scorecard's row bands (GEN-089, GEN-090, GEN-091); offline, the caller gives the thread count; stays"),
         ("crates/generators/src/global.rs", 5, "moves in PR 4: the bake rows and blocks"),
         ("crates/generators/src/height.rs", 2, "moves in PR 4: the tile workers of `generate_region`"),
         ("crates/generators/src/horizon.rs", 2, "moves in PR 4: the horizon bake"),

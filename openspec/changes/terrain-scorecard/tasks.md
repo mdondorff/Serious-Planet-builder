@@ -6,7 +6,7 @@
 | 3 | `examples/terrain_score.rs`, the sites file, distances, report; `cargo xtask terrain-score` | TEST-079, TEST-080, BUILD-029 | A: distances and report on synthetic results; xtask argument tests. Manual: one run on the store and the tiles, wall time per phase in `report.json`, at most 60 s |
 
 ## 2. Steps
-- [ ] 2.1 PR 1: descriptors and their tier-A tests; `numerics-reviewer` (generators)
+- [x] 2.1 PR 1: descriptors and their tier-A tests; `numerics-reviewer` (generators)
 - [x] 2.2 PR 2: GLO-30 reader; licence notice text as a constant beside it
 - [ ] 2.3 PR 3: the run, the report and the command; the sites file from SPIKE-55's table
 - [ ] 2.4 Check the run reproduces SPIKE-55's slope and relief p50 and p99 per tile and site within 2 % (blocks and slope are the same definitions; the real side now uses the central 0.5 degrees, so the real rows are re-stated, not compared)
