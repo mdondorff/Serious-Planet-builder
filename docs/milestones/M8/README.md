@@ -36,6 +36,6 @@ Known and tracked, not to be judged as new: faint striations on shadowed walls b
 | Files | Criterion |
 |---|---|
 | `criterion-6-edit-window.md` | criterion 6 summary |
-| `edit-latency-w*.md`, `edit-resolve-w*-phases.log`, `edit-latency-chunks-*.md`, `edit-latency-nochunks.md` | criterion 6 windows; the latest is `edit-latency-w13-6x2-horizon-reuse.md` (`w14` is an upper bound of a withdrawn change, not a result) |
+| `edit-latency-w*.md`, `edit-resolve-w*-phases.log`, `edit-latency-chunks-*.md`, `edit-latency-nochunks.md` | criterion 6 windows; the latest are `edit-latency-w24-main819-5x.md` and `edit-latency-w25-drawn-again.md` (`w14` is an upper bound of a withdrawn change, not a result) |
 | `envelope-w*.json` | criterion 7 windows; the latest are `envelope-w12-steady-300.json` and `envelope-w12-steady-rest.json` |
 | `anet-change-bound-48-chunks.log` | the chunk stage's measured height change (input to the plan bounds) |
