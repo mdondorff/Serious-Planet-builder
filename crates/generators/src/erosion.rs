@@ -128,9 +128,19 @@ fn crease_parts(seed: u64, dir: Vec3) -> (f64, f64) {
 /// The slope factor of the fine creases (GEN-061): the factor of the bake's slope lifted towards 1 by the landform driver `l` in `[0, 1]`
 /// (`l` 0 on a plain or at the coast: the factor of the slope alone; `l` 1 deep inland in a range zone: the full amplitude whatever the slope).
 /// SPIKE-73 (spike code, never merged): `SPIKE73_FINE_FLOOR` sets a least value of the fine creases' factor (0: none).
+static SPIKE73_FLOOR: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(u64::MAX);
 fn spike73_floor() -> f64 {
-    static F: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
-    *F.get_or_init(|| std::env::var("SPIKE73_FINE_FLOOR").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0))
+    let v = SPIKE73_FLOOR.load(std::sync::atomic::Ordering::Relaxed);
+    if v == u64::MAX {
+        let f: f64 = std::env::var("SPIKE73_FINE_FLOOR").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+        SPIKE73_FLOOR.store(f.to_bits(), std::sync::atomic::Ordering::Relaxed);
+        return f;
+    }
+    f64::from_bits(v)
+}
+/// SPIKE-74: sets the floor at runtime.
+pub fn spike73_set_floor(f: f64) {
+    SPIKE73_FLOOR.store(f.to_bits(), std::sync::atomic::Ordering::Relaxed);
 }
 
 fn fine_carve(carve: f64, landform: f64) -> f64 {
