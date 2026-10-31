@@ -1,0 +1,144 @@
+# SPIKE-77: a default relief-class map on SPIKE-69's 0.5-degree map of the generator's inputs (720 x 360 x 13 f32).
+# k from L (SPIKE-69's knots), a mountain-strength boost from the bake's 50 km spread, and a plateau rule: an inland uplift field (a new low-frequency
+# value-noise fBm standing in for a craton layer) adds up to 1,200 m to the base elevation with k held at 1 there. Shares by 7 km-radius relief classes
+# against Earth's (SPIKE-69), land above 1 km against Earth's hypsometry, continuity of k, and the maps.
+# Usage: python -I classmap.py <map13.f32> <out dir>
+import sys, itertools, json, time
+import numpy as np
+from PIL import Image, ImageDraw
+
+mp, out = sys.argv[1], sys.argv[2]
+t0 = time.time()
+W, H = 720, 360
+a = np.fromfile(mp, dtype='<f4').reshape(H, W, 13).astype(np.float64)
+lat, lon, cont, zone, inland, ridge, hill, e, s50, s200, r5, hc, r14 = [a[..., i] for i in range(13)]
+landall = cont > 0.1
+land = np.isfinite(r14) & np.isfinite(r5) & (np.abs(lat) < 60)
+w = np.cos(np.radians(lat))
+
+
+def smooth(x, lo, hi):
+    t = np.clip((x - lo) / (hi - lo), 0, 1)
+    return t * t * (3 - 2 * t)
+
+
+def vnoise(p, freq, seed):
+    q = p * freq
+    i = np.floor(q).astype(np.int64)
+    f = q - i
+    t = f * f * (3 - 2 * f)
+    def h(x, y, z):
+        v = (x * 73856093) ^ (y * 19349663) ^ (z * 83492791) ^ seed
+        v = (v ^ (v >> 13)) * 1274126177
+        v = v ^ (v >> 16)
+        return (v & 0xffff) / 32767.5 - 1.0
+    acc = 0
+    for dx, dy, dz in itertools.product((0, 1), repeat=3):
+        wx = t[..., 0] if dx else 1 - t[..., 0]
+        wy = t[..., 1] if dy else 1 - t[..., 1]
+        wz = t[..., 2] if dz else 1 - t[..., 2]
+        acc = acc + wx * wy * wz * h(i[..., 0] + dx, i[..., 1] + dy, i[..., 2] + dz)
+    return acc
+
+
+def fbm(p, freq, oct, seed):
+    s, amp, n = 0, 1.0, 0
+    for o in range(oct):
+        s = s + amp * vnoise(p, freq * 2 ** o, seed + o)
+        n += amp
+        amp *= 0.5
+    return s / n
+
+
+la, lo = np.radians(lat), np.radians(lon)
+P3 = np.stack([np.cos(la) * np.cos(lo), np.cos(la) * np.sin(lo), np.sin(la)], -1)
+L = zone * inland
+
+
+def k_of_L(L):
+    return np.interp(L, [0.0, 0.028, 0.176, 1.0], [1.0, 4.5, 4.5, 5.625])
+
+
+# Mountain strength from the 50 km spread of the bake (Alps 561 m, hill sites 132-239 m; SPIKE-69/75).
+M = smooth(s50, 300.0, 600.0)
+# The plateau rule: an inland uplift field, away from the belts (zone low), not at the coast.
+pn = 0.5 + 0.5 * fbm(P3, 1.6, 3, 4242)
+import os
+PLO, PHI = float(os.environ.get('S77_PLO', '0.56')), float(os.environ.get('S77_PHI', '0.70'))
+UP = float(os.environ.get('S77_UP', '1200'))
+P = smooth(pn, PLO, PHI) * smooth(inland, 0.2, 0.6) * (1 - smooth(zone, 0.2, 0.6))
+UPLIFT = UP
+e2 = np.where(landall, e + UPLIFT * P, e)
+Q = P * (1 - M)
+
+variants = {}
+kL = k_of_L(L)
+tap = smooth(e, 0, 400)
+variants['SPIKE-69 (k from L)'] = (1 + tap * (kL - 1), e)
+km = kL + 3.0 * M * smooth(L, 0.0, 0.028)
+variants['L + mountain strength'] = (1 + tap * (km - 1), e)
+variants['L + mountain strength + plateau (k 1)'] = (1 + smooth(e2, 0, 400) * ((km - 1) * (1 - Q)), e2)
+
+
+def shares(k):
+    c = np.digitize(k * r14, [100, 300, 1000])
+    c = np.where(e >= 2500, np.maximum(c, 2), c)
+    wl = w * land
+    return [float((wl * (c == j)).sum() / wl.sum()) for j in range(4)], c
+
+
+def above(ev, thr):
+    wl = w * land
+    return float((wl * (ev >= thr)).sum() / wl.sum())
+
+
+res = {}
+for name, (k, ev) in variants.items():
+    sh, c = shares(k)
+    d = np.concatenate([np.abs(np.diff(k, axis=0))[land[:-1] & land[1:]], np.abs(np.diff(k, axis=1))[land[:, :-1] & land[:, 1:]]])
+    res[name] = {'plains': sh[0], 'hills': sh[1], 'mountains': sh[2] + sh[3], 'high': sh[3], 'dk_p99': float(np.percentile(d, 99)), 'dk_max': float(d.max()),
+                 'land_above_500': above(ev, 500), 'land_above_1000': above(ev, 1000), 'land_above_2000': above(ev, 2000)}
+    print(f"{name}: plains {sh[0]:.3f} hills {sh[1]:.3f} mountains {sh[2]+sh[3]:.3f} (high {sh[3]:.3f}) | dk p99 {res[name]['dk_p99']:.2f} max {res[name]['dk_max']:.2f} | land above 0.5/1/2 km {res[name]['land_above_500']:.3f}/{res[name]['land_above_1000']:.3f}/{res[name]['land_above_2000']:.3f}")
+wl = w * land
+res['plateau share of land (Q > 0.5)'] = float((wl * (Q > 0.5)).sum() / wl.sum())
+print('plateau share of land (Q > 0.5):', round(res['plateau share of land (Q > 0.5)'], 3))
+# Plateau cells: their relief class (k 1 and r14 unchanged: the uplift is broad).
+pl = land & (Q > 0.5)
+print('plateau cells: r14 p50', float(np.median(r14[pl])) if pl.any() else None, 'base elevation p50 before/after', float(np.median(e[pl])) if pl.any() else None, float(np.median(e2[pl])) if pl.any() else None)
+res['seconds'] = time.time() - t0
+json.dump(res, open(f'{out}/classmap.json', 'w'), indent=1)
+
+# Maps: classes and k of the full variant, and the base elevation before and after the plateau rule.
+k, ev = variants['L + mountain strength + plateau (k 1)']
+cls = np.zeros((H, W), int)
+cls[k >= 1.3] = 1
+cls[k >= 2.5] = 2
+cls[k >= 6.0] = 3
+cls[Q > 0.5] = 4
+COL = np.array([[0.62, 0.78, 0.45], [0.80, 0.85, 0.50], [0.66, 0.42, 0.25], [0.95, 0.95, 0.95], [0.85, 0.62, 0.35]])
+sea = ~landall
+def ramp(x):
+    stops = np.array([[0.27, 0.0, 0.33], [0.23, 0.32, 0.55], [0.13, 0.57, 0.55], [0.37, 0.79, 0.38], [0.99, 0.91, 0.14]])
+    x = np.nan_to_num(np.clip(x, 0, 1)) * (len(stops) - 1)
+    i = np.minimum(x.astype(int), len(stops) - 2)
+    f = (x - i)[..., None]
+    return stops[i] * (1 - f) + stops[i + 1] * f
+ci = COL[cls]
+ci[sea] = [0.08, 0.12, 0.25]
+ki = ramp((k - 1) / 7.5)
+ki[sea] = [0.08, 0.12, 0.25]
+img = Image.fromarray((np.concatenate([ci, ki], 1) * 255).astype(np.uint8))
+dr = ImageDraw.Draw(img)
+dr.rectangle((0, 0, 560, 14), fill=(0, 0, 0))
+dr.text((4, 2), 'classes: plain, rolling, hills (brown), high mountains (white), plateau (tan) | k 1 (dark) to 8.5 (yellow)', fill=(255, 255, 255))
+img.save(f'{out}/classes-and-k.png')
+def elev(ev):
+    x = ramp(np.clip(ev, 0, 3000) / 3000)
+    x[sea] = [0.08, 0.12, 0.25]
+    return x
+img = Image.fromarray((np.concatenate([elev(e), elev(e2)], 1) * 255).astype(np.uint8))
+dr = ImageDraw.Draw(img)
+dr.rectangle((0, 0, 520, 14), fill=(0, 0, 0))
+dr.text((4, 2), 'base elevation 0 to 3,000 m: today (left), with the plateau rule (right)', fill=(255, 255, 255))
+img.save(f'{out}/plateau-elevation.png')
+print('seconds', round(res['seconds'], 1))
