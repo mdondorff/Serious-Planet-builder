@@ -194,9 +194,7 @@ fn work_tiles() -> Vec<TileId> {
 fn twenty_threads_take_the_shared_lock_only_on_a_change_of_block_and_decode_each_block_once() {
     // The deterministic proxy of "the 20-thread rate over the store is at least 80 % of the in-memory rate": what made the
     // rate 20 tiles/s on 20 threads was a lock per lattice read. The measured rate is not asserted (wall clock is not stable
-    // on shared CI, and this 64-cell grid has blocks so small that tiles change block often): run by hand on the real store,
-    //   cargo run --release -p planet --example store_blocks -- --store DIR --global-res 16384 --part rate --memory-rate N
-    // where N is the 20-thread tiles/s of the same tiles over an in-memory bake; it prints the ratio and PASS or FAIL at 80 %.
+    // on shared CI, and this 64-cell grid has blocks so small that tiles change block often): run by hand on the real store (the removed `store_blocks` example did: the ratio to the 20-thread tiles/s of the same tiles over an in-memory bake, PASS at 80 %).
     // Recorded (ad hoc, Rasierklinge, 2026-10-15, M4 item 7b, cells 32, ground-1m draw set): 1,000-1,190 tiles/s on 20 threads
     // over the store against 1,207 in memory (83-98 %); 152 on one thread (111 before); 20 on 20 threads with a mutex per read.
     // Blocks of 16 cells (a 64-cell grid is 4 x 4 blocks per face): the shape of the product, where a tile lies in a few blocks.
