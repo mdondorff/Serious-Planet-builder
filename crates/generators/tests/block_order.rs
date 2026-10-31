@@ -267,6 +267,11 @@ fn a_threaded_batch_equals_the_single_heights_at_every_thread_count_and_reads_ea
             assert!(got == single, "{n} directions on {threads} threads");
             assert_eq!(src.decodes(), distinct, "{n} directions on {threads} threads: every distinct block once");
         }
+        // An injected Par that runs the slots backwards, one after another: the gather and the table do not depend on which slot read which block.
+        let src = Simulated::new(usize::MAX, true);
+        let got: Vec<u64> = field(&src).heights_threaded(&dirs, &ReversedPar).iter().map(|h| h.to_bits()).collect();
+        assert!(got == single, "{n} directions on a reversed Par");
+        assert_eq!(src.decodes(), distinct, "{n} directions on a reversed Par: every distinct block once");
     }
 }
 

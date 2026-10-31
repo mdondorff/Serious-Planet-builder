@@ -370,6 +370,7 @@ impl planet_core::par::Par for SharePar {
     fn threads(&self) -> usize {
         let st = self.share.shared.state.lock().expect("job state");
         let s = &st.shares[self.share.index];
+        // The calling thread is assumed to be a job of this share (it holds one slot): called from outside, this is one more than the ceiling allows.
         1 + s.ceiling.saturating_sub(s.running)
     }
 

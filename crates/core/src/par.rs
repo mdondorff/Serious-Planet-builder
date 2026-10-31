@@ -9,7 +9,8 @@ pub trait Par: Sync {
     fn threads(&self) -> usize;
 
     /// Run `f(0)` to `f(n - 1)`, each once, in any order and concurrently where threads are free, and return when all are done. A panic of `f` is raised in
-    /// the caller. Results must not depend on which thread ran an index (CON-14): `f` writes to its own slot.
+    /// the caller (the message of one raised on a helper thread may be generic). Results must not depend on which thread ran an index (CON-14): `f` writes to its own slot.
+    /// When `run` returns, everything every `f` wrote happens before the caller's next read (a join or an equivalent): callers read flags with relaxed loads after it.
     fn run(&self, n: usize, f: &(dyn Fn(usize) + Sync));
 }
 
@@ -25,12 +26,22 @@ impl Par for usize {
     }
 }
 
-/// `workers` scoped threads (the caller is one) take the indices `0..n` from one counter.
+/// `workers` scoped threads (the caller is one) run the indices `0..n`. With at most as many indices as workers every index gets a thread of its own (the
+/// caller takes index 0), as the lower crates always did for a chunk each; with more, the threads take indices from one counter.
 pub fn run_scoped(workers: usize, n: usize, f: &(dyn Fn(usize) + Sync)) {
     if workers <= 1 || n <= 1 {
         for i in 0..n {
             f(i);
         }
+        return;
+    }
+    if n <= workers {
+        std::thread::scope(|s| {
+            for i in 1..n {
+                crate::thread::spawn_named(s, "par-worker", move || f(i));
+            }
+            f(0);
+        });
         return;
     }
     let next = AtomicUsize::new(0);
