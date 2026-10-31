@@ -42,12 +42,13 @@ Source: ADR 0083 points 2 and 3, SPIKE-44
 All background work SHALL run on one job system with a core budget per subsystem (BUDG-003) and the priority classes frame-critical, visible streaming and edits, prefetch, and idle (bakes), in that order. No subsystem SHALL create threads outside it, including the scoped workers of a job.
 
 Verify: A
-Status: planned
-Source: ADR 0083 point 2
+Status: active
+Source: ADR 0083 point 2; opus-planner (2026-10-31, the order of the moves: tile pool, chunk pool, plan workers, horizon bakes)
 
 #### Scenario: A thread outside
-- **WHEN** the source of the crates is scanned for thread creation
-- **THEN** every spawn goes through the job system or is listed with a reason
+- **WHEN** the source of the crates is scanned for thread creation (BUDG-010)
+- **THEN** every start is on the list with its count and reason, and each pool that moves onto the job system leaves the list in the change that moves it
+- **AND** the requirement turns `active` when only the drivers and tools that stay are left on the list
 
 ### Requirement: BUDG-005 Memory shares
 RAM SHALL stay within 8 GB (CON-21), in shares in GB: terrain 4.0, sky and weather 0.5, physics 0.75, game logic 1.0, networking 0.25, runtime and interface 0.5, headroom 1.0. VRAM SHALL stay within the tier cap (8 GiB mid, 14 GiB high), in shares in GiB mid / high: terrain 2.0 / 3.0 (STRM-006), sky and weather 1.0 / 2.0, physics 0.25 / 0.5, game content 2.5 / 5.0, frame targets 1.0 / 1.5, headroom the rest.
@@ -81,3 +82,52 @@ Source: ADR 0083 consequences, VIEW-056
 #### Scenario: A report
 - **WHEN** a perf run's shares are compared with the spec
 - **THEN** each share is listed with its measured value, its limit and the verdict, and the largest overrun is named
+
+### Requirement: BUDG-008 A share's ceiling and the class order
+The job system SHALL run at most a share's ceiling of that share's jobs at once and SHALL start the jobs of the best class first (frame-critical, visible, prefetch, idle), in submission order within a class and share; a running job SHALL never be preempted. A share at its ceiling SHALL not hold back another share's jobs. A share MAY cap its idle-class jobs at once (STRM-060). A system MAY have workers of its own for frame-critical jobs (normal priority, ADR 0046) or for idle jobs (the horizon bakes): the other workers SHALL then never take that class.
+
+Verify: A
+Status: active
+Source: ADR 0083 point 2, BUDG-003, BUDG-004
+
+#### Scenario: A ceiling with free workers
+- **WHEN** five jobs of a share with ceiling 2 are queued on six workers and none ends
+- **THEN** two run, the other three wait, and the share's peak is 2 for the whole run
+
+#### Scenario: An idle cap
+- **WHEN** a share with ceiling 4 and an idle cap of 1 has three idle jobs and then three visible jobs queued
+- **THEN** one idle job runs, the other two wait, and the three visible jobs run beside it
+
+#### Scenario: Frame-critical workers
+- **WHEN** both ordinary workers of a system with one frame-critical worker are held by visible jobs, and a frame-critical job and a visible job are queued
+- **THEN** the frame-critical job runs at once on the frame worker, and the visible job waits for an ordinary worker
+
+#### Scenario: Idle-only workers
+- **WHEN** a system with one ordinary and one idle-only worker has two idle jobs queued, the first holding the idle worker
+- **THEN** the second waits for the idle worker though the ordinary one is free, and a visible job runs on the ordinary worker at once
+
+#### Scenario: A better class passes a worse one
+- **WHEN** jobs of the classes idle, prefetch, visible, idle, frame-critical and visible are queued behind a running job of one worker
+- **THEN** they start in the order frame-critical, visible, visible, prefetch, idle, idle
+
+### Requirement: BUDG-009 Pool API and fan-out on the caller's share
+A subsystem SHALL spawn background work on its `Share` and fan a computation out with `fan_out`, which returns the results in index order whatever the number of workers (CON-14). The calling thread SHALL work on the indices too; helpers SHALL stay inside the share's ceiling; a panic of the work SHALL be raised in the caller after every index has finished and SHALL not end a worker. Code below the job system SHALL fan out through an injected `planet_core::par::Par` (CON-04); the share's `Par` takes the free slots as permits, counted as running, runs the chunks on that many scoped threads beside the calling job, and gives them back.
+
+Verify: A
+Status: active
+Source: ADR 0083 point 2, CON-14, opus-planner (2026-10-31: the plan job's fan-out counts against terrain's share at the highest priority within it)
+
+#### Scenario: Order and progress
+- **WHEN** 200 indices are fanned out over shares of 1 to 8 workers and ceilings of 1 to 8, and again with the only worker held by another job
+- **THEN** the results are identical and in index order each time, and the held case completes on the calling thread
+
+### Requirement: BUDG-010 The thread-creation scan
+A tier-A test SHALL scan the production code of `crates/*/src` and `xtask/src` for calls that start a thread (`thread::spawn`, `thread::Builder::new`, `thread::scope`, `spawn_named`, `spawn_scoped`) and SHALL fail on a call that is not on the allow-list, on a count that differs from the list, and on a listed file that starts no thread any more. Each entry SHALL carry a reason: the job system itself, a driver or tool that stays, or the PR of the change `job-system` that moves it.
+
+Verify: A
+Status: active
+Source: ADR 0083 point 2, BUDG-004
+
+#### Scenario: A new thread
+- **WHEN** a file starts a thread that the list does not name, or a moved pool leaves its entry in place
+- **THEN** the test fails and names the file, the count and what to do

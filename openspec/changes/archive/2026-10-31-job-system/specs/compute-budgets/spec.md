@@ -13,7 +13,7 @@ Source: ADR 0083 point 2; opus-planner (2026-10-31, the order of the moves: tile
 
 ## ADDED Requirements
 ### Requirement: BUDG-008 A share's ceiling and the class order
-The job system SHALL run at most a share's ceiling of that share's jobs at once, however many workers are free, and SHALL start the jobs of the best class first (frame-critical, visible, prefetch, idle), in submission order within a class and share; a running job SHALL never be preempted. A share at its ceiling SHALL not hold back another share's jobs, and a closing system SHALL keep the ceilings while it drains. A share MAY cap its idle-class jobs at once (the tile pool of the horizon: STRM-060), so that a bake never holds a worker a visible job of the share needs. A job system MAY have workers of its own for frame-critical jobs (at normal priority, beside tile workers below normal, ADR 0046): the other workers SHALL then never take that class.
+The job system SHALL run at most a share's ceiling of that share's jobs at once and SHALL start the jobs of the best class first (frame-critical, visible, prefetch, idle), in submission order within a class and share; a running job SHALL never be preempted. A share at its ceiling SHALL not hold back another share's jobs. A share MAY cap its idle-class jobs at once (STRM-060). A system MAY have workers of its own for frame-critical jobs (normal priority, ADR 0046) or for idle jobs (the horizon bakes): the other workers SHALL then never take that class.
 
 Verify: A
 Status: active
@@ -31,12 +31,16 @@ Source: ADR 0083 point 2, BUDG-003, BUDG-004
 - **WHEN** both ordinary workers of a system with one frame-critical worker are held by visible jobs, and a frame-critical job and a visible job are queued
 - **THEN** the frame-critical job runs at once on the frame worker, and the visible job waits for an ordinary worker
 
+#### Scenario: Idle-only workers
+- **WHEN** a system with one ordinary and one idle-only worker has two idle jobs queued, the first holding the idle worker
+- **THEN** the second waits for the idle worker though the ordinary one is free, and a visible job runs on the ordinary worker at once
+
 #### Scenario: A better class passes a worse one
 - **WHEN** jobs of the classes idle, prefetch, visible, idle, frame-critical and visible are queued behind a running job of one worker
 - **THEN** they start in the order frame-critical, visible, visible, prefetch, idle, idle
 
 ### Requirement: BUDG-009 Pool API and fan-out on the caller's share
-A subsystem SHALL spawn background work on its `Share` (a job with a class, or a `Spawner`) and SHALL fan a computation out over it with `fan_out`, which returns the results in index order whatever the number of workers and the ceiling (CON-14). The calling thread SHALL work on the indices too, so a fan-out makes progress when every worker is busy; helpers SHALL stay inside the share's ceiling; a panic of the work SHALL be raised in the caller after every index has finished and SHALL not end a worker. Code below the job system (generators, frame) SHALL fan its work out through an injected `planet_core::par::Par` (CON-04); the share's `Par` takes the free slots of the share as permits (counted as running until given back), runs the chunks on that many scoped threads beside the calling job, and gives the permits back, so the ceiling holds without a lifetime erasure.
+A subsystem SHALL spawn background work on its `Share` and fan a computation out with `fan_out`, which returns the results in index order whatever the number of workers (CON-14). The calling thread SHALL work on the indices too; helpers SHALL stay inside the share's ceiling; a panic of the work SHALL be raised in the caller after every index has finished and SHALL not end a worker. Code below the job system SHALL fan out through an injected `planet_core::par::Par` (CON-04); the share's `Par` takes the free slots as permits, counted as running, runs the chunks on that many scoped threads beside the calling job, and gives them back.
 
 Verify: A
 Status: active

@@ -1,0 +1,1 @@
+- 2026-10-31 **job-system** (B2, PRs 1a to 4): one job system with shares, classes and idle-only workers; tile, plan and horizon pools and the scoped workers of generators, frame, cache and app run on it (`Par`); BUDG-004 and BUDG-008 to BUDG-010 active, thread scan at 15 listed sites; lit A/B tile-ready -63 %, teleport-2km frame p99 +36 % accepted; `job-system` archived
