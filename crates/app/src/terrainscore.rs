@@ -130,6 +130,12 @@ pub fn generator_directions(lat: f64, lon: f64, radius_m: f64) -> Vec<Vec3> {
     dirs
 }
 
+/// The heights of the generator window around a site (`(lat, lon)` in degrees) from a field, row-major like [`generator_directions`]; the same on any
+/// `threads` (each height is a pure function of its direction, CON-14).
+pub fn sample_window(field: &dyn planet_generators::height::HeightField, lat: f64, lon: f64, radius_m: f64, threads: usize) -> Vec<f64> {
+    field.heights_threaded(&generator_directions(lat, lon, radius_m), &threads)
+}
+
 /// A GLO-30 style tile borrowed for resampling: row-major `f32` (NaN is no-data), row 0 north, with its georeference in degrees.
 #[derive(Clone, Copy)]
 pub struct TileView<'a> {

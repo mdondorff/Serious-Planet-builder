@@ -129,8 +129,7 @@ fn run() -> Result<(), String> {
     for s in &specs {
         let mut windows = Vec::new();
         for &(lat, lon) in &s.sites {
-            let dirs = ts::generator_directions(lat, lon, radius);
-            windows.push(field.heights_threaded(&dirs, &threads));
+            windows.push(ts::sample_window(&*field, lat, lon, radius, threads));
         }
         gens.push(windows);
     }
