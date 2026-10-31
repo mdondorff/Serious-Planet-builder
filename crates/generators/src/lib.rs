@@ -4,7 +4,6 @@
 //! renderer. Everything here is integer hashing plus IEEE `+ - * /` and `libm::floor`, so results are
 //! bit-identical across platforms and thread counts.
 
-pub mod anet;
 pub mod chain;
 pub mod chunk;
 pub mod chunkfield;
@@ -25,7 +24,6 @@ pub mod manifest;
 pub mod mesh;
 pub mod normals;
 pub mod ocean;
-pub mod route;
 pub mod stage;
 pub mod stamp;
 /// Test-only stress terrain; only test builds enable the `stress` feature (dev-dependencies).

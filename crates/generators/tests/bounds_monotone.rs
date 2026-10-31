@@ -133,24 +133,6 @@ fn every_field_that_says_its_bounds_are_monotone_gives_nested_bounds_for_nested_
     let st_ref = stage_over(Arc::clone(&reference), items_near(at));
     let st_er = stage_over(Arc::clone(&er), items_near(at));
     let st_te = stage_over(Arc::clone(&te), items_near(at));
-    // The chunk stage over the reference terrain, with the chunk under `at` ready and with none: its bounds widen by a constant.
-    let (lat, process) = (
-        planet_generators::chunkfield::ChunkLattice::new(16).unwrap(),
-        planet_generators::chunkfield::StandIn { seed: 7, radius_m: 6_371_000.0, amplitude_m: 30.0, steps: 3 },
-    );
-    let chunk_none = planet_generators::chunkfield::ChunkField::new(Reference(1), lat, 6_371_000.0, &process);
-    let chunk_tile = planet_core::TileId::from_direction(&planet_core::cube::TangentWarp, at, planet_generators::chunk::CHUNK_GRID_LEVEL);
-    let chunk_ready = planet_generators::chunkfield::ChunkField::new(Reference(1), lat, 6_371_000.0, &process).with_ready(Arc::new(
-        planet_generators::chunkfield::compute_chunk(
-            &lat,
-            &process,
-            6_371_000.0,
-            planet_generators::chunkfield::PYRAMID_TOP_LEVEL,
-            chunk_tile,
-            planet_generators::chunkfield::halo_rings(&process),
-        )
-        .unwrap(),
-    ));
     for (name, f) in [
         ("reference", reference.as_ref() as &dyn HeightField),
         ("eroded", er.as_ref()),
@@ -158,8 +140,6 @@ fn every_field_that_says_its_bounds_are_monotone_gives_nested_bounds_for_nested_
         ("stamp over reference", &st_ref),
         ("stamp over eroded", &st_er),
         ("stamp over terrain", &st_te),
-        ("chunk stage, none ready", &chunk_none),
-        ("chunk stage, the chunk under the cap ready", &chunk_ready),
     ] {
         assert!(f.bounds_monotone(), "{name} says its bounds are monotone");
         for seed in [5, 6] {

@@ -1,7 +1,7 @@
 //! The chunk horizon in a world (M8-5, STRM-049): the baker that gives `streaming::horizonjobs::HorizonJobs` its maps, and the world's methods to
 //! enable the jobs, run a frame of them and read a map. Additive to the chunk wiring of `worldfield` (one field, no change to its methods).
 //!
-//! A chunk's horizon is baked from the world's own field (base, stamps and the changes of the chunks that are ready), sampled at the cell
+//! A chunk's horizon is baked from the world's own field (base and stamps), sampled at the cell
 //! directions of the chunk lattice over the chunk and a halo of `ceil(range / cell) + 2` cells, on the extended cube plane past a face edge.
 //! The chunk's map is one byte per azimuth for each of its cells, row `j` outer (`HorizonMap` of GEN-044).
 
@@ -12,7 +12,7 @@ use planet_cache::global_store::HorizonSpec;
 use planet_cache::horizon_store::{load_horizon, store_horizon};
 use planet_cache::pack::{TileStore, DEFAULT_MAX_PACK_BYTES};
 use planet_core::{Face, PlanetFixed, TileId};
-use planet_generators::chunkfield::{ChunkKey, ChunkLattice, ChunkResult};
+use planet_generators::chunkfield::{ChunkKey, ChunkLattice};
 use planet_generators::coarsehorizon::{coarse_horizon_range, CoarseParams};
 use planet_generators::global::LatticeSource;
 use planet_generators::horizon::{bake_horizon, halo_texels, HeightRaster, HorizonParams};
@@ -48,6 +48,11 @@ pub const HORIZON_WORKERS_MAX: usize = 8;
 
 /// Version of the world's horizon bake (what it samples and how); part of the march's hash, so a change re-bakes every map.
 pub const BAKE_VERSION: u32 = 1;
+
+/// The versions of the removed A-net and chunk-stage code, kept as numbers in the world state of a horizon map: the state word is part of the key of the
+/// maps stored on the pack, so the values stay what they were when the chunk stage went (B6, ADR 0086) and no stored map is lost to the removal.
+const CODE_VERSION_ANET: u64 = 10;
+const CODE_VERSION_CHUNK_STAGE: u64 = 1;
 
 /// Bakes the horizon of a chunk from the world's field.
 pub struct ChunkHorizonBaker {
@@ -279,7 +284,7 @@ impl ChunkHorizonBaker {
     }
 
     /// What the heights of a block depend on besides its items and its chunk: the base of the definition (seed, radius, height field, stage order), the baked input, the code that makes the chunks and the field above them
-    /// (`ANET_VERSION`, the chunk stage, this bake), the lattice, and the coupled lens, which the field chain does not hash into a tile key.
+    /// (the versions of the removed A-net and chunk-stage code, this bake), the lattice, and the coupled lens, which the field chain does not hash into a tile key.
     fn world_state(&self, world: &WorldTerrain) -> u64 {
         let lens = world.coupled_lens().map_or(0, |l| 1 + l as u64);
         let ready = matches!(world.coupled_standing(), crate::coupledworld::Standing::Ready(..));
@@ -295,8 +300,8 @@ impl ChunkHorizonBaker {
             0x4854_5753,
             &[
                 u64::from(BAKE_VERSION),
-                u64::from(planet_generators::anet::ANET_VERSION),
-                u64::from(planet_generators::chunkfield::CHUNK_STAGE_VERSION),
+                CODE_VERSION_ANET,
+                CODE_VERSION_CHUNK_STAGE,
                 u64::from(self.lat.cells_per_chunk()),
                 self.params.radius_m.to_bits(),
                 lens,
@@ -396,7 +401,7 @@ impl HorizonBaker for ChunkHorizonBaker {
 
     /// The map of `key`; a world that is gone or a field that cannot be built gives a map of zeros of the right length (no shadow), never a
     /// short one, so a consumer indexing by cell and azimuth stays inside it.
-    fn bake(&self, key: ChunkKey, _ready: &[(ChunkKey, Arc<ChunkResult>)]) -> Option<Vec<u8>> {
+    fn bake(&self, key: ChunkKey) -> Option<Vec<u8>> {
         let n = self.lat.cells_per_chunk() as usize;
         let none = || Some(vec![0u8; n * n * self.params.azimuths as usize]);
         let record = BakeGuard::new(key);

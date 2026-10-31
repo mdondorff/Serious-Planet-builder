@@ -1,7 +1,7 @@
 //! The global coupled run (M8-1, ADR 0077 point 1, GEN-040): stream-power landscape evolution on the cube-sphere bake lattice. Per step the
 //! depressions are filled (priority flood with epsilon, Barnes 2014), every cell takes the steepest receiver (a jittered D8 that removes most of
 //! the grid-axis alignment, SPIKE-35), the drainage area is accumulated downstream and the heights take one implicit stream-power update
-//! (Braun and Willett 2013; stable at a large step). The result fixes the river network the chunk stages incise along.
+//! (Braun and Willett 2013; stable at a large step). The result fixes the river network of the world.
 //!
 //! Deterministic by construction (CON-14): one thread, fixed visiting orders (the flood's pop order, ties broken by cell index), `libm` for
 //! the transcendentals, and a jitter that is a hash of the cell and the direction. Ported from SPIKE-33's prototype
@@ -325,7 +325,7 @@ fn jitter_factor(seed: u64, c: usize, k: usize, jitter: f64) -> f64 {
     jitter_of(seed, c as u64, k, jitter)
 }
 
-/// [`jitter_factor`] for any cell identity `id` (the coupled run uses the coarse cell index, a chunk stage the fine cell's packed key): the one
+/// [`jitter_factor`] for any cell identity `id` (the coupled run uses the coarse cell index): the one
 /// definition of the jitter, a function of position alone.
 pub fn jitter_of(seed: u64, id: u64, k: usize, jitter: f64) -> f64 {
     if jitter == 0.0 {
@@ -1045,7 +1045,7 @@ mod tests {
 mod maps_tests {
     use super::*;
 
-    // spec: GEN-047
+    // spec: GEN-040
     #[test]
     fn the_receivers_of_stored_heights_carry_a_growing_area_and_are_made_once() {
         let lat = Lattice::new(12, 6.0e6);

@@ -5,24 +5,22 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use planet_core::{Face, TileId};
-use planet_generators::chunk::CHUNK_GRID_LEVEL;
-use planet_generators::chunkfield::{compute_chunk, halo_rings, ChunkKey, ChunkLattice, ChunkResult, StandIn, PYRAMID_TOP_LEVEL};
+use planet_core::TileId;
+use planet_generators::chunkfield::ChunkKey;
 use planet_streaming::horizonjobs::{BaseTerrain, ChunkSource, HorizonBaker, HorizonConfig, HorizonDisk, HorizonJobs};
 use planet_streaming::{FakeClock, ManualSpawner};
-
-const R: f64 = 6_371_000.0;
 
 fn key(x: u32, y: u32) -> ChunkKey {
     (2, 1000 + x, 1000 + y)
 }
 
-/// A baker that reads the chunk and its eight neighbours on the grid, counts its bakes and returns how many neighbours were ready.
+/// A baker that reads the chunk and its eight neighbours on the grid, counts its bakes and returns how many of them were ready.
 struct FakeBaker {
     bakes: AtomicU64,
     spec: u64,
     /// Bakes that report the heights went stale (the next ones this many are dropped).
     stale: AtomicU64,
+    source: Arc<FakeSource>,
 }
 
 impl HorizonBaker for FakeBaker {
@@ -37,13 +35,14 @@ impl HorizonBaker for FakeBaker {
         }
         v
     }
-    fn bake(&self, k: ChunkKey, ready: &[(ChunkKey, Arc<ChunkResult>)]) -> Option<Vec<u8>> {
+    fn bake(&self, k: ChunkKey) -> Option<Vec<u8>> {
         self.bakes.fetch_add(1, Ordering::SeqCst);
         if self.stale.load(Ordering::SeqCst) > 0 {
             self.stale.fetch_sub(1, Ordering::SeqCst);
             return None;
         }
-        Some(vec![k.1 as u8, k.2 as u8, ready.len() as u8])
+        let ready = self.reads(k).into_iter().filter(|r| self.source.is_ready(*r)).count();
+        Some(vec![k.1 as u8, k.2 as u8, ready as u8])
     }
     fn spec_hash(&self) -> u64 {
         self.spec
@@ -52,26 +51,19 @@ impl HorizonBaker for FakeBaker {
 
 /// A chunk source that evicts: the chunks a test lands are ready until it takes them away again.
 struct FakeSource {
-    lat: ChunkLattice,
-    stage: StandIn,
-    ready: Mutex<HashMap<ChunkKey, Arc<ChunkResult>>>,
+    ready: Mutex<HashMap<ChunkKey, u64>>,
 }
 
 impl FakeSource {
     fn new() -> Arc<FakeSource> {
-        Arc::new(FakeSource {
-            lat: ChunkLattice::new(16).unwrap(),
-            stage: StandIn { seed: 7, radius_m: R, amplitude_m: 30.0, steps: 3 },
-            ready: Mutex::default(),
-        })
+        Arc::new(FakeSource { ready: Mutex::default() })
     }
 
-    /// Make the chunks `keys` ready, with real results.
+    /// Make the chunks `keys` ready, each with a hash of its own.
     fn land(&self, keys: &[ChunkKey]) {
         for &k in keys {
-            let tile = TileId::new(Face(k.0), CHUNK_GRID_LEVEL, k.1, k.2).expect("a chunk of the grid is a tile");
-            let r = compute_chunk(&self.lat, &self.stage, R, PYRAMID_TOP_LEVEL, tile, halo_rings(&self.stage)).unwrap();
-            self.ready.lock().unwrap().insert(k, Arc::new(r));
+            let hash = planet_core::hash::hash_u64s(7, &[u64::from(k.0), u64::from(k.1), u64::from(k.2)]) | 1;
+            self.ready.lock().unwrap().insert(k, hash);
         }
     }
 
@@ -84,11 +76,8 @@ impl ChunkSource for FakeSource {
     fn is_ready(&self, key: ChunkKey) -> bool {
         self.ready.lock().unwrap().contains_key(&key)
     }
-    fn result(&self, key: ChunkKey) -> Option<Arc<ChunkResult>> {
-        self.ready.lock().unwrap().get(&key).cloned()
-    }
     fn result_hash(&self, key: ChunkKey) -> Option<u64> {
-        self.result(key).map(|r| r.hash())
+        self.ready.lock().unwrap().get(&key).copied()
     }
 }
 
@@ -98,7 +87,7 @@ fn rig(settle_ms: u64, workers: usize) -> Rig {
     let clock = Arc::new(FakeClock::default());
     let hs = Arc::new(ManualSpawner::default());
     let m = FakeSource::new();
-    let baker = Arc::new(FakeBaker { bakes: AtomicU64::new(0), spec: 1, stale: AtomicU64::new(0) });
+    let baker = Arc::new(FakeBaker { bakes: AtomicU64::new(0), spec: 1, stale: AtomicU64::new(0), source: m.clone() });
     let jobs = HorizonJobs::new(m.clone(), baker.clone(), hs.clone(), clock.clone(), None, HorizonConfig { workers, settle_ms, keep: 8 });
     (clock, hs, m, baker, jobs)
 }
@@ -197,7 +186,7 @@ fn a_map_made_for_another_march_is_not_taken_from_the_disk_and_a_failing_entry_i
         let clock = Arc::new(FakeClock::default());
         let hs = Arc::new(ManualSpawner::default());
         let m = FakeSource::new();
-        let baker = Arc::new(FakeBaker { bakes: AtomicU64::new(0), spec, stale: AtomicU64::new(0) });
+        let baker = Arc::new(FakeBaker { bakes: AtomicU64::new(0), spec, stale: AtomicU64::new(0), source: m.clone() });
         let jobs = HorizonJobs::new(m.clone(), baker.clone(), hs.clone(), clock, Some(disk), HorizonConfig::default());
         m.land(&[k]);
         jobs.update(&[(k, 1.0)]);
@@ -263,7 +252,7 @@ fn a_map_stored_for_the_same_neighbourhood_is_read_back_and_one_for_another_is_a
         let clock = Arc::new(FakeClock::default());
         let hs = Arc::new(ManualSpawner::default());
         let m = FakeSource::new();
-        let baker = Arc::new(FakeBaker { bakes: AtomicU64::new(0), spec: 1, stale: AtomicU64::new(0) });
+        let baker = Arc::new(FakeBaker { bakes: AtomicU64::new(0), spec: 1, stale: AtomicU64::new(0), source: m.clone() });
         let jobs =
             HorizonJobs::new(m.clone(), baker.clone(), hs.clone(), clock, Some(disk as Arc<dyn HorizonDisk>), HorizonConfig::default());
         (hs, m, baker, jobs)
@@ -326,8 +315,7 @@ impl HorizonBaker for EditBaker {
     fn reads(&self, k: ChunkKey) -> Vec<ChunkKey> {
         vec![k]
     }
-    fn bake(&self, k: ChunkKey, ready: &[(ChunkKey, Arc<ChunkResult>)]) -> Option<Vec<u8>> {
-        assert!(ready.is_empty(), "no chunk stage: no chunk results");
+    fn bake(&self, k: ChunkKey) -> Option<Vec<u8>> {
         Some(vec![k.1 as u8, self.word.load(Ordering::SeqCst) as u8])
     }
     fn spec_hash(&self) -> u64 {
@@ -387,7 +375,7 @@ impl HorizonBaker for WorldBaker {
     fn reads(&self, k: ChunkKey) -> Vec<ChunkKey> {
         vec![k]
     }
-    fn bake(&self, k: ChunkKey, _ready: &[(ChunkKey, Arc<ChunkResult>)]) -> Option<Vec<u8>> {
+    fn bake(&self, k: ChunkKey) -> Option<Vec<u8>> {
         Some(vec![k.1 as u8, self.world.load(Ordering::SeqCst) as u8])
     }
     fn spec_hash(&self) -> u64 {
