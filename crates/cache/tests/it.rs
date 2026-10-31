@@ -1,5 +1,3 @@
-#[path = "chunk_keys.rs"]
-mod chunk_keys;
 #[path = "compact.rs"]
 mod compact;
 #[path = "concurrent_source.rs"]

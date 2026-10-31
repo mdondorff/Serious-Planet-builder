@@ -5,9 +5,10 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use planet_core::TileId;
-use planet_generators::chunkfield::{ChunkKey, ChunkLattice, ChunkResult, StandIn, PYRAMID_TOP_LEVEL};
-use planet_streaming::chunks::{BaseTerrain, ChunkConfig, ChunkManager, HorizonBaker, HorizonConfig, HorizonDisk, HorizonJobs};
+use planet_core::{Face, TileId};
+use planet_generators::chunk::CHUNK_GRID_LEVEL;
+use planet_generators::chunkfield::{compute_chunk, halo_rings, ChunkKey, ChunkLattice, ChunkResult, StandIn, PYRAMID_TOP_LEVEL};
+use planet_streaming::horizonjobs::{BaseTerrain, ChunkSource, HorizonBaker, HorizonConfig, HorizonDisk, HorizonJobs};
 use planet_streaming::{FakeClock, ManualSpawner};
 
 const R: f64 = 6_371_000.0;
@@ -49,68 +50,68 @@ impl HorizonBaker for FakeBaker {
     }
 }
 
-fn chunks(clock: Arc<FakeClock>, spawner: Arc<ManualSpawner>) -> Arc<ChunkManager> {
-    let stage = StandIn { seed: 7, radius_m: R, amplitude_m: 30.0, steps: 3 };
-    Arc::new(ChunkManager::new(
-        ChunkLattice::new(16).unwrap(),
-        R,
-        PYRAMID_TOP_LEVEL,
-        Arc::new(stage),
-        spawner,
-        clock,
-        None,
-        ChunkConfig { workers: 16, ..ChunkConfig::default() },
-    ))
+/// A chunk source that evicts: the chunks a test lands are ready until it takes them away again.
+struct FakeSource {
+    lat: ChunkLattice,
+    stage: StandIn,
+    ready: Mutex<HashMap<ChunkKey, Arc<ChunkResult>>>,
 }
 
-/// Land the chunks `keys` (a frame of the chunk manager and the jobs it started run to the end).
-fn land(m: &ChunkManager, spawner: &ManualSpawner, keys: &[ChunkKey]) {
-    let wanted: Vec<(ChunkKey, f64)> = keys.iter().map(|k| (*k, 1.0)).collect();
-    m.update(&wanted);
-    spawner.run(keys.len());
-    m.update(&wanted);
+impl FakeSource {
+    fn new() -> Arc<FakeSource> {
+        Arc::new(FakeSource {
+            lat: ChunkLattice::new(16).unwrap(),
+            stage: StandIn { seed: 7, radius_m: R, amplitude_m: 30.0, steps: 3 },
+            ready: Mutex::default(),
+        })
+    }
+
+    /// Make the chunks `keys` ready, with real results.
+    fn land(&self, keys: &[ChunkKey]) {
+        for &k in keys {
+            let tile = TileId::new(Face(k.0), CHUNK_GRID_LEVEL, k.1, k.2).expect("a chunk of the grid is a tile");
+            let r = compute_chunk(&self.lat, &self.stage, R, PYRAMID_TOP_LEVEL, tile, halo_rings(&self.stage)).unwrap();
+            self.ready.lock().unwrap().insert(k, Arc::new(r));
+        }
+    }
+
+    fn evict(&self, k: ChunkKey) {
+        self.ready.lock().unwrap().remove(&k);
+    }
 }
 
-type Rig = (Arc<FakeClock>, Arc<ManualSpawner>, Arc<ManualSpawner>, Arc<ChunkManager>, Arc<FakeBaker>, HorizonJobs);
+impl ChunkSource for FakeSource {
+    fn is_ready(&self, key: ChunkKey) -> bool {
+        self.ready.lock().unwrap().contains_key(&key)
+    }
+    fn result(&self, key: ChunkKey) -> Option<Arc<ChunkResult>> {
+        self.ready.lock().unwrap().get(&key).cloned()
+    }
+    fn result_hash(&self, key: ChunkKey) -> Option<u64> {
+        self.result(key).map(|r| r.hash())
+    }
+}
+
+type Rig = (Arc<FakeClock>, Arc<ManualSpawner>, Arc<FakeSource>, Arc<FakeBaker>, HorizonJobs);
 
 fn rig(settle_ms: u64, workers: usize) -> Rig {
     let clock = Arc::new(FakeClock::default());
-    let (cs, hs) = (Arc::new(ManualSpawner::default()), Arc::new(ManualSpawner::default()));
-    let m = chunks(clock.clone(), cs.clone());
+    let hs = Arc::new(ManualSpawner::default());
+    let m = FakeSource::new();
     let baker = Arc::new(FakeBaker { bakes: AtomicU64::new(0), spec: 1, stale: AtomicU64::new(0) });
     let jobs = HorizonJobs::new(m.clone(), baker.clone(), hs.clone(), clock.clone(), None, HorizonConfig { workers, settle_ms, keep: 8 });
-    (clock, cs, hs, m, baker, jobs)
-}
-
-// spec: STRM-048
-#[test]
-fn the_state_word_of_a_horizon_hashes_a_chunks_pyramid_once_however_many_frames_ask() {
-    let (_clock, cs, _hs, m, _baker, jobs) = rig(1_000, 1);
-    let keys: Vec<ChunkKey> = (0..3).flat_map(|x| (0..3).map(move |y| key(x, y))).collect();
-    land(&m, &cs, &keys);
-    let wanted: Vec<(ChunkKey, f64)> = keys.iter().map(|k| (*k, 1.0)).collect();
-    // Every frame the state word of every wanted chunk reads the result hash of the nine chunks around it: with the hash made on every call that
-    // was 9 x 9 hashes of the whole pyramid a frame, on the main thread and under the chunk-state lock.
-    for _ in 0..50 {
-        jobs.update(&wanted);
-        for k in &keys {
-            assert!(m.result_hash(*k).is_some());
-        }
-    }
-    for k in &keys {
-        assert_eq!(m.result(*k).unwrap().hash_runs(), 1, "the pyramid of {k:?} was hashed once, in the job that made it");
-    }
+    (clock, hs, m, baker, jobs)
 }
 
 // spec: STRM-048
 #[test]
 fn a_horizon_is_baked_only_after_its_chunk_is_ready_and_until_it_lands_the_tile_has_none() {
-    let (_clock, cs, hs, m, baker, jobs) = rig(1_000, 1);
+    let (_clock, hs, m, baker, jobs) = rig(1_000, 1);
     let k = key(0, 0);
     let up = jobs.update(&[(k, 1.0)]);
     assert_eq!((up.started, hs.pending()), (0, 0), "no heights, no horizon job");
     assert!(jobs.horizon(k).is_none());
-    land(&m, &cs, &[k]);
+    m.land(&[k]);
     let up = jobs.update(&[(k, 1.0)]);
     assert_eq!(up.started, 1, "the chunk is ready: its horizon job starts");
     assert_eq!(hs.pending(), 1, "the update returned with the job waiting: no frame waits for it");
@@ -127,9 +128,9 @@ fn a_horizon_is_baked_only_after_its_chunk_is_ready_and_until_it_lands_the_tile_
 // spec: STRM-048
 #[test]
 fn at_most_workers_run_at_once_and_the_nearest_chunk_goes_first() {
-    let (_clock, cs, hs, m, _baker, jobs) = rig(1_000, 2);
+    let (_clock, hs, m, _baker, jobs) = rig(1_000, 2);
     let keys = [key(0, 0), key(5, 0), key(10, 0), key(15, 0)];
-    land(&m, &cs, &keys);
+    m.land(&keys);
     let wanted = [(key(15, 0), 900.0), (key(0, 0), 100.0), (key(10, 0), 500.0), (key(5, 0), 300.0)];
     assert_eq!(jobs.update(&wanted).started, 2);
     hs.run(2);
@@ -141,10 +142,10 @@ fn at_most_workers_run_at_once_and_the_nearest_chunk_goes_first() {
 // spec: STRM-048
 #[test]
 fn eight_neighbours_landing_one_after_another_cost_one_rebake_not_eight() {
-    let (clock, cs, hs, m, baker, jobs) = rig(1_000, 1);
+    let (clock, hs, m, baker, jobs) = rig(1_000, 1);
     let centre = key(5, 5);
     let around: Vec<ChunkKey> = baker.reads(centre).into_iter().skip(1).collect();
-    land(&m, &cs, &[centre]);
+    m.land(&[centre]);
     jobs.update(&[(centre, 1.0)]);
     hs.run(1);
     jobs.update(&[(centre, 1.0)]);
@@ -153,7 +154,7 @@ fn eight_neighbours_landing_one_after_another_cost_one_rebake_not_eight() {
     let mut seen = Vec::new();
     for (i, n) in around.iter().enumerate() {
         seen.push(*n);
-        land(&m, &cs, &seen);
+        m.land(&seen);
         clock.advance(100);
         let up = jobs.update(&[(centre, 1.0)]);
         assert_eq!(up.started, 0, "after neighbour {i} the neighbourhood has not settled: no bake yet");
@@ -172,17 +173,15 @@ fn eight_neighbours_landing_one_after_another_cost_one_rebake_not_eight() {
 // spec: STRM-048
 #[test]
 fn a_map_leaves_with_its_chunk() {
-    let (clock, cs, hs, m, baker, jobs) = rig(0, 1);
+    let (_clock, hs, m, baker, jobs) = rig(0, 1);
     let k = key(0, 0);
-    land(&m, &cs, &[k]);
+    m.land(&[k]);
     jobs.update(&[(k, 1.0)]);
     hs.run(1);
     jobs.update(&[(k, 1.0)]);
     assert!(jobs.horizon(k).is_some());
-    // Not wanted for longer than the chunk's eviction time: the chunk leaves RAM and the map goes with it.
-    clock.advance(31_000);
-    let evicted = m.update(&[]).evicted;
-    assert_eq!(evicted, vec![k]);
+    // The chunk leaves RAM and the map goes with it.
+    m.evict(k);
     let up = jobs.update(&[(k, 1.0)]);
     assert_eq!(up.evicted, vec![k]);
     assert!(jobs.horizon(k).is_none());
@@ -196,11 +195,11 @@ fn a_map_made_for_another_march_is_not_taken_from_the_disk_and_a_failing_entry_i
     let disk = Arc::new(MemDisk::default());
     let run = |spec: u64, disk: Arc<dyn HorizonDisk>, k: ChunkKey| {
         let clock = Arc::new(FakeClock::default());
-        let (cs, hs) = (Arc::new(ManualSpawner::default()), Arc::new(ManualSpawner::default()));
-        let m = chunks(clock.clone(), cs.clone());
+        let hs = Arc::new(ManualSpawner::default());
+        let m = FakeSource::new();
         let baker = Arc::new(FakeBaker { bakes: AtomicU64::new(0), spec, stale: AtomicU64::new(0) });
         let jobs = HorizonJobs::new(m.clone(), baker.clone(), hs.clone(), clock, Some(disk), HorizonConfig::default());
-        land(&m, &cs, &[k]);
+        m.land(&[k]);
         jobs.update(&[(k, 1.0)]);
         hs.run(1);
         jobs.update(&[(k, 1.0)]);
@@ -262,32 +261,32 @@ fn a_map_stored_for_the_same_neighbourhood_is_read_back_and_one_for_another_is_a
     let disk = Arc::new(MemDisk::default());
     let make = |disk: Arc<MemDisk>| {
         let clock = Arc::new(FakeClock::default());
-        let (cs, hs) = (Arc::new(ManualSpawner::default()), Arc::new(ManualSpawner::default()));
-        let m = chunks(clock.clone(), cs.clone());
+        let hs = Arc::new(ManualSpawner::default());
+        let m = FakeSource::new();
         let baker = Arc::new(FakeBaker { bakes: AtomicU64::new(0), spec: 1, stale: AtomicU64::new(0) });
         let jobs =
             HorizonJobs::new(m.clone(), baker.clone(), hs.clone(), clock, Some(disk as Arc<dyn HorizonDisk>), HorizonConfig::default());
-        (cs, hs, m, baker, jobs)
+        (hs, m, baker, jobs)
     };
     let k = key(3, 3);
-    let (cs, hs, m, baker, jobs) = make(disk.clone());
-    land(&m, &cs, &[k]);
+    let (hs, m, baker, jobs) = make(disk.clone());
+    m.land(&[k]);
     jobs.update(&[(k, 1.0)]);
     hs.run(1);
     jobs.update(&[(k, 1.0)]);
     assert_eq!(baker.bakes.load(Ordering::SeqCst), 1);
     let first = (*jobs.horizon(k).unwrap()).clone();
     // A second run of the same world: the same chunk with the same neighbourhood reads the map from the disk, no bake.
-    let (cs, hs, m, baker, jobs) = make(disk.clone());
-    land(&m, &cs, &[k]);
+    let (hs, m, baker, jobs) = make(disk.clone());
+    m.land(&[k]);
     jobs.update(&[(k, 1.0)]);
     hs.run(1);
     jobs.update(&[(k, 1.0)]);
     assert_eq!((baker.bakes.load(Ordering::SeqCst), jobs.stats().disk_hits), (0, 1));
     assert_eq!(*jobs.horizon(k).unwrap(), first);
     // With a neighbour ready the state word differs: a miss, a bake, a second entry on the disk.
-    let (cs, hs, m, baker, jobs) = make(disk.clone());
-    land(&m, &cs, &[k, key(4, 3)]);
+    let (hs, m, baker, jobs) = make(disk.clone());
+    m.land(&[k, key(4, 3)]);
     jobs.update(&[(k, 1.0)]);
     hs.run(1);
     jobs.update(&[(k, 1.0)]);
@@ -299,9 +298,9 @@ fn a_map_stored_for_the_same_neighbourhood_is_read_back_and_one_for_another_is_a
 // spec: STRM-061
 #[test]
 fn a_bake_that_went_stale_is_dropped_never_published_and_baked_again() {
-    let (_clock, cs, hs, m, baker, jobs) = rig(1_000, 1);
+    let (_clock, hs, m, baker, jobs) = rig(1_000, 1);
     let k = key(0, 0);
-    land(&m, &cs, &[k]);
+    m.land(&[k]);
     baker.stale.store(1, Ordering::SeqCst);
     assert_eq!(jobs.update(&[(k, 1.0)]).started, 1);
     hs.run(1);

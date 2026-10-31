@@ -1736,7 +1736,7 @@ mod tests {
     // spec: TEST-066
     #[test]
     fn the_wait_for_a_quiet_horizon_ends_after_the_quiet_window_and_the_window_exceeds_the_jobs_settle_window() {
-        assert!(HORIZON_QUIET.as_millis() as u64 > planet_streaming::chunks::HorizonConfig::default().settle_ms);
+        assert!(HORIZON_QUIET.as_millis() as u64 > planet_streaming::horizonjobs::HorizonConfig::default().settle_ms);
         let t0 = Instant::now();
         let mut since = None;
         assert!(!horizon_quiet_over(&mut since, t0), "the first quiet frame starts the window");

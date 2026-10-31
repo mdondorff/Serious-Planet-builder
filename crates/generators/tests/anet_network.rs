@@ -753,7 +753,7 @@ impl BaseDetail for Bumped {
     }
 }
 
-// spec: GEN-081
+// spec: GEN-078
 #[test]
 fn an_item_outside_the_read_set_changes_no_bit_of_a_chunk_and_one_inside_does() {
     use planet_generators::anet::chunk_read_set;
@@ -809,7 +809,7 @@ fn an_item_outside_the_read_set_changes_no_bit_of_a_chunk_and_one_inside_does() 
     assert!(changed_inside > 0, "no bump inside the read set changed a network");
 }
 
-// spec: GEN-081, GEN-084
+// spec: GEN-078, GEN-084
 #[test]
 fn the_read_set_holds_the_segment_before_the_far_end_of_a_confluence_chain_only_with_the_smoothing() {
     use planet_generators::anet::chunk_read_set;
