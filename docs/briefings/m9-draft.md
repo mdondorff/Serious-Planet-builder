@@ -77,3 +77,11 @@ Sources: roadmap M9 and its design constraints (2026-10-28); `docs/briefings/wee
 - The M9 bake pipeline: a ground-following network, a carve capped by local relief and tapered from heads, thermal and deposition passes, checkpoints (after R3).
 - A GPU bake whose stored output is the canonical field (CON-07, CON-14), only if R3 shows the CPU bake over 10 h.
 - ADR 0076 decided again with the bake's channels (decision 9).
+
+## Spike results since the draft (opus-planner, 2026-10-31)
+| Spike | Result | Effect on the plan |
+|---|---|---|
+| SPIKE-61, 62 | Planet bake about 4.5-6 h at 10 steps (re-route every 3-5 steps, Barnes flood, jittered D8); erosion layer 7-10 GB | criterion 7 met on estimates; disk decided (decision 7) |
+| SPIKE-63 | Height octaves below 6 m show at 3-80 m, no GPU cost, +16 % tile build; G3's 3 cm octave draws a block grid at the feet | R6 starts with the block grid; the law is the owner's pick from the stills |
+| SPIKE-64 | Thermal and deposition change nothing on today's gentle slopes; deposition fills basins first | the kernels follow the relief, they do not make it |
+| SPIKE-65 | Amplitude x4-6 per landform brings hills to 0.68-1.26 of real; steady-state stream power erases landforms; amplitude + short carve + thermal: 0.62-1.13 at the hill sites, Alps 0.53-0.78; flats 16-21 % (real 6-9 %) | R7 becomes a per-landform relief factor in the generator (SPIKE-66) plus a transient carve in R4; no steady-state erosion |
