@@ -256,5 +256,5 @@ fn a_key_without_a_stage_is_what_it_was_and_every_wrapper_that_forwards_the_sour
             }
         }
     }
-    assert!(forwarding >= 5, "the scan found the wrappers (Bound, water, skeleton, plan_ablation, origin_batch), {forwarding}");
+    assert!(forwarding >= 4, "the scan found the wrappers (Bound, water, skeleton, origin_batch), {forwarding}");
 }

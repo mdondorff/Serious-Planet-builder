@@ -34,7 +34,11 @@ mod tests {
         ("crates/perf/src/load.rs", 1, "tool: the load generator, which must not use the system it loads; stays"),
         ("crates/perf/src/streaming.rs", 1, "tool: the streaming scene's scoped parts; stays"),
         ("crates/streaming/src/jobs.rs", 1, "the job system itself: its workers"),
-        ("crates/streaming/src/lib.rs", 1, "moves in PR 1: the tile pool's workers (`ThreadPool`)"),
+        (
+            "crates/streaming/src/lib.rs",
+            1,
+            "moves in PR 3: `ThreadPool`, still the plan worker's pool (the tile pool is a share since PR 2)",
+        ),
         ("xtask/src/testlog.rs", 1, "tool: the log pump; stays"),
     ];
 

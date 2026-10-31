@@ -4,7 +4,7 @@ A planet-scale generator, editor and real-time renderer, written in Rust with wg
 
 ## Status
 
-M0 to M8 are done; M8 (Natural landscape) was accepted on 2026-10-30 ([report](docs/milestones/M8-report.md)). M8 shipped less than planned: the chunk stage (fine erosion and rivers per 5 km chunk) is off by default and is being removed from the code; realistic hills and rivers move to M9. The week from 2026-11-02 runs Option B: the chunk stage's removal, automated owner checks, one job system, test robustness and M9 groundwork ([week plan](docs/briefings/week-2026-11-02.md)); then the new shadows (ADR 0085) and M9's terrain steps. Current work, open owner decisions and the queue are in [docs/status.md](docs/status.md).
+M0 to M8 are done; M8 (Natural landscape) was accepted on 2026-10-30 ([report](docs/milestones/M8-report.md)). M8 shipped less than planned: the chunk stage (fine erosion and rivers per 5 km chunk) was removed from the code (B6, ADR 0086); realistic hills and rivers move to M9. The week from 2026-11-02 runs Option B: automated owner checks, one job system, test robustness and M9 groundwork ([week plan](docs/briefings/week-2026-11-02.md)); then the new shadows (ADR 0085) and M9's terrain steps. Current work, open owner decisions and the queue are in [docs/status.md](docs/status.md).
 
 What works today:
 - A whole planet from a global bake (16384 cells per cube face, about 0.6 km) with erosion, climate (temperature, precipitation) and an ocean connected through low ground.

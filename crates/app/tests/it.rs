@@ -6,6 +6,8 @@ mod coupled_remake;
 mod horizon_world;
 #[path = "live_definition.rs"]
 mod live_definition;
+#[path = "real_store.rs"]
+mod real_store;
 #[path = "residency_headroom.rs"]
 mod residency_headroom;
 #[path = "water_reach.rs"]

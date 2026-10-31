@@ -4,7 +4,6 @@
 
 use planet_streaming::{priority, GenWorkers, Priority, Spawner, ThreadPool};
 use std::sync::mpsc::channel;
-use std::sync::Arc;
 
 /// What each of `jobs` jobs on `pool` reads back as its thread's priority.
 fn worker_priorities(pool: &dyn Spawner, jobs: usize) -> Vec<Option<Priority>> {
@@ -49,7 +48,7 @@ fn generation_workers_carry_their_priority_into_the_pool_and_it_changes_no_size_
     assert_eq!(plain.priority, Priority::BelowNormal, "the default of the generation workers");
     assert_eq!((low.workers, low.ahead), (plain.workers, plain.ahead));
     assert_eq!(plain.apply(Default::default()).job_limit(), low.apply(Default::default()).job_limit());
-    let pool: Arc<ThreadPool> = low.pool();
+    let pool = low.pool();
     if HAS_PRIORITY {
         assert!(worker_priorities(pool.as_ref(), 8).iter().all(|p| *p == Some(Priority::BelowNormal)));
     }
