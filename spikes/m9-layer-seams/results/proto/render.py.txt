@@ -1,0 +1,31 @@
+# SPIKE-68: hillshade crops round the four-tile corner of the 6,656^2 window; and |mosaic - joint|.
+import sys, numpy as np
+from PIL import Image, ImageDraw
+d, out, site = sys.argv[1], sys.argv[2], sys.argv[3]
+names = sys.argv[4].split(',')
+B, C, H, DX = 6656, 1024, 3328, 101.8
+def load(n):
+    a = np.memmap(f'{d}/{site}-{n}.f32', dtype='<f4', mode='r', shape=(B, B))
+    return np.array(a[H - C // 2:H + C // 2, H - C // 2:H + C // 2], dtype=np.float64)
+def shade(h):
+    gy, gx = np.gradient(h, DX)
+    n = np.stack([-gx, -gy, np.ones_like(h)], -1); n /= np.linalg.norm(n, axis=-1, keepdims=True)
+    l = np.array([-0.5, -0.5, 0.7]); l /= np.linalg.norm(l)
+    v = np.clip(n @ l, 0, 1)
+    rgb = np.stack([v, v, v], -1)
+    rgb[h <= 0] = [0.15, 0.25, 0.45]
+    return (rgb * 255).astype(np.uint8)
+hs = {n: load(n) for n in names}
+cells = []
+for n in names:
+    im = Image.fromarray(shade(hs[n])).resize((512, 512), Image.LANCZOS)
+    dr = ImageDraw.Draw(im); dr.rectangle((0, 0, 110, 16), fill=(0, 0, 0)); dr.text((4, 3), n, fill=(255, 255, 255))
+    cells.append(im)
+diff = np.abs(hs[names[1]] - hs[names[0]])
+dv = (np.clip(diff / 50.0, 0, 1) * 255).astype(np.uint8)
+im = Image.fromarray(np.stack([dv, dv // 3, dv // 3], -1)).resize((512, 512), Image.LANCZOS)
+dr = ImageDraw.Draw(im); dr.rectangle((0, 0, 170, 16), fill=(0, 0, 0)); dr.text((4, 3), f'|{names[1]}-{names[0]}| 0-50 m', fill=(255, 255, 255))
+cells.append(im)
+o = Image.new('RGB', (512 * len(cells), 512))
+for i, c in enumerate(cells): o.paste(c, (512 * i, 0))
+o.save(f'{out}/{site}-seams.jpg', quality=88)

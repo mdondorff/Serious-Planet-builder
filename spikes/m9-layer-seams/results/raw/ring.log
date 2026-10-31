@@ -1,0 +1,18 @@
+heavy-run lock: the machine is free after 716 s: running `C:/Program Files/Git/usr/bin/bash.exe C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/570e124f-4ca5-49b4-8bf6-680604dce399/scratchpad/s68/run-ring.sh`
+$ C:/Program Files/Git/usr/bin/bash.exe C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/570e124f-4ca5-49b4-8bf6-680604dce399/scratchpad/s68/run-ring.sh
+=== seam 13:23:08 cpu 4%
+alps: joint bake 148 s
+alps: ring tile 0 39 s
+alps: ring tile 1 43 s
+alps: ring tile 2 41 s
+alps: ring tile 3 39 s
+alps ring inflow carve+thermal hard: step over 12154 edge pairs p50 0.01 p99 165.80 max 409.59 m | |s-j| by distance (p50/p99 m) 0-1: 0.00/132.80, 2-8: 0.00/139.32, 9-32: 0.00/160.76, 33-128: 0.00/133.23, 129-512: 0.00/120.76, 513-4000: 0.00/14.12 | crossings mosaic 196 joint 223 matched 179 | ponds near seams mosaic 4929 joint 2189
+alps ring inflow carve+thermal blend64: step over 12154 edge pairs p50 0.00 p99 24.74 max 92.51 m | |s-j| by distance (p50/p99 m) 0-1: 0.01/103.14, 2-8: 0.01/111.29, 9-32: 0.00/146.25, 33-128: 0.00/133.23, 129-512: 0.00/120.76, 513-4000: 0.00/14.12 | crossings mosaic 216 joint 223 matched 204 | ponds near seams mosaic 3770 joint 2189
+blackforest: joint bake 142 s
+blackforest: ring tile 0 40 s
+blackforest: ring tile 1 39 s
+blackforest: ring tile 2 40 s
+blackforest: ring tile 3 39 s
+blackforest ring inflow carve+thermal hard: step over 12288 edge pairs p50 0.00 p99 83.39 max 286.17 m | |s-j| by distance (p50/p99 m) 0-1: 0.00/76.64, 2-8: 0.00/75.59, 9-32: 0.00/75.21, 33-128: 0.00/68.53, 129-512: 0.00/50.34, 513-4000: 0.00/13.80 | crossings mosaic 277 joint 281 matched 225 | ponds near seams mosaic 8145 joint 1116
+blackforest ring inflow carve+thermal blend64: step over 12288 edge pairs p50 0.00 p99 20.73 max 84.53 m | |s-j| by distance (p50/p99 m) 0-1: 0.00/50.76, 2-8: 0.00/52.04, 9-32: 0.00/64.40, 33-128: 0.00/68.53, 129-512: 0.00/50.34, 513-4000: 0.00/13.80 | crossings mosaic 294 joint 281 matched 232 | ponds near seams mosaic 8695 joint 1116
+=== done 13:35:34

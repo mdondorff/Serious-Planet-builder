@@ -1,5 +1,5 @@
 # 0088 The M9 terrain bake
-Status: proposed (drafted by the spikes session for opus-planner, 2026-10-31; the owner decides: a data format)
+Status: proposed (drafted by the spikes session for opus-planner, 2026-10-31; the owner decides: a data format); open (opus-planner, 2026-10-31): decision 4 (per-tile carve with a halo) fails SPIKE-68 (core-edge steps p99 134-172 m; routing is non-local); revised after SPIKE-70 (global routing for the carve)
 Date: 2026-10-31
 Source: SPIKE-61 to SPIKE-66 (`spikes/m9-*/results/results.md`); ADR 0006, ADR 0045, ADR 0055, ADR 0056, ADR 0086, ADR 0087; M9 draft (`docs/briefings/m9-draft.md`) decision 7; CON-07, CON-11, CON-14; GEN-020, GEN-062
 
