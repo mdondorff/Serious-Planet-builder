@@ -3,6 +3,7 @@
 
 pub mod adapter;
 pub mod camera;
+pub mod clipmap;
 pub mod controller;
 pub mod draw;
 pub mod freecam;
