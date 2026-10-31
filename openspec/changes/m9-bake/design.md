@@ -31,7 +31,7 @@
 | Receivers | jittered D8 on the filled surface (SPIKE-62) | slope x (1 + 0.5 u), `u` an integer hash of cell and direction |
 | Order | donor stack from the receivers (Braun and Willett) | none |
 | Carve | implicit stream power with uplift, n 1, m 0.5 (SPIKE-65); per face at about 800 m (SPIKE-70) | U/K 20, K dt 0.05, 20 steps (K t 1), re-route every 5th step |
-| Local carve | the same kernel per tile at 100 m with the drainage area capped (SPIKE-70 hybrid); it only incises: no fill, no breach (SPIKE-72) | cap about 1 km^2 |
+| Local carve | the same kernel per tile at 100 m with the drainage area capped (SPIKE-70 hybrid); it only incises: no fill, no breach, no uplift (SPIKE-72, SPIKE-73: with uplift, undrained cells make spikes) | cap about 1 km^2 |
 | Breach | before each fill: a receiver at most 0.1 % below its donor, by at most 50 m (SPIKE-66) | as stated |
 | Thermal | Jacobi gather at repose (SPIKE-64), on active cells (a full Jacobi costs about 13 h for the planet, SPIKE-70) | 33 degrees x (1 + 0.25 u), 1/16 per pass, until no cell moves or 100 passes |
 | Deposition | one sweep on the last route (SPIKE-64) | `kc` 1e5, `zeta` 0.5 |

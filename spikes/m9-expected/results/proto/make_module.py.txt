@@ -1,0 +1,65 @@
+# SPIKE-74: the kernels of SPIKE-70 to SPIKE-73 as a module of the terrain_score example (spike branch only): G, flood, route, carve (with the
+# LOCAL and UK switches), thermal_active, and SPIKE-64's deposition sweep adapted to G.
+import os, re
+S = os.path.dirname(os.path.abspath(__file__))
+src = open(os.path.join(S, '..', 's73', 'carve', 'src', 'main.rs'), encoding='utf-8').read()
+src = src[:src.index('fn main() {')]
+# Drop the window-specific parts that need BIG/TW constants or are unused.
+for name in ['fn sub(', 'fn inflow_of(', 'fn core0(', 'fn mosaic(', 'fn measure(', 'fn thermal_tiles(', 'fn coarse_delta(', 'fn block_means(',
+             'fn face_pass(', 'fn tiles_pass(', 'fn hybrid(', 'fn bake(', 'fn carve_ring_unused(']:
+    while name in src:
+        i = src.index(name)
+        # back up to the doc comment start
+        j = src.rfind('\n\n', 0, i) + 2
+        # find the end: the next line that is exactly "}\n" at column 0 after i
+        k = src.index('\n}\n', i) + 3
+        src = src[:j] + src[k:]
+src = re.sub(r'^//!.*\n', '', src, flags=re.M)
+src = re.sub(r'^const (BIG|CORE|HALO|TW): .*\n', '', src, flags=re.M)
+src = re.sub(r'^fn ', 'pub fn ', src, flags=re.M)
+src = re.sub(r'^static ', 'pub static ', src, flags=re.M)
+src = src.replace("struct G<'a> {", "pub struct G<'a> {")
+src = re.sub(r"^    (w|ox|oy|fix|dx|frec|farea|amax): ", r"    pub \1: ", src, flags=re.M)
+src = src.replace('const DX: f64 = 101.8;', '#[allow(dead_code)]\npub const DX: f64 = 101.8;')
+dep = '''
+/// SPIKE-64's deposition sweep on window `g`: the eroded column (`orig - h`) is carried down the routing of the current surface; it first fills each
+/// cell's depression up to the filled level, then `zeta` of the load over the capacity `kc A^0.5 S` settles, up to half the drop to the receiver.
+pub fn deposit(g: G, h: &mut [f32], orig: &[f32], kc: f64, zeta: f64) {
+    let (rec, order, area, filled) = route(g, h, &[]);
+    let n = g.n();
+    let ca = g.dx * g.dx;
+    let w = g.w;
+    let mut qs = vec![0f64; n];
+    for &p in order.iter().rev() {
+        let p = p as usize;
+        let e = (f64::from(orig[p]) - f64::from(h[p])).max(0.0) * ca;
+        let mut load = qs[p] + if h[p] > 0.0 { e } else { 0.0 };
+        let r = rec[p];
+        if r == u32::MAX {
+            continue;
+        }
+        let r = r as usize;
+        let hp = f64::from(h[p]);
+        let fp = f64::from(filled[p]);
+        let pit = ((fp - hp).max(0.0) * ca).min(load);
+        let mut rise = pit / ca;
+        load -= pit;
+        let dd = if (p % w) == (r % w) || (p / w) == (r / w) { g.dx } else { g.dx * std::f64::consts::SQRT_2 };
+        let s = ((fp - f64::from(filled[r])) / dd).max(0.0);
+        let cap = kc * area[p].sqrt() * s;
+        if load > cap {
+            let room = (0.5 * (fp - f64::from(filled[r])).max(0.0) + (fp - hp - rise).max(0.0)) * ca;
+            let d = (zeta * (load - cap)).min(room);
+            rise += d / ca;
+            load -= d;
+        }
+        h[p] = (hp + rise) as f32;
+        qs[r] += load;
+    }
+}
+'''
+out = '//! SPIKE-74 (spike code, never merged): the kernels of SPIKE-70 to SPIKE-73 and SPIKE-64\'s deposition, for the pipeline run.\n#![allow(dead_code, clippy::all)]\nuse std::cmp::Reverse;\nuse std::collections::{BinaryHeap, VecDeque};\nuse std::time::Instant;\n' + src.split('use std::time::Instant;', 1)[1] + dep
+root = 'C:/DEV/Serious-Planet-Builder/.claude/worktrees/sonnet-spikes-36fc88/crates/app/examples/s74'
+os.makedirs(root, exist_ok=True)
+open(root + '/kernels.rs', 'w', encoding='utf-8', newline='').write(out)
+print(len(out.splitlines()), 'lines')
