@@ -1,9 +1,45 @@
 //! Tier C: the streaming perf scenes end to end on the software adapter (smoke), and their refusals (TEST-019, TEST-012).
 
+/// A writer into a buffer that the test can read while the run is still going.
+#[derive(Clone, Default)]
+struct Shared(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for Shared {
+    fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(b);
+        Ok(b.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// The longest a run may take: under nextest's 300 s, so that a run that stalls fails with what it printed so far (CI showed a bare timeout).
+const RUN_LIMIT: std::time::Duration = std::time::Duration::from_secs(240);
+
 fn run(args: &[&str]) -> Result<String, String> {
-    let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
-    let mut buf = Vec::new();
-    planet::run(&args, &mut buf).map(|_| String::from_utf8(buf).unwrap())
+    let owned: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    let out = Shared::default();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut writer = out.clone();
+    // The run is in-process; it goes on a thread of its own so that the test can give up on it. A stalled thread is left behind: the test fails.
+    std::thread::Builder::new()
+        .name("planet-run".into())
+        .spawn(move || {
+            let _ = tx.send(planet::run(&owned, &mut writer));
+        })
+        .expect("start the run");
+    match rx.recv_timeout(RUN_LIMIT) {
+        Ok(result) => result.map(|_| String::from_utf8(out.0.lock().unwrap().clone()).unwrap()),
+        Err(_) => panic!(
+            "`planet {}` did not finish in {RUN_LIMIT:?}; phases: {}; output so far:
+{}",
+            args.join(" "),
+            planet::stall::phase_report(),
+            String::from_utf8_lossy(&out.0.lock().unwrap())
+        ),
+    }
 }
 
 fn tmp(name: &str) -> std::path::PathBuf {
