@@ -1,7 +1,7 @@
 # 0088 The M9 terrain bake
 Status: proposed (drafted by the spikes session for opus-planner, 2026-10-31; the owner decides: a data format); open (opus-planner, 2026-10-31): decision 4 (per-tile carve with a halo) fails SPIKE-68 (core-edge steps p99 134-172 m; routing is non-local); decision 4 revised after SPIKE-70 (two passes: the carve per face at about 800 m, the local work per tile; spikes session, 2026-10-31)
 Date: 2026-10-31
-Source: SPIKE-61 to SPIKE-72 (`spikes/m9-*/results/results.md`); ADR 0006, ADR 0045, ADR 0055, ADR 0056, ADR 0086, ADR 0087; M9 draft (`docs/briefings/m9-draft.md`) decision 7; CON-07, CON-11, CON-14; GEN-020, GEN-062
+Source: SPIKE-61 to SPIKE-73 (`spikes/m9-*/results/results.md`); ADR 0006, ADR 0045, ADR 0055, ADR 0056, ADR 0086, ADR 0087; M9 draft (`docs/briefings/m9-draft.md`) decision 7; CON-07, CON-11, CON-14; GEN-020, GEN-062
 
 ## Context
 - Hills and mountains are 4-9x too gentle in slope and relief (SPIKE-55). The relief comes from the amplitude of the base field below about 20 km: x4-6 for hills, about x7.5 for the Alps to reach 0.8 of real (SPIKE-65, SPIKE-66). Today's landform driver (GEN-062) is the wrong weight; it is low at the hill sites.
@@ -24,7 +24,7 @@ Source: SPIKE-61 to SPIKE-72 (`spikes/m9-*/results/results.md`); ADR 0006, ADR 0
    1. **Per cube face at about 800 m:** the base of point 2 sampled once per cell (SPIKE-71), then a transient carve (implicit stream power with uplift, a fixed `K t`, not to steady state), breaching before the fill and re-routing every 3-5 steps (Barnes flood, order from the receivers, jittered D8). Faces do not route across cube edges.
    2. **Per tile of the 100 m grid** (SPIKE-61's tiles, 256-cell halo, core stored):
       - the base of point 2 plus the face carve's change, bilinear;
-      - a local carve of catchments up to about 1 km^2 that only incises: no fill, no breach (basins are pass 1's and the deposition's; SPIKE-72);
+      - a local carve of catchments up to about 1 km^2 that only incises: no fill, no breach, no uplift (basins are pass 1's and the deposition's; SPIKE-72, SPIKE-73);
       - thermal at the angle of repose with a perturbed critical slope on active cells;
       - one deposition sweep on the last route.
    The layer stores each tile's change against the base of point 2 (decision 7).
