@@ -44,10 +44,14 @@ struct ShareState {
     running: usize,
     /// The most jobs of this share that ran at once so far.
     peak: usize,
+    /// Most idle-class jobs of this share running at once (`usize::MAX`: no limit of their own); they count in `running` too.
+    idle_cap: usize,
+    idle_running: usize,
 }
 
 struct Queued {
     share: usize,
+    class: Class,
     job: Job,
 }
 
@@ -62,12 +66,16 @@ impl State {
     fn take(&mut self) -> Option<Queued> {
         for class in Class::ALL {
             let shares = &self.shares;
-            let at = self.queues[class as usize].iter().position(|q| shares[q.share].running < shares[q.share].ceiling);
+            let at = self.queues[class as usize].iter().position(|q| {
+                let s = &shares[q.share];
+                s.running < s.ceiling && (class != Class::Idle || s.idle_running < s.idle_cap)
+            });
             if let Some(at) = at {
                 let q = self.queues[class as usize].remove(at).expect("a queued job");
                 let s = &mut self.shares[q.share];
                 s.running += 1;
                 s.peak = s.peak.max(s.running);
+                s.idle_running += usize::from(class == Class::Idle);
                 return Some(q);
             }
         }
@@ -117,7 +125,12 @@ impl JobSystem {
                             };
                             // A panic of a job ends the job, not the worker.
                             let _ = catch_unwind(AssertUnwindSafe(queued.job));
-                            shared.state.lock().expect("job state").shares[queued.share].running -= 1;
+                            {
+                                let mut st = shared.state.lock().expect("job state");
+                                let s = &mut st.shares[queued.share];
+                                s.running -= 1;
+                                s.idle_running -= usize::from(queued.class == Class::Idle);
+                            }
                             // A job of this share that waited for the ceiling may start now.
                             shared.wake.notify_all();
                         }
@@ -131,8 +144,23 @@ impl JobSystem {
     /// A share named `name` with at most `ceiling` jobs running at once (at least one).
     pub fn share(&self, name: &str, ceiling: usize) -> Share {
         let mut st = self.shared.state.lock().expect("job state");
-        st.shares.push(ShareState { name: name.to_string(), ceiling: ceiling.max(1), running: 0, peak: 0 });
+        st.shares.push(ShareState {
+            name: name.to_string(),
+            ceiling: ceiling.max(1),
+            running: 0,
+            peak: 0,
+            idle_cap: usize::MAX,
+            idle_running: 0,
+        });
         Share { shared: Arc::clone(&self.shared), index: st.shares.len() - 1 }
+    }
+
+    /// Like [`share`](JobSystem::share), and at most `idle_cap` of the share's idle-class jobs run at once, so a bake never holds a worker that a
+    /// visible job of the share needs (STRM-060): the ceiling is sized for the visible work plus `idle_cap`.
+    pub fn share_with_idle(&self, name: &str, ceiling: usize, idle_cap: usize) -> Share {
+        let share = self.share(name, ceiling);
+        self.shared.state.lock().expect("job state").shares[share.index].idle_cap = idle_cap.max(1);
+        share
     }
 }
 
@@ -175,7 +203,7 @@ impl Share {
 
     /// A job of `class`: it runs when a worker is free and fewer than the ceiling of this share are running.
     pub fn spawn_class(&self, class: Class, job: Job) {
-        self.shared.state.lock().expect("job state").queues[class as usize].push_back(Queued { share: self.index, job });
+        self.shared.state.lock().expect("job state").queues[class as usize].push_back(Queued { share: self.index, class, job });
         self.shared.wake.notify_one();
     }
 
@@ -236,6 +264,34 @@ impl Spawner for Share {
 
     fn spawn_in(&self, class: JobClass, job: Job) {
         self.spawn_class(class.into(), job);
+    }
+}
+
+/// A share together with the job system it was made on: for a subsystem that has a system of its own (the tile pool of one streamer). Dropping it
+/// drains the share's queued jobs and joins the workers.
+pub struct OwnedShare {
+    // The share first: it is dropped before the system whose workers it feeds.
+    share: Share,
+    _system: JobSystem,
+}
+
+impl OwnedShare {
+    pub fn new(system: JobSystem, share: Share) -> Self {
+        Self { share, _system: system }
+    }
+
+    pub fn share(&self) -> &Share {
+        &self.share
+    }
+}
+
+impl Spawner for OwnedShare {
+    fn spawn(&self, job: Job) {
+        self.share.spawn(job);
+    }
+
+    fn spawn_in(&self, class: JobClass, job: Job) {
+        self.share.spawn_in(class, job);
     }
 }
 
@@ -324,6 +380,33 @@ mod tests {
         release.store(true, Ordering::SeqCst);
         drop(system);
         assert_eq!((a.peak_running(), b.peak_running()), (1, 2));
+    }
+
+    // spec: BUDG-008
+    #[test]
+    fn a_share_can_cap_its_idle_jobs_so_a_bake_never_holds_a_worker_a_visible_job_needs() {
+        let system = JobSystem::new(4, Priority::Normal);
+        let share = system.share_with_idle("terrain", 4, 1);
+        let release = Arc::new(AtomicBool::new(false));
+        let (tx, rx) = mpsc::channel();
+        for id in 0..3 {
+            share.spawn_class(Class::Idle, blocker(tx.clone(), id, Arc::clone(&release)));
+        }
+        rx.recv_timeout(Duration::from_secs(10)).expect("one idle job starts");
+        assert!(rx.recv_timeout(Duration::from_millis(150)).is_err(), "a second idle job started over the idle cap");
+        // Visible work still has the other workers.
+        for id in 10..13 {
+            share.spawn_class(Class::Visible, blocker(tx.clone(), id, Arc::clone(&release)));
+        }
+        let mut started = Vec::new();
+        for _ in 0..3 {
+            started.push(rx.recv_timeout(Duration::from_secs(10)).expect("visible jobs start beside the idle one"));
+        }
+        started.sort();
+        assert_eq!(started, [10, 11, 12]);
+        release.store(true, Ordering::SeqCst);
+        drop(system);
+        assert_eq!(share.peak_running(), 4);
     }
 
     // spec: BUDG-009
