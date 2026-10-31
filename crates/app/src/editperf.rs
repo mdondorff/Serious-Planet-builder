@@ -690,6 +690,68 @@ fn items_near(def: &WorldDefinition, layer: &str, at: Vec3) -> Vec<planet_world_
 
 /// The preview stamps the editor sets for the edit of `stamp` from `before` to `edited`, seen from `camera` on a body of `planet_radius_m`:
 /// the footprint delta with the brushes (VIEW-036), so a brush stroke is previewed as its chain of stamps as in the editor.
+/// Plans the case view of `altitude_m` on the CPU over the world of `o` with the pair's parameters and with the parameters of `generate --plan-check`, and says
+/// how deep each plan goes and how many nodes it holds back (ADR 0074): tells whether a plan stops short because of the harness or because of the field.
+pub fn plan_probe(o: &Options, altitude_m: f64, site: Option<(f64, f64)>) -> Result<String, String> {
+    let world = crate::streamperf::open_world(o, false)?;
+    let planet_m = world.radius_m();
+    let field = world.field()?;
+    let mut case = cases_at(altitude_m, true, planet_m).into_iter().next().ok_or("no case")?;
+    if let Some((lat, lon)) = site {
+        case.centre = Vec3::from_lat_lon(lat.to_radians(), lon.to_radians());
+    }
+    let ground = |d: Vec3| field.height(d);
+    let rho = (1.5 * case.size_m).max(200.0);
+    let mut out = String::new();
+    // (label, viewport height px, tau px, max_height_m)
+    let variants = [
+        ("pair: 432 px, tau 6, max |h| + 200 m", 432.0, o.tau, field.max_abs_height_m() + 200.0),
+        ("720 px, tau 6, max |h|", 720.0, o.tau, field.max_abs_height_m()),
+        ("1080 px, tau 6, max |h|", 1080.0, o.tau, field.max_abs_height_m()),
+        ("1440 px, tau 6, max |h|", 1440.0, o.tau, field.max_abs_height_m()),
+        ("432 px, tau 4.5, max |h|", 432.0, 4.5, field.max_abs_height_m()),
+        ("plan-check: 1080 px, tau 4.5, max |h|", 1080.0, 4.5, field.max_abs_height_m()),
+    ];
+    for (label, vh, tau, max_h) in variants {
+        let size = ((vh * 16.0 / 9.0) as u32, vh as u32);
+        let lod = LodParams {
+            cells: o.cells,
+            viewport_h_px: vh,
+            tau_px: tau,
+            max_level: o.finest_level_for(o.cells),
+            min_level: o.min_level(),
+            radius_m: planet_m,
+            max_height_m: LodParams::earth_1080p().max_height_m.max(max_h),
+            ..LodParams::earth_1080p()
+        };
+        let req = TerrainRequest {
+            camera: camera_for(case.centre, &ground, planet_m, rho, altitude_m, 16.0 / 9.0),
+            size,
+            view: TerrainView::Level,
+            lod,
+            face_mapping: TangentWarp.id().to_string(),
+            seed: field.seed(),
+        };
+        match planet_frame::plan_terrain_field(&req, field.as_ref()) {
+            Ok(plan) => {
+                let mut by_level = BTreeMap::<u8, (usize, usize)>::new();
+                for n in &plan.nodes {
+                    let e = by_level.entry(n.level).or_default();
+                    e.0 += 1;
+                    e.1 += usize::from(n.capped);
+                }
+                out += &format!(
+                    "{label}: {} nodes, {} capped; level: (nodes, capped) {by_level:?}\n",
+                    plan.nodes.len(),
+                    plan.nodes.iter().filter(|n| n.capped).count()
+                );
+            }
+            Err(e) => out += &format!("{label}: plan refused: {e:?}\n"),
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 fn case_preview(
     before: &WorldDefinition,
@@ -1454,6 +1516,7 @@ pub fn pair_frames(
     views: &[TerrainView],
     altitude_m: f64,
     radius_m: f64,
+    site: Option<(f64, f64)>,
 ) -> Result<Vec<PairFrames>, String> {
     let world = Arc::new(crate::streamperf::open_world(o, false)?);
     let planet_m = world.radius_m();
@@ -1471,10 +1534,15 @@ pub fn pair_frames(
     };
     lod.validate().map_err(|e| format!("--cells {} --tau {}: {e}", o.cells, o.tau))?;
     let ground = |d: Vec3| field.height(d);
-    let case = cases_at(altitude_m, true, planet_m)
+    let mut case = cases_at(altitude_m, true, planet_m)
         .into_iter()
         .find(|c| c.kind == CaseKind::Stamp && (c.size_m - radius_m).abs() < 1e-6)
         .ok_or_else(|| format!("the scene has no stamp case of radius {radius_m} m at {altitude_m} m"))?;
+    if let Some((lat, lon)) = site {
+        let d = Vec3::from_lat_lon(lat.to_radians(), lon.to_radians());
+        case.centre = d;
+        case.spec.dir = d;
+    }
     let aspect = f64::from(size.0) / f64::from(size.1);
     let rho = (1.5 * case.size_m).max(200.0);
     let req = TerrainRequest {
@@ -1736,7 +1804,7 @@ mod tests {
     // spec: TEST-066
     #[test]
     fn the_wait_for_a_quiet_horizon_ends_after_the_quiet_window_and_the_window_exceeds_the_jobs_settle_window() {
-        assert!(HORIZON_QUIET.as_millis() as u64 > planet_streaming::chunks::HorizonConfig::default().settle_ms);
+        assert!(HORIZON_QUIET.as_millis() as u64 > planet_streaming::horizonjobs::HorizonConfig::default().settle_ms);
         let t0 = Instant::now();
         let mut since = None;
         assert!(!horizon_quiet_over(&mut since, t0), "the first quiet frame starts the window");

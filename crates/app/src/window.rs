@@ -307,7 +307,7 @@ struct Running {
     last_counts: planet_frame::managed::FrameCounts,
     /// What the horizon step did, per feature (TEST-058), and the horizon update of the last step (its maps are uploaded in the horizon frame).
     chunk_counters: crate::horizonstep::FeatureCounters,
-    horizon_update: planet_streaming::chunks::HorizonUpdate,
+    horizon_update: planet_streaming::horizonjobs::HorizonUpdate,
     last_ms: Option<u64>,
     last_gpu_sample: Instant,
     gpu_ms: Option<f64>,
@@ -880,7 +880,6 @@ impl App<'_> {
                 let tiles: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
                 let features = crate::horizonstep::FrameFeatures::default();
                 let step = crate::horizonstep::frame_step(self.world, &tiles, camera.position, &features, &mut st.chunk_counters);
-                st.counts.horizon_steps = st.chunk_counters.horizon_frames;
                 st.horizon_update = step.horizon;
             }
             if let Some(g) = st.gate.as_mut().filter(|_| self.world.horizon_enabled()) {

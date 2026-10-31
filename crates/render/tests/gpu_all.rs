@@ -1,7 +1,5 @@
 #[path = "gpu_atmosphere.rs"]
 mod gpu_atmosphere;
-#[path = "gpu_chunk_fade.rs"]
-mod gpu_chunk_fade;
 #[path = "gpu_compact.rs"]
 mod gpu_compact;
 #[path = "gpu_compact_blocks.rs"]

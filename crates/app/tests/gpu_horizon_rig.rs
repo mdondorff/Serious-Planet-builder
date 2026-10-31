@@ -12,7 +12,7 @@ use planet_generators::chunk::CHUNK_GRID_LEVEL;
 use planet_generators::chunkfield::{ChunkKey, PYRAMID_TOP_LEVEL};
 use planet_generators::horizon::HorizonParams;
 use planet_render::{AdapterPolicy, GpuContext, TerrainRenderer};
-use planet_streaming::chunks::HorizonConfig;
+use planet_streaming::horizonjobs::HorizonConfig;
 use planet_streaming::{FakeClock, ManualSpawner};
 use planet_world_def::WorldDefinition;
 

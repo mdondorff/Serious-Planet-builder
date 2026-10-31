@@ -350,7 +350,7 @@ fn tile_generation_reads_the_height_at_its_own_level() {
     );
 }
 
-// spec: STRM-041
+// spec: GEN-037
 #[test]
 fn a_chunk_result_round_trips_through_bytes_and_a_damaged_payload_is_refused() {
     use planet_generators::chunkfield::ChunkResult;
@@ -507,7 +507,7 @@ fn a_tile_replacing_one_that_is_drawn_draws_what_it_drew_at_weight_zero_and_its_
     assert_eq!(with.change_replacing(&other, 1.0), None);
 }
 
-// spec: REND-039
+// spec: STRM-047
 #[test]
 fn the_mirror_of_the_vertex_stage_draws_the_final_height_at_weight_one_the_base_at_zero_and_the_old_arithmetic_without_a_plane() {
     use planet_generators::compact::compact_tile_field;

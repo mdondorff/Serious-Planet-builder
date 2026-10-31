@@ -101,11 +101,6 @@ pub struct TerrainDraw {
     /// How the node stands against the current definition (VIEW-044): set by the draw plan, [`TileState::Exact`] in a plan made by the
     /// planner. The stale-tile overlay colours by it; the text form does not carry it.
     pub state: TileState,
-    /// The fade weight of the tile's chunk change, 0 to 1 (STRM-047, REND-039): the minimum of the weights of the chunks the tile reads (so two
-    /// tiles on either side of a chunk border rise together), as an f32 (CON-11). 1 for a plan made by the planner and for a tile without a
-    /// change plane (the draw is then the final height, bit for bit); the managed loop sets it from the landing times. A runtime value of the
-    /// draw plan; the recorded text form and the summary hash do not carry it.
-    pub chunk_weight: f32,
 }
 
 /// The state of a drawn node against the current definition (VIEW-044).
@@ -217,25 +212,14 @@ fn origin_heights(
     if missing.is_empty() {
         return heights;
     }
-    // The origin of a tile is its centre at the height the tile draws it at (GEN-036): for a field with chunk detail one batch per tile level, as
-    // `heights_and_climate` reads it; every other field keeps its one batch for the whole plan (LOD-009, GEN-020).
-    let mut levels: Vec<Option<u8>> = missing.iter().map(|&i| field.level_aware().then(|| selection.nodes[i].tile.level())).collect();
-    levels.sort_unstable();
-    levels.dedup();
-    for level in levels {
-        let of_level: Vec<usize> =
-            missing.iter().copied().filter(|&i| level.is_none_or(|l| selection.nodes[i].tile.level() == l)).collect();
-        let dirs: Vec<planet_core::Vec3> = of_level.iter().map(|&i| selection.nodes[i].tile.center_direction(map)).collect();
-        // Invariant: a batch that was stopped (`heights_until`, `heights_threaded_until`) returns 0.0 for the directions it did not
-        // finish, so a caller that can cancel MUST discard the results of a stopped batch (never memoise them). This call has no stop
-        // flag, so its batch is complete; a field whose wrapper cancels is checked by the plan worker before it uses the plan.
-        let batch = match level {
-            Some(l) => field.heights_threaded_at_level(&dirs, l, threads.max(1)),
-            None => field.heights_threaded(&dirs, threads.max(1)),
-        };
-        for (&i, h) in of_level.iter().zip(batch) {
-            heights[i] = if reuse { cache.origin_height(selection.nodes[i].tile, || h) } else { h };
-        }
+    // One batch for the whole plan (LOD-009, GEN-020).
+    let dirs: Vec<planet_core::Vec3> = missing.iter().map(|&i| selection.nodes[i].tile.center_direction(map)).collect();
+    // Invariant: a batch that was stopped (`heights_until`, `heights_threaded_until`) returns 0.0 for the directions it did not
+    // finish, so a caller that can cancel MUST discard the results of a stopped batch (never memoise them). This call has no stop
+    // flag, so its batch is complete; a field whose wrapper cancels is checked by the plan worker before it uses the plan.
+    let batch = field.heights_threaded(&dirs, threads.max(1));
+    for (&i, h) in missing.iter().zip(batch) {
+        heights[i] = if reuse { cache.origin_height(selection.nodes[i].tile, || h) } else { h };
     }
     heights
 }
@@ -360,7 +344,6 @@ pub(crate) fn plan_terrain_keyed(
                 quadrants: crate::lod::ALL_QUADRANTS,
                 // A leaf held back by a tile too steep to morph (ADR 0074) shows in its own colour in the overlays.
                 state: if n.capped { TileState::Capped } else { TileState::Exact },
-                chunk_weight: 1.0,
             }
         })
         .collect();

@@ -190,8 +190,8 @@ pub(crate) struct Tick {
     pub(crate) settled: bool,
     /// The tiles of the plan this frame drew (resident and drawn): what the lag post-pass needs besides the camera.
     pub(crate) drawn: Vec<TileId>,
-    /// Whether the horizon jobs still have work for the frame's plan (TEST-054): a stand-in node or a horizon job in flight; false without them.
-    pub(crate) chunk_busy: bool,
+    /// Whether the horizon jobs still have work for the frame's plan (TEST-054): a horizon job in flight; false without them.
+    pub(crate) horizon_busy: bool,
     /// Plan nodes of the frame that carry water (zero without the lit path).
     pub(crate) water_nodes: usize,
 }
@@ -270,7 +270,7 @@ impl Driver<'_> {
         let ctx = self.ctx;
         let frame = self.rig.managed.begin_frame_strict(req, &mut RendererSink { ctx, renderer: &mut self.rig.renderer })?;
         // The horizon jobs, as the window does after the plan (STRM-049): the maps of the chunks the plan's tiles read, nearest first.
-        let mut chunk_busy = false;
+        let mut horizon_busy = false;
         if let Some(hd) = self.horizon.as_mut() {
             let tiles: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
             let step = crate::horizonstep::frame_step(
@@ -283,7 +283,7 @@ impl Driver<'_> {
             if hd.horizon {
                 hd.landed += step.horizon.landed.len() as u64;
             }
-            chunk_busy = crate::horizonstep::chunks_busy(frame.counts.chunk.chunk_stand_in, hd.world.horizon_in_flight());
+            horizon_busy = crate::horizonstep::horizon_busy(hd.world.horizon_in_flight());
         }
         self.rig.fi.retire_to(self.rig.renderer.retired_frames(ctx));
         while self.rig.fi.is_full() {
@@ -362,7 +362,7 @@ impl Driver<'_> {
             lit_plan_ms,
         };
         self.pace();
-        Ok(Tick { record, settled, drawn, chunk_busy, water_nodes })
+        Ok(Tick { record, settled, drawn, horizon_busy, water_nodes })
     }
 
     /// Hold the loop to the frame step of script time: the next iteration starts one step after this one was due (a late frame

@@ -1,0 +1,1 @@
+- 2026-10-30 **rm-chunks-streaming** (ADR 0086, B6 PR 4): the chunk manager and the A-net chunk pack are removed; the horizon jobs moved to streaming::horizonjobs; STRM-038, STRM-039, STRM-041, STRM-042, STRM-056, GEN-081, GEN-082 removed; no default-path change

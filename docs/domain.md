@@ -186,6 +186,6 @@ History for reading old ADRs, logs and spike results. Nothing here describes the
 | chunk stage, A-net erosion | fine erosion and river routing per 5 km chunk on a 4 to 10 m raster, on top of the base field (ADR 0077 points on regional stages, GEN-036 to GEN-078) | off by default 2026-10-28; removed after M8 (owner, 2026-10-29); *code removal pending* | M9's erosion design (bake-side erosion; SPIKE-57) |
 | chunk erosion order (D3: `Under`, `OnTop`) | where the chunk stage ran relative to the edits | with the chunk stage; *code removal pending* | section 6 |
 | chunk re-solve | re-running the chunks an edit touched (STRM-056, GEN-081, GEN-082, GEN-087) | with the chunk stage; *code removal pending* | none; M9 deferred list |
-| chunk fade, stand-in share | the 1.5 s fade of a landing chunk's change and the plan's share of stand-in tiles (REND-039, STRM-052) | with the chunk stage; *code removal pending* | none |
+| chunk fade, stand-in share | the 1.5 s fade of a landing chunk's change and the plan's share of stand-in tiles (REND-039, STRM-052) | with the chunk stage; removed in B6 PR 3 (2026-10-30) | none |
 | block (regional square) | the first name of the chunk (SPIKE-34) | renamed 2026-10-23 | chunk, then retired |
 | hydrology chunks | informal name for the chunk stage's river and erosion work | with the chunk stage; *code removal pending* | the global coupled run's network; M9 channels |
