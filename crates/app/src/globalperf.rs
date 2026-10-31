@@ -1680,6 +1680,29 @@ mod tests {
                 b.extend_from_slice(&(*x as f32).to_le_bytes());
             }
             std::fs::write(format!("{dir}/{name}-orig-{w}x{w}.f32"), b).unwrap();
+            // SPIKE-71: `RELIEF_COARSE=f`: the same window at f x f cells, one point sample at each coarse cell's centre, with all octaves and with
+            // the crease octaves capped at `RELIEF_OCTAVES` (default 5), each timed.
+            if let Some(f) = std::env::var("RELIEF_COARSE").ok().and_then(|v| v.parse::<usize>().ok()) {
+                let wc = w / f;
+                let mut cd = Vec::with_capacity(wc * wc);
+                for j in 0..wc {
+                    for i in 0..wc {
+                        let (s, t) = ((i0 * 2 + (2 * i + 1) * f) as f64 / m as f64 - 1.0, (j0 * 2 + (2 * j + 1) * f) as f64 / m as f64 - 1.0);
+                        cd.push(face_to_direction(&TangentWarp, face, s, t));
+                    }
+                }
+                let cap: u32 = std::env::var("RELIEF_OCTAVES").ok().and_then(|v| v.parse().ok()).unwrap_or(5);
+                for (tag, c) in [("point", 12u32), ("oct", cap)] {
+                    planet_generators::erosion::spike71_set_octave_cap(c);
+                    let t1 = std::time::Instant::now();
+                    let hc = field.heights_threaded(&cd, 4);
+                    let secs = t1.elapsed().as_secs_f64();
+                    let b: Vec<u8> = hc.iter().flat_map(|x| (*x as f32).to_le_bytes()).collect();
+                    std::fs::write(format!("{dir}/{name}-{tag}{c}-{wc}x{wc}.f32"), b).unwrap();
+                    println!("RELIEF {name}: coarse {tag} {c} octaves, {wc}^2 sampled in {secs:.2} s");
+                }
+                planet_generators::erosion::spike71_set_octave_cap(12);
+            }
             let land = h.iter().filter(|&&x| x > 0.0).count() as f64 / h.len() as f64;
             println!(
                 "RELIEF {name}: face {} cells i {i0} j {j0} ({w}^2), dx {dx:.2} m, land {:.1} %, min {:.0} max {:.0} m, sampled in {:.1} s",

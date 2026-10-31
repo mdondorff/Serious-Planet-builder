@@ -108,10 +108,23 @@ fn crease_range(nlo: f64, nhi: f64) -> (f64, f64) {
     (crease(a), crease(b))
 }
 
+/// SPIKE-71 (spike code, never merged): octaves at or above this index are left out (12: none), for a coarse sampling of the field.
+static SPIKE71_OCTAVE_CAP: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(OCTAVES);
+pub fn spike71_set_octave_cap(n: u32) {
+    SPIKE71_OCTAVE_CAP.store(n, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// The normalised crease sum at a direction in two parts, the coarse octaves (below [`CREASE_SPLIT`]) and the fine ones: their sum lies in [-0.75, 0.25].
 fn crease_parts(seed: u64, dir: Vec3) -> (f64, f64) {
     let (mut coarse, mut fine, mut amp, mut norm, mut freq) = (0.0, 0.0, 1.0, 0.0, BASE_FREQUENCY);
+    let cap = SPIKE71_OCTAVE_CAP.load(std::sync::atomic::Ordering::Relaxed);
     for o in 0..OCTAVES {
+        if o >= cap {
+            norm += amp;
+            amp *= PERSISTENCE;
+            freq *= 2.0;
+            continue;
+        }
         let term = amp * crease(layer_noise(seed, LAYER_CREASE, o, dir * freq));
         if o < CREASE_SPLIT {
             coarse += term;
