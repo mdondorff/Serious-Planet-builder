@@ -52,9 +52,7 @@ impl GeoPoint {
 
     /// The unit direction of the point.
     pub fn dir(self) -> Vec3 {
-        let (lat, lon) = (self.lat_deg * DEG_TO_RAD, self.lon_deg * DEG_TO_RAD);
-        let c = libm::cos(lat);
-        Vec3::new(c * libm::cos(lon), c * libm::sin(lon), libm::sin(lat))
+        Vec3::from_lat_lon(self.lat_deg * DEG_TO_RAD, self.lon_deg * DEG_TO_RAD)
     }
 
     /// The point a unit (or any non-zero) direction looks at.

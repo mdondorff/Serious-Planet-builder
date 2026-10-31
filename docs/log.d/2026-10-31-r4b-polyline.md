@@ -1,0 +1,1 @@
+- 2026-10-31 **r4b-polyline** (R4b): `GeoPoint::dir` in `editor/polyline.rs` is `Vec3::from_lat_lon` (the same arithmetic, bit for bit); `of_dir` keeps its own `sqrt` because `Vec3::lat_lon` uses `hypot`, which can differ in the last bit and would move the stored points of a split line; B7b row done
