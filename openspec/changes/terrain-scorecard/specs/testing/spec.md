@@ -4,7 +4,7 @@
 `planet_testkit::glo30` SHALL read a Copernicus GLO-30 COG GeoTIFF tile: the TIFF tags, deflate (through `miniz_oxide`) with the floating-point predictor, tiles or strips, the georeference (origin and pixel scale) and the no-data value, into an f32 raster with marked no-data cells. It SHALL refuse a tile with any other compression, predictor or sample format, naming the tag. `planet-testkit` stays a dev-dependency.
 
 Verify: A, B
-Status: planned
+Status: active
 Source: SPIKE-55 (reader in Python, outside the repo), SPIKE-57, GLO-30 licence notes
 
 #### Scenario: Round trip
@@ -13,7 +13,7 @@ Source: SPIKE-55 (reader in Python, outside the repo), SPIKE-57, GLO-30 licence 
 
 #### Scenario: A real tile
 - **WHEN** `PLANET_GLO30_DIR` names the sample tiles and N47E011 is read
-- **THEN** the p50 slope of its central 0.5-degree square at 30 m lies within 0.5 degrees of SPIKE-55's 19.3; without the variable the check is NOT RUN
+- **THEN** the p50 slope of the whole tile (central differences at the true metric spacing) lies within 0.5 degrees of SPIKE-55's 19.3, which checks the decoder; without the variable the check is NOT RUN, never a pass
 
 ### Requirement: TEST-079 The terrain scorecard run
 The scorecard run SHALL compute, for each landform of the sites file, the seven descriptors (GEN-089 to GEN-092) on three rasters: the real tile's central 0.5-degree square and the generator's two matched sites (`world.field()` of the store), each 1,853 x 1,853 cells at 30 m on an east-north grid. Per site and descriptor it SHALL give a distance to the tile: Wasserstein-1 over percentiles p1 to p99 divided by the real p5-to-p95 range for continuous descriptors, L1 between class histograms for geomorphons, and the generator-to-real ratio for drainage density.
