@@ -36,7 +36,7 @@ Source: ADR 0083 point 2, BUDG-003, BUDG-004
 - **THEN** they start in the order frame-critical, visible, visible, prefetch, idle, idle
 
 ### Requirement: BUDG-009 Pool API and fan-out on the caller's share
-A subsystem SHALL spawn background work on its `Share` (a job with a class, or a `Spawner`) and SHALL fan a computation out over it with `fan_out`, which returns the results in index order whatever the number of workers and the ceiling (CON-14). The calling thread SHALL work on the indices too, so a fan-out makes progress when every worker is busy; helpers SHALL stay inside the share's ceiling; a panic of the work SHALL be raised in the caller after every index has finished and SHALL not end a worker.
+A subsystem SHALL spawn background work on its `Share` (a job with a class, or a `Spawner`) and SHALL fan a computation out over it with `fan_out`, which returns the results in index order whatever the number of workers and the ceiling (CON-14). The calling thread SHALL work on the indices too, so a fan-out makes progress when every worker is busy; helpers SHALL stay inside the share's ceiling; a panic of the work SHALL be raised in the caller after every index has finished and SHALL not end a worker. Code below the job system (generators, frame) SHALL fan its work out through an injected `planet_core::par::Par` (CON-04); the share's `Par` takes the free slots of the share as permits (counted as running until given back), runs the chunks on that many scoped threads beside the calling job, and gives the permits back, so the ceiling holds without a lifetime erasure.
 
 Verify: A
 Status: active

@@ -511,8 +511,8 @@ impl HeightField for StampStage<'_> {
         self.add_stamps(dirs, base, stop)
     }
 
-    fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), threads: usize) -> Vec<f64> {
-        let base = self.base.heights_threaded_until(dirs, stop, threads);
+    fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), par: &dyn planet_core::par::Par) -> Vec<f64> {
+        let base = self.base.heights_threaded_until(dirs, stop, par);
         self.add_stamps(dirs, base, stop)
     }
 

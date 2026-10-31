@@ -175,9 +175,9 @@ impl HeightField for Spy {
         self.dirs.lock().unwrap().extend_from_slice(dirs);
         self.inner.heights_until(dirs, stop)
     }
-    fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), threads: usize) -> Vec<f64> {
+    fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), par: &dyn planet_core::par::Par) -> Vec<f64> {
         self.dirs.lock().unwrap().extend_from_slice(dirs);
-        self.inner.heights_threaded_until(dirs, stop, threads)
+        self.inner.heights_threaded_until(dirs, stop, par)
     }
     fn seed(&self) -> u64 {
         self.inner.seed()
@@ -273,8 +273,8 @@ fn the_heights_of_a_tile_are_bit_identical_at_any_thread_count_batch_order_and_b
     let dirs: Vec<Vec3> =
         (0..=16u32).flat_map(|l| (0..=16u32).map(move |k| (k, l))).map(|(k, l)| tile.sample_direction(&TangentWarp, 16, k, l)).collect();
     let one = s.heights(&dirs);
-    let threaded1 = s.heights_threaded(&dirs, 1);
-    let threaded3 = s.heights_threaded(&dirs, 3);
+    let threaded1 = s.heights_threaded(&dirs, &1);
+    let threaded3 = s.heights_threaded(&dirs, &3);
     let single: Vec<f64> = dirs.iter().map(|d| s.height(*d)).collect();
     let mut reversed: Vec<Vec3> = dirs.clone();
     reversed.reverse();

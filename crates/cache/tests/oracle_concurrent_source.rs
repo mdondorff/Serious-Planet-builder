@@ -81,7 +81,7 @@ fn a_threaded_batch_over_the_store_decodes_each_block_once_whatever_the_budget_a
         for threads in [1usize, 2, 20] {
             let src = StoreSource::with_budget(&store, &w, RES, blocks * BLOCK_BYTES).unwrap();
             let field = ErosionGenerator.field(&GenContext::new(&def), BodyId::PLANET, &src, key).unwrap();
-            let got: Vec<u64> = field.heights_threaded(&dirs, threads).iter().map(|h| h.to_bits()).collect();
+            let got: Vec<u64> = field.heights_threaded(&dirs, &threads).iter().map(|h| h.to_bits()).collect();
             assert!(got == reference, "budget {blocks} blocks, {threads} threads: heights differ");
             assert!(
                 src.stats().decodes <= distinct,

@@ -58,6 +58,8 @@ mod morph;
 mod mouselook_replay;
 #[path = "overlay.rs"]
 mod overlay;
+#[path = "par_cost.rs"]
+mod par_cost;
 #[path = "pick.rs"]
 mod pick;
 #[path = "pipeline.rs"]

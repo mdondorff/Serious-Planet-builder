@@ -11,7 +11,7 @@ use planet_frame::managed::{FrameCounts, ManagedLoop, TileSink, UploadStats};
 use planet_frame::pipeline::{
     residency_of, DrawKind, FrameColumns, FramesInFlight, PlanField, PlanPipeline, PlanWorker, MAX_FRAMES_IN_FLIGHT,
 };
-use planet_frame::{plan_terrain_threaded, PlanError, ResidencySet, SelectionCache, TerrainPlan, TerrainRequest};
+use planet_frame::{PlanError, ResidencySet, SelectionCache, TerrainPlan, TerrainRequest};
 use planet_generators::compact::CompactTile;
 use planet_render::{GpuContext, RgbaFrame, TerrainRenderer};
 use planet_streaming::jobs::{Class, JobSystem};
@@ -28,9 +28,9 @@ impl PlanField for WorldPlanner {
         self.0.definition().revision()
     }
 
-    fn plan(&self, req: &TerrainRequest, cache: &mut SelectionCache, threads: usize) -> Result<TerrainPlan, PlanError> {
+    fn plan(&self, req: &TerrainRequest, cache: &mut SelectionCache, par: &dyn planet_core::par::Par) -> Result<TerrainPlan, PlanError> {
         let field = self.0.field().map_err(PlanError::HeightField)?;
-        plan_terrain_threaded(req, field.as_ref(), cache, threads)
+        planet_frame::plan_terrain_par(req, field.as_ref(), cache, par)
     }
 
     fn residency(&self, req: &TerrainRequest, cache: &mut SelectionCache) -> Result<ResidencySet, PlanError> {
@@ -122,14 +122,14 @@ impl Rig {
         // a measured frame, ADR 0032).
         renderer.warm_up(ctx);
         crate::stall::phase_mark("renderer warm-up");
-        let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
         // One job system for the rig (BUDG-004): the tile workers below normal priority (ADR 0046) and the plan worker, a frame-critical thread at normal priority,
         // on the one share `terrain`, whose ceiling holds both.
         let system = Arc::new(JobSystem::with_frame_workers(gen.workers, gen.priority, 1, Priority::Normal));
         let terrain = system.share("terrain", gen.workers + 1);
         let plan_pool: Arc<dyn Spawner> = Arc::new(terrain.classed(Class::FrameCritical));
+        let plan_par = Arc::new(terrain.par());
         let tile_pool: Arc<dyn Spawner> = Arc::new(terrain);
-        let pipe = PlanPipeline::new(PlanWorker::new(plan_pool, Arc::new(WorldPlanner(Arc::clone(world))), threads));
+        let pipe = PlanPipeline::new(PlanWorker::with_par(plan_pool, Arc::new(WorldPlanner(Arc::clone(world))), plan_par));
         // The streamer counts its slots in the renderer's pools: what it places, the renderer can hold.
         let pool = *renderer.pool_config();
         let clock: Arc<dyn planet_streaming::Clock> = Arc::new(SystemClock::new());

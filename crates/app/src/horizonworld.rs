@@ -322,7 +322,7 @@ impl ChunkHorizonBaker {
                 dirs.push(self.lat.direction_ext(face, x0 + i as i64, y0 + j as i64));
             }
         }
-        field.heights_threaded_until(&dirs, &|| false, self.threads).into_iter().map(|h| h as f32).collect()
+        field.heights_threaded_until(&dirs, &|| false, &self.threads).into_iter().map(|h| h as f32).collect()
     }
 
     /// The heights of the chunk-sized block `(bx, by)` of `face`'s plane: from the cache under `tile_key`, else from the field (and kept under

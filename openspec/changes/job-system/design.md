@@ -32,3 +32,6 @@
 3. The spawn cost is measured against the plan job's time. Only above 1 % is a pooled version with erasure considered, in its own PR with a numerics-reviewer pass.
 4. CON-14 test: the heights are bit-exact for 1, 2 and k chunks and for the fake `Par`.
 5. Built after B6 PR 6 merges (it edits `generators`).
+
+## PR 3b: what was measured (opus-planner's 1 % rule)
+`frame/tests/par_cost.rs` (ignored diagnostic): one fan-out of 8 trivial chunks costs 252 us on the share's `Par` and 231 us on plain scoped threads (what the plan job paid before), medians of 201; a cold plan job of the 200 m view on the reference field (cheap to read) takes 14.3 ms. The fan-out is 1.8 % of that plan job, as it was before this change; what the share adds is 21 us (0.15 %). A plan over the production store is longer, so both ratios are upper bounds there. The pooled version with lifetime erasure is not needed for this change.

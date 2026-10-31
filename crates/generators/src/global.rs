@@ -11,6 +11,7 @@
 //! snapshots and known answers do not move. Hydrology is not here (SPIKE-03).
 
 use planet_core::cube::{face_to_direction, FaceMapping};
+use planet_core::par::Par;
 use planet_core::{Face, TileId, Vec3};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -1230,16 +1231,17 @@ pub fn eval_gathered_threads(
     src: &dyn LatticeSource,
     dirs: &[Vec3],
     stop: &(dyn Fn() -> bool + Sync),
-    threads: usize,
+    par: &dyn Par,
     footprint: &(dyn Fn(&dyn LatticeSource, Vec3) + Sync),
     reach: Option<u32>,
     eval: &(dyn Fn(&dyn LatticeSource, Vec3) -> f64 + Sync),
 ) -> Vec<f64> {
+    let threads = par.threads();
     if threads <= 1 {
         return eval_gathered_from(src, dirs, stop, footprint, reach, eval, 2);
     }
     if !gatherable(src, dirs.len(), 2) {
-        return crate::height::eval_chunked(dirs, stop, threads, &|d| eval(src, d));
+        return crate::height::eval_chunked(dirs, stop, par, &|d| eval(src, d));
     }
     let out = vec![0.0; dirs.len()];
     let Some(by_block) = footprint_by_block(src, dirs, stop, footprint, reach, None) else { return out };
@@ -1253,33 +1255,31 @@ pub fn eval_gathered_threads(
     }
     let next = std::sync::atomic::AtomicUsize::new(0);
     let stopped = std::sync::atomic::AtomicBool::new(false);
-    let parts: Vec<Vec<(u64, Result<GlobalSample, ReadError>)>> = std::thread::scope(|s| {
-        let handles: Vec<_> = (0..threads.min(groups.len()))
-            .map(|_| {
-                planet_core::thread::spawn_named(s, "lattice-gather", || {
-                    let mut mine = Vec::new();
-                    loop {
-                        let g = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        if g >= groups.len() {
-                            return mine;
-                        }
-                        if stop() {
-                            stopped.store(true, std::sync::atomic::Ordering::Relaxed);
-                            return mine;
-                        }
-                        for (n, &(face, _, k)) in by_block[groups[g].clone()].iter().enumerate() {
-                            if n % 64 == 63 && stop() {
-                                stopped.store(true, std::sync::atomic::Ordering::Relaxed);
-                                return mine;
-                            }
-                            mine.push(read_cell(src, face, k));
-                        }
-                    }
-                })
-            })
-            .collect();
-        handles.into_iter().map(|h| h.join().expect("block read thread")).collect()
+    type Cells = Vec<(u64, Result<GlobalSample, ReadError>)>;
+    let readers = threads.min(groups.len());
+    let slots: Vec<std::sync::Mutex<Cells>> = (0..readers).map(|_| std::sync::Mutex::new(Vec::new())).collect();
+    par.run(readers, &|slot| {
+        let mut mine = Vec::new();
+        'groups: loop {
+            let g = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if g >= groups.len() {
+                break;
+            }
+            if stop() {
+                stopped.store(true, std::sync::atomic::Ordering::Relaxed);
+                break;
+            }
+            for (n, &(face, _, k)) in by_block[groups[g].clone()].iter().enumerate() {
+                if n % 64 == 63 && stop() {
+                    stopped.store(true, std::sync::atomic::Ordering::Relaxed);
+                    break 'groups;
+                }
+                mine.push(read_cell(src, face, k));
+            }
+        }
+        *slots[slot].lock().expect("block read slot") = mine;
     });
+    let parts: Vec<Cells> = slots.into_iter().map(|m| m.into_inner().expect("block read slot")).collect();
     // (A thread that saw the flag recorded it: the table may be partial, whatever the flag says now.)
     if stopped.load(std::sync::atomic::Ordering::Relaxed) || stop() {
         return out;
@@ -1287,7 +1287,7 @@ pub fn eval_gathered_threads(
     let mut cells: Vec<_> = parts.into_iter().flatten().collect();
     cells.sort_unstable_by_key(|c| c.0);
     let table = CellTable { res: src.res(), cells };
-    crate::height::eval_chunked(dirs, stop, threads, &|d| eval(&table, d))
+    crate::height::eval_chunked(dirs, stop, par, &|d| eval(&table, d))
 }
 
 /// The cells a set of reads needs, fetched once from a block-structured source in block order (GEN-020): a source of its own that

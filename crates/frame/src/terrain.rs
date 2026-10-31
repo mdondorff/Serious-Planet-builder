@@ -198,7 +198,7 @@ fn origin_heights(
     map: &(dyn planet_core::cube::FaceMapping + Sync),
     field: &dyn HeightField,
     cache: &mut SelectionCache,
-    threads: usize,
+    par: &dyn planet_core::par::Par,
 ) -> Vec<f64> {
     let reuse = !field.reads_cells() || cache.tracks_items();
     let mut heights = vec![f64::NAN; selection.nodes.len()];
@@ -217,7 +217,7 @@ fn origin_heights(
     // Invariant: a batch that was stopped (`heights_until`, `heights_threaded_until`) returns 0.0 for the directions it did not
     // finish, so a caller that can cancel MUST discard the results of a stopped batch (never memoise them). This call has no stop
     // flag, so its batch is complete; a field whose wrapper cancels is checked by the plan worker before it uses the plan.
-    let batch = field.heights_threaded(&dirs, threads.max(1));
+    let batch = field.heights_threaded(&dirs, par);
     for (&i, h) in missing.iter().zip(batch) {
         heights[i] = if reuse { cache.origin_height(selection.nodes[i].tile, || h) } else { h };
     }
@@ -241,7 +241,7 @@ pub fn plan_terrain_field(req: &TerrainRequest, field: &dyn HeightField) -> Resu
 /// [`plan_terrain_field`] reusing the per-tile selection work of earlier plans in `cache` (a renderer plans every frame;
 /// the plan is identical to the uncached one).
 pub fn plan_terrain_cached(req: &TerrainRequest, field: &dyn HeightField, cache: &mut SelectionCache) -> Result<TerrainPlan, PlanError> {
-    plan_terrain_keyed(req, field, cache, None, 1)
+    plan_terrain_keyed(req, field, cache, None, &1usize)
 }
 
 /// [`plan_terrain_cached`] with the origin heights of the nodes the cache does not hold yet evaluated as ONE batch on `threads` threads, each block read once (LOD-009, GEN-020; STRM-016,
@@ -253,7 +253,17 @@ pub fn plan_terrain_threaded(
     cache: &mut SelectionCache,
     threads: usize,
 ) -> Result<TerrainPlan, PlanError> {
-    plan_terrain_keyed(req, field, cache, None, threads)
+    plan_terrain_keyed(req, field, cache, None, &threads)
+}
+
+/// [`plan_terrain_threaded`] with the threads of an injected [`Par`](planet_core::par::Par): the job system's share, so the plan job's helpers are counted (BUDG-009).
+pub fn plan_terrain_par(
+    req: &TerrainRequest,
+    field: &dyn HeightField,
+    cache: &mut SelectionCache,
+    par: &dyn planet_core::par::Par,
+) -> Result<TerrainPlan, PlanError> {
+    plan_terrain_keyed(req, field, cache, None, par)
 }
 
 /// The first node whose morph interval is empty (it starts after 95 % of its length: no room for a crack-free morph), if any. The
@@ -271,7 +281,7 @@ pub(crate) fn plan_terrain_keyed(
     field: &dyn HeightField,
     cache: &mut SelectionCache,
     key_override: Option<&dyn Fn(TileId) -> u64>,
-    threads: usize,
+    par: &dyn planet_core::par::Par,
 ) -> Result<TerrainPlan, PlanError> {
     if field.seed() != req.seed {
         return Err(PlanError::HeightField(format!("field seed {} differs from request seed {}", field.seed(), req.seed)));
@@ -305,7 +315,7 @@ pub(crate) fn plan_terrain_keyed(
     }
     // A field that reads authored items keys its tiles by their reads: what the cache holds of a tile whose reads changed is dropped (STRM-027).
     cache.verify_tiles(selection.nodes.iter().map(|n| n.tile), map.as_ref(), field);
-    let heights = origin_heights(&selection, map.as_ref(), field, cache, threads);
+    let heights = origin_heights(&selection, map.as_ref(), field, cache, par);
     let keyer = planet_generators::mesh::MeshKeyer::new(field, map.as_ref(), req.lod.cells, req.lod.radius_m);
     let derive_key = |tile: TileId| key_override.map_or_else(|| keyer.key(tile), |f| f(tile));
     let mut nodes: Vec<TerrainDraw> = selection
@@ -590,7 +600,7 @@ mod tests {
             *derived.borrow_mut().entry(t).or_insert(0u32) += 1;
             hash_u64s(0x7465_7374, &[t.raw(), u64::from(req.lod.cells)])
         };
-        let plan = plan_terrain_keyed(req, &Reference(1), cache, Some(&key), 1).unwrap();
+        let plan = plan_terrain_keyed(req, &Reference(1), cache, Some(&key), &1usize).unwrap();
         (plan, derived.into_inner())
     }
 
