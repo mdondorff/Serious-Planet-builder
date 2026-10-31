@@ -237,6 +237,7 @@ fn a_key_without_a_stage_is_what_it_was_and_every_wrapper_that_forwards_the_sour
         }
     }
     let mut forwarding = 0;
+    let mut found = Vec::new();
     for f in files {
         let text = std::fs::read_to_string(&f).unwrap_or_default();
         if text.contains("fn source_key(&self) -> Option<[u8; 16]> {") && text.contains(".source_key()") && !f.ends_with("stamp_keys.rs") {
@@ -245,6 +246,7 @@ fn a_key_without_a_stage_is_what_it_was_and_every_wrapper_that_forwards_the_sour
                 text.lines().zip(text.lines().skip(1)).any(|(a, b)| a.contains("fn source_key(&self)") && b.contains(".source_key()"));
             if forwards {
                 forwarding += 1;
+                found.push(f.display().to_string());
                 assert!(
                     text.contains("fn upstream(&self)")
                         && text.contains("fn stage_params(&self)")
@@ -256,5 +258,8 @@ fn a_key_without_a_stage_is_what_it_was_and_every_wrapper_that_forwards_the_sour
             }
         }
     }
-    assert!(forwarding >= 4, "the scan found the wrappers (Bound, water, skeleton, origin_batch), {forwarding}");
+    assert_eq!(
+        forwarding, 6,
+        "the scan finds the six wrappers (editscale, skeleton, frame tests support origin_batch, generators chain, height, water); found {forwarding}: {found:?}"
+    );
 }

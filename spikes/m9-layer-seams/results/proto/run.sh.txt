@@ -1,0 +1,6 @@
+#!/bin/bash
+cd C:/DEV/Serious-Planet-Builder/.claude/worktrees/sonnet-spikes-36fc88
+cpu=$(powershell -NoProfile -Command "(Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average")
+echo "=== seam $(date +%H:%M:%S) cpu ${cpu}%"
+cmd //c start "" //b //wait //belownormal target/s68build/release/s68seam.exe C:/DEV/SeriousPlanetData/spike-r3/relief68 C:/DEV/SeriousPlanetData/spike-r3/relief68/out alps,blackforest
+echo "=== done $(date +%H:%M:%S)"

@@ -1422,6 +1422,21 @@ Detail:
 - **WHEN** the scene runs with `--smoke` over an in-memory bake
 - **THEN** it ends without error, writes the log with four altitudes, and says it is not a measurement
 
+### Requirement: TEST-078 The GLO-30 reader
+`planet_testkit::glo30` SHALL read a Copernicus GLO-30 COG GeoTIFF tile: the TIFF tags, deflate (through `miniz_oxide`) with the floating-point predictor, tiles or strips, the georeference (origin and pixel scale) and the no-data value, into an f32 raster with marked no-data cells. It SHALL refuse a tile with any other compression, predictor or sample format, naming the tag. `planet-testkit` stays a dev-dependency.
+
+Verify: A, B
+Status: active
+Source: SPIKE-55 (reader in Python, outside the repo), SPIKE-57, GLO-30 licence notes
+
+#### Scenario: Round trip
+- **WHEN** a test writes a small TIFF with deflate and predictor 3 in two tiles and reads it back
+- **THEN** the floats, the georeference and the no-data cells equal the input, and a tile with LZW compression is refused naming the compression tag
+
+#### Scenario: A real tile
+- **WHEN** `PLANET_GLO30_DIR` names the sample tiles and N47E011 is read
+- **THEN** the p50 slope of the whole tile (central differences at the true metric spacing) lies within 0.5 degrees of SPIKE-55's 19.3, which checks the decoder; without the variable the check is NOT RUN, never a pass
+
 ### Requirement: TEST-077 The preview pair comparison
 `planet_testkit::pair::compare_pair` SHALL take the stale frame, the preview frame and the exact frame of one pose and a grey threshold, and SHALL report the pixels the stale frame has more than the threshold from the exact frame, the pixels the preview frame has, the mean and largest channel difference of the preview and the bounding box of its differing pixels. The verdict SHALL be Within when the preview leaves at most a twentieth of the changed pixels, Over otherwise, and TooSmall, never a pass, when the edit changes 50 pixels or fewer. Frames of different sizes SHALL be refused.
 

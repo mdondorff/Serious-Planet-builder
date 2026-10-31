@@ -55,6 +55,12 @@ Reader dependency: `miniz_oxide` 0.8.9 (pure Rust inflate; MIT OR Zlib OR Apache
 | Report | under 1 s |
 | Total | **at most 60 s** on Rasierklinge (BUILD-029). A correctness run, not a perf verdict: it needs no window (ADR 0087 point 3 lists no such check) |
 
+### 7. Geomorphon and curvature definitions (PR 1, accepted by opus-planner 2026-10-31)
+- Class table: from Jasiewicz and Stepinski (2013), checked against GRASS `r.geomorphon` `geom.c` (`determine_form`); no code adopted, no GRASS code or comments copied (GRASS is GPL). All 45 (lower, higher) pairs are pinned by a test.
+- Ternary rule: the reference default (`compare_multi`): a direction is non-level only where its angle exceeds the threshold; when both the zenith and the nadir angle exceed it the larger wins, and an exact tie is "higher". It is not the paper's sum rule (zenith plus nadir above the threshold). Decision: follow the reference default.
+- Contour curvature: uncounted where the gradient is below 1e-3, because its 1/g^3 term turns the near-flat noise of GLO-30 (lake edges, resampling) into the p1 and p99 tails. Profile curvature keeps the 1e-6 floor. Stated in GEN-089.
+- Real-tile check of the reader (PR 2): the whole-tile p50 slope of N47E011 reproduces SPIKE-55's 19.3 (19.26); the central 0.5-degree square reads 23.7. The central-square real rows of the scorecard are re-stated, not compared with SPIKE-55.
+
 ## Tests (tier A unless named)
 | Kernel | Synthetic input | Expected |
 |---|---|---|
@@ -68,7 +74,7 @@ Reader dependency: `miniz_oxide` 0.8.9 (pure Rust inflate; MIT OR Zlib OR Apache
 | Reader | a small TIFF written by the test (deflate, predictor 3, two strips or tiles) | the decoded floats equal the input; georeference and no-data read back |
 | Distances | two identical and two shifted percentile sets | 0 and the known shift over the range |
 | Report | a synthetic run result | the notice is the first line after the title; no table over four columns |
-- Tier B (ignored, `PLANET_GLO30_DIR`): the reader decodes `N47E011` and the central-square p50 slope is within 0.5 degrees of SPIKE-55's 19.3. NOT RUN when the directory is absent.
+- Tier B (ignored, `PLANET_GLO30_DIR`): the reader decodes `N47E011` and the whole-tile p50 slope is within 0.5 degrees of SPIKE-55's 19.3 (the central square reads 23.7: the real rows are re-stated, not compared). NOT RUN when the directory is absent.
 
 ## Risks
 | Risk | Control |
