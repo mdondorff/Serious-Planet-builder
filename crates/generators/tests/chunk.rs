@@ -1,4 +1,4 @@
-//! GEN-034, GEN-035: the chunk scope, its key and the chunk grid with its apply level.
+//! GEN-034, GEN-035: the chunk scope, its key, the chunk grid with its apply level and the lattice of its cells.
 
 use std::collections::BTreeMap;
 
@@ -96,4 +96,31 @@ fn the_apply_level_is_the_coarsest_level_whose_vertex_spacing_is_at_most_twice_t
         assert!(l >= last, "cell {cell}: level {l} after {last}");
         last = l;
     }
+}
+
+// spec: GEN-035
+#[test]
+fn the_cells_of_a_chunk_are_the_cells_of_its_tile_and_the_chunks_a_tile_reads_start_with_its_own() {
+    use planet_generators::chunkfield::{chunks_read_by, Cell, ChunkLattice};
+    let lat = ChunkLattice::new(16).unwrap();
+    let per = lat.cells_per_chunk();
+    for tile in [
+        TileId::new(Face(2), CHUNK_GRID_LEVEL, 1000, 1000).unwrap(),
+        TileId::new(Face(0), CHUNK_GRID_LEVEL, 2047, 5).unwrap(),
+        TileId::new(Face(5), CHUNK_GRID_LEVEL, 0, 0).unwrap(),
+    ] {
+        for (i, j) in [(0, 0), (1, 0), (per - 1, per - 1), (per / 2, 3)] {
+            let cell = Cell { face: tile.face().0, i: tile.x() * per + i, j: tile.y() * per + j };
+            assert_eq!(TileId::from_direction(&TangentWarp, lat.direction(cell), CHUNK_GRID_LEVEL), tile, "cell ({i}, {j}) of {tile:?}");
+            assert_eq!(lat.cell_at(lat.direction(cell)), cell, "a cell holds its own centre");
+        }
+        let own = (tile.face().0, tile.x(), tile.y());
+        assert_eq!(chunks_read_by(&lat, CHUNK_GRID_LEVEL, 0, tile), vec![own], "a tile of the grid level reads its own chunk");
+        let reads = chunks_read_by(&lat, CHUNK_GRID_LEVEL, i64::from(per), tile);
+        assert_eq!(reads[0], own, "own chunk first");
+        assert!(reads.len() > 1 && reads.windows(2).skip(1).all(|w| w[0] < w[1]), "the neighbours follow in a fixed order: {reads:?}");
+    }
+    // A tile coarser than the grid reads no chunk.
+    let coarse = TileId::new(Face(2), CHUNK_GRID_LEVEL - 1, 5, 5).unwrap();
+    assert!(chunks_read_by(&lat, CHUNK_GRID_LEVEL, 0, coarse).is_empty());
 }

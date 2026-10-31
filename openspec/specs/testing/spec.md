@@ -1456,6 +1456,19 @@ Detail: The pair is a measurement of the preview, not a gate: a pair over the bo
 - **WHEN** the preview leaves more than a twentieth of the changed pixels in a view
 - **THEN** the test still passes and the verdict is printed
 
+### Requirement: TEST-075 The definition hash survives the removal of the chunk stage
+A world definition SHALL hash to the value it had before the chunk stage was removed (ADR 0086, decision 3): without items, with an item and the default `Under` chunk stage, and with the layer set `OnTop`. The `chunk_stage` setting SHALL stay parseable and hashed, so a store built before the removal opens without a rebuild.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-31), ADR 0086 decision 3, GEN-039, WDEF-018
+
+Detail: The expected values were computed on main before the generator cut; the test pins them as literals.
+
+#### Scenario: The pinned hashes
+- **WHEN** the three definitions are built and hashed
+- **THEN** each equals its pinned value and `CHAIN_ORDER_ERA` is 2
+
 ### Requirement: TEST-074 The owner package says what ran
 `cargo xtask package` SHALL run the `capture stills` of the default look of each look-review site and `capture flights` into `target/review/owner-package/<date>/` and SHALL write `package.md` there with one row per item: PASS, FAIL or NOT RUN, with its reason, and its files. An item with no store SHALL be NOT RUN, a failed command FAIL with its message, a command that wrote no file FAIL. A failed item SHALL NOT stop the others, and the command SHALL fail when an item failed.
 

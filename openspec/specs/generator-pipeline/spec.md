@@ -752,89 +752,30 @@ Source: ADR 0077 points 2 and 4, ADR 0022, STRM-011, CON-08, CON-14
 - **THEN** exactly the keys of that field's chunks change, and the tile and the chunk never share a key
 
 ### Requirement: GEN-035 Chunk grid and apply level
-Chunks SHALL lie on a fixed grid of the tiles of level 11 (whole coarse cells, about 5 km), and a chunk field SHALL state its raster cell size; its apply level SHALL be the coarsest tile level whose vertex spacing is at most twice that cell size (level 15 for 8 m cells, level 16 for 4 m), computed from the raster and never set by hand. The raster is read unfiltered from the apply level down (GEN-053).
+Chunks SHALL lie on a fixed grid of the tiles of level 11 (whole coarse cells, about 5 km), and the lattice of their cells SHALL state its raster cell size; its apply level SHALL be the coarsest tile level whose vertex spacing is at most twice that cell size (level 15 for 8 m cells, level 16 for 4 m), computed from the raster and never set by hand. The cells of a chunk SHALL be the cells of its tile, and the chunks a tile reads SHALL be listed own chunk first, then the neighbours its reads reach, in a fixed order.
 
 Verify: A
 Status: active
 Source: ADR 0077 point 5, SPIKE-34 (conditions 1 and 3), STRM-029
 
 #### Scenario: Apply level
-- **WHEN** a chunk field has 8 m cells, then 4 m cells
+- **WHEN** a chunk lattice has 8 m cells, then 4 m cells
 - **THEN** its apply level is 15, then 16
 
-### Requirement: GEN-036 Level-aware height
-The height capabilities of a field SHALL include `height_at_level(dir, level)`; for a field without chunk detail it SHALL equal `height(dir)` at every level, and for a chunk field it SHALL be the base plus the chunk change read from the pyramid at `level` for a level at or finer than the pyramid's top level (GEN-035), and the base for a coarser level. `height` SHALL remain position-only and SHALL equal `height_at_level` at the field's finest level. Tile generation SHALL read `height_at_level` with its own level.
-
-Verify: A
-Status: active
-Source: SPIKE-34 section 3, ADR 0077 point 5, GEN-020
-
-#### Scenario: Default
-- **WHEN** every existing field is sampled with `height_at_level` at levels 0 to 22
-- **THEN** each value equals `height(dir)` bit for bit
-
-#### Scenario: Chunk field
-- **WHEN** a chunk field with a ready chunk is sampled over the chunk at levels 13, 14 and 15, and at a level that reads the raster (finer than the apply level), with the top level at its default 14
-- **THEN** level 13 equals the base bit for bit, levels 14 and 15 read the box-filtered pyramid (base plus change), and the finest level equals the base plus the chunk's stored change at the cell centres
-
-### Requirement: GEN-037 Chunk pyramid steps
-A chunk's change SHALL be stored with a pyramid down to the apply level, each level box-filtered from the level below it (never from a coarser run). A tile at the apply level SHALL differ from its parent, at the parent's vertices, by at most 0.25 m at p99 for the stand-in compute; the steps between the coarser levels up to the pyramid's top are measured and recorded (design.md), not bounded.
-
-Verify: A
-Status: active
-Source: SPIKE-34 section 3, M8 plan criterion 3
-
-#### Scenario: Step against the parent
-- **WHEN** the stand-in chunk (30 m amplitude, 8 m cells) is ready and every tile of levels 14 and 15 over it is generated
-- **THEN** the height difference between a level-15 tile and its level-14 parent at the parent's vertices has p99 at most 0.25 m, and the test prints the p99, the maximum and the tile ids of the worst vertex on failure
-
-### Requirement: GEN-038 Chunk border agreement and determinism
-Neighbouring chunks SHALL agree on every shared border sample, across cube-face edges and at corners, and a chunk's result SHALL be bit-identical for 1, 2 and 8 threads and on Windows and Linux (fixed order, `libm`). A chunk field SHALL state its halo in metres as at least its step cap times its reach per step.
-
-Verify: A
-Status: active
-Source: ADR 0077 points 3 and 4, GEN-004, GEN-002, GEN-003, CON-14, M8 plan criterion 2
-
-#### Scenario: Borders
-- **WHEN** two neighbouring stand-in chunks are computed with the stated halo, in the middle of a face, across a face edge and at a cube corner
-- **THEN** their border rows agree to the bit, and with a halo below the rule the test reports the largest difference in metres and the chunk ids
-
-#### Scenario: Threads and systems
-- **WHEN** a chunk is computed on 1, 2 and 8 threads
-- **THEN** its hash is identical and equals the recorded known answer, which CI checks on Windows and Linux
+#### Scenario: Cells and reads
+- **WHEN** cells of chunks on the middle of a face, on a face edge and at a cube corner are placed, and the chunks read by a tile are listed
+- **THEN** each cell lies in the tile of its chunk and holds its own centre, and the list starts with the tile's own chunk and follows in a fixed order
 
 ### Requirement: GEN-039 The chunk stage's position per layer
-A layer SHALL have a `chunk_stage` setting, `Under` by default for a world with a chunk stage: the chain is base, stamps, chunk; `OnTop` (base, chunk, stamps) SHALL stay representable in the key.
+A layer SHALL have a `chunk_stage` setting, `Under` by default; `OnTop` SHALL stay representable and enter the definition hash (WDEF-018). The setting SHALL act on no build (ADR 0086): the stamps of a layer stack in the order of ADR 0007 whatever it says.
 
 Verify: A
 Status: active
-Source: M8 plan D3 (owner, 2026-10-26), ADR 0077 point 7, m8-chunk-version
+Source: M8 plan D3 (owner, 2026-10-26), ADR 0077 point 7, m8-chunk-version, ADR 0086
 
 #### Scenario: Default and refusal
-- **WHEN** a world with a chunk stage and no setting is built
-- **THEN** its layer's chain is base, stamps, chunk (nothing is refused), and `OnTop` set explicitly gives base, chunk, stamps
-
-### Requirement: GEN-053 The chunk pyramid's top level
-The chunk pyramid SHALL reach from the apply level up to a top level, by default tile level 14 (a parameter of the chunk field: level 11 needs about 285 chunks per view, level 14 about 5). A tile coarser than the top level SHALL be identity on the base field and key as the base (STRM-029). A tile at or finer than it SHALL read the pyramid at the continuous level of its vertex spacing over the cell size (GEN-037), the raster itself where that is 0.
-
-Verify: A
-Status: active
-Source: planner decision (option a, 2026-10-24), ADR 0077 point 5, SPIKE-34 section 3
-
-#### Scenario: Top level
-- **WHEN** a chunk field with its top level at 14 and a ready chunk is sampled at levels 13, 14 and 15, then with the top at 11
-- **THEN** level 13 equals the base bit for bit and levels 14 and 15 read the pyramid; with the top at 11, levels 11 to 13 read it too
-
-### Requirement: GEN-054 Heights of a field with chunk detail
-For a field with chunk detail the single-height rules (GEN-016, GEN-020) SHALL hold at each tile's own level: `height_at_level` of a tile's level is the value its tile, its batch (`heights_and_climate`, `heights_threaded_at_level`) and its origin carry, bit for bit, and the same point differs between a tile and its parent by the pyramid step of GEN-037. `height` SHALL be the value at the finest level. A field without chunk detail SHALL keep its one batch and its single height at every level.
-
-Verify: A
-Status: active
-Source: GEN-036, GEN-016, GEN-020, LOD-009
-
-#### Scenario: Tile, batch and origin
-- **WHEN** a chunk field's tile, its batch heights and its plan origin are compared with `height_at_level` at the tile's level
-- **THEN** they are equal bit for bit, and a field without chunk detail gives the same values at every level
+- **WHEN** a world with no setting is built, and then with a layer set to `OnTop`
+- **THEN** the layer is `Under` in the first, `OnTop` in the second (nothing is refused), and the layers stack in the order of ADR 0007 in both
 
 ### Requirement: GEN-044 The chunk horizon map
 `generators` SHALL bake, for a raster of heights with its halo, the horizon map of the chunk: per texel and per azimuth `k` of `A` evenly spaced azimuths from north, the elevation angle of the highest terrain along that azimuth out to the range, found by marching with steps that grow 4.5 % plus 2 m. The bake SHALL be a pure function of the raster, the halo and the parameters, independent of the thread count (CON-14).
@@ -879,116 +820,6 @@ Detail: The sun's azimuth SHALL be formed in each map's own frame: the geographi
 - **WHEN** a point has a chunk horizon of 3 degrees and a coarse horizon of 5 degrees at an azimuth, and the sun is 4 degrees and then 6 degrees high there
 - **THEN** the point is in shadow at 4 degrees and lit at 6 degrees, and with the coarse horizon absent the chunk map decides alone (and the coarse map alone before the chunk's lands), the ramp is monotone between its ends, the interpolation is exact at the stored azimuths and wraps, and the sun's azimuth is 0 toward north, a quarter turn toward east in both frames and differs between the two frames on a turned face
 
-### Requirement: GEN-047 The global network in the chunk raster
-A chunk stage of the A-net kind SHALL take the river network of a chunk from the stored global coupled run: the path from every coarse cell above `river_area_m2` (GEN-068) to its receiver, node to node (GEN-066), is the chunk's corridor, so neighbouring chunks find the same path through their shared border. The drainage area crossing the halo ring is injected as inflow, the initial fine heights are the coarse heights upsampled plus the base field's detail, and the corridor's bed is set by GEN-059. A chunk with no such cell SHALL have no corridor.
-
-Verify: A
-Status: active
-Source: ADR 0077 points 1 and 3, SPIKE-33 (two-scale scheme), SPIKE-35 item 1, GEN-040, STRM-043
-
-#### Scenario: One path for two chunks
-- **WHEN** two neighbouring chunks are given the same stored run
-- **THEN** their corridor polylines agree at the shared border to the bit, each starts and ends at a coarse cell centre (with no slide and no routing, else at the node of GEN-066), and the inflow at each ring equals the coarse area that crosses it
-
-### Requirement: GEN-048 The breach rule leaves no uphill channel
-After the incision no channel cell (drainage area over 50,000 m2) SHALL have a receiver higher than itself by more than 1 micrometre, except a link between two fixed corridor cells, which may climb by at most 5 cm (GEN-059). The rule is: channel cells take no diffusion and no slumping, a cell whose receiver is a higher ring cell is an outlet, and along the corridor's links a cell drains to the next cell of the path.
-
-Verify: A
-Status: active
-Source: SPIKE-35 item 1 (variant c4), ADR 0077 consequences
-
-#### Scenario: Zero uphill
-- **WHEN** a chunk of a terrain whose corridor runs uphill in places runs N = 30 steps
-- **THEN** 0 channel cells have a higher receiver, and two runs give the same receivers and heights, bit for bit
-
-### Requirement: GEN-049 The halo of an A-net chunk
-An A-net chunk SHALL state its halo (3 km by default) and SHALL, with it, equal the same run over a wider halo in every cell of its core: bit for bit where every channel chain meets a fixed cell (an anchor) inside the halo and every catchment lies within the area window, and to within 2 cm on a gentle valley where a stream runs a long way to the river. The reaches that bound this (breach window, area window, tributary step cap) are parameters of the stage and part of its definition.
-
-Verify: A, B
-Status: active
-Source: SPIKE-35 item 2, ADR 0077 point 4, GEN-038
-
-#### Scenario: Halo
-- **WHEN** two neighbouring chunks run with halos of 1.5, 3 and 5 km against the whole-region run
-- **THEN** the cores differ in 0 cells at 3 and 5 km, and the test prints the number of differing cells and the largest difference in metres at 1.5 km
-
-### Requirement: GEN-050 Jittered receivers
-The receiver of a cell SHALL be the steepest of its eight neighbours after scaling the slope of direction `k` by `1 + j (2 h - 1)`, `h` in `[0, 1)` a hash of the cell and `k`, with `j` 0.4: a function of position only, the same as the global run's jitter, so every chunk makes the same choice. The share of axis directions among the receivers of cells over 2e4 m2 SHALL be at most 0.56.
-
-Verify: A
-Status: active
-Source: SPIKE-35 item 3, GEN-040
-
-#### Scenario: Axis share
-- **WHEN** the receivers of a 4 m lattice of 49 km2 are chosen with j 0.4 and with j 0
-- **THEN** the axis share with jitter is at most 0.56 and below the share without, and two runs give the same receivers
-
-### Requirement: GEN-051 Diffusion and slumping
-After the incision a chunk SHALL apply hillslope diffusion and thermal slumping to its non-channel cells in a fixed order with `libm` only: diffusion within its stability bound, slumping moving the excess over the angle of repose to the lower neighbours for a fixed number of passes. Channel cells SHALL be unchanged by both, and the result SHALL be bit-identical for 1, 2 and 8 threads.
-
-Verify: A
-Status: active
-Source: SPIKE-33 stage model, ADR 0077 point 3, CON-14
-
-#### Scenario: Hillslopes
-- **WHEN** a chunk with steep slopes and a channel runs the processes
-- **THEN** the channel cells are unchanged, no non-channel cell exceeds the angle of repose by more than one pass can move, the volume moved equals the volume received, and the hash is the same on 1, 2 and 8 threads
-
-### Requirement: GEN-057 Corridor anchors follow the drawn ground
-The corridor of an A-net chunk SHALL be anchored at every polyline point at the base field's height there minus the valley depth `depth_m (A / area_ref_m2)^exponent` for the river's area `A` at that point, at most `lerp(cap_low_m, cap_m, rf)` with `rf` the relief factor (GEN-060; defaults: 3 m at 100 km2, exponent 0.5, `cap_m` 100 m, `cap_low_m` 30 m, so the cap is at most a third of `bound_m`, 300 m), and GEN-059 sets the bed from these raw anchors. The coupled run's absolute height SHALL not set an anchor. The law's constants are part of the stage's definition hash.
-
-Verify: A
-Status: active
-Source: owner decision 2026-10-25 (terrain relief into M8, part 1), GEN-047, learnings 2026-10-25
-
-#### Scenario: High ground over a low run
-- **WHEN** a chunk of a base 2,600 m above the coupled run runs its incision
-- **THEN** every anchor lies at most `cap_m` under the base, no core cell is cut by half the bound or more, and the depth of the law rises with the drainage area up to the cap
-
-### Requirement: GEN-058 The banks settle to the angle of repose
-After the incision steps an A-net chunk SHALL lower every free cell within `bank_rounds` (`ceil(bound_m / (talus cell_m)) + 6`, 48 at 8 m) rings of the core to at most `z(s) + talus x distance` of every protected cell `s` that is not in the outer ring (a channel, the corridor, an anchor), but not under a protected neighbour by more than `talus x distance`, and SHALL not move any protected cell. A cell SHALL only be lowered, and the core SHALL be the same for every halo of at least the stated one.
-
-Verify: A
-Status: active
-Source: planner decision 2026-10-25, GEN-051, learnings 2026-10-25 (walls), ADR 0074
-
-#### Scenario: A breach cut through a ridge
-- **WHEN** a chunk of a river that crosses a 600 m ridge runs with and without the settle
-- **THEN** without it more than ten bank pairs stand over the repose slope, with it at most one in twenty, no protected cell differs, and no cell is higher with it than without
-
-### Requirement: GEN-059 The bed of a river follows the ground and falls the whole way
-Every corridor cell of an A-net chunk SHALL be held at a bed interpolated along its segment from samples at every polyline point: the base height minus the depth law (GEN-057), as the running minimum from upstream along the main stem (the donor of the largest area) over `window` segments, each sample a least fall under the one above and at most `cut_cap_m` under the ground. `window` (16), `cut_cap_m` (200 m) and the fall law are part of the definition hash.
-
-Verify: A
-Status: active
-Source: SPIKE-40, SPIKE-42, ADR 0081, ADR 0082, GEN-057
-
-#### Scenario: A ridge across the river
-- **WHEN** a chunk of a river over a base with a ridge across its path runs
-- **THEN** every corridor bed is at most the ground, no link climbs by more than 5 cm, and the cut is at most the cut cap plus the valley depth
-
-### Requirement: GEN-069 A tributary hangs above the stem and no bed climbs
-A tributary's bed SHALL end no lower than the main stem's bed at the confluence, rising at the least fall back up the river, and never over the ground. No corridor bed SHALL lie over the ground, no link SHALL climb by more than 5 cm and no linked corridor cell SHALL lack a receiver, wherever the ground does not rise along the river by more than the cut cap.
-
-Verify: A
-Status: active
-Source: SPIKE-42, GEN-059, GEN-068
-
-#### Scenario: A fork over a hollow
-- **WHEN** a chunk of a fork with a tributary runs over smooth ground and over a 30 m hollow on the tributary
-- **THEN** no bed lies over the ground, and over smooth ground no link climbs by more than 5 cm
-
-### Requirement: GEN-060 The channel from discharge, the valley from relief
-Round every corridor cell an A-net chunk SHALL hold the cells within `band_cap_m` of the river at a channel and valley profile: a channel of width `w_coef Q^w_exp` and depth `d_coef Q^d_exp` (`Q = q_per_km2 A`, km2) under a valley floor `lerp(floor_low, floor_high, rf)` channel widths wide at the bed, the corridor cells at the channel floor, and sides rising at `lerp(side_low, side_high, rf)` to the ground. `rf` is the base's relief over the river's coarse cell and its eight neighbours over `relief_full_m`; the valley depth follows GEN-057; the cap follows the halo (`(halo_rings - area_window - 2)` cells at most; 0 paints no band). The constants are part of the definition hash.
-
-Verify: A
-Status: active
-Source: SPIKE-40, SPIKE-41, planner decision 2026-10-25 (H2), GEN-057, GEN-058
-
-#### Scenario: A great lowland river
-- **WHEN** a chunk of a river of 9.5e6 km2 over smooth ground runs its incision
-- **THEN** the channel is within a factor 2 of the law's width at half depth and its depth within 1.5 of the law's, in a valley floor wider than half the channel
-
 ### Requirement: GEN-061 The fine creases follow the landform
 The erosion field (`cpu-erosion-v1`) SHALL split its crease octaves at wavelength 1.6 km (octave 4 of 25 km spacing halving): the coarse octaves SHALL keep the amplitude `A(E) carve(slope)`, the fine octaves the amplitude `A(E) (carve + (1 - carve) L)` with `L` the landform driver in `[0, 1]` read from the landform lattice (GEN-062, the interpolant of `global::landform(seed, direction)`). With `L` 0 the detail SHALL be the detail of version 1; with `L` 1 only the fine creases differ, and on ground where `carve` is 1 nothing differs. The field's version SHALL be 2.
 
@@ -1011,85 +842,19 @@ Source: GEN-017, GEN-061, ADR 0074 (bounds must be sound)
 - **WHEN** 20,000 random caps of radius 1e-6 to 0.01 rad, rims included, and cube edges and corners crossed are taken
 - **THEN** the lattice value at the centre and at a point of the rim lie in the range of the cap, the lattice differs from `landform` by less than 0.03, and two points 1e-12 either side of a cube edge or corner differ by less than 1e-9
 
-### Requirement: GEN-066 The main stem is routed over the ground
-The A-net chunk stage SHALL route a river segment over the base. The node of a river's coarse cell SHALL slide to the lowest raster ground (every `route_stride`-th cell) within `lerp(slide_m, slide_steep_m, rf)` of the cell's centre, a head to the highest ground within `head_m`. The segment from node to node SHALL be the least-cost path (rise in millimetres plus `route_lambda` times length, integer arithmetic) over the raster cells within `route_band_m` of the coarse guide (`route_stride` 8). Every segment through a coarse cell SHALL share its node; `route_band_m` 0 with no slide gives the coarse path. The parameters (slide 0.5 to 1 km, band and head 1 km, lambda 0.02, stride 8) are part of the definition hash.
+### Requirement: GEN-071 Driver channels of a tile and their blend
+The driver block of a compact tile (GEN-074) SHALL hold the soil depth, the moisture and the insolation as three 8-bit codes per texel. A consumer SHALL read a driver as `neutral + w (value - neutral)` with `w` the weight of the block's value (1 in the fragment stage); the neutral values are soil 1 m, moisture 0.5 and the insolation of the latitude alone.
 
 Verify: A
 Status: active
-Source: ADR 0081, ADR 0082, SPIKE-42
-
-#### Scenario: A ridge across the coarse path
-- **WHEN** a river's coarse path crosses a ridge that a path within the band avoids
-- **THEN** the corridor of the routed chunk reaches a lower highest ground than the coarse path's by at least 30 m
-
-### Requirement: GEN-067 Chunks agree on the routed corridor and thread count changes nothing
-Two chunks that see the same coarse segment SHALL find the same routed polyline, the same corridor cells, links and beds in the cells they share (bit equal), whatever the size of their halo, and the routing SHALL use no threads of its own and no state a result depends on: its memo (nodes, relief factors and routed polylines, shared by the chunks of one stage and emptied when the law changes) holds pure functions of the coarse cell and segment, a hit equal to a miss bit for bit, so the result is the same at any thread count.
-
-Verify: A
-Status: active
-Source: ADR 0081 consequences, GEN-047, CON-14
-
-#### Scenario: Neighbouring chunks
-- **WHEN** two neighbouring chunks of a river with slid nodes are built
-- **THEN** every shared cell has the same corridor flag, bed bits and next cell
-
-### Requirement: GEN-068 The coarse run's tributaries are routed like stems
-The A-net chunk stage SHALL route every coarse link whose drainage area exceeds `river_area_m2` (default 100 km2; the stage's definition sets 5e7 m2) by the node slide, least-cost segment, bed rule and valley law of the main stems (GEN-059, GEN-066), so topology, crossings and areas come from the global run and chunks agree on them by construction (GEN-067). `river_area_m2` is part of the definition hash and `ANET_VERSION` is 7.
-
-Verify: A
-Status: active
-Source: ADR 0081 point 3, planner decision 2026-10-25
-
-#### Scenario: A tributary under the threshold
-- **WHEN** a chunk of a river with a tributary of 3e8 m2 is built with thresholds of 1e8 and 5e8 m2
-- **THEN** the tributary has a corridor with the first and none with the second
-
-### Requirement: GEN-070 Slope, curvature, wetness and moisture of a chunk
-`generators::drivers` SHALL compute, for every core cell of a chunk raster from the cell and its eight neighbours at their true distances (the lattice is equal-angle, and across a face edge the neighbour found is the real cell), the slope, the mean curvature and the wetness `ln(A / (w tan s))` with `tan s` floored at 0.01 and the drainage area `A` clamped to 1e8 m2, and the moisture `clamp((W - 4) / 12, 0, 1)`. A non-finite height or area SHALL be refused. The functions SHALL be pure, use `libm` only and no threads.
-
-Verify: A
-Status: active
-Source: ADR 0076 points 2 and 3, SPIKE-30, planner decision 2026-10-26
-
-#### Scenario: Known rasters
-- **WHEN** the drivers are computed on a plane, a bowl, a saddle, a cone and a hollow whose area exceeds the clamp
-- **THEN** the slope and curvature equal the geometry's, a flat gives the wetness of the floor, the hollow the maximum, a plane on cells 0.7 as wide gives the same drivers, a ramp on a cube-face edge gives the same codes at the edge as two cells in, and a second run on another thread gives the same bits
-
-### Requirement: GEN-075 Soil depth of a chunk
-The soil depth of a core cell SHALL be `soil_base_m` (2.5 m) times a slope factor `exp(-slope / 18 degrees)`, a curvature factor `1 + 0.5 tanh(100 m kappa)`, a flow factor from 0.5 to 1 over the drainage area 1e2 to 1e8 m2, a lithology factor `1 + 0.5 n` and an altitude factor falling to 0 from 2,500 to 4,500 m, clamped to 0 to 8 m and stored square-root coded in 8 bits. The lithology `n` SHALL be `height::layer_noise` at the cell's f64 unit direction times 400, seeded with the world's seed (`drivers.seed`, set by the stage's owner). The constants SHALL be part of the stage's definition hash.
-
-Verify: A
-Status: active
-Source: ADR 0076, SPIKE-30, planner decision 2026-10-26, CON-11
-
-#### Scenario: Factors
-- **WHEN** the soil depth is evaluated on a paraboloid of curvature 0.01 per metre, on steep ground, with more flow, high up and for the two ends of the lithology
-- **THEN** the curvature factor is 1.3808, steep and high ground are thin, more flow and a hollow are deeper, and the codes round trip within half a code step
-
-### Requirement: GEN-076 Annual-mean insolation of a chunk
-The insolation of a core cell SHALL be the annual-mean beam irradiance on a tilted plane (Duffie and Beckman's cosine, every fifth day of the year in 96 steps of the day, the sun above the horizon only, no shadowing by terrain, never the current sun) in units of the flat plane at the equator, read bilinearly from a 17 x 17 table over slope (0 to 60 degrees, steeper cells read 60) and aspect at the latitude of the chunk's centre.
-
-Verify: A
-Status: active
-Source: ADR 0076, SPIKE-30, planner decision 2026-10-26
-
-#### Scenario: Against a brute force
-- **WHEN** the insolation is compared with a one-minute integration over every day of the year at the equator and at 45 degrees north up to 60 degrees of slope
-- **THEN** it is within 1 %, and the table reads the function it tabulates and wraps the aspect
-
-### Requirement: GEN-071 Driver channels of a chunk and their blend
-A chunk result SHALL carry the soil depth, the moisture and the insolation as three 8-bit channels at the raster with box-filtered pyramid levels, in the chunk's disk record. A consumer SHALL read a driver as `neutral + w (chunk - neutral)` with `w` the chunk weight that fades the height; the neutral values are soil 1 m, moisture 0.5 and the insolation of the latitude alone.
-
-Verify: A
-Status: active
-Source: ADR 0076, GEN-037, planner decision 2026-10-26
+Source: ADR 0076, planner decision 2026-10-26, ADR 0086
 
 #### Scenario: The range edge
-- **WHEN** the weight of a chunk goes from 0 to 1
-- **THEN** the driver goes from the neutral value to the chunk's value, monotone, with no step
+- **WHEN** the weight goes from 0 to 1
+- **THEN** the driver goes from the neutral value to the block's value, monotone, with no step
 
 ### Requirement: GEN-072 The materials read the drivers
-`MaterialParams::weights` SHALL read the soil depth, the moisture and the insolation from the blended drivers in its reserved inputs, by the same function and the same input vector as for the other inputs.
+`MaterialParams::weights` SHALL read the soil depth, the moisture and the insolation from the tile's driver block in its reserved inputs, by the same function and the same input vector as for the other inputs.
 
 Verify: A
 Status: active
@@ -1111,49 +876,23 @@ Source: planner decision 2026-10-26, ADR 0017
 - **THEN** the weights are equal bit for bit and every image equals its golden
 
 ### Requirement: GEN-074 The tile driver block and the driver views
-A compact tile SHALL carry a driver block of 9 x 9 words (GEN-025): at each climate texel the soil depth, moisture and insolation codes of the ready chunk under it as the tile's level reads them, or the neutral codes where none is ready, and the neutral insolation of the texel's latitude in the top byte. The fragment stage SHALL read the block bilinearly, blend it as `neutral + w (chunk - neutral)` with `w` one minus the node's fade, and fill the reserved material inputs (GEN-072). The debug views `soil`, `moisture` and `insolation` (`ShadeView` 7 to 9, reached by J) SHALL show the blended drivers in false colour.
+A compact tile SHALL carry a driver block of 9 x 9 words (GEN-025): at each climate texel the neutral soil depth, moisture and insolation codes, and the neutral insolation of the texel's latitude in the top byte (the builder makes no other since ADR 0086). The fragment stage SHALL read the block bilinearly, blend it as `neutral + w (value - neutral)` with `w` 1 (GEN-071), and fill the reserved material inputs (GEN-072). The debug views `soil`, `moisture` and `insolation` (`ShadeView` 7 to 9, reached by J) SHALL show the blended drivers in false colour.
 
 Verify: A, C
 Status: active
-Source: ADR 0076 point 5, GEN-071, GEN-072, GEN-025
+Source: ADR 0076 point 5, GEN-071, GEN-072, GEN-025, ADR 0086
 
-#### Scenario: Under a chunk and away from one
-- **WHEN** compact tiles are built over a ready chunk with drivers and away from every chunk
-- **THEN** the first hold the chunk's codes in every texel, the others the neutral codes, a tile with chunk drivers has another content hash, and a tile under a chunk that moved no height gets a plane of zeros so its drivers fade in
+#### Scenario: The neutral block
+- **WHEN** compact tiles are built over a field
+- **THEN** every texel of the block holds the neutral codes of its latitude
 
 #### Scenario: The views
 - **WHEN** a compact tile whose driver block is uniform, and one whose block is a ramp, are drawn in each driver view
-- **THEN** every covered pixel has the colour the CPU mirror gives for those codes (within 0.003 for the uniform block), and a node with no fade plane reads the chunk's values at full weight
+- **THEN** every covered pixel has the colour the CPU mirror gives for those codes (within 0.003 for the uniform block), and a node with no fade plane reads the block's values at full weight
 
 #### Scenario: Constants
 - **WHEN** the block is decoded
 - **THEN** the soil code uses the default `soil_max_m` of 8 m in the builder and the shader alike
-
-### Requirement: GEN-077 Routing reads known base heights
-The raster of the local routing (GEN-066) SHALL read the base field's height at a raster point from, in order: the heights of the region's cells that the network build has already read, a memo owned by the stage (`RouteMemo`) of heights by lattice point, and only then the base field. Every value SHALL be the base field's height at the direction of the point, whichever chunk, thread or batch asked, so no polyline, bed or chunk hash depends on the memo's state. The memo SHALL hold at most 1,048,576 points and SHALL be emptied when a batch would take it over the cap.
-
-Verify: A
-Status: active
-Source: opus-planner (2026-10-26), GEN-052 perf window, GEN-066, GEN-067
-
-#### Scenario: The same bits however the memo is filled
-- **WHEN** chunks are built with the memo cold, warm, filled in another order, over a small cap, or through one memo on 1 and 8 workers
-- **THEN** every chunk's bits equal those of a build over a fresh memo, a warm build evaluates no raster point, and the memo never holds more than its cap
-
-#### Scenario: Region heights
-- **WHEN** a segment is routed with the region's heights known
-- **THEN** its polyline equals the one routed by evaluating the base field at every raster point, and fewer points are evaluated
-
-### Requirement: GEN-078 A chunk routes only the segments that can reach it
-The A-net network build of a chunk SHALL route a segment of the ring of coarse cells (and, for its bed, the segments upstream of it within the window) only if the segment's coarse chord lies within the region's radius plus the routing's reach (the band, the slide, the meander, the smoothing and the raster's rounding) of the region's centre. A segment left out SHALL change no cell, bed, inflow or link of the region: the network is bit for bit the one that routes every segment of the ring.
-
-Verify: A
-Status: active
-Source: opus-planner (2026-10-26), GEN-066, GEN-067
-
-#### Scenario: Pruned and unpruned
-- **WHEN** chunks of a fork of rivers are built with every segment of the ring routed and with only the segments that can reach the region, at strides 1 and 4 and two halos
-- **THEN** the corridor, links, anchors, areas and inflows are bit for bit equal and fewer segments are routed in total
 
 ### Requirement: GEN-079 A compact batch takes its footprint from a hint
 A batch of directions that lies on one face at least `reach + 2` cells from its edges, in a box of at most 4,194,304 cells, evaluated by a field whose reads stay within `reach` cells of a direction's cell (the eroded field's `reach` is 8), SHALL take the cells to gather from the box of `reach` cells before and `reach + 1` after the cell of each direction, not from a pass that reads for every direction; any other batch SHALL take the exact footprint. The gathered cells are the source's own samples, so every value is bit for bit the single `height` at any thread count, with the tile's climate (GEN-021) joined.
@@ -1278,40 +1017,6 @@ A world's run SHALL have it off (`coupledworld::COUPLED_ERODE`) and SHALL not ma
 #### Scenario: The key
 - **WHEN** two specs differ only in `erode`
 - **THEN** their keys differ
-
-### Requirement: GEN-083 The valley band's distance is Euclidean
-The band painting of an A-net chunk (GEN-060) SHALL take the distance of a cell from the river as the Euclidean distance to the source that owns the cell (the nearest source the relaxation reaches), not as a sum of edge lengths over the cell graph, so that a wall off the grid axes rises evenly from cell to cell and the band of a core cell does not depend on the halo (GEN-049).
-
-Verify: A
-Status: active
-Source: look review 2b (river-r1 sunset ripple), GEN-060, GEN-049
-
-#### Scenario: A wall off the grid axes
-- **WHEN** a straight corridor at 26.6 degrees to the grid axes is painted over flat ground at the lowland side slope, and the slopes of three adjacent cells in the middle of the wall (between the floor's edge and the rim) are compared along both axes
-- **THEN** the larger over the smaller slope of the two pairs is at most 1.2 at the 90th percentile (the graph distance gave 1.4 with a median of 1.2; the Euclidean distance 1.05 with a median of 1.02)
-
-#### Scenario: Two corridors and two halos
-- **WHEN** two corridors off the grid axes that run towards each other are painted over a chunk with a halo of 30 rings and of 45 rings
-- **THEN** every core cell has the same painted height, bit for bit, in both
-
-### Requirement: GEN-084 The routed corridor is smoothed
-The routed polyline of a coarse segment SHALL be smoothed: each of its points moves to the average of the chain formed by that polyline with the polyline of the segment it continues from and the one it continues into, over a tent of half width `smooth_m` (256 m) along the path, by at most `smooth_max_m` (64 m). A river that begins, ends or meets another at a node keeps that node: the move fades to zero over `smooth_m` towards it. The smoothed polyline SHALL be a function of the segment alone (GEN-067), and the smoothing's bound SHALL be part of the routing's reach (GEN-078). Both constants are part of the definition hash.
-
-Verify: A
-Status: active
-Source: look review 2b (river-r1 benches), opus-planner (2026-10-26), GEN-066, GEN-067, GEN-078
-
-#### Scenario: A kink
-- **WHEN** a chain with a 45 degree kink is smoothed with its neighbours, and a chain with no neighbours
-- **THEN** the worst turn per 100 m is at most half of the raw one, no point moves more than 64 m, a straight chain stays and the ends of a chain with no neighbour stay
-
-#### Scenario: A joint and a confluence
-- **WHEN** the two segments of a joint the river runs through are smoothed, and the segments of a confluence
-- **THEN** the joint is one point from both sides within a micrometre and moved, and every point of a confluence segment is within 64 m of its routed point
-
-#### Scenario: Borders, halos and threads
-- **WHEN** a fork and a ridge are built over two halos, over neighbouring chunks and on four threads with the smoothing on
-- **THEN** the corridor, the beds and the links of shared cells are bit for bit equal
 
 ### Requirement: GEN-085 The horizon march walks a step table
 `generators::horizon::bake_horizon` SHALL make the distance of every step of the march and its curvature drop `d^2 / (2 R)` once per bake and walk that table for every texel and azimuth. The table's values and the march's arithmetic SHALL be the ones of a march that adds its steps as it goes, so the bytes of a map are those of GEN-044 before this requirement.

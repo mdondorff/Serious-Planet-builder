@@ -68,7 +68,6 @@ impl TileSource<CompactTile> for Source {
             climate_words: [0; planet_generators::climate::CLIMATE_TEXELS],
             driver_words: [0; planet_generators::drivers::DRIVER_TEXELS],
             texels: Vec::new(),
-            change: None,
         })
     }
 }

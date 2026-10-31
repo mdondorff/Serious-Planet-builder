@@ -82,8 +82,7 @@ pub enum Kind {
     GlobalWetFloor = 6,
     /// A block of the global coupled run (M8-1, GEN-040): height, drainage area and receiver per cell.
     GlobalCoupled = 7,
-    /// The result of one chunk of a chunk field (M8-2, STRM-041): the change raster and its pyramid.
-    Chunk = 8,
+    // 8 was the result of one chunk of a chunk field (removed with the chunk stage, ADR 0086); the number is not reused.
     /// A block of the coarse horizon of the global run (M8-5, GEN-045): per observer cell and azimuth one byte.
     GlobalHorizon = 9,
 }
@@ -105,8 +104,7 @@ pub const QUERY_FOOTPRINT: u8 = 3;
 /// One node of the region summary tree a coarse tile reads (WDEF-008, ADR 0066 point 3): a key carrying one has
 /// [`KEY_FORMAT_TAG_FOOTPRINT`] too.
 pub const QUERY_SUMMARY: u8 = 4;
-/// The state of one chunk of a chunk field a tile reads (STRM-038): body, chunk tile and the state word (0: not ready).
-pub const QUERY_CHUNK: u8 = 5;
+// Query kind 5 was the state of one chunk of a chunk field (removed with the chunk stage, ADR 0086); the number is not reused.
 
 /// Everything a key covers (ADR 0018).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -244,14 +242,6 @@ pub fn read_entry(record: &ReadRecord) -> ReadEntry {
         ReadRecord::Body { body, items } => {
             ReadEntry::Query { kind: QUERY_BODY, params: body.0.to_le_bytes().to_vec(), result: query_result_hash128(items) }
         }
-        ReadRecord::Chunk { body, chunk, state } => {
-            let mut params = Vec::with_capacity(12);
-            params.extend_from_slice(&body.0.to_le_bytes());
-            params.extend_from_slice(&chunk.raw().to_le_bytes());
-            let mut result = [0u8; 16];
-            result[..8].copy_from_slice(&state.to_le_bytes());
-            ReadEntry::Query { kind: QUERY_CHUNK, params, result }
-        }
         ReadRecord::SummaryNode { body, layer, node, hash } => {
             ReadEntry::Query { kind: QUERY_SUMMARY, params: summary_params(*body, layer, *node), result: *hash }
         }
@@ -340,8 +330,7 @@ pub const PARAM_STAGE_LAYER: u8 = 8;
 pub const PARAM_STAGE_INDEX: u8 = 9;
 /// The run of a coupled block: lattice cells per face edge, steps, base resolution and every parameter of the run (STRM-043).
 pub const PARAM_COUPLED: u8 = 10;
-/// The definition of a chunk field: the process hash, cells per chunk edge, pyramid top level and the radius bits (STRM-041).
-pub const PARAM_CHUNK: u8 = 11;
+// Output parameter 11 was the definition of a chunk field (removed with the chunk stage, ADR 0086); the number is not reused.
 /// The coarse horizon of a block: observer cells per face edge, azimuths, range, step, radius and the version of the march (STRM-045).
 pub const PARAM_HORIZON: u8 = 12;
 

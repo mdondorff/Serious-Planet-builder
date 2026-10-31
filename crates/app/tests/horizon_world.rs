@@ -123,7 +123,7 @@ fn a_march_the_chunks_cannot_hold_or_the_bake_refuses_is_turned_down_at_once_and
         let r2 = rig();
         ChunkHorizonBaker::new(&r2.world, r2.world.horizon_lattice().unwrap(), params(), 1)
     };
-    let map = gone.bake((2, 1000, 1000), &[]).expect("a map");
+    let map = gone.bake((2, 1000, 1000)).expect("a map");
     assert_eq!(map.len(), (CELLS * CELLS * 8) as usize);
     assert!(map.iter().all(|&b| b == 0));
 }
@@ -245,20 +245,20 @@ fn a_bake_from_shared_height_tiles_equals_the_bake_that_evaluates_its_whole_rast
     let east: ChunkKey = (2, 1001, 1000);
     let reads = shared.reads(own);
     assert!(reads.len() == 9, "the rig's chunks around the tile are all ready: {reads:?}");
-    let first = shared.bake(own, &[]).expect("a map");
-    assert_eq!(first, plain.bake(own, &[]).expect("a map"), "the chunk");
+    let first = shared.bake(own).expect("a map");
+    assert_eq!(first, plain.bake(own).expect("a map"), "the chunk");
     assert!(first.iter().any(|&b| b > 0), "the relief of the terrain shades something");
     assert_eq!(shared.tile_stats(), planet::horizonworld::TileStats { evaluated: 9, hits: 0, held: 9 });
     // The chunk to the east shares six of its nine tiles with the first: three are new.
-    assert_eq!(shared.bake(east, &[]).expect("a map"), plain.bake(east, &[]).expect("a map"), "the neighbour");
+    assert_eq!(shared.bake(east).expect("a map"), plain.bake(east).expect("a map"), "the neighbour");
     let s = shared.tile_stats();
     assert_eq!((s.evaluated, s.hits), (12, 6), "{s:?}");
     // The same chunk again evaluates nothing.
-    assert_eq!(shared.bake(own, &[]).expect("a map"), first);
+    assert_eq!(shared.bake(own).expect("a map"), first);
     assert_eq!(shared.tile_stats().evaluated, 12);
     // A cache that holds fewer tiles than a bake reads still gives the same map, and never holds more than its bound.
     let tight = ChunkHorizonBaker::new(&r.world, lat, params(), 2).with_tile_cap(4);
-    assert_eq!(tight.bake(own, &[]).expect("a map"), first);
+    assert_eq!(tight.bake(own).expect("a map"), first);
     assert_eq!(tight.tile_stats().held, 4);
 }
 
@@ -271,12 +271,12 @@ fn bakes_that_run_at_once_evaluate_a_shared_tile_once_and_give_the_same_maps_as_
     let lat = r.world.horizon_lattice().unwrap();
     let keys: Vec<ChunkKey> = (0..4).map(|dx| (2, 1000 + dx, 1000)).collect();
     let alone = ChunkHorizonBaker::new(&r.world, lat, params(), 1);
-    let expected: Vec<_> = keys.iter().map(|k| alone.bake(*k, &[]).expect("a map")).collect();
+    let expected: Vec<_> = keys.iter().map(|k| alone.bake(*k).expect("a map")).collect();
     // Four chunks in a row read 6 x 3 distinct tiles; one after the other that is what is evaluated.
     assert_eq!(alone.tile_stats().evaluated, 18);
     let together = ChunkHorizonBaker::new(&r.world, lat, params(), 1);
     let maps: Vec<_> = std::thread::scope(|s| {
-        let jobs: Vec<_> = keys.iter().map(|k| s.spawn(|| together.bake(*k, &[]).expect("a map"))).collect();
+        let jobs: Vec<_> = keys.iter().map(|k| s.spawn(|| together.bake(*k).expect("a map"))).collect();
         jobs.into_iter().map(|j| j.join().unwrap()).collect()
     });
     assert_eq!(maps, expected, "the result does not depend on how many bakes run at once (CON-14)");
@@ -293,15 +293,15 @@ fn a_neighbours_edit_replaces_the_tile_it_touches_in_the_halo_and_no_other() {
     let shared = ChunkHorizonBaker::new(&r.world, lat, params(), 2);
     let plain = ChunkHorizonBaker::new(&r.world, lat, params(), 2).with_tile_cap(0);
     let own: ChunkKey = (2, 1000, 1000);
-    let landed = shared.bake(own, &[]).expect("a map");
-    assert_eq!(landed, plain.bake(own, &[]).expect("a map"));
+    let landed = shared.bake(own).expect("a map");
+    assert_eq!(landed, plain.bake(own).expect("a map"));
     assert_eq!(shared.tile_stats().evaluated, 9);
     // An edit inside the chunk to the east, 800 m across and clear of every other chunk of the nine.
     let mut def = (*r.world.definition()).clone();
     def.put_item_spec(BodyId::PLANET, hill_at((1001, 1000), 11)).unwrap();
     r.world.set_definition(Arc::new(def)).unwrap();
-    let edited = shared.bake(own, &[]).expect("a map");
-    assert_eq!(edited, plain.bake(own, &[]).expect("a map"), "the edit is in the map, as if nothing had been kept");
+    let edited = shared.bake(own).expect("a map");
+    assert_eq!(edited, plain.bake(own).expect("a map"), "the edit is in the map, as if nothing had been kept");
     assert_ne!(edited, landed, "the hill beside the chunk shades its edge");
     let s = shared.tile_stats();
     // (A tile's key holds the items within the stamp stage's halo of it, so the hill, 2.5 km in, also re-keys the tiles beside the east one;
@@ -311,7 +311,7 @@ fn a_neighbours_edit_replaces_the_tile_it_touches_in_the_halo_and_no_other() {
         "only the tiles the hill reaches are made again, not the nine: {s:?}"
     );
     // Nothing changes: nothing is made again.
-    let again = shared.bake(own, &[]).expect("a map");
+    let again = shared.bake(own).expect("a map");
     assert_eq!((again, shared.tile_stats().evaluated), (edited, s.evaluated));
 }
 
@@ -325,11 +325,11 @@ fn a_change_of_the_lens_makes_every_tile_again_and_the_map_still_equals_the_whol
     let shared = ChunkHorizonBaker::new(&r.world, lat, params(), 2);
     let plain = ChunkHorizonBaker::new(&r.world, lat, params(), 2).with_tile_cap(0);
     let own: ChunkKey = (2, 1000, 1000);
-    shared.bake(own, &[]).expect("a map");
+    shared.bake(own).expect("a map");
     assert_eq!(shared.tile_stats().evaluated, 9);
     // The coupled lens (the field chain does not hash it into a tile key).
     r.world.set_coupled_lens(Some(planet_generators::coupled::CoupledLens::Height));
-    assert_eq!(shared.bake(own, &[]).expect("a map"), plain.bake(own, &[]).expect("a map"));
+    assert_eq!(shared.bake(own).expect("a map"), plain.bake(own).expect("a map"));
     assert_eq!(shared.tile_stats().evaluated, 18, "a lens makes all nine again");
 }
 
@@ -459,7 +459,7 @@ fn horizon_bake_throughput() {
                     s.spawn(|| loop {
                         let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         let Some(k) = keys.get(i) else { break };
-                        baker.bake(*k, &[]).unwrap();
+                        baker.bake(*k).unwrap();
                     });
                 }
             });
@@ -489,10 +489,10 @@ fn horizon_march_time() {
     let lat = world.horizon_lattice().unwrap();
     let baker = ChunkHorizonBaker::new(&world, lat, chunk_horizon_params(&lat, R), 1);
     for key in [(2u8, 1000u32, 1000u32), (2, 1500, 1200)] {
-        baker.bake(key, &[]).unwrap();
+        baker.bake(key).unwrap();
         for rep in 0..3 {
             let t = std::time::Instant::now();
-            let map = baker.bake(key, &[]).unwrap();
+            let map = baker.bake(key).unwrap();
             let hash = planet_core::hash::hash_u64s(1, &map.iter().map(|&b| u64::from(b)).collect::<Vec<_>>());
             println!("{key:?} rep {rep}: {:.0} ms, hash {hash:016x}", t.elapsed().as_secs_f64() * 1e3);
         }
@@ -524,7 +524,7 @@ fn horizon_bake_split() {
                 s.spawn(|| loop {
                     let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     let Some(k) = keys.get(i) else { break };
-                    baker.bake(*k, &[]).unwrap();
+                    baker.bake(*k).unwrap();
                 });
             }
         });
@@ -573,7 +573,7 @@ fn a_bake_times_its_steps_and_the_diagnosis_log_holds_it_when_started() {
     let baker = ChunkHorizonBaker::new(&r.world, lat, params(), 1);
     let key: ChunkKey = (2, 1000, 1000);
     bake_log_start();
-    baker.bake(key, &[]).expect("a map");
+    baker.bake(key).expect("a map");
     let t = baker.bake_times();
     assert_eq!(t.bakes, 1);
     assert!(t.tiles_ms > 0.0 && t.march_ms > 0.0, "{t:?}");
@@ -601,7 +601,7 @@ fn horizon_march_concurrency() {
     let baker = ChunkHorizonBaker::new(&world, lat, chunk_horizon_params(&lat, R), 1);
     let keys: Vec<(u8, u32, u32)> = (0..4u32).flat_map(|x| (0..3u32).map(move |y| (2u8, 1000 + x, 1000 + y))).collect();
     for k in &keys {
-        baker.bake(*k, &[]).unwrap();
+        baker.bake(*k).unwrap();
     }
     for priority in [Priority::Normal, Priority::BelowNormal] {
         for c in [1usize, 2, 4, 7] {
@@ -614,7 +614,7 @@ fn horizon_march_concurrency() {
                         let applied = set_current(priority);
                         assert!(applied || cfg!(not(any(windows, target_os = "linux"))), "the priority was not applied");
                         for rep in 0..2 {
-                            baker.bake(keys[(i * 2 + rep) % keys.len()], &[]).unwrap();
+                            baker.bake(keys[(i * 2 + rep) % keys.len()]).unwrap();
                         }
                     });
                 }

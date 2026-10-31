@@ -364,18 +364,6 @@ impl HeightField for Timed<'_> {
     fn height(&self, d: Vec3) -> f64 {
         self.timed(0, || self.inner.height(d))
     }
-    fn height_at_level(&self, d: Vec3, level: u8) -> f64 {
-        self.timed(0, || self.inner.height_at_level(d, level))
-    }
-    fn level_aware(&self) -> bool {
-        self.inner.level_aware()
-    }
-    fn level_drivers(&self, dirs: &[Vec3], level: u8) -> Option<Vec<Option<[u8; 3]>>> {
-        self.inner.level_drivers(dirs, level)
-    }
-    fn level_change(&self, dirs: &[Vec3], level: u8) -> Option<Vec<f64>> {
-        self.inner.level_change(dirs, level)
-    }
     fn heights_and_climate(
         &self,
         map: &dyn FaceMapping,
