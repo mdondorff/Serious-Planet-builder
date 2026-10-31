@@ -52,7 +52,7 @@ pub const STEADY_WINDOW_S: f64 = 60.0;
 /// The start places a steady search runs at per altitude by default: one place for every trial of a search (a slow chunk at one place would break the
 /// search's assumption that the share rises with the speed), and the lower of the searches is the figure.
 pub const STEADY_PLACES: usize = 2;
-/// The first trial place index of the steady searches (a place index moves the start 0.6 degrees north; the chunk stage is rebuilt per flight, so places the cold curve also flew share nothing).
+/// The first trial place index of the steady searches (a place index moves the start 0.6 degrees north; the horizon jobs start empty per flight, so places the cold curve also flew share nothing).
 const STEADY_PLACE_BASE: usize = 0;
 /// Seconds the settle before a trial may take at most.
 const SETTLE_LIMIT_S: f64 = 900.0;
@@ -282,7 +282,7 @@ pub fn log_json(points: &[Point], facts: &LogFacts<'_>) -> String {
     s += &format!("  \"start_speed_mps\": {START_SPEED_MPS},\n  \"cap_speed_mps\": {CAP_SPEED_MPS},\n  \"bisections\": {BISECTIONS},\n");
     s += "  \"judged\": \"coarse_share, the worst 1 s window\",\n";
     s += "  \"coarse_weighting\": \"pixels: nodes of the fresh plan weighted by their projected screen pixels (TEST-046)\",\n";
-    // The A-net chunk stage is removed (ADR 0086): criterion 7 is measured with it off (tiles and horizon maps only); a log without this field is from before.
+    // The chunk stage is removed (ADR 0086), so the field is always false (tiles and horizon maps only); `accept M8` reads it, and a log without it is from before.
     s += "  \"chunk_stage\": false,\n";
     s += &format!("  \"horizon\": {},\n", facts.horizon);
     s += "  \"curve\": [\n";
@@ -317,7 +317,7 @@ struct StageSetup {
     horizon: bool,
 }
 
-/// The stage a flight runs: none without a store, the horizon jobs from the base terrain with one (the chunk stage is removed).
+/// The stage a flight runs: none without a store, the horizon jobs from the base terrain with one.
 fn stage_setup(o: &Options) -> Option<StageSetup> {
     (o.store.is_some() && !o.allow_memory_bake).then(|| StageSetup { gen: crate::horizonstep::stage_gen(o), horizon: true })
 }

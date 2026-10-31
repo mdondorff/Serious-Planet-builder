@@ -418,7 +418,7 @@ pub struct Stages {
     pub coalesced: u64,
     pub cancelled: u64,
     pub dropped: u64,
-    /// The horizon maps the edit touched (a run with the horizon jobs and no chunk stage): per map the chunk and the milliseconds from `set_definition` to the
+    /// The horizon maps the edit touched (a run with the horizon jobs): per map the chunk and the milliseconds from `set_definition` to the
     /// first landing after it (`None`: it had not landed when the run stopped waiting). `None` without the jobs.
     pub horizon: Option<Vec<(planet_generators::chunkfield::ChunkKey, Option<f64>, f64)>>,
     /// The horizon bakes after the edit, one line each with the start, the end and the step times (see `horizon_diag`).
@@ -1060,7 +1060,7 @@ fn horizon_diag_section(rows: &[CaseRow]) -> String {
     s
 }
 
-/// The table of the horizon side of every case (a run with the horizon jobs and no chunk stage): per case one row per wanted map the edit touched
+/// The table of the horizon side of every case (a run with the horizon jobs): per case one row per wanted map the edit touched
 /// (the first run of the case) and the milliseconds from the edit to the map's landing. Reported, not judged (M8 criterion 6 amended 2026-10-29, TEST-065).
 pub fn horizon_table(rows: &[CaseRow]) -> String {
     let mut s = String::from("| altitude | stamp radius | map (face, x, y) | distance m | edit to map ms |\n|---|---|---|---|---|\n");
@@ -1186,7 +1186,7 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
         planet_perf::check_reference_adapter(&crate::facts(ctx)).map_err(|r| r.to_string())?;
         crate::readiness_gate(o, ctx, out)?;
     }
-    // The horizon jobs bake the maps from the base terrain (STRM-064, TEST-065); the chunk stage is removed.
+    // The horizon jobs bake the maps from the base terrain (STRM-064, TEST-065).
     let with_horizon = !smoke && !o.no_horizon_jobs && o.store.is_some() && !o.allow_memory_bake;
     if with_horizon {
         if let Some(n) = o.horizon_threads {

@@ -1,5 +1,5 @@
 //! LOD-008 (ADR 0074): a channel cut into a plateau is capped only where its walls are steeper than the parameters can draw (`drawable_slope`). On a
-//! synthetic trench along a great circle, 100 m and 300 m deep, with walls of slope 0.5, 0.9 (the angle of repose of the chunk stage's hillslopes),
+//! synthetic trench along a great circle, 100 m and 300 m deep, with walls of slope 0.5, 0.9 (the angle of repose of the removed chunk stage's hillslopes),
 //! 2.0, 4.0 and a 1 m ramp (vertical), the plan from poses like the stills' (300 m, 30 m, 1.8 m over the ground) caps no tile below the drawable
 //! slope and caps tiles above it. Tier A, no GPU.
 
