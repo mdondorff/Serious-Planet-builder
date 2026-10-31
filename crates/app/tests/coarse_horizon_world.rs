@@ -131,7 +131,7 @@ fn the_coupled_views_key_every_tile_of_a_store_backed_world_with_and_without_the
     use planet_generators::coupled::CoupledLens;
     // The owner's session of 2026-10-27: the K views (the run's heights and drainage area) panicked on the pool workers at the mesh key
     // ("a field that reads cells must report its cell queries in read_records_for"): every tile the view re-keys must have a key.
-    let store = std::env::temp_dir().join(format!("planet-anet-lens-{}", std::process::id()));
+    let store = std::env::temp_dir().join(format!("planet-lens-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&store);
     run(&["generate", "--global-dir", store.to_str().unwrap(), "--global-res", &RES.to_string(), "--threads", "2"]).unwrap();
     let world = open(&store);

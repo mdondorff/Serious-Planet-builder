@@ -16,22 +16,21 @@ Dormant (no near trigger; not asked now):
 | # | Step | Lane |
 |---|---|---|
 | NR | Real-GPU window checks NOT RUN on a locked desktop (TEST-073; owner, 2026-10-30) | crusader |
-| B6 | Chunk stage removed from the code (`openspec/changes/remove-chunk-stage/`, 7 PRs, ADR 0086 in PR 1) | crusader |
 | B4 | Automated owner checks (`openspec/changes/b4-owner-checks/`): B4-5 package command (TEST-074), B4-4 edit scenario, B4-6 delivery | explorer |
-| B9 | SPIKE-58 phase 2 (noise under load, core pinning) in a quiet slot; then the ADR and B2, B3 | spikes, then explorer |
-| B2, B3 | One job system; reserve test (ADR 0083) | explorer |
+| B2, B3 | One job system (PRs 1a, 2 merged; 3a plan worker; 3b `Par` in core after B6), then the reserve test (ADR 0083, BUDG-008 to 010) | explorer |
 | B5 | Test robustness: the rest after #912 (`test fast` budget mostly falls with B6) | crusader |
-| B7, B8 | M9 groundwork: R1 `terrain_stats` and the scorecard (SPIKE-57), R3 bake pre-run; ground-detail stills | spikes, crusader |
+| B7 | The terrain scorecard (`openspec/changes/terrain-scorecard/`, 3 PRs) | crusader |
+| M9 spikes | SPIKE-66 relief factor in the generator (after SPIKE-61 to 65: bake 4.5-6 h, amplitude per landform is the relief lever, ground-detail stills sent to the owner) | spikes |
 | HK | M8 housekeeping, mechanical pass and evidence diet (declutter batches 3, 4, 7) | spikes |
 | R4b | `GeoPoint::of_dir` and `dir` in `editor/polyline.rs` onto the core helpers | crusader |
 
-After Option B: ADR 0085's build, then M9 R3 to R6 (week plan section 4).
+After Option B: ADR 0085's build (after the scorecard; opus-planner, 2026-10-31), then M9 R3 to R6 (week plan section 4). B6 (chunk stage removed) and B8 (ground-detail stills) done 2026-10-31.
 
 ## Tracked
 - **Window checks need an unlocked desktop** (2026-10-30): on the RTX, present stalls 1.3-2.7 s or the device is lost while the session is locked or in modern standby; unlocked the dense sweep takes 26 s. The device losses since 10-18 most likely had this cause. NR handles it. Display off after 2 h (owner, 2026-10-31); the owner unlocks remotely for a batch, which the planner requests 07:00-22:00.
-- **CI WARP jobs over budget** (BUILD-014, `ci-stats` 2026-10-30): A+B 17.1, C 1/2 18.8, C 2/2 16.8 min medians against 16; B6 removes chunk tests.
+- **CI WARP jobs over budget** (BUILD-014, `ci-stats` 2026-10-30): A+B 17.1, C 1/2 18.8, C 2/2 16.8 min medians against 16; B6 removed the chunk tests: re-read `ci-stats` after the next runs.
 - **Local WARP aborts under nextest** (2026-10-30, after the Windows update): 2 of 177 in `test gpu` (access violation in `d3d10warp.dll`), pass alone; CI judges the step.
-- **Fast tier over budget** (BUILD-003, BUILD-014): `test fast` 44-71 s under load; 391 s single-thread total, the largest items chunk tests (B6).
+- **Fast tier over budget** (BUILD-003, BUILD-014): `test fast` 44-71 s under load; 391 s single-thread total, the largest items were chunk tests (removed in B6): re-measure.
 - **Detail blocks** (BUILD-027): 10 in `xtask/src/detail_blocks.txt`: split or shorten each, delete its line; no new blocks.
 - **Frame tail** (SPIKE-44): `draw_plan_transient` 8-14 ms on a plan delivery (24-48 frames/min) + ~9 ms frame work drops a frame at 60 fps; ADR 0083 frame share.
 - **Coupled run key read**: about 25M bake samples are read for the key even when the run is stored; the K view is coarse (climate shading).

@@ -122,8 +122,8 @@ fn manual_criteria(milestone: &str) -> &'static [&'static str] {
         ],
         "M8" => &[
             "Criterion 1: the owner's look review of `docs/milestones/M8/look-review-2b/` on plausible relief with horizon shadows (river and valley forms are not judged in M8; F8 compares the default and the sample look live) and the default look",
-            "Criterion 3: `cargo xtask gate` on the real store with the chunk stage at its default (off) (TEST-061, TEST-062): no frame over 100 ms, 0 held-back tiles without edits, no step between levels, no panic; run it before the window, never inside one (`gate --small` is an automated step above)",
-            "Criteria 4 to 7 are read from the perf logs only; criterion 6 is decided by the M6 table of `edit-latency.md` (the drawn tiles; the horizon table is reported, not judged), and criterion 7's envelope log must come from a run with the chunk stage off",
+            "Criterion 3: `cargo xtask gate` on the real store (TEST-061, TEST-062): no frame over 100 ms, 0 held-back tiles without edits, no step between levels (measured on the base field), the store opens without a rebuild (TEST-075), no panic; run it before the window, never inside one (`gate --small` is an automated step above)",
+            "Criteria 4 to 7 are read from the perf logs only; criterion 6 is decided by the M6 table of `edit-latency.md` (the drawn tiles; the horizon table is reported, not judged), and criterion 7's envelope log must say `chunk_stage` false",
             "CI green on Windows (WARP) and Linux (lavapipe) for the merge commit, and the determinism comparison (criterion 2)",
             "The owner's live-test items (docs/milestones/M8/owner-test-2026-10-27/README.md) and the M8 report (docs/milestones/M8-report.md): the planner",
         ],

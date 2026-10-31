@@ -335,7 +335,7 @@ fn without_a_chunk_stage_the_wanted_chunks_are_baked_from_the_base_kept_to_the_c
     let cfg = HorizonConfig { workers: 4, settle_ms: 1_000, keep: 2 };
     let jobs = HorizonJobs::new(Arc::new(BaseTerrain), baker.clone(), hs.clone(), clock.clone(), None, cfg);
     let (a, b) = (key(0, 0), key(1, 0));
-    assert_eq!(jobs.update(&[(a, 1.0), (b, 2.0)]).started, 2, "every chunk is ready with no chunk stage: both start at once");
+    assert_eq!(jobs.update(&[(a, 1.0), (b, 2.0)]).started, 2, "every chunk of the base terrain is ready: both start at once");
     hs.run(2);
     let up = jobs.update(&[(a, 1.0), (b, 2.0)]);
     assert_eq!(up.landed.len(), 2);

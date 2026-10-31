@@ -1,0 +1,61 @@
+# SPIKE-65 stills: a column-cast perspective render of a 2,560^2 raster at 101.8 m (not the engine's renderer).
+# Eye at `alt` m above the ground at cell (cx, cy), looking along `heading` degrees, pitched down `pitch` degrees, 70 degree horizontal
+# field; bilinear heights, the Earth's curvature, Lambert shading with a sun at azimuth 290 and elevation 15 degrees, grass to rock by slope,
+# and haze with distance. Usage: python -I render.py <raster.f32> <alt> <heading> <pitch> <out.png> [cx cy] (the eye cell; default the centre)
+import sys, math
+import numpy as np
+from PIL import Image
+
+N, DX, R = 2560, 101.8, 6.371e6
+path, alt, heading, pitch, out = sys.argv[1], float(sys.argv[2]), float(sys.argv[3]), float(sys.argv[4]), sys.argv[5]
+IW, IH = 960, 540
+CX, CY = (float(sys.argv[6]), float(sys.argv[7])) if len(sys.argv) > 7 else (N / 2, N / 2)
+h = np.fromfile(path, "<f4").reshape(N, N).astype(np.float64)
+gy, gx = np.gradient(h, DX)
+az, el = math.radians(290), math.radians(15)
+sun = np.array([math.cos(el) * math.sin(az), math.cos(el) * math.cos(az), math.sin(el)])
+nrm = np.sqrt(gx * gx + gy * gy + 1)
+lam = np.clip((-gx * sun[0] + gy * sun[1] + sun[2]) / nrm, 0, 1)
+slope = np.degrees(np.arctan(np.hypot(gx, gy)))
+rock = np.clip((slope - 25) / 15, 0, 1)[..., None]
+base = (1 - rock) * np.array([0.30, 0.42, 0.18]) + rock * np.array([0.45, 0.43, 0.40])
+base[h <= 0] = [0.10, 0.20, 0.35]
+col = base * (0.25 + 0.95 * lam[..., None])
+
+def bil(a, x, y):
+    x = np.clip(x, 0, N - 1.001); y = np.clip(y, 0, N - 1.001)
+    i, j = x.astype(int), y.astype(int); fx, fy = x - i, y - j
+    if a.ndim == 3:
+        fx, fy = fx[:, None], fy[:, None]
+    return (a[j, i] * (1 - fx) * (1 - fy) + a[j, i + 1] * fx * (1 - fy) + a[j + 1, i] * (1 - fx) * fy + a[j + 1, i + 1] * fx * fy)
+
+cx, cy = CX, CY
+ground = bil(h, np.array([cx]), np.array([cy]))[0]
+eye = max(ground, 0) + alt
+f = (IW / 2) / math.tan(math.radians(35))
+hor = IH / 2 + f * math.tan(math.radians(pitch))
+cols = np.arange(IW)
+ang = math.radians(heading) + np.arctan((cols - IW / 2) / f)
+# Columns along the heading: x east (i), y north (decreasing j).
+dx, dy = np.sin(ang), np.cos(ang)
+cosf = np.cos(ang - math.radians(heading))
+img = np.zeros((IH, IW, 3))
+sky = np.linspace(0.55, 0.85, IH)[:, None] * np.array([0.55, 0.70, 0.95])
+img[:] = sky[:, None, :]
+ybuf = np.full(IW, IH, int)
+zmax = min(1100 * DX, 120 * alt + 15000)
+zs = np.geomspace(max(5.0, alt * 0.3), zmax, 1400)
+for z in zs:
+    px, py = cx + dx * z / DX, cy - dy * z / DX
+    inside = (px > 0) & (px < N - 1) & (py > 0) & (py < N - 1)
+    hz = bil(h, px, py) - z * z / (2 * R)
+    y = (hor - (hz - eye) / (z * cosf) * f).astype(int)
+    y = np.clip(y, 0, IH)
+    c = bil(col, px, py)
+    t = 1 - np.exp(-z / 40000.0)
+    c = c * (1 - t[..., None] if np.ndim(t) else 1 - t) + t * np.array([0.62, 0.72, 0.88])
+    for k in np.nonzero(inside & (y < ybuf))[0]:
+        img[y[k]:ybuf[k], k] = c[k]
+        ybuf[k] = y[k]
+Image.fromarray((np.clip(img, 0, 1) ** (1 / 1.4) * 255).astype(np.uint8)).save(out)
+print(out, "eye %.0f m (ground %.0f m)" % (eye, ground))

@@ -49,7 +49,7 @@ pub const HORIZON_WORKERS_MAX: usize = 8;
 /// Version of the world's horizon bake (what it samples and how); part of the march's hash, so a change re-bakes every map.
 pub const BAKE_VERSION: u32 = 1;
 
-/// The versions of the removed A-net and chunk-stage code, kept as numbers in the world state of a horizon map: the state word is part of the key of the
+/// The versions of the removed A-net and chunk-stage code (ADR 0086), kept as numbers in the world state of a horizon map: the state word is part of the key of the
 /// maps stored on the pack, so the values stay what they were when the chunk stage went (B6, ADR 0086) and no stored map is lost to the removal.
 const CODE_VERSION_ANET: u64 = 10;
 const CODE_VERSION_CHUNK_STAGE: u64 = 1;
@@ -283,7 +283,7 @@ impl ChunkHorizonBaker {
         TileStats { evaluated: t.evaluated, hits: t.hits, held: t.held.len() }
     }
 
-    /// What the heights of a block depend on besides its items and its chunk: the base of the definition (seed, radius, height field, stage order), the baked input, the code that makes the chunks and the field above them
+    /// What the heights of a block depend on besides its items: the base of the definition (seed, radius, height field, stage order), the baked input, the code that makes the field
     /// (the versions of the removed A-net and chunk-stage code, this bake), the lattice, and the coupled lens, which the field chain does not hash into a tile key.
     fn world_state(&self, world: &WorldTerrain) -> u64 {
         let lens = world.coupled_lens().map_or(0, |l| 1 + l as u64);
@@ -461,8 +461,8 @@ impl HorizonBaker for ChunkHorizonBaker {
         map.map_or_else(|_| none(), |m| Some(m.data))
     }
 
-    /// The items of every stamp layer that touch the chunk and the halo the march reads around it (the horizon samples the whole field, so the layers
-    /// above the chunk stage count too): the hash of those items, 0 for none. The cap is the chunk's own with a halo of the march's cells.
+    /// The items of every stamp layer that touch the chunk and the halo the march reads around it (the horizon samples the whole field, so every
+    /// stamp layer counts): the hash of those items, 0 for none. The cap is the chunk's own with a halo of the march's cells.
     fn edit_word(&self, key: ChunkKey) -> u64 {
         self.items_word(key, self.halo_cells() as f64)
     }
@@ -492,15 +492,15 @@ pub fn max_range_m(lat: &ChunkLattice, radius_m: f64) -> f64 {
 }
 
 /// The march of a world's chunk horizons: SPIKE-32's 16 azimuths and 5 km, the range cut to what a chunk edge allows (4.8 km at the 8 m lattice
-/// of the A-net default; a 5 km range would need 627 cells of halo against a chunk of 614).
+/// of the default; a 5 km range would need 627 cells of halo against a chunk of 614).
 pub fn chunk_horizon_params(lat: &ChunkLattice, radius_m: f64) -> HorizonParams {
     let base = HorizonParams::chunk(radius_m);
     HorizonParams { range_m: base.range_m.min(max_range_m(lat, radius_m)), ..base }
 }
 
 impl WorldTerrain {
-    /// Give a world that has a chunk stage the horizon jobs (STRM-049): a second job per ready chunk on `spawner`, `clock` for the settle window,
-    /// `params` the march (its cell is the chunk lattice's). Errors without a chunk stage. A second call replaces the first.
+    /// Give a world that has a chunk lattice (one that reads a bake) the horizon jobs (STRM-049): a job per chunk the plan reads on `spawner`, `clock` for the settle window,
+    /// `params` the march (its cell is the chunk lattice's). Errors without a lattice. A second call replaces the first.
     pub fn enable_horizon(
         self: &Arc<Self>,
         params: HorizonParams,
@@ -909,7 +909,7 @@ impl HorizonRig {
     }
 
     /// One frame: with the horizon update of the chunk step (`frame_step` ran the jobs for the plan tiles `tiles`), hand the renderer the table of the frame, the next map to upload and
-    /// (once) the coarse map. `sun` is the lit plan sun direction. Does nothing without the chunk stage of the world.
+    /// (once) the coarse map. `sun` is the lit plan sun direction. Does nothing without the horizon jobs of the world.
     pub fn frame(
         &mut self,
         world: &WorldTerrain,

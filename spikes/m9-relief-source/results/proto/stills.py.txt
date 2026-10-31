@@ -1,0 +1,28 @@
+# SPIKE-65 still sheets (eye at the highest original cell near the centre): per site, rows = variants, columns = eye 300 m (pitch 8) and eye 30 m (pitch 4), heading 90; render.py per cell.
+# Usage: python -I stills.py <out dir of rasters> <sheet dir> <site> <variant,...>
+import sys, os, subprocess
+from PIL import Image, ImageDraw, ImageFont
+d, sd, site, variants = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4].split(",")
+here = os.path.dirname(os.path.abspath(__file__))
+os.makedirs(sd, exist_ok=True)
+CW, CH, LW, TH = 960, 540, 230, 40
+font = ImageFont.load_default(size=26)
+sheet = Image.new("RGB", (LW + 2 * CW + 8, TH + len(variants) * (CH + 8)), "white")
+dr = ImageDraw.Draw(sheet)
+import numpy as np
+# The eye: the highest cell of the original ground within 100 cells of the centre (one vantage point for every variant).
+o = np.fromfile(f"{d}/{site}-orig.f32", "<f4").reshape(2560, 2560)[1180:1380, 1180:1380]
+ey, ex = np.unravel_index(np.argmax(o), o.shape)
+cx, cy = 1180 + ex, 1180 + ey
+dr.text((LW + 10, 6), "eye 300 m", fill="black", font=font)
+dr.text((LW + CW + 18, 6), "eye 30 m", fill="black", font=font)
+for r, v in enumerate(variants):
+    y = TH + r * (CH + 8)
+    dr.text((8, y + CH // 2 - 14), v, fill="black", font=font)
+    for c, (alt, pitch) in enumerate([(300, 8), (30, 4)]):
+        p = f"{sd}/{site}-{v}-{alt}.png"
+        subprocess.run([sys.executable, "-I", f"{here}/render.py", f"{d}/{site}-{v}.f32", str(alt), "90", str(pitch), p, str(cx), str(cy)], check=True, capture_output=True)
+        sheet.paste(Image.open(p).convert("RGB"), (LW + c * (CW + 8), y))
+out = f"{sd}/{site}-stills.jpg"
+sheet.save(out, quality=85)
+print(out, sheet.size)

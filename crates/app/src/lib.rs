@@ -153,11 +153,11 @@ pub struct Options {
     pub radii_m: Option<String>,
     /// `--altitudes-m`: cameras at these altitudes (metres separated by commas) in the `edit-latency` and envelope scenes; none: the scene's own.
     pub altitudes_m: Option<String>,
-    /// `--horizon-threads N`: the scoped threads one horizon bake of the chunk stage uses in the `edit-latency` scene (default: the cores, at most 4).
+    /// `--horizon-threads N`: the scoped threads one horizon bake uses in the `edit-latency` scene (default: the cores, at most 4).
     pub horizon_threads: Option<usize>,
     /// `--repeats N`: the runs of every case of the `edit-latency` scene (default 3).
     pub repeats: Option<usize>,
-    /// `--no-horizon-jobs`: the `edit-latency` scene's chunk stage without the horizon jobs (they share the chunk pool).
+    /// `--no-horizon-jobs`: the `edit-latency` scene without the horizon jobs (the edit's tile refresh alone).
     pub no_horizon_jobs: bool,
     /// `perf coupled --store DIR --remake-into OUT`: time a fresh make of the coupled run from the stored bake, written to `OUT` under `target/`, never into the store (GEN-042).
     pub remake_into: Option<PathBuf>,
@@ -718,19 +718,8 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
         } else if stream_scene {
             // `--prefill-levels`: the levels of the tile pack the gated dives require pre-filled at their start (default 4).
             // `--altitudes-m`: the altitudes of the envelope scene (`--only-steady`, TEST-057).
-            // `--base-threads`: the threads of a batch of the A-net's base heights in the edit-latency scene.
             // `--radii-m`: with `--altitudes-m`, the hill stamps of the edit-latency scene to run (a diagnosis of one case).
-            &[
-                "--world",
-                "--global-res",
-                "--prefill-levels",
-                "--base-threads",
-                "--horizon-threads",
-                "--repeats",
-                "--altitudes-m",
-                "--radii-m",
-                "--places",
-            ]
+            &["--world", "--global-res", "--prefill-levels", "--horizon-threads", "--repeats", "--altitudes-m", "--radii-m", "--places"]
         } else if window {
             &["--world", "--global-res", "--prefill-levels"]
         } else if terrain_scene {
