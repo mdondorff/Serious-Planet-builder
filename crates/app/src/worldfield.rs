@@ -197,6 +197,8 @@ pub struct WorldTerrain {
     /// The queue of the height warm-up thread (made on the first [`WorldTerrain::warm_heights`]) and the batches it has read.
     warm: std::sync::Mutex<Option<std::sync::mpsc::SyncSender<Vec<planet_core::Vec3>>>>,
     warmed: std::sync::atomic::AtomicU64,
+    /// The helper threads of a tile job's water reads (BUDG-004): the rig sets the terrain share's; 8 plain scoped threads without one.
+    job_par: std::sync::RwLock<Arc<dyn planet_core::par::Par + Send + Sync>>,
 }
 
 /// The ocean channel of a stored bake as the water field's lattice.
@@ -291,6 +293,7 @@ impl WorldTerrain {
             coupled: Default::default(),
             warm: Default::default(),
             warmed: Default::default(),
+            job_par: std::sync::RwLock::new(Arc::new(8usize)),
             coarse: Default::default(),
             horizon_threads: std::sync::atomic::AtomicUsize::new(0),
             horizon_cells: std::sync::atomic::AtomicU32::new(0),
@@ -376,6 +379,7 @@ impl WorldTerrain {
             coupled: Default::default(),
             warm: Default::default(),
             warmed: Default::default(),
+            job_par: std::sync::RwLock::new(Arc::new(8usize)),
             coarse: Default::default(),
             horizon_threads: std::sync::atomic::AtomicUsize::new(0),
             horizon_cells: std::sync::atomic::AtomicU32::new(0),
@@ -611,7 +615,8 @@ impl WorldTerrain {
         }
         let radius_m = self.radius_m;
         let book = &self.water_book;
-        if matches!(self.with_water(|f| book.fill(f, &TangentWarp, tile, radius_m)), Ok(Some(Ok(())))) {
+        let par = Arc::clone(&self.job_par.read().expect("job par"));
+        if matches!(self.with_water(|f| book.fill_par(f, &TangentWarp, tile, radius_m, par.as_ref())), Ok(Some(Ok(())))) {
             book.set_min_height(tile, built.min_height_m());
         }
     }
@@ -743,6 +748,11 @@ impl WorldTerrain {
 
     pub(crate) fn store_dir(&self) -> Option<&Path> {
         self.store_dir.as_deref()
+    }
+
+    /// The parallelism the tile jobs' helper threads are asked from (the terrain share of the rig, BUDG-004).
+    pub fn set_job_par(&self, par: Arc<dyn planet_core::par::Par + Send + Sync>) {
+        *self.job_par.write().expect("job par") = par;
     }
 
     /// Set the scoped threads one horizon bake uses (at least 1).

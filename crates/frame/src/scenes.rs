@@ -476,10 +476,8 @@ pub fn lag_post_pass<'f>(
             })
             .collect()
     };
-    let parts: Vec<Result<Vec<FrameLag>, String>> = std::thread::scope(|s| {
-        let handles: Vec<_> = frames.chunks(chunk).enumerate().map(|(c, part)| s.spawn(move || (c, run(c * chunk, part)))).collect();
-        handles.into_iter().map(|h| h.join().expect("lag post-pass thread").1).collect()
-    });
+    let chunks: Vec<&[FrameDraw]> = frames.chunks(chunk).collect();
+    let parts: Vec<Result<Vec<FrameLag>, String>> = planet_core::par::map(&threads, chunks.len(), &|c| run(c * chunk, chunks[c]));
     let mut out = Vec::with_capacity(frames.len());
     for p in parts {
         out.extend(p?);
