@@ -1,0 +1,27 @@
+$ C:/Program Files/Git/usr/bin/bash.exe C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/570e124f-4ca5-49b4-8bf6-680604dce399/scratchpad/s66/dump.sh
+=== k4 K=4 KM=4 W=0 09:32:16 cpu 7%
+RELIEF alps: face 0 cells i 27665 j 61097 (2560^2), dx 99.98 m, land 91.8 %, min -15 max 4765 m, sampled in 7.0 s
+RELIEF blackforest: face 3 cells i 10188 j 51184 (2560^2), dx 101.75 m, land 91.1 %, min 2 max 1909 m, sampled in 7.7 s
+RELIEF highlands: face 3 cells i 12373 j 61409 (2560^2), dx 100.77 m, land 82.2 %, min -41 max 2178 m, sampled in 8.0 s
+RELIEF valleyridge: face 3 cells i 24388 j 67161 (2560^2), dx 98.22 m, land 88.5 %, min -39 max 844 m, sampled in 7.6 s
+=== k6 K=6 KM=6 W=0 09:33:28 cpu %
+RELIEF alps: face 0 cells i 27665 j 61097 (2560^2), dx 99.98 m, land 91.7 %, min -15 max 5233 m, sampled in 7.9 s
+RELIEF blackforest: face 3 cells i 10188 j 51184 (2560^2), dx 101.75 m, land 91.1 %, min 1 max 1958 m, sampled in 8.2 s
+RELIEF highlands: face 3 cells i 12373 j 61409 (2560^2), dx 100.77 m, land 82.1 %, min -41 max 2275 m, sampled in 7.5 s
+RELIEF valleyridge: face 3 cells i 24388 j 67161 (2560^2), dx 98.22 m, land 88.4 %, min -39 max 872 m, sampled in 7.3 s
+=== k4all K=4 KM=4 W=1 09:34:24 cpu 5%
+RELIEF alps: face 0 cells i 27665 j 61097 (2560^2), dx 99.98 m, land 88.6 %, min -176 max 5136 m, sampled in 7.1 s
+RELIEF blackforest: face 3 cells i 10188 j 51184 (2560^2), dx 101.75 m, land 84.9 %, min -180 max 2038 m, sampled in 7.6 s
+RELIEF highlands: face 3 cells i 12373 j 61409 (2560^2), dx 100.77 m, land 69.5 %, min -181 max 2329 m, sampled in 8.0 s
+RELIEF valleyridge: face 3 cells i 24388 j 67161 (2560^2), dx 98.22 m, land 74.9 %, min -189 max 968 m, sampled in 7.5 s
+=== k6m10 K=6 KM=10 W=0 09:34:58 cpu 2%
+RELIEF alps: face 0 cells i 27665 j 61097 (2560^2), dx 99.98 m, land 91.7 %, min -397 max 6170 m, sampled in 7.4 s
+RELIEF blackforest: face 3 cells i 10188 j 51184 (2560^2), dx 101.75 m, land 91.1 %, min 1 max 2046 m, sampled in 8.0 s
+RELIEF highlands: face 3 cells i 12373 j 61409 (2560^2), dx 100.77 m, land 82.1 %, min -41 max 2503 m, sampled in 9.6 s
+RELIEF valleyridge: face 3 cells i 24388 j 67161 (2560^2), dx 98.22 m, land 88.4 %, min -39 max 872 m, sampled in 7.5 s
+=== k6m14 K=6 KM=14 W=0 09:35:35 cpu 26%
+RELIEF alps: face 0 cells i 27665 j 61097 (2560^2), dx 99.98 m, land 91.7 %, min -1900 max 7107 m, sampled in 7.8 s
+RELIEF blackforest: face 3 cells i 10188 j 51184 (2560^2), dx 101.75 m, land 91.1 %, min 1 max 2133 m, sampled in 7.9 s
+RELIEF highlands: face 3 cells i 12373 j 61409 (2560^2), dx 100.77 m, land 82.1 %, min -41 max 2730 m, sampled in 7.7 s
+RELIEF valleyridge: face 3 cells i 24388 j 67161 (2560^2), dx 98.22 m, land 88.4 %, min -39 max 872 m, sampled in 7.2 s
+=== done 09:36:11
