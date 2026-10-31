@@ -403,4 +403,276 @@ mod spike82 {
             }
         }
     }
+
+    // SPIKE-83 (spike code, never merged): the bounds pyramid. A baked layer stands in for ADR 0088's erosion layer: the steep field sampled on the
+    // face grid of SPIKE-61 (98,304 cells per face edge, 101.8 m) over a window round a site, read bilinearly; plus a runtime detail octave
+    // (gradient noise at about 25 m, amplitude 1.5 k m) with analytic per-cap bounds. Bounds per cap: the min/max of the layer's nodes the cap's face
+    // box touches, from a pyramid of 32 x 32 blocks and its coarser levels (raw nodes for boxes under 16 cells), plus the detail's bounds.
+    const NF: f64 = 98_304.0;
+
+    struct Win {
+        face: u8,
+        i0: i64,
+        j0: i64,
+        n: i64,
+        nodes: Vec<f32>,
+        /// (block size in cells, blocks per row, (min, max) per block); block `b` covers nodes `b B ..= (b + 1) B`.
+        levels: Vec<(i64, i64, Vec<(f32, f32)>)>,
+    }
+
+    impl Win {
+        fn node(&self, i: i64, j: i64) -> f32 {
+            self.nodes[((j - self.j0) * (self.n + 1) + (i - self.i0)) as usize]
+        }
+        fn inside(&self, i0: i64, i1: i64, j0: i64, j1: i64) -> bool {
+            i0 >= self.i0 && j0 >= self.j0 && i1 <= self.i0 + self.n && j1 <= self.j0 + self.n
+        }
+        fn range(&self, i0: i64, i1: i64, j0: i64, j1: i64) -> (f64, f64) {
+            let (mut lo, mut hi) = (f32::INFINITY, f32::NEG_INFINITY);
+            let w = (i1 - i0).max(j1 - j0);
+            if w <= 16 {
+                for j in j0..=j1 {
+                    for i in i0..=i1 {
+                        let v = self.node(i, j);
+                        lo = lo.min(v);
+                        hi = hi.max(v);
+                    }
+                }
+            } else {
+                // The finest level whose blocks are at least half the box: at most about 3 x 3 blocks.
+                let (b, per, mm) = self.levels.iter().find(|(b, _, _)| *b * 2 >= w).unwrap_or(self.levels.last().unwrap());
+                let (bi0, bi1) = ((i0 - self.i0) / b, ((i1 - self.i0 - 1).max(0) / b).min(per - 1));
+                let (bj0, bj1) = ((j0 - self.j0) / b, ((j1 - self.j0 - 1).max(0) / b).min(per - 1));
+                for bj in bj0..=bj1 {
+                    for bi in bi0..=bi1 {
+                        let (a, z) = mm[(bj * per + bi) as usize];
+                        lo = lo.min(a);
+                        hi = hi.max(z);
+                    }
+                }
+            }
+            (f64::from(lo), f64::from(hi))
+        }
+    }
+
+    fn build(steep: &Steep<'_>, face: u8, ci: i64, cj: i64, n: i64) -> (Win, f64, f64) {
+        let (i0, j0) = (ci - n / 2, cj - n / 2);
+        let t = Instant::now();
+        let rows: Vec<std::sync::Mutex<Vec<f32>>> = (0..=n).map(|_| std::sync::Mutex::new(Vec::new())).collect();
+        let next = std::sync::atomic::AtomicI64::new(0);
+        std::thread::scope(|sc| {
+            for _ in 0..8 {
+                sc.spawn(|| loop {
+                    let r = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if r > n {
+                        break;
+                    }
+                    let row: Vec<f32> = (0..=n)
+                        .map(|c| {
+                            let (s, tt) = (-1.0 + 2.0 * (i0 + c) as f64 / NF, -1.0 + 2.0 * (j0 + r) as f64 / NF);
+                            steep.height(planet_core::cube::face_to_direction(&TangentWarp, planet_core::cube::Face(face), s, tt)) as f32
+                        })
+                        .collect();
+                    *rows[r as usize].lock().unwrap() = row;
+                });
+            }
+        });
+        let nodes: Vec<f32> = rows.into_iter().flat_map(|m| m.into_inner().unwrap()).collect();
+        let t_sample = t.elapsed().as_secs_f64();
+        let t = Instant::now();
+        let mut levels = Vec::new();
+        let mut b = 32i64;
+        // Level 0 from the nodes; each coarser level from four blocks of the one below.
+        let per = n / b;
+        let mut mm = Vec::with_capacity((per * per) as usize);
+        for bj in 0..per {
+            for bi in 0..per {
+                let (mut lo, mut hi) = (f32::INFINITY, f32::NEG_INFINITY);
+                for j in bj * b..=(bj + 1) * b {
+                    for i in bi * b..=(bi + 1) * b {
+                        let v = nodes[(j * (n + 1) + i) as usize];
+                        lo = lo.min(v);
+                        hi = hi.max(v);
+                    }
+                }
+                mm.push((lo, hi));
+            }
+        }
+        levels.push((b, per, mm));
+        while levels.last().unwrap().1 >= 2 {
+            let (_, per, ref prev) = *levels.last().unwrap();
+            let np = per / 2;
+            let mut next = Vec::with_capacity((np * np) as usize);
+            for bj in 0..np {
+                for bi in 0..np {
+                    let q = |x: i64, y: i64| prev[(y * per + x) as usize];
+                    let v = [q(2 * bi, 2 * bj), q(2 * bi + 1, 2 * bj), q(2 * bi, 2 * bj + 1), q(2 * bi + 1, 2 * bj + 1)];
+                    next.push((v.iter().map(|x| x.0).fold(f32::INFINITY, f32::min), v.iter().map(|x| x.1).fold(f32::NEG_INFINITY, f32::max)));
+                }
+            }
+            b *= 2;
+            levels.push((b, np, next));
+        }
+        let t_pyr = t.elapsed().as_secs_f64();
+        (Win { face, i0, j0, n, nodes, levels }, t_sample, t_pyr)
+    }
+
+    struct Pyr<'a> {
+        steep: &'a Steep<'a>,
+        wins: Vec<Win>,
+        lookups: std::sync::atomic::AtomicU64,
+        lookup_ns: std::sync::atomic::AtomicU64,
+    }
+
+    const DETAIL_FREQ: f64 = 6_371_000.0 / 25.0;
+
+    impl Pyr<'_> {
+        fn locate(&self, d: Vec3) -> Option<(&Win, f64, f64)> {
+            let (face, s, t) = planet_core::cube::direction_to_face(&TangentWarp, d);
+            let (x, y) = ((s + 1.0) * 0.5 * NF, (t + 1.0) * 0.5 * NF);
+            self.wins.iter().find(|w| w.face == face.0 && w.inside(x.floor() as i64, x.floor() as i64 + 1, y.floor() as i64, y.floor() as i64 + 1)).map(|w| (w, x, y))
+        }
+        fn detail(&self, d: Vec3) -> f64 {
+            1.5 * self.steep.look(d, 1) * planet_generators::global::spike83_detail(self.steep.seed, d, DETAIL_FREQ)
+        }
+    }
+
+    impl HeightField for Pyr<'_> {
+        fn height(&self, d: Vec3) -> f64 {
+            let base = match self.locate(d) {
+                Some((w, x, y)) => {
+                    let (i, j) = (x.floor() as i64, y.floor() as i64);
+                    let (fx, fy) = (x - i as f64, y - j as f64);
+                    let v = |a: i64, b: i64| f64::from(w.node(a, b));
+                    (v(i, j) * (1.0 - fx) + v(i + 1, j) * fx) * (1.0 - fy) + (v(i, j + 1) * (1.0 - fx) + v(i + 1, j + 1) * fx) * fy
+                }
+                None => self.steep.height(d),
+            };
+            base + self.detail(d)
+        }
+        fn seed(&self) -> u64 {
+            self.steep.seed
+        }
+        fn implementation_id(&self) -> &'static str {
+            "spike83-pyramid"
+        }
+        fn version(&self) -> u32 {
+            1
+        }
+        fn max_abs_height_m(&self) -> f64 {
+            self.steep.max_abs + 15.0
+        }
+        fn bounds_monotone(&self) -> bool {
+            false
+        }
+        fn height_bounds(&self, c: Vec3, r: f64) -> (f64, f64) {
+            let t = Instant::now();
+            let (nlo, nhi) = planet_generators::global::spike83_detail_bounds(self.steep.seed, c, r, DETAIL_FREQ);
+            let (klo, khi) = self.steep.range(c, r, 1);
+            let (klo, khi) = if klo.is_finite() { (klo, khi) } else { (0.0, 7.5) };
+            let det = (1.5 * if nlo < 0.0 { khi } else { klo } * nlo, 1.5 * if nhi > 0.0 { khi } else { klo } * nhi);
+            let (face, s, tt) = planet_core::cube::direction_to_face(&TangentWarp, c);
+            let reach = 2.0 * r + 1e-9;
+            let (x0, x1) = (((s - reach + 1.0) * 0.5 * NF).floor() as i64, ((s + reach + 1.0) * 0.5 * NF).floor() as i64 + 1);
+            let (y0, y1) = (((tt - reach + 1.0) * 0.5 * NF).floor() as i64, ((tt + reach + 1.0) * 0.5 * NF).floor() as i64 + 1);
+            let out = match self.wins.iter().find(|w| r <= 0.05 && s - reach > -1.0 && s + reach < 1.0 && tt - reach > -1.0 && tt + reach < 1.0 && w.face == face.0 && w.inside(x0, x1, y0, y1)) {
+                Some(w) => {
+                    let (lo, hi) = w.range(x0, x1, y0, y1);
+                    (lo + det.0, hi + det.1)
+                }
+                None => {
+                    let (lo, hi) = self.steep.height_bounds(c, r);
+                    (lo + det.0 - 1.0, hi + det.1 + 1.0)
+                }
+            };
+            self.lookups.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.lookup_ns.fetch_add(t.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+            out
+        }
+    }
+
+    /// `S82_FIELDS=FILE S82_NCH=4 S83_SITES=name:lat:lon,... S83_N=2048 cargo test -p planet --release --lib spike83_pyramid -- --ignored --nocapture`:
+    /// per site, bake a window of S83_N^2 cells of the steep field, build the pyramid, and plan at 200 m and 2 km with its bounds (production
+    /// parameters); the bound against the sampled range per level; the pyramid's size, build time and lookup cost.
+    #[test]
+    #[ignore = "a spike measurement"]
+    fn spike83_pyramid() {
+        let def = WorldDefinition::single_planet(crate::skeleton::RADIUS_M, 1);
+        let world = GlobalWorld::from_definition(&def).unwrap();
+        let store = planet_cache::pack::TileStore::open(std::path::Path::new("C:/DEV/SeriousPlanetData/global16384"), world.params()).unwrap();
+        let src = StoreSource::new(&store, &world, 16384).unwrap();
+        let bake_key = world.stage_key(16384).0;
+        let radius = GenContext::new(&def).body_radius_m(BodyId::PLANET).unwrap();
+        let eroded = ErosionGenerator.field(&GenContext::new(&def), BodyId::PLANET, &src, bake_key).unwrap();
+        let nch: usize = std::env::var("S82_NCH").ok().and_then(|v| v.parse().ok()).unwrap_or(4);
+        let f: Vec<f32> = std::fs::read(std::env::var("S82_FIELDS").unwrap()).unwrap().chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
+        let detail = (eroded.max_abs_height_m() - 9000.0).abs().max(1000.0);
+        let steep = Steep { inner: &eroded, f, nch, seed: eroded.seed(), max_abs: 9000.0 + 900.0 + 7.5 * detail, hb_on: true };
+        let n: i64 = std::env::var("S83_N").ok().and_then(|v| v.parse().ok()).unwrap_or(2048);
+        let map = &TangentWarp;
+        let sites: Vec<(String, f64, f64)> = std::env::var("S83_SITES")
+            .unwrap()
+            .split(',')
+            .map(|s| {
+                let v: Vec<&str> = s.split(':').collect();
+                (v[0].to_string(), v[1].parse().unwrap(), v[2].parse().unwrap())
+            })
+            .collect();
+        let mut wins = Vec::new();
+        for (name, lat, lon) in &sites {
+            let d = Vec3::from_lat_lon(lat.to_radians(), lon.to_radians());
+            let (face, s, t) = planet_core::cube::direction_to_face(map, d);
+            let (ci, cj) = (((s + 1.0) * 0.5 * NF) as i64, ((t + 1.0) * 0.5 * NF) as i64);
+            let (w, ts, tp) = build(&steep, face.0, ci, cj, n);
+            let blocks: usize = w.levels.iter().map(|l| l.2.len()).sum();
+            println!(
+                "S83BUILD {name}: face {} window {n}^2 cells ({:.0} km), layer sampled in {ts:.1} s, pyramid {} levels, {blocks} blocks ({} B as 2 x f32, {:.3} % of the nodes' f32) built in {:.3} s",
+                face.0,
+                n as f64 * 101.8 / 1000.0,
+                w.levels.len(),
+                blocks * 8,
+                100.0 * (blocks * 8) as f64 / (w.nodes.len() * 4) as f64,
+                tp
+            );
+            wins.push(w);
+        }
+        let pyr = Pyr { steep: &steep, wins, lookups: Default::default(), lookup_ns: Default::default() };
+        for (name, lat, lon) in &sites {
+            let d = Vec3::from_lat_lon(lat.to_radians(), lon.to_radians());
+            for (alt, pitch) in [(200.0, 12.0f64), (2000.0, 20.0)] {
+                let pos = PlanetFixed(d * (radius + pyr.height(d) + alt));
+                let cam = Camera::at_surface_point(pos, Vec3::new(0.0, 0.0, 1.0), pitch.to_radians(), 60f64.to_radians(), 16.0 / 9.0, 0.1);
+                let lod = LodParams { radius_m: radius, max_height_m: pyr.max_abs_height_m(), ..LodParams::earth_1080p() };
+                let req = TerrainRequest { camera: cam, size: (192, 108), view: TerrainView::Level, lod, face_mapping: TangentWarp.id().to_string(), seed: pyr.seed() };
+                let (l0, n0) = (pyr.lookups.load(std::sync::atomic::Ordering::Relaxed), pyr.lookup_ns.load(std::sync::atomic::Ordering::Relaxed));
+                let t = Instant::now();
+                match plan_terrain_field(&req, &pyr) {
+                    Ok(plan) => {
+                        let dl = pyr.lookups.load(std::sync::atomic::Ordering::Relaxed) - l0;
+                        let dn = pyr.lookup_ns.load(std::sync::atomic::Ordering::Relaxed) - n0;
+                        println!(
+                            "S83PLAN {name} pyramid {alt:.0} m | {} nodes, {} capped, deepest {} | {:.2} s | {dl} bounds lookups, {:.2} us each",
+                            plan.nodes.len(),
+                            plan.nodes.iter().filter(|x| x.capped).count(),
+                            plan.nodes.iter().map(|x| x.level).max().unwrap_or(0),
+                            t.elapsed().as_secs_f64(),
+                            dn as f64 / 1000.0 / dl.max(1) as f64
+                        );
+                    }
+                    Err(e) => println!("S83PLAN {name} pyramid {alt:.0} m | REJECTED: {e}"),
+                }
+            }
+            let mut line = format!("S83BOUND {name}:");
+            for level in (10u8..=22).step_by(2) {
+                let centre = TileId::from_direction(map, d, level);
+                let dirs: Vec<Vec3> = (0..=64u32).flat_map(|l| (0..=64u32).map(move |k| (k, l))).map(|(k, l)| centre.sample_direction(map, 64, k, l)).collect();
+                let fine: Vec<f64> = dirs.iter().map(|x| pyr.height(*x)).collect();
+                let (smin, smax) = fine.iter().fold((f64::MAX, f64::MIN), |a, &h| (a.0.min(h), a.1.max(h)));
+                let (blo, bhi) = pyr.height_bounds(centre.center_direction(map), planet_frame::lod::angular_radius(map, centre));
+                let ok = blo <= smin + 1e-6 && bhi >= smax - 1e-6;
+                line += &format!(" L{level} range {:.1} bound {:.1}x{};", smax - smin, (bhi - blo) / (smax - smin).max(1e-3), if ok { "" } else { " MISSES" });
+            }
+            println!("{line}");
+        }
+    }
 }

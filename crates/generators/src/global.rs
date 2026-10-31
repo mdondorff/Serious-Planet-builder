@@ -386,6 +386,17 @@ pub fn spike82_hill_pattern_bounds(seed: u64, d: Vec3, r: f64) -> (f64, f64) {
     (lo / norm, hi / norm)
 }
 
+/// SPIKE-83 (spike code, never merged): one octave of gradient noise at `freq` (a runtime detail stand-in), and its bounds over a cap.
+pub fn spike83_detail(seed: u64, d: Vec3, freq: f64) -> f64 {
+    crate::height::layer_noise(seed, 0x474c_0083, 0, d * freq).clamp(-1.0, 1.0)
+}
+
+/// SPIKE-83: the bounds of [`spike83_detail`] over the cap of angular radius `r` round `c`.
+pub fn spike83_detail_bounds(seed: u64, c: Vec3, r: f64, freq: f64) -> (f64, f64) {
+    let (lo, hi) = crate::height::layer_noise_bounds(seed, 0x474c_0083, 0, c, r, freq);
+    (lo.max(-1.0), hi.min(1.0))
+}
+
 pub fn spike69_parts(seed: u64, d: Vec3) -> [f64; 5] {
     let t = terrain(seed, d);
     let ridge = ridge_at(seed, t.warped);
