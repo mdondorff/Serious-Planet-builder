@@ -1,6 +1,6 @@
 # M8 criterion 6: the edit-latency window of 2026-10-26 (recorded result)
 
-Machine: Rasierklinge (RTX 3080 Ti Laptop), release build, store `global16384`, 2560x1440, readiness gate ok for all three runs (the first attempt of the first two was refused by the gate for competing load and rerun; nothing overridden). The chunk stage is the viewer's (`anetworld::viewer_chunk_stage`: 4 chunk workers, horizon jobs), no disk cache. Tables: `edit-latency-chunks-hold.md` (viewer stage with the stale hold), `edit-latency-chunks-nohold.md` (`--no-stale-hold`), `edit-latency-nochunks.md` (`--no-chunks`).
+Machine: Rasierklinge (RTX 3080 Ti Laptop), release build, store `global16384`, 2560x1440, readiness gate ok for all three runs (the first attempt of the first two was refused by the gate for competing load and rerun; nothing overridden). The chunk stage is the viewer's (`anetworld::viewer_chunk_stage`: 4 chunk workers, horizon jobs), no disk cache. Tables: [`edit-latency-chunks-hold.md`](../../archive/M8/perf/edit-latency-chunks-hold.md) (viewer stage with the stale hold), [`edit-latency-chunks-nohold.md`](../../archive/M8/perf/edit-latency-chunks-nohold.md) (`--no-stale-hold`), [`edit-latency-nochunks.md`](../../archive/M8/perf/edit-latency-nochunks.md) (`--no-chunks`).
 
 | Reading | With chunks (hold / no hold) | Without chunks |
 |---|---|---|
@@ -24,7 +24,7 @@ Machine: Rasierklinge (RTX 3080 Ti Laptop), release build, store `global16384`, 
 3. The first-chunk-frame spike: precompute the read-set discs and versions of the wanted chunks before the first edit.
 
 ## Window 2 of 2026-10-26 (main at #775 and #774; pools and base threads varied)
-Machine and build as above, readiness gate ok for the four runs (6x2 and 8x2 were refused at option parsing the first time, then run). The scene tells the plan cache where the items changed after every swap (#775). Tables: `edit-latency-w5-4x4.md`, `-6x2.md`, `-8x2.md`, `-4x4-nohorizon.md` (chunk workers x base threads; the last is 4x4 with `--no-horizon-jobs`).
+Machine and build as above, readiness gate ok for the four runs (6x2 and 8x2 were refused at option parsing the first time, then run). The scene tells the plan cache where the items changed after every swap (#775). Tables: [`edit-latency-w5-4x4.md`](../../archive/M8/perf/edit-latency-w5-4x4.md), `-6x2.md`, `-8x2.md`, `-4x4-nohorizon.md` (chunk workers x base threads; the last is 4x4 with `--no-horizon-jobs`).
 
 | Run | Eroded result drawn within 10 s (19 cases) | Drawn again, median / range (s) | M6 column over (13 gated) |
 |---|---|---|---|
@@ -38,7 +38,7 @@ Machine and build as above, readiness gate ok for the four runs (6x2 and 8x2 wer
 - Horizon jobs: no map was baked in any run (0 baked after every edit): the scene's frame loop does not call `horizon_frame`, so the horizon-off line compares nothing. To be added to the scene.
 
 ## Window 8 of 2026-10-27 (main at #782; 6 x 2, horizon jobs on and off, 300 m flight with prefetch)
-Readiness gate ok for all three runs. The scene calls `horizon_frame` and `chunk_frame` each step. Tables: `edit-latency-w8-6x2-horizon.md`, `edit-latency-w8-6x2-nohorizon.md`, `envelope-w8-prefetch.json`.
+Readiness gate ok for all three runs. The scene calls `horizon_frame` and `chunk_frame` each step. Tables: [`edit-latency-w8-6x2-horizon.md`](../../archive/M8/perf/edit-latency-w8-6x2-horizon.md), [`edit-latency-w8-6x2-nohorizon.md`](../../archive/M8/perf/edit-latency-w8-6x2-nohorizon.md), [`envelope-w8-prefetch.json`](../../archive/M8/perf/envelope-w8-prefetch.json).
 
 | Run | Eroded result drawn within 10 s (19 cases) | M6 column over (13 gated) |
 |---|---|---|
@@ -50,7 +50,7 @@ Readiness gate ok for all three runs. The scene calls `horizon_frame` and `chunk
 - 300 m flight, prefetch on (`prefetch_asked` about 840 per trial): highest speed 115 m/s, as without prefetch (floor 200 m/s). Limiter: chunk wait. Two chunks land per trial, each after a median 5 to 7 s (one solve); the stand-in share past 115 m/s is nodes whose chunk is not ready; the workers are idle at the end of most trials, so the pool and the plan time do not limit.
 
 ## Windows 9 and 10 of 2026-10-27 (main at #786 and #787; job classes, run-in envelope, bake threads)
-Gate ok for every run. Files: `edit-latency-w9-6x2-horizon-jobclasses.md`, `edit-latency-w10-ht4.md`, `edit-latency-w10-ht1.md`, `envelope-w9-run-in.json`, `edit-resolve-w9-phases.log`.
+Gate ok for every run. Files: [`edit-latency-w9-6x2-horizon-jobclasses.md`](../../archive/M8/perf/edit-latency-w9-6x2-horizon-jobclasses.md), [`edit-latency-w10-ht4.md`](../../archive/M8/perf/edit-latency-w10-ht4.md), [`edit-latency-w10-ht1.md`](../../archive/M8/perf/edit-latency-w10-ht1.md), [`envelope-w9-run-in.json`](../../archive/M8/perf/envelope-w9-run-in.json), [`edit-resolve-w9-phases.log`](../../archive/M8/perf/edit-resolve-w9-phases.log).
 
 | Run (6 x 2, horizon jobs on) | Eroded result drawn within 10 s (19) | Median drawn | M6 column over (13 gated) | Busy cores mean / peak (of 20) |
 |---|---|---|---|---|
@@ -62,10 +62,10 @@ Gate ok for every run. Files: `edit-latency-w9-6x2-horizon-jobclasses.md`, `edit
 - The job classes alone change nothing (2 of 19 against 2): no queued chunk job waits for a bake in the scene.
 - One bake thread recovers 6 of the 10 cases the horizon jobs cost; the rest is the bake's field evaluation or `horizon_frame`.
 - Re-solve phases (`generate --edit-resolve`, 6 workers x 2 base threads, per chunk job): network 2.2 to 3.1 s, solve 1.9 to 2.5 s, drivers 0.1 to 0.2 s; the last chunk lands 4.7 to 5.2 s (2 chunks) and 6.2 to 6.5 s (4 chunks). In the scene the same re-solves land at 8 to 9 s with horizon jobs off.
-- Envelope (`envelope-w9-run-in.json`, highest speed in m/s at 30, 100, 300, 1000 m): cold 125, 90, 115, 100; steady after a 12 s run-in 95, 110, 155, 78 (300 m: 145 with horizon off). Limiter of the steady 300 m flight: chunk wait (3 chunks land at 160 m/s after a median 6.3 s; stand-in 4.6 % of the nodes).
+- Envelope ([`envelope-w9-run-in.json`](../../archive/M8/perf/envelope-w9-run-in.json), highest speed in m/s at 30, 100, 300, 1000 m): cold 125, 90, 115, 100; steady after a 12 s run-in 95, 110, 155, 78 (300 m: 145 with horizon off). Limiter of the steady 300 m flight: chunk wait (3 chunks land at 160 m/s after a median 6.3 s; stand-in 4.6 % of the nodes).
 
 ## Window 11 of 2026-10-27 (main at #792; track-set prefetch, AVX2 march, 60 s steady window; bake threads and stale cancel of #789 on main)
-Gate ok. Files: `edit-latency-w11-6x2.md`, `envelope-w11-steady-300.json`. The full envelope scene was stopped after the 30 m and 100 m cold curves at the planner's request (it needs 1.5 to 2 h); the steady curve was run for 300 m alone (`--only-steady --altitudes-m 300`, #792 and the next PR); the other altitudes and the 12 s steady quick mode go to a later window.
+Gate ok. Files: [`edit-latency-w11-6x2.md`](../../archive/M8/perf/edit-latency-w11-6x2.md), [`envelope-w11-steady-300.json`](../../archive/M8/perf/envelope-w11-steady-300.json). The full envelope scene was stopped after the 30 m and 100 m cold curves at the planner's request (it needs 1.5 to 2 h); the steady curve was run for 300 m alone (`--only-steady --altitudes-m 300`, #792 and the next PR); the other altitudes and the 12 s steady quick mode go to a later window.
 
 | Run (6 x 2, horizon jobs on) | Eroded result drawn within 10 s (19) | M6 column over (13 gated) |
 |---|---|---|
@@ -80,7 +80,7 @@ Gate ok. Files: `edit-latency-w11-6x2.md`, `envelope-w11-steady-300.json`. The f
 - Window 9 envelope for comparison (12 s steady window, one edge): steady 95, 110, 155, 78 m/s at 30, 100, 300, 1000 m.
 
 ## Window 13 of 2026-10-27 (main at #797: job classes, horizon bake share, base-height reuse)
-Gate ok. Files: `edit-latency-w13-6x2-horizon-reuse.md`, `edit-resolve-w13-phases.log`.
+Gate ok. Files: [`edit-latency-w13-6x2-horizon-reuse.md`](../../archive/M8/perf/edit-latency-w13-6x2-horizon-reuse.md), [`edit-resolve-w13-phases.log`](../../archive/M8/perf/edit-resolve-w13-phases.log).
 
 | Run (6 x 2, horizon jobs on) | Eroded result drawn within 10 s (19) | Median drawn | M6 column over (13 gated) |
 |---|---|---|---|
@@ -92,12 +92,12 @@ Gate ok. Files: `edit-latency-w13-6x2-horizon-reuse.md`, `edit-resolve-w13-phase
 - What is left: the solve (about 60 % of a re-solve), the M6 column (plan delivered after 390 to 1030 ms with chunks).
 
 ## Window 14 and two probes of 2026-10-27 (what the plan, the tile build and the stated bound are worth)
-- Window 14, `edit-latency-w14-x-upper-bound.md`: the plan with the chunk stage's widening taken out of the split and morph bounds (an unsound experiment, withdrawn after review: the camera could be treated as higher than the ground and a morph interval could crack). Plan delivered 58 to 320 ms against 270 to 930 ms in window 13; the M6 column did not improve (`all refreshed` 390 to 1294 ms, 10 of 13 gated over against 7), criterion 6 17 of 19 as before. The plan is at most about 0.5 s of the M6 gap.
+- Window 14, [`edit-latency-w14-x-upper-bound.md`](../../archive/M8/perf/edit-latency-w14-x-upper-bound.md): the plan with the chunk stage's widening taken out of the split and morph bounds (an unsound experiment, withdrawn after review: the camera could be treated as higher than the ground and a morph interval could crack). Plan delivered 58 to 320 ms against 270 to 930 ms in window 13; the M6 column did not improve (`all refreshed` 390 to 1294 ms, 10 of 13 gated over against 7), criterion 6 17 of 19 as before. The plan is at most about 0.5 s of the M6 gap.
 - `tile_cost_report` (one thread, 32 cells, chunks landed): a tile costs 2 to 3 ms with the chunk layer and 2 ms without, at levels 15, 13, 11, 9. The tile build is not the 340 to 1100 ms of the refresh.
-- `anet_change_report` (`anet-change-bound-48-chunks.log`; 48 random land chunks of the 16384 store, 65 x 65 samples a level): the chunk change is almost only incision. Per level 11 to 16: p50 0.9 m, p99 48 to 49 m, p99.9 137 to 138 m, p99.99 190 m, max 201 to 207 m; signed range -206.7 to +1.2 m. The stage states 300 m both ways.
+- `anet_change_report` ([`anet-change-bound-48-chunks.log`](../../archive/M8/perf/anet-change-bound-48-chunks.log); 48 random land chunks of the 16384 store, 65 x 65 samples a level): the chunk change is almost only incision. Per level 11 to 16: p50 0.9 m, p99 48 to 49 m, p99.9 137 to 138 m, p99.99 190 m, max 201 to 207 m; signed range -206.7 to +1.2 m. The stage states 300 m both ways.
 
 ## Window 12 of 2026-10-27 (main at #797; track-set prefetch, the shared chunk step, height reuse #796)
-Gate ok. Files: `envelope-w12-steady-300.json`, `envelope-w12-steady-rest.json`. Steady curve only (`--only-steady`), 60 s window after a 12 s run-in, bound 1 % over every 1 s window of the stretch.
+Gate ok. Files: [`envelope-w12-steady-300.json`](../../archive/M8/perf/envelope-w12-steady-300.json), [`envelope-w12-steady-rest.json`](../../archive/M8/perf/envelope-w12-steady-rest.json). Steady curve only (`--only-steady`), 60 s window after a 12 s run-in, bound 1 % over every 1 s window of the stretch.
 
 | Altitude | Highest steady speed | Stand-in / coarse at the first failing speed | Notes |
 |---|---|---|---|
@@ -110,7 +110,7 @@ Gate ok. Files: `envelope-w12-steady-300.json`, `envelope-w12-steady-rest.json`.
 - The 200 m/s floor (steady flight, owner 2026-10-27) is shown at 30 m (320) and 300 m (480); not shown, not refuted, at 100 m and 1000 m.
 
 ## Window 14 of 2026-10-27 (main at #800; steady curve at two fixed start places per altitude)
-Gate ok. File: `envelope-w14-steady-100-1000.json`. `--only-steady --altitudes-m 100,1000 --steady-window-s 60 --places 2`: each search flies all its trials over one start place; the figure is the lower of the two.
+Gate ok. File: [`envelope-w14-steady-100-1000.json`](../../archive/M8/perf/envelope-w14-steady-100-1000.json). `--only-steady --altitudes-m 100,1000 --steady-window-s 60 --places 2`: each search flies all its trials over one start place; the figure is the lower of the two.
 
 | Altitude | Place 0 | Place 1 | Figure | Limiter |
 |---|---|---|---|---|
@@ -124,7 +124,7 @@ Gate ok. File: `envelope-w14-steady-100-1000.json`. `--only-steady --altitudes-m
 - Levers: a reach floor of one chunk edge (the next chunk is asked as soon as the current one is entered), a lead of at least the solve time (7 s) plus a margin, and a trace that also covers the run-in to confirm cause 2.
 
 ## Windows 16 to 21 of 2026-10-27 (the tail of the refresh, named)
-Gate ok each. Files: `edit-latency-w18-lock-waits.md`, `edit-latency-w19-stragglers.md`, `edit-latency-w21-drawn-exact.md`.
+Gate ok each. Files: [`edit-latency-w18-lock-waits.md`](../../archive/M8/perf/edit-latency-w18-lock-waits.md), [`edit-latency-w19-stragglers.md`](../../archive/M8/perf/edit-latency-w19-stragglers.md), [`edit-latency-w21-drawn-exact.md`](../../archive/M8/perf/edit-latency-w21-drawn-exact.md).
 - Window 16 (refresh frame by frame): the bulk of the named tiles is refreshed in 60 to 500 ms; the last 1 to 6 tiles end one at a time 50 to 250 ms apart with 1 to 3 jobs in flight, no upload pending, frames of 2 to 5 ms.
 - Window 18 (lock waits by name): over a whole case the chunk-state lock waits 0.1 to 54 ms in all (660k takes), the route memo 7 to 60 ms (longest 6 ms), landform lattice, epoch memo, region cache and pool state under 3 ms. No lock explains a 100 to 300 ms job.
 - Window 19 (stragglers of the first wave): they are the level-3 ancestors (6,5), (6,6), (7,5), (7,6) of face 0 (and (12,11), (12,12) at level 4): 120 to 510 ms each, every other refresh job at levels 5 to 16 takes 8 to 20 ms; worker wait 6 to 30 ms. The edit refreshes these ancestors every time (the refreshed-set table: levels 3 to 14 are resident only, "change below spacing").
