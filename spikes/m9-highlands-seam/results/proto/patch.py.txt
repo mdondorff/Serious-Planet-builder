@@ -1,0 +1,43 @@
+import os
+os.chdir(os.path.dirname(os.path.abspath(__file__)) + '/bake/src')
+p = 'main.rs'
+t = open(p, encoding='utf-8').read()
+t = t.replace("//! SPIKE-71 (spike code, never merged;", "//! SPIKE-72 (spike code, never merged): the Highlands seam; local carve modes in `LOCAL`. SPIKE-71 (", 1)
+# A process-wide mode for the local carve (g.amax > 0): 0 as SPIKE-70, 1 no fill, 2 no fill and no breach.
+a = "fn carve_ring(g: G, h: &mut [f32], inflow: &[(usize, f64)], ring: Option<(&[f32], &[f32])>) {"
+b = "static LOCAL: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);\n\n" + a + "\n    let mode = if g.amax > 0.0 { LOCAL.load(std::sync::atomic::Ordering::Relaxed) } else { 0 };"
+assert t.count(a) == 1
+t = t.replace(a, b)
+a = "                if r == u32::MAX || h[r as usize] <= 0.0 || g.edge(r as usize) {"
+b = "                if mode == 2 || r == u32::MAX || h[r as usize] <= 0.0 || g.edge(r as usize) {"
+assert t.count(a) == 1
+t = t.replace(a, b)
+a = "            h[p] = hn.max(hr + 1e-3) as f32;"
+b = """            if mode >= 1 && hr >= f64::from(h[p]) {
+                // No fill: a cell whose receiver (on the flooded surface) is not below it stays; pits stay pits for the local carve.
+                continue;
+            }
+            h[p] = hn.max(hr + 1e-3) as f32;"""
+assert t.count(a) == 1
+t = t.replace(a, b)
+i = t.index('fn main() {')
+t = t[:i] + '''fn main() {
+    let a: Vec<String> = std::env::args().collect();
+    let outd = &a[2];
+    for site in a[3].split(',') {
+        let base = read(&format!("{outd}/{site}-base.f32"));
+        let jt = read(&format!("{outd}/{site}-joint.f32"));
+        let down = block_means(&base, 8);
+        let h1 = face_pass(&base, &down, 8, None);
+        for (mode, tag) in [(1u32, "nofill"), (2, "nofill-nobreach")] {
+            LOCAL.store(mode, std::sync::atomic::Ordering::Relaxed);
+            let (s, secs) = tiles_pass(&h1, 1e6);
+            println!("{site}: hybrid1 {tag}, 4 tiles {secs:.0} s");
+            measure(&format!("{site} hybrid1-{tag} hard"), &s, &jt);
+            write(&format!("{outd}/{site}-hybrid1-{tag}.f32"), &s);
+        }
+    }
+}
+'''
+open(p, 'w', encoding='utf-8', newline='').write(t)
+print('patched')

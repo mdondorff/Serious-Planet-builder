@@ -1,0 +1,58 @@
+# SPIKE-72: where the core-edge step sits. For a mosaic S (6,656^2), the step across the two seam lines (column/row 3,327 to 3,328) per edge cell,
+# against the same surface's steps 150 and 300 cells off the edge; its large steps by distance to the sea, by height and by drainage area
+# proxy (local relief); and a map: a hillshade strip along each seam line with the edge cells coloured by step.
+# Usage: python -I stepmap.py <dir> <site> <variant> <out dir>
+import sys
+import numpy as np
+from PIL import Image, ImageDraw
+d, site, var, out = sys.argv[1:5]
+B, M = 6656, 3328
+S = np.memmap(f'{d}/{site}-{var}.f32', dtype='<f4', mode='r', shape=(B, B))
+lo, hi = 256, 6400
+def steps(off):
+    x = M + off
+    col = np.abs(S[lo:hi, x].astype(np.float64) - S[lo:hi, x - 1])
+    row = np.abs(S[x, lo:hi].astype(np.float64) - S[x - 1, lo:hi])
+    lc = (S[lo:hi, x] > 0) & (S[lo:hi, x - 1] > 0)
+    lr = (S[x, lo:hi] > 0) & (S[x - 1, lo:hi] > 0)
+    return col, row, lc, lr
+col, row, lc, lr = steps(0)
+ref = np.concatenate([np.concatenate([c[l], r[m]]) for c, r, l, m in (steps(o) for o in (-300, -150, 150, 300))])
+thr = np.percentile(ref, 99)
+print(f'{site} {var}: edge p99 {np.percentile(np.concatenate([col[lc], row[lr]]), 99):.1f} m, off-edge p99 {thr:.1f} m')
+# Where: big steps (over the off-edge p99) along each line, by position, distance to sea and height.
+sea = np.asarray(S) <= 0
+from scipy import ndimage
+dist = ndimage.distance_transform_edt(~sea) * 0.1018  # km to the nearest sea cell
+for name, st, lm, pos in (('vertical', col, lc, lambda k: (lo + k, M)), ('horizontal', row, lr, lambda k: (M, lo + k))):
+    big = np.where(lm & (st > thr))[0]
+    ds = np.array([dist[pos(k)] for k in big]) if len(big) else np.array([])
+    hs = np.array([S[pos(k)] for k in big]) if len(big) else np.array([])
+    alld = np.array([dist[pos(k)] for k in np.where(lm)[0]])
+    print(f'  {name}: {len(big)} of {lm.sum()} land edge cells over {thr:.0f} m; their distance to sea p50 {np.median(ds) if len(ds) else 0:.1f} km (all edge cells {np.median(alld):.1f}), height p50 {np.median(hs) if len(hs) else 0:.0f} m; runs (contiguous): {len(np.split(big, np.where(np.diff(big) > 3)[0] + 1)) if len(big) else 0}')
+# Map: the full window, hillshade at 1/8, seam lines coloured by step (0 to 150 m: yellow to red), sea blue.
+f = 8
+A = np.asarray(S[::f, ::f], dtype=np.float64)
+gy, gx = np.gradient(A, 101.8 * f)
+n = np.stack([-gx, -gy, np.ones_like(A)], -1); n /= np.linalg.norm(n, axis=-1, keepdims=True)
+l = np.array([-0.5, -0.5, 0.7]); l /= np.linalg.norm(l)
+v = np.clip(n @ l, 0, 1)
+img = np.stack([v, v, v], -1) * 0.85
+img[A <= 0] = [0.15, 0.25, 0.45]
+im = Image.fromarray((img * 255).astype(np.uint8))
+dr = ImageDraw.Draw(im)
+def colour(s):
+    t = min(s / 150.0, 1.0)
+    return (255, int(230 * (1 - t)), 0)
+for k in range(0, hi - lo, f):
+    s = col[k:k + f].max()
+    if lc[k:k + f].any():
+        y = (lo + k) // f
+        dr.line([(M // f - 1, y), (M // f + 1, y)], fill=colour(s), width=1)
+    s = row[k:k + f].max()
+    if lr[k:k + f].any():
+        x = (lo + k) // f
+        dr.line([(x, M // f - 1), (x, M // f + 1)], fill=colour(s), width=1)
+dr.rectangle((0, 0, 420, 14), fill=(0, 0, 0))
+dr.text((4, 2), f'{site} {var}: seam lines coloured by step (yellow 0, red 150 m and over); sea blue', fill=(255, 255, 255))
+im.save(f'{out}/{site}-{var}-stepmap.png')
