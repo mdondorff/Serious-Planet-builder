@@ -9,27 +9,15 @@ mod tests {
     /// What counts as starting a thread (the production part of a file: everything before its `mod tests`).
     const CALLS: [&str; 5] = ["thread::spawn(", "thread::Builder::new(", "thread::scope(", "spawn_named(", "spawn_scoped("];
 
-    /// (file, calls, reason). The pools of the job system and the scoped workers still to move are marked `moves in PR n` (openspec/changes/job-system).
-    const ALLOWED: [(&str, usize, &str); 26] = [
+    /// (file, calls, reason). Every other entry is the job system itself, a driver or a tool that stays.
+    const ALLOWED: [(&str, usize, &str); 14] = [
         ("crates/app/src/coupledworld.rs", 1, "driver: the coupled run's one thread; stays"),
-        ("crates/app/src/horizonworld.rs", 1, "moves in PR 4: the horizon bake coordinator"),
+        ("crates/app/src/horizonworld.rs", 1, "driver: the one-shot read of the stored coarse horizon; stays"),
         ("crates/app/src/hoverpick.rs", 1, "driver: the hover pick's one thread; stays"),
-        ("crates/app/src/skeleton.rs", 2, "moves in PR 1: the skeleton's scoped tile workers"),
-        ("crates/app/src/stills.rs", 1, "moves in PR 4: the stills' scoped parts"),
         ("crates/app/src/streamperf.rs", 1, "driver: a perf scene's flight thread; stays"),
-        ("crates/app/src/worldfield.rs", 1, "moves in PR 4: the coupled run's thread"),
-        ("crates/cache/src/meshpack.rs", 2, "moves in PR 4: the prefill workers"),
+        ("crates/app/src/worldfield.rs", 1, "driver: the height warm-up thread, which waits on a queue; stays"),
         ("crates/core/src/par.rs", 4, "`run_scoped`: the scoped helper threads of a `Par`; `SharePar` takes them as permits of the terrain share first (the permit rule, BUDG-009)"),
         ("crates/core/src/thread.rs", 1, "the named scoped thread helper itself"),
-        ("crates/frame/src/look/atmosphere.rs", 2, "moves in PR 4: the atmosphere rows"),
-        ("crates/frame/src/scenes.rs", 1, "moves in PR 4: the lag post-pass parts"),
-        ("crates/frame/src/water.rs", 2, "moves in PR 4: the water heights"),
-        ("crates/generators/src/coarsehorizon.rs", 2, "moves in PR 4: the coarse horizon"),
-        ("crates/generators/src/coupledinput.rs", 2, "moves in PR 4: the bake reduction"),
-        ("crates/generators/src/global.rs", 5, "moves in PR 4: the bake rows and blocks"),
-        ("crates/generators/src/height.rs", 2, "moves in PR 4: the tile workers of `generate_region`"),
-        ("crates/generators/src/horizon.rs", 2, "moves in PR 4: the horizon bake"),
-        ("crates/generators/src/ocean.rs", 2, "moves in PR 4: the ocean passes"),
         ("crates/perf/src/desktop.rs", 1, "tool: the desktop probe; stays"),
         ("crates/perf/src/gate.rs", 1, "tool: the GPU load query; stays"),
         ("crates/perf/src/load.rs", 1, "tool: the load generator, which must not use the system it loads; stays"),

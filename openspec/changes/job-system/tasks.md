@@ -9,8 +9,13 @@
 - [ ] 2.4 Verifier; counts companion (jobs by class, tier B); tell the planner when a perf measurement is due
 
 ## 3. PR 2 to 4
-- [ ] 3.1 Chunk pool (if B6 leaves it); plan workers; horizon bakes and the scoped workers; the allow-list empties
+- [x] 3.1 Chunk pool (gone with B6); plan workers (4.1); horizon bakes and the scoped workers (5.1); the allow-list holds only the job system, `Par` and the drivers and tools that stay
 
 ## 4. PR 3a: plan worker
 - [x] 4.1 `JobSystem::with_frame_workers`, `Share::classed`; the pipelined rig runs tile and plan workers on one system and one share `terrain` (ceiling workers + 1), the plan worker as a frame-critical thread at normal priority; `ThreadPool` has no production caller
 - [x] 4.2 PR 3b: `planet_core::par::Par` (`impl Par for usize` = plain scoped threads), `HeightField::heights_threaded_until` takes `&dyn Par`, `eval_chunked` and the lattice gather run on it; `Share::try_acquire`/`par()` (permits of the terrain share, no unsafe); `PlanWorker::with_par`, the rig passes the terrain share's `Par`. Tests: bit-exact heights for 1, 2, 7 threads and a fake `Par` (GEN-020, CON-14); the permit rule on the share. Spawn cost: `frame/tests/par_cost.rs`
+
+## 5. PR 4: horizon bakes and the scoped workers
+- [x] 5.1 `planet_core::par::map` (ordered results on a `Par`); the scoped sites of `generators` (`global`, `horizon`, `ocean`, `coarsehorizon`, `coupledinput`, `height`), `frame` (`water`, `look/atmosphere`, `scenes`), `cache/meshpack` and `app` (`skeleton`, `stills`) run on a `Par` (the callers' `threads: usize`, plain scoped threads, or the share's `Par`); the rig sets the terrain share's `Par` on the world (`WorldTerrain::set_job_par`) for the water reads of a tile job
+- [x] 5.2 The horizon bakes are the idle class of the rig's `terrain` share (`share_with_idle`, ceiling workers + 1 + horizon, idle cap horizon; the system has `horizon` more threads), not a pool of their own; the tools without a rig (`editperf`, `envelopeperf`, `stills`) keep `enable_viewer_horizon` with a pool of their own
+- [x] 5.3 The scan: the allow-list shrinks to the job system, `Par` and the drivers and tools; BUDG-004 turns `active`

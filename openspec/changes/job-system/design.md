@@ -38,3 +38,9 @@
 
 ## Open point (opus-planner, 2026-10-31)
 A pooled fan-out (helper threads taken from the job system's workers instead of scoped threads started per call) could save about 1.5 % of a cold plan job (the 1.8 % thread-start cost less the 0.15 % the share adds). No work now; it needs the lifetime erasure the first version avoids, in its own PR with a numerics-reviewer pass.
+
+## PR 4: what moved and what stays
+1. A scoped site takes a `Par`: tools and bakes keep their `threads: usize` argument (`impl Par for usize` is the scoped threads, results in index order, CON-14); a job of the rig reaches the terrain share's `Par` through the world (`set_job_par`: the water reads of a tile job).
+2. The horizon bakes share `terrain` with the tile and plan jobs: one ceiling (workers + 1 + horizon), the idle class capped at `horizon` (STRM-060). The system grows by `horizon` threads, the sum of the old two pools.
+3. Stay as drivers: `app/coupledworld` (the coupled run), `hoverpick`, `streamperf`, `worldfield` (the height warm-up thread waits on a queue: a job would hold a worker), `horizonworld` (the one-shot read of the stored coarse horizon). `ThreadPool` stays for tests and examples.
+4. Risk for the perf window: the water reads of a tile job (8 helpers before) now take free permits of the terrain share; with the tile jobs at their limit the free ones are the idle slots (`horizon`) and the plan worker's. A cold lit tile may wait longer on its store blocks; the planner decides whether a window measures it (ADR 0087).

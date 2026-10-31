@@ -55,21 +55,36 @@ struct Queued {
     job: Job,
 }
 
+/// What a worker takes: any class the dedicated workers leave, frame-critical jobs only, or idle jobs only.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Any,
+    Frame,
+    Idle,
+}
+
 struct State {
     queues: [VecDeque<Queued>; 4],
     shares: Vec<ShareState>,
     closed: bool,
     /// Threads exist that run only frame-critical jobs: the other workers leave that class to them.
     frame_dedicated: bool,
+    /// Threads exist that run only idle jobs: the other workers leave that class to them, so the idle work never holds a thread the visible work needs.
+    idle_dedicated: bool,
     /// Worker threads still running: a spawn after the last one is gone could never run.
     alive: usize,
 }
 
 impl State {
     /// The next job a free worker may take: the best class with a job whose share is under its ceiling (a closing system keeps the ceilings and drains).
-    fn take(&mut self, frame_only: bool) -> Option<Queued> {
+    fn take(&mut self, kind: Kind) -> Option<Queued> {
         for class in Class::ALL {
-            if frame_only != (class == Class::FrameCritical) && (frame_only || self.frame_dedicated) {
+            let fits = match kind {
+                Kind::Frame => class == Class::FrameCritical,
+                Kind::Idle => class == Class::Idle,
+                Kind::Any => !(self.frame_dedicated && class == Class::FrameCritical) && !(self.idle_dedicated && class == Class::Idle),
+            };
+            if !fits {
                 continue;
             }
             let shares = &self.shares;
@@ -110,25 +125,48 @@ impl JobSystem {
     /// `workers` threads at `priority` for the three classes below frame-critical, and `frame_workers` more at `frame_priority` that run frame-critical jobs only
     /// (the plan of a frame runs at normal priority beside tile workers below normal, ADR 0046); with `frame_workers` at zero every worker takes every class.
     pub fn with_frame_workers(workers: usize, priority: Priority, frame_workers: usize, frame_priority: Priority) -> Self {
+        Self::with_dedicated_workers(workers, priority, frame_workers, frame_priority, 0)
+    }
+
+    /// [`with_frame_workers`](JobSystem::with_frame_workers) and `idle_workers` more at `priority` that run idle-class jobs only (the horizon bakes of the rig): the other workers never
+    /// take that class, so a tile job is never held behind a bake and the visible work keeps the thread count it had.
+    pub fn with_dedicated_workers(
+        workers: usize,
+        priority: Priority,
+        frame_workers: usize,
+        frame_priority: Priority,
+        idle_workers: usize,
+    ) -> Self {
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
                 queues: Default::default(),
                 shares: Vec::new(),
                 closed: false,
                 frame_dedicated: frame_workers > 0,
-                alive: workers.max(1) + frame_workers,
+                idle_dedicated: idle_workers > 0,
+                alive: workers.max(1) + frame_workers + idle_workers,
             }),
             wake: Condvar::new(),
         });
-        let spec: Vec<(bool, Priority)> =
-            (0..workers.max(1)).map(|_| (false, priority)).chain((0..frame_workers).map(|_| (true, frame_priority))).collect();
+        let spec: Vec<(Kind, Priority)> = (0..workers.max(1))
+            .map(|_| (Kind::Any, priority))
+            .chain((0..frame_workers).map(|_| (Kind::Frame, frame_priority)))
+            .chain((0..idle_workers).map(|_| (Kind::Idle, priority)))
+            .collect();
         let workers = spec
             .into_iter()
             .enumerate()
-            .map(|(n, (frame_only, priority))| {
+            .map(|(n, (kind, priority))| {
                 let shared = Arc::clone(&shared);
                 std::thread::Builder::new()
-                    .name(format!("{}-{n}", if frame_only { "job-frame-worker" } else { "job-worker" }))
+                    .name(format!(
+                        "{}-{n}",
+                        match kind {
+                            Kind::Frame => "job-frame-worker",
+                            Kind::Idle => "job-idle-worker",
+                            Kind::Any => "job-worker",
+                        }
+                    ))
                     .spawn(move || {
                         if priority != Priority::Normal {
                             priority::set_current(priority);
@@ -137,7 +175,7 @@ impl JobSystem {
                             let queued = {
                                 let mut st = shared.state.lock().expect("job state");
                                 loop {
-                                    if let Some(q) = st.take(frame_only) {
+                                    if let Some(q) = st.take(kind) {
                                         break q;
                                     }
                                     if st.closed && st.queues.iter().all(VecDeque::is_empty) {
@@ -234,7 +272,7 @@ impl Share {
             panic!("job spawned on share {name}: its job system was dropped, so no worker is left to run it (keep the JobSystem alive as long as its shares are used)");
         }
         st.queues[class as usize].push_back(Queued { share: self.index, class, job });
-        let dedicated = st.frame_dedicated;
+        let dedicated = st.frame_dedicated || st.idle_dedicated;
         drop(st);
         // With workers that take one class only, the one woken may be a worker that cannot take this job: wake them all.
         if dedicated {
@@ -439,6 +477,36 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(1));
             }
         })
+    }
+
+    // spec: BUDG-008
+    #[test]
+    fn idle_jobs_run_on_the_idle_workers_only_and_leave_the_other_workers_to_visible_jobs() {
+        let system = JobSystem::with_dedicated_workers(1, Priority::Normal, 0, Priority::Normal, 1);
+        let share = system.share_with_idle("t", 3, 2);
+        let (tx, rx) = mpsc::channel();
+        let release = Arc::new(AtomicBool::new(false));
+        for id in 0..2 {
+            let (tx, release) = (tx.clone(), Arc::clone(&release));
+            share.spawn_class(
+                Class::Idle,
+                Box::new(move || {
+                    tx.send((id, std::thread::current().name().unwrap_or("").to_string())).unwrap();
+                    while !release.load(Ordering::SeqCst) {
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                }),
+            );
+        }
+        // One idle job runs on the idle worker; the second waits for it, though the other worker is free.
+        let (_, name) = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(name.starts_with("job-idle-worker"), "{name}");
+        assert!(rx.recv_timeout(Duration::from_millis(100)).is_err(), "a second idle job took the visible worker");
+        let (vtx, vrx) = mpsc::channel();
+        share.spawn_class(Class::Visible, Box::new(move || vtx.send(()).unwrap()));
+        vrx.recv_timeout(Duration::from_secs(5)).expect("the visible job runs while the bake holds the idle worker");
+        release.store(true, Ordering::SeqCst);
+        let _ = rx.recv_timeout(Duration::from_secs(5)).unwrap();
     }
 
     // spec: BUDG-008
