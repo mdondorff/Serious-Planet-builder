@@ -1,0 +1,118 @@
+=== alps base 12:08:09 cpu 8%
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+capture-stills: NOT a measurement (no gate, no timestamps, no log): 2560x1440, 2 poses, height field cpu-erosion-v1 over a 16384-cell bake
+coupled run ready after 0.8 s
+coarse horizon: 512 observer cells per face edge, 16 azimuths
+anchor: latitude 11.5000 longitude -18.5000 degrees, ground 1316.3 m
+SPIKE63 eye-lowsun: full 2.824 ms; shadows 0.441, ground detail 1.074, both 1.454; compiled out Some([2.382848, 1.750016, 1.370112]); spread Some([0.25804800000000006, 0.07987199999999994, 0.050176, 0.02867200000000003]); nodes 2294
+eye-lowsun: 9 horizon maps in 9.7 s, drawn in 34.4 s -> target/s67/alps/base\eye-lowsun.png
+SPIKE63 feet-lowsun: full 2.256 ms; shadows 0.389, ground detail 1.056, both 1.248; compiled out Some([1.866752, 1.200128, 1.007616]); spread Some([0.2048000000000001, 0.0645119999999999, 0.05324799999999996, 0.035840000000000094]); nodes 1671
+feet-lowsun: 9 horizon maps in 0.0 s, drawn in 21.7 s -> target/s67/alps/base\feet-lowsun.png
+wrote target/s67/alps/base (one PNG per pose and stills.txt)
+=== alps grad3 12:09:09 cpu 2%
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+capture-stills: NOT a measurement (no gate, no timestamps, no log): 2560x1440, 2 poses, height field cpu-erosion-v1 over a 16384-cell bake
+coupled run ready after 0.9 s
+coarse horizon: 512 observer cells per face edge, 16 azimuths
+anchor: latitude 11.5000 longitude -18.5000 degrees, ground 1316.3 m
+SPIKE63 eye-lowsun: full 2.782 ms; shadows 0.260, ground detail 1.099, both 1.424; compiled out Some([2.522112, 1.683456, 1.357824]); spread Some([0.04403199999999963, 0.11775999999999964, 0.09728000000000003, 0.08499199999999996]); nodes 2294
+eye-lowsun: 9 horizon maps in 13.2 s, drawn in 46.8 s -> target/s67/alps/grad3\eye-lowsun.png
+SPIKE63 feet-lowsun: full 2.186 ms; shadows 0.249, ground detail 0.955, both 1.117; compiled out Some([1.937408, 1.230848, 1.069056]); spread Some([0.11059200000000002, 0.05222400000000005, 0.012288000000000077, 0.062464000000000075]); nodes 1671
+feet-lowsun: 9 horizon maps in 0.0 s, drawn in 21.7 s -> target/s67/alps/grad3\feet-lowsun.png
+wrote target/s67/alps/grad3 (one PNG per pose and stills.txt)
+=== alps gradall 12:10:21 cpu 15%
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+capture-stills: NOT a measurement (no gate, no timestamps, no log): 2560x1440, 2 poses, height field cpu-erosion-v1 over a 16384-cell bake
+coupled run ready after 0.9 s
+coarse horizon: 512 observer cells per face edge, 16 azimuths
+anchor: latitude 11.5000 longitude -18.5000 degrees, ground 1316.3 m
+SPIKE63 eye-lowsun: full 2.786 ms; shadows 0.268, ground detail 1.110, both 1.381; compiled out Some([2.518016, 1.676288, 1.404928]); spread Some([0.24473600000000006, 0.12595199999999984, 0.018432000000000004, 0.022528000000000103]); nodes 2294
+eye-lowsun: 9 horizon maps in 12.4 s, drawn in 41.4 s -> target/s67/alps/gradall\eye-lowsun.png
+SPIKE63 feet-lowsun: full 2.274 ms; shadows 0.241, ground detail 1.001, both 1.250; compiled out Some([2.033664, 1.272832, 1.024]); spread Some([0.051200000000000134, 0.1822720000000002, 0.05119999999999991, 0.06655999999999995]); nodes 1671
+feet-lowsun: 9 horizon maps in 0.0 s, drawn in 22.3 s -> target/s67/alps/gradall\feet-lowsun.png
+wrote target/s67/alps/gradall (one PNG per pose and stills.txt)
+=== alps off3 12:11:29 cpu 4%
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+capture-stills: NOT a measurement (no gate, no timestamps, no log): 2560x1440, 2 poses, height field cpu-erosion-v1 over a 16384-cell bake
+coupled run ready after 0.9 s
+coarse horizon: 512 observer cells per face edge, 16 azimuths
+anchor: latitude 11.5000 longitude -18.5000 degrees, ground 1316.3 m
+
+thread 'main' (26076) panicked at C:\Users\matth\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\naga-30.0.1\src\back\spv\block.rs:1022:42:
+internal error: entered unreachable code: Expression [241] is not cached!
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+crash report: target/review/crashes\20261031-111143Z.txt
+=== hills-b base 12:11:45 cpu 43%
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+capture-stills: NOT a measurement (no gate, no timestamps, no log): 2560x1440, 2 poses, height field cpu-erosion-v1 over a 16384-cell bake
+coupled run ready after 0.9 s
+coarse horizon: 512 observer cells per face edge, 16 azimuths
+anchor: latitude 8.9720 longitude -16.2380 degrees, ground 3754.6 m
+SPIKE63 eye-lowsun: full 3.367 ms; shadows 0.462, ground detail 1.313, both 1.694; compiled out Some([2.905088, 2.054144, 1.673216]); spread Some([0.18534399999999973, 0.12492800000000015, 0.05734400000000006, 0.03583999999999987]); nodes 2639
+eye-lowsun: 11 horizon maps in 15.5 s, drawn in 42.9 s -> target/s67/hills-b/base\eye-lowsun.png
+SPIKE63 feet-lowsun: full 2.393 ms; shadows 0.227, ground detail 0.884, both 1.110; compiled out Some([2.16576, 1.509376, 1.283072]); spread Some([0.0829439999999999, 0.06348799999999999, 0.02252799999999988, 0.019455999999999918]); nodes 2256
+feet-lowsun: 8 horizon maps in 0.0 s, drawn in 22.6 s -> target/s67/hills-b/base\feet-lowsun.png
+wrote target/s67/hills-b/base (one PNG per pose and stills.txt)
+=== hills-b grad3 12:12:54 cpu 1%
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+capture-stills: NOT a measurement (no gate, no timestamps, no log): 2560x1440, 2 poses, height field cpu-erosion-v1 over a 16384-cell bake
+coupled run ready after 0.9 s
+coarse horizon: 512 observer cells per face edge, 16 azimuths
+anchor: latitude 8.9720 longitude -16.2380 degrees, ground 3754.6 m
+SPIKE63 eye-lowsun: full 3.493 ms; shadows 0.464, ground detail 1.351, both 1.748; compiled out Some([3.028992, 2.142208, 1.744896]); spread Some([0.4444159999999999, 0.13209599999999977, 0.07372800000000002, 0.0040960000000000996]); nodes 2639
+eye-lowsun: 11 horizon maps in 14.9 s, drawn in 40.6 s -> target/s67/hills-b/grad3\eye-lowsun.png
+SPIKE63 feet-lowsun: full 2.414 ms; shadows 0.233, ground detail 0.896, both 1.119; compiled out Some([2.180096, 1.517568, 1.294336]); spread Some([0.15667199999999992, 0.10752000000000006, 0.03686400000000001, 0.02662399999999998]); nodes 2256
+feet-lowsun: 8 horizon maps in 0.0 s, drawn in 22.5 s -> target/s67/hills-b/grad3\feet-lowsun.png
+wrote target/s67/hills-b/grad3 (one PNG per pose and stills.txt)
+=== hills-b gradall 12:14:00 cpu 1%
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+capture-stills: NOT a measurement (no gate, no timestamps, no log): 2560x1440, 2 poses, height field cpu-erosion-v1 over a 16384-cell bake
+coupled run ready after 0.9 s
+coarse horizon: 512 observer cells per face edge, 16 azimuths
+anchor: latitude 8.9720 longitude -16.2380 degrees, ground 3754.6 m
+SPIKE63 eye-lowsun: full 3.504 ms; shadows 0.465, ground detail 1.397, both 1.788; compiled out Some([3.039232, 2.107392, 1.716224]); spread Some([0.16281599999999985, 0.1617919999999997, 0.0419839999999998, 0.04096000000000011]); nodes 2639
+eye-lowsun: 11 horizon maps in 14.6 s, drawn in 40.4 s -> target/s67/hills-b/gradall\eye-lowsun.png
+SPIKE63 feet-lowsun: full 2.530 ms; shadows 0.219, ground detail 1.024, both 1.246; compiled out Some([2.311168, 1.506304, 1.284096]); spread Some([0.1751039999999997, 0.09523199999999976, 0.01536000000000004, 0.020480000000000054]); nodes 2256
+feet-lowsun: 8 horizon maps in 0.0 s, drawn in 22.7 s -> target/s67/hills-b/gradall\feet-lowsun.png
+wrote target/s67/hills-b/gradall (one PNG per pose and stills.txt)
+=== hills-b off3 12:15:07 cpu 0%
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+capture-stills: NOT a measurement (no gate, no timestamps, no log): 2560x1440, 2 poses, height field cpu-erosion-v1 over a 16384-cell bake
+coupled run ready after 0.9 s
+coarse horizon: 512 observer cells per face edge, 16 azimuths
+anchor: latitude 8.9720 longitude -16.2380 degrees, ground 3754.6 m
+
+thread 'main' (26504) panicked at C:\Users\matth\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\naga-30.0.1\src\back\spv\block.rs:1022:42:
+internal error: entered unreachable code: Expression [241] is not cached!
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+crash report: target/review/crashes\20261031-111524Z.txt
+=== done 12:15:25
+=== alps off3 12:16:09 cpu 10%
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+capture-stills: NOT a measurement (no gate, no timestamps, no log): 2560x1440, 2 poses, height field cpu-erosion-v1 over a 16384-cell bake
+coupled run ready after 0.8 s
+coarse horizon: 512 observer cells per face edge, 16 azimuths
+anchor: latitude 11.5000 longitude -18.5000 degrees, ground 1316.3 m
+eye-lowsun: 9 horizon maps in 10.6 s, drawn in 17.4 s -> target/s67/alps/off3\eye-lowsun.png
+feet-lowsun: 9 horizon maps in 0.0 s, drawn in 3.4 s -> target/s67/alps/off3\feet-lowsun.png
+wrote target/s67/alps/off3 (one PNG per pose and stills.txt)
+=== hills-b off3 12:16:34 cpu 2%
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+capture-stills: NOT a measurement (no gate, no timestamps, no log): 2560x1440, 2 poses, height field cpu-erosion-v1 over a 16384-cell bake
+coupled run ready after 0.9 s
+coarse horizon: 512 observer cells per face edge, 16 azimuths
+anchor: latitude 8.9720 longitude -16.2380 degrees, ground 3754.6 m
+eye-lowsun: 11 horizon maps in 13.8 s, drawn in 20.2 s -> target/s67/hills-b/off3\eye-lowsun.png
+feet-lowsun: 8 horizon maps in 0.0 s, drawn in 3.2 s -> target/s67/hills-b/off3\feet-lowsun.png
+wrote target/s67/hills-b/off3 (one PNG per pose and stills.txt)
+=== done 12:17:00
