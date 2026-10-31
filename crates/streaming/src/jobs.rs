@@ -61,6 +61,8 @@ struct State {
     closed: bool,
     /// Threads exist that run only frame-critical jobs: the other workers leave that class to them.
     frame_dedicated: bool,
+    /// Worker threads still running: a spawn after the last one is gone could never run.
+    alive: usize,
 }
 
 impl State {
@@ -109,7 +111,13 @@ impl JobSystem {
     /// (the plan of a frame runs at normal priority beside tile workers below normal, ADR 0046); with `frame_workers` at zero every worker takes every class.
     pub fn with_frame_workers(workers: usize, priority: Priority, frame_workers: usize, frame_priority: Priority) -> Self {
         let shared = Arc::new(Shared {
-            state: Mutex::new(State { queues: Default::default(), shares: Vec::new(), closed: false, frame_dedicated: frame_workers > 0 }),
+            state: Mutex::new(State {
+                queues: Default::default(),
+                shares: Vec::new(),
+                closed: false,
+                frame_dedicated: frame_workers > 0,
+                alive: workers.max(1) + frame_workers,
+            }),
             wake: Condvar::new(),
         });
         let spec: Vec<(bool, Priority)> =
@@ -133,6 +141,7 @@ impl JobSystem {
                                         break q;
                                     }
                                     if st.closed && st.queues.iter().all(VecDeque::is_empty) {
+                                        st.alive -= 1;
                                         return;
                                     }
                                     st = shared.wake.wait(st).expect("job state");
@@ -219,6 +228,11 @@ impl Share {
     /// A job of `class`: it runs when a worker is free and fewer than the ceiling of this share are running.
     pub fn spawn_class(&self, class: Class, job: Job) {
         let mut st = self.shared.state.lock().expect("job state");
+        if st.alive == 0 {
+            let name = st.shares[self.index].name.clone();
+            drop(st);
+            panic!("job spawned on share {name}: its job system was dropped, so no worker is left to run it (keep the JobSystem alive as long as its shares are used)");
+        }
         st.queues[class as usize].push_back(Queued { share: self.index, class, job });
         let dedicated = st.frame_dedicated;
         drop(st);
@@ -499,6 +513,17 @@ mod tests {
             plan.spawn(Box::new(move || tx.send(round).unwrap()));
             assert_eq!(rx.recv_timeout(Duration::from_secs(10)).expect("a frame-critical job runs"), round);
         }
+    }
+
+    // spec: BUDG-009
+    #[test]
+    fn a_job_spawned_on_a_share_whose_system_is_gone_is_refused_loudly_not_lost() {
+        let system = JobSystem::new(2, Priority::Normal);
+        let share = system.share("terrain", 2);
+        drop(system);
+        let refused = catch_unwind(AssertUnwindSafe(|| share.spawn_class(Class::Visible, Box::new(|| {}))));
+        let message = refused.expect_err("the spawn is refused").downcast::<String>().map(|s| *s).unwrap_or_default();
+        assert!(message.contains("terrain") && message.contains("job system was dropped"), "{message}");
     }
 
     // spec: BUDG-009

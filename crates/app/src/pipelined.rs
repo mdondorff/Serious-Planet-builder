@@ -203,7 +203,8 @@ pub fn run_script(
             r.lod.floor_level()
         ));
     }
-    let Rig { mut renderer, mut managed, mut fi, pool, .. } = Rig::new(ctx, world, first, gen)?;
+    // The job system stays bound for the whole run: dropping it ends the workers.
+    let Rig { mut renderer, mut managed, mut fi, pool, _system, .. } = Rig::new(ctx, world, first, gen)?;
     let mut log: Vec<FrameLog> = Vec::new();
     let mut last_drawn: Option<TerrainPlan> = None;
     let mut iteration = 0u64;
