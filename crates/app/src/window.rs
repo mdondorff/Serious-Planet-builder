@@ -483,7 +483,7 @@ impl App<'_> {
         crate::stall::phase_mark("floor tiles");
         // The horizon maps are baked from the base terrain and the stamps (STRM-064), on the idle class of the same pool (the chunk stage is removed).
         if self.world.has_bake() && self.world.store_dir().is_some() && (!cfg.smoke || std::env::var_os("PLANET_GATE").is_some()) {
-            if let Err(e) = self.world.enable_viewer_horizon(cfg.gen, self.clock.clone()) {
+            if let Err(e) = self.world.enable_viewer_horizon_on(cfg.gen, rig.horizon_pool.clone(), self.clock.clone()) {
                 eprintln!("horizon: {e}");
             }
         }

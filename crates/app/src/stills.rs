@@ -532,22 +532,16 @@ pub fn slope_table(
     let measure = |cells: &[usize]| -> Vec<(f64, f64)> {
         let threads = std::thread::available_parallelism().map_or(4, |t| t.get());
         let chunk = cells.len().div_ceil(threads).max(1);
-        let parts: Vec<Vec<(f64, f64)>> = std::thread::scope(|sc| {
-            let jobs: Vec<_> = cells
-                .chunks(chunk)
-                .map(|part| {
-                    sc.spawn(move || {
-                        part.iter()
-                            .filter_map(|&c| {
-                                let d = lat.direction(c);
-                                let h = ground(d);
-                                (h > sea_m).then(|| (h, libm::atan(local_slope(ground, d, radius_m, step_m, planet).0).to_degrees()))
-                            })
-                            .collect()
-                    })
+        let chunks: Vec<&[usize]> = cells.chunks(chunk).collect();
+        let parts: Vec<Vec<(f64, f64)>> = planet_core::par::map(&threads, chunks.len(), &|c| {
+            chunks[c]
+                .iter()
+                .filter_map(|&c| {
+                    let d = lat.direction(c);
+                    let h = ground(d);
+                    (h > sea_m).then(|| (h, libm::atan(local_slope(ground, d, radius_m, step_m, planet).0).to_degrees()))
                 })
-                .collect();
-            jobs.into_iter().map(|j| j.join().expect("a slope worker")).collect()
+                .collect()
         });
         parts.concat()
     };

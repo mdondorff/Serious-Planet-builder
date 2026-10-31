@@ -1076,25 +1076,22 @@ pub(crate) fn upload_missing_meshes(
     let missing: Vec<TileId> = plan.nodes.iter().filter(|n| !renderer.has_mesh(n.tile, n.mesh_key)).map(|n| n.tile).collect();
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
     let chunk = missing.len().div_ceil(threads).max(1);
-    let meshes: Vec<CompactTile> = std::thread::scope(|s| {
-        let handles: Vec<_> = missing
-            .chunks(chunk)
-            .map(|part| {
-                planet_core::thread::spawn_named(s, "skeleton-tile", move || {
-                    part.iter()
-                        .map(|&t| {
-                            let made = tile_for(field, t, cells, radius_m);
-                            if let Some(w) = world {
-                                w.fill_water(t, &made);
-                            }
-                            made
-                        })
-                        .collect::<Vec<_>>()
-                })
+    let parts: Vec<&[TileId]> = missing.chunks(chunk).collect();
+    let meshes: Vec<CompactTile> = planet_core::par::map(&threads, parts.len(), &|c| {
+        parts[c]
+            .iter()
+            .map(|&t| {
+                let made = tile_for(field, t, cells, radius_m);
+                if let Some(w) = world {
+                    w.fill_water(t, &made);
+                }
+                made
             })
-            .collect();
-        handles.into_iter().flat_map(|h| h.join().expect("mesh thread")).collect()
-    });
+            .collect::<Vec<_>>()
+    })
+    .into_iter()
+    .flatten()
+    .collect();
     for m in &meshes {
         renderer.upload_tile(ctx, m).map_err(|e| e.to_string())?;
     }

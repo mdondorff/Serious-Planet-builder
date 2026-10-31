@@ -213,6 +213,18 @@ impl WaterBook {
 
     /// Compute the water of `tile` (in the caller's thread, a tile job) and keep it. A tile already held is not computed again.
     pub fn fill(&self, src: &dyn WaterSource, map: &dyn FaceMapping, tile: TileId, radius_m: f64) -> Result<(), WaterError> {
+        self.fill_par(src, map, tile, radius_m, &8usize)
+    }
+
+    /// [`fill`](WaterBook::fill) with the helper threads of the block loads asked from `par` (the job's share, BUDG-004).
+    pub fn fill_par(
+        &self,
+        src: &dyn WaterSource,
+        map: &dyn FaceMapping,
+        tile: TileId,
+        radius_m: f64,
+        par: &dyn planet_core::par::Par,
+    ) -> Result<(), WaterError> {
         if self.tiles.lock().expect("water book").contains_key(&tile) {
             return Ok(());
         }
@@ -229,16 +241,13 @@ impl WaterBook {
         // The helper threads run at the job's priority (a new thread starts at normal): the workers run below normal so that the frame
         // thread gets its core back (STRM-020), and a job's helpers must not take it.
         let priority = planet_streaming::priority::current();
-        std::thread::scope(|scope| {
-            for chunk in dirs.chunks(dirs.len().div_ceil(8)) {
-                planet_core::thread::spawn_named(scope, "water-heights", move || {
-                    if let Some(p) = priority {
-                        planet_streaming::priority::set_current(p);
-                    }
-                    for d in chunk {
-                        let _ = src.water_at(*d);
-                    }
-                });
+        let chunks: Vec<&[Vec3]> = dirs.chunks(dirs.len().div_ceil(8)).collect();
+        par.run(chunks.len(), &|c| {
+            if let Some(p) = priority {
+                planet_streaming::priority::set_current(p);
+            }
+            for d in chunks[c] {
+                let _ = src.water_at(*d);
             }
         });
         let answer = WaterTileCache::new().tile_water(src, map, tile, radius_m)?;

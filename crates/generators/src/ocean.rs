@@ -895,25 +895,5 @@ pub fn parallel_map<T: Sync, R: Send>(items: &[T], threads: usize, f: &(dyn Fn(&
     if threads == 1 {
         return items.iter().map(f).collect();
     }
-    let next = std::sync::atomic::AtomicUsize::new(0);
-    let parts: Vec<Vec<(usize, R)>> = std::thread::scope(|s| {
-        let handles: Vec<_> = (0..threads)
-            .map(|_| {
-                planet_core::thread::spawn_named(s, "ocean-pass", || {
-                    let mut mine = Vec::new();
-                    loop {
-                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        if i >= items.len() {
-                            return mine;
-                        }
-                        mine.push((i, f(&items[i])));
-                    }
-                })
-            })
-            .collect();
-        handles.into_iter().map(|h| h.join().expect("ocean worker panicked")).collect()
-    });
-    let mut flat: Vec<(usize, R)> = parts.into_iter().flatten().collect();
-    flat.sort_unstable_by_key(|(i, _)| *i);
-    flat.into_iter().map(|(_, r)| r).collect()
+    planet_core::par::map(&threads, items.len(), &|i| f(&items[i]))
 }
