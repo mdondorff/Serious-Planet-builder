@@ -884,7 +884,7 @@ fn perf_stream_args(args: &[String]) -> Result<Vec<String>, String> {
         match a.as_str() {
             "--smoke" => smoke = true,
             "--machine-ready" | "--allow-memory-bake" | "--lit" | "--no-horizon-jobs" | "--only-steady" => tail.push(a.clone()),
-            "--store" | "--global-res" | "--out" | "--upload" | "--prefill-levels" | "--gen-workers" | "--base-threads" | "--horizon-threads" | "--repeats" | "--gen-ahead" | "--gen-reserve" | "--gen-priority" | "--settle-ms" | "--share-bound" | "--steady-window-s" | "--altitudes-m" | "--places" | "--poses" | "--out-dir" => {
+            "--store" | "--global-res" | "--out" | "--upload" | "--prefill-levels" | "--gen-workers" | "--horizon-threads" | "--repeats" | "--gen-ahead" | "--gen-reserve" | "--gen-priority" | "--settle-ms" | "--share-bound" | "--steady-window-s" | "--altitudes-m" | "--places" | "--poses" | "--out-dir" => {
                 let value = it.next().ok_or_else(|| format!("{a} needs a value"))?;
                 tail.push(a.clone());
                 tail.push(value.clone());

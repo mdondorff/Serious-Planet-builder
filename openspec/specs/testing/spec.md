@@ -1096,7 +1096,7 @@ Source: opus-planner (2026-10-25), look review 1 second site, TEST-050, ADR 0086
 - **THEN** all the land is in the band of 600 m with no slope, and the same table comes out every time
 
 ### Requirement: TEST-054 The envelope scene runs the horizon jobs
-The envelope scene (TEST-047) SHALL run the horizon jobs from the base terrain when its world has a store, and no chunk stage (ADR 0086: the stage is removed). The jobs are driven every frame from the plan's tiles and every flight starts with no horizon map resident. A world without a store SHALL keep the tile-only scene.
+The envelope scene (TEST-047) SHALL run the horizon jobs from the base terrain when its world has a store (ADR 0086: no stage runs on top of the base). The jobs are driven every frame from the plan's tiles and every flight starts with no horizon map resident. A world without a store SHALL keep the tile-only scene.
 
 Verify: A
 Status: active
@@ -1104,7 +1104,7 @@ Source: M8 plan, TEST-047, STRM-064, ADR 0086
 
 #### Scenario: The stage of a flight
 - **WHEN** the envelope scene is set up with a store and with an in-memory bake
-- **THEN** the first runs the horizon jobs and no chunk stage, and the second has none
+- **THEN** the first runs the horizon jobs from the base terrain, and the second has none
 
 #### Scenario: A frame waits for the horizon jobs
 - **WHEN** a frame has a horizon job in flight, and when it has none
@@ -1157,7 +1157,7 @@ Per-scene table (the counters each scene checks; a scene with the feature off ch
 - **THEN** the first fails the check naming the horizon and the counter table, and the second is not checked and logs `off`
 
 ### Requirement: TEST-060 Milestone M8 acceptance
-`cargo xtask accept M8` SHALL run the automated steps of `accept M5`, the discrete-GPU tier C run and `gate --small` (TEST-063), and SHALL judge M8's criteria 4 to 7 only from the logs of a valid window, never from a measurement of its own. A missing, smoke, other-scene or overridden log SHALL be MISSING, not a pass; a failed row fails the command, otherwise a MISSING row makes it incomplete. Criterion 3 (`cargo xtask gate` on the real store, chunk stage off) SHALL be listed as a manual item.
+`cargo xtask accept M8` SHALL run the automated steps of `accept M5`, the discrete-GPU tier C run and `gate --small` (TEST-063), and SHALL judge M8's criteria 4 to 7 only from the logs of a valid window, never from a measurement of its own. A missing, smoke, other-scene or overridden log SHALL be MISSING, not a pass; a failed row fails the command, otherwise a MISSING row makes it incomplete. Criterion 3 (`cargo xtask gate` on the real store) SHALL be listed as a manual item.
 
 Verify: A
 Status: active
@@ -1174,13 +1174,13 @@ Detail: The logs in `perf/logs/` or `--logs DIR`: `coupled-make.json` (at most 6
 - **THEN** criterion 6 passes in all three cases while the M6 table is within budget, and the horizon rows are not judged; an over row of the M6 table FAILS and a log without the M6 table is MISSING
 
 ### Requirement: TEST-061 The no-degradation gate counters and limits
-The window SHALL, when `PLANET_GATE` is set, count the main-thread time of every frame, the tiles the plan holds back (ADR 0074), the horizon maps baked, the bake blocks the main thread decodes itself (VIEW-061) and the panics caught, and the gate SHALL fail the run on a frame over 100 ms, a held-back tile with no edit in reach, a decoded block, no horizon map over a lit run with a chunk stage, a caught panic, or a step between levels over the bound of M8 exit criterion 3. A failure SHALL name the counter, the frame, the phase or the tile IDs.
+The window SHALL, when `PLANET_GATE` is set, count the main-thread time of every frame, the tiles the plan holds back (ADR 0074), the horizon maps baked, the bake blocks the main thread decodes itself (VIEW-061) and the panics caught, and the gate SHALL fail the run on a frame over 100 ms, a held-back tile with no edit in reach, a decoded block, no horizon map over a lit run with the horizon jobs, a caught panic, or a step between levels over the bound of M8 exit criterion 3. A failure SHALL name the counter, the frame, the phase or the tile IDs.
 
 Verify: A, C
 Status: active
 Source: owner (2026-10-28), owner test 2026-10-27 findings 7, 11 and 16, ADR 0074, TEST-058, VIEW-061
 
-Detail: A frame's time is its phases without the waits for the GPU, and the phase of the longest one is named. Held-back tiles are listed with their IDs and whether an edit is in reach; those under an edit are reported and not failed. The first 20 frames are not judged. On the software adapter (`PLANET_GATE_SOFTWARE`, the CI run) frame time, decoded blocks and horizon maps are reported and not judged, because its rendering shares the CPU with the main thread; held-back tiles and panics are always judged. The step between levels is measured by `cargo xtask gate` (the field-side `anet_steps_report`, levels above the entry level), not by the window.
+Detail: A frame's time is its phases without the waits for the GPU, and the phase of the longest one is named. Held-back tiles are listed with their IDs and whether an edit is in reach; those under an edit are reported and not failed. The first 20 frames are not judged. On the software adapter (`PLANET_GATE_SOFTWARE`, the CI run) frame time, decoded blocks and horizon maps are reported and not judged, because its rendering shares the CPU with the main thread; held-back tiles and panics are always judged. The step between levels is measured by `cargo xtask gate` (the field-side `base_steps_report`, levels 12 to 16), not by the window.
 
 #### Scenario: A held-back tile away from an edit
 - **WHEN** the counters record a frame whose plan holds back 3 tiles and no edit reaches them
@@ -1220,16 +1220,16 @@ Source: owner (2026-10-28), CLAUDE.md prepush rule
 - **WHEN** the changed paths include `crates/streaming/src/chunks.rs`
 - **THEN** the pre-push run includes the small gate; for `docs/status.md` alone it does not
 
-### Requirement: TEST-064 The gate runs without the chunk stage by default
-`cargo xtask gate` SHALL run the sites of TEST-062 over the base terrain and report the step between levels of the base field alone; the stage-on run (`gate --chunks`) no longer exists (ADR 0086). `gate --small` SHALL run the small world once.
+### Requirement: TEST-064 The gate runs on the base terrain
+`cargo xtask gate` SHALL run the sites of TEST-062 over the base terrain and SHALL measure the step between levels on the base field: the tiles under one river's tile at levels 12 to 16 are generated and each vertex they share with their parent is compared with the parent's height, p99 and maximum in metres, with the bound 0.25 m (`base_steps_report`). The row names the figures ("measured on the base field"). The stage-on run (`gate --chunks`) no longer exists (ADR 0086). `gate --small` SHALL run the small world once.
 
 Verify: C
 Status: active
 Source: opus-planner (2026-10-28), owner fallback 2026-10-28, TEST-061, TEST-062, ADR 0086
 
-#### Scenario: Stage off
+#### Scenario: Base terrain
 - **WHEN** the window runs over a store with a coupled run
-- **THEN** no chunk job is computed and the gate line names the horizon jobs and no chunk jobs
+- **THEN** no chunk job is computed and the gate line names the horizon jobs and no chunk jobs; the levels row says it was measured on the base field
 
 ### Requirement: TEST-065 The gate reports the horizon re-bake after its edit; the edit-latency scene tabulates it
 The gate SHALL fail a lit run with the horizon jobs on when no horizon map was baked. It SHALL report, and not judge, the time from the scripted edit to the first landing of a map the edit touched, or that none landed (owner decision 2026-10-29: the horizon-map shadows are redone after SPIKE-56, M8 criterion 6 is decided by the drawn tiles). The edit-latency scene SHALL print a table headed `edit to map ms`, one row per touched map, with no verdict column.
@@ -1249,7 +1249,7 @@ Detail: A map is on screen with its landing plus the frames of its upload; the w
 - **THEN** the gate fails naming the horizon maps
 
 ### Requirement: TEST-066 The edit-latency horizon rows are measured on a quiet horizon
-The edit-latency scene, with the horizon jobs and no chunk stage, SHALL:
+The edit-latency scene, with the horizon jobs, SHALL:
 1. make each edit of the table `edit to map ms` only after the horizon jobs have had no bake in flight and no start for at least 1.5 s;
 2. wait for the same quiet after taking the edit back;
 3. run the first case of each altitude once more, right after the view settled, into a table without a verdict column.
@@ -1456,18 +1456,22 @@ Detail: The pair is a measurement of the preview, not a gate: a pair over the bo
 - **WHEN** the preview leaves more than a twentieth of the changed pixels in a view
 - **THEN** the test still passes and the verdict is printed
 
-### Requirement: TEST-075 The definition hash survives the removal of the chunk stage
-A world definition SHALL hash to the value it had before the chunk stage was removed (ADR 0086, decision 3): without items, with an item and the default `Under` chunk stage, and with the layer set `OnTop`. The `chunk_stage` setting SHALL stay parseable and hashed, so a store built before the removal opens without a rebuild.
+### Requirement: TEST-075 The definition hash and the production store survive the removal
+A world definition SHALL hash to the value it had before ADR 0086's removal: without items, with an item and the default `Under` setting, and with the layer set `OnTop`. The `chunk_stage` setting SHALL stay parseable and hashed, so a store built before the removal opens without a rebuild. The production store (`C:/DEV/SeriousPlanetData/global16384`) SHALL open with the current build, read only: `cargo xtask gate` runs the ignored `the_real_store_opens_without_a_rebuild` and prints MATCH, NOT RUN (the store is absent; never a pass) or a failure.
 
 Verify: A
 Status: active
 Source: opus-planner (2026-10-31), ADR 0086 decision 3, GEN-039, WDEF-018
 
-Detail: The expected values were computed on main before the generator cut; the test pins them as literals.
+Detail: The expected values were computed on main before the generator cut; the test pins them as literals. The store records no whole-definition hash: a record is found by the keys its definition derives, so the check opens the store as the viewer does (the packs load without a problem, the bake, ocean channel, wet floor and water summary open) and loads the stored coupled run by its key; it writes nothing.
 
 #### Scenario: The pinned hashes
 - **WHEN** the three definitions are built and hashed
 - **THEN** each equals its pinned value and `CHAIN_ORDER_ERA` is 2
+
+#### Scenario: The production store
+- **WHEN** the default world (seed 1, Earth radius) is opened over the store of 16384 cells and its coupled run is loaded by key
+- **THEN** both succeed with no rebuild, or the check says NOT RUN when the store is absent
 
 ### Requirement: TEST-074 The owner package says what ran
 `cargo xtask package` SHALL run the `capture stills` of the default look of each look-review site and `capture flights` into `target/review/owner-package/<date>/` and SHALL write `package.md` there with one row per item: PASS, FAIL or NOT RUN, with its reason, and its files. An item with no store SHALL be NOT RUN, a failed command FAIL with its message, a command that wrote no file FAIL. A failed item SHALL NOT stop the others, and the command SHALL fail when an item failed.

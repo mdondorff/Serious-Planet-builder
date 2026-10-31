@@ -8,7 +8,7 @@
 ### 1. Placement and dependencies
 | Part | Where | Why |
 |---|---|---|
-| Descriptor kernels | `planet_generators::descriptors` | pure f64 functions on a raster; reusable as M10 drivers (GEN-070 set) |
+| Descriptor kernels | `planet_generators::descriptors` | pure f64 functions on a raster; reusable as M10 drivers (the driver set of the removed chunk stage, ADR 0086) |
 | GLO-30 reader | `planet_testkit::glo30` | test data input; `planet-testkit` is a dev-dependency only (its manifest says so), so the product binary does not link it |
 | Run | `crates/app/examples/terrain_score.rs` | an example may use dev-dependencies and the app's world (store, `world.field()`); same pattern as other `cargo xtask heavy` examples |
 | Command | `cargo xtask terrain-score` | runs the example in release under the heavy lock (BUILD-026) |

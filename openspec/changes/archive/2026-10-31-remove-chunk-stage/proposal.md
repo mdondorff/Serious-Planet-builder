@@ -38,7 +38,7 @@ Consumers first, producers last, so every PR compiles and `test gpu` still has i
 | 3 | `rm-chunks-frame` (done, B6 PR 3) | `chunkshare.rs`, the chunk request, origin and fade parts of the plan and `managed.rs`, and the smoke verdict counter `stage_lit_frames`; the render fade (REND-039) with `gpu_chunk_fade.rs` (any golden diff stops it) | LOD-013, LOD-014, STRM-040, STRM-052 to STRM-054, REND-039, REND-042 removed; STRM-039, STRM-042, STRM-047, STRM-055, STRM-056, STRM-058 reworded to the manager and generator sides that stay until PRs 4 and 5 | `chunk_plan.rs`, `chunk_share.rs`, `oracle_chunk_flight.rs`, `gpu_chunk_fade.rs`; `height_aware.rs` stays (it tests LOD-008, TEST-012, not the stage) |
 | 4 | `rm-chunks-streaming` (done, B6 PR 4) | the manager half of `chunks.rs` (the horizon half moved to `horizonjobs.rs`), `chunk_store.rs`; `m8-editor-stalls` archived | STRM-038, STRM-039, STRM-041, STRM-042, STRM-056, GEN-081, GEN-082 removed; STRM-046, STRM-048, STRM-057, STRM-060, GEN-039 reworded; WDEF-018 and the STRM-038 key parts (`QUERY_CHUNK`, `ReadRecord::Chunk`, `Scope::Chunk`) stay with their producers until PR 5 | `streaming/tests/chunks.rs`, `chunk_keys.rs`; `stage_keys.rs` stays (GEN-034) |
 | 5 | `rm-chunks-generators` (done, B6 PR 5) | `anet.rs`, `route.rs`, the chunk field and pyramid, chunk drivers; GEN-039 `chunk_stage` setting and the `CHAIN_ORDER_ERA` hash term (decision 3: the setting stays parseable and hashes as its old default; TEST-075 is the planner's) | GEN-036 to GEN-039, GEN-047, GEN-049, GEN-053 to GEN-054, GEN-059, GEN-067 to GEN-078 and the rest of the audit list | `anet_incision.rs`, `anet_network.rs`, `chunkfield.rs`, `bounds_monotone.rs` |
-| 6 | `rm-chunks-leftovers` | dead code, examples, docs, perf scenes (`residency_counts`, `scheduler_ablation`), status Tracked rows, learnings kept | none | none |
+| 6 | `rm-chunks-leftovers` (done, B6 PR 6) | dead code, examples, docs, perf scenes (`residency_counts`, `scheduler_ablation`), status Tracked rows, learnings kept | none | none |
 Reasons for the order: PR 1 changes no default (the stage is already off). The app is the only caller of the stage, so it goes first; PRs 3 and 4 remove what only the app fed. PR 5 is the bulk and only compiles once nothing above calls it.
 
 ## Decisions (opus-planner, 2026-10-29)
@@ -83,6 +83,9 @@ Four merged changes are still in `openspec/changes/` because chunk code cites th
 | `m8-edit-latency-chunks` | TEST-056 | PR 1 `rm-chunks-flag` (the chunk side of the edit-latency scene) |
 | `m8-envelope-late-chunks` | TEST-059 | PR 1 `rm-chunks-flag` (the envelope scene's chunk step) |
 `m8-horizon-march-simd` (GEN-086) and `m8-horizon-share` (STRM-061) belong to the ADR 0085 build, not to this removal.
+
+## Closed (2026-10-31)
+The removal is complete with B6 PR 6 (`rm-chunks-leftovers`): no code, flag, example or current spec names the chunk stage as live. The `chunk_stage` setting stays parseable and hashed (decision 3, TEST-075), the horizon jobs and the chunk lattice stay (SPIKE-56, ADR 0085). The real store opens without a rebuild (TEST-075, checked read only in the gate). Archived without a spec sync: its requirement changes were made in the six PRs' own deltas.
 
 ## Out of scope
 Horizon maps and jobs (SPIKE-56). The global coupled run and its store. The base terrain, tiles, stamps and brushes. Any new erosion design.

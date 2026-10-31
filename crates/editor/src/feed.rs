@@ -28,7 +28,7 @@ pub fn edited_tiles(affected: &[Affected], body: BodyId, resident: &[TileId], ra
 }
 
 /// The `chunks` (tiles of the chunk grid) of `body` whose square plus a halo of `halo_m` metres a reach in `affected` can touch, without
-/// repeats, in tile order: the chunks an edit re-keys (the A-net of a chunk reads its halo). A halo beyond one chunk edge is taken as one.
+/// repeats, in tile order: the chunks an edit re-keys (the horizon map of a chunk reads its halo). A halo beyond one chunk edge is taken as one.
 pub fn edited_chunks(
     affected: &[Affected],
     body: BodyId,

@@ -56,7 +56,7 @@ pub trait ChunkSource: Send + Sync {
     }
 }
 
-/// No chunk stage: every chunk is ready with no change, nothing is ever evicted by the source.
+/// The base terrain: every chunk is ready with no change, nothing is ever evicted by the source.
 pub struct BaseTerrain;
 
 impl ChunkSource for BaseTerrain {
@@ -74,7 +74,7 @@ impl ChunkSource for BaseTerrain {
 /// The knobs of the horizon jobs.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct HorizonConfig {
-    /// Jobs running at once (fewer than the chunk jobs: heights come first).
+    /// Jobs running at once.
     pub workers: usize,
     /// A map made against a neighbourhood that has since changed is baked again only once the neighbourhood has been unchanged for this long
     /// (milliseconds of the injected clock), so the landing of the eight neighbours one after another costs one or two bakes, not eight.

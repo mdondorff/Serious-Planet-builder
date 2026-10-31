@@ -19,7 +19,7 @@ const PATHS: &str = "C:/DEV/SeriousPlanetData/owner-test-2026-10-27";
 /// new. Never a weakened limit: the table only keeps the run from failing on what the baseline already shows.
 pub type Known = (&'static str, &'static str, &'static str, f64);
 
-pub const KNOWN: [Known; 20] = [
+pub const KNOWN: [Known; 16] = [
     ("frame-116591", "held-back tiles", "Tracked: gate held-back tiles", 170.0),
     ("frame-134050", "held-back tiles", "Tracked: gate held-back tiles", 185.0),
     ("frame-139490", "held-back tiles", "Tracked: gate held-back tiles", 170.0),
@@ -36,13 +36,9 @@ pub const KNOWN: [Known; 20] = [
     ("*", "frames over", "Tracked: gate slow frames", 3000.0),
     ("*", "bake blocks decoded", "Tracked: gate main-thread decodes", 6.0),
     ("frame-102263", "horizon maps baked", "Tracked: gate no horizon map at frame-102263", 0.0),
-    ("levels", "level 12/11", "Tracked: gate level steps", 9.0),
-    ("levels", "level 13/12", "Tracked: gate level steps", 3.85),
-    ("levels", "level 14/13", "Tracked: gate level steps", 1.86),
-    ("levels", "level 15/14", "Tracked: gate level steps", 0.72),
 ];
 
-/// The number a ceiling bounds: the most tiles held back at once, the longest frame in ms, the bake blocks the main thread decoded, or a level step's p99 in m; 0 for a failure without one.
+/// The number a ceiling bounds: the most tiles held back at once, the longest frame in ms, the bake blocks the main thread decoded; 0 for a failure without one.
 pub fn key_number(failure: &str) -> f64 {
     let after = |marker: &str, end: &str| -> f64 {
         failure.split(marker).nth(1).and_then(|s| s.split(end).next()).and_then(|n| n.trim().parse().ok()).unwrap_or(0.0)
@@ -59,8 +55,6 @@ pub fn key_number(failure: &str) -> f64 {
             .unwrap_or(0.0)
     } else if failure.starts_with("bake blocks decoded") {
         after("VIEW-061): ", " in ")
-    } else if failure.starts_with("level ") {
-        after("p99 ", " m")
     } else {
         0.0
     }
@@ -192,7 +186,7 @@ pub fn run_gate(root: &Path, args: &[String]) -> Res {
         }
         new_failures += new.len();
     }
-    // The step between levels (criterion 3): the field-side measurement of one real chunk, read only.
+    // The step between levels (criterion 3, TEST-064): measured on the base field, read only.
     eprintln!("gate: the step between levels ...");
     let steps = Command::new("cargo")
         .args(["test", "-p", "planet", "--release", "--lib", "base_steps_report", "--", "--ignored", "--nocapture"])
@@ -203,24 +197,45 @@ pub fn run_gate(root: &Path, args: &[String]) -> Res {
         .output()
         .map_err(|e| format!("cannot start cargo test: {e}"))?;
     let text = String::from_utf8_lossy(&steps.stdout).into_owned();
-    let over = planet_app_level_steps(&text);
-    if !steps.status.success() || over.is_none() {
-        table.push("levels: ERROR the steps report did not run".to_string());
-        new_failures += 1;
-    } else if let Some(over) = over.filter(|o| !o.is_empty()) {
-        for (level, p99) in over {
-            let line = format!("level {level}/{} step p99 {p99:.3} m over the bound {:.2} m", level - 1, 0.25);
-            let (known, new) = split_known("levels", std::slice::from_ref(&line), &KNOWN);
-            match known.first() {
-                Some((f, entry)) => table.push(format!("levels: KNOWN ({entry}): {f}")),
-                None => {
-                    table.push(format!("levels: NEW: {}", new[0]));
-                    new_failures += 1;
-                }
+    match planet_app_level_steps(&text) {
+        Some(levels) if steps.status.success() => {
+            let worst = levels.iter().map(|&(_, p99)| p99).fold(0.0, f64::max);
+            let over: Vec<String> = levels
+                .iter()
+                .filter(|&&(_, p99)| p99 > LEVEL_STEP_BOUND_M)
+                .map(|&(l, p99)| format!("level {l}/{} p99 {p99:.3} m", l - 1))
+                .collect();
+            if over.is_empty() {
+                table.push(format!(
+                    "levels: PASS (measured on the base field: worst p99 {worst:.3} m over {} levels, bound {LEVEL_STEP_BOUND_M} m)",
+                    levels.len()
+                ));
+            } else {
+                table.push(format!("levels: NEW: step over the bound {LEVEL_STEP_BOUND_M} m on the base field: {}", over.join(", ")));
+                new_failures += 1;
             }
         }
-    } else {
-        table.push("levels: PASS".to_string());
+        _ => {
+            table.push("levels: ERROR the steps report did not run".to_string());
+            new_failures += 1;
+        }
+    }
+    // The production store opens with this build without a rebuild (TEST-075, ADR 0086 decision 3): read only; NOT RUN is not a pass.
+    eprintln!("gate: the store opens without a rebuild ...");
+    let open = Command::new("cargo")
+        .args(["test", "-p", "planet", "--release", "--test", "it", "the_real_store_opens", "--", "--ignored", "--nocapture"])
+        .current_dir(root)
+        .env("PLANET_REAL_STORE", &store)
+        .output()
+        .map_err(|e| format!("cannot start cargo test: {e}"))?;
+    let text = String::from_utf8_lossy(&open.stdout).into_owned();
+    match text.lines().find(|l| l.starts_with("real store: ")) {
+        Some(l) if open.status.success() && l.starts_with("real store: MATCH") => table.push(format!("store: PASS ({l})")),
+        Some(l) if l.starts_with("real store: NOT RUN") => table.push(format!("store: NOT RUN, not a pass ({l})")),
+        _ => {
+            table.push("store: FAIL the store does not open with this build (run the test for the message)".to_string());
+            new_failures += 1;
+        }
     }
     let summary = table.join("\n");
     let _ = std::fs::write(out_dir.join("summary.txt"), &summary);
@@ -232,11 +247,9 @@ pub fn run_gate(root: &Path, args: &[String]) -> Res {
     }
 }
 
-/// The levels over the bound in an `anet_steps_report` (the parse lives in `planet::gate`, which xtask does not depend on: a copy of its few lines).
+/// The p99 step against the parent per level in a `base_steps_report` (the parse lives in `planet::gate`, which xtask does not depend on: a copy of its few lines); `None` when the report has no level line.
 fn planet_app_level_steps(report: &str) -> Option<Vec<(u8, f64)>> {
-    let mut any = false;
-    let mut over = Vec::new();
-    let mut lowest: Option<u8> = None;
+    let mut levels = Vec::new();
     for l in report.lines() {
         let Some(rest) = l.trim().strip_prefix("level ") else { continue };
         let Some((level, rest)) = rest.split_once(':') else { continue };
@@ -246,16 +259,13 @@ fn planet_app_level_steps(report: &str) -> Option<Vec<(u8, f64)>> {
             continue;
         };
         let Ok(level) = level.trim().parse::<u8>() else { continue };
-        any = true;
-        lowest = Some(lowest.map_or(level, |l| l.min(level)));
-        if p99 > 0.25 {
-            over.push((level, p99));
-        }
+        levels.push((level, p99));
     }
-    // The lowest level of the report steps against the base (the entry step, its own bound of about 0.5 px), not against a parent level.
-    let lowest = lowest.unwrap_or(0);
-    any.then_some(over.into_iter().filter(|&(l, _)| l != lowest).collect())
+    (!levels.is_empty()).then_some(levels)
 }
+
+/// The most a level's p99 step against its parent may be on the base field, in m (TEST-064).
+const LEVEL_STEP_BOUND_M: f64 = 0.25;
 
 #[cfg(test)]
 mod tests {
@@ -295,7 +305,7 @@ mod tests {
     #[test]
     fn a_known_failure_over_its_ceiling_is_new() {
         let held = |n: u32| format!("held-back tiles with no edit in reach (ADR 0074): on 9 frames, up to {n} at once; frame 3: x");
-        let slow = "frames over 100 ms: 1 (longest frame 64: 2149 ms, most of it in \"chunk frame\" at 2125 ms)".to_string();
+        let slow = "frames over 100 ms: 1 (longest frame 64: 2149 ms, most of it in \"horizon frame\" at 2125 ms)".to_string();
         assert_eq!((key_number(&held(152)), key_number(&slow)), (152.0, 2149.0));
         let h152 = [held(152)];
         let (k, n) = split_known("frame-116591", &h152, &KNOWN);
@@ -322,21 +332,14 @@ mod tests {
         assert_eq!(ids, ["frame-10", "frame-9"]);
     }
 
-    // spec: TEST-061
+    // spec: TEST-064
     #[test]
-    fn the_steps_over_the_bound_are_read_from_the_report() {
+    fn the_steps_per_level_are_read_from_the_report() {
         let r = "level 13: against the parent p99 3.0 m
-level 14: against the parent p99 1.850 m, max 3\nlevel 16: against the parent p99 0.171 m, max 1\n";
-        assert_eq!(planet_app_level_steps(r), Some(vec![(14, 1.85)]));
-        assert_eq!(
-            planet_app_level_steps(
-                "level 11: against the parent p99 126.0 m
-level 12: against the parent p99 9.0 m
-"
-            ),
-            Some(vec![(12, 9.0)]),
-            "the lowest level is the entry step against the base"
-        );
+level 14: against the parent p99 1.850 m, max 3
+level 16: against the parent p99 0.171 m, max 1
+";
+        assert_eq!(planet_app_level_steps(r), Some(vec![(13, 3.0), (14, 1.85), (16, 0.171)]));
         assert_eq!(planet_app_level_steps("nothing"), None, "no report is not a pass");
     }
 }

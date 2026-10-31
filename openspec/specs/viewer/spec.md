@@ -1222,8 +1222,8 @@ The title SHALL name a shade view other than normal, the local solar time at the
 - **THEN** the camera reads 12:00; six hours later the sun is on the -y axis and the camera reads 18:00; a camera 90 degrees west of the first reads 12:00 for that sun; a sun of another declination keeps it
 
 #### Scenario: The title
-- **WHEN** the title is made at the start over a world with a chunk stage, over a world without one, and with the horizon view and a sun six hours later
-- **THEN** it adds nothing, adds the chunk-stage notice, and adds "shade view horizon" and "sun 18:00 local solar time"; with the editing light on it does not claim the time
+- **WHEN** the title is made at the start and with the horizon view and a sun six hours later
+- **THEN** it adds nothing, and adds "shade view horizon" and "sun 18:00 local solar time"; with the editing light on it does not claim the time
 
 ### Requirement: VIEW-060 F8 switches the ground look
 The lit window SHALL show the ground look `LookChoice` names: F8 cycles the defaults (the Earth curves at the strength F6 names) and the look file's `ground` table (LOOK-011; its curves, and its detail strength in place of the natural mode's, while full and off stay what F6 says); the window starts on the defaults. The window's title SHALL name the choice when it is not the default (`look look file`), the key table SHALL list F8 with its state (`default` or `look file`), and `LitPlan::with_ground_look` SHALL make the plan so that a test can read it. A look file without a ground table shows the same in both. Nothing is stored or keyed (ADR 0035).
