@@ -54,9 +54,83 @@ pub enum MeasureVariant {
     Neither,
 }
 
+/// SPIKE-67 (spike code, never merged): `SPIKE67_G3` swaps the ground detail's planar value noise.
+/// - `grad3`: the 3 cm octave (k 3) as gradient noise (quintic, analytic derivative, corner gradients from the same hash), RMS slope matched;
+/// - `gradall`: every octave as gradient noise;
+/// - `off3`: the 3 cm octave left out.
+fn spike67_source(source: String) -> String {
+    let Ok(mode) = std::env::var("SPIKE67_G3") else { return source };
+    let only3 = match mode.as_str() {
+        "grad3" => true,
+        "gradall" => false,
+        "off3" => {
+            return source.replace(
+                "let o = gd_octave(cell, frac, local, foot, 0u, 3u, axes);",
+                "let o = 0.0 * gd_octave(cell, frac, local, foot, 0u, 3u, axes);",
+            );
+        }
+        _ => return source,
+    };
+    let mut out = source.replace("fn gd_plane(base: vec3<i32>,", "fn gd_plane_value(base: vec3<i32>,");
+    out.push_str(&format!(
+        "
+fn gd_plane(base: vec3<i32>, q: vec3<f32>, k: u32, axis: u32) -> vec4<f32> {{
+    if ({only3} && k != 3u) {{
+        return gd_plane_value(base, q, k, axis);
+    }}
+    return gd_plane_grad(base, q, k, axis);
+}}
+
+fn gd_corner_grad(x: u32) -> vec2<f32> {{
+    let a = gd_finish(x) * 3.14159265;
+    return vec2<f32>(cos(a), sin(a));
+}}
+
+// Gradient noise on the plane: the same cell, shear and hash as `gd_plane`, the corner value turned into a unit gradient; quintic fade.
+fn gd_plane_grad(base: vec3<i32>, q: vec3<f32>, k: u32, axis: u32) -> vec4<f32> {{
+    let cell0 = select(select(vec2<i32>(base.x, base.y), vec2<i32>(base.x, base.z), axis == 1u), vec2<i32>(base.y, base.z), axis == 0u);
+    let q0 = select(select(vec2<f32>(q.x, q.y), vec2<f32>(q.x, q.z), axis == 1u), vec2<f32>(q.y, q.z), axis == 0u);
+    let m = gd_shear(k);
+    let uv_cell = vec2<i32>(m.x * cell0.x + m.y * cell0.y, m.z * cell0.x + m.w * cell0.y);
+    let uv_q = vec2<f32>(f32(m.x) * q0.x + f32(m.y) * q0.y, f32(m.z) * q0.x + f32(m.w) * q0.y);
+    let fl = floor(uv_q);
+    let u = uv_q - fl;
+    let c = bitcast<vec2<u32>>(uv_cell + vec2<i32>(fl));
+    let t = u * u * u * (u * (u * 6.0 - 15.0) + 10.0);
+    let dt = 30.0 * u * u * (u * (u - 2.0) + 1.0);
+    let kx = ((k + 1u) * 0x9e3779b1u) ^ ((axis + 1u) * 0xcb1ab31fu);
+    let pu0 = c.x * 0x8da6b343u;
+    let pv0 = (c.y * 0xd8163841u) ^ kx;
+    let pu1 = pu0 + 0x8da6b343u;
+    let pv1 = ((c.y * 0xd8163841u) + 0xd8163841u) ^ kx;
+    let g00 = gd_corner_grad(pu0 ^ pv0);
+    let g10 = gd_corner_grad(pu1 ^ pv0);
+    let g01 = gd_corner_grad(pu0 ^ pv1);
+    let g11 = gd_corner_grad(pu1 ^ pv1);
+    let a = dot(g00, u);
+    let b = dot(g10, u - vec2<f32>(1.0, 0.0));
+    let cc = dot(g01, u - vec2<f32>(0.0, 1.0));
+    let d = dot(g11, u - vec2<f32>(1.0, 1.0));
+    let k0 = a - b - cc + d;
+    let value = a + (b - a) * t.x + (cc - a) * t.y + k0 * t.x * t.y;
+    let gk = g00 - g10 - g01 + g11;
+    let gu = g00 + (g10 - g00) * t.x + (g01 - g00) * t.y + gk * t.x * t.y
+        + vec2<f32>(dt.x * ((b - a) + k0 * t.y), dt.y * ((cc - a) + k0 * t.x));
+    // RMS slope matched to the value noise (SPIKE-67: 1.08 against 0.88 lattice units), the value by the same factor.
+    let s = 1.23;
+    let go = s * select(1.0, 0.70710678, (k & 1u) == 0u) * vec2<f32>(f32(m.x) * gu.x + f32(m.z) * gu.y, f32(m.y) * gu.x + f32(m.w) * gu.y);
+    let grad = select(select(vec3<f32>(go.x, go.y, 0.0), vec3<f32>(go.x, 0.0, go.y), axis == 1u), vec3<f32>(0.0, go.x, go.y), axis == 0u);
+    return vec4<f32>(grad, s * value);
+}}
+"
+    ));
+    out
+}
+
 /// The lit terrain shader with `variant` applied: the call of `shadow_factor` in the lit views is replaced by 1.0 and `ground_detail` by a
 /// function returning the neutral detail (the original is kept under another name, unused). `Product` returns `source` unchanged.
 pub(crate) fn measure_source(source: String, variant: MeasureVariant) -> String {
+    let source = spike67_source(source);
     let (shadow, material) = match variant {
         MeasureVariant::Product => return source,
         MeasureVariant::NoShadow => (true, false),
