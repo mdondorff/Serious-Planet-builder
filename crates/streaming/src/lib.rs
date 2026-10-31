@@ -16,10 +16,10 @@
 //! retire. A request that finds no free slot makes room by evicting (prefetch and tiles outside R first, then R tiles
 //! farthest and finest first, never the draw set with its ancestors or a root) or waits. [`manager`] fits the wants to
 //! the pool before they get here.
-
+pub mod budget;
+pub mod horizonjobs;
 pub mod horizonjobs;
 pub mod jobs;
-pub mod horizonjobs;
 mod layer;
 pub mod manager;
 pub mod priority;
