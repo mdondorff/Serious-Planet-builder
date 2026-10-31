@@ -31,12 +31,12 @@ Sources: roadmap M9 and its design constraints (2026-10-28); `docs/briefings/wee
 |---|---|---|---|---|
 | R0 | Shadows layer 1 (#941; 9 PRs) | 9 PRs, 12-18 h, 2 windows | crusader | B6 PR 5 |
 | R1 | Terrain scorecard (#942) and its baseline report | 3 PRs, 5-8 h | crusader | now (parallel to R0 PR 1-2) |
-| R3 | Bake pre-run: one face at 100 m with a ground-following network, valley carve capped by local relief and tapered from heads, thermal and deposition passes; time, size, scorecard on that face | spike, 2 h + machine hours | spikes | R1 baseline |
-| R3b | CPU thermal and deposition kernels on one region against the scorecard (SPIKE-57 recommendation 2) | spike, 2-3 h | spikes | with R3 |
-| R4 | The bake: network routed on the base at 100-600 m (curved, GEN-066 style), carve, thermal, deposition; checkpointed; a new store beside `global16384` | 4-6 PRs, 8-12 h + one overnight bake | explorer | R3, R3b |
+| R3 | Bake pre-run at 100 m (done: SPIKE-61, SPIKE-62, SPIKE-65, SPIKE-66) | done | spikes | - |
+| R3b | CPU thermal and deposition kernels on one region (done: SPIKE-64) | done | spikes | - |
+| R4 | The bake (ADR 0088 proposed, change `m9-bake`): baked relief driver and ring mean; runtime base `m + k (e - m)`; a transient carve with breach before fill, re-routing every 3-5 steps, thermal at repose, one deposition sweep; the erosion layer beside `global16384`, checkpointed; behind a switch | 6 PRs, 10-14 h + one overnight bake (estimated 2.5-4 h) | explorer | R1, ADR 0088 accepted |
 | R5 | Channels per point along the baked network; width at least two vertex spacings per level (SPIKE-60) | 3-5 PRs, 6-10 h | crusader | R4 store |
 | R6 | Ground detail: G3 shader detail, G1 with a steeper fine-octave law (SPIKE-53, SPIKE-54); behind a switch until the owner's look | 4-6 PRs, 6-10 h | crusader | R0 PR 5 (same lit path) |
-| R7 | Hill tuning rounds against the scorecard and the look reference | 2-4 rounds of 1-3 PRs | explorer | R4 |
+| R7 | Tuning rounds against the scorecard at the four hill sites and the look reference: the `k` curve per landform (start about x4-6 hills, about x7.5 mountains), the coast taper, the carve's U/K and steps, thermal; Badlands and desert not worse | 2-4 rounds of 1-3 PRs, a channel re-bake (minutes) or a layer re-bake (hours) each | explorer | R4 |
 | R8 | Switch the default store; retire the M8 store's channels nobody reads | 1-2 PRs | explorer | criteria 1, 2, 6 |
 - Total: about 30-45 PRs, 50-75 lane-hours, one overnight bake (two if the first fails), 4-6 perf windows.
 - Calendar (owner back 2026-11-09): R0 and R1 in the first week; R3, R3b and R4 by the end of the second; R5 to R7 in weeks three and four; acceptance about 2026-12-04, at full quota.
@@ -68,14 +68,14 @@ Sources: roadmap M9 and its design constraints (2026-10-28); `docs/briefings/wee
 3. **A river across an edit (E 15).** Proposal: the channel follows the baked network and is cut through the edit per point (R5); re-routing a river around an edit is M10 or later.
 4. **Scope of groups F and G.** Proposal: F (river form) in M9 through R4 and R5; G (resolution at walking height) in M9 through R6.
 5. **The 1 m / 500 m exception.** Proposal: close it; it was the chunk re-solve's 10 s column, removed with the chunk stage.
-6. **Criterion 1's bound.** Proposal: 0.6 of real at p50 for slope and 1 km relief at the hill and mountain tiles; another number is the owner's call.
-7. **Disk.** Decided (owner, 2026-10-31): R4 first writes the erosion result as a separate layer beside `global16384` (easy to reverse), only if reads meet criterion 6's speed; once the erosion result is accepted, it is folded into one store (no paired reads of two files), and its size is optimised then. SPIKE-61: the layer is about 7-10 GB.
-8. **GPU bake.** Proposal: not now; the CPU bake must fit 10 h first (R3 decides). A GPU bake with a stored canonical output needs an ADR (candidate below).
-9. **Driver maps (ADR 0076, open).** Proposal: soil depth and wetness become baked channels in R4 if they cost under 10 % of the bake; their use (materials, plants) stays M10.
+6. **Criterion 1's bound.** Proposal: the pass bound stays 0.6 of real at p50 for slope and 1 km relief at the hill and mountain tiles; R7 tunes towards 0.8. Evidence: the prototypes reach 0.62-1.35 at the hill sites (SPIKE-65, SPIKE-66), and the Alps reach 0.8 at a factor of about x7.5 with thermal capping the slope tail (SPIKE-66). Another number is the owner's call.
+7. **Disk.** Decided (owner, 2026-10-31): R4 first writes the erosion result as a separate layer beside `global16384` (easy to reverse), only if reads meet criterion 6's speed; once the erosion result is accepted, it is folded into one store (no paired reads of two files), and its size is optimised then. SPIKE-61: the layer is about 7-10 GB; ADR 0088 adds two channels under 1 GB (relief driver and ring mean).
+8. **GPU bake.** Proposal: not needed. The CPU bake is estimated at 2.5-4 h (transient carve about 10 s a tile, thermal on active cells; SPIKE-62, SPIKE-64, SPIKE-65), within criterion 7's 10 h; the overnight run confirms it.
+9. **Driver maps (ADR 0076, open).** Proposal: the relief driver is M9's first baked driver (ADR 0088), with its own curve per landform, not today's landform driver (SPIKE-66: low at the hill sites). Soil depth and wetness become baked channels in R4 if they cost under 10 % of the bake; their use (materials, plants) stays M10. **New:** ADR 0088 (the bake's channels and layer format) is the owner's decision before R4 starts.
 
 ## Candidate ADRs (not written)
-- The M9 bake pipeline: a ground-following network, a carve capped by local relief and tapered from heads, thermal and deposition passes, checkpoints (after R3).
-- A GPU bake whose stored output is the canonical field (CON-07, CON-14), only if R3 shows the CPU bake over 10 h.
+- The M9 bake pipeline: written as ADR 0088 (proposed, 2026-10-31).
+- A GPU bake whose stored output is the canonical field (CON-07, CON-14): not needed on the estimates (decision 8).
 - ADR 0076 decided again with the bake's channels (decision 9).
 
 ## Spike results since the draft (opus-planner, 2026-10-31)
@@ -85,3 +85,4 @@ Sources: roadmap M9 and its design constraints (2026-10-28); `docs/briefings/wee
 | SPIKE-63 | Height octaves below 6 m show at 3-80 m, no GPU cost, +16 % tile build; G3's 3 cm octave draws a block grid at the feet | R6 starts with the block grid; the law is the owner's pick from the stills |
 | SPIKE-64 | Thermal and deposition change nothing on today's gentle slopes; deposition fills basins first | the kernels follow the relief, they do not make it |
 | SPIKE-65 | Amplitude x4-6 per landform brings hills to 0.68-1.26 of real; steady-state stream power erases landforms; amplitude + short carve + thermal: 0.62-1.13 at the hill sites, Alps 0.53-0.78; flats 16-21 % (real 6-9 %) | R7 becomes a per-landform relief factor in the generator (SPIKE-66) plus a transient carve in R4; no steady-state erosion |
+| SPIKE-66 | The factor works on all land (hills x4-6; Alps 0.8 at about x7.5); weighted by today's landform driver it barely acts; a 10 km stencil breaks batch reads, bounds and plan-check; scaling to the sea loses land; breach before fill: flats 10-12 % | ADR 0088 (proposed): factor and mean as baked channels with per-cap bounds, coast taper, breach in R4's carve |
