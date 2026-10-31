@@ -26,6 +26,13 @@ impl Par for usize {
     }
 }
 
+/// `f(0)` to `f(n - 1)` on `par`, the results in index order whatever thread ran each (CON-14).
+pub fn map<T: Send>(par: &dyn Par, n: usize, f: &(dyn Fn(usize) -> T + Sync)) -> Vec<T> {
+    let slots: Vec<std::sync::Mutex<Option<T>>> = (0..n).map(|_| std::sync::Mutex::new(None)).collect();
+    par.run(n, &|i| *slots[i].lock().expect("a result slot") = Some(f(i)));
+    slots.into_iter().map(|m| m.into_inner().expect("a result slot").expect("every index ran")).collect()
+}
+
 /// `workers` scoped threads (the caller is one) run the indices `0..n`. With at most as many indices as workers every index gets a thread of its own (the
 /// caller takes index 0), as the lower crates always did for a chunk each; with more, the threads take indices from one counter.
 pub fn run_scoped(workers: usize, n: usize, f: &(dyn Fn(usize) + Sync)) {
@@ -78,5 +85,6 @@ mod tests {
         1usize.run(8, &|_| ids.lock().unwrap().push(std::thread::current().id()));
         assert!(ids.lock().unwrap().iter().all(|id| *id == caller));
         assert_eq!(0usize.threads(), 1);
+        assert_eq!(map(&3usize, 7, &|i| i * i), vec![0, 1, 4, 9, 16, 25, 36]);
     }
 }
