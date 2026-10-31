@@ -40,7 +40,8 @@ const AMPLITUDE_LAND_M: f64 = 900.0;
 const SLOPE_CELLS: f64 = 3.0;
 /// How far from the cell of a direction the lattice reads of a height reach, in cells (GEN-020): the gradient stencil reaches [`SLOPE_CELLS`] cells (a bit
 /// more on the chart, 2/sqrt(3) at most) and the bilinear read one more; a footprint taken from this hint is a superset of the exact one.
-pub const GRADIENT_REACH_CELLS: u32 = 8;
+// SPIKE-66: 8 plus the relief factor's 10 km ring (about 17 cells at 16384) and its bilinear read.
+pub const GRADIENT_REACH_CELLS: u32 = 26;
 /// The slope factor: this share of the amplitude on flat ground, the rest from slope 0.01 (rise over run) to 0.2.
 const CARVE_FLOOR: f64 = 0.15;
 const CARVE_FROM: f64 = 0.01;
@@ -174,7 +175,7 @@ impl ErosionField<'_> {
 
     /// The largest height the field takes in magnitude at its relief scale (WDEF-017): the elevation clamp times the scale plus the deepest incision.
     fn max_abs_height(&self) -> f64 {
-        MAX_ELEVATION_M.max(-MIN_ELEVATION_M) * self.relief + DETAIL_DOWN_M
+        (MAX_ELEVATION_M.max(-MIN_ELEVATION_M) * self.relief + DETAIL_DOWN_M) * relief_factor().map_or(1.0, |r| r.max())
     }
 
     /// The ground elevation of the bake at a direction, without creases.
@@ -222,10 +223,61 @@ impl ErosionField<'_> {
         let e = self.base_via(src, dir);
         let slope = self.gradient_via(src, dir) / self.radius_m;
         let c = carve(slope);
+        if let Some(rf) = relief_factor() {
+            // SPIKE-66: the relief factor scales the bake's deviation from its ring mean and the creases.
+            let l = self.landform().at(dir);
+            let mean = self.ring_mean(src, dir, e);
+            let k = rf.k(l, mean);
+            return mean + k * (e - mean) + k * detail_m(self.seed, dir, e, c, if c >= 1.0 { 0.0 } else { l });
+        }
         // Where the slope factor is 1 the landform changes nothing (`fine_carve(1, L)` is 1), so it is not evaluated.
         let l = if c >= 1.0 { 0.0 } else { self.landform().at(dir) };
         e + detail_m(self.seed, dir, e, c, l)
     }
+
+    /// SPIKE-66: the bake's mean over the centre and 8 points on a ring of [`RING_M`] (the elevation below which relief is scaled).
+    fn ring_mean(&self, src: &dyn LatticeSource, dir: Vec3, e: f64) -> f64 {
+        let a = RING_M / self.radius_m;
+        let helper = if dir.z.abs() < 0.9 { Vec3::new(0.0, 0.0, 1.0) } else { Vec3::new(1.0, 0.0, 0.0) };
+        let t1 = helper.cross(dir).normalized();
+        let t2 = dir.cross(t1);
+        let mut sum = e;
+        for k in 0..8 {
+            let th = f64::from(k) * core::f64::consts::FRAC_PI_4;
+            let p = (dir + (t1 * libm::cos(th) + t2 * libm::sin(th)) * a).normalized();
+            sum += self.base_via(src, p);
+        }
+        sum / 9.0
+    }
+}
+
+/// SPIKE-66 (spike code, never merged): a relief factor per landform. `PLANET_RELIEF_K` (hills) and `PLANET_RELIEF_KM` (mountains, default
+/// K): `k = 1 + (K(m) - 1) w`, `K(m)` from K to KM by the ring mean from 800 to 2,000 m, `w` the landform driver (or 1 everywhere with
+/// `PLANET_RELIEF_W=1`). Unset: today's field.
+const RING_M: f64 = 10_000.0;
+#[derive(Clone, Copy)]
+struct ReliefFactor {
+    hills: f64,
+    mountains: f64,
+    all: bool,
+}
+impl ReliefFactor {
+    fn k(&self, landform: f64, mean: f64) -> f64 {
+        let km = self.hills + (self.mountains - self.hills) * smoothstep(800.0, 2000.0, mean);
+        let w = if self.all { 1.0 } else { landform.clamp(0.0, 1.0) };
+        1.0 + (km - 1.0) * w
+    }
+    fn max(&self) -> f64 {
+        self.hills.max(self.mountains).max(1.0)
+    }
+}
+fn relief_factor() -> Option<ReliefFactor> {
+    static R: OnceLock<Option<ReliefFactor>> = OnceLock::new();
+    *R.get_or_init(|| {
+        let hills: f64 = std::env::var("PLANET_RELIEF_K").ok()?.parse().ok()?;
+        let mountains = std::env::var("PLANET_RELIEF_KM").ok().and_then(|v| v.parse().ok()).unwrap_or(hills);
+        Some(ReliefFactor { hills, mountains, all: std::env::var("PLANET_RELIEF_W").as_deref() == Ok("1") })
+    })
 }
 
 impl ErosionField<'_> {
@@ -427,7 +479,30 @@ impl HeightField for ErosionField<'_> {
         let ((c1, c2), (f1, f2)) = (part(a_lo, a_hi, clo, chi), part(fa_lo, fa_hi, flo, fhi));
         let (dlo, dhi) = ((c1 + f1).max(-0.75 * AMPLITUDE_MAX_M), (c2 + f2).min(0.25 * AMPLITUDE_MAX_M));
         let pad = |x: f64| 1e-6 + x.abs() * 1.2e-7;
-        let (l, h) = (blo + dlo, bhi + dhi);
+        let (l, h) = match relief_factor() {
+            // SPIKE-66: e' = m + k (e - m), k in [1, K]. The ring mean m is the mean of the bake at 9 points that each move by at most the
+            // cap's radius (times 1.01 for the ring's tilt), so it lies within its value at the centre plus or minus the bake's Lipschitz
+            // constant (over the cap widened by the ring) times the radius; the detail is times k.
+            Some(rf) => {
+                let k = rf.max();
+                let wide = match scan_base(&self.src, centre, (angular_radius + 1.01 * RING_M / self.radius_m) * (1.0 + 1e-9)) {
+                    Ok(Some(w)) => w,
+                    _ => return global,
+                };
+                let lip = f64::from(self.src.res()) * (wide.max_du + wide.max_dv);
+                let mc = self.ring_mean(&self.src, centre, self.base_via(&self.src, centre));
+                if mc.is_nan() {
+                    return global;
+                }
+                let spread = lip * angular_radius * 1.01 * (1.0 + 1e-9) + 1e-3;
+                let (mlo, mhi) = ((mc - spread).max(wide.lo), (mc + spread).min(wide.hi));
+                (
+                    blo.min(k * blo - (k - 1.0) * mhi) + k * dlo.min(0.0) + dlo.max(0.0),
+                    bhi.max(k * bhi - (k - 1.0) * mlo) + k * dhi.max(0.0) + dhi.min(0.0),
+                )
+            }
+            None => (blo + dlo, bhi + dhi),
+        };
         ((l - pad(l)).max(global.0), (h + pad(h)).min(global.1))
     }
 }

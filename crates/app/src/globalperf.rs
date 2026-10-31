@@ -1641,6 +1641,72 @@ mod tests {
         });
     }
 
+    /// SPIKE-66 (spike code, never merged): the step a tile's mesh shows against its children's, per level, at sites: for the tile of
+    /// each level at the site and its 8 neighbours (cells 32), the field at the 65 x 65 child-grid points against the bilinear surface of the
+    /// tile's 33 x 33 vertices (what changes when the tile splits); p99 and max in metres. Run with and without `PLANET_RELIEF_K`.
+    /// `PLANET_ANET_STORE=DIR PLANET_ANET_RES=16384 RELIEF_SITES=name:lat:lon,... cargo test -p planet --release --lib relief_level_error
+    /// -- --ignored --nocapture`. Read only.
+    #[test]
+    #[ignore = "a spike measurement"]
+    fn relief_level_error() {
+        use planet_core::cube::TangentWarp;
+        let res: u32 = std::env::var("PLANET_ANET_RES").ok().and_then(|v| v.parse().ok()).unwrap_or(256);
+        let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
+        let mut so = std::io::stdout();
+        let (world, _maps, _tile) = anet_scene(res, 11, store, &mut so).unwrap();
+        let field = world.field().unwrap();
+        let map = &TangentWarp;
+        for site in std::env::var("RELIEF_SITES").unwrap().split(',') {
+            let v: Vec<&str> = site.split(':').collect();
+            let (name, lat, lon): (&str, f64, f64) = (v[0], v[1].parse().unwrap(), v[2].parse().unwrap());
+            let d = planet_core::Vec3::from_lat_lon(lat.to_radians(), lon.to_radians());
+            let mut line = format!("LEVELERR {name}:");
+            for level in (10u8..=22).step_by(2) {
+                let centre = planet_core::TileId::from_direction(map, d, level);
+                let mut ids = vec![centre];
+                ids.extend(centre.neighbors8());
+                let mut errs = Vec::new();
+                for id in &ids {
+                    let fine: Vec<f64> = {
+                        let dirs: Vec<planet_core::Vec3> =
+                            (0..=64u32).flat_map(|l| (0..=64u32).map(move |k| (k, l))).map(|(k, l)| id.sample_direction(map, 64, k, l)).collect();
+                        field.heights_threaded(&dirs, 4)
+                    };
+                    let at = |k: usize, l: usize| fine[l * 65 + k];
+                    for l in 0..=64usize {
+                        for k in 0..=64usize {
+                            // The coarse mesh's vertices are the even child points; the surface between them is bilinear.
+                            let (k0, l0) = ((k / 2) * 2, (l / 2) * 2);
+                            let (k1, l1) = ((k0 + 2).min(64), (l0 + 2).min(64));
+                            let (fx, fy) = ((k - k0) as f64 / 2.0, (l - l0) as f64 / 2.0);
+                            let coarse = at(k0, l0) * (1.0 - fx) * (1.0 - fy) + at(k1, l0) * fx * (1.0 - fy) + at(k0, l1) * (1.0 - fx) * fy + at(k1, l1) * fx * fy;
+                            errs.push((at(k, l) - coarse).abs());
+                        }
+                    }
+                }
+                errs.sort_by(f64::total_cmp);
+                // The bound of the centre tile against the range its 65 x 65 samples take.
+                let fine: Vec<f64> = {
+                    let dirs: Vec<planet_core::Vec3> =
+                        (0..=64u32).flat_map(|l| (0..=64u32).map(move |k| (k, l))).map(|(k, l)| centre.sample_direction(map, 64, k, l)).collect();
+                    field.heights_threaded(&dirs, 4)
+                };
+                let (smin, smax) = fine.iter().fold((f64::MAX, f64::MIN), |a, &h| (a.0.min(h), a.1.max(h)));
+                let (blo, bhi) = field.height_bounds(centre.center_direction(map), planet_frame::lod::angular_radius(map, centre));
+                line += &format!(
+                    " L{level} p99 {:.3} max {:.3} bound {:.0}/{:.0} range {:.0} ({:.1}x);",
+                    errs[errs.len() * 99 / 100],
+                    errs[errs.len() - 1],
+                    blo,
+                    bhi,
+                    smax - smin,
+                    (bhi - blo) / (smax - smin).max(1e-3)
+                );
+            }
+            println!("{line}");
+        }
+    }
+
     /// SPIKE-65 (spike code, never merged): windows of the base field at SPIKE-61's grid (48 cells per coupled cell, 101.8 m at 16384)
     /// centred on latitudes and longitudes, as f32 rasters `<dir>/<name>-orig-WxW.f32` (row j north-south along the face's t axis).
     /// `PLANET_ANET_STORE=DIR PLANET_ANET_RES=16384 RELIEF_SITES=name:lat:lon,... RELIEF_W=2560 RELIEF_DIR=DIR cargo test -p planet --release
