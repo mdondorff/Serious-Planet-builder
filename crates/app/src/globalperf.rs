@@ -1037,7 +1037,8 @@ mod tests {
                             let rr = r as usize - fc0;
                             let (ri, rj) = ((rr % nc) * PER + PER / 2, (rr / nc) * PER + PER / 2);
                             if !inside(fi, fj) && inside(ri, rj) && maps.z(c) > 0.0 {
-                                let (ei, ej) = (fi.clamp(wi0, wi1 - 1) - wi0, fj.clamp(wj0, wj1 - 1) - wj0);
+                                // SPIKE-70: the first interior cell, not the window's edge (an edge cell is an outlet: inflow there never entered the routing).
+                                let (ei, ej) = (fi.clamp(wi0 + 1, wi1 - 2) - wi0, fj.clamp(wj0 + 1, wj1 - 2) - wj0);
                                 inflow.push((ej * w + ei, maps.network_area_m2(c) as f64));
                             }
                         }
