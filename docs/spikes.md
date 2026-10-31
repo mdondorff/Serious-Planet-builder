@@ -9,6 +9,7 @@ Per-spike register sections of M5 and M6: `docs/archive/M6/spikes.md`. Closed sp
 ## Index of open spikes
 | Id | Title | Status | Results |
 |---|---|---|---|
+| SPIKE-69 | The relief-driver map: where k comes from | closed 2026-10-31 (the landform driver L through a land-quantile curve, k 1 at L 0, 4.5 by L 0.028, 5.6 at L 1, with the coast taper: Earth's shares within 3 points (63/12/25 %), sites 3.9-4.6 against 3.6-6.9; other sources need k 8-17 at the sites; pre-bake in seconds, paintable as an L override) | `spikes/m9-relief-driver/results/` |
 | SPIKE-68 | Erosion-layer seams | closed 2026-10-31 (tiles with a 256-cell halo: edge step p99 134-172 m, max 400-480 m; the error follows river networks deep into the cores; inflow and an oracle edge ring do not fix it, held neighbours are worse, a 64-cell blend hides the step only; the carve's routing must be global) | `spikes/m9-layer-seams/results/` |
 | SPIKE-67 | G3 block grid at the feet | closed 2026-10-31 (cause: value noise, its slope is 0 on cell edges, so low sun draws the lattice; gradient noise on the same lattice and hash removes it at no measurable cost, all octaves +0.14 ms; R6 builds it) | `spikes/m9-g3-grid/results/` |
 | SPIKE-66 | Relief factor in the generator | closed 2026-10-31 (all-land factor x4-6 for hills, about x7.5 for the Alps' 0.8; the landform driver is the wrong weight; a 10 km stencil breaks batch reads, bounds and plan-check: bake the factor and mean; taper at the coast; breach cuts flats to 10-12 %) | `spikes/m9-relief-factor/results/` |

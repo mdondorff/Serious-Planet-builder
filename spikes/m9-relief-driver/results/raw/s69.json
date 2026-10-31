@@ -1,0 +1,148 @@
+{
+ "candidates": {
+  "landform today (zone x inland)": {
+   "curve_k": [
+    1.0,
+    1.0,
+    4.5,
+    4.5,
+    5.62
+   ],
+   "curve_quantiles": [
+    0.0,
+    0.5,
+    0.66,
+    0.82,
+    1.0
+   ],
+   "shares": [
+    0.626,
+    0.124,
+    0.189,
+    0.061
+   ],
+   "fit_error": 0.032,
+   "dk_p99": 1.6,
+   "dk_max": 3.5,
+   "k_mean_land": 2.18,
+   "sites": {
+    "alps": 4.6,
+    "blackforest": 4.5,
+    "highlands": 3.93,
+    "valleyridge": 4.32
+   }
+  },
+  "(a) structure (zone, ridge)": {
+   "curve_k": [
+    1.0,
+    1.0,
+    7.0,
+    10.0,
+    15.0
+   ],
+   "curve_quantiles": [
+    0.0,
+    0.5,
+    0.66,
+    0.82,
+    1.0
+   ],
+   "shares": [
+    0.645,
+    0.105,
+    0.106,
+    0.144
+   ],
+   "fit_error": 0.071,
+   "dk_p99": 3.34,
+   "dk_max": 13.47,
+   "k_mean_land": 3.22,
+   "sites": {
+    "alps": 11.99,
+    "blackforest": 8.23,
+    "highlands": 8.74,
+    "valleyridge": 9.38
+   }
+  },
+  "(c) bake spread 50 km": {
+   "curve_k": [
+    1.0,
+    1.0,
+    2.5,
+    10.5,
+    15.75
+   ],
+   "curve_quantiles": [
+    0.0,
+    0.5,
+    0.66,
+    0.82,
+    1.0
+   ],
+   "shares": [
+    0.609,
+    0.142,
+    0.095,
+    0.154
+   ],
+   "fit_error": 0.005,
+   "dk_p99": 5.15,
+   "dk_max": 11.82,
+   "k_mean_land": 3.37,
+   "sites": {
+    "alps": 13.59,
+    "blackforest": 11.48,
+    "highlands": 9.84,
+    "valleyridge": 10.4
+   }
+  },
+  "(b) relief-class layer (new fBm with zone)": {
+   "curve_k": [
+    1.0,
+    1.0,
+    5.0,
+    13.0,
+    19.5
+   ],
+   "curve_quantiles": [
+    0.0,
+    0.5,
+    0.66,
+    0.82,
+    1.0
+   ],
+   "shares": [
+    0.611,
+    0.139,
+    0.107,
+    0.142
+   ],
+   "fit_error": 0.002,
+   "dk_p99": 4.27,
+   "dk_max": 18.24,
+   "k_mean_land": 3.59,
+   "sites": {
+    "alps": 16.66,
+    "blackforest": 3.14,
+    "highlands": 11.24,
+    "valleyridge": 12.67
+   }
+  }
+ },
+ "need": {
+  "alps": 6.906040268456376,
+  "blackforest": 3.5555555555555554,
+  "highlands": 6.841269841269841,
+  "valleyridge": 5.583333333333333
+ },
+ "earth_targets": [
+  0.61,
+  0.14,
+  0.25
+ ],
+ "bounds_m": [
+  100.0,
+  300.0,
+  1000.0
+ ]
+}
