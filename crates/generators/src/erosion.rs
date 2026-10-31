@@ -127,8 +127,14 @@ fn crease_parts(seed: u64, dir: Vec3) -> (f64, f64) {
 
 /// The slope factor of the fine creases (GEN-061): the factor of the bake's slope lifted towards 1 by the landform driver `l` in `[0, 1]`
 /// (`l` 0 on a plain or at the coast: the factor of the slope alone; `l` 1 deep inland in a range zone: the full amplitude whatever the slope).
+/// SPIKE-73 (spike code, never merged): `SPIKE73_FINE_FLOOR` sets a least value of the fine creases' factor (0: none).
+fn spike73_floor() -> f64 {
+    static F: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+    *F.get_or_init(|| std::env::var("SPIKE73_FINE_FLOOR").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0))
+}
+
 fn fine_carve(carve: f64, landform: f64) -> f64 {
-    carve + (1.0 - carve) * landform
+    (carve + (1.0 - carve) * landform).max(spike73_floor())
 }
 
 /// The detail in metres at a point of ground elevation `e`, bake slope factor `carve` and landform `landform`: the coarse creases at the amplitude of the

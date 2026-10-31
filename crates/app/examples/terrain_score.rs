@@ -136,6 +136,122 @@ fn run() -> Result<(), String> {
     drop(field);
     lap("sample generator windows", t);
 
+    // SPIKE-73 (spike code, never merged): `S73_DIR=DIR` scores variants of the plains rasters (Brandenburg, Loess, Erg Chebbi) and returns.
+    // It writes each raster as f32 (`<tile>-real.f32`, `<tile>-site<k>.f32`, 1853^2) for offline variants, and scores any `<tile>-site<k>-<tag>.f32`
+    // found there. Printed per raster: flat share, the three largest classes, slope p50, relief 1 km p50, and against the real tile the class L1 and
+    // the relief 1 km distance.
+    if let Ok(dir) = std::env::var("S73_DIR") {
+        let dir = PathBuf::from(dir);
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let g = ts::GRID;
+        let write = |name: &str, z: &[f64]| {
+            let b: Vec<u8> = z.iter().flat_map(|x| (*x as f32).to_le_bytes()).collect();
+            std::fs::write(dir.join(name), b).expect("write a raster");
+        };
+        let read = |path: &Path| -> Vec<f64> {
+            let b = std::fs::read(path).expect("read a raster");
+            b.chunks_exact(4).map(|c| f64::from(f32::from_le_bytes([c[0], c[1], c[2], c[3]]))).collect()
+        };
+        // A box mean of side 2r+1 by summed-area table (clamped at the edge).
+        let box_mean = |z: &[f64], r: usize| -> Vec<f64> {
+            let w = g + 1;
+            let mut s = vec![0f64; w * w];
+            for j in 0..g {
+                let mut row = 0.0;
+                for i in 0..g {
+                    row += z[j * g + i];
+                    s[(j + 1) * w + i + 1] = s[j * w + i + 1] + row;
+                }
+            }
+            let mut out = vec![0f64; g * g];
+            for j in 0..g {
+                for i in 0..g {
+                    let (i0, i1, j0, j1) = (i.saturating_sub(r), (i + r + 1).min(g), j.saturating_sub(r), (j + r + 1).min(g));
+                    let t = s[j1 * w + i1] - s[j0 * w + i1] - s[j1 * w + i0] + s[j0 * w + i0];
+                    out[j * g + i] = t / ((i1 - i0) * (j1 - j0)) as f64;
+                }
+            }
+            out
+        };
+        // White noise of standard deviation `sd` from an integer hash of the cell (a stand-in for G1's sub-30 m octaves sampled at 30 m).
+        let noise = |z: &[f64], sd: f64, salt: u64| -> Vec<f64> {
+            z.iter()
+                .enumerate()
+                .map(|(k, v)| {
+                    let mut x = (k as u64 ^ salt).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+                    x = (x ^ (x >> 31)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+                    x ^= x >> 29;
+                    let u = (x >> 11) as f64 / (1u64 << 53) as f64;
+                    let mut y = x.wrapping_mul(0x94D0_49BB_1331_11EB);
+                    y ^= y >> 32;
+                    let u2 = ((y >> 11) as f64 / (1u64 << 53) as f64).max(1e-12);
+                    v + sd * (-2.0 * u2.ln()).sqrt() * (2.0 * std::f64::consts::PI * u).cos()
+                })
+                .collect()
+        };
+        let line = |label: &str, s: &RasterStats, real: Option<&RasterStats>| {
+            let mut top: Vec<(usize, f64)> = (0..10).map(|k| (k, s.forms[k])).collect();
+            top.sort_by(|a, b| b.1.total_cmp(&a.1));
+            let tops: Vec<String> = top.iter().take(3).map(|(k, v)| format!("{} {:.0}%", ts::FORM_NAMES[*k], 100.0 * v)).collect();
+            let d = real.map(|r| ts::distances(r, s));
+            println!(
+                "S73 {label:40} flat {:5.1}% | {} | slope p50 {:.2} | relief1 p50 {:.1} | vs real: classes L1 {} relief1 {}",
+                100.0 * s.forms[0],
+                tops.join(", "),
+                s.series[0].p(50),
+                s.series[3].p(50),
+                d.as_ref().map_or("-".into(), |d| format!("{:.2}", d.forms_l1)),
+                d.as_ref().and_then(|d| d.continuous[3]).map_or("-".into(), |x| format!("{x:.2}")),
+            );
+        };
+        let threads_k = threads;
+        for (i, s) in specs.iter().enumerate() {
+            if !["N52E012", "N41W096", "N31W004"].contains(&s.tile.as_str()) {
+                continue;
+            }
+            let real = &reals[i];
+            write(&format!("{}-real.f32", s.tile), real);
+            let (rs, _) = ts::analyse(real, g, g, threads_k, false);
+            line(&format!("{} real", s.tile), &rs, None);
+            // The real tile smoothed: does surface clutter (GLO-30 is a surface model) make the real plains non-flat?
+            for r in [1usize, 2] {
+                let (st, _) = ts::analyse(&box_mean(real, r), g, g, threads_k, false);
+                line(&format!("{} real box {}x{}", s.tile, 2 * r + 1, 2 * r + 1), &st, Some(&rs));
+            }
+            for (k, z) in gens[i].iter().enumerate() {
+                write(&format!("{}-site{}.f32", s.tile, k + 1), z);
+                let (st, _) = ts::analyse(z, g, g, threads_k, false);
+                line(&format!("{} site{} base", s.tile, k + 1), &st, Some(&rs));
+                // A plains relief floor in k: m + k (h - m), m the 10 km box mean.
+                let m = box_mean(z, 167);
+                for kf in [1.5f64, 2.0, 2.5, 3.0] {
+                    let zk: Vec<f64> = z.iter().zip(&m).map(|(h, mm)| if *h > 0.0 { mm + kf * (h - mm) } else { *h }).collect();
+                    let (st, _) = ts::analyse(&zk, g, g, threads_k, false);
+                    line(&format!("{} site{} k {kf}", s.tile, k + 1), &st, Some(&rs));
+                }
+                // G1-like sub-30 m detail sampled at 30 m: white noise.
+                for sd in [0.1f64, 0.3, 1.0] {
+                    let (st, _) = ts::analyse(&noise(z, sd, 7 + k as u64), g, g, threads_k, false);
+                    line(&format!("{} site{} noise {sd} m", s.tile, k + 1), &st, Some(&rs));
+                }
+                // Offline variants (the local carve).
+                let prefix = format!("{}-site{}-", s.tile, k + 1);
+                let mut extra: Vec<PathBuf> = std::fs::read_dir(&dir)
+                    .map_err(|e| e.to_string())?
+                    .filter_map(|e| e.ok().map(|e| e.path()))
+                    .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with(&prefix) && n.ends_with(".f32")))
+                    .collect();
+                extra.sort();
+                for p in extra {
+                    let (st, _) = ts::analyse(&read(&p), g, g, threads_k, false);
+                    let tag = p.file_stem().and_then(|n| n.to_str()).unwrap_or("?").to_string();
+                    line(&tag, &st, Some(&rs));
+                }
+            }
+        }
+        return Ok(());
+    }
+
     // Phase 3: the descriptors on 27 rasters, a few at a time.
     let t = Instant::now();
     let jobs: Vec<(usize, Option<usize>)> =
