@@ -36,6 +36,7 @@ With decisions 1, 2 and 5 together (class map and plateau rule, plate-margin bel
   - the hill band kept, with its amplitude from the class (30 m on plains to about 825 m in high mountains), not removed: without it the hill landforms fail criterion 1 at re-matched sites (SPIKE-80 corrects SPIKE-76).
 - **Cost to reverse:** medium. The class lattice is a new channel and the global bake changes (section 4). The old weights stay in git history; a revert is a re-bake.
 - **Open inside it (R7):** the Badlands' two sites need different classes (SPIKE-77); the arid classes have no default rule, because the generator's climate is independent of its landforms (SPIKE-75).
+- Derived classes: see [SPIKE-81](../../spikes/m9-class-drivers/results/results.md) (a rule table over plate history, rock hardness, aridity and height; it adds badlands and sand sea as derived classes, and the Badlands score about equal to today's baseline at driver-chosen sites).
 
 ## 3. The terrain ADRs (verdict table: SPIKE-76 section 4)
 | Verdict | ADRs | Evidence |
