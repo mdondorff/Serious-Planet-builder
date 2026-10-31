@@ -1,0 +1,259 @@
+=== hills-b g1=none d=0.6 07:44:47 cpu 3%
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+capture-stills: NOT a measurement (no gate, no timestamps, no log): 2560x1440, 3 poses, height field cpu-erosion-v1 over a 16384-cell bake
+coupled run ready after 0.8 s
+coarse horizon: 512 observer cells per face edge, 16 azimuths
+anchor: latitude 8.9720 longitude -16.2380 degrees, ground 3754.6 m
+eye-midmorning: 11 horizon maps in 13.3 s, drawn in 18.0 s -> target/s63/hills-b/g1-none-d0.6\eye-midmorning.png
+eye-lowsun: 11 horizon maps in 0.0 s, drawn in 2.4 s -> target/s63/hills-b/g1-none-d0.6\eye-lowsun.png
+feet-lowsun: 8 horizon maps in 0.0 s, drawn in 3.1 s -> target/s63/hills-b/g1-none-d0.6\feet-lowsun.png
+wrote target/s63/hills-b/g1-none-d0.6 (one PNG per pose and stills.txt)
+=== hills-b g1=none d=1.0 07:45:14 cpu 1%
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+capture-stills: NOT a measurement (no gate, no timestamps, no log): 2560x1440, 3 poses, height field cpu-erosion-v1 over a 16384-cell bake
+coupled run ready after 0.8 s
+coarse horizon: 512 observer cells per face edge, 16 azimuths
+anchor: latitude 8.9720 longitude -16.2380 degrees, ground 3754.6 m
+SPIKE63 eye-midmorning: full 3.507 ms; shadows 0.627, ground detail 1.470, both 1.848; compiled out Some([2.880512, 2.036736, 1.65888]); spread Some([0.1843199999999996, 0.31334399999999984, 0.07270399999999988, 0.06553599999999982]); nodes 2639
+eye-midmorning: 11 horizon maps in 17.9 s, drawn in 44.3 s -> target/s63/hills-b/g1-none-d1.0\eye-midmorning.png
+SPIKE63 eye-lowsun: full 3.351 ms; shadows 0.283, ground detail 1.304, both 1.655; compiled out Some([3.067904, 2.046976, 1.695744]); spread Some([0.3522560000000001, 0.45465599999999995, 0.14847999999999972, 0.13516799999999995]); nodes 2639
+eye-lowsun: 11 horizon maps in 0.0 s, drawn in 25.0 s -> target/s63/hills-b/g1-none-d1.0\eye-lowsun.png
+SPIKE63 feet-lowsun: full 2.476 ms; shadows 0.338, ground detail 0.953, both 1.168; compiled out Some([2.138112, 1.522688, 1.307648]); spread Some([0.5324800000000001, 0.07782400000000012, 0.062464000000000075, 0.03481600000000018]); nodes 2256
+feet-lowsun: 8 horizon maps in 0.0 s, drawn in 23.3 s -> target/s63/hills-b/g1-none-d1.0\feet-lowsun.png
+wrote target/s63/hills-b/g1-none-d1.0 (one PNG per pose and stills.txt)
+=== hills-b g1=a d=0.6 07:46:50 cpu 7%
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+capture-stills: NOT a measurement (no gate, no timestamps, no log): 2560x1440, 3 poses, height field cpu-erosion-v1 over a 16384-cell bake
+coupled run ready after 0.9 s
+coarse horizon: 512 observer cells per face edge, 16 azimuths
+anchor: latitude 8.9720 longitude -16.2380 degrees, ground 3754.5 m
+eye-midmorning: 11 horizon maps in 17.0 s, drawn in 23.7 s -> target/s63/hills-b/g1-a-d0.6\eye-midmorning.png
+eye-lowsun: 11 horizon maps in 0.0 s, drawn in 3.4 s -> target/s63/hills-b/g1-a-d0.6\eye-lowsun.png
+feet-lowsun: 8 horizon maps in 0.0 s, drawn in 3.6 s -> target/s63/hills-b/g1-a-d0.6\feet-lowsun.png
+wrote target/s63/hills-b/g1-a-d0.6 (one PNG per pose and stills.txt)
+=== hills-b g1=a d=1.0 07:47:24 cpu %
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+capture-stills: NOT a measurement (no gate, no timestamps, no log): 2560x1440, 3 poses, height field cpu-erosion-v1 over a 16384-cell bake
+coupled run ready after 0.9 s
+coarse horizon: 512 observer cells per face edge, 16 azimuths
+anchor: latitude 8.9720 longitude -16.2380 degrees, ground 3754.5 m
+SPIKE63 eye-midmorning: full 3.366 ms; shadows 0.476, ground detail 1.322, both 1.708; compiled out Some([2.889728, 2.043904, 1.657856]); spread Some([0.23039999999999994, 0.16691199999999995, 0.0419839999999998, 0.01126399999999994]); nodes 2658
+eye-midmorning: 11 horizon maps in 16.6 s, drawn in 43.3 s -> target/s63/hills-b/g1-a-d1.0\eye-midmorning.png
+SPIKE63 eye-lowsun: full 3.409 ms; shadows 0.508, ground detail 1.369, both 1.713; compiled out Some([2.900992, 2.039808, 1.695744]); spread Some([0.022528000000000326, 0.06655999999999995, 0.03276800000000035, 0.06758400000000009]); nodes 2658
+eye-lowsun: 11 horizon maps in 0.0 s, drawn in 22.4 s -> target/s63/hills-b/g1-a-d1.0\eye-lowsun.png
+SPIKE63 feet-lowsun: full 2.419 ms; shadows 0.255, ground detail 0.923, both 1.122; compiled out Some([2.163712, 1.496064, 1.296384]); spread Some([0.1658879999999998, 0.0460799999999999, 0.014335999999999904, 0.03993599999999997]); nodes 2273
+feet-lowsun: 8 horizon maps in 0.0 s, drawn in 22.9 s -> target/s63/hills-b/g1-a-d1.0\feet-lowsun.png
+wrote target/s63/hills-b/g1-a-d1.0 (one PNG per pose and stills.txt)
+=== hills-b g1=b d=0.6 07:48:57 cpu 1%
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+capture-stills: NOT a measurement (no gate, no timestamps, no log): 2560x1440, 3 poses, height field cpu-erosion-v1 over a 16384-cell bake
+coupled run ready after 0.9 s
+coarse horizon: 512 observer cells per face edge, 16 azimuths
+anchor: latitude 8.9720 longitude -16.2380 degrees, ground 3754.6 m
+eye-midmorning: 11 horizon maps in 16.6 s, drawn in 21.6 s -> target/s63/hills-b/g1-b-d0.6\eye-midmorning.png
+eye-lowsun: 11 horizon maps in 0.0 s, drawn in 3.0 s -> target/s63/hills-b/g1-b-d0.6\eye-lowsun.png
+feet-lowsun: 8 horizon maps in 0.0 s, drawn in 4.0 s -> target/s63/hills-b/g1-b-d0.6\feet-lowsun.png
+wrote target/s63/hills-b/g1-b-d0.6 (one PNG per pose and stills.txt)
+=== hills-b g1=b d=1.0 07:49:29 cpu 3%
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+capture-stills: NOT a measurement (no gate, no timestamps, no log): 2560x1440, 3 poses, height field cpu-erosion-v1 over a 16384-cell bake
+coupled run ready after 0.9 s
+coarse horizon: 512 observer cells per face edge, 16 azimuths
+anchor: latitude 8.9720 longitude -16.2380 degrees, ground 3754.6 m
+SPIKE63 eye-midmorning: full 3.424 ms; shadows 0.343, ground detail 1.286, both 1.694; compiled out Some([3.081216, 2.138112, 1.73056]); spread Some([0.2334719999999999, 0.07782400000000012, 0.031744000000000216, 0.03481599999999996]); nodes 2651
+eye-midmorning: 11 horizon maps in 17.0 s, drawn in 43.8 s -> target/s63/hills-b/g1-b-d1.0\eye-midmorning.png
+SPIKE63 eye-lowsun: full 3.459 ms; shadows 0.470, ground detail 1.350, both 1.743; compiled out Some([2.989056, 2.10944, 1.716224]); spread Some([0.0583680000000002, 0.0829439999999999, 0.052223999999999826, 0.01536000000000004]); nodes 2651
+eye-lowsun: 11 horizon maps in 0.0 s, drawn in 22.4 s -> target/s63/hills-b/g1-b-d1.0\eye-lowsun.png
+SPIKE63 feet-lowsun: full 2.489 ms; shadows 0.274, ground detail 0.940, both 1.152; compiled out Some([2.214912, 1.549312, 1.337344]); spread Some([0.04505599999999976, 0.04505600000000021, 0.012287999999999855, 0.0020479999999998277]); nodes 2270
+feet-lowsun: 8 horizon maps in 0.0 s, drawn in 22.9 s -> target/s63/hills-b/g1-b-d1.0\feet-lowsun.png
+wrote target/s63/hills-b/g1-b-d1.0 (one PNG per pose and stills.txt)
+=== river-r1 g1=none d=0.6 07:51:02 cpu 6%
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+capture-stills: NOT a measurement (no gate, no timestamps, no log): 2560x1440, 3 poses, height field cpu-erosion-v1 over a 16384-cell bake
+coupled run ready after 1.0 s
+coarse horizon: 512 observer cells per face edge, 16 azimuths
+anchor: latitude -11.1657 longitude 23.0493 degrees, ground 286.2 m
+eye-midmorning: 8 horizon maps in 12.9 s, drawn in 17.1 s -> target/s63/river-r1/g1-none-d0.6\eye-midmorning.png
+eye-lowsun: 8 horizon maps in 0.0 s, drawn in 3.0 s -> target/s63/river-r1/g1-none-d0.6\eye-lowsun.png
+feet-lowsun: 8 horizon maps in 0.0 s, drawn in 4.2 s -> target/s63/river-r1/g1-none-d0.6\feet-lowsun.png
+wrote target/s63/river-r1/g1-none-d0.6 (one PNG per pose and stills.txt)
+=== river-r1 g1=none d=1.0 07:51:31 cpu 5%
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+capture-stills: NOT a measurement (no gate, no timestamps, no log): 2560x1440, 3 poses, height field cpu-erosion-v1 over a 16384-cell bake
+coupled run ready after 0.9 s
+coarse horizon: 512 observer cells per face edge, 16 azimuths
+anchor: latitude -11.1657 longitude 23.0493 degrees, ground 286.2 m
+SPIKE63 eye-midmorning: full 2.855 ms; shadows 0.455, ground detail 1.157, both 1.437; compiled out Some([2.400256, 1.697792, 1.41824]); spread Some([0.31334399999999984, 0.1413120000000001, 0.08499199999999996, 0.014336000000000126]); nodes 2220
+eye-midmorning: 8 horizon maps in 13.4 s, drawn in 39.4 s -> target/s63/river-r1/g1-none-d1.0\eye-midmorning.png
+SPIKE63 eye-lowsun: full 2.915 ms; shadows 0.390, ground detail 1.183, both 1.507; compiled out Some([2.525184, 1.732608, 1.408]); spread Some([0.08704, 0.10547200000000023, 0.02047999999999983, 0.015359999999999818]); nodes 2220
+eye-lowsun: 8 horizon maps in 0.0 s, drawn in 21.4 s -> target/s63/river-r1/g1-none-d1.0\eye-lowsun.png
+SPIKE63 feet-lowsun: full 2.125 ms; shadows 0.257, ground detail 1.001, both 1.217; compiled out Some([1.867776, 1.123328, 0.908288]); spread Some([0.07782399999999967, 0.02252799999999988, 0.01945600000000014, 0.011264000000000052]); nodes 1218
+feet-lowsun: 8 horizon maps in 0.0 s, drawn in 20.9 s -> target/s63/river-r1/g1-none-d1.0\feet-lowsun.png
+wrote target/s63/river-r1/g1-none-d1.0 (one PNG per pose and stills.txt)
+=== river-r1 g1=a d=0.6 07:52:56 cpu 2%
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+capture-stills: NOT a measurement (no gate, no timestamps, no log): 2560x1440, 3 poses, height field cpu-erosion-v1 over a 16384-cell bake
+coupled run ready after 0.9 s
+coarse horizon: 512 observer cells per face edge, 16 azimuths
+anchor: latitude -11.1657 longitude 23.0493 degrees, ground 286.2 m
+eye-midmorning: 8 horizon maps in 13.6 s, drawn in 18.5 s -> target/s63/river-r1/g1-a-d0.6\eye-midmorning.png
+eye-lowsun: 8 horizon maps in 0.0 s, drawn in 3.6 s -> target/s63/river-r1/g1-a-d0.6\eye-lowsun.png
+feet-lowsun: 8 horizon maps in 0.0 s, drawn in 4.6 s -> target/s63/river-r1/g1-a-d0.6\feet-lowsun.png
+wrote target/s63/river-r1/g1-a-d0.6 (one PNG per pose and stills.txt)
+=== river-r1 g1=a d=1.0 07:53:27 cpu 25%
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+capture-stills: NOT a measurement (no gate, no timestamps, no log): 2560x1440, 3 poses, height field cpu-erosion-v1 over a 16384-cell bake
+coupled run ready after 1.2 s
+coarse horizon: 512 observer cells per face edge, 16 azimuths
+anchor: latitude -11.1657 longitude 23.0493 degrees, ground 286.2 m
+SPIKE63 eye-midmorning: full 2.860 ms; shadows 0.388, ground detail 1.184, both 1.489; compiled out Some([2.471936, 1.676288, 1.371136]); spread Some([0.301056, 0.2631680000000003, 0.11161599999999994, 0.06451200000000012]); nodes 2226
+eye-midmorning: 8 horizon maps in 20.2 s, drawn in 46.6 s -> target/s63/river-r1/g1-a-d1.0\eye-midmorning.png
+SPIKE63 eye-lowsun: full 2.893 ms; shadows 0.434, ground detail 1.215, both 1.509; compiled out Some([2.458624, 1.677312, 1.383424]); spread Some([0.07065600000000005, 0.06758400000000009, 0.014335999999999904, 0.01740800000000009]); nodes 2226
+eye-lowsun: 8 horizon maps in 0.0 s, drawn in 21.4 s -> target/s63/river-r1/g1-a-d1.0\eye-lowsun.png
+SPIKE63 feet-lowsun: full 2.093 ms; shadows 0.231, ground detail 0.955, both 1.194; compiled out Some([1.861632, 1.137664, 0.899072]); spread Some([0.06143999999999972, 0.12390400000000001, 0.014335999999999904, 0.01740799999999998]); nodes 1231
+feet-lowsun: 8 horizon maps in 0.0 s, drawn in 21.0 s -> target/s63/river-r1/g1-a-d1.0\feet-lowsun.png
+wrote target/s63/river-r1/g1-a-d1.0 (one PNG per pose and stills.txt)
+=== river-r1 g1=b d=0.6 07:55:01 cpu 3%
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+capture-stills: NOT a measurement (no gate, no timestamps, no log): 2560x1440, 3 poses, height field cpu-erosion-v1 over a 16384-cell bake
+coupled run ready after 0.9 s
+coarse horizon: 512 observer cells per face edge, 16 azimuths
+anchor: latitude -11.1657 longitude 23.0493 degrees, ground 286.2 m
+eye-midmorning: 8 horizon maps in 13.8 s, drawn in 19.3 s -> target/s63/river-r1/g1-b-d0.6\eye-midmorning.png
+eye-lowsun: 8 horizon maps in 0.0 s, drawn in 2.1 s -> target/s63/river-r1/g1-b-d0.6\eye-lowsun.png
+feet-lowsun: 8 horizon maps in 0.0 s, drawn in 3.0 s -> target/s63/river-r1/g1-b-d0.6\feet-lowsun.png
+wrote target/s63/river-r1/g1-b-d0.6 (one PNG per pose and stills.txt)
+=== river-r1 g1=b d=1.0 07:55:29 cpu 1%
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+capture-stills: NOT a measurement (no gate, no timestamps, no log): 2560x1440, 3 poses, height field cpu-erosion-v1 over a 16384-cell bake
+coupled run ready after 0.9 s
+coarse horizon: 512 observer cells per face edge, 16 azimuths
+anchor: latitude -11.1657 longitude 23.0493 degrees, ground 286.2 m
+SPIKE63 eye-midmorning: full 2.827 ms; shadows 0.385, ground detail 1.121, both 1.451; compiled out Some([2.44224, 1.705984, 1.376256]); spread Some([0.038911999999999836, 0.006143999999999927, 0.060416000000000025, 0.01945600000000014]); nodes 2223
+eye-midmorning: 8 horizon maps in 14.3 s, drawn in 39.7 s -> target/s63/river-r1/g1-b-d1.0\eye-midmorning.png
+SPIKE63 eye-lowsun: full 2.841 ms; shadows 0.387, ground detail 1.144, both 1.455; compiled out Some([2.453504, 1.696768, 1.385472]); spread Some([0.18022399999999994, 0.023552000000000017, 0.033792000000000044, 0.010240000000000027]); nodes 2223
+eye-lowsun: 8 horizon maps in 0.0 s, drawn in 21.5 s -> target/s63/river-r1/g1-b-d1.0\eye-lowsun.png
+SPIKE63 feet-lowsun: full 2.118 ms; shadows 0.270, ground detail 0.984, both 1.194; compiled out Some([1.847296, 1.133568, 0.923648]); spread Some([0.02457599999999971, 0.14438400000000007, 0.07884800000000003, 0.2559999999999999]); nodes 1225
+feet-lowsun: 8 horizon maps in 0.0 s, drawn in 24.7 s -> target/s63/river-r1/g1-b-d1.0\feet-lowsun.png
+wrote target/s63/river-r1/g1-b-d1.0 (one PNG per pose and stills.txt)
+=== alps g1=none d=0.6 07:57:00 cpu 0%
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+capture-stills: NOT a measurement (no gate, no timestamps, no log): 2560x1440, 3 poses, height field cpu-erosion-v1 over a 16384-cell bake
+coupled run ready after 1.6 s
+coarse horizon: 512 observer cells per face edge, 16 azimuths
+anchor: latitude 11.5000 longitude -18.5000 degrees, ground 1316.3 m
+eye-midmorning: 9 horizon maps in 55.6 s, drawn in 63.4 s -> target/s63/alps/g1-none-d0.6\eye-midmorning.png
+eye-lowsun: 9 horizon maps in 0.0 s, drawn in 2.8 s -> target/s63/alps/g1-none-d0.6\eye-lowsun.png
+feet-lowsun: 9 horizon maps in 0.0 s, drawn in 9.9 s -> target/s63/alps/g1-none-d0.6\feet-lowsun.png
+wrote target/s63/alps/g1-none-d0.6 (one PNG per pose and stills.txt)
+=== alps g1=none d=1.0 07:58:43 cpu 5%
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+capture-stills: NOT a measurement (no gate, no timestamps, no log): 2560x1440, 3 poses, height field cpu-erosion-v1 over a 16384-cell bake
+coupled run ready after 1.4 s
+coarse horizon: 512 observer cells per face edge, 16 azimuths
+anchor: latitude 11.5000 longitude -18.5000 degrees, ground 1316.3 m
+SPIKE63 eye-midmorning: full 2.540 ms; shadows 0.347, ground detail 0.806, both 1.068; compiled out Some([2.192384, 1.733632, 1.471488]); spread Some([0.23244799999999977, 0.24371199999999993, 0.12595200000000006, 0.41779199999999994]); nodes 2294
+eye-midmorning: 9 horizon maps in 11.8 s, drawn in 44.0 s -> target/s63/alps/g1-none-d1.0\eye-midmorning.png
+SPIKE63 eye-lowsun: full 2.787 ms; shadows 0.255, ground detail 1.047, both 1.341; compiled out Some([2.532352, 1.7408, 1.445888]); spread Some([0.12697599999999998, 0.14745600000000003, 0.03686400000000001, 0.031743999999999994]); nodes 2294
+eye-lowsun: 9 horizon maps in 0.0 s, drawn in 21.9 s -> target/s63/alps/g1-none-d1.0\eye-lowsun.png
+SPIKE63 feet-lowsun: full 2.214 ms; shadows 0.247, ground detail 0.939, both 1.164; compiled out Some([1.967104, 1.27488, 1.0496]); spread Some([0.0962559999999999, 0.04198400000000024, 0.012287999999999855, 0.01331199999999999]); nodes 1671
+feet-lowsun: 9 horizon maps in 0.0 s, drawn in 21.6 s -> target/s63/alps/g1-none-d1.0\feet-lowsun.png
+wrote target/s63/alps/g1-none-d1.0 (one PNG per pose and stills.txt)
+=== alps g1=a d=0.6 08:00:16 cpu 3%
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+capture-stills: NOT a measurement (no gate, no timestamps, no log): 2560x1440, 3 poses, height field cpu-erosion-v1 over a 16384-cell bake
+coupled run ready after 0.9 s
+coarse horizon: 512 observer cells per face edge, 16 azimuths
+anchor: latitude 11.5000 longitude -18.5000 degrees, ground 1316.3 m
+eye-midmorning: 9 horizon maps in 12.9 s, drawn in 17.8 s -> target/s63/alps/g1-a-d0.6\eye-midmorning.png
+eye-lowsun: 9 horizon maps in 0.0 s, drawn in 2.8 s -> target/s63/alps/g1-a-d0.6\eye-lowsun.png
+feet-lowsun: 9 horizon maps in 0.0 s, drawn in 3.7 s -> target/s63/alps/g1-a-d0.6\feet-lowsun.png
+wrote target/s63/alps/g1-a-d0.6 (one PNG per pose and stills.txt)
+=== alps g1=a d=1.0 08:00:44 cpu 6%
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+capture-stills: NOT a measurement (no gate, no timestamps, no log): 2560x1440, 3 poses, height field cpu-erosion-v1 over a 16384-cell bake
+coupled run ready after 0.9 s
+coarse horizon: 512 observer cells per face edge, 16 azimuths
+anchor: latitude 11.5000 longitude -18.5000 degrees, ground 1316.3 m
+SPIKE63 eye-midmorning: full 2.849 ms; shadows 0.332, ground detail 1.009, both 1.368; compiled out Some([2.516992, 1.840128, 1.480704]); spread Some([0.3665919999999998, 0.07270399999999988, 0.047104000000000035, 0.13414400000000004]); nodes 2316
+eye-midmorning: 9 horizon maps in 13.1 s, drawn in 40.1 s -> target/s63/alps/g1-a-d1.0\eye-midmorning.png
+SPIKE63 eye-lowsun: full 2.881 ms; shadows 0.343, ground detail 1.125, both 1.436; compiled out Some([2.537472, 1.755136, 1.444864]); spread Some([0.22528000000000015, 0.052223999999999826, 0.008191999999999977, 0.023552000000000017]); nodes 2316
+eye-lowsun: 9 horizon maps in 0.0 s, drawn in 22.3 s -> target/s63/alps/g1-a-d1.0\eye-lowsun.png
+SPIKE63 feet-lowsun: full 2.282 ms; shadows 0.317, ground detail 0.989, both 1.182; compiled out Some([1.965056, 1.293312, 1.1008]); spread Some([0.24371199999999993, 0.08089599999999986, 0.04403200000000007, 0.04608000000000012]); nodes 1699
+feet-lowsun: 9 horizon maps in 0.0 s, drawn in 22.1 s -> target/s63/alps/g1-a-d1.0\feet-lowsun.png
+wrote target/s63/alps/g1-a-d1.0 (one PNG per pose and stills.txt)
+=== alps g1=b d=0.6 08:02:12 cpu 0%
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+capture-stills: NOT a measurement (no gate, no timestamps, no log): 2560x1440, 3 poses, height field cpu-erosion-v1 over a 16384-cell bake
+coupled run ready after 1.0 s
+coarse horizon: 512 observer cells per face edge, 16 azimuths
+anchor: latitude 11.5000 longitude -18.5000 degrees, ground 1316.3 m
+eye-midmorning: 9 horizon maps in 13.4 s, drawn in 18.4 s -> target/s63/alps/g1-b-d0.6\eye-midmorning.png
+eye-lowsun: 9 horizon maps in 0.0 s, drawn in 3.1 s -> target/s63/alps/g1-b-d0.6\eye-lowsun.png
+feet-lowsun: 9 horizon maps in 0.0 s, drawn in 4.2 s -> target/s63/alps/g1-b-d0.6\feet-lowsun.png
+wrote target/s63/alps/g1-b-d0.6 (one PNG per pose and stills.txt)
+=== alps g1=b d=1.0 08:02:43 cpu 5%
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+capture-stills: NOT a measurement (no gate, no timestamps, no log): 2560x1440, 3 poses, height field cpu-erosion-v1 over a 16384-cell bake
+coupled run ready after 0.9 s
+coarse horizon: 512 observer cells per face edge, 16 azimuths
+anchor: latitude 11.5000 longitude -18.5000 degrees, ground 1316.3 m
+SPIKE63 eye-midmorning: full 2.910 ms; shadows 0.410, ground detail 1.092, both 1.455; compiled out Some([2.500608, 1.818624, 1.455104]); spread Some([0.04915199999999986, 0.100352, 0.10547200000000001, 0.0040960000000000996]); nodes 2309
+eye-midmorning: 9 horizon maps in 13.4 s, drawn in 40.1 s -> target/s63/alps/g1-b-d1.0\eye-midmorning.png
+SPIKE63 eye-lowsun: full 2.900 ms; shadows 0.387, ground detail 1.169, both 1.480; compiled out Some([2.512896, 1.73056, 1.420288]); spread Some([0.16486400000000012, 0.008192000000000199, 0.09728000000000003, 0.027647999999999895]); nodes 2309
+eye-lowsun: 9 horizon maps in 0.0 s, drawn in 22.3 s -> target/s63/alps/g1-b-d1.0\eye-lowsun.png
+SPIKE63 feet-lowsun: full 2.221 ms; shadows 0.198, ground detail 0.888, both 1.144; compiled out Some([2.023424, 1.333248, 1.077248]); spread Some([0.20582400000000023, 0.28159999999999985, 0.33484800000000003, 0.30515199999999987]); nodes 1689
+feet-lowsun: 9 horizon maps in 0.0 s, drawn in 23.5 s -> target/s63/alps/g1-b-d1.0\feet-lowsun.png
+wrote target/s63/alps/g1-b-d1.0 (one PNG per pose and stills.txt)
+=== done 08:04:12
+=== hills-b g1=none d=0.0 08:18:45 cpu 7%
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+capture-stills: NOT a measurement (no gate, no timestamps, no log): 2560x1440, 3 poses, height field cpu-erosion-v1 over a 16384-cell bake
+coupled run ready after 0.8 s
+coarse horizon: 512 observer cells per face edge, 16 azimuths
+anchor: latitude 8.9720 longitude -16.2380 degrees, ground 3754.6 m
+eye-midmorning: 11 horizon maps in 14.0 s, drawn in 20.1 s -> target/s63/hills-b/g1-none-d0.0\eye-midmorning.png
+eye-lowsun: 11 horizon maps in 0.0 s, drawn in 1.9 s -> target/s63/hills-b/g1-none-d0.0\eye-lowsun.png
+feet-lowsun: 8 horizon maps in 0.0 s, drawn in 1.8 s -> target/s63/hills-b/g1-none-d0.0\feet-lowsun.png
+wrote target/s63/hills-b/g1-none-d0.0 (one PNG per pose and stills.txt)
+=== hills-b g1=a d=0.0 08:19:12 cpu 10%
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+capture-stills: NOT a measurement (no gate, no timestamps, no log): 2560x1440, 3 poses, height field cpu-erosion-v1 over a 16384-cell bake
+coupled run ready after 0.8 s
+coarse horizon: 512 observer cells per face edge, 16 azimuths
+anchor: latitude 8.9720 longitude -16.2380 degrees, ground 3754.5 m
+eye-midmorning: 11 horizon maps in 16.6 s, drawn in 22.3 s -> target/s63/hills-b/g1-a-d0.0\eye-midmorning.png
+eye-lowsun: 11 horizon maps in 0.0 s, drawn in 2.4 s -> target/s63/hills-b/g1-a-d0.0\eye-lowsun.png
+feet-lowsun: 8 horizon maps in 0.0 s, drawn in 2.4 s -> target/s63/hills-b/g1-a-d0.0\feet-lowsun.png
+wrote target/s63/hills-b/g1-a-d0.0 (one PNG per pose and stills.txt)
+=== hills-b g1=b d=0.0 08:19:43 cpu 3%
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+capture-stills: NOT a measurement (no gate, no timestamps, no log): 2560x1440, 3 poses, height field cpu-erosion-v1 over a 16384-cell bake
+coupled run ready after 0.8 s
+coarse horizon: 512 observer cells per face edge, 16 azimuths
+anchor: latitude 8.9720 longitude -16.2380 degrees, ground 3754.6 m
+eye-midmorning: 11 horizon maps in 15.6 s, drawn in 21.6 s -> target/s63/hills-b/g1-b-d0.0\eye-midmorning.png
+eye-lowsun: 11 horizon maps in 0.0 s, drawn in 2.5 s -> target/s63/hills-b/g1-b-d0.0\eye-lowsun.png
+feet-lowsun: 8 horizon maps in 0.0 s, drawn in 2.5 s -> target/s63/hills-b/g1-b-d0.0\feet-lowsun.png
+wrote target/s63/hills-b/g1-b-d0.0 (one PNG per pose and stills.txt)
