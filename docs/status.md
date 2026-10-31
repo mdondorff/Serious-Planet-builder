@@ -10,6 +10,7 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 Dormant (no near trigger; not asked now):
 - **ADR 0045** (bodies, bake resolution, storage budget): proposed. Trigger: multi-body work.
 - **Region keep-inside** (`openspec/changes/region-mode1`): soft influence for Cities, not a hard clip (owner, 2026-10-21, Q8). Trigger: Cities.
+- **Global authoring preview** (owner, 2026-10-31): a coarse whole-planet preview of relief and landforms from the inputs, before the bake, as the step before detailed editing; not runtime. SPIKE-69 rates its k-sources for this. Trigger: after M9's bake, or when SPIKE-69 shows a pre-bake source.
 - **Coarse-first refinement of an edit** (owner, 2026-10-20): parked. Trigger: a brush case of the edit-latency scene that misses its budget.
 
 ## Away-week queue (Option B, `docs/briefings/week-2026-11-02.md`; started 2026-10-30)
