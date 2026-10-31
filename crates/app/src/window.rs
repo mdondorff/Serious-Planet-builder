@@ -307,7 +307,7 @@ struct Running {
     last_counts: planet_frame::managed::FrameCounts,
     /// What the horizon step did, per feature (TEST-058), and the horizon update of the last step (its maps are uploaded in the horizon frame).
     chunk_counters: crate::horizonstep::FeatureCounters,
-    horizon_update: planet_streaming::chunks::HorizonUpdate,
+    horizon_update: planet_streaming::horizonjobs::HorizonUpdate,
     last_ms: Option<u64>,
     last_gpu_sample: Instant,
     gpu_ms: Option<f64>,

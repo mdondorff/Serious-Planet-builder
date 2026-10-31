@@ -350,7 +350,7 @@ fn tile_generation_reads_the_height_at_its_own_level() {
     );
 }
 
-// spec: STRM-041
+// spec: GEN-037
 #[test]
 fn a_chunk_result_round_trips_through_bytes_and_a_damaged_payload_is_refused() {
     use planet_generators::chunkfield::ChunkResult;

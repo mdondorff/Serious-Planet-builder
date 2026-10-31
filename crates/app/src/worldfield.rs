@@ -193,7 +193,7 @@ pub struct WorldTerrain {
     /// Cells per chunk edge of the horizon lattice (0: the default of [`crate::horizonworld::HORIZON_CELL_M`]); a test sets a coarse one to stay quick.
     pub(crate) horizon_cells: std::sync::atomic::AtomicU32,
     /// The horizon jobs of the chunks (M8-5, STRM-049): none until `enable_horizon` (in `horizonworld`).
-    pub(crate) horizon: std::sync::RwLock<Option<Arc<planet_streaming::chunks::HorizonJobs>>>,
+    pub(crate) horizon: std::sync::RwLock<Option<Arc<planet_streaming::horizonjobs::HorizonJobs>>>,
     /// The queue of the height warm-up thread (made on the first [`WorldTerrain::warm_heights`]) and the batches it has read.
     warm: std::sync::Mutex<Option<std::sync::mpsc::SyncSender<Vec<planet_core::Vec3>>>>,
     warmed: std::sync::atomic::AtomicU64,

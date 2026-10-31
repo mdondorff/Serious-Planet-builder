@@ -804,7 +804,7 @@ Source: ADR 0077 points 3 and 4, GEN-004, GEN-002, GEN-003, CON-14, M8 plan crit
 - **THEN** its hash is identical and equals the recorded known answer, which CI checks on Windows and Linux
 
 ### Requirement: GEN-039 The chunk stage's position per layer
-A layer SHALL have a `chunk_stage` setting, `Under` by default for a world with a chunk stage: the chain is base, stamps, chunk, and an edit changes the version of the chunks whose read set (GEN-081) it touches (GEN-082). `OnTop` (base, chunk, stamps) SHALL stay representable in the key; an edit then never invalidates a chunk.
+A layer SHALL have a `chunk_stage` setting, `Under` by default for a world with a chunk stage: the chain is base, stamps, chunk; `OnTop` (base, chunk, stamps) SHALL stay representable in the key.
 
 Verify: A
 Status: active
@@ -1293,28 +1293,6 @@ Source: look review 2b (river-r1 sunset ripple), GEN-060, GEN-049
 #### Scenario: Two corridors and two halos
 - **WHEN** two corridors off the grid axes that run towards each other are painted over a chunk with a halo of 30 rings and of 45 rings
 - **THEN** every core cell has the same painted height, bit for bit, in both
-
-### Requirement: GEN-081 The read set of a chunk
-`chunk_read_set` SHALL return the discs outside which no item can change a chunk's bits: the chunk's region (its square plus the halo of GEN-049) and the routed network it reads, that is the segments the pruning of GEN-078 keeps (one `region_segments`, one `segments_reaching`) and those upstream of them along the main stem up to the law's window (one more segment when the corridor is smoothed, GEN-084), each widened by `routing_reach_m` along its chord. The set SHALL be a function of the chunk key, the global run and the stage parameters only, never of routed paths or items, so it cannot depend on the edits it selects.
-
-Verify: A
-Status: active
-Source: m8-chunk-version, GEN-049, GEN-059, GEN-078
-
-#### Scenario: The set covers what the network reads
-- **WHEN** an item's reach touches only the routing reach of a kept segment, outside the halo
-- **THEN** it is inside the read set and the chunk's bits change with it; an item outside every disc changes no bit, and the set takes no item as input
-
-### Requirement: GEN-082 The version of a chunk
-A chunk's version SHALL be the hash of the items of the `Under` chain whose reach touches its read set (GEN-081), the empty hash for none. It SHALL be part of the chunk's disk key. A chunk re-solved after an edit SHALL equal, bit for bit, a cold solve of the same version (the solve itself does not depend on the thread count, GEN-077).
-
-Verify: A
-Status: active
-Source: m8-chunk-version, GEN-039, CON-14
-
-#### Scenario: A re-solve equals a cold solve
-- **WHEN** a chunk is solved, a hill is added inside the halo, and the chunk is solved again
-- **THEN** its version differs, and its bits equal those of a cold solve of the new definition; with the hill outside the read set the version and bits are those of the first solve
 
 ### Requirement: GEN-084 The routed corridor is smoothed
 The routed polyline of a coarse segment SHALL be smoothed: each of its points moves to the average of the chain formed by that polyline with the polyline of the segment it continues from and the one it continues into, over a tent of half width `smooth_m` (256 m) along the path, by at most `smooth_max_m` (64 m). A river that begins, ends or meets another at a node keeps that node: the move fades to zero over `smooth_m` towards it. The smoothed polyline SHALL be a function of the segment alone (GEN-067), and the smoothing's bound SHALL be part of the routing's reach (GEN-078). Both constants are part of the definition hash.

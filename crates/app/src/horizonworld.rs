@@ -1,4 +1,4 @@
-//! The chunk horizon in a world (M8-5, STRM-049): the baker that gives `streaming::chunks::HorizonJobs` its maps, and the world's methods to
+//! The chunk horizon in a world (M8-5, STRM-049): the baker that gives `streaming::horizonjobs::HorizonJobs` its maps, and the world's methods to
 //! enable the jobs, run a frame of them and read a map. Additive to the chunk wiring of `worldfield` (one field, no change to its methods).
 //!
 //! A chunk's horizon is baked from the world's own field (base, stamps and the changes of the chunks that are ready), sampled at the cell
@@ -17,7 +17,7 @@ use planet_generators::coarsehorizon::{coarse_horizon_range, CoarseParams};
 use planet_generators::global::LatticeSource;
 use planet_generators::horizon::{bake_horizon, halo_texels, HeightRaster, HorizonParams};
 use planet_generators::stamp::STAGE_HALO;
-use planet_streaming::chunks::{HorizonBaker, HorizonConfig, HorizonJobs, HorizonStats, HorizonUpdate};
+use planet_streaming::horizonjobs::{HorizonBaker, HorizonConfig, HorizonJobs, HorizonStats, HorizonUpdate};
 use planet_streaming::{Clock, Spawner};
 use planet_world_def::WorldDefinition;
 
@@ -505,7 +505,7 @@ impl WorldTerrain {
         threads: usize,
     ) -> Result<(), String> {
         // Every chunk is ready with no change: the maps are baked from the base terrain and the stamps (STRM-064).
-        let chunks: Arc<dyn planet_streaming::chunks::ChunkSource> = Arc::new(planet_streaming::chunks::BaseTerrain);
+        let chunks: Arc<dyn planet_streaming::horizonjobs::ChunkSource> = Arc::new(planet_streaming::horizonjobs::BaseTerrain);
         let lat = self.horizon_lattice().ok_or("the world has no chunk lattice")?;
         let baker = Arc::new(ChunkHorizonBaker::new(self, lat, params, threads));
         // The march must be one the bake accepts, and its halo must fit in the ring of neighbours the state word reads (a chunk edge): refused
