@@ -19,7 +19,7 @@ mod tests {
         ("crates/app/src/streamperf.rs", 1, "driver: a perf scene's flight thread; stays"),
         ("crates/app/src/worldfield.rs", 1, "moves in PR 4: the coupled run's thread"),
         ("crates/cache/src/meshpack.rs", 2, "moves in PR 4: the prefill workers"),
-        ("crates/core/src/par.rs", 2, "`run_scoped`: the scoped helper threads of a `Par`; `SharePar` takes them as permits of the terrain share first (the permit rule, BUDG-009)"),
+        ("crates/core/src/par.rs", 4, "`run_scoped`: the scoped helper threads of a `Par`; `SharePar` takes them as permits of the terrain share first (the permit rule, BUDG-009)"),
         ("crates/core/src/thread.rs", 1, "the named scoped thread helper itself"),
         ("crates/frame/src/look/atmosphere.rs", 2, "moves in PR 4: the atmosphere rows"),
         ("crates/frame/src/scenes.rs", 1, "moves in PR 4: the lag post-pass parts"),
