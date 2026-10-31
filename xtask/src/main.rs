@@ -16,6 +16,7 @@ mod speclint;
 mod storecmd;
 mod testcmd;
 mod testlog;
+mod threadscan;
 mod util;
 
 use std::process::ExitCode;

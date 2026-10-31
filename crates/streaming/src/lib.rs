@@ -19,6 +19,7 @@
 
 pub mod budget;
 pub mod chunks;
+pub mod jobs;
 mod layer;
 pub mod manager;
 pub mod priority;

@@ -19,3 +19,9 @@
 ## Open
 - Requirement IDs (planner): the pool API, the class order, the share ceiling test.
 - Whether the plan job's scoped workers count against the terrain share or the frame-critical class (the plan is frame-critical: the draw waits for it).
+
+## Decisions (opus-planner, 2026-10-31)
+1. The plan job's fan-out counts against terrain's share, at the highest priority within it (`Class::FrameCritical`); it is not a share of its own.
+2. The first PR adds the job system as a module (`planet-streaming::jobs`: `JobSystem`, `Share`, `Class`) with its tests on fake work and the spawn scan; no pool moves in it. The tile pool moves in the next PR, after B6 PR 4 (streaming); generators and frame pools after B6 PR 5.
+3. `fan_out` takes a `'static` closure (an `Arc<dyn Fn(usize) -> R>`): safe code, no lifetime erasure. A scoped site that borrows large arrays wraps them in `Arc` or, if that costs too much, PR 3 adds a scoped variant and says so.
+4. The calling thread of a fan-out works on the indices and is not counted in the share's ceiling; the helpers are.
