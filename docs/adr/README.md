@@ -97,3 +97,4 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0085 | [Shadows from a height clipmap march, objects by cascades](0085-shadows-from-a-height-clipmap-march-objects-by-cascades.md) | accepted | replaces the horizon-map shadows (GEN-044/045, REND-038); SPIKE-56 |
 | 0086 | [Chunk stage removed](0086-chunk-stage-removed.md) | accepted (owner) | supersedes 0077 (except the global coupled run), 0081, 0082 and 0084 points 3 and 4 |
 | 0087 | [Perf verdicts under load, windows only for close calls](0087-perf-verdicts-under-load-windows-only-for-close-calls.md) | accepted (opus-planner, delegated) | amends 0020 in part; open: the calibration limits (0065) refuse a quiet machine; SPIKE-58 |
+| 0088 | [The M9 terrain bake](0088-the-m9-terrain-bake.md) | proposed | baked relief driver and ring mean, a transient carve with breach, thermal and deposition as a separate erosion layer; SPIKE-61 to 66; the owner decides |
