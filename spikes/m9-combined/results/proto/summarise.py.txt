@@ -1,0 +1,15 @@
+# SPIKE-80: the run log as ratios generator / real with distances (python -I summarise.py <run.log>).
+import sys, re
+real = {}
+for l in open(sys.argv[1], encoding='utf-8', errors='replace'):
+    m = re.match(r'S80 (\S+) real \| flat ([\d.]+)%.*slope=([\d.]+).*relief_1km=([\d.]+) relief_5km=([\d.]+)', l)
+    if m:
+        real[m[1]] = (float(m[3]), float(m[4]), float(m[5]), m[2])
+        print(m[1], 'REAL slope %.2f r1 %.1f r5 %.0f flat %s' % real[m[1]])
+        continue
+    m = re.match(r'S80 (\S+) (site\d) (\S+) \| flat ([\d.]+)% \| classes L1 ([\d.]+).*slope=([\d.]+)/([\d.-]+).*relief_1km=([\d.]+)/([\d.-]+) relief_5km=([\d.]+)/([\d.-]+)', l)
+    if m:
+        t, rs = m[1], real[m[1]]
+        print('  %s %s %-24s slope %.2f (%s) r1 %.2f (%s) r5 %.2f (%s) flat %s%% L1 %s' % (t, m[2], m[3], float(m[6]) / rs[0], m[7], float(m[8]) / rs[1], m[9], float(m[10]) / rs[2], m[11], m[4], m[5]))
+    if l.startswith('S80SITE'):
+        print('   ', l.strip()[8:200])
