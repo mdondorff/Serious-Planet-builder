@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: REND-046 The frame's height clipmap plan
-`planet_frame::clipmap` SHALL decide, GPU-free, the height clipmap of a frame: `CLIPMAP_LEVELS` nested square levels of `CLIPMAP_TEXELS`^2 texels around the anchor (the camera's ground point in its tangent frame, kept in f64), each level's texel twice the last's, each centre snapped to its own texel grid and addressed toroidally; per level the resident tiles of R that cover it, the finest available per region; per tile an affine map from clipmap texels to the tile's `(u, v)` and the coefficients `c0 + c1 x + c2 y + c3 (x^2 + y^2)` of the sphere's drop in the anchor frame, both fitted in f64 and handed over tile-local f32 (CON-11); and the dirty rectangles of the frame (tiles landed, evicted to an ancestor or refreshed, strips uncovered by a scroll, the reach of each preview stamp).
+`planet_frame::clipmap` SHALL decide, GPU-free, the height clipmap of a frame: `CLIPMAP_LEVELS` nested square levels of `CLIPMAP_TEXELS`^2 texels around the anchor (the camera's ground point in its tangent frame, kept in f64), each level's texel twice the last's, each centre snapped to its own texel grid and addressed toroidally; per level the resident tiles of R that cover it, the finest available per region; per tile one or more blocks (a tile whose footprint is too curved or too large for one map is split), each with an affine map from clipmap texels to the tile's `(u, v)` and the coefficients `c0 + c1 x + c2 y + c3 (x^2 + y^2)` of the sphere's drop in the anchor frame, both fitted in f64 and handed over tile-local f32 (CON-11); and the dirty rectangles of the frame (tiles landed, evicted to an ancestor or refreshed, strips uncovered by a scroll, the reach of each preview stamp).
 
 Verify: A
 Status: planned
@@ -9,7 +9,7 @@ Source: ADR 0085 points 2 and 3, SPIKE-56 finding 2 and P2, CON-03, CON-11, STRM
 
 #### Scenario: Mapping and drop
 - **WHEN** the plan is made for a camera over a face corner and over a face centre
-- **THEN** every tile's affine map lands within 1/8 texel of the f64 projection at its corners and centre, and the drop coefficients reproduce the f64 sphere's drop within 1 mm over the tile
+- **THEN** every block's affine map lands within 1/8 texel of the f64 projection at its corners and centre, and its drop coefficients reproduce the f64 sphere's drop within the larger of 1 mm and a 1024th of the level's texel, plus the f32 rounding of `c0`, and every texel of every window where R holds a tile is covered by a block of the finest resident tile no finer than the level's texel
 
 #### Scenario: Scroll
 - **WHEN** the camera moves by three texels of level 0 and by half of level 0's extent

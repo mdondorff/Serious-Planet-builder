@@ -1,5 +1,7 @@
 #[path = "atmosphere.rs"]
 mod atmosphere;
+#[path = "clipmap.rs"]
+mod clipmap;
 #[path = "coarsening_loop.rs"]
 mod coarsening_loop;
 #[path = "compact_pool.rs"]
