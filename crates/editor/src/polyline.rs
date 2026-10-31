@@ -55,7 +55,7 @@ impl GeoPoint {
         Vec3::from_lat_lon(self.lat_deg * DEG_TO_RAD, self.lon_deg * DEG_TO_RAD)
     }
 
-    /// The point a unit (or any non-zero) direction looks at.
+    /// The point a unit (or any non-zero) direction looks at. Kept as is: hypot vs the core helper's sqrt could move stored item points (a data change).
     pub fn of_dir(d: Vec3) -> GeoPoint {
         let rho = (d.x * d.x + d.y * d.y).sqrt();
         GeoPoint { lat_deg: libm::atan2(d.z, rho) * RAD_TO_DEG, lon_deg: libm::atan2(d.y, d.x) * RAD_TO_DEG }
