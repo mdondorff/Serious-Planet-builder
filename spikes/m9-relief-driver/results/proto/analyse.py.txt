@@ -1,0 +1,173 @@
+# SPIKE-69: relief-driver sources. Each source is a score field; one monotone curve per source (k at land-weighted quantiles of its score),
+# fitted so the land shares of the relief classes match Earth's; then where the relief goes: the four sites, continuity, maps.
+# Usage: python -I analyse2.py <map13.f32> <sites.txt> <out dir>
+import sys, json, re, itertools
+import numpy as np
+from PIL import Image, ImageDraw
+
+mp, sites_path, out = sys.argv[1], sys.argv[2], sys.argv[3]
+W, H = 720, 360
+a = np.fromfile(mp, dtype='<f4').reshape(H, W, 13).astype(np.float64)
+lat, lon, cont, zone, inland, ridge, hill, e, s50, s200, r5, hc, r14 = [a[..., i] for i in range(13)]
+land = np.isfinite(r14) & np.isfinite(r5)
+# Earth's figures leave out Antarctica (and Greenland): the polar land of the generator is left out of the shares and the fit.
+land &= np.abs(lat) < 60.0
+wl = (np.cos(np.radians(lat)) * land)[land]
+
+# Classes (Kapos et al. 2000's local elevation range within 7 km; mountains also at 2,500 m and above): relief bounds in m.
+B = [100.0, 300.0, 1000.0]
+NAMES = ['plains', 'hills', 'low mountains', 'high mountains']
+EARTH = np.array([0.61, 0.14, 0.25])  # plains, hills, mountains (low + high)
+
+def smooth(x, a, b):
+    t = np.clip((x - a) / (b - a), 0, 1)
+    return t * t * (3 - 2 * t)
+
+def taper(e):
+    return smooth(e, 0.0, 400.0)
+
+def classes(k):
+    rel = k * r14
+    c = np.digitize(rel, B)
+    c = np.where(e >= 2500.0, np.maximum(c, 2), c)
+    return c
+
+def shares(k):
+    c = classes(k)[land]
+    return np.array([wl[c == i].sum() for i in range(4)]) / wl.sum()
+
+# Value-noise fBm on the sphere (a stand-in for a new generator layer).
+def vnoise(p, freq, seed):
+    q = p * freq
+    i = np.floor(q).astype(np.int64)
+    f = q - i
+    t = f * f * (3 - 2 * f)
+    def h(x, y, z):
+        v = (x * 73856093) ^ (y * 19349663) ^ (z * 83492791) ^ seed
+        v = (v ^ (v >> 13)) * 1274126177
+        v = v ^ (v >> 16)
+        return (v & 0xffff) / 32767.5 - 1.0
+    acc = 0
+    for dx, dy, dz in itertools.product((0, 1), repeat=3):
+        wx = t[..., 0] if dx else 1 - t[..., 0]
+        wy = t[..., 1] if dy else 1 - t[..., 1]
+        wz = t[..., 2] if dz else 1 - t[..., 2]
+        acc = acc + wx * wy * wz * h(i[..., 0] + dx, i[..., 1] + dy, i[..., 2] + dz)
+    return acc
+
+def fbm(p, freq, oct, seed):
+    s, amp, n = 0, 1.0, 0
+    for o in range(oct):
+        s = s + amp * vnoise(p, freq * 2 ** o, seed + o)
+        n += amp
+        amp *= 0.5
+    return s / n
+
+def unit(la, lo):
+    la, lo = np.radians(la), np.radians(lo)
+    return np.stack([np.cos(la) * np.cos(lo), np.cos(la) * np.sin(lo), np.sin(la)], -1)
+
+P = unit(lat, lon)
+u = 0.5 + 0.5 * fbm(P, 2.2, 4, 1234)
+SCORES = {
+    'landform today (zone x inland)': lambda z, i, r, s, uu: z * i,
+    '(a) structure (zone, ridge)': lambda z, i, r, s, uu: z * (0.7 + 0.3 * r),
+    '(c) bake spread 50 km': lambda z, i, r, s, uu: s,
+    '(b) relief-class layer (new fBm with zone)': lambda z, i, r, s, uu: 0.55 * uu + 0.45 * z,
+}
+
+# The curve: k 1 up to the plains' quantile q0, then kh at q1, km at q2, kM at 1 (linear in the quantile between); times the coast taper.
+Q = [0.0, 0.50, 0.66, 0.82, 1.0]
+
+def curve(score, ks):
+    sl, wls = score[land], wl
+    order = np.argsort(sl, kind='stable')
+    cw = np.cumsum(wls[order]); cw /= cw[-1]
+    qv = [sl[order][min(np.searchsorted(cw, q), len(cw) - 1)] for q in Q]
+    # Ties (a score of 0 over a large share) collapse quantiles: spread them so interp stays monotone.
+    for j in range(1, len(qv)):
+        if qv[j] <= qv[j - 1]:
+            qv[j] = qv[j - 1] + 1e-9
+    kv = [1.0, 1.0] + list(ks)
+    return qv, kv
+
+def kfield(score, ks):
+    qv, kv = curve(score, ks)
+    return 1 + taper(e) * (np.interp(score, qv, kv) - 1), qv, kv
+
+def fit(score):
+    best = None
+    for kh in np.arange(1.5, 12.1, 0.5):
+        for km in np.arange(kh, 20.1, 1.0):
+            for kM in (km, km * 1.25, km * 1.5):
+                k, _, _ = kfield(score, (kh, km, kM))
+                s = shares(k)
+                err = abs(s[0] - EARTH[0]) + abs(s[1] - EARTH[1]) + abs(s[2] + s[3] - EARTH[2])
+                if best is None or err < best[0]:
+                    best = (err, (kh, km, kM), s)
+    return best
+
+# Sites: inputs from the sampler; the needed k is real 5 km relief over the generator's (SPIKE-65 windows' p50).
+NEED = {'alps': 1029 / 149, 'blackforest': 256 / 72, 'highlands': 431 / 63, 'valleyridge': 335 / 60}
+sites = {}
+for line in open(sites_path):
+    m = re.match(r'S69SITE (\S+) \[(.*)\]', line.strip())
+    if m:
+        sites[m.group(1)] = np.array([float(x) for x in m.group(2).split(',')])
+
+res, kmaps = {}, {}
+for name, fn in SCORES.items():
+    score = fn(zone, inland, ridge, s50, u)
+    err, ks, sh = fit(score)
+    k, qv, kv = kfield(score, ks)
+    kmaps[name] = k
+    dk = np.concatenate([np.abs(np.diff(k, axis=0))[land[:-1] & land[1:]], np.abs(np.diff(k, axis=1))[land[:, :-1] & land[:, 1:]]])
+    sk = {}
+    for s, v in sites.items():
+        vl, vlo, vc, vz, vi, vr, vh, ve, v50, v200, vr5, vhc, vr14 = v
+        uu = 0.5 + 0.5 * float(fbm(unit(np.array([vl]), np.array([vlo])), 2.2, 4, 1234)[0])
+        sc = fn(vz, vi, vr, v50, uu)
+        sk[s] = round(float(1 + taper(np.array(ve)) * (np.interp(sc, qv, kv) - 1)), 2)
+    lw = (np.cos(np.radians(lat)) * land)
+    res[name] = {'curve_k': [round(x, 2) for x in kv], 'curve_quantiles': Q, 'shares': [round(x, 3) for x in sh], 'fit_error': round(err, 3),
+                 'dk_p99': round(float(np.percentile(dk, 99)), 2), 'dk_max': round(float(dk.max()), 2),
+                 'k_mean_land': round(float((np.nan_to_num(k) * lw).sum() / lw.sum()), 2), 'sites': sk}
+    print(f"{name}: k {res[name]['curve_k']} shares {res[name]['shares']} err {res[name]['fit_error']} dk p99 {res[name]['dk_p99']} max {res[name]['dk_max']} mean {res[name]['k_mean_land']} sites {sk}")
+print('need', {s: round(v, 1) for s, v in NEED.items()})
+print('r14 land p10/50/90/99', [round(float(np.percentile(r14[land], q))) for q in (10, 50, 90, 99)], 'r14/r5 p50', round(float(np.median(r14[land] / np.maximum(r5[land], 1))), 2))
+print('site inputs', {s: {'zone': round(v[3], 2), 'inland': round(v[4], 2), 'ridge': round(v[5], 2), 'e': round(v[7]), 's50': round(v[8]), 'r14': round(v[12])} for s, v in sites.items()})
+json.dump({'candidates': res, 'need': NEED, 'earth_targets': EARTH.tolist(), 'bounds_m': B}, open(f'{out}/s69.json', 'w'), indent=1)
+
+# Maps: per source, k (1 to 12) and the classes; ocean dark; site markers.
+def ramp(x):
+    stops = np.array([[0.27, 0.0, 0.33], [0.23, 0.32, 0.55], [0.13, 0.57, 0.55], [0.37, 0.79, 0.38], [0.99, 0.91, 0.14]])
+    x = np.nan_to_num(np.clip(x, 0, 1)) * (len(stops) - 1)
+    i = np.minimum(x.astype(int), len(stops) - 2)
+    f = (x - i)[..., None]
+    return stops[i] * (1 - f) + stops[i + 1] * f
+CLS = np.array([[0.62, 0.78, 0.45], [0.86, 0.75, 0.42], [0.66, 0.42, 0.25], [0.95, 0.95, 0.95]])
+rows = []
+for name, k in kmaps.items():
+    img = ramp((k - 1) / 11)
+    img[~land] = [0.08, 0.12, 0.25]
+    ci = CLS[np.clip(classes(k), 0, 3)]
+    ci[~land] = [0.08, 0.12, 0.25]
+    row = Image.fromarray((np.concatenate([img, ci], 1) * 255).astype(np.uint8))
+    d = ImageDraw.Draw(row)
+    d.rectangle((0, 0, 330, 14), fill=(0, 0, 0)); d.text((4, 2), name + ': k 1 (dark) to 12 (yellow) | classes', fill=(255, 255, 255))
+    for s, v in sites.items():
+        x, y = (v[1] + 180) * 2, (90 - v[0]) * 2
+        for off in (0, W):
+            d.ellipse((x + off - 3, y - 3, x + off + 3, y + 3), outline=(255, 0, 0))
+    rows.append(row)
+sheet = Image.new('RGB', (2 * W, H * len(rows)))
+for i, r in enumerate(rows):
+    sheet.paste(r, (0, i * H))
+sheet.save(f'{out}/k-and-classes.png')
+# The generator's raw inputs: zone, inland, ridge x zone, 50 km spread, 7 km relief.
+ins = [smooth(zone, 0, 1), inland, zone * ridge, np.clip(s50 / 400, 0, 1), np.clip(r14 / 300, 0, 1)]
+rows = []
+for x in ins:
+    img = ramp(x); img[~land] = [0.08, 0.12, 0.25]
+    rows.append(img)
+Image.fromarray((np.concatenate([np.concatenate(rows[:3], 1), np.concatenate(rows[3:] + [np.zeros_like(rows[0])], 1)], 0) * 255).astype(np.uint8)).save(f'{out}/inputs.png')
