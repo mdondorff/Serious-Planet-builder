@@ -135,7 +135,39 @@ fn fine_carve(carve: f64, landform: f64) -> f64 {
 /// slope, the fine ones at the amplitude lifted by the landform.
 fn detail_m(seed: u64, dir: Vec3, e: f64, carve: f64, landform: f64) -> f64 {
     let (coarse, fine) = crease_parts(seed, dir);
-    amplitude_m(e, carve) * coarse + amplitude_m(e, fine_carve(carve, landform)) * fine
+    let fa = amplitude_m(e, fine_carve(carve, landform));
+    amplitude_m(e, carve) * coarse + fa * fine + g1_m(seed, dir, fa)
+}
+
+/// SPIKE-63 (spike code, never merged): a G1 detail term below the finest crease octave, `PLANET_G1_LAW` = `a` or `b` (read once per
+/// process; unset: none). Five gradient-noise octaves of wavelength 6, 3, 1.5, 0.75 and 0.375 m; the 6 m octave has amplitude `A6`
+/// metres at full share and each finer octave `R` times the one above. Law a: A6 0.25 m, R 0.5 (every octave the same slope). Law b:
+/// A6 0.12 m, R 0.71 (the finer octaves steeper: rough ground). The share is `0.3 + 0.7 fa / AMPLITUDE_MAX_M` (the fine creases' own
+/// amplitude: plains get 0.3 to 0.4 of it, hills in a range zone all of it).
+const LAYER_G1: u64 = 0x4552_0063;
+const G1_OCTAVES: u32 = 5;
+fn g1_law() -> Option<(f64, f64)> {
+    static L: OnceLock<Option<(f64, f64)>> = OnceLock::new();
+    *L.get_or_init(|| match std::env::var("PLANET_G1_LAW").as_deref() {
+        Ok("a") => Some((0.25, 0.5)),
+        Ok("b") => Some((0.12, 0.71)),
+        _ => None,
+    })
+}
+/// The largest magnitude of the G1 term (the noise lies in [-1, 1]).
+fn g1_max_m() -> f64 {
+    g1_law().map_or(0.0, |(a6, r)| (0..G1_OCTAVES).map(|k| a6 * libm::pow(r, f64::from(k))).sum())
+}
+fn g1_m(seed: u64, dir: Vec3, fa: f64) -> f64 {
+    let Some((a6, r)) = g1_law() else { return 0.0 };
+    let share = 0.3 + 0.7 * (fa / AMPLITUDE_MAX_M).clamp(0.0, 1.0);
+    let (mut sum, mut amp, mut freq) = (0.0, a6, BASE_FREQUENCY * libm::pow(2.0, f64::from(OCTAVES)));
+    for k in 0..G1_OCTAVES {
+        sum += amp * layer_noise(seed, LAYER_G1, k, dir * freq);
+        amp *= r;
+        freq *= 2.0;
+    }
+    share * sum
 }
 
 /// The eroded terrain field of one body over a baked global-coarse grid.
@@ -174,7 +206,7 @@ impl ErosionField<'_> {
 
     /// The largest height the field takes in magnitude at its relief scale (WDEF-017): the elevation clamp times the scale plus the deepest incision.
     fn max_abs_height(&self) -> f64 {
-        MAX_ELEVATION_M.max(-MIN_ELEVATION_M) * self.relief + DETAIL_DOWN_M
+        MAX_ELEVATION_M.max(-MIN_ELEVATION_M) * self.relief + DETAIL_DOWN_M + g1_max_m()
     }
 
     /// The ground elevation of the bake at a direction, without creases.
@@ -427,7 +459,8 @@ impl HeightField for ErosionField<'_> {
         let ((c1, c2), (f1, f2)) = (part(a_lo, a_hi, clo, chi), part(fa_lo, fa_hi, flo, fhi));
         let (dlo, dhi) = ((c1 + f1).max(-0.75 * AMPLITUDE_MAX_M), (c2 + f2).min(0.25 * AMPLITUDE_MAX_M));
         let pad = |x: f64| 1e-6 + x.abs() * 1.2e-7;
-        let (l, h) = (blo + dlo, bhi + dhi);
+        // SPIKE-63: the G1 term's largest magnitude both ways.
+        let (l, h) = (blo + dlo - g1_max_m(), bhi + dhi + g1_max_m());
         ((l - pad(l)).max(global.0), (h + pad(h)).min(global.1))
     }
 }

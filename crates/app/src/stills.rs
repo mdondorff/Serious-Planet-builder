@@ -796,6 +796,22 @@ fn run_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write, mut cost: Opti
             rows.push(measure_cost(ctx, &mut r, &mut lit, &pose.name)?);
         }
         r.read_color(ctx).write_png(&dir.join(format!("{}.png", pose.name))).map_err(|e| format!("writing {}: {e}", pose.name))?;
+        // SPIKE-63 (spike code): `SPIKE63_COST=1` times the terrain pass after the still (no gate, indicative): the product shader with
+        // the detail on, and with the ground detail and shadows compiled out (REND-044's variants).
+        if cost.is_none() && std::env::var_os("SPIKE63_COST").is_some() {
+            let row = measure_cost(ctx, &mut r, &mut lit, &pose.name)?;
+            let (s, m, both) = row.shares();
+            writeln!(
+                out,
+                "SPIKE63 {}: full {:.3} ms; shadows {s:.3}, ground detail {m:.3}, both {both:.3}; compiled out {:?}; spread {:?}; nodes {}",
+                pose.name,
+                row.full,
+                row.compiled_out,
+                row.spread,
+                plan.nodes.len()
+            )
+            .map_err(err)?;
+        }
         let (eye_lat, _) = camera.position.0.lat_lon();
         let height = camera.position.0.length() - radius_m;
         writeln!(
