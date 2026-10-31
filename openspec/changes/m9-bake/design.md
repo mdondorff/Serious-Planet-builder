@@ -39,12 +39,12 @@
 
 ### 4. The erosion layer
 - Two passes (SPIKE-70):
-  1. per cube face: the base's block means at 8 x 8 cells (814 m, 12,288^2 a face, about 5.5 GB), the carve, its change stored per face (checkpoint);
-  2. per tile: the base plus the face change (bilinear, land at 1 m or more), the local carve, thermal, deposition; the core's change stored.
+  1. per cube face: the base sampled once per 8 x 8 cell (814 m, 12,288^2 a face; SPIKE-71: 1/47 of the block means' cost, relief within 1-3 %), the carve (about 5.5 GB), its change stored per face (checkpoint);
+  2. per tile: the base plus the face change (bilinear), the local carve, active-cell thermal (exact, SPIKE-71), deposition; the core's change stored.
 - Grid: 98,304 cells per face edge (101.8 m at 16384, 48 per coupled cell), tiles of 3,072^2 core cells with a 256-cell halo (SPIKE-61); 2,140 land tiles.
 - Content: the core's change against the sampled base (decision 2 without the layer), quantised (proposed 0.25 m, i16) and compressed per block, about 0.34-0.42 bytes per land cell (SPIKE-61); about 7-10 GB.
 - Inflow: not needed per tile (the face carve holds the large rivers); faces do not route across cube edges (a known limit).
-- Seams: core edges show none at three of four sites (SPIKE-70); PR 5 re-measures with the 1 m land floor, and PR 4 measures the cube-edge step of the face carve. A halo blend hides a step but does not fix routing (SPIKE-68).
+- Seams: core edges show none at three of four sites (SPIKE-70); the coastal Highlands window keeps one that a 1 m land floor does not remove (SPIKE-71). PR 5 measures it, and PR 4 measures the cube-edge step of the face carve. A halo blend hides a step but does not fix routing (SPIKE-68).
 - Checkpoints: one file per finished tile plus an index; `--resume` skips finished tiles; a key mismatch (bake, channel versions, kernel parameters) refuses to resume.
 - Read: a block cache like the bake's; bilinear at 100 m.
 
@@ -54,7 +54,7 @@
 - The owner's look at R4 (stills at 300 m, 30 m and 1.8 m, plus the scorecard report) decides the default.
 
 ## Risks
-0. Bake time: 7.5-10 h estimated (SPIKE-70), at criterion 7's limit; the active-cell thermal and a coarse-level sampling of pass 1 are the levers.
+0. Bake time: about 6-7.5 h estimated (central 6.9 h, SPIKE-71), within criterion 7's 10 h; no margin at the top of the range.
 1. Level steps at production tau: a visible pop would need finer LOD near the camera (cost) or a smaller `k` at fine levels (a scale-dependent factor). Measured in PR 2.
 2. Tile seams of the layer: measured in PR 4; the blend is a fallback.
 3. Coast and water: the taper keeps lowland above the sea. The ocean connectivity (ADR 0071) and the coastal band (ADR 0056) read the new heights, so their channels may need a re-bake with the layer.
