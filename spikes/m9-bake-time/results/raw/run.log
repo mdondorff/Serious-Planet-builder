@@ -1,0 +1,54 @@
+heavy-run lock: the machine is free after 18 s: running `C:/Program Files/Git/usr/bin/bash.exe C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/570e124f-4ca5-49b4-8bf6-680604dce399/scratchpad/s71/run.sh`
+$ C:/Program Files/Git/usr/bin/bash.exe C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/570e124f-4ca5-49b4-8bf6-680604dce399/scratchpad/s71/run.sh
+=== dump 16:39:28 cpu 5%
+RELIEF alps: coarse point 12 octaves, 832^2 sampled in 0.71 s
+RELIEF alps: coarse oct 5 octaves, 832^2 sampled in 0.62 s
+RELIEF alps: face 0 cells i 25617 j 59049 (6656^2), dx 99.98 m, land 84.6 %, min -43 max 5644 m, sampled in 32.8 s
+RELIEF blackforest: coarse point 12 octaves, 832^2 sampled in 0.67 s
+RELIEF blackforest: coarse oct 5 octaves, 832^2 sampled in 0.60 s
+RELIEF blackforest: face 3 cells i 8140 j 49136 (6656^2), dx 101.75 m, land 96.3 %, min -33 max 3379 m, sampled in 32.6 s
+RELIEF highlands: coarse point 12 octaves, 832^2 sampled in 0.71 s
+RELIEF highlands: coarse oct 5 octaves, 832^2 sampled in 0.64 s
+RELIEF highlands: face 3 cells i 10325 j 59361 (6656^2), dx 100.77 m, land 66.8 %, min -74 max 2908 m, sampled in 32.8 s
+RELIEF valleyridge: coarse point 12 octaves, 832^2 sampled in 0.72 s
+RELIEF valleyridge: coarse oct 5 octaves, 832^2 sampled in 0.64 s
+RELIEF valleyridge: face 3 cells i 22340 j 65113 (6656^2), dx 98.22 m, land 72.3 %, min -116 max 1202 m, sampled in 33.4 s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 230 filtered out; finished in 134.32s
+=== s71 16:41:45 cpu 3%
+blackforest: tile 0 local carve 16.4 s; thermal full 21.2 s, active 1.6 s (4 threads), 3.4 s (1 thread); 100 passes, 3.48 cell evaluations per cell (full: 100); max |full - active| 0 m; 1 and 4 threads identical true
+blackforest: hybrid1 with the floor, 4 tiles 97 s
+blackforest hybrid1floor hard: step over 12288 edge pairs p50 6.73 p99 68.75 max 137.46 m | |s-j| by distance (p50/p99 m) 0-1: 41.41/302.37, 2-8: 40.62/293.42, 9-32: 43.04/287.70, 33-128: 43.91/282.25, 129-512: 44.17/300.68, 513-4000: 38.23/344.52 | crossings mosaic 230 joint 281 matched 71 | ponds near seams mosaic 966 joint 1116
+blackforest: coarse base point12 against block means: mean 0.0 m, |d| p50 6.9 p99 87.6 m
+blackforest: hybrid1 floor from point12, 4 tiles 94 s
+blackforest hybrid1floor-point12 hard: step over 12288 edge pairs p50 7.30 p99 66.39 max 140.25 m | |s-j| by distance (p50/p99 m) 0-1: 44.60/385.68, 2-8: 43.52/387.22, 9-32: 44.83/359.14, 33-128: 45.75/321.05, 129-512: 45.77/351.26, 513-4000: 38.58/354.38 | crossings mosaic 209 joint 281 matched 58 | ponds near seams mosaic 1003 joint 1116
+blackforest: coarse base oct5 against block means: mean 2.5 m, |d| p50 6.4 p99 85.0 m
+blackforest: hybrid1 floor from oct5, 4 tiles 94 s
+blackforest hybrid1floor-oct5 hard: step over 12288 edge pairs p50 7.18 p99 68.47 max 140.25 m | |s-j| by distance (p50/p99 m) 0-1: 45.63/359.23, 2-8: 43.66/351.70, 9-32: 44.79/311.99, 33-128: 45.41/298.01, 129-512: 44.15/323.16, 513-4000: 38.35/354.93 | crossings mosaic 229 joint 281 matched 70 | ponds near seams mosaic 1062 joint 1116
+highlands: tile 0 local carve 15.2 s; thermal full 21.3 s, active 2.7 s (4 threads), 7.1 s (1 thread); 100 passes, 5.32 cell evaluations per cell (full: 100); max |full - active| 0 m; 1 and 4 threads identical true
+highlands: hybrid1 with the floor, 4 tiles 106 s
+highlands hybrid1floor hard: step over 9249 edge pairs p50 6.75 p99 106.53 max 201.64 m | |s-j| by distance (p50/p99 m) 0-1: 59.07/374.15, 2-8: 58.34/375.18, 9-32: 53.90/417.90, 33-128: 53.45/463.62, 129-512: 60.62/474.42, 513-4000: 63.59/359.06 | crossings mosaic 129 joint 160 matched 36 | ponds near seams mosaic 1341 joint 883
+highlands: coarse base point12 against block means: mean 0.1 m, |d| p50 9.3 p99 88.9 m
+highlands: hybrid1 floor from point12, 4 tiles 106 s
+highlands hybrid1floor-point12 hard: step over 9249 edge pairs p50 7.27 p99 95.41 max 125.41 m | |s-j| by distance (p50/p99 m) 0-1: 59.34/390.13, 2-8: 59.24/381.50, 9-32: 56.42/413.07, 33-128: 56.08/482.55, 129-512: 60.31/420.30, 513-4000: 65.46/383.84 | crossings mosaic 143 joint 160 matched 36 | ponds near seams mosaic 1261 joint 883
+highlands: coarse base oct5 against block means: mean 3.6 m, |d| p50 8.6 p99 83.5 m
+highlands: hybrid1 floor from oct5, 4 tiles 100 s
+highlands hybrid1floor-oct5 hard: step over 9249 edge pairs p50 7.00 p99 93.20 max 157.89 m | |s-j| by distance (p50/p99 m) 0-1: 57.00/364.92, 2-8: 56.18/360.46, 9-32: 54.80/389.39, 33-128: 56.06/423.03, 129-512: 60.64/381.79, 513-4000: 63.68/389.49 | crossings mosaic 144 joint 160 matched 41 | ponds near seams mosaic 1228 joint 883
+valleyridge: tile 0 local carve 15.4 s; thermal full 20.7 s, active 6.2 s (4 threads), 12.3 s (1 thread); 100 passes, 11.54 cell evaluations per cell (full: 100); max |full - active| 0 m; 1 and 4 threads identical true
+valleyridge: hybrid1 with the floor, 4 tiles 78 s
+valleyridge hybrid1floor hard: step over 10634 edge pairs p50 5.61 p99 56.17 max 102.89 m | |s-j| by distance (p50/p99 m) 0-1: 31.54/152.18, 2-8: 32.25/153.90, 9-32: 32.69/148.96, 33-128: 32.30/152.29, 129-512: 33.00/155.94, 513-4000: 42.61/170.53 | crossings mosaic 168 joint 220 matched 47 | ponds near seams mosaic 2567 joint 641
+valleyridge: coarse base point12 against block means: mean 0.1 m, |d| p50 8.4 p99 52.9 m
+valleyridge: hybrid1 floor from point12, 4 tiles 77 s
+valleyridge hybrid1floor-point12 hard: step over 10634 edge pairs p50 5.89 p99 57.19 max 116.78 m | |s-j| by distance (p50/p99 m) 0-1: 33.03/163.78, 2-8: 34.03/156.20, 9-32: 34.70/154.85, 33-128: 34.10/158.00, 129-512: 35.95/159.48, 513-4000: 44.89/179.67 | crossings mosaic 191 joint 220 matched 51 | ponds near seams mosaic 1716 joint 641
+valleyridge: coarse base oct5 against block means: mean 2.9 m, |d| p50 7.7 p99 48.0 m
+valleyridge: hybrid1 floor from oct5, 4 tiles 77 s
+valleyridge hybrid1floor-oct5 hard: step over 10634 edge pairs p50 5.80 p99 57.40 max 103.24 m | |s-j| by distance (p50/p99 m) 0-1: 33.54/162.04, 2-8: 33.71/156.81, 9-32: 34.38/156.48, 33-128: 33.28/161.09, 129-512: 34.55/158.62, 513-4000: 43.72/175.82 | crossings mosaic 195 joint 220 matched 56 | ponds near seams mosaic 1833 joint 641
+alps: tile 0 local carve 13.5 s; thermal full 22.8 s, active 16.6 s (4 threads), 31.8 s (1 thread); 100 passes, 25.21 cell evaluations per cell (full: 100); max |full - active| 0 m; 1 and 4 threads identical true
+alps: hybrid1 with the floor, 4 tiles 132 s
+alps hybrid1floor hard: step over 12154 edge pairs p50 10.00 p99 82.38 max 165.27 m | |s-j| by distance (p50/p99 m) 0-1: 105.25/743.47, 2-8: 106.85/731.22, 9-32: 105.18/752.97, 33-128: 101.98/783.00, 129-512: 97.24/734.60, 513-4000: 86.58/660.02 | crossings mosaic 193 joint 223 matched 53 | ponds near seams mosaic 275 joint 2189
+alps: coarse base point12 against block means: mean 0.1 m, |d| p50 11.7 p99 182.0 m
+alps: hybrid1 floor from point12, 4 tiles 130 s
+alps hybrid1floor-point12 hard: step over 12154 edge pairs p50 10.26 p99 82.49 max 145.63 m | |s-j| by distance (p50/p99 m) 0-1: 105.45/658.56, 2-8: 105.70/654.33, 9-32: 105.17/683.32, 33-128: 103.24/747.15, 129-512: 99.32/739.38, 513-4000: 88.16/676.22 | crossings mosaic 161 joint 223 matched 44 | ponds near seams mosaic 286 joint 2189
+alps: coarse base oct5 against block means: mean 3.7 m, |d| p50 10.7 p99 177.9 m
+alps: hybrid1 floor from oct5, 4 tiles 131 s
+alps hybrid1floor-oct5 hard: step over 12154 edge pairs p50 10.35 p99 82.72 max 156.51 m | |s-j| by distance (p50/p99 m) 0-1: 107.37/839.67, 2-8: 107.41/781.36, 9-32: 103.99/810.34, 33-128: 101.56/772.08, 129-512: 100.24/717.07, 513-4000: 88.23/670.96 | crossings mosaic 161 joint 223 matched 45 | ponds near seams mosaic 312 joint 2189
+=== done 17:12:24
