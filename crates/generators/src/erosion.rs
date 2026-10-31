@@ -193,6 +193,14 @@ impl ErosionField<'_> {
         MAX_ELEVATION_M.max(-MIN_ELEVATION_M) * self.relief + DETAIL_DOWN_M
     }
 
+    /// SPIKE-82 (spike code, never merged): the bake's range over a cap (`scan_base`), or `None` when the cap is too wide to scan.
+    pub fn spike82_base_bounds(&self, centre: Vec3, angular_radius: f64) -> Option<(f64, f64)> {
+        match crate::terrain::scan_base(&self.src, centre, angular_radius) {
+            Ok(Some(s)) => Some((s.lo, s.hi)),
+            _ => None,
+        }
+    }
+
     /// The ground elevation of the bake at a direction, without creases.
     pub fn base_elevation(&self, dir: Vec3) -> f64 {
         self.base_via(&self.src, dir)

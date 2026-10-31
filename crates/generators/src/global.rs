@@ -366,6 +366,26 @@ pub fn spike80_hill_pattern(seed: u64, d: Vec3) -> f64 {
     sum / norm
 }
 
+/// SPIKE-82 (spike code, never merged): bounds of [`spike80_hill_pattern`] over the cap of angular radius `r` round `d`, from the per-octave noise
+/// bounds at the warped centre. The warp is taken as at most 5.5x Lipschitz on the cap (a spike assumption, not proven).
+pub fn spike82_hill_pattern_bounds(seed: u64, d: Vec3, r: f64) -> (f64, f64) {
+    let t = terrain(seed, d);
+    let (mut lo, mut hi, mut amp, mut norm, mut freq) = (0.0, 0.0, 1.0, 0.0, HILL_BAND_FREQ);
+    for o in 0..HILL_BAND_OCTAVES {
+        let (nlo, nhi) = crate::height::layer_noise_bounds(seed, LAYER_HILL, o, t.warped, 5.5 * r, freq);
+        let (nlo, nhi) = (nlo.max(-1.0), nhi.min(1.0));
+        let amin = if nlo <= 0.0 && nhi >= 0.0 { 0.0 } else { libm::fabs(nlo).min(libm::fabs(nhi)) };
+        let amax = libm::fabs(nlo).max(libm::fabs(nhi));
+        let (rlo, rhi) = ((1.0 - amax).max(0.0), (1.0 - amin).max(0.0));
+        lo += amp * rlo * rlo;
+        hi += amp * rhi * rhi;
+        norm += amp;
+        amp *= 0.5;
+        freq *= 2.0;
+    }
+    (lo / norm, hi / norm)
+}
+
 pub fn spike69_parts(seed: u64, d: Vec3) -> [f64; 5] {
     let t = terrain(seed, d);
     let ridge = ridge_at(seed, t.warped);
