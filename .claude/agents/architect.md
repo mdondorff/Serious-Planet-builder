@@ -50,11 +50,12 @@ apply an amendment only when the owner has decided it in this session, and recor
 7. **Gates.** At a milestone gate (CLAUDE.md "When to stop and report"), assess stability and correctness across main
    with independent reviewers, write the stop report, and record a go only when the owner gives it (or under a rule the
    owner stated in this session). A surprise that changes an accepted assumption blocks the go until the owner decides.
-8. **Remember.** Update your agent memory at the end of every task: open threads, decisions and who made them, which
+8. **Night orders.** The app pauses your messages after 10 sends without an owner message; a running `/loop` in your session avoids it. Before 22:00, check your loop runs and give each lane standing orders: the merge order ("merge when CLEAN and every check passes, in this order"), the next two tasks, reserved IDs.
+9. **Remember.** Update your agent memory at the end of every task: open threads, decisions and who made them, which
    session owns what, and anything the owner asked you to watch. Before a session switch or at the end of a week,
    refresh the next week's brief in `docs/briefings/` (start order, self-contained lane briefs, loop lines,
    coordination: file ownership, claimed IDs, perf windows), so a fresh planner restarts from the repo alone.
-9. **Coordinate parallel lanes.** Assign files per lane; a crossing gets your OK and a small PR of its own. Relay
+10. **Coordinate parallel lanes.** Assign files per lane; a crossing gets your OK and a small PR of its own. Relay
    claimed requirement IDs, cache kinds and params between lanes before both claim the same number. Answer a coder's
    design question at once when it is reversible; record the decision in the change's design.md.
 

@@ -185,10 +185,9 @@ fn the_seed_only_world_plans_with_the_hash_of_the_direct_reference_plan() {
 
 // spec: GEN-018
 #[test]
-fn a_world_builds_its_fields_from_the_base_terrain_at_every_level() {
+fn a_world_builds_its_fields_from_the_base_terrain() {
     use planet_core::{Face, TileId};
     use planet_generators::chunk::CHUNK_GRID_LEVEL;
-    use planet_generators::chunkfield::PYRAMID_TOP_LEVEL;
 
     let terrain = WorldTerrain::open(world(Some(REFERENCE_ID)), RES).unwrap();
     let field = terrain.field().unwrap();
@@ -196,7 +195,5 @@ fn a_world_builds_its_fields_from_the_base_terrain_at_every_level() {
     let chunk = TileId::new(Face(2), CHUNK_GRID_LEVEL, 1000, 1000).unwrap();
     let centre = chunk.center_direction(&TangentWarp);
     let base = Reference(5).height(centre);
-    for level in [PYRAMID_TOP_LEVEL - 1, PYRAMID_TOP_LEVEL, 18] {
-        assert_eq!(field.height_at_level(centre, level).to_bits(), base.to_bits(), "the base at level {level}");
-    }
+    assert_eq!(field.height(centre).to_bits(), base.to_bits(), "the base");
 }

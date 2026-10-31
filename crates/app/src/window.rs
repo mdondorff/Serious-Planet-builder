@@ -516,9 +516,9 @@ impl App<'_> {
             }
             // The hover pick runs on a thread of its own against a field it makes (the current definition and stamps): a cold bake block is decoded there (VIEW-059).
             let world = self.world.clone();
-            e.set_hover_source(std::sync::Arc::new(move |ray, limits, level| {
+            e.set_hover_source(std::sync::Arc::new(move |ray, limits| {
                 let field = world.field().ok()?;
-                planet_frame::pick::pick_surface(&ray, &limits, &|d| field.height_at_level(d, level))
+                planet_frame::pick::pick_surface(&ray, &limits, &|d| field.height(d))
             }));
             // The brush guard limits the stack of strokes by what these parameters can draw (VIEW-043).
             e.session.set_drawable_slope(cfg.lod.drawable_slope());
@@ -771,15 +771,8 @@ impl App<'_> {
             // A command of this frame (C back to the flight, restart) may have released the mouse.
             apply_grab(&mut st);
             st.stall.mark("input, commands and the smoke script");
-            // The ground under the camera reads the height of the tile level a pixel of this view can show, like the pick (VIEW-056); the bake blocks the
-            // camera is about to fly over are read ahead on a thread of their own (CON-22).
-            let ground_level = crate::editwin::EditRuntime::pick_level(
-                &st.last_camera,
-                Viewport { width_px: f64::from(cfg.size.0), height_px: f64::from(cfg.size.1) },
-                radius,
-                lod_max_height_m,
-            );
-            let ground = |p: planet_core::PlanetFixed| radius + field.height_at_level(p.0.normalized(), ground_level);
+            // The bake blocks the camera is about to fly over are read ahead on a thread of their own (CON-22).
+            let ground = |p: planet_core::PlanetFixed| radius + field.height(p.0.normalized());
             let height = |p: planet_core::PlanetFixed| p.0.length() - ground(p);
             let had_globe = st.viewer.globe.is_some();
             let camera = st.viewer.camera(self.cameras, now_ms, dt, &self.params, &height, &ground);

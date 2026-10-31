@@ -1067,17 +1067,6 @@ Source: D7 (runtime generation, disk cache), ADR 0077 point 7, STRM-043, owner f
 - **WHEN** the window opens a world with a stored coupled channel
 - **THEN** it starts no chunk job and computes no chunk
 
-### Requirement: STRM-047 The compact tile carries the chunk change
-The compact tile builder SHALL store the chunk change of a tile at the tile's own level beside its heights (`HeightField::level_change`, forwarded by every wrapper that forwards `height_at_level`), and the CPU mirror `CompactTile::shade_vertex_faded` SHALL take `fade x change` off a vertex. The renderer and the plan do not read the change or a weight since ADR 0086; the requirement goes with the generators' chunk field.
-
-Verify: A
-Status: active
-Source: GEN-025, ADR 0086
-
-#### Scenario: Change
-- **WHEN** a tile at the pyramid top over a ready chunk is built
-- **THEN** the stored change equals the field's height at the tile's level minus the base's, and the mirror's vertices at fade `f` are the final ones minus `f` times the change
-
 ### Requirement: STRM-055 The job log tells a refresh and its waits
 The job log (STRM-022) SHALL record for each job the milliseconds from the request of its tile to its dispatch (the wait in the streamer's queue) and whether it rebuilds a stale resident tile (a refresh, STRM-026). `refresh_summary` SHALL put the refresh jobs of a slice in one line: their count and the median, 90th percentile and largest of the streamer-queue wait, the spawner-queue wait and the load, in milliseconds; none without a refresh. The viewer SHALL write that line every 10 s while there are refreshes. The readings decide nothing (CON-14).
 

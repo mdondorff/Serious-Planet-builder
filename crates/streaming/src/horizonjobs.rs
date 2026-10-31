@@ -4,7 +4,7 @@
 use crate::{Clock, JobClass, Spawner};
 use planet_core::{Face, TileId};
 use planet_generators::chunk::CHUNK_GRID_LEVEL;
-use planet_generators::chunkfield::{ChunkKey, ChunkResult};
+use planet_generators::chunkfield::ChunkKey;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
@@ -16,14 +16,14 @@ fn tile_of(key: ChunkKey) -> TileId {
 // The horizon job (M8-5, STRM-048): a second job per chunk that lands after its heights
 
 /// What the horizon job needs of the layers above it, injected so this crate stays GPU-free and a test runs with a fake: the chunks a horizon
-/// reads and the bake itself (the real one samples the chunk field's heights over the chunk and its halo and calls `bake_horizon`).
+/// reads and the bake itself (the real one samples the field's heights over the chunk and its halo and calls `bake_horizon`).
 pub trait HorizonBaker: Send + Sync {
-    /// The chunks the horizon of `key` reads, its own first: the changes of these (where they are ready) are in its heights.
+    /// The chunks the horizon of `key` reads, its own first: the state of these is in the state word of its map.
     fn reads(&self, key: ChunkKey) -> Vec<ChunkKey>;
-    /// The horizon map of `key`, given the ready results among [`HorizonBaker::reads`] (a chunk that is not ready contributes its base only).
+    /// The horizon map of `key`, baked from the base terrain and the stamps.
     /// `None`: an edit changed what the map samples while it was being made ([`HorizonBaker::edit_word`]); the job drops it, nothing is published or stored, and
     /// the chunk is baked again against the new word once the neighbourhood has settled (STRM-060).
-    fn bake(&self, key: ChunkKey, ready: &[(ChunkKey, Arc<ChunkResult>)]) -> Option<Vec<u8>>;
+    fn bake(&self, key: ChunkKey) -> Option<Vec<u8>>;
     /// A hash of everything that defines the march (texel, azimuths, range, version): a change re-keys every stored map.
     fn spec_hash(&self) -> u64;
     /// A word that differs when an edit can change the heights the horizon of `key` samples (the items that touch the chunk and its halo),
@@ -45,10 +45,9 @@ pub trait HorizonDisk: Send + Sync {
     fn put(&self, tile: TileId, word: u64, bytes: Vec<u8>) -> Result<(), String>;
 }
 
-/// What the horizon jobs need to know of the chunk stage: which chunks are ready and their results. [`BaseTerrain`] is the source: the world with no chunk stage (every chunk is ready and has no change), so the maps are baked from the base terrain and the stamps alone (STRM-064).
+/// What the horizon jobs need to know of the source of chunks: which chunks are ready and the hash of what is ready. [`BaseTerrain`] is the source: every chunk is ready and has no hash, so the maps are baked from the base terrain and the stamps alone (STRM-064).
 pub trait ChunkSource: Send + Sync {
     fn is_ready(&self, key: ChunkKey) -> bool;
-    fn result(&self, key: ChunkKey) -> Option<Arc<ChunkResult>>;
     fn result_hash(&self, key: ChunkKey) -> Option<u64>;
     /// Whether chunks leave this source on their own (then the horizon drops the maps of chunks that left); `false` makes the jobs keep the
     /// [`HorizonConfig::keep`] most recently wanted maps beyond the wanted ones.
@@ -63,9 +62,6 @@ pub struct BaseTerrain;
 impl ChunkSource for BaseTerrain {
     fn is_ready(&self, _key: ChunkKey) -> bool {
         true
-    }
-    fn result(&self, _key: ChunkKey) -> Option<Arc<ChunkResult>> {
-        None
     }
     fn result_hash(&self, _key: ChunkKey) -> Option<u64> {
         None
@@ -258,7 +254,7 @@ impl HorizonJobs {
     }
 
     fn job(&self, key: ChunkKey, word: u64) -> crate::Job {
-        let (chunks, baker, disk, shared) = (self.chunks.clone(), self.baker.clone(), self.disk.clone(), self.shared.clone());
+        let (baker, disk, shared) = (self.baker.clone(), self.disk.clone(), self.shared.clone());
         Box::new(move || {
             let tile = tile_of(key);
             let mut bytes = None;
@@ -272,9 +268,7 @@ impl HorizonJobs {
             let bytes = match bytes {
                 Some(b) => b,
                 None => {
-                    let ready: Vec<(ChunkKey, Arc<ChunkResult>)> =
-                        baker.reads(key).into_iter().filter_map(|r| chunks.result(r).map(|res| (r, res))).collect();
-                    let Some(made) = baker.bake(key, &ready) else {
+                    let Some(made) = baker.bake(key) else {
                         // Stale before it was done: nothing is stored or published, the next update bakes it against the new word.
                         let mut sh = shared.lock().expect("horizon state");
                         sh.running.remove(&key);

@@ -28,7 +28,7 @@ Dormant (no near trigger; not asked now):
 After Option B: ADR 0085's build, then M9 R3 to R6 (week plan section 4).
 
 ## Tracked
-- **Window checks need an unlocked desktop** (2026-10-30): on the RTX, present stalls 1.3-2.7 s or the device is lost while the session is locked or in modern standby; unlocked the dense sweep takes 26 s. The device losses since 10-18 most likely had this cause. NR handles it; the display never turns off (owner).
+- **Window checks need an unlocked desktop** (2026-10-30): on the RTX, present stalls 1.3-2.7 s or the device is lost while the session is locked or in modern standby; unlocked the dense sweep takes 26 s. The device losses since 10-18 most likely had this cause. NR handles it. Display off after 2 h (owner, 2026-10-31); the owner unlocks remotely for a batch, which the planner requests 07:00-22:00.
 - **CI WARP jobs over budget** (BUILD-014, `ci-stats` 2026-10-30): A+B 17.1, C 1/2 18.8, C 2/2 16.8 min medians against 16; B6 removes chunk tests.
 - **Local WARP aborts under nextest** (2026-10-30, after the Windows update): 2 of 177 in `test gpu` (access violation in `d3d10warp.dll`), pass alone; CI judges the step.
 - **Fast tier over budget** (BUILD-003, BUILD-014): `test fast` 44-71 s under load; 391 s single-thread total, the largest items chunk tests (B6).
@@ -38,7 +38,7 @@ After Option B: ADR 0085's build, then M9 R3 to R6 (week plan section 4).
 - **Static memo** (CON-06): `global::landform_lattice` is a static Mutex memo of a pure function of the seed; later the bake's owner builds it and passes it to `ErosionGenerator::field`.
 - **Water cut keeps more nodes after the hill band** (#673): kept share 53-73 % (was 40-50 %); check the water pass's GPU time in the next perf window.
 - **Horizon-map shadows retiring** (ADR 0085): their latency (window 28: 131 of 269 maps over 10 s on large edits), disk cache and edge limits are not worked on. Anything added to the terrain pass keeps criterion 5's 1.5 ms (max 1.42).
-- **Drag residuals** (owner test 2, 2026-10-30): after #900 some tiles are clipped or not drawn while dragging and settle at rest; collect F9 captures; no fix scheduled.
+- **Drag residuals** (owner test 2, 2026-10-30): after #900 some tiles are clipped or not drawn while dragging and settle at rest. Real-store pair (#949, RTX and software adapter agree within 2 px, 2026-10-31): preview residue at most 6 % of changed pixels (contour lines), 0 at river-r1; lit frame and metres NOT RUN. No fix scheduled.
 - **`--site` in the editor** (owner, 2026-10-30): no descent, the window opens at the default view; `--marker` with G works.
 - **Window resize (P2)** (owner, 2026-10-30): the 3D target keeps its size after a resize; `--size WxH` at start works around it.
 - **K view stall at orbit** (report `20261030-110527Z`): 1.3 s frame, 1,063 ms in camera, ground heights and overview with 4 main-thread block decodes (within VIEW-061's ceiling).
