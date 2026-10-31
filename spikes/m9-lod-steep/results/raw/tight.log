@@ -1,0 +1,12 @@
+S82PLAN alps today-tight 200 m | 1018 nodes, 0 capped, deepest 18 | 2.5 s 
+S82PLAN alps today-tight 2000 m | 744 nodes, 0 capped, deepest 15 | 1.7 s 
+S82STEP alps today-tight: L10 p99 6.105 max 14.292 range 118 bound 1.4x; L12 p99 1.911 max 4.172 range 57 bound 1.3x; L14 p99 0.572 max 1.178 range 20 bound 1.8x; L16 p99 0.150 max 0.362 range 4 bound 2.3x; L18 p99 0.029 max 0.079 range 2 bound 2.2x; L20 p99 0.001 max 0.018 range 0 bound 7.2x; L22 p99 0.000 max 0.000 range 0 bound 28.0x;
+S82PLAN alps steep-tight 200 m | 1048 nodes, 0 capped, deepest 18 | 4.2 s 
+S82PLAN alps steep-tight 2000 m | 787 nodes, 0 capped, deepest 15 | 3.1 s 
+S82STEP alps steep-tight: L10 p99 34.019 max 78.096 range 402 bound 1.7x; L12 p99 10.634 max 23.315 range 194 bound 1.1x MISSES; L14 p99 3.189 max 6.575 range 113 bound 1.2x; L16 p99 0.835 max 2.018 range 29 bound 1.6x; L18 p99 0.159 max 0.438 range 16 bound 1.4x; L20 p99 0.005 max 0.100 range 3 bound 2.4x; L22 p99 0.000 max 0.000 range 1 bound 4.9x;
+S82PLAN himalaya today-tight 200 m | 1001 nodes, 0 capped, deepest 18 | 2.3 s 
+S82PLAN himalaya today-tight 2000 m | 725 nodes, 0 capped, deepest 15 | 1.6 s 
+S82STEP himalaya today-tight: L10 p99 6.703 max 14.382 range 265 bound 1.5x; L12 p99 2.060 max 5.217 range 58 bound 1.8x; L14 p99 0.622 max 1.468 range 17 bound 1.5x; L16 p99 0.163 max 0.332 range 9 bound 1.4x; L18 p99 0.033 max 0.090 range 4 bound 2.0x; L20 p99 0.003 max 0.021 range 1 bound 3.1x; L22 p99 0.000 max 0.000 range 0 bound 8.3x;
+S82PLAN himalaya steep-tight 200 m | 1036 nodes, 0 capped, deepest 18 | 4.0 s 
+S82PLAN himalaya steep-tight 2000 m | 774 nodes, 0 capped, deepest 15 | 3.0 s 
+S82STEP himalaya steep-tight: L10 p99 46.864 max 92.804 range 1053 bound 1.3x; L12 p99 13.304 max 33.927 range 348 bound 1.8x; L14 p99 4.036 max 9.507 range 76 bound 1.8x; L16 p99 1.055 max 2.148 range 41 bound 1.2x; L18 p99 0.216 max 0.579 range 16 bound 1.7x; L20 p99 0.018 max 0.138 range 6 bound 1.8x; L22 p99 0.000 max 0.003 range 1 bound 3.2x;

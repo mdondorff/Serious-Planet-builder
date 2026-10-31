@@ -1,0 +1,46 @@
+=== s82 21:48:31
+$ cmd /c start  /b /wait /belownormal target/release/deps/planet-f7ec3bd3dbee2d4c.exe spike82_lod --ignored --nocapture
+
+running 1 test
+S82 seed 1 | eroded max |h| 9735 m | steep max |h| 17400 m
+S82PLAN blackforest today 200 m | 929 nodes, 0 capped, deepest 18 | 0.1 s | levels 7:10 8:84 9:82 10:92 11:82 12:76 13:86 14:86 15:89 16:90 17:94 18:58
+S82PLAN blackforest today 2000 m | 665 nodes, 0 capped, deepest 15 | 0.0 s | levels 7:21 8:84 9:82 10:92 11:82 12:79 13:86 14:93 15:46
+S82STEP blackforest today: L10 p99 2.283 max 5.357 range 36 bound 9.7x; L12 p99 0.683 max 1.459 range 20 bound 9.2x; L14 p99 0.200 max 0.489 range 6 bound 6.9x; L16 p99 0.057 max 0.124 range 3 bound 5.5x; L18 p99 0.011 max 0.029 range 1 bound 6.6x; L20 p99 0.001 max 0.006 range 0 bound 4.8x; L22 p99 0.000 max 0.001 range 0 bound 4.9x;
+S82PLAN blackforest steep-nohb 200 m | 986 nodes, 0 capped, deepest 18 | 0.2 s | levels 7:30 8:91 9:84 10:101 11:84 12:76 13:86 14:86 15:88 16:94 17:92 18:74
+S82PLAN blackforest steep-nohb 2000 m | 700 nodes, 0 capped, deepest 15 | 0.2 s | levels 7:43 8:88 9:81 10:100 11:83 12:80 13:87 14:93 15:45
+S82STEP blackforest steep-nohb: L10 p99 11.415 max 26.784 range 148 bound 13.1x; L12 p99 3.415 max 7.296 range 81 bound 12.8x; L14 p99 1.000 max 2.443 range 23 bound 11.0x; L16 p99 0.287 max 0.621 range 10 bound 8.6x; L18 p99 0.056 max 0.147 range 3 bound 9.8x; L20 p99 0.007 max 0.029 range 1 bound 6.2x; L22 p99 0.000 max 0.004 range 0 bound 6.3x;
+S82PLAN blackforest steep 200 m | 975 nodes, 54 capped, deepest 17 | 0.2 s | levels 7:30 8:91 9:84 10:101 11:84 12:76 13:86 14:86 15:86 16:95 17:156
+S82PLAN blackforest steep 2000 m | 718 nodes, 0 capped, deepest 15 | 0.1 s | levels 7:43 8:88 9:81 10:100 11:83 12:80 13:86 14:96 15:61
+S82STEP blackforest steep: L10 p99 11.698 max 27.210 range 232 bound 9.1x; L12 p99 3.421 max 7.317 range 112 bound 10.8x; L14 p99 1.001 max 2.444 range 35 bound 12.4x; L16 p99 0.287 max 0.621 range 15 bound 17.8x; L18 p99 0.056 max 0.147 range 5 bound 45.2x; L20 p99 0.007 max 0.029 range 2 bound 99.1x; L22 p99 0.000 max 0.004 range 0 bound 372.3x;
+S82PLAN alps today 200 m | 1039 nodes, 0 capped, deepest 18 | 0.1 s | levels 7:10 8:97 9:99 10:100 11:91 12:93 13:90 14:101 15:99 16:94 17:97 18:68
+S82PLAN alps today 2000 m | 758 nodes, 0 capped, deepest 15 | 0.0 s | levels 7:26 8:96 9:96 10:99 11:91 12:93 13:102 14:103 15:52
+S82STEP alps today: L10 p99 6.105 max 14.292 range 118 bound 9.1x; L12 p99 1.911 max 4.172 range 57 bound 13.8x; L14 p99 0.572 max 1.178 range 20 bound 12.2x; L16 p99 0.150 max 0.362 range 4 bound 11.5x; L18 p99 0.029 max 0.079 range 2 bound 5.0x; L20 p99 0.001 max 0.018 range 0 bound 10.2x; L22 p99 0.000 max 0.000 range 0 bound 12.5x;
+S82PLAN alps steep-nohb 200 m | 1277 nodes, 4 capped, deepest 18 | 0.2 s | levels 7:43 8:97 9:97 10:118 11:94 12:102 13:120 14:128 15:119 16:123 17:123 18:113
+S82PLAN alps steep-nohb 2000 m | 898 nodes, 3 capped, deepest 15 | 0.2 s | levels 7:57 8:97 9:97 10:116 11:93 12:104 13:124 14:136 15:74
+S82STEP alps steep-nohb: L10 p99 33.601 max 77.930 range 362 bound 21.0x; L12 p99 10.616 max 23.316 range 172 bound 28.7x; L14 p99 3.188 max 6.571 range 123 bound 13.1x; L16 p99 0.835 max 2.018 range 34 bound 9.6x; L18 p99 0.159 max 0.438 range 18 bound 4.6x; L20 p99 0.005 max 0.100 range 3 bound 7.8x; L22 p99 0.000 max 0.000 range 1 bound 8.7x;
+S82PLAN alps steep 200 m | 970 nodes, 86 capped, deepest 15 | 0.2 s | levels 7:44 8:97 9:97 10:116 11:102 12:102 13:133 14:143 15:136
+S82PLAN alps steep 2000 m | 901 nodes, 29 capped, deepest 15 | 0.2 s | levels 7:58 8:97 9:97 10:116 11:93 12:104 13:139 14:140 15:57
+S82STEP alps steep: L10 p99 34.019 max 78.096 range 402 bound 19.6x; L12 p99 10.634 max 23.315 range 194 bound 26.8x; L14 p99 3.189 max 6.575 range 113 bound 16.5x; L16 p99 0.835 max 2.018 range 29 bound 20.2x; L18 p99 0.159 max 0.438 range 16 bound 21.1x; L20 p99 0.005 max 0.100 range 3 bound 99.5x; L22 p99 0.000 max 0.000 range 1 bound 442.1x;
+S82PLAN himalaya today 200 m | 1022 nodes, 0 capped, deepest 18 | 0.1 s | levels 7:20 8:92 9:96 10:97 11:90 12:89 13:93 14:91 15:95 16:92 17:97 18:70
+S82PLAN himalaya today 2000 m | 742 nodes, 0 capped, deepest 15 | 0.0 s | levels 7:30 8:91 9:95 10:96 11:90 12:90 13:93 14:104 15:53
+S82STEP himalaya today: L10 p99 6.703 max 14.382 range 265 bound 4.8x; L12 p99 2.060 max 5.217 range 58 bound 15.0x; L14 p99 0.622 max 1.468 range 17 bound 29.1x; L16 p99 0.163 max 0.332 range 9 bound 5.9x; L18 p99 0.033 max 0.090 range 4 bound 3.5x; L20 p99 0.003 max 0.021 range 1 bound 3.2x; L22 p99 0.000 max 0.000 range 0 bound 4.3x;
+S82PLAN himalaya steep-nohb 200 m | 626 nodes, 60 capped, deepest 13 | 0.2 s | levels 7:47 8:92 9:99 10:113 11:97 12:161 13:17
+S82PLAN himalaya steep-nohb 2000 m | 632 nodes, 56 capped, deepest 13 | 0.2 s | levels 7:60 8:91 9:98 10:112 11:97 12:155 13:19
+S82STEP himalaya steep-nohb: L10 p99 43.689 max 90.910 range 783 bound 14.4x; L12 p99 13.284 max 33.835 range 285 bound 23.4x; L14 p99 4.026 max 9.490 range 69 bound 49.7x; L16 p99 1.055 max 2.147 range 42 bound 10.4x; L18 p99 0.216 max 0.579 range 17 bound 6.0x; L20 p99 0.018 max 0.138 range 6 bound 4.7x; L22 p99 0.000 max 0.003 range 2 bound 6.2x;
+S82PLAN himalaya steep 200 m | 625 nodes, 62 capped, deepest 13 | 0.4 s | levels 7:51 8:92 9:99 10:113 11:97 12:169 13:4
+S82PLAN himalaya steep 2000 m | 635 nodes, 62 capped, deepest 13 | 0.2 s | levels 7:62 8:91 9:98 10:112 11:97 12:171 13:4
+S82STEP himalaya steep: L10 p99 46.864 max 92.804 range 1053 bound 11.3x; L12 p99 13.304 max 33.927 range 348 bound 20.9x; L14 p99 4.036 max 9.507 range 76 bound 52.6x; L16 p99 1.055 max 2.148 range 41 bound 24.8x; L18 p99 0.216 max 0.579 range 16 bound 44.1x; L20 p99 0.018 max 0.138 range 6 bound 103.9x; L22 p99 0.000 max 0.003 range 1 bound 424.8x;
+S82PLAN alps-today today 200 m | 1003 nodes, 0 capped, deepest 18 | 0.2 s | levels 7:18 8:89 9:87 10:99 11:93 12:84 13:90 14:94 15:96 16:86 17:101 18:66
+S82PLAN alps-today today 2000 m | 717 nodes, 0 capped, deepest 15 | 0.1 s | levels 7:27 8:89 9:85 10:99 11:90 12:85 13:92 14:102 15:48
+S82STEP alps-today today: L10 p99 5.370 max 13.700 range 329 bound 4.5x; L12 p99 1.667 max 3.505 range 87 bound 8.6x; L14 p99 0.496 max 1.108 range 24 bound 19.6x; L16 p99 0.134 max 0.338 range 10 bound 11.5x; L18 p99 0.028 max 0.082 range 2 bound 12.8x; L20 p99 0.002 max 0.010 range 0 bound 57.2x; L22 p99 0.000 max 0.000 range 0 bound 207.0x;
+S82PLAN alps-today steep-nohb 200 m | 1039 nodes, 0 capped, deepest 18 | 0.2 s | levels 7:25 8:91 9:88 10:108 11:93 12:83 13:94 14:94 15:97 16:86 17:103 18:77
+S82PLAN alps-today steep-nohb 2000 m | 747 nodes, 0 capped, deepest 15 | 0.2 s | levels 7:44 8:90 9:85 10:106 11:90 12:85 13:91 14:107 15:49
+S82STEP alps-today steep-nohb: L10 p99 5.370 max 13.700 range 180 bound 17.4x; L12 p99 1.668 max 3.505 range 40 bound 32.0x; L14 p99 0.496 max 1.108 range 20 bound 30.1x; L16 p99 0.134 max 0.338 range 9 bound 16.3x; L18 p99 0.028 max 0.082 range 2 bound 15.5x; L20 p99 0.002 max 0.010 range 0 bound 32.3x; L22 p99 0.000 max 0.000 range 0 bound 77.0x;
+S82PLAN alps-today steep 200 m | 1058 nodes, 0 capped, deepest 18 | 0.2 s | levels 7:25 8:91 9:88 10:108 11:93 12:83 13:94 14:94 15:95 16:94 17:102 18:91
+S82PLAN alps-today steep 2000 m | 748 nodes, 0 capped, deepest 15 | 0.2 s | levels 7:44 8:90 9:85 10:106 11:90 12:85 13:91 14:107 15:50
+S82STEP alps-today steep: L10 p99 5.433 max 13.989 range 201 bound 15.6x; L12 p99 1.671 max 3.516 range 39 bound 33.1x; L14 p99 0.496 max 1.109 range 20 bound 32.0x; L16 p99 0.134 max 0.338 range 9 bound 20.2x; L18 p99 0.028 max 0.082 range 2 bound 31.5x; L20 p99 0.002 max 0.010 range 0 bound 116.8x; L22 p99 0.000 max 0.000 range 0 bound 446.2x;
+test plancheck::spike82::spike82_lod ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 213 filtered out; finished in 10.16s
+
+=== done 21:48:42

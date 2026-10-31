@@ -1,0 +1,7 @@
+#!/bin/bash
+# SPIKE-82: plans, level steps and bounds for today's eroded field and the steep combined field (branch spike/m9-plains, plancheck.rs spike82_lod).
+cd C:/DEV/Serious-Planet-Builder/.claude/worktrees/sonnet-spikes-36fc88
+echo "=== s82 $(date +%H:%M:%S)"
+S82_FIELDS=target/s81/s81-fields.f32 S82_NCH=4 S82_SITES=blackforest:-7.75:10.25,alps:13.5:-117.25,himalaya:11.75:-111.25,alps-today:11.5:-18.5 \
+  cargo xtask heavy cmd //c start "" //b //wait //belownormal target/release/deps/planet-f7ec3bd3dbee2d4c.exe spike82_lod --ignored --nocapture 2>&1
+echo "=== done $(date +%H:%M:%S)"
