@@ -9,6 +9,7 @@ Per-spike register sections of M5 and M6: `docs/archive/M6/spikes.md`. Closed sp
 ## Index of open spikes
 | Id | Title | Status | Results |
 |---|---|---|---|
+| SPIKE-66 | Relief factor in the generator | closed 2026-10-31 (all-land factor x4-6 for hills, about x7.5 for the Alps' 0.8; the landform driver is the wrong weight; a 10 km stencil breaks batch reads, bounds and plan-check: bake the factor and mean; taper at the coast; breach cuts flats to 10-12 %) | `spikes/m9-relief-factor/results/` |
 | SPIKE-65 | Where M9's relief comes from | closed 2026-10-31 (amplitude x4-6 is the lever, 0.68-1.26 of real at hill sites; steady-state stream power erases landforms; amp6 + transient carve + thermal 0.62-1.13 at hills, Alps 0.53-0.78; landform drivers own the amplitude, R4 the carve and thermal) | `spikes/m9-relief-source/results/` |
 | SPIKE-64 | R3b: CPU thermal and deposition kernels on a region | closed 2026-10-31 (no effect on today's slopes, far under the critical angle; on x4 relief thermal 33 cuts p99 48 to 36 deg; deposition fills basins, 15-33 %; deposition about 0.3-3 s a tile, thermal 16-41 s, needs an active-cell kernel) | `spikes/m9-thermal-deposition/results/` |
 | SPIKE-63 | B8: ground detail at 1.8 m (R6 as a spike) | closed 2026-10-31 (G1 shows at 3-80 m in low sun, laws a and b alike under G3, no GPU cost; G3's 3 cm octave a block grid at the feet; G3 full 0.81-1.47 ms) | `spikes/m9-ground-detail/results/` |

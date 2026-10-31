@@ -1,0 +1,17 @@
+#!/bin/bash
+# SPIKE-66 (b): level error, plan-check and engine stills, without and with the relief factor (hills x6, mountains x10).
+S="$1"; OUT=target/s66; mkdir -p $OUT
+cargo build --release -p planet 2>&1 | tail -1
+for v in base k6m10; do
+  if [ $v = base ]; then E=""; else E="PLANET_RELIEF_K=6 PLANET_RELIEF_KM=10"; fi
+  echo "=== $v level error $(date +%T) cpu $(powershell -NoProfile -Command '(Get-CimInstance Win32_Processor).LoadPercentage')%"
+  env $E PLANET_ANET_STORE=C:/DEV/SeriousPlanetData/global16384 PLANET_ANET_RES=16384 RELIEF_SITES=alps:11.5:-18.5,blackforest:2.5:-124.5 cmd //c start "" //b //wait //belownormal cargo test -p planet --release --lib relief_level_error -- --ignored --nocapture 2>&1 | grep -E "LEVELERR|panicked"
+  echo "=== $v plan-check $(date +%T)"
+  env $E cmd //c start "" //b //wait //belownormal target/release/planet.exe generate --plan-check C:/DEV/SeriousPlanetData/global16384 --global-res 16384 2>&1 | tail -8
+  for site in alps blackforest; do
+    echo "=== $v stills $site $(date +%T)"
+    env $E cmd //c start "" //b //wait //belownormal target/release/planet.exe test-render --scene capture-stills --adapter hardware --store C:/DEV/SeriousPlanetData/global16384 --poses $S/poses-$site.toml --out-dir $OUT/stills/$site-$v 2>&1 | grep -v "^$" | tail -4
+    cat $OUT/stills/$site-$v/stills.txt; head -5 $OUT/stills/$site-$v/capped.txt
+  done
+done
+echo "=== done $(date +%T)"
