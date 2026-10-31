@@ -79,11 +79,13 @@ impl State {
     /// The next job a free worker may take: the best class with a job whose share is under its ceiling (a closing system keeps the ceilings and drains).
     fn take(&mut self, kind: Kind) -> Option<Queued> {
         for class in Class::ALL {
-            let fits = match kind {
-                Kind::Frame => class == Class::FrameCritical,
-                Kind::Idle => class == Class::Idle,
-                Kind::Any => !(self.frame_dedicated && class == Class::FrameCritical) && !(self.idle_dedicated && class == Class::Idle),
-            };
+            // A closing system drains whatever is queued, whichever worker is left: a running job may queue a job of a class whose dedicated worker has gone.
+            let fits = self.closed
+                || match kind {
+                    Kind::Frame => class == Class::FrameCritical,
+                    Kind::Idle => class == Class::Idle,
+                    Kind::Any => !(self.frame_dedicated && class == Class::FrameCritical) && !(self.idle_dedicated && class == Class::Idle),
+                };
             if !fits {
                 continue;
             }
@@ -280,7 +282,10 @@ impl Share {
             panic!("job spawned on share {name}: its job system was dropped, so no worker is left to run it (keep the JobSystem alive as long as its shares are used)");
         }
         st.queues[class as usize].push_back(Queued { share: self.index, class, job });
-        let (dedicated, idle_only) = (st.frame_dedicated || st.idle_dedicated, st.idle_dedicated && class == Class::Idle);
+        let (dedicated, idle_only) = (st.frame_dedicated || st.idle_dedicated, st.idle_dedicated && class == Class::Idle && !st.closed);
+        if st.closed {
+            self.shared.wake_idle.notify_all();
+        }
         drop(st);
         // With workers that take one class only, the one woken may be a worker that cannot take this job: wake them all. An idle job with idle-only workers
         // wakes only those.
@@ -489,6 +494,81 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(1));
             }
         })
+    }
+
+    /// A deterministic pseudo-random sequence (a stall must be reproducible by its seed).
+    fn lcg(state: &mut u64) -> u64 {
+        *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        *state >> 33
+    }
+
+    // spec: BUDG-008
+    #[test]
+    fn mixed_classes_on_ordinary_frame_and_idle_only_workers_all_run_and_the_system_drops_without_a_stall() {
+        // (ordinary workers, frame workers, idle-only workers, ceiling, idle cap): the shapes the rig and the tools build, and the thin ones of a small CI machine.
+        let shapes = [(1, 1, 1, 3, 1), (1, 0, 1, 2, 1), (2, 1, 2, 5, 2), (1, 1, 0, 2, 1), (3, 1, 3, 7, 3), (1, 1, 1, 1, 1)];
+        for (shape, &(workers, frame, idle, ceiling, cap)) in shapes.iter().enumerate() {
+            for seed in 0..150u64 {
+                let (done_tx, done_rx) = mpsc::channel();
+                std::thread::Builder::new()
+                    .name("stress".into())
+                    .spawn(move || {
+                        let system = JobSystem::with_dedicated_workers(workers, Priority::Normal, frame, Priority::Normal, idle);
+                        let share = system.share_with_idle("t", ceiling, cap);
+                        let other = system.share("o", 2);
+                        let ran = Arc::new(AtomicUsize::new(0));
+                        let mut state = seed * 7919 + shape as u64;
+                        let (total, mut extra) = (300usize, 0usize);
+                        for k in 0..total {
+                            let r = lcg(&mut state);
+                            // Idle jobs need an idle-only worker or an ordinary one; frame-critical ones a frame worker or an ordinary one: with none of the kind the
+                            // system routes the class to the workers that take it, so every class is submitted whatever the shape.
+                            let class = Class::ALL[(r % 4) as usize];
+                            let target = if r % 5 == 0 { &other } else { &share };
+                            let (ran, spawn_more) = (Arc::clone(&ran), r % 11 == 0);
+                            extra += usize::from(spawn_more);
+                            let again = target.clone();
+                            target.spawn_class(
+                                class,
+                                Box::new(move || {
+                                    if k % 3 == 0 {
+                                        std::thread::yield_now();
+                                    }
+                                    if spawn_more {
+                                        let ran = Arc::clone(&ran);
+                                        again.spawn_class(
+                                            Class::Idle,
+                                            Box::new(move || {
+                                                ran.fetch_add(1, Ordering::SeqCst);
+                                            }),
+                                        );
+                                    }
+                                    ran.fetch_add(1, Ordering::SeqCst);
+                                }),
+                            );
+                        }
+                        // Steady state first: every job must run while the system is open (a lost wake-up leaves a queued job with a free worker), then the drop drains and joins.
+                        let started = std::time::Instant::now();
+                        while ran.load(Ordering::SeqCst) < total + extra {
+                            assert!(
+                                started.elapsed() < Duration::from_secs(30),
+                                "stall before the drop: shape {shape}, seed {seed}: {} of {} ran",
+                                ran.load(Ordering::SeqCst),
+                                total + extra
+                            );
+                            std::thread::yield_now();
+                        }
+                        // Dropping the system drains the queues and joins every worker: a lost wake-up leaves a worker waiting for ever.
+                        drop(system);
+                        let _ = done_tx.send((ran.load(Ordering::SeqCst), total + extra));
+                    })
+                    .unwrap();
+                let (ran, expected) = done_rx.recv_timeout(Duration::from_secs(60)).unwrap_or_else(|_| {
+                    panic!("stall: shape {shape} {:?}, seed {seed}: the system did not drain and drop in 60 s", shapes[shape])
+                });
+                assert_eq!(ran, expected, "shape {shape}, seed {seed}: jobs that ran");
+            }
+        }
     }
 
     // spec: BUDG-008
