@@ -193,7 +193,7 @@ impl Frame {
         Frame { dir, e1, e2, radius }
     }
 
-    fn to_plane(&self, d: Vec3) -> (f64, f64) {
+    fn project(&self, d: Vec3) -> (f64, f64) {
         let (x, y) = (d.dot(self.e1), d.dot(self.e2));
         let s = libm::hypot(x, y);
         if s == 0.0 {
@@ -204,7 +204,7 @@ impl Frame {
         (x * k, y * k)
     }
 
-    fn from_plane(&self, x: f64, y: f64) -> Vec3 {
+    fn unproject(&self, x: f64, y: f64) -> Vec3 {
         let rho = libm::hypot(x, y);
         if rho == 0.0 {
             return self.dir;
@@ -288,7 +288,7 @@ impl ClipmapPlanner {
         let (frame, generation, reanchored) = match &self.state {
             Some(s)
                 if s.texel0 == texel0 && {
-                    let (x, y) = s.frame.to_plane(cam);
+                    let (x, y) = s.frame.project(cam);
                     x.abs().max(y.abs()) <= 0.25 * f64::from(p.texels) * texel0
                 } =>
             {
@@ -297,7 +297,7 @@ impl ClipmapPlanner {
             Some(s) => (Frame::new(cam, p.radius_m), s.generation + 1, true),
             None => (Frame::new(cam, p.radius_m), 1, true),
         };
-        let (cx, cy) = frame.to_plane(cam);
+        let (cx, cy) = frame.project(cam);
         let windows: Vec<TexelRect> = (0..p.levels)
             .map(|k| {
                 let (ix, iy) = (libm::round(cx / texel_of(k)) as i64, libm::round(cy / texel_of(k)) as i64);
@@ -313,6 +313,7 @@ impl ClipmapPlanner {
 
         let mut levels = Vec::with_capacity(p.levels);
         let mut all_blocks = Vec::with_capacity(p.levels);
+        #[allow(clippy::needless_range_loop)] // `k` also scales the texel and indexes the previous state's levels
         for k in 0..p.levels {
             let texel_m = texel_of(k);
             let window = windows[k];
@@ -339,7 +340,7 @@ impl ClipmapPlanner {
                 if dir.dot(frame.dir) <= 0.0 {
                     continue;
                 }
-                let (x, y) = frame.to_plane(dir);
+                let (x, y) = frame.project(dir);
                 let r = TexelRect {
                     x0: libm::floor((x - reach) / texel_m) as i64 - 1,
                     y0: libm::floor((y - reach) / texel_m) as i64 - 1,
@@ -460,7 +461,7 @@ fn tile_rect(frame: &Frame, map: &dyn FaceMapping, tile: TileId, texel_m: f64) -
                 continue;
             }
             any = true;
-            let (x, y) = frame.to_plane(d);
+            let (x, y) = frame.project(d);
             x0 = x0.min(x);
             y0 = y0.min(y);
             x1 = x1.max(x);
@@ -502,7 +503,7 @@ fn fit_block(frame: &Frame, map: &dyn FaceMapping, tile: TileId, rect: TexelRect
         // `fa`, `fb` in [-1, 1] across the block's texel centres.
         let (a, b) = (hx * (1.0 + fa), hy * (1.0 + fb));
         let (px, py) = ((rect.x0 as f64 + a + 0.5) * texel_m, (rect.y0 as f64 + b + 0.5) * texel_m);
-        let d = frame.from_plane(px, py);
+        let d = frame.unproject(px, py);
         let (u, v) = tile_uv(map, tile, d);
         (u, v, px, py)
     };
@@ -558,8 +559,11 @@ fn fit_block(frame: &Frame, map: &dyn FaceMapping, tile: TileId, rect: TexelRect
 
     // Reject a block wholly outside its tile: every check point beyond the same edge by more than the map's own texel step.
     let m = 1.5 * (u1[0].abs() + u1[1].abs()).max(v1[0].abs() + v1[1].abs()).max(1.0e-12);
-    let all = |f: &dyn Fn(&(f64, f64, f64, f64, f64, f64)) -> bool| pts.iter().all(f);
-    if all(&|p| p.0 < -m) || all(&|p| p.0 > 1.0 + m) || all(&|p| p.1 < -m) || all(&|p| p.1 > 1.0 + m) {
+    if pts.iter().all(|p| p.0 < -m)
+        || pts.iter().all(|p| p.0 > 1.0 + m)
+        || pts.iter().all(|p| p.1 < -m)
+        || pts.iter().all(|p| p.1 > 1.0 + m)
+    {
         return None;
     }
 
@@ -621,8 +625,9 @@ fn solve4(mut a: [[f64; 4]; 4], mut b: [f64; 4]) -> [f64; 4] {
         }
         for r in col + 1..4 {
             let f = a[r][col] / d;
-            for c in col..4 {
-                a[r][c] -= f * a[col][c];
+            let pivot_row = a[col];
+            for (x, pv) in a[r].iter_mut().zip(pivot_row).skip(col) {
+                *x -= f * pv;
             }
             b[r] -= f * b[col];
         }
