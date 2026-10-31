@@ -524,8 +524,8 @@ mod tests {
                             // Idle jobs need an idle-only worker or an ordinary one; frame-critical ones a frame worker or an ordinary one: with none of the kind the
                             // system routes the class to the workers that take it, so every class is submitted whatever the shape.
                             let class = Class::ALL[(r % 4) as usize];
-                            let target = if r % 5 == 0 { &other } else { &share };
-                            let (ran, spawn_more) = (Arc::clone(&ran), r % 11 == 0);
+                            let target = if r.is_multiple_of(5) { &other } else { &share };
+                            let (ran, spawn_more) = (Arc::clone(&ran), r.is_multiple_of(11));
                             extra += usize::from(spawn_more);
                             let again = target.clone();
                             target.spawn_class(
