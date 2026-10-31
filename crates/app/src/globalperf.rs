@@ -1640,4 +1640,55 @@ mod tests {
             }
         });
     }
+
+    /// SPIKE-65 (spike code, never merged): windows of the base field at SPIKE-61's grid (48 cells per coupled cell, 101.8 m at 16384)
+    /// centred on latitudes and longitudes, as f32 rasters `<dir>/<name>-orig-WxW.f32` (row j north-south along the face's t axis).
+    /// `PLANET_ANET_STORE=DIR PLANET_ANET_RES=16384 RELIEF_SITES=name:lat:lon,... RELIEF_W=2560 RELIEF_DIR=DIR cargo test -p planet --release
+    /// --lib relief_window_dump -- --ignored --nocapture`. Read only on the store.
+    #[test]
+    #[ignore = "a spike measurement"]
+    fn relief_window_dump() {
+        use planet_core::cube::{direction_to_face, face_to_direction, Face, TangentWarp};
+        let res: u32 = std::env::var("PLANET_ANET_RES").ok().and_then(|v| v.parse().ok()).unwrap_or(256);
+        let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
+        let w: usize = std::env::var("RELIEF_W").ok().and_then(|v| v.parse().ok()).unwrap_or(2560);
+        let dir = std::env::var("RELIEF_DIR").unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut so = std::io::stdout();
+        let (world, maps, _tile) = anet_scene(res, 11, store, &mut so).unwrap();
+        let field = world.field().unwrap();
+        let m = maps.lattice().n() * 48;
+        for site in std::env::var("RELIEF_SITES").unwrap().split(',') {
+            let v: Vec<&str> = site.split(':').collect();
+            let (name, lat, lon): (&str, f64, f64) = (v[0], v[1].parse().unwrap(), v[2].parse().unwrap());
+            let d = planet_core::Vec3::from_lat_lon(lat.to_radians(), lon.to_radians());
+            let (face, s, t) = direction_to_face(&TangentWarp, d);
+            let ci = (((s + 1.0) * 0.5 * m as f64) as usize).clamp(w / 2, m - w / 2);
+            let cj = (((t + 1.0) * 0.5 * m as f64) as usize).clamp(w / 2, m - w / 2);
+            let (i0, j0) = (ci - w / 2, cj - w / 2);
+            let t0 = std::time::Instant::now();
+            let mut dirs = Vec::with_capacity(w * w);
+            for j in j0..j0 + w {
+                for i in i0..i0 + w {
+                    dirs.push(face_to_direction(&TangentWarp, face, -1.0 + (2.0 * i as f64 + 1.0) / m as f64, -1.0 + (2.0 * j as f64 + 1.0) / m as f64));
+                }
+            }
+            let dx = world.radius_m() * libm::acos(dirs[w * (w / 2) + w / 2].dot(dirs[w * (w / 2) + w / 2 + 1]).min(1.0));
+            let h = field.heights_threaded(&dirs, 4);
+            let mut b = Vec::with_capacity(w * w * 4);
+            for x in &h {
+                b.extend_from_slice(&(*x as f32).to_le_bytes());
+            }
+            std::fs::write(format!("{dir}/{name}-orig-{w}x{w}.f32"), b).unwrap();
+            let land = h.iter().filter(|&&x| x > 0.0).count() as f64 / h.len() as f64;
+            println!(
+                "RELIEF {name}: face {} cells i {i0} j {j0} ({w}^2), dx {dx:.2} m, land {:.1} %, min {:.0} max {:.0} m, sampled in {:.1} s",
+                face.0,
+                100.0 * land,
+                h.iter().cloned().fold(f64::MAX, f64::min),
+                h.iter().cloned().fold(f64::MIN, f64::max),
+                t0.elapsed().as_secs_f64()
+            );
+        }
+    }
 }
