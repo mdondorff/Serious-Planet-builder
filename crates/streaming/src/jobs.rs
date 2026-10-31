@@ -146,7 +146,8 @@ impl Drop for JobSystem {
     }
 }
 
-/// A subsystem's handle on the job system: its ceiling and its queue position by class.
+/// A subsystem's handle on the job system: its ceiling and its queue position by class. A share that outlives its `JobSystem` runs no spawned job (the
+/// workers are gone); `fan_out` still completes on the calling thread.
 #[derive(Clone)]
 pub struct Share {
     shared: Arc<Shared>,
@@ -241,7 +242,7 @@ impl Spawner for Share {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::{AtomicBool, AtomicUsize};
     use std::sync::mpsc;
     use std::time::Duration;
 
@@ -353,13 +354,26 @@ mod tests {
         let sum: usize = share.fan_out(Class::FrameCritical, 50, Arc::new(|i| i)).into_iter().sum();
         assert_eq!(sum, (0..50).sum::<usize>());
         let caught = catch_unwind(AssertUnwindSafe(|| {
-            share.fan_out(Class::FrameCritical, 8, Arc::new(|i| if i == 5 { panic!("work failed") } else { i }));
+            let ran = Arc::new(AtomicUsize::new(0));
+            let r = Arc::clone(&ran);
+            let work: Arc<dyn Fn(usize) -> usize + Send + Sync> = Arc::new(move |i| {
+                r.fetch_add(1, Ordering::SeqCst);
+                if i == 5 {
+                    panic!("work failed")
+                }
+                i
+            });
+            let out = catch_unwind(AssertUnwindSafe(|| share.fan_out(Class::FrameCritical, 8, work)));
+            assert_eq!(ran.load(Ordering::SeqCst), 8, "every index ran before the panic was raised");
+            if let Err(p) = out {
+                resume_unwind(p);
+            }
         }));
         assert!(caught.is_err(), "the panic reaches the caller");
         release.store(true, Ordering::SeqCst);
-        // The worker is still alive after the panic.
+        // A plain job that panics does not end the only worker either: the next job still runs.
+        share.spawn_class(Class::Visible, Box::new(|| panic!("job failed")));
         let (tx, rx) = mpsc::channel();
-        drop(system.share("again", 1));
         share.spawn_class(Class::Visible, Box::new(move || tx.send(1).unwrap()));
         assert_eq!(rx.recv_timeout(Duration::from_secs(10)).unwrap(), 1);
     }
