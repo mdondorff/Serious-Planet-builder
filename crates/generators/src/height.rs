@@ -488,21 +488,11 @@ pub fn generate_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: T
 pub fn generate_region(seed: u64, map: &(dyn FaceMapping + Sync), ids: &[TileId], res: u32, threads: usize) -> Vec<TileData> {
     let threads = threads.max(1).min(ids.len().max(1));
     let chunk = ids.len().div_ceil(threads).max(1);
-    let mut out: Vec<TileData> = Vec::with_capacity(ids.len());
-    std::thread::scope(|scope| {
-        let handles: Vec<_> = ids
-            .chunks(chunk)
-            .map(|part| {
-                planet_core::thread::spawn_named(scope, "tile-worker", move || {
-                    part.iter().map(|&id| generate_tile(seed, map, id, res)).collect::<Vec<_>>()
-                })
-            })
-            .collect();
-        for h in handles {
-            out.extend(h.join().expect("generator thread panicked"));
-        }
-    });
-    out
+    let chunks: Vec<&[TileId]> = ids.chunks(chunk).collect();
+    planet_core::par::map(&threads, chunks.len(), &|c| chunks[c].iter().map(|&id| generate_tile(seed, map, id, res)).collect::<Vec<_>>())
+        .into_iter()
+        .flatten()
+        .collect()
 }
 
 pub(crate) fn fold_str(s: &str) -> Vec<u64> {

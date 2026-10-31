@@ -3,7 +3,7 @@
 All background work SHALL run on one job system with a core budget per subsystem (BUDG-003) and the priority classes frame-critical, visible streaming and edits, prefetch, and idle (bakes), in that order. No subsystem SHALL create threads outside it, including the scoped workers of a job.
 
 Verify: A
-Status: planned
+Status: active
 Source: ADR 0083 point 2; opus-planner (2026-10-31, the order of the moves: tile pool, chunk pool, plan workers, horizon bakes)
 
 #### Scenario: A thread outside

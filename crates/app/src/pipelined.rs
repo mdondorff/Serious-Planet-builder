@@ -92,6 +92,8 @@ pub(crate) struct Rig {
     /// The start-up load of the roots (the tiles of the render floor, STRM-001): how many and how long it waited for them (a reading,
     /// STRM-022: the cold start of a run without a pre-fill is the one without the pack's tiles).
     pub roots: (usize, std::time::Duration),
+    /// The horizon bakes' pool: the idle class of the terrain share (`WorldTerrain::enable_viewer_horizon_on`).
+    pub horizon_pool: Arc<dyn Spawner>,
     /// The job system the tile and plan workers run on (BUDG-004); last, so it is dropped after the streamer and the plan worker that feed it.
     pub _system: Arc<planet_streaming::jobs::JobSystem>,
 }
@@ -124,8 +126,12 @@ impl Rig {
         crate::stall::phase_mark("renderer warm-up");
         // One job system for the rig (BUDG-004): the tile workers below normal priority (ADR 0046) and the plan worker, a frame-critical thread at normal priority,
         // on the one share `terrain`, whose ceiling holds both.
-        let system = Arc::new(JobSystem::with_frame_workers(gen.workers, gen.priority, 1, Priority::Normal));
-        let terrain = system.share("terrain", gen.workers + 1);
+        // The horizon bakes (STRM-060, STRM-064) are the idle class of the same share: `horizon` more threads that run idle jobs only, so a bake never holds a worker a visible job needs and the tile jobs keep their `gen.workers` threads.
+        let horizon = crate::horizonworld::horizon_workers(gen);
+        let system = Arc::new(JobSystem::with_dedicated_workers(gen.workers, gen.priority, 1, Priority::Normal, horizon));
+        let terrain = system.share_with_idle("terrain", gen.workers + 1 + horizon, horizon);
+        let horizon_pool: Arc<dyn Spawner> = Arc::new(terrain.clone());
+        world.set_job_par(Arc::new(terrain.par()));
         let plan_pool: Arc<dyn Spawner> = Arc::new(terrain.classed(Class::FrameCritical));
         let plan_par = Arc::new(terrain.par());
         let tile_pool: Arc<dyn Spawner> = Arc::new(terrain);
@@ -164,7 +170,7 @@ impl Rig {
         // The roots go to the GPU here too (STRM-001, ADR 0064): the start-up load is a step of the body, so frame 0 is a steady frame and
         // carries no root upload (a measured frame stays under the cap of STRM-006 and the CON-21 limits).
         managed.upload_roots(&mut RendererSink { ctx, renderer: &mut renderer })?;
-        Ok(Rig { renderer, managed, fi: FramesInFlight::new(MAX_FRAMES_IN_FLIGHT), pool, roots, _system: system })
+        Ok(Rig { renderer, managed, fi: FramesInFlight::new(MAX_FRAMES_IN_FLIGHT), pool, roots, horizon_pool, _system: system })
     }
 }
 

@@ -304,19 +304,17 @@ pub fn bake_horizon_with(
     let mut data = vec![0u8; w * h * a];
     let row_len = w * a;
     let rows_per = h.div_ceil(threads.clamp(1, h)).max(1);
-    std::thread::scope(|s| {
-        for (c, part) in data.chunks_mut(rows_per * row_len).enumerate() {
-            let (dirs, steps) = (&dirs, &steps);
-            planet_core::thread::spawn_named(s, "horizon-bake", move || {
-                for (r, row) in part.chunks_mut(row_len).enumerate() {
-                    let y = y0 + c * rows_per + r;
-                    for i in 0..w {
-                        texel_bytes(raster, steps, x0 + i, y, dirs, kernel, &mut row[i * a..(i + 1) * a]);
-                    }
-                }
-            });
+    let parts: Vec<std::sync::Mutex<&mut [u8]>> = data.chunks_mut(rows_per * row_len).map(std::sync::Mutex::new).collect();
+    planet_core::par::Par::run(&threads, parts.len(), &|c| {
+        let mut part = parts[c].lock().expect("a horizon chunk");
+        for (r, row) in part.chunks_mut(row_len).enumerate() {
+            let y = y0 + c * rows_per + r;
+            for i in 0..w {
+                texel_bytes(raster, &steps, x0 + i, y, &dirs, kernel, &mut row[i * a..(i + 1) * a]);
+            }
         }
     });
+    drop(parts);
     Ok(HorizonMap { w, h, azimuths: p.azimuths, data })
 }
 

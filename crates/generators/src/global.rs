@@ -218,22 +218,15 @@ impl LandformLattice {
         let n = LANDFORM_LATTICE_N;
         let map = planet_core::cube::TangentWarp;
         // One thread per face: every value is independent of the others, so the lattice does not depend on the thread count (CON-14).
-        let faces = std::thread::scope(|scope| {
-            let handles: Vec<_> = (0..6u8)
-                .map(|f| {
-                    scope.spawn(move || {
-                        let mut values = Vec::with_capacity((n + 1) * (n + 1));
-                        for j in 0..=n {
-                            for i in 0..=n {
-                                let (s, t) = (2.0 * i as f64 / n as f64 - 1.0, 2.0 * j as f64 / n as f64 - 1.0);
-                                values.push(landform(seed, face_to_direction(&map, Face(f), s, t)) as f32);
-                            }
-                        }
-                        values
-                    })
-                })
-                .collect();
-            handles.into_iter().map(|h| h.join().expect("a landform lattice thread")).collect()
+        let faces = planet_core::par::map(&6usize, 6, &|f| {
+            let mut values = Vec::with_capacity((n + 1) * (n + 1));
+            for j in 0..=n {
+                for i in 0..=n {
+                    let (s, t) = (2.0 * i as f64 / n as f64 - 1.0, 2.0 * j as f64 / n as f64 - 1.0);
+                    values.push(landform(seed, face_to_direction(&map, Face(f as u8), s, t)) as f32);
+                }
+            }
+            values
         });
         LandformLattice { faces }
     }
@@ -470,27 +463,20 @@ pub fn bake(seed: u64, map: &(dyn FaceMapping + Sync), res: u32, threads: usize)
         let threads = threads.max(1).min(rows.len());
         let chunk = rows.len().div_ceil(threads);
         let mut out = Vec::with_capacity((n * n) as usize);
-        std::thread::scope(|scope| {
-            let handles: Vec<_> = rows
-                .chunks(chunk)
-                .map(|rs| {
-                    planet_core::thread::spawn_named(scope, "bake-rows", move || {
-                        let mut v = Vec::with_capacity(rs.len() * n as usize);
-                        for &l in rs {
-                            let t = face_coord(l, res);
-                            for k in 0..n {
-                                let s = face_coord(k, res);
-                                v.push(sample(seed, face_to_direction(map, face, s, t)));
-                            }
-                        }
-                        v
-                    })
-                })
-                .collect();
-            for h in handles {
-                out.extend(h.join().expect("bake thread panicked"));
+        let chunks: Vec<&[u32]> = rows.chunks(chunk).collect();
+        for part in planet_core::par::map(&threads, chunks.len(), &|c| {
+            let mut v = Vec::with_capacity(chunks[c].len() * n as usize);
+            for &l in chunks[c] {
+                let t = face_coord(l, res);
+                for k in 0..n {
+                    let s = face_coord(k, res);
+                    v.push(sample(seed, face_to_direction(map, face, s, t)));
+                }
             }
-        });
+            v
+        }) {
+            out.extend(part);
+        }
         out
     });
     Ok(GlobalGrid { seed, res, faces })
@@ -625,20 +611,11 @@ pub fn bake_blocks_with<A: Send>(
             next = end;
             continue;
         }
-        let blocks: Vec<(Vec<GlobalSample>, A)> = std::thread::scope(|scope| {
-            let (live, peak) = (&live, &peak);
-            let handles: Vec<_> = batch
-                .iter()
-                .map(|t| {
-                    planet_core::thread::spawn_named(scope, "bake-block", move || {
-                        let block = bake_block(seed, map, *t, cells);
-                        peak.fetch_max(live.fetch_add(1, Ordering::SeqCst) + 1, Ordering::SeqCst);
-                        let a = analyse(*t, &block);
-                        (block, a)
-                    })
-                })
-                .collect();
-            handles.into_iter().map(|h| h.join().expect("bake thread panicked")).collect()
+        let blocks: Vec<(Vec<GlobalSample>, A)> = planet_core::par::map(&batch.len(), batch.len(), &|i| {
+            let block = bake_block(seed, map, batch[i], cells);
+            peak.fetch_max(live.fetch_add(1, Ordering::SeqCst) + 1, Ordering::SeqCst);
+            let a = analyse(batch[i], &block);
+            (block, a)
         });
         for (t, (b, a)) in batch.iter().zip(blocks) {
             sink(*t, b, a);

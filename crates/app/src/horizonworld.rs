@@ -550,6 +550,19 @@ impl WorldTerrain {
     /// the stamps on a pool of their own ([`horizon_workers`] threads, all in the idle class, one thread a bake: the march scales poorly inside a map
     /// and linearly across maps), and the stored far-field horizon is requested.
     pub fn enable_viewer_horizon(self: &Arc<Self>, gen: planet_streaming::GenWorkers, clock: Arc<dyn Clock>) -> Result<(), String> {
+        let workers = horizon_workers(gen);
+        let pool: Arc<dyn Spawner> = planet_streaming::GenWorkers::new(1).with_priority(gen.priority).pool_with_idle(workers);
+        self.enable_viewer_horizon_on(gen, pool, clock)
+    }
+
+    /// [`enable_viewer_horizon`](WorldTerrain::enable_viewer_horizon) on `pool`, the idle class of a rig's terrain share (BUDG-004): the horizon bakes then count in the same
+    /// share as the tile and plan jobs. The tools without a rig make a pool of their own.
+    pub fn enable_viewer_horizon_on(
+        self: &Arc<Self>,
+        gen: planet_streaming::GenWorkers,
+        pool: Arc<dyn Spawner>,
+        clock: Arc<dyn Clock>,
+    ) -> Result<(), String> {
         let lat = self.horizon_lattice().ok_or("the world has no bake: no horizon shadows")?;
         let mut params = chunk_horizon_params(&lat, self.radius_m());
         // A test run (the software adapter in CI) asks for a short march so that a map is a small raster: `PLANET_HORIZON_RANGE_M`, never below one chunk cell.
@@ -557,7 +570,6 @@ impl WorldTerrain {
             params.range_m = params.range_m.min(r.max(lat.cell_m(self.radius_m()) * 4.0));
         }
         let workers = horizon_workers(gen);
-        let pool: Arc<dyn Spawner> = planet_streaming::GenWorkers::new(1).with_priority(gen.priority).pool_with_idle(workers);
         let cfg = HorizonConfig { workers, ..Default::default() };
         self.enable_horizon(params, pool, clock, cfg, self.horizon_threads_set().unwrap_or(1))?;
         self.request_coarse_horizon();

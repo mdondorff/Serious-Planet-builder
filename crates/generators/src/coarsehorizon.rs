@@ -9,6 +9,7 @@
 
 use crate::coupled::Lattice;
 use crate::horizon::quantize;
+use planet_core::par::Par;
 use planet_core::Vec3;
 
 /// The most azimuths a map may hold (the map is `6 m^2` cells of that many bytes).
@@ -191,29 +192,27 @@ pub fn coarse_horizon_at(
     let cells = 6 * m * m;
     let mut out = vec![0u8; cells * a];
     let per = cells.div_ceil(threads.clamp(1, cells)).max(1);
-    std::thread::scope(|s| {
-        for (c, part) in out.chunks_mut(per * a).enumerate() {
-            let (obs, height, observer_height) = (&obs, &height, &observer_height);
-            planet_core::thread::spawn_named(s, "coarse-horizon", move || {
-                for (r, bytes) in part.chunks_mut(a).enumerate() {
-                    let d0 = obs.direction(c * per + r);
-                    let h0 = observer_height(c * per + r);
-                    for (k, byte) in bytes.iter_mut().enumerate() {
-                        let az = core::f64::consts::TAU * k as f64 / f64::from(p.azimuths);
-                        let t = tangent(d0, az);
-                        let mut best = f64::NEG_INFINITY;
-                        for step in 1..=steps {
-                            let sarc = step as f64 * p.step_m;
-                            let theta = sarc / p.radius_m;
-                            let dir = d0 * libm::cos(theta) + t * libm::sin(theta);
-                            best = best.max(elevation(p.radius_m, h0, height(dir), sarc));
-                        }
-                        *byte = if best.is_finite() { quantize(best) } else { 0 };
-                    }
+    let parts: Vec<std::sync::Mutex<&mut [u8]>> = out.chunks_mut(per * a).map(std::sync::Mutex::new).collect();
+    threads.run(parts.len(), &|c| {
+        let mut part = parts[c].lock().expect("a coarse horizon chunk");
+        for (r, bytes) in part.chunks_mut(a).enumerate() {
+            let d0 = obs.direction(c * per + r);
+            let h0 = observer_height(c * per + r);
+            for (k, byte) in bytes.iter_mut().enumerate() {
+                let az = core::f64::consts::TAU * k as f64 / f64::from(p.azimuths);
+                let t = tangent(d0, az);
+                let mut best = f64::NEG_INFINITY;
+                for step in 1..=steps {
+                    let sarc = step as f64 * p.step_m;
+                    let theta = sarc / p.radius_m;
+                    let dir = d0 * libm::cos(theta) + t * libm::sin(theta);
+                    best = best.max(elevation(p.radius_m, h0, height(dir), sarc));
                 }
-            });
+                *byte = if best.is_finite() { quantize(best) } else { 0 };
+            }
         }
     });
+    drop(parts);
     Ok(out)
 }
 
