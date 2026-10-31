@@ -1,0 +1,20 @@
+heavy-run lock: the machine is free after 1542 s: running `C:/Program Files/Git/usr/bin/bash.exe C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/570e124f-4ca5-49b4-8bf6-680604dce399/scratchpad/s70/hybrid.sh`
+$ C:/Program Files/Git/usr/bin/bash.exe C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/570e124f-4ca5-49b4-8bf6-680604dce399/scratchpad/s70/hybrid.sh
+=== hybrid 15:34:50 cpu 1%
+blackforest: hybrid 800 m + local carve to 10 km2: 4 tiles 153 s
+blackforest hybrid10km2 hard: step over 12269 edge pairs p50 7.28 p99 71.52 max 142.76 m | |s-j| by distance (p50/p99 m) 0-1: 44.28/312.05, 2-8: 43.78/308.26, 9-32: 46.18/302.61, 33-128: 46.92/294.00, 129-512: 47.16/311.63, 513-4000: 41.02/354.28 | crossings mosaic 223 joint 281 matched 66 | ponds near seams mosaic 1207 joint 1116
+blackforest: hybrid 800 m + local carve to 1 km2: 4 tiles 150 s
+blackforest hybrid1km2 hard: step over 12270 edge pairs p50 6.74 p99 68.75 max 137.46 m | |s-j| by distance (p50/p99 m) 0-1: 41.48/302.37, 2-8: 40.71/293.55, 9-32: 43.13/287.76, 33-128: 43.97/283.24, 129-512: 44.33/300.87, 513-4000: 38.49/344.72 | crossings mosaic 225 joint 281 matched 72 | ponds near seams mosaic 943 joint 1116
+highlands: hybrid 800 m + local carve to 10 km2: 4 tiles 153 s
+highlands hybrid10km2 hard: step over 9216 edge pairs p50 7.13 p99 111.21 max 201.71 m | |s-j| by distance (p50/p99 m) 0-1: 62.46/384.19, 2-8: 61.86/391.92, 9-32: 57.67/441.25, 33-128: 57.23/487.80, 129-512: 64.33/497.98, 513-4000: 67.43/368.40 | crossings mosaic 124 joint 160 matched 37 | ponds near seams mosaic 1234 joint 883
+highlands: hybrid 800 m + local carve to 1 km2: 4 tiles 152 s
+highlands hybrid1km2 hard: step over 9218 edge pairs p50 6.69 p99 106.53 max 201.64 m | |s-j| by distance (p50/p99 m) 0-1: 59.24/374.66, 2-8: 58.40/377.77, 9-32: 54.04/422.60, 33-128: 53.57/466.36, 129-512: 60.72/477.08, 513-4000: 63.77/359.54 | crossings mosaic 121 joint 160 matched 35 | ponds near seams mosaic 984 joint 883
+valleyridge: hybrid 800 m + local carve to 10 km2: 4 tiles 150 s
+valleyridge hybrid10km2 hard: step over 10599 edge pairs p50 5.75 p99 58.74 max 117.44 m | |s-j| by distance (p50/p99 m) 0-1: 33.78/160.11, 2-8: 34.68/162.53, 9-32: 34.89/158.23, 33-128: 34.78/161.37, 129-512: 35.33/164.90, 513-4000: 45.03/178.16 | crossings mosaic 164 joint 220 matched 45 | ponds near seams mosaic 1165 joint 641
+valleyridge: hybrid 800 m + local carve to 1 km2: 4 tiles 149 s
+valleyridge hybrid1km2 hard: step over 10600 edge pairs p50 5.57 p99 56.23 max 102.89 m | |s-j| by distance (p50/p99 m) 0-1: 31.69/152.47, 2-8: 32.36/154.04, 9-32: 32.86/149.12, 33-128: 32.48/152.40, 129-512: 33.13/156.30, 513-4000: 42.68/170.73 | crossings mosaic 163 joint 220 matched 46 | ponds near seams mosaic 1043 joint 641
+alps: hybrid 800 m + local carve to 10 km2: 4 tiles 155 s
+alps hybrid10km2 hard: step over 12140 edge pairs p50 10.89 p99 86.57 max 165.76 m | |s-j| by distance (p50/p99 m) 0-1: 113.89/764.79, 2-8: 114.68/757.44, 9-32: 111.92/780.44, 33-128: 108.51/809.83, 129-512: 103.81/756.40, 513-4000: 91.51/676.86 | crossings mosaic 187 joint 223 matched 45 | ponds near seams mosaic 1000 joint 2189
+alps: hybrid 800 m + local carve to 1 km2: 4 tiles 153 s
+alps hybrid1km2 hard: step over 12144 edge pairs p50 10.05 p99 82.89 max 165.27 m | |s-j| by distance (p50/p99 m) 0-1: 105.41/743.47, 2-8: 107.15/731.23, 9-32: 105.38/753.08, 33-128: 102.25/783.43, 129-512: 97.54/734.88, 513-4000: 86.76/660.21 | crossings mosaic 190 joint 223 matched 53 | ponds near seams mosaic 258 joint 2189
+=== done 15:59:31
