@@ -1,0 +1,17 @@
+=== s83 21:59:21
+$ cmd /c start  /b /wait /belownormal target/release/deps/planet-f7ec3bd3dbee2d4c.exe spike83_pyramid --ignored --nocapture
+
+running 1 test
+S83BUILD himalaya: face 3 window 2048^2 cells (208 km), layer sampled in 1.9 s, pyramid 7 levels, 5461 blocks (43688 B as 2 x f32, 0.260 % of the nodes' f32) built in 0.003 s
+S83BUILD alps: face 3 window 2048^2 cells (208 km), layer sampled in 1.9 s, pyramid 7 levels, 5461 blocks (43688 B as 2 x f32, 0.260 % of the nodes' f32) built in 0.003 s
+S83PLAN himalaya pyramid 200 m | 1075 nodes, 0 capped, deepest 18 | 0.09 s | 6189 bounds lookups, 2.47 us each
+S83PLAN himalaya pyramid 2000 m | 805 nodes, 0 capped, deepest 15 | 0.05 s | 4546 bounds lookups, 4.01 us each
+S83BOUND himalaya: L10 range 1037.5 bound 1.5x; L12 range 338.2 bound 2.4x; L14 range 82.2 bound 2.8x; L16 range 34.5 bound 2.6x; L18 range 7.6 bound 6.1x; L20 range 2.6 bound 10.5x; L22 range 0.4 bound 66.4x;
+S83PLAN alps pyramid 200 m | 1094 nodes, 0 capped, deepest 18 | 0.04 s | 6333 bounds lookups, 2.59 us each
+S83PLAN alps pyramid 2000 m | 818 nodes, 0 capped, deepest 15 | 0.02 s | 4620 bounds lookups, 3.69 us each
+S83BOUND alps: L10 range 397.5 bound 2.7x; L12 range 193.7 bound 2.0x; L14 range 107.7 bound 1.4x; L16 range 32.8 bound 2.8x; L18 range 14.2 bound 3.6x; L20 range 2.9 bound 14.7x; L22 range 0.6 bound 64.3x;
+test plancheck::spike82::spike83_pyramid ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 214 filtered out; finished in 4.04s
+
+=== done 21:59:27
