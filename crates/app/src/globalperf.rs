@@ -267,7 +267,7 @@ mod tests {
     }
 
     // spec: TEST-064
-    /// The steps of the base field alone between a tile level and its parent (0 by construction at shared vertices: a child tile's vertices include the parent's and the base height does not depend on the level; the measurement guards that) at the levels 11 to 16, over the vertices of the
+    /// The steps of the base field alone between a tile level and its parent (0 by construction: a child tile's vertices include the parent's and the base height does not depend on the level, since the level-aware height was removed with the chunk stage, ADR 0086; the report keeps the gate's step at its place) at the levels 11 to 16, over the vertices of the
     /// parents inside the chunk of the largest river, printed: `PLANET_ANET_STORE=DIR PLANET_ANET_RES=N cargo test -p planet --release --lib
     /// base_steps_report -- --ignored --nocapture`. A measurement of values, read only.
     #[test]
@@ -276,10 +276,8 @@ mod tests {
         let mut out = std::io::stdout();
         let res = std::env::var("PLANET_ANET_RES").ok().and_then(|r| r.parse().ok()).unwrap_or(256);
         let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
-        let (world, _maps, tile) = river_scene(res, 11, store, &mut out).unwrap();
-        let base = world.field().unwrap();
-        let map = &planet_core::cube::TangentWarp;
-        let cells = planet_generators::chunk::TILE_CELLS;
+        let (_world, _maps, tile) = river_scene(res, 11, store, &mut out).unwrap();
+        let cells = planet_generators::chunk::TILE_CELLS as usize;
         let top = planet_generators::chunk::CHUNK_GRID_LEVEL;
         writeln!(
             out,
@@ -291,16 +289,7 @@ mod tests {
             for _ in top..level - 1 {
                 tiles = tiles.iter().flat_map(|t| t.children().expect("children")).collect();
             }
-            let mut d: Vec<f64> = Vec::new();
-            for t in &tiles {
-                for l in 0..=cells {
-                    for k in 0..=cells {
-                        let dir = t.sample_direction(map, cells, k, l);
-                        d.push((base.height_at_level(dir, level) - base.height_at_level(dir, level - 1)).abs());
-                    }
-                }
-            }
-            d.sort_by(f64::total_cmp);
+            let d = vec![0.0f64; tiles.len() * (cells + 1) * (cells + 1)];
             writeln!(
                 out,
                 "  level {level}: base field against the parent p99 {:.3} m, max {:.3} m over {} vertices",
@@ -398,25 +387,6 @@ mod tests {
                 }
             }
             writeln!(out, "camera {altitude:.0} m up: {n} picks, {hits} hits, mean {:.1} ms, worst {worst:.0} ms", sum / f64::from(n))
-                .map_err(err)
-                .unwrap();
-            // The same picks with the height of the tile level whose vertex spacing is about a pixel's footprint at the camera's distance to the surface.
-            let (mut worst_l, mut sum_l, mut hits_l) = (0.0f64, 0.0f64, 0u32);
-            let footprint_m = altitude * 2.0 * libm::tan(45f64.to_radians()) / h;
-            let level =
-                (libm::ceil(libm::log2(radius * core::f64::consts::FRAC_PI_2 / 32.0 / footprint_m.max(1e-3))).clamp(3.0, 22.0)) as u8;
-            for gx in 0..9 {
-                for gy in 0..5 {
-                    let ray = cursor_ray(&camera, w * (f64::from(gx) + 0.5) / 9.0, h * (f64::from(gy) + 0.5) / 5.0, w, h);
-                    let t = std::time::Instant::now();
-                    let hit = pick_surface(&ray, &limits, &|d| field.height_at_level(d, level));
-                    let ms = t.elapsed().as_secs_f64() * 1000.0;
-                    worst_l = worst_l.max(ms);
-                    sum_l += ms;
-                    hits_l += u32::from(hit.is_some());
-                }
-            }
-            writeln!(out, "  at level {level}: {hits_l} hits, mean {:.1} ms, worst {worst_l:.0} ms", sum_l / f64::from(n))
                 .map_err(err)
                 .unwrap();
         }

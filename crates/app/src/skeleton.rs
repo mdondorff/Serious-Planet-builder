@@ -921,22 +921,6 @@ impl planet_generators::height::HeightField for CancelGuarded<'_> {
             self.inner.height(dir)
         }
     }
-    fn height_at_level(&self, dir: Vec3, level: u8) -> f64 {
-        if self.cancel.is_cancelled() {
-            0.0
-        } else {
-            self.inner.height_at_level(dir, level)
-        }
-    }
-    fn level_aware(&self) -> bool {
-        self.inner.level_aware()
-    }
-    fn level_drivers(&self, dirs: &[Vec3], level: u8) -> Option<Vec<Option<[u8; 3]>>> {
-        self.inner.level_drivers(dirs, level)
-    }
-    fn level_change(&self, dirs: &[Vec3], level: u8) -> Option<Vec<f64>> {
-        self.inner.level_change(dirs, level)
-    }
     /// The inner field's batch (it may order the samples by block, GEN-020), stopped by the token or the caller's flag.
     // Invariant: once `stop` or the cancel flag answers true the batch returns 0.0 for the unfinished directions; whoever cancels
     // must discard the results of the batch (the plan of a cancelled job is never used or memoised).
@@ -1620,23 +1604,20 @@ mod tests {
         }
     }
 
-    // spec: GEN-036
+    // spec: STRM-005
     #[test]
-    fn the_cancel_guard_answers_the_level_as_its_inner_field_does_and_nothing_once_cancelled() {
+    fn the_cancel_guard_answers_as_its_inner_field_does_and_nothing_once_cancelled() {
         use planet_generators::height::HeightField;
-        struct Leveled;
-        impl HeightField for Leveled {
+        struct Flat;
+        impl HeightField for Flat {
             fn height(&self, _: Vec3) -> f64 {
                 1.0
-            }
-            fn height_at_level(&self, _: Vec3, level: u8) -> f64 {
-                1.0 + f64::from(level)
             }
             fn seed(&self) -> u64 {
                 1
             }
             fn implementation_id(&self) -> &'static str {
-                "leveled-test"
+                "flat-test"
             }
             fn version(&self) -> u32 {
                 1
@@ -1646,10 +1627,10 @@ mod tests {
             }
         }
         let (never, cancelled) = (planet_streaming::CancelToken::never(), planet_streaming::CancelToken::cancelled());
-        let (live, dead) = (CancelGuarded { inner: &Leveled, cancel: &never }, CancelGuarded { inner: &Leveled, cancel: &cancelled });
+        let (live, dead) = (CancelGuarded { inner: &Flat, cancel: &never }, CancelGuarded { inner: &Flat, cancel: &cancelled });
         let d = Vec3::new(1.0, 0.0, 0.0);
-        assert_eq!(live.height_at_level(d, 15), 16.0);
-        assert_eq!(dead.height_at_level(d, 15), 0.0);
+        assert_eq!(live.height(d), 1.0);
+        assert_eq!(dead.height(d), 0.0);
     }
 
     // spec: STRM-005
