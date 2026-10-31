@@ -16,7 +16,7 @@
 | 9 | `shadow-clipmap-march` archive | perf acceptance row, spec sync, archive, glossary rows | none new | **window**: layer 1 at most 1.5 ms at every pose (REND-052), the acceptance number of record; `spec-lint`; log fragment |
 
 ## 2. Steps per PR
-- [ ] 2.1 PR 1 `shadow-clipmap-plan`
+- [x] 2.1 PR 1 `shadow-clipmap-plan`
 - [ ] 2.2 PR 2 `shadow-clipmap-gather`
 - [ ] 2.3 PR 3 `shadow-march`
 - [ ] 2.4 PR 4 `shadow-resolve` (perf window for the 2-degree pose)

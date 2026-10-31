@@ -1,0 +1,51 @@
+=== s78 amp 7000 bk 1 20:22:28
+heavy-run lock: waiting for perf stream teleport-2km --lit --store C:/DEV/SeriousPlanetData/global16384 (process 8224, in start-879e4b, since 1793474486 s after the epoch); `cmd /c start  /b /wait /belownormal target/release/examples/terrain_score.exe` is queued
+heavy-run lock: waiting for perf stream dive --lit --store C:/DEV/SeriousPlanetData/global16384 (process 15312, in ab-main, since 1793474577 s after the epoch); `cmd /c start  /b /wait /belownormal target/release/examples/terrain_score.exe` is queued
+heavy-run lock: the machine is free after 44 s: running `cmd /c start  /b /wait /belownormal target/release/examples/terrain_score.exe`
+$ cmd /c start  /b /wait /belownormal target/release/examples/terrain_score.exe
+terrain-score: read tiles: 0.4 s
+terrain-score: sample generator windows: 15.8 s
+S78 N43W102 real | flat 2.6% | slope=3.035 profile_curvature=0.000 contour_curvature=-0.001 relief_1km=39.465 relief_5km=108.238 tpi_300m=-0.260 tpi_2km=-1.878 drainage_area=1800.000
+S78 N43W102 site1 baseline | flat 0.0% | classes L1 0.31 | density ratio 1.89 | slope=2.512/0.12 profile_curvature=-0.000/0.06 contour_curvature=-0.002/0.04 relief_1km=34.478/0.11 relief_5km=103.905/0.04 tpi_300m=0.233/0.08 tpi_2km=-0.539/0.02 drainage_area=3600.000/0.25
+S78SITE N43W102 site1 | sample elevation 812 m | window mean today 791 m | belt delta p10/p50/p90 194/211/238 m (amp 7000)
+S78 N43W102 site1 class | flat 0.1% | classes L1 0.43 | density ratio 1.05 | slope=2.904/0.06 profile_curvature=-0.000/0.06 contour_curvature=-0.002/0.19 relief_1km=24.873/0.22 relief_5km=45.931/0.53 tpi_300m=0.136/0.06 tpi_2km=-0.333/0.10 drainage_area=1800.000/0.14
+S78 N43W102 site1 class: 6 s
+S78 N43W102 site1 nocarve | flat 0.0% | classes L1 0.31 | density ratio 1.89 | slope=2.512/0.12 profile_curvature=-0.000/0.06 contour_curvature=-0.002/0.04 relief_1km=34.478/0.11 relief_5km=103.905/0.04 tpi_300m=0.233/0.08 tpi_2km=-0.539/0.02 drainage_area=3600.000/0.25
+S78 N43W102 site1 nocarve: 2 s
+S78 N43W102 site1 nocarve-bare | flat 0.0% | classes L1 0.31 | density ratio 1.89 | slope=2.512/0.12 profile_curvature=-0.000/0.06 contour_curvature=-0.002/0.04 relief_1km=34.478/0.11 relief_5km=103.905/0.04 tpi_300m=0.233/0.08 tpi_2km=-0.539/0.02 drainage_area=3600.000/0.25
+S78 N43W102 site1 nocarve-bare: 2 s
+S78 N43W102 site2 baseline | flat 0.0% | classes L1 0.23 | density ratio 1.41 | slope=4.209/0.10 profile_curvature=-0.000/0.09 contour_curvature=-0.002/0.06 relief_1km=53.593/0.21 relief_5km=144.022/0.36 tpi_300m=0.450/0.05 tpi_2km=-0.164/0.10 drainage_area=2700.000/0.20
+S78SITE N43W102 site2 | sample elevation 876 m | window mean today 857 m | belt delta p10/p50/p90 125/152/174 m (amp 7000)
+S78 N43W102 site2 class | flat 0.0% | classes L1 0.57 | density ratio 1.04 | slope=7.379/0.48 profile_curvature=-0.001/0.37 contour_curvature=-0.002/0.20 relief_1km=72.088/0.58 relief_5km=173.116/0.78 tpi_300m=0.742/0.19 tpi_2km=0.635/0.26 drainage_area=900.000/0.16
+S78 N43W102 site2 class: 8 s
+S78 N43W102 site2 nocarve | flat 0.0% | classes L1 0.23 | density ratio 1.41 | slope=4.209/0.10 profile_curvature=-0.000/0.09 contour_curvature=-0.002/0.06 relief_1km=53.593/0.21 relief_5km=144.022/0.36 tpi_300m=0.450/0.05 tpi_2km=-0.164/0.10 drainage_area=2700.000/0.20
+S78 N43W102 site2 nocarve: 2 s
+S78 N43W102 site2 nocarve-bare | flat 0.0% | classes L1 0.23 | density ratio 1.41 | slope=4.209/0.10 profile_curvature=-0.000/0.09 contour_curvature=-0.002/0.06 relief_1km=53.593/0.21 relief_5km=144.022/0.36 tpi_300m=0.450/0.05 tpi_2km=-0.164/0.10 drainage_area=2700.000/0.20
+S78 N43W102 site2 nocarve-bare: 2 s
+S78 N47E011 real | flat 1.3% | slope=22.348 profile_curvature=0.000 contour_curvature=-0.001 relief_1km=391.099 relief_5km=1038.814 tpi_300m=-1.474 tpi_2km=-19.413 drainage_area=3600.000
+S78 N47E011 site1 baseline | flat 0.1% | classes L1 0.26 | density ratio 1.18 | slope=2.646/0.43 profile_curvature=-0.000/0.15 contour_curvature=-0.002/0.08 relief_1km=44.881/0.46 relief_5km=169.015/0.57 tpi_300m=0.109/0.18 tpi_2km=-1.217/0.20 drainage_area=2700.000/0.04
+S78SITE N47E011 site1 | sample elevation 1374 m | window mean today 1378 m | belt delta p10/p50/p90 312/426/555 m (amp 7000)
+S78 N47E011 site1 class | flat 0.0% | classes L1 0.28 | density ratio 1.04 | slope=24.808/0.08 profile_curvature=0.000/0.14 contour_curvature=-0.001/0.22 relief_1km=294.917/0.15 relief_5km=847.977/0.17 tpi_300m=-0.773/0.04 tpi_2km=-9.898/0.06 drainage_area=1800.000/0.05
+S78 N47E011 site1 class: 18 s
+S78 N47E011 site1 class+belt | flat 0.0% | classes L1 0.21 | density ratio 1.03 | slope=26.790/0.10 profile_curvature=0.000/0.11 contour_curvature=-0.001/0.18 relief_1km=338.740/0.09 relief_5km=1026.182/0.08 tpi_300m=-0.610/0.04 tpi_2km=-4.568/0.04 drainage_area=1800.000/0.05
+S78 N47E011 site1 class+belt: 19 s
+S78 N47E011 site2 baseline | flat 0.0% | classes L1 0.22 | density ratio 1.31 | slope=2.488/0.44 profile_curvature=-0.000/0.14 contour_curvature=-0.002/0.14 relief_1km=40.028/0.46 relief_5km=156.549/0.59 tpi_300m=0.170/0.18 tpi_2km=-0.809/0.20 drainage_area=2700.000/0.07
+S78SITE N47E011 site2 | sample elevation 1327 m | window mean today 1293 m | belt delta p10/p50/p90 305/394/503 m (amp 7000)
+S78 N47E011 site2 class | flat 0.0% | classes L1 0.37 | density ratio 1.08 | slope=22.795/0.08 profile_curvature=-0.000/0.18 contour_curvature=-0.002/0.28 relief_1km=240.195/0.21 relief_5km=662.790/0.26 tpi_300m=-0.666/0.04 tpi_2km=-8.956/0.10 drainage_area=1800.000/0.04
+S78 N47E011 site2 class: 17 s
+S78 N47E011 site2 class+belt | flat 0.0% | classes L1 0.33 | density ratio 1.07 | slope=23.856/0.08 profile_curvature=-0.000/0.16 contour_curvature=-0.001/0.26 relief_1km=259.425/0.19 relief_5km=731.300/0.22 tpi_300m=-0.593/0.04 tpi_2km=-8.416/0.09 drainage_area=1800.000/0.05
+S78 N47E011 site2 class+belt: 17 s
+S78 N27E086 real | flat 0.0% | slope=29.136 profile_curvature=0.000 contour_curvature=-0.000 relief_1km=523.697 relief_5km=1573.197 tpi_300m=0.378 tpi_2km=0.107 drainage_area=3600.000
+S78 N27E086 site1 baseline | flat 0.0% | classes L1 0.09 | density ratio 2.54 | slope=6.781/0.63 profile_curvature=-0.000/0.10 contour_curvature=-0.001/0.13 relief_1km=124.958/0.78 relief_5km=475.897/0.86 tpi_300m=0.097/0.18 tpi_2km=-4.109/0.17 drainage_area=7200.000/0.26
+S78SITE N27E086 site1 | sample elevation 3221 m | window mean today 3040 m | belt delta p10/p50/p90 733/882/1035 m (amp 7000)
+S78 N27E086 site1 class | flat 0.0% | classes L1 0.26 | density ratio 1.16 | slope=34.673/0.17 profile_curvature=0.000/0.11 contour_curvature=-0.001/0.15 relief_1km=559.693/0.20 relief_5km=1869.879/0.19 tpi_300m=-2.575/0.07 tpi_2km=-32.924/0.07 drainage_area=4500.000/0.12
+S78 N27E086 site1 class: 21 s
+S78 N27E086 site1 class+belt | flat 0.0% | classes L1 0.24 | density ratio 1.15 | slope=35.118/0.18 profile_curvature=0.000/0.10 contour_curvature=-0.001/0.14 relief_1km=581.230/0.23 relief_5km=1923.740/0.24 tpi_300m=-2.544/0.07 tpi_2km=-32.192/0.08 drainage_area=4500.000/0.11
+S78 N27E086 site1 class+belt: 21 s
+S78 N27E086 site2 baseline | flat 0.0% | classes L1 0.07 | density ratio 1.59 | slope=4.161/0.71 profile_curvature=-0.000/0.13 contour_curvature=-0.001/0.16 relief_1km=73.343/0.89 relief_5km=274.911/1.01 tpi_300m=0.136/0.19 tpi_2km=-1.868/0.21 drainage_area=3600.000/0.18
+S78SITE N27E086 site2 | sample elevation 2122 m | window mean today 2136 m | belt delta p10/p50/p90 518/668/799 m (amp 7000)
+S78 N27E086 site2 class | flat 0.0% | classes L1 0.34 | density ratio 1.17 | slope=28.982/0.07 profile_curvature=0.000/0.15 contour_curvature=-0.001/0.30 relief_1km=365.081/0.27 relief_5km=1124.750/0.36 tpi_300m=-1.602/0.02 tpi_2km=-22.304/0.07 drainage_area=2700.000/0.10
+S78 N27E086 site2 class: 19 s
+S78 N27E086 site2 class+belt | flat 0.0% | classes L1 0.30 | density ratio 1.12 | slope=29.712/0.05 profile_curvature=0.000/0.12 contour_curvature=-0.001/0.27 relief_1km=385.960/0.23 relief_5km=1188.228/0.29 tpi_300m=-1.536/0.02 tpi_2km=-22.987/0.06 drainage_area=2700.000/0.10
+S78 N27E086 site2 class+belt: 19 s
+=== done 20:27:06
