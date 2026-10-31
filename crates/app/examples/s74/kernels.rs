@@ -332,12 +332,14 @@ pub fn carve(g: G, h: &mut [f32], inflow: &[(usize, f64)]) {
 }
 
 /// `ring`: (base, target) of the window: before each step the window's edge cells are set to `base + (target - base) s / steps`.
+/// SPIKE-77: the carve's K dt in percent of 0.05.
+pub static KDT_PCT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(100);
 pub static UK: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(20);
 pub static LOCAL: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 pub fn carve_ring(g: G, h: &mut [f32], inflow: &[(usize, f64)], ring: Option<(&[f32], &[f32])>) {
     let mode = if g.amax > 0.0 { LOCAL.load(std::sync::atomic::Ordering::Relaxed) } else { 0 };
-    let (u_over_k, kdt, steps, reroute) = (f64::from(UK.load(std::sync::atomic::Ordering::Relaxed)), 0.05, 20, 5);
+    let (u_over_k, kdt, steps, reroute) = (f64::from(UK.load(std::sync::atomic::Ordering::Relaxed)), 0.05 * f64::from(KDT_PCT.load(std::sync::atomic::Ordering::Relaxed)) / 100.0, 20, 5);
     let udt = u_over_k * kdt;
     let w = g.w;
     let mut routed = None;
