@@ -69,6 +69,7 @@ With decisions 1, 2 and 5 together (class map and plateau rule, plate-margin bel
 - **Cost to reverse:** low with decision 4's re-bake. The plate layer is a pure function of the seed, and dropping it restores the range zone.
 
 ## 6. Options for the class source
+Decided (owner, 2026-10-31): option C. A's measured default classes go in now, behind a class-weights interface; the physical derivation (B) replaces the default source later, once it is measured on the real bake. ADR 0088 and the relief-class ADR stay the owner's decisions on return.
 Owner, 2026-10-31: painting classes or driver maps is intended, painting types is poor; consider the more physical version, with informed work and risk estimates. All three options give the same output, class weights per lattice point, which the bake (decision 1) and the field (decision 2) read.
 | | A: rule-based default plus painted classes | B: classes derived from physical drivers, painting on the drivers (classes as an override) | C: A now, built so that B replaces the default later |
 |---|---|---|---|
