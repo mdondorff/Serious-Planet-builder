@@ -351,6 +351,13 @@ pub fn hill_band_m(seed: u64, d: Vec3) -> f64 {
     hill_band(seed, &t, ridge_at(seed, t.warped))
 }
 
+/// SPIKE-69/75 (spike code, never merged): the structure terms at `d`: continent, range zone, inland ramp, ridge and hill band (m).
+pub fn spike69_parts(seed: u64, d: Vec3) -> [f64; 5] {
+    let t = terrain(seed, d);
+    let ridge = ridge_at(seed, t.warped);
+    [t.continent, t.zone, t.inland, ridge, hill_band(seed, &t, ridge)]
+}
+
 /// The global-coarse field at the unit direction `d`. Pure: the same `(seed, d)` gives the same bits everywhere.
 pub fn sample(seed: u64, d: Vec3) -> GlobalSample {
     let t = terrain(seed, d);
