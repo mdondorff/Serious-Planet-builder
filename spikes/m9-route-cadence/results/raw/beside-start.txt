@@ -1,0 +1,7 @@
+8236 planet.exe C:\DEV\Serious-Planet-Builder\.claude\worktrees\start-879e4b\target\debug\planet.exe editor --smoke --edit --size 480x27
+10736 cargo.exe cargo nextest run --no-tests=pass --workspace -E binary(/^gpu_/) --no-fail-fast
+11716 cargo-nextest.exe C:\Users\matth\.cargo\bin\cargo-nextest.exe nextest run --no-tests=pass --workspace -E binary(/^gpu_/) --no-fail-fast
+18828 cargo.exe C:\Users\matth\.cargo\bin\cargo.exe xtask prepush
+20704 cargo.exe C:\Users\matth\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin\cargo.exe xtask prepush
+23736 cargo.exe C:\Users\matth\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin\cargo.exe nextest run --no-tests=pass --workspace -E
+24672 planet.exe C:\DEV\Serious-Planet-Builder\.claude\worktrees\start-879e4b\target\debug\planet.exe generate --global-dir C:\Users\matt
