@@ -1,0 +1,244 @@
+    // SPIKE-76 (spike code, never merged; from SPIKE-75): `S76_DIR=DIR` runs the pipeline with an assigned relief class per landform (k and crease floor per class, the stand-in for an authored class map) next to SPIKE-74's `ref`. SPIKE-75: logs the pipeline's inputs at every scorecard site and runs SPIKE-74's pipeline with variants:
+    // `ref` (SPIKE-74 as run), `arid` (k held at 1 or below where the generator is dry, the crease floor only where k is about 1), `arid+top8`
+    // (and the top knot 8), `sand` (as arid+top8, k 0.4 where very dry). Same tables as SPIKE-74, plus per site: L, k, base elevation, precipitation,
+    // temperature, zone, inland, ridge at the centre and k p10/p50/p90 over the window.
+    if let Ok(dir) = std::env::var("S76_DIR") {
+        use planet_generators::height::HeightField as _;
+        use std::sync::atomic::Ordering::Relaxed;
+        let dir = PathBuf::from(dir);
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let g = ts::GRID;
+        let seed = field_s74.seed();
+        let lattice = planet_generators::global::landform_lattice(seed);
+        let smooth = |x: f64, a: f64, b: f64| {
+            let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
+            t * t * (3.0 - 2.0 * t)
+        };
+        #[derive(Clone, Copy)]
+        struct V {
+            name: &'static str,
+            arid: bool,
+            top: f64,
+            sand: bool,
+        }
+        let variants = [
+            V { name: "ref", arid: false, top: 5.625, sand: false },
+            V { name: "class", arid: true, top: 0.0, sand: false },
+        ];
+        // The assigned class per scorecard tile: (class name, k, crease floor).
+        let class_of = |tile: &str| -> (&'static str, f64, f64) {
+            match tile {
+                "N52E012" => ("plain", 1.0, 0.2),
+                "N41W096" => ("rolling plain", 1.0, 0.35),
+                "N43W102" => ("badlands (arid rugged)", 1.0, 0.0),
+                "N31W004" => ("sand sea (arid flat)", 0.35, 0.0),
+                "N47E011" | "N27E086" => ("high mountains", 7.5, 0.0),
+                _ => ("hills", 5.0, 0.0),
+            }
+        };
+        // k of L (SPIKE-69's knots, the top knot `top`), the coast taper on `e`, and the aridity gate on precipitation `p` (mm): from 1 under 250 mm to
+        // full over 500 mm; with `sand`, under 150 mm k falls toward 0.4.
+        let class_k = std::cell::Cell::new(1.0f64);
+        let k_of = |v: V, l: f64, e: f64, p: f64| {
+            if v.arid {
+                return 1.0 + smooth(e, 0.0, 400.0) * (class_k.get() - 1.0);
+            }
+            let (xs, ys) = ([0.0, 0.028, 0.176, 1.0], [1.0, 4.5, 4.5, v.top]);
+            let mut kk = ys[3];
+            for j in 0..3 {
+                if l <= xs[j + 1] {
+                    kk = ys[j] + (ys[j + 1] - ys[j]) * (l - xs[j]) / (xs[j + 1] - xs[j]);
+                    break;
+                }
+            }
+            let mut k = 1.0 + smooth(e, 0.0, 400.0) * (kk - 1.0);
+            if v.arid {
+                k = 1.0 + (k - 1.0) * smooth(p, 250.0, 500.0);
+            }
+            if v.sand {
+                k -= 0.6 * (1.0 - smooth(p, 80.0, 150.0)) * smooth(e, 0.0, 400.0);
+            }
+            k
+        };
+        let box_mean = |z: &[f64], n: usize, r: usize| -> Vec<f64> {
+            let w = n + 1;
+            let mut s = vec![0f64; w * w];
+            for j in 0..n {
+                let mut row = 0.0;
+                for i in 0..n {
+                    row += z[j * n + i];
+                    s[(j + 1) * w + i + 1] = s[j * w + i + 1] + row;
+                }
+            }
+            let mut out = vec![0f64; n * n];
+            for j in 0..n {
+                for i in 0..n {
+                    let (i0, i1, j0, j1) = (i.saturating_sub(r), (i + r + 1).min(n), j.saturating_sub(r), (j + r + 1).min(n));
+                    out[j * n + i] = (s[j1 * w + i1] - s[j0 * w + i1] - s[j1 * w + i0] + s[j0 * w + i0]) / ((i1 - i0) * (j1 - j0)) as f64;
+                }
+            }
+            out
+        };
+        let frame = |lat: f64, lon: f64| {
+            let (la, lo) = (lat.to_radians(), lon.to_radians());
+            let (sla, cla, slo, clo) = (libm::sin(la), libm::cos(la), libm::sin(lo), libm::cos(lo));
+            (
+                planet_core::Vec3::new(cla * clo, cla * slo, sla),
+                planet_core::Vec3::new(-slo, clo, 0.0),
+                planet_core::Vec3::new(-sla * clo, -sla * slo, cla),
+            )
+        };
+        const NC: usize = 491;
+        const CC: f64 = 814.0;
+        let report = |label: &str, s: &RasterStats, real: &RasterStats| -> String {
+            let d = ts::distances(real, s);
+            let cs: Vec<String> = ts::CONTINUOUS
+                .iter()
+                .enumerate()
+                .map(|(k, c)| format!("{}={:.3}/{}", c.id, s.series[k].p(50), d.continuous[k].map_or("-".into(), |x| format!("{x:.2}"))))
+                .collect();
+            format!(
+                "S76 {label} | flat {:.1}% | classes L1 {:.2} | density ratio {} | {}",
+                100.0 * s.forms[0],
+                d.forms_l1,
+                d.density_ratio.map_or("-".into(), |x| format!("{x:.2}")),
+                cs.join(" ")
+            )
+        };
+        let half_m = ts::HALF_DEG.to_radians() * radius;
+        for (i, s) in specs.iter().enumerate() {
+            let (rs, _) = ts::analyse(&reals[i], g, g, threads, false);
+            let cs: Vec<String> = ts::CONTINUOUS.iter().enumerate().map(|(k, c)| format!("{}={:.3}", c.id, rs.series[k].p(50))).collect();
+            println!("S76 {} real | flat {:.1}% | {}", s.tile, 100.0 * rs.forms[0], cs.join(" "));
+            for (k, &(lat, lon)) in s.sites.iter().enumerate() {
+                let z0 = &gens[i][k];
+                let (bs, _) = ts::analyse(z0, g, g, threads, false);
+                println!("{}", report(&format!("{} site{} baseline", s.tile, k + 1), &bs, &rs));
+                let dirs = ts::generator_directions(lat, lon, radius);
+                planet_generators::erosion::spike73_set_floor(0.35);
+                let z1 = field_s74.heights_threaded(&dirs, &threads);
+                // The coarse window: point samples at 814 m (floor on, as SPIKE-74), and per coarse cell L, base elevation and precipitation.
+                let (c, east, north) = frame(lat, lon);
+                let mut dc = Vec::with_capacity(NC * NC);
+                for row in 0..NC {
+                    for col in 0..NC {
+                        let (x, y) = ((col as f64 - (NC / 2) as f64) * CC, ((NC / 2) as f64 - row as f64) * CC);
+                        let p = c * radius + east * x + north * y;
+                        dc.push(p * (1.0 / libm::sqrt(p.x * p.x + p.y * p.y + p.z * p.z)));
+                    }
+                }
+                let zc = field_s74.heights_threaded(&dc, &threads);
+                planet_generators::erosion::spike73_set_floor(0.0);
+                let pc: Vec<f64> = dc.iter().map(|d| f64::from(planet_generators::global::sample(seed, *d).precipitation_mm)).collect();
+                let lc: Vec<f64> = dc.iter().map(|d| lattice.at(*d)).collect();
+                // Site log at the centre.
+                {
+                    let d0 = planet_core::Vec3::new(c.x, c.y, c.z);
+                    let gs = planet_generators::global::sample(seed, d0);
+                    let parts = planet_generators::global::spike69_parts(seed, d0);
+                    let l0 = lattice.at(d0);
+                    let kref = k_of(variants[0], l0, f64::from(gs.elevation_m), f64::from(gs.precipitation_mm));
+                    let karid = k_of(variants[1], l0, f64::from(gs.elevation_m), f64::from(gs.precipitation_mm));
+                    // k over the window (ref variant), from the coarse cells inside the 55 km square.
+                    let mut ks: Vec<f64> = Vec::new();
+                    let r = (half_m / CC) as usize;
+                    for row in NC / 2 - r..=NC / 2 + r {
+                        for col in NC / 2 - r..=NC / 2 + r {
+                            let q = row * NC + col;
+                            if zc[q] > 0.0 {
+                                ks.push(k_of(variants[0], lc[q], zc[q].max(0.0), pc[q]));
+                            }
+                        }
+                    }
+                    ks.sort_by(f64::total_cmp);
+                    let pk = |f: f64| ks.get(((ks.len().max(1) - 1) as f64 * f) as usize).copied().unwrap_or(f64::NAN);
+                    println!(
+                        "S76SITE {} site{} | L {:.3} | k ref {:.2} (window p10/p50/p90 {:.2}/{:.2}/{:.2}) | k arid {:.2} | bake elevation {:.0} m | precipitation {:.0} mm | temperature {:.1} C | zone {:.2} inland {:.2} ridge {:.2} hill band {:.0} m",
+                        s.tile,
+                        k + 1,
+                        l0,
+                        kref,
+                        pk(0.1),
+                        pk(0.5),
+                        pk(0.9),
+                        karid,
+                        gs.elevation_m,
+                        gs.precipitation_mm,
+                        gs.temperature_c,
+                        parts[1],
+                        parts[2],
+                        parts[3],
+                        parts[4]
+                    );
+                }
+                let (cname, ck, cfloor) = class_of(&s.tile);
+                class_k.set(ck);
+                println!("S76CLASS {} site{} | {} | k {} | floor {}", s.tile, k + 1, cname, ck, cfloor);
+                for v in variants {
+                    let t = Instant::now();
+                    // Fine raster: k per cell from L (lattice) and precipitation (bilinear from the coarse grid), the 10 km mean as elevation.
+                    let at_coarse = |a: &[f64], row: usize, col: usize| -> f64 {
+                        let (x, y) = (-half_m + (col as f64 + 0.5) * ts::CELL_M, half_m - (row as f64 + 0.5) * ts::CELL_M);
+                        let fx = (x / CC + (NC / 2) as f64).clamp(0.0, (NC - 2) as f64);
+                        let fy = ((NC / 2) as f64 - y / CC).clamp(0.0, (NC - 2) as f64);
+                        let (x0, y0) = (fx as usize, fy as usize);
+                        let (tx, ty) = (fx - x0 as f64, fy - y0 as f64);
+                        (a[y0 * NC + x0] * (1.0 - tx) + a[y0 * NC + x0 + 1] * tx) * (1.0 - ty) + (a[(y0 + 1) * NC + x0] * (1.0 - tx) + a[(y0 + 1) * NC + x0 + 1] * tx) * ty
+                    };
+                    let m = box_mean(&z1, g, 167);
+                    let mut kf = vec![1f64; g * g];
+                    for row in 0..g {
+                        for col in 0..g {
+                            let p = row * g + col;
+                            kf[p] = k_of(v, lattice.at(dirs[p]), m[p], at_coarse(&pc, row, col));
+                        }
+                    }
+                    // The crease floor: everywhere (ref), or only where k is about 1 (the arid variants): blend of the floored and plain samples.
+                    let zf: Vec<f64> = if v.arid {
+                        (0..g * g).map(|p| z0[p] + (z1[p] - z0[p]) * (cfloor / 0.35)).collect()
+                    } else {
+                        z1.clone()
+                    };
+                    let mf = box_mean(&zf, g, 167);
+                    let h: Vec<f64> = (0..g * g).map(|p| if zf[p] > 0.0 { mf[p] + kf[p] * (zf[p] - mf[p]) } else { zf[p] }).collect();
+                    // Pass 1 on the coarse window with the same k rule.
+                    let mcs = box_mean(&zc, NC, 6);
+                    let hc: Vec<f32> =
+                        (0..NC * NC).map(|q| if zc[q] > 0.0 { (mcs[q] + k_of(v, lc[q], mcs[q], pc[q]) * (zc[q] - mcs[q])) as f32 } else { zc[q] as f32 }).collect();
+                    let mut cc = hc.clone();
+                    let gc = k74::G { w: NC, ox: 0, oy: 0, fix: &[], dx: CC, frec: &[], farea: &[], amax: 0.0 };
+                    k74::UK.store(20, Relaxed);
+                    k74::LOCAL.store(0, Relaxed);
+                    k74::carve(gc, &mut cc, &[]);
+                    let dcf: Vec<f64> = (0..NC * NC).map(|q| f64::from(cc[q] - hc[q])).collect();
+                    let mut h2: Vec<f32> = Vec::with_capacity(g * g);
+                    for row in 0..g {
+                        for col in 0..g {
+                            let p = row * g + col;
+                            let dv = at_coarse(&dcf, row, col);
+                            h2.push(if zf[p] > 0.0 { (h[p] + dv) as f32 } else { h[p] as f32 });
+                        }
+                    }
+                    let orig: Vec<f32> = h.iter().map(|x| *x as f32).collect();
+                    let g2 = k74::G { w: g, ox: 0, oy: 0, fix: &[], dx: ts::CELL_M, frec: &[], farea: &[], amax: 1e6 };
+                    k74::LOCAL.store(2, Relaxed);
+                    k74::UK.store(0, Relaxed);
+                    k74::carve(g2, &mut h2, &[]);
+                    k74::thermal_active(g2, &mut h2, 33.0, 100, threads);
+                    k74::deposit(g2, &mut h2, &orig, 1e5, 0.5);
+                    k74::LOCAL.store(0, Relaxed);
+                    k74::UK.store(20, Relaxed);
+                    let hf: Vec<f64> = h2.iter().map(|x| f64::from(*x)).collect();
+                    let (ps, _) = ts::analyse(&hf, g, g, threads, false);
+                    println!("{}", report(&format!("{} site{} {}", s.tile, k + 1, v.name), &ps, &rs));
+                    if k == 0 {
+                        let b: Vec<u8> = hf.iter().flat_map(|x| (*x as f32).to_le_bytes()).collect();
+                        std::fs::write(dir.join(format!("{}-site1-{}.f32", s.tile, v.name.replace('+', "-"))), b).map_err(|e| e.to_string())?;
+                    }
+                    eprintln!("S76 {} site{} {}: {:.0} s", s.tile, k + 1, v.name, t.elapsed().as_secs_f64());
+                }
+            }
+        }
+        return Ok(());
+    }
+
