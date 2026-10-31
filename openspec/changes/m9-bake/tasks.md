@@ -6,8 +6,8 @@ Revised 2026-10-31 (SPIKE-70): the carve moves to a face pass before the tile dr
 | 1 | Channels `k` and `m`: computed from the bake, stored beside it with block ranges, versioned; the `k` curve and the coast taper | TBD (generator-pipeline) | A: synthetic bake, 1 and 8 threads byte-identical; the channels' block ranges contain every value; the taper is 1 at the coast band |
 | 2 | Runtime base `m + k (e - m) + k creases` behind the switch; bounds from the channels | TBD (generator-pipeline) | A: switch off bit for bit today's field; bounds nest (LOD-012) and contain sampled heights; B: plan-check on `global16384` with the channels passes; the level-step probe per level at the four sites |
 | 3 | Bake kernels: flood, receivers, order, carve with uplift and an area cap, breach, active-cell thermal, deposition sweep | TBD (generator-pipeline) | A: synthetic surfaces (a cone, a pit, a ramp) against expected results; thread-count independence; mass kept by thermal within f32 rounding; B: active-cell thermal on one tile under 5 s (timing gate); `numerics-reviewer` |
-| 4 | Face carve (pass 1): block means per face, the carve at about 800 m, its change stored per face, checkpoint and `--resume` | TBD (generator-pipeline, streaming-cache) | A: a small face end to end, resume gives identical bytes; B: one face timed and its memory; the cube-edge step |
-| 5 | Tile driver and the erosion layer (pass 2): the face change upsampled with the 1 m land floor, local carve, thermal, deposition; checkpoints, `--resume`, the layer's writer and reader; `generate --erosion-layer DIR`; `cargo xtask` command under the heavy lock | TBD (generator-pipeline, streaming-cache) | A: a 256-cell bake end to end; resume after a killed run gives identical bytes; B: one tile per landform timed; the core-edge seam against off-edge (SPIKE-70's measure) |
+| 4 | Face carve (pass 1): the base sampled once per 814 m cell per face, the carve at about 800 m, its change stored per face, checkpoint and `--resume` | TBD (generator-pipeline, streaming-cache) | A: a small face end to end, resume gives identical bytes; B: one face timed and its memory; the cube-edge step |
+| 5 | Tile driver and the erosion layer (pass 2): the face change upsampled, local carve, active-cell thermal, deposition; checkpoints, `--resume`, the layer's writer and reader; `generate --erosion-layer DIR`; `cargo xtask` command under the heavy lock | TBD (generator-pipeline, streaming-cache) | A: a 256-cell bake end to end; resume after a killed run gives identical bytes; B: one tile per landform timed; the core-edge seam against off-edge (SPIKE-70's measure) |
 | 6 | Runtime adds the layer behind the switch; the layer's block ranges in the bounds | TBD (generator-pipeline, streaming-cache) | A: switch off unchanged; bounds contain the layered heights; C: goldens unchanged with the switch off |
 | 7 | The overnight bake and the scorecard report on the baked field (four hill sites plus the other landforms) | TBD (testing) | the bake at most 10 h (criterion 7, the run itself); the scorecard report; stills at 300 m, 30 m, 1.8 m for the owner |
 
@@ -34,6 +34,6 @@ Revised 2026-10-31 (SPIKE-70): the carve moves to a face pass before the tile dr
 | Thermal | 33 degrees, +-25 %, 1/16 per pass | SPIKE-64 |
 | Deposition | kc 1e5, zeta 0.5 | SPIKE-64 |
 | Layer | 7-10 GB | SPIKE-61 |
-| Face carve | about 800 m (8 x 8 block means), about 3 min and 5.5 GB a face | SPIKE-70 |
+| Face carve | about 800 m (one point sample per cell), about 3 min and 5.5 GB a face | SPIKE-70, SPIKE-71 |
 | Local carve cap | about 1 km^2 | SPIKE-70 |
-| Bake estimate | 7.5-10 h for 2,140 land tiles at 4 at a time (two samplings, active-cell thermal) | SPIKE-61, SPIKE-70 |
+| Bake estimate | about 6-7.5 h (central 6.9 h) for 2,140 land tiles at 4 at a time | SPIKE-61, SPIKE-70, SPIKE-71 |
