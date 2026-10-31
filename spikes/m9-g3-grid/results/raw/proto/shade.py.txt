@@ -1,0 +1,48 @@
+import numpy as np
+from PIL import Image
+from hash import corners
+# top-down shading of the 3 cm octave (k 3, plane's own lattice) alone, 40 x 40 cells, 8 px per cell
+def octave(qx, qy, interp):
+    fx, fy = np.floor(qx), np.floor(qy)
+    ux, uy = qx - fx, qy - fy
+    cx, cy = fx.astype(np.int64), fy.astype(np.int64)
+    c00 = corners(cx, cy, 3, 0); c10 = corners(cx + 1, cy, 3, 0)
+    c01 = corners(cx, cy + 1, 3, 0); c11 = corners(cx + 1, cy + 1, 3, 0)
+    if interp == 'cubic':
+        t = lambda u: u * u * (3 - 2 * u); dt = lambda u: 6 * u * (1 - u)
+    else:
+        t = lambda u: u ** 3 * (u * (u * 6 - 15) + 10); dt = lambda u: 30 * u * u * (u * (u - 2) + 1)
+    tx, ty = t(ux), t(uy)
+    gx = dt(ux) * ((c10 - c00) * (1 - ty) + (c11 - c01) * ty)
+    gy = dt(uy) * ((c01 - c00) * (1 - tx) + (c11 - c10) * tx)
+    return gx, gy
+def grad_noise(qx, qy):
+    # Perlin gradient noise with gradients from the same hash (angle), quintic
+    fx, fy = np.floor(qx), np.floor(qy); ux, uy = qx - fx, qy - fy
+    cx, cy = fx.astype(np.int64), fy.astype(np.int64)
+    def g(ix, iy):
+        a = corners(ix, iy, 3, 0) * np.pi
+        return np.cos(a), np.sin(a)
+    t = lambda u: u ** 3 * (u * (u * 6 - 15) + 10)
+    h = lambda ix, iy, dx, dy: (lambda gg: gg[0] * dx + gg[1] * dy)(g(ix, iy))
+    eps = 1e-3
+    def val(ux, uy):
+        tx, ty = t(ux), t(uy)
+        n00 = h(cx, cy, ux, uy); n10 = h(cx + 1, cy, ux - 1, uy)
+        n01 = h(cx, cy + 1, ux, uy - 1); n11 = h(cx + 1, cy + 1, ux - 1, uy - 1)
+        return (n00 * (1 - tx) + n10 * tx) * (1 - ty) + (n01 * (1 - tx) + n11 * tx) * ty
+    v = val(ux, uy)
+    return (val(ux + eps, uy) - v) / eps * 1.5, (val(ux, uy + eps) - v) / eps * 1.5
+N = 320
+y, x = np.mgrid[0:N, 0:N] / 8.0
+sun = np.array([0.0, -0.95, 0.30]); sun /= np.linalg.norm(sun)
+s = 0.15  # grass tilt coefficient of the 3 cm octave
+rows = []
+for name, (gx, gy) in [('cubic', octave(x, y, 'cubic')), ('quintic', octave(x, y, 'quintic')), ('gradient', grad_noise(x, y))]:
+    n = np.stack([-s * gx, -s * gy, np.ones_like(gx)], -1)
+    n /= np.linalg.norm(n, axis=-1, keepdims=True)
+    lit = np.clip(n @ sun, 0, 1)
+    img = (lit / lit.max() * 255).astype(np.uint8)
+    rows.append(img)
+    print(name, 'max |g|', np.hypot(gx, gy).max())
+Image.fromarray(np.concatenate(rows, 1)).save('shade.png')
