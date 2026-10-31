@@ -1,0 +1,48 @@
+# The terrain scorecard's landforms (TEST-079): one Copernicus GLO-30 tile each and the two generator sites matched to it by SPIKE-55
+# (mean and standard deviation of height per 1 degree cell; sites at least 8 degrees apart). Sites are (latitude, longitude) in degrees,
+# the centre of the 0.5 degree window. Edit this file to add a landform or move a site; the tile must be in the --dem directory.
+
+[[landform]]
+name = "Brandenburg plain"
+tile = "N52E012"
+sites = [[-38.5, 30.5], [41.5, 149.5]]
+
+[[landform]]
+name = "Loess hills and plains"
+tile = "N41W096"
+sites = [[-15.5, 150.5], [-10.5, 155.5]]
+
+[[landform]]
+name = "Badlands"
+tile = "N43W102"
+sites = [[13.5, 22.5], [-33.5, 4.5]]
+
+[[landform]]
+name = "Erg Chebbi desert"
+tile = "N31W004"
+sites = [[-23.5, -18.5], [9.5, 18.5]]
+
+[[landform]]
+name = "Valley and Ridge"
+tile = "N40W078"
+sites = [[16.5, -111.5], [-40.5, 1.5]]
+
+[[landform]]
+name = "Black Forest"
+tile = "N48E008"
+sites = [[2.5, -124.5], [17.5, -26.5]]
+
+[[landform]]
+name = "Scottish Highlands"
+tile = "N57W005"
+sites = [[10.5, -122.5], [-26.5, -118.5]]
+
+[[landform]]
+name = "Alps, Tyrol"
+tile = "N47E011"
+sites = [[11.5, -18.5], [-38.5, 3.5]]
+
+[[landform]]
+name = "Himalaya, Everest"
+tile = "N27E086"
+sites = [[-38.5, 1.5], [7.5, -19.5]]

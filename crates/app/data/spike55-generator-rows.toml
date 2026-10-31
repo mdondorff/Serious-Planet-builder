@@ -1,0 +1,146 @@
+# SPIKE-55's generator rows (spikes/m9-glo30-targets/results/raw/generator_window_metrics.json): slope in degrees and local relief in metres at
+# 30 m, [p50, p99] per matched site. Derived statistics only. The reproduction check of TEST-079 compares the scorecard's sites with these within 2 %.
+
+[[row]]
+tile = "N27E086"
+lat = -38.5
+lon = 1.5
+slope = [6.779791, 24.185057]
+relief_1km = [124.958496, 430.486450]
+relief_5km = [475.897217, 843.614551]
+
+[[row]]
+tile = "N27E086"
+lat = 7.5
+lon = -19.5
+slope = [4.162063, 15.210319]
+relief_1km = [73.343262, 249.519617]
+relief_5km = [274.910645, 550.718066]
+
+[[row]]
+tile = "N31W004"
+lat = -23.5
+lon = -18.5
+slope = [2.365964, 6.346056]
+relief_1km = [33.464783, 71.177933]
+relief_5km = [105.821533, 184.556372]
+
+[[row]]
+tile = "N31W004"
+lat = 9.5
+lon = 18.5
+slope = [3.149346, 8.435631]
+relief_1km = [43.199768, 85.797998]
+relief_5km = [126.631836, 182.310205]
+
+[[row]]
+tile = "N40W078"
+lat = 16.5
+lon = -111.5
+slope = [1.432185, 3.964350]
+relief_1km = [20.395126, 44.383069]
+relief_5km = [65.211212, 107.096960]
+
+[[row]]
+tile = "N40W078"
+lat = -40.5
+lon = 1.5
+slope = [1.371418, 3.774882]
+relief_1km = [19.077209, 41.460111]
+relief_5km = [61.665771, 116.544278]
+
+[[row]]
+tile = "N41W096"
+lat = -15.5
+lon = 150.5
+slope = [0.851491, 2.278777]
+relief_1km = [12.633102, 27.583713]
+relief_5km = [41.227020, 74.436041]
+
+[[row]]
+tile = "N41W096"
+lat = -10.5
+lon = 155.5
+slope = [0.877581, 2.322902]
+relief_1km = [13.301895, 28.199152]
+relief_5km = [43.321259, 75.411249]
+
+[[row]]
+tile = "N43W102"
+lat = 13.5
+lon = 22.5
+slope = [2.513008, 6.800159]
+relief_1km = [34.477692, 75.159198]
+relief_5km = [103.904663, 190.876294]
+
+[[row]]
+tile = "N43W102"
+lat = -33.5
+lon = 4.5
+slope = [4.210024, 11.217667]
+relief_1km = [53.592957, 103.524612]
+relief_5km = [144.022217, 199.866870]
+
+[[row]]
+tile = "N47E011"
+lat = 11.5
+lon = -18.5
+slope = [2.645731, 7.649998]
+relief_1km = [44.880737, 111.386554]
+relief_5km = [169.014893, 309.153149]
+
+[[row]]
+tile = "N47E011"
+lat = -38.5
+lon = 3.5
+slope = [2.488481, 7.259247]
+relief_1km = [40.027527, 101.261523]
+relief_5km = [156.549011, 270.018066]
+
+[[row]]
+tile = "N48E008"
+lat = 2.5
+lon = -124.5
+slope = [1.660402, 4.809193]
+relief_1km = [24.153488, 60.609453]
+relief_5km = [83.712952, 159.033936]
+
+[[row]]
+tile = "N48E008"
+lat = 17.5
+lon = -26.5
+slope = [1.434221, 4.117563]
+relief_1km = [22.450195, 57.963062]
+relief_5km = [84.047363, 144.454053]
+
+[[row]]
+tile = "N52E012"
+lat = -38.5
+lon = 30.5
+slope = [0.561427, 1.546846]
+relief_1km = [8.601330, 18.445918]
+relief_5km = [30.175734, 47.971741]
+
+[[row]]
+tile = "N52E012"
+lat = 41.5
+lon = 149.5
+slope = [0.564463, 1.613948]
+relief_1km = [8.188803, 17.720366]
+relief_5km = [26.721550, 58.489443]
+
+[[row]]
+tile = "N57W005"
+lat = 10.5
+lon = -122.5
+slope = [1.205856, 3.547566]
+relief_1km = [18.113831, 43.851669]
+relief_5km = [65.198853, 128.877722]
+
+[[row]]
+tile = "N57W005"
+lat = -26.5
+lon = -118.5
+slope = [1.226960, 3.403965]
+relief_1km = [19.258423, 41.892947]
+relief_5km = [68.839844, 122.487311]

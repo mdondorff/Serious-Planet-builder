@@ -20,7 +20,7 @@ Dormant (no near trigger; not asked now):
 | B4 | Automated owner checks (`openspec/changes/b4-owner-checks/`): B4-5 package command (TEST-074), B4-4 edit scenario, B4-6 delivery | explorer |
 | B2, B3 | One job system (PRs 1a, 2 merged; 3a plan worker; 3b `Par` in core after B6), then the reserve test (ADR 0083, BUDG-008 to 010) | explorer |
 | B5 | Test robustness: the rest after #912 (`test fast` budget mostly falls with B6) | crusader |
-| B7 | The terrain scorecard (`openspec/changes/terrain-scorecard/`, 3 PRs) | crusader |
+| B7b | The scorecard baseline report as a docs PR (`docs/milestones/M9/terrain-score-baseline.md`, from `cargo xtask terrain-score`) | crusader |
 | M9 spikes | SPIKE-66 relief factor in the generator (after SPIKE-61 to 65: bake 4.5-6 h, amplitude per landform is the relief lever, ground-detail stills sent to the owner) | spikes |
 | HK | M8 housekeeping, mechanical pass and evidence diet (declutter batches 3, 4, 7) | spikes |
 | R4b | `GeoPoint::of_dir` and `dir` in `editor/polyline.rs` onto the core helpers | crusader |
