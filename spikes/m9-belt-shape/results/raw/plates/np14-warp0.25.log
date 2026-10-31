@@ -1,0 +1,44 @@
+knobs FI 2.2 GI 0.35 GC 0.4 DC 0.1; mask land share (B>0.5) 0.063, zone inland>0.5 0.062
+grid best (hypsometry):
+  hw 70 km c 0.65 amp 6000: 1/2/3/4/5 km 0.254/0.064/0.032/0.019/0.0088 err 0.23
+  hw 70 km c 0.5 amp 6500: 1/2/3/4/5 km 0.253/0.063/0.031/0.018/0.0091 err 0.31
+  hw 90 km c 0.5 amp 6000: 1/2/3/4/5 km 0.267/0.073/0.035/0.019/0.0085 err 0.32
+  hw 90 km c 0.65 amp 5500: 1/2/3/4/5 km 0.268/0.074/0.037/0.020/0.0072 err 0.33
+  hw 90 km c 0.35 amp 6500: 1/2/3/4/5 km 0.266/0.070/0.033/0.018/0.0093 err 0.36
+  hw 110 km c 0.35 amp 6000: 1/2/3/4/5 km 0.278/0.077/0.036/0.018/0.0081 err 0.38
+today (zone blobs, 7000 m)                       | 1/2/3/4/5 km 0.278/0.071/0.031/0.014/0.0075 err 0.44 | max 7974 | regions 11 aspect median 3.5 area-weighted 3.4 share aspect>=4 0.21 longest 3644 km
+    region    3939 k km2 | L  3644 km | W 1081 km | aspect   3.4 | lat -30
+    region    1674 k km2 | L  1669 km | W 1003 km | aspect   1.7 | lat 36
+    region     931 k km2 | L  1817 km | W  512 km | aspect   3.5 | lat 13
+    region     894 k km2 | L  2486 km | W  359 km | aspect   6.9 | lat 8
+    region     710 k km2 | L  1806 km | W  393 km | aspect   4.6 | lat 13
+    region     411 k km2 | L  1052 km | W  391 km | aspect   2.7 | lat 8
+belts hw 70 km, c 0.65, amp 6000                 | 1/2/3/4/5 km 0.254/0.064/0.032/0.019/0.0088 err 0.23 | max 6799 | regions 10 aspect median 12.5 area-weighted 17.7 share aspect>=4 0.95 longest 7691 km
+    region    3343 k km2 | L  7691 km | W  435 km | aspect  17.7 | lat 9
+    region    2062 k km2 | L  4091 km | W  504 km | aspect   8.1 | lat -35
+    region     855 k km2 | L  4342 km | W  197 km | aspect  22.0 | lat -2
+    region     806 k km2 | L  7229 km | W  112 km | aspect  64.8 | lat -6
+    region     549 k km2 | L  2708 km | W  203 km | aspect  13.4 | lat -25
+    region     335 k km2 | L   764 km | W  438 km | aspect   1.7 | lat -11
+belts hw 90 km, c 0.5, amp 6000                  | 1/2/3/4/5 km 0.267/0.073/0.035/0.019/0.0085 err 0.32 | max 6772 | regions 11 aspect median 12.9 area-weighted 14.7 share aspect>=4 0.96 longest 7707 km
+    region    4038 k km2 | L  7707 km | W  524 km | aspect  14.7 | lat 8
+    region    2258 k km2 | L  4099 km | W  551 km | aspect   7.4 | lat -35
+    region    1065 k km2 | L  4336 km | W  246 km | aspect  17.7 | lat -2
+    region     638 k km2 | L  4063 km | W  157 km | aspect  25.9 | lat -15
+    region     568 k km2 | L  2711 km | W  209 km | aspect  12.9 | lat -25
+    region     336 k km2 | L   764 km | W  439 km | aspect   1.7 | lat -11
+belts hw 110 km, c 0.35, amp 6000                | 1/2/3/4/5 km 0.278/0.077/0.036/0.018/0.0081 err 0.38 | max 6746 | regions 12 aspect median 11.7 area-weighted 16.5 share aspect>=4 0.97 longest 7714 km
+    region    2592 k km2 | L  7714 km | W  336 km | aspect  23.0 | lat 4
+    region    2365 k km2 | L  4144 km | W  571 km | aspect   7.3 | lat -36
+    region    1946 k km2 | L  5672 km | W  343 km | aspect  16.5 | lat 12
+    region    1254 k km2 | L  4320 km | W  290 km | aspect  14.9 | lat -2
+    region     590 k km2 | L  3738 km | W  158 km | aspect  23.7 | lat -17
+    region     337 k km2 | L   764 km | W  441 km | aspect   1.7 | lat -11
+belts without coastal arcs (hw 70)               | 1/2/3/4/5 km 0.226/0.048/0.024/0.016/0.0080 err 0.81 | max 6799 | regions 9 aspect median 11.6 area-weighted 10.5 share aspect>=4 0.94 longest 6024 km
+    region    2062 k km2 | L  4091 km | W  504 km | aspect   8.1 | lat -35
+    region    1654 k km2 | L  6024 km | W  275 km | aspect  21.9 | lat 18
+    region     855 k km2 | L  4342 km | W  197 km | aspect  22.0 | lat -2
+    region     776 k km2 | L  2860 km | W  271 km | aspect  10.5 | lat -16
+    region     335 k km2 | L   764 km | W  438 km | aspect   1.7 | lat -11
+    region     294 k km2 | L  2086 km | W  141 km | aspect  14.8 | lat -21
+images for belts hw 90 km, c 0.5, amp 6000 | 14 s

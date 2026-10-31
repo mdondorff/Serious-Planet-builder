@@ -45,5 +45,6 @@ Sources: SPIKE-61 to SPIKE-77 (`spikes/m9-*/results/results.md`); ADR 0088 (prop
 | Coupled run and water fields re-baked on the new heights | they read the base (ADR 0071, ADR 0088 risks) | minutes; the coupled run about 20 s (GEN-088) |
 | Relief-class lattice and ADR 0088's ring mean | the class drives `k`; the runtime reads one value per point | under 1 GB |
 | The erosion layer | ADR 0088 | about 7-10 GB ([SPIKE-61](../../spikes/m9-bake-prerun/results/results.md)); about 6-7.5 h overnight |
+- The belt amplitude 5,200 → 7,000 m joins the `GLOBAL_VERSION` bump: land above 2 / 3 / 4 km 7.1 / 3.2 / 1.4 % against Earth's 6.7 / 3.2 / 1.9 % without Antarctica ([SPIKE-78](../../spikes/m9-belts/results/results.md)); with SPIKE-79's plate-margin belt mask the amplitude is 6,000 m ([SPIKE-79](../../spikes/m9-belt-shape/results/results.md)).
 - **Recommendation:** re-bake once, after the class ADR and ADR 0088 are accepted, as R4 PR 1's first step. Keep `global16384` until the new store passes the gate, then delete it.
 - **Cost to reverse:** low. The old store stays on disk until the new one passes (135 GB free, SPIKE-61).
