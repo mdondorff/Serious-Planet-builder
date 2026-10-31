@@ -10,3 +10,7 @@
 
 ## 3. PR 2 to 4
 - [ ] 3.1 Chunk pool (if B6 leaves it); plan workers; horizon bakes and the scoped workers; the allow-list empties
+
+## 4. PR 3a: plan worker
+- [x] 4.1 `JobSystem::with_frame_workers`, `Share::classed`; the pipelined rig runs tile and plan workers on one system and one share `terrain` (ceiling workers + 1), the plan worker as a frame-critical thread at normal priority; `ThreadPool` has no production caller
+- [ ] 4.2 PR 3b: the plan job's scoped height workers (generators): needs the injected scoped fan-out in `planet-core` (CON-02, CON-04); planner decides

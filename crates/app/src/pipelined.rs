@@ -14,7 +14,8 @@ use planet_frame::pipeline::{
 use planet_frame::{plan_terrain_threaded, PlanError, ResidencySet, SelectionCache, TerrainPlan, TerrainRequest};
 use planet_generators::compact::CompactTile;
 use planet_render::{GpuContext, RgbaFrame, TerrainRenderer};
-use planet_streaming::{ResidencyManager, SlotRef, StreamConfig, Streamer, SystemClock, ThreadPool};
+use planet_streaming::jobs::{Class, JobSystem};
+use planet_streaming::{Priority, ResidencyManager, SlotRef, Spawner, StreamConfig, Streamer, SystemClock};
 use std::io::Write;
 use std::sync::Arc;
 use std::time::Instant;
@@ -91,6 +92,8 @@ pub(crate) struct Rig {
     /// The start-up load of the roots (the tiles of the render floor, STRM-001): how many and how long it waited for them (a reading,
     /// STRM-022: the cold start of a run without a pre-fill is the one without the pack's tiles).
     pub roots: (usize, std::time::Duration),
+    /// The job system the tile and plan workers run on (BUDG-004); last, so it is dropped after the streamer and the plan worker that feed it.
+    pub _system: Arc<planet_streaming::jobs::JobSystem>,
 }
 
 impl Rig {
@@ -120,7 +123,12 @@ impl Rig {
         renderer.warm_up(ctx);
         crate::stall::phase_mark("renderer warm-up");
         let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
-        let plan_pool = Arc::new(ThreadPool::new(1));
+        // One job system for the rig (BUDG-004): the tile workers below normal priority (ADR 0046) and the plan worker, a frame-critical thread at normal priority,
+        // on the one share `terrain`, whose ceiling holds both.
+        let system = Arc::new(JobSystem::with_frame_workers(gen.workers, gen.priority, 1, Priority::Normal));
+        let terrain = system.share("terrain", gen.workers + 1);
+        let plan_pool: Arc<dyn Spawner> = Arc::new(terrain.classed(Class::FrameCritical));
+        let tile_pool: Arc<dyn Spawner> = Arc::new(terrain);
         let pipe = PlanPipeline::new(PlanWorker::new(plan_pool, Arc::new(WorldPlanner(Arc::clone(world))), threads));
         // The streamer counts its slots in the renderer's pools: what it places, the renderer can hold.
         let pool = *renderer.pool_config();
@@ -128,7 +136,7 @@ impl Rig {
         let mut streamer = Streamer::new(
             Arc::new(MeshSource { world: Arc::clone(world), max_level: first.lod.max_level, cells: first.lod.cells }),
             // The tile threads and the jobs running at once are one number (STRM-020).
-            gen.pool(),
+            tile_pool,
             Arc::clone(&clock),
             gen.apply(StreamConfig {
                 capacity: pool.main_slots() as usize,
@@ -156,7 +164,7 @@ impl Rig {
         // The roots go to the GPU here too (STRM-001, ADR 0064): the start-up load is a step of the body, so frame 0 is a steady frame and
         // carries no root upload (a measured frame stays under the cap of STRM-006 and the CON-21 limits).
         managed.upload_roots(&mut RendererSink { ctx, renderer: &mut renderer })?;
-        Ok(Rig { renderer, managed, fi: FramesInFlight::new(MAX_FRAMES_IN_FLIGHT), pool, roots })
+        Ok(Rig { renderer, managed, fi: FramesInFlight::new(MAX_FRAMES_IN_FLIGHT), pool, roots, _system: system })
     }
 }
 

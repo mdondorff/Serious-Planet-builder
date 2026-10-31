@@ -13,7 +13,7 @@ Source: ADR 0083 point 2; opus-planner (2026-10-31, the order of the moves: tile
 
 ## ADDED Requirements
 ### Requirement: BUDG-008 A share's ceiling and the class order
-The job system SHALL run at most a share's ceiling of that share's jobs at once, however many workers are free, and SHALL start the jobs of the best class first (frame-critical, visible, prefetch, idle), in submission order within a class and share; a running job SHALL never be preempted. A share at its ceiling SHALL not hold back another share's jobs, and a closing system SHALL keep the ceilings while it drains. A share MAY cap its idle-class jobs at once (the tile pool of the horizon: STRM-060), so that a bake never holds a worker a visible job of the share needs.
+The job system SHALL run at most a share's ceiling of that share's jobs at once, however many workers are free, and SHALL start the jobs of the best class first (frame-critical, visible, prefetch, idle), in submission order within a class and share; a running job SHALL never be preempted. A share at its ceiling SHALL not hold back another share's jobs, and a closing system SHALL keep the ceilings while it drains. A share MAY cap its idle-class jobs at once (the tile pool of the horizon: STRM-060), so that a bake never holds a worker a visible job of the share needs. A job system MAY have workers of its own for frame-critical jobs (at normal priority, beside tile workers below normal, ADR 0046): the other workers SHALL then never take that class.
 
 Verify: A
 Status: active
@@ -26,6 +26,10 @@ Source: ADR 0083 point 2, BUDG-003, BUDG-004
 #### Scenario: An idle cap
 - **WHEN** a share with ceiling 4 and an idle cap of 1 has three idle jobs and then three visible jobs queued
 - **THEN** one idle job runs, the other two wait, and the three visible jobs run beside it
+
+#### Scenario: Frame-critical workers
+- **WHEN** both ordinary workers of a system with one frame-critical worker are held by visible jobs, and a frame-critical job and a visible job are queued
+- **THEN** the frame-critical job runs at once on the frame worker, and the visible job waits for an ordinary worker
 
 #### Scenario: A better class passes a worse one
 - **WHEN** jobs of the classes idle, prefetch, visible, idle, frame-critical and visible are queued behind a running job of one worker

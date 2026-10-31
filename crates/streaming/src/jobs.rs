@@ -59,12 +59,17 @@ struct State {
     queues: [VecDeque<Queued>; 4],
     shares: Vec<ShareState>,
     closed: bool,
+    /// Threads exist that run only frame-critical jobs: the other workers leave that class to them.
+    frame_dedicated: bool,
 }
 
 impl State {
     /// The next job a free worker may take: the best class with a job whose share is under its ceiling (a closing system keeps the ceilings and drains).
-    fn take(&mut self) -> Option<Queued> {
+    fn take(&mut self, frame_only: bool) -> Option<Queued> {
         for class in Class::ALL {
+            if frame_only != (class == Class::FrameCritical) && (frame_only || self.frame_dedicated) {
+                continue;
+            }
             let shares = &self.shares;
             let at = self.queues[class as usize].iter().position(|q| {
                 let s = &shares[q.share];
@@ -97,15 +102,25 @@ pub struct JobSystem {
 impl JobSystem {
     /// `workers` threads (at least one), each setting its own thread's `priority` before its first job.
     pub fn new(workers: usize, priority: Priority) -> Self {
+        Self::with_frame_workers(workers, priority, 0, Priority::Normal)
+    }
+
+    /// `workers` threads at `priority` for the three classes below frame-critical, and `frame_workers` more at `frame_priority` that run frame-critical jobs only
+    /// (the plan of a frame runs at normal priority beside tile workers below normal, ADR 0046); with `frame_workers` at zero every worker takes every class.
+    pub fn with_frame_workers(workers: usize, priority: Priority, frame_workers: usize, frame_priority: Priority) -> Self {
         let shared = Arc::new(Shared {
-            state: Mutex::new(State { queues: Default::default(), shares: Vec::new(), closed: false }),
+            state: Mutex::new(State { queues: Default::default(), shares: Vec::new(), closed: false, frame_dedicated: frame_workers > 0 }),
             wake: Condvar::new(),
         });
-        let workers = (0..workers.max(1))
-            .map(|n| {
+        let spec: Vec<(bool, Priority)> =
+            (0..workers.max(1)).map(|_| (false, priority)).chain((0..frame_workers).map(|_| (true, frame_priority))).collect();
+        let workers = spec
+            .into_iter()
+            .enumerate()
+            .map(|(n, (frame_only, priority))| {
                 let shared = Arc::clone(&shared);
                 std::thread::Builder::new()
-                    .name(format!("job-worker-{n}"))
+                    .name(format!("{}-{n}", if frame_only { "job-frame-worker" } else { "job-worker" }))
                     .spawn(move || {
                         if priority != Priority::Normal {
                             priority::set_current(priority);
@@ -114,7 +129,7 @@ impl JobSystem {
                             let queued = {
                                 let mut st = shared.state.lock().expect("job state");
                                 loop {
-                                    if let Some(q) = st.take() {
+                                    if let Some(q) = st.take(frame_only) {
                                         break q;
                                     }
                                     if st.closed && st.queues.iter().all(VecDeque::is_empty) {
@@ -254,6 +269,30 @@ impl Share {
         drop(done);
         let results = std::mem::take(&mut *run.results.lock().expect("fan-out results"));
         results.into_iter().map(|r| r.expect("every index ran")).map(|r| r.unwrap_or_else(|p| resume_unwind(p))).collect()
+    }
+}
+
+/// A [`Share`] whose every job runs in one class: the spawner of a subsystem whose work is all of one kind (the plan worker's jobs are frame-critical).
+#[derive(Clone)]
+pub struct ClassedShare {
+    share: Share,
+    class: Class,
+}
+
+impl Share {
+    /// A spawner that puts every job in `class`.
+    pub fn classed(&self, class: Class) -> ClassedShare {
+        ClassedShare { share: self.clone(), class }
+    }
+}
+
+impl Spawner for ClassedShare {
+    fn spawn(&self, job: Job) {
+        self.share.spawn_class(self.class, job);
+    }
+
+    fn spawn_in(&self, _class: JobClass, job: Job) {
+        self.share.spawn_class(self.class, job);
     }
 }
 
@@ -407,6 +446,37 @@ mod tests {
         release.store(true, Ordering::SeqCst);
         drop(system);
         assert_eq!(share.peak_running(), 4);
+    }
+
+    // spec: BUDG-008
+    #[test]
+    fn frame_critical_jobs_run_on_their_own_workers_and_the_others_never_take_them() {
+        let system = JobSystem::with_frame_workers(2, Priority::Normal, 1, Priority::Normal);
+        let share = system.share("terrain", 3);
+        let release = Arc::new(AtomicBool::new(false));
+        let (tx, rx) = mpsc::channel();
+        // Both ordinary workers are held.
+        for id in 0..2 {
+            share.spawn_class(Class::Visible, blocker(tx.clone(), id, Arc::clone(&release)));
+        }
+        for _ in 0..2 {
+            rx.recv_timeout(Duration::from_secs(10)).expect("an ordinary worker starts");
+        }
+        // A frame-critical job still runs at once, on the frame worker.
+        let (name_tx, name_rx) = mpsc::channel();
+        share
+            .classed(Class::FrameCritical)
+            .spawn(Box::new(move || name_tx.send(std::thread::current().name().map(str::to_string)).unwrap()));
+        let name = name_rx.recv_timeout(Duration::from_secs(10)).expect("the frame worker runs it").expect("a named thread");
+        assert!(name.starts_with("job-frame-worker"), "ran on {name}");
+        // A visible job never runs on the frame worker, though it is free.
+        let (v_tx, v_rx) = mpsc::channel();
+        share.spawn_class(Class::Visible, Box::new(move || v_tx.send(std::thread::current().name().map(str::to_string)).unwrap()));
+        assert!(v_rx.recv_timeout(Duration::from_millis(150)).is_err(), "a visible job ran while both ordinary workers were held");
+        release.store(true, Ordering::SeqCst);
+        let name = v_rx.recv_timeout(Duration::from_secs(10)).unwrap().unwrap();
+        assert!(name.starts_with("job-worker"), "ran on {name}");
+        drop(system);
     }
 
     // spec: BUDG-009
