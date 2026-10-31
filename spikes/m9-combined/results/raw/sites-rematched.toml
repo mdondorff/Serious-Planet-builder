@@ -1,0 +1,47 @@
+# SPIKE-80: the scorecard landforms with sites re-matched on the combined generator (combined.py): by class and the real window's mean height,
+# well inland, and on today's ground at 300 m or more for hills and mountains.
+
+[[landform]]
+name = "Brandenburg plain"
+tile = "N52E012"
+sites = [[-7.750, -87.000], [-18.250, -146.250]]
+
+[[landform]]
+name = "Loess hills and plains"
+tile = "N41W096"
+sites = [[18.000, -77.500], [3.000, 11.750]]
+
+[[landform]]
+name = "Badlands"
+tile = "N43W102"
+sites = [[1.000, -71.750], [10.500, -70.000]]
+
+[[landform]]
+name = "Erg Chebbi desert"
+tile = "N31W004"
+sites = [[-3.000, -79.500], [-17.500, -15.750]]
+
+[[landform]]
+name = "Valley and Ridge"
+tile = "N40W078"
+sites = [[33.000, 128.000], [40.750, 137.250]]
+
+[[landform]]
+name = "Black Forest"
+tile = "N48E008"
+sites = [[-18.000, 27.500], [-7.500, 10.000]]
+
+[[landform]]
+name = "Scottish Highlands"
+tile = "N57W005"
+sites = [[43.000, 140.500], [-49.750, 7.500]]
+
+[[landform]]
+name = "Alps, Tyrol"
+tile = "N47E011"
+sites = [[13.750, -117.500], [-8.750, 27.750]]
+
+[[landform]]
+name = "Himalaya, Everest"
+tile = "N27E086"
+sites = [[-54.750, -110.250], [12.000, -111.500]]
