@@ -15,7 +15,7 @@
 use crate::terrain::{SHADER_HEAD, SHADER_TAIL};
 use planet_generators::compact::{NORMAL_SCALE, SLOT_CLIMATE_OFFSET, SLOT_DRIVER_OFFSET, SLOT_TEXEL_OFFSET};
 
-/// Bytes of one tile reference: the slot's first texel in its block, the entry of the tile's fade plane plus one (0: none, REND-039), slot index, reserved.
+/// Bytes of one tile reference: the slot's first texel in its block, reserved, slot index, reserved.
 pub const REF_BYTES: u64 = 16;
 
 /// The compact pipeline's shader for tiles of `cells`: the product shader's header, fragment stage and helpers (shared with the
@@ -33,8 +33,8 @@ pub fn compact_terrain_shader(cells: u32) -> String {
 }
 
 const COMPACT_VERTEX: &str = r#"
-// Compact tiles (REND-016, GEN-025). Group 1: the per-frame tile reference of each node (first word of its slot in the block, the entry of its
-// fade plane plus one or 0, slot index, reserved), then the frame's fade planes (REND-039). Group 2: the block, read as words: the slot's header (nine control points as 27 f32, hr_min, hr_step,
+// Compact tiles (REND-016, GEN-025). Group 1: the per-frame tile reference of each node (first word of its slot in the block, reserved, slot
+// index, reserved). Group 2: the block, read as words: the slot's header (nine control points as 27 f32, hr_min, hr_step,
 // h_origin, skirt depth, the flags word), the climate block (81 words), the driver block (81 words) and the texels (two words each).
 @group(1) @binding(0) var<storage, read> tile_refs: array<vec4<u32>>;
 @group(2) @binding(0) var<storage, read> block: array<u32>;
@@ -62,10 +62,6 @@ var<private> skirt_depth: f32;
 var<private> flip: bool;
 // Index of the slot's first word in the block.
 var<private> origin: u32;
-// The chunk change fading in (REND-039): the entry of the frame's tile-reference buffer where the tile's change plane starts, plus one (0: the
-// tile has no plane in this frame), and the fade `1 - w` of the node; 0 reads no plane, so the old arithmetic is untouched.
-var<private> plane_entry: u32;
-var<private> fade: f32;
 
 fn hf(k: u32) -> f32 {
     return bitcast<f32>(block[origin + k]);
@@ -132,22 +128,6 @@ fn texel(i: i32, j: i32) -> vec2<u32> {
 
 fn rel_height(t: vec2<u32>) -> f32 {
     return hr_min + f32(t.x) * hr_step;
-}
-
-// The height of texel (i, j) with the fade of the chunk change taken off: `h_q - fade x change` (REND-039). Without a plane in this frame
-// or at fade 0 it is `hr` itself, the same operations as before.
-fn faded_height(i: i32, j: i32, hr: f32) -> f32 {
-    if (fade == 0.0) {
-        return hr;
-    }
-    let k = u32(j * (CELLS + 1) + i);
-    let v = tile_refs[plane_entry - 1u + k / 4u];
-    let lane = k & 3u;
-    var bits = v.x;
-    if (lane == 1u) { bits = v.y; }
-    if (lane == 2u) { bits = v.z; }
-    if (lane == 3u) { bits = v.w; }
-    return hr - fade * bitcast<f32>(bits);
 }
 
 fn texel_normal(t: vec2<u32>) -> vec3<f32> {
@@ -249,7 +229,7 @@ fn preview_place(o_rel: vec3<f32>, nup: vec4<f32>, i: i32, j: i32, hr: f32, k0: 
 
 // A neighbour for the parent-grid target: the preview's displaced vertex for a previewed node, the plain one otherwise.
 fn cplace(previewed: bool, o_rel: vec3<f32>, nup: vec4<f32>, i: i32, j: i32, k0: u32) -> vec4<f32> {
-    let hr = faded_height(i, j, rel_height(texel(i, j)));
+    let hr = rel_height(texel(i, j));
     if (previewed) {
         return preview_place(o_rel, nup, i, j, hr, k0);
     }
@@ -260,8 +240,6 @@ fn terrain_vertex(inst: u32, vi: u32) -> VsOut {
     let node = nodes[inst];
     let tref = tile_refs[inst];
     load_tile(tref.x);
-    plane_entry = tref.y;
-    fade = select(0.0, node.phase[6].w, tref.y != 0u);
     let w = CELLS + 1;
     let idx = i32(vi);
     var i = 0;
@@ -292,7 +270,7 @@ fn terrain_vertex(inst: u32, vi: u32) -> VsOut {
     let previewed = g.extra.w > 0.5 && node.morph.z > 0.5;
     // 2 marks a node only the transient stamps (after the delta's) apply to (VIEW-036).
     let k0 = select(0u, u32(g.extra.w) >> 6u, node.morph.z > 1.5);
-    var own = place(i, j, faded_height(i, j, rel_height(own_t)));
+    var own = place(i, j, rel_height(own_t));
     var grad = vec3<f32>(0.0);
     var flat_w = 0.0;
     var vup = vec3<f32>(0.0);
@@ -455,8 +433,9 @@ fn tile_climate(in: VsOut) -> vec2<f32> {
 }
 
 // The drivers at a fragment of a compact tile (presentation data): the bilinear interpolation of the tile's 9 x 9 driver block at the fragment's tile
-// coordinates, as (soil depth in metres, moisture, insolation), faded in with the node's chunk weight `w = 1 - fade` from the neutral values
-// (soil 1 m, moisture 0.5, the neutral insolation of the texel's latitude in the top byte of the word): `neutral + w (chunk - neutral)` (GEN-071).
+// coordinates, as (soil depth in metres, moisture, insolation), blended with the neutral values (soil 1 m, moisture 0.5, the neutral insolation of the
+// texel's latitude in the top byte of the word) at weight 1: `neutral + w (chunk - neutral)` (GEN-071; the weight is the constant 1 since the chunk
+// fade left the draw, and the expression is kept so the lit path stays bit-identical until the drivers go).
 // A tile with no chunk holds the neutral values, so the blend changes nothing there. The unorm8 decode is exact in f32.
 fn driver_texel(base: u32, idx: i32) -> vec4<f32> {
     let word = block[base + DRIVER_WORD + u32(idx)];
@@ -465,8 +444,7 @@ fn driver_texel(base: u32, idx: i32) -> vec4<f32> {
 }
 
 fn tile_drivers(in: VsOut) -> vec3<f32> {
-    let tref = tile_refs[in.node_index];
-    let base = tref.x;
+    let base = tile_refs[in.node_index].x;
     let x = clamp(in.aux.x, 0.0, 1.0) * 8.0;
     let y = clamp(in.aux.y, 0.0, 1.0) * 8.0;
     let a = min(i32(x), 7);
@@ -475,7 +453,7 @@ fn tile_drivers(in: VsOut) -> vec3<f32> {
     let wy = y - f32(b);
     let i00 = b * 9 + a;
     let d = mix(mix(driver_texel(base, i00), driver_texel(base, i00 + 1), wx), mix(driver_texel(base, i00 + 9), driver_texel(base, i00 + 10), wx), wy);
-    let fade_w = 1.0 - select(0.0, nodes[in.node_index].phase[6].w, tref.y != 0u);
+    let fade_w = 1.0;
     return vec3<f32>(1.0 + fade_w * (d.x - 1.0), 0.5 + fade_w * (d.y - 0.5), d.w + fade_w * (d.z - d.w));
 }
 

@@ -1002,77 +1002,6 @@ Source: opus-planner (2026-10-23, M8-1 part c), ADR 0077, R5
 - **WHEN** a run on a small lattice is written and read back, and a run parameter, the steps, the base resolution or an input changes
 - **THEN** the arrays are equal bit for bit, every key differs from the first run's, and a payload cut short or of another `B` is refused naming the block
 
-### Requirement: STRM-038 Chunk results in tile keys
-A tile key SHALL chain the content hash of the chunk results the tile reads, its own chunk and every neighbouring chunk within its read reach (a tile near a chunk border reads cells of the neighbour); a chunk that is not ready SHALL chain word 0, so a stand-in tile and an exact tile never share a key and a neighbour landing re-keys exactly the tiles it can change, and a tile above the pyramid's top level SHALL have the base's key whatever the chunks hold.
-
-Verify: A
-Status: active
-Source: SPIKE-34 section 6, STRM-027, STRM-029, ADR 0022
-
-#### Scenario: Keys
-- **WHEN** a tile at the pyramid top is keyed with its chunk not ready, then ready, a tile one level above the top in both states, and a tile at the chunk border with its neighbour not ready, then ready
-- **THEN** the first two keys differ, the two keys of the coarser tile are equal and equal the base's, and the border tile's keys differ while a tile in the middle of the chunk keeps its key
-
-### Requirement: STRM-039 Chunk jobs never block a frame
-Chunk jobs SHALL run on the injected spawner (CON-04), ordered by distance to the camera, at most `chunk_workers` at once, and no frame SHALL wait for one. A tile whose chunk is not ready SHALL draw the base; on landing, the chunk's change SHALL fade in per tile over `chunk_fade_ms` (default 1500, the owner, 2026-10-24) on the injected clock, through a plain f32 weight (CON-11; the weight is the CPU side, drawing with it is REND-039). The per-frame log SHALL count the plan's nodes that read chunk detail (at or finer than the pyramid's top level, column `chunk_nodes`) and those among them whose own chunk is not ready (column `chunk_stand_in`): the stand-in share, for the speed-envelope scene.
-
-Verify: A, B
-Status: active
-Source: ADR 0077 point 7, CON-22, CON-04, CON-11, M8 plan criteria 3 and 7
-
-#### Scenario: Flight without waiting
-- **WHEN** a scripted flight from 30 km to 1.8 m and a 300 m pan run on the fake clock with a stand-in chunk cost of 0.25 s per km2 and 6 workers
-- **THEN** no frame waits for a chunk, every chunk lands (the first within 10 s at the pan), and the log shows the stand-in share falling to zero
-
-#### Scenario: Fade
-- **WHEN** a chunk lands under visible tiles
-- **THEN** each tile's weight rises linearly from 0 to 1 over `chunk_fade_ms` (default 1500), so the drawn height `base + w x change` steps by at most the weight step times the change per frame (a change of 17.55 m, the 256-bake figure, moves 0.19 m a frame at 60 frames per second; the shared store's largest entry step of 58.3 m moves 0.65 m a frame, which is 0.20 px on screen at the distance where it enters: design.md 6a of `m8-chunk-fade`)
-
-### Requirement: STRM-040 Landing refreshes and invalidates
-When a chunk lands, the tiles that read it (the chunk under them and the neighbours within their read reach, STRM-038) SHALL be refreshed through the stale-tile machinery (the old tile keeps drawing while the refresh runs, REND-032), and the origin heights and mesh keys the plan cache holds for them, resident or not, SHALL be invalidated before the next plan reads the cache (STRM-058). The viewer's use of this (building the field with the landed chunk, calling it each frame) arrives with the chunk stage in the viewer (STRM-046). Heights sampled by the plan SHALL never request a chunk.
-
-Verify: A
-Status: active
-Source: SPIKE-34 sections 1 and 4, REND-032, LOD-009
-
-#### Scenario: Landing
-- **WHEN** a chunk lands during a flight
-- **THEN** exactly the tiles at or above the apply level under it are refreshed and their cached origin heights dropped, and no chunk is requested by sampling
-
-### Requirement: STRM-041 Chunk residency, eviction and disk cache
-A chunk not wanted for `chunk_evict_s` (default 30) on the injected clock SHALL be evicted from RAM, and its bytes SHALL count toward the RAM caps as a pool of their own, 512 MiB by default, the least recently wanted leaving first beyond it. A landed chunk SHALL be stored in the pack store under a key that covers the body, the process hash, the chunk grid, the pyramid top level, the radius, the key of the field below the chunk stage and the chunk, and verified on read (CON-05); a verification failure SHALL be a miss and the chunk recomputed, with the failure named in the log.
-
-Verify: A
-Status: active
-Source: ADR 0077, D7 (runtime generation, disk cache), CON-05, STRM-033, opus-planner (2026-10-27: the default was 5; owner test, 1150 evictions in an hour)
-
-#### Scenario: Evict and reload
-- **WHEN** a chunk is evicted and wanted again, with its disk entry intact, then with a corrupted entry
-- **THEN** the first reload reads the disk entry without computing, the second recomputes and logs the failure, and both give the identical result
-
-#### Scenario: Not wanted for 32 s
-- **WHEN** one of two ready chunks is not wanted for 32 s of the injected clock and the other is
-- **THEN** the first is evicted and the second stays, and the pool's bytes never pass the cap
-
-### Requirement: STRM-042 Chunk prefetch along travel
-The chunks needed by the camera predicted by STRM-018's velocity, one chunk ahead along the direction of travel, SHALL be requested below the wanted set in priority, and a camera that only rotates SHALL prefetch no chunk. The frame crate computes the set (`prefetch_chunks`, `track_chunks`); no app code asks a chunk manager for it since ADR 0086 (the requirement goes with the frame side). The track SHALL ask the chunks whose centre lies within the larger of the plan's reach and one chunk edge, plus half an edge, of its samples: the next chunk is asked on entering the current one, and a chunk is asked as early before it is wanted as the lead says.
-
-Verify: A, B
-Status: active
-Source: STRM-018, SPIKE-34 section 7, D7, opus-planner (2026-10-26, criterion 7: the request was never made; 2026-10-27, the lead trace of window 14)
-
-#### Scenario: Travel and rotation
-- **WHEN** the camera travels at 100 m/s over a fixed script, then turns 360 degrees in place
-- **THEN** the next chunk along the travel is requested before it is wanted, and the rotation requests none
-
-#### Scenario: A low view
-- **WHEN** the plan's reach is a fraction of one chunk edge and the camera has just entered a chunk
-- **THEN** the chunk across the nearest edge is asked at once, and the set equals the one for a reach of one edge
-
-#### Scenario: A solve ahead
-- **WHEN** the camera flies straight at 100 to 500 m/s over ground the prefetch has not covered, with a plan reach under one chunk edge, 1.6 edges and 2.6 edges
-- **THEN** every chunk the plan later wants is asked at least the longest solve (10 s) and a second before it is wanted, and the chunks wanted within the first 12 s of the flight are asked in its first frame
-
 ### Requirement: STRM-045 The coarse horizon is stored as a channel
 The coarse horizon (GEN-045) SHALL be stored as a `TileChannel` of kind 9 in blocks of the canonical layout of its observer lattice (`GlobalWorld::layout(m)`): per observer cell the record of GEN-045 (`2 a + 2` bytes for `a` azimuths), one `B x B` block per tile, as an LZ4 block with the record length in its header. The key SHALL carry the observer lattice size, every parameter of the march and its version, and the whole coupled run it is computed from (STRM-043's spec and inputs hash), so a changed value gives every block a new key and no key equals a coupled-run block's.
 
@@ -1087,20 +1016,20 @@ Detail: A block read back SHALL equal what was written bit for bit; a block of a
 - **THEN** the map is equal bit for bit, the block of a tile holds the observer cells under it, every key differs from the first one's and from the coupled run's, and a payload cut short, of another `B` or azimuth count, or missing is refused naming the block
 
 ### Requirement: STRM-048 The chunk horizon follows its chunk
-`streaming::chunks::HorizonJobs` SHALL run the horizon map of a chunk (GEN-044) as a second job that starts only once the chunk's heights are ready, on the injected spawner, at most `workers` at once, nearest first, and never waits for one (CON-22): until its map lands a tile reads the coarse horizon alone (`horizon(key)` is `None`).
+`streaming::horizonjobs::HorizonJobs` SHALL run the horizon map of a chunk (GEN-044) as a job that starts only once its `ChunkSource` reports the chunk ready, on the injected spawner, at most `workers` at once, nearest first, and never waits for one (CON-22): until its map lands a tile reads the coarse horizon alone (`horizon(key)` is `None`).
 
 Verify: A
 Status: active
-Source: opus-planner (2026-10-24, M8-5; coalescing added the same day), STRM-038 to STRM-041, CON-22
+Source: opus-planner (2026-10-24, M8-5; coalescing added the same day), STRM-064, CON-22, ADR 0086
 
-Detail: Each map carries a state word, the hash of the march and of the results of the chunk and of every chunk its bake reads (0 for one that is not ready). A map whose word differs from the current one is baked again, with the state word checked at dispatch and not at each landing, and only once the word has been unchanged for `settle_ms` of the injected clock, so the landing of eight neighbours one after another costs one re-bake, not eight; the number of re-bakes is in the stats. A map is dropped when its chunk leaves RAM. With a disk cache a map is looked up by its tile and its state word before it is baked, and stored after: a map made against other neighbours, or another march, is a miss, and a failing entry is a logged miss.
+Detail: Each map carries a state word, the hash of the march and of the results of the chunk and of every chunk its bake reads (0 for one that is not ready). A map whose word differs from the current one is baked again, with the state word checked at dispatch and not at each landing, and only once the word has been unchanged for `settle_ms` of the injected clock, so the landing of eight neighbours one after another costs one re-bake, not eight; the number of re-bakes is in the stats. A map is dropped when its chunk leaves the source. With a disk cache a map is looked up by its tile and its state word before it is baked, and stored after: a map made against other neighbours, or another march, is a miss, and a failing entry is a logged miss.
 
-#### Scenario: Stand-in, landing and coalescing
-- **WHEN** a chunk has its heights, then its horizon job runs, then its eight neighbours land one every 100 ms, then the jobs are asked after the settle window
+#### Scenario: Landing and coalescing
+- **WHEN** a chunk becomes ready in the source, then its horizon job runs, then its eight neighbours land one every 100 ms, then the jobs are asked after the settle window
 - **THEN** no job starts before the heights, the update returns with the job waiting, the tile reads no map until it lands, the neighbours' landings start no bake until the neighbourhood has settled, and then one re-bake reads all nine chunks (two bakes, one re-bake in all)
 
 #### Scenario: Eviction, the march and the disk
-- **WHEN** a chunk is evicted, the march changes, and a second world starts from the same disk cache
+- **WHEN** the source evicts a chunk, the march changes, and a second world starts from the same disk cache
 - **THEN** the chunk's map is dropped with it, a map of another march is not taken for the first, the same chunk with the same neighbourhood reads its map from the disk with no bake, and one with another neighbourhood is a miss
 
 ### Requirement: STRM-049 The world bakes the chunk horizon
@@ -1128,65 +1057,29 @@ Source: opus-planner (2026-10-24, M8-5), STRM-048
 - **THEN** the second run reads the maps from the pack and bakes none
 
 ### Requirement: STRM-046 The viewer runs A-net chunks at runtime when asked
-No app code starts a chunk stage (the flag `--chunks` and the world's stage are removed, ADR 0086), so every tile the viewer, the editor and the scenes draw SHALL be the base. No frame SHALL wait for a chunk (STRM-039).
+No app code starts a chunk stage (the flag `--chunks` and the world's stage are removed, ADR 0086), so every tile the viewer, the editor and the scenes draw SHALL be the base. No frame SHALL wait for a bake (CON-22).
 
 Verify: A
 Status: active
-Source: D7 (runtime generation, disk cache), ADR 0077 point 7, STRM-039, STRM-041, STRM-043, owner fallback 2026-10-28, ADR 0086
-
-#### Scenario: Enabled by the channel
-- **WHEN** a world with a stored coupled channel and a world without one are opened with the stage asked for by a caller
-- **THEN** the first has a chunk manager whose fields carry the chunk stage and the second has none, and a chunk landed in the first is read from the disk cache after a restart without computing
+Source: D7 (runtime generation, disk cache), ADR 0077 point 7, STRM-043, owner fallback 2026-10-28, ADR 0086
 
 #### Scenario: Off by default
 - **WHEN** the window opens a world with a stored coupled channel
-- **THEN** it has no chunk manager and computes no chunk
+- **THEN** it starts no chunk job and computes no chunk
 
-### Requirement: STRM-047 The change and its weight reach the draw
-The compact tile builder SHALL store the chunk change of a tile at the tile's own level beside its heights (`HeightField::level_change`, forwarded by every wrapper that forwards `height_at_level`), and the plan's node (`TerrainDraw::chunk_weight`) SHALL carry the tile's fade weight, the minimum of the weights of the chunks the tile reads that are ready (a chunk that is not ready adds nothing to its plane and has no weight), so two tiles on either side of a chunk border rise together, also next to a chunk that is still being computed; the node record holds it as the fade `1 - w` (REND-039).
-
-Verify: A
-Status: active
-Source: STRM-039 (the weight), STRM-038 (the chunks a tile reads), REND-039
-
-#### Scenario: Change and weight
-- **WHEN** a tile at the pyramid top over a ready chunk and a tile near its border with a chunk that landed later are built and planned
-- **THEN** the stored change equals the field's height at the tile's level minus the base's (for a tile without a predecessor), the node weights follow the fade of each chunk, and the border tile takes the smaller weight of the ready chunks it reads
-
-### Requirement: STRM-052 The fade clock of a landed chunk
-The fade of a landed chunk's change (STRM-047) SHALL start when the change is first drawn: when the first exact tile that reads the chunk is drawn (its mesh is the one the plan expects, STRM-038), once no stale tile that reads it is still drawn from the mesh it had before the landing. A stale tile SHALL start nothing; until the clock starts the chunk SHALL weigh 0, so a rebuild slower than `chunk_fade_ms` still fades. Every tile of the chunk SHALL share that one clock. A chunk that lands again without having left RAM (a new version) SHALL keep its state, so the tiles under it neither drop to the base nor fade again.
+### Requirement: STRM-047 The compact tile carries the chunk change
+The compact tile builder SHALL store the chunk change of a tile at the tile's own level beside its heights (`HeightField::level_change`, forwarded by every wrapper that forwards `height_at_level`), and the CPU mirror `CompactTile::shade_vertex_faded` SHALL take `fade x change` off a vertex. The renderer and the plan do not read the change or a weight since ADR 0086; the requirement goes with the generators' chunk field.
 
 Verify: A
 Status: active
-Source: STRM-047, STRM-038, M8 plan criterion 3
+Source: GEN-025, ADR 0086
 
-#### Scenario: A slow rebuild and a new version
-- **WHEN** a chunk lands and its rebuilt tiles reach the renderer 2 s later (the fade is 1.5 s), and later the chunk and a neighbour land again
-- **THEN** the tiles under the chunk weigh 0 until the rebuilt tiles arrive, 0.5 at 750 ms after, and 1 after 1.5 s, and the later landings leave the weights at 1
-
-### Requirement: STRM-053 A rebuilt tile carries the increment over the tile it replaces
-A rebuilt tile SHALL be uploaded with a change plane that is, per texel, its own final height less the height the replaced tile is drawn at (`CompactTile::change_replacing`), so that at the weight of its chunks' clock it draws `drawn_old + w x (final' - drawn_old)`: at weight 0 what was on screen, at weight 1 its own surface, and at any weight the same as every other tile rebuilt for the same landing along their shared edges. A tile without a predecessor SHALL keep the plane over the base. This rests on an invariant: a drawn tile that reads a chunk is never stale while that chunk's clock runs (STRM-052).
-Verify: A
-Status: active
-Source: STRM-047, STRM-052, numerics review of 2026-10-26
-
-#### Scenario: Neighbour landing and a chunk that is not ready
-- **WHEN** two tiles side by side across the border of chunks A and B are drawn with A faded in and B not ready, and B then lands and both tiles are rebuilt
-- **THEN** before and after the landing the edge between them is closed to within 0.05 m at every weight, the rebuilt tiles draw what the old ones drew at weight 0 and their own surface at weight 1, and no tile moves while a stale tile that reads the chunk is still drawn
-
-### Requirement: STRM-054 A replaced tile keeps its weight until the swap
-The loop SHALL keep, for each resident tile that reads chunks, the tile as it was last uploaded, and the weight it keeps drawing at from the landing of a chunk it reads until its rebuilt tile is uploaded (the weight it had when the chunk landed).
-
-Verify: A
-Status: active
-Source: STRM-053, STRM-047
-
-#### Scenario: A landing under a drawn tile
-- **WHEN** a chunk lands under a resident tile that reads it while the tile is drawn at some weight
-- **THEN** the tile keeps drawing at the weight it had when the chunk landed until its rebuilt tile is uploaded, and the loop holds the tile as it was last uploaded
+#### Scenario: Change
+- **WHEN** a tile at the pyramid top over a ready chunk is built
+- **THEN** the stored change equals the field's height at the tile's level minus the base's, and the mirror's vertices at fade `f` are the final ones minus `f` times the change
 
 ### Requirement: STRM-055 The job log tells a refresh and its waits
-The job log (STRM-022) SHALL record for each job the milliseconds from the request of its tile to its dispatch (the wait in the streamer's queue) and whether it rebuilds a stale resident tile (a refresh, STRM-026). `refresh_summary` SHALL put the refresh jobs of a slice in one line: their count and the median, 90th percentile and largest of the streamer-queue wait, the spawner-queue wait and the load, in milliseconds; none without a refresh. The viewer SHALL write that line every 10 s while there are refreshes, with the chunks landed and the stand-in share (`ChunkShare::landing_note`). The readings decide nothing (CON-14).
+The job log (STRM-022) SHALL record for each job the milliseconds from the request of its tile to its dispatch (the wait in the streamer's queue) and whether it rebuilds a stale resident tile (a refresh, STRM-026). `refresh_summary` SHALL put the refresh jobs of a slice in one line: their count and the median, 90th percentile and largest of the streamer-queue wait, the spawner-queue wait and the load, in milliseconds; none without a refresh. The viewer SHALL write that line every 10 s while there are refreshes. The readings decide nothing (CON-14).
 
 Verify: A
 Status: active
@@ -1221,38 +1114,27 @@ Source: opus-planner (2026-10-25, M8-R rebuild)
 - **WHEN** a bake is reduced with a progress callback on 1 and on 4 threads
 - **THEN** the callback is called once per band with counts that reach the total, and the heights equal those of `reduce_bake`
 
-### Requirement: STRM-056 A stale chunk keeps drawing and is re-solved when read
-An edit SHALL mark the ready chunks whose read set (GEN-081) it touches stale. A stale chunk SHALL keep drawing its old version (STRM-054) until the new version lands, and SHALL be re-solved only when the plan reads it: nearest to the camera first, ahead of prefetch (STRM-042), with at most two of the chunk workers on stale chunks. The new version SHALL land as a second landing (STRM-052, STRM-053). No frame waits for it (CON-22).
-
-Verify: A
-Status: active
-Source: m8-chunk-version, STRM-040, STRM-042, STRM-054
-
-#### Scenario: An edit over a drawn chunk
-- **WHEN** a world with a stand-in chunk stage on a fake clock has a chunk ready, gets an edit inside its halo, and the plan keeps reading the chunk
-- **THEN** the chunk draws its old version until the new one lands, one job runs for it, a chunk the plan does not read stays stale and unsolved, and at most two stale jobs run at once
-
 ### Requirement: STRM-057 A chunk's horizon is baked again only when an edit touches it
 The state word of a chunk's horizon (STRM-048) SHALL carry, instead of the definition's revision, the hash of the items of every stamp layer that touch the chunk and the halo the march reads around it (`HorizonBaker::edit_word`), 0 for none. An edit that touches none of a chunk's items SHALL NOT bake its map again; one that does SHALL, once the neighbourhood has settled, at most once per chunk.
 
 Verify: A
 Status: active
-Source: m8-chunk-version, STRM-048, STRM-049, GEN-082
+Source: m8-chunk-version, STRM-048, STRM-049
 
 #### Scenario: An edit far from the flight
 - **WHEN** a world with the horizon jobs has every map landed and gets an edit outside every chunk's halo
 - **THEN** no map is baked again; an edit at the chunks bakes at most one map per chunk it touches
 
 ### Requirement: STRM-058 The main thread never takes the plan cache's lock
-The plan job holds the plan cache's lock for the whole plan, which can take a second while chunk and horizon jobs hold the cores, so the main thread SHALL NOT take it. Everything the main thread asks of the cache (the tiles of a landed chunk, the tiles of an edit, a change of the item revision) SHALL wait in one ordered queue that the plan job applies, under the lock, before it plans, landed chunks that follow one another in one pass. The queue SHALL stay bounded: a clear replaces what was queued before it, tile drops merge without duplicates, a chunk is queued once, and a queue that outgrows the cache becomes a clear.
+The plan job holds the plan cache's lock for the whole plan, which can take a second while chunk and horizon jobs hold the cores, so the main thread SHALL NOT take it. Everything the main thread asks of the cache (the tiles of an edit, a change of the item revision) SHALL wait in one ordered queue that the plan job applies, under the lock, before it plans. The queue SHALL stay bounded: a clear replaces what was queued before it, tile drops merge without duplicates, and a queue that outgrows the cache becomes a clear.
 
 Verify: A
 Status: active
-Source: SPIKE-44 step 2, CON-22, STRM-040
+Source: SPIKE-44 step 2, CON-22
 
 #### Scenario: The queue is bounded
-- **WHEN** one chunk lands a thousand times, two thousand overlapping tile drops are asked, six thousand distinct chunks land, and a clear follows
-- **THEN** the queue holds one entry for the chunk, one merged tile drop with no tile twice past 4,096 tiles, at most 4,097 entries in the storm, and after the clear one entry that makes the tile drops and landings after it moot while an item change after it is still queued in order
+- **WHEN** two thousand overlapping tile drops are asked, more item changes than the cache keeps follow, and a clear follows
+- **THEN** the queue holds one merged tile drop with no tile twice past 4,096 tiles, the item changes the cache keeps, and after the clear one entry that makes the tile drops after it moot while an item change after it is still queued in order
 
 #### Scenario: A landing waits for the plan job
 - **WHEN** a chunk lands while the plan cache holds the origin heights of tiles that read it and of tiles that do not, and two landings come together
@@ -1288,13 +1170,13 @@ Detail: Every chunk counts as ready with no change. The bakes run on a pool of t
 - **WHEN** the window runs lit over a store
 - **THEN** `chunk jobs` stays `None` and the horizon jobs bake at least one map (judged by the real-store gate `cargo xtask gate`; the small-world run reports it, because a software adapter is too slow to wait for a bake)
 
-### Requirement: STRM-060 Background jobs run in classes and a bake never holds a chunk worker
-The shared job pool SHALL run a waiting job of a better class before any waiting job of a worse class (`JobClass`: visible streaming and edits, prefetch, idle; ADR 0083 point 2), in submission order within a class, and SHALL NOT preempt a running job. Idle jobs SHALL run on at most `idle_cap` workers of the pool. The viewer's chunk pool SHALL have `VIEW_CHUNK_WORKERS` threads for chunk jobs plus `idle_cap` (1) for the idle class, and the chunk horizon jobs (STRM-049) SHALL be idle jobs, so that no chunk job waits for a horizon bake.
+### Requirement: STRM-060 Background jobs run in classes and a bake never holds a tile worker
+The shared job pool SHALL run a waiting job of a better class before any waiting job of a worse class (`JobClass`: visible streaming and edits, prefetch, idle; ADR 0083 point 2), in submission order within a class, and SHALL NOT preempt a running job. Idle jobs SHALL run on at most `idle_cap` workers of the pool. The chunk horizon jobs (STRM-049) SHALL be idle jobs, so that no other job waits for a horizon bake.
 
 Verify: A
 Status: active
-Source: opus-planner (2026-10-27, window 8), ADR 0083 point 2, STRM-049, STRM-056
+Source: opus-planner (2026-10-27, window 8), ADR 0083 point 2, STRM-049, ADR 0086
 
-#### Scenario: A queued chunk job against waiting bakes
+#### Scenario: A queued job against waiting bakes
 - **WHEN** a one-worker pool is busy and idle, prefetch and visible jobs are submitted in that order
 - **THEN** the visible jobs start first, then the prefetch job, then the idle jobs; with an idle cap of 1 on three workers, a second idle job does not start while the first runs and two visible jobs run beside it

@@ -1,0 +1,14 @@
+face 0 fine 98304 per edge (101.8 m mean), core 3072 halo 256, 6 tiles of 1024 per face, stride 11, par 3, sample threads 4, steps 30
+face 0: 707 of 1024 tiles hold land; land share 0.609
+face 1: 330 of 1024 tiles hold land; land share 0.269
+face 2: 208 of 1024 tiles hold land; land share 0.175
+face 3: 519 of 1024 tiles hold land; land share 0.435
+face 4: 33 of 1024 tiles hold land; land share 0.022
+face 5: 343 of 1024 tiles hold land; land share 0.247
+tile ti tj land_frac skip dirs_s sample_s route_s carve_s total_s max_cut_m p50_cut_chan_m chan_cells core_cells delta_bytes h16_bytes inflow_cells
+1 16 5 1.000 0 0.40 15.79 63.75 11.82 94.45 100.0 8.64 529495 9437184 8116804 12714207 99
+3 5 16 0.000 1 0 0 0 0 0.000 0 0 0 9437184 0 0 0
+2 27 5 1.000 0 0.40 15.87 73.14 13.46 105.55 41.8 2.94 590598 9437184 5339825 8687469 122
+0 5 5 0.185 0 0.37 15.91 168.37 1.70 187.50 7.2 0.76 7775 9437184 157960 4080631 106
+4 16 16 1.000 0 0.30 9.04 75.00 13.42 100.75 42.0 2.80 683894 9437184 5362550 8134539 91
+5 27 16 1.000 0 0.35 9.10 76.24 13.72 101.80 31.1 1.72 682728 9437184 4630482 7049988 143

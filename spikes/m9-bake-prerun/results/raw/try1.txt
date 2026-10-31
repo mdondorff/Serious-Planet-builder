@@ -1,0 +1,5 @@
+face 0 fine 98304 per edge (101.8 m mean), core 3072 halo 256, 3 tiles of 1024 per face, stride 11, par 3, sample threads 4, steps 2
+tile ti tj land_frac skip dirs_s sample_s route_s carve_s total_s max_cut_m p50_cut_chan_m chan_cells core_cells delta_bytes h16_bytes inflow_cells
+1 16 5 1.000 0 1.48 62.81 13.53 2.23 85.65 100.0 0.42 560778 9437184 3279336 12541710 99
+2 27 5 1.000 0 1.47 62.68 15.22 3.34 86.53 26.0 0.12 717003 9437184 1274519 8071694 122
+0 5 5 0.185 0 1.44 62.58 38.29 0.36 116.11 1.0 0.05 8285 9437184 23429 4071195 106

@@ -9,7 +9,7 @@ use planet_generators::chunk::CHUNK_GRID_LEVEL;
 use planet_generators::chunkfield::{ChunkKey, PYRAMID_TOP_LEVEL};
 use planet_generators::height::IMPLEMENTATION_ID as REFERENCE_ID;
 use planet_generators::horizon::HorizonParams;
-use planet_streaming::chunks::HorizonConfig;
+use planet_streaming::horizonjobs::HorizonConfig;
 use planet_streaming::{FakeClock, ManualSpawner};
 use planet_world_def::stamp::{Stamp, StampKind};
 use planet_world_def::{BodyId, ItemSpec, WorldDefinition, DEFAULT_ITEM_LAYER};
@@ -70,7 +70,7 @@ fn a_world_without_a_bake_has_no_horizon_jobs_and_does_nothing() {
 #[test]
 fn a_horizon_reads_the_three_by_three_chunks_around_it_across_face_edges_too() {
     use planet::horizonworld::ChunkHorizonBaker;
-    use planet_streaming::chunks::HorizonBaker;
+    use planet_streaming::horizonjobs::HorizonBaker;
     let r = rig();
     let lat = r.world.horizon_lattice().unwrap();
     let baker = ChunkHorizonBaker::new(&r.world, lat, params(), 1);
@@ -91,7 +91,7 @@ fn a_horizon_reads_the_three_by_three_chunks_around_it_across_face_edges_too() {
 #[test]
 fn a_march_the_chunks_cannot_hold_or_the_bake_refuses_is_turned_down_at_once_and_a_gone_world_gives_a_map_of_zeros() {
     use planet::horizonworld::{chunk_horizon_params, max_range_m, ChunkHorizonBaker};
-    use planet_streaming::chunks::HorizonBaker;
+    use planet_streaming::horizonjobs::HorizonBaker;
     let r = rig();
     let spawn = |r: &Rig| -> (Arc<ManualSpawner>, Arc<FakeClock>) { (r.horizon_jobs.clone(), r.clock.clone()) };
     let (s, c) = spawn(&r);
@@ -236,7 +236,7 @@ fn hill_at(chunk: (u32, u32), id: u128) -> ItemSpec {
 #[test]
 fn a_bake_from_shared_height_tiles_equals_the_bake_that_evaluates_its_whole_raster_and_neighbours_share_the_tiles() {
     use planet::horizonworld::ChunkHorizonBaker;
-    use planet_streaming::chunks::HorizonBaker;
+    use planet_streaming::horizonjobs::HorizonBaker;
     let r = rig();
     let lat = r.world.horizon_lattice().unwrap();
     let shared = ChunkHorizonBaker::new(&r.world, lat, params(), 2);
@@ -266,7 +266,7 @@ fn a_bake_from_shared_height_tiles_equals_the_bake_that_evaluates_its_whole_rast
 #[test]
 fn bakes_that_run_at_once_evaluate_a_shared_tile_once_and_give_the_same_maps_as_one_after_the_other() {
     use planet::horizonworld::ChunkHorizonBaker;
-    use planet_streaming::chunks::HorizonBaker;
+    use planet_streaming::horizonjobs::HorizonBaker;
     let r = rig();
     let lat = r.world.horizon_lattice().unwrap();
     let keys: Vec<ChunkKey> = (0..4).map(|dx| (2, 1000 + dx, 1000)).collect();
@@ -287,7 +287,7 @@ fn bakes_that_run_at_once_evaluate_a_shared_tile_once_and_give_the_same_maps_as_
 #[test]
 fn a_neighbours_edit_replaces_the_tile_it_touches_in_the_halo_and_no_other() {
     use planet::horizonworld::ChunkHorizonBaker;
-    use planet_streaming::chunks::HorizonBaker;
+    use planet_streaming::horizonjobs::HorizonBaker;
     let r = rig();
     let lat = r.world.horizon_lattice().unwrap();
     let shared = ChunkHorizonBaker::new(&r.world, lat, params(), 2);
@@ -319,7 +319,7 @@ fn a_neighbours_edit_replaces_the_tile_it_touches_in_the_halo_and_no_other() {
 #[test]
 fn a_change_of_the_lens_makes_every_tile_again_and_the_map_still_equals_the_whole_raster() {
     use planet::horizonworld::ChunkHorizonBaker;
-    use planet_streaming::chunks::HorizonBaker;
+    use planet_streaming::horizonjobs::HorizonBaker;
     let r = rig();
     let lat = r.world.horizon_lattice().unwrap();
     let shared = ChunkHorizonBaker::new(&r.world, lat, params(), 2);
@@ -370,7 +370,7 @@ fn the_horizon_step_counts_its_feature_and_a_feature_turned_off_counts_nothing()
 #[test]
 fn an_edit_changes_the_word_of_the_chunk_beside_it_whose_march_reads_it_and_of_no_chunk_two_edges_away() {
     use planet::horizonworld::ChunkHorizonBaker;
-    use planet_streaming::chunks::HorizonBaker;
+    use planet_streaming::horizonjobs::HorizonBaker;
     // The owner's session of 2026-10-27 asked whether an edit re-bakes the neighbours whose horizon reach it: the word of a chunk is the hash of the
     // items within its march's halo (2 km here, 9 cells), so a hill at the centre of one chunk is in the halo of the chunk beside it (its edge is
     // 2.4 km from the hill) and out of the halo of the chunk after that (7.3 km).
@@ -442,7 +442,7 @@ fn a_world_with_a_bake_and_no_chunk_stage_wants_and_bakes_horizon_maps_from_the_
 #[ignore]
 fn horizon_bake_throughput() {
     use planet::horizonworld::{chunk_horizon_params, ChunkHorizonBaker};
-    use planet_streaming::chunks::HorizonBaker;
+    use planet_streaming::horizonjobs::HorizonBaker;
     let store = std::path::Path::new("C:/DEV/SeriousPlanetData/global16384");
     let seed = planet::parse_args(&["test-render".to_string(), "--scene".to_string(), "lit".to_string()]).expect("options").seed;
     let world = Arc::new(WorldTerrain::open_store(WorldDefinition::single_planet(R, seed), store, 16384).unwrap());
@@ -482,7 +482,7 @@ fn the_horizon_bakes_without_a_chunk_stage_run_on_half_the_generation_workers_at
 #[ignore]
 fn horizon_march_time() {
     use planet::horizonworld::{chunk_horizon_params, ChunkHorizonBaker};
-    use planet_streaming::chunks::HorizonBaker;
+    use planet_streaming::horizonjobs::HorizonBaker;
     let store = std::path::Path::new("C:/DEV/SeriousPlanetData/global16384");
     let seed = planet::parse_args(&["test-render".to_string(), "--scene".to_string(), "lit".to_string()]).expect("options").seed;
     let world = Arc::new(WorldTerrain::open_store(WorldDefinition::single_planet(R, seed), store, 16384).unwrap());
@@ -507,7 +507,7 @@ fn horizon_march_time() {
 #[ignore]
 fn horizon_bake_split() {
     use planet::horizonworld::{chunk_horizon_params, ChunkHorizonBaker};
-    use planet_streaming::chunks::HorizonBaker;
+    use planet_streaming::horizonjobs::HorizonBaker;
     let store = std::path::Path::new("C:/DEV/SeriousPlanetData/global16384");
     let seed = planet::parse_args(&["test-render".to_string(), "--scene".to_string(), "lit".to_string()]).expect("options").seed;
     let world = Arc::new(WorldTerrain::open_store(WorldDefinition::single_planet(R, seed), store, 16384).unwrap());
@@ -567,7 +567,7 @@ fn horizon_bake_split() {
 #[test]
 fn a_bake_times_its_steps_and_the_diagnosis_log_holds_it_when_started() {
     use planet::horizonworld::{bake_log_start, bake_log_take, ChunkHorizonBaker};
-    use planet_streaming::chunks::HorizonBaker;
+    use planet_streaming::horizonjobs::HorizonBaker;
     let r = rig();
     let lat = r.world.horizon_lattice().unwrap();
     let baker = ChunkHorizonBaker::new(&r.world, lat, params(), 1);
@@ -592,7 +592,7 @@ fn a_bake_times_its_steps_and_the_diagnosis_log_holds_it_when_started() {
 #[ignore]
 fn horizon_march_concurrency() {
     use planet::horizonworld::{chunk_horizon_params, ChunkHorizonBaker};
-    use planet_streaming::chunks::HorizonBaker;
+    use planet_streaming::horizonjobs::HorizonBaker;
     use planet_streaming::priority::{set_current, Priority};
     let store = std::path::Path::new("C:/DEV/SeriousPlanetData/global16384");
     let seed = planet::parse_args(&["test-render".to_string(), "--scene".to_string(), "lit".to_string()]).expect("options").seed;

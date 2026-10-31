@@ -8,7 +8,6 @@ use crate::streamperf::Driver;
 use crate::worldfield::WorldTerrain;
 use crate::{err, Options};
 use planet_core::cube::{FaceMapping, TangentWarp};
-use planet_frame::chunkshare::ChunkShare;
 use planet_frame::scenes::{lag_post_pass, level_flight_cameras, FrameDraw, FRAME_STEP_S, SETTLE_S, SITE_LAT_DEG, SITE_LON_DEG};
 use planet_frame::{Camera, LodParams, TerrainRequest, TerrainView};
 use planet_render::GpuContext;
@@ -77,16 +76,10 @@ pub fn worst_window(shares: &[f64], step_s: f64, window_s: f64) -> f64 {
     worst / w as f64
 }
 
-/// What one flight measured: the worst 1 s window of the pixel-weighted coarse share (TEST-046) and of the node-weighted chunk stand-in
-/// fraction (STRM-039), and the chunk nodes the flight counted. The bound is judged on the larger of the two shares.
+/// What one flight measured: the worst 1 s window of the pixel-weighted coarse share (TEST-046). The bound is judged on it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Measure {
     pub coarse_share: f64,
-    /// `None`: the world has no chunk field to count against.
-    pub stand_in_share: Option<f64>,
-    /// Sums over the frames of the flight: plan nodes at or finer than the pyramid top level, and those whose own chunk was not ready.
-    pub chunk_nodes: u64,
-    pub chunk_stand_in: u64,
     /// What the horizon jobs did during the flight (TEST-054); `None` without them.
     pub stage: Option<StageFacts>,
 }
@@ -102,24 +95,20 @@ pub struct StageFacts {
 }
 
 impl Measure {
-    /// A measure of a world without a chunk field.
+    /// A measure of the coarse share alone.
     pub fn coarse_only(coarse_share: f64) -> Measure {
-        Measure { coarse_share, stand_in_share: None, chunk_nodes: 0, chunk_stand_in: 0, stage: None }
+        Measure { coarse_share, stage: None }
     }
 
-    /// The same measure with what the chunk stage did.
+    /// The same measure with what the horizon jobs did.
     pub fn with_stage(mut self, stage: Option<StageFacts>) -> Measure {
         self.stage = stage;
         self
     }
 
-    /// The share the bound is judged on: the larger of the two; NaN (missing data) when either is, which no bound accepts.
+    /// The share the bound is judged on: the coarse share; NaN (missing data) when it is, which no bound accepts.
     pub fn judged(&self) -> f64 {
-        match self.stand_in_share {
-            Some(s) if s.is_nan() || self.coarse_share.is_nan() => f64::NAN,
-            Some(s) => s.max(self.coarse_share),
-            None => self.coarse_share,
-        }
+        self.coarse_share
     }
 }
 
@@ -219,17 +208,11 @@ pub struct LogFacts<'a> {
     pub adapter: &'a str,
     pub smoke: bool,
     pub owner_override: &'a [String],
-    /// Whether the scene counted against a chunk field; when not, the log says why `stand_in_share` is `null`.
-    pub chunk_field: bool,
     /// Whether the curve ran with the horizon jobs (REND-038: from the base terrain, STRM-064).
     pub horizon: bool,
     /// The steady-flight curve (a run-in before the window, `run_in_s` long) next to the cold one; `None` without the horizon jobs.
     pub steady: Option<(&'a [Point], f64, f64)>,
 }
-
-/// Why the chunk stand-in share is `null` in a log of a world without a chunk field.
-pub const NO_CHUNK_FIELD: &str =
-    "the world of this scene has no stored coupled run (it is not a `--store` world): no chunk stage, only the coarse share is judged";
 
 fn number(x: f64) -> String {
     if x.is_finite() {
@@ -249,13 +232,10 @@ fn curve_json(points: &[Point]) -> String {
             .iter()
             .map(|t| {
                 format!(
-                    "{{\"speed_mps\": {}, \"share\": {}, \"coarse_share\": {}, \"stand_in_share\": {}, \"chunk_nodes\": {}, \"chunk_stand_in\": {}, \"stage\": {}}}",
+                    "{{\"speed_mps\": {}, \"share\": {}, \"coarse_share\": {}, \"stage\": {}}}",
                     number(t.speed_mps),
                     number(t.share),
                     number(t.measure.coarse_share),
-                    opt(t.measure.stand_in_share),
-                    t.measure.chunk_nodes,
-                    t.measure.chunk_stand_in,
                     stage_json(t.measure.stage)
                 )
             })
@@ -263,13 +243,12 @@ fn curve_json(points: &[Point]) -> String {
         // The shares of the flight at the highest holding speed.
         let at = p.speed_mps.and_then(|v| p.trials.iter().find(|t| t.speed_mps == v)).map(|t| t.measure);
         s += &format!(
-            "    {{\"altitude_m\": {}, \"place\": {}, \"highest_speed_mps\": {}, \"share_at_speed\": {}, \"coarse_share\": {}, \"stand_in_share\": {}, \"capped\": {}, \"trials\": [{}]}}{}\n",
+            "    {{\"altitude_m\": {}, \"place\": {}, \"highest_speed_mps\": {}, \"share_at_speed\": {}, \"coarse_share\": {}, \"capped\": {}, \"trials\": [{}]}}{}\n",
             number(p.altitude_m),
             points[..i].iter().filter(|q| q.altitude_m == p.altitude_m).count(),
             p.speed_mps.map_or("null".to_string(), number),
             number(p.share),
             opt(at.map(|m| m.coarse_share)),
-            opt(at.and_then(|m| m.stand_in_share)),
             p.capped,
             trials.join(", "),
             if i + 1 < points.len() { "," } else { "" }
@@ -301,16 +280,11 @@ pub fn log_json(points: &[Point], facts: &LogFacts<'_>) -> String {
     s += &format!("  \"owner_override\": {:?},\n", facts.owner_override);
     s += &format!("  \"bound\": {},\n  \"window_s\": {WINDOW_S},\n  \"frame_step_s\": {FRAME_STEP_S},\n", number(facts.bound));
     s += &format!("  \"start_speed_mps\": {START_SPEED_MPS},\n  \"cap_speed_mps\": {CAP_SPEED_MPS},\n  \"bisections\": {BISECTIONS},\n");
-    s += "  \"judged\": \"the larger of coarse_share and stand_in_share, the worst 1 s window\",\n";
+    s += "  \"judged\": \"coarse_share, the worst 1 s window\",\n";
     s += "  \"coarse_weighting\": \"pixels: nodes of the fresh plan weighted by their projected screen pixels (TEST-046)\",\n";
-    s += "  \"stand_in_weighting\": \"nodes: unweighted share of the plan nodes at or finer than the pyramid top level whose chunk is not ready (STRM-039)\",\n";
-    s += &format!("  \"chunk_field\": {},\n", facts.chunk_field);
     // The A-net chunk stage is removed (ADR 0086): criterion 7 is measured with it off (tiles and horizon maps only); a log without this field is from before.
     s += "  \"chunk_stage\": false,\n";
     s += &format!("  \"horizon\": {},\n", facts.horizon);
-    if !facts.chunk_field && !facts.horizon {
-        s += &format!("  \"stand_in_reason\": {NO_CHUNK_FIELD:?},\n");
-    }
     s += "  \"curve\": [\n";
     s += &curve_json(points);
     s += "  ],\n";
@@ -394,7 +368,7 @@ fn fly(
     loop {
         let t = d.tick(&first)?;
         frames += 1;
-        quiet = if t.settled && !t.chunk_busy { quiet + 1 } else { 0 };
+        quiet = if t.settled && !t.horizon_busy { quiet + 1 } else { 0 };
         if (smoke && frames >= 6) || quiet >= need {
             break;
         }
@@ -426,26 +400,12 @@ fn fly(
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
     let lags = lag_post_pass(&draws, req_of, &|| world.field(), threads)?;
     let coarse: Vec<f64> = lags.iter().map(|l| l.coarse_share).collect();
-    Ok(measure_of(&coarse, None).with_stage(stage_facts))
+    Ok(measure_of(&coarse).with_stage(stage_facts))
 }
 
-/// The measure of a flight from the per-frame coarse shares and, with a chunk field, the per-frame chunk shares: each judged as its worst
-/// window of [`WINDOW_S`] (the stand-in on the node-weighted fraction), the chunk node counts summed over the frames.
-pub fn measure_of(coarse: &[f64], chunk: Option<&[ChunkShare]>) -> Measure {
-    let coarse_share = worst_window(coarse, FRAME_STEP_S, WINDOW_S);
-    match chunk {
-        None => Measure::coarse_only(coarse_share),
-        Some(frames) => {
-            let fractions: Vec<f64> = frames.iter().map(ChunkShare::fraction).collect();
-            Measure {
-                coarse_share,
-                stand_in_share: Some(worst_window(&fractions, FRAME_STEP_S, WINDOW_S)),
-                chunk_nodes: frames.iter().map(|f| f.chunk_nodes as u64).sum(),
-                chunk_stand_in: frames.iter().map(|f| f.chunk_stand_in as u64).sum(),
-                stage: None,
-            }
-        }
-    }
+/// The measure of a flight from the per-frame coarse shares: judged as the worst window of [`WINDOW_S`].
+pub fn measure_of(coarse: &[f64]) -> Measure {
+    Measure::coarse_only(worst_window(coarse, FRAME_STEP_S, WINDOW_S))
 }
 
 /// `test-render --perf --scene envelope` (TEST-047): the curve of the highest speed per altitude, written to `perf/logs/envelope.json`.
@@ -547,21 +507,16 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
                 n += 1;
                 let cameras = level_flight_cameras(radius_m, aspect, field.as_ref(), altitude, speed, lat, lon, frames);
                 let measure = fly(ctx, &world, &req_of, &cameras, 0, false, o.gen_workers(), stage)?;
-                writeln!(
-                    out,
-                    "  {altitude:.0} m at {speed:.1} m/s: worst window {:.3} % coarse (pixels){}",
-                    100.0 * measure.coarse_share,
-                    measure.stand_in_share.map_or(String::new(), |s| format!(", {:.3} % chunk stand-in (nodes)", 100.0 * s))
-                )
-                .map_err(err)?;
+                writeln!(out, "  {altitude:.0} m at {speed:.1} m/s: worst window {:.3} % coarse (pixels)", 100.0 * measure.coarse_share)
+                    .map_err(err)?;
                 Ok(measure)
             })?
         };
         writeln!(out, "{}", summary_line(&point)).map_err(err)?;
         points.push(point);
     }
-    // The steady flight (STRM-042): the same altitudes with a run-in at the speed under test before the window, so the prefetch has been running for longer than a
-    // chunk takes when the window starts. The cold curve above is the first visit after a stop.
+    // The steady flight: the same altitudes with a run-in at the speed under test before the window, so the horizon jobs have been running for longer than a
+    // map takes when the window starts. The cold curve above is the first visit after a stop.
     let run_in_s = if smoke { SMOKE_RUN_IN_S } else { RUN_IN_S };
     let steady: Vec<Point> = if stage.is_some() {
         let run_in = (run_in_s / FRAME_STEP_S).round() as usize;
@@ -593,9 +548,8 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
                         let measure = fly(ctx, &world, &req_of, &cameras, run_in, false, o.gen_workers(), stage)?;
                         writeln!(
                         out,
-                        "  steady (run-in {run_in_s} s), {altitude:.0} m place {pj} at {speed:.1} m/s: worst window {:.3} % coarse (pixels){}",
-                        100.0 * measure.coarse_share,
-                        measure.stand_in_share.map_or(String::new(), |s| format!(", {:.3} % chunk stand-in (nodes)", 100.0 * s))
+                        "  steady (run-in {run_in_s} s), {altitude:.0} m place {pj} at {speed:.1} m/s: worst window {:.3} % coarse (pixels)",
+                        100.0 * measure.coarse_share
                     )
                     .map_err(err)?;
                         Ok(measure)
@@ -610,7 +564,6 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
         Vec::new()
     };
     let adapter = ctx.adapter_name();
-    writeln!(out, "stand-in share: {NO_CHUNK_FIELD}").map_err(err)?;
     let json = log_json(
         &points,
         &LogFacts {
@@ -619,7 +572,6 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
             adapter,
             smoke,
             owner_override: &owner_override,
-            chunk_field: false,
             horizon: stage.is_some_and(|s| s.horizon),
             steady: stage.map(|_| (steady.as_slice(), run_in_s, if smoke { SMOKE_FLIGHT_S } else { o.steady_window_s })),
         },
@@ -658,37 +610,19 @@ mod tests {
     // spec: STRM-046
     #[test]
     fn the_log_says_the_chunk_stage_did_not_run() {
-        let facts = |chunk_field| LogFacts {
-            bound: 0.01,
-            source: "s",
-            adapter: "a",
-            smoke: false,
-            owner_override: &[],
-            chunk_field,
-            horizon: true,
-            steady: None,
-        };
-        assert!(log_json(&[], &facts(false)).contains("\"chunk_stage\": false,"));
-        assert!(log_json(&[], &facts(true)).contains("\"chunk_stage\": false,"), "removed, ADR 0086: always false");
+        let facts = LogFacts { bound: 0.01, source: "s", adapter: "a", smoke: false, owner_override: &[], horizon: true, steady: None };
+        assert!(log_json(&[], &facts).contains("\"chunk_stage\": false,"), "removed, ADR 0086: always false");
     }
 
     // spec: STRM-046
     #[test]
-    fn a_stage_off_log_over_a_store_says_the_horizon_jobs_ran_and_gives_no_stand_in_reason() {
-        let facts = |horizon| LogFacts {
-            bound: 0.01,
-            source: "store S",
-            adapter: "a",
-            smoke: false,
-            owner_override: &[],
-            chunk_field: false,
-            horizon,
-            steady: None,
-        };
+    fn a_log_over_a_store_says_whether_the_horizon_jobs_ran() {
+        let facts =
+            |horizon| LogFacts { bound: 0.01, source: "store S", adapter: "a", smoke: false, owner_override: &[], horizon, steady: None };
         let ran = log_json(&[], &facts(true));
-        assert!(ran.contains("\"horizon\": true,") && ran.contains("\"chunk_stage\": false,") && !ran.contains("stand_in_reason"), "{ran}");
+        assert!(ran.contains("\"horizon\": true,") && ran.contains("\"chunk_stage\": false,"), "{ran}");
         let none = log_json(&[], &facts(false));
-        assert!(none.contains("\"horizon\": false,") && none.contains("stand_in_reason"), "{none}");
+        assert!(none.contains("\"horizon\": false,") && none.contains("\"chunk_stage\": false,"), "{none}");
     }
     // spec: TEST-047
     #[test]
@@ -767,78 +701,32 @@ mod tests {
 
     // spec: TEST-047
     #[test]
-    fn the_chunk_stand_in_share_is_a_node_fraction_judged_with_the_pixel_share_by_the_larger() {
-        let frames = |nodes: usize, stand_in: usize, n: usize| vec![ChunkShare { chunk_nodes: nodes, chunk_stand_in: stand_in }; n];
-        // Without a chunk field: only the coarse share, and the log says so.
-        let none = measure_of(&[0.002; 120], None);
-        assert_eq!((none.stand_in_share, none.chunk_nodes, none.chunk_stand_in), (None, 0, 0));
-        assert!((none.judged() - 0.002).abs() < 1e-12);
-        // With one: 1 of 4 chunk nodes on the base for the whole second is 25 % of the nodes, whatever the pixels say.
-        let m = measure_of(&[0.002; 120], Some(&frames(4, 1, 120)));
-        assert!((m.stand_in_share.unwrap() - 0.25).abs() < 1e-12, "{m:?}");
-        assert_eq!((m.chunk_nodes, m.chunk_stand_in), (480, 120), "sums over the frames");
-        assert_eq!(m.judged(), 0.25, "the larger of the two");
-        // A frame without chunk nodes has fraction 0; the larger side can also be the pixels.
-        let m = measure_of(&[0.3; 60], Some(&frames(0, 0, 60)));
-        assert_eq!(m.stand_in_share, Some(0.0));
-        assert!((m.judged() - 0.3).abs() < 1e-12);
-        // Missing data on either side is never a pass.
-        let mut nan = Measure::coarse_only(0.0);
-        nan.stand_in_share = Some(f64::NAN);
-        assert!(nan.judged().is_nan());
-        let mut nan = Measure::coarse_only(f64::NAN);
-        nan.stand_in_share = Some(0.0);
-        assert!(nan.judged().is_nan());
-        // The search bounds on the larger share: the stand-in rises first here and sets the speed.
-        let p = search(100.0, 0.01, |v| {
-            Ok(Measure {
-                coarse_share: 0.0,
-                stand_in_share: Some(if v <= 50.0 { 0.0 } else { 0.5 }),
-                chunk_nodes: 10,
-                chunk_stand_in: 0,
-                stage: None,
-            })
-        })
-        .unwrap();
+    fn the_coarse_share_is_the_worst_window_of_the_frames_and_is_what_the_bound_judges() {
+        let m = measure_of(&[0.002; 120]);
+        assert!((m.coarse_share - 0.002).abs() < 1e-12 && m.stage.is_none());
+        assert!((m.judged() - 0.002).abs() < 1e-12);
+        // Missing data is never a pass.
+        assert!(measure_of(&[0.0, f64::NAN, 0.0]).judged().is_nan());
+        // The search bounds on the judged share: the coarse share rises past 50 m/s here and sets the speed.
+        let p = search(100.0, 0.01, |v| Ok(Measure::coarse_only(if v <= 50.0 { 0.0 } else { 0.5 }))).unwrap();
         assert_eq!(p.speed_mps.map(|v| v <= 50.0), Some(true), "{p:?}");
     }
 
     // spec: TEST-047
     #[test]
-    fn the_log_names_the_weightings_and_the_reason_a_stand_in_share_is_missing() {
-        let pt = |measure: Measure| Point {
+    fn the_log_names_the_weighting_and_holds_no_chunk_share() {
+        let measure = Measure::coarse_only(0.004);
+        let pt = Point {
             altitude_m: 30.0,
             speed_mps: Some(80.0),
             share: measure.judged(),
             capped: false,
             trials: vec![Trial { speed_mps: 80.0, share: measure.judged(), measure }],
         };
-        let facts = |chunk_field| LogFacts {
-            bound: 0.01,
-            source: "s",
-            adapter: "a",
-            smoke: false,
-            owner_override: &[],
-            chunk_field,
-            horizon: chunk_field,
-            steady: None,
-        };
-        let without = log_json(&[pt(Measure::coarse_only(0.004))], &facts(false));
-        assert!(
-            without.contains("\"chunk_field\": false") && without.contains("\"stand_in_reason\"") && without.contains("no chunk stage"),
-            "{without}"
-        );
-        assert!(without.contains("\"stand_in_share\": null") && without.contains("pixels") && without.contains("nodes"), "{without}");
-        let with = log_json(
-            &[pt(Measure { coarse_share: 0.004, stand_in_share: Some(0.02), chunk_nodes: 400, chunk_stand_in: 8, stage: None })],
-            &facts(true),
-        );
-        assert!(with.contains("\"chunk_field\": true") && !with.contains("stand_in_reason"), "{with}");
-        assert!(
-            with.contains("\"stand_in_share\": 0.02") && with.contains("\"chunk_nodes\": 400") && with.contains("\"chunk_stand_in\": 8"),
-            "{with}"
-        );
-        assert!(with.contains("\"coarse_share\": 0.004"), "{with}");
+        let facts = LogFacts { bound: 0.01, source: "s", adapter: "a", smoke: false, owner_override: &[], horizon: true, steady: None };
+        let text = log_json(&[pt], &facts);
+        assert!(text.contains("\"coarse_weighting\"") && text.contains("pixels") && text.contains("\"coarse_share\": 0.004"), "{text}");
+        assert!(!text.contains("stand_in") && !text.contains("chunk_nodes") && !text.contains("chunk_field"), "{text}");
     }
 
     // spec: TEST-057
@@ -859,7 +747,6 @@ mod tests {
                 adapter: "a",
                 smoke: false,
                 owner_override: &[],
-                chunk_field: false,
                 horizon: true,
                 steady: Some((std::slice::from_ref(&steady), RUN_IN_S, STEADY_WINDOW_S)),
             },
@@ -889,16 +776,8 @@ mod tests {
             capped: false,
             trials: vec![Trial { speed_mps: 80.0, share: measure.judged(), measure }],
         };
-        let facts = |horizon: bool| LogFacts {
-            bound: 0.01,
-            source: "s",
-            adapter: "a",
-            smoke: false,
-            owner_override: &[],
-            chunk_field: false,
-            horizon,
-            steady: None,
-        };
+        let facts =
+            |horizon: bool| LogFacts { bound: 0.01, source: "s", adapter: "a", smoke: false, owner_override: &[], horizon, steady: None };
         let with = log_json(&[pt(30.0, Measure::coarse_only(0.004).with_stage(Some(stage)))], &facts(true));
         for want in [
             "\"horizon\": true",
@@ -942,23 +821,13 @@ mod tests {
                 adapter: "NVIDIA \"X\"",
                 smoke: false,
                 owner_override: &[],
-                chunk_field: false,
                 horizon: false,
                 steady: None,
             },
         );
-        for want in [
-            "\"scene\": \"envelope\"",
-            "\"bound\": 0.01",
-            "\"window_s\": 1",
-            "\"stand_in_share\": null",
-            "\"chunk_field\": false",
-            "stand_in_reason",
-            "\"coarse_weighting\"",
-            "\"stand_in_weighting\"",
-            "\"capped\": true",
-            "NVIDIA 'X'",
-        ] {
+        for want in
+            ["\"scene\": \"envelope\"", "\"bound\": 0.01", "\"window_s\": 1", "\"coarse_weighting\"", "\"capped\": true", "NVIDIA 'X'"]
+        {
             assert!(text.contains(want), "{want} missing in {text}");
         }
         for a in ALTITUDES_M {
