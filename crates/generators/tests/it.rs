@@ -22,6 +22,8 @@ mod compact;
 mod coupled_fill;
 #[path = "coupled_lens.rs"]
 mod coupled_lens;
+#[path = "descriptors.rs"]
+mod descriptors;
 #[path = "erosion.rs"]
 mod erosion;
 #[path = "generator_contract.rs"]
