@@ -131,8 +131,8 @@ impl HeightField for CoupledLensField<'_> {
     fn heights_until(&self, dirs: &[Vec3], stop: &dyn Fn() -> bool) -> Vec<f64> {
         self.f().heights_until(dirs, stop)
     }
-    fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), threads: usize) -> Vec<f64> {
-        self.f().heights_threaded_until(dirs, stop, threads)
+    fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), par: &dyn planet_core::par::Par) -> Vec<f64> {
+        self.f().heights_threaded_until(dirs, stop, par)
     }
     fn seed(&self) -> u64 {
         self.f().seed()

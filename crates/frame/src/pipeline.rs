@@ -27,7 +27,7 @@ use crate::plan::{face_mapping_by_id, PlanError, CLEAR_COLOR, HEIGHT_RANGE};
 use crate::prefetch::prefetch_set;
 use crate::preview::PreviewStamp;
 use crate::residency::{residency_set_field, ResidencySet};
-use crate::terrain::{node_color, plan_terrain_threaded, TerrainDraw, TerrainPlan, TerrainRequest, TileState};
+use crate::terrain::{node_color, TerrainDraw, TerrainPlan, TerrainRequest, TileState};
 use planet_core::cube::FaceMapping;
 use planet_core::{PlanetFixed, TileId};
 use planet_generators::height::HeightField;
@@ -467,7 +467,7 @@ fn view_cover(req: &TerrainRequest, map: &dyn FaceMapping, resident: &dyn Reside
 /// What a worker plans over: a height field that is `Send + Sync + 'static`, or anything that can build one inside the job
 /// (a world whose field borrows its bake). `plan` is [`plan_terrain_threaded`] of the request over that field.
 pub trait PlanField: Send + Sync + 'static {
-    fn plan(&self, req: &TerrainRequest, cache: &mut SelectionCache, threads: usize) -> Result<TerrainPlan, PlanError>;
+    fn plan(&self, req: &TerrainRequest, cache: &mut SelectionCache, par: &dyn planet_core::par::Par) -> Result<TerrainPlan, PlanError>;
 
     /// The residency set R of `req` (STRM-015): the position-only selection of the request's camera position, with the
     /// request's LOD parameters, over the same field. `cache` is the one the plan used, so every tile geometry and height
@@ -482,8 +482,8 @@ pub trait PlanField: Send + Sync + 'static {
 }
 
 impl<T: HeightField + Send + Sync + 'static> PlanField for T {
-    fn plan(&self, req: &TerrainRequest, cache: &mut SelectionCache, threads: usize) -> Result<TerrainPlan, PlanError> {
-        plan_terrain_threaded(req, self, cache, threads)
+    fn plan(&self, req: &TerrainRequest, cache: &mut SelectionCache, par: &dyn planet_core::par::Par) -> Result<TerrainPlan, PlanError> {
+        crate::terrain::plan_terrain_par(req, self, cache, par)
     }
 
     fn residency(&self, req: &TerrainRequest, cache: &mut SelectionCache) -> Result<ResidencySet, PlanError> {
@@ -595,7 +595,7 @@ pub struct PlanWorker {
     spawner: Arc<dyn Spawner>,
     field: Arc<dyn PlanField>,
     cache: Arc<Mutex<SelectionCache>>,
-    threads: usize,
+    par: Arc<dyn planet_core::par::Par + Send + Sync>,
     state: Arc<Mutex<WorkerState>>,
     /// What the main thread asked of the plan cache since the last plan job (STRM-026, STRM-034), in order: the job applies it under the cache's
     /// lock before it plans. The main thread never takes that lock: the plan job holds it for the whole plan, which can take a second.
@@ -628,7 +628,18 @@ fn apply_ops(cache: &mut SelectionCache, ops: &Mutex<Vec<CacheOp>>) {
 
 impl PlanWorker {
     pub fn new(spawner: Arc<dyn Spawner>, field: Arc<dyn PlanField>, threads: usize) -> Self {
-        Self { spawner, field, cache: Arc::new(Mutex::new(SelectionCache::new())), threads, state: Arc::default(), ops: Arc::default() }
+        Self {
+            spawner,
+            field,
+            cache: Arc::new(Mutex::new(SelectionCache::new())),
+            par: Arc::new(threads),
+            state: Arc::default(),
+            ops: Arc::default(),
+        }
+    }
+    /// A worker whose plan jobs fan their origin heights out over `par` (the job system's share: BUDG-009) instead of plain scoped threads.
+    pub fn with_par(spawner: Arc<dyn Spawner>, field: Arc<dyn PlanField>, par: Arc<dyn planet_core::par::Par + Send + Sync>) -> Self {
+        Self { spawner, field, cache: Arc::new(Mutex::new(SelectionCache::new())), par, state: Arc::default(), ops: Arc::default() }
     }
 
     /// Queue `op`, keeping the queue bounded and equivalent: a clear makes everything queued before it moot (it empties the cache and the item transitions) and
@@ -725,8 +736,8 @@ impl PlanWorker {
     }
 
     fn spawn_job(&self, seq: u64, req: TerrainRequest, predicted: Option<PlanetFixed>) {
-        let (state, cache, field, threads, spawner) =
-            (Arc::clone(&self.state), Arc::clone(&self.cache), Arc::clone(&self.field), self.threads, Arc::clone(&self.spawner));
+        let (state, cache, field, par, spawner) =
+            (Arc::clone(&self.state), Arc::clone(&self.cache), Arc::clone(&self.field), Arc::clone(&self.par), Arc::clone(&self.spawner));
         let ops = Arc::clone(&self.ops);
         let spawner_again = Arc::clone(&spawner);
         spawner.spawn(Box::new(move || {
@@ -741,7 +752,7 @@ impl PlanWorker {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let mut cache = cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 apply_ops(&mut cache, &ops);
-                field.plan(&req, &mut cache, threads)
+                field.plan(&req, &mut cache, par.as_ref())
             }))
             .unwrap_or_else(|_| Err(PlanError::HeightField("the plan job panicked".into())));
             let plan_ms = started.elapsed().as_secs_f64() * 1000.0;
@@ -823,7 +834,7 @@ impl PlanWorker {
                 next
             };
             if let Some((seq, req, predicted)) = next {
-                let worker = PlanWorker { spawner: spawner_again, field, cache, threads, state, ops };
+                let worker = PlanWorker { spawner: spawner_again, field, cache, par, state, ops };
                 worker.spawn_job(seq, req, predicted);
             }
         }));

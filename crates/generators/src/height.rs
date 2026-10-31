@@ -6,6 +6,7 @@
 
 use planet_core::cube::FaceMapping;
 use planet_core::hash::{hash_u64s, unit_f64, HASH_VERSION};
+use planet_core::par::Par;
 use planet_core::{TileId, Vec3};
 pub use planet_world_def::BodyId;
 use planet_world_def::{
@@ -200,31 +201,29 @@ pub(crate) fn layer_noise_bounds(seed: u64, layer: u64, octave: u32, centre: Vec
     (lo.max(hlo), hi.min(hhi))
 }
 
-/// `eval` on every direction of `dirs`, in the caller's order, split over up to `threads` scoped threads in contiguous chunks
-/// (a batch of fewer than 8 directions per thread uses fewer threads; a single chunk runs on the calling thread, several on scoped threads). `stop` is polled
-/// every 64 samples of each chunk; once it answers true the unfinished results are 0.0. The values do not depend on `threads`.
-pub fn eval_chunked(dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), threads: usize, eval: &(dyn Fn(Vec3) -> f64 + Sync)) -> Vec<f64> {
-    let mut out = vec![0.0; dirs.len()];
-    let workers = threads.clamp(1, (dirs.len() / 8).max(1));
+/// `eval` on every direction of `dirs`, in the caller's order, split over up to `par.threads()` threads in contiguous chunks
+/// (a batch of fewer than 8 directions per thread uses fewer threads; a single chunk runs on the calling thread). `stop` is polled
+/// every 64 samples of each chunk; once it answers true the unfinished results are 0.0. The values do not depend on the threads (CON-14).
+pub fn eval_chunked(dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), par: &dyn Par, eval: &(dyn Fn(Vec3) -> f64 + Sync)) -> Vec<f64> {
+    let workers = par.threads().clamp(1, (dirs.len() / 8).max(1));
     let chunk = dirs.len().div_ceil(workers).max(1);
-    let run = |dirs: &[Vec3], out: &mut [f64]| {
+    let run = |dirs: &[Vec3]| -> Vec<f64> {
+        let mut out = vec![0.0; dirs.len()];
         for (k, (&d, o)) in dirs.iter().zip(out.iter_mut()).enumerate() {
             if k % 64 == 0 && stop() {
                 break;
             }
             *o = eval(d);
         }
+        out
     };
     if workers == 1 {
-        run(dirs, &mut out);
-    } else {
-        std::thread::scope(|s| {
-            for (d, o) in dirs.chunks(chunk).zip(out.chunks_mut(chunk)) {
-                planet_core::thread::spawn_named(s, "heights-worker", move || run(d, o));
-            }
-        });
+        return run(dirs);
     }
-    out
+    let parts: Vec<&[Vec3]> = dirs.chunks(chunk).collect();
+    let done: Vec<std::sync::Mutex<Vec<f64>>> = parts.iter().map(|_| std::sync::Mutex::new(Vec::new())).collect();
+    par.run(parts.len(), &|i| *done[i].lock().expect("a chunk's heights") = run(parts[i]));
+    done.into_iter().flat_map(|m| m.into_inner().expect("a chunk's heights")).collect()
 }
 
 /// A height field over unit directions. The reference generator is [`Reference`]; the test-only stress field
@@ -250,12 +249,12 @@ pub trait HeightField: Send + Sync {
     /// values in the same order for every `threads` (CON-14), because each height is a pure function of its direction and the
     /// threads only split the work. The default splits the directions into chunks and evaluates each with `height`; a field
     /// that reads a block store overrides it to read the distinct blocks of the whole batch on the threads (GEN-020).
-    fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), threads: usize) -> Vec<f64> {
-        eval_chunked(dirs, stop, threads, &|d| self.height(d))
+    fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), par: &dyn Par) -> Vec<f64> {
+        eval_chunked(dirs, stop, par, &|d| self.height(d))
     }
     /// [`HeightField::heights_threaded_until`] without a stop flag.
-    fn heights_threaded(&self, dirs: &[Vec3], threads: usize) -> Vec<f64> {
-        self.heights_threaded_until(dirs, &|| false, threads)
+    fn heights_threaded(&self, dirs: &[Vec3], par: &dyn Par) -> Vec<f64> {
+        self.heights_threaded_until(dirs, &|| false, par)
     }
     /// The seed (part of every key).
     fn seed(&self) -> u64;
@@ -577,8 +576,8 @@ impl<F: HeightField> HeightField for Bound<F> {
     fn heights_until(&self, dirs: &[Vec3], stop: &dyn Fn() -> bool) -> Vec<f64> {
         self.field.heights_until(dirs, stop)
     }
-    fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), threads: usize) -> Vec<f64> {
-        self.field.heights_threaded_until(dirs, stop, threads)
+    fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), par: &dyn Par) -> Vec<f64> {
+        self.field.heights_threaded_until(dirs, stop, par)
     }
     fn seed(&self) -> u64 {
         self.field.seed()
@@ -651,11 +650,11 @@ impl<T: HeightField + ?Sized> HeightField for Box<T> {
     fn heights(&self, dirs: &[Vec3]) -> Vec<f64> {
         (**self).heights(dirs)
     }
-    fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), threads: usize) -> Vec<f64> {
-        (**self).heights_threaded_until(dirs, stop, threads)
+    fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), par: &dyn Par) -> Vec<f64> {
+        (**self).heights_threaded_until(dirs, stop, par)
     }
-    fn heights_threaded(&self, dirs: &[Vec3], threads: usize) -> Vec<f64> {
-        (**self).heights_threaded(dirs, threads)
+    fn heights_threaded(&self, dirs: &[Vec3], par: &dyn Par) -> Vec<f64> {
+        (**self).heights_threaded(dirs, par)
     }
     fn seed(&self) -> u64 {
         (**self).seed()

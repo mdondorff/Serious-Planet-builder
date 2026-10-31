@@ -263,7 +263,7 @@ fn a_threaded_batch_equals_the_single_heights_at_every_thread_count_and_reads_ea
         for threads in [0usize, 1, 2, 5, 20] {
             // A cache of every block: the decodes are those of a source that never forgets, per block read.
             let src = Simulated::new(usize::MAX, true);
-            let got: Vec<u64> = field(&src).heights_threaded(&dirs, threads).iter().map(|h| h.to_bits()).collect();
+            let got: Vec<u64> = field(&src).heights_threaded(&dirs, &threads).iter().map(|h| h.to_bits()).collect();
             assert!(got == single, "{n} directions on {threads} threads");
             assert_eq!(src.decodes(), distinct, "{n} directions on {threads} threads: every distinct block once");
         }
@@ -278,11 +278,11 @@ fn a_threaded_batch_reads_nothing_once_the_flag_is_set() {
     let mut rng = SplitMix64(3);
     let mut axis = || rng.next_f64() * 2.0 - 1.0;
     let dirs: Vec<Vec3> = (0..200).map(|_| Vec3::new(axis(), axis(), axis()).normalized()).collect();
-    let none = f.heights_threaded_until(&dirs, &|| true, 8);
+    let none = f.heights_threaded_until(&dirs, &|| true, &8);
     assert!(none.iter().all(|x| *x == 0.0) && src.reads.load(Ordering::Relaxed) == 0, "a set flag reads nothing");
     // Set while the blocks are being read: the threads stop within a bounded number of reads.
     let limit = 300u64;
-    let cut = f.heights_threaded_until(&dirs, &|| src.reads.load(Ordering::Relaxed) >= limit, 8);
+    let cut = f.heights_threaded_until(&dirs, &|| src.reads.load(Ordering::Relaxed) >= limit, &8);
     let reads = src.reads.load(Ordering::Relaxed);
     assert!(reads <= limit + 8 * 64, "{reads} reads after the flag was set at {limit}");
     assert!(cut.iter().all(|x| *x == 0.0), "an unfinished batch leaves 0.0");
@@ -319,7 +319,7 @@ fn a_compact_batch_takes_its_footprint_from_the_hint_and_has_the_bits_of_the_sin
         for threads in [1usize, 8] {
             let src = Simulated::new(3, true);
             let f = field(&src);
-            let got: Vec<u64> = f.heights_threaded_until(dirs, &|| false, threads).iter().map(|h| h.to_bits()).collect();
+            let got: Vec<u64> = f.heights_threaded_until(dirs, &|| false, &threads).iter().map(|h| h.to_bits()).collect();
             assert!(got == want, "batch {b}, {threads} threads: a height differs from the single read");
             assert!(f.error().is_none(), "batch {b}, {threads} threads: a read failed: {:?}", f.error());
         }
@@ -333,7 +333,7 @@ fn the_hinted_footprint_reads_about_the_cells_the_batch_needs_and_decodes_each_b
     let dirs = compact_batch(2, 0.0, 0.0, 1.5e-5, 100);
     let src = Simulated::new(1, true);
     let f = field(&src);
-    let _ = f.heights_threaded_until(&dirs, &|| false, 1);
+    let _ = f.heights_threaded_until(&dirs, &|| false, &1);
     // The cells of a 12-cell batch with a 3-cell stencil and a box of 8: a few hundred, on the four blocks round the face centre; never one per read.
     let reads = src.reads.load(Ordering::Relaxed);
     assert!(reads < 2_000, "{reads} cell reads for a batch of about 12 x 12 cells");
@@ -350,7 +350,7 @@ fn a_hinted_batch_at_the_middle_of_a_face_edge_where_the_chart_stretches_most_ha
     for threads in [1usize, 8] {
         let src = Simulated::new(3, true);
         let f = field(&src);
-        let got: Vec<u64> = f.heights_threaded_until(&dirs, &|| false, threads).iter().map(|h| h.to_bits()).collect();
+        let got: Vec<u64> = f.heights_threaded_until(&dirs, &|| false, &threads).iter().map(|h| h.to_bits()).collect();
         assert!(got == want && f.error().is_none(), "{threads} threads: {:?}", f.error());
         // The hint was taken (a few hundred cells, not one per read).
         assert!(src.reads.load(Ordering::Relaxed) < 3_000, "{} reads", src.reads.load(Ordering::Relaxed));
@@ -364,7 +364,7 @@ fn a_sparse_batch_takes_the_exact_footprint_and_a_box_that_is_too_small_fails_lo
     // 33 x 33 directions 32 bake cells apart (a coarse tile): the hinted boxes would gather 100 times the cells the reads touch.
     let dirs = compact_batch(2, 0.0, 0.0, 32.0 * 1.2e-4, 33);
     let src = Simulated::new(3, true);
-    let _ = field(&src).heights_threaded_until(&dirs, &|| false, 1);
+    let _ = field(&src).heights_threaded_until(&dirs, &|| false, &1);
     let reads = src.reads.load(Ordering::Relaxed);
     assert!(
         reads < 60_000,
@@ -394,4 +394,35 @@ fn a_sparse_batch_takes_the_exact_footprint_and_a_box_that_is_too_small_fails_lo
     // A box of 4 holds a 3-cell stencil (the eroded field's) but not a 5-cell one: the 5-cell stencil reads 5 cells before the cell.
     let four = eval_gathered(&src, &compact, &|| false, &footprint, Some(4), &stencil);
     assert!(four.iter().any(|h| h.is_nan()), "a box of 4 did not miss a cell of a 5-cell stencil");
+}
+
+/// A `Par` that runs its indices one after another in descending order and reports four threads: the splitting is real, the order is the worst case.
+struct ReversedPar;
+
+impl planet_core::par::Par for ReversedPar {
+    fn threads(&self) -> usize {
+        4
+    }
+
+    fn run(&self, n: usize, f: &(dyn Fn(usize) + Sync)) {
+        for i in (0..n).rev() {
+            f(i);
+        }
+    }
+}
+
+// spec: GEN-020, BUDG-009, CON-14
+#[test]
+fn the_heights_of_a_batch_are_bit_for_bit_the_same_on_1_2_and_many_threads_and_on_an_injected_par_that_runs_the_chunks_backwards() {
+    let field = planet_generators::height::Reference(SEED);
+    let mut rng = SplitMix64(11);
+    let dirs: Vec<Vec3> =
+        (0..700).map(|_| Vec3::new(rng.next_f64() - 0.5, rng.next_f64() - 0.5, rng.next_f64() - 0.5).normalized()).collect();
+    let want: Vec<u64> = field.heights(&dirs).iter().map(|h| h.to_bits()).collect();
+    for threads in [1usize, 2, 7] {
+        let got: Vec<u64> = field.heights_threaded(&dirs, &threads).iter().map(|h| h.to_bits()).collect();
+        assert_eq!(got, want, "{threads} threads");
+    }
+    let got: Vec<u64> = field.heights_threaded(&dirs, &ReversedPar).iter().map(|h| h.to_bits()).collect();
+    assert_eq!(got, want, "an injected Par");
 }

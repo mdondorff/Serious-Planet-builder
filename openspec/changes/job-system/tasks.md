@@ -13,4 +13,4 @@
 
 ## 4. PR 3a: plan worker
 - [x] 4.1 `JobSystem::with_frame_workers`, `Share::classed`; the pipelined rig runs tile and plan workers on one system and one share `terrain` (ceiling workers + 1), the plan worker as a frame-critical thread at normal priority; `ThreadPool` has no production caller
-- [ ] 4.2 PR 3b: the plan job's scoped height workers (generators): needs the injected scoped fan-out in `planet-core` (CON-02, CON-04); planner decides
+- [x] 4.2 PR 3b: `planet_core::par::Par` (`impl Par for usize` = plain scoped threads), `HeightField::heights_threaded_until` takes `&dyn Par`, `eval_chunked` and the lattice gather run on it; `Share::try_acquire`/`par()` (permits of the terrain share, no unsafe); `PlanWorker::with_par`, the rig passes the terrain share's `Par`. Tests: bit-exact heights for 1, 2, 7 threads and a fake `Par` (GEN-020, CON-14); the permit rule on the share. Spawn cost: `frame/tests/par_cost.rs`

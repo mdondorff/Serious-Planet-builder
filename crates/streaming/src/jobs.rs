@@ -318,6 +318,73 @@ impl Spawner for ClassedShare {
     }
 }
 
+/// Slots of a share taken for helper threads, given back when dropped (BUDG-009).
+pub struct Permits {
+    share: Share,
+    granted: usize,
+}
+
+impl Permits {
+    pub fn granted(&self) -> usize {
+        self.granted
+    }
+}
+
+impl Drop for Permits {
+    fn drop(&mut self) {
+        if self.granted > 0 {
+            self.share.shared.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner).shares[self.share.index].running -=
+                self.granted;
+            self.share.shared.wake.notify_all();
+        }
+    }
+}
+
+impl Share {
+    /// Up to `k` of the share's free slots (ceiling minus jobs running), counted as running until the permits drop: the threads of a fan-out that borrows
+    /// its data and so cannot be pool jobs. Never waits; `granted()` may be 0.
+    pub fn try_acquire(&self, k: usize) -> Permits {
+        let mut st = self.shared.state.lock().expect("job state");
+        let s = &mut st.shares[self.index];
+        let granted = k.min(s.ceiling.saturating_sub(s.running));
+        s.running += granted;
+        s.peak = s.peak.max(s.running);
+        drop(st);
+        Permits { share: self.clone(), granted }
+    }
+
+    /// The injected parallelism of the code below the job system (`planet_core::par::Par`): a fan-out takes the free slots of this share and runs on that many
+    /// scoped threads, the calling thread (itself a job of this share) one more.
+    pub fn par(&self) -> SharePar {
+        SharePar { share: self.clone() }
+    }
+}
+
+/// [`Share::par`].
+#[derive(Clone)]
+pub struct SharePar {
+    share: Share,
+}
+
+impl planet_core::par::Par for SharePar {
+    fn threads(&self) -> usize {
+        let st = self.share.shared.state.lock().expect("job state");
+        let s = &st.shares[self.share.index];
+        1 + s.ceiling.saturating_sub(s.running)
+    }
+
+    fn run(&self, n: usize, f: &(dyn Fn(usize) + Sync)) {
+        if n <= 1 {
+            for i in 0..n {
+                f(i);
+            }
+            return;
+        }
+        let permits = self.share.try_acquire(n - 1);
+        planet_core::par::run_scoped(1 + permits.granted(), n, f);
+    }
+}
+
 impl Spawner for Share {
     fn spawn(&self, job: Job) {
         self.spawn_class(Class::Visible, job);
@@ -513,6 +580,54 @@ mod tests {
             plan.spawn(Box::new(move || tx.send(round).unwrap()));
             assert_eq!(rx.recv_timeout(Duration::from_secs(10)).expect("a frame-critical job runs"), round);
         }
+    }
+
+    // spec: BUDG-009
+    #[test]
+    fn a_par_of_a_share_takes_free_slots_as_permits_so_the_helpers_never_pass_the_ceiling() {
+        use planet_core::par::Par;
+        let system = JobSystem::new(8, Priority::Normal);
+        let share = system.share("terrain", 4);
+        let par = share.par();
+        // Called by a job of the share (the plan job): the caller holds one slot, three are free.
+        let (tx, rx) = mpsc::channel();
+        let (p, s) = (par.clone(), share.clone());
+        share.spawn_class(
+            Class::FrameCritical,
+            Box::new(move || {
+                let now = Arc::new(AtomicUsize::new(0));
+                let most = Arc::new(AtomicUsize::new(0));
+                let threads = p.threads();
+                let (n2, m2) = (Arc::clone(&now), Arc::clone(&most));
+                p.run(32, &move |_| {
+                    let k = n2.fetch_add(1, Ordering::SeqCst) + 1;
+                    m2.fetch_max(k, Ordering::SeqCst);
+                    std::thread::sleep(Duration::from_millis(5));
+                    n2.fetch_sub(1, Ordering::SeqCst);
+                });
+                tx.send((threads, most.load(Ordering::SeqCst), s.peak_running(), s.running())).unwrap();
+            }),
+        );
+        let (threads, most, peak, running_after) = rx.recv_timeout(Duration::from_secs(10)).expect("the job ends");
+        assert_eq!(threads, 4, "the caller and three free slots");
+        assert!(most <= 4, "{most} threads worked at once");
+        assert_eq!(peak, 4, "the permits were counted in the share");
+        assert_eq!(running_after, 1, "the permits are given back (only the calling job still runs)");
+        // With the share full, a run still completes on the calling thread.
+        let release = Arc::new(AtomicBool::new(false));
+        let (btx, brx) = mpsc::channel();
+        for id in 0..4 {
+            share.spawn_class(Class::Visible, blocker(btx.clone(), id, Arc::clone(&release)));
+        }
+        for _ in 0..4 {
+            brx.recv_timeout(Duration::from_secs(10)).unwrap();
+        }
+        let sum = Mutex::new(0usize);
+        par.run(10, &|i| *sum.lock().unwrap() += i);
+        assert_eq!(*sum.lock().unwrap(), 45);
+        assert_eq!(share.running(), 4, "a full share gave no permits");
+        release.store(true, Ordering::SeqCst);
+        drop(system);
     }
 
     // spec: BUDG-009

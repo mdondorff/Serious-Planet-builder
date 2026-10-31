@@ -927,8 +927,8 @@ impl planet_generators::height::HeightField for CancelGuarded<'_> {
     fn heights_until(&self, dirs: &[Vec3], stop: &dyn Fn() -> bool) -> Vec<f64> {
         self.inner.heights_until(dirs, &|| stop() || self.cancel.is_cancelled())
     }
-    fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), threads: usize) -> Vec<f64> {
-        self.inner.heights_threaded_until(dirs, &|| stop() || self.cancel.is_cancelled(), threads)
+    fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), par: &dyn planet_core::par::Par) -> Vec<f64> {
+        self.inner.heights_threaded_until(dirs, &|| stop() || self.cancel.is_cancelled(), par)
     }
     fn seed(&self) -> u64 {
         self.inner.seed()
