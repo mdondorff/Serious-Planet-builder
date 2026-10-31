@@ -44,3 +44,18 @@ A pooled fan-out (helper threads taken from the job system's workers instead of 
 2. The horizon bakes share `terrain` with the tile and plan jobs: one ceiling (workers + 1 + horizon), the idle class capped at `horizon` (STRM-060). The system grows by `horizon` threads, the sum of the old two pools.
 3. Stay as drivers: `app/coupledworld` (the coupled run), `hoverpick`, `streamperf`, `worldfield` (the height warm-up thread waits on a queue: a job would hold a worker), `horizonworld` (the one-shot read of the stored coarse horizon). `ThreadPool` stays for tests and examples.
 4. Risk for the perf window: the water reads of a tile job (8 helpers before) now take free permits of the terrain share; with the tile jobs at their limit the free ones are the idle slots (`horizon`) and the plan worker's. A cold lit tile may wait longer on its store blocks; the planner decides whether a window measures it (ADR 0087).
+
+## PR 4: perf verdict (opus-planner, 2026-10-31; ADR 0087, interleaved A/B on the loaded machine)
+Five interleaved rounds of the lit `dive` and `teleport-2km` (`perf stream --lit`, water on, the read-only 16384 store) against main; medians main → this change:
+
+| Scene | Tile-ready (load run) | Load wait | Frame median | Frame p99 |
+|---|---|---|---|---|
+| dive | 12471 → 4524 us (-64 %) | 5177 → 147 us | 5.71 → 5.44 ms | 8.66 → 8.79 ms (+1.4 %) |
+| teleport-2km | 12015 → 4448 us (-63 %) | 6703 → 3413 us | 1.98 → 1.76 ms | 4.54 → 6.18 ms (+36 %) |
+
+1. The permits on the terrain share removed an oversubscription: the water reads of a tile job started 8 scoped threads each.
+2. The teleport-2km p99 is outside the +5 % rule and accepted by the planner: 6.2 ms against the 16.7 ms frame. The likely cause (not measured) is that tiles land earlier, so their uploads bunch in fewer frames.
+3. Open point for B3 or the upload work: upload pacing after a teleport.
+4. First build: the idle-only workers shared the wake condvar and teleport-2km tile-ready rose 10 % (wait +24 %); they wait on their own condvar now (non-lit A/B within 5 %).
+5. 8 of the 20 lit sessions were INVALID by CPU calibration (single thread 52-60 ms against 52 ms): loaded machine, recorded not judged.
+6. The PR's Windows C `gpu_stream_perf` tests timed out once (300 s, two shards); not reproduced after update-branch or locally on 1-2 cores. A Tracked item if it recurs.
