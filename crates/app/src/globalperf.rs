@@ -267,29 +267,48 @@ mod tests {
     }
 
     // spec: TEST-064
-    /// The steps of the base field alone between a tile level and its parent (0 by construction: a child tile's vertices include the parent's and the base height does not depend on the level, since the level-aware height was removed with the chunk stage, ADR 0086; the report keeps the gate's step at its place) at the levels 11 to 16, over the vertices of the
-    /// parents inside the chunk of the largest river, printed: `PLANET_ANET_STORE=DIR PLANET_ANET_RES=N cargo test -p planet --release --lib
-    /// base_steps_report -- --ignored --nocapture`. A measurement of values, read only.
+    /// Measured on the base field: the step between a tile level and its parent. For each level 12 to 16 the tiles under the tile of the largest
+    /// river are generated as the field gives them (`generate_tile_field`, heights rounded to f32) and every vertex of a tile that is also a vertex
+    /// of its parent (the even `k`, `l`) is compared with the parent's height there. A vertex has one direction (COORD-007) and the base height
+    /// does not depend on the level, so the steps are 0 or rounding; a value over 0.25 m fails the gate (TEST-064). Printed:
+    /// `PLANET_ANET_STORE=DIR PLANET_ANET_RES=N cargo test -p planet --release --lib base_steps_report -- --ignored --nocapture`.
+    /// A measurement of values, read only.
     #[test]
-    #[ignore = "a measurement: it prints the steps of the base field in one real chunk"]
+    #[ignore = "a measurement: it prints the steps of the base field between a level and its parent around one river"]
     fn base_steps_report() {
+        use planet_generators::height::generate_tile_field;
         let mut out = std::io::stdout();
         let res = std::env::var("PLANET_ANET_RES").ok().and_then(|r| r.parse().ok()).unwrap_or(256);
         let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
-        let (_world, _maps, tile) = river_scene(res, 11, store, &mut out).unwrap();
-        let cells = planet_generators::chunk::TILE_CELLS as usize;
+        let (world, _maps, tile) = river_scene(res, 11, store, &mut out).unwrap();
+        let base = world.field().unwrap();
+        let map = &planet_core::cube::TangentWarp;
+        let cells = planet_generators::chunk::TILE_CELLS;
         let top = planet_generators::chunk::CHUNK_GRID_LEVEL;
         writeln!(
             out,
-            "steps of the base field alone against the parent (tile level L vs L - 1, at the parent's vertices, inside the chunk):"
+            "steps of the base field alone against the parent (tile level L vs L - 1, at the parent's vertices, under the tile {tile:?}):"
         )
         .unwrap();
+        let mut parents = std::collections::HashMap::new();
         for level in top + 1..=top + 5 {
             let mut tiles = vec![tile];
-            for _ in top..level - 1 {
+            for _ in top..level {
                 tiles = tiles.iter().flat_map(|t| t.children().expect("children")).collect();
             }
-            let d = vec![0.0f64; tiles.len() * (cells + 1) * (cells + 1)];
+            let mut d: Vec<f64> = Vec::new();
+            for t in &tiles {
+                let parent = t.parent().expect("parent");
+                let p = parents.entry(parent).or_insert_with(|| generate_tile_field(&*base, map, parent, cells));
+                let (qx, qy) = ((t.x() & 1) * (cells / 2), (t.y() & 1) * (cells / 2));
+                let child = generate_tile_field(&*base, map, *t, cells);
+                for l in (0..=cells).step_by(2) {
+                    for k in (0..=cells).step_by(2) {
+                        d.push(f64::from(child.at(k, l) - p.at(qx + k / 2, qy + l / 2)).abs());
+                    }
+                }
+            }
+            d.sort_by(f64::total_cmp);
             writeln!(
                 out,
                 "  level {level}: base field against the parent p99 {:.3} m, max {:.3} m over {} vertices",
@@ -298,6 +317,7 @@ mod tests {
                 d.len()
             )
             .unwrap();
+            parents.clear();
         }
     }
 

@@ -320,10 +320,10 @@ mod tests {
         let mut g = Gate::default();
         g.frame(30, &[("draw", 12.0)], &[]);
         g.frame(3, &[("compile", 900.0)], &[]);
-        g.frame(39, &[("input", 2.0), ("chunk frame", 120.0), ("wait for the GPU (x)", 900.0), ("present (swapchain)", 50.0)], &[]);
+        g.frame(39, &[("input", 2.0), ("horizon frame", 120.0), ("wait for the GPU (x)", 900.0), ("present (swapchain)", 50.0)], &[]);
         let f = g.failures(1, true, 0, true);
         assert_eq!(f.len(), 1);
-        assert!(f[0].contains("frame 39") && f[0].contains("122 ms") && f[0].contains("chunk frame"), "{f:?}");
+        assert!(f[0].contains("frame 39") && f[0].contains("122 ms") && f[0].contains("horizon frame"), "{f:?}");
         assert!(g.report(1, 0).contains("1 over 100 ms"));
     }
 
@@ -387,7 +387,7 @@ mod tests {
     #[test]
     fn on_the_software_adapter_frame_time_and_horizon_maps_are_reported_and_held_tiles_and_panics_still_fail() {
         let mut g = Gate::default();
-        g.frame(30, &[("chunk frame", 900.0)], &[]);
+        g.frame(30, &[("horizon frame", 900.0)], &[]);
         g.held(31, &[tile(1)], &[]);
         let f = g.failures(0, true, 1, false);
         assert_eq!(f.len(), 2, "{f:?}");

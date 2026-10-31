@@ -1,0 +1,1 @@
+- 2026-10-31 **rm-chunks-leftovers** (ADR 0086, B6 PR 6, the last): dead world-def helpers, three M4 ablation examples and the streaming-to-cache dependency removed; the gate measures the level step on the base field and checks that the 16384 store opens without a rebuild (TEST-075); remaining chunk-stage wording reworded; `remove-chunk-stage` archived; no default-path change

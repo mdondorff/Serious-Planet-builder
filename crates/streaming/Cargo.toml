@@ -16,7 +16,6 @@ path = "tests/it.rs"
 
 [dependencies]
 planet-core.workspace = true
-planet-cache.workspace = true
 planet-generators.workspace = true
 
 [target.'cfg(windows)'.dependencies]

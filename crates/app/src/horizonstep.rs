@@ -36,7 +36,7 @@ pub fn wait_coarse_horizon(world: &WorldTerrain, out: &mut dyn Write) -> Result<
     writeln!(out, "{line}").map_err(err)
 }
 
-/// The generation workers of the options, which the viewer's chunk stage takes its pool size from.
+/// The generation workers of the options, which the horizon jobs take their pool size from.
 pub fn stage_gen(o: &Options) -> planet_streaming::GenWorkers {
     o.gen_workers()
 }
