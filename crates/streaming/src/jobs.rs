@@ -108,6 +108,8 @@ impl State {
 struct Shared {
     state: Mutex<State>,
     wake: Condvar,
+    /// The idle-only workers wait here, so a job of another class does not wake them for nothing.
+    wake_idle: Condvar,
 }
 
 /// The workers: `workers` threads for every share together.
@@ -147,6 +149,7 @@ impl JobSystem {
                 alive: workers.max(1) + frame_workers + idle_workers,
             }),
             wake: Condvar::new(),
+            wake_idle: Condvar::new(),
         });
         let spec: Vec<(Kind, Priority)> = (0..workers.max(1))
             .map(|_| (Kind::Any, priority))
@@ -182,19 +185,23 @@ impl JobSystem {
                                         st.alive -= 1;
                                         return;
                                     }
-                                    st = shared.wake.wait(st).expect("job state");
+                                    st = if kind == Kind::Idle { &shared.wake_idle } else { &shared.wake }.wait(st).expect("job state");
                                 }
                             };
                             // A panic of a job ends the job, not the worker.
                             let _ = catch_unwind(AssertUnwindSafe(queued.job));
-                            {
+                            let idle_waits = {
                                 let mut st = shared.state.lock().expect("job state");
                                 let s = &mut st.shares[queued.share];
                                 s.running -= 1;
                                 s.idle_running -= usize::from(queued.class == Class::Idle);
-                            }
+                                !st.queues[Class::Idle as usize].is_empty()
+                            };
                             // A job of this share that waited for the ceiling may start now.
                             shared.wake.notify_all();
+                            if idle_waits {
+                                shared.wake_idle.notify_all();
+                            }
                         }
                     })
                     .expect("start a job worker")
@@ -230,6 +237,7 @@ impl Drop for JobSystem {
     fn drop(&mut self) {
         self.shared.state.lock().expect("job state").closed = true;
         self.shared.wake.notify_all();
+        self.shared.wake_idle.notify_all();
         for w in self.workers.lock().expect("job workers").drain(..) {
             let _ = w.join();
         }
@@ -272,10 +280,13 @@ impl Share {
             panic!("job spawned on share {name}: its job system was dropped, so no worker is left to run it (keep the JobSystem alive as long as its shares are used)");
         }
         st.queues[class as usize].push_back(Queued { share: self.index, class, job });
-        let dedicated = st.frame_dedicated || st.idle_dedicated;
+        let (dedicated, idle_only) = (st.frame_dedicated || st.idle_dedicated, st.idle_dedicated && class == Class::Idle);
         drop(st);
-        // With workers that take one class only, the one woken may be a worker that cannot take this job: wake them all.
-        if dedicated {
+        // With workers that take one class only, the one woken may be a worker that cannot take this job: wake them all. An idle job with idle-only workers
+        // wakes only those.
+        if idle_only {
+            self.shared.wake_idle.notify_all();
+        } else if dedicated {
             self.shared.wake.notify_all();
         } else {
             self.shared.wake.notify_one();
@@ -374,6 +385,7 @@ impl Drop for Permits {
             self.share.shared.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner).shares[self.share.index].running -=
                 self.granted;
             self.share.shared.wake.notify_all();
+            self.share.shared.wake_idle.notify_all();
         }
     }
 }
