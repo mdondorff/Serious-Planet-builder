@@ -218,8 +218,16 @@ impl Share {
 
     /// A job of `class`: it runs when a worker is free and fewer than the ceiling of this share are running.
     pub fn spawn_class(&self, class: Class, job: Job) {
-        self.shared.state.lock().expect("job state").queues[class as usize].push_back(Queued { share: self.index, class, job });
-        self.shared.wake.notify_one();
+        let mut st = self.shared.state.lock().expect("job state");
+        st.queues[class as usize].push_back(Queued { share: self.index, class, job });
+        let dedicated = st.frame_dedicated;
+        drop(st);
+        // With workers that take one class only, the one woken may be a worker that cannot take this job: wake them all.
+        if dedicated {
+            self.shared.wake.notify_all();
+        } else {
+            self.shared.wake.notify_one();
+        }
     }
 
     /// `f(0)` to `f(n - 1)` on this share, the results in index order whatever the number of workers (CON-14). The calling thread works on the indices too,
@@ -477,6 +485,20 @@ mod tests {
         let name = v_rx.recv_timeout(Duration::from_secs(10)).unwrap().unwrap();
         assert!(name.starts_with("job-worker"), "ran on {name}");
         drop(system);
+    }
+
+    // spec: BUDG-008
+    #[test]
+    fn a_frame_critical_job_is_never_left_waiting_with_ordinary_workers_idle() {
+        // Ordinary workers that wake for a job they may not take must not swallow the wake-up of the frame worker.
+        let system = JobSystem::with_frame_workers(6, Priority::Normal, 1, Priority::Normal);
+        let share = system.share("terrain", 7);
+        let plan = share.classed(Class::FrameCritical);
+        for round in 0..300 {
+            let (tx, rx) = mpsc::channel();
+            plan.spawn(Box::new(move || tx.send(round).unwrap()));
+            assert_eq!(rx.recv_timeout(Duration::from_secs(10)).expect("a frame-critical job runs"), round);
+        }
     }
 
     // spec: BUDG-009
