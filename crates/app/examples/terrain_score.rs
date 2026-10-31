@@ -255,6 +255,25 @@ fn run() -> Result<(), String> {
         return Ok(());
     }
 
+    // SPIKE-81 (spike code, never merged): `S81_CLIMATE=FILE` writes the global-coarse precipitation (mm) and temperature (C) on a 0.25-degree
+    // grid (1440 x 720 x 2 f32, row 0 at 89.875 N, column 0 at -179.875) and returns.
+    if let Ok(path) = std::env::var("S81_CLIMATE") {
+        let seed = field_s74.seed();
+        let mut b = Vec::with_capacity(1440 * 720 * 8);
+        for r in 0..720 {
+            let lat = 90.0 - (r as f64 + 0.5) * 0.25;
+            for c in 0..1440 {
+                let lon = -180.0 + (c as f64 + 0.5) * 0.25;
+                let gs = planet_generators::global::sample(seed, planet_core::Vec3::from_lat_lon(lat.to_radians(), lon.to_radians()));
+                b.extend_from_slice(&gs.precipitation_mm.to_le_bytes());
+                b.extend_from_slice(&gs.temperature_c.to_le_bytes());
+            }
+        }
+        std::fs::write(&path, b).map_err(|e| e.to_string())?;
+        println!("S81 climate -> {path}");
+        return Ok(());
+    }
+
     // SPIKE-80 (spike code, never merged; from SPIKE-78): `S80_DIR=DIR S80_FIELDS=FILE` runs the combined generator at the sites of `--sites`
     // (re-matched by SPIKE-80's `combined.py`). FILE is 1440 x 720 x 3 f32 (row 0 at 89.875 N): the delta to today's sample elevation, the class map's
     // k and crease floor. The delta enters the fine and coarse windows before the pipeline (a stand-in for a re-baked store); k and the floor per cell
@@ -272,7 +291,9 @@ fn run() -> Result<(), String> {
             .collect();
         const FW: usize = 1440;
         const FH: usize = 720;
-        assert_eq!(fields.len(), FW * FH * 3);
+        // SPIKE-81: `S80_NCH=4` adds the class's carve strength (fraction) as a 4th channel, read at the site centre.
+        let nch: usize = std::env::var("S80_NCH").ok().and_then(|v| v.parse().ok()).unwrap_or(3);
+        assert_eq!(fields.len(), FW * FH * nch);
         // Bilinear lookup of channel `ch` at a unit direction.
         let look = |d: planet_core::Vec3, ch: usize| -> f64 {
             let lat = libm::asin(d.z.clamp(-1.0, 1.0)).to_degrees();
@@ -284,7 +305,7 @@ fn run() -> Result<(), String> {
             let tx = fx - xf;
             let x0 = (xf as i64).rem_euclid(FW as i64) as usize;
             let x1 = (x0 + 1) % FW;
-            let v = |y: usize, x: usize| f64::from(fields[(y * FW + x) * 3 + ch]);
+            let v = |y: usize, x: usize| f64::from(fields[(y * FW + x) * nch + ch]);
             (v(y0, x0) * (1.0 - tx) + v(y0, x1) * tx) * (1.0 - ty) + (v(y0 + 1, x0) * (1.0 - tx) + v(y0 + 1, x1) * tx) * ty
         };
         let g = ts::GRID;
@@ -383,14 +404,14 @@ fn run() -> Result<(), String> {
                     );
                 }
                 let plateau = matches!(s.tile.as_str(), "N43W102" | "N31W004");
-                let names: &[&str] = if plateau { &["combined", "combined+authored"] } else { &["combined", "combined+hb"] };
+                let names: &[&str] = if nch == 4 { &["derived+hb"] } else if plateau { &["combined", "combined+authored"] } else { &["combined", "combined+hb"] };
                 for &name in names {
                     let t = Instant::now();
                     // (k override, carve strength in %, carve on)
                     let (kov, kdt, carve): (Option<f64>, u32, bool) = match (name, s.tile.as_str()) {
                         ("combined+authored", "N43W102") => (Some(1.0), 100, false),
                         ("combined+authored", _) => (Some(0.35), 50, true),
-                        _ => (None, 100, true),
+                        _ => (None, if nch == 4 { (100.0 * look(c, 3)).round().clamp(0.0, 100.0) as u32 } else { 100 }, true),
                     };
                     let zb: Vec<f64> = (0..g * g)
                         .map(|p| {
