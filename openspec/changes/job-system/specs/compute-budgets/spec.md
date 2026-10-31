@@ -13,7 +13,7 @@ Source: ADR 0083 point 2; opus-planner (2026-10-31, the order of the moves: tile
 
 ## ADDED Requirements
 ### Requirement: BUDG-008 A share's ceiling and the class order
-The job system SHALL run at most a share's ceiling of that share's jobs at once, however many workers are free, and SHALL start the jobs of the best class first (frame-critical, visible, prefetch, idle), in submission order within a class and share; a running job SHALL never be preempted. A share at its ceiling SHALL not hold back another share's jobs, and a closing system SHALL keep the ceilings while it drains.
+The job system SHALL run at most a share's ceiling of that share's jobs at once, however many workers are free, and SHALL start the jobs of the best class first (frame-critical, visible, prefetch, idle), in submission order within a class and share; a running job SHALL never be preempted. A share at its ceiling SHALL not hold back another share's jobs, and a closing system SHALL keep the ceilings while it drains. A share MAY cap its idle-class jobs at once (the tile pool of the horizon: STRM-060), so that a bake never holds a worker a visible job of the share needs.
 
 Verify: A
 Status: active
@@ -22,6 +22,10 @@ Source: ADR 0083 point 2, BUDG-003, BUDG-004
 #### Scenario: A ceiling with free workers
 - **WHEN** five jobs of a share with ceiling 2 are queued on six workers and none ends
 - **THEN** two run, the other three wait, and the share's peak is 2 for the whole run
+
+#### Scenario: An idle cap
+- **WHEN** a share with ceiling 4 and an idle cap of 1 has three idle jobs and then three visible jobs queued
+- **THEN** one idle job runs, the other two wait, and the three visible jobs run beside it
 
 #### Scenario: A better class passes a worse one
 - **WHEN** jobs of the classes idle, prefetch, visible, idle, frame-critical and visible are queued behind a running job of one worker
