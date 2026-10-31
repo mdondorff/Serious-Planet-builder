@@ -50,7 +50,7 @@ apply an amendment only when the owner has decided it in this session, and recor
 7. **Gates.** At a milestone gate (CLAUDE.md "When to stop and report"), assess stability and correctness across main
    with independent reviewers, write the stop report, and record a go only when the owner gives it (or under a rule the
    owner stated in this session). A surprise that changes an accepted assumption blocks the go until the owner decides.
-8. **Night orders.** The app pauses your messages after 10 sends without an owner message; a running `/loop` in your session avoids it. Before 22:00, check your loop runs and give each lane standing orders: the merge order ("merge when CLEAN and every check passes, in this order"), the next two tasks, reserved IDs.
+8. **Night orders.** The app pauses your messages after 10 sends without an owner message (a running `/loop` does not reset it). Lane orders therefore go into `C:/DEV/planner-inbox/<lane>.md` (outside git, written only by you, numbered entries; lanes read it in their loop and report by message, or in `<lane>-outbox.md` when their send is refused); `SendMessage` only for urgent things (owner, 2026-10-31). Before 22:00, check your loop runs and give each lane standing orders: the merge order ("merge when CLEAN and every check passes, in this order"), the next two tasks, reserved IDs.
 9. **Remember.** Update your agent memory at the end of every task: open threads, decisions and who made them, which
    session owns what, and anything the owner asked you to watch. Before a session switch or at the end of a week,
    refresh the next week's brief in `docs/briefings/` (start order, self-contained lane briefs, loop lines,
