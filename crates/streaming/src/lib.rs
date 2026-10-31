@@ -19,6 +19,7 @@
 
 pub mod budget;
 pub mod horizonjobs;
+pub mod jobs;
 mod layer;
 pub mod manager;
 pub mod priority;
@@ -783,16 +784,21 @@ impl GenWorkers {
         Self { priority, ..self }
     }
 
-    /// The pool: exactly `workers` threads.
-    pub fn pool(&self) -> Arc<ThreadPool> {
-        Arc::new(ThreadPool::with_priority(self.workers, self.priority))
+    /// The tile pool: a share named `terrain` with a ceiling of `workers` jobs at once on a job system of exactly `workers` threads (BUDG-004). The pool
+    /// owns its system, so the threads go when the last handle does.
+    pub fn pool(&self) -> Arc<jobs::OwnedShare> {
+        let system = jobs::JobSystem::new(self.workers, self.priority);
+        let share = system.share("terrain", self.workers);
+        Arc::new(jobs::OwnedShare::new(system, share))
     }
 
     /// The pool for visible work on `workers` threads and `idle` more for the idle class, at most `idle` of which run idle jobs at once, so a
     /// bake never holds a worker a visible job needs (STRM-060).
-    pub fn pool_with_idle(&self, idle: usize) -> Arc<ThreadPool> {
+    pub fn pool_with_idle(&self, idle: usize) -> Arc<jobs::OwnedShare> {
         let idle = idle.max(1);
-        Arc::new(ThreadPool::with_classes(self.workers + idle, self.priority, idle))
+        let system = jobs::JobSystem::new(self.workers + idle, self.priority);
+        let share = system.share_with_idle("terrain", self.workers + idle, idle);
+        Arc::new(jobs::OwnedShare::new(system, share))
     }
 
     /// `config` with the in-flight limits of this pool.
