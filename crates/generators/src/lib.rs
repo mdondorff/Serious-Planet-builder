@@ -12,6 +12,7 @@ pub mod coarsehorizon;
 pub mod compact;
 pub mod coupled;
 pub mod coupledinput;
+pub mod descriptors;
 pub mod drivers;
 pub mod dump;
 pub mod erosion;

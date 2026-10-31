@@ -1,0 +1,597 @@
+//! SPIKE-68 (spike code, never merged): erosion-layer seams (ADR 0088's open risk).
+//! One window of the base field (6,656^2 at 101.8 m) holds 2 x 2 tile cores of 3,072^2, each with a 256-cell halo. The window is amplified
+//! once (x6 about the 20 km box mean, SPIKE-65), then baked by ADR 0088's order without deposition: the transient carve with uplift and the breach
+//! (U/K 20, K dt 0.05, 20 steps, re-route every 5th; SPIKE-66) and thermal at 33 degrees (100 passes; SPIKE-64).
+//! - joint: the whole window in one bake (no seams inside: the reference);
+//! - tiles: each tile's 3,584^2 window on its own, the core stored; without inflow, and with the inflow the joint routing of the amplified
+//!   base brings across the window edge (an ideal stand-in for the coupled network's inflow, SPIKE-61);
+//! - the mosaic of the cores (hard), and a cross-fade of neighbouring tiles over 64 cells centred on the core edge (blend).
+//! Every hash uses the global cell, so a tile and the joint bake jitter the same cell the same way.
+//! Usage: `s68seam <dir> <out> <site,...>`; reads `<dir>/<site>-orig-6656x6656.f32`, prints one line per measure.
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, VecDeque};
+use std::time::Instant;
+
+const BIG: usize = 6656;
+const CORE: usize = 3072;
+const HALO: usize = 256;
+const TW: usize = CORE + 2 * HALO;
+const DX: f64 = 101.8;
+const NB: [(i64, i64); 8] = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)];
+
+#[derive(Clone, Copy)]
+struct G<'a> {
+    w: usize,
+    ox: usize,
+    oy: usize,
+    /// Cells held at their height (a neighbour's baked core): base level, never eroded, no thermal exchange.
+    fix: &'a [bool],
+}
+
+impl G<'_> {
+    fn n(&self) -> usize {
+        self.w * self.w
+    }
+    fn nbr(&self, p: usize, d: usize) -> Option<usize> {
+        let w = self.w as i64;
+        let (i, j) = ((p % self.w) as i64 + NB[d].0, (p / self.w) as i64 + NB[d].1);
+        (i >= 0 && j >= 0 && i < w && j < w).then(|| j as usize * self.w + i as usize)
+    }
+    fn edge(&self, p: usize) -> bool {
+        let (i, j) = (p % self.w, p / self.w);
+        i == 0 || j == 0 || i == self.w - 1 || j == self.w - 1 || (!self.fix.is_empty() && self.fix[p])
+    }
+    fn border(&self, p: usize, h: &[f32]) -> bool {
+        self.edge(p) || h[p] <= 0.0
+    }
+    /// The global cell of a window cell (big-window coordinates).
+    fn gid(&self, p: usize) -> u64 {
+        (((self.oy + p / self.w) as u64) << 20) | (self.ox + p % self.w) as u64
+    }
+}
+
+fn read(path: &str) -> Vec<f32> {
+    let b = std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    b.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()
+}
+
+fn mix(x: u64) -> f64 {
+    let x = (x ^ (x >> 31)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    let x = x ^ (x >> 29);
+    (x >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0
+}
+
+fn pair_u(a: u64, b: u64) -> f64 {
+    let (a, b) = if a < b { (a, b) } else { (b, a) };
+    mix(a.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ b.wrapping_mul(0xC2B2_AE3D_27D4_EB4F))
+}
+
+fn thermal(g: G, h: &mut Vec<f32>, theta_deg: f64, passes: usize, threads: usize) {
+    const K: f64 = 0.0625;
+    let t = theta_deg.to_radians().tan();
+    let w = g.w;
+    let mut next = h.clone();
+    for _ in 0..passes {
+        let rows_per = w.div_ceil(threads);
+        let cur = &*h;
+        std::thread::scope(|sc| {
+            for (k, out) in next.chunks_mut(rows_per * w).enumerate() {
+                sc.spawn(move || {
+                    for (o, v) in out.iter_mut().enumerate() {
+                        let p = k * rows_per * w + o;
+                        let hp = f64::from(cur[p]);
+                        let mut dh = 0.0;
+                        let edge = g.edge(p);
+                        for d in 0..8 {
+                            let Some(q) = g.nbr(p, d) else { continue };
+                            let hq = f64::from(cur[q]);
+                            let dist = if d < 4 { DX } else { DX * std::f64::consts::SQRT_2 };
+                            let crit = t * (1.0 + 0.25 * pair_u(g.gid(p), g.gid(q))) * dist;
+                            let diff = hp - hq;
+                            if diff > crit && hp > 0.0 && !edge {
+                                dh -= K * (diff - crit);
+                            } else if -diff > crit && hq > 0.0 && !g.edge(q) {
+                                dh += K * (-diff - crit);
+                            }
+                        }
+                        *v = (hp + dh) as f32;
+                    }
+                });
+            }
+        });
+        std::mem::swap(h, &mut next);
+    }
+}
+
+fn flood(g: G, h: &[f32]) -> Vec<f32> {
+    let key = |v: f32| -> u32 {
+        let b = v.to_bits();
+        if b & 0x8000_0000 != 0 { !b } else { b | 0x8000_0000 }
+    };
+    let n = g.n();
+    let mut filled = vec![0f32; n];
+    let mut seen = vec![false; n];
+    let mut heap: BinaryHeap<Reverse<(u32, u32)>> = BinaryHeap::new();
+    let mut pit: VecDeque<u32> = VecDeque::new();
+    for p in 0..n {
+        if g.border(p, h) {
+            filled[p] = h[p];
+            seen[p] = true;
+            heap.push(Reverse((key(h[p]), p as u32)));
+        }
+    }
+    loop {
+        let p = if let Some(p) = pit.pop_front() {
+            p as usize
+        } else if let Some(Reverse((_, p))) = heap.pop() {
+            p as usize
+        } else {
+            break;
+        };
+        for d in 0..8 {
+            let Some(q) = g.nbr(p, d) else { continue };
+            if seen[q] {
+                continue;
+            }
+            seen[q] = true;
+            let lo = filled[p] + 1e-3;
+            if h[q] <= lo {
+                filled[q] = lo;
+                pit.push_back(q as u32);
+            } else {
+                filled[q] = h[q];
+                heap.push(Reverse((key(filled[q]), q as u32)));
+            }
+        }
+    }
+    filled
+}
+
+/// Receivers (jittered D8 on the filled surface, hashed on the global cell), the order outlets first, the area with the inflow added.
+fn route(g: G, h: &[f32], inflow: &[(usize, f64)]) -> (Vec<u32>, Vec<u32>, Vec<f64>, Vec<f32>) {
+    let filled = flood(g, h);
+    let n = g.n();
+    let mut rec = vec![u32::MAX; n];
+    for p in 0..n {
+        if g.border(p, h) {
+            continue;
+        }
+        let mut best = (0.0f64, u32::MAX);
+        for d in 0..8 {
+            let q = g.nbr(p, d).unwrap();
+            let dd = if d < 4 { DX } else { DX * std::f64::consts::SQRT_2 };
+            let mut s = f64::from(filled[p] - filled[q]) / dd;
+            if s > 0.0 {
+                s *= 1.0 + 0.5 * mix(g.gid(p).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (d as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F));
+            }
+            if s > best.0 {
+                best = (s, q as u32);
+            }
+        }
+        rec[p] = best.1;
+    }
+    let mut ndon = vec![0u32; n + 1];
+    for &r in &rec {
+        if r != u32::MAX {
+            ndon[r as usize + 1] += 1;
+        }
+    }
+    for i in 0..n {
+        ndon[i + 1] += ndon[i];
+    }
+    let mut fill = ndon.clone();
+    let mut don = vec![0u32; n];
+    for (p, &r) in rec.iter().enumerate() {
+        if r != u32::MAX {
+            don[fill[r as usize] as usize] = p as u32;
+            fill[r as usize] += 1;
+        }
+    }
+    drop(fill);
+    let mut order = Vec::with_capacity(n);
+    let mut stack: Vec<u32> = (0..n as u32).filter(|&p| rec[p as usize] == u32::MAX).collect();
+    while let Some(p) = stack.pop() {
+        order.push(p);
+        stack.extend_from_slice(&don[ndon[p as usize] as usize..ndon[p as usize + 1] as usize]);
+    }
+    let mut area = vec![DX * DX; n];
+    for &(p, a) in inflow {
+        area[p] += a;
+    }
+    for &p in order.iter().rev() {
+        let r = rec[p as usize];
+        if r != u32::MAX {
+            area[r as usize] += area[p as usize];
+        }
+    }
+    (rec, order, area, filled)
+}
+
+/// Land heights `m + k (h - m)`, `m` the box mean over 20 km (radius 98 cells, clamped to the window), at least 1 m.
+fn amplify(w: usize, h: &[f32], k: f64) -> Vec<f32> {
+    const R: usize = 98;
+    let mut sat = vec![0f64; (w + 1) * (w + 1)];
+    for j in 0..w {
+        let mut row = 0.0;
+        for i in 0..w {
+            row += f64::from(h[j * w + i]);
+            sat[(j + 1) * (w + 1) + i + 1] = sat[j * (w + 1) + i + 1] + row;
+        }
+    }
+    let mut out = h.to_vec();
+    for j in 0..w {
+        for i in 0..w {
+            let p = j * w + i;
+            if h[p] <= 0.0 {
+                continue;
+            }
+            let (i0, i1, j0, j1) = (i.saturating_sub(R), (i + R + 1).min(w), j.saturating_sub(R), (j + R + 1).min(w));
+            let s = sat[j1 * (w + 1) + i1] - sat[j0 * (w + 1) + i1] - sat[j1 * (w + 1) + i0] + sat[j0 * (w + 1) + i0];
+            let m = s / ((i1 - i0) * (j1 - j0)) as f64;
+            out[p] = (m + k * (f64::from(h[p]) - m)).max(1.0) as f32;
+        }
+    }
+    out
+}
+
+/// The transient carve with uplift and the breach before each fill (SPIKE-66 (d)).
+fn carve(g: G, h: &mut [f32], inflow: &[(usize, f64)]) {
+    carve_ring(g, h, inflow, None)
+}
+
+/// `ring`: (base, target) of the window: before each step the window's edge cells are set to `base + (target - base) s / steps`.
+fn carve_ring(g: G, h: &mut [f32], inflow: &[(usize, f64)], ring: Option<(&[f32], &[f32])>) {
+    let (u_over_k, kdt, steps, reroute) = (20.0, 0.05, 20, 5);
+    let udt = u_over_k * kdt;
+    let w = g.w;
+    let mut routed = None;
+    for s in 0..steps {
+        if let Some((b0, b1)) = ring {
+            let f = s as f32 / steps as f32;
+            for p in 0..g.n() {
+                if g.edge(p) {
+                    h[p] = b0[p] + (b1[p] - b0[p]) * f;
+                }
+            }
+        }
+        if s % reroute == 0 {
+            routed = Some(route(g, h, inflow));
+            let (rec, order, _, _) = routed.as_ref().unwrap();
+            for &p in order.iter().rev() {
+                let p = p as usize;
+                let r = rec[p];
+                if r == u32::MAX || h[r as usize] <= 0.0 || g.edge(r as usize) {
+                    continue;
+                }
+                let r = r as usize;
+                let dist = if (p % w) == (r % w) || (p / w) == (r / w) { DX } else { DX * std::f64::consts::SQRT_2 };
+                let want = f64::from(h[p]) - 1e-3 * dist;
+                if f64::from(h[r]) > want {
+                    h[r] = want.max(f64::from(h[r]) - 50.0) as f32;
+                }
+            }
+        }
+        let (rec, order, area, _) = routed.as_ref().unwrap();
+        for &p in order.iter() {
+            let p = p as usize;
+            let r = rec[p];
+            if r == u32::MAX {
+                continue;
+            }
+            let r = r as usize;
+            let dist = if (p % w) == (r % w) || (p / w) == (r / w) { DX } else { DX * std::f64::consts::SQRT_2 };
+            let f = kdt * area[p].sqrt() / dist;
+            let hr = f64::from(h[r]);
+            let hn = (f64::from(h[p]) + udt + f * hr) / (1.0 + f);
+            h[p] = hn.max(hr + 1e-3) as f32;
+        }
+    }
+}
+
+/// The bake of one window: (after the carve, after thermal).
+fn bake(g: G, h0: &[f32], inflow: &[(usize, f64)]) -> (Vec<f32>, Vec<f32>) {
+    let mut h = h0.to_vec();
+    carve(g, &mut h, inflow);
+    let c = h.clone();
+    thermal(g, &mut h, 33.0, 100, 4);
+    (c, h)
+}
+
+fn sub(src: &[f32], ox: usize, oy: usize, w: usize) -> Vec<f32> {
+    let mut v = Vec::with_capacity(w * w);
+    for j in 0..w {
+        v.extend_from_slice(&src[(oy + j) * BIG + ox..(oy + j) * BIG + ox + w]);
+    }
+    v
+}
+
+/// The inflow of tile window `g` from the joint routing: every big-window cell outside it whose receiver lies inside, at the first interior cell
+/// down its path (an edge cell of the tile window is an outlet there, so inflow put on it would leave at once).
+fn inflow_of(g: G, rec: &[u32], area: &[f64]) -> Vec<(usize, f64)> {
+    let inside = |x: usize, y: usize| x >= g.ox && x < g.ox + g.w && y >= g.oy && y < g.oy + g.w;
+    let interior = |x: usize, y: usize| x > g.ox && x < g.ox + g.w - 1 && y > g.oy && y < g.oy + g.w - 1;
+    let mut out = Vec::new();
+    for q in 0..BIG * BIG {
+        let r = rec[q];
+        if r == u32::MAX {
+            continue;
+        }
+        let (qx, qy) = (q % BIG, q / BIG);
+        let (mut rx, mut ry) = (r as usize % BIG, r as usize / BIG);
+        if inside(qx, qy) || !inside(rx, ry) {
+            continue;
+        }
+        let mut c = r as usize;
+        let mut ok = true;
+        while !interior(rx, ry) {
+            let n = rec[c];
+            if n == u32::MAX {
+                ok = false;
+                break;
+            }
+            c = n as usize;
+            (rx, ry) = (c % BIG, c / BIG);
+            if !inside(rx, ry) {
+                ok = false;
+                break;
+            }
+        }
+        if ok {
+            out.push(((ry - g.oy) * g.w + (rx - g.ox), area[q]));
+        }
+    }
+    out
+}
+
+/// The core origins (big-window coordinates) of the 2 x 2 tiles; tile t's window starts HALO before.
+fn core0(t: usize) -> (usize, usize) {
+    (HALO + (t % 2) * CORE, HALO + (t / 2) * CORE)
+}
+
+/// The mosaic of four tile results (each `TW^2`): hard (each cell from the core that holds it; the outer halo of the big window from the nearest
+/// core) or blended (weights `wx wy`, per axis `clamp(0.5 + e / band, 0, 1)` with `e` the signed distance into the core).
+fn mosaic(tiles: &[Vec<f32>], band: f64) -> Vec<f32> {
+    let mut out = vec![0f32; BIG * BIG];
+    for y in 0..BIG {
+        for x in 0..BIG {
+            let mut sw = 0.0;
+            let mut sh = 0.0;
+            for (t, h) in tiles.iter().enumerate() {
+                let (cx, cy) = core0(t);
+                let (wx0, wy0) = (cx - HALO, cy - HALO);
+                if x < wx0 || x >= wx0 + TW || y < wy0 || y >= wy0 + TW {
+                    continue;
+                }
+                let e = |v: usize, c: usize| -> f64 {
+                    let v = v as f64 + 0.5;
+                    (v - c as f64).min((c + CORE) as f64 - v)
+                };
+                let wt = if band <= 0.0 {
+                    let (ex, ey) = (e(x, cx), e(y, cy));
+                    // Inside the core, or in the big window's outer halo next to it.
+                    let okx = ex > 0.0 || (x < HALO && t % 2 == 0) || (x >= BIG - HALO && t % 2 == 1);
+                    let oky = ey > 0.0 || (y < HALO && t / 2 == 0) || (y >= BIG - HALO && t / 2 == 1);
+                    if okx && oky { 1.0 } else { 0.0 }
+                } else {
+                    let wx = if (x < HALO && t % 2 == 0) || (x >= BIG - HALO && t % 2 == 1) { 1.0 } else { (0.5 + e(x, cx) / band).clamp(0.0, 1.0) };
+                    let wy = if (y < HALO && t / 2 == 0) || (y >= BIG - HALO && t / 2 == 1) { 1.0 } else { (0.5 + e(y, cy) / band).clamp(0.0, 1.0) };
+                    wx * wy
+                };
+                if wt > 0.0 {
+                    sw += wt;
+                    sh += wt * f64::from(h[(y - wy0) * TW + (x - wx0)]);
+                }
+            }
+            out[y * BIG + x] = (sh / sw) as f32;
+        }
+    }
+    out
+}
+
+fn pct(v: &mut [f64], p: f64) -> f64 {
+    if v.is_empty() {
+        return f64::NAN;
+    }
+    v.sort_by(f64::total_cmp);
+    v[((v.len() - 1) as f64 * p).round() as usize]
+}
+
+/// The seam measures of a mosaic `s` against the joint bake `j`: the step across the 4 core edges (the mosaic's difference across the edge minus
+/// the joint's), |s - j| by distance from the nearest edge, and channel crossings (area >= 1 km2) of the edges in each one's own routing.
+fn measure(label: &str, s: &[f32], j: &[f32]) {
+    let mid = HALO + CORE;
+    let (lo, hi) = (HALO, BIG - HALO);
+    let land = |p: usize| s[p] > 0.0 && j[p] > 0.0;
+    let mut steps = Vec::new();
+    for y in lo..hi {
+        let (a, b) = (y * BIG + mid - 1, y * BIG + mid);
+        if land(a) && land(b) {
+            steps.push(f64::from((s[b] - s[a]) - (j[b] - j[a])).abs());
+        }
+    }
+    for x in lo..hi {
+        let (a, b) = ((mid - 1) * BIG + x, mid * BIG + x);
+        if land(a) && land(b) {
+            steps.push(f64::from((s[b] - s[a]) - (j[b] - j[a])).abs());
+        }
+    }
+    let n_steps = steps.len();
+    let (p50, p99, max) = (pct(&mut steps, 0.5), pct(&mut steps, 0.99), pct(&mut steps, 1.0));
+    // |s - j| by distance from the nearest seam line (cores only).
+    let bins = [(0usize, 1usize), (2, 8), (9, 32), (33, 128), (129, 512), (513, 4000)];
+    let mut by: Vec<Vec<f64>> = vec![Vec::new(); bins.len()];
+    for y in lo..hi {
+        for x in lo..hi {
+            let p = y * BIG + x;
+            if !land(p) {
+                continue;
+            }
+            let dx = if x < mid { mid - 1 - x } else { x - mid };
+            let dy = if y < mid { mid - 1 - y } else { y - mid };
+            let d = dx.min(dy);
+            if let Some(k) = bins.iter().position(|&(a, b)| d >= a && d <= b) {
+                by[k].push(f64::from(s[p] - j[p]).abs());
+            }
+        }
+    }
+    let prof: Vec<String> = by.iter_mut().zip(bins).map(|(v, (a, b))| format!("{a}-{b}: {:.2}/{:.2}", pct(v, 0.5), pct(v, 0.99))).collect();
+    // Channel crossings of the seam lines.
+    let g = G { w: BIG, ox: 0, oy: 0, fix: &[] };
+    let cross = |h: &[f32]| -> (Vec<(bool, usize, f64)>, usize) {
+        let (rec, _, area, filled) = route(g, h, &[]);
+        let mut c = Vec::new();
+        for y in lo..hi {
+            for (a, b) in [(y * BIG + mid - 1, y * BIG + mid), (y * BIG + mid, y * BIG + mid - 1)] {
+                if area[a] >= 1e6 && rec[a] as usize == b {
+                    c.push((true, y, area[a]));
+                }
+            }
+        }
+        for x in lo..hi {
+            for (a, b) in [((mid - 1) * BIG + x, mid * BIG + x), (mid * BIG + x, (mid - 1) * BIG + x)] {
+                if area[a] >= 1e6 && rec[a] as usize == b {
+                    c.push((false, x, area[a]));
+                }
+            }
+        }
+        // Ponds next to the seams (fill over 1 m within 4 cells of a seam line).
+        let mut ponds = 0;
+        for y in lo..hi {
+            for x in lo..hi {
+                let p = y * BIG + x;
+                let near = x.abs_diff(mid) <= 4 || y.abs_diff(mid) <= 4;
+                if near && h[p] > 0.0 && filled[p] - h[p] > 1.0 {
+                    ponds += 1;
+                }
+            }
+        }
+        (c, ponds)
+    };
+    let (cs, ps) = cross(s);
+    let (cj, pj) = cross(j);
+    let matched = cs.iter().filter(|(v, at, a)| cj.iter().any(|(v2, at2, a2)| v == v2 && at.abs_diff(*at2) <= 3 && (a / a2) > 0.5 && (a / a2) < 2.0)).count();
+    println!(
+        "{label}: step over {n_steps} edge pairs p50 {p50:.2} p99 {p99:.2} max {max:.2} m | |s-j| by distance (p50/p99 m) {} | crossings mosaic {} joint {} matched {matched} | ponds near seams mosaic {ps} joint {pj}",
+        prof.join(", "),
+        cs.len(),
+        cj.len()
+    );
+}
+
+fn main() {
+    let a: Vec<String> = std::env::args().collect();
+    let (dir, outd) = (&a[1], &a[2]);
+    std::fs::create_dir_all(outd).unwrap();
+    for site in a[3].split(',') {
+        let t0 = Instant::now();
+        let orig = read(&format!("{dir}/{site}-orig-{BIG}x{BIG}.f32"));
+        let base = amplify(BIG, &orig, 6.0);
+        drop(orig);
+        let gb = G { w: BIG, ox: 0, oy: 0, fix: &[] };
+        let (rec0, _, area0, _) = route(gb, &base, &[]);
+        let t = Instant::now();
+        let (jc, jt) = bake(gb, &base, &[]);
+        println!("{site}: joint bake {:.0} s", t.elapsed().as_secs_f64());
+        if std::env::var("S68_MODE").as_deref() == Ok("ring") {
+            // Oracle boundary: each tile's window edge follows the joint carve's heights (base to the joint result after the carve, linear in steps),
+            // then thermal with the edge at the joint's final heights.
+            let mut tiles: Vec<Vec<f32>> = Vec::new();
+            for t in 0..4 {
+                let (cx, cy) = core0(t);
+                let g = G { w: TW, ox: cx - HALO, oy: cy - HALO, fix: &[] };
+                let h0 = sub(&base, g.ox, g.oy, TW);
+                let tc = sub(&jc, g.ox, g.oy, TW);
+                let tt = sub(&jt, g.ox, g.oy, TW);
+                let inflow = inflow_of(g, &rec0, &area0);
+                let t1 = Instant::now();
+                let mut h = h0.clone();
+                carve_ring(g, &mut h, &inflow, Some((&h0, &tc)));
+                for p in 0..g.n() {
+                    if g.edge(p) {
+                        h[p] = tt[p];
+                    }
+                }
+                thermal(g, &mut h, 33.0, 100, 4);
+                println!("{site}: ring tile {t} {:.0} s", t1.elapsed().as_secs_f64());
+                tiles.push(h);
+            }
+            let hard = mosaic(&tiles, 0.0);
+            measure(&format!("{site} ring inflow carve+thermal hard"), &hard, &jt);
+            measure(&format!("{site} ring inflow carve+thermal blend64"), &mosaic(&tiles, 64.0), &jt);
+            let b: Vec<u8> = hard.iter().flat_map(|x| x.to_le_bytes()).collect();
+            std::fs::write(format!("{outd}/{site}-ring-hard.f32"), b).unwrap();
+            continue;
+        }
+        if std::env::var("S68_MODE").as_deref() == Ok("seq") {
+            // Tiles in order 0..3; a tile's window cells inside an earlier tile's core are held at that core's baked height.
+            let mut done = vec![f32::NAN; BIG * BIG];
+            let mut tiles: Vec<Vec<f32>> = Vec::new();
+            for t in 0..4 {
+                let (cx, cy) = core0(t);
+                let (ox, oy) = (cx - HALO, cy - HALO);
+                let mut h0 = sub(&base, ox, oy, TW);
+                let mut fix = vec![false; TW * TW];
+                for j in 0..TW {
+                    for i in 0..TW {
+                        let d = done[(oy + j) * BIG + ox + i];
+                        if !d.is_nan() {
+                            fix[j * TW + i] = true;
+                            h0[j * TW + i] = d;
+                        }
+                    }
+                }
+                let g = G { w: TW, ox, oy, fix: &fix };
+                let inflow = inflow_of(g, &rec0, &area0);
+                let tt = Instant::now();
+                let (_, th) = bake(g, &h0, &inflow);
+                println!("{site}: seq tile {t} ({} held cells) {:.0} s", fix.iter().filter(|f| **f).count(), tt.elapsed().as_secs_f64());
+                for j in HALO..HALO + CORE {
+                    for i in HALO..HALO + CORE {
+                        done[(oy + j) * BIG + ox + i] = th[j * TW + i];
+                    }
+                }
+                tiles.push(th);
+            }
+            let hard = mosaic(&tiles, 0.0);
+            measure(&format!("{site} seq inflow carve+thermal hard"), &hard, &jt);
+            measure(&format!("{site} seq inflow carve+thermal blend64"), &mosaic(&tiles, 64.0), &jt);
+            let b: Vec<u8> = hard.iter().flat_map(|x| x.to_le_bytes()).collect();
+            std::fs::write(format!("{outd}/{site}-seq-hard.f32"), b).unwrap();
+            continue;
+        }
+        let mut tiles_c: [Vec<Vec<f32>>; 2] = [Vec::new(), Vec::new()];
+        let mut tiles_t: [Vec<Vec<f32>>; 2] = [Vec::new(), Vec::new()];
+        for t in 0..4 {
+            let (cx, cy) = core0(t);
+            let g = G { w: TW, ox: cx - HALO, oy: cy - HALO, fix: &[] };
+            let h0 = sub(&base, g.ox, g.oy, TW);
+            for (v, inflow) in [Vec::new(), inflow_of(g, &rec0, &area0)].into_iter().enumerate() {
+                let tt = Instant::now();
+                let (c, th) = bake(g, &h0, &inflow);
+                println!("{site}: tile {t} {} ({} inflow cells) {:.0} s", ["no inflow", "inflow"][v], inflow.len(), tt.elapsed().as_secs_f64());
+                tiles_c[v].push(c);
+                tiles_t[v].push(th);
+            }
+        }
+        for v in 0..2 {
+            let name = ["noinflow", "inflow"][v];
+            measure(&format!("{site} {name} carve hard"), &mosaic(&tiles_c[v], 0.0), &jc);
+            let hard = mosaic(&tiles_t[v], 0.0);
+            measure(&format!("{site} {name} carve+thermal hard"), &hard, &jt);
+            let blend = mosaic(&tiles_t[v], 64.0);
+            measure(&format!("{site} {name} carve+thermal blend64"), &blend, &jt);
+            if v == 1 {
+                let wr = |n: &str, h: &[f32]| {
+                    let b: Vec<u8> = h.iter().flat_map(|x| x.to_le_bytes()).collect();
+                    std::fs::write(format!("{outd}/{site}-{n}.f32"), b).unwrap();
+                };
+                wr("joint", &jt);
+                wr("hard", &hard);
+                wr("blend64", &blend);
+            }
+        }
+        // Reference: the amplified base against itself shows 0; the joint against the base shows the bake's own size.
+        let mut dz: Vec<f64> = jt.iter().zip(&base).filter(|(a, _)| **a > 0.0).map(|(a, b)| f64::from(a - b).abs()).collect();
+        println!("{site}: joint bake change |jt - base| p50 {:.1} p99 {:.1} m; all {:.0} s", pct(&mut dz, 0.5), pct(&mut dz, 0.99), t0.elapsed().as_secs_f64());
+    }
+}
