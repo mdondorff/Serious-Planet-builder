@@ -467,7 +467,8 @@ planet editor [smoke ok]: 90 frames drawn
     // spec: TEST-063
     #[test]
     fn a_main_thread_block_decode_is_never_known_so_it_fails_the_gate_at_every_site() {
-        let decode = "bake blocks decoded on the main thread (VIEW-061): 1 in 1 frames; first in frame 25 in \"camera\" (1 blocks)".to_string();
+        let decode =
+            "bake blocks decoded on the main thread (VIEW-061): 1 in 1 frames; first in frame 25 in \"camera\" (1 blocks)".to_string();
         let one = [decode];
         for site in ["frame-102263", "frame-139490", "frame-197238"] {
             let (k, n) = split_known(site, &one, &KNOWN);
