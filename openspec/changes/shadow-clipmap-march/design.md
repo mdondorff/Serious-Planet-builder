@@ -29,7 +29,8 @@
 | Steady frame, R unchanged | 3-5 us | blocks shared by `Arc` |
 | One tile landed or evicted | about 0.5 ms | only the tile and its parent are refitted, in 128-texel grid cells |
 | Scroll by one level-0 texel (mean of 20) | about 0.55 ms | tiles at a window edge gain and lose whole grid cells (no refit, so a scroll writes the bytes of a full rebuild); target 0.1 ms not met |
-- The first plan and a re-anchor run off the frame thread (opus-planner, inbox #13), the old clipmap drawn until it lands.
+- Known miss, not fixed in PR 2b (opus-planner, inbox #20): a one-texel scroll costs about 0.55 ms against the 0.1 ms target. Cause: blocks are fitted on a fixed 128-texel grid, so a scroll that enters a new grid cell fits the whole cell (about 128^2 texels of samples) although only a strip of it is new. If the per-frame budget is affected, the fix is its own shadows PR (a finer grid at the fine levels, or fitting a new cell off-thread with the old clipmap drawn).
+- Thread of the 400 ms first plan: no caller exists yet (the plan and the gather are not wired into the frame path before PR 5), so nothing hitches today. The planner is GPU-free and meant for the terrain share (inbox #13): the first plan and every re-anchor run there, the old clipmap drawn until it lands; the frame thread only calls the incremental plan (0.5 ms). The wiring PR (5) must show that split before it merges.
 - A different finest level under the camera changes level 0's texel; the clipmap re-anchors only after the change has held `TEXEL_CHANGE_HYSTERESIS_FRAMES` (30) frames.
 
 ### 2. Gather (render, compute)
