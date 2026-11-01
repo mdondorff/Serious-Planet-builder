@@ -1100,6 +1100,11 @@ impl ShadowResolveGpu {
         self.fresh = false;
     }
 
+    /// The resolved shadow of the last frame as a sampled view (the shadow view draws it).
+    pub(crate) fn shadow_texture_view(&self) -> Option<wgpu::TextureView> {
+        self.targets.as_ref().map(|t| t.shadow[self.current].create_view(&Default::default()))
+    }
+
     /// The resolved shadow of the last frame, `width * height` visibilities in [0, 1], row-major.
     pub fn read_shadow(&self, ctx: &GpuContext) -> Vec<f32> {
         let t = self.targets.as_ref().expect("a frame was resolved");
