@@ -5,7 +5,7 @@ ADR 0083 point 3 and BUDG-006: a share that no subsystem has claimed stays unuse
 1. Synthetic loads, one per reserved share at its full size (BUDG-001 to BUDG-003): sky and weather (1.5 ms main thread, 3.0 ms GPU, 1 core), physics (2.0 ms main, 0.5 ms GPU, 2 cores), game logic (2.0 ms main, 2 cores), networking (0.5 ms main, 1 core). A load does fixed work calibrated to milliseconds, not a sleep: a spin on the frame thread per frame, a spin job of the full frame period on its share for the cores, a GPU pass calibrated with timestamp queries.
 2. A reserve scene in the perf harness: the standard flights (the streaming scenes' flights) with all loads on, against the same flights with none; per flight the median and p99 of terrain's main-thread time, its GPU time, the threads busy for terrain (the `terrain` share's peak and running counts), and the frame time.
 3. The report of BUDG-007: each share with measured value, limit and verdict, the largest overrun named; the reserve verdict is PASS only if terrain stays within its shares and the frame median within 16.6 ms with the loads on.
-4. Spec: BUDG-006 stays the requirement; new requirements (IDs from the planner) for the load calibration (tier A) and the scene and its report (tier C).
+4. Spec: BUDG-006 stays the requirement; BUDG-011 (load definition and calibration, tier A) and BUDG-012 (the scene and its verdict, tier C).
 
 ## Impact
 - New code: `planet_perf` (load definitions, calibration, report; GPU-free), `planet_render` (the GPU burn pass behind the timestamp calibration), `planet` (the scene and its options), `xtask perf reserve`.
