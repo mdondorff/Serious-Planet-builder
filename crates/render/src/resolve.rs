@@ -532,6 +532,8 @@ pub struct GenerationMap {
     levels: usize,
     /// Per level, per mip, the values row-major.
     mirror: Vec<Vec<Vec<u32>>>,
+    /// The latest frame any cell was marked in (0: never).
+    last_marked: u32,
 }
 
 impl GenerationMap {
@@ -550,7 +552,7 @@ impl GenerationMap {
             view_formats: &[],
         });
         let chain = || (0..mips).map(|g| vec![0u32; ((cells >> g) * (cells >> g)) as usize]).collect::<Vec<_>>();
-        let map = GenerationMap { texture, cells, levels, mirror: (0..levels).map(|_| chain()).collect() };
+        let map = GenerationMap { texture, cells, levels, mirror: (0..levels).map(|_| chain()).collect(), last_marked: 0 };
         for level in 0..levels {
             map.upload(ctx, level);
         }
@@ -608,6 +610,7 @@ impl GenerationMap {
     /// flag a walk near the opposite window edge too (extra rejection, never a miss).
     pub fn mark_rects<'a>(&mut self, ctx: &GpuContext, frame: u32, rects: impl IntoIterator<Item = (usize, &'a TexelRect)>) {
         assert!(frame > 0);
+        self.last_marked = self.last_marked.max(frame);
         let n = i64::from(self.cells);
         let mut touched = vec![false; self.levels];
         for (level, rect) in rects {
@@ -637,8 +640,14 @@ impl GenerationMap {
     }
 
     /// Mark every cell of every level (a re-anchor).
+    /// The latest frame any cell was marked in (0: never).
+    pub fn last_marked(&self) -> u32 {
+        self.last_marked
+    }
+
     pub fn mark_all(&mut self, ctx: &GpuContext, frame: u32) {
         assert!(frame > 0);
+        self.last_marked = self.last_marked.max(frame);
         for level in 0..self.levels {
             self.mirror[level][0].iter_mut().for_each(|v| *v = frame);
             self.rebuild(level);
@@ -660,6 +669,26 @@ struct Targets {
     shadow: [wgpu::Texture; 2],
 }
 
+/// The five passes of a resolve, in order (the timing probe's rows).
+pub const RESOLVE_PASS_NAMES: [&str; 5] = ["receivers", "march", "fill", "upsample", "temporal"];
+
+/// GPU timestamps around each pass of the resolve (a probe, off unless [`ShadowResolveGpu::enable_timing`] is called).
+struct PassTimer {
+    queries: wgpu::QuerySet,
+    resolve: wgpu::Buffer,
+    readback: wgpu::Buffer,
+}
+
+impl PassTimer {
+    fn writes(&self, pass: usize) -> wgpu::ComputePassTimestampWrites<'_> {
+        wgpu::ComputePassTimestampWrites {
+            query_set: &self.queries,
+            beginning_of_pass_write_index: Some(2 * pass as u32),
+            end_of_pass_write_index: Some(2 * pass as u32 + 1),
+        }
+    }
+}
+
 /// The receivers, upsample and temporal passes with their history. One instance per view.
 pub struct ShadowResolveGpu {
     receivers: wgpu::ComputePipeline,
@@ -672,6 +701,9 @@ pub struct ShadowResolveGpu {
     temporal_bgl: wgpu::BindGroupLayout,
     generations: GenerationMap,
     targets: Option<Targets>,
+    timer: Option<PassTimer>,
+    uniform: Option<wgpu::Buffer>,
+    march_uniform: Option<wgpu::Buffer>,
     /// The index of the shadow texture holding the last frame.
     current: usize,
     /// The next frame must void the history: first frame or a new size.
@@ -785,9 +817,59 @@ impl ShadowResolveGpu {
             temporal_bgl,
             generations: GenerationMap::new(ctx, clip.texels(), clip.levels()),
             targets: None,
+            timer: None,
+            uniform: None,
+            march_uniform: None,
             current: 0,
             fresh: true,
         }
+    }
+
+    /// Time each pass with GPU timestamps from the next frame on; false when the device has no timestamp queries.
+    pub fn enable_timing(&mut self, ctx: &GpuContext) -> bool {
+        if !ctx.timestamps_supported() {
+            return false;
+        }
+        let n = 2 * RESOLVE_PASS_NAMES.len() as u32;
+        let bytes = u64::from(n) * 8;
+        self.timer = Some(PassTimer {
+            queries: ctx.device.create_query_set(&wgpu::QuerySetDescriptor {
+                label: Some("shadow-resolve-timestamps"),
+                ty: wgpu::QueryType::Timestamp,
+                count: n,
+            }),
+            resolve: ctx.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("shadow-resolve-timestamps-resolve"),
+                size: bytes,
+                usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }),
+            readback: ctx.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("shadow-resolve-timestamps-readback"),
+                size: bytes,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            }),
+        });
+        true
+    }
+
+    /// The GPU milliseconds of each pass of the last frame ([`RESOLVE_PASS_NAMES`] order), `None` without [`ShadowResolveGpu::enable_timing`].
+    pub fn pass_ms(&self, ctx: &GpuContext) -> Option<[f64; 5]> {
+        let t = self.timer.as_ref()?;
+        let slice = t.readback.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |r| r.expect("timestamp map failed"));
+        ctx.device.poll(wgpu::PollType::wait_indefinitely()).expect("device poll failed");
+        let data = slice.get_mapped_range().expect("timestamp range");
+        let tick = |k: usize| u64::from_le_bytes(data[k * 8..k * 8 + 8].try_into().expect("8 bytes"));
+        let period = f64::from(ctx.queue.get_timestamp_period());
+        let mut out = [0.0; 5];
+        for (i, o) in out.iter_mut().enumerate() {
+            *o = tick(2 * i + 1).saturating_sub(tick(2 * i)) as f64 * period / 1.0e6;
+        }
+        drop(data);
+        t.readback.unmap();
+        Some(out)
     }
 
     /// The generation map the march reads: mark the frame's dirty rectangles in it before [`ShadowResolveGpu::resolve`].
@@ -875,15 +957,20 @@ impl ShadowResolveGpu {
         let (hw, hh) = (width.div_ceil(2), height.div_ceil(2));
         let cut = params.cut || self.fresh;
         let mut p = march_params.clone();
-        p.dirty_since = params.frame.saturating_sub(1).max(1);
+        // The march looks for changed cells only while one was marked this frame or the last: in a quiet frame it skips the lookups.
+        let since = params.frame.saturating_sub(1).max(1);
+        p.dirty_since = if self.generations.last_marked() >= since { since } else { 0 };
         let march_uniform = ShadowMarchGpu::uniform_bytes(clip, cube, &p);
-        let march_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("shadow-march-uniform"),
-            size: march_uniform.len() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
+        // The uniform buffers are made once and rewritten each frame (queue order keeps the frames in flight apart).
+        let march_buffer = self.march_uniform.get_or_insert_with(|| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("shadow-march-uniform"),
+                size: march_uniform.len() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
         });
-        ctx.queue.write_buffer(&march_buffer, 0, &march_uniform);
+        ctx.queue.write_buffer(march_buffer, 0, &march_uniform);
 
         let mut bytes: Vec<u8> = Vec::with_capacity(224);
         let f = |out: &mut Vec<u8>, v: &[f32]| v.iter().for_each(|x| out.extend_from_slice(&x.to_le_bytes()));
@@ -899,13 +986,15 @@ impl ShadowResolveGpu {
             bytes.extend_from_slice(&v.to_le_bytes());
         }
         f(&mut bytes, &[params.history_weight.clamp(0.0, MAX_HISTORY_WEIGHT), march_params.drop_coefficient, 0.0, 0.0]);
-        let uniform = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("shadow-resolve-uniform"),
-            size: bytes.len() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
+        let uniform = self.uniform.get_or_insert_with(|| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("shadow-resolve-uniform"),
+                size: bytes.len() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
         });
-        ctx.queue.write_buffer(&uniform, 0, &bytes);
+        ctx.queue.write_buffer(uniform, 0, &bytes);
 
         let t = self.targets.as_ref().expect("targets");
         let view = |tex: &wgpu::Texture| tex.create_view(&Default::default());
@@ -917,6 +1006,7 @@ impl ShadowResolveGpu {
         let entry = |binding, view| wgpu::BindGroupEntry { binding, resource: wgpu::BindingResource::TextureView(view) };
         let ubind = wgpu::BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() };
 
+        let stamp = |pass: usize| self.timer.as_ref().map(|t| t.writes(pass));
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("shadow-resolve") });
         {
             let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -931,7 +1021,7 @@ impl ShadowResolveGpu {
                 ],
             });
             let mut pass =
-                encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("shadow-receivers"), timestamp_writes: None });
+                encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("shadow-receivers"), timestamp_writes: stamp(0) });
             pass.set_pipeline(&self.receivers);
             pass.set_bind_group(0, &bind, &[]);
             pass.dispatch_workgroups(hw.div_ceil(8), hh.div_ceil(8), 1);
@@ -941,13 +1031,14 @@ impl ShadowResolveGpu {
             &mut encoder,
             clip,
             cube,
-            &march_buffer,
+            march_buffer,
             &self.generations.view(),
             &receivers_view,
             &half_vis_view,
             &half_steps_view,
             hw,
             hh,
+            stamp(1),
         );
         {
             let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -962,7 +1053,8 @@ impl ShadowResolveGpu {
                     entry(5, &filled_view),
                 ],
             });
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("shadow-fill"), timestamp_writes: None });
+            let mut pass =
+                encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("shadow-fill"), timestamp_writes: stamp(2) });
             pass.set_pipeline(&self.fill);
             pass.set_bind_group(0, &bind, &[]);
             pass.dispatch_workgroups(hw.div_ceil(8), hh.div_ceil(8), 1);
@@ -981,7 +1073,7 @@ impl ShadowResolveGpu {
                 ],
             });
             let mut pass =
-                encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("shadow-upsample"), timestamp_writes: None });
+                encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("shadow-upsample"), timestamp_writes: stamp(3) });
             pass.set_pipeline(&self.upsample);
             pass.set_bind_group(0, &bind, &[]);
             pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
@@ -993,14 +1085,24 @@ impl ShadowResolveGpu {
                 entries: &[ubind, entry(1, depth_view), entry(2, &up_view), entry(3, &history_view), entry(4, &out_view)],
             });
             let mut pass =
-                encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("shadow-temporal"), timestamp_writes: None });
+                encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("shadow-temporal"), timestamp_writes: stamp(4) });
             pass.set_pipeline(&self.temporal);
             pass.set_bind_group(0, &bind, &[]);
             pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
         }
+        if let Some(t) = &self.timer {
+            let n = 2 * RESOLVE_PASS_NAMES.len() as u32;
+            encoder.resolve_query_set(&t.queries, 0..n, &t.resolve, 0);
+            encoder.copy_buffer_to_buffer(&t.resolve, 0, &t.readback, 0, u64::from(n) * 8);
+        }
         ctx.queue.submit([encoder.finish()]);
         self.current = 1 - self.current;
         self.fresh = false;
+    }
+
+    /// The resolved shadow of the last frame as a sampled view (the shadow view draws it).
+    pub(crate) fn shadow_texture_view(&self) -> Option<wgpu::TextureView> {
+        self.targets.as_ref().map(|t| t.shadow[self.current].create_view(&Default::default()))
     }
 
     /// The resolved shadow of the last frame, `width * height` visibilities in [0, 1], row-major.

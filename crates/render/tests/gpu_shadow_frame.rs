@@ -138,3 +138,27 @@ fn a_shadow_frame_is_used_once() {
     }
     assert_eq!(r.shadow_frames_run(), 1, "only the frame that had a shadow frame ran the pass: its deltas are not replayed");
 }
+
+// spec: REND-050
+#[test]
+fn the_shadow_view_draws_the_resolved_visibility_as_grey_over_the_surface() {
+    use planet_frame::look::shading::ShadeView;
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let mut p = plan();
+    p.lit.as_mut().unwrap().view = ShadeView::Shadow;
+    let (mut r, tiles) = renderer(&ctx, &p);
+    r.enable_shadow(&ctx, TEXELS, LEVELS, R);
+    let mut planner = ClipmapPlanner::new(ClipmapParams { texels: TEXELS, ..ClipmapParams::new(R, CELLS) });
+    r.set_shadow_frame(shadow_frame(&p, &tiles, &mut planner));
+    r.render(&ctx, &p, false).unwrap();
+    let visibility = r.read_shadow(&ctx).expect("the shadow pass ran");
+    let rgba = r.read_color(&ctx).rgba;
+    let mut grey = 0usize;
+    for (i, v) in visibility.iter().enumerate() {
+        let px = &rgba[i * 4..i * 4 + 4];
+        if px[0] == px[1] && px[1] == px[2] && (f32::from(px[0]) - v * 255.0).abs() <= 1.0 {
+            grey += 1;
+        }
+    }
+    assert!(grey * 2 > visibility.len(), "most pixels show the visibility as grey: {grey} of {}", visibility.len());
+}

@@ -1104,6 +1104,8 @@ pub struct TerrainRenderer {
     shadow_frame: Option<crate::shadow_path::ShadowFrame>,
     /// Tiles the shadow pass found not resident in its last frame.
     shadow_unresident: Vec<planet_core::TileId>,
+    /// Tiles placed since the app last asked (kept only while the shadow pass is enabled): the clipmap plan refreshes them.
+    placed_log: Vec<planet_core::TileId>,
     /// The frame's horizon table (REND-041), written beside the node records; `None`: every node has slot -1.
     horizon_frame: Option<planet_frame::horizonview::HorizonFrame>,
     node_capacity: usize,
@@ -1304,6 +1306,12 @@ impl TerrainRenderer {
         self.shadow_frame = None;
     }
 
+    /// The tiles placed (uploaded or replaced) since the last call, while the shadow pass is enabled: the app hands them to the clipmap
+    /// planner as refreshed.
+    pub fn take_placed_tiles(&mut self) -> Vec<planet_core::TileId> {
+        std::mem::take(&mut self.placed_log)
+    }
+
     /// The tiles the shadow pass found not resident in its last frame (the gather's blocks and the cube's floor tiles).
     pub fn shadow_unresident(&self) -> &[planet_core::TileId] {
         &self.shadow_unresident
@@ -1464,6 +1472,7 @@ impl TerrainRenderer {
             shadow: None,
             shadow_frame: None,
             shadow_unresident: Vec::new(),
+            placed_log: Vec::new(),
             node_capacity,
             draw_mode: ctx.default_draw_mode(),
             indices,
@@ -2032,6 +2041,9 @@ impl TerrainRenderer {
         let (id, key, cells) = (tile.id, tile.key, tile.cells);
         if cells != self.cells {
             return Err(ExecError::BadResolution { id, res: cells });
+        }
+        if self.shadow.is_some() {
+            self.placed_log.push(id);
         }
         // Resident with the same key: nothing to do for a tile the renderer places itself. A different key (other seed, radius,
         // mesh version) replaces it.
@@ -2688,6 +2700,10 @@ impl TerrainRenderer {
             let mut path = self.shadow.take().expect("shadow enabled");
             let frame = self.shadow_frame.take().expect("shadow frame set");
             self.shadow_unresident = path.run(ctx, self, &frame, &self.depth_view, self.size);
+            // J's shadow view (VIEW-054): the resolved visibility as grey over the picture.
+            if plan.lit.as_ref().is_some_and(|l| l.view == planet_frame::look::shading::ShadeView::Shadow) {
+                path.draw_visibility(ctx, &self.depth_view, &self.color_view);
+            }
             // The frame carries this frame's deltas (dirty rectangles, floor tiles, a cut): it is spent, the app sets the next.
             drop(frame);
             self.shadow = Some(path);

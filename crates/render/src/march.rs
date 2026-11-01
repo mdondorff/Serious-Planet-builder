@@ -459,6 +459,7 @@ impl ShadowMarchGpu {
         steps_view: &wgpu::TextureView,
         width: u32,
         height: u32,
+        timestamps: Option<wgpu::ComputePassTimestampWrites>,
     ) {
         let (clip_view, cube_view) = (clip.sampled_view(), cube.sampled_view());
         let bind = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -474,7 +475,8 @@ impl ShadowMarchGpu {
                 wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(gens_view) },
             ],
         });
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("shadow-march"), timestamp_writes: None });
+        let mut pass =
+            encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("shadow-march"), timestamp_writes: timestamps });
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &bind, &[]);
         pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
@@ -540,7 +542,20 @@ impl ShadowMarchGpu {
             steps_tex.create_view(&Default::default()),
         );
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("shadow-march") });
-        self.encode(ctx, &mut encoder, clip, cube, &uniform_buffer, &gens.view(), &receivers_view, &vis_view, &steps_view, width, height);
+        self.encode(
+            ctx,
+            &mut encoder,
+            clip,
+            cube,
+            &uniform_buffer,
+            &gens.view(),
+            &receivers_view,
+            &vis_view,
+            &steps_view,
+            width,
+            height,
+            None,
+        );
         ctx.queue.submit([encoder.finish()]);
         let read = |tex: &wgpu::Texture| -> Vec<u8> { read_texture(ctx, tex, width, height) };
         let visibility = read(&vis_tex).chunks(4).map(|b| f32::from_le_bytes(b.try_into().unwrap())).collect();

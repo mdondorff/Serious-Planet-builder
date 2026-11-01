@@ -66,6 +66,32 @@ pub struct ClipmapPreview {
     pub flagged: BTreeMap<TileId, u8>,
 }
 
+impl ClipmapPreview {
+    /// The preview of a frame's draw plan (REND-033, REND-045): the stamps in the plane around `anchor` (the delta's first, `delta_len` of
+    /// them) and the nodes the vertex stage previews, as the plan flags them (1: the delta and the transient stamps, 2: the transient ones only).
+    pub fn of_draw(
+        stamps: &[PreviewStamp],
+        delta_len: usize,
+        nodes: &[planet_frame::TerrainDraw],
+        anchor: planet_core::Vec3,
+        radius_m: f64,
+    ) -> ClipmapPreview {
+        let mut out = ClipmapPreview::default();
+        for (i, s) in stamps.iter().take(MAX_CLIPMAP_STAMPS).enumerate() {
+            if let Some(c) = ClipmapStamp::of(s, anchor, radius_m) {
+                out.stamps.push(c);
+                if i < delta_len {
+                    out.delta_count += 1;
+                }
+            }
+        }
+        for n in nodes.iter().filter(|n| n.preview) {
+            out.flagged.insert(n.tile, if n.transient_only { 2 } else { 1 });
+        }
+        out
+    }
+}
+
 /// What the gather writes where no block covers a texel (and what the mips of such texels are): far below any terrain.
 pub const NO_DATA_M: f32 = -1.0e30;
 

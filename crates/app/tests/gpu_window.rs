@@ -132,6 +132,21 @@ max_ev100 = 16.0
     the_look_file_is_drawn_by_the_window(&second);
 }
 
+// spec: REND-050
+#[test]
+fn the_shadow_march_flag_runs_the_clipmap_shadow_pass_beside_the_lit_frames() {
+    let Some(stdout) = smoke(&["--shadow-march", "--no-ui", "--size", "320x180"]) else { return };
+    assert!(stdout.contains("[smoke ok]"), "{stdout}");
+    // The planner job landed its first plan and the pass resolved shadow frames (a number after the colon, more than none).
+    let frames: u64 = stdout
+        .split("shadow pass: ")
+        .nth(1)
+        .and_then(|t| t.split_whitespace().next())
+        .and_then(|n| n.parse().ok())
+        .unwrap_or_else(|| panic!("the summary names the shadow pass: {stdout}"));
+    assert!(frames > 0, "the shadow pass resolved frames: {stdout}");
+}
+
 fn the_window_runs_lit_with_the_atmosphere(stdout: &str) {
     assert!(stdout.contains("[smoke ok]"), "{stdout}");
     // The adapter line names what ran, and the run presented frames to the window.
