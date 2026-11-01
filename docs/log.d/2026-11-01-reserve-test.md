@@ -1,0 +1,1 @@
+- 2026-11-01 **reserve-test** (ADR 0083 point 3): GPU burn pass and ReservePlan node, the reserve scene and `perf reserve`, terrain share capped at BUDG-003's 12 busy threads; BUDG-011 and BUDG-012 active; loaded run: 4 of 5 flights pass, teleport-1m +1 % over the frame median; `reserve-test` archived
