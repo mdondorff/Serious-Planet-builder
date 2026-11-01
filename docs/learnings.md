@@ -122,3 +122,9 @@ Scope: tests (nextest; SPIKE-84 fix 2)
 - SPIKE-84 proposed a `OnceLock` fixture to build the `concurrent_source` store once per binary. Under nextest every test is a process of its own, so a static is built once per test, as before.
 - A fixture worth sharing lives on disk (`CARGO_TARGET_TMPDIR`), named by the test binary, built into a private directory and renamed into place (`crates/cache/tests/support/concurrent_source.rs`).
 - Obsolete if the tests move to a runner that shares one process per binary.
+
+## 2026-11-02 A belt narrower than about 190 km cannot meet GEN-097's step limit of 2.0
+Scope: generators (GEN-094, GEN-097; `classes.rs`)
+- The class lattice has a cell of about 39 km and `k` runs from 1 to 7.5, so a step of at most 2.0 needs the weights to change over about 130 km (190 km for a smoothstep). Gaussian belts of 130 km half-width gave steps of 6.5; tent belts of 220 to 500 km and gates over 250 km give 4.9, with 0.22 % of steps over 2.0.
+- A pair of plates must contribute a term that does not change when the two plates swap (distance, convergence and the continental difference are symmetric), and the third plate's weight must fall to 0 where it trades places with the fourth; otherwise the mask jumps at plate bisectors and triple junctions (the straight edges of iteration 0).
+- Obsolete when the limit is restated (a feathering rule, a smaller `k` range) or the lattice is finer.

@@ -319,7 +319,7 @@ pub fn hill_amplitude_for_k(k: f64) -> f64 {
     30.0 + 145.0 * smoothstep(1.0, 5.0, k) + 650.0 * smoothstep(5.0, 7.5, k)
 }
 
-/// The default class weights from the mask terms, the base elevation `e0` (GEN-096 without the band) and the rolling-plain membership (GEN-095), summing to 1.
+/// The default class weights from the mask terms, the class elevation `e_class` (GEN-096 without the band and the ridge factor) and the rolling-plain membership (GEN-095), summing to 1.
 pub fn class_weights(terms: &MaskTerms, e0: f64, rolling: f64) -> [f64; CLASS_COUNT] {
     let mt = terms.core;
     let high = mt * smoothstep(1500.0, 3500.0, e0);

@@ -255,3 +255,16 @@ fn the_shape_metrics_find_a_ring_a_long_band_and_two_land_masses_on_a_synthetic_
     assert!(!m.longest_spans_km.is_empty() && m.longest_spans_km[0] > 2000.0);
     assert!(m.width_median_km > 0.0 && m.width_p10_km <= m.width_median_km);
 }
+
+// spec: GEN-103
+#[test]
+fn the_lattice_reports_the_largest_k_step_and_where_and_the_share_of_steps_over_a_limit() {
+    let source = ClassSource::new(SEED);
+    let lattice = ClassLattice::build_with(&source, 16, 2);
+    let (step, face, i, j) = lattice.largest_k_step_at();
+    assert_eq!(step, lattice.largest_k_step());
+    assert!(i <= 16 && j <= 16 && face.0 < 6);
+    let over_half = lattice.k_steps_over(step / 2.0);
+    assert!(over_half > 0.0 && over_half <= 1.0, "{over_half}");
+    assert_eq!(lattice.k_steps_over(step + 1e-9), 0.0, "no step is over the largest step");
+}
