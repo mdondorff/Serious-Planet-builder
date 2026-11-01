@@ -114,5 +114,9 @@ fn the_ceiling_follows_the_field_and_adds_the_previews_bounds() {
         sign: 1,
         max_delta_m,
     };
-    assert_eq!(ceiling_m(9_000.0, &[stamp(1_500.0), stamp(200.0), stamp(-300.0)]), 11_000.0, "every stamp adds its bound, whichever its sign");
+    assert_eq!(
+        ceiling_m(9_000.0, &[stamp(1_500.0), stamp(200.0), stamp(-300.0)]),
+        11_000.0,
+        "every stamp adds its bound, whichever its sign"
+    );
 }
