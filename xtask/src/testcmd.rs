@@ -498,14 +498,21 @@ pub fn repro(root: &Path, args: &[String]) -> Res {
             .map(|p| p.to_string_lossy().trim_start_matches("\\?\\").to_string())
     };
     let (bundle_name, path_name) = repro_pair(&file);
-    let bundle = resolve(&bundle_name).map_err(|e| format!("repro bundle '{bundle_name}' not found: {e}"))?;
+    let mut bundle = resolve(&bundle_name).map_err(|e| format!("repro bundle '{bundle_name}' not found: {e}"))?;
     let adapter = if real { "hardware" } else { "software" };
     // `--at-commit` (TEST-071): the replay runs in a worktree of the commit the bundle was recorded at, building into its own target
     // folder; the images still land in this tree's `target/review`.
     let (run_root, env_target, review) = if at_commit {
         let text = std::fs::read_to_string(&bundle).map_err(|e| format!("reading {bundle}: {e}"))?;
         let commit = bundle_commit(&text, &bundle)?;
+        if commit.ends_with("+dirty") {
+            return Err(format!(
+                "{bundle} was recorded at commit {} with uncommitted changes in the tree, so that commit does not reproduce its build and --at-commit cannot replay it; check out that commit, re-apply the changes you made at the time, and replay there",
+                commit.trim_end_matches("+dirty")
+            ));
+        }
         let tree = repro_worktree(root, &commit)?;
+        bundle = strip_commit_line(&text, &tree)?;
         let target = root.join("target").join("repro-target").to_string_lossy().into_owned();
         (tree, Some(target), root.join("target").join("review"))
     } else {
@@ -563,7 +570,7 @@ fn bundle_commit(text: &str, bundle: &str) -> Res<String> {
     head.lines()
         .find_map(|l| l.strip_prefix("commit "))
         .map(|c| c.trim().to_string())
-        .filter(|c| !c.is_empty() && c.chars().all(|ch| ch.is_ascii_hexdigit()))
+        .filter(|c| !c.is_empty() && c.trim_end_matches("+dirty").chars().all(|ch| ch.is_ascii_hexdigit()))
         .ok_or_else(|| {
             format!(
                 concat!(
@@ -574,6 +581,33 @@ fn bundle_commit(text: &str, bundle: &str) -> Res<String> {
                 bundle
             )
         })
+}
+
+/// The bundle without its `commit` line, written beside the worktree: the old build that replays it need not know the line (TEST-071).
+fn strip_commit_line(text: &str, tree: &Path) -> Res<String> {
+    let (head, rest) = text
+        .split_once(
+            "
+---
+",
+        )
+        .unwrap_or((text, ""));
+    let head: Vec<&str> = head.lines().filter(|l| !l.starts_with("commit ")).collect();
+    let path = tree.with_extension("bundle");
+    std::fs::write(
+        &path,
+        format!(
+            "{}
+---
+{rest}",
+            head.join(
+                "
+"
+            )
+        ),
+    )
+    .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+    Ok(path.to_string_lossy().into_owned())
 }
 
 /// The worktree of `commit` under `target/repro-worktree/`, made on first use and kept for the next replay of the same commit.
@@ -1962,6 +1996,51 @@ commit 0123abcdef
 ";
         let e = bundle_commit(old, "old.bundle").unwrap_err();
         assert!(e.contains("old.bundle records no commit") && e.contains("mesh_version") && e.contains("git log -S"), "{e}");
+        assert_eq!(
+            bundle_commit(
+                "planet-terrain-repro 2
+commit 0123ab+dirty
+---
+",
+                "b"
+            )
+            .unwrap(),
+            "0123ab+dirty"
+        );
+        let stripped = std::env::temp_dir().join("strip-commit-test");
+        std::fs::create_dir_all(&stripped).unwrap();
+        let p = strip_commit_line(
+            "planet-terrain-repro 2
+adapter x
+commit 0123ab
+seed 1
+---
+plan commit
+",
+            &stripped.join("w"),
+        )
+        .unwrap();
+        let got = std::fs::read_to_string(&p).unwrap();
+        assert_eq!(
+            got,
+            "planet-terrain-repro 2
+adapter x
+seed 1
+---
+plan commit
+"
+        );
+        let dirty = std::env::temp_dir().join("dirty-bundle-test.bundle");
+        std::fs::write(
+            &dirty,
+            "planet-terrain-repro 2
+commit 0123ab+dirty
+---
+",
+        )
+        .unwrap();
+        let e = repro(Path::new("."), &[dirty.to_string_lossy().into_owned(), "--at-commit".into()]).unwrap_err();
+        assert!(e.contains("uncommitted changes") && e.contains("0123ab"), "{e}");
         let bad = bundle_commit(
             "planet-terrain-repro 2
 commit zz

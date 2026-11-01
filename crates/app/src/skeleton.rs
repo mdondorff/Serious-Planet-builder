@@ -721,7 +721,7 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
             mesh_version: planet_generators::mesh::MESH_VERSION,
             definition_hash,
             adapter: ctx.adapter_key(),
-            commit: Some(crate::crash::commit()).filter(|c| c != "unknown"),
+            commit: crate::crash::bundle_commit(),
             world: world_section,
             request,
             plan,

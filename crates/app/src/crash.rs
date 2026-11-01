@@ -126,6 +126,26 @@ pub(crate) fn commit() -> String {
         .clone()
 }
 
+/// The commit a bundle records (TEST-071): [`commit`], with `+dirty` when the working tree has uncommitted changes (the commit then does
+/// not reproduce the build), `None` when git cannot say.
+pub(crate) fn bundle_commit() -> Option<String> {
+    static ID: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    ID.get_or_init(|| {
+        let c = commit();
+        if c == "unknown" {
+            return None;
+        }
+        let dirty = std::process::Command::new("git")
+            .args(["status", "--porcelain", "--untracked-files=no"])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .is_some_and(|o| !o.stdout.iter().all(u8::is_ascii_whitespace));
+        Some(if dirty { format!("{c}+dirty") } else { c })
+    })
+    .clone()
+}
+
 pub struct Input<'a> {
     pub kind: &'a str,
     /// The run went on after the failure (a plan refusal): the report is called a refusal report, not a crash report.
