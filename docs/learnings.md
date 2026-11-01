@@ -116,3 +116,9 @@ Scope: render (REND-047, REND-053; ADR 0085 point 9)
 - Point 9 says layer 1 uses no atomics. Overlapping blocks written by unordered dispatches raced on the software adapter (an incremental gather differed from a full one at random). The gather now clears, claims (`atomicMax` of the job index) and writes, so the finest block wins in any dispatch order.
 - The result of an integer maximum does not depend on order, which is what point 9 protects. REND-053 now says that (the march, upsample and temporal passes stay atomic-free; a tier A scan checks the shaders). The ADR wording needs a one-line amendment (ADR 0078): "no atomics except the owner pass's integer `atomicMax`".
 - Obsolete when the gather resolves overlaps without an atomic (for example one thread per texel scanning the level's blocks, or a spatial index of winners).
+
+## 2026-11-01 nextest runs each test in its own process: an in-memory fixture shares nothing
+Scope: tests (nextest; SPIKE-84 fix 2)
+- SPIKE-84 proposed a `OnceLock` fixture to build the `concurrent_source` store once per binary. Under nextest every test is a process of its own, so a static is built once per test, as before.
+- A fixture worth sharing lives on disk (`CARGO_TARGET_TMPDIR`), named by the test binary, built into a private directory and renamed into place (`crates/cache/tests/support/concurrent_source.rs`).
+- Obsolete if the tests move to a runner that shares one process per binary.
