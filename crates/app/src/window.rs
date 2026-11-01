@@ -391,11 +391,29 @@ struct App<'w> {
     /// The plan parameters: the configured ones, with the height bound raised to the field's maximum when the stamps lift it (VIEW-022).
     lod: LodParams,
     cameras: &'w [Camera],
+    /// The size of the 3D target in pixels: the window's inner size, as of the last resize that has settled (it starts as `--size`).
+    size: (u32, u32),
+    /// A resize the window reported and the time it did (the target follows when the size has held for [`RESIZE_SETTLE_MS`]).
+    pending_resize: Option<((u32, u32), u64)>,
     clock: Arc<SystemClock>,
     params: ControllerParams,
     state: Option<Running>,
     error: Option<String>,
     summary: Option<String>,
+}
+
+/// How long a window size must hold before the 3D target is made again at it, milliseconds (an edge drag sends a size per mouse move).
+const RESIZE_SETTLE_MS: u64 = 150;
+
+/// The target size a pending window resize asks for now: the pending size when it differs from the current one and has held for
+/// [`RESIZE_SETTLE_MS`].
+pub fn resize_due(current: (u32, u32), pending: Option<((u32, u32), u64)>, now_ms: u64) -> Option<(u32, u32)> {
+    pending.filter(|(size, at)| *size != current && now_ms.saturating_sub(*at) >= RESIZE_SETTLE_MS).map(|(size, _)| size)
+}
+
+/// The aspect (width over height) of a target size, as the camera's projection takes it.
+pub fn aspect_of(size: (u32, u32)) -> f64 {
+    f64::from(size.0) / f64::from(size.1.max(1))
 }
 
 /// How long the title keeps the notice of an F9 capture, milliseconds (VIEW-026).
@@ -619,7 +637,7 @@ impl App<'_> {
     /// A click on the globe overview at the cursor: a marker or the surface under it, and the flight there starts (VIEW-013).
     fn globe_click(&mut self) {
         let Some(st) = self.state.as_mut() else { return };
-        let viewport = Viewport { width_px: f64::from(self.cfg.size.0), height_px: f64::from(self.cfg.size.1) };
+        let viewport = Viewport { width_px: f64::from(self.size.0), height_px: f64::from(self.size.1) };
         let limits = planet_frame::pick::PickLimits::new(self.cfg.radius_m, self.lod.max_height_m);
         let field = self.field.as_ref();
         let height = |d: planet_core::Vec3| field.height(d);
@@ -645,7 +663,7 @@ impl App<'_> {
     /// arrow elsewhere. Outside the overview the cursor is the arrow and there is no target.
     fn update_click_target(&mut self) {
         let Some(st) = self.state.as_mut() else { return };
-        let viewport = Viewport { width_px: f64::from(self.cfg.size.0), height_px: f64::from(self.cfg.size.1) };
+        let viewport = Viewport { width_px: f64::from(self.size.0), height_px: f64::from(self.size.1) };
         let limits = planet_frame::pick::PickLimits::new(self.cfg.radius_m, self.lod.max_height_m);
         let field = self.field.as_ref();
         let height = |d: planet_core::Vec3| field.height(d);
@@ -664,7 +682,7 @@ impl App<'_> {
     fn request(&self, camera: Camera, view: TerrainView, coarse: bool) -> TerrainRequest {
         TerrainRequest {
             camera,
-            size: self.cfg.size,
+            size: self.size,
             view,
             lod: planet_frame::viewer::effective_lod(&self.lod, coarse),
             face_mapping: planet_core::cube::FaceMapping::id(&planet_core::cube::TangentWarp).to_string(),
@@ -677,6 +695,17 @@ impl App<'_> {
         let cfg = self.cfg;
         let began = Instant::now();
         let now_ms = self.clock.now_ms();
+        // The 3D target takes the window's size once it has settled; every size the frame reads comes from `self.size`.
+        if let Some(new) = resize_due(self.size, self.pending_resize, now_ms) {
+            if let Some(st) = self.state.as_mut() {
+                st.rig.renderer.resize(&st.ctx, new);
+                st.viewer.reset_exposure();
+            }
+            self.size = new;
+            self.pending_resize = None;
+        } else if self.pending_resize.is_some_and(|(sz, _)| sz == self.size) {
+            self.pending_resize = None;
+        }
         if let Some(st) = self.state.as_mut() {
             st.stall.begin();
         }
@@ -782,7 +811,7 @@ impl App<'_> {
                 }
             }
             if cfg.smoke && cfg.edit {
-                let viewport = Viewport { width_px: f64::from(cfg.size.0), height_px: f64::from(cfg.size.1) };
+                let viewport = Viewport { width_px: f64::from(self.size.0), height_px: f64::from(self.size.1) };
                 let limits = PickLimits::new(radius, lod_max_height_m);
                 let camera = st.last_camera;
                 let frames = st.frames;
@@ -802,9 +831,11 @@ impl App<'_> {
             let ground = |p: planet_core::PlanetFixed| radius + ground_m.unwrap_or_else(|| field.height(p.0.normalized()));
             let height = |p: planet_core::PlanetFixed| p.0.length() - ground(p);
             let had_globe = st.viewer.globe.is_some();
-            let camera = st.viewer.camera(self.cameras, now_ms, dt, &self.params, &height, &ground);
+            let mut camera = st.viewer.camera(self.cameras, now_ms, dt, &self.params, &height, &ground);
+            // The scripted cameras carry the aspect of the start size: the projection follows the window.
+            camera.aspect = aspect_of(self.size);
             let camera = match st.sweep.as_ref() {
-                Some(s) if !s.done() => s.camera(&|d| field.height(d), radius, f64::from(cfg.size.0) / f64::from(cfg.size.1)),
+                Some(s) if !s.done() => s.camera(&|d| field.height(d), radius, f64::from(self.size.0) / f64::from(self.size.1)),
                 _ => camera,
             };
             // The gate holds the first pose of its path while the edit script runs, then replays the path in real time.
@@ -852,7 +883,7 @@ impl App<'_> {
             }
             st.globe_stats.landings += u64::from(had_globe && st.viewer.globe.is_none() && st.viewer.is_free());
             // The globe overview: the markers it shows (render pixels to window pixels) and the one under the cursor.
-            let viewport = Viewport { width_px: f64::from(cfg.size.0), height_px: f64::from(cfg.size.1) };
+            let viewport = Viewport { width_px: f64::from(self.size.0), height_px: f64::from(self.size.1) };
             if st.viewer.globe.is_some() {
                 // The edits the camera shows are markers too (VIEW-022), found over the tiles the last plan wanted.
                 if let Some(e) = st.edit.as_mut() {
@@ -1316,7 +1347,7 @@ impl App<'_> {
     /// A mouse button in the editor mode: the left one edits (a press in the world presses, a release always releases), the right one looks
     /// around while it is held.
     fn edit_mouse(&mut self, state: ElementState, button: MouseButton, world: bool) {
-        let viewport = Viewport { width_px: f64::from(self.cfg.size.0), height_px: f64::from(self.cfg.size.1) };
+        let viewport = Viewport { width_px: f64::from(self.size.0), height_px: f64::from(self.size.1) };
         let limits = PickLimits::new(self.cfg.radius_m, self.lod.max_height_m);
         let field = self.field.as_ref();
         let Some(st) = self.state.as_mut() else { return };
@@ -1606,6 +1637,10 @@ impl ApplicationHandler for App<'_> {
                 if let Some(st) = self.state.as_mut() {
                     st.surface.resize(&st.ctx, (size.width, size.height));
                 }
+                // The 3D target follows the window once the size holds (dragging an edge sends a stream of sizes); a minimised window (0) keeps it.
+                if size.width > 0 && size.height > 0 {
+                    self.pending_resize = Some(((size.width, size.height), self.clock.now_ms()));
+                }
             }
             WindowEvent::KeyboardInput { event, is_synthetic, .. } if !self.cfg.smoke => {
                 let PhysicalKey::Code(code) = event.physical_key else { return };
@@ -1667,10 +1702,8 @@ impl ApplicationHandler for App<'_> {
             WindowEvent::CursorMoved { position, .. } => {
                 if let Some(st) = self.state.as_mut() {
                     let inner = st.window.inner_size();
-                    let (sx, sy) = (
-                        f64::from(self.cfg.size.0) / f64::from(inner.width.max(1)),
-                        f64::from(self.cfg.size.1) / f64::from(inner.height.max(1)),
-                    );
+                    let (sx, sy) =
+                        (f64::from(self.size.0) / f64::from(inner.width.max(1)), f64::from(self.size.1) / f64::from(inner.height.max(1)));
                     let now = [position.x * sx, position.y * sy];
                     // A press only counts while the overview is shown; otherwise it is stale.
                     if st.viewer.globe.is_none() {
@@ -1679,12 +1712,12 @@ impl ApplicationHandler for App<'_> {
                     let d = [now[0] - st.cursor[0], now[1] - st.cursor[1]];
                     if world && st.press.moved_by(libm::hypot(d[0], d[1])) {
                         if let Some(g) = st.viewer.globe.as_mut() {
-                            g.drag(d[0], d[1], self.cameras[0].fov_y_rad, f64::from(self.cfg.size.1));
+                            g.drag(d[0], d[1], self.cameras[0].fov_y_rad, f64::from(self.size.1));
                         }
                     }
                     st.cursor = now;
                     if world && st.edit_down {
-                        let viewport = Viewport { width_px: f64::from(self.cfg.size.0), height_px: f64::from(self.cfg.size.1) };
+                        let viewport = Viewport { width_px: f64::from(self.size.0), height_px: f64::from(self.size.1) };
                         let limits = PickLimits::new(self.cfg.radius_m, self.lod.max_height_m);
                         let camera = st.last_camera;
                         if let Some(e) = st.edit.as_mut() {
@@ -2039,6 +2072,8 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         field_stage: world.field_stage(),
         lod: cfg.lod.clone(),
         cameras: &script.cameras,
+        size: cfg.size,
+        pending_resize: None,
         clock: Arc::new(SystemClock::new()),
         params: ControllerParams::for_radius(radius_m),
         state: None,
@@ -2611,5 +2646,29 @@ mod tests {
                 assert_eq!(mode_camera_steps(false, false, globe, free), (false, false));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod resize_tests {
+    use super::*;
+
+    // spec: VIEW-006
+    #[test]
+    fn a_window_size_that_has_held_becomes_the_target_size_and_one_that_has_not_waits() {
+        let now = 10_000;
+        assert_eq!(resize_due((1280, 720), None, now), None, "nothing pending");
+        assert_eq!(resize_due((1280, 720), Some(((1920, 1080), now - 10)), now), None, "still being dragged");
+        assert_eq!(resize_due((1280, 720), Some(((1920, 1080), now - RESIZE_SETTLE_MS)), now), Some((1920, 1080)), "it has held");
+        assert_eq!(resize_due((1280, 720), Some(((1280, 720), now - 5_000)), now), None, "back to the current size: nothing to do");
+        assert_eq!(resize_due((1280, 720), Some(((1920, 1080), now + 5)), now), None, "a clock that stepped back waits");
+    }
+
+    // spec: VIEW-006
+    #[test]
+    fn the_projection_aspect_is_the_targets() {
+        assert!((aspect_of((1920, 1080)) - 16.0 / 9.0).abs() < 1e-12);
+        assert!((aspect_of((800, 800)) - 1.0).abs() < 1e-12);
+        assert_eq!(aspect_of((640, 0)), 640.0, "a zero height is read as one pixel, never a division by zero");
     }
 }

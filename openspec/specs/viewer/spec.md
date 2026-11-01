@@ -129,15 +129,23 @@ Source: ADR 0042 point 4, ADR 0015, owner 2026-10-16, owner 2026-10-17 (item 5b)
 - **THEN** it exits non-zero with `no display: ...`; the test reports a skip with that reason when `PLANET_NO_DISPLAY` is set and fails when it is not
 
 ### Requirement: VIEW-006 Presentation blit
-The window surface SHALL show the terrain renderer's colour target scaled to fit the window keeping its aspect, centred, with black bars, without rebuilding the renderer on a resize; an outdated, lost, timed-out or occluded surface SHALL be a skipped frame (reconfigured where that recovers it), not an error.
+The window surface SHALL show the terrain renderer's colour target scaled to fit the window keeping its aspect, centred, with black bars; an outdated, lost, timed-out or occluded surface SHALL be a skipped frame (reconfigured where that recovers it), not an error. The 3D target SHALL follow the window: once a size has held for 150 ms the renderer SHALL make its targets again at it, keeping its tiles, pipelines and pools, and the camera's aspect SHALL be the new size's.
 
-Verify: C
+Verify: A, C
 Status: active
-Source: ADR 0015, ADR 0042 point 4
+Source: ADR 0015, ADR 0042 point 4, owner 2026-10-30 (the 3D target kept its size after a window resize)
 
 #### Scenario: Fit
 - **WHEN** a 4x2 frame is blitted into a square target
 - **THEN** the middle rows hold the frame, scaled, each source texel's colour at its centre, and the rows above and below are black
+
+#### Scenario: Resize
+- **WHEN** a lit renderer (also with the atmosphere) that drew at one size is resized to another and draws a plan of the new size, and then back
+- **THEN** the frame is the frame of a renderer built at that size, byte for byte, the colour, depth, lit, atmosphere and water targets are made again, the exposure snaps on the next lit frame, and a plan of the old size is refused with a size mismatch
+
+#### Scenario: Settle
+- **WHEN** a window size is reported and 10 ms later, and again after 150 ms
+- **THEN** the target follows the second only, a size equal to the current one asks for nothing, the projection's aspect is the target's width over its height, and a minimised window (size 0) keeps the target
 
 ### Requirement: VIEW-007 Lit path in the window
 The viewer window SHALL start on the lit path with the atmosphere and draw the body's look (`--look`, else the file beside `--world`, else the Earth defaults): the lit plan of each frame SHALL be a pure function of the look, the world's radius, the frame clock's dt (capped at 0.25 s) and a reset flag (`viewer_lit_plan`), carrying the look's sun direction, tone curve, scene units, histogram and albedo, the adaptive exposure (range and speeds of the look, the pre-exposure of the body: 12 stops moved by the stops its sun differs from the Earth's) and the atmosphere of a body of the world's radius; a look whose atmosphere does not fit the body SHALL leave the lit path without the atmosphere and the run SHALL say why. The exposure SHALL snap to its target on the first lit frame, on the return to the lit path and on a restart of the flight, and adapt otherwise. L SHALL switch to the debug path, which draws the plan as the pipelined loop decided it, and back; the free camera and the scripted flight SHALL work on both. `enable_lit` is not part of `warm_up`: the window SHALL enable the lit path and the atmosphere and draw the first lit frame once per ring set before frame 0, whichever path it opens on, so that no lit frame creates a long-lived GPU object or uses a part of the renderer for the first time. The title SHALL show the exposure of the last sampled lit frame as `EV <ev100> (adapted)` within 0.05 stop of the target and `EV <ev100> (adapting to <target>)` otherwise. The debug-path defaults of `test-render` and the tests SHALL NOT change.

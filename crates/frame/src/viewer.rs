@@ -360,6 +360,11 @@ impl ViewerState {
         self
     }
 
+    /// Ask for the exposure to snap to its target on the next lit frame (the lit targets were made again at a new size).
+    pub fn reset_exposure(&mut self) {
+        self.exposure_reset = true;
+    }
+
     /// Whether the next lit frame snaps the exposure to its target, once: true for the first lit frame, after the lit path was
     /// switched back on and after a restart of the flight (a cut).
     pub fn take_exposure_reset(&mut self) -> bool {
