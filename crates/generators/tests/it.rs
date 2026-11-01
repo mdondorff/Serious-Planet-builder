@@ -48,6 +48,8 @@ mod mesh;
 mod ocean;
 #[path = "pipeline.rs"]
 mod pipeline;
+#[path = "reads_contract.rs"]
+mod reads_contract;
 #[path = "region_mask.rs"]
 mod region_mask;
 #[path = "relief_scale.rs"]
