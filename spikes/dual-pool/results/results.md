@@ -5,7 +5,7 @@ Time box: 3 h (Sonnet; prototype and plan); the measurement is explorer's, in a 
 Success criteria: a minimal prototype behind a switch; a measurement plan with four configurations, three flights, loaded and quiet, three interleaved rounds; the verdict rule stated before the run.
 Fallback if it fails: the plan alone, with the prototype's limits.
 Code location: branch `spike/dual-pool` (a4878fe9; never merged); patch in `proto/dual-pool.patch.txt`.
-Status: open, ready for the perf window (the results section is filled after the run).
+Status: open; the quiet half is measured (2026-11-01), the next step is a throttled background pool.
 
 ## Prototype
 | Piece | What it does |
@@ -43,7 +43,47 @@ Status: open, ready for the perf window (the results section is filled after the
 - A rule that cannot be judged (the gate refuses quiet runs for more than the window) is reported as "no verdict", never as a pass.
 
 ## Results
-To be filled after the perf window.
+Run 2026-11-01 21:17 to 23:15 on Rasierklinge (explorer, perf window on the planner's go, ADR 0087), the quiet half only: 4 configurations x 3 flights x 3 rotated rounds = 36 runs, `cargo xtask perf stream <flight> --store C:/DEV/SeriousPlanetData/global16384 [--gen-workers N]` (no `--lit`), release build of `spike/dual-pool` at a4878fe9 in its own worktree, no `--machine-ready`. The desktop stayed unlocked. The loaded half was not run (the window was used up).
+
+Medians over the 3 rounds. Tile-ready = `load_run_us_median` + `load_wait_us_median` (us); p99 and median are the frame times (ms). Every p99 is far under 20 ms and every median under 16.6 ms.
+| Flight | Config | Tile-ready | Frame p99 | Frame median | Jobs |
+|---|---|---|---|---|---|
+| dive | a today | 5345 | 8.36 | 5.13 | 14072 |
+| dive | b 10 unpinned | 2951 | 8.89 | 5.13 | 14002 |
+| dive | c dual pool | 4516 | 8.63 | 5.38 | 13642 |
+| dive | d dual pool, E-cores saturated | 5430 | 15.69 | 7.17 | 13277 |
+| teleport-1m | a | 5484 | 5.53 | 2.40 | 11349 |
+| teleport-1m | b | 4522 | 4.73 | 2.43 | 10607 |
+| teleport-1m | c | 4027 | 4.17 | 2.22 | 5899 |
+| teleport-1m | d | 5863 | 6.74 | 3.41 | 5854 |
+| teleport-2km | a | 5927 | 3.03 | 1.26 | 6355 |
+| teleport-2km | b | 4378 | 2.68 | 1.29 | 6355 |
+| teleport-2km | c | 4046 | 2.33 | 1.36 | 5882 |
+| teleport-2km | d | 5995 | 3.79 | 2.52 | 5828 |
+
+## Verdicts (by the rule above)
+| Question | dive | teleport-1m | teleport-2km | Verdict |
+|---|---|---|---|---|
+| d against c ("does not slow") | tile-ready +20 %, p99 +82 % | +46 %, +62 % | +48 %, +63 % | FAIL in every flight |
+| c against a (dual pool against today) | -16 %, +3.2 % | -27 %, -25 % | -32 %, -23 % | PASS in every flight |
+| b against a (10 unpinned against 12) | -45 %, +6.3 % | -17 %, -14 % | -26 %, -12 % | PASS on two flights; dive FAILS the median rule on p99 (+0.5 ms), teleport-1m fails the worst-round rule (one round p99 8.25 against 6.24 ms) |
+- A saturated E-core pool slows the critical work on the P-cores by far more than the 5 % margin (probable cause: shared last-level cache, memory bandwidth and the power budget; not tested).
+- Terrain 6 on the P-cores plus the background pool (c) is no worse than terrain 12 on any core (a) and faster in tile-ready; the teleport flights run fewer jobs (the terrain share is smaller and the prefetch work moved to the E-cores).
+- 10 unpinned (b) is no worse than 12 in tile-ready or jobs; its only miss is the dive p99, 8.89 against 8.36 ms.
+
+## Caveats
+- 7 of the 9 d runs were marked INVALID by the CPU calibration only (dive rounds 1 and 3, all three teleport-1m, teleport-2km rounds 2 and 3) and are the third attempt; by the rule they are "no verdict" on their own. Their margins are 4 to 15 times the 5 % limit.
+- The loaded half was skipped; the threads of the hover pick, the ground read and the coupled run stay unpinned (as in the prototype); no `--lit`.
+- Three rounds are few: single rounds vary by up to 10 % (b's teleport-1m p99 ranges 4.66 to 8.25 ms).
+
+## Gate behaviour (ADR 0087's open point on the calibration limits)
+- 40 attempts were refused or marked INVALID over the 36 runs: 15 on a, b and c (each retried until valid), 24 on d (7 runs kept at their third attempt) and 1 hard refusal.
+- All 39 INVALID verdicts were CPU-calibration limits ("before" or "after", single or parallel), most by under 10 % (for example 53.2 ms against 52 ms, 59.2 ms against 56 ms); the largest was 60.3 ms against 52 ms (teleport-2km, round 1).
+- The hard refusal: another lane's cargo and rustc were running at 23:10 (quiet-machine check), and the orchestration script copied the previous log for that run; found at analysis, deleted and the run repeated at 23:14 (valid). Scripts that copy a log after a run must check for "wrote perf" first.
+- No run exceeded the 15-minute refusal limit.
+
+## Next step (SPIKE-90 stays open)
+A throttled background pool: `PLANET_DUAL_POOL_BG=2` and `4`, or EcoQoS on the E threads, to find a setting where d passes against c. The measurement plan and the verdict rule stay as written.
 
 ## Visuals
-Nothing to look at yet: timings only.
+Timings only: no images.
