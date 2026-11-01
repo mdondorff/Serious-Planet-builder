@@ -5,7 +5,8 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use planet_perf::reserve::{spin, SyntheticLoad};
+use planet_perf::reserve::{calibrate_spin, spin, total_cores, Calibration, SyntheticLoad, LOADS};
+use planet_render::{BurnPass, GpuContext};
 use planet_streaming::jobs::{Class, JobSystem, Share};
 
 /// How long a spin job works between two looks at the stop flag, in milliseconds.
@@ -63,6 +64,76 @@ impl CoreLoad {
 impl Drop for CoreLoad {
     fn drop(&mut self) {
         self.stop();
+    }
+}
+
+/// What the reserve scene runs beside the terrain: every load's cores on a job system of its own (the subsystems that will claim the reserves have pools of their
+/// own), the main-thread spin of all loads once per frame, and the burn passes of the loads with GPU time submitted before the frame.
+pub struct ReserveRun {
+    // Dropped first: the spin jobs stop before their system joins its workers.
+    cores: Vec<CoreLoad>,
+    _system: JobSystem,
+    spin_iterations: u64,
+    burns: Vec<(BurnPass, u32)>,
+    /// What the calibration found, one line each, for the log.
+    pub notes: Vec<String>,
+    /// The calibrated burn milliseconds per frame (0 when the GPU part could not be calibrated).
+    pub burn_gpu_ms: f64,
+}
+
+impl ReserveRun {
+    /// Calibrate the spin and the burns and start the cores of every load. The burn passes need timestamp queries: without them the GPU part is left out and the notes say so.
+    pub fn start(ctx: &GpuContext) -> Result<ReserveRun, String> {
+        let cal: Calibration = calibrate_spin().ok_or("the CPU spin cannot be calibrated: the clock does not advance")?;
+        let mut notes = vec![format!("spin calibrated: {:.0} iterations per ms", cal.iterations_per_ms)];
+        let system = JobSystem::new(total_cores(), planet_streaming::Priority::Normal);
+        let cores: Vec<CoreLoad> = LOADS.iter().map(|l| CoreLoad::start(&system, l, cal.iterations_per_ms)).collect();
+        // The main-thread spin is calibrated again with the cores running: the loads compete for the machine (shared cores, power, caches), and the main-thread work of a
+        // reserved share must take its milliseconds under that competition, not on an idle machine.
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let cal = calibrate_spin().ok_or("the CPU spin cannot be calibrated beside the loads: the clock does not advance")?;
+        notes.push(format!("spin calibrated beside the loads: {:.0} iterations per ms", cal.iterations_per_ms));
+        let spin_iterations = cal.iterations_for(planet_perf::reserve::total_main_ms());
+        let mut burns: Vec<(BurnPass, u32)> = Vec::new();
+        let mut burn_gpu_ms = 0.0;
+        for l in LOADS.iter().filter(|l| l.gpu_ms > 0.0) {
+            let pass = BurnPass::new(ctx);
+            match pass.calibrate(ctx, l.gpu_ms, 0.05) {
+                Some(c) => {
+                    notes.push(format!(
+                        "{} burn calibrated: {} iterations take {:.3} ms (target {:.1} ms)",
+                        l.name, c.iterations, c.measured_ms, l.gpu_ms
+                    ));
+                    burn_gpu_ms += c.measured_ms;
+                    burns.push((pass, c.iterations));
+                }
+                None => notes.push(format!(
+                    "{} burn NOT calibrated (no timestamp queries or no stable time): the GPU part of this load is left out",
+                    l.name
+                )),
+            }
+        }
+        Ok(ReserveRun { cores, _system: system, spin_iterations, burns, notes, burn_gpu_ms })
+    }
+
+    /// One frame of the loads on the frame thread: submit the burns, then spin the main-thread milliseconds of every load. Returns the milliseconds the spin took.
+    pub fn frame(&self, ctx: &GpuContext) -> f64 {
+        self.burn(ctx);
+        let t0 = std::time::Instant::now();
+        spin(self.spin_iterations);
+        t0.elapsed().as_secs_f64() * 1000.0
+    }
+
+    /// Submit the burn passes alone (the GPU samples at the end of a flight).
+    pub fn burn(&self, ctx: &GpuContext) {
+        for (pass, iterations) in &self.burns {
+            pass.submit(ctx, *iterations);
+        }
+    }
+
+    /// The most busy spin jobs of every load, `(name, peak)`.
+    pub fn peaks(&self) -> Vec<(&'static str, usize)> {
+        LOADS.iter().zip(&self.cores).map(|(l, c)| (l.name, c.peak())).collect()
     }
 }
 

@@ -224,12 +224,27 @@ pub(crate) struct Driver<'a> {
     hold: Option<(f64, f32)>,
     /// The sun direction every lit frame uses instead of the look's (a still-camera check sets one above the horizon).
     sun: Option<[f32; 3]>,
+    /// The synthetic loads of the reserve test (`--reserve`, BUDG-012): their main-thread spin and burns run in every frame, and `spins` keeps the milliseconds the spin took.
+    reserve: Option<crate::reserveload::ReserveRun>,
+    spins: Vec<f64>,
 }
 
 impl<'a> Driver<'a> {
     /// A driver of the debug path (no lit plan) over `rig`, paced from now.
     pub(crate) fn plain(ctx: &'a GpuContext, rig: Rig) -> Driver<'a> {
-        Driver { ctx, rig, next_deadline: Instant::now(), lit: None, cut_field: None, ticks: 0, horizon: None, hold: None, sun: None }
+        Driver {
+            ctx,
+            rig,
+            next_deadline: Instant::now(),
+            lit: None,
+            cut_field: None,
+            ticks: 0,
+            horizon: None,
+            hold: None,
+            sun: None,
+            reserve: None,
+            spins: Vec::new(),
+        }
     }
 
     /// Drive the horizon jobs of `world` every frame (TEST-054): the maps of the chunks the plan reads, nearest first, when `horizon`.
@@ -265,6 +280,22 @@ impl<'a> Driver<'a> {
 impl Driver<'_> {
     /// One iteration of the loop for `req`: never waits for a plan; waits for the GPU only at the frames-in-flight bound.
     /// The time of the iteration is `wall_ms` (the pacing sleep and the lag bookkeeping, which follow it, are not in it).
+    /// The GPU time of the terrain pass at `req`'s camera, `n` timed renders of its plan (each waits for the GPU), with the loads' burns submitted before each when the
+    /// reserve is on (BUDG-012); empty without timestamp queries.
+    pub(crate) fn terrain_gpu_samples(&mut self, req: &TerrainRequest, n: usize) -> Result<Vec<f64>, String> {
+        let ctx = self.ctx;
+        let frame = self.rig.managed.begin_frame_strict(req, &mut RendererSink { ctx, renderer: &mut self.rig.renderer })?;
+        let mut out = Vec::with_capacity(n);
+        for _ in 0..n {
+            if let Some(r) = &self.reserve {
+                r.burn(ctx);
+            }
+            let (timing, _) = self.rig.renderer.render(ctx, &frame.pipeline.draw.plan, true).map_err(|e| e.to_string())?;
+            out.extend(timing.gpu_ms);
+        }
+        Ok(out)
+    }
+
     pub(crate) fn tick(&mut self, req: &TerrainRequest) -> Result<Tick, String> {
         let started = Instant::now();
         let ctx = self.ctx;
@@ -316,6 +347,10 @@ impl Driver<'_> {
         let water_nodes = lit_plan.as_ref().and_then(|p| p.water.as_ref()).map_or(0, |w| w.nodes.len());
         self.ticks += 1;
         self.rig.renderer.set_preview_of(&frame.pipeline.draw);
+        // The reserved shares at their full size beside terrain (BUDG-012): the loads' burns are submitted and their main-thread work spins inside the timed frame.
+        if let Some(r) = &self.reserve {
+            self.spins.push(r.frame(ctx));
+        }
         let (timing, _) =
             self.rig.renderer.submit(ctx, lit_plan.as_ref().unwrap_or(&frame.pipeline.draw.plan)).map_err(|e| e.to_string())?;
         self.rig.fi.submit();
@@ -455,6 +490,7 @@ fn run_case(
     req: &(dyn Fn(planet_frame::Camera) -> TerrainRequest + Sync),
     smoke: bool,
     calibrate: bool,
+    reserve: bool,
     smoke_frames: usize,
     gen: planet_streaming::GenWorkers,
     lit: Option<crate::litperf::LitSetup>,
@@ -481,7 +517,16 @@ fn run_case(
         horizon: None,
         hold: None,
         sun: None,
+        reserve: None,
+        spins: Vec::new(),
     };
+    if reserve {
+        let r = crate::reserveload::ReserveRun::start(ctx)?;
+        for n in &r.notes {
+            writeln!(out, "{}: reserve: {n}", script.scene.name()).map_err(err)?;
+        }
+        d.reserve = Some(r);
+    }
     // The machine's state as a fixed job sees it, alone and with the pool's thread count at once, before and after the case (STRM-022:
     // recorded only, never judged; the per-tile times of the log read against it). Nothing of the case runs yet.
     let calib_threads = gen.workers;
@@ -589,6 +634,51 @@ fn run_case(
     }
     let host_load = load_sampler.map_or_else(planet_perf::load::CaseLoad::not_measured, planet_perf::load::LoadSampler::stop);
     let cpu_after = (!smoke).then(planet_perf::host::query_cpu_clock).flatten();
+    // The reserve report (BUDG-007, BUDG-012): terrain against its shares with all loads on.
+    if d.reserve.is_some() {
+        let median = |v: &[f64]| planet_perf::ab::median(v).unwrap_or(f64::NAN);
+        let main: Vec<f64> = frames.iter().zip(&d.spins).map(|(f, s)| f.wall_ms - s).collect();
+        let (spin_ms, main_ms) = (median(&d.spins), median(&main));
+        let frame_ms = median(&frames.iter().map(|f| f.wall_ms).collect::<Vec<_>>());
+        let last = *script.cameras.last().expect("a script has cameras");
+        let gpu = d.terrain_gpu_samples(&req(last), if smoke { 3 } else { 30 })?;
+        let gpu_ms = median(&gpu);
+        let peak = d.rig.terrain.peak_running() as f64;
+        let loads: Vec<planet_perf::reserve::ShareReading> = d
+            .reserve
+            .as_ref()
+            .map(|r| r.peaks())
+            .unwrap_or_default()
+            .into_iter()
+            .zip(planet_perf::reserve::LOADS)
+            .map(|((name, peak), l)| planet_perf::reserve::ShareReading {
+                share: name.to_string(),
+                resource: "cores",
+                measured: peak as f64,
+                limit: l.cores as f64,
+                decides: false,
+            })
+            .collect();
+        let report = planet_perf::reserve::ReserveReport::new(main_ms, gpu_ms, peak, frame_ms, loads);
+        writeln!(
+            out,
+            "{}: reserve report (loads on: spin {spin_ms:.2} ms per frame, burn {:.2} ms GPU; {} GPU samples):",
+            script.scene.name(),
+            d.reserve.as_ref().map_or(0.0, |r| r.burn_gpu_ms),
+            gpu.len()
+        )
+        .map_err(err)?;
+        for l in report.lines() {
+            writeln!(out, "{}: {l}", script.scene.name()).map_err(err)?;
+        }
+        let us = |ms: f64| if ms.is_finite() { (ms * 1000.0).round() as u64 } else { 0 };
+        load_counts.push(("reserve_on".into(), 1));
+        load_counts.push(("reserve_spin_us_median".into(), us(spin_ms)));
+        load_counts.push(("reserve_terrain_main_us_median".into(), us(main_ms)));
+        load_counts.push(("reserve_terrain_gpu_us_median".into(), us(gpu_ms)));
+        load_counts.push(("reserve_terrain_peak_threads".into(), peak as u64));
+        load_counts.push(("reserve_pass".into(), u64::from(report.pass())));
+    }
     let pool = d.rig.pool;
     let torn = Instant::now();
     drop(d);
@@ -797,7 +887,8 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         writeln!(out, "{}: script built in {:.1} s", scene.name(), built.elapsed().as_secs_f64()).map_err(err)?;
         let case_started = Instant::now();
         let lit_setup = if o.lit { Some(crate::litperf::LitSetup::new(o, &scene_world, &lod)?) } else { None };
-        let run = run_case(ctx, &scene_world, &script, &req_of, smoke, o.calibrate, smoke_frames, o.gen_workers(), lit_setup, out)?;
+        let run =
+            run_case(ctx, &scene_world, &script, &req_of, smoke, o.calibrate, o.reserve, smoke_frames, o.gen_workers(), lit_setup, out)?;
         writeln!(out, "{}: case ran in {:.1} s (teardown {:.2} s)", scene.name(), case_started.elapsed().as_secs_f64(), run.teardown_s)
             .map_err(err)?;
         if o.lit {
@@ -1141,6 +1232,8 @@ pub fn lit_stream_stills(o: &Options, ctx: &GpuContext, size: (u32, u32), frames
         horizon: None,
         hold: None,
         sun: None,
+        reserve: None,
+        spins: Vec::new(),
     };
     // The look's own sun is below the horizon at this coast (night, a black picture): a sun from the side at 35 degrees.
     let side = (camera.forward.cross(camera.up).normalized() * libm::cos(35f64.to_radians()) + camera.up * libm::sin(35f64.to_radians()))

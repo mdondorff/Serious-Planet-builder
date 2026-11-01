@@ -94,6 +94,8 @@ pub(crate) struct Rig {
     pub roots: (usize, std::time::Duration),
     /// The horizon bakes' pool: the idle class of the terrain share (`WorldTerrain::enable_viewer_horizon_on`).
     pub horizon_pool: Arc<dyn Spawner>,
+    /// The terrain share (tile, plan and horizon jobs): the reserve test reads its peak of busy threads (BUDG-012).
+    pub terrain: planet_streaming::jobs::Share,
     /// The job system the tile and plan workers run on (BUDG-004); last, so it is dropped after the streamer and the plan worker that feed it.
     pub _system: Arc<planet_streaming::jobs::JobSystem>,
 }
@@ -131,6 +133,7 @@ impl Rig {
         let system = Arc::new(JobSystem::with_dedicated_workers(gen.workers, gen.priority, 1, Priority::Normal, horizon));
         let terrain = system.share_with_idle("terrain", gen.workers + 1 + horizon, horizon);
         let horizon_pool: Arc<dyn Spawner> = Arc::new(terrain.clone());
+        let terrain_share = terrain.clone();
         world.set_job_par(Arc::new(terrain.par()));
         let plan_pool: Arc<dyn Spawner> = Arc::new(terrain.classed(Class::FrameCritical));
         let plan_par = Arc::new(terrain.par());
@@ -170,7 +173,16 @@ impl Rig {
         // The roots go to the GPU here too (STRM-001, ADR 0064): the start-up load is a step of the body, so frame 0 is a steady frame and
         // carries no root upload (a measured frame stays under the cap of STRM-006 and the CON-21 limits).
         managed.upload_roots(&mut RendererSink { ctx, renderer: &mut renderer })?;
-        Ok(Rig { renderer, managed, fi: FramesInFlight::new(MAX_FRAMES_IN_FLIGHT), pool, roots, horizon_pool, _system: system })
+        Ok(Rig {
+            renderer,
+            managed,
+            fi: FramesInFlight::new(MAX_FRAMES_IN_FLIGHT),
+            pool,
+            roots,
+            horizon_pool,
+            terrain: terrain_share,
+            _system: system,
+        })
     }
 }
 
