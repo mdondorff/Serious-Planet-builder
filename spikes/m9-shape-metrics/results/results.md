@@ -6,6 +6,9 @@ Success criteria: the blind spot of the old metrics named; 5 to 8 shape metrics 
 Fallback if it fails: the metric definitions alone.
 Code location: Python scripts in `proto/` on SPIKE-69's 0.5-degree map of the generator's inputs (`target/s69/map13.f32`), resampled to 0.25 degree, and SPIKE-80's `combined.py` rerun unchanged (`s80-fields.f32`); no Rust, no cargo (a perf window ran beside it; scripts at idle priority).
 Closed: 2026-11-01
+Earth measured: 2026-11-01 (section 3b), on the owner's approval of the ETOPO 2022 download (planner inbox #59, #60).
+
+**Earth data source.** NOAA National Centers for Environmental Information. 2022: ETOPO 2022 15 Arc-Second Global Relief Model. NOAA National Centers for Environmental Information. https://doi.org/10.25921/fd45-gt74 (the 60 arc-second surface-elevation grid). Licence, from NCEI's dataset record (https://data.noaa.gov/metaview/page?xml=NOAA/NESDIS/NGDC/MGG/DEM//iso/xml/etopo_2022.xml&view=getDataView&header=none): "NOAA waives any potential copyright and related rights in these data worldwide through the Creative Commons Zero 1.0 Universal Public Domain Dedication (CC0-1.0)." The file is not in the repository: `C:/DEV/SeriousPlanetData/etopo2022/ETOPO_2022_v1_60s_N90W180_surface.tif`, from https://www.ngdc.noaa.gov/mgg/global/relief/ETOPO2022/data/60s/60s_surface_elev_gtif/ETOPO_2022_v1_60s_N90W180_surface.tif, 465,969,062 bytes, SHA-256 `9d27d4b8ea8e76977e2988bca667d7c8fa68b927355feffcddd6b4875a7fd08e`. Only derived figures are here.
 
 ## Headline
 - **The old metrics are histograms, so they are blind to shape.** Class shares and hypsometry count land cells by class or height. Any rearrangement of the same cells scores the same: a 9,000 km line one cell wide and a compact massif of equal area at the same heights are equal to them. SPIKE-80 also tuned its belt amplitude and back-arc uplift on hypsometry itself, so that match was fitted, not predicted.
@@ -38,7 +41,7 @@ Computed on a global equirectangular grid (0.25 degree here; on the cube map the
 | S6 | Enclosed area | land the high-ground regions surround but do not cover (filled minus covered), summed over holes of at least 0.5 Mkm² | about 0-1 Mkm² (the Tarim and Qaidam basins, partly ringed) |
 | S7 | High ground share of land | land at least 2 km over all land | about 7 % without Antarctica (SPIKE-78) |
 | S8 | Belt sinuosity | longest skeleton path over the distance between its ends | about 1.1-1.3 for the Andes' axis and the Himalayan arc (approximate); here measured as skeleton length over the region's largest span, which counts branches: not comparable yet, a cleaner path measure is needed |
-- S5, S6 and S8 need an Earth measurement with the same code to become gates: ETOPO 2022 (NOAA, public, 1 arc-minute) at 0.25 degree would do; downloading it needs the planner's OK (paper and data rule).
+- S5, S6 and S8 are measured on Earth with the same code in section 3b (ETOPO 2022), which also proposes the gates.
 
 ## 3. Measured
 `raw/shape.json`, `raw/holes.json`; today's map is the generator's elevation channel, the combined map SPIKE-80's chosen setting.
@@ -56,6 +59,27 @@ Computed on a global equirectangular grid (0.25 degree here; on the cube map the
 | Regions above 2 km | 10 | 18 | - |
 - S7 is the only shape-free metric here, and the combined map passes it; S1, S2, S5 and S6 fail clearly and would have flagged SPIKE-80.
 - Today's high ground is blob-like (wide, few, short); the combined map is the opposite extreme (thin, long, ringed).
+
+## 3b. Earth measured (ETOPO 2022)
+`proto/earth.py.txt` reads the 60 arc-second grid with SPIKE-55's decoder, block-averages 15 x 15 cells to 0.25 degree and runs the same metrics on all three maps. High-ground metrics (S4-S8) are restricted to latitudes within 60 degrees on every map: the ice sheets of Antarctica and Greenland are surface elevation above 2 km, not orogens. S8 is now the longest path through a region's skeleton over the distance between its ends (regions of at least 500 km), area-weighted. `raw/earth.json`.
+| Metric | Earth (ETOPO 2022) | Today | SPIKE-80 combined | Gate proposal |
+|---|---|---|---|---|
+| Land fraction | 29.1 % | 29.8 % | 29.7 % | 27-31 % |
+| S1 land masses of at least 1 Mkm² | 5 (79.8, 38.9, 13.7, 7.7, 2.2) | 2 (119.4, 31.1) | 2 (119.1, 31.1) | 4-7 |
+| S2 largest share of land | 54 % | 79 % | 79 % | 45-62 % |
+| S3 coastline dimension (28-900 km) | 1.22 | 1.11 | 1.11 | at least 1.18 |
+| S4 width, area-weighted median | 310 km (Tibet weighs most) | 376 km | 199 km | 150-450 km, and S5 |
+| S5 longest five regions above 2 km | 6,009 / 5,877 / 2,136 / 1,980 / 1,448 km | 4,379 / 2,157 / 1,844 / 1,723 / 1,648 km | 11,031 / 5,232 / 4,635 / 4,490 / 4,345 km | longest at most 7,500 km; the third at most half the longest |
+| S6 enclosed by high ground (holes of at least 0.5 Mkm²) | 0 | 0 | 10.9 Mkm² | 0 to 1 Mkm² |
+| S7 high ground share of land within 60 degrees | 6.3 % | 4.3 % | 6.7 % | 5-8 % |
+| S8 sinuosity (longest skeleton path / chord, regions of at least 500 km) | 1.71 | 1.81 | 1.41 | 1.4-2.0 (coarse) |
+| Regions above 2 km within 60 degrees | 69 | 10 | 16 | at least 30 |
+- Earth's high ground is two long systems (the Andes and Tibet-Himalaya, about 6,000 km each), a few of 1,500-2,100 km and many short ranges: 69 regions. The combined map has one 11,000 km region, four of 4,300-5,200 km and only 16 regions: too continuous and too uniform, as the image showed.
+- The combined belts are straighter than Earth's high ground (S8 1.41 against 1.71): Earth's regions are ragged and branched at 0.25 degree; the Voronoi margins are smooth arcs.
+- The region count is a ninth useful number: it catches the missing fragmentation that S5 shows only at the top.
+- The approximate references of section 2 stand corrected by this table (S2 54 %, not 57 %: at 0.25 degree Africa and Eurasia join only through Sinai).
+
+![Earth (ETOPO 2022 at 0.25 degree): land grey, every connected region above 2 km within 60 degrees in its own colour](images/earth-high-ground.png)
 
 ## 4. Knobs that move each metric
 | Metric | Knob (where) |
@@ -79,6 +103,6 @@ Computed on a global equirectangular grid (0.25 degree here; on the cube map the
 
 ## Limits
 - 0.25-degree resampling of a 0.5-degree input: widths under about 60 km and coast detail under 100 km are not resolved.
-- Earth references for S5, S6 and S8 are approximate from standard geography; they need the same code on a global DEM before they gate.
+- Section 2's Earth references are from standard geography; section 3b replaces them with ETOPO 2022 measured by the same code.
 - Skeleton lengths count branches (S5, S8 overstate long, branched regions); the order of magnitude is not in doubt (18,100 km against a few thousand).
 - The polar land of the generator is in S1, S2 and the largest mass (the southern band connects to the central continent).
