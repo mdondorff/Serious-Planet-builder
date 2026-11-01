@@ -43,24 +43,23 @@ With decisions 1, 2 and 5 together (class map and plateau rule, plate-margin bel
 | Verdict | ADRs | Evidence |
 |---|---|---|
 | keep | 0006, 0014, 0019, 0022, 0041, 0056, 0058, 0071, 0073, 0074, 0085 | not touched by the spikes, or consumers of the heights; 0014 and 0074 re-checked: with the pyramid no mountain pose caps a tile (SPIKE-82, SPIKE-83) |
-| amend | 0016 (bounds from the pyramid), 0026 (channels, base elevation), 0028 point 6 (detail by class), 0045 (storage), 0076 (classes as a consumer), 0080 point 1 (hill band by class); extend 0066 (class paint) | SPIKE-66, SPIKE-73, SPIKE-75, SPIKE-80, SPIKE-82, SPIKE-83 |
-| supersede | 0030 by 0088 (point 1, the crease filter, stays as amended by 0089); 0080 points 2 and 3 by 0089 | SPIKE-65, SPIKE-66, SPIKE-73, SPIKE-80 |
-| new | ADR 0089 (draft, proposed); ADR 0088 amended while proposed | this brief, sections 2, 5 and 6 |
+| amend (accepted ADRs, by 0088 or 0089) | 0016 (cap bounds: the layer's pyramid, the class band, the detail), 0026 (channels, base elevation), 0028 point 6 (detail by class), 0030 point 1 (creases without the landform factor), 0080 points 1 and 5 (hill band and its bounds by class); extend 0066 (class paint) | SPIKE-66, SPIKE-73, SPIKE-75, SPIKE-80, SPIKE-82, SPIKE-83 |
+| supersede | 0030 point 2 by 0088; 0080 point 2 and point 3 as the weight by 0089 (point 3's lattice mechanism stays) | SPIKE-65, SPIKE-66, SPIKE-73, SPIKE-80 |
+| edit in place (proposed ADRs) | 0045 (storage: the layer, its pyramid, the class channel), 0076 (the class as a consumer of drivers) | ADR 0088, ADR 0089 |
+| new | ADR 0089 (proposed); ADR 0088 amended while proposed | this brief, sections 2, 5 and 6 |
 
-**Status lines, ready to apply** (ADR 0078: a status line records supersession and amendment; the decision text stays). `<date>` is the owner's decision date; each line below is appended to the ADR's current status line.
+**Status lines (template, applied only on the owner's go).** ADR 0078 lets a status line record supersession and amendment while the decision text stays. Each line below is appended to the accepted ADR's current status line; `<date>` is the date of the owner's decision.
 | ADR | Appended to the status line |
 |---|---|
-| 0016 | `; amended by ADR 0088 point 8 (owner, <date>): bounds per cap read the erosion layer's min/max pyramid where a layer provides one` |
-| 0026 | `; amended by ADR 0089 points 1 and 7 and ADR 0088 point 1 (owner, <date>): a class-weights channel, the relief driver and ring-mean channels, and the base-elevation rule (plate belts, plateaus, class hill band; a GLOBAL_VERSION bump)` |
-| 0028 | `; point 6 amended by ADR 0089 points 5 and 6 (owner, <date>): the detail amplitude follows the relief class, not the base elevation` |
-| 0030 | `; superseded by ADR 0088 (owner, <date>) except point 1, whose crease filter stays with its landform-keyed factor removed by ADR 0089 point 6` |
-| 0045 | `; storage amended by ADR 0088 and ADR 0089 (owner, <date>): the erosion layer (about 7-10 GB) with its min/max pyramid (about 90 MB) and the class-weights lattice (under 1 GB)` |
-| 0066 | `; extended by ADR 0089 point 8 (owner, <date>): class paint is an authored item that sets class weights, feathered` |
-| 0076 | `; ADR 0089 points 4 and 8 (owner, <date>): the relief class becomes a consumer of the driver vector when the derived source replaces the default; paint then acts on drivers (point 7)` |
-| 0080 | `; points 2 and 3 superseded and point 1 amended by ADR 0089 (owner, <date>): the hill band's amplitude follows the relief class; points 4 and 5 stay` |
-| 0088 | replaced by `Status: accepted (owner, <date>; drafted by the spikes session for opus-planner, 2026-10-31, amended draft 2026-11-01)` |
-| 0089 | replaced by `Status: accepted (owner, <date>; drafted by the spikes session for opus-planner, 2026-11-01)` |
-- **Recommendation:** approve ADR 0088 (amended draft) and ADR 0089, and apply the lines above in one maintenance PR per ADR 0078.
+| 0016 | `; amended by ADR 0088 point 8 and ADR 0089 (owner, <date>): cap bounds read the erosion layer's min/max pyramid and carry the class hill band's and the detail's bounds` |
+| 0026 | `; amended by ADR 0088 point 1 and ADR 0089 decisions 1 and 7 (owner, <date>): the relief driver, ring-mean and class-weights channels, and the base-elevation rule (plate belts, plateaus; a GLOBAL_VERSION bump)` |
+| 0028 | `; point 6 amended by ADR 0089 decisions 5 and 6 (owner, <date>): the detail amplitude follows the relief class, not the base elevation` |
+| 0030 | `; point 2 superseded by ADR 0088 and point 1 amended by ADR 0089 decision 6 (owner, <date>): the crease filter stays without its landform-keyed factor` |
+| 0066 | `; extended by ADR 0089 decision 8 (owner, <date>): class paint is an authored item that sets class weights, feathered` |
+| 0080 | `; point 2 and point 3 as the weight superseded, points 1 and 5 amended by ADR 0089 (owner, <date>): the hill band and its bounds follow the relief class; point 3's lattice mechanism carries the class weights; point 4 stays` |
+- ADR 0045 and ADR 0076 are proposed: they are edited in place when 0088 and 0089 are decided, with no ADR 0078 route.
+- ADR 0088 and ADR 0089 take the owner's status on acceptance.
+- **Recommendation:** approve ADR 0088 (amended draft) and ADR 0089, then apply the template in one ADR 0078 maintenance PR and edit 0045 and 0076 in place in another.
 - **Cost to reverse:** low per ADR (status lines and new ADRs; ADR 0078's rules).
 
 ## 4. The store re-bake
