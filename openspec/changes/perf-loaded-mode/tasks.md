@@ -1,6 +1,6 @@
 ## 1. PR 1: gate and report
-- [ ] 1.1 Tier A: `readiness(.., Mode)` splits hard conditions from load readings; `LoadRecord`; `--loaded` refused with `--machine-ready` (BUILD-030)
-- [ ] 1.2 Tier A: the report rows state `loaded` or `quiet` with the readings (BUILD-032); CPU performance % by index lookup or `unavailable`
+- [x] 1.1 Tier A: `gate::readiness_mode(.., Mode)` splits hard conditions from load readings; `LoadRecord`; `--loaded` on `xtask perf` and `test-render`, refused with `--machine-ready`; loaded mode records the ADR 0065 calibration instead of voiding the session and marks the quiet verdicts as not counting until PR 2 (BUILD-030)
+- [x] 1.2 Tier A: the session log states `mode` on the session and on every run row, and the `load_record` (BUILD-032). Not in this PR: the CPU performance % reading (needs the counter lookup by index) and the modes of the one-off logs (`global-bake`, `coupled`, `envelope`, `edit`), which keep their own writers
 
 ## 2. PR 2: verdict function
 - [ ] 2.1 Tier A: `loaded_verdict` for the five kinds, the margins and the +18 % GPU note (BUILD-031); the verdict in the loaded rows

@@ -551,9 +551,10 @@ fn perf_cargo_args(args: &[String]) -> Result<Vec<&'static str>, String> {
     for a in args {
         match a.as_str() {
             "--machine-ready" => v.push("--machine-ready"),
+            "--loaded" => v.push("--loaded"),
             other => {
                 return Err(format!(
-                    "unknown perf option '{other}' (known: --machine-ready, the owner's override of a failed readiness gate)"
+                    "unknown perf option '{other}' (known: --machine-ready, the owner's override of a failed readiness gate; --loaded, loaded mode, BUILD-030)"
                 ))
             }
         }
@@ -610,7 +611,7 @@ fn perf_lit_args(scene: &str, args: &[String]) -> Result<Vec<String>, String> {
     while let Some(a) = it.next() {
         match a.as_str() {
             "--smoke" => smoke = true,
-            "--machine-ready" | "--allow-memory-bake" => tail.push(a.clone()),
+            "--machine-ready" | "--loaded" | "--allow-memory-bake" => tail.push(a.clone()),
             "--store" | "--global-res" | "--out" | "--frames" | "--flight-frames" | "--views" | "--prefill-levels" | "--look" | "--world" => {
                 let value = it.next().ok_or_else(|| format!("{a} needs a value"))?;
                 tail.push(a.clone());
@@ -883,7 +884,7 @@ fn perf_stream_args(args: &[String]) -> Result<Vec<String>, String> {
     while let Some(a) = it.next() {
         match a.as_str() {
             "--smoke" => smoke = true,
-            "--machine-ready" | "--allow-memory-bake" | "--lit" | "--no-horizon-jobs" | "--only-steady" => tail.push(a.clone()),
+            "--machine-ready" | "--loaded" | "--allow-memory-bake" | "--lit" | "--no-horizon-jobs" | "--only-steady" => tail.push(a.clone()),
             "--store" | "--global-res" | "--out" | "--upload" | "--prefill-levels" | "--gen-workers" | "--horizon-threads" | "--repeats" | "--gen-ahead" | "--gen-reserve" | "--gen-priority" | "--settle-ms" | "--share-bound" | "--steady-window-s" | "--altitudes-m" | "--places" | "--poses" | "--out-dir" => {
                 let value = it.next().ok_or_else(|| format!("{a} needs a value"))?;
                 tail.push(a.clone());
@@ -1582,6 +1583,14 @@ mod tests {
         assert_eq!(over.last(), Some(&"--machine-ready"));
         let e = perf_cargo_args(&s(&["--force"])).unwrap_err();
         assert!(e.contains("--force") && e.contains("override"), "{e}");
+    }
+
+    // spec: BUILD-030
+    #[test]
+    fn perf_passes_the_loaded_mode_through_and_the_streaming_scenes_do_too() {
+        assert_eq!(perf_cargo_args(&s(&["--loaded"])).unwrap().last(), Some(&"--loaded"));
+        let stream = perf_stream_args(&s(&["dive", "--loaded", "--store", "D:/bake"]));
+        assert!(stream.is_ok_and(|a| a.iter().any(|x| x == "--loaded")), "the stream scenes forward --loaded");
     }
 
     // spec: TEST-048

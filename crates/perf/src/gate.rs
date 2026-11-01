@@ -114,8 +114,73 @@ fn pct(v: Option<f64>) -> String {
     v.map_or("unavailable".to_string(), |v| format!("{v:.1}"))
 }
 
-/// The readiness gate: every failed condition with its measured value; empty means the machine is ready.
+/// How the gate treats the load of the machine (BUILD-030).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mode {
+    /// ADR 0020: a busy machine is refused.
+    Quiet,
+    /// ADR 0087: the load is recorded as a reading; the hard conditions still refuse.
+    Loaded,
+}
+
+/// The load the gate read in loaded mode: recorded with the session and in every row of its report (BUILD-032), never judged by the gate.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LoadRecord {
+    /// Mean competing CPU load over the sampling window (percent), `None` when it could not be read.
+    pub cpu_pct: Option<f64>,
+    pub gpu_util_pct: Option<f64>,
+    pub gpu_temp_c: Option<f64>,
+    /// Build and test processes beside the harness (`name (pid n)`), `None` when the process list could not be read.
+    pub processes: Option<Vec<String>>,
+}
+
+impl LoadRecord {
+    /// The record as one line for the console and the notes of a log.
+    pub fn text(&self) -> String {
+        let procs = match &self.processes {
+            Some(p) if p.is_empty() => "none".to_string(),
+            Some(p) => p.join(", "),
+            None => "unavailable".to_string(),
+        };
+        format!(
+            "CPU load {} %, GPU utilisation {} %, GPU temperature {} C, build and test processes: {procs}",
+            pct(self.cpu_pct),
+            pct(self.gpu_util_pct),
+            pct(self.gpu_temp_c)
+        )
+    }
+
+    /// The record as a JSON object.
+    pub fn json(&self) -> String {
+        let num = |v: Option<f64>| v.map_or("null".to_string(), |v| format!("{v:.1}"));
+        let procs = self
+            .processes
+            .as_ref()
+            .map_or("null".to_string(), |p| format!("[{}]", p.iter().map(|n| format!("{n:?}")).collect::<Vec<_>>().join(",")));
+        format!(
+            "{{\"cpu_pct\":{},\"gpu_util_pct\":{},\"gpu_temp_c\":{},\"processes\":{procs}}}",
+            num(self.cpu_pct),
+            num(self.gpu_util_pct),
+            num(self.gpu_temp_c)
+        )
+    }
+}
+
+/// What the gate found: the conditions that refuse, and in loaded mode the load it recorded.
+#[derive(Clone, Debug, Default)]
+pub struct Gate {
+    pub failures: Vec<GateFailure>,
+    pub load: Option<LoadRecord>,
+}
+
+/// The readiness gate of a quiet machine: every failed condition with its measured value; empty means the machine is ready.
 pub fn readiness(f: &MachineFacts) -> Vec<GateFailure> {
+    readiness_mode(f, Mode::Quiet).failures
+}
+
+/// The readiness gate in `mode`. The hard conditions (AC power, power scheme, reference adapter, GPU temperature) refuse in both modes. The load
+/// conditions (build and test processes, CPU load, GPU utilisation) refuse in quiet mode and are recorded in loaded mode.
+pub fn readiness_mode(f: &MachineFacts, mode: Mode) -> Gate {
     let mut out = Vec::new();
     let mut fail = |condition: &'static str, measured: String| out.push(GateFailure { condition, measured });
     match f.ac_power {
@@ -131,28 +196,42 @@ pub fn readiness(f: &MachineFacts) -> Vec<GateFailure> {
     if let Err(r) = check_reference_adapter(&f.adapter) {
         fail("reference adapter", r.to_string());
     }
-    match &f.processes {
-        Some(procs) => {
-            let bad = offending_processes(procs, f.own_pid);
-            if !bad.is_empty() {
-                fail("quiet machine: no build or test processes", bad.join(", "));
-            }
+    let processes = f.processes.as_ref().map(|procs| offending_processes(procs, f.own_pid));
+    let quiet = mode == Mode::Quiet;
+    if quiet {
+        match &processes {
+            Some(bad) if !bad.is_empty() => fail("quiet machine: no build or test processes", bad.join(", ")),
+            Some(_) => {}
+            None => fail("quiet machine: no build or test processes", "the process list could not be read".into()),
         }
-        None => fail("quiet machine: no build or test processes", "the process list could not be read".into()),
-    }
-    match f.cpu_load_pct {
-        Some(v) if v < MAX_CPU_LOAD_PCT => {}
-        v => fail("CPU load", format!("{} % competing load, mean over {LOAD_WINDOW_S} s (limit {MAX_CPU_LOAD_PCT} %)", pct(v))),
-    }
-    match f.gpu_util_pct {
-        Some(v) if v < MAX_GPU_UTIL_PCT => {}
-        v => fail("GPU utilisation", format!("{} % mean over {LOAD_WINDOW_S} s (limit {MAX_GPU_UTIL_PCT} %)", pct(v))),
+        match f.cpu_load_pct {
+            Some(v) if v < MAX_CPU_LOAD_PCT => {}
+            v => fail("CPU load", format!("{} % competing load, mean over {LOAD_WINDOW_S} s (limit {MAX_CPU_LOAD_PCT} %)", pct(v))),
+        }
+        match f.gpu_util_pct {
+            Some(v) if v < MAX_GPU_UTIL_PCT => {}
+            v => fail("GPU utilisation", format!("{} % mean over {LOAD_WINDOW_S} s (limit {MAX_GPU_UTIL_PCT} %)", pct(v))),
+        }
     }
     match f.gpu_temp_c {
         Some(v) if v < MAX_GPU_TEMP_C => {}
         v => fail("GPU temperature", format!("{} C (limit {MAX_GPU_TEMP_C} C)", pct(v))),
     }
-    out
+    let load =
+        (!quiet).then_some(LoadRecord { cpu_pct: f.cpu_load_pct, gpu_util_pct: f.gpu_util_pct, gpu_temp_c: f.gpu_temp_c, processes });
+    Gate { failures: out, load }
+}
+
+static RECORDED_LOAD: std::sync::Mutex<Option<LoadRecord>> = std::sync::Mutex::new(None);
+
+/// Keep the load the gate read for the session log (one harness run is one process): [`validity`] picks it up.
+pub fn record_load(load: Option<LoadRecord>) {
+    *RECORDED_LOAD.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = load;
+}
+
+/// The load of the loaded-mode gate of this run, `None` in quiet mode.
+pub fn recorded_load() -> Option<LoadRecord> {
+    RECORDED_LOAD.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
 }
 
 /// The software power cap bit of `clocks_throttle_reasons.active`: the laptop GPU's normal governor at full load. Recorded and
@@ -180,9 +259,11 @@ pub fn has_power_cap(reasons: &str) -> bool {
 }
 
 /// Outcome of the after-the-run validity rules.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct Validity {
     pub reasons: Vec<String>,
+    /// The load recorded by the loaded-mode gate; `Some` marks the session `loaded` (BUILD-030, BUILD-032).
+    pub load: Option<LoadRecord>,
 }
 
 impl Validity {
@@ -216,7 +297,7 @@ pub fn validity(throttled: &[String], noisy: &[(String, f64)]) -> Validity {
     for (name, n) in noisy {
         reasons.push(format!("{NOISE_REASON_PREFIX}{n:.3} on '{name}' is above {MAX_NOISE} and {NOISE_FLOOR_FRAME_MS} ms after one retry"));
     }
-    Validity { reasons }
+    Validity { reasons, load: recorded_load() }
 }
 
 /// The start of a throttling reason of [`validity`] (the logs carry these texts; the readers recognise them by it).
@@ -470,6 +551,54 @@ mod tests {
             assert!(is_throttling(bad), "{bad}");
         }
         assert!(is_throttling("[Not Supported]"));
+    }
+
+    fn loaded_machine() -> MachineFacts {
+        MachineFacts {
+            processes: Some(vec![
+                ProcInfo { pid: 10, ppid: 1, created: 10, name: "explorer.exe".into() },
+                ProcInfo { pid: 30, ppid: 1, created: 11, name: "cargo.exe".into() },
+            ]),
+            cpu_load_pct: Some(40.0),
+            gpu_util_pct: Some(50.0),
+            ..ready()
+        }
+    }
+
+    // spec: BUILD-030
+    #[test]
+    fn loaded_mode_records_the_load_that_quiet_mode_refuses_and_still_refuses_the_hard_conditions() {
+        let f = loaded_machine();
+        assert_eq!(only(&f), vec!["quiet machine: no build or test processes", "CPU load", "GPU utilisation"]);
+        let g = readiness_mode(&f, Mode::Loaded);
+        assert!(g.failures.is_empty(), "{:?}", g.failures);
+        let load = g.load.expect("the loaded gate records the load");
+        assert_eq!((load.cpu_pct, load.gpu_util_pct, load.gpu_temp_c), (Some(40.0), Some(50.0), Some(45.0)));
+        assert_eq!(load.processes, Some(vec!["cargo.exe (pid 30)".to_string()]));
+        assert!(readiness_mode(&ready(), Mode::Quiet).load.is_none(), "a quiet gate records nothing");
+        // Battery, a wrong scheme, the wrong adapter and a hot GPU refuse in loaded mode too, beside the recorded load.
+        let hard = MachineFacts {
+            ac_power: Some(false),
+            power_scheme: Some("Balanced".into()),
+            adapter: adapter(DeviceKind::Integrated),
+            gpu_temp_c: Some(MAX_GPU_TEMP_C),
+            ..loaded_machine()
+        };
+        let conditions: Vec<_> = readiness_mode(&hard, Mode::Loaded).failures.iter().map(|x| x.condition).collect();
+        assert_eq!(conditions, vec!["AC power connected", "performance power scheme", "reference adapter", "GPU temperature"]);
+        // A reading that could not be taken is recorded as unavailable, not a refusal.
+        let blind = MachineFacts { processes: None, cpu_load_pct: None, gpu_util_pct: None, ..ready() };
+        let g = readiness_mode(&blind, Mode::Loaded);
+        assert!(g.failures.is_empty());
+        assert!(g.load.unwrap().text().starts_with("CPU load unavailable %, GPU utilisation unavailable %"));
+    }
+
+    // spec: BUILD-030
+    #[test]
+    fn a_load_record_prints_and_serialises_with_its_readings() {
+        let l = LoadRecord { cpu_pct: Some(40.0), gpu_util_pct: None, gpu_temp_c: Some(45.0), processes: Some(vec![]) };
+        assert_eq!(l.text(), "CPU load 40.0 %, GPU utilisation unavailable %, GPU temperature 45.0 C, build and test processes: none");
+        assert_eq!(l.json(), "{\"cpu_pct\":40.0,\"gpu_util_pct\":null,\"gpu_temp_c\":45.0,\"processes\":[]}");
     }
 
     // spec: TEST-012

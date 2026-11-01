@@ -752,7 +752,7 @@ mod tests {
             source: (!f.omit_source).then(|| f.source.clone()),
             ..Protocol::default()
         };
-        let validity = gate::Validity { reasons: f.invalid.clone() };
+        let validity = gate::Validity { reasons: f.invalid.clone(), load: None };
         let json = report_json_with_warmups(&adapter, Some(f.scheme), &[], &validity, &protocol, &[run], &[]);
         // The logs of windows 7 and 8 carry the idle-start warning of a streaming scene that began at P8 (the harness no longer makes it:
         // `takes_gpu_rows`, TEST-037): the readers still judge such logs by their frame verdicts, so the fixture writes it in by hand.

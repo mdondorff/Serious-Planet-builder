@@ -10,6 +10,7 @@
 //! | run validity rule (thermal/hardware throttling, noise, not the production source) | yes | yes |
 //! | owner override of the readiness gate               | yes                  | yes                |
 //! | a scene's CPU calibration outside the limits (ADR 0065, TEST-039) | yes   | yes                |
+//! | loaded mode (`--loaded`, BUILD-030): the quiet verdicts do not count; the CPU calibration is recorded and does not void | yes | yes |
 //! | a run started with the GPU in P5 or lower (idle clock) | NO               | yes                |
 //! | a view's clock sample below the 1,400 MHz floor    | NO (per view)        | yes (that view)    |
 //! | software power cap 0x4                             | no (recorded only)   | no                 |
@@ -34,6 +35,8 @@ pub enum CauseKind {
     LowStartClock,
     /// The scene's CPU calibration lies outside the limits of [`calibration`] before or after the case (ADR 0065): no verdict.
     CpuCalibration,
+    /// The session ran in loaded mode (BUILD-030): its readings are recorded, and the quiet budget verdicts do not count; the loaded rules of BUILD-031 judge it.
+    Loaded,
 }
 
 impl CauseKind {
@@ -157,6 +160,17 @@ impl SessionVerdict {
         owner_override: &[String],
     ) -> SessionVerdict {
         let mut causes = session_causes(adapter, power_scheme, runs, smoke);
+        // Loaded mode (ADR 0087, BUILD-030): the calibration limits of ADR 0065 are recorded, not a cause; the quiet verdicts do not count.
+        if let Some(load) = &validity.load {
+            causes.retain(|c| c.kind != CauseKind::CpuCalibration);
+            causes.push(Cause {
+                kind: CauseKind::Loaded,
+                text: format!(
+                    "loaded mode ({}): the quiet budget verdicts do not count; judge it by the loaded rules (BUILD-031)",
+                    load.text()
+                ),
+            });
+        }
         causes.extend(validity.reasons.iter().map(|r| Cause { kind: CauseKind::Run, text: r.clone() }));
         if !owner_override.is_empty() {
             causes.push(Cause {
@@ -697,6 +711,34 @@ mod tests {
         assert!(v.frame_valid());
         let json = report_json(&rtx(), Some(GOOD), &[], &gate::Validity::default(), &proto, std::slice::from_ref(&r));
         assert!(json.contains("\"cpu_calibration_valid\":null,\"cpu_calibration_reasons\":[]"), "{json}");
+    }
+
+    // spec: BUILD-030, BUILD-032
+    #[test]
+    fn a_loaded_session_records_its_calibration_and_load_and_its_quiet_verdicts_do_not_count() {
+        let mut r = run("P0", 1500);
+        r.path_name = "stream-lit/dive".into();
+        r.counts = calib((46_984, 105_071), (59_335, 91_121));
+        let load = gate::LoadRecord {
+            cpu_pct: Some(41.5),
+            gpu_util_pct: Some(12.0),
+            gpu_temp_c: Some(55.0),
+            processes: Some(vec!["cargo.exe (pid 7)".into()]),
+        };
+        let loaded = gate::Validity { reasons: vec![], load: Some(load) };
+        let v = assess(std::slice::from_ref(&r), false, &loaded, &[]);
+        // The calibration over its limit is not a cause in loaded mode; the loaded mode is, and it carries the readings.
+        assert_eq!(v.causes.len(), 1);
+        assert_eq!(v.causes[0].kind, CauseKind::Loaded);
+        assert!(v.causes[0].text.contains("CPU load 41.5 %") && v.causes[0].text.contains("cargo.exe (pid 7)"), "{}", v.causes[0].text);
+        assert!(!v.frame_valid() && !v.gpu_session_valid());
+        // The log names the mode on the session and on every row, with the load record, and still records the calibration reading.
+        let json = report_json(&rtx(), Some(GOOD), &[], &loaded, &Protocol::default(), std::slice::from_ref(&r));
+        assert!(json.starts_with("{\"mode\":\"loaded\",\"load_record\":{\"cpu_pct\":41.5,"), "{json}");
+        assert!(json.contains("\"processes\":[\"cargo.exe (pid 7)\"]") && json.contains("\"runs\":[{\"mode\":\"loaded\","), "{json}");
+        assert!(json.contains("\"cpu_calibration_valid\":false"), "the reading stays recorded: {json}");
+        let quiet = report_json(&rtx(), Some(GOOD), &[], &gate::Validity::default(), &Protocol::default(), std::slice::from_ref(&r));
+        assert!(quiet.starts_with("{\"mode\":\"quiet\",\"adapter\"") && quiet.contains("\"runs\":[{\"mode\":\"quiet\","), "{quiet}");
     }
 
     /// A log with one run whose counts are `counts`, recorded flags and warnings as given.
