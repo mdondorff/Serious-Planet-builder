@@ -246,7 +246,8 @@ fn the_lit_water_and_atmosphere_frames_over_compact_blocks_are_the_recorded_pixe
     // byte-identical to the buffer blocks on WARP and on the RTX; re-recorded by the pixel-footprint fade of the waves, ADR 0056). A driver not in the table prints its hash and records nothing.
     const KNOWN: [(&str, u64); 2] = [
         ("Microsoft Basic Render Driver | Dx12 | Cpu | driver '10.0.26100.9711' ''", 0x089f_3f75_fa7c_fd77),
-        ("NVIDIA GeForce RTX 3080 Ti Laptop GPU | Vulkan | DiscreteGpu | driver 'NVIDIA' '591.86'", 0xa678_7a98_e2dc_b4a3),
+        // The RTX hash: recorded 2026-11-01 under MESH_VERSION 10 (`test gpu --real`); another adapter or driver skips with a printed hash.
+        ("NVIDIA GeForce RTX 3080 Ti Laptop GPU | Vulkan | DiscreteGpu | driver 'NVIDIA' '621.01'", 0x9599_4aed_a437_d5f8),
     ];
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let field = Reference(1);
