@@ -275,7 +275,8 @@ pub fn lint(specs: &BTreeMap<String, String>, sources: &BTreeMap<PathBuf, String
         let (parsed, e) = parse_requirements(name, text);
         errors.extend(e);
         for req in parsed {
-            // An ADDED requirement of a change must be new: an ID in a main spec (or another change) is a clash, which would silently replace it.
+            // An ADDED requirement of a change must be new: an ID in a main spec is a clash, which would silently replace it (two changes that add
+            // the same ID are caught by the duplicate-ID check below).
             if req.added && is_delta(name) {
                 if let Some(x) = reqs.iter().find(|x| x.id == req.id && !is_delta(&x.spec) && x.body.trim() != req.body.trim()) {
                     errors.push(format!("{}: ADDED in '{name}' but already a requirement of spec '{}' (take a free ID, or MODIFIED if it is meant to change it; an identical copy is accepted)", req.id, x.spec));
