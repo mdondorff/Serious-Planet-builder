@@ -18,7 +18,6 @@ Dormant (no near trigger; not asked now):
 |---|---|---|
 | NR | Real-GPU window checks NOT RUN on a locked desktop (TEST-073; owner, 2026-10-30) | crusader |
 | B4 | Automated owner checks (`openspec/changes/b4-owner-checks/`): B4-5 package command (TEST-074), B4-4 edit scenario, B4-6 delivery | explorer |
-| B2, B3 | One job system (PRs 1a, 2 merged; 3a plan worker; 3b `Par` in core after B6), then the reserve test (ADR 0083, BUDG-008 to 010) | explorer |
 | B5 | Test robustness: the rest after #912 (`test fast` budget mostly falls with B6) | crusader |
 | M9 spikes | SPIKE-66 relief factor in the generator (after SPIKE-61 to 65: bake 4.5-6 h, amplitude per landform is the relief lever, ground-detail stills sent to the owner) | spikes |
 | HK | M8 housekeeping, mechanical pass and evidence diet (declutter batches 3, 4, 7) | spikes |
@@ -26,6 +25,8 @@ Dormant (no near trigger; not asked now):
 After Option B: ADR 0085's build (after the scorecard; opus-planner, 2026-10-31), then M9 R3 to R6 (week plan section 4). B6 (chunk stage removed) and B8 (ground-detail stills) done 2026-10-31.
 
 ## Tracked
+- **Reserve test result** (BUDG-012, loaded, 3 rounds, 2026-11-01): dive, look-1m, look-2km, teleport-2km pass; teleport-1m fails by +1 % (frame median 16.75 against 16.60 ms; the spin runs 5-18 % over its 6-9 ms target). Frame p99 over 20 ms includes the spin by construction. A quiet window decides the absolute rows.
+- **Reserve test gaps** (2026-11-01): terrain GPU is sampled at the last pose only; the share ceilings of ADR 0083 are provisional, pending the owner. Scaling (P-cores, 3 rounds): tile-ready rises with every worker, throughput saturates at 8-10; proposal to restate BUDG-003 sent to the planner.
 - **Mode in the one-off logs** (perf-loaded-mode, 2026-11-01): `global-bake`, `coupled`, `envelope` and `edit` write their own logs without `mode` or `load_record`; the lit-pass and one-off rows carry no `loaded_verdicts`.
 - **`gpu_stream_perf` 300 s timeout on Windows WARP C 2/2** (2026-10-31): did not recur after the jobs.rs shutdown fix (#1001), cause not proven; the capture names the stage if it returns.
 - **Upload pacing after a teleport** (job-system PR 4, 2026-10-31): lit teleport-2km frame p99 4.5 -> 6.2 ms (+36 %, accepted) as tiles land 2.7x sooner and their uploads bunch; pace uploads in B3 or the upload work.
