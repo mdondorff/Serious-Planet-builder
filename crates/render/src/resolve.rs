@@ -97,6 +97,52 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 "#;
 
+const FILL_BODY: &str = r#"
+@group(0) @binding(1) var half_vis: texture_2d<f32>;
+@group(0) @binding(2) var half_steps: texture_2d<u32>;
+@group(0) @binding(3) var receivers: texture_2d<f32>;
+@group(0) @binding(4) var prev_filled: texture_2d<f32>;
+// The half-resolution visibility with the rays the checkerboard skipped taken from the previous frame's: -1 where there is none.
+@group(0) @binding(5) var out_filled: texture_storage_2d<r32float, write>;
+
+@compute @workgroup_size(8, 8, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if (gid.x >= r.dims.z || gid.y >= r.dims.w) {
+        return;
+    }
+    let hp = vec2<i32>(gid.xy);
+    let v = textureLoad(half_vis, hp, 0).x;
+    if (v >= 0.0) {
+        textureStore(out_filled, hp, vec4<f32>(v, 0.0, 0.0, 0.0));
+        return;
+    }
+    let hmax = vec2<i32>(i32(r.dims.z) - 1, i32(r.dims.w) - 1);
+    // A ray beside a march that crossed a changed clipmap cell has no valid history.
+    var changed = false;
+    for (var j = -1; j <= 1; j = j + 1) {
+        for (var i = -1; i <= 1; i = i + 1) {
+            if ((textureLoad(half_steps, clamp(hp + vec2<i32>(i, j), vec2<i32>(0, 0), hmax), 0).x >> 31u) != 0u) {
+                changed = true;
+            }
+        }
+    }
+    var out = -1.0;
+    let rc = textureLoad(receivers, hp, 0);
+    if (r.mode.z == 0u && !changed && rc.w < -0.5) {
+        let rel = rc.xyz - r.prev.pos.xyz;
+        let zc = dot(rel, r.prev.fwd.xyz);
+        if (zc > r.prev.k.z) {
+            let ndc = vec2<f32>(dot(rel, r.prev.right.xyz) / (zc * r.prev.k.x), dot(rel, r.prev.up.xyz) / (zc * r.prev.k.y));
+            let uv = vec2<f32>((ndc.x * 0.5 + 0.5) * f32(r.dims.x), (0.5 - ndc.y * 0.5) * f32(r.dims.y));
+            if (uv.x >= 0.0 && uv.y >= 0.0 && uv.x < f32(r.dims.x) && uv.y < f32(r.dims.y)) {
+                out = textureLoad(prev_filled, clamp(vec2<i32>(floor(uv * 0.5)), vec2<i32>(0, 0), hmax), 0).x;
+            }
+        }
+    }
+    textureStore(out_filled, hp, vec4<f32>(out, 0.0, 0.0, 0.0));
+}
+"#;
+
 const UPSAMPLE_BODY: &str = r#"
 @group(0) @binding(1) var depth: texture_depth_2d;
 @group(0) @binding(2) var half_vis: texture_2d<f32>;
@@ -113,7 +159,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let p = vec2<i32>(gid.xy);
     let d = textureLoad(depth, p, 0);
     if (d <= 0.0) {
-        textureStore(out_up, p, vec4<f32>(1.0, 0.0, 0.0, 0.0));
+        textureStore(out_up, p, vec4<f32>(-1.0, 0.0, 0.0, 0.0));
         return;
     }
     let zf = r.cur.k.z / d;
@@ -146,6 +192,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             }
             // A tap on another surface counts for little: the weight falls with the relative depth difference.
             let rel = abs(zh - zf) / (0.03 * zf + 0.5);
+            // A tap past a few times the depth tolerance is another surface altogether and counts for nothing.
+            if (rel > 3.0) {
+                continue;
+            }
             let w = bw / (1.0 + 16.0 * rel * rel);
             sum = sum + w;
             acc = acc + w * v;
@@ -205,12 +255,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let zc = dot(rel, r.prev.fwd.xyz);
     var reject = r.mode.z == 1u;
     var hist = 1.0;
-    if (zc <= r.prev.k.z) {
+    if (!(zc > r.prev.k.z)) {
         reject = true;
     } else {
         let ndc = vec2<f32>(dot(rel, r.prev.right.xyz) / (zc * r.prev.k.x), dot(rel, r.prev.up.xyz) / (zc * r.prev.k.y));
         let uv = vec2<f32>((ndc.x * 0.5 + 0.5) * f32(r.dims.x), (0.5 - ndc.y * 0.5) * f32(r.dims.y));
-        if (uv.x < 0.0 || uv.y < 0.0 || uv.x >= f32(r.dims.x) || uv.y >= f32(r.dims.y)) {
+        if (!(uv.x >= 0.0 && uv.y >= 0.0 && uv.x < f32(r.dims.x) && uv.y < f32(r.dims.y))) {
             reject = true;
         } else {
             let q = uv - vec2<f32>(0.5, 0.5);
@@ -229,11 +279,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if (here.y > 0.5) {
             reject = true;
         }
-        var w = r.blend.x;
+        // A rejected history is not read at all (it may hold anything).
         if (reject) {
-            w = 0.0;
+            result = here.x;
+        } else {
+            result = mix(here.x, clamp(hist, lo, hi), r.blend.x);
         }
-        result = mix(here.x, clamp(hist, lo, hi), w);
     } else {
         // A pixel the checkerboard skipped: history, unless the clipmap changed around it, then what the neighbours show.
         if (near_changed > 0.5) {
@@ -256,6 +307,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 /// The receivers shader (a function so the shader scan and the validation test can reach it).
 pub fn receivers_shader() -> String {
     format!("{COMMON}{RECEIVERS_BODY}")
+}
+
+/// The fill shader: skipped rays take the previous frame's half-resolution value.
+pub fn fill_shader() -> String {
+    format!("{COMMON}{FILL_BODY}")
 }
 
 /// The upsample shader.
@@ -454,7 +510,7 @@ pub struct GenerationMap {
 
 impl GenerationMap {
     pub fn new(ctx: &GpuContext, texels: u32, levels: usize) -> GenerationMap {
-        assert!(texels.is_power_of_two() && texels >= 64, "the generation cells need a clipmap of at least 64 texels");
+        assert!(texels.is_power_of_two() && texels >= 8, "the generation cells need a clipmap of at least 8 texels");
         let cells = texels >> GENERATION_CELL_SHIFT;
         let mips = cells.trailing_zeros() + 1;
         let texture = ctx.device.create_texture(&wgpu::TextureDescriptor {
@@ -520,7 +576,9 @@ impl GenerationMap {
         }
     }
 
-    /// Mark the cells a dirty rectangle (world texel indices of `level`) touches as changed in `frame` (counting from 1).
+    /// Mark the cells a dirty rectangle (world texel indices of `level`) touches as changed in `frame` (counting from 1). A march reads the
+    /// level whose window holds it, so a change must be marked in every level whose window it intersects. The mip chain is a maximum in slot
+    /// space: a coarse cell of a window not aligned to it may flag a walk near the opposite window edge too (extra rejection, never a miss).
     pub fn mark(&mut self, ctx: &GpuContext, frame: u32, level: usize, rect: &TexelRect) {
         assert!(level < self.levels && frame > 0);
         if rect.is_empty() {
@@ -557,6 +615,7 @@ struct Targets {
     half_depth: wgpu::Texture,
     half_vis: wgpu::Texture,
     half_steps: wgpu::Texture,
+    filled: [wgpu::Texture; 2],
     up: wgpu::Texture,
     shadow: [wgpu::Texture; 2],
 }
@@ -565,6 +624,8 @@ struct Targets {
 pub struct ShadowResolveGpu {
     receivers: wgpu::ComputePipeline,
     receivers_bgl: wgpu::BindGroupLayout,
+    fill: wgpu::ComputePipeline,
+    fill_bgl: wgpu::BindGroupLayout,
     upsample: wgpu::ComputePipeline,
     upsample_bgl: wgpu::BindGroupLayout,
     temporal: wgpu::ComputePipeline,
@@ -638,6 +699,18 @@ impl ShadowResolveGpu {
             receivers_shader(),
             &[uniform, depth(1), storage(2, wgpu::TextureFormat::Rgba32Float), storage(3, wgpu::TextureFormat::R32Float)],
         );
+        let (fill, fill_bgl) = pipeline(
+            "shadow-fill",
+            fill_shader(),
+            &[
+                uniform,
+                sampled(1, float),
+                sampled(2, wgpu::TextureSampleType::Uint),
+                sampled(3, float),
+                sampled(4, float),
+                storage(5, wgpu::TextureFormat::R32Float),
+            ],
+        );
         let (upsample, upsample_bgl) = pipeline(
             "shadow-upsample",
             upsample_shader(),
@@ -658,6 +731,8 @@ impl ShadowResolveGpu {
         ShadowResolveGpu {
             receivers,
             receivers_bgl,
+            fill,
+            fill_bgl,
             upsample,
             upsample_bgl,
             temporal,
@@ -700,6 +775,10 @@ impl ShadowResolveGpu {
             half_depth: make("shadow-half-depth", hw, hh, wgpu::TextureFormat::R32Float, rw),
             half_vis: make("shadow-half", hw, hh, wgpu::TextureFormat::R32Float, rw),
             half_steps: make("shadow-half-steps", hw, hh, wgpu::TextureFormat::R32Uint, rw),
+            filled: [
+                make("shadow-half-filled", hw, hh, wgpu::TextureFormat::R32Float, rw),
+                make("shadow-half-filled", hw, hh, wgpu::TextureFormat::R32Float, rw),
+            ],
             up: make("shadow-up", width, height, wgpu::TextureFormat::Rg32Float, rw),
             shadow: [shadow(), shadow()],
         });
@@ -720,6 +799,12 @@ impl ShadowResolveGpu {
         params: &ResolveParams,
     ) {
         assert!(params.frame > 0, "frames count from 1");
+        for cam in [&params.camera, &params.previous] {
+            assert!(
+                cam.near_m > 0.0 && cam.tan_half_fov[0] > 0.0 && cam.tan_half_fov[1] > 0.0,
+                "a camera needs a near plane and a field of view"
+            );
+        }
         self.ensure(ctx, depth.width, depth.height);
         let device = &ctx.device;
         let (width, height) = (depth.width, depth.height);
@@ -764,6 +849,7 @@ impl ShadowResolveGpu {
             depth.texture.create_view(&wgpu::TextureViewDescriptor { aspect: wgpu::TextureAspect::DepthOnly, ..Default::default() });
         let (receivers_view, half_depth_view, half_vis_view, half_steps_view, up_view) =
             (view(&t.receivers), view(&t.half_depth), view(&t.half_vis), view(&t.half_steps), view(&t.up));
+        let (filled_prev, filled_view) = (view(&t.filled[self.current]), view(&t.filled[1 - self.current]));
         let (history_view, out_view) = (view(&t.shadow[self.current]), view(&t.shadow[1 - self.current]));
         let entry = |binding, view| wgpu::BindGroupEntry { binding, resource: wgpu::BindingResource::TextureView(view) };
         let ubind = wgpu::BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() };
@@ -796,12 +882,30 @@ impl ShadowResolveGpu {
         );
         {
             let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("shadow-fill"),
+                layout: &self.fill_bgl,
+                entries: &[
+                    ubind.clone(),
+                    entry(1, &half_vis_view),
+                    entry(2, &half_steps_view),
+                    entry(3, &receivers_view),
+                    entry(4, &filled_prev),
+                    entry(5, &filled_view),
+                ],
+            });
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("shadow-fill"), timestamp_writes: None });
+            pass.set_pipeline(&self.fill);
+            pass.set_bind_group(0, &bind, &[]);
+            pass.dispatch_workgroups(hw.div_ceil(8), hh.div_ceil(8), 1);
+        }
+        {
+            let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("shadow-upsample"),
                 layout: &self.upsample_bgl,
                 entries: &[
                     ubind.clone(),
                     entry(1, &depth_view),
-                    entry(2, &half_vis_view),
+                    entry(2, &filled_view),
                     entry(3, &half_depth_view),
                     entry(4, &half_steps_view),
                     entry(5, &up_view),

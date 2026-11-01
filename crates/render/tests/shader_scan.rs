@@ -121,6 +121,7 @@ fn shipped_shaders_contain_no_planet_scale_values() {
     }
     for (name, src) in [
         ("shadow-receivers", planet_render::resolve::receivers_shader()),
+        ("shadow-fill", planet_render::resolve::fill_shader()),
         ("shadow-upsample", planet_render::resolve::upsample_shader()),
         ("shadow-temporal", planet_render::resolve::temporal_shader()),
     ] {
@@ -184,6 +185,7 @@ fn the_march_and_the_mip_shaders_contain_no_atomics() {
         ("coarse-cube", planet_render::shadow::cube_shader(16)),
         ("coarse-cube-mip", planet_render::shadow::cube_mip_shader()),
         ("shadow-receivers", planet_render::resolve::receivers_shader()),
+        ("shadow-fill", planet_render::resolve::fill_shader()),
         ("shadow-upsample", planet_render::resolve::upsample_shader()),
         ("shadow-temporal", planet_render::resolve::temporal_shader()),
     ] {

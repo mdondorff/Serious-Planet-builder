@@ -5,7 +5,8 @@
 use planet_frame::clipmap::TexelRect;
 use planet_render::march::{MarchParams, ShadowMarchGpu, PENUMBRA_SEARCH_M, SUN_DISC_TAN};
 use planet_render::resolve::{
-    receivers_shader, spread_for_sun, temporal_shader, upsample_shader, DepthTarget, ResolveCamera, ResolveParams, ShadowResolveGpu,
+    fill_shader, receivers_shader, spread_for_sun, temporal_shader, upsample_shader, DepthTarget, ResolveCamera, ResolveParams,
+    ShadowResolveGpu,
 };
 use planet_render::shadow::{ClipmapGpu, CoarseCubeGpu};
 use planet_render::{AdapterPolicy, GpuContext};
@@ -39,13 +40,18 @@ fn scene() -> Scene {
 
 /// A wall one level-0 texel wide at world x = `at` (a multiple of 8 m), 100 m high along all of y; no wall for `None`.
 fn set_wall(s: &Scene, at: Option<i32>) {
+    set_wall_of(s, at, 100.0);
+}
+
+/// As `set_wall`, `height_m` high.
+fn set_wall_of(s: &Scene, at: Option<i32>, height_m: f32) {
     for level in 0..LEVELS {
         let mut heights = vec![0f32; (TEXELS * TEXELS) as usize];
         if let Some(x) = at {
             let texel = (x as f32 / (FIRST_TEXEL_M * (1 << level) as f32)).floor() as i64;
             let slot = texel.rem_euclid(i64::from(TEXELS)) as usize;
             for j in 0..TEXELS as usize {
-                heights[j * TEXELS as usize + slot] = 100.0;
+                heights[j * TEXELS as usize + slot] = height_m;
             }
         }
         s.clip.upload_level(&s.ctx, level, &heights);
@@ -203,6 +209,7 @@ fn a_march_across_a_changed_cell_is_flagged_and_one_elsewhere_is_not() {
     let wall = |level: usize, x0: i64| (level, TexelRect { x0, y0: -128, x1: x0 + 1, y1: 128 });
     let all = (W / 2 * (H / 2)) as usize;
     // (the mark: level and rectangle, the frame it is marked in), the frame resolved, the flagged count.
+    #[allow(clippy::type_complexity)]
     let cases: [(&str, Option<((usize, TexelRect), u32)>, u32, usize); 7] = [
         ("nothing changed", None, 2, 0),
         ("behind the receivers, off every ray", Some(((0, TexelRect { x0: 100, y0: -128, x1: 104, y1: 128 }), 2)), 2, 0),
@@ -327,7 +334,51 @@ fn the_same_sequence_draws_the_same_bytes_and_the_passes_hold_no_atomics() {
         out
     };
     assert_eq!(run(), run());
-    for (name, src) in [("receivers", receivers_shader()), ("upsample", upsample_shader()), ("temporal", temporal_shader())] {
+    for (name, src) in
+        [("receivers", receivers_shader()), ("fill", fill_shader()), ("upsample", upsample_shader()), ("temporal", temporal_shader())]
+    {
         assert!(!src.contains("atomic"), "REND-053: {name} must not use atomics");
+    }
+}
+
+// spec: REND-050
+#[test]
+fn a_still_scene_with_a_shadow_edge_in_view_does_not_flicker_under_the_spread() {
+    let s = scene();
+    // A 5 m wall under a 2 degree sun: the shadow ends at 199 m, inside the frame (x from 100 to 300 m).
+    set_wall_of(&s, Some(48), 5.0);
+    let depth = depth_target(&s, &depths(None, 0));
+    let sun = 2.0f32;
+    let mut r = ShadowResolveGpu::new(&s.ctx, &s.clip);
+    let mut frames = Vec::new();
+    for frame in 1..=4u32 {
+        r.resolve(&s.ctx, &s.march, &s.clip, &s.cube, &march_params(sun), &depth, &frame_params(frame, false, 0.8, true));
+        frames.push(r.read_shadow(&s.ctx));
+    }
+    let lit = frames[0].iter().filter(|v| **v > 0.98).count();
+    let dark = frames[0].iter().filter(|v| **v < 0.02).count();
+    assert!(lit > 100 && dark > 100, "the frame holds both sides of the edge ({lit} lit, {dark} dark)");
+    for (f, frame) in frames.iter().enumerate().skip(1) {
+        for (i, (a, b)) in frames[0].iter().zip(frame).enumerate() {
+            assert!((a - b).abs() <= 1.0 / 255.0, "pixel {i}: {a} in the first frame, {b} in frame {}", f + 1);
+        }
+    }
+}
+
+// spec: REND-050
+#[test]
+fn the_sky_does_not_widen_the_history_clamp_below_the_horizon() {
+    let s = scene();
+    let depth = depth_target(&s, &depths(None, 4));
+    let mut r = ShadowResolveGpu::new(&s.ctx, &s.clip);
+    // The first frame is lit (history 1); the wall then rises without a cut or a mark, so the clamp alone has to refuse the lit history.
+    set_wall(&s, None);
+    r.resolve(&s.ctx, &s.march, &s.clip, &s.cube, &march_params(10.0), &depth, &frame_params(1, true, 0.8, false));
+    set_wall(&s, Some(-96));
+    r.resolve(&s.ctx, &s.march, &s.clip, &s.cube, &march_params(10.0), &depth, &frame_params(2, false, 0.8, false));
+    let shadow = r.read_shadow(&s.ctx);
+    for x in 0..W {
+        let v = shadow[(4 * W + x) as usize];
+        assert!(v < 0.02, "the row under the sky at column {x} must be dark, got {v}");
     }
 }
