@@ -1196,8 +1196,12 @@ A frame that takes at least one second SHALL be a stall: the report `stall (the 
 - **THEN** the first is a stall listing the phases longest first and the second is none, and a report is due at most once in ten seconds
 
 #### Scenario: A lock waited on
-- **WHEN** another thread holds a mutex for 40 ms while the main thread acquires it through the timed acquire, and an uncontended acquire is made too
-- **THEN** only the held lock is recorded, with its name and a wait of at least 20 ms, and the next frame starts with no waits
+- **WHEN** the timed acquires report waits of 40 ms, 2 ms and 1.999 ms under three names in a frame that is a stall
+- **THEN** the 40 ms and 2 ms waits are recorded with their names, longest first, the shorter one is not, and the next frame starts with no waits
+
+#### Scenario: A lock waited on, real threads
+- **WHEN** `cargo xtask perf wallclock` runs, another thread holds a mutex for 40 ms while the main thread acquires it through the timed acquire, and an uncontended acquire is made too
+- **THEN** only the held lock is recorded, with its name and a wait of at least 20 ms, and the next frame starts with no waits; a wall-clock check (BUILD-003), not tier A
 
 #### Scenario: Named workers
 - **WHEN** a scoped worker is started with `spawn_named`
