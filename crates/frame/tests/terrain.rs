@@ -399,15 +399,22 @@ fn a_terrain_bundle_records_its_commit_and_an_older_one_reads_without() {
         plan,
     };
     let text = bundle.to_text();
-    assert!(text.contains("
+    assert!(
+        text.contains(
+            "
 commit 0123456789abcdef0123456789abcdef01234567
-"), "{text}");
+"
+        ),
+        "{text}"
+    );
     assert_eq!(TerrainBundle::from_text(&text).unwrap().commit, bundle.commit);
     // A bundle written before the commit was recorded has no such line and reads as `None`.
     bundle.commit = None;
     let old = bundle.to_text();
-    assert!(!old.contains("
-commit "));
+    assert!(!old.contains(
+        "
+commit "
+    ));
     assert_eq!(TerrainBundle::from_text(&old).unwrap().commit, None);
 }
 

@@ -326,8 +326,10 @@ impl TerrainBundle {
         );
         s += &format!("definition_hash {:016x}\nadapter {}\n", self.definition_hash, self.adapter);
         if let Some(c) = &self.commit {
-            s += &format!("commit {c}
-");
+            s += &format!(
+                "commit {c}
+"
+            );
         }
         if let Some(w) = &self.world {
             s += &format!("height_field {}\nglobal_res {}\nworld_toml {}\n", w.height_field, w.global_res, escape_line(&w.definition_toml));

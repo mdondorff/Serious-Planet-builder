@@ -559,9 +559,14 @@ pub fn repro(root: &Path, args: &[String]) -> Res {
 
 /// The commit a bundle records (`commit <sha>` in its head), or a refusal that says what to do about a bundle without one (TEST-071).
 fn bundle_commit(text: &str, bundle: &str) -> Res<String> {
-    let head = text.split("
+    let head = text
+        .split(
+            "
 ---
-").next().unwrap_or("");
+",
+        )
+        .next()
+        .unwrap_or("");
     head.lines()
         .find_map(|l| l.strip_prefix("commit "))
         .map(|c| c.trim().to_string())
@@ -580,9 +585,8 @@ fn repro_worktree(root: &Path, commit: &str) -> Res<PathBuf> {
         return Ok(dir);
     }
     let path = dir.to_string_lossy().into_owned();
-    capture(root, "git", &["worktree", "add", "--detach", &path, commit]).map_err(|e| {
-        format!("cannot check out commit {commit} for the replay ({e}); is it fetched? `git fetch origin` and retry")
-    })?;
+    capture(root, "git", &["worktree", "add", "--detach", &path, commit])
+        .map_err(|e| format!("cannot check out commit {commit} for the replay ({e}); is it fetched? `git fetch origin` and retry"))?;
     Ok(dir)
 }
 
@@ -1885,10 +1889,14 @@ commit 0123abcdef
 ";
         let e = bundle_commit(old, "old.bundle").unwrap_err();
         assert!(e.contains("old.bundle records no commit") && e.contains("mesh_version") && e.contains("git log -S"), "{e}");
-        let bad = bundle_commit("planet-terrain-repro 2
+        let bad = bundle_commit(
+            "planet-terrain-repro 2
 commit zz
 ---
-", "b").unwrap_err();
+",
+            "b",
+        )
+        .unwrap_err();
         assert!(bad.contains("records no commit"), "{bad}");
     }
 
