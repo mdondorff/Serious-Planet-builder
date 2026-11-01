@@ -26,6 +26,7 @@ Dormant (no near trigger; not asked now):
 After Option B: ADR 0085's build (after the scorecard; opus-planner, 2026-10-31), then M9 R3 to R6 (week plan section 4). B6 (chunk stage removed) and B8 (ground-detail stills) done 2026-10-31.
 
 ## Tracked
+- **Mode in the one-off logs** (perf-loaded-mode, 2026-11-01): `global-bake`, `coupled`, `envelope` and `edit` write their own logs without `mode` or `load_record`; the lit-pass and one-off rows carry no `loaded_verdicts`.
 - **`gpu_stream_perf` 300 s timeout on Windows WARP C 2/2** (2026-10-31): did not recur after the jobs.rs shutdown fix (#1001), cause not proven; the capture names the stage if it returns.
 - **Upload pacing after a teleport** (job-system PR 4, 2026-10-31): lit teleport-2km frame p99 4.5 -> 6.2 ms (+36 %, accepted) as tiles land 2.7x sooner and their uploads bunch; pace uploads in B3 or the upload work.
 - **Pooled fan-out** (job-system PR 3b): helper threads taken from the job system's workers instead of scoped threads per call could save about 1.5 % of a cold plan job; needs lifetime erasure, own PR with a numerics-reviewer pass.
