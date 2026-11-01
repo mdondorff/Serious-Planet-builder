@@ -73,6 +73,8 @@ struct State {
     idle_dedicated: bool,
     /// Worker threads still running: a spawn after the last one is gone could never run.
     alive: usize,
+    /// SPIKE-90 dual pool: the idle-only workers are the background pool on the E-cores and take the prefetch class too.
+    dual: bool,
 }
 
 impl State {
@@ -83,8 +85,12 @@ impl State {
             let fits = self.closed
                 || match kind {
                     Kind::Frame => class == Class::FrameCritical,
-                    Kind::Idle => class == Class::Idle,
-                    Kind::Any => !(self.frame_dedicated && class == Class::FrameCritical) && !(self.idle_dedicated && class == Class::Idle),
+                    Kind::Idle => class == Class::Idle || (self.dual && class == Class::Prefetch),
+                    Kind::Any => {
+                        !(self.frame_dedicated && class == Class::FrameCritical)
+                            && !(self.idle_dedicated && class == Class::Idle)
+                            && !(self.dual && class == Class::Prefetch)
+                    }
                 };
             if !fits {
                 continue;
@@ -141,6 +147,20 @@ impl JobSystem {
         frame_priority: Priority,
         idle_workers: usize,
     ) -> Self {
+        // SPIKE-90: with PLANET_DUAL_POOL on a hybrid CPU the idle-only workers become the background pool, one per E-core thread unless
+        // PLANET_DUAL_POOL_BG names a count; on any other machine nothing changes.
+        let (p_cores, e_cores) = crate::cpusets::classes();
+        let dual = crate::cpusets::dual_pool_enabled() && !e_cores.is_empty();
+        let idle_workers = if dual {
+            let bg = std::env::var("PLANET_DUAL_POOL_BG").ok().and_then(|v| v.parse().ok()).unwrap_or(e_cores.len());
+            eprintln!(
+                "dual pool: critical {} + {frame_workers} frame workers on P {p_cores:?}, background {bg} workers on E {e_cores:?}",
+                workers.max(1)
+            );
+            idle_workers.max(bg)
+        } else {
+            idle_workers
+        };
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
                 queues: Default::default(),
@@ -149,6 +169,7 @@ impl JobSystem {
                 frame_dedicated: frame_workers > 0,
                 idle_dedicated: idle_workers > 0,
                 alive: workers.max(1) + frame_workers + idle_workers,
+                dual,
             }),
             wake: Condvar::new(),
             wake_idle: Condvar::new(),
@@ -176,6 +197,13 @@ impl JobSystem {
                         if priority != Priority::Normal {
                             priority::set_current(priority);
                         }
+                        if dual {
+                            crate::cpusets::pin_current(if kind == Kind::Idle {
+                                crate::cpusets::CoreClass::Efficiency
+                            } else {
+                                crate::cpusets::CoreClass::Performance
+                            });
+                        }
                         loop {
                             let queued = {
                                 let mut st = shared.state.lock().expect("job state");
@@ -197,7 +225,7 @@ impl JobSystem {
                                 let s = &mut st.shares[queued.share];
                                 s.running -= 1;
                                 s.idle_running -= usize::from(queued.class == Class::Idle);
-                                !st.queues[Class::Idle as usize].is_empty()
+                                !st.queues[Class::Idle as usize].is_empty() || (st.dual && !st.queues[Class::Prefetch as usize].is_empty())
                             };
                             // A job of this share that waited for the ceiling may start now.
                             shared.wake.notify_all();
@@ -209,7 +237,41 @@ impl JobSystem {
                     .expect("start a job worker")
             })
             .collect();
-        Self { shared, workers: Mutex::new(workers) }
+        let system = Self { shared, workers: Mutex::new(workers) };
+        // SPIKE-90 configuration (d): PLANET_DUAL_POOL_LOAD=N keeps N idle-class jobs spinning on the background pool for the system's life (a
+        // synthetic bake: integer hashing over a 4 MiB buffer per job, so it loads the caches and memory as a bake does).
+        if dual {
+            if let Some(n) = std::env::var("PLANET_DUAL_POOL_LOAD").ok().and_then(|v| v.parse::<usize>().ok()).filter(|n| *n > 0) {
+                eprintln!("dual pool: {n} synthetic background jobs");
+                let share = system.share_with_idle("spike90-load", n, n);
+                for k in 0..n {
+                    let shared = Arc::clone(&system.shared);
+                    share.spawn_class(
+                        Class::Idle,
+                        Box::new(move || {
+                            let mut buf = vec![0u64; 1 << 19];
+                            let mut x = 0x9E37_79B9_7F4A_7C15u64 ^ k as u64;
+                            let mut i = 0usize;
+                            loop {
+                                for _ in 0..4096 {
+                                    x ^= x << 13;
+                                    x ^= x >> 7;
+                                    x ^= x << 17;
+                                    let at = (x as usize) & (buf.len() - 1);
+                                    buf[at] = buf[at].wrapping_add(x);
+                                    i = i.wrapping_add(1);
+                                }
+                                if shared.state.lock().expect("job state").closed {
+                                    std::hint::black_box((&buf, i));
+                                    return;
+                                }
+                            }
+                        }),
+                    );
+                }
+            }
+        }
+        system
     }
 
     /// A share named `name` with at most `ceiling` jobs running at once (at least one).
@@ -282,7 +344,10 @@ impl Share {
             panic!("job spawned on share {name}: its job system was dropped, so no worker is left to run it (keep the JobSystem alive as long as its shares are used)");
         }
         st.queues[class as usize].push_back(Queued { share: self.index, class, job });
-        let (dedicated, idle_only) = (st.frame_dedicated || st.idle_dedicated, st.idle_dedicated && class == Class::Idle && !st.closed);
+        let (dedicated, idle_only) = (
+            st.frame_dedicated || st.idle_dedicated,
+            st.idle_dedicated && (class == Class::Idle || (st.dual && class == Class::Prefetch)) && !st.closed,
+        );
         if st.closed {
             self.shared.wake_idle.notify_all();
         }

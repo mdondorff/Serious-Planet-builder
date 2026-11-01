@@ -18,6 +18,7 @@
 //! the pool before they get here.
 
 pub mod budget;
+pub mod cpusets;
 pub mod horizonjobs;
 pub mod jobs;
 mod layer;
