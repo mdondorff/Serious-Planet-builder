@@ -159,6 +159,8 @@ pub struct PanelData<'a> {
     pub view_status: &'a str,
     /// The rows of the Keys tab (VIEW-057): the keys the window accepts now, by group, with their state.
     pub keys: &'a [planet_frame::keytable::KeyRow],
+    /// The item store's count and load time against the revisit trigger of ADR 0066 point 6 (AUTH-006); `None` where there is no editor.
+    pub store: Option<&'a planet_editor::store_watch::StoreWatch>,
 }
 
 fn kind_color(kind: &str) -> egui::Color32 {
@@ -662,6 +664,11 @@ fn inspector(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Vec
     });
 }
 
+/// The diagnostics line of the item store (AUTH-006): the largest body's item count and the last load time with their limits, empty without one.
+pub fn store_line(d: &PanelData) -> String {
+    d.store.map_or(String::new(), |w| w.summary())
+}
+
 /// The right-hand text of the status bar: the count of edits, the undo depth, where the edits are saved and the window's own status.
 pub fn counts_line(d: &PanelData) -> String {
     format!("{} edits · undo {} · {} · {}", d.edit_count, d.undo_depth, d.saved, d.view_status)
@@ -688,6 +695,11 @@ fn status_bar(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Ve
         ui.label(if d.status.is_empty() { "Ready" } else { d.status });
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.weak(counts_line(d));
+            let store = store_line(d);
+            if !store.is_empty() {
+                ui.separator();
+                ui.weak(store);
+            }
         });
     });
 }
@@ -979,7 +991,24 @@ mod tests {
             saved: "not saved",
             view_status: "",
             keys: &[],
+            store: None,
         }
+    }
+
+    // spec: AUTH-006
+    #[test]
+    fn the_status_bar_has_a_store_line_with_both_values_only_when_the_editor_has_a_store() {
+        let f = fixture();
+        let h = held(&f, Layout::default());
+        assert_eq!(store_line(&data(&h)), "", "no editor, no line");
+        let mut w = planet_editor::store_watch::StoreWatch::default();
+        w.record_load(planet_world_def::BodyId(0), 20_001, std::time::Duration::from_millis(2_100));
+        let d = PanelData { store: Some(&w), ..data(&h) };
+        let line = store_line(&d);
+        assert!(
+            line.contains("20001 items (limit 20000)") && line.contains("last load 2100 ms (limit 2000 ms)") && line.contains("REVISIT"),
+            "{line}"
+        );
     }
 
     // spec: VIEW-021
