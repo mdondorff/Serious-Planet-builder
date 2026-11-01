@@ -50,11 +50,11 @@ Source: ADR 0085 point 4, SPIKE-56 finding 4 and P3
 - **THEN** the cube texel over it reads the peak's height, and a ray beyond the clipmap grazing that height is shadowed
 
 ### Requirement: REND-049 The shadow march
-A compute pass SHALL compute, at half resolution, for every pixel with a depth, a sun visibility in [0, 1] by marching from the receiver toward the sun over the clipmap and the coarse cube: a texel walk (DDA) with max-mip skipping, on the finest level whose window holds the point with a margin of two texels, positions camera-relative f32 in the anchor frame; the march is at most 1,000 km long (the straight ray in the anchor frame is first-order accurate beyond that no longer). A sun below the receiver's geometric horizon SHALL give 0 without a march. The visibility SHALL take a penumbra from the smallest `(ray height - terrain height) / distance` along the march, mapped across the sun's disc (0.267 degrees radius), searched to 2 km. The sphere's drop SHALL arrive as one precomputed f32 coefficient `1 / (2 R)` applied to anchor-relative distances, and the WGSL SHALL hold no planet-radius value (CON-11). A receiver SHALL not shadow itself: the ground box is lowered by half a texel over the first four texels. A coarse cell that reaches past its level's window SHALL be walked in its parts. Beyond the outermost level the march SHALL continue in the cube with strides of 3 % of the distance (at least the outermost texel), sampled at mips whose dilated texels span the stride, and at mip 0 in quarters within one texel of a face edge. Beyond the 2 km search only the sign of the clearance counts. A march that reaches its step limit (2,048 clipmap steps, 256 cube strides) keeps the penumbra found so far (a known light leak at relief beyond the budget; the step count is reported). A pixel without a receiver and a sun straight overhead give 1.
+A compute pass SHALL compute, at half resolution, for every pixel with a depth, a sun visibility in [0, 1] by marching from the receiver toward the sun over the clipmap and the coarse cube: a texel walk (DDA) with max-mip skipping, on the finest level whose window holds the point with a margin of two texels, positions camera-relative f32 in the anchor frame; the march is at most 1,000 km long: there an f32 anchor-frame position has a step of 0.0625 m, the drop term `c rho^2` (78 km) is exact to 4 mm, and the straight ray is first-order accurate (a slope error of about 0.08 at 500 km under a 45 degree sun, which grows beyond). A sun below the receiver's geometric horizon SHALL give 0 without a march. The visibility SHALL take a penumbra from the smallest `(ray height - terrain height) / distance` along the march, mapped across the sun's disc (0.267 degrees radius), searched to 2 km. The sphere's drop SHALL arrive as one precomputed f32 coefficient `1 / (2 R)` applied to anchor-relative distances, and the WGSL SHALL hold no planet-radius value (CON-11). A receiver SHALL not shadow itself: the ground box is lowered by half a texel over the first four texels. A coarse cell that reaches past its level's window SHALL be walked in its parts. Beyond the outermost level the march SHALL continue in the cube with strides of 3 % of the distance (at least the outermost texel), sampled at mips whose dilated texels span the stride, and at mip 0 in quarters within one texel of a face edge. Beyond the 2 km search only the sign of the clearance counts. A march that reaches its step limit (2,048 clipmap steps, 256 cube strides) keeps the penumbra found so far (a known light leak at relief beyond the budget; the step count is reported). A pixel without a receiver and a sun straight overhead give 1.
 
 Verify: A, C
 Status: planned
-Source: ADR 0085 points 1, 3 and 5, SPIKE-56 findings 1 and 3 and P1, CON-11
+Source: ADR 0085 points 1, 3 and 5, SPIKE-56 findings 1 and 3 and P1, CON-11, ADR 0090 (the drop coefficient `1 / (2 R)` as an f32 uniform for the horizon test and beyond the clipmap)
 
 #### Scenario: A wall
 - **WHEN** a synthetic clipmap holds a 100 m wall and the sun stands 10 degrees above it
@@ -122,7 +122,7 @@ The clipmap gather, the coarse cube, the march, the upsample and the temporal pa
 
 Verify: A, C
 Status: planned
-Source: ADR 0085 point 9, CON-14, ADR 0061
+Source: ADR 0085 point 9, CON-14, ADR 0061, ADR 0090 (the gather's integer `atomicMax` owner pass)
 
 #### Scenario: Twice
 - **WHEN** the same three-frame sequence is drawn twice on the software adapter
