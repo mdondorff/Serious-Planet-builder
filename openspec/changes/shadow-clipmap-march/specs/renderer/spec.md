@@ -106,7 +106,7 @@ Source: ADR 0085 Consequences, ADR 0083, BUDG-002, SPIKE-56 P1, ADR 0087
 - **THEN** the first fails and the second passes; a pass within 5 % of the budget measured under load is not a verdict (ADR 0087)
 
 ### Requirement: REND-053 The shadow is the same on every run of an adapter
-The clipmap gather, the coarse cube, the march, the upsample and the temporal pass SHALL use no atomics and no order-dependent reduction, so that one adapter draws the same shadow bytes on every run of the same frame sequence; goldens are kept per adapter (ADR 0061).
+The clipmap gather, the coarse cube, the march, the upsample and the temporal pass SHALL use no order-dependent reduction, so that one adapter draws the same shadow bytes on every run of the same frame sequence; the march, the upsample and the temporal pass SHALL use no atomics, and the gather's only atomic is the `atomicMax` of the owner pass (REND-047), whose result does not depend on the order of the dispatches; goldens are kept per adapter (ADR 0061).
 
 Verify: A, C
 Status: planned
@@ -114,7 +114,7 @@ Source: ADR 0085 point 9, CON-14, ADR 0061
 
 #### Scenario: Twice
 - **WHEN** the same three-frame sequence is drawn twice on the software adapter
-- **THEN** the shadow targets of both runs are byte-identical, and the shadow WGSL contains no atomic operation
+- **THEN** the shadow targets of both runs are byte-identical, and the march, upsample and temporal WGSL contain no atomic operation
 
 ## MODIFIED Requirements
 
