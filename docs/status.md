@@ -4,8 +4,8 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 
 ## Waiting for the owner
 - **For M9 planning** (after the away week): owner test 2026-10-27 groups E (edits on top as default, erosion keeping mass), F and G scope, the 1 m / 500 m exception (`docs/milestones/M8/owner-test-2026-10-27/README.md`); where edits sit relative to M9's erosion (D3, owner 2026-10-26: under the erosion by default).
-- **M9 decisions** (`docs/briefings/m9-decisions.md`): ADR 0088 (the bake), ADR 0089 (relief classes, option C), the ADR verdict table, the store re-bake.
-- **ADR 0083 shares** (`compute-budgets`, BUDG-001 to BUDG-007): initial values ratified provisionally by opus-planner (2026-10-30); the owner may override.
+- **M9 decisions** (`docs/briefings/m9-decisions.md`): ADR 0088 (the bake), ADR 0089 (relief classes, option C), the ADR verdict table, the store re-bake; ADR 0090 (proposed, amends ADR 0085 points 3 and 9: the gather's order-independent atomicMax, the drop coefficient 1/(2R)).
+- **ADR 0083 shares** (`compute-budgets`, BUDG-001 to BUDG-007): initial values ratified provisionally by opus-planner (2026-10-30). Terrain cap (BUDG-003) 12 → 10 proposed (2026-11-01, asked by push): unpinned 10 workers match 12 on throughput, tile-ready -26 % on dive, dive p99 +0.6 ms; 8 workers leave teleport-1m at 83 % of its tiles.
 - **Optional, when convenient:** the M6 retest list (`docs/archive/M6/briefings/m6-owner-test-plan.md`, "Retest"); a live check of the flickers (Tracked); excluding the repo's `target` folders from Windows Search indexing.
 
 Dormant (no near trigger; not asked now):
@@ -19,16 +19,16 @@ Dormant (no near trigger; not asked now):
 |---|---|---|
 | NR | Real-GPU window checks NOT RUN on a locked desktop (TEST-073; owner, 2026-10-30) | crusader |
 | B4 | Automated owner checks (`openspec/changes/b4-owner-checks/`): B4-5 package command (TEST-074), B4-4 edit scenario, B4-6 delivery | explorer |
-| Shadows | ADR 0085 clipmap march: PR 1 #985, 2a #1014 merged; 2b coarse cube #1017; PRs 3 to 9 follow (7, 8 remove GEN-086, STRM-061) | crusader |
-| B5 | SPIKE-84 fix list: fixes 1 and 3 merged (#1021, nextest limits); fix 2 shared `concurrent_source` fixture, 4 wall-clock asserts out of tier A, 5 bundle commit and `repro --at-commit`, 6 software real-store `editor --smoke`; plus the nextest config-test assertions (Tracked) | spikes, crusader |
+| Shadows | ADR 0085 clipmap march (ADR 0090 proposed): PRs 1, 1b, 2a, 2b, 3 merged (#985, #1000, #1014, #1017, #1024); next PR 4 `shadow-resolve` (needs a perf window at the 2° pose), then 5 to 9 (7, 8 remove GEN-086, STRM-061). Crusader waits for the owner's clear (handover: inbox #23) | crusader |
+| B5 | SPIKE-84 fix list: 1 and 3 (#1021), config-test assertions (#1025), 2 shared on-disk `concurrent_source` store (#1027) merged; 4 wall-clock asserts out of tier A (spikes); 5 bundle commit and `repro --at-commit`, 6 software real-store `editor --smoke` (explorer) | spikes, explorer |
 | M9 | ADR 0088/0089 proposed (#1013); planned spec deltas GEN-093 to 102, STRM-065 to 068, TEST-081 to 084 in `m9-bake` (#1018, #1019); unmeasured values marked start values for R7. Waits for the owner | owner |
 
 After Option B: M9 R3 to R6 (week plan section 4). B6 (chunk stage removed) and B8 (ground-detail stills) done 2026-10-31.
 
 ## Tracked
 - **Reserve test result** (BUDG-012, loaded, 3 rounds, 2026-11-01): dive, look-1m, look-2km, teleport-2km pass; teleport-1m fails by +1 % (frame median 16.75 against 16.60 ms; the spin runs 5-18 % over its 6-9 ms target). Frame p99 over 20 ms includes the spin by construction. A quiet window decides the absolute rows.
+- **teleport-1m reserve marginal** (quiet window, 2026-11-01): reserve verdict pass in 3 of 3; frame medians with loads 14.33/16.31/16.40 ms against 16.60, but 5 of 6 sessions had no frame verdict (ADR 0065 CPU calibration out of limits). Re-check on a calm CPU, after the terrain cap decision.
 - **Reserve test gaps** (2026-11-01): terrain GPU is sampled at the last pose only; the share ceilings of ADR 0083 are provisional, pending the owner. Scaling (P-cores, 3 rounds): tile-ready rises with every worker, throughput saturates at 8-10; proposal to restate BUDG-003 sent to the planner.
-- **nextest config test** (#1021, 2026-11-01): the xtask test that parses `.config/nextest.toml` needs assertions for the gpu-tier cap 8, the two 450 s overrides before the gpu_ one and the named heavy-window tests; its "default profile has no test group" assertion guards nothing since 10-29. Owner lane: crusader or spikes (B5).
 - **Mode in the one-off logs** (perf-loaded-mode, 2026-11-01): `global-bake`, `coupled`, `envelope` and `edit` write their own logs without `mode` or `load_record`; the lit-pass and one-off rows carry no `loaded_verdicts`.
 - **`gpu_stream_perf` 300 s timeout on Windows WARP C 2/2** (2026-10-31): did not recur after the jobs.rs shutdown fix (#1001), cause not proven; the capture names the stage if it returns.
 - **Upload pacing after a teleport** (job-system PR 4, 2026-10-31): lit teleport-2km frame p99 4.5 -> 6.2 ms (+36 %, accepted) as tiles land 2.7x sooner and their uploads bunch; pace uploads in B3 or the upload work.
