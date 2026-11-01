@@ -13,42 +13,44 @@ Source: ADR 0089 decisions 1, 2 and 10, ADR 0088/0089 accepted 2026-11-01; ADR 0
 
 ### Requirement: GEN-094 The plate mask and the uplift fields
 The default class source SHALL compute, as pure functions of the seed and the direction:
-- **Plates:** 14 centres and Euler-pole rotation vectors (rates 0.3 to 1.0, dimensionless) from the seed's hash; the direction warped by 0.35 times a two-octave fBm of frequency 1.3.
-- **Margin distance** `d`: half the angular difference between the warped direction's nearest and second-nearest centre, times the body's radius.
-- **Convergence:** the difference of the two plates' velocities (rotation vector cross direction) against the unit margin normal (from the nearest towards the second-nearest centre, in the tangent plane), positive where the nearest plate moves towards the other.
-- **Core:** the larger of `smoothstep(0.05, 0.35, convergence) exp(-(d / w)^2)` and a coastal arc `a exp(-(d_c / (0.8 w))^2)`. Here `w = 90 (0.6 + 0.9 n)` km with `n` a two-octave fBm of frequency 2.5 in `[0, 1]`, `d_c` the distance to the line at land depth 0.10, and `a = smoothstep(0.40, 0.52)` of a two-octave fBm of frequency 0.9.
-- **Flank:** the same two terms at three times their half-widths. **Old margin:** `(1 - smoothstep(-0.05, 0.15, convergence)) exp(-(d / 150 km)^2)`.
-- **Back-arc:** `smoothstep(0.7, 0.95, convergence) (1 - smoothstep(450, 700 km, d)) smoothstep(0.1, 0.5, inland)` on the plate with the larger land share of the two, else 0.
+- **Plates:** 14 centres and Euler-pole rotation vectors (rates 0.3 to 1.0, dimensionless) from the seed's hash; the direction warped by 0.35 times a two-octave fBm of frequency 1.3. A plate's **land share** is the fraction of its area that is land, from 2048 points of a Fibonacci sphere assigned by the warped direction's nearest centre.
+- **Pairs:** the pairs (nearest, second), (nearest, third) and (second, third) of the three nearest centres of the warped direction, with angles `a1` to `a4` for the four nearest. Every term below is the largest over the pairs, each pair's term weighted by 1 for (nearest, second), by `smoothstep(0, 0.05 rad, a4 - a3)` for the pairs with the third plate, and for (second, third) also by `1 - smoothstep(0, 0.03 rad, a2 - a1)`. Each pair's term is symmetric in its two plates, so the mask is continuous where the nearest plate changes.
+- **Margin distance** `d` of a pair: half the angular difference of its two centres' angles, times the body's radius. The preview uses 6,371 km; the bake SHALL read the body's radius from the definition (CON-11).
+- **Convergence** of a pair: the difference of the two plates' velocities (rotation vector cross direction) against the unit margin normal (from the first towards the second centre, in the tangent plane), positive where they move towards each other.
+- **Distances to the coast and to the coastal line:** `|land depth - 0.10| / |gradient|` for the line at land depth 0.10 (`d_c`) and `land depth / |gradient|` for the coast, the gradient of the land depth by a central difference of 0.004 rad (a first-order estimate, valid near the line; infinite where the gradient is under 1e-9).
+- **Core:** the larger of a belt `smoothstep(0.05, 0.35, convergence) max(0, 1 - d / W)` and a coastal belt `a o near smoothstep(0.05, 0.35, convergence) max(0, 1 - d_c / (0.8 W))`, times the strike factor. Here `W = 220 + 280 n` km with `n` a two-octave fBm of frequency 2.5 in `[0, 1]`; `a = smoothstep(0.38, 0.56)` of a two-octave fBm of frequency 0.9 in `[0, 1]`; `o = c_x (1 - c_y) + c_y (1 - c_x)` is 1 where one plate of the pair is oceanic and the other not, with `c = smoothstep(0.15, 0.40, land share)`; `near = 1 - smoothstep(250, 500 km, d)`. The coastal belt thus lies only where a convergent margin with an oceanic side is within a few hundred km. The strike factor is `smoothstep(0.25, 0.55, s) (0.55 + 0.45 h)`, with `s` a two-octave fBm of frequency 2.2 in `[0, 1]` (gaps between segments where it is low) and `h` one of frequency 5.0 (the height along the strike).
+- **Flank:** the same terms at three times `W`. **Old margin:** `(1 - smoothstep(-0.05, 0.15, convergence)) max(0, 1 - d / 300 km)`.
+- **Back-arc:** for the pairs with the nearest plate: `smoothstep(0.7, 0.95, convergence) (1 - smoothstep(450, 700 km, d)) smoothstep(0, 150 km, d) smoothstep(0, 150 km, d1) smoothstep(0.1, 0.5, inland) smoothstep(-0.08, 0.08, share_nearest - share_other)`, `d1` the distance to the nearest margin: it is 0 at a margin and prefers the plate with the larger land share smoothly.
 - **Plateau field:** `smoothstep(0.50, 0.62, c) smoothstep(0.2, 0.6, inland) (1 - smoothstep(0.2, 0.6, max(flank, back-arc)))`, `c` a three-octave fBm of frequency 1.6.
-Core, flank and old margin SHALL be multiplied by `smoothstep(0, 0.04, land depth)`, where land depth is the continentalness minus the sea level and `inland` is the bake's `smoothstep(0.02, 0.35, land depth)` (`global.rs` `terrain`). The mask SHALL replace the range zone as the mountain strength. The numbers here are start values (SPIKE-79, SPIKE-80); R7 tunes them. The planet-wide check of the belts is TEST-082.
+Core, flank and old margin SHALL be multiplied by the coast gate `smoothstep(0, 250 km, distance to the coast)` (0 at and under the coast; no belt stops at the coast in a step), where land depth is the continentalness minus the sea level and `inland` is the bake's `smoothstep(0.02, 0.35, land depth)` (`global.rs` `terrain`). The mask SHALL replace the range zone as the mountain strength. No gate of the mask SHALL switch over less than 100 km. The numbers here are start values (SPIKE-79, SPIKE-80, round 1 of the preview iteration); R7 tunes them. The planet-wide check of the belts is TEST-082.
 
 Verify: A
 Status: planned
-Source: ADR 0089 decision 3, ADR 0088/0089 accepted 2026-11-01; SPIKE-79 (14 plates, warp 0.35), SPIKE-80 (width variety, flanks, back-arc)
+Source: ADR 0089 decision 3, ADR 0088/0089 accepted 2026-11-01; SPIKE-79 (14 plates, warp 0.35), SPIKE-80 (width variety, flanks, back-arc), SPIKE-91 (belt width, segments, rings); planner critique of the preview's iteration 0 (2026-11-01, inbox #39); numerics review of the preview (the jumps at plate bisectors)
 
 #### Scenario: Pure and continuous
-- **WHEN** the mask is evaluated on 1 and 8 threads, and at two points 1e-12 either side of a cube edge
-- **THEN** both runs give identical bits, and the two points differ by under 1e-9 in every term
+- **WHEN** the mask is evaluated on 1 and 8 threads, at points 1e-12 either side of cube edges and corners, and at points 1e-9 rad either side of a plate bisector
+- **THEN** both runs give identical bits, the points either side of a cube edge differ by under 1e-9 in every term, and those either side of a bisector by under 1e-6 in core, flank, old margin, back-arc, plateau field and `e0` in km
 
 ### Requirement: GEN-095 The default classes follow rules over the mask
-The default class weights SHALL be memberships blended by smoothsteps, then normalised by GEN-093. Here `e0` is the base elevation of GEN-096 without the hill band (GEN-098), which breaks the loop between the classes and the band:
-- mountains `mt = smoothstep(0.25, 0.55, core)`, of which high mountains `mt smoothstep(2000, 3000 m, e0)` and mountains the rest;
+The default class weights SHALL be memberships blended by smoothsteps, then normalised by GEN-093. Here `e_class` is the base elevation of GEN-096 without the hill band (GEN-098), which breaks the loop between the classes and the band, and with the ridge factor `0.5 + 0.5 r` replaced by 0.75, so that the weights do not follow the ridge noise's fine structure (GEN-097's limit on the step of `k`):
+- mountains `mt = core`, of which high mountains `mt smoothstep(1500, 3500 m, e_class)` and mountains the rest;
 - hills `(1 - mt) smoothstep(0.2, 0.45, max(flank, old margin))`;
-- plateau `(1 - mt)(1 - hills) smoothstep(0.3, 0.6, max(plateau field, back-arc))`;
-- the rest rolling plain by `smoothstep(0.45, 0.6)` of a three-octave fBm of frequency 3.0, else plain.
+- plateau `(1 - mt - hills) smoothstep(0.3, 0.6, max(plateau field, back-arc))`, so that the memberships partition 1 before the normalisation;
+- the rest `1 - mt - hills - plateau`, rolling plain by `smoothstep(0.45, 0.6)` of a three-octave fBm of frequency 3.0, else plain.
 Badlands and sand sea SHALL have weight 0 in the default source; class paint (ADR 0089 decision 8) or a derived source sets them. The thresholds are start values (SPIKE-80); R7 tunes them. The planet-wide check of the class shares is TEST-082.
 
 Verify: A
 Status: planned
-Source: ADR 0089 decision 3, ADR 0088/0089 accepted 2026-11-01; SPIKE-77, SPIKE-80
+Source: ADR 0089 decision 3, ADR 0088/0089 accepted 2026-11-01; SPIKE-77, SPIKE-80; planner (2026-11-01): the plateau as the difference
 
 #### Scenario: Memberships
-- **WHEN** a lattice point has core 1, `e0` 3500 m, and another has core 0, flank 0, old margin 0 and plateau field 1
+- **WHEN** a lattice point has core 1, `e_class` 3500 m, and another has core 0, flank 0, old margin 0 and plateau field 1
 - **THEN** the first holds weight 255 in high mountains and the second 255 in plateau
 
 ### Requirement: GEN-096 The base elevation takes the belts and the plateaus
 `global::sample`'s land elevation SHALL be the coast ramp (up to 1000 m, unchanged) plus:
-- the belt term `5500 core (0.5 + 0.5 r)` m, with `r` the bake's squared ridge term (`global.rs` `ridge_at`);
+- the belt term `7000 core (0.5 + 0.5 r)` m, with `r` the bake's squared ridge term (`global.rs` `ridge_at`);
 - the back-arc uplift `2000 back-arc` m;
 - the old-margin and flank uplift `200 max(old margin, 0.5 flank)` m;
 - the plateau uplift `1200 plateau field` m;

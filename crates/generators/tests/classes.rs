@@ -108,6 +108,7 @@ fn a_core_over_high_ground_is_high_mountains_and_a_plateau_field_is_plateau() {
         old_margin: 0.0,
         back_arc: 0.0,
         plateau_field: 0.0,
+        strike: 1.0,
         plate: 0,
     };
     let core = MaskTerms { core: 1.0, ..none };
@@ -177,4 +178,80 @@ fn the_preview_images_are_the_same_bytes_for_the_same_seed_on_any_thread_count()
     }
     let other = render(&compute(2, 128, 64, 8, 1));
     assert!(a.iter().zip(&other).any(|((_, x), (_, y))| x != y), "two seeds draw the same images");
+}
+
+// spec: GEN-103
+#[test]
+fn the_mask_is_continuous_where_the_nearest_plate_changes() {
+    let source = ClassSource::new(SEED);
+    // Walk great-circle arcs, find where the nearest plate changes by bisection, and compare the two sides 1e-9 rad apart.
+    let mut checked = 0;
+    for k in 0..400u32 {
+        let (a, b) = (
+            Vec3::new(f64::from(k % 7) - 3.1, f64::from(k % 11) - 5.2, f64::from(k % 5) - 2.3).normalized(),
+            Vec3::new(f64::from((k * 3) % 13) - 6.1, f64::from((k * 5) % 7) - 3.3, f64::from((k * 7) % 9) - 4.4).normalized(),
+        );
+        let at = |t: f64| (a * (1.0 - t) + b * t).normalized();
+        let plate = |t: f64| {
+            let p = source.eval(at(t));
+            (p.terms.plate, p)
+        };
+        let n = 200;
+        for s in 0..n {
+            let (t0, t1) = (f64::from(s) / f64::from(n), f64::from(s + 1) / f64::from(n));
+            let (p0, p1) = (plate(t0).0, plate(t1).0);
+            if p0 == p1 {
+                continue;
+            }
+            let (mut lo, mut hi) = (t0, t1);
+            for _ in 0..60 {
+                let mid = 0.5 * (lo + hi);
+                if plate(mid).0 == p0 {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            let (x, y) = (plate(lo).1, plate(hi).1);
+            for (name, u, v) in [
+                ("core", x.terms.core, y.terms.core),
+                ("flank", x.terms.flank, y.terms.flank),
+                ("old margin", x.terms.old_margin, y.terms.old_margin),
+                ("back-arc", x.terms.back_arc, y.terms.back_arc),
+                ("plateau", x.terms.plateau_field, y.terms.plateau_field),
+                ("e0", x.e0 / 1000.0, y.e0 / 1000.0),
+            ] {
+                assert!((u - v).abs() < 1e-6, "{name} jumps where the nearest plate changes (arc {k}, t {lo}): {u} against {v}");
+            }
+            checked += 1;
+        }
+    }
+    assert!(checked >= 20, "only {checked} plate changes were found on the arcs");
+}
+
+// spec: GEN-103
+#[test]
+fn the_shape_metrics_find_a_ring_a_long_band_and_two_land_masses_on_a_synthetic_grid() {
+    use planet_generators::shape::{shape_metrics, Grid};
+    let (w, h) = (360usize, 180usize);
+    let mut land = vec![false; w * h];
+    let mut high = vec![false; w * h];
+    // Two land blocks (lon 40..100 and 200..260, lat rows 50..130) and a ring of high ground round a hole in the first.
+    for y in 50..130 {
+        for x in (40..100).chain(200..260) {
+            land[y * w + x] = true;
+        }
+    }
+    for y in 60..120 {
+        for x in 50..90 {
+            let edge = y < 64 || y >= 116 || x < 54 || x >= 86;
+            high[y * w + x] = edge;
+        }
+    }
+    let m = shape_metrics(&Grid { width: w, height: h, land: &land, high: &high });
+    assert_eq!(m.land_masses.len(), 2, "{:?}", m.land_masses);
+    assert!((m.largest_share - 0.5).abs() < 0.05, "{}", m.largest_share);
+    assert!(m.enclosed_mkm2 > 0.0, "the ring encloses land the high ground does not cover: {}", m.enclosed_mkm2);
+    assert!(!m.longest_spans_km.is_empty() && m.longest_spans_km[0] > 2000.0);
+    assert!(m.width_median_km > 0.0 && m.width_p10_km <= m.width_median_km);
 }

@@ -22,6 +22,13 @@ fn the_preview_of_seed_1_reports_the_class_shares_beside_the_bands() {
         ("land above 4 km", "band 1-3 %"),
         ("highest land", "band 7-9 km"),
         ("largest step", "limit 2.0"),
+        ("S1 ", "Earth 5"),
+        ("S2 ", "Earth about 57 %"),
+        ("S3 ", "Earth 1.1-1.3"),
+        ("S4 ", "target median about 310 km"),
+        ("S5 ", "target the longest at most 7500 km"),
+        ("S6 ", "Earth about 0-1"),
+        ("S7 ", "Earth about 7 %"),
     ] {
         let line = text.lines().find(|l| l.contains(needle)).unwrap_or_else(|| panic!("the report names '{needle}'"));
         assert!(line.contains(band), "'{needle}' carries its band '{band}': {line}");

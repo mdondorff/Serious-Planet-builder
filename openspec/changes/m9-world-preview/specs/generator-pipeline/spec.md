@@ -6,7 +6,7 @@
 - land and sea; the elevation with hillshade; today's elevation with hillshade; both side by side;
 - the plate mask with the plate margins; the plateau field and the back-arc;
 - the relief class by largest weight and by the blended weights; `k`.
-Every image SHALL carry the seed, `GLOBAL_VERSION`, `MESH_VERSION`, the class list and class source versions, the preview version, and a legend; the command SHALL also write a report of the class shares, the share of land above 2 and 4 km, the highest land and the largest step of `k` between lattice points.
+Every image SHALL carry the seed, `GLOBAL_VERSION`, `MESH_VERSION`, the class list and class source versions, the preview version, and a legend; the command SHALL also write a report of the class shares, the share of land above 2 and 4 km, the highest land, the largest step of `k` between lattice points and the share of steps over 2.0, and the shape metrics S1 to S7 of SPIKE-91 beside their Earth references (computed on the preview grid; S8 is not measured).
 
 Verify: A
 Status: planned
