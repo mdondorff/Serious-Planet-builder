@@ -1102,7 +1102,16 @@ impl App<'_> {
                     stamps: draw.preview.clone(),
                 });
                 let sun = planet_core::Vec3::new(f64::from(lit.sun_dir[0]), f64::from(lit.sun_dir[1]), f64::from(lit.sun_dir[2]));
-                if let Some(f) = shadow.frame(landed, &plan.camera, sun, cfg.radius_m, &draw.preview, draw.preview_delta_len, &plan.nodes) {
+                if let Some(f) = shadow.frame(
+                    landed,
+                    &plan.camera,
+                    sun,
+                    cfg.radius_m,
+                    self.lod.max_height_m,
+                    &draw.preview,
+                    draw.preview_delta_len,
+                    &plan.nodes,
+                ) {
                     st.rig.renderer.set_shadow_frame(f);
                 }
             }

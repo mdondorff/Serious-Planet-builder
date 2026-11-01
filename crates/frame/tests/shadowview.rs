@@ -99,3 +99,24 @@ fn the_basis_is_the_cameras_own_also_when_it_looks_along_its_up() {
         }
     }
 }
+
+// spec: REND-050
+#[test]
+fn the_ceiling_follows_the_field_and_adds_the_previews_bounds() {
+    use planet_frame::preview::PreviewStamp;
+    use planet_frame::shadowview::ceiling_m;
+    assert_eq!(ceiling_m(9_000.0, &[]), 9_000.0);
+    let stamp = |max_delta_m: f64| PreviewStamp {
+        dir: Vec3::new(0.0, 0.0, 1.0),
+        reach_m: 5_000.0,
+        amount_m: max_delta_m,
+        kind: planet_world_def::stamp::StampKind::Hill,
+        sign: 1,
+        max_delta_m,
+    };
+    assert_eq!(
+        ceiling_m(9_000.0, &[stamp(1_500.0), stamp(200.0), stamp(-300.0)]),
+        11_000.0,
+        "every stamp adds its bound, whichever its sign"
+    );
+}

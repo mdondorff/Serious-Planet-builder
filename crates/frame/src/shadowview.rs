@@ -60,3 +60,11 @@ impl ShadowView {
         }
     }
 }
+
+/// The highest terrain of a frame above the sphere, metres: the field's maximum (`max_height_m`, which follows the stamps of the
+/// definition) plus the most the frame's transient preview can add on top: per stamp the larger of its bound `max_delta_m` and its
+/// amount, whichever sign (a conservative sum: the march ends a ray above this, so it must never be below what the clipmap holds, and the
+/// gather adds the preview bump before any republish).
+pub fn ceiling_m(max_height_m: f64, stamps: &[crate::preview::PreviewStamp]) -> f64 {
+    max_height_m + stamps.iter().map(|s| s.max_delta_m.abs().max(s.amount_m.abs())).sum::<f64>()
+}

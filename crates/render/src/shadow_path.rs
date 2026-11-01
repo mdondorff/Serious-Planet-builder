@@ -46,6 +46,9 @@ pub struct ShadowFrame {
     pub floor_tiles: Vec<TileId>,
     /// A camera cut or teleport: history is void and every ray is marched.
     pub cut: bool,
+    /// The highest terrain above the sphere this frame, metres, preview lifts included (`planet_frame::shadowview::ceiling_m`): a ray above
+    /// it ends its march. Infinity: unknown, no early exit.
+    pub ceiling_m: f64,
 }
 
 /// The GPU side of the shadow pass.
@@ -132,6 +135,7 @@ impl ShadowPath {
             east: f.view.east,
             north: f.view.north,
             cube_texel_m: self.cube_texel_m,
+            ceiling_m: f.ceiling_m as f32,
             dirty_since: 0,
         };
         let params = ResolveParams {
