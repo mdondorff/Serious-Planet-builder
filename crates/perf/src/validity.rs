@@ -721,6 +721,7 @@ mod tests {
         r.counts = calib((46_984, 105_071), (59_335, 91_121));
         let load = gate::LoadRecord {
             cpu_pct: Some(41.5),
+            cpu_perf_pct: Some(88.0),
             gpu_util_pct: Some(12.0),
             gpu_temp_c: Some(55.0),
             processes: Some(vec!["cargo.exe (pid 7)".into()]),
@@ -734,10 +735,16 @@ mod tests {
         assert!(!v.frame_valid() && !v.gpu_session_valid());
         // The log names the mode on the session and on every row, with the load record, and still records the calibration reading.
         let json = report_json(&rtx(), Some(GOOD), &[], &loaded, &Protocol::default(), std::slice::from_ref(&r));
-        assert!(json.starts_with("{\"mode\":\"loaded\",\"load_record\":{\"cpu_pct\":41.5,"), "{json}");
+        assert!(json.starts_with("{\"mode\":\"loaded\",\"load_record\":{\"cpu_pct\":41.5,\"cpu_perf_pct\":88.0,"), "{json}");
         assert!(json.contains("\"processes\":[\"cargo.exe (pid 7)\"]") && json.contains("\"runs\":[{\"mode\":\"loaded\","), "{json}");
         assert!(json.contains("\"cpu_calibration_valid\":false"), "the reading stays recorded: {json}");
+        assert!(
+            json.contains("\"loaded_verdicts\":[{\"metric\":\"frame median ms\""),
+            "a streaming row carries its loaded verdicts: {json}"
+        );
+        assert!(json.contains("\"verdict\":\"needs a quiet window\""), "{json}");
         let quiet = report_json(&rtx(), Some(GOOD), &[], &gate::Validity::default(), &Protocol::default(), std::slice::from_ref(&r));
+        assert!(!quiet.contains("loaded_verdicts"), "a quiet row has none: {quiet}");
         assert!(quiet.starts_with("{\"mode\":\"quiet\",\"adapter\"") && quiet.contains("\"runs\":[{\"mode\":\"quiet\","), "{quiet}");
     }
 
