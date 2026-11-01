@@ -4,7 +4,7 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 
 ## Waiting for the owner
 - **For M9 planning** (after the away week): owner test 2026-10-27 groups E (edits on top as default, erosion keeping mass), F and G scope, the 1 m / 500 m exception (`docs/milestones/M8/owner-test-2026-10-27/README.md`); where edits sit relative to M9's erosion (D3, owner 2026-10-26: under the erosion by default).
-- **M9 decisions** (`docs/briefings/m9-decisions.md`): ADR 0089, ADR 0091 (45° ceiling) and ADR 0088 accepted 2026-11-01. Owner: the SPIKE-80 world map "looks generally wrong" (thin continuous belts, unchanged continents); first M9 step is the engine's whole-planet preview and iterative generator quality with preview images, before any planet bake. Open: the ADR verdict table and its status lines; ADR 0090; the 2° shadow cost (ADR 0085 options).
+- **M9 decisions** (`docs/briefings/m9-decisions.md`): ADR 0089, ADR 0091 (45° ceiling) and ADR 0088 accepted 2026-11-01. Owner: the SPIKE-80 world map "looks generally wrong" (thin continuous belts, unchanged continents); first M9 step is the engine's whole-planet preview and iterative generator quality with preview images, before any planet bake. Open: the ADR verdict table and its status lines; the 2° shadow cost (ADR 0085 options).
 - **ADR 0083 shares** (`compute-budgets`, BUDG-001 to BUDG-007): initial values ratified provisionally by opus-planner (2026-10-30). Terrain cap (BUDG-003) 12 → 10 proposed (2026-11-01, asked by push): unpinned 10 workers match 12 on throughput, tile-ready -26 % on dive, dive p99 +0.6 ms; 8 workers leave teleport-1m at 83 % of its tiles.
 - **Optional, when convenient:** the M6 retest list (`docs/archive/M6/briefings/m6-owner-test-plan.md`, "Retest"); a live check of the flickers (Tracked); excluding the repo's `target` folders from Windows Search indexing. One editor session at the marker "TheEdgeHill" on the RTX (SPIKE-87 measured 0.17 ms editor cost on WARP; the 10-21 report predates the off-main block decodes).
 
@@ -19,7 +19,7 @@ Dormant (no near trigger; not asked now):
 |---|---|---|
 | NR | Real-GPU window checks NOT RUN on a locked desktop (TEST-073; owner, 2026-10-30) | crusader |
 | B4 | Automated owner checks (`openspec/changes/b4-owner-checks/`): B4-5 package command (TEST-074), B4-4 edit scenario, B4-6 delivery | explorer |
-| Shadows | ADR 0085 clipmap march (ADR 0090 proposed): PRs 1 to 4 merged (#985, #1000, #1014, #1017, #1024, #1041); next 5a render path (flag, off by default), 5a2 app wiring and J view, 5b apply (every lit golden to the owner's /bless), then the perf window at the 2° pose; PRs 6 to 9 (7, 8 remove GEN-086, STRM-061) | crusader |
+| Shadows | ADR 0085 clipmap march (ADR 0090 accepted): PRs 1 to 4 merged (#985, #1000, #1014, #1017, #1024, #1041); next 5a render path (flag, off by default), 5a2 app wiring and J view, 5b apply (every lit golden to the owner's /bless), then the perf window at the 2° pose; PRs 6 to 9 (7, 8 remove GEN-086, STRM-061) | crusader |
 | B5 | Done: SPIKE-84 fixes 1 to 6 and the follow-ups (#1021, #1025, #1027, #1029 to #1032, #1034, #1035, #1037). Further Tracked fixes: camera ground read off the main thread (SPIKE-88, spikes) | spikes |
 | M9 | ADR 0088/0089 proposed (#1013); planned spec deltas GEN-093 to 102, STRM-065 to 068, TEST-081 to 084 in `m9-bake` (#1018, #1019); unmeasured values marked start values for R7. Waits for the owner | owner |
 
