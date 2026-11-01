@@ -22,9 +22,108 @@ fn reaches(a: &Affected, cap: Cap, radius_m: f64) -> bool {
     EditReach { dir: a.dir, reach_m: a.reach_m, strokes: a.brush.as_ref().map(|b| b.strokes()) }.touches_cap(cap, radius_m)
 }
 
-/// The `resident` tiles of `body` whose area plus [`REFRESH_HALO`] a reach in `affected` can touch, without repeats, in tile order.
+/// The `resident` tiles of `body` an edit re-keys, without repeats, in tile order: those whose area plus [`REFRESH_HALO`] a reach in `affected`
+/// can touch, and the coarse tiles whose region summary (WDEF-008) holds the anchor of an item in `affected`. A coarse tile's key reads the
+/// summary nodes of its cells and `margin_rings` rings of cells around them (the whole body when the rings overflow), so an edit anchored
+/// there re-keys it whether or not its reach touches the tile. Every coarse tile is taken to read its summary (see [`edited_tiles_reading`]).
 pub fn edited_tiles(affected: &[Affected], body: BodyId, resident: &[TileId], radius_m: f64, map: &dyn FaceMapping) -> Vec<TileId> {
-    edited_with_halo(affected, body, resident, REFRESH_HALO, radius_m, map)
+    edited_tiles_reading(affected, body, resident, radius_m, map, &|_| true)
+}
+
+/// [`edited_tiles`] where `reads_summary(tile)` says whether a coarse tile reads its region summary at all (a tile no item touches keeps
+/// the base's key, so only a tile with an item in its footprint is re-keyed through the summary): the exact set, for the editor, which
+/// knows its definition.
+pub fn edited_tiles_reading(
+    affected: &[Affected],
+    body: BodyId,
+    resident: &[TileId],
+    radius_m: f64,
+    map: &dyn FaceMapping,
+    reads_summary: &dyn Fn(TileId) -> bool,
+) -> Vec<TileId> {
+    let mut out = edited_with_halo(affected, body, resident, REFRESH_HALO, radius_m, map);
+    out.extend(summary_re_keyed(affected, body, resident, radius_m, reads_summary));
+    out.sort_by_key(|t| t.raw());
+    out.dedup();
+    out
+}
+
+/// The coarse `resident` tiles that read their region summary and whose cover holds the anchor cell of an item in `affected` (WDEF-008).
+/// The cover is the tile's cells and the cells within `margin_rings` steps of them by [`TileId::neighbors8`] at the cell level (the walk
+/// of `cells::with_margin`), or the whole body when the rings overflow. One walk from each anchor cell out to [`SUMMARY_MAX_RING`] steps
+/// gives the fewest steps to each coarse tile; a tile holds the anchor when that is at most its rings. No cover is built (VIEW-061: the
+/// find runs on the frame thread).
+fn summary_re_keyed(
+    affected: &[Affected],
+    body: BodyId,
+    resident: &[TileId],
+    radius_m: f64,
+    reads_summary: &dyn Fn(TileId) -> bool,
+) -> Vec<TileId> {
+    use planet_world_def::cells;
+    use planet_world_def::summary::{is_coarse, margin_rings};
+    use std::collections::HashMap;
+    let level = cells::cell_level(radius_m);
+    // The coarse tiles that read their summary, with their rings (`None`: the whole body).
+    let coarse: Vec<(TileId, Option<u32>)> = resident
+        .iter()
+        .copied()
+        .filter(|t| is_coarse(*t, level) && reads_summary(*t))
+        .map(|t| (t, margin_rings(t, REFRESH_HALO, radius_m, level)))
+        .collect();
+    // The anchor cell as the world files the item (the normalised direction, bit for bit).
+    let mut anchors: Vec<TileId> =
+        affected.iter().filter(|a| a.body == body).map(|a| cells::cell_of(radius_m, a.dir.normalized())).collect();
+    anchors.sort_by_key(|c| c.raw());
+    anchors.dedup();
+    if coarse.is_empty() || anchors.is_empty() {
+        return Vec::new();
+    }
+    let reach = coarse.iter().filter_map(|(_, r)| *r).max().unwrap_or(0);
+    let top = coarse.iter().map(|(t, _)| t.level()).max().expect("not empty");
+    let bottom = coarse.iter().map(|(t, _)| t.level()).min().expect("not empty");
+    // One walk from every anchor cell at once (only the fewest steps to a tile counts), out to the most rings any tile needs; each cell
+    // climbs its ancestors once, from the finest coarse level up.
+    let mut steps: HashMap<u64, u32> = HashMap::new();
+    let mut note = |cell: TileId, d: u32| {
+        let mut t = cell;
+        while t.level() > top {
+            t = t.parent().expect("above level 0");
+        }
+        loop {
+            let e = steps.entry(t.raw()).or_insert(d);
+            *e = (*e).min(d);
+            if t.level() <= bottom {
+                break;
+            }
+            t = t.parent().expect("above level 0");
+        }
+    };
+    let mut seen: HashSet<u64> = anchors.iter().map(|c| c.raw()).collect();
+    for c in &anchors {
+        note(*c, 0);
+    }
+    let mut frontier = anchors;
+    for d in 1..=reach {
+        let mut next = Vec::new();
+        for c in &frontier {
+            for n in c.neighbors8() {
+                if seen.insert(n.raw()) {
+                    note(n, d);
+                    next.push(n);
+                }
+            }
+        }
+        frontier = next;
+    }
+    coarse
+        .into_iter()
+        .filter(|(t, rings)| match rings {
+            None => true,
+            Some(r) => steps.get(&t.raw()).is_some_and(|d| d <= r),
+        })
+        .map(|(t, _)| t)
+        .collect()
 }
 
 /// The `chunks` (tiles of the chunk grid) of `body` whose square plus a halo of `halo_m` metres a reach in `affected` can touch, without

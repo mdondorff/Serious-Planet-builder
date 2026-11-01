@@ -803,6 +803,10 @@ Source: SPIKE-13 variant D, ADR 0066, ADR 0021 point 2, M6 plan row E1, window 1
 - **WHEN** a refresh is queued for a resident tile of a residency set made from a selection (closed under its ancestors) and the wants then change so that the tile is in no class before the request starts
 - **THEN** no job starts, the request is dropped and counted as cancelled, the tile stays resident with its old payload, and when it is wanted again the new version replaces it
 
+#### Scenario: Every re-keyed tile is in the edit's set
+- **WHEN** a hill is added inside a face, near a face edge, near a cube corner and with a 40 km reach, and the mesh keys of every tile of levels 0 to 5 and of the tiles round the edit down to level 12 are taken before and after
+- **THEN** every tile whose key changed is in the edit's set (`planet_editor::feed::edited_tiles`), including the coarse tiles whose region summary covers the whole body (WDEF-008, levels 0 to 2 at Earth's radius), which every edit re-keys
+
 ### Requirement: STRM-028 The terrain reads the current definition
 A world's terrain SHALL hold its definition as a replaceable shared value and SHALL build every field from a snapshot of it taken when the field is built; a field built before a replacement SHALL keep the definition it was built from (a plan or tile job in flight finishes on the definition it started with, and its keys name it through the item revision and the footprint entries). A replacement SHALL be refused, naming both hashes, when the new definition's base hash differs from the current one's, because the bake the fields read was made from the base. The field of a definition that holds stamps SHALL be the base field with one stamp stage (GEN-026) per layer that holds a stamp, lowest layer first (the layer stack of ADR 0007, then other layer names by name), each at its place in the stack (layers outside it follow the stack's seven, in name order), below the water bound; the field of a definition without stamps SHALL be what it was. The plan worker's residency set SHALL be selected again when the definition's revision changes, whatever the camera did. A caller that edits items SHALL replace the definition first and then name the edited tiles to the managed loop.
 
@@ -950,6 +954,21 @@ Source: owner (2026-10-21, P1-4), STRM-016, VIEW-014; added by turn-cover (#522)
 #### Scenario: A turn
 - **WHEN** the camera turns away from the view of the plan in hand over a residency set that is complete, and again over one with tiles missing
 - **THEN** the first frame draws the cover with every tile exact; the second draws exact the tiles at the plan's level and stand-in exactly the tiles that stand in for a missing one
+
+### Requirement: STRM-070 The refresh set holds the coarse tiles re-keyed through their region summary
+The tiles an item edit names for refresh (STRM-026, `planet_editor::feed::edited_tiles_reading`) SHALL include every resident coarse tile (WDEF-008) that reads its region summary and whose summary cover holds the anchor cell of an edited item, in its state before or after the edit, whether or not the item's reach touches the tile. A tile reads its summary when it is a root or an item of a stamp layer touches it with the stage's halo. The cover SHALL be tested without building it: the fewest `neighbors8` steps from the anchor cell to the tile's cells, at most its margin rings (any anchor for a whole-body cover). The find SHALL use the stamp stage's halo.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-11-01, inbox #62, option 2), WDEF-007, WDEF-008, ADR 0045 point 7, ADR 0066, VIEW-061, edit-stale-diagnostics
+
+#### Scenario: An edit in a coarse tile's summary margin
+- **WHEN** a hill is the only item in a level-5 tile and a 3 km-reach hill is added 250 km outside that tile's edge, and the mesh keys of the coarse tiles round it are taken before and after
+- **THEN** every tile whose key changed (tiles of levels 3, 4 and 5) is in the edit's set, and the set holds no coarse tile whose key did not change
+
+#### Scenario: The find's halo is the stage's
+- **WHEN** the find's halo and the stamp stage's halo are compared
+- **THEN** their bits are equal, so the covers the find walks are the ones the keys read
 
 ### Requirement: STRM-034 The plan cache keeps what an edit cannot reach
 `SelectionCache::note_item_change(from, to, changes)` SHALL announce that the field's item revision went from `from` to `to` and where the items that differ were and are (`ItemChange`). The next plan SHALL keep, as checked at the new revision, the footprint hashes of tiles whose reads the changes cannot reach (the tile's cap with its halo, or the cover of a coarse tile, widened by the change's reach; never a tile that reads the whole body) and the certificates and cap bounds beyond eight radii of a change; the others SHALL be checked again. A revision that is not announced, or whose chain of announcements is broken, SHALL start the checks from all tiles. Plans SHALL equal a fresh cache's, node for node.
