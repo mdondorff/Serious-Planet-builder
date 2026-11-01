@@ -1789,7 +1789,7 @@ mod tests {
         let region = CaseRow { kind: CaseKind::Region, altitude_m: 200.0, radius_m: 5000.0, runs: vec![run] };
         let quiet = planet_perf::gate::Validity::default();
         assert_eq!(planet_perf::mode_lines(&quiet), "mode: quiet\n");
-        assert_eq!(loaded_section(&[stamp.clone()], &quiet), "", "a quiet report has no loaded section");
+        assert_eq!(loaded_section(std::slice::from_ref(&stamp), &quiet), "", "a quiet report has no loaded section");
         let load = planet_perf::gate::LoadRecord {
             cpu_pct: Some(30.0),
             cpu_perf_pct: Some(90.0),
