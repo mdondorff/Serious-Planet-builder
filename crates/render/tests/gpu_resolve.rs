@@ -526,7 +526,11 @@ fn march_cost_probe_over_eleven_levels() {
     clip.rebuild_all_mips(&ctx);
     let cube = CoarseCubeGpu::new(&ctx, CUBE, CELLS);
     let march = ShadowMarchGpu::new(&ctx);
-    let (w, h) = (2560u32, 1440u32);
+    // PLANET_PROBE_SIZE=1280x720 runs the march over a quarter of the rays (the quarter-resolution option).
+    let (w, h) = std::env::var("PLANET_PROBE_SIZE")
+        .ok()
+        .and_then(|v| v.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))))
+        .unwrap_or((2560u32, 1440u32));
     let height = 20_000.0f64;
     let cam = ResolveCamera {
         position: [0.0, 0.0, height as f32],
@@ -553,6 +557,11 @@ fn march_cost_probe_over_eleven_levels() {
             mp.levels = (0..LV).map(|k| ([-512, -512, 512, 512], (1u64 << k) as f32)).collect();
             mp.max_distance_m = 1_000_000.0;
             mp.ceiling_m = ceiling;
+            // By-hand variants of the 2 degree question: PLANET_PROBE_PENUMBRA (metres) and PLANET_PROBE_SPREAD=0 (no checkerboard).
+            if let Some(v) = std::env::var("PLANET_PROBE_PENUMBRA").ok().and_then(|v| v.parse().ok()) {
+                mp.penumbra_search_m = v;
+            }
+            let spread_off = std::env::var("PLANET_PROBE_SPREAD").is_ok_and(|v| v == "0");
             let mut r = ShadowResolveGpu::new(&ctx, &clip);
             let timed = r.enable_timing(&ctx);
             let (mut passes, mut steps): (Vec<[f64; 5]>, Vec<u32>) = (Vec::new(), Vec::new());
@@ -563,7 +572,7 @@ fn march_cost_probe_over_eleven_levels() {
                     history_weight: 0.8,
                     cut: frame == 1,
                     frame,
-                    spread: spread_for_sun(libm::sinf(sun.to_radians())),
+                    spread: spread_for_sun(libm::sinf(sun.to_radians())) && !spread_off,
                 };
                 r.resolve(&ctx, &march, &clip, &cube, &mp, &target, &params);
                 ctx.wait_idle();
