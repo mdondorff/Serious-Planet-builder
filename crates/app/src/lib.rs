@@ -24,6 +24,7 @@ pub mod prefill;
 pub mod preflightperf;
 pub mod reproworld;
 pub mod reserveload;
+pub mod shadowrig;
 pub mod sheet;
 pub mod skeleton;
 pub mod stall;
@@ -44,7 +45,7 @@ use planet_render::{AdapterPolicy, GpuContext};
 
 pub const USAGE: &str = "usage: planet <mode> [options]
 modes:
-  editor        the viewer window (VIEW-001..VIEW-007): the scripted orbit-to-1 m flight on the pipelined loop; keys P/Space pause, R restart, L lit (with the atmosphere) or debug path, V debug view, T vsync, C flight or free camera (WASD move, Q/E down/up, arrows look, Shift boost), Esc quit; the window opens on the lit path with the atmosphere, the look file drawn (sun, adaptive exposure); the title shows frame rate, CPU and GPU time, the path (or the debug view), on the lit path the exposure, and the readiness report; runs on a discrete GPU only (an integrated GPU, a software adapter or an adapter missing a feature or limit is refused with the reason); [--world F --global-res N | --store DIR] [--look F] [--size WxH] [--view NAME] [--cells N --tau PX --finest-level N] [--no-vsync] [--no-ui] (the editor UI, an egui layer drawn after the tone map, VIEW-011) [--edit] (start in the editor mode, VIEW-022: Tab toggles it; the panels, stamps by 2-4 and a click, handles on the planet, Ctrl+Z / Ctrl+Y) [--items DIR] (the edits as one TOML file each in DIR, loaded at the start) [--editor-layout F] (the panel layout, VIEW-018) [--marker LAT,LON[,RADIUS_M]]... (item markers of the globe overview, G, VIEW-013) [--site LAT,LON] (the scripted flight descends over this point, default 20,30); --smoke opens the window, drives the keys for a few dozen frames and closes it (test mode: PLANET_ADAPTER or --adapter, software by default; exits with `no display` where there is none); --no-window starts and exits without a window; --offscreen runs the skeleton without a window
+  editor        the viewer window (VIEW-001..VIEW-007): the scripted orbit-to-1 m flight on the pipelined loop; keys P/Space pause, R restart, L lit (with the atmosphere) or debug path, V debug view, T vsync, C flight or free camera (WASD move, Q/E down/up, arrows look, Shift boost), Esc quit; the window opens on the lit path with the atmosphere, the look file drawn (sun, adaptive exposure); the title shows frame rate, CPU and GPU time, the path (or the debug view), on the lit path the exposure, and the readiness report; runs on a discrete GPU only (an integrated GPU, a software adapter or an adapter missing a feature or limit is refused with the reason); [--world F --global-res N | --store DIR] [--look F] [--size WxH] [--view NAME] [--cells N --tau PX --finest-level N] [--no-vsync] [--shadow-march] (the clipmap shadow pass, off by default; J shows it) [--no-ui] (the editor UI, an egui layer drawn after the tone map, VIEW-011) [--edit] (start in the editor mode, VIEW-022: Tab toggles it; the panels, stamps by 2-4 and a click, handles on the planet, Ctrl+Z / Ctrl+Y) [--items DIR] (the edits as one TOML file each in DIR, loaded at the start) [--editor-layout F] (the panel layout, VIEW-018) [--marker LAT,LON[,RADIUS_M]]... (item markers of the globe overview, G, VIEW-013) [--site LAT,LON] (the scripted flight descends over this point, default 20,30); --smoke opens the window, drives the keys for a few dozen frames and closes it (test mode: PLANET_ADAPTER or --adapter, software by default; exits with `no display` where there is none); --no-window starts and exits without a window; --offscreen runs the skeleton without a window
   generate      headless generator CLI: --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --manifest <file> writes the determinism manifest (GEN-003); --cache-dir <dir> --region F,L [--res N] writes a tile face region into a tile store; --verify-cache <dir> [--sample N] regenerates stored tiles and compares (both take --world <definition.toml> or --seed N; --verify-cache fails when nothing could be compared, --allow-stale accepts that); --global-dir <dir> [--global-res N, default 256] bakes the global-coarse field (continents, elevation, climate) of N cells per face edge into a tile store as blocks in the canonical layout (blocks of min(N, 1024) cells) together with its ocean-connectivity channel (one bit per vertex; the area threshold is the definition's `body.0.sea.min_area_fraction`) and prints the time per sample and the channel's cost; --verify-global <dir> [--sample N] regenerates stored blocks and compares; --global-products <dir> [--global-res N] writes cube nets and maps of an in-memory bake (these take --world or --seed and --threads N); --coupled-run <dir> --global-res N (required) makes the coupled run of the bake stored in <dir> (or finds it there) and stores it, with a progress line at most every 10 s during the reduction of the bake and the wall time (STRM-051); --coarse-horizon <dir> --global-res N (required) [--threads N] makes the coarse horizon (far-field shadows, STRM-045) from the coupled run stored beside the bake in <dir> and stores it there, with a progress line and the wall time (the coupled run is made and stored by the viewer or `test-render --scene coupled`); --plan-check <dir> --global-res N (required) plans the standard flight at cells 32 and viewport / tau 240 over the stored bake with the terrain and the eroded field and fails if a view is rejected (M3 acceptance); --prefill-dir <dir> --global-res N [--prefill-levels L] [--floor-level F] writes the coarse tiles of levels F..=L (F the render floor, default 3; L default 4; an L below F writes nothing and says so; the tiles of cells 32, finest level 22, compact form, as the streamer generates them) of the stored bake into its tile pack, skipping what is there; --global-dir pre-fills the same way after the bake (--prefill-levels 0 disables; --floor-level takes both); --smoke starts and exits
   test-render   headless render harness
     --scene hello-triangle|tiles|terrain   render a scene (default hello-triangle)
@@ -240,6 +241,8 @@ pub struct Options {
     pub size: Option<(u32, u32)>,
     /// `editor --no-vsync`: start with vsync off (the `T` key toggles it).
     pub no_vsync: bool,
+    /// `editor --shadow-march`: run the clipmap shadow pass (ADR 0085, REND-050) beside the lit frames; nothing shades with it yet, J's shadow view shows it.
+    pub shadow_march: bool,
     /// `editor --no-window`: do not open the window (the start check of CON-01 on a machine without a display).
     pub no_window: bool,
     /// Every option given on the command line, so modes can reject options they would otherwise ignore.
@@ -384,6 +387,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         out_dir: None,
         size: None,
         no_vsync: false,
+        shadow_march: false,
         no_window: false,
         given: Default::default(),
     };
@@ -392,6 +396,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         match a.as_str() {
             "--smoke" => o.smoke = true,
             "--no-vsync" => o.no_vsync = true,
+            "--shadow-march" => o.shadow_march = true,
             "--no-window" => o.no_window = true,
             "--perf" => o.perf = true,
             "--offscreen" => o.offscreen = true,
