@@ -119,6 +119,7 @@ impl ShadowPath {
             history_weight: MAX_HISTORY_WEIGHT,
             cut,
             frame,
+            // Chosen from the sun's elevation at the anchor; receivers far off see it up to about 9 degrees away (a stated limit).
             spread: spread_for_sun(f.view.sun[2]),
         };
         self.resolve.resolve_view(ctx, &self.march, &self.clip, &self.cube, &march, depth_view, size, &params);
@@ -131,6 +132,11 @@ impl ShadowPath {
     /// The resolved visibility of the last frame, `width * height` values in [0, 1], row-major (tests and the shadow view).
     pub fn read_visibility(&self, ctx: &GpuContext) -> Vec<f32> {
         self.resolve.read_shadow(ctx)
+    }
+
+    /// How many frames this pass has run.
+    pub fn frames_run(&self) -> u32 {
+        self.frame
     }
 
     /// How many half-resolution pixels of the last frame marched across a clipmap cell that changed this frame or the last (tests).

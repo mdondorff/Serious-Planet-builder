@@ -123,3 +123,18 @@ fn a_refreshed_tile_flags_the_marches_across_it_for_two_frames_through_the_frame
     assert!(changed[4].1 > 0, "the frame after still flags them (changed last frame): {changed:?}");
     assert_eq!((changed[5].1, changed[6].1), (0, 0), "two quiet frames after the refresh flag none: {changed:?}");
 }
+
+// spec: REND-050
+#[test]
+fn a_shadow_frame_is_used_once() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let p = plan();
+    let (mut r, tiles) = renderer(&ctx, &p);
+    r.enable_shadow(&ctx, TEXELS, LEVELS, R);
+    let mut planner = ClipmapPlanner::new(ClipmapParams { texels: TEXELS, ..ClipmapParams::new(R, CELLS) });
+    r.set_shadow_frame(shadow_frame(&p, &tiles, &mut planner));
+    for _ in 0..4 {
+        r.render(&ctx, &p, false).unwrap();
+    }
+    assert_eq!(r.shadow_frames_run(), 1, "only the frame that had a shadow frame ran the pass: its deltas are not replayed");
+}

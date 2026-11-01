@@ -1293,7 +1293,8 @@ impl TerrainRenderer {
         self.shadow = Some(crate::shadow_path::ShadowPath::new(ctx, texels, levels, self.cells, radius_m));
     }
 
-    /// Give the next frames' shadow pass its data (the plan, the preview, the camera and the sun).
+    /// Give the next frame's shadow pass its data (the plan, the preview, the camera and the sun). The frame is used once: a lit frame
+    /// drawn without a new one runs no shadow pass.
     pub fn set_shadow_frame(&mut self, frame: crate::shadow_path::ShadowFrame) {
         self.shadow_frame = Some(frame);
     }
@@ -1306,6 +1307,11 @@ impl TerrainRenderer {
     /// The tiles the shadow pass found not resident in its last frame (the gather's blocks and the cube's floor tiles).
     pub fn shadow_unresident(&self) -> &[planet_core::TileId] {
         &self.shadow_unresident
+    }
+
+    /// How many frames the shadow pass has run (tests).
+    pub fn shadow_frames_run(&self) -> u32 {
+        self.shadow.as_ref().map_or(0, |s| s.frames_run())
     }
 
     /// How many half-resolution marches of the last shadow frame crossed a clipmap cell that changed this frame or the last (tests).
@@ -2682,7 +2688,8 @@ impl TerrainRenderer {
             let mut path = self.shadow.take().expect("shadow enabled");
             let frame = self.shadow_frame.take().expect("shadow frame set");
             self.shadow_unresident = path.run(ctx, self, &frame, &self.depth_view, self.size);
-            self.shadow_frame = Some(frame);
+            // The frame carries this frame's deltas (dirty rectangles, floor tiles, a cut): it is spent, the app sets the next.
+            drop(frame);
             self.shadow = Some(path);
         }
         let retired = std::sync::Arc::clone(&self.retired);

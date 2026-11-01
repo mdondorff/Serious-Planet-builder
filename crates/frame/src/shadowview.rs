@@ -1,7 +1,8 @@
 //! The shadow pass's view of a frame (REND-050, ADR 0085 points 1 and 5), GPU-free: the camera and the sun in the clipmap anchor's tangent
-//! frame (x east, y north, z up, Euclidean offsets from the anchor's surface point), rounded once to f32 (CON-11). In that frame a surface
-//! point at plane distance `rho` from the anchor sits at `z = height - rho^2 / (2 R)` to first order, which is the frame the clipmap stores
-//! its heights in (height minus the sphere's drop), so the shadow passes need no planet radius: the drop arrives as one coefficient.
+//! frame (x east, y north, z up, Euclidean offsets from the anchor's surface point), rounded once to f32 (CON-11). The clipmap is indexed
+//! differently: by the azimuthal equidistant plane around the anchor (arc length, not chord), holding height minus the sphere's drop. The
+//! receivers pass converts a Euclidean point to that frame in the shader from the drop coefficient alone (`to_plane`), so no planet radius
+//! reaches a shader; the camera and the reprojection stay Euclidean, where a rigid motion is exact.
 
 use planet_core::Vec3;
 
@@ -37,24 +38,19 @@ impl ShadowView {
     /// direction to the sun in the planet-fixed axes, `radius_m` the body's radius.
     pub fn new(anchor: Vec3, camera: &Camera, sun_dir: Vec3, radius_m: f64) -> ShadowView {
         let (east, north) = anchor.tangent_basis();
-        let f = camera.forward.normalized();
-        let mut r = f.cross(camera.up);
-        if r.length() < 1e-9 {
-            // The view along the up hint: any right will do, as in the camera's own basis.
-            r = f.cross(if f.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) });
-        }
-        let r = r.normalized();
-        let u = r.cross(f);
+        // The camera's own basis (the one the depth buffer's projection uses), with the tangents of the field of view taken off it.
+        let (rt, ut, f) = camera.ray_frame();
+        let (tx, ty) = (rt.length(), ut.length());
+        let (r, u) = (rt * (1.0 / tx), ut * (1.0 / ty));
         let local = |v: Vec3| f3(Vec3::new(v.dot(east), v.dot(north), v.dot(anchor)));
         let offset = camera.position.0 - anchor * radius_m;
-        let t = libm::tan(camera.fov_y_rad / 2.0);
         ShadowView {
             // The offset is a difference of two planet-radius vectors: formed in f64, rounded once.
             position: local(offset),
             forward: local(f),
             right: local(r),
             up: local(u),
-            tan_half_fov: [(t * camera.aspect) as f32, t as f32],
+            tan_half_fov: [tx as f32, ty as f32],
             near_m: camera.near_m as f32,
             sun: local(sun_dir.normalized()),
             drop_coefficient: (0.5 / radius_m) as f32,

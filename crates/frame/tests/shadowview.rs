@@ -54,27 +54,48 @@ fn the_sun_keeps_its_elevation_at_the_anchor() {
 
 // spec: REND-050
 #[test]
-fn a_surface_point_lands_at_the_sphere_drop_in_the_frame_of_the_clipmap_heights() {
+fn a_surface_point_lands_where_the_euclidean_tangent_frame_puts_it() {
     let anchor = Vec3::new(-0.2, 0.7, 0.4).normalized();
     let (e1, e2) = anchor.tangent_basis();
-    let c = 0.5 / R;
-    for (x, y) in [(1_000.0, 0.0), (0.0, -20_000.0), (30_000.0, 40_000.0), (-100_000.0, 20_000.0)] {
-        // The point at plane position (x, y) on the sphere (the azimuthal equidistant projection's inverse).
+    for (x, y) in [(1_000.0, 0.0), (0.0, -20_000.0), (30_000.0, 40_000.0), (-100_000.0, 20_000.0), (500_000.0, 300_000.0)] {
         let rho = libm::hypot(x, y);
-        let d = (anchor * libm::cos(rho / R) + (e1 * x + e2 * y) * (libm::sin(rho / R) / rho)).normalized();
-        assert!((plane_position(anchor, d, R).0 - x).abs() < 1e-6);
-        // The point 50 m above the sphere, seen from a camera at the point itself, stands where the frame says.
+        let theta = rho / R;
+        let d = (anchor * libm::cos(theta) + (e1 * x + e2 * y) * (libm::sin(theta) / rho)).normalized();
+        assert!((plane_position(anchor, d, R).0 - x).abs() < 1e-3);
         let p = PlanetFixed(d * (R + 50.0));
         let cam = Camera::at_surface_point(p, e1, 0.0, 1.0, 1.0, 0.5);
         let v = ShadowView::new(anchor, &cam, anchor, R);
-        // Euclidean tangent coordinates: z = height - drop to first order (the chord against the arc is of the order of rho^3 / R^2).
-        let expected_z = 50.0 - c * rho * rho;
-        let chord = rho * rho * rho / (R * R);
-        assert!(
-            (f64::from(v.position[2]) - expected_z).abs() < 0.01 + chord,
-            "rho {rho:.0} m: z {} against {expected_z} (tolerance {})",
-            v.position[2],
-            0.01 + chord
+        // Exact Euclidean offsets: horizontal (R + h) sin(theta) along the plane direction, vertical (R + h) cos(theta) - R.
+        let (ex, ey) = ((R + 50.0) * libm::sin(theta) * x / rho, (R + 50.0) * libm::sin(theta) * y / rho);
+        let ez = (R + 50.0) * libm::cos(theta) - R;
+        let tol = 1e-6 * (1.0 + rho);
+        for (name, got, want) in [("x", v.position[0], ex), ("y", v.position[1], ey), ("z", v.position[2], ez)] {
+            assert!((f64::from(got) - want).abs() < tol.max(1e-3), "rho {rho:.0} m, {name}: {got} against {want}");
+        }
+    }
+}
+
+// spec: REND-050
+#[test]
+fn the_basis_is_the_cameras_own_also_when_it_looks_along_its_up() {
+    for dir in [Vec3::new(-0.6, 0.0, -0.8), Vec3::new(0.0, 0.0, 1.0), Vec3::new(0.3, 0.5, 0.8).normalized()] {
+        let cam = Camera::at_surface_point(
+            PlanetFixed(dir * (R + 1_000.0)),
+            Vec3::new(0.2, 0.9, 0.1),
+            core::f64::consts::FRAC_PI_2,
+            1.0,
+            16.0 / 9.0,
+            0.5,
         );
+        let v = ShadowView::new(dir.normalized(), &cam, dir.normalized(), R);
+        let (r, u, f) = cam.ray_frame();
+        let (east, north) = dir.normalized().tangent_basis();
+        let local = |w: Vec3| [w.dot(east) as f32, w.dot(north) as f32, w.dot(dir.normalized()) as f32];
+        let (rn, un) = (r.normalized(), u.normalized());
+        for (name, got, want) in [("forward", v.forward, local(f)), ("right", v.right, local(rn)), ("up", v.up, local(un))] {
+            for k in 0..3 {
+                assert!((got[k] - want[k]).abs() < 1e-5, "{name}[{k}] at {dir:?}: {got:?} against {want:?}");
+            }
+        }
     }
 }
