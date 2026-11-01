@@ -1,0 +1,301 @@
+diff --git a/crates/streaming/Cargo.toml b/crates/streaming/Cargo.toml
+index 38e9b1b9..7421bdc3 100644
+--- a/crates/streaming/Cargo.toml
++++ b/crates/streaming/Cargo.toml
+@@ -19,7 +19,7 @@ planet-core.workspace = true
+ planet-generators.workspace = true
+ 
+ [target.'cfg(windows)'.dependencies]
+-windows = { version = "0.62", default-features = false, features = ["Win32_System_Threading"] }
++windows = { version = "0.62", default-features = false, features = ["Win32_System_Threading", "Win32_System_SystemInformation"] }
+ 
+ [target.'cfg(target_os = "linux")'.dependencies]
+ libc = "0.2"
+diff --git a/crates/streaming/src/cpusets.rs b/crates/streaming/src/cpusets.rs
+new file mode 100644
+index 00000000..bc1f511b
+--- /dev/null
++++ b/crates/streaming/src/cpusets.rs
+@@ -0,0 +1,135 @@
++//! SPIKE-90 (spike branch only, never merged): the dual pool's core classes. With `PLANET_DUAL_POOL` set, the critical workers are kept on the
++//! performance cores and the background workers on the efficiency cores through Windows CPU sets (`SetThreadSelectedCpuSets`, a soft affinity the
++//! scheduler honours). A machine without two efficiency classes, and Linux, keep one pool: `pin_current` reports `false` and changes nothing.
++//! Placement changes when a thread runs, never what it computes (CON-14).
++
++/// Where a worker should run.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum CoreClass {
++    /// The cores of the highest efficiency class (the P-cores of a hybrid CPU).
++    Performance,
++    /// Every core below the highest class (the E-cores).
++    Efficiency,
++}
++
++/// Whether the dual pool is asked for (`PLANET_DUAL_POOL` set to anything but `0`).
++pub fn dual_pool_enabled() -> bool {
++    std::env::var("PLANET_DUAL_POOL").is_ok_and(|v| v != "0")
++}
++
++/// The logical processor indices of each class: `(performance, efficiency)`; both empty where the platform cannot say or the CPU has one class.
++pub fn classes() -> (Vec<u32>, Vec<u32>) {
++    let sets = imp::cpu_sets();
++    let Some(top) = sets.iter().map(|s| s.efficiency_class).max() else { return (Vec::new(), Vec::new()) };
++    if sets.iter().all(|s| s.efficiency_class == top) {
++        return (Vec::new(), Vec::new());
++    }
++    let p = sets.iter().filter(|s| s.efficiency_class == top).map(|s| s.logical).collect();
++    let e = sets.iter().filter(|s| s.efficiency_class < top).map(|s| s.logical).collect();
++    (p, e)
++}
++
++/// Keep the calling thread on the cores of `class`; `false` (nothing changed) on a CPU with one class or a platform without CPU sets.
++pub fn pin_current(class: CoreClass) -> bool {
++    let sets = imp::cpu_sets();
++    let Some(top) = sets.iter().map(|s| s.efficiency_class).max() else { return false };
++    if sets.iter().all(|s| s.efficiency_class == top) {
++        return false;
++    }
++    let ids: Vec<u32> = sets
++        .iter()
++        .filter(|s| match class {
++            CoreClass::Performance => s.efficiency_class == top,
++            CoreClass::Efficiency => s.efficiency_class < top,
++        })
++        .map(|s| s.id)
++        .collect();
++    imp::select(&ids)
++}
++
++#[derive(Clone, Copy, Debug)]
++struct CpuSet {
++    id: u32,
++    logical: u32,
++    efficiency_class: u8,
++}
++
++#[cfg(windows)]
++mod imp {
++    use super::CpuSet;
++    use windows::Win32::System::SystemInformation::{CpuSetInformation, GetSystemCpuSetInformation, SYSTEM_CPU_SET_INFORMATION};
++    use windows::Win32::System::Threading::{GetCurrentThread, SetThreadSelectedCpuSets};
++
++    pub fn cpu_sets() -> Vec<CpuSet> {
++        let mut len = 0u32;
++        // SAFETY: a size query with no buffer; the call writes only `len`.
++        let _ = unsafe { GetSystemCpuSetInformation(None, 0, &mut len, None, None) };
++        if len == 0 {
++            return Vec::new();
++        }
++        // u64 words keep the records aligned for the struct reads below.
++        let mut buf = vec![0u64; (len as usize).div_ceil(8)];
++        // SAFETY: the buffer holds `len` bytes, the size the first call asked for.
++        let ok = unsafe { GetSystemCpuSetInformation(Some(buf.as_mut_ptr().cast()), len, &mut len, None, None) };
++        if !ok.as_bool() {
++            return Vec::new();
++        }
++        let bytes = buf.as_ptr().cast::<u8>();
++        let mut out = Vec::new();
++        let mut at = 0usize;
++        while at + std::mem::size_of::<u32>() * 2 <= len as usize {
++            // SAFETY: `at` is the start of a record inside the filled bytes; each record begins with its own size, and the CpuSet
++            // member is read only for records of that type, which are at least the struct's size.
++            let rec = unsafe { &*bytes.add(at).cast::<SYSTEM_CPU_SET_INFORMATION>() };
++            if rec.Size == 0 {
++                break;
++            }
++            if rec.Type == CpuSetInformation {
++                // SAFETY: the record's type says the union holds a CpuSet.
++                let c = unsafe { rec.Anonymous.CpuSet };
++                out.push(CpuSet {
++                    id: c.Id,
++                    logical: u32::from(c.Group) * 64 + u32::from(c.LogicalProcessorIndex),
++                    efficiency_class: c.EfficiencyClass,
++                });
++            }
++            at += rec.Size as usize;
++        }
++        out
++    }
++
++    pub fn select(ids: &[u32]) -> bool {
++        if ids.is_empty() {
++            return false;
++        }
++        // SAFETY: the pseudo handle of the calling thread is always valid; the ids come from the system's own CPU set list.
++        unsafe { SetThreadSelectedCpuSets(GetCurrentThread(), ids).as_bool() }
++    }
++}
++
++#[cfg(not(windows))]
++mod imp {
++    use super::CpuSet;
++
++    pub fn cpu_sets() -> Vec<CpuSet> {
++        Vec::new()
++    }
++
++    pub fn select(_: &[u32]) -> bool {
++        false
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    // A probe of the machine, not a test of a rule (spike).
++    #[test]
++    fn the_classes_partition_the_machine_or_are_both_empty() {
++        let (p, e) = classes();
++        eprintln!("performance {p:?}, efficiency {e:?}");
++        assert_eq!(p.is_empty(), e.is_empty(), "either a hybrid CPU with both classes or neither");
++        assert!(p.iter().all(|x| !e.contains(x)));
++    }
++}
+diff --git a/crates/streaming/src/jobs.rs b/crates/streaming/src/jobs.rs
+index 14ff326b..d812ca45 100644
+--- a/crates/streaming/src/jobs.rs
++++ b/crates/streaming/src/jobs.rs
+@@ -73,6 +73,8 @@ struct State {
+     idle_dedicated: bool,
+     /// Worker threads still running: a spawn after the last one is gone could never run.
+     alive: usize,
++    /// SPIKE-90 dual pool: the idle-only workers are the background pool on the E-cores and take the prefetch class too.
++    dual: bool,
+ }
+ 
+ impl State {
+@@ -83,8 +85,12 @@ impl State {
+             let fits = self.closed
+                 || match kind {
+                     Kind::Frame => class == Class::FrameCritical,
+-                    Kind::Idle => class == Class::Idle,
+-                    Kind::Any => !(self.frame_dedicated && class == Class::FrameCritical) && !(self.idle_dedicated && class == Class::Idle),
++                    Kind::Idle => class == Class::Idle || (self.dual && class == Class::Prefetch),
++                    Kind::Any => {
++                        !(self.frame_dedicated && class == Class::FrameCritical)
++                            && !(self.idle_dedicated && class == Class::Idle)
++                            && !(self.dual && class == Class::Prefetch)
++                    }
+                 };
+             if !fits {
+                 continue;
+@@ -141,6 +147,20 @@ impl JobSystem {
+         frame_priority: Priority,
+         idle_workers: usize,
+     ) -> Self {
++        // SPIKE-90: with PLANET_DUAL_POOL on a hybrid CPU the idle-only workers become the background pool, one per E-core thread unless
++        // PLANET_DUAL_POOL_BG names a count; on any other machine nothing changes.
++        let (p_cores, e_cores) = crate::cpusets::classes();
++        let dual = crate::cpusets::dual_pool_enabled() && !e_cores.is_empty();
++        let idle_workers = if dual {
++            let bg = std::env::var("PLANET_DUAL_POOL_BG").ok().and_then(|v| v.parse().ok()).unwrap_or(e_cores.len());
++            eprintln!(
++                "dual pool: critical {} + {frame_workers} frame workers on P {p_cores:?}, background {bg} workers on E {e_cores:?}",
++                workers.max(1)
++            );
++            idle_workers.max(bg)
++        } else {
++            idle_workers
++        };
+         let shared = Arc::new(Shared {
+             state: Mutex::new(State {
+                 queues: Default::default(),
+@@ -149,6 +169,7 @@ impl JobSystem {
+                 frame_dedicated: frame_workers > 0,
+                 idle_dedicated: idle_workers > 0,
+                 alive: workers.max(1) + frame_workers + idle_workers,
++                dual,
+             }),
+             wake: Condvar::new(),
+             wake_idle: Condvar::new(),
+@@ -176,6 +197,13 @@ impl JobSystem {
+                         if priority != Priority::Normal {
+                             priority::set_current(priority);
+                         }
++                        if dual {
++                            crate::cpusets::pin_current(if kind == Kind::Idle {
++                                crate::cpusets::CoreClass::Efficiency
++                            } else {
++                                crate::cpusets::CoreClass::Performance
++                            });
++                        }
+                         loop {
+                             let queued = {
+                                 let mut st = shared.state.lock().expect("job state");
+@@ -197,7 +225,7 @@ impl JobSystem {
+                                 let s = &mut st.shares[queued.share];
+                                 s.running -= 1;
+                                 s.idle_running -= usize::from(queued.class == Class::Idle);
+-                                !st.queues[Class::Idle as usize].is_empty()
++                                !st.queues[Class::Idle as usize].is_empty() || (st.dual && !st.queues[Class::Prefetch as usize].is_empty())
+                             };
+                             // A job of this share that waited for the ceiling may start now.
+                             shared.wake.notify_all();
+@@ -209,7 +237,41 @@ impl JobSystem {
+                     .expect("start a job worker")
+             })
+             .collect();
+-        Self { shared, workers: Mutex::new(workers) }
++        let system = Self { shared, workers: Mutex::new(workers) };
++        // SPIKE-90 configuration (d): PLANET_DUAL_POOL_LOAD=N keeps N idle-class jobs spinning on the background pool for the system's life (a
++        // synthetic bake: integer hashing over a 4 MiB buffer per job, so it loads the caches and memory as a bake does).
++        if dual {
++            if let Some(n) = std::env::var("PLANET_DUAL_POOL_LOAD").ok().and_then(|v| v.parse::<usize>().ok()).filter(|n| *n > 0) {
++                eprintln!("dual pool: {n} synthetic background jobs");
++                let share = system.share_with_idle("spike90-load", n, n);
++                for k in 0..n {
++                    let shared = Arc::clone(&system.shared);
++                    share.spawn_class(
++                        Class::Idle,
++                        Box::new(move || {
++                            let mut buf = vec![0u64; 1 << 19];
++                            let mut x = 0x9E37_79B9_7F4A_7C15u64 ^ k as u64;
++                            let mut i = 0usize;
++                            loop {
++                                for _ in 0..4096 {
++                                    x ^= x << 13;
++                                    x ^= x >> 7;
++                                    x ^= x << 17;
++                                    let at = (x as usize) & (buf.len() - 1);
++                                    buf[at] = buf[at].wrapping_add(x);
++                                    i = i.wrapping_add(1);
++                                }
++                                if shared.state.lock().expect("job state").closed {
++                                    std::hint::black_box((&buf, i));
++                                    return;
++                                }
++                            }
++                        }),
++                    );
++                }
++            }
++        }
++        system
+     }
+ 
+     /// A share named `name` with at most `ceiling` jobs running at once (at least one).
+@@ -282,7 +344,10 @@ impl Share {
+             panic!("job spawned on share {name}: its job system was dropped, so no worker is left to run it (keep the JobSystem alive as long as its shares are used)");
+         }
+         st.queues[class as usize].push_back(Queued { share: self.index, class, job });
+-        let (dedicated, idle_only) = (st.frame_dedicated || st.idle_dedicated, st.idle_dedicated && class == Class::Idle && !st.closed);
++        let (dedicated, idle_only) = (
++            st.frame_dedicated || st.idle_dedicated,
++            st.idle_dedicated && (class == Class::Idle || (st.dual && class == Class::Prefetch)) && !st.closed,
++        );
+         if st.closed {
+             self.shared.wake_idle.notify_all();
+         }
+diff --git a/crates/streaming/src/lib.rs b/crates/streaming/src/lib.rs
+index 3ab25830..5dad83ea 100644
+--- a/crates/streaming/src/lib.rs
++++ b/crates/streaming/src/lib.rs
+@@ -18,6 +18,7 @@
+ //! the pool before they get here.
+ 
+ pub mod budget;
++pub mod cpusets;
+ pub mod horizonjobs;
+ pub mod jobs;
+ mod layer;
