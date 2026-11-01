@@ -5,7 +5,7 @@ The generator SHALL describe relief classes as class weights per lattice point. 
 
 Verify: A
 Status: planned
-Source: ADR 0089 decisions 1, 2 and 10, pending the owner's acceptance of ADR 0088/0089; ADR 0080 point 3 (the lattice geometry); SPIKE-77, SPIKE-80
+Source: ADR 0089 decisions 1, 2 and 10, ADR 0088/0089 accepted 2026-11-01; ADR 0080 point 3 (the lattice geometry); SPIKE-77, SPIKE-80
 
 #### Scenario: Weights sum and stay the same bits
 - **WHEN** the default weights are built for a seed on 1 and on 8 threads
@@ -24,7 +24,7 @@ Core, flank and old margin SHALL be multiplied by `smoothstep(0, 0.04, land dept
 
 Verify: A
 Status: planned
-Source: ADR 0089 decision 3, pending the owner's acceptance of ADR 0088/0089; SPIKE-79 (14 plates, warp 0.35), SPIKE-80 (width variety, flanks, back-arc)
+Source: ADR 0089 decision 3, ADR 0088/0089 accepted 2026-11-01; SPIKE-79 (14 plates, warp 0.35), SPIKE-80 (width variety, flanks, back-arc)
 
 #### Scenario: Pure and continuous
 - **WHEN** the mask is evaluated on 1 and 8 threads, and at two points 1e-12 either side of a cube edge
@@ -40,7 +40,7 @@ Badlands and sand sea SHALL have weight 0 in the default source; class paint (AD
 
 Verify: A
 Status: planned
-Source: ADR 0089 decision 3, pending the owner's acceptance of ADR 0088/0089; SPIKE-77, SPIKE-80
+Source: ADR 0089 decision 3, ADR 0088/0089 accepted 2026-11-01; SPIKE-77, SPIKE-80
 
 #### Scenario: Memberships
 - **WHEN** a lattice point has core 1, `e0` 3500 m, and another has core 0, flank 0, old margin 0 and plateau field 1
@@ -57,7 +57,7 @@ The sum SHALL be clamped to `MAX_ELEVATION_M` (9000 m), which it can reach. Cap 
 
 Verify: A
 Status: planned
-Source: ADR 0089 decision 7, pending the owner's acceptance of ADR 0088/0089; SPIKE-78, SPIKE-80 (land above 0.5 / 1 / 2 / 3 / 4 / 5 km 48 / 27 / 7.6 / 3.3 / 1.8 / 0.75 %, highest 8.0 km)
+Source: ADR 0089 decision 7, ADR 0088/0089 accepted 2026-11-01; SPIKE-78, SPIKE-80 (land above 0.5 / 1 / 2 / 3 / 4 / 5 km 48 / 27 / 7.6 / 3.3 / 1.8 / 0.75 %, highest 8.0 km)
 
 #### Scenario: Clamp and bounds
 - **WHEN** a direction whose terms sum above 9000 m is sampled, and caps around it are bounded
@@ -82,7 +82,7 @@ The table and the limit are start values (SPIKE-73, SPIKE-76 to SPIKE-81; `kc` f
 
 Verify: A
 Status: planned
-Source: ADR 0089 decisions 5 and 6, ADR 0088 point 1, pending the owner's acceptance of ADR 0088/0089; SPIKE-73, SPIKE-76, SPIKE-77, SPIKE-78, SPIKE-80, SPIKE-81
+Source: ADR 0089 decisions 5 and 6, ADR 0088 point 1, ADR 0088/0089 accepted 2026-11-01; SPIKE-73, SPIKE-76, SPIKE-77, SPIKE-78, SPIKE-80, SPIKE-81
 
 #### Scenario: Blended amplitudes
 - **WHEN** a lattice point holds weights 128 hills and 127 mountains
@@ -93,7 +93,7 @@ The hill band SHALL keep GEN-064's three octaves, weights, warped direction and 
 
 Verify: A
 Status: planned
-Source: ADR 0089 decision 6, pending the owner's acceptance of ADR 0088/0089; SPIKE-80 (the hill landforms fail criterion 1 without the band), SPIKE-82
+Source: ADR 0089 decision 6, ADR 0088/0089 accepted 2026-11-01; SPIKE-80 (the hill landforms fail criterion 1 without the band), SPIKE-82
 
 #### Scenario: Band by class
 - **WHEN** the band is evaluated at the same direction with `k` 1, 5 and 7.5
@@ -107,7 +107,7 @@ The runtime base field SHALL be `m + k (e - m)` plus `k` times the creases, with
 
 Verify: A
 Status: planned
-Source: ADR 0088 points 1 and 2, pending the owner's acceptance of ADR 0088/0089; m9-bake PR 1 computes `m` from the existing bake; SPIKE-66 (the 10 km ring; a runtime stencil breaks batch reads and bounds)
+Source: ADR 0088 points 1 and 2, ADR 0088/0089 accepted 2026-11-01; m9-bake PR 1 computes `m` from the existing bake; SPIKE-66 (the 10 km ring; a runtime stencil breaks batch reads and bounds)
 
 #### Scenario: One read per term
 - **WHEN** the base field is evaluated for a batch of directions
@@ -124,7 +124,7 @@ It SHALL keep each face's change as a record of the layer store (STRM-065) and c
 
 Verify: A, B
 Status: planned
-Source: ADR 0088 point 4.1, pending the owner's acceptance of ADR 0088/0089; SPIKE-62, SPIKE-65, SPIKE-66, SPIKE-70, SPIKE-71
+Source: ADR 0088 point 4.1, ADR 0088/0089 accepted 2026-11-01; SPIKE-62, SPIKE-65, SPIKE-66, SPIKE-70, SPIKE-71
 
 #### Scenario: A small face
 - **WHEN** pass 1 runs on a synthetic face of 64 x 64 cells uninterrupted on 1 thread (the reference), on 8 threads, and on 1 thread killed and resumed
@@ -144,7 +144,7 @@ It SHALL store the core's change against the base field and checkpoint per tile.
 
 Verify: A
 Status: planned
-Source: ADR 0088 points 4.2 and 6, pending the owner's acceptance of ADR 0088/0089; SPIKE-61, SPIKE-64, SPIKE-70, SPIKE-71, SPIKE-72, SPIKE-73
+Source: ADR 0088 points 4.2 and 6, ADR 0088/0089 accepted 2026-11-01; SPIKE-61, SPIKE-64, SPIKE-70, SPIKE-71, SPIKE-72, SPIKE-73
 
 #### Scenario: Incise only
 - **WHEN** pass 2's local carve runs on a synthetic tile with a closed basin
@@ -160,7 +160,7 @@ Because each pyramid level holds the range of the levels below and of the nodes,
 
 Verify: A
 Status: planned
-Source: ADR 0088 points 3 and 8, pending the owner's acceptance of ADR 0088/0089; SPIKE-82, SPIKE-83 (the steep classes plan to level 18 with no capped tile, 2.5-4 us per lookup)
+Source: ADR 0088 points 3 and 8, ADR 0088/0089 accepted 2026-11-01; SPIKE-82, SPIKE-83 (the steep classes plan to level 18 with no capped tile, 2.5-4 us per lookup)
 
 #### Scenario: Sound and nested
 - **WHEN** 20,000 random caps of radius 1e-6 to 0.01 rad over a synthetic layer are bounded, rims and face edges included, each with a nested cap inside it
