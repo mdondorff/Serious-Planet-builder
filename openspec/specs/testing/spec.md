@@ -1566,3 +1566,7 @@ Source: owner (2026-10-30), explorer's measurement of the locked-session stalls,
 #### Scenario: Accept
 - **WHEN** an acceptance step has NOT RUN checks
 - **THEN** its row says INCOMPLETE and not pass, and the acceptance run returns an error
+
+#### Scenario: A step that gave no verdict
+- **WHEN** an acceptance step ends `INCOMPLETE:` and left no marker (for example `perf wallclock` refused by the readiness gate, BUILD-003)
+- **THEN** the text of its error is the step's NOT RUN line, its row says INCOMPLETE and not pass, and the run returns an error; a step with markers keeps its markers
