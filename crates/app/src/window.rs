@@ -514,7 +514,7 @@ impl App<'_> {
                 texels: if cfg.smoke { 256 } else { planet_frame::clipmap::CLIPMAP_TEXELS },
                 ..planet_frame::clipmap::ClipmapParams::new(cfg.radius_m, cfg.lod.cells)
             };
-            rig.renderer.enable_shadow(&ctx, params.texels, params.levels, cfg.radius_m);
+            rig.renderer.enable_shadow(&ctx, params.texels, params.levels, cfg.radius_m, cfg.lod.max_height_m);
             crate::shadowrig::ShadowRig::new(rig.horizon_pool.clone(), params)
         });
         let now = self.clock.now_ms();

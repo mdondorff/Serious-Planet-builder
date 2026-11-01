@@ -26,7 +26,7 @@ struct March {
     north: vec4<f32>,
     // The edge of a level in texels, the level count, the edge of the cube in texels, the highest mip the walk uses.
     info: vec4<u32>,
-    // x: a cube texel in metres at the middle of a face.
+    // x: a cube texel in metres at the middle of a face; y: the highest terrain above the sphere (1e30: unknown).
     cube: vec4<f32>,
     // x: the generation value from which a clipmap cell counts as changed (0: never); y: the shift from texels to generation cells.
     gen: vec4<u32>,
@@ -44,6 +44,7 @@ struct March {
 @group(0) @binding(6) var gens: texture_2d_array<u32>;
 
 const MAX_STEPS: i32 = 2048;
+const START_MIP: i32 = 2;
 const MAX_CUBE_STEPS: i32 = 256;
 const QUARTER_TURN_ANGLE: f32 = 0.7853982;
 
@@ -73,6 +74,33 @@ fn changed_at(k: i32, mip: i32, cx: i32, cy: i32) -> bool {
     let sh = u32(i32(m.gen.y) + gm - mip);
     let n = (i32(m.info.x) >> m.gen.y) >> u32(gm);
     return textureLoad(gens, vec2<i32>(slot(cx >> sh, n), slot(cy >> sh, n)), k, gm).x >= m.gen.x;
+}
+
+fn in_window(k: i32, x: f32, y: f32) -> bool {
+    let t = m.texel[k].x;
+    let w = m.windows[k];
+    return x >= (f32(w.x) + 2.0) * t && x < (f32(w.z) - 2.0) * t && y >= (f32(w.y) + 2.0) * t && y < (f32(w.w) - 2.0) * t;
+}
+
+// The same as level_at, searched outward from the level the walk was on: a step moves a point to a neighbouring level or none, so one or two
+// window tests answer where the scan of every level did.
+fn level_near(x: f32, y: f32, hint: i32) -> i32 {
+    let n = i32(m.info.y);
+    var k = clamp(hint, 0, n - 1);
+    if (in_window(k, x, y)) {
+        for (; k > 0; k = k - 1) {
+            if (!in_window(k - 1, x, y)) {
+                break;
+            }
+        }
+        return k;
+    }
+    for (var j = k + 1; j < n; j = j + 1) {
+        if (in_window(j, x, y)) {
+            return j;
+        }
+    }
+    return level_at(x, y);
 }
 
 fn level_max(k: i32, mip: i32, cx: i32, cy: i32) -> f32 {
@@ -152,18 +180,30 @@ fn march(o: vec3<f32>) -> vec3<f32> {
     var steps = 0.0;
     var blocked = false;
     var dirty = false;
-    var mip = min(2, i32(m.info.w));
+    var mip = min(START_MIP, i32(m.info.w));
+    var last_level = level_at(o.x, o.y);
+    // The ray is above the world's highest terrain from here on: nothing it passes can shade it (the sun is above the horizon here).
+    var tau_end = m.curv.y;
+    var ceiling_exit = false;
+    if (slope > 1.0e-4 && m.cube.y < 1.0e29) {
+        let t_above = (m.cube.y - o.z) / slope;
+        if (t_above < tau_end) {
+            tau_end = max(t_above, 0.0);
+            ceiling_exit = true;
+        }
+    }
     var left = false;
     for (var it = 0; it < MAX_STEPS; it = it + 1) {
-        if (tau > m.curv.y) {
+        if (tau > tau_end) {
             break;
         }
         let q = o.xy + d * tau;
-        let lv = level_at(q.x, q.y);
+        let lv = level_near(q.x, q.y, last_level);
         if (lv < 0) {
             left = true;
             break;
         }
+        last_level = lv;
         let tl = m.texel[lv].x;
         let cs = tl * f32(1 << u32(mip));
         let cx = i32(floor(q.x / cs));
@@ -183,7 +223,7 @@ fn march(o: vec3<f32>) -> vec3<f32> {
         let dt = max(min(tx, ty), 1.0e-3 * tl) + 1.0e-3 * tl;
         // A coarse cell that reaches past the level's window is looked at in its parts, so no part is judged by the far side of the torus.
         let exit = o.xy + d * (tau + dt);
-        if (mip > 0 && level_at(exit.x, exit.y) != lv) {
+        if (mip > 0 && level_near(exit.x, exit.y, lv) != lv) {
             mip = mip - 1;
             continue;
         }
@@ -225,7 +265,7 @@ fn march(o: vec3<f32>) -> vec3<f32> {
     // Beyond the outermost level the coarse cube continues the march, in steps that grow with the distance. Each sample is a mip whose
     // texel (dilated by one) spans the step; within one texel of a face edge, where the mips do not dilate across the edge, the stride is
     // sampled at mip 0 in quarters.
-    if (!blocked && left && m.curv.w > 0.5) {
+    if (!blocked && left && !ceiling_exit && m.curv.w > 0.5) {
         let top_level = i32(m.info.y) - 1;
         let floor_stride = m.texel[top_level].x;
         let cube_mips = i32(firstTrailingBit(m.info.z));
@@ -319,6 +359,8 @@ pub struct MarchParams {
     pub north: [f32; 3],
     /// A cube texel in metres at the middle of a face.
     pub cube_texel_m: f32,
+    /// The highest terrain of the world above the sphere, metres: a ray above it ends its walk (`f32::MAX`: unknown, no early exit).
+    pub ceiling_m: f32,
     /// The generation value from which a clipmap cell counts as changed (0: the march reports no change), see [`GENERATION_CELL_SHIFT`].
     pub dirty_since: u32,
 }
@@ -427,7 +469,7 @@ impl ShadowMarchGpu {
         for v in [clip.texels(), params.levels.len() as u32, cube.texels(), clip.texels().trailing_zeros().min(6)] {
             uniform.extend_from_slice(&v.to_le_bytes());
         }
-        f(&mut uniform, &[params.cube_texel_m, 0.0, 0.0, 0.0]);
+        f(&mut uniform, &[params.cube_texel_m, params.ceiling_m, 0.0, 0.0]);
         for v in [params.dirty_since, GENERATION_CELL_SHIFT, 0, 0] {
             uniform.extend_from_slice(&v.to_le_bytes());
         }

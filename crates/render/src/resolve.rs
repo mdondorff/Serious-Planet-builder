@@ -1126,6 +1126,15 @@ impl ShadowResolveGpu {
             .collect()
     }
 
+    /// The step count of each half-resolution march of the last frame (0 for a pixel without a receiver or a skipped ray).
+    pub fn read_half_steps(&self, ctx: &GpuContext) -> Vec<u32> {
+        let t = self.targets.as_ref().expect("a frame was resolved");
+        read_texture(ctx, &t.half_steps, t.width.div_ceil(2), t.height.div_ceil(2))
+            .chunks(4)
+            .map(|b| u32::from_le_bytes(b.try_into().unwrap()) & !crate::march::STEPS_CHANGED_BIT)
+            .collect()
+    }
+
     /// The receivers' distances along the camera's forward at half resolution (0 without a receiver).
     pub fn read_half_depth(&self, ctx: &GpuContext) -> Vec<f32> {
         let t = self.targets.as_ref().expect("a frame was resolved");

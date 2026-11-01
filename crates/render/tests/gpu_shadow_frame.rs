@@ -79,7 +79,7 @@ fn a_lit_frame_with_a_shadow_frame_resolves_a_visibility_and_draws_the_same_pict
     let p = plan();
     let (mut with, tiles) = renderer(&ctx, &p);
     let (mut without, _) = renderer(&ctx, &p);
-    with.enable_shadow(&ctx, TEXELS, LEVELS, R);
+    with.enable_shadow(&ctx, TEXELS, LEVELS, R, f64::INFINITY);
     let mut planner = ClipmapPlanner::new(ClipmapParams { texels: TEXELS, ..ClipmapParams::new(R, CELLS) });
     with.set_shadow_frame(shadow_frame(&p, &tiles, &mut planner));
     with.render(&ctx, &p, false).unwrap();
@@ -97,7 +97,7 @@ fn a_refreshed_tile_flags_the_marches_across_it_for_two_frames_through_the_frame
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let p = plan();
     let (mut r, tiles) = renderer(&ctx, &p);
-    r.enable_shadow(&ctx, TEXELS, LEVELS, R);
+    r.enable_shadow(&ctx, TEXELS, LEVELS, R, f64::INFINITY);
     let mut planner = ClipmapPlanner::new(ClipmapParams { texels: TEXELS, ..ClipmapParams::new(R, CELLS) });
     // The refresh of every resident tile at the second frame dirties every window; the frames before and after change nothing.
     let mut changed = Vec::new();
@@ -130,7 +130,7 @@ fn a_shadow_frame_is_used_once() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let p = plan();
     let (mut r, tiles) = renderer(&ctx, &p);
-    r.enable_shadow(&ctx, TEXELS, LEVELS, R);
+    r.enable_shadow(&ctx, TEXELS, LEVELS, R, f64::INFINITY);
     let mut planner = ClipmapPlanner::new(ClipmapParams { texels: TEXELS, ..ClipmapParams::new(R, CELLS) });
     r.set_shadow_frame(shadow_frame(&p, &tiles, &mut planner));
     for _ in 0..4 {
@@ -147,7 +147,7 @@ fn the_shadow_view_draws_the_resolved_visibility_as_grey_over_the_surface() {
     let mut p = plan();
     p.lit.as_mut().unwrap().view = ShadeView::Shadow;
     let (mut r, tiles) = renderer(&ctx, &p);
-    r.enable_shadow(&ctx, TEXELS, LEVELS, R);
+    r.enable_shadow(&ctx, TEXELS, LEVELS, R, f64::INFINITY);
     let mut planner = ClipmapPlanner::new(ClipmapParams { texels: TEXELS, ..ClipmapParams::new(R, CELLS) });
     r.set_shadow_frame(shadow_frame(&p, &tiles, &mut planner));
     r.render(&ctx, &p, false).unwrap();

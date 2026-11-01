@@ -52,6 +52,7 @@ fn params(sun_elevation_deg: f32, drop_coefficient: f32) -> MarchParams {
         east: [1.0, 0.0, 0.0],
         north: [0.0, 1.0, 0.0],
         cube_texel_m: 100.0,
+        ceiling_m: f32::MAX,
         dirty_since: 0,
     }
 }
@@ -284,4 +285,21 @@ fn a_ridge_just_across_a_cube_edge_or_corner_blocks_the_ray() {
     // The corner pose: the ridge on one of the other two faces that meet at the corner.
     assert_eq!(edge_pose(true, &[0, 2]), 0.0, "the ridge on the faces around the corner must block");
     assert_eq!(edge_pose(true, &[]), 1.0);
+}
+
+// spec: REND-049
+#[test]
+fn a_ray_above_the_highest_terrain_ends_its_march_without_changing_the_answer() {
+    let s = scene(100.0);
+    let (receivers, _) = row();
+    let n = receivers.len() as u32;
+    let mut p = params(30.0, 0.0);
+    let without = s.march.run(&s.ctx, &s.clip, &s.cube, &p, &receivers, n, 1);
+    // The wall is the highest terrain (100 m): a ray above that height cannot meet anything.
+    p.ceiling_m = 100.0;
+    let with = s.march.run(&s.ctx, &s.clip, &s.cube, &p, &receivers, n, 1);
+    assert_eq!(with.visibility, without.visibility, "the early exit changes no visibility");
+    let (a, b): (u64, u64) = (with.steps.iter().map(|s| u64::from(*s)).sum(), without.steps.iter().map(|s| u64::from(*s)).sum());
+    assert!(a < b, "the lit receivers stop earlier: {a} steps with the ceiling against {b}");
+    assert!(with.steps.iter().zip(&without.steps).all(|(x, y)| x <= y), "no ray takes more steps with the ceiling");
 }

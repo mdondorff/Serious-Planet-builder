@@ -117,6 +117,18 @@ Until ADR 0087 is accepted, every perf check runs in a planner-authorized window
 - J's shadow view draws the resolved visibility as grey over the surface when a shadow frame ran (`ShadowPath::draw_visibility`); nothing else reads it before PR 5b.
 - A smoke run uses 256-texel levels and the test a 320x180 window (WARP gathers 1024^2 levels in seconds a frame).
 
+## The march cost (PR `shadow-march-cost`, inbox #26)
+Probe `march_cost_probe_over_eleven_levels` (ignored, by hand; RTX 3080 Ti Laptop, machine shared with other lanes; 11 levels of 1024^2 texels with rolling relief up to 1,200 m, 1440p, a camera 20 km up; GPU timestamps, median of 11 frames; steps are per marched ray):
+| Pose | Early exit | GPU total | March | Steps median / p99 / max |
+|---|---|---|---|---|
+| 45 degrees | none | 14.00 ms | 13.21 ms | 87 / 208 / 308 |
+| 45 degrees | above 1,300 m | 1.25 ms | 0.62 ms | 6 / 25 / 161 |
+| 2 degrees (spread) | none | 5.63 ms | 4.94 ms | 9 / 214 / 820 |
+| 2 degrees (spread) | above 1,300 m | 2.85 ms | 2.16 ms | 7 / 124 / 744 |
+- Cause of the reversed ordering: a high sun's rays never met the end of the walk; they ran to the end of the outermost level (87 steps median). The walk now ends where the ray passes the world's highest terrain (`MarchParams::ceiling_m`, `LodParams::max_height_m`; the terrain in the walk's frame is at most that high, so a ray above it hits nothing), and the cube continuation is skipped then.
+- The level lookup searches outward from the level the walk was on (one or two window tests instead of a scan of every level, and for the window-edge split too). A higher start mip (4, 6) changed nothing (2.82 and 2.69 ms at 2 degrees, 1.31 and 1.36 ms at 45): the start mip is not where the steps go.
+- The 2 degree pose is still 1.9x the budget for layer 1 in total (0.7 ms of that is the four full-resolution passes, 2.16 ms the march). Its steps are a long tail (median 7, p99 124, max 744): grazing rays that stay within the penumbra search's clearance demand along the relief. What is left changes the look (quarter resolution) or the design (ADR 0085), so it goes to the owner as asked by inbox #26.
+
 ## What needs the owner
 - Look review before the horizon maps are deleted (PR 5): stills at river-r1, hills-b and the Plateau 6 drag (300 m, 30 m, 1.8 m; sunset, midday, 2-degree sun), old against new, plus a 5-10 s drag video of a plateau stamp, through `cargo xtask package` (TEST-074).
 - `/bless` of the first lit goldens of the new shadow, per adapter (ADR 0017, ADR 0061).
