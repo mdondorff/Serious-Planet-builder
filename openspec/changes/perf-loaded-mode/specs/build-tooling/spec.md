@@ -41,7 +41,7 @@ Source: ADR 0087 points 1 and 2
 - **THEN** each row names its mode and readings, and the loaded rows their verdicts
 
 ### Requirement: BUILD-033 The A/B helper
-`cargo xtask perf --ab <ref> <perf command>` SHALL run the command in the working tree and in a worktree of `<ref>` in alternating order for N rounds, SHALL retry a gate refusal up to a cap and report how often and why it refused, SHALL keep every run's log, and SHALL print one table of the medians of both builds, the change in % and the verdict against the margin. It SHALL not write the store or the main tree's `perf/logs`.
+`cargo xtask perf --ab <ref> <perf command>` SHALL run the command in the working tree and in a worktree of `<ref>` in alternating order for N rounds (default 5), SHALL retry a gate refusal up to a cap and report how often and why, SHALL keep every run's log, and SHALL print one table: per metric both medians, the change in %, the verdict against the 5 % margin and the rule that judges the metric under load (the metric table of the design: tile-ready and frame p99 by default). It SHALL not write the store or the main tree's `perf/logs`.
 
 Verify: A
 Status: planned

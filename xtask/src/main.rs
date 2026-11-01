@@ -9,6 +9,7 @@ mod heavy;
 mod layering;
 mod logcmd;
 mod package;
+mod perfab;
 mod prepush;
 mod repocheck;
 mod retired;
@@ -39,6 +40,7 @@ const USAGE: &str = "cargo xtask <command>
   capture stills --poses FILE [--store DIR | --allow-memory-bake --global-res N] [--out-dir DIR] [--size WxH] [--views A,B] [--smoke]   one PNG per pose of the poses file over the base terrain of a world, with the horizon maps near the eye baked (TEST-048; default directory target/review/m8-stills)
   perf [--machine-ready] [--loaded]   performance harness on Rasierklinge; the harness measures readiness and refuses (ADR 0020); --loaded records the load instead of refusing on it (ADR 0087, BUILD-030);
                            --machine-ready is the owner's override. Only the architect session runs it
+  perf --ab REF [--rounds N] [--retries N] [--metrics a,b] [--log FILE] PERF-COMMAND...   the A/B helper (BUILD-033, ADR 0087): the working tree and REF run alternately (a worktree under target/ab), a gate refusal is retried, one table of the medians, the change and the verdict
   perf stream [SCENE|all] --store DIR   the streaming scenes dive, dive-fast, teleport-1m, teleport-2km, look-1m, look-2km (ADR 0032) and dive-cold (the dive over a reader that ignores the pre-filled coarse tiles, report-only) over a stored 16384-cell bake; --allow-memory-bake runs over an in-memory bake labelled NOT the production source; `all` runs one child process per scene (the scene's own RAM peak, gate per child);
                            --smoke proves the scenes on the software adapter (never a measurement) and, with --store, first checks the store read-only (ocean channel, pre-filled compact tiles of levels F-4 (F the render floor, default 3), TEST-024; --prefill-levels N changes N and --floor-level F the floor, both passed through test-render); also --global-res N, --out PATH, --machine-ready, --gen-workers N (tile generation threads, default the machine's), --gen-ahead N, --gen-reserve N, --gen-priority below-normal|normal (STRM-020)
   package [--store DIR] [--date YYYY-MM-DD] [--out DIR] [--dry-run]   the owner package (TEST-074): the default-look stills of the three look-review sites and the coastal flights over the store, and a package.md with PASS, FAIL or NOT RUN per item, in target/review/owner-package/<date>/; never a measurement

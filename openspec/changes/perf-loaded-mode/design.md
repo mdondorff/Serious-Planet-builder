@@ -24,6 +24,14 @@ The pinning mode of point 2 is not built here; until it exists a `Cpu` scene nee
 ## A/B helper
 `cargo xtask perf --ab <ref> <perf command...>`: a worktree of `<ref>` under `target/ab/`, N rounds (default 5), each round runs the command in both trees (order alternating per round), retries a gate refusal up to a cap (counting and naming the reasons) and copies each run's log out before the next. The verdict compares the medians of the chosen metrics in one table (both values, the change in %, the margin). It never writes the store or the main tree's `perf/logs`.
 
+## Metric table (BUILD-033; `planet_perf::ab::METRICS`)
+| Metric (log key) | Kind (BUILD-031) | Budget | Under load |
+|---|---|---|---|
+| `load_run_us_median`, `load_wait_us_median`, `load_run_us_p99` (tile loads) | CPU, not pinned | none | relative only; an absolute CPU time needs 30 % margin |
+| `median_ms` (frame median) | frame time with streaming | 16.6 ms | needs a quiet window |
+| `p99_ms` (frame p99) | frame time with streaming | 20 ms | needs a quiet window |
+The A/B verdict is relative: within +-5 % of the ref, better, or worse. The absolute rule column of the table says how the same reading would be judged against its budget under load.
+
 ## Decisions (opus-planner, 2026-10-31, under the owner's delegation for process ADRs)
 1. In loaded mode the ADR 0065 calibration limits are recorded and do not invalidate the session; the verdict follows ADR 0087's rules. Quiet sessions keep ADR 0065 unchanged.
 2. `perf --ab` takes its metrics from the command's JSON counts and metrics; the default pair is tile-ready (`load_run_us_median`) and frame p99.
