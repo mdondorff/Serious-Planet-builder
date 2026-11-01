@@ -21,7 +21,7 @@ Dormant (no near trigger; not asked now):
 | NR | Real-GPU window checks NOT RUN on a locked desktop (TEST-073; owner, 2026-10-30) | crusader |
 | B4 | Automated owner checks (`openspec/changes/b4-owner-checks/`): B4-5 package command (TEST-074), B4-4 edit scenario, B4-6 delivery | explorer |
 | Shadows | ADR 0085 clipmap march (ADR 0090 proposed): PRs 1 to 4 merged (#985, #1000, #1014, #1017, #1024, #1041); next 5a render path (flag, off by default), 5a2 app wiring and J view, 5b apply (every lit golden to the owner's /bless), then the perf window at the 2° pose; PRs 6 to 9 (7, 8 remove GEN-086, STRM-061) | crusader |
-| B5 | Done: SPIKE-84 fixes 1 to 6 and the follow-ups (#1021, #1025, #1027, #1029 to #1032, #1034, #1035, #1037). Further Tracked fixes: camera ground read off the main thread (SPIKE-88, spikes), RTX known-answer hashes (explorer) | spikes, explorer |
+| B5 | Done: SPIKE-84 fixes 1 to 6 and the follow-ups (#1021, #1025, #1027, #1029 to #1032, #1034, #1035, #1037). Further Tracked fixes: camera ground read off the main thread (SPIKE-88, spikes) | spikes |
 | M9 | ADR 0088/0089 proposed (#1013); planned spec deltas GEN-093 to 102, STRM-065 to 068, TEST-081 to 084 in `m9-bake` (#1018, #1019); unmeasured values marked start values for R7. Waits for the owner | owner |
 
 After Option B: M9 R3 to R6 (week plan section 4). B6 (chunk stage removed) and B8 (ground-detail stills) done 2026-10-31.
@@ -56,7 +56,6 @@ After Option B: M9 R3 to R6 (week plan section 4). B6 (chunk stage removed) and 
 - **Orbit flicker and dark-pixel flicker not reproduced** (owner, 2026-10-22): still-camera views identical (TEST-068 to TEST-070); not covered: streaming on the lit path while moving, the editor hover, wall-clock water. Needs the owner: editor off, F3 overlay, a recording or F9.
 - **Authored items at scale** (SPIKE-29): cold plan over empty ground that sees a 5k/20k cluster 3.75/9.4 s; candidate: a per-cell bound aggregate (`spikes/edit-scale/results/results.md`).
 - **Tiles flash to a coarser level while moving** (owner, P1-4, P2-8): not reproduced (TEST-067, TEST-070, TEST-072 on a generated world); next: the owner's F9 capture; open: a margin round the plan's frustum.
-- **RTX known-answer hashes** in `gpu_compact_blocks.rs` and `gpu_water.rs` removed under MESH_VERSION 8: re-record with `test gpu --real` (now MESH_VERSION 9).
 - **Flaky `gpu_window` flight test**: one failure after 7.5 s, 0 of 5 since; probably the lock (first item). On a second failure keep the full output.
 - **WARP device removal with the compact format and the atmosphere**: test-only, accepted; the software smoke stays on the vertex format. Re-test when WARP, wgpu or Windows changes (Windows changed 2026-10-30).
 - **Beach shading flashes on WARP** (36.8 % of shore-band pixels on the coastal descent): unchecked since REND-030; check with the next look review.
