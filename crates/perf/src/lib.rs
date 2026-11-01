@@ -13,6 +13,7 @@ pub mod gate;
 pub mod host;
 pub mod lit;
 pub mod load;
+pub mod loaded;
 pub mod prefill;
 pub mod preflight;
 pub mod session;
