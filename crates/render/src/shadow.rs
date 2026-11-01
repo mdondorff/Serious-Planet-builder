@@ -16,7 +16,7 @@ use planet_frame::clipmap::{BlockMap, ClipmapPlan, TexelRect};
 use planet_frame::preview::PreviewStamp;
 use std::collections::BTreeMap;
 
-pub const CLIPMAP_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
+pub(crate) const CLIPMAP_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
 const JOB_BYTES: u64 = 112;
 const MIP_JOB_BYTES: u64 = 32;
 /// The most stamps the gather's table holds (the terrain table's 64 entries, two a stamp).
