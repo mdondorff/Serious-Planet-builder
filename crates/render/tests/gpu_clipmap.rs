@@ -33,6 +33,11 @@ struct World {
 }
 
 fn world() -> World {
+    world_without(&[])
+}
+
+/// The world with some tiles of R left out of the renderer (planned, not uploaded yet).
+fn world_without(skip: &[TileId]) -> World {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let r = residency_set(&TangentWarp, PlanetFixed(dir() * (R + 300.0)), &lod(), &mut SelectionCache::new());
     let resident: Vec<TileId> = r.tiles.iter().map(|e| e.tile).collect();
@@ -47,7 +52,7 @@ fn world() -> World {
     let mut terrain = TerrainRenderer::with_pools(&ctx, (64, 48), CELLS, pool);
     let field = Reference(1);
     let mut tiles = BTreeMap::new();
-    for &t in &resident {
+    for &t in resident.iter().filter(|t| !skip.contains(t)) {
         let data = compact_tile_field(&field, &TangentWarp, t, CELLS, R);
         terrain.upload_tile(&ctx, &data).unwrap();
         tiles.insert(t, data);
@@ -113,7 +118,7 @@ fn sample_texels_read_the_tile_height_minus_the_drop_and_the_mips_are_dilated_ma
     for level in [0usize, 5] {
         let mut below = gpu.read_level(&w.ctx, level, 0);
         let mut edge = TEXELS as i64;
-        for mip in 1..=3u32 {
+        for mip in 1..=8u32 {
             let here = gpu.read_level(&w.ctx, level, mip);
             let child = edge / 2;
             for cy in 0..child {
@@ -158,7 +163,7 @@ fn an_incremental_gather_writes_the_bytes_of_a_full_rebuild() {
     let mut full = ClipmapGpu::new(&w.ctx, TEXELS, LEVELS, CELLS);
     full.gather(&w.ctx, &w.terrain, &full_plan, &ClipmapPreview::default());
     for level in 0..LEVELS {
-        for mip in [0u32, 1, 3] {
+        for mip in 0..=8u32 {
             let (a, b) = (incremental.read_level(&w.ctx, level, mip), full.read_level(&w.ctx, level, mip));
             assert!(
                 a.iter().zip(&b).all(|(x, y)| x.to_bits() == y.to_bits()),
@@ -232,4 +237,72 @@ fn a_preview_stamp_moves_only_the_flagged_tiles_texels() {
     unflagged.gather(&w.ctx, &w.terrain, &full, &no_flags);
     let plain = unflagged.read_level(&w.ctx, 0, 0);
     assert!(plain.iter().zip(&before).all(|(a, b)| a.to_bits() == b.to_bits()), "an unflagged stamp changed the clipmap");
+}
+
+fn moved(dir: Vec3, meters: f64) -> Vec3 {
+    let (e1, _) = dir.tangent_basis();
+    let th = meters / R;
+    (dir * libm::cos(th) + e1 * libm::sin(th)).normalized()
+}
+
+// spec: REND-047
+#[test]
+fn a_gather_after_a_window_move_writes_the_bytes_of_a_full_rebuild() {
+    let w = world();
+    let mut planner = ClipmapPlanner::new(params());
+    let first = planner.plan(camera(), &w.resident, &[], &[], &TangentWarp);
+    let mut moved_gpu = ClipmapGpu::new(&w.ctx, TEXELS, LEVELS, CELLS);
+    moved_gpu.gather(&w.ctx, &w.terrain, &first, &ClipmapPreview::default());
+    let to = PlanetFixed(moved(dir(), 3.0 * first.levels[0].texel_m) * (R + 300.0));
+    let second = planner.plan(to, &w.resident, &[], &[], &TangentWarp);
+    assert!(!second.reanchored && second.levels.iter().any(|l| l.window != first.levels[0].window));
+    moved_gpu.gather(&w.ctx, &w.terrain, &second, &ClipmapPreview::default());
+
+    // The same plan from scratch around the same anchor: every level rebuilt and every window dirty.
+    let mut fresh = ClipmapPlanner::new(params());
+    fresh.plan(camera(), &w.resident, &[], &[], &TangentWarp);
+    fresh.force_full_rebuild();
+    let full_plan = fresh.plan(to, &w.resident, &[], &[], &TangentWarp);
+    assert!(full_plan.levels.iter().all(|l| l.dirty == vec![l.window]));
+    let mut full = ClipmapGpu::new(&w.ctx, TEXELS, LEVELS, CELLS);
+    full.gather(&w.ctx, &w.terrain, &full_plan, &ClipmapPreview::default());
+    for level in 0..LEVELS {
+        for mip in 0..=8u32 {
+            let (a, b) = (moved_gpu.read_level(&w.ctx, level, mip), full.read_level(&w.ctx, level, mip));
+            if let Some(k) = a.iter().zip(&b).position(|(x, y)| x.to_bits() != y.to_bits()) {
+                panic!("level {level} mip {mip}: after a move the texture differs from a full rebuild at index {k}: {} vs {}", a[k], b[k]);
+            }
+        }
+    }
+}
+
+// spec: REND-047
+#[test]
+fn a_planned_tile_that_is_not_uploaded_is_returned_and_leaves_no_data_not_stale_heights() {
+    let probe = world();
+    let leaf =
+        (0..=28u8).rev().map(|l| TileId::from_direction(&TangentWarp, dir(), l)).find(|t| probe.resident.binary_search(t).is_ok()).unwrap();
+    drop(probe);
+    // The tile and its ancestors: nothing coarser stands in for it.
+    let mut missing = vec![leaf];
+    while let Some(p) = missing.last().unwrap().parent() {
+        missing.push(p);
+    }
+    let w = world_without(&missing);
+    let mut planner = ClipmapPlanner::new(params());
+    let plan = planner.plan(camera(), &w.resident, &[], &[], &TangentWarp);
+    let mut gpu = ClipmapGpu::new(&w.ctx, TEXELS, LEVELS, CELLS);
+    let skipped = gpu.gather(&w.ctx, &w.terrain, &plan, &ClipmapPreview::default());
+    assert!(skipped.contains(&leaf), "the tile that is not resident must be returned: {skipped:?}");
+    // A texel only the missing tile covers (away from its seams).
+    let win = plan.levels[0].window;
+    let (i, j) = (win.y0..win.y1)
+        .flat_map(|j| (win.x0..win.x1).map(move |i| (i, j)))
+        .find(|&(i, j)| {
+            let covering: Vec<_> = plan.levels[0].blocks.iter().filter(|b| b.rect.contains(i, j) && b.covers(i, j)).collect();
+            !covering.is_empty() && covering.iter().all(|b| missing.contains(&b.tile))
+        })
+        .expect("a texel only missing tiles cover");
+    let level0 = gpu.read_level(&w.ctx, 0, 0);
+    assert_eq!(level0[slot(j) * TEXELS as usize + slot(i)], planet_render::shadow::NO_DATA_M, "texel ({i},{j})");
 }

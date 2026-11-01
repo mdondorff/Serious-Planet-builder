@@ -2199,6 +2199,11 @@ impl TerrainRenderer {
         Some((block, buffer, local * (self.pool.slot_bytes / 4) as u32))
     }
 
+    /// Cells per tile edge.
+    pub(crate) fn compact_cells(&self) -> u32 {
+        self.cells
+    }
+
     /// The pool configuration whose `allocated_bytes` bound this renderer's allocations.
     pub fn pool_config(&self) -> &PoolConfig {
         &self.pool

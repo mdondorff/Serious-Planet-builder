@@ -6,7 +6,8 @@
 //! The stored height is the tile's height above the sphere (bilinear in the plan's `(u, v)` over the tile's lattice) minus the plan's
 //! drop of the block, so the shadow march works in the anchor's flat frame without a planet radius (CON-11). The preview stamps are
 //! given as plane positions around the anchor ([`ClipmapStamp`]); the distance is measured in that plane, which differs from the
-//! vertex stage's tangent-plane distance by a term of the order of the reach squared over the planet radius.
+//! vertex stage's tangent-plane distance by about the reach times (rho / R)^2 / 6 at a distance rho from the anchor (a metre for a
+//! kilometre of reach at 500 km, where the texels are a kilometre).
 
 use crate::compact::{slot_access_wgsl, PREVIEW_STAMPS};
 use crate::terrain::TerrainRenderer;
@@ -37,16 +38,20 @@ pub struct ClipmapStamp {
 
 impl ClipmapStamp {
     /// The stamp of `s` around the unit direction `anchor` of a planet of `radius_m`.
-    pub fn of(s: &PreviewStamp, anchor: planet_core::Vec3, radius_m: f64) -> ClipmapStamp {
+    pub fn of(s: &PreviewStamp, anchor: planet_core::Vec3, radius_m: f64) -> Option<ClipmapStamp> {
+        // A stamp on the far hemisphere is nowhere near a window (and its plane position would be planet-sized, CON-11).
+        if s.dir.dot(anchor) <= 0.0 {
+            return None;
+        }
         let (x, y) = planet_frame::clipmap::plane_position(anchor, s.dir, radius_m);
-        ClipmapStamp {
+        Some(ClipmapStamp {
             plane_m: [x as f32, y as f32],
             reach_m: s.reach_m as f32,
             amount_m: s.amount_m as f32,
             kind: s.kind_code(),
             sign: f32::from(s.sign),
             max_delta_m: s.max_delta_m as f32,
-        }
+        })
     }
 }
 
@@ -61,7 +66,11 @@ pub struct ClipmapPreview {
     pub flagged: BTreeMap<TileId, u8>,
 }
 
+/// What the gather writes where no block covers a texel (and what the mips of such texels are): far below any terrain.
+pub const NO_DATA_M: f32 = -1.0e30;
+
 const GATHER_HEAD: &str = r#"
+const NO_DATA: f32 = {NO_DATA};
 struct Globals {
     extra: vec4<f32>,
     preview: array<vec4<f32>, 64>,
@@ -77,13 +86,14 @@ struct Job {
     dirty: vec4<i32>,
     // u0, du per texel in i, du per texel in j, the margin (in uv) a texel may lie outside the tile.
     u: vec4<f32>,
+    // v0, dv per texel in i, dv per texel in j, the level's texel in metres.
     v: vec4<f32>,
     // c0 + c1 x + c2 y + c3 (x^2 + y^2), x and y metres from the block's centre.
     drop: vec4<f32>,
     // The slot's first word, the layer, the preview flag, the level's texels.
     misc: vec4<u32>,
-    // The level's texel in metres.
-    params: vec4<f32>,
+    // The job's id (1 and up, in overwrite order).
+    params: vec4<u32>,
 };
 @group(1) @binding(0) var<uniform> job: Job;
 "#;
@@ -118,6 +128,9 @@ fn clear(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
     atomicStore(&owner[owner_index(ti, tj)], 0u);
+    // No data until a job writes the texel: far below any terrain, so a ray sees no occluder there.
+    let n = i32(job.misc.w);
+    textureStore(clipmap, vec2<i32>(slot_of(ti, n), slot_of(tj, n)), i32(job.misc.y), vec4<f32>(NO_DATA, 0.0, 0.0, 0.0));
 }
 
 fn coords() -> vec2<f32> {
@@ -137,7 +150,7 @@ fn claim(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (!texel_of_invocation(gid) || !covered(coords())) {
         return;
     }
-    atomicMax(&owner[owner_index(ti, tj)], bitcast<u32>(job.params.y));
+    atomicMax(&owner[owner_index(ti, tj)], job.params.x);
 }
 
 @compute @workgroup_size(8, 8, 1)
@@ -145,7 +158,7 @@ fn store_texel(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (!texel_of_invocation(gid)) {
         return;
     }
-    if (atomicLoad(&owner[owner_index(ti, tj)]) != bitcast<u32>(job.params.y)) {
+    if (atomicLoad(&owner[owner_index(ti, tj)]) != job.params.x) {
         return;
     }
     let i = ti;
@@ -163,7 +176,7 @@ fn store_texel(@builtin(global_invocation_id) gid: vec3<u32>) {
     let h01 = rel_height(texel(i0, j0 + 1));
     let h11 = rel_height(texel(i0 + 1, j0 + 1));
     var height = h_origin + mix(mix(h00, h10, tu), mix(h01, h11, tu), tv);
-    let tm = job.params.x;
+    let tm = job.v.w;
     if (job.misc.z > 0u && g.extra.w > 0.5) {
         let px = f32(2 * i + 1) * 0.5 * tm;
         let py = f32(2 * j + 1) * 0.5 * tm;
@@ -181,7 +194,12 @@ fn store_texel(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 /// The gather shader for tiles of `cells`: the vertex stage's slot reader and stamp function around the gather's own entry.
 pub fn gather_shader(cells: u32) -> String {
-    format!("{GATHER_HEAD}{}{PREVIEW_STAMPS}{GATHER_MAIN}", slot_access_wgsl(cells))
+    format!("{}{}{PREVIEW_STAMPS}{GATHER_MAIN}", GATHER_HEAD.replace("{NO_DATA}", &format!("{NO_DATA_M:?}")), slot_access_wgsl(cells))
+}
+
+/// The mip shader (a function so the shader scan can reach it).
+pub fn mip_shader() -> String {
+    MIP_SHADER.to_string()
 }
 
 const MIP_SHADER: &str = r#"
@@ -237,6 +255,7 @@ pub fn parent_rect(r: &TexelRect, child_edge: i64) -> TexelRect {
 }
 
 pub struct ClipmapGpu {
+    cells: u32,
     texels: u32,
     levels: usize,
     mips: u32,
@@ -369,6 +388,7 @@ impl ClipmapGpu {
         });
         let mip_pipeline = pipeline("clipmap-mip", "main", &[&mip_bgl0, &mip_bgl1], MIP_SHADER.to_string());
         ClipmapGpu {
+            cells,
             texels,
             levels,
             mips,
@@ -392,9 +412,16 @@ impl ClipmapGpu {
     }
 
     /// Write the dirty rectangles of `plan` from the tiles resident in `terrain`, then rebuild the touched mips. A block whose tile is not
-    /// resident in `terrain` is skipped (its region keeps the coarser tile's heights, written earlier in the same order).
-    pub fn gather(&mut self, ctx: &GpuContext, terrain: &TerrainRenderer, plan: &ClipmapPlan, preview: &ClipmapPreview) {
+    /// resident in `terrain` is skipped and returned: its texels hold [`NO_DATA_M`] unless a coarser block covers them, and the caller
+    /// passes the tile as refreshed to the planner once it is resident.
+    pub fn gather(&mut self, ctx: &GpuContext, terrain: &TerrainRenderer, plan: &ClipmapPlan, preview: &ClipmapPreview) -> Vec<TileId> {
         assert_eq!(plan.levels.len(), self.levels, "the plan and the texture have different level counts");
+        assert_eq!(terrain.compact_cells(), self.cells, "the clipmap was made for tiles of another size");
+        assert!(
+            plan.levels.iter().all(|l| l.window.width() == i64::from(self.texels) && l.window.height() == i64::from(self.texels)),
+            "the plan's windows are not the texture's edge"
+        );
+        let mut skipped: Vec<TileId> = Vec::new();
         let device = &ctx.device;
         let align = u64::from(device.limits().min_uniform_buffer_offset_alignment).max(JOB_BYTES);
         let n = i64::from(self.texels);
@@ -404,7 +431,10 @@ impl ClipmapGpu {
         let mut buffers: BTreeMap<usize, &wgpu::Buffer> = BTreeMap::new();
         for (k, level) in plan.levels.iter().enumerate() {
             for b in level.blocks.iter() {
-                let Some((block, buffer, first_word)) = terrain.slot_words(b.tile) else { continue };
+                let Some((block, buffer, first_word)) = terrain.slot_words(b.tile) else {
+                    skipped.push(b.tile);
+                    continue;
+                };
                 buffers.insert(block, buffer);
                 for d in &level.dirty {
                     let cut = b.rect.intersect(d);
@@ -576,6 +606,9 @@ impl ClipmapGpu {
             }
             ctx.queue.submit([encoder.finish()]);
         }
+        skipped.sort();
+        skipped.dedup();
+        skipped
     }
 
     /// The texels of one level at one mip, row-major, `(texels >> mip)^2` values: a test readback.
@@ -656,15 +689,14 @@ fn job_bytes(b: &BlockMap, cut: &TexelRect, first_word: u32, layer: u32, flag: u
     {
         out.extend_from_slice(&v.to_le_bytes());
     }
-    for v in [b.u[0], b.u[1], b.u[2], margin, b.v[0], b.v[1], b.v[2], 0.0, b.drop[0], b.drop[1], b.drop[2], b.drop[3]] {
+    for v in [b.u[0], b.u[1], b.u[2], margin, b.v[0], b.v[1], b.v[2], texel_m as f32, b.drop[0], b.drop[1], b.drop[2], b.drop[3]] {
         out.extend_from_slice(&v.to_le_bytes());
     }
     for v in [first_word, layer, u32::from(flag), texels] {
         out.extend_from_slice(&v.to_le_bytes());
     }
-    out.extend_from_slice(&(texel_m as f32).to_le_bytes());
     out.extend_from_slice(&id.to_le_bytes());
-    out.extend_from_slice(&[0u8; 8]);
+    out.extend_from_slice(&[0u8; 12]);
     debug_assert_eq!(out.len() as u64, JOB_BYTES);
     out
 }

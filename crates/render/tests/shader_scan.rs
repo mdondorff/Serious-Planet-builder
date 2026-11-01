@@ -100,6 +100,14 @@ fn shipped_shaders_contain_no_planet_scale_values() {
             all.push(format!("terrain-compact ({cells} cells): {h}"));
         }
     }
+    for cells in [4, 16, 32] {
+        for h in scan(&planet_render::shadow::gather_shader(cells)) {
+            all.push(format!("clipmap-gather ({cells} cells): {h}"));
+        }
+    }
+    for h in scan(&planet_render::shadow::mip_shader()) {
+        all.push(format!("clipmap-mip: {h}"));
+    }
     assert!(all.is_empty(), "CON-11: shaders must not compute planet-radius magnitudes:\n{}", all.join("\n"));
 }
 
