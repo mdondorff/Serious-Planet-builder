@@ -379,6 +379,35 @@ fn the_plan_carries_the_shore_ramps_growth_with_distance_for_every_node_and_the_
     assert_eq!(parsed.nodes, p.nodes);
 }
 
+// spec: TEST-071
+#[test]
+fn a_terrain_bundle_records_its_commit_and_an_older_one_reads_without() {
+    use planet_frame::TerrainBundle;
+    let (_, camera) = scripted_views(R, 4.0 / 3.0, 1)[4];
+    let request =
+        TerrainRequest { camera, size: (64, 48), view: TerrainView::Morph, lod: lod(), face_mapping: "tangent-v1".into(), seed: 7 };
+    let plan = plan_terrain(&request).unwrap();
+    let mut bundle = TerrainBundle {
+        generator_version: 2,
+        implementation_id: "cpu-ref-height-v2".into(),
+        mesh_version: planet_generators::mesh::MESH_VERSION,
+        definition_hash: 0,
+        adapter: "test-adapter".into(),
+        commit: Some("0123456789abcdef0123456789abcdef01234567".into()),
+        world: None,
+        request,
+        plan,
+    };
+    let text = bundle.to_text();
+    assert!(text.contains("\ncommit 0123456789abcdef0123456789abcdef01234567\n"), "{text}");
+    assert_eq!(TerrainBundle::from_text(&text).unwrap().commit, bundle.commit);
+    // A bundle written before the commit was recorded has no such line and reads as `None`.
+    bundle.commit = None;
+    let old = bundle.to_text();
+    assert!(!old.contains("\ncommit "));
+    assert_eq!(TerrainBundle::from_text(&old).unwrap().commit, None);
+}
+
 // spec: TEST-009, TEST-008
 #[test]
 fn a_terrain_bundle_round_trips_and_detects_corruption() {
@@ -393,6 +422,7 @@ fn a_terrain_bundle_round_trips_and_detects_corruption() {
         mesh_version: planet_generators::mesh::MESH_VERSION,
         definition_hash: 0,
         adapter: "test-adapter".into(),
+        commit: None,
         world: None,
         request: request.clone(),
         plan: plan.clone(),
@@ -440,6 +470,7 @@ fn a_bundle_records_the_render_floor_and_one_without_min_level_replays_as_floor_
             mesh_version: planet_generators::mesh::MESH_VERSION,
             definition_hash: 0,
             adapter: "test-adapter".into(),
+            commit: None,
             world: None,
             request,
             plan,
@@ -488,6 +519,7 @@ fn a_world_bundle_records_the_definition_and_bake_and_a_version_one_bundle_still
         mesh_version: planet_generators::mesh::MESH_VERSION,
         definition_hash: 0xabc,
         adapter: "test-adapter".into(),
+        commit: None,
         world: Some(world.clone()),
         request,
         plan,

@@ -306,6 +306,9 @@ pub struct TerrainBundle {
     pub definition_hash: u64,
     /// Adapter the bundle was recorded on (informational: views compare per adapter).
     pub adapter: String,
+    /// The commit (`git rev-parse HEAD`) of the build that recorded the bundle; `None` for a bundle made before the commit was recorded
+    /// (TEST-071), which cannot be replayed at its commit.
+    pub commit: Option<String>,
     /// The world the field came from; `None`: the seed-only reference field of `request.seed`.
     pub world: Option<BundleWorld>,
     pub request: TerrainRequest,
@@ -322,6 +325,9 @@ impl TerrainBundle {
             self.generator_version, self.implementation_id, self.mesh_version, r.seed
         );
         s += &format!("definition_hash {:016x}\nadapter {}\n", self.definition_hash, self.adapter);
+        if let Some(c) = &self.commit {
+            s += &format!("commit {c}\n");
+        }
         if let Some(w) = &self.world {
             s += &format!("height_field {}\nglobal_res {}\nworld_toml {}\n", w.height_field, w.global_res, escape_line(&w.definition_toml));
             for item in &w.items {
@@ -374,6 +380,7 @@ impl TerrainBundle {
         let mut world_items = Vec::new();
         let plan = TerrainPlan::from_text(plan_text)?;
         let (mut gv, mut imp, mut mv, mut seed, mut dh, mut adapter) = (None, None, None, None, 0u64, String::new());
+        let mut commit = None;
         let (mut mapping, mut view, mut size, mut camera, mut lod, mut recorded) = (None, None, None, None, None, None);
         for line in lines {
             let t: Vec<&str> = line.split_whitespace().collect();
@@ -385,6 +392,7 @@ impl TerrainBundle {
                 ["seed", v] => seed = Some(v.parse::<u64>().map_err(bad)?),
                 ["definition_hash", v] => dh = u64::from_str_radix(v, 16).map_err(bad)?,
                 ["adapter", v] => adapter = v.to_string(),
+                ["commit", v] => commit = Some(v.to_string()),
                 ["height_field", v] => field_id = Some(v.to_string()),
                 ["global_res", v] => global_res = Some(v.parse::<u32>().map_err(bad)?),
                 ["world_toml", ..] => world_toml = Some(unescape_line(line.strip_prefix("world_toml ").unwrap_or(""))?),
@@ -450,6 +458,7 @@ impl TerrainBundle {
             mesh_version: mv.ok_or("bundle has no mesh_version")?,
             definition_hash: dh,
             adapter,
+            commit,
             world,
             request: TerrainRequest {
                 camera: camera.ok_or("bundle has no camera")?,
