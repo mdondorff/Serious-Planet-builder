@@ -1529,12 +1529,15 @@ mod tests {
 
     // spec: BUILD-003
     #[test]
-    fn the_real_gpu_profile_groups_existing_binaries_only_and_leaves_the_default_profile_alone() {
+    fn the_real_gpu_profile_groups_existing_binaries_only_and_its_heavy_group_stays_in_that_profile() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
         let toml = std::fs::read_to_string(root.join(".config/nextest.toml")).unwrap();
-        let (default_part, real_part) = toml.split_once("[profile.real-gpu]").expect("the real-gpu profile exists");
-        assert!(!default_part.contains("test-group ="), "the default profile (software, WARP, CI) has no test group");
+        let (_, real_part) = toml.split_once("[profile.real-gpu]").expect("the real-gpu profile exists");
         assert!(toml.contains("real-gpu-heavy = { max-threads ="));
+        // The real-GPU heavy group is the `--real` run's own: the software, WARP and CI runs never use it.
+        for o in nextest_overrides(&toml).iter().filter(|o| o.body.contains(r#"test-group = "real-gpu-heavy""#)) {
+            assert_eq!(o.profile, "real-gpu", "{}", o.filter);
+        }
         // Every binary the group names is a test binary somewhere in the workspace (a test file, or a `[[test]]` of a crate with one
         // binary per tier, BUILD-015), and every module of a `test(/^(a|b)::/)` pattern is a test file (a typo would silently leave a
         // heavy test uncapped).
@@ -1564,6 +1567,82 @@ mod tests {
         }
         for m in modules {
             assert!(files.iter().any(|f| f == m), "{m} is not a test file (a module of a per-tier binary)");
+        }
+    }
+
+    /// One `[[profile.<p>.overrides]]` table of `.config/nextest.toml`: its profile, its filter (one line or `'''` block) and its text.
+    struct NextestOverride {
+        profile: String,
+        filter: String,
+        body: String,
+    }
+
+    /// The override tables of a nextest config, in file order (the first matching one sets a value, so the order matters).
+    fn nextest_overrides(toml: &str) -> Vec<NextestOverride> {
+        toml.split("[[profile.")
+            .skip(1)
+            .filter_map(|part| {
+                let (profile, rest) = part.split_once(".overrides]]")?;
+                let body = rest.split("\n[").next().unwrap_or(rest);
+                let filter = match body.split_once("filter = '''") {
+                    Some((_, f)) => f.split("'''").next()?,
+                    None => body.split_once("filter = '")?.1.split('\'').next()?,
+                };
+                Some(NextestOverride { profile: profile.into(), filter: filter.trim().into(), body: body.into() })
+            })
+            .collect()
+    }
+
+    // spec: BUILD-003
+    #[test]
+    fn the_default_profile_declares_its_450_s_limits_before_the_gpu_tier_and_caps_only_gpu_tests() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let toml = std::fs::read_to_string(root.join(".config/nextest.toml")).unwrap();
+        assert!(toml.contains("gpu-tier = { max-threads = 8 }"), "the software GPU tier runs at most 8 at once");
+        assert!(toml.contains("heavy-window = { max-threads = 2 }"));
+        let all = nextest_overrides(&toml);
+        let defaults: Vec<&NextestOverride> = all.iter().filter(|o| o.profile == "default").collect();
+        let position = |pred: &dyn Fn(&NextestOverride) -> bool, what: &str| defaults.iter().position(|o| pred(o)).expect(what);
+        let gpu = position(&|o| o.filter == "binary(/^gpu_/)", "the gpu_ tier override");
+        // Every test a filter names by its full name is a test function of some crate (a renamed test would silently lose its limit).
+        let sources: String = std::fs::read_dir(root.join("crates"))
+            .unwrap()
+            .flatten()
+            .filter_map(|k| std::fs::read_dir(k.path().join("tests")).ok())
+            .flat_map(|rd| rd.flatten().filter_map(|e| std::fs::read_to_string(e.path()).ok()))
+            .collect();
+        let exists = |name: &str| sources.contains(&format!("fn {name}("));
+        // The declared 450 s limits: each its own override, before the 300 s of the `gpu_` tier (the first match sets the value).
+        for name in [
+            "the_window_path_opens_runs_the_flight_lit_with_the_atmosphere_and_closes",
+            "a_coastal_flight_at_low_altitude_flickers_within_the_budget_while_the_lod_changes_under_it",
+            "the_lit_coast_view_over_streamed_tiles_draws_the_same_pixels_still_and_after_a_small_turn_and_back",
+            "the_edit_latency_scene_runs_end_to_end_in_smoke_mode_and_prints_its_table",
+            "the_stills_scene_draws_each_pose_with_its_horizon_maps_baked",
+        ] {
+            let at = position(&|o| o.filter.contains(&format!("test({name})")), name);
+            assert!(at < gpu, "{name}: its limit comes after the gpu_ override and would never apply");
+            assert!(defaults[at].body.contains(r#"slow-timeout = { period = "90s", terminate-after = 5 }"#), "{name}: 450 s");
+            assert!(exists(name), "{name} is not a test function");
+        }
+        // The heavy-window group holds the named heavy tests, and its override comes before the `gpu-tier` one.
+        let heavy = position(&|o| o.body.contains(r#"test-group = "heavy-window""#), "the heavy-window override");
+        let tier = position(&|o| o.body.contains(r#"test-group = "gpu-tier""#), "the gpu-tier override");
+        assert!(heavy < tier, "a heavy test would land in gpu-tier (the first matching override sets the group)");
+        assert_eq!(defaults[tier].filter, "binary(gpu_all)");
+        let hf = &defaults[heavy].filter;
+        for module in ["gpu_window", "gpu_water_coverage", "gpu_stream_perf", "gpu_envelope_perf", "gpu_edit_perf", "gpu_stills"] {
+            assert!(hf.contains(&format!("test(/^{module}::/)")), "{module} is not in heavy-window");
+        }
+        let named: Vec<&str> =
+            hf.match_indices("test(").map(|(i, _)| hf[i + 5..].split(')').next().unwrap()).filter(|n| !n.starts_with('/')).collect();
+        assert_eq!(named.len(), 3, "the three gpu_skeleton loop tests: {named:?}");
+        for name in named {
+            assert!(exists(name), "{name} is not a test function");
+        }
+        // Tier A and B are not capped: every group of the default profile holds `gpu_all` tests only.
+        for o in defaults.iter().filter(|o| o.body.contains("test-group =")) {
+            assert!(o.filter.starts_with("binary(gpu_all)"), "a group outside tier C: {}", o.filter);
         }
     }
 
