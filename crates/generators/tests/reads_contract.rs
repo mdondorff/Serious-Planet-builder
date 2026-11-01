@@ -15,17 +15,10 @@ use planet_world_def::{BodyId, ItemSpec, ReadRecord, WorldDefinition, DEFAULT_IT
 
 const R: f64 = 6_371_000.0;
 const BRUSH_LAYER: &str = "brush";
-/// Every item of the test world with its layer.
-const ITEMS: [(&str, u128); 8] = [
-    (DEFAULT_ITEM_LAYER, 1),
-    (DEFAULT_ITEM_LAYER, 2),
-    (DEFAULT_ITEM_LAYER, 3),
-    (DEFAULT_ITEM_LAYER, 4),
-    (DEFAULT_ITEM_LAYER, 5),
-    (DEFAULT_ITEM_LAYER, 6),
-    (BRUSH_LAYER, 7),
-    (BRUSH_LAYER, 8),
-];
+/// The first id of the boundary sweep: tiny stamps at growing distances from the cluster, so that some reach ends fall inside and some outside
+/// the cap a tile of level 15 or 17 declares (GEN-026: its halo is a quarter of the tile edge).
+const SWEEP_FIRST: u128 = 100;
+const SWEEP_N: u128 = 24;
 
 fn unit(lat_deg: f64, lon_deg: f64) -> Vec3 {
     let (la, lo) = (lat_deg.to_radians(), lon_deg.to_radians());
@@ -91,6 +84,14 @@ fn brush_item(id: u128, points: &[(f64, f64)]) -> ItemSpec {
     .with_stamp(Stamp::new(StampKind::Brush, [0.0; 3]).with_strokes(&[stroke]))
 }
 
+/// Every item of the test world with its layer.
+fn item_ids() -> Vec<(&'static str, u128)> {
+    let mut v: Vec<(&'static str, u128)> = (1..=6).map(|id| (DEFAULT_ITEM_LAYER, id)).collect();
+    v.extend([(BRUSH_LAYER, 7), (BRUSH_LAYER, 8)]);
+    v.extend((0..SWEEP_N).map(|k| (DEFAULT_ITEM_LAYER, SWEEP_FIRST + k)));
+    v
+}
+
 /// The authored world: stamps and two lines on the default layer, two brush items on the brush layer; some under the tiles of the test, some far.
 fn world() -> Arc<WorldDefinition> {
     let a = unit(20.0, 30.0);
@@ -108,6 +109,12 @@ fn world() -> Arc<WorldDefinition> {
     let mut d = WorldDefinition::single_planet(R, 1);
     for i in items {
         d.put_item_spec(BodyId::PLANET, i).unwrap();
+    }
+    // The sweep: reach 20 m each, 25 m to 600 m east of the cluster in steps of 25 m; a tile of level 15 declares about 230 m around its
+    // centre and one of level 17 about 60 m, so the reach ends of the sweep fall on both sides of both caps.
+    for k in 0..SWEEP_N {
+        let at = at_distance(a, east, 25.0 + 25.0 * k as f64);
+        d.put_item_spec(BodyId::PLANET, stamp_item(SWEEP_FIRST + k, at, 20.0, StampKind::Hill, [5.0, 0.0, 0.0])).unwrap();
     }
     Arc::new(d)
 }
@@ -148,15 +155,10 @@ fn stack(reader: Arc<dyn ItemReader>) -> StampStage<'static> {
     StampStage::new(Arc::new(lower), reader, BodyId::PLANET, BRUSH_LAYER, 1, 1).expect("a body with a radius")
 }
 
-/// The directions a tile samples: its grid and a one-sample halo.
+/// The directions a tile evaluates, as production builds them (the lattice and its ring, ADR 0073) for the mesh resolutions of the viewer and for
+/// the coarse 4-cell stencil, whose ring is a quarter of the tile edge away: exactly the stage's declared halo.
 fn tile_dirs(tile: TileId) -> Vec<Vec3> {
-    let mut dirs = Vec::new();
-    for l in -1..=17i64 {
-        for k in -1..=17i64 {
-            dirs.push(tile.sample_direction_ext(&TangentWarp, 16, k, l));
-        }
-    }
-    dirs
+    [4u32, 8, 32].into_iter().flat_map(|cells| planet_generators::normals::lattice_directions(&TangentWarp, tile, cells)).collect()
 }
 
 /// The tiles of the test: continental to metre scale over an item, three kilometres from it, and on the far side of the planet.
@@ -183,6 +185,8 @@ fn declared(def: &WorldDefinition, layer: &str, tile: TileId) -> Vec<u128> {
 #[test]
 fn every_item_a_stage_reads_while_it_generates_a_tile_is_declared_by_the_tile() {
     let def = world();
+    let at_cluster = TileId::from_direction(&TangentWarp, unit(20.0, 30.0), 15);
+    let far = TileId::from_direction(&TangentWarp, unit(-40.0, -100.0), 17);
     let mut read_something = false;
     for tile in tiles() {
         let seen = Arc::new(Mutex::new(Vec::new()));
@@ -190,6 +194,20 @@ fn every_item_a_stage_reads_while_it_generates_a_tile_is_declared_by_the_tile() 
         let _ = top.heights(&tile_dirs(tile));
         let seen = seen.lock().unwrap().clone();
         read_something |= !seen.is_empty();
+        if tile == at_cluster {
+            let has = |layer: &str| seen.iter().any(|(l, _)| l == layer);
+            assert!(has(DEFAULT_ITEM_LAYER) && has(BRUSH_LAYER), "a tile of the cluster reads items of both layers: {seen:?}");
+        }
+        if tile == far {
+            assert!(seen.contains(&(BRUSH_LAYER.to_string(), 8)), "the far tile reads the brush item under it: {seen:?}");
+        }
+        // The fine tiles are declared by the items they touch, not by summaries of their cells (the gate of the key test below).
+        if tile.level() >= 11 {
+            for layer in [DEFAULT_ITEM_LAYER, BRUSH_LAYER] {
+                let reads = def.tile_reads(BodyId::PLANET, layer, tile, STAGE_HALO);
+                assert!(!reads.iter().any(|r| matches!(r, ReadRecord::SummaryNode { .. })), "level {}: summary reads", tile.level());
+            }
+        }
         for (layer, id) in &seen {
             let declared = declared(&def, layer, tile);
             assert!(
@@ -211,7 +229,7 @@ fn an_item_a_tile_does_not_declare_changes_none_of_its_heights_and_none_of_its_f
         let dirs = tile_dirs(tile);
         let full = stack(def.clone() as Arc<dyn ItemReader>);
         let mut pruned = (*def).clone();
-        for (layer, id) in ITEMS {
+        for (layer, id) in item_ids() {
             if !declared(&def, layer, tile).contains(&id) {
                 assert!(pruned.remove_item(BodyId::PLANET, id));
                 pruned_any = true;
@@ -235,6 +253,15 @@ fn an_item_a_tile_does_not_declare_changes_none_of_its_heights_and_none_of_its_f
         }
     }
     assert!(pruned_any, "some item is out of reach of some tile");
+    // The sweep puts reach ends on both sides of the declared cap of the level 15 and 17 tiles over the cluster: some sweep item is
+    // declared and some is not, so the removal above probes the boundary and not only items on the far side of the planet.
+    let a = unit(20.0, 30.0);
+    for level in [15u8, 17] {
+        let tile = TileId::from_direction(&TangentWarp, a, level);
+        let d = declared(&def, DEFAULT_ITEM_LAYER, tile);
+        let swept = (0..SWEEP_N).filter(|k| d.contains(&(SWEEP_FIRST + k))).count();
+        assert!(swept > 0 && swept < SWEEP_N as usize, "level {level}: {swept} of {SWEEP_N} sweep items declared");
+    }
 }
 
 // spec: GEN-026, GEN-028, GEN-030, WDEF-007
