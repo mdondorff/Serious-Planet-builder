@@ -177,6 +177,17 @@ pub fn load_or_run(def: &WorldDefinition, dir: Option<&Path>, src: &dyn LatticeS
     make(p, src, dir)
 }
 
+/// SPIKE-88 (spike branch only): [`load_or_run`] that never writes: a run the store does not hold is made in memory.
+pub fn load_or_run_readonly(def: &WorldDefinition, dir: Option<&Path>, src: &dyn LatticeSource, n: u32, steps: u32) -> Result<CoupledRun, String> {
+    let p = prepare(def, src, n, steps)?;
+    if let Some(r) = p.load(dir) {
+        eprintln!("spike88: the coupled run was loaded from the store");
+        return Ok(r);
+    }
+    eprintln!("spike88: the store holds no coupled run: made in memory, not stored");
+    make(p, src, None)
+}
+
 /// Make the run (reduce the bake, run the steps) and write it to `dir` when given.
 fn make(p: Prepared, src: &dyn LatticeSource, dir: Option<&Path>) -> Result<CoupledRun, String> {
     let started = std::time::Instant::now();

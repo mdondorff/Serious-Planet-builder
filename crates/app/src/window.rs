@@ -766,7 +766,12 @@ impl App<'_> {
                 let camera = st.last_camera;
                 let frames = st.frames;
                 if let Some(e) = st.edit.as_mut() {
+                    let t0 = Instant::now();
                     e.smoke_step(frames, &camera, viewport, &limits, field)?;
+                    let ms = t0.elapsed().as_secs_f64() * 1000.0;
+                    if ms > 5.0 {
+                        eprintln!("spike88: frame {frames} edit smoke step {ms:.1} ms");
+                    }
                 }
             }
             // A command of this frame (C back to the flight, restart) may have released the mouse.
@@ -1462,11 +1467,15 @@ fn title_text(st: &Running, now_ms: u64) -> String {
 fn smoke_keys(st: &mut Running, cameras: &[Camera], now_ms: u64) -> Result<bool, String> {
     let cam = planet_frame::viewer::camera_at(cameras, st.viewer.clock.time_s(now_ms));
     let press = |st: &mut Running, c: Command| {
+        // SPIKE-88 probe (spike branch only): the time of each scripted key, and of its swapchain change
+        let t0 = Instant::now();
         let was = st.viewer.vsync;
         st.viewer.command(c, now_ms, &cam);
+        let t1 = t0.elapsed().as_secs_f64() * 1000.0;
         if st.viewer.vsync != was {
             st.surface.set_vsync(&st.ctx, st.viewer.vsync);
         }
+        eprintln!("spike88: frame {} key {:?}: command {:.1} ms, total {:.1} ms", st.frames, c, t1, t0.elapsed().as_secs_f64() * 1000.0);
     };
     match st.frames {
         // The window starts lit: V does nothing there, L goes to the debug path, V cycles a debug view, L comes back.

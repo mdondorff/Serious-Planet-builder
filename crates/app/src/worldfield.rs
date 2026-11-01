@@ -696,6 +696,15 @@ impl WorldTerrain {
         }
     }
 
+    /// SPIKE-88 (spike branch only): [`WorldTerrain::set_coupled_lens`] whose run is never written to the store.
+    pub fn set_coupled_lens_readonly(self: &Arc<Self>, lens: CoupledLens) {
+        self.coupled_lens.store(if lens == CoupledLens::Height { 1 } else { 2 }, std::sync::atomic::Ordering::Relaxed);
+        let world = Arc::clone(self);
+        self.coupled.request(move || {
+            crate::coupledworld::load_or_run_readonly(&world.definition(), world.store_dir.as_deref(), world.src.as_ref(), run_cells(world.res), COUPLED_STEPS)
+        });
+    }
+
     /// Where the coupled run stands.
     pub fn coupled_standing(&self) -> Standing {
         self.coupled.standing()
