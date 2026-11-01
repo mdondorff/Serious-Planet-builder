@@ -47,6 +47,16 @@ slow-timeout = { period = "90s", terminate-after = 5 }
 filter = 'binary(gpu_all) and test(the_stills_scene_draws_each_pose_with_its_horizon_maps_baked)'
 slow-timeout = { period = "90s", terminate-after = 5 }
 
+# Declared limit (approved by the planner, 2026-11-02, BUILD-003; #1056). `gpu_window::the_gate_passes_on_a_small_world_without_the_chunk_stage_which_is_the_default`
+# runs the window gate on a small world (480x270, the editor, a scripted edit and flight). Locally it takes 51 s to 140 s alone on main (the spread is the
+# machine's load), 59 s to 82 s on the branch of #1056 and 68 s to 93 s beside the window smoke of `--shadow-march`; on the Windows CI runner (WARP,
+# partition `C 1/2`) it was cut off at 300.9 s in two runs of #1056 after a green first run, while #1052 (same base, without the added window smoke) passed:
+# runner load, not a hang. A declared 450 s (5 x 90 s) still catches a hang. The first matching override sets a value, so this one comes before the `gpu_`
+# one. No test is skipped, retried or changed.
+[[profile.default.overrides]]
+filter = 'binary(gpu_all) and test(the_gate_passes_on_a_small_world_without_the_chunk_stage_which_is_the_default)'
+slow-timeout = { period = "90s", terminate-after = 5 }
+
 # The software-adapter GPU tier (BUILD-003): the heavy `gpu_*` tests take 40 to 66 s alone and up to 144 s beside the other processes of
 # a full `cargo xtask test gpu` (about 20 at once, each software rasteriser multi-threaded), so they reach the 120 s mark of the default
 # limit. The limit is there to catch a hang, not to budget a test: these binaries terminate after 300 s (5 x 60 s). Grouping the heavy
