@@ -500,6 +500,28 @@ impl CaseRow {
     }
 }
 
+/// The loaded verdicts of the gated rows (BUILD-031, BUILD-032): the preview and the drawn-exact times as unpinned CPU times against their budgets.
+/// Empty in a quiet session. The M6 verdict column of the table stays as it is.
+pub fn loaded_section(rows: &[CaseRow], validity: &planet_perf::gate::Validity) -> String {
+    if validity.load.is_none() {
+        return String::new();
+    }
+    let mut s = String::from(
+        "\nloaded verdicts (BUILD-031; the verdict column above is the quiet rule):\n\n| altitude | stamp radius | reading | ms | budget ms | loaded verdict |\n|---|---|---|---|---|---|\n",
+    );
+    for r in rows.iter().filter(|r| r.gated()) {
+        let mut line = |name: &str, v: Option<f64>, budget: f64| {
+            if let Some(v) = v {
+                let judged = planet_perf::loaded::loaded_verdict(planet_perf::loaded::Kind::Cpu { pinned: false }, v, budget);
+                s += &format!("| {} m | {} | {name} | {v:.1} | {budget} | {} |\n", r.altitude_m, r.radius_label(), judged.text());
+            }
+        };
+        line("preview", r.preview_median(), PREVIEW_BUDGET_MS);
+        line("drawn exact", r.drawn_exact_median(), exact_budget_ms(r.radius_m, r.altitude_m));
+    }
+    s
+}
+
 /// The report table (markdown): one row per case, medians over the repeats, budgets named.
 pub fn table(rows: &[CaseRow]) -> String {
     let mut s = String::from(
@@ -1364,7 +1386,13 @@ the refresh frame by frame (first run of each case; rows where a count moved or 
     )
     .map_err(err)?;
     if let Some(dir) = &o.out {
-        let path = write_report(dir, &format!("{table}\n{stages}\n{levels}\n{horizon}\n{cost}"))?;
+        let validity = planet_perf::run_validity();
+        let text = format!(
+            "{}{table}{}\n{stages}\n{levels}\n{horizon}\n{cost}",
+            planet_perf::mode_lines(&validity),
+            loaded_section(&rows, &validity)
+        );
+        let path = write_report(dir, &text)?;
         writeln!(out, "table written to {}", path.display()).map_err(err)?;
     }
     if smoke && rows.iter().any(|r| r.runs.iter().any(|x| x.exact_ms.is_none())) {
@@ -1746,6 +1774,36 @@ mod tests {
             assert!(!stamps.is_empty(), "the {radius} m brush is previewed: the chain of its stroke");
             assert!(stamps.len() <= planet_frame::preview::MAX_PREVIEW_STAMPS, "{} stamps over the cap", stamps.len());
         }
+    }
+
+    // spec: BUILD-032
+    #[test]
+    fn the_edit_report_names_its_mode_and_a_loaded_one_judges_the_gated_rows() {
+        let run = CaseRun {
+            preview_ms: Some(10.0),
+            stages: Stages { drawn_exact_ms: Some(100.0), ..Default::default() },
+            exact_ms: Some(100.0),
+            ..Default::default()
+        };
+        let stamp = CaseRow { kind: CaseKind::Stamp, altitude_m: 200.0, radius_m: 150.0, runs: vec![run.clone()] };
+        let region = CaseRow { kind: CaseKind::Region, altitude_m: 200.0, radius_m: 5000.0, runs: vec![run] };
+        let quiet = planet_perf::gate::Validity::default();
+        assert_eq!(planet_perf::mode_lines(&quiet), "mode: quiet\n");
+        assert_eq!(loaded_section(std::slice::from_ref(&stamp), &quiet), "", "a quiet report has no loaded section");
+        let load = planet_perf::gate::LoadRecord {
+            cpu_pct: Some(30.0),
+            cpu_perf_pct: Some(90.0),
+            gpu_util_pct: None,
+            gpu_temp_c: None,
+            processes: Some(vec![]),
+        };
+        let loaded = planet_perf::gate::Validity { reasons: vec![], load: Some(load) };
+        assert!(planet_perf::mode_lines(&loaded).starts_with("mode: loaded\nload: "));
+        let section = loaded_section(&[stamp, region], &loaded);
+        // preview 10 ms of 16 is 37.5 % under (loaded pass at 30 %); exact 100 ms of 300 is far under; the 5 km region is only recorded.
+        assert!(section.contains("| 200 m | 150 m | preview | 10.0 | 16 | loaded pass |"), "{section}");
+        assert!(section.contains("| drawn exact | 100.0 | 300 | loaded pass |"), "{section}");
+        assert!(!section.contains("5000"), "{section}");
     }
 
     // spec: TEST-042

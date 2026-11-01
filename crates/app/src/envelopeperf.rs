@@ -576,6 +576,8 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
             steady: stage.map(|_| (steady.as_slice(), run_in_s, if smoke { SMOKE_FLIGHT_S } else { o.steady_window_s })),
         },
     );
+    // The curve is judged on the coarse share, not on a time: the log carries the mode and the load, no loaded verdict (BUILD-032).
+    let json = planet_perf::stamp_one_off_json(&json, &planet_perf::run_validity(), &[]);
     let path = log_path(o)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(err)?;
@@ -612,6 +614,25 @@ mod tests {
     fn the_log_says_the_chunk_stage_did_not_run() {
         let facts = LogFacts { bound: 0.01, source: "s", adapter: "a", smoke: false, owner_override: &[], horizon: true, steady: None };
         assert!(log_json(&[], &facts).contains("\"chunk_stage\": false,"), "removed, ADR 0086: always false");
+    }
+
+    // spec: BUILD-032
+    #[test]
+    fn the_log_is_stamped_with_its_mode_and_the_load_of_a_loaded_run() {
+        let facts = LogFacts { bound: 0.01, source: "s", adapter: "a", smoke: false, owner_override: &[], horizon: true, steady: None };
+        let base = log_json(&[], &facts);
+        let quiet = planet_perf::stamp_one_off_json(&base, &planet_perf::gate::Validity::default(), &[]);
+        assert!(quiet.starts_with("{\n  \"mode\":\"quiet\",\n  \"scene\": \"envelope\""), "{quiet}");
+        let load = planet_perf::gate::LoadRecord {
+            cpu_pct: Some(30.0),
+            cpu_perf_pct: Some(90.0),
+            gpu_util_pct: None,
+            gpu_temp_c: None,
+            processes: Some(vec![]),
+        };
+        let loaded = planet_perf::stamp_one_off_json(&base, &planet_perf::gate::Validity { reasons: vec![], load: Some(load) }, &[]);
+        assert!(loaded.starts_with("{\n  \"mode\":\"loaded\",\"load_record\":{"), "{loaded}");
+        assert!(loaded.contains("\"chunk_stage\": false,") && !loaded.contains("loaded_verdicts"), "the curve is not judged on a time");
     }
 
     // spec: STRM-046

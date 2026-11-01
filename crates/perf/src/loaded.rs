@@ -102,7 +102,7 @@ pub struct RowVerdict {
 
 /// The loaded verdicts of a run row (BUILD-032): which readings of the row are judged, and as what kind. Rows of the streaming scenes (`stream/`, `stream-lit/`)
 /// have the frame time with streaming, which needs a quiet window. Rows of the terrain views (`terrain/`) have the GPU time (timestamp queries), the CPU plan time and
-/// the waited frame total (CPU wall time, not pinned). Other rows (the lit passes, the one-off scenes) have no table yet and carry no verdict.
+/// the waited frame total (CPU wall time, not pinned). Rows of the lit passes (`lit/`) have the GPU passes and the waited frame p99. Other rows carry no verdict.
 pub fn row_verdicts(r: &crate::RunReport) -> Vec<RowVerdict> {
     let mut out = Vec::new();
     let mut add = |metric: &'static str, kind: Kind, reading: f64, budget: f64| {
@@ -120,6 +120,18 @@ pub fn row_verdicts(r: &crate::RunReport) -> Vec<RowVerdict> {
             add("CPU plan median ms", Kind::Cpu { pinned: false }, c, crate::PLAN_CPU_BUDGET_MS);
         }
         add("frame p99 ms", Kind::Cpu { pinned: false }, r.stats.p99, crate::FRAME_P99_BUDGET_MS);
+    } else if r.path_name.starts_with("lit/") {
+        // The lit passes (TEST-025): the GPU passes with their budgets and the waited frame p99, as the terrain views.
+        if let Some(g) = metric("gpu_ms") {
+            add("terrain pass GPU median ms", Kind::Gpu, g, crate::TERRAIN_GPU_BUDGET_MS);
+        }
+        if let Some(a) = metric("gpu_atmosphere_ms") {
+            add("atmosphere GPU median ms", Kind::Gpu, a, crate::lit::ATMOSPHERE_GPU_BUDGET_MS);
+        }
+        if let Some(w) = metric("gpu_water_total_ms") {
+            add("water GPU median ms", Kind::Gpu, w, crate::lit::water_budget_ms(&r.path_name));
+        }
+        add("frame p99 ms", Kind::Cpu { pinned: false }, r.stats.p99, crate::FRAME_P99_BUDGET_MS);
     }
     out
 }
@@ -127,6 +139,27 @@ pub fn row_verdicts(r: &crate::RunReport) -> Vec<RowVerdict> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // spec: BUILD-032
+    #[test]
+    fn a_lit_row_carries_its_gpu_and_frame_verdicts() {
+        let stat = |m: f64| crate::summarize(&[m, m], 0).unwrap();
+        let r = crate::RunReport {
+            path_name: "lit/coast-3m".into(),
+            vram_cap_gb: 8,
+            stats: stat(5.0),
+            clocks_before: None,
+            clocks_after: None,
+            metrics: vec![("gpu_ms".into(), stat(4.0)), ("gpu_atmosphere_ms".into(), stat(0.9)), ("gpu_water_total_ms".into(), stat(2.1))],
+            counts: vec![],
+        };
+        let v = row_verdicts(&r);
+        let names: Vec<&str> = v.iter().map(|x| x.metric).collect();
+        assert_eq!(names, ["terrain pass GPU median ms", "atmosphere GPU median ms", "water GPU median ms", "frame p99 ms"]);
+        assert_eq!(v[2].budget, crate::lit::COAST_3M_WATER_GPU_BUDGET_MS, "the coast view keeps its own water budget");
+        assert_eq!(v[0].judged.verdict, Verdict::LoadedPass);
+        assert!(v[0].judged.note.is_some(), "a GPU reading carries the +18 % note");
+    }
 
     // spec: BUILD-031
     #[test]
@@ -207,6 +240,12 @@ mod tests {
         assert_eq!(v[0].judged.note, Some(GPU_LOAD_NOTE));
         let v = row_verdicts(&report("terrain/orbit", &[("gpu_ms", 9.0)], 6.0, 25.0));
         assert_eq!((v[0].judged.verdict, v[1].judged.verdict), (Verdict::Inconclusive, Verdict::Inconclusive));
-        assert!(row_verdicts(&report("lit/orbit", &[("gpu_ms", 1.0)], 1.0, 1.0)).is_empty(), "rows without a table carry no verdict");
+        assert!(row_verdicts(&report("global-bake", &[("gpu_ms", 1.0)], 1.0, 1.0)).is_empty(), "rows without a table carry no verdict");
+        let lit = row_verdicts(&report("lit/orbit", &[("gpu_ms", 1.0)], 1.0, 1.0));
+        assert_eq!(
+            lit.iter().map(|x| x.metric).collect::<Vec<_>>(),
+            vec!["terrain pass GPU median ms", "frame p99 ms"],
+            "the lit passes have a table"
+        );
     }
 }

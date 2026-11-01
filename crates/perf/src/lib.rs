@@ -432,6 +432,53 @@ fn mode_json(validity: &gate::Validity) -> String {
     format!("\"mode\":{},{load}", json_str(mode_name(validity)))
 }
 
+/// One time reading of a one-off scene with the budget it is judged against (same unit, lower is better).
+pub struct OneOffReading {
+    pub metric: &'static str,
+    pub reading: f64,
+    pub budget: f64,
+}
+
+/// A one-off JSON log (`global-bake`, `coupled`, `coupled-make`, `envelope`: a single object written by hand) stamped like the flight logs
+/// (BUILD-032): the `mode` key and, in loaded mode, the `load_record` open the object, and `loaded_verdicts` (each reading judged as an
+/// unpinned CPU time, BUILD-031) closes it. A quiet session adds the mode only.
+pub fn stamp_one_off_json(json: &str, validity: &gate::Validity, readings: &[OneOffReading]) -> String {
+    let body = json.strip_prefix("{\n").unwrap_or(json);
+    let mut s = format!("{{\n  {}\n{body}", mode_json(validity));
+    if validity.load.is_some() && !readings.is_empty() {
+        let rows: Vec<String> = readings
+            .iter()
+            .map(|r| {
+                let judged = loaded::loaded_verdict(loaded::Kind::Cpu { pinned: false }, r.reading, r.budget);
+                format!(
+                    "{{\"metric\":{},\"reading\":{},\"budget\":{},\"verdict\":{}}}",
+                    json_str(r.metric),
+                    json_f(r.reading),
+                    json_f(r.budget),
+                    json_str(&judged.text())
+                )
+            })
+            .collect();
+        if let Some(end) = s.trim_end().strip_suffix('}') {
+            s = format!("{},\n  \"loaded_verdicts\": [{}]\n}}\n", end.trim_end(), rows.join(","));
+        }
+    }
+    s
+}
+
+/// The mode lines that open a one-off report in markdown (`edit-latency.md`): `mode: quiet` or `mode: loaded` with the load readings.
+pub fn mode_lines(validity: &gate::Validity) -> String {
+    match &validity.load {
+        Some(l) => format!("mode: loaded\nload: {}\n", l.text()),
+        None => "mode: quiet\n".to_string(),
+    }
+}
+
+/// The validity of this process's run for a one-off log: the load the gate recorded, if it ran in loaded mode.
+pub fn run_validity() -> gate::Validity {
+    gate::Validity { reasons: Vec::new(), load: gate::recorded_load() }
+}
+
 /// [`report_json_with_warmups`] plus the host load of each view or scene (`load` in the run's object, `load_notes` at the top;
 /// TEST-023): `loads` are keyed by the run's path name, a run without an entry carries none. Recorded only: nothing here changes a
 /// validity answer.
