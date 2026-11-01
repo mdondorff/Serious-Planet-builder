@@ -23,7 +23,7 @@ With decisions 1, 2 and 5 together (class map and plateau rule, plate-margin bel
 - **Bounds:** the layer stores a min/max pyramid per 32 x 32 block: about 90 MB for the planet (1-2.5 % of the layer), seconds to build, 2.5-4 us a lookup. Without it the steep classes stop refining at level 13-15 ([SPIKE-82](../../spikes/m9-lod-steep/results/results.md)); with it they plan to level 18 with no capped tile at 5-8 % more nodes ([SPIKE-83](../../spikes/m9-bounds-pyramid/results/results.md)).
 - **Cost to reverse:** low. The layer is separate and switched; turning it off restores today's field. The bake is re-run, not migrated.
 
-## 2. Relief classes drive the terrain's amplitude ([ADR 0089](../adr/0089-relief-classes-drive-the-terrains-amplitude.md), proposed; outline in SPIKE-76 section 5)
+## 2. Relief classes drive the terrain's amplitude ([ADR 0089](../adr/0089-relief-classes-drive-the-terrains-amplitude.md), accepted by the owner 2026-11-01 with the 45° slope ceiling, ADR 0091; outline in SPIKE-76 section 5)
 - **Evidence:**
   - with a class per landform, all four hill landforms pass criterion 1, the Alps included (in-sample, [SPIKE-76](../../spikes/m9-generator-design/results/results.md));
   - a default class map matches Earth's class shares (63 / 14 / 23 %) with smooth `k` ([SPIKE-77](../../spikes/m9-class-map/results/results.md));
