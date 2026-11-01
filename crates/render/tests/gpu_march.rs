@@ -257,7 +257,7 @@ fn edge_pose(corner: bool, high_faces: &[usize]) -> f32 {
         let n = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
         let a = [a[0] / n, a[1] / n, a[2] / n];
         // East toward -y +x: perpendicular to a within the plane of x, y.
-        let e = [0.7071f32, -0.7071, 0.0];
+        let e = [std::f32::consts::FRAC_1_SQRT_2, -std::f32::consts::FRAC_1_SQRT_2, 0.0];
         let nn = [a[1] * e[2] - a[2] * e[1], a[2] * e[0] - a[0] * e[2], a[0] * e[1] - a[1] * e[0]];
         (a, e, nn)
     } else {
