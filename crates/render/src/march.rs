@@ -292,6 +292,11 @@ pub struct MarchParams {
     pub cube_texel_m: f32,
 }
 
+/// The penumbra search distance (REND-049), metres.
+pub const PENUMBRA_SEARCH_M: f32 = 2_000.0;
+/// The longest march (REND-049), metres.
+pub const MAX_MARCH_M: f32 = 1_000_000.0;
+
 /// The tangent of the sun's angular radius: 0.267 degrees.
 pub const SUN_DISC_TAN: f32 = 0.004_660_3;
 

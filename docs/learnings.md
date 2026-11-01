@@ -110,3 +110,9 @@ Scope: project (real-GPU window tests, the real-store gate, acceptance)
 - While the Windows session is locked or in modern standby, present stalls 1.3 to 2.7 s or the device is lost; unlocked, the same test passes in 26 s. A remote unlock (Chrome Remote Desktop) counts.
 - Headless scenes, the software adapter and CI are unaffected. Window checks report NOT RUN when locked (TEST-073).
 
+
+## 2026-11-01 The clipmap gather needs one atomic, against ADR 0085 point 9
+Scope: render (REND-047, REND-053; ADR 0085 point 9)
+- Point 9 says layer 1 uses no atomics. Overlapping blocks written by unordered dispatches raced on the software adapter (an incremental gather differed from a full one at random). The gather now clears, claims (`atomicMax` of the job index) and writes, so the finest block wins in any dispatch order.
+- The result of an integer maximum does not depend on order, which is what point 9 protects. REND-053 now says that (the march, upsample and temporal passes stay atomic-free; a tier A scan checks the shaders). The ADR wording needs a one-line amendment (ADR 0078): "no atomics except the owner pass's integer `atomicMax`".
+- Obsolete when the gather resolves overlaps without an atomic (for example one thread per texel scanning the level's blocks, or a spatial index of winners).

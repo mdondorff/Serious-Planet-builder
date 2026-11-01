@@ -50,7 +50,7 @@ Source: ADR 0085 point 4, SPIKE-56 finding 4 and P3
 - **THEN** the cube texel over it reads the peak's height, and a ray beyond the clipmap grazing that height is shadowed
 
 ### Requirement: REND-049 The shadow march
-A compute pass SHALL compute, at half resolution, for every pixel with a depth, a sun visibility in [0, 1] by marching from the receiver toward the sun over the clipmap and the coarse cube: a texel walk (DDA) with max-mip skipping, the level by distance from the anchor, positions camera-relative f32 in the anchor frame. A sun below the receiver's geometric horizon SHALL give 0 without a march. The visibility SHALL take a penumbra from the smallest `(ray height - terrain height) / distance` along the march, mapped across the sun's disc (0.267 degrees radius), searched to 2 km. The WGSL SHALL hold no planet-radius value (CON-11).
+A compute pass SHALL compute, at half resolution, for every pixel with a depth, a sun visibility in [0, 1] by marching from the receiver toward the sun over the clipmap and the coarse cube: a texel walk (DDA) with max-mip skipping, on the finest level whose window holds the point with a margin of two texels, positions camera-relative f32 in the anchor frame; the march is at most 1,000 km long (the straight ray in the anchor frame is first-order accurate beyond that no longer). A sun below the receiver's geometric horizon SHALL give 0 without a march. The visibility SHALL take a penumbra from the smallest `(ray height - terrain height) / distance` along the march, mapped across the sun's disc (0.267 degrees radius), searched to 2 km. The sphere's drop SHALL arrive as one precomputed f32 coefficient `1 / (2 R)` applied to anchor-relative distances, and the WGSL SHALL hold no planet-radius value (CON-11). A receiver SHALL not shadow itself: the ground box is lowered by half a texel over the first four texels. A coarse cell that reaches past its level's window SHALL be walked in its parts. Beyond the outermost level the march SHALL continue in the cube with strides of 3 % of the distance (at least the outermost texel), sampled at mips whose dilated texels span the stride, and at mip 0 in quarters within one texel of a face edge. Beyond the 2 km search only the sign of the clearance counts. A march that reaches its step limit (2,048 clipmap steps, 256 cube strides) keeps the penumbra found so far (a known light leak at relief beyond the budget; the step count is reported). A pixel without a receiver and a sun straight overhead give 1.
 
 Verify: A, C
 Status: planned
@@ -63,6 +63,18 @@ Source: ADR 0085 points 1, 3 and 5, SPIKE-56 findings 1 and 3 and P1, CON-11
 #### Scenario: Below the horizon
 - **WHEN** the sun is 1 degree below a receiver's geometric horizon
 - **THEN** its visibility is 0 and the march's step count for it is 0
+
+#### Scenario: Receivers
+- **WHEN** receivers lie on flat ground (also a few millimetres under its texel sample) and on a slope facing a sun 10 degrees above it
+- **THEN** every one is lit
+
+#### Scenario: Window edge
+- **WHEN** a level's window is not aligned to the mips and a wall stands in the next level just beyond it
+- **THEN** a ray across the window edge is blocked by that wall
+
+#### Scenario: Cube
+- **WHEN** a ridge stands in the cube across a face edge or at a corner of three faces, in line with the sun
+- **THEN** the receiver is 0, and 1 without the ridge; a low sun (0.2 degrees) over flat ground ends within 600 steps
 
 #### Scenario: No planet radius
 - **WHEN** spec-lint's shader check reads the shadow WGSL
@@ -106,7 +118,7 @@ Source: ADR 0085 Consequences, ADR 0083, BUDG-002, SPIKE-56 P1, ADR 0087
 - **THEN** the first fails and the second passes; a pass within 5 % of the budget measured under load is not a verdict (ADR 0087)
 
 ### Requirement: REND-053 The shadow is the same on every run of an adapter
-The clipmap gather, the coarse cube, the march, the upsample and the temporal pass SHALL use no order-dependent reduction, so that one adapter draws the same shadow bytes on every run of the same frame sequence; the march, the upsample and the temporal pass SHALL use no atomics, and the gather's only atomic is the `atomicMax` of the owner pass (REND-047), whose result does not depend on the order of the dispatches; goldens are kept per adapter (ADR 0061).
+The clipmap gather, the coarse cube, the march, the upsample and the temporal pass SHALL use no order-dependent reduction, so that one adapter draws the same shadow bytes on every run of the same frame sequence. The march, the upsample and the temporal pass SHALL use no atomics. The gather's only atomic is the integer `atomicMax` of its owner pass (REND-047): the owner of a texel is the maximum block index that covers it, and a maximum over integers does not depend on the order in which the dispatches run. Goldens are kept per adapter (ADR 0061).
 
 Verify: A, C
 Status: planned

@@ -2,7 +2,7 @@
 //! that widens with the distance, a sun below the receiver's geometric horizon gives 0 without a march, the cube continues the march, and
 //! two runs write the same bytes.
 
-use planet_render::march::{march_shader, MarchParams, ShadowMarchGpu, SUN_DISC_TAN};
+use planet_render::march::{march_shader, MarchParams, ShadowMarchGpu, PENUMBRA_SEARCH_M, SUN_DISC_TAN};
 use planet_render::shadow::{ClipmapGpu, CoarseCubeGpu, NO_DATA_M};
 use planet_render::{AdapterPolicy, GpuContext};
 
@@ -43,7 +43,7 @@ fn params(sun_elevation_deg: f32, drop_coefficient: f32) -> MarchParams {
         sun_tan: SUN_DISC_TAN,
         drop_coefficient,
         max_distance_m: 20_000.0,
-        penumbra_search_m: 2_000.0,
+        penumbra_search_m: PENUMBRA_SEARCH_M,
         levels: (0..LEVELS)
             .map(|k| ([-(TEXELS as i32) / 2, -(TEXELS as i32) / 2, TEXELS as i32 / 2, TEXELS as i32 / 2], FIRST_TEXEL_M * (1 << k) as f32))
             .collect(),
