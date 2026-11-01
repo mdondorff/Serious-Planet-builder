@@ -20,7 +20,7 @@ Source: ADR 0085 points 2 and 3, SPIKE-56 finding 2 and P2, CON-03, CON-11, STRM
 - **THEN** both plans are equal, and a tile finer than a level's texel is replaced in that level by its resident ancestor
 
 ### Requirement: REND-047 The clipmap gather applies the frame's preview stamps
-A compute pass SHALL write each dirty rectangle of each level from the tile slots (the compact heights over the biquadratic base, as the vertex stage reads them), bilinear in `(u, v)`, minus the tile's drop, into an `R32Float` array texture, and SHALL apply the frame's preview stamps exactly where the vertex stage applies them (REND-033, REND-045), with the same WGSL stamp function. It SHALL then rebuild the max-height mips of the touched region, each texel the maximum over the 3x3-dilated footprint of its parent's texels. An incremental update SHALL write the same bytes as a full rebuild of the same plan.
+A compute pass SHALL write each dirty rectangle of each level from the tile slots (the compact heights over the biquadratic base, as the vertex stage reads them), bilinear in `(u, v)`, minus the tile's drop, into an `R32Float` array texture, and SHALL apply the frame's preview stamps exactly where the vertex stage applies them (REND-033, REND-045), with the same WGSL stamp function. It SHALL then rebuild the max-height mips of the touched region, each texel the maximum over the 3x3-dilated footprint of its parent's texels. Where blocks overlap, the finest block (the last in the plan's order) SHALL win whichever order the adapter runs the dispatches in, and a texel within a quarter texel of a tile's edge MAY be taken from either tile. The stamps are applied at plane positions around the clipmap's anchor (distances in that plane, which differ from the vertex stage's tangent-plane distances by a term of the order of the reach squared over the planet radius). An incremental update SHALL write the same bytes as a full rebuild of the same plan.
 
 Verify: C
 Status: planned
@@ -28,7 +28,7 @@ Source: ADR 0085 point 2, SPIKE-56 finding 2 and P5, REND-016, REND-033, REND-04
 
 #### Scenario: Readback
 - **WHEN** a plan of 256^2-texel levels is gathered on the software adapter
-- **THEN** sample texels read the tile height minus the drop within 1 mm, and each mip texel equals the maximum of its dilated footprint
+- **THEN** sample texels read the tile height minus the drop within 1 mm (0.1 m on a seam texel) plus the f32 rounding of the value, and each mip texel equals the maximum of its dilated footprint
 
 #### Scenario: Incremental equals full
 - **WHEN** one tile is refreshed and its rectangle is gathered, and the same plan is gathered from scratch

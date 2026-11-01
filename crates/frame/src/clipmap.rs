@@ -182,6 +182,12 @@ pub struct ClipmapPlan {
     pub levels: Vec<LevelPlan>,
 }
 
+/// The plane position (metres east and north in the anchor's tangent basis, azimuthal equidistant) of the unit direction `dir` around the
+/// unit direction `anchor`: where a stamp or a point sits in the clipmap's coordinates.
+pub fn plane_position(anchor: Vec3, dir: Vec3, radius_m: f64) -> (f64, f64) {
+    Frame::new(anchor, radius_m).project(dir)
+}
+
 /// The anchor's tangent frame and the azimuthal equidistant projection around it.
 #[derive(Clone, Copy, Debug)]
 struct Frame {
