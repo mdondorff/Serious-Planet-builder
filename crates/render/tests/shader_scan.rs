@@ -113,6 +113,9 @@ fn shipped_shaders_contain_no_planet_scale_values() {
     for h in scan(&planet_render::shadow::cube_mip_shader()) {
         all.push(format!("coarse-cube-mip: {h}"));
     }
+    for h in scan(&planet_render::march::march_shader()) {
+        all.push(format!("shadow-march: {h}"));
+    }
     for h in scan(&planet_render::shadow::mip_shader()) {
         all.push(format!("clipmap-mip: {h}"));
     }
@@ -161,4 +164,21 @@ fn the_composite_declares_the_altitude_and_the_steps_of_the_cameras_march_from_t
     for line in declared {
         assert!(source.contains(&line), "the composite declares `{line}`");
     }
+}
+
+// spec: REND-053
+#[test]
+fn the_march_and_the_mip_shaders_contain_no_atomics() {
+    for (name, src) in [
+        ("shadow-march", planet_render::march::march_shader()),
+        ("clipmap-mip", planet_render::shadow::mip_shader()),
+        ("coarse-cube", planet_render::shadow::cube_shader(16)),
+        ("coarse-cube-mip", planet_render::shadow::cube_mip_shader()),
+    ] {
+        assert!(!src.contains("atomic"), "REND-053: {name} must not use atomics");
+    }
+    // The gather's owner pass is the one atomic of layer 1, an integer maximum (REND-047).
+    let gather = planet_render::shadow::gather_shader(16);
+    assert_eq!(gather.matches("atomicMax").count(), 1);
+    assert!(!gather.contains("atomicAdd") && !gather.contains("atomicExchange") && !gather.contains("atomicCompareExchangeWeak"));
 }
