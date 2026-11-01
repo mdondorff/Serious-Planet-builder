@@ -17,6 +17,7 @@ pub mod load;
 pub mod loaded;
 pub mod prefill;
 pub mod preflight;
+pub mod reserve;
 pub mod session;
 pub mod smoke;
 pub mod streaming;

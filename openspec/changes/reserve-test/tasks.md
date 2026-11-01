@@ -3,9 +3,9 @@
 - [x] 1.2 Spec deltas (BUDG-011, BUDG-012; BUDG-006 stays)
 
 ## 2. Tier A (GPU-free)
-- [ ] 2.1 `SyntheticLoad` definitions with the shares of BUDG-001 to BUDG-003 and the calibration of the CPU spin on a fake clock; a real-clock tolerance test (5 %) (BUDG-011)
-- [ ] 2.2 The core load: spin jobs on a share keep exactly `ceiling` threads busy and never more; terrain's ceiling holds beside them (BUDG-011, BUDG-008 on fake work)
-- [ ] 2.3 The report: shares, measured value, limit, verdict, largest overrun named (BUDG-007, BUDG-012), on recorded fixtures
+- [x] 2.1 (`planet_perf::reserve`: `LOADS`, `spin`, `calibrate`) `SyntheticLoad` definitions with the shares of BUDG-001 to BUDG-003 and the calibration of the CPU spin on a fake clock; a real-clock tolerance test (5 %) (BUDG-011)
+- [x] 2.2 (`planet::reserveload::CoreLoad`) The core load: spin jobs on a share keep exactly `ceiling` threads busy and never more; terrain's ceiling holds beside them (BUDG-011, BUDG-008 on fake work)
+- [x] 2.3 (`planet_perf::reserve::ReserveReport`) The report: shares, measured value, limit, verdict, largest overrun named (BUDG-007, BUDG-012), on recorded fixtures
 
 ## 3. Tier C
 - [ ] 3.1 The GPU burn pass, calibrated with timestamp queries to the GPU ms; skipped with a reason where timestamps are unsupported (software adapter)
