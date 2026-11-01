@@ -31,6 +31,22 @@ slow-timeout = { period = "90s", terminate-after = 5 }
 filter = 'binary(gpu_all) and test(the_lit_coast_view_over_streamed_tiles_draws_the_same_pixels_still_and_after_a_small_turn_and_back)'
 slow-timeout = { period = "90s", terminate-after = 5 }
 
+# Declared limit (approved by the planner, 2026-11-01, BUILD-003; SPIKE-84). `gpu_edit_perf::the_edit_latency_scene_runs_end_to_end_in_smoke_mode_and_prints_its_table`
+# runs the edit-latency scene end to end in smoke mode. On the Windows CI runner (WARP, partition `C 1/2`) it was cut off at the 300 s limit of the
+# `gpu_` tier in 22 runs between 2026-10-19 and 2026-10-25 and passed on re-run (39413040398, 39404054677): runner load, not a hang. A declared 450 s
+# (5 x 90 s) still catches a hang. The first matching override sets a value, so this one comes before the `gpu_` one. No test is skipped, retried or changed.
+[[profile.default.overrides]]
+filter = 'binary(gpu_all) and test(the_edit_latency_scene_runs_end_to_end_in_smoke_mode_and_prints_its_table)'
+slow-timeout = { period = "90s", terminate-after = 5 }
+
+# Declared limit (approved by the planner, 2026-11-01, BUILD-003; SPIKE-84). `gpu_stills::the_stills_scene_draws_each_pose_with_its_horizon_maps_baked`
+# draws every pose of the stills scene. On the Windows CI runner (WARP, partition `C 2/2`) it was cut off at 300 s in 15 runs (under its former name
+# `…_with_its_chunks_landed…`) and passed on re-run (40234157047, 40217219666). A declared 450 s (5 x 90 s) still catches a hang. The first matching
+# override sets a value, so this one comes before the `gpu_` one. No test is skipped, retried or changed.
+[[profile.default.overrides]]
+filter = 'binary(gpu_all) and test(the_stills_scene_draws_each_pose_with_its_horizon_maps_baked)'
+slow-timeout = { period = "90s", terminate-after = 5 }
+
 # The software-adapter GPU tier (BUILD-003): the heavy `gpu_*` tests take 40 to 66 s alone and up to 144 s beside the other processes of
 # a full `cargo xtask test gpu` (about 20 at once, each software rasteriser multi-threaded), so they reach the 120 s mark of the default
 # limit. The limit is there to catch a hang, not to budget a test: these binaries terminate after 300 s (5 x 60 s). Grouping the heavy
@@ -65,6 +81,7 @@ path = "junit.xml"
 [test-groups]
 real-gpu-heavy = { max-threads = 2 }
 heavy-window = { max-threads = 2 }
+gpu-tier = { max-threads = 8 }
 
 [profile.real-gpu]
 inherits = "default"
@@ -85,7 +102,18 @@ test-group = "real-gpu-heavy"
 # `gpu_envelope_perf`) are CPU-bound (each software rasteriser uses every core) and their wall time swings 2 to 5 times with how many of them run
 # beside each other: the same sweep took 72 s in one job of one CI run and 215 s in the other (`TIMING` of #881 and #883, Windows WARP, 4 threads).
 # They share a group that runs at most 2 at once; the lighter tests still fill the other threads. Only the overlap changes: no test is skipped,
-# retried or changed (the planner's proposal, 2026-10-29; CI is the judge of what it does to the per-test and the job time).
+# retried or changed (the planner's proposal, 2026-10-29; CI is the judge of what it does to the per-test and the job time). Joined 2026-11-01
+# (BUILD-003; SPIKE-84): `gpu_edit_perf`, `gpu_stills` and the three `gpu_skeleton` loop tests, which timed out under the same load on WARP CI
+# (37 runs in 14 days) and locally (2026-10-31).
 [[profile.default.overrides]]
-filter = 'binary(gpu_all) and (test(/^gpu_window::/) or test(/^gpu_water_coverage::/) or test(/^gpu_stream_perf::/) or test(/^gpu_envelope_perf::/))'
+filter = 'binary(gpu_all) and (test(/^gpu_window::/) or test(/^gpu_water_coverage::/) or test(/^gpu_stream_perf::/) or test(/^gpu_envelope_perf::/) or test(/^gpu_edit_perf::/) or test(/^gpu_stills::/) or test(the_pipelined_loop_settles_on_the_synchronous_frame_from_a_cold_start_and_after_a_jump) or test(the_draw_flag_selects_the_path_and_every_loop_draws_the_same_frame_on_either) or test(the_upload_flag_selects_the_write_path_and_the_batched_loop_draws_the_same_frames_in_fewer_calls))'
 test-group = "heavy-window"
+
+# The software GPU tier runs at most 8 `gpu_*` tests at once (BUILD-003; SPIKE-84); every `gpu_*` test lives in a `gpu_all` binary (BUILD-015).
+# A local software `test gpu` started about 20 rasterising processes on the 16-thread laptop: the 12 timeouts of 2026-10-20 and the 3
+# `gpu_skeleton` timeouts of 2026-10-31 came from that load. A test the override above puts in `heavy-window` stays there (the first matching
+# override sets the group). Tier A and B are not capped; a machine with 8 cores or fewer (CI's runners) runs as before. No test is skipped,
+# retried or changed.
+[[profile.default.overrides]]
+filter = 'binary(gpu_all)'
+test-group = "gpu-tier"
