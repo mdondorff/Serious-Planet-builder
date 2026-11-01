@@ -11,7 +11,7 @@ Source: SPIKE-61 to SPIKE-83 (`spikes/m9-*/results/results.md`); ADR 0089; ADR 0
 - Disk (decision 7, owner): the erosion result is a separate layer beside `global16384` first, about 7-10 GB (SPIKE-61).
 
 ## Decision
-1. **Two new channels in the bake**, each with min and max per block: the relief driver `k`, from the class weights of ADR 0089 and tapered to 1 towards the coast band of ADR 0056; and the ring mean `m`, the bake's mean over a ring. Grids, the ring's radius and the class amplitudes are in the generator spec.
+1. **Two new channels in the bake**, each with min and max per block: the relief driver `k`, from the class weights of ADR 0089 and tapered to 1 towards the coast band of ADR 0056; and the ring mean `m`, the bake's mean over a ring. Grids, the ring's radius and the class amplitudes are in the generator spec (GEN-097, GEN-099).
 2. **Runtime base field:** `m + k (e - m)` plus `k` times the creases, with `e` the bake. Each term is one read at the point, so nothing at runtime reads with a wide stencil.
 3. **Bounds per cap** come from the blocks' ranges of `e`, `k` and `m`, the layer's min/max pyramid (point 8) and the crease bounds, nested as LOD-012 requires.
 4. **The erosion layer, in two passes** (routing is global, SPIKE-68; SPIKE-70):
@@ -21,11 +21,11 @@ Source: SPIKE-61 to SPIKE-83 (`spikes/m9-*/results/results.md`); ADR 0089; ADR 0
       - a local carve of small catchments that only incises: no fill, no breach, no uplift (SPIKE-72, SPIKE-73);
       - thermal at the angle of repose on active cells;
       - one deposition sweep on the last route.
-   The layer stores each tile's change against the base of point 2 (decision 7). Grid sizes, the re-routing period and the catchment limit are in the bake spec.
+   The layer stores each tile's change against the base of point 2 (decision 7). Grid sizes, the re-routing period and the catchment limit are in the spec (GEN-100, GEN-101).
 5. **The runtime field adds the layer** bilinearly. Below the layer's cells the field's octaves and the shader detail apply (R6).
 6. **Determinism:** every kernel is a Jacobi gather or a fixed topological sweep in f64 with `libm` (CON-14), and the result does not depend on the thread count.
 7. **Checkpoints and keys:** the bake checkpoints each face carve and each tile, and resumes from the last complete one. The layer is keyed by the bake key, the channel versions and the kernel parameters (ADR 0006).
-8. **A min/max pyramid of the layer:** the min and max of each block of the layer, and of each coarser level from four blocks below, stored with the layer and rounded outward. A cap's bounds read a few blocks; below the layer's cells the runtime detail adds its analytic bound; a cap across a face edge reads both faces' blocks (SPIKE-83). The block size and precision are in the bake spec.
+8. **A min/max pyramid of the layer:** the min and max of each block of the layer, and of each coarser level from four blocks below, stored with the layer and rounded outward. A cap's bounds read a few blocks; below the layer's cells the runtime detail adds its analytic bound; a cap across a face edge reads both faces' blocks (SPIKE-83). The block size and precision are in the spec (STRM-066).
 9. **Crates (CON-02):** the bake kernels and the pyramid's builder live in `planet-generators`; the store keeps the layer and the pyramid in `planet-cache` behind a `planet-generators` trait (as `LatticeSource` today); the cap bounds read it in the field, which `planet-frame`'s planner calls. Dependencies point downward only.
 
 ## Consequences

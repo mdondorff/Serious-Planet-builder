@@ -25,8 +25,8 @@ ADR 0088 (proposed) fixes the format. This change builds it as M9 item R4.
 - none
 
 ### Modified Capabilities
-- `generator-pipeline`: the relief channels, the runtime base formula, the bake kernels, the erosion layer (requirement IDs TBD, ask the planner)
-- `streaming-cache`: the erosion layer's storage, keys and reads (IDs TBD)
+- `generator-pipeline`: the relief classes and their default source, the base elevation, the class amplitudes and hill band, the relief channels and the runtime base formula, the two bake passes, the cap bounds (GEN-093 to GEN-102, planned)
+- `streaming-cache`: the erosion layer's storage and keys, its min/max pyramid, the class-weights and relief channels (STRM-065 to STRM-068, planned)
 - `testing`: the scorecard run on the baked field, the level-step and seam checks (IDs TBD)
 
 ## Impact
