@@ -14,6 +14,7 @@
 use crate::preview::PreviewStamp;
 use planet_core::cube::FaceMapping;
 use planet_core::{PlanetFixed, TileId, Vec3};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 /// Levels of the clipmap (1 m to 1,024 m texels; 1 km to 1,048 km squares).
@@ -26,6 +27,9 @@ pub const CLIPMAP_FINEST_TEXEL_M: f64 = 1.0;
 pub const AFFINE_TOLERANCE_TEXELS: f64 = 0.125;
 /// The drop fit's tolerance floor, metres.
 pub const DROP_TOLERANCE_FLOOR_M: f64 = 1.0e-3;
+/// Frames a different finest level under the camera (so a different level-0 texel) must hold before the clipmap re-anchors to it: a camera
+/// hovering on the boundary of two tile levels does not thrash the generation and void every level's history.
+pub const TEXEL_CHANGE_HYSTERESIS_FRAMES: u32 = 30;
 /// The smallest block edge, texels: below it a block is kept whatever its error (the error is then reported by [`BlockMap::fit_error`]).
 const MIN_BLOCK_TEXELS: i64 = 4;
 
@@ -251,8 +255,26 @@ struct State {
     texel0: f64,
     windows: Vec<TexelRect>,
     resident: Vec<TileId>,
-    blocks: Vec<Arc<Vec<BlockMap>>>,
+    levels: Vec<LevelCache>,
     stamps: Vec<(Vec3, f64)>,
+    /// A level-0 texel the camera's finest level asks for, and for how many frames in a row.
+    pending_texel0: Option<(f64, u32)>,
+}
+
+/// One level's tiles in the anchor frame, so a change of R or of the window rebuilds only the tiles it touches.
+#[derive(Default)]
+struct LevelCache {
+    cands: BTreeMap<TileId, Cand>,
+    /// The sorted blocks of `cands`, rebuilt when a candidate changes.
+    blocks: Arc<Vec<BlockMap>>,
+}
+
+struct Cand {
+    /// The tile's footprint, unclipped.
+    foot: TexelRect,
+    /// The part of it inside the window the blocks were made for.
+    clip: TexelRect,
+    blocks: Vec<BlockMap>,
 }
 
 pub struct ClipmapPlanner {
@@ -281,7 +303,21 @@ impl ClipmapPlanner {
     ) -> ClipmapPlan {
         let p = self.params;
         let cam = camera.0.normalized();
-        let texel0 = CLIPMAP_FINEST_TEXEL_M.max(finest_spacing_under(&p, resident, map, cam));
+        let wanted = CLIPMAP_FINEST_TEXEL_M.max(finest_spacing_under(&p, resident, map, cam));
+        let (texel0, pending_texel0) = match &self.state {
+            Some(s) if s.texel0 != wanted => {
+                let n = match s.pending_texel0 {
+                    Some((t, n)) if t == wanted => n + 1,
+                    _ => 1,
+                };
+                if n >= TEXEL_CHANGE_HYSTERESIS_FRAMES {
+                    (wanted, None)
+                } else {
+                    (s.texel0, Some((wanted, n)))
+                }
+            }
+            _ => (wanted, None),
+        };
         let half = i64::from(p.texels / 2);
         let texel_of = |k: usize| texel0 * f64::from(1u32 << k);
 
@@ -305,37 +341,76 @@ impl ClipmapPlanner {
             })
             .collect();
 
-        let prev = if reanchored { None } else { self.state.as_ref() };
+        let prev_windows = self.state.as_ref().filter(|_| !reanchored).map(|s| s.windows.clone());
+        let old_stamps: Vec<(Vec3, f64)> = self.state.as_ref().filter(|_| !reanchored).map(|s| s.stamps.clone()).unwrap_or_default();
         let mut changed: Vec<TileId> = refreshed.to_vec();
-        if let Some(s) = prev {
+        if let Some(s) = self.state.as_ref().filter(|_| !reanchored) {
             changed.extend(symmetric_difference(&s.resident, resident));
         }
+        let mut old_caches = self.state.take().filter(|_| !reanchored).map(|s| s.levels);
 
         let mut levels = Vec::with_capacity(p.levels);
-        let mut all_blocks = Vec::with_capacity(p.levels);
+        let mut caches: Vec<LevelCache> = Vec::with_capacity(p.levels);
         #[allow(clippy::needless_range_loop)] // `k` also scales the texel and indexes the previous state's levels
         for k in 0..p.levels {
             let texel_m = texel_of(k);
             let window = windows[k];
-            let mut dirty: Vec<TexelRect> = match prev {
+            let mut dirty: Vec<TexelRect> = match prev_windows.as_ref() {
                 None => vec![window],
-                Some(s) => window.minus(&s.windows[k]),
+                Some(w) => window.minus(&w[k]),
             };
             let deepest = p.deepest_level_for(texel_m);
-            let mut rebuild = prev.is_none_or(|s| s.windows[k] != window);
-            if prev.is_some() {
+            // The farthest a window's corner can be from the anchor, for the cheap reject of tiles that can never reach it.
+            let max_reach_m = f64::from(p.texels) * (0.5 * texel_m + 0.25 * texel0) + 2.0 * texel_m;
+            let max_reach_m = max_reach_m * core::f64::consts::SQRT_2;
+            let mut cache = old_caches.as_mut().map(|c| std::mem::take(&mut c[k])).unwrap_or_default();
+            let mut modified = old_caches.is_none();
+            if old_caches.is_none() {
+                for &tile in resident.iter().filter(|t| t.level() <= deepest) {
+                    if let Some(c) = self.make_cand(&frame, map, resident, tile, texel_m, window, deepest, max_reach_m) {
+                        cache.cands.insert(tile, c);
+                    }
+                }
+            } else {
+                // The tiles a change of R touches: the changed tiles (their own entry) and their parents (the children-all-resident rule).
+                let mut touched: Vec<TileId> = Vec::new();
                 for t in changed.iter().filter(|t| t.level() <= deepest) {
+                    touched.push(*t);
+                    touched.extend(t.parent());
                     if let Some(r) = tile_rect(&frame, map, *t, texel_m).map(|r| r.intersect(&window)).filter(|r| !r.is_empty()) {
                         dirty.push(r);
-                        rebuild = true;
+                    }
+                }
+                touched.sort();
+                touched.dedup();
+                for tile in touched {
+                    modified |= cache.cands.remove(&tile).is_some();
+                    if let Some(c) = self.make_cand(&frame, map, resident, tile, texel_m, window, deepest, max_reach_m) {
+                        cache.cands.insert(tile, c);
+                        modified = true;
+                    }
+                }
+                if prev_windows.as_ref().is_some_and(|w| w[k] != window) {
+                    for (tile, c) in cache.cands.iter_mut() {
+                        let clip = c.foot.intersect(&window);
+                        if clip != c.clip {
+                            c.clip = clip;
+                            c.blocks.clear();
+                            if !clip.is_empty() {
+                                split_blocks(&frame, map, *tile, clip, texel_m, &mut c.blocks);
+                            }
+                            modified = true;
+                        }
                     }
                 }
             }
-            let blocks = match prev {
-                Some(s) if !rebuild => Arc::clone(&s.blocks[k]),
-                _ => Arc::new(self.level_blocks(&frame, map, resident, k, texel_m, window)),
-            };
-            let old_stamps = prev.map_or(&[][..], |s| &s.stamps[..]);
+            if modified {
+                let mut all: Vec<BlockMap> = cache.cands.values().flat_map(|c| c.blocks.iter().copied()).collect();
+                all.sort_by_key(|b| (b.tile.level(), b.tile, b.rect.y0, b.rect.x0));
+                cache.blocks = Arc::new(all);
+            }
+            let blocks = Arc::clone(&cache.blocks);
+            caches.push(cache);
             for (dir, reach) in stamps.iter().map(|s| (s.dir, s.reach_m)).chain(old_stamps.iter().copied()) {
                 if dir.dot(frame.dir) <= 0.0 {
                     continue;
@@ -354,7 +429,6 @@ impl ClipmapPlanner {
             }
             dirty.sort_by_key(|r| (r.y0, r.x0, r.y1, r.x1));
             dirty.dedup();
-            all_blocks.push(Arc::clone(&blocks));
             levels.push(LevelPlan { texel_m, window, blocks, dirty });
         }
 
@@ -364,49 +438,48 @@ impl ClipmapPlanner {
             texel0,
             windows,
             resident: resident.to_vec(),
-            blocks: all_blocks,
+            levels: caches,
             stamps: stamps.iter().map(|s| (s.dir, s.reach_m)).collect(),
+            pending_texel0,
         });
         ClipmapPlan { anchor: frame.dir, generation, reanchored, levels }
     }
 
-    /// The blocks of level `k`: for every region the finest resident tile no finer than the level's texel.
-    fn level_blocks(
+    /// The candidate of `tile` on a level with the given texel: its footprint and its blocks inside `window`, if the level reads the tile:
+    /// it is resident, no finer than the level, not covered by four resident children no finer than the level (R is not a full quadtree
+    /// since the horizon cut drops children, so a tile with only some children stays as their backdrop), and can reach the window.
+    #[allow(clippy::too_many_arguments)]
+    fn make_cand(
         &self,
         frame: &Frame,
         map: &dyn FaceMapping,
         resident: &[TileId],
-        k: usize,
+        tile: TileId,
         texel_m: f64,
         window: TexelRect,
-    ) -> Vec<BlockMap> {
+        deepest: u8,
+        max_reach_m: f64,
+    ) -> Option<Cand> {
         let p = &self.params;
-        let deepest = p.deepest_level_for(texel_m);
-        // The farthest corner of the window from the anchor (the window's centre is up to a quarter of level 0's extent off it).
-        let half_diag_m = libm::hypot(window.x0.abs().max(window.x1.abs()) as f64, window.y0.abs().max(window.y1.abs()) as f64) * texel_m;
-        let mut out: Vec<BlockMap> = Vec::new();
-        for &tile in resident {
-            let l = tile.level();
-            if l > deepest {
-                continue;
-            }
-            // A tile whose four children are resident, and no finer than the level, is covered by them. R is not a full quadtree (the
-            // horizon cut drops children), so a tile with only some of its children stays as the backdrop of the others.
-            if l < deepest && tile.children().is_some_and(|c| c.iter().all(|ch| resident.binary_search(ch).is_ok())) {
-                continue;
-            }
-            // Cheap reject by the angle between the tile's centre and the anchor, before any projection.
-            let tile_r_m = p.radius_m * core::f64::consts::FRAC_PI_2 / f64::from(1u32 << l.min(31));
-            let reach = (half_diag_m + tile_r_m) / p.radius_m;
-            if reach < core::f64::consts::PI && tile.center_direction(map).dot(frame.dir) < libm::cos(reach) {
-                continue;
-            }
-            let Some(rect) = tile_rect(frame, map, tile, texel_m).map(|r| r.intersect(&window)).filter(|r| !r.is_empty()) else { continue };
-            split_blocks(frame, map, tile, rect, texel_m, &mut out);
+        let l = tile.level();
+        if l > deepest || resident.binary_search(&tile).is_err() {
+            return None;
         }
-        let _ = k;
-        out.sort_by_key(|b| (b.tile.level(), b.tile, b.rect.y0, b.rect.x0));
-        out
+        if l < deepest && tile.children().is_some_and(|c| c.iter().all(|ch| resident.binary_search(ch).is_ok())) {
+            return None;
+        }
+        let tile_r_m = p.radius_m * core::f64::consts::FRAC_PI_2 / f64::from(1u32 << l.min(31));
+        let reach = (max_reach_m + tile_r_m) / p.radius_m;
+        if reach < core::f64::consts::PI && tile.center_direction(map).dot(frame.dir) < libm::cos(reach) {
+            return None;
+        }
+        let foot = tile_rect(frame, map, tile, texel_m)?;
+        let clip = foot.intersect(&window);
+        let mut blocks = Vec::new();
+        if !clip.is_empty() {
+            split_blocks(frame, map, tile, clip, texel_m, &mut blocks);
+        }
+        Some(Cand { foot, clip, blocks })
     }
 }
 
