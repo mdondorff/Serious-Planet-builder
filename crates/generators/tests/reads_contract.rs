@@ -1,7 +1,7 @@
 //! ADR 0021 point 7 (M3 gate condition 2): the reads a stage makes while it generates are a subset of the reads its tile declared at plan time,
 //! and its key follows them. Run over the whole stack of authored stages (stamps and lines on one layer, brush strokes on another) and over a set
 //! of tiles from continental to metre scale, near the items and far from them. A stage that read an item its tile did not declare would key
-//! wrongly (learning 2026-10-11); one that declared too little would not re-key the tile when that item changes.
+//! wrongly (ADR 0021 point 7); one that declared too little would not re-key the tile when that item changes.
 
 use std::sync::{Arc, Mutex};
 

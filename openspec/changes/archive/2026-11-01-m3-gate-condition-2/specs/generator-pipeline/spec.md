@@ -69,6 +69,6 @@ Source: ADR 0066 points 1, 4 and 5, ADR 0067, ADR 0021 point 7, SPIKE-13, M6 pla
 - **WHEN** a stamped coast scene is drawn in the debug relief view on each adapter family
 - **THEN** the frame hash equals the one recorded for that family (WARP and the RTX; an adapter with no recorded hash prints its own), the unstamped and the stamped scene differ, and the images are written to `target/review/stamps/` for inspection
 
-#### Scenario: Reads against declared reads
+#### Scenario: Reads contract over the authored stack
 - **WHEN** the stack of stamp, line and brush stages generates tiles from continental to metre scale, near the items and far from them, through a recording reader
 - **THEN** every item read is in the footprint its tile declared, removing the items the tile did not declare changes none of its heights (nor the key of a tile of level 11 or finer), and removing an item that was read re-keys the tile
