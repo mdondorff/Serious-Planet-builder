@@ -1,0 +1,1 @@
+- 2026-11-01 b5-test-limits: declared 450 s limits for the edit-latency smoke and the stills scene, three more tests in the heavy-window group and a software GPU tier of at most 8 at once (BUILD-003; SPIKE-84 fixes 1 and 3)

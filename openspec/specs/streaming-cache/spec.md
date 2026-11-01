@@ -1169,3 +1169,14 @@ Source: opus-planner (2026-10-27, window 8), ADR 0083 point 2, STRM-049, ADR 008
 #### Scenario: A queued job against waiting bakes
 - **WHEN** a one-worker pool is busy and idle, prefetch and visible jobs are submitted in that order
 - **THEN** the visible jobs start first, then the prefetch job, then the idle jobs; with an idle cap of 1 on three workers, a second idle job does not start while the first runs and two visible jobs run beside it
+
+### Requirement: STRM-061 A horizon bake stops when an edit makes it stale
+The chunk horizon baker SHALL march on its configured threads. A bake whose chunk's edit word (STRM-057) changed while it ran SHALL return no map: the job SHALL publish and store nothing, free its slot, and the chunk SHALL be baked again against the new word once the neighbourhood has settled (STRM-048).
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-27, window 10), STRM-048, STRM-057, STRM-060, ADR 0086
+
+#### Scenario: A bake made stale by an edit
+- **WHEN** a horizon job's baker reports that the heights went stale while it ran
+- **THEN** no map lands or is published for the chunk, the cancelled count is 1, the job's slot is free, and the next update bakes the chunk again and that map lands

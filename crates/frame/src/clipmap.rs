@@ -182,6 +182,12 @@ pub struct ClipmapPlan {
     pub levels: Vec<LevelPlan>,
 }
 
+/// The plane position (metres east and north in the anchor's tangent basis, azimuthal equidistant) of the unit direction `dir` around the
+/// unit direction `anchor`: where a stamp or a point sits in the clipmap's coordinates.
+pub fn plane_position(anchor: Vec3, dir: Vec3, radius_m: f64) -> (f64, f64) {
+    Frame::new(anchor, radius_m).project(dir)
+}
+
 /// The anchor's tangent frame and the azimuthal equidistant projection around it.
 #[derive(Clone, Copy, Debug)]
 struct Frame {
@@ -272,19 +278,47 @@ struct LevelCache {
 struct Cand {
     /// The tile's footprint, unclipped.
     foot: TexelRect,
-    /// The part of it inside the window the blocks were made for.
-    clip: TexelRect,
-    blocks: Vec<BlockMap>,
+    /// The blocks of each grid cell (of [`BLOCK_CELL_TEXELS`] texels, aligned in world texel indices) the footprint meets inside the window.
+    /// A block never depends on the window, so a scroll adds and drops whole cells and no block is refitted: the texels a scroll
+    /// does not dirty keep the bytes a full rebuild would write.
+    cells: BTreeMap<(i64, i64), Vec<BlockMap>>,
+}
+
+/// The edge of the grid cells blocks are fitted in, texels.
+pub const BLOCK_CELL_TEXELS: i64 = 128;
+
+/// The cells of the grid that meet `r`.
+fn cells_meeting(r: &TexelRect) -> impl Iterator<Item = (i64, i64)> {
+    let (cx0, cx1) = (r.x0.div_euclid(BLOCK_CELL_TEXELS), (r.x1 - 1).div_euclid(BLOCK_CELL_TEXELS));
+    let (cy0, cy1) = (r.y0.div_euclid(BLOCK_CELL_TEXELS), (r.y1 - 1).div_euclid(BLOCK_CELL_TEXELS));
+    let empty = r.is_empty();
+    (cy0..=cy1).flat_map(move |cy| (cx0..=cx1).map(move |cx| (cx, cy))).filter(move |_| !empty)
+}
+
+fn cell_rect(c: (i64, i64)) -> TexelRect {
+    TexelRect {
+        x0: c.0 * BLOCK_CELL_TEXELS,
+        y0: c.1 * BLOCK_CELL_TEXELS,
+        x1: (c.0 + 1) * BLOCK_CELL_TEXELS,
+        y1: (c.1 + 1) * BLOCK_CELL_TEXELS,
+    }
 }
 
 pub struct ClipmapPlanner {
     params: ClipmapParams,
     state: Option<State>,
+    force_full: bool,
 }
 
 impl ClipmapPlanner {
     pub fn new(params: ClipmapParams) -> ClipmapPlanner {
-        ClipmapPlanner { params, state: None }
+        ClipmapPlanner { params, state: None, force_full: false }
+    }
+
+    /// The next plan rebuilds every level from scratch around the same anchor and dirties every window: the plan a full rebuild would
+    /// gather, which an incremental gather must equal byte for byte.
+    pub fn force_full_rebuild(&mut self) {
+        self.force_full = true;
     }
 
     pub fn params(&self) -> &ClipmapParams {
@@ -341,13 +375,14 @@ impl ClipmapPlanner {
             })
             .collect();
 
-        let prev_windows = self.state.as_ref().filter(|_| !reanchored).map(|s| s.windows.clone());
-        let old_stamps: Vec<(Vec3, f64)> = self.state.as_ref().filter(|_| !reanchored).map(|s| s.stamps.clone()).unwrap_or_default();
+        let fresh = reanchored || std::mem::take(&mut self.force_full);
+        let prev_windows = self.state.as_ref().filter(|_| !fresh).map(|s| s.windows.clone());
+        let old_stamps: Vec<(Vec3, f64)> = self.state.as_ref().filter(|_| !fresh).map(|s| s.stamps.clone()).unwrap_or_default();
         let mut changed: Vec<TileId> = refreshed.to_vec();
-        if let Some(s) = self.state.as_ref().filter(|_| !reanchored) {
+        if let Some(s) = self.state.as_ref().filter(|_| !fresh) {
             changed.extend(symmetric_difference(&s.resident, resident));
         }
-        let mut old_caches = self.state.take().filter(|_| !reanchored).map(|s| s.levels);
+        let mut old_caches = self.state.take().filter(|_| !fresh).map(|s| s.levels);
 
         let mut levels = Vec::with_capacity(p.levels);
         let mut caches: Vec<LevelCache> = Vec::with_capacity(p.levels);
@@ -392,20 +427,23 @@ impl ClipmapPlanner {
                 }
                 if prev_windows.as_ref().is_some_and(|w| w[k] != window) {
                     for (tile, c) in cache.cands.iter_mut() {
-                        let clip = c.foot.intersect(&window);
-                        if clip != c.clip {
-                            c.clip = clip;
-                            c.blocks.clear();
-                            if !clip.is_empty() {
-                                split_blocks(&frame, map, *tile, clip, texel_m, &mut c.blocks);
+                        let wanted: Vec<(i64, i64)> = cells_meeting(&c.foot.intersect(&window)).collect();
+                        let before = c.cells.len();
+                        c.cells.retain(|cell, _| wanted.contains(cell));
+                        modified |= c.cells.len() != before;
+                        for cell in wanted {
+                            if let std::collections::btree_map::Entry::Vacant(v) = c.cells.entry(cell) {
+                                let mut blocks = Vec::new();
+                                split_blocks(&frame, map, *tile, cell_rect(cell), texel_m, &mut blocks);
+                                v.insert(blocks);
+                                modified = true;
                             }
-                            modified = true;
                         }
                     }
                 }
             }
             if modified {
-                let mut all: Vec<BlockMap> = cache.cands.values().flat_map(|c| c.blocks.iter().copied()).collect();
+                let mut all: Vec<BlockMap> = cache.cands.values().flat_map(|c| c.cells.values().flatten().copied()).collect();
                 all.sort_by_key(|b| (b.tile.level(), b.tile, b.rect.y0, b.rect.x0));
                 cache.blocks = Arc::new(all);
             }
@@ -474,12 +512,13 @@ impl ClipmapPlanner {
             return None;
         }
         let foot = tile_rect(frame, map, tile, texel_m)?;
-        let clip = foot.intersect(&window);
-        let mut blocks = Vec::new();
-        if !clip.is_empty() {
-            split_blocks(frame, map, tile, clip, texel_m, &mut blocks);
+        let mut cells = BTreeMap::new();
+        for cell in cells_meeting(&foot.intersect(&window)) {
+            let mut blocks = Vec::new();
+            split_blocks(frame, map, tile, cell_rect(cell), texel_m, &mut blocks);
+            cells.insert(cell, blocks);
         }
-        Some(Cand { foot, clip, blocks })
+        Some(Cand { foot, cells })
     }
 }
 

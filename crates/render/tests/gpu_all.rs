@@ -2,6 +2,8 @@
 mod gpu_atmosphere;
 #[path = "gpu_burn.rs"]
 mod gpu_burn;
+#[path = "gpu_clipmap.rs"]
+mod gpu_clipmap;
 #[path = "gpu_compact.rs"]
 mod gpu_compact;
 #[path = "gpu_compact_blocks.rs"]
@@ -20,6 +22,8 @@ mod gpu_horizon;
 mod gpu_indirect;
 #[path = "gpu_lit.rs"]
 mod gpu_lit;
+#[path = "gpu_march.rs"]
+mod gpu_march;
 #[path = "gpu_overlay.rs"]
 mod gpu_overlay;
 #[path = "gpu_pipelined.rs"]

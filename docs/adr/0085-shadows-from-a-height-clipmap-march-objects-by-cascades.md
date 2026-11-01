@@ -1,5 +1,5 @@
 # 0085 Shadows from a height clipmap march, objects by cascades
-Status: accepted (owner, 2026-10-30; proposed by opus-planner, 2026-10-29, from SPIKE-56)
+Status: accepted (owner, 2026-10-30; proposed by opus-planner, 2026-10-29, from SPIKE-56); points 3 and 9 amended by ADR 0090 (proposed)
 Date: 2026-10-29
 Source: SPIKE-56 phases 1 and 2 (`spikes/m9-shadow-architecture/results/results.md`); owner's Plateau 6 report (2026-10-29); ADR 0083; CON-11, CON-14
 

@@ -15,12 +15,12 @@ Source: SPIKE-55, SPIKE-65 to SPIKE-83 (`spikes/m9-*/results/results.md`); `docs
 2. **Proposed:** the classes are plain, rolling plain, hills, mountains, high mountains, plateau, badlands and sand sea; a new class bumps the list's version.
 3. **Proposed:** the default source is a rule set over the seed's inputs: plate-margin belts (SPIKE-79) as mountain strength in place of the range zone, plateaus (SPIKE-77), hills on belt flanks and old margins.
 4. **Swappable source:** a derived source (SPIKE-81, through an ADR 0076 rule table) replaces the default only after it is measured on the real bake; the swap bumps the channel's version.
-5. **Amplitude per class:** `k`, the fine-crease floor, the carve's `K t`, the deposition's `kc` and the hill band's amplitude, blended by the weights. Values and the per-cell limit on `k`'s change are in the generator spec.
+5. **Amplitude per class:** `k`, the fine-crease floor, the carve's `K t`, the deposition's `kc` and the hill band's amplitude, blended by the weights. Values and the per-cell limit on `k`'s change are in the generator spec (GEN-097, GEN-098).
 6. **The hill band stays, keyed to the class** (SPIKE-80). The landform-keyed crease factor and the elevation ramps above 300 m are removed; the coast taper stays.
 7. **Proposed:** the global bake's base elevation takes the belt term on the plate mask and the plateau uplifts (a `GLOBAL_VERSION` bump).
 8. **Proposed:** class paint is an authored item (extends ADR 0066) that sets weights, feathered, and overrides every source. With the derived source, paint acts on its drivers (ADR 0076 point 7); no item names a type.
 9. **The bake reads the classes:** ADR 0088's `k` and pass amplitudes come from the class weights.
-10. **Canonical fields (CON-07, CON-14):** the plate mask and the class weights are CPU fields (`libm`, integer hashing, bit-exact for any thread count, no GPU twin). Their stored precision and the order of normalisation are in the generator spec.
+10. **Canonical fields (CON-07, CON-14):** the plate mask and the class weights are CPU fields (`libm`, integer hashing, bit-exact for any thread count, no GPU twin). Their stored precision and the order of normalisation are in the generator spec (GEN-093).
 11. **Crates (CON-02):**
     - the class paint item lives in `planet-world-def` with the other authored items (ADR 0066);
     - the class source, the weights and the amplitudes live in `planet-generators`, and the store reads them through a `planet-generators` trait that `planet-cache` implements, as `LatticeSource` today;

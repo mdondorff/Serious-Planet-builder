@@ -25,11 +25,12 @@
 ### 1a. Plan cost (measured 2026-10-31, `clipmap::incremental_plan_times` and `plan_time_for_a_large_r`, ignored probes)
 | Case | Time | Notes |
 |---|---|---|
-| First plan, or after a re-anchor, 1024^2 levels, R of about 1,600 tiles (32 cells) | 100-350 ms | block fits at coarse levels dominate; never on the frame thread |
+| First plan, or after a re-anchor, 1024^2 levels, R of about 1,600 tiles (32 cells) | about 400 ms | block fits at coarse levels dominate; never on the frame thread |
 | Steady frame, R unchanged | 3-5 us | blocks shared by `Arc` |
-| One tile landed or evicted | 60-110 us | only the tile and its parent are refitted |
-| Scroll by one level-0 texel (mean of 20) | 0.8 ms | tiles straddling a window edge are re-clipped; target 0.1 ms not met |
-- The first plan and a re-anchor run off the frame thread (opus-planner, inbox #13), the old clipmap drawn until it lands.
+| One tile landed or evicted | about 0.5 ms | only the tile and its parent are refitted, in 128-texel grid cells |
+| Scroll by one level-0 texel (mean of 20) | about 0.55 ms | tiles at a window edge gain and lose whole grid cells (no refit, so a scroll writes the bytes of a full rebuild); target 0.1 ms not met |
+- Known miss, not fixed in PR 2b (opus-planner, inbox #20): a one-texel scroll costs about 0.55 ms against the 0.1 ms target. Cause: blocks are fitted on a fixed 128-texel grid, so a scroll that enters a new grid cell fits the whole cell (about 128^2 texels of samples) although only a strip of it is new. If the per-frame budget is affected, the fix is its own shadows PR (a finer grid at the fine levels, or fitting a new cell off-thread with the old clipmap drawn).
+- Thread of the 400 ms first plan: no caller exists yet (the plan and the gather are not wired into the frame path before PR 5), so nothing hitches today. The planner is GPU-free and meant for the terrain share (inbox #13): the first plan and every re-anchor run there, the old clipmap drawn until it lands; the frame thread only calls the incremental plan (0.5 ms). The wiring PR (5) must show that split before it merges.
 - A different finest level under the camera changes level 0's texel; the clipmap re-anchors only after the change has held `TEXEL_CHANGE_HYSTERESIS_FRAMES` (30) frames.
 
 ### 2. Gather (render, compute)
@@ -86,6 +87,17 @@ Until ADR 0087 is accepted, every perf check runs in a planner-authorized window
 | Affine per-tile mapping too coarse near face corners | tier A bound (< 1/8 texel) over corner tiles; a finer split of the tile's rectangle if it fails |
 | Goldens shift on every lit view at once | one PR moves them (PR 5); everything before draws shadows only on new targets |
 | Retirement removes a test that also covers base behaviour | move the assertion to a surviving requirement first (CLAUDE.md) |
+
+## Notes for the march (REND-049), from the coarse cube's review
+- The cube's mips are clamped at each face edge, so the one-texel dilation margin is missing along the 12 cube edges, where the walk also switches faces. The march drops to mip 0 within one coarse texel of a face edge, or dilates across faces; decide in PR 3.
+- The cube holds heights above the sphere (no drop): beyond the clipmap the march adds the sphere's drop from a curvature coefficient passed as a uniform (CON-11).
+- The cube is a max over the floor tiles' lattice samples, not over the finer tiles drawn there: a narrow peak between lattice vertices reads lower than the drawn peak (a peak missed by the lattice under-shadows at a grazing sun; the look review judges it).
+
+## The march as built (PR 3)
+- Curvature arrives as the drop coefficient `c = 1/(2R)` (a precomputed f32 uniform, never R): the drop at a distance rho is `c rho^2`. The review measured the f32 error: positions to 1,000 km keep a step of 0.06 m against texels of 512 m or more, and `c rho^2` at 78 km (the outer level's reach) keeps millimetres. The straight ray in the anchor frame is first-order accurate: beyond about 1,000 km (`max_distance_m`) the slope error grows (about 0.08 at 500 km and a 45 degree sun), so the march stays within 1,000 km.
+- Cube edges: within one cube texel of a face edge, where the mips do not dilate across the edge, a stride is sampled at mip 0 in quarters (3 extra reads per such stride; the other strides cost the same). Tested with a pose across an edge and one at a corner.
+- Receiver bias: the ground is a box a texel wide at its sample, so the box is lowered by half a texel over the first four texels (a receiver on flat ground or on a slope facing the sun is lit).
+- A coarse cell that reaches past a level's window is split until it lies inside it. The skip rule demands the sun disc's clearance only within the 2 km penumbra search.
 
 ## What needs the owner
 - Look review before the horizon maps are deleted (PR 5): stills at river-r1, hills-b and the Plateau 6 drag (300 m, 30 m, 1.8 m; sunset, midday, 2-degree sun), old against new, plus a 5-10 s drag video of a plateau stamp, through `cargo xtask package` (TEST-074).

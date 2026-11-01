@@ -2191,6 +2191,19 @@ impl TerrainRenderer {
         self.tiles.get(&tile).map(|r| r.slot)
     }
 
+    /// Where a resident tile's slot is for the clipmap gather (REND-047): its block, the block's buffer and the slot's first word in it.
+    pub(crate) fn slot_words(&self, tile: planet_core::TileId) -> Option<(usize, &wgpu::Buffer, u32)> {
+        let slot = self.slot_of(tile)?;
+        let (block, local) = ((slot.index / self.pool.block_slots) as usize, slot.index % self.pool.block_slots);
+        let buffer = &self.compact.blocks.get(block)?.as_ref()?.buffer;
+        Some((block, buffer, local * (self.pool.slot_bytes / 4) as u32))
+    }
+
+    /// Cells per tile edge.
+    pub(crate) fn compact_cells(&self) -> u32 {
+        self.cells
+    }
+
     /// The pool configuration whose `allocated_bytes` bound this renderer's allocations.
     pub fn pool_config(&self) -> &PoolConfig {
         &self.pool

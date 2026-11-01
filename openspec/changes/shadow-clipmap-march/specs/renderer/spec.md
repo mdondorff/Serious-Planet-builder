@@ -20,7 +20,7 @@ Source: ADR 0085 points 2 and 3, SPIKE-56 finding 2 and P2, CON-03, CON-11, STRM
 - **THEN** both plans are equal, and a tile finer than a level's texel is replaced in that level by its resident ancestor
 
 ### Requirement: REND-047 The clipmap gather applies the frame's preview stamps
-A compute pass SHALL write each dirty rectangle of each level from the tile slots (the compact heights over the biquadratic base, as the vertex stage reads them), bilinear in `(u, v)`, minus the tile's drop, into an `R32Float` array texture, and SHALL apply the frame's preview stamps exactly where the vertex stage applies them (REND-033, REND-045), with the same WGSL stamp function. It SHALL then rebuild the max-height mips of the touched region, each texel the maximum over the 3x3-dilated footprint of its parent's texels. An incremental update SHALL write the same bytes as a full rebuild of the same plan.
+A compute pass SHALL write each dirty rectangle of each level from the tile slots (the compact heights over the biquadratic base, as the vertex stage reads them), bilinear in `(u, v)`, minus the tile's drop, into an `R32Float` array texture, and SHALL apply the frame's preview stamps exactly where the vertex stage applies them (REND-033, REND-045), with the same WGSL stamp function. It SHALL then rebuild the max-height mips of the touched region, each texel the maximum over the 3x3-dilated footprint of its parent's texels. Where blocks overlap, the finest block (the last in the plan's order) SHALL win whichever order the adapter runs the dispatches in, and a texel within a quarter texel of a tile's edge MAY be taken from either tile. The stamps are applied at plane positions around the clipmap's anchor (distances in that plane, which differ from the vertex stage's tangent-plane distances by a term of the order of the reach squared over the planet radius). An incremental update SHALL write the same bytes as a full rebuild of the same plan.
 
 Verify: C
 Status: planned
@@ -28,7 +28,7 @@ Source: ADR 0085 point 2, SPIKE-56 finding 2 and P5, REND-016, REND-033, REND-04
 
 #### Scenario: Readback
 - **WHEN** a plan of 256^2-texel levels is gathered on the software adapter
-- **THEN** sample texels read the tile height minus the drop within 1 mm, and each mip texel equals the maximum of its dilated footprint
+- **THEN** sample texels read the tile height minus the drop within 1 mm (0.1 m on a seam texel) plus the f32 rounding of the value, and each mip texel equals the maximum of its dilated footprint
 
 #### Scenario: Incremental equals full
 - **WHEN** one tile is refreshed and its rectangle is gathered, and the same plan is gathered from scratch
@@ -50,11 +50,11 @@ Source: ADR 0085 point 4, SPIKE-56 finding 4 and P3
 - **THEN** the cube texel over it reads the peak's height, and a ray beyond the clipmap grazing that height is shadowed
 
 ### Requirement: REND-049 The shadow march
-A compute pass SHALL compute, at half resolution, for every pixel with a depth, a sun visibility in [0, 1] by marching from the receiver toward the sun over the clipmap and the coarse cube: a texel walk (DDA) with max-mip skipping, the level by distance from the anchor, positions camera-relative f32 in the anchor frame. A sun below the receiver's geometric horizon SHALL give 0 without a march. The visibility SHALL take a penumbra from the smallest `(ray height - terrain height) / distance` along the march, mapped across the sun's disc (0.267 degrees radius), searched to 2 km. The WGSL SHALL hold no planet-radius value (CON-11).
+A compute pass SHALL compute, at half resolution, for every pixel with a depth, a sun visibility in [0, 1] by marching from the receiver toward the sun over the clipmap and the coarse cube: a texel walk (DDA) with max-mip skipping, on the finest level whose window holds the point with a margin of two texels, positions camera-relative f32 in the anchor frame; the march is at most 1,000 km long: there an f32 anchor-frame position has a step of 0.0625 m, the drop term `c rho^2` (78 km) is exact to 4 mm, and the straight ray is first-order accurate (a slope error of about 0.08 at 500 km under a 45 degree sun, which grows beyond). A sun below the receiver's geometric horizon SHALL give 0 without a march. The visibility SHALL take a penumbra from the smallest `(ray height - terrain height) / distance` along the march, mapped across the sun's disc (0.267 degrees radius), searched to 2 km. The sphere's drop SHALL arrive as one precomputed f32 coefficient `1 / (2 R)` applied to anchor-relative distances, and the WGSL SHALL hold no planet-radius value (CON-11). A receiver SHALL not shadow itself: the ground box is lowered by half a texel over the first four texels. A coarse cell that reaches past its level's window SHALL be walked in its parts. Beyond the outermost level the march SHALL continue in the cube with strides of 3 % of the distance (at least the outermost texel), sampled at mips whose dilated texels span the stride, and at mip 0 in quarters within one texel of a face edge. Beyond the 2 km search only the sign of the clearance counts. A march that reaches its step limit (2,048 clipmap steps, 256 cube strides) keeps the penumbra found so far (a known light leak at relief beyond the budget; the step count is reported). A pixel without a receiver and a sun straight overhead give 1.
 
 Verify: A, C
 Status: planned
-Source: ADR 0085 points 1, 3 and 5, SPIKE-56 findings 1 and 3 and P1, CON-11
+Source: ADR 0085 points 1, 3 and 5, SPIKE-56 findings 1 and 3 and P1, CON-11, ADR 0090 (the drop coefficient `1 / (2 R)` as an f32 uniform for the horizon test and beyond the clipmap)
 
 #### Scenario: A wall
 - **WHEN** a synthetic clipmap holds a 100 m wall and the sun stands 10 degrees above it
@@ -63,6 +63,18 @@ Source: ADR 0085 points 1, 3 and 5, SPIKE-56 findings 1 and 3 and P1, CON-11
 #### Scenario: Below the horizon
 - **WHEN** the sun is 1 degree below a receiver's geometric horizon
 - **THEN** its visibility is 0 and the march's step count for it is 0
+
+#### Scenario: Receivers
+- **WHEN** receivers lie on flat ground (also a few millimetres under its texel sample) and on a slope facing a sun 10 degrees above it
+- **THEN** every one is lit
+
+#### Scenario: Window edge
+- **WHEN** a level's window is not aligned to the mips and a wall stands in the next level just beyond it
+- **THEN** a ray across the window edge is blocked by that wall
+
+#### Scenario: Cube
+- **WHEN** a ridge stands in the cube across a face edge or at a corner of three faces, in line with the sun
+- **THEN** the receiver is 0, and 1 without the ridge; a low sun (0.2 degrees) over flat ground ends within 600 steps
 
 #### Scenario: No planet radius
 - **WHEN** spec-lint's shader check reads the shadow WGSL
@@ -106,15 +118,15 @@ Source: ADR 0085 Consequences, ADR 0083, BUDG-002, SPIKE-56 P1, ADR 0087
 - **THEN** the first fails and the second passes; a pass within 5 % of the budget measured under load is not a verdict (ADR 0087)
 
 ### Requirement: REND-053 The shadow is the same on every run of an adapter
-The clipmap gather, the coarse cube, the march, the upsample and the temporal pass SHALL use no atomics and no order-dependent reduction, so that one adapter draws the same shadow bytes on every run of the same frame sequence; goldens are kept per adapter (ADR 0061).
+The clipmap gather, the coarse cube, the march, the upsample and the temporal pass SHALL use no order-dependent reduction, so that one adapter draws the same shadow bytes on every run of the same frame sequence. The march, the upsample and the temporal pass SHALL use no atomics. The gather's only atomic is the integer `atomicMax` of its owner pass (REND-047): the owner of a texel is the maximum block index that covers it, and a maximum over integers does not depend on the order in which the dispatches run. Goldens are kept per adapter (ADR 0061).
 
 Verify: A, C
 Status: planned
-Source: ADR 0085 point 9, CON-14, ADR 0061
+Source: ADR 0085 point 9, CON-14, ADR 0061, ADR 0090 (the gather's integer `atomicMax` owner pass)
 
 #### Scenario: Twice
 - **WHEN** the same three-frame sequence is drawn twice on the software adapter
-- **THEN** the shadow targets of both runs are byte-identical, and the shadow WGSL contains no atomic operation
+- **THEN** the shadow targets of both runs are byte-identical, and the march, upsample and temporal WGSL contain no atomic operation
 
 ## MODIFIED Requirements
 
