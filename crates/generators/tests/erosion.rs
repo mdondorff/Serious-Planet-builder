@@ -2,10 +2,11 @@
 
 use planet_core::cube::{face_to_direction, TangentWarp};
 use planet_core::hash::SplitMix64;
-use planet_core::{Face, Vec3};
+use planet_core::{Face, TileId, Vec3};
 use planet_generators::erosion::{ErosionField, ErosionGenerator, EROSION_IMPLEMENTATION_ID, EROSION_VERSION, MAX_ABS_HEIGHT_M};
 use planet_generators::global::{bake, GlobalGrid, GlobalSample, GridSource, LatticeSource, ReadError};
 use planet_generators::height::HeightField;
+use planet_generators::mesh::tile_mesh_field;
 use planet_world_def::{BodyId, GenContext, WorldDefinition};
 
 const R: f64 = 6_371_000.0;
@@ -287,4 +288,81 @@ fn bounds_hold_over_small_caps_where_the_landform_is_neither_0_nor_1() {
         }
     }
     assert!(checked >= 10, "{checked} centres with a landform between 0.05 and 0.95");
+}
+
+/// The lattice a tile samples (its grid and a one-sample halo), `res` cells to the edge.
+fn lattice(tile: TileId, res: u32) -> Vec<Vec3> {
+    let mut dirs = Vec::new();
+    for l in -1..=i64::from(res) + 1 {
+        for k in -1..=i64::from(res) + 1 {
+            dirs.push(tile.sample_direction_ext(&TangentWarp, res, k, l));
+        }
+    }
+    dirs
+}
+
+// spec: GEN-017
+#[test]
+fn a_direction_has_one_height_whichever_tile_asks_for_it() {
+    let g = grid(64);
+    let src = GridSource(&g);
+    let f = field(&src);
+    let mut rng = SplitMix64(5);
+    let mut asked = 0;
+    for level in [3u8, 6, 9, 12, 15, 18] {
+        for _ in 0..3 {
+            let tile = TileId::from_direction(&TangentWarp, random_dir(&mut rng), level);
+            let dirs = lattice(tile, 16);
+            let expect: Vec<u64> = dirs.iter().map(|&d| f.height(d).to_bits()).collect();
+            // The tile itself, a neighbour (across a face edge at times), its parent, its child and a tile on the far side of the planet.
+            let mut askers = vec![tile, tile.neighbors8()[0], TileId::from_direction(&TangentWarp, -dirs[dirs.len() / 2], level)];
+            askers.extend(tile.parent());
+            askers.extend(tile.children().map(|c| c[0]));
+            for asker in askers {
+                let (batch, _) = f.heights_and_climate(&TangentWarp, asker, &dirs, &|| false);
+                let got: Vec<u64> = batch.iter().map(|h| h.to_bits()).collect();
+                assert_eq!(got, expect, "level {level}: tile {asker:?} gave other heights for the directions of {tile:?}");
+                asked += 1;
+            }
+            // The meshes of the same tile at 8 and 16 cells share their even lattice points, whose heights are the one height of the direction.
+            let (coarse, fine) = (tile_mesh_field(&f, &TangentWarp, tile, 8, R), tile_mesh_field(&f, &TangentWarp, tile, 16, R));
+            for j in 0..=8usize {
+                for i in 0..=8usize {
+                    let (c, v) = (coarse.vertices[j * 9 + i].height, fine.vertices[2 * j * 17 + 2 * i].height);
+                    assert_eq!(c.to_bits(), v.to_bits(), "level {level}: lattice point ({i}, {j}) of {tile:?} at 8 and at 16 cells");
+                }
+            }
+        }
+    }
+    assert!(asked >= 18 * 4, "{asked} askers over 18 tiles");
+}
+
+// spec: GEN-017
+#[test]
+fn the_lattice_points_two_tiles_share_have_the_same_height_across_tile_and_face_edges() {
+    let g = grid(64);
+    let src = GridSource(&g);
+    let f = field(&src);
+    let mut rng = SplitMix64(11);
+    let mut shared = 0;
+    let mut tiles: Vec<TileId> = (0..6).map(|_| TileId::from_direction(&TangentWarp, random_dir(&mut rng), 9)).collect();
+    // Tiles on a face edge and at the cube corner, where the neighbour is on another face.
+    for &(s, t) in &[(1.0, 0.3), (1.0, 1.0), (-1.0, 0.5)] {
+        tiles.push(TileId::from_direction(&TangentWarp, face_to_direction(&TangentWarp, Face(0), s, t), 9));
+    }
+    for tile in tiles {
+        let mine = lattice(tile, 16);
+        for other in tile.neighbors8() {
+            let theirs = lattice(other, 16);
+            for &d in &mine {
+                // The same point of the sphere, reached from the other tile's lattice (to the rounding of the direction).
+                if let Some(&e) = theirs.iter().find(|e| (**e - d).length() < 1e-13) {
+                    let (a, b) = (f.height(d), f.height(e));
+                    assert!((a - b).abs() < 1e-6, "{tile:?} and {other:?} give {a} and {b} for one point");
+                    shared += 1;
+                }
+            }
+        }
+    }
+    assert!(shared > 100, "the neighbours share lattice points ({shared} found)");
 }
