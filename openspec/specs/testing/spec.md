@@ -1450,7 +1450,7 @@ Source: SPIKE-57 (seven descriptors, about 1 minute), SPIKE-55 (sites, 30 m wind
 
 #### Scenario: SPIKE-55 reproduced
 - **WHEN** the ignored test `the_scorecard_reproduces_spike_55` runs over the store (`cargo test -p planet --release --test it the_scorecard_reproduces_spike_55 -- --ignored --nocapture`)
-- **THEN** each generator site's slope and 1 km and 5 km relief p50 and p99 lie within 2 % of SPIKE-55's generator rows (`crates/app/data/spike55-generator-rows.toml`); the real rows are re-stated on the central 0.5-degree square (N47E011 slope p50 is 23.7, not the whole tile's 19.3), not compared; without the store the check is NOT RUN, never a pass
+- **THEN** each generator site's slope and 1 km and 5 km relief p50 and p99 lie within 2 % of SPIKE-55's generator rows (`crates/app/data/spike55-generator-rows.toml`); the real rows are re-stated on the central 0.5-degree square (N47E011 slope p50 is 23.7, not the whole tile's 19.3), not compared; without the store the check is NOT RUN, never a pass; it is run by hand (by the lane that changes the scorecard or the generator rows, or the owner), not by a tier, `gate` or `accept`
 
 ### Requirement: TEST-080 The scorecard report reads on a phone
 The run SHALL write `report.md` and `report.json` under `target/review/terrain-score/<date>/`. `report.md` begins with the Copernicus WorldDEM-30 notice for derived data and the no-liability sentence (`LICENCE-NOTES.md` of the tiles), then the run's inputs (date, commit, store, tiles, sites file), then one section per landform holding one table per generator site (at most four columns: descriptor, real p50, generator p50, distance) and, under each table, one line naming that site's three descriptors with the largest distance. `report.json` holds every percentile, histogram and distance with the run's inputs and the wall time per phase.
@@ -1496,6 +1496,10 @@ Detail: The pair is a measurement of the preview, not a gate: a pair over the bo
 #### Scenario: A verdict over the bound
 - **WHEN** the preview leaves more than a twentieth of the changed pixels in a view
 - **THEN** the test still passes and the verdict is printed
+
+#### Scenario: The pair over a real store (by hand)
+- **WHEN** the ignored tests `gpu_edit_pair::the_pair_over_a_real_store` (the discrete GPU, `PLANET_ADAPTER=hardware`, and an unlocked desktop) and `…the_plan_over_a_real_store_is_reported_per_parameter_set` (CPU only) run with `PLANET_PAIR_STORE` naming a store
+- **THEN** each case's pair and plan are printed, with the pictures in `target/review/edit-pair/`; this is run by hand for the owner's drag report, not by a tier, `gate` or `accept`, and the owner checks the pictures
 
 ### Requirement: TEST-075 The definition hash and the production store survive the removal
 A world definition SHALL hash to the value it had before ADR 0086's removal: without items, with an item and the default `Under` setting, and with the layer set `OnTop`. The `chunk_stage` setting SHALL stay parseable and hashed, so a store built before the removal opens without a rebuild. The production store (`C:/DEV/SeriousPlanetData/global16384`) SHALL open with the current build, read only: `cargo xtask gate` runs the ignored `the_real_store_opens_without_a_rebuild` and prints MATCH, NOT RUN (the store is absent; the gate is then incomplete, exit code 3, never a pass) or a failure.
