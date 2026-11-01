@@ -118,6 +118,74 @@ pub fn run_small(root: &Path) -> Res {
     )
 }
 
+/// The real-store smoke on the software adapter (TEST-073): the editor window over the store (read only), the scripted edit session, no
+/// camera path. It checks the store's logic while the desktop is locked; the hardware run of the gate stays the presentation check.
+/// `Ok` is the table row of a pass, `Err` the row of a failure.
+fn software_smoke(root: &Path, exe: &Path, store: &str) -> Result<String, String> {
+    eprintln!("gate: editor --smoke on the real store, software adapter ...");
+    let before = store_snapshot(Path::new(store));
+    let out = Command::new(exe)
+        .args(["editor", "--smoke", "--edit", "--no-vsync", "--adapter", "software", "--store", store])
+        .current_dir(root)
+        .output()
+        .map_err(|e| format!("software smoke: ERROR cannot start {}: {e}", exe.display()))?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let mut verdict = smoke_verdict(out.status.success(), &stdout, &stderr);
+    // The store is opened read only: no file of it may have appeared, changed size or been touched by the run.
+    if let Some(change) = store_changes(&before, &store_snapshot(Path::new(store))) {
+        verdict = Err(format!("the run changed the store, which must stay read only: {change}"));
+    }
+    match &verdict {
+        Ok(line) => Ok(format!("software smoke: PASS  {line}")),
+        Err(why) => Err(format!("software smoke: FAIL  {why}")),
+    }
+}
+
+/// The files of a store directory with their sizes and modification times (the directory itself, not its subfolders' contents).
+fn store_snapshot(dir: &Path) -> Vec<(String, u64, Option<std::time::SystemTime>)> {
+    let mut v: Vec<_> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let m = e.metadata().ok()?;
+            Some((e.file_name().to_string_lossy().into_owned(), m.len(), m.modified().ok()))
+        })
+        .collect();
+    v.sort_by(|a, b| a.0.cmp(&b.0));
+    v
+}
+
+/// What differs between two snapshots of a store (TEST-085): the first added, removed or changed file, or `None`.
+fn store_changes(
+    before: &[(String, u64, Option<std::time::SystemTime>)],
+    after: &[(String, u64, Option<std::time::SystemTime>)],
+) -> Option<String> {
+    for (name, size, time) in before {
+        match after.iter().find(|a| &a.0 == name) {
+            None => return Some(format!("{name} is gone")),
+            Some(a) if a.1 != *size => return Some(format!("{name} grew or shrank from {size} to {} bytes", a.1)),
+            Some(a) if a.2 != *time => return Some(format!("{name} was modified")),
+            Some(_) => {}
+        }
+    }
+    after.iter().find(|a| !before.iter().any(|b| b.0 == a.0)).map(|a| format!("{} is new", a.0))
+}
+
+/// A smoke run passes when it exits successfully and prints its `[smoke ok]` line.
+fn smoke_verdict(success: bool, stdout: &str, stderr: &str) -> Result<String, String> {
+    let ok_line = stdout.lines().find(|l| l.contains("[smoke ok]"));
+    match (success, ok_line) {
+        (true, Some(l)) => Ok(l.trim().chars().take(160).collect()),
+        _ => Err(format!(
+            "the run exited {} without a `[smoke ok]` line: {}",
+            if success { "successfully" } else { "with an error" },
+            stderr.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("(no output)")
+        )),
+    }
+}
+
 pub fn run_gate(root: &Path, args: &[String]) -> Res {
     let (mut small, mut only, mut paths, mut store) = (false, Vec::new(), PATHS.to_string(), STORE.to_string());
     let mut it = args.iter();
@@ -133,11 +201,26 @@ pub fn run_gate(root: &Path, args: &[String]) -> Res {
     if small {
         return run_small(root);
     }
+    run(root, "cargo", &["build", "--release", "-p", "planet"], &[])?;
+    let exe = root.join("target").join("release").join(if cfg!(windows) { "planet.exe" } else { "planet" });
+    // The software smoke runs whatever the desktop does; its result is printed before a locked desktop ends the gate.
+    let software = software_smoke(root, &exe, &store);
+    match &software {
+        Ok(row) | Err(row) => eprintln!("{row}"),
+    }
     // A locked desktop makes the window stall and lose its device: NOT RUN, reported and counted, never a pass (TEST-073).
     if let planet_perf::desktop::Desktop::Locked(reason) = planet_perf::desktop::detect() {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
         planet_perf::desktop::report("gate", &reason, now, now, false, Some(&root.join(crate::util::NOT_RUN_DIR)));
-        return Err(format!("{} the gate was NOT RUN (desktop locked); the run is incomplete, not a pass", crate::util::INCOMPLETE));
+        if software.is_err() {
+            return Err(
+                "the gate failed: the software smoke on the real store failed (the hardware part was NOT RUN, desktop locked)".into()
+            );
+        }
+        return Err(format!(
+            "{} the hardware gate was NOT RUN (desktop locked); the software smoke on the real store passed; the run is incomplete, not a pass",
+            crate::util::INCOMPLETE
+        ));
     }
     let all = sites(Path::new(&paths));
     let chosen: Vec<_> =
@@ -147,11 +230,16 @@ pub fn run_gate(root: &Path, args: &[String]) -> Res {
     }
     let out_dir = root.join("target").join("gate");
     std::fs::create_dir_all(&out_dir).map_err(|e| format!("cannot create {}: {e}", out_dir.display()))?;
-    run(root, "cargo", &["build", "--release", "-p", "planet"], &[])?;
-    let exe = root.join("target").join("release").join(if cfg!(windows) { "planet.exe" } else { "planet" });
     let mut new_failures = 0usize;
     let mut not_run = 0usize;
     let mut table = Vec::new();
+    match software {
+        Ok(row) => table.push(row),
+        Err(row) => {
+            table.push(row);
+            new_failures += 1;
+        }
+    }
     for (id, path) in chosen {
         let report = out_dir.join(format!("{id}.txt"));
         eprintln!("gate: {id} ...");
@@ -290,6 +378,57 @@ mod tests {
         assert!(e.starts_with(crate::util::INCOMPLETE), "{e}");
         let e = verdict(2, 1).unwrap_err();
         assert!(!e.starts_with(crate::util::INCOMPLETE) && e.contains("2 failure"), "{e}");
+    }
+
+    // spec: TEST-085
+    #[test]
+    fn a_software_smoke_passes_on_its_ok_line_and_fails_without_one_naming_the_last_stderr_line() {
+        let ok = smoke_verdict(
+            true,
+            "adapter: x
+planet editor [smoke ok]: 90 frames drawn
+",
+            "",
+        )
+        .unwrap();
+        assert!(ok.contains("[smoke ok]") && ok.contains("90 frames"), "{ok}");
+        let no_line = smoke_verdict(
+            true,
+            "adapter: x
+",
+            "warning: a
+
+",
+        )
+        .unwrap_err();
+        assert!(no_line.contains("without a `[smoke ok]` line") && no_line.contains("warning: a"), "{no_line}");
+        let crashed = smoke_verdict(
+            false,
+            "planet editor [smoke ok]: 1 frames
+",
+            "panicked at x
+",
+        )
+        .unwrap_err();
+        assert!(crashed.contains("with an error") && crashed.contains("panicked at x"), "{crashed}");
+    }
+
+    // spec: TEST-085
+    #[test]
+    fn a_run_that_adds_changes_or_removes_a_store_file_is_named_and_an_untouched_store_is_not() {
+        let dir = std::env::temp_dir().join("gate-store-snapshot-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("pack-1.tpack"), b"abc").unwrap();
+        let before = store_snapshot(&dir);
+        assert_eq!(store_changes(&before, &store_snapshot(&dir)), None);
+        std::fs::write(dir.join("pack-1.tpack"), b"abcd").unwrap();
+        assert!(store_changes(&before, &store_snapshot(&dir)).unwrap().contains("pack-1.tpack grew or shrank from 3 to 4"));
+        std::fs::write(dir.join("pack-1.tpack"), b"abc").unwrap();
+        std::fs::write(dir.join("pack-2.tpack"), b"x").unwrap();
+        assert!(store_changes(&before, &store_snapshot(&dir)).unwrap().contains("pack-2.tpack is new"));
+        std::fs::remove_file(dir.join("pack-1.tpack")).unwrap();
+        assert!(store_changes(&before, &store_snapshot(&dir)).unwrap().contains("pack-1.tpack is gone"));
     }
 
     // spec: TEST-063

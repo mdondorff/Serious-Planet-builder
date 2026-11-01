@@ -1,0 +1,1 @@
+- 2026-11-01 **b5-editor-smoke-software** (SPIKE-84 fix 6): `cargo xtask gate` on the real store also runs `editor --smoke --edit` on the software adapter, PASS or FAIL even with the desktop locked, and fails if the run changed any store file; TEST-085 active; `b5-editor-smoke-software` archived
