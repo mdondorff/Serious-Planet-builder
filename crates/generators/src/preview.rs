@@ -475,8 +475,10 @@ pub fn shares(f: &Fields) -> Shares {
             }
         }
     }
+    // A body with no land under 60 degrees has no shares; they stay 0 instead of NaN.
+    let norm = if land > 0.0 { land } else { 1.0 };
     for v in &mut per_class {
-        *v /= land;
+        *v /= norm;
     }
     Shares {
         land_fraction: land_all / all,
@@ -485,9 +487,9 @@ pub fn shares(f: &Fields) -> Shares {
         mountains: per_class[MOUNTAINS] + per_class[HIGH_MOUNTAINS],
         plateau: per_class[PLATEAU],
         per_class,
-        above_2km: above2 / land,
-        above_4km: above4 / land,
-        highest_m: highest,
+        above_2km: above2 / norm,
+        above_4km: above4 / norm,
+        highest_m: if highest == f64::MIN { 0.0 } else { highest },
         largest_k_step: f.largest_k_step,
     }
 }

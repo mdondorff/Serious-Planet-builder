@@ -24,15 +24,15 @@ fn lattice_bytes(l: &ClassLattice) -> Vec<u8> {
 #[test]
 fn every_lattice_point_sums_to_255_and_the_bytes_do_not_depend_on_the_thread_count() {
     let source = ClassSource::new(SEED);
-    let one = ClassLattice::build_with(&source, 12, 1);
-    let eight = ClassLattice::build_with(&source, 12, 8);
+    let one = ClassLattice::build_with(&source, 16, 1);
+    let eight = ClassLattice::build_with(&source, 16, 8);
     let a = lattice_bytes(&one);
     assert_eq!(a, lattice_bytes(&eight), "the lattice differs between 1 and 8 threads");
-    assert_eq!(a, lattice_bytes(&ClassLattice::build_with(&ClassSource::new(SEED), 12, 3)), "a second source of the same seed differs");
+    assert_eq!(a, lattice_bytes(&ClassLattice::build_with(&ClassSource::new(SEED), 16, 3)), "a second source of the same seed differs");
     for point in a.chunks(CLASS_COUNT) {
         assert_eq!(point.iter().map(|&v| u32::from(v)).sum::<u32>(), 255, "{point:?}");
     }
-    assert_ne!(a, lattice_bytes(&ClassLattice::build_with(&ClassSource::new(2), 12, 1)), "two seeds give the same weights");
+    assert_ne!(a, lattice_bytes(&ClassLattice::build_with(&ClassSource::new(2), 16, 1)), "two seeds give the same weights");
 }
 
 // spec: GEN-103
@@ -49,24 +49,50 @@ fn the_quantised_weights_sum_to_255_and_ties_go_to_the_earlier_class() {
 
 // spec: GEN-103
 #[test]
-fn the_source_is_continuous_across_a_cube_edge_and_reads_the_same_bits_twice() {
+fn the_source_is_continuous_across_cube_edges_and_corners_and_reads_the_same_bits_twice() {
     let source = ClassSource::new(SEED);
-    let map = TangentWarp;
-    // The edge between +x and +y faces: s = 1 on one, s = -1 on the other, at the same t.
-    for t in [-0.7, 0.0, 0.31, 0.8] {
-        let a = face_to_direction(&map, Face(0), 1.0 - 1e-12, t);
-        let b = face_to_direction(&map, Face(2), -1.0 + 1e-12, t);
+    let eps = 1e-12;
+    // Points straddling cube edges (two of |x|, |y|, |z| equal and largest), several along each of the edges, and the corners.
+    let mut pairs: Vec<(Vec3, Vec3)> = Vec::new();
+    for sx in [-1.0, 1.0] {
+        for sy in [-1.0, 1.0] {
+            for z in [-0.8, -0.2, 0.0, 0.45, 0.8] {
+                let on_edge = |x: f64, y: f64, z: f64| Vec3::new(sx * x, sy * y, z);
+                // The edge |x| = |y|: step across it along the in-plane normal.
+                let p = on_edge(1.0, 1.0, z).normalized();
+                let n = Vec3::new(sx, -sy, 0.0).normalized();
+                pairs.push(((p + n * eps).normalized(), (p - n * eps).normalized()));
+                // The edge |x| = |z| and the edge |y| = |z|, on the faces whose coordinates stay on the larger axis.
+                let q = Vec3::new(sx * 1.0, z, 1.0).normalized();
+                let m = Vec3::new(sx, 0.0, -1.0).normalized();
+                pairs.push(((q + m * eps).normalized(), (q - m * eps).normalized()));
+                let r = Vec3::new(z, sy * 1.0, 1.0).normalized();
+                let k = Vec3::new(0.0, sy, -1.0).normalized();
+                pairs.push(((r + k * eps).normalized(), (r - k * eps).normalized()));
+            }
+            let corner = Vec3::new(sx, sy, 1.0).normalized();
+            let (e1, _) = corner.tangent_basis();
+            pairs.push(((corner + e1 * eps).normalized(), (corner - e1 * eps).normalized()));
+        }
+    }
+    for (a, b) in pairs {
         let (pa, pb) = (source.eval(a), source.eval(b));
         assert_eq!(pa, source.eval(a), "not pure");
+        let (ta, tb) = (pa.terms, pb.terms);
         for (name, x, y) in [
-            ("core", pa.terms.core, pb.terms.core),
-            ("flank", pa.terms.flank, pb.terms.flank),
-            ("old margin", pa.terms.old_margin, pb.terms.old_margin),
-            ("back-arc", pa.terms.back_arc, pb.terms.back_arc),
-            ("plateau", pa.terms.plateau_field, pb.terms.plateau_field),
+            ("margin_km", ta.margin_km / 1000.0, tb.margin_km / 1000.0),
+            ("convergence", ta.convergence, tb.convergence),
+            ("core", ta.core, tb.core),
+            ("flank", ta.flank, tb.flank),
+            ("old margin", ta.old_margin, tb.old_margin),
+            ("back-arc", ta.back_arc, tb.back_arc),
+            ("plateau", ta.plateau_field, tb.plateau_field),
             ("e0", pa.e0 / 1000.0, pb.e0 / 1000.0),
         ] {
-            assert!((x - y).abs() < 1e-6, "{name} jumps across the edge at t {t}: {x} against {y}");
+            assert!((x - y).abs() < 1e-9, "{name} jumps across a cube edge at {a:?}: {x} against {y}");
+        }
+        for c in 0..CLASS_COUNT {
+            assert!((pa.weights[c] - pb.weights[c]).abs() < 1e-9, "class {c} jumps across a cube edge at {a:?}");
         }
     }
 }

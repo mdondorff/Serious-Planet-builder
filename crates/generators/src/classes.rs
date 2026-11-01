@@ -329,6 +329,8 @@ impl ClassLattice {
 
     /// A lattice of `cells` cells per face edge (tests use a coarse one).
     pub fn build_with(source: &ClassSource, cells: usize, threads: usize) -> ClassLattice {
+        // A power of two, so the face coordinates `2 i / n - 1` are exact and a shared edge point is the same direction on both faces (GEN-093).
+        assert!(cells.is_power_of_two(), "the class lattice has a power of two cells per face edge, not {cells}");
         let n = cells;
         let map = TangentWarp;
         let par: &dyn Par = &threads;
