@@ -2,6 +2,7 @@
 //! warm-up, medians and p99, JSON run logs. GPU-free: adapter facts arrive as plain structs and the
 //! frame loop itself is supplied by the renderer once it exists (M2).
 
+pub mod ab;
 pub mod accept;
 pub mod accept_m5;
 pub mod accept_m8;

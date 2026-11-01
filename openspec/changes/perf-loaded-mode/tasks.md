@@ -7,5 +7,5 @@
 - [ ] 2.2 The verdict on the rows of the loaded session log (BUILD-032): needs the table that maps each logged metric to a kind and a budget (the scenes' verdict lines are scattered: terrain GPU, plan CPU, streaming frame, upload); proposed in PR 3 with the A/B helper, which is its first user
 
 ## 3. PR 3: A/B helper
-- [ ] 3.1 Tier A on fake runs: alternating rounds, kept logs, refusal count and reasons, the table (BUILD-033); `xtask perf --ab`
+- [x] 3.1 Tier A on fake runs (`planet_perf::ab`): alternating rounds, kept logs, refusal count and reasons, the table with the metric table (BUILD-033); `xtask perf --ab` (`xtask/src/perfab.rs`: the worktree of the ref under `target/ab/base`, the runs under `target/ab/runs/<time>/`)
 - [ ] 3.2 One live loaded A/B of a streaming scene as the check

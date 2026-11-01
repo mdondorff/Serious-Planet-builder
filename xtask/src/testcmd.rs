@@ -1055,6 +1055,9 @@ fn perf_stream_all(root: &Path, rest: &[String], settle: bool) -> Res {
 }
 
 pub fn perf(root: &Path, args: &[String]) -> Res {
+    if args.first().map(String::as_str) == Some("--ab") {
+        return crate::perfab::run(root, args);
+    }
     if args.first().map(String::as_str) == Some("stream") {
         if stream_runs_all(&args[1..]) {
             let rest = if args.get(1).is_some_and(|a| a == "all") { &args[2..] } else { &args[1..] };
