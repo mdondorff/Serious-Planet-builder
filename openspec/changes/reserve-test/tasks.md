@@ -8,7 +8,7 @@
 - [x] 2.3 (`planet_perf::reserve::ReserveReport`) The report: shares, measured value, limit, verdict, largest overrun named (BUDG-007, BUDG-012), on recorded fixtures
 
 ## 3. Tier C
-- [ ] 3.1 The GPU burn pass, calibrated with timestamp queries to the GPU ms; skipped with a reason where timestamps are unsupported (software adapter)
+- [x] 3.1 (`planet_render::BurnPass`, `planet_frame::reserve::ReservePlan`; the test passes on the software adapter as "cannot calibrate" and on the RTX 3080 Ti within 5 % of 3.0 ms) The GPU burn pass, calibrated with timestamp queries to the GPU ms; skipped with a reason where timestamps are unsupported (software adapter)
 - [ ] 3.2 The reserve scene on the software adapter in smoke mode (labelled, no verdict) and on the discrete GPU under `xtask perf reserve`
 
 ## 4. Measurement

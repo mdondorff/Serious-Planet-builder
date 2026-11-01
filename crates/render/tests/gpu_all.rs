@@ -1,5 +1,7 @@
 #[path = "gpu_atmosphere.rs"]
 mod gpu_atmosphere;
+#[path = "gpu_burn.rs"]
+mod gpu_burn;
 #[path = "gpu_compact.rs"]
 mod gpu_compact;
 #[path = "gpu_compact_blocks.rs"]

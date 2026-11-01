@@ -26,6 +26,7 @@ pub mod prefetch;
 pub mod preview;
 pub mod regions;
 pub mod repro;
+pub mod reserve;
 pub mod residency;
 pub mod scalerefs;
 pub mod scenes;
