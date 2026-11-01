@@ -363,3 +363,43 @@ fn the_pack_counts_its_lookups_and_the_ones_that_found_a_record() {
     let after = store.read_stats();
     assert_eq!((after.gets, after.found), (reads.gets + 1, reads.found));
 }
+
+// spec: VIEW-061
+#[test]
+fn pinned_blocks_stay_resident_under_loader_pressure() {
+    // The camera's ground read touches a block or two; pinned, they survive loader threads that read every block of the world through
+    // a budget of 4 blocks, so the next ground read decodes nothing.
+    let (d, w) = stored();
+    let store = TileStore::open(d.path(), w.params()).unwrap();
+    let src = StoreSource::with_budget(&store, &w, RES, 4 * BLOCK_BYTES).unwrap();
+    // A read across a block corner touches several blocks.
+    let ground = || src.at(Face(2), 4, 4).unwrap().elevation_m + src.at(Face(2), 3, 3).unwrap().elevation_m;
+    let (h0, touched) = planet_cache::global_store::record_touched_blocks(ground);
+    assert!(touched.len() >= 2, "a corner read touches two or more blocks: {touched:?}");
+    src.pin_touched(&touched);
+    assert_eq!(src.pinned_blocks().len(), touched.len().min(3), "the pins stay fewer than the budget");
+    let grid = bake(7, &TangentWarp, RES, 2).unwrap();
+    std::thread::scope(|s| {
+        for t in 0..4 {
+            let (src, grid) = (&src, &grid);
+            s.spawn(move || read_all(src, &GridSource(grid), t));
+        }
+    });
+    let st = src.stats();
+    assert!(st.evictions > BLOCKS, "the loaders pushed blocks out: {st:?}");
+    assert!(st.peak_resident_blocks <= 4, "the budget holds with pins: {st:?}");
+    // A fresh thread (no thread-local block) reads the ground again: no decode.
+    let before = src.stats().decodes;
+    let h1 = std::thread::scope(|s| s.spawn(ground).join().unwrap());
+    assert_eq!(h1, h0, "the same ground");
+    assert_eq!(src.stats().decodes, before, "the pinned blocks were still resident");
+    // Unpinned, the same pressure pushes them out.
+    src.pin_touched(&[]);
+    std::thread::scope(|s| {
+        let (src, grid) = (&src, &grid);
+        s.spawn(move || read_all(src, &GridSource(grid), 1));
+    });
+    let before = src.stats().decodes;
+    std::thread::scope(|s| s.spawn(ground).join().unwrap());
+    assert!(src.stats().decodes > before, "without the pins the ground decodes again");
+}

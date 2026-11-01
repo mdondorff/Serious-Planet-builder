@@ -1,6 +1,7 @@
 //! The single binary's run modes (CON-01): `editor` (interactive viewer), `generate` (headless CLI)
 //! and `test-render` (headless harness). It wires the other crates together: the window and the editor mode (`window`, `editwin`, `panels`), the world's field chain (`worldfield`), the stores and bakes, and the perf and stress scenes.
 
+pub mod cameraground;
 pub mod coupledworld;
 pub mod crash;
 pub mod editperf;
@@ -1468,6 +1469,39 @@ mod tests {
     fn the_compact_format_with_fewer_than_16_cells_is_refused_naming_the_minimum() {
         let e = run_str(&["test-render", "--scene", "terrain", "--cells", "8"]).unwrap_err();
         assert!(e.contains("--cells 8") && e.contains("at least 16"), "{e}");
+    }
+
+    // spec: VIEW-061
+    #[test]
+    fn the_camera_phase_decodes_no_block_on_the_main_thread_and_the_ground_arrives_pinned_and_exact() {
+        // A cold store: the camera's first ground read decodes a block. The frame polls the ground thread inside its camera phase; the decode
+        // happens on that thread, the phase records none, and the answer equals the field's own height bit for bit with its blocks pinned.
+        let d = TempDir::new("camera-ground");
+        let store = d.s("store");
+        run_str(&["generate", "--global-dir", &store, "--global-res", "8", "--seed", "3", "--prefill-levels", "0"]).unwrap();
+        let def = planet_world_def::WorldDefinition::single_planet(skeleton::RADIUS_M, 3);
+        let world = std::sync::Arc::new(worldfield::WorldTerrain::open_store(def, std::path::Path::new(&store), 8).unwrap());
+        assert!(world.pinned_blocks().is_empty(), "nothing pinned before the first ground read");
+        let w = std::sync::Arc::clone(&world);
+        let mut ground = cameraground::CameraGround::new(std::sync::Arc::new(move |d| w.ground_pinned(d)));
+        let nadir = planet_core::Vec3::new(0.3, -0.6, 0.74).normalized();
+        let mut probe = stall::StallProbe::default();
+        let start = std::time::Instant::now();
+        let answer = loop {
+            probe.begin();
+            let a = ground.poll(nadir);
+            probe.mark("camera, ground heights and the globe overview");
+            assert!(probe.main_decodes().is_empty(), "the camera phase decoded a block on the main thread: {:?}", probe.main_decodes());
+            if let Some(a) = a {
+                break a;
+            }
+            assert!(start.elapsed() < std::time::Duration::from_secs(20), "the ground never arrived");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        };
+        assert_eq!(answer.0, nadir);
+        let exact = world.field().unwrap().height(nadir);
+        assert_eq!(answer.1.to_bits(), exact.to_bits(), "the ground thread reads the same field: {} against {exact}", answer.1);
+        assert!(!world.pinned_blocks().is_empty(), "the blocks under the camera are pinned");
     }
 
     // spec: STRM-021, STRM-022

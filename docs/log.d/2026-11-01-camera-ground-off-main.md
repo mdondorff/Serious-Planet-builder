@@ -1,0 +1,1 @@
+- 2026-11-01 camera-ground-off-main: the free camera's ground is read on a thread of its own with its bake blocks pinned, and the stall report gives the time spent getting blocks per phase (VIEW-061, SPIKE-88)

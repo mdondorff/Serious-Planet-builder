@@ -1114,6 +1114,9 @@ pub struct StoreSource<'a> {
     /// budget is never exceeded, at any moment, not only when a test samples it).
     peak_blocks: AtomicUsize,
     shared: Mutex<Vec<(TileId, Arc<Slot>)>>,
+    /// Blocks the budget never pushes out while another block can go (VIEW-061: the camera's ground; at most [`PINNED_BLOCKS_MAX`], and
+    /// fewer than the budget). Taken only inside the shared-cache lock or alone.
+    pinned: Mutex<Vec<TileId>>,
 }
 
 /// One block of the shared cache: filled once by the first thread that wants it.
@@ -1152,6 +1155,9 @@ pub struct SourceStats {
 /// 1024 cells; it was 16 blocks).
 pub const SOURCE_CACHE_BYTES: u64 = 512 << 20;
 
+/// The most blocks [`StoreSource::pin_touched`] keeps out of eviction: the camera's ground read touches one to four blocks.
+pub const PINNED_BLOCKS_MAX: usize = 8;
+
 /// The block a thread read last.
 struct Pinned {
     source: u64,
@@ -1166,6 +1172,21 @@ thread_local! {
     static BLOCK_WAIT_NS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     /// Blocks this thread decoded itself (recorded only).
     static THREAD_DECODES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// While [`record_touched_blocks`] runs on this thread: the blocks its reads touched, as (source, block tile).
+    static TOUCHED: RefCell<Option<Vec<(u64, TileId)>>> = const { RefCell::new(None) };
+    /// Whether `TOUCHED` records: a cell read checks this flag only (the read path of every generator and streamer job).
+    static RECORDING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Run `f` and return, with its result, the bake blocks its reads touched on this thread (source and block tile, each once, in the
+/// order of first touch): what [`StoreSource::pin_touched`] keeps out of eviction (VIEW-061).
+pub fn record_touched_blocks<R>(f: impl FnOnce() -> R) -> (R, Vec<(u64, TileId)>) {
+    let outer = TOUCHED.with(|t| t.borrow_mut().replace(Vec::new()));
+    let was = RECORDING.with(|c| c.replace(true));
+    let r = f();
+    RECORDING.with(|c| c.set(was));
+    let touched = TOUCHED.with(|t| std::mem::replace(&mut *t.borrow_mut(), outer)).unwrap_or_default();
+    (r, touched)
 }
 
 /// Blocks the calling thread has decoded itself so far, for any [`StoreSource`] (recorded only, STRM-022): a job reads it before and
@@ -1212,7 +1233,22 @@ impl<'a> StoreSource<'a> {
             decode_ns: AtomicU64::new(0),
             peak_blocks: AtomicUsize::new(0),
             shared: Mutex::new(Vec::new()),
+            pinned: Mutex::new(Vec::new()),
         })
+    }
+
+    /// Keep the blocks of this source among `touched` (from [`record_touched_blocks`]) out of eviction, in place of the blocks pinned
+    /// before (VIEW-061: the blocks under the camera, so that the tile streamer cannot push them out). At most [`PINNED_BLOCKS_MAX`] and
+    /// fewer than the budget, the first touched first; an empty list unpins. Pinning reads nothing and decodes nothing.
+    pub fn pin_touched(&self, touched: &[(u64, TileId)]) {
+        let cap = PINNED_BLOCKS_MAX.min(self.budget_blocks.saturating_sub(1));
+        let tiles: Vec<TileId> = touched.iter().filter(|(source, _)| *source == self.id).map(|(_, t)| *t).take(cap).collect();
+        *self.pinned.lock().expect("pinned blocks mutex") = tiles;
+    }
+
+    /// The blocks kept out of eviction now.
+    pub fn pinned_blocks(&self) -> Vec<TileId> {
+        self.pinned.lock().expect("pinned blocks mutex").clone()
     }
 
     /// What the shared cache holds now.
@@ -1251,7 +1287,11 @@ impl<'a> StoreSource<'a> {
         let slot = Arc::new(Slot { block: OnceLock::new() });
         shared.push((tile, Arc::clone(&slot)));
         if shared.len() > self.budget_blocks {
-            shared.remove(0);
+            // The least recently used block that is not pinned leaves (the pinned are fewer than the budget, so one always can).
+            let pinned = self.pinned.lock().expect("pinned blocks mutex");
+            let at = shared.iter().position(|(t, _)| !pinned.contains(t)).unwrap_or(0);
+            drop(pinned);
+            shared.remove(at);
             self.evictions.fetch_add(1, Ordering::Relaxed);
         }
         self.peak_blocks.fetch_max(shared.len(), Ordering::Relaxed);
@@ -1313,6 +1353,16 @@ impl<'a> StoreSource<'a> {
     }
 
     fn sample(&self, at: (u8, u32, u32), index: usize) -> Result<GlobalSample, ReadError> {
+        if RECORDING.with(std::cell::Cell::get) {
+            TOUCHED.with(|t| {
+                if let Some(list) = t.borrow_mut().as_mut() {
+                    let tile = TileId::new(Face(at.0), self.level, at.1, at.2).expect("a tile of the grid");
+                    if !list.contains(&(self.id, tile)) {
+                        list.push((self.id, tile));
+                    }
+                }
+            });
+        }
         let hit = PINNED.with(|p| p.borrow().as_ref().filter(|p| p.source == self.id && p.at == at).map(|p| p.block[index]));
         if let Some(s) = hit {
             return Ok(s);

@@ -93,6 +93,9 @@ pub struct StallProbe {
     /// main thread is a stall the warm-up thread should have taken (VIEW-059, CON-22).
     phase_decodes: Vec<u64>,
     last_decodes: u64,
+    /// The time the main thread spent getting bake blocks in each phase (lock, another thread's decode, its own decode; parallel to `phases`).
+    phase_block_wait: Vec<Duration>,
+    last_block_wait_ns: u64,
     last_report: Option<Instant>,
     /// Frames at or over [`STALL`] so far.
     pub stalls: u64,
@@ -131,6 +134,8 @@ impl Default for StallProbe {
             phases: Vec::new(),
             phase_decodes: Vec::new(),
             last_decodes: 0,
+            phase_block_wait: Vec::new(),
+            last_block_wait_ns: 0,
             last_report: None,
             stalls: 0,
             totals: Vec::new(),
@@ -148,8 +153,9 @@ pub struct Stall {
     pub phases: Vec<(&'static str, Duration)>,
     /// The lock waits of the main thread, longest first.
     pub waits: Vec<(&'static str, Duration)>,
-    /// The phases in which the main thread decoded a bake block itself, with the count (in the order the frame ran them).
-    pub decodes: Vec<(&'static str, u64)>,
+    /// The phases in which the main thread decoded a bake block itself, with the count and the time it spent getting blocks in that phase
+    /// (in the order the frame ran them; VIEW-061).
+    pub decodes: Vec<(&'static str, u64, Duration)>,
 }
 
 impl StallProbe {
@@ -161,6 +167,8 @@ impl StallProbe {
         self.phases.clear();
         self.phase_decodes.clear();
         self.last_decodes = planet_cache::global_store::thread_block_decodes();
+        self.phase_block_wait.clear();
+        self.last_block_wait_ns = planet_cache::global_store::thread_block_wait_ns();
         WAITS.with(|w| w.borrow_mut().clear());
     }
 
@@ -181,6 +189,9 @@ impl StallProbe {
         let decodes = planet_cache::global_store::thread_block_decodes();
         self.phase_decodes.push(decodes - self.last_decodes);
         self.last_decodes = decodes;
+        let waited = planet_cache::global_store::thread_block_wait_ns();
+        self.phase_block_wait.push(Duration::from_nanos(waited.saturating_sub(self.last_block_wait_ns)));
+        self.last_block_wait_ns = waited;
         self.last = now;
     }
 
@@ -211,7 +222,14 @@ impl StallProbe {
         phases.sort_by_key(|p| std::cmp::Reverse(p.1));
         let mut waits = WAITS.with(|w| w.borrow().clone());
         waits.sort_by_key(|p| std::cmp::Reverse(p.1));
-        let decodes = self.main_decodes();
+        let decodes = self
+            .phases
+            .iter()
+            .zip(&self.phase_decodes)
+            .zip(&self.phase_block_wait)
+            .filter(|((_, n), _)| **n > 0)
+            .map(|(((name, _), n), w)| (*name, *n, *w))
+            .collect();
         Some(Stall { frame, phases, waits, decodes })
     }
 
@@ -247,10 +265,11 @@ impl Stall {
                 s += &format!("  {name}: {}\n", ms(*d));
             }
         }
-        for (name, n) in &self.decodes {
+        for (name, n, waited) in &self.decodes {
             s += &format!(
-                "blocks the main thread decoded in {name}: {n}
-"
+                "blocks the main thread decoded in {name}: {n} ({} getting blocks)
+",
+                ms(*waited)
             );
         }
         if !extra.is_empty() {
@@ -295,6 +314,31 @@ mod tests {
         assert!(text.contains("a frame took 1300 ms") && text.contains("chunks: 900 ms") && text.contains("jobs in flight: 3"), "{text}");
         assert!(text.contains("locks the main thread waited on (2 ms or more): none"), "{text}");
         assert!(s.notice().contains("most of it in chunks"), "{}", s.notice());
+    }
+
+    // spec: VIEW-061
+    #[test]
+    fn a_stall_report_names_each_phase_that_decoded_with_its_count_and_the_time_spent_getting_blocks() {
+        // The K view stall of 2026-10-30 as the probe records it (no clock: the counts and waits are given).
+        let (mut p, now) =
+            probe_with(&[("camera, ground heights and the globe overview", 1_063), ("plan and residency (begin_frame)", 220)], 1_304);
+        p.phase_decodes = vec![4, 1];
+        p.phase_block_wait = vec![Duration::from_millis(1_050), Duration::from_millis(210)];
+        let s = p.end_at(now).expect("a stall");
+        assert_eq!(s.decodes[0], ("camera, ground heights and the globe overview", 4, Duration::from_millis(1_050)));
+        let text = s.text("");
+        assert!(
+            text.contains("blocks the main thread decoded in camera, ground heights and the globe overview: 4 (1050 ms getting blocks)"),
+            "{text}"
+        );
+        assert!(text.contains("blocks the main thread decoded in plan and residency (begin_frame): 1 (210 ms getting blocks)"), "{text}");
+        // A phase that decoded nothing is not named.
+        p.begin();
+        p.began = now - Duration::from_millis(1_304);
+        p.phases = vec![("render", Duration::from_millis(1_304))];
+        p.phase_decodes = vec![0];
+        p.phase_block_wait = vec![Duration::ZERO];
+        assert!(!p.end_at(now).expect("a stall").text("").contains("blocks the main thread decoded"));
     }
 
     // spec: VIEW-056
