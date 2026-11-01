@@ -6,7 +6,7 @@ How the project proves itself: spec traceability and the A/B/C/D verification ti
 ## Requirements
 
 ### Requirement: TEST-001 Spec traceability
-Every requirement in the specs SHALL have a unique trace ID, a verification tier (A, B, C or D) and a status (active, planned or deprecated); every `// spec: ID` citation in the code SHALL name an existing requirement or constitution rule; every active tier A, B or C requirement SHALL be cited by at least one test of its own tier, where a citation counts only when the `// spec:` comment sits directly above a `#[test]` function (only comments and attributes, including wrapped multi-line ones, may sit between; only the `#[test]` attribute counts) and integration test files `tests/gpu_*.rs` are tier C, `tests/oracle_*.rs` tier B and all others (including unit tests under `src/`) tier A, matching the test runner, and a `// spec:` comment directly above a performance-harness scene entry point (a `fn perf_*` item under `crates/app/src/`, with the same comments-and-attributes rule between) counts as tier C evidence only (CON-17: the scene measures what no test may; there is no further tier); every tier D requirement SHALL name its review artefact; and every main spec SHALL have a Purpose section that is not empty and does not contain the placeholder "TBD" (in any case).
+Every requirement in the specs SHALL have a unique trace ID, a verification tier (A, B, C or D) and a status (active, planned or deprecated); every `// spec: ID` citation in the code SHALL name an existing requirement or constitution rule; every active tier A, B or C requirement SHALL be cited by at least one test of each declared tier, where a citation counts only when the `// spec:` comment sits directly above a `#[test]` function (only comments and attributes, including wrapped multi-line ones, may sit between; only the `#[test]` attribute counts) and integration test files `tests/gpu_*.rs` are tier C, `tests/oracle_*.rs` tier B and all others (including unit tests under `src/`) tier A, matching the test runner, and a `// spec:` comment directly above a performance-harness scene entry point (a `fn perf_*` item under `crates/app/src/`, with the same comments-and-attributes rule between) counts as tier C evidence only (CON-17: the scene measures what no test may; there is no further tier); every tier D requirement SHALL name its review artefact; and every main spec SHALL have a Purpose section that is not empty and does not contain the placeholder "TBD" (in any case).
 
 Verify: A
 Status: active
@@ -36,6 +36,7 @@ Source: CON-16, ADR 0009, ADR 0012, planner inbox #44 (2026-11-01)
 #### Scenario: Wrong tier
 - **WHEN** an active tier C requirement is cited only by tests outside `gpu_*` files
 - **THEN** `cargo xtask spec-lint` fails and says which tiers cite it and which tier is required
+- **AND** a requirement of several tiers (`Verify: A, C`) fails for each declared tier no test of that tier cites, and a tier other than A, B, C or D on the line is refused
 
 #### Scenario: Perf scene citation
 - **WHEN** a `// spec:` comment sits directly above a `fn perf_*` item under `crates/app/src/`
@@ -1438,9 +1439,9 @@ Detail:
 ### Requirement: TEST-078 The GLO-30 reader
 `planet_testkit::glo30` SHALL read a Copernicus GLO-30 COG GeoTIFF tile: the TIFF tags, deflate (through `miniz_oxide`) with the floating-point predictor, tiles or strips, the georeference (origin and pixel scale) and the no-data value, into an f32 raster with marked no-data cells. It SHALL refuse a tile with any other compression, predictor or sample format, naming the tag. `planet-testkit` stays a dev-dependency.
 
-Verify: A, B
+Verify: A
 Status: active
-Source: SPIKE-55 (reader in Python, outside the repo), SPIKE-57, GLO-30 licence notes
+Source: SPIKE-55 (reader in Python, outside the repo), SPIKE-57, GLO-30 licence notes, ADR 0009
 
 #### Scenario: Round trip
 - **WHEN** a test writes a small TIFF with deflate and predictor 3 in two tiles and reads it back
@@ -1453,9 +1454,9 @@ Source: SPIKE-55 (reader in Python, outside the repo), SPIKE-57, GLO-30 licence 
 ### Requirement: TEST-079 The terrain scorecard run
 The scorecard run SHALL compute, for each landform of the sites file, the seven descriptors (GEN-089 to GEN-092) on three rasters: the real tile's central 0.5-degree square and the generator's two matched sites (`world.field()` of the store), each 1,853 x 1,853 cells at 30 m on an east-north grid. Per site and descriptor it SHALL give a distance to the tile: Wasserstein-1 over percentiles p1 to p99 divided by the real p5-to-p95 range for continuous descriptors, L1 between class histograms for geomorphons, and the generator-to-real ratio for drainage density.
 
-Verify: A, B
+Verify: A
 Status: active
-Source: SPIKE-57 (seven descriptors, about 1 minute), SPIKE-55 (sites, 30 m windows)
+Source: SPIKE-57 (seven descriptors, about 1 minute), SPIKE-55 (sites, 30 m windows), ADR 0009
 
 #### Scenario: Distances
 - **WHEN** two identical percentile sets and two sets shifted by a quarter of the real p5-to-p95 range are compared, and two class histograms with disjoint support
@@ -1463,7 +1464,7 @@ Source: SPIKE-57 (seven descriptors, about 1 minute), SPIKE-55 (sites, 30 m wind
 
 #### Scenario: SPIKE-55 reproduced
 - **WHEN** the ignored test `the_scorecard_reproduces_spike_55` runs over the store (`cargo test -p planet --release --test it the_scorecard_reproduces_spike_55 -- --ignored --nocapture`)
-- **THEN** each generator site's slope and 1 km and 5 km relief p50 and p99 lie within 2 % of SPIKE-55's generator rows (`crates/app/data/spike55-generator-rows.toml`); the real rows are re-stated on the central 0.5-degree square (N47E011 slope p50 is 23.7, not the whole tile's 19.3), not compared; without the store the check is NOT RUN, never a pass
+- **THEN** each generator site's slope and 1 km and 5 km relief p50 and p99 lie within 2 % of SPIKE-55's generator rows (`crates/app/data/spike55-generator-rows.toml`); the real rows are re-stated on the central 0.5-degree square (N47E011 slope p50 is 23.7, not the whole tile's 19.3), not compared; without the store the check is NOT RUN, never a pass; it is run by hand (by the lane that changes the scorecard or the generator rows, or the owner), not by a tier, `gate` or `accept`
 
 ### Requirement: TEST-080 The scorecard report reads on a phone
 The run SHALL write `report.md` and `report.json` under `target/review/terrain-score/<date>/`. `report.md` begins with the Copernicus WorldDEM-30 notice for derived data and the no-liability sentence (`LICENCE-NOTES.md` of the tiles), then the run's inputs (date, commit, store, tiles, sites file), then one section per landform holding one table per generator site (at most four columns: descriptor, real p50, generator p50, distance) and, under each table, one line naming that site's three descriptors with the largest distance. `report.json` holds every percentile, histogram and distance with the run's inputs and the wall time per phase.
@@ -1509,6 +1510,10 @@ Detail: The pair is a measurement of the preview, not a gate: a pair over the bo
 #### Scenario: A verdict over the bound
 - **WHEN** the preview leaves more than a twentieth of the changed pixels in a view
 - **THEN** the test still passes and the verdict is printed
+
+#### Scenario: The pair over a real store (by hand)
+- **WHEN** the ignored tests `gpu_edit_pair::the_pair_over_a_real_store` (the discrete GPU, `PLANET_ADAPTER=hardware`, and an unlocked desktop) and `…the_plan_over_a_real_store_is_reported_per_parameter_set` (CPU only) run with `PLANET_PAIR_STORE` naming a store
+- **THEN** each case's pair and plan are printed, with the pictures in `target/review/edit-pair/`; this is run by hand for the owner's drag report, not by a tier, `gate` or `accept`, and the owner checks the pictures
 
 ### Requirement: TEST-075 The definition hash and the production store survive the removal
 A world definition SHALL hash to the value it had before ADR 0086's removal: without items, with an item and the default `Under` setting, and with the layer set `OnTop`. The `chunk_stage` setting SHALL stay parseable and hashed, so a store built before the removal opens without a rebuild. The production store (`C:/DEV/SeriousPlanetData/global16384`) SHALL open with the current build, read only: `cargo xtask gate` runs the ignored `the_real_store_opens_without_a_rebuild` and prints MATCH, NOT RUN (the store is absent; the gate is then incomplete, exit code 3, never a pass) or a failure.

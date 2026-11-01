@@ -1,0 +1,1 @@
+- 2026-11-01 test-tier-marks: TEST-076's and TEST-079's real-store scenarios say they are run by hand, not by a tier, gate or accept (TEST-076, TEST-079)

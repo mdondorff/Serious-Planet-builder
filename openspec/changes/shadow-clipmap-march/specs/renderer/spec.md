@@ -81,11 +81,19 @@ Source: ADR 0085 points 1, 3 and 5, SPIKE-56 findings 1 and 3 and P1, CON-11, AD
 - **THEN** it finds no planet-scale constant
 
 ### Requirement: REND-050 Upsample and temporal accumulation of the shadow
-A pass SHALL bring the half-resolution visibility to full resolution by a depth-aware 4-tap upsample and accumulate it over frames: reprojection with the previous camera, a clamp to the 3x3 neighbourhood, a history weight of at most 0.8, history rejected where the clipmap changed this frame or the last (a per-level generation texture) and after a camera cut. Below 5 degrees of sun, half of the half-resolution rays SHALL be marched each frame in a checkerboard and the other half taken from history.
+A pass SHALL reconstruct the half-resolution receivers from the depth buffer (the nearest of each 2x2 pixels, camera-relative f32 in the anchor's tangent frame), the march SHALL run over them, and a pass SHALL bring the half-resolution visibility to full resolution by a depth-aware 4-tap upsample (a tap on another surface counts for little: its weight falls with the relative depth difference) and accumulate it over frames: reprojection with the previous camera, a clamp to the 3x3 neighbourhood, a history weight of at most 0.8, history rejected where the march crossed a clipmap cell that changed this frame or the last and after a camera cut. The changes are kept in a per-level generation texture of 8x8-texel cells with a max mip chain, so a march step of any mip reads the one generation cell that holds it. Below 5 degrees of sun, half of the half-resolution rays SHALL be marched each frame in a checkerboard and the other half taken from history; the first frame and a camera cut march every ray.
 
 Verify: C
 Status: planned
 Source: ADR 0085 point 5, SPIKE-56 finding 6 and P1
+
+#### Scenario: Receivers and edges
+- **WHEN** a frame of flat ground with a sky band and a ledge over its right half stands in the shadow of a wall the ledge clears
+- **THEN** the receivers lie where the depth puts them (within 0.05 m), a sky pixel has none, and the upsample keeps the ground at 0 and the ledge at 1 on both sides of the depth edge (within 0.02)
+
+#### Scenario: Changed cells
+- **WHEN** a generation cell on every ray's path is marked changed, and then one that no ray crosses
+- **THEN** the first flags every march and the second none
 
 #### Scenario: A dragged stamp leaves no ghost
 - **WHEN** a plateau stamp is dragged 1.5 km a frame for 3 frames with temporal accumulation on and off
@@ -93,7 +101,11 @@ Source: ADR 0085 point 5, SPIKE-56 finding 6 and P1
 
 #### Scenario: The spread fills
 - **WHEN** the sun is at 2 degrees and the camera is still
-- **THEN** every half-resolution pixel is marched within 2 frames, and a camera cut marches all of them in the next frame
+- **THEN** every half-resolution pixel is marched within 2 frames, a still scene's shadow does not move while it fills (within 1/255), and a camera cut marches all of them in the next frame
+
+#### Scenario: A cut voids history
+- **WHEN** the scene changes and the frame is a camera cut
+- **THEN** the shadow equals the first frame of a fresh resolve of that scene
 
 ### Requirement: REND-051 The shadow is applied in sky-composite
 The lit terrain pass SHALL write its direct-sun radiance, unshadowed, to its own target (`sun-direct`) and the rest to `hdr-scene`; `sky-composite` SHALL add `shadow x sun-direct` before the aerial perspective; the water pass SHALL take the same visibility for its sun terms. J's shadow view SHALL draw the visibility as grey. The debug path SHALL be unchanged.

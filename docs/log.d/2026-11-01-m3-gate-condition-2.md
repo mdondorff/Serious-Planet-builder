@@ -1,0 +1,1 @@
+- 2026-11-01 **m3-gate-condition-2** (ADR 0021 point 7, GEN-017): the declared-versus-recorded reads contract test over the stamp, line and brush stages and a tile-level GEN-017 test (one height per direction whichever tile asks) written; both pass; `m3-gate-condition-2` archived
