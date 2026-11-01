@@ -1,0 +1,55 @@
+== gen capped leaves by level {}
+  alt 0-100              poses   696  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  alt 100-1000           poses   431  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  alt 1000-10000         poses   402  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  alt 10000-31000        poses   204  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  alt 31000-100000       poses   194  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  alt 100000-1000000     poses   406  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  alt 1000000-1000000000 poses   667  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  class ocean            poses  1091  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  class plain            poses  1587  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  class hills            poses   320  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  class mountains        poses     2  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+== store capped leaves by level {}
+  alt 0-100              poses   704  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  alt 100-1000           poses   407  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  alt 1000-10000         poses   436  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  alt 10000-31000        poses   201  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  alt 31000-100000       poses   174  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  alt 100000-1000000     poses   407  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  alt 1000000-1000000000 poses   671  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  class ocean            poses  1089  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  class plain            poses   255  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  class hills            poses  1601  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  class mountains        poses    55  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+== gen_band capped leaves by level {}
+  alt 10000-31000        poses  1000  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  class ocean            poses   356  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  class plain            poses   534  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  class hills            poses   109  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  class mountains        poses     1  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+== store_band capped leaves by level {}
+  alt 10000-31000        poses   600  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  class ocean            poses   214  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  class plain            poses    38  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  class hills            poses   333  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  class mountains        poses    15  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+== store_steep capped leaves by level {}
+  alt 0-100              poses   159  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  alt 100-1000           poses    88  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  alt 1000-10000         poses   108  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  alt 10000-31000        poses    45  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  class ocean            poses     9  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  class hills            poses     2  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  class mountains        poses   389  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+== stub_band.txt capped leaves by level {}
+  alt 10000-31000        poses    20  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  class ocean            poses    12  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  class plain            poses     7  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  class hills            poses     1  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+== stub_band capped leaves by level {}
+  alt 10000-31000        poses  2000  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  class ocean            poses  1455  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  class plain            poses   448  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  class hills            poses    96  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
+  class mountains        poses     1  refused   0  with capped leaf    0 (0.0 %)  capped leaves 0
