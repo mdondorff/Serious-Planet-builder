@@ -161,7 +161,7 @@ pub fn perf_coupled(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
     }
 }
 
-// spec: GEN-042
+// spec: GEN-042, GEN-088
 /// The make of the coupled run from the stored bake of `--store` (the viewer's make: reduction of the bake, then the steps), written to `into` under
 /// `target/` and never into the store, after the readiness gate: wall time against the GEN-042 budget, log `perf/logs/coupled-make.json`.
 fn perf_coupled_make(o: &Options, ctx: &GpuContext, out: &mut dyn Write, owner_override: &[String], into: &Path) -> Result<(), String> {

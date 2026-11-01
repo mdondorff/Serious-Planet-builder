@@ -39,7 +39,12 @@ fn mirror_error(field: &dyn HeightField, cells: u32, tiles: &[TileId]) -> (f64, 
     let (mut pos, mut height, mut normal) = (0f64, 0f64, 0f64);
     for id in tiles {
         let mesh = tile_mesh_field(field, &TangentWarp, *id, cells, R);
-        let ct = compact_tile_field(field, &TangentWarp, *id, cells, R);
+        let built = compact_tile_field(field, &TangentWarp, *id, cells, R);
+        // The mirror reads the tile back from its slot bytes at the layout's offsets (GEN-025): one byte string for the CPU, the pack
+        // and the shader.
+        let ct = CompactTile::from_slot_data(*id, cells, built.key, built.origin, built.relief_m, &built.slot_data())
+            .unwrap_or_else(|e| panic!("{id:?}: {e}"));
+        assert_eq!(ct, built, "{id:?}: the slot bytes round-trip the tile");
         let edge = R * core::f64::consts::FRAC_PI_2 / f64::from(1u32 << id.level());
         let shaded = ct.shade_all();
         assert_eq!(shaded.len(), vertex_count(cells));
@@ -67,7 +72,7 @@ fn mirror_error(field: &dyn HeightField, cells: u32, tiles: &[TileId]) -> (f64, 
     (pos, height, normal)
 }
 
-// spec: GEN-019, LOD-004, CON-13
+// spec: GEN-019, GEN-025, LOD-004, CON-13
 #[test]
 fn the_cpu_mirror_matches_the_product_mesh_at_every_level_from_3_to_26() {
     let reference = Reference(1);
