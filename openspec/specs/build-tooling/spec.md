@@ -95,6 +95,11 @@ Source: ADR 0009, report §16
 - **WHEN** a nextest JUnit report of a `test fast` run is read
 - **THEN** the five tests with the greatest times are listed, slowest first, each as its binary and test name
 
+#### Scenario: A WARP access violation is named, not hidden
+- **WHEN** a `cargo xtask test`, `test fast` or `test gpu` run on the software adapter ends with a test process aborted by `0xc0000005` (the access violation in `d3d10warp.dll`, docs/learnings.md)
+- **THEN** the summary names each such test as `WARP crash (d3d10warp), CI judges: <test>` before the log path
+- **AND** the step still counts as failed with its own exit code: no retry, no skip, no test changed
+
 ### Requirement: BUILD-004 Three run modes
 The single binary SHALL provide the modes `editor`, `generate` and `test-render`, each of which starts and exits cleanly with `--smoke`; for `editor`, `--smoke` opens the viewer window (VIEW-005) and the display-free start check is `editor --smoke --no-window`; headless PNG output of `test-render` is covered by TEST-004 and REND-007.
 
