@@ -342,6 +342,11 @@ struct FloorWorld {
 
 /// Every tile of the render floor (level 3) of a peaked terrain, uploaded.
 fn floor_world(peak: Vec3) -> FloorWorld {
+    floor_world_without(peak, None)
+}
+
+/// The same with one tile planned but not uploaded.
+fn floor_world_without(peak: Vec3, skip: Option<TileId>) -> FloorWorld {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let floor = planet_frame::lod::DEFAULT_RENDER_FLOOR;
     let ids: Vec<TileId> = planet_core::cube::Face::ALL
@@ -361,7 +366,9 @@ fn floor_world(peak: Vec3) -> FloorWorld {
     let mut tiles = BTreeMap::new();
     for &t in &ids {
         let data = compact_tile_field(&field, &TangentWarp, t, CELLS, R);
-        terrain.upload_tile(&ctx, &data).unwrap();
+        if Some(t) != skip {
+            terrain.upload_tile(&ctx, &data).unwrap();
+        }
         tiles.insert(t, data);
     }
     FloorWorld { ctx, terrain, tiles }
@@ -399,8 +406,25 @@ fn the_coarse_cube_holds_the_maximum_height_of_the_floor_tiles_over_each_texel()
                 let want = tile.h_origin + best;
                 let got = data[(cy * CUBE_TEXELS as i32 + cx) as usize];
                 assert!((got - want).abs() <= 1.0e-3, "face {face} texel ({cx},{cy}): {got} vs {want}");
-                if t == tile.id() && face == 4 && t.x() == 2 && t.y() == 5 {
+                if face == 4 && t.x() == 2 && t.y() == 5 {
                     peak_texel = peak_texel.max(got);
+                }
+            }
+        }
+    }
+    // Every lattice vertex is bounded by every texel whose closed footprint (in lattice units) contains it, whatever the index formula.
+    let cells = CELLS as i32;
+    for (id, tile) in &w.tiles {
+        let data = cube.read_face(&w.ctx, usize::from(id.face().0), 0);
+        for j in 0..=cells {
+            for i in 0..=cells {
+                let h = tile.h_origin + tile.rel_height(i as usize, j as usize);
+                for ly in ((j * size + cells - 1) / cells - 1).max(0)..=((j * size) / cells).min(size - 1) {
+                    for lx in ((i * size + cells - 1) / cells - 1).max(0)..=((i * size) / cells).min(size - 1) {
+                        let (cx, cy) = (id.x() as i32 * size + lx, id.y() as i32 * size + ly);
+                        let got = data[(cy * CUBE_TEXELS as i32 + cx) as usize];
+                        assert!(got >= h - 1.0e-3, "tile {id:?} vertex ({i},{j}): texel ({cx},{cy}) reads {got} below {h}");
+                    }
                 }
             }
         }
@@ -434,4 +458,20 @@ fn the_coarse_cube_holds_the_maximum_height_of_the_floor_tiles_over_each_texel()
         below = here;
         edge = child;
     }
+}
+
+// spec: REND-048
+#[test]
+fn a_floor_tile_that_is_not_uploaded_is_returned_and_its_texels_read_no_data() {
+    let tile = TileId::new(planet_core::cube::Face(1), 3, 4, 4).unwrap();
+    let w = floor_world_without(Vec3::new(1.0, 0.0, 0.0), Some(tile));
+    let mut cube = planet_render::shadow::CoarseCubeGpu::new(&w.ctx, CUBE_TEXELS, CELLS);
+    let tiles: Vec<TileId> = w.tiles.keys().copied().collect();
+    assert_eq!(cube.rebuild(&w.ctx, &w.terrain, &tiles), vec![tile]);
+    let data = cube.read_face(&w.ctx, 1, 0);
+    let size = (CUBE_TEXELS >> 3) as usize;
+    let (cx, cy) = (4 * size + 1, 4 * size + 1);
+    assert_eq!(data[cy * CUBE_TEXELS as usize + cx], planet_render::shadow::NO_DATA_M);
+    // The tile next to it is written.
+    assert!(data[cy * CUBE_TEXELS as usize + cx + size] > -1.0e6);
 }

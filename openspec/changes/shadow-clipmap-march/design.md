@@ -87,6 +87,11 @@ Until ADR 0087 is accepted, every perf check runs in a planner-authorized window
 | Goldens shift on every lit view at once | one PR moves them (PR 5); everything before draws shadows only on new targets |
 | Retirement removes a test that also covers base behaviour | move the assertion to a surviving requirement first (CLAUDE.md) |
 
+## Notes for the march (REND-049), from the coarse cube's review
+- The cube's mips are clamped at each face edge, so the one-texel dilation margin is missing along the 12 cube edges, where the walk also switches faces. The march drops to mip 0 within one coarse texel of a face edge, or dilates across faces; decide in PR 3.
+- The cube holds heights above the sphere (no drop): beyond the clipmap the march adds the sphere's drop from a curvature coefficient passed as a uniform (CON-11).
+- The cube is a max over the floor tiles' lattice samples, not over the finer tiles drawn there: a narrow peak between lattice vertices reads lower than the drawn peak (a peak missed by the lattice under-shadows at a grazing sun; the look review judges it).
+
 ## What needs the owner
 - Look review before the horizon maps are deleted (PR 5): stills at river-r1, hills-b and the Plateau 6 drag (300 m, 30 m, 1.8 m; sunset, midday, 2-degree sun), old against new, plus a 5-10 s drag video of a plateau stamp, through `cargo xtask package` (TEST-074).
 - `/bless` of the first lit goldens of the new shadow, per adapter (ADR 0017, ADR 0061).

@@ -799,7 +799,14 @@ pub fn cube_mip_shader() -> String {
 }
 
 /// The coarse max-height cube (REND-048, ADR 0085 point 4): six faces of `texels`^2 `R32Float` with max mips, each texel the maximum height
-/// above the sphere of the tile over it. The caller passes the floor tiles (disjoint footprints) and rebuilds when one changes.
+/// above the sphere of the tiles over it, taken over the lattice samples a texel's footprint touches (not over finer tiles drawn there).
+/// The caller passes every floor tile (disjoint footprints, covering every face) and rebuilds when one changes.
+///
+/// Layout for the march (REND-049): a 2D array texture, not a cube view; layer = the `planet_core` face index; texel `x` runs along the face
+/// coordinate `s` and row `y` along `t`; texels are uniform in the face coordinates before the `TangentWarp`. The values are heights above
+/// the sphere, not drop-corrected: beyond the clipmap the march adds the sphere's drop itself (with a curvature coefficient as a uniform,
+/// CON-11). The mips stop at the face edge (clamped), so a walk within one coarse texel of a face edge reads mip 0 or the neighbour face.
+/// Texels no tile has written read [`NO_DATA_M`].
 pub struct CoarseCubeGpu {
     cells: u32,
     texels: u32,
@@ -827,9 +834,27 @@ impl CoarseCubeGpu {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: CLIPMAP_FORMAT,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
+            usage: wgpu::TextureUsages::STORAGE_BINDING
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
+        for m in 0..mips {
+            let edge = (texels >> m).max(1);
+            let data = vec![NO_DATA_M; (edge * edge * 6) as usize].iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>();
+            ctx.queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &texture,
+                    mip_level: m,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &data,
+                wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(edge * 4), rows_per_image: Some(edge) },
+                wgpu::Extent3d { width: edge, height: edge, depth_or_array_layers: 6 },
+            );
+        }
         let mip_views = (0..mips)
             .map(|m| {
                 texture.create_view(&wgpu::TextureViewDescriptor {
@@ -917,7 +942,7 @@ impl CoarseCubeGpu {
     }
 
     /// Rewrite the whole cube from `tiles` (the floor tiles, disjoint footprints, each of a level at most `log2(texels)`), then its mips.
-    /// A tile that is not resident in `terrain` is skipped and returned; its texels stay as they were until it is.
+    /// A tile that is not resident in `terrain` is skipped and returned; its texels stay as they were (NO_DATA_M at first) until it is.
     pub fn rebuild(&mut self, ctx: &GpuContext, terrain: &TerrainRenderer, tiles: &[TileId]) -> Vec<TileId> {
         assert_eq!(terrain.compact_cells(), self.cells, "the cube was made for tiles of another size");
         let device = &ctx.device;
@@ -925,6 +950,7 @@ impl CoarseCubeGpu {
         let mut skipped = Vec::new();
         let mut jobs: Vec<(usize, Vec<u8>)> = Vec::new();
         let mut buffers: BTreeMap<usize, &wgpu::Buffer> = BTreeMap::new();
+        let mut area = 0u64;
         let mut claimed: Vec<(u32, u32, u32, u32, u32)> = Vec::new();
         for &t in tiles {
             assert!(u32::from(t.level()) <= self.texels.trailing_zeros(), "tile {t:?} is finer than a cube texel");
@@ -936,6 +962,7 @@ impl CoarseCubeGpu {
                 "floor tiles overlap at {t:?}"
             );
             claimed.push((face, x0, y0, x0 + size, y0 + size));
+            area += u64::from(size) * u64::from(size);
             let Some((block, buffer, first_word)) = terrain.slot_words(t) else {
                 skipped.push(t);
                 continue;
@@ -950,6 +977,7 @@ impl CoarseCubeGpu {
             }
             jobs.push((block, bytes));
         }
+        assert_eq!(area, 6 * u64::from(self.texels) * u64::from(self.texels), "the floor tiles must cover every face of the cube");
         if !jobs.is_empty() {
             let jobs_buffer = job_buffer(ctx, "coarse-cube-jobs", align, jobs.iter().map(|(_, b)| b.as_slice()));
             let bind0 = device.create_bind_group(&wgpu::BindGroupDescriptor {
