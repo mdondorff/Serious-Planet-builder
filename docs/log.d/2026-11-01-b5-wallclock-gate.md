@@ -1,0 +1,1 @@
+- 2026-11-01 b5-wallclock-gate: `cargo xtask perf wallclock` runs under the readiness gate (ADR 0020, without the adapter condition) and is the last step of `cargo xtask accept`; a refused gate is NOT RUN, never a pass (BUILD-003, TEST-073)
