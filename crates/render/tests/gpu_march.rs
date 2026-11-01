@@ -39,7 +39,7 @@ fn scene(wall_m: f32) -> Scene {
 fn params(sun_elevation_deg: f32, curvature: f32) -> MarchParams {
     let e = sun_elevation_deg.to_radians();
     MarchParams {
-        sun: [-e.cos(), 0.0, e.sin()],
+        sun: [-libm::cosf(e), 0.0, libm::sinf(e)],
         sun_tan: SUN_DISC_TAN,
         curvature,
         max_distance_m: 20_000.0,
@@ -74,7 +74,7 @@ fn a_wall_shadows_what_its_geometry_predicts_and_the_penumbra_widens_with_the_di
     let mut widths = Vec::new();
     for wall in [50.0f32, 100.0] {
         let (xs, vis) = wall_visibility(wall, 10.0);
-        let tip = 8.0 + wall / 10f32.to_radians().tan();
+        let tip = 8.0 + wall / libm::tanf(10f32.to_radians());
         // The penumbra of the sun disc spans the distances at which the ray grazes the wall top within the disc.
         for (x, v) in xs.iter().zip(&vis) {
             if *x <= tip - 24.0 {
@@ -97,13 +97,13 @@ fn a_sun_below_the_geometric_horizon_gives_zero_without_a_march() {
     let k = 1.0 / 6_371_000.0f32;
     let height = 100.0f32;
     let dip = (2.0 * height * k).sqrt();
-    let below = -(dip + 1.0f32.to_radians().sin());
+    let below = -(dip + libm::sinf(1.0f32.to_radians()));
     let mut p = params(0.0, k);
     p.sun = [-(1.0 - below * below).sqrt(), 0.0, below];
     let r = s.march.run(&s.ctx, &s.clip, &s.cube, &p, &[[0.0, 0.0, height, 1.0]], 1, 1);
     assert_eq!((r.visibility[0], r.steps[0]), (0.0, 0), "1 degree below the horizon");
     // A sun above the horizon on flat ground is lit, and the march took steps.
-    let above = -dip + 1.0f32.to_radians().sin();
+    let above = -dip + libm::sinf(1.0f32.to_radians());
     p.sun = [-(1.0 - above * above).sqrt(), 0.0, above];
     let r = s.march.run(&s.ctx, &s.clip, &s.cube, &p, &[[0.0, 0.0, height, 1.0]], 1, 1);
     assert_eq!(r.visibility[0], 1.0);
