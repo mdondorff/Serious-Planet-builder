@@ -29,10 +29,6 @@ fn plan_at(size: (u32, u32), atmosphere: bool) -> TerrainPlan {
     p
 }
 
-fn renderer(ctx: &GpuContext, size: (u32, u32), plans: &[&TerrainPlan], atmosphere: bool) -> TerrainRenderer {
-    renderer_with_water(ctx, size, plans, atmosphere, false)
-}
-
 fn renderer_with_water(ctx: &GpuContext, size: (u32, u32), plans: &[&TerrainPlan], atmosphere: bool, water: bool) -> TerrainRenderer {
     let block_slots = 24 * 24;
     let pool = compact_format_pool_with(
