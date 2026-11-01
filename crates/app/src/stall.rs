@@ -299,7 +299,28 @@ mod tests {
 
     // spec: VIEW-056
     #[test]
-    fn a_lock_the_main_thread_waits_on_is_named_and_a_short_wait_is_not_recorded() {
+    fn a_wait_of_2_ms_or_more_is_recorded_under_its_lock_longest_first_and_a_shorter_one_is_not() {
+        // What the timed acquires record, given their waits (no clock: the timed acquire on real threads is the wall-clock check below).
+        let (mut p, now) = probe_with(&[("render", 1_500)], 1_500);
+        waited("short", Duration::from_micros(1_999));
+        waited("at the threshold", WAIT_NOTED);
+        waited("the held lock", Duration::from_millis(40));
+        let s = p.end_at(now).expect("a stall");
+        assert_eq!(s.waits, [("the held lock", Duration::from_millis(40)), ("at the threshold", WAIT_NOTED)]);
+        let text = s.text("");
+        assert!(text.contains("the held lock") && !text.contains("short"), "{text}");
+        // The next frame starts clean: a stall again, with no waits.
+        p.begin();
+        p.began = now - Duration::from_millis(1_500);
+        assert_eq!(p.end_at(now).expect("a stall").waits, []);
+    }
+
+    // spec: VIEW-056
+    #[test]
+    #[ignore = "wall clock: cargo xtask perf wallclock"]
+    fn a_lock_another_thread_holds_for_40_ms_is_recorded_with_a_wait_of_at_least_20_ms() {
+        // The timed acquire on real threads: a wall-clock check that runs with `cargo xtask perf wallclock`, not in tier A (it failed on a
+        // shared runner when the main thread was descheduled, SPIKE-84). What the acquires record from a wait is tier A above.
         let (mut p, _) = probe_with(&[("render", 1_500)], 1_500);
         p.begin();
         p.began -= Duration::from_millis(1_500);

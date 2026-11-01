@@ -1265,17 +1265,22 @@ mod tests {
         let cam = above(at, 3_000.0);
         let mut e = runtime(None);
         e.toggle();
-        let (release, wait) = std::sync::mpsc::sync_channel::<()>(0);
+        // The pick blocks until it is released after the frames; had a frame waited for it, it would have given up first (an order, not
+        // a time: the 10 s only ends a pick that is never released).
+        let (release, wait) = std::sync::mpsc::channel::<()>();
         let wait = std::sync::Mutex::new(wait);
+        let gave_up = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = Arc::clone(&gave_up);
         e.set_hover_source(Arc::new(move |_, _| {
-            wait.lock().unwrap().recv_timeout(std::time::Duration::from_secs(3)).ok();
+            if wait.lock().unwrap().recv_timeout(std::time::Duration::from_secs(10)).is_err() {
+                flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
             None
         }));
-        let t = std::time::Instant::now();
         frame(&mut e, &cam, false);
         frame(&mut e, &cam, false);
-        assert!(t.elapsed() < std::time::Duration::from_millis(1500), "two frames with the pick blocked took {:?}", t.elapsed());
         release.send(()).unwrap();
+        assert!(!gave_up.load(std::sync::atomic::Ordering::SeqCst), "the pick gave up before the frames returned: a frame waited for it");
         // A click still picks on the spot, on the exact surface.
         let field = Flat;
         let hit = EditRuntime::hit_at(&cam, VIEWPORT, CENTRE, &limits(), &field);

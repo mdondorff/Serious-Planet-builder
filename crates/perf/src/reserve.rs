@@ -270,8 +270,11 @@ mod tests {
 
     // spec: BUDG-011
     #[test]
+    #[ignore = "wall clock: cargo xtask perf wallclock"]
     fn the_real_spin_takes_its_milliseconds_within_five_percent() {
-        // The median of many short spins on the real clock; a loaded machine gets three calibrations to land inside.
+        // The median of many short spins on the real clock; a loaded machine gets three calibrations to land inside. A wall-clock check: it
+        // runs with `cargo xtask perf wallclock` on the reference machine, not in tier A (it failed on a shared runner, SPIKE-84); the
+        // calibration itself is tier A on fake clocks.
         let timer = RealTimer::default();
         let mut worst = f64::MAX;
         for _ in 0..3 {

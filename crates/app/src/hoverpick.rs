@@ -84,18 +84,23 @@ mod tests {
     // spec: VIEW-061
     #[test]
     fn a_pick_that_blocks_never_holds_the_frame_and_its_hit_arrives_on_a_later_poll() {
-        let (release, wait) = sync_channel::<()>(0);
+        // The pick blocks until it is released after the frames; had a frame waited for it, it would have given up first (an order, not
+        // a time: the 10 s only ends a pick that is never released).
+        let (release, wait) = channel::<()>();
         let wait = Mutex::new(wait);
+        let gave_up = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&gave_up);
         let source: PickSource = Arc::new(move |_, _| {
-            wait.lock().unwrap().recv_timeout(std::time::Duration::from_secs(2)).ok();
+            if wait.lock().unwrap().recv_timeout(std::time::Duration::from_secs(10)).is_err() {
+                flag.store(true, Ordering::SeqCst);
+            }
             Some(hit(5.0))
         });
         let mut picker = HoverPicker::new(source);
-        let t = std::time::Instant::now();
         assert_eq!(picker.poll(request()), None, "nothing has finished");
         assert_eq!(picker.poll(request()), None, "the pick is still blocked and the frame did not wait");
-        assert!(t.elapsed() < std::time::Duration::from_millis(500));
         release.send(()).unwrap();
+        assert!(!gave_up.load(Ordering::SeqCst), "the pick gave up before the frames returned: a frame waited for it");
         let start = std::time::Instant::now();
         let got = loop {
             if let Some(h) = picker.poll(request()) {

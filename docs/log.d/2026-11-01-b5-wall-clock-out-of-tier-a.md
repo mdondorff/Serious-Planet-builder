@@ -1,0 +1,1 @@
+- 2026-11-01 b5-wall-clock-out-of-tier-a: tier A no longer asserts on wall time: the real spin, the cell-margin ratio and the real-thread lock wait are ignored checks of the new `cargo xtask perf wallclock`; the stall lock's recording and the frame-hold tests are tier A by values and by order (BUILD-003, BUDG-011, VIEW-056; SPIKE-84 fix 4)
