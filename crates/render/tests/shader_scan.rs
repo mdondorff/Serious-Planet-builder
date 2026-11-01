@@ -105,6 +105,14 @@ fn shipped_shaders_contain_no_planet_scale_values() {
             all.push(format!("clipmap-gather ({cells} cells): {h}"));
         }
     }
+    for cells in [4, 16, 32] {
+        for h in scan(&planet_render::shadow::cube_shader(cells)) {
+            all.push(format!("coarse-cube ({cells} cells): {h}"));
+        }
+    }
+    for h in scan(&planet_render::shadow::cube_mip_shader()) {
+        all.push(format!("coarse-cube-mip: {h}"));
+    }
     for h in scan(&planet_render::shadow::mip_shader()) {
         all.push(format!("clipmap-mip: {h}"));
     }

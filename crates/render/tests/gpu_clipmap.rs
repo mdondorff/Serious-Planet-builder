@@ -306,3 +306,172 @@ fn a_planned_tile_that_is_not_uploaded_is_returned_and_leaves_no_data_not_stale_
     let level0 = gpu.read_level(&w.ctx, 0, 0);
     assert_eq!(level0[slot(j) * TEXELS as usize + slot(i)], planet_render::shadow::NO_DATA_M, "texel ({i},{j})");
 }
+
+/// The reference terrain with one narrow peak (2 km tall) at a direction.
+struct Peaked {
+    base: Reference,
+    at: Vec3,
+}
+
+impl planet_generators::height::HeightField for Peaked {
+    fn height(&self, dir: Vec3) -> f64 {
+        let a = dir.angle_to(self.at);
+        self.base.height(dir) + 2000.0 * libm::exp(-(a / 0.004) * (a / 0.004))
+    }
+    fn seed(&self) -> u64 {
+        self.base.seed()
+    }
+    fn implementation_id(&self) -> &'static str {
+        self.base.implementation_id()
+    }
+    fn version(&self) -> u32 {
+        self.base.version()
+    }
+    fn max_abs_height_m(&self) -> f64 {
+        self.base.max_abs_height_m() + 2000.0
+    }
+}
+
+const CUBE_TEXELS: u32 = 64;
+
+struct FloorWorld {
+    ctx: GpuContext,
+    terrain: TerrainRenderer,
+    tiles: BTreeMap<TileId, CompactTile>,
+}
+
+/// Every tile of the render floor (level 3) of a peaked terrain, uploaded.
+fn floor_world(peak: Vec3) -> FloorWorld {
+    floor_world_without(peak, None)
+}
+
+/// The same with one tile planned but not uploaded.
+fn floor_world_without(peak: Vec3, skip: Option<TileId>) -> FloorWorld {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let floor = planet_frame::lod::DEFAULT_RENDER_FLOOR;
+    let ids: Vec<TileId> = planet_core::cube::Face::ALL
+        .iter()
+        .flat_map(|f| (0..1u32 << floor).flat_map(move |y| (0..1u32 << floor).map(move |x| TileId::new(*f, floor, x, y).unwrap())))
+        .collect();
+    let block_slots = 64;
+    let pool = compact_format_pool_with(
+        (128 << 20) + 20 * u64::from(block_slots) * planet_generators::compact::slot_bytes(CELLS),
+        CELLS,
+        block_slots,
+        1,
+    )
+    .unwrap();
+    let mut terrain = TerrainRenderer::with_pools(&ctx, (64, 48), CELLS, pool);
+    let field = Peaked { base: Reference(1), at: peak };
+    let mut tiles = BTreeMap::new();
+    for &t in &ids {
+        let data = compact_tile_field(&field, &TangentWarp, t, CELLS, R);
+        if Some(t) != skip {
+            terrain.upload_tile(&ctx, &data).unwrap();
+        }
+        tiles.insert(t, data);
+    }
+    FloorWorld { ctx, terrain, tiles }
+}
+
+// spec: REND-048
+#[test]
+fn the_coarse_cube_holds_the_maximum_height_of_the_floor_tiles_over_each_texel() {
+    // A peak 2 km above its surroundings, at a lattice vertex of a floor tile.
+    let tile = TileId::new(planet_core::cube::Face(4), 3, 2, 5).unwrap();
+    let peak = tile.sample_direction(&TangentWarp, CELLS, CELLS / 2, CELLS / 2);
+    let w = floor_world(peak);
+    let mut cube = planet_render::shadow::CoarseCubeGpu::new(&w.ctx, CUBE_TEXELS, CELLS);
+    let tiles: Vec<TileId> = w.tiles.keys().copied().collect();
+    assert!(cube.rebuild(&w.ctx, &w.terrain, &tiles).is_empty());
+
+    let size = (CUBE_TEXELS >> 3) as i32;
+    let mut peak_texel = f32::MIN;
+    for face in 0..6usize {
+        let data = cube.read_face(&w.ctx, face, 0);
+        for cy in 0..CUBE_TEXELS as i32 {
+            for cx in 0..CUBE_TEXELS as i32 {
+                let t = TileId::new(planet_core::cube::Face(face as u8), 3, (cx / size) as u32, (cy / size) as u32).unwrap();
+                let tile = &w.tiles[&t];
+                let (lx, ly) = (cx % size, cy % size);
+                let cells = CELLS as i32;
+                let (i0, i1) = ((lx * cells) / size, (((lx + 1) * cells + size - 1) / size).min(cells));
+                let (j0, j1) = ((ly * cells) / size, (((ly + 1) * cells + size - 1) / size).min(cells));
+                let mut best = f32::MIN;
+                for j in j0..=j1 {
+                    for i in i0..=i1 {
+                        best = best.max(tile.rel_height(i as usize, j as usize));
+                    }
+                }
+                let want = tile.h_origin + best;
+                let got = data[(cy * CUBE_TEXELS as i32 + cx) as usize];
+                assert!((got - want).abs() <= 1.0e-3, "face {face} texel ({cx},{cy}): {got} vs {want}");
+                if face == 4 && t.x() == 2 && t.y() == 5 {
+                    peak_texel = peak_texel.max(got);
+                }
+            }
+        }
+    }
+    // Every lattice vertex is bounded by every texel whose closed footprint (in lattice units) contains it, whatever the index formula.
+    let cells = CELLS as i32;
+    for (id, tile) in &w.tiles {
+        let data = cube.read_face(&w.ctx, usize::from(id.face().0), 0);
+        for j in 0..=cells {
+            for i in 0..=cells {
+                let h = tile.h_origin + tile.rel_height(i as usize, j as usize);
+                for ly in ((j * size + cells - 1) / cells - 1).max(0)..=((j * size) / cells).min(size - 1) {
+                    for lx in ((i * size + cells - 1) / cells - 1).max(0)..=((i * size) / cells).min(size - 1) {
+                        let (cx, cy) = (id.x() as i32 * size + lx, id.y() as i32 * size + ly);
+                        let got = data[(cy * CUBE_TEXELS as i32 + cx) as usize];
+                        assert!(got >= h - 1.0e-3, "tile {id:?} vertex ({i},{j}): texel ({cx},{cy}) reads {got} below {h}");
+                    }
+                }
+            }
+        }
+    }
+    // The texel over the peak reads (at least) the peak's height: 2 km above the tile's own terrain.
+    let t = &w.tiles[&tile];
+    let around = (0..=CELLS as usize)
+        .flat_map(|j| (0..=CELLS as usize).map(move |i| (i, j)))
+        .map(|(i, j)| t.h_origin + t.rel_height(i, j))
+        .fold(f32::MAX, f32::min);
+    assert!(peak_texel > around + 1500.0, "the peak ({peak_texel}) must stand well above the tile's low ground ({around})");
+
+    // Each mip texel is the maximum of its 2 x 2 footprint dilated by one texel, clamped to the face.
+    let mut below = cube.read_face(&w.ctx, 4, 0);
+    let mut edge = CUBE_TEXELS as i32;
+    for mip in 1..=3u32 {
+        let here = cube.read_face(&w.ctx, 4, mip);
+        let child = edge / 2;
+        for cy in 0..child {
+            for cx in 0..child {
+                let mut best = f32::MIN;
+                for dy in -1..=2 {
+                    for dx in -1..=2 {
+                        let (px, py) = ((2 * cx + dx).clamp(0, edge - 1), (2 * cy + dy).clamp(0, edge - 1));
+                        best = best.max(below[(py * edge + px) as usize]);
+                    }
+                }
+                assert_eq!(here[(cy * child + cx) as usize], best, "mip {mip} texel ({cx},{cy})");
+            }
+        }
+        below = here;
+        edge = child;
+    }
+}
+
+// spec: REND-048
+#[test]
+fn a_floor_tile_that_is_not_uploaded_is_returned_and_its_texels_read_no_data() {
+    let tile = TileId::new(planet_core::cube::Face(1), 3, 4, 4).unwrap();
+    let w = floor_world_without(Vec3::new(1.0, 0.0, 0.0), Some(tile));
+    let mut cube = planet_render::shadow::CoarseCubeGpu::new(&w.ctx, CUBE_TEXELS, CELLS);
+    let tiles: Vec<TileId> = w.tiles.keys().copied().collect();
+    assert_eq!(cube.rebuild(&w.ctx, &w.terrain, &tiles), vec![tile]);
+    let data = cube.read_face(&w.ctx, 1, 0);
+    let size = (CUBE_TEXELS >> 3) as usize;
+    let (cx, cy) = (4 * size + 1, 4 * size + 1);
+    assert_eq!(data[cy * CUBE_TEXELS as usize + cx], planet_render::shadow::NO_DATA_M);
+    // The tile next to it is written.
+    assert!(data[cy * CUBE_TEXELS as usize + cx + size] > -1.0e6);
+}

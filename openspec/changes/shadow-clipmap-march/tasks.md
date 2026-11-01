@@ -17,7 +17,7 @@
 
 ## 2. Steps per PR
 - [x] 2.1 PR 1 `shadow-clipmap-plan`
-- [ ] 2.2 PR 2 `shadow-clipmap-gather` (2a gather and mips done; 2b the coarse cube, REND-048, remains)
+- [x] 2.2 PR 2 `shadow-clipmap-gather` (2a gather and mips; 2b the coarse cube, REND-048)
 - [ ] 2.3 PR 3 `shadow-march`
 - [ ] 2.4 PR 4 `shadow-resolve` (perf window for the 2-degree pose)
 - [ ] 2.5 PR 5 `shadow-integration` (goldens per adapter; owner package)
