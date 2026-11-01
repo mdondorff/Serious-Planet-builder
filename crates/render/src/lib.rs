@@ -16,6 +16,7 @@ pub mod graph;
 pub mod horizon;
 pub use horizon::{probe_horizon, HorizonAnswer, HorizonQuery};
 pub mod lit;
+pub mod march;
 #[cfg(feature = "reference-renderer")]
 pub mod reference;
 pub(crate) mod refs;

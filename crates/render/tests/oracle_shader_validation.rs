@@ -55,6 +55,9 @@ fn every_shader_module_validates() {
     if let Err(e) = ctx.validate_wgsl("coarse-cube-mip", &planet_render::shadow::cube_mip_shader()) {
         panic!("{e}");
     }
+    if let Err(e) = ctx.validate_wgsl("shadow-march", &planet_render::march::march_shader()) {
+        panic!("{e}");
+    }
     if let Err(e) = ctx.validate_wgsl("clipmap-mip", &planet_render::shadow::mip_shader()) {
         panic!("{e}");
     }

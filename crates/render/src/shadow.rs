@@ -285,7 +285,10 @@ impl ClipmapGpu {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: CLIPMAP_FORMAT,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
+            usage: wgpu::TextureUsages::STORAGE_BINDING
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
         let mip_views = (0..mips)
@@ -407,6 +410,43 @@ impl ClipmapGpu {
         }
     }
 
+    /// Write mip 0 of one level from `heights` (`texels^2` values, row-major by slot): a synthetic clipmap for tests and probes. Call
+    /// [`ClipmapGpu::rebuild_all_mips`] after the levels are written.
+    pub fn upload_level(&self, ctx: &GpuContext, level: usize, heights: &[f32]) {
+        assert_eq!(heights.len(), (self.texels * self.texels) as usize, "a level is texels^2 values");
+        let data: Vec<u8> = heights.iter().flat_map(|v| v.to_le_bytes()).collect();
+        ctx.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d { x: 0, y: 0, z: level as u32 },
+                aspect: wgpu::TextureAspect::All,
+            },
+            &data,
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(self.texels * 4), rows_per_image: Some(self.texels) },
+            wgpu::Extent3d { width: self.texels, height: self.texels, depth_or_array_layers: 1 },
+        );
+    }
+
+    /// Rebuild the mips of every level over its whole edge.
+    pub fn rebuild_all_mips(&self, ctx: &GpuContext) {
+        let whole = TexelRect { x0: 0, y0: 0, x1: i64::from(self.texels), y1: i64::from(self.texels) };
+        self.build_mips(ctx, (0..self.levels).map(|_| vec![whole]).collect());
+    }
+
+    /// All levels and mips as one sampled array view (the march reads it).
+    pub(crate) fn sampled_view(&self) -> wgpu::TextureView {
+        self.texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("clipmap-sampled"),
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        })
+    }
+
+    pub fn levels(&self) -> usize {
+        self.levels
+    }
+
     pub fn texels(&self) -> u32 {
         self.texels
     }
@@ -424,7 +464,6 @@ impl ClipmapGpu {
         let mut skipped: Vec<TileId> = Vec::new();
         let device = &ctx.device;
         let align = u64::from(device.limits().min_uniform_buffer_offset_alignment).max(JOB_BYTES);
-        let n = i64::from(self.texels);
 
         // Jobs, level by level, coarse blocks first: the order is the overwrite order.
         let mut jobs: Vec<(usize, Vec<u8>)> = Vec::new();
@@ -548,8 +587,18 @@ impl ClipmapGpu {
         ctx.queue.submit([encoder.finish()]);
 
         // The mips: one pass a mip, so a mip is read only after the one below it is written.
-        let mut rects: Vec<Vec<TexelRect>> =
-            plan.levels.iter().map(|l| l.dirty.iter().filter(|r| !r.is_empty()).copied().collect()).collect();
+        let rects: Vec<Vec<TexelRect>> = plan.levels.iter().map(|l| l.dirty.iter().filter(|r| !r.is_empty()).copied().collect()).collect();
+        self.build_mips(ctx, rects);
+        skipped.sort();
+        skipped.dedup();
+        skipped
+    }
+
+    /// Rebuild the max mips of the given rectangles (world texel indices of mip 0, per level), one pass a mip.
+    pub(crate) fn build_mips(&self, ctx: &GpuContext, mut rects: Vec<Vec<TexelRect>>) {
+        let device = &ctx.device;
+        let align = u64::from(device.limits().min_uniform_buffer_offset_alignment).max(JOB_BYTES);
+        let n = i64::from(self.texels);
         for m in 1..self.mips {
             let edge = n >> m;
             let mut mip_jobs: Vec<Vec<u8>> = Vec::new();
@@ -606,9 +655,6 @@ impl ClipmapGpu {
             }
             ctx.queue.submit([encoder.finish()]);
         }
-        skipped.sort();
-        skipped.dedup();
-        skipped
     }
 
     /// The texels of one level at one mip, row-major, `(texels >> mip)^2` values: a test readback.
@@ -1023,6 +1069,14 @@ impl CoarseCubeGpu {
             }
             ctx.queue.submit([encoder.finish()]);
         }
+        self.build_mips(ctx);
+        skipped
+    }
+
+    /// Rebuild all mips from mip 0, one pass a mip.
+    pub fn build_mips(&self, ctx: &GpuContext) {
+        let device = &ctx.device;
+        let align = u64::from(device.limits().min_uniform_buffer_offset_alignment).max(CUBE_JOB_BYTES);
         for m in 1..self.mips {
             let edge = self.texels >> m;
             let mip_jobs: Vec<Vec<u8>> = (0..6u32)
@@ -1068,7 +1122,33 @@ impl CoarseCubeGpu {
             }
             ctx.queue.submit([encoder.finish()]);
         }
-        skipped
+    }
+
+    /// Write mip 0 of all six faces from `heights` (`6 * texels^2` values, face-major): a synthetic cube for tests and probes. Call
+    /// [`CoarseCubeGpu::build_mips`] after.
+    pub fn upload_faces(&self, ctx: &GpuContext, heights: &[f32]) {
+        assert_eq!(heights.len(), (6 * self.texels * self.texels) as usize, "six faces of texels^2 values");
+        let data: Vec<u8> = heights.iter().flat_map(|v| v.to_le_bytes()).collect();
+        ctx.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &data,
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(self.texels * 4), rows_per_image: Some(self.texels) },
+            wgpu::Extent3d { width: self.texels, height: self.texels, depth_or_array_layers: 6 },
+        );
+    }
+
+    /// All faces and mips as one sampled array view (the march reads it).
+    pub(crate) fn sampled_view(&self) -> wgpu::TextureView {
+        self.texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("coarse-cube-sampled"),
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        })
     }
 
     pub fn texels(&self) -> u32 {

@@ -22,6 +22,8 @@ mod gpu_horizon;
 mod gpu_indirect;
 #[path = "gpu_lit.rs"]
 mod gpu_lit;
+#[path = "gpu_march.rs"]
+mod gpu_march;
 #[path = "gpu_overlay.rs"]
 mod gpu_overlay;
 #[path = "gpu_pipelined.rs"]
