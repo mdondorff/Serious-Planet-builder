@@ -16,14 +16,14 @@ const MARCH_SHADER: &str = r#"
 struct March {
     // xyz: the unit direction to the sun in the anchor frame; w: the tangent of the sun disc's angular size.
     sun: vec4<f32>,
-    // x: the curvature (the reciprocal of the planet's size, a uniform); y: the longest march; z: the penumbra search distance; w: 1 when the
+    // x: the drop coefficient (the sphere falls c rho^2 below the tangent plane at a distance rho; half the curvature, a uniform); y: the longest march; z: the penumbra search distance; w: 1 when the
     // coarse cube continues the march beyond the outermost level.
     curv: vec4<f32>,
     // The anchor and its east and north in planet-fixed coordinates (the cube lookup).
     anchor: vec4<f32>,
     east: vec4<f32>,
     north: vec4<f32>,
-    // The edge of a level in texels, the level count, the edge of the cube in texels.
+    // The edge of a level in texels, the level count, the edge of the cube in texels, the highest mip the walk uses.
     info: vec4<u32>,
     // x: a cube texel in metres at the middle of a face.
     cube: vec4<f32>,
@@ -38,10 +38,9 @@ struct March {
 @group(0) @binding(4) var out_visibility: texture_storage_2d<r32float, write>;
 @group(0) @binding(5) var out_steps: texture_storage_2d<r32uint, write>;
 
-const MAX_MIP: i32 = 6;
-const MAX_STEPS: i32 = 1024;
+const MAX_STEPS: i32 = 2048;
 const MAX_CUBE_STEPS: i32 = 256;
-const QUARTER_TURN_TAN: f32 = 0.7853982;
+const QUARTER_TURN_ANGLE: f32 = 0.7853982;
 
 fn slot(c: i32, n: i32) -> i32 {
     return ((c % n) + n) % n;
@@ -64,8 +63,8 @@ fn level_max(k: i32, mip: i32, cx: i32, cy: i32) -> f32 {
     return textureLoad(clipmap, vec2<i32>(slot(cx, n), slot(cy, n)), k, mip).x;
 }
 
-// The cube texel and face of a unit direction (the face of the largest component, the coordinates uniform in the warped face coordinate).
-fn cube_height(dir: vec3<f32>, mip: i32) -> f32 {
+// The cube texel of a unit direction at a mip: (height, 1 when the texel is within one texel of a face edge at that mip).
+fn cube_probe(dir: vec3<f32>, mip: i32) -> vec2<f32> {
     let a = abs(dir);
     var face = 0;
     var n = vec3<f32>(1.0, 0.0, 0.0);
@@ -85,13 +84,27 @@ fn cube_height(dir: vec3<f32>, mip: i32) -> f32 {
         face = 5; n = vec3<f32>(0.0, 0.0, -1.0); u = vec3<f32>(1.0, 0.0, 0.0); v = vec3<f32>(0.0, -1.0, 0.0);
     }
     let dn = dot(dir, n);
-    let s = atan(dot(dir, u) / dn) / QUARTER_TURN_TAN;
-    let t = atan(dot(dir, v) / dn) / QUARTER_TURN_TAN;
-    let edge = i32(m.info.z);
-    let e = edge >> u32(mip);
+    let s = atan(dot(dir, u) / dn) / QUARTER_TURN_ANGLE;
+    let t = atan(dot(dir, v) / dn) / QUARTER_TURN_ANGLE;
+    let e = i32(m.info.z) >> u32(mip);
     let cx = clamp(i32(floor((s * 0.5 + 0.5) * f32(e))), 0, e - 1);
     let cy = clamp(i32(floor((t * 0.5 + 0.5) * f32(e))), 0, e - 1);
-    return textureLoad(cube, vec2<i32>(cx, cy), face, mip).x;
+    var edge = 0.0;
+    if (cx <= 1 || cy <= 1 || cx >= e - 2 || cy >= e - 2) {
+        edge = 1.0;
+    }
+    return vec2<f32>(textureLoad(cube, vec2<i32>(cx, cy), face, mip).x, edge);
+}
+
+// The direction of the planet-fixed unit vector at the plane point q (the drop coefficient c is half the curvature).
+fn cube_direction(q: vec2<f32>) -> vec3<f32> {
+    let rho = length(q);
+    var dir = m.anchor.xyz;
+    if (rho > 1.0e-3) {
+        let theta = rho * 2.0 * m.curv.x;
+        dir = normalize(m.anchor.xyz * cos(theta) + (m.east.xyz * q.x + m.north.xyz * q.y) * (sin(theta) / rho));
+    }
+    return dir;
 }
 
 // Visibility from the smallest clearance over distance, across the sun disc.
@@ -103,11 +116,12 @@ fn visibility_of(pen: f32) -> f32 {
 // (visibility, steps) of one receiver.
 fn march(o: vec3<f32>) -> vec2<f32> {
     let s = m.sun.xyz;
-    let k = m.curv.x;
+    // The drop of the sphere at a distance rho from the anchor is c rho^2 (c is a uniform, half the curvature).
+    let c = m.curv.x;
     // The planet's own shadow: the sun below the receiver's geometric horizon.
-    let up = normalize(vec3<f32>(o.x * k, o.y * k, 1.0));
-    let height = max(o.z + 0.5 * k * (o.x * o.x + o.y * o.y), 0.0);
-    if (dot(s, up) < -sqrt(2.0 * height * k)) {
+    let up = normalize(vec3<f32>(o.x * 2.0 * c, o.y * 2.0 * c, 1.0));
+    let height = max(o.z + c * (o.x * o.x + o.y * o.y), 0.0);
+    if (dot(s, up) < -sqrt(4.0 * height * c)) {
         return vec2<f32>(0.0, 0.0);
     }
     let hl = length(s.xy);
@@ -120,7 +134,7 @@ fn march(o: vec3<f32>) -> vec2<f32> {
     var pen = 1.0e5;
     var steps = 0.0;
     var blocked = false;
-    var mip = 2;
+    var mip = min(2, i32(m.info.w));
     var left = false;
     for (var it = 0; it < MAX_STEPS; it = it + 1) {
         if (tau > m.curv.y) {
@@ -149,14 +163,27 @@ fn march(o: vec3<f32>) -> vec2<f32> {
             ty = (f32(cy) * cs - q.y) / d.y;
         }
         let dt = max(min(tx, ty), 1.0e-3 * tl) + 1.0e-3 * tl;
+        // A coarse cell that reaches past the level's window is looked at in its parts, so no part is judged by the far side of the torus.
+        let exit = o.xy + d * (tau + dt);
+        if (mip > 0 && level_at(exit.x, exit.y) != lv) {
+            mip = mip - 1;
+            continue;
+        }
         let low = min(o.z + slope * tau, o.z + slope * (tau + dt));
-        let top = level_max(lv, mip, cx, cy);
+        // The ground is a box a texel wide at its sample; a receiver on it or on a slope would shadow itself, so the box is lowered by half a
+        // texel over the first four texels.
+        let relax = 0.5 * tl * clamp(1.0 - tau / (4.0 * tl), 0.0, 1.0);
+        let top = level_max(lv, mip, cx, cy) - relax;
         steps = steps + 1.0;
-        let dist = max(tau + dt, 1.0);
-        if (low - top >= m.sun.w * dist) {
-            // Clear of this cell by more than the sun disc spans: fully lit as far as it is concerned, and so is every cell it contains.
+        let dist = max(tau + 0.5 * dt, 1.0);
+        // Within the penumbra search a cell must be cleared by what the sun disc spans; beyond it only the sign matters.
+        var need = 0.0;
+        if (tau < m.curv.z) {
+            need = m.sun.w * dist;
+        }
+        if (low - top >= need) {
             tau = tau + dt;
-            mip = min(mip + 1, MAX_MIP);
+            mip = min(mip + 1, i32(m.info.w));
         } else if (mip > 0) {
             // A near miss or a hit against a maximum: look at the cells inside, down to the texels, where the clearance is exact.
             mip = mip - 1;
@@ -174,31 +201,43 @@ fn march(o: vec3<f32>) -> vec2<f32> {
             tau = tau + dt;
         }
     }
-    // Beyond the outermost level the coarse cube continues the march, in steps that grow with the distance.
+    // Beyond the outermost level the coarse cube continues the march, in steps that grow with the distance. Each sample is a mip whose
+    // texel (dilated by one) spans the step; within one texel of a face edge, where the mips do not dilate across the edge, the stride is
+    // sampled at mip 0 in quarters.
     if (!blocked && left && m.curv.w > 0.5) {
         let top_level = i32(m.info.y) - 1;
-        let floor_step = m.texel[top_level].x;
+        let floor_stride = m.texel[top_level].x;
+        let cube_mips = i32(firstTrailingBit(m.info.z));
+        let texel_min = max(m.cube.x * 0.70710678, 1.0e-3);
         for (var it = 0; it < MAX_CUBE_STEPS; it = it + 1) {
-            let stride = max(0.03 * tau, floor_step);
-            tau = tau + stride;
             if (tau > m.curv.y) {
                 break;
             }
+            let stride = max(0.03 * tau, floor_stride);
+            let mip_c = clamp(i32(ceil(log2(max(stride / texel_min, 1.0)))) + 1, 0, cube_mips);
             let q = o.xy + d * tau;
-            let rho = length(q);
-            let theta = rho * k;
-            var dir = m.anchor.xyz;
-            if (rho > 1.0e-3) {
-                dir = normalize(m.anchor.xyz * cos(theta) + (m.east.xyz * q.x + m.north.xyz * q.y) * (sin(theta) / rho));
-            }
-            let mip_c = clamp(i32(floor(log2(max(stride / max(m.cube.x, 1.0e-3), 1.0)))), 0, MAX_MIP);
-            let top = cube_height(dir, mip_c);
-            let above = o.z + slope * tau + 0.5 * k * rho * rho;
+            let probe = cube_probe(cube_direction(q), mip_c);
+            let above = o.z + slope * tau + c * dot(q, q);
             steps = steps + 1.0;
-            if (above < top) {
+            if (above < probe.x) {
                 blocked = true;
                 break;
             }
+            if (probe.y > 0.5) {
+                for (var j = 1; j < 4; j = j + 1) {
+                    let tj = tau + stride * f32(j) * 0.25;
+                    let qj = o.xy + d * tj;
+                    let fine = cube_probe(cube_direction(qj), 0);
+                    steps = steps + 1.0;
+                    if (o.z + slope * tj + c * dot(qj, qj) < fine.x) {
+                        blocked = true;
+                    }
+                }
+                if (blocked) {
+                    break;
+                }
+            }
+            tau = tau + stride;
         }
     }
     if (blocked) {
@@ -236,8 +275,9 @@ pub struct MarchParams {
     pub sun: [f32; 3],
     /// The tangent of the sun disc's angular radius (0.267 degrees).
     pub sun_tan: f32,
-    /// The reciprocal of the planet's size, as a uniform (0 for a flat synthetic world).
-    pub curvature: f32,
+    /// The sphere's drop per squared distance from the anchor, `1 / (2 R)`, as a precomputed uniform (CON-11: never R itself; 0 for a flat
+    /// synthetic world).
+    pub drop_coefficient: f32,
     pub max_distance_m: f32,
     /// How far the penumbra search reaches (2 km, ADR 0085).
     pub penumbra_search_m: f32,
@@ -339,11 +379,14 @@ impl ShadowMarchGpu {
         let mut uniform: Vec<u8> = Vec::with_capacity(624);
         let f = |out: &mut Vec<u8>, v: &[f32]| v.iter().for_each(|x| out.extend_from_slice(&x.to_le_bytes()));
         f(&mut uniform, &[params.sun[0], params.sun[1], params.sun[2], params.sun_tan]);
-        f(&mut uniform, &[params.curvature, params.max_distance_m, params.penumbra_search_m, if params.use_cube { 1.0 } else { 0.0 }]);
+        f(
+            &mut uniform,
+            &[params.drop_coefficient, params.max_distance_m, params.penumbra_search_m, if params.use_cube { 1.0 } else { 0.0 }],
+        );
         f(&mut uniform, &[params.anchor[0], params.anchor[1], params.anchor[2], 0.0]);
         f(&mut uniform, &[params.east[0], params.east[1], params.east[2], 0.0]);
         f(&mut uniform, &[params.north[0], params.north[1], params.north[2], 0.0]);
-        for v in [clip.texels(), params.levels.len() as u32, cube.texels(), 0] {
+        for v in [clip.texels(), params.levels.len() as u32, cube.texels(), clip.texels().trailing_zeros().min(6)] {
             uniform.extend_from_slice(&v.to_le_bytes());
         }
         f(&mut uniform, &[params.cube_texel_m, 0.0, 0.0, 0.0]);

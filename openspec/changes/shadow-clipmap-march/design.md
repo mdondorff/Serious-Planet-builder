@@ -93,6 +93,12 @@ Until ADR 0087 is accepted, every perf check runs in a planner-authorized window
 - The cube holds heights above the sphere (no drop): beyond the clipmap the march adds the sphere's drop from a curvature coefficient passed as a uniform (CON-11).
 - The cube is a max over the floor tiles' lattice samples, not over the finer tiles drawn there: a narrow peak between lattice vertices reads lower than the drawn peak (a peak missed by the lattice under-shadows at a grazing sun; the look review judges it).
 
+## The march as built (PR 3)
+- Curvature arrives as the drop coefficient `c = 1/(2R)` (a precomputed f32 uniform, never R): the drop at a distance rho is `c rho^2`. The review measured the f32 error: positions to 1,000 km keep a step of 0.06 m against texels of 512 m or more, and `c rho^2` at 78 km (the outer level's reach) keeps millimetres. The straight ray in the anchor frame is first-order accurate: beyond about 1,000 km (`max_distance_m`) the slope error grows (about 0.08 at 500 km and a 45 degree sun), so the march stays within 1,000 km.
+- Cube edges: within one cube texel of a face edge, where the mips do not dilate across the edge, a stride is sampled at mip 0 in quarters (3 extra reads per such stride; the other strides cost the same). Tested with a pose across an edge and one at a corner.
+- Receiver bias: the ground is a box a texel wide at its sample, so the box is lowered by half a texel over the first four texels (a receiver on flat ground or on a slope facing the sun is lit).
+- A coarse cell that reaches past a level's window is split until it lies inside it. The skip rule demands the sun disc's clearance only within the 2 km penumbra search.
+
 ## What needs the owner
 - Look review before the horizon maps are deleted (PR 5): stills at river-r1, hills-b and the Plateau 6 drag (300 m, 30 m, 1.8 m; sunset, midday, 2-degree sun), old against new, plus a 5-10 s drag video of a plateau stamp, through `cargo xtask package` (TEST-074).
 - `/bless` of the first lit goldens of the new shadow, per adapter (ADR 0017, ADR 0061).
