@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 #[macro_use]
 mod horizon_wgsl;
 pub mod atmosphere;
+pub mod burn;
 pub mod compact;
 pub mod exec;
 pub mod gate;
@@ -24,6 +25,7 @@ pub mod water;
 pub mod water_gpu;
 pub mod window;
 pub use atmosphere::{atmosphere_shaders, AtmospherePath, ProbeKind};
+pub use burn::{BurnCalibration, BurnPass};
 pub use compact::compact_terrain_shader;
 pub use exec::{execute, reference_frame, ExecError, ExecStats, TileResource, EXEC_SHADERS};
 pub use gate::requirements as adapter_requirements;
