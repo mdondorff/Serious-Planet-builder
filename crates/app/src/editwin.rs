@@ -97,6 +97,8 @@ pub struct EditStats {
     pub published: u64,
     /// The previews set with at least one stamp (VIEW-023).
     pub previews: u64,
+    /// The previews that ended because the exact tiles were in (VIEW-023).
+    pub previews_ended: u64,
     /// The most nodes a frame drew previewed.
     pub previewed_max: usize,
 }
@@ -435,6 +437,7 @@ impl EditRuntime {
     /// The exact tiles are in: the preview ends and the oldest state is forgotten.
     pub fn preview_end(&mut self) {
         self.feed.oldest = None;
+        self.stats.previews_ended += 1;
     }
 
     /// The tiles of `resident` the commands since the last call changed (the footprint find, `planet_editor::feed`), counted; every
@@ -1037,8 +1040,8 @@ impl EditRuntime {
     pub fn summary(&self) -> String {
         let s = &self.stats;
         format!(
-            "{} frames in the editor mode, {} placed, {} selected, {} dragged, {} typed, {} deleted, {} undone, {} redone, {} flights, {} refused, up to {} edits shown, {} tiles sent to refresh, {} definitions handed to the generator, {} previews set, up to {} nodes previewed",
-            s.frames, s.placed, s.selected, s.dragged, s.typed, s.deleted, s.undone, s.redone, s.flights, s.refused, s.shown_max, s.refresh_tiles, s.published, s.previews, s.previewed_max
+            "{} frames in the editor mode, {} placed, {} selected, {} dragged, {} typed, {} deleted, {} undone, {} redone, {} flights, {} refused, up to {} edits shown, {} tiles sent to refresh, {} definitions handed to the generator, {} previews set, {} previews ended on the exact tiles, up to {} nodes previewed",
+            s.frames, s.placed, s.selected, s.dragged, s.typed, s.deleted, s.undone, s.redone, s.flights, s.refused, s.shown_max, s.refresh_tiles, s.published, s.previews, s.previews_ended, s.previewed_max
         )
     }
 }
@@ -1988,6 +1991,7 @@ mod tests {
         assert!(e.preview_active());
         e.preview_end();
         assert!(!e.preview_active() && e.preview_stamps(cam.position.0).is_empty(), "ended: nothing to preview");
+        assert!(e.stats.previews_ended == 1 && e.summary().contains(" 1 previews ended on the exact tiles"), "{}", e.summary());
         e.session.set_param_text("radius_m", "777").unwrap();
         let second = hand_over(&mut e);
         let stamps = e.preview_stamps(cam.position.0);
