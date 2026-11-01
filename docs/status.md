@@ -29,7 +29,6 @@ After Option B: M9 R3 to R6 (week plan section 4). B6 (chunk stage removed) and 
 - **Reserve test result** (BUDG-012, loaded, 3 rounds, 2026-11-01): dive, look-1m, look-2km, teleport-2km pass; teleport-1m fails by +1 % (frame median 16.75 against 16.60 ms; the spin runs 5-18 % over its 6-9 ms target). Frame p99 over 20 ms includes the spin by construction. A quiet window decides the absolute rows.
 - **teleport-1m reserve marginal** (quiet window, 2026-11-01): reserve verdict pass in 3 of 3; frame medians with loads 14.33/16.31/16.40 ms against 16.60, but 5 of 6 sessions had no frame verdict (ADR 0065 CPU calibration out of limits). Re-check on a calm CPU, after the terrain cap decision.
 - **Reserve test gaps** (2026-11-01): terrain GPU is sampled at the last pose only; the share ceilings of ADR 0083 are provisional, pending the owner. Scaling (P-cores, 3 rounds): tile-ready rises with every worker, throughput saturates at 8-10; proposal to restate BUDG-003 sent to the planner.
-- **Mode in the one-off logs** (perf-loaded-mode, 2026-11-01): `global-bake`, `coupled`, `envelope` and `edit` write their own logs without `mode` or `load_record`; the lit-pass and one-off rows carry no `loaded_verdicts`.
 - **`gpu_stream_perf` 300 s timeout on Windows WARP C 2/2** (2026-10-31): did not recur after the jobs.rs shutdown fix (#1001), cause not proven; the capture names the stage if it returns.
 - **Upload pacing after a teleport** (job-system PR 4, 2026-10-31): lit teleport-2km frame p99 4.5 -> 6.2 ms (+36 %, accepted) as tiles land 2.7x sooner and their uploads bunch; pace uploads in B3 or the upload work.
 - **Pooled fan-out** (job-system PR 3b): helper threads taken from the job system's workers instead of scoped threads per call could save about 1.5 % of a cold plan job; needs lifetime erasure, own PR with a numerics-reviewer pass.
@@ -57,8 +56,6 @@ After Option B: M9 R3 to R6 (week plan section 4). B6 (chunk stage removed) and 
 - **Tiles flash to a coarser level while moving** (owner, P1-4, P2-8): not reproduced (TEST-067, TEST-070, TEST-072 on a generated world); next: the owner's F9 capture; open: a margin round the plan's frustum.
 - **Base LOD refused below about 31 km over a field with only a global bound** (VIEW-032): 6.8 to 9.4 % of sweep poses; possibly a harness artefact. Next: sweep the real eroded world.
 - **RTX known-answer hashes** in `gpu_compact_blocks.rs` and `gpu_water.rs` removed under MESH_VERSION 8: re-record with `test gpu --real` (now MESH_VERSION 9).
-- **Item store revisit trigger** (ADR 0066 point 6): more than 20,000 items in a body or a load over 2 s decides the backend. Nothing counts or times it yet.
-- **M3 gate condition 2**: the declared-versus-recorded reads contract test (ADR 0021 point 7) and a tile-level GEN-017 test are approved, not written.
 - **Flaky `gpu_window` flight test**: one failure after 7.5 s, 0 of 5 since; probably the lock (first item). On a second failure keep the full output.
 - **WARP device removal with the compact format and the atmosphere**: test-only, accepted; the software smoke stays on the vertex format. Re-test when WARP, wgpu or Windows changes (Windows changed 2026-10-30).
 - **Beach shading flashes on WARP** (36.8 % of shore-band pixels on the coastal descent): unchecked since REND-030; check with the next look review.

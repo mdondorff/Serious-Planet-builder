@@ -457,6 +457,37 @@ fn nodes_appear_where_their_vertices_project() {
     }
 }
 
+// spec: LOD-011
+#[test]
+fn the_orbit_view_is_drawn_from_floor_tiles_without_a_hole_and_its_floor_leaves_do_not_morph() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let floor = lod().min_level;
+    assert_eq!(floor, 3, "the production render floor");
+    // The orbit-20000km view (index 0): every node sits on the floor, and the floor is a leaf.
+    let (name, plan) = plan_for(0, TerrainView::Level);
+    assert!(!plan.nodes.is_empty() && plan.nodes.iter().all(|n| n.level == floor), "{name}: a node off the floor");
+    let (img, _) = render(&ctx, &plan, &meshes_for(&plan));
+    let h = holes(&plan, &img);
+    assert!(h.is_empty(), "{name}: {} hole pixels inside the planet, first at {:?}", h.len(), h.first());
+    let covered: Vec<[u8; 4]> = img.pixels().filter(|p| *p != plan.clear_color).collect();
+    assert!(covered.len() > 1000, "{name}: only {} pixels show the planet", covered.len());
+    assert!(covered.iter().all(|p| *p == level_color(floor)), "{name}: a pixel not of the floor level's colour");
+    // The morph view: red is the morph value, and a floor leaf draws none anywhere on the planet.
+    // The relief and normals views of the same orbit: no hole either.
+    for view in [TerrainView::Relief, TerrainView::Normals] {
+        let (_, plan) = plan_for(0, view);
+        let (img, _) = render(&ctx, &plan, &meshes_for(&plan));
+        let h = holes(&plan, &img);
+        assert!(h.is_empty(), "{name} {}: {} hole pixels inside the planet, first at {:?}", view.name(), h.len(), h.first());
+    }
+    // The plan gives every floor leaf the interval that never morphs, and the morph view draws exactly morph 0 (red 0, blue 255).
+    let (_, plan) = plan_for(0, TerrainView::Morph);
+    assert!(plan.nodes.iter().all(|n| n.morph_start_m >= 1e30 && n.morph_end_m >= 1e30), "{name}: a floor node with a morph interval");
+    let (img, _) = render(&ctx, &plan, &meshes_for(&plan));
+    let morphing = img.pixels().filter(|p| *p != plan.clear_color && *p != [0, 0, 255, 255]).count();
+    assert_eq!(morphing, 0, "{name}: {morphing} pixels of the floor leaves morph");
+}
+
 // spec: REND-009, LOD-004
 #[test]
 fn gpu_morph_values_match_the_cpu_formula_at_projected_vertices() {

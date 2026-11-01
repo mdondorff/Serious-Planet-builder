@@ -6,11 +6,11 @@ How the project proves itself: spec traceability and the A/B/C/D verification ti
 ## Requirements
 
 ### Requirement: TEST-001 Spec traceability
-Every requirement in the specs SHALL have a unique trace ID, a verification tier (A, B, C or D) and a status (active, planned or deprecated); every `// spec: ID` citation in the code SHALL name an existing requirement or constitution rule; every active tier A, B or C requirement SHALL be cited by at least one test of its own tier, where a citation counts only when the `// spec:` comment sits directly above a `#[test]` function (only comments and attributes, including wrapped multi-line ones, may sit between; only the `#[test]` attribute counts) and integration test files `tests/gpu_*.rs` are tier C, `tests/oracle_*.rs` tier B and all others (including unit tests under `src/`) tier A, matching the test runner, and a `// spec:` comment directly above a performance-harness scene entry point (a `fn perf_*` item under `crates/app/src/`, with the same comments-and-attributes rule between) counts as tier C evidence only (CON-17: the scene measures what no test may; there is no further tier); every tier D requirement SHALL name its review artefact; and every main spec SHALL have a Purpose section that is not empty and does not contain the placeholder "TBD" (in any case).
+Every requirement in the specs SHALL have a unique trace ID, a verification tier (A, B, C or D) and a status (active, planned or deprecated); every `// spec: ID` citation in the code SHALL name an existing requirement or constitution rule; every active tier A, B or C requirement SHALL be cited by at least one test of each declared tier, where a citation counts only when the `// spec:` comment sits directly above a `#[test]` function (only comments and attributes, including wrapped multi-line ones, may sit between; only the `#[test]` attribute counts) and integration test files `tests/gpu_*.rs` are tier C, `tests/oracle_*.rs` tier B and all others (including unit tests under `src/`) tier A, matching the test runner, and a `// spec:` comment directly above a performance-harness scene entry point (a `fn perf_*` item under `crates/app/src/`, with the same comments-and-attributes rule between) counts as tier C evidence only (CON-17: the scene measures what no test may; there is no further tier); every tier D requirement SHALL name its review artefact; and every main spec SHALL have a Purpose section that is not empty and does not contain the placeholder "TBD" (in any case).
 
 Verify: A
 Status: active
-Source: CON-16, ADR 0009, ADR 0012
+Source: CON-16, ADR 0009, ADR 0012, planner inbox #44 (2026-11-01)
 
 #### Scenario: Placeholder Purpose
 - **WHEN** a spec's Purpose is missing, empty or contains "TBD"
@@ -28,9 +28,15 @@ Source: CON-16, ADR 0009, ADR 0012
 - **WHEN** a `// spec:` comment sits above a helper function, a constant or a module instead of a `#[test]` function
 - **THEN** it does not count towards coverage and the requirement is reported as not cited
 
+#### Scenario: Ignored test
+- **WHEN** a `// spec:` comment sits above a `#[test]` function that is also marked `#[ignore]` (with or without a reason, before or after `#[test]`)
+- **THEN** it counts for no tier, and a requirement cited only by ignored tests is reported as not cited
+- **AND** the citation must still name an existing requirement; a wall-clock check (BUILD-003) is such a test
+
 #### Scenario: Wrong tier
 - **WHEN** an active tier C requirement is cited only by tests outside `gpu_*` files
 - **THEN** `cargo xtask spec-lint` fails and says which tiers cite it and which tier is required
+- **AND** a requirement of several tiers (`Verify: A, C`) fails for each declared tier no test of that tier cites, and a tier other than A, B, C or D on the line is refused
 
 #### Scenario: Perf scene citation
 - **WHEN** a `// spec:` comment sits directly above a `fn perf_*` item under `crates/app/src/`
@@ -1358,11 +1364,11 @@ Detail: The pixel bounds are proposed from the morph design (LOD-008: a node is 
 - **THEN** the verdict is NOT EXERCISED, never PASS
 
 ### Requirement: TEST-071 A bundle of a stored bake replays from the store
-A terrain bundle that records a bake of more cells than a run makes in memory (1024 per face edge) SHALL replay with `--store DIR`, the stored bake of that size opened read-only, and SHALL be refused without it, naming the recorded size and `--store DIR`. The replay SHALL check the recorded definition hash, field id and radius as for any recorded world (TEST-008).
+A terrain bundle that records a bake of more than 1024 cells per face edge SHALL replay with `--store DIR` (opened read-only) and be refused without it, naming the recorded size and `--store DIR`; the recorded definition hash, field id and radius are checked (TEST-008). A bundle SHALL record its build's commit (`commit <sha>`, `+dirty` for a dirty tree; optional on read). A version mismatch SHALL name that commit and `--at-commit`, or how to find the build. `cargo xtask repro <bundle> --at-commit` SHALL replay in a worktree of the commit under `target/repro-worktree/`, handing the build the bundle without the line, and SHALL refuse a bundle without a commit or of a dirty tree, saying how to go on.
 
 Verify: A
 Status: active
-Source: opus-planner (2026-10-30, B5), CON-19, TEST-008
+Source: opus-planner (2026-10-30, B5; 2026-11-01, SPIKE-84 fix 5), CON-19, TEST-008
 
 #### Scenario: A bake beyond the memory limit
 - **WHEN** a bundle records a bake of 4096 cells and is replayed without a store
@@ -1371,6 +1377,14 @@ Source: opus-planner (2026-10-30, B5), CON-19, TEST-008
 #### Scenario: From the store
 - **WHEN** a bundle of a small bake is replayed with the stored bake of the same size and again with the bake made in memory
 - **THEN** both worlds give the same heights bit for bit, and a directory that is no store is refused naming it
+
+#### Scenario: The recorded commit
+- **WHEN** a bundle is written with a commit, read back, and then written and read without one
+- **THEN** the first reads the same commit, the second reads none, and neither is refused for the line
+
+#### Scenario: Replay at the commit
+- **WHEN** `repro --at-commit` is given a bundle with a commit, and then one without
+- **THEN** the first is replayed in the worktree of that commit, and the second is refused naming the file, the versions to look for and `git log -S`
 
 ### Requirement: TEST-046 The coarse share of a frame
 `planet_frame::scenes::detail_lag` SHALL also give the coarse share of a frame: the share of the screen, weighted by the projected pixels of the nodes of the fresh selection ([`node_weight`]), whose node is drawn from a tile coarser than the selection wanted or is not covered at all. A node drawn at its own level, or covered by finer tiles, counts 0; a node drawn from an ancestor or uncovered counts its whole weight. The share is a number in `[0, 1]` (0 for a selection without weight) and a pure function of the fresh plan and the drawn set.
@@ -1425,9 +1439,9 @@ Detail:
 ### Requirement: TEST-078 The GLO-30 reader
 `planet_testkit::glo30` SHALL read a Copernicus GLO-30 COG GeoTIFF tile: the TIFF tags, deflate (through `miniz_oxide`) with the floating-point predictor, tiles or strips, the georeference (origin and pixel scale) and the no-data value, into an f32 raster with marked no-data cells. It SHALL refuse a tile with any other compression, predictor or sample format, naming the tag. `planet-testkit` stays a dev-dependency.
 
-Verify: A, B
+Verify: A
 Status: active
-Source: SPIKE-55 (reader in Python, outside the repo), SPIKE-57, GLO-30 licence notes
+Source: SPIKE-55 (reader in Python, outside the repo), SPIKE-57, GLO-30 licence notes, ADR 0009
 
 #### Scenario: Round trip
 - **WHEN** a test writes a small TIFF with deflate and predictor 3 in two tiles and reads it back
@@ -1440,9 +1454,9 @@ Source: SPIKE-55 (reader in Python, outside the repo), SPIKE-57, GLO-30 licence 
 ### Requirement: TEST-079 The terrain scorecard run
 The scorecard run SHALL compute, for each landform of the sites file, the seven descriptors (GEN-089 to GEN-092) on three rasters: the real tile's central 0.5-degree square and the generator's two matched sites (`world.field()` of the store), each 1,853 x 1,853 cells at 30 m on an east-north grid. Per site and descriptor it SHALL give a distance to the tile: Wasserstein-1 over percentiles p1 to p99 divided by the real p5-to-p95 range for continuous descriptors, L1 between class histograms for geomorphons, and the generator-to-real ratio for drainage density.
 
-Verify: A, B
+Verify: A
 Status: active
-Source: SPIKE-57 (seven descriptors, about 1 minute), SPIKE-55 (sites, 30 m windows)
+Source: SPIKE-57 (seven descriptors, about 1 minute), SPIKE-55 (sites, 30 m windows), ADR 0009
 
 #### Scenario: Distances
 - **WHEN** two identical percentile sets and two sets shifted by a quarter of the real p5-to-p95 range are compared, and two class histograms with disjoint support
@@ -1569,3 +1583,22 @@ Source: owner (2026-10-30), explorer's measurement of the locked-session stalls,
 #### Scenario: A step that gave no verdict
 - **WHEN** an acceptance step ends `INCOMPLETE:` and left no marker (for example `perf wallclock` refused by the readiness gate, BUILD-003)
 - **THEN** the text of its error is the step's NOT RUN line, its row says INCOMPLETE and not pass, and the run returns an error; a step with markers keeps its markers
+
+### Requirement: TEST-085 The gate smokes the real store on the software adapter
+`cargo xtask gate` on the real store SHALL also run `editor --smoke --edit --no-vsync --adapter software --store DIR` once and print its PASS or FAIL whether or not the desktop is locked. The run passes when it exits successfully and prints its `[smoke ok]` line. The store SHALL stay read only: the gate compares the store's top-level entries (names, sizes, modification times) before and after the run, and any addition, removal or change SHALL fail it, naming the file. The gate's exit SHALL be the worst of its parts: a failed software smoke exits 1, a passed one beside a locked desktop leaves the hardware part NOT RUN and exits 3 (TEST-073).
+
+Verify: A
+Status: active
+Source: opus-planner (2026-11-01, SPIKE-84 fix 6), TEST-073, CON-19
+
+#### Scenario: The verdict
+- **WHEN** a smoke run exits successfully with a `[smoke ok]` line, then without the line, then with an error status
+- **THEN** the first passes and the others fail, naming the last line of stderr
+
+#### Scenario: The store is opened read only
+- **WHEN** a run adds, resizes, touches or removes a file of the store, and when it changes none
+- **THEN** the first is named by file and fails the gate, and an untouched store passes
+
+#### Scenario: Locked desktop
+- **WHEN** the desktop is locked and the software smoke passes
+- **THEN** the hardware part is NOT RUN and the gate exits 3, and a failed software smoke exits 1

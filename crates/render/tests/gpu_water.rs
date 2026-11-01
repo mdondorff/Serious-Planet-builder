@@ -831,7 +831,7 @@ fn flicker_of(frames: &[FlightFrame], field: &dyn HeightField) -> planet_frame::
     total
 }
 
-// spec: ATMO-017, ATMO-004
+// spec: ATMO-017, ATMO-004, REND-030
 #[test]
 fn a_coastal_flight_at_low_altitude_flickers_within_the_budget_while_the_lod_changes_under_it() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");

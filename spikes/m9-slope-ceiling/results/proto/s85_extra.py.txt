@@ -1,0 +1,38 @@
+"""SPIKE-85 follow-up: (1) self-check of the envelope on a synthetic cliff; (2) at 30 m, the 1 km relief p50 ratio of the
+slope-limited surface for lower ceilings; (3) the share of the total rise (sum of |grad| over the area) carried by cells above each ceiling."""
+import json, math, re, sys
+import numpy as np
+from glo30 import read_tile
+from s85_slope import SITES, resample, slope_deg, lower_env, relief_p50
+
+def check():
+    x = np.arange(200) * 10.0
+    h = np.tile(np.where(x > 1000, 300.0, 0.0), (50, 1))  # a 300 m vertical cliff
+    t = math.tan(math.radians(45))
+    m = 0.5 * (lower_env(h, 10, 10, t) - lower_env(-h, 10, 10, t))
+    s = slope_deg(m, 10, 10)
+    print('check: max slope %.1f (<= ~45), height range kept %.0f m, cliff width %d cells' % (s.max(), m.max() - m.min(), int(((m > 1) & (m < 299)).sum(axis=1)[25])))
+
+def main(dem_dir, out_json):
+    check()
+    res = {}
+    for key, name in SITES.items():
+        m = re.match(r'([NS])(\d+)([EW])(\d+)', key)
+        lat = int(m.group(2))
+        f = '%s/Copernicus_DSM_COG_10_%s%02d_00_%s%03d_00_DEM.tif' % (dem_dir, m.group(1), int(m.group(2)), m.group(3), int(m.group(4)))
+        a, sc, _, _ = read_tile(f)
+        dy0 = sc[1] * 111195.0; dx0 = sc[0] * 111195.0 * math.cos(math.radians(lat + 0.5))
+        h, dx, dy = resample(a.astype(np.float64), dx0, dy0, 30)
+        gy, gx = np.gradient(h, dy, dx); g = np.hypot(gx, gy); sl = np.degrees(np.arctan(g))
+        r = {'rise_share_above': {str(c): float(g[sl > c].sum() / g.sum()) for c in (25, 30, 35, 45, 55, 65)}, 'relief_ratio_limited': {}}
+        rp = relief_p50(h, dx, dy)
+        for c in (15, 20, 25, 30):
+            t = math.tan(math.radians(c))
+            mm = 0.5 * (lower_env(h, dx, dy, t) - lower_env(-h, dx, dy, t))
+            r['relief_ratio_limited'][str(c)] = relief_p50(mm, dx, dy) / rp
+        print(key, 'rise share above', r['rise_share_above'], 'relief ratio at low ceilings', {k: round(v, 3) for k, v in r['relief_ratio_limited'].items()}, flush=True)
+        res[key] = r
+    json.dump(res, open(out_json, 'w'), indent=1)
+
+if __name__ == '__main__':
+    main(sys.argv[1], sys.argv[2])

@@ -22,7 +22,10 @@ use std::path::{Path, PathBuf};
 pub struct Requirement {
     pub id: String,
     pub spec: String,
+    /// The first tier of the `Verify:` line (the summary counts by it).
     pub tier: Option<char>,
+    /// Every tier of the `Verify:` line, in order (`Verify: A, C` is A and C): each of A, B and C must be cited by a test of that tier.
+    pub tiers: Vec<char>,
     pub status: Option<String>,
     pub review: Option<String>,
     /// Declared under an `## ADDED` heading of a change delta: the ID must be new.
@@ -61,6 +64,7 @@ pub fn parse_requirements(spec_name: &str, text: &str) -> (Vec<Requirement>, Vec
             if removed {
                 // Removed by a change delta: outside the coverage rules.
                 r.tier = Some('A');
+                r.tiers = vec!['A'];
                 r.status = Some("deprecated".into());
             }
             reqs.push(r);
@@ -72,6 +76,7 @@ pub fn parse_requirements(spec_name: &str, text: &str) -> (Vec<Requirement>, Vec
             }
             if let Some(v) = t.strip_prefix("Verify:") {
                 r.tier = v.trim().chars().next();
+                r.tiers = v.split(',').filter_map(|t| t.trim().chars().next()).collect();
             } else if let Some(v) = t.strip_prefix("Status:") {
                 r.status = Some(v.trim().to_string());
             } else if let Some(v) = t.strip_prefix("Review:") {
@@ -97,7 +102,8 @@ pub fn parse_citations(text: &str) -> Vec<String> {
 }
 
 /// Trace IDs cited by `// spec:` comments that are attached to a `#[test]` function: the comment is followed only by
-/// more comments and attributes, one of which is `#[test]`, and then the `fn`.
+/// more comments and attributes, one of which is `#[test]`, and then the `fn`. A test marked `#[ignore]` is no evidence of any tier:
+/// no tier command runs it (a wall-clock check runs with `perf wallclock`, a real-store test by hand), so its citation counts for nothing.
 pub fn parse_test_citations(text: &str) -> Vec<String> {
     let lines: Vec<&str> = text.lines().collect();
     let mut ids = Vec::new();
@@ -105,7 +111,7 @@ pub fn parse_test_citations(text: &str) -> Vec<String> {
         let t = line.trim_start();
         let Some(c) = t.strip_prefix("//") else { continue };
         let Some(list) = c.trim_start_matches(['/', '!']).trim_start().strip_prefix("spec:") else { continue };
-        let (mut saw_test, mut attached, mut depth) = (false, false, 0i32);
+        let (mut saw_test, mut ignored, mut attached, mut depth) = (false, false, false, 0i32);
         for next in &lines[i + 1..] {
             let n = next.trim();
             if depth > 0 {
@@ -119,10 +125,11 @@ pub fn parse_test_citations(text: &str) -> Vec<String> {
             if n.starts_with("#[") {
                 let code = n.split("//").next().unwrap_or("").trim();
                 saw_test |= code == "#[test]";
+                ignored |= code == "#[ignore]" || ["#[ignore =", "#[ignore=", "#[ignore("].iter().any(|p| code.starts_with(p));
                 depth = bracket_balance(code);
                 continue;
             }
-            attached = saw_test && starts_fn_item(n);
+            attached = saw_test && !ignored && starts_fn_item(n);
             break;
         }
         if attached {
@@ -285,9 +292,8 @@ pub fn lint(specs: &BTreeMap<String, String>, sources: &BTreeMap<PathBuf, String
         if let Some(other) = seen.insert(&r.id, &r.spec) {
             errors.push(format!("{}: duplicate requirement ID (also in spec '{other}')", r.id));
         }
-        match r.tier {
-            Some('A' | 'B' | 'C' | 'D') => {}
-            _ => errors.push(format!("{} ({}): missing or invalid 'Verify:' tier (A, B, C or D)", r.id, r.spec)),
+        if r.tiers.is_empty() || r.tiers.iter().any(|t| !matches!(t, 'A' | 'B' | 'C' | 'D')) {
+            errors.push(format!("{} ({}): missing or invalid 'Verify:' tier (A, B, C or D)", r.id, r.spec));
         }
         match r.status.as_deref() {
             Some("active" | "planned" | "deprecated") => {}
@@ -320,24 +326,28 @@ pub fn lint(specs: &BTreeMap<String, String>, sources: &BTreeMap<PathBuf, String
             }
         }
     }
+    // Every declared tier of an active requirement is cited by a test of that tier (`Verify: A, C` needs both).
     for r in &reqs {
-        let active = r.status.as_deref() == Some("active");
-        let Some(tier @ ('A' | 'B' | 'C')) = r.tier else { continue };
-        if !active {
+        if r.status.as_deref() != Some("active") {
             continue;
         }
+        let declared: Vec<char> = r.tiers.iter().copied().filter(|t| matches!(t, 'A' | 'B' | 'C')).collect();
+        let Some(first) = declared.first() else { continue };
         match cited.get(&r.id) {
             None => errors.push(format!(
-                "{} ({}): active tier-{tier} requirement is not cited by any test (put `// spec: {}` directly above the `#[test]` fn that covers it, or mark the requirement planned)",
+                "{} ({}): active tier-{first} requirement is not cited by any test (put `// spec: {}` directly above the `#[test]` fn that covers it, or mark the requirement planned)",
                 r.id, r.spec, r.id
             )),
-            Some(tiers) if !tiers.contains(&tier) => errors.push(format!(
-                "{} ({}): requires a tier-{tier} test but is cited only by tier {} tests (tests/gpu_*.rs are tier C, tests/oracle_*.rs tier B, everything else tier A): add a tier-{tier} test or change the requirement's Verify tier",
-                r.id,
-                r.spec,
-                tiers.iter().collect::<String>()
-            )),
-            Some(_) => {}
+            Some(tiers) => {
+                for tier in declared.iter().filter(|t| !tiers.contains(t)) {
+                    errors.push(format!(
+                        "{} ({}): requires a tier-{tier} test but is cited only by tier {} tests (tests/gpu_*.rs are tier C, tests/oracle_*.rs tier B, everything else tier A): add a tier-{tier} test or change the requirement's Verify tier",
+                        r.id,
+                        r.spec,
+                        tiers.iter().collect::<String>()
+                    ));
+                }
+            }
         }
     }
 
@@ -1089,14 +1099,41 @@ fn t() {}
             "// spec: COORD-003
 // more
 #[test]
-#[ignore]
+#[should_panic]
 fn t() {}
 "
         )
         .errors
         .is_empty());
-        // A citation above a helper, a constant, a module or a test-less fn covers nothing.
+        // A citation above a helper, a constant, a module, a test-less fn or an ignored test covers nothing (no tier command runs an
+        // ignored test).
         for loose in [
+            "// spec: COORD-003
+#[test]
+#[ignore]
+fn t() {}
+",
+            "// spec: COORD-003
+#[test]
+#[ignore = \"wall clock: cargo xtask perf wallclock\"]
+fn t() {}
+",
+            "// spec: COORD-003
+#[ignore]
+#[test]
+fn t() {}
+",
+            "// spec: COORD-003
+#[test]
+#[ignore=\"unspaced\"]
+fn t() {}
+",
+            "// spec: COORD-003
+#[test]
+#[ignore = \"a reason wrapped
+    over two lines\"]
+fn t() {}
+",
             "// spec: COORD-003
 fn helper() {}
 ",
@@ -1166,6 +1203,31 @@ fn t() {}
         let sources =
             BTreeMap::from([(PathBuf::from("a/tests/x.rs"), test.to_string()), (PathBuf::from("a/tests/gpu_x.rs"), test.to_string())]);
         assert!(lint(&specs, &sources, "").errors.is_empty());
+    }
+
+    // spec: TEST-001
+    #[test]
+    fn every_declared_tier_needs_a_test_of_that_tier() {
+        let test = "// spec: COORD-003
+#[test]
+fn t() {}
+";
+        let run = |verify: &str, paths: &[&str]| {
+            let spec = ONE.replace("Verify: A", &format!("Verify: {verify}"));
+            let specs = BTreeMap::from([("coordinates".to_string(), with_purpose(&spec))]);
+            let sources: BTreeMap<PathBuf, String> = paths.iter().map(|p| (PathBuf::from(p), test.to_string())).collect();
+            lint(&specs, &sources, "").errors
+        };
+        // `A, C` cited by tier A alone misses C, and only C; cited by both it passes; the first tier is not the only one judged.
+        let e = run("A, C", &["x/tests/a.rs"]);
+        assert!(e.len() == 1 && e[0].contains("requires a tier-C test") && e[0].contains("cited only by tier A"), "{e:?}");
+        assert!(run("A, C", &["x/tests/a.rs", "x/tests/gpu_a.rs"]).is_empty());
+        // Each missing tier is named: `A, B, C` cited by A alone misses B and C.
+        let e = run("A, B, C", &["x/tests/a.rs"]);
+        assert!(e.len() == 2 && e[0].contains("tier-B") && e[1].contains("tier-C"), "{e:?}");
+        // Tier D needs no test, and an unknown tier anywhere on the line is refused.
+        assert!(run("A, D", &["x/tests/a.rs"]).is_empty());
+        assert!(run("A, E", &["x/tests/a.rs"]).iter().any(|e| e.contains("invalid 'Verify:' tier")));
     }
 
     // spec: TEST-001
