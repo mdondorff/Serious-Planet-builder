@@ -1,5 +1,5 @@
 # 0089 Relief classes drive the terrain's amplitude
-Status: proposed (drafted by the spikes session for opus-planner, 2026-11-01; the owner decides: generator architecture and a store channel)
+Status: accepted (owner, 2026-11-01; drafted by the spikes session for opus-planner)
 Date: 2026-11-01
 Source: SPIKE-55, SPIKE-65 to SPIKE-83 (`spikes/m9-*/results/results.md`); `docs/briefings/m9-decisions.md` sections 2, 5 and 6; ADR 0016, 0026, 0028, 0030, 0045, 0066, 0076, 0080, 0088; CON-02, CON-06, CON-07, CON-14
 
@@ -8,20 +8,21 @@ Source: SPIKE-55, SPIKE-65 to SPIKE-83 (`spikes/m9-*/results/results.md`); `docs
 - Today's weights (the landform driver `L`, the hill band keyed to the range zone, the crease factor, the elevation ramps) are low at hill sites, switch relief off on plains (SPIKE-73) and cannot tell an arid plateau from a foothill (SPIKE-75); the isotropic range zone makes blobs, not belts (SPIKE-79).
 - Amplitude per relief class passes criterion 1 at the hill landforms and the Alps at re-matched sites, but only with a hill band keyed to the class (SPIKE-80, SPIKE-81).
 - Rule-based default classes with plate-margin belts and plateaus give Earth's class shares and hypsometry from 0.5 to 5 km (SPIKE-77 to SPIKE-80); a derivation from physical drivers places badlands well but invents rock hardness and PET (SPIKE-81).
-- Owner, 2026-10-31: "Painting classes or other driver maps is intended. Painting types is poor." The owner chose option C (a rule-based default now, the physical derivation later behind the same interface; `m9-decisions.md` section 6).
+- Owner, 2026-10-31 and 2026-11-01: authoring the generator acts on drivers (inputs the generator interprets and blends: class weights, uplift, aridity), not on finished terrain types that dictate the result. Results that must be dictated (a flat city plot, no forest in a district) are hard constraints applied after generation. The owner chose option C (a rule-based default now, the physical derivation later behind the same interface; `m9-decisions.md` section 6).
 
 ## Decision
 1. **Class weights per lattice point** are the interface: a channel on a fixed lattice per face edge (the mechanism of ADR 0080 point 3), weights of a versioned class list summing to 1, read bilinearly. Every consumer reads only this.
-2. **Proposed:** the classes are plain, rolling plain, hills, mountains, high mountains, plateau, badlands and sand sea; a new class bumps the list's version.
-3. **Proposed:** the default source is a rule set over the seed's inputs: plate-margin belts (SPIKE-79) as mountain strength in place of the range zone, plateaus (SPIKE-77), hills on belt flanks and old margins.
+2. The classes are plain, rolling plain, hills, mountains, high mountains, plateau, badlands and sand sea; a new class bumps the list's version.
+3. The default source is a rule set over the seed's inputs: plate-margin belts (SPIKE-79) as mountain strength in place of the range zone, plateaus (SPIKE-77), hills on belt flanks and old margins.
 4. **Swappable source:** a derived source (SPIKE-81, through an ADR 0076 rule table) replaces the default only after it is measured on the real bake; the swap bumps the channel's version.
 5. **Amplitude per class:** `k`, the fine-crease floor, the carve's `K t`, the deposition's `kc` and the hill band's amplitude, blended by the weights. Values and the per-cell limit on `k`'s change are in the generator spec (GEN-097, GEN-098).
 6. **The hill band stays, keyed to the class** (SPIKE-80). The landform-keyed crease factor and the elevation ramps above 300 m are removed; the coast taper stays.
-7. **Proposed:** the global bake's base elevation takes the belt term on the plate mask and the plateau uplifts (a `GLOBAL_VERSION` bump).
-8. **Proposed:** class paint is an authored item (extends ADR 0066) that sets weights, feathered, and overrides every source. With the derived source, paint acts on its drivers (ADR 0076 point 7); no item names a type.
+7. The global bake's base elevation takes the belt term on the plate mask and the plateau uplifts (a `GLOBAL_VERSION` bump).
+8. Class paint is an authored item (extends ADR 0066) that sets weights, feathered, and overrides every source. With the derived source, paint acts on its drivers (ADR 0076 point 7). No item stamps a finished terrain type into the generator.
 9. **The bake reads the classes:** ADR 0088's `k` and pass amplitudes come from the class weights.
 10. **Canonical fields (CON-07, CON-14):** the plate mask and the class weights are CPU fields (`libm`, integer hashing, bit-exact for any thread count, no GPU twin). Their stored precision and the order of normalisation are in the generator spec (GEN-093).
-11. **Crates (CON-02):**
+11. **Hard constraints come after generation.** Authored results that must be dictated (height edits, and later land-cover exclusions and flat plots for cities) apply in a final override stage per output channel, after the generator; height edits already do (ADR 0066). Every generated channel ends in such a stage, so constraints can be added later without reworking the generator.
+12. **Crates (CON-02):**
     - the class paint item lives in `planet-world-def` with the other authored items (ADR 0066);
     - the class source, the weights and the amplitudes live in `planet-generators`, and the store reads them through a `planet-generators` trait that `planet-cache` implements, as `LatticeSource` today;
     - dependencies point downward only.
