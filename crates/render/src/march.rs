@@ -6,6 +6,7 @@
 //! This is the pass as a probe over a list of receivers (their anchor-frame positions in a texture); the frame path reconstructs the
 //! receivers from the depth buffer and applies the result in a later change. Nothing here draws.
 
+use crate::resolve::GenerationMap;
 use crate::shadow::{ClipmapGpu, CoarseCubeGpu};
 use crate::GpuContext;
 
@@ -27,6 +28,8 @@ struct March {
     info: vec4<u32>,
     // x: a cube texel in metres at the middle of a face.
     cube: vec4<f32>,
+    // x: the generation value from which a clipmap cell counts as changed (0: never); y: the shift from texels to generation cells.
+    gen: vec4<u32>,
     windows: array<vec4<i32>, 16>,
     texel: array<vec4<f32>, 16>,
 };
@@ -37,6 +40,8 @@ struct March {
 @group(0) @binding(3) var receivers: texture_2d<f32>;
 @group(0) @binding(4) var out_visibility: texture_storage_2d<r32float, write>;
 @group(0) @binding(5) var out_steps: texture_storage_2d<r32uint, write>;
+// Per level, the frame at which each generation cell of the clipmap last changed (REND-050).
+@group(0) @binding(6) var gens: texture_2d_array<u32>;
 
 const MAX_STEPS: i32 = 2048;
 const MAX_CUBE_STEPS: i32 = 256;
@@ -56,6 +61,18 @@ fn level_at(x: f32, y: f32) -> i32 {
         }
     }
     return -1;
+}
+
+// Whether the cell (cx, cy) of the walk's current mip at level k lies in a generation cell that changed (the temporal pass rejects its
+// history there). The generation cells are 8 texels at mip 0 and double with the walk's mip, so a walk cell lies in exactly one of them.
+fn changed_at(k: i32, mip: i32, cx: i32, cy: i32) -> bool {
+    if (m.gen.x == 0u) {
+        return false;
+    }
+    let gm = max(mip - i32(m.gen.y), 0);
+    let sh = u32(i32(m.gen.y) + gm - mip);
+    let n = (i32(m.info.x) >> m.gen.y) >> u32(gm);
+    return textureLoad(gens, vec2<i32>(slot(cx >> sh, n), slot(cy >> sh, n)), k, gm).x >= m.gen.x;
 }
 
 fn level_max(k: i32, mip: i32, cx: i32, cy: i32) -> f32 {
@@ -114,7 +131,7 @@ fn visibility_of(pen: f32) -> f32 {
 }
 
 // (visibility, steps) of one receiver.
-fn march(o: vec3<f32>) -> vec2<f32> {
+fn march(o: vec3<f32>) -> vec3<f32> {
     let s = m.sun.xyz;
     // The drop of the sphere at a distance rho from the anchor is c rho^2 (c is a uniform, half the curvature).
     let c = m.curv.x;
@@ -122,11 +139,11 @@ fn march(o: vec3<f32>) -> vec2<f32> {
     let up = normalize(vec3<f32>(o.x * 2.0 * c, o.y * 2.0 * c, 1.0));
     let height = max(o.z + c * (o.x * o.x + o.y * o.y), 0.0);
     if (dot(s, up) < -sqrt(4.0 * height * c)) {
-        return vec2<f32>(0.0, 0.0);
+        return vec3<f32>(0.0, 0.0, 0.0);
     }
     let hl = length(s.xy);
     if (hl < 1.0e-5) {
-        return vec2<f32>(1.0, 0.0);
+        return vec3<f32>(1.0, 0.0, 0.0);
     }
     let d = s.xy / hl;
     let slope = s.z / hl;
@@ -134,6 +151,7 @@ fn march(o: vec3<f32>) -> vec2<f32> {
     var pen = 1.0e5;
     var steps = 0.0;
     var blocked = false;
+    var dirty = false;
     var mip = min(2, i32(m.info.w));
     var left = false;
     for (var it = 0; it < MAX_STEPS; it = it + 1) {
@@ -168,6 +186,9 @@ fn march(o: vec3<f32>) -> vec2<f32> {
         if (mip > 0 && level_at(exit.x, exit.y) != lv) {
             mip = mip - 1;
             continue;
+        }
+        if (!dirty && changed_at(lv, mip, cx, cy)) {
+            dirty = true;
         }
         let low = min(o.z + slope * tau, o.z + slope * (tau + dt));
         // The ground is a box a texel wide at its sample; a receiver on it or on a slope would shadow itself, so the box is lowered by half a
@@ -240,10 +261,14 @@ fn march(o: vec3<f32>) -> vec2<f32> {
             tau = tau + stride;
         }
     }
-    if (blocked) {
-        return vec2<f32>(0.0, steps);
+    var flag = 0.0;
+    if (dirty) {
+        flag = 1.0;
     }
-    return vec2<f32>(visibility_of(pen), steps);
+    if (blocked) {
+        return vec3<f32>(0.0, steps, flag);
+    }
+    return vec3<f32>(visibility_of(pen), steps, flag);
 }
 
 @compute @workgroup_size(8, 8, 1)
@@ -254,12 +279,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     let p = vec2<i32>(gid.xy);
     let r = textureLoad(receivers, p, 0);
-    var result = vec2<f32>(1.0, 0.0);
+    var result = vec3<f32>(1.0, 0.0, 0.0);
     if (r.w > 0.5) {
         result = march(r.xyz);
+    } else if (r.w < -0.5) {
+        // Not marched this frame (the checkerboard of a low sun): the resolve takes it from history.
+        result = vec3<f32>(-1.0, 0.0, 0.0);
     }
+    // Bit 31 of the step count flags a march that crossed a changed clipmap cell.
     textureStore(out_visibility, p, vec4<f32>(result.x, 0.0, 0.0, 0.0));
-    textureStore(out_steps, p, vec4<u32>(u32(result.y), 0u, 0u, 0u));
+    textureStore(out_steps, p, vec4<u32>(u32(result.y) | (u32(result.z) << 31u), 0u, 0u, 0u));
 }
 "#;
 
@@ -290,7 +319,15 @@ pub struct MarchParams {
     pub north: [f32; 3],
     /// A cube texel in metres at the middle of a face.
     pub cube_texel_m: f32,
+    /// The generation value from which a clipmap cell counts as changed (0: the march reports no change), see [`GENERATION_CELL_SHIFT`].
+    pub dirty_since: u32,
 }
+
+/// The edge of a generation cell as a power of two of clipmap texels (8 texels).
+pub const GENERATION_CELL_SHIFT: u32 = 3;
+
+/// The bit of the step count that flags a march across a changed clipmap cell.
+pub const STEPS_CHANGED_BIT: u32 = 1 << 31;
 
 /// The penumbra search distance (REND-049), metres.
 pub const PENUMBRA_SEARCH_M: f32 = 2_000.0;
@@ -333,6 +370,14 @@ impl ShadowMarchGpu {
             label: Some("shadow-march"),
             entries: &[
                 entry(
+                    6,
+                    wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Uint,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                ),
+                entry(
                     0,
                     wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
                 ),
@@ -363,25 +408,13 @@ impl ShadowMarchGpu {
         ShadowMarchGpu { pipeline, bgl }
     }
 
-    /// March every receiver (`width * height` entries `[x, y, z, w]` in the anchor frame, `w` = 1 for a receiver) over the clipmap and the cube.
-    #[allow(clippy::too_many_arguments)]
-    pub fn run(
-        &self,
-        ctx: &GpuContext,
-        clip: &ClipmapGpu,
-        cube: &CoarseCubeGpu,
-        params: &MarchParams,
-        receivers: &[[f32; 4]],
-        width: u32,
-        height: u32,
-    ) -> MarchResult {
-        assert_eq!(receivers.len(), (width * height) as usize, "one receiver a pixel");
+    /// The uniform block of one march.
+    pub(crate) fn uniform_bytes(clip: &ClipmapGpu, cube: &CoarseCubeGpu, params: &MarchParams) -> Vec<u8> {
         assert!(
             params.levels.len() <= MARCH_MAX_LEVELS && params.levels.len() == clip.levels(),
             "the march reads every level of the clipmap"
         );
-        let device = &ctx.device;
-        let mut uniform: Vec<u8> = Vec::with_capacity(624);
+        let mut uniform: Vec<u8> = Vec::with_capacity(640);
         let f = |out: &mut Vec<u8>, v: &[f32]| v.iter().for_each(|x| out.extend_from_slice(&x.to_le_bytes()));
         f(&mut uniform, &[params.sun[0], params.sun[1], params.sun[2], params.sun_tan]);
         f(
@@ -395,6 +428,9 @@ impl ShadowMarchGpu {
             uniform.extend_from_slice(&v.to_le_bytes());
         }
         f(&mut uniform, &[params.cube_texel_m, 0.0, 0.0, 0.0]);
+        for v in [params.dirty_since, GENERATION_CELL_SHIFT, 0, 0] {
+            uniform.extend_from_slice(&v.to_le_bytes());
+        }
         for k in 0..MARCH_MAX_LEVELS {
             let w = params.levels.get(k).map_or([0; 4], |l| l.0);
             for v in w {
@@ -404,6 +440,61 @@ impl ShadowMarchGpu {
         for k in 0..MARCH_MAX_LEVELS {
             f(&mut uniform, &[params.levels.get(k).map_or(0.0, |l| l.1), 0.0, 0.0, 0.0]);
         }
+        uniform
+    }
+
+    /// Record the march of every pixel of `receivers_view` (anchor-frame positions, `w` 1 for a receiver, -1 for a pixel to skip, 0 for none)
+    /// into `vis_view` (R32Float; -1 for a skipped pixel) and `steps_view` (R32Uint: steps, with [`STEPS_CHANGED_BIT`]).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn encode(
+        &self,
+        ctx: &GpuContext,
+        encoder: &mut wgpu::CommandEncoder,
+        clip: &ClipmapGpu,
+        cube: &CoarseCubeGpu,
+        uniform: &wgpu::Buffer,
+        gens_view: &wgpu::TextureView,
+        receivers_view: &wgpu::TextureView,
+        vis_view: &wgpu::TextureView,
+        steps_view: &wgpu::TextureView,
+        width: u32,
+        height: u32,
+    ) {
+        let (clip_view, cube_view) = (clip.sampled_view(), cube.sampled_view());
+        let bind = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("shadow-march"),
+            layout: &self.bgl,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&clip_view) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&cube_view) },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(receivers_view) },
+                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(vis_view) },
+                wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(steps_view) },
+                wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(gens_view) },
+            ],
+        });
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("shadow-march"), timestamp_writes: None });
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, &bind, &[]);
+        pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+    }
+
+    /// March every receiver (`width * height` entries `[x, y, z, w]` in the anchor frame, `w` = 1 for a receiver) over the clipmap and the cube.
+    #[allow(clippy::too_many_arguments)]
+    pub fn run(
+        &self,
+        ctx: &GpuContext,
+        clip: &ClipmapGpu,
+        cube: &CoarseCubeGpu,
+        params: &MarchParams,
+        receivers: &[[f32; 4]],
+        width: u32,
+        height: u32,
+    ) -> MarchResult {
+        assert_eq!(receivers.len(), (width * height) as usize, "one receiver a pixel");
+        let device = &ctx.device;
+        let uniform = Self::uniform_bytes(clip, cube, params);
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("shadow-march-uniform"),
             size: uniform.len() as u64,
@@ -442,41 +533,24 @@ impl ShadowMarchGpu {
         let usage = wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC;
         let vis_tex = make("march-visibility", wgpu::TextureFormat::R32Float, usage);
         let steps_tex = make("march-steps", wgpu::TextureFormat::R32Uint, usage);
-        let (clip_view, cube_view) = (clip.sampled_view(), cube.sampled_view());
+        let gens = GenerationMap::new(ctx, clip.texels(), clip.levels());
         let (receivers_view, vis_view, steps_view) = (
             receivers_tex.create_view(&Default::default()),
             vis_tex.create_view(&Default::default()),
             steps_tex.create_view(&Default::default()),
         );
-        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("shadow-march"),
-            layout: &self.bgl,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&clip_view) },
-                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&cube_view) },
-                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&receivers_view) },
-                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&vis_view) },
-                wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(&steps_view) },
-            ],
-        });
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("shadow-march") });
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("shadow-march"), timestamp_writes: None });
-            pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &bind, &[]);
-            pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
-        }
+        self.encode(ctx, &mut encoder, clip, cube, &uniform_buffer, &gens.view(), &receivers_view, &vis_view, &steps_view, width, height);
         ctx.queue.submit([encoder.finish()]);
         let read = |tex: &wgpu::Texture| -> Vec<u8> { read_texture(ctx, tex, width, height) };
         let visibility = read(&vis_tex).chunks(4).map(|b| f32::from_le_bytes(b.try_into().unwrap())).collect();
-        let steps = read(&steps_tex).chunks(4).map(|b| u32::from_le_bytes(b.try_into().unwrap())).collect();
+        let steps = read(&steps_tex).chunks(4).map(|b| u32::from_le_bytes(b.try_into().unwrap()) & !STEPS_CHANGED_BIT).collect();
         MarchResult { width, height, visibility, steps }
     }
 }
 
 /// The texels of a 4-byte-a-texel 2D texture, row-major.
-fn read_texture(ctx: &GpuContext, texture: &wgpu::Texture, width: u32, height: u32) -> Vec<u8> {
+pub(crate) fn read_texture(ctx: &GpuContext, texture: &wgpu::Texture, width: u32, height: u32) -> Vec<u8> {
     let row = (width * 4).next_multiple_of(256);
     let buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("march-readback"),

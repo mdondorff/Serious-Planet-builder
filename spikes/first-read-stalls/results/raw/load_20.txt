@@ -1,0 +1,4 @@
+alone: 30 cold reads, p50 19.6 ms, p90 21.4 ms, max 97.9 ms, sum 665 ms; warm mean 0.003 ms; coupled "loading"
+rebuild: same direction cold 20.12 ms, warm 0.0015 ms, on a new field 0.0016 ms, a neighbour on the new field 0.0014 ms
+under 20 loader threads: 30 cold reads, p50 70.1 ms, p90 81.1 ms, max 90.8 ms, sum 2108 ms; warm mean 70.920 ms; coupled "loading"
+loader reads 1264

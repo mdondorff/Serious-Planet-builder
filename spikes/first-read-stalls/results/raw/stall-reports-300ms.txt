@@ -1,0 +1,208 @@
+== edit 20261101-164455Z.txt: a frame took 2541 ms (the stall limit is 300 ms)
+phases of the frame, longest first:
+  title, exposure readback: 2446 ms
+  render submit: 88 ms
+  editor panels (egui frame): 4 ms
+  present (swapchain, tone map, egui paint): 2 ms
+  plan and residency (begin_frame): 1 ms
+locks the main thread waited on (2 ms or more): none
+jobs in flight in the tile streamer: 0 in flight, 0 queued, 0 dispatched this frame, 0 blocked; resident 384, slots in use 384
+== edit 20261101-164505Z.txt: a frame took 997 ms (the stall limit is 300 ms)
+phases of the frame, longest first:
+  title, exposure readback: 924 ms
+  wait for the GPU (frames in flight) and the lit plan with the water: 67 ms
+  render submit: 4 ms
+  plan and residency (begin_frame): 2 ms
+  present (swapchain, tone map, egui paint): 1 ms
+locks the main thread waited on (2 ms or more): none
+jobs in flight in the tile streamer: 29 in flight, 4177 queued, 29 dispatched this frame, 0 blocked; resident 529, slots in use 558
+== edit 20261101-164517Z.txt: a frame took 2814 ms (the stall limit is 300 ms)
+phases of the frame, longest first:
+  render submit: 1996 ms
+  wait for the GPU (frames in flight) and the lit plan with the water: 813 ms
+  plan and residency (begin_frame): 3 ms
+  present (swapchain, tone map, egui paint): 1 ms
+  title, exposure readback: 1 ms
+locks the main thread waited on (2 ms or more): none
+jobs in flight in the tile streamer: 29 in flight, 8031 queued, 29 dispatched this frame, 0 blocked; resident 808, slots in use 837
+== edit 20261101-164528Z.txt: a frame took 1301 ms (the stall limit is 300 ms)
+phases of the frame, longest first:
+  title, exposure readback: 1292 ms
+  render submit: 5 ms
+  plan and residency (begin_frame): 2 ms
+  present (swapchain, tone map, egui paint): 1 ms
+locks the main thread waited on (2 ms or more): none
+jobs in flight in the tile streamer: 29 in flight, 1552 queued, 29 dispatched this frame, 0 blocked; resident 1040, slots in use 1069
+== edit 20261101-164539Z.txt: a frame took 1817 ms (the stall limit is 300 ms)
+phases of the frame, longest first:
+  render submit: 1795 ms
+  title, exposure readback: 12 ms
+  plan and residency (begin_frame): 9 ms
+  present (swapchain, tone map, egui paint): 1 ms
+locks the main thread waited on (2 ms or more): none
+jobs in flight in the tile streamer: 29 in flight, 10705 queued, 29 dispatched this frame, 0 blocked; resident 1156, slots in use 1185
+== edit 20261101-164551Z.txt: a frame took 2361 ms (the stall limit is 300 ms)
+phases of the frame, longest first:
+  render submit: 2299 ms
+  plan and residency (begin_frame): 60 ms
+  present (swapchain, tone map, egui paint): 1 ms
+  title, exposure readback: 1 ms
+locks the main thread waited on (2 ms or more): none
+blocks the main thread decoded in plan and residency (begin_frame): 1
+jobs in flight in the tile streamer: 0 in flight, 0 queued, 0 dispatched this frame, 0 blocked; resident 1243, slots in use 1243
+== edit 20261101-164602Z.txt: a frame took 2058 ms (the stall limit is 300 ms)
+phases of the frame, longest first:
+  render submit: 2053 ms
+  plan and residency (begin_frame): 3 ms
+  present (swapchain, tone map, egui paint): 1 ms
+  title, exposure readback: 1 ms
+locks the main thread waited on (2 ms or more): none
+jobs in flight in the tile streamer: 29 in flight, 546 queued, 29 dispatched this frame, 0 blocked; resident 1254, slots in use 1283
+== edit 20261101-164614Z.txt: a frame took 2071 ms (the stall limit is 300 ms)
+phases of the frame, longest first:
+  render submit: 2068 ms
+  plan and residency (begin_frame): 1 ms
+  title, exposure readback: 1 ms
+  present (swapchain, tone map, egui paint): 1 ms
+locks the main thread waited on (2 ms or more): none
+jobs in flight in the tile streamer: 29 in flight, 5896 queued, 29 dispatched this frame, 0 blocked; resident 1399, slots in use 1428
+== edit 20261101-164626Z.txt: a frame took 2528 ms (the stall limit is 300 ms)
+phases of the frame, longest first:
+  render submit: 2524 ms
+  plan and residency (begin_frame): 2 ms
+  present (swapchain, tone map, egui paint): 1 ms
+  title, exposure readback: 1 ms
+locks the main thread waited on (2 ms or more): none
+jobs in flight in the tile streamer: 29 in flight, 5751 queued, 29 dispatched this frame, 0 blocked; resident 1544, slots in use 1573
+== edit 20261101-164638Z.txt: a frame took 2471 ms (the stall limit is 300 ms)
+phases of the frame, longest first:
+  render submit: 2466 ms
+  editor panels (egui frame): 2 ms
+  plan and residency (begin_frame): 1 ms
+  present (swapchain, tone map, egui paint): 1 ms
+  title, exposure readback: 1 ms
+locks the main thread waited on (2 ms or more): none
+jobs in flight in the tile streamer: 29 in flight, 5606 queued, 29 dispatched this frame, 0 blocked; resident 1689, slots in use 1718
+== edit 20261101-164648Z.txt: a frame took 2590 ms (the stall limit is 300 ms)
+phases of the frame, longest first:
+  render submit: 2584 ms
+  plan and residency (begin_frame): 2 ms
+  editor update (picks, outlines, lists): 2 ms
+  present (swapchain, tone map, egui paint): 1 ms
+  editor panels (egui frame): 1 ms
+  title, exposure readback: 1 ms
+  input, commands and the smoke script: 1 ms
+locks the main thread waited on (2 ms or more): none
+jobs in flight in the tile streamer: 29 in flight, 5563 queued, 29 dispatched this frame, 0 blocked; resident 1805, slots in use 1834
+== edit 20261101-164659Z.txt: a frame took 2549 ms (the stall limit is 300 ms)
+phases of the frame, longest first:
+  render submit: 2543 ms
+  editor update (picks, outlines, lists): 2 ms
+  editor panels (egui frame): 1 ms
+  plan and residency (begin_frame): 1 ms
+  present (swapchain, tone map, egui paint): 1 ms
+  title, exposure readback: 1 ms
+locks the main thread waited on (2 ms or more): none
+jobs in flight in the tile streamer: 29 in flight, 5483 queued, 29 dispatched this frame, 0 blocked; resident 1824, slots in use 1853
+== edit 20261101-164709Z.txt: a frame took 2583 ms (the stall limit is 300 ms)
+phases of the frame, longest first:
+  render submit: 2578 ms
+  plan and residency (begin_frame): 2 ms
+  editor update (picks, outlines, lists): 2 ms
+  present (swapchain, tone map, egui paint): 1 ms
+  editor panels (egui frame): 1 ms
+locks the main thread waited on (2 ms or more): none
+jobs in flight in the tile streamer: 29 in flight, 5464 queued, 29 dispatched this frame, 0 blocked; resident 1882, slots in use 1911
+== edit 20261101-164720Z.txt: a frame took 2628 ms (the stall limit is 300 ms)
+phases of the frame, longest first:
+  render submit: 2622 ms
+  editor update (picks, outlines, lists): 2 ms
+  plan and residency (begin_frame): 2 ms
+  present (swapchain, tone map, egui paint): 1 ms
+  editor panels (egui frame): 1 ms
+  title, exposure readback: 1 ms
+locks the main thread waited on (2 ms or more): none
+jobs in flight in the tile streamer: 29 in flight, 5443 queued, 29 dispatched this frame, 0 blocked; resident 1901, slots in use 1930
+== edit 20261101-164730Z.txt: a frame took 2646 ms (the stall limit is 300 ms)
+phases of the frame, longest first:
+  render submit: 2643 ms
+  plan and residency (begin_frame): 1 ms
+  present (swapchain, tone map, egui paint): 1 ms
+locks the main thread waited on (2 ms or more): none
+jobs in flight in the tile streamer: 29 in flight, 5384 queued, 29 dispatched this frame, 0 blocked; resident 1923, slots in use 1952
+== edit 20261101-164741Z.txt: a frame took 3097 ms (the stall limit is 300 ms)
+phases of the frame, longest first:
+  render submit: 3093 ms
+  present (swapchain, tone map, egui paint): 1 ms
+  plan and residency (begin_frame): 1 ms
+  title, exposure readback: 1 ms
+  editor panels (egui frame): 1 ms
+locks the main thread waited on (2 ms or more): none
+jobs in flight in the tile streamer: 29 in flight, 5268 queued, 29 dispatched this frame, 0 blocked; resident 2039, slots in use 2068
+== edit 20261101-164752Z.txt: a frame took 3925 ms (the stall limit is 300 ms)
+phases of the frame, longest first:
+  render submit: 3916 ms
+  title, exposure readback: 4 ms
+  present (swapchain, tone map, egui paint): 3 ms
+  plan and residency (begin_frame): 1 ms
+  editor panels (egui frame): 1 ms
+locks the main thread waited on (2 ms or more): none
+jobs in flight in the tile streamer: 29 in flight, 5181 queued, 29 dispatched this frame, 0 blocked; resident 2126, slots in use 2155
+== noedit 20261101-164454Z.txt: a frame took 2439 ms (the stall limit is 300 ms)
+phases of the frame, longest first:
+  title, exposure readback: 2347 ms
+  render submit: 82 ms
+  editor panels (egui frame): 6 ms
+  present (swapchain, tone map, egui paint): 3 ms
+  plan and residency (begin_frame): 1 ms
+locks the main thread waited on (2 ms or more): none
+jobs in flight in the tile streamer: 0 in flight, 0 queued, 0 dispatched this frame, 0 blocked; resident 384, slots in use 384
+== noedit 20261101-164506Z.txt: a frame took 1892 ms (the stall limit is 300 ms)
+phases of the frame, longest first:
+  input, commands and the smoke script: 1203 ms
+  render submit: 686 ms
+  plan and residency (begin_frame): 2 ms
+  present (swapchain, tone map, egui paint): 1 ms
+  title, exposure readback: 1 ms
+locks the main thread waited on (2 ms or more): none
+jobs in flight in the tile streamer: 29 in flight, 4447 queued, 29 dispatched this frame, 0 blocked; resident 586, slots in use 615
+== noedit 20261101-164517Z.txt: a frame took 1465 ms (the stall limit is 300 ms)
+phases of the frame, longest first:
+  render submit: 1458 ms
+  plan and residency (begin_frame): 5 ms
+  title, exposure readback: 1 ms
+  present (swapchain, tone map, egui paint): 1 ms
+locks the main thread waited on (2 ms or more): none
+jobs in flight in the tile streamer: 29 in flight, 9204 queued, 29 dispatched this frame, 0 blocked; resident 876, slots in use 905
+== noedit 20261101-164529Z.txt: a frame took 2205 ms (the stall limit is 300 ms)
+phases of the frame, longest first:
+  render submit: 2200 ms
+  plan and residency (begin_frame): 2 ms
+  editor panels (egui frame): 2 ms
+  present (swapchain, tone map, egui paint): 1 ms
+  title, exposure readback: 1 ms
+locks the main thread waited on (2 ms or more): none
+jobs in flight in the tile streamer: 29 in flight, 1534 queued, 29 dispatched this frame, 0 blocked; resident 1079, slots in use 1108
+== noedit 20261101-164540Z.txt: a frame took 2550 ms (the stall limit is 300 ms)
+phases of the frame, longest first:
+  render submit: 2541 ms
+  plan and residency (begin_frame): 6 ms
+  title, exposure readback: 1 ms
+  present (swapchain, tone map, egui paint): 1 ms
+locks the main thread waited on (2 ms or more): none
+jobs in flight in the tile streamer: 29 in flight, 13640 queued, 29 dispatched this frame, 0 blocked; resident 1195, slots in use 1224
+== noedit 20261101-164551Z.txt: a frame took 2331 ms (the stall limit is 300 ms)
+phases of the frame, longest first:
+  render submit: 2329 ms
+  present (swapchain, tone map, egui paint): 1 ms
+  title, exposure readback: 1 ms
+locks the main thread waited on (2 ms or more): none
+jobs in flight in the tile streamer: 0 in flight, 0 queued, 0 dispatched this frame, 0 blocked; resident 1253, slots in use 1253
+== noedit 20261101-164603Z.txt: a frame took 3219 ms (the stall limit is 300 ms)
+phases of the frame, longest first:
+  render submit: 3213 ms
+  plan and residency (begin_frame): 5 ms
+  present (swapchain, tone map, egui paint): 1 ms
+  title, exposure readback: 1 ms
+locks the main thread waited on (2 ms or more): none
+jobs in flight in the tile streamer: 29 in flight, 2624 queued, 29 dispatched this frame, 0 blocked; resident 1291, slots in use 1320

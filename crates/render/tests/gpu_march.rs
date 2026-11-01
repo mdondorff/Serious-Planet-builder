@@ -52,6 +52,7 @@ fn params(sun_elevation_deg: f32, drop_coefficient: f32) -> MarchParams {
         east: [1.0, 0.0, 0.0],
         north: [0.0, 1.0, 0.0],
         cube_texel_m: 100.0,
+        dirty_since: 0,
     }
 }
 
