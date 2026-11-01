@@ -10,7 +10,7 @@ Every requirement in the specs SHALL have a unique trace ID, a verification tier
 
 Verify: A
 Status: active
-Source: CON-16, ADR 0009, ADR 0012
+Source: CON-16, ADR 0009, ADR 0012, planner inbox #44 (2026-11-01)
 
 #### Scenario: Placeholder Purpose
 - **WHEN** a spec's Purpose is missing, empty or contains "TBD"
@@ -27,6 +27,11 @@ Source: CON-16, ADR 0009, ADR 0012
 #### Scenario: Citation not on a test
 - **WHEN** a `// spec:` comment sits above a helper function, a constant or a module instead of a `#[test]` function
 - **THEN** it does not count towards coverage and the requirement is reported as not cited
+
+#### Scenario: Ignored test
+- **WHEN** a `// spec:` comment sits above a `#[test]` function that is also marked `#[ignore]` (with or without a reason, before or after `#[test]`)
+- **THEN** it counts for no tier, and a requirement cited only by ignored tests is reported as not cited
+- **AND** the citation must still name an existing requirement; a wall-clock check (BUILD-003) is such a test
 
 #### Scenario: Wrong tier
 - **WHEN** an active tier C requirement is cited only by tests outside `gpu_*` files
