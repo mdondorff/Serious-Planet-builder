@@ -351,6 +351,8 @@ struct Running {
     markers: Vec<Marker>,
     screen_markers: Vec<ScreenMarker>,
     hover: Option<u64>,
+    /// The free camera's ground, read on a thread of its own (VIEW-061).
+    ground: crate::cameraground::CameraGround,
     /// The cursor in render pixels, the camera of the last frame (what a click on the overview is traced through) and a press in progress.
     cursor: [f64; 2],
     /// What a click at the cursor would do in the overview (VIEW-045), kept from the last cursor move; `None` outside the overview.
@@ -527,7 +529,11 @@ impl App<'_> {
         } else {
             None
         };
+        // The free camera's ground is read on a thread of its own, with the blocks under the camera pinned (VIEW-061, CON-22).
+        let ground_world = self.world.clone();
+        let ground = crate::cameraground::CameraGround::new(std::sync::Arc::new(move |d| ground_world.ground_pinned(d)));
         self.state = Some(Running {
+            ground,
             ui,
             edit,
             ctrl: false,
@@ -772,8 +778,13 @@ impl App<'_> {
             // A command of this frame (C back to the flight, restart) may have released the mouse.
             apply_grab(&mut st);
             st.stall.mark("input, commands and the smoke script");
-            // The bake blocks the camera is about to fly over are read ahead on a thread of their own (CON-22).
-            let ground = |p: planet_core::PlanetFixed| radius + field.height(p.0.normalized());
+            // The bake blocks the camera is about to fly over are read ahead on a thread of their own (CON-22). The free camera's ground is the
+            // ground thread's last answer, for the nadir of a frame at most one request old (VIEW-061); before the first answer and after a jump
+            // (`usable_ground`) the field is read here.
+            let nadir = st.last_camera.position.0;
+            let answer = if nadir.length() > 0.0 { st.ground.poll(nadir.normalized()) } else { st.ground.last() };
+            let ground_m = crate::cameraground::usable_ground(answer, nadir, radius);
+            let ground = |p: planet_core::PlanetFixed| radius + ground_m.unwrap_or_else(|| field.height(p.0.normalized()));
             let height = |p: planet_core::PlanetFixed| p.0.length() - ground(p);
             let had_globe = st.viewer.globe.is_some();
             let camera = st.viewer.camera(self.cameras, now_ms, dt, &self.params, &height, &ground);
