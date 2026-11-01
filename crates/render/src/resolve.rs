@@ -798,6 +798,23 @@ impl ShadowResolveGpu {
         depth: &DepthTarget,
         params: &ResolveParams,
     ) {
+        let view = depth.texture.create_view(&wgpu::TextureViewDescriptor { aspect: wgpu::TextureAspect::DepthOnly, ..Default::default() });
+        self.resolve_view(ctx, march, clip, cube, march_params, &view, (depth.width, depth.height), params);
+    }
+
+    /// [`ShadowResolveGpu::resolve`] over the lit pass's own depth view (a `Depth32Float` texture of `size`, reversed-Z).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn resolve_view(
+        &mut self,
+        ctx: &GpuContext,
+        march: &ShadowMarchGpu,
+        clip: &ClipmapGpu,
+        cube: &CoarseCubeGpu,
+        march_params: &MarchParams,
+        depth_view: &wgpu::TextureView,
+        size: (u32, u32),
+        params: &ResolveParams,
+    ) {
         assert!(params.frame > 0, "frames count from 1");
         for cam in [&params.camera, &params.previous] {
             assert!(
@@ -805,9 +822,9 @@ impl ShadowResolveGpu {
                 "a camera needs a near plane and a field of view"
             );
         }
-        self.ensure(ctx, depth.width, depth.height);
+        self.ensure(ctx, size.0, size.1);
         let device = &ctx.device;
-        let (width, height) = (depth.width, depth.height);
+        let (width, height) = size;
         let (hw, hh) = (width.div_ceil(2), height.div_ceil(2));
         let cut = params.cut || self.fresh;
         let mut p = march_params.clone();
@@ -845,8 +862,6 @@ impl ShadowResolveGpu {
 
         let t = self.targets.as_ref().expect("targets");
         let view = |tex: &wgpu::Texture| tex.create_view(&Default::default());
-        let depth_view =
-            depth.texture.create_view(&wgpu::TextureViewDescriptor { aspect: wgpu::TextureAspect::DepthOnly, ..Default::default() });
         let (receivers_view, half_depth_view, half_vis_view, half_steps_view, up_view) =
             (view(&t.receivers), view(&t.half_depth), view(&t.half_vis), view(&t.half_steps), view(&t.up));
         let (filled_prev, filled_view) = (view(&t.filled[self.current]), view(&t.filled[1 - self.current]));
@@ -859,7 +874,7 @@ impl ShadowResolveGpu {
             let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("shadow-receivers"),
                 layout: &self.receivers_bgl,
-                entries: &[ubind.clone(), entry(1, &depth_view), entry(2, &receivers_view), entry(3, &half_depth_view)],
+                entries: &[ubind.clone(), entry(1, depth_view), entry(2, &receivers_view), entry(3, &half_depth_view)],
             });
             let mut pass =
                 encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("shadow-receivers"), timestamp_writes: None });
@@ -904,7 +919,7 @@ impl ShadowResolveGpu {
                 layout: &self.upsample_bgl,
                 entries: &[
                     ubind.clone(),
-                    entry(1, &depth_view),
+                    entry(1, depth_view),
                     entry(2, &filled_view),
                     entry(3, &half_depth_view),
                     entry(4, &half_steps_view),
@@ -921,7 +936,7 @@ impl ShadowResolveGpu {
             let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("shadow-temporal"),
                 layout: &self.temporal_bgl,
-                entries: &[ubind, entry(1, &depth_view), entry(2, &up_view), entry(3, &history_view), entry(4, &out_view)],
+                entries: &[ubind, entry(1, depth_view), entry(2, &up_view), entry(3, &history_view), entry(4, &out_view)],
             });
             let mut pass =
                 encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("shadow-temporal"), timestamp_writes: None });
