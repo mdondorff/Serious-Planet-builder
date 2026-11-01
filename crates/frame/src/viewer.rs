@@ -923,6 +923,17 @@ mod tests {
     use super::*;
     use planet_core::Vec3;
 
+    // spec: VIEW-006
+    #[test]
+    fn a_resize_asks_for_the_exposure_to_snap_once() {
+        let mut v = ViewerState::new(0, 3, 0, true);
+        assert!(v.take_exposure_reset(), "the first lit frame snaps");
+        assert!(!v.take_exposure_reset(), "and only that one");
+        v.reset_exposure();
+        assert!(v.take_exposure_reset(), "a resize asks for the next lit frame to snap");
+        assert!(!v.take_exposure_reset());
+    }
+
     fn cam(x: f64) -> Camera {
         Camera {
             position: PlanetFixed(Vec3::new(6.4e6 + x, 0.0, 0.0)),

@@ -30,6 +30,10 @@ fn plan_at(size: (u32, u32), atmosphere: bool) -> TerrainPlan {
 }
 
 fn renderer(ctx: &GpuContext, size: (u32, u32), plans: &[&TerrainPlan], atmosphere: bool) -> TerrainRenderer {
+    renderer_with_water(ctx, size, plans, atmosphere, false)
+}
+
+fn renderer_with_water(ctx: &GpuContext, size: (u32, u32), plans: &[&TerrainPlan], atmosphere: bool, water: bool) -> TerrainRenderer {
     let block_slots = 24 * 24;
     let pool = compact_format_pool_with(
         (128 << 20) + 4 * u64::from(block_slots) * planet_generators::compact::slot_bytes(CELLS),
@@ -43,6 +47,9 @@ fn renderer(ctx: &GpuContext, size: (u32, u32), plans: &[&TerrainPlan], atmosphe
     if atmosphere {
         r.enable_atmosphere(ctx, &Atmosphere::earth(R));
     }
+    if water {
+        r.enable_water(ctx);
+    }
     for p in plans {
         for n in &p.nodes {
             if r.slot_of(n.tile).is_none() {
@@ -53,12 +60,14 @@ fn renderer(ctx: &GpuContext, size: (u32, u32), plans: &[&TerrainPlan], atmosphe
     r
 }
 
-fn resize_draws_what_a_fresh_renderer_draws(atmosphere: bool) {
+fn resize_draws_what_a_fresh_renderer_draws(atmosphere: bool, water: bool) {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let (small, wide) = (plan_at(SMALL, atmosphere), plan_at(WIDE, atmosphere));
-    let mut resized = renderer(&ctx, SMALL, &[&small, &wide], atmosphere);
+    let mut resized = renderer_with_water(&ctx, SMALL, &[&small, &wide], atmosphere, water);
     resized.render(&ctx, &small, false).unwrap();
+    let slots: Vec<_> = small.nodes.iter().map(|n| resized.slot_of(n.tile)).collect();
     resized.resize(&ctx, WIDE);
+    assert!(small.nodes.iter().zip(&slots).all(|(n, s)| resized.slot_of(n.tile) == *s), "the tiles stay where they were");
     assert_eq!(resized.target_size(), WIDE);
     // The old size is refused, the new one is drawn.
     let e = resized.render(&ctx, &small, false).unwrap_err();
@@ -66,13 +75,13 @@ fn resize_draws_what_a_fresh_renderer_draws(atmosphere: bool) {
     resized.render(&ctx, &wide, false).unwrap();
     let got = resized.read_color(&ctx);
     assert_eq!((got.width, got.height), WIDE);
-    let mut fresh = renderer(&ctx, WIDE, &[&wide], atmosphere);
+    let mut fresh = renderer_with_water(&ctx, WIDE, &[&wide], atmosphere, water);
     fresh.render(&ctx, &wide, false).unwrap();
     assert!(got.rgba == fresh.read_color(&ctx).rgba, "the resized renderer draws the frame of a fresh one (atmosphere: {atmosphere})");
     // And back again.
     resized.resize(&ctx, SMALL);
     resized.render(&ctx, &small, false).unwrap();
-    let mut back = renderer(&ctx, SMALL, &[&small], atmosphere);
+    let mut back = renderer_with_water(&ctx, SMALL, &[&small], atmosphere, water);
     back.render(&ctx, &small, false).unwrap();
     assert!(resized.read_color(&ctx).rgba == back.read_color(&ctx).rgba, "and back to the first size (atmosphere: {atmosphere})");
 }
@@ -80,11 +89,17 @@ fn resize_draws_what_a_fresh_renderer_draws(atmosphere: bool) {
 // spec: VIEW-006
 #[test]
 fn a_resized_lit_renderer_draws_the_frame_of_a_fresh_one() {
-    resize_draws_what_a_fresh_renderer_draws(false);
+    resize_draws_what_a_fresh_renderer_draws(false, false);
 }
 
 // spec: VIEW-006
 #[test]
 fn a_resized_renderer_with_the_atmosphere_draws_the_frame_of_a_fresh_one() {
-    resize_draws_what_a_fresh_renderer_draws(true);
+    resize_draws_what_a_fresh_renderer_draws(true, false);
+}
+
+// spec: VIEW-006
+#[test]
+fn a_resized_renderer_with_the_water_pass_and_the_atmosphere_draws_the_frame_of_a_fresh_one() {
+    resize_draws_what_a_fresh_renderer_draws(true, true);
 }

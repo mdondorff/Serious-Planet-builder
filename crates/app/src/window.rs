@@ -411,6 +411,22 @@ pub fn resize_due(current: (u32, u32), pending: Option<((u32, u32), u64)>, now_m
     pending.filter(|(size, at)| *size != current && now_ms.saturating_sub(*at) >= RESIZE_SETTLE_MS).map(|(size, _)| size)
 }
 
+/// The window's report of a new size: the pending resize it makes (a size of 0, a minimised window, leaves what was pending).
+pub fn on_resized(pending: Option<((u32, u32), u64)>, width: u32, height: u32, now_ms: u64) -> Option<((u32, u32), u64)> {
+    if width > 0 && height > 0 {
+        Some(((width, height), now_ms))
+    } else {
+        pending
+    }
+}
+
+/// The plan parameters for a target of `size`: the viewport height is the target's (the error tolerance stays in pixels); `None` when the
+/// parameters then fail their own check (a window too small for the cell count), and the old ones stay.
+pub fn lod_for_size(base: &LodParams, size: (u32, u32)) -> Option<LodParams> {
+    let lod = LodParams { viewport_h_px: f64::from(size.1), ..base.clone() };
+    lod.validate().ok().map(|()| lod)
+}
+
 /// The aspect (width over height) of a target size, as the camera's projection takes it.
 pub fn aspect_of(size: (u32, u32)) -> f64 {
     f64::from(size.0) / f64::from(size.1.max(1))
@@ -514,17 +530,7 @@ impl App<'_> {
         }
         // `enable_lit` is not part of `warm_up`: the lit and atmosphere passes are enabled and used once per ring set here, before the
         // first measured frame, whether the window starts lit or on the debug path (REND-017, VIEW-007).
-        let warm_lit = viewer_lit_plan(&cfg.look, cfg.radius_m, 0.0, true, cfg.atmosphere)?.with_water_level(cfg.water_level_m);
-        rig.renderer
-            .warm_up_lit(&ctx, &{
-                let mut warm = lit_warm_plan(self.cameras[0], cfg.size, cfg.lod.cells, warm_lit);
-                // A world with water warms the water pass too (no node: the pipelines and the copy target exist before frame 0).
-                if self.world.has_water() {
-                    warm.water = Some(empty_water_plan(&cfg.look.water));
-                }
-                warm
-            })
-            .map_err(|e| format!("warming the lit path: {e}"))?;
+        rig.renderer.warm_up_lit(&ctx, &self.lit_warm(cfg.size)?).map_err(|e| format!("warming the lit path: {e}"))?;
         // The clipmap shadow pass (ADR 0085 layer 1), off unless asked for: the planner runs on the terrain share.
         // A smoke run uses 256-texel levels (the software adapter gathers 1024^2 levels in seconds a frame); a real run the full size.
         let shadow = cfg.shadow_march.then(|| {
@@ -678,6 +684,36 @@ impl App<'_> {
         }
     }
 
+    /// The lit plan the renderer is warmed with at `size`: the look's plan with the atmosphere, and the water pass where the world has water.
+    fn lit_warm(&self, size: (u32, u32)) -> Result<planet_frame::TerrainPlan, String> {
+        let cfg = self.cfg;
+        let lit = viewer_lit_plan(&cfg.look, cfg.radius_m, 0.0, true, cfg.atmosphere)?.with_water_level(cfg.water_level_m);
+        let mut warm = lit_warm_plan(self.cameras[0], size, cfg.lod.cells, lit);
+        // A world with water warms the water pass too (no node: the pipelines and the copy target exist before frame 0).
+        if self.world.has_water() {
+            warm.water = Some(empty_water_plan(&cfg.look.water));
+        }
+        Ok(warm)
+    }
+
+    /// The 3D target takes the window's size (VIEW-006): the renderer makes its targets again, the plan's viewport height follows, the
+    /// exposure snaps, and the lit path is warmed again at once so the first drawn frame after the resize creates and first-uses nothing
+    /// (REND-017).
+    fn apply_resize(&mut self, new: (u32, u32)) -> Result<(), String> {
+        self.size = new;
+        self.pending_resize = None;
+        if let Some(lod) = lod_for_size(&self.lod, new) {
+            self.lod = lod;
+        }
+        let warm = self.lit_warm(new)?;
+        if let Some(st) = self.state.as_mut() {
+            st.rig.renderer.resize(&st.ctx, new);
+            st.viewer.reset_exposure();
+            st.rig.renderer.warm_up_lit(&st.ctx, &warm).map_err(|e| format!("warming the lit path after a resize: {e}"))?;
+        }
+        Ok(())
+    }
+
     /// The request of a frame; `coarse` is the editor's coarse-LOD inspection view (the error bound times four, VIEW-014).
     fn request(&self, camera: Camera, view: TerrainView, coarse: bool) -> TerrainRequest {
         TerrainRequest {
@@ -697,12 +733,7 @@ impl App<'_> {
         let now_ms = self.clock.now_ms();
         // The 3D target takes the window's size once it has settled; every size the frame reads comes from `self.size`.
         if let Some(new) = resize_due(self.size, self.pending_resize, now_ms) {
-            if let Some(st) = self.state.as_mut() {
-                st.rig.renderer.resize(&st.ctx, new);
-                st.viewer.reset_exposure();
-            }
-            self.size = new;
-            self.pending_resize = None;
+            self.apply_resize(new)?;
         } else if self.pending_resize.is_some_and(|(sz, _)| sz == self.size) {
             self.pending_resize = None;
         }
@@ -1638,9 +1669,7 @@ impl ApplicationHandler for App<'_> {
                     st.surface.resize(&st.ctx, (size.width, size.height));
                 }
                 // The 3D target follows the window once the size holds (dragging an edge sends a stream of sizes); a minimised window (0) keeps it.
-                if size.width > 0 && size.height > 0 {
-                    self.pending_resize = Some(((size.width, size.height), self.clock.now_ms()));
-                }
+                self.pending_resize = on_resized(self.pending_resize, size.width, size.height, self.clock.now_ms());
             }
             WindowEvent::KeyboardInput { event, is_synthetic, .. } if !self.cfg.smoke => {
                 let PhysicalKey::Code(code) = event.physical_key else { return };
@@ -2670,5 +2699,28 @@ mod resize_tests {
         assert!((aspect_of((1920, 1080)) - 16.0 / 9.0).abs() < 1e-12);
         assert!((aspect_of((800, 800)) - 1.0).abs() < 1e-12);
         assert_eq!(aspect_of((640, 0)), 640.0, "a zero height is read as one pixel, never a division by zero");
+    }
+
+    // spec: VIEW-006
+    #[test]
+    fn a_drag_of_sizes_waits_for_the_last_and_a_minimised_window_changes_nothing() {
+        let mut pending = None;
+        for (i, (w, h)) in [(900, 600), (950, 620), (1000, 640)].into_iter().enumerate() {
+            pending = on_resized(pending, w, h, 1_000 + 10 * i as u64);
+        }
+        assert_eq!(pending, Some(((1000, 640), 1_020)), "the last size of the drag, at its time");
+        assert_eq!(resize_due((1280, 720), pending, 1_030), None, "10 ms after the last size: still dragging");
+        assert_eq!(resize_due((1280, 720), pending, 1_020 + RESIZE_SETTLE_MS), Some((1000, 640)));
+        assert_eq!(on_resized(pending, 0, 0, 5_000), pending, "a minimised window keeps what was pending");
+        assert_eq!(on_resized(None, 0, 480, 5_000), None);
+    }
+
+    // spec: VIEW-006
+    #[test]
+    fn the_plan_parameters_follow_the_targets_height_and_keep_the_old_ones_when_they_would_fail() {
+        let base = LodParams { cells: 16, viewport_h_px: 720.0, tau_px: 2.5, max_level: 26, ..LodParams::earth_1080p() };
+        let tall = lod_for_size(&base, (1920, 1080)).expect("a taller target");
+        assert_eq!((tall.viewport_h_px, tall.tau_px, tall.max_height_m), (1080.0, 2.5, base.max_height_m));
+        assert!(lod_for_size(&base, (64, 20)).is_none(), "20 px high and 16 cells fail the parameters' own check (viewport / tau > 32)");
     }
 }

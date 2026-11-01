@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: VIEW-006 Presentation blit
-The window surface SHALL show the terrain renderer's colour target scaled to fit the window keeping its aspect, centred, with black bars; an outdated, lost, timed-out or occluded surface SHALL be a skipped frame (reconfigured where that recovers it), not an error. The 3D target SHALL follow the window: once a size has held for 150 ms the renderer SHALL make its targets again at it, keeping its tiles, pipelines and pools, and the camera's aspect SHALL be the new size's.
+The window surface SHALL show the terrain renderer's colour target scaled to fit the window keeping its aspect, centred, with black bars; an outdated, lost, timed-out or occluded surface SHALL be a skipped frame (reconfigured where that recovers it), not an error. The 3D target SHALL follow the window: once a size has held for 150 ms the renderer SHALL make its targets again at it (the lit, atmosphere and water ones included; tiles, pools and terrain pipelines are kept), warm the lit path again outside any frame (REND-017), and the plan's viewport height and the camera's aspect SHALL be the new size's.
 
 Verify: A, C
 Status: active
