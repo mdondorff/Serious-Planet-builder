@@ -713,6 +713,38 @@ mod tests {
         assert!(json.contains("\"cpu_calibration_valid\":null,\"cpu_calibration_reasons\":[]"), "{json}");
     }
 
+    // spec: BUILD-032
+    #[test]
+    fn a_one_off_log_is_stamped_with_its_mode_and_load_and_a_loaded_one_carries_verdicts() {
+        let log = "{\n  \"scene\": \"global-bake\",\n  \"seconds\": 500.000,\n  \"budget_failures\": []\n}\n";
+        let reading = [crate::OneOffReading { metric: "bake seconds (GEN-014)", reading: 500.0, budget: 600.0 }];
+        let quiet = crate::stamp_one_off_json(log, &gate::Validity::default(), &reading);
+        assert!(quiet.starts_with("{\n  \"mode\":\"quiet\",\n  \"scene\": \"global-bake\""), "{quiet}");
+        assert!(!quiet.contains("load_record") && !quiet.contains("loaded_verdicts"), "{quiet}");
+        let load = gate::LoadRecord {
+            cpu_pct: Some(41.5),
+            cpu_perf_pct: Some(88.0),
+            gpu_util_pct: None,
+            gpu_temp_c: None,
+            processes: Some(vec![]),
+        };
+        let loaded = gate::Validity { reasons: vec![], load: Some(load) };
+        let text = crate::stamp_one_off_json(log, &loaded, &reading);
+        assert!(text.starts_with("{\n  \"mode\":\"loaded\",\"load_record\":{\"cpu_pct\":41.5,"), "{text}");
+        // 500 s against 600 s is 16.7 % under: inside the 30 % margin of an unpinned CPU time, so the window queue decides.
+        assert!(
+            text.contains("\"loaded_verdicts\": [{\"metric\":\"bake seconds (GEN-014)\",\"reading\":500") && text.contains("window queue"),
+            "{text}"
+        );
+        assert!(text.trim_end().ends_with("]\n}"), "the object still closes: {text}");
+        let fast = [crate::OneOffReading { metric: "m", reading: 300.0, budget: 600.0 }];
+        assert!(crate::stamp_one_off_json(log, &loaded, &fast).contains("loaded pass"));
+        let over = [crate::OneOffReading { metric: "m", reading: 700.0, budget: 600.0 }];
+        assert!(crate::stamp_one_off_json(log, &loaded, &over).contains("inconclusive"));
+        assert_eq!(crate::mode_lines(&gate::Validity::default()), "mode: quiet\n");
+        assert!(crate::mode_lines(&loaded).starts_with("mode: loaded\nload: "));
+    }
+
     // spec: BUILD-030, BUILD-032
     #[test]
     fn a_loaded_session_records_its_calibration_and_load_and_its_quiet_verdicts_do_not_count() {
