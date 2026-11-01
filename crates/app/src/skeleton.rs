@@ -721,6 +721,7 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
             mesh_version: planet_generators::mesh::MESH_VERSION,
             definition_hash,
             adapter: ctx.adapter_key(),
+            commit: Some(crate::crash::commit()).filter(|c| c != "unknown"),
             world: world_section,
             request,
             plan,
@@ -729,6 +730,15 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
         writeln!(out, "wrote repro bundle {}", path.display()).map_err(err)?;
     }
     Ok(())
+}
+
+/// What to do about a bundle of another version (TEST-071): replay it at the commit it records, or find that commit.
+fn commit_advice(commit: Option<&str>) -> String {
+    match commit {
+        Some(c) => format!("it was recorded at commit {c}: `cargo xtask repro <bundle> --at-commit` replays it there"),
+        None => "it records no commit (made before bundles did): find the commit whose generator and mesh versions match                  (`git log -S\"MESH_VERSION: u32 = N\"`), check it out and replay there"
+            .to_string(),
+    }
 }
 
 /// Read a terrain repro bundle and refuse it on a version mismatch; rebuild the world it recorded (none for a seed-only bundle).
@@ -742,8 +752,14 @@ pub(crate) fn open_terrain_bundle(
     let mesh_version = planet_generators::mesh::MESH_VERSION;
     if b.generator_version != GENERATOR_VERSION || b.implementation_id != IMPLEMENTATION_ID || b.mesh_version != mesh_version {
         return Err(format!(
-            "bundle was recorded with generator {} ({}) and mesh version {}, this build has {} ({}) and {}; check out the matching commit to replay it",
-            b.generator_version, b.implementation_id, b.mesh_version, GENERATOR_VERSION, IMPLEMENTATION_ID, mesh_version
+            "bundle was recorded with generator {} ({}) and mesh version {}, this build has {} ({}) and {}; {}",
+            b.generator_version,
+            b.implementation_id,
+            b.mesh_version,
+            GENERATOR_VERSION,
+            IMPLEMENTATION_ID,
+            mesh_version,
+            commit_advice(b.commit.as_deref())
         ));
     }
     // A bundle that recorded a world rebuilds its field from the recorded definition and bake size; one that recorded none is
@@ -1712,6 +1728,7 @@ mod tests {
             mesh_version: 1,
             definition_hash: def.hash(),
             adapter: "a".into(),
+            commit: None,
             world: Some(world.clone()),
             request,
             plan,
@@ -1746,6 +1763,7 @@ mod tests {
                 mesh_version: 1,
                 definition_hash: def.hash(),
                 adapter: "a".into(),
+                commit: None,
                 world: Some(world.clone()),
                 request: request.clone(),
                 plan: plan.clone(),

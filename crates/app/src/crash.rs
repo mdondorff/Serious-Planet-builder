@@ -111,7 +111,7 @@ fn noun(survived: bool) -> &'static str {
 }
 
 /// The build commit: `git rev-parse HEAD` of the working directory, best effort.
-fn commit() -> String {
+pub(crate) fn commit() -> String {
     // Asked once per run: a flight over steep ground writes many reports, and each must not start a process.
     static COMMIT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     COMMIT
