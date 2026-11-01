@@ -10,7 +10,8 @@ mod tests {
     const CALLS: [&str; 5] = ["thread::spawn(", "thread::Builder::new(", "thread::scope(", "spawn_named(", "spawn_scoped("];
 
     /// (file, calls, reason). Every other entry is the job system itself, a driver or a tool that stays.
-    const ALLOWED: [(&str, usize, &str); 15] = [
+    const ALLOWED: [(&str, usize, &str); 16] = [
+        ("crates/app/src/cameraground.rs", 1, "driver: the free camera's ground read, one thread waiting on a queue (VIEW-061); stays"),
         ("crates/app/src/coupledworld.rs", 1, "driver: the coupled run's one thread; stays"),
         ("crates/app/src/horizonworld.rs", 1, "driver: the one-shot read of the stored coarse horizon; stays"),
         ("crates/app/src/hoverpick.rs", 1, "driver: the hover pick's one thread; stays"),

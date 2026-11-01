@@ -1,0 +1,151 @@
+diff --git a/crates/app/src/coupledworld.rs b/crates/app/src/coupledworld.rs
+index 0081fcea..4c5383c6 100644
+--- a/crates/app/src/coupledworld.rs
++++ b/crates/app/src/coupledworld.rs
+@@ -177,6 +177,17 @@ pub fn load_or_run(def: &WorldDefinition, dir: Option<&Path>, src: &dyn LatticeS
+     make(p, src, dir)
+ }
+ 
++/// SPIKE-88 (spike branch only): [`load_or_run`] that never writes: a run the store does not hold is made in memory.
++pub fn load_or_run_readonly(def: &WorldDefinition, dir: Option<&Path>, src: &dyn LatticeSource, n: u32, steps: u32) -> Result<CoupledRun, String> {
++    let p = prepare(def, src, n, steps)?;
++    if let Some(r) = p.load(dir) {
++        eprintln!("spike88: the coupled run was loaded from the store");
++        return Ok(r);
++    }
++    eprintln!("spike88: the store holds no coupled run: made in memory, not stored");
++    make(p, src, None)
++}
++
+ /// Make the run (reduce the bake, run the steps) and write it to `dir` when given.
+ fn make(p: Prepared, src: &dyn LatticeSource, dir: Option<&Path>) -> Result<CoupledRun, String> {
+     let started = std::time::Instant::now();
+diff --git a/crates/app/src/editwin.rs b/crates/app/src/editwin.rs
+index 1b85fbfa..0baedec6 100644
+--- a/crates/app/src/editwin.rs
++++ b/crates/app/src/editwin.rs
+@@ -649,7 +649,6 @@ impl EditRuntime {
+             saved: &self.saved,
+             view_status,
+             keys: &self.keys,
+-            store: Some(s.editor().store_watch()),
+         }
+     }
+ 
+diff --git a/crates/app/src/panels.rs b/crates/app/src/panels.rs
+index df834176..34f84ed7 100644
+--- a/crates/app/src/panels.rs
++++ b/crates/app/src/panels.rs
+@@ -159,8 +159,6 @@ pub struct PanelData<'a> {
+     pub view_status: &'a str,
+     /// The rows of the Keys tab (VIEW-057): the keys the window accepts now, by group, with their state.
+     pub keys: &'a [planet_frame::keytable::KeyRow],
+-    /// The item store's count and load time against the revisit trigger of ADR 0066 point 6 (AUTH-006); `None` where there is no editor.
+-    pub store: Option<&'a planet_editor::store_watch::StoreWatch>,
+ }
+ 
+ fn kind_color(kind: &str) -> egui::Color32 {
+@@ -664,11 +662,6 @@ fn inspector(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Vec
+     });
+ }
+ 
+-/// The diagnostics line of the item store (AUTH-006): the largest body's item count and the last load time with their limits, empty without one.
+-pub fn store_line(d: &PanelData) -> String {
+-    d.store.map_or(String::new(), |w| w.summary())
+-}
+-
+ /// The right-hand text of the status bar: the count of edits, the undo depth, where the edits are saved and the window's own status.
+ pub fn counts_line(d: &PanelData) -> String {
+     format!("{} edits · undo {} · {} · {}", d.edit_count, d.undo_depth, d.saved, d.view_status)
+@@ -695,11 +688,6 @@ fn status_bar(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Ve
+         ui.label(if d.status.is_empty() { "Ready" } else { d.status });
+         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+             ui.weak(counts_line(d));
+-            let store = store_line(d);
+-            if !store.is_empty() {
+-                ui.separator();
+-                ui.weak(store);
+-            }
+         });
+     });
+ }
+@@ -991,26 +979,9 @@ mod tests {
+             saved: "not saved",
+             view_status: "",
+             keys: &[],
+-            store: None,
+         }
+     }
+ 
+-    // spec: AUTH-006
+-    #[test]
+-    fn the_status_bar_has_a_store_line_with_both_values_only_when_the_editor_has_a_store() {
+-        let f = fixture();
+-        let h = held(&f, Layout::default());
+-        assert_eq!(store_line(&data(&h)), "", "no editor, no line");
+-        let mut w = planet_editor::store_watch::StoreWatch::default();
+-        w.record_load(planet_world_def::BodyId(0), 20_001, std::time::Duration::from_millis(2_100));
+-        let d = PanelData { store: Some(&w), ..data(&h) };
+-        let line = store_line(&d);
+-        assert!(
+-            line.contains("20001 items (limit 20000)") && line.contains("last load 2100 ms (limit 2000 ms)") && line.contains("REVISIT"),
+-            "{line}"
+-        );
+-    }
+-
+     // spec: VIEW-021
+     #[test]
+     fn the_panels_sit_where_the_layout_says_and_the_pointer_over_one_is_covered() {
+diff --git a/crates/app/src/window.rs b/crates/app/src/window.rs
+index da2511c3..3b9b1084 100644
+--- a/crates/app/src/window.rs
++++ b/crates/app/src/window.rs
+@@ -766,7 +766,12 @@ impl App<'_> {
+                 let camera = st.last_camera;
+                 let frames = st.frames;
+                 if let Some(e) = st.edit.as_mut() {
++                    let t0 = Instant::now();
+                     e.smoke_step(frames, &camera, viewport, &limits, field)?;
++                    let ms = t0.elapsed().as_secs_f64() * 1000.0;
++                    if ms > 5.0 {
++                        eprintln!("spike88: frame {frames} edit smoke step {ms:.1} ms");
++                    }
+                 }
+             }
+             // A command of this frame (C back to the flight, restart) may have released the mouse.
+@@ -1462,11 +1467,15 @@ fn title_text(st: &Running, now_ms: u64) -> String {
+ fn smoke_keys(st: &mut Running, cameras: &[Camera], now_ms: u64) -> Result<bool, String> {
+     let cam = planet_frame::viewer::camera_at(cameras, st.viewer.clock.time_s(now_ms));
+     let press = |st: &mut Running, c: Command| {
++        // SPIKE-88 probe (spike branch only): the time of each scripted key, and of its swapchain change
++        let t0 = Instant::now();
+         let was = st.viewer.vsync;
+         st.viewer.command(c, now_ms, &cam);
++        let t1 = t0.elapsed().as_secs_f64() * 1000.0;
+         if st.viewer.vsync != was {
+             st.surface.set_vsync(&st.ctx, st.viewer.vsync);
+         }
++        eprintln!("spike88: frame {} key {:?}: command {:.1} ms, total {:.1} ms", st.frames, c, t1, t0.elapsed().as_secs_f64() * 1000.0);
+     };
+     match st.frames {
+         // The window starts lit: V does nothing there, L goes to the debug path, V cycles a debug view, L comes back.
+diff --git a/crates/app/src/worldfield.rs b/crates/app/src/worldfield.rs
+index c14c7674..1ad3e94a 100644
+--- a/crates/app/src/worldfield.rs
++++ b/crates/app/src/worldfield.rs
+@@ -696,6 +696,15 @@ impl WorldTerrain {
+         }
+     }
+ 
++    /// SPIKE-88 (spike branch only): [`WorldTerrain::set_coupled_lens`] whose run is never written to the store.
++    pub fn set_coupled_lens_readonly(self: &Arc<Self>, lens: CoupledLens) {
++        self.coupled_lens.store(if lens == CoupledLens::Height { 1 } else { 2 }, std::sync::atomic::Ordering::Relaxed);
++        let world = Arc::clone(self);
++        self.coupled.request(move || {
++            crate::coupledworld::load_or_run_readonly(&world.definition(), world.store_dir.as_deref(), world.src.as_ref(), run_cells(world.res), COUPLED_STEPS)
++        });
++    }
++
+     /// Where the coupled run stands.
+     pub fn coupled_standing(&self) -> Standing {
+         self.coupled.standing()

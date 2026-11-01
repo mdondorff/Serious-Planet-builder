@@ -792,6 +792,23 @@ impl WorldTerrain {
         let _ = tx.try_send(dirs);
     }
 
+    /// The camera's ground read (VIEW-061), for the ground thread of [`crate::cameraground::CameraGround`]: the height at `dir` from a field
+    /// made for it, with the bake blocks the read touched pinned in the stored bake's cache, so that the tile streamer cannot push the blocks
+    /// under the camera out. NaN when no field can be made (the frame keeps its last answer).
+    pub fn ground_pinned(&self, dir: planet_core::Vec3) -> f64 {
+        let Ok(field) = self.field() else { return f64::NAN };
+        let (h, touched) = planet_cache::global_store::record_touched_blocks(|| field.height(dir));
+        if let Some(src) = self.store_source {
+            src.pin_touched(&touched);
+        }
+        h
+    }
+
+    /// The blocks the stored bake's cache keeps out of eviction now (VIEW-061); none for an in-memory bake.
+    pub fn pinned_blocks(&self) -> Vec<planet_core::TileId> {
+        self.store_source.map(|s| s.pinned_blocks()).unwrap_or_default()
+    }
+
     /// Batches the warm-up thread has read so far.
     pub fn warmed_batches(&self) -> u64 {
         self.warmed.load(std::sync::atomic::Ordering::SeqCst)
