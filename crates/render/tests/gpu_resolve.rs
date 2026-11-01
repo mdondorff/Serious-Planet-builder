@@ -91,13 +91,18 @@ fn frame_params(frame: u32, cut: bool, weight: f32, spread: bool) -> ResolvePara
 
 /// Depth of the flat ground below the camera everywhere, with `ledge` (a distance below the camera) over the right half of the frame.
 fn depths(ledge: Option<f32>, sky_rows: u32) -> Vec<f32> {
+    depths_with_edge(ledge, sky_rows, W / 2)
+}
+
+/// As `depths`, with the ledge from column `edge` on.
+fn depths_with_edge(ledge: Option<f32>, sky_rows: u32, edge: u32) -> Vec<f32> {
     let mut d = vec![1.0 / CAMERA_HEIGHT; (W * H) as usize];
     for y in 0..H {
         for x in 0..W {
             let i = (y * W + x) as usize;
             if y < sky_rows {
                 d[i] = 0.0;
-            } else if let (Some(z), true) = (ledge, x >= W / 2) {
+            } else if let (Some(z), true) = (ledge, x >= edge) {
                 d[i] = 1.0 / z;
             }
         }
@@ -169,32 +174,61 @@ fn the_upsample_does_not_blend_across_a_depth_edge() {
 
 // spec: REND-050
 #[test]
+fn the_upsample_keeps_a_depth_edge_inside_a_quad_of_receivers() {
+    let s = scene();
+    set_wall(&s, Some(-96));
+    let mut r = ShadowResolveGpu::new(&s.ctx, &s.clip);
+    // The ledge starts at an odd column: the 2x2 quad of columns 32 and 33 holds both surfaces, and its receiver is the nearer one.
+    let depth = depth_target(&s, &depths_with_edge(Some(CAMERA_HEIGHT - 120.0), 0, 33));
+    r.resolve(&s.ctx, &s.march, &s.clip, &s.cube, &march_params(10.0), &depth, &frame_params(1, true, 0.0, false));
+    let shadow = r.read_shadow(&s.ctx);
+    for y in 0..H {
+        for x in 0..W {
+            let v = shadow[(y * W + x) as usize];
+            if x < 33 {
+                assert!(v < 0.02, "ground pixel ({x}, {y}) must stay in the shadow, got {v}");
+            } else {
+                assert!(v > 0.98, "ledge pixel ({x}, {y}) must be lit, got {v}");
+            }
+        }
+    }
+}
+
+// spec: REND-050
+#[test]
 fn a_march_across_a_changed_cell_is_flagged_and_one_elsewhere_is_not() {
     let s = scene();
     set_wall(&s, Some(-96));
     let depth = depth_target(&s, &depths(None, 0));
-    let wall_cell = TexelRect { x0: -12, y0: -128, x1: -11, y1: 128 };
-    let behind = TexelRect { x0: 100, y0: -128, x1: 104, y1: 128 };
-    let mut flags = Vec::new();
-    for rect in [None, Some(behind), Some(wall_cell)] {
-        let mut r = ShadowResolveGpu::new(&s.ctx, &s.clip);
-        if let Some(rect) = rect {
-            r.generations_mut().mark(&s.ctx, 2, 0, &rect);
-        }
-        r.resolve(&s.ctx, &s.march, &s.clip, &s.cube, &march_params(10.0), &depth, &frame_params(2, false, 0.8, false));
-        flags.push(r.read_half_changed(&s.ctx).into_iter().filter(|c| *c).count());
-    }
+    let wall = |level: usize, x0: i64| (level, TexelRect { x0, y0: -128, x1: x0 + 1, y1: 128 });
     let all = (W / 2 * (H / 2)) as usize;
-    assert_eq!(flags[0], 0, "nothing changed: nothing flagged");
-    assert_eq!(flags[1], 0, "a change behind the receivers, away from every ray, flags nothing");
-    assert_eq!(flags[2], all, "every ray toward the sun crosses the wall's cell");
+    // (the mark: level and rectangle, the frame it is marked in), the frame resolved, the flagged count.
+    let cases: [(&str, Option<((usize, TexelRect), u32)>, u32, usize); 7] = [
+        ("nothing changed", None, 2, 0),
+        ("behind the receivers, off every ray", Some(((0, TexelRect { x0: 100, y0: -128, x1: 104, y1: 128 }), 2)), 2, 0),
+        ("the wall's cell this frame", Some((wall(0, -12), 2)), 2, all),
+        ("the wall's cell last frame", Some((wall(0, -12), 1)), 2, all),
+        ("the wall's cell two frames ago", Some((wall(0, -12), 1)), 3, 0),
+        ("a coarse level the walk does not use", Some((wall(1, -6), 2)), 2, 0),
+        ("the wall's cell, addressed one clipmap edge further (toroidal)", Some((wall(0, -12 + i64::from(TEXELS)), 2)), 2, all),
+    ];
+    for (what, mark, frame, expected) in cases {
+        let mut r = ShadowResolveGpu::new(&s.ctx, &s.clip);
+        if let Some(((level, rect), at)) = mark {
+            r.generations_mut().mark(&s.ctx, at, level, &rect);
+        }
+        r.resolve(&s.ctx, &s.march, &s.clip, &s.cube, &march_params(10.0), &depth, &frame_params(frame, false, 0.8, false));
+        let flagged = r.read_half_changed(&s.ctx).into_iter().filter(|c| *c).count();
+        assert_eq!(flagged, expected, "{what}");
+    }
 }
 
 fn shadow_of_drag(weight: f32, mark: bool) -> (Vec<f32>, f32) {
     let s = scene();
     let mut r = ShadowResolveGpu::new(&s.ctx, &s.clip);
     let depth = depth_target(&s, &depths(None, 0));
-    // The wall is dragged: its shadow's tip stands at 136, 376 and 236 m.
+    // The wall is dragged (the scenario's plateau stamp, scaled to this 2 km clipmap of 8 m texels): its shadow's tip stands at 136, 376 and
+    // 236 m, so the third frame lights what the second shadowed.
     let walls = [-440, -200, -340];
     let mut last = None;
     for (i, x) in walls.iter().enumerate() {
