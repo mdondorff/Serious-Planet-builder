@@ -20,19 +20,15 @@ The default class source SHALL compute, as pure functions of the seed and the di
 - **Flank:** the same two terms at three times their half-widths. **Old margin:** `(1 - smoothstep(-0.05, 0.15, convergence)) exp(-(d / 150 km)^2)`.
 - **Back-arc:** `smoothstep(0.7, 0.95, convergence) (1 - smoothstep(450, 700 km, d)) smoothstep(0.1, 0.5, inland)` on the plate with the larger land share of the two, else 0.
 - **Plateau field:** `smoothstep(0.50, 0.62, c) smoothstep(0.2, 0.6, inland) (1 - smoothstep(0.2, 0.6, max(flank, back-arc)))`, `c` a three-octave fBm of frequency 1.6.
-Core, flank and old margin SHALL be multiplied by `smoothstep(0, 0.04, land depth)`, where land depth is the continentalness minus the sea level and `inland` is the bake's `smoothstep(0.02, 0.35, land depth)` (`global.rs` `terrain`). The mask SHALL replace the range zone as the mountain strength. The numbers here are start values (SPIKE-79, SPIKE-80); R7 tunes them.
+Core, flank and old margin SHALL be multiplied by `smoothstep(0, 0.04, land depth)`, where land depth is the continentalness minus the sea level and `inland` is the bake's `smoothstep(0.02, 0.35, land depth)` (`global.rs` `terrain`). The mask SHALL replace the range zone as the mountain strength. The numbers here are start values (SPIKE-79, SPIKE-80); R7 tunes them. The planet-wide check of the belts is TEST-082.
 
-Verify: A, B
+Verify: A
 Status: planned
 Source: ADR 0089 decision 3, pending the owner's acceptance of ADR 0088/0089; SPIKE-79 (14 plates, warp 0.35), SPIKE-80 (width variety, flanks, back-arc)
 
-#### Scenario: Pure and continuous (A)
+#### Scenario: Pure and continuous
 - **WHEN** the mask is evaluated on 1 and 8 threads, and at two points 1e-12 either side of a cube edge
 - **THEN** both runs give identical bits, and the two points differ by under 1e-9 in every term
-
-#### Scenario: Belts, not blobs (B, seed 1, the measured seed)
-- **WHEN** the core of seed 1 is sampled at 0.25 degree over land under 60 degrees latitude
-- **THEN** of the land where the core exceeds 0.5, at least 90 % of the area lies in connected regions with a length squared over area of 4 or more
 
 ### Requirement: GEN-095 The default classes follow rules over the mask
 The default class weights SHALL be memberships blended by smoothsteps, then normalised by GEN-093. Here `e0` is the base elevation of GEN-096 without the hill band (GEN-098), which breaks the loop between the classes and the band:
@@ -40,19 +36,15 @@ The default class weights SHALL be memberships blended by smoothsteps, then norm
 - hills `(1 - mt) smoothstep(0.2, 0.45, max(flank, old margin))`;
 - plateau `(1 - mt)(1 - hills) smoothstep(0.3, 0.6, max(plateau field, back-arc))`;
 - the rest rolling plain by `smoothstep(0.45, 0.6)` of a three-octave fBm of frequency 3.0, else plain.
-Badlands and sand sea SHALL have weight 0 in the default source; class paint (ADR 0089 decision 8) or a derived source sets them. The thresholds are start values (SPIKE-80); R7 tunes them.
+Badlands and sand sea SHALL have weight 0 in the default source; class paint (ADR 0089 decision 8) or a derived source sets them. The thresholds are start values (SPIKE-80); R7 tunes them. The planet-wide check of the class shares is TEST-082.
 
-Verify: A, B
+Verify: A
 Status: planned
 Source: ADR 0089 decision 3, pending the owner's acceptance of ADR 0088/0089; SPIKE-77, SPIKE-80
 
-#### Scenario: Memberships (A)
+#### Scenario: Memberships
 - **WHEN** a lattice point has core 1, `e0` 3500 m, and another has core 0, flank 0, old margin 0 and plateau field 1
 - **THEN** the first holds weight 255 in high mountains and the second 255 in plateau
-
-#### Scenario: Class shares (B, seed 1, the measured seed)
-- **WHEN** the default classes of seed 1 are read at 0.25 degree over land under 60 degrees latitude, and each point's relief `k R14` is taken (`R14` the elevation range of today's field within 7 km at `k` 1; plains under 100 m, hills 100-300 m, mountains over 300 m or `e0` over 2.5 km)
-- **THEN** plains are 55-67 %, hills 10-25 % and mountains 14-30 % of the land (measured 61 / 20 / 19 %; Earth 61 / 14 / 25 %)
 
 ### Requirement: GEN-096 The base elevation takes the belts and the plateaus
 `global::sample`'s land elevation SHALL be the coast ramp (up to 1000 m, unchanged) plus:
@@ -61,19 +53,15 @@ Source: ADR 0089 decision 3, pending the owner's acceptance of ADR 0088/0089; SP
 - the old-margin and flank uplift `200 max(old margin, 0.5 flank)` m;
 - the plateau uplift `1200 plateau field` m;
 - the class hill band (GEN-098).
-The sum SHALL be clamped to `MAX_ELEVATION_M` (9000 m), which it can reach. Cap bounds SHALL clamp the same way and stay sound where the clamp acts. This replaces the range term `5200 ridge zone inland` and GEN-064's band, and `GLOBAL_VERSION` SHALL become 6. The constants are start values (SPIKE-78, SPIKE-80); R7 tunes them.
+The sum SHALL be clamped to `MAX_ELEVATION_M` (9000 m), which it can reach. Cap bounds SHALL clamp the same way and stay sound where the clamp acts. This replaces the range term `5200 ridge zone inland` and GEN-064's band, and `GLOBAL_VERSION` SHALL become 6. The constants are start values (SPIKE-78, SPIKE-80); R7 tunes them. The planet-wide check of the hypsometry is TEST-082.
 
-Verify: A, B
+Verify: A
 Status: planned
 Source: ADR 0089 decision 7, pending the owner's acceptance of ADR 0088/0089; SPIKE-78, SPIKE-80 (land above 0.5 / 1 / 2 / 3 / 4 / 5 km 48 / 27 / 7.6 / 3.3 / 1.8 / 0.75 %, highest 8.0 km)
 
-#### Scenario: Clamp and bounds (A)
+#### Scenario: Clamp and bounds
 - **WHEN** a direction whose terms sum above 9000 m is sampled, and caps around it are bounded
 - **THEN** its elevation is 9000 m and lies in every cap's bounds, and no sample of 40,000 directions spread over the sphere exceeds the clamp
-
-#### Scenario: Hypsometry (B, seed 1, the measured seed)
-- **WHEN** the elevation of seed 1 is sampled at 0.25 degree over land under 60 degrees latitude
-- **THEN** land above 2 km is 5-10 %, above 4 km 1-3 %, and the highest land is between 7 and 9 km
 
 ### Requirement: GEN-097 Amplitudes per class
 Each class SHALL carry the relief driver `k`, the fine-crease floor, the carve factor (a factor on the carve's `K dt`, ADR 0089's `K t`) and the deposition's `kc`, blended by the class weights:
@@ -90,19 +78,15 @@ Each class SHALL carry the relief driver `k`, the fine-crease floor, the carve f
 - The blended `k` SHALL be tapered to 1 by `1 + smoothstep(0, 400 m, m) (k - 1)` towards the coast, with `m` the ring mean (GEN-099).
 - The untapered blended `k` SHALL change by at most 2.0 between neighbouring lattice points. The default source SHALL meet this, and a class paint item SHALL be feathered over at least `ceil(|delta k| / 2)` lattice cells so that it does.
 - The crease and detail amplitudes SHALL no longer depend on the landform driver or on the base elevation above 300 m. The erosion field's version SHALL become 3.
-The table and the limit are start values (SPIKE-73, SPIKE-76 to SPIKE-81; `kc` from SPIKE-64); R7 tunes them on the scorecard.
+The table and the limit are start values (SPIKE-73, SPIKE-76 to SPIKE-81; `kc` from SPIKE-64); R7 tunes them on the scorecard. The planet-wide check of the step limit is TEST-082.
 
-Verify: A, B
+Verify: A
 Status: planned
 Source: ADR 0089 decisions 5 and 6, ADR 0088 point 1, pending the owner's acceptance of ADR 0088/0089; SPIKE-73, SPIKE-76, SPIKE-77, SPIKE-78, SPIKE-80, SPIKE-81
 
-#### Scenario: Blended amplitudes (A)
+#### Scenario: Blended amplitudes
 - **WHEN** a lattice point holds weights 128 hills and 127 mountains
 - **THEN** its untapered `k` is `(128 x 5 + 127 x 6) / 255`, and at a ring mean of 0 m the tapered `k` is 1
-
-#### Scenario: Step limit (B, seed 1)
-- **WHEN** the default `k` of seed 1 is read at every lattice point
-- **THEN** no two neighbouring points differ by more than 2.0
 
 ### Requirement: GEN-098 The hill band follows the class
 The hill band SHALL keep GEN-064's three octaves, weights, warped direction and coast ramp, and SHALL take the amplitude `30 + 145 smoothstep(1, 5, k) + 650 smoothstep(5, 7.5, k)` m from the untapered blended `k` (GEN-097) instead of the range zone's mountain strength. `HILL_BAND_MAX_M` SHALL become 825 m. A cap's bounds SHALL carry the band's per-octave noise bounds at the cap. The curve is a start value (SPIKE-80); R7 tunes it.
@@ -142,7 +126,7 @@ Verify: A, B
 Status: planned
 Source: ADR 0088 point 4.1, pending the owner's acceptance of ADR 0088/0089; SPIKE-62, SPIKE-65, SPIKE-66, SPIKE-70, SPIKE-71
 
-#### Scenario: A small face (A)
+#### Scenario: A small face
 - **WHEN** pass 1 runs on a synthetic face of 64 x 64 cells uninterrupted on 1 thread (the reference), on 8 threads, and on 1 thread killed and resumed
 - **THEN** the second and third runs equal the reference byte for byte
 
@@ -156,19 +140,15 @@ The bake's second pass SHALL work per tile of the layer grid: 98,304 cells per f
 - a local carve of catchments up to 1 km^2 that only incises: no fill, no breach, no uplift;
 - thermal at a critical slope of 33 degrees, perturbed by up to 25 %, moving 1/16 of the excess per pass, on active cells;
 - one deposition sweep with `kc` from GEN-097 and `zeta` 0.5 on the last route.
-It SHALL store the core's change against the base field and checkpoint per tile. Every kernel SHALL be a Jacobi gather or a fixed topological sweep in f64 with `libm`. The constants are start values (SPIKE-61, SPIKE-64, SPIKE-70, SPIKE-72).
+It SHALL store the core's change against the base field and checkpoint per tile. Every kernel SHALL be a Jacobi gather or a fixed topological sweep in f64 with `libm`. The constants are start values (SPIKE-61, SPIKE-64, SPIKE-70, SPIKE-72). The seam check is TEST-084.
 
-Verify: A, B
+Verify: A
 Status: planned
 Source: ADR 0088 points 4.2 and 6, pending the owner's acceptance of ADR 0088/0089; SPIKE-61, SPIKE-64, SPIKE-70, SPIKE-71, SPIKE-72, SPIKE-73
 
-#### Scenario: Incise only (A)
+#### Scenario: Incise only
 - **WHEN** pass 2's local carve runs on a synthetic tile with a closed basin
 - **THEN** no cell ends higher than its input, and the basin keeps its pour point
-
-#### Scenario: Core-edge seam (B)
-- **WHEN** two neighbouring tiles of the store are baked
-- **THEN** the p99 of the height step across their shared core edge is at most the p99 of the step between neighbouring cells one cell off the edge
 
 ### Requirement: GEN-102 Cap bounds read the layer's pyramid
 The field's height bounds over a cap SHALL take the layer's part from the min/max pyramid (STRM-066):
@@ -176,19 +156,15 @@ The field's height bounds over a cap SHALL take the layer's part from the min/ma
 - it is read at the finest pyramid level whose blocks are at least half the box, or from the layer's nodes for a box under 16 cells;
 - the runtime detail below the layer's cells adds its analytic per-octave bound;
 - a cap that crosses a face edge reads both faces' blocks.
-Because each pyramid level holds the range of the levels below and of the nodes, the bounds of nested caps SHALL nest (LOD-012).
+Because each pyramid level holds the range of the levels below and of the nodes, the bounds of nested caps SHALL nest (LOD-012). The plan check at production parameters is TEST-083.
 
-Verify: A, B
+Verify: A
 Status: planned
 Source: ADR 0088 points 3 and 8, pending the owner's acceptance of ADR 0088/0089; SPIKE-82, SPIKE-83 (the steep classes plan to level 18 with no capped tile, 2.5-4 us per lookup)
 
-#### Scenario: Sound and nested (A)
+#### Scenario: Sound and nested
 - **WHEN** 20,000 random caps of radius 1e-6 to 0.01 rad over a synthetic layer are bounded, rims and face edges included, each with a nested cap inside it
 - **THEN** every sampled height lies in its cap's bounds, and each inner cap's bounds lie within its outer cap's (within LOD-012's slack)
-
-#### Scenario: No capped tile at a mountain pose (B)
-- **WHEN** the plan at production parameters is made at a high-mountain pose over a baked layer
-- **THEN** no tile is capped (ADR 0074)
 
 ## REMOVED Requirements
 
