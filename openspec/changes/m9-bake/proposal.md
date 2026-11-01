@@ -27,7 +27,7 @@ ADR 0088 (proposed) fixes the format. This change builds it as M9 item R4.
 ### Modified Capabilities
 - `generator-pipeline`: the relief classes and their default source, the base elevation, the class amplitudes and hill band, the relief channels and the runtime base formula, the two bake passes, the cap bounds (GEN-093 to GEN-102, planned)
 - `streaming-cache`: the erosion layer's storage and keys, its min/max pyramid, the class-weights and relief channels (STRM-065 to STRM-068, planned)
-- `testing`: the scorecard run on the baked field, the level-step and seam checks (IDs TBD)
+- `testing`: criterion 1 on the baked field, the default classes' shares and hypsometry, plans with no capped tile, the core-edge seam (TEST-081 to TEST-084, planned)
 
 ## Impact
 - Code:
