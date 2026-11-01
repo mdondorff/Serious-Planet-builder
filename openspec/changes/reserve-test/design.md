@@ -20,3 +20,8 @@
 - The scene runs the two variants (loads on, loads off) alternately inside one session, so the cost of the reserves on terrain is a relative reading.
 - Absolute verdicts follow BUILD-031: the frame median with streaming needs a quiet window; GPU timings carry the +18 % note; CPU times need pinning or 30 % margin. A loaded run records everything and gives `loaded pass`, `inconclusive` or `needs a quiet window` per row.
 - The planner is told before each measured run and gives the go; the run is a loaded A/B (`perf --ab` for a comparison of builds) unless the planner asks for a quiet window.
+
+## The terrain cap (inbox #24, 2026-11-01)
+The first quiet reserve measurement (4 flights, loads on) found the terrain share at a peak of 27 busy threads against BUDG-003's 12: the Rig sized the share as tile workers + plan + horizon without the spec's limit. The ceiling is now `planet_perf::reserve::TERRAIN_CORES` (12) with the plan worker, the tile workers (11 on the reference machine, 15 before) and the horizon bakes inside it (`pipelined::terrain_sizes`); a machine with fewer threads is not capped.
+
+A/B of the capped tree against main (`perf --ab`, lit, loaded, 3 rounds, medians): dive tile load run 4368 -> 4068 us (-7 %), tile wait 169 -> 2587 us, frame median 5.35 -> 5.60 ms (+4.8 %), p99 12.69 -> 13.17 ms (+3.8 %); teleport-1m run 4079 -> 3159 us (-23 %), wait 3125 -> 2449 us, frame median 3.98 -> 3.11 ms, p99 8.53 -> 6.83 ms. The tile jobs run faster (less oversubscription) and wait longer for a permit on the dive.
