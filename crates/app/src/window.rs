@@ -168,6 +168,8 @@ struct Config {
     /// Frames a smoke run drives before it closes the window (`--frames`, default [`SMOKE_FRAMES`]).
     smoke_frames: u64,
     vsync: bool,
+    /// `--shadow-march`: the clipmap shadow pass runs beside the lit frames.
+    shadow_march: bool,
     policy: AdapterPolicy,
     gen: planet_streaming::GenWorkers,
     initial_view: usize,
@@ -346,6 +348,8 @@ struct Running {
     camera_position: planet_core::Vec3,
     /// The slots, versions and uploads of the horizon shadows (REND-038).
     horizon: crate::horizonworld::HorizonRig,
+    /// The clipmap shadow pass's planner and last plan (`--shadow-march`).
+    shadow: Option<crate::shadowrig::ShadowRig>,
     coupled_standing: Standing,
     /// The item markers of the globe overview, the ones the overview shows this frame (window pixels) and the one under the cursor.
     markers: Vec<Marker>,
@@ -503,6 +507,16 @@ impl App<'_> {
                 warm
             })
             .map_err(|e| format!("warming the lit path: {e}"))?;
+        // The clipmap shadow pass (ADR 0085 layer 1), off unless asked for: the planner runs on the terrain share.
+        // A smoke run uses 256-texel levels (the software adapter gathers 1024^2 levels in seconds a frame); a real run the full size.
+        let shadow = cfg.shadow_march.then(|| {
+            let params = planet_frame::clipmap::ClipmapParams {
+                texels: if cfg.smoke { 256 } else { planet_frame::clipmap::CLIPMAP_TEXELS },
+                ..planet_frame::clipmap::ClipmapParams::new(cfg.radius_m, cfg.lod.cells)
+            };
+            rig.renderer.enable_shadow(&ctx, params.texels, params.levels, cfg.radius_m);
+            crate::shadowrig::ShadowRig::new(rig.horizon_pool.clone(), params)
+        });
         let now = self.clock.now_ms();
         // The editor holds a re-keyed tile's refresh until its edits have been quiet for a moment (STRM-031, ADR 0072).
         if cfg.ui {
@@ -580,6 +594,7 @@ impl App<'_> {
             sun_dir: [0.0, 0.0, 1.0],
             camera_position: planet_core::Vec3::new(1.0, 0.0, 0.0),
             horizon: Default::default(),
+            shadow,
             coupled_standing: Standing::Idle,
             markers: cfg.markers.clone(),
             screen_markers: Vec::new(),
@@ -1074,6 +1089,24 @@ impl App<'_> {
                 }
             }
             st.stall.mark("horizon frame and upload");
+            // The clipmap shadow pass (`--shadow-march`): the planner job on the terrain share, the plan that landed (or the last one, unchanged)
+            // with this frame's camera, sun and preview.
+            if let (Some(shadow), Some(lit)) = (st.shadow.as_mut(), plan.lit.as_ref()) {
+                let mut resident: Vec<TileId> = st.rig.managed.resident().keys().copied().collect();
+                resident.sort();
+                let placed = st.rig.renderer.take_placed_tiles();
+                let landed = shadow.step(crate::shadowrig::ShadowInputs {
+                    camera: plan.camera.position,
+                    resident,
+                    placed,
+                    stamps: draw.preview.clone(),
+                });
+                let sun = planet_core::Vec3::new(f64::from(lit.sun_dir[0]), f64::from(lit.sun_dir[1]), f64::from(lit.sun_dir[2]));
+                if let Some(f) = shadow.frame(landed, &plan.camera, sun, cfg.radius_m, &draw.preview, draw.preview_delta_len, &plan.nodes) {
+                    st.rig.renderer.set_shadow_frame(f);
+                }
+            }
+            st.stall.mark("shadow plan and frame");
             // The regions overlay (VIEW-030): the region items of the editor's definition nearest the camera, decided here, drawn by the renderer.
             if plan.lit.is_some_and(|l| l.overlay == planet_frame::look::Overlay::Regions) {
                 let list = st.edit.as_ref().map(|e| e.region_list(plan.camera.position.0)).unwrap_or_default();
@@ -1793,6 +1826,13 @@ fn smoke_summary(st: &Running) -> String {
             if e.on { "mode on" } else { "mode off" }
         )
     });
+    let shadow = st.shadow.as_ref().map_or(String::new(), |_| {
+        format!(
+            "
+  shadow pass: {} frames resolved",
+            st.rig.renderer.shadow_frames_run()
+        )
+    });
     // The F9 files of the run, when the script pressed it (`PLANET_REPRO_DIR` set).
     let repro = if st.repro_files > 0 {
         format!(
@@ -1834,6 +1874,7 @@ fn smoke_summary(st: &Running) -> String {
         st.last_title
     ) + &ui
         + &edit
+        + &shadow
         + &globe
         + &repro
         + &format!("
@@ -1962,6 +2003,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
             SMOKE_FRAMES
         },
         vsync: !o.no_vsync,
+        shadow_march: o.shadow_march,
         policy,
         gen: o.gen_workers(),
         initial_view,

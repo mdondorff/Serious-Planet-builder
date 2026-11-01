@@ -13,6 +13,25 @@ use crate::shadow::{ClipmapGpu, ClipmapPreview, CoarseCubeGpu, COARSE_CUBE_TEXEL
 use crate::terrain::TerrainRenderer;
 use crate::GpuContext;
 
+const SHADOW_VIEW_SHADER: &str = r#"
+@group(0) @binding(0) var shadow: texture_2d<f32>;
+@group(0) @binding(1) var depth: texture_depth_2d;
+@vertex
+fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
+    let p = vec2<f32>(f32((i << 1u) & 2u), f32(i & 2u));
+    return vec4<f32>(p * 2.0 - 1.0, 0.0, 1.0);
+}
+@fragment
+fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    let p = vec2<i32>(pos.xy);
+    if (textureLoad(depth, p, 0) <= 0.0) {
+        discard;
+    }
+    let v = textureLoad(shadow, p, 0).x;
+    return vec4<f32>(v, v, v, 1.0);
+}
+"#;
+
 /// What the app decides about the shadow of one frame.
 #[derive(Clone, Debug)]
 pub struct ShadowFrame {
@@ -41,6 +60,7 @@ pub struct ShadowPath {
     previous: Option<ResolveCamera>,
     /// Floor tiles the cube found not resident: asked for again next frame.
     pending_floor: Vec<TileId>,
+    grey: Option<wgpu::RenderPipeline>,
 }
 
 fn camera_of(v: &ShadowView) -> ResolveCamera {
@@ -66,6 +86,7 @@ impl ShadowPath {
             generation: None,
             previous: None,
             pending_floor: Vec::new(),
+            grey: None,
         }
     }
 
@@ -127,6 +148,102 @@ impl ShadowPath {
         let mut out = skipped;
         out.extend(self.pending_floor.iter().copied());
         out
+    }
+
+    /// J's shadow view (VIEW-054): draw the resolved visibility as grey over `target` (`Rgba8Unorm`) where `depth_view` holds a surface; the
+    /// sky keeps what it shows.
+    pub(crate) fn draw_visibility(&mut self, ctx: &GpuContext, depth_view: &wgpu::TextureView, target: &wgpu::TextureView) {
+        let Some(shadow) = self.resolve.shadow_texture_view() else { return };
+        let device = &ctx.device;
+        let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("shadow-view"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let pipeline = self.grey.get_or_insert_with(|| {
+            let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("shadow-view"),
+                source: wgpu::ShaderSource::Wgsl(SHADOW_VIEW_SHADER.into()),
+            });
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("shadow-view"),
+                bind_group_layouts: &[Some(&bgl)],
+                immediate_size: 0,
+            });
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("shadow-view"),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some("fs"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        });
+        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("shadow-view"),
+            layout: &bgl,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&shadow) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(depth_view) },
+            ],
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("shadow-view") });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("shadow-view"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &bind, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        ctx.queue.submit([encoder.finish()]);
     }
 
     /// The resolved visibility of the last frame, `width * height` values in [0, 1], row-major (tests and the shadow view).

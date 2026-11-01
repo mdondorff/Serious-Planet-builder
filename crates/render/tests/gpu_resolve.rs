@@ -397,8 +397,11 @@ fn resolve_cost_probe_at_1440p() {
     let target = DepthTarget::new(&s.ctx, w, h);
     target.write(&s.ctx, &vec![1.0 / CAMERA_HEIGHT; (w * h) as usize]);
     let mut r = ShadowResolveGpu::new(&s.ctx, &s.clip);
+    let timed = r.enable_timing(&s.ctx);
     for sun in [45.0f32, 2.0] {
+        let mut passes: Vec<[f64; 5]> = Vec::new();
         let mut times = Vec::new();
+        let mut cpu = Vec::new();
         for frame in 1..=24u32 {
             let params = ResolveParams {
                 camera: camera(CAMERA_X),
@@ -410,18 +413,33 @@ fn resolve_cost_probe_at_1440p() {
             };
             let t = std::time::Instant::now();
             r.resolve(&s.ctx, &s.march, &s.clip, &s.cube, &march_params(sun), &target, &params);
+            let submitted = t.elapsed().as_secs_f64() * 1000.0;
             s.ctx.wait_idle();
             if frame > 3 {
+                passes.extend(r.pass_ms(&s.ctx));
+                cpu.push(submitted);
                 times.push(t.elapsed().as_secs_f64() * 1000.0);
             }
         }
         times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        cpu.sort_by(|a, b| a.partial_cmp(b).unwrap());
         eprintln!(
-            "resolve at 1440p, sun {sun} deg: median {:.2} ms, min {:.2} ms, max {:.2} ms (waited frames)",
+            "resolve at 1440p, sun {sun} deg: median {:.2} ms (CPU until submitted {:.2} ms), min {:.2} ms, max {:.2} ms (waited frames)",
             times[times.len() / 2],
+            cpu[cpu.len() / 2],
             times[0],
             times[times.len() - 1]
         );
+        if timed && !passes.is_empty() {
+            let median = |i: usize| {
+                let mut v: Vec<f64> = passes.iter().map(|p| p[i]).collect();
+                v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                v[v.len() / 2]
+            };
+            let rows: Vec<String> =
+                planet_render::resolve::RESOLVE_PASS_NAMES.iter().enumerate().map(|(i, n)| format!("{n} {:.2} ms", median(i))).collect();
+            eprintln!("  GPU timestamps, median per pass: {}", rows.join(", "));
+        }
     }
 }
 
