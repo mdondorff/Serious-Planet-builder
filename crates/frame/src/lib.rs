@@ -30,6 +30,7 @@ pub mod reserve;
 pub mod residency;
 pub mod scalerefs;
 pub mod scenes;
+pub mod shadowview;
 pub mod terrain;
 pub mod terrain_text;
 pub mod upload;
