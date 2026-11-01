@@ -2,7 +2,7 @@ use crate::layering::CHAIN;
 use crate::testlog;
 use crate::util::{capture, files_with_ext, run, Res};
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 /// Test binaries named `gpu_*` are tier C, `oracle_*` tier B; everything else is tier A.
@@ -476,20 +476,21 @@ fn repro_pair(file: &str) -> (String, Option<String>) {
 pub fn repro(root: &Path, args: &[String]) -> Res {
     let mut it = args.iter();
     let mut file = None;
-    let (mut every, mut real, mut store) = (None, false, None);
+    let (mut every, mut real, mut store, mut at_commit) = (None, false, None, false);
     while let Some(a) = it.next() {
         match a.as_str() {
             "--real" => real = true,
+            "--at-commit" => at_commit = true,
             "--every" => every = Some(it.next().ok_or("--every needs a count")?.clone()),
             "--store" => store = Some(it.next().ok_or("--store needs a directory")?.clone()),
             other if other.starts_with("--") => {
-                return Err(format!("unknown repro option '{other}' (known: --real, --every N, --store DIR)"))
+                return Err(format!("unknown repro option '{other}' (known: --real, --every N, --store DIR, --at-commit)"))
             }
             other => file = Some(other.to_string()),
         }
     }
     let Some(file) = file else {
-        return Err("usage: cargo xtask repro <bundle | frame-N-path.txt> [--real] [--every N] [--store DIR]".into());
+        return Err("usage: cargo xtask repro <bundle | frame-N-path.txt> [--real] [--every N] [--store DIR] [--at-commit]".into());
     };
     let resolve = |name: &str| {
         std::fs::canonicalize(name)
@@ -497,8 +498,28 @@ pub fn repro(root: &Path, args: &[String]) -> Res {
             .map(|p| p.to_string_lossy().trim_start_matches("\\?\\").to_string())
     };
     let (bundle_name, path_name) = repro_pair(&file);
-    let bundle = resolve(&bundle_name).map_err(|e| format!("repro bundle '{bundle_name}' not found: {e}"))?;
+    let mut bundle = resolve(&bundle_name).map_err(|e| format!("repro bundle '{bundle_name}' not found: {e}"))?;
     let adapter = if real { "hardware" } else { "software" };
+    // `--at-commit` (TEST-071): the replay runs in a worktree of the commit the bundle was recorded at, building into its own target
+    // folder; the images still land in this tree's `target/review`.
+    let (run_root, env_target, review) = if at_commit {
+        let text = std::fs::read_to_string(&bundle).map_err(|e| format!("reading {bundle}: {e}"))?;
+        let commit = bundle_commit(&text, &bundle)?;
+        if commit.ends_with("+dirty") {
+            return Err(format!(
+                "{bundle} was recorded at commit {} with uncommitted changes in the tree, so that commit does not reproduce its build and --at-commit cannot replay it; check out that commit, re-apply the changes you made at the time, and replay there",
+                commit.trim_end_matches("+dirty")
+            ));
+        }
+        let tree = repro_worktree(root, &commit)?;
+        bundle = strip_commit_line(&text, &tree)?;
+        let target = root.join("target").join("repro-target").to_string_lossy().into_owned();
+        (tree, Some(target), root.join("target").join("review"))
+    } else {
+        (root.to_path_buf(), None, Path::new("target").join("review"))
+    };
+    let env: Vec<(&str, &str)> = env_target.iter().map(|t| ("CARGO_TARGET_DIR", t.as_str())).collect();
+    let replay_dir = review.join("replay").to_string_lossy().into_owned();
     if file.ends_with("-path.txt") {
         let path = resolve(&file).map_err(|e| format!("camera path '{file}' not found: {e}"))?;
         let mut cargo: Vec<String> = [
@@ -515,7 +536,7 @@ pub fn repro(root: &Path, args: &[String]) -> Res {
             "--replay-path",
             &path,
             "--out-dir",
-            "target/review/replay",
+            &replay_dir,
         ]
         .iter()
         .map(|s| s.to_string())
@@ -527,7 +548,7 @@ pub fn repro(root: &Path, args: &[String]) -> Res {
             cargo.extend(["--store".to_string(), dir.clone()]);
         }
         let refs: Vec<&str> = cargo.iter().map(String::as_str).collect();
-        return run(root, "cargo", &refs, &[]);
+        return run(&run_root, "cargo", &refs, &env);
     }
     if every.is_some() {
         return Err("--every applies to a camera path file (frame-N-path.txt)".into());
@@ -535,12 +556,70 @@ pub fn repro(root: &Path, args: &[String]) -> Res {
     if let Some(p) = path_name.filter(|p| resolve(p).is_ok()) {
         println!("a camera path lies beside this bundle: cargo xtask repro {p} replays it pose by pose");
     }
-    let out = "target/review/repro.png";
-    let mut cargo = vec!["run", "-q", "-p", "planet", "--", "test-render", "--adapter", adapter, "--repro", &bundle, "--out", out];
+    let out = review.join("repro.png").to_string_lossy().into_owned();
+    let mut cargo = vec!["run", "-q", "-p", "planet", "--", "test-render", "--adapter", adapter, "--repro", &bundle, "--out", &out];
     if let Some(dir) = &store {
         cargo.extend(["--store", dir]);
     }
-    run(root, "cargo", &cargo, &[])
+    run(&run_root, "cargo", &cargo, &env)
+}
+
+/// The commit a bundle records (`commit <sha>` in its head), or a refusal that says what to do about a bundle without one (TEST-071).
+fn bundle_commit(text: &str, bundle: &str) -> Res<String> {
+    let head = text.split("\n---\n").next().unwrap_or("");
+    head.lines()
+        .find_map(|l| l.strip_prefix("commit "))
+        .map(|c| c.trim().to_string())
+        .filter(|c| !c.is_empty() && c.trim_end_matches("+dirty").chars().all(|ch| ch.is_ascii_hexdigit()))
+        .ok_or_else(|| {
+            format!(
+                concat!(
+                    "{} records no commit (bundles made before 2026-11-01 do not), so --at-commit cannot find its build; read the ",
+                    "generator and mesh versions in its head (`generator_version`, `mesh_version`), find the commit that had them ",
+                    "(`git log -S\"MESH_VERSION: u32 = N\" -- crates/generators`), check it out and replay there; bundles made from now on record theirs",
+                ),
+                bundle
+            )
+        })
+}
+
+/// The bundle without its `commit` line, written beside the worktree: the old build that replays it need not know the line (TEST-071).
+fn strip_commit_line(text: &str, tree: &Path) -> Res<String> {
+    let (head, rest) = text
+        .split_once(
+            "
+---
+",
+        )
+        .unwrap_or((text, ""));
+    let head: Vec<&str> = head.lines().filter(|l| !l.starts_with("commit ")).collect();
+    let path = tree.with_extension("bundle");
+    std::fs::write(
+        &path,
+        format!(
+            "{}
+---
+{rest}",
+            head.join(
+                "
+"
+            )
+        ),
+    )
+    .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// The worktree of `commit` under `target/repro-worktree/`, made on first use and kept for the next replay of the same commit.
+fn repro_worktree(root: &Path, commit: &str) -> Res<PathBuf> {
+    let dir = root.join("target").join("repro-worktree").join(&commit[..commit.len().min(12)]);
+    if dir.join(".git").exists() {
+        return Ok(dir);
+    }
+    let path = dir.to_string_lossy().into_owned();
+    capture(root, "git", &["worktree", "add", "--detach", &path, commit])
+        .map_err(|e| format!("cannot check out commit {commit} for the replay ({e}); is it fetched? `git fetch origin` and retry"))?;
+    Ok(dir)
 }
 
 /// The `cargo` arguments of a perf run. The harness decides readiness itself (ADR 0020: AC power, performance scheme,
@@ -1961,6 +2040,81 @@ mod repro_tests {
     fn repro_needs_an_existing_bundle() {
         assert!(repro(Path::new("."), &[]).unwrap_err().contains("usage"));
         assert!(repro(Path::new("."), &["no-such-bundle.repro".to_string()]).unwrap_err().contains("not found"));
+    }
+
+    // spec: TEST-071
+    #[test]
+    fn at_commit_reads_the_recorded_commit_and_refuses_an_old_bundle_with_the_way_forward() {
+        let text = "planet-terrain-repro 2
+adapter x
+commit 0123abcdef
+seed 1
+---
+commit not-a-line-of-the-head
+";
+        assert_eq!(bundle_commit(text, "b").unwrap(), "0123abcdef");
+        let old = "planet-terrain-repro 2
+adapter x
+seed 1
+---
+commit 0123abcdef
+";
+        let e = bundle_commit(old, "old.bundle").unwrap_err();
+        assert!(e.contains("old.bundle records no commit") && e.contains("mesh_version") && e.contains("git log -S"), "{e}");
+        assert_eq!(
+            bundle_commit(
+                "planet-terrain-repro 2
+commit 0123ab+dirty
+---
+",
+                "b"
+            )
+            .unwrap(),
+            "0123ab+dirty"
+        );
+        let stripped = std::env::temp_dir().join("strip-commit-test");
+        std::fs::create_dir_all(&stripped).unwrap();
+        let p = strip_commit_line(
+            "planet-terrain-repro 2
+adapter x
+commit 0123ab
+seed 1
+---
+plan commit
+",
+            &stripped.join("w"),
+        )
+        .unwrap();
+        let got = std::fs::read_to_string(&p).unwrap();
+        assert_eq!(
+            got,
+            "planet-terrain-repro 2
+adapter x
+seed 1
+---
+plan commit
+"
+        );
+        let dirty = std::env::temp_dir().join("dirty-bundle-test.bundle");
+        std::fs::write(
+            &dirty,
+            "planet-terrain-repro 2
+commit 0123ab+dirty
+---
+",
+        )
+        .unwrap();
+        let e = repro(Path::new("."), &[dirty.to_string_lossy().into_owned(), "--at-commit".into()]).unwrap_err();
+        assert!(e.contains("uncommitted changes") && e.contains("0123ab"), "{e}");
+        let bad = bundle_commit(
+            "planet-terrain-repro 2
+commit zz
+---
+",
+            "b",
+        )
+        .unwrap_err();
+        assert!(bad.contains("records no commit"), "{bad}");
     }
 
     // spec: VIEW-026

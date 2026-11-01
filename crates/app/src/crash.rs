@@ -111,7 +111,7 @@ fn noun(survived: bool) -> &'static str {
 }
 
 /// The build commit: `git rev-parse HEAD` of the working directory, best effort.
-fn commit() -> String {
+pub(crate) fn commit() -> String {
     // Asked once per run: a flight over steep ground writes many reports, and each must not start a process.
     static COMMIT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     COMMIT
@@ -124,6 +124,26 @@ fn commit() -> String {
                 .map_or_else(|| "unknown".to_string(), |o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         })
         .clone()
+}
+
+/// The commit a bundle records (TEST-071): [`commit`], with `+dirty` when the working tree has uncommitted changes (the commit then does
+/// not reproduce the build), `None` when git cannot say.
+pub(crate) fn bundle_commit() -> Option<String> {
+    static ID: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    ID.get_or_init(|| {
+        let c = commit();
+        if c == "unknown" {
+            return None;
+        }
+        let dirty = std::process::Command::new("git")
+            .args(["status", "--porcelain", "--untracked-files=no"])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .is_some_and(|o| !o.stdout.iter().all(u8::is_ascii_whitespace));
+        Some(if dirty { format!("{c}+dirty") } else { c })
+    })
+    .clone()
 }
 
 pub struct Input<'a> {

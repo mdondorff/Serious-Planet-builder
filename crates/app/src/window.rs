@@ -439,6 +439,7 @@ impl App<'_> {
             mesh_version: planet_generators::mesh::MESH_VERSION,
             definition_hash: definition.hash(),
             adapter: st.ctx.adapter_key(),
+            commit: crate::crash::bundle_commit(),
             world: Some(planet_frame::BundleWorld {
                 height_field: self.world.id().to_string(),
                 global_res: self.world.global_res(),

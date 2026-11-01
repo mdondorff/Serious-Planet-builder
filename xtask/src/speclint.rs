@@ -97,7 +97,8 @@ pub fn parse_citations(text: &str) -> Vec<String> {
 }
 
 /// Trace IDs cited by `// spec:` comments that are attached to a `#[test]` function: the comment is followed only by
-/// more comments and attributes, one of which is `#[test]`, and then the `fn`.
+/// more comments and attributes, one of which is `#[test]`, and then the `fn`. A test marked `#[ignore]` is no evidence of any tier:
+/// no tier command runs it (a wall-clock check runs with `perf wallclock`, a real-store test by hand), so its citation counts for nothing.
 pub fn parse_test_citations(text: &str) -> Vec<String> {
     let lines: Vec<&str> = text.lines().collect();
     let mut ids = Vec::new();
@@ -105,7 +106,7 @@ pub fn parse_test_citations(text: &str) -> Vec<String> {
         let t = line.trim_start();
         let Some(c) = t.strip_prefix("//") else { continue };
         let Some(list) = c.trim_start_matches(['/', '!']).trim_start().strip_prefix("spec:") else { continue };
-        let (mut saw_test, mut attached, mut depth) = (false, false, 0i32);
+        let (mut saw_test, mut ignored, mut attached, mut depth) = (false, false, false, 0i32);
         for next in &lines[i + 1..] {
             let n = next.trim();
             if depth > 0 {
@@ -119,10 +120,11 @@ pub fn parse_test_citations(text: &str) -> Vec<String> {
             if n.starts_with("#[") {
                 let code = n.split("//").next().unwrap_or("").trim();
                 saw_test |= code == "#[test]";
+                ignored |= code == "#[ignore]" || ["#[ignore =", "#[ignore=", "#[ignore("].iter().any(|p| code.starts_with(p));
                 depth = bracket_balance(code);
                 continue;
             }
-            attached = saw_test && starts_fn_item(n);
+            attached = saw_test && !ignored && starts_fn_item(n);
             break;
         }
         if attached {
@@ -1089,14 +1091,41 @@ fn t() {}
             "// spec: COORD-003
 // more
 #[test]
-#[ignore]
+#[should_panic]
 fn t() {}
 "
         )
         .errors
         .is_empty());
-        // A citation above a helper, a constant, a module or a test-less fn covers nothing.
+        // A citation above a helper, a constant, a module, a test-less fn or an ignored test covers nothing (no tier command runs an
+        // ignored test).
         for loose in [
+            "// spec: COORD-003
+#[test]
+#[ignore]
+fn t() {}
+",
+            "// spec: COORD-003
+#[test]
+#[ignore = \"wall clock: cargo xtask perf wallclock\"]
+fn t() {}
+",
+            "// spec: COORD-003
+#[ignore]
+#[test]
+fn t() {}
+",
+            "// spec: COORD-003
+#[test]
+#[ignore=\"unspaced\"]
+fn t() {}
+",
+            "// spec: COORD-003
+#[test]
+#[ignore = \"a reason wrapped
+    over two lines\"]
+fn t() {}
+",
             "// spec: COORD-003
 fn helper() {}
 ",
