@@ -1057,8 +1057,8 @@ fn perf_stream_all(root: &Path, rest: &[String], settle: bool) -> Res {
 /// The `#[ignore]` reason of a wall-clock check: a test that times real work, which tier A does not (BUILD-003; it flaked on shared runners).
 pub const WALLCLOCK_IGNORE: &str = "wall clock: cargo xtask perf wallclock";
 
-/// The wall-clock checks `cargo xtask perf wallclock` runs, in release, on a quiet reference machine (no readiness gate: tolerance checks, not measurements): the package, the cargo target and the
-/// test's path in it. Each is an ignored test with [`WALLCLOCK_IGNORE`] (a tier-A test checks that every one exists).
+/// The wall-clock checks `cargo xtask perf wallclock` runs, in release, under the readiness gate (ADR 0020): the package, the cargo target
+/// and the test's path in it. Each is an ignored test with [`WALLCLOCK_IGNORE`] (a tier-A test checks that every one exists).
 pub const WALLCLOCK: [(&str, &str, &str); 3] = [
     ("planet-perf", "--lib", "reserve::tests::the_real_spin_takes_its_milliseconds_within_five_percent"),
     (
@@ -1074,9 +1074,39 @@ fn wallclock_args(package: &str, target: &str, test: &str) -> Vec<String> {
     ["test", "-p", package, "--release", target, test, "--", "--ignored", "--exact", "--nocapture"].map(String::from).to_vec()
 }
 
-/// `perf wallclock`: every check of [`WALLCLOCK`], each in its own `cargo test`; a failing one does not stop the others.
-fn perf_wallclock(root: &Path) -> Res {
+/// The readiness gate's refusals for the wall-clock checks: every condition of ADR 0020 except the reference adapter, which CPU-only checks
+/// do not use (xtask has no GPU adapter to name). Empty means the machine is ready.
+fn wallclock_refusals(facts: &planet_perf::gate::MachineFacts) -> Vec<String> {
+    planet_perf::gate::readiness(facts).into_iter().filter(|f| f.condition != "reference adapter").map(|f| f.to_string()).collect()
+}
+
+/// `perf wallclock [--machine-ready]`: the checks of [`WALLCLOCK`] under the readiness gate. They are built first (a build beside the gate
+/// is a busy machine), then the gate measures the machine; a refusal is no verdict (`INCOMPLETE:`, exit code 3), never a failure, unless
+/// `--machine-ready` (the owner's override) runs them anyway. Each runs in its own `cargo test`; a failing one does not stop the others.
+fn perf_wallclock(root: &Path, args: &[String]) -> Res {
+    let machine_ready = match args {
+        [] => false,
+        [a] if a == "--machine-ready" => true,
+        _ => {
+            return Err(format!(
+                "unknown perf wallclock option(s) {args:?} (known: --machine-ready, the owner's override of a failed gate)"
+            ))
+        }
+    };
     println!("wallclock: {} checks, the ignored tests marked `{WALLCLOCK_IGNORE}`", WALLCLOCK.len());
+    for (package, target, _) in WALLCLOCK {
+        run(root, "cargo", &["test", "-p", package, "--release", target, "--no-run"], &[])?;
+    }
+    let adapter =
+        planet_perf::AdapterFacts { name: "none (CPU checks)".into(), backend: "none".into(), kind: planet_perf::DeviceKind::Cpu };
+    let refusals = wallclock_refusals(&planet_perf::gate::measure_machine(adapter));
+    if !refusals.is_empty() {
+        let text = format!("the readiness gate refused (ADR 0020): {}", refusals.join("; "));
+        if !machine_ready {
+            return Err(format!("{} perf wallclock NOT RUN: {text}", crate::util::INCOMPLETE));
+        }
+        println!("wallclock: --machine-ready, the owner's override: {text}");
+    }
     let mut failed = Vec::new();
     for (package, target, test) in WALLCLOCK {
         let args = wallclock_args(package, target, test);
@@ -1096,7 +1126,7 @@ fn perf_wallclock(root: &Path) -> Res {
 
 pub fn perf(root: &Path, args: &[String]) -> Res {
     if args.first().map(String::as_str) == Some("wallclock") {
-        return perf_wallclock(root);
+        return perf_wallclock(root, &args[1..]);
     }
     if args.first().map(String::as_str) == Some("--ab") {
         return crate::perfab::run(root, args);
@@ -1611,6 +1641,41 @@ mod tests {
         for m in modules {
             assert!(files.iter().any(|f| f == m), "{m} is not a test file (a module of a per-tier binary)");
         }
+    }
+
+    // spec: BUILD-003
+    #[test]
+    fn the_wall_clock_checks_run_on_a_ready_machine_without_a_gpu_adapter_and_a_busy_one_is_refused() {
+        use planet_perf::gate::{MachineFacts, ProcInfo};
+        let ready = MachineFacts {
+            adapter: planet_perf::AdapterFacts {
+                name: "none (CPU checks)".into(),
+                backend: "none".into(),
+                kind: planet_perf::DeviceKind::Cpu,
+            },
+            ac_power: Some(true),
+            power_scheme: Some("Power Scheme GUID: 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c  (High performance)".into()),
+            processes: Some(vec![ProcInfo { pid: 10, ppid: 1, created: 10, name: "explorer.exe".into() }]),
+            own_pid: 20,
+            cpu_load_pct: Some(3.0),
+            gpu_util_pct: Some(1.0),
+            gpu_temp_c: Some(45.0),
+            cpu_perf_pct: Some(90.0),
+        };
+        // The CPU checks use no adapter: its condition is the only one that does not apply.
+        assert!(!planet_perf::gate::readiness(&ready).is_empty(), "the full gate refuses a machine without the discrete GPU");
+        assert_eq!(wallclock_refusals(&ready), Vec::<String>::new());
+        let busy = MachineFacts {
+            processes: Some(vec![ProcInfo { pid: 30, ppid: 1, created: 30, name: "cargo.exe".into() }]),
+            cpu_load_pct: Some(40.0),
+            ..ready.clone()
+        };
+        let r = wallclock_refusals(&busy);
+        assert!(r.len() == 2 && r[0].contains("cargo.exe") && r[1].starts_with("CPU load"), "{r:?}");
+        assert!(wallclock_refusals(&MachineFacts { ac_power: Some(false), ..ready }).iter().any(|f| f.contains("battery")));
+        // Options are checked before anything runs.
+        let e = perf_wallclock(std::path::Path::new("."), &["--fast".to_string()]).unwrap_err();
+        assert!(e.contains("--machine-ready"), "{e}");
     }
 
     // spec: BUILD-003
