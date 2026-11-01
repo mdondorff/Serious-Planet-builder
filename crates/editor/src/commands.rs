@@ -7,7 +7,7 @@
 
 use crate::ids::IdMaker;
 use crate::polyline::{self, GeoPoint, PolylineError};
-use crate::store_watch::{LoadTimer, StoreWatch, WallTimer, ITEM_LIMIT};
+use crate::store_watch::{LoadTimer, StoreWatch, WallTimer};
 use planet_core::Vec3;
 use planet_world_def::item::{ActiveVersions, Anchor, Item, ItemFileError, ItemStroke, PutError};
 use planet_world_def::item_store::{ItemStore, StoreError};
@@ -307,18 +307,11 @@ impl<S: ItemStore> Editor<S> {
         self.items.values().filter(|i| i.body == body).count()
     }
 
-    /// The count half of the revisit trigger (AUTH-006), after an item was added: looked at only when the editor holds enough items for a
-    /// body to be over the limit, so an ordinary session pays one comparison.
-    fn check_counts(&mut self) {
-        if self.items.len() <= ITEM_LIMIT && !self.watch.any_over() {
-            return;
-        }
-        let bodies: std::collections::BTreeSet<BodyId> = self.items.values().map(|i| i.body).collect();
-        for body in bodies {
-            let count = self.items_of(body);
-            if let Some(w) = self.watch.record_count(body, count) {
-                self.watch.issue(&w);
-            }
+    /// An item of `body` was added (`+1`) or removed (`-1`): the live count of the revisit trigger (AUTH-006), one map update, and the warning
+    /// when the body has just crossed the limit.
+    fn count_changed(&mut self, body: BodyId, delta: isize) {
+        if let Some(w) = self.watch.adjust(body, delta) {
+            self.watch.issue(&w);
         }
     }
 
@@ -353,7 +346,10 @@ impl<S: ItemStore> Editor<S> {
     pub fn load_report(&mut self, body: BodyId) -> Result<LoadReport, EditError> {
         self.no_open_edit()?;
         self.timer.begin();
-        let items = self.store.load_all(body)?;
+        let read = self.store.load_all(body);
+        // The time of the store's read alone (ADR 0066 point 6): re-keying older items and writing them back is not the backend's cost.
+        let elapsed = self.timer.end();
+        let items = read?;
         let versions = ActiveVersions {
             generator_version: self.generator_version,
             stage_version: self.stage_version,
@@ -390,7 +386,6 @@ impl<S: ItemStore> Editor<S> {
             self.note_changed(item.id);
             self.items.insert(item.id, item.canonical());
         }
-        let elapsed = self.timer.end();
         let count = self.items_of(body);
         for w in self.watch.record_load(body, count, elapsed) {
             self.watch.issue(&w);
@@ -429,6 +424,10 @@ impl<S: ItemStore> Editor<S> {
         for item in &from_store {
             self.note_changed(item.id);
             self.items.insert(item.id, item.clone().canonical());
+        }
+        let count = self.items_of(body);
+        if let Some(w) = self.watch.record_count(body, count) {
+            self.watch.issue(&w);
         }
         self.undo.clear();
         self.redo.clear();
@@ -1128,15 +1127,17 @@ impl<S: ItemStore> Editor<S> {
                     return Err(e.into());
                 }
                 self.note_changed(id);
-                self.items.insert(id, after.clone());
-                self.check_counts();
+                if self.items.insert(id, after.clone()).is_none() {
+                    self.count_changed(after.body, 1);
+                }
             }
             (None, Some(item)) => {
                 self.store.delete(item.body, id)?;
                 self.def.remove_item(item.body, id);
                 self.note_changed(id);
-                self.items.remove(&id);
-                self.check_counts();
+                if self.items.remove(&id).is_some() {
+                    self.count_changed(item.body, -1);
+                }
             }
             (None, None) => {}
         }

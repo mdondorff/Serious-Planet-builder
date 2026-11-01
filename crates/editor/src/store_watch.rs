@@ -66,7 +66,7 @@ pub struct StoreWatch {
 }
 
 impl StoreWatch {
-    /// The warning of a count over the limit, or `None`.
+    /// The warning of a count over the limit.
     fn count_warning(body: BodyId, count: usize) -> String {
         format!(
             "item store: body {} holds {count} items, over the {ITEM_LIMIT} of the revisit trigger (ADR 0066 point 6: revisit the backend)",
@@ -85,13 +85,19 @@ impl StoreWatch {
         }
     }
 
+    /// An item of `body` was added (`delta` 1) or removed (-1): the count follows, and the warning comes when the body has just crossed the limit.
+    pub fn adjust(&mut self, body: BodyId, delta: isize) -> Option<String> {
+        let count = self.counts.get(&body).copied().unwrap_or(0).saturating_add_signed(delta);
+        self.record_count(body, count)
+    }
+
     /// A load of `body` that found `count` items took `elapsed`: the warnings it earned, the count one first.
     pub fn record_load(&mut self, body: BodyId, count: usize, elapsed: Duration) -> Vec<String> {
         let mut out: Vec<String> = self.record_count(body, count).into_iter().collect();
         self.last_load = Some((body, elapsed));
         if elapsed > LOAD_LIMIT {
             out.push(format!(
-                "item store: loading body {} took {} ms, over the {} ms of the revisit trigger (ADR 0066 point 6: revisit the backend)",
+                "item store: reading body {} took {} ms on this machine, over the {} ms of the revisit trigger; only loads on Rasierklinge decide (ADR 0066 point 6: revisit the backend)",
                 body.0,
                 elapsed.as_millis(),
                 LOAD_LIMIT.as_millis()
@@ -176,6 +182,20 @@ mod tests {
         let both = w.record_load(BodyId(1), 20_001, Duration::from_secs(3));
         assert_eq!(both.len(), 2, "the count and the time are two warnings: {both:?}");
         assert!(both[0].contains("20001") && both[1].contains("3000 ms"));
+    }
+
+    // spec: AUTH-006
+    #[test]
+    fn the_count_follows_additions_and_removals_and_never_goes_below_zero() {
+        let mut w = StoreWatch::default();
+        for _ in 0..3 {
+            assert_eq!(w.adjust(B, 1), None);
+        }
+        assert_eq!(w.max_items(), 3);
+        assert_eq!(w.adjust(B, -1), None);
+        assert_eq!(w.max_items(), 2);
+        assert_eq!(w.adjust(BodyId(1), -1), None, "a removal from an unknown body stays at zero");
+        assert_eq!(w.summary(), "store: 2 items (limit 20000), no load yet");
     }
 
     // spec: AUTH-006

@@ -99,6 +99,21 @@ fn adding_the_20_001st_item_warns_once_and_removing_it_clears_the_mark() {
 
 // spec: AUTH-006
 #[test]
+fn the_count_in_the_diagnostics_follows_the_edits_below_the_limit() {
+    let mut e = loaded(store_of(100), Duration::from_millis(5));
+    assert_eq!(e.store_watch().max_items(), 100);
+    let (id, _) = e.put(hill(1_000)).unwrap();
+    e.put(hill(1_001)).unwrap();
+    assert_eq!(e.store_watch().max_items(), 102);
+    e.delete(id).unwrap();
+    assert_eq!(e.store_watch().max_items(), 101);
+    e.undo().unwrap();
+    assert_eq!(e.store_watch().max_items(), 102);
+    assert!(e.store_watch().summary().starts_with("store: 102 items (limit 20000), last load 5 ms"));
+}
+
+// spec: AUTH-006
+#[test]
 fn a_slow_load_warns_with_the_time_and_a_load_at_the_limit_does_not() {
     let at_limit = loaded(store_of(5), LOAD_LIMIT);
     assert!(at_limit.store_watch().issued().is_empty());
