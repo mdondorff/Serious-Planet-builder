@@ -1,5 +1,5 @@
 # 0090 Shadow march: order-independent atomics and a drop coefficient
-Status: proposed (opus-planner, 2026-11-01; amends ADR 0085 points 3 and 9; the owner decides)
+Status: accepted (owner, 2026-11-01; drafted by opus-planner; amends ADR 0085 points 3 and 9)
 Date: 2026-11-01
 Source: shadow-clipmap-march PR 2a (#1014) and PR 3 (REND-049, REND-053); crusader's departure report, 2026-11-01; spec-guardian and numerics-reviewer on PR 3; CON-11, CON-14
 
