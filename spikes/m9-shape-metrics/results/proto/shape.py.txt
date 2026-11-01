@@ -1,0 +1,127 @@
+"""SPIKE-91: shape metrics of a global elevation map (0.25 degree equirectangular), for today's generator and SPIKE-80's combined model.
+Usage: python shape.py <map13.f32> <s80-fields.f32> <out.json>
+Metrics (land = elevation > 0, all latitudes; high ground = elevation >= 2,000 m; areas on the sphere):
+ 1 land fraction; 2 continents: areas of connected land regions, the count of regions >= 1 Mkm2, the largest's share of land;
+ 3 coastline box-counting dimension over 2-32 cells (about 28-900 km at the equator; cells weighted by nothing: a coarse estimate);
+ 4 high-ground regions (>= 2 km): per region the length of its skeleton (km), its mean width (2 x mean distance to the edge on the skeleton,
+   km), and its sinuosity (skeleton length / the largest distance between two of its cells); 5 the regions' count and the share of high
+   ground in regions longer than 1,000 km."""
+import ctypes, json, sys
+import numpy as np
+from scipy import ndimage
+from skimage.morphology import skeletonize
+
+try:  # idle priority: a perf window runs beside this
+    ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x40)
+except Exception:
+    pass
+
+R = 6371.0
+a = np.fromfile(sys.argv[1], dtype='<f4').reshape(360, 720, 13).astype(np.float64)
+H, W = 720, 1440
+lat = 90 - (np.arange(H) + 0.5) * 0.25
+fy = np.clip((90 - lat) / 0.5 - 0.5, 0, 359)
+lon = -180 + (np.arange(W) + 0.5) * 0.25
+fx = (lon + 180) / 0.5 - 0.5
+y0 = np.minimum(np.floor(fy).astype(int), 358); ty = (fy - y0)[:, None]
+x0 = np.floor(fx).astype(int) % 720; x1 = (x0 + 1) % 720; tx = (fx - np.floor(fx))[None, :]
+def up(ch):
+    c = np.nan_to_num(a[..., ch])
+    return (c[y0][:, x0] * (1 - tx) + c[y0][:, x1] * tx) * (1 - ty) + (c[y0 + 1][:, x0] * (1 - tx) + c[y0 + 1][:, x1] * tx) * ty
+e_today = up(7)
+f = np.fromfile(sys.argv[2], dtype='<f4').reshape(H, W, 3).astype(np.float64)
+e_comb = e_today + f[..., 0]
+cos = np.cos(np.radians(lat))[:, None] * np.ones((1, W))
+cell_km2 = (R * np.radians(0.25)) ** 2 * cos
+dy_km = R * np.radians(0.25)
+
+def wrap_label(mask):
+    lab, n = ndimage.label(mask, structure=np.ones((3, 3)))
+    # join regions across the 180 degree seam
+    parent = list(range(n + 1))
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]; i = parent[i]
+        return i
+    for y in range(H):
+        for yy in (y - 1, y, y + 1):
+            if 0 <= yy < H and lab[y, 0] and lab[yy, W - 1]:
+                ra, rb = find(lab[y, 0]), find(lab[yy, W - 1])
+                if ra != rb:
+                    parent[ra] = rb
+    roots = np.array([find(i) for i in range(n + 1)])
+    return roots[lab]
+
+def coast_dimension(land):
+    coast = land & ~ndimage.binary_erosion(land, structure=np.ones((3, 3)))
+    sizes, counts = [], []
+    for s in (2, 4, 8, 16, 32):
+        hh, ww = H // s * s, W // s * s
+        b = coast[:hh, :ww].reshape(hh // s, s, ww // s, s).any(axis=(1, 3))
+        sizes.append(s); counts.append(b.sum())
+    slope = -np.polyfit(np.log(sizes), np.log(counts), 1)[0]
+    return float(slope), dict(zip(sizes, map(int, counts)))
+
+def regions(e, thr, min_cells=4):
+    lab = wrap_label(e >= thr)
+    out = []
+    for r in np.unique(lab):
+        if r == 0:
+            continue
+        m = lab == r
+        if m.sum() < min_cells:
+            continue
+        ys, xs = np.nonzero(m)
+        y0_, y1_ = ys.min(), ys.max() + 1
+        # unwrap a region that crosses the seam
+        if xs.min() == 0 and xs.max() == W - 1:
+            m = np.roll(m, W // 2, axis=1); ys, xs = np.nonzero(m)
+        x0_, x1_ = xs.min(), xs.max() + 1
+        sub = np.pad(m[y0_:y1_, x0_:x1_], 1)
+        latc = np.radians(lat[y0_:y1_].mean())
+        dx_km = dy_km * max(np.cos(latc), 0.1)
+        dist = ndimage.distance_transform_edt(sub, sampling=(dy_km, dx_km))
+        sk = skeletonize(sub)
+        sy, sx = np.nonzero(sk)
+        # skeleton length: skeleton pixels x the mean cell step (a coarse estimate, within about 20 % for diagonal runs)
+        step = 0.5 * (dy_km + dx_km)
+        length = max(len(sy), 1) * step
+        width = 2 * float(dist[sk].mean()) if sk.any() else 0.0
+        pts = np.stack([(sy) * dy_km, (sx) * dx_km], -1)
+        if len(pts) > 400:
+            pts = pts[np.linspace(0, len(pts) - 1, 400).astype(int)]
+        span = float(np.max(np.linalg.norm(pts[:, None] - pts[None], axis=-1))) if len(pts) > 1 else step
+        area = float(cell_km2[lab == r].sum())
+        out.append(dict(area_km2=area, length_km=length, width_km=width, sinuosity=length / max(span, step)))
+    return out
+
+def summary(e, name):
+    land = e > 0
+    land_area = float(cell_km2[land].sum())
+    lab = wrap_label(land)
+    areas = sorted((float(cell_km2[lab == r].sum()) for r in np.unique(lab) if r), reverse=True)
+    D, counts = coast_dimension(land)
+    hg = regions(e, 2000.0)
+    hg_area = sum(r['area_km2'] for r in hg) or 1
+    long_share = sum(r['area_km2'] for r in hg if r['length_km'] >= 1000) / hg_area
+    w = np.array([r['width_km'] for r in hg]); L = np.array([r['length_km'] for r in hg]); S = np.array([r['sinuosity'] for r in hg])
+    aw = np.array([r['area_km2'] for r in hg])
+    res = dict(
+        land_fraction=land_area / float(cell_km2.sum()),
+        continents_ge_1Mkm2=sum(1 for x in areas if x >= 1e6),
+        largest_share_of_land=areas[0] / land_area,
+        top5_Mkm2=[round(x / 1e6, 2) for x in areas[:5]],
+        coast_box_dimension=D, coast_box_counts=counts,
+        high_regions=len(hg),
+        high_width_km_areaweighted_median=float(np.median(np.repeat(w, np.maximum((aw / 1e4).astype(int), 1)))) if len(w) else None,
+        high_width_km_p10_p90=[float(np.percentile(w, 10)), float(np.percentile(w, 90))] if len(w) else None,
+        high_length_km_largest5=sorted([round(x) for x in L], reverse=True)[:5],
+        high_share_in_regions_over_1000km=long_share,
+        high_sinuosity_areaweighted_mean=float((S * aw).sum() / aw.sum()) if len(S) else None,
+        high_ground_share_of_land=float(cell_km2[e >= 2000].sum()) / land_area,
+    )
+    print(name, json.dumps(res), flush=True)
+    return res
+
+out = {'today': summary(e_today, 'today'), 'combined': summary(e_comb, 'combined')}
+json.dump(out, open(sys.argv[3], 'w'), indent=1)

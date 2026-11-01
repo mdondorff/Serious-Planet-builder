@@ -25,7 +25,7 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0013 | [Render graph and GPU-driven baseline](0013-render-graph-and-gpu-driven-baseline.md) | accepted |  |
 | 0014 | [Terrain LOD algorithm](0014-terrain-lod-algorithm.md) | accepted |  |
 | 0015 | [Window surface and UI painting live in render](0015-window-surface-and-ui-painting-in-render.md) | accepted |  |
-| 0016 | [Height-aware terrain selection and morph](0016-height-aware-terrain-selection.md) | accepted |  |
+| 0016 | [Height-aware terrain selection and morph](0016-height-aware-terrain-selection.md) | accepted; amended or extended by 0088/0089 (2026-11-01) |  |
 | 0017 | [Golden review policy and agent blessing](0017-golden-review-policy.md) | accepted | cross-adapter agreement amended by 0061 |
 | 0018 | [Persistent cache keys: 128 bits from BLAKE3 over a canonical encoding](0018-persistent-cache-keys.md) | accepted |  |
 | 0019 | [Tile storage: an append-only pack with a rebuildable index, Hilbert-ordered](0019-tile-storage-pack-format.md) | accepted |  |
@@ -35,11 +35,11 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0023 | [Clarifications to the persistent key encoding (ADR 0018)](0023-persistent-key-clarifications.md) | accepted |  |
 | 0024 | [Clarifications to the tile pack format (ADR 0019)](0024-tile-pack-clarifications.md) | accepted |  |
 | 0025 | [Tile payload codec, node set id and what cache-verify finds](0025-tile-codec-and-cache-verify.md) | accepted |  |
-| 0026 | [Global-coarse field representation and bake layout](0026-global-coarse-representation.md) | accepted |  |
+| 0026 | [Global-coarse field representation and bake layout](0026-global-coarse-representation.md) | accepted; amended or extended by 0088/0089 (2026-11-01) |  |
 | 0027 | [Reading the global-coarse bake, and the canonical block layout](0027-reading-the-global-bake.md) | superseded by 0055 (content in specs) |  |
-| 0028 | [The terrain field: a pure function of the direction over the global bake](0028-terrain-field-from-the-global-bake.md) | accepted |  |
+| 0028 | [The terrain field: a pure function of the direction over the global bake](0028-terrain-field-from-the-global-bake.md) | accepted; amended or extended by 0088/0089 (2026-11-01) |  |
 | 0029 | [Compaction and the size cap: write then delete, an injectable eviction rank](0029-compaction-and-the-size-cap.md) | accepted |  |
-| 0030 | [Erosion strategy: local filter in M3, a coarse global stream-power stage after it](0030-erosion-strategy-hybrid.md) | accepted |  |
+| 0030 | [Erosion strategy: local filter in M3, a coarse global stream-power stage after it](0030-erosion-strategy-hybrid.md) | accepted; amended or extended by 0088/0089 (2026-11-01) |  |
 | 0031 | [Residency set and request priorities](0031-residency-set-and-request-priorities.md) | accepted |  |
 | 0032 | [Streaming test definitions: dive, teleport, mouse look](0032-streaming-test-definitions.md) | accepted |  |
 | 0033 | [Memory budgets and terrain's VRAM share](0033-memory-budgets-and-terrain-vram-share.md) | accepted | point 3 amended by 0054; points 3-5 by 0062 and 0063; point 9 by 0064 |
@@ -75,7 +75,7 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0063 | [Slot v2 without the 5x5 reserve: 9,168 B](0063-slot-v2-size-correction.md) | accepted | corrects 0062 point 4; for the owner at the M5 gate |
 | 0064 | [The render floor's roots load outside the per-frame upload cap](0064-floor-roots-exempt-from-the-upload-cap.md) | accepted | amends 0033 point 9 |
 | 0065 | [CPU calibration decides whether a perf scene counts](0065-cpu-calibration-validity.md) | accepted | extends 0020 and 0036 |
-| 0066 | [Authored items: reach, region summaries, stages, selection bounds, item files, command log](0066-authored-items-reach-summaries-stages-and-files.md) | accepted | decides 0021 points 2, 5, 6, 8; amends 0007, 0018, 0023 |
+| 0066 | [Authored items: reach, region summaries, stages, selection bounds, item files, command log](0066-authored-items-reach-summaries-stages-and-files.md) | accepted; amended or extended by 0088/0089 (2026-11-01) | decides 0021 points 2, 5, 6, 8; amends 0007, 0018, 0023 |
 | 0067 | [Stamp key hash and height bounds by delta range](0067-stamp-key-hash-and-delta-range-bounds.md) | accepted | amends 0066 points 2, 5 and the key role of 6 |
 | 0068 | [An authored stage with an empty footprint passes its source key through](0068-empty-authored-stage-passes-the-key-through.md) | accepted | amends 0066 point 4 |
 | 0069 | [Lines and regions are point-list items; a long line splits into linked items](0069-lines-and-regions-are-point-list-items.md) | accepted | extends 0066 point 6 and 0067; mode 1 dormant until Cities (soft influence, owner Q8) |
@@ -89,14 +89,15 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0077 | [Regional stages run per chunk of a fixed grid; the global coupled run fixes the river network](0077-regional-stages-per-chunk-and-a-global-river-network.md) | accepted (owner) | CON-08 amended to name chunks (constitution v1.6); extends 0022 and 0030; built in M8 |
 | 0078 | [Maintenance of accepted ADRs: links, spec-owned values, domain terms, errata](0078-maintenance-of-accepted-adrs.md) | accepted (owner) | amends CON-23 (constitution v1.5); spec-lint check queued |
 | 0079 | [The constitution's size cap follows the owner's amendments](0079-constitution-cap-follows-owner-amendments.md) | accepted (owner) | amends 0075 point 1 for the constitution |
-| 0080 | [Hill-scale relief: a band in the bake, landform-keyed creases, and a stationary uplift for the coupled run](0080-hill-relief-in-the-bake-landform-creases-and-a-stationary-uplift.md) | accepted | amends 0030 point 1; reorders 0076 point 6; SPIKE-45 (owner, 2026-10-27) |
+| 0080 | [Hill-scale relief: a band in the bake, landform-keyed creases, and a stationary uplift for the coupled run](0080-hill-relief-in-the-bake-landform-creases-and-a-stationary-uplift.md) | accepted; amended or extended by 0088/0089 (2026-11-01) | amends 0030 point 1; reorders 0076 point 6; SPIKE-45 (owner, 2026-10-27) |
 | 0081 | [Local main-stem routing inside a chunk](0081-local-main-stem-routing-inside-a-chunk.md) | accepted | departs from 0077 point 3 (refines it: topology and border crossings stay global) |
 | 0082 | [The coarse node slides, not the border crossing](0082-the-coarse-node-slides-not-the-border-crossing.md) | accepted | amends 0081 point 1 |
 | 0083 | [Runtime compute budgets](0083-runtime-compute-budgets.md) | accepted | new; numbers in a spec |
 | 0084 | [A coarse valley carve in the base](0084-coarse-valley-carve-in-the-base.md) | not pursued | SPIKE-49 negative; M9's bake decides valley carving |
-| 0085 | [Shadows from a height clipmap march, objects by cascades](0085-shadows-from-a-height-clipmap-march-objects-by-cascades.md) | accepted; points 3, 9 amended by 0090 (proposed) | replaces the horizon-map shadows (GEN-044/045, REND-038); SPIKE-56 |
+| 0085 | [Shadows from a height clipmap march, objects by cascades](0085-shadows-from-a-height-clipmap-march-objects-by-cascades.md) | accepted; points 3, 9 amended by 0090 | replaces the horizon-map shadows (GEN-044/045, REND-038); SPIKE-56 |
 | 0086 | [Chunk stage removed](0086-chunk-stage-removed.md) | accepted (owner) | supersedes 0077 (except the global coupled run), 0081, 0082 and 0084 points 3 and 4 |
 | 0087 | [Perf verdicts under load, windows only for close calls](0087-perf-verdicts-under-load-windows-only-for-close-calls.md) | accepted (opus-planner, delegated) | amends 0020 in part; built (perf-loaded-mode, BUILD-030 to 033); open: the 0065 limits for quiet sessions; SPIKE-58 |
-| 0088 | [The M9 terrain bake](0088-the-m9-terrain-bake.md) | proposed | baked relief driver (from the classes, ADR 0089) and ring mean; the erosion layer in two passes (a carve per face on a coarse grid, then per tile an incise-only local carve, thermal and deposition) with a min/max pyramid; SPIKE-61 to 83; the owner decides |
-| 0089 | [Relief classes drive the terrain's amplitude](0089-relief-classes-drive-the-terrains-amplitude.md) | proposed | class weights per lattice point as the interface; rule-based default (plate belts, plateaus) now, physical derivation later (option C); amplitude and hill band per class; class paint as an item; SPIKE-65 to 83; the owner decides |
-| 0090 | [Shadow march: order-independent atomics and a drop coefficient](0090-shadow-march-order-independent-atomics-and-a-drop-coefficient.md) | proposed | amends ADR 0085 points 3 and 9: the gather's integer atomicMax owner pass; the drop as an f32 coefficient 1/(2R) beyond the clipmap; the owner decides |
+| 0088 | [The M9 terrain bake](0088-the-m9-terrain-bake.md) | accepted | baked relief driver (from the classes, ADR 0089) and ring mean; the erosion layer in two passes (a carve per face on a coarse grid, then per tile an incise-only local carve, thermal and deposition) with a min/max pyramid; the bake waits for the owner's approval of the engine preview; SPIKE-61 to 83 |
+| 0089 | [Relief classes drive the terrain's amplitude](0089-relief-classes-drive-the-terrains-amplitude.md) | accepted | class weights per lattice point as the interface; rule-based default (plate belts, plateaus) now, physical derivation later (option C); amplitude and hill band per class; class paint as an item; drivers, not dictated types; hard constraints after generation; SPIKE-65 to 83 |
+| 0090 | [Shadow march: order-independent atomics and a drop coefficient](0090-shadow-march-order-independent-atomics-and-a-drop-coefficient.md) | accepted | amends ADR 0085 points 3 and 9: the gather's integer atomicMax owner pass; the drop as an f32 coefficient 1/(2R) beyond the clipmap |
+| 0091 | [The heightfield is judged up to 45 degrees; steeper faces are a separate technology](0091-the-heightfield-is-judged-up-to-45-degrees.md) | accepted | criterion 1's slope counts cells at or below 45°; cliffs and overhangs by a separate technology (own ADR); SPIKE-85 |

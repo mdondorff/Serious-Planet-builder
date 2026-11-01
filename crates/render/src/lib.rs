@@ -22,6 +22,7 @@ pub mod reference;
 pub(crate) mod refs;
 pub mod resolve;
 pub mod shadow;
+pub mod shadow_path;
 pub mod terrain;
 pub mod ui;
 pub mod water;

@@ -96,6 +96,8 @@ mod scheduler_incremental;
 mod scheduler_rotation;
 #[path = "shading.rs"]
 mod shading;
+#[path = "shadowview.rs"]
+mod shadowview;
 #[path = "stamp_cache.rs"]
 mod stamp_cache;
 #[path = "stamp_steep.rs"]

@@ -1,0 +1,19 @@
+import ctypes, sys, json, numpy as np
+from scipy import ndimage
+try: ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x40)
+except Exception: pass
+sys.argv=['x','../s69/map13.f32','s80-fields.f32','/dev/null']
+exec(open('shape.py',encoding='utf-8').read().split("out = {'today'")[0])
+res={}
+for name,e in (('today',e_today),('combined',e_comb)):
+    m=e>=2000
+    # roll so no ring is cut by the seam where the land is: fill holes on the map rolled by half too, take the larger fill
+    best=0
+    for sh in (0,W//2,W//4):
+        mm=np.roll(m,sh,1); filled=ndimage.binary_fill_holes(mm)
+        holes=filled&~mm; lab,n=ndimage.label(holes)
+        big=[float(np.roll(cell_km2,sh,1)[lab==i].sum()) for i in range(1,n+1)]
+        best=max(best,sum(x for x in big if x>=0.5e6))
+    res[name]={'enclosed_by_high_ground_Mkm2':round(best/1e6,2)}
+print(json.dumps(res))
+json.dump(res,open('holes.json','w'))
