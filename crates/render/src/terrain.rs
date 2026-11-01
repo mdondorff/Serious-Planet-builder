@@ -1099,6 +1099,11 @@ pub struct TerrainRenderer {
     ring: Vec<FrameSet>,
     /// The horizon shadows' textures (REND-038), dummies until [`set_horizon`](TerrainRenderer::set_horizon) gives a capacity.
     horizon: crate::horizon::HorizonGpu,
+    /// The shadow pass (REND-050), once enabled, and the frame's data for it (set by the app, as the horizon data was).
+    shadow: Option<crate::shadow_path::ShadowPath>,
+    shadow_frame: Option<crate::shadow_path::ShadowFrame>,
+    /// Tiles the shadow pass found not resident in its last frame.
+    shadow_unresident: Vec<planet_core::TileId>,
     /// The frame's horizon table (REND-041), written beside the node records; `None`: every node has slot -1.
     horizon_frame: Option<planet_frame::horizonview::HorizonFrame>,
     node_capacity: usize,
@@ -1282,6 +1287,43 @@ impl TerrainRenderer {
         self.horizon_frame = None;
     }
 
+    /// Build the shadow pass (REND-050): the clipmap of `texels` per level edge and `levels` levels, the coarse cube and the resolve targets,
+    /// for a body of radius `radius_m`. Lit frames with a shadow frame set then run it after the terrain pass.
+    pub fn enable_shadow(&mut self, ctx: &GpuContext, texels: u32, levels: usize, radius_m: f64) {
+        self.shadow = Some(crate::shadow_path::ShadowPath::new(ctx, texels, levels, self.cells, radius_m));
+    }
+
+    /// Give the next frame's shadow pass its data (the plan, the preview, the camera and the sun). The frame is used once: a lit frame
+    /// drawn without a new one runs no shadow pass.
+    pub fn set_shadow_frame(&mut self, frame: crate::shadow_path::ShadowFrame) {
+        self.shadow_frame = Some(frame);
+    }
+
+    /// End the shadow pass: lit frames draw as before.
+    pub fn clear_shadow_frame(&mut self) {
+        self.shadow_frame = None;
+    }
+
+    /// The tiles the shadow pass found not resident in its last frame (the gather's blocks and the cube's floor tiles).
+    pub fn shadow_unresident(&self) -> &[planet_core::TileId] {
+        &self.shadow_unresident
+    }
+
+    /// How many frames the shadow pass has run (tests).
+    pub fn shadow_frames_run(&self) -> u32 {
+        self.shadow.as_ref().map_or(0, |s| s.frames_run())
+    }
+
+    /// How many half-resolution marches of the last shadow frame crossed a clipmap cell that changed this frame or the last (tests).
+    pub fn shadow_changed_pixels(&self, ctx: &GpuContext) -> Option<usize> {
+        self.shadow.as_ref().map(|s| s.changed_pixels(ctx))
+    }
+
+    /// The resolved shadow visibility of the last frame that ran the shadow pass, `width * height` values in [0, 1].
+    pub fn read_shadow(&self, ctx: &GpuContext) -> Option<Vec<f32>> {
+        self.shadow.as_ref().map(|s| s.read_visibility(ctx))
+    }
+
     /// Bytes the horizon array holds (0 before a capacity is set).
     pub fn horizon_bytes(&self) -> u64 {
         self.horizon.bytes()
@@ -1419,6 +1461,9 @@ impl TerrainRenderer {
             ring,
             horizon,
             horizon_frame: None,
+            shadow: None,
+            shadow_frame: None,
+            shadow_unresident: Vec::new(),
             node_capacity,
             draw_mode: ctx.default_draw_mode(),
             indices,
@@ -2339,6 +2384,8 @@ impl TerrainRenderer {
         }
         // A frame draws the water pass only when some node carries water.
         let water_frame = plan.lit.is_some() && plan.water.as_ref().is_some_and(|w| !w.nodes.is_empty());
+        // The shadow pass reads the lit pass's depth after it: the depth is kept.
+        let shadow_frame = plan.lit.is_some() && self.shadow.is_some() && self.shadow_frame.is_some();
         self.frame += 1;
         let device = &ctx.device;
         if plan.nodes.len() > self.node_capacity {
@@ -2475,7 +2522,7 @@ impl TerrainRenderer {
                     // The composite and the water pass read the depth, so an atmosphere or water frame keeps it.
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(0.0),
-                        store: if atmosphere_frame || water_frame { wgpu::StoreOp::Store } else { wgpu::StoreOp::Discard },
+                        store: if atmosphere_frame || water_frame || shadow_frame { wgpu::StoreOp::Store } else { wgpu::StoreOp::Discard },
                     }),
                     stencil_ops: None,
                 }),
@@ -2636,6 +2683,15 @@ impl TerrainRenderer {
         }
         let command_buffer = encoder.finish();
         let index = ctx.queue.submit([command_buffer]);
+        if shadow_frame {
+            // Queue order puts the shadow passes after the terrain pass that wrote the depth; the path is taken out so it can read the renderer.
+            let mut path = self.shadow.take().expect("shadow enabled");
+            let frame = self.shadow_frame.take().expect("shadow frame set");
+            self.shadow_unresident = path.run(ctx, self, &frame, &self.depth_view, self.size);
+            // The frame carries this frame's deltas (dirty rectangles, floor tiles, a cut): it is spent, the app sets the next.
+            drop(frame);
+            self.shadow = Some(path);
+        }
         let retired = std::sync::Arc::clone(&self.retired);
         ctx.queue.on_submitted_work_done(move || {
             retired.fetch_add(1, std::sync::atomic::Ordering::SeqCst);

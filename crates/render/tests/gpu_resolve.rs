@@ -382,3 +382,93 @@ fn the_sky_does_not_widen_the_history_clamp_below_the_horizon() {
         assert!(v < 0.02, "the row under the sky at column {x} must be dark, got {v}");
     }
 }
+
+// spec: REND-052
+/// A standalone cost probe of the resolve passes (receivers, march, fill, upsample, temporal) at 1440p over a flat synthetic clipmap, as the
+/// median of waited frames. Not a verdict: REND-052 is judged on the frame harness with GPU timestamps; this is a quick number for the
+/// passes alone (`cargo test -p planet-render --test gpu_all resolve_cost -- --ignored --nocapture`, on the discrete GPU with
+/// `PLANET_ADAPTER=hardware`).
+#[test]
+#[ignore = "a timing probe, run by hand"]
+fn resolve_cost_probe_at_1440p() {
+    let s = scene();
+    set_wall(&s, Some(-96));
+    let (w, h) = (2560u32, 1440u32);
+    let target = DepthTarget::new(&s.ctx, w, h);
+    target.write(&s.ctx, &vec![1.0 / CAMERA_HEIGHT; (w * h) as usize]);
+    let mut r = ShadowResolveGpu::new(&s.ctx, &s.clip);
+    for sun in [45.0f32, 2.0] {
+        let mut times = Vec::new();
+        for frame in 1..=24u32 {
+            let params = ResolveParams {
+                camera: camera(CAMERA_X),
+                previous: camera(CAMERA_X),
+                history_weight: 0.8,
+                cut: frame == 1,
+                frame,
+                spread: spread_for_sun(libm::sinf(sun.to_radians())),
+            };
+            let t = std::time::Instant::now();
+            r.resolve(&s.ctx, &s.march, &s.clip, &s.cube, &march_params(sun), &target, &params);
+            s.ctx.wait_idle();
+            if frame > 3 {
+                times.push(t.elapsed().as_secs_f64() * 1000.0);
+            }
+        }
+        times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        eprintln!(
+            "resolve at 1440p, sun {sun} deg: median {:.2} ms, min {:.2} ms, max {:.2} ms (waited frames)",
+            times[times.len() / 2],
+            times[0],
+            times[times.len() - 1]
+        );
+    }
+}
+
+// spec: REND-050
+#[test]
+fn receivers_far_from_the_anchor_land_in_the_clipmaps_azimuthal_frame() {
+    // A real planet radius, on the CPU side of the test only: the shader gets the coefficient 1 / (2 R).
+    const PLANET_R: f64 = 6_371_000.0;
+    let s = scene();
+    let c = (0.5 / PLANET_R) as f32;
+    // The camera 30 km up looking at the horizon: a pixel at a depth of 400 km sees a Euclidean point far from the anchor.
+    let cam = ResolveCamera {
+        position: [0.0, 0.0, 30_000.0],
+        forward: [0.0, 1.0, 0.0],
+        right: [1.0, 0.0, 0.0],
+        up: [0.0, 0.0, 1.0],
+        tan_half_fov: [0.5, 0.5],
+        near_m: 1.0,
+    };
+    let z_view = 400_000.0f32;
+    let mut mp = march_params(10.0);
+    mp.drop_coefficient = c;
+    let depth = depth_target(&s, &vec![1.0 / z_view; (W * H) as usize]);
+    let mut r = ShadowResolveGpu::new(&s.ctx, &s.clip);
+    let rp = ResolveParams { camera: cam, previous: cam, history_weight: 0.8, cut: true, frame: 1, spread: false };
+    r.resolve(&s.ctx, &s.march, &s.clip, &s.cube, &mp, &depth, &rp);
+    let receivers = r.read_receivers(&s.ctx);
+    for (hx, hy) in [(0u32, 0u32), (16, 9), (31, 17), (5, 12)] {
+        let got = receivers[(hy * (W / 2) + hx) as usize];
+        // The Euclidean point the depth puts at the quad's first pixel, then the exact plane position and height - drop in f64.
+        let (px, py) = ((2 * hx) as f64 + 0.5, (2 * hy) as f64 + 0.5);
+        let (nx, ny) = (px / f64::from(W) * 2.0 - 1.0, 1.0 - py / f64::from(H) * 2.0);
+        let (ex, ey, ez) = (nx * 0.5 * f64::from(z_view), f64::from(z_view), 30_000.0 + ny * 0.5 * f64::from(z_view));
+        let rho_e = libm::hypot(ex, ey);
+        let theta = libm::atan2(rho_e, ez + PLANET_R);
+        let plane = PLANET_R * theta;
+        let height = libm::hypot(rho_e, ez + PLANET_R) - PLANET_R;
+        let drop = 2.0 * PLANET_R * libm::sin(0.5 * theta) * libm::sin(0.5 * theta);
+        let want = [ex * plane / rho_e, ey * plane / rho_e, height - drop];
+        for k in 0..3 {
+            assert!(
+                (f64::from(got[k]) - want[k]).abs() < 2.0e-6 * want[k].abs().max(1.0e3),
+                "half pixel ({hx}, {hy}), axis {k}: {} against {} (the chord differs from the arc by {:.0} m)",
+                got[k],
+                want[k],
+                (plane - rho_e).abs()
+            );
+        }
+    }
+}
