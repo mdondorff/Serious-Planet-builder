@@ -1,0 +1,22 @@
+"""SPIKE-86: sum the sweep outputs per group (file-name prefix): poses, refused and poses with a capped leaf, by altitude band and class."""
+import collections, glob, os, re, sys
+groups = collections.defaultdict(lambda: collections.defaultdict(lambda: [0, 0, 0, 0]))  # key -> [poses, refused, capped poses, capped leaves]
+lv = collections.defaultdict(collections.Counter)
+for f in sorted(glob.glob(os.path.join(sys.argv[1], '*.txt'))):
+    g = re.sub(r'_\d+\.txt$', '', os.path.basename(f))
+    for line in open(f):
+        m = re.match(r'altitude\s+(\d+) to\s+(\d+) m:\s+(\d+) poses,\s+(\d+) refused', line)
+        if m: k = 'alt %s-%s' % (m.group(1), m.group(2)); groups[g][k][0] += int(m.group(3)); groups[g][k][1] += int(m.group(4))
+        m = re.match(r'class\s+(\w+):\s+(\d+) poses,\s+(\d+) refused', line)
+        if m: k = 'class ' + m.group(1); groups[g][k][0] += int(m.group(2)); groups[g][k][1] += int(m.group(3))
+        m = re.match(r'capped: altitude\s+(\d+) to\s+(\d+) m:\s+(\d+) poses with a capped leaf,\s+(\d+)', line)
+        if m: k = 'alt %s-%s' % (m.group(1), m.group(2)); groups[g][k][2] += int(m.group(3)); groups[g][k][3] += int(m.group(4))
+        m = re.match(r'capped: class\s+(\w+):\s+(\d+) poses with a capped leaf,\s+(\d+)', line)
+        if m: k = 'class ' + m.group(1); groups[g][k][2] += int(m.group(2)); groups[g][k][3] += int(m.group(3))
+        m = re.match(r'capped leaves by level: \{(.*)\}', line)
+        if m and m.group(1): 
+            for a, b in re.findall(r'(\d+): (\d+)', m.group(1)): lv[g][int(a)] += int(b)
+for g, d in groups.items():
+    print('==', g, 'capped leaves by level', dict(lv[g]))
+    for k, (p, r, cp, cl) in d.items():
+        if p: print('  %-22s poses %5d  refused %3d  with capped leaf %4d (%.1f %%)  capped leaves %d' % (k, p, r, cp, 100 * cp / p, cl))
