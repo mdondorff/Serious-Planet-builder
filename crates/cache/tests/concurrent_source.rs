@@ -8,7 +8,7 @@ include!("support/concurrent_source.rs");
 fn tiles_over_the_store_are_identical_at_1_and_3_threads_and_to_the_in_memory_bake() {
     // The small variant (tier A): one thread against three, on four tiles of every face (levels 0 to 2 and a fine edge tile, so a face
     // edge and block borders still occur); 1, 4 and 20 threads on all tiles is `oracle_concurrent_source.rs` (tier B).
-    let (d, w) = stored("tiles");
+    let (d, w) = stored();
     let store = TileStore::open(d.path(), w.params()).unwrap();
     let grid = bake(7, &TangentWarp, RES, 2).unwrap();
     let def = WorldDefinition::single_planet(R, 7);
@@ -56,7 +56,7 @@ fn tiles_over_the_store_are_identical_at_1_and_3_threads_and_to_the_in_memory_ba
 // spec: STRM-014
 #[test]
 fn threads_that_want_one_block_share_one_decode() {
-    let (d, w) = stored("one-decode");
+    let (d, w) = stored();
     let store = TileStore::open(d.path(), w.params()).unwrap();
     let grid = bake(7, &TangentWarp, RES, 2).unwrap();
     let src = StoreSource::with_budget(&store, &w, RES, BLOCKS * BLOCK_BYTES).unwrap();
@@ -74,7 +74,7 @@ fn threads_that_want_one_block_share_one_decode() {
 // spec: STRM-014
 #[test]
 fn resident_bytes_never_exceed_the_budget_and_reads_stay_exact() {
-    let (d, w) = stored("budget");
+    let (d, w) = stored();
     let store = TileStore::open(d.path(), w.params()).unwrap();
     let grid = bake(7, &TangentWarp, RES, 2).unwrap();
     for budget_blocks in [0u64, 1, 5, 40] {
@@ -240,7 +240,7 @@ fn twenty_threads_take_the_shared_lock_only_on_a_change_of_block_and_decode_each
 // spec: GEN-020
 #[test]
 fn a_tile_decodes_each_block_it_touches_once_even_with_a_cache_of_one_block() {
-    let (d, w) = stored("block-order");
+    let (d, w) = stored();
     let store = TileStore::open(d.path(), w.params()).unwrap();
     let def = WorldDefinition::single_planet(R, 7);
     let key = w.stage_key(RES).0;
@@ -271,7 +271,7 @@ fn a_threaded_batch_over_the_store_decodes_each_block_once_whatever_the_budget_a
     use planet_core::hash::SplitMix64;
     use planet_core::Vec3;
     use planet_generators::height::HeightField;
-    let (d, w) = stored("threaded-batch");
+    let (d, w) = stored();
     let store = TileStore::open(d.path(), w.params()).unwrap();
     let def = WorldDefinition::single_planet(R, 7);
     let key = w.stage_key(RES).0;
@@ -309,7 +309,7 @@ fn a_threaded_batch_over_the_store_decodes_each_block_once_whatever_the_budget_a
 // spec: STRM-022
 #[test]
 fn the_source_counts_its_cache_behaviour_exactly_and_the_reads_stay_the_stored_bits() {
-    let (d, w) = stored("counters");
+    let (d, w) = stored();
     let store = TileStore::open(d.path(), w.params()).unwrap();
     let grid = bake(7, &TangentWarp, RES, 2).unwrap();
     // One thread, a budget of five blocks: every miss decodes and inserts one block, so the evictions are the decodes beyond the
@@ -347,7 +347,7 @@ fn the_source_counts_its_cache_behaviour_exactly_and_the_reads_stay_the_stored_b
 // spec: STRM-022
 #[test]
 fn the_pack_counts_its_lookups_and_the_ones_that_found_a_record() {
-    let (d, w) = stored("pack-counts");
+    let (d, w) = stored();
     let store = TileStore::open(d.path(), w.params()).unwrap();
     assert_eq!(store.read_stats(), planet_cache::pack::StoreReadStats::default());
     let src = StoreSource::with_budget(&store, &w, RES, BLOCKS * BLOCK_BYTES).unwrap();

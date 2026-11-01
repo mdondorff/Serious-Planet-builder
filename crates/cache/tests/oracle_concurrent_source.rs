@@ -7,7 +7,7 @@ include!("support/concurrent_source.rs");
 // spec: STRM-014
 #[test]
 fn tiles_over_the_store_are_identical_at_1_4_and_20_threads_and_to_the_in_memory_bake() {
-    let (d, w) = stored("tiles");
+    let (d, w) = stored();
     let store = TileStore::open(d.path(), w.params()).unwrap();
     let grid = bake(7, &TangentWarp, RES, 2).unwrap();
     let def = WorldDefinition::single_planet(R, 7);
@@ -59,7 +59,7 @@ fn a_threaded_batch_over_the_store_decodes_each_block_once_whatever_the_budget_a
     use planet_core::hash::SplitMix64;
     use planet_core::Vec3;
     use planet_generators::height::HeightField;
-    let (d, w) = stored("threaded-batch");
+    let (d, w) = stored();
     let store = TileStore::open(d.path(), w.params()).unwrap();
     let def = WorldDefinition::single_planet(R, 7);
     let key = w.stage_key(RES).0;
