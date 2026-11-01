@@ -22,6 +22,7 @@ mod plancheck;
 pub mod prefill;
 pub mod preflightperf;
 pub mod reproworld;
+pub mod reserveload;
 pub mod sheet;
 pub mod skeleton;
 pub mod stall;
