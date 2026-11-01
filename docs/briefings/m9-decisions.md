@@ -9,7 +9,7 @@ With decisions 1, 2 and 5 together (class map and plateau rule, plate-margin bel
 - the plains, Loess, Erg Chebbi (authored sand-sea class) and Himalaya improve on today. Three hill landforms pass criterion 1, but only with the hill band kept and keyed to the class; the Alps fail at one site (0.47) and the Badlands get worse;
 - the evidence is a stand-in (the new elevation added to today's stored field), not a re-bake; decision 4's re-bake is the real test.
 
-## 1. ADR 0088, the M9 terrain bake (proposed; a data format)
+## 1. ADR 0088, the M9 terrain bake (accepted by the owner 2026-11-01; the bake waits for the owner's approval of the engine preview)
 - **Evidence:**
   - the two-pass bake has clean seams at four sites ([SPIKE-70](../../spikes/m9-global-routing/results/results.md), [SPIKE-72](../../spikes/m9-highlands-seam/results/results.md), [SPIKE-74](../../spikes/m9-expected/results/results.md));
   - it takes about 6-7.5 h for the planet ([SPIKE-71](../../spikes/m9-bake-time/results/results.md));

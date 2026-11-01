@@ -5,7 +5,7 @@ The scorecard run (TEST-079) over a store with the erosion layer (STRM-065) and 
 
 Verify: A, B
 Status: planned
-Source: M9 draft (`docs/briefings/m9-draft.md`) decision 6, criterion 1's bound; ADR 0088, ADR 0089, pending the owner's acceptance of ADR 0088/0089; SPIKE-80, SPIKE-81 (the stand-in: the hill landforms pass with the class hill band, the Alps at 0.71-0.72); the 45° ceiling: ADR 0091, SPIKE-85
+Source: M9 draft (`docs/briefings/m9-draft.md`) decision 6, criterion 1's bound; ADR 0088, ADR 0089, ADR 0088/0089 accepted 2026-11-01; SPIKE-80, SPIKE-81 (the stand-in: the hill landforms pass with the class hill band, the Alps at 0.71-0.72); the 45° ceiling: ADR 0091, SPIKE-85
 
 #### Scenario: Pass and fail named (A)
 - **WHEN** the check reads a site whose slope ratio is 0.65 and 1 km relief ratio 0.55
@@ -30,7 +30,7 @@ A tier-B check SHALL evaluate seed 1's default source (GEN-094 to GEN-097) and r
 
 Verify: B
 Status: planned
-Source: ADR 0089 decisions 3, 5 and 7, pending the owner's acceptance of ADR 0088/0089; SPIKE-69, SPIKE-78, SPIKE-79, SPIKE-80
+Source: ADR 0089 decisions 3, 5 and 7, ADR 0088/0089 accepted 2026-11-01; SPIKE-69, SPIKE-78, SPIKE-79, SPIKE-80
 
 #### Scenario: Seed 1 within its bands
 - **WHEN** the check runs on seed 1
@@ -45,7 +45,7 @@ The report SHALL give, per pose, the nodes, the capped tiles and the deepest lev
 
 Verify: B
 Status: planned
-Source: ADR 0088 point 8, ADR 0089, pending the owner's acceptance of ADR 0088/0089; SPIKE-82 (level 13-15 and 28-85 capped tiles without the pyramid), SPIKE-83 (no capped tile, 5-8 % more nodes with it); M9 criterion 6 (no degradation)
+Source: ADR 0088 point 8, ADR 0089, ADR 0088/0089 accepted 2026-11-01; SPIKE-82 (level 13-15 and 28-85 capped tiles without the pyramid), SPIKE-83 (no capped tile, 5-8 % more nodes with it); M9 criterion 6 (no degradation)
 
 #### Scenario: High-mountain pose
 - **WHEN** the plan is made at the high-mountain pose at 200 m
@@ -59,7 +59,7 @@ The report SHALL give both p99 and the maximum per site. The p99 comparison is a
 
 Verify: B
 Status: planned
-Source: ADR 0088 point 4, pending the owner's acceptance of ADR 0088/0089; SPIKE-68 (a per-tile carve leaves p99 134-172 m), SPIKE-70, SPIKE-72 (the two passes are seam-free at four of four sites once the local carve only incises)
+Source: ADR 0088 point 4, ADR 0088/0089 accepted 2026-11-01; SPIKE-68 (a per-tile carve leaves p99 134-172 m), SPIKE-70, SPIKE-72 (the two passes are seam-free at four of four sites once the local carve only incises)
 
 #### Scenario: Four sites
 - **WHEN** the check runs at the four bake sites

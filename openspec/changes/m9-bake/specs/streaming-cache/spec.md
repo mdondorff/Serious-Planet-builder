@@ -8,7 +8,7 @@ The store SHALL be keyed by the bake's stage key, the versions of the class-weig
 
 Verify: A
 Status: planned
-Source: ADR 0088 points 4 and 7, M9 draft decision 7 (owner: a separate layer first), pending the owner's acceptance of ADR 0088/0089; SPIKE-61 (tile changes about 7-10 GB)
+Source: ADR 0088 points 4 and 7, M9 draft decision 7 (owner: a separate layer first), ADR 0088/0089 accepted 2026-11-01; SPIKE-61 (tile changes about 7-10 GB)
 
 #### Scenario: Resume and refusal
 - **WHEN** a layer bake is killed after some tiles and resumed, and its layer is later opened against a bake with another key
@@ -23,7 +23,7 @@ Each value SHALL be a `u16` over `[-H, H]` with `H` the body field's `max_abs_he
 
 Verify: A
 Status: planned
-Source: ADR 0088 point 8, pending the owner's acceptance of ADR 0088/0089; SPIKE-83 (32 x 32 blocks; about 90 MB for the planet, built in seconds)
+Source: ADR 0088 point 8, ADR 0088/0089 accepted 2026-11-01; SPIKE-83 (32 x 32 blocks; about 90 MB for the planet, built in seconds)
 
 #### Scenario: Rounded outward and nested
 - **WHEN** a tile's pyramid is built and read back
@@ -34,7 +34,7 @@ The class-weights lattice (GEN-093, its geometry and its `u8` weights) SHALL be 
 
 Verify: A
 Status: planned
-Source: ADR 0089 decisions 1 and 8, ADR 0080 point 3 (its "not stored" ends with ADR 0089's acceptance), pending the owner's acceptance of ADR 0088/0089
+Source: ADR 0089 decisions 1 and 8, ADR 0080 point 3 (its "not stored" ends with ADR 0089's acceptance), ADR 0088/0089 accepted 2026-11-01
 
 #### Scenario: Old and new stores
 - **WHEN** `global16384` (without the channel) and a new store with the channel are opened
@@ -45,7 +45,7 @@ The relief channels of GEN-099 (`k` and `m`, f32 on the coupled lattice, min and
 
 Verify: A
 Status: planned
-Source: ADR 0088 point 1, pending the owner's acceptance of ADR 0088/0089; SPIKE-66, m9-bake design
+Source: ADR 0088 point 1, ADR 0088/0089 accepted 2026-11-01; SPIKE-66, m9-bake design
 
 #### Scenario: Block ranges and size
 - **WHEN** the channels of a synthetic bake are stored and read back, and their size for a planet is computed from the lattice sizes
