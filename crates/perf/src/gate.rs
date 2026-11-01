@@ -217,7 +217,8 @@ pub fn readiness_mode(f: &MachineFacts, mode: Mode) -> Gate {
         Some(v) if v < MAX_GPU_TEMP_C => {}
         v => fail("GPU temperature", format!("{} C (limit {MAX_GPU_TEMP_C} C)", pct(v))),
     }
-    let load = (!quiet).then(|| LoadRecord { cpu_pct: f.cpu_load_pct, gpu_util_pct: f.gpu_util_pct, gpu_temp_c: f.gpu_temp_c, processes });
+    let load =
+        (!quiet).then_some(LoadRecord { cpu_pct: f.cpu_load_pct, gpu_util_pct: f.gpu_util_pct, gpu_temp_c: f.gpu_temp_c, processes });
     Gate { failures: out, load }
 }
 
