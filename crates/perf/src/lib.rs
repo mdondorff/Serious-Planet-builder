@@ -394,6 +394,21 @@ pub fn report_json_with_warmups(
     report_json_full(adapter, power_scheme, owner_override, validity, protocol, runs, warmups, &[])
 }
 
+/// `loaded` or `quiet`: the mode of a session (BUILD-032).
+fn mode_name(validity: &gate::Validity) -> &'static str {
+    if validity.load.is_some() {
+        "loaded"
+    } else {
+        "quiet"
+    }
+}
+
+/// The leading keys of a log: the mode and, in loaded mode, the load the gate recorded (each ends in a comma).
+fn mode_json(validity: &gate::Validity) -> String {
+    let load = validity.load.as_ref().map_or(String::new(), |l| format!("\"load_record\":{},", l.json()));
+    format!("\"mode\":{},{load}", json_str(mode_name(validity)))
+}
+
 /// [`report_json_with_warmups`] plus the host load of each view or scene (`load` in the run's object, `load_notes` at the top;
 /// TEST-023): `loads` are keyed by the run's path name, a run without an entry carries none. Recorded only: nothing here changes a
 /// validity answer.
@@ -421,7 +436,8 @@ pub fn report_json_full(
         .map(|r| {
             let gv = gpu_valid_json(&view_gpu_validity(runs, &r.path_name));
             format!(
-                "{{\"path\":{},\"vram_cap_gb\":{},\"samples\":{},\"median_ms\":{},\"p99_ms\":{},\"min_ms\":{},\"max_ms\":{},\"mean_ms\":{},\"clocks_before\":{},\"clocks_after\":{},\"gpu_valid\":{},\"gpu_clock_state\":{},\"power_cap\":{},\"metrics\":{{{}}},\"counts\":{{{}}}{}}}",
+                "{{\"mode\":{},\"path\":{},\"vram_cap_gb\":{},\"samples\":{},\"median_ms\":{},\"p99_ms\":{},\"min_ms\":{},\"max_ms\":{},\"mean_ms\":{},\"clocks_before\":{},\"clocks_after\":{},\"gpu_valid\":{},\"gpu_clock_state\":{},\"power_cap\":{},\"metrics\":{{{}}},\"counts\":{{{}}}{}}}",
+                json_str(mode_name(validity)),
                 json_str(&r.path_name),
                 r.vram_cap_gb,
                 r.stats.samples,
@@ -442,7 +458,8 @@ pub fn report_json_full(
         })
         .collect();
     format!(
-        "{{\"adapter\":{{\"name\":{},\"backend\":{}}},\"power_scheme\":{},\"owner_override\":[{}],\"valid_for_budgets\":{},\"frame_valid\":{},\"gpu_session_valid\":{},\"gpu_only_causes\":[{}],\"cpu_calibration_valid\":{},\"cpu_calibration_reasons\":[{}],\"warnings\":[{}],\"load_notes\":[{}],\"warmups\":[{}],\"protocol\":{{\"warmup_frames\":{},\"measured_frames\":{},\"runs\":{},\"vram_caps_gb\":{:?},\"internal_resolution\":[{},{}],\"field\":{},\"source\":{},\"gen\":{}}},\"runs\":[{}]}}\n",
+        "{{{}\"adapter\":{{\"name\":{},\"backend\":{}}},\"power_scheme\":{},\"owner_override\":[{}],\"valid_for_budgets\":{},\"frame_valid\":{},\"gpu_session_valid\":{},\"gpu_only_causes\":[{}],\"cpu_calibration_valid\":{},\"cpu_calibration_reasons\":[{}],\"warnings\":[{}],\"load_notes\":[{}],\"warmups\":[{}],\"protocol\":{{\"warmup_frames\":{},\"measured_frames\":{},\"runs\":{},\"vram_caps_gb\":{:?},\"internal_resolution\":[{},{}],\"field\":{},\"source\":{},\"gen\":{}}},\"runs\":[{}]}}\n",
+        mode_json(validity),
         json_str(&adapter.name),
         json_str(&adapter.backend),
         power_scheme.map_or("null".to_string(), json_str),

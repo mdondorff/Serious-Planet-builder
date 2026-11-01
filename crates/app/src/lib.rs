@@ -84,6 +84,7 @@ modes:
     --perf                   performance-harness skeleton (needs --adapter hardware; the readiness gate decides, ADR 0020)
     --calibrate              measure the CPU calibration in a smoke run too (TEST-039; a measured run always does): proves the logging on any adapter, the log is still no measurement
     --machine-ready          owner override of a failed readiness gate (ADR 0020); recorded in the log
+    --loaded                 loaded mode (ADR 0087, BUILD-030): the load of the machine is recorded, not refused; the hard conditions still refuse
     --smoke                  start and exit";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -113,6 +114,8 @@ pub struct Options {
     pub gen_priority: Option<planet_streaming::Priority>,
     pub perf: bool,
     pub machine_ready: bool,
+    /// Loaded mode (BUILD-030): the readiness gate records the load of the machine instead of refusing on it.
+    pub loaded: bool,
     pub view: String,
     pub tiles: Vec<String>,
     pub seed: u64,
@@ -305,6 +308,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         gen_reserve: None,
         perf: false,
         machine_ready: false,
+        loaded: false,
         view: "face".into(),
         tiles: vec![],
         seed: 1,
@@ -524,6 +528,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--manifest" => o.manifest = Some(PathBuf::from(it.next().ok_or("--manifest needs a path")?)),
             "--face-net" => o.face_net = Some(PathBuf::from(it.next().ok_or("--face-net needs a path")?)),
             "--machine-ready" => o.machine_ready = true,
+            "--loaded" => o.loaded = true,
             "--scene" => o.scene = it.next().ok_or("--scene needs a value")?.clone(),
             "--out" => o.out = Some(PathBuf::from(it.next().ok_or("--out needs a value")?)),
             "--upload" => {
@@ -565,6 +570,9 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             }
             other => return Err(format!("unknown option '{other}'\n{USAGE}")),
         }
+    }
+    if o.loaded && o.machine_ready {
+        return Err("--loaded and --machine-ready exclude each other: loaded mode records the load, the owner's override ignores a failed gate (BUILD-030)".into());
     }
     Ok(o)
 }
@@ -765,7 +773,14 @@ pub(crate) fn err(e: std::io::Error) -> String {
 /// The adapter itself is checked by the caller before this (it is never overridable and costs no sampling time).
 pub(crate) fn readiness_gate(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<Vec<String>, String> {
     writeln!(out, "readiness gate: sampling the machine for {} s ...", planet_perf::gate::LOAD_WINDOW_S).map_err(err)?;
-    let failures = planet_perf::gate::readiness(&planet_perf::gate::measure_machine(facts(ctx)));
+    let mode = if o.loaded { planet_perf::gate::Mode::Loaded } else { planet_perf::gate::Mode::Quiet };
+    let gate = planet_perf::gate::readiness_mode(&planet_perf::gate::measure_machine(facts(ctx)), mode);
+    // Loaded mode: the load is recorded with the session and printed; the hard conditions below still refuse.
+    if let Some(load) = &gate.load {
+        writeln!(out, "readiness gate (loaded mode, load recorded not judged): {}", load.text()).map_err(err)?;
+    }
+    planet_perf::gate::record_load(gate.load.clone());
+    let failures = gate.failures;
     if failures.is_empty() {
         writeln!(out, "readiness gate: ok").map_err(err)?;
         return Ok(Vec::new());
@@ -1744,6 +1759,16 @@ mod tests {
         assert!(run_str(&["test-render", "--out-dir", p]).unwrap_err().contains("--out-dir only applies to --flight"));
         assert!(run_str(&["test-render", "--size", "12x12"]).unwrap_err().contains("--size must be WxH"));
         assert!(!d.exists(), "no rejected run may create the output directory");
+    }
+
+    // spec: BUILD-030
+    #[test]
+    fn loaded_mode_is_an_option_and_excludes_the_owners_override() {
+        let args = |a: &[&str]| parse_args(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        assert!(args(&["test-render", "--perf", "--loaded"]).unwrap().loaded);
+        assert!(!args(&["test-render", "--perf"]).unwrap().loaded);
+        let e = args(&["test-render", "--perf", "--loaded", "--machine-ready"]).unwrap_err();
+        assert!(e.contains("--loaded and --machine-ready exclude each other"), "{e}");
     }
 
     // spec: GEN-003
