@@ -1,0 +1,1 @@
+- 2026-11-01 **perf-one-off-mode** (BUILD-032): the one-off perf logs (global-bake, coupled, coupled-make, envelope, edit-latency) record their mode and load record, those with a time budget their loaded verdicts, and the lit rows judge their GPU passes; `perf-one-off-mode` archived

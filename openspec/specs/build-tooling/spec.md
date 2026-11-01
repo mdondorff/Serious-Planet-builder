@@ -557,15 +557,23 @@ Source: ADR 0087 points 1 to 5
 - **THEN** the first needs 70 % or less to be a loaded pass, and the second needs a quiet window
 
 ### Requirement: BUILD-032 The report states loaded or quiet
-Every row of a perf report SHALL state `loaded` or `quiet` and carry the load readings (CPU load, competing load, the top processes, GPU utilisation, CPU performance %, calibration), and a loaded row SHALL carry its verdict of BUILD-031.
+Every row of a perf report, and every perf log (the one-off logs `global-bake`, `coupled`, `coupled-make`, `envelope` and `edit-latency` included), SHALL state `loaded` or `quiet`; a loaded one SHALL carry the load readings (CPU load, competing load, the top processes, GPU utilisation, CPU performance %, calibration). A loaded row with a time reading and a budget (the streaming and terrain rows, the lit passes, the bake and coupled times, the gated edit rows) SHALL carry its verdict of BUILD-031.
 
 Verify: A
 Status: active
-Source: ADR 0087 points 1 and 2
+Source: ADR 0087 points 1 and 2, planner (2026-11-01, perf-one-off-mode)
 
 #### Scenario: Rows
 - **WHEN** a loaded and a quiet session are reported
 - **THEN** each row names its mode and readings, and the loaded rows their verdicts
+
+#### Scenario: One-off logs
+- **WHEN** a one-off log is written in a quiet and in a loaded session
+- **THEN** both open with their mode, the loaded one also with its load record, and a log with a time budget closes with its verdicts in the loaded case only
+
+#### Scenario: Lit rows
+- **WHEN** a loaded session reports a `lit/` row
+- **THEN** its GPU passes and its frame p99 carry the verdicts of BUILD-031 against their budgets
 
 ### Requirement: BUILD-033 The A/B helper
 `cargo xtask perf --ab <ref> <perf command>` SHALL run the command in the working tree and in a worktree of `<ref>` in alternating order for N rounds (default 5), SHALL retry a gate refusal up to a cap and report how often and why, SHALL keep every run's log, and SHALL print one table: per metric both medians, the change in %, the verdict against the 5 % margin and the rule that judges the metric under load (the metric table of the design: tile-ready and frame p99 by default). It SHALL not write the store or the main tree's `perf/logs`.
