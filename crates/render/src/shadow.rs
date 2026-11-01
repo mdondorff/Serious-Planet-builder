@@ -630,7 +630,7 @@ fn read_texture_layer(ctx: &GpuContext, texture: &wgpu::Texture, texels: u32, la
     let mut encoder = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("clipmap-readback") });
     encoder.copy_texture_to_buffer(
         wgpu::TexelCopyTextureInfo {
-            texture: texture,
+            texture,
             mip_level: mip,
             origin: wgpu::Origin3d { x: 0, y: 0, z: layer as u32 },
             aspect: wgpu::TextureAspect::All,
