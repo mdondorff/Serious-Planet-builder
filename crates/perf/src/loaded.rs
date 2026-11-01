@@ -240,6 +240,12 @@ mod tests {
         assert_eq!(v[0].judged.note, Some(GPU_LOAD_NOTE));
         let v = row_verdicts(&report("terrain/orbit", &[("gpu_ms", 9.0)], 6.0, 25.0));
         assert_eq!((v[0].judged.verdict, v[1].judged.verdict), (Verdict::Inconclusive, Verdict::Inconclusive));
-        assert!(row_verdicts(&report("lit/orbit", &[("gpu_ms", 1.0)], 1.0, 1.0)).is_empty(), "rows without a table carry no verdict");
+        assert!(row_verdicts(&report("global-bake", &[("gpu_ms", 1.0)], 1.0, 1.0)).is_empty(), "rows without a table carry no verdict");
+        let lit = row_verdicts(&report("lit/orbit", &[("gpu_ms", 1.0)], 1.0, 1.0));
+        assert_eq!(
+            lit.iter().map(|x| x.metric).collect::<Vec<_>>(),
+            vec!["terrain pass GPU median ms", "frame p99 ms"],
+            "the lit passes have a table"
+        );
     }
 }
