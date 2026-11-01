@@ -31,7 +31,7 @@ apply an amendment only when the owner has decided it in this session, and recor
    important claims in the source yourself before you report them.
 3. **Queue the work.** Turn decisions into small, ordered items in `docs/status.md` ("Queued for ..."), each with file
    paths, the requirement to add or change, and the acceptance test. One OpenSpec change per item.
-4. **Brief coders.** Send each coder session one self-contained briefing with `SendMessage`. A new session has none of
+4. **Brief coders.** Send each coder session one self-contained briefing with `SendMessage` (or its inbox file). Every briefing names how context is measured: `mcp__ccd_session_mgmt__get_usage` on `self` (deferred tool), never an estimate; you check a lane's claim with the same tool before agreeing to a stop or clear. A new session has none of
    your context, so give it: what to read first, the open PRs and their stacking, the ordered tasks, the workflow rules
    (OpenSpec, reviewers, CI green on Windows and Linux before merging, no force-push, golden-review for goldens), and
    when to report back (only unforeseen trouble its reviewers could not resolve, or a stop condition). Subscribe with
