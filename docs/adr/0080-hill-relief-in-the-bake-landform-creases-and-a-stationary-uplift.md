@@ -1,5 +1,5 @@
 # 0080 Hill-scale relief: a band in the bake, landform-keyed creases, and a stationary uplift for the coupled run
-Status: accepted (owner, 2026-10-27, after SPIKE-45; drafted by sonnet-explorer, 2026-10-25; point 4 as written: the run without stream-power erosion at M8, the real fix in M9)
+Status: accepted (owner, 2026-10-27, after SPIKE-45; drafted by sonnet-explorer, 2026-10-25; point 4 as written: the run without stream-power erosion at M8, the real fix in M9); point 2 and point 3 as the weight superseded, points 1 and 5 amended by ADR 0089 (owner, 2026-11-01): the hill band and its bounds follow the relief class; point 3's lattice mechanism carries the class weights; point 4 stays
 Date: 2026-10-25
 Source: owner, 2026-10-25 (terrain relief into M8; scope: plausible relief, hydrology and horizon shadows); `openspec/changes/m8-relief/proposal.md`; learnings 2026-10-25; ADR 0022, 0026, 0030, 0076; CON-06, CON-07, CON-14
 

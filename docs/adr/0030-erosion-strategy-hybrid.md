@@ -1,5 +1,5 @@
 # 0030 Erosion strategy: local filter in M3, a coarse global stream-power stage after it
-Status: accepted (owner, 2026-10-12; decided in the opus-planner session after SPIKE-03 and SPIKE-04)
+Status: accepted (owner, 2026-10-12; decided in the opus-planner session after SPIKE-03 and SPIKE-04); point 2 superseded by ADR 0088 and point 1 amended by ADR 0089 decision 6 (owner, 2026-11-01): the crease filter stays without its landform-keyed factor
 Date: 2026-10-12
 Source: SPIKE-03 (hydrology, #93) and SPIKE-04 (erosion filter variants, #91) in `docs/spikes.md`; architecture report §5 (erosion strategy: "global coarse + local filter"; the MVP excludes global hydrology), M3 row; ADR 0022 (option 1), ADR 0028; constitution CON-08, CON-14, CON-21
 
