@@ -649,6 +649,7 @@ impl EditRuntime {
             saved: &self.saved,
             view_status,
             keys: &self.keys,
+            store: Some(s.editor().store_watch()),
         }
     }
 

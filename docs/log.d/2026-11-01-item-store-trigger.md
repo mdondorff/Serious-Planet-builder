@@ -1,0 +1,1 @@
+- 2026-11-01 **item-store-trigger** (ADR 0066 point 6): the editor counts the items per body and times each load, warns once per crossing of 20,000 items or 2 s and shows both in the status bar; AUTH-006 active; `item-store-trigger` archived
