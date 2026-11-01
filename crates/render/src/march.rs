@@ -26,7 +26,7 @@ struct March {
     north: vec4<f32>,
     // The edge of a level in texels, the level count, the edge of the cube in texels, the highest mip the walk uses.
     info: vec4<u32>,
-    // x: a cube texel in metres at the middle of a face; y: the highest terrain above the sphere (1e30: unknown).
+    // x: a cube texel in metres at the middle of a face; y: the highest terrain above the sphere; z: 1 when y is known.
     cube: vec4<f32>,
     // x: the generation value from which a clipmap cell counts as changed (0: never); y: the shift from texels to generation cells.
     gen: vec4<u32>,
@@ -185,7 +185,7 @@ fn march(o: vec3<f32>) -> vec3<f32> {
     // The ray is above the world's highest terrain from here on: nothing it passes can shade it (the sun is above the horizon here).
     var tau_end = m.curv.y;
     var ceiling_exit = false;
-    if (slope > 1.0e-4 && m.cube.y < 1.0e29) {
+    if (slope > 1.0e-4 && m.cube.z > 0.5) {
         let t_above = (m.cube.y - o.z) / slope;
         if (t_above < tau_end) {
             tau_end = max(t_above, 0.0);
@@ -469,7 +469,8 @@ impl ShadowMarchGpu {
         for v in [clip.texels(), params.levels.len() as u32, cube.texels(), clip.texels().trailing_zeros().min(6)] {
             uniform.extend_from_slice(&v.to_le_bytes());
         }
-        f(&mut uniform, &[params.cube_texel_m, params.ceiling_m, 0.0, 0.0]);
+        let known = params.ceiling_m.is_finite() && params.ceiling_m < f32::MAX;
+        f(&mut uniform, &[params.cube_texel_m, if known { params.ceiling_m } else { 0.0 }, if known { 1.0 } else { 0.0 }, 0.0]);
         for v in [params.dirty_since, GENERATION_CELL_SHIFT, 0, 0] {
             uniform.extend_from_slice(&v.to_le_bytes());
         }
