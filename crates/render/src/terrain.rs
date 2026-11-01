@@ -1308,6 +1308,11 @@ impl TerrainRenderer {
         &self.shadow_unresident
     }
 
+    /// How many half-resolution marches of the last shadow frame crossed a clipmap cell that changed this frame or the last (tests).
+    pub fn shadow_changed_pixels(&self, ctx: &GpuContext) -> Option<usize> {
+        self.shadow.as_ref().map(|s| s.changed_pixels(ctx))
+    }
+
     /// The resolved shadow visibility of the last frame that ran the shadow pass, `width * height` values in [0, 1].
     pub fn read_shadow(&self, ctx: &GpuContext) -> Option<Vec<f32>> {
         self.shadow.as_ref().map(|s| s.read_visibility(ctx))

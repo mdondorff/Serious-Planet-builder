@@ -89,11 +89,7 @@ impl ShadowPath {
         if cut {
             generations.mark_all(ctx, frame);
         } else {
-            for (level, l) in f.plan.levels.iter().enumerate() {
-                for rect in &l.dirty {
-                    generations.mark(ctx, frame, level, rect);
-                }
-            }
+            generations.mark_rects(ctx, frame, f.plan.levels.iter().enumerate().flat_map(|(k, l)| l.dirty.iter().map(move |r| (k, r))));
         }
         let mut floor: Vec<TileId> = std::mem::take(&mut self.pending_floor);
         floor.extend(f.floor_tiles.iter().copied());
@@ -135,6 +131,11 @@ impl ShadowPath {
     /// The resolved visibility of the last frame, `width * height` values in [0, 1], row-major (tests and the shadow view).
     pub fn read_visibility(&self, ctx: &GpuContext) -> Vec<f32> {
         self.resolve.read_shadow(ctx)
+    }
+
+    /// How many half-resolution pixels of the last frame marched across a clipmap cell that changed this frame or the last (tests).
+    pub fn changed_pixels(&self, ctx: &GpuContext) -> usize {
+        self.resolve.read_half_changed(ctx).into_iter().filter(|c| *c).count()
     }
 
     /// The clipmap, for tests.

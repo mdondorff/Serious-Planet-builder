@@ -90,3 +90,36 @@ fn a_lit_frame_with_a_shadow_frame_resolves_a_visibility_and_draws_the_same_pict
     assert!(visibility.iter().all(|v| (0.0..=1.0).contains(v)), "visibility lies in [0, 1]");
     assert!(without.read_shadow(&ctx).is_none(), "a renderer without the shadow pass has none");
 }
+
+// spec: REND-050
+#[test]
+fn a_refreshed_tile_flags_the_marches_across_it_for_two_frames_through_the_frame_path() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let p = plan();
+    let (mut r, tiles) = renderer(&ctx, &p);
+    r.enable_shadow(&ctx, TEXELS, LEVELS, R);
+    let mut planner = ClipmapPlanner::new(ClipmapParams { texels: TEXELS, ..ClipmapParams::new(R, CELLS) });
+    // The refresh of every resident tile at the second frame dirties every window; the frames before and after change nothing.
+    let mut changed = Vec::new();
+    for (i, refresh) in [false, false, false, true, false, false, false].into_iter().enumerate() {
+        let cam = p.camera.position;
+        let clip = planner.plan(cam, &tiles, if refresh { &tiles } else { &[] }, &[], &TangentWarp);
+        let up = cam.0.normalized();
+        let sun = (up * 0.8 + Vec3::new(0.0, 0.0, 1.0)).normalized();
+        r.set_shadow_frame(ShadowFrame {
+            view: ShadowView::new(clip.anchor, &p.camera, sun, R),
+            plan: clip,
+            preview: ClipmapPreview::default(),
+            floor_tiles: Vec::new(),
+            cut: false,
+        });
+        r.render(&ctx, &p, false).unwrap();
+        changed.push((i, r.shadow_changed_pixels(&ctx).expect("the shadow pass ran")));
+    }
+    // Frame 1 is a cut (everything marked) and frame 2 still counts it; frame 3 is quiet; 4 refreshes; 5 still counts it; 6 and 7 are quiet.
+    assert!(changed[0].1 > 0 && changed[1].1 > 0, "the cut and the frame after flag marches: {changed:?}");
+    assert_eq!(changed[2].1, 0, "a quiet frame flags none: {changed:?}");
+    assert!(changed[3].1 > 0, "the refresh frame flags marches: {changed:?}");
+    assert!(changed[4].1 > 0, "the frame after still flags them (changed last frame): {changed:?}");
+    assert_eq!((changed[5].1, changed[6].1), (0, 0), "two quiet frames after the refresh flag none: {changed:?}");
+}

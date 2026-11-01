@@ -576,25 +576,38 @@ impl GenerationMap {
         }
     }
 
-    /// Mark the cells a dirty rectangle (world texel indices of `level`) touches as changed in `frame` (counting from 1). A march reads the
-    /// level whose window holds it, so a change must be marked in every level whose window it intersects. The mip chain is a maximum in slot
-    /// space: a coarse cell of a window not aligned to it may flag a walk near the opposite window edge too (extra rejection, never a miss).
-    pub fn mark(&mut self, ctx: &GpuContext, frame: u32, level: usize, rect: &TexelRect) {
-        assert!(level < self.levels && frame > 0);
-        if rect.is_empty() {
-            return;
-        }
+    /// Mark the cells of each rectangle (world texel indices of its level) as changed in `frame` (counting from 1), rebuilding and uploading
+    /// each touched level once however many rectangles it has. A march reads the level whose window holds it, so a change must be marked
+    /// in every level whose window it intersects. The mip chain is a maximum in slot space: a coarse cell of a window not aligned to it may
+    /// flag a walk near the opposite window edge too (extra rejection, never a miss).
+    pub fn mark_rects<'a>(&mut self, ctx: &GpuContext, frame: u32, rects: impl IntoIterator<Item = (usize, &'a TexelRect)>) {
+        assert!(frame > 0);
         let n = i64::from(self.cells);
-        let (cx0, cx1) = (rect.x0 >> GENERATION_CELL_SHIFT, (rect.x1 - 1) >> GENERATION_CELL_SHIFT);
-        let (cy0, cy1) = (rect.y0 >> GENERATION_CELL_SHIFT, (rect.y1 - 1) >> GENERATION_CELL_SHIFT);
-        for cy in cy0..=cy1.min(cy0 + n - 1) {
-            for cx in cx0..=cx1.min(cx0 + n - 1) {
-                let (sx, sy) = (cx.rem_euclid(n) as usize, cy.rem_euclid(n) as usize);
-                self.mirror[level][0][sy * self.cells as usize + sx] = frame;
+        let mut touched = vec![false; self.levels];
+        for (level, rect) in rects {
+            assert!(level < self.levels);
+            if rect.is_empty() {
+                continue;
+            }
+            touched[level] = true;
+            let (cx0, cx1) = (rect.x0 >> GENERATION_CELL_SHIFT, (rect.x1 - 1) >> GENERATION_CELL_SHIFT);
+            let (cy0, cy1) = (rect.y0 >> GENERATION_CELL_SHIFT, (rect.y1 - 1) >> GENERATION_CELL_SHIFT);
+            for cy in cy0..=cy1.min(cy0 + n - 1) {
+                for cx in cx0..=cx1.min(cx0 + n - 1) {
+                    let (sx, sy) = (cx.rem_euclid(n) as usize, cy.rem_euclid(n) as usize);
+                    self.mirror[level][0][sy * self.cells as usize + sx] = frame;
+                }
             }
         }
-        self.rebuild(level);
-        self.upload(ctx, level);
+        for level in (0..self.levels).filter(|l| touched[*l]) {
+            self.rebuild(level);
+            self.upload(ctx, level);
+        }
+    }
+
+    /// [`GenerationMap::mark_rects`] for one rectangle.
+    pub fn mark(&mut self, ctx: &GpuContext, frame: u32, level: usize, rect: &TexelRect) {
+        self.mark_rects(ctx, frame, [(level, rect)]);
     }
 
     /// Mark every cell of every level (a re-anchor).

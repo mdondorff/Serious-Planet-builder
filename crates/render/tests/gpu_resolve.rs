@@ -382,3 +382,45 @@ fn the_sky_does_not_widen_the_history_clamp_below_the_horizon() {
         assert!(v < 0.02, "the row under the sky at column {x} must be dark, got {v}");
     }
 }
+
+// spec: REND-052
+/// A standalone cost probe of the resolve passes (receivers, march, fill, upsample, temporal) at 1440p over a flat synthetic clipmap, as the
+/// median of waited frames. Not a verdict: REND-052 is judged on the frame harness with GPU timestamps; this is a quick number for the
+/// passes alone (`cargo test -p planet-render --test gpu_all resolve_cost -- --ignored --nocapture`, on the discrete GPU with
+/// `PLANET_ADAPTER=hardware`).
+#[test]
+#[ignore = "a timing probe, run by hand"]
+fn resolve_cost_probe_at_1440p() {
+    let s = scene();
+    set_wall(&s, Some(-96));
+    let (w, h) = (2560u32, 1440u32);
+    let target = DepthTarget::new(&s.ctx, w, h);
+    target.write(&s.ctx, &vec![1.0 / CAMERA_HEIGHT; (w * h) as usize]);
+    let mut r = ShadowResolveGpu::new(&s.ctx, &s.clip);
+    for sun in [45.0f32, 2.0] {
+        let mut times = Vec::new();
+        for frame in 1..=24u32 {
+            let params = ResolveParams {
+                camera: camera(CAMERA_X),
+                previous: camera(CAMERA_X),
+                history_weight: 0.8,
+                cut: frame == 1,
+                frame,
+                spread: spread_for_sun(libm::sinf(sun.to_radians())),
+            };
+            let t = std::time::Instant::now();
+            r.resolve(&s.ctx, &s.march, &s.clip, &s.cube, &march_params(sun), &target, &params);
+            s.ctx.wait_idle();
+            if frame > 3 {
+                times.push(t.elapsed().as_secs_f64() * 1000.0);
+            }
+        }
+        times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        eprintln!(
+            "resolve at 1440p, sun {sun} deg: median {:.2} ms, min {:.2} ms, max {:.2} ms (waited frames)",
+            times[times.len() / 2],
+            times[0],
+            times[times.len() - 1]
+        );
+    }
+}
