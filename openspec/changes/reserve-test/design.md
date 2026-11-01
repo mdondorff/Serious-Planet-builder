@@ -10,7 +10,13 @@
 4. **Verdict.** For each standard flight, with loads and without: terrain medians within BUDG-001/002/003 and the frame median within 16.6 ms; the difference between the runs is reported as the cost of the reserves on terrain. Under ADR 0087 the median must clear 16.6 ms by the loaded margin (5 %) or the verdict goes to the window queue.
 5. **Windows.** The scene is a CPU- and GPU-timed scene: pinned-load mode (ADR 0087 point 4) and GPU timestamps; the planner opens the window; the run is not run unprompted.
 
-## Open
-- Requirement IDs (planner): load calibration (tier A), the reserve scene and report (tier C); BUDG-006 and BUDG-007 are the parents.
-- Whether the GPU burn pass lives in `planet_render` as a diagnostics pass or in the app's scene code (CON-03 says the renderer executes a plan: a burn pass is a plan node of a synthetic scene).
-- Which flights count as the standard flights (the streaming scenes' dive and look flights, or the lit flights).
+## Decisions (opus-planner, inbox #6, 2026-10-31)
+1. IDs: BUDG-011 (synthetic load definition and calibration, tier A) and BUDG-012 (the reserve scene and its verdict, tier C). BUDG-013 is held for this change.
+2. Standard flights: the gate's streaming flights (dive, look-1m, look-2km, teleport-1m, teleport-2km). The lit flights join after ADR 0085's build.
+3. The GPU burn pass is a plan node of a synthetic scene in `planet_render` (CON-03: the renderer executes a plan, the frame crate decides). Only the plans of test scenes carry it; a production plan never does.
+4. The job system is complete (change `job-system`, BUDG-004, BUDG-008 to BUDG-010): every pool is on a share, so the reserve test is meaningful.
+
+## Windows under ADR 0087
+- The scene runs the two variants (loads on, loads off) alternately inside one session, so the cost of the reserves on terrain is a relative reading.
+- Absolute verdicts follow BUILD-031: the frame median with streaming needs a quiet window; GPU timings carry the +18 % note; CPU times need pinning or 30 % margin. A loaded run records everything and gives `loaded pass`, `inconclusive` or `needs a quiet window` per row.
+- The planner is told before each measured run and gives the go; the run is a loaded A/B (`perf --ab` for a comparison of builds) unless the planner asks for a quiet window.

@@ -1,11 +1,11 @@
 ## 1. Change
-- [ ] 1.1 Planner confirms the design and the standard flights; requirement IDs reserved
-- [ ] 1.2 Spec deltas (BUDG-006 scenario kept; new requirements)
+- [x] 1.1 Planner confirms the design and the standard flights; requirement IDs reserved (BUDG-011, BUDG-012; BUDG-013 held)
+- [x] 1.2 Spec deltas (BUDG-011, BUDG-012; BUDG-006 stays)
 
 ## 2. Tier A (GPU-free)
-- [ ] 2.1 `SyntheticLoad` definitions with the shares of BUDG-001 to BUDG-003 and the calibration of the CPU spin on a fake clock; a real-clock tolerance test (5 %)
-- [ ] 2.2 The core load: spin jobs on a share keep exactly `ceiling` threads busy and never more; terrain's ceiling holds beside them (BUDG-008 on fake work)
-- [ ] 2.3 The report: shares, measured value, limit, verdict, largest overrun named (BUDG-007), on recorded fixtures
+- [ ] 2.1 `SyntheticLoad` definitions with the shares of BUDG-001 to BUDG-003 and the calibration of the CPU spin on a fake clock; a real-clock tolerance test (5 %) (BUDG-011)
+- [ ] 2.2 The core load: spin jobs on a share keep exactly `ceiling` threads busy and never more; terrain's ceiling holds beside them (BUDG-011, BUDG-008 on fake work)
+- [ ] 2.3 The report: shares, measured value, limit, verdict, largest overrun named (BUDG-007, BUDG-012), on recorded fixtures
 
 ## 3. Tier C
 - [ ] 3.1 The GPU burn pass, calibrated with timestamp queries to the GPU ms; skipped with a reason where timestamps are unsupported (software adapter)
