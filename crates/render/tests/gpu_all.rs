@@ -2,6 +2,8 @@
 mod gpu_atmosphere;
 #[path = "gpu_burn.rs"]
 mod gpu_burn;
+#[path = "gpu_clipmap.rs"]
+mod gpu_clipmap;
 #[path = "gpu_compact.rs"]
 mod gpu_compact;
 #[path = "gpu_compact_blocks.rs"]

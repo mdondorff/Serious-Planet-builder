@@ -19,6 +19,7 @@ pub mod lit;
 #[cfg(feature = "reference-renderer")]
 pub mod reference;
 pub(crate) mod refs;
+pub mod shadow;
 pub mod terrain;
 pub mod ui;
 pub mod water;
