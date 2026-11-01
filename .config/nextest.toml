@@ -110,7 +110,7 @@ filter = 'binary(gpu_all) and (test(/^gpu_window::/) or test(/^gpu_water_coverag
 test-group = "heavy-window"
 
 # The software GPU tier runs at most 8 `gpu_*` tests at once (BUILD-003; SPIKE-84); every `gpu_*` test lives in a `gpu_all` binary (BUILD-015).
-# A local software `test gpu` started about 20 rasterising processes on the 16-thread laptop: the 12 timeouts of 2026-10-20 and the 3
+# A local software `test gpu` started about 20 rasterising processes on the 20-thread reference laptop: the 12 timeouts of 2026-10-20 and the 3
 # `gpu_skeleton` timeouts of 2026-10-31 came from that load. A test the override above puts in `heavy-window` stays there (the first matching
 # override sets the group). Tier A and B are not capped; a machine with 8 cores or fewer (CI's runners) runs as before. No test is skipped,
 # retried or changed.
