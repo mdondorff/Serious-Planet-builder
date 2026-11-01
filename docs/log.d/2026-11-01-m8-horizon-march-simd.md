@@ -1,0 +1,1 @@
+- 2026-11-01 m8-horizon-march-simd: archived; an AVX2 horizon march with the bytes of the scalar one (GEN-086, #788), synced for removal in shadow-clipmap-march PR 8.

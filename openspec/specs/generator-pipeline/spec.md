@@ -1029,6 +1029,19 @@ Source: opus-planner (2026-10-26, criterion 6), GEN-044, CON-14
 - **WHEN** a rough raster is baked at three ranges, two growths and three body radii
 - **THEN** every byte equals that of a march that forms each distance and drop as it goes
 
+### Requirement: GEN-086 The horizon march has an AVX2 kernel with the bytes of the scalar one
+`generators::horizon` SHALL march four azimuths of a texel at once on a CPU with AVX2, chosen at run time, and SHALL give for every raster, block, parameter set and thread count the bytes of the scalar march (GEN-085), which every other machine and every remainder azimuth runs.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-27, owner: no deferred optimisation), GEN-044, GEN-085, CON-14
+
+Detail: The kernel SHALL do the scalar march's IEEE operations on each lane in the same order, with no fused multiply-add, and SHALL treat a sample outside the raster as the scalar march does (the lane stops). Both kernels SHALL be tested against each other on CI wherever AVX2 is present, with azimuth counts of 16, 7, 4 and 1, with texels whose rays leave the raster, and with a raster of NaN heights.
+
+#### Scenario: Both kernels
+- **WHEN** a rough raster is baked on the scalar kernel and on the AVX2 kernel
+- **THEN** every byte is equal, for texels near the raster edge as well
+
 ### Requirement: GEN-089 Local terrain descriptors
 `planet_generators::descriptors` SHALL compute, on a height raster of cell size `h` with marked no-data cells (NaN), the slope in degrees (`atan` of the central-difference gradient) and the profile and contour curvature in 1/m from the Evans-Young quadric fit over the 3x3 window. Profile curvature is taken along the gradient and contour curvature across it, both positive where the surface curves upward (a bowl). The profile is 0 where the gradient is under 1e-6 and the contour is uncounted where it is under 1e-3 (it would only report noise). A cell whose window touches the edge or a no-data cell SHALL be uncounted. The computation SHALL use f64 and `libm` and give the same bytes at any thread count (CON-14).
 
