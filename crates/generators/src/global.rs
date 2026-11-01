@@ -136,7 +136,7 @@ impl GlobalSample {
     }
 }
 
-fn fbm(seed: u64, layer: u64, p: Vec3, base_frequency: f64, octaves: u32) -> f64 {
+pub(crate) fn fbm(seed: u64, layer: u64, p: Vec3, base_frequency: f64, octaves: u32) -> f64 {
     let (mut sum, mut amp, mut norm, mut freq) = (0.0, 1.0, 0.0, base_frequency);
     for o in 0..octaves {
         sum += amp * layer_noise(seed, layer, o, p * freq);
@@ -162,15 +162,15 @@ pub fn sin_latitude(d: Vec3) -> f64 {
 }
 
 /// The terms of the elevation that the landform driver and the hill band share: the warped direction, the continent value and the range zone.
-struct Terrain {
-    warped: Vec3,
-    continent: f64,
-    land_depth: f64,
-    zone: f64,
-    inland: f64,
+pub(crate) struct Terrain {
+    pub(crate) warped: Vec3,
+    pub(crate) continent: f64,
+    pub(crate) land_depth: f64,
+    pub(crate) zone: f64,
+    pub(crate) inland: f64,
 }
 
-fn terrain(seed: u64, d: Vec3) -> Terrain {
+pub(crate) fn terrain(seed: u64, d: Vec3) -> Terrain {
     // Continents: low-frequency fBm of a domain-warped direction, so coastlines are not round blobs.
     let warp = Vec3::new(
         fbm(seed, LAYER_WARP, d + Vec3::new(0.0, 0.0, 0.0), 1.3, 3),
@@ -187,7 +187,7 @@ fn terrain(seed: u64, d: Vec3) -> Terrain {
 }
 
 /// The ridge term of the mountain ranges at the warped direction, in `[0, 1]`.
-fn ridge_at(seed: u64, warped: Vec3) -> f64 {
+pub(crate) fn ridge_at(seed: u64, warped: Vec3) -> f64 {
     let n = fbm(seed, LAYER_RIDGE, warped, 3.0, 5);
     let r = 1.0 - libm::fabs(n) * 2.0;
     r.max(0.0) * r.max(0.0)
@@ -326,6 +326,11 @@ fn hill_band(seed: u64, t: &Terrain, ridge: f64) -> f64 {
         return 0.0;
     }
     let m = t.zone * t.inland * (0.25 + 0.75 * ridge);
+    hill_amplitude_m(m) * hill_octaves(seed, t) * smoothstep(0.0, 0.1, t.land_depth)
+}
+
+/// The three octaves of the hill band, in `[0, 1]` (the shape of GEN-064's band before its amplitude and the coast ramp; GEN-098 gives it another amplitude).
+pub(crate) fn hill_octaves(seed: u64, t: &Terrain) -> f64 {
     let (mut sum, mut amp, mut norm, mut freq) = (0.0, 1.0, 0.0, HILL_BAND_FREQ);
     for o in 0..HILL_BAND_OCTAVES {
         let n = layer_noise(seed, LAYER_HILL, o, t.warped * freq);
@@ -335,7 +340,7 @@ fn hill_band(seed: u64, t: &Terrain, ridge: f64) -> f64 {
         amp *= 0.5;
         freq *= 2.0;
     }
-    hill_amplitude_m(m) * (sum / norm) * smoothstep(0.0, 0.1, t.land_depth)
+    sum / norm
 }
 
 /// The hill band in metres at the unit direction `d` (GEN-064): what the bake adds to the elevation for wavelengths of 2 to 8 km.
