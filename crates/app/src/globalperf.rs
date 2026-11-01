@@ -69,6 +69,11 @@ pub fn perf_global_bake(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> R
         report.peak_resident_blocks,
         failures
     );
+    let json = planet_perf::stamp_one_off_json(
+        &json,
+        &planet_perf::run_validity(),
+        &[planet_perf::OneOffReading { metric: "bake seconds (GEN-014)", reading: secs, budget: 600.0 }],
+    );
     let path = o.out.clone().unwrap_or_else(|| Path::new("perf").join("logs").join("global-bake.json"));
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(err)?;
@@ -138,6 +143,11 @@ pub fn perf_coupled(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
         owner_override,
         failures
     );
+    let json = planet_perf::stamp_one_off_json(
+        &json,
+        &planet_perf::run_validity(),
+        &[planet_perf::OneOffReading { metric: "coupled seconds (GEN-042)", reading: secs, budget: 600.0 }],
+    );
     let path = o.out.clone().unwrap_or_else(|| Path::new("perf").join("logs").join("coupled.json"));
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(err)?;
@@ -176,6 +186,11 @@ fn perf_coupled_make(o: &Options, ctx: &GpuContext, out: &mut dyn Write, owner_o
         owner_override,
         o.global_res,
         failures
+    );
+    let json = planet_perf::stamp_one_off_json(
+        &json,
+        &planet_perf::run_validity(),
+        &[planet_perf::OneOffReading { metric: "coupled make seconds (GEN-042)", reading: secs, budget: 600.0 }],
     );
     let path = o.out.clone().unwrap_or_else(|| Path::new("perf").join("logs").join("coupled-make.json"));
     if let Some(parent) = path.parent() {
