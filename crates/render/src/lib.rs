@@ -20,6 +20,7 @@ pub mod march;
 #[cfg(feature = "reference-renderer")]
 pub mod reference;
 pub(crate) mod refs;
+pub mod resolve;
 pub mod shadow;
 pub mod terrain;
 pub mod ui;

@@ -19,7 +19,7 @@
 - [x] 2.1 PR 1 `shadow-clipmap-plan`
 - [x] 2.2 PR 2 `shadow-clipmap-gather` (2a gather and mips; 2b the coarse cube, REND-048)
 - [x] 2.3 PR 3 `shadow-march`
-- [ ] 2.4 PR 4 `shadow-resolve` (perf window for the 2-degree pose)
+- [x] 2.4 PR 4 `shadow-resolve` (perf window for the 2-degree pose: asked of opus-planner, not yet measured)
 - [ ] 2.5 PR 5 `shadow-integration` (goldens per adapter; owner package)
 - [ ] 2.6 Owner: look review of PR 5 (stills old against new, a drag video) and `/bless` of the first lit goldens
 - [ ] 2.7 PR 6 `rm-horizon-render`

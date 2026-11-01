@@ -38,6 +38,8 @@ mod gpu_quadrants;
 mod gpu_reference;
 #[path = "gpu_renderer.rs"]
 mod gpu_renderer;
+#[path = "gpu_resolve.rs"]
+mod gpu_resolve;
 #[path = "gpu_shading.rs"]
 mod gpu_shading;
 #[path = "gpu_stamps.rs"]

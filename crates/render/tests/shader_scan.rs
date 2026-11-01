@@ -119,6 +119,15 @@ fn shipped_shaders_contain_no_planet_scale_values() {
     for h in scan(&planet_render::shadow::mip_shader()) {
         all.push(format!("clipmap-mip: {h}"));
     }
+    for (name, src) in [
+        ("shadow-receivers", planet_render::resolve::receivers_shader()),
+        ("shadow-upsample", planet_render::resolve::upsample_shader()),
+        ("shadow-temporal", planet_render::resolve::temporal_shader()),
+    ] {
+        for h in scan(&src) {
+            all.push(format!("{name}: {h}"));
+        }
+    }
     assert!(all.is_empty(), "CON-11: shaders must not compute planet-radius magnitudes:\n{}", all.join("\n"));
 }
 
@@ -174,6 +183,9 @@ fn the_march_and_the_mip_shaders_contain_no_atomics() {
         ("clipmap-mip", planet_render::shadow::mip_shader()),
         ("coarse-cube", planet_render::shadow::cube_shader(16)),
         ("coarse-cube-mip", planet_render::shadow::cube_mip_shader()),
+        ("shadow-receivers", planet_render::resolve::receivers_shader()),
+        ("shadow-upsample", planet_render::resolve::upsample_shader()),
+        ("shadow-temporal", planet_render::resolve::temporal_shader()),
     ] {
         assert!(!src.contains("atomic"), "REND-053: {name} must not use atomics");
     }
