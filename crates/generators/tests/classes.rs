@@ -244,7 +244,7 @@ fn the_shape_metrics_find_a_ring_a_long_band_and_two_land_masses_on_a_synthetic_
     }
     for y in 60..120 {
         for x in 50..90 {
-            let edge = y < 64 || y >= 116 || x < 54 || x >= 86;
+            let edge = !(64..116).contains(&y) || !(54..86).contains(&x);
             high[y * w + x] = edge;
         }
     }
