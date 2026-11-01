@@ -6,6 +6,10 @@
   - A plate's land share is the fraction of its area that is land, from 2048 Fibonacci points assigned by the warped nearest centre.
   - Hills are `(1 - mt) smoothstep(0.2, 0.45, max(flank, old margin))`; the plateau takes its membership from what mountains and hills leave, and the rest is plain or rolling plain, so the memberships partition 1 before the normalisation.
   - The belt term's `r` is the bake's squared ridge term (`ridge_at`); the elevation of GEN-096 here is the class source's own (`ClassSource::elevation_m`), not `global::sample`.
+  - The plateau and the rest take `1 - mt - hills` (a difference), where the planned text has the product `(1 - mt)(1 - hills)`; the two differ by `mt hills` where a core overlaps a flank, and the difference sums to 1 without the normalisation.
+  - The back-arc applies where the point's own plate has the strictly larger land share; equal shares give none.
+  - The margin distance uses Earth's radius (`EARTH_RADIUS_M`); wiring the source into the bake takes the body's radius from the definition (CON-11).
+  - `d_c` is a first-order estimate, valid near the line.
 - **Refactor in `global.rs`:** `Terrain`, `terrain`, `ridge_at` and `fbm` are `pub(crate)`, and the three octaves of the hill band are a function (`hill_octaves`); `hill_band` computes the same operations in the same order (the global tests and goldens are unchanged).
 - **Images:** 2048 x 1024, one pixel per direction at its centre, no resampling; text from a 5 x 7 font in the crate (no new dependency).
 - **First findings (seed 1, reported by the preview):** the largest step of the untapered `k` between lattice points is 6.5 against GEN-097's limit of 2.0 (the belts are narrow), and several shares fall outside TEST-082's bands. They are the start values' state, left for the iteration that follows this change.
