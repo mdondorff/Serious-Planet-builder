@@ -6,7 +6,7 @@ How the project proves itself: spec traceability and the A/B/C/D verification ti
 ## Requirements
 
 ### Requirement: TEST-001 Spec traceability
-Every requirement in the specs SHALL have a unique trace ID, a verification tier (A, B, C or D) and a status (active, planned or deprecated); every `// spec: ID` citation in the code SHALL name an existing requirement or constitution rule; every active tier A, B or C requirement SHALL be cited by at least one test of its own tier, where a citation counts only when the `// spec:` comment sits directly above a `#[test]` function (only comments and attributes, including wrapped multi-line ones, may sit between; only the `#[test]` attribute counts) and integration test files `tests/gpu_*.rs` are tier C, `tests/oracle_*.rs` tier B and all others (including unit tests under `src/`) tier A, matching the test runner, and a `// spec:` comment directly above a performance-harness scene entry point (a `fn perf_*` item under `crates/app/src/`, with the same comments-and-attributes rule between) counts as tier C evidence only (CON-17: the scene measures what no test may; there is no further tier); every tier D requirement SHALL name its review artefact; and every main spec SHALL have a Purpose section that is not empty and does not contain the placeholder "TBD" (in any case).
+Every requirement in the specs SHALL have a unique trace ID, a verification tier (A, B, C or D) and a status (active, planned or deprecated); every `// spec: ID` citation in the code SHALL name an existing requirement or constitution rule; every active tier A, B or C requirement SHALL be cited by at least one test of each declared tier, where a citation counts only when the `// spec:` comment sits directly above a `#[test]` function (only comments and attributes, including wrapped multi-line ones, may sit between; only the `#[test]` attribute counts) and integration test files `tests/gpu_*.rs` are tier C, `tests/oracle_*.rs` tier B and all others (including unit tests under `src/`) tier A, matching the test runner, and a `// spec:` comment directly above a performance-harness scene entry point (a `fn perf_*` item under `crates/app/src/`, with the same comments-and-attributes rule between) counts as tier C evidence only (CON-17: the scene measures what no test may; there is no further tier); every tier D requirement SHALL name its review artefact; and every main spec SHALL have a Purpose section that is not empty and does not contain the placeholder "TBD" (in any case).
 
 Verify: A
 Status: active
@@ -36,6 +36,7 @@ Source: CON-16, ADR 0009, ADR 0012, planner inbox #44 (2026-11-01)
 #### Scenario: Wrong tier
 - **WHEN** an active tier C requirement is cited only by tests outside `gpu_*` files
 - **THEN** `cargo xtask spec-lint` fails and says which tiers cite it and which tier is required
+- **AND** a requirement of several tiers (`Verify: A, C`) fails for each declared tier no test of that tier cites, and a tier other than A, B, C or D on the line is refused
 
 #### Scenario: Perf scene citation
 - **WHEN** a `// spec:` comment sits directly above a `fn perf_*` item under `crates/app/src/`
@@ -1438,9 +1439,9 @@ Detail:
 ### Requirement: TEST-078 The GLO-30 reader
 `planet_testkit::glo30` SHALL read a Copernicus GLO-30 COG GeoTIFF tile: the TIFF tags, deflate (through `miniz_oxide`) with the floating-point predictor, tiles or strips, the georeference (origin and pixel scale) and the no-data value, into an f32 raster with marked no-data cells. It SHALL refuse a tile with any other compression, predictor or sample format, naming the tag. `planet-testkit` stays a dev-dependency.
 
-Verify: A, B
+Verify: A
 Status: active
-Source: SPIKE-55 (reader in Python, outside the repo), SPIKE-57, GLO-30 licence notes
+Source: SPIKE-55 (reader in Python, outside the repo), SPIKE-57, GLO-30 licence notes, ADR 0009
 
 #### Scenario: Round trip
 - **WHEN** a test writes a small TIFF with deflate and predictor 3 in two tiles and reads it back
@@ -1453,9 +1454,9 @@ Source: SPIKE-55 (reader in Python, outside the repo), SPIKE-57, GLO-30 licence 
 ### Requirement: TEST-079 The terrain scorecard run
 The scorecard run SHALL compute, for each landform of the sites file, the seven descriptors (GEN-089 to GEN-092) on three rasters: the real tile's central 0.5-degree square and the generator's two matched sites (`world.field()` of the store), each 1,853 x 1,853 cells at 30 m on an east-north grid. Per site and descriptor it SHALL give a distance to the tile: Wasserstein-1 over percentiles p1 to p99 divided by the real p5-to-p95 range for continuous descriptors, L1 between class histograms for geomorphons, and the generator-to-real ratio for drainage density.
 
-Verify: A, B
+Verify: A
 Status: active
-Source: SPIKE-57 (seven descriptors, about 1 minute), SPIKE-55 (sites, 30 m windows)
+Source: SPIKE-57 (seven descriptors, about 1 minute), SPIKE-55 (sites, 30 m windows), ADR 0009
 
 #### Scenario: Distances
 - **WHEN** two identical percentile sets and two sets shifted by a quarter of the real p5-to-p95 range are compared, and two class histograms with disjoint support

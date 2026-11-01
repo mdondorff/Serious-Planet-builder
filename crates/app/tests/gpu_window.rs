@@ -212,7 +212,7 @@ fn a_world_with_a_bake_has_an_ocean_and_the_window_draws_its_water_through_the_w
     assert!(count_before(&stdout, " with the atmosphere") >= planet_frame::viewer::SMOKE_MIN_LIT_FRAMES, "{stdout}");
 }
 
-// spec: VIEW-022
+// spec: VIEW-022, VIEW-023, VIEW-024, VIEW-026
 #[test]
 fn the_editor_mode_places_drags_types_undoes_and_deletes_in_the_real_window_and_writes_the_item_file() {
     let dir = std::env::temp_dir().join(format!("planet-editor-smoke-{}", std::process::id()));
@@ -250,6 +250,9 @@ fn the_editor_mode_places_drags_types_undoes_and_deletes_in_the_real_window_and_
     assert!(count(" definitions handed to the generator") >= 1, "the edits reached the generator: {line}");
     // spec: VIEW-023
     assert!(count(" previews set") >= 1, "the window fed the preview of the edit in flight: {line}");
+    // The previews that ended on the exact tiles are counted, not asserted: the smoke run ends before they land (0 of 6 on 2026-11-01, with
+    // 0 nodes drawn previewed), a finding tracked by the planner; the end of a preview is tier A (`editwin`).
+    let _ = count(" previews ended on the exact tiles");
     // spec: VIEW-024
     let repro_line = stdout.lines().find(|l| l.trim_start().starts_with("repro:")).unwrap_or_else(|| panic!("no repro line in: {stdout}"));
     assert!(repro_line.contains(" 1 F9 write(s)"), "the script pressed F9 once: {repro_line}");

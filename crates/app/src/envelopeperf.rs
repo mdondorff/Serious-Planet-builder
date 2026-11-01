@@ -408,6 +408,7 @@ pub fn measure_of(coarse: &[f64]) -> Measure {
     Measure::coarse_only(worst_window(coarse, FRAME_STEP_S, WINDOW_S))
 }
 
+// spec: TEST-057, TEST-058
 /// `test-render --perf --scene envelope` (TEST-047): the curve of the highest speed per altitude, written to `perf/logs/envelope.json`.
 /// `--smoke` (`--perf-smoke`) runs one short trial per altitude on the software adapter and measures nothing.
 pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<(), String> {
