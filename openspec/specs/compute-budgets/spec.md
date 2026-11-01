@@ -147,6 +147,10 @@ Source: ADR 0083 point 3, BUDG-006, BUDG-008, planner inbox #6 (2026-10-31)
 - **WHEN** the physics load runs beside a terrain share of ceiling 12 on fake work
 - **THEN** exactly two of its jobs run at once, and terrain still reaches 12
 
+#### Scenario: The real clock
+- **WHEN** `cargo xtask perf wallclock` runs on the reference machine
+- **THEN** a 2 ms spin calibrated on the real clock takes its milliseconds within 5 % (the median of 41 spins, the best of three calibrations); this is a wall-clock check (BUILD-003), not tier A, which checks the calibration on fake clocks
+
 ### Requirement: BUDG-012 The reserve scene and its verdict
 The perf harness SHALL run the standard flights (dive, look-1m, look-2km, teleport-1m, teleport-2km) with all synthetic loads on and without, in alternating runs, and SHALL report per flight terrain's main-thread, GPU and busy-thread medians and p99, the frame median and the share table of BUDG-007. The reserve verdict SHALL pass only if terrain stays inside its shares (BUDG-001 to BUDG-003) and the frame median inside 16.6 ms with the loads on. Under load the frame time SHALL need a quiet window (BUILD-031).
 

@@ -311,9 +311,11 @@ fn the_margin_by_integer_seam_folding_equals_the_walk_on_every_cell_of_the_small
 
 // spec: WDEF-005
 #[test]
+#[ignore = "wall clock: cargo xtask perf wallclock"]
 fn the_margin_of_a_cell_on_a_face_edge_or_a_cube_corner_costs_a_small_multiple_of_one_inside_a_face() {
     // The editor's picking field asks for the margin of its point's cell on every height query (VIEW-022): the walk across a seam cost 50
-    // to 250 times the interior square (78 against 0.3 microseconds at three rings).
+    // to 250 times the interior square (78 against 0.3 microseconds at three rings). A wall-clock check: it runs with `cargo xtask perf
+    // wallclock` on the reference machine, not in tier A (a timing ratio failed on a shared runner, #1017); the cells it returns stay tier A.
     let level = cell_level(R);
     let time = |c: TileId| {
         let _ = with_margin(&[c], 3);

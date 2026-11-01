@@ -1054,7 +1054,50 @@ fn perf_stream_all(root: &Path, rest: &[String], settle: bool) -> Res {
     }
 }
 
+/// The `#[ignore]` reason of a wall-clock check: a test that times real work, which tier A does not (BUILD-003; it flaked on shared runners).
+pub const WALLCLOCK_IGNORE: &str = "wall clock: cargo xtask perf wallclock";
+
+/// The wall-clock checks `cargo xtask perf wallclock` runs, in release, on a quiet reference machine (no readiness gate: tolerance checks, not measurements): the package, the cargo target and the
+/// test's path in it. Each is an ignored test with [`WALLCLOCK_IGNORE`] (a tier-A test checks that every one exists).
+pub const WALLCLOCK: [(&str, &str, &str); 3] = [
+    ("planet-perf", "--lib", "reserve::tests::the_real_spin_takes_its_milliseconds_within_five_percent"),
+    (
+        "planet-world-def",
+        "--test=cell_index",
+        "the_margin_of_a_cell_on_a_face_edge_or_a_cube_corner_costs_a_small_multiple_of_one_inside_a_face",
+    ),
+    ("planet", "--lib", "stall::tests::a_lock_another_thread_holds_for_40_ms_is_recorded_with_a_wait_of_at_least_20_ms"),
+];
+
+/// The cargo arguments of one wall-clock check: only that test, the ignored one, in release.
+fn wallclock_args(package: &str, target: &str, test: &str) -> Vec<String> {
+    ["test", "-p", package, "--release", target, test, "--", "--ignored", "--exact", "--nocapture"].map(String::from).to_vec()
+}
+
+/// `perf wallclock`: every check of [`WALLCLOCK`], each in its own `cargo test`; a failing one does not stop the others.
+fn perf_wallclock(root: &Path) -> Res {
+    println!("wallclock: {} checks, the ignored tests marked `{WALLCLOCK_IGNORE}`", WALLCLOCK.len());
+    let mut failed = Vec::new();
+    for (package, target, test) in WALLCLOCK {
+        let args = wallclock_args(package, target, test);
+        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        let ok = run(root, "cargo", &refs, &[]).is_ok();
+        println!("wallclock: {} {package} {test}", if ok { "PASS" } else { "FAIL" });
+        if !ok {
+            failed.push(test);
+        }
+    }
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{} of {} wall-clock checks failed: {}", failed.len(), WALLCLOCK.len(), failed.join(", ")))
+    }
+}
+
 pub fn perf(root: &Path, args: &[String]) -> Res {
+    if args.first().map(String::as_str) == Some("wallclock") {
+        return perf_wallclock(root);
+    }
     if args.first().map(String::as_str) == Some("--ab") {
         return crate::perfab::run(root, args);
     }
@@ -1568,6 +1611,38 @@ mod tests {
         for m in modules {
             assert!(files.iter().any(|f| f == m), "{m} is not a test file (a module of a per-tier binary)");
         }
+    }
+
+    // spec: BUILD-003
+    #[test]
+    fn every_wall_clock_check_exists_as_an_ignored_test_of_its_package_and_runs_alone_in_release() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        for (package, target, test) in WALLCLOCK {
+            let krate = std::fs::read_dir(root.join("crates"))
+                .unwrap()
+                .flatten()
+                .find(|k| {
+                    std::fs::read_to_string(k.path().join("Cargo.toml"))
+                        .is_ok_and(|m| m.lines().any(|l| l.trim() == format!("name = \"{package}\"")))
+                })
+                .unwrap_or_else(|| panic!("no crate named {package}"));
+            let dir = if target == "--lib" { krate.path().join("src") } else { krate.path().join("tests") };
+            let name = test.rsplit("::").next().unwrap();
+            let ignored = format!("#[ignore = \"{WALLCLOCK_IGNORE}\"]");
+            // The ignore attribute sits directly above the function (a moved or renamed test would silently drop out of the run).
+            let found = std::fs::read_dir(&dir).unwrap().flatten().filter_map(|e| std::fs::read_to_string(e.path()).ok()).any(|text| {
+                let lines: Vec<&str> = text.lines().map(str::trim).collect();
+                lines.windows(2).any(|w| w[0] == ignored && w[1].starts_with(&format!("fn {name}(")))
+            });
+            assert!(found, "{package} {target}: no `{ignored}` directly above `fn {name}(` in {}", dir.display());
+            if let Some(file) = target.strip_prefix("--test=") {
+                assert!(dir.join(format!("{file}.rs")).is_file(), "{package}: no test binary {file}");
+            }
+        }
+        assert_eq!(
+            wallclock_args("planet-perf", "--lib", "a::b"),
+            ["test", "-p", "planet-perf", "--release", "--lib", "a::b", "--", "--ignored", "--exact", "--nocapture"]
+        );
     }
 
     /// One `[[profile.<p>.overrides]]` table of `.config/nextest.toml`: its profile, its filter (one line or `'''` block) and its text.
