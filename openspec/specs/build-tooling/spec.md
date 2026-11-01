@@ -104,7 +104,7 @@ Source: ADR 0009, report §16, ADR 0020, planner inbox #44 (2026-11-01)
 #### Scenario: The software GPU tier runs at most 8 GPU tests at once
 - **WHEN** a `gpu_*` test runs under the default nextest profile
 - **THEN** it is in the test group `gpu-tier` of at most 8 processes at once, unless an earlier override puts it in a heavier group; the window, water-coverage, stream-perf, envelope-perf, edit-perf and stills tests and the three loop tests of `gpu_skeleton` are in `heavy-window` of at most 2; tier A and B tests are not capped
-- **AND** a machine with 8 cores or fewer (CI's runners) runs as before; on the 16-thread laptop the software tier C no longer runs about 20 rasterising processes at once (SPIKE-84: the 12 timeouts of 2026-10-20 and 3 load timeouts on 2026-10-31)
+- **AND** a machine with 8 cores or fewer (CI's runners) runs as before; on the 20-thread reference laptop the software tier C no longer runs about 20 rasterising processes at once (SPIKE-84: the 12 timeouts of 2026-10-20 and 3 load timeouts on 2026-10-31)
 
 #### Scenario: Wall-clock checks run with perf, not in tier A
 - **WHEN** a test would assert on the time real work takes (a timing ratio, a spin's milliseconds, a lock wait on real threads)

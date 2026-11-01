@@ -9,7 +9,7 @@ With decisions 1, 2 and 5 together (class map and plateau rule, plate-margin bel
 - the plains, Loess, Erg Chebbi (authored sand-sea class) and Himalaya improve on today. Three hill landforms pass criterion 1, but only with the hill band kept and keyed to the class; the Alps fail at one site (0.47) and the Badlands get worse;
 - the evidence is a stand-in (the new elevation added to today's stored field), not a re-bake; decision 4's re-bake is the real test.
 
-## 1. ADR 0088, the M9 terrain bake (proposed; a data format)
+## 1. ADR 0088, the M9 terrain bake (accepted by the owner 2026-11-01; the bake waits for the owner's approval of the engine preview)
 - **Evidence:**
   - the two-pass bake has clean seams at four sites ([SPIKE-70](../../spikes/m9-global-routing/results/results.md), [SPIKE-72](../../spikes/m9-highlands-seam/results/results.md), [SPIKE-74](../../spikes/m9-expected/results/results.md));
   - it takes about 6-7.5 h for the planet ([SPIKE-71](../../spikes/m9-bake-time/results/results.md));
@@ -23,7 +23,7 @@ With decisions 1, 2 and 5 together (class map and plateau rule, plate-margin bel
 - **Bounds:** the layer stores a min/max pyramid per 32 x 32 block: about 90 MB for the planet (1-2.5 % of the layer), seconds to build, 2.5-4 us a lookup. Without it the steep classes stop refining at level 13-15 ([SPIKE-82](../../spikes/m9-lod-steep/results/results.md)); with it they plan to level 18 with no capped tile at 5-8 % more nodes ([SPIKE-83](../../spikes/m9-bounds-pyramid/results/results.md)).
 - **Cost to reverse:** low. The layer is separate and switched; turning it off restores today's field. The bake is re-run, not migrated.
 
-## 2. Relief classes drive the terrain's amplitude ([ADR 0089](../adr/0089-relief-classes-drive-the-terrains-amplitude.md), proposed; outline in SPIKE-76 section 5)
+## 2. Relief classes drive the terrain's amplitude ([ADR 0089](../adr/0089-relief-classes-drive-the-terrains-amplitude.md), accepted by the owner 2026-11-01 with the 45° slope ceiling, ADR 0091; outline in SPIKE-76 section 5)
 - **Evidence:**
   - with a class per landform, all four hill landforms pass criterion 1, the Alps included (in-sample, [SPIKE-76](../../spikes/m9-generator-design/results/results.md));
   - a default class map matches Earth's class shares (63 / 14 / 23 %) with smooth `k` ([SPIKE-77](../../spikes/m9-class-map/results/results.md));

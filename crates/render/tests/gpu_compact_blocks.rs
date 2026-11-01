@@ -71,7 +71,9 @@ fn expect(ctx: &GpuContext, what: &str, got: u64, known: &[(&str, u64)]) {
 }
 
 const WARP: &str = "Microsoft Basic Render Driver | Dx12 | Cpu | driver '10.0.26100.9711' ''";
-const RTX: &str = "NVIDIA GeForce RTX 3080 Ti Laptop GPU | Vulkan | DiscreteGpu | driver 'NVIDIA' '591.86'";
+// The RTX hashes below were recorded on 2026-11-01 under MESH_VERSION 10 (`test gpu --real`) on this adapter and driver; an adapter or
+// driver not in a table skips the comparison with a printed hash and never compares against the RTX hash.
+const RTX: &str = "NVIDIA GeForce RTX 3080 Ti Laptop GPU | Vulkan | DiscreteGpu | driver 'NVIDIA' '621.01'";
 
 // spec: REND-016
 #[test]
@@ -90,7 +92,7 @@ fn one_shot_frames_in_every_debug_view_are_the_recorded_pixels() {
     // 18,180 since render-floor-3 (LOD-011, declared): the orbit views draw the 181 level-3 tiles instead of 52 level-2 tiles (16,542).
     assert_eq!((frames, compact_nodes), (90, 18_180), "the scripted views changed");
     println!("one_shot: {frames} frames, {compact_nodes} compact nodes drawn, hash {all:016x}");
-    expect(&ctx, "one_shot", all, &[(WARP, 0xba29_e870_5bd4_05a3), (RTX, 0x4d06_4625_abe9_fbec)]);
+    expect(&ctx, "one_shot", all, &[(WARP, 0xba29_e870_5bd4_05a3), (RTX, 0x60a4_c811_a037_d009)]);
 }
 
 fn persistent(ctx: &GpuContext, plan: &TerrainPlan, mode: UploadMode, lit: Option<LitPlan>) -> Vec<u8> {

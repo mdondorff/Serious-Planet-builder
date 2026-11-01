@@ -42,6 +42,8 @@ mod gpu_renderer;
 mod gpu_resolve;
 #[path = "gpu_shading.rs"]
 mod gpu_shading;
+#[path = "gpu_shadow_frame.rs"]
+mod gpu_shadow_frame;
 #[path = "gpu_stamps.rs"]
 mod gpu_stamps;
 #[path = "gpu_steep_terrain.rs"]

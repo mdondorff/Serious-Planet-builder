@@ -42,7 +42,7 @@ struct Resolve {
     // x: 1 when half of the rays are skipped this frame; y: the parity of the rays that are marched; z: 1 when history is void;
     // w: unused.
     mode: vec4<u32>,
-    // x: the history weight.
+    // x: the history weight; y: the drop coefficient 1 / (2 R) (a uniform, never R itself).
     blend: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> r: Resolve;
@@ -60,6 +60,29 @@ const RECEIVERS_BODY: &str = r#"
 @group(0) @binding(2) var out_receivers: texture_storage_2d<rgba32float, write>;
 // The distance along the camera's forward of the receiver, 0 without one.
 @group(0) @binding(3) var out_depth: texture_storage_2d<r32float, write>;
+// The same receivers in the camera's own (Euclidean) frame, for reprojection.
+@group(0) @binding(4) var out_world: texture_storage_2d<rgba32float, write>;
+
+// A point of the anchor's Euclidean tangent frame in the clipmap's frame: the azimuthal equidistant plane position (arc length from the
+// anchor, not the chord) and the height above the sphere minus the sphere's drop at that distance. With c = 1 / (2 R) the sphere's centre
+// sits at z = -1 / (2 c), so t = tan(theta) = 2 c rho / (1 + 2 c z), the plane distance is theta / (2 c) and the drop sin^2(theta / 2) / c.
+// Every term is built from c and small quantities, never from R (CON-11), and without trigonometry (a shader atan2 may be off by 4096 ulp,
+// which is 20 m at 400 km): theta / t is a series in t^2 (t is at most 0.2 within 1,000 km, the seventh term is 1e-9), cos(theta) is
+// 1 / sqrt(1 + t^2) and 1 - cos(theta) is t^2 cos^2(theta) / (1 + cos(theta)), free of cancellation.
+fn to_plane(e: vec3<f32>, c: f32) -> vec3<f32> {
+    let a = 1.0 + 2.0 * c * e.z;
+    if (c <= 0.0 || a < 0.1) {
+        return e;
+    }
+    let t = 2.0 * c * length(e.xy) / a;
+    let t2 = t * t;
+    let ct = inverseSqrt(1.0 + t2);
+    let omc = t2 * ct * ct / (1.0 + ct);
+    let series = 1.0 - t2 * (1.0 / 3.0 - t2 * (1.0 / 5.0 - t2 * (1.0 / 7.0 - t2 * (1.0 / 9.0))));
+    // height - drop = z / cos(theta) + (sin^2(theta / 2) / c) (1 - cos(theta)) / cos(theta), with sin^2(theta / 2) = (1 - cos(theta)) / 2.
+    let z = e.z / ct + (0.5 * omc / c) * omc / ct;
+    return vec3<f32>(e.xy * (series / a), z);
+}
 
 @compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -82,6 +105,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
     }
     var receiver = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+    var world = vec4<f32>(0.0, 0.0, 0.0, 0.0);
     var z = 0.0;
     if (best > 0.0) {
         z = r.cur.k.z / best;
@@ -90,8 +114,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if (r.mode.x == 1u && ((u32(hp.x + hp.y) + r.mode.y) & 1u) != 0u) {
             w = -1.0;
         }
-        receiver = vec4<f32>(pos, w);
+        receiver = vec4<f32>(to_plane(pos, r.blend.y), w);
+        world = vec4<f32>(pos, w);
     }
+    textureStore(out_world, hp, world);
     textureStore(out_receivers, hp, receiver);
     textureStore(out_depth, hp, vec4<f32>(z, 0.0, 0.0, 0.0));
 }
@@ -576,25 +602,38 @@ impl GenerationMap {
         }
     }
 
-    /// Mark the cells a dirty rectangle (world texel indices of `level`) touches as changed in `frame` (counting from 1). A march reads the
-    /// level whose window holds it, so a change must be marked in every level whose window it intersects. The mip chain is a maximum in slot
-    /// space: a coarse cell of a window not aligned to it may flag a walk near the opposite window edge too (extra rejection, never a miss).
-    pub fn mark(&mut self, ctx: &GpuContext, frame: u32, level: usize, rect: &TexelRect) {
-        assert!(level < self.levels && frame > 0);
-        if rect.is_empty() {
-            return;
-        }
+    /// Mark the cells of each rectangle (world texel indices of its level) as changed in `frame` (counting from 1), rebuilding and uploading
+    /// each touched level once however many rectangles it has. A march reads the level whose window holds it, so a change must be marked
+    /// in every level whose window it intersects. The mip chain is a maximum in slot space: a coarse cell of a window not aligned to it may
+    /// flag a walk near the opposite window edge too (extra rejection, never a miss).
+    pub fn mark_rects<'a>(&mut self, ctx: &GpuContext, frame: u32, rects: impl IntoIterator<Item = (usize, &'a TexelRect)>) {
+        assert!(frame > 0);
         let n = i64::from(self.cells);
-        let (cx0, cx1) = (rect.x0 >> GENERATION_CELL_SHIFT, (rect.x1 - 1) >> GENERATION_CELL_SHIFT);
-        let (cy0, cy1) = (rect.y0 >> GENERATION_CELL_SHIFT, (rect.y1 - 1) >> GENERATION_CELL_SHIFT);
-        for cy in cy0..=cy1.min(cy0 + n - 1) {
-            for cx in cx0..=cx1.min(cx0 + n - 1) {
-                let (sx, sy) = (cx.rem_euclid(n) as usize, cy.rem_euclid(n) as usize);
-                self.mirror[level][0][sy * self.cells as usize + sx] = frame;
+        let mut touched = vec![false; self.levels];
+        for (level, rect) in rects {
+            assert!(level < self.levels);
+            if rect.is_empty() {
+                continue;
+            }
+            touched[level] = true;
+            let (cx0, cx1) = (rect.x0 >> GENERATION_CELL_SHIFT, (rect.x1 - 1) >> GENERATION_CELL_SHIFT);
+            let (cy0, cy1) = (rect.y0 >> GENERATION_CELL_SHIFT, (rect.y1 - 1) >> GENERATION_CELL_SHIFT);
+            for cy in cy0..=cy1.min(cy0 + n - 1) {
+                for cx in cx0..=cx1.min(cx0 + n - 1) {
+                    let (sx, sy) = (cx.rem_euclid(n) as usize, cy.rem_euclid(n) as usize);
+                    self.mirror[level][0][sy * self.cells as usize + sx] = frame;
+                }
             }
         }
-        self.rebuild(level);
-        self.upload(ctx, level);
+        for level in (0..self.levels).filter(|l| touched[*l]) {
+            self.rebuild(level);
+            self.upload(ctx, level);
+        }
+    }
+
+    /// [`GenerationMap::mark_rects`] for one rectangle.
+    pub fn mark(&mut self, ctx: &GpuContext, frame: u32, level: usize, rect: &TexelRect) {
+        self.mark_rects(ctx, frame, [(level, rect)]);
     }
 
     /// Mark every cell of every level (a re-anchor).
@@ -612,6 +651,7 @@ struct Targets {
     width: u32,
     height: u32,
     receivers: wgpu::Texture,
+    world: wgpu::Texture,
     half_depth: wgpu::Texture,
     half_vis: wgpu::Texture,
     half_steps: wgpu::Texture,
@@ -697,7 +737,13 @@ impl ShadowResolveGpu {
         let (receivers, receivers_bgl) = pipeline(
             "shadow-receivers",
             receivers_shader(),
-            &[uniform, depth(1), storage(2, wgpu::TextureFormat::Rgba32Float), storage(3, wgpu::TextureFormat::R32Float)],
+            &[
+                uniform,
+                depth(1),
+                storage(2, wgpu::TextureFormat::Rgba32Float),
+                storage(3, wgpu::TextureFormat::R32Float),
+                storage(4, wgpu::TextureFormat::Rgba32Float),
+            ],
         );
         let (fill, fill_bgl) = pipeline(
             "shadow-fill",
@@ -772,6 +818,7 @@ impl ShadowResolveGpu {
             width,
             height,
             receivers: make("shadow-receivers", hw, hh, wgpu::TextureFormat::Rgba32Float, rw),
+            world: make("shadow-receivers-world", hw, hh, wgpu::TextureFormat::Rgba32Float, rw),
             half_depth: make("shadow-half-depth", hw, hh, wgpu::TextureFormat::R32Float, rw),
             half_vis: make("shadow-half", hw, hh, wgpu::TextureFormat::R32Float, rw),
             half_steps: make("shadow-half-steps", hw, hh, wgpu::TextureFormat::R32Uint, rw),
@@ -798,6 +845,23 @@ impl ShadowResolveGpu {
         depth: &DepthTarget,
         params: &ResolveParams,
     ) {
+        let view = depth.texture.create_view(&wgpu::TextureViewDescriptor { aspect: wgpu::TextureAspect::DepthOnly, ..Default::default() });
+        self.resolve_view(ctx, march, clip, cube, march_params, &view, (depth.width, depth.height), params);
+    }
+
+    /// [`ShadowResolveGpu::resolve`] over the lit pass's own depth view (a `Depth32Float` texture of `size`, reversed-Z).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn resolve_view(
+        &mut self,
+        ctx: &GpuContext,
+        march: &ShadowMarchGpu,
+        clip: &ClipmapGpu,
+        cube: &CoarseCubeGpu,
+        march_params: &MarchParams,
+        depth_view: &wgpu::TextureView,
+        size: (u32, u32),
+        params: &ResolveParams,
+    ) {
         assert!(params.frame > 0, "frames count from 1");
         for cam in [&params.camera, &params.previous] {
             assert!(
@@ -805,9 +869,9 @@ impl ShadowResolveGpu {
                 "a camera needs a near plane and a field of view"
             );
         }
-        self.ensure(ctx, depth.width, depth.height);
+        self.ensure(ctx, size.0, size.1);
         let device = &ctx.device;
-        let (width, height) = (depth.width, depth.height);
+        let (width, height) = size;
         let (hw, hh) = (width.div_ceil(2), height.div_ceil(2));
         let cut = params.cut || self.fresh;
         let mut p = march_params.clone();
@@ -834,7 +898,7 @@ impl ShadowResolveGpu {
         for v in [width, height, hw, hh, skip, params.frame & 1, u32::from(cut), 0] {
             bytes.extend_from_slice(&v.to_le_bytes());
         }
-        f(&mut bytes, &[params.history_weight.clamp(0.0, MAX_HISTORY_WEIGHT), 0.0, 0.0, 0.0]);
+        f(&mut bytes, &[params.history_weight.clamp(0.0, MAX_HISTORY_WEIGHT), march_params.drop_coefficient, 0.0, 0.0]);
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("shadow-resolve-uniform"),
             size: bytes.len() as u64,
@@ -845,10 +909,9 @@ impl ShadowResolveGpu {
 
         let t = self.targets.as_ref().expect("targets");
         let view = |tex: &wgpu::Texture| tex.create_view(&Default::default());
-        let depth_view =
-            depth.texture.create_view(&wgpu::TextureViewDescriptor { aspect: wgpu::TextureAspect::DepthOnly, ..Default::default() });
         let (receivers_view, half_depth_view, half_vis_view, half_steps_view, up_view) =
             (view(&t.receivers), view(&t.half_depth), view(&t.half_vis), view(&t.half_steps), view(&t.up));
+        let world_view = view(&t.world);
         let (filled_prev, filled_view) = (view(&t.filled[self.current]), view(&t.filled[1 - self.current]));
         let (history_view, out_view) = (view(&t.shadow[self.current]), view(&t.shadow[1 - self.current]));
         let entry = |binding, view| wgpu::BindGroupEntry { binding, resource: wgpu::BindingResource::TextureView(view) };
@@ -859,7 +922,13 @@ impl ShadowResolveGpu {
             let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("shadow-receivers"),
                 layout: &self.receivers_bgl,
-                entries: &[ubind.clone(), entry(1, &depth_view), entry(2, &receivers_view), entry(3, &half_depth_view)],
+                entries: &[
+                    ubind.clone(),
+                    entry(1, depth_view),
+                    entry(2, &receivers_view),
+                    entry(3, &half_depth_view),
+                    entry(4, &world_view),
+                ],
             });
             let mut pass =
                 encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("shadow-receivers"), timestamp_writes: None });
@@ -888,7 +957,7 @@ impl ShadowResolveGpu {
                     ubind.clone(),
                     entry(1, &half_vis_view),
                     entry(2, &half_steps_view),
-                    entry(3, &receivers_view),
+                    entry(3, &world_view),
                     entry(4, &filled_prev),
                     entry(5, &filled_view),
                 ],
@@ -904,7 +973,7 @@ impl ShadowResolveGpu {
                 layout: &self.upsample_bgl,
                 entries: &[
                     ubind.clone(),
-                    entry(1, &depth_view),
+                    entry(1, depth_view),
                     entry(2, &filled_view),
                     entry(3, &half_depth_view),
                     entry(4, &half_steps_view),
@@ -921,7 +990,7 @@ impl ShadowResolveGpu {
             let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("shadow-temporal"),
                 layout: &self.temporal_bgl,
-                entries: &[ubind, entry(1, &depth_view), entry(2, &up_view), entry(3, &history_view), entry(4, &out_view)],
+                entries: &[ubind, entry(1, depth_view), entry(2, &up_view), entry(3, &history_view), entry(4, &out_view)],
             });
             let mut pass =
                 encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("shadow-temporal"), timestamp_writes: None });
