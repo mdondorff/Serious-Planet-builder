@@ -47,6 +47,8 @@ pub struct MachineFacts {
     pub cpu_load_pct: Option<f64>,
     pub gpu_util_pct: Option<f64>,
     pub gpu_temp_c: Option<f64>,
+    /// The CPU clock as a share of its base clock (percent, above 100 with turbo): recorded in loaded mode, never judged.
+    pub cpu_perf_pct: Option<f64>,
 }
 
 /// A failed gate condition with its measured value.
@@ -130,6 +132,8 @@ pub struct LoadRecord {
     pub cpu_pct: Option<f64>,
     pub gpu_util_pct: Option<f64>,
     pub gpu_temp_c: Option<f64>,
+    /// The CPU performance (percent of the base clock), `None` when it could not be read.
+    pub cpu_perf_pct: Option<f64>,
     /// Build and test processes beside the harness (`name (pid n)`), `None` when the process list could not be read.
     pub processes: Option<Vec<String>>,
 }
@@ -143,8 +147,9 @@ impl LoadRecord {
             None => "unavailable".to_string(),
         };
         format!(
-            "CPU load {} %, GPU utilisation {} %, GPU temperature {} C, build and test processes: {procs}",
+            "CPU load {} %, CPU performance {} %, GPU utilisation {} %, GPU temperature {} C, build and test processes: {procs}",
             pct(self.cpu_pct),
+            pct(self.cpu_perf_pct),
             pct(self.gpu_util_pct),
             pct(self.gpu_temp_c)
         )
@@ -158,8 +163,9 @@ impl LoadRecord {
             .as_ref()
             .map_or("null".to_string(), |p| format!("[{}]", p.iter().map(|n| format!("{n:?}")).collect::<Vec<_>>().join(",")));
         format!(
-            "{{\"cpu_pct\":{},\"gpu_util_pct\":{},\"gpu_temp_c\":{},\"processes\":{procs}}}",
+            "{{\"cpu_pct\":{},\"cpu_perf_pct\":{},\"gpu_util_pct\":{},\"gpu_temp_c\":{},\"processes\":{procs}}}",
             num(self.cpu_pct),
+            num(self.cpu_perf_pct),
             num(self.gpu_util_pct),
             num(self.gpu_temp_c)
         )
@@ -217,8 +223,13 @@ pub fn readiness_mode(f: &MachineFacts, mode: Mode) -> Gate {
         Some(v) if v < MAX_GPU_TEMP_C => {}
         v => fail("GPU temperature", format!("{} C (limit {MAX_GPU_TEMP_C} C)", pct(v))),
     }
-    let load =
-        (!quiet).then_some(LoadRecord { cpu_pct: f.cpu_load_pct, gpu_util_pct: f.gpu_util_pct, gpu_temp_c: f.gpu_temp_c, processes });
+    let load = (!quiet).then_some(LoadRecord {
+        cpu_pct: f.cpu_load_pct,
+        cpu_perf_pct: f.cpu_perf_pct,
+        gpu_util_pct: f.gpu_util_pct,
+        gpu_temp_c: f.gpu_temp_c,
+        processes,
+    });
     Gate { failures: out, load }
 }
 
@@ -354,6 +365,20 @@ pub fn query_cpu_load(seconds: u32) -> Option<f64> {
     crate::load::competing_load(seconds, std::process::id())
 }
 
+/// The CPU performance as a share of the base clock (percent), through the locale-independent WMI class (the counter paths of `Get-Counter` are localised and
+/// fail on the German machine); `None` when it cannot be read.
+pub fn query_cpu_performance() -> Option<f64> {
+    parse_percent(&powershell(
+        "(Get-CimInstance Win32_PerfFormattedData_Counters_ProcessorInformation -Filter \"Name='_Total'\").PercentProcessorPerformance",
+    )?)
+}
+
+/// A percentage printed by PowerShell: a plain number, with a decimal comma or point; anything else is `None`.
+pub fn parse_percent(text: &str) -> Option<f64> {
+    let v: f64 = text.trim().replace(',', ".").parse().ok()?;
+    (v.is_finite() && v >= 0.0).then_some(v)
+}
+
 /// Parse one `nvidia-smi --query-gpu=utilization.gpu,temperature.gpu --format=csv,noheader,nounits` line.
 pub fn parse_gpu_util_temp(csv: &str) -> Option<(f64, f64)> {
     let line = csv.lines().find(|l| !l.trim().is_empty())?;
@@ -397,6 +422,7 @@ pub fn measure_machine(adapter: AdapterFacts) -> MachineFacts {
         cpu_load_pct,
         gpu_util_pct: gpu.map(|g| g.0),
         gpu_temp_c: gpu.map(|g| g.1),
+        cpu_perf_pct: query_cpu_performance(),
     }
 }
 
@@ -419,6 +445,7 @@ mod tests {
             cpu_load_pct: Some(3.0),
             gpu_util_pct: Some(1.0),
             gpu_temp_c: Some(45.0),
+            cpu_perf_pct: Some(90.0),
         }
     }
 
@@ -573,7 +600,7 @@ mod tests {
         let g = readiness_mode(&f, Mode::Loaded);
         assert!(g.failures.is_empty(), "{:?}", g.failures);
         let load = g.load.expect("the loaded gate records the load");
-        assert_eq!((load.cpu_pct, load.gpu_util_pct, load.gpu_temp_c), (Some(40.0), Some(50.0), Some(45.0)));
+        assert_eq!((load.cpu_pct, load.gpu_util_pct, load.gpu_temp_c, load.cpu_perf_pct), (Some(40.0), Some(50.0), Some(45.0), Some(90.0)));
         assert_eq!(load.processes, Some(vec!["cargo.exe (pid 30)".to_string()]));
         assert!(readiness_mode(&ready(), Mode::Quiet).load.is_none(), "a quiet gate records nothing");
         // Battery, a wrong scheme, the wrong adapter and a hot GPU refuse in loaded mode too, beside the recorded load.
@@ -590,15 +617,43 @@ mod tests {
         let blind = MachineFacts { processes: None, cpu_load_pct: None, gpu_util_pct: None, ..ready() };
         let g = readiness_mode(&blind, Mode::Loaded);
         assert!(g.failures.is_empty());
-        assert!(g.load.unwrap().text().starts_with("CPU load unavailable %, GPU utilisation unavailable %"));
+        assert!(g.load.unwrap().text().starts_with("CPU load unavailable %, CPU performance 90.0 %, GPU utilisation unavailable %"));
+    }
+
+    // spec: BUILD-030
+    #[test]
+    fn a_percentage_from_powershell_parses_with_a_point_or_a_comma_and_nothing_else_does() {
+        assert_eq!(
+            (
+                parse_percent(
+                    "151
+"
+                ),
+                parse_percent("93,5"),
+                parse_percent("93.5")
+            ),
+            (Some(151.0), Some(93.5), Some(93.5))
+        );
+        for bad in ["", "abc", "-3", "NaN", "inf"] {
+            assert_eq!(parse_percent(bad), None, "{bad:?}");
+        }
     }
 
     // spec: BUILD-030
     #[test]
     fn a_load_record_prints_and_serialises_with_its_readings() {
-        let l = LoadRecord { cpu_pct: Some(40.0), gpu_util_pct: None, gpu_temp_c: Some(45.0), processes: Some(vec![]) };
-        assert_eq!(l.text(), "CPU load 40.0 %, GPU utilisation unavailable %, GPU temperature 45.0 C, build and test processes: none");
-        assert_eq!(l.json(), "{\"cpu_pct\":40.0,\"gpu_util_pct\":null,\"gpu_temp_c\":45.0,\"processes\":[]}");
+        let l = LoadRecord {
+            cpu_pct: Some(40.0),
+            cpu_perf_pct: Some(151.0),
+            gpu_util_pct: None,
+            gpu_temp_c: Some(45.0),
+            processes: Some(vec![]),
+        };
+        assert_eq!(
+            l.text(),
+            "CPU load 40.0 %, CPU performance 151.0 %, GPU utilisation unavailable %, GPU temperature 45.0 C, build and test processes: none"
+        );
+        assert_eq!(l.json(), "{\"cpu_pct\":40.0,\"cpu_perf_pct\":151.0,\"gpu_util_pct\":null,\"gpu_temp_c\":45.0,\"processes\":[]}");
     }
 
     // spec: TEST-012

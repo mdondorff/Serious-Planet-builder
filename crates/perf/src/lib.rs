@@ -405,6 +405,26 @@ fn mode_name(validity: &gate::Validity) -> &'static str {
     }
 }
 
+/// The `loaded_verdicts` of a run row in a loaded session (BUILD-032): each time reading of the row with the rule of BUILD-031 and its answer; empty in a quiet session.
+fn loaded_verdicts_json(validity: &gate::Validity, r: &RunReport) -> String {
+    if validity.load.is_none() {
+        return String::new();
+    }
+    let rows: Vec<String> = loaded::row_verdicts(r)
+        .iter()
+        .map(|v| {
+            format!(
+                "{{\"metric\":{},\"reading\":{},\"budget\":{},\"verdict\":{}}}",
+                json_str(v.metric),
+                json_f(v.reading),
+                json_f(v.budget),
+                json_str(&v.judged.text())
+            )
+        })
+        .collect();
+    format!(",\"loaded_verdicts\":[{}]", rows.join(","))
+}
+
 /// The leading keys of a log: the mode and, in loaded mode, the load the gate recorded (each ends in a comma).
 fn mode_json(validity: &gate::Validity) -> String {
     let load = validity.load.as_ref().map_or(String::new(), |l| format!("\"load_record\":{},", l.json()));
@@ -438,7 +458,7 @@ pub fn report_json_full(
         .map(|r| {
             let gv = gpu_valid_json(&view_gpu_validity(runs, &r.path_name));
             format!(
-                "{{\"mode\":{},\"path\":{},\"vram_cap_gb\":{},\"samples\":{},\"median_ms\":{},\"p99_ms\":{},\"min_ms\":{},\"max_ms\":{},\"mean_ms\":{},\"clocks_before\":{},\"clocks_after\":{},\"gpu_valid\":{},\"gpu_clock_state\":{},\"power_cap\":{},\"metrics\":{{{}}},\"counts\":{{{}}}{}}}",
+                "{{\"mode\":{},\"path\":{},\"vram_cap_gb\":{},\"samples\":{},\"median_ms\":{},\"p99_ms\":{},\"min_ms\":{},\"max_ms\":{},\"mean_ms\":{},\"clocks_before\":{},\"clocks_after\":{},\"gpu_valid\":{},\"gpu_clock_state\":{},\"power_cap\":{},\"metrics\":{{{}}},\"counts\":{{{}}}{}{}}}",
                 json_str(mode_name(validity)),
                 json_str(&r.path_name),
                 r.vram_cap_gb,
@@ -455,7 +475,8 @@ pub fn report_json_full(
                 view_power_cap(runs, &r.path_name),
                 r.metrics.iter().map(|(n, s)| format!("{}:{{\"median\":{},\"p99\":{},\"max\":{},\"mean\":{},\"samples\":{}}}", json_str(n), json_f(s.median), json_f(s.p99), json_f(s.max), json_f(s.mean), s.samples)).collect::<Vec<_>>().join(","),
                 r.counts.iter().map(|(n, v)| format!("{}:{v}", json_str(n))).collect::<Vec<_>>().join(","),
-                load_of(&r.path_name).map_or(String::new(), |l| format!(",\"load\":{}", load::load_json(l)))
+                load_of(&r.path_name).map_or(String::new(), |l| format!(",\"load\":{}", load::load_json(l))),
+                loaded_verdicts_json(validity, r)
             )
         })
         .collect();
