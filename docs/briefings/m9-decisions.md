@@ -1,6 +1,6 @@
 # M9: decisions for the owner on return
 Status: for the owner (drafted by the spikes session for opus-planner, 2026-10-31). No new findings: each line cites the spike results.
-Sources: SPIKE-61 to SPIKE-80 (`spikes/m9-*/results/results.md`); ADR 0088 (proposed); `docs/briefings/m9-draft.md`.
+Sources: SPIKE-61 to SPIKE-83 (`spikes/m9-*/results/results.md`); ADR 0088 and ADR 0089 (proposed); `docs/briefings/m9-draft.md`.
 
 ## What the combined generator gives ([SPIKE-80](../../spikes/m9-combined/results/results.md))
 With decisions 1, 2 and 5 together (class map and plateau rule, plate-margin belts, class amplitudes, the two-pass bake), at coarse global resolution and at re-matched scorecard sites:
@@ -23,7 +23,7 @@ With decisions 1, 2 and 5 together (class map and plateau rule, plate-margin bel
 - **Bounds:** the layer stores a min/max pyramid per 32 x 32 block: about 90 MB for the planet (1-2.5 % of the layer), seconds to build, 2.5-4 us a lookup. Without it the steep classes stop refining at level 13-15 ([SPIKE-82](../../spikes/m9-lod-steep/results/results.md)); with it they plan to level 18 with no capped tile at 5-8 % more nodes ([SPIKE-83](../../spikes/m9-bounds-pyramid/results/results.md)).
 - **Cost to reverse:** low. The layer is separate and switched; turning it off restores today's field. The bake is re-run, not migrated.
 
-## 2. Relief classes drive the terrain's amplitude (a new ADR; outline in SPIKE-76 section 5)
+## 2. Relief classes drive the terrain's amplitude ([ADR 0089](../adr/0089-relief-classes-drive-the-terrains-amplitude.md), proposed; outline in SPIKE-76 section 5)
 - **Evidence:**
   - with a class per landform, all four hill landforms pass criterion 1, the Alps included (in-sample, [SPIKE-76](../../spikes/m9-generator-design/results/results.md));
   - a default class map matches Earth's class shares (63 / 14 / 23 %) with smooth `k` ([SPIKE-77](../../spikes/m9-class-map/results/results.md));
@@ -39,13 +39,27 @@ With decisions 1, 2 and 5 together (class map and plateau rule, plate-margin bel
 - **Open inside it (R7):** the Badlands' two sites need different classes (SPIKE-77); the arid classes have no default rule, because the generator's climate is independent of its landforms (SPIKE-75).
 - Derived classes: see [SPIKE-81](../../spikes/m9-class-drivers/results/results.md) (a rule table over plate history, rock hardness, aridity and height; it adds badlands and sand sea as derived classes, and the Badlands score about equal to today's baseline at driver-chosen sites).
 
-## 3. The terrain ADRs (verdict table: SPIKE-76 section 4)
+## 3. The terrain ADRs (verdict table: SPIKE-76 section 4, updated by SPIKE-80, SPIKE-82 and SPIKE-83)
 | Verdict | ADRs | Evidence |
 |---|---|---|
-| keep | 0006, 0014, 0016 and 0074 (re-check level steps and capped tiles at R4's gate), 0019, 0022, 0041, 0056, 0058, 0071, 0073, 0085 | not touched by the spikes, or consumers of the heights |
-| amend | 0026 (bake channels, version bump), 0028 (the field formula by class), 0045 (storage: layer and class channel), 0076 (merge: the class is a driver), 0088 (`k` from the class); extend 0066 (class paint as an item) | SPIKE-66, SPIKE-73, SPIKE-75, SPIKE-76 |
-| supersede | 0030 by 0088; 0080 points 1-3 by the class amplitudes (point 4 stays) | SPIKE-65, SPIKE-66, SPIKE-73 |
-- **Recommendation:** approve the table as the plan; the planner drafts each change after the decision.
+| keep | 0006, 0014, 0019, 0022, 0041, 0056, 0058, 0071, 0073, 0074, 0085 | not touched by the spikes, or consumers of the heights; 0014 and 0074 re-checked: with the pyramid no mountain pose caps a tile (SPIKE-82, SPIKE-83) |
+| amend (accepted ADRs, by 0088 or 0089) | 0016 (cap bounds: the layer's pyramid, the class band, the detail), 0026 (channels, base elevation), 0028 point 6 (detail by class), 0030 point 1 (creases without the landform factor), 0080 points 1 and 5 (hill band and its bounds by class); extend 0066 (class paint) | SPIKE-66, SPIKE-73, SPIKE-75, SPIKE-80, SPIKE-82, SPIKE-83 |
+| supersede | 0030 point 2 by 0088; 0080 point 2 and point 3 as the weight by 0089 (point 3's lattice mechanism stays) | SPIKE-65, SPIKE-66, SPIKE-73, SPIKE-80 |
+| edit in place (proposed ADRs) | 0045 (storage: the layer, its pyramid, the class channel), 0076 (the class as a consumer of drivers) | ADR 0088, ADR 0089 |
+| new | ADR 0089 (proposed); ADR 0088 amended while proposed | this brief, sections 2, 5 and 6 |
+
+**Status lines (template, applied only on the owner's go).** ADR 0078 lets a status line record supersession and amendment while the decision text stays. Each line below is appended to the accepted ADR's current status line; `<date>` is the date of the owner's decision.
+| ADR | Appended to the status line |
+|---|---|
+| 0016 | `; amended by ADR 0088 point 8 and ADR 0089 (owner, <date>): cap bounds read the erosion layer's min/max pyramid and carry the class hill band's and the detail's bounds` |
+| 0026 | `; amended by ADR 0088 point 1 and ADR 0089 decisions 1 and 7 (owner, <date>): the relief driver, ring-mean and class-weights channels, and the base-elevation rule (plate belts, plateaus; a GLOBAL_VERSION bump)` |
+| 0028 | `; point 6 amended by ADR 0089 decisions 5 and 6 (owner, <date>): the detail amplitude follows the relief class, not the base elevation` |
+| 0030 | `; point 2 superseded by ADR 0088 and point 1 amended by ADR 0089 decision 6 (owner, <date>): the crease filter stays without its landform-keyed factor` |
+| 0066 | `; extended by ADR 0089 decision 8 (owner, <date>): class paint is an authored item that sets class weights, feathered` |
+| 0080 | `; point 2 and point 3 as the weight superseded, points 1 and 5 amended by ADR 0089 (owner, <date>): the hill band and its bounds follow the relief class; point 3's lattice mechanism carries the class weights; point 4 stays` |
+- ADR 0045 and ADR 0076 are proposed: they are edited in place when 0088 and 0089 are decided, with no ADR 0078 route.
+- ADR 0088 and ADR 0089 take the owner's status on acceptance.
+- **Recommendation:** approve ADR 0088 (amended draft) and ADR 0089, then apply the template in one ADR 0078 maintenance PR and edit 0045 and 0076 in place in another.
 - **Cost to reverse:** low per ADR (status lines and new ADRs; ADR 0078's rules).
 
 ## 4. The store re-bake
