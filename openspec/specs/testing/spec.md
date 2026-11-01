@@ -1567,7 +1567,7 @@ Source: owner (2026-10-30), explorer's measurement of the locked-session stalls,
 - **THEN** the text of its error is the step's NOT RUN line, its row says INCOMPLETE and not pass, and the run returns an error; a step with markers keeps its markers
 
 ### Requirement: TEST-085 The gate smokes the real store on the software adapter
-`cargo xtask gate` on the real store SHALL also run `editor --smoke --edit --adapter software --store DIR` once and print its PASS or FAIL whether or not the desktop is locked. The run passes when it exits successfully and prints its `[smoke ok]` line. The store SHALL stay read only: the gate compares the store's files (names, sizes, modification times) before and after the run, and any addition, removal or change SHALL fail it, naming the file. The gate's exit SHALL be the worst of its parts: a failed software smoke exits 1, a passed one beside a locked desktop leaves the hardware part NOT RUN and exits 3 (TEST-073).
+`cargo xtask gate` on the real store SHALL also run `editor --smoke --edit --no-vsync --adapter software --store DIR` once and print its PASS or FAIL whether or not the desktop is locked. The run passes when it exits successfully and prints its `[smoke ok]` line. The store SHALL stay read only: the gate compares the store's top-level entries (names, sizes, modification times) before and after the run, and any addition, removal or change SHALL fail it, naming the file. The gate's exit SHALL be the worst of its parts: a failed software smoke exits 1, a passed one beside a locked desktop leaves the hardware part NOT RUN and exits 3 (TEST-073).
 
 Verify: A
 Status: active

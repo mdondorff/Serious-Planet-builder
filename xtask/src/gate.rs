@@ -123,7 +123,7 @@ pub fn run_small(root: &Path) -> Res {
 /// `Ok` is the table row of a pass, `Err` the row of a failure.
 fn software_smoke(root: &Path, exe: &Path, store: &str) -> Result<String, String> {
     eprintln!("gate: editor --smoke on the real store, software adapter ...");
-    let before = store_snapshot(Path::new(store));
+    let before = store_snapshot(Path::new(store))?;
     let out = Command::new(exe)
         .args(["editor", "--smoke", "--edit", "--no-vsync", "--adapter", "software", "--store", store])
         .current_dir(root)
@@ -133,7 +133,7 @@ fn software_smoke(root: &Path, exe: &Path, store: &str) -> Result<String, String
     let stderr = String::from_utf8_lossy(&out.stderr);
     let mut verdict = smoke_verdict(out.status.success(), &stdout, &stderr);
     // The store is opened read only: no file of it may have appeared, changed size or been touched by the run.
-    if let Some(change) = store_changes(&before, &store_snapshot(Path::new(store))) {
+    if let Some(change) = store_changes(&before, &store_snapshot(Path::new(store))?) {
         verdict = Err(format!("the run changed the store, which must stay read only: {change}"));
     }
     match &verdict {
@@ -142,11 +142,12 @@ fn software_smoke(root: &Path, exe: &Path, store: &str) -> Result<String, String
     }
 }
 
-/// The files of a store directory with their sizes and modification times (the directory itself, not its subfolders' contents).
-fn store_snapshot(dir: &Path) -> Vec<(String, u64, Option<std::time::SystemTime>)> {
-    let mut v: Vec<_> = std::fs::read_dir(dir)
-        .into_iter()
-        .flatten()
+/// The top-level entries of a store directory with their sizes and modification times (the packs and indexes live there; a subfolder counts
+/// as one entry). An unreadable directory is an error, never an empty snapshot.
+fn store_snapshot(dir: &Path) -> Result<Vec<(String, u64, Option<std::time::SystemTime>)>, String> {
+    let entries = std::fs::read_dir(dir)
+        .map_err(|e| format!("software smoke: ERROR cannot read the store directory {} to check it stays read only: {e}", dir.display()))?;
+    let mut v: Vec<_> = entries
         .flatten()
         .filter_map(|e| {
             let m = e.metadata().ok()?;
@@ -154,7 +155,7 @@ fn store_snapshot(dir: &Path) -> Vec<(String, u64, Option<std::time::SystemTime>
         })
         .collect();
     v.sort_by(|a, b| a.0.cmp(&b.0));
-    v
+    Ok(v)
 }
 
 /// What differs between two snapshots of a store (TEST-085): the first added, removed or changed file, or `None`.
@@ -171,6 +172,19 @@ fn store_changes(
         }
     }
     after.iter().find(|a| !before.iter().any(|b| b.0 == a.0)).map(|a| format!("{} is new", a.0))
+}
+
+/// The error that ends a gate on a locked desktop (TEST-073, TEST-085): a failed software smoke is a failure (exit 1), a passed one leaves the
+/// hardware part NOT RUN, incomplete (exit 3).
+fn locked_outcome(software_passed: bool) -> String {
+    if software_passed {
+        format!(
+            "{} the hardware gate was NOT RUN (desktop locked); the software smoke on the real store passed; the run is incomplete, not a pass",
+            crate::util::INCOMPLETE
+        )
+    } else {
+        "the gate failed: the software smoke on the real store failed (the hardware part was NOT RUN, desktop locked)".into()
+    }
 }
 
 /// A smoke run passes when it exits successfully and prints its `[smoke ok]` line.
@@ -212,15 +226,7 @@ pub fn run_gate(root: &Path, args: &[String]) -> Res {
     if let planet_perf::desktop::Desktop::Locked(reason) = planet_perf::desktop::detect() {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
         planet_perf::desktop::report("gate", &reason, now, now, false, Some(&root.join(crate::util::NOT_RUN_DIR)));
-        if software.is_err() {
-            return Err(
-                "the gate failed: the software smoke on the real store failed (the hardware part was NOT RUN, desktop locked)".into()
-            );
-        }
-        return Err(format!(
-            "{} the hardware gate was NOT RUN (desktop locked); the software smoke on the real store passed; the run is incomplete, not a pass",
-            crate::util::INCOMPLETE
-        ));
+        return Err(locked_outcome(software.is_ok()));
     }
     let all = sites(Path::new(&paths));
     let chosen: Vec<_> =
@@ -420,15 +426,29 @@ planet editor [smoke ok]: 90 frames drawn
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("pack-1.tpack"), b"abc").unwrap();
-        let before = store_snapshot(&dir);
-        assert_eq!(store_changes(&before, &store_snapshot(&dir)), None);
+        let before = store_snapshot(&dir).unwrap();
+        assert_eq!(store_changes(&before, &store_snapshot(&dir).unwrap()), None);
         std::fs::write(dir.join("pack-1.tpack"), b"abcd").unwrap();
-        assert!(store_changes(&before, &store_snapshot(&dir)).unwrap().contains("pack-1.tpack grew or shrank from 3 to 4"));
+        assert!(store_changes(&before, &store_snapshot(&dir).unwrap()).unwrap().contains("pack-1.tpack grew or shrank from 3 to 4"));
         std::fs::write(dir.join("pack-1.tpack"), b"abc").unwrap();
+        let touched = std::fs::OpenOptions::new().write(true).open(dir.join("pack-1.tpack")).unwrap();
+        touched.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(5)).unwrap();
+        drop(touched);
+        assert!(store_changes(&before, &store_snapshot(&dir).unwrap()).unwrap().contains("pack-1.tpack was modified"));
+        let before = store_snapshot(&dir).unwrap();
         std::fs::write(dir.join("pack-2.tpack"), b"x").unwrap();
-        assert!(store_changes(&before, &store_snapshot(&dir)).unwrap().contains("pack-2.tpack is new"));
+        assert!(store_changes(&before, &store_snapshot(&dir).unwrap()).unwrap().contains("pack-2.tpack is new"));
         std::fs::remove_file(dir.join("pack-1.tpack")).unwrap();
-        assert!(store_changes(&before, &store_snapshot(&dir)).unwrap().contains("pack-1.tpack is gone"));
+        assert!(store_changes(&before, &store_snapshot(&dir).unwrap()).unwrap().contains("pack-1.tpack is gone"));
+    }
+
+    // spec: TEST-085
+    #[test]
+    fn a_locked_desktop_ends_the_gate_incomplete_after_a_passed_software_smoke_and_failed_after_a_failed_one() {
+        assert!(locked_outcome(true).starts_with(crate::util::INCOMPLETE));
+        let failed = locked_outcome(false);
+        assert!(!failed.starts_with(crate::util::INCOMPLETE) && failed.contains("software smoke"), "{failed}");
+        assert!(store_snapshot(Path::new("no/such/store/dir")).unwrap_err().contains("cannot read the store directory"));
     }
 
     // spec: TEST-063
