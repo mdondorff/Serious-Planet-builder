@@ -1,11 +1,11 @@
 ## ADDED Requirements
 
 ### Requirement: TEST-081 Criterion 1 on the baked field
-The scorecard run (TEST-079) over a store with the erosion layer (STRM-065) and the relief classes (GEN-093) SHALL check M9 criterion 1. At Valley and Ridge, the Black Forest, the Scottish Highlands and the Alps, the generator's slope p50 and 1 km relief p50 SHALL be at least 0.6 of the real tile's, at both matched sites. The sites SHALL be matched to the baked field by class and mean height (SPIKE-80's method), and the sites file SHALL record them. The report SHALL name each landform and site with its two ratios and PASS or FAIL. Without the layer the check SHALL be NOT RUN, never a pass. The bound 0.6 is a start value; R7 tunes towards 0.8.
+The scorecard run (TEST-079) over a store with the erosion layer (STRM-065) and the relief classes (GEN-093) SHALL check M9 criterion 1. At Valley and Ridge, the Black Forest, the Scottish Highlands and the Alps, the generator's slope p50 over cells at or below the heightfield's slope ceiling (45°, on both sides) and its 1 km relief p50 SHALL be at least 0.6 of the real tile's, at both matched sites. The sites SHALL be matched to the baked field by class and mean height (SPIKE-80's method), and the sites file SHALL record them. The report SHALL name each landform and site with its two ratios and PASS or FAIL. Without the layer the check SHALL be NOT RUN, never a pass. The bound 0.6 is a start value; R7 tunes towards 0.8.
 
 Verify: A, B
 Status: planned
-Source: M9 draft (`docs/briefings/m9-draft.md`) decision 6, criterion 1's bound; ADR 0088, ADR 0089, pending the owner's acceptance of ADR 0088/0089; SPIKE-80, SPIKE-81 (the stand-in: the hill landforms pass with the class hill band, the Alps at 0.71-0.72)
+Source: M9 draft (`docs/briefings/m9-draft.md`) decision 6, criterion 1's bound; ADR 0088, ADR 0089, pending the owner's acceptance of ADR 0088/0089; SPIKE-80, SPIKE-81 (the stand-in: the hill landforms pass with the class hill band, the Alps at 0.71-0.72); the 45° ceiling: ADR 0091, SPIKE-85
 
 #### Scenario: Pass and fail named (A)
 - **WHEN** the check reads a site whose slope ratio is 0.65 and 1 km relief ratio 0.55
