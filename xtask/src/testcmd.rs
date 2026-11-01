@@ -884,7 +884,7 @@ fn perf_stream_args(args: &[String]) -> Result<Vec<String>, String> {
     while let Some(a) = it.next() {
         match a.as_str() {
             "--smoke" => smoke = true,
-            "--machine-ready" | "--loaded" | "--allow-memory-bake" | "--lit" | "--no-horizon-jobs" | "--only-steady" => tail.push(a.clone()),
+            "--machine-ready" | "--loaded" | "--reserve" | "--allow-memory-bake" | "--lit" | "--no-horizon-jobs" | "--only-steady" => tail.push(a.clone()),
             "--store" | "--global-res" | "--out" | "--upload" | "--prefill-levels" | "--gen-workers" | "--horizon-threads" | "--repeats" | "--gen-ahead" | "--gen-reserve" | "--gen-priority" | "--settle-ms" | "--share-bound" | "--steady-window-s" | "--altitudes-m" | "--places" | "--poses" | "--out-dir" => {
                 let value = it.next().ok_or_else(|| format!("{a} needs a value"))?;
                 tail.push(a.clone());
@@ -1057,6 +1057,9 @@ fn perf_stream_all(root: &Path, rest: &[String], settle: bool) -> Res {
 pub fn perf(root: &Path, args: &[String]) -> Res {
     if args.first().map(String::as_str) == Some("--ab") {
         return crate::perfab::run(root, args);
+    }
+    if args.first().map(String::as_str) == Some("reserve") {
+        return crate::perfab::reserve(root, &args[1..]);
     }
     if args.first().map(String::as_str) == Some("stream") {
         if stream_runs_all(&args[1..]) {

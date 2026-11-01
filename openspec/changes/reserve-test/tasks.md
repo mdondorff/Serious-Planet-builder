@@ -9,7 +9,7 @@
 
 ## 3. Tier C
 - [x] 3.1 (`planet_render::BurnPass`, `planet_frame::reserve::ReservePlan`; the test passes on the software adapter as "cannot calibrate" and on the RTX 3080 Ti within 5 % of 3.0 ms) The GPU burn pass, calibrated with timestamp queries to the GPU ms; skipped with a reason where timestamps are unsupported (software adapter)
-- [ ] 3.2 The reserve scene on the software adapter in smoke mode (labelled, no verdict) and on the discrete GPU under `xtask perf reserve`
+- [x] 3.2 (`--reserve` on the streaming scenes: `ReserveRun` spins the loads' main-thread ms inside the timed frame, submits the burns, the cores run on a system of their own; terrain GPU from 30 timed renders at the last pose; `ReserveReport` printed and its numbers in the log counts; `cargo xtask perf reserve` alternates loads off and on per flight; smoke test on the software adapter) The reserve scene on the software adapter in smoke mode (labelled, no verdict) and on the discrete GPU under `xtask perf reserve`
 
 ## 4. Measurement
 - [ ] 4.1 Tell the planner when the scene is ready; the planner opens the window (ADR 0087); first run and report

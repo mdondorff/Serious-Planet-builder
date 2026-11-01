@@ -622,3 +622,40 @@ fn a_lit_view_a_lit_flight_and_a_stream_scene_log_their_cpu_calibration_when_ask
     assert!(!json.contains("\"cpu_calibration_valid\":null"), "{json}");
     let _ = std::fs::remove_file(&stream);
 }
+
+// spec: BUDG-011, BUDG-012
+#[test]
+fn a_smoke_run_with_the_reserve_loads_calibrates_them_and_prints_the_reserve_report() {
+    let dir = tmp("reserve");
+    let out = run(&[
+        "test-render",
+        "--perf-smoke",
+        "--scene",
+        "dive",
+        "--adapter",
+        "software",
+        "--allow-memory-bake",
+        "--global-res",
+        "256",
+        "--floor-level",
+        "3",
+        "--cells",
+        "16",
+        "--frames",
+        "12",
+        "--reserve",
+        "--out",
+        dir.to_str().unwrap(),
+    ])
+    .unwrap();
+    assert!(out.contains("reserve: spin calibrated beside the loads"), "{out}");
+    assert!(out.contains("dive: reserve report (loads on: spin"), "{out}");
+    assert!(out.contains("terrain main-thread ms:") && out.contains("terrain cores:") && out.contains("frame median ms:"), "{out}");
+    assert!(out.contains("physics cores:") && out.contains("[load, not decisive]"), "the loads' cores are listed: {out}");
+    assert!(out.contains("reserve verdict:"), "{out}");
+    let json = std::fs::read_to_string(dir.join("dive.json")).unwrap();
+    assert!(
+        json.contains("\"reserve_on\":1") && json.contains("reserve_terrain_peak_threads"),
+        "the log carries the reserve counts: {json}"
+    );
+}

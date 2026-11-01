@@ -24,12 +24,31 @@ pub struct MetricInfo {
 }
 
 /// The metrics of the streaming scenes (`perf stream`), lower is better for all of them.
-pub const METRICS: [MetricInfo; 5] = [
+pub const METRICS: [MetricInfo; 9] = [
     MetricInfo { name: "load_run_us_median", label: "tile-ready: load run median (us)", kind: Kind::Cpu { pinned: false }, budget: None },
     MetricInfo { name: "load_wait_us_median", label: "tile load wait median (us)", kind: Kind::Cpu { pinned: false }, budget: None },
     MetricInfo { name: "load_run_us_p99", label: "tile-ready: load run p99 (us)", kind: Kind::Cpu { pinned: false }, budget: None },
     MetricInfo { name: "median_ms", label: "frame median (ms)", kind: Kind::FrameStreaming, budget: Some(16.6) },
     MetricInfo { name: "p99_ms", label: "frame p99 (ms)", kind: Kind::FrameStreaming, budget: Some(20.0) },
+    MetricInfo {
+        name: "reserve_terrain_main_us_median",
+        label: "reserve: terrain main-thread median (us)",
+        kind: Kind::Cpu { pinned: false },
+        budget: Some(10_000.0),
+    },
+    MetricInfo { name: "reserve_terrain_gpu_us_median", label: "reserve: terrain GPU median (us)", kind: Kind::Gpu, budget: Some(5_000.0) },
+    MetricInfo {
+        name: "reserve_terrain_peak_threads",
+        label: "reserve: terrain peak busy threads",
+        kind: Kind::Cpu { pinned: false },
+        budget: Some(12.0),
+    },
+    MetricInfo {
+        name: "reserve_spin_us_median",
+        label: "reserve: the loads' main-thread spin median (us)",
+        kind: Kind::Cpu { pinned: false },
+        budget: None,
+    },
 ];
 
 /// The metrics compared unless `--metrics` says otherwise: tile-ready and the frame p99 (planner, 2026-11-01).

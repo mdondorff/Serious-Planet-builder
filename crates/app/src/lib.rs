@@ -85,6 +85,7 @@ modes:
     --perf                   performance-harness skeleton (needs --adapter hardware; the readiness gate decides, ADR 0020)
     --calibrate              measure the CPU calibration in a smoke run too (TEST-039; a measured run always does): proves the logging on any adapter, the log is still no measurement
     --machine-ready          owner override of a failed readiness gate (ADR 0020); recorded in the log
+    --reserve                run the streaming scenes with the synthetic loads of the reserved shares on (BUDG-011, BUDG-012) and print the reserve report
     --loaded                 loaded mode (ADR 0087, BUILD-030): the load of the machine is recorded, not refused; the hard conditions still refuse
     --smoke                  start and exit";
 
@@ -117,6 +118,8 @@ pub struct Options {
     pub machine_ready: bool,
     /// Loaded mode (BUILD-030): the readiness gate records the load of the machine instead of refusing on it.
     pub loaded: bool,
+    /// The streaming scenes run beside the synthetic loads of the reserved shares (BUDG-012).
+    pub reserve: bool,
     pub view: String,
     pub tiles: Vec<String>,
     pub seed: u64,
@@ -310,6 +313,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         perf: false,
         machine_ready: false,
         loaded: false,
+        reserve: false,
         view: "face".into(),
         tiles: vec![],
         seed: 1,
@@ -530,6 +534,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--face-net" => o.face_net = Some(PathBuf::from(it.next().ok_or("--face-net needs a path")?)),
             "--machine-ready" => o.machine_ready = true,
             "--loaded" => o.loaded = true,
+            "--reserve" => o.reserve = true,
             "--scene" => o.scene = it.next().ok_or("--scene needs a value")?.clone(),
             "--out" => o.out = Some(PathBuf::from(it.next().ok_or("--out needs a value")?)),
             "--upload" => {
@@ -1760,6 +1765,14 @@ mod tests {
         assert!(run_str(&["test-render", "--out-dir", p]).unwrap_err().contains("--out-dir only applies to --flight"));
         assert!(run_str(&["test-render", "--size", "12x12"]).unwrap_err().contains("--size must be WxH"));
         assert!(!d.exists(), "no rejected run may create the output directory");
+    }
+
+    // spec: BUDG-012
+    #[test]
+    fn the_reserve_option_is_parsed() {
+        let args = |a: &[&str]| parse_args(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        assert!(args(&["test-render", "--perf", "--reserve"]).unwrap().reserve);
+        assert!(!args(&["test-render", "--perf"]).unwrap().reserve);
     }
 
     // spec: BUILD-030
