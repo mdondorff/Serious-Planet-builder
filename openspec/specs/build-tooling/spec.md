@@ -56,7 +56,7 @@ Source: CON-25, CLAUDE.md
 
 Verify: A
 Status: active
-Source: ADR 0009, report §16
+Source: ADR 0009, report §16, ADR 0020, planner inbox #44 (2026-11-01)
 
 #### Scenario: Change in a middle crate
 - **WHEN** only files of `streaming` changed
@@ -109,8 +109,13 @@ Source: ADR 0009, report §16
 #### Scenario: Wall-clock checks run with perf, not in tier A
 - **WHEN** a test would assert on the time real work takes (a timing ratio, a spin's milliseconds, a lock wait on real threads)
 - **THEN** it is an ignored test with the reason `wall clock: cargo xtask perf wallclock`, listed in xtask's `WALLCLOCK`, and `cargo xtask perf wallclock` runs each alone in release, naming each PASS or FAIL; tier A asserts the counts, the results and the order of events instead, and a tier-A test checks that every listed check exists as such an ignored test
-- **AND** a wall-clock check is evidence of the reference machine outside the tiers: its `// spec:` citation does not stand in for a tier-A test of the same scenario, and CI, `test` and `accept` do not run it; the command runs no readiness gate (tolerance checks, not measurements, ADR 0020), so it is run on a quiet Rasierklinge outside a perf window
+- **AND** a wall-clock check is evidence of the reference machine outside the tiers: its `// spec:` citation does not stand in for a tier-A test of the same scenario, and CI and `test` do not run it
 - **AND** today the list is the real spin within 5 % (BUDG-011), the lock held 40 ms (VIEW-056) and the cost of the margin of a seam cell against an interior one (the picking query of VIEW-022; no spec states its number, the check guards the seam form of `with_margin` against a return to the geometric walk); a hang guard (a deadline after which a test fails rather than stalls) is not a wall-clock check
+
+#### Scenario: The wall-clock checks run under the readiness gate
+- **WHEN** `cargo xtask perf wallclock` runs, on its own or as the last step of `cargo xtask accept`
+- **THEN** it builds the checks, then runs the readiness gate of ADR 0020 without its reference-adapter condition (the checks use the CPU only), then each check; a refused gate is NOT RUN with the refused conditions (`INCOMPLETE:`, exit code 3), no verdict and never a failure, and `--machine-ready` (the owner's override) runs the checks anyway
+- **AND** in `accept` a step that ends `INCOMPLETE:` without a locked-desktop marker lists its text as a NOT RUN line, so the step and the run are INCOMPLETE, never a pass (see TEST-073)
 
 ### Requirement: BUILD-004 Three run modes
 The single binary SHALL provide the modes `editor`, `generate` and `test-render`, each of which starts and exits cleanly with `--smoke`; for `editor`, `--smoke` opens the viewer window (VIEW-005) and the display-free start check is `editor --smoke --no-window`; headless PNG output of `test-render` is covered by TEST-004 and REND-007.
