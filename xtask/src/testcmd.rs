@@ -559,21 +559,19 @@ pub fn repro(root: &Path, args: &[String]) -> Res {
 
 /// The commit a bundle records (`commit <sha>` in its head), or a refusal that says what to do about a bundle without one (TEST-071).
 fn bundle_commit(text: &str, bundle: &str) -> Res<String> {
-    let head = text
-        .split(
-            "
----
-",
-        )
-        .next()
-        .unwrap_or("");
+    let head = text.split("\n---\n").next().unwrap_or("");
     head.lines()
         .find_map(|l| l.strip_prefix("commit "))
         .map(|c| c.trim().to_string())
         .filter(|c| !c.is_empty() && c.chars().all(|ch| ch.is_ascii_hexdigit()))
         .ok_or_else(|| {
             format!(
-                "{bundle} records no commit (bundles made before 2026-11-01 do not), so --at-commit cannot find its build; read the                  generator and mesh versions in its head (`generator_version`, `mesh_version`), find the commit that had them                  (`git log -S\"MESH_VERSION: u32 = N\" -- crates/generators`), check it out and replay there; bundles made from now on record theirs"
+                concat!(
+                    "{} records no commit (bundles made before 2026-11-01 do not), so --at-commit cannot find its build; read the ",
+                    "generator and mesh versions in its head (`generator_version`, `mesh_version`), find the commit that had them ",
+                    "(`git log -S\"MESH_VERSION: u32 = N\" -- crates/generators`), check it out and replay there; bundles made from now on record theirs",
+                ),
+                bundle
             )
         })
 }

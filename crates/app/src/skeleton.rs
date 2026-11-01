@@ -736,8 +736,11 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
 fn commit_advice(commit: Option<&str>) -> String {
     match commit {
         Some(c) => format!("it was recorded at commit {c}: `cargo xtask repro <bundle> --at-commit` replays it there"),
-        None => "it records no commit (made before bundles did): find the commit whose generator and mesh versions match                  (`git log -S\"MESH_VERSION: u32 = N\"`), check it out and replay there"
-            .to_string(),
+        None => concat!(
+            "it records no commit (made before bundles did): find the commit whose generator and mesh versions match ",
+            "(`git log -S\"MESH_VERSION: u32 = N\"`), check it out and replay there"
+        )
+        .to_string(),
     }
 }
 
@@ -1741,6 +1744,35 @@ mod tests {
         let mut other_radius = bundle.clone();
         other_radius.request.lod.radius_m += 1.0;
         assert!(world_of_bundle(&world, &other_radius, None).err().unwrap().contains("radius"));
+    }
+
+    // spec: TEST-071
+    #[test]
+    fn a_bundle_of_another_version_is_refused_naming_its_commit_or_the_way_to_find_it() {
+        use planet_frame::{plan_terrain, TerrainBundle, TerrainRequest, TerrainView};
+        let (_, camera) = planet_frame::scripted_views(RADIUS_M, 4.0 / 3.0, 1)[3];
+        let lod = planet_frame::LodParams { cells: 16, viewport_h_px: 192.0, tau_px: 4.0, ..planet_frame::LodParams::earth_1080p() };
+        let request = TerrainRequest { camera, size: (64, 48), view: TerrainView::Level, lod, face_mapping: "tangent-v1".into(), seed: 1 };
+        let plan = plan_terrain(&request).unwrap();
+        let other_build = |commit: Option<&str>| {
+            TerrainBundle {
+                generator_version: GENERATOR_VERSION,
+                implementation_id: "another-build".into(),
+                mesh_version: planet_generators::mesh::MESH_VERSION,
+                definition_hash: 0,
+                adapter: "a".into(),
+                commit: commit.map(str::to_string),
+                world: None,
+                request: request.clone(),
+                plan: plan.clone(),
+            }
+            .to_text()
+        };
+        let path = Path::new("b.bundle");
+        let with = open_terrain_bundle(&other_build(Some("0123abc")), path, None).err().unwrap();
+        assert!(with.contains("commit 0123abc") && with.contains("repro <bundle> --at-commit"), "{with}");
+        let without = open_terrain_bundle(&other_build(None), path, None).err().unwrap();
+        assert!(without.contains("records no commit") && without.contains("git log -S"), "{without}");
     }
 
     // spec: TEST-071

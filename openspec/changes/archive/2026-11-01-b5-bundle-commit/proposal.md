@@ -9,3 +9,7 @@ A repro bundle of another generator or mesh version is refused with "check out t
 ## Impact
 - Spec: TEST-071 (modified).
 - Code: `planet_frame::TerrainBundle`, `crates/app` (writers, refusal text), `xtask` (`repro`).
+
+## Limits
+- The recorded commit is `git rev-parse HEAD` of the writing tree: a dirty tree records a commit that does not reproduce its build, and `--at-commit` cannot replay uncommitted changes.
+- `target/repro-worktree/` is not cleaned up; `git worktree remove` it when done. A build older than this change cannot read a bundle with the `commit` line (the format version is unchanged).
