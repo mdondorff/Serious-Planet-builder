@@ -22,3 +22,4 @@ pub mod relevance;
 pub mod session;
 pub mod shape;
 pub mod slope;
+pub mod store_watch;

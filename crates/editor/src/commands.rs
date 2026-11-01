@@ -7,6 +7,7 @@
 
 use crate::ids::IdMaker;
 use crate::polyline::{self, GeoPoint, PolylineError};
+use crate::store_watch::{LoadTimer, StoreWatch, WallTimer, ITEM_LIMIT};
 use planet_core::Vec3;
 use planet_world_def::item::{ActiveVersions, Anchor, Item, ItemFileError, ItemStroke, PutError};
 use planet_world_def::item_store::{ItemStore, StoreError};
@@ -258,6 +259,9 @@ pub struct Editor<S: ItemStore> {
     changes: Vec<ItemId>,
     /// The sequence number of `changes[0]`.
     changes_base: u64,
+    /// The item counts and the last load against the revisit trigger of ADR 0066 point 6 (AUTH-006).
+    watch: StoreWatch,
+    timer: Box<dyn LoadTimer>,
 }
 
 /// The entries of the change log kept; a reader further behind than this starts again from all the items.
@@ -282,6 +286,39 @@ impl<S: ItemStore> Editor<S> {
             inconsistent: Vec::new(),
             changes: Vec::new(),
             changes_base: 0,
+            watch: StoreWatch::default(),
+            timer: Box::new(WallTimer::new()),
+        }
+    }
+
+    /// The timer of loads (tests inject a fixed duration; the editor times with the wall clock).
+    pub fn with_load_timer(mut self, timer: Box<dyn LoadTimer>) -> Editor<S> {
+        self.timer = timer;
+        self
+    }
+
+    /// The item counts and the last load as the revisit trigger sees them (AUTH-006): for the diagnostics.
+    pub fn store_watch(&self) -> &StoreWatch {
+        &self.watch
+    }
+
+    /// The items the editor holds of `body`.
+    fn items_of(&self, body: BodyId) -> usize {
+        self.items.values().filter(|i| i.body == body).count()
+    }
+
+    /// The count half of the revisit trigger (AUTH-006), after an item was added: looked at only when the editor holds enough items for a
+    /// body to be over the limit, so an ordinary session pays one comparison.
+    fn check_counts(&mut self) {
+        if self.items.len() <= ITEM_LIMIT && !self.watch.any_over() {
+            return;
+        }
+        let bodies: std::collections::BTreeSet<BodyId> = self.items.values().map(|i| i.body).collect();
+        for body in bodies {
+            let count = self.items_of(body);
+            if let Some(w) = self.watch.record_count(body, count) {
+                self.watch.issue(&w);
+            }
         }
     }
 
@@ -315,6 +352,7 @@ impl<S: ItemStore> Editor<S> {
     /// [`load`](Editor::load), saying which items were re-keyed under the active stage version (AUTH-002).
     pub fn load_report(&mut self, body: BodyId) -> Result<LoadReport, EditError> {
         self.no_open_edit()?;
+        self.timer.begin();
         let items = self.store.load_all(body)?;
         let versions = ActiveVersions {
             generator_version: self.generator_version,
@@ -351,6 +389,11 @@ impl<S: ItemStore> Editor<S> {
         for item in loaded_items {
             self.note_changed(item.id);
             self.items.insert(item.id, item.canonical());
+        }
+        let elapsed = self.timer.end();
+        let count = self.items_of(body);
+        for w in self.watch.record_load(body, count, elapsed) {
+            self.watch.issue(&w);
         }
         Ok(LoadReport { loaded, restaged })
     }
@@ -1086,12 +1129,14 @@ impl<S: ItemStore> Editor<S> {
                 }
                 self.note_changed(id);
                 self.items.insert(id, after.clone());
+                self.check_counts();
             }
             (None, Some(item)) => {
                 self.store.delete(item.body, id)?;
                 self.def.remove_item(item.body, id);
                 self.note_changed(id);
                 self.items.remove(&id);
+                self.check_counts();
             }
             (None, None) => {}
         }
