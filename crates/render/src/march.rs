@@ -183,14 +183,17 @@ fn march(o: vec3<f32>) -> vec3<f32> {
     var mip = min(START_MIP, i32(m.info.w));
     var last_level = level_at(o.x, o.y);
     // The ray is above the world's highest terrain from here on: nothing it passes can shade it (the sun is above the horizon here).
+    // Within the penumbra search a ray clears the highest terrain for good only once its clearance over it reaches the sun disc's
+    // (slope - w) tau >= H - z; beyond the search only the sign counts, so the plain height does.
     var tau_end = m.curv.y;
-    var ceiling_exit = false;
     if (slope > 1.0e-4 && m.cube.z > 0.5) {
-        let t_above = (m.cube.y - o.z) / slope;
-        if (t_above < tau_end) {
-            tau_end = max(t_above, 0.0);
-            ceiling_exit = true;
+        let rise = m.cube.y - o.z;
+        let t_plain = rise / slope;
+        var t_clear = 1.0e5;
+        if (slope > m.sun.w) {
+            t_clear = rise / (slope - m.sun.w);
         }
+        tau_end = clamp(max(t_plain, min(t_clear, m.curv.z)), 0.0, m.curv.y);
     }
     var left = false;
     for (var it = 0; it < MAX_STEPS; it = it + 1) {
@@ -265,13 +268,13 @@ fn march(o: vec3<f32>) -> vec3<f32> {
     // Beyond the outermost level the coarse cube continues the march, in steps that grow with the distance. Each sample is a mip whose
     // texel (dilated by one) spans the step; within one texel of a face edge, where the mips do not dilate across the edge, the stride is
     // sampled at mip 0 in quarters.
-    if (!blocked && left && !ceiling_exit && m.curv.w > 0.5) {
+    if (!blocked && left && m.curv.w > 0.5) {
         let top_level = i32(m.info.y) - 1;
         let floor_stride = m.texel[top_level].x;
         let cube_mips = i32(firstTrailingBit(m.info.z));
         let texel_min = max(m.cube.x * 0.70710678, 1.0e-3);
         for (var it = 0; it < MAX_CUBE_STEPS; it = it + 1) {
-            if (tau > m.curv.y) {
+            if (tau > tau_end) {
                 break;
             }
             let stride = max(0.03 * tau, floor_stride);

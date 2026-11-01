@@ -1290,10 +1290,9 @@ impl TerrainRenderer {
     }
 
     /// Build the shadow pass (REND-050): the clipmap of `texels` per level edge and `levels` levels, the coarse cube and the resolve targets,
-    /// for a body of radius `radius_m` whose terrain rises at most `max_height_m` above the sphere (a ray above it ends its march; infinity: unknown).
-    /// Lit frames with a shadow frame set then run it after the terrain pass.
-    pub fn enable_shadow(&mut self, ctx: &GpuContext, texels: u32, levels: usize, radius_m: f64, max_height_m: f64) {
-        self.shadow = Some(crate::shadow_path::ShadowPath::new(ctx, texels, levels, self.cells, radius_m, max_height_m));
+    /// for a body of radius `radius_m`. Lit frames with a shadow frame set then run it after the terrain pass.
+    pub fn enable_shadow(&mut self, ctx: &GpuContext, texels: u32, levels: usize, radius_m: f64) {
+        self.shadow = Some(crate::shadow_path::ShadowPath::new(ctx, texels, levels, self.cells, radius_m));
     }
 
     /// Give the next frame's shadow pass its data (the plan, the preview, the camera and the sun). The frame is used once: a lit frame

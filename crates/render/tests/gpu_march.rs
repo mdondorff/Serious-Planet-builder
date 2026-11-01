@@ -303,3 +303,29 @@ fn a_ray_above_the_highest_terrain_ends_its_march_without_changing_the_answer() 
     assert!(a < b, "the lit receivers stop earlier: {a} steps with the ceiling against {b}");
     assert!(with.steps.iter().zip(&without.steps).all(|(x, y)| x <= y), "no ray takes more steps with the ceiling");
 }
+
+// spec: REND-049
+#[test]
+fn the_cube_still_continues_the_march_while_the_ray_is_below_the_ceiling() {
+    let s = scene(0.0);
+    let mut faces = vec![NO_DATA_M; (6 * CUBE * CUBE) as usize];
+    for v in &mut faces[(4 * CUBE * CUBE) as usize..(5 * CUBE * CUBE) as usize] {
+        *v = 10_000.0;
+    }
+    s.cube.upload_faces(&s.ctx, &faces);
+    s.cube.build_mips(&s.ctx);
+    let receivers = [[1000.0f32, 0.0, 0.5, 1.0]];
+    let mut p = params(10.0, 0.0);
+    p.use_cube = true;
+    let unknown = s.march.run(&s.ctx, &s.clip, &s.cube, &p, &receivers, 1, 1);
+    // The ray leaves the clipmap a few km out and stays below the 10 km plateau for 56 km more: the ceiling must not end its walk early.
+    p.ceiling_m = 10_000.0;
+    let known = s.march.run(&s.ctx, &s.clip, &s.cube, &p, &receivers, 1, 1);
+    assert_eq!(unknown.visibility[0], 0.0);
+    assert_eq!(known.visibility[0], 0.0, "the plateau in the cube blocks the ray also when the ceiling is known");
+    // Once the ceiling is below the ray's height at the cube, nothing beyond it can shade: lit, and fewer steps.
+    p.ceiling_m = 5.0;
+    let low = s.march.run(&s.ctx, &s.clip, &s.cube, &p, &receivers, 1, 1);
+    assert_eq!(low.visibility[0], 1.0);
+    assert!(low.steps[0] < unknown.steps[0]);
+}

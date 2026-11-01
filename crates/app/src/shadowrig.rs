@@ -113,6 +113,7 @@ impl ShadowRig {
         camera: &planet_frame::Camera,
         sun: planet_core::Vec3,
         radius_m: f64,
+        max_height_m: f64,
         stamps: &[PreviewStamp],
         delta_len: usize,
         nodes: &[planet_frame::TerrainDraw],
@@ -135,6 +136,7 @@ impl ShadowRig {
             plan,
             floor_tiles,
             cut: false,
+            ceiling_m: planet_frame::shadowview::ceiling_m(max_height_m, stamps),
         })
     }
 

@@ -46,6 +46,9 @@ pub struct ShadowFrame {
     pub floor_tiles: Vec<TileId>,
     /// A camera cut or teleport: history is void and every ray is marched.
     pub cut: bool,
+    /// The highest terrain above the sphere this frame, metres, preview lifts included (`planet_frame::shadowview::ceiling_m`): a ray above
+    /// it ends its march. Infinity: unknown, no early exit.
+    pub ceiling_m: f64,
 }
 
 /// The GPU side of the shadow pass.
@@ -55,8 +58,6 @@ pub struct ShadowPath {
     march: ShadowMarchGpu,
     resolve: ShadowResolveGpu,
     cube_texel_m: f32,
-    /// The highest terrain of the world above the sphere: a ray above it ends its walk.
-    ceiling_m: f32,
     frame: u32,
     generation: Option<u64>,
     previous: Option<ResolveCamera>,
@@ -76,7 +77,7 @@ fn window(r: &TexelRect) -> [i32; 4] {
 impl ShadowPath {
     /// `texels` and `levels` as the plan's `ClipmapParams`, `cells` the tiles' cell count, `radius_m` the body's (the coarse cube's texel
     /// size is computed here, on the CPU).
-    pub fn new(ctx: &GpuContext, texels: u32, levels: usize, cells: u32, radius_m: f64, max_height_m: f64) -> ShadowPath {
+    pub fn new(ctx: &GpuContext, texels: u32, levels: usize, cells: u32, radius_m: f64) -> ShadowPath {
         let clip = ClipmapGpu::new(ctx, texels, levels, cells);
         ShadowPath {
             resolve: ShadowResolveGpu::new(ctx, &clip),
@@ -84,7 +85,6 @@ impl ShadowPath {
             march: ShadowMarchGpu::new(ctx),
             clip,
             cube_texel_m: (radius_m * core::f64::consts::FRAC_PI_2 / f64::from(COARSE_CUBE_TEXELS)) as f32,
-            ceiling_m: max_height_m as f32,
             frame: 0,
             generation: None,
             previous: None,
@@ -135,7 +135,7 @@ impl ShadowPath {
             east: f.view.east,
             north: f.view.north,
             cube_texel_m: self.cube_texel_m,
-            ceiling_m: self.ceiling_m,
+            ceiling_m: f.ceiling_m as f32,
             dirty_since: 0,
         };
         let params = ResolveParams {
