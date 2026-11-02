@@ -135,3 +135,10 @@ Scope: project (editor refresh find; WDEF-008, STRM-070, ADR 0045 point 7)
 - The editor's find named a tile only when the edit's reach touched it, so such tiles were never marked stale and stayed on their old version (the `gpu_edit_perf` flake: 8 substituted nodes, nothing pending). The find now walks `neighbors8` from the anchor cells and compares with the rings (edit-stale-diagnostics).
 - ADR 0045 point 7 meant about one coarse tile per level per edit; today's margins re-key more (a Tracked architect item).
 - Obsolete when the summary margins are sized from the reaches present, or coarse keys stop reading margins.
+
+## 2026-11-02 A Git Bash loop survives TaskStop
+Scope: project (agent tooling; perf windows)
+What happened: SPIKE-90 window 2 ran its runs from a Git Bash script started as a background command. TaskStop at 09:51 reported success, but the `bash.exe` running the script kept launching perf runs until its process was stopped at 09:58, so the planned cooling pause had no idle.
+Assumption it changes: that TaskStop ends a background command's whole process tree (perf-window practice; the quiet-machine rule of CLAUDE.md).
+Proposed follow-up: after TaskStop on a script runner, find it by its command line (`Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*<script>*' }`) and `Stop-Process` it; check `tasklist` for `planet.exe`/`xtask.exe` before declaring a pause. A run already started is better left to finish than killed mid-measurement.
+Obsolete when: TaskStop ends Git Bash children, or perf runners become an xtask command (no shell loop).
