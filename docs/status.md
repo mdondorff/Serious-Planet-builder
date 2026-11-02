@@ -16,14 +16,17 @@ Dormant (no near trigger; not asked now):
 - **Coarse-first refinement of an edit** (owner, 2026-10-20): parked. Trigger: a brush case of the edit-latency scene that misses its budget.
 
 ## Queue (2026-11-02)
+Option B (`docs/briefings/week-2026-11-02.md`) closed 2026-11-02 (owner): B1, B2, B3, B5, B6, B7 (R1), B8 done; B4's rest, B9 and the relative shares carried below.
+
 | # | Step | Lane |
 |---|---|---|
 | NR | Real-GPU window checks NOT RUN on a locked desktop (TEST-073; owner, 2026-10-30) | crusader |
-| B4 | Automated owner checks (`openspec/changes/b4-owner-checks/`): B4-5 package command (TEST-074), B4-4 edit scenario, B4-6 delivery | explorer, after M9 rounds |
-| Shadows | ADR 0085 / 0090: PRs 1 to 4, 5a, 5a2, march cost and the low-sun quarter-res march (#1079; 2° 1.50-1.54 ms) merged. Next 5b-1 plumbing (visibility forced to 1), 5b-2 apply (every lit golden to the owner's /bless), the 2° perf window, PRs 6 to 9 | crusader |
-| Glint | `sun-glint-turn` (#1072, ATMO-013): blessed by the owner 2026-11-02; merges on green | crusader |
+| Shadows | ADR 0085 / 0090: 5b-1 plumbing (#1084, blessed), 5b-2 apply (#1085: the march on by default; acne fix, elevated and eye-level march goldens to the owner's /bless), the 2° perf window, PRs 6 to 9 | crusader |
+| B4 | Automated owner checks, rest (`openspec/changes/b4-owner-checks/`): B4-4 the real-store pair in metres and its PR, B4-6 the daily package delivery; B4-3 rivers waits for M9's channels | crusader, after 5b-2 |
 | Nodes | `node-buffer-delta`: frames rewrite the whole node buffer (record 2.1-5.1 ms) and frame 14 of a teleport costs 6-7 ms outside the logged phases | crusader |
-| M9 | Generator round 2 (#1078, continents, GEN-104 to 106, TEST-087/088), round 3 (relief to SPIKE-93's Earth bands), then the `m9-bake` code on small regions; no planet bake before the owner approves the engine preview (owner, 2026-11-01) | explorer |
+| B9 | Perf-window process: halve the time a window blocks the lanes without losing verdict validity; window 2 (2026-11-02) took 1 h 44 min and lost runs to heat | spikes (SPIKE-95) |
+| Shares | Relative compute shares: ADR draft from SPIKE-89 (fractions of P + 0.65 E) and SPIKE-90 (no background pool; background budgeted), BUDG-003 restated; to the owner | opus-planner |
+| M9 | Generator round 2 (#1078, the fixture climate aligned before the bless), round 3 (#1086, relief to SPIKE-93's Earth bands), the `m9-bake` code on small regions; no planet bake before the owner approves the engine preview (owner, 2026-11-01) | explorer |
 
 ## Tracked
 - **Reserve test result** (BUDG-012, loaded, 3 rounds, 2026-11-01): dive, look-1m, look-2km, teleport-2km pass; teleport-1m fails by +1 % (frame median 16.75 against 16.60 ms; the spin runs 5-18 % over its 6-9 ms target). Frame p99 over 20 ms includes the spin by construction. A quiet window decides the absolute rows.
