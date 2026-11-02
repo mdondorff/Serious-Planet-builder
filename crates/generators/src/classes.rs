@@ -65,7 +65,9 @@ const BEND_KM: f64 = 120.0;
 const COAST_BUFFER_KM: f64 = 50.0;
 const COAST_RAMP_KM: f64 = 300.0;
 /// The land depth over which the gate rises from the true coast.
-const COAST_DEPTH_RAMP: f64 = 0.25;
+const COAST_DEPTH_RAMP: f64 = 0.3;
+/// The land depth below the true coast over which the gate still rises (the full value is rough at the lattice's scale, so a hard switch at the coast is a step of `k`).
+const TRUE_COAST_SOFT: f64 = 0.15;
 
 const LAYER_PLATE_WARP: u64 = 0x474c_0010;
 const LAYER_WIDTH: u64 = 0x474c_0011;
@@ -318,7 +320,7 @@ impl ClassSource {
         let arc = smoothstep(0.38, 0.56, 0.5 + 0.5 * fbm(self.seed, LAYER_COAST_ARC, d, 0.9, 2));
         let smooth = self.land_depth(d);
         // The gate below is 0 unless both depths are positive, and every term that reads the gradient is multiplied by it: elsewhere the gradient is not computed (7 of 10 points).
-        let on_land = land_depth > 0.0 && smooth > 0.0;
+        let on_land = land_depth > -TRUE_COAST_SOFT && smooth > 0.0;
         let gradient = if on_land { self.land_gradient(d) } else { 0.0 };
         let line_km = self.signed_km(smooth - COAST_LINE_DEPTH, gradient);
         // The gate of the land: 0 within COAST_BUFFER_KM of the smooth coast and 1 from COAST_RAMP_KM inland, and 0 at the true coast (a depth ramp), so that no belt stops at the
@@ -326,7 +328,9 @@ impl ClassSource {
         let coast_gate = if !on_land {
             0.0
         } else {
-            smoothstep(COAST_BUFFER_KM, COAST_RAMP_KM, self.distance_km(smooth, gradient)) * smoothstep(0.0, COAST_DEPTH_RAMP, land_depth)
+            smoothstep(COAST_BUFFER_KM, COAST_RAMP_KM, self.distance_km(smooth, gradient))
+                * smoothstep(0.0, COAST_DEPTH_RAMP, smooth)
+                * smoothstep(-TRUE_COAST_SOFT, 0.1, land_depth)
         };
         let (mut core, mut flank, mut old_margin, mut back_arc) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
         let (mut margin_km, mut convergence) = (0.0, 0.0);
@@ -373,8 +377,8 @@ impl ClassSource {
         let (core, flank) = (core * strike * coast_gate, flank * strike * coast_gate);
         let old_margin = old_margin * coast_gate;
         let c = 0.5 + 0.5 * fbm(self.seed, LAYER_PLATEAU, d, 1.6, 3);
-        let plateau_field = smoothstep(0.50, 0.62, c) * smoothstep(0.2, 0.6, inland) * (1.0 - smoothstep(0.2, 0.6, flank.max(back_arc)));
-        let hilly = smoothstep(0.56, 0.70, 0.5 + 0.5 * fbm(self.seed, LAYER_HILLY, d, 2.2, 3)) * smoothstep(0.1, 0.4, inland);
+        let plateau_field = smoothstep(0.45, 0.70, c) * smoothstep(0.2, 0.6, inland) * (1.0 - smoothstep(0.2, 0.6, flank.max(back_arc)));
+        let hilly = smoothstep(0.50, 0.76, 0.5 + 0.5 * fbm(self.seed, LAYER_HILLY, d, 2.2, 3)) * smoothstep(0.1, 0.4, smooth);
         MaskTerms { margin_km, convergence, core, flank, old_margin, back_arc, plateau_field, hilly, strike, plate: idx[0] }
     }
 
