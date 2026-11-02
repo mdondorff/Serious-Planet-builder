@@ -246,7 +246,7 @@ fn fixed_exposure_ignores_the_scene_and_the_history() {
         let s = path.read_exposure(&ctx);
         assert_eq!((s.ev100, s.target_ev100, s.factor), (13.0, 13.0, 1.0), "scene EV {scene_ev}");
     }
-    assert_eq!(path.executed_passes(), ["terrain", "exposure-adapt", "tonemap"], "no histogram pass under fixed exposure");
+    assert_eq!(path.executed_passes(), ["terrain", "shadow-apply", "exposure-adapt", "tonemap"], "no histogram pass under fixed exposure");
 }
 
 // spec: REND-019
@@ -260,10 +260,10 @@ fn the_executor_follows_the_compiled_graph_and_recompiles_only_when_the_shape_ch
         let _ = path.tone_map_to_image(&ctx, &LitPlan::fixed(12.0));
     }
     assert_eq!(path.graph_compiles(), 1, "three frames of one shape compile once");
-    assert_eq!(path.executed_passes(), ["terrain", "exposure-adapt", "tonemap"]);
+    assert_eq!(path.executed_passes(), ["terrain", "shadow-apply", "exposure-adapt", "tonemap"]);
     let _ = path.tone_map_to_image(&ctx, &LitPlan::adaptive(12.0, 0.016));
     assert_eq!(path.graph_compiles(), 2, "a new exposure mode is a new shape");
-    assert_eq!(path.executed_passes(), ["terrain", "exposure-histogram", "exposure-adapt", "tonemap"]);
+    assert_eq!(path.executed_passes(), ["terrain", "shadow-apply", "exposure-histogram", "exposure-adapt", "tonemap"]);
     for _ in 0..3 {
         let _ = path.tone_map_to_image(&ctx, &LitPlan::adaptive(12.0, 0.016));
     }
