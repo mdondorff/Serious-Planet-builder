@@ -45,7 +45,7 @@ const BELT_AMPLITUDE_M: f64 = 7500.0;
 /// The plateau field's uplift in metres (GEN-096).
 const PLATEAU_UPLIFT_M: f64 = 800.0;
 /// The narrowest half-width a belt has, in km (a belt tapers in width and height towards the ends of its segment, never below this).
-const MIN_BELT_KM: f64 = 120.0;
+const MIN_BELT_KM: f64 = 125.0;
 /// The gain from the core to the mountains' membership.
 const MOUNTAIN_GAIN: f64 = 2.0;
 /// The largest sideways shift of a belt's centreline, in km (low-frequency noise bends the trace).
@@ -196,31 +196,24 @@ impl ClassSource {
         terrain(self.seed, d).continent - SEA_LEVEL_C
     }
 
-    /// The gradient magnitude of the land depth at `d` per radian, by a central difference of [`GRADIENT_STEP`] in two tangent directions.
+    /// The gradient magnitude of the land depth at `d` per radian: central differences of [`GRADIENT_STEP`] along the fixed axes x, y and z, with the radial part removed, so
+    /// that it does not depend on a tangent basis (a basis that switches its helper axis near the poles would step the estimate).
     fn land_gradient(&self, d: Vec3) -> f64 {
-        let (e1, e2) = d.tangent_basis();
         let h = GRADIENT_STEP;
-        let at = |t: Vec3, s: f64| self.land_depth((d + t * s).normalized());
-        let g1 = (at(e1, h) - at(e1, -h)) / (2.0 * h);
-        let g2 = (at(e2, h) - at(e2, -h)) / (2.0 * h);
-        libm::sqrt(g1 * g1 + g2 * g2)
+        let at = |axis: Vec3| (self.land_depth((d + axis * h).normalized()) - self.land_depth((d - axis * h).normalized())) / (2.0 * h);
+        let g = Vec3::new(at(Vec3::new(1.0, 0.0, 0.0)), at(Vec3::new(0.0, 1.0, 0.0)), at(Vec3::new(0.0, 0.0, 1.0)));
+        (g - d * g.dot(d)).length()
     }
 
-    /// The first-order estimate in km of the distance over which the land depth changes by `delta` at `d`: `|delta| / |gradient|` (valid near `d`), infinite
-    /// where the gradient vanishes.
+    /// The first-order estimate in km of the distance over which the land depth changes by `delta` at `d`: `|delta| / |gradient|` (valid near `d`), the gradient
+    /// floored at 1e-9 so that the estimate has no step where it vanishes.
     fn distance_km(&self, delta: f64, gradient: f64) -> f64 {
-        if gradient < 1e-9 {
-            return f64::INFINITY;
-        }
-        libm::fabs(delta) / gradient * self.radius_m / 1000.0
+        libm::fabs(delta) / gradient.max(1e-9) * self.radius_m / 1000.0
     }
 
-    /// Like [`distance_km`](Self::distance_km) but signed: `delta / gradient` in km, a large value of the sign of `delta` where the gradient vanishes.
+    /// Like [`distance_km`](Self::distance_km) but signed: `delta / gradient` in km, positive where `delta` is.
     fn signed_km(&self, delta: f64, gradient: f64) -> f64 {
-        if gradient < 1e-9 {
-            return if delta < 0.0 { -1e9 } else { 1e9 };
-        }
-        delta / gradient * self.radius_m / 1000.0
+        delta / gradient.max(1e-9) * self.radius_m / 1000.0
     }
 
     /// The continental weight of a plate in `[0, 1]`: 0 for a plate that is mostly ocean (land share under 0.15), 1 for one with 0.40 of its area land.
@@ -239,7 +232,7 @@ impl ClassSource {
         // Each plate's weight depends on its own angle, so a pair of plates that trade places has the same weight before and after (the margin factor of (second, third) too).
         let rank = |r: usize| smoothstep(0.0, 0.05, ang[3] - ang[r]);
         let pair_weight = [rank(0) * rank(1), rank(0) * rank(2), rank(1) * rank(2) * (1.0 - smoothstep(0.0, 0.04, ang[1] - ang[0]))];
-        // The width of a belt: a tent profile of 220 to 500 km half-width (220 to 500 km across at half height); the belt is cut into segments and its height varies along it.
+        // The width of a belt: a tent profile of 260 to 560 km half-width before the taper (never under 125 km after it); the belt is cut into segments and its height varies along it.
         let width_km = 260.0 + 300.0 * (0.5 + 0.5 * fbm(self.seed, LAYER_WIDTH, d, 2.5, 2));
         let segment = smoothstep(0.25, 0.55, 0.5 + 0.5 * fbm(self.seed, LAYER_SEGMENT, d, 2.8, 2));
         let along = 0.5 + 0.5 * fbm(self.seed, LAYER_STRIKE, d, 5.0, 2);
