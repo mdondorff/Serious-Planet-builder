@@ -33,7 +33,7 @@ pub const CLASS_LATTICE_N: usize = 256;
 /// Plates of the default source (GEN-094).
 const PLATES: usize = 14;
 /// Plate draws and the points that score them (GEN-105).
-const PLATE_DRAWS: u64 = 16;
+const PLATE_DRAWS: u64 = 64;
 const PLATE_SCORE_POINTS: usize = 8192;
 /// Radius of the body in metres used for the margin distances; the default source is defined for Earth's radius (GEN-094's kilometres).
 pub const EARTH_RADIUS_M: f64 = 6_371_000.0;
@@ -46,7 +46,10 @@ const COAST_LINE_DEPTH: f64 = 0.10;
 /// The belt term's amplitude in metres (GEN-096; 5500 m in the first start values, raised because the belts are now cut into segments of lower height).
 const BELT_AMPLITUDE_M: f64 = 7500.0;
 /// The plateau field's uplift in metres (GEN-096).
-const PLATEAU_UPLIFT_M: f64 = 800.0;
+const PLATEAU_UPLIFT_M: f64 = 600.0;
+/// The base elevation of the land far from the coast and the land depth over which it is reached (GEN-096).
+const COAST_TOP_M: f64 = 450.0;
+const COAST_RAMP_DEPTH: f64 = 1.2;
 /// The narrowest half-width a belt has, in km (a belt tapers in width and height towards the ends of its segment, never below this).
 const MIN_BELT_KM: f64 = 125.0;
 /// The core value at which the mountains' membership is 1 (it rises smoothly from 0 at the belt's edge, so the class weights change over the belt's width and not in one lattice step).
@@ -375,8 +378,11 @@ impl ClassSource {
     pub fn eval(&self, d: Vec3) -> ClassPoint {
         let t = terrain(self.seed, d);
         let terms = self.mask_terms(d, t.land_depth, t.inland);
-        let coast =
-            if t.land_depth < 0.0 { -4500.0 * smoothstep(0.0, 0.9, -t.land_depth) } else { 1000.0 * smoothstep(0.0, 0.9, t.land_depth) };
+        let coast = if t.land_depth < 0.0 {
+            -4500.0 * smoothstep(0.0, 0.9, -t.land_depth)
+        } else {
+            COAST_TOP_M * smoothstep(0.0, COAST_RAMP_DEPTH, t.land_depth)
+        };
         let ridge = ridge_at(self.seed, t.warped);
         let e0 = (coast
             + BELT_AMPLITUDE_M * terms.core * (0.5 + 0.5 * ridge)
