@@ -153,8 +153,8 @@ fn the_climate_is_bit_identical_across_thread_counts_and_matches_the_known_answe
     assert_eq!(climate_version_word(), KNOWN_VERSION_WORD, "the version word changed: {:#018x}", climate_version_word());
 }
 
-const KNOWN_CLIMATE: [u64; 4] = [0xc0e173ff72ca4f41, 0xe03f709b7666e2fa, 0x7dfac2c34f7246fd, 0xb1ccdcde645c74bb];
-const KNOWN_VERSION_WORD: u64 = 0xa1ed286cdac40926;
+const KNOWN_CLIMATE: [u64; 4] = [0xa462d5f57fe8be1f, 0x4066977cddc7c722, 0x13affc8130ddf2d4, 0x910e00dd1bec3c30];
+const KNOWN_VERSION_WORD: u64 = 0x2097a6a7c9a9271c;
 
 // spec: GEN-021
 #[test]

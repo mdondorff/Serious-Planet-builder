@@ -500,6 +500,7 @@ fn the_hill_band_moves_gently_over_a_hundred_metres_which_a_finer_octave_would_n
     assert!(worst <= 90.0, "band step {worst} m over {ds} m (58 m recorded)");
 }
 
+// spec: GEN-104
 // spec: GEN-064
 #[test]
 fn the_landform_driver_is_the_range_zone_strength_and_pinned() {
@@ -509,9 +510,9 @@ fn the_landform_driver_is_the_range_zone_strength_and_pinned() {
     assert_eq!(landform(SEED, dirs[2]), landform(SEED, dirs[2]));
 }
 
-const KNOWN_LANDFORM: &str = "[3febd551a18cedd4, 0000000000000000, 3f91678e96fd4c3a, 0000000000000000]";
+const KNOWN_LANDFORM: &str = "[3fe880ee3a65f096, 3fc97d5a71c25b57, 0000000000000000, 0000000000000000]";
 
 /// The version the known answers below were recorded against (ADR 0006): changing the output without a bump fails here.
-const RECORDED_VERSION: u32 = 5; // 4 -> 5: the hill band (GEN-064, ADR 0080); the elevation of land moved. 3 -> 4: the ocean channel (ADR 0041); no sample bit moved, the grid hash names the version. 2 -> 3: latitude from COORD's +z pole (was d.y)
-const KNOWN_POINTS: &str = "[[3f3ef54b, 44ddf6b1, 4199dcbd, 45032416], [be83b213, c4c37fdb, 41e85e2b, 451fdf30], [bed97260, c52f51c0, c1cc7154, 442aa58a], [3e25822e, 42d4b964, c086c87e, 44c8606a], [beff7496, c54fe3c7, 4172b6d8, 42fa29a4]]";
-const KNOWN_GRID_HASH: &str = "53151403187027b0";
+const RECORDED_VERSION: u32 = 6; // 5 -> 6: the continent stage (GEN-104); every field moved. 4 -> 5: the hill band (GEN-064, ADR 0080); the elevation of land moved. 3 -> 4: the ocean channel (ADR 0041); no sample bit moved, the grid hash names the version. 2 -> 3: latitude from COORD's +z pole (was d.y)
+const KNOWN_POINTS: &str = "[[3ea66ad1, 444f7091, 41cb0d3b, 451034b7], [3e9c76aa, 431f4f2c, 41e01571, 4507c6c7], [be8ebcbd, c4d70ac9, c1cc7154, 442aa58a], [be8d949d, c4d4fa94, c06151d9, 44ca8e10], [bcd61bf6, c3706597, 4172b6d8, 42fa29a4]]";
+const KNOWN_GRID_HASH: &str = "4b265af80a22905b";

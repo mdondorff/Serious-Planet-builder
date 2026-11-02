@@ -7,7 +7,7 @@ use std::path::PathBuf;
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (mut seed, mut out, mut width, mut threads, mut cells) =
-        (1u64, None::<PathBuf>, 2048usize, 0usize, planet_generators::classes::CLASS_LATTICE_N);
+        (3u64, None::<PathBuf>, 2048usize, 0usize, planet_generators::classes::CLASS_LATTICE_N);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut value = || it.next().cloned().unwrap_or_else(|| fail(&format!("{a} needs a value")));

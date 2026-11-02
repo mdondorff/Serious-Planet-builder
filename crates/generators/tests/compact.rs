@@ -338,7 +338,7 @@ fn compact_tiles_are_bit_identical_across_thread_counts_and_match_the_known_answ
 }
 
 // Re-recorded 2026-10-26 with MESH_VERSION 10, driver block, ADR 0076/GEN-071 (declared): the slot gained the driver block, so the content hash of every tile moved; heights, normals and climate did not.
-const KNOWN_ANSWERS: [u64; 4] = [17436593168830713006, 8256297299846410263, 4509477482494538851, 1687505822890779193];
+const KNOWN_ANSWERS: [u64; 4] = [16447613209477896933, 310997886877753242, 17289868773559931581, 834959833473210614];
 
 // spec: GEN-019, CON-13, CON-14
 #[test]
