@@ -268,22 +268,22 @@ fn a_node_with_no_chunk_map_and_no_coarse_map_is_lit_in_full_and_a_coarse_map_al
     assert!(got[1].factor == 1.0, "{:?}", got[1]);
 }
 
-// spec: REND-038
+// spec: REND-051
 #[test]
-fn a_frame_whose_chunk_horizon_is_the_zenith_loses_its_direct_light() {
+fn a_frame_whose_chunk_horizon_is_the_zenith_keeps_its_direct_light_the_shadow_comes_from_the_march() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let p = plan(3);
     let mut r = renderer(&ctx, &p);
     let plain = frame(&mut r, &ctx, &p);
     let nodes = vec![HorizonNode { slot: 0, sun_azimuth: 0.0, sun_elevation: 0.0, fade: 1.0, rect: [0.0, 0.0, 1.0, 1.0] }; p.nodes.len()];
     let set = HorizonFrame { capacity: 1, nodes, update: SlotUpdate::default() };
-    // Every texel of every azimuth at the largest byte: a horizon at the zenith, so no direct light reaches any fragment.
+    // Every texel of every azimuth at the largest byte: a horizon at the zenith. Until REND-051 this removed all direct light from the
+    // lit fragments (REND-038); the lit fragments no longer read the horizon maps, so the picture is the same.
     r.set_horizon(&ctx, &set, &[(0, vec![255u8; SLOT_BYTES])]);
-    let shadowed = frame(&mut r, &ctx, &p);
+    let with_map = frame(&mut r, &ctx, &p);
     let sum = |i: &Image| i.pixels().map(|px| px.iter().take(3).map(|&c| u64::from(c)).sum::<u64>()).sum::<u64>();
-    eprintln!("plain {} shadowed {}", sum(&plain), sum(&shadowed));
     assert!(sum(&plain) > 1000, "the plain frame has lit terrain");
-    assert!(sum(&shadowed) * 20 < sum(&plain), "the shadowed frame is dark");
+    assert_eq!(sum(&with_map), sum(&plain), "the horizon maps no longer darken the lit frame");
 }
 
 // spec: REND-038

@@ -187,7 +187,9 @@ fn water_vertex(t: VsOut) -> WOut {
 }
 
 struct WLight {
-    diffuse: vec3<f32>,
+    // The light the sun shadow does not touch (the atmosphere ambient) and the direct term it multiplies (REND-051).
+    ambient: vec3<f32>,
+    direct: vec3<f32>,
     sun_t: vec3<f32>,
     sky: vec3<f32>,
 };
@@ -237,9 +239,15 @@ fn fs_water(in: WOut) -> @location(0) vec4<f32> {
         return vec4<f32>((n * 0.5 + vec3<f32>(0.5)) * (0.31830988618 * factor), 1.0);
     }
     let light = water_light(n, up, rec.a.x, sun, reflect(-v, n));
+    // The march visibility at this pixel (the seabed one, where the water pass draws over the depth of the terrain pass); a one-texel
+    // stand-in means a frame without the shadow passes.
+    var vis = 1.0;
+    if (textureDimensions(water_visibility).x > 1u) {
+        vis = textureLoad(water_visibility, vec2<i32>(in.pos.xy), 0).x;
+    }
     let seabed = textureLoad(scene_copy, vec2<i32>(in.pos.xy), 0).rgb / factor;
     let foam_mod = 0.5 + 0.5 * cos(water_wave_arg(liq.wave[0], in.local, rec.phases.x));
-    let rgb = water_surface(liq, WG.a, vec4<f32>(WG.b.x, WG.b.y, depth_width, 0.0), n, v, up, sun, in.depth, foam_mod, seabed, light.diffuse, light.sun_t, light.sky);
+    let rgb = water_surface(liq, WG.a, vec4<f32>(WG.b.x, WG.b.y, depth_width, 0.0), n, v, up, sun, in.depth, foam_mod, seabed, light.ambient + light.direct * vis, light.sun_t * vis, light.sky);
     return vec4<f32>(clamp(rgb * factor, vec3<f32>(0.0), vec3<f32>(60000.0)), 1.0);
 }
 "#;
@@ -247,10 +255,12 @@ fn fs_water(in: WOut) -> @location(0) vec4<f32> {
 /// The lighting of a frame without an atmosphere: the terrain's Lambert (no ambient, no sky), the sun at full strength.
 const WATER_PLAIN_LIGHT: &str = r#"
 @group(3) @binding(4) var scene_copy: texture_2d<f32>;
+@group(3) @binding(5) var water_visibility: texture_2d<f32>;
 
 fn water_light(n: vec3<f32>, up: vec3<f32>, h_alt: f32, sun: vec3<f32>, refl: vec3<f32>) -> WLight {
     var l: WLight;
-    l.diffuse = vec3<f32>(max(dot(n, sun), 0.0) * 0.31830988618);
+    l.ambient = vec3<f32>(0.0);
+    l.direct = vec3<f32>(max(dot(n, sun), 0.0) * 0.31830988618);
     l.sun_t = vec3<f32>(1.0);
     l.sky = vec3<f32>(0.0);
     return l;
@@ -263,10 +273,13 @@ fn water_light(n: vec3<f32>, up: vec3<f32>, h_alt: f32, sun: vec3<f32>, refl: ve
 const WATER_ATMOSPHERE_LIGHT: &str = r#"
 @group(3) @binding(3) var sky_lut: texture_2d<f32>;
 @group(3) @binding(4) var scene_copy: texture_2d<f32>;
+@group(3) @binding(5) var water_visibility: texture_2d<f32>;
 
 fn water_light(n: vec3<f32>, up: vec3<f32>, h_alt: f32, sun: vec3<f32>, refl: vec3<f32>) -> WLight {
     var l: WLight;
-    l.diffuse = atm_terrain_lighting(n, up, h_alt, sun);
+    let parts = atm_terrain_lighting_parts(n, up, h_alt, sun, 1.0);
+    l.ambient = parts.amb;
+    l.direct = parts.dir;
     let mu_s = clamp(dot(up, sun), -1.0, 1.0);
     let h = clamp(h_alt, 0.0, A.body.y);
     l.sun_t = atm_transmittance(h, mu_s) * atm_planet_shadow(h, mu_s);
