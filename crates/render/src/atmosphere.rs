@@ -747,17 +747,18 @@ const LIGHTING: &str = r#"
 // The sun's light on a surface with the given normal at altitude `h_alt` above the reference surface (up and sun in planet-fixed
 // axes): transmitted direct light on Lambert's cosine plus the multiple-scattering ambient on the sky hemisphere.
 fn atm_terrain_lighting(normal: vec3<f32>, up: vec3<f32>, h_alt: f32, sun: vec3<f32>) -> vec3<f32> {
-    return atm_terrain_lighting_vis(normal, up, h_alt, sun, 1.0);
+    let p = atm_terrain_lighting_parts(normal, up, h_alt, sun);
+    return p.dir + p.amb;
 }
 
-// The light as two parts: the multiple-scattering ambient and the direct term times `vis`, the horizon shadow's factor (REND-038); the
-// ambient is not shadowed. The terrain pass writes the parts to two targets (REND-051).
+// The light as two parts: the multiple-scattering ambient and the direct term, unshadowed; the shadow of the march applies to the direct term
+// in the shadow-apply pass. The terrain pass writes the parts to two targets (REND-051).
 struct LightParts {
     amb: vec3<f32>,
     dir: vec3<f32>,
 }
 
-fn atm_terrain_lighting_parts(normal: vec3<f32>, up: vec3<f32>, h_alt: f32, sun: vec3<f32>, vis: f32) -> LightParts {
+fn atm_terrain_lighting_parts(normal: vec3<f32>, up: vec3<f32>, h_alt: f32, sun: vec3<f32>) -> LightParts {
     let n = normalize(normal);
     let ndl = max(dot(n, sun), 0.0);
     let mu_s = clamp(dot(up, sun), -1.0, 1.0);
@@ -766,13 +767,7 @@ fn atm_terrain_lighting_parts(normal: vec3<f32>, up: vec3<f32>, h_alt: f32, sun:
     let shadow = atm_planet_shadow(h, mu_s);
     let ms = atm_multiscatter(h, mu_s);
     let hemi = 0.5 + 0.5 * clamp(dot(n, up), -1.0, 1.0);
-    return LightParts(ms * hemi, t * (shadow * ndl * 0.31830988618 * vis));
-}
-
-// The same summed.
-fn atm_terrain_lighting_vis(normal: vec3<f32>, up: vec3<f32>, h_alt: f32, sun: vec3<f32>, vis: f32) -> vec3<f32> {
-    let p = atm_terrain_lighting_parts(normal, up, h_alt, sun, vis);
-    return p.dir + p.amb;
+    return LightParts(ms * hemi, t * (shadow * ndl * 0.31830988618));
 }
 
 // The sun's illuminance that reaches the surface (the transmittance and the planet's shadow, one unit outside the atmosphere): what the
@@ -786,14 +781,14 @@ fn atm_sun_direct(up: vec3<f32>, h_alt: f32, sun: vec3<f32>) -> vec3<f32> {
 
 const TERRAIN_MAIN: &str = r#"
 
-fn atm_terrain_radiance(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32, ramp_min: f32, h_alt: f32, sun: vec3<f32>, vis: f32) -> vec3<f32> {
+fn atm_terrain_radiance(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32, ramp_min: f32, h_alt: f32, sun: vec3<f32>) -> vec3<f32> {
     let n = normalize(normal);
     let cs = clamp(dot(n, up), 0.0, 1.0);
     let inv_pi = 0.31830988618;
     if (view >= 3u) {
         return climate_colour(view, t, p) * inv_pi;
     }
-    let light = atm_terrain_lighting_vis(normal, up, h_alt, sun, vis);
+    let light = atm_terrain_lighting(normal, up, h_alt, sun);
     if (view == 2u) {
         return light;
     }
@@ -804,8 +799,8 @@ fn atm_terrain_radiance(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>,
     return a * light;
 }
 
-fn atm_shade_lit(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32, ramp_min: f32, h_alt: f32, sun: vec3<f32>, vis: f32, factor: f32) -> vec3<f32> {
-    return clamp(atm_terrain_radiance(view, tab, normal, up, t, p, h, ramp_min, h_alt, sun, vis) * factor, vec3<f32>(0.0), vec3<f32>(60000.0));
+fn atm_shade_lit(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32, ramp_min: f32, h_alt: f32, sun: vec3<f32>, factor: f32) -> vec3<f32> {
+    return clamp(atm_terrain_radiance(view, tab, normal, up, t, p, h, ramp_min, h_alt, sun) * factor, vec3<f32>(0.0), vec3<f32>(60000.0));
 }
 
 // The parts of `atm_terrain_radiance` after the pre-exposure factor: `amb` is what the sun's shadow does not touch, `dir` the direct term
@@ -815,7 +810,7 @@ struct LitParts {
     dir: vec3<f32>,
 }
 
-fn atm_shade_lit_parts(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32, ramp_min: f32, h_alt: f32, sun: vec3<f32>, vis: f32, factor: f32) -> LitParts {
+fn atm_shade_lit_parts(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32, ramp_min: f32, h_alt: f32, sun: vec3<f32>, factor: f32) -> LitParts {
     let n = normalize(normal);
     let cs = clamp(dot(n, up), 0.0, 1.0);
     let inv_pi = 0.31830988618;
@@ -825,7 +820,7 @@ fn atm_shade_lit_parts(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, 
     if (view >= 3u) {
         amb = climate_colour(view, t, p) * inv_pi;
     } else {
-        let light = atm_terrain_lighting_parts(normal, up, h_alt, sun, vis);
+        let light = atm_terrain_lighting_parts(normal, up, h_alt, sun);
         if (view == 2u) {
             amb = light.amb;
             dir = light.dir;
@@ -859,8 +854,7 @@ fn fs_lit_atmo_view(in: VsOut) -> LitOut {
     let drv = tile_drivers(in);
     let gd = ground_detail(in.node_index, in.local, in.normal, up, climate.x, climate.y, in.height - g.extra.x, drv);
     // The direct sun term is unshadowed here: the shadow of the march applies to `sun-direct` in the shadow-apply pass (REND-051).
-    let coarse_fade = horizon_coarse_fade(camera_distance(nodes[in.node_index].origin_rel, in.local));
-    let parts = atm_shade_lit_parts(g.mode.x, g.albedo, gd.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), in.height, sun, 1.0, g.range.z);
+    let parts = atm_shade_lit_parts(g.mode.x, g.albedo, gd.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), in.height, sun, g.range.z);
     let dm = detail_mul(gd, g.mode.x, g.albedo, climate.x, climate.y, clamp(dot(normalize(gd.normal), up), 0.0, 1.0), in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)));
     // The ambient goes to the scene target, the direct term to `sun-direct`, where the shadow applies to it (REND-051).
     var amb = parts.amb * dm;
@@ -874,11 +868,12 @@ fn fs_lit_atmo_view(in: VsOut) -> LitOut {
     dir = min(dir, vec3<f32>(60000.0) - amb);
     var rgb = amb + dir;
     var sunlit = true;
-    if (g.mode.x == 5u || g.mode.x == 6u) {
-        rgb = horizon_view_colour(g.mode.x, in.node_index, in.aux, up, sun, coarse_fade, max(in.height, 0.0)) * g.range.z;
+    if (g.mode.x == 5u) {
+        // J's shadow view: a lit grey; the march's visibility is drawn over it (VIEW-054).
+        rgb = vec3<f32>(0.31830988618) * g.range.z;
         sunlit = false;
     }
-    if (g.mode.x >= 7u) {
+    if (g.mode.x >= 6u) {
         rgb = clamp(driver_colour(g.mode.x, drv) * 0.31830988618 * g.range.z, vec3<f32>(0.0), vec3<f32>(60000.0));
         sunlit = false;
     }

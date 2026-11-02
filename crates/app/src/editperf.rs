@@ -1409,7 +1409,7 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
     let levels = levels_table(&rows);
     let horizon = if with_horizon {
         format!("
-the horizon side of every case (ms from set_definition to the landing of each map the edit touched; the maps baked from the base terrain). On screen is landing plus the upload: the window uploads one landed map per frame (`HorizonRig::decide`, horizonworld.rs), so a map is drawn within one frame of landing when it is the only one pending, and the window gate logs the frame a re-baked map is first drawn:
+the horizon side of every case (ms from set_definition to the landing of each map the edit touched; the maps baked from the base terrain). The viewer no longer draws the maps (rm-horizon-render), so the landing is the end of this side:
 
 {}{}{}", horizon_table(&rows), horizon_wave_section(&waves), horizon_diag_section(&rows))
     } else {

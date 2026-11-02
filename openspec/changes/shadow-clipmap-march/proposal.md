@@ -15,9 +15,9 @@ ADR 0085 (accepted, owner, 2026-10-30) replaces the horizon-map shadows with a p
 - none (the requirements join `renderer`)
 
 ### Modified Capabilities
-- `renderer`: REND-046 to REND-053 added; REND-044 reworded; REND-038, REND-041, REND-043 removed
+- `renderer`: REND-046 to REND-053 added (REND-044 reworded and REND-038, REND-041, REND-043 removed by `rm-horizon-render`, PR 6)
 - `compute-budgets`: BUDG-002 names layer 1 and a reserved layer 2
-- `viewer`: VIEW-054 without the horizon view
+- `viewer`: VIEW-054 without the horizon view (in `rm-horizon-render`, PR 6)
 - `generator-pipeline`: GEN-044, GEN-045, GEN-046, GEN-085 removed
 - `streaming-cache`: STRM-060 without its horizon clause; STRM-045, STRM-048, STRM-049, STRM-050, STRM-057, STRM-059, STRM-064 removed
 - `testing`: TEST-054 without horizon jobs; TEST-065, TEST-066 removed
