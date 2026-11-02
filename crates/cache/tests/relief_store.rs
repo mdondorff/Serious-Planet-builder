@@ -152,3 +152,61 @@ fn an_incomplete_or_damaged_channel_is_an_error_naming_the_record() {
     let e = load_relief(&store, &w, RES, &s, CELLS).unwrap_err().to_string();
     assert!(e.contains("face 3") && e.contains("bytes"), "{e}");
 }
+
+// spec: STRM-013
+// spec: STRM-068
+#[test]
+fn the_records_of_both_kinds_are_live_for_their_world_and_stale_after_a_version_change() {
+    let (w, l) = (world(), lattice(3));
+    let channels = ReliefChannels::compute(&l, &surface, R, CELLS as usize, 2);
+    let mut records = class_weights_records(&w, RES, &l, CLASS_LIST_VERSION, CLASS_SOURCE_VERSION);
+    records.extend(relief_records(&w, RES, &spec(&l), &channels));
+    for r in &records {
+        assert!(w.is_live(r), "a record of kind {} is live for its own world", r.kind);
+        let mut stale = r.clone();
+        stale.generator_version += 1;
+        assert!(!w.is_live(&stale), "a record of kind {} of another generator version is stale", r.kind);
+    }
+}
+
+// spec: STRM-067
+#[test]
+fn a_damaged_class_weights_channel_is_an_error_naming_the_record_or_the_faces() {
+    let (w, l) = (world(), lattice(3));
+    let good = class_weights_records(&w, RES, &l, CLASS_LIST_VERSION, CLASS_SOURCE_VERSION);
+    // An incomplete face set.
+    let mut records = good.clone();
+    records.remove(2);
+    let d = Dir::new("cw-incomplete");
+    let e = load_class_weights(&store_of(&d, &w, &records), &w, RES, 16, CLASS_LIST_VERSION).unwrap_err().to_string();
+    assert!(e.contains("face 2") && e.contains("incomplete"), "{e}");
+    // Weights that still sum to 255 but are not the ones the hash was made of: two class bytes of a point swapped.
+    let mut swapped = good.clone();
+    let at = 29 + 8 * 40;
+    let (a, b) = (swapped[1].payload[at], swapped[1].payload[at + 1]);
+    assert_ne!(a, b, "the point has two different class bytes");
+    swapped[1].payload.swap(at, at + 1);
+    let d2 = Dir::new("cw-hash");
+    let e = load_class_weights(&store_of(&d2, &w, &swapped), &w, RES, 16, CLASS_LIST_VERSION).unwrap_err().to_string();
+    assert!(e.contains("lattice hash") && e.contains("faces 0 to 5"), "{e}");
+    // Weights that do not sum to 255.
+    let mut broken = good.clone();
+    broken[4].payload[29 + 8 * 7] = broken[4].payload[29 + 8 * 7].wrapping_add(1);
+    let d3 = Dir::new("cw-sum");
+    let e = load_class_weights(&store_of(&d3, &w, &broken), &w, RES, 16, CLASS_LIST_VERSION).unwrap_err().to_string();
+    assert!(e.contains("sum to 255"), "{e}");
+}
+
+// spec: STRM-068
+#[test]
+fn the_channels_of_a_planet_stay_under_a_gigabyte() {
+    // The payloads' sizes from their layouts: relief 5 + 8 (n + 1)^2 bytes a face at 2048 cells, class weights 29 + 8 (n + 1)^2 at 256.
+    let relief = 6 * (5 + 8 * 2049u64 * 2049);
+    let weights = 6 * (29 + 8 * 257u64 * 257);
+    assert!(relief + weights < 1_000_000_000, "{} bytes", relief + weights);
+    // And the code writes exactly those lengths (checked at a small size).
+    let (w, l) = (world(), lattice(3));
+    let channels = ReliefChannels::compute(&l, &surface, R, CELLS as usize, 2);
+    assert_eq!(relief_records(&w, RES, &spec(&l), &channels)[0].payload.len(), 5 + 8 * 33 * 33);
+    assert_eq!(class_weights_records(&w, RES, &l, CLASS_LIST_VERSION, CLASS_SOURCE_VERSION)[0].payload.len(), 29 + 8 * 17 * 17);
+}

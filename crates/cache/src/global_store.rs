@@ -46,6 +46,7 @@ use crate::key::{
     PARAM_OCEAN_AREA_FRACTION, PARAM_RESOLUTION,
 };
 use crate::pack::{PackError, PackWriter, Record, StoreParams, TileStore};
+use crate::relief_store::{KIND_GLOBAL_CLASS_WEIGHTS, KIND_GLOBAL_RELIEF};
 use crate::stage_key::{stage_key, StageKeyContext};
 use crate::tiles::{Mismatch, VerifyReport};
 
@@ -1086,7 +1087,9 @@ impl GlobalWorld {
         (record.kind != KIND_GLOBAL_BLOCK
             && record.kind != KIND_GLOBAL_OCEAN
             && record.kind != KIND_GLOBAL_WET_FLOOR
-            && record.kind != KIND_GLOBAL_WATER_SUMMARY)
+            && record.kind != KIND_GLOBAL_WATER_SUMMARY
+            && record.kind != KIND_GLOBAL_RELIEF
+            && record.kind != KIND_GLOBAL_CLASS_WEIGHTS)
             || (record.generator_version == GLOBAL_VERSION && record.hash_version == HASH_VERSION && record.node_set_id == self.node_set_id)
     }
 

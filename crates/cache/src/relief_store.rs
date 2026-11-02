@@ -51,6 +51,7 @@ pub struct ReliefSpec {
 
 impl ReliefSpec {
     fn bytes(&self) -> Vec<u8> {
+        assert!(self.max_step.is_finite() && self.max_step > 0.0, "the step limit of k is finite and positive, not {}", self.max_step);
         let mut b = Vec::with_capacity(52);
         b.extend(RELIEF_CHANNELS_VERSION.to_le_bytes());
         b.extend(self.class_list_version.to_le_bytes());
@@ -140,7 +141,9 @@ pub fn class_weights_records(
         .collect()
 }
 
-/// The stored class lattice of `cells` cells per face edge: `Ok(None)` when the store holds none (a store from before the channel); an error naming both versions when the
+/// The stored class lattice of `cells` cells per face edge and the class-source version it was made with (the caller compares it with the generator's: the key does not carry
+/// it, so a repaint under an unchanged class list writes the same key, and the newest copy wins). Load the class weights BEFORE the relief channels: a changed class-list
+/// version is refused here, but reads as absent for the relief channels: `Ok(None)` when the store holds none (a store from before the channel); an error naming both versions when the
 /// stored class-list version is not `class_list_version` (STRM-067), and when a record is damaged or the faces disagree.
 pub fn load_class_weights(
     store: &TileStore,
@@ -183,12 +186,12 @@ pub fn load_class_weights(
     let (source, hash) = header.expect("six faces were read");
     let lattice = ClassLattice::from_bytes(cells as usize, &faces).ok_or_else(|| {
         ReliefStoreError(format!(
-            "class weights (record kind {KIND_GLOBAL_CLASS_WEIGHTS}): the stored weights do not fit {cells} cells or do not sum to 255"
+            "class weights (record kind {KIND_GLOBAL_CLASS_WEIGHTS}) faces 0 to 5: the stored weights do not fit {cells} cells or do not sum to 255"
         ))
     })?;
     if lattice_hash(&lattice) != hash {
         return Err(ReliefStoreError(format!(
-            "class weights (record kind {KIND_GLOBAL_CLASS_WEIGHTS}): the stored weights do not match their lattice hash"
+            "class weights (record kind {KIND_GLOBAL_CLASS_WEIGHTS}) faces 0 to 5: the stored weights do not match their lattice hash"
         )));
     }
     Ok(Some((lattice, source)))

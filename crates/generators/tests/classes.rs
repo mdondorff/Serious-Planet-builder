@@ -385,3 +385,23 @@ fn the_flank_of_a_belt_is_mountains_before_its_core_is_high_enough_to_count() {
     let faint = class_weights(&MaskTerms { flank: 0.05, ..none }, 400.0, 0.0);
     assert!(faint[MOUNTAINS] < w[MOUNTAINS] && faint[MOUNTAINS] < 0.1, "the membership rises smoothly from the belt's edge: {faint:?}");
 }
+
+// spec: GEN-097
+#[test]
+fn the_k_step_quantile_runs_from_the_smallest_to_the_largest_step_and_is_monotone() {
+    let lattice = ClassLattice::build_with(&ClassSource::new(SEED), 16, 2);
+    let largest = lattice.largest_k_step();
+    assert_eq!(lattice.k_step_quantile(1.0), largest, "the 1.0 quantile is the largest step");
+    let qs: Vec<f64> = [0.0, 0.5, 0.9, 0.99, 1.0].iter().map(|&q| lattice.k_step_quantile(q)).collect();
+    assert!(qs.windows(2).all(|w| w[0] <= w[1]), "the quantiles of the steps are monotone: {qs:?}");
+    // A hand-made lattice of one cell per face: plain everywhere except one point of mountains, so the steps are 0 and 5 only.
+    let mut bytes = vec![0u8; 6 * 4 * CLASS_COUNT];
+    for p in bytes.as_chunks_mut::<CLASS_COUNT>().0 {
+        p[PLAIN] = 255;
+    }
+    bytes[MOUNTAINS..=MOUNTAINS].copy_from_slice(&[255]);
+    bytes[PLAIN] = 0;
+    let tiny = ClassLattice::from_bytes(1, &bytes).expect("a lattice of one cell per face");
+    assert_eq!(tiny.k_step_quantile(1.0), 5.0, "plain k 1, mountains k 6");
+    assert_eq!(tiny.k_step_quantile(0.0), 0.0);
+}

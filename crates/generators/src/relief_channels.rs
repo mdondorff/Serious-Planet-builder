@@ -236,7 +236,7 @@ impl ReliefChannels {
         over as f64 / total as f64
     }
 
-    /// The channels' bytes, for the identity checks of the tests and the stored form's key: the version, the cells, then `k` and `m` of every face, f32 little-endian.
+    /// The channels' bytes, for the identity checks of the tests: the version, the cells, then `k` and `m` of every face, f32 little-endian.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(8 + 8 * 6 * (self.cells + 1) * (self.cells + 1));
         out.extend(RELIEF_CHANNELS_VERSION.to_le_bytes());
