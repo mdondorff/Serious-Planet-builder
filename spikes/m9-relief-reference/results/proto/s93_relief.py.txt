@@ -1,0 +1,105 @@
+"""SPIKE-93: Earth's relief bands (ETOPO 2022 60 arc-second surface elevation; NOAA NCEI, DOI 10.25921/fd45-gt74, CC0-1.0) and the same
+measures on a world preview's per-pixel fields (SPIKE-93's `fields.f32`: new_m, untapered k, land depth as f32 triples, 0.25 degree).
+Land is elevation > 0 (Earth) or land depth > 0 (preview); the relief boxes clamp elevation at 0 m (sea counts as sea level); every share is area-weighted over land within 60 degrees of the equator
+(TEST-082's region; Antarctica and most of Greenland excluded) unless named "all land".
+Measures:
+- hypsometry: the share of land per 250 m band, and above 1, 2, 3 and 4 km;
+- relief classes (TEST-082's rule on Earth): R7 = max - min elevation in a box of +-7.4 km (+-4 rows, +-4/cos(lat) columns at 1');
+  plain R7 < 100 m, hills 100-300 m, mountains R7 > 300 m or elevation > 2500 m;
+- mountain belts: R50 = max - min in a box of +-50 km (at 1': +-27 rows, +-27/cos(lat) columns; at 0.25 degree: +-2 rows,
+  +-2/cos(lat) columns); belt land where R50 >= 1000 m;
+- k-step analogue: a pixel's k from its relief class with GEN-097's table (plain 1, hills 5, mountains 6 + 1.5 smoothstep(1500, 3500 m,
+  elevation)); the mean k of the land pixels of each 0.36 degree cell (about 40 km, GEN-095's lattice spacing) holding at least half land;
+  the largest |dk| between 4-neighbouring such cells, its p99 and the share of neighbour pairs over 2.0.
+Usage: python s93_relief.py earth <etopo .tif> <out.json> | python s93_relief.py preview <fields.f32> <out.json>"""
+import json, sys
+import numpy as np
+from scipy.ndimage import maximum_filter1d, minimum_filter1d
+
+def area_w(lat_deg):
+    return np.cos(np.radians(lat_deg))
+
+def box_range(e, lat_deg, half_rows, half_cols_eq):
+    """max - min of e over a box of +-half_rows rows and +-half_cols_eq/cos(lat) columns (wrapping in longitude)."""
+    mx = np.empty_like(e); mn = np.empty_like(e)
+    for i in range(e.shape[0]):
+        w = 2 * int(round(half_cols_eq / max(np.cos(np.radians(lat_deg[i])), 0.05))) + 1
+        mx[i] = maximum_filter1d(e[i], w, mode='wrap'); mn[i] = minimum_filter1d(e[i], w, mode='wrap')
+    size = 2 * half_rows + 1
+    return maximum_filter1d(mx, size, axis=0, mode='nearest') - minimum_filter1d(mn, size, axis=0, mode='nearest')
+
+def smoothstep(a, b, x):
+    t = np.clip((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t)
+
+def hyps(e, w, land):
+    tot = w[land].sum()
+    edges = np.arange(0, 9001, 250)
+    h, _ = np.histogram(e[land], bins=edges, weights=w[land])
+    return dict(bands=[[int(a), round(float(v / tot) * 100, 2)] for a, v in zip(edges[:-1], h) if v > 0],
+                above={str(k): round(float(w[land & (e > k)].sum() / tot) * 100, 2) for k in (500, 1000, 2000, 3000, 4000, 5000)},
+                highest_m=round(float(e[land].max()), 0))
+
+def kstep(kpix, land, lat_deg, cell_rows, cell_cols):
+    H, W = kpix.shape
+    H2, W2 = H // cell_rows, W // cell_cols
+    k = kpix[:H2 * cell_rows, :W2 * cell_cols].reshape(H2, cell_rows, W2, cell_cols)
+    l = land[:H2 * cell_rows, :W2 * cell_cols].reshape(H2, cell_rows, W2, cell_cols)
+    nl = l.sum(axis=(1, 3)); ok = nl >= 0.5 * cell_rows * cell_cols
+    km = np.where(ok, (k * l).sum(axis=(1, 3)) / np.maximum(nl, 1), np.nan)
+    d = [np.abs(km[:, 1:] - km[:, :-1]).ravel(), np.abs(km[:, 0] - km[:, -1]), np.abs(km[1:] - km[:-1]).ravel()]
+    d = np.concatenate(d); d = d[np.isfinite(d)]
+    return dict(largest=round(float(d.max()), 2), p99=round(float(np.percentile(d, 99)), 2), p90=round(float(np.percentile(d, 90)), 2),
+                over_2=round(float((d > 2.0).mean()) * 100, 2), pairs=int(d.size))
+
+def earth(path):
+    sys.path.insert(0, __file__.rsplit('\\', 1)[0] if '\\' in __file__ else '.')
+    from glo30 import read_tile
+    a, _, _, _ = read_tile(path)
+    a = a[:10800, :21600]
+    rows = slice(int((90 - 61) * 60), int((90 + 61) * 60))  # 61 N to 61 S: the 60-degree region plus the boxes' margin
+    e = np.ascontiguousarray(a[rows], dtype=np.float32); del a
+    lat = 90 - (np.arange(rows.start, rows.stop) + 0.5) / 60
+    w = np.broadcast_to(area_w(lat)[:, None], e.shape)
+    region = (np.abs(lat) < 60)[:, None]
+    land = (e > 0) & region
+    out = dict(hypsometry=hyps(e, w, land))
+    ec = np.maximum(e, 0)  # sea counts as sea level: the boxes measure relief on land, not to the sea floor
+    r7 = box_range(ec, lat, 4, 4)
+    mtn = (r7 > 300) | (e > 2500); hills = ~mtn & (r7 >= 100); plain = ~mtn & ~hills
+    tot = w[land].sum()
+    out['classes'] = {n: round(float(w[land & m].sum() / tot) * 100, 2) for n, m in (('plains', plain), ('hills', hills), ('mountains', mtn))}
+    kpix = np.where(plain, 1.0, np.where(hills, 5.0, 6.0 + 1.5 * smoothstep(1500, 3500, e))).astype(np.float32)
+    del r7
+    out['kstep_40km'] = kstep(kpix, land, lat, 22, 22)  # 22 arc-minutes = 0.367 degree, about 40 km
+    del kpix
+    r50 = box_range(ec, lat, 27, 27); del ec
+    out['belts_1min'] = round(float(w[land & (r50 >= 1000)].sum() / tot) * 100, 2)
+    out['r50_1min_land_p50_p90'] = [round(float(np.percentile(r50[land], q)), 0) for q in (50, 90)]
+    del r50
+    # The same belt rule at 0.25 degree on 15 x 15 block means, the preview's resolution.
+    H4 = e.shape[0] // 15
+    e4 = e[:H4 * 15].reshape(H4, 15, 1440, 15).mean(axis=(1, 3)); lat4 = lat[:H4 * 15].reshape(H4, 15).mean(axis=1)
+    land4 = (e4 > 0) & (np.abs(lat4) < 60)[:, None]; w4 = np.broadcast_to(area_w(lat4)[:, None], e4.shape)
+    r50q = box_range(np.maximum(e4, 0), lat4, 2, 2)
+    out['belts_quarter_degree'] = round(float(w4[land4 & (r50q >= 1000)].sum() / w4[land4].sum()) * 100, 2)
+    out['hypsometry_quarter_degree_above'] = hyps(e4, w4, land4)['above']
+    return out
+
+def preview(path):
+    f = np.fromfile(path, dtype='<f4').reshape(720, 1440, 3)
+    e, k, depth = f[..., 0].astype(np.float64), f[..., 1].astype(np.float64), f[..., 2]
+    lat = 90 - (np.arange(720) + 0.5) * 0.25
+    w = np.broadcast_to(area_w(lat)[:, None], e.shape)
+    land = (depth > 0) & (np.abs(lat) < 60)[:, None]
+    out = dict(hypsometry=hyps(e, w, land))
+    r50 = box_range(np.maximum(e, 0), lat, 2, 2)
+    out['belts_quarter_degree'] = round(float(w[land & (r50 >= 1000)].sum() / w[land].sum()) * 100, 2)
+    out['kstep_pixels_quarter_degree'] = kstep(k, land, lat, 1, 1)  # 0.25 degree pixels, about 28 km
+    out['kstep_cells_0.5_degree'] = kstep(k, land, lat, 2, 2)  # about 55 km
+    return out
+
+if __name__ == '__main__':
+    res = earth(sys.argv[2]) if sys.argv[1] == 'earth' else preview(sys.argv[2])
+    json.dump(res, open(sys.argv[3], 'w'), indent=1)
+    print(json.dumps({k: v for k, v in res.items() if k != 'hypsometry'}))
+    print(res['hypsometry']['above'], res['hypsometry']['highest_m'])
