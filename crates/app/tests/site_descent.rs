@@ -2,7 +2,7 @@
 //! default view with no descent). The scripted flight starts high above the site and lands over it; the editor mode, which edits from
 //! the free camera, turns on where the descent ends.
 
-use planet::window::descent_finished;
+use planet::window::{descent_finished, descent_wait_step, site_descent_wanted};
 use planet_core::Vec3;
 use planet_frame::scenes::{build_script_at, StreamScene, FRAME_STEP_S};
 use planet_frame::Camera;
@@ -38,4 +38,24 @@ fn a_site_descent_starts_high_over_the_site_and_the_editor_mode_waits_for_its_en
     assert!(descent_finished((n as f64 - 1.0) * FRAME_STEP_S, n));
     assert!(descent_finished(1.0e6, n));
     assert!(descent_finished(0.0, 1), "a one-camera script has nothing to wait for");
+}
+
+// spec: VIEW-022
+#[test]
+fn the_wait_for_the_descent_ends_at_the_last_camera_or_a_tab_and_only_an_edit_site_run_waits() {
+    let n = 100;
+    let end = (n as f64 - 1.0) * FRAME_STEP_S;
+    // Only --edit with --site, outside a smoke run, waits.
+    assert!(site_descent_wanted(true, true, false));
+    assert!(!site_descent_wanted(true, false, false), "no --site: the mode starts on as before");
+    assert!(!site_descent_wanted(false, true, false), "no --edit: the flight plays and nothing is waiting");
+    assert!(!site_descent_wanted(true, true, true), "a smoke run turns the mode on itself");
+    // While the flight plays: waiting, no toggle.
+    assert_eq!(descent_wait_step(true, false, 0.0, n), (true, false));
+    assert_eq!(descent_wait_step(true, false, end - FRAME_STEP_S, n), (true, false));
+    // At the last camera: stop waiting and turn the mode on, once.
+    assert_eq!(descent_wait_step(true, false, end, n), (false, true));
+    assert_eq!(descent_wait_step(false, false, end, n), (false, false), "after the wait nothing toggles again");
+    // A Tab during the descent turned the mode on: the wait ends without a second toggle.
+    assert_eq!(descent_wait_step(true, true, 3.0, n), (false, false));
 }

@@ -2,7 +2,7 @@
 
 ### Requirement: VIEW-022 The editor mode of the window
 `planet editor` SHALL have an editor mode (`planet::editwin`, with `window`) that edits the world's definition through the session (VIEW-017) and the panels (VIEW-021).
-- Tab turns the mode on and off; `--edit` starts the window with it on.
+- Tab turns the mode on and off; `--edit` starts it on (`--site`: after descent).
 - `--items DIR` is the directory the edits are written to and loaded from: one TOML file per edit (AUTH-001), every command writes its file; without it the edits live in memory and the status line says they are not saved.
 - `--editor-layout F` is the layout file (VIEW-018).
 - `--edit` with `--no-ui` is an error that says the mode needs the UI.
@@ -90,4 +90,4 @@ Source: owner (M6 step U3, 2026-10-19), VIEW-003, VIEW-010, VIEW-011, VIEW-017, 
 
 #### Scenario: Site descent
 - **WHEN** the window starts with `--edit --site LAT,LON`
-- **THEN** the scripted flight starts high above the site and descends over it with the mode off, the mode turns on where the last camera is reached (or at a Tab before then), and the free camera takes the landing pose
+- **THEN** the scripted flight starts high above the site and descends over it with the mode off, the mode turns on where the last camera is reached (or at a Tab before then), and the free camera takes over there

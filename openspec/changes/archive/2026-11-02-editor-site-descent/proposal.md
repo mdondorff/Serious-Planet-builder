@@ -3,7 +3,7 @@ Tracked owner bug (2026-10-30): `editor --edit --site LAT,LON` opened at the def
 
 ## What Changes
 - With `--edit` and `--site` (not a smoke run) the editor mode starts off; the flight descends over the site; the mode turns on where the descent ends (the free camera takes the landing pose), or at once at a Tab.
-- `window::descent_finished`; VIEW-022 gains the bullet; tier A test `site_descent` (the script starts high over the site and lands over it; the mode waits for the last camera).
+- `window::descent_finished`; VIEW-022 gains the scenario Site descent (the statement is at its word limit) and its first bullet says `--edit` starts the mode on, except with `--site`; `site_descent_wanted` and `descent_wait_step` are the pure steps of the window; tier A test `site_descent` (the script starts high over the site and lands over it; the wait ends at the last camera or a Tab, only an `--edit --site` run waits).
 
 ## Capabilities
 ### Modified Capabilities
