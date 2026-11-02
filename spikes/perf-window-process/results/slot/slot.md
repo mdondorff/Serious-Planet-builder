@@ -25,6 +25,7 @@ The planner schedules the slot (inbox #72, opus-planner 2026-11-02); the spikes 
    - 3b: the frame-level verdict of the 2° pose against REND-052, in the same results file; NOT RUN if the scene is not on main at the slot.
 4. Flight verdicts (frame median and p99, tile-ready) of dive, dive-fast, look-1m and look-2km at 6 workers (0.6 x B, B = 10 here: ADR 0092's worked example). Teleport-1m and teleport-2km are recorded, never a verdict. coast-glide runs once as the lit flight's frame-time check.
    - A flight miss goes back to the owner.
+   - If compute-shares-fractions PR 3 is not merged before the slot: parallel readings not judged at --gen-workers 6 (pre-PR-3 calibration); single readings and step 2's window preflight stand.
 
 ## After the slot
 - Results go into `spikes/perf-window-process/results/results.md`, section "Proofs".
