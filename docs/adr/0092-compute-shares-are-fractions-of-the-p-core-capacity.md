@@ -1,5 +1,5 @@
 # 0092 Compute shares are fractions of the P-core capacity; background work is budgeted, not pooled on E-cores
-Status: proposed (drafted by opus-planner, 2026-11-02; for the owner)
+Status: accepted (owner, 2026-11-02: a conservative terrain share; flight, not teleport, is the performance goal; no machine counts as rules; drafted by opus-planner)
 Date: 2026-11-02
 Source: owner, 2026-11-01 (shares divide P-core capacity only; E-cores only as a background pool that never slows critical work; BUDG-003 generalised beyond the reference machine); SPIKE-89 (`spikes/relative-shares/results/results.md`); SPIKE-90 (`spikes/dual-pool/results/results.md`); amends ADR 0083 point 3
 
@@ -16,17 +16,17 @@ Source: owner, 2026-11-01 (shares divide P-core capacity only; E-cores only as a
 4. **Detection without new crates:** `GetLogicalProcessorInformationEx` on Windows (a feature of the existing `windows` dependency), sysfs on Linux, `available_parallelism` as the fallback; `PLANET_CPU_TOPOLOGY=P,E` overrides for tests.
 5. **Absolute caps derive from the shares** (horizon bakes `terrain / 2`, the coupled run `B`); reference-machine calibrations (TEST-039/040) are named as such and give no verdict elsewhere.
 
-## Open point for the owner
-| Terrain fraction | Rasierklinge (P 12, B 10) | 8-core desktop (P 16, B 14) | Measured on Rasierklinge |
-|---|---|---|---|
-| 0.6 | 6 | 8 | below the 8-10 knee; teleport-1m coverage not measured at 6 |
-| 0.8 | 8 | 11 | teleport-1m 83 % of tiles |
-| 0.8 with max 10 | 8 | 10 | as above |
-A window measures the chosen value on Rasierklinge (tile-ready, coverage, frame p99) before BUDG-003 is set active.
+## Terrain share (owner, 2026-11-02)
+- The terrain share is conservative: the terrain must later run inside a game engine beside physics, game logic, sky and networking, each keeping at least its minimum.
+- The performance goal is flight (dive, glide, look scenes): tile-ready and frame budgets hold at the terrain share. Teleport speed is a nice-to-have, recorded, not a verdict.
+- The fractions, minimums and maximums live in BUDG-003 only; thread counts per machine appear only as worked examples, never as rules (owner, 2026-11-02).
+- Worked example (not a rule): a terrain fraction of 0.6 gives 6 threads on Rasierklinge (12 P threads) and 8 on an 8-core desktop.
+- The next perf window confirms the flight scenes at the spec's fraction; a miss comes back to the owner.
 
 ## Consequences
 - BUDG-003, BUDG-011, BUDG-012, STRM-020, STRM-064, TEST-039/040 change (SPIKE-89 section 4); about 4 PRs.
-- Rasierklinge's terrain ceiling falls from 12 to 6-8; streaming may land tiles later. The window above decides whether that is acceptable.
+- The reference machine's terrain ceiling falls below today's fixed 12 (6 in the worked example); teleports land tiles later (accepted); flights are checked in the next window.
+- Spec work: BUDG-003 states the formula and the fraction table; scenarios use synthetic topologies and name results as examples.
 - ADR 0083 point 3's "stated fraction of the cores" becomes a fraction of the P-core capacity.
 
 ## Licences of adopted code or techniques
