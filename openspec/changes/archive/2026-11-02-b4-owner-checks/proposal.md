@@ -13,3 +13,7 @@ Design only in this change (no spec delta yet); each step below is its own chang
 ## Impact
 - Docs and OpenSpec only; no code. Tier A only for design; each step later names its tiers (detectors A, scenes C, the package a manual run).
 - Existing detectors are reused, not duplicated (design.md table).
+
+## Outcome (archived 2026-11-02)
+- B4-1 (inventory), B4-2 (level-pop detector, TEST-072), B4-4 (preview pair, TEST-076, TEST-077, the pair in metres), B4-5 (package command, TEST-074) and B4-6 (delivery pointer; two sites; stills and flights run the clipmap shadow) are done.
+- B4-3 (river bed-rise detector) is not done: it waits for M9's channels (the default world draws no rivers).
