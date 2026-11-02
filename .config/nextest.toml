@@ -123,8 +123,15 @@ test-group = "real-gpu-heavy"
 # `gpu_window::the_window_path_opens_runs_the_flight_lit_with_the_atmosphere_and_closes` (249 s), `gpu_window::the_editor_mode_places_drags_types_undoes_and_deletes_in_the_real_window_and_writes_the_item_file` (123 s),
 # `gpu_water_coverage` (114 s) and the item sweep (60 s) ran at the same time; the flight draws no shadow march, so its own work did not change. The first
 # matching override sets the group, so this one comes before the `heavy-window` one. Only the overlap changes: no test is skipped, retried or changed.
+# The rule for the rest of the group (planner, 2026-11-03): process tests that run a lit flight or lit streaming scene on the software adapter.
+# - `gpu_stream_perf::a_lit_view_a_lit_flight_and_a_stream_scene_log_their_cpu_calibration_when_asked_even_in_a_smoke_run` runs the lit coast-glide
+#   flight (two shore-filter runs): 30 to 70 s and 128 to 235 s on the two Windows CI partitions before and after the calibration changes (#1091,
+#   #1095), cut off at 300.5, 301.2 and 305.3 s only in this branch's runs, beside the serialised tests; the CPU calibration is about 1 s of it.
+# - `gpu_stream_perf::a_streaming_scene_on_the_lit_path_logs_beside_the_debug_path_under_its_own_name` runs look-1m with `--lit`: 172 s and 222 s on
+#   `C 1/2`, then stopped by its own 240 s RUN_LIMIT.
+# nextest's slow timer starts when a test starts, not while it waits for the group, so their limits stay as they are.
 [[profile.default.overrides]]
-filter = 'binary(gpu_all) and (test(a_coastal_flight_at_low_altitude_flickers_within_the_budget_while_the_lod_changes_under_it) or test(/^gpu_window::/))'
+filter = 'binary(gpu_all) and (test(a_coastal_flight_at_low_altitude_flickers_within_the_budget_while_the_lod_changes_under_it) or test(/^gpu_window::/) or test(a_lit_view_a_lit_flight_and_a_stream_scene_log_their_cpu_calibration_when_asked_even_in_a_smoke_run) or test(a_streaming_scene_on_the_lit_path_logs_beside_the_debug_path_under_its_own_name))'
 test-group = "warp-heavy"
 
 # The heavy software-adapter window and scene tests (the tracked tier-C timeouts: `gpu_window`, `gpu_water_coverage`, `gpu_stream_perf`,

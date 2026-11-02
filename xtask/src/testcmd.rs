@@ -1861,7 +1861,13 @@ mod tests {
         let warp = position(&|o| o.body.contains(r#"test-group = "warp-heavy""#), "the warp-heavy override");
         let heavy_at = position(&|o| o.body.contains(r#"test-group = "heavy-window""#), "the heavy-window override");
         assert!(warp < heavy_at, "a window test would land in heavy-window (the first matching override sets the group)");
-        for member in ["a_coastal_flight_at_low_altitude_flickers_within_the_budget_while_the_lod_changes_under_it", "/^gpu_window::/"] {
+        for member in [
+            "a_coastal_flight_at_low_altitude_flickers_within_the_budget_while_the_lod_changes_under_it",
+            "/^gpu_window::/",
+            // Process tests that run a lit flight or lit streaming scene on the software adapter (planner, 2026-11-03).
+            "a_lit_view_a_lit_flight_and_a_stream_scene_log_their_cpu_calibration_when_asked_even_in_a_smoke_run",
+            "a_streaming_scene_on_the_lit_path_logs_beside_the_debug_path_under_its_own_name",
+        ] {
             assert!(defaults[warp].filter.contains(&format!("test({member})")), "{member} is not in warp-heavy");
         }
         // The heavy-window group holds the named heavy tests, and its override comes before the `gpu-tier` one.
