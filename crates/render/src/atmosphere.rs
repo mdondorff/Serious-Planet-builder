@@ -868,8 +868,11 @@ fn fs_lit_atmo_view(in: VsOut) -> LitOut {
     var dir = parts.dir * dm;
     let gloss = ground_gloss(in.node_index, in.local, gd, sun);
     if (gloss > 0.0) {
-        dir = min(dir + atm_sun_direct(up, in.height, sun) * (gloss * g.range.z * sun_vis), vec3<f32>(60000.0));
+        dir = dir + atm_sun_direct(up, in.height, sun) * (gloss * g.range.z * sun_vis);
     }
+    // The two targets add up in the scene target (f16): the sum is bounded here, as the single clamp of the unsplit radiance did.
+    amb = min(amb, vec3<f32>(60000.0));
+    dir = min(dir, vec3<f32>(60000.0) - amb);
     var rgb = amb + dir;
     var sunlit = true;
     if (g.mode.x == 5u || g.mode.x == 6u) {

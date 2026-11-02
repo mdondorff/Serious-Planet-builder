@@ -371,7 +371,10 @@ fn the_plain_lit_frame_keeps_its_sun_term_in_sun_direct_and_shadow_apply_adds_it
     let (hdr, direct) = frame(ShadeView::Lit);
     let mut lit_pixels = 0;
     for (i, (h, d)) in hdr.iter().zip(&direct).enumerate() {
-        assert_eq!(h[..3], d[..3], "pixel {i}: the scene is the applied sun term");
+        // Exact, except that a blend unit may flush an f16 subnormal (below 2^-14) to zero.
+        for c in 0..3 {
+            assert!(h[c] == d[c] || (h[c].abs() < 6.2e-5 && d[c].abs() < 6.2e-5), "pixel {i} channel {c}: scene {} vs sun-direct {}", h[c], d[c]);
+        }
         lit_pixels += usize::from(d[..3].iter().any(|v| *v > 0.0));
     }
     assert!(lit_pixels > 100, "the planet carries a sun term in {lit_pixels} pixels");
