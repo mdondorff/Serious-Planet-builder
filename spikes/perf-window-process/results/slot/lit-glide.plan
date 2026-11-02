@@ -1,0 +1,5 @@
+# ADR 0092: the lit flight coast-glide once, as the lit path's frame-time check (the views' cool start is capped at 30 s, ADR 0094).
+rounds 1
+retries 1
+config default
+flight coast-glide lit --views coast-glide --store C:/DEV/SeriousPlanetData/global16384 --log lit.json

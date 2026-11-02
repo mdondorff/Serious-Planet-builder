@@ -1,0 +1,8 @@
+# SPIKE-95 proof 2 and 3 (inbox #72): streaming runs with the duty idle and no cool start (ADR 0094), through the window runner (BUILD-034).
+# Compare: valid share, waits and minutes per valid run against SPIKE-90 window 2 block 2 (120 s capped cool-downs, all INVALID).
+# Confound: window 2 was thermally limited (60-64 C) and its block-2 runs were loaded configurations; this plan runs today's default.
+rounds 5
+retries 1
+config main
+flight dive stream dive --store C:/DEV/SeriousPlanetData/global16384
+flight teleport-1m stream teleport-1m --store C:/DEV/SeriousPlanetData/global16384
