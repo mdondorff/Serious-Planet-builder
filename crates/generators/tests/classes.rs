@@ -313,8 +313,8 @@ fn the_mask_has_no_step_at_the_latitudes_where_a_tangent_basis_would_change() {
     let source = ClassSource::new(SEED);
     // The tangent basis of Vec3 switches its helper axis at |z| = 0.9; the estimate of the coast distance must not.
     let at = |phi: f64, z: f64| {
-        let r = (1.0 - z * z).sqrt();
-        Vec3::new(r * phi.cos(), r * phi.sin(), z).normalized()
+        let r = libm::sqrt(1.0 - z * z);
+        Vec3::new(r * libm::cos(phi), r * libm::sin(phi), z).normalized()
     };
     for sign in [-1.0, 1.0] {
         for k in 0..400u32 {
