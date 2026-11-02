@@ -7,12 +7,11 @@ Round 3 of the M9 generator (planner, 2026-11-02): the relief on the round-2 con
 - **Preview (TEST-086):** the report prints SPIKE-93's rows (land under 500 m, median elevation, coastal median, land above 1 and 3 km, belt land, the `k`-step distribution) beside Earth and the proposed bands, and the class bands follow TEST-082.
 - **TEST-082:** the single-seed bands become SPIKE-93's bands over seeds 1 to 5 with a gate form (the median within the band widened by 10 % of its width; no seed outside by more than the stated tolerance). The bands are proposed; the owner's yes is pending, and only the numbers change back if they decline.
 - **GEN-097:** the max step of `k` stays 2.0 as written; the residual (largest step 5.1 to 5.8, 0.4 % of steps over 2.0, p99 about 1.5 against Earth's 3.3) is noted, and the limit against a p99 or share form is the owner's call.
-- Not in this change: belt land (13-23 %, median 10.7 %, seed 4 at 6.0 %), which needs belts only at convergent margins (reported, gated with that round); wiring into the bake.
+- Not in this change: belt land (13-23 %, median 9.7 %, seed 4 at 5.4 %), which needs belts only at convergent margins (reported, gated with that round); wiring into the bake.
 
 ## Capabilities
 ### Modified Capabilities
 - `generator-pipeline`: GEN-094 to GEN-097 (planned, in `m9-bake`), GEN-105 (round 2's plate draws: 64)
 - `testing`: TEST-082 (planned, in `m9-bake`), TEST-086's report
 
-Expected golden changes:
-- lit_orbit_ev15, lit_orbit_ev_bands, lit_orbit_precipitation_ev15, lit_orbit_temperature_ev15, sky_orbit_ev15, water_class_orbit: not expected to move if the global stage is unchanged (only the class source and the report change); listed to be confirmed from the CI artifacts
+Expected golden changes: none (the class source reaches no render path; the global stage is unchanged).

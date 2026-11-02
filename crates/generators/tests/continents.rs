@@ -100,3 +100,10 @@ fn the_plate_draws_and_the_layout_retry_give_the_same_class_weights_on_every_bui
     let c = ClassSource::new(5);
     assert!(directions().iter().step_by(37).any(|&d| a.eval(d) != c.eval(d)), "another seed gives the same source");
 }
+
+// spec: GEN-105
+#[test]
+fn the_kept_plate_draw_of_seeds_1_to_5_is_pinned_so_that_a_swapped_plate_set_needs_a_declared_re_pin() {
+    let kept: Vec<u64> = (1..=5).map(|s| ClassSource::new(s).plate_draw()).collect();
+    assert_eq!(kept, vec![36, 19, 48, 11, 48], "a seed's plate draw changed: declare the re-pin (round 3 start values)");
+}

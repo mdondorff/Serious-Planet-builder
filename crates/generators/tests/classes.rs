@@ -257,7 +257,7 @@ fn the_class_source_version_goes_with_its_output() {
     );
 }
 
-const FINGERPRINT: u64 = 14282494629378385424;
+const FINGERPRINT: u64 = 11516291648435887283;
 
 // spec: GEN-103
 #[test]

@@ -543,7 +543,7 @@ fn weighted_quantile(v: &mut [(f64, f64)], q: f64) -> f64 {
             return *x;
         }
     }
-    v.last().map_or(0.0, |x| x.0)
+    v.last().map_or(f64::NAN, |x| x.0)
 }
 
 pub fn relief(f: &Fields) -> Relief {
@@ -562,7 +562,7 @@ pub fn relief(f: &Fields) -> Relief {
             continue;
         }
         let area = libm::cos(lat);
-        let cols = |r: isize| ((r as f64) / libm::cos(lat).max(0.2)).ceil() as isize;
+        let cols = |r: isize| ((r as f64) / libm::cos(lat).max(0.2)).round() as isize;
         for x in 0..w {
             let p = px(x, y);
             if p.land_depth <= 0.0 {
@@ -600,13 +600,17 @@ pub fn relief(f: &Fields) -> Relief {
         }
     }
     let norm = if land > 0.0 { land } else { 1.0 };
-    // The k of 2 x 2 pixel cells with at least two land pixels, and the steps between 4-neighbours.
+    // The k of 2 x 2 pixel cells with at least two land pixels (the mean over the land pixels, as the SPIKE-93 reference), under 60 degrees latitude, and the steps between 4-neighbours.
     let (cw, ch) = (w / 2, h / 2);
     let cell: Vec<Option<f64>> = (0..cw * ch)
         .map(|i| {
             let (cx, cy) = (i % cw, i / cw);
+            if libm::fabs(latitude(2 * cy + 1, h)) >= 60f64.to_radians() {
+                return None;
+            }
             let ps = [px(2 * cx, 2 * cy), px(2 * cx + 1, 2 * cy), px(2 * cx, 2 * cy + 1), px(2 * cx + 1, 2 * cy + 1)];
-            (ps.iter().filter(|p| p.land_depth > 0.0).count() >= 2).then(|| ps.iter().map(|p| f64::from(p.k)).sum::<f64>() / 4.0)
+            let on: Vec<f64> = ps.iter().filter(|p| p.land_depth > 0.0).map(|p| f64::from(p.k)).collect();
+            (on.len() >= 2).then(|| on.iter().sum::<f64>() / on.len() as f64)
         })
         .collect();
     let mut steps: Vec<(f64, f64)> = Vec::new();
@@ -722,31 +726,26 @@ pub fn report(f: &Fields) -> String {
     if f.width >= 360 && f.height >= 180 {
         let c = crate::shape::continent_metrics(&land, f.width, f.height);
         r += "continent stage (SPIKE-92, GEN-104; TEST-087 and TEST-088 score these on a 1440 x 720 land grid; reported here on the preview grid):
-    ";
+";
         r += &format!(
             "  S9 compactness (area-weighted median of 4 pi A / P^2): {:.2}; Earth 0.10, gate at most 0.20
-    ",
+",
             c.compactness
         );
         r += &format!(
             "  S10 elongation (median sqrt(l1 / l2)): {:.2}; Earth 1.77, band 1.5-2.5
-    ",
+",
             c.elongation
         );
         r += &format!(
             "  S11 islands (masses of 10^4 to 10^6 km2): {}, {:.1} % of land; Earth 50, 3.9 %, band 35-70 and 1.9-6 %
-    ",
+",
             c.islands,
             100.0 * c.island_share
         );
-        r += &format!(
-            "  masses of at least 1 Mkm2 centred poleward of 70 degrees: {}; limit 1
-",
-            c.polar_masses
-        );
+        r += &format!("  masses of at least 1 Mkm2 centred poleward of 70 degrees: {}; limit 1\n", c.polar_masses);
     } else {
-        r += "continent stage metrics S9 to S11: not measured (they 
-";
+        r += "continent stage metrics S9 to S11: not measured (they need a grid of at least 360 x 180)\n";
     }
     r += "  S8 sinuosity: not measured (SPIKE-91 has no comparable measure yet)\n";
     r += &relief_report(f);

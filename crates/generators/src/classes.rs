@@ -378,7 +378,9 @@ impl ClassSource {
         let old_margin = old_margin * coast_gate;
         let c = 0.5 + 0.5 * fbm(self.seed, LAYER_PLATEAU, d, 1.6, 3);
         let plateau_field = smoothstep(0.45, 0.70, c) * smoothstep(0.2, 0.6, inland) * (1.0 - smoothstep(0.2, 0.6, flank.max(back_arc)));
-        let hilly = smoothstep(0.50, 0.76, 0.5 + 0.5 * fbm(self.seed, LAYER_HILLY, d, 2.2, 3)) * smoothstep(0.1, 0.4, smooth);
+        let hilly = smoothstep(0.50, 0.76, 0.5 + 0.5 * fbm(self.seed, LAYER_HILLY, d, 2.2, 3))
+            * smoothstep(0.1, 0.4, smooth)
+            * smoothstep(0.0, TRUE_COAST_RAMP, land_depth);
         MaskTerms { margin_km, convergence, core, flank, old_margin, back_arc, plateau_field, hilly, strike, plate: idx[0] }
     }
 

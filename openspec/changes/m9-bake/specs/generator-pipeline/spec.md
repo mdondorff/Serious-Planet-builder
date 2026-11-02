@@ -50,7 +50,7 @@ Source: ADR 0089 decision 3, ADR 0088/0089 accepted 2026-11-01; SPIKE-77, SPIKE-
 - **THEN** the first holds weight 255 in high mountains and the second 255 in plateau
 
 ### Requirement: GEN-096 The base elevation takes the belts and the plateaus
-`global::sample`'s land elevation SHALL be the coast ramp (`620 m smoothstep(0, 1.2, land depth)`; it was 1000 m over 0.9, which put the median land at 1,180 m against Earth's 410 m, SPIKE-93) plus:
+`global::sample`'s land elevation SHALL be the coast ramp (`620 m smoothstep(0, 1.2, land depth)`; the default class source's `e0` applies it now and `global::sample` when the bake is wired; it was 1000 m over 0.9, which put the median land at 1,180 m against Earth's 410 m, SPIKE-93) plus:
 - the belt term `7800 core (0.5 + 0.5 r)` m, with `r` the bake's squared ridge term (`global.rs` `ridge_at`);
 - the back-arc uplift `2000 back-arc` m;
 - the old-margin and flank uplift `200 max(old margin, 0.5 flank)` m;
@@ -81,7 +81,7 @@ Each class SHALL carry the relief driver `k`, the fine-crease floor, the carve f
 - The blended `k` SHALL be tapered to 1 by `1 + smoothstep(0, 400 m, m) (k - 1)` towards the coast, with `m` the ring mean (GEN-099).
 - The untapered blended `k` SHALL change by at most 2.0 between neighbouring lattice points. The default source SHALL meet this, and a class paint item SHALL be feathered over at least `ceil(|delta k| / 2)` lattice cells so that it does.
 - The crease and detail amplitudes SHALL no longer depend on the landform driver or on the base elevation above 300 m. The erosion field's version SHALL become 3.
-On seeds 1 to 5 the default source's largest step is 4.8 to 5.8 (median 5.6) and 0.4 % of the lattice steps are over 2.0: the belts' flanks change by 0.2 to 0.3 of the core over one 40 km cell and the classes differ by 4 to 6 in `k`, so the limit holds only with belts that ramp over 200 km on each side, which the hypsometry and belt bands of TEST-082 (SPIKE-93) do not allow. Earth has 6.7 % of 40 km pairs over 2.0 (largest 5.4, p99 3.3). The limit stays as written until the owner decides between it and a p99 or share form (the Tracked line in `docs/status.md`).
+This requirement is not met yet and is deferred to the owner's decision below: the bake takes the limit as a parameter. On seeds 1 to 5 the default source's largest step is 5.1 to 5.8 (median 5.6) and 0.4 % of the lattice steps are over 2.0: the belts' flanks change by 0.2 to 0.3 of the core over one 40 km cell and the classes differ by 4 to 6 in `k`, so the limit holds only with belts that ramp over 200 km on each side, which the hypsometry and belt bands of TEST-082 (SPIKE-93) do not allow. Earth has 6.7 % of 40 km pairs over 2.0 (largest 5.4, p99 3.3). The limit stays as written until the owner decides between it and a p99 or share form (the Tracked line in `docs/status.md`).
 The table and the limit are start values (SPIKE-73, SPIKE-76 to SPIKE-81; `kc` from SPIKE-64); R7 tunes them on the scorecard. The planet-wide check of the step limit is TEST-082.
 
 Verify: A

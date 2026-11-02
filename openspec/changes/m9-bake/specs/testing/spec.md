@@ -25,11 +25,12 @@ A tier-B check SHALL evaluate the default source (GEN-094 to GEN-097) of seeds 1
 | Land above 1 km / 2 km / 3 km / 4 km | 21.6 / 6.5 / 3.5 / 2.2 % | 17-27 / 5-10 / 2-5 / 1-3 % |
 | Highest land | 8.16 km | 7-9 km |
 | Relief classes, plains / hills / mountains | 45.7 / 24.6 / 29.7 % (R7 at 1') | 45-62 / 15-30 / 20-32 % |
-| Belt land (range of +-50 km at least 1,000 m), 0.25 degree | 17.6 % | 13-23 %; reported, gated with the convergent-only arc round (seed 4 holds 6.0 %, the median 10.3 %) |
+| Belt land (range of +-50 km at least 1,000 m), 0.25 degree | 17.6 % | 13-23 %; reported, gated with the convergent-only arc round (seed 4 holds 5.4 %, the median 9.7 %) |
+| p99 of the step of `k` between 40 km cells | 3.3 | reported, at most 3.5 (realism; SPIKE-93) |
 | Largest step of the untapered `k` between neighbouring lattice points | 5.4 | at most 2.0 (GEN-097; the residual is noted there, the owner decides the form) |
 - **Gate form:** the median of the five seeds SHALL lie within the band widened by 10 % of its width, and no seed SHALL lie outside the band by more than one band width. Earth is one sample and some worlds are more mountainous than others: the seed spread is a feature and the median carries the realism.
 - A point's relief class comes from the class weights; its elevation is the base elevation of GEN-096 before any bake or erosion.
-- Without the seed's global bake the check SHALL be NOT RUN, never a pass.
+- Until the bake is wired the check reads the base elevation of the default source (the preview, before any bake or erosion) and its result is not the baked field's; with the bake it SHALL read the seed's global bake, and without that bake it SHALL be NOT RUN, never a pass.
 - The preview report prints each measure beside its band (TEST-086).
 
 Verify: B

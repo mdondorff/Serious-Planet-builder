@@ -108,3 +108,11 @@ fn seeds_1_to_5_pass_the_relief_bands_of_spike_93_in_the_gate_form() {
         )
     );
 }
+
+// spec: TEST-086
+#[test]
+fn a_small_preview_says_why_the_continent_metrics_are_missing_and_prints_no_control_characters() {
+    let text = report(&compute(1, 180, 90, 64, 2));
+    assert!(text.contains("need a grid of at least 360 x 180"), "{text}");
+    assert!(text.chars().all(|c| c == '\n' || !c.is_control()), "a control character in the report");
+}
