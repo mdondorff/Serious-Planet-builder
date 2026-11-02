@@ -548,7 +548,6 @@ Source: owner (M6 step U3: map first, list, search, inspector bound to the comma
 ### Requirement: VIEW-022 The editor mode of the window
 `planet editor` SHALL have an editor mode (`planet::editwin`, with `window`) that edits the world's definition through the session (VIEW-017) and the panels (VIEW-021).
 - Tab turns the mode on and off; `--edit` starts the window with it on.
-- `--edit` with `--site LAT,LON` plays the scripted descent over the site first and turns the mode on where it ends (a Tab before then turns it on at once).
 - `--items DIR` is the directory the edits are written to and loaded from: one TOML file per edit (AUTH-001), every command writes its file; without it the edits live in memory and the status line says they are not saved.
 - `--editor-layout F` is the layout file (VIEW-018).
 - `--edit` with `--no-ui` is an error that says the mode needs the UI.
@@ -633,6 +632,10 @@ Source: owner (M6 step U3, 2026-10-19), VIEW-003, VIEW-010, VIEW-011, VIEW-017, 
 #### Scenario: The real window
 - **WHEN** `planet editor --smoke --edit --items DIR` runs on the selected adapter
 - **THEN** the run succeeds with one edit placed, one drag, one typed value, one delete, two undos and one redo and nothing refused, definitions handed to the generator, tiles sent to refresh, and one item file in DIR
+
+#### Scenario: Site descent
+- **WHEN** the window starts with `--edit --site LAT,LON`
+- **THEN** the scripted flight starts high above the site and descends over it with the mode off, the mode turns on where the last camera is reached (or at a Tab before then), and the free camera takes the landing pose
 
 ### Requirement: VIEW-030 Region overlay
 The debug overlay enum `planet_frame::look::Overlay` (VIEW-014) SHALL have a fourth value `Regions` (shader code 3, plan token `overlay regions`) that tints the lit terrain by the surface type of the region over each fragment. For each frame that shows it the app SHALL decide a `planet_frame::regions::RegionList` and hand it to the renderer (the renderer decides nothing, CON-03): the at most 8 region items of the definition nearest the camera (ties by item id), each as a polygon of its 3 to 64 points in the orthographic frame of its anchor (the anchor relative to the camera, the tangent plane's basis, and the points in metres in that plane; f64 on the CPU, rounded once to f32, CON-11), with the surface type's tint as linear light, and the count of the regions it left out (the farthest). The list SHALL have a stable text form (a header line and one line per polygon, floats as bit patterns) that round-trips, and an empty list has no text. The lit fragment stage SHALL take the fragment's position relative to the camera, subtract the anchor, project onto the basis, and test the point against the polygons nearest first by the even-odd rule, skipping a polygon whose plane is farther from the fragment than its band or whose reach the fragment is beyond; where it is inside a polygon it SHALL mix the tint at the weight 0.45 into the lit colour (`mix(lit, tint * 0.8 * pre-exposure, 0.45)`), with no texture and no planet-radius value in the shader. F3 cycles the overlay through off, tiles, mesh, regions, off, and the corner label names it. With the overlay not `Regions`, or with no polygon in the list, the frame is the lit frame bit for bit, and the headless modes and goldens never set the overlay (VIEW-014).
