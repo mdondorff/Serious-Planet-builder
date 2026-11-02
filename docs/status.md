@@ -4,8 +4,9 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 
 ## Waiting for the owner
 - **For M9 planning** (after the away week): owner test 2026-10-27 groups E (edits on top as default, erosion keeping mass), F and G scope, the 1 m / 500 m exception (`docs/milestones/M8/owner-test-2026-10-27/README.md`); where edits sit relative to M9's erosion (D3, owner 2026-10-26: under the erosion by default).
-- **M9 decisions** (`docs/briefings/m9-decisions.md`): ADR 0089, ADR 0091 (45° ceiling) and ADR 0088 accepted 2026-11-01. Owner: the SPIKE-80 world map "looks generally wrong" (thin continuous belts, unchanged continents); first M9 step is the engine's whole-planet preview and iterative generator quality with preview images, before any planet bake. Open: the ADR verdict table and its status lines; the 2° shadow cost (ADR 0085 options).
-- **ADR 0083 shares** (`compute-budgets`, BUDG-001 to BUDG-007): initial values ratified provisionally by opus-planner (2026-10-30). Terrain cap (BUDG-003) 12 → 10 proposed (2026-11-01, asked by push): unpinned 10 workers match 12 on throughput, tile-ready -26 % on dive, dive p99 +0.6 ms; 8 workers leave teleport-1m at 83 % of its tiles.
+- **M9 generator** (2026-11-02): pick a seed from the engine's gallery (seeds 1-24, explorer `target/review/m9-round-2/gallery/`; the spike's seed 3 did not survive the port: land-mask agreement 0.71); then the round-2 /bless (#1078, 15 lit/sky/water views) with the world preview. SPIKE-93's Earth bands for TEST-082 (plains/hills/mountains 45-62 / 15-30 / 20-32 %): yes or no.
+- **Cliffs** (SPIKE-94, #1082): asset library or procedural only; the Alps' 4.3 % of area above 45° as the v1 coverage; a coarse collision proxy for now. Trigger: after M9's generator rounds.
+- **ADR 0083 shares** (`compute-budgets`, BUDG-001 to BUDG-007): initial values ratified provisionally (2026-10-30). Owner, 2026-11-01: shares divide P-core capacity; an E-core background pool only if it never slows critical work. SPIKE-90 window 2 (#1080): every tested knob slows the critical path (dive p99 +43-58 %), so no background pool; an ADR draft (background work budgeted, BUDG-003 restated without the reference machine's constants) follows for the owner.
 - **Optional, when convenient:** the M6 retest list (`docs/archive/M6/briefings/m6-owner-test-plan.md`, "Retest"); a live check of the flickers (Tracked); excluding the repo's `target` folders from Windows Search indexing. One editor session at the marker "TheEdgeHill" on the RTX (SPIKE-87 measured 0.17 ms editor cost on WARP; the 10-21 report predates the off-main block decodes).
 
 Dormant (no near trigger; not asked now):
@@ -14,16 +15,15 @@ Dormant (no near trigger; not asked now):
 - **Global authoring preview** (owner, 2026-10-31): a coarse whole-planet preview of relief and landforms from the inputs, before the bake, as the step before detailed editing; not runtime. SPIKE-69 rates its k-sources for this. Trigger: after M9's bake, or when SPIKE-69 shows a pre-bake source.
 - **Coarse-first refinement of an edit** (owner, 2026-10-20): parked. Trigger: a brush case of the edit-latency scene that misses its budget.
 
-## Away-week queue (Option B, `docs/briefings/week-2026-11-02.md`; started 2026-10-30)
+## Queue (2026-11-02)
 | # | Step | Lane |
 |---|---|---|
 | NR | Real-GPU window checks NOT RUN on a locked desktop (TEST-073; owner, 2026-10-30) | crusader |
-| B4 | Automated owner checks (`openspec/changes/b4-owner-checks/`): B4-5 package command (TEST-074), B4-4 edit scenario, B4-6 delivery | explorer |
-| Shadows | ADR 0085 clipmap march (ADR 0090 accepted): PRs 1 to 4 merged (#985, #1000, #1014, #1017, #1024, #1041); next 5a render path (flag, off by default), 5a2 app wiring and J view, 5b apply (every lit golden to the owner's /bless), then the perf window at the 2° pose; PRs 6 to 9 (7, 8 remove GEN-086, STRM-061) | crusader |
-| B5 | Done: SPIKE-84 fixes 1 to 6 and the follow-ups (#1021, #1025, #1027, #1029 to #1032, #1034, #1035, #1037). Further Tracked fixes: camera ground read off the main thread (SPIKE-88, spikes) | spikes |
-| M9 | ADR 0088/0089 proposed (#1013); planned spec deltas GEN-093 to 102, STRM-065 to 068, TEST-081 to 084 in `m9-bake` (#1018, #1019); unmeasured values marked start values for R7. Waits for the owner | owner |
-
-After Option B: M9 R3 to R6 (week plan section 4). B6 (chunk stage removed) and B8 (ground-detail stills) done 2026-10-31.
+| B4 | Automated owner checks (`openspec/changes/b4-owner-checks/`): B4-5 package command (TEST-074), B4-4 edit scenario, B4-6 delivery | explorer, after M9 rounds |
+| Shadows | ADR 0085 / 0090: PRs 1 to 4, 5a, 5a2, march cost and the low-sun quarter-res march (#1079; 2° 1.50-1.54 ms) merged. Next 5b-1 plumbing (visibility forced to 1), 5b-2 apply (every lit golden to the owner's /bless), the 2° perf window, PRs 6 to 9 | crusader |
+| Glint | `sun-glint-turn` (#1072, ATMO-013): blessed by the owner 2026-11-02; merges on green | crusader |
+| Nodes | `node-buffer-delta`: frames rewrite the whole node buffer (record 2.1-5.1 ms) and frame 14 of a teleport costs 6-7 ms outside the logged phases | crusader |
+| M9 | Generator round 2 (#1078, continents, GEN-104 to 106, TEST-087/088), round 3 (relief to SPIKE-93's Earth bands), then the `m9-bake` code on small regions; no planet bake before the owner approves the engine preview (owner, 2026-11-01) | explorer |
 
 ## Tracked
 - **Reserve test result** (BUDG-012, loaded, 3 rounds, 2026-11-01): dive, look-1m, look-2km, teleport-2km pass; teleport-1m fails by +1 % (frame median 16.75 against 16.60 ms; the spin runs 5-18 % over its 6-9 ms target). Frame p99 over 20 ms includes the spin by construction. A quiet window decides the absolute rows.
@@ -32,7 +32,7 @@ After Option B: M9 R3 to R6 (week plan section 4). B6 (chunk stage removed) and 
 - **Fine-level bound looseness** (SPIKE-86): below 1 km over steep land 5.5 % of real-store poses cap leaves at levels 16-21; tile bounds are 5-37x the sampled range. Fix with M9 R4's bounds pyramid (SPIKE-83) or a per-octave tile bound, with a tier-A bound-vs-sampled test.
 - **Reserve test gaps** (2026-11-01): terrain GPU is sampled at the last pose only; the share ceilings of ADR 0083 are provisional, pending the owner. Scaling (P-cores, 3 rounds): tile-ready rises with every worker, throughput saturates at 8-10; proposal to restate BUDG-003 sent to the planner.
 - **`gpu_stream_perf` 300 s timeout on Windows WARP C 2/2** (2026-10-31): did not recur after the jobs.rs shutdown fix (#1001), cause not proven; the capture names the stage if it returns.
-- **Upload pacing after a teleport** (job-system PR 4, 2026-10-31): lit teleport-2km frame p99 4.5 -> 6.2 ms (+36 %, accepted) as tiles land 2.7x sooner and their uploads bunch; a cap exists (STRM-006, 1 MiB); the frames log now has `deferred` and `node_bytes`: measure the capped share in the next window, then a lower cap or an over-run-aware allowance.
+- **Upload pacing after a teleport** (window 2026-11-02, #1080): lit teleport-2km p99 4.28 ms, the 4.5 -> 6.2 ms rise did not reproduce; upload 0.23-0.27 ms on slow frames, `deferred` 0. The cost is the full node-buffer rewrite (queue: Nodes). Delete when `node-buffer-delta` merges.
 - **Pooled fan-out** (job-system PR 3b): helper threads taken from the job system's workers instead of scoped threads per call could save about 1.5 % of a cold plan job; needs lifetime erasure, own PR with a numerics-reviewer pass.
 - **Store write** (2026-10-31 16:02): `generate --prefill-dir` into the read-only `global16384` appended 1,920 tiles of levels 3-4 (18,116,378 B) to pack-00000007; the definition hash is unchanged and the data is cache only. Kept (no removal tool). Perf preparation prefills a copy or a separate cache directory from now on.
 - **gpu_horizon flake** (2026-10-31): `a_slot_written_through_set_horizon_reads_back_as_written` failed once in a loaded prepush ("an unwritten slot is zero", gpu_horizon.rs:77); passes alone and on CI. Likely uninitialised GPU memory on the software adapter under load. Watch for a recurrence.
@@ -48,11 +48,10 @@ After Option B: M9 R3 to R6 (week plan section 4). B6 (chunk stage removed) and 
 - **Water cut keeps more nodes after the hill band** (#673): kept share 53-73 % (was 40-50 %); check the water pass's GPU time in the next perf window.
 - **Horizon-map shadows retiring** (ADR 0085): their latency (window 28: 131 of 269 maps over 10 s on large edits), disk cache and edge limits are not worked on. Anything added to the terrain pass keeps criterion 5's 1.5 ms (max 1.42).
 - **Drag residuals** (owner test 2, 2026-10-30): after #900 some tiles are clipped or not drawn while dragging and settle at rest. Real-store pair (#949, RTX and software adapter agree within 2 px, 2026-10-31): preview residue at most 6 % of changed pixels (contour lines), 0 at river-r1; lit frame and metres NOT RUN. No fix scheduled.
-- **Blocky sun glint while turning** (owner, 2026-10-23, RTX; `docs/dev_screenshots/2026-10-23-bug-sun-glint-*.png`): pitch or yaw turns the sea glint into rectangles; a still camera restores it. Suspects: the turn cover (STRM-033), a per-tile water normal. Next: F9 while turning, F3 overlay.
 - **Orbit flicker and dark-pixel flicker not reproduced** (owner, 2026-10-22): still-camera views identical (TEST-068 to TEST-070); not covered: streaming on the lit path while moving, the editor hover, wall-clock water. Needs the owner: editor off, F3 overlay, a recording or F9.
 - **Authored items at scale** (SPIKE-29): cold plan over empty ground that sees a 5k/20k cluster 3.75/9.4 s; candidate: a per-cell bound aggregate (`spikes/edit-scale/results/results.md`).
 - **Tiles flash to a coarser level while moving** (owner, P1-4, P2-8): not reproduced (TEST-067, TEST-070, TEST-072 on a generated world); next: the owner's F9 capture; open: a margin round the plan's frustum.
-- **Default class source and GEN-097's step limit** (`m9-generator-round-1`, seed 1): the largest step of the untapered `k` between lattice points is 4.93 against 2.0 (0.22 % of steps over 2.0), mountains 5.5 % against 14-30 %; the continents are round 2. Next: round 2, then R7; the source is not wired into the bake until the step limit holds or the owner accepts the residual.
+- **Default class source and GEN-097's step limit**: largest step of the untapered `k` 6.0 against 2.0 (0.25-0.42 % of steps over 2.0) after round 2. SPIKE-93: Earth itself has 6.7 % of 40 km pairs over 2.0, so 2.0 stays an engine rule, not a realism target; round 3 reports the p99 against Earth's 3.3. Not wired into the bake until the limit holds or the owner accepts the residual.
 - **Flaky `gpu_window` flight test**: one failure after 7.5 s, 0 of 5 since; probably the lock (first item). On a second failure keep the full output.
 - **WARP device removal with the compact format and the atmosphere**: test-only, accepted; the software smoke stays on the vertex format. Re-test when WARP, wgpu or Windows changes (Windows changed 2026-10-30).
 - **Beach shading flashes on WARP** (36.8 % of shore-band pixels on the coastal descent): unchecked since REND-030; check with the next look review.
