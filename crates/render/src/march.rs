@@ -89,6 +89,36 @@ fn in_window(k: i32, x: f32, y: f32) -> bool {
     return x >= (f32(w.x) + 2.0) * t && x < (f32(w.z) - 2.0) * t && y >= (f32(w.y) + 2.0) * t && y < (f32(w.w) - 2.0) * t;
 }
 
+// The ground at a point of level k, interpolated bilinearly between the four texel samples around it (a sample sits at its texel's centre);
+// below -1e29 where one of them holds no ground.
+fn surface_at(k: i32, p: vec2<f32>) -> f32 {
+    let t = m.texel[k].x;
+    let f = p / t - vec2<f32>(0.5);
+    let fl = floor(f);
+    let w = f - fl;
+    let i = vec2<i32>(fl);
+    let h00 = level_max(k, 0, i.x, i.y);
+    let h10 = level_max(k, 0, i.x + 1, i.y);
+    let h01 = level_max(k, 0, i.x, i.y + 1);
+    let h11 = level_max(k, 0, i.x + 1, i.y + 1);
+    if (min(min(h00, h10), min(h01, h11)) < -1.0e29) {
+        return -2.0e30;
+    }
+    return mix(mix(h00, h10, w.x), mix(h01, h11, w.x), w.y);
+}
+
+// The highest the ground gets along the walk's step at mip 0: the interpolated surface at its two ends and its middle (the box top where a
+// sample is missing). A box a texel wide at its sample makes a shadow edge step with the texels; the surface does not.
+fn step_surface(k: i32, a: vec2<f32>, b: vec2<f32>, box_top: f32) -> f32 {
+    let sa = surface_at(k, a);
+    let sm = surface_at(k, 0.5 * (a + b));
+    let sb = surface_at(k, b);
+    if (min(sa, min(sm, sb)) < -1.0e29) {
+        return box_top;
+    }
+    return max(sa, max(sm, sb));
+}
+
 // The level holds the point in its window and a tile wrote the texel there.
 fn usable(k: i32, x: f32, y: f32) -> bool {
     if (!in_window(k, x, y)) {
@@ -269,7 +299,10 @@ fn march(o: vec3<f32>) -> vec3<f32> {
             // A near miss or a hit against a maximum: look at the cells inside, down to the texels, where the clearance is exact.
             mip = mip - 1;
         } else {
-            let clearance = (low - top) / dist;
+            // At the texels the ground is the interpolated surface, not the box: the clearance (and with it the penumbra and the edge of the
+            // shadow) varies smoothly with the ray instead of stepping with the texels.
+            let ground = step_surface(lv, q, o.xy + d * (tau + dt), top + relax) - relax;
+            let clearance = (low - ground) / dist;
             if (tau < m.curv.z) {
                 pen = min(pen, clearance);
             } else if (clearance < 0.0) {
