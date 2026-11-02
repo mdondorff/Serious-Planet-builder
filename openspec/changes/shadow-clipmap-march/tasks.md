@@ -20,7 +20,8 @@
 - [x] 2.2 PR 2 `shadow-clipmap-gather` (2a gather and mips; 2b the coarse cube, REND-048)
 - [x] 2.3 PR 3 `shadow-march`
 - [ ] 2.4 PR 4 `shadow-resolve` (code and tier C tests done; open: the perf window for the 2-degree pose, REND-052 unmeasured, asked of opus-planner)
-- [ ] 2.5 PR 5 `shadow-integration` (goldens per adapter; owner package)
+- [x] 2.5a PR 5a `shadow-apply-plumbing` (the `sun-direct` second target in both lit terrain pipelines and the scale references; the `shadow-apply` pass right after the terrain pass, before the water copy, with the visibility forced to 1; `sun-direct` still carries the horizon factor until 5b-2 removes it)
+- [ ] 2.5b PR 5b `shadow-apply` (the real visibility; the horizon factor leaves the fragment; goldens per adapter; owner package)
 - [ ] 2.6 Owner: look review of PR 5 (stills old against new, a drag video) and `/bless` of the first lit goldens
 - [ ] 2.7 PR 6 `rm-horizon-render`
 - [ ] 2.8 PR 7 `rm-horizon-jobs`

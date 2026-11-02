@@ -701,8 +701,15 @@ fn shade_lit(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up: vec3<f
 // The sun direction and the pre-exposure factor travel in the otherwise unused words of the globals (mode.yzw as bits, range.z), the
 // view in mode.x and the water level in extra.x. The up vector is formed from the node's tile-local numbers and the fragment's
 // tile-local position: no planet-radius value reaches this stage.
+// The lit fragment's two outputs (REND-051): the scene target, and `sun-direct` with the direct-sun radiance the shadow applies to.
+// The plain path puts the whole radiance of the lit views in `sun-direct` (it has no ambient); the other views write the scene only.
+struct LitOut {
+    @location(0) scene: vec4<f32>,
+    @location(1) direct: vec4<f32>,
+}
+
 @fragment
-fn fs_lit(in: VsOut) -> @location(0) vec4<f32> {
+fn fs_lit(in: VsOut) -> LitOut {
     let c = fs_lit_view(in);
     if (CUT_QUADRANTS && quadrant_cut(in)) {
         discard;
@@ -710,7 +717,7 @@ fn fs_lit(in: VsOut) -> @location(0) vec4<f32> {
     return c;
 }
 
-fn fs_lit_view(in: VsOut) -> vec4<f32> {
+fn fs_lit_view(in: VsOut) -> LitOut {
     let sun = vec3<f32>(bitcast<f32>(g.mode.y), bitcast<f32>(g.mode.z), bitcast<f32>(g.mode.w));
     let up = up_at(nodes[in.node_index].up, in.local);
     let climate = tile_climate(in);
@@ -722,20 +729,29 @@ fn fs_lit_view(in: VsOut) -> vec4<f32> {
     var rgb = sun_vis * shade_lit(g.mode.x, g.albedo, gd.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), sun, g.range.z) * detail_mul(gd, g.mode.x, g.albedo, climate.x, climate.y, clamp(dot(normalize(gd.normal), up), 0.0, 1.0), in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)));
     // The sum is clamped like the rest of the lit radiance: the scene target is f16.
     rgb = min(rgb + vec3<f32>(ground_gloss(in.node_index, in.local, gd, sun) * (g.range.z * sun_vis)), vec3<f32>(60000.0));
+    var sunlit = g.mode.x == 0u || g.mode.x == 2u;
     if (g.mode.x == 5u || g.mode.x == 6u) {
         rgb = horizon_view_colour(g.mode.x, in.node_index, in.aux, up, sun, coarse_fade, max(in.height, 0.0)) * g.range.z;
+        sunlit = false;
     }
     if (g.mode.x >= 7u) {
         rgb = clamp(driver_colour(g.mode.x, drv) * 0.31830988618 * g.range.z, vec3<f32>(0.0), vec3<f32>(60000.0));
+        sunlit = false;
     }
     if (g.extra.y > 3.5) {
         rgb = stale_tint(in, rgb, g.range.z);
+        sunlit = false;
     } else if (g.extra.y > 2.5) {
         rgb = region_tint(nodes[in.node_index].origin_rel.xyz + in.local, rgb, g.range.z);
+        sunlit = false;
     } else if (g.extra.y > 0.5) {
         rgb = overlay_wire(in, rgb, g.range.z, g.extra.y);
+        sunlit = false;
     }
-    return vec4<f32>(rgb, 1.0);
+    if (sunlit) {
+        return LitOut(vec4<f32>(0.0, 0.0, 0.0, 1.0), vec4<f32>(rgb, 1.0));
+    }
+    return LitOut(vec4<f32>(rgb, 1.0), vec4<f32>(0.0));
 }
 
 // The region tint (VIEW-030): the lit colour mixed with the tint of the nearest region polygon the fragment lies in. Plain arithmetic on
@@ -1677,7 +1693,11 @@ impl TerrainRenderer {
             stencil: Default::default(),
             bias: Default::default(),
         };
-        let targets = [Some(wgpu::ColorTargetState { format: hdr, blend: None, write_mask: wgpu::ColorWrites::ALL })];
+        // The scene target and `sun-direct` (REND-051).
+        let targets = [
+            Some(wgpu::ColorTargetState { format: hdr, blend: None, write_mask: wgpu::ColorWrites::ALL }),
+            Some(wgpu::ColorTargetState { format: hdr, blend: None, write_mask: wgpu::ColorWrites::ALL }),
+        ];
         let c = &self.compact;
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("terrain-compact-lit"),
@@ -1713,8 +1733,8 @@ impl TerrainRenderer {
         };
         let (pipeline, pipeline_cut) = (make(false), make(true));
         let path = LitPath::new(ctx, self.size);
-        // The scene target, the exposure buffers, three post pipelines and the terrain pipelines (whole nodes, nodes over some quadrants).
-        self.lit_objects = 1 + 3 + 2 + 1;
+        // The scene target, `sun-direct` and its apply pipeline, the exposure buffers, three post pipelines and the terrain pipelines (whole nodes, nodes over some quadrants).
+        self.lit_objects = 1 + 1 + 3 + 1 + 2 + 1;
         let refs = crate::refs::RefPass::new(ctx);
         self.lit = Some(LitGpu { path, pipeline, pipeline_cut, atmosphere_pipeline: None, atmosphere_pipeline_cut: None, refs });
     }
@@ -1731,7 +1751,10 @@ impl TerrainRenderer {
             stencil: Default::default(),
             bias: Default::default(),
         };
-        let targets = [Some(wgpu::ColorTargetState { format: crate::lit::HDR_FORMAT, blend: None, write_mask: wgpu::ColorWrites::ALL })];
+        let targets = [
+            Some(wgpu::ColorTargetState { format: crate::lit::HDR_FORMAT, blend: None, write_mask: wgpu::ColorWrites::ALL }),
+            Some(wgpu::ColorTargetState { format: crate::lit::HDR_FORMAT, blend: None, write_mask: wgpu::ColorWrites::ALL }),
+        ];
         // The atmosphere's group is 3 (groups 1 and 2 are the tile references and the block), so one bind group set once per pass stays
         // bound for the whole pass.
         let c = &self.compact;
@@ -2572,14 +2595,24 @@ impl TerrainRenderer {
         let any_masked = masked.iter().any(|m| *m);
         {
             let [r, g, b, a] = if lit_gpu.is_some() { [0.0; 4] } else { plan.clear_color.map(|v| f64::from(v) / 255.0) };
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("terrain-pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            // The lit pipelines write `sun-direct` (REND-051) as their second target; the debug path has one target.
+            let attachments = [
+                Some(wgpu::RenderPassColorAttachment {
                     view: color_target,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r, g, b, a }), store: wgpu::StoreOp::Store },
-                })],
+                }),
+                lit_gpu.map(|l| wgpu::RenderPassColorAttachment {
+                    view: l.path.sun_direct_view(),
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
+                }),
+            ];
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("terrain-pass"),
+                color_attachments: &attachments[..if lit_gpu.is_some() { 2 } else { 1 }],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &self.depth_view,
                     // The composite and the water pass read the depth, so an atmosphere or water frame keeps it.
@@ -2668,6 +2701,10 @@ impl TerrainRenderer {
                     stats.draw_calls += 1;
                 }
             }
+        }
+        // The shadow applies to the direct sun term before the water pass copies the scene (the seabed seen through the water is lit).
+        if let (Some(l), Some(lit)) = (lit_gpu, plan.lit.as_ref()) {
+            l.path.record_shadow_apply(&mut encoder, lit);
         }
         if let (true, Some(w), Some(wp), Some(l), Some(lit)) =
             (water_frame, self.water.as_ref(), plan.water.as_ref(), lit_gpu, plan.lit.as_ref())

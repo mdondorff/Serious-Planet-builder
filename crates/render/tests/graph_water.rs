@@ -26,6 +26,7 @@ fn the_water_pass_runs_after_the_terrain_and_before_the_composite_with_an_atmosp
             "sky-view",
             "aerial-perspective",
             "terrain",
+            "shadow-apply",
             "scene-copy",
             "water",
             "sky-composite",
@@ -37,22 +38,22 @@ fn the_water_pass_runs_after_the_terrain_and_before_the_composite_with_an_atmosp
     assert!(c.culled.is_empty(), "{:?}", c.culled);
     let life = |r: &str| c.lifetimes.iter().find(|l| l.resource == r).unwrap_or_else(|| panic!("no lifetime for {r}")).clone();
     // The copy lives from its pass to the water pass; the scene target and the depth buffer live through the water to the composite.
-    assert_eq!((life("scene-copy").first, life("scene-copy").last), (4, 5));
-    assert_eq!((life("hdr-scene").first, life("hdr-scene").last), (3, 6));
-    assert_eq!((life("depth").first, life("depth").last), (3, 6), "the composite reads the depth the water wrote");
+    assert_eq!((life("scene-copy").first, life("scene-copy").last), (5, 6));
+    assert_eq!((life("hdr-scene").first, life("hdr-scene").last), (3, 7));
+    assert_eq!((life("depth").first, life("depth").last), (3, 7), "the composite reads the depth the water wrote");
     // Fixed exposure still culls only the histogram.
     let (g, f) = compile(true, false, true);
     assert_eq!(f.culled, ["exposure-histogram"]);
-    assert_eq!(names(&g, &f).len(), 9);
+    assert_eq!(names(&g, &f).len(), 10);
 }
 
 // spec: ATMO-016
 #[test]
 fn without_an_atmosphere_the_water_draws_over_the_hdr_target_and_a_frame_without_water_is_unchanged() {
     let (g, c) = compile(false, true, true);
-    assert_eq!(names(&g, &c), ["terrain", "scene-copy", "water", "exposure-histogram", "exposure-adapt", "tonemap"]);
+    assert_eq!(names(&g, &c), ["terrain", "shadow-apply", "scene-copy", "water", "exposure-histogram", "exposure-adapt", "tonemap"]);
     // The frames without water are the graphs of before the water pass: same passes, same bytes.
-    for (atmosphere, passes, bytes) in [(false, 4usize, 44_237_072u64), (true, 8, 74_434_832 + 14_745_600)] {
+    for (atmosphere, passes, bytes) in [(false, 5usize, 73_728_272u64), (true, 9, 74_434_832 + 14_745_600 + 29_491_200)] {
         let (g, c) = compile(atmosphere, true, false);
         assert_eq!(names(&g, &c).len(), passes);
         assert_eq!(c.frame_target_bytes(), bytes, "atmosphere {atmosphere}");
@@ -80,14 +81,14 @@ fn the_water_pass_adds_one_hdr_sized_copy_and_the_frame_stays_inside_the_share_a
     assert_eq!(with.frame_target_bytes() - without.frame_target_bytes(), 29_491_200);
     assert_eq!(
         with.frame_target_bytes(),
-        118_671_632,
+        148_162_832,
         "the atmosphere frame with water at 1440p (the half-resolution haze of the camera march included, 14,745,600 B)"
     );
     let share = frame_target_share_bytes(P1440);
     assert!(with.frame_target_bytes() <= share, "{} B against the share of {share} B", with.frame_target_bytes());
     // The plain lit frame with water too.
     let (_, plain) = compile(false, true, true);
-    assert_eq!(plain.frame_target_bytes(), 44_237_072 + 29_491_200);
+    assert_eq!(plain.frame_target_bytes(), 73_728_272 + 29_491_200);
     assert!(plain.frame_target_bytes() <= share);
     println!("the lit frame with the atmosphere and water at 1440p: {} B of the share's {share} B", with.frame_target_bytes());
 }

@@ -111,8 +111,8 @@ Source: ADR 0085 point 5, SPIKE-56 finding 6 and P1
 - **WHEN** the scene changes and the frame is a camera cut
 - **THEN** the shadow equals the first frame of a fresh resolve of that scene
 
-### Requirement: REND-051 The shadow is applied in sky-composite
-The lit terrain pass SHALL write its direct-sun radiance, unshadowed, to its own target (`sun-direct`) and the rest to `hdr-scene`; `sky-composite` SHALL add `shadow x sun-direct` before the aerial perspective; the water pass SHALL take the same visibility for its sun terms. J's shadow view SHALL draw the visibility as grey. The debug path SHALL be unchanged.
+### Requirement: REND-051 The shadow is applied before the aerial perspective
+The lit terrain pass SHALL write its direct-sun radiance, unshadowed, to its own target (`sun-direct`) and the rest to the scene target; a `shadow-apply` pass SHALL add `shadow x sun-direct` to the scene target directly after the terrain pass, before the water pass copies the scene and before the aerial perspective; the water pass SHALL take the same visibility for its sun terms. Views without a sun term (debug views, tints, overlays) SHALL write the scene target only. J's shadow view SHALL draw the visibility as grey. The debug path SHALL be unchanged.
 
 Verify: C
 Status: planned

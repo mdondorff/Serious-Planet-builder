@@ -221,8 +221,8 @@ pub const HISTOGRAM_BYTES: u64 = 64 * 4;
 pub const EXPOSURE_STATE_BYTES: u64 = 16;
 
 /// Frame targets may take this many bytes per pixel of the internal resolution plus [`FRAME_TARGET_FIXED_BYTES`] (the
-/// frame-target share, an amendment to ADR 0033's reserved remainder; ADR 0042 point 5). The lit path uses 12 B per pixel today
-/// (HDR 8, depth 4); the rest is room for the water pass's copies, the sky's targets and the atmosphere volumes.
+/// frame-target share, an amendment to ADR 0033's reserved remainder; ADR 0042 point 5). The lit path uses 20 B per pixel today
+/// (HDR 8, depth 4, `sun-direct` 8); the rest is room for the water pass's copies, the sky's targets and the atmosphere volumes.
 pub const FRAME_TARGET_BYTES_PER_PIXEL: u64 = 40;
 pub const FRAME_TARGET_FIXED_BYTES: u64 = 32 * 1024 * 1024;
 
@@ -269,6 +269,7 @@ pub fn lit_frame_graph(shape: &LitShape) -> RenderGraph {
     let mut g = RenderGraph::new(&["presentable"]);
     g.describe_sized("hdr", "rgba16float-frame", pixels * HDR_BYTES_PER_PIXEL)
         .describe_sized("depth", "depth32-frame", pixels * DEPTH_BYTES_PER_PIXEL)
+        .describe_sized("sun-direct", "rgba16float-frame", pixels * HDR_BYTES_PER_PIXEL)
         .describe_sized("histogram", "histogram-64", HISTOGRAM_BYTES)
         .persistent("exposure-state", EXPOSURE_STATE_BYTES);
     if shape.atmosphere {
@@ -282,7 +283,9 @@ pub fn lit_frame_graph(shape: &LitShape) -> RenderGraph {
         g.add_pass("atmosphere-luts", &[], &["transmittance-lut", "multiscatter-lut"], false);
         g.add_pass("sky-view", &["transmittance-lut", "multiscatter-lut"], &["sky-view-lut"], false);
         g.add_pass("aerial-perspective", &["transmittance-lut", "multiscatter-lut"], &["aerial-perspective-volume"], false);
-        g.add_pass("terrain", &["transmittance-lut", "multiscatter-lut"], &["hdr-scene", "depth"], false);
+        g.add_pass("terrain", &["transmittance-lut", "multiscatter-lut"], &["hdr-scene", "sun-direct", "depth"], false);
+        // The shadow applies to the direct sun term before the water pass copies the scene (REND-051).
+        g.add_pass("shadow-apply", &["hdr-scene", "sun-direct"], &["hdr-scene"], false);
         if shape.water {
             g.describe_sized("scene-copy", "rgba16float-frame", pixels * HDR_BYTES_PER_PIXEL);
             g.add_pass("scene-copy", &["hdr-scene"], &["scene-copy"], false);
@@ -302,7 +305,8 @@ pub fn lit_frame_graph(shape: &LitShape) -> RenderGraph {
             false,
         );
     } else {
-        g.add_pass("terrain", &[], &["hdr", "depth"], false);
+        g.add_pass("terrain", &[], &["hdr", "sun-direct", "depth"], false);
+        g.add_pass("shadow-apply", &["hdr", "sun-direct"], &["hdr"], false);
         if shape.water {
             g.describe_sized("scene-copy", "rgba16float-frame", pixels * HDR_BYTES_PER_PIXEL);
             g.add_pass("scene-copy", &["hdr"], &["scene-copy"], false);

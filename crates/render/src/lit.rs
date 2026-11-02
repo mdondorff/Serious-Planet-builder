@@ -150,6 +150,22 @@ fn fs(v: V) -> @location(0) vec4<f32> {
 }
 "#;
 
+/// The shadow-apply pass (REND-051): `visibility x sun-direct` added to the scene target. The visibility is 1 until the march feeds it.
+const SHADOW_APPLY: &str = r#"
+@group(0) @binding(0) var sun_direct: texture_2d<f32>;
+@vertex
+fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
+    let p = vec2<f32>(f32((i << 1u) & 2u), f32(i & 2u));
+    return vec4<f32>(p * 2.0 - 1.0, 0.0, 1.0);
+}
+const VISIBILITY: f32 = 1.0;
+@fragment
+fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    let d = textureLoad(sun_direct, vec2<i32>(pos.xy), 0).xyz;
+    return vec4<f32>(d * VISIBILITY, 0.0);
+}
+"#;
+
 /// The tone-map shader with the band colours of `look::EV_BAND_COLORS` spliced in.
 pub fn tonemap_shader() -> String {
     let colors: Vec<String> =
@@ -186,6 +202,11 @@ pub struct LitPath {
     size: (u32, u32),
     hdr: wgpu::Texture,
     hdr_view: wgpu::TextureView,
+    /// The terrain pass's second target (REND-051): the direct-sun radiance the shadow applies to.
+    sun_direct: wgpu::Texture,
+    sun_direct_view: wgpu::TextureView,
+    apply_pipeline: wgpu::RenderPipeline,
+    apply_bind: wgpu::BindGroup,
     histogram: wgpu::Buffer,
     state: wgpu::Buffer,
     params: wgpu::Buffer,
@@ -225,6 +246,17 @@ impl LitPath {
             view_formats: &[],
         });
         let hdr_view = hdr.create_view(&Default::default());
+        let sun_direct = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("lit-sun-direct"),
+            size: wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: HDR_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let sun_direct_view = sun_direct.create_view(&Default::default());
         let buffer = |label, size: u64, usage| {
             device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage, mapped_at_creation: false })
         };
@@ -346,13 +378,64 @@ impl LitPath {
             [params.as_entire_binding(), wgpu::BindingResource::TextureView(&hdr_view), state.as_entire_binding()],
         );
 
-        let allocated = u64::from(size.0) * u64::from(size.1) * crate::graph::HDR_BYTES_PER_PIXEL
+        // The shadow-apply pass adds `visibility x sun-direct` to the scene target (REND-051); the visibility is forced to 1 until the
+        // march feeds it (PR 5b-2).
+        let (apply_bgl, apply_pl) = layout("lit-shadow-apply", &[texture(0, f)]);
+        let apply_module = module("lit-shadow-apply", SHADOW_APPLY.to_string());
+        let apply_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("lit-shadow-apply"),
+            layout: Some(&apply_pl),
+            vertex: wgpu::VertexState {
+                module: &apply_module,
+                entry_point: Some("vs"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &apply_module,
+                entry_point: Some("fs"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: HDR_FORMAT,
+                    // Add the colour, keep the target's alpha.
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::One,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::Zero,
+                            dst_factor: wgpu::BlendFactor::One,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+        let apply_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("lit-shadow-apply"),
+            layout: &apply_bgl,
+            entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&sun_direct_view) }],
+        });
+
+        let allocated = 2 * u64::from(size.0) * u64::from(size.1) * crate::graph::HDR_BYTES_PER_PIXEL
             + crate::graph::HISTOGRAM_BYTES
             + crate::graph::EXPOSURE_STATE_BYTES;
         Self {
             size,
             hdr,
             hdr_view,
+            sun_direct,
+            sun_direct_view,
+            apply_pipeline,
+            apply_bind,
             histogram,
             state,
             params,
@@ -398,6 +481,32 @@ impl LitPath {
     /// The scene target the terrain pass draws into.
     pub(crate) fn hdr_view(&self) -> &wgpu::TextureView {
         &self.hdr_view
+    }
+
+    /// The terrain pass's second target: the direct-sun radiance (REND-051).
+    pub(crate) fn sun_direct_view(&self) -> &wgpu::TextureView {
+        &self.sun_direct_view
+    }
+
+    /// Record the `shadow-apply` pass: add the visibility times `sun-direct` to the scene target the terrain drew into. Recorded by the
+    /// terrain renderer right after the terrain pass (the water pass copies the lit scene).
+    pub(crate) fn record_shadow_apply(&self, encoder: &mut wgpu::CommandEncoder, plan: &LitPlan) {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("shadow-apply"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: self.terrain_target(plan),
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_pipeline(&self.apply_pipeline);
+        pass.set_bind_group(0, &self.apply_bind, &[]);
+        pass.draw(0..3, 0..1);
     }
 
     /// Bytes of the scene target, the histogram and the exposure history this path allocated (the depth target is the terrain
@@ -530,7 +639,7 @@ impl LitPath {
         for &i in &compiled.order[after_terrain..] {
             match graph.passes()[i].name {
                 // Recorded by the terrain renderer between the terrain pass and these (they need its vertex buffers).
-                "scene-copy" | "water" => {}
+                "shadow-apply" | "scene-copy" | "water" => {}
                 "sky-composite" => self.atmosphere.as_ref().expect("atmosphere enabled").record_composite(encoder, &self.hdr_view, stamps),
                 "exposure-histogram" => {
                     encoder.clear_buffer(&self.histogram, 0, None);
@@ -638,6 +747,15 @@ impl LitPath {
 
     /// The scene target as f32 RGBA, row-major.
     pub fn read_hdr(&self, ctx: &GpuContext) -> Vec<[f32; 4]> {
+        self.read_rgba16(ctx, &self.hdr)
+    }
+
+    /// The `sun-direct` target of the last frame as f32 RGBA, row-major (REND-051): the direct-sun radiance before the shadow.
+    pub fn read_sun_direct(&self, ctx: &GpuContext) -> Vec<[f32; 4]> {
+        self.read_rgba16(ctx, &self.sun_direct)
+    }
+
+    fn read_rgba16(&self, ctx: &GpuContext, texture: &wgpu::Texture) -> Vec<[f32; 4]> {
         let (w, h) = self.size;
         let unpadded = w * 8;
         let padded = unpadded.next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
@@ -649,7 +767,7 @@ impl LitPath {
         });
         let mut encoder = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("lit-hdr-readback") });
         encoder.copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo { texture: &self.hdr, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            wgpu::TexelCopyTextureInfo { texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
             wgpu::TexelCopyBufferInfo {
                 buffer: &readback,
                 layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(padded), rows_per_image: Some(h) },
