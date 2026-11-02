@@ -108,6 +108,7 @@ fn a_core_over_high_ground_is_high_mountains_and_a_plateau_field_is_plateau() {
         old_margin: 0.0,
         back_arc: 0.0,
         plateau_field: 0.0,
+        hilly: 0.0,
         strike: 1.0,
         plate: 0,
     };
@@ -372,6 +373,7 @@ fn the_flank_of_a_belt_is_mountains_before_its_core_is_high_enough_to_count() {
         old_margin: 0.0,
         back_arc: 0.0,
         plateau_field: 0.0,
+        hilly: 0.0,
         strike: 1.0,
         plate: 0,
     };
