@@ -1,0 +1,54 @@
+"""SPIKE-93 visuals: (1) the hypsometric curve (cumulative share of land at or under each elevation) of Earth and H2r3 seed 3;
+(2) mountain-belt maps at 0.25 degree (R50 >= 1000 m on land within 60 degrees) of Earth and seed 3, side by side.
+Earth from ETOPO 2022 (NOAA NCEI, DOI 10.25921/fd45-gt74, CC0-1.0). Usage: python s93_visuals.py <etopo .tif> <fields.f32> <earth.json> <seed3.json> <out dir>"""
+import json, sys
+import numpy as np
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from PIL import Image, ImageDraw
+from s93_relief import box_range
+tif, fields, ej, sj, out = sys.argv[1:6]
+BLUE, ORANGE, INK, INK2, SURF = '#2a78d6', '#eb6834', '#0b0b0b', '#52514e', '#fcfcfb'
+
+# 1. Hypsometric curve.
+fig, ax = plt.subplots(figsize=(8, 4.5), dpi=110)
+fig.patch.set_facecolor(SURF); ax.set_facecolor(SURF)
+for path, label, col in ((ej, 'Earth (ETOPO 2022, 1\')', BLUE), (sj, 'H2r3 seed 3 (preview, 0.25°)', ORANGE)):
+    b = json.load(open(path))['hypsometry']['bands']
+    x = [0] + [a + 250 for a, _ in b]; y = [0] + list(np.cumsum([v for _, v in b]))
+    ax.plot(x, y, color=col, lw=2, label=label)
+    ax.annotate(label.split(' (')[0], (x[3], y[3]), xytext=(8, -14 if col == BLUE else 6), textcoords='offset points', color=INK, fontsize=9)
+ax.set_xlim(0, 7000); ax.set_ylim(0, 100)
+ax.set_xlabel('elevation (m)', color=INK2); ax.set_ylabel('share of land at or under it (%)', color=INK2)
+ax.set_title('Hypsometric curve, land within 60° of the equator', color=INK, fontsize=11, loc='left')
+ax.grid(color='#e6e5e0', lw=0.8); ax.tick_params(colors=INK2)
+for s in ('top', 'right'): ax.spines[s].set_visible(False)
+for s in ('left', 'bottom'): ax.spines[s].set_color('#c9c8c2')
+ax.legend(frameon=False, loc='lower right', fontsize=9)
+fig.tight_layout(); fig.savefig(f'{out}/hypsometry-earth-seed3.png', facecolor=SURF); plt.close(fig)
+
+# 2. Belt maps at 0.25 degree.
+def belt_rgb(e, land, lat):
+    r50 = box_range(np.maximum(e, 0).astype(np.float32), lat, 2, 2)
+    img = np.zeros(e.shape + (3,), np.uint8); img[:] = (40, 70, 120)
+    img[land] = (165, 190, 125); img[land & (r50 >= 1000)] = (150, 75, 40)
+    img[(np.abs(lat) >= 60)[:, None] & np.ones_like(land)] //= 2  # outside the measured region, dimmed
+    return img
+sys.path.insert(0, '.')
+from glo30 import read_tile
+a, _, _, _ = read_tile(tif); a = a[:10800, :21600]
+e4 = a.reshape(720, 15, 1440, 15).mean(axis=(1, 3)); del a
+lat = 90 - (np.arange(720) + 0.5) * 0.25
+earth = belt_rgb(e4, e4 > 0, lat)
+f = np.fromfile(fields, dtype='<f4').reshape(720, 1440, 3)
+seed = belt_rgb(f[..., 0], f[..., 2] > 0, lat)
+W, H = 720, 360
+sheet = Image.new('RGB', (W, 2 * H + 40), (255, 255, 255)); d = ImageDraw.Draw(sheet)
+for i, (img, label) in enumerate(((earth, 'Earth (ETOPO 2022, 0.25 deg block means): belt land 18 % of land within 60 deg'),
+                                  (seed, 'H2r3 seed 3 (preview new_m, 0.25 deg): belt land 49 %'))):
+    y = i * (H + 20)
+    d.text((4, y + 4), label, fill=(0, 0, 0))
+    sheet.paste(Image.fromarray(img).resize((W, H), Image.NEAREST), (0, y + 18))
+sheet.save(f'{out}/belts-earth-seed3.png', optimize=True)
+print('ok')
