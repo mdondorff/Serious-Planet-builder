@@ -50,13 +50,17 @@ pub fn run(root: &Path, args: &[String]) -> Res {
             .map_err(|e| format!("the window's preflight refused, so the window does not start (see {dir}/preflight.md): {e}"))?;
     }
     let mut runner = Children { root: root.to_path_buf(), out_dir: out_dir.clone() };
-    let report = window::execute(&plan, &mut runner)?;
+    let report = window::execute(&plan, &mut runner);
     let lines = window::table(&plan, &report);
     for l in &lines {
         println!("{l}");
     }
+    // The table is written before a failure is reported: the attempts before it are kept (BUILD-034).
     std::fs::write(out_dir.join("table.md"), lines.join("\n") + "\n").map_err(|e| format!("cannot write the table: {e}"))?;
-    Ok(())
+    match report.failure {
+        Some(f) => Err(format!("the window stopped: {f}")),
+        None => Ok(()),
+    }
 }
 
 /// Run a command to its end with its output on the console; a non-zero exit is an error.

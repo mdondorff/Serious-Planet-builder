@@ -121,6 +121,9 @@ pub fn parse_plan(text: &str) -> Result<Plan, String> {
         None => 0,
     };
     let metrics = metrics.unwrap_or_else(|| DEFAULT_METRICS.iter().map(ToString::to_string).collect());
+    if metrics.is_empty() {
+        return Err("metrics names no metric".into());
+    }
     if let Some(bad) = metrics.iter().find(|m| !METRICS.iter().any(|i| i.name == m.as_str())) {
         return Err(format!("unknown metric '{bad}' (known: {})", METRICS.map(|m| m.name).join(", ")));
     }
@@ -220,6 +223,8 @@ pub struct Report {
     pub attempts: Vec<Attempt>,
     /// Per flight and configuration (not the reference): the stop rule's verdict and the round it settled after.
     pub settled: Vec<(String, String, Settle, Option<usize>)>,
+    /// The run that failed and why, which stopped the window; the attempts before it are kept.
+    pub failure: Option<String>,
 }
 
 /// Judge a child's log: valid with its metric values, or invalid with the reasons its frame verdicts do not count.
@@ -234,8 +239,8 @@ pub fn judge_log(log: &str, metrics: &[String]) -> AttemptOutcome {
 
 /// Run the plan: rounds of rotated configurations per flight, each run retried while invalid or refused up to the plan's retries,
 /// the duty idle between two runs, and no further rounds for a configuration the stop rule settled. A child that fails for another
-/// reason stops the window with the reason.
-pub fn execute(plan: &Plan, runner: &mut dyn WindowRunner) -> Result<Report, String> {
+/// reason stops the window: the report keeps the attempts before it and names the failure.
+pub fn execute(plan: &Plan, runner: &mut dyn WindowRunner) -> Report {
     let mut report = Report::default();
     let nf = plan.flights.len();
     let nc = plan.configs.len();
@@ -243,7 +248,9 @@ pub fn execute(plan: &Plan, runner: &mut dyn WindowRunner) -> Result<Report, Str
     let mut valid: Vec<Vec<Vec<Vec<Option<f64>>>>> = vec![vec![Vec::new(); nc]; nf];
     let mut settled: Vec<Vec<Option<(Settle, usize)>>> = vec![vec![None; nc]; nf];
     let mut last_run_s: Option<f64> = None;
-    for round in 0..plan.rounds {
+    // A retry after a refusal waits for the gate instead of the duty idle (BUILD-035): the refused run did not load the machine.
+    let mut after_refusal = false;
+    'rounds: for round in 0..plan.rounds {
         for f in 0..nf {
             let open = |c: usize, settled: &Vec<Vec<Option<(Settle, usize)>>>| settled[f][c].is_none();
             // The reference runs while any other configuration of the flight is open (and alone, with one configuration).
@@ -255,7 +262,7 @@ pub fn execute(plan: &Plan, runner: &mut dyn WindowRunner) -> Result<Report, Str
                 }
                 let (flight, config) = (&plan.flights[f], &plan.configs[c]);
                 for attempt in 0..=plan.retries {
-                    let idle = crate::clock::duty_idle_s(last_run_s);
+                    let idle = if after_refusal { 0.0 } else { crate::clock::duty_idle_s(last_run_s) };
                     if idle > 0.0 {
                         runner.rest(idle);
                     }
@@ -265,13 +272,17 @@ pub fn execute(plan: &Plan, runner: &mut dyn WindowRunner) -> Result<Report, Str
                     let outcome = match child.outcome {
                         Outcome::Log(log) => judge_log(&log, &plan.metrics),
                         Outcome::Refused(conditions) => AttemptOutcome::Refused(conditions.join("; ")),
-                        Outcome::Failed(why) => return Err(format!("{tag}: the run failed: {why}")),
+                        Outcome::Failed(why) => {
+                            report.failure = Some(format!("{tag}: the run failed: {why}"));
+                            break 'rounds;
+                        }
                     };
                     let done = matches!(outcome, AttemptOutcome::Valid(_));
                     if let AttemptOutcome::Valid(values) = &outcome {
                         valid[f][c].push(values.clone());
                     }
                     let refused = matches!(outcome, AttemptOutcome::Refused(_));
+                    after_refusal = refused;
                     report.attempts.push(Attempt {
                         flight: flight.name.clone(),
                         config: config.name.clone(),
@@ -308,7 +319,7 @@ pub fn execute(plan: &Plan, runner: &mut dyn WindowRunner) -> Result<Report, Str
             report.settled.push((flight.name.clone(), config.name.clone(), s, at));
         }
     }
-    Ok(report)
+    report
 }
 
 /// The window's table: every attempt with its times, then per flight and configuration the medians against the reference, the
@@ -382,6 +393,9 @@ pub fn table(plan: &Plan, report: &Report) -> Vec<String> {
     let wall = report.attempts.last().map_or(0.0, |a| a.end_s) - t0;
     let valid = report.attempts.iter().filter(|a| matches!(a.outcome, AttemptOutcome::Valid(_))).count();
     out.push(String::new());
+    if let Some(f) = &report.failure {
+        out.push(format!("STOPPED: {f}"));
+    }
     out.push(format!(
         "window: {} attempt(s), {valid} valid, {:.1} min wall, {} min per valid run",
         report.attempts.len(),
@@ -416,6 +430,8 @@ mod tests {
             ("metrics nope\nflight a stream dive", "unknown metric"),
             ("frobnicate 3", "unknown statement"),
             ("rounds 3", "no flight"),
+            ("metrics
+flight a stream dive", "no metric"),
         ] {
             let e = parse_plan(bad).unwrap_err();
             assert!(e.contains(says), "{bad}: {e}");
@@ -511,7 +527,8 @@ mod tests {
     fn a_window_rotates_rests_between_runs_stops_settled_configurations_and_times_every_attempt() {
         let plan = parse_plan(PLAN).unwrap();
         let mut f = fake();
-        let r = execute(&plan, &mut f).unwrap();
+        let r = execute(&plan, &mut f);
+        assert_eq!(r.failure, None);
         // Round 1 runs c, d, e; d settles worse at once, e is open after one round. Round 2 runs e and c (rotated); e settles
         // within. Round 3 runs nothing: every configuration is settled, so the reference stops too.
         assert_eq!(f.calls, ["r1-dive-c-t1", "r1-dive-d-t1", "r1-dive-e-t1", "r2-dive-e-t1", "r2-dive-c-t1"]);
@@ -538,11 +555,13 @@ mod tests {
     fn an_invalid_or_refused_run_is_retried_within_the_plan_and_a_failed_child_stops_the_window() {
         let plan = parse_plan(PLAN).unwrap();
         let mut f = Fake { invalid_first: vec!["c"], refuse: true, ..fake() };
-        let r = execute(&plan, &mut f).unwrap();
+        let r = execute(&plan, &mut f);
         // The first run is refused (a wait, then the retry), and that retry of c is invalid: retries 1 is used up, so round 1 has
         // no valid c and nothing settles in round 1.
         assert_eq!(&f.calls[..3], ["r1-dive-c-t1", "r1-dive-c-t2", "r1-dive-d-t1"]);
         assert_eq!(f.waits, 1);
+        assert_eq!(f.rests.first(), Some(&20.0), "no duty idle before the refused run's retry; the next run after the invalid one rests");
+        assert_eq!(r.attempts[1].idle_before_s, 0.0, "the retry after the refusal waited for the gate, not the duty idle");
         assert!(matches!(&r.attempts[0].outcome, AttemptOutcome::Refused(w) if w.contains("cargo.exe")));
         assert!(matches!(&r.attempts[1].outcome, AttemptOutcome::Invalid(w) if w.contains("CPU calibration")));
         assert!(r.settled.iter().all(|s| s.3 != Some(0)), "no valid reference in round 1: nothing settles: {:?}", r.settled);
@@ -554,6 +573,21 @@ mod tests {
             fn rest(&mut self, _: f64) {}
             fn wait_refused(&mut self) {}
         }
-        assert!(execute(&plan, &mut Broken).unwrap_err().contains("r1-dive-c-t1: the run failed: exit 101"));
+        let r = execute(&plan, &mut Broken);
+        assert!(r.failure.as_deref().is_some_and(|f| f.contains("r1-dive-c-t1: the run failed: exit 101")), "{:?}", r.failure);
+        assert!(table(&plan, &r).iter().any(|l| l.starts_with("STOPPED: r1-dive-c-t1")));
+        // A failure after valid runs keeps them.
+        struct FailSecond(usize);
+        impl WindowRunner for FailSecond {
+            fn run(&mut self, _: &Flight, _: &Config, _: &str) -> ChildRun {
+                self.0 += 1;
+                let outcome = if self.0 == 1 { Outcome::Log(log(4.0, 9.0, true)) } else { Outcome::Failed("exit 101".into()) };
+                ChildRun { outcome, start_s: 0.0, end_s: 1.0 }
+            }
+            fn rest(&mut self, _: f64) {}
+            fn wait_refused(&mut self) {}
+        }
+        let r = execute(&plan, &mut FailSecond(0));
+        assert!(r.attempts.len() == 1 && r.failure.is_some(), "{r:?}");
     }
 }
