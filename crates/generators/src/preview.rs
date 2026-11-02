@@ -32,6 +32,8 @@ pub struct Fields {
     pub height: usize,
     pub pixels: Vec<Pixel>,
     pub largest_k_step: f64,
+    /// The share of neighbouring lattice point pairs whose `k` differs by more than GEN-097's limit of 2.0.
+    pub k_edges_over: f64,
 }
 
 /// The pixel centre's latitude in radians.
@@ -77,7 +79,14 @@ pub fn compute(seed: u64, width: usize, height: usize, lattice_cells: usize, thr
             })
             .collect::<Vec<_>>()
     });
-    Fields { seed, width, height, pixels: rows.into_iter().flatten().collect(), largest_k_step: lattice.largest_k_step() }
+    Fields {
+        seed,
+        width,
+        height,
+        pixels: rows.into_iter().flatten().collect(),
+        largest_k_step: lattice.largest_k_step(),
+        k_edges_over: lattice.k_steps_over(2.0),
+    }
 }
 
 // ---- text: a 5 x 7 pixel font for the headers and legends ----
@@ -516,10 +525,28 @@ pub fn report(f: &Fields) -> String {
         s.largest_k_step,
         if s.largest_k_step <= 2.0 { "within" } else { "OVER" }
     );
+    r += &format!("  share of lattice steps of k over 2.0: {:.2} %\n", 100.0 * f.k_edges_over);
     r += "  per class:";
     for (name, share) in CLASS_NAMES.iter().zip(s.per_class) {
         r += &format!(" {name} {:.1} %", 100.0 * share);
     }
     r.push('\n');
+    let land: Vec<bool> = f.pixels.iter().map(|p| p.land_depth > 0.0).collect();
+    let high: Vec<bool> = f.pixels.iter().zip(&land).map(|(p, &l)| l && p.new_m >= 2000.0).collect();
+    let m = crate::shape::shape_metrics(&crate::shape::Grid { width: f.width, height: f.height, land: &land, high: &high });
+    let list = |v: &[f64], unit: &str| v.iter().map(|x| format!("{x:.1}{unit}")).collect::<Vec<_>>().join(" / ");
+    r += "shape metrics (SPIKE-91; Earth beside; reported, not judged):\n";
+    r += &format!("  S1 land masses of at least 1 Mkm2: {} ({}); Earth 5\n", m.land_masses.len(), list(&m.land_masses, ""));
+    r += &format!("  S2 largest land mass's share of land: {:.0} %; Earth about 57 %\n", 100.0 * m.largest_share);
+    r += &format!(
+        "  S3 coastline dimension (boxes of 2 to 32 cells): {:.2}; Earth 1.1-1.3 (measure Earth at the same band before judging)\n",
+        m.coast_dimension
+    );
+    r += &format!("  S4 high-ground width, area-weighted median {:.0} km, 10th percentile {:.0} km; Earth about 100-500 km, target median about 310 km\n", m.width_median_km, m.width_p10_km);
+    r += &format!("  S5 spans of the longest high-ground regions: {}; target the longest at most 7500 km (the greatest distance between two cells, not a skeleton length)\n", list(&m.longest_spans_km, " km"));
+    r += &format!("  S6 enclosed area (holes of at least 0.5 Mkm2): {:.1} Mkm2; Earth about 0-1\n", m.enclosed_mkm2);
+    r +=
+        &format!("  S7 high ground's share of land under 60 degrees: {:.1} %; Earth about 7 % (without Antarctica)\n", 100.0 * s.above_2km);
+    r += "  S8 sinuosity: not measured (SPIKE-91 has no comparable measure yet)\n";
     r
 }
