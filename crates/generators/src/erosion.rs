@@ -161,16 +161,19 @@ pub struct ErosionField<'a> {
 }
 
 impl ErosionField<'_> {
-    /// Turns the relief channels on (GEN-099, the m9-bake switch, off by default): the field reads `k` and `m` once at each point and its keys change (the channels' identity
-    /// enters the inputs hash and the implementation id). The channels are of the bake as it is, so the body's relief scale must be 1.
-    pub fn with_relief(mut self, channels: Arc<crate::relief_lattice::ReliefLattice>) -> Self {
-        assert!(self.relief == 1.0, "the relief channels are of the bake at relief scale 1, not {}", self.relief);
+    /// Turns the relief channels on (GEN-099, the m9-bake switch, off by default): the field reads `k` and `m` once at each point and its keys change (the channels' content
+    /// hash, their resolution and the channels' version enter the inputs hash, and the implementation id changes). The channels are of the bake as it is, so the body's relief scale must be 1:
+    /// an error naming the scale otherwise.
+    pub fn with_relief(mut self, channels: Arc<crate::relief_lattice::ReliefLattice>) -> Result<Self, String> {
+        if self.relief != 1.0 {
+            return Err(format!("the relief channels are of the bake at relief scale 1, the body's is {}", self.relief));
+        }
         self.inputs = hash_u64s(
             0x7265_6c66,
             &[self.inputs, channels.id(), channels.cells() as u64, u64::from(crate::relief_channels::RELIEF_CHANNELS_VERSION)],
         );
         self.relief_channels = Some(channels);
-        self
+        Ok(self)
     }
 
     /// Whether the relief channels are on.
@@ -194,7 +197,8 @@ impl ErosionField<'_> {
         }
     }
 
-    /// The largest height the field takes in magnitude at its relief scale (WDEF-017): the elevation clamp times the scale plus the deepest incision.
+    /// The largest height the field takes in magnitude at its relief scale (WDEF-017): the elevation clamp times the scale plus the deepest incision; with the relief channels on,
+    /// `max|1 - k| max|m| + k_max` times that (`m + k (e - m) + k detail = (1 - k) m + k (e + detail)`).
     fn max_abs_height(&self) -> f64 {
         let today = MAX_ELEVATION_M.max(-MIN_ELEVATION_M) * self.relief + DETAIL_DOWN_M;
         match &self.relief_channels {
@@ -385,7 +389,8 @@ impl HeightField for ErosionField<'_> {
     /// Bounds over a cap (GEN-017). The bake's range over the cap is the terrain field's. The slope at a cap point differs
     /// from the slope at the centre by at most `delta_g` (below), so the slope factor lies in an interval, the amplitude in
     /// another (it grows with the elevation and the slope factor), the crease sum in a third (from the per-octave noise
-    /// bounds), and the detail is the product of the last two. A cap too wide for the scan takes the global range.
+    /// bounds), and the detail is the product of the last two. A cap too wide for the scan takes the global range. With the relief channels on, the base is `m + k (e - m) + k detail`
+    /// over the intervals of the four terms (the range of the channels over the cap from [`crate::relief_lattice::ReliefLattice::range_over_cap`]).
     fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
         let global = (-self.max_abs_height(), self.max_abs_height());
         let base = match scan_base(&self.src, centre, angular_radius) {

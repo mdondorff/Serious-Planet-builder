@@ -3,8 +3,9 @@
 //!
 //! The reader owns the channels ([`ReliefChannels`], computed by the bake or loaded from the store) and an identity that enters the keys of a field that reads it.
 
-use crate::relief_channels::{ReliefChannels, BLOCK_CELLS};
+use crate::relief_channels::{ReliefChannels, BLOCK_CELLS, RELIEF_CHANNELS_VERSION};
 use planet_core::cube::{direction_to_face, face_to_direction, TangentWarp};
+use planet_core::hash::hash_u64s;
 use planet_core::{Face, Vec3};
 
 /// The smallest node, in cells, a range over a cap is taken from below the blocks (2 cells: 9 lattice points).
@@ -23,17 +24,24 @@ fn merge(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
 }
 
 impl ReliefLattice {
-    /// The reader of `channels`; `id` names the channels' content for the keys of a field that reads it (the caller derives it from the stored channels' key or hash).
-    pub fn new(channels: ReliefChannels, id: u64) -> ReliefLattice {
+    /// The reader of `channels`, whose identity is a hash of their content (the keys of a field that reads it follow it): an error naming the face when a value is not finite
+    /// (a failed read of the bake: a block range would leave it out) or the lattice is too small for a block.
+    pub fn new(channels: ReliefChannels) -> Result<ReliefLattice, String> {
         let n = channels.cells();
+        if n < BLOCK_CELLS {
+            return Err(format!("the relief channels have {n} cells per face edge, at least {BLOCK_CELLS} are needed"));
+        }
+        let mut id = hash_u64s(0x7265_6c69, &[n as u64, u64::from(RELIEF_CHANNELS_VERSION)]);
         for f in 0..6u8 {
             let planes = channels.face_planes(Face(f));
-            assert!(
-                planes.k.iter().chain(planes.m).all(|v| v.is_finite()),
-                "the relief channels of face {f} hold a value that is not finite (a failed read of the bake?): a block range would leave it out"
-            );
+            if !planes.k.iter().chain(planes.m).all(|v| v.is_finite()) {
+                return Err(format!("the relief channels of face {f} hold a value that is not finite (a failed read of the bake?)"));
+            }
+            for pair in planes.k.iter().chain(planes.m).copied().collect::<Vec<f32>>().chunks(2) {
+                let word = u64::from(pair[0].to_bits()) << 32 | pair.get(1).map_or(0, |v| u64::from(v.to_bits()));
+                id = hash_u64s(id, &[word]);
+            }
         }
-        assert!(n >= BLOCK_CELLS, "the channels have at least {BLOCK_CELLS} cells per face edge");
         let b = channels.cells() / BLOCK_CELLS;
         let mut levels: Vec<Vec<Vec<[f32; 4]>>> = Vec::new();
         levels.push((0..6u8).map(|f| (0..b * b).map(|i| channels.block_range(Face(f), i % b, i / b)).collect()).collect());
@@ -54,7 +62,7 @@ impl ReliefLattice {
             levels.push(next);
             side = half;
         }
-        ReliefLattice { channels, levels, id }
+        Ok(ReliefLattice { channels, levels, id })
     }
 
     pub fn id(&self) -> u64 {

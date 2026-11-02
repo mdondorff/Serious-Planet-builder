@@ -30,15 +30,15 @@ fn field<'a>(src: &'a dyn LatticeSource) -> ErosionField<'a> {
     ErosionGenerator.field(&GenContext::new(&def), BodyId::PLANET, src, KEY).unwrap()
 }
 
-/// Channels whose `k` and `m` are the functions of the direction `kf` and `mf` at every lattice point.
-fn channels(kf: &dyn Fn(Vec3) -> f64, mf: &dyn Fn(Vec3) -> f64) -> ReliefChannels {
+/// Channels of `cells` cells per face edge whose `k` and `m` are the functions of the direction `kf` and `mf` at every lattice point.
+fn channels_n(cells: usize, kf: &dyn Fn(Vec3) -> f64, mf: &dyn Fn(Vec3) -> f64) -> ReliefChannels {
     let faces = (0..6u8)
         .map(|f| {
             let (mut k, mut m) = (Vec::new(), Vec::new());
-            for j in 0..=CELLS {
-                for i in 0..=CELLS {
+            for j in 0..=cells {
+                for i in 0..=cells {
                     let d =
-                        face_to_direction(&TangentWarp, Face(f), 2.0 * i as f64 / CELLS as f64 - 1.0, 2.0 * j as f64 / CELLS as f64 - 1.0);
+                        face_to_direction(&TangentWarp, Face(f), 2.0 * i as f64 / cells as f64 - 1.0, 2.0 * j as f64 / cells as f64 - 1.0);
                     k.push(kf(d) as f32);
                     m.push(mf(d) as f32);
                 }
@@ -46,7 +46,11 @@ fn channels(kf: &dyn Fn(Vec3) -> f64, mf: &dyn Fn(Vec3) -> f64) -> ReliefChannel
             (k, m)
         })
         .collect();
-    ReliefChannels::from_planes(CELLS, faces).expect("channels of a synthetic lattice")
+    ReliefChannels::from_planes(cells, faces).expect("channels of a synthetic lattice")
+}
+
+fn channels(kf: &dyn Fn(Vec3) -> f64, mf: &dyn Fn(Vec3) -> f64) -> ReliefChannels {
+    channels_n(CELLS, kf, mf)
 }
 
 fn varying() -> ReliefChannels {
@@ -70,8 +74,8 @@ fn with_k_1_the_relief_field_is_todays_field_and_with_k_and_m_it_is_m_plus_k_tim
     let g = grid();
     let src = GridSource(&g);
     let off = field(&src);
-    let ones = field(&src).with_relief(Arc::new(ReliefLattice::new(channels(&|_| 1.0, &|_| 300.0), 1)));
-    let twice = field(&src).with_relief(Arc::new(ReliefLattice::new(channels(&|_| 2.0, &|_| 100.0), 2)));
+    let ones = field(&src).with_relief(Arc::new(ReliefLattice::new(channels(&|_| 1.0, &|_| 300.0)).unwrap())).unwrap();
+    let twice = field(&src).with_relief(Arc::new(ReliefLattice::new(channels(&|_| 2.0, &|_| 100.0)).unwrap())).unwrap();
     let mut rng = SplitMix64(3);
     for _ in 0..300 {
         let d = random_dir(&mut rng);
@@ -92,12 +96,37 @@ fn the_relief_switch_is_off_by_default_and_changes_the_implementation_and_the_ke
     let off = field(&src);
     assert!(!off.relief_on());
     assert_eq!(off.implementation_id(), EROSION_IMPLEMENTATION_ID);
-    let (a, b) = (Arc::new(ReliefLattice::new(varying(), 11)), Arc::new(ReliefLattice::new(varying(), 12)));
-    let (on_a, on_b) = (field(&src).with_relief(a), field(&src).with_relief(b));
-    assert!(on_a.relief_on());
-    assert_eq!(on_a.implementation_id(), EROSION_RELIEF_IMPLEMENTATION_ID);
-    assert_ne!(on_a.inputs_hash(), off.inputs_hash(), "the channels re-key the field");
-    assert_ne!(on_a.inputs_hash(), on_b.inputs_hash(), "other channels, another key");
+    let on = |c: ReliefChannels| field(&src).with_relief(Arc::new(ReliefLattice::new(c).unwrap())).unwrap();
+    let (a, a2, b) = (on(varying()), on(varying()), on(channels(&|_| 2.0, &|_| 100.0)));
+    assert!(a.relief_on());
+    assert_eq!(a.implementation_id(), EROSION_RELIEF_IMPLEMENTATION_ID);
+    assert_ne!(a.inputs_hash(), off.inputs_hash(), "the channels re-key the field");
+    assert_eq!(a.inputs_hash(), a2.inputs_hash(), "the same channels give the same key");
+    assert_ne!(a.inputs_hash(), b.inputs_hash(), "other channels, another key (the identity is a hash of their content)");
+}
+
+// spec: GEN-099
+#[test]
+fn channels_of_another_resolution_key_the_field_differently_and_a_scaled_body_or_a_bad_lattice_is_an_error() {
+    let g = grid();
+    let src = GridSource(&g);
+    let (coarse, fine) = (channels_n(CELLS, &|_| 2.0, &|_| 100.0), channels_n(2 * CELLS, &|_| 2.0, &|_| 100.0));
+    let on = |c: ReliefChannels| field(&src).with_relief(Arc::new(ReliefLattice::new(c).unwrap())).unwrap();
+    assert_ne!(on(coarse).inputs_hash(), on(fine).inputs_hash(), "the same values at another resolution are another key");
+    // A body with a relief scale other than 1: the channels are of the bake as it is.
+    let mut def = WorldDefinition::single_planet(R, SEED);
+    def.set(&planet_world_def::body_relief_scale_path(BodyId::PLANET), planet_world_def::NodeValue::F64(2.0));
+    let scaled = ErosionGenerator.field(&GenContext::new(&def), BodyId::PLANET, &src, KEY).unwrap();
+    let e = scaled
+        .with_relief(Arc::new(ReliefLattice::new(channels(&|_| 1.0, &|_| 0.0)).unwrap()))
+        .err()
+        .expect("a scaled body refuses the channels");
+    assert!(e.contains("relief scale 1") && e.contains('2'), "{e}");
+    // A lattice with fewer cells than a block cannot be built; planes with a value that is not finite are refused when the channels are made.
+    assert!(ReliefChannels::from_planes(16, vec![(vec![1.0; 17 * 17], vec![0.0; 17 * 17]); 6]).is_none(), "fewer cells than a block");
+    let mut planes: Vec<(Vec<f32>, Vec<f32>)> = vec![(vec![1.0; (CELLS + 1) * (CELLS + 1)], vec![0.0; (CELLS + 1) * (CELLS + 1)]); 6];
+    planes[2].1[5] = f32::NAN;
+    assert!(ReliefChannels::from_planes(CELLS, planes).is_none(), "a NaN plane is refused");
 }
 
 // spec: GEN-099
@@ -105,7 +134,7 @@ fn the_relief_switch_is_off_by_default_and_changes_the_implementation_and_the_ke
 fn a_batch_of_heights_with_the_relief_on_equals_the_heights_one_by_one() {
     let g = grid();
     let src = GridSource(&g);
-    let f = field(&src).with_relief(Arc::new(ReliefLattice::new(varying(), 1)));
+    let f = field(&src).with_relief(Arc::new(ReliefLattice::new(varying()).unwrap())).unwrap();
     let mut rng = SplitMix64(5);
     let dirs: Vec<Vec3> = (0..400).map(|_| random_dir(&mut rng)).collect();
     let batch = f.heights_until(&dirs, &|| false);
@@ -119,7 +148,7 @@ fn a_batch_of_heights_with_the_relief_on_equals_the_heights_one_by_one() {
 fn the_bounds_with_the_relief_on_hold_every_height_and_nested_caps_nest() {
     let g = grid();
     let src = GridSource(&g);
-    let f = field(&src).with_relief(Arc::new(ReliefLattice::new(varying(), 1)));
+    let f = field(&src).with_relief(Arc::new(ReliefLattice::new(varying()).unwrap())).unwrap();
     let mut rng = SplitMix64(8);
     for n in 0..150 {
         let c = if n % 10 == 0 { Vec3::new(1.0, 1.0 - 1e-9, 0.2).normalized() } else { random_dir(&mut rng) };
@@ -141,7 +170,7 @@ fn the_bounds_with_the_relief_on_hold_every_height_and_nested_caps_nest() {
 // spec: GEN-102
 #[test]
 fn the_ranges_over_a_cap_hold_every_value_read_in_it_include_the_face_edges_and_nest() {
-    let lat = ReliefLattice::new(varying(), 1);
+    let lat = ReliefLattice::new(varying()).unwrap();
     let mut rng = SplitMix64(13);
     for n in 0..300 {
         // A third of the caps sit on a cube edge or corner.
@@ -177,7 +206,7 @@ fn the_ranges_over_a_cap_hold_every_value_read_in_it_include_the_face_edges_and_
 #[test]
 fn the_range_over_a_cap_below_a_block_comes_from_the_lattice_points_around_it_not_from_the_whole_block() {
     use planet_core::cube::direction_to_face;
-    let lat = ReliefLattice::new(varying(), 1);
+    let lat = ReliefLattice::new(varying()).unwrap();
     let mut rng = SplitMix64(21);
     let (mut tight, mut block_width, mut checked) = (0.0f64, 0.0f64, 0);
     for _ in 0..400 {
@@ -218,7 +247,7 @@ fn the_global_height_bound_with_the_relief_on_holds_every_height_and_is_not_wild
     let steep = channels(&|d| 1.0 + 3.0 * (0.5 + 0.5 * libm::sin(5.0 * d.x + 2.0) * libm::cos(3.0 * d.z)), &|d| {
         600.0 * libm::sin(5.0 * d.y) + 100.0
     });
-    let f = field(&src).with_relief(Arc::new(ReliefLattice::new(steep, 1)));
+    let f = field(&src).with_relief(Arc::new(ReliefLattice::new(steep).unwrap())).unwrap();
     let mut rng = SplitMix64(33);
     let (bound, mut seen) = (f.max_abs_height_m(), 0.0f64);
     for _ in 0..4_000 {
@@ -229,45 +258,10 @@ fn the_global_height_bound_with_the_relief_on_holds_every_height_and_is_not_wild
     assert!(bound < 5.0 * (seen + 1.0e4), "the bound {bound} against the largest height seen {seen}");
 }
 
-// spec: GEN-099
-#[test]
-fn channels_of_another_resolution_or_id_key_the_field_differently_and_a_non_finite_channel_is_refused() {
-    let g = grid();
-    let src = GridSource(&g);
-    let coarse = channels(&|_| 2.0, &|_| 100.0);
-    let fine_like = {
-        let faces = (0..6)
-            .map(|f| {
-                let n = 2 * CELLS;
-                let plane = vec![2.0f32; (n + 1) * (n + 1)];
-                let _ = f;
-                (plane.clone(), vec![100.0f32; (n + 1) * (n + 1)])
-            })
-            .collect();
-        ReliefChannels::from_planes(2 * CELLS, faces).unwrap()
-    };
-    let (a, b) = (
-        field(&src).with_relief(Arc::new(ReliefLattice::new(coarse, 7))),
-        field(&src).with_relief(Arc::new(ReliefLattice::new(fine_like, 7))),
-    );
-    assert_ne!(a.inputs_hash(), b.inputs_hash(), "the same id at another resolution is another key");
-    // `from_planes` already refuses a non-finite value; a channel made by `compute` over a failed bake read is refused by the reader.
-    let bad = std::panic::catch_unwind(|| {
-        let faces: Vec<(Vec<f32>, Vec<f32>)> =
-            (0..6).map(|_| (vec![1.0f32; (CELLS + 1) * (CELLS + 1)], vec![0.0f32; (CELLS + 1) * (CELLS + 1)])).collect();
-        let ok = ReliefChannels::from_planes(CELLS, faces.clone()).expect("finite channels");
-        let _ = ReliefLattice::new(ok, 1);
-        let mut nan = faces;
-        nan[2].1[5] = f32::NAN;
-        assert!(ReliefChannels::from_planes(CELLS, nan).is_none(), "a NaN plane is refused by from_planes");
-    });
-    assert!(bad.is_ok());
-}
-
 // spec: GEN-102
 #[test]
 fn ranges_hold_for_caps_over_a_face_or_the_hemisphere_and_non_concentric_caps_nest() {
-    let lat = ReliefLattice::new(varying(), 1);
+    let lat = ReliefLattice::new(varying()).unwrap();
     let mut rng = SplitMix64(44);
     for theta in [0.8, 1.0, std::f64::consts::FRAC_PI_2, 2.0, 3.0] {
         let c = random_dir(&mut rng);
@@ -291,4 +285,73 @@ fn ranges_hold_for_caps_over_a_face_or_the_hemisphere_and_non_concentric_caps_ne
             "an inner cap at another centre {i:?} leaves its outer cap {o:?}"
         );
     }
+}
+
+// spec: GEN-102
+#[test]
+fn the_pyramid_holds_at_depth_with_512_cells_per_face_edge_and_the_planet_wide_range_is_the_top() {
+    use planet_core::cube::direction_to_face;
+    let n = 512;
+    let lat = ReliefLattice::new(channels_n(n, &|d| 1.0 + 3.0 * (0.5 + 0.5 * libm::sin(9.0 * d.x + 1.0) * libm::cos(7.0 * d.y)), &|d| {
+        400.0 * libm::sin(11.0 * d.z) + 150.0
+    }))
+    .unwrap();
+    let mut rng = SplitMix64(55);
+    for theta in [1e-4, 1e-3, 1e-2, 0.05, 0.2, 0.7, 1.2] {
+        for _ in 0..30 {
+            let c = random_dir(&mut rng);
+            let r = lat.range_over_cap(c, theta);
+            let inner = lat.range_over_cap(c, theta * 0.4);
+            assert!(r[0] <= inner[0] && inner[1] <= r[1] && r[2] <= inner[2] && inner[3] <= r[3], "nesting at depth, cap {theta}");
+            for ring in [0.0, 0.5, 1.0] {
+                for k in 0..12 {
+                    let d = offset(c, theta * ring, f64::from(k) * std::f64::consts::TAU / 12.0);
+                    let (kv, mv) = lat.at(d);
+                    assert!(
+                        r[0] <= kv && kv <= r[1] && r[2] <= mv && mv <= r[3],
+                        "(k, m) = ({kv}, {mv}) outside {r:?} at depth, cap {theta}"
+                    );
+                }
+            }
+        }
+    }
+    let g = lat.global_range();
+    assert_eq!(lat.range_over_cap(Vec3::new(0.0, 0.0, 1.0), std::f64::consts::PI), g);
+    // The top of the pyramid is the whole planet: a point range is inside it.
+    let (face, _, _) = direction_to_face(&TangentWarp, Vec3::new(0.3, -0.5, 0.8).normalized());
+    let (k, m) = lat.channels().at(face, 17, 99);
+    assert!(g[0] <= f64::from(k) && f64::from(k) <= g[1] && g[2] <= f64::from(m) && f64::from(m) <= g[3]);
+}
+
+// spec: GEN-102
+#[test]
+fn field_bounds_with_the_relief_on_nest_for_caps_at_other_centres_and_every_batch_path_agrees() {
+    let g = grid();
+    let src = GridSource(&g);
+    let f = field(&src).with_relief(Arc::new(ReliefLattice::new(varying()).unwrap())).unwrap();
+    let mut rng = SplitMix64(66);
+    for _ in 0..120 {
+        let outer_c = random_dir(&mut rng);
+        let outer_r = 1e-3 + rng.next_f64() * 0.02;
+        let inner_r = rng.next_f64() * outer_r * 0.4;
+        let inner_c = offset(outer_c, rng.next_f64() * (outer_r - inner_r) * 0.99, rng.next_f64() * std::f64::consts::TAU);
+        let (olo, ohi) = f.height_bounds(outer_c, outer_r);
+        let (ilo, ihi) = f.height_bounds(inner_c, inner_r);
+        assert!(
+            olo <= ilo + 1e-9 && ihi <= ohi + 1e-9,
+            "the bounds of a cap at another centre [{ilo}, {ihi}] leave its outer cap's [{olo}, {ohi}]"
+        );
+    }
+    // The batch paths agree with the single read: the threaded batch and the batch with the climate.
+    let dirs: Vec<Vec3> = (0..200).map(|_| random_dir(&mut rng)).collect();
+    let single: Vec<u64> = dirs.iter().map(|d| f.height(*d).to_bits()).collect();
+    let threaded = f.heights_threaded_until(&dirs, &|| false, &4usize);
+    assert_eq!(threaded.iter().map(|h| h.to_bits()).collect::<Vec<_>>(), single, "the threaded batch differs from the single reads");
+    let id = planet_core::TileId::new(Face(2), 5, 9, 14).unwrap();
+    let (with_climate, _) = f.heights_and_climate(&TangentWarp, id, &dirs, &|| false);
+    assert_eq!(
+        with_climate.iter().map(|h| h.to_bits()).collect::<Vec<_>>(),
+        single,
+        "the batch with the climate differs from the single reads"
+    );
 }
