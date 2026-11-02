@@ -13,11 +13,11 @@ Source: SPIKE-95 (`spikes/perf-window-process/results/results.md`); SPIKE-90 win
 ## Decision
 1. **Streaming scenes take no cool start.** Their GPU temperature at the start stays recorded in the log's clock sample; their calibration reading before the case follows the settle only (amends ADR 0093 point 2 for them).
 2. **Lit and terrain views keep the cool start with a short cap** (value in TEST-033); a view that starts hot is judged by the clock floor.
-3. **A duty idle between runs.** The A/B helper, the reserve test and `perf stream all` (and the planned window runner) idle for a share of the previous run's wall time, with a cap, before the next run (values in BUILD-033); not before the first run, and not between a refused try and its retry.
+3. **A duty idle between runs.** The A/B helper, the reserve test and `perf stream all` (and the planned window runner) idle for a share of the previous run's wall time, with a cap, before the next run (values in BUILD-035); not before the first run, and not between a refused try and its retry.
 4. **Stop rule.** A streaming run that starts above the gate's temperature limit is named in the console (TEST-037); a device loss or a throttle reason other than the power cap in such a run brings back a capped cool start for streaming scenes, by a new ADR.
 
 ## Consequences
-- TEST-033, TEST-037 and BUILD-033 change (change `perf-duty-cycle`); TEST-039 and STRM-022 drop "the cool-down" for streaming scenes; the window runner (planned, BUILD-034) uses the same duty idle.
+- TEST-033 and TEST-037 change and BUILD-035 is added (change `perf-duty-cycle`); TEST-039 and STRM-022 drop "the cool-down" for streaming scenes; the window runner (planned, BUILD-034) uses the same duty idle.
 - On acceptance, ADR 0057's status line and its README row gain "point 1 amended by 0094" (ADR 0078).
 - Window 8's device losses were the reason for the streaming cool start; `docs/status.md` attributes the device losses since 2026-10-18 most likely to a locked desktop. That is an attribution, not a measurement: the removal is unproven and is reversed in one place (`start_steps`); point 4 catches a return.
 - To be measured in the planner's next quiet slot: 10 back-to-back streaming runs with the duty idle against 10 with the old cool-down, interleaved: valid share, tile-ready and frame p99 within the quiet noise.

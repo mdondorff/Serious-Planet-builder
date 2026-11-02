@@ -425,7 +425,7 @@ mod tests {
         }
     }
 
-    // spec: BUILD-033
+    // spec: BUILD-033, BUILD-035
     #[test]
     fn five_rounds_alternate_keep_every_log_retry_refusals_and_give_one_table() {
         let spec = parse(&s(&["--ab", "origin/main", "stream", "dive"])).unwrap();

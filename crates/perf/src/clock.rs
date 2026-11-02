@@ -557,7 +557,7 @@ mod tests {
         assert_eq!(HOT_START_C, 70.0);
     }
 
-    // spec: BUILD-033
+    // spec: BUILD-035
     #[test]
     fn the_duty_idle_is_half_the_previous_run_capped_and_none_before_the_first() {
         assert_eq!(duty_idle_s(None), 0.0);
