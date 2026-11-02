@@ -623,7 +623,7 @@ fn a_lit_view_a_lit_flight_and_a_stream_scene_log_their_cpu_calibration_when_ask
     let _ = std::fs::remove_file(&stream);
 }
 
-// spec: BUDG-011, BUDG-012
+// spec: BUDG-011, BUDG-012, BUDG-003
 #[test]
 fn a_smoke_run_with_the_reserve_loads_calibrates_them_and_prints_the_reserve_report() {
     let dir = tmp("reserve");
@@ -653,6 +653,19 @@ fn a_smoke_run_with_the_reserve_loads_calibrates_them_and_prints_the_reserve_rep
     assert!(out.contains("terrain main-thread ms:") && out.contains("terrain cores:") && out.contains("frame median ms:"), "{out}");
     assert!(out.contains("physics cores:") && out.contains("[load, not decisive]"), "the loads' cores are listed: {out}");
     assert!(out.contains("reserve verdict:"), "{out}");
+    // BUDG-003: terrain's busy threads are judged against the machine's terrain share, and the flight stays inside it.
+    let share = planet_streaming::shares::Shares::machine().terrain as f64;
+    let line = out.lines().find(|l| l.contains("terrain cores:")).expect("the terrain cores row");
+    let num = |after: &str| -> f64 {
+        line.split(after)
+            .nth(1)
+            .and_then(|r| r.split(|c: char| c != '.' && !c.is_ascii_digit()).find(|t| !t.is_empty()))
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    let (busy, limit) = (num("terrain cores:"), num("(limit"));
+    assert!(limit == share && busy <= limit, "terrain busy {busy} against limit {limit}, share {share}: {line}");
     let json = std::fs::read_to_string(dir.join("dive.json")).unwrap();
     assert!(
         json.contains("\"reserve_on\":1") && json.contains("reserve_terrain_peak_threads"),

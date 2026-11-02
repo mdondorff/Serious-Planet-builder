@@ -46,7 +46,7 @@
   - the default pool becomes the terrain share, and "18 workers on 20 threads" becomes a worked example;
   - `--gen-workers N` still fixes the pool;
   - `--gen-reserve N` keeps today's meaning (logical threads − N) as an explicit override of the share.
-- STRM-064: horizon bakes `terrain / 2`, at least 1. Its Detail block (BUILD-027) gets shorter, not longer.
+- STRM-064: the code bakes on `terrain / 2`, at least 1. The requirement's Detail line ("at most 8 at once") is not modified here: the open change `shadow-clipmap-march` (crusader) already modifies STRM-064, and the horizon maps retire under ADR 0085. That change takes the number with it.
 - TEST-039 and TEST-040: the calibration runs on a fixed reference thread count (`min(18, logical threads)`) independent of the pool. Otherwise every share-sized log (6 threads) loses the parallel limits silently. ADR 0065's limits stay valid; accepted (open point 3).
 - Code beside `pipelined.rs` and the reserve: `litperf.rs` (`calibration_threads`), `streamperf.rs` (`calib_threads = gen.workers`), `horizonworld.rs` (`HORIZON_WORKERS_MAX`), `coupledworld.rs`, `app/src/lib.rs` (the `GEN_RESERVE` default and its test), `streaming/tests/dispatch_throughput.rs`.
 - BUDG-005 (RAM in GB) and BUDG-008 (generic) do not change.

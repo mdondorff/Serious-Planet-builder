@@ -24,6 +24,7 @@ mod layer;
 pub mod manager;
 pub mod priority;
 mod queue;
+pub mod shares;
 pub mod slots;
 pub mod topology;
 
@@ -746,10 +747,9 @@ pub fn floor_roots(floor: u8) -> Vec<TileId> {
     out
 }
 
-/// Hardware threads the default tile generation pool leaves free (STRM-020, perf window 2): the frame thread, the plan worker and
-/// the driver's threads need cores of their own, or a frame's upload and scheduler steps wait for the OS to schedule them behind
-/// the generation threads (their time then varies by milliseconds with the load, not with the bytes). A named default, not a
-/// measured optimum: `--gen-reserve N` changes it, `--gen-workers N` sets the pool size outright.
+/// Hardware threads a pool sized by `--gen-reserve` leaves free (STRM-020, perf window 2): the frame thread, the plan worker and the
+/// driver's threads need cores of their own. The default pool is the terrain share instead (BUDG-003); `--gen-workers N` sets the
+/// size outright.
 pub const GEN_RESERVE: usize = 2;
 
 /// The size of the tile generation pool and how far the scheduler queues ahead of it (STRM-020): one place that builds the pool
@@ -771,10 +771,9 @@ impl GenWorkers {
         Self { workers, ahead: workers, priority: Priority::BelowNormal }
     }
 
-    /// The default: one worker per hardware thread of the machine less [`GEN_RESERVE`] cores kept for the frame thread, the plan
-    /// worker and the driver's threads.
+    /// The default: the machine's terrain share (BUDG-003, ADR 0092), a fraction of its performance threads less the frame's two.
     pub fn machine() -> Self {
-        Self::machine_reserving(GEN_RESERVE)
+        Self::new(crate::shares::Shares::machine().terrain)
     }
 
     /// One worker per hardware thread of the machine less `reserve` cores (`--gen-reserve N`).

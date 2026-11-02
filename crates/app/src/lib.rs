@@ -251,21 +251,27 @@ pub struct Options {
 }
 
 impl Options {
-    /// The tile generation pool of the pipelined loop and the streaming scenes (STRM-020): `--gen-workers` threads (default the
-    /// machine's hardware threads less `--gen-reserve`, 2 unless given) with `--gen-ahead` jobs queued behind them (default as
-    /// many).
+    /// The tile generation pool of the pipelined loop and the streaming scenes (STRM-020): `--gen-workers` threads, else the machine's
+    /// hardware threads less `--gen-reserve` when given, else the terrain share (BUDG-003); with `--gen-ahead` jobs queued behind them
+    /// (default as many).
     pub fn gen_workers(&self) -> planet_streaming::GenWorkers {
-        let reserve = self.gen_reserve.unwrap_or(planet_streaming::GEN_RESERVE);
-        let g =
-            self.gen_workers.map_or_else(|| planet_streaming::GenWorkers::machine_reserving(reserve), planet_streaming::GenWorkers::new);
+        let g = match (self.gen_workers, self.gen_reserve) {
+            (Some(n), _) => planet_streaming::GenWorkers::new(n),
+            (None, Some(reserve)) => planet_streaming::GenWorkers::machine_reserving(reserve),
+            (None, None) => planet_streaming::GenWorkers::machine(),
+        };
         let g = self.gen_priority.map_or(g, |p| g.with_priority(p));
         self.gen_ahead.map_or(g, |a| g.with_ahead(a))
     }
 
-    /// The reserve behind the pool size, for the perf log: `None` when `--gen-workers` fixed the size and the reserve decided
-    /// nothing.
+    /// The reserve behind the pool size, for the perf log: `None` when `--gen-workers` fixed the size or the terrain share set it
+    /// (no `--gen-reserve`), so the reserve decided nothing.
     pub fn gen_reserve_used(&self) -> Option<usize> {
-        self.gen_workers.is_none().then(|| self.gen_reserve.unwrap_or(planet_streaming::GEN_RESERVE))
+        if self.gen_workers.is_some() {
+            None
+        } else {
+            self.gen_reserve
+        }
     }
 
     /// The finest geometry level of a run with tiles of `cells` cells: `--finest-level`, else the production default
@@ -1087,8 +1093,8 @@ mod tests {
         let cores = std::thread::available_parallelism().map_or(4, |n| n.get());
         let o = args(&["test-render", "--scene", "terrain"]);
         let g = o.gen_workers();
-        assert_eq!(g.workers, planet_streaming::GenWorkers::workers_for(cores, planet_streaming::GEN_RESERVE));
-        assert_eq!((g.ahead, o.gen_reserve_used()), (g.workers, Some(planet_streaming::GEN_RESERVE)));
+        assert_eq!(g.workers, planet_streaming::shares::Shares::machine().terrain, "the default is the terrain share (BUDG-003)");
+        assert_eq!((g.ahead, o.gen_reserve_used()), (g.workers, None));
         let o = args(&["test-render", "--gen-reserve", "5"]);
         assert_eq!(o.gen_workers().workers, planet_streaming::GenWorkers::workers_for(cores, 5));
         assert_eq!(o.gen_reserve_used(), Some(5));
