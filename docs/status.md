@@ -48,7 +48,6 @@ After Option B: M9 R3 to R6 (week plan section 4). B6 (chunk stage removed) and 
 - **Water cut keeps more nodes after the hill band** (#673): kept share 53-73 % (was 40-50 %); check the water pass's GPU time in the next perf window.
 - **Horizon-map shadows retiring** (ADR 0085): their latency (window 28: 131 of 269 maps over 10 s on large edits), disk cache and edge limits are not worked on. Anything added to the terrain pass keeps criterion 5's 1.5 ms (max 1.42).
 - **Drag residuals** (owner test 2, 2026-10-30): after #900 some tiles are clipped or not drawn while dragging and settle at rest. Real-store pair (#949, RTX and software adapter agree within 2 px, 2026-10-31): preview residue at most 6 % of changed pixels (contour lines), 0 at river-r1; lit frame and metres NOT RUN. No fix scheduled.
-- **`--site` in the editor** (owner, 2026-10-30): no descent, the window opens at the default view; `--marker` with G works.
 - **Blocky sun glint while turning** (owner, 2026-10-23, RTX; `docs/dev_screenshots/2026-10-23-bug-sun-glint-*.png`): pitch or yaw turns the sea glint into rectangles; a still camera restores it. Suspects: the turn cover (STRM-033), a per-tile water normal. Next: F9 while turning, F3 overlay.
 - **Orbit flicker and dark-pixel flicker not reproduced** (owner, 2026-10-22): still-camera views identical (TEST-068 to TEST-070); not covered: streaming on the lit path while moving, the editor hover, wall-clock water. Needs the owner: editor off, F3 overlay, a recording or F9.
 - **Authored items at scale** (SPIKE-29): cold plan over empty ground that sees a 5k/20k cluster 3.75/9.4 s; candidate: a per-cell bound aggregate (`spikes/edit-scale/results/results.md`).
@@ -57,7 +56,7 @@ After Option B: M9 R3 to R6 (week plan section 4). B6 (chunk stage removed) and 
 - **Flaky `gpu_window` flight test**: one failure after 7.5 s, 0 of 5 since; probably the lock (first item). On a second failure keep the full output.
 - **WARP device removal with the compact format and the atmosphere**: test-only, accepted; the software smoke stays on the vertex format. Re-test when WARP, wgpu or Windows changes (Windows changed 2026-10-30).
 - **Beach shading flashes on WARP** (36.8 % of shore-band pixels on the coastal descent): unchecked since REND-030; check with the next look review.
-- **ADR 0056 limits**: steep coastal ground and inlets under 4 km stay dry (fix: per-vertex sea mask); `WaterBook` is never evicted (watch its growth).
+- **Coastal water limits** (ADR 0071 replaced ADR 0056's 4 km reach by connectivity, ATMO-019): (a) steep coastal ground cut under the level above `B(W)` does not conduct (ADR 0071 point 2; a fix is a slope-aware wet floor: a new store pass and coast goldens); (b) below the block level a band strip narrower than a parent's sample spacing can leave the parent dry (ATMO-019). Measure on the real store if the owner saw a dry coast. `WaterBook` is never evicted (`waterbook-eviction`).
 - **ADR 0051 (superseded by 0055)**: point 1 (liquid parameters in the definition) awaits the planner's acceptance; point 6 (per-tile W storage) is open.
 - **Cold start without the pre-fill**: 384 roots in 17.76 s (indicative, software adapter); no budget set.
 - **Flight clock collapse follows run order** (windows 10, 11): the first run of a flight pair drops to P5 or P8; cause open.
