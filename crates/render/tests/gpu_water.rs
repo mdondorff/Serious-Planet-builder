@@ -243,11 +243,11 @@ fn fnv(h: u64, bytes: &[u8]) -> u64 {
 fn the_lit_water_and_atmosphere_frames_over_compact_blocks_are_the_recorded_pixels() {
     // The hash of the HDR and colour targets of five frames of the aerial coast (no water, the atmosphere, the class view, the lit
     // water without and with the atmosphere), as the atlas textures drew them (recorded by the differential of ADR 0054's change,
-    // byte-identical to the buffer blocks on WARP and on the RTX; re-recorded by the pixel-footprint fade of the waves, ADR 0056). A driver not in the table prints its hash and records nothing.
+    // byte-identical to the buffer blocks on WARP and on the RTX; re-recorded by the pixel-footprint fade of the waves, ADR 0056, and by the grid-independent shading normal, ATMO-013). A driver not in the table prints its hash and records nothing.
     const KNOWN: [(&str, u64); 2] = [
-        ("Microsoft Basic Render Driver | Dx12 | Cpu | driver '10.0.26100.9711' ''", 0x089f_3f75_fa7c_fd77),
-        // The RTX hash: recorded 2026-11-01 under MESH_VERSION 10 (`test gpu --real`); another adapter or driver skips with a printed hash.
-        ("NVIDIA GeForce RTX 3080 Ti Laptop GPU | Vulkan | DiscreteGpu | driver 'NVIDIA' '621.01'", 0x9599_4aed_a437_d5f8),
+        ("Microsoft Basic Render Driver | Dx12 | Cpu | driver '10.0.26100.9711' ''", 0xcb76_74ec_ad7a_973c),
+        // The RTX hash: re-recorded 2026-11-02 by the sun-glint-turn fix (ATMO-013), owner bless 2026-11-02 (`test gpu --real`); another adapter or driver skips with a printed hash.
+        ("NVIDIA GeForce RTX 3080 Ti Laptop GPU | Vulkan | DiscreteGpu | driver 'NVIDIA' '621.01'", 0x7f5e_9697_4390_1fb1),
     ];
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let field = Reference(1);
