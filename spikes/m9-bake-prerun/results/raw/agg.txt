@@ -1,0 +1,60 @@
+== a-face0-s3: tiles 121, land tiles 79, run 1808 s, par 4, steps 10
+  sample: mean 23.1 p50 19.6 p90 33.8 max 81.9
+  route: mean 53.8 p50 49.0 p90 88.2 max 182.1
+  carve: mean 8.1 p50 7.3 p90 15.4 max 21.2
+  total: mean 90.2 p50 80.7 p90 142.3 max 266.5
+  route per step mean 5.38, carve per step mean 0.81
+  land share of land tiles mean 0.913
+  delta B/cell mean 0.369 max 0.730; per land cell 0.404; h16 B/cell mean 0.869, per land cell 0.951
+  max cut p50 40.6, chan p50 cut median 0.75
+  land tiles per hour at par 4: 157
+== d-face3-s4: tiles 64, land tiles 33, run 510 s, par 4, steps 10
+  sample: mean 11.9 p50 11.8 p90 15.1 max 15.2
+  route: mean 41.3 p50 33.2 p90 70.5 max 79.8
+  carve: mean 4.0 p50 4.7 p90 6.0 max 6.8
+  total: mean 60.0 p50 53.4 p90 86.1 max 95.1
+  route per step mean 4.13, carve per step mean 0.40
+  land share of land tiles mean 0.776
+  delta B/cell mean 0.267 max 0.579; per land cell 0.344; h16 B/cell mean 0.716, per land cell 0.923
+  max cut p50 32.1, chan p50 cut median 0.56
+  land tiles per hour at par 4: 233
+== b-steps30: tiles 6, land tiles 5, run 210 s, par 3, steps 30
+  sample: mean 13.1 p50 15.8 p90 15.9 max 15.9
+  route: mean 91.3 p50 75.0 p90 168.4 max 168.4
+  carve: mean 10.8 p50 13.4 p90 13.7 max 13.7
+  total: mean 118.0 p50 101.8 p90 187.5 max 187.5
+  route per step mean 3.04, carve per step mean 0.36
+  land share of land tiles mean 0.837
+  delta B/cell mean 0.500 max 0.860; per land cell 0.598; h16 B/cell mean 0.862, per land cell 1.030
+  max cut p50 41.8, chan p50 cut median 2.80
+  land tiles per hour at par 3: 86
+== c-sample16: tiles 2, land tiles 2, run 18 s, par 1, steps 1
+  sample: mean 3.8 p50 3.9 p90 3.9 max 3.9
+  route: mean 2.7 p50 3.7 p90 3.7 max 3.7
+  carve: mean 0.2 p50 0.3 p90 0.3 max 0.3
+  total: mean 8.0 p50 8.8 p90 8.8 max 8.8
+  route per step mean 2.69, carve per step mean 0.17
+  land share of land tiles mean 0.593
+  delta B/cell mean 0.119 max 0.236; per land cell 0.201; h16 B/cell mean 0.880, per land cell 1.485
+  max cut p50 94.5, chan p50 cut median 0.21
+  land tiles per hour at par 1: 390
+== try1: tiles 3, land tiles 3, run 126 s, par 3, steps 2
+  sample: mean 62.7 p50 62.7 p90 62.8 max 62.8
+  route: mean 22.3 p50 15.2 p90 38.3 max 38.3
+  carve: mean 2.0 p50 2.2 p90 3.3 max 3.3
+  total: mean 96.1 p50 86.5 p90 116.1 max 116.1
+  route per step mean 11.17, carve per step mean 0.99
+  land share of land tiles mean 0.728
+  delta B/cell mean 0.162 max 0.347; per land cell 0.222; h16 B/cell mean 0.872, per land cell 1.197
+  max cut p50 26.0, chan p50 cut median 0.12
+  land tiles per hour at par 3: 85
+== e-par8: tiles 60, land tiles 50, run 1022 s, par 8, steps 10
+  sample: mean 59.4 p50 38.4 p90 143.9 max 263.8
+  route: mean 74.7 p50 79.0 p90 139.0 max 164.0
+  carve: mean 13.6 p50 11.9 p90 18.6 max 123.8
+  total: mean 154.9 p50 145.9 p90 280.2 max 422.5
+  route per step mean 7.47, carve per step mean 1.36
+  land share of land tiles mean 0.919
+  delta B/cell mean 0.386 max 0.742; per land cell 0.420; h16 B/cell mean 0.903, per land cell 0.983
+  max cut p50 41.9, chan p50 cut median 0.78
+  land tiles per hour at par 8: 176

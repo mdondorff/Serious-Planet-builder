@@ -1,0 +1,9 @@
+20:32:55 start a-face0-s3
+21:03:03 end a-face0-s3 exit 0
+21:03:03 start b-steps30
+21:06:36 end b-steps30 exit 0
+21:06:36 start c-sample16
+21:06:59 end c-sample16 exit 0
+21:06:59 start d-face3-s4
+21:15:30 end d-face3-s4 exit 0
+21:15:30 all done

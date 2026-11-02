@@ -1,0 +1,16 @@
+    pub fn spacing_m(&self, c: usize, k: usize, nb: usize) -> f64 {
+85:        if v.name.starts_with("followU") {
+172:    if want("followu") {
+173:        run_variant(&lat, &z0, Variant { name: "followU: stationary uplift of the current network", p, uplift: zero.clone(), relax_years: None, depth_cap: None }, steps);
+$ cargo run --release -p planet --example coupled_uplift_variants -- --store C:/DEV/SeriousPlanetData/global16384 --cache C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/3116f58f-e80d-45b8-9131-e11d4834ea4d/s
+cells 25165824 land 7370117
+-- followU: stationary uplift of the current network: run minus input, median (p10 p90) by input band 0-500 | 500-1000 | 1000-2500 | 2500-5000 | >5000
+step 1 (mean|dz| 7.30)          0.9 (      0      9) |      2.2 (      0     16) |      4.7 (      0     41) |     31.5 (      3    143) |     41.1 (     12    118) |
+step 8 (mean|dz| 9.30)         14.6 (      0     90) |     45.2 (     10    141) |     76.7 (      8    462) |    395.3 (     50   1005) |    696.3 (    332   1215) |
+step 24 (mean|dz| 4.39)        16.9 (      0    171) |    143.5 (     27    344) |    213.9 (     26    849) |    689.7 (    122   2019) |   1409.9 (    564   2418) |
+step 80 (mean|dz| 1.51)        16.0 (      0    157) |    177.7 (     24    501) |    256.7 (     25    927) |    708.3 (    133   2032) |   1518.9 (    555   2515) |
+   receivers differing between step 1 and step 80: 2262072 of 7370117 land cells (30.7 %); last step mean|dz| 1.51 m
+by area, step 80               54.6 (n  5093811) |     39.2 (n  1363039) |     35.4 (n   626197) |     56.2 (n   225494) |     46.7 (n    61576) |
+   cells over 1e11 m2: 61576 ; input minus run median -46.7 m p10 -350.0 p90 -0.7   (354 s)
+exit 0
+[exited with code 0]

@@ -1,0 +1,26 @@
+import csv, json, math, sys
+import numpy as np
+real = json.load(open('s55_real.json'))
+rows = list(csv.DictReader(open('C:/DEV/Serious-Planet-Builder/.claude/worktrees/spike-m9-glo30/crates/app/target/spike55/scan.csv')))
+lat = np.array([float(r['lat']) for r in rows]); lon = np.array([float(r['lon']) for r in rows])
+mean = np.array([float(r['mean']) for r in rows]); std = np.array([float(r['std']) for r in rows])
+land = mean > 0
+print('generator cells scanned', len(rows), 'land (mean > 0):', int(land.sum()))
+print('generator std over land cells: p50 %.0f p90 %.0f p99 %.0f max %.0f; mean elevation p50 %.0f p99 %.0f max %.0f' % (*np.percentile(std[land], [50, 90, 99]), std[land].max(), *np.percentile(mean[land], [50, 99]), mean[land].max()))
+sites = {}
+for key, r in real.items():
+    m, s = r['desc_mean'], r['desc_std']
+    d = np.hypot((mean - m) / (0.3 * max(abs(m), 150.0)), (std - s) / (0.3 * max(s, 25.0)))
+    d[~land] = 1e9
+    order = np.argsort(d)
+    picked = []
+    for i in order:
+        if all(abs(lat[i] - lat[j]) + abs(lon[i] - lon[j]) >= 8 for j in picked):
+            picked.append(i)
+        if len(picked) == 2: break
+    sites[key] = [{'lat': float(lat[i]) + 0.5, 'lon': float(lon[i]) + 0.5, 'mean': float(mean[i]), 'std': float(std[i]), 'dist': float(d[i])} for i in picked]
+    print(key, r['landform'], 'real mean %.0f std %.0f ->' % (m, s), ['(%.1f, %.1f) mean %.0f std %.0f d %.2f' % (x['lat'], x['lon'], x['mean'], x['std'], x['dist']) for x in sites[key]])
+json.dump(sites, open('s55_sites.json', 'w'), indent=1)
+wl = ';'.join('%.1f,%.1f' % (x['lat'], x['lon']) for k in sorted(sites) for x in sites[k])
+open('s55_windows.txt', 'w').write(wl)
+print(wl)

@@ -1,0 +1,5 @@
+VAR truth-frozen routing against truth-dynamic: |dz| p50 6.03 p90 32.45 p99 108.93 m (p99 / core relief 0.175); channels (A>50000 m2, 6.1 % of cells) p99 82.08, slopes p99 110.72; 2 % of the p99 tail in channels; |dlnA| mean 1.553 p99 6.52
+VAR H=1 km coarse flux, dynamic: |dz| p50 0.33 p90 18.17 p99 79.43 m (p99 / core relief 0.128); channels (A>50000 m2, 6.1 % of cells) p99 143.05, slopes p99 69.90; 31 % of the p99 tail in channels; |dlnA| mean 0.599 p99 7.68
+VAR H=1 km oracle flux, dynamic: |dz| p50 0.29 p90 16.29 p99 76.31 m (p99 / core relief 0.123); channels (A>50000 m2, 6.1 % of cells) p99 144.57, slopes p99 66.71; 30 % of the p99 tail in channels; |dlnA| mean 0.570 p99 7.46
+VAR H=1 km coarse flux, frozen: |dz| p50 5.37 p90 27.80 p99 89.72 m (p99 / core relief 0.144); channels (A>50000 m2, 6.1 % of cells) p99 133.96, slopes p99 84.24; 23 % of the p99 tail in channels; |dlnA| mean 1.494 p99 6.63
+VAR H=1 km oracle flux, frozen: |dz| p50 5.38 p90 27.83 p99 90.35 m (p99 / core relief 0.145); channels (A>50000 m2, 6.1 % of cells) p99 133.91, slopes p99 85.79; 22 % of the p99 tail in channels; |dlnA| mean 1.489 p99 6.56

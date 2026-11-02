@@ -1,0 +1,7 @@
+#!/bin/bash
+# SPIKE-80: the combined generator at the re-matched scorecard sites (branch spike/m9-plains, S80 block of the terrain_score example).
+cd C:/DEV/Serious-Planet-Builder/.claude/worktrees/sonnet-spikes-36fc88
+R=spikes/m9-combined/results/raw
+echo "=== s80 $(date +%H:%M:%S)"
+S80_DIR=target/s80/r S80_FIELDS=target/s80/s80-fields.f32 cargo xtask heavy cmd //c start "" //b //wait //belownormal target/release/examples/terrain_score.exe --sites $R/sites-rematched.toml 2>&1
+echo "=== done $(date +%H:%M:%S)"

@@ -27,8 +27,8 @@ pub mod mesh;
 pub mod normals;
 pub mod ocean;
 pub mod preview;
-pub mod stage;
 pub mod spike92;
+pub mod stage;
 pub mod stamp;
 /// Test-only stress terrain; only test builds enable the `stress` feature (dev-dependencies).
 #[cfg(feature = "stress")]

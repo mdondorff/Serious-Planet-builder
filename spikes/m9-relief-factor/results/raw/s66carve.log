@@ -1,0 +1,12 @@
+cpu 54% 09:34:06
+$ cmd /c start  /b /wait /belownormal target/s66build/release/s66carve.exe C:/DEV/SeriousPlanetData/spike-r3/relief target/s65/out alps,blackforest,highlands,valleyridge
+SPIKE-65: window 2560^2 at 101.8 m; stream power 60 steps, K dt 1, re-route every 5th
+alps amp4-sptb: route and breach 5.3 s, steps 1.2 s
+alps amp6-sptb: route and breach 5.5 s, steps 1.1 s
+blackforest amp4-sptb: route and breach 4.9 s, steps 1.0 s
+blackforest amp6-sptb: route and breach 4.9 s, steps 1.0 s
+highlands amp4-sptb: route and breach 4.6 s, steps 0.9 s
+highlands amp6-sptb: route and breach 6.0 s, steps 1.0 s
+valleyridge amp4-sptb: route and breach 4.8 s, steps 0.9 s
+valleyridge amp6-sptb: route and breach 4.9 s, steps 1.0 s
+end 09:48:06

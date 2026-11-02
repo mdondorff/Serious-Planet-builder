@@ -1,0 +1,23 @@
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+view 6 ground-1m: 2378 nodes, 2378 compact, tiles built in 0.5 s
+GPU time of the render pass, ms, interleaved A B / B A over 300 frames (A = atlas texture, B = storage buffer):
+  atlas    median 1.888  p10 1.859  p90 1.993  (n 300)
+  buffer   median 1.898  p10 1.865  p90 1.990  (n 300)
+ratio buffer / atlas (medians): 1.005
+CPU time to record and submit, ms:
+  atlas    median 1.109  p10 0.995  p90 1.186  (n 300)
+  buffer   median 1.106  p10 0.994  p90 1.182  (n 300)
+GPU time in alternating blocks of 60 frames:
+  atlas    median 1.930  p10 1.882  p90 1.971  (n 300)
+  buffer   median 1.952  p10 1.900  p90 2.005  (n 300)
+ratio buffer / atlas (medians): 1.011
+
+Upload of 2378 tiles (2378 compact), median of 5 fresh renderers. first = the first upload into fresh blocks (includes the driver's / wgpu's
+first-touch initialisation of the block), warm = the same tiles written again into the same slots. calls = frame-thread time in the
+upload calls, wall = calls plus an empty submission and waiting until the queue is idle:
+  per slot, contiguous     atlas   first: calls    15.51 wall     24.18 ms | warm: calls   15.09 wall    23.90 ms = 10.05 us/tile (4756 write calls, 21021520 bytes)
+  per slot, contiguous     buffer  first: calls    14.57 wall     16.33 ms | warm: calls   14.39 wall    16.01 ms = 6.73 us/tile (4756 write calls, 21021520 bytes)
+  batched, contiguous      atlas   first: calls    19.16 wall     19.99 ms | warm: calls   10.47 wall    11.28 ms = 4.74 us/tile (21 write calls, 21021520 bytes)
+  batched, contiguous      buffer  first: calls    23.03 wall     23.32 ms | warm: calls   11.08 wall    11.40 ms = 4.79 us/tile (2 write calls, 21021520 bytes)
+  batched, every 3rd slot  atlas   first: calls    26.49 wall     31.82 ms | warm: calls   17.53 wall    23.02 ms = 9.68 us/tile (4756 write calls, 21021520 bytes)
+  batched, every 3rd slot  buffer  first: calls    25.49 wall     27.25 ms | warm: calls   16.16 wall    17.81 ms = 7.49 us/tile (4756 write calls, 21021520 bytes)

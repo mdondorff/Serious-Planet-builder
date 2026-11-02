@@ -1,0 +1,11 @@
+thread 'main' (12920) panicked at crates\app\src\coupledworld.rs:353:14:
+spawn the coupled run's thread: Os { code: 5, kind: PermissionDenied, message: "Zugriff verweigert" }
+xtask: `target/release/planet.exe test-render --perf --scene anet-chunk --adapter hardware --store C:/DEV/SeriousPlanetData/global16384 --global-res 16384 --out target/spike58/anet-chunk-load-1.json --machine-ready` failed with exit code: 0xc0000005
+thread 'main' (19348) panicked at crates\app\src\coupledworld.rs:353:14:
+spawn the coupled run's thread: Os { code: 5, kind: PermissionDenied, message: "Zugriff verweigert" }
+xtask: `target/release/planet.exe test-render --perf --scene anet-chunk --adapter hardware --store C:/DEV/SeriousPlanetData/global16384 --global-res 16384 --out target/spike58/anet-chunk-load-3.json --machine-ready` failed with exit code: 0xc0000005
+xtask: `target/release/planet.exe test-render --perf --scene preflight --adapter hardware --out target/spike58/preflight-load-2 --machine-ready` failed with exit code: 0xc0000005
+xtask: `target/release/planet.exe test-render --perf --scene preflight --adapter hardware --out target/spike58/preflight-load-3 --machine-ready` failed with exit code: 0xc0000005
+xtask: `target/release/planet.exe test-render --perf --scene shadow-cost --adapter hardware --store C:/DEV/SeriousPlanetData/global16384 --global-res 16384 --poses target/spike58/pose.toml --out-dir target/spike58/shadow-cost-load-1 --machine-ready` failed with exit code: 0xc0000005
+300m-sunset: terrain pass 2.903 ms; shadows 0.430 ms, material map 1.095 ms, together 1.485 ms (runtime off: without shadows 2.538, without material 1.912, without both 1.590; compiled out: 2.473, 1.808, 1.418; spread across rounds: 0.014, 0.012, 0.004, 0.004)
+300m-sunset: terrain pass 2.906 ms; shadows 0.426 ms, material map 1.091 ms, together 1.483 ms (runtime off: without shadows 2.540, without material 1.915, without both 1.592; compiled out: 2.480, 1.816, 1.423; spread across rounds: 0.011, 0.006, 0.006, 0.003)

@@ -1,0 +1,7 @@
+#!/bin/bash
+# SPIKE-81: the derived classes at their re-matched scorecard sites (branch spike/m9-plains, S80 block with S80_NCH=4: delta, k, floor, carve).
+cd C:/DEV/Serious-Planet-Builder/.claude/worktrees/sonnet-spikes-36fc88
+R=spikes/m9-class-drivers/results/raw
+echo "=== s81 $(date +%H:%M:%S)"
+S80_DIR=target/s81/r S80_NCH=4 S80_FIELDS=target/s81/s81-fields.f32 cargo xtask heavy cmd //c start "" //b //wait //belownormal target/release/examples/terrain_score.exe --sites $R/sites-derived.toml 2>&1
+echo "=== done $(date +%H:%M:%S)"

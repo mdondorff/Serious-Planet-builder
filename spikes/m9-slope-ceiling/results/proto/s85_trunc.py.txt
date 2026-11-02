@@ -1,0 +1,19 @@
+"""SPIKE-85: the real slope p50 at 30 m (whole tile and central 0.5 degree, as criterion 1 uses) counting only cells at or below each ceiling."""
+import json, math, re, sys
+import numpy as np
+from glo30 import read_tile
+from s85_slope import SITES, resample, slope_deg
+out = {}
+for key in SITES:
+    m = re.match(r'([NS])(\d+)([EW])(\d+)', key); lat = int(m.group(2))
+    a, sc, _, _ = read_tile('%s/Copernicus_DSM_COG_10_%s%02d_00_%s%03d_00_DEM.tif' % (sys.argv[1], m.group(1), lat, m.group(3), int(m.group(4))))
+    dy0 = sc[1] * 111195.0; dx0 = sc[0] * 111195.0 * math.cos(math.radians(lat + 0.5))
+    sl = slope_deg(*resample(a.astype(np.float64), dx0, dy0, 30))
+    ny, nx = sl.shape; c = sl[ny // 4:3 * ny // 4, nx // 4:3 * nx // 4]
+    r = {}
+    for name, s in (('tile', sl), ('centre', c)):
+        r[name] = {'p50_all': float(np.median(s)), 'share_above_45': float((s > 45).mean())}
+        for t in (35, 45, 55):
+            r[name]['p50_below_%d' % t] = float(np.median(s[s <= t]))
+    out[key] = r; print(key, json.dumps(r), flush=True)
+json.dump(out, open(sys.argv[2], 'w'), indent=1)

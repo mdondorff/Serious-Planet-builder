@@ -1,0 +1,18 @@
+network build 3.88 s, region 1838736 cells, core 608 x 608
+base: dens 1e5: 0.30, dens 3e5: 0.02, dens 1e6: 0.00, filled>0.5m 0.0%, >5m 0.0%; slope 32 m p50 8.6 p90 19.1 deg, slope 88 m p50 7.8 p90 17.2 deg, relief 1 km p50 158 m, core 905 m
+prod solve (without network) 2.27 s
+prod: dens 1e5: 1.36, dens 3e5: 0.38, dens 1e6: 0.03, filled>0.5m 0.0%, >5m 0.0%; slope 32 m p50 9.0 p90 23.3 deg, slope 88 m p50 8.2 p90 19.8 deg, relief 1 km p50 150 m, core 860 m
+prod: lowering off the corridor p50 12.01 m, p90 39.5 m, max 165 m; over 5 m 79.6%, over 50 m 7.6%
+rr5: solve alone 3.13 s (+ network 3.88 s)
+rr5: dens 1e5: 1.71, dens 3e5: 0.64, dens 1e6: 0.20, filled>0.5m 0.0%, >5m 0.0%; slope 32 m p50 8.9 p90 23.2 deg, slope 88 m p50 8.1 p90 19.5 deg, relief 1 km p50 147 m, core 857 m
+rr5: lowering off the corridor p50 13.46 m, p90 39.2 m, max 165 m; over 5 m 90.2%, over 50 m 7.3%
+  own routing: 4507 core cells off the corridor over 1e5 m2
+rr5lake: solve alone 3.08 s (+ network 3.88 s)
+rr5lake: dens 1e5: 1.71, dens 3e5: 0.64, dens 1e6: 0.20, filled>0.5m 0.0%, >5m 0.0%; slope 32 m p50 8.9 p90 23.2 deg, slope 88 m p50 8.1 p90 19.5 deg, relief 1 km p50 147 m, core 857 m
+rr5lake: lowering off the corridor p50 13.46 m, p90 39.2 m, max 165 m; over 5 m 90.2%, over 50 m 7.3%
+  own routing: 4507 core cells off the corridor over 1e5 m2
+rr10: solve alone 1.97 s (+ network 3.88 s)
+rr10: dens 1e5: 1.66, dens 3e5: 0.59, dens 1e6: 0.07, filled>0.5m 0.0%, >5m 0.0%; slope 32 m p50 8.9 p90 23.2 deg, slope 88 m p50 8.1 p90 19.6 deg, relief 1 km p50 154 m, core 858 m
+rr10: lowering off the corridor p50 13.24 m, p90 39.2 m, max 165 m; over 5 m 88.9%, over 50 m 7.3%
+  own routing: 3890 core cells off the corridor over 1e5 m2
+sheet C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/3116f58f-e80d-45b8-9131-e11d4834ea4d/scratchpad/trib\hillshade_37.718_134.029.png (1200 x 800), panels in order: base, prod, rr5, rr5lake, rr10

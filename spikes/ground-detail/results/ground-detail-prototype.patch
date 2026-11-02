@@ -1,0 +1,468 @@
+diff --git a/crates/app/src/litperf.rs b/crates/app/src/litperf.rs
+index 5eda6bff..2ce18f7c 100644
+--- a/crates/app/src/litperf.rs
++++ b/crates/app/src/litperf.rs
+@@ -527,6 +527,7 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
+     crate::streamperf::check_options(o)?;
+     let from_store = o.store.is_some();
+     let world = crate::streamperf::open_world(o, false)?.bounding_water();
++    ground_crater(&world)?;
+     if !world.has_water() {
+         return Err("the lit scenes measure the water pass, but this world has no ocean channel (a store made before GLOBAL_VERSION 4?): regenerate it with `generate --global-dir`".into());
+     }
+@@ -833,6 +834,9 @@ pub fn capture_flights(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Re
+     let default = setup.look.water.shore_filter;
+     let first = views[0].cameras[0];
+     let mut r = new_renderer(&rig, &setup, first)?;
++    if std::env::var_os("CAPTURE_GROUND").is_some() {
++        return capture_ground(&rig, &mut setup, &mut r, &world, &is_sea, &dir, out);
++    }
+     for view in views.iter().filter(|v| v.kind == ViewKind::Flight) {
+         for filter in [default, if default == 0.0 { 1.0 } else { 0.0 }] {
+             setup.look.water.shore_filter = filter;
+@@ -862,6 +866,142 @@ pub fn capture_flights(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Re
+     writeln!(out, "wrote {} (frames of each flight and shore filter, and capture.txt)", dir.display()).map_err(err)
+ }
+ 
++
++/// SPIKE G1: `GROUND_CRATER=lat,lon,reach_m,depth_m` puts a crater into the world (a steep slope to look at: the bake has none at 300 m).
++fn ground_crater(world: &WorldTerrain) -> Result<(), String> {
++    let Ok(v) = std::env::var("GROUND_CRATER") else { return Ok(()) };
++    let p: Vec<f64> = v.split(',').filter_map(|x| x.parse().ok()).collect();
++    if p.len() != 4 {
++        return Err("GROUND_CRATER=lat,lon,reach_m,depth_m".into());
++    }
++    let (la, lo) = (p[0].to_radians(), p[1].to_radians());
++    let dir = planet_core::Vec3::new(la.cos() * lo.cos(), la.cos() * lo.sin(), la.sin());
++    let mut def = (*world.definition()).clone();
++    let spec = planet_world_def::ItemSpec {
++        id: 1,
++        layer: "stamps".into(),
++        priority: 0,
++        dir,
++        content_hash: 0,
++        reach_m: p[2],
++        max_delta_m: p[3] * 1.5,
++        stamp: None,
++    }
++    .with_stamp(planet_world_def::stamp::Stamp::new(planet_world_def::stamp::StampKind::Crater, [p[3], 0.0, 0.0]));
++    def.put_item_spec(planet_world_def::BodyId::PLANET, spec).map_err(|e| e.to_string())?;
++    world.set_definition(std::sync::Arc::new(def))
++}
++
++/// SPIKE G1 (spike branch only): `CAPTURE_GROUND=1 test-render --scene capture-flights ...`: stills at the ground: for `GROUND_SITES` (6) land
++/// sites spread over the sphere and flat enough, eye heights 1.8 m, 0.5 m (crouched) and 20 m, written to `dir` as PNG with the tag
++/// `GROUND_TAG`; the near plane is `GROUND_NEAR_M` (default 0.1, the viewer's). The first still is also timed (100 frames).
++fn capture_ground(
++    rig: &Rig<'_>,
++    setup: &mut LitSetup,
++    r: &mut TerrainRenderer,
++    world: &WorldTerrain,
++    is_sea: &dyn Fn(planet_core::Vec3) -> bool,
++    dir: &std::path::Path,
++    out: &mut dyn Write,
++) -> Result<(), String> {
++    let env = |k: &str, d: f64| std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d);
++    let near = env("GROUND_NEAR_M", 0.1);
++    let n_sites = env("GROUND_SITES", 6.0) as usize;
++    let tag = std::env::var("GROUND_TAG").unwrap_or_else(|_| "plain".into());
++    let aspect = f64::from(rig.size.0) / f64::from(rig.size.1);
++    let radius = rig.radius_m;
++    let level = setup.level_m;
++    let flat = |d: planet_core::Vec3| -> f64 {
++        // The steepest height change over 300 m in four directions, metres per 300 m.
++        let helper = if d.z.abs() < 0.9 { planet_core::Vec3::new(0.0, 0.0, 1.0) } else { planet_core::Vec3::new(1.0, 0.0, 0.0) };
++        let east = d.cross(helper).normalized();
++        let north = d.cross(east).normalized();
++        let h0 = rig.field.height(d);
++        [east, north, east * -1.0, north * -1.0]
++            .iter()
++            .map(|v| (rig.field.height((d + *v * (300.0 / radius)).normalized()) - h0).abs())
++            .fold(0.0, f64::max)
++    };
++    let mut sites: Vec<planet_core::Vec3> = Vec::new();
++    let n = 20000usize;
++    for i in 0..n {
++        if sites.len() >= n_sites {
++            break;
++        }
++        let z = 1.0 - 2.0 * (i as f64 + 0.5) / n as f64;
++        let rr = (1.0 - z * z).sqrt();
++        let a = std::f64::consts::PI * (3.0 - 5f64.sqrt()) * i as f64;
++        let d = planet_core::Vec3::new(rr * a.cos(), rr * a.sin(), z);
++        if is_sea(d) || rig.field.height(d) < level + 60.0 || flat(d) > env("GROUND_FLAT_MAX", 25.0) || flat(d) < env("GROUND_FLAT_MIN", 0.0) {
++            continue;
++        }
++        if sites.iter().any(|s| s.dot(d) > 0.9) {
++            continue;
++        }
++        sites.push(d);
++    }
++    if let Ok(v) = std::env::var("GROUND_CRATER") {
++        // The crater's slope: a site on the inner slope half way to the rim, looking across.
++        let p: Vec<f64> = v.split(',').filter_map(|x| x.parse().ok()).collect();
++        let (la, lo) = (p[0].to_radians(), p[1].to_radians());
++        let c = planet_core::Vec3::new(la.cos() * lo.cos(), la.cos() * lo.sin(), la.sin());
++        let east = c.cross(planet_core::Vec3::new(0.0, 0.0, 1.0)).normalized();
++        sites.clear();
++        sites.push((c + east * (0.6 * p[2] / radius)).normalized());
++    }
++    writeln!(out, "capture-ground: tag {tag}, near plane {near} m, {} sites of {n_sites} asked", sites.len()).map_err(err)?;
++    let mut cache = SelectionCache::new();
++    let mut first_timed = false;
++    for (si, d) in sites.iter().enumerate() {
++        let helper = planet_core::Vec3::new(0.0, 0.0, 1.0);
++        let east = if std::env::var_os("GROUND_CRATER").is_some() { d.cross(helper).normalized() * -1.0 } else { d.cross(helper).normalized() };
++        let ground = rig.field.height(*d);
++        let (lat, lon) = (d.z.asin().to_degrees(), d.y.atan2(d.x).to_degrees());
++        let poses: Vec<(f64, f64)> = std::env::var("GROUND_POSES")
++            .ok()
++            .map(|v| v.split(',').filter_map(|p| p.split_once(':').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?)))).collect())
++            .unwrap_or_else(|| vec![(1.8, 6.0), (0.5, 6.0), (20.0, 12.0)]);
++        for (eye, pitch_deg) in poses {
++            let pos = planet_core::PlanetFixed(*d * (radius + ground + eye));
++            let camera = Camera::at_surface_point(pos, east, f64::to_radians(pitch_deg), f64::to_radians(60.0), aspect, near);
++            let plan = planet_frame::plan_terrain_cached(&request(rig, camera), rig.field, &mut cache).map_err(|e| e.to_string())?;
++            crate::skeleton::upload_missing_meshes(rig.ctx, Some(rig.world), r, &plan, rig.field, radius, rig.cells)?;
++            let lit = setup.plan(world, rig.field, &plan, WATER_T0, 1.0 / 60.0, true)?;
++            for _ in 0..3 {
++                r.render(rig.ctx, &lit, false).map_err(|e| e.to_string())?;
++            }
++            let image = r.read_color(rig.ctx);
++            let name = format!("site{si}_lat{lat:.2}_lon{lon:.2}_eye{eye}_{tag}.png");
++            image.write_png(&dir.join(&name)).map_err(|e| format!("writing {name}: {e}"))?;
++            writeln!(out, "  {name}: ground {ground:.1} m, {} nodes, finest level {}", plan.nodes.len(), plan.nodes.iter().map(|x| x.level).max().unwrap_or(0))
++                .map_err(err)?;
++            if !first_timed {
++                first_timed = true;
++                let mut gpu = Vec::new();
++                let mut total = Vec::new();
++                for _ in 0..100 {
++                    let (t, _) = r.render(rig.ctx, &lit, true).map_err(|e| e.to_string())?;
++                    gpu.push(t.gpu_ms.unwrap_or(f64::NAN));
++                    total.push(t.total_ms);
++                }
++                gpu.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
++                total.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
++                writeln!(
++                    out,
++                    "  timing (site {si}, eye 1.8 m, {}x{}, 100 frames, indicative): gpu median {:.3} ms (p95 {:.3}), wall median {:.3} ms",
++                    rig.size.0,
++                    rig.size.1,
++                    gpu[50],
++                    gpu[95],
++                    total[50]
++                )
++                .map_err(err)?;
++            }
++        }
++    }
++    Ok(())
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+diff --git a/crates/frame/src/draw.rs b/crates/frame/src/draw.rs
+index 56da40db..74034d03 100644
+--- a/crates/frame/src/draw.rs
++++ b/crates/frame/src/draw.rs
+@@ -14,7 +14,10 @@ pub const DRAW_RECORD_BYTES: u64 = 20;
+ 
+ /// Bytes of one node record in the storage buffer the shader indexes with the instance index (origin, colour, morph interval
+ /// nine grid phases and the up vector with the inverse radius of the tile origin, 16-byte aligned).
+-pub const NODE_RECORD_BYTES: u64 = 48 + 16 * 9 + 16;
++pub const NODE_RECORD_BYTES: u64 = 48 + 16 * 9 + 16 + GROUND_DETAIL_BYTES;
++
++/// SPIKE G1: the ground detail block of a node record (four lattices: integer cell of the tile origin, fraction and cells per metre).
++pub const GROUND_DETAIL_BYTES: u64 = 128;
+ 
+ /// Bytes written per frame for `nodes` planned nodes on the indirect path: node records plus argument records.
+ pub fn indirect_frame_bytes(nodes: usize) -> u64 {
+diff --git a/crates/render/src/atmosphere.rs b/crates/render/src/atmosphere.rs
+index f6307491..55b83c0a 100644
+--- a/crates/render/src/atmosphere.rs
++++ b/crates/render/src/atmosphere.rs
+@@ -740,7 +740,9 @@ fn fs_lit_atmo_view(in: VsOut) -> vec4<f32> {
+     let sun = vec3<f32>(bitcast<f32>(g.mode.y), bitcast<f32>(g.mode.z), bitcast<f32>(g.mode.w));
+     let up = up_at(nodes[in.node_index].up, in.local);
+     let climate = tile_climate(in);
+-    var rgb = atm_shade_lit(g.mode.x, g.albedo, in.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), in.height, sun, g.range.z);
++    let nrm0 = normalize(in.normal);
++    let gd = ground_detail(in.node_index, in.local, nrm0, g.albedo, climate.y, clamp(dot(nrm0, up), 0.0, 1.0));
++    var rgb = atm_shade_lit(g.mode.x, g.albedo, gd.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), in.height, sun, g.range.z) * gd.mul;
+     if (g.extra.y > 3.5) {
+         rgb = stale_tint(in, rgb, g.range.z);
+     } else if (g.extra.y > 2.5) {
+diff --git a/crates/render/src/terrain.rs b/crates/render/src/terrain.rs
+index a25a1636..3b6ff9de 100644
+--- a/crates/render/src/terrain.rs
++++ b/crates/render/src/terrain.rs
+@@ -18,7 +18,7 @@ pub const GRID_SPACINGS_M: [f64; 9] = [0.01, 0.1, 1.0, 10.0, 100.0, 1.0e3, 1.0e4
+ 
+ /// Bytes of one node record (origin, colour, morph interval, one grid phase per decade) in the storage buffer the shader
+ /// indexes with the instance index.
+-pub(crate) const NODE_BYTES: u64 = 48 + 16 * GRID_SPACINGS_M.len() as u64 + 16;
++pub(crate) const NODE_BYTES: u64 = 48 + 16 * GRID_SPACINGS_M.len() as u64 + 16 + planet_frame::draw::GROUND_DETAIL_BYTES;
+ const _: () = assert!(NODE_BYTES == planet_frame::draw::NODE_RECORD_BYTES, "the frame crate counts the same record size");
+ 
+ /// The relief grid's anchors for a tile origin (planet-fixed, f64): for each decade the fractional part of
+@@ -75,6 +75,9 @@ struct Node {
+     // The unit up vector of the tile origin (planet-fixed axes) and the inverse of the origin's distance from the planet centre:
+     // up at a point `local` metres from the origin is normalize(xyz + local * w), formed from tile-local numbers only (CON-11).
+     up: vec4<f32>,
++    // SPIKE G1: four detail lattices (cell of the tile origin as integers, w of the first: 1 when the detail is on; fraction and cells per metre).
++    dbase: array<vec4<i32>, 4>,
++    dfrac: array<vec4<f32>, 4>,
+ };
+ 
+ @group(0) @binding(0) var<uniform> g: Globals;
+@@ -244,6 +247,108 @@ fn fs_view(in: VsOut) -> vec4<f32> {
+     return vec4<f32>(v * k, v * k, v * k, 1.0);
+ }
+ 
++
++// SPIKE G1 (spike branch only): the ground detail term of the lit path. Four absolute noise lattices (cells of 2 m, 0.5 m, 12.5 cm and
++// 3 cm) anchored to the world through the node record (integer cell of the tile origin from f64 on the CPU, fraction and cells per
++// metre), so neighbouring tiles and LOD levels read the same noise and no planet-radius value reaches the shader (CON-11). Value noise
++// with analytic gradients; per material (rock, sand, grass by the albedo's own slope and precipitation weights) it modulates the albedo
++// and tilts the shading normal. Fades with the pixel footprint (an octave resolves while a pixel covers under 0.4 of a cell).
++fn gd_hash(c: vec3<i32>, k: u32) -> f32 {
++    var h = (bitcast<u32>(c.x) * 0x8da6b343u) ^ (bitcast<u32>(c.y) * 0xd8163841u) ^ (bitcast<u32>(c.z) * 0xcb1ab31fu) ^ ((k + 1u) * 0x9e3779b1u);
++    h = h ^ (h >> 16u);
++    h = h * 0x85ebca6bu;
++    h = h ^ (h >> 13u);
++    h = h * 0xc2b2ae35u;
++    h = h ^ (h >> 16u);
++    return f32(h >> 8u) * 1.1920929e-7 - 1.0;
++}
++
++// Smoothstep value noise: xyz gradient with respect to q (lattice units), w value in [-1, 1].
++fn gd_noise(base: vec3<i32>, q: vec3<f32>, k: u32) -> vec4<f32> {
++    let fl = floor(q);
++    let u = q - fl;
++    let c = base + vec3<i32>(fl);
++    let t = u * u * (3.0 - 2.0 * u);
++    let dt = 6.0 * u * (1.0 - u);
++    let c000 = gd_hash(c, k);
++    let c100 = gd_hash(c + vec3<i32>(1, 0, 0), k);
++    let c010 = gd_hash(c + vec3<i32>(0, 1, 0), k);
++    let c110 = gd_hash(c + vec3<i32>(1, 1, 0), k);
++    let c001 = gd_hash(c + vec3<i32>(0, 0, 1), k);
++    let c101 = gd_hash(c + vec3<i32>(1, 0, 1), k);
++    let c011 = gd_hash(c + vec3<i32>(0, 1, 1), k);
++    let c111 = gd_hash(c + vec3<i32>(1, 1, 1), k);
++    let x00 = mix(c000, c100, t.x);
++    let x10 = mix(c010, c110, t.x);
++    let x01 = mix(c001, c101, t.x);
++    let x11 = mix(c011, c111, t.x);
++    let value = mix(mix(x00, x10, t.y), mix(x01, x11, t.y), t.z);
++    let gx = dt.x * mix(mix(c100 - c000, c110 - c010, t.y), mix(c101 - c001, c111 - c011, t.y), t.z);
++    let gy = dt.y * mix(mix(c010 - c000, c110 - c100, t.x), mix(c011 - c001, c111 - c101, t.x), t.z);
++    let gz = dt.z * mix(mix(c001 - c000, c101 - c100, t.x), mix(c011 - c010, c111 - c110, t.x), t.y);
++    return vec4<f32>(gx, gy, gz, value);
++}
++
++// The detail of a fragment: xyz the albedo multiplier (mean about 1), the normal returned through `n_out`. `tab` is the look's albedo
++// table (its slope and precipitation thresholds decide the material), `p` the precipitation, `cs` the cosine of the slope.
++struct GroundDetail {
++    mul: vec3<f32>,
++    normal: vec3<f32>,
++};
++
++fn ground_detail(node_index: u32, local: vec3<f32>, n: vec3<f32>, tab: array<vec4<f32>, 10>, p: f32, cs: f32) -> GroundDetail {
++    var out: GroundDetail;
++    out.mul = vec3<f32>(1.0);
++    out.normal = n;
++    // The derivative first (uniform control flow): the footprint of a pixel in metres.
++    let foot = max(abs(fwidth(local.x)), max(abs(fwidth(local.y)), abs(fwidth(local.z))));
++    let node = nodes[node_index];
++    if (node.dbase[0].w == 0) {
++        return out;
++    }
++    let wet = smoothstep(tab[0].w, tab[1].w, p);
++    var rock_w = 1.0 - smoothstep(tab[6].w, tab[7].w, cs);
++    var grass_w = wet * (1.0 - rock_w);
++    var sand_w = (1.0 - wet) * (1.0 - rock_w);
++    let forced = node.dbase[1].w;
++    if (forced != 0) {
++        rock_w = select(0.0, 1.0, forced == 1);
++        sand_w = select(0.0, 1.0, forced == 2);
++        grass_w = select(0.0, 1.0, forced == 3);
++    }
++    var val = array<f32, 4>(0.0, 0.0, 0.0, 0.0);
++    var grad = array<vec3<f32>, 4>(vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0));
++    var fade = array<f32, 4>(0.0, 0.0, 0.0, 0.0);
++    for (var k = 0u; k < 4u; k = k + 1u) {
++        let inv = node.dfrac[k].w;
++        fade[k] = 1.0 - smoothstep(0.1, 0.4, foot * inv);
++        if (fade[k] > 0.0) {
++            let q = node.dfrac[k].xyz + local * inv;
++            var base = node.dbase[k].xyz;
++            let nz = gd_noise(base, q, k);
++            val[k] = nz.w * fade[k];
++            // The height of an octave is its amplitude times the cell size, so the slope is the lattice gradient times the amplitude.
++            grad[k] = nz.xyz * fade[k];
++        }
++    }
++    // Rock: cracked ridges (the ridged value of the 2 m and 0.5 m octaves) and a mottled albedo, strong normals.
++    let r_ridge = (1.0 - abs(val[0])) * (1.0 - abs(val[1]));
++    let rock_mul = (0.78 + 0.30 * val[1] + 0.18 * val[2] - 0.45 * smoothstep(0.80, 1.0, 1.0 - abs(val[1])) * fade[1]) * vec3<f32>(1.0, 0.98, 0.95);
++    let rock_g = 0.55 * grad[1] + 0.45 * grad[2] + 0.30 * grad[3];
++    // Sand: fine grain and low ripples.
++    let sand_mul = (1.0 + 0.10 * val[3] + 0.06 * val[2]) * vec3<f32>(1.0, 1.0, 0.98);
++    let sand_g = 0.12 * grad[0] + 0.10 * grad[2] + 0.18 * grad[3];
++    // Grass: blade-scale patches, darker and greener, strong small-scale normals.
++    let grass_t = 0.5 + 0.5 * val[2];
++    let grass_mul = mix(vec3<f32>(0.62, 0.72, 0.52), vec3<f32>(1.12, 1.18, 0.95), grass_t) * (1.0 + 0.18 * val[3]);
++    let grass_g = 0.35 * grad[3] + 0.20 * grad[2];
++    let wsum = max(rock_w + sand_w + grass_w, 1e-4);
++    out.mul = (rock_mul * rock_w + sand_mul * sand_w + grass_mul * grass_w) / wsum;
++    let g = (rock_g * rock_w + sand_g * sand_w + grass_g * grass_w) / wsum;
++    out.normal = normalize(n - (g - dot(g, n) * n));
++    return out;
++}
++
+ // The albedo of the surface (ADR 0039 point 3, REND-026): ground from the climate (desert, grass, forest, tundra), bare rock on
+ // steep ground, snow by temperature and slope, a beach band above the water and the seabed below it. `t` is the temperature in
+ // degrees C, `p` the precipitation in mm, `cs` the cosine of the slope and `h` the height above the water level. The same function
+@@ -340,7 +445,9 @@ fn fs_lit_view(in: VsOut) -> vec4<f32> {
+     let sun = vec3<f32>(bitcast<f32>(g.mode.y), bitcast<f32>(g.mode.z), bitcast<f32>(g.mode.w));
+     let up = up_at(nodes[in.node_index].up, in.local);
+     let climate = tile_climate(in);
+-    var rgb = shade_lit(g.mode.x, g.albedo, in.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), sun, g.range.z);
++    let nrm0 = normalize(in.normal);
++    let gd = ground_detail(in.node_index, in.local, nrm0, g.albedo, climate.y, clamp(dot(nrm0, up), 0.0, 1.0));
++    var rgb = shade_lit(g.mode.x, g.albedo, gd.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), sun, g.range.z) * gd.mul;
+     if (g.extra.y > 3.5) {
+         rgb = stale_tint(in, rgb, g.range.z);
+     } else if (g.extra.y > 2.5) {
+@@ -405,6 +512,23 @@ pub(crate) fn view_index(v: TerrainView) -> u32 {
+     TerrainView::ALL.iter().position(|x| *x == v).expect("known view") as u32
+ }
+ 
++/// SPIKE G1: the ground detail is on when `GROUND_DETAIL` is set in the environment (read once).
++fn ground_detail_on() -> bool {
++    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
++    *ON.get_or_init(|| std::env::var_os("GROUND_DETAIL").is_some())
++}
++
++/// SPIKE G1: `GROUND_MATERIAL=rock|sand|grass` forces the material weights of the detail (for the material sheet): 1, 2, 3; 0 none.
++fn ground_material_forced() -> i32 {
++    static M: std::sync::OnceLock<i32> = std::sync::OnceLock::new();
++    *M.get_or_init(|| match std::env::var("GROUND_MATERIAL").as_deref() {
++        Ok("rock") => 1,
++        Ok("sand") => 2,
++        Ok("grass") => 3,
++        _ => 0,
++    })
++}
++
+ /// The node records of a plan, `NODE_BYTES` each (at least one record's worth, zero-filled when the plan has no nodes), as the shader
+ /// indexes them with the instance index.
+ pub(crate) fn node_record_bytes(plan: &TerrainPlan) -> Vec<u8> {
+@@ -442,7 +566,23 @@ pub(crate) fn node_record_bytes(plan: &TerrainPlan) -> Vec<u8> {
+         let o = d.origin.0;
+         let len = (o.x * o.x + o.y * o.y + o.z * o.z).sqrt();
+         floats.extend([(o.x / len) as f32, (o.y / len) as f32, (o.z / len) as f32, (1.0 / len) as f32]);
+-        let b = f32_bytes(&floats);
++        let mut b = f32_bytes(&floats);
++        // SPIKE G1: the detail lattices (scales 2 m, 0.5 m, 12.5 cm, 3 cm), decided in f64 (CON-11): the integer cell of the tile origin
++        // and its fraction, so the noise is anchored to the world and no planet-radius value reaches the shader.
++        let on = ground_detail_on();
++        let scales = [2.0f64, 0.5, 0.125, 0.03125];
++        let mut cells = Vec::new();
++        let mut fracs = Vec::new();
++        for (k, s) in scales.iter().enumerate() {
++            let c = [o.x, o.y, o.z].map(|v| (v / s).floor());
++            let f = [o.x, o.y, o.z].map(|v| ((v / s) - (v / s).floor()) as f32);
++            cells.extend([c[0] as i64 as i32, c[1] as i64 as i32, c[2] as i64 as i32, if k == 0 && on { 1 } else if k == 1 { ground_material_forced() } else { 0 }]);
++            fracs.extend([f[0].min(0.999_999), f[1].min(0.999_999), f[2].min(0.999_999), (1.0 / s) as f32]);
++        }
++        for c in cells {
++            b.extend(c.to_le_bytes());
++        }
++        b.extend(f32_bytes(&fracs));
+         nodes[i * NODE_BYTES as usize..(i + 1) * NODE_BYTES as usize].copy_from_slice(&b);
+     }
+     nodes
+diff --git a/docs/adr/0075-documentation-budget.md b/docs/adr/0075-documentation-budget.md
+deleted file mode 100644
+index 1b67916f..00000000
+--- a/docs/adr/0075-documentation-budget.md
++++ /dev/null
+@@ -1,30 +0,0 @@
+-# 0075 Documentation budget: the hot files stay small and current
+-Status: accepted (opus-planner, 2026-10-21; budget approved by the owner)
+-Date: 2026-10-21
+-Source: owner's approval of the documentation budget (2026-10-21)
+-
+-## Context
+-- Markdown is 4.2 MB against 6.5 MB of Rust on main; the OpenSpec change archive is 2.1 MB.
+-- Hot files read by every session: `status.md` 42 KB, `learnings.md` 107 KB, `spikes.md` 38 KB.
+-- ADR 0055 keeps archived changes (proposal and spec deltas); nothing reads them, and the current specs hold the rules.
+-- Documentation is a means to maintainable software, not an output.
+-
+-## Decision
+-1. **Hot-file caps**, checked by `cargo xtask spec-lint`:
+-   - `docs/status.md` at most 15 KB;
+-   - `docs/learnings.md` at most 20 KB;
+-   - `docs/spikes.md` at most 10 KB, as an index (one row per spike, details in the spike's results file);
+-   - `CLAUDE.md` and `docs/constitution.md` at most their size when this ADR is accepted.
+-2. **Archived OpenSpec changes are deleted at milestone close.** The specs hold the rules; git holds the history. This amends ADR 0055 point 5 (keep `proposal.md` and spec deltas).
+-3. **A learning has one of three fates:** promoted (a spec line, a `CLAUDE.md` line or a test that cites it), kept while still active and surprising, or moved to `docs/archive/<M>/learnings.md` with its milestone.
+-4. **A Tracked entry in `status.md` has at most 3 lines.** Details live in the change or spike it names. A finished entry is deleted.
+-5. **Each milestone report states the hot set's size in tokens** (`status.md`, `learnings.md`, `spikes.md`, `CLAUDE.md`, the constitution).
+-
+-## Consequences
+-- A session's startup reading is bounded and current; history is found with `git log`.
+-- Housekeeping must promote, keep or archive learnings and trim status at each milestone close, or spec-lint fails.
+-- Existing archived changes are deleted once; links into them are fixed in the same change.
+-- Cap values change only by a new ADR.
+-
+-## Licences of adopted code or techniques
+-None.
+diff --git a/docs/adr/README.md b/docs/adr/README.md
+index 8bb182b5..ec8e3ffe 100644
+--- a/docs/adr/README.md
++++ b/docs/adr/README.md
+@@ -84,4 +84,3 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
+ | 0072 | [Edit visible: the drawn tiles are exact, drawn tiles refresh first, stale refreshes are pre-empted](0072-edit-visible-drawn-tiles-exact-and-stale-refreshes-are-pre-empted.md) | accepted | reads the M6 criterion; extends STRM-026 |
+ | 0073 | [Normals from the tile's height lattice](0073-normals-from-the-tile-height-lattice.md) | accepted | amends GEN-019 and GEN-010; extends 0033 point 4 |
+ | 0074 | [A tile too steep to morph is not refined; the plan degrades locally](0074-a-tile-too-steep-to-morph-is-not-refined.md) | accepted | amends LOD-008; extends 0016 and 0014 |
+-| 0075 | [Documentation budget: the hot files stay small and current](0075-documentation-budget.md) | accepted (opus-planner; owner approved) | amends 0055 point 5 |
+diff --git a/docs/log.d/2026-10-21-m6-gate-condition.md b/docs/log.d/2026-10-21-m6-gate-condition.md
+deleted file mode 100644
+index f9339742..00000000
+--- a/docs/log.d/2026-10-21-m6-gate-condition.md
++++ /dev/null
+@@ -1 +0,0 @@
+-- 2026-10-21 **M6 gate condition (owner):** M6 closes without the owner's retest once the ADR 0074 plan-job cost is back within +10 %; then housekeeping and M7.
+diff --git a/docs/milestones/M6-report.md b/docs/milestones/M6-report.md
+index ed8eafa7..574d3d11 100644
+--- a/docs/milestones/M6-report.md
++++ b/docs/milestones/M6-report.md
+@@ -2,9 +2,7 @@
+ 
+ **DRAFT pending the owner's retest of the P1 fixes.** Drafted by sonnet-explorer for opus-planner from `docs/briefings/m6-gate-evidence.md` (sonnet-crusader, 2026-10-20), `docs/briefings/m6-owner-test-plan.md`, `docs/status.md`, the log fragments of 2026-10-19 to 2026-10-21 and the perf windows 18 to 21. Nothing is archived. "Not checked" marks a figure this draft did not re-derive. The verdict, the owner's decisions and the process review are the planner's.
+ 
+-## Verdict (opus-planner): pending one condition
+-
+-**Owner, 2026-10-21:** M6 closes without the owner's retest once the ADR 0074 plan-job cost is back within +10 % (window 22 measured +125 %). The exit criteria are met (windows 20 and 21, the undo and merge tests), the owner's hands-on review took place on 2026-10-20, and its P1 findings are fixed and verified by tests and the item sweep (SPIKE-26, 0 refused stops with #505).
++## Verdict (opus-planner): to be written after the owner's retest
+ 
+ State at drafting:
+ 
+diff --git a/docs/status.md b/docs/status.md
+index e18de6c4..1b3077b2 100644
+--- a/docs/status.md
++++ b/docs/status.md
+@@ -51,7 +51,7 @@ Dormant (no near trigger; not asked now):
+ 
+ 
+ ## M6 iteration after the owner's test (owner, 2026-10-20; notes in `docs/briefings/m6-owner-test-plan.md`)
+-**Gate condition (owner, 2026-10-21): M6 closes without the owner's retest once the ADR 0074 plan-job cost is back within +10 % (window 22: +125 %), measured in a perf window. The retest list stays as optional checks after the close; P1-3 and keys-after-G stay tracked.** The owner's first ask: stability.
++The gate waits for P1. The owner's first ask: stability.
+ 
+ | # | Item | Owner's note | Lane |
+ |---|---|---|---|

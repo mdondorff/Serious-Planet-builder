@@ -1,0 +1,118 @@
+diff --git a/crates/app/src/globalperf.rs b/crates/app/src/globalperf.rs
+index 5d7f895a..97a66537 100644
+--- a/crates/app/src/globalperf.rs
++++ b/crates/app/src/globalperf.rs
+@@ -616,6 +616,78 @@ mod tests {
+         }
+     }
+ 
++    // spec: GEN-052
++    /// SPIKE-54: what extra fine crease octaves (`PLANET_EXTRA_OCTAVES`, read once per process, wavelengths 6 m down) add to a tile build at the finest levels. Tiles of
++    /// level 22, 20 and 18 at the site and their 8 neighbours (27 tiles), cells 32, no chunk stage: wall time per tile of the mesh path (`tile_mesh_field`, the batch
++    /// height call as the streamer runs it) and of 33 x 33 serial height reads, median and mean of `PLANET_G1_REPEATS` (default 5) rounds after one warm-up; the
++    /// heights of every tile are written as raw f64 to `target/spike54/heights_N.bin` so runs can be compared bit for bit. `PLANET_ANET_STORE=DIR PLANET_ANET_RES=N
++    /// PLANET_EXTRA_OCTAVES=K cargo test -p planet --release --lib g1_cost_report -- --ignored --nocapture`. Read only.
++    #[test]
++    #[ignore = "a measurement: it times tile builds"]
++    fn g1_cost_report() {
++        use planet_core::cube::TangentWarp;
++        let mut out = std::io::stdout();
++        let res = std::env::var("PLANET_ANET_RES").ok().and_then(|r| r.parse().ok()).unwrap_or(256);
++        let repeats: usize = std::env::var("PLANET_G1_REPEATS").ok().and_then(|r| r.parse().ok()).unwrap_or(5);
++        let extra: u32 = std::env::var("PLANET_EXTRA_OCTAVES").ok().and_then(|r| r.parse().ok()).unwrap_or(0);
++        let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
++        let (world, _maps, tile) = anet_scene(res, 11, store, &mut out).unwrap();
++        let map = &TangentWarp;
++        let site = tile.center_direction(map);
++        let field = world.field().unwrap();
++        let cells = 32u32;
++        let mut dump: Vec<u8> = Vec::new();
++        for level in [22u8, 20, 18] {
++            let centre = planet_core::TileId::from_direction(map, site, level);
++            let mut ids = vec![centre];
++            ids.extend(centre.neighbors8());
++            // Warm-up: caches of the bake blocks and the lattice.
++            for id in &ids {
++                std::hint::black_box(planet_generators::mesh::tile_mesh_field(&*field, map, *id, cells, world.radius_m()));
++            }
++            let (mut mesh_ms, mut read_ms) = (Vec::<f64>::new(), Vec::<f64>::new());
++            for _ in 0..repeats {
++                for id in &ids {
++                    let t = std::time::Instant::now();
++                    std::hint::black_box(planet_generators::mesh::tile_mesh_field(&*field, map, *id, cells, world.radius_m()));
++                    mesh_ms.push(t.elapsed().as_secs_f64() * 1000.0);
++                    let t = std::time::Instant::now();
++                    let mut sum = 0.0;
++                    for l in 0..=cells {
++                        for k in 0..=cells {
++                            sum += field.height(id.sample_direction(map, cells, k, l));
++                        }
++                    }
++                    std::hint::black_box(sum);
++                    read_ms.push(t.elapsed().as_secs_f64() * 1000.0);
++                }
++            }
++            for id in &ids {
++                for l in 0..=cells {
++                    for k in 0..=cells {
++                        dump.extend_from_slice(&field.height(id.sample_direction(map, cells, k, l)).to_le_bytes());
++                    }
++                }
++            }
++            let stat = |v: &mut Vec<f64>| -> (f64, f64, f64) {
++                v.sort_by(f64::total_cmp);
++                (v[v.len() / 2], v.iter().sum::<f64>() / v.len() as f64, v[v.len() * 9 / 10])
++            };
++            let (m50, mmean, m90) = stat(&mut mesh_ms);
++            let (r50, rmean, r90) = stat(&mut read_ms);
++            writeln!(
++                out,
++                "RESULT extra {extra} level {level}: mesh path per tile median {m50:.3} ms, mean {mmean:.3}, p90 {m90:.3}; 1089 serial reads median {r50:.3} ms, mean {rmean:.3}, p90 {r90:.3} ({} tiles x {repeats})",
++                ids.len()
++            )
++            .map_err(err)
++            .unwrap();
++        }
++        std::fs::create_dir_all("target/spike54").unwrap();
++        std::fs::write(format!("target/spike54/heights_{extra}.bin"), &dump).unwrap();
++        writeln!(out, "RESULT extra {extra}: {} bytes of heights written", dump.len()).map_err(err).unwrap();
++    }
++
+     // spec: GEN-052
+     /// What building one tile costs with the chunk layer (chunks ready under it, an edit in the definition) and without it (base and stamps only),
+     /// per level (M8-7, criterion 6: the tile refresh of an edit). `PLANET_ANET_STORE=DIR PLANET_ANET_RES=N cargo test -p planet --release --lib
+diff --git a/crates/generators/src/erosion.rs b/crates/generators/src/erosion.rs
+index 358a5b13..a1cba0a3 100644
+--- a/crates/generators/src/erosion.rs
++++ b/crates/generators/src/erosion.rs
+@@ -30,6 +30,11 @@ pub const EROSION_IMPLEMENTATION_ID: &str = "cpu-erosion-v1";
+ /// Domain tag of the crease lattice.
+ const LAYER_CREASE: u64 = 0x4552_0001;
+ const OCTAVES: u32 = 12;
++/// SPIKE-54: extra fine octaves (wavelengths 6 m down), `PLANET_EXTRA_OCTAVES`; they add to the fine crease sum, the normalisation stays that of the first 12.
++fn extra_octaves() -> u32 {
++    static E: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
++    *E.get_or_init(|| std::env::var("PLANET_EXTRA_OCTAVES").ok().and_then(|v| v.parse().ok()).unwrap_or(0))
++}
+ /// Lowest octave frequency (lattice cells per unit radius): a crease spacing of about 25 km; the finest octave is 12 m.
+ const BASE_FREQUENCY: f64 = 256.0;
+ const PERSISTENCE: f64 = 0.55;
+@@ -111,14 +116,16 @@ fn crease_range(nlo: f64, nhi: f64) -> (f64, f64) {
+ /// The normalised crease sum at a direction in two parts, the coarse octaves (below [`CREASE_SPLIT`]) and the fine ones: their sum lies in [-0.75, 0.25].
+ fn crease_parts(seed: u64, dir: Vec3) -> (f64, f64) {
+     let (mut coarse, mut fine, mut amp, mut norm, mut freq) = (0.0, 0.0, 1.0, 0.0, BASE_FREQUENCY);
+-    for o in 0..OCTAVES {
++    for o in 0..OCTAVES + extra_octaves() {
+         let term = amp * crease(layer_noise(seed, LAYER_CREASE, o, dir * freq));
+         if o < CREASE_SPLIT {
+             coarse += term;
+         } else {
+             fine += term;
+         }
+-        norm += amp;
++        if o < OCTAVES {
++            norm += amp;
++        }
+         amp *= PERSISTENCE;
+         freq *= 2.0;
+     }

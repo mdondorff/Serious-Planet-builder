@@ -1,0 +1,144 @@
+# SPIKE-78: what limits the belts' height, and one change at coarse global resolution, on SPIKE-69's 0.5-degree map (720 x 360 x 13 f32).
+# The generator's elevation is base + 5200 ridge zone inland + hill band (global.rs `sample`). The belt term is rebuilt from the map's zone, inland and
+# ridge; variants change only the belt term. SPIKE-77's plateau rule is added on top (same noise, window 0.50-0.62, 1,200 m) for the combined shares.
+# Earth: land above 1/2/3/4/5 km from Steve Dutch's ETOPO5 5-minute tables, without Antarctica (sum of the continent tables).
+# Usage: python -I belts.py <map13.f32> <out dir>
+import sys, itertools, json
+import numpy as np
+from PIL import Image
+
+mp, out = sys.argv[1], sys.argv[2]
+W, H = 720, 360
+a = np.fromfile(mp, dtype='<f4').reshape(H, W, 13).astype(np.float64)
+lat, lon, cont, zone, inland, ridge, hill, e = [a[..., i] for i in range(8)]
+landall = cont > 0.1
+land = landall & (np.abs(lat) < 60)
+w = np.cos(np.radians(lat)) * land
+belt0 = 5200 * ridge * zone * inland
+base = e - belt0 - hill
+r = np.sqrt(ridge)  # ridge = max(r, 0)^2
+
+
+def smooth(x, lo, hi):
+    t = np.clip((x - lo) / (hi - lo), 0, 1)
+    return t * t * (3 - 2 * t)
+
+
+# SPIKE-77's plateau field (classmap.py), reproduced.
+def vnoise(p, freq, seed):
+    q = p * freq
+    i = np.floor(q).astype(np.int64)
+    f = q - i
+    t = f * f * (3 - 2 * f)
+    def h(x, y, z):
+        v = (x * 73856093) ^ (y * 19349663) ^ (z * 83492791) ^ seed
+        v = (v ^ (v >> 13)) * 1274126177
+        v = v ^ (v >> 16)
+        return (v & 0xffff) / 32767.5 - 1.0
+    acc = 0
+    for dx, dy, dz in itertools.product((0, 1), repeat=3):
+        wx = t[..., 0] if dx else 1 - t[..., 0]
+        wy = t[..., 1] if dy else 1 - t[..., 1]
+        wz = t[..., 2] if dz else 1 - t[..., 2]
+        acc = acc + wx * wy * wz * h(i[..., 0] + dx, i[..., 1] + dy, i[..., 2] + dz)
+    return acc
+
+
+def fbm(p, freq, oct, seed):
+    s, amp, n = 0, 1.0, 0
+    for o in range(oct):
+        s = s + amp * vnoise(p, freq * 2 ** o, seed + o)
+        n += amp
+        amp *= 0.5
+    return s / n
+
+
+la, lo = np.radians(lat), np.radians(lon)
+P3 = np.stack([np.cos(la) * np.cos(lo), np.cos(la) * np.sin(lo), np.sin(la)], -1)
+pn = 0.5 + 0.5 * fbm(P3, 1.6, 3, 4242)
+P = smooth(pn, 0.50, 0.62) * smooth(inland, 0.2, 0.6) * (1 - smooth(zone, 0.2, 0.6))
+plateau = np.where(landall, 1200 * P, 0)
+
+EARTH = {1000: 0.20, 2000: 0.0666, 3000: 0.0315, 4000: 0.0194, 5000: 0.0077}  # 1 km: SPIKE-77's estimate without Antarctica
+EARTH_ICE = {1000: 0.272, 2000: 0.117, 3000: 0.051, 4000: 0.018, 5000: 0.007}
+
+
+def share(x, t):
+    return float((w * (x >= t)).sum() / w.sum())
+
+
+def score(ev):
+    s = {t: share(ev, t) for t in EARTH}
+    err = sum(abs(np.log(max(s[t], 1e-5) / EARTH[t])) for t in (2000, 3000, 4000, 5000))
+    return s, err
+
+
+# The belt variants. `core` is the range core: zone and inland together; `r` the ridge before squaring.
+def belt(amp=5200.0, ex=2.0, uplift=0.0, core_mode='product'):
+    if core_mode == 'product':
+        core = zone * inland
+    else:  # the zone carried to the coast's ramp only: inland as a gate at the coast, not a weight
+        core = zone * smooth(inland, 0.0, 0.3)
+    return amp * r ** ex * core + uplift * core
+
+
+variants = {
+    'today (5200 ridge^2 zone inland)': belt(),
+    'amplitude 7000': belt(amp=7000),
+    'amplitude 8000': belt(amp=8000),
+    'ridge^1 (wider ridges)': belt(ex=1.0),
+    'inland as a coast gate': belt(core_mode='gate'),
+    'range uplift 1500 (broad, no ridge)': belt(uplift=1500),
+    'range uplift 1500 + amplitude 6000': belt(amp=6000, uplift=1500),
+    'range uplift 2000 + amplitude 6000': belt(amp=6000, uplift=2000),
+    'range uplift 1500 + amplitude 6500, gate': belt(amp=6500, uplift=1500, core_mode='gate'),
+}
+res = {}
+rows = []
+for name, b in variants.items():
+    for pl in (False, True):
+        ev = np.clip(base + b + hill + (plateau if pl else 0), -9000, 9000)
+        s, err = score(ev)
+        key = name + (' + plateau' if pl else '')
+        res[key] = {'above': {str(k): v for k, v in s.items()}, 'err': err, 'max': float(ev[land].max()), 'p999': float(np.percentile(ev[land], 99.9))}
+        rows.append((key, s, err, ev[land].max()))
+        print(f"{key:58s} | 1/2/3/4/5 km {s[1000]:.3f}/{s[2000]:.3f}/{s[3000]:.3f}/{s[4000]:.3f}/{s[5000]:.4f} | log err {err:.2f} | max {ev[land].max():.0f}")
+print(f"{'Earth without Antarctica':58s} | 1/2/3/4/5 km " + '/'.join(f'{v:.3f}' for v in EARTH.values()))
+print(f"{'Earth with ice':58s} | 1/2/3/4/5 km " + '/'.join(f'{v:.3f}' for v in EARTH_ICE.values()))
+
+# Grid search of the two-term belt (broad range uplift U plus ridge amplitude A), plateau on.
+best = []
+for A in range(4000, 8001, 500):
+    for U in range(0, 3001, 250):
+        for mode in ('product', 'gate'):
+            ev = np.clip(base + belt(amp=A, uplift=U, core_mode=mode) + hill + plateau, -9000, 9000)
+            s, err = score(ev)
+            best.append((err, A, U, mode, s, float(ev[land].max())))
+best.sort(key=lambda x: x[0])
+print('grid best (plateau on):')
+for err, A, U, mode, s, mx in best[:8]:
+    print(f"  A {A} U {U} {mode}: 1/2/3/4/5 km {s[1000]:.3f}/{s[2000]:.3f}/{s[3000]:.3f}/{s[4000]:.3f}/{s[5000]:.4f} | err {err:.2f} | max {mx:.0f}")
+res['grid_best'] = [{'err': b[0], 'A': b[1], 'U': b[2], 'mode': b[3], 'above': {str(k): v for k, v in b[4].items()}, 'max': b[5]} for b in best[:8]]
+
+# Diagnostics: why the product is small.
+def wq(x, m):
+    return float((w * m * x).sum() / (w * m).sum())
+res['diag'] = {
+    'zone>0.5': share(zone, 0.5), 'inland>0.5': share(inland, 0.5), 'ridge>0.5': share(ridge, 0.5), 'zone*inland>0.5': share(zone * inland, 0.5),
+    'P(inland>0.5 | zone>0.5)': float((w * (zone > 0.5) * (inland > 0.5)).sum() / (w * (zone > 0.5)).sum()),
+    'mean ridge where zone*inland>0.5': wq(ridge, zone * inland > 0.5),
+}
+print('diag', json.dumps(res['diag'], indent=0))
+json.dump(res, open(f'{out}/belts.json', 'w'), indent=1)
+
+# Map: elevation today (left) and the chosen variant with the plateau (right), 0 to 6 km.
+A, U, mode = best[0][1], best[0][2], best[0][3]
+evn = np.clip(base + belt(amp=A, uplift=U, core_mode=mode) + hill + plateau, -9000, 9000)
+def ramp(x):
+    t = np.clip(x / 6000.0, 0, 1)[..., None]
+    lo_c, mid_c, hi_c = np.array([0.30, 0.55, 0.25]), np.array([0.65, 0.45, 0.25]), np.array([1.0, 1.0, 1.0])
+    c = np.where(t < 0.5, lo_c + (mid_c - lo_c) * (t / 0.5), mid_c + (hi_c - mid_c) * ((t - 0.5) / 0.5))
+    return np.where(landall[..., None], c, np.array([0.12, 0.2, 0.35]))
+img = np.concatenate([ramp(e), np.ones((H, 6, 3)), ramp(evn)], axis=1)
+Image.fromarray((img * 255).astype(np.uint8)).save(f'{out}/elevation-today-vs-belts.png')
+print('chosen', A, U, mode)

@@ -1,0 +1,25 @@
+cpu 12% 08:47:43
+$ cmd /c start  /b /wait /belownormal target/s64build/release/s64.exe C:/DEV/SeriousPlanetData/spike-r3 target/s64/out 1,4
+SPIKE-64: tiles ["1", "4"], thermal 100 passes on 4 threads; dx 101.8 m
+tile 1 thermal theta 33: 100 passes 22.52 s (225.2 ms/pass, 4 threads); first-pass volume 2.905e8 m3, cells moving in the last pass 18490; land mass change 5.327e3 m3
+tile 1 thermal theta 20: 100 passes 41.39 s (413.9 ms/pass, 4 threads); first-pass volume 2.630e9 m3, cells moving in the last pass 109488; land mass change 4.668e4 m3
+tile 1 dep-lo (kc 10000): 2.33 s (flood 1.48, route 0.62); eroded 5.885e11 m3, deposited 1.965e11 (33.4 %), left the window 3.920e11
+tile 1 dep-mid (kc 100000): 2.29 s (flood 1.48, route 0.62); eroded 5.885e11 m3, deposited 1.336e11 (22.7 %), left the window 4.550e11
+tile 1 dep-mid+thermal33: thermal 16.15 s
+tile 1 dep-hi (kc 1000000): 2.34 s (flood 1.51, route 0.65); eroded 5.885e11 m3, deposited 1.262e11 (21.5 %), left the window 4.623e11
+tile 4 thermal theta 33: 100 passes 17.13 s (171.3 ms/pass, 4 threads); first-pass volume 0.000e0 m3, cells moving in the last pass 0; land mass change 0.000e0 m3
+tile 4 thermal theta 20: 100 passes 16.11 s (161.1 ms/pass, 4 threads); first-pass volume 8.719e4 m3, cells moving in the last pass 62; land mass change 8.859e0 m3
+tile 4 dep-lo (kc 10000): 3.07 s (flood 2.17, route 0.67); eroded 1.490e11 m3, deposited 3.998e10 (26.8 %), left the window 1.090e11
+tile 4 dep-mid (kc 100000): 3.71 s (flood 2.90, route 0.63); eroded 1.490e11 m3, deposited 2.620e10 (17.6 %), left the window 1.228e11
+tile 4 dep-mid+thermal33: thermal 17.37 s
+tile 4 dep-hi (kc 1000000): 2.69 s (flood 1.89, route 0.62); eroded 1.490e11 m3, deposited 2.445e10 (16.4 %), left the window 1.245e11
+cpu 93% 08:50:21
+$ cmd /c start  /b /wait /belownormal target/s64build2/release/s64.exe C:/DEV/SeriousPlanetData/spike-r3 target/s64/out 1
+SPIKE-64: tiles ["1"], thermal 100 passes on 4 threads; dx 101.8 m
+tile 1 thermal theta 33: 100 passes 15.68 s (156.8 ms/pass, 4 threads); first-pass volume 2.905e8 m3, cells moving in the last pass 18490; land mass change 5.327e3 m3
+tile 1 thermal theta 20: 100 passes 16.81 s (168.1 ms/pass, 4 threads); first-pass volume 2.630e9 m3, cells moving in the last pass 109488; land mass change 4.668e4 m3
+tile 1 dep-lo (kc 10000): 2.35 s (flood 1.47, route 0.63); eroded 5.885e11 m3, deposited 1.965e11 (33.4 %), left the window 3.920e11
+tile 1 dep-mid (kc 100000): 2.26 s (flood 1.47, route 0.61); eroded 5.885e11 m3, deposited 1.336e11 (22.7 %), left the window 4.550e11
+tile 1 dep-mid+thermal33: thermal 15.80 s
+tile 1 dep-hi (kc 1000000): 2.31 s (flood 1.52, route 0.61); eroded 5.885e11 m3, deposited 1.262e11 (21.5 %), left the window 4.623e11
+tile 1 scaled x4 thermal33: 16.91 s; first-pass volume 5.132e10 m3, cells moving in the last pass 798478

@@ -1,0 +1,4 @@
+19:24:19 debug build 1: 221.5 s exit 0
+19:28:15 debug build 2: 233.5 s exit 0
+19:32:15 debug build 3: 236.3 s exit 0
+19:36:21 debug build 4: 243.3 s exit 0

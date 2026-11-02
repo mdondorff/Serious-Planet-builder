@@ -1,0 +1,74 @@
+{
+ "today": {
+  "land_fraction": 0.2977649394003103,
+  "continents_ge_1Mkm2": 2,
+  "largest_share_of_land": 0.7858095887508142,
+  "top5_Mkm2": [
+   119.35,
+   31.11,
+   0.74,
+   0.58,
+   0.1
+  ],
+  "coast_box_dimension": 1.11246705103027,
+  "coast_box_counts": {
+   "2": 5287,
+   "4": 2628,
+   "8": 1290,
+   "16": 606,
+   "32": 233
+  },
+  "high_regions": 10,
+  "high_width_km_areaweighted_median": 375.7202950163898,
+  "high_width_km_p10_p90": [
+   74.92465171572599,
+   422.2757719961263
+  ],
+  "high_length_km_largest5": [
+   7219,
+   2667,
+   2051,
+   1623,
+   1510
+  ],
+  "high_share_in_regions_over_1000km": 0.9339691336567612,
+  "high_sinuosity_areaweighted_mean": 1.9052799288045497,
+  "high_ground_share_of_land": 0.038585820378220226
+ },
+ "combined": {
+  "land_fraction": 0.2973974243082742,
+  "continents_ge_1Mkm2": 2,
+  "largest_share_of_land": 0.7852721090224657,
+  "top5_Mkm2": [
+   119.12,
+   31.14,
+   0.75,
+   0.59,
+   0.09
+  ],
+  "coast_box_dimension": 1.1117594402999427,
+  "coast_box_counts": {
+   "2": 5292,
+   "4": 2637,
+   "8": 1290,
+   "16": 607,
+   "32": 234
+  },
+  "high_regions": 18,
+  "high_width_km_areaweighted_median": 199.14669910637292,
+  "high_width_km_p10_p90": [
+   64.4456373698159,
+   302.6917482040905
+  ],
+  "high_length_km_largest5": [
+   18127,
+   8334,
+   6603,
+   5384,
+   4225
+  ],
+  "high_share_in_regions_over_1000km": 0.9461247097205919,
+  "high_sinuosity_areaweighted_mean": 1.7238940734825012,
+  "high_ground_share_of_land": 0.06912601323005857
+ }
+}

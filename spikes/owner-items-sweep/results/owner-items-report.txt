@@ -1,0 +1,233 @@
+stop item kind altitude_m frames p50_ms p95_ms max_ms refused first_refusal
+0 Crater_1 crater 2000 90 17.00 18.00 18.00 0 -
+1 Crater_1 crater 200 90 17.00 18.00 18.00 0 -
+2 Crater_1 crater 30 90 17.00 18.00 18.00 0 -
+3 Crater_2 crater 2000 90 17.00 21.00 23.00 0 -
+4 Crater_2 crater 200 90 17.00 18.00 22.00 0 -
+5 Crater_2 crater 30 90 22.00 34.00 41.00 0 -
+6 Platonmax crater 2000 90 17.00 29.00 32.00 0 -
+7 Platonmax crater 200 90 17.00 18.00 40.00 1 plan for frame 634: invalid LOD parameters: tile TileId(1224979112080673376) (level 17): morph interval [1244.4, 991.8] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+8 Platonmax crater 30 90 17.00 18.00 18.00 1 plan for frame 724: invalid LOD parameters: tile TileId(1441152740656060451) (level 20): morph interval [137.6, 124.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+9 Plateau_1 plateau 2000 90 19.00 23.00 25.00 0 -
+10 Plateau_1 plateau 200 90 47.00 64.00 86.00 0 -
+11 Plateau_1 plateau 30 90 64.00 84.00 93.00 0 -
+12 Plateau_2 plateau 2000 90 47.00 70.00 79.00 0 -
+13 Plateau_2 plateau 200 90 95.00 233.00 250.00 0 -
+14 Plateau_2 plateau 30 90 74.00 178.00 250.00 0 -
+15 Plateau_3 plateau 2000 90 90.00 250.00 250.00 0 -
+16 Plateau_3 plateau 200 90 64.00 111.00 140.00 0 -
+17 Plateau_3 plateau 30 90 77.00 185.00 250.00 0 -
+18 Plateau_4 plateau 2000 90 66.00 86.00 250.00 0 -
+19 Plateau_4 plateau 200 90 59.00 73.00 77.00 0 -
+20 Plateau_4 plateau 30 90 79.00 160.00 236.00 0 -
+21 Plateau_5 plateau 2000 90 76.00 127.00 250.00 0 -
+22 Plateau_5 plateau 200 90 78.00 164.00 220.00 0 -
+23 Plateau_5 plateau 30 90 138.00 250.00 250.00 0 -
+24 Plateau_6 plateau 2000 90 50.00 62.00 66.00 0 -
+25 Plateau_6 plateau 200 90 58.00 82.00 88.00 0 -
+26 Plateau_6 plateau 30 90 74.00 91.00 96.00 0 -
+27 Plateau_7 plateau 2000 90 65.00 112.00 139.00 0 -
+28 Plateau_7 plateau 200 90 118.00 250.00 250.00 0 -
+29 Plateau_7 plateau 30 90 166.00 250.00 250.00 0 -
+30 Hill_1 hill 2000 90 99.00 250.00 250.00 0 -
+31 Hill_1 hill 200 90 93.00 225.00 250.00 0 -
+32 Hill_1 hill 30 90 95.00 229.00 250.00 0 -
+33 Hill_2 hill 2000 90 83.00 195.00 250.00 0 -
+34 Hill_2 hill 200 90 107.00 250.00 250.00 0 -
+35 Hill_2 hill 30 90 118.00 250.00 250.00 0 -
+36 Hill_3 hill 2000 90 82.00 191.00 250.00 0 -
+37 Hill_3 hill 200 90 99.00 250.00 250.00 0 -
+38 Hill_3 hill 30 90 97.00 250.00 250.00 0 -
+39 Hill_4 hill 2000 90 88.00 247.00 250.00 0 -
+40 Hill_4 hill 200 90 101.00 198.00 216.00 0 -
+41 Hill_4 hill 30 90 88.00 185.00 248.00 0 -
+42 Hill_6 hill 2000 90 68.00 218.00 250.00 0 -
+43 Hill_6 hill 200 90 85.00 250.00 250.00 0 -
+44 Hill_6 hill 30 90 104.00 248.00 250.00 0 -
+45 Crater_4 crater 2000 90 84.00 242.00 250.00 0 -
+46 Crater_4 crater 200 90 92.00 237.00 250.00 0 -
+47 Crater_4 crater 30 90 112.00 250.00 250.00 0 -
+48 Plateau_8 plateau 2000 90 110.00 250.00 250.00 0 -
+49 Plateau_8 plateau 200 90 173.00 250.00 250.00 0 -
+50 Plateau_8 plateau 30 90 89.00 250.00 250.00 0 -
+51 Plateau_9 plateau 2000 90 125.00 250.00 250.00 0 -
+52 Plateau_9 plateau 200 90 100.00 151.00 250.00 0 -
+53 Plateau_9 plateau 30 90 91.00 103.00 107.00 0 -
+54 Ridge_1 ridge 2000 90 29.00 74.00 85.00 0 -
+55 Ridge_1 ridge 200 90 44.00 53.00 56.00 0 -
+56 Ridge_1 ridge 30 90 48.00 69.00 83.00 0 -
+57 Ridge_2 ridge 2000 90 35.00 107.00 165.00 0 -
+58 Ridge_2 ridge 200 90 35.00 44.00 47.00 0 -
+59 Ridge_2 ridge 30 90 44.00 53.00 54.00 0 -
+60 Channel_1 channel 2000 90 19.00 25.00 39.00 0 -
+61 Channel_1 channel 200 90 29.00 40.00 44.00 0 -
+62 Channel_1 channel 30 90 42.00 49.00 58.00 0 -
+63 Ridge_3 ridge 2000 90 21.00 30.00 47.00 0 -
+64 Ridge_3 ridge 200 90 20.00 34.00 40.00 1 plan for frame 5814: invalid LOD parameters: tile TileId(1152921506245890461) (level 16): morph interval [2042.0, 1983.7] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+65 Ridge_3 ridge 30 90 17.00 24.00 25.00 7 plan for frame 5859: invalid LOD parameters: tile TileId(1224979105200948974) (level 17): morph interval [1302.5, 991.8] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+66 Region_1 region 2000 90 47.00 61.00 61.00 0 -
+67 Region_1 region 200 90 39.00 48.00 53.00 0 -
+68 Region_1 region 30 90 61.00 77.00 83.00 0 -
+69 Hill_7 hill 2000 90 30.00 47.00 54.00 0 -
+70 Hill_7 hill 200 90 17.00 19.00 21.00 1 plan for frame 6308: invalid LOD parameters: tile TileId(1297036718906982231) (level 18): morph interval [641.6, 495.9] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+71 Hill_7 hill 30 90 23.00 51.00 56.00 2 plan for frame 6445: invalid LOD parameters: tile TileId(1297036718906993419) (level 18): morph interval [600.5, 495.9] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+72 Brush_1 brush 2000 90 24.00 48.00 217.00 1 plan for frame 6485: invalid LOD parameters: tile TileId(1152921506245866508) (level 16): morph interval [2043.2, 1983.7] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+73 Brush_1 brush 200 90 130.00 250.00 250.00 0 -
+74 Brush_1 brush 30 90 176.00 250.00 250.00 0 -
+75 Brush_2 brush 2000 90 250.00 250.00 250.00 1 plan for frame 6752: invalid LOD parameters: tile TileId(1152921506245866535) (level 16): morph interval [2045.6, 1983.7] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+76 Brush_2 brush 200 90 111.00 250.00 250.00 0 -
+77 Brush_2 brush 30 90 177.00 223.00 250.00 0 -
+78 Brush_2 brush 2000 90 78.00 250.00 250.00 0 -
+79 Brush_2 brush 200 90 132.00 250.00 250.00 0 -
+80 Brush_2 brush 30 90 250.00 250.00 250.00 0 -
+81 Brush_2 brush 2000 90 178.00 250.00 250.00 0 -
+82 Brush_2 brush 200 90 236.00 250.00 250.00 0 -
+83 Brush_2 brush 30 90 250.00 250.00 250.00 0 -
+84 Brush_2 brush 2000 90 159.00 250.00 250.00 0 -
+85 Brush_2 brush 200 90 238.00 250.00 250.00 0 -
+86 Brush_2 brush 30 90 250.00 250.00 250.00 0 -
+87 Brush_6 brush 2000 90 250.00 250.00 250.00 1 plan for frame 7832: invalid LOD parameters: tile TileId(1152921506245861035) (level 16): morph interval [2043.8, 1983.7] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+88 Brush_6 brush 200 90 250.00 250.00 250.00 0 -
+89 Brush_6 brush 30 90 250.00 250.00 250.00 0 -
+90 Brush_7 brush 2000 90 89.00 167.00 236.00 0 -
+91 Brush_7 brush 200 90 91.00 120.00 250.00 0 -
+92 Brush_7 brush 30 90 98.00 129.00 143.00 0 -
+93 Plateau_10 plateau 2000 90 82.00 102.00 125.00 1 plan for frame 8373: invalid LOD parameters: tile TileId(1152921506245866508) (level 16): morph interval [2043.2, 1983.7] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+94 Plateau_10 plateau 200 90 74.00 150.00 167.00 0 -
+95 Plateau_10 plateau 30 90 97.00 181.00 218.00 0 -
+96 Plateau_11 plateau 2000 90 56.00 83.00 103.00 0 -
+97 Plateau_11 plateau 200 90 51.00 62.00 68.00 0 -
+98 Plateau_11 plateau 30 90 46.00 61.00 72.00 0 -
+99 Brush_8 brush 2000 90 17.00 23.00 46.00 0 -
+100 Brush_8 brush 200 90 21.00 31.00 38.00 0 -
+101 Brush_8 brush 30 90 33.00 41.00 46.00 0 -
+102 Brush_8 brush 2000 90 22.00 35.00 41.00 0 -
+103 Brush_8 brush 200 90 30.00 42.00 57.00 0 -
+104 Brush_8 brush 30 90 61.00 154.00 250.00 0 -
+105 Brush_10 brush 2000 90 55.00 61.00 70.00 0 -
+106 Brush_10 brush 200 90 49.00 85.00 93.00 1 plan for frame 9550: invalid LOD parameters: tile TileId(1369094328548324251) (level 19): morph interval [293.9, 248.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+107 Brush_10 brush 30 90 59.00 82.00 95.00 2 plan for frame 9675: invalid LOD parameters: tile TileId(1369094328548325045) (level 19): morph interval [300.1, 248.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+108 Brush_11 brush 2000 90 22.00 37.00 46.00 0 -
+109 Brush_11 brush 200 90 47.00 55.00 81.00 1 plan for frame 9813: invalid LOD parameters: tile TileId(1369094328548325759) (level 19): morph interval [296.0, 248.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+110 Brush_11 brush 30 90 65.00 250.00 250.00 2 plan for frame 9924: invalid LOD parameters: tile TileId(1369094328548326621) (level 19): morph interval [307.5, 248.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+111 Brush_12 brush 2000 90 94.00 250.00 250.00 0 -
+112 Brush_12 brush 200 90 97.00 152.00 171.00 1 plan for frame 10088: invalid LOD parameters: tile TileId(1369094328548319217) (level 19): morph interval [309.9, 248.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+113 Brush_12 brush 30 90 107.00 185.00 250.00 2 plan for frame 10220: invalid LOD parameters: tile TileId(1369094328551115685) (level 19): morph interval [270.6, 248.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+114 Brush_13 brush 2000 90 101.00 245.00 250.00 0 -
+115 Brush_13 brush 200 90 116.00 250.00 250.00 1 plan for frame 10356: invalid LOD parameters: tile TileId(1369094328548324873) (level 19): morph interval [300.1, 248.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+116 Brush_13 brush 30 90 91.00 160.00 250.00 2 plan for frame 10484: invalid LOD parameters: tile TileId(1369094328548325133) (level 19): morph interval [307.2, 248.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+117 Brush_14 brush 2000 90 87.00 198.00 250.00 0 -
+118 Brush_14 brush 200 90 95.00 126.00 250.00 1 plan for frame 10625: invalid LOD parameters: tile TileId(1369094328548315183) (level 19): morph interval [285.0, 248.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+119 Brush_14 brush 30 90 90.00 108.00 118.00 2 plan for frame 10742: invalid LOD parameters: tile TileId(1369094328548315453) (level 19): morph interval [290.6, 248.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+120 Brush_15 brush 2000 90 23.00 60.00 68.00 0 -
+121 Brush_15 brush 200 90 30.00 42.00 48.00 1 plan for frame 10897: invalid LOD parameters: tile TileId(1369094328548292331) (level 19): morph interval [283.2, 248.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+122 Brush_15 brush 30 90 124.00 250.00 250.00 2 plan for frame 11020: invalid LOD parameters: tile TileId(1369094328548292597) (level 19): morph interval [283.7, 248.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+123 Brush_16 brush 2000 90 80.00 151.00 192.00 0 -
+124 Brush_16 brush 200 90 108.00 248.00 250.00 1 plan for frame 11166: invalid LOD parameters: tile TileId(1369094328548320691) (level 19): morph interval [283.0, 248.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+125 Brush_16 brush 30 90 117.00 172.00 231.00 2 plan for frame 11287: invalid LOD parameters: tile TileId(1369094328548323517) (level 19): morph interval [286.9, 248.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+126 Brush_17 brush 2000 90 86.00 163.00 250.00 0 -
+127 Brush_17 brush 200 90 85.00 168.00 250.00 1 plan for frame 11441: invalid LOD parameters: tile TileId(1369094328551123703) (level 19): morph interval [298.2, 248.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+128 Brush_17 brush 30 90 70.00 95.00 186.00 2 plan for frame 11554: invalid LOD parameters: tile TileId(1369094328551124653) (level 19): morph interval [295.3, 248.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+129 Brush_18 brush 2000 90 86.00 215.00 250.00 0 -
+130 Brush_18 brush 200 90 82.00 128.00 177.00 1 plan for frame 11707: invalid LOD parameters: tile TileId(1369094328549725317) (level 19): morph interval [285.9, 248.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+131 Brush_18 brush 30 90 85.00 106.00 126.00 2 plan for frame 11824: invalid LOD parameters: tile TileId(1369094328549725503) (level 19): morph interval [293.2, 248.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+132 Brush_19 brush 2000 90 40.00 94.00 107.00 0 -
+133 Brush_19 brush 200 90 29.00 36.00 39.00 1 plan for frame 11976: invalid LOD parameters: tile TileId(1369094328548326056) (level 19): morph interval [260.8, 248.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+134 Brush_19 brush 30 90 34.00 41.00 43.00 2 plan for frame 12080: invalid LOD parameters: tile TileId(1369094328548326308) (level 19): morph interval [292.9, 248.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+135 Brush_20 brush 2000 90 22.00 46.00 52.00 0 -
+136 Brush_20 brush 200 90 29.00 38.00 46.00 1 plan for frame 12248: invalid LOD parameters: tile TileId(1369094328548286505) (level 19): morph interval [289.2, 248.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+137 Brush_20 brush 30 90 35.00 42.00 51.00 2 plan for frame 12355: invalid LOD parameters: tile TileId(1369094328548286777) (level 19): morph interval [279.9, 248.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+138 Brush_21 brush 2000 90 21.00 50.00 59.00 0 -
+139 Brush_21 brush 200 90 30.00 36.00 41.00 1 plan for frame 12516: invalid LOD parameters: tile TileId(1369094328548177812) (level 19): morph interval [276.9, 248.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+140 Brush_21 brush 30 90 34.00 72.00 79.00 2 plan for frame 12625: invalid LOD parameters: tile TileId(1369094328548188777) (level 19): morph interval [304.3, 248.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+141 Brush_22 brush 2000 90 34.00 55.00 66.00 0 -
+142 Brush_22 brush 200 90 62.00 73.00 75.00 0 -
+143 Brush_22 brush 30 90 44.00 83.00 84.00 2 plan for frame 12886: invalid LOD parameters: tile TileId(1441152048078430776) (level 20): morph interval [165.2, 124.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+144 Brush_23 brush 2000 90 20.00 37.00 46.00 0 -
+145 Brush_23 brush 200 90 23.00 28.00 34.00 1 plan for frame 13058: invalid LOD parameters: tile TileId(1369094328552530255) (level 19): morph interval [296.9, 248.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+146 Brush_23 brush 30 90 26.00 35.00 49.00 2 plan for frame 13170: invalid LOD parameters: tile TileId(1369094328552531037) (level 19): morph interval [295.3, 248.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+147 Ridge_4 ridge 2000 90 28.00 36.00 40.00 0 -
+148 Ridge_4 ridge 200 90 59.00 74.00 82.00 0 -
+149 Ridge_4 ridge 30 90 41.00 55.00 58.00 0 -
+150 Ridge_4 ridge 2000 90 33.00 44.00 50.00 0 -
+151 Ridge_4 ridge 200 90 56.00 68.00 81.00 0 -
+152 Ridge_4 ridge 30 90 41.00 53.00 59.00 0 -
+153 Crater_5 crater 2000 90 20.00 28.00 33.00 0 -
+154 Crater_5 crater 200 90 17.00 22.00 27.00 0 -
+155 Crater_5 crater 30 90 19.00 27.00 37.00 0 -
+156 Hill_7 hill 2000 90 43.00 55.00 58.00 0 -
+157 Hill_7 hill 200 90 50.00 65.00 74.00 0 -
+158 Hill_7 hill 30 90 77.00 98.00 101.00 0 -
+159 Plateau_12 plateau 2000 90 20.00 41.00 53.00 0 -
+160 Plateau_12 plateau 200 90 54.00 70.00 81.00 0 -
+161 Plateau_12 plateau 30 90 85.00 110.00 117.00 0 -
+162 Ridge_5 ridge 2000 90 18.00 29.00 42.00 0 -
+163 Ridge_5 ridge 200 90 45.00 55.00 60.00 0 -
+164 Ridge_5 ridge 30 90 42.00 54.00 57.00 0 -
+165 Channel_2 channel 2000 90 17.00 25.00 33.00 0 -
+166 Channel_2 channel 200 90 39.00 47.00 54.00 0 -
+167 Channel_2 channel 30 90 38.00 45.00 56.00 0 -
+168 Region_2 region 2000 90 24.00 39.00 46.00 0 -
+169 Region_2 region 200 90 34.00 43.00 50.00 0 -
+170 Region_2 region 30 90 36.00 45.00 55.00 0 -
+171 Brush_24 brush 2000 90 22.00 32.00 48.00 0 -
+172 Brush_24 brush 200 90 46.00 61.00 64.00 0 -
+173 Brush_24 brush 30 90 56.00 71.00 78.00 0 -
+174 Brush_24 brush 2000 90 23.00 34.00 44.00 0 -
+175 Brush_24 brush 200 90 44.00 78.00 88.00 0 -
+176 Brush_24 brush 30 90 109.00 132.00 142.00 0 -
+177 Brush_26 brush 2000 90 22.00 38.00 53.00 0 -
+178 Brush_26 brush 200 90 37.00 52.00 59.00 0 -
+179 Brush_26 brush 30 90 54.00 68.00 73.00 0 -
+180 Brush_26 brush 2000 90 24.00 33.00 45.00 0 -
+181 Brush_26 brush 200 90 43.00 93.00 102.00 0 -
+182 Brush_26 brush 30 90 90.00 124.00 132.00 0 -
+183 Brush_26 brush 2000 90 20.00 35.00 49.00 0 -
+184 Brush_26 brush 200 90 41.00 52.00 61.00 0 -
+185 Brush_26 brush 30 90 72.00 88.00 96.00 0 -
+186 Brush_29 brush 2000 90 23.00 38.00 56.00 0 -
+187 Brush_29 brush 200 90 40.00 56.00 60.00 0 -
+188 Brush_29 brush 30 90 54.00 66.00 69.00 0 -
+189 Brush_29 brush 2000 90 22.00 31.00 43.00 0 -
+190 Brush_29 brush 200 90 42.00 77.00 83.00 0 -
+191 Brush_29 brush 30 90 93.00 115.00 124.00 0 -
+192 Brush_31 brush 2000 90 22.00 34.00 42.00 0 -
+193 Brush_31 brush 200 90 41.00 61.00 70.00 0 -
+194 Brush_31 brush 30 90 47.00 63.00 68.00 0 -
+195 Brush_31 brush 2000 90 21.00 29.00 36.00 0 -
+196 Brush_31 brush 200 90 46.00 65.00 71.00 0 -
+197 Brush_31 brush 30 90 56.00 75.00 79.00 0 -
+198 Brush_33 brush 2000 90 25.00 42.00 47.00 0 -
+199 Brush_33 brush 200 90 44.00 62.00 80.00 0 -
+200 Brush_33 brush 30 90 90.00 120.00 126.00 0 -
+201 Brush_33 brush 2000 90 21.00 29.00 44.00 0 -
+202 Brush_33 brush 200 90 36.00 61.00 68.00 0 -
+203 Brush_33 brush 30 90 41.00 48.00 51.00 2 plan for frame 18275: invalid LOD parameters: tile TileId(1585274578883740745) (level 22): morph interval [33.0, 31.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+204 Brush_33 brush 2000 90 21.00 30.00 42.00 0 -
+205 Brush_33 brush 200 90 36.00 56.00 74.00 0 -
+206 Brush_33 brush 30 90 39.00 47.00 53.00 2 plan for frame 18546: invalid LOD parameters: tile TileId(1585274578922540700) (level 22): morph interval [34.3, 31.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+207 Brush_33 brush 2000 90 19.00 27.00 38.00 0 -
+208 Brush_33 brush 200 90 27.00 45.00 60.00 0 -
+209 Brush_33 brush 30 90 29.00 36.00 43.00 2 plan for frame 18816: invalid LOD parameters: tile TileId(1585274578922640021) (level 22): morph interval [34.0, 31.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+210 Brush_33 brush 2000 90 25.00 34.00 41.00 0 -
+211 Brush_33 brush 200 90 23.00 40.00 56.00 0 -
+212 Brush_33 brush 30 90 47.00 58.00 62.00 2 plan for frame 19084: invalid LOD parameters: tile TileId(1585274578921149563) (level 22): morph interval [36.8, 31.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+213 Brush_33 brush 2000 90 23.00 34.00 55.00 0 -
+214 Brush_33 brush 200 90 49.00 66.00 76.00 0 -
+215 Brush_33 brush 30 90 23.00 31.00 34.00 2 plan for frame 19362: invalid LOD parameters: tile TileId(1441152350049516972) (level 20): morph interval [132.3, 124.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+216 Brush_39 brush 2000 90 20.00 28.00 30.00 0 -
+217 Brush_39 brush 200 90 28.00 45.00 52.00 0 -
+218 Brush_39 brush 30 90 74.00 93.00 103.00 0 -
+219 Brush_39 brush 2000 90 21.00 36.00 40.00 0 -
+220 Brush_39 brush 200 90 33.00 49.00 55.00 0 -
+221 Brush_39 brush 30 90 58.00 72.00 81.00 0 -
+222 Brush_41 brush 2000 90 19.00 32.00 39.00 0 -
+223 Brush_41 brush 200 90 37.00 49.00 55.00 0 -
+224 Brush_41 brush 30 90 42.00 53.00 62.00 0 -
+225 Crater_6 crater 2000 90 17.00 21.00 23.00 0 -
+226 Crater_6 crater 200 90 17.00 18.00 23.00 1 plan for frame 20377: invalid LOD parameters: tile TileId(1297036723436998285) (level 18): morph interval [559.9, 495.9] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+227 Crater_6 crater 30 90 45.00 58.00 60.00 0 -
+228 Brush_42 brush 2000 90 27.00 38.00 63.00 0 -
+229 Brush_42 brush 200 90 35.00 42.00 46.00 1 plan for frame 20614: invalid LOD parameters: tile TileId(1224979106333348572) (level 17): morph interval [1021.8, 991.8] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+230 Brush_42 brush 30 90 17.00 21.00 37.00 2 plan for frame 20729: invalid LOD parameters: tile TileId(1224979106333348671) (level 17): morph interval [966.9, 991.8] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+[sweep FAIL]: 231 stops, 77 items x 3 altitudes, 45 stops with a refused plan, worst p95 250.00 ms

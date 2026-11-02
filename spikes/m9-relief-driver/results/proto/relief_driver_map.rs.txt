@@ -1,0 +1,107 @@
+    /// SPIKE-69 (spike code, never merged): the relief driver's inputs on a 0.5 degree map. Per pixel (row-major from 90 N, 720 x 360): lat, lon,
+    /// continent, zone, inland, ridge, hill band (m), bake elevation (m), the bake's elevation spread (std) over +-50 km and +-200 km (9 x 9),
+    /// and the field's 5 km relief (max - min of 11 x 11 heights 500 m apart); 12 f32 each, NaN past the field's reads. Sites from `S69_SITES`
+    /// (`name:lat:lon,...`) print the same values. `PLANET_ANET_STORE=DIR PLANET_ANET_RES=16384 S69_OUT=FILE`.
+    #[test]
+    #[ignore = "a spike measurement"]
+    fn relief_driver_map() {
+        use planet_core::Vec3;
+        let res: u32 = std::env::var("PLANET_ANET_RES").ok().and_then(|v| v.parse().ok()).unwrap_or(256);
+        let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
+        let out_path = std::env::var("S69_OUT").unwrap();
+        let mut so = std::io::stdout();
+        let (world, _maps, _tile) = anet_scene(res, 11, store, &mut so).unwrap();
+        let field = world.field().unwrap();
+        let seed = field.seed();
+        let radius = world.radius_m();
+        let values = |lat: f64, lon: f64| -> [f32; 13] {
+            let d = Vec3::from_lat_lon(lat.to_radians(), lon.to_radians());
+            let p = planet_generators::global::spike69_parts(seed, d);
+            let e = f64::from(planet_generators::global::sample(seed, d).elevation_m);
+            let mut v = [f32::NAN; 13];
+            v[0] = lat as f32;
+            v[1] = lon as f32;
+            for k in 0..5 {
+                v[2 + k] = p[k] as f32;
+            }
+            v[7] = e as f32;
+            if p[0] <= planet_generators::global::SEA_LEVEL_C || lat.abs() > 89.0 {
+                return v;
+            }
+            let east = Vec3::new(0.0, 0.0, 1.0).cross(d).normalized();
+            let north = d.cross(east).normalized();
+            let at = |x: f64, y: f64| (d + east * (x / radius) + north * (y / radius)).normalized();
+            let spread = |step: f64| {
+                let mut s = Vec::with_capacity(81);
+                for j in -4..=4 {
+                    for i in -4..=4 {
+                        s.push(f64::from(planet_generators::global::sample(seed, at(i as f64 * step, j as f64 * step)).elevation_m));
+                    }
+                }
+                let m = s.iter().sum::<f64>() / s.len() as f64;
+                (s.iter().map(|x| (x - m) * (x - m)).sum::<f64>() / s.len() as f64).sqrt()
+            };
+            v[8] = spread(12_500.0) as f32;
+            v[9] = spread(50_000.0) as f32;
+            let mut dirs = Vec::with_capacity(121);
+            for j in -5..=5 {
+                for i in -5..=5 {
+                    dirs.push(at(i as f64 * 500.0, j as f64 * 500.0));
+                }
+            }
+            let h = field.heights_threaded(&dirs, 1);
+            let (lo, hi) = h.iter().fold((f64::MAX, f64::MIN), |(a, b), &x| (a.min(x), b.max(x)));
+            v[10] = (hi - lo) as f32;
+            v[11] = h[60] as f32;
+            // The relief within a 7 km radius (Kapos et al. 2000's local elevation range): 15 x 15 heights 1 km apart, inside the circle.
+            let mut dirs = Vec::with_capacity(225);
+            for j in -7i32..=7 {
+                for i in -7i32..=7 {
+                    if i * i + j * j <= 49 {
+                        dirs.push(at(f64::from(i) * 1000.0, f64::from(j) * 1000.0));
+                    }
+                }
+            }
+            let h = field.heights_threaded(&dirs, 1);
+            let (lo, hi) = h.iter().fold((f64::MAX, f64::MIN), |(a, b), &x| (a.min(x), b.max(x)));
+            v[12] = (hi - lo) as f32;
+            v
+        };
+        if let Ok(sites) = std::env::var("S69_SITES") {
+            for site in sites.split(',') {
+                let s: Vec<&str> = site.split(':').collect();
+                let v = values(s[1].parse().unwrap(), s[2].parse().unwrap());
+                println!("S69SITE {} {:?}", s[0], v);
+            }
+        }
+        let (w, h) = (720usize, 360usize);
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let rows: Vec<std::sync::Mutex<Vec<f32>>> = (0..h).map(|_| std::sync::Mutex::new(Vec::new())).collect();
+        let t0 = std::time::Instant::now();
+        std::thread::scope(|sc| {
+            for _ in 0..8 {
+                sc.spawn(|| loop {
+                    let r = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if r >= h {
+                        break;
+                    }
+                    let lat = 90.0 - (r as f64 + 0.5) * 0.5;
+                    let mut row = Vec::with_capacity(w * 13);
+                    for c in 0..w {
+                        row.extend_from_slice(&values(lat, -180.0 + (c as f64 + 0.5) * 0.5));
+                    }
+                    *rows[r].lock().unwrap() = row;
+                });
+            }
+        });
+        let mut b = Vec::with_capacity(w * h * 52);
+        for r in &rows {
+            for x in r.lock().unwrap().iter() {
+                b.extend_from_slice(&x.to_le_bytes());
+            }
+        }
+        std::fs::write(&out_path, b).unwrap();
+        println!("S69 map {w} x {h} in {:.0} s -> {out_path}", t0.elapsed().as_secs_f64());
+    }
+}
+

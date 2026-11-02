@@ -1,0 +1,52 @@
+heavy-run lock: waiting for test fast (process 31328, in start-879e4b, since 1793134630 s after the epoch); `cargo run --release -p planet --example coarse_carve -- --store C:/DEV/SeriousPlanetData/global16384 --cache C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/3116f58f-e80d-45b8-9131-e11d4834ea4d/scratchpad/z.bin --out spikes/m8-coarse-carve/results/images --site 5.93,-20.49 --site 5.86,-20.54 --site -37.689,3.140 --site 8.972,-16.238` is queued
+heavy-run lock: waiting for test fast (process 31328, in start-879e4b, since 1793134630 s after the epoch); `cargo run --release -p planet --example coarse_carve -- --store C:/DEV/SeriousPlanetData/global16384 --cache C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/3116f58f-e80d-45b8-9131-e11d4834ea4d/scratchpad/z.bin --out spikes/m8-coarse-carve/results/images --site 5.93,-20.49 --site 5.86,-20.54 --site -37.689,3.140 --site 8.972,-16.238` is queued
+heavy-run lock: waiting for test fast (process 31328, in start-879e4b, since 1793134630 s after the epoch); `cargo run --release -p planet --example coarse_carve -- --store C:/DEV/SeriousPlanetData/global16384 --cache C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/3116f58f-e80d-45b8-9131-e11d4834ea4d/scratchpad/z.bin --out spikes/m8-coarse-carve/results/images --site 5.93,-20.49 --site 5.86,-20.54 --site -37.689,3.140 --site 8.972,-16.238` is queued
+heavy-run lock: waiting for test fast (process 36620, in sonnet-crusader-c1a4f2, since 1793134736 s after the epoch); `cargo run --release -p planet --example coarse_carve -- --store C:/DEV/SeriousPlanetData/global16384 --cache C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/3116f58f-e80d-45b8-9131-e11d4834ea4d/scratchpad/z.bin --out spikes/m8-coarse-carve/results/images --site 5.93,-20.49 --site 5.86,-20.54 --site -37.689,3.140 --site 8.972,-16.238` is queued
+heavy-run lock: waiting for test fast (process 36620, in sonnet-crusader-c1a4f2, since 1793134736 s after the epoch); `cargo run --release -p planet --example coarse_carve -- --store C:/DEV/SeriousPlanetData/global16384 --cache C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/3116f58f-e80d-45b8-9131-e11d4834ea4d/scratchpad/z.bin --out spikes/m8-coarse-carve/results/images --site 5.93,-20.49 --site 5.86,-20.54 --site -37.689,3.140 --site 8.972,-16.238` is queued
+heavy-run lock: waiting for test fast (process 36620, in sonnet-crusader-c1a4f2, since 1793134736 s after the epoch); `cargo run --release -p planet --example coarse_carve -- --store C:/DEV/SeriousPlanetData/global16384 --cache C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/3116f58f-e80d-45b8-9131-e11d4834ea4d/scratchpad/z.bin --out spikes/m8-coarse-carve/results/images --site 5.93,-20.49 --site 5.86,-20.54 --site -37.689,3.140 --site 8.972,-16.238` is queued
+heavy-run lock: waiting for test fast (process 36620, in sonnet-crusader-c1a4f2, since 1793134736 s after the epoch); `cargo run --release -p planet --example coarse_carve -- --store C:/DEV/SeriousPlanetData/global16384 --cache C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/3116f58f-e80d-45b8-9131-e11d4834ea4d/scratchpad/z.bin --out spikes/m8-coarse-carve/results/images --site 5.93,-20.49 --site 5.86,-20.54 --site -37.689,3.140 --site 8.972,-16.238` is queued
+heavy-run lock: waiting for test fast (process 36620, in sonnet-crusader-c1a4f2, since 1793134736 s after the epoch); `cargo run --release -p planet --example coarse_carve -- --store C:/DEV/SeriousPlanetData/global16384 --cache C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/3116f58f-e80d-45b8-9131-e11d4834ea4d/scratchpad/z.bin --out spikes/m8-coarse-carve/results/images --site 5.93,-20.49 --site 5.86,-20.54 --site -37.689,3.140 --site 8.972,-16.238` is queued
+heavy-run lock: waiting for test fast (process 32524, in start-879e4b, since 1793134876 s after the epoch); `cargo run --release -p planet --example coarse_carve -- --store C:/DEV/SeriousPlanetData/global16384 --cache C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/3116f58f-e80d-45b8-9131-e11d4834ea4d/scratchpad/z.bin --out spikes/m8-coarse-carve/results/images --site 5.93,-20.49 --site 5.86,-20.54 --site -37.689,3.140 --site 8.972,-16.238` is queued
+heavy-run lock: waiting for test fast (process 32524, in start-879e4b, since 1793134876 s after the epoch); `cargo run --release -p planet --example coarse_carve -- --store C:/DEV/SeriousPlanetData/global16384 --cache C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/3116f58f-e80d-45b8-9131-e11d4834ea4d/scratchpad/z.bin --out spikes/m8-coarse-carve/results/images --site 5.93,-20.49 --site 5.86,-20.54 --site -37.689,3.140 --site 8.972,-16.238` is queued
+heavy-run lock: waiting for test fast (process 32524, in start-879e4b, since 1793134876 s after the epoch); `cargo run --release -p planet --example coarse_carve -- --store C:/DEV/SeriousPlanetData/global16384 --cache C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/3116f58f-e80d-45b8-9131-e11d4834ea4d/scratchpad/z.bin --out spikes/m8-coarse-carve/results/images --site 5.93,-20.49 --site 5.86,-20.54 --site -37.689,3.140 --site 8.972,-16.238` is queued
+heavy-run lock: the machine is free after 331 s: running `cargo run --release -p planet --example coarse_carve -- --store C:/DEV/SeriousPlanetData/global16384 --cache C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/3116f58f-e80d-45b8-9131-e11d4834ea4d/scratchpad/z.bin --out spikes/m8-coarse-carve/results/images --site 5.93,-20.49 --site 5.86,-20.54 --site -37.689,3.140 --site 8.972,-16.238`
+$ cargo run --release -p planet --example coarse_carve -- --store C:/DEV/SeriousPlanetData/global16384 --cache C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/3116f58f-e80d-45b8-9131-e11d4834ea4d/scratchpad/z.bin --out spikes/m8-coarse-carve/results/images --site 5.93,-20.49 --site 5.86,-20.54 --site -37.689,3.140 --site 8.972,-16.238
+warning: value assigned to `rec` is never read
+   --> crates\app\src\tribspike.rs:263:10
+    |
+263 |     let (mut rec, mut order, mut area) = (Vec::new(), Vec::new(), Vec::new());
+    |          ^^^^^^^ this value is reassigned later and never used
+...
+299 |                 (rec, order, area) = (r, o, a);
+    |                  --- `rec` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `order` is never read
+   --> crates\app\src\tribspike.rs:263:19
+    |
+263 |     let (mut rec, mut order, mut area) = (Vec::new(), Vec::new(), Vec::new());
+    |                   ^^^^^^^^^ this value is reassigned later and never used
+...
+299 |                 (rec, order, area) = (r, o, a);
+    |                       ----- `order` is overwritten here before the previous value is read
+
+warning: `planet` (lib) generated 2 warnings
+    Finished `release` profile [optimized] target(s) in 0.36s
+     Running `target\release\examples\coarse_carve.exe --store 'C:/DEV/SeriousPlanetData/global16384' --cache 'C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/3116f58f-e80d-45b8-9131-e11d4834ea4d/scratchpad/z.bin' --out spikes/m8-coarse-carve/results/images --site 5.93,-20.49 --site 5.86,-20.54 --site -37.689,3.140 --site 8.972,-16.238`
+cells 25165824 land 7370117; fill+route+accumulate 2.70 s; carve + flood + route + accumulate 2.79 s (added)
+receivers changed by the carve: 2029905 (27.5 %); cells the second flood fills over 0.5 m: 0
+max area 1.449e13 -> 1.449e13; cells over 1e10 m2 284498 -> 283024; over 1e11 50312 -> 49801
+relief kept: carved minus input (m), median (p10 p90 | p99 of the lowering) by input band
+fill only                0.0 (     0     1 |      0) |     0.0 (     0     3 |      0) |     0.0 (     0     3 |      0) |     0.0 (     0    38 |      0) |     0.0 (     0    30 |      0) |
+carved                  -1.4 (   -11    -0 |    -59) |    -1.4 (   -12    -1 |    -67) |    -1.4 (    -9    -1 |    -40) |    -1.4 (    -5    30 |    -24) |    -1.3 (    -3    25 |    -12) |
+carved, re-flooded      -1.4 (   -11    -0 |    -59) |    -1.4 (   -12    -1 |    -67) |    -1.4 (    -9    -1 |    -40) |    -1.4 (    -5    30 |    -24) |    -1.3 (    -3    25 |    -12) |
+local relief, input -> carved (median m) 10 -> 17 | 13 -> 24 | 79 -> 82 | 266 -> 224 | 343 -> 282 |
+site (5.930, -20.490) off-corridor cells 368941: chunk change |dz| p50 0.5 p99 4.8 max 6.8 m; carve lowering p50 4.91 p99 4.91 max 4.91 m; chunk change after the carve p50 4.4 p99 4.9 max 5.1
+site (5.860, -20.540) off-corridor cells 369664: chunk change |dz| p50 0.4 p99 1.2 max 1.9 m; carve lowering p50 1.42 p99 1.42 max 1.42 m; chunk change after the carve p50 1.0 p99 1.4 max 1.6
+site (-37.689, 3.140) off-corridor cells 369664: chunk change |dz| p50 9.7 p99 27.8 max 41.3 m; carve lowering p50 1.84 p99 1.84 max 1.84 m; chunk change after the carve p50 7.9 p99 26.0 max 39.5
+site (8.972, -16.238) off-corridor cells 368894: chunk change |dz| p50 10.8 p99 31.4 max 79.5 m; carve lowering p50 21.46 p99 21.46 max 21.46 m; chunk change after the carve p50 10.8 p99 21.5 max 58.1
+still spikes/m8-coarse-carve/results/images\carve_5.93_-20.49.png : left input, right carved; window 96 x 96 cells of 4886 m (face 0)
+still spikes/m8-coarse-carve/results/images\carve_5.86_-20.54.png : left input, right carved; window 96 x 96 cells of 4886 m (face 0)
+still spikes/m8-coarse-carve/results/images\carve_-37.69_3.14.png : left input, right carved; window 96 x 96 cells of 4886 m (face 0)
+still spikes/m8-coarse-carve/results/images\carve_8.97_-16.24.png : left input, right carved; window 96 x 96 cells of 4886 m (face 0)

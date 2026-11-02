@@ -1,0 +1,64 @@
+cpu 38% 08:59:33
+$ cmd /c start  /b /wait /belownormal target/s65build/release/s65.exe C:/DEV/SeriousPlanetData/spike-r3/relief target/s65/out alps,blackforest,highlands,valleyridge
+SPIKE-65: window 2560^2 at 101.8 m; stream power 60 steps, K dt 1, re-route every 5th
+alps amp2: 0.04 s
+alps amp4: 0.04 s
+alps amp6: 0.04 s
+alps spu5: route 18.5 s, steps 3.1 s
+alps spu10: route 18.4 s, steps 3.0 s
+alps spu20: route 18.9 s, steps 3.0 s
+alps spu40: route 17.3 s, steps 2.9 s
+alps amp2-spu10: route 16.3 s, steps 2.9 s
+blackforest amp2: 0.04 s
+blackforest amp4: 0.04 s
+blackforest amp6: 0.04 s
+blackforest spu5: route 16.4 s, steps 2.9 s
+blackforest spu10: route 17.3 s, steps 2.9 s
+blackforest spu20: route 17.9 s, steps 2.9 s
+blackforest spu40: route 18.3 s, steps 2.9 s
+blackforest amp2-spu10: route 17.6 s, steps 2.9 s
+highlands amp2: 0.04 s
+highlands amp4: 0.03 s
+highlands amp6: 0.04 s
+highlands spu5: route 16.7 s, steps 2.6 s
+highlands spu10: route 16.9 s, steps 2.6 s
+highlands spu20: route 17.1 s, steps 2.6 s
+highlands spu40: route 18.2 s, steps 2.8 s
+highlands amp2-spu10: route 16.7 s, steps 2.6 s
+valleyridge amp2: 0.04 s
+valleyridge amp4: 0.03 s
+valleyridge amp6: 0.04 s
+valleyridge spu5: route 16.6 s, steps 2.7 s
+valleyridge spu10: route 17.3 s, steps 2.8 s
+valleyridge spu20: route 18.6 s, steps 2.9 s
+valleyridge spu40: route 18.9 s, steps 3.0 s
+valleyridge amp2-spu10: route 16.7 s, steps 2.8 s
+end 09:06:26
+cpu 8% 09:07:27
+$ cmd /c start  /b /wait /belownormal target/s65build/release/s65.exe C:/DEV/SeriousPlanetData/spike-r3/relief target/s65/out alps,blackforest,highlands,valleyridge
+SPIKE-65: window 2560^2 at 101.8 m; stream power 60 steps, K dt 1, re-route every 5th
+alps amp3-spt: route 4.1 s, steps 1.1 s
+alps amp3-spt-th: thermal 8.9 s
+alps amp4-spt: route 4.2 s, steps 1.1 s
+alps amp4-spt-th: thermal 11.4 s
+alps amp6-spt: route 4.1 s, steps 1.0 s
+alps amp6-spt-th: thermal 10.7 s
+blackforest amp3-spt: route 4.2 s, steps 1.0 s
+blackforest amp3-spt-th: thermal 8.1 s
+blackforest amp4-spt: route 4.3 s, steps 1.0 s
+blackforest amp4-spt-th: thermal 8.1 s
+blackforest amp6-spt: route 4.3 s, steps 1.0 s
+blackforest amp6-spt-th: thermal 8.2 s
+highlands amp3-spt: route 4.1 s, steps 0.9 s
+highlands amp3-spt-th: thermal 8.1 s
+highlands amp4-spt: route 4.2 s, steps 0.9 s
+highlands amp4-spt-th: thermal 8.0 s
+highlands amp6-spt: route 4.2 s, steps 0.9 s
+highlands amp6-spt-th: thermal 8.2 s
+valleyridge amp3-spt: route 4.2 s, steps 0.9 s
+valleyridge amp3-spt-th: thermal 8.0 s
+valleyridge amp4-spt: route 4.7 s, steps 1.0 s
+valleyridge amp4-spt-th: thermal 8.7 s
+valleyridge amp6-spt: route 4.4 s, steps 0.9 s
+valleyridge amp6-spt-th: thermal 7.4 s
+end 09:20:44

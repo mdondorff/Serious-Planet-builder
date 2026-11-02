@@ -1,0 +1,15 @@
+Microsoft Basic Render Driver [Dx12]
+one write_buffer of 21 MB at offset 0, then an empty submit and wait; median of 5 fresh buffers (first write) and of 5 rewrites:
+  128 MiB STORAGE|COPY_DST|COPY_SRC    first  1545.33 ms   rewrite  1534.65 ms
+  128 MiB COPY_DST                     first  1547.46 ms   rewrite  1582.80 ms
+  128 MiB STORAGE|COPY_DST             first  1546.68 ms   rewrite  1531.22 ms
+  32 MiB STORAGE|COPY_DST|COPY_SRC     first  1604.92 ms   rewrite  1612.20 ms
+  24 MiB STORAGE|COPY_DST|COPY_SRC     first  1594.45 ms   rewrite  1603.79 ms
+scaling of the write size into a 128 MiB STORAGE|COPY_DST buffer (rewrite, median of 5):
+       8712 bytes:     0.77 ms = 11.3 MB/s
+     262144 bytes:    20.27 ms = 12.9 MB/s
+    1048576 bytes:    80.08 ms = 13.1 MB/s
+    4194304 bytes:   317.55 ms = 13.2 MB/s
+    8388608 bytes:   634.95 ms = 13.2 MB/s
+   21000000 bytes:  1595.67 ms = 13.2 MB/s
+  4096^2 Rgba16Uint texture, 640 rows  first   230.00 ms   rewrite   206.41 ms

@@ -1,0 +1,10 @@
+#!/bin/bash
+# SPIKE-71 under one heavy lock: coarse dumps (branch spike/m9-relief-source, worktree already on it), then the driver.
+cd C:/DEV/Serious-Planet-Builder/.claude/worktrees/sonnet-spikes-36fc88
+cpu() { powershell -NoProfile -Command "(Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average"; }
+[ "$(git branch --show-current)" = spike/m9-relief-source ] || exit 1
+echo "=== dump $(date +%H:%M:%S) cpu $(cpu)%"
+PLANET_ANET_STORE=C:/DEV/SeriousPlanetData/global16384 PLANET_ANET_RES=16384 RELIEF_SITES=alps:11.5:-18.5,blackforest:2.5:-124.5,highlands:10.5:-122.5,valleyridge:16.5:-111.5 RELIEF_W=6656 RELIEF_COARSE=8 RELIEF_OCTAVES=5 RELIEF_DIR=C:/DEV/SeriousPlanetData/spike-r3/relief68 cmd //c start "" //b //wait //belownormal cargo test -p planet --release --lib relief_window_dump -- --ignored --nocapture 2>&1 | grep -E "RELIEF|test result|panicked"
+echo "=== s71 $(date +%H:%M:%S) cpu $(cpu)%"
+cmd //c start "" //b //wait //belownormal target/s71build/release/s71bake.exe C:/DEV/SeriousPlanetData/spike-r3/relief68 C:/DEV/SeriousPlanetData/spike-r3/relief70 blackforest,highlands,valleyridge,alps
+echo "=== done $(date +%H:%M:%S)"

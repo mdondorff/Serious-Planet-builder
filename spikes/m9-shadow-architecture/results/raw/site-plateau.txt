@@ -1,0 +1,28 @@
+adapter: NVIDIA GeForce RTX 3080 Ti Laptop GPU (Vulkan)  timestamps: true
+plateau mode 1: cpu setup 1091 ms, anchor [0.0, -0.0]
+  terrain pixels 87.6 %
+  gather+mips                    median 1.308 ms  spread 1.308-1.308  rounds [1.308, 1.308, 1.308]
+  primary (stand-in for depth)   median 8.614 ms  spread 7.239-9.457  rounds [9.457, 8.614, 7.239]
+  shadow full                    median 3.352 ms  spread 3.343-3.359  rounds [3.359, 3.352, 3.343]
+  shadow half                    median 1.171 ms  spread 0.803-1.173  rounds [0.803, 1.173, 1.171]
+  shadow full, penumbra 2 km     median 3.348 ms  spread 3.347-3.364  rounds [3.364, 3.347, 3.348]
+  shadow half, penumbra 2 km     median 1.174 ms  spread 1.161-5.135  rounds [1.161, 1.174, 5.135]
+  upsample                       median 4.432 ms  spread 4.425-4.442  rounds [4.442, 4.432, 4.425]
+  penumbra 2 km: steps mean 28.4 p95 72; vs uncapped mean |d| 0.0005, pixels off by > 0.25: 0.07 %
+  full: steps mean 28.5 p95 72 (marched 74.1 % of pixels), mean visibility 0.691
+  half+upsample vs full: mean |d| 0.0066, pixels off by > 0.25: 1.01 %
+plateau mode 0: cpu setup 697 ms, anchor [0.0, -0.0]
+  terrain pixels 87.6 %
+  gather+mips                    median 1.254 ms  spread 1.253-1.255  rounds [1.253, 1.254, 1.255]
+  primary (stand-in for depth)   median 7.011 ms  spread 6.640-8.493  rounds [8.493, 6.64, 7.011]
+  shadow full                    median 4.658 ms  spread 2.335-6.070  rounds [2.335, 4.658, 6.07]
+  shadow half                    median 1.179 ms  spread 1.172-2.186  rounds [2.186, 1.179, 1.172]
+  shadow full, penumbra 2 km     median 2.359 ms  spread 2.337-3.350  rounds [3.35, 2.359, 2.337]
+  shadow half, penumbra 2 km     median 1.170 ms  spread 1.163-1.171  rounds [1.171, 1.163, 1.17]
+  upsample                       median 0.216 ms  spread 0.200-1.862  rounds [1.862, 0.216, 0.2]
+  penumbra 2 km: steps mean 28.4 p95 72; vs uncapped mean |d| 0.0005, pixels off by > 0.25: 0.07 %
+  full: steps mean 28.5 p95 72 (marched 74.0 % of pixels), mean visibility 0.691
+  half+upsample vs full: mean |d| 0.0066, pixels off by > 0.25: 1.01 %
+  drag frame 1: stamp at +0 m, gather+mips 1.242 ms (all levels)
+  drag frame 2: stamp at +1500 m, gather+mips 1.308 ms (all levels)
+  drag frame 3: stamp at +3000 m, gather+mips 1.310 ms (all levels)

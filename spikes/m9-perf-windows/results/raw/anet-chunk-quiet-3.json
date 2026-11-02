@@ -1,0 +1,8 @@
+{
+  "scene": "anet-chunk",
+  "adapter": "NVIDIA GeForce RTX 3080 Ti Laptop GPU",
+  "owner_override": [],
+  "res": 16384,
+  "chunks": [{"cell_m": 8, "threads": "production", "cells_per_chunk": 608, "halo_rings": 374, "seconds": 3.844}, {"cell_m": 8, "threads": "1", "cells_per_chunk": 608, "halo_rings": 374, "seconds": 5.819}, {"cell_m": 4, "threads": "production", "cells_per_chunk": 1216, "halo_rings": 747, "seconds": 16.090}, {"cell_m": 10, "threads": "production", "cells_per_chunk": 496, "halo_rings": 305, "seconds": 2.385}],
+  "budget_failures": []
+}

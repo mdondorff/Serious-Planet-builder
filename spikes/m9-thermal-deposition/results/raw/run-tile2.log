@@ -1,0 +1,10 @@
+cpu 43% 08:26:23
+$ cmd /c start  /b /wait /belownormal target/s64build/release/s64.exe C:/DEV/SeriousPlanetData/spike-r3 target/s64/out 2
+SPIKE-64: tiles ["2"], thermal 100 passes on 4 threads; dx 101.8 m
+tile 2 thermal theta 33: 100 passes 15.74 s (157.4 ms/pass, 4 threads); first-pass volume 0.000e0 m3, cells moving in the last pass 0; land mass change 0.000e0 m3
+tile 2 thermal theta 20: 100 passes 16.20 s (162.0 ms/pass, 4 threads); first-pass volume 1.475e5 m3, cells moving in the last pass 78; land mass change 5.945e1 m3
+tile 2 dep-lo (kc 10000): 2.56 s (flood 1.70, route 0.63); eroded 1.451e11 m3, deposited 3.843e10 (26.5 %), left the window 1.066e11
+tile 2 dep-mid (kc 100000): 2.52 s (flood 1.70, route 0.63); eroded 1.451e11 m3, deposited 2.394e10 (16.5 %), left the window 1.211e11
+tile 2 dep-mid+thermal33: thermal 15.79 s
+tile 2 dep-hi (kc 1000000): 2.62 s (flood 1.78, route 0.66); eroded 1.451e11 m3, deposited 2.207e10 (15.2 %), left the window 1.230e11
+[exited with code 0]

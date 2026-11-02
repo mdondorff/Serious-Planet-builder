@@ -1,0 +1,36 @@
+COARSE look n=2048: base sampled in 7.9s (6 threads)
+COARSE look step 0: mean |dz| 37.530 m, max 936.5 m, 2548 ms, peak 1072 MB
+COARSE look step 5: mean |dz| 18.625 m, max 862.2 m, 3530 ms, peak 1133 MB
+COARSE look step 10: mean |dz| 11.044 m, max 701.7 m, 3755 ms, peak 1133 MB
+COARSE look step 15: mean |dz| 6.119 m, max 657.9 m, 3673 ms, peak 1133 MB
+COARSE look step 20: mean |dz| 3.461 m, max 605.8 m, 3661 ms, peak 1133 MB
+COARSE look step 25: mean |dz| 2.429 m, max 571.7 m, 3673 ms, peak 1133 MB
+COARSE look step 30: mean |dz| 1.999 m, max 459.3 m, 3685 ms, peak 1133 MB
+COARSE look step 35: mean |dz| 1.724 m, max 429.0 m, 3697 ms, peak 1133 MB
+COARSE look step 40: mean |dz| 1.513 m, max 412.7 m, 3756 ms, peak 1133 MB
+COARSE look step 45: mean |dz| 1.355 m, max 340.9 m, 3674 ms, peak 1133 MB
+COARSE look step 50: mean |dz| 1.211 m, max 440.0 m, 3655 ms, peak 1133 MB
+COARSE look step 55: mean |dz| 1.085 m, max 393.2 m, 3693 ms, peak 1133 MB
+COARSE look step 60: mean |dz| 0.988 m, max 403.9 m, 3689 ms, peak 1133 MB
+COARSE look step 65: mean |dz| 0.897 m, max 278.5 m, 3730 ms, peak 1133 MB
+COARSE look step 70: mean |dz| 0.816 m, max 358.3 m, 3676 ms, peak 1133 MB
+COARSE look step 75: mean |dz| 0.758 m, max 477.3 m, 3723 ms, peak 1133 MB
+COARSE look step 80: mean |dz| 0.704 m, max 355.5 m, 3734 ms, peak 1133 MB
+COARSE look step 85: mean |dz| 0.652 m, max 436.5 m, 3694 ms, peak 1133 MB
+COARSE look step 90: mean |dz| 0.612 m, max 404.6 m, 3707 ms, peak 1133 MB
+COARSE look step 95: mean |dz| 0.571 m, max 367.8 m, 3791 ms, peak 1133 MB
+COARSE look step 99: mean |dz| 0.542 m, max 457.6 m, 3737 ms, peak 1133 MB
+SITE face 0 cell (820,1542) of 2048: lat 22.536 lon -8.943, coarse relief 2368 m in 7x7 cells, z 3487 m
+LOOK site lat 22.536 lon -8.943, 1750x1750 cells of 4 m = 49 km2, detail 400 m
+NET breach: 61313 cells carved, mean 27.99 m
+COST A-net N=30: 2.8 s single thread for 49 km2 at 4 m = 0.06 s/km2 (30 ns per cell-step), 8 coarse segments, 186 cycle cells
+COST A N=30: 18.3 s single thread for 49 km2 at 4 m = 0.37 s/km2 (199 ns per cell-step)
+COST B (gully noise): 0.51 s single thread for 49 km2 = 0.010 s/km2
+COST C (1 M droplets, life 200, thermal 12 passes at 56 deg): 10.5 s single thread for 49 km2 = 0.21 s/km2
+wrote ../results/images/sheet_sunset.png (1248x312, 239 KB)
+wrote ../results/images/sheet_midday.png (1248x312, 239 KB)
+SHAPE main: relief 535 m in the central 5 km, slope median 6.1 deg p90 6.9 deg p99 7.4 deg
+SHAPE A_net: relief 775 m in the central 5 km, slope median 19.3 deg p90 41.0 deg p99 58.2 deg
+SHAPE B: relief 754 m in the central 5 km, slope median 25.9 deg p90 48.3 deg p99 67.0 deg
+SHAPE C: relief 751 m in the central 5 km, slope median 16.4 deg p90 32.3 deg p99 44.6 deg
+SHAPE A_dyn_N30: relief 768 m in the central 5 km, slope median 26.2 deg p90 55.8 deg p99 73.0 deg

@@ -1,0 +1,39 @@
+site hillsA: solved ground 1824 cells, core 608, height 4377 to 5629 m, largest change from base 228 m, A_t 0.3 km2 = 4644 cells
+bounded scheme: breach radius 64 cells, carve limit 20 m, area depth 245 steps: dependence radius 375 cells
+fill reference over the window: 359 ms, 523067 flat cells
+bounded reference over the window: pits 4672, carved 4602, sinks 70 (0.92 s)
+
+== A. fill (step 1 scheme) on solved ground: chunk with halo H vs the fill reference (margin 608); A_t 0.3 km2 ==
+    H       ms     dens    miss%   extra% | seam E links differ stepdn | seam N links differ stepdn
+    0       34    1.107    81.08    48.35 |            0      0      0 |            1      0      0
+  100       60    1.565     7.11     0.82 |            0      0      0 |            1      0      0
+  200       99    1.650     0.72     0.00 |            0      0      0 |            1      0      0
+  375      187    1.661     0.00     0.00 |            0      0      0 |            1      0      0
+  600      354    1.661     0.00     0.00 |            0      0      0 |            1      0      0
+(the chunks east and north are clipped to the window: H above 608 is H 608 for them)
+
+== B. bounded scheme: chunk with halo H vs the bounded reference (same parameters, the whole window); A_t 0.3 km2 ==
+    H       ms     dens    miss%   extra% mismatch | seam E links differ stepdn | seam N links differ stepdn
+  100      133    1.543     6.45     0.00     1565 |            0      0      0 |            0      0      0
+  200      236    1.644     0.20     0.00      215 |            0      0      0 |            0      0      0
+  300      337    1.647     0.00     0.00        0 |            0      0      0 |            0      0      0
+  375      442    1.647     0.00     0.00        0 |            0      0      0 |            0      0      0
+  600      839    1.647     0.00     0.00        0 |            0      0      0 |            0      0      0
+(mismatch: core cells where the chunk's area or receiver differs from the reference's, any value; the chunks east and north have the same H, their regions fit the window up to H 608 only on the sides facing the centre)
+
+== C. what the bound changes: bounded reference vs fill reference, whole window core (A_t 0.3 km2) ==
+fill:    density 1.661  straight-run share 20.2 %  flat cells in the core: 70517
+bounded: density 1.647  straight-run share 0.2 %  sink cells in the core: 21  miss 62.08 % extra 66.63 % against the fill reference
+tolerance 3 cells (24 m): fill channel cells with no bounded channel within 3 cells 51.1 %, bounded cells with no fill channel within 3 cells 52.5 %; tolerance 8 cells (64 m): 41.9 % and 41.2 %
+  Rb  carve    L |    dens    miss%   extra% straight    sinks carved     ms
+  32     20  309 |   1.481    62.41    57.03     0.3       24   4556    815
+  64      5  245 |   1.451    62.92    55.66     0.3       27   4544    852
+  64     20  245 |   1.647    62.08    66.63     0.2       21   4602    853
+  64    100  245 |   1.675    62.05    67.89     0.2       13   4616    852
+  96     20  181 |   1.605    62.44    64.34     0.3       21   4602    927
+  64     20 1400 |   1.654    61.56    66.63     0.2       21   4602    882
+(Rb breach radius in cells, carve limit in m, L area depth in steps; the last row is the bounded breach with an area depth no tree reaches)
+
+== D. cost and thread identity (bounded, H 375, centre chunk; 9 cores clipped to the window) ==
+centre chunk 1844164 cells: breach 74 ms, receivers 11 ms, area 353 ms, total 438 ms; pits 2797, carved 2750, sinks 47; hash 385e1eca10426247
+9 chunks: 1 worker 2.40 s, 8 workers 0.83 s, hashes identical: true

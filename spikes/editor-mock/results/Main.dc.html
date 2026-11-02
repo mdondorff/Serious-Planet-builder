@@ -1,0 +1,695 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Planet editor, map first</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;background:#121417}
+a{color:#F0A93B}a:hover{color:#FFC56B}
+.app button{font:inherit;color:inherit}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.top{height:48px;display:flex;align-items:center;gap:16px;padding:0 16px;border-bottom:1px solid #2C3036;background:#17191C}
+.brand{font-weight:600;font-size:14px;letter-spacing:.02em}
+.world{font-family:'IBM Plex Mono',monospace;font-size:12px;color:#A3A8AE}
+.seg{display:flex;border:1px solid #3A3F46;border-radius:6px;overflow:hidden}
+.seg button{border:0;background:transparent;padding:0 14px;height:30px;font-size:13px;cursor:pointer;color:#C9CDD2}
+.seg button+button{border-left:1px solid #3A3F46}
+.seg button.on{background:#F0A93B;color:#1A1405;font-weight:600}
+.btn{border:1px solid #3A3F46;background:#1F2226;border-radius:6px;height:30px;padding:0 12px;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:8px}
+.btn:hover{background:#272B30}
+.btn:disabled{opacity:.4;cursor:default}
+.kbd{font-family:'IBM Plex Mono',monospace;font-size:11px;color:#A3A8AE}
+.main{display:flex;height:820px}
+.rail{width:56px;border-right:1px solid #2C3036;background:#17191C;display:flex;flex-direction:column;align-items:center;gap:6px;padding-top:10px}
+.tool{width:44px;height:44px;border:1px solid transparent;border-radius:8px;background:transparent;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px}
+.tool:hover{background:#23272C}
+.tool.on{background:#2B2417;border-color:#F0A93B}
+.tool svg{width:20px;height:20px;fill:none;stroke:#E8E6E1;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.tool.on svg{stroke:#F0A93B}
+.tool .kbd{font-size:9px;line-height:1}
+.left{width:300px;border-right:1px solid #2C3036;background:#1B1E22;display:flex;flex-direction:column;min-height:0}
+.tabs{display:flex;border-bottom:1px solid #2C3036}
+.tabs button{flex:1;height:40px;border:0;background:transparent;cursor:pointer;font-size:13px;color:#A3A8AE;border-bottom:2px solid transparent}
+.tabs button.on{color:#E8E6E1;border-bottom-color:#F0A93B;font-weight:600}
+.pane{padding:12px;overflow:auto;flex:1;display:flex;flex-direction:column;gap:10px}
+.search{width:100%;box-sizing:border-box;height:34px;border-radius:6px;border:1px solid #3A3F46;background:#121417;color:#E8E6E1;padding:0 10px;font:inherit;font-size:13px}
+.pills{display:flex;flex-wrap:wrap;gap:6px}
+.pill{border:1px solid #3A3F46;background:transparent;border-radius:999px;height:26px;padding:0 10px;font-size:12px;cursor:pointer;color:#C9CDD2}
+.pill.on{background:#E8E6E1;color:#121417;border-color:#E8E6E1;font-weight:600}
+.cap{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#8E949B;margin:4px 0 0}
+.row{display:flex;align-items:center;gap:10px;width:100%;text-align:left;border:1px solid transparent;background:transparent;border-radius:6px;padding:8px;cursor:pointer}
+.row:hover{background:#23272C}
+.row.sel{background:#2B2417;border-color:#6B5426}
+.row.off{opacity:.5}
+.sw{width:10px;height:10px;flex:none;border-radius:2px}
+.k-stamp .sw{background:#F0A93B;border-radius:50%}
+.k-line .sw{background:#4C8DF6;height:3px;width:12px;border-radius:2px}
+.k-region .sw{border:1.5px dashed #CBB8FF;background:transparent}
+.rname{font-size:13px;color:#E8E6E1}
+.rmeta{font-size:11px;color:#9AA0A6}
+.rdist{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#C9CDD2}
+.grp{border:1px solid #2C3036;border-radius:8px;overflow:hidden}
+.grph{display:flex;justify-content:space-between;align-items:baseline;padding:8px 10px;background:#202328;font-size:12px;font-weight:600}
+.grph span{font-weight:400;color:#9AA0A6;font-size:11px}
+.lrow{display:flex;align-items:center;gap:8px;padding:4px 10px;border-top:1px solid #262A2F}
+.lrow.sel{background:#2B2417}
+.lrow input{accent-color:#F0A93B;width:15px;height:15px;margin:0}
+.lrow .row{padding:6px 4px}
+.gnode{display:block;width:100%;text-align:left;border:1px solid #3A3F46;background:#202328;border-radius:8px;padding:8px 10px;cursor:pointer;position:relative}
+.gnode.sel{border-color:#F0A93B;background:#2B2417}
+.gnode.fixed{cursor:default;background:#17191C;border-style:dashed}
+.gwire{width:2px;height:14px;background:#4A5058;margin:0 0 0 18px}
+.gnode.k-stamp{border-left:4px solid #F0A93B}
+.gnode.k-line{border-left:4px solid #4C8DF6}
+.gnode.k-region{border-left:4px dashed #CBB8FF}
+.gtitle{font-size:13px}
+.gmeta{font-size:11px;color:#9AA0A6;margin-top:2px}
+.vps{flex:1;display:flex;min-width:0;position:relative;background:#0F1113}
+.vp{flex:1;position:relative;overflow:hidden;min-width:0}
+.vp+.vp{border-left:2px solid #2C3036}
+.bg{position:absolute;inset:0;width:100%;height:100%}
+.ct{fill:none;stroke:#9B9469;stroke-width:1;vector-effect:non-scaling-stroke;opacity:.45}
+.gr{fill:none;stroke:#FFFFFF;stroke-width:1;vector-effect:non-scaling-stroke;opacity:.08}
+.ground{position:absolute;inset:0;border:0;padding:0;margin:0;background:transparent;cursor:default}
+.ground.place{cursor:crosshair}
+.vlabel{position:absolute;left:12px;top:12px;background:rgba(17,19,22,.85);border:1px solid #3A3F46;border-radius:6px;padding:6px 10px;font-size:12px;pointer-events:none}
+.vlabel b{font-weight:600}
+.edit{position:absolute;padding:0;margin:0;border:0;background:transparent;cursor:pointer}
+.edit .shape{position:absolute;left:0;top:0;width:100%;height:100%;overflow:visible}
+.edit ellipse{fill:rgba(240,169,59,.10);stroke:#F0A93B;stroke-width:1.5;stroke-dasharray:5 4;vector-effect:non-scaling-stroke}
+.edit path{fill:none;stroke:#4C8DF6;stroke-width:3;vector-effect:non-scaling-stroke;opacity:.85}
+.edit polygon{fill:rgba(203,184,255,.10);stroke:#CBB8FF;stroke-width:1.5;stroke-dasharray:7 5;vector-effect:non-scaling-stroke}
+.edit:hover ellipse,.edit:hover polygon{stroke-width:2.5}
+.edit:hover path{stroke-width:5;opacity:1}
+.edit.sel ellipse,.edit.sel polygon{stroke-dasharray:none;stroke-width:2.5;fill-opacity:1}
+.edit.sel ellipse{fill:rgba(240,169,59,.22)}
+.edit.sel polygon{fill:rgba(203,184,255,.22)}
+.edit.sel path{stroke:#9CC2FF;stroke-width:5;opacity:1}
+.edit.dim{opacity:.25}
+.edit:focus-visible{outline:2px solid #F0A93B;outline-offset:3px}
+.tag{position:absolute;left:50%;top:-28px;transform:translateX(-50%);white-space:nowrap;background:#111316;color:#E8E6E1;font-size:12px;font-weight:500;line-height:1;padding:6px 8px;border-radius:4px;border:1px solid #3A3F46;opacity:0;pointer-events:none}
+.edit:hover .tag,.edit.sel .tag{opacity:1}
+.hd{position:absolute;width:9px;height:9px;background:#F0A93B;border:1.5px solid #1A1405;display:none}
+.edit.sel .hd{display:block}
+.hd.n{left:50%;top:-5px;margin-left:-5px}.hd.s{left:50%;bottom:-5px;margin-left:-5px}
+.hd.e{right:-5px;top:50%;margin-top:-5px}.hd.w{left:-5px;top:50%;margin-top:-5px}
+.hd.r{left:50%;top:-44px;margin-left:-5px;border-radius:50%;background:#E8E6E1}
+.k-line .hd,.k-region .hd{background:#E8E6E1}
+.palette{position:absolute;left:50%;top:12px;transform:translateX(-50%);display:flex;align-items:center;gap:8px;background:rgba(23,25,28,.95);border:1px solid #3A3F46;border-radius:8px;padding:6px 8px;z-index:5}
+.palette .hint{font-size:12px;color:#C9CDD2;padding:0 6px}
+.globe-wrap{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+.globe{position:relative;width:640px;height:640px}
+.gmark{position:absolute;border:0;padding:0;cursor:pointer;background:transparent}
+.gmark.dot{width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;border:2px solid #121417}
+.gmark.dot.k-stamp{background:#F0A93B}.gmark.dot.k-line{background:#4C8DF6}.gmark.dot.k-region{background:#CBB8FF}
+.gmark.ring{border:2px dashed #F0A93B;border-radius:50%;background:rgba(240,169,59,.06)}
+.gmark.sel{outline:3px solid #E8E6E1;outline-offset:2px}
+.gmark:hover .tag,.gmark.sel .tag{opacity:1}
+.insp{width:320px;border-left:1px solid #2C3036;background:#1B1E22;overflow:auto;padding:16px;box-sizing:border-box;display:flex;flex-direction:column;gap:14px}
+.eyebrow{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#8E949B}
+.insp h2{margin:4px 0 8px;font-size:20px;font-weight:600}
+.chip{display:inline-block;font-size:11px;border:1px solid #3A3F46;border-radius:999px;padding:3px 8px;margin-right:6px;color:#C9CDD2}
+.chip.sc-local{border-color:#4F7A55;color:#B9E0BE}
+.chip.sc-regional{border-color:#6B5426;color:#F3C77A}
+.chip.sc-cont{border-color:#7A3E3E;color:#F2B3B3}
+.kv{display:grid;grid-template-columns:84px 1fr;gap:6px 10px;margin:0;font-size:12px}
+.kv dt{color:#9AA0A6}.kv dd{margin:0;font-family:'IBM Plex Mono',monospace;color:#E8E6E1}
+.prm label{display:flex;justify-content:space-between;font-size:12px;color:#C9CDD2;margin-bottom:4px}
+.prm .val{font-family:'IBM Plex Mono',monospace;color:#E8E6E1}
+.prm input{width:100%;accent-color:#F0A93B;margin:0}
+.box{border:1px solid #2C3036;border-radius:8px;padding:10px;font-size:12px;color:#C9CDD2;background:#17191C;line-height:1.45}
+.box b{color:#E8E6E1}
+.chk{display:flex;gap:8px;align-items:center;font-size:12px}
+.chk input{accent-color:#F0A93B;width:15px;height:15px;margin:0}
+.danger{border-color:#7A3E3E;color:#F2B3B3}
+.empty{color:#9AA0A6;font-size:13px;line-height:1.5}
+.status{height:32px;display:flex;align-items:center;gap:20px;padding:0 16px;border-top:1px solid #2C3036;background:#17191C;font-size:12px;color:#C9CDD2}
+.status .mono{font-family:'IBM Plex Mono',monospace;color:#A3A8AE}
+.status .msg{flex:1;color:#E8E6E1}
+.btn.on{background:#2B2417;border-color:#F0A93B;color:#F3C77A}
+.edit.surf-desert polygon{fill:rgba(214,170,90,.6)}
+.edit.surf-snow polygon{fill:rgba(240,240,235,.65)}
+.edit.surf-rock polygon{fill:rgba(140,140,150,.65)}
+.edit.surf-forest polygon{fill:rgba(60,120,70,.7)}
+.edit.surf-grass polygon{fill:rgba(130,180,90,.6)}
+.legend{position:absolute;left:12px;bottom:12px;background:rgba(17,19,22,.9);border:1px solid #3A3F46;border-radius:8px;padding:10px 12px;font-size:12px;width:220px}
+.lg{display:flex;align-items:center;gap:8px;margin:3px 0}
+.lsw{width:14px;height:10px;border-radius:2px;border:1px solid #3A3F46}
+.dotlive{display:inline-block;width:8px;height:8px;border-radius:50%;background:#7FD08A;margin-right:8px}
+</style>
+</helmet>
+<div class="app" style="width: 1440px; height: 900px; background: #121417; color: #E8E6E1; font-family: 'IBM Plex Sans', system-ui, sans-serif; display: flex; flex-direction: column; overflow: hidden">
+
+<header class="top">
+<div class="brand">Planet Builder · Editor</div>
+<div class="world">world: Aster · seed 4217 · {{editCount}} edits</div>
+<div style="flex: 1"></div>
+<div class="seg" role="group" aria-label="View">
+<sc-for list="{{views}}" as="v" hint-placeholder-count="3">
+<button class="{{v.cls}}" aria-pressed="{{v.pressed}}" onClick="{{v.pick}}">{{v.label}}</button>
+</sc-for>
+</div>
+<button class="{{overlayCls}}" aria-pressed="{{overlayPressed}}" onClick="{{toggleOverlay}}">Surface overlay</button>
+<button class="btn" onClick="{{undo}}" disabled="{{undoOff}}">Undo <span class="kbd">Ctrl+Z</span></button>
+<button class="btn" onClick="{{redo}}" disabled="{{redoOff}}">Redo <span class="kbd">Ctrl+Y</span></button>
+</header>
+
+<div class="main">
+
+<nav class="rail" aria-label="Tools">
+<sc-for list="{{tools}}" as="t" hint-placeholder-count="5">
+<button class="{{t.cls}}" aria-pressed="{{t.pressed}}" aria-label="{{t.label}}" title="{{t.title}}" onClick="{{t.pick}}">
+<svg viewBox="0 0 24 24" aria-hidden="true"><path d="{{t.icon}}"></path></svg>
+<span class="kbd">{{t.key}}</span>
+</button>
+</sc-for>
+</nav>
+
+<section class="left" aria-label="Edits">
+<div class="tabs" role="group" aria-label="Edit list view">
+<sc-for list="{{panels}}" as="p" hint-placeholder-count="3">
+<button class="{{p.cls}}" aria-pressed="{{p.pressed}}" onClick="{{p.pick}}">{{p.label}}</button>
+</sc-for>
+</div>
+
+<sc-if value="{{panelNear}}" hint-placeholder-val="{{true}}">
+<div class="pane">
+<label for="q" class="sr">Search edits</label>
+<input id="q" class="search" type="search" placeholder="Search edits by name or type" value="{{query}}" onChange="{{onQuery}}">
+<div class="pills" role="group" aria-label="Filter by kind">
+<sc-for list="{{filters}}" as="f" hint-placeholder-count="4">
+<button class="{{f.cls}}" aria-pressed="{{f.pressed}}" onClick="{{f.pick}}">{{f.label}}</button>
+</sc-for>
+</div>
+<p class="cap">Nearest to the camera</p>
+<sc-for list="{{near}}" as="n" hint-placeholder-count="6">
+<button class="{{n.cls}}" onClick="{{n.pick}}">
+<span class="sw"></span>
+<span style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+<span class="rname">{{n.name}}</span>
+<span class="rmeta">{{n.meta}}</span>
+</span>
+<span class="rdist">{{n.dist}}</span>
+</button>
+</sc-for>
+<sc-if value="{{nearEmpty}}" hint-placeholder-val="{{false}}">
+<p class="empty">No edit matches. Clear the search or the filter.</p>
+</sc-if>
+</div>
+</sc-if>
+
+<sc-if value="{{panelLayers}}" hint-placeholder-val="{{false}}">
+<div class="pane">
+<p class="cap">Apply order: bottom to top</p>
+<sc-for list="{{layerGroups}}" as="g" hint-placeholder-count="3">
+<div class="grp">
+<div class="grph">{{g.title}} <span>{{g.sub}}</span></div>
+<sc-for list="{{g.rows}}" as="r" hint-placeholder-count="3">
+<div class="{{r.cls}}">
+<input type="checkbox" id="{{r.cbid}}" checked="{{r.checked}}" onChange="{{r.onToggle}}">
+<label for="{{r.cbid}}" class="sr">Show {{r.name}}</label>
+<button class="row" onClick="{{r.pick}}">
+<span class="sw"></span>
+<span style="display: flex; flex-direction: column; gap: 2px">
+<span class="rname">{{r.name}}</span>
+<span class="rmeta">{{r.meta}}</span>
+</span>
+</button>
+</div>
+</sc-for>
+</div>
+</sc-for>
+<div class="grp">
+<div class="grph">Procedural base <span>locked · generator pinned</span></div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{panelGraph}}" hint-placeholder-val="{{false}}">
+<div class="pane">
+<p class="cap">Regions feed into edits</p>
+<sc-for list="{{graphInputs}}" as="gi" hint-placeholder-count="3">
+<button class="{{gi.cls}}" onClick="{{gi.pick}}">
+<div class="gtitle">{{gi.title}}</div>
+<div class="gmeta">{{gi.meta}}</div>
+</button>
+</sc-for>
+<p class="cap">Chain, top applies first</p>
+<div>
+<sc-for list="{{graphChain}}" as="gn" hint-placeholder-count="6">
+<sc-if value="{{gn.notFirst}}" hint-placeholder-val="{{true}}"><div class="gwire" aria-hidden="true"></div></sc-if>
+<sc-if value="{{gn.isItem}}" hint-placeholder-val="{{true}}">
+<button class="{{gn.cls}}" onClick="{{gn.pick}}">
+<div class="gtitle">{{gn.title}}</div>
+<div class="gmeta">{{gn.meta}}</div>
+</button>
+</sc-if>
+<sc-if value="{{gn.isFixed}}" hint-placeholder-val="{{false}}">
+<div class="gnode fixed">
+<div class="gtitle">{{gn.title}}</div>
+<div class="gmeta">{{gn.meta}}</div>
+</div>
+</sc-if>
+</sc-for>
+</div>
+</div>
+</sc-if>
+</section>
+
+<section class="vps" aria-label="Viewports">
+
+<sc-if value="{{hasPalette}}" hint-placeholder-val="{{false}}">
+<div class="palette" role="group" aria-label="Tool options">
+<sc-for list="{{palette}}" as="o" hint-placeholder-count="4">
+<button class="{{o.cls}}" aria-pressed="{{o.pressed}}" onClick="{{o.pick}}">{{o.label}}</button>
+</sc-for>
+<span class="hint">{{paletteHint}}</span>
+</div>
+</sc-if>
+
+<sc-if value="{{showMap}}" hint-placeholder-val="{{false}}">
+<div class="vp">
+<svg class="bg" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true">
+<rect x="0" y="0" width="1000" height="1000" fill="#23465C"></rect>
+<polygon points="130,0 1000,0 1000,1000 270,1000 210,880 100,800 150,700 70,600 120,480 50,380 130,260 80,120" fill="#6B674E"></polygon>
+<polygon class="ct" points="260,120 900,90 950,500 820,900 360,930 250,700 300,420"></polygon>
+<polygon class="ct" points="380,220 820,200 860,480 760,800 420,820 360,560"></polygon>
+<polygon class="ct" points="480,320 740,300 760,520 680,700 500,700 460,500"></polygon>
+<polygon points="720,50 950,40 975,160 760,175" fill="#CFCDC4" opacity=".75"></polygon>
+<polygon points="600,280 900,270 930,560 640,560" fill="#B59F6E" opacity=".55"></polygon>
+<line class="gr" x1="0" y1="250" x2="1000" y2="250"></line>
+<line class="gr" x1="0" y1="500" x2="1000" y2="500"></line>
+<line class="gr" x1="0" y1="750" x2="1000" y2="750"></line>
+<line class="gr" x1="250" y1="0" x2="250" y2="1000"></line>
+<line class="gr" x1="500" y1="0" x2="500" y2="1000"></line>
+<line class="gr" x1="750" y1="0" x2="750" y2="1000"></line>
+<polygon points="500,930 400,560 600,560" fill="#FFFFFF" opacity=".07"></polygon>
+<polygon points="500,915 488,945 512,945" fill="#E8E6E1"></polygon>
+</svg>
+<button class="{{groundCls}}" aria-label="{{groundLabel}}" onClick="{{groundMap}}"></button>
+<sc-for list="{{itemsMap}}" as="it" hint-placeholder-count="6">
+<button class="{{it.cls}}" style="{{it.style}}" aria-label="{{it.aria}}" onClick="{{it.pick}}">
+<sc-if value="{{it.isStamp}}" hint-placeholder-val="{{true}}"><svg class="shape" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><ellipse cx="50" cy="50" rx="49" ry="48"></ellipse></svg></sc-if>
+<sc-if value="{{it.isLine}}" hint-placeholder-val="{{false}}"><svg class="shape" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d="{{it.path}}"></path></svg></sc-if>
+<sc-if value="{{it.isRegion}}" hint-placeholder-val="{{false}}"><svg class="shape" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polygon points="{{it.poly}}"></polygon></svg></sc-if>
+<span class="hd n"></span><span class="hd s"></span><span class="hd e"></span><span class="hd w"></span>
+<span class="tag">{{it.name}}</span>
+</button>
+</sc-for>
+<div class="vlabel"><b>Map</b> · top-down · 1 : 250 000 · camera at the triangle</div>
+</div>
+</sc-if>
+
+<sc-if value="{{show3d}}" hint-placeholder-val="{{true}}">
+<div class="vp">
+<svg class="bg" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true">
+<rect x="0" y="0" width="1000" height="1000" fill="#1C2838"></rect>
+<rect x="0" y="150" width="1000" height="170" fill="#253650"></rect>
+<path d="M0,300 Q500,262 1000,300 L1000,1000 L0,1000 Z" fill="#485244"></path>
+<polygon points="0,318 70,290 140,312 220,266 300,306 370,280 450,304 530,256 610,300 690,274 770,302 850,270 930,300 1000,288 1000,380 0,380" fill="#59624E"></polygon>
+<polygon points="770,302 850,270 930,300 900,318 800,318" fill="#CFCDC4" opacity=".7"></polygon>
+<rect x="0" y="380" width="1000" height="620" fill="#686751"></rect>
+<path d="M0,430 Q150,400 300,438 T600,428 T1000,418 L1000,540 L0,540 Z" fill="#716E4F"></path>
+<path d="M600,520 Q760,500 980,530 L960,640 Q760,670 620,640 Z" fill="#9C8A5E" opacity=".7"></path>
+<path d="M0,610 Q300,570 600,650 T1000,630 L1000,1000 L0,1000 Z" fill="#7C7655"></path>
+<path d="M0,590 Q110,560 200,620 Q240,700 160,760 L0,780 Z" fill="#2D5770"></path>
+<path class="ct" d="M0,700 Q300,660 600,735 T1000,712"></path>
+<path class="ct" d="M0,800 Q260,760 560,840 T1000,812"></path>
+<path class="ct" d="M200,900 Q500,860 1000,920"></path>
+<path class="ct" d="M300,470 Q500,450 700,480"></path>
+</svg>
+<button class="{{groundCls}}" aria-label="{{groundLabel}}" onClick="{{ground3d}}"></button>
+<sc-for list="{{items3d}}" as="it" hint-placeholder-count="6">
+<button class="{{it.cls}}" style="{{it.style}}" aria-label="{{it.aria}}" onClick="{{it.pick}}">
+<sc-if value="{{it.isStamp}}" hint-placeholder-val="{{true}}"><svg class="shape" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><ellipse cx="50" cy="50" rx="49" ry="48"></ellipse></svg></sc-if>
+<sc-if value="{{it.isLine}}" hint-placeholder-val="{{false}}"><svg class="shape" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d="{{it.path}}"></path></svg></sc-if>
+<sc-if value="{{it.isRegion}}" hint-placeholder-val="{{false}}"><svg class="shape" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polygon points="{{it.poly}}"></polygon></svg></sc-if>
+<span class="hd n"></span><span class="hd s"></span><span class="hd e"></span><span class="hd w"></span><span class="hd r"></span>
+<span class="tag">{{it.name}}</span>
+</button>
+</sc-for>
+<div class="vlabel"><b>3D</b> · free camera · altitude 12.4 km · looking north</div>
+<sc-if value="{{overlayOn}}" hint-placeholder-val="{{false}}">
+<div class="legend">
+<div class="cap" style="margin: 0 0 6px">Debug overlay · surface type</div>
+<div class="lg"><span class="lsw" style="background: #D6AA5A"></span>Desert</div>
+<div class="lg"><span class="lsw" style="background: #F0F0EB"></span>Snow</div>
+<div class="lg"><span class="lsw" style="background: #8C8C96"></span>Rock</div>
+<div class="lg"><span class="lsw" style="background: #3C7846"></span>Forest</div>
+<div class="lg"><span class="lsw" style="background: #82B45A"></span>Grass</div>
+<div class="rmeta" style="margin-top: 6px">Stored on the region; materials are drawn later.</div>
+</div>
+</sc-if>
+</div>
+</sc-if>
+
+<sc-if value="{{showGlobe}}" hint-placeholder-val="{{false}}">
+<div class="vp">
+<div class="globe-wrap">
+<div class="globe">
+<svg class="bg" viewBox="0 0 100 100" aria-hidden="true">
+<circle cx="50" cy="50" r="48" fill="#23465C"></circle>
+<path d="M22,30 C30,18 48,14 60,20 C70,25 76,34 72,46 C68,56 58,60 50,58 C42,64 30,62 24,52 C18,44 18,36 22,30 Z" fill="#6B674E"></path>
+<path d="M58,66 C66,62 76,66 78,74 C76,82 66,86 60,80 C56,76 55,70 58,66 Z" fill="#6B674E"></path>
+<path d="M30,12 C38,8 50,7 58,10 C52,13 40,14 30,12 Z" fill="#CFCDC4" opacity=".8"></path>
+<ellipse class="gr" cx="50" cy="50" rx="48" ry="16"></ellipse>
+<ellipse class="gr" cx="50" cy="50" rx="48" ry="34"></ellipse>
+<ellipse class="gr" cx="50" cy="50" rx="16" ry="48"></ellipse>
+<ellipse class="gr" cx="50" cy="50" rx="34" ry="48"></ellipse>
+<circle cx="50" cy="50" r="48" fill="none" stroke="#7FA6C2" stroke-width=".4" opacity=".6"></circle>
+</svg>
+<sc-for list="{{globeItems}}" as="gm" hint-placeholder-count="6">
+<button class="{{gm.cls}}" style="{{gm.style}}" aria-label="{{gm.aria}}" onClick="{{gm.pick}}"><span class="tag">{{gm.name}}</span></button>
+</sc-for>
+</div>
+</div>
+<div class="vlabel"><b>Globe</b> · click an edit to fly there</div>
+</div>
+</sc-if>
+
+</section>
+
+<aside class="insp" aria-label="Inspector">
+<sc-if value="{{hasSel}}" hint-placeholder-val="{{true}}">
+<div>
+<div class="eyebrow">{{sel.kindLabel}} · {{sel.layer}}</div>
+<h2>{{sel.name}}</h2>
+<span class="chip">{{sel.subLabel}}</span><span class="{{sel.scaleCls}}">{{sel.scaleLabel}}</span>
+</div>
+<dl class="kv">
+<dt>Anchor</dt><dd>{{sel.lat}} · {{sel.lon}}</dd>
+<dt>Distance</dt><dd>{{sel.dist}} from camera</dd>
+<dt>Order</dt><dd>{{sel.order}}</dd>
+</dl>
+<sc-if value="{{sel.hasParams}}" hint-placeholder-val="{{true}}">
+<p class="cap">Shape</p>
+<sc-for list="{{sel.params}}" as="p" hint-placeholder-count="3">
+<div class="prm">
+<label for="{{p.id}}">{{p.label}} <span class="val">{{p.display}}</span></label>
+<input id="{{p.id}}" type="range" min="{{p.min}}" max="{{p.max}}" step="{{p.step}}" value="{{p.value}}" onChange="{{p.onChange}}">
+</div>
+</sc-for>
+</sc-if>
+<sc-if value="{{sel.isRegion}}" hint-placeholder-val="{{false}}">
+<p class="cap">Surface type · stored, drawn later</p>
+<div class="pills" role="group" aria-label="Surface type">
+<sc-for list="{{sel.surfaces}}" as="sf" hint-placeholder-count="6">
+<button class="{{sf.cls}}" aria-pressed="{{sf.pressed}}" onClick="{{sf.pick}}">{{sf.label}}</button>
+</sc-for>
+</div>
+<div class="chk">
+<input type="checkbox" id="maskchk" checked="{{sel.mask}}" onChange="{{sel.onMask}}">
+<label for="maskchk">Use as a mask: edits listed below act only inside</label>
+</div>
+<div class="box">{{sel.maskText}}</div>
+</sc-if>
+<sc-if value="{{sel.hasMaskedBy}}" hint-placeholder-val="{{false}}">
+<div class="box"><b>Limited by</b> {{sel.maskedBy}}: this edit acts only inside that outline.</div>
+</sc-if>
+<div class="box"><b>{{sel.scaleLabel}} edit.</b> {{sel.scaleStatus}}</div>
+<div style="display: flex; gap: 8px">
+<button class="btn danger" onClick="{{sel.onDelete}}">Delete</button>
+<button class="btn" onClick="{{deselect}}">Deselect</button>
+</div>
+</sc-if>
+<sc-if value="{{noSel}}" hint-placeholder-val="{{false}}">
+<div class="eyebrow">Inspector</div>
+<p class="empty">Nothing selected. Click an edit on the planet, or pick one from the list on the left. Choose a tool on the far left and click the planet to place a new stamp, line or region. Continental edits are out of the MVP.</p>
+</sc-if>
+</aside>
+
+</div>
+
+<footer class="status">
+<span class="mono">alt 12.4 km · 47.21° N 8.53° E</span>
+<span class="msg"><span class="dotlive" aria-hidden="true"></span>{{status}}</span>
+<span class="mono">undo {{undoCount}} · redo {{redoCount}}</span>
+</footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+const SUB = {crater:'Crater',hill:'Hill',plateau:'Plateau',uplift:'Continental uplift',ridge:'Ridge',channel:'Carved channel',desert:'Desert surface',snow:'Snow surface',annotate:'Named area',mask:'Mask region'};
+const KINDL = {stamp:'Stamp',line:'Line',region:'Region'};
+const LAYER = {stamp:'Stamps layer',line:'Lines layer',region:'Regions layer'};
+const SCALE = {
+  local:{label:'Local',cls:'chip sc-local',status:'Exact result in under 1 s.'},
+  regional:{label:'Regional',cls:'chip sc-regional',status:'Preview at once, exact result in a few seconds.'},
+  continental:{label:'Continental',cls:'chip sc-cont',status:'Preview at once; the exact result needs a global re-bake (about 1 min).'}
+};
+const PARAMS = {
+  crater:[['radius','Radius','km',0.2,10,0.1],['depth','Depth','m',10,800,10],['rim','Rim height','m',0,200,5]],
+  hill:[['radius','Radius','m',50,2000,10],['height','Height','m',5,400,5]],
+  plateau:[['radius','Radius','km',1,60,0.5],['height','Height','m',20,1500,10],['soft','Edge softness','%',0,100,1]],
+  uplift:[['radius','Radius','km',100,2000,10],['height','Uplift','m',50,3000,50]],
+  ridge:[['height','Crest height','m',100,4000,50],['width','Width','km',1,40,0.5]],
+  channel:[['depth','Depth','m',2,300,1],['width','Width','m',10,2000,10]]
+};
+const DEF = {crater:{radius:2,depth:250,rim:40},hill:{radius:400,height:80},plateau:{radius:15,height:300,soft:40},uplift:{radius:500,height:600},ridge:{height:1500,width:8},channel:{depth:30,width:150}};
+const SURFACES = ['None','Desert','Snow','Rock','Forest','Grass'];
+const PALETTES = {
+  stamp:{key:'stampType',hint:'Click the planet to drop the stamp',opts:[['crater','Crater · local'],['hill','Hill · local'],['plateau','Plateau · regional']]},
+  line:{key:'lineType',hint:'Click to drop a line (the real tool: click points, double-click to end)',opts:[['ridge','Ridge'],['channel','Carved channel']]},
+  region:{key:'regionType',hint:'Click to drop an outline (the real tool: draw it)',opts:[['desert','Desert'],['snow','Snow'],['annotate','Named area'],['mask','Mask only']]},
+  brush:{key:'brushType',hint:'The brush follows stamps in a later iteration',opts:[['raise','Raise'],['lower','Lower'],['smooth','Smooth'],['flatten','Flatten']]}
+};
+
+function initialItems() {
+  return [
+    {id:'glacier',name:'Glacier Cap',kind:'region',sub:'snow',scale:'regional',lat:'47.61° N',lon:'8.92° E',dist:52,surface:'Snow',mask:false,masks:[],a:[70,30,20,6],m:[70,5,24,14],g:[63,30],poly3:'2,70 20,20 55,5 92,25 98,80 40,96',polyM:'4,40 30,6 80,4 98,50 70,96 15,90'},
+    {id:'ridge',name:'Northern Range',kind:'line',sub:'ridge',scale:'regional',lat:'47.48° N',lon:'8.40° E',dist:41,p:{height:2200,width:12},a:[16,33,54,9],m:[8,14,58,22],g:[52,31],path3:'M0,85 C18,20 38,75 58,22 S86,10 100,48',pathM:'M0,92 C22,40 48,85 68,30 S92,8 100,18'},
+    {id:'dune',name:'Dune Sea',kind:'region',sub:'desert',scale:'regional',lat:'47.02° N',lon:'8.80° E',dist:18,surface:'Desert',mask:true,masks:['basalt'],a:[60,50,34,15],m:[58,26,32,30],g:[64,38],poly3:'4,45 28,6 78,12 98,52 72,96 18,90',polyM:'5,30 35,4 85,10 97,60 70,96 12,85'},
+    {id:'basalt',name:'Basalt Plateau',kind:'stamp',sub:'plateau',scale:'regional',lat:'47.05° N',lon:'8.71° E',dist:24,p:{radius:18,height:420,soft:35},r0:18,a:[62,43,22,7],m:[64,30,20,14],g:[60,35]},
+    {id:'river',name:'Silver River',kind:'line',sub:'channel',scale:'regional',lat:'47.22° N',lon:'8.58° E',dist:6,p:{depth:40,width:220},a:[28,45,40,48],m:[30,34,34,60],g:[55,42],path3:'M100,0 C72,22 62,40 50,56 S18,86 0,100',pathM:'M96,0 C80,30 56,44 50,60 S22,90 4,100'},
+    {id:'settle',name:'Harbor settlement site',kind:'region',sub:'annotate',scale:'local',lat:'47.23° N',lon:'8.47° E',dist:3.4,surface:'None',mask:false,masks:[],a:[5,56,17,8],m:[12,62,12,10],g:[50,40],poly3:'0,55 22,4 100,22 92,100 8,92',polyM:'0,40 30,0 100,15 90,100 10,95'},
+    {id:'ember',name:'Ember Crater',kind:'stamp',sub:'crater',scale:'local',lat:'47.19° N',lon:'8.55° E',dist:2.1,p:{radius:2.4,depth:320,rim:60},r0:2.4,a:[41,61,20,10],m:[45,64,9,7],g:[58,45]},
+    {id:'hill7',name:'Hill 7',kind:'stamp',sub:'hill',scale:'local',lat:'47.20° N',lon:'8.51° E',dist:0.8,p:{radius:450,height:85},r0:450,a:[14,76,13,6],m:[40,78,5,4],g:[53,47]}
+  ];
+}
+
+function fmtDist(d) { return d < 1 ? Math.round(d * 1000) + ' m' : d < 10 ? d.toFixed(1) + ' km' : Math.round(d) + ' km'; }
+function fmtNum(v, step) { return step < 1 ? Number(v).toFixed(1) : String(Math.round(v)); }
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+function box(b, it) {
+  let l = b[0], t = b[1], w = b[2], h = b[3];
+  if (it.kind === 'stamp' && it.r0) {
+    const f = clamp(Math.sqrt(it.p.radius / it.r0), 0.35, 2.2);
+    const cx = l + w / 2, cy = t + h / 2;
+    w = w * f; h = h * f; l = cx - w / 2; t = cy - h / 2;
+  }
+  return 'left:' + l + '%;top:' + t + '%;width:' + w + '%;height:' + h + '%';
+}
+
+class Component extends DCLogic {
+  state = {items: initialItems(), sel: 'ember', tool: 'select', view: '3d', panel: 'near', query: '', filter: 'all', hidden: {}, past: [], future: [], lastKey: null, status: 'Ready · 8 edits loaded from the world files', overlay: false, stampType: 'crater', lineType: 'ridge', regionType: 'desert', brushType: 'raise', counter: 1};
+
+  commit(items, key, status, extra) {
+    const s = this.state;
+    const same = key && key === s.lastKey;
+    this.setState(Object.assign({items: items, past: same ? s.past : s.past.concat([s.items]).slice(-1000), future: same ? s.future : [], lastKey: key || null, status: status}, extra || {}));
+  }
+
+  undo() {
+    const s = this.state;
+    if (!s.past.length) return;
+    const prev = s.past[s.past.length - 1];
+    this.setState({items: prev, past: s.past.slice(0, -1), future: [s.items].concat(s.future), lastKey: null, status: 'Undone', sel: prev.some(i => i.id === s.sel) ? s.sel : null});
+  }
+
+  redo() {
+    const s = this.state;
+    if (!s.future.length) return;
+    const next = s.future[0];
+    this.setState({items: next, past: s.past.concat([s.items]), future: s.future.slice(1), lastKey: null, status: 'Redone', sel: next.some(i => i.id === s.sel) ? s.sel : null});
+  }
+
+  setParam(id, k, label, unit, step, v) {
+    const s = this.state;
+    const it = s.items.find(i => i.id === id);
+    const items = s.items.map(i => i.id === id ? Object.assign({}, i, {p: Object.assign({}, i.p, {[k]: v})}) : i);
+    this.commit(items, id + ':' + k, it.name + ' · ' + label + ' ' + fmtNum(v, step) + ' ' + unit + ' · ' + SCALE[it.scale].status);
+  }
+
+  setRegion(id, patch, key) {
+    const s = this.state;
+    const it = s.items.find(i => i.id === id);
+    const items = s.items.map(i => i.id === id ? Object.assign({}, i, patch) : i);
+    this.commit(items, key ? id + ':' + key : null, it.name + ' changed · ' + SCALE[it.scale].status);
+  }
+
+  remove(id) {
+    const s = this.state;
+    const it = s.items.find(i => i.id === id);
+    const items = s.items.filter(i => i.id !== id).map(i => i.masks ? Object.assign({}, i, {masks: i.masks.filter(m => m !== id)}) : i);
+    this.commit(items, null, it.name + ' deleted · Undo brings it back', {sel: null});
+  }
+
+  make(x, y) {
+    const s = this.state, n = s.counter;
+    let it;
+    if (s.tool === 'stamp') {
+      const sub = s.stampType;
+      const dims = {crater:[14,7],hill:[9,5],plateau:[22,8],uplift:[70,12]}[sub];
+      const scale = {crater:'local',hill:'local',plateau:'regional',uplift:'continental'}[sub];
+      it = {kind:'stamp', sub: sub, scale: scale, p: Object.assign({}, DEF[sub]), r0: DEF[sub].radius, w: dims[0], h: dims[1]};
+    } else if (s.tool === 'line') {
+      const sub = s.lineType;
+      it = {kind:'line', sub: sub, scale:'regional', p: Object.assign({}, DEF[sub]), w: 36, h: 14, path3:'M0,70 C25,20 50,80 75,30 S95,40 100,20', pathM:'M0,70 C25,20 50,80 75,30 S95,40 100,20'};
+    } else {
+      const sub = s.regionType;
+      it = {kind:'region', sub: sub, scale:'local', w: 20, h: 10, surface: {desert:'Desert',snow:'Snow',annotate:'None',mask:'None'}[sub], mask: sub === 'mask', masks: [], poly3:'5,40 35,5 90,15 95,70 55,98 10,80', polyM:'5,40 35,5 90,15 95,70 55,98 10,80'};
+    }
+    const b = [clamp(x - it.w / 2, 0, 100 - it.w), clamp(y - it.h / 2, 0, 100 - it.h), it.w, it.h];
+    it.id = 'new' + n;
+    it.name = SUB[it.sub] + ' ' + n;
+    it.a = b; it.m = b.slice();
+    it.g = [56, 39];
+    it.lat = (47.3 - y / 400).toFixed(2) + '° N';
+    it.lon = (8.3 + x / 300).toFixed(2) + '° E';
+    it.dist = Math.max(0.3, Math.round((100 - y) * (100 - y) / 40) / 10);
+    return it;
+  }
+
+  ground(e) {
+    const s = this.state;
+    if (s.tool === 'select') { this.setState({sel: null}); return; }
+    if (s.tool === 'brush') { this.setState({status: 'Brush (' + s.brushType + ') comes after stamps, in a later M6 iteration'}); return; }
+    const r = e.currentTarget.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width * 100;
+    const y = (e.clientY - r.top) / r.height * 100;
+    const it = this.make(x, y);
+    this.commit(s.items.concat([it]), null, it.name + ' placed · ' + SCALE[it.scale].status, {sel: it.id, counter: s.counter + 1, tool: 'select'});
+  }
+
+  renderVals() {
+    const s = this.state;
+    const q = s.query.trim().toLowerCase();
+    const match = i => !q || i.name.toLowerCase().indexOf(q) >= 0 || SUB[i.sub].toLowerCase().indexOf(q) >= 0;
+    const pick = id => () => this.setState({sel: id});
+    const visible = s.items.filter(i => !s.hidden[i.id]);
+    const maskedBy = id => s.items.filter(r => r.kind === 'region' && r.mask && (r.masks || []).indexOf(id) >= 0).map(r => r.name);
+    const overlay = (i, which) => ({
+      name: i.name,
+      aria: i.name + ', ' + SUB[i.sub],
+      cls: 'edit k-' + i.kind + (s.sel === i.id ? ' sel' : '') + (match(i) ? '' : ' dim') + (s.overlay && i.surface && i.surface !== 'None' ? ' surf-' + i.surface.toLowerCase() : ''),
+      style: box(which === '3d' ? i.a : i.m, i),
+      isStamp: i.kind === 'stamp', isLine: i.kind === 'line', isRegion: i.kind === 'region',
+      path: which === '3d' ? i.path3 : i.pathM,
+      poly: which === '3d' ? i.poly3 : i.polyM,
+      pick: pick(i.id)
+    });
+
+    const tools = [
+      ['select','Select','V','M6 3l12 8.5-5.2 1.3 3 6.2-2.4 1.1-3-6.2L6 17.5z'],
+      ['stamp','Stamp','S','M4 12a8 8 0 1 0 16 0a8 8 0 1 0 -16 0M9 12a3 3 0 1 0 6 0a3 3 0 1 0 -6 0'],
+      ['brush','Brush (later)','B','M15 4l5 5-8.5 8.5H6.5v-5zM4 20.5h7'],
+      ['line','Line','L','M3 18C7 6 13 20 21 6M3 18h0M21 6h0'],
+      ['region','Region','R','M4 8l6-4 10 3-2 11-12 2z']
+    ].map(t => ({label: t[1], title: t[1] + ' (' + t[2] + ')', key: t[2], icon: t[3], cls: 'tool' + (s.tool === t[0] ? ' on' : ''), pressed: String(s.tool === t[0]), pick: () => this.setState({tool: t[0], status: t[0] === 'select' ? 'Select: click an edit on the planet' : PALETTES[t[0]].hint})}));
+
+    const views = [['3d','3D'],['globe','Globe']].map(v => ({label: v[1], cls: s.view === v[0] ? 'on' : '', pressed: String(s.view === v[0]), pick: () => this.setState({view: v[0]})}));
+    const panels = [['near','Near'],['layers','Layers'],['graph','Graph']].map(p => ({label: p[1], cls: s.panel === p[0] ? 'on' : '', pressed: String(s.panel === p[0]), pick: () => this.setState({panel: p[0]})}));
+    const filters = [['all','All'],['stamp','Stamps'],['line','Lines'],['region','Regions']].map(f => ({label: f[1], cls: 'pill' + (s.filter === f[0] ? ' on' : ''), pressed: String(s.filter === f[0]), pick: () => this.setState({filter: f[0]})}));
+
+    const near = s.items.filter(i => (s.filter === 'all' || i.kind === s.filter) && match(i)).slice().sort((a, b) => a.dist - b.dist).map(i => ({
+      name: i.name, meta: SUB[i.sub] + ' · ' + SCALE[i.scale].label + (s.hidden[i.id] ? ' · hidden' : ''), dist: fmtDist(i.dist),
+      cls: 'row k-' + i.kind + (s.sel === i.id ? ' sel' : '') + (s.hidden[i.id] ? ' off' : ''), pick: pick(i.id)
+    }));
+
+    const layerGroups = [['region','Regions','masks, surfaces, names'],['line','Lines','ridges, channels'],['stamp','Stamps','shapes']].map(g => ({
+      title: g[1], sub: g[2],
+      rows: s.items.filter(i => i.kind === g[0]).slice().reverse().map(i => ({
+        name: i.name, meta: SUB[i.sub], cbid: 'vis-' + i.id, checked: !s.hidden[i.id],
+        onToggle: () => this.setState({hidden: Object.assign({}, this.state.hidden, {[i.id]: !this.state.hidden[i.id]})}),
+        pick: pick(i.id), cls: 'lrow k-' + i.kind + (s.sel === i.id ? ' sel' : '')
+      }))
+    }));
+
+    const graphInputs = s.items.filter(i => i.kind === 'region').map(r => {
+      const names = (r.masks || []).map(id => (s.items.find(i => i.id === id) || {}).name).filter(Boolean);
+      const parts = [];
+      if (r.mask && names.length) parts.push('masks ' + names.join(', '));
+      if (r.surface && r.surface !== 'None') parts.push('surface: ' + r.surface);
+      if (!parts.length) parts.push('name only');
+      return {title: r.name, meta: parts.join(' · '), cls: 'gnode k-region' + (s.sel === r.id ? ' sel' : ''), pick: pick(r.id)};
+    });
+    const chainItems = s.items.filter(i => i.kind === 'stamp').concat(s.items.filter(i => i.kind === 'line'));
+    const graphChain = [{isItem: false, isFixed: true, notFirst: false, title: 'Procedural base', meta: 'generator pinned · world v12'}]
+      .concat(chainItems.map(i => {
+        const mb = maskedBy(i.id);
+        return {isItem: true, isFixed: false, notFirst: true, title: i.name, meta: SUB[i.sub] + (mb.length ? ' · limited by ' + mb.join(', ') : ''), cls: 'gnode k-' + i.kind + (s.sel === i.id ? ' sel' : ''), pick: pick(i.id)};
+      }))
+      .concat([{isItem: false, isFixed: true, notFirst: true, title: 'Tiles', meta: 'regenerated where the edits touch'}]);
+
+    const globeItems = visible.map(i => {
+      const ring = i.scale === 'continental';
+      return {
+        name: i.name, aria: 'Fly to ' + i.name,
+        cls: 'gmark k-' + i.kind + (ring ? ' ring' : ' dot') + (s.sel === i.id ? ' sel' : ''),
+        style: ring ? 'left:' + i.g[0] + '%;top:' + i.g[1] + '%;width:' + i.g[2] + '%;height:' + i.g[3] + '%' : 'left:' + i.g[0] + '%;top:' + i.g[1] + '%',
+        pick: () => this.setState({sel: i.id, view: '3d', status: 'Flew to ' + i.name})
+      };
+    });
+
+    const pal = PALETTES[s.tool];
+    const palette = pal ? pal.opts.map(o => ({label: o[1], cls: 'pill' + (s[pal.key] === o[0] ? ' on' : ''), pressed: String(s[pal.key] === o[0]), pick: () => this.setState({[pal.key]: o[0]})})) : [];
+
+    const it = s.items.find(i => i.id === s.sel);
+    let sel = {};
+    if (it) {
+      const sameKind = s.items.filter(i => i.kind === it.kind);
+      const mb = maskedBy(it.id);
+      const maskNames = (it.masks || []).map(id => (s.items.find(i => i.id === id) || {}).name).filter(Boolean);
+      const params = (PARAMS[it.sub] || []).map(d => ({
+        id: 'p-' + it.id + '-' + d[0], label: d[1], min: d[3], max: d[4], step: d[5], value: it.p[d[0]],
+        display: fmtNum(it.p[d[0]], d[5]) + ' ' + d[2],
+        onChange: e => this.setParam(it.id, d[0], d[1], d[2], d[5], parseFloat(e.target.value))
+      }));
+      sel = {
+        name: it.name, kindLabel: KINDL[it.kind], layer: LAYER[it.kind], subLabel: SUB[it.sub],
+        scaleLabel: SCALE[it.scale].label, scaleCls: SCALE[it.scale].cls, scaleStatus: SCALE[it.scale].status,
+        lat: it.lat, lon: it.lon, dist: fmtDist(it.dist),
+        order: (sameKind.indexOf(it) + 1) + ' of ' + sameKind.length + ' in its layer',
+        params: params, hasParams: params.length > 0, isRegion: it.kind === 'region',
+        surfaces: SURFACES.map(x => ({label: x, cls: 'pill' + (it.surface === x ? ' on' : ''), pressed: String(it.surface === x), pick: () => this.setRegion(it.id, {surface: x}, 'surface')})),
+        mask: !!it.mask, onMask: () => this.setRegion(it.id, {mask: !it.mask}, null),
+        maskText: it.mask ? (maskNames.length ? 'Masks: ' + maskNames.join(', ') + '.' : 'Masks no edit yet. (Real tool: drag an edit onto the region.)') : 'Not used as a mask.',
+        hasMaskedBy: mb.length > 0, maskedBy: mb.join(', '),
+        onDelete: () => this.remove(it.id)
+      };
+    }
+
+    const placing = s.tool !== 'select' && s.tool !== 'brush';
+    return {
+      editCount: s.items.length,
+      views: views, tools: tools, panels: panels, filters: filters,
+      panelNear: s.panel === 'near', panelLayers: s.panel === 'layers', panelGraph: s.panel === 'graph',
+      query: s.query, onQuery: e => this.setState({query: e.target.value}),
+      near: near, nearEmpty: near.length === 0,
+      layerGroups: layerGroups, graphInputs: graphInputs, graphChain: graphChain,
+      show3d: s.view === '3d', showMap: false, showGlobe: s.view === 'globe',
+      overlayOn: s.overlay, overlayCls: 'btn' + (s.overlay ? ' on' : ''), overlayPressed: String(s.overlay),
+      toggleOverlay: () => this.setState({overlay: !this.state.overlay, status: this.state.overlay ? 'Surface overlay off' : 'Debug overlay: regions tinted by surface type (materials are not drawn yet)'}),
+      items3d: visible.map(i => overlay(i, '3d')), itemsMap: visible.map(i => overlay(i, 'map')), globeItems: globeItems,
+      groundCls: 'ground' + (placing ? ' place' : ''),
+      groundLabel: placing ? 'Place on the planet here' : 'Clear the selection',
+      ground3d: e => this.ground(e), groundMap: e => this.ground(e),
+      hasPalette: !!pal, palette: palette, paletteHint: pal ? pal.hint : '',
+      hasSel: !!it, noSel: !it, sel: sel, deselect: () => this.setState({sel: null}),
+      undo: () => this.undo(), redo: () => this.redo(),
+      undoOff: s.past.length === 0, redoOff: s.future.length === 0,
+      undoCount: s.past.length, redoCount: s.future.length,
+      status: s.status
+    };
+  }
+}
+</script>
+</body>
+</html>

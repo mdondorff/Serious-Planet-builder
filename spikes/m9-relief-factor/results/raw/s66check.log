@@ -1,0 +1,77 @@
+$ C:/Program Files/Git/usr/bin/bash.exe C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/570e124f-4ca5-49b4-8bf6-680604dce399/scratchpad/s66/check.sh C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/570e124f-4ca5-49b4-8bf6-680604dce399/scratchpad/s66
+    Finished `release` profile [optimized] target(s) in 15.32s
+=== base level error 09:36:27 cpu 21%
+LEVELERR alps: L10 p99 5.370 max 13.700; L12 p99 1.667 max 3.505; L14 p99 0.496 max 1.108; L16 p99 0.134 max 0.338; L18 p99 0.028 max 0.082; L20 p99 0.002 max 0.010; L22 p99 0.000 max 0.000;
+LEVELERR blackforest: L10 p99 4.115 max 9.052; L12 p99 1.291 max 2.706; L14 p99 0.387 max 0.809; L16 p99 0.105 max 0.273; L18 p99 0.023 max 0.050; L20 p99 0.001 max 0.012; L22 p99 0.000 max 0.000;
+=== base plan-check 09:36:32
+  erosion aerial-20km: 913 nodes, deepest level 12, 0.1 s
+  erosion low-2km: 1311 nodes, deepest level 15, 0.0 s
+  erosion ground-200m: 1736 nodes, deepest level 19, 0.1 s
+  erosion ground-1m: 2429 nodes, deepest level 22, 0.1 s
+  erosion north-pole-1km: 1128 nodes, deepest level 16, 0.1 s
+  erosion cube-corner-1km: 1606 nodes, deepest level 16, 0.1 s
+  erosion face-edge-1km: 1561 nodes, deepest level 16, 0.2 s
+plan-check: both fields plan every view without steepness rejection
+=== base stills alps 09:37:03
+anchor: latitude 11.5000 longitude -18.5000 degrees, ground 1316.3 m
+300m: 6 chunks after 22 rounds and 12.2 s, 4 horizon maps in 5.0 s, drawn in 20.1 s -> target/s66/stills/alps-base\300m.png
+30m: 4 chunks after 2 rounds and 2.4 s, 4 horizon maps in 0.0 s, drawn in 7.5 s -> target/s66/stills/alps-base\30m.png
+wrote target/s66/stills/alps-base (one PNG per pose, stills.txt and sections.txt)
+# anchor: latitude 11.5000 longitude -18.5000 degrees, ground 1316.3 m
+# pose width height eye_lat_deg eye_lon_deg eye_height_m heading_deg pitch_deg sun_local_hours chunks waited_s nodes capped_nodes
+300m 2560 1440 11.50000 -18.51377 1548.7 90 10 16 6 12.2 1490 124
+30m 2560 1440 11.50000 -18.50367 1324.3 90 5 16 4 2.4 1489 123
+# level edge_m grid_res height_min_m height_max_m max_slope morph_start_m morph_end_m chunk_edge_distance_m
+16 153 32 1251.2 1258.0 0.15 1839 1984 1603
+16 153 32 1264.0 1271.6 0.12 1839 1984 1298
+16 153 32 1261.7 1267.0 0.14 1839 1984 1298
+16 153 32 1256.0 1262.2 0.13 1839 1984 1451
+=== base stills blackforest 09:37:34
+anchor: latitude 2.5000 longitude -124.5000 degrees, ground 499.5 m
+300m: 4 chunks after 20 rounds and 25.9 s, 4 horizon maps in 3.7 s, drawn in 32.6 s -> target/s66/stills/blackforest-base\300m.png
+30m: 4 chunks after 2 rounds and 1.2 s, 4 horizon maps in 0.0 s, drawn in 3.0 s -> target/s66/stills/blackforest-base\30m.png
+wrote target/s66/stills/blackforest-base (one PNG per pose, stills.txt and sections.txt)
+# anchor: latitude 2.5000 longitude -124.5000 degrees, ground 499.5 m
+# pose width height eye_lat_deg eye_lon_deg eye_height_m heading_deg pitch_deg sun_local_hours chunks waited_s nodes capped_nodes
+300m 2560 1440 2.50000 -124.51350 796.0 90 10 16 4 25.9 1580 116
+30m 2560 1440 2.50000 -124.50360 528.9 90 5 16 4 1.2 1580 124
+# level edge_m grid_res height_min_m height_max_m max_slope morph_start_m morph_end_m chunk_edge_distance_m
+16 153 32 492.2 496.1 0.09 1683 1984 382
+16 153 32 491.2 495.6 0.12 1683 1984 229
+16 153 32 490.9 493.8 0.12 1683 1984 76
+16 153 32 496.2 498.4 0.08 1683 1984 840
+=== k6m10 level error 09:38:12 cpu %
+LEVELERR alps: L10 p99 NaN max NaN; L12 p99 NaN max NaN; L14 p99 NaN max NaN; L16 p99 NaN max NaN; L18 p99 NaN max NaN; L20 p99 NaN max NaN; L22 p99 NaN max NaN;
+LEVELERR blackforest: L10 p99 NaN max NaN; L12 p99 NaN max NaN; L14 p99 NaN max NaN; L16 p99 NaN max NaN; L18 p99 NaN max NaN; L20 p99 NaN max NaN; L22 p99 NaN max NaN;
+=== k6m10 plan-check 09:38:17
+  erosion low-2km: 548 nodes, deepest level 8, 0.9 s
+  erosion ground-200m: 543 nodes, deepest level 8, 4.8 s
+  erosion ground-1m: 541 nodes, deepest level 8, 5.0 s
+  erosion north-pole-1km: 440 nodes, deepest level 8, 1.0 s
+  erosion cube-corner-1km: 593 nodes, deepest level 8, 1.1 s
+  erosion face-edge-1km: 608 nodes, deepest level 8, 1.2 s
+  erosion: the bake could not be read: the global bake cannot be read: cell (1043, 1031) of face 0 was not in the batch's footprint
+error: plan-check: 1 view(s) rejected or unreadable
+=== k6m10 stills alps 09:39:01
+mesh thread: Any { .. }
+thread 'skeleton-tile' (28024) panicked at crates\core\src\vec3.rs:35:9:
+cannot normalise Vec3 { x: NaN, y: NaN, z: NaN }
+crash report: target/review/crashes\20261031-084443Z.txt
+cat: target/s66/stills/alps-k6m10/stills.txt: No such file or directory
+# level edge_m grid_res height_min_m height_max_m max_slope morph_start_m morph_end_m chunk_edge_distance_m
+8 39092 128 665.7 3062.7 1.69 459772 507820 0
+8 39092 128 597.3 5207.0 3.24 459772 507820 0
+8 39092 128 816.8 4456.9 2.67 459772 507820 0
+8 39092 128 -2494.4 8308.9 8.57 459772 507820 0
+=== k6m10 stills blackforest 09:44:44
+cannot normalise Vec3 { x: NaN, y: NaN, z: NaN }
+thread 'main' (29532) panicked at crates\app\src\skeleton.rs:1115:51:
+mesh thread: Any { .. }
+crash report: target/review/crashes\20261031-084602Z.txt
+cat: target/s66/stills/blackforest-k6m10/stills.txt: No such file or directory
+# level edge_m grid_res height_min_m height_max_m max_slope morph_start_m morph_end_m chunk_edge_distance_m
+8 39092 128 1142.3 1912.5 0.48 459772 507820 0
+8 39092 128 661.1 1129.1 0.28 459772 507820 0
+8 39092 128 888.5 1836.6 0.48 459772 507820 0
+8 39092 128 712.1 1696.8 0.47 459772 507820 0
+=== done 09:46:03

@@ -1,0 +1,36 @@
+heavy-run lock: the machine is free after 649 s: running `C:/Program Files/Git/usr/bin/bash.exe C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/570e124f-4ca5-49b4-8bf6-680604dce399/scratchpad/s68/run.sh`
+$ C:/Program Files/Git/usr/bin/bash.exe C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/570e124f-4ca5-49b4-8bf6-680604dce399/scratchpad/s68/run.sh
+=== seam 12:36:10 cpu 5%
+alps: joint bake 147 s
+alps: tile 0 no inflow (0 inflow cells) 38 s
+alps: tile 0 inflow (2189 inflow cells) 38 s
+alps: tile 1 no inflow (0 inflow cells) 41 s
+alps: tile 1 inflow (1538 inflow cells) 42 s
+alps: tile 2 no inflow (0 inflow cells) 39 s
+alps: tile 2 inflow (2725 inflow cells) 38 s
+alps: tile 3 no inflow (0 inflow cells) 39 s
+alps: tile 3 inflow (2408 inflow cells) 39 s
+alps noinflow carve hard: step over 12153 edge pairs p50 0.01 p99 188.62 max 1221.07 m | |s-j| by distance (p50/p99 m) 0-1: 0.00/138.88, 2-8: 0.00/150.29, 9-32: 0.00/172.30, 33-128: 0.00/136.88, 129-512: 0.00/116.39, 513-4000: 0.00/9.53 | crossings mosaic 201 joint 220 matched 183 | ponds near seams mosaic 3128 joint 0
+alps noinflow carve+thermal hard: step over 12154 edge pairs p50 0.01 p99 171.90 max 481.46 m | |s-j| by distance (p50/p99 m) 0-1: 0.00/135.78, 2-8: 0.00/141.76, 9-32: 0.00/164.57, 33-128: 0.00/133.08, 129-512: 0.00/120.43, 513-4000: 0.00/14.19 | crossings mosaic 199 joint 223 matched 180 | ponds near seams mosaic 4972 joint 2188
+alps noinflow carve+thermal blend64: step over 12154 edge pairs p50 0.00 p99 24.64 max 92.51 m | |s-j| by distance (p50/p99 m) 0-1: 0.01/103.81, 2-8: 0.01/109.69, 9-32: 0.00/143.11, 33-128: 0.00/133.08, 129-512: 0.00/120.43, 513-4000: 0.00/14.19 | crossings mosaic 214 joint 223 matched 203 | ponds near seams mosaic 3811 joint 2188
+alps inflow carve hard: step over 12153 edge pairs p50 0.01 p99 188.52 max 1221.07 m | |s-j| by distance (p50/p99 m) 0-1: 0.00/138.88, 2-8: 0.00/149.81, 9-32: 0.00/171.92, 33-128: 0.00/136.75, 129-512: 0.00/116.28, 513-4000: 0.00/9.52 | crossings mosaic 201 joint 220 matched 183 | ponds near seams mosaic 3124 joint 0
+alps inflow carve+thermal hard: step over 12154 edge pairs p50 0.01 p99 171.90 max 481.46 m | |s-j| by distance (p50/p99 m) 0-1: 0.00/135.37, 2-8: 0.00/141.53, 9-32: 0.00/164.41, 33-128: 0.00/132.82, 129-512: 0.00/120.41, 513-4000: 0.00/14.19 | crossings mosaic 199 joint 223 matched 180 | ponds near seams mosaic 4972 joint 2188
+alps inflow carve+thermal blend64: step over 12154 edge pairs p50 0.00 p99 24.64 max 92.51 m | |s-j| by distance (p50/p99 m) 0-1: 0.01/103.81, 2-8: 0.01/109.38, 9-32: 0.00/142.88, 33-128: 0.00/132.82, 129-512: 0.00/120.41, 513-4000: 0.00/14.19 | crossings mosaic 214 joint 223 matched 203 | ponds near seams mosaic 3812 joint 2188
+alps: joint bake change |jt - base| p50 40.7 p99 1856.3 m; all 633 s
+blackforest: joint bake 133 s
+blackforest: tile 0 no inflow (0 inflow cells) 37 s
+blackforest: tile 0 inflow (2159 inflow cells) 37 s
+blackforest: tile 1 no inflow (0 inflow cells) 37 s
+blackforest: tile 1 inflow (2365 inflow cells) 37 s
+blackforest: tile 2 no inflow (0 inflow cells) 37 s
+blackforest: tile 2 inflow (2352 inflow cells) 40 s
+blackforest: tile 3 no inflow (0 inflow cells) 39 s
+blackforest: tile 3 inflow (2111 inflow cells) 38 s
+blackforest noinflow carve hard: step over 12288 edge pairs p50 0.00 p99 149.83 max 612.73 m | |s-j| by distance (p50/p99 m) 0-1: 0.00/153.11, 2-8: 0.00/135.04, 9-32: 0.00/136.31, 33-128: 0.00/109.45, 129-512: 0.00/62.77, 513-4000: 0.00/13.65 | crossings mosaic 274 joint 282 matched 228 | ponds near seams mosaic 7761 joint 0
+blackforest noinflow carve+thermal hard: step over 12288 edge pairs p50 0.00 p99 133.84 max 399.47 m | |s-j| by distance (p50/p99 m) 0-1: 0.00/152.92, 2-8: 0.00/134.28, 9-32: 0.00/137.41, 33-128: 0.00/108.90, 129-512: 0.00/62.75, 513-4000: 0.00/14.76 | crossings mosaic 269 joint 281 matched 222 | ponds near seams mosaic 8413 joint 1115
+blackforest noinflow carve+thermal blend64: step over 12288 edge pairs p50 0.00 p99 27.35 max 108.35 m | |s-j| by distance (p50/p99 m) 0-1: 0.00/113.13, 2-8: 0.00/113.30, 9-32: 0.00/130.91, 33-128: 0.00/108.90, 129-512: 0.00/62.75, 513-4000: 0.00/14.76 | crossings mosaic 296 joint 281 matched 233 | ponds near seams mosaic 9043 joint 1115
+blackforest inflow carve hard: step over 12288 edge pairs p50 0.00 p99 149.93 max 612.74 m | |s-j| by distance (p50/p99 m) 0-1: 0.00/153.11, 2-8: 0.00/135.04, 9-32: 0.00/136.31, 33-128: 0.00/109.44, 129-512: 0.00/62.33, 513-4000: 0.00/13.65 | crossings mosaic 276 joint 282 matched 229 | ponds near seams mosaic 7823 joint 0
+blackforest inflow carve+thermal hard: step over 12288 edge pairs p50 0.00 p99 133.84 max 399.85 m | |s-j| by distance (p50/p99 m) 0-1: 0.00/152.92, 2-8: 0.00/134.28, 9-32: 0.00/137.42, 33-128: 0.00/108.90, 129-512: 0.00/62.65, 513-4000: 0.00/14.76 | crossings mosaic 271 joint 281 matched 223 | ponds near seams mosaic 8479 joint 1115
+blackforest inflow carve+thermal blend64: step over 12288 edge pairs p50 0.00 p99 27.35 max 108.35 m | |s-j| by distance (p50/p99 m) 0-1: 0.00/113.13, 2-8: 0.00/113.30, 9-32: 0.00/130.91, 33-128: 0.00/108.90, 129-512: 0.00/62.65, 513-4000: 0.00/14.76 | crossings mosaic 296 joint 281 matched 233 | ponds near seams mosaic 9050 joint 1115
+blackforest: joint bake change |jt - base| p50 17.4 p99 601.1 m; all 620 s
+=== done 12:57:03

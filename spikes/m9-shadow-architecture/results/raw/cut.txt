@@ -1,0 +1,8 @@
+adapter: NVIDIA GeForce RTX 3080 Ti Laptop GPU (Vulkan)  timestamps: true
+cut case search: far skyline 5.60 deg is 4.76 deg above the near one
+cut case: camera [-10000.0, 0.0, 2937.562235514324], sun az 20 el 5.30 (far skyline 5.60 deg)
+  full R                           shadowed 98.7 % of terrain pixels, agrees with full R on 100.0 %
+  R cut at 30 km, coarse fill      shadowed 0.0 % of terrain pixels, agrees with full R on 1.3 %
+  R cut at 30 km, coarse max fill  shadowed 100.0 % of terrain pixels, agrees with full R on 98.7 %
+  R cut at 30 km, coarse 2.4 km fill shadowed 0.0 % of terrain pixels, agrees with full R on 1.3 %
+  R cut at 30 km, no fill          shadowed 0.0 % of terrain pixels, agrees with full R on 1.3 %

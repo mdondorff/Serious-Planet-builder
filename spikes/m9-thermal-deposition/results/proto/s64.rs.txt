@@ -1,0 +1,319 @@
+//! SPIKE-64 (spike code, never merged): CPU thermal and deposition kernels on SPIKE-61's carved tiles at 101.8 m.
+//! Inputs per tile: `<dir>/tileK-{orig,carved,area}-3584x3584.f32` (window 3,584^2: 3,072^2 core plus a 256-cell halo).
+//! Variants written as f32 core rasters (3,072^2) to `<out>/tileK-<variant>.f32`; one line of timings and mass per variant on stdout.
+//! Usage: `s64 <dump dir> <out dir> <tile,tile,...>`
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, VecDeque};
+use std::time::Instant;
+
+const W: usize = 3584;
+const CORE: usize = 3072;
+const HALO: usize = 256;
+const DX: f64 = 101.8;
+const NB: [(i64, i64); 8] = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)];
+
+fn read(path: &str) -> Vec<f32> {
+    let b = std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    b.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()
+}
+
+fn write_core(path: &str, h: &[f32]) {
+    let mut b = Vec::with_capacity(CORE * CORE * 4);
+    for j in HALO..HALO + CORE {
+        for i in HALO..HALO + CORE {
+            b.extend_from_slice(&h[j * W + i].to_le_bytes());
+        }
+    }
+    std::fs::write(path, b).unwrap();
+}
+
+fn nbr(p: usize, d: usize) -> Option<usize> {
+    let (i, j) = ((p % W) as i64 + NB[d].0, (p / W) as i64 + NB[d].1);
+    (i >= 0 && j >= 0 && i < W as i64 && j < W as i64).then(|| j as usize * W + i as usize)
+}
+
+fn border(p: usize, h: &[f32]) -> bool {
+    let (i, j) = (p % W, p / W);
+    i == 0 || j == 0 || i == W - 1 || j == W - 1 || h[p] <= 0.0
+}
+
+/// A hash in [-1, 1] of the unordered pair (p, q): both cells of a pair see the same critical slope, so a transfer leaves one and enters the other.
+fn pair_u(p: usize, q: usize) -> f64 {
+    let (a, b) = if p < q { (p, q) } else { (q, p) };
+    let x = (a as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (b as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
+    let x = (x ^ (x >> 31)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    let x = x ^ (x >> 29);
+    (x >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0
+}
+
+/// Thermal stabilisation (after Schott et al. 2024's thermal pass, as a CPU Jacobi gather): each pass every interior cell gives each lower
+/// neighbour `K` of the height difference above the critical one (`tan(theta) (1 + 0.25 u)` times the distance, `u` the pair hash) and
+/// takes the same from each higher one, read from the previous pass: mass is kept and the result does not depend on the thread count.
+/// Sea cells (h <= 0) and the window's edge take part as receivers only. Returns the cells moved in the last pass.
+fn thermal(h: &mut Vec<f32>, theta_deg: f64, passes: usize, threads: usize) -> (usize, f64) {
+    const K: f64 = 0.0625;
+    let t = theta_deg.to_radians().tan();
+    let mut next = h.clone();
+    let mut moved_last = 0;
+    let mut moved_vol = 0.0;
+    for pass in 0..passes {
+        let rows_per = W.div_ceil(threads);
+        let cur = &*h;
+        let counts: Vec<(usize, f64)> = std::thread::scope(|sc| {
+            let hs: Vec<_> = next
+                .chunks_mut(rows_per * W)
+                .enumerate()
+                .map(|(k, out)| {
+                    sc.spawn(move || {
+                        let mut moved = 0usize;
+                        let mut vol = 0.0f64;
+                        for (o, v) in out.iter_mut().enumerate() {
+                            let p = k * rows_per * W + o;
+                            let hp = f64::from(cur[p]);
+                            let mut dh = 0.0;
+                            let (i, j) = (p % W, p / W);
+                            let edge = i == 0 || j == 0 || i == W - 1 || j == W - 1;
+                            for d in 0..8 {
+                                let Some(q) = nbr(p, d) else { continue };
+                                let hq = f64::from(cur[q]);
+                                let dist = if d < 4 { DX } else { DX * std::f64::consts::SQRT_2 };
+                                let crit = t * (1.0 + 0.25 * pair_u(p, q)) * dist;
+                                let diff = hp - hq;
+                                // p gives to a lower q (p must be land and inside); takes from a higher land q off the edge.
+                                if diff > crit && hp > 0.0 && !edge {
+                                    dh -= K * (diff - crit);
+                                } else if -diff > crit && hq > 0.0 {
+                                    let (qi, qj) = (q % W, q / W);
+                                    if !(qi == 0 || qj == 0 || qi == W - 1 || qj == W - 1) {
+                                        dh += K * (-diff - crit);
+                                    }
+                                }
+                            }
+                            if dh < 0.0 {
+                                moved += 1;
+                                vol -= dh;
+                            }
+                            *v = (hp + dh) as f32;
+                        }
+                        (moved, vol)
+                    })
+                })
+                .collect();
+            hs.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        std::mem::swap(h, &mut next);
+        moved_last = counts.iter().map(|c| c.0).sum();
+        if pass == 0 {
+            moved_vol = counts.iter().map(|c| c.1).sum::<f64>() * DX * DX;
+        }
+    }
+    (moved_last, moved_vol)
+}
+
+/// Barnes' improved priority flood (SPIKE-62), 1 mm steps over flats.
+fn flood(h: &[f32]) -> Vec<f32> {
+    let key = |v: f32| -> u32 {
+        let b = v.to_bits();
+        if b & 0x8000_0000 != 0 { !b } else { b | 0x8000_0000 }
+    };
+    let n = W * W;
+    let mut filled = vec![0f32; n];
+    let mut seen = vec![false; n];
+    let mut heap: BinaryHeap<Reverse<(u32, u32)>> = BinaryHeap::new();
+    let mut pit: VecDeque<u32> = VecDeque::new();
+    for p in 0..n {
+        if border(p, h) {
+            filled[p] = h[p];
+            seen[p] = true;
+            heap.push(Reverse((key(h[p]), p as u32)));
+        }
+    }
+    loop {
+        let p = if let Some(p) = pit.pop_front() {
+            p as usize
+        } else if let Some(Reverse((_, p))) = heap.pop() {
+            p as usize
+        } else {
+            break;
+        };
+        for d in 0..8 {
+            let Some(q) = nbr(p, d) else { continue };
+            if seen[q] {
+                continue;
+            }
+            seen[q] = true;
+            let lo = filled[p] + 1e-3;
+            if h[q] <= lo {
+                filled[q] = lo;
+                pit.push_back(q as u32);
+            } else {
+                filled[q] = h[q];
+                heap.push(Reverse((key(filled[q]), q as u32)));
+            }
+        }
+    }
+    filled
+}
+
+/// Jittered D8 receivers on the filled surface (SPIKE-62) and the topological order (outlets first) from them.
+fn route(h: &[f32], filled: &[f32]) -> (Vec<u32>, Vec<u32>) {
+    let n = W * W;
+    let mut rec = vec![u32::MAX; n];
+    for p in 0..n {
+        if border(p, h) {
+            continue;
+        }
+        let mut best = (0.0f64, u32::MAX);
+        for d in 0..8 {
+            let q = nbr(p, d).unwrap();
+            let dd = if d < 4 { DX } else { DX * std::f64::consts::SQRT_2 };
+            let mut s = f64::from(filled[p] - filled[q]) / dd;
+            if s > 0.0 {
+                let x = (p as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (d as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
+                let x = (x ^ (x >> 31)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+                s *= 1.0 + 0.5 * ((x >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0);
+            }
+            if s > best.0 {
+                best = (s, q as u32);
+            }
+        }
+        rec[p] = best.1;
+    }
+    let mut ndon = vec![0u32; n + 1];
+    for &r in &rec {
+        if r != u32::MAX {
+            ndon[r as usize + 1] += 1;
+        }
+    }
+    for i in 0..n {
+        ndon[i + 1] += ndon[i];
+    }
+    let mut fill = ndon.clone();
+    let mut don = vec![0u32; n];
+    for (p, &r) in rec.iter().enumerate() {
+        if r != u32::MAX {
+            don[fill[r as usize] as usize] = p as u32;
+            fill[r as usize] += 1;
+        }
+    }
+    let mut order = Vec::with_capacity(n);
+    let mut stack: Vec<u32> = (0..n as u32).filter(|&p| rec[p as usize] == u32::MAX).collect();
+    while let Some(p) = stack.pop() {
+        order.push(p);
+        stack.extend_from_slice(&don[ndon[p as usize] as usize..ndon[p as usize + 1] as usize]);
+    }
+    (rec, order)
+}
+
+/// Deposition (transport-limited, one sweep upstream to downstream): the sediment of a cell is its donors' plus its own eroded column
+/// (`orig - carved`, m times the cell area). It first fills the cell's depression up to the filled level, then, where the load exceeds the
+/// capacity `kc A^0.5 S` (m3 per step, `A` the dumped drainage area, `S` the filled slope to the receiver), `zeta` of the excess settles,
+/// raising the cell at most to the filled level plus half the drop to the receiver (the receiver stays lower). The rest moves on; what reaches
+/// the sea or the window edge leaves. Returns (eroded, deposited, exported) volumes in m3.
+fn deposit(h: &mut [f32], orig: &[f32], area: &[f32], kc: f64, zeta: f64) -> (f64, f64, f64, f64, f64) {
+    let t = Instant::now();
+    let filled = flood(h);
+    let t_flood = t.elapsed().as_secs_f64();
+    let (rec, order) = route(h, &filled);
+    let t_route = t.elapsed().as_secs_f64() - t_flood;
+    let n = W * W;
+    let ca = DX * DX;
+    let mut qs = vec![0f64; n];
+    let (mut eroded, mut dep, mut out) = (0.0, 0.0, 0.0);
+    for &p in order.iter().rev() {
+        let p = p as usize;
+        let e = (f64::from(orig[p]) - f64::from(h[p])).max(0.0) * ca;
+        if h[p] > 0.0 {
+            eroded += e;
+        }
+        let mut load = qs[p] + if h[p] > 0.0 { e } else { 0.0 };
+        let r = rec[p];
+        if r == u32::MAX {
+            out += load;
+            continue;
+        }
+        let r = r as usize;
+        let hp = f64::from(h[p]);
+        let fp = f64::from(filled[p]);
+        // The depression first.
+        let pit = ((fp - hp).max(0.0) * ca).min(load);
+        let mut rise = pit / ca;
+        load -= pit;
+        // Then the excess over capacity, up to half the drop to the receiver above the filled level.
+        let dd = if (p % W) == (r % W) || (p / W) == (r / W) { DX } else { DX * std::f64::consts::SQRT_2 };
+        let s = ((fp - f64::from(filled[r])) / dd).max(0.0);
+        let cap = kc * f64::from(area[p]).sqrt() * s;
+        if load > cap {
+            let room = (0.5 * (fp - f64::from(filled[r])).max(0.0) + (fp - hp - rise).max(0.0)) * ca;
+            let d = (zeta * (load - cap)).min(room);
+            rise += d / ca;
+            load -= d;
+        }
+        h[p] = (hp + rise) as f32;
+        dep += rise * ca;
+        qs[r] += load;
+    }
+    (eroded, dep, out, t_flood, t_route)
+}
+
+fn main() {
+    let a: Vec<String> = std::env::args().collect();
+    let (dir, outd) = (&a[1], &a[2]);
+    let tiles: Vec<String> = a[3].split(',').map(String::from).collect();
+    let threads: usize = std::env::var("S64_THREADS").ok().and_then(|v| v.parse().ok()).unwrap_or(4);
+    let passes: usize = std::env::var("S64_PASSES").ok().and_then(|v| v.parse().ok()).unwrap_or(100);
+    std::fs::create_dir_all(outd).unwrap();
+    println!("SPIKE-64: tiles {tiles:?}, thermal {passes} passes on {threads} threads; dx {DX} m");
+    for tile in &tiles {
+        let orig = read(&format!("{dir}/tile{tile}-orig-{W}x{W}.f32"));
+        let carved = read(&format!("{dir}/tile{tile}-carved-{W}x{W}.f32"));
+        let area = read(&format!("{dir}/tile{tile}-area-{W}x{W}.f32"));
+        write_core(&format!("{outd}/tile{tile}-orig.f32"), &orig);
+        write_core(&format!("{outd}/tile{tile}-carved.f32"), &carved);
+        let mass = |h: &[f32]| h.iter().filter(|&&v| v > 0.0).map(|&v| f64::from(v)).sum::<f64>() * DX * DX;
+        // Thermal alone at two critical angles.
+        for theta in [33.0, 20.0] {
+            let mut h = carved.clone();
+            let m0 = mass(&h);
+            let t = Instant::now();
+            let (moved, vol1) = thermal(&mut h, theta, passes, threads);
+            let s = t.elapsed().as_secs_f64();
+            println!(
+                "tile {tile} thermal theta {theta}: {passes} passes {s:.2} s ({:.1} ms/pass, {threads} threads); first-pass volume {vol1:.3e} m3, cells moving in the last pass {moved}; land mass change {:.3e} m3",
+                s * 1000.0 / passes as f64,
+                mass(&h) - m0
+            );
+            write_core(&format!("{outd}/tile{tile}-thermal{theta:.0}.f32"), &h);
+        }
+        // Deposition at three capacities, and the middle one followed by thermal at 33 degrees.
+        for (name, kc) in [("dep-lo", 1.0e4), ("dep-mid", 1.0e5), ("dep-hi", 1.0e6)] {
+            let mut h = carved.clone();
+            let t = Instant::now();
+            let (ero, dep, out, tf, tr) = deposit(&mut h, &orig, &area, kc, 0.5);
+            let s = t.elapsed().as_secs_f64();
+            println!(
+                "tile {tile} {name} (kc {kc}): {s:.2} s (flood {tf:.2}, route {tr:.2}); eroded {ero:.3e} m3, deposited {dep:.3e} ({:.1} %), left the window {out:.3e}",
+                100.0 * dep / ero.max(1.0)
+            );
+            write_core(&format!("{outd}/tile{tile}-{name}.f32"), &h);
+            if name == "dep-mid" {
+                let t = Instant::now();
+                thermal(&mut h, 33.0, passes, threads);
+                println!("tile {tile} dep-mid+thermal33: thermal {:.2} s", t.elapsed().as_secs_f64());
+                write_core(&format!("{outd}/tile{tile}-dep-mid-thermal33.f32"), &h);
+            }
+        }
+        // What thermal does once relief is realistic: land heights scaled by `S64_SCALE` (SPIKE-55's gap), then thermal at 33 degrees.
+        if let Some(k) = std::env::var("S64_SCALE").ok().and_then(|v| v.parse::<f32>().ok()) {
+            let mut h: Vec<f32> = carved.iter().map(|&v| if v > 0.0 { v * k } else { v }).collect();
+            write_core(&format!("{outd}/tile{tile}-scaled.f32"), &h);
+            let t = Instant::now();
+            let (moved, vol1) = thermal(&mut h, 33.0, passes, threads);
+            println!(
+                "tile {tile} scaled x{k} thermal33: {:.2} s; first-pass volume {vol1:.3e} m3, cells moving in the last pass {moved}",
+                t.elapsed().as_secs_f64()
+            );
+            write_core(&format!("{outd}/tile{tile}-scaled-thermal33.f32"), &h);
+        }
+    }
+}

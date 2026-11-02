@@ -1,0 +1,8 @@
+#!/bin/bash
+cd C:/DEV/Serious-Planet-Builder/.claude/worktrees/sonnet-spikes-36fc88
+for f in 0.25 0.5 1.0; do
+  echo "=== floor $f $(date +%H:%M:%S) cpu $(powershell -NoProfile -Command "(Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average")%"
+  mkdir -p target/s73/f$f
+  SPIKE73_FINE_FLOOR=$f S73_DIR=target/s73/f$f cmd //c start "" //b //wait //belownormal target/release/examples/terrain_score.exe 2>&1 | grep -E "S73 .*(site. base|site. k 1.5)"
+done
+echo "=== done $(date +%H:%M:%S)"

@@ -1,0 +1,19 @@
+block | stamp place | reach m | halo m | blocks invalidated | time until exact s (6 workers, 0.25 s per km2) | tile-level baseline: tiles of level 15 within the reach
+ 4.9 km | block centre        |    400 |   320 | 1 (without the halo: 1) | 6 | about 13
+ 4.9 km | block centre        |   2000 |   320 | 3 (without the halo: 1) | 6 | about 177
+ 4.9 km | 30 m inside an edge |    400 |   320 | 2 (without the halo: 2) | 6 | about 13
+ 4.9 km | 30 m inside an edge |   2000 |   320 | 2 (without the halo: 2) | 6 | about 177
+ 4.9 km | block corner        |    400 |   320 | 4 (without the halo: 4) | 6 | about 13
+ 4.9 km | block corner        |   2000 |   320 | 4 (without the halo: 4) | 6 | about 177
+ 9.8 km | block centre        |    400 |   320 | 1 (without the halo: 1) | 24 | about 13
+ 9.8 km | block centre        |   2000 |   320 | 1 (without the halo: 1) | 24 | about 177
+ 9.8 km | 30 m inside an edge |    400 |   320 | 2 (without the halo: 2) | 24 | about 13
+ 9.8 km | 30 m inside an edge |   2000 |   320 | 2 (without the halo: 2) | 24 | about 177
+ 9.8 km | block corner        |    400 |   320 | 4 (without the halo: 4) | 24 | about 13
+ 9.8 km | block corner        |   2000 |   320 | 4 (without the halo: 4) | 24 | about 177
+19.5 km | block centre        |    400 |   320 | 1 (without the halo: 1) | 96 | about 13
+19.5 km | block centre        |   2000 |   320 | 1 (without the halo: 1) | 96 | about 177
+19.5 km | 30 m inside an edge |    400 |   320 | 2 (without the halo: 2) | 96 | about 13
+19.5 km | 30 m inside an edge |   2000 |   320 | 2 (without the halo: 2) | 96 | about 177
+19.5 km | block corner        |    400 |   320 | 4 (without the halo: 4) | 96 | about 13
+19.5 km | block corner        |   2000 |   320 | 4 (without the halo: 4) | 96 | about 177

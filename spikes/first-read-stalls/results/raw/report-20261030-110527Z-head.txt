@@ -1,0 +1,30 @@
+planet refusal report
+kind: stall (the window went on)
+time: 2026-10-30T11:05:27Z
+build commit: 79653500eaa798ae0226f354ad390f4b937a3682
+version: 0.0.0
+command line: editor --edit --store C:/DEV/SeriousPlanetData/global16384 --look docs/milestones/M8/look-review-2b/sample-driver-look.look.toml --size 2400x1300 --marker 8.972,-16.238 --marker -11.1657,23.0493 --marker -37.6958,3.1397
+
+message:
+a frame took 1304 ms (the stall limit is 1000 ms)
+phases of the frame, longest first:
+  camera, ground heights and the globe overview: 1063 ms
+  plan and residency (begin_frame): 220 ms
+  render submit: 16 ms
+  title, exposure readback: 2 ms
+  chunk frame (frame_step, landings, refresh summary): 1 ms
+  present (swapchain, tone map, egui paint): 1 ms
+  editor panels (egui frame): 1 ms
+  wait for the GPU (frames in flight) and the lit plan with the water: 0 ms
+  editor update (picks, outlines, lists): 0 ms
+  horizon frame and upload: 0 ms
+  the rest of the frame: 0 ms
+  plan refusals, sweep, repro files and the preview end: 0 ms
+  input, commands and the smoke script: 0 ms
+  coupled lens and plan refusals: 0 ms
+  scale references: 0 ms
+  field rebuild (a new stage or lens): 0 ms
+  edit republish (set_definition, field, tile refresh): 0 ms
+  regions overlay: 0 ms
+locks the main thread waited on (2 ms or more): none
+blocks the main thread decoded in camera, ground heights and the globe overview: 4

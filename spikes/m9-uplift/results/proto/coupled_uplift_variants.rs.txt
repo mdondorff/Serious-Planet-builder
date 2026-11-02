@@ -1,0 +1,182 @@
+//! SPIKE-48 (spike branch only): uplift variants for the coupled run that keep the input's relief while the drainage reorganises.
+//! `cargo run --release -p planet --example coupled_uplift_variants -- --store DIR --cache FILE [--steps 80] [--only NAME]`. Reads the store only.
+
+use planet::coupledworld::{ERODIBILITY, UPLIFT_RHO};
+use planet_cache::global_store::{GlobalWorld, StoreSource};
+use planet_generators::coupled::{accumulate, priority_flood, receivers, stationary_uplift, step, CoupledInput, CoupledParams, Lattice, NONE};
+use planet_generators::coupledinput::reduce_bake;
+use planet_world_def::WorldDefinition;
+
+fn arg(name: &str) -> Option<String> {
+    let a: Vec<String> = std::env::args().collect();
+    a.iter().position(|x| x == name).and_then(|i| a.get(i + 1).cloned())
+}
+
+const BANDS: [(f32, f32); 5] = [(0.0, 500.0), (500.0, 1000.0), (1000.0, 2500.0), (2500.0, 5000.0), (5000.0, 1.0e9)];
+const AREAS: [(f64, f64); 5] = [(0.0, 1.0e8), (1.0e8, 1.0e9), (1.0e9, 1.0e10), (1.0e10, 1.0e11), (1.0e11, 1.0e20)];
+
+fn pct(v: &mut [f32], q: f64) -> f32 {
+    if v.is_empty() {
+        return f32::NAN;
+    }
+    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    v[((v.len() - 1) as f64 * q) as usize]
+}
+
+/// Median (p10 p90) of run minus input by band of the input.
+fn bands(tag: &str, input: &[f32], run: &[f32]) {
+    let mut line = format!("{tag:<26}");
+    for &(lo, hi) in &BANDS {
+        let mut d: Vec<f32> = input.iter().zip(run).filter(|(a, _)| **a > lo && **a <= hi).map(|(a, b)| b - a).collect();
+        let (m, a, b) = (pct(&mut d, 0.5), pct(&mut d, 0.1), pct(&mut d, 0.9));
+        line += &format!(" {m:8.1} ({a:7.0} {b:6.0}) |");
+    }
+    println!("{line}");
+}
+
+/// Median of run minus input by the run's drainage area class (land of the input only): the area dependence of what the erosion does.
+fn by_area(tag: &str, input: &[f32], run: &[f32], area: &[f64]) {
+    let mut line = format!("{tag:<26}");
+    for &(lo, hi) in &AREAS {
+        let mut d: Vec<f32> = (0..input.len()).filter(|&c| input[c] > 0.0 && area[c] > lo && area[c] <= hi).map(|c| run[c] - input[c]).collect();
+        let n = d.len();
+        line += &format!(" {:8.1} (n {n:8}) |", pct(&mut d, 0.5));
+    }
+    println!("{line}");
+}
+
+fn load_input(lat: &Lattice, store: &str, cache: &str) -> Result<Vec<f32>, String> {
+    if let Ok(bytes) = std::fs::read(cache) {
+        if bytes.len() == lat.len() * 4 {
+            return Ok(bytes.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect());
+        }
+    }
+    let def = WorldDefinition::single_planet(6_371_000.0, 1);
+    let world = GlobalWorld::from_definition(&def).map_err(|e| format!("{e}"))?;
+    let ts = planet_cache::pack::TileStore::open(std::path::Path::new(store), world.params()).map_err(|e| e.to_string())?;
+    let src = StoreSource::new(&ts, &world, 16384).map_err(|e| format!("{e}"))?;
+    let z = reduce_bake(&src, lat.n() as u32, 8).map_err(|e| e.to_string())?;
+    let bytes: Vec<u8> = z.iter().flat_map(|v| v.to_le_bytes()).collect();
+    std::fs::write(cache, bytes).map_err(|e| e.to_string())?;
+    Ok(z)
+}
+
+struct Variant<'a> {
+    name: &'a str,
+    /// The parameters of the steps.
+    p: CoupledParams,
+    /// The uplift of the first step in m per year: the stationary one of some parameters, or zero.
+    uplift: Vec<f32>,
+    /// Relax towards the input with this time constant in years (the uplift of each step is the base uplift plus `(input - z) / T`).
+    relax_years: Option<f64>,
+    /// After each step a land cell stays within `c (A / 1e8)^0.5` metres, at most `max`, under its input height.
+    depth_cap: Option<(f64, f64)>,
+}
+
+fn run_variant(lat: &Lattice, z0: &[f32], v: Variant, steps: usize) {
+    let mut input = CoupledInput { z: z0.to_vec(), uplift: v.uplift.clone(), erodibility: vec![ERODIBILITY; z0.len()] };
+    let mut z = z0.to_vec();
+    println!("-- {}: run minus input, median (p10 p90) by input band 0-500 | 500-1000 | 1000-2500 | 2500-5000 | >5000", v.name);
+    let t = std::time::Instant::now();
+    let mut rec_first: Vec<u32> = Vec::new();
+    let (mut rec_last, mut a_last) = (Vec::new(), Vec::new());
+    let mut last_dz = 0.0;
+    for n in 1..=steps {
+        if v.name.starts_with("followU") {
+            // The uplift that leaves the input where it is under the network of the current surface: K A^m (input drop to the receiver) / distance.
+            let (filled, order) = priority_flood(lat, &z);
+            let (rec, dir) = receivers(lat, &filled, &order, &v.p);
+            let a = accumulate(lat, &z, &order, &rec);
+            for c in 0..z.len() {
+                input.uplift[c] = 0.0;
+                let r = rec[c];
+                if z0[c] > 0.0 && r != NONE {
+                    let dist = lat.spacing_m(c, usize::from(dir[c]), r as usize);
+                    let drop = (f64::from(z0[c]) - f64::from(z0[r as usize]).max(0.0)).max(0.0);
+                    input.uplift[c] = (f64::from(ERODIBILITY) * a[c].powf(v.p.area_exp) * drop / dist) as f32;
+                }
+            }
+        }
+        if let Some(tau) = v.relax_years {
+            for c in 0..z.len() {
+                if z0[c] > 0.0 {
+                    input.uplift[c] = v.uplift[c] + ((f64::from(z0[c]) - f64::from(z[c])) / tau) as f32;
+                }
+            }
+        }
+        let (rec, a, st) = step(lat, &input, &mut z, &v.p);
+        if let Some((c, max)) = v.depth_cap {
+            for i in 0..z.len() {
+                if z0[i] > 0.0 {
+                    let d = (c * (a[i] / 1.0e8).sqrt()).min(max) as f32;
+                    z[i] = z[i].max(z0[i] - d).max(v.p.min_height_m as f32);
+                }
+            }
+        }
+        if n == 1 {
+            rec_first = rec.clone();
+        }
+        last_dz = st.mean_dz_m;
+        if [1, 8, 24, 80, 160].contains(&n) && n <= steps {
+            bands(&format!("step {n} (mean|dz| {:.2})", st.mean_dz_m), z0, &z);
+        }
+        rec_last = rec;
+        a_last = a;
+    }
+    let land = z0.iter().filter(|&&x| x > 0.0).count();
+    let changed = (0..z0.len()).filter(|&c| z0[c] > 0.0 && rec_first[c] != rec_last[c]).count();
+    println!(
+        "   receivers differing between step 1 and step {steps}: {changed} of {land} land cells ({:.1} %); last step mean|dz| {last_dz:.2} m",
+        100.0 * changed as f64 / land as f64
+    );
+    by_area(&format!("by area, step {steps}"), z0, &z, &a_last);
+    let mut trunk: Vec<f32> = (0..z.len()).filter(|&c| z0[c] > 0.0 && a_last[c] > 1.0e11).map(|c| z0[c] - z[c]).collect();
+    println!(
+        "   cells over 1e11 m2: {} ; input minus run median {:.1} m p10 {:.1} p90 {:.1}   ({:.0} s)",
+        trunk.len(),
+        pct(&mut trunk, 0.5),
+        pct(&mut trunk, 0.1),
+        pct(&mut trunk, 0.9),
+        t.elapsed().as_secs_f64()
+    );
+}
+
+fn main() -> Result<(), String> {
+    let store = arg("--store").ok_or("--store DIR needed")?;
+    let cache = arg("--cache").unwrap_or_else(|| "coupled_uplift_z.bin".into());
+    let steps: usize = arg("--steps").map_or(Ok(80), |s| s.parse()).map_err(|e| format!("{e}"))?;
+    let only = arg("--only");
+    let want = |n: &str| only.as_deref().is_none_or(|o| o == n);
+    let lat = Lattice::new(2048, 6_371_000.0);
+    let z0 = load_input(&lat, &store, &cache)?;
+    let ero = vec![ERODIBILITY; z0.len()];
+    let p = CoupledParams { erode: true, ..CoupledParams::default() };
+    let zero = vec![0.0f32; z0.len()];
+    println!("cells {} land {}", z0.len(), z0.iter().filter(|&&v| v > 0.0).count());
+    let pcap = CoupledParams { area_cap_m2: 5.0e7, ..p };
+
+    if want("cap5e7") {
+        let u = stationary_uplift(&lat, &z0, &ero, &pcap, UPLIFT_RHO);
+        run_variant(&lat, &z0, Variant { name: "cap5e7 (SPIKE-45)", p: pcap, uplift: u, relax_years: None, depth_cap: None }, steps);
+    }
+    if want("hillu") {
+        // The uplift of hillslope scale (the area capped at 5e7 in U), the erosion with the true area.
+        let u = stationary_uplift(&lat, &z0, &ero, &pcap, UPLIFT_RHO);
+        run_variant(&lat, &z0, Variant { name: "hill-scale U, true A in erosion", p, uplift: u, relax_years: None, depth_cap: None }, steps);
+    }
+    for (name, tau) in [("relax5e5", 5.0e5), ("relax1e6", 1.0e6), ("relax3e6", 3.0e6)] {
+        if want(name) {
+            run_variant(&lat, &z0, Variant { name, p, uplift: zero.clone(), relax_years: Some(tau), depth_cap: None }, steps);
+        }
+    }
+    if want("followu") {
+        run_variant(&lat, &z0, Variant { name: "followU: stationary uplift of the current network", p, uplift: zero.clone(), relax_years: None, depth_cap: None }, steps);
+    }
+    if want("depthcap") {
+        run_variant(&lat, &z0, Variant { name: "depth cap 3 m (A/1e8)^0.5, max 100 m", p, uplift: zero.clone(), relax_years: None, depth_cap: Some((3.0, 100.0)) }, steps);
+    }
+    if want("depthcap300") {
+        run_variant(&lat, &z0, Variant { name: "depth cap 3 m (A/1e8)^0.5, max 300 m", p, uplift: zero.clone(), relax_years: None, depth_cap: Some((3.0, 300.0)) }, steps);
+    }
+    Ok(())
+}

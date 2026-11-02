@@ -1,0 +1,5 @@
+BAKE evalbench n=512 cells=1572864 threads=1 | topo 0.01s sample 2.02s (1.29 us/cell/thread) flood 0.07s accumulate(MFD) 0.07s derive(slope,twi,soil) 0.05s | land 746478 (47.5 %) seeds 12143 raised 36321 unreached 0 heap_peak 12200 | peak working set 33 MB
+BAKE-SINGLE-THREAD-EQUIV evalbench n=512: flood+accumulate+derive 0.18s = 117.5 ns/cell (all sequential); with sampling 2.21s
+EVAL pine rule (5 trapezoids, product): 7.2 ns per point, single thread (checksum 9916268.0)
+EVAL driver-vector read by direction (cube-face lookup, nearest, 3 u8 channels, 512 grid): 41.8 ns per point (checksum 182535237)
+EVAL one tile's 9x9 driver vector (4 channels) from the grid: 5.49 us per tile (checksum 197083055)

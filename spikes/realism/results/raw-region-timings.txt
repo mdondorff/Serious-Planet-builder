@@ -1,0 +1,60 @@
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+realism site: lat -23.882 lon -15.284, base height 1400 m, floor 1391 m, worst rim change 4 m
+capture-flights: NOT a measurement (no gate, no timestamps, no log); 2560x1440, 240 cameras per flight, tile format compact, height field cpu-erosion-v1 over a 512-cell bake (in-memory bake)
+capture-flights: the one-frame stills (still-*) set the camera directly, below the viewer's 1 m ground clamp (VIEW-004): the viewer itself does not go this low
+realism: region ON, steps [0, 1, 3, 7], suns ["sunset", "noon"]
+valley-300m: ground 1396.3 m at (-1500, -1700), 1116 nodes, 1116 new meshes in 0.7 s
+  valley-300m_sunset_s0.png: terrain pass 1.148 ms (p90 4.616), gpu span 1.708 ms
+  valley-300m_sunset_s1.png: terrain pass 1.037 ms (p90 1.038), gpu span 1.483 ms
+  valley-300m_sunset_s3.png: terrain pass 1.946 ms (p90 2.031), gpu span 2.403 ms
+  valley-300m_sunset_s7.png: terrain pass 3.869 ms (p90 4.011), gpu span 4.318 ms
+  valley-300m_noon_s0.png: terrain pass 0.831 ms (p90 0.851), gpu span 1.232 ms
+  valley-300m_noon_s1.png: terrain pass 0.977 ms (p90 0.999), gpu span 1.393 ms
+  valley-300m_noon_s3.png: terrain pass 4.087 ms (p90 4.445), gpu span 5.531 ms
+  valley-300m_noon_s7.png: terrain pass 4.789 ms (p90 4.815), gpu span 5.343 ms
+valley-30m: ground 1396.3 m at (-1500, -1700), 1113 nodes, 9 new meshes in 0.0 s
+  valley-30m_sunset_s0.png: terrain pass 0.881 ms (p90 0.883), gpu span 1.300 ms
+  valley-30m_sunset_s1.png: terrain pass 0.959 ms (p90 0.989), gpu span 1.375 ms
+  valley-30m_sunset_s3.png: terrain pass 1.864 ms (p90 1.949), gpu span 2.289 ms
+  valley-30m_sunset_s7.png: terrain pass 4.089 ms (p90 4.179), gpu span 4.535 ms
+  valley-30m_noon_s0.png: terrain pass 0.814 ms (p90 0.834), gpu span 1.196 ms
+  valley-30m_noon_s1.png: terrain pass 0.926 ms (p90 0.953), gpu span 1.324 ms
+  valley-30m_noon_s3.png: terrain pass 1.879 ms (p90 1.914), gpu span 2.300 ms
+  valley-30m_noon_s7.png: terrain pass 4.082 ms (p90 4.256), gpu span 4.499 ms
+valley-1.8m: ground 1396.3 m at (-1500, -1700), 1113 nodes, 1 new meshes in 0.0 s
+  valley-1.8m_sunset_s0.png: terrain pass 0.810 ms (p90 0.819), gpu span 1.201 ms
+  valley-1.8m_sunset_s1.png: terrain pass 0.894 ms (p90 0.911), gpu span 1.298 ms
+  valley-1.8m_sunset_s3.png: terrain pass 1.778 ms (p90 1.834), gpu span 2.203 ms
+  valley-1.8m_sunset_s7.png: terrain pass 3.967 ms (p90 4.100), gpu span 4.444 ms
+  valley-1.8m_noon_s0.png: terrain pass 0.787 ms (p90 0.801), gpu span 1.161 ms
+  valley-1.8m_noon_s1.png: terrain pass 0.883 ms (p90 0.901), gpu span 1.269 ms
+  valley-1.8m_noon_s3.png: terrain pass 1.814 ms (p90 1.859), gpu span 2.225 ms
+  valley-1.8m_noon_s7.png: terrain pass 4.026 ms (p90 4.152), gpu span 4.479 ms
+slope-300m: ground 1880.9 m at (300, -900), 1118 nodes, 259 new meshes in 0.2 s
+  slope-300m_sunset_s0.png: terrain pass 1.187 ms (p90 4.527), gpu span 1.728 ms
+  slope-300m_sunset_s1.png: terrain pass 1.313 ms (p90 1.315), gpu span 1.848 ms
+  slope-300m_sunset_s3.png: terrain pass 1.915 ms (p90 1.958), gpu span 2.349 ms
+  slope-300m_sunset_s7.png: terrain pass 4.560 ms (p90 4.744), gpu span 5.024 ms
+  slope-300m_noon_s0.png: terrain pass 0.886 ms (p90 0.899), gpu span 1.286 ms
+  slope-300m_noon_s1.png: terrain pass 0.975 ms (p90 0.978), gpu span 1.369 ms
+  slope-300m_noon_s3.png: terrain pass 1.915 ms (p90 1.979), gpu span 2.336 ms
+  slope-300m_noon_s7.png: terrain pass 4.526 ms (p90 4.718), gpu span 4.971 ms
+slope-30m: ground 1880.9 m at (300, -900), 1115 nodes, 3 new meshes in 0.0 s
+  slope-30m_sunset_s0.png: terrain pass 0.823 ms (p90 1.070), gpu span 1.199 ms
+  slope-30m_sunset_s1.png: terrain pass 1.154 ms (p90 1.155), gpu span 1.633 ms
+  slope-30m_sunset_s3.png: terrain pass 1.715 ms (p90 1.774), gpu span 2.113 ms
+  slope-30m_sunset_s7.png: terrain pass 4.535 ms (p90 4.990), gpu span 5.097 ms
+  slope-30m_noon_s0.png: terrain pass 0.804 ms (p90 0.811), gpu span 1.165 ms
+  slope-30m_noon_s1.png: terrain pass 0.890 ms (p90 0.906), gpu span 1.270 ms
+  slope-30m_noon_s3.png: terrain pass 1.724 ms (p90 1.785), gpu span 2.112 ms
+  slope-30m_noon_s7.png: terrain pass 4.662 ms (p90 5.022), gpu span 5.126 ms
+slope-1.8m: ground 1880.9 m at (300, -900), 1105 nodes, 0 new meshes in 0.0 s
+  slope-1.8m_sunset_s0.png: terrain pass 1.255 ms (p90 1.257), gpu span 1.814 ms
+  slope-1.8m_sunset_s1.png: terrain pass 0.924 ms (p90 1.367), gpu span 1.316 ms
+  slope-1.8m_sunset_s3.png: terrain pass 1.751 ms (p90 1.789), gpu span 2.144 ms
+  slope-1.8m_sunset_s7.png: terrain pass 3.092 ms (p90 3.172), gpu span 3.556 ms
+  slope-1.8m_noon_s0.png: terrain pass 0.801 ms (p90 0.819), gpu span 1.162 ms
+  slope-1.8m_noon_s1.png: terrain pass 0.884 ms (p90 0.899), gpu span 1.256 ms
+  slope-1.8m_noon_s3.png: terrain pass 1.780 ms (p90 1.791), gpu span 2.173 ms
+  slope-1.8m_noon_s7.png: terrain pass 2.978 ms (p90 3.159), gpu span 3.404 ms

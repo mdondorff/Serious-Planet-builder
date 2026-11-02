@@ -1,0 +1,207 @@
+//! SPIKE-49 (spike branch only): the one-pass coarse valley carve of ADR 0084 on the coupled run, and what it holds of the chunk's change.
+//! `cargo run --release -p planet --example coarse_carve -- --store DIR --cache FILE --out DIR [--site LAT,LON]... [--max 100] [--coef 3]`. Reads the store only.
+
+use planet::worldfield::WorldTerrain;
+use planet_cache::global_store::{GlobalWorld, StoreSource};
+use planet_generators::coupled::{accumulate, priority_flood, receivers, CoupledParams, Lattice};
+use planet_generators::coupledinput::reduce_bake;
+use planet_world_def::WorldDefinition;
+use std::sync::Arc;
+
+fn arg(name: &str) -> Option<String> {
+    let a: Vec<String> = std::env::args().collect();
+    a.iter().position(|x| x == name).and_then(|i| a.get(i + 1).cloned())
+}
+
+fn args(name: &str) -> Vec<String> {
+    let a: Vec<String> = std::env::args().collect();
+    a.iter().enumerate().filter(|(_, x)| *x == name).filter_map(|(i, _)| a.get(i + 1).cloned()).collect()
+}
+
+const BANDS: [(f32, f32); 5] = [(0.0, 500.0), (500.0, 1000.0), (1000.0, 2500.0), (2500.0, 5000.0), (5000.0, 1.0e9)];
+
+fn pct(v: &mut [f64], q: f64) -> f64 {
+    if v.is_empty() {
+        return f64::NAN;
+    }
+    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    v[((v.len() - 1) as f64 * q) as usize]
+}
+
+fn load_input(lat: &Lattice, store: &str, cache: &str) -> Result<Vec<f32>, String> {
+    if let Ok(bytes) = std::fs::read(cache) {
+        if bytes.len() == lat.len() * 4 {
+            return Ok(bytes.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect());
+        }
+    }
+    let def = WorldDefinition::single_planet(6_371_000.0, 1);
+    let world = GlobalWorld::from_definition(&def).map_err(|e| format!("{e}"))?;
+    let ts = planet_cache::pack::TileStore::open(std::path::Path::new(store), world.params()).map_err(|e| e.to_string())?;
+    let src = StoreSource::new(&ts, &world, 16384).map_err(|e| format!("{e}"))?;
+    let z = reduce_bake(&src, lat.n() as u32, 8).map_err(|e| e.to_string())?;
+    let bytes: Vec<u8> = z.iter().flat_map(|v| v.to_le_bytes()).collect();
+    std::fs::write(cache, bytes).map_err(|e| e.to_string())?;
+    Ok(z)
+}
+
+fn hillshade(z: &[f32], w: usize, cell_m: f64, ve: f64) -> Vec<u8> {
+    let (az, alt) = (315.0f64.to_radians(), 45.0f64.to_radians());
+    let at = |i: usize, j: usize| f64::from(z[j * w + i]) * ve;
+    let mut out = vec![0u8; w * w];
+    for j in 1..w - 1 {
+        for i in 1..w - 1 {
+            let dzdx = (at(i + 1, j) - at(i - 1, j)) / (2.0 * cell_m);
+            let dzdy = (at(i, j + 1) - at(i, j - 1)) / (2.0 * cell_m);
+            let slope = (dzdx * dzdx + dzdy * dzdy).sqrt().atan();
+            let aspect = (-dzdy).atan2(-dzdx);
+            let s = alt.sin() * slope.cos() + alt.cos() * slope.sin() * (az - aspect).cos();
+            out[j * w + i] = (s.clamp(0.0, 1.0) * 255.0) as u8;
+        }
+    }
+    out
+}
+
+fn main() -> Result<(), String> {
+    let store = arg("--store").ok_or("--store DIR needed")?;
+    let cache = arg("--cache").unwrap_or_else(|| "coupled_z.bin".into());
+    let out = arg("--out").unwrap_or_else(|| ".".into());
+    let max: f64 = arg("--max").map_or(Ok(100.0), |s| s.parse()).map_err(|e| format!("{e}"))?;
+    let coef: f64 = arg("--coef").map_or(Ok(3.0), |s| s.parse()).map_err(|e| format!("{e}"))?;
+    let lat = Lattice::new(2048, 6_371_000.0);
+    let z0 = load_input(&lat, &store, &cache)?;
+    let p = CoupledParams::default();
+
+    // The run without erosion (today): fill, receivers, accumulate.
+    let t = std::time::Instant::now();
+    let (filled, order) = priority_flood(&lat, &z0);
+    let (rec, _) = receivers(&lat, &filled, &order, &p);
+    let a = accumulate(&lat, &filled, &order, &rec);
+    let t_fill = t.elapsed().as_secs_f64();
+
+    // The one-pass carve: z = filled - d(A), then one re-route and accumulate on the carved surface.
+    let t = std::time::Instant::now();
+    let mut carved: Vec<f32> = filled.clone();
+    for c in 0..carved.len() {
+        if z0[c] > 0.0 {
+            let d = (coef * (a[c] / 1.0e8).sqrt()).min(max);
+            carved[c] = (f64::from(filled[c]) - d).max(p.min_height_m) as f32;
+        }
+    }
+    let (filled2, order2) = priority_flood(&lat, &carved);
+    let (rec2, _) = receivers(&lat, &filled2, &order2, &p);
+    let a2 = accumulate(&lat, &filled2, &order2, &rec2);
+    let t_carve = t.elapsed().as_secs_f64();
+    let changed = (0..z0.len()).filter(|&c| z0[c] > 0.0 && rec[c] != rec2[c]).count();
+    let land = z0.iter().filter(|&&v| v > 0.0).count();
+    let refilled = (0..z0.len()).filter(|&c| z0[c] > 0.0 && f64::from(filled2[c]) - f64::from(carved[c]) > 0.5).count();
+    println!("cells {} land {land}; fill+route+accumulate {t_fill:.2} s; carve + flood + route + accumulate {t_carve:.2} s (added)", z0.len());
+    println!("receivers changed by the carve: {changed} ({:.1} %); cells the second flood fills over 0.5 m: {refilled}", 100.0 * changed as f64 / land as f64);
+    let amax = a.iter().cloned().fold(0.0, f64::max);
+    let amax2 = a2.iter().cloned().fold(0.0, f64::max);
+    let n_over = |a: &[f64], t: f64| a.iter().filter(|&&x| x > t).count();
+    println!("max area {amax:.3e} -> {amax2:.3e}; cells over 1e10 m2 {} -> {}; over 1e11 {} -> {}", n_over(&a, 1e10), n_over(&a2, 1e10), n_over(&a, 1e11), n_over(&a2, 1e11));
+
+    println!("relief kept: carved minus input (m), median (p10 p90 | p99 of the lowering) by input band");
+    for (tag, z) in [("fill only", &filled), ("carved", &carved), ("carved, re-flooded", &filled2)] {
+        let mut line = format!("{tag:<20}");
+        for &(lo, hi) in &BANDS {
+            let mut d: Vec<f64> = (0..z0.len()).filter(|&c| z0[c] > lo && z0[c] <= hi).map(|c| f64::from(z[c]) - f64::from(z0[c])).collect();
+            line += &format!(" {:7.1} ({:6.0} {:5.0} | {:6.0}) |", pct(&mut d, 0.5), pct(&mut d, 0.1), pct(&mut d, 0.9), pct(&mut d, 0.01));
+        }
+        println!("{line}");
+    }
+    // Relief within 3 x 3 cell windows (a local range): the input's against the carved one, medians by band.
+    let relief = |z: &[f32], c: usize| -> f64 {
+        let mut lo = f32::MAX;
+        let mut hi = f32::MIN;
+        for nb in lat.neighbours(c) {
+            if nb != u32::MAX {
+                lo = lo.min(z[nb as usize]);
+                hi = hi.max(z[nb as usize]);
+            }
+        }
+        f64::from((hi.max(z[c])) - lo.min(z[c]))
+    };
+    let mut line = String::from("local relief, input -> carved (median m)");
+    for &(blo, bhi) in &BANDS {
+        let idx: Vec<usize> = (0..z0.len()).filter(|&c| z0[c] > blo && z0[c] <= bhi).step_by(7).collect();
+        let mut r0: Vec<f64> = idx.iter().map(|&c| relief(&z0, c)).collect();
+        let mut r1: Vec<f64> = idx.iter().map(|&c| relief(&carved, c)).collect();
+        line += &format!(" {:.0} -> {:.0} |", pct(&mut r0, 0.5), pct(&mut r1, 0.5));
+    }
+    println!("{line}");
+
+    // The sites: the chunk's change against the base (production solve), what the carve holds of it, the residue.
+    let sites: Vec<(f64, f64)> = args("--site").iter().filter_map(|s| s.split_once(',').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?)))).collect();
+    if !sites.is_empty() {
+        let seed = planet::parse_args(&["test-render".to_string(), "--scene".to_string(), "lit".to_string()]).unwrap().seed;
+        let def = WorldDefinition::single_planet(6_371_000.0, seed);
+        let world = Arc::new(WorldTerrain::open_store(def, std::path::Path::new(&store), 16384)?);
+        for &(la, lo) in &sites {
+            let run = world.tributary_spike(la, lo, &[], 1)?;
+            let (base, prod) = (&run.cores[0].1, &run.cores[1].1);
+            let mut change = Vec::new();
+            let mut held = Vec::new();
+            let mut resid = Vec::new();
+            for c in 0..base.len() {
+                if run.corridor[c] {
+                    continue;
+                }
+                let cell = lat.cell_at(run.dirs[c]);
+                let delta = f64::from(carved[cell]) - f64::from(z0[cell]);
+                let ch = prod[c] - base[c];
+                change.push(ch.abs());
+                held.push(-delta);
+                // The chunk measured against the carved base: the carve lowers the base by -delta; the chunk then lowers the rest (>= 0 kept).
+                resid.push((ch + (-delta)).abs());
+            }
+            let (mut c1, mut c2) = (change.clone(), change.clone());
+            let (mut h1, mut h2) = (held.clone(), held.clone());
+            let (mut r1, mut r2) = (resid.clone(), resid.clone());
+            println!(
+                "site ({la:.3}, {lo:.3}) off-corridor cells {}: chunk change |dz| p50 {:.1} p99 {:.1} max {:.1} m; carve lowering p50 {:.2} p99 {:.2} max {:.2} m; chunk change after the carve p50 {:.1} p99 {:.1} max {:.1}",
+                change.len(),
+                pct(&mut c1, 0.5),
+                pct(&mut c2, 0.99),
+                change.iter().cloned().fold(0.0, f64::max),
+                pct(&mut h1, 0.5),
+                pct(&mut h2, 0.99),
+                held.iter().cloned().fold(0.0, f64::max),
+                pct(&mut r1, 0.5),
+                pct(&mut r2, 0.99),
+                resid.iter().cloned().fold(0.0, f64::max),
+            );
+        }
+    }
+
+    // Stills: a 96 x 96 window of the lattice around each site, input and carved, hillshade, heights x 4.
+    let n = lat.n();
+    for &(la, lo) in &sites {
+        let d = planet_core::Vec3::from_lat_lon(la.to_radians(), lo.to_radians());
+        let c0 = lat.cell_at(d);
+        let (f, j0, i0) = (c0 / (n * n), (c0 % (n * n)) / n, c0 % n);
+        let w = 96usize;
+        let (i1, j1) = (i0.saturating_sub(w / 2).min(n - w), j0.saturating_sub(w / 2).min(n - w));
+        let win = |z: &[f32]| -> Vec<f32> { (0..w * w).map(|k| z[f * n * n + (j1 + k / w) * n + i1 + k % w]).collect() };
+        let cell_m = 6_371_000.0 * std::f64::consts::FRAC_PI_2 / n as f64;
+        let panels = [hillshade(&win(&z0), w, cell_m, 4.0), hillshade(&win(&carved), w, cell_m, 4.0)];
+        let (zoom, pw) = (4usize, w);
+        let (ow, oh) = (pw * zoom * 2 + 4, pw * zoom);
+        let mut sheet = vec![0u8; ow * oh];
+        for (p, panel) in panels.iter().enumerate() {
+            for y in 0..oh {
+                for x in 0..pw * zoom {
+                    sheet[y * ow + p * (pw * zoom + 4) + x] = panel[(y / zoom) * pw + x / zoom];
+                }
+            }
+        }
+        let path = std::path::Path::new(&out).join(format!("carve_{la:.2}_{lo:.2}.png"));
+        let file = std::io::BufWriter::new(std::fs::File::create(&path).map_err(|e| e.to_string())?);
+        let mut enc = png::Encoder::new(file, ow as u32, oh as u32);
+        enc.set_color(png::ColorType::Grayscale);
+        enc.set_depth(png::BitDepth::Eight);
+        enc.write_header().map_err(|e| e.to_string())?.write_image_data(&sheet).map_err(|e| e.to_string())?;
+        println!("still {} : left input, right carved; window {w} x {w} cells of {cell_m:.0} m (face {f})", path.display());
+    }
+    Ok(())
+}

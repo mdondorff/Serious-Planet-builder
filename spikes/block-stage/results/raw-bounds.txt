@@ -1,0 +1,16 @@
+alt m | field | nodes | capped | refused | plan ms (cold)
+   30000 | base alone | 626 | 0 | 0 | 10
+   30000 | block, none ready | 626 | 0 | 0 | 25
+   30000 | block, all under the camera ready | 626 | 0 | 0 | 30
+    5000 | base alone | 852 | 0 | 0 | 20
+    5000 | block, none ready | 852 | 0 | 0 | 41
+    5000 | block, all under the camera ready | 852 | 0 | 0 | 42
+     300 | base alone | 1347 | 0 | 0 | 29
+     300 | block, none ready | 1404 | 0 | 0 | 69
+     300 | block, all under the camera ready | 1404 | 0 | 0 | 69
+      30 | base alone | 1760 | 0 | 0 | 36
+      30 | block, none ready | 1507 | 89 | 0 | 114
+      30 | block, all under the camera ready | 1507 | 89 | 0 | 112
+     1.8 | base alone | 1955 | 0 | 0 | 39
+     1.8 | block, none ready | 1502 | 87 | 0 | 117
+     1.8 | block, all under the camera ready | 1502 | 87 | 0 | 119

@@ -1,0 +1,995 @@
+diff --git a/crates/render/examples/instancing_spike.rs b/crates/render/examples/instancing_spike.rs
+new file mode 100644
+index 00000000..7bf735da
+--- /dev/null
++++ b/crates/render/examples/instancing_spike.rs
+@@ -0,0 +1,989 @@
++//! SPIKE-28 (M7 I1): instancing at walking height. Scattered instances (grass clumps of 6 triangles, rocks of 80) over a flat ground, drawn at 2560x1440
++//! from an eye 1.8 m high, with the visible set found two ways: the CPU culls every frame (frustum, distance thinning) and uploads the visible instances,
++//! or a GPU compute pass culls a static buffer and writes indirect draw arguments (the CPU reference of `planet_frame::instances` is the oracle:
++//! the two sets must agree). Raw wgpu with its own device; GPU times from timestamps of waited frames, in one process, indicative (no readiness gate,
++//! other programs may run). Throwaway: never merged as it is.
++//!
++//! `cargo run --release -p planet-render --example instancing_spike -- [--adapter hardware] [--frames 100]`
++
++#![allow(clippy::disallowed_methods)]
++
++use std::time::Instant;
++use wgpu::util::DeviceExt;
++
++const W: u32 = 2560;
++const H: u32 = 1440;
++const EYE_M: f32 = 1.8;
++const PITCH_DEG: f32 = 6.0;
++const FOV_DEG: f32 = 60.0;
++const NEAR: f32 = 0.05;
++const FAR: f32 = 600.0;
++/// The side of a cell of the instance index, metres (the CPU culls cells first).
++const CELL_M: f32 = 16.0;
++/// The bounding sphere of an instance before its scale, metres.
++const RADIUS_M: [f32; 2] = [0.7, 0.8];
++const GRASS_VERTS: u32 = 18;
++const ROCK_VERTS: u32 = 240;
++
++fn arg(name: &str) -> Option<String> {
++    let a: Vec<String> = std::env::args().collect();
++    a.iter().position(|x| x == name).and_then(|i| a.get(i + 1).cloned())
++}
++
++// ---------------------------------------------------------------------------------------------------------------------------------------------
++// The scene: placement, the camera, the frustum, the CPU reference of the cull
++
++fn hash(mut x: u32) -> u32 {
++    x ^= x >> 16;
++    x = x.wrapping_mul(0x7feb352d);
++    x ^= x >> 15;
++    x = x.wrapping_mul(0x846ca68b);
++    x ^= x >> 16;
++    x
++}
++
++fn unit(h: u32) -> f32 {
++    (h >> 8) as f32 / 16_777_216.0
++}
++
++/// An instance as the buffers hold it: the place (relative to the region origin, which is where the camera stands: tile-local f32, CON-11) and a
++/// word with the kind (8 bits), the turn (8), the size (8) and the thinning byte (8).
++#[derive(Clone, Copy)]
++struct Inst {
++    p: [f32; 3],
++    w: u32,
++}
++
++impl Inst {
++    fn bytes(&self) -> [u8; 16] {
++        let mut b = [0u8; 16];
++        for k in 0..3 {
++            b[4 * k..4 * k + 4].copy_from_slice(&self.p[k].to_le_bytes());
++        }
++        b[12..16].copy_from_slice(&self.w.to_le_bytes());
++        b
++    }
++
++    fn kind(&self) -> usize {
++        (self.w & 255) as usize
++    }
++}
++
++/// The density input of the placement (the hook for ADR 0076): the suitability of a kind at a place, 0 to 1. `Flat` places everything the scatter
++/// offers; `Patches` is a toy field (soft patches), standing in for a suitability evaluated by the CPU from the driver vector.
++#[derive(Clone, Copy, PartialEq)]
++enum Suitability {
++    Flat,
++    Patches,
++}
++
++impl Suitability {
++    fn at(self, kind: usize, x: f32, z: f32) -> f32 {
++        match self {
++            Suitability::Flat => 1.0,
++            Suitability::Patches => {
++                let k = if kind == 0 { 1.0 / 18.0 } else { 1.0 / 40.0 };
++                (0.5 + 0.5 * (x * k).sin() * (z * k * 1.3).cos()).clamp(0.0, 1.0)
++            }
++        }
++    }
++}
++
++/// `n` candidate places in a disc, 80 % grass clumps and 20 % rocks, each kept with the probability the suitability gives (the placement is a
++/// CPU field: deterministic, the same set on every machine).
++fn scatter(n: usize, suit: Suitability, field_m: f32) -> Vec<Inst> {
++    let mut v = Vec::with_capacity(n);
++    for i in 0..n as u32 {
++        let h0 = hash(i.wrapping_mul(0x9e3779b1) ^ 0x1234);
++        let (h1, h2, h3, h4) = (hash(h0 ^ 1), hash(h0 ^ 2), hash(h0 ^ 3), hash(h0 ^ 4));
++        let kind = usize::from(unit(h0) >= 0.8);
++        let r = field_m * unit(h1).sqrt();
++        let a = std::f32::consts::TAU * unit(h2);
++        let (x, z) = (r * a.cos(), r * a.sin());
++        if unit(h3) >= suit.at(kind, x, z) {
++            continue;
++        }
++        let w = kind as u32 | (((h4 >> 24) & 255) << 8) | (((h4 >> 16) & 255) << 16) | ((hash(h4) >> 24) << 24);
++        v.push(Inst { p: [x, 0.0, z], w });
++    }
++    v
++}
++
++/// The camera: eye at the origin of the region, 1.8 m up, looking north pitched down. Rows of the world-to-clip matrix, and the six frustum planes
++/// (normalised, pointing inside).
++struct Camera {
++    rows: [[f32; 4]; 4],
++    planes: [[f32; 4]; 6],
++    eye: [f32; 3],
++}
++
++fn camera() -> Camera {
++    let eye = [0.0, EYE_M, 0.0];
++    let phi = PITCH_DEG.to_radians();
++    let forward = [0.0, -phi.sin(), phi.cos()];
++    let right = [1.0, 0.0, 0.0];
++    let up = [0.0, phi.cos(), phi.sin()];
++    let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
++    let f = 1.0 / (FOV_DEG.to_radians() * 0.5).tan();
++    let aspect = W as f32 / H as f32;
++    let (k1, k0) = (FAR / (FAR - NEAR), -FAR * NEAR / (FAR - NEAR));
++    let row = |v: [f32; 3], s: f32| [v[0] * s, v[1] * s, v[2] * s, -dot(v, eye) * s];
++    let r0 = row(right, f / aspect);
++    let r1 = row(up, f);
++    let mut r2 = row(forward, k1);
++    r2[3] += k0;
++    let r3 = row(forward, 1.0);
++    let add = |a: [f32; 4], b: [f32; 4], s: f32| [a[0] + s * b[0], a[1] + s * b[1], a[2] + s * b[2], a[3] + s * b[3]];
++    let norm = |p: [f32; 4]| {
++        let l = (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt();
++        [p[0] / l, p[1] / l, p[2] / l, p[3] / l]
++    };
++    let planes = [add(r3, r0, 1.0), add(r3, r0, -1.0), add(r3, r1, 1.0), add(r3, r1, -1.0), r2, add(r3, r2, -1.0)].map(norm);
++    Camera { rows: [r0, r1, r2, r3], planes, eye }
++}
++
++/// The cull of one instance, the formula of both paths: inside the six planes (with the bounding sphere), and kept by the distance thinning (the
++/// instance's own byte against a keep probability that falls from 1 at half the kind's distance to 0 at the distance).
++fn keeps(cam: &Camera, i: &Inst, lod_m: [f32; 2]) -> bool {
++    let kind = i.kind();
++    let scale = 0.6 + ((i.w >> 16) & 255) as f32 / 255.0 * 0.8;
++    let r = RADIUS_M[kind] * scale;
++    let (dx, dy, dz) = (i.p[0] - cam.eye[0], i.p[1] - cam.eye[1], i.p[2] - cam.eye[2]);
++    let d = (dx * dx + dy * dy + dz * dz).sqrt();
++    let p = ((lod_m[kind] - d) / (0.5 * lod_m[kind])).clamp(0.0, 1.0);
++    if ((i.w >> 24) as f32 + 0.5) / 256.0 >= p {
++        return false;
++    }
++    cam.planes.iter().all(|pl| pl[0] * i.p[0] + pl[1] * i.p[1] + pl[2] * i.p[2] + pl[3] >= -r)
++}
++
++/// The CPU reference: the indices of the kept instances of each kind, ascending.
++fn cull_cpu(cam: &Camera, all: &[Inst], lod_m: [f32; 2]) -> [Vec<u32>; 2] {
++    let mut out = [Vec::new(), Vec::new()];
++    for (k, i) in all.iter().enumerate() {
++        if keeps(cam, i, lod_m) {
++            out[i.kind()].push(k as u32);
++        }
++    }
++    out
++}
++
++/// The instances sorted by cell, and the cells (the index a tile would hold): the cell, where its instances start and how many there are.
++struct Cell {
++    cx: i32,
++    cz: i32,
++    start: usize,
++    len: usize,
++}
++
++fn index_cells(all: &mut Vec<Inst>) -> Vec<Cell> {
++    let key = |i: &Inst| ((i.p[0] / CELL_M).floor() as i32, (i.p[2] / CELL_M).floor() as i32);
++    all.sort_by_key(|i| key(i));
++    let mut cells: Vec<Cell> = Vec::new();
++    for (k, i) in all.iter().enumerate() {
++        let (cx, cz) = key(i);
++        match cells.last_mut() {
++            Some(c) if c.cx == cx && c.cz == cz => c.len += 1,
++            _ => cells.push(Cell { cx, cz, start: k, len: 1 }),
++        }
++    }
++    cells
++}
++
++/// The CPU path as an engine would run it: the cells are tested first (a sphere round the cell against the frustum, the nearest distance against
++/// the largest range), the instances only of the cells that pass. The same set as `cull_cpu`.
++fn cull_cells(cam: &Camera, all: &[Inst], cells: &[Cell], lod_m: [f32; 2]) -> [Vec<u32>; 2] {
++    let mut out = [Vec::new(), Vec::new()];
++    let rc = CELL_M * 0.7072 + 1.2;
++    let range = lod_m[0].max(lod_m[1]);
++    for c in cells {
++        let (x, z) = ((c.cx as f32 + 0.5) * CELL_M, (c.cz as f32 + 0.5) * CELL_M);
++        let (dx, dz) = (x - cam.eye[0], z - cam.eye[2]);
++        if (dx * dx + dz * dz).sqrt() - rc - cam.eye[1] > range {
++            continue;
++        }
++        if !cam.planes.iter().all(|pl| pl[0] * x + pl[2] * z + pl[3] >= -rc - pl[1].abs() * 2.0) {
++            continue;
++        }
++        for k in c.start..c.start + c.len {
++            if keeps(cam, &all[k], lod_m) {
++                out[all[k].kind()].push(k as u32);
++            }
++        }
++    }
++    out
++}
++
++// ---------------------------------------------------------------------------------------------------------------------------------------------
++// The meshes: 18 vertices of a grass clump (three crossed tapered quads), 240 of a rock (an icosphere of 80 faces, flat shaded)
++
++fn meshes() -> (Vec<[f32; 4]>, Vec<[f32; 4]>) {
++    let (mut pos, mut nrm) = (Vec::new(), Vec::new());
++    for q in 0..3 {
++        let a = q as f32 * std::f32::consts::PI / 3.0;
++        let (c, s) = (a.cos(), a.sin());
++        let at = |u: f32, h: f32| [c * u, h, s * u, 0.0];
++        let (b, t, h) = (0.18, 0.03, 0.6);
++        for [u, v] in [[-b, 0.0], [b, 0.0], [-t, h], [-t, h], [b, 0.0], [t, h]] {
++            let mut p = at(u, v);
++            p[3] = v / h;
++            pos.push(p);
++            nrm.push([0.0, 1.0, 0.0, 0.0]);
++        }
++    }
++    // The icosphere.
++    let t = (1.0 + 5f32.sqrt()) / 2.0;
++    let mut v: Vec<[f32; 3]> = vec![
++        [-1.0, t, 0.0],
++        [1.0, t, 0.0],
++        [-1.0, -t, 0.0],
++        [1.0, -t, 0.0],
++        [0.0, -1.0, t],
++        [0.0, 1.0, t],
++        [0.0, -1.0, -t],
++        [0.0, 1.0, -t],
++        [t, 0.0, -1.0],
++        [t, 0.0, 1.0],
++        [-t, 0.0, -1.0],
++        [-t, 0.0, 1.0],
++    ];
++    let f: [[usize; 3]; 20] = [
++        [0, 11, 5],
++        [0, 5, 1],
++        [0, 1, 7],
++        [0, 7, 10],
++        [0, 10, 11],
++        [1, 5, 9],
++        [5, 11, 4],
++        [11, 10, 2],
++        [10, 7, 6],
++        [7, 1, 8],
++        [3, 9, 4],
++        [3, 4, 2],
++        [3, 2, 6],
++        [3, 6, 8],
++        [3, 8, 9],
++        [4, 9, 5],
++        [2, 4, 11],
++        [6, 2, 10],
++        [8, 6, 7],
++        [9, 8, 1],
++    ];
++    let normalise = |p: [f32; 3]| {
++        let l = (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt();
++        [p[0] / l, p[1] / l, p[2] / l]
++    };
++    for p in &mut v {
++        *p = normalise(*p);
++    }
++    let mid = |a: [f32; 3], b: [f32; 3]| normalise([(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0, (a[2] + b[2]) / 2.0]);
++    let mut faces: Vec<[[f32; 3]; 3]> = Vec::new();
++    for tri in f {
++        let (a, b, c) = (v[tri[0]], v[tri[1]], v[tri[2]]);
++        let (ab, bc, ca) = (mid(a, b), mid(b, c), mid(c, a));
++        faces.extend([[a, ab, ca], [b, bc, ab], [c, ca, bc], [ab, bc, ca]]);
++    }
++    assert_eq!(faces.len() * 3, ROCK_VERTS as usize);
++    let displace = |p: [f32; 3]| {
++        let h = hash(((p[0] * 997.0) as i32 as u32) ^ (((p[1] * 991.0) as i32 as u32) << 8) ^ (((p[2] * 983.0) as i32 as u32) << 16));
++        let r = 0.42 + 0.18 * unit(h);
++        [p[0] * r, p[1] * r * 0.8 + 0.12, p[2] * r]
++    };
++    for tri in faces {
++        let q = tri.map(displace);
++        let e1 = [q[1][0] - q[0][0], q[1][1] - q[0][1], q[1][2] - q[0][2]];
++        let e2 = [q[2][0] - q[0][0], q[2][1] - q[0][1], q[2][2] - q[0][2]];
++        let n = normalise([e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]]);
++        for p in q {
++            pos.push([p[0], p[1], p[2], 0.5]);
++            nrm.push([n[0], n[1], n[2], 0.0]);
++        }
++    }
++    (pos, nrm)
++}
++
++// ---------------------------------------------------------------------------------------------------------------------------------------------
++// The shaders
++
++const COMMON: &str = r#"
++struct Inst { p: vec3<f32>, w: u32 };
++struct Globals { rows: array<vec4<f32>, 4>, eye: vec4<f32>, sun: vec4<f32> };
++"#;
++
++fn render_shader(gpu_path: bool) -> String {
++    let load = if gpu_path {
++        "fn load_instance(ii: u32) -> Inst { return all_inst[vis[ii]]; }"
++    } else {
++        "fn load_instance(ii: u32) -> Inst { return vis_inst[ii]; }"
++    };
++    let bindings = if gpu_path {
++        "@group(0) @binding(2) var<storage, read> all_inst: array<Inst>;\n@group(0) @binding(3) var<storage, read> vis: array<u32>;"
++    } else {
++        "@group(0) @binding(2) var<storage, read> vis_inst: array<Inst>;"
++    };
++    format!(
++        r#"{COMMON}
++@group(0) @binding(0) var<uniform> g: Globals;
++@group(0) @binding(1) var<storage, read> mesh: array<vec4<f32>, {n}>;
++@group(0) @binding(4) var<storage, read> mesh_n: array<vec4<f32>, {n}>;
++{bindings}
++{load}
++
++struct VsOut {{ @builtin(position) pos: vec4<f32>, @location(0) col: vec3<f32> }};
++
++fn clip_of(p: vec3<f32>) -> vec4<f32> {{
++    let q = vec4<f32>(p, 1.0);
++    return vec4<f32>(dot(g.rows[0], q), dot(g.rows[1], q), dot(g.rows[2], q), dot(g.rows[3], q));
++}}
++
++@vertex
++fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VsOut {{
++    let inst = load_instance(ii);
++    let kind = inst.w & 255u;
++    let turn = f32((inst.w >> 8u) & 255u) * (6.2831853 / 256.0);
++    let sc = 0.6 + f32((inst.w >> 16u) & 255u) / 255.0 * 0.8;
++    let tint = f32(inst.w >> 24u) / 255.0;
++    let m = mesh[vi];
++    let c = cos(turn);
++    let s = sin(turn);
++    let local = vec3<f32>(m.x * c - m.z * s, m.y, m.x * s + m.z * c) * sc;
++    let nl = mesh_n[vi].xyz;
++    let n = vec3<f32>(nl.x * c - nl.z * s, nl.y, nl.x * s + nl.z * c);
++    var out: VsOut;
++    out.pos = clip_of(inst.p + local);
++    let lit = 0.35 + 0.65 * max(dot(n, g.sun.xyz), 0.0);
++    var base = vec3<f32>(0.4, 0.38, 0.35) * (0.8 + 0.4 * tint);
++    if (kind == 0u) {{
++        base = mix(vec3<f32>(0.16, 0.32, 0.09), vec3<f32>(0.34, 0.52, 0.16), m.w) * (0.8 + 0.4 * tint);
++    }}
++    out.col = base * lit;
++    return out;
++}}
++
++@fragment
++fn fs(in: VsOut) -> @location(0) vec4<f32> {{
++    return vec4<f32>(in.col, 1.0);
++}}
++
++struct GroundOut {{ @builtin(position) pos: vec4<f32> }};
++
++@vertex
++fn vs_ground(@builtin(vertex_index) vi: u32) -> GroundOut {{
++    var corners = array<vec2<f32>, 6>(vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, -1.0), vec2<f32>(-1.0, 1.0), vec2<f32>(-1.0, 1.0), vec2<f32>(1.0, -1.0), vec2<f32>(1.0, 1.0));
++    let c = corners[vi] * 400.0;
++    var out: GroundOut;
++    out.pos = clip_of(vec3<f32>(c.x, 0.0, c.y));
++    return out;
++}}
++
++@fragment
++fn fs_ground() -> @location(0) vec4<f32> {{
++    return vec4<f32>(0.33, 0.31, 0.22, 1.0);
++}}
++"#,
++        n = GRASS_VERTS + ROCK_VERTS,
++    )
++}
++
++const CULL_SHADER: &str = r#"
++struct Inst { p: vec3<f32>, w: u32 };
++struct Cull { planes: array<vec4<f32>, 6>, eye: vec4<f32>, lod: vec4<f32>, radius: vec4<f32>, n: u32, pad0: u32, pad1: u32, pad2: u32 };
++@group(0) @binding(0) var<uniform> c: Cull;
++@group(0) @binding(1) var<storage, read> all_inst: array<Inst>;
++@group(0) @binding(2) var<storage, read_write> vis_grass: array<u32>;
++@group(0) @binding(3) var<storage, read_write> vis_rock: array<u32>;
++@group(0) @binding(4) var<storage, read_write> args: array<atomic<u32>>;
++
++@compute @workgroup_size(64)
++fn main(@builtin(global_invocation_id) id: vec3<u32>) {
++    let i = id.x;
++    if (i >= c.n) {
++        return;
++    }
++    let inst = all_inst[i];
++    let kind = inst.w & 255u;
++    let scale = 0.6 + f32((inst.w >> 16u) & 255u) / 255.0 * 0.8;
++    let lod = select(c.lod.x, c.lod.y, kind == 1u);
++    let r = select(c.radius.x, c.radius.y, kind == 1u) * scale;
++    let d3 = inst.p - c.eye.xyz;
++    let d = sqrt(dot(d3, d3));
++    let p = clamp((lod - d) / (0.5 * lod), 0.0, 1.0);
++    if ((f32(inst.w >> 24u) + 0.5) / 256.0 >= p) {
++        return;
++    }
++    for (var k = 0u; k < 6u; k = k + 1u) {
++        let pl = c.planes[k];
++        if (pl.x * inst.p.x + pl.y * inst.p.y + pl.z * inst.p.z + pl.w < -r) {
++            return;
++        }
++    }
++    if (kind == 0u) {
++        let slot = atomicAdd(&args[1], 1u);
++        vis_grass[slot] = i;
++    } else {
++        let slot = atomicAdd(&args[5], 1u);
++        vis_rock[slot] = i;
++    }
++}
++"#;
++
++// ---------------------------------------------------------------------------------------------------------------------------------------------
++// The harness
++
++struct Gpu {
++    device: wgpu::Device,
++    queue: wgpu::Queue,
++    period_ns: f64,
++}
++
++struct Timing {
++    queries: wgpu::QuerySet,
++    resolve: wgpu::Buffer,
++    readback: wgpu::Buffer,
++}
++
++fn storage(device: &wgpu::Device, label: &str, size: u64, extra: wgpu::BufferUsages) -> wgpu::Buffer {
++    device.create_buffer(&wgpu::BufferDescriptor {
++        label: Some(label),
++        size: size.max(16),
++        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | extra,
++        mapped_at_creation: false,
++    })
++}
++
++fn read_back(gpu: &Gpu, src: &wgpu::Buffer, bytes: u64) -> Vec<u8> {
++    let staging = gpu.device.create_buffer(&wgpu::BufferDescriptor {
++        label: Some("readback"),
++        size: bytes.max(4),
++        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
++        mapped_at_creation: false,
++    });
++    let mut enc = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("readback") });
++    enc.copy_buffer_to_buffer(src, 0, &staging, 0, bytes);
++    gpu.queue.submit([enc.finish()]);
++    let slice = staging.slice(..);
++    slice.map_async(wgpu::MapMode::Read, |r| r.expect("map"));
++    gpu.device.poll(wgpu::PollType::wait_indefinitely()).expect("poll");
++    let out = slice.get_mapped_range().expect("range").to_vec();
++    out
++}
++
++fn median(v: &mut [f64]) -> f64 {
++    v.sort_by(|a, b| a.total_cmp(b));
++    v[v.len() / 2]
++}
++
++#[derive(Default, Clone)]
++struct Row {
++    n_placed: usize,
++    grass: usize,
++    rocks: usize,
++    cull_cpu_ms: f64,
++    cull_cells_ms: f64,
++    upload_bytes: u64,
++    upload_ms: f64,
++    cpu_draw_gpu_ms: f64,
++    gpu_cull_ms: f64,
++    gpu_draw_ms: f64,
++    sets_equal: bool,
++    mismatches: usize,
++    wall_cpu_path_ms: f64,
++    wall_gpu_path_ms: f64,
++}
++
++fn main() {
++    let hardware = arg("--adapter").is_some_and(|a| a == "hardware");
++    let frames: usize = arg("--frames").and_then(|v| v.parse().ok()).unwrap_or(100);
++    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
++    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
++        power_preference: if hardware { wgpu::PowerPreference::HighPerformance } else { wgpu::PowerPreference::None },
++        force_fallback_adapter: !hardware,
++        compatible_surface: None,
++        apply_limit_buckets: false,
++    }))
++    .expect("adapter");
++    let info = adapter.get_info();
++    println!("adapter: {:?} {} ({:?}); {W}x{H}, eye {EYE_M} m, pitch {PITCH_DEG} deg, {frames} timed frames per row; the rows name the placed count and the field radius", info.backend, info.name, info.device_type);
++    let timestamps = adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY);
++    let mut limits = wgpu::Limits::default();
++    limits.max_storage_buffer_binding_size = 1 << 29;
++    limits.max_buffer_size = 1 << 29;
++    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
++        required_features: if timestamps { wgpu::Features::TIMESTAMP_QUERY } else { wgpu::Features::empty() },
++        required_limits: limits,
++        ..Default::default()
++    }))
++    .expect("device");
++    let period_ns = f64::from(queue.get_timestamp_period());
++    let gpu = Gpu { device, queue, period_ns };
++    println!("timestamps: {timestamps}");
++
++    let device = &gpu.device;
++    let color = device.create_texture(&wgpu::TextureDescriptor {
++        label: Some("color"),
++        size: wgpu::Extent3d { width: W, height: H, depth_or_array_layers: 1 },
++        mip_level_count: 1,
++        sample_count: 1,
++        dimension: wgpu::TextureDimension::D2,
++        format: wgpu::TextureFormat::Rgba8Unorm,
++        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
++        view_formats: &[],
++    });
++    let depth = device.create_texture(&wgpu::TextureDescriptor {
++        label: Some("depth"),
++        size: wgpu::Extent3d { width: W, height: H, depth_or_array_layers: 1 },
++        mip_level_count: 1,
++        sample_count: 1,
++        dimension: wgpu::TextureDimension::D2,
++        format: wgpu::TextureFormat::Depth32Float,
++        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
++        view_formats: &[],
++    });
++    let (color_view, depth_view) = (color.create_view(&Default::default()), depth.create_view(&Default::default()));
++    let cam = camera();
++
++    // Globals, meshes.
++    let mut globals = Vec::new();
++    for r in cam.rows {
++        for v in r {
++            globals.extend(v.to_le_bytes());
++        }
++    }
++    for v in [cam.eye[0], cam.eye[1], cam.eye[2], 0.0, 0.5f32, 0.8, 0.3, 0.0] {
++        globals.extend(v.to_le_bytes());
++    }
++    let globals_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
++        label: Some("globals"),
++        contents: &globals,
++        usage: wgpu::BufferUsages::UNIFORM,
++    });
++    let (pos, nrm) = meshes();
++    let bytes_of = |v: &[[f32; 4]]| v.iter().flat_map(|q| q.iter().flat_map(|f| f.to_le_bytes())).collect::<Vec<u8>>();
++    let mesh_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("mesh"), contents: &bytes_of(&pos), usage: wgpu::BufferUsages::STORAGE });
++    let mesh_n_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("mesh-n"), contents: &bytes_of(&nrm), usage: wgpu::BufferUsages::STORAGE });
++
++    // Pipelines.
++    let entry = |binding, vis, ty| wgpu::BindGroupLayoutEntry { binding, visibility: vis, ty, count: None };
++    let st = |ro| wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: ro }, has_dynamic_offset: false, min_binding_size: None };
++    let un = wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None };
++    let (v, _f, c) = (wgpu::ShaderStages::VERTEX, wgpu::ShaderStages::FRAGMENT, wgpu::ShaderStages::COMPUTE);
++    let layout_for = |label: &str, entries: &[wgpu::BindGroupLayoutEntry]| {
++        let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some(label), entries });
++        let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some(label), bind_group_layouts: &[Some(&bgl)], immediate_size: 0 });
++        (bgl, pl)
++    };
++    let draw_pipeline = |gpu_path: bool| {
++        let entries: Vec<wgpu::BindGroupLayoutEntry> = if gpu_path {
++            vec![entry(0, v, un), entry(1, v, st(true)), entry(2, v, st(true)), entry(3, v, st(true)), entry(4, v, st(true))]
++        } else {
++            vec![entry(0, v, un), entry(1, v, st(true)), entry(2, v, st(true)), entry(4, v, st(true))]
++        };
++        let (bgl, pl) = layout_for("draw", &entries);
++        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("draw"), source: wgpu::ShaderSource::Wgsl(render_shader(gpu_path).into()) });
++        let target = Some(wgpu::ColorTargetState { format: wgpu::TextureFormat::Rgba8Unorm, blend: None, write_mask: wgpu::ColorWrites::ALL });
++        let depth_state = Some(wgpu::DepthStencilState {
++            format: wgpu::TextureFormat::Depth32Float,
++            depth_write_enabled: Some(true),
++            depth_compare: Some(wgpu::CompareFunction::Less),
++            stencil: Default::default(),
++            bias: Default::default(),
++        });
++        let make = |vs: &str, fs: &str| {
++            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
++                label: Some(vs),
++                layout: Some(&pl),
++                vertex: wgpu::VertexState { module: &module, entry_point: Some(vs), compilation_options: Default::default(), buffers: &[] },
++                fragment: Some(wgpu::FragmentState { module: &module, entry_point: Some(fs), compilation_options: Default::default(), targets: &[target.clone()] }),
++                primitive: wgpu::PrimitiveState::default(),
++                depth_stencil: depth_state.clone(),
++                multisample: wgpu::MultisampleState::default(),
++                multiview_mask: None,
++                cache: None,
++            })
++        };
++        (bgl, make("vs", "fs"), make("vs_ground", "fs_ground"))
++    };
++    let (cpu_bgl, cpu_inst_pipe, cpu_ground_pipe) = draw_pipeline(false);
++    let (gpu_bgl, gpu_inst_pipe, gpu_ground_pipe) = draw_pipeline(true);
++    let (cull_bgl, cull_pl) = layout_for("cull", &[entry(0, c, un), entry(1, c, st(true)), entry(2, c, st(false)), entry(3, c, st(false)), entry(4, c, st(false))]);
++    let cull_module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("cull"), source: wgpu::ShaderSource::Wgsl(CULL_SHADER.into()) });
++    let cull_pipe = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor { label: Some("cull"), layout: Some(&cull_pl), module: &cull_module, entry_point: Some("main"), compilation_options: Default::default(), cache: None });
++
++    let timing = timestamps.then(|| Timing {
++        queries: device.create_query_set(&wgpu::QuerySetDescriptor { label: Some("ts"), ty: wgpu::QueryType::Timestamp, count: 4 }),
++        resolve: device.create_buffer(&wgpu::BufferDescriptor { label: Some("ts-resolve"), size: 32, usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC, mapped_at_creation: false }),
++        readback: device.create_buffer(&wgpu::BufferDescriptor { label: Some("ts-read"), size: 32, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false }),
++    });
++
++    let run_frame = |encode: &mut dyn FnMut(&mut wgpu::CommandEncoder, bool)| -> (f64, f64) {
++        let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("frame") });
++        encode(&mut enc, timestamps);
++        if let Some(t) = &timing {
++            enc.resolve_query_set(&t.queries, 0..4, &t.resolve, 0);
++            enc.copy_buffer_to_buffer(&t.resolve, 0, &t.readback, 0, 32);
++        }
++        let t0 = Instant::now();
++        gpu.queue.submit([enc.finish()]);
++        gpu.device.poll(wgpu::PollType::wait_indefinitely()).expect("poll");
++        let wall = t0.elapsed().as_secs_f64() * 1000.0;
++        let mut spans = (0.0, 0.0);
++        if let Some(t) = &timing {
++            let slice = t.readback.slice(..);
++            slice.map_async(wgpu::MapMode::Read, |r| r.expect("map"));
++            gpu.device.poll(wgpu::PollType::wait_indefinitely()).expect("poll");
++            {
++                let data = slice.get_mapped_range().expect("range");
++                let ticks: Vec<u64> = data.chunks(8).map(|c| u64::from_le_bytes(c.try_into().unwrap())).collect();
++                let ms = |a: u64, b: u64| (b.saturating_sub(a)) as f64 * gpu.period_ns / 1.0e6;
++                spans = (ms(ticks[0], ticks[1]), ms(ticks[2], ticks[3]));
++            }
++            t.readback.unmap();
++        }
++        let _ = wall;
++        spans
++    };
++
++    let draw_pass = |enc: &mut wgpu::CommandEncoder, stamps: bool, ground: &wgpu::RenderPipeline, inst: &wgpu::RenderPipeline, bind: &wgpu::BindGroup, args: Option<&wgpu::Buffer>, direct: Option<[u32; 2]>| {
++        let writes = stamps.then(|| timing.as_ref().map(|t| wgpu::RenderPassTimestampWrites { query_set: &t.queries, beginning_of_pass_write_index: Some(2), end_of_pass_write_index: Some(3) })).flatten();
++        let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
++            label: Some("draw"),
++            color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &color_view, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.5, g: 0.65, b: 0.9, a: 1.0 }), store: wgpu::StoreOp::Store } })],
++            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment { view: &depth_view, depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }), stencil_ops: None }),
++            timestamp_writes: writes,
++            occlusion_query_set: None,
++            multiview_mask: None,
++        });
++        pass.set_bind_group(0, bind, &[]);
++        pass.set_pipeline(ground);
++        pass.draw(0..6, 0..1);
++        pass.set_pipeline(inst);
++        if let Some(a) = args {
++            pass.draw_indirect(a, 0);
++            pass.draw_indirect(a, 16);
++        } else if let Some([g, r]) = direct {
++            pass.draw(0..GRASS_VERTS, 0..g);
++            pass.draw(GRASS_VERTS..GRASS_VERTS + ROCK_VERTS, 0..r);
++        }
++    };
++
++    let mut rows: Vec<(String, Row)> = Vec::new();
++    for (label, n, suit, field_m, lod_m) in [
++        ("10 k, 250 m", 10_000usize, Suitability::Flat, 250.0f32, [45.0f32, 120.0]),
++        ("100 k, 250 m", 100_000, Suitability::Flat, 250.0, [45.0, 120.0]),
++        ("1 M, 250 m", 1_000_000, Suitability::Flat, 250.0, [45.0, 120.0]),
++        ("4 M, 250 m", 4_000_000, Suitability::Flat, 250.0, [45.0, 120.0]),
++        ("1 M, 250 m, patches", 1_000_000, Suitability::Patches, 250.0, [45.0, 120.0]),
++        ("2 M, 80 m dense", 2_000_000, Suitability::Flat, 80.0, [60.0, 120.0]),
++        ("4 M, 80 m dense", 4_000_000, Suitability::Flat, 80.0, [60.0, 120.0]),
++    ] {
++        let mut all = scatter(n, suit, field_m);
++        let cells = index_cells(&mut all);
++        let reference = cull_cpu(&cam, &all, lod_m);
++        assert!(cull_cells(&cam, &all, &cells, lod_m) == reference, "the cell cull is the reference");
++        // The cull uniform of this row.
++        let mut cull_u = Vec::new();
++        for p in cam.planes {
++            for x in p {
++                cull_u.extend(x.to_le_bytes());
++            }
++        }
++        for x in [cam.eye[0], cam.eye[1], cam.eye[2], 0.0, lod_m[0], lod_m[1], 0.0, 0.0, RADIUS_M[0], RADIUS_M[1], 0.0, 0.0] {
++            cull_u.extend(x.to_le_bytes());
++        }
++        let mut row = Row { n_placed: all.len(), grass: reference[0].len(), rocks: reference[1].len(), ..Default::default() };
++        let inst_bytes: Vec<u8> = all.iter().flat_map(Inst::bytes).collect();
++
++        // The baseline: the ground alone (no instance drawn).
++        let dummy = storage(device, "dummy", 16, wgpu::BufferUsages::empty());
++        let cpu_bind_dummy = device.create_bind_group(&wgpu::BindGroupDescriptor {
++            label: Some("cpu-bind"),
++            layout: &cpu_bgl,
++            entries: &[
++                wgpu::BindGroupEntry { binding: 0, resource: globals_buf.as_entire_binding() },
++                wgpu::BindGroupEntry { binding: 1, resource: mesh_buf.as_entire_binding() },
++                wgpu::BindGroupEntry { binding: 2, resource: dummy.as_entire_binding() },
++                wgpu::BindGroupEntry { binding: 4, resource: mesh_n_buf.as_entire_binding() },
++            ],
++        });
++        let mut base = Vec::new();
++        for k in 0..frames + 10 {
++            let (_, d) = run_frame(&mut |enc, st| draw_pass(enc, st, &cpu_ground_pipe, &cpu_inst_pipe, &cpu_bind_dummy, None, Some([0, 0])));
++            if k >= 10 {
++                base.push(d);
++            }
++        }
++        let ground_only = median(&mut base);
++
++        // The CPU path: cull on the CPU, upload the visible instances of each kind, draw them instanced.
++        let max_vis = reference[0].len().max(1) + reference[1].len().max(1);
++        let vis_cpu = storage(device, "vis-cpu", (max_vis as u64 + 64) * 16 * 2, wgpu::BufferUsages::empty());
++        let cpu_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
++            label: Some("cpu-bind"),
++            layout: &cpu_bgl,
++            entries: &[
++                wgpu::BindGroupEntry { binding: 0, resource: globals_buf.as_entire_binding() },
++                wgpu::BindGroupEntry { binding: 1, resource: mesh_buf.as_entire_binding() },
++                wgpu::BindGroupEntry { binding: 2, resource: vis_cpu.as_entire_binding() },
++                wgpu::BindGroupEntry { binding: 4, resource: mesh_n_buf.as_entire_binding() },
++            ],
++        });
++        let (mut t_cull, mut t_up, mut t_draw, mut t_wall) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
++        let mut bytes_up = 0u64;
++        for k in 0..frames + 10 {
++            let t0 = Instant::now();
++            let mut idx = cull_cpu(&cam, &all, lod_m);
++            // SORT=near: nearest first; SORT=far: farthest first; SORT=random: shuffled (the order the GPU path's atomics give, about).
++            if let Ok(mode) = std::env::var("SORT") {
++                let d = |k: &u32| {
++                    let p = all[*k as usize].p;
++                    p[0] * p[0] + p[2] * p[2]
++                };
++                for v in &mut idx {
++                    match mode.as_str() {
++                        "near" => v.sort_by(|a, b| d(a).total_cmp(&d(b))),
++                        "far" => v.sort_by(|a, b| d(b).total_cmp(&d(a))),
++                        _ => v.sort_by_key(|k| hash(*k)),
++                    }
++                }
++            }
++            let t1 = Instant::now();
++            // Grass first, then rocks, in one buffer; the rock draw starts after the grass instances (first_instance).
++            let mut packed: Vec<u8> = Vec::with_capacity((idx[0].len() + idx[1].len()) * 16);
++            for k in idx[0].iter().chain(idx[1].iter()) {
++                packed.extend(all[*k as usize].bytes());
++            }
++            gpu.queue.write_buffer(&vis_cpu, 0, &packed);
++            let t2 = Instant::now();
++            bytes_up = packed.len() as u64;
++            let (g, r) = (idx[0].len() as u32, idx[1].len() as u32);
++            // Two draws with first_instance: the rocks read their records after the grass ones (the shader indexes by instance_index).
++            let (_, d) = run_frame(&mut |enc, st| {
++                let writes = st.then(|| timing.as_ref().map(|t| wgpu::RenderPassTimestampWrites { query_set: &t.queries, beginning_of_pass_write_index: Some(2), end_of_pass_write_index: Some(3) })).flatten();
++                let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
++                    label: Some("draw"),
++                    color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &color_view, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.5, g: 0.65, b: 0.9, a: 1.0 }), store: wgpu::StoreOp::Store } })],
++                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment { view: &depth_view, depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }), stencil_ops: None }),
++                    timestamp_writes: writes,
++                    occlusion_query_set: None,
++                    multiview_mask: None,
++                });
++                pass.set_bind_group(0, &cpu_bind, &[]);
++                pass.set_pipeline(&cpu_ground_pipe);
++                pass.draw(0..6, 0..1);
++                pass.set_pipeline(&cpu_inst_pipe);
++                pass.draw(0..GRASS_VERTS, 0..g);
++                pass.draw(GRASS_VERTS..GRASS_VERTS + ROCK_VERTS, g..g + r);
++            });
++            let t3 = Instant::now();
++            if k >= 10 {
++                t_cull.push((t1 - t0).as_secs_f64() * 1000.0);
++                t_up.push((t2 - t1).as_secs_f64() * 1000.0);
++                t_draw.push(d);
++                t_wall.push((t3 - t0).as_secs_f64() * 1000.0);
++            }
++        }
++        // The cell path: only the culling (the upload and the draw are those of the full scan).
++        let mut t_cells = Vec::new();
++        for _ in 0..frames {
++            let t0 = Instant::now();
++            let idx = cull_cells(&cam, &all, &cells, lod_m);
++            std::hint::black_box(&idx);
++            t_cells.push(t0.elapsed().as_secs_f64() * 1000.0);
++        }
++        row.cull_cells_ms = median(&mut t_cells);
++        row.cull_cpu_ms = median(&mut t_cull);
++        row.upload_ms = median(&mut t_up);
++        row.upload_bytes = bytes_up;
++        row.cpu_draw_gpu_ms = median(&mut t_draw) - ground_only;
++        row.wall_cpu_path_ms = median(&mut t_wall);
++
++        // The GPU path: the static buffer, a compute pass writing the visible indices and the indirect arguments, two indirect draws.
++        let all_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("all"), contents: &inst_bytes, usage: wgpu::BufferUsages::STORAGE });
++        let vis_grass = storage(device, "vis-grass", (all.len() as u64 + 1) * 4, wgpu::BufferUsages::COPY_SRC);
++        let vis_rock = storage(device, "vis-rock", (all.len() as u64 + 1) * 4, wgpu::BufferUsages::COPY_SRC);
++        let args = storage(device, "args", 32, wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_SRC);
++        let cull_ubuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
++            label: Some("cull-u"),
++            contents: &[cull_u.clone(), (all.len() as u32).to_le_bytes().to_vec(), vec![0u8; 12]].concat(),
++            usage: wgpu::BufferUsages::UNIFORM,
++        });
++        let cull_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
++            label: Some("cull-bind"),
++            layout: &cull_bgl,
++            entries: &[
++                wgpu::BindGroupEntry { binding: 0, resource: cull_ubuf.as_entire_binding() },
++                wgpu::BindGroupEntry { binding: 1, resource: all_buf.as_entire_binding() },
++                wgpu::BindGroupEntry { binding: 2, resource: vis_grass.as_entire_binding() },
++                wgpu::BindGroupEntry { binding: 3, resource: vis_rock.as_entire_binding() },
++                wgpu::BindGroupEntry { binding: 4, resource: args.as_entire_binding() },
++            ],
++        });
++        // Two binds for the draws: the grass indices and the rock indices.
++        let mk_draw_bind = |vis: &wgpu::Buffer| {
++            device.create_bind_group(&wgpu::BindGroupDescriptor {
++                label: Some("gpu-bind"),
++                layout: &gpu_bgl,
++                entries: &[
++                    wgpu::BindGroupEntry { binding: 0, resource: globals_buf.as_entire_binding() },
++                    wgpu::BindGroupEntry { binding: 1, resource: mesh_buf.as_entire_binding() },
++                    wgpu::BindGroupEntry { binding: 2, resource: all_buf.as_entire_binding() },
++                    wgpu::BindGroupEntry { binding: 3, resource: vis.as_entire_binding() },
++                    wgpu::BindGroupEntry { binding: 4, resource: mesh_n_buf.as_entire_binding() },
++                ],
++            })
++        };
++        let (bind_g, bind_r) = (mk_draw_bind(&vis_grass), mk_draw_bind(&vis_rock));
++        let mut initial = Vec::new();
++        for x in [GRASS_VERTS, 0, 0, 0, ROCK_VERTS, 0, GRASS_VERTS, 0] {
++            initial.extend(x.to_le_bytes());
++        }
++        let groups = (all.len() as u32).div_ceil(64);
++        let (mut t_c, mut t_d, mut t_w) = (Vec::new(), Vec::new(), Vec::new());
++        for k in 0..frames + 10 {
++            gpu.queue.write_buffer(&args, 0, &initial);
++            let t0 = Instant::now();
++            let (cs, ds) = run_frame(&mut |enc, st| {
++                {
++                    let writes = st.then(|| timing.as_ref().map(|t| wgpu::ComputePassTimestampWrites { query_set: &t.queries, beginning_of_pass_write_index: Some(0), end_of_pass_write_index: Some(1) })).flatten();
++                    let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("cull"), timestamp_writes: writes });
++                    pass.set_pipeline(&cull_pipe);
++                    pass.set_bind_group(0, &cull_bind, &[]);
++                    pass.dispatch_workgroups(groups.min(65_535), groups.div_ceil(65_535).max(1), 1);
++                }
++                let writes = st.then(|| timing.as_ref().map(|t| wgpu::RenderPassTimestampWrites { query_set: &t.queries, beginning_of_pass_write_index: Some(2), end_of_pass_write_index: Some(3) })).flatten();
++                let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
++                    label: Some("draw"),
++                    color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &color_view, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.5, g: 0.65, b: 0.9, a: 1.0 }), store: wgpu::StoreOp::Store } })],
++                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment { view: &depth_view, depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }), stencil_ops: None }),
++                    timestamp_writes: writes,
++                    occlusion_query_set: None,
++                    multiview_mask: None,
++                });
++                pass.set_bind_group(0, &bind_g, &[]);
++                pass.set_pipeline(&gpu_ground_pipe);
++                pass.draw(0..6, 0..1);
++                pass.set_pipeline(&gpu_inst_pipe);
++                pass.draw_indirect(&args, 0);
++                pass.set_bind_group(0, &bind_r, &[]);
++                pass.draw_indirect(&args, 16);
++            });
++            let t1 = Instant::now();
++            if k >= 10 {
++                t_c.push(cs);
++                t_d.push(ds);
++                t_w.push((t1 - t0).as_secs_f64() * 1000.0);
++            }
++        }
++        row.gpu_cull_ms = median(&mut t_c);
++        row.gpu_draw_ms = median(&mut t_d) - ground_only;
++        row.wall_gpu_path_ms = median(&mut t_w);
++        let _ = (&gpu_ground_pipe, &draw_pass);
++
++        // The oracle: the GPU's visible sets (one more frame: the counts and the indices) against the CPU reference.
++        gpu.queue.write_buffer(&args, 0, &initial);
++        let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("check") });
++        {
++            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("cull"), timestamp_writes: None });
++            pass.set_pipeline(&cull_pipe);
++            pass.set_bind_group(0, &cull_bind, &[]);
++            pass.dispatch_workgroups(groups.min(65_535), groups.div_ceil(65_535).max(1), 1);
++        }
++        gpu.queue.submit([enc.finish()]);
++        let a = read_back(&gpu, &args, 32);
++        let word = |i: usize| u32::from_le_bytes(a[4 * i..4 * i + 4].try_into().unwrap());
++        let (cg, cr) = (word(1) as usize, word(5) as usize);
++        let mut got = [Vec::new(), Vec::new()];
++        for (kind, (buf, count)) in [(&vis_grass, cg), (&vis_rock, cr)].into_iter().enumerate() {
++            let b = read_back(&gpu, buf, (count as u64 * 4).max(4));
++            let mut v: Vec<u32> = b.chunks(4).take(count).map(|c| u32::from_le_bytes(c.try_into().unwrap())).collect();
++            v.sort_unstable();
++            got[kind] = v;
++        }
++        row.sets_equal = got == reference;
++        if let Some(dir) = arg("--png") {
++            // One more frame of the GPU path, read back (Rgba8Unorm, 2560 x 4 bytes a row is 256-aligned) and written as a PNG.
++            gpu.queue.write_buffer(&args, 0, &initial);
++            let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("picture") });
++            {
++                let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("cull"), timestamp_writes: None });
++                pass.set_pipeline(&cull_pipe);
++                pass.set_bind_group(0, &cull_bind, &[]);
++                pass.dispatch_workgroups(groups.min(65_535), groups.div_ceil(65_535).max(1), 1);
++            }
++            {
++                let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
++                    label: Some("picture"),
++                    color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &color_view, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.5, g: 0.65, b: 0.9, a: 1.0 }), store: wgpu::StoreOp::Store } })],
++                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment { view: &depth_view, depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }), stencil_ops: None }),
++                    timestamp_writes: None,
++                    occlusion_query_set: None,
++                    multiview_mask: None,
++                });
++                pass.set_bind_group(0, &bind_g, &[]);
++                pass.set_pipeline(&gpu_ground_pipe);
++                pass.draw(0..6, 0..1);
++                pass.set_pipeline(&gpu_inst_pipe);
++                pass.draw_indirect(&args, 0);
++                pass.set_bind_group(0, &bind_r, &[]);
++                pass.draw_indirect(&args, 16);
++            }
++            let buf = device.create_buffer(&wgpu::BufferDescriptor { label: Some("picture"), size: u64::from(W * H * 4), usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
++            enc.copy_texture_to_buffer(
++                color.as_image_copy(),
++                wgpu::TexelCopyBufferInfo { buffer: &buf, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(W * 4), rows_per_image: Some(H) } },
++                wgpu::Extent3d { width: W, height: H, depth_or_array_layers: 1 },
++            );
++            gpu.queue.submit([enc.finish()]);
++            let slice = buf.slice(..);
++            slice.map_async(wgpu::MapMode::Read, |r| r.expect("map"));
++            gpu.device.poll(wgpu::PollType::wait_indefinitely()).expect("poll");
++            let data = slice.get_mapped_range().expect("range").to_vec();
++            let name = format!("{dir}/{}.png", label.replace([' ', ','], "_"));
++            let file = std::fs::File::create(&name).expect("png file");
++            let mut enc = png::Encoder::new(std::io::BufWriter::new(file), W, H);
++            enc.set_color(png::ColorType::Rgba);
++            enc.set_depth(png::BitDepth::Eight);
++            enc.write_header().expect("header").write_image_data(&data).expect("pixels");
++            println!("wrote {name}");
++        }
++        row.mismatches = (0..2)
++            .map(|k| {
++                let (a, b): (std::collections::BTreeSet<_>, std::collections::BTreeSet<_>) = (got[k].iter().collect(), reference[k].iter().collect());
++                a.symmetric_difference(&b).count()
++            })
++            .sum();
++        rows.push((label.to_string(), row));
++    }
++
++    println!();
++    println!("| Placed | Visible grass | Visible rocks | Triangles | CPU cull ms, all | CPU cull ms, by cells | CPU upload ms (bytes) | GPU draw ms, CPU path | GPU cull ms | GPU draw ms, GPU path | Equal | Diff |");
++    println!("|---|---|---|---|---|---|---|---|---|---|---|---|");
++    for (label, r) in &rows {
++        println!(
++            "| {label} ({}) | {} | {} | {} | {:.3} | {:.3} | {:.3} ({}) | {:.3} | {:.3} | {:.3} | {} | {} |",
++            r.n_placed,
++            r.grass,
++            r.rocks,
++            r.grass * 6 + r.rocks * 80,
++            r.cull_cpu_ms,
++            r.cull_cells_ms,
++            r.upload_ms,
++            r.upload_bytes,
++            r.cpu_draw_gpu_ms,
++            r.gpu_cull_ms,
++            r.gpu_draw_ms,
++            r.sets_equal,
++            r.mismatches
++        );
++    }
++    println!();
++    println!("wall per frame (submit, wait; the CPU path includes the cull and the upload): CPU path / GPU path ms");
++    for (label, r) in &rows {
++        println!("  {label}: {:.3} / {:.3}", r.wall_cpu_path_ms, r.wall_gpu_path_ms);
++    }
++    println!();
++    println!("memory: instance 16 B (position 3 x f32, one word of kind, turn, size, thinning byte), unpacked 32 B; GPU path: the whole set + 4 B index per visible instance (allocated worst case 8 B x placed)");
++    for (label, r) in &rows {
++        println!("  {label}: instances {} B, GPU-path worst-case indices {} B, CPU-path visible upload {} B", r.n_placed * 16, r.n_placed * 8, r.upload_bytes);
++    }
++}

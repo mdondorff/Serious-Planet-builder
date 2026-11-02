@@ -1,0 +1,150 @@
+{
+ "notice": "produced using Copernicus WorldDEM-30 (c) DLR e.V. 2010-2014 and (c) Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved. The organisations in charge of the Copernicus programme by law or by delegation do not incur any liability for any use of the Copernicus WorldDEM-30.",
+ "what": "generator sites matched to GLO-30 tile descriptors",
+ "data": {
+  "N27E086": [
+   {
+    "lat": -38.5,
+    "lon": 1.5,
+    "mean": 3025.88,
+    "std": 753.09,
+    "dist": 1.886180278585768
+   },
+   {
+    "lat": 7.5,
+    "lon": -19.5,
+    "mean": 2087.5,
+    "std": 673.62,
+    "dist": 2.081146074519122
+   }
+  ],
+  "N31W004": [
+   {
+    "lat": -23.5,
+    "lon": -18.5,
+    "mean": 939.26,
+    "std": 116.95,
+    "dist": 0.018006998665298805
+   },
+   {
+    "lat": 9.5,
+    "lon": 18.5,
+    "mean": 929.16,
+    "std": 116.07,
+    "dist": 0.06157905023289142
+   }
+  ],
+  "N40W078": [
+   {
+    "lat": 16.5,
+    "lon": -111.5,
+    "mean": 315.59,
+    "std": 132.2,
+    "dist": 0.1204211723413512
+   },
+   {
+    "lat": -40.5,
+    "lon": 1.5,
+    "mean": 315.62,
+    "std": 134.12,
+    "dist": 0.16478766888244833
+   }
+  ],
+  "N41W096": [
+   {
+    "lat": -15.5,
+    "lon": 150.5,
+    "mean": 366.54,
+    "std": 40.27,
+    "dist": 0.061210968366926466
+   },
+   {
+    "lat": -10.5,
+    "lon": 155.5,
+    "mean": 375.94,
+    "std": 39.11,
+    "dist": 0.06775206850647285
+   }
+  ],
+  "N43W102": [
+   {
+    "lat": 13.5,
+    "lon": 22.5,
+    "mean": 817.45,
+    "std": 108.91,
+    "dist": 0.06985779694264646
+   },
+   {
+    "lat": -33.5,
+    "lon": 4.5,
+    "mean": 843.61,
+    "std": 111.82,
+    "dist": 0.07385116594809327
+   }
+  ],
+  "N47E011": [
+   {
+    "lat": 11.5,
+    "lon": -18.5,
+    "mean": 1403.25,
+    "std": 544.22,
+    "dist": 0.7137028296938326
+   },
+   {
+    "lat": -38.5,
+    "lon": 3.5,
+    "mean": 1348.95,
+    "std": 487.55,
+    "dist": 0.7987235051745073
+   }
+  ],
+  "N48E008": [
+   {
+    "lat": 2.5,
+    "lon": -124.5,
+    "mean": 527.21,
+    "std": 221.28,
+    "dist": 0.238093421484923
+   },
+   {
+    "lat": 17.5,
+    "lon": -26.5,
+    "mean": 579.12,
+    "std": 237.41,
+    "dist": 0.25284655331991945
+   }
+  ],
+  "N52E012": [
+   {
+    "lat": -38.5,
+    "lon": 30.5,
+    "mean": 54.8,
+    "std": 33.61,
+    "dist": 0.06375144933416256
+   },
+   {
+    "lat": 41.5,
+    "lon": 149.5,
+    "mean": 61.08,
+    "std": 34.37,
+    "dist": 0.09459453978568544
+   }
+  ],
+  "N57W005": [
+   {
+    "lat": 10.5,
+    "lon": -122.5,
+    "mean": 321.9,
+    "std": 230.55,
+    "dist": 0.17180020882421748
+   },
+   {
+    "lat": -26.5,
+    "lon": -118.5,
+    "mean": 352.96,
+    "std": 196.65,
+    "dist": 0.477293597039332
+   }
+  ]
+ }
+}

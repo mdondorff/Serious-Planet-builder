@@ -1,0 +1,9 @@
+$ C:/Program Files/Git/usr/bin/bash.exe C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/570e124f-4ca5-49b4-8bf6-680604dce399/scratchpad/s69/map.sh
+=== map2 13:46:45 cpu 6%
+S69SITE alps [11.5, -18.5, 0.25187036, 0.69890094, 0.3514344, 0.9624104, 69.006386, 1374.0237, 561.3558, 1382.4349, 156.64111, 1316.2634, 316.34653]
+S69SITE blackforest [2.5, -124.5, 0.28203183, 0.36194852, 0.4865098, 0.4077911, 36.85738, 516.43823, 224.72076, 857.9594, 71.68596, 499.5288, 138.49384]
+S69SITE highlands [10.5, -122.5, 0.20151857, 0.60806704, 0.15291752, 0.47925845, 30.417658, 297.44748, 239.45886, 830.1186, 108.52152, 283.71655, 171.99031]
+S69SITE valleyridge [16.5, -111.5, 0.22648571, 0.5801251, 0.24517594, 0.35810813, 26.83841, 345.4013, 132.43437, 293.91177, 75.01159, 273.95465, 88.22987]
+S69 map 720 x 360 in 33 s -> C:/DEV/Serious-Planet-Builder/.claude/worktrees/sonnet-spikes-36fc88/target/s69/map13.f32
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 231 filtered out; finished in 35.71s
+=== done 13:47:40

@@ -1,0 +1,13 @@
+NET truth (whole 20 km lattice, frozen network): 0.8 s, 8 cycle cells
+NET block 1 against the truth with the same network: |dz| p50 0.000 p90 0.000 p99 0.00 max 0.0 m; |dlnA| mean 0.000 p99 0.00
+NET block 2 against the truth with the same network: |dz| p50 0.000 p90 0.000 p99 0.00 max 0.0 m; |dlnA| mean 0.000 p99 0.00
+SEAMS block 1 core x 250..500, block 2 core x 500..750, y 250..500, H = 5 km, N = 30, ds 20 m, blocks 0.5 s and 0.5 s
+SEAM hard join: height step between neighbouring cells across the seam (m): p50 2.694 p90 8.602 p99 18.888 max 22.136; interior reference p50 1.828 p90 7.408 p99 13.823 max 15.281
+SEAM hard join: slope jump (second difference / ds, 1/m): p50 0.119 p90 0.337 p99 0.561 max 0.837; interior reference p50 0.054 p90 0.193 p99 0.317 max 0.423
+SEAM hard join: of 15 rows where a channel (A > 50000 m2) reaches the seam on either side, 12 have it on one side only
+SEAM hard join: 2 of 42 channel cells within 3 cells of the seam have a receiver higher than the cell in the joined surface
+SEAM overlap blend: height step between neighbouring cells across the seam (m): p50 2.694 p90 8.602 p99 18.888 max 22.136; interior reference p50 1.828 p90 7.408 p99 13.823 max 15.281
+SEAM overlap blend: slope jump (second difference / ds, 1/m): p50 0.119 p90 0.337 p99 0.561 max 0.837; interior reference p50 0.054 p90 0.193 p99 0.317 max 0.423
+SEAM blend zone (x 252..748): the two blocks differ by |dz| p50 0.00 p90 0.07 p99 64.79 max 217.8 m
+SEAM blend zone: 1934 of 9795 channel cells (dominant block, A > 50000 m2) have a receiver higher than the cell in the blended surface (19.74 %)
+SEAM blend zone: of 10626 cells that are a channel in either block, 313 are under 10000 m2 in the other (2.9 %): the channel network does not agree

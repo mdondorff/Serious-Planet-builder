@@ -1,0 +1,30 @@
+== flight 30 km to 1.8 m | blocks 4.9 km, cell 8 m, halo 40 cells, model cost 6.0 s per block (0.25 s per km2 x 23.9 km2), 6 workers
+band | frames | fine nodes drawn from the stand-in (share) | blocks needed (max) | resident MB (max)
+ 300 m to 5 km |   174 | 8022/44154 (18 %) | 3 | 3
+    above 5 km |   111 | 0/0 (0 %) | 0 | 0
+   below 300 m |   365 | 1453/226034 (1 %) | 3 | 4
+blocks asked 3 landed 3 evicted 0 | ready latency s: p50 6.0 p99 6.0 max 6.0 | stand-in to block pop m: p99 24.30 max 27.37 (324522 vertices)
+apply level 15 (tile spacing at most 2 cells of 8 m) | blocks asked by sampling any height 739 (served: 3) | coarse tiles under landed blocks: 52272 vertices, change p99 25.15 max 27.80 m (not applied by the rule)
+frame CPU (plan, cached) ms: p50 9.4 p99 19.5 max 28.5 | stand-in run real ms per block: p50 789 max 1005 | height calls 3213 of which coarse 2002 | plan-cache tiles invalidated by landings 298
+== flight 30 km to 1.8 m | blocks 9.8 km, cell 8 m, halo 40 cells, model cost 23.9 s per block (0.25 s per km2 x 95.5 km2), 6 workers
+band | frames | fine nodes drawn from the stand-in (share) | blocks needed (max) | resident MB (max)
+ 300 m to 5 km |   174 | 44154/44154 (100 %) | 2 | 0
+    above 5 km |   111 | 0/0 (0 %) | 0 | 0
+   below 300 m |   365 | 51748/226037 (23 %) | 2 | 12
+blocks asked 2 landed 2 evicted 0 | ready latency s: p50 23.9 p99 23.9 max 23.9 | stand-in to block pop m: p99 25.42 max 27.37 (671913 vertices)
+apply level 15 (tile spacing at most 2 cells of 8 m) | blocks asked by sampling any height 578 (served: 2) | coarse tiles under landed blocks: 45738 vertices, change p99 24.95 max 27.42 m (not applied by the rule)
+frame CPU (plan, cached) ms: p50 7.5 p99 15.9 max 34.1 | stand-in run real ms per block: p50 2898 max 2946 | height calls 3532 of which coarse 2627 | plan-cache tiles invalidated by landings 617
+== flight 30 km to 1.8 m | blocks 19.5 km, cell 8 m, halo 40 cells, model cost 95.5 s per block (0.25 s per km2 x 382.0 km2), 6 workers
+band | frames | fine nodes drawn from the stand-in (share) | blocks needed (max) | resident MB (max)
+ 300 m to 5 km |   174 | 44154/44154 (100 %) | 2 | 0
+    above 5 km |   111 | 0/0 (0 %) | 0 | 0
+   below 300 m |   365 | 225614/225614 (100 %) | 2 | 0
+blocks asked 2 landed 0 evicted 0 | ready latency s: p50 0.0 p99 0.0 max 0.0 | stand-in to block pop m: p99 0.00 max 0.00 (0 vertices)
+apply level 15 (tile spacing at most 2 cells of 8 m) | blocks asked by sampling any height 435 (served: 2) | coarse tiles under landed blocks: 0 vertices, change p99 0.00 max 0.00 m (not applied by the rule)
+frame CPU (plan, cached) ms: p50 8.7 p99 21.8 max 46.3 | stand-in run real ms per block: p50 0 max 0 | height calls 2915 of which coarse 2915 | plan-cache tiles invalidated by landings 0
+== pan at 300 m | blocks 19.5 km, cell 8 m, halo 40 cells, model cost 95.5 s per block (0.25 s per km2 x 382.0 km2), 6 workers
+band | frames | fine nodes drawn from the stand-in (share) | blocks needed (max) | resident MB (max)
+   below 300 m |   320 | 166762/166762 (100 %) | 2 | 0
+blocks asked 2 landed 0 evicted 0 | ready latency s: p50 0.0 p99 0.0 max 0.0 | stand-in to block pop m: p99 0.00 max 0.00 (0 vertices)
+apply level 15 (tile spacing at most 2 cells of 8 m) | blocks asked by sampling any height 310 (served: 2) | coarse tiles under landed blocks: 0 vertices, change p99 0.00 max 0.00 m (not applied by the rule)
+frame CPU (plan, cached) ms: p50 4.7 p99 11.1 max 66.3 | stand-in run real ms per block: p50 0 max 0 | height calls 3384 of which coarse 3384 | plan-cache tiles invalidated by landings 0

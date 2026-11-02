@@ -1,0 +1,47 @@
+$ cargo run --release -p planet --example coupled_uplift_diag -- --store C:/DEV/SeriousPlanetData/global16384 --cache C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/3116f58f-e80d-45b8-9131-e11d4834ea4d/scratchpad/z.bin --steps 24
+    Finished `release` profile [optimized] target(s) in 0.21s
+     Running `target\release\examples\coupled_uplift_diag.exe --store 'C:/DEV/SeriousPlanetData/global16384' --cache 'C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/3116f58f-e80d-45b8-9131-e11d4834ea4d/scratchpad/z.bin' --steps 24`
+cells 25165824 land 7370117 ; rho 1
+land in a depression (filled > z): 1155795 (15.7 %); land with U == 0: 744185 (10.1 %)
+U m/yr p10/50/90/max: 1.13e-5 6.42e-5 4.94e-4 1.42e-1
+-- base (as the app did): run minus input, median (p10 p90) by input band 0-500 | 500-1000 | 1000-2500 | 2500-5000 | >5000
+step 1 (mean|dz| 7.3)             0.9 (      0      9) |      2.2 (      0     16) |      4.7 (      0     41) |     31.5 (      3    143) |     41.1 (     12    118) |
+step 2 (mean|dz| 12.7)            0.0 (    -11     11) |      0.1 (    -20     19) |     -0.1 (    -53     47) |     20.2 (    -80    180) |     48.8 (    -22    159) |
+step 4 (mean|dz| 25.8)           -8.5 (    -67      4) |    -27.6 (   -137      7) |    -71.7 (   -332     13) |   -122.4 (   -593    107) |    -60.6 (   -394    140) |
+step 8 (mean|dz| 36.5)          -50.0 (   -202      0) |   -207.9 (   -459    -60) |   -444.8 (   -956   -108) |   -898.6 (  -1838   -295) |  -1010.2 (  -1922   -328) |
+step 16 (mean|dz| 14.4)         -92.2 (   -327     -0) |   -552.0 (   -785   -372) |   -962.6 (  -1585   -581) |  -2120.1 (  -3101  -1412) |  -3375.6 (  -3991  -2466) |
+step 24 (mean|dz| 3.3)          -98.9 (   -351     -0) |   -639.5 (   -863   -457) |  -1087.9 (  -1747   -806) |  -2431.7 (  -3463  -1844) |  -4055.6 (  -4544  -3471) |
+   (80 s)
+step 1: raised >1 m 4243444: in a depression 1072858, not in one and receiver also raised 3170586, not in one and receiver not raised 0; near the floor 964; fell >1 m 0
+step 1                            0.9 (      0      9) |      2.2 (      0     16) |      4.7 (      0     41) |     31.5 (      3    143) |     41.1 (     12    118) |
+-- H1: input pre-filled (z := filled): run minus input, median (p10 p90) by input band 0-500 | 500-1000 | 1000-2500 | 2500-5000 | >5000
+step 1 (mean|dz| 0.0)             0.0 (      0      0) |      0.0 (      0      0) |      0.0 (      0      0) |      0.0 (      0      0) |      0.0 (      0      0) |
+step 2 (mean|dz| 0.6)            -0.0 (     -1      0) |     -0.0 (     -0      0) |     -0.0 (     -0      0) |      0.0 (     -0      0) |      0.0 (     -0      0) |
+step 4 (mean|dz| 2.3)            -0.7 (    -12      0) |     -0.1 (     -7     -0) |     -0.1 (     -2     -0) |     -0.0 (     -0     -0) |     -0.0 (     -0     -0) |
+step 8 (mean|dz| 8.2)           -10.0 (    -53      0) |    -12.5 (    -99     -0) |     -8.3 (    -76     -0) |     -2.5 (    -40     -0) |     -0.6 (     -5     -0) |
+step 16 (mean|dz| 14.2)         -43.6 (   -131     -0) |   -135.3 (   -387    -46) |   -252.6 (   -617    -79) |   -316.7 (  -1188    -60) |   -193.4 (   -832    -28) |
+step 24 (mean|dz| 11.8)         -73.0 (   -201     -0) |   -270.4 (   -535   -129) |   -579.1 (  -1014   -279) |  -1228.6 (  -2110   -524) |  -1542.8 (  -2773   -531) |
+   (62 s)
+-- H2: jitter 0 (plain D8): run minus input, median (p10 p90) by input band 0-500 | 500-1000 | 1000-2500 | 2500-5000 | >5000
+step 1 (mean|dz| 7.6)             1.0 (      0      9) |      2.2 (      0     16) |      4.8 (      0     42) |     32.6 (      4    146) |     42.5 (     13    124) |
+step 2 (mean|dz| 13.2)            0.0 (    -12     12) |      0.1 (    -21     20) |     -0.2 (    -55     48) |     21.2 (    -82    182) |     50.6 (    -23    164) |
+step 4 (mean|dz| 26.5)           -8.5 (    -69      6) |    -28.9 (   -146      8) |    -74.4 (   -339     13) |   -125.0 (   -605    106) |    -64.7 (   -413    136) |
+step 8 (mean|dz| 36.7)          -49.3 (   -204      0) |   -213.9 (   -474    -61) |   -454.5 (   -960   -117) |   -907.1 (  -1832   -313) |  -1043.7 (  -1947   -376) |
+step 16 (mean|dz| 14.0)         -91.0 (   -325     -0) |   -556.2 (   -789   -372) |   -967.7 (  -1582   -594) |  -2096.8 (  -3073  -1423) |  -3242.2 (  -3913  -2533) |
+step 24 (mean|dz| 3.1)          -98.4 (   -349     -0) |   -638.4 (   -862   -452) |  -1092.5 (  -1741   -803) |  -2399.8 (  -3412  -1854) |  -3897.0 (  -4438  -3432) |
+   (84 s)
+trace cell 357398: z0 5530.8 U 1.643e-3
+  step 1: z 5564.8 A 1.899e7 rec 355349 z_rec 5351.8 (input z_rec 5262.3)
+  step 2: z 5561.1 A 1.899e7 rec 355351 z_rec 5286.6 (input z_rec 5260.2)
+  step 3: z 5523.5 A 1.899e7 rec 355351 z_rec 5193.6 (input z_rec 5260.2)
+  step 4: z 5409.4 A 1.899e7 rec 355351 z_rec 4954.4 (input z_rec 5260.2)
+  step 5: z 5176.7 A 1.899e7 rec 359446 z_rec 4717.8 (input z_rec 5486.3)
+  step 6: z 4827.5 A 1.899e7 rec 359446 z_rec 4233.9 (input z_rec 5486.3)
+  step 7: z 4390.6 A 1.899e7 rec 359446 z_rec 3695.7 (input z_rec 5486.3)
+  step 8: z 3904.2 A 1.899e7 rec 359446 z_rec 3151.9 (input z_rec 5486.3)
+  step 9: z 3414.6 A 1.899e7 rec 359446 z_rec 2658.8 (input z_rec 5486.3)
+  step 10: z 2967.2 A 1.899e7 rec 359446 z_rec 2260.1 (input z_rec 5486.3)
+H3: U after step 1 over U before, cells above 1000 m (704628): p10/50/90 0.39 0.94 1.68
+   receivers changed by step 1: 2657091 of 7370117 land cells (36.1 %)
+   A after / A before, cells above 1000 m: p10/50/90 0.20 1.00 6.35
+done

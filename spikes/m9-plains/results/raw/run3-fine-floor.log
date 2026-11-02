@@ -1,0 +1,42 @@
+heavy-run lock: the machine is free after 12 s: running `C:/Program Files/Git/usr/bin/bash.exe C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/570e124f-4ca5-49b4-8bf6-680604dce399/scratchpad/s73/run3.sh`
+$ C:/Program Files/Git/usr/bin/bash.exe C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/570e124f-4ca5-49b4-8bf6-680604dce399/scratchpad/s73/run3.sh
+=== floor 0.25 18:24:37 cpu 0%
+S73 N52E012 site1 base                       flat  64.0% | flat 64%, shoulder 13%, slope 11% | slope p50 0.77 | relief1 p50 10.4 | vs real: classes L1 1.05 relief1 0.31
+S73 N52E012 site1 k 1.5                      flat  17.4% | slope 29%, shoulder 21%, flat 17% | slope p50 1.15 | relief1 p50 15.2 | vs real: classes L1 0.72 relief1 0.20
+S73 N52E012 site2 base                       flat  67.5% | flat 67%, shoulder 12%, footslope 9% | slope p50 0.74 | relief1 p50 9.8 | vs real: classes L1 1.10 relief1 0.33
+S73 N52E012 site2 k 1.5                      flat  21.0% | slope 27%, shoulder 22%, flat 21% | slope p50 1.11 | relief1 p50 14.4 | vs real: classes L1 0.68 relief1 0.22
+S73 N41W096 site1 base                       flat  11.0% | slope 32%, shoulder 21%, flat 11% | slope p50 1.23 | relief1 p50 16.0 | vs real: classes L1 0.96 relief1 0.67
+S73 N41W096 site1 k 1.5                      flat   0.3% | slope 38%, spur 18%, ridge 14% | slope p50 1.83 | relief1 p50 23.7 | vs real: classes L1 0.49 relief1 0.43
+S73 N41W096 site2 base                       flat  10.5% | slope 33%, shoulder 20%, flat 10% | slope p50 1.24 | relief1 p50 16.4 | vs real: classes L1 0.95 relief1 0.66
+S73 N41W096 site2 k 1.5                      flat   0.3% | slope 39%, spur 18%, ridge 14% | slope p50 1.85 | relief1 p50 24.2 | vs real: classes L1 0.50 relief1 0.40
+S73 N31W004 site1 base                       flat   0.0% | slope 38%, spur 21%, hollow 14% | slope p50 2.37 | relief1 p50 33.5 | vs real: classes L1 1.28 relief1 0.26
+S73 N31W004 site1 k 1.5                      flat   0.0% | slope 32%, spur 23%, hollow 15% | slope p50 3.53 | relief1 p50 49.9 | vs real: classes L1 1.30 relief1 0.43
+S73 N31W004 site2 base                       flat   0.0% | slope 32%, spur 23%, hollow 15% | slope p50 3.15 | relief1 p50 43.2 | vs real: classes L1 1.30 relief1 0.37
+S73 N31W004 site2 k 1.5                      flat   0.0% | slope 30%, spur 23%, hollow 15% | slope p50 4.71 | relief1 p50 64.7 | vs real: classes L1 1.30 relief1 0.62
+=== floor 0.5 18:26:25 cpu 0%
+S73 N52E012 site1 base                       flat   4.9% | slope 32%, shoulder 16%, ridge 11% | slope p50 1.40 | relief1 p50 16.4 | vs real: classes L1 0.77 relief1 0.20
+S73 N52E012 site1 k 1.5                      flat   0.1% | slope 32%, spur 19%, ridge 17% | slope p50 2.10 | relief1 p50 24.3 | vs real: classes L1 0.87 relief1 0.11
+S73 N52E012 site2 base                       flat   5.9% | slope 31%, shoulder 16%, ridge 11% | slope p50 1.37 | relief1 p50 15.9 | vs real: classes L1 0.74 relief1 0.20
+S73 N52E012 site2 k 1.5                      flat   0.1% | slope 32%, spur 19%, ridge 17% | slope p50 2.06 | relief1 p50 23.6 | vs real: classes L1 0.86 relief1 0.10
+S73 N41W096 site1 base                       flat   0.0% | slope 31%, spur 21%, ridge 17% | slope p50 2.27 | relief1 p50 26.4 | vs real: classes L1 0.36 relief1 0.35
+S73 N41W096 site1 k 1.5                      flat   0.0% | slope 25%, spur 22%, ridge 17% | slope p50 3.39 | relief1 p50 39.5 | vs real: classes L1 0.32 relief1 0.06
+S73 N41W096 site2 base                       flat   0.0% | slope 31%, spur 21%, ridge 17% | slope p50 2.25 | relief1 p50 26.4 | vs real: classes L1 0.36 relief1 0.36
+S73 N41W096 site2 k 1.5                      flat   0.0% | slope 25%, spur 22%, ridge 17% | slope p50 3.38 | relief1 p50 39.4 | vs real: classes L1 0.32 relief1 0.05
+S73 N31W004 site1 base                       flat   0.0% | slope 36%, spur 22%, hollow 14% | slope p50 2.53 | relief1 p50 35.1 | vs real: classes L1 1.29 relief1 0.28
+S73 N31W004 site1 k 1.5                      flat   0.0% | slope 31%, spur 23%, hollow 15% | slope p50 3.78 | relief1 p50 52.2 | vs real: classes L1 1.30 relief1 0.46
+S73 N31W004 site2 base                       flat   0.0% | slope 32%, spur 23%, hollow 15% | slope p50 3.15 | relief1 p50 43.2 | vs real: classes L1 1.30 relief1 0.37
+S73 N31W004 site2 k 1.5                      flat   0.0% | slope 30%, spur 23%, hollow 15% | slope p50 4.71 | relief1 p50 64.7 | vs real: classes L1 1.30 relief1 0.62
+=== floor 1.0 18:28:16 cpu 3%
+S73 N52E012 site1 base                       flat   0.0% | slope 27%, spur 21%, ridge 18% | slope p50 2.73 | relief1 p50 30.2 | vs real: classes L1 0.84 relief1 0.21
+S73 N52E012 site1 k 1.5                      flat   0.0% | slope 23%, spur 22%, ridge 18% | slope p50 4.09 | relief1 p50 45.0 | vs real: classes L1 0.83 relief1 0.57
+S73 N52E012 site2 base                       flat   0.0% | slope 27%, spur 21%, ridge 18% | slope p50 2.69 | relief1 p50 29.6 | vs real: classes L1 0.84 relief1 0.20
+S73 N52E012 site2 k 1.5                      flat   0.0% | slope 23%, spur 22%, ridge 18% | slope p50 4.01 | relief1 p50 43.6 | vs real: classes L1 0.82 relief1 0.54
+S73 N41W096 site1 base                       flat   0.0% | slope 23%, spur 22%, ridge 18% | slope p50 4.43 | relief1 p50 49.2 | vs real: classes L1 0.31 relief1 0.36
+S73 N41W096 site1 k 1.5                      flat   0.0% | slope 23%, spur 22%, ridge 18% | slope p50 6.62 | relief1 p50 73.8 | vs real: classes L1 0.31 relief1 1.14
+S73 N41W096 site2 base                       flat   0.0% | slope 23%, spur 22%, ridge 18% | slope p50 4.39 | relief1 p50 48.6 | vs real: classes L1 0.31 relief1 0.34
+S73 N41W096 site2 k 1.5                      flat   0.0% | slope 22%, spur 22%, ridge 18% | slope p50 6.56 | relief1 p50 72.7 | vs real: classes L1 0.31 relief1 1.10
+S73 N31W004 site1 base                       flat   0.0% | slope 25%, spur 23%, ridge 17% | slope p50 4.58 | relief1 p50 54.8 | vs real: classes L1 1.30 relief1 0.50
+S73 N31W004 site1 k 1.5                      flat   0.0% | slope 24%, spur 23%, ridge 17% | slope p50 6.84 | relief1 p50 81.7 | vs real: classes L1 1.30 relief1 0.83
+S73 N31W004 site2 base                       flat   0.0% | slope 26%, spur 23%, ridge 17% | slope p50 4.65 | relief1 p50 57.8 | vs real: classes L1 1.30 relief1 0.53
+S73 N31W004 site2 k 1.5                      flat   0.0% | slope 25%, spur 23%, ridge 17% | slope p50 6.96 | relief1 p50 86.4 | vs real: classes L1 1.30 relief1 0.90
+=== done 18:30:09

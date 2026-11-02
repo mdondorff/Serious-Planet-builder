@@ -1,0 +1,7 @@
+EDGE-DIAG n=1024: orthogonal pairs across a face edge 24576; one-sided (the neighbour does not list the cell back) 0 (0.000 %); listed back at a non-opposite index 12288 (50.000 %)
+EDGE-DIAG land pairs inside a face 11907796, across an edge 11076: mean exact centre distance 9083.8 m inside, 9250.0 m across (ratio 1.018); the model (sqrt of the areas) 8991.9 m inside, 8371.2 m across (ratio 0.931); exact over model: inside 1.010, across 1.105
+EDGE-DIAG mean |dz| of land pairs: inside 6.44 m, across 6.08 m (ratio 0.944); mean |dz| / exact distance: inside 0.00072, across 0.00064 (ratio 0.890)
+EDGE-DIAG MFD distances model: mean |dlnA| inside a face 0.1139, across an edge 0.1706 (ratio 1.497); same-face pairs touching the outermost row 0.1365 (ratio of across to those 1.250)
+EDGE-DIAG MFD distances exact: mean |dlnA| inside a face 0.1135, across an edge 0.1570 (ratio 1.383); same-face pairs touching the outermost row 0.1258 (ratio of across to those 1.248)
+EDGE-DIAG D8 distances model: mean |dlnA| inside a face 0.4586, across an edge 0.7099 (ratio 1.548); same-face pairs touching the outermost row 0.5051 (ratio of across to those 1.405)
+EDGE-DIAG D8 distances exact: mean |dlnA| inside a face 0.4532, across an edge 0.5743 (ratio 1.267); same-face pairs touching the outermost row 0.4546 (ratio of across to those 1.263)

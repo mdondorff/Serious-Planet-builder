@@ -1,0 +1,9 @@
+network build 3.59 s, region 1838736 cells, core 608 x 608
+base: dens 1e5: 0.40, dens 3e5: 0.08, dens 1e6: 0.00, filled>0.5m 0.0%, >5m 0.0%; slope 32 m p50 8.0 p90 14.0 deg, slope 88 m p50 7.5 p90 13.1 deg, relief 1 km p50 148 m, core 577 m
+prod solve (without network) 2.02 s
+prod: dens 1e5: 1.77, dens 3e5: 0.67, dens 1e6: 0.04, filled>0.5m 0.0%, >5m 0.0%; slope 32 m p50 8.3 p90 14.8 deg, slope 88 m p50 7.6 p90 13.2 deg, relief 1 km p50 157 m, core 573 m
+prod: lowering off the corridor p50 10.78 m, p90 21.9 m, max 80 m; over 5 m 77.1%, over 50 m 0.2%
+rr10: solve alone 1.91 s (+ network 3.59 s)
+rr10: dens 1e5: 2.09, dens 3e5: 0.86, dens 1e6: 0.21, filled>0.5m 0.0%, >5m 0.0%; slope 32 m p50 8.2 p90 14.5 deg, slope 88 m p50 7.5 p90 13.1 deg, relief 1 km p50 157 m, core 571 m
+rr10: lowering off the corridor p50 11.88 m, p90 22.0 m, max 80 m; over 5 m 87.2%, over 50 m 0.2%
+  own routing: 4298 core cells off the corridor over 1e5 m2

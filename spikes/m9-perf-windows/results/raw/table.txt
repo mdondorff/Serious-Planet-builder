@@ -1,0 +1,30 @@
+preflight-quiet-1      19:11:37 wall   73.4 cpu    4.7 aff 20 pri 32 pp -                      single 55 47 48 | par 85 96 97
+shadow-cost-quiet-1    19:12:50 wall   39.8 cpu   71.1 aff 20 pri 32 pp -                      2.379 0.442 0.919 1.263 1.936, 1.460, 1.116 0.067, 0.065, 0.020, 0.017
+anet-chunk-quiet-1     19:13:30 wall   59.7 cpu   78.0 aff 20 pri 32 pp -                      8m/production=3.84 8m/1=5.928 4m/production=16.065 10m/production=2.349
+preflight-quiet-2      19:14:30 wall   73.9 cpu    4.6 aff 20 pri 32 pp -                      single 51 47 47 | par 104 97 97
+shadow-cost-quiet-2    19:15:44 wall   39.8 cpu   69.8 aff 20 pri 32 pp -                      2.359 0.416 0.910 1.236 1.944, 1.449, 1.123 0.020, 0.019, 0.032, 0.040
+anet-chunk-quiet-2     19:16:24 wall   59.6 cpu   77.7 aff 20 pri 32 pp -                      8m/production=3.742 8m/1=5.811 4m/production=16.288 10m/production=2.453
+preflight-quiet-3      19:17:24 wall   73.4 cpu    4.5 aff 20 pri 32 pp -                      single 50 48 47 | par 101 90 107
+shadow-cost-quiet-3    19:18:37 wall   39.8 cpu   70.6 aff 20 pri 32 pp -                      2.369 0.426 0.890 1.260 1.943, 1.479, 1.109 0.039, 0.018, 0.095, 0.037
+anet-chunk-quiet-3     19:19:17 wall   59.5 cpu   77.6 aff 20 pri 32 pp -                      8m/production=3.844 8m/1=5.819 4m/production=16.09 10m/production=2.385
+preflight-load-1       19:21:36 wall   97.4 cpu    7.8 aff 20 pri 32 pp 72-74 % 2160-2160 MHz  single 169 287 157 | par 198 200 192
+shadow-cost-load-1     19:23:14 wall   81.4 cpu   90.6 aff 20 pri 32 pp 72-123 % 2160-2160 MHz 2.462 0.425 0.880 1.276 2.037, 1.582, 1.186 0.540, 0.354, 0.412, 0.278
+anet-chunk-load-1      19:24:35 wall  148.5 cpu  158.2 aff 20 pri 32 pp 71-74 % 2160-2160 MHz  8m/production=13.576 8m/1=13.046 4m/production=45.773 10m/production=10.033
+preflight-load-2       19:27:05 wall   92.9 cpu    8.0 aff 20 pri 32 pp 72-74 % 2160-2160 MHz  single 222 344 173 | par 153 188 192
+shadow-cost-load-2     19:28:38 wall  133.5 cpu   85.0 aff 20 pri 32 pp 71-74 % 2160-2160 MHz  2.909 0.432 1.093 1.485 2.477, 1.817, 1.424 0.011, 0.006, 0.005, 0.003
+anet-chunk-load-2      19:30:52 wall  192.4 cpu  154.9 aff 20 pri 32 pp 71-75 % 2160-2160 MHz  8m/production=17.802 8m/1=16.027 4m/production=63.149 10m/production=16.072
+preflight-load-3       19:34:05 wall   96.6 cpu    7.9 aff 20 pri 32 pp 71-75 % 2160-2160 MHz  single 100 197 135 | par 228 155 145
+shadow-cost-load-3     19:35:42 wall   74.3 cpu   81.4 aff 20 pri 32 pp 71-126 % 2160-2160 MHz 2.902 0.430 1.087 1.478 2.472, 1.815, 1.424 0.254, 0.660, 0.119, 0.002
+anet-chunk-load-3      19:36:57 wall  200.9 cpu  158.9 aff 20 pri 32 pp 72-74 % 2160-2160 MHz  8m/production=21.302 8m/1=20.508 4m/production=58.09 10m/production=10.585
+preflight-pinned-1     19:41:18 wall   75.0 cpu    5.6 aff 12 pri 128 pp 90-94 % 2160-2160 MHz  single 79 69 65 | par 120 113 113
+shadow-cost-pinned-1   19:42:33 wall   46.2 cpu   75.4 aff 12 pri 128 pp 87-95 % 2160-2160 MHz  2.531 0.432 1.008 1.375 2.099, 1.524, 1.156 0.046, 0.025, 0.019, 0.042
+anet-chunk-pinned-1    19:43:20 wall   72.3 cpu   99.8 aff 12 pri 128 pp 78-92 % 2160-2160 MHz  8m/production=4.835 8m/1=7.313 4m/production=19.766 10m/production=3.056
+preflight-pinned-2     19:44:32 wall   75.0 cpu    5.5 aff 12 pri 128 pp 87-94 % 2160-2160 MHz  single 79 73 67 | par 116 113 114
+shadow-cost-pinned-2   19:45:48 wall   45.4 cpu   70.5 aff 12 pri 128 pp 71-119 % 2160-2160 MHz 2.658 0.501 1.031 1.434 2.158, 1.627, 1.225 0.127, 0.136, 0.103, 0.028
+anet-chunk-pinned-2    19:46:33 wall   72.9 cpu  100.5 aff 12 pri 128 pp 80-89 % 2160-2160 MHz  8m/production=4.803 8m/1=7.394 4m/production=19.605 10m/production=3.093
+preflight-pinned-3     19:47:46 wall   75.1 cpu    5.6 aff 12 pri 128 pp 86-92 % 2160-2160 MHz  single 79 65 69 | par 119 109 114
+shadow-cost-pinned-3   19:49:01 wall   45.4 cpu   73.0 aff 12 pri 128 pp 74-90 % 2160-2160 MHz  2.533 0.455 1.008 1.378 2.079, 1.526, 1.155 0.070, 0.057, 0.000, 0.042
+anet-chunk-pinned-3    19:49:47 wall   72.5 cpu  100.8 aff 12 pri 128 pp 79-91 % 2160-2160 MHz  8m/production=4.879 8m/1=7.353 4m/production=19.756 10m/production=3.127
+preflight-quiet-4      19:51:12 wall   73.7 cpu    4.4 aff 20 pri 32 pp 137-147 % 2160-2160 MHz single 51 49 48 | par 129 101 97
+shadow-cost-quiet-4    19:52:26 wall   39.8 cpu   70.2 aff 20 pri 32 pp 132-142 % 2160-2160 MHz 2.382 0.386 0.940 1.290 1.996, 1.442, 1.092 0.014, 0.071, 0.033, 0.003
+anet-chunk-quiet-4     19:53:05 wall   59.5 cpu   77.5 aff 20 pri 32 pp 113-141 % 2160-2160 MHz 8m/production=3.803 8m/1=5.88 4m/production=16.021 10m/production=2.375

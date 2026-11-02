@@ -1,0 +1,12 @@
+RTX 3080 Ti Laptop (Vulkan), 2560x1440, cells 32, finest level 22, Reference field, relief view, probe_ab --part gpu --frames 400,
+interleaved A B / B A, GPU time of the render pass in ms (median, p10, p90). Taken 2026-10-17 09:20:41 to 09:21:09, indicative: GPU clock state not
+controlled, no other GPU work of ours running (the coder session's real-GPU run had finished and it was holding), the owner may have had a remote desktop session.
+
+view 6 ground-1m (2378 nodes), run 2:   atlas 1.942 (1.888 / 2.029)   buffer 1.951 (1.902 / 2.037)   ratio 1.005
+view 6 ground-1m (2378 nodes), run 3:   atlas 1.951 (1.908 / 2.015)   buffer 1.963 (1.918 / 2.028)   ratio 1.006
+view 2 aerial-200km (630 nodes):        atlas 2.167 (2.095 / 2.215)   buffer 2.170 (2.098 / 2.218)   ratio 1.001
+view 9 face-edge-1km (1574 nodes):      atlas 2.312 (2.020 / 2.757)   buffer 2.322 (2.018 / 2.765)   ratio 1.004
+
+CPU time to record and submit (ms, median): view 6 1.10 / 1.09 and 1.09 / 1.09; view 2 0.420 / 0.419; view 9 2.149 / 2.143 (atlas / buffer).
+
+The first run (300 frames, with the alternating 60-frame blocks and the upload part) is in ab-rtx-view6-300frames-2026-10-17-0920.txt.

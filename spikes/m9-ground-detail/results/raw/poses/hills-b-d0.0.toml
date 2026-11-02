@@ -1,0 +1,33 @@
+# SPIKE-63 hills-b, ground detail strength 0
+chunk_timeout_s = 1800
+
+[place]
+lat = 8.972
+lon = -16.238
+
+[look]
+ground_detail = 0.0
+
+[[pose]]
+name = "eye-midmorning"
+altitude_m = 1.8
+back_m = 60
+heading_deg = 90
+pitch_deg = 6
+sun_local_hours = 10
+
+[[pose]]
+name = "eye-lowsun"
+altitude_m = 1.8
+back_m = 60
+heading_deg = 90
+pitch_deg = 6
+sun_local_hours = 17.25
+
+[[pose]]
+name = "feet-lowsun"
+altitude_m = 1.8
+back_m = 60
+heading_deg = 90
+pitch_deg = 35
+sun_local_hours = 17.25

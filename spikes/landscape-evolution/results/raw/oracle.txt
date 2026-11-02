@@ -1,0 +1,12 @@
+ORACLE N= 10 H=0.5 km: |dz| p50 0.02 p90 5.99 p99 39.30 max 166.1 m; |dlnA| mean 0.480 p99 6.86
+ORACLE N= 10 H=1.0 km: |dz| p50 0.01 p90 5.24 p99 36.52 max 166.1 m; |dlnA| mean 0.426 p99 6.64
+ORACLE N= 10 H=2.0 km: |dz| p50 0.00 p90 3.78 p99 31.78 max 122.0 m; |dlnA| mean 0.349 p99 6.25
+ORACLE N= 10 H=5.0 km: |dz| p50 0.00 p90 0.21 p99 10.07 max 80.1 m; |dlnA| mean 0.091 p99 2.64
+ORACLE N= 30 H=0.5 km: |dz| p50 0.48 p90 16.39 p99 84.76 max 264.4 m; |dlnA| mean 0.562 p99 7.58
+ORACLE N= 30 H=1.0 km: |dz| p50 0.34 p90 15.51 p99 82.97 max 264.7 m; |dlnA| mean 0.535 p99 7.71
+ORACLE N= 30 H=2.0 km: |dz| p50 0.15 p90 12.91 p99 63.48 max 175.8 m; |dlnA| mean 0.434 p99 7.43
+ORACLE N= 30 H=5.0 km: |dz| p50 0.00 p90 1.92 p99 29.03 max 107.9 m; |dlnA| mean 0.147 p99 4.49
+ORACLE N=100 H=0.5 km: |dz| p50 6.96 p90 67.54 p99 200.74 max 442.4 m; |dlnA| mean 0.663 p99 8.02
+ORACLE N=100 H=1.0 km: |dz| p50 5.00 p90 65.63 p99 205.61 max 442.4 m; |dlnA| mean 0.616 p99 8.02
+ORACLE N=100 H=2.0 km: |dz| p50 3.64 p90 52.88 p99 149.70 max 301.5 m; |dlnA| mean 0.519 p99 7.85
+ORACLE N=100 H=5.0 km: |dz| p50 0.22 p90 14.71 p99 63.55 max 193.2 m; |dlnA| mean 0.199 p99 4.88

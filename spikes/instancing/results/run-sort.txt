@@ -1,0 +1,11 @@
+Ad-hoc runs of the example with the environment variable SORT (the CPU path's visible list sorted before the upload); the rows 2 M and 4 M dense only; columns as in results.md (CPU cull all, by cells, upload ms (bytes), draw CPU path, GPU cull, draw GPU path, same set, diff).
+SORT=near
+| 2 M, 80 m dense (2000000) | 138713 | 96618 | 8561718 | 24.979 | 7.092 | 2.270 (3765296) | 9.442 | 0.118 | 3.978 | true | 0 |
+| 4 M, 80 m dense (4000000) | 277130 | 192380 | 17053180 | 53.183 | 14.637 | 5.243 (7512160) | 26.317 | 0.168 | 7.731 | true | 0 |
+SORT=far
+| 2 M, 80 m dense (2000000) | 138713 | 96618 | 8561718 | 27.205 | 6.642 | 2.419 (3765296) | 12.755 | 0.115 | 4.094 | true | 0 |
+| 4 M, 80 m dense (4000000) | 277130 | 192380 | 17053180 | 58.047 | 13.851 | 5.514 (7512160) | 33.042 | 0.169 | 7.916 | true | 0 |
+SORT=random
+| 2 M, 80 m dense (2000000) | 138713 | 96618 | 8561718 | 21.250 | 7.223 | 2.174 (3765296) | 8.599 | 0.114 | 3.967 | true | 0 |
+| 4 M, 80 m dense (4000000) | 277130 | 192380 | 17053180 | 43.673 | 14.837 | 6.198 (7512160) | 22.328 | 0.221 | 7.728 | true | 0 |
+Default order (cell order), from run-final.txt: 2 M dense: draw CPU path 7.397, GPU path 3.959; 4 M dense: 15.920 and 7.725. (An earlier default run in the same session gave 6.570 / 3.987 and 15.651 / 7.751: the two runs agree within 0.9 ms on the CPU path's draw and 0.03 ms on the GPU path's.)

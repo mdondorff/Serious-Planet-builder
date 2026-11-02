@@ -1,0 +1,58 @@
+heavy-run lock: the machine is free after 149 s: running `C:/Program Files/Git/usr/bin/bash.exe C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/570e124f-4ca5-49b4-8bf6-680604dce399/scratchpad/s70/run.sh`
+$ C:/Program Files/Git/usr/bin/bash.exe C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/570e124f-4ca5-49b4-8bf6-680604dce399/scratchpad/s70/run.sh
+=== dump 14:05:02 cpu 9%
+RELIEF highlands: face 3 cells i 10325 j 59361 (6656^2), dx 100.77 m, land 66.8 %, min -74 max 2908 m, sampled in 31.8 s
+RELIEF valleyridge: face 3 cells i 22340 j 65113 (6656^2), dx 98.22 m, land 72.3 %, min -116 max 1202 m, sampled in 33.0 s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 230 filtered out; finished in 67.42s
+=== s70 14:06:55 cpu 0%
+blackforest: joint bake 147 s (44302336 cells)
+blackforest: one route of the window 8.7 s
+blackforest: coarse x4 (407 m, 1664^2) carve 2.8 s, thermal per tile 84 s
+blackforest coarse400 hard: step over 12283 edge pairs p50 8.10 p99 61.31 max 110.42 m | |s-j| by distance (p50/p99 m) 0-1: 22.35/175.78, 2-8: 21.98/177.93, 9-32: 22.51/176.37, 33-128: 22.49/190.50, 129-512: 22.36/196.24, 513-4000: 18.39/206.43 | crossings mosaic 234 joint 281 matched 82 | ponds near seams mosaic 14448 joint 1116
+blackforest: coarse x8 (814 m, 832^2) carve 0.6 s, thermal per tile 83 s
+blackforest coarse800 hard: step over 12272 edge pairs p50 8.20 p99 59.75 max 122.27 m | |s-j| by distance (p50/p99 m) 0-1: 36.37/261.34, 2-8: 35.26/271.47, 9-32: 37.10/273.55, 33-128: 37.80/262.90, 129-512: 38.20/276.10, 513-4000: 32.94/339.20 | crossings mosaic 245 joint 281 matched 78 | ponds near seams mosaic 19878 joint 1116
+blackforest: forced 10 km2: 286467 forced cells in tile 0
+blackforest: forced 10 km2: 4 tiles 150 s
+blackforest forced10km2 hard: step over 12288 edge pairs p50 0.00 p99 83.12 max 308.73 m | |s-j| by distance (p50/p99 m) 0-1: 0.00/54.30, 2-8: 0.00/49.97, 9-32: 0.00/43.35, 33-128: 0.00/36.48, 129-512: 0.00/29.17, 513-4000: 0.00/23.40 | crossings mosaic 291 joint 281 matched 235 | ponds near seams mosaic 1737 joint 1116
+blackforest: forced 100 km2: 79743 forced cells in tile 0
+blackforest: forced 100 km2: 4 tiles 150 s
+blackforest forced100km2 hard: step over 12288 edge pairs p50 0.00 p99 127.76 max 312.40 m | |s-j| by distance (p50/p99 m) 0-1: 0.00/97.37, 2-8: 0.00/89.18, 9-32: 0.00/67.56, 33-128: 0.00/35.18, 129-512: 0.00/18.77, 513-4000: 0.00/9.27 | crossings mosaic 269 joint 281 matched 241 | ponds near seams mosaic 2966 joint 1116
+highlands: joint bake 142 s (44302336 cells)
+highlands: one route of the window 12.7 s
+highlands: coarse x4 (407 m, 1664^2) carve 2.4 s, thermal per tile 85 s
+highlands coarse400 hard: step over 9247 edge pairs p50 8.24 p99 68.45 max 135.76 m | |s-j| by distance (p50/p99 m) 0-1: 24.84/314.84, 2-8: 24.57/301.43, 9-32: 23.42/295.52, 33-128: 23.79/335.28, 129-512: 25.60/304.01, 513-4000: 27.48/220.65 | crossings mosaic 139 joint 160 matched 37 | ponds near seams mosaic 8484 joint 883
+highlands: coarse x8 (814 m, 832^2) carve 0.5 s, thermal per tile 83 s
+highlands coarse800 hard: step over 9222 edge pairs p50 8.65 p99 65.60 max 108.47 m | |s-j| by distance (p50/p99 m) 0-1: 47.55/353.61, 2-8: 46.59/361.49, 9-32: 43.91/381.07, 33-128: 43.66/438.48, 129-512: 47.57/435.44, 513-4000: 52.53/341.17 | crossings mosaic 135 joint 160 matched 37 | ponds near seams mosaic 12952 joint 883
+highlands: forced 10 km2: 169882 forced cells in tile 0
+highlands: forced 10 km2: 4 tiles 172 s
+highlands forced10km2 hard: step over 9249 edge pairs p50 0.00 p99 73.91 max 219.01 m | |s-j| by distance (p50/p99 m) 0-1: 0.00/57.31, 2-8: 0.00/66.75, 9-32: 0.00/51.90, 33-128: 0.00/56.43, 129-512: 0.00/26.24, 513-4000: 0.00/21.23 | crossings mosaic 156 joint 160 matched 132 | ponds near seams mosaic 1158 joint 883
+highlands: forced 100 km2: 49436 forced cells in tile 0
+highlands: forced 100 km2: 4 tiles 163 s
+highlands forced100km2 hard: step over 9249 edge pairs p50 0.00 p99 109.83 max 319.15 m | |s-j| by distance (p50/p99 m) 0-1: 0.00/89.96, 2-8: 0.00/91.83, 9-32: 0.00/86.74, 33-128: 0.00/87.15, 129-512: 0.00/11.66, 513-4000: 0.00/8.49 | crossings mosaic 149 joint 160 matched 132 | ponds near seams mosaic 2033 joint 883
+valleyridge: joint bake 157 s (44302336 cells)
+valleyridge: one route of the window 12.9 s
+valleyridge: coarse x4 (407 m, 1664^2) carve 2.7 s, thermal per tile 87 s
+valleyridge coarse400 hard: step over 10627 edge pairs p50 7.05 p99 55.58 max 109.23 m | |s-j| by distance (p50/p99 m) 0-1: 17.26/91.90, 2-8: 17.14/93.93, 9-32: 17.06/97.63, 33-128: 17.02/99.50, 129-512: 17.24/101.65, 513-4000: 19.72/116.11 | crossings mosaic 176 joint 220 matched 51 | ponds near seams mosaic 12623 joint 641
+valleyridge: coarse x8 (814 m, 832^2) carve 0.6 s, thermal per tile 82 s
+valleyridge coarse800 hard: step over 10604 edge pairs p50 7.15 p99 54.96 max 114.79 m | |s-j| by distance (p50/p99 m) 0-1: 27.42/146.07, 2-8: 27.99/142.67, 9-32: 28.50/140.60, 33-128: 27.65/134.36, 129-512: 28.40/139.89, 513-4000: 33.94/158.78 | crossings mosaic 180 joint 220 matched 52 | ponds near seams mosaic 17637 joint 641
+valleyridge: forced 10 km2: 268543 forced cells in tile 0
+valleyridge: forced 10 km2: 4 tiles 150 s
+valleyridge forced10km2 hard: step over 10634 edge pairs p50 0.00 p99 33.20 max 158.79 m | |s-j| by distance (p50/p99 m) 0-1: 0.00/25.16, 2-8: 0.00/25.28, 9-32: 0.00/25.09, 33-128: 0.00/20.00, 129-512: 0.00/14.35, 513-4000: 0.00/14.50 | crossings mosaic 219 joint 220 matched 188 | ponds near seams mosaic 910 joint 641
+valleyridge: forced 100 km2: 82775 forced cells in tile 0
+valleyridge: forced 100 km2: 4 tiles 148 s
+valleyridge forced100km2 hard: step over 10634 edge pairs p50 0.00 p99 34.01 max 139.48 m | |s-j| by distance (p50/p99 m) 0-1: 0.00/24.78, 2-8: 0.00/24.89, 9-32: 0.00/23.32, 33-128: 0.00/18.38, 129-512: 0.00/9.88, 513-4000: 0.00/6.47 | crossings mosaic 215 joint 220 matched 194 | ponds near seams mosaic 1118 joint 641
+alps: joint bake 141 s (44302336 cells)
+alps: one route of the window 8.7 s
+alps: coarse x4 (407 m, 1664^2) carve 2.5 s, thermal per tile 91 s
+alps coarse400 hard: step over 12154 edge pairs p50 10.78 p99 81.73 max 148.44 m | |s-j| by distance (p50/p99 m) 0-1: 46.60/568.60, 2-8: 46.31/523.81, 9-32: 44.35/442.44, 33-128: 44.49/473.91, 129-512: 44.01/464.41, 513-4000: 40.04/382.88 | crossings mosaic 179 joint 223 matched 57 | ponds near seams mosaic 13158 joint 2189
+alps: coarse x8 (814 m, 832^2) carve 0.6 s, thermal per tile 93 s
+alps coarse800 hard: step over 12149 edge pairs p50 11.79 p99 78.40 max 165.55 m | |s-j| by distance (p50/p99 m) 0-1: 85.93/676.68, 2-8: 86.29/664.30, 9-32: 85.56/716.71, 33-128: 83.00/763.77, 129-512: 79.62/719.13, 513-4000: 73.07/657.14 | crossings mosaic 201 joint 223 matched 48 | ponds near seams mosaic 18927 joint 2189
+alps: forced 10 km2: 221403 forced cells in tile 0
+alps: forced 10 km2: 4 tiles 152 s
+alps forced10km2 hard: step over 12154 edge pairs p50 0.01 p99 75.09 max 467.84 m | |s-j| by distance (p50/p99 m) 0-1: 0.00/60.43, 2-8: 0.00/60.70, 9-32: 0.00/69.75, 33-128: 0.00/59.44, 129-512: 0.00/49.27, 513-4000: 0.00/31.90 | crossings mosaic 222 joint 223 matched 207 | ponds near seams mosaic 2269 joint 2189
+alps: forced 100 km2: 74675 forced cells in tile 0
+alps: forced 100 km2: 4 tiles 153 s
+alps forced100km2 hard: step over 12154 edge pairs p50 0.00 p99 73.72 max 452.54 m | |s-j| by distance (p50/p99 m) 0-1: 0.00/49.46, 2-8: 0.00/42.96, 9-32: 0.00/46.68, 33-128: 0.00/34.22, 129-512: 0.00/20.70, 513-4000: 0.00/9.08 | crossings mosaic 219 joint 223 matched 211 | ponds near seams mosaic 2252 joint 2189
+=== prerun d, inflow on interior cells 14:58:24 cpu 0%
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 228 filtered out; finished in 536.72s
+=== done 15:07:50
