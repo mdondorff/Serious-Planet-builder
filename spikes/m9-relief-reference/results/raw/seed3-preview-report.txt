@@ -1,0 +1,12 @@
+world preview seed 3 1440x720: global v5, mesh v10, class list v1, class source v1, preview v1
+land fraction 28.9 %
+land under 60 degrees latitude, by the class weights (TEST-082's bands, reported not judged; its classes come from k R14 once the bake exists):
+  plains (plain + rolling) 33.3 % (band 55-67 %, OUT OF BAND)
+  hills 27.0 % (band 10-25 %, OUT OF BAND)
+  mountains (mountains + high) 19.2 % (band 14-30 %, in band)
+  plateau 20.5 % (no band; counted with the plains by TEST-082)
+  land above 2 km 26.3 % (band 5-10 %, OUT OF BAND)
+  land above 4 km 5.9 % (band 1-3 %, OUT OF BAND)
+  highest land 6.44 km (band 7-9 km, OUT OF BAND)
+  largest step of the untapered k between lattice points 6.50 (limit 2.0, OVER)
+  per class: plain 20.3 % rolling plain 13.0 % hills 27.0 % mountains 5.2 % high mountains 14.0 % plateau 20.5 % badlands 0.0 % sand sea 0.0 %
