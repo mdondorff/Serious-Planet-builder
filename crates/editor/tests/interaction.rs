@@ -3,7 +3,7 @@
 use planet_core::cube::{FaceMapping, TangentWarp};
 use planet_core::{PlanetFixed, TileId, Vec3};
 use planet_editor::commands::{Affected, Editor};
-use planet_editor::feed::{edited_chunks, edited_tiles, REFRESH_HALO};
+use planet_editor::feed::{edited_chunks, edited_tiles, edited_tiles_reading, REFRESH_HALO};
 use planet_editor::ids::{FixedClock, IdMaker, SeededEntropy};
 use planet_editor::interaction::{Interaction, PointerView, Pressed};
 use planet_editor::overlay::{self, OUTLINE_SEGMENTS};
@@ -403,13 +403,15 @@ fn the_coarse_to_fine_find_is_the_set_a_scan_of_every_resident_tile_finds() {
                 })
                 .collect()
         };
+        // The reach part of the find (no tile reads a region summary here; STRM-070's part is tested below).
+        let reach_find = |aff: &[Affected]| edited_tiles_reading(aff, BodyId::PLANET, &resident, R, &map, &|_| false);
         let mut checked = 0;
         for (k, reach_m) in [10.0f64, 50.0, 150.0, 500.0, 3_000.0, 20_000.0, 40_000.0].into_iter().enumerate() {
             for step in 0..24 {
                 let off = f64::from(step) * 0.7 * reach_m.min(300.0) * f64::from(k as u32 % 3 + 1);
                 let dir = shape::point_at(centre, f64::from(step) * 15.0, off, R);
                 let aff = [Affected { body: BodyId::PLANET, dir, reach_m, brush: None }];
-                assert_eq!(edited_tiles(&aff, BodyId::PLANET, &resident, R, &map), scan(&aff), "reach {reach_m} m, step {step}");
+                assert_eq!(reach_find(&aff), scan(&aff), "reach {reach_m} m, step {step}");
                 checked += 1;
             }
         }
@@ -418,7 +420,7 @@ fn the_coarse_to_fine_find_is_the_set_a_scan_of_every_resident_tile_finds() {
             Affected { body: BodyId::PLANET, dir: centre, reach_m: 500.0, brush: None },
             Affected { body: BodyId::PLANET, dir: unit(-40.0, 100.0), reach_m: 500.0, brush: None },
         ];
-        assert_eq!(edited_tiles(&two, BodyId::PLANET, &resident, R, &map), scan(&two));
+        assert_eq!(reach_find(&two), scan(&two));
         assert!(checked == 7 * 24);
     }
 }
@@ -510,4 +512,60 @@ fn clicking_again_at_the_same_spot_goes_through_the_edits_under_it_smallest_firs
     // One edit under the cursor has no rank to show.
     ix.hover(&mut s, &view(spot, Some(unit(47.2, 8.55 + 0.4)), &shown[..1], &[]));
     assert!(s.hover_rank().is_none());
+}
+
+// spec: STRM-070, WDEF-008
+#[test]
+fn a_coarse_tile_is_named_exactly_when_its_summary_cover_holds_the_anchor_cell_across_faces_and_corners() {
+    // A small body (cells at level 5, coarse tiles at levels 0 to 2): for the coarse tiles at a cube corner, every cell of the corner's three
+    // faces as the anchor of a 1 m reach. The find names the tile exactly when the cover the key reads holds the anchor's cell (the walk equals the cover
+    // at face edges and corners; a reach that touches the tile always lies in the cover).
+    use planet_world_def::{cells, summary};
+    let radius = 32.0 * cells::CELL_EDGE_M / core::f64::consts::FRAC_PI_2;
+    let level = cells::cell_level(radius);
+    assert_eq!(level, 5, "the test's body has cells at level 5");
+    let corner = Vec3::new(1.0, 1.0, 1.0).normalized();
+    let tiles: Vec<TileId> = (1..=2u8)
+        .flat_map(|l| {
+            let t = TileId::from_direction(&TangentWarp, corner, l);
+            let mut v = vec![t];
+            v.extend(t.neighbors8());
+            v
+        })
+        .collect();
+    let covers: Vec<(TileId, std::collections::HashSet<u64>)> = tiles
+        .iter()
+        .map(|t| {
+            assert!(summary::is_coarse(*t, level));
+            let rings = summary::margin_rings(*t, REFRESH_HALO, radius, level);
+            (*t, summary::cover(*t, level, rings).iter().flat_map(|n| summary::cells_under(*n, level)).map(|c| c.raw()).collect())
+        })
+        .collect();
+    // Every cell of the faces the tiles lie on (the three faces of the corner): the seams and the corner itself, exhaustively.
+    let faces: std::collections::BTreeSet<u8> = tiles.iter().map(|t| t.face().0).collect();
+    let mut checked = 0;
+    for f in faces {
+        let n = 1u32 << level;
+        for x in 0..n {
+            for y in 0..n {
+                let cell = TileId::new(planet_core::Face(f), level, x, y).unwrap();
+                let affected = [Affected { body: BodyId::PLANET, dir: cell.center_direction(&TangentWarp), reach_m: 1.0, brush: None }];
+                let named: std::collections::HashSet<TileId> =
+                    edited_tiles(&affected, BodyId::PLANET, &tiles, radius, &TangentWarp).into_iter().collect();
+                for (tile, held) in &covers {
+                    assert_eq!(
+                        named.contains(tile),
+                        held.contains(&cell.raw()),
+                        "tile face {} level {} ({}, {}), anchor cell face {f} ({x}, {y})",
+                        tile.face().0,
+                        tile.level(),
+                        tile.x(),
+                        tile.y()
+                    );
+                    checked += 1;
+                }
+            }
+        }
+    }
+    assert!(checked > 10_000);
 }

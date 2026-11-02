@@ -693,16 +693,61 @@ impl Harness<'_> {
     }
 }
 
+/// The nodes a frame draws in place of the plan's own (a resident tile of another key, or an ancestor standing in) with what keeps each from
+/// becoming exact (edit-stale-diagnostics): the tile, the key the plan wants against the key resident, whether the edit named it for refresh,
+/// and the streamer's state of it. At most 16 lines.
+fn substituted_report(h: &Harness<'_>, world: &WorldTerrain, frame: &planet_frame::managed::ManagedFrame, refreshed: &[TileId]) -> String {
+    use planet_frame::terrain::TileState;
+    let Ok(field) = world.field() else { return String::new() };
+    let streamer = h.rig.managed.manager().streamer();
+    let resident = h.rig.managed.resident();
+    let cells = frame.pipeline.draw.plan.cells;
+    let lines: Vec<String> = frame
+        .pipeline
+        .draw
+        .plan
+        .nodes
+        .iter()
+        .filter(|n| {
+            matches!(n.state, TileState::Stale | TileState::Previewed | TileState::StandIn)
+                && !(n.state == TileState::Previewed && n.transient_only)
+        })
+        .take(16)
+        .map(|n| {
+            let wanted = planet_generators::mesh::mesh_key_field(field.as_ref(), &TangentWarp, n.tile, cells, world.radius_m());
+            format!(
+                "
+  {:?} face {} level {} ({}, {}): wanted key {wanted:#018x}, resident {}, in the edit's refresh list {}, streamer {:?}",
+                n.state,
+                n.tile.face().0,
+                n.tile.level(),
+                n.tile.x(),
+                n.tile.y(),
+                resident.get(&n.tile).map_or("none".to_string(), |r| format!("{:#018x}", r.mesh_key)),
+                refreshed.contains(&n.tile),
+                streamer.tile_report(n.tile)
+            )
+        })
+        .collect();
+    if lines.is_empty() {
+        String::new()
+    } else {
+        format!("; substituted nodes:{}", lines.concat())
+    }
+}
+
 /// The resident tiles the stamp's reach touches: the edit's find as the editor makes it (`planet_editor::feed::edited_tiles`), what
 /// `ManagedLoop::edit` is given.
-fn found_tiles(stamp: &ItemSpec, resident: &[TileId], radius_m: f64) -> Vec<TileId> {
+fn found_tiles(def: &WorldDefinition, stamp: &ItemSpec, resident: &[TileId], radius_m: f64) -> Vec<TileId> {
     let affected = [planet_editor::commands::Affected {
         body: BodyId::PLANET,
         dir: stamp.dir,
         reach_m: stamp.reach_m,
         brush: stamp.stamp.clone().map(std::sync::Arc::new),
     }];
-    planet_editor::feed::edited_tiles(&affected, BodyId::PLANET, resident, radius_m, &TangentWarp)
+    planet_editor::feed::edited_tiles_reading(&affected, BodyId::PLANET, resident, radius_m, &TangentWarp, &|t| {
+        crate::editwin::reads_summary(def, BodyId::PLANET, t)
+    })
 }
 
 /// Items of `layer` near the stamp, for the preview delta (the whole body would be the same list: only stamps that differ count).
@@ -848,7 +893,7 @@ fn run_once(
     announce_item_change(h, world, &before_def, old_revision);
     let resident: Vec<TileId> = h.rig.managed.resident().keys().copied().collect();
     let found = Instant::now();
-    let tiles = found_tiles(stamp, &resident, world.radius_m());
+    let tiles = found_tiles(&edited, stamp, &resident, world.radius_m());
     out.stages.find_ms = ms(found);
     out.levels = level_rows(&tiles, &h.drawn, &req.lod, stamp.max_delta_m);
     out.refreshed = h.rig.managed.edit(&tiles);
@@ -918,18 +963,22 @@ fn run_once(
         }
         waiting_for_exact = true;
         if sampler_started.elapsed() > limit {
+            let streamer = h.rig.managed.manager().streamer();
             return Err(format!(
-                "the edit did not become exact in {} s: kind {:?}, substituted {}, blank {}, previewed {}, unfinished jobs {}, plan worker busy {}, pending {}, refreshed {} of {} resident",
+                "the edit did not become exact in {} s: kind {:?}, substituted {}, blank {}, previewed {}, unfinished jobs {}, plan worker busy {}, pending {}, refreshed {} of {} resident, held refreshes {}, queued draw/residency/prefetch {:?}{}",
                 limit.as_secs(),
                 frame.pipeline.draw.kind,
                 frame.pipeline.draw.substituted,
                 frame.pipeline.draw.blank,
                 previewed,
-                h.rig.managed.manager().streamer().unfinished_jobs(),
+                streamer.unfinished_jobs(),
                 h.rig.managed.pipeline().worker().busy(),
                 h.rig.managed.pending().len(),
                 out.refreshed,
-                out.resident
+                out.resident,
+                streamer.held_refreshes(),
+                streamer.queued_by_class(),
+                substituted_report(h, world, &frame, &tiles)
             ));
         }
         std::thread::sleep(Duration::from_millis(1));
@@ -1326,7 +1375,7 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
                 world.set_definition(Arc::new(with_base))?;
                 // The tiles the earlier state touches are refreshed, as an edit's are, so that the frames settle on the world as it is.
                 let resident: Vec<TileId> = h.rig.managed.resident().keys().copied().collect();
-                h.rig.managed.edit(&found_tiles(base, &resident, radius_m));
+                h.rig.managed.edit(&found_tiles(&world.definition(), base, &resident, radius_m));
             }
             // A smoke run needs the frames to be exact once, not a long calm: every frame is slow on the software adapter.
             let settle = h.settle(&req, if smoke { 3 } else { 20 })?;
@@ -1345,7 +1394,7 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
             world.set_definition(original)?;
             if let Some(base) = &case.base {
                 let resident: Vec<TileId> = h.rig.managed.resident().keys().copied().collect();
-                h.rig.managed.edit(&found_tiles(base, &resident, radius_m));
+                h.rig.managed.edit(&found_tiles(&world.definition(), base, &resident, radius_m));
             }
             rows.push(CaseRow { kind: case.kind, altitude_m: altitude, radius_m: case.size_m, runs });
             focus = Some((req, case.centre));
@@ -1609,7 +1658,7 @@ pub fn pair_frames(
         world.set_definition(Arc::clone(&edited))?;
         announce_item_change(&mut h, &world, &before_def, old_revision);
         let resident: Vec<TileId> = h.rig.managed.resident().keys().copied().collect();
-        let tiles = found_tiles(&case.spec, &resident, planet_m);
+        let tiles = found_tiles(&edited, &case.spec, &resident, planet_m);
         h.rig.managed.edit(&tiles);
         h.rig.managed.set_preview_list(case_preview_list(&before_def, &edited, &case.spec, req.camera.position.0, planet_m));
         let preview = frame_read(&mut h, &req)?;

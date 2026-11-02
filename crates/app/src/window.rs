@@ -1366,6 +1366,15 @@ impl App<'_> {
         if let Some(h) = self.world.horizon_stats() {
             extra += &format!("horizon jobs: {h:?}\n");
         }
+        {
+            // A refresh that waits shows here (edit-stale-diagnostics): held by the settle window, or queued per class.
+            let streamer = st.rig.managed.manager().streamer();
+            extra += &format!(
+                "refreshes held by the settle window: {}; requests queued draw/residency/prefetch: {:?}\n",
+                streamer.held_refreshes(),
+                streamer.queued_by_class()
+            );
+        }
         extra += &format!("stalls so far: {}\n", st.stall.stalls);
         let text = stall.text(&extra);
         let now_ms = self.clock.now_ms();
