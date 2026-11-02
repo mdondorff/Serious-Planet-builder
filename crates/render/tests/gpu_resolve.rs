@@ -75,6 +75,7 @@ fn march_params(sun_elevation_deg: f32) -> MarchParams {
         east: [1.0, 0.0, 0.0],
         north: [0.0, 1.0, 0.0],
         cube_texel_m: 100.0,
+        ceiling_m: f32::MAX,
         dirty_since: 0,
     }
 }
@@ -486,6 +487,120 @@ fn receivers_far_from_the_anchor_land_in_the_clipmaps_azimuthal_frame() {
                 got[k],
                 want[k],
                 (plane - rho_e).abs()
+            );
+        }
+    }
+}
+
+fn relief(x: f64, y: f64) -> f64 {
+    let h = 600.0 * libm::sin(x / 9000.0) * libm::cos(y / 7000.0)
+        + 300.0 * libm::sin(x / 1300.0 + 1.3) * libm::sin(y / 1700.0)
+        + 120.0 * libm::sin(x / 190.0) * libm::sin(y / 230.0)
+        + 40.0 * libm::sin(x / 31.0 + y / 47.0);
+    (h + 700.0).max(0.0)
+}
+
+// spec: REND-052
+/// The march's cost over a realistic clipmap: 11 levels of 1024^2 texels (1 m to 1,024 m) of rolling relief up to about 1,200 m, 1440p, a
+/// camera 20 km up over the anchor. Prints the GPU milliseconds of each pass and the median and p99 steps of a ray at a 45 degree and a
+/// 2 degree sun, with and without the early exit above the world's highest terrain. A by-hand probe, not a verdict (REND-052 is judged on the
+/// frame harness): `PLANET_ADAPTER=hardware cargo test -p planet-render --test gpu_all march_cost -- --ignored --nocapture`.
+#[test]
+#[ignore = "a timing probe, run by hand"]
+fn march_cost_probe_over_eleven_levels() {
+    const N: u32 = 1024;
+    const LV: usize = 11;
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let clip = ClipmapGpu::new(&ctx, N, LV, CELLS);
+    for level in 0..LV {
+        let texel = (1u64 << level) as f64;
+        let mut heights = vec![0f32; (N * N) as usize];
+        for j in 0..N as usize {
+            for i in 0..N as usize {
+                let (ix, iy) = (if i < 512 { i as i64 } else { i as i64 - 1024 }, if j < 512 { j as i64 } else { j as i64 - 1024 });
+                heights[j * N as usize + i] = relief(ix as f64 * texel, iy as f64 * texel) as f32;
+            }
+        }
+        clip.upload_level(&ctx, level, &heights);
+    }
+    clip.rebuild_all_mips(&ctx);
+    let cube = CoarseCubeGpu::new(&ctx, CUBE, CELLS);
+    let march = ShadowMarchGpu::new(&ctx);
+    // PLANET_PROBE_SIZE=1280x720 runs the march over a quarter of the rays (the quarter-resolution option).
+    let (w, h) = std::env::var("PLANET_PROBE_SIZE")
+        .ok()
+        .and_then(|v| v.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))))
+        .unwrap_or((2560u32, 1440u32));
+    let height = 20_000.0f64;
+    let cam = ResolveCamera {
+        position: [0.0, 0.0, height as f32],
+        forward: [0.0, 0.0, -1.0],
+        right: [1.0, 0.0, 0.0],
+        up: [0.0, 1.0, 0.0],
+        tan_half_fov: [0.5 * 16.0 / 9.0, 0.5],
+        near_m: 1.0,
+    };
+    let mut depths = vec![0f32; (w * h) as usize];
+    for y in 0..h {
+        for x in 0..w {
+            let (nx, ny) = ((f64::from(x) + 0.5) / f64::from(w) * 2.0 - 1.0, 1.0 - (f64::from(y) + 0.5) / f64::from(h) * 2.0);
+            let z0 = height - relief(nx * 0.5 * 16.0 / 9.0 * height, ny * 0.5 * height);
+            let z = height - relief(nx * 0.5 * 16.0 / 9.0 * z0, ny * 0.5 * z0);
+            depths[(y * w + x) as usize] = (1.0 / z) as f32;
+        }
+    }
+    let target = DepthTarget::new(&ctx, w, h);
+    target.write(&ctx, &depths);
+    for (ceiling, label) in [(f32::MAX, "no early exit"), (1_300.0, "early exit above 1,300 m")] {
+        for sun in [45.0f32, 2.0] {
+            let mut mp = march_params(sun);
+            mp.levels = (0..LV).map(|k| ([-512, -512, 512, 512], (1u64 << k) as f32)).collect();
+            mp.max_distance_m = 1_000_000.0;
+            mp.ceiling_m = ceiling;
+            // By-hand variants of the 2 degree question: PLANET_PROBE_PENUMBRA (metres) and PLANET_PROBE_SPREAD=0 (no checkerboard).
+            if let Some(v) = std::env::var("PLANET_PROBE_PENUMBRA").ok().and_then(|v| v.parse().ok()) {
+                mp.penumbra_search_m = v;
+            }
+            let spread_off = std::env::var("PLANET_PROBE_SPREAD").is_ok_and(|v| v == "0");
+            let mut r = ShadowResolveGpu::new(&ctx, &clip);
+            let timed = r.enable_timing(&ctx);
+            let (mut passes, mut steps): (Vec<[f64; 5]>, Vec<u32>) = (Vec::new(), Vec::new());
+            for frame in 1..=14u32 {
+                let params = ResolveParams {
+                    camera: cam,
+                    previous: cam,
+                    history_weight: 0.8,
+                    cut: frame == 1,
+                    frame,
+                    spread: spread_for_sun(libm::sinf(sun.to_radians())) && !spread_off,
+                };
+                r.resolve(&ctx, &march, &clip, &cube, &mp, &target, &params);
+                ctx.wait_idle();
+                if frame > 3 {
+                    passes.extend(r.pass_ms(&ctx));
+                }
+                if frame == 14 {
+                    steps = r.read_half_steps(&ctx).into_iter().filter(|s| *s > 0).collect();
+                }
+            }
+            steps.sort_unstable();
+            let pick = |q: f64| steps.get(((steps.len() as f64 - 1.0) * q) as usize).copied().unwrap_or(0);
+            let median = |i: usize| {
+                let mut v: Vec<f64> = passes.iter().map(|p| p[i]).collect();
+                v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                v.get(v.len() / 2).copied().unwrap_or(0.0)
+            };
+            let total: f64 = (0..5).map(median).sum();
+            eprintln!(
+                "11 levels, sun {sun} deg, {label}: GPU {total:.2} ms (timed: {timed}; receivers {:.2}, march {:.2}, fill {:.2}, upsample {:.2}, temporal {:.2}); steps per ray: median {}, p99 {}, max {}",
+                median(0),
+                median(1),
+                median(2),
+                median(3),
+                median(4),
+                pick(0.5),
+                pick(0.99),
+                steps.last().copied().unwrap_or(0)
             );
         }
     }
