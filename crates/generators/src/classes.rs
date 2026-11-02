@@ -13,7 +13,7 @@ use planet_core::{smoothstep, Face, Vec3};
 /// The version of the class list (GEN-093): plain, rolling plain, hills, mountains, high mountains, plateau, badlands, sand sea, in that order.
 pub const CLASS_LIST_VERSION: u32 = 1;
 /// Bump whenever the default source's output changes for a seed (the rules of GEN-094 and GEN-095, their constants, or the plate construction).
-pub const CLASS_SOURCE_VERSION: u32 = 1;
+pub const CLASS_SOURCE_VERSION: u32 = 2;
 pub const CLASS_COUNT: usize = 8;
 pub const CLASS_NAMES: [&str; CLASS_COUNT] =
     ["plain", "rolling plain", "hills", "mountains", "high mountains", "plateau", "badlands", "sand sea"];
@@ -84,7 +84,7 @@ struct Plate {
 pub struct MaskTerms {
     /// Distance to the nearest plate margin in km (half the angular difference of the two nearest centres, times the radius).
     pub margin_km: f64,
-    /// The margin's convergence, positive where the nearest plate moves towards the other (not bounded by 1).
+    /// The convergence of the nearest and second-nearest plate (a diagnostic: it changes sign where the second plate changes), positive where they move towards each other (not bounded by 1).
     pub convergence: f64,
     pub core: f64,
     pub flank: f64,
@@ -218,10 +218,10 @@ impl ClassSource {
     pub fn mask_terms(&self, d: Vec3, land_depth: f64, inland: f64) -> MaskTerms {
         let q = self.warp(d);
         let (idx, ang) = self.nearest_three(q);
-        // The third plate counts fully only while it is clearly the third: its weight is 0 where it swaps places with the fourth, so the pairs it joins appear continuously.
-        let third = smoothstep(0.0, 0.05, ang[3] - ang[2]);
         // The pair of the second and third plate is a real margin only next to the margin of the first two (where the nearest plate changes, it takes the place of the pair (0, 2)).
-        let pair_weight = [1.0, third, third * (1.0 - smoothstep(0.0, 0.03, ang[1] - ang[0]))];
+        // Each plate's weight depends on its own angle, so a pair of plates that trade places has the same weight before and after (the margin factor of (second, third) too).
+        let rank = |r: usize| smoothstep(0.0, 0.05, ang[3] - ang[r]);
+        let pair_weight = [rank(0) * rank(1), rank(0) * rank(2), rank(1) * rank(2) * (1.0 - smoothstep(0.0, 0.04, ang[1] - ang[0]))];
         // The width of a belt: a tent profile of 220 to 500 km half-width (220 to 500 km across at half height); the belt is cut into segments and its height varies along it.
         let width_km = 220.0 + 280.0 * (0.5 + 0.5 * fbm(self.seed, LAYER_WIDTH, d, 2.5, 2));
         let segment = smoothstep(0.25, 0.55, 0.5 + 0.5 * fbm(self.seed, LAYER_SEGMENT, d, 2.2, 2));

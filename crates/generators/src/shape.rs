@@ -107,7 +107,7 @@ pub struct ShapeMetrics {
     /// S4: the area-weighted median and the 10th percentile of the high ground's width in km (twice the distance to the edge at the ridge cells of the distance transform).
     pub width_median_km: f64,
     pub width_p10_km: f64,
-    /// S5: the spans in km (the greatest distance between two cells) of the five longest high-ground regions of at least 50,000 km^2.
+    /// S5: the spans in km (the greatest distance between two of up to 600 sampled cells, so a lower bound) of the five longest high-ground regions of at least 50,000 km^2.
     pub longest_spans_km: Vec<f64>,
     /// S6: land the high-ground regions surround but do not cover, in Mkm^2 (holes of at least 0.5 Mkm^2 of land).
     pub enclosed_mkm2: f64,
@@ -128,7 +128,7 @@ pub fn shape_metrics(g: &Grid) -> ShapeMetrics {
     let total_land: f64 = areas[1..].iter().sum();
     let mut land_masses: Vec<f64> = areas[1..].iter().map(|a| a / 1e6).filter(|&a| a >= 1.0).collect();
     land_masses.sort_by(|a, b| b.partial_cmp(a).expect("finite areas"));
-    let largest_share = if total_land > 0.0 { land_masses.first().map_or(0.0, |a| a * 1e6 / total_land) } else { 0.0 };
+    let largest_share = if total_land > 0.0 { areas[1..].iter().cloned().fold(0.0, f64::max) / total_land } else { 0.0 };
 
     // S3: boxes of 2, 4, 8, 16 and 32 cells over the coast cells (land with a sea neighbour).
     let coast: Vec<bool> = (0..w * h)

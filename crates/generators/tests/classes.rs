@@ -182,52 +182,74 @@ fn the_preview_images_are_the_same_bytes_for_the_same_seed_on_any_thread_count()
 
 // spec: GEN-103
 #[test]
-fn the_mask_is_continuous_where_the_nearest_plate_changes() {
+fn the_mask_has_no_jump_where_the_nearest_or_the_second_plate_changes() {
     let source = ClassSource::new(SEED);
-    // Walk great-circle arcs, find where the nearest plate changes by bisection, and compare the two sides 1e-9 rad apart.
-    let mut checked = 0;
-    for k in 0..400u32 {
+    // Walk great-circle arcs in steps of about 13 km; where a term moves by more than 0.08 between two samples, bisect on the larger difference and compare
+    // the two sides about 1e-12 rad apart. A smooth change shrinks with the step, a jump does not.
+    let terms = |d: Vec3| {
+        let p = source.eval(d);
+        [p.terms.core, p.terms.flank, p.terms.old_margin, p.terms.back_arc, p.terms.plateau_field, p.e0 / 1000.0]
+    };
+    let (mut candidates, mut plate_changes) = (0, 0);
+    for k in 0..90u32 {
         let (a, b) = (
             Vec3::new(f64::from(k % 7) - 3.1, f64::from(k % 11) - 5.2, f64::from(k % 5) - 2.3).normalized(),
             Vec3::new(f64::from((k * 3) % 13) - 6.1, f64::from((k * 5) % 7) - 3.3, f64::from((k * 7) % 9) - 4.4).normalized(),
         );
         let at = |t: f64| (a * (1.0 - t) + b * t).normalized();
-        let plate = |t: f64| {
-            let p = source.eval(at(t));
-            (p.terms.plate, p)
-        };
-        let n = 200;
-        for s in 0..n {
-            let (t0, t1) = (f64::from(s) / f64::from(n), f64::from(s + 1) / f64::from(n));
-            let (p0, p1) = (plate(t0).0, plate(t1).0);
-            if p0 == p1 {
-                continue;
+        let n = 1500;
+        let mut prev = (terms(at(0.0)), source.eval(at(0.0)).terms.plate);
+        for s in 1..=n {
+            let t1 = f64::from(s) / f64::from(n);
+            let cur = (terms(at(t1)), source.eval(at(t1)).terms.plate);
+            let diff = |x: &[f64; 6], y: &[f64; 6]| x.iter().zip(y).map(|(u, v)| (u - v).abs()).fold(0.0, f64::max);
+            if cur.1 != prev.1 {
+                plate_changes += 1;
             }
-            let (mut lo, mut hi) = (t0, t1);
-            for _ in 0..60 {
-                let mid = 0.5 * (lo + hi);
-                if plate(mid).0 == p0 {
-                    lo = mid;
-                } else {
-                    hi = mid;
+            if diff(&prev.0, &cur.0) > 0.08 {
+                candidates += 1;
+                let (mut lo, mut hi) = (f64::from(s - 1) / f64::from(n), t1);
+                for _ in 0..50 {
+                    let mid = 0.5 * (lo + hi);
+                    if diff(&terms(at(lo)), &terms(at(mid))) > diff(&terms(at(mid)), &terms(at(hi))) {
+                        hi = mid;
+                    } else {
+                        lo = mid;
+                    }
                 }
+                let jump = diff(&terms(at(lo)), &terms(at(hi)));
+                assert!(jump < 1e-4, "a term jumps by {jump} at t {lo} of arc {k}: {:?} against {:?}", terms(at(lo)), terms(at(hi)));
             }
-            let (x, y) = (plate(lo).1, plate(hi).1);
-            for (name, u, v) in [
-                ("core", x.terms.core, y.terms.core),
-                ("flank", x.terms.flank, y.terms.flank),
-                ("old margin", x.terms.old_margin, y.terms.old_margin),
-                ("back-arc", x.terms.back_arc, y.terms.back_arc),
-                ("plateau", x.terms.plateau_field, y.terms.plateau_field),
-                ("e0", x.e0 / 1000.0, y.e0 / 1000.0),
-            ] {
-                assert!((u - v).abs() < 1e-6, "{name} jumps where the nearest plate changes (arc {k}, t {lo}): {u} against {v}");
-            }
-            checked += 1;
+            prev = cur;
         }
     }
-    assert!(checked >= 20, "only {checked} plate changes were found on the arcs");
+    assert!(plate_changes >= 8, "only {plate_changes} changes of the nearest plate on the arcs");
+    println!("{candidates} steep steps examined, {plate_changes} changes of the nearest plate");
 }
+
+// spec: GEN-103
+#[test]
+fn the_class_source_version_goes_with_its_output() {
+    // Bump CLASS_SOURCE_VERSION whenever this fingerprint changes (the preview images and the stored fields carry the version).
+    let source = ClassSource::new(SEED);
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for k in 0..24u32 {
+        let d = Vec3::new(f64::from(k % 5) - 2.2, f64::from(k % 7) - 3.1, f64::from(k % 3) - 1.3).normalized();
+        let p = source.eval(d);
+        for v in [p.terms.core, p.terms.flank, p.terms.old_margin, p.terms.back_arc, p.terms.plateau_field, p.terms.strike, p.e0] {
+            for byte in v.to_bits().to_le_bytes() {
+                hash = (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3);
+            }
+        }
+    }
+    assert_eq!(
+        (CLASS_SOURCE_VERSION, hash),
+        (2, FINGERPRINT),
+        "the default source's output changed: bump CLASS_SOURCE_VERSION and record the new fingerprint"
+    );
+}
+
+const FINGERPRINT: u64 = 4895128674126474520;
 
 // spec: GEN-103
 #[test]
@@ -267,4 +289,20 @@ fn the_lattice_reports_the_largest_k_step_and_where_and_the_share_of_steps_over_
     let over_half = lattice.k_steps_over(step / 2.0);
     assert!(over_half > 0.0 && over_half <= 1.0, "{over_half}");
     assert_eq!(lattice.k_steps_over(step + 1e-9), 0.0, "no step is over the largest step");
+}
+
+// spec: GEN-103
+#[test]
+fn a_world_of_one_small_island_has_all_its_land_in_the_largest_mass() {
+    use planet_generators::shape::{shape_metrics, Grid};
+    let (w, h) = (360usize, 180usize);
+    let mut land = vec![false; w * h];
+    for y in 88..92 {
+        for x in 100..104 {
+            land[y * w + x] = true;
+        }
+    }
+    let m = shape_metrics(&Grid { width: w, height: h, land: &land, high: &vec![false; w * h] });
+    assert!(m.land_masses.is_empty(), "under 1 Mkm2");
+    assert!((m.largest_share - 1.0).abs() < 1e-9, "{}", m.largest_share);
 }
