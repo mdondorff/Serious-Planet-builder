@@ -1,0 +1,1 @@
+- 2026-11-02 waterbook-eviction: the water book holds at most 262,144 tiles (about 26 MB), evicting the least recently used eighth; an evicted tile is computed again to the same bits (ATMO-012)

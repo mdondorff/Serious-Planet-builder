@@ -118,6 +118,8 @@ mod wall_repose;
 mod water;
 #[path = "water_band.rs"]
 mod water_band;
+#[path = "water_book.rs"]
+mod water_book;
 #[path = "water_cut.rs"]
 mod water_cut;
 #[path = "water_plan.rs"]

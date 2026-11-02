@@ -743,7 +743,7 @@ Source: window 6 (single-scene `--out DIR`), TEST-019, TEST-025
 - **THEN** the log path is `<dir>/<scene>-lit.json`, the same under the new directory, the file itself, and a refusal by the option check before the case
 
 ### Requirement: TEST-031 Water plan counters in the streaming frames log
-The `frames.txt` of a streaming case SHALL end with the columns `queries`, `tile_misses`, `band_queries` and `lit_plan_ms`: the field queries, the tiles asked of the tile jobs' water book that had no entry, the coastal-band queries and the milliseconds of the lit path's water plan on the frame thread, per frame (all 0 on the debug path). They are recorded only: no verdict, count digest or comparison reads them. `WaterTileCache::counters()` gives the cumulative counts; a frame's share is the difference of two snapshots. A log without the columns is refused as old-format.
+The `frames.txt` of a streaming case SHALL end with the columns `queries`, `tile_misses`, `band_queries`, `lit_plan_ms`, `deferred` and `node_bytes`, per frame: the water plan's field queries, book misses, band queries and milliseconds on the frame thread (all 0 on the debug path), the finished tiles that waited for the upload budget (the cap was reached) and the node-record bytes of the plan. With `upload_bytes`, `uploaded` and `upload_calls` they show whether a slow frame was an upload-capped one. They are recorded only: no verdict, count digest or comparison reads them. A log without the columns is refused as old-format.
 
 Verify: A
 Status: active
@@ -751,7 +751,7 @@ Source: M5 item 9a.1 (status.md), TEST-012, TEST-021
 
 #### Scenario: The columns round-trip
 - **WHEN** a frames log with counter values is written and read back
-- **THEN** the values are equal and the header ends `queries tile_misses band_queries lit_plan_ms`
+- **THEN** the values are equal and the header ends `queries tile_misses band_queries lit_plan_ms deferred node_bytes`
 
 #### Scenario: A memoised plan asks nothing
 - **WHEN** the same terrain plan is planned twice with one cache

@@ -1,6 +1,6 @@
 # SPIKE-92: continent candidates for M9 generator round 2
 
-Status: round 1 closed 2026-11-02 (7e68ebb8); round 2 (inbox #65, the hybrid and S9/S10) closed 2026-11-02 (efec4475 on `spike/m9-continents`, never merged); patch of both rounds in `proto/spike92.patch`.
+Status: round 1 closed 2026-11-02 (7e68ebb8); round 2 (inbox #65, the hybrid and S9/S10) closed 2026-11-02 (efec4475); round 3 (inbox #66, islands, polar land, 3D noise) closed 2026-11-02 (79c9d663 on `spike/m9-continents`, never merged); patch of all rounds in `proto/spike92.patch`. Winner: H2r3 (round 3).
 Planner review of round 1: B2 passes S1-S3 but is round blobs with noisy rims (S3 met by rim noise); A looks Earth-like but fails on sizes. Round 2 answers that.
 
 ## Question
@@ -160,3 +160,89 @@ raw = A's warped fBm × margin weight + k × Σ lobe weights, then round 1's per
 - Thin streaks along the polar rows come from the warp at the poles (present in A as well).
 - Margins are thin: H1's S1 is 4 on seed 1 (band edge) and its S3 1.20 on seed 2; H2's S1 is 7 on seeds 2 and 3.
 - The S9 gate (≤ 0.20) and the S10 band (1.5-2.5) rest on Earth's single sample; 5 seeds only.
+
+# Round 3: islands, polar land, 3D noise (inbox #66)
+Planner's pick after round 2: H2 (R3-k0.8-a2.5-g.72). Round 3 varies H2 only; spike code 79c9d663.
+
+## New checks (`proto/s92_islands.py`, same 0.25° grid)
+
+| Check | Definition | Earth (ETOPO 2022) | Gate |
+|---|---|---|---|
+| S11 islands | count of land masses of 10^4 to 10^6 km², and their share of all land | 50 islands, 3.9 % of land | 35-70 islands and 2-6 % of land |
+| Polar masses | masses of at least 1 Mkm² whose area-weighted mean direction lies poleward of 70° | 2 (Greenland 73.1° N, Antarctica 85.8° S) | ≤ 1 (planner) |
+
+- Earth itself fails the ≤ 1 polar rule (Greenland's centroid is at 73° N); the rule is the planner's, kept as given.
+- H2 of round 2 already has ≤ 1 polar mass on every seed (0 or 1), so no latitude weighting of the craton placement was needed.
+- H2 of round 2 has 21-40 islands holding 0.5-1.9 % of land: too few and too small.
+
+## Islands term
+- `S92_DEEP` (the fBm floor in the deep ocean and craton interiors) is raised from 0.3.
+- `S92_ISL`, `S92_ISLF` add island-scale fBm (4 octaves, gain 0.6, on the warped 3D direction) just offshore of the craton margins: weight exp(-((w - 0.2)/0.15)²), w = min(bias, 1).
+- Raising the floor alone helps on average but stays seed-dependent (seed 2: 19-37 islands at floors 0.45-0.75; higher floors overshoot to 82).
+- Island noise at base frequency 6 makes many small islands (share 1-2 %); base frequency 3 makes islands of Earth's size (Earth's 50 islands average 0.08 Mkm²: Borneo, Madagascar, Baffin, Sumatra).
+
+## Results (seeds 1-5; all on H2's knobs plus the column's)
+
+| Config | S1 | S2 % | S3 | S9 | S10 | S11 | S11 % | polar | all |
+|---|---|---|---|---|---|---|---|---|---|
+| H2 (round 2, deep 0.3) | 5 7 7 5 4 | 58 52 50 52 56 | 1.27 1.23 1.26 1.28 1.29 | 0.12 0.15 0.18 0.11 0.09 | 2.0 2.4 2.1 1.8 2.2 | 26 21 24 40 36 | 0.9 1.1 0.5 0.8 1.9 | 1 1 1 0 1 | 0/5 |
+| d.45 | 6 7 7 5 4 | 56 52 49 51 54 | 1.29 1.23 1.26 1.28 1.31 | 0.11 0.13 0.16 0.11 0.09 | 1.8 2.4 2.2 1.8 2.1 | 61 19 33 64 56 | 3.2 1.0 0.8 1.8 3.3 | 1 1 1 0 1 | 2/5 |
+| d.6 | 6 7 7 7 4 | 53 52 48 49 53 | 1.32 1.24 1.27 1.29 1.30 | 0.10 0.12 0.15 0.10 0.08 | 1.7 2.3 2.4 1.7 2.0 | 77 23 52 66 67 | 3.9 1.2 1.7 2.2 3.3 | 0 1 1 0 1 | 2/5 |
+| d.75 | 6 7 7 5 6 | 50 52 47 54 47 | 1.32 1.26 1.29 1.30 1.30 | 0.05 0.11 0.15 0.06 0.10 | 1.9 2.7 2.3 1.9 2.2 | 68 37 72 82 79 | 3.2 1.8 2.9 4.9 4.2 | 1 1 1 0 1 | 1/5 |
+| d.45-i.35 (f6) | 6 7 7 5 4 | 56 52 49 52 55 | 1.28 1.23 1.28 1.28 1.30 | 0.12 0.15 0.13 0.09 0.08 | 2.0 2.3 2.2 1.9 2.1 | 82 40 45 36 44 | 3.1 1.9 1.2 1.3 2.8 | 1 1 1 0 1 | 1/5 |
+| d.45-i.6-f3 | 5 7 7 6 4 | 55 53 48 50 56 | 1.26 1.27 1.28 1.27 1.30 | 0.11 0.10 0.14 0.11 0.09 | 1.8 2.3 2.2 2.1 2.4 | 57 31 41 36 51 | 2.9 1.9 1.9 2.6 3.5 | 1 1 1 0 1 | 3/5 |
+| d.45-i.9-f2.5 | 5 7 7 7 6 | 55 55 48 51 57 | 1.25 1.26 1.27 1.26 1.30 | 0.09 0.08 0.14 0.11 0.07 | 1.8 2.3 2.2 1.6 2.3 | 38 23 30 37 37 | 1.4 1.3 0.9 1.2 1.6 | 1 1 1 0 1 | 0/5 |
+| d.55-i.6-f3 | 7 7 7 6 5 | 54 52 47 50 54 | 1.29 1.27 1.28 1.29 1.30 | 0.09 0.10 0.14 0.08 0.09 | 1.8 2.3 2.2 2.1 2.2 | 64 41 56 52 66 | 2.7 2.2 2.0 2.8 3.6 | 1 1 1 0 1 | 4/5 |
+| d.6-i.6-f3 | 6 7 7 6 6 | 53 52 47 50 54 | 1.30 1.27 1.28 1.28 1.30 | 0.09 0.09 0.14 0.08 0.09 | 1.8 2.2 2.3 2.1 2.3 | 78 41 65 56 57 | 3.3 2.4 2.1 3.4 3.2 | 1 1 1 0 1 | 4/5 |
+| **H2r3: d.65-i.6-f3** | 6 7 7 7 7 | 53 52 47 49 53 | 1.30 1.27 1.28 1.29 1.30 | 0.08 0.08 0.13 0.07 0.09 | 1.8 2.2 2.3 2.2 2.2 | 68 40 65 54 56 | 3.4 2.2 2.3 2.8 2.8 | 1 1 1 0 1 | **5/5** |
+
+- Land is 29 % on every seed. Every row of `raw/scores-round3.json` (17 configs) reproduces on 79c9d663 (`S92_ISL` defaults to 0, no island term).
+- H2r3's environment: `S92_CANDIDATE=H S92_SIZES=0.50,0.26,0.10,0.06,0.03,0.02,0.01,0.01 S92_LOBES=3 S92_TURN=1.2 S92_SPACING=0.6 S92_K=0.8 S92_AMAX=2.5 S92_GAIN=0.72 S92_RETRY=12 S92_DEEP=0.65 S92_ISL=0.6 S92_ISLF=3`.
+
+## 3D noise
+- Every continent term is 3D value noise on the direction: `global::fbm` calls `height::layer_noise` (crates/generators/src/height.rs:51), trilinear on a Cartesian lattice at `p · freq`; the warp, the shape fBm, the craton weights and the island term all take the 3D direction. No term reads latitude or longitude.
+- `images/polar-H2r3.png` shows seeds 1, 4 and 5 in azimuthal-equidistant views to 40° from each pole beside the equirectangular map: coasts keep their character at the poles; the edge streaks of the equirectangular map are its projection.
+- Some island fields show parallel striations (seed 4's south view, seed 1's west coast): the domain warp (0.6) stretches the high-frequency noise along its gradient. It is direction-based and appears at all latitudes; a smaller warp on the island term would reduce it.
+
+## Findings (round 3)
+1. H2r3 passes S1-S3, S9, S10, S11 and the polar rule on all 5 seeds.
+2. Islands need both a higher fBm floor (0.65) and an island-scale term at Earth's island size (base frequency 3); either alone is seed-dependent.
+3. The islands cost S1 margin: S1 is 7 (band edge) on four seeds, as large islands near 1 Mkm² count as masses.
+
+## Visuals (round 3)
+- `images/land-sea-A-H2-H2r3.png`: seeds 1-5 (rows) for A-f1.0-g.60, H2 (round 2) and H2r3 (columns).
+- `images/polar-H2r3.png`: polar views of H2r3, seeds 1, 4, 5.
+- `images/H2-d.65-i.6-f3/land-sea-seed-N.png`: H2r3 at 1440 × 720.
+
+## Limits (round 3)
+- Margins are thin: S1 7 on seeds 2-5, S11 68 on seed 1 (band 35-70), S11 share 2.2 % on seed 2.
+- The S11 band and the polar rule rest on Earth's single sample (Earth fails the polar rule).
+- Warp striations in the island fields (above).
+
+# H2r3 seeds 1-24 (inbox #67)
+Owner request, 2026-11-02: more H2r3 seeds to pick a favourite (seed 4 is liked but has no polar land). Images only; spike code 79c9d663, H2r3's environment as in round 3.
+
+| Sheet | Content |
+|---|---|
+| `images/seeds/H2r3-seeds-land-sea.png` | land-sea, 4 × 6, seed label, PASS or the failed checks, polar mass count and island count |
+| `images/seeds/H2r3-seeds-elevation.png` | the preview's elevation (hillshade) map, same layout |
+| `images/seeds/H2r3-seeds-polar.png` | north and south azimuthal views to 40° from each pole per seed, with the polar mass count |
+
+- Scores: `raw/scores-H2r3-seeds-1-24.json`; sheets by `proto/s92_seedsheets.py` (palette PNGs, each under 1 MB).
+- 16 of 24 seeds pass S1-S3, S9-S11 and the polar rule: 1-6, 8, 10, 13-16, 19, 21, 23, 24.
+- Fails, all near the band edges:
+
+| Seed | Failed checks |
+|---|---|
+| 7 | S1 8; S11 100 islands (4.7 %) |
+| 9 | S11 71 islands |
+| 11 | S1 8 |
+| 12 | S1 9 |
+| 17 | S10 1.4 |
+| 18 | S11 87 islands |
+| 20 | S1 8 |
+| 22 | S11 75 islands |
+
+- Polar land (a mass of at least 1 Mkm² centred poleward of 70°) on 10 seeds: 1, 2, 3, 5, 8, 12, 15, 18, 22, 23; passing seeds with polar land: 1, 2, 3, 5, 8, 15, 23.
+- The mountain belts in the elevation sheet are today's belt stage (round 1 belts are explorer's); they do not follow the new coasts yet.
+- Earth-likeness is one family; other layouts (Pangaea-like and others) would be another generator or parameter set (owner, later).
