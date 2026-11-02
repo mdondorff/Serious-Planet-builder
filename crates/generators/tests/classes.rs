@@ -112,10 +112,10 @@ fn a_core_over_high_ground_is_high_mountains_and_a_plateau_field_is_plateau() {
         plate: 0,
     };
     let core = MaskTerms { core: 1.0, ..none };
-    let w = quantize_weights(&class_weights(&core, 3500.0, 0.0));
+    let w = quantize_weights(&class_weights(&core, 5500.0, 0.0));
     assert_eq!(w[HIGH_MOUNTAINS], 255, "{w:?}");
-    let w = quantize_weights(&class_weights(&core, 1200.0, 0.0));
-    assert_eq!(w[MOUNTAINS], 255, "a core below 2 km is plain mountains: {w:?}");
+    let w = quantize_weights(&class_weights(&core, 800.0, 0.0));
+    assert_eq!(w[MOUNTAINS], 255, "a core below 1 km is plain mountains: {w:?}");
     let plateau = MaskTerms { plateau_field: 1.0, ..none };
     assert_eq!(quantize_weights(&class_weights(&plateau, 900.0, 0.0))[PLATEAU], 255);
     let w = quantize_weights(&class_weights(&none, 100.0, 1.0));
@@ -211,7 +211,12 @@ fn the_mask_has_no_jump_where_the_nearest_or_the_second_plate_changes() {
                 let (mut lo, mut hi) = (f64::from(s - 1) / f64::from(n), t1);
                 for _ in 0..50 {
                     let mid = 0.5 * (lo + hi);
-                    if diff(&terms(at(lo)), &terms(at(mid))) > diff(&terms(at(mid)), &terms(at(hi))) {
+                    let (left, right) = (diff(&terms(at(lo)), &terms(at(mid))), diff(&terms(at(mid)), &terms(at(hi))));
+                    // A smooth change has halved below the jump limit's tenth within a few steps (a jump of 1e-4 would show in one half): stop there.
+                    if left.max(right) < 1e-5 {
+                        break;
+                    }
+                    if left > right {
                         hi = mid;
                     } else {
                         lo = mid;
@@ -244,12 +249,12 @@ fn the_class_source_version_goes_with_its_output() {
     }
     assert_eq!(
         (CLASS_SOURCE_VERSION, hash),
-        (3, FINGERPRINT),
+        (4, FINGERPRINT),
         "the default source's output changed: bump CLASS_SOURCE_VERSION and record the new fingerprint"
     );
 }
 
-const FINGERPRINT: u64 = 11776409573502279601;
+const FINGERPRINT: u64 = 8071739336690852680;
 
 // spec: GEN-103
 #[test]
@@ -331,4 +336,48 @@ fn the_mask_has_no_step_at_the_latitudes_where_a_tangent_basis_would_change() {
             }
         }
     }
+}
+
+// spec: GEN-094
+#[test]
+fn no_belt_stands_in_the_sea_and_the_plates_of_a_retry_are_the_same_on_every_build() {
+    let source = ClassSource::new(3);
+    let golden = core::f64::consts::PI * (3.0 - libm::sqrt(5.0));
+    let n = 6000;
+    let (mut sea, mut belts_on_land) = (0, 0);
+    for i in 0..n {
+        let z = 1.0 - 2.0 * (f64::from(i) + 0.5) / f64::from(n);
+        let r = libm::sqrt((1.0 - z * z).max(0.0));
+        let d = Vec3::new(r * libm::cos(golden * f64::from(i)), r * libm::sin(golden * f64::from(i)), z);
+        let p = source.eval(d);
+        if p.land_depth <= 0.0 {
+            sea += 1;
+            assert_eq!((p.terms.core, p.terms.flank, p.terms.old_margin), (0.0, 0.0, 0.0), "a belt term over the sea at {d:?}");
+        } else if p.terms.core > 0.0 {
+            belts_on_land += 1;
+        }
+    }
+    assert!(sea > 3000, "most of the sphere is sea: {sea}");
+    assert!(belts_on_land > 50, "the retried plates put belts on the land: {belts_on_land} of the land points");
+}
+
+// spec: GEN-095
+#[test]
+fn the_flank_of_a_belt_is_mountains_before_its_core_is_high_enough_to_count() {
+    let none = MaskTerms {
+        margin_km: 500.0,
+        convergence: 0.0,
+        core: 0.0,
+        flank: 0.0,
+        old_margin: 0.0,
+        back_arc: 0.0,
+        plateau_field: 0.0,
+        strike: 1.0,
+        plate: 0,
+    };
+    let on_flank = MaskTerms { flank: 0.5, ..none };
+    let w = class_weights(&on_flank, 400.0, 0.0);
+    assert!(w[MOUNTAINS] > 0.3 && w[MOUNTAINS] < 1.0, "a flank of 0.5 is partly mountains: {w:?}");
+    let faint = class_weights(&MaskTerms { flank: 0.05, ..none }, 400.0, 0.0);
+    assert!(faint[MOUNTAINS] < w[MOUNTAINS] && faint[MOUNTAINS] < 0.1, "the membership rises smoothly from the belt's edge: {faint:?}");
 }

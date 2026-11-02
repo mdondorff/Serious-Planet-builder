@@ -8,7 +8,7 @@ use planet_frame::look::{self, LitPlan};
 use planet_frame::pool::compact_format_pool_with;
 use planet_frame::{plan_terrain, scripted_views, LodParams, TerrainPlan, TerrainRequest, TerrainView};
 use planet_generators::compact::compact_tile_field;
-use planet_generators::global::sample;
+use planet_generators::global::climate_from_elevation;
 use planet_generators::height::Reference;
 use planet_render::{AdapterPolicy, GpuContext, TerrainRenderer};
 use planet_streaming::PoolConfig;
@@ -113,9 +113,10 @@ fn the_climate_views_show_the_climate_field_of_the_world() {
                 }
                 let (x, y) = ((i as u32) % SIZE.0, (i as u32) / SIZE.0);
                 let Some(d) = hit_direction(&cam, SIZE, x, y, R) else { continue };
-                // The world's climate at the point the pixel sees: the analytic function the reference field's tiles are sampled from.
-                let s = sample(1, planet_core::Vec3::new(d[0], d[1], d[2]));
-                let want = climate_view_colour(view, f64::from(s.temperature_c), f64::from(s.precipitation_mm));
+                // The field's climate at the point the pixel sees: the climate formula over the reference field's own height there (GEN-021), what its tiles are sampled from.
+                let at = planet_core::Vec3::new(d[0], d[1], d[2]);
+                let (temperature, precipitation) = climate_from_elevation(1, at, planet_generators::height::height_at(1, at), 0.0);
+                let want = climate_view_colour(view, f64::from(temperature), f64::from(precipitation));
                 let got = colour_of(px);
                 let err = (0..3).map(|c| (got[c] - want[c]).abs()).fold(0.0, f64::max);
                 sum += err;

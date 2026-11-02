@@ -92,14 +92,14 @@ mod tests {
         assert_eq!(get("base"), "b00fa2b4b0f9accc87be74b4dd9d40ca");
         assert_eq!(get("height"), "340480159ae2ca791db08d1cae1232ce");
         // MESH_VERSION 10, driver block, ADR 0076/GEN-071 (was 4843c471858a5aff0c6741d4cd9a60c0 under 9).
-        assert_eq!(get("mesh"), "60231b614dd8032fd7cb54b54bf35246");
+        assert_eq!(get("mesh"), "4edba8989effcc04639e468142bd8803");
         assert_eq!(get("node"), "dd934e9e858a828bb73c45e8a4eb4d45");
         assert_eq!(get("body"), "91f0cebc78907779e2f87196650d468e");
         assert_eq!(get("emptyquery"), "a97668a9d9614a3f4a73f2fceae97219");
-        assert_eq!(get("stagekey32"), "9f1fce5d0a4efe935a8fda701db5318a");
-        assert_eq!(get("blockkey"), "bc2026919007000277f1e34774425262");
+        assert_eq!(get("stagekey32"), "d8048e5e6b2d07025d50d7e0047789a0");
+        assert_eq!(get("blockkey"), "778be6dbc932ea82b2f6d9bc840970c2");
         assert_eq!(get("nodesetid"), "92572f1974620d913454c89a22aca7be");
-        assert_eq!(get("oceankey"), "a36a2a536f7b47f4b734fb245a1b8c7e");
+        assert_eq!(get("oceankey"), "284457b129f0ce970f3afe6b48670611");
         assert_eq!(m.lines().filter(|l| l.starts_with("persistent ")).count(), 10);
         assert!(m.starts_with(&planet_generators::manifest::determinism_manifest()), "the generators' manifest comes first, unchanged");
         let mut keys: Vec<&str> = m.lines().map(|l| l.rsplit_once(' ').unwrap().0).collect();

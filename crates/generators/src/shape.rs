@@ -258,3 +258,161 @@ pub fn shape_metrics(g: &Grid) -> ShapeMetrics {
         enclosed_mkm2,
     }
 }
+
+/// The continent-stage metrics of SPIKE-92 (S9 to S11 and the polar rule, TEST-088) of a land mask.
+pub struct ContinentMetrics {
+    /// S9: the area-weighted median over the masses of at least 1 Mkm^2 of the compactness 4 pi A / P^2, P the contour length of the mass's land fraction on a 1 degree grid.
+    pub compactness: f64,
+    /// S10: the median over those masses of sqrt(l1 / l2), the eigenvalues of the area-weighted second moment in the tangent plane at the mass's mean direction.
+    pub elongation: f64,
+    /// S11: the number of land masses of 10^4 to 10^6 km^2, and their share of all land.
+    pub islands: usize,
+    pub island_share: f64,
+    /// The masses of at least 1 Mkm^2 whose area-weighted mean direction is poleward of 70 degrees.
+    pub polar_masses: usize,
+}
+
+/// The contour length in km of `f` (rows x cols, row 0 north, one degree cells, one row of padding above and below) at level 0.5, by marching squares: the sum over the cells
+/// of the length of the segments between the linearly interpolated edge crossings, east-west steps scaled by the cosine of the segment's latitude.
+fn contour_km(f: &[f64], rows: usize, cols: usize) -> f64 {
+    let d = EARTH_RADIUS_M / 1000.0 * core::f64::consts::PI / 180.0;
+    let at = |i: usize, j: usize| f[i * cols + j];
+    let mut total = 0.0;
+    for i in 0..rows - 1 {
+        for j in 0..cols - 1 {
+            let (a, b, c, e) = (at(i, j), at(i, j + 1), at(i + 1, j + 1), at(i + 1, j));
+            let case = usize::from(a >= 0.5) | usize::from(b >= 0.5) << 1 | usize::from(c >= 0.5) << 2 | usize::from(e >= 0.5) << 3;
+            // Crossing points (row, column) on the edges 0 top, 1 right, 2 bottom, 3 left.
+            let point = |edge: usize| -> (f64, f64) {
+                let t = |p: f64, q: f64| (0.5 - p) / (q - p);
+                match edge {
+                    0 => (i as f64, j as f64 + t(a, b)),
+                    1 => (i as f64 + t(b, c), j as f64 + 1.0),
+                    2 => (i as f64 + 1.0, j as f64 + t(e, c)),
+                    _ => (i as f64 + t(a, e), j as f64),
+                }
+            };
+            let centre_in = 0.25 * (a + b + c + e) >= 0.5;
+            let segments: &[(usize, usize)] = match case {
+                1 | 14 => &[(3, 0)],
+                2 | 13 => &[(0, 1)],
+                3 | 12 => &[(3, 1)],
+                4 | 11 => &[(1, 2)],
+                5 if centre_in => &[(0, 1), (2, 3)],
+                5 => &[(3, 0), (1, 2)],
+                6 | 9 => &[(0, 2)],
+                7 | 8 => &[(2, 3)],
+                10 if centre_in => &[(3, 0), (1, 2)],
+                10 => &[(0, 1), (2, 3)],
+                _ => &[],
+            };
+            for &(p, q) in segments {
+                let ((y1, x1), (y2, x2)) = (point(p), point(q));
+                // Padded row y is row y - 1 of the grid; the latitude of the segment's middle.
+                let lat = (90.0 - ((0.5 * (y1 + y2) - 1.0) + 0.5)).to_radians();
+                total += d * libm::hypot(y2 - y1, (x2 - x1) * libm::cos(lat));
+            }
+        }
+    }
+    total
+}
+
+/// S9 to S11 and the polar rule of `land` on a `width x height` equirectangular grid (the longitude wrapping). The perimeter of each mass is taken on a 360 x 180 grid of its land fractions
+/// (a pixel counts for the one degree cell it lies in), cut at the meridian where the mass is thinnest.
+pub fn continent_metrics(land: &[bool], width: usize, height: usize) -> ContinentMetrics {
+    let (w, h) = (width, height);
+    let (label, n) = components(land, w, h, true);
+    let mut areas = vec![0.0f64; n + 1];
+    for i in 0..w * h {
+        areas[label[i] as usize] += cell_km2(i / w, w, h);
+    }
+    let total_land: f64 = areas[1..].iter().sum();
+    let bin = |i: usize| ((i / w) * 180 / h) * 360 + (i % w) * 360 / w;
+    let mut per_bin = vec![0.0f64; 360 * 180];
+    for i in 0..w * h {
+        per_bin[bin(i)] += 1.0;
+    }
+    let (mut s9, mut s10): (Vec<(f64, f64)>, Vec<f64>) = (Vec::new(), Vec::new());
+    let (mut islands, mut island_area, mut polar) = (0usize, 0.0, 0usize);
+    for (m, &a) in areas.iter().enumerate().skip(1) {
+        if (1e4..1e6).contains(&a) {
+            islands += 1;
+            island_area += a;
+        }
+        if a < 1e6 {
+            continue;
+        }
+        let dirs: Vec<(usize, Vec3, f64)> = (0..w * h)
+            .filter(|&i| label[i] as usize == m)
+            .map(|i| {
+                let lon = -core::f64::consts::PI + ((i % w) as f64 + 0.5) / w as f64 * 2.0 * core::f64::consts::PI;
+                (i, Vec3::from_lat_lon(latitude(i / w, h), lon), cell_km2(i / w, w, h))
+            })
+            .collect();
+        // S9: the land fraction of the mass on the one degree grid, cut at the emptiest meridian, padded with sea.
+        let mut frac = vec![0.0f64; 360 * 180];
+        for (i, _, _) in &dirs {
+            frac[bin(*i)] += 1.0;
+        }
+        for (f, t) in frac.iter_mut().zip(&per_bin) {
+            *f = if *t > 0.0 { *f / *t } else { 0.0 };
+        }
+        let column = |c: usize| (0..180).map(|r| frac[r * 360 + c]).sum::<f64>();
+        let cut = (0..360).fold(0, |best, c| if column(c) < column(best) { c } else { best });
+        let (rows, cols) = (182, 362);
+        let mut padded = vec![0.0f64; rows * cols];
+        for r in 0..180 {
+            for c in 0..360 {
+                padded[(r + 1) * cols + c + 1] = frac[r * 360 + (c + cut) % 360];
+            }
+        }
+        let p = contour_km(&padded, rows, cols);
+        s9.push((4.0 * core::f64::consts::PI * a / (p * p), a));
+        // S10 and the polar rule: the second moment in the tangent plane at the area-weighted mean direction.
+        let sum = dirs.iter().fold(Vec3::new(0.0, 0.0, 0.0), |s, (_, v, wgt)| s + *v * *wgt);
+        let nrm = sum.normalized();
+        if libm::asin(nrm.z.clamp(-1.0, 1.0)).to_degrees().abs() >= 70.0 {
+            polar += 1;
+        }
+        let helper = if nrm.z.abs() < 0.9 { Vec3::new(0.0, 0.0, 1.0) } else { Vec3::new(1.0, 0.0, 0.0) };
+        let e1 = nrm.cross(helper).normalized();
+        let e2 = nrm.cross(e1);
+        let wsum: f64 = dirs.iter().map(|d| d.2).sum();
+        let (mu, mt) =
+            (dirs.iter().map(|d| d.2 * d.1.dot(e1)).sum::<f64>() / wsum, dirs.iter().map(|d| d.2 * d.1.dot(e2)).sum::<f64>() / wsum);
+        let (mut cuu, mut ctt, mut cut_) = (0.0, 0.0, 0.0);
+        for (_, v, wgt) in &dirs {
+            let (u, t) = (v.dot(e1) - mu, v.dot(e2) - mt);
+            cuu += wgt * u * u;
+            ctt += wgt * t * t;
+            cut_ += wgt * u * t;
+        }
+        let (cuu, ctt, cut_) = (cuu / wsum, ctt / wsum, cut_ / wsum);
+        let mean = 0.5 * (cuu + ctt);
+        let disc = libm::sqrt((0.5 * (cuu - ctt)) * (0.5 * (cuu - ctt)) + cut_ * cut_);
+        s10.push(libm::sqrt((mean + disc) / (mean - disc).max(1e-300)));
+    }
+    s9.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let half = 0.5 * s9.iter().map(|p| p.1).sum::<f64>();
+    let mut acc = 0.0;
+    let compactness = s9
+        .iter()
+        .find(|p| {
+            acc += p.1;
+            acc >= half
+        })
+        .map_or(0.0, |p| p.0);
+    s10.sort_by(f64::total_cmp);
+    let elongation = match s10.len() {
+        0 => 0.0,
+        k if k % 2 == 1 => s10[k / 2],
+        k => 0.5 * (s10[k / 2 - 1] + s10[k / 2]),
+    };
+    ContinentMetrics {
+        compactness,
+        elongation,
+        islands,
+        island_share: if total_land > 0.0 { island_area / total_land } else { 0.0 },
+        polar_masses: polar,
+    }
+}

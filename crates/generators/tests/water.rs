@@ -43,7 +43,7 @@ fn the_sea_is_ocean_connected_low_terrain_and_everything_else_has_no_water() {
     let sea = SeaProducer::new(&ocean, SeaParams::EARTH);
     let field = WaterField::new(&TangentWarp, &src, vec![&sea]);
     let mut counts = [0usize; 4]; // wet, dry sea (a basin), land, edge cases
-    for d in directions(6000) {
+    for d in directions(9000) {
         let w = field.water_at(d).unwrap();
         let ground = planet_generators::global::read_direction(&src, &TangentWarp, d).unwrap();
         let low = f64::from(ground.continent) <= SEA_LEVEL_C;
@@ -202,7 +202,11 @@ fn a_synthetic_lake_goes_through_the_same_path_as_the_sea() {
         .flat_map(|f| (8..RES - 8).flat_map(move |j| (8..RES - 8).map(move |i| (f, i, j))))
         .find(|&(f, i, j)| {
             let s = grid.at(Face(f), i, j);
-            s.continent > 0.5 && (200.0..800.0).contains(&s.elevation_m)
+            // A highland with a slope: some neighbour two cells away stands over the lake's level (the lake does not cover its whole footprint).
+            let up = |di: i64, dj: i64| grid.at(Face(f), (i as i64 + di) as u32, (j as i64 + dj) as u32).elevation_m;
+            s.continent > 0.5
+                && (200.0..800.0).contains(&s.elevation_m)
+                && [(2, 0), (-2, 0), (0, 2), (0, -2)].iter().any(|&(di, dj)| up(di, dj) > s.elevation_m + 450.0)
         })
         .expect("the bake has a highland");
     let s = |k: u32| 2.0 * f64::from(k) / f64::from(RES) - 1.0;
@@ -332,8 +336,8 @@ fn known_answers_of_the_field_are_pinned() {
     assert_eq!((wet, h), (KNOWN_WET, KNOWN_HASH));
 }
 
-const KNOWN_WET: usize = 3068;
-const KNOWN_HASH: u64 = 0xc93a_0500_e6ca_f961;
+const KNOWN_WET: usize = 3415;
+const KNOWN_HASH: u64 = 0xe12a_fade_753c_8e07;
 
 // spec: GEN-023
 #[test]
@@ -364,8 +368,8 @@ fn directions_on_face_edges_and_cube_corners_are_pinned_and_agree_with_the_verte
     assert_eq!((wet, h), (KNOWN_EDGE_WET, KNOWN_EDGE_HASH));
 }
 
-const KNOWN_EDGE_WET: usize = 42;
-const KNOWN_EDGE_HASH: u64 = 17169129414116492182;
+const KNOWN_EDGE_WET: usize = 39;
+const KNOWN_EDGE_HASH: u64 = 16716836204161442492;
 
 // spec: ATMO-019
 #[test]
