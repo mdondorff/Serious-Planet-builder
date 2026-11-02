@@ -67,6 +67,10 @@ pub struct FrameRecord {
     pub tile_misses: u64,
     pub band_queries: u64,
     pub lit_plan_ms: f64,
+    /// Finished tiles that did not fit the frame's upload budget and wait for the next frame (the cap was reached), and the node-record
+    /// bytes of the frame's plan (an own line against CON-21's 2 ms, STRM-006): recorded only, they say whether a slow frame was a capped one.
+    pub deferred: usize,
+    pub node_bytes: u64,
 }
 
 /// How a lag rule counts towards the verdict (the owner's decision of 2026-10-15, ADR 0032).
@@ -508,12 +512,12 @@ pub fn column_metrics(frames: &[FrameRecord]) -> Vec<(String, Stats)> {
 /// The per-frame log as text (one line per frame): the columns of TEST-012 and the counts of the frame.
 pub fn frames_text(frames: &[FrameRecord]) -> String {
     let mut s = String::from(
-        "# frame plan_ms scheduler_ms upload_ms record_ms gpu_ms wall_ms lag uncovered blank upload_bytes resident in_flight queued dispatched uploaded cancelled degraded allocated_bytes upload_calls queries tile_misses band_queries lit_plan_ms\n",
+        "# frame plan_ms scheduler_ms upload_ms record_ms gpu_ms wall_ms lag uncovered blank upload_bytes resident in_flight queued dispatched uploaded cancelled degraded allocated_bytes upload_calls queries tile_misses band_queries lit_plan_ms deferred node_bytes\n",
     );
     for (k, f) in frames.iter().enumerate() {
         let opt = |v: Option<f64>| v.map_or("-".to_string(), |v| format!("{v:.3}"));
         s.push_str(&format!(
-            "{k} {:.3} {:.3} {:.3} {:.3} {} {:.3} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {:.3}\n",
+            "{k} {:.3} {:.3} {:.3} {:.3} {} {:.3} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {:.3} {} {}\n",
             f.plan_ms,
             f.scheduler_ms,
             f.upload_ms,
@@ -536,7 +540,9 @@ pub fn frames_text(frames: &[FrameRecord]) -> String {
             f.queries,
             f.tile_misses,
             f.band_queries,
-            f.lit_plan_ms
+            f.lit_plan_ms,
+            f.deferred,
+            f.node_bytes
         ));
     }
     s

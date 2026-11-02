@@ -205,8 +205,8 @@ pub fn parse_frames(text: &str) -> Result<Vec<FrameRecord>, String> {
             continue;
         }
         let t: Vec<&str> = line.split_whitespace().collect();
-        if t.len() != 24 {
-            return Err(format!("frames.txt line {}: {} columns, expected 24", n + 2, t.len()));
+        if t.len() != 26 {
+            return Err(format!("frames.txt line {}: {} columns, expected 26", n + 2, t.len()));
         }
         let bad = |what: &str| format!("frames.txt line {}: `{}` is not a {what}", n + 2, line);
         let f = |i: usize| t[i].parse::<f64>().map_err(|_| bad("number"));
@@ -239,6 +239,8 @@ pub fn parse_frames(text: &str) -> Result<Vec<FrameRecord>, String> {
             tile_misses: u(21)?,
             band_queries: u(22)?,
             lit_plan_ms: f(23)?,
+            deferred: u(24)? as usize,
+            node_bytes: u(25)?,
             ..FrameRecord::default()
         });
     }
@@ -1189,6 +1191,7 @@ mod tests {
         fr[2].uncovered_nodes = 4;
         fr[3].upload_calls = 17;
         (fr[4].queries, fr[4].tile_misses, fr[4].band_queries, fr[4].lit_plan_ms) = (1089, 2, 3400, 12.5);
+        (fr[6].deferred, fr[6].node_bytes, fr[6].upload_bytes, fr[6].uploaded) = (37, 4_096, 1 << 20, 110);
         let back = parse_frames(&frames_text(&fr)).unwrap();
         assert_eq!(back.len(), fr.len());
         assert_eq!((back[0].gpu_ms, back[1].lag, back[2].uncovered_nodes, back[5].allocated_bytes), (Some(1.25), None, 4, 1 << 30));
@@ -1199,12 +1202,19 @@ mod tests {
             "the lit path's water counters are the last four columns (recorded only)"
         );
         assert!(
-            frames_text(&[]).trim_end().ends_with("allocated_bytes upload_calls queries tile_misses band_queries lit_plan_ms"),
+            frames_text(&[])
+                .trim_end()
+                .ends_with("allocated_bytes upload_calls queries tile_misses band_queries lit_plan_ms deferred node_bytes"),
             "the header names them (TEST-012)"
+        );
+        assert_eq!(
+            (back[6].deferred, back[6].node_bytes, back[6].upload_bytes, back[6].uploaded),
+            (37, 4_096, 1 << 20, 110),
+            "the upload columns: bytes and tiles written, tiles that waited for the budget, node-record bytes"
         );
         // A log from before the column (19 columns, the old header) is refused as old-format, never read with a zero.
         let old = frames_text(&fr).replace(
-            " upload_calls queries tile_misses band_queries lit_plan_ms
+            " upload_calls queries tile_misses band_queries lit_plan_ms deferred node_bytes
 ",
             "
 ",
