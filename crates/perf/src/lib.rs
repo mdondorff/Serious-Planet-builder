@@ -191,15 +191,24 @@ pub struct GenSettings {
     pub reserve: Option<usize>,
     /// The workers ran at below normal OS priority (ADR 0046); a log that records no priority ran at normal.
     pub below_normal: bool,
+    /// The machine's terrain share when a flag overrode it (STRM-020): such a run's frame verdicts are not at the BUDG-003 share.
+    pub override_of_share: Option<usize>,
+}
+
+/// The console line of a run whose pool a flag sized instead of the terrain share (STRM-020): its frame verdicts are not at the BUDG-003
+/// share. `None` for a run at the share.
+pub fn pool_override_line(g: &GenSettings) -> Option<String> {
+    g.override_of_share.map(|s| format!("pool: override {} (share {s}): the frame verdicts are not at the BUDG-003 share", g.workers))
 }
 
 impl GenSettings {
     /// The settings as one line (`workers 18, ahead 18, reserve 2`), what the comparison prints and compares.
     pub fn describe(&self) -> String {
         let priority = if self.below_normal { ", below-normal priority" } else { "" };
+        let pool = self.override_of_share.map_or(String::new(), |s| format!(", pool: override {} (share {s})", self.workers));
         match self.reserve {
-            Some(r) => format!("workers {}, ahead {}, reserve {r}{priority}", self.workers, self.ahead),
-            None => format!("workers {}, ahead {}{priority}", self.workers, self.ahead),
+            Some(r) => format!("workers {}, ahead {}, reserve {r}{priority}{pool}", self.workers, self.ahead),
+            None => format!("workers {}, ahead {}{priority}{pool}", self.workers, self.ahead),
         }
     }
 
@@ -207,11 +216,12 @@ impl GenSettings {
         match g {
             None => "null".into(),
             Some(g) => format!(
-                "{{\"workers\":{},\"ahead\":{},\"reserve\":{},\"priority\":\"{}\"}}",
+                "{{\"workers\":{},\"ahead\":{},\"reserve\":{},\"priority\":\"{}\",\"override_of_share\":{}}}",
                 g.workers,
                 g.ahead,
                 g.reserve.map_or("null".to_string(), |r| r.to_string()),
-                if g.below_normal { "below-normal" } else { "normal" }
+                if g.below_normal { "below-normal" } else { "normal" },
+                g.override_of_share.map_or("null".to_string(), |s| s.to_string())
             ),
         }
     }
@@ -559,6 +569,20 @@ pub fn report_json_full(
 
 #[cfg(test)]
 mod tests {
+
+    // spec: STRM-020
+    #[test]
+    fn a_pool_that_a_flag_sized_is_marked_and_a_pool_at_the_share_is_not() {
+        let at_share = GenSettings { workers: 6, ahead: 6, reserve: None, below_normal: true, override_of_share: None };
+        assert_eq!(pool_override_line(&at_share), None);
+        assert_eq!(at_share.describe(), "workers 6, ahead 6, below-normal priority");
+        let wide = GenSettings { workers: 18, ahead: 18, reserve: Some(2), override_of_share: Some(6), ..at_share };
+        assert_eq!(
+            pool_override_line(&wide).as_deref(),
+            Some("pool: override 18 (share 6): the frame verdicts are not at the BUDG-003 share")
+        );
+        assert_eq!(wide.describe(), "workers 18, ahead 18, reserve 2, below-normal priority, pool: override 18 (share 6)");
+    }
     use super::*;
 
     fn gpu(name: &str, kind: DeviceKind) -> AdapterFacts {

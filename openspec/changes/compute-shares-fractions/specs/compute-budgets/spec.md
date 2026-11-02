@@ -1,6 +1,6 @@
 ## MODIFIED Requirements
 ### Requirement: BUDG-003 Core shares
-Background work SHALL run in shares of the background capacity `B = max(P − 2, 1)`, where `P` is the machine's logical threads on performance cores, SMT siblings counted (BUDG-013); the 2 are the frame's main and render threads. Each share SHALL be `clamp(floor(pct × B / 100), min, max)` in integer arithmetic, with the percentage, minimum and maximum of the fraction table. If the shares sum to more than `B`, terrain SHALL give up threads down to its minimum; a machine whose minimums still exceed `B` runs at the minimums, oversubscribed. A share is a ceiling on threads busy at once, summed over the subsystem's pools.
+Work running beside a frame SHALL run in shares of the background capacity `B = max(P − 2, 1)`, where `P` is the machine's logical threads on performance cores, SMT siblings counted (BUDG-013); the 2 are the frame's main and render threads. Each share SHALL be `clamp(floor(pct × B / 100), min, max)` in integer arithmetic, with the percentage, minimum and maximum of the fraction table. If the shares sum to more than `B`, terrain SHALL give up threads down to its minimum; a machine whose minimums still exceed `B` runs at the minimums, oversubscribed. A share is a ceiling on threads busy at once, summed over the subsystem's pools; offline tools and post-passes size their own pools.
 
 Verify: A, C
 Status: active

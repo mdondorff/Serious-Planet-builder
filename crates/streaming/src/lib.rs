@@ -762,18 +762,21 @@ pub struct GenWorkers {
     /// The priority the workers run at (ADR 0046; below normal unless `--gen-priority normal`): changes when they run, never what
     /// they compute.
     pub priority: Priority,
+    /// Whether the size is the machine's terrain share (BUDG-003), which the rig then holds as its ceiling; an explicit size
+    /// (`--gen-workers`, `--gen-reserve`) overrides the share, uncapped (STRM-020).
+    pub from_share: bool,
 }
 
 impl GenWorkers {
     /// `workers` threads and as many jobs queued behind them.
     pub fn new(workers: usize) -> Self {
         let workers = workers.max(1);
-        Self { workers, ahead: workers, priority: Priority::BelowNormal }
+        Self { workers, ahead: workers, priority: Priority::BelowNormal, from_share: false }
     }
 
     /// The default: the machine's terrain share (BUDG-003, ADR 0092), a fraction of its performance threads less the frame's two.
     pub fn machine() -> Self {
-        Self::new(crate::shares::Shares::machine().terrain)
+        Self { from_share: true, ..Self::new(crate::shares::Shares::machine().terrain) }
     }
 
     /// One worker per hardware thread of the machine less `reserve` cores (`--gen-reserve N`).

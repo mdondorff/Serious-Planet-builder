@@ -1027,6 +1027,10 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
     } else {
         crate::session_verdict_line_for(out, &verdict, false)?;
     }
+    // STRM-020: a flag that overrode the terrain share marks the run's frame verdicts.
+    if let Some(line) = planet_perf::pool_override_line(&gen_settings(o)) {
+        writeln!(out, "{line}").map_err(err)?;
+    }
     let protocol = Protocol {
         warmup_frames: 0,
         measured_frames: 0,
@@ -1136,6 +1140,7 @@ fn gen_settings(o: &Options) -> planet_perf::GenSettings {
         ahead: g.ahead,
         reserve: o.gen_reserve_used(),
         below_normal: g.priority == planet_streaming::Priority::BelowNormal,
+        override_of_share: (!g.from_share).then(|| planet_streaming::shares::Shares::machine().terrain),
     }
 }
 

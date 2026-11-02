@@ -136,9 +136,11 @@ impl Rig {
         // One job system for the rig (BUDG-004): the tile workers below normal priority (ADR 0046) and the plan worker, a frame-critical thread at normal priority,
         // on the one share `terrain`, whose ceiling holds both.
         // The terrain share holds at most the machine's terrain share of busy threads (BUDG-003, ADR 0092): the tile workers, the plan worker and the horizon bakes together.
-        // The tile pool shrinks to what is left beside the plan worker (and the streamer's limit with it, STRM-020); the bakes are half the share (STRM-064).
-        let cap = planet_streaming::shares::Shares::machine().terrain;
-        let horizon = crate::horizonworld::horizon_workers(cap);
+        // The tile pool shrinks to what is left beside the plan worker (and the streamer's limit with it, STRM-020); the bakes are half the share (STRM-064). An explicit
+        // size (`--gen-workers`, `--gen-reserve`) overrides the share, uncapped (STRM-020): its threads, the plan worker and the bakes.
+        let share = planet_streaming::shares::Shares::machine().terrain;
+        let horizon = crate::horizonworld::horizon_workers(share);
+        let cap = if gen.from_share { share } else { gen.workers + 1 + horizon };
         let (tile_workers, ceiling) = terrain_sizes(gen.workers, horizon, cap);
         let gen = planet_streaming::GenWorkers { workers: tile_workers, ..gen };
         // The horizon bakes (STRM-060, STRM-064) are the idle class of the same share: `horizon` more threads that run idle jobs only, so a bake never holds a worker a visible job needs and the tile jobs keep their `gen.workers` threads.
