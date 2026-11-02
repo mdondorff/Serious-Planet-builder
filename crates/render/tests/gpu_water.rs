@@ -709,6 +709,7 @@ fn nothing_is_created_per_frame_after_enable_water_and_the_frame_targets_equal_t
             "sky-view",
             "aerial-perspective",
             "terrain",
+            "shadow-apply",
             "scene-copy",
             "water",
             "sky-composite",
