@@ -66,7 +66,8 @@ struct Resolve {
     // x: 1 when half of the rays are skipped this frame; y: the parity of the rays that are marched; z: 1 when history is void;
     // w: the march's pixels per ray edge (2: a ray per 2x2 pixels, 4: per 4x4).
     mode: vec4<u32>,
-    // x: the history weight; y: the drop coefficient 1 / (2 R) (a uniform, never R itself).
+    // x: the history weight; y: the drop coefficient 1 / (2 R) (a uniform, never R itself); z: 1 over the march's pixels per ray edge (0.5 or
+    // 0.25, exact, so a multiply is exact on every adapter).
     blend: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> r: Resolve;
@@ -186,7 +187,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             let ndc = vec2<f32>(dot(rel, r.prev.right.xyz) / (zc * r.prev.k.x), dot(rel, r.prev.up.xyz) / (zc * r.prev.k.y));
             let uv = vec2<f32>((ndc.x * 0.5 + 0.5) * f32(r.dims.x), (0.5 - ndc.y * 0.5) * f32(r.dims.y));
             if (uv.x >= 0.0 && uv.y >= 0.0 && uv.x < f32(r.dims.x) && uv.y < f32(r.dims.y)) {
-                out = textureLoad(prev_filled, clamp(vec2<i32>(floor(uv / f32(r.mode.w))), vec2<i32>(0, 0), hmax), 0).x;
+                out = textureLoad(prev_filled, clamp(vec2<i32>(floor(uv * r.blend.z)), vec2<i32>(0, 0), hmax), 0).x;
             }
         }
     }
@@ -202,20 +203,11 @@ const UPSAMPLE_BODY: &str = r#"
 // x: the visibility, -1 when no marched tap lies on this pixel's surface; y: 1 when a tap crossed a changed clipmap cell.
 @group(0) @binding(5) var out_up: texture_storage_2d<rg32float, write>;
 
-@compute @workgroup_size(8, 8, 1)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    if (gid.x >= r.dims.x || gid.y >= r.dims.y) {
-        return;
-    }
-    let p = vec2<i32>(gid.xy);
-    let d = textureLoad(depth, p, 0);
-    if (d <= 0.0) {
-        textureStore(out_up, p, vec4<f32>(-1.0, 0.0, 0.0, 0.0));
-        return;
-    }
-    let zf = r.cur.k.z / d;
-    let hx = (f32(p.x) + 0.5) / f32(r.mode.w) - 0.5;
-    let hy = (f32(p.y) + 0.5) / f32(r.mode.w) - 0.5;
+// The marched taps around a full-resolution pixel with their depth-aware weights: (weight sum, weighted visibility, 1 when a tap crossed a
+// changed clipmap cell, 1 when a tap was refused for being another surface).
+fn taps(p: vec2<i32>, zf: f32, tolerance: f32) -> vec4<f32> {
+    let hx = (f32(p.x) + 0.5) * r.blend.z - 0.5;
+    let hy = (f32(p.y) + 0.5) * r.blend.z - 0.5;
     let x0 = i32(floor(hx));
     let y0 = i32(floor(hy));
     let fx = hx - floor(hx);
@@ -224,6 +216,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     var sum = 0.0;
     var acc = 0.0;
     var changed = 0.0;
+    var refused = 0.0;
     for (var j = 0; j < 2; j = j + 1) {
         for (var i = 0; i < 2; i = i + 1) {
             let tp = clamp(vec2<i32>(x0 + i, y0 + j), vec2<i32>(0, 0), hmax);
@@ -242,9 +235,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 continue;
             }
             // A tap on another surface counts for little: the weight falls with the relative depth difference.
-            let rel = abs(zh - zf) / (0.03 * zf + 0.5);
+            let rel = abs(zh - zf) / tolerance;
             // A tap past a few times the depth tolerance is another surface altogether and counts for nothing.
             if (rel > 3.0) {
+                refused = 1.0;
                 continue;
             }
             let w = bw / (1.0 + 16.0 * rel * rel);
@@ -255,11 +249,57 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             }
         }
     }
-    var vis = -1.0;
-    if (sum > 1.0e-6) {
-        vis = acc / sum;
+    return vec4<f32>(sum, acc, changed, refused);
+}
+
+// The pixel's own depth gradient: per axis the smaller of the differences to its two neighbours (at an edge one side is still the pixel's own
+// surface, so the edge keeps its tolerance), the larger of the two axes.
+fn depth_gradient(p: vec2<i32>, zf: f32) -> f32 {
+    let last = vec2<i32>(i32(r.dims.x) - 1, i32(r.dims.y) - 1);
+    var gx = 1.0e9;
+    var gy = 1.0e9;
+    for (var k = 0; k < 4; k = k + 1) {
+        var o = vec2<i32>(0, 0);
+        if (k == 0) { o = vec2<i32>(-1, 0); }
+        if (k == 1) { o = vec2<i32>(1, 0); }
+        if (k == 2) { o = vec2<i32>(0, -1); }
+        if (k == 3) { o = vec2<i32>(0, 1); }
+        let dn = textureLoad(depth, clamp(p + o, vec2<i32>(0, 0), last), 0);
+        if (dn > 0.0) {
+            let dz = abs(r.cur.k.z / dn - zf);
+            if (k < 2) {
+                gx = min(gx, dz);
+            } else {
+                gy = min(gy, dz);
+            }
+        }
     }
-    textureStore(out_up, p, vec4<f32>(vis, changed, 0.0, 0.0));
+    return max(select(gx, 0.0, gx > 1.0e8), select(gy, 0.0, gy > 1.0e8));
+}
+
+@compute @workgroup_size(8, 8, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if (gid.x >= r.dims.x || gid.y >= r.dims.y) {
+        return;
+    }
+    let p = vec2<i32>(gid.xy);
+    let d = textureLoad(depth, p, 0);
+    if (d <= 0.0) {
+        textureStore(out_up, p, vec4<f32>(-1.0, 0.0, 0.0, 0.0));
+        return;
+    }
+    let zf = r.cur.k.z / d;
+    var t = taps(p, zf, 0.03 * zf + 0.5);
+    // Taps `scale` pixels apart on a grazing plane differ in depth by what the plane's slope says, not by what an edge says: past half
+    // resolution a pixel that refused a tap tries again with a tolerance that grows with its own depth gradient. Half resolution never does.
+    if (r.mode.w > 2u && t.w > 0.5) {
+        t = taps(p, zf, 0.03 * zf + 0.5 + 1.5 * f32(r.mode.w) * depth_gradient(p, zf));
+    }
+    var vis = -1.0;
+    if (t.x > 1.0e-6) {
+        vis = t.y / t.x;
+    }
+    textureStore(out_up, p, vec4<f32>(vis, t.z, 0.0, 0.0));
 }
 "#;
 
@@ -1019,7 +1059,7 @@ impl ShadowResolveGpu {
         for v in [width, height, hw, hh, skip, params.frame & 1, u32::from(cut), scale] {
             bytes.extend_from_slice(&v.to_le_bytes());
         }
-        f(&mut bytes, &[params.history_weight.clamp(0.0, MAX_HISTORY_WEIGHT), march_params.drop_coefficient, 0.0, 0.0]);
+        f(&mut bytes, &[params.history_weight.clamp(0.0, MAX_HISTORY_WEIGHT), march_params.drop_coefficient, 1.0 / scale as f32, 0.0]);
         let uniform = self.uniform.get_or_insert_with(|| {
             device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("shadow-resolve-uniform"),

@@ -634,3 +634,88 @@ fn the_quarter_resolution_march_draws_the_shadow_of_the_half_resolution_one_away
         }
     }
 }
+
+// spec: REND-049
+#[test]
+fn far_grazing_ground_stays_in_the_shadow_at_quarter_resolution_on_the_cut_frame_and_after() {
+    let s = scene();
+    set_wall(&s, Some(-96));
+    // A camera 2 m up looking along the ground: a row of pixels is a long step of distance (the depth changes by a third from row to row).
+    let (w, h) = (64u32, 180u32);
+    let cam = ResolveCamera {
+        position: [0.0, 0.0, 2.0],
+        forward: [1.0, 0.0, 0.0],
+        right: [0.0, -1.0, 0.0],
+        up: [0.0, 0.0, 1.0],
+        tan_half_fov: [0.5, 0.5],
+        near_m: 1.0,
+    };
+    let distance = |y: u32| 2.0 / (-(1.0 - (y as f32 + 0.5) / h as f32 * 2.0) * 0.5);
+    let mut depths = vec![0f32; (w * h) as usize];
+    for y in h / 2..h {
+        for x in 0..w {
+            depths[(y * w + x) as usize] = 1.0 / distance(y);
+        }
+    }
+    let target = DepthTarget::new(&s.ctx, w, h);
+    target.write(&s.ctx, &depths);
+    let shadow_at = |scale: u32| {
+        let mut r = ShadowResolveGpu::new(&s.ctx, &s.clip);
+        let mut out = Vec::new();
+        for frame in 1..=3u32 {
+            let params = ResolveParams {
+                camera: cam,
+                previous: cam,
+                history_weight: 0.8,
+                cut: frame == 1,
+                frame,
+                spread: false,
+                march_scale: scale,
+            };
+            r.resolve(&s.ctx, &s.march, &s.clip, &s.cube, &march_params(10.0), &target, &params);
+            out.push(r.read_shadow(&s.ctx));
+        }
+        out
+    };
+    let (half, quarter) = (shadow_at(2), shadow_at(4));
+    // The ground within 400 m of the camera is in the shadow of the wall (its shadow ends at 479 m), in every frame, at both resolutions.
+    let mut checked = 0;
+    for frame in 0..3 {
+        for y in h / 2..h {
+            if distance(y) > 400.0 {
+                continue;
+            }
+            for x in 0..w {
+                let i = (y * w + x) as usize;
+                assert!(half[frame][i] < 0.1, "frame {frame}, row {y} ({} m): half resolution reads {}", distance(y), half[frame][i]);
+                assert!(
+                    quarter[frame][i] < 0.15,
+                    "frame {frame}, row {y} ({} m), column {x}: the quarter-resolution march reads {} on shadowed ground",
+                    distance(y),
+                    quarter[frame][i]
+                );
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 3 * 64 * 20, "rows of grazing ground were judged: {checked}");
+}
+
+// spec: REND-049
+#[test]
+fn a_change_of_the_march_resolution_marches_every_ray_in_its_frame() {
+    let s = scene();
+    set_wall(&s, Some(-96));
+    let depth = depth_target(&s, &depths(None, 0));
+    let mut r = ShadowResolveGpu::new(&s.ctx, &s.clip);
+    let step = |r: &mut ShadowResolveGpu, frame: u32, scale: u32| {
+        let params = ResolveParams { march_scale: scale, ..frame_params(frame, frame == 1, 0.8, true) };
+        r.resolve(&s.ctx, &s.march, &s.clip, &s.cube, &march_params(2.0), &depth, &params);
+        r.read_half_visibility(&s.ctx)
+    };
+    let (_, second) = (step(&mut r, 1, 2), step(&mut r, 2, 2));
+    assert!(second.iter().any(|v| *v < 0.0), "with the spread, half of the rays are skipped in a steady frame");
+    let switched = step(&mut r, 3, 4);
+    assert_eq!(switched.len(), (W / 4 * (H / 4)) as usize);
+    assert!(switched.iter().all(|v| *v >= 0.0), "the frame that remakes the targets marches every ray");
+}

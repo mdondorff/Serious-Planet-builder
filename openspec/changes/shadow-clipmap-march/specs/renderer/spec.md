@@ -62,7 +62,7 @@ Source: ADR 0085 points 1, 3 and 5, SPIKE-56 findings 1 and 3 and P1, CON-11, AD
 
 #### Scenario: Low sun
 - **WHEN** the sun is at 4.9, 5.2 (coming from below and from above) and 5.6 degrees, and the same frame is marched at half and at quarter resolution
-- **THEN** the resolution is quarter, the previous one, and half; the quarter-resolution march has a ray per 4x4 pixels and draws the shadow of the half-resolution one within 0.05 away from the depth edges; and at 2 and 45 degrees layer 1 takes 1.5 ms (measured 1.50 and 1.22 on the 11-level probe)
+- **THEN** the resolution is quarter, the previous one, and half; the quarter-resolution march has a ray per 4x4 pixels and draws the shadow of the half-resolution one within 0.05 away from the depth edges; and at 2 and 45 degrees layer 1 takes 1.5 ms (measured 1.50 to 1.54 and 1.23 on the 11-level probe); and far grazing ground (a 2 m camera, rows a third nearer than the last) stays in a wall's shadow at quarter resolution on the cut frame and after
 
 #### Scenario: Below the horizon
 - **WHEN** the sun is 1 degree below a receiver's geometric horizon
