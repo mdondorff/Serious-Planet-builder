@@ -105,6 +105,12 @@ pub fn edit_mouse_action(button: MouseButton, state: ElementState, world: bool, 
     }
 }
 
+/// Whether the scripted descent (`cameras` of it, one per frame step) has played to its last camera at flight time `t_s`: the editor mode of
+/// `--edit --site` turns on there, where the free camera takes the flight's landing pose (VIEW-022).
+pub fn descent_finished(t_s: f64, cameras: usize) -> bool {
+    t_s >= cameras.saturating_sub(1) as f64 * planet_frame::scenes::FRAME_STEP_S
+}
+
 /// What the editor mode does to the camera and the overview this frame (VIEW-022), as (end the overview, take the free camera): turning
 /// the mode on ends the overview once (`end_overview` is that one request, taken by the caller), and while the mode is on and no overview
 /// is shown the camera is the free one. The overview shown later with G stays.
@@ -161,6 +167,8 @@ struct Config {
     ui: bool,
     /// Start in the editor mode (`--edit`, VIEW-022).
     edit: bool,
+    /// `--edit` with `--site` (not a smoke run): the scripted flight descends over the site first, and the editor mode turns on where it ends.
+    site_descent: bool,
     /// The directory the edits are written to and loaded from (`--items`).
     items: Option<PathBuf>,
     /// The panel layout (`--editor-layout`, VIEW-018).
@@ -295,6 +303,8 @@ struct Running {
     last_wanted: Vec<TileId>,
     /// Turning the mode on ends the overview, once.
     end_overview: bool,
+    /// The editor mode waits for the end of the scripted descent (`--edit --site`, VIEW-022).
+    descent_wait: bool,
     window: Arc<Window>,
     ctx: GpuContext,
     surface: WindowSurface,
@@ -527,7 +537,7 @@ impl App<'_> {
         let edit = if cfg.ui {
             let mut e = EditRuntime::new(self.world.definition().as_ref().clone(), cfg.radius_m, cfg.items.as_ref(), cfg.layout.clone())?;
             // A smoke run turns the mode on itself, at the frame its script says, after the overview phases.
-            e.on = cfg.edit && !cfg.smoke;
+            e.on = cfg.edit && !cfg.smoke && !cfg.site_descent;
             if std::env::var_os("PLANET_GATE").is_some() {
                 e.set_gate();
             }
@@ -557,6 +567,7 @@ impl App<'_> {
             marker_labels: HashMap::new(),
             last_wanted: Vec::new(),
             end_overview: false,
+            descent_wait: cfg.site_descent,
             window,
             ctx,
             surface,
@@ -767,6 +778,18 @@ impl App<'_> {
             let mut quit = false;
             if cfg.smoke {
                 quit |= smoke_keys(&mut st, self.cameras, now_ms)?;
+            }
+            // `--edit --site`: the flight descends over the site first and the editor mode turns on where it ends (a Tab before then turns it on at once).
+            if st.descent_wait {
+                let t_s = st.viewer.clock.time_s(now_ms);
+                let early = st.edit.as_ref().is_some_and(|e| e.on);
+                if early || descent_finished(t_s, self.cameras.len()) {
+                    st.descent_wait = false;
+                    if let (false, Some(e)) = (early, st.edit.as_mut()) {
+                        e.toggle();
+                        st.end_overview = e.on;
+                    }
+                }
             }
             // The editor mode edits from the free camera: turning it on ended the overview once (G may show it again).
             {
@@ -1998,6 +2021,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         smoke: o.smoke,
         ui: !o.no_ui,
         edit: o.edit,
+        site_descent: o.edit && o.site.is_some() && !o.smoke,
         items: o.items.clone(),
         layout: match &o.editor_layout {
             Some(p) => Layout::from_toml(&std::fs::read_to_string(p).map_err(|e| format!("--editor-layout {}: {e}", p.display()))?)

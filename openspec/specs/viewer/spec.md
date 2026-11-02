@@ -548,6 +548,7 @@ Source: owner (M6 step U3: map first, list, search, inspector bound to the comma
 ### Requirement: VIEW-022 The editor mode of the window
 `planet editor` SHALL have an editor mode (`planet::editwin`, with `window`) that edits the world's definition through the session (VIEW-017) and the panels (VIEW-021).
 - Tab turns the mode on and off; `--edit` starts the window with it on.
+- `--edit` with `--site LAT,LON` plays the scripted descent over the site first and turns the mode on where it ends (a Tab before then turns it on at once).
 - `--items DIR` is the directory the edits are written to and loaded from: one TOML file per edit (AUTH-001), every command writes its file; without it the edits live in memory and the status line says they are not saved.
 - `--editor-layout F` is the layout file (VIEW-018).
 - `--edit` with `--no-ui` is an error that says the mode needs the UI.

@@ -12,6 +12,8 @@ mod real_store;
 mod residency_headroom;
 #[path = "shadow_rig.rs"]
 mod shadow_rig;
+#[path = "site_descent.rs"]
+mod site_descent;
 #[path = "ts_reproduce.rs"]
 mod ts_reproduce;
 #[path = "water_reach.rs"]
