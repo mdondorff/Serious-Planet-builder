@@ -179,7 +179,8 @@ pub(crate) fn terrain(seed: u64, d: Vec3) -> Terrain {
     );
     let warped = d + warp * 0.45;
     // Rounded to the stored f32 first, so land and the sign of the elevation are decided from the same number.
-    let continent = f64::from((fbm(seed, LAYER_CONTINENT, warped, 1.1, 5) * 1.7) as f32);
+    // SPIKE-92 (spike branch only): a continent candidate in place of today's value.
+    let continent = f64::from((crate::spike92::continent(seed, d).unwrap_or_else(|| fbm(seed, LAYER_CONTINENT, warped, 1.1, 5) * 1.7)) as f32);
     let land_depth = continent - SEA_LEVEL_C;
     let zone = smoothstep(0.1, 0.6, fbm(seed, LAYER_RANGE_MASK, warped, 1.7, 3) + 0.2);
     let inland = smoothstep(0.02, 0.35, land_depth);

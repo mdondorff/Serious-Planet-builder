@@ -35,6 +35,9 @@ fn main() {
         image.write_png(&path).unwrap_or_else(|e| fail(&format!("cannot write {}: {e}", path.display())));
         println!("wrote {}", path.display());
     }
+    // SPIKE-92: the land mask as raw bytes (1 land, 0 sea), row 0 north, for the shape metrics.
+    let mask: Vec<u8> = fields.pixels.iter().map(|p| u8::from(p.land_depth > 0.0)).collect();
+    std::fs::write(out.join("land.u8"), &mask).unwrap_or_else(|e| fail(&format!("cannot write the land mask: {e}")));
     let report = preview::report(&fields);
     std::fs::write(out.join("report.txt"), &report).unwrap_or_else(|e| fail(&format!("cannot write the report: {e}")));
     print!("{report}");
