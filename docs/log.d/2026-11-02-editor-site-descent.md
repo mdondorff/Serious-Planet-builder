@@ -1,0 +1,1 @@
+- 2026-11-02 editor-site-descent: `editor --edit --site` plays the scripted descent over the site and turns the editor mode on where it ends (VIEW-022); tier A site_descent

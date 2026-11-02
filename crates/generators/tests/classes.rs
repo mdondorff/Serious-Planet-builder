@@ -108,6 +108,7 @@ fn a_core_over_high_ground_is_high_mountains_and_a_plateau_field_is_plateau() {
         old_margin: 0.0,
         back_arc: 0.0,
         plateau_field: 0.0,
+        strike: 1.0,
         plate: 0,
     };
     let core = MaskTerms { core: 1.0, ..none };
@@ -177,4 +178,131 @@ fn the_preview_images_are_the_same_bytes_for_the_same_seed_on_any_thread_count()
     }
     let other = render(&compute(2, 128, 64, 8, 1));
     assert!(a.iter().zip(&other).any(|((_, x), (_, y))| x != y), "two seeds draw the same images");
+}
+
+// spec: GEN-103
+#[test]
+fn the_mask_has_no_jump_where_the_nearest_or_the_second_plate_changes() {
+    let source = ClassSource::new(SEED);
+    // Walk great-circle arcs in steps of about 13 km; where a term moves by more than 0.08 between two samples, bisect on the larger difference and compare
+    // the two sides about 1e-12 rad apart. A smooth change shrinks with the step, a jump does not.
+    let terms = |d: Vec3| {
+        let p = source.eval(d);
+        [p.terms.core, p.terms.flank, p.terms.old_margin, p.terms.back_arc, p.terms.plateau_field, p.e0 / 1000.0]
+    };
+    let (mut candidates, mut plate_changes) = (0, 0);
+    for k in 0..90u32 {
+        let (a, b) = (
+            Vec3::new(f64::from(k % 7) - 3.1, f64::from(k % 11) - 5.2, f64::from(k % 5) - 2.3).normalized(),
+            Vec3::new(f64::from((k * 3) % 13) - 6.1, f64::from((k * 5) % 7) - 3.3, f64::from((k * 7) % 9) - 4.4).normalized(),
+        );
+        let at = |t: f64| (a * (1.0 - t) + b * t).normalized();
+        let n = 1500;
+        let mut prev = (terms(at(0.0)), source.eval(at(0.0)).terms.plate);
+        for s in 1..=n {
+            let t1 = f64::from(s) / f64::from(n);
+            let cur = (terms(at(t1)), source.eval(at(t1)).terms.plate);
+            let diff = |x: &[f64; 6], y: &[f64; 6]| x.iter().zip(y).map(|(u, v)| (u - v).abs()).fold(0.0, f64::max);
+            if cur.1 != prev.1 {
+                plate_changes += 1;
+            }
+            if diff(&prev.0, &cur.0) > 0.08 {
+                candidates += 1;
+                let (mut lo, mut hi) = (f64::from(s - 1) / f64::from(n), t1);
+                for _ in 0..50 {
+                    let mid = 0.5 * (lo + hi);
+                    if diff(&terms(at(lo)), &terms(at(mid))) > diff(&terms(at(mid)), &terms(at(hi))) {
+                        hi = mid;
+                    } else {
+                        lo = mid;
+                    }
+                }
+                let jump = diff(&terms(at(lo)), &terms(at(hi)));
+                assert!(jump < 1e-4, "a term jumps by {jump} at t {lo} of arc {k}: {:?} against {:?}", terms(at(lo)), terms(at(hi)));
+            }
+            prev = cur;
+        }
+    }
+    assert!(plate_changes >= 8, "only {plate_changes} changes of the nearest plate on the arcs");
+    println!("{candidates} steep steps examined, {plate_changes} changes of the nearest plate");
+}
+
+// spec: GEN-103
+#[test]
+fn the_class_source_version_goes_with_its_output() {
+    // Bump CLASS_SOURCE_VERSION whenever this fingerprint changes (the preview images and the stored fields carry the version).
+    let source = ClassSource::new(SEED);
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for k in 0..24u32 {
+        let d = Vec3::new(f64::from(k % 5) - 2.2, f64::from(k % 7) - 3.1, f64::from(k % 3) - 1.3).normalized();
+        let p = source.eval(d);
+        for v in [p.terms.core, p.terms.flank, p.terms.old_margin, p.terms.back_arc, p.terms.plateau_field, p.terms.strike, p.e0] {
+            for byte in v.to_bits().to_le_bytes() {
+                hash = (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3);
+            }
+        }
+    }
+    assert_eq!(
+        (CLASS_SOURCE_VERSION, hash),
+        (2, FINGERPRINT),
+        "the default source's output changed: bump CLASS_SOURCE_VERSION and record the new fingerprint"
+    );
+}
+
+const FINGERPRINT: u64 = 4895128674126474520;
+
+// spec: GEN-103
+#[test]
+fn the_shape_metrics_find_a_ring_a_long_band_and_two_land_masses_on_a_synthetic_grid() {
+    use planet_generators::shape::{shape_metrics, Grid};
+    let (w, h) = (360usize, 180usize);
+    let mut land = vec![false; w * h];
+    let mut high = vec![false; w * h];
+    // Two land blocks (lon 40..100 and 200..260, lat rows 50..130) and a ring of high ground round a hole in the first.
+    for y in 50..130 {
+        for x in (40..100).chain(200..260) {
+            land[y * w + x] = true;
+        }
+    }
+    for y in 60..120 {
+        for x in 50..90 {
+            let edge = !(64..116).contains(&y) || !(54..86).contains(&x);
+            high[y * w + x] = edge;
+        }
+    }
+    let m = shape_metrics(&Grid { width: w, height: h, land: &land, high: &high });
+    assert_eq!(m.land_masses.len(), 2, "{:?}", m.land_masses);
+    assert!((m.largest_share - 0.5).abs() < 0.05, "{}", m.largest_share);
+    assert!(m.enclosed_mkm2 > 0.0, "the ring encloses land the high ground does not cover: {}", m.enclosed_mkm2);
+    assert!(!m.longest_spans_km.is_empty() && m.longest_spans_km[0] > 2000.0);
+    assert!(m.width_median_km > 0.0 && m.width_p10_km <= m.width_median_km);
+}
+
+// spec: GEN-103
+#[test]
+fn the_lattice_reports_the_largest_k_step_and_where_and_the_share_of_steps_over_a_limit() {
+    let source = ClassSource::new(SEED);
+    let lattice = ClassLattice::build_with(&source, 16, 2);
+    let (step, face, i, j) = lattice.largest_k_step_at();
+    assert_eq!(step, lattice.largest_k_step());
+    assert!(i <= 16 && j <= 16 && face.0 < 6);
+    let over_half = lattice.k_steps_over(step / 2.0);
+    assert!(over_half > 0.0 && over_half <= 1.0, "{over_half}");
+    assert_eq!(lattice.k_steps_over(step + 1e-9), 0.0, "no step is over the largest step");
+}
+
+// spec: GEN-103
+#[test]
+fn a_world_of_one_small_island_has_all_its_land_in_the_largest_mass() {
+    use planet_generators::shape::{shape_metrics, Grid};
+    let (w, h) = (360usize, 180usize);
+    let mut land = vec![false; w * h];
+    for y in 88..92 {
+        for x in 100..104 {
+            land[y * w + x] = true;
+        }
+    }
+    let m = shape_metrics(&Grid { width: w, height: h, land: &land, high: &vec![false; w * h] });
+    assert!(m.land_masses.is_empty(), "under 1 Mkm2");
+    assert!((m.largest_share - 1.0).abs() < 1e-9, "{}", m.largest_share);
 }
