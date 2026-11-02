@@ -5,8 +5,8 @@
 use planet_frame::clipmap::TexelRect;
 use planet_render::march::{MarchParams, ShadowMarchGpu, PENUMBRA_SEARCH_M, SUN_DISC_TAN};
 use planet_render::resolve::{
-    fill_shader, receivers_shader, spread_for_sun, temporal_shader, upsample_shader, DepthTarget, ResolveCamera, ResolveParams,
-    ShadowResolveGpu,
+    fill_shader, march_scale_for_sun, receivers_shader, spread_for_sun, temporal_shader, upsample_shader, DepthTarget, ResolveCamera,
+    ResolveParams, ShadowResolveGpu,
 };
 use planet_render::shadow::{ClipmapGpu, CoarseCubeGpu};
 use planet_render::{AdapterPolicy, GpuContext};
@@ -93,7 +93,7 @@ fn camera(x: f32) -> ResolveCamera {
 }
 
 fn frame_params(frame: u32, cut: bool, weight: f32, spread: bool) -> ResolveParams {
-    ResolveParams { camera: camera(CAMERA_X), previous: camera(CAMERA_X), history_weight: weight, cut, frame, spread }
+    ResolveParams { camera: camera(CAMERA_X), previous: camera(CAMERA_X), history_weight: weight, cut, frame, spread, march_scale: 2 }
 }
 
 /// Depth of the flat ground below the camera everywhere, with `ledge` (a distance below the camera) over the right half of the frame.
@@ -411,6 +411,7 @@ fn resolve_cost_probe_at_1440p() {
                 cut: frame == 1,
                 frame,
                 spread: spread_for_sun(libm::sinf(sun.to_radians())),
+                march_scale: 2,
             };
             let t = std::time::Instant::now();
             r.resolve(&s.ctx, &s.march, &s.clip, &s.cube, &march_params(sun), &target, &params);
@@ -465,7 +466,7 @@ fn receivers_far_from_the_anchor_land_in_the_clipmaps_azimuthal_frame() {
     mp.drop_coefficient = c;
     let depth = depth_target(&s, &vec![1.0 / z_view; (W * H) as usize]);
     let mut r = ShadowResolveGpu::new(&s.ctx, &s.clip);
-    let rp = ResolveParams { camera: cam, previous: cam, history_weight: 0.8, cut: true, frame: 1, spread: false };
+    let rp = ResolveParams { camera: cam, previous: cam, history_weight: 0.8, cut: true, frame: 1, spread: false, march_scale: 2 };
     r.resolve(&s.ctx, &s.march, &s.clip, &s.cube, &mp, &depth, &rp);
     let receivers = r.read_receivers(&s.ctx);
     for (hx, hy) in [(0u32, 0u32), (16, 9), (31, 17), (5, 12)] {
@@ -562,6 +563,8 @@ fn march_cost_probe_over_eleven_levels() {
                 mp.penumbra_search_m = v;
             }
             let spread_off = std::env::var("PLANET_PROBE_SPREAD").is_ok_and(|v| v == "0");
+            // PLANET_PROBE_SCALE=2 or 4 forces the march's pixels per ray edge; without it the sun decides (REND-049).
+            let probe_scale: Option<u32> = std::env::var("PLANET_PROBE_SCALE").ok().and_then(|v| v.parse().ok());
             let mut r = ShadowResolveGpu::new(&ctx, &clip);
             let timed = r.enable_timing(&ctx);
             let (mut passes, mut steps): (Vec<[f64; 5]>, Vec<u32>) = (Vec::new(), Vec::new());
@@ -573,6 +576,7 @@ fn march_cost_probe_over_eleven_levels() {
                     cut: frame == 1,
                     frame,
                     spread: spread_for_sun(libm::sinf(sun.to_radians())) && !spread_off,
+                    march_scale: probe_scale.unwrap_or_else(|| march_scale_for_sun(2, libm::sinf(sun.to_radians()))),
                 };
                 r.resolve(&ctx, &march, &clip, &cube, &mp, &target, &params);
                 ctx.wait_idle();
@@ -602,6 +606,31 @@ fn march_cost_probe_over_eleven_levels() {
                 pick(0.99),
                 steps.last().copied().unwrap_or(0)
             );
+        }
+    }
+}
+
+// spec: REND-049
+#[test]
+fn the_quarter_resolution_march_draws_the_shadow_of_the_half_resolution_one_away_from_its_edges() {
+    let s = scene();
+    set_wall(&s, Some(-96));
+    let depth = depth_target(&s, &depths(Some(CAMERA_HEIGHT - 120.0), 0));
+    let shadow_at = |scale: u32| {
+        let mut r = ShadowResolveGpu::new(&s.ctx, &s.clip);
+        let params = ResolveParams { march_scale: scale, ..frame_params(1, true, 0.0, false) };
+        r.resolve(&s.ctx, &s.march, &s.clip, &s.cube, &march_params(10.0), &depth, &params);
+        (r.read_shadow(&s.ctx), r.read_half_visibility(&s.ctx).len())
+    };
+    let (half, half_rays) = shadow_at(2);
+    let (quarter, quarter_rays) = shadow_at(4);
+    assert_eq!(half_rays, (W / 2 * (H / 2)) as usize);
+    assert_eq!(quarter_rays, (W / 4 * (H / 4)) as usize, "a ray per 4x4 pixels");
+    // The ground stays dark and the ledge stays lit on both sides of the depth edge, whichever the resolution (the depth-aware upsample).
+    for y in 0..H {
+        for x in 0..W {
+            let (a, b) = (half[(y * W + x) as usize], quarter[(y * W + x) as usize]);
+            assert!((a - b).abs() < 0.05, "pixel ({x}, {y}): {a} at half resolution, {b} at quarter");
         }
     }
 }
