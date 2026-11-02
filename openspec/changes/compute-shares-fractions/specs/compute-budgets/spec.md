@@ -35,7 +35,7 @@ Worked examples (not rules):
 
 ## ADDED Requirements
 ### Requirement: BUDG-013 CPU topology detection
-The job system SHALL know the machine's logical threads on performance cores `P` and on efficiency cores `E`, with no new dependency: on Windows from `GetLogicalProcessorInformationEx` core records, summed over processor groups, each core's threads counted from its affinity mask, the highest efficiency class being performance (one class: all performance); on Linux from `/sys/devices/cpu_core/cpus` and `/sys/devices/cpu_atom/cpus`, else `cpu_capacity` (the highest value being performance); otherwise, or when a query fails, `available_parallelism`, all performance. `P` SHALL be at most `available_parallelism`. `PLANET_CPU_TOPOLOGY=P,E` (P at least 1) SHALL override detection. `E` is reported only. Parsing SHALL be pure.
+The job system SHALL know the machine's logical threads on performance cores `P` and on efficiency cores `E`, with no new dependency: on Windows from `GetLogicalProcessorInformationEx` core records, summed over processor groups, each core's threads counted from its affinity mask, the highest efficiency class being performance (one class: all performance); on Linux from `/sys/devices/cpu_core/cpus` and `/sys/devices/cpu_atom/cpus`, else `cpu_capacity` (the highest value being performance); otherwise, or when a query fails, `available_parallelism`, all performance. Detected `P` SHALL be at most `available_parallelism`; `PLANET_CPU_TOPOLOGY=P,E` (P at least 1) SHALL replace detection, uncapped. `E` is reported only. Parsing SHALL be pure.
 
 Verify: A
 Status: active

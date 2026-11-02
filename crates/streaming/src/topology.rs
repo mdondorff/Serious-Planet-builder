@@ -1,7 +1,7 @@
 //! The machine's CPU topology (BUDG-013, ADR 0092 point 4): logical threads on performance cores `p` and on efficiency cores `e`, from the
 //! operating system with no new dependency. Windows reads the core records of `GetLogicalProcessorInformationEx`, Linux the hybrid sysfs
 //! lists or the core capacities, and anything else (or a failed query) counts every thread of `available_parallelism` as performance.
-//! `p` is never more than the threads the process may use. `PLANET_CPU_TOPOLOGY=P,E` overrides the detection. Every source is parsed by a
+//! `p` is never more than the threads the process may use. `PLANET_CPU_TOPOLOGY=P,E` replaces the detection, uncapped (tests fix a topology with it). Every source is parsed by a
 //! pure function, tested on recorded bytes and strings; the queries are thin.
 
 /// The environment variable that overrides the detection (`P,E`, P at least 1).
