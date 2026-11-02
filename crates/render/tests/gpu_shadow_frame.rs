@@ -65,6 +65,7 @@ fn shadow_frame(p: &TerrainPlan, tiles: &[TileId], planner: &mut ClipmapPlanner)
         preview: ClipmapPreview::default(),
         floor_tiles: Vec::new(),
         cut: false,
+        ceiling_m: f64::INFINITY,
     }
 }
 
@@ -112,6 +113,7 @@ fn a_refreshed_tile_flags_the_marches_across_it_for_two_frames_through_the_frame
             preview: ClipmapPreview::default(),
             floor_tiles: Vec::new(),
             cut: false,
+            ceiling_m: f64::INFINITY,
         });
         r.render(&ctx, &p, false).unwrap();
         changed.push((i, r.shadow_changed_pixels(&ctx).expect("the shadow pass ran")));
