@@ -16,7 +16,7 @@ Source: M9 draft (`docs/briefings/m9-draft.md`) decision 6, criterion 1's bound;
 - **THEN** criterion 1 is reported NOT RUN, naming the missing layer
 
 ### Requirement: TEST-082 The default classes and the base elevation match Earth's shares
-A tier-B check SHALL evaluate the default source (GEN-094 to GEN-097) of seeds 1 to 5 and report each measure per seed, with the median, against its band. Unless a row says otherwise, it samples at 0.25 degree over land under 60 degrees latitude, area weighted. Earth's values are from ETOPO 2022 (SPIKE-93). The bands are approved (owner, 2026-11-02; they replace the single-seed bands of SPIKE-80).
+A tier-B check SHALL evaluate the default source (GEN-094 to GEN-097) of seeds 1 to 5 and report each measure per seed, with the median, against its band. Unless a row says otherwise, it samples at 0.25 degree over land under 60 degrees latitude, area weighted. Earth's values are from ETOPO 2022 (SPIKE-93). The class bands (plains / hills / mountains 45-62 / 15-30 / 20-32 %) are approved (owner, 2026-11-02); the other bands are the planner's, from SPIKE-93 (2026-11-02). They replace the single-seed bands of SPIKE-80.
 | Measure | Earth | Band |
 |---|---|---|
 | Land under 500 m | 58.4 % | 50-65 % |
@@ -35,7 +35,7 @@ A tier-B check SHALL evaluate the default source (GEN-094 to GEN-097) of seeds 1
 
 Verify: B
 Status: planned
-Source: ADR 0089 decisions 3, 5 and 7, ADR 0088/0089 accepted 2026-11-01; SPIKE-69, SPIKE-78, SPIKE-79, SPIKE-80; SPIKE-93 (Earth's bands from ETOPO), planner (2026-11-02, inbox #69 and later); the class bands (plains / hills / mountains 45-62 / 15-30 / 20-32 %) and the other SPIKE-93 bands approved by the owner, 2026-11-02
+Source: ADR 0089 decisions 3, 5 and 7, ADR 0088/0089 accepted 2026-11-01; SPIKE-69, SPIKE-78, SPIKE-79, SPIKE-80; SPIKE-93 (Earth's bands from ETOPO), planner (2026-11-02, inbox #69 and later); the class bands (plains / hills / mountains 45-62 / 15-30 / 20-32 %) approved by the owner, 2026-11-02
 
 #### Scenario: Seeds 1 to 5
 - **WHEN** the check runs on seeds 1 to 5
