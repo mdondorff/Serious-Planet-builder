@@ -134,8 +134,14 @@ max_ev100 = 16.0
 
 // spec: REND-050
 #[test]
-fn the_shadow_march_flag_runs_the_clipmap_shadow_pass_beside_the_lit_frames() {
-    let Some(stdout) = smoke(&["--shadow-march", "--no-ui", "--size", "320x180"]) else { return };
+fn the_clipmap_shadow_pass_runs_with_the_lit_frames_by_default_and_the_flag_turns_it_off() {
+    let Some(off) = smoke(&["--no-shadow-march", "--no-ui", "--size", "320x180"]) else { return };
+    assert!(off.contains("[smoke ok]"), "{off}");
+    let frames_of = |stdout: &str| -> Option<u64> {
+        stdout.split("shadow pass: ").nth(1).and_then(|t| t.split_whitespace().next()).and_then(|n| n.parse().ok())
+    };
+    assert!(frames_of(&off).is_none_or(|n| n == 0), "--no-shadow-march runs no shadow pass: {off}");
+    let Some(stdout) = smoke(&["--no-ui", "--size", "320x180"]) else { return };
     assert!(stdout.contains("[smoke ok]"), "{stdout}");
     // The planner job landed its first plan and the pass resolved shadow frames (a number after the colon, more than none).
     let frames: u64 = stdout

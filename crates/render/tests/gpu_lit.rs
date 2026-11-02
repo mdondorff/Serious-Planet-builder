@@ -236,7 +236,7 @@ fn lit_frames_create_nothing_after_the_lit_path_is_enabled() {
     let p = plan(3);
     let mut r = renderer(&ctx, &[&p], true);
     let (built, objects) = (r.init_counts(), r.lit_objects());
-    assert_eq!(objects, 9, "the scene target, `sun-direct` and its apply pipeline (REND-051), the three post pipelines, the scale references pipeline (REND-036) and the two compact lit pipelines (whole nodes, nodes over some quadrants, STRM-016; the vertex lit pipeline went with the vertex format): {objects}");
+    assert_eq!(objects, 11, "the scene target, `sun-direct`, its two apply pipelines and their one-texel texture (REND-051), the three post pipelines, the scale references pipeline (REND-036) and the two compact lit pipelines (whole nodes, nodes over some quadrants, STRM-016; the vertex lit pipeline went with the vertex format): {objects}");
     for plan in [lit(p.clone(), LitPlan::fixed(EV)), lit(p.clone(), LitPlan::adaptive(EV, 0.016)), lit(p.clone(), LitPlan::fixed(EV))] {
         r.render(&ctx, &plan, false).unwrap();
         assert_eq!(r.lit_objects(), objects);
