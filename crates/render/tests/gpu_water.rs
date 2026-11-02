@@ -243,11 +243,11 @@ fn fnv(h: u64, bytes: &[u8]) -> u64 {
 fn the_lit_water_and_atmosphere_frames_over_compact_blocks_are_the_recorded_pixels() {
     // The hash of the HDR and colour targets of five frames of the aerial coast (no water, the atmosphere, the class view, the lit
     // water without and with the atmosphere), as the atlas textures drew them (recorded by the differential of ADR 0054's change,
-    // byte-identical to the buffer blocks on WARP and on the RTX; re-recorded by the pixel-footprint fade of the waves, ADR 0056). A driver not in the table prints its hash and records nothing.
+    // byte-identical to the buffer blocks on WARP and on the RTX; re-recorded by the pixel-footprint fade of the waves, ADR 0056, and by the grid-independent shading normal, ATMO-013). A driver not in the table prints its hash and records nothing.
     const KNOWN: [(&str, u64); 2] = [
-        ("Microsoft Basic Render Driver | Dx12 | Cpu | driver '10.0.26100.9711' ''", 0x089f_3f75_fa7c_fd77),
-        // The RTX hash: recorded 2026-11-01 under MESH_VERSION 10 (`test gpu --real`); another adapter or driver skips with a printed hash.
-        ("NVIDIA GeForce RTX 3080 Ti Laptop GPU | Vulkan | DiscreteGpu | driver 'NVIDIA' '621.01'", 0x9599_4aed_a437_d5f8),
+        ("Microsoft Basic Render Driver | Dx12 | Cpu | driver '10.0.26100.9711' ''", 0xcb76_74ec_ad7a_973c),
+        // The RTX hash: re-recorded 2026-11-02 by the sun-glint-turn fix (ATMO-013), owner bless 2026-11-02 (`test gpu --real`); another adapter or driver skips with a printed hash.
+        ("NVIDIA GeForce RTX 3080 Ti Laptop GPU | Vulkan | DiscreteGpu | driver 'NVIDIA' '621.01'", 0x7f5e_9697_4390_1fb1),
     ];
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let field = Reference(1);
@@ -1099,4 +1099,262 @@ fn a_timed_lit_frame_reports_the_gpu_time_of_every_pass_it_ran_and_the_pixels_do
         "{t:?}"
     );
     assert!(t.passes.get(GpuPass::Tonemap).is_some() && t.passes.get(GpuPass::ExposureAdapt).is_some(), "{t:?}");
+}
+
+// spec: ATMO-013
+/// The owner's blocky sun glint while turning (2026-10-23, RTX): during a turn the plan holds stand-in tiles of coarser levels beside finer
+/// ones, and each tile's grid spacing decided which waves the fragment stage kept, so the shading normal jumped at the tile's border and the
+/// glint broke into rectangles. The normal at a pixel is the sea's, not the tile's: it SHALL NOT depend on the grid spacing of the node that
+/// draws it (only the displaced geometry may).
+#[test]
+fn the_shading_normal_of_the_sea_does_not_depend_on_the_grid_spacing_of_the_tile_that_draws_it() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let field = Reference(1);
+    let size = (192, 120);
+    let (c, heading) = coast(&field, 0.0);
+    let table = LiquidTable::earth();
+    let src = HeightSea { field: &field, level: 0.0 };
+    let camera = coast_camera(c, heading, 0.0, 30.0, 3500.0, 0.0, 8.0, 1.6);
+    let scene = Scene { camera, size, field: &field };
+    let plan = scene.terrain();
+    let mut r = new_renderer(&ctx, size);
+    upload_all(&ctx, &mut r, &plan, &field);
+    r.enable_water(&ctx);
+    let base = frame(&ctx, &mut r, &plan, None, false);
+    let normals = water_plan(&plan, &src, &table, size, 10.0, WaterView::Normals);
+    let drawn = frame(&ctx, &mut r, &plan, Some(&normals), false);
+    // The same sea with every other node taken for a stand-in of a much coarser level (its grid cannot hold the short waves).
+    let mut coarse = normals.clone();
+    for (i, n) in coarse.nodes.iter_mut().enumerate() {
+        if i % 2 == 1 {
+            n.spacing_m *= 64.0;
+        }
+    }
+    let mixed = frame(&ctx, &mut r, &plan, Some(&coarse), false);
+    let (mut water, mut worst, mut sum) = (0usize, 0.0f32, 0.0f64);
+    for (i, p) in drawn.iter().enumerate() {
+        if *p == base[i] || mixed[i] == base[i] {
+            continue;
+        }
+        water += 1;
+        let d = (0..3).map(|k| (p[k] - mixed[i][k]).abs()).fold(0.0f32, f32::max);
+        worst = worst.max(d);
+        sum += f64::from(d);
+    }
+    assert!(water > 2000, "water pixels: {water}");
+    // The displaced geometry moves a few pixels at the border of a wave; the normal view's values are in [0, 1] times the pre-exposure.
+    let mean = sum / water as f64;
+    eprintln!(
+        "normal view, every other tile taken for a coarse stand-in: {water} water pixels, mean difference {mean:.5}, worst {worst:.4}"
+    );
+    assert!(mean < 0.004, "the normal depends on the tile's spacing: mean difference {mean} over {water} pixels (worst {worst})");
+}
+
+// spec: ATMO-013
+/// The owner package for the sun glint (inbox #29, #1072), written to `target/review/sun-glint-turn/` under the adapter's name and
+/// `PLANET_STILLS_TAG` (`before` on the old shader, `after` on the fix; run `before` first: it leaves the scale the `after` run shares).
+/// Per adapter: (1) the step stand-in tiles make in the shading normal, at the pose and with the nodes of the repro test (every other
+/// node's spacing x64), a colour map scaled to the image's own maximum (and, in the `after` run, also to the `before` maximum so the two
+/// compare), with a scale bar; (2) the lit sea with the sun ahead, stand-ins in, cropped to the glint, 2x; (3) a strip of six frames of a
+/// turn (3 degrees a frame, the stand-in pattern changing as the plan's does), the same crop. By hand:
+/// `PLANET_STILLS_TAG=before PLANET_ADAPTER=hardware cargo test -p planet-render --test gpu_all sun_glint_stills -- --ignored`.
+#[test]
+#[ignore = "writes the stills of the owner package, run by hand"]
+fn sun_glint_stills() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let tag = std::env::var("PLANET_STILLS_TAG").unwrap_or_else(|_| "after".into());
+    let adapter: String = ctx.adapter_name().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+    let dir = planet_testkit::repo_root().join("target").join("review").join("sun-glint-turn");
+    std::fs::create_dir_all(&dir).unwrap();
+    let field = Reference(1);
+    let table = LiquidTable::earth();
+    let src = HeightSea { field: &field, level: 0.0 };
+    let (c, heading) = coast(&field, 0.0);
+    let save = |name: &str, w: u32, h: u32, rgba: Vec<u8>| {
+        planet_testkit::write_png(&dir.join(format!("{adapter}-{tag}-{name}.png")), &Image::new(w, h, rgba)).unwrap()
+    };
+    let stand_in = |wp: &WaterPlan, parity: usize| {
+        let mut w = wp.clone();
+        for (i, n) in w.nodes.iter_mut().enumerate() {
+            if (i + parity) % 2 == 1 {
+                n.spacing_m *= 64.0;
+            }
+        }
+        w
+    };
+
+    // (1) The step in the shading normal, at the repro test's pose and size, read from the HDR target (no 8-bit rounding).
+    {
+        let size = (192, 120);
+        let camera = coast_camera(c, heading, 0.0, 30.0, 3500.0, 0.0, 8.0, 1.6);
+        let plan = Scene { camera, size, field: &field }.terrain();
+        let mut r = new_renderer(&ctx, size);
+        upload_all(&ctx, &mut r, &plan, &field);
+        r.enable_water(&ctx);
+        let base = frame(&ctx, &mut r, &plan, None, false);
+        let normals = water_plan(&plan, &src, &table, size, 10.0, WaterView::Normals);
+        let drawn = frame(&ctx, &mut r, &plan, Some(&normals), false);
+        let mixed = frame(&ctx, &mut r, &plan, Some(&stand_in(&normals, 1)), false);
+        let (mut diff, mut water, mut sum) = (vec![0f32; drawn.len()], 0usize, 0f64);
+        for (i, p) in drawn.iter().enumerate() {
+            if *p != base[i] && mixed[i] != base[i] {
+                diff[i] = (0..3).map(|k| (p[k] - mixed[i][k]).abs()).fold(0.0f32, f32::max);
+                water += 1;
+                sum += f64::from(diff[i]);
+            }
+        }
+        let max = diff.iter().copied().fold(0.0f32, f32::max).max(1e-9);
+        let mean = sum / water.max(1) as f64;
+        let scale_file = dir.join(format!("{adapter}-before-step-max.txt"));
+        if tag == "before" {
+            std::fs::write(&scale_file, format!("{max}")).unwrap();
+        }
+        let common: f32 = std::fs::read_to_string(&scale_file).ok().and_then(|t| t.trim().parse().ok()).unwrap_or(max);
+        for (label, top) in [("own-scale", max), ("before-scale", common)] {
+            let (w, h) = (size.0 * 3, size.1 * 3);
+            let bar = 36usize;
+            let mut rgba = vec![0u8; (w as usize + bar) * h as usize * 4];
+            for y in 0..h as usize {
+                for x in 0..w as usize + bar {
+                    let o = (y * (w as usize + bar) + x) * 4;
+                    let px = if x < w as usize {
+                        let d = diff[(y / 3) * size.0 as usize + x / 3];
+                        inferno(d / top)
+                    } else if x >= w as usize + 8 && x < w as usize + 28 {
+                        inferno(1.0 - y as f32 / (h - 1) as f32)
+                    } else {
+                        [20, 20, 20]
+                    };
+                    rgba[o..o + 3].copy_from_slice(&px);
+                    rgba[o + 3] = 255;
+                }
+            }
+            // The ticks of the bar: top (the scale's maximum), three quarters, half, a quarter and zero.
+            for k in 0..=4usize {
+                let y = (k * (h as usize - 1)) / 4;
+                for x in w as usize + 2..w as usize + 8 {
+                    let o = (y * (w as usize + bar) + x) * 4;
+                    rgba[o..o + 3].copy_from_slice(&[255, 255, 255]);
+                }
+            }
+            save(&format!("1-normal-step-{label}-top{top:.4}"), w + bar as u32, h, rgba);
+        }
+        let line = format!(
+            "{adapter} {tag}: normal step of every other tile at x64 spacing: mean {mean:.5}, max {max:.4}, over {water} water pixels\n"
+        );
+        print!("{line}");
+        let mut log = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("numbers.txt")).unwrap();
+        std::io::Write::write_all(&mut log, line.as_bytes()).unwrap();
+    }
+
+    // (2) and (3) The lit sea looking along the coast over open water, the sun low ahead.
+    let size = (320, 200);
+    let aspect = f64::from(size.0) / f64::from(size.1);
+    let up = c;
+    let rotate = |deg: f64| (heading * libm::cos(deg.to_radians()) + up.cross(heading) * libm::sin(deg.to_radians())).normalized();
+    // Whichever side of the coast line is open sea.
+    let side = [90.0, -90.0]
+        .into_iter()
+        .max_by_key(|d| {
+            let cam = coast_camera(c, rotate(*d), 0.0, 8.0, 3500.0, 0.0, 2.0, aspect);
+            let plan = Scene { camera: cam, size: (96, 60), field: &field }.terrain();
+            plan.nodes.len()
+        })
+        .unwrap();
+    let pose = |yaw: f64| coast_camera(c, rotate(side + yaw), 0.0, 8.0, 3500.0, 0.0, 2.0, aspect);
+    let first = pose(0.0);
+    let ahead = (first.forward - first.position.0.normalized() * first.forward.dot(first.position.0.normalized())).normalized();
+    let sun = (ahead * libm::cos(4.0f64.to_radians()) + first.position.0.normalized() * libm::sin(4.0f64.to_radians())).normalized();
+    let lit_with = |yaw: f64, parity: usize| -> (Vec<u8>, (u32, u32)) {
+        let cam = pose(yaw);
+        let plan = Scene { camera: cam, size, field: &field }.terrain();
+        let wp = water_plan(&plan, &src, &table, size, 4.0, WaterView::Lit);
+        let mut r = new_renderer(&ctx, size);
+        upload_all(&ctx, &mut r, &plan, &field);
+        r.enable_water(&ctx);
+        let mut p = plan.clone();
+        let mut lit = lit_plan(false);
+        lit.sun_dir = [sun.x as f32, sun.y as f32, sun.z as f32];
+        p.lit = Some(lit);
+        p.water = Some(stand_in(&wp, parity));
+        r.render(&ctx, &p, false).unwrap();
+        let f = r.read_color(&ctx);
+        (f.rgba, (f.width, f.height))
+    };
+    // The crop: 160 x 100 around the centroid of the brightest pixels of the frame (the glint).
+    let crop = |rgba: &[u8], (w, h): (u32, u32)| -> Vec<u8> {
+        let lum = |i: usize| u32::from(rgba[i * 4]) + u32::from(rgba[i * 4 + 1]) + u32::from(rgba[i * 4 + 2]);
+        let max = (0..(w * h) as usize).map(lum).max().unwrap_or(1);
+        let (mut sx, mut sy, mut n) = (0u64, 0u64, 0u64);
+        for i in 0..(w * h) as usize {
+            if lum(i) * 10 >= max * 9 {
+                sx += (i as u64) % u64::from(w);
+                sy += (i as u64) / u64::from(w);
+                n += 1;
+            }
+        }
+        let (cx, cy) = ((sx / n.max(1)) as i64, (sy / n.max(1)) as i64);
+        let (x0, y0) = ((cx - 80).clamp(0, i64::from(w) - 160) as usize, (cy - 50).clamp(0, i64::from(h) - 100) as usize);
+        let mut out = Vec::with_capacity(160 * 100 * 4);
+        for y in 0..100usize {
+            for x in 0..160usize {
+                let o = ((y0 + y) * w as usize + x0 + x) * 4;
+                out.extend_from_slice(&rgba[o..o + 4]);
+            }
+        }
+        out
+    };
+    let double = |px: &[u8], w: usize, h: usize| -> Vec<u8> {
+        let mut out = Vec::with_capacity(w * h * 4 * 4);
+        for y in 0..h * 2 {
+            for x in 0..w * 2 {
+                let o = ((y / 2) * w + x / 2) * 4;
+                out.extend_from_slice(&px[o..o + 4]);
+            }
+        }
+        out
+    };
+    // (2) The pair: the frame as planned and the frame with stand-ins, glint crops at 2x, side by side with a divider.
+    let (planned, dims) = lit_with(0.0, 0);
+    let (stand, _) = lit_with(0.0, 1);
+    let (a, b) = (double(&crop(&planned, dims), 160, 100), double(&crop(&stand, dims), 160, 100));
+    let mut pair = Vec::new();
+    for y in 0..200usize {
+        pair.extend_from_slice(&a[y * 320 * 4..(y + 1) * 320 * 4]);
+        pair.extend_from_slice(&[255, 255, 255, 255, 255, 255, 255, 255]);
+        pair.extend_from_slice(&b[y * 320 * 4..(y + 1) * 320 * 4]);
+    }
+    save("2-glint-as-planned-left-stand-ins-right-2x", 322 + 320, 200, pair);
+    // (3) The strip: six frames of a turn, 3 degrees a frame, stand-in tiles alternating with the frame.
+    let mut strip = vec![0u8; 0];
+    let frames: Vec<Vec<u8>> = (0..6usize).map(|k| double(&crop(&lit_with(3.0 * k as f64, k % 2).0, dims), 160, 100)).collect();
+    for y in 0..200usize {
+        for (k, f) in frames.iter().enumerate() {
+            strip.extend_from_slice(&f[y * 320 * 4..(y + 1) * 320 * 4]);
+            if k < 5 {
+                strip.extend_from_slice(&[255, 255, 255, 255, 255, 255, 255, 255]);
+            }
+        }
+    }
+    save("3-turn-strip-six-frames-2x", 320 * 6 + 10, 200, strip);
+}
+
+/// A black-purple-orange-yellow colour map, `t` in [0, 1].
+fn inferno(t: f32) -> [u8; 3] {
+    let t = t.clamp(0.0, 1.0);
+    let stops: [(f32, [f32; 3]); 5] = [
+        (0.0, [0.0, 0.0, 0.0]),
+        (0.25, [87.0, 16.0, 110.0]),
+        (0.5, [188.0, 55.0, 84.0]),
+        (0.75, [249.0, 142.0, 9.0]),
+        (1.0, [252.0, 255.0, 164.0]),
+    ];
+    for w in stops.windows(2) {
+        let ((t0, c0), (t1, c1)) = (w[0], w[1]);
+        if t <= t1 {
+            let f = (t - t0) / (t1 - t0);
+            return [0, 1, 2].map(|k| (c0[k] + (c1[k] - c0[k]) * f) as u8);
+        }
+    }
+    [252, 255, 164]
 }

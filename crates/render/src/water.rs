@@ -206,7 +206,10 @@ fn fs_water(in: WOut) -> @location(0) vec4<f32> {
     let up = up_at(node.up, in.local);
     let cam = node.origin_rel.xyz + in.local;
     let dist = length(cam);
-    let w = water_waves(liq, in.local, up, rec.phases, in.spacing, in.depth, WG.a.w, footprint);
+    // The shading normal is the sea's, not the tile's: every wave the pixel can resolve is in it (the footprint fades the ones it cannot), whatever
+    // the grid spacing of the tile that draws it. Only the vertex stage holds the waves its grid can (`in.spacing`); the normal at a stand-in tile's
+    // border (a turn, STRM-016) would otherwise jump with the tile's level and break the glint into rectangles.
+    let w = water_waves(liq, in.local, up, rec.phases, 1.0e-3, in.depth, WG.a.w, footprint);
     let n = normalize(up - w.slope);
     let v = -cam / dist;
     let sun = vec3<f32>(bitcast<f32>(g.mode.y), bitcast<f32>(g.mode.z), bitcast<f32>(g.mode.w));

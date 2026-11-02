@@ -4,7 +4,7 @@
 ## 2. Belts on the new coasts
 - [x] 2.1 Plate draws scored by land next to a convergent margin; coast distances on the smooth value; coast gate; mountains' membership; `CLASS_SOURCE_VERSION` 4
 ## 3. Preview and checks
-- [x] 3.1 S9, S10, S11, polar in `shape.rs` and the report; default seed 3
+- [x] 3.1 S9, S10, S11, polar in `shape.rs` and the report; default seed 14
 - [x] 3.2 TEST-087, TEST-088 (tier B); tier-A tests for determinism and the fingerprint
 - [ ] 3.3 Re-pin the known answers of GLOBAL_VERSION 6
 - [ ] 3.4 numerics-reviewer, verifier, spec-guardian

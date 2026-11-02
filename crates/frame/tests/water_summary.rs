@@ -98,7 +98,7 @@ fn a_coarse_answer_is_a_superset_of_the_point_query_a_parent_is_wet_where_its_ch
 // spec: ATMO-012
 #[test]
 fn a_tile_job_of_a_coarse_tile_reads_no_block_and_one_of_a_fine_tile_at_most_four() {
-    // Seed 3 (the reference world; seed 5 has no coarse tile without water since the continent stage of GLOBAL_VERSION 6).
+    // Seed 3 (seeds 5 and 14, the reference world, fail the check below that the test bake has both sea and land tiles at this resolution, since the continent stage of GLOBAL_VERSION 6).
     let def = WorldDefinition::single_planet(R, 3);
     let world = GlobalWorld::from_definition(&def).unwrap().with_block_limit(8);
     let (res, d) = (64u32, Dir::new("jobs"));
