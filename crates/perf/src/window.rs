@@ -430,8 +430,11 @@ mod tests {
             ("metrics nope\nflight a stream dive", "unknown metric"),
             ("frobnicate 3", "unknown statement"),
             ("rounds 3", "no flight"),
-            ("metrics
-flight a stream dive", "no metric"),
+            (
+                "metrics
+flight a stream dive",
+                "no metric",
+            ),
         ] {
             let e = parse_plan(bad).unwrap_err();
             assert!(e.contains(says), "{bad}: {e}");
