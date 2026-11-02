@@ -256,8 +256,10 @@ fn taps(p: vec2<i32>, zf: f32, tolerance: f32) -> vec4<f32> {
 // surface, so the edge keeps its tolerance), the larger of the two axes.
 fn depth_gradient(p: vec2<i32>, zf: f32) -> f32 {
     let last = vec2<i32>(i32(r.dims.x) - 1, i32(r.dims.y) - 1);
-    var gx = 1.0e9;
-    var gy = 1.0e9;
+    var gx = 0.0;
+    var gy = 0.0;
+    var seen_x = false;
+    var seen_y = false;
     for (var k = 0; k < 4; k = k + 1) {
         var o = vec2<i32>(0, 0);
         if (k == 0) { o = vec2<i32>(-1, 0); }
@@ -268,13 +270,15 @@ fn depth_gradient(p: vec2<i32>, zf: f32) -> f32 {
         if (dn > 0.0) {
             let dz = abs(r.cur.k.z / dn - zf);
             if (k < 2) {
-                gx = min(gx, dz);
+                gx = select(min(gx, dz), dz, !seen_x);
+                seen_x = true;
             } else {
-                gy = min(gy, dz);
+                gy = select(min(gy, dz), dz, !seen_y);
+                seen_y = true;
             }
         }
     }
-    return max(select(gx, 0.0, gx > 1.0e8), select(gy, 0.0, gy > 1.0e8));
+    return max(gx, gy);
 }
 
 @compute @workgroup_size(8, 8, 1)
