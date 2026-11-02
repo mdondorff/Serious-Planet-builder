@@ -1100,3 +1100,52 @@ fn a_timed_lit_frame_reports_the_gpu_time_of_every_pass_it_ran_and_the_pixels_do
     );
     assert!(t.passes.get(GpuPass::Tonemap).is_some() && t.passes.get(GpuPass::ExposureAdapt).is_some(), "{t:?}");
 }
+
+// spec: ATMO-013
+/// The owner's blocky sun glint while turning (2026-10-23, RTX): during a turn the plan holds stand-in tiles of coarser levels beside finer
+/// ones, and each tile's grid spacing decided which waves the fragment stage kept, so the shading normal jumped at the tile's border and the
+/// glint broke into rectangles. The normal at a pixel is the sea's, not the tile's: it SHALL NOT depend on the grid spacing of the node that
+/// draws it (only the displaced geometry may).
+#[test]
+fn the_shading_normal_of_the_sea_does_not_depend_on_the_grid_spacing_of_the_tile_that_draws_it() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let field = Reference(1);
+    let size = (192, 120);
+    let (c, heading) = coast(&field, 0.0);
+    let table = LiquidTable::earth();
+    let src = HeightSea { field: &field, level: 0.0 };
+    let camera = coast_camera(c, heading, 0.0, 30.0, 3500.0, 0.0, 8.0, 1.6);
+    let scene = Scene { camera, size, field: &field };
+    let plan = scene.terrain();
+    let mut r = new_renderer(&ctx, size);
+    upload_all(&ctx, &mut r, &plan, &field);
+    r.enable_water(&ctx);
+    let base = frame(&ctx, &mut r, &plan, None, false);
+    let normals = water_plan(&plan, &src, &table, size, 10.0, WaterView::Normals);
+    let drawn = frame(&ctx, &mut r, &plan, Some(&normals), false);
+    // The same sea with every other node taken for a stand-in of a much coarser level (its grid cannot hold the short waves).
+    let mut coarse = normals.clone();
+    for (i, n) in coarse.nodes.iter_mut().enumerate() {
+        if i % 2 == 1 {
+            n.spacing_m *= 64.0;
+        }
+    }
+    let mixed = frame(&ctx, &mut r, &plan, Some(&coarse), false);
+    let (mut water, mut worst, mut sum) = (0usize, 0.0f32, 0.0f64);
+    for (i, p) in drawn.iter().enumerate() {
+        if *p == base[i] || mixed[i] == base[i] {
+            continue;
+        }
+        water += 1;
+        let d = (0..3).map(|k| (p[k] - mixed[i][k]).abs()).fold(0.0f32, f32::max);
+        worst = worst.max(d);
+        sum += f64::from(d);
+    }
+    assert!(water > 2000, "water pixels: {water}");
+    // The displaced geometry moves a few pixels at the border of a wave; the normal view's values are in [0, 1] times the pre-exposure.
+    let mean = sum / water as f64;
+    eprintln!(
+        "normal view, every other tile taken for a coarse stand-in: {water} water pixels, mean difference {mean:.5}, worst {worst:.4}"
+    );
+    assert!(mean < 0.004, "the normal depends on the tile's spacing: mean difference {mean} over {water} pixels (worst {worst})");
+}
