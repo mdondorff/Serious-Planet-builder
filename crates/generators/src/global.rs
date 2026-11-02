@@ -24,14 +24,13 @@ use crate::height::layer_noise;
 /// Bump whenever any output of this module changes (ADR 0006). History: 2 = the climate's pole axis moved to COORD's +z (3);
 /// 4 = the global stage gains the ocean-connectivity channel (`crate::ocean`, ADR 0041 point 2); the four sample channels are
 /// unchanged, but every key under this version is new, so stored blocks of version 3 are unreachable; 5 = the hill band joins the elevation
-/// (GEN-064, ADR 0080).
-pub const GLOBAL_VERSION: u32 = 5;
+/// (GEN-064, ADR 0080); 6 = the continent value comes from the continent stage (`crate::continents`, GEN-104).
+pub const GLOBAL_VERSION: u32 = 6;
 /// Names this implementation in cache keys (CON-07).
 pub const IMPLEMENTATION_ID: &str = "cpu-global-coarse-v1";
 
 /// Domain tags so the lattices of different layers never alias for the same seed.
 const LAYER_WARP: u64 = 0x474c_0001;
-const LAYER_CONTINENT: u64 = 0x474c_0002;
 const LAYER_RIDGE: u64 = 0x474c_0003;
 const LAYER_RANGE_MASK: u64 = 0x474c_0004;
 const LAYER_TEMPERATURE: u64 = 0x474c_0005;
@@ -120,7 +119,7 @@ impl GlobalCoarseGenerator {
 /// The four channels of the global-coarse field at one point.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GlobalSample {
-    /// Continentalness in [-1.7, 1.7]; above [`SEA_LEVEL_C`] is land.
+    /// Continentalness (about -2 to 2); above [`SEA_LEVEL_C`] is land.
     pub continent: f32,
     /// Elevation above the reference surface in metres (negative below sea level).
     pub elevation_m: f32,
@@ -168,10 +167,13 @@ pub(crate) struct Terrain {
     pub(crate) land_depth: f64,
     pub(crate) zone: f64,
     pub(crate) inland: f64,
+    /// The landform driver `zone * smoothstep(0.02, 0.35, depth)` of the coarse continent value (GEN-104): the full value's coast is rough at the scale of one lattice cell, so a
+    /// driver that rose with it could not be held by the lattice. It is 0 at the coarse coast, not exactly at the full value's.
+    pub(crate) driver: f64,
 }
 
 pub(crate) fn terrain(seed: u64, d: Vec3) -> Terrain {
-    // Continents: low-frequency fBm of a domain-warped direction, so coastlines are not round blobs.
+    // The warped direction for the range zone and the ridges; the continent value has its own stage (GEN-104).
     let warp = Vec3::new(
         fbm(seed, LAYER_WARP, d + Vec3::new(0.0, 0.0, 0.0), 1.3, 3),
         fbm(seed, LAYER_WARP, d + Vec3::new(17.0, 0.0, 0.0), 1.3, 3),
@@ -179,11 +181,18 @@ pub(crate) fn terrain(seed: u64, d: Vec3) -> Terrain {
     );
     let warped = d + warp * 0.45;
     // Rounded to the stored f32 first, so land and the sign of the elevation are decided from the same number.
-    let continent = f64::from((fbm(seed, LAYER_CONTINENT, warped, 1.1, 5) * 1.7) as f32);
+    let continent = f64::from(crate::continents::continent(seed, d) as f32);
     let land_depth = continent - SEA_LEVEL_C;
     let zone = smoothstep(0.1, 0.6, fbm(seed, LAYER_RANGE_MASK, warped, 1.7, 3) + 0.2);
     let inland = smoothstep(0.02, 0.35, land_depth);
-    Terrain { warped, continent, land_depth, zone, inland }
+    let coarse_depth = f64::from(crate::continents::continent_coarse(seed, d) as f32) - SEA_LEVEL_C;
+    let driver = zone * smoothstep(0.02, 0.35, coarse_depth);
+    Terrain { warped, continent, land_depth, zone, inland, driver }
+}
+
+/// The land depth (continent value minus the sea level) at `d`: the continent stage alone, without the rest of [`terrain`].
+pub fn continent_land_depth(seed: u64, d: Vec3) -> f64 {
+    f64::from(crate::continents::continent(seed, d) as f32) - SEA_LEVEL_C
 }
 
 /// The ridge term of the mountain ranges at the warped direction, in `[0, 1]`.
@@ -198,7 +207,7 @@ pub(crate) fn ridge_at(seed: u64, warped: Vec3) -> f64 {
 /// not read the hill band, so the band's amplitude does not feed back into the driver that sets it, and the same bits at any bake resolution.
 pub fn landform(seed: u64, d: Vec3) -> f64 {
     let t = terrain(seed, d);
-    t.zone * t.inland
+    t.driver
 }
 
 /// Cells per face edge of the [`LandformLattice`]: 256 cells of 2/256 in the face coordinate, about 39 km at the face centre.
@@ -325,7 +334,7 @@ fn hill_band(seed: u64, t: &Terrain, ridge: f64) -> f64 {
     if t.land_depth <= 0.0 {
         return 0.0;
     }
-    let m = t.zone * t.inland * (0.25 + 0.75 * ridge);
+    let m = t.driver * (0.25 + 0.75 * ridge);
     hill_amplitude_m(m) * hill_octaves(seed, t) * smoothstep(0.0, 0.1, t.land_depth)
 }
 
@@ -367,22 +376,29 @@ pub fn sample(seed: u64, d: Vec3) -> GlobalSample {
     let ridge = ridge_at(seed, t.warped);
     let elevation = (base + 5200.0 * ridge * zone * inland + hill_band(seed, &t, ridge)).clamp(MIN_ELEVATION_M, MAX_ELEVATION_M);
 
-    // Climate (latitude from COORD's +z pole, see [`sin_latitude`]): temperature falls with latitude and, over land, with height; rain follows the latitude bands.
+    let (temperature_c, precipitation_mm) = climate_from_elevation(seed, d, elevation, if land_depth > 0.0 { inland } else { 0.0 });
+
+    GlobalSample {
+        continent: continent as f32, // exact: already rounded above
+        elevation_m: elevation as f32,
+        temperature_c,
+        precipitation_mm,
+    }
+}
+
+/// The climate formula of the global-coarse field (latitude from COORD's +z pole, see [`sin_latitude`]) for a given `elevation` in metres and `interior` (the land's
+/// inland measure in `[0, 1]`, 0 over the sea): temperature falls with latitude and, over land, with height; rain follows the latitude bands and dries towards the interior.
+/// [`sample`] calls it with the generator's elevation; a test field calls it with its own heights (GEN-021), so the climate follows the field it colours.
+pub fn climate_from_elevation(seed: u64, d: Vec3, elevation: f64, interior: f64) -> (f32, f32) {
     let sin_lat = sin_latitude(d);
     let lat_deg = libm::asin(sin_lat) * (180.0 / core::f64::consts::PI);
     let abs_lat = libm::fabs(lat_deg);
     let altitude_km = elevation.max(0.0) / 1000.0;
     let temperature = 30.0 - 55.0 * sin_lat * sin_lat - 6.5 * altitude_km + 4.0 * fbm(seed, LAYER_TEMPERATURE, d, 2.0, 3);
     let bands = 700.0 + 1900.0 * gauss(lat_deg, 0.0, 12.0) + 900.0 * gauss(abs_lat, 52.0, 14.0) - 650.0 * gauss(abs_lat, 27.0, 8.0);
-    let wetness = 1.0 + 0.45 * fbm(seed, LAYER_RAIN, d, 2.5, 3) - if land_depth > 0.0 { 0.25 * inland } else { 0.0 };
+    let wetness = 1.0 + 0.45 * fbm(seed, LAYER_RAIN, d, 2.5, 3) - 0.25 * interior;
     let precipitation = (bands * wetness).clamp(0.0, 4500.0);
-
-    GlobalSample {
-        continent: continent as f32, // exact: already rounded above
-        elevation_m: elevation as f32,
-        temperature_c: temperature as f32,
-        precipitation_mm: precipitation as f32,
-    }
+    (temperature as f32, precipitation as f32)
 }
 
 /// The baked field of one body: `(res + 1)^2` samples per face (`res` cells per face edge), vertices included, so the
