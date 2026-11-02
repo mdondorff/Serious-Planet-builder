@@ -270,3 +270,71 @@ fn fields_over_a_bake_take_their_climate_from_the_integer_reader_and_key_with_th
     assert_eq!(climate_tile(&src, t).unwrap(), want);
     assert_ne!(climate_version_word(), planet_generators::climate::analytic_version_word());
 }
+
+/// A field of a constant height (its own world, not the generator's).
+struct Level(f64);
+
+impl HeightField for Level {
+    fn height(&self, _: planet_core::Vec3) -> f64 {
+        self.0
+    }
+    fn seed(&self) -> u64 {
+        SEED
+    }
+    fn implementation_id(&self) -> &'static str {
+        "test-level"
+    }
+    fn version(&self) -> u32 {
+        1
+    }
+    fn max_abs_height_m(&self) -> f64 {
+        self.0.abs()
+    }
+}
+
+// spec: GEN-021
+#[test]
+fn the_climate_of_a_field_without_a_bake_is_the_formula_over_its_own_heights_and_not_the_generators_world() {
+    use planet_generators::climate::{analytic_version_word, height_climate};
+    use planet_generators::global::climate_from_elevation;
+    use planet_generators::height::height_at;
+    let (f, t) = (Reference(SEED), id(2, 8, 77, 31));
+    let got = f.climate(&TangentWarp, t);
+    // Exactly the formula applied to the reference generator's own height at each texel.
+    let (mut temp, mut precip) = ([0f32; CLIMATE_TEXELS], [0f32; CLIMATE_TEXELS]);
+    for b in 0..CLIMATE_EDGE {
+        for a in 0..CLIMATE_EDGE {
+            let d = t.sample_direction(&TangentWarp, CLIMATE_CELLS, a as u32, b as u32);
+            (temp[b * CLIMATE_EDGE + a], precip[b * CLIMATE_EDGE + a]) = climate_from_elevation(SEED, d, height_at(SEED, d), 0.0);
+        }
+    }
+    assert_eq!(got, ClimateTexture::from_f32(&temp, &precip), "the reference field's climate is the formula over its own heights");
+    assert_eq!(got, height_climate(SEED, &TangentWarp, t, &|d| height_at(SEED, d)));
+    // Not the generator's: the same seed's global-coarse field (its continents) gives other texels.
+    let differs = (0..6u8)
+        .flat_map(|face| (0..4u32).map(move |x| id(face, 2, x, 1)))
+        .any(|tile| f.climate(&TangentWarp, tile) != analytic_climate(SEED, &TangentWarp, tile));
+    assert!(
+        differs,
+        "the reference field's climate does not read the generator's world: some tile of level 2 differs from the generator's"
+    );
+    // The version word names the function, not the generator: it does not fold GLOBAL_VERSION (a generator change moves no such field's keys).
+    assert_ne!(analytic_version_word(), climate_version_word());
+}
+
+// spec: GEN-021
+#[test]
+fn the_temperature_of_a_field_without_a_bake_follows_its_own_altitude() {
+    let t = id(1, 6, 10, 20);
+    let (low, high) = (Level(0.0).climate(&TangentWarp, t), Level(2_000.0).climate(&TangentWarp, t));
+    for b in 0..CLIMATE_EDGE {
+        for a in 0..CLIMATE_EDGE {
+            let drop = low.texel(a, b).0 - high.texel(a, b).0;
+            // 6.5 degrees per km over 2 km, up to the f16 rounding of both values.
+            assert!((drop - 13.0).abs() < 0.05, "texel ({a}, {b}) cools by {drop}, not 13 degrees, over 2 km");
+            assert_eq!(low.texel(a, b).1, high.texel(a, b).1, "the rain does not depend on the altitude");
+        }
+    }
+    // A field below sea level is as warm as one at sea level (the altitude is clamped at 0, as in the generator's formula).
+    assert_eq!(Level(-500.0).climate(&TangentWarp, t), low);
+}

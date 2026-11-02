@@ -376,22 +376,29 @@ pub fn sample(seed: u64, d: Vec3) -> GlobalSample {
     let ridge = ridge_at(seed, t.warped);
     let elevation = (base + 5200.0 * ridge * zone * inland + hill_band(seed, &t, ridge)).clamp(MIN_ELEVATION_M, MAX_ELEVATION_M);
 
-    // Climate (latitude from COORD's +z pole, see [`sin_latitude`]): temperature falls with latitude and, over land, with height; rain follows the latitude bands.
+    let (temperature_c, precipitation_mm) = climate_from_elevation(seed, d, elevation, if land_depth > 0.0 { inland } else { 0.0 });
+
+    GlobalSample {
+        continent: continent as f32, // exact: already rounded above
+        elevation_m: elevation as f32,
+        temperature_c,
+        precipitation_mm,
+    }
+}
+
+/// The climate formula of the global-coarse field (latitude from COORD's +z pole, see [`sin_latitude`]) for a given `elevation` in metres and `interior` (the land's
+/// inland measure in `[0, 1]`, 0 over the sea): temperature falls with latitude and, over land, with height; rain follows the latitude bands and dries towards the interior.
+/// [`sample`] calls it with the generator's elevation; a test field calls it with its own heights (GEN-021), so the climate follows the field it colours.
+pub fn climate_from_elevation(seed: u64, d: Vec3, elevation: f64, interior: f64) -> (f32, f32) {
     let sin_lat = sin_latitude(d);
     let lat_deg = libm::asin(sin_lat) * (180.0 / core::f64::consts::PI);
     let abs_lat = libm::fabs(lat_deg);
     let altitude_km = elevation.max(0.0) / 1000.0;
     let temperature = 30.0 - 55.0 * sin_lat * sin_lat - 6.5 * altitude_km + 4.0 * fbm(seed, LAYER_TEMPERATURE, d, 2.0, 3);
     let bands = 700.0 + 1900.0 * gauss(lat_deg, 0.0, 12.0) + 900.0 * gauss(abs_lat, 52.0, 14.0) - 650.0 * gauss(abs_lat, 27.0, 8.0);
-    let wetness = 1.0 + 0.45 * fbm(seed, LAYER_RAIN, d, 2.5, 3) - if land_depth > 0.0 { 0.25 * inland } else { 0.0 };
+    let wetness = 1.0 + 0.45 * fbm(seed, LAYER_RAIN, d, 2.5, 3) - 0.25 * interior;
     let precipitation = (bands * wetness).clamp(0.0, 4500.0);
-
-    GlobalSample {
-        continent: continent as f32, // exact: already rounded above
-        elevation_m: elevation as f32,
-        temperature_c: temperature as f32,
-        precipitation_mm: precipitation as f32,
-    }
+    (temperature as f32, precipitation as f32)
 }
 
 /// The baked field of one body: `(res + 1)^2` samples per face (`res` cells per face edge), vertices included, so the

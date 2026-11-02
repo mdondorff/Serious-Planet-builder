@@ -92,7 +92,7 @@ mod tests {
         assert_eq!(get("base"), "b00fa2b4b0f9accc87be74b4dd9d40ca");
         assert_eq!(get("height"), "340480159ae2ca791db08d1cae1232ce");
         // MESH_VERSION 10, driver block, ADR 0076/GEN-071 (was 4843c471858a5aff0c6741d4cd9a60c0 under 9).
-        assert_eq!(get("mesh"), "3ea4f12a61251092f38a2b1d1a3b8b43");
+        assert_eq!(get("mesh"), "4edba8989effcc04639e468142bd8803");
         assert_eq!(get("node"), "dd934e9e858a828bb73c45e8a4eb4d45");
         assert_eq!(get("body"), "91f0cebc78907779e2f87196650d468e");
         assert_eq!(get("emptyquery"), "a97668a9d9614a3f4a73f2fceae97219");
