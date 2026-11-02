@@ -89,6 +89,7 @@ path = "junit.xml"
 # Only the start order and the overlap change: no test is skipped, retried or changed, and the software and WARP runs keep the
 # default profile.
 [test-groups]
+warp-heavy = { max-threads = 1 }
 real-gpu-heavy = { max-threads = 2 }
 heavy-window = { max-threads = 2 }
 gpu-tier = { max-threads = 8 }
@@ -107,6 +108,15 @@ or (package(=planet) and binary(gpu_all) and test(/^(gpu_water_coverage|gpu_stre
 or (package(=planet-cache) and binary(oracle_all) and test(/^oracle_concurrent_source::/))
 '''
 test-group = "real-gpu-heavy"
+
+# The coastal flight and the real-window tests run one at a time (planner, 2026-11-02). Each software rasteriser uses every core, and the flight is
+# the last test of the Windows CI partition `C 1/2`: in the CI run of #1100 it took 390.7 s (120 s on main at ff86ac73, 147, 170, 352 since) while
+# `gpu_window::the_window_path_opens_runs_the_flight_lit_with_the_atmosphere_and_closes` (249 s), `gpu_window::the_editor_mode_places_drags_types_undoes_and_deletes_in_the_real_window_and_writes_the_item_file` (123 s),
+# `gpu_water_coverage` (114 s) and the item sweep (60 s) ran at the same time; the flight draws no shadow march, so its own work did not change. The first
+# matching override sets the group, so this one comes before the `heavy-window` one. Only the overlap changes: no test is skipped, retried or changed.
+[[profile.default.overrides]]
+filter = '(package(=planet-render) and binary(gpu_all) and test(a_coastal_flight_at_low_altitude_flickers_within_the_budget_while_the_lod_changes_under_it)) or (package(=planet) and binary(gpu_all) and test(/^gpu_window::/))'
+test-group = "warp-heavy"
 
 # The heavy software-adapter window and scene tests (the tracked tier-C timeouts: `gpu_window`, `gpu_water_coverage`, `gpu_stream_perf`,
 # `gpu_envelope_perf`) are CPU-bound (each software rasteriser uses every core) and their wall time swings 2 to 5 times with how many of them run
