@@ -646,11 +646,11 @@ pub fn relief(f: &Fields) -> Relief {
     }
 }
 
-/// The report lines of the relief measures beside SPIKE-93's bands (proposed, the owner's yes pending; Earth from ETOPO 2022, land under 60 degrees).
+/// The report lines of the relief measures beside SPIKE-93's bands (approved by the owner, 2026-11-02; Earth from ETOPO 2022, land under 60 degrees).
 fn relief_report(f: &Fields) -> String {
     let r = relief(f);
     let band = |v: f64, lo: f64, hi: f64| if v >= lo && v <= hi { "in band" } else { "OUT OF BAND" };
-    let mut t = String::from("relief against Earth (SPIKE-93, bands proposed and the owner's yes pending; land under 60 degrees; on the preview grid, before any bake):
+    let mut t = String::from("relief against Earth (SPIKE-93, bands approved by the owner 2026-11-02; land under 60 degrees; on the preview grid, before any bake):
 ");
     let pct = |name: &str, v: f64, earth: &str, lo: f64, hi: f64| {
         format!(
