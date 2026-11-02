@@ -750,8 +750,14 @@ fn atm_terrain_lighting(normal: vec3<f32>, up: vec3<f32>, h_alt: f32, sun: vec3<
     return atm_terrain_lighting_vis(normal, up, h_alt, sun, 1.0);
 }
 
-// The same with the direct term multiplied by `vis`, the horizon shadow's factor (REND-038); the ambient is not shadowed.
-fn atm_terrain_lighting_vis(normal: vec3<f32>, up: vec3<f32>, h_alt: f32, sun: vec3<f32>, vis: f32) -> vec3<f32> {
+// The light as two parts: the multiple-scattering ambient and the direct term times `vis`, the horizon shadow's factor (REND-038); the
+// ambient is not shadowed. The terrain pass writes the parts to two targets (REND-051).
+struct LightParts {
+    amb: vec3<f32>,
+    dir: vec3<f32>,
+}
+
+fn atm_terrain_lighting_parts(normal: vec3<f32>, up: vec3<f32>, h_alt: f32, sun: vec3<f32>, vis: f32) -> LightParts {
     let n = normalize(normal);
     let ndl = max(dot(n, sun), 0.0);
     let mu_s = clamp(dot(up, sun), -1.0, 1.0);
@@ -760,7 +766,13 @@ fn atm_terrain_lighting_vis(normal: vec3<f32>, up: vec3<f32>, h_alt: f32, sun: v
     let shadow = atm_planet_shadow(h, mu_s);
     let ms = atm_multiscatter(h, mu_s);
     let hemi = 0.5 + 0.5 * clamp(dot(n, up), -1.0, 1.0);
-    return t * (shadow * ndl * 0.31830988618 * vis) + ms * hemi;
+    return LightParts(ms * hemi, t * (shadow * ndl * 0.31830988618 * vis));
+}
+
+// The same summed.
+fn atm_terrain_lighting_vis(normal: vec3<f32>, up: vec3<f32>, h_alt: f32, sun: vec3<f32>, vis: f32) -> vec3<f32> {
+    let p = atm_terrain_lighting_parts(normal, up, h_alt, sun, vis);
+    return p.dir + p.amb;
 }
 
 // The sun's illuminance that reaches the surface (the transmittance and the planet's shadow, one unit outside the atmosphere): what the
@@ -796,8 +808,42 @@ fn atm_shade_lit(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up: ve
     return clamp(atm_terrain_radiance(view, tab, normal, up, t, p, h, ramp_min, h_alt, sun, vis) * factor, vec3<f32>(0.0), vec3<f32>(60000.0));
 }
 
+// The parts of `atm_terrain_radiance` after the pre-exposure factor: `amb` is what the sun's shadow does not touch, `dir` the direct term
+// (zero for the views without lighting).
+struct LitParts {
+    amb: vec3<f32>,
+    dir: vec3<f32>,
+}
+
+fn atm_shade_lit_parts(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32, ramp_min: f32, h_alt: f32, sun: vec3<f32>, vis: f32, factor: f32) -> LitParts {
+    let n = normalize(normal);
+    let cs = clamp(dot(n, up), 0.0, 1.0);
+    let inv_pi = 0.31830988618;
+    let hi = vec3<f32>(60000.0);
+    var amb = vec3<f32>(0.0);
+    var dir = vec3<f32>(0.0);
+    if (view >= 3u) {
+        amb = climate_colour(view, t, p) * inv_pi;
+    } else {
+        let light = atm_terrain_lighting_parts(normal, up, h_alt, sun, vis);
+        if (view == 2u) {
+            amb = light.amb;
+            dir = light.dir;
+        } else {
+            let a = albedo_of(tab, t, p, cs, h, ramp_min);
+            if (view == 1u) {
+                amb = a * inv_pi;
+            } else {
+                amb = a * light.amb;
+                dir = a * light.dir;
+            }
+        }
+    }
+    return LitParts(clamp(amb * factor, vec3<f32>(0.0), hi), clamp(dir * factor, vec3<f32>(0.0), hi));
+}
+
 @fragment
-fn fs_lit_atmo(in: VsOut) -> @location(0) vec4<f32> {
+fn fs_lit_atmo(in: VsOut) -> LitOut {
     // The derivatives of the inner function come first; a node drawn over some quadrants discards the rest after them (STRM-016).
     let c = fs_lit_atmo_view(in);
     if (CUT_QUADRANTS && quadrant_cut(in)) {
@@ -806,34 +852,50 @@ fn fs_lit_atmo(in: VsOut) -> @location(0) vec4<f32> {
     return c;
 }
 
-fn fs_lit_atmo_view(in: VsOut) -> vec4<f32> {
+fn fs_lit_atmo_view(in: VsOut) -> LitOut {
     let sun = vec3<f32>(bitcast<f32>(g.mode.y), bitcast<f32>(g.mode.z), bitcast<f32>(g.mode.w));
     let up = up_at(nodes[in.node_index].up, in.local);
     let climate = tile_climate(in);
     let drv = tile_drivers(in);
     let gd = ground_detail(in.node_index, in.local, in.normal, up, climate.x, climate.y, in.height - g.extra.x, drv);
-    // The horizon shadow multiplies the direct sun term (REND-038): 1.0 where no horizon map is there.
+    // The direct sun term is unshadowed here: the shadow of the march applies to `sun-direct` in the shadow-apply pass (REND-051).
     let coarse_fade = horizon_coarse_fade(camera_distance(nodes[in.node_index].origin_rel, in.local));
-    let sun_vis = select(1.0, shadow_factor(in.node_index, in.aux, up, sun, coarse_fade, max(in.height, 0.0)), g.mode.x == 0u || g.mode.x == 2u);
-    var rgb = atm_shade_lit(g.mode.x, g.albedo, gd.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), in.height, sun, sun_vis, g.range.z) * detail_mul(gd, g.mode.x, g.albedo, climate.x, climate.y, clamp(dot(normalize(gd.normal), up), 0.0, 1.0), in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)));
+    let parts = atm_shade_lit_parts(g.mode.x, g.albedo, gd.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), in.height, sun, 1.0, g.range.z);
+    let dm = detail_mul(gd, g.mode.x, g.albedo, climate.x, climate.y, clamp(dot(normalize(gd.normal), up), 0.0, 1.0), in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)));
+    // The ambient goes to the scene target, the direct term to `sun-direct`, where the shadow applies to it (REND-051).
+    var amb = parts.amb * dm;
+    var dir = parts.dir * dm;
     let gloss = ground_gloss(in.node_index, in.local, gd, sun);
     if (gloss > 0.0) {
-        rgb = min(rgb + atm_sun_direct(up, in.height, sun) * (gloss * g.range.z * sun_vis), vec3<f32>(60000.0));
+        dir = dir + atm_sun_direct(up, in.height, sun) * (gloss * g.range.z);
     }
+    // The two targets add up in the scene target (f16): the sum is bounded here, as the single clamp of the unsplit radiance did.
+    amb = min(amb, vec3<f32>(60000.0));
+    dir = min(dir, vec3<f32>(60000.0) - amb);
+    var rgb = amb + dir;
+    var sunlit = true;
     if (g.mode.x == 5u || g.mode.x == 6u) {
         rgb = horizon_view_colour(g.mode.x, in.node_index, in.aux, up, sun, coarse_fade, max(in.height, 0.0)) * g.range.z;
+        sunlit = false;
     }
     if (g.mode.x >= 7u) {
         rgb = clamp(driver_colour(g.mode.x, drv) * 0.31830988618 * g.range.z, vec3<f32>(0.0), vec3<f32>(60000.0));
+        sunlit = false;
     }
     if (g.extra.y > 3.5) {
         rgb = stale_tint(in, rgb, g.range.z);
+        sunlit = false;
     } else if (g.extra.y > 2.5) {
         rgb = region_tint(nodes[in.node_index].origin_rel.xyz + in.local, rgb, g.range.z);
+        sunlit = false;
     } else if (g.extra.y > 0.5) {
         rgb = overlay_wire(in, rgb, g.range.z, g.extra.y);
+        sunlit = false;
     }
-    return vec4<f32>(rgb, 1.0);
+    if (sunlit) {
+        return LitOut(vec4<f32>(amb, 1.0), vec4<f32>(dir, 1.0));
+    }
+    return LitOut(vec4<f32>(rgb, 1.0), vec4<f32>(0.0));
 }
 "#;
 
@@ -1246,8 +1308,13 @@ impl AtmospherePath {
     }
 
     /// The water pass's group 3 with the atmosphere: the uniform block (0), the two static tables (1, 2), the sky-view table (3) and
-    /// the copy of the scene target (4). Returns the layout and the bind group.
-    pub(crate) fn water_group(&self, device: &wgpu::Device, scene_copy: &wgpu::TextureView) -> (wgpu::BindGroupLayout, wgpu::BindGroup) {
+    /// the copy of the scene target (4) and the march visibility (5, REND-051). Returns the layout and the bind group.
+    pub(crate) fn water_group(
+        &self,
+        device: &wgpu::Device,
+        scene_copy: &wgpu::TextureView,
+        visibility: &wgpu::TextureView,
+    ) -> (wgpu::BindGroupLayout, wgpu::BindGroup) {
         let tex = |binding| wgpu::BindGroupLayoutEntry {
             binding,
             visibility: wgpu::ShaderStages::FRAGMENT,
@@ -1275,25 +1342,38 @@ impl AtmospherePath {
                 tex(2),
                 tex(3),
                 tex(4),
+                tex(5),
             ],
         });
+        let bind = self.water_bind(device, &layout, scene_copy, visibility);
+        (layout, bind)
+    }
+
+    /// The water pass group 3 over `layout` with this frame visibility.
+    pub(crate) fn water_bind(
+        &self,
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        scene_copy: &wgpu::TextureView,
+        visibility: &wgpu::TextureView,
+    ) -> wgpu::BindGroup {
         let (tr, ms, sky) = (
             self.tr_lut.create_view(&Default::default()),
             self.ms_lut.create_view(&Default::default()),
             self.sky_view.create_view(&Default::default()),
         );
-        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("water-atmosphere"),
-            layout: &layout,
+            layout,
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: self.uniform.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&tr) },
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&ms) },
                 wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&sky) },
                 wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(scene_copy) },
+                wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(visibility) },
             ],
-        });
-        (layout, bind)
+        })
     }
 
     /// The scene target's texture (copy source of the water pass).

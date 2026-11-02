@@ -662,7 +662,31 @@ pub struct CpuCalibration {
     pub parallel_max_us: u64,
 }
 
-/// Measure [`CpuCalibration`] now. Takes about `2 x` the kernel's time; call it when the case is not running.
+/// How many single-thread timings one calibration takes; the reading is the smallest (ADR 0093).
+pub const CALIBRATION_SINGLE_TIMINGS: usize = 5;
+/// How many parallel repetitions one calibration takes; the reading is the one with the smallest median (ADR 0093).
+pub const CALIBRATION_PARALLEL_REPS: usize = 3;
+
+/// Reduce the timings of one calibration to its reading (ADR 0093): the smallest single timing, and the median and maximum of the
+/// parallel repetition with the smallest median. Interference only adds time to fixed work, so the minimum is the machine's state
+/// without transients, while a lasting slow state shows in every timing.
+pub fn reduce_calibration(threads: usize, singles: &[u64], parallel_reps: &[Vec<u64>]) -> CpuCalibration {
+    let single_us = singles.iter().copied().min().unwrap_or(0);
+    let (parallel_median_us, parallel_max_us) = parallel_reps
+        .iter()
+        .map(|rep| {
+            let mut each = rep.clone();
+            each.sort_unstable();
+            (quantile_u64(&each, 0.5), each.last().copied().unwrap_or(0))
+        })
+        .min()
+        .unwrap_or((0, 0));
+    CpuCalibration { threads, single_us, parallel_median_us, parallel_max_us }
+}
+
+/// Measure [`CpuCalibration`] now: [`CALIBRATION_SINGLE_TIMINGS`] kernels alone, then [`CALIBRATION_PARALLEL_REPS`] rounds of one
+/// kernel on each of `threads` threads started together, reduced by [`reduce_calibration`]. Takes about 0.6 s on the reference machine;
+/// call it when the case is not running.
 pub fn calibrate_cpu(threads: usize) -> CpuCalibration {
     let threads = threads.max(1);
     let time = || {
@@ -670,21 +694,35 @@ pub fn calibrate_cpu(threads: usize) -> CpuCalibration {
         std::hint::black_box(calibration_kernel(std::hint::black_box(CALIBRATION_ROUNDS)));
         u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX)
     };
-    let single_us = time();
-    let start = std::sync::Barrier::new(threads);
-    let mut each: Vec<u64> = std::thread::scope(|s| {
-        let handles: Vec<_> = (0..threads)
-            .map(|_| {
-                s.spawn(|| {
-                    start.wait();
-                    time()
-                })
+    let singles: Vec<u64> = (0..CALIBRATION_SINGLE_TIMINGS).map(|_| time()).collect();
+    let reps: Vec<Vec<u64>> = (0..CALIBRATION_PARALLEL_REPS)
+        .map(|_| {
+            let start = std::sync::Barrier::new(threads);
+            std::thread::scope(|s| {
+                let handles: Vec<_> = (0..threads)
+                    .map(|_| {
+                        s.spawn(|| {
+                            start.wait();
+                            time()
+                        })
+                    })
+                    .collect();
+                handles.into_iter().map(|h| h.join().expect("a calibration thread")).collect()
             })
-            .collect();
-        handles.into_iter().map(|h| h.join().expect("a calibration thread")).collect()
-    });
-    each.sort_unstable();
-    CpuCalibration { threads, single_us, parallel_median_us: quantile_u64(&each, 0.5), parallel_max_us: each.last().copied().unwrap_or(0) }
+        })
+        .collect();
+    reduce_calibration(threads, &singles, &reps)
+}
+
+/// A case's calibration as log counts, before and after, with [`crate::calibration::DECLARED_LOAD_COUNT`] = 1 when the scene's own load
+/// ran during the reading before the case (the reserve test, ADR 0093 point 4, TEST-039).
+pub fn case_calibration_counts(before: &CpuCalibration, after: &CpuCalibration, declared_load: bool) -> Vec<(String, u64)> {
+    let mut c = calibration_counts("before", before);
+    c.extend(calibration_counts("after", after));
+    if declared_load {
+        c.push((crate::calibration::DECLARED_LOAD_COUNT.to_string(), 1));
+    }
+    c
 }
 
 /// The calibration as log counts: `load_calib_<when>_single_us`, `..._parallel_median_us`, `..._parallel_max_us`, `..._threads`.
@@ -1282,5 +1320,34 @@ mod load_tests {
         assert_eq!(get(&counts, "load_calib_before_single_us"), c.single_us);
         assert_eq!(get(&counts, "load_calib_before_parallel_max_us"), c.parallel_max_us);
         assert_eq!(calibrate_cpu(0).threads, 1, "at least one thread");
+    }
+
+    // spec: TEST-089
+    #[test]
+    fn the_calibration_reading_is_the_smallest_single_timing_and_the_parallel_repetition_with_the_smallest_median() {
+        let singles = [61_000, 47_800, 52_300, 48_100, 49_000];
+        let reps = vec![vec![104_000, 99_000, 110_000], vec![95_000, 91_000, 120_000], vec![97_000, 93_000, 98_000]];
+        let c = reduce_calibration(3, &singles, &reps);
+        assert_eq!(c, CpuCalibration { threads: 3, single_us: 47_800, parallel_median_us: 95_000, parallel_max_us: 120_000 });
+        // The repetition is chosen by its median: the 91,000 us timing alone does not pick it, and its own maximum comes with it.
+        let reps = vec![vec![91_000, 130_000, 131_000], vec![100_000, 101_000, 102_000]];
+        let c = reduce_calibration(3, &singles, &reps);
+        assert_eq!((c.parallel_median_us, c.parallel_max_us), (101_000, 102_000));
+        assert_eq!(reduce_calibration(1, &[], &[]).single_us, 0, "no timings: zeros, never a panic");
+        assert_eq!((CALIBRATION_SINGLE_TIMINGS, CALIBRATION_PARALLEL_REPS), (5, 3));
+    }
+
+    // spec: TEST-039, TEST-089
+    #[test]
+    fn a_case_with_its_own_load_declares_it_beside_its_calibration_counts() {
+        let c = CpuCalibration { threads: 18, single_us: 62_183, parallel_median_us: 96_759, parallel_max_us: 110_666 };
+        let plain = case_calibration_counts(&c, &c, false);
+        assert_eq!(plain.len(), 8);
+        assert!(!plain.iter().any(|(n, _)| n == crate::calibration::DECLARED_LOAD_COUNT));
+        let declared = case_calibration_counts(&c, &c, true);
+        assert_eq!(declared.last(), Some(&(crate::calibration::DECLARED_LOAD_COUNT.to_string(), 1)));
+        assert!(declared.iter().all(|(n, _)| n.starts_with(LOAD_COUNT_PREFIX)), "the comparison ignores them (STRM-022 (6))");
+        let count = |k: &str| declared.iter().find(|(n, _)| n == k).map(|(_, v)| *v);
+        assert!(crate::calibration::declared_load(&count));
     }
 }

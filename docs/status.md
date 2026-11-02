@@ -16,14 +16,17 @@ Dormant (no near trigger; not asked now):
 - **Coarse-first refinement of an edit** (owner, 2026-10-20): parked. Trigger: a brush case of the edit-latency scene that misses its budget.
 
 ## Queue (2026-11-02)
+Option B (`docs/briefings/week-2026-11-02.md`) closed 2026-11-02 (owner): B1, B2, B3, B5, B6, B7 (R1), B8 done; B4's rest, B9 and the relative shares carried below.
+
 | # | Step | Lane |
 |---|---|---|
 | NR | Real-GPU window checks NOT RUN on a locked desktop (TEST-073; owner, 2026-10-30) | crusader |
-| B4 | Automated owner checks (`openspec/changes/b4-owner-checks/`): B4-5 package command (TEST-074), B4-4 edit scenario, B4-6 delivery | explorer, after M9 rounds |
-| Shadows | ADR 0085 / 0090: PRs 1 to 4, 5a, 5a2, march cost and the low-sun quarter-res march (#1079; 2° 1.50-1.54 ms) merged. Next 5b-1 plumbing (visibility forced to 1), 5b-2 apply (every lit golden to the owner's /bless), the 2° perf window, PRs 6 to 9 | crusader |
-| Glint | `sun-glint-turn` (#1072, ATMO-013): blessed by the owner 2026-11-02; merges on green | crusader |
+| Shadows | ADR 0085 / 0090: 5b-1 plumbing (#1084, blessed), 5b-2 apply (#1085: the march on by default; acne fix, elevated and eye-level march goldens to the owner's /bless), the 2° perf window, PRs 6 to 9 | crusader |
+| B4 | Automated owner checks, rest (`openspec/changes/b4-owner-checks/`): B4-4 the real-store pair in metres and its PR, B4-6 the daily package delivery; B4-3 rivers waits for M9's channels | crusader, after 5b-2 |
 | Nodes | `node-buffer-delta`: frames rewrite the whole node buffer (record 2.1-5.1 ms) and frame 14 of a teleport costs 6-7 ms outside the logged phases | crusader |
-| M9 | Generator round 2 (#1078, continents, GEN-104 to 106, TEST-087/088), round 3 (relief to SPIKE-93's Earth bands), then the `m9-bake` code on small regions; no planet bake before the owner approves the engine preview (owner, 2026-11-01) | explorer |
+| B9 | Perf-window process: halve the time a window blocks the lanes without losing verdict validity; window 2 (2026-11-02) took 1 h 44 min and lost runs to heat | spikes (SPIKE-95) |
+| Shares | Relative compute shares: ADR draft from SPIKE-89 (fractions of P + 0.65 E) and SPIKE-90 (no background pool; background budgeted), BUDG-003 restated; to the owner | opus-planner |
+| M9 | Generator round 2 (#1078, the fixture climate aligned before the bless), round 3 (#1086, relief to SPIKE-93's Earth bands), the `m9-bake` code on small regions; no planet bake before the owner approves the engine preview (owner, 2026-11-01) | explorer |
 
 ## Tracked
 - **Reserve test result** (BUDG-012, loaded, 3 rounds, 2026-11-01): dive, look-1m, look-2km, teleport-2km pass; teleport-1m fails by +1 % (frame median 16.75 against 16.60 ms; the spin runs 5-18 % over its 6-9 ms target). Frame p99 over 20 ms includes the spin by construction. A quiet window decides the absolute rows.
@@ -52,7 +55,8 @@ Dormant (no near trigger; not asked now):
 - **Authored items at scale** (SPIKE-29): cold plan over empty ground that sees a 5k/20k cluster 3.75/9.4 s; candidate: a per-cell bound aggregate (`spikes/edit-scale/results/results.md`).
 - **Tiles flash to a coarser level while moving** (owner, P1-4, P2-8): not reproduced (TEST-067, TEST-070, TEST-072 on a generated world); next: the owner's F9 capture; open: a margin round the plan's frustum.
 - **Belt land and the polar relief** (`m9-generator-round-3`): belt land median 9.7 % against 13-23 % (seed 4 at 5.4 %, seed 14 at 7.9 %): reported, gated with the convergent-only arc round; the SPIKE-93 class bands are approved (owner, 2026-11-02), the other bands are the planner's from SPIKE-93 (2026-11-02); seed 14's highest land 6.1 km against 7-9 km and its south polar land (79 % of the band) is 31 % above 2 km. GEN-097 now gates the p99 of the `k` steps (owner, 2026-11-02); the class source may be wired into the bake.
-- **Flaky `gpu_shadow_frame` frame test** (`a_lit_frame_with_a_shadow_frame_resolves_a_visibility_and_draws_the_same_picture`): "visibility lies in [0, 1]" (`gpu_shadow_frame.rs:91`) in 3 of 4 full `test gpu --real` runs on 2026-11-02 (at 1.6 s, with 4 test threads), 0 of 3 alone; probably another GPU test sharing the device. Keep the full output on the next failure.
+- **Flaky `oracle_stream_smoke::the_streamer_and_the_pool_of_a_short_dive_show_no_configuration_cap`** (lavapipe A+B only): `oracle_stream_smoke.rs:87` found "the scheduler_ms median is 1.132 ms, at most 0.5 ms expected" on #1078 (run 41490826981, 2026-11-02) and failed once more the same day on #1072; it passes locally (5.2 s). A timing bound on a loaded software-rendered runner. Keep the full log on the next failure; candidate: judge the median over more frames or raise the bound with a note.
+- **Flaky `gpu_shadow_frame` frame test** (`a_lit_frame_with_a_shadow_frame_resolves_a_visibility_and_applies_it_to_the_direct_sun`, formerly `..._and_draws_the_same_picture`): "visibility lies in [0, 1]" (`gpu_shadow_frame.rs:90`) in 4 of 5 full `test gpu --real` runs on 2026-11-02 (at 1.2-1.6 s, with 4 test threads), 0 of 3 alone; it began before the march shadows became the default (#1085), so it is not from them; probably another GPU test sharing the device. Keep the full output on the next failure.
 - **Flaky `gpu_window` flight test**: one failure after 7.5 s, 0 of 5 since; probably the lock (first item). On a second failure keep the full output.
 - **WARP device removal with the compact format and the atmosphere**: test-only, accepted; the software smoke stays on the vertex format. Re-test when WARP, wgpu or Windows changes (Windows changed 2026-10-30).
 - **Beach shading flashes on WARP** (36.8 % of shore-band pixels on the coastal descent): unchecked since REND-030; check with the next look review.

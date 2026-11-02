@@ -47,8 +47,9 @@ pub fn scenes_of(name: &str) -> Vec<StreamScene> {
     }
 }
 
-/// What a streaming scene does before its measured span (TEST-037): the cool start (ADR 0057, TEST-033: wait for the GPU to read
-/// 60 C or less) in a measured run, nothing in a smoke run (no measurement, perhaps no `nvidia-smi`). There is no warm-up: the loop
+/// What a streaming scene does before its measured span (TEST-037): nothing. No cool start since ADR 0094: the scenes' verdicts are
+/// CPU wall time and take no GPU rows, the GPU's temperature at the start stays in the log's clock sample, and the runner's duty idle
+/// keeps the machine from heating run after run. There is no warm-up: the loop
 /// is paced to 60 Hz and CPU-bound, so no amount of rendering it brings the GPU to the loaded clock (look-2km at 58 C stayed at P3
 /// 1,087 MHz after 30 s unpaced), and the scenes take no GPU time for the clock to matter to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,8 +57,8 @@ pub struct StartSteps {
     pub cool: bool,
 }
 
-pub fn start_steps(smoke: bool) -> StartSteps {
-    StartSteps { cool: !smoke }
+pub fn start_steps(_smoke: bool) -> StartSteps {
+    StartSteps { cool: false }
 }
 
 /// The source of the bake for the log (`protocol.source`) and whether it is the production one: the stored bake is, an
@@ -529,10 +530,7 @@ fn run_case(
         }
         d.reserve = Some(r);
     }
-    // The machine's state as a fixed job sees it, alone and with the pool's thread count at once, before and after the case (STRM-022:
-    // recorded only, never judged; the per-tile times of the log read against it). Nothing of the case runs yet.
     let calib_threads = gen.workers;
-    let calib_before = (!smoke || calibrate).then(|| planet_perf::streaming::calibrate_cpu(calib_threads));
     writeln!(out, "{}: rig built in {:.2} s", script.scene.name(), rig_started.elapsed().as_secs_f64()).map_err(err)?;
     // The start-up load of the roots, before frame 0 (STRM-001): a reading of the cold start (with the pack ignored, `dive-cold`, it is
     // every root generated), recorded under the `load_` prefix like the tile loads.
@@ -566,11 +564,15 @@ fn run_case(
         writeln!(out, "{}: settled at the start view after {:.1} s ({frames} frames)", script.scene.name(), settle_s.unwrap_or(0.0))
             .map_err(err)?;
     }
-    // Both device losses of the lit dive (window 8) came after long runs on a hot GPU, so the measured span starts cool (ADR 0057,
-    // TEST-033). No warm-up: see `StartSteps`.
+    // No cool start and no warm-up (ADR 0094, TEST-037): see `StartSteps`. Window 8's device losses on a hot GPU were most likely the
+    // locked desktop (`docs/status.md`); the GPU temperature at the start is in the clock sample below.
     if start_steps(smoke).cool {
         writeln!(out, "{}", planet_perf::cool_gpu().line(script.scene.name())).map_err(err)?;
     }
+    // The machine's state as a fixed job sees it, alone and with the pool's thread count at once, before and after the case (STRM-022,
+    // TEST-089): read here, after the settle, right before the first measured frame, so it sees the machine the frames run on and not
+    // the start-up (ADR 0093, ADR 0094: no cool-down for streaming scenes). The reserve test's loads already run: the log declares them.
+    let calib_before = (!smoke || calibrate).then(|| planet_perf::streaming::calibrate_cpu(calib_threads));
     // The clock, before, during (a sampler thread: a process spawn never on the frame path) and after the case.
     let mut clocks: Vec<planet_perf::ClockSample> = Vec::new();
     let cpu_before = (!smoke).then(planet_perf::host::query_cpu_clock).flatten();
@@ -682,14 +684,16 @@ fn run_case(
         load_counts.push(("reserve_pass".into(), u64::from(report.pass())));
     }
     let pool = d.rig.pool;
+    let declared_load = d.reserve.is_some();
     let torn = Instant::now();
     drop(d);
     let teardown_s = torn.elapsed().as_secs_f64();
     load_counts.push(("load_startup_roots".into(), roots.0 as u64));
     load_counts.push(("load_startup_roots_ms".into(), u64::try_from(roots.1.as_millis()).unwrap_or(u64::MAX)));
     if let Some(c) = &calib_before {
-        load_counts.extend(planet_perf::streaming::calibration_counts("before", c));
-        load_counts.extend(planet_perf::streaming::calibration_counts("after", &planet_perf::streaming::calibrate_cpu(calib_threads)));
+        // The reserve loads ran during the reading before the case: recorded, not voiding (ADR 0093 point 4, TEST-039).
+        let after = planet_perf::streaming::calibrate_cpu(calib_threads);
+        load_counts.extend(planet_perf::streaming::case_calibration_counts(c, &after, declared_load));
     }
     // The lag post-pass, off the timed path: the loop is gone (queued jobs cancelled, in-flight ones finished), the case is over,
     // and every frame's lag is judged against the plan selected afresh for its own camera (TEST-020).
@@ -973,8 +977,13 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
                 counts.push((name.into(), c.effective_mhz().round() as u64));
             }
         }
+        let path_name = format!("{}/{}", if o.lit { "stream-lit" } else { "stream" }, scene.name());
+        // ADR 0094 point 4: a hot start is named, so a device loss or throttling after one is seen against it.
+        if let Some(line) = run.clocks.first().and_then(|c| planet_perf::clock::hot_start_line(&path_name, c)) {
+            writeln!(out, "{line}").map_err(err)?;
+        }
         let report = RunReport {
-            path_name: format!("{}/{}", if o.lit { "stream-lit" } else { "stream" }, scene.name()),
+            path_name,
             vram_cap_gb: 8,
             stats,
             clocks_before: run.clocks.first().cloned(),
@@ -1398,16 +1407,16 @@ mod tests {
 
     // spec: TEST-037
     #[test]
-    fn a_streaming_scene_cools_down_in_a_measured_run_and_never_warms_up() {
-        // A smoke run takes no step (no measurement, perhaps no nvidia-smi); a measured run cools the GPU first.
+    fn a_streaming_scene_neither_cools_down_nor_warms_up() {
+        // No step in a smoke run or a measured one (ADR 0094): the verdicts are CPU wall time, the GPU temperature is logged.
         assert_eq!(start_steps(true), StartSteps { cool: false });
-        assert_eq!(start_steps(false), StartSteps { cool: true });
+        assert_eq!(start_steps(false), StartSteps { cool: false });
         // No scene warms up, whether it starts from a settled view or from an empty cache: the loop is CPU-bound at 60 Hz, so a warm-up
         // cannot reach the clock floor (look-2km: P3 1,087 MHz after 30 s unpaced), and a warm-up from an empty cache would load what
         // the scene measures. The steps have no warm-up field to set.
         for scene in planet_frame::scenes::StreamScene::ALL {
             let script = planet_frame::scenes::build_script(scene, 6_371_000.0, 16.0 / 9.0, &planet_generators::height::Reference(1), 1);
-            assert!(start_steps(false).cool, "{scene:?} ({} a settled start)", if script.prelude.is_some() { "has" } else { "has not" });
+            assert!(!start_steps(false).cool, "{scene:?} ({} a settled start)", if script.prelude.is_some() { "has" } else { "has not" });
         }
     }
 

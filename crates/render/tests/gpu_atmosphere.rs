@@ -188,7 +188,10 @@ fn the_frame_targets_with_an_atmosphere_equal_the_compiled_graphs_count_and_noth
     assert_eq!(path.atmosphere().unwrap().table_uploads(), 1, "the tables are uploaded once for the body, not per frame");
     assert_eq!(path.graph_compiles(), 3, "atmosphere, none, atmosphere: each change of shape compiles");
     let names = path.executed_passes();
-    assert_eq!(names, ["atmosphere-luts", "sky-view", "aerial-perspective", "terrain", "sky-composite", "exposure-adapt", "tonemap"]);
+    assert_eq!(
+        names,
+        ["atmosphere-luts", "sky-view", "aerial-perspective", "terrain", "shadow-apply", "sky-composite", "exposure-adapt", "tonemap"]
+    );
 }
 
 // spec: ATMO-011
@@ -300,4 +303,48 @@ fn the_atmosphere_lit_terrain_is_the_albedo_times_the_lighting() {
         checked += 1;
     }
     assert!(checked > 100, "{checked} terrain pixels");
+}
+
+// spec: REND-051
+#[test]
+fn the_atmosphere_terrain_writes_the_direct_term_to_sun_direct_and_the_ambient_to_the_scene() {
+    use planet_frame::look::shading::ShadeView;
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let base = plan(3);
+    let mut r = renderer_atmosphere(&ctx, &[&base]);
+    let mut direct_of = |view: ShadeView| {
+        let mut l = atmosphere_plan(AtmosphereView::Composite);
+        l.view = view;
+        r.render(&ctx, &lit(base.clone(), l), false).unwrap();
+        r.lit_path().unwrap().read_sun_direct(&ctx)
+    };
+    let counted = |d: &[[f32; 4]]| d.iter().filter(|p| p[..3].iter().any(|v| *v > 0.0)).count();
+    let (lit_px, lighting, albedo) = (direct_of(ShadeView::Lit), direct_of(ShadeView::Lighting), direct_of(ShadeView::Albedo));
+    assert!(counted(&lit_px) > 100, "the lit view carries a direct term in {} pixels", counted(&lit_px));
+    assert!(counted(&lighting) > 100, "the lighting view carries one in {} pixels", counted(&lighting));
+    assert_eq!(counted(&albedo), 0, "the albedo view has none");
+}
+
+// spec: REND-051, REND-025
+#[test]
+fn a_very_bright_pre_exposure_keeps_the_scene_target_finite_after_the_apply_pass() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let base = plan(3);
+    let mut r = renderer_atmosphere(&ctx, &[&base]);
+    // A pre-exposure far below the scene's brightness (EV100 -6) makes the factor large enough that the 60,000 clamp is active: the
+    // ambient and the direct term are clamped together, so their sum in the f16 scene target never overflows.
+    let mut l = LitPlan::fixed(-6.0).with_atmosphere(&LookParams::default(), R).unwrap();
+    l.atmosphere.as_mut().unwrap().view = AtmosphereView::Composite;
+    r.render(&ctx, &lit(base, l), false).unwrap();
+    let path = r.lit_path().unwrap();
+    let scene = path.atmosphere().unwrap().read_scene(&ctx);
+    let direct = path.read_sun_direct(&ctx);
+    let mut clamped = 0;
+    for (i, (s, d)) in scene.iter().zip(&direct).enumerate() {
+        for c in 0..3 {
+            assert!(s[c].is_finite() && s[c] <= 60_001.0, "pixel {i} channel {c}: scene {}", s[c]);
+            clamped += usize::from(s[c] + d[c] >= 59_000.0);
+        }
+    }
+    assert!(clamped > 0, "the clamp is active in this frame");
 }

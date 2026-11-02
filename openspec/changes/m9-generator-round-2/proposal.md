@@ -17,6 +17,7 @@ Round 2 of the M9 generator (inbox #41, 2026-11-02): the continents. SPIKE-92 cl
 - `generator-pipeline`: GEN-094 to GEN-096 (planned, in `m9-bake`)
 
 Expected golden changes:
-- lit_orbit_ev15, lit_orbit_ev_bands, lit_orbit_precipitation_ev15, lit_orbit_temperature_ev15, sky_orbit_ev15, water_class_orbit: the continents move (GLOBAL_VERSION 6); a few hundred pixels at the coasts
-- lit_aerial20km_ev15, lit_aerial20km_albedo_ev15, sky_aerial20km_ev15, water_class_coast_aerial2km: the ground under the camera has the new continent value and the hill band's driver (the coarse value)
-- lit_ground1m_ev15, lit_ground_eye0p5m_natural_ev14p5, lit_ground_eye1p8m_natural_ev14p5, sky_ground1m_ev15, sky_ground1m_sunset_ev11: the same ground, small differences of the hill band's amplitude
+- lit_orbit_ev15, lit_orbit_ev_bands, lit_orbit_precipitation_ev15, lit_orbit_temperature_ev15, sky_orbit_ev15, water_class_orbit: once, the test field's climate now follows its own heights (GEN-021, owner 2026-11-02) instead of the generator's world: biome colours change where the reference heights and the old generator's elevation differed; the geometry is the reference field's and does not move; a few hundred pixels
+- lit_aerial20km_ev15, lit_aerial20km_albedo_ev15, sky_aerial20km_ev15, water_class_coast_aerial2km: the same climate change under the aerial camera (a whole-ground tint of at most 18 of 255)
+- lit_ground1m_ev15, lit_ground_eye0p5m_natural_ev14p5, lit_ground_eye1p8m_natural_ev14p5, sky_ground1m_ev15, sky_ground1m_sunset_ev11: the same, at the ground (at most 14 of 255)
+After this change a change of the generator moves none of these goldens (they read the reference field's heights and climate only).
