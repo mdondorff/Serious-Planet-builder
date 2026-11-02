@@ -122,7 +122,8 @@ fn the_lit_ground_at_eye_height_matches_the_adapters_goldens() {
 
 // spec: REND-051, REND-049
 #[test]
-fn the_hills_cast_the_march_shadow_onto_the_ground_at_ten_and_two_degrees_of_sun_and_match_the_adapters_goldens() {
+fn the_hills_cast_the_march_shadow_onto_the_ground_at_eye_level_and_from_above_at_ten_and_two_degrees_of_sun_and_match_the_adapters_goldens(
+) {
     use planet_frame::clipmap::{ClipmapParams, ClipmapPlanner};
     use planet_frame::shadowview::ShadowView;
     use planet_render::shadow::ClipmapPreview;
@@ -149,14 +150,6 @@ fn the_hills_cast_the_march_shadow_onto_the_ground_at_ten_and_two_degrees_of_sun
     let ground = field.height(up);
     let aspect = f64::from(SIZE.0) / f64::from(SIZE.1);
     let look = LookParams::default();
-    let camera = Camera::at_surface_point(
-        PlanetFixed(up * (R + ground + 1.8)),
-        Vec3::new(0.0, 0.0, 1.0),
-        f64::to_radians(5.0),
-        60f64.to_radians(),
-        aspect,
-        0.05,
-    );
     let lod = LodParams {
         cells: CELLS,
         viewport_h_px: f64::from(SIZE.1),
@@ -165,96 +158,120 @@ fn the_hills_cast_the_march_shadow_onto_the_ground_at_ten_and_two_degrees_of_sun
         max_height_m: LodParams::earth_1080p().max_height_m.max(field.max_abs_height_m() + 10.0),
         ..LodParams::earth_1080p()
     };
-    let mut plan = plan_terrain_cached(
-        &TerrainRequest { camera, size: SIZE, view: TerrainView::Level, lod, face_mapping: "tangent-v1".into(), seed: 1 },
-        &field,
-        &mut SelectionCache::new(),
-    )
-    .expect("plan");
-    let tiles: Vec<planet_core::TileId> = plan.nodes.iter().map(|n| n.tile).collect();
-    for (deg, golden) in [(10.0f64, "lit_ground_march_10deg_ev14p5"), (2.0, "lit_ground_march_2deg_ev14p5")] {
-        let block_slots = (plan.nodes.len() as u32 + 64).max(1024);
-        let pool =
-            compact_format_pool_with((256 << 20) + 4 * u64::from(block_slots) * slot_bytes(CELLS), CELLS, block_slots, 1).expect("pool");
-        let mut r = TerrainRenderer::with_pools(&ctx, SIZE, CELLS, pool);
-        r.enable_lit(&ctx);
-        r.enable_atmosphere(&ctx, &Atmosphere::earth(R));
-        r.enable_shadow(&ctx, 256, 11, R);
+    // The eye-level view guards the grazing-angle acne; the aerial view (300 m up, 250 m back from the site, pitched 20 degrees down) frames both
+    // hills and the ground behind them, so the shape and the length of the cast shadows show.
+    for (name, eye_m, back_m, pitch_deg) in [("", 1.8f64, 0.0f64, 5.0f64), ("aerial_", 300.0, 250.0, 20.0)] {
+        let position = (up * R + north * -back_m).normalized() * (R + ground + eye_m);
+        let camera = Camera::at_surface_point(
+            PlanetFixed(position),
+            Vec3::new(0.0, 0.0, 1.0),
+            f64::to_radians(pitch_deg),
+            60f64.to_radians(),
+            aspect,
+            0.05,
+        );
+        let mut plan = plan_terrain_cached(
+            &TerrainRequest { camera, size: SIZE, view: TerrainView::Level, lod: lod.clone(), face_mapping: "tangent-v1".into(), seed: 1 },
+            &field,
+            &mut SelectionCache::new(),
+        )
+        .expect("plan");
+        // The resident set: the drawn tiles and their ancestors down to level 3, as the streamer keeps them (a clipmap level coarser than a drawn
+        // tile is written from the tile's resident ancestor).
+        let mut resident: std::collections::BTreeSet<planet_core::TileId> = plan.nodes.iter().map(|n| n.tile).collect();
         for n in &plan.nodes {
-            if r.slot_of(n.tile).is_none() {
-                r.upload_tile(&ctx, &compact_tile_field(&field, &TangentWarp, n.tile, CELLS, R)).expect("upload");
+            let mut t = n.tile;
+            while let Some(parent) = t.parent().filter(|p| p.level() >= 3) {
+                resident.insert(parent);
+                t = parent;
             }
         }
-        let sun = (up * libm::sin(deg.to_radians()) + toward_sun * libm::cos(deg.to_radians())).normalized();
-        let mut lit = LitPlan::fixed(EV).with_atmosphere(&look, R).expect("an atmosphere plan");
-        lit.sun_dir = [sun.x as f32, sun.y as f32, sun.z as f32];
-        lit.materials = MaterialParams::EARTH;
-        lit.ground_detail = NATURAL_STRENGTH;
-        plan.lit = Some(lit);
-        // A still camera: the first frame is a cut, the next ones fill the quarter-resolution rays and settle the history.
-        let mut planner = ClipmapPlanner::new(ClipmapParams { texels: 256, ..ClipmapParams::new(R, CELLS) });
-        for k in 0..6 {
-            let clip = planner.plan(plan.camera.position, &tiles, &[], &[], &TangentWarp);
-            r.set_shadow_frame(ShadowFrame {
-                view: ShadowView::new(clip.anchor, &plan.camera, sun, R),
-                plan: clip,
-                preview: ClipmapPreview::default(),
-                floor_tiles: Vec::new(),
-                cut: k == 0,
-                ceiling_m: field.max_abs_height_m() + 10.0,
-            });
-            r.render(&ctx, &plan, false).expect("render");
-        }
-        let visibility = r.read_shadow(&ctx).expect("the shadow pass ran");
-        let f = r.read_color(&ctx);
-        let img = Image::new(f.width, f.height, f.rgba);
-        let covered = r.lit_path().expect("lit").read_hdr(&ctx).iter().filter(|px| px[3] > 0.0).count();
-        assert!(covered > 10_000, "{golden}: only {covered} terrain pixels");
-        let dark = visibility.iter().filter(|v| **v < 0.2).count();
-        // No acne: shadowed pixels that belong to no real shadow. The march used to shadow a receiver by the gap between the tile mesh and the
-        // clipmap's bilinear lattice, in contour bands of short dashes on a lit flank; the cast shadows here are regions of thousands of
-        // pixels, so a connected group of fewer than 40 shadowed pixels is a speck.
-        let (w, h) = (SIZE.0 as usize, SIZE.1 as usize);
-        let mut seen = vec![false; w * h];
-        let mut specks = 0;
-        for start in 0..w * h {
-            if seen[start] || visibility[start] >= 0.2 {
-                continue;
-            }
-            let mut group = vec![start];
-            seen[start] = true;
-            let mut k = 0;
-            while k < group.len() {
-                let (x, y) = ((group[k] % w) as isize, (group[k] / w) as isize);
-                k += 1;
-                for (dx, dy) in [(-1isize, -1isize), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)] {
-                    let (nx, ny) = (x + dx, y + dy);
-                    if nx < 0 || ny < 0 || nx >= w as isize || ny >= h as isize {
-                        continue;
-                    }
-                    let n = ny as usize * w + nx as usize;
-                    if !seen[n] && visibility[n] < 0.2 {
-                        seen[n] = true;
-                        group.push(n);
-                    }
+        let tiles: Vec<planet_core::TileId> = resident.into_iter().collect();
+        for deg in [10.0f64, 2.0] {
+            let golden = format!("lit_ground_march_{name}{}deg_ev14p5", deg as u32);
+            let block_slots = (tiles.len() as u32 + 64).max(1024);
+            let pool = compact_format_pool_with((256 << 20) + 4 * u64::from(block_slots) * slot_bytes(CELLS), CELLS, block_slots, 1)
+                .expect("pool");
+            let mut r = TerrainRenderer::with_pools(&ctx, SIZE, CELLS, pool);
+            r.enable_lit(&ctx);
+            r.enable_atmosphere(&ctx, &Atmosphere::earth(R));
+            r.enable_shadow(&ctx, 256, 11, R);
+            for &tile in &tiles {
+                if r.slot_of(tile).is_none() {
+                    r.upload_tile(&ctx, &compact_tile_field(&field, &TangentWarp, tile, CELLS, R)).expect("upload");
                 }
             }
-            if group.len() < 40 {
-                specks += group.len();
+            let sun = (up * libm::sin(deg.to_radians()) + toward_sun * libm::cos(deg.to_radians())).normalized();
+            let mut lit = LitPlan::fixed(EV).with_atmosphere(&look, R).expect("an atmosphere plan");
+            lit.sun_dir = [sun.x as f32, sun.y as f32, sun.z as f32];
+            lit.materials = MaterialParams::EARTH;
+            lit.ground_detail = NATURAL_STRENGTH;
+            plan.lit = Some(lit);
+            // A still camera: the first frame is a cut, the next ones fill the quarter-resolution rays and settle the history.
+            let mut planner = ClipmapPlanner::new(ClipmapParams { texels: 256, ..ClipmapParams::new(R, CELLS) });
+            for k in 0..6 {
+                let clip = planner.plan(plan.camera.position, &tiles, &[], &[], &TangentWarp);
+                r.set_shadow_frame(ShadowFrame {
+                    view: ShadowView::new(clip.anchor, &plan.camera, sun, R),
+                    plan: clip,
+                    preview: ClipmapPreview::default(),
+                    floor_tiles: Vec::new(),
+                    cut: k == 0,
+                    ceiling_m: field.max_abs_height_m() + 10.0,
+                });
+                r.render(&ctx, &plan, false).expect("render");
             }
+            let visibility = r.read_shadow(&ctx).expect("the shadow pass ran");
+            let f = r.read_color(&ctx);
+            let img = Image::new(f.width, f.height, f.rgba);
+            let covered = r.lit_path().expect("lit").read_hdr(&ctx).iter().filter(|px| px[3] > 0.0).count();
+            assert!(covered > 10_000, "{golden}: only {covered} terrain pixels");
+            let dark = visibility.iter().filter(|v| **v < 0.2).count();
+            // No acne: shadowed pixels that belong to no real shadow. The march used to shadow a receiver by the gap between the tile mesh and the
+            // clipmap's bilinear lattice, in contour bands of short dashes on a lit flank; the cast shadows here are regions of thousands of
+            // pixels, so a connected group of fewer than 40 shadowed pixels is a speck.
+            let (w, h) = (SIZE.0 as usize, SIZE.1 as usize);
+            let mut seen = vec![false; w * h];
+            let mut specks = 0;
+            for start in 0..w * h {
+                if seen[start] || visibility[start] >= 0.2 {
+                    continue;
+                }
+                let mut group = vec![start];
+                seen[start] = true;
+                let mut k = 0;
+                while k < group.len() {
+                    let (x, y) = ((group[k] % w) as isize, (group[k] / w) as isize);
+                    k += 1;
+                    for (dx, dy) in [(-1isize, -1isize), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)] {
+                        let (nx, ny) = (x + dx, y + dy);
+                        if nx < 0 || ny < 0 || nx >= w as isize || ny >= h as isize {
+                            continue;
+                        }
+                        let n = ny as usize * w + nx as usize;
+                        if !seen[n] && visibility[n] < 0.2 {
+                            seen[n] = true;
+                            group.push(n);
+                        }
+                    }
+                }
+                if group.len() < 40 {
+                    specks += group.len();
+                }
+            }
+            assert!(specks <= 40, "{golden}: {specks} shadowed pixels in specks (shadow acne)");
+            let lit_px = visibility.iter().filter(|v| **v > 0.8).count();
+            assert!(dark > 500 && lit_px > 5_000, "{golden}: the hills shadow part of the ground ({dark} dark, {lit_px} lit)");
+            goldens.check(&golden, &img, Tolerance::Exact);
+            // The owner's look package (before: the same frame without a shadow frame, which applies visibility 1): written beside the
+            // review images, per adapter, for the owner's comparison.
+            r.render(&ctx, &plan, false).expect("render");
+            let f = r.read_color(&ctx);
+            let dir = std::path::PathBuf::from(format!("../../target/review/shadow-apply/{}", ctx.adapter_key()));
+            let _ = std::fs::create_dir_all(&dir);
+            let _ = planet_testkit::write_png(&dir.join(format!("{golden}-before.png")), &Image::new(f.width, f.height, f.rgba));
+            let _ = planet_testkit::write_png(&dir.join(format!("{golden}-after.png")), &img);
         }
-        assert!(specks <= 40, "{golden}: {specks} shadowed pixels in specks (shadow acne)");
-        let lit_px = visibility.iter().filter(|v| **v > 0.8).count();
-        assert!(dark > 500 && lit_px > 5_000, "{golden}: the hills shadow part of the ground ({dark} dark, {lit_px} lit)");
-        goldens.check(golden, &img, Tolerance::Exact);
-        // The owner's look package (before: the same frame without a shadow frame, which applies visibility 1): written beside the
-        // review images, per adapter, for the owner's comparison.
-        r.render(&ctx, &plan, false).expect("render");
-        let f = r.read_color(&ctx);
-        let dir = std::path::PathBuf::from(format!("../../target/review/shadow-apply/{}", ctx.adapter_key()));
-        let _ = std::fs::create_dir_all(&dir);
-        let _ = planet_testkit::write_png(&dir.join(format!("{golden}-before.png")), &Image::new(f.width, f.height, f.rgba));
-        let _ = planet_testkit::write_png(&dir.join(format!("{golden}-after.png")), &img);
     }
     goldens.finish();
 }
