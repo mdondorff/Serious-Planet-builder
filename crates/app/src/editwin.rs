@@ -226,6 +226,17 @@ pub fn exact_and_idle(managed: &planet_frame::managed::ManagedLoop, frame: &plan
         && managed.pending().is_empty()
 }
 
+/// Whether the key of `tile` reads its region summary in `def` (WDEF-008): a root always does; any other tile when an item of a stamp layer
+/// touches it with the stage's halo (a tile with an empty footprint keeps the base's key, `StampStage::passes_through`). The predicate of
+/// `planet_editor::feed::edited_tiles_reading`.
+pub fn reads_summary(def: &WorldDefinition, body: BodyId, tile: TileId) -> bool {
+    tile.level() == 0
+        || def
+            .stamp_layers(body)
+            .iter()
+            .any(|l| def.footprint_items(body, l, tile, planet_generators::stamp::STAGE_HALO).is_ok_and(|v| !v.is_empty()))
+}
+
 fn open_store(dir: Option<&Path>) -> (EditStore, String) {
     match dir {
         Some(d) => (EditStore::Files(LooseFileStore::new(d)), format!("saved in {}", d.display())),
@@ -451,7 +462,15 @@ impl EditRuntime {
         if affected.is_empty() {
             return Vec::new();
         }
-        let tiles = planet_editor::feed::edited_tiles(&affected, BodyId::PLANET, resident, self.radius_m, &planet_core::cube::TangentWarp);
+        let def = self.session.editor().definition();
+        let tiles = planet_editor::feed::edited_tiles_reading(
+            &affected,
+            BodyId::PLANET,
+            resident,
+            self.radius_m,
+            &planet_core::cube::TangentWarp,
+            &|t| reads_summary(def, BodyId::PLANET, t),
+        );
         self.stats.refresh_tiles += tiles.len() as u64;
         tiles
     }

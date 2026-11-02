@@ -122,3 +122,10 @@ Scope: tests (nextest; SPIKE-84 fix 2)
 - SPIKE-84 proposed a `OnceLock` fixture to build the `concurrent_source` store once per binary. Under nextest every test is a process of its own, so a static is built once per test, as before.
 - A fixture worth sharing lives on disk (`CARGO_TARGET_TMPDIR`), named by the test binary, built into a private directory and renamed into place (`crates/cache/tests/support/concurrent_source.rs`).
 - Obsolete if the tests move to a runner that shares one process per binary.
+
+## 2026-11-01 An edit re-keys coarse tiles far beyond its reach
+Scope: project (editor refresh find; WDEF-008, STRM-070, ADR 0045 point 7)
+- A coarse tile (levels 0-5 at Earth's radius) that holds an item reads its region summary over its cells and `margin_rings` rings of cells, sized for the 40 km maximum reach plus whole cells: about 13 rings (450-500 km) at level 5, the whole body at levels 0-2. Any edit anchored there re-keys it, whatever its own reach.
+- The editor's find named a tile only when the edit's reach touched it, so such tiles were never marked stale and stayed on their old version (the `gpu_edit_perf` flake: 8 substituted nodes, nothing pending). The find now walks `neighbors8` from the anchor cells and compares with the rings (edit-stale-diagnostics).
+- ADR 0045 point 7 meant about one coarse tile per level per edit; today's margins re-key more (a Tracked architect item).
+- Obsolete when the summary margins are sized from the reaches present, or coarse keys stop reading margins.
