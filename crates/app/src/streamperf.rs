@@ -690,12 +690,9 @@ fn run_case(
     load_counts.push(("load_startup_roots".into(), roots.0 as u64));
     load_counts.push(("load_startup_roots_ms".into(), u64::try_from(roots.1.as_millis()).unwrap_or(u64::MAX)));
     if let Some(c) = &calib_before {
-        load_counts.extend(planet_perf::streaming::calibration_counts("before", c));
-        load_counts.extend(planet_perf::streaming::calibration_counts("after", &planet_perf::streaming::calibrate_cpu(calib_threads)));
         // The reserve loads ran during the reading before the case: recorded, not voiding (ADR 0093 point 4, TEST-039).
-        if declared_load {
-            load_counts.push((planet_perf::calibration::DECLARED_LOAD_COUNT.into(), 1));
-        }
+        let after = planet_perf::streaming::calibrate_cpu(calib_threads);
+        load_counts.extend(planet_perf::streaming::case_calibration_counts(c, &after, declared_load));
     }
     // The lag post-pass, off the timed path: the loop is gone (queued jobs cancelled, in-flight ones finished), the case is over,
     // and every frame's lag is judged against the plan selected afresh for its own camera (TEST-020).

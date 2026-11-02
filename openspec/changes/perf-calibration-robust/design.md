@@ -1,6 +1,0 @@
-## Design notes
-- Estimator: `reduce_calibration(threads, singles, parallel_reps)` is pure; `calibrate_cpu` only collects timings (5 single, then 3 barrier-started rounds of `threads` kernels) and calls it. Minimum of 3 medians, not their median: interference only adds time to fixed work (planner, 2026-11-02).
-- Placement: `streamperf.rs` moves `calib_before` from after the rig build to after the cool-down. The dive has no prelude; its streamer is idle there because no camera has been ticked. Lit views and flights already calibrate after the cool-down and warm-up (`litperf.rs`).
-- Scope: `CauseKind::CpuCalibration` no longer voids GPU verdicts. `lines_for` gains the case "frame NO, GPU yes". `log_gpu_session_valid` ignores calibration warnings when judging again. `gpu_only_causes` keeps its meaning (causes that void GPU verdicts only); a new `frame_only()` lists the reverse for the console.
-- Declared load: the count `load_calib_declared_load` (prefix `load_`, so the regression comparison ignores it, STRM-022 (6)). `session_causes` skips such runs; `calibration_status` still reports them, with the suffix; `recomputed_warnings` skips them.
-- Limits are not changed (ADR 0093 point 5).

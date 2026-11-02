@@ -741,7 +741,7 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
         out,
         "{} gated measure(s) over budget{}",
         failed.len(),
-        if smoke || !verdict.frame_valid() && !verdict.gpu_session_valid() {
+        if smoke || (!verdict.frame_valid() && !verdict.gpu_session_valid()) {
             " (the session does not count)"
         } else if !verdict.frame_valid() {
             " (the frame verdicts do not count)"

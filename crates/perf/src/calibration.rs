@@ -1,6 +1,6 @@
 //! The CPU calibration decides whether a perf scene counts (TEST-039, ADR 0065): a scene whose fixed-kernel times (STRM-022) lie outside the
-//! limits below, before or after the case, gets no verdict, with the reading, the limit and the moment named. Logs without a calibration
-//! are not judged. A pure function over the logged counts, used by the harness (the session verdict) and by `accept` (judging a log
+//! limits below, before or after the case, gets no frame verdict (its GPU verdicts stand, ADR 0093), with the reading, the limit and the
+//! moment named; a run that declared a load of its own is recorded only. Logs without a calibration are not judged. A pure function over the logged counts, used by the harness (the session verdict) and by `accept` (judging a log
 //! again), so that they cannot disagree.
 //!
 //! The limits are the maximum of the quiet-machine readings (Rasierklinge, 18 threads on 20 logical CPUs, the native-UI coder

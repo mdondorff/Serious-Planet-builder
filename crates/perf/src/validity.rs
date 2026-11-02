@@ -904,7 +904,8 @@ mod tests {
         assert!(!assess(std::slice::from_ref(&r), false, &gate::Validity::default(), &[]).frame_valid());
         assert!(!log_frame_valid(&log_with_counts(true, &[], "stream-lit/teleport-1m", &r.counts)));
         // Only the value 1 declares; a recorded calibration reason of a declared run goes away when judged again.
-        let w = "no verdict: CPU calibration of 'stream-lit/teleport-1m' outside the limits (ADR 0065): before single 62,183 us over 52,000 us";
+        let w =
+            "no verdict: CPU calibration of 'stream-lit/teleport-1m' outside the limits (ADR 0065): before single 62,183 us over 52,000 us";
         assert!(log_frame_valid(&log_with_counts(false, &[w], "stream-lit/teleport-1m", &counts)));
         let mut zero = calib((62_183, 96_759), (50_800, 95_330));
         zero.push((calibration::DECLARED_LOAD_COUNT.into(), 0));

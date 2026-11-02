@@ -714,6 +714,17 @@ pub fn calibrate_cpu(threads: usize) -> CpuCalibration {
     reduce_calibration(threads, &singles, &reps)
 }
 
+/// A case's calibration as log counts, before and after, with [`crate::calibration::DECLARED_LOAD_COUNT`] = 1 when the scene's own load
+/// ran during the reading before the case (the reserve test, ADR 0093 point 4, TEST-039).
+pub fn case_calibration_counts(before: &CpuCalibration, after: &CpuCalibration, declared_load: bool) -> Vec<(String, u64)> {
+    let mut c = calibration_counts("before", before);
+    c.extend(calibration_counts("after", after));
+    if declared_load {
+        c.push((crate::calibration::DECLARED_LOAD_COUNT.to_string(), 1));
+    }
+    c
+}
+
 /// The calibration as log counts: `load_calib_<when>_single_us`, `..._parallel_median_us`, `..._parallel_max_us`, `..._threads`.
 pub fn calibration_counts(when: &str, c: &CpuCalibration) -> Vec<(String, u64)> {
     vec![
@@ -1324,5 +1335,19 @@ mod load_tests {
         assert_eq!((c.parallel_median_us, c.parallel_max_us), (101_000, 102_000));
         assert_eq!(reduce_calibration(1, &[], &[]).single_us, 0, "no timings: zeros, never a panic");
         assert_eq!((CALIBRATION_SINGLE_TIMINGS, CALIBRATION_PARALLEL_REPS), (5, 3));
+    }
+
+    // spec: TEST-039
+    #[test]
+    fn a_case_with_its_own_load_declares_it_beside_its_calibration_counts() {
+        let c = CpuCalibration { threads: 18, single_us: 62_183, parallel_median_us: 96_759, parallel_max_us: 110_666 };
+        let plain = case_calibration_counts(&c, &c, false);
+        assert_eq!(plain.len(), 8);
+        assert!(!plain.iter().any(|(n, _)| n == crate::calibration::DECLARED_LOAD_COUNT));
+        let declared = case_calibration_counts(&c, &c, true);
+        assert_eq!(declared.last(), Some(&(crate::calibration::DECLARED_LOAD_COUNT.to_string(), 1)));
+        assert!(declared.iter().all(|(n, _)| n.starts_with(LOAD_COUNT_PREFIX)), "the comparison ignores them (STRM-022 (6))");
+        let count = |k: &str| declared.iter().find(|(n, _)| n == k).map(|(_, v)| *v);
+        assert!(crate::calibration::declared_load(&count));
     }
 }
