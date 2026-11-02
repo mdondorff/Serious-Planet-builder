@@ -22,6 +22,7 @@ pub mod session;
 pub mod smoke;
 pub mod streaming;
 pub mod validity;
+pub mod window;
 
 use std::process::Command;
 

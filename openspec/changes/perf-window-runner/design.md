@@ -1,0 +1,12 @@
+## Design notes
+- **Plan format:** one statement per line, `#` starts a comment: `rounds N`, `retries N`, `metrics a,b`, `reference NAME`, `config NAME [KEY=VALUE ...]`, `flight NAME <perf arguments> [--log FILE]`. A line format, not TOML, because xtask takes no new dependency. The metrics are the A/B helper's table (`ab::METRICS`).
+- **Rotation:** round k runs the configurations rotated by k, within each flight in the plan's order. The reference keeps running while any other configuration of the flight is open, and stops once all are settled.
+- **Stop rule (ADR 0087 point 7):**
+  - Settled worse when the median of a configuration's valid rounds misses the reference's median by more than 3 x 5 % on any metric, checked after each round.
+  - Settled within after 2 valid rounds on both sides with every metric within 5 % (better by more than 5 % is not "within").
+  - Otherwise every round runs.
+  - The thresholds are constants of `planet_perf::window`, and their values are in BUILD-034.
+- **Validity:** a child's log counts when its frame verdicts do (`validity::log_frame_valid`); an invalid log keeps its reasons. A refusal waits 30 s. Both use the plan's retries. A child that fails otherwise stops the window. A run that wrote no log is a failure, never a copy.
+- **One build and one preflight:** `cargo build --release -p planet`, then `cargo xtask perf preflight --out <dir>`. Children are `cargo xtask perf ...` (their `cargo run --release` only checks). Each child keeps its own readiness gate.
+- **Duty idle:** `clock::duty_idle_s` of the previous run's wall time, before every run but the first, retries included (a retry follows a run that heated the machine).
+- **Smoke:** `cargo xtask perf window <plan> --no-preflight` with `--smoke ... --out perf/logs` flights on the software adapter exercises the orchestration end to end. Smoke logs are invalid by design, so every attempt is retried and nothing settles.
