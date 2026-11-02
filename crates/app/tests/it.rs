@@ -2,6 +2,8 @@
 mod coarse_horizon_world;
 #[path = "coupled_remake.rs"]
 mod coupled_remake;
+#[path = "edit_keys.rs"]
+mod edit_keys;
 #[path = "horizon_world.rs"]
 mod horizon_world;
 #[path = "live_definition.rs"]
