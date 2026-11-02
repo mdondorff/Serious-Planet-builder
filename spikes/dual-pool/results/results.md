@@ -99,20 +99,23 @@ Prototype: branch `spike/dual-pool-2` at 3af166f1 (from a4878fe9; never merged; 
 | | Name | Switches (all with `PLANET_DUAL_POOL=1`, `--gen-workers 5`) |
 |---|---|---|
 | c | dual pool, baseline | none |
+| d-plain | 8 background workers, saturated by the new load, no knob | `PLANET_DUAL_POOL_LOAD=8` |
 | d-BG2 | 2 background workers, saturated | `PLANET_DUAL_POOL_LOAD=8 PLANET_DUAL_POOL_BG=2` |
 | d-Eco | EcoQoS, saturated | `PLANET_DUAL_POOL_LOAD=8 PLANET_DUAL_POOL_ECOQOS=1` |
 | d-Duty50 | duty cap 50 %, saturated | `PLANET_DUAL_POOL_LOAD=8 PLANET_DUAL_POOL_DUTY=50` |
+- d-plain is the like-for-like reference for the knobs (the load changed from window 1's endless jobs to ~10 ms chained jobs) and re-checks window 1's verdict "d slows c" with the new load (planner, 2026-11-02).
 - Not in this window: BG 4 (more load than BG 2: only worth running if BG 2 passes) and combinations (BG 4 + EcoQoS); a third window takes the best one further if needed.
 
 ### Runs and time
-- Flights: `dive` and `teleport-1m` (window 1's teleport-2km behaved like teleport-1m in every verdict); quiet only; 3 rounds, configurations rotated per round (round 1 c, BG2, Eco, Duty; round 2 BG2, Eco, Duty, c; round 3 Eco, Duty, c, BG2).
-- 4 configurations x 2 flights x 3 rounds = 24 runs: `cargo xtask perf stream <flight> --store C:/DEV/SeriousPlanetData/global16384 --gen-workers 5` with the environment of the row; release build of `spike/dual-pool-2` at 3af166f1 in its own worktree.
-- Estimate: window 1 took 118 min for 36 runs including 40 refused or INVALID attempts (about 3.3 min per kept run), so 24 runs take about 75-80 min; without a refusal storm about 60 min. If the window runs short, drop teleport-1m round 3 first.
+- Flights: `dive` (3 rounds) and `teleport-1m` (2 rounds; window 1's teleport-2km behaved like teleport-1m in every verdict); quiet only; configurations rotated per round (round 1 c, d-plain, BG2, Eco, Duty; round 2 d-plain, BG2, Eco, Duty, c; round 3, dive only, BG2, Eco, Duty, c, d-plain).
+- 5 configurations x (3 dive + 2 teleport-1m) = 25 runs: `cargo xtask perf stream <flight> --store C:/DEV/SeriousPlanetData/global16384 --gen-workers 5` with the environment of the row; release build of `spike/dual-pool-2` at 3af166f1 in its own worktree.
+- Estimate: window 1 took 118 min for 36 runs including 40 refused or INVALID attempts (about 3.3 min per kept run), so 25 runs take about 80 min; without a refusal storm about 60 min. If the window runs short, stop after dive round 3's last configuration; teleport-1m's two rounds come first in the run order of each round.
 - Each run also keeps its stderr line `dual pool: synthetic load chunks finished: K` and the run's wall time (chunks per second for the background's throughput).
 
 ### Verdict rule (unchanged from window 1, fixed before the run)
-- For each knob against c, per flight, medians of 3 rounds: tile-ready (`load_run_us_median` + `load_wait_us_median`) and frame p99 at most 5 % above c, and no knob round more than 10 % worse than the worst c round. A knob passes "does not slow" only in both flights.
-- Report for each passing knob its background throughput (chunks per second) against d's of window 1 (8 workers, uncapped), so the owner sees what the pass costs the background.
+- For each knob and for d-plain against c, per flight, medians of the rounds (3 for dive, 2 for teleport-1m): tile-ready (`load_run_us_median` + `load_wait_us_median`) and frame p99 at most 5 % above c, and no knob round more than 10 % worse than the worst c round. A knob passes "does not slow" only in both flights.
+- Report for each passing knob its background throughput (chunks per second) against d-plain's, so the owner sees what the pass costs the background.
+- With 2 rounds the worst-round rule compares the worse of the knob's two rounds with the worse of c's two.
 - A run INVALID by the calibration stays "no verdict" for its own number, as in window 1; a knob with fewer than 2 valid rounds in a flight is "no verdict" there.
 
 ## Visuals
