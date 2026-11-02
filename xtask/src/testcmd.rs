@@ -949,7 +949,12 @@ fn perf_stream_args(args: &[String]) -> Result<Vec<String>, String> {
     if let Some(first) = args.first().filter(|a| !a.starts_with("--")) {
         if first == "all" {
             scene = "streaming".into();
-        } else if STREAM_SCENES.contains(&first.as_str()) || first == EDIT_SCENE || first == ENVELOPE_SCENE || first == COST_SCENE || first == LAYER1_SCENE {
+        } else if STREAM_SCENES.contains(&first.as_str())
+            || first == EDIT_SCENE
+            || first == ENVELOPE_SCENE
+            || first == COST_SCENE
+            || first == LAYER1_SCENE
+        {
             scene = first.clone();
         } else {
             return Err(format!(
