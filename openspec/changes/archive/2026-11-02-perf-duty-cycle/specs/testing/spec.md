@@ -36,3 +36,22 @@ Source: perf window 7 (the clock follows the GPU temperature under the software 
 #### Scenario: Cool already, or no sensor
 - **WHEN** the first reading is 55 C, or the sensor gives nothing
 - **THEN** the wait ends at once, cooled in the first case
+
+### Requirement: TEST-089 The CPU calibration's estimator, moment and scope
+A calibration reading SHALL be the smallest of 5 single timings and the median and maximum of the parallel repetition with the smallest median of 3 (STRM-022), the one before the case taken right before the first measured frame, after the settle and, where the scene has them, the cool-down and warm-up (ADR 0094). A reading outside TEST-039's limits SHALL void frame verdicts only: `gpu_session_valid` and the GPU rows stand. A run whose own load runs during that reading (the reserve loads, BUDG-012) SHALL log `load_calib_declared_load` = 1; its reasons get the suffix ` (declared load: recorded, not voiding)` and are no cause. `accept` SHALL judge again with this scope; acceptance still needs frame validity.
+
+Verify: A
+Status: active
+Source: ADR 0093 (SPIKE-95), ADR 0094, ADR 0065, TEST-039, STRM-022
+
+#### Scenario: The calibration voids frame verdicts only
+- **WHEN** a lit session's only cause is a calibration reading over its limit
+- **THEN** `frame_valid` is false, `gpu_session_valid` is true, the console says the frame verdicts are not valid and the GPU verdicts are, and `accept` judging the log again agrees
+
+#### Scenario: A declared load is recorded, not voiding
+- **WHEN** a reserve run logs `load_calib_declared_load` = 1 with a before single reading of 62,183 us, and a run without the count logs the same reading
+- **THEN** the first session has no calibration cause, `cpu_calibration_valid` false and the reason with the declared-load suffix, the second gets no frame verdict, and `accept` judging both logs again agrees
+
+#### Scenario: The estimator
+- **WHEN** the single timings 61,000, 47,800, 52,300, 48,100 and 49,000 us and three parallel repetitions with medians 104,000, 95,000 and 97,000 us are reduced
+- **THEN** the single reading is 47,800 us and the parallel median and maximum are those of the 95,000 us repetition, chosen by its median and not by its fastest thread

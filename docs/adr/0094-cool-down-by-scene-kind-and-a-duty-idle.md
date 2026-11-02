@@ -1,5 +1,5 @@
 # 0094 Cool-down by scene kind, and a duty idle between runs
-Status: proposed (drafted by the spikes lane, 2026-11-02; a process decision for opus-planner under the owner's delegation); amends ADR 0057 point 1 and, for streaming scenes, ADR 0093 point 2
+Status: accepted (opus-planner, 2026-11-02, under the owner's delegation: a process decision, inbox #72; drafted by the spikes lane); amends ADR 0057 point 1 and, for streaming scenes, ADR 0093 point 2
 Date: 2026-11-02
 Source: SPIKE-95 (`spikes/perf-window-process/results/results.md`); SPIKE-90 window 2; ADR 0057, ADR 0093; TEST-033, TEST-037; opus-planner, inbox #72
 

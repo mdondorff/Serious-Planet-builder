@@ -570,8 +570,8 @@ fn run_case(
         writeln!(out, "{}", planet_perf::cool_gpu().line(script.scene.name())).map_err(err)?;
     }
     // The machine's state as a fixed job sees it, alone and with the pool's thread count at once, before and after the case (STRM-022,
-    // TEST-039): read here, after the settle and the cool-down, right before the first measured frame, so it sees the machine the
-    // frames run on and not the heat of the start-up (ADR 0093). The reserve test's loads already run: the log declares them.
+    // TEST-089): read here, after the settle, right before the first measured frame, so it sees the machine the frames run on and not
+    // the start-up (ADR 0093, ADR 0094: no cool-down for streaming scenes). The reserve test's loads already run: the log declares them.
     let calib_before = (!smoke || calibrate).then(|| planet_perf::streaming::calibrate_cpu(calib_threads));
     // The clock, before, during (a sampler thread: a process spawn never on the frame path) and after the case.
     let mut clocks: Vec<planet_perf::ClockSample> = Vec::new();
