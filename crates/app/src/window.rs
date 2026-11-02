@@ -192,7 +192,7 @@ struct Config {
     /// Frames a smoke run drives before it closes the window (`--frames`, default [`SMOKE_FRAMES`]).
     smoke_frames: u64,
     vsync: bool,
-    /// `--shadow-march`: the clipmap shadow pass runs beside the lit frames.
+    /// The clipmap shadow pass runs with the lit frames (on unless `--no-shadow-march`).
     shadow_march: bool,
     policy: AdapterPolicy,
     gen: planet_streaming::GenWorkers,

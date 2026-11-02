@@ -150,19 +150,24 @@ fn fs(v: V) -> @location(0) vec4<f32> {
 }
 "#;
 
-/// The shadow-apply pass (REND-051): `visibility x sun-direct` added to the scene target. The visibility is 1 until the march feeds it.
+/// The shadow-apply pass (REND-051): `visibility x sun-direct` added to the scene target. `fs_unit` is the frame without the shadow passes.
 const SHADOW_APPLY: &str = r#"
 @group(0) @binding(0) var sun_direct: texture_2d<f32>;
+@group(0) @binding(1) var visibility: texture_2d<f32>;
 @vertex
 fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
     let p = vec2<f32>(f32((i << 1u) & 2u), f32(i & 2u));
     return vec4<f32>(p * 2.0 - 1.0, 0.0, 1.0);
 }
-const VISIBILITY: f32 = 1.0;
 @fragment
 fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
-    let d = textureLoad(sun_direct, vec2<i32>(pos.xy), 0).xyz;
-    return vec4<f32>(d * VISIBILITY, 0.0);
+    let p = vec2<i32>(pos.xy);
+    let d = textureLoad(sun_direct, p, 0).xyz;
+    return vec4<f32>(d * textureLoad(visibility, p, 0).x, 0.0);
+}
+@fragment
+fn fs_unit(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    return vec4<f32>(textureLoad(sun_direct, vec2<i32>(pos.xy), 0).xyz, 0.0);
 }
 "#;
 
@@ -205,8 +210,11 @@ pub struct LitPath {
     /// The terrain pass's second target (REND-051): the direct-sun radiance the shadow applies to.
     sun_direct: wgpu::Texture,
     sun_direct_view: wgpu::TextureView,
+    /// The shadow-apply pass with the march's visibility (`fs`), and without one (`fs_unit`: the visibility is 1).
     apply_pipeline: wgpu::RenderPipeline,
-    apply_bind: wgpu::BindGroup,
+    apply_unit_pipeline: wgpu::RenderPipeline,
+    apply_bgl: wgpu::BindGroupLayout,
+    apply_unit_bind: wgpu::BindGroup,
     histogram: wgpu::Buffer,
     state: wgpu::Buffer,
     params: wgpu::Buffer,
@@ -378,51 +386,69 @@ impl LitPath {
             [params.as_entire_binding(), wgpu::BindingResource::TextureView(&hdr_view), state.as_entire_binding()],
         );
 
-        // The shadow-apply pass adds `visibility x sun-direct` to the scene target (REND-051); the visibility is forced to 1 until the
-        // march feeds it (PR 5b-2).
-        let (apply_bgl, apply_pl) = layout("lit-shadow-apply", &[texture(0, f)]);
+        // The shadow-apply pass adds `visibility x sun-direct` to the scene target (REND-051): the march's visibility when the frame ran
+        // the shadow passes, else 1.
+        let (apply_bgl, apply_pl) = layout("lit-shadow-apply", &[texture(0, f), texture(1, f)]);
         let apply_module = module("lit-shadow-apply", SHADOW_APPLY.to_string());
-        let apply_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("lit-shadow-apply"),
-            layout: Some(&apply_pl),
-            vertex: wgpu::VertexState {
-                module: &apply_module,
-                entry_point: Some("vs"),
-                compilation_options: Default::default(),
-                buffers: &[],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &apply_module,
-                entry_point: Some("fs"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: HDR_FORMAT,
-                    // Add the colour, keep the target's alpha.
-                    blend: Some(wgpu::BlendState {
-                        color: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::One,
-                            dst_factor: wgpu::BlendFactor::One,
-                            operation: wgpu::BlendOperation::Add,
-                        },
-                        alpha: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::Zero,
-                            dst_factor: wgpu::BlendFactor::One,
-                            operation: wgpu::BlendOperation::Add,
-                        },
-                    }),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
+        let apply_pipeline_of = |entry: &'static str| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("lit-shadow-apply"),
+                layout: Some(&apply_pl),
+                vertex: wgpu::VertexState {
+                    module: &apply_module,
+                    entry_point: Some("vs"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &apply_module,
+                    entry_point: Some(entry),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: HDR_FORMAT,
+                        // Add the colour, keep the target's alpha.
+                        blend: Some(wgpu::BlendState {
+                            color: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::One,
+                                dst_factor: wgpu::BlendFactor::One,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                            alpha: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::Zero,
+                                dst_factor: wgpu::BlendFactor::One,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                        }),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let (apply_pipeline, apply_unit_pipeline) = (apply_pipeline_of("fs"), apply_pipeline_of("fs_unit"));
+        // The unit pipeline reads no visibility; a one-texel texture fills the layout's second binding.
+        let unit_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("lit-shadow-apply-unit"),
+            size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
         });
-        let apply_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("lit-shadow-apply"),
+        let unit_view = unit_texture.create_view(&Default::default());
+        let apply_unit_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("lit-shadow-apply-unit"),
             layout: &apply_bgl,
-            entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&sun_direct_view) }],
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&sun_direct_view) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&unit_view) },
+            ],
         });
 
         let allocated = 2 * u64::from(size.0) * u64::from(size.1) * crate::graph::HDR_BYTES_PER_PIXEL
@@ -435,7 +461,9 @@ impl LitPath {
             sun_direct,
             sun_direct_view,
             apply_pipeline,
-            apply_bind,
+            apply_unit_pipeline,
+            apply_bgl,
+            apply_unit_bind,
             histogram,
             state,
             params,
@@ -490,7 +518,25 @@ impl LitPath {
 
     /// Record the `shadow-apply` pass: add the visibility times `sun-direct` to the scene target the terrain drew into. Recorded by the
     /// terrain renderer right after the terrain pass (the water pass copies the lit scene).
-    pub(crate) fn record_shadow_apply(&self, encoder: &mut wgpu::CommandEncoder, plan: &LitPlan) {
+    /// `visibility` is the march's resolved visibility of this frame (`R32Float`, the frame's size), or none for a frame without the shadow
+    /// passes, whose visibility is 1.
+    pub(crate) fn record_shadow_apply(
+        &self,
+        ctx: &GpuContext,
+        encoder: &mut wgpu::CommandEncoder,
+        plan: &LitPlan,
+        visibility: Option<&wgpu::TextureView>,
+    ) {
+        let bind = visibility.map(|v| {
+            ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("lit-shadow-apply"),
+                layout: &self.apply_bgl,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&self.sun_direct_view) },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(v) },
+                ],
+            })
+        });
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("shadow-apply"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -504,8 +550,16 @@ impl LitPath {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        pass.set_pipeline(&self.apply_pipeline);
-        pass.set_bind_group(0, &self.apply_bind, &[]);
+        match &bind {
+            Some(b) => {
+                pass.set_pipeline(&self.apply_pipeline);
+                pass.set_bind_group(0, b, &[]);
+            }
+            None => {
+                pass.set_pipeline(&self.apply_unit_pipeline);
+                pass.set_bind_group(0, &self.apply_unit_bind, &[]);
+            }
+        }
         pass.draw(0..3, 0..1);
     }
 
