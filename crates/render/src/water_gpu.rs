@@ -8,7 +8,9 @@ use planet_frame::look::water::{LiquidAppearance, LIQUID_VEC4S, WAVES};
 
 /// One lighting flavour of the water pass: its group 3 and its pipeline.
 pub(crate) struct WaterFlavour {
+    /// Group 3 with the one-texel visibility (a frame without the shadow passes).
     pub(crate) bind: wgpu::BindGroup,
+    pub(crate) layout: wgpu::BindGroupLayout,
     pub(crate) compact: wgpu::RenderPipeline,
 }
 
@@ -19,6 +21,9 @@ pub(crate) struct WaterGpu {
     pub(crate) copy_view: wgpu::TextureView,
     /// Bytes of the copy: a frame target of the share.
     pub(crate) copy_bytes: u64,
+    /// A one-texel stand-in for the visibility: the shader reads 1 where the texture is that small.
+    pub(crate) unit_visibility: wgpu::TextureView,
+    _unit_texture: wgpu::Texture,
     pub(crate) plain: WaterFlavour,
     pub(crate) atmosphere: Option<WaterFlavour>,
     /// The long-lived objects made so far (texture, bind groups, pipelines).
@@ -102,18 +107,65 @@ impl WaterGpu {
             view_formats: &[],
         });
         let copy_view = copy.create_view(&Default::default());
-        let g3 =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("water-plain"), entries: &[texture_entry(4)] });
-        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("water-plain"),
-            layout: &g3,
-            entries: &[wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&copy_view) }],
+        let unit_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("water-unit-visibility"),
+            size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
         });
+        let unit_visibility = unit_texture.create_view(&Default::default());
+        let g3 = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("water-plain"),
+            entries: &[texture_entry(4), texture_entry(5)],
+        });
+        let bind = Self::plain_bind(device, &g3, &copy_view, &unit_visibility);
         let compact_pipeline = pipeline(device, bgl0, &g3, compact, false);
-        // The copy, the bind group and the pipeline.
-        let objects = 1 + 1 + 1;
+        // The copy, the one-texel visibility, the bind group and the pipeline.
+        let objects = 1 + 1 + 1 + 1;
         let copy_bytes = u64::from(size.0) * u64::from(size.1) * crate::graph::HDR_BYTES_PER_PIXEL;
-        WaterGpu { copy, copy_view, copy_bytes, plain: WaterFlavour { bind, compact: compact_pipeline }, atmosphere: None, objects }
+        WaterGpu {
+            copy,
+            copy_view,
+            copy_bytes,
+            unit_visibility,
+            _unit_texture: unit_texture,
+            plain: WaterFlavour { bind, layout: g3, compact: compact_pipeline },
+            atmosphere: None,
+            objects,
+        }
+    }
+
+    fn plain_bind(
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        copy_view: &wgpu::TextureView,
+        visibility: &wgpu::TextureView,
+    ) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("water-plain"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(copy_view) },
+                wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(visibility) },
+            ],
+        })
+    }
+
+    /// Group 3 of this frame flavour over the march visibility (`R32Float`, the frame size).
+    pub(crate) fn bind_with_visibility(
+        &self,
+        device: &wgpu::Device,
+        atmosphere: Option<&AtmospherePath>,
+        visibility: &wgpu::TextureView,
+    ) -> wgpu::BindGroup {
+        match (atmosphere, &self.atmosphere) {
+            (Some(a), Some(f)) => a.water_bind(device, &f.layout, &self.copy_view, visibility),
+            _ => Self::plain_bind(device, &self.plain.layout, &self.copy_view, visibility),
+        }
     }
 
     /// The atmosphere flavour: group 3 holds the atmosphere's block, tables and sky-view table beside the copy.
@@ -127,10 +179,10 @@ impl WaterGpu {
         if self.atmosphere.is_some() {
             return;
         }
-        let (layout, bind) = atmosphere.water_group(device, &self.copy_view);
+        let (layout, bind) = atmosphere.water_group(device, &self.copy_view, &self.unit_visibility);
         let compact_pipeline = pipeline(device, bgl0, &layout, compact, true);
         self.objects += 1 + 1;
-        self.atmosphere = Some(WaterFlavour { bind, compact: compact_pipeline });
+        self.atmosphere = Some(WaterFlavour { bind, layout, compact: compact_pipeline });
     }
 }
 
