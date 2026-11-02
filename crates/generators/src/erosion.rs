@@ -27,6 +27,9 @@ pub const EROSION_VERSION: u32 = 2;
 /// Names this implementation in cache keys (CON-07).
 pub const EROSION_IMPLEMENTATION_ID: &str = "cpu-erosion-v1";
 
+/// Names this implementation with the relief channels on (CON-07): another field, another key.
+pub const EROSION_RELIEF_IMPLEMENTATION_ID: &str = "cpu-erosion-v1+relief";
+
 /// Domain tag of the crease lattice.
 const LAYER_CREASE: u64 = 0x4552_0001;
 const OCTAVES: u32 = 12;
@@ -153,9 +156,25 @@ pub struct ErosionField<'a> {
     error: Mutex<Option<String>>,
     /// The landform lattice of the seed (GEN-062), taken from the shared cache on first use.
     landform: OnceLock<Arc<crate::global::LandformLattice>>,
+    /// The relief channels `k` and `m` (GEN-099): when present the height is `m + k (e - m) + k detail`, else today's `e + detail` (`k` 1, `m` not read).
+    relief_channels: Option<Arc<crate::relief_lattice::ReliefLattice>>,
 }
 
 impl ErosionField<'_> {
+    /// Turns the relief channels on (GEN-099, the m9-bake switch, off by default): the field reads `k` and `m` once at each point and its keys change (the channels' identity
+    /// enters the inputs hash and the implementation id). The channels are of the bake as it is, so the body's relief scale must be 1.
+    pub fn with_relief(mut self, channels: Arc<crate::relief_lattice::ReliefLattice>) -> Self {
+        assert!(self.relief == 1.0, "the relief channels are of the bake at relief scale 1, not {}", self.relief);
+        self.inputs = hash_u64s(0x7265_6c66, &[self.inputs, channels.id(), u64::from(crate::relief_channels::RELIEF_CHANNELS_VERSION)]);
+        self.relief_channels = Some(channels);
+        self
+    }
+
+    /// Whether the relief channels are on.
+    pub fn relief_on(&self) -> bool {
+        self.relief_channels.is_some()
+    }
+
     /// The first error reading the bake since the field was built, if any.
     pub fn error(&self) -> Option<String> {
         self.error.lock().expect("erosion error mutex").clone()
@@ -174,7 +193,16 @@ impl ErosionField<'_> {
 
     /// The largest height the field takes in magnitude at its relief scale (WDEF-017): the elevation clamp times the scale plus the deepest incision.
     fn max_abs_height(&self) -> f64 {
-        MAX_ELEVATION_M.max(-MIN_ELEVATION_M) * self.relief + DETAIL_DOWN_M
+        let today = MAX_ELEVATION_M.max(-MIN_ELEVATION_M) * self.relief + DETAIL_DOWN_M;
+        match &self.relief_channels {
+            None => today,
+            // `m + k (e - m) + k detail` with `e` and the detail inside `today` and `k`, `m` inside the channels' planet range.
+            Some(r) => {
+                let g = r.global_range();
+                let (k, m) = (g[1].max(1.0), g[2].abs().max(g[3].abs()));
+                m + k * (today + m)
+            }
+        }
     }
 
     /// The ground elevation of the bake at a direction, without creases.
@@ -224,7 +252,15 @@ impl ErosionField<'_> {
         let c = carve(slope);
         // Where the slope factor is 1 the landform changes nothing (`fine_carve(1, L)` is 1), so it is not evaluated.
         let l = if c >= 1.0 { 0.0 } else { self.landform().at(dir) };
-        e + detail_m(self.seed, dir, e, c, l)
+        let detail = detail_m(self.seed, dir, e, c, l);
+        match &self.relief_channels {
+            None => e + detail,
+            // GEN-099: each term one read at the point.
+            Some(r) => {
+                let (k, m) = r.at(dir);
+                m + k * (e - m) + k * detail
+            }
+        }
     }
 }
 
@@ -305,7 +341,11 @@ impl HeightField for ErosionField<'_> {
     }
 
     fn implementation_id(&self) -> &'static str {
-        EROSION_IMPLEMENTATION_ID
+        if self.relief_channels.is_some() {
+            EROSION_RELIEF_IMPLEMENTATION_ID
+        } else {
+            EROSION_IMPLEMENTATION_ID
+        }
     }
 
     fn version(&self) -> u32 {
@@ -417,7 +457,20 @@ impl HeightField for ErosionField<'_> {
         let ((c1, c2), (f1, f2)) = (part(a_lo, a_hi, clo, chi), part(fa_lo, fa_hi, flo, fhi));
         let (dlo, dhi) = ((c1 + f1).max(-0.75 * AMPLITUDE_MAX_M), (c2 + f2).min(0.25 * AMPLITUDE_MAX_M));
         let pad = |x: f64| 1e-6 + x.abs() * 1.2e-7;
-        let (l, h) = (blo + dlo, bhi + dhi);
+        let (l, h) = match &self.relief_channels {
+            None => (blo + dlo, bhi + dhi),
+            // `m + k (e - m) + k detail` over the intervals of `e`, `m`, `k` and the detail: the products of intervals (GEN-099, GEN-102).
+            Some(r) => {
+                let [klo, khi, mlo, mhi] = r.range_over_cap(centre, angular_radius);
+                let product = |alo: f64, ahi: f64, blo_: f64, bhi_: f64| {
+                    let p = [alo * blo_, alo * bhi_, ahi * blo_, ahi * bhi_];
+                    (p.iter().cloned().fold(f64::INFINITY, f64::min), p.iter().cloned().fold(f64::NEG_INFINITY, f64::max))
+                };
+                let (rise_lo, rise_hi) = product(klo, khi, blo - mhi, bhi - mlo);
+                let (det_lo, det_hi) = product(klo, khi, dlo, dhi);
+                (mlo + rise_lo + det_lo, mhi + rise_hi + det_hi)
+            }
+        };
         ((l - pad(l)).max(global.0), (h + pad(h)).min(global.1))
     }
 }
@@ -466,6 +519,7 @@ impl ErosionGenerator {
             relief,
             error: Mutex::new(None),
             landform: OnceLock::new(),
+            relief_channels: None,
         })
     }
 }
