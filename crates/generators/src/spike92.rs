@@ -13,6 +13,7 @@ const LAYER_A: u64 = 0x5392_0001;
 const LAYER_WARP: u64 = 0x5392_0002;
 const LAYER_MID: u64 = 0x5392_0003;
 const LAYER_HIGH: u64 = 0x5392_0004;
+const LAYER_ISL: u64 = 0x5392_0005;
 
 #[derive(Clone, Copy, Debug)]
 pub enum Candidate {
@@ -50,6 +51,17 @@ pub enum Candidate {
         cwarp: f64,
         pw: f64,
     },
+}
+
+/// Knobs of the hot path, read once per process.
+fn deep() -> f64 {
+    static V: OnceLock<f64> = OnceLock::new();
+    *V.get_or_init(|| env("S92_DEEP", 1.0))
+}
+
+fn isl() -> (f64, f64) {
+    static V: OnceLock<(f64, f64)> = OnceLock::new();
+    *V.get_or_init(|| (env("S92_ISL", 0.0), env("S92_ISLF", 6.0)))
 }
 
 fn env(k: &str, d: f64) -> f64 {
@@ -314,9 +326,13 @@ fn h_value(seed: u64, lseed: u64, d: Vec3, c: Candidate) -> f64 {
             })
             .sum();
         // The fBm's amplitude peaks on the craton margins (bias 0.5) and falls to `S92_DEEP` in the deep ocean and the interiors.
-        let deep = env("S92_DEEP", 1.0);
+        let deep = deep();
         let wm = bias.min(1.0);
-        shape * (deep + (1.0 - deep) * 4.0 * wm * (1.0 - wm)) + k * bias
+        // Islands: island-scale fBm (`S92_ISL` amplitude, base frequency `S92_ISLF`) just offshore of the craton margins (bias about 0.2).
+        let (isl, islf) = isl();
+        let near = libm::exp(-((wm - 0.2) / 0.15) * ((wm - 0.2) / 0.15));
+        let islands = if isl > 0.0 { isl * near * fbm_gain(seed, LAYER_ISL, d + w * warp, islf, 4, 0.6) } else { 0.0 };
+        shape * (deep + (1.0 - deep) * 4.0 * wm * (1.0 - wm)) + k * bias + islands
     }
 }
 
