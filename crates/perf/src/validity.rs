@@ -9,7 +9,8 @@
 //! | not a performance power scheme / unreadable        | yes                  | yes                |
 //! | run validity rule (thermal/hardware throttling, noise, not the production source) | yes | yes |
 //! | owner override of the readiness gate               | yes                  | yes                |
-//! | a scene's CPU calibration outside the limits (ADR 0065, TEST-039) | yes   | yes                |
+//! | a scene's CPU calibration outside the limits (ADR 0065, TEST-039) | yes   | NO (ADR 0093)      |
+//! | the same, in a run that declared a load of its own (ADR 0093 point 4): recorded only | no | no         |
 //! | loaded mode (`--loaded`, BUILD-030): the quiet verdicts do not count; the CPU calibration is recorded and does not void | yes | yes |
 //! | a run started with the GPU in P5 or lower (idle clock) | NO               | yes                |
 //! | a view's clock sample below the 1,400 MHz floor    | NO (per view)        | yes (that view)    |
@@ -44,9 +45,10 @@ impl CauseKind {
     pub fn voids_frames(self) -> bool {
         !matches!(self, CauseKind::LowStartClock)
     }
-    /// Whether the cause voids the GPU verdicts: every cause does (a view's own clock floor is judged per view).
+    /// Whether the cause voids the GPU verdicts: every cause but the CPU calibration does (ADR 0093: a GPU timing is judged by the
+    /// clock floor and the noise rule, not by a CPU kernel; a view's own clock floor is judged per view).
     pub fn voids_gpu(self) -> bool {
-        true
+        !matches!(self, CauseKind::CpuCalibration)
     }
 }
 
@@ -112,13 +114,17 @@ pub fn session_causes(adapter: &AdapterFacts, power_scheme: Option<&str>, runs: 
             }
         }
     }
-    // ADR 0065: a scene whose CPU calibration lies outside the limits gets no verdict (a scene without a calibration is not judged).
+    // ADR 0065: a scene whose CPU calibration lies outside the limits gets no frame verdict (a scene without a calibration is not
+    // judged); a run that declared a load of its own is recorded only (ADR 0093 point 4).
     let mut judged_paths: Vec<&str> = Vec::new();
     for r in runs {
         if judged_paths.contains(&r.path_name.as_str()) {
             continue;
         }
         let count = |k: &str| r.counts.iter().find(|(n, _)| n == k).map(|(_, v)| *v);
+        if calibration::declared_load(&count) {
+            continue;
+        }
         if let Judgement::Outside(over) = calibration::judge(&count) {
             judged_paths.push(&r.path_name);
             push(CauseKind::CpuCalibration, calibration::reason(&r.path_name, &over));
@@ -142,7 +148,8 @@ pub fn calibration_status(runs: &[RunReport]) -> (Option<bool>, Vec<String>) {
             Judgement::Outside(over) => {
                 judged = true;
                 seen.push(&r.path_name);
-                reasons.push(calibration::reason(&r.path_name, &over));
+                let suffix = if calibration::declared_load(&count) { calibration::DECLARED_LOAD_SUFFIX } else { "" };
+                reasons.push(format!("{}{suffix}", calibration::reason(&r.path_name, &over)));
             }
         }
     }
@@ -201,6 +208,11 @@ impl SessionVerdict {
         self.causes.iter().filter(|c| !c.kind.voids_frames()).map(|c| c.text.clone()).collect()
     }
 
+    /// Texts of the causes that void the frame verdicts only (the CPU calibration, ADR 0093).
+    pub fn frame_only(&self) -> Vec<String> {
+        self.causes.iter().filter(|c| !c.kind.voids_gpu()).map(|c| c.text.clone()).collect()
+    }
+
     /// The console lines of the verdict, printed once before any budget verdict. The only place that words the session's validity.
     pub fn lines(&self) -> Vec<String> {
         self.lines_for(true)
@@ -220,6 +232,16 @@ impl SessionVerdict {
         }
         if self.frame_valid() {
             return vec![format!("SESSION VALID for frame verdicts: yes; GPU verdicts: NOT VALID ({})", self.gpu_only().join("; "))];
+        }
+        if self.gpu_session_valid() && gpu_rows {
+            let mut l = vec![format!(
+                "SESSION VALID for GPU verdicts: yes (each view judged against the {:.0} MHz clock floor); frame verdicts: NO, the frame verdicts below do not count",
+                clock::GPU_CLOCK_FLOOR_MHZ
+            )];
+            for t in self.frame_only() {
+                l.push(format!("  NO FRAME VERDICT: {t}"));
+            }
+            return l;
         }
         let mut l = vec!["SESSION INVALID for budgets: frame verdicts: NO; GPU verdicts: NO; the verdicts below do not count".to_string()];
         for c in &self.causes {
@@ -291,6 +313,11 @@ fn recomputed_warnings(root: &Json) -> (Vec<String>, Vec<String>) {
     let (mut calibrated, mut cal_fresh, mut cal_paths) = (false, Vec::new(), Vec::<String>::new());
     for r in &runs {
         let count = |k: &str| r.get("counts").and_then(|c| c.get(k)).and_then(Json::num).map(|n| n as u64);
+        // A run that declared a load of its own is recorded only (ADR 0093 point 4); its readings still count as a calibration seen.
+        if calibration::declared_load(&count) {
+            calibrated |= !matches!(calibration::judge(&count), Judgement::NotJudged);
+            continue;
+        }
         match calibration::judge(&count) {
             Judgement::NotJudged => {}
             Judgement::Within => calibrated = true,
@@ -411,11 +438,11 @@ pub(crate) fn log_frame_valid(root: &Json) -> bool {
     !ws.is_empty() && ws.iter().all(|w| is_low_start_warning(w)) && root.get("valid_for_budgets").is_some()
 }
 
-/// Whether a log's session is fit for GPU verdicts: no warning left after judging them again (without `warnings`: the recorded
-/// `gpu_session_valid`, else exactly when `valid_for_budgets` is true).
+/// Whether a log's session is fit for GPU verdicts: no warning left after judging them again but the CPU calibration's, which voids
+/// frame verdicts only (ADR 0093; without `warnings`: the recorded `gpu_session_valid`, else exactly when `valid_for_budgets` is true).
 pub(crate) fn log_gpu_session_valid(root: &Json) -> bool {
     if has_verdict_inputs(root) {
-        return recomputed_warnings(root).0.is_empty();
+        return recomputed_warnings(root).0.iter().all(|w| w.starts_with(calibration::REASON_PREFIX));
     }
     match root.get("gpu_session_valid") {
         Some(Json::Bool(b)) => *b,
@@ -692,7 +719,7 @@ mod tests {
         // The smoke dive disturbed by git: the after single reading is out.
         r.counts = calib((46_984, 105_071), (59_335, 91_121));
         let v = assess(std::slice::from_ref(&r), false, &gate::Validity::default(), &[]);
-        assert!(!v.frame_valid() && !v.gpu_session_valid(), "no verdict: the whole scene does not count");
+        assert!(!v.frame_valid() && v.gpu_session_valid(), "no frame verdict; the GPU verdicts are not the calibration's (ADR 0093)");
         assert_eq!(v.causes.len(), 1);
         assert_eq!(v.causes[0].kind, CauseKind::CpuCalibration);
         let reason =
@@ -800,7 +827,7 @@ mod tests {
     fn accept_judges_the_calibration_again_from_the_logged_counts_and_leaves_logs_without_one_alone() {
         // A log written before the rule, with the slow planner terminal's readings: now no verdict, with the reason.
         let slow = log_with_counts(true, &[], "stream/dive", &calib((66_877, 130_386), (48_553, 133_755)));
-        assert!(!log_frame_valid(&slow) && !log_gpu_session_valid(&slow));
+        assert!(!log_frame_valid(&slow) && log_gpu_session_valid(&slow), "frame verdicts only (ADR 0093)");
         let reasons = log_frame_void_reasons(&slow);
         assert_eq!(reasons.len(), 1);
         assert!(
@@ -822,5 +849,65 @@ mod tests {
         assert!(log_frame_valid(&none));
         let kept = log_with_counts(false, &[w], "stream-lit/dive", &[]);
         assert!(!log_frame_valid(&kept), "no counts to judge again: the recorded reason stands");
+    }
+
+    // spec: TEST-039
+    #[test]
+    fn the_calibration_voids_the_frame_verdicts_only_and_the_console_and_accept_agree() {
+        let mut r = run("P0", 1500);
+        r.path_name = "lit/ground-0.5m".into();
+        // Window 25's lit-full-r2: before single 52,900 us over 52,000 us, its only cause.
+        r.counts = calib((52_900, 95_000), (49_000, 96_000));
+        let v = assess(std::slice::from_ref(&r), false, &gate::Validity::default(), &[]);
+        assert!(!v.frame_valid() && v.gpu_session_valid(), "{:?}", v.causes);
+        let l = v.lines();
+        assert!(l[0].starts_with("SESSION VALID for GPU verdicts: yes") && l[0].contains("frame verdicts: NO"), "{l:?}");
+        assert!(l.iter().any(|x| x.starts_with("  NO FRAME VERDICT: no verdict: CPU calibration of 'lit/ground-0.5m'")), "{l:?}");
+        assert_eq!(v.frame_only().len(), 1);
+        assert!(v.gpu_only().is_empty());
+        // The log records both validities, and accept judging it again agrees.
+        let json = report_json(&rtx(), Some(GOOD), &[], &gate::Validity::default(), &Protocol::default(), std::slice::from_ref(&r));
+        assert!(json.contains("\"frame_valid\":false,\"gpu_session_valid\":true"), "{json}");
+        let j = parse(json.as_bytes()).unwrap();
+        assert!(!log_frame_valid(&j) && log_gpu_session_valid(&j));
+        // A streaming scene has no GPU rows: the session is plainly invalid for its (frame) verdicts.
+        r.path_name = "stream/dive".into();
+        let v = assess(std::slice::from_ref(&r), false, &gate::Validity::default(), &[]);
+        assert!(v.lines_for(false)[0].starts_with("SESSION INVALID for budgets"), "{:?}", v.lines_for(false));
+        // Beside a cause that voids both, the GPU verdicts are void too.
+        let throttled = gate::validity(&["lit/ground-0.5m".into()], &[]);
+        r.path_name = "lit/ground-0.5m".into();
+        assert!(!assess(std::slice::from_ref(&r), false, &throttled, &[]).gpu_session_valid());
+    }
+
+    // spec: TEST-039
+    #[test]
+    fn a_declared_load_records_its_calibration_and_voids_nothing_at_run_time_or_in_accept() {
+        let mut r = run("P0", 1500);
+        r.path_name = "stream-lit/teleport-1m".into();
+        // The reserve window of 2026-11-01: before single 62,183 us with the reserve loads running.
+        let mut counts = calib((62_183, 96_759), (50_800, 95_330));
+        counts.push((calibration::DECLARED_LOAD_COUNT.into(), 1));
+        r.counts = counts.clone();
+        let v = assess(std::slice::from_ref(&r), false, &gate::Validity::default(), &[]);
+        assert!(v.causes.is_empty() && v.frame_valid() && v.gpu_session_valid(), "{:?}", v.causes);
+        let (status, reasons) = calibration_status(std::slice::from_ref(&r));
+        assert_eq!(status, Some(false));
+        assert_eq!(reasons.len(), 1);
+        assert!(reasons[0].contains("before single 62,183 us over 52,000 us") && reasons[0].ends_with(calibration::DECLARED_LOAD_SUFFIX));
+        let json = report_json(&rtx(), Some(GOOD), &[], &gate::Validity::default(), &Protocol::default(), std::slice::from_ref(&r));
+        let j = parse(json.as_bytes()).unwrap();
+        assert!(log_frame_valid(&j) && log_gpu_session_valid(&j), "accept agrees: {json}");
+        assert!(session_verdict_notes(&j).is_empty(), "{:?}", session_verdict_notes(&j));
+        // The same readings without the declaration: no frame verdict, at run time and in accept.
+        r.counts = calib((62_183, 96_759), (50_800, 95_330));
+        assert!(!assess(std::slice::from_ref(&r), false, &gate::Validity::default(), &[]).frame_valid());
+        assert!(!log_frame_valid(&log_with_counts(true, &[], "stream-lit/teleport-1m", &r.counts)));
+        // Only the value 1 declares; a recorded calibration reason of a declared run goes away when judged again.
+        let w = "no verdict: CPU calibration of 'stream-lit/teleport-1m' outside the limits (ADR 0065): before single 62,183 us over 52,000 us";
+        assert!(log_frame_valid(&log_with_counts(false, &[w], "stream-lit/teleport-1m", &counts)));
+        let mut zero = calib((62_183, 96_759), (50_800, 95_330));
+        zero.push((calibration::DECLARED_LOAD_COUNT.into(), 0));
+        assert!(!log_frame_valid(&log_with_counts(true, &[], "stream-lit/teleport-1m", &zero)));
     }
 }

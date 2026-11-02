@@ -529,10 +529,7 @@ fn run_case(
         }
         d.reserve = Some(r);
     }
-    // The machine's state as a fixed job sees it, alone and with the pool's thread count at once, before and after the case (STRM-022:
-    // recorded only, never judged; the per-tile times of the log read against it). Nothing of the case runs yet.
     let calib_threads = gen.workers;
-    let calib_before = (!smoke || calibrate).then(|| planet_perf::streaming::calibrate_cpu(calib_threads));
     writeln!(out, "{}: rig built in {:.2} s", script.scene.name(), rig_started.elapsed().as_secs_f64()).map_err(err)?;
     // The start-up load of the roots, before frame 0 (STRM-001): a reading of the cold start (with the pack ignored, `dive-cold`, it is
     // every root generated), recorded under the `load_` prefix like the tile loads.
@@ -571,6 +568,10 @@ fn run_case(
     if start_steps(smoke).cool {
         writeln!(out, "{}", planet_perf::cool_gpu().line(script.scene.name())).map_err(err)?;
     }
+    // The machine's state as a fixed job sees it, alone and with the pool's thread count at once, before and after the case (STRM-022,
+    // TEST-039): read here, after the settle and the cool-down, right before the first measured frame, so it sees the machine the
+    // frames run on and not the heat of the start-up (ADR 0093). The reserve test's loads already run: the log declares them.
+    let calib_before = (!smoke || calibrate).then(|| planet_perf::streaming::calibrate_cpu(calib_threads));
     // The clock, before, during (a sampler thread: a process spawn never on the frame path) and after the case.
     let mut clocks: Vec<planet_perf::ClockSample> = Vec::new();
     let cpu_before = (!smoke).then(planet_perf::host::query_cpu_clock).flatten();
@@ -682,6 +683,7 @@ fn run_case(
         load_counts.push(("reserve_pass".into(), u64::from(report.pass())));
     }
     let pool = d.rig.pool;
+    let declared_load = d.reserve.is_some();
     let torn = Instant::now();
     drop(d);
     let teardown_s = torn.elapsed().as_secs_f64();
@@ -690,6 +692,10 @@ fn run_case(
     if let Some(c) = &calib_before {
         load_counts.extend(planet_perf::streaming::calibration_counts("before", c));
         load_counts.extend(planet_perf::streaming::calibration_counts("after", &planet_perf::streaming::calibrate_cpu(calib_threads)));
+        // The reserve loads ran during the reading before the case: recorded, not voiding (ADR 0093 point 4, TEST-039).
+        if declared_load {
+            load_counts.push((planet_perf::calibration::DECLARED_LOAD_COUNT.into(), 1));
+        }
     }
     // The lag post-pass, off the timed path: the loop is gone (queued jobs cancelled, in-flight ones finished), the case is over,
     // and every frame's lag is judged against the plan selected afresh for its own camera (TEST-020).

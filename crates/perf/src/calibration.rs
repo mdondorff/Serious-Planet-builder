@@ -32,6 +32,17 @@ pub const AFTER_PARALLEL_MEDIAN_MAX_US: u64 = 112_000;
 /// The start of every reason this module words.
 pub const REASON_PREFIX: &str = "no verdict: CPU calibration";
 
+/// The count a run logs as 1 when its scene started a load of its own before its calibration (the reserve test's loads, BUDG-012):
+/// its readings are recorded, not a session cause (ADR 0093 point 4).
+pub const DECLARED_LOAD_COUNT: &str = "load_calib_declared_load";
+/// What a declared-load run's reason carries at its end in `cpu_calibration_reasons`.
+pub const DECLARED_LOAD_SUFFIX: &str = " (declared load: recorded, not voiding)";
+
+/// Whether the run whose counts `count` reads declared a load of its own ([`DECLARED_LOAD_COUNT`]).
+pub fn declared_load(count: &dyn Fn(&str) -> Option<u64>) -> bool {
+    count(DECLARED_LOAD_COUNT) == Some(1)
+}
+
 /// What the calibration of one scene says.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Judgement {

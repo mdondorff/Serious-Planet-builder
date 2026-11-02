@@ -125,6 +125,21 @@ impl LitVerdict {
         self.gated && self.status == Status::Over
     }
 
+    /// Whether the row is the waited frame's (a frame verdict) rather than a GPU timing's: the CPU calibration voids only the first
+    /// kind (ADR 0093).
+    pub fn is_frame_row(&self) -> bool {
+        self.measure == FRAME_ROW
+    }
+
+    /// Whether a failing row counts in a session with these validities: the frame row needs frame verdicts, a GPU row GPU verdicts.
+    pub fn counts_in(&self, frame_valid: bool, gpu_session_valid: bool) -> bool {
+        if self.is_frame_row() {
+            frame_valid
+        } else {
+            gpu_session_valid
+        }
+    }
+
     pub fn line(&self, view: &str) -> String {
         let v = self.value.map_or("n/a".to_string(), |v| format!("{v:.3} ms"));
         let b = self.budget.map_or(String::new(), |b| format!(" (budget {b} ms)"));
@@ -141,6 +156,9 @@ impl LitVerdict {
         format!("  {view}: {} {} {v}{b} {word}", self.measure, self.stat)
     }
 }
+
+/// The measure of the waited frame's row, the one frame verdict among a view's rows.
+const FRAME_ROW: &str = "frame (waited)";
 
 fn stat_of<'a>(m: &'a [(String, Stats)], name: &str) -> Option<&'a Stats> {
     m.iter().find(|(n, _)| n == name).map(|(_, s)| s)
@@ -227,7 +245,7 @@ pub fn view_verdicts_with(
     // The frame verdict holds at any clock state (ADR 0034 as amended): the p99 of the waited frame against CON-21's 20 ms.
     let over = frame.p99 > crate::FRAME_P99_BUDGET_MS;
     rows.push(LitVerdict {
-        measure: "frame (waited)",
+        measure: FRAME_ROW,
         stat: "p99",
         value: Some(frame.p99),
         budget: Some(crate::FRAME_P99_BUDGET_MS),
@@ -383,6 +401,20 @@ mod tests {
         }
         let frame_row = rows.iter().find(|r| r.measure == "frame (waited)").unwrap();
         assert!(frame_row.fails(), "p99 31 ms is over 20 ms at any clock state: {frame_row:?}");
+    }
+
+    // spec: TEST-039
+    #[test]
+    fn a_failing_gpu_row_counts_without_frame_verdicts_and_the_frame_row_needs_them() {
+        let over = metrics_of(&(0..5).map(|_| lit(1.5, 2.2)).collect::<Vec<_>>());
+        let slow = summarize(&[10.0, 30.0, 31.0], 0).unwrap();
+        let rows = view_verdicts(&over, &slow, &valid(), true, 40, true);
+        let (frame, gpu): (Vec<_>, Vec<_>) = rows.iter().filter(|r| r.fails()).partition(|r| r.is_frame_row());
+        assert!(frame.len() == 1 && !gpu.is_empty(), "{rows:?}");
+        // A session voided by its CPU calibration only (ADR 0093): the GPU rows count, the frame row does not.
+        assert!(gpu.iter().all(|r| r.counts_in(false, true)) && !frame[0].counts_in(false, true));
+        // Valid for both, and void for both.
+        assert!(rows.iter().all(|r| r.counts_in(true, true)) && rows.iter().all(|r| !r.counts_in(false, false)));
     }
 
     // spec: TEST-034

@@ -676,7 +676,7 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
                 true,
                 planet_perf::lit::water_budget_ms(&res.path),
             ) {
-                if row.fails() && verdict.frame_valid() {
+                if row.fails() && row.counts_in(verdict.frame_valid(), verdict.gpu_session_valid()) {
                     failed.push(row.line(&res.path));
                 }
             }
@@ -741,7 +741,13 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
         out,
         "{} gated measure(s) over budget{}",
         failed.len(),
-        if smoke || !verdict.frame_valid() { " (the session does not count)" } else { "" }
+        if smoke || !verdict.frame_valid() && !verdict.gpu_session_valid() {
+            " (the session does not count)"
+        } else if !verdict.frame_valid() {
+            " (the frame verdicts do not count)"
+        } else {
+            ""
+        }
     )
     .map_err(err)?;
     for f in &failed {
