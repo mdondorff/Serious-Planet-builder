@@ -65,3 +65,18 @@
 - Requirement IDs: TBD, ask the planner.
 - Whether `m` uses SPIKE-66's 9-point ring or a separable box (same cost at bake time; the box is smoother).
 - The `k` curve's input: the bake's 50 km spread or a new landform map (M10 drivers). The spread is proposed for M9.
+
+### 5. The stored form of the class weights and the relief channels (PR 1b)
+| | Class weights (STRM-067) | Relief channels (STRM-068) |
+|---|---|---|
+| Kind byte | 11 (`GlobalClassWeights`) | 10 (`GlobalRelief`) |
+| Records | 6, one per face, filed under the face's level-0 tile | 6, the same |
+| Key | stage key of the bake (source), bake resolution (tag 4), cells (tag 1), class count (tag 14); not the class-list version (found and refused naming both) | the same plus tag 13: channels' version, class-list and class-source versions, class-lattice hash, `max_step`, ring radius, taper |
+| Payload | codec u8, class-list version, class-source version, cells, lattice hash (16), weights (`u8` x 8 per point) | codec u8, cells, `k` plane, `m` plane (f32 LE); ranges recomputed on load |
+| Size at Earth's size | 257 x 257 x 8 x 6 = 3.2 MB at 256 cells | 2 x 2049 x 2049 x 4 x 6 = 201 MB at 2048 cells |
+- No store holds these kinds yet; an older store opens as before and reads them as absent. The kind bytes are persisted and never change meaning.
+- `max_step` is in the relief key although the tapered `k` does not depend on it today: a bake parameter changes the bytes it is the limit of, and the key must not claim otherwise (planner, 2026-11-02).
+- The loaders return `Ok(None)` for absent, an error naming the record for damaged or incomplete.
+
+### 6. Open for R7 (the scorecard)
+- A 9-sample ring on a 4.9 km lattice aliases relief under 10 km (the numerics review measured a neighbour-to-neighbour `|dm|` of about 122 m on a 7-9 km test surface), and the runtime base `m + k (e - m)` multiplies it by `(1 - k)`, up to 6.5. SPIKE-66 and ADR 0088 chose the stencil; the scorecard on the baked field is where it shows. No change now.

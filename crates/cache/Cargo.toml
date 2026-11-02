@@ -26,4 +26,5 @@ blake3.workspace = true
 lz4_flex.workspace = true
 
 [dev-dependencies]
+libm.workspace = true
 planet-generators = { workspace = true, features = ["stress"] }

@@ -25,6 +25,7 @@ pub const TAPER_FULL_M: f64 = 400.0;
 pub const DEFAULT_MAX_STEP: f64 = 2.0;
 
 /// The `k` and `m` channels on one lattice, with their block ranges.
+#[derive(Debug)]
 pub struct ReliefChannels {
     cells: usize,
     /// The tapered `k` per face, `(cells + 1)^2` points, row `j` of `i` (the lattice's own order).
@@ -100,6 +101,41 @@ pub fn feather_cells(delta_k: f64, max_step: f64) -> usize {
     libm::ceil(libm::fabs(delta_k) / max_step) as usize
 }
 
+/// `[k_min, k_max, m_min, m_max]` per block of each face: a block holds the points of its cells, so the shared row and column of the next block are in both:
+/// a bilinear read inside a block stays inside its range (in exact arithmetic: a reader must interpolate in f64, or allow one f32 ulp, since `a + t (b - a)`
+/// in f32 can overshoot).
+fn block_ranges(n: usize, k: &[Vec<f32>], m: &[Vec<f32>]) -> Vec<Vec<[f32; 4]>> {
+    let b = n / BLOCK_CELLS;
+    (0..6)
+        .map(|f| {
+            let mut out = Vec::with_capacity(b * b);
+            for bj in 0..b {
+                for bi in 0..b {
+                    let mut r = [f32::INFINITY, f32::NEG_INFINITY, f32::INFINITY, f32::NEG_INFINITY];
+                    for j in bj * BLOCK_CELLS..=(bj + 1) * BLOCK_CELLS {
+                        for i in bi * BLOCK_CELLS..=(bi + 1) * BLOCK_CELLS {
+                            let at = j * (n + 1) + i;
+                            r[0] = r[0].min(k[f][at]);
+                            r[1] = r[1].max(k[f][at]);
+                            r[2] = r[2].min(m[f][at]);
+                            r[3] = r[3].max(m[f][at]);
+                        }
+                    }
+                    out.push(r);
+                }
+            }
+            out
+        })
+        .collect()
+}
+
+/// The planes of one face of the channels (see [`ReliefChannels::face_planes`]).
+pub struct FacePlanes<'a> {
+    pub k: &'a [f32],
+    pub m: &'a [f32],
+    pub ranges: &'a [[f32; 4]],
+}
+
 impl ReliefChannels {
     /// Computes both channels on `cells` cells per face edge (a power of two, a multiple of [`BLOCK_CELLS`]).
     pub fn compute(
@@ -137,35 +173,34 @@ impl ReliefChannels {
                 m[idx / (n + 1)].push(mv);
             }
         }
-        let b = n / BLOCK_CELLS;
-        // A block holds the points of its cells, so the shared row and column of the next block are in both: a bilinear read inside a block stays inside its range
-        // (in exact arithmetic: a reader must interpolate in f64, or allow one f32 ulp, since `a + t (b - a)` in f32 can overshoot).
-        let ranges = (0..6)
-            .map(|f| {
-                let mut out = Vec::with_capacity(b * b);
-                for bj in 0..b {
-                    for bi in 0..b {
-                        let mut r = [f32::INFINITY, f32::NEG_INFINITY, f32::INFINITY, f32::NEG_INFINITY];
-                        for j in bj * BLOCK_CELLS..=(bj + 1) * BLOCK_CELLS {
-                            for i in bi * BLOCK_CELLS..=(bi + 1) * BLOCK_CELLS {
-                                let at = j * (n + 1) + i;
-                                r[0] = r[0].min(k[f][at]);
-                                r[1] = r[1].max(k[f][at]);
-                                r[2] = r[2].min(m[f][at]);
-                                r[3] = r[3].max(m[f][at]);
-                            }
-                        }
-                        out.push(r);
-                    }
-                }
-                out
-            })
-            .collect();
+        let ranges = block_ranges(n, &k, &m);
         ReliefChannels { cells: n, k, m, ranges }
     }
 
     pub fn cells(&self) -> usize {
         self.cells
+    }
+
+    /// The planes of one face, the form the store holds: `k` and `m` (`(cells + 1)^2` each) and the block ranges.
+    pub fn face_planes(&self, face: Face) -> FacePlanes<'_> {
+        let f = face.0 as usize;
+        FacePlanes { k: &self.k[f], m: &self.m[f], ranges: &self.ranges[f] }
+    }
+
+    /// The channels from the planes of the six faces as [`face_planes`](Self::face_planes) gave them: `None` when a length does not fit or a value is not finite.
+    /// The block ranges are recomputed from the planes, so a stored range that does not hold its block cannot come back.
+    pub fn from_planes(cells: usize, faces: Vec<(Vec<f32>, Vec<f32>)>) -> Option<ReliefChannels> {
+        let n = cells;
+        if !n.is_power_of_two() || n < BLOCK_CELLS || faces.len() != 6 {
+            return None;
+        }
+        let per_face = (n + 1) * (n + 1);
+        if faces.iter().any(|(k, m)| k.len() != per_face || m.len() != per_face || k.iter().chain(m).any(|v| !v.is_finite())) {
+            return None;
+        }
+        let (k, m): (Vec<_>, Vec<_>) = faces.into_iter().unzip();
+        let ranges = block_ranges(n, &k, &m);
+        Some(ReliefChannels { cells: n, k, m, ranges })
     }
 
     /// The tapered `k` and the ring mean `m` at lattice point `(i, j)` of `face`.
