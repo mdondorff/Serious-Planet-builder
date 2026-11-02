@@ -1,0 +1,254 @@
+diff --git a/crates/generators/examples/preview_world.rs b/crates/generators/examples/preview_world.rs
+index 7f89bcea..a926c4e8 100644
+--- a/crates/generators/examples/preview_world.rs
++++ b/crates/generators/examples/preview_world.rs
+@@ -35,6 +35,9 @@ fn main() {
+         image.write_png(&path).unwrap_or_else(|e| fail(&format!("cannot write {}: {e}", path.display())));
+         println!("wrote {}", path.display());
+     }
++    // SPIKE-92: the land mask as raw bytes (1 land, 0 sea), row 0 north, for the shape metrics.
++    let mask: Vec<u8> = fields.pixels.iter().map(|p| u8::from(p.land_depth > 0.0)).collect();
++    std::fs::write(out.join("land.u8"), &mask).unwrap_or_else(|e| fail(&format!("cannot write the land mask: {e}")));
+     let report = preview::report(&fields);
+     std::fs::write(out.join("report.txt"), &report).unwrap_or_else(|e| fail(&format!("cannot write the report: {e}")));
+     print!("{report}");
+diff --git a/crates/generators/src/global.rs b/crates/generators/src/global.rs
+index f8c212bb..b4648413 100644
+--- a/crates/generators/src/global.rs
++++ b/crates/generators/src/global.rs
+@@ -179,7 +179,8 @@ pub(crate) fn terrain(seed: u64, d: Vec3) -> Terrain {
+     );
+     let warped = d + warp * 0.45;
+     // Rounded to the stored f32 first, so land and the sign of the elevation are decided from the same number.
+-    let continent = f64::from((fbm(seed, LAYER_CONTINENT, warped, 1.1, 5) * 1.7) as f32);
++    // SPIKE-92 (spike branch only): a continent candidate in place of today's value.
++    let continent = f64::from((crate::spike92::continent(seed, d).unwrap_or_else(|| fbm(seed, LAYER_CONTINENT, warped, 1.1, 5) * 1.7)) as f32);
+     let land_depth = continent - SEA_LEVEL_C;
+     let zone = smoothstep(0.1, 0.6, fbm(seed, LAYER_RANGE_MASK, warped, 1.7, 3) + 0.2);
+     let inland = smoothstep(0.02, 0.35, land_depth);
+diff --git a/crates/generators/src/lib.rs b/crates/generators/src/lib.rs
+index a03f762c..ab936768 100644
+--- a/crates/generators/src/lib.rs
++++ b/crates/generators/src/lib.rs
+@@ -28,6 +28,7 @@ pub mod normals;
+ pub mod ocean;
+ pub mod preview;
+ pub mod stage;
++pub mod spike92;
+ pub mod stamp;
+ /// Test-only stress terrain; only test builds enable the `stress` feature (dev-dependencies).
+ #[cfg(feature = "stress")]
+diff --git a/crates/generators/src/spike92.rs b/crates/generators/src/spike92.rs
+new file mode 100644
+index 00000000..c3a00927
+--- /dev/null
++++ b/crates/generators/src/spike92.rs
+@@ -0,0 +1,208 @@
++//! SPIKE-92 (spike branch only, never merged): continent candidates for M9 generator round 2. `S92_CANDIDATE` picks the continent value of
++//! `global::terrain`: `base` (today's), `A` (tuned fBm: `S92_FREQ`, `S92_OCT`, `S92_WARP`) or `B` (cratons with multi-scale detail:
++//! `S92_CRATONS`, `S92_RADIUS`, `S92_SPREAD`, `S92_MID`, `S92_HIGH`). A and B are shifted per seed so that about `S92_LAND` (0.29) of the
++//! sphere is land: the offset is the matching quantile of the raw value over a fixed Fibonacci grid of directions. Deterministic and libm only
++//! (CON-14); the configuration is read once per process.
++
++use crate::global::fbm;
++use planet_core::Vec3;
++use std::collections::HashMap;
++use std::sync::{Mutex, OnceLock};
++
++const LAYER_A: u64 = 0x5392_0001;
++const LAYER_WARP: u64 = 0x5392_0002;
++const LAYER_MID: u64 = 0x5392_0003;
++const LAYER_HIGH: u64 = 0x5392_0004;
++
++#[derive(Clone, Copy, Debug)]
++pub enum Candidate {
++    Base,
++    A { freq: f64, oct: u32, warp: f64, gain: f64 },
++    B { cratons: u32, radius: f64, spread: f64, mid: f64, high: f64, gain: f64 },
++    /// Ranked cratons: area shares of the land (`S92_SIZES`, largest first), centres kept apart, one profile slope for every craton.
++    B2 { mid: f64, high: f64, gain: f64 },
++}
++
++fn env(k: &str, d: f64) -> f64 {
++    std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d)
++}
++
++pub fn candidate() -> Candidate {
++    static C: OnceLock<Candidate> = OnceLock::new();
++    *C.get_or_init(|| match std::env::var("S92_CANDIDATE").as_deref() {
++        Ok("A") => Candidate::A {
++            freq: env("S92_FREQ", 1.8),
++            oct: env("S92_OCT", 7.0) as u32,
++            warp: env("S92_WARP", 0.6),
++            gain: env("S92_GAIN", 0.5),
++        },
++        Ok("B") => Candidate::B {
++            cratons: env("S92_CRATONS", 7.0) as u32,
++            radius: env("S92_RADIUS", 0.32),
++            spread: env("S92_SPREAD", 0.55),
++            mid: env("S92_MID", 0.35),
++            high: env("S92_HIGH", 0.10),
++            gain: env("S92_GAIN", 0.6),
++        },
++        Ok("B2") => Candidate::B2 { mid: env("S92_MID", 0.12), high: env("S92_HIGH", 0.12), gain: env("S92_GAIN", 0.65) },
++        _ => Candidate::Base,
++    })
++}
++
++fn land_target() -> f64 {
++    static L: OnceLock<f64> = OnceLock::new();
++    *L.get_or_init(|| env("S92_LAND", 0.29))
++}
++
++fn splitmix(x: &mut u64) -> u64 {
++    *x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
++    let mut z = *x;
++    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
++    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
++    z ^ (z >> 31)
++}
++
++fn unit(x: &mut u64) -> f64 {
++    (splitmix(x) >> 11) as f64 / (1u64 << 53) as f64
++}
++
++/// The craton centres and radii of a seed: uniform directions, radii log-normal around `radius` with `spread`.
++fn cratons(seed: u64, n: u32, radius: f64, spread: f64) -> Vec<(Vec3, f64)> {
++    let mut s = seed ^ 0x5392_c4a7;
++    (0..n)
++        .map(|_| {
++            let z = 2.0 * unit(&mut s) - 1.0;
++            let a = core::f64::consts::TAU * unit(&mut s);
++            let r = libm::sqrt((1.0 - z * z).max(0.0));
++            // Box-Muller for the log-normal radius.
++            let (u1, u2) = (unit(&mut s).max(1e-12), unit(&mut s));
++            let g = libm::sqrt(-2.0 * libm::log(u1)) * libm::cos(core::f64::consts::TAU * u2);
++            (Vec3::new(r * libm::cos(a), r * libm::sin(a), z), radius * libm::exp(spread * g))
++        })
++        .collect()
++}
++
++/// fBm with a gain per octave (the coast's roughness: a gain near 0.6 gives a coastline dimension near 1.25; 0.5 is today's), each octave
++/// its own layer.
++fn fbm_gain(seed: u64, layer: u64, p: Vec3, freq: f64, octaves: u32, gain: f64) -> f64 {
++    let (mut sum, mut amp, mut norm, mut f) = (0.0, 1.0, 0.0, freq);
++    for o in 0..octaves {
++        sum += amp * fbm(seed, layer.wrapping_add(u64::from(o) << 8), p, f, 1);
++        norm += amp;
++        amp *= gain;
++        f *= 2.0;
++    }
++    sum / norm
++}
++
++/// The area shares of the ranked cratons, largest first (`S92_SIZES`, comma separated; default Earth-like).
++fn sizes() -> &'static [f64] {
++    static S: OnceLock<Vec<f64>> = OnceLock::new();
++    S.get_or_init(|| {
++        std::env::var("S92_SIZES")
++            .ok()
++            .map(|v| v.split(',').filter_map(|x| x.parse().ok()).collect())
++            .unwrap_or_else(|| vec![0.54, 0.26, 0.09, 0.05, 0.02, 0.015, 0.01, 0.01])
++    })
++}
++
++/// Ranked craton centres and angular radii of a seed: each craton's cap holds its share of 29 % of the sphere; a centre is redrawn (up to 200
++/// times) until it is at least the two radii plus 0.15 rad from every earlier one, so cratons do not merge before the detail.
++fn ranked(seed: u64) -> Vec<(Vec3, f64)> {
++    static M: OnceLock<Mutex<HashMap<u64, Vec<(Vec3, f64)>>>> = OnceLock::new();
++    let m = M.get_or_init(Default::default);
++    if let Some(v) = m.lock().expect("craton memo").get(&seed) {
++        return v.clone();
++    }
++    let mut s = seed ^ 0x5392_b2b2;
++    let mut out: Vec<(Vec3, f64)> = Vec::new();
++    for share in sizes() {
++        // A cap of half-angle r holds 2 pi (1 - cos r) of the sphere's 4 pi.
++        let r = libm::acos((1.0 - 2.0 * land_target() * share).clamp(-1.0, 1.0));
++        let mut c = Vec3::new(0.0, 0.0, 1.0);
++        for _ in 0..200 {
++            let z = 2.0 * unit(&mut s) - 1.0;
++            let a = core::f64::consts::TAU * unit(&mut s);
++            let q = libm::sqrt((1.0 - z * z).max(0.0));
++            c = Vec3::new(q * libm::cos(a), q * libm::sin(a), z);
++            if out.iter().all(|(o, ro)| angle(c, *o) >= r + ro + 0.15) {
++                break;
++            }
++        }
++        out.push((c, r));
++    }
++    m.lock().expect("craton memo").insert(seed, out.clone());
++    out
++}
++
++fn angle(a: Vec3, b: Vec3) -> f64 {
++    libm::atan2(a.cross(b).length(), a.dot(b))
++}
++
++/// The raw continent value of a candidate at `d` (before the land offset).
++fn raw(seed: u64, d: Vec3, c: Candidate) -> f64 {
++    match c {
++        Candidate::Base => 0.0,
++        Candidate::A { freq, oct, warp, gain } => {
++            let w = Vec3::new(
++                fbm(seed, LAYER_WARP, d, 1.3, 3),
++                fbm(seed, LAYER_WARP, d + Vec3::new(17.0, 0.0, 0.0), 1.3, 3),
++                fbm(seed, LAYER_WARP, d + Vec3::new(0.0, 31.0, 0.0), 1.3, 3),
++            );
++            fbm_gain(seed, LAYER_A, d + w * warp, freq, oct, gain) * 1.7
++        }
++        Candidate::B { cratons: n, radius, spread, mid, high, gain } => {
++            let w = Vec3::new(
++                fbm(seed, LAYER_WARP, d, 1.6, 3),
++                fbm(seed, LAYER_WARP, d + Vec3::new(17.0, 0.0, 0.0), 1.6, 3),
++                fbm(seed, LAYER_WARP, d + Vec3::new(0.0, 31.0, 0.0), 1.6, 3),
++            );
++            let p = (d + w * 0.25).normalized();
++            let core = cratons(seed, n, radius, spread).iter().map(|(c, r)| 1.0 - angle(p, *c) / r).fold(f64::NEG_INFINITY, f64::max);
++            core + mid * fbm(seed, LAYER_MID, p, 2.5, 3) + high * fbm_gain(seed, LAYER_HIGH, p, 6.0, 6, gain)
++        }
++        Candidate::B2 { mid, high, gain } => {
++            let w = Vec3::new(
++                fbm(seed, LAYER_WARP, d, 1.6, 3),
++                fbm(seed, LAYER_WARP, d + Vec3::new(17.0, 0.0, 0.0), 1.6, 3),
++                fbm(seed, LAYER_WARP, d + Vec3::new(0.0, 31.0, 0.0), 1.6, 3),
++            );
++            let p = (d + w * 0.2).normalized();
++            // One slope for every craton (radians of margin), so the detail moves every coast alike.
++            let core = ranked(seed).iter().map(|(c, r)| r - angle(p, *c)).fold(f64::NEG_INFINITY, f64::max);
++            core + mid * fbm(seed, LAYER_MID, p, 3.0, 3) + high * fbm_gain(seed, LAYER_HIGH, p, 6.0, 7, gain)
++        }
++    }
++}
++
++/// The land offset of a seed: the `1 - land` quantile of the raw value over a fixed Fibonacci grid of 20,000 directions.
++fn offset(seed: u64, c: Candidate) -> f64 {
++    static M: OnceLock<Mutex<HashMap<u64, f64>>> = OnceLock::new();
++    let m = M.get_or_init(Default::default);
++    if let Some(v) = m.lock().expect("offset memo").get(&seed) {
++        return *v;
++    }
++    let n = 20_000usize;
++    let golden = core::f64::consts::PI * (3.0 - libm::sqrt(5.0));
++    let mut v: Vec<f64> = (0..n)
++        .map(|i| {
++            let z = 1.0 - 2.0 * (i as f64 + 0.5) / n as f64;
++            let r = libm::sqrt((1.0 - z * z).max(0.0));
++            let a = golden * i as f64;
++            raw(seed, Vec3::new(r * libm::cos(a), r * libm::sin(a), z), c)
++        })
++        .collect();
++    v.sort_by(f64::total_cmp);
++    let q = v[((1.0 - land_target()) * n as f64) as usize];
++    m.lock().expect("offset memo").insert(seed, q);
++    q
++}
++
++/// The continent value at `d` for the chosen candidate, `None` for today's (the caller keeps its own).
++pub fn continent(seed: u64, d: Vec3) -> Option<f64> {
++    let c = candidate();
++    if matches!(c, Candidate::Base) {
++        return None;
++    }
++    Some(raw(seed, d, c) - offset(seed, c) + crate::global::SEA_LEVEL_C)
++}
