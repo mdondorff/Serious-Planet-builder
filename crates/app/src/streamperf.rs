@@ -395,6 +395,8 @@ impl Driver<'_> {
             tile_misses: water.tile_misses,
             band_queries: water.band_queries,
             lit_plan_ms,
+            deferred: c.deferred,
+            node_bytes: c.node_bytes,
         };
         self.pace();
         Ok(Tick { record, settled, drawn, horizon_busy, water_nodes })
