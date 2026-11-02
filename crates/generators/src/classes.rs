@@ -13,7 +13,7 @@ use planet_core::{smoothstep, Face, Vec3};
 /// The version of the class list (GEN-093): plain, rolling plain, hills, mountains, high mountains, plateau, badlands, sand sea, in that order.
 pub const CLASS_LIST_VERSION: u32 = 1;
 /// Bump whenever the default source's output changes for a seed (the rules of GEN-094 and GEN-095, their constants, or the plate construction).
-pub const CLASS_SOURCE_VERSION: u32 = 2;
+pub const CLASS_SOURCE_VERSION: u32 = 3;
 pub const CLASS_COUNT: usize = 8;
 pub const CLASS_NAMES: [&str; CLASS_COUNT] =
     ["plain", "rolling plain", "hills", "mountains", "high mountains", "plateau", "badlands", "sand sea"];
@@ -41,7 +41,15 @@ const GRADIENT_STEP: f64 = 0.004;
 /// The land depth of the coastal line the Andean arcs follow (GEN-094).
 const COAST_LINE_DEPTH: f64 = 0.10;
 /// The belt term's amplitude in metres (GEN-096; 5500 m in the first start values, raised because the belts are now cut into segments of lower height).
-const BELT_AMPLITUDE_M: f64 = 7000.0;
+const BELT_AMPLITUDE_M: f64 = 7500.0;
+/// The plateau field's uplift in metres (GEN-096).
+const PLATEAU_UPLIFT_M: f64 = 800.0;
+/// The narrowest half-width a belt has, in km (a belt tapers in width and height towards the ends of its segment, never below this).
+const MIN_BELT_KM: f64 = 125.0;
+/// The gain from the core to the mountains' membership.
+const MOUNTAIN_GAIN: f64 = 2.0;
+/// The largest sideways shift of a belt's centreline, in km (low-frequency noise bends the trace).
+const BEND_KM: f64 = 120.0;
 /// Distance over which the mask's coast gate rises, in km.
 const COAST_RAMP_KM: f64 = 250.0;
 
@@ -52,6 +60,7 @@ const LAYER_PLATEAU: u64 = 0x474c_0013;
 const LAYER_ROLLING: u64 = 0x474c_0014;
 const LAYER_SEGMENT: u64 = 0x474c_0015;
 const LAYER_STRIKE: u64 = 0x474c_0016;
+const LAYER_BEND: u64 = 0x474c_0017;
 
 fn splitmix(mut x: u64) -> u64 {
     x = x.wrapping_add(0x9e37_79b9_7f4a_7c15);
@@ -187,23 +196,24 @@ impl ClassSource {
         terrain(self.seed, d).continent - SEA_LEVEL_C
     }
 
-    /// The gradient magnitude of the land depth at `d` per radian, by a central difference of [`GRADIENT_STEP`] in two tangent directions.
+    /// The gradient magnitude of the land depth at `d` per radian: central differences of [`GRADIENT_STEP`] along the fixed axes x, y and z, with the radial part removed, so
+    /// that it does not depend on a tangent basis (a basis that switches its helper axis near the poles would step the estimate).
     fn land_gradient(&self, d: Vec3) -> f64 {
-        let (e1, e2) = d.tangent_basis();
         let h = GRADIENT_STEP;
-        let at = |t: Vec3, s: f64| self.land_depth((d + t * s).normalized());
-        let g1 = (at(e1, h) - at(e1, -h)) / (2.0 * h);
-        let g2 = (at(e2, h) - at(e2, -h)) / (2.0 * h);
-        libm::sqrt(g1 * g1 + g2 * g2)
+        let at = |axis: Vec3| (self.land_depth((d + axis * h).normalized()) - self.land_depth((d - axis * h).normalized())) / (2.0 * h);
+        let g = Vec3::new(at(Vec3::new(1.0, 0.0, 0.0)), at(Vec3::new(0.0, 1.0, 0.0)), at(Vec3::new(0.0, 0.0, 1.0)));
+        (g - d * g.dot(d)).length()
     }
 
-    /// The first-order estimate in km of the distance over which the land depth changes by `delta` at `d`: `|delta| / |gradient|` (valid near `d`), infinite
-    /// where the gradient vanishes.
+    /// The first-order estimate in km of the distance over which the land depth changes by `delta` at `d`: `|delta| / |gradient|` (valid near `d`), the gradient
+    /// floored at 1e-9 so that the estimate has no step where it vanishes.
     fn distance_km(&self, delta: f64, gradient: f64) -> f64 {
-        if gradient < 1e-9 {
-            return f64::INFINITY;
-        }
-        libm::fabs(delta) / gradient * self.radius_m / 1000.0
+        libm::fabs(delta) / gradient.max(1e-9) * self.radius_m / 1000.0
+    }
+
+    /// Like [`distance_km`](Self::distance_km) but signed: `delta / gradient` in km, positive where `delta` is.
+    fn signed_km(&self, delta: f64, gradient: f64) -> f64 {
+        delta / gradient.max(1e-9) * self.radius_m / 1000.0
     }
 
     /// The continental weight of a plate in `[0, 1]`: 0 for a plate that is mostly ocean (land share under 0.15), 1 for one with 0.40 of its area land.
@@ -222,13 +232,17 @@ impl ClassSource {
         // Each plate's weight depends on its own angle, so a pair of plates that trade places has the same weight before and after (the margin factor of (second, third) too).
         let rank = |r: usize| smoothstep(0.0, 0.05, ang[3] - ang[r]);
         let pair_weight = [rank(0) * rank(1), rank(0) * rank(2), rank(1) * rank(2) * (1.0 - smoothstep(0.0, 0.04, ang[1] - ang[0]))];
-        // The width of a belt: a tent profile of 220 to 500 km half-width (220 to 500 km across at half height); the belt is cut into segments and its height varies along it.
-        let width_km = 220.0 + 280.0 * (0.5 + 0.5 * fbm(self.seed, LAYER_WIDTH, d, 2.5, 2));
-        let segment = smoothstep(0.25, 0.55, 0.5 + 0.5 * fbm(self.seed, LAYER_SEGMENT, d, 2.2, 2));
-        let strike = segment * (0.55 + 0.45 * (0.5 + 0.5 * fbm(self.seed, LAYER_STRIKE, d, 5.0, 2)));
+        // The width of a belt: a tent profile of 260 to 560 km half-width before the taper (never under 125 km after it); the belt is cut into segments and its height varies along it.
+        let width_km = 260.0 + 300.0 * (0.5 + 0.5 * fbm(self.seed, LAYER_WIDTH, d, 2.5, 2));
+        let segment = smoothstep(0.25, 0.55, 0.5 + 0.5 * fbm(self.seed, LAYER_SEGMENT, d, 2.8, 2));
+        let along = 0.5 + 0.5 * fbm(self.seed, LAYER_STRIKE, d, 5.0, 2);
+        let strike = segment * (0.45 + 0.55 * along);
+        // A segment tapers in width as well as in height towards its ends, and its width varies along the strike; the trace of a belt bends sideways.
+        let belt_km = (width_km * (0.55 + 0.45 * segment) * (0.9 + 0.2 * along)).max(MIN_BELT_KM);
+        let bend_km = BEND_KM * fbm(self.seed, LAYER_BEND, d, 3.0, 2);
         let arc = smoothstep(0.38, 0.56, 0.5 + 0.5 * fbm(self.seed, LAYER_COAST_ARC, d, 0.9, 2));
         let gradient = self.land_gradient(d);
-        let line_km = self.distance_km(land_depth - COAST_LINE_DEPTH, gradient);
+        let line_km = self.signed_km(land_depth - COAST_LINE_DEPTH, gradient);
         // The gate of the land: 0 at the coast and 1 over 250 km inland, so that no belt stops at the coast in a step (GEN-097's limit on the step of `k`).
         let coast_gate = if land_depth <= 0.0 { 0.0 } else { smoothstep(0.0, COAST_RAMP_KM, self.distance_km(land_depth, gradient)) };
         let (mut core, mut flank, mut old_margin, mut back_arc) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
@@ -236,6 +250,8 @@ impl ClassSource {
         for (n, &(x, y)) in [(0usize, 1usize), (0, 2), (1, 2)].iter().enumerate() {
             let (px, py) = (&self.plates[idx[x]], &self.plates[idx[y]]);
             let dist_km = 0.5 * (ang[y] - ang[x]) * self.radius_m / 1000.0;
+            // The signed distance to the margin, positive on the side of the plate with the lower index: continuous through the margin where the nearest plate changes.
+            let across_km = if idx[x] < idx[y] { dist_km } else { -dist_km };
             // The margin normal: from plate x towards plate y, in the tangent plane at d (symmetric: swapping the plates flips it and the velocity difference).
             let mut nrm = py.centre - px.centre;
             nrm = nrm - d * nrm.dot(d);
@@ -251,12 +267,12 @@ impl ClassSource {
             let one_oceanic = cx * (1.0 - cy) + cy * (1.0 - cx);
             let near = 1.0 - smoothstep(250.0, 500.0, dist_km);
             let term = |w: f64| {
-                let belt = conv_gate * (1.0 - dist_km / w).max(0.0);
-                let coast = arc * one_oceanic * near * conv_gate * (1.0 - line_km / (0.8 * w)).max(0.0);
+                let belt = conv_gate * (1.0 - libm::fabs(across_km - bend_km) / w).max(0.0);
+                let coast = arc * one_oceanic * near * conv_gate * (1.0 - libm::fabs(line_km - bend_km) / (0.8 * w)).max(0.0);
                 belt.max(coast)
             };
-            core = core.max(term(width_km));
-            flank = flank.max(term(3.0 * width_km));
+            core = core.max(term(belt_km));
+            flank = flank.max(term(3.0 * belt_km));
             old_margin = old_margin.max(pair_weight[n] * (1.0 - smoothstep(-0.05, 0.15, conv)) * (1.0 - dist_km / 300.0).max(0.0));
             if x == 0 {
                 // The back-arc lies behind the margin, on the plate of the pair with the larger land share (a smooth preference), and starts 0 at the margin.
@@ -289,7 +305,7 @@ impl ClassSource {
             + BELT_AMPLITUDE_M * terms.core * (0.5 + 0.5 * ridge)
             + 2000.0 * terms.back_arc
             + 200.0 * terms.old_margin.max(0.5 * terms.flank)
-            + 1200.0 * terms.plateau_field)
+            + PLATEAU_UPLIFT_M * terms.plateau_field)
             .clamp(MIN_ELEVATION_M, MAX_ELEVATION_M);
         let rolling = smoothstep(0.45, 0.6, 0.5 + 0.5 * fbm(self.seed, LAYER_ROLLING, d, 3.0, 3));
         // The class decision reads the base elevation without the ridge term's fine structure, so that the weights change gently (GEN-097's step limit).
@@ -297,7 +313,7 @@ impl ClassSource {
             + BELT_AMPLITUDE_M * terms.core * 0.75
             + 2000.0 * terms.back_arc
             + 200.0 * terms.old_margin.max(0.5 * terms.flank)
-            + 1200.0 * terms.plateau_field)
+            + PLATEAU_UPLIFT_M * terms.plateau_field)
             .clamp(MIN_ELEVATION_M, MAX_ELEVATION_M);
         ClassPoint { terms, land_depth: t.land_depth, e0, weights: class_weights(&terms, e_smooth, rolling) }
     }
@@ -321,7 +337,8 @@ pub fn hill_amplitude_for_k(k: f64) -> f64 {
 
 /// The default class weights from the mask terms, the class elevation `e_class` (GEN-096 without the band and the ridge factor) and the rolling-plain membership (GEN-095), summing to 1.
 pub fn class_weights(terms: &MaskTerms, e0: f64, rolling: f64) -> [f64; CLASS_COUNT] {
-    let mt = terms.core;
+    // Mountains follow the core with a gain, so the flanks of a belt that is high enough to be above 2 km are mountains, not hills.
+    let mt = (MOUNTAIN_GAIN * terms.core).min(1.0);
     let high = mt * smoothstep(1500.0, 3500.0, e0);
     let hills = (1.0 - mt) * smoothstep(0.2, 0.45, terms.flank.max(terms.old_margin));
     // What mountains and hills leave is shared by the plateau and the rest, so the memberships partition 1 before the normalisation.
