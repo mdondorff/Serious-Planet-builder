@@ -242,7 +242,9 @@ fn the_class_source_version_goes_with_its_output() {
     for k in 0..24u32 {
         let d = Vec3::new(f64::from(k % 5) - 2.2, f64::from(k % 7) - 3.1, f64::from(k % 3) - 1.3).normalized();
         let p = source.eval(d);
-        for v in [p.terms.core, p.terms.flank, p.terms.old_margin, p.terms.back_arc, p.terms.plateau_field, p.terms.strike, p.e0] {
+        for v in
+            [p.terms.core, p.terms.flank, p.terms.old_margin, p.terms.back_arc, p.terms.plateau_field, p.terms.hilly, p.terms.strike, p.e0]
+        {
             for byte in v.to_bits().to_le_bytes() {
                 hash = (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3);
             }
@@ -250,12 +252,12 @@ fn the_class_source_version_goes_with_its_output() {
     }
     assert_eq!(
         (CLASS_SOURCE_VERSION, hash),
-        (4, FINGERPRINT),
+        (5, FINGERPRINT),
         "the default source's output changed: bump CLASS_SOURCE_VERSION and record the new fingerprint"
     );
 }
 
-const FINGERPRINT: u64 = 8071739336690852680;
+const FINGERPRINT: u64 = 14282494629378385424;
 
 // spec: GEN-103
 #[test]
@@ -377,9 +379,9 @@ fn the_flank_of_a_belt_is_mountains_before_its_core_is_high_enough_to_count() {
         strike: 1.0,
         plate: 0,
     };
-    let on_flank = MaskTerms { flank: 0.5, ..none };
+    let on_flank = MaskTerms { flank: 0.2, ..none };
     let w = class_weights(&on_flank, 400.0, 0.0);
-    assert!(w[MOUNTAINS] > 0.3 && w[MOUNTAINS] < 1.0, "a flank of 0.5 is partly mountains: {w:?}");
+    assert!(w[MOUNTAINS] > 0.3 && w[MOUNTAINS] < 1.0, "a flank of 0.2 is partly mountains: {w:?}");
     let faint = class_weights(&MaskTerms { flank: 0.05, ..none }, 400.0, 0.0);
     assert!(faint[MOUNTAINS] < w[MOUNTAINS] && faint[MOUNTAINS] < 0.1, "the membership rises smoothly from the belt's edge: {faint:?}");
 }

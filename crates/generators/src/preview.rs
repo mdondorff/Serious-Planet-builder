@@ -684,10 +684,10 @@ pub fn report(f: &Fields) -> String {
         f.seed, f.width, f.height
     );
     r += &format!("land fraction {:.1} %\nland under 60 degrees latitude, by the class weights (TEST-082's bands, reported not judged; its classes come from k R14 once the bake exists):\n", 100.0 * s.land_fraction);
-    r += &format!("  plains (plain + rolling) {:.1} % (band 55-67 %, {})\n", 100.0 * s.plains, band(100.0 * s.plains, 55.0, 67.0));
-    r += &format!("  hills {:.1} % (band 10-25 %, {})\n", 100.0 * s.hills, band(100.0 * s.hills, 10.0, 25.0));
+    r += &format!("  plains (plain + rolling) {:.1} % (band 45-62 %, {})\n", 100.0 * s.plains, band(100.0 * s.plains, 45.0, 62.0));
+    r += &format!("  hills {:.1} % (band 15-30 %, {})\n", 100.0 * s.hills, band(100.0 * s.hills, 15.0, 30.0));
     r +=
-        &format!("  mountains (mountains + high) {:.1} % (band 14-30 %, {})\n", 100.0 * s.mountains, band(100.0 * s.mountains, 14.0, 30.0));
+        &format!("  mountains (mountains + high) {:.1} % (band 20-32 %, {})\n", 100.0 * s.mountains, band(100.0 * s.mountains, 20.0, 32.0));
     r += &format!("  plateau {:.1} % (no band; counted with the plains by TEST-082)\n", 100.0 * s.plateau);
     r += &format!("  land above 2 km {:.1} % (band 5-10 %, {})\n", 100.0 * s.above_2km, band(100.0 * s.above_2km, 5.0, 10.0));
     r += &format!("  land above 4 km {:.1} % (band 1-3 %, {})\n", 100.0 * s.above_4km, band(100.0 * s.above_4km, 1.0, 3.0));

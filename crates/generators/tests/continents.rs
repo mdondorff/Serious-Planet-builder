@@ -93,9 +93,9 @@ fn the_plate_draws_and_the_layout_retry_give_the_same_class_weights_on_every_bui
     for &d in directions().iter().step_by(37) {
         assert_eq!(a.eval(d), b.eval(d), "two sources of seed 2 differ at {d:?}");
     }
-    // The retry is effective: some seed keeps a draw other than its own, and every kept draw is one of the PLATE_DRAWS (16).
+    // The retry is effective: some seed keeps a draw other than its own, and every kept draw is one of the PLATE_DRAWS (64).
     let kept: Vec<u64> = (1..=8).map(|s| ClassSource::new(s).plate_draw()).collect();
-    assert!(kept.iter().all(|&t| t < 16) && kept.iter().any(|&t| t > 0), "kept plate draws of seeds 1 to 8: {kept:?}");
+    assert!(kept.iter().all(|&t| t < 64) && kept.iter().any(|&t| t > 0), "kept plate draws of seeds 1 to 8: {kept:?}");
     assert_eq!(ClassSource::new(2).plate_draw(), a.plate_draw());
     let c = ClassSource::new(5);
     assert!(directions().iter().step_by(37).any(|&d| a.eval(d) != c.eval(d)), "another seed gives the same source");
