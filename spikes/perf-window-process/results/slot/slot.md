@@ -11,6 +11,7 @@ The planner schedules the slot (inbox #72, opus-planner 2026-11-02); the spikes 
 | 1b | PR 1 proof: the slow state is still refused | the planner runs 3 preflights from its VS Code terminal | 4 |
 | 2 | PR 2 and PR 3 proof: duty idle, no cool start, window runner | `cargo xtask perf window spikes/perf-window-process/results/slot/proof-duty-idle.plan` | 20 |
 | 3 | The 2° march cost with today's shader (bilinear ground at the last texel, data-aware level choice), outside `perf window` (the probe writes no log) | `PLANET_ADAPTER=hardware cargo test --release -p planet-render --test gpu_all march_cost -- --ignored --nocapture` | 5 |
+| 3b | REND-052 2° frame scene (crusader's PR, crusader inbox #38) | the command from that PR; runs if it merged before the slot, otherwise NOT RUN | 10 |
 | 4 | ADR 0092: flight scenes at the terrain share; teleports recorded | `cargo xtask perf window spikes/perf-window-process/results/slot/flights-share6.plan --no-preflight` | 25 |
 | 4b | The lit flight coast-glide once (frame-time check) | `cargo xtask perf window spikes/perf-window-process/results/slot/lit-glide.plan --no-preflight` | 3 |
 
@@ -21,6 +22,7 @@ The planner schedules the slot (inbox #72, opus-planner 2026-11-02); the spikes 
    - Confound: window 2 ran thermally limited (60-64 C) with loaded configurations.
    - Also the gate's share of the window: the remaining lever, an ADR 0020 amendment if it is large.
 3. The march probe's GPU ms per pass and its median and p99 steps at 45 and 2 degrees (crusader's `march_cost_probe_over_eleven_levels`, #1079), against its 1.23 and 1.50-1.54 ms, which predate the bilinear ground and the level choice. A reading, not a verdict: REND-052's frame-level 2° scene does not exist yet (river-r1 and hills-b poses with a 2° sun; crusader offers to add them).
+   - 3b: the frame-level verdict of the 2° pose against REND-052, in the same results file; NOT RUN if the scene is not on main at the slot.
 4. Flight verdicts (frame median and p99, tile-ready) of dive, dive-fast, look-1m and look-2km at 6 workers (0.6 x B, B = 10 here: ADR 0092's worked example). Teleport-1m and teleport-2km are recorded, never a verdict. coast-glide runs once as the lit flight's frame-time check.
    - A flight miss goes back to the owner.
 
