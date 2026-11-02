@@ -47,6 +47,12 @@ pub fn pin_current(class: CoreClass) -> bool {
     imp::select(&ids)
 }
 
+/// Ask the OS to run the calling thread power-throttled (Windows EcoQoS, `ThreadPowerThrottling` execution-speed throttling): on a hybrid CPU it
+/// prefers the efficiency cores at a low clock. `false` where the platform has no such call or refused it.
+pub fn eco_qos_current() -> bool {
+    imp::eco_qos()
+}
+
 #[derive(Clone, Copy, Debug)]
 struct CpuSet {
     id: u32,
@@ -98,6 +104,28 @@ mod imp {
         out
     }
 
+    pub fn eco_qos() -> bool {
+        use windows::Win32::System::Threading::{
+            SetThreadInformation, ThreadPowerThrottling, THREAD_POWER_THROTTLING_CURRENT_VERSION, THREAD_POWER_THROTTLING_EXECUTION_SPEED,
+            THREAD_POWER_THROTTLING_STATE,
+        };
+        let state = THREAD_POWER_THROTTLING_STATE {
+            Version: THREAD_POWER_THROTTLING_CURRENT_VERSION,
+            ControlMask: THREAD_POWER_THROTTLING_EXECUTION_SPEED,
+            StateMask: THREAD_POWER_THROTTLING_EXECUTION_SPEED,
+        };
+        // SAFETY: the pseudo handle of the calling thread is always valid; the state is a live local of the size passed.
+        unsafe {
+            SetThreadInformation(
+                GetCurrentThread(),
+                ThreadPowerThrottling,
+                std::ptr::from_ref(&state).cast(),
+                std::mem::size_of::<THREAD_POWER_THROTTLING_STATE>() as u32,
+            )
+            .is_ok()
+        }
+    }
+
     pub fn select(ids: &[u32]) -> bool {
         if ids.is_empty() {
             return false;
@@ -116,6 +144,10 @@ mod imp {
     }
 
     pub fn select(_: &[u32]) -> bool {
+        false
+    }
+
+    pub fn eco_qos() -> bool {
         false
     }
 }
