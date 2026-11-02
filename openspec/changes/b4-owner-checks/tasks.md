@@ -5,7 +5,7 @@
 ## 2. Steps (state at the handover, 2026-10-30; main 318a7e74 or later)
 - [x] B4-2 level-pop detector: `planet_frame::popcheck`, TEST-072 (#923). Descent test through the morph model passes, the no-morph descent fails. The pixel bounds (0.5 px p99, 2 px max) are a proposal. Not done: feeding it from the real plan on the real store (design.md risk: the real plan chooses levels by distance to the bounding volume; rugged sites only, a hard switch on gentle ground stays under 0.5 px).
 - [ ] B4-3 river bed-rise detector: later, against a generated world (the default world draws no rivers until M9's channels).
-- [~] B4-4 the preview pair (design #928):
+- [x] B4-4 the preview pair (design #928):
   - [x] TEST-077 `planet_testkit::pair::compare_pair` (#930); bound 1/20 of the changed pixels, TooSmall at 50 pixels or fewer.
   - [x] TEST-076 `editperf::pair_frames` and the tier-C smoke test (#937): stale, preview, exact and control frames per debug view; control bit exact.
   - First finding (software adapter, smoke memory bake, 50 m hill at 200 m): normals Within (0 of 9381 pixels left), relief Over (2836 of 7152 left, largest 76); the control is 0 bytes; the preview, exact and stale frames draw the same 170 tiles (0 differing), so the relief difference is not a different level choice; it is in the previewed nodes' heights (contour lines are displaced), size in metres not measured.
