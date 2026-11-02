@@ -13,7 +13,8 @@ pub struct SyntheticLoad {
     pub cores: usize,
 }
 
-/// The four reserved shares: sky and weather, physics, game logic, networking.
+/// The four reserved shares: sky and weather, physics, game logic, networking. Their `cores` are the desktop-sized defaults of the tests
+/// only; a run sizes the loads from the machine's shares with [`with_cores`] (BUDG-011).
 pub const LOADS: [SyntheticLoad; 4] = [
     SyntheticLoad { name: "sky", main_ms: 1.5, gpu_ms: 3.0, cores: 1 },
     SyntheticLoad { name: "physics", main_ms: 2.0, gpu_ms: 0.5, cores: 2 },

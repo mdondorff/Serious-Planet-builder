@@ -48,10 +48,17 @@ impl Shares {
         Shares { capacity, terrain, physics: n[1], game_logic: n[2], sky: n[3], networking: n[4] }
     }
 
-    /// The shares of this machine: the detected topology (BUDG-013), or every usable thread as performance when the override is
-    /// malformed (the error is the caller's to print).
+    /// The shares of this machine, detected once per process (BUDG-013): a malformed `PLANET_CPU_TOPOLOGY` is printed once and every usable
+    /// thread then counts as performance.
     pub fn machine() -> Shares {
-        Shares::for_topology(crate::topology::detect().unwrap_or(CpuTopology { p: crate::topology::available_threads(), e: 0 }))
+        static MACHINE: std::sync::OnceLock<Shares> = std::sync::OnceLock::new();
+        *MACHINE.get_or_init(|| {
+            let topology = crate::topology::detect().unwrap_or_else(|e| {
+                eprintln!("warning: {e}; counting every usable thread as performance");
+                CpuTopology { p: crate::topology::available_threads(), e: 0 }
+            });
+            Shares::for_topology(topology)
+        })
     }
 
     /// The share named `name` in [`TABLE`] (`None` for another name).

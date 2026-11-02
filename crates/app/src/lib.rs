@@ -75,8 +75,8 @@ modes:
     --adapter software|hardware   adapter policy (default: PLANET_ADAPTER or software)
     --draw per-draw|indirect   how the terrain renderer submits draws (REND-015): per-draw is the reference loop, indirect one multi-draw per buffer run from a CPU-built argument buffer (default indirect where the adapter supports it, else per-draw)
     --upload per-slot|batched   how a frame's tile writes reach the queue (REND-016): batched (default) writes each run of adjacent slots with one call, per-slot is the reference (one or two calls per tile); the pool contents are identical
-    --gen-workers N          threads of the tile generation pool and so jobs running at once in the pipelined loop and the streaming perf scenes (STRM-020; default: the machine's hardware threads; the plan worker's threads are separate)
-    --gen-reserve N          hardware threads the default generation pool leaves free for the frame thread, the plan worker and the driver (STRM-020; default 2; ignored when --gen-workers is given)
+    --gen-workers N          threads of the tile generation pool and so jobs running at once in the pipelined loop and the streaming perf scenes (STRM-020; default: the terrain share, BUDG-003; the rig keeps the pool inside that share; the plan worker's threads are separate)
+    --gen-reserve N          size the generation pool as the hardware threads less N instead of the terrain share (STRM-020; ignored when --gen-workers is given)
     --gen-ahead N            jobs queued behind the running ones so a worker that finishes between two frames takes the next at once (STRM-020; default: the worker count; 0: refill at frame boundaries only)
     --gen-priority below-normal|normal   OS priority of the generation workers (STRM-020, ADR 0046; default below-normal: the frame thread wins a core both want; no result depends on it)
     --lit                    the streaming perf scenes on the lit path with the atmosphere and water (TEST-025): same scripts, same verdicts, logs named <scene>-lit
@@ -109,10 +109,10 @@ pub struct Options {
     pub draw: Option<planet_render::DrawMode>,
     /// `--upload per-slot|batched`: how a frame's tile writes reach the queue (REND-016); default batched, per-slot the reference.
     pub upload: Option<planet_render::UploadMode>,
-    /// `--gen-workers N` and `--gen-ahead N`: the tile generation pool (STRM-020); default the machine's threads and as many queued.
+    /// `--gen-workers N` and `--gen-ahead N`: the tile generation pool (STRM-020); default the terrain share (BUDG-003) and as many queued.
     pub gen_workers: Option<usize>,
     pub gen_ahead: Option<usize>,
-    /// `--gen-reserve N`: cores the default pool size leaves free (`planet_streaming::GEN_RESERVE` when absent).
+    /// `--gen-reserve N`: size the pool as the machine's threads less N instead of the terrain share (none when absent).
     pub gen_reserve: Option<usize>,
     /// `--gen-priority below-normal|normal`: the priority of the generation workers (STRM-020, ADR 0046); below-normal when absent.
     pub gen_priority: Option<planet_streaming::Priority>,

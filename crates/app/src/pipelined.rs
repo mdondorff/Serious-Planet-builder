@@ -377,7 +377,7 @@ mod size_tests {
     // spec: BUDG-003
     #[test]
     fn the_terrain_share_never_holds_more_than_the_cap_and_a_small_machine_is_not_capped() {
-        // The reference machine: 15 tile threads wanted and 7 bakes: capped to 11 tile workers, the plan worker and the ceiling 12.
+        // A cap of 12 (a large machine's share would be at most 10; a model value): 15 tile threads wanted and 7 bakes: 11 tile workers, the plan worker and the ceiling 12.
         assert_eq!(terrain_sizes(15, 7, 12), (11, 12));
         // A 4-core CI machine: 1 tile worker, 1 bake: the sum of threads, below the cap.
         assert_eq!(terrain_sizes(1, 1, 12), (1, 3));
