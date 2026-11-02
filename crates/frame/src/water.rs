@@ -181,14 +181,46 @@ impl WaterSource for WaterField<'_> {
     }
 }
 
-/// The water of tiles computed off the frame (ADR 0056): the tile's job fills its answer here and the plan reads it. A tile's answer
-/// is a pure function of the tile and the field, so which thread computes it, and when, changes nothing (CON-14).
+/// The most tiles a [`WaterBook`] holds by default (`waterbook-eviction`): about 100 bytes an entry, so 26 MB, more than ten times the largest
+/// resident set R of a deep flight (21,000 tiles at 1,000 km, `clipmap::plan_time_for_a_large_r`) so that no tile of R is evicted.
+pub const WATER_BOOK_CAP: usize = 262_144;
+
+/// One tile of the book: its answer, the lowest own-lattice height of its mesh when its job left one (ATMO-020) and when it was last used.
+#[derive(Clone, Copy, Debug)]
+struct BookEntry {
+    answer: Option<WaterSample>,
+    min_m: Option<f32>,
+    used: u64,
+}
+
 #[derive(Default)]
+struct BookInner {
+    tiles: HashMap<TileId, BookEntry>,
+    /// Counts every use: the order of the entries by last use.
+    clock: u64,
+}
+
+impl BookInner {
+    fn touch(&mut self) -> u64 {
+        self.clock += 1;
+        self.clock
+    }
+}
+
+/// The water of tiles computed off the frame (ADR 0056): the tile's job fills its answer here and the plan reads it. A tile's answer
+/// is a pure function of the tile and the field, so which thread computes it, and when, changes nothing (CON-14). The book is bounded: past
+/// its capacity the least recently used eighth of its entries goes, and a tile asked for again is computed again, to the same bits.
 pub struct WaterBook {
-    tiles: std::sync::Mutex<HashMap<TileId, Option<WaterSample>>>,
-    /// The lowest height of the own lattice vertices of the tiles whose job built the mesh and whose answer is wet (ATMO-020).
-    mins: std::sync::Mutex<HashMap<TileId, f32>>,
+    inner: std::sync::Mutex<BookInner>,
+    cap: usize,
     filled: std::sync::atomic::AtomicU64,
+    evicted: std::sync::atomic::AtomicU64,
+}
+
+impl Default for WaterBook {
+    fn default() -> WaterBook {
+        WaterBook::with_capacity(WATER_BOOK_CAP)
+    }
 }
 
 impl WaterBook {
@@ -196,19 +228,58 @@ impl WaterBook {
         WaterBook::default()
     }
 
+    /// A book that holds at most `cap` tiles (at least 8).
+    pub fn with_capacity(cap: usize) -> WaterBook {
+        WaterBook {
+            inner: std::sync::Mutex::new(BookInner::default()),
+            cap: cap.max(8),
+            filled: std::sync::atomic::AtomicU64::new(0),
+            evicted: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+
     /// Keep `min_m`, the lowest height of the own lattice vertices of `tile`'s mesh, for the height test of the cut (ATMO-020). Only a
     /// tile whose answer in the book is wet keeps one (a dry tile is never a water node); called by the tile's job after
     /// [`fill`](WaterBook::fill). A pure function of the tile and the field, so two jobs of one tile agree.
     pub fn set_min_height(&self, tile: TileId, min_m: f32) {
-        if !min_m.is_finite() || !matches!(self.get(tile), Some(Some(_))) {
-            return;
+        let mut b = self.inner.lock().expect("water book");
+        let used = b.touch();
+        if let Some(e) = b.tiles.get_mut(&tile).filter(|e| min_m.is_finite() && e.answer.is_some()) {
+            e.min_m = Some(min_m);
+            e.used = used;
         }
-        self.mins.lock().expect("water book").insert(tile, min_m);
     }
 
     /// The lowest height of the own lattice vertices of `tile`'s mesh, when its job left one.
     pub fn min_height(&self, tile: TileId) -> Option<f32> {
-        self.mins.lock().expect("water book").get(&tile).copied()
+        let mut b = self.inner.lock().expect("water book");
+        let used = b.touch();
+        b.tiles.get_mut(&tile).and_then(|e| {
+            e.used = used;
+            e.min_m
+        })
+    }
+
+    /// Keep the answer of `tile` if the book has none; the count of entries stays within the capacity. Returns whether it was new.
+    fn insert_answer(&self, tile: TileId, answer: Option<WaterSample>) -> bool {
+        let mut b = self.inner.lock().expect("water book");
+        let used = b.touch();
+        if let Some(e) = b.tiles.get_mut(&tile) {
+            e.used = used;
+            return false;
+        }
+        b.tiles.insert(tile, BookEntry { answer, min_m: None, used });
+        if b.tiles.len() > self.cap {
+            // The least recently used eighth goes (ties by tile id: the same entries for any order of the map).
+            let drop = (self.cap / 8).max(1);
+            let mut order: Vec<(u64, TileId)> = b.tiles.iter().map(|(t, e)| (e.used, *t)).collect();
+            order.sort_unstable();
+            for (_, t) in order.into_iter().take(drop) {
+                b.tiles.remove(&t);
+            }
+            self.evicted.fetch_add(drop as u64, std::sync::atomic::Ordering::Relaxed);
+        }
+        true
     }
 
     /// Compute the water of `tile` (in the caller's thread, a tile job) and keep it. A tile already held is not computed again.
@@ -225,12 +296,12 @@ impl WaterBook {
         radius_m: f64,
         par: &dyn planet_core::par::Par,
     ) -> Result<(), WaterError> {
-        if self.tiles.lock().expect("water book").contains_key(&tile) {
+        if self.inner.lock().expect("water book").tiles.contains_key(&tile) {
             return Ok(());
         }
         // A tile that spans more than one block is answered by the coarse level of W and reads none (ADR 0058).
         if let Some(answer) = src.coarse_tile_water(map, tile, radius_m)? {
-            if self.tiles.lock().expect("water book").insert(tile, answer).is_none() {
+            if self.insert_answer(tile, answer) {
                 self.filled.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
             return Ok(());
@@ -252,19 +323,43 @@ impl WaterBook {
         });
         let answer = WaterTileCache::new().tile_water(src, map, tile, radius_m)?;
         // Two jobs of one tile compute the same answer; only the first to insert counts.
-        if self.tiles.lock().expect("water book").insert(tile, answer).is_none() {
+        if self.insert_answer(tile, answer) {
             self.filled.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
         Ok(())
     }
 
     pub fn get(&self, tile: TileId) -> Option<Option<WaterSample>> {
-        self.tiles.lock().expect("water book").get(&tile).copied()
+        let mut b = self.inner.lock().expect("water book");
+        let used = b.touch();
+        b.tiles.get_mut(&tile).map(|e| {
+            e.used = used;
+            e.answer
+        })
     }
 
     /// Tiles computed by [`fill`](WaterBook::fill).
     pub fn filled(&self) -> u64 {
         self.filled.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// The tiles the book holds now.
+    pub fn len(&self) -> usize {
+        self.inner.lock().expect("water book").tiles.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// The most tiles the book holds.
+    pub fn capacity(&self) -> usize {
+        self.cap
+    }
+
+    /// Entries evicted so far.
+    pub fn evicted(&self) -> u64 {
+        self.evicted.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
@@ -317,6 +412,15 @@ impl WaterTileCache {
         WaterTileCache::default()
     }
 
+    /// Remember a tile's answer. The memo is bounded like the book: past [`WATER_BOOK_CAP`] tiles it starts over (every answer is a pure function
+    /// of the tile and the field, so a forgotten one is read from the book or asked of the field again, to the same bits).
+    fn memo(&mut self, tile: TileId, answer: Option<WaterSample>) {
+        if self.tiles.len() >= WATER_BOOK_CAP {
+            self.tiles.clear();
+        }
+        self.tiles.insert(tile, answer);
+    }
+
     /// A cache that reads the answers the tile jobs left in `book` before it asks the field.
     pub fn with_book(book: std::sync::Arc<WaterBook>) -> WaterTileCache {
         WaterTileCache { book: Some(book), ..WaterTileCache::default() }
@@ -352,12 +456,12 @@ impl WaterTileCache {
         }
         if let Some(w) = self.book.as_ref().and_then(|b| b.get(tile)) {
             self.book_hits += 1;
-            self.tiles.insert(tile, w);
+            self.memo(tile, w);
             return Ok(w);
         }
         let started = std::time::Instant::now();
         if let Some(coarse) = src.coarse_tile_water(map, tile, radius_m)? {
-            self.tiles.insert(tile, coarse);
+            self.memo(tile, coarse);
             return Ok(coarse);
         }
         let n = TILE_SAMPLES;
@@ -380,7 +484,7 @@ impl WaterTileCache {
         }
         self.query_ns += u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
         self.tile_misses += 1;
-        self.tiles.insert(tile, best);
+        self.memo(tile, best);
         Ok(best)
     }
 }
