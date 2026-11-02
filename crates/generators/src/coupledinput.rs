@@ -9,6 +9,7 @@
 use crate::global::{LatticeSource, ReadError};
 use planet_core::cube::Face;
 use planet_core::hash::mix64;
+use planet_core::par::Par;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
@@ -42,23 +43,14 @@ pub fn reduce_bake_with(
     let rows_per_band = if src.block_cells() > 0 { (src.block_cells() as usize / r).max(1) } else { 1 };
     let bands_per_face = n.div_ceil(rows_per_band);
     let bands = 6 * bands_per_face;
-    let next = AtomicUsize::new(0);
     let finished = AtomicUsize::new(0);
     let done: Mutex<Vec<Band>> = Mutex::new(Vec::with_capacity(bands));
-    std::thread::scope(|s| {
-        for _ in 0..threads.clamp(1, bands) {
-            planet_core::thread::spawn_named(s, "reduce-bake", || loop {
-                let b = next.fetch_add(1, Ordering::Relaxed);
-                if b >= bands {
-                    break;
-                }
-                let face = Face((b / bands_per_face) as u8);
-                let j0 = (b % bands_per_face) * rows_per_band;
-                let out = band(src, face, j0, (j0 + rows_per_band).min(n), n, r);
-                done.lock().expect("reduction results").push((b, out));
-                progress(finished.fetch_add(1, Ordering::Relaxed) + 1, bands);
-            });
-        }
+    threads.clamp(1, bands).run(bands, &|b| {
+        let face = Face((b / bands_per_face) as u8);
+        let j0 = (b % bands_per_face) * rows_per_band;
+        let out = band(src, face, j0, (j0 + rows_per_band).min(n), n, r);
+        done.lock().expect("reduction results").push((b, out));
+        progress(finished.fetch_add(1, Ordering::Relaxed) + 1, bands);
     });
     let mut parts = done.into_inner().expect("reduction results");
     parts.sort_by_key(|p| p.0);

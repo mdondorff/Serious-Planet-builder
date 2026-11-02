@@ -6,6 +6,8 @@ mod floor_roots;
 mod horizon_jobs;
 #[path = "job_classes.rs"]
 mod job_classes;
+#[path = "job_dispatch_cost.rs"]
+mod job_dispatch_cost;
 #[path = "job_log.rs"]
 mod job_log;
 #[path = "manager.rs"]

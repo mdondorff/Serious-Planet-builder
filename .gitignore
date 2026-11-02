@@ -8,3 +8,11 @@
 # Spike prototypes and their build output stay on spike branches, never on main (spike skill)
 spikes/*/proto/
 spikes/*/out/
+
+# The streaming scenes' logs of a perf run (dive, teleport, look): measurements stay local; the window records that are meant to be tracked are listed by name
+perf/logs/dive*.json
+perf/logs/dive*.frames.txt
+perf/logs/teleport-*.json
+perf/logs/teleport-*.frames.txt
+perf/logs/look-*.json
+perf/logs/look-*.frames.txt

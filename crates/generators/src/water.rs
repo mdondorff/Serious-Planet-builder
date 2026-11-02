@@ -361,23 +361,11 @@ impl crate::height::HeightField for WaterBounded<'_> {
     fn height(&self, dir: Vec3) -> f64 {
         self.f().height(dir)
     }
-    fn height_at_level(&self, dir: Vec3, level: u8) -> f64 {
-        self.f().height_at_level(dir, level)
-    }
-    fn level_aware(&self) -> bool {
-        self.f().level_aware()
-    }
-    fn level_drivers(&self, dirs: &[Vec3], level: u8) -> Option<Vec<Option<[u8; 3]>>> {
-        self.f().level_drivers(dirs, level)
-    }
-    fn level_change(&self, dirs: &[Vec3], level: u8) -> Option<Vec<f64>> {
-        self.f().level_change(dirs, level)
-    }
     fn heights_until(&self, dirs: &[Vec3], stop: &dyn Fn() -> bool) -> Vec<f64> {
         self.f().heights_until(dirs, stop)
     }
-    fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), threads: usize) -> Vec<f64> {
-        self.f().heights_threaded_until(dirs, stop, threads)
+    fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), par: &dyn planet_core::par::Par) -> Vec<f64> {
+        self.f().heights_threaded_until(dirs, stop, par)
     }
     fn seed(&self) -> u64 {
         self.f().seed()

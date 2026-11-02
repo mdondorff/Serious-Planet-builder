@@ -152,7 +152,7 @@ fn cases() -> Vec<Case> {
     out
 }
 
-// spec: REND-025
+// spec: REND-025, REND-030
 #[test]
 fn the_lit_radiance_matches_the_f64_reference_within_its_declared_bound() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");

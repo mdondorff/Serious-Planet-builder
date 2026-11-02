@@ -1,7 +1,7 @@
 # 0045 Bodies, bake resolution and the storage budget
-Status: proposed (draft by opus-planner, 2026-10-16, at the owner's request; point 3 decided by the owner 2026-10-16, pre-fill levels amended by 0062 and 0063; the rest is decided when several bodies become a milestone, or earlier if the editor (M6) needs point 7)
+Status: proposed (draft by opus-planner, 2026-10-16, at the owner's request; point 3 decided by the owner 2026-10-16, pre-fill levels amended by 0062 and 0063; point 9 added 2026-11-01 for ADR 0088 and ADR 0089 (owner, group 3); the rest is decided when several bodies become a milestone, or earlier if the editor (M6) needs point 7)
 Date: 2026-10-16
-Source: owner's questions of 2026-10-16 (generation cost, disk per planet, "amount of planets vs quality vs speed", authored regions); M4 perf windows 1 and 2 and sonnet-explorer's measurements (#157, #162); ADR 0006, ADR 0007, ADR 0018, ADR 0019, ADR 0021 (points 2, 5, 6, 8 open), ADR 0026, ADR 0027, ADR 0028, ADR 0029, ADR 0033; constitution CON-05, CON-06, CON-08, CON-14, CON-21
+Source: owner's questions of 2026-10-16 (generation cost, disk per planet, "amount of planets vs quality vs speed", authored regions); M4 perf windows 1 and 2 and sonnet-explorer's measurements (#157, #162); ADR 0006, ADR 0007, ADR 0018, ADR 0019, ADR 0021 (points 2, 5, 6, 8 open), ADR 0026, ADR 0027, ADR 0028, ADR 0029, ADR 0033, ADR 0088, ADR 0089, STRM-065 to STRM-068; constitution CON-05, CON-06, CON-08, CON-14, CON-21
 
 ## Context
 - **The bake is the per-body world map**, not tiles: four `f32` channels (continentalness, elevation, temperature, precipitation) on a vertex grid of `res` cells per cube-face edge (ADR 0026). At Earth radius and `res` 16384 (about 0.6 km) it takes 370 s on 20 threads and 11.66 GB on disk (perf window 2026-10-12).
@@ -34,6 +34,11 @@ These options combine: 2 is the default, 3 is a per-body choice, and 1 is a pack
 
 7. **Authored edits against pre-filled coarse tiles.** A coarse tile spans thousands of authored cells and today records the whole body in its key (ADR 0021 point 5), so every edit would re-key all pre-filled coarse tiles. **Before the editor ships**, ADR 0021 point 5 is decided with region summary hashes (a quadtree of cell hashes with fixed empty hashes per level), so one edit invalidates about one coarse tile per level (about 10 s of background regeneration at Earth scale, the stale tile shown meanwhile).
 8. **Global-scale authoring and hydrology are out of scope here.** Edits that change global context (moving a range that changes rain shadows, a lake that changes ocean connectivity) would re-bake the affected global stage. They are decided with hydrology, whose global data also adds per-body storage (and is where the knobs above matter most).
+9. **The M9 layers (ADR 0088, ADR 0089)**, per body, caches under point 1 (rebuilt when absent, evicted with the body's bake); values are start values in the specs:
+   - the erosion layer, a separate store beside the bake that never rewrites it (about 7-10 GB at 16384; STRM-065), keyed by the bake key and the channel versions (ADR 0088 point 7), so a class-paint edit invalidates it where the weights change;
+   - its min/max pyramid (about 90 MB; STRM-066);
+   - the class-weights channel, stored in the bake's store and rebuilt from the seed and the class-paint items, which are authored content in the definition (STRM-067);
+   - the relief channels `k` and `m` with block ranges, together with the weights under 1 GB (STRM-068).
 
 ## Consequences
 - A system of many bodies costs disk only for the bodies visited recently; the price is a first-visit wait that the readiness report makes visible.

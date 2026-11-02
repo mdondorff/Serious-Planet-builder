@@ -39,8 +39,20 @@ fn step(name: &'static str, f: impl FnOnce() -> Res) -> Step {
     clear_markers();
     let t = Instant::now();
     let outcome = f().map(|_| t.elapsed().as_secs_f64());
+    let not_run = not_run_of(&outcome, read_markers());
     let outcome = incomplete_is_not_a_failure(outcome, t.elapsed().as_secs_f64());
-    Step { name, outcome, note: String::new(), not_run: read_markers() }
+    Step { name, outcome, note: String::new(), not_run }
+}
+
+/// The NOT RUN lines of a step: its markers (a locked desktop, TEST-073), or, without one, the text of an `INCOMPLETE:` error (a check that
+/// gave no verdict, such as `perf wallclock` refused by the readiness gate), so that the step is never a pass.
+fn not_run_of(outcome: &Result<f64, String>, markers: Vec<String>) -> Vec<String> {
+    match outcome {
+        Err(e) if markers.is_empty() && e.starts_with(crate::util::INCOMPLETE) => {
+            vec![e.trim_start_matches(crate::util::INCOMPLETE).trim().to_string()]
+        }
+        _ => markers,
+    }
 }
 
 /// A step whose result carries a note for its row.
@@ -49,12 +61,10 @@ fn step_with_note(name: &'static str, f: impl FnOnce() -> Result<String, String>
     let t = Instant::now();
     match f() {
         Ok(note) => Step { name, outcome: Ok(t.elapsed().as_secs_f64()), note, not_run: read_markers() },
-        Err(e) => Step {
-            name,
-            outcome: incomplete_is_not_a_failure(Err(e), t.elapsed().as_secs_f64()),
-            note: String::new(),
-            not_run: read_markers(),
-        },
+        Err(e) => {
+            let not_run = not_run_of(&Err(e.clone()), read_markers());
+            Step { name, outcome: incomplete_is_not_a_failure(Err(e), t.elapsed().as_secs_f64()), note: String::new(), not_run }
+        }
     }
 }
 
@@ -70,7 +80,7 @@ fn incomplete_is_not_a_failure(outcome: Result<f64, String>, secs: f64) -> Resul
 fn step_row(s: &Step) -> String {
     match &s.outcome {
         Ok(secs) if !s.not_run.is_empty() => {
-            format!("| {} | INCOMPLETE: {} check(s) NOT RUN, desktop locked (TEST-073) | {secs:.1} |\n", s.name, s.not_run.len())
+            format!("| {} | INCOMPLETE: {} check(s) NOT RUN (TEST-073; why, below the table) | {secs:.1} |\n", s.name, s.not_run.len())
         }
         Ok(secs) => format!("| {} | pass{} | {secs:.1} |\n", s.name, s.note),
         Err(e) => format!("| {} | FAIL: {} | |\n", s.name, e.lines().next().unwrap_or("")),
@@ -122,8 +132,8 @@ fn manual_criteria(milestone: &str) -> &'static [&'static str] {
         ],
         "M8" => &[
             "Criterion 1: the owner's look review of `docs/milestones/M8/look-review-2b/` on plausible relief with horizon shadows (river and valley forms are not judged in M8; F8 compares the default and the sample look live) and the default look",
-            "Criterion 3: `cargo xtask gate` on the real store with the chunk stage at its default (off) (TEST-061, TEST-062): no frame over 100 ms, 0 held-back tiles without edits, no step between levels, no panic; run it before the window, never inside one (`gate --small` is an automated step above)",
-            "Criteria 4 to 7 are read from the perf logs only; criterion 6 is decided by the M6 table of `edit-latency.md` (the drawn tiles; the horizon table is reported, not judged), and criterion 7's envelope log must come from a run with the chunk stage off",
+            "Criterion 3: `cargo xtask gate` on the real store (TEST-061, TEST-062): no frame over 100 ms, 0 held-back tiles without edits, no step between levels (measured on the base field), the store opens without a rebuild (TEST-075), no panic; run it before the window, never inside one (`gate --small` is an automated step above)",
+            "Criteria 4 to 7 are read from the perf logs only; criterion 6 is decided by the M6 table of `edit-latency.md` (the drawn tiles; the horizon table is reported, not judged), and criterion 7's envelope log must say `chunk_stage` false",
             "CI green on Windows (WARP) and Linux (lavapipe) for the merge commit, and the determinism comparison (criterion 2)",
             "The owner's live-test items (docs/milestones/M8/owner-test-2026-10-27/README.md) and the M8 report (docs/milestones/M8-report.md): the planner",
         ],
@@ -266,6 +276,8 @@ pub fn run(root: &Path, args: &[String]) -> Res {
         step_with_note("test fast (timing)", || {
             crate::testcmd::judge_fast_timing(crate::testcmd::test_timed(root, &["fast".to_string()])?)
         }),
+        // BUILD-003: the wall-clock checks under the readiness gate; a refused gate is NOT RUN (no verdict), never a failure.
+        step("perf wallclock (BUILD-003)", || crate::testcmd::perf(root, &["wallclock".to_string()])),
     ]);
 
     let mut steps_md = String::from("| Step | Result | Seconds |\n|---|---|---|\n");
@@ -278,7 +290,7 @@ pub fn run(root: &Path, args: &[String]) -> Res {
     let not_run: Vec<&String> = steps.iter().flat_map(|s| s.not_run.iter()).collect();
     if !not_run.is_empty() {
         md += &format!(
-            "\nINCOMPLETE: {} real-GPU check(s) were NOT RUN while the desktop was locked (owner decision 2026-10-30, TEST-073); run them again with the desktop unlocked:\n\n",
+            "\nINCOMPLETE: {} check(s) were NOT RUN (a locked desktop, owner decision 2026-10-30, TEST-073; or a refused readiness gate, BUILD-003); run them again once the cause is gone:\n\n",
             not_run.len()
         );
         for l in &not_run {
@@ -366,10 +378,7 @@ pub fn run(root: &Path, args: &[String]) -> Res {
     std::fs::write(&out, &md).map_err(|e| e.to_string())?;
     eprintln!("\n{md}\nwrote {}", out.display());
     if !not_run.is_empty() && !failed && hardware_error.is_none() {
-        return Err(format!(
-            "acceptance {m} is INCOMPLETE: {} real-GPU check(s) were NOT RUN (desktop locked); see the table",
-            not_run.len()
-        ));
+        return Err(format!("acceptance {m} is INCOMPLETE: {} check(s) were NOT RUN; see the table", not_run.len()));
     }
     if let Some(e) = hardware_error {
         return Err(if failed { format!("{e}; and at least one automated step failed (see above)") } else { e });
@@ -392,6 +401,23 @@ mod tests {
         assert_eq!(incomplete_is_not_a_failure(Err(incomplete), 4.0), Ok(4.0));
         assert_eq!(incomplete_is_not_a_failure(Err("boom".into()), 4.0), Err("boom".into()));
         assert_eq!(incomplete_is_not_a_failure(Ok(1.0), 4.0), Ok(1.0));
+    }
+
+    // spec: BUILD-003
+    // spec: TEST-073
+    #[test]
+    fn a_step_that_gave_no_verdict_is_not_run_with_its_reason_and_its_markers_win() {
+        let refused = Err(format!("{} perf wallclock NOT RUN: the readiness gate refused (ADR 0020): CPU load", crate::util::INCOMPLETE));
+        assert_eq!(not_run_of(&refused, vec![]), ["perf wallclock NOT RUN: the readiness gate refused (ADR 0020): CPU load"]);
+        assert_eq!(not_run_of(&refused, vec!["NOT RUN x: desktop locked".into()]), ["NOT RUN x: desktop locked"]);
+        assert!(not_run_of(&Err("boom".into()), vec![]).is_empty() && not_run_of(&Ok(1.0), vec![]).is_empty());
+        let row = step_row(&Step {
+            name: "perf wallclock (BUILD-003)",
+            outcome: Ok(1.0),
+            note: String::new(),
+            not_run: not_run_of(&refused, vec![]),
+        });
+        assert!(row.contains("INCOMPLETE: 1 check(s) NOT RUN") && !row.contains("pass"), "{row}");
     }
 
     // spec: TEST-073

@@ -69,6 +69,11 @@ pub fn perf_global_bake(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> R
         report.peak_resident_blocks,
         failures
     );
+    let json = planet_perf::stamp_one_off_json(
+        &json,
+        &planet_perf::run_validity(),
+        &[planet_perf::OneOffReading { metric: "bake seconds (GEN-014)", reading: secs, budget: 600.0 }],
+    );
     let path = o.out.clone().unwrap_or_else(|| Path::new("perf").join("logs").join("global-bake.json"));
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(err)?;
@@ -138,6 +143,11 @@ pub fn perf_coupled(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
         owner_override,
         failures
     );
+    let json = planet_perf::stamp_one_off_json(
+        &json,
+        &planet_perf::run_validity(),
+        &[planet_perf::OneOffReading { metric: "coupled seconds (GEN-042)", reading: secs, budget: 600.0 }],
+    );
     let path = o.out.clone().unwrap_or_else(|| Path::new("perf").join("logs").join("coupled.json"));
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(err)?;
@@ -151,7 +161,7 @@ pub fn perf_coupled(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
     }
 }
 
-// spec: GEN-042
+// spec: GEN-042, GEN-088
 /// The make of the coupled run from the stored bake of `--store` (the viewer's make: reduction of the bake, then the steps), written to `into` under
 /// `target/` and never into the store, after the readiness gate: wall time against the GEN-042 budget, log `perf/logs/coupled-make.json`.
 fn perf_coupled_make(o: &Options, ctx: &GpuContext, out: &mut dyn Write, owner_override: &[String], into: &Path) -> Result<(), String> {
@@ -176,6 +186,11 @@ fn perf_coupled_make(o: &Options, ctx: &GpuContext, out: &mut dyn Write, owner_o
         owner_override,
         o.global_res,
         failures
+    );
+    let json = planet_perf::stamp_one_off_json(
+        &json,
+        &planet_perf::run_validity(),
+        &[planet_perf::OneOffReading { metric: "coupled make seconds (GEN-042)", reading: secs, budget: 600.0 }],
     );
     let path = o.out.clone().unwrap_or_else(|| Path::new("perf").join("logs").join("coupled-make.json"));
     if let Some(parent) = path.parent() {
@@ -267,12 +282,16 @@ mod tests {
     }
 
     // spec: TEST-064
-    /// The steps of the base field alone between a tile level and its parent (0 by construction at shared vertices: a child tile's vertices include the parent's and the base height does not depend on the level; the measurement guards that) at the levels 11 to 16, over the vertices of the
-    /// parents inside the chunk of the largest river, printed: `PLANET_ANET_STORE=DIR PLANET_ANET_RES=N cargo test -p planet --release --lib
-    /// base_steps_report -- --ignored --nocapture`. A measurement of values, read only.
+    /// Measured on the base field: the step between a tile level and its parent. For each level 12 to 16 the tiles under the tile of the largest
+    /// river are generated as the field gives them (`generate_tile_field`, heights rounded to f32) and every vertex of a tile that is also a vertex
+    /// of its parent (the even `k`, `l`) is compared with the parent's height there. A vertex has one direction (COORD-007) and the base height
+    /// does not depend on the level, so the steps are 0 or rounding; a value over 0.25 m fails the gate (TEST-064). Printed:
+    /// `PLANET_ANET_STORE=DIR PLANET_ANET_RES=N cargo test -p planet --release --lib base_steps_report -- --ignored --nocapture`.
+    /// A measurement of values, read only.
     #[test]
-    #[ignore = "a measurement: it prints the steps of the base field in one real chunk"]
+    #[ignore = "a measurement: it prints the steps of the base field between a level and its parent around one river"]
     fn base_steps_report() {
+        use planet_generators::height::generate_tile_field;
         let mut out = std::io::stdout();
         let res = std::env::var("PLANET_ANET_RES").ok().and_then(|r| r.parse().ok()).unwrap_or(256);
         let store = std::env::var_os("PLANET_ANET_STORE").map(std::path::PathBuf::from);
@@ -283,20 +302,24 @@ mod tests {
         let top = planet_generators::chunk::CHUNK_GRID_LEVEL;
         writeln!(
             out,
-            "steps of the base field alone against the parent (tile level L vs L - 1, at the parent's vertices, inside the chunk):"
+            "steps of the base field alone against the parent (tile level L vs L - 1, at the parent's vertices, under the tile {tile:?}):"
         )
         .unwrap();
+        let mut parents = std::collections::HashMap::new();
         for level in top + 1..=top + 5 {
             let mut tiles = vec![tile];
-            for _ in top..level - 1 {
+            for _ in top..level {
                 tiles = tiles.iter().flat_map(|t| t.children().expect("children")).collect();
             }
             let mut d: Vec<f64> = Vec::new();
             for t in &tiles {
-                for l in 0..=cells {
-                    for k in 0..=cells {
-                        let dir = t.sample_direction(map, cells, k, l);
-                        d.push((base.height_at_level(dir, level) - base.height_at_level(dir, level - 1)).abs());
+                let parent = t.parent().expect("parent");
+                let p = parents.entry(parent).or_insert_with(|| generate_tile_field(&*base, map, parent, cells));
+                let (qx, qy) = ((t.x() & 1) * (cells / 2), (t.y() & 1) * (cells / 2));
+                let child = generate_tile_field(&*base, map, *t, cells);
+                for l in (0..=cells).step_by(2) {
+                    for k in (0..=cells).step_by(2) {
+                        d.push(f64::from(child.at(k, l) - p.at(qx + k / 2, qy + l / 2)).abs());
                     }
                 }
             }
@@ -309,6 +332,7 @@ mod tests {
                 d.len()
             )
             .unwrap();
+            parents.clear();
         }
     }
 
@@ -398,25 +422,6 @@ mod tests {
                 }
             }
             writeln!(out, "camera {altitude:.0} m up: {n} picks, {hits} hits, mean {:.1} ms, worst {worst:.0} ms", sum / f64::from(n))
-                .map_err(err)
-                .unwrap();
-            // The same picks with the height of the tile level whose vertex spacing is about a pixel's footprint at the camera's distance to the surface.
-            let (mut worst_l, mut sum_l, mut hits_l) = (0.0f64, 0.0f64, 0u32);
-            let footprint_m = altitude * 2.0 * libm::tan(45f64.to_radians()) / h;
-            let level =
-                (libm::ceil(libm::log2(radius * core::f64::consts::FRAC_PI_2 / 32.0 / footprint_m.max(1e-3))).clamp(3.0, 22.0)) as u8;
-            for gx in 0..9 {
-                for gy in 0..5 {
-                    let ray = cursor_ray(&camera, w * (f64::from(gx) + 0.5) / 9.0, h * (f64::from(gy) + 0.5) / 5.0, w, h);
-                    let t = std::time::Instant::now();
-                    let hit = pick_surface(&ray, &limits, &|d| field.height_at_level(d, level));
-                    let ms = t.elapsed().as_secs_f64() * 1000.0;
-                    worst_l = worst_l.max(ms);
-                    sum_l += ms;
-                    hits_l += u32::from(hit.is_some());
-                }
-            }
-            writeln!(out, "  at level {level}: {hits_l} hits, mean {:.1} ms, worst {worst_l:.0} ms", sum_l / f64::from(n))
                 .map_err(err)
                 .unwrap();
         }

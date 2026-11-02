@@ -1,0 +1,126 @@
+# SPIKE-81: relief classes derived from physical drivers (ADR 0076: drivers -> rules -> consumers), on SPIKE-80's combined global model.
+# Drivers per 0.25-degree cell:
+# - plate history (SPIKE-79/80's plates): active orogen core, flank, old margin, back-arc, rift (divergent margin), craton (far from every margin);
+# - an analytic rock hardness H in [0, 1]: hard in cratons and orogen cores, soft in foreland and lowland basins (sediment), plus a noise;
+# - aridity from the generator's own climate (S81_CLIMATE dump: precipitation P, temperature T): aridity index P / PET with the stand-in
+#   PET = 300 + 45 max(T, 0) mm, `arid` = 1 - smoothstep(0.2, 0.65) of it (UNEP's arid / humid bounds);
+# - the combined elevation and SPIKE-77's plateau field.
+# A rule table: per class, a product of response curves (trapezoids) of the drivers; badlands and sand sea are new derived classes, the rest
+# keep SPIKE-80's rules. Memberships are normalised. Writes the 4-channel fields (delta, k, floor, carve) and re-matched sites for the site run.
+# Usage: python -I classdrivers.py <map13.f32> <out dir> <real stats json> <climate.f32> <combined.py>
+import sys, runpy, json, os
+import numpy as np
+from PIL import Image
+
+mp, out, realp, climp, combp = sys.argv[1:6]
+os.environ.setdefault('S80_HILLU', '200')
+os.environ.setdefault('S80_FIX', '5500,2000,0.7')
+argv0 = sys.argv
+sys.argv = [combp, mp, out, realp]
+g = runpy.run_path(combp, run_name='combined')
+sys.argv = argv0
+smooth, fbm, P3, LAT, lat, lon, land, landall, wgt, e, r14 = (g[n] for n in ('smooth', 'fbm', 'P3', 'LAT', 'lat', 'lon', 'land', 'landall', 'wgt', 'e', 'r14'))
+conv, d_margin, inland = g['conv'], g['d_margin'], g['inland']
+ev, m = g['variants'][list(g['variants'])[-1]]
+H, W = LAT.shape
+clim = np.fromfile(climp, '<f4').reshape(H, W, 2).astype(np.float64)
+P, T = clim[..., 0], clim[..., 1]
+
+
+def trap(x, a, b, c, d):
+    return smooth(x, a, b) * (1 - smooth(x, c, d))
+
+
+# Drivers.
+core, flank, oldm, ba, Ppl = m['core'], m['flank'], m['oldm'], m['ba'], m['P']
+craton = smooth(d_margin, 500.0, 1100.0)
+rift = smooth(-conv, 0.15, 0.4) * np.exp(-(d_margin / 150.0) ** 2)
+basin = (1 - smooth(ev, 200.0, 700.0)) * smooth(inland, 0.3, 0.7)
+foreland = flank * (1 - smooth(core, 0.2, 0.5))
+noise = fbm(P3, 4.0, 3, 8111)
+Hd = np.clip(0.45 + 0.4 * craton * (1 - basin) + 0.35 * core - 0.4 * foreland - 0.35 * basin + 0.25 * noise, 0, 1)
+soft = 1 - Hd
+AI = P / (300.0 + 45.0 * np.maximum(T, 0.0))
+arid = 1 - smooth(AI, 0.2, 0.65)
+mt = smooth(core, 0.25, 0.55)
+
+# The rule table (raw weights).
+w = {}
+w['high mountains'] = mt * smooth(ev, 2000.0, 3000.0)
+w['mountains'] = mt * (1 - smooth(ev, 2000.0, 3000.0))
+w['badlands'] = (1 - mt) * smooth(soft, 0.45, 0.65) * trap(arid, 0.2, 0.4, 0.8, 0.95) * trap(ev, 250.0, 450.0, 1500.0, 2200.0)
+w['sand sea'] = (1 - mt) * smooth(arid, 0.75, 0.92) * smooth(np.maximum(soft, basin), 0.4, 0.6) * (1 - smooth(ev, 1300.0, 1900.0)) * (1 - smooth(flank, 0.3, 0.6))
+# Both carry (1 - mt) already; where together they exceed it, scale them down to it.
+sb = w['badlands'] + w['sand sea']
+scale = np.where(sb > 1 - mt, (1 - mt) / np.maximum(sb, 1e-9), 1.0)
+w['badlands'] *= scale
+w['sand sea'] *= scale
+free = np.clip(1 - mt - w['badlands'] - w['sand sea'], 0, 1)
+w['hills'] = free * smooth(np.maximum(flank, oldm), 0.2, 0.45)
+w['plateau'] = free * (1 - smooth(np.maximum(flank, oldm), 0.2, 0.45)) * smooth(np.maximum(Ppl, ba), 0.3, 0.6)
+rest = np.clip(free - w['hills'] - w['plateau'], 0, 1)
+# Rolling plain on soft or rifted ground in humid climate, plain otherwise (SPIKE-80 split it by a noise).
+roll_w = smooth(0.6 * soft + 0.4 * rift + 0.3 * (1 - arid) - 0.3, 0.2, 0.5)
+w['rolling plain'] = rest * roll_w
+w['plain'] = rest * (1 - roll_w)
+names = list(w)
+total = sum(w.values())
+assert float(np.abs(total - 1)[landall].max()) < 1e-6, float(np.abs(total - 1)[landall].max())
+K = {'plain': 1.0, 'rolling plain': 1.0, 'hills': 5.0, 'mountains': 6.0, 'high mountains': 7.5, 'plateau': 1.0, 'badlands': 2.0, 'sand sea': 0.35}
+FLOOR = {'plain': 0.2, 'rolling plain': 0.35, 'hills': 0.0, 'mountains': 0.0, 'high mountains': 0.0, 'plateau': 0.0, 'badlands': 0.0, 'sand sea': 0.0}
+CARVE = {n: 1.0 for n in names}
+CARVE['sand sea'] = 0.5
+k = sum(K[n] * w[n] for n in names)
+floor = sum(FLOOR[n] * w[n] for n in names)
+carve = sum(CARVE[n] * w[n] for n in names)
+cls = np.argmax(np.stack([w[n] for n in names], -1), -1)
+share = {n: float((wgt * (cls == j)).sum() / wgt.sum()) for j, n in enumerate(names)}
+rc = np.digitize(k * r14, [100, 300, 1000])
+rc = np.where(ev >= 2500, np.maximum(rc, 2), rc)
+rsh = [float((wgt * (rc == j)).sum() / wgt.sum()) for j in range(4)]
+aridsh = {lbl: float((wgt * (arid > t)).sum() / wgt.sum()) for lbl, t in (('arid > 0.5 (AI under about 0.4)', 0.5), ('arid > 0.9 (AI under about 0.25)', 0.9))}
+print('derived class shares (largest membership):', {n: round(v, 3) for n, v in share.items()})
+print(f'relief classes k R14: plains {rsh[0]:.3f} hills {rsh[1]:.3f} mountains {rsh[2] + rsh[3]:.3f} (high {rsh[3]:.3f}); SPIKE-80 0.608/0.200/0.191; Earth 0.61/0.14/0.25')
+print('dry land:', {a: round(b, 3) for a, b in aridsh.items()}, '| hard rock (H > 0.6)', round(float((wgt * (Hd > 0.6)).sum() / wgt.sum()), 3), '| soft (H < 0.4)', round(float((wgt * (Hd < 0.4)).sum() / wgt.sum()), 3))
+d = np.concatenate([np.abs(np.diff(k, axis=0))[land[:-1] & land[1:]], np.abs(np.diff(k, axis=1))[land[:, :-1] & land[:, 1:]]])
+print(f'k step per 0.25 degree: p99 {np.percentile(d, 99):.2f} max {d.max():.2f}')
+res = {'shares': share, 'relief_classes_kR14': rsh, 'dry': aridsh, 'dk': [float(np.percentile(d, 99)), float(d.max())]}
+
+# Fields for the site run (delta, k, floor, carve) and the re-matched sites.
+np.stack([ev - e, k, floor, carve], -1).astype('<f4').tofile(f'{out}/s81-fields.f32')
+WANT = {'N52E012': 'plain', 'N41W096': 'rolling plain', 'N43W102': 'badlands', 'N31W004': 'sand sea', 'N40W078': 'hills', 'N48E008': 'hills',
+        'N57W005': 'hills', 'N47E011': 'mountains', 'N27E086': 'high mountains'}
+real = json.load(open(realp))
+from scipy.ndimage import uniform_filter
+land9 = uniform_filter(landall.astype(float), size=9, mode='wrap')
+evw = uniform_filter(ev, size=2, mode='wrap')
+sites = {}
+for tile, cname in WANT.items():
+    j = names.index(cname)
+    pure = uniform_filter((cls == j).astype(float), size=2, mode='wrap')
+    e_ok = (uniform_filter(e, size=3, mode='wrap') >= 300.0) if cname in ('hills', 'mountains', 'high mountains') else np.ones_like(e, bool)
+    mr = real[tile]['mean']
+    cost = np.abs(evw - mr) / max(mr, 200.0) + 2.0 * (1 - pure) + 10.0 * (np.abs(LAT) > 55) + 10.0 * (land9 < 0.99) + 10.0 * (~e_ok)
+    picks = []
+    for idx in np.argsort(cost, axis=None)[:300000]:
+        r, c = np.unravel_index(idx, cost.shape)
+        if all(np.degrees(np.arccos(np.clip(P3[r, c] @ P3[a, b], -1, 1))) >= 8.0 for a, b in picks):
+            picks.append((r, c))
+        if len(picks) == 2:
+            break
+    sites[tile] = [{'lat': float(lat[r] - 0.125), 'lon': float(lon[c] + 0.125), 'mean_model': float(evw[r, c]), 'k': float(k[r, c]), 'carve': float(carve[r, c]),
+                    'purity': float(pure[r, c]), 'arid': float(arid[r, c]), 'H': float(Hd[r, c]), 'P': float(P[r, c]), 'T': float(T[r, c])} for r, c in picks]
+    print(tile, cname, 'real mean %.0f ->' % mr, [(round(s['lat'], 2), round(s['lon'], 2), round(s['mean_model']), 'k %.2f carve %.2f arid %.2f H %.2f P %.0f T %.1f purity %.2f' % (s['k'], s['carve'], s['arid'], s['H'], s['P'], s['T'], s['purity'])) for s in sites[tile]])
+res['sites'] = sites
+json.dump(res, open(f'{out}/classdrivers.json', 'w'), indent=1)
+
+# Maps: derived classes | drivers (rock hardness red-blue, aridity as yellow).
+COL = {'plain': [0.62, 0.78, 0.45], 'rolling plain': [0.80, 0.85, 0.50], 'hills': [0.66, 0.42, 0.25], 'mountains': [0.55, 0.50, 0.48],
+       'high mountains': [0.95, 0.95, 0.95], 'plateau': [0.85, 0.62, 0.35], 'badlands': [0.75, 0.25, 0.20], 'sand sea': [0.98, 0.85, 0.30]}
+sea = np.array([0.12, 0.2, 0.35])
+cimg = np.where(landall[..., None], np.array([COL[n] for n in names])[cls], sea)
+drv = np.stack([0.3 + 0.6 * arid, 0.3 + 0.5 * arid * (1 - Hd) + 0.2 * (1 - arid), 0.3 + 0.6 * Hd * (1 - arid)], -1)
+dimg = np.where(landall[..., None], np.clip(drv, 0, 1), sea)
+img = np.concatenate([cimg, np.ones((H, 8, 3)), dimg], 1)
+Image.fromarray((img * 255).astype(np.uint8)).resize((img.shape[1] // 2, H // 2), Image.LANCZOS).save(f'{out}/derived-classes-and-drivers.png')
+print('done')

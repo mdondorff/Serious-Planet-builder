@@ -3,6 +3,7 @@
 
 pub mod adapter;
 pub mod camera;
+pub mod clipmap;
 pub mod controller;
 pub mod draw;
 pub mod freecam;
@@ -25,9 +26,11 @@ pub mod prefetch;
 pub mod preview;
 pub mod regions;
 pub mod repro;
+pub mod reserve;
 pub mod residency;
 pub mod scalerefs;
 pub mod scenes;
+pub mod shadowview;
 pub mod terrain;
 pub mod terrain_text;
 pub mod upload;
@@ -49,7 +52,7 @@ pub use repro::ReproBundle;
 pub use residency::{residency_set, residency_set_field, ResidencyEntry, ResidencySet};
 pub use terrain::{
     first_empty_morph_interval, flight_path, flight_path_field, level_color, plan_terrain, plan_terrain_cached, plan_terrain_field,
-    plan_terrain_threaded, scripted_views, scripted_views_field, CountBudget, PlanCounts, TerrainDraw, TerrainPlan, TerrainRequest,
-    TerrainView, TileState,
+    plan_terrain_par, plan_terrain_threaded, scripted_views, scripted_views_field, CountBudget, PlanCounts, TerrainDraw, TerrainPlan,
+    TerrainRequest, TerrainView, TileState,
 };
 pub use terrain_text::{BundleWorld, TerrainBundle};

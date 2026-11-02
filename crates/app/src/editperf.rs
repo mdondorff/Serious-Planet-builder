@@ -418,7 +418,7 @@ pub struct Stages {
     pub coalesced: u64,
     pub cancelled: u64,
     pub dropped: u64,
-    /// The horizon maps the edit touched (a run with the horizon jobs and no chunk stage): per map the chunk and the milliseconds from `set_definition` to the
+    /// The horizon maps the edit touched (a run with the horizon jobs): per map the chunk and the milliseconds from `set_definition` to the
     /// first landing after it (`None`: it had not landed when the run stopped waiting). `None` without the jobs.
     pub horizon: Option<Vec<(planet_generators::chunkfield::ChunkKey, Option<f64>, f64)>>,
     /// The horizon bakes after the edit, one line each with the start, the end and the step times (see `horizon_diag`).
@@ -498,6 +498,28 @@ impl CaseRow {
             _ => "no result",
         }
     }
+}
+
+/// The loaded verdicts of the gated rows (BUILD-031, BUILD-032): the preview and the drawn-exact times as unpinned CPU times against their budgets.
+/// Empty in a quiet session. The M6 verdict column of the table stays as it is.
+pub fn loaded_section(rows: &[CaseRow], validity: &planet_perf::gate::Validity) -> String {
+    if validity.load.is_none() {
+        return String::new();
+    }
+    let mut s = String::from(
+        "\nloaded verdicts (BUILD-031; the verdict column above is the quiet rule):\n\n| altitude | stamp radius | reading | ms | budget ms | loaded verdict |\n|---|---|---|---|---|---|\n",
+    );
+    for r in rows.iter().filter(|r| r.gated()) {
+        let mut line = |name: &str, v: Option<f64>, budget: f64| {
+            if let Some(v) = v {
+                let judged = planet_perf::loaded::loaded_verdict(planet_perf::loaded::Kind::Cpu { pinned: false }, v, budget);
+                s += &format!("| {} m | {} | {name} | {v:.1} | {budget} | {} |\n", r.altitude_m, r.radius_label(), judged.text());
+            }
+        };
+        line("preview", r.preview_median(), PREVIEW_BUDGET_MS);
+        line("drawn exact", r.drawn_exact_median(), exact_budget_ms(r.radius_m, r.altitude_m));
+    }
+    s
 }
 
 /// The report table (markdown): one row per case, medians over the repeats, budgets named.
@@ -671,16 +693,61 @@ impl Harness<'_> {
     }
 }
 
+/// The nodes a frame draws in place of the plan's own (a resident tile of another key, or an ancestor standing in) with what keeps each from
+/// becoming exact (edit-stale-diagnostics): the tile, the key the plan wants against the key resident, whether the edit named it for refresh,
+/// and the streamer's state of it. At most 16 lines.
+fn substituted_report(h: &Harness<'_>, world: &WorldTerrain, frame: &planet_frame::managed::ManagedFrame, refreshed: &[TileId]) -> String {
+    use planet_frame::terrain::TileState;
+    let Ok(field) = world.field() else { return String::new() };
+    let streamer = h.rig.managed.manager().streamer();
+    let resident = h.rig.managed.resident();
+    let cells = frame.pipeline.draw.plan.cells;
+    let lines: Vec<String> = frame
+        .pipeline
+        .draw
+        .plan
+        .nodes
+        .iter()
+        .filter(|n| {
+            matches!(n.state, TileState::Stale | TileState::Previewed | TileState::StandIn)
+                && !(n.state == TileState::Previewed && n.transient_only)
+        })
+        .take(16)
+        .map(|n| {
+            let wanted = planet_generators::mesh::mesh_key_field(field.as_ref(), &TangentWarp, n.tile, cells, world.radius_m());
+            format!(
+                "
+  {:?} face {} level {} ({}, {}): wanted key {wanted:#018x}, resident {}, in the edit's refresh list {}, streamer {:?}",
+                n.state,
+                n.tile.face().0,
+                n.tile.level(),
+                n.tile.x(),
+                n.tile.y(),
+                resident.get(&n.tile).map_or("none".to_string(), |r| format!("{:#018x}", r.mesh_key)),
+                refreshed.contains(&n.tile),
+                streamer.tile_report(n.tile)
+            )
+        })
+        .collect();
+    if lines.is_empty() {
+        String::new()
+    } else {
+        format!("; substituted nodes:{}", lines.concat())
+    }
+}
+
 /// The resident tiles the stamp's reach touches: the edit's find as the editor makes it (`planet_editor::feed::edited_tiles`), what
 /// `ManagedLoop::edit` is given.
-fn found_tiles(stamp: &ItemSpec, resident: &[TileId], radius_m: f64) -> Vec<TileId> {
+fn found_tiles(def: &WorldDefinition, stamp: &ItemSpec, resident: &[TileId], radius_m: f64) -> Vec<TileId> {
     let affected = [planet_editor::commands::Affected {
         body: BodyId::PLANET,
         dir: stamp.dir,
         reach_m: stamp.reach_m,
         brush: stamp.stamp.clone().map(std::sync::Arc::new),
     }];
-    planet_editor::feed::edited_tiles(&affected, BodyId::PLANET, resident, radius_m, &TangentWarp)
+    planet_editor::feed::edited_tiles_reading(&affected, BodyId::PLANET, resident, radius_m, &TangentWarp, &|t| {
+        crate::editwin::reads_summary(def, BodyId::PLANET, t)
+    })
 }
 
 /// Items of `layer` near the stamp, for the preview delta (the whole body would be the same list: only stamps that differ count).
@@ -826,7 +893,7 @@ fn run_once(
     announce_item_change(h, world, &before_def, old_revision);
     let resident: Vec<TileId> = h.rig.managed.resident().keys().copied().collect();
     let found = Instant::now();
-    let tiles = found_tiles(stamp, &resident, world.radius_m());
+    let tiles = found_tiles(&edited, stamp, &resident, world.radius_m());
     out.stages.find_ms = ms(found);
     out.levels = level_rows(&tiles, &h.drawn, &req.lod, stamp.max_delta_m);
     out.refreshed = h.rig.managed.edit(&tiles);
@@ -896,18 +963,22 @@ fn run_once(
         }
         waiting_for_exact = true;
         if sampler_started.elapsed() > limit {
+            let streamer = h.rig.managed.manager().streamer();
             return Err(format!(
-                "the edit did not become exact in {} s: kind {:?}, substituted {}, blank {}, previewed {}, unfinished jobs {}, plan worker busy {}, pending {}, refreshed {} of {} resident",
+                "the edit did not become exact in {} s: kind {:?}, substituted {}, blank {}, previewed {}, unfinished jobs {}, plan worker busy {}, pending {}, refreshed {} of {} resident, held refreshes {}, queued draw/residency/prefetch {:?}{}",
                 limit.as_secs(),
                 frame.pipeline.draw.kind,
                 frame.pipeline.draw.substituted,
                 frame.pipeline.draw.blank,
                 previewed,
-                h.rig.managed.manager().streamer().unfinished_jobs(),
+                streamer.unfinished_jobs(),
                 h.rig.managed.pipeline().worker().busy(),
                 h.rig.managed.pending().len(),
                 out.refreshed,
-                out.resident
+                out.resident,
+                streamer.held_refreshes(),
+                streamer.queued_by_class(),
+                substituted_report(h, world, &frame, &tiles)
             ));
         }
         std::thread::sleep(Duration::from_millis(1));
@@ -1060,7 +1131,7 @@ fn horizon_diag_section(rows: &[CaseRow]) -> String {
     s
 }
 
-/// The table of the horizon side of every case (a run with the horizon jobs and no chunk stage): per case one row per wanted map the edit touched
+/// The table of the horizon side of every case (a run with the horizon jobs): per case one row per wanted map the edit touched
 /// (the first run of the case) and the milliseconds from the edit to the map's landing. Reported, not judged (M8 criterion 6 amended 2026-10-29, TEST-065).
 pub fn horizon_table(rows: &[CaseRow]) -> String {
     let mut s = String::from("| altitude | stamp radius | map (face, x, y) | distance m | edit to map ms |\n|---|---|---|---|---|\n");
@@ -1186,7 +1257,7 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
         planet_perf::check_reference_adapter(&crate::facts(ctx)).map_err(|r| r.to_string())?;
         crate::readiness_gate(o, ctx, out)?;
     }
-    // The horizon jobs bake the maps from the base terrain (STRM-064, TEST-065); the chunk stage is removed.
+    // The horizon jobs bake the maps from the base terrain (STRM-064, TEST-065).
     let with_horizon = !smoke && !o.no_horizon_jobs && o.store.is_some() && !o.allow_memory_bake;
     if with_horizon {
         if let Some(n) = o.horizon_threads {
@@ -1304,7 +1375,7 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
                 world.set_definition(Arc::new(with_base))?;
                 // The tiles the earlier state touches are refreshed, as an edit's are, so that the frames settle on the world as it is.
                 let resident: Vec<TileId> = h.rig.managed.resident().keys().copied().collect();
-                h.rig.managed.edit(&found_tiles(base, &resident, radius_m));
+                h.rig.managed.edit(&found_tiles(&world.definition(), base, &resident, radius_m));
             }
             // A smoke run needs the frames to be exact once, not a long calm: every frame is slow on the software adapter.
             let settle = h.settle(&req, if smoke { 3 } else { 20 })?;
@@ -1323,7 +1394,7 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
             world.set_definition(original)?;
             if let Some(base) = &case.base {
                 let resident: Vec<TileId> = h.rig.managed.resident().keys().copied().collect();
-                h.rig.managed.edit(&found_tiles(base, &resident, radius_m));
+                h.rig.managed.edit(&found_tiles(&world.definition(), base, &resident, radius_m));
             }
             rows.push(CaseRow { kind: case.kind, altitude_m: altitude, radius_m: case.size_m, runs });
             focus = Some((req, case.centre));
@@ -1364,7 +1435,13 @@ the refresh frame by frame (first run of each case; rows where a count moved or 
     )
     .map_err(err)?;
     if let Some(dir) = &o.out {
-        let path = write_report(dir, &format!("{table}\n{stages}\n{levels}\n{horizon}\n{cost}"))?;
+        let validity = planet_perf::run_validity();
+        let text = format!(
+            "{}{table}{}\n{stages}\n{levels}\n{horizon}\n{cost}",
+            planet_perf::mode_lines(&validity),
+            loaded_section(&rows, &validity)
+        );
+        let path = write_report(dir, &text)?;
         writeln!(out, "table written to {}", path.display()).map_err(err)?;
     }
     if smoke && rows.iter().any(|r| r.runs.iter().any(|x| x.exact_ms.is_none())) {
@@ -1581,7 +1658,7 @@ pub fn pair_frames(
         world.set_definition(Arc::clone(&edited))?;
         announce_item_change(&mut h, &world, &before_def, old_revision);
         let resident: Vec<TileId> = h.rig.managed.resident().keys().copied().collect();
-        let tiles = found_tiles(&case.spec, &resident, planet_m);
+        let tiles = found_tiles(&edited, &case.spec, &resident, planet_m);
         h.rig.managed.edit(&tiles);
         h.rig.managed.set_preview_list(case_preview_list(&before_def, &edited, &case.spec, req.camera.position.0, planet_m));
         let preview = frame_read(&mut h, &req)?;
@@ -1746,6 +1823,36 @@ mod tests {
             assert!(!stamps.is_empty(), "the {radius} m brush is previewed: the chain of its stroke");
             assert!(stamps.len() <= planet_frame::preview::MAX_PREVIEW_STAMPS, "{} stamps over the cap", stamps.len());
         }
+    }
+
+    // spec: BUILD-032
+    #[test]
+    fn the_edit_report_names_its_mode_and_a_loaded_one_judges_the_gated_rows() {
+        let run = CaseRun {
+            preview_ms: Some(10.0),
+            stages: Stages { drawn_exact_ms: Some(100.0), ..Default::default() },
+            exact_ms: Some(100.0),
+            ..Default::default()
+        };
+        let stamp = CaseRow { kind: CaseKind::Stamp, altitude_m: 200.0, radius_m: 150.0, runs: vec![run.clone()] };
+        let region = CaseRow { kind: CaseKind::Region, altitude_m: 200.0, radius_m: 5000.0, runs: vec![run] };
+        let quiet = planet_perf::gate::Validity::default();
+        assert_eq!(planet_perf::mode_lines(&quiet), "mode: quiet\n");
+        assert_eq!(loaded_section(std::slice::from_ref(&stamp), &quiet), "", "a quiet report has no loaded section");
+        let load = planet_perf::gate::LoadRecord {
+            cpu_pct: Some(30.0),
+            cpu_perf_pct: Some(90.0),
+            gpu_util_pct: None,
+            gpu_temp_c: None,
+            processes: Some(vec![]),
+        };
+        let loaded = planet_perf::gate::Validity { reasons: vec![], load: Some(load) };
+        assert!(planet_perf::mode_lines(&loaded).starts_with("mode: loaded\nload: "));
+        let section = loaded_section(&[stamp, region], &loaded);
+        // preview 10 ms of 16 is 37.5 % under (loaded pass at 30 %); exact 100 ms of 300 is far under; the 5 km region is only recorded.
+        assert!(section.contains("| 200 m | 150 m | preview | 10.0 | 16 | loaded pass |"), "{section}");
+        assert!(section.contains("| drawn exact | 100.0 | 300 | loaded pass |"), "{section}");
+        assert!(!section.contains("5000"), "{section}");
     }
 
     // spec: TEST-042

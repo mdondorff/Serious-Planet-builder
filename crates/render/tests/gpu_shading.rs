@@ -465,6 +465,51 @@ fn the_driver_views_show_the_drivers_of_the_tiles_driver_block() {
     assert_ne!(lit_hdr, soil_hdr);
 }
 
+// spec: GEN-073
+#[test]
+fn the_default_look_draws_the_same_pixels_whatever_the_driver_block_holds() {
+    use planet_generators::drivers::{pack_driver_word, DRIVER_TEXELS};
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    // A uniform block far from neutral, and a ramp whose soil, moisture and insolation run across the tile.
+    let uniform = [pack_driver_word([180, 100, 200], 128); DRIVER_TEXELS];
+    let mut ramp = [0u32; DRIVER_TEXELS];
+    for b in 0..9 {
+        for a in 0..9 {
+            ramp[b * 9 + a] = pack_driver_word([(a * 28) as u8, (b * 28) as u8, ((a + b) * 14) as u8], 60);
+        }
+    }
+    // The orbit-to-region view without ground detail, and the ground at 1 m with it (the material weights and the gloss run there).
+    for (index, strength) in [(3usize, 0.0), (6, 1.0)] {
+        let (p, _) = plan(index);
+        let draw = |words: Option<[u32; DRIVER_TEXELS]>| -> Vec<Vec<[u32; 4]>> {
+            let mut r = TerrainRenderer::with_pools(&ctx, SIZE, CELLS, compact_pool());
+            r.enable_lit(&ctx);
+            for n in &p.nodes {
+                if r.slot_of(n.tile).is_none() {
+                    let mut tile = compact_tile_field(&Reference(1), &TangentWarp, n.tile, CELLS, R);
+                    if let Some(w) = words {
+                        tile.driver_words = w;
+                    }
+                    r.upload_tile(&ctx, &tile).unwrap();
+                }
+            }
+            // Bit for bit: the pixels as their f32 bits (a sign of zero would count).
+            [ShadeView::Lit, ShadeView::Albedo]
+                .map(|v| hdr_of(&mut r, &ctx, &p, detail_plan(v, strength)).iter().map(|px| px.map(f32::to_bits)).collect())
+                .to_vec()
+        };
+        let neutral = draw(None);
+        let covered = neutral[0].iter().filter(|px| f32::from_bits(px[3]) > 0.0).count();
+        assert!(covered > 300, "view {index}: {covered} covered pixels");
+        for (name, words) in [("uniform", uniform), ("ramp", ramp)] {
+            assert!(
+                draw(Some(words)) == neutral,
+                "view {index}, detail {strength}: the {name} driver block changed the default look's pixels"
+            );
+        }
+    }
+}
+
 // spec: GEN-074
 #[test]
 fn a_ramp_in_the_driver_block_shows_in_the_views_between_the_cpu_mirrors_extremes() {

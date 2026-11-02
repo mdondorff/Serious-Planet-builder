@@ -1,0 +1,5 @@
+#!/bin/bash
+cd C:/DEV/Serious-Planet-Builder/.claude/worktrees/sonnet-spikes-36fc88
+echo "=== s75 $(date +%H:%M:%S) cpu $(powershell -NoProfile -Command "(Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average")%"
+S75_DIR=target/s75/r cmd //c start "" //b //wait //belownormal target/release/examples/terrain_score.exe 2>&1
+echo "=== done $(date +%H:%M:%S)"

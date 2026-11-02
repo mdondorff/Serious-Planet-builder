@@ -1,0 +1,21 @@
+=== tau 4
+S82PLAN himalaya today 200 m | 2002 nodes, 0 capped, deepest 19 | 0.1 s 
+S82PLAN himalaya today 2000 m | 1457 nodes, 0 capped, deepest 15 | 0.1 s 
+S82PLAN himalaya steep-nohb 200 m | 1408 nodes, 108 capped, deepest 14 | 0.4 s 
+S82PLAN himalaya steep-nohb 2000 m | 1407 nodes, 101 capped, deepest 14 | 0.3 s 
+S82PLAN himalaya steep 200 m | 1385 nodes, 128 capped, deepest 14 | 0.4 s 
+S82PLAN himalaya steep 2000 m | 1369 nodes, 117 capped, deepest 14 | 0.3 s 
+=== tau 3
+S82PLAN himalaya today 200 m | 3327 nodes, 0 capped, deepest 19 | 0.1 s 
+S82PLAN himalaya today 2000 m | 2406 nodes, 0 capped, deepest 16 | 0.1 s 
+S82PLAN himalaya steep-nohb 200 m | 3722 nodes, 106 capped, deepest 17 | 0.6 s 
+S82PLAN himalaya steep-nohb 2000 m | 3073 nodes, 0 capped, deepest 16 | 0.5 s 
+S82PLAN himalaya steep 200 m | 3287 nodes, 291 capped, deepest 17 | 0.6 s 
+S82PLAN himalaya steep 2000 m | 2993 nodes, 102 capped, deepest 16 | 0.5 s 
+=== tau 2
+S82PLAN himalaya today 200 m | 6888 nodes, 0 capped, deepest 20 | 0.8 s 
+S82PLAN himalaya today 2000 m | 5088 nodes, 0 capped, deepest 16 | 0.6 s 
+S82PLAN himalaya steep-nohb 200 m | 8664 nodes, 0 capped, deepest 20 | 1.1 s 
+S82PLAN himalaya steep-nohb 2000 m | 6163 nodes, 0 capped, deepest 17 | 0.9 s 
+S82PLAN himalaya steep 200 m | 9295 nodes, 0 capped, deepest 20 | 1.2 s 
+S82PLAN himalaya steep 2000 m | 6481 nodes, 0 capped, deepest 17 | 1.0 s 

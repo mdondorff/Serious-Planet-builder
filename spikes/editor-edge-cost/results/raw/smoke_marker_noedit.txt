@@ -1,0 +1,141 @@
+planet editor: smoke test (height field cpu-erosion-v1 over a 16384-cell bake)
+view: the lit path with the atmosphere (the look's sun, adaptive exposure); L switches to the debug path
+frame phases over 4 frames (mean / longest ms):
+  render submit: 1714.26 / 4014.9
+  title, exposure readback: 717.36 / 2840.6
+  present (swapchain, tone map, egui paint): 1.63 / 3.5
+  editor panels (egui frame): 1.25 / 4.4
+  plan and residency (begin_frame): 0.67 / 1.1
+  wait for the GPU (frames in flight) and the lit plan with the water: 0.11 / 0.3
+  camera, ground heights and the globe overview: 0.02 / 0.1
+  the rest of the frame: 0.02 / 0.0
+  plan refusals, sweep, repro files and the preview end: 0.00 / 0.0
+  input, commands and the smoke script: 0.00 / 0.0
+  coupled lens and plan refusals: 0.00 / 0.0
+  horizon frame (frame_step): 0.00 / 0.0
+  edit republish (set_definition, field, tile refresh): 0.00 / 0.0
+  scale references: 0.00 / 0.0
+  field rebuild (a new lens): 0.00 / 0.0
+  editor update (picks, outlines, lists): 0.00 / 0.0
+  horizon frame and upload: 0.00 / 0.0
+  regions overlay: 0.00 / 0.0
+frame phases over 18 frames (mean / longest ms):
+  render submit: 645.11 / 4014.9
+  title, exposure readback: 272.88 / 2840.6
+  input, commands and the smoke script: 118.03 / 2025.5
+  wait for the GPU (frames in flight) and the lit plan with the water: 52.63 / 611.4
+  present (swapchain, tone map, egui paint): 14.06 / 165.9
+  plan and residency (begin_frame): 2.04 / 4.3
+  editor panels (egui frame): 0.46 / 4.4
+  the rest of the frame: 0.02 / 0.1
+  camera, ground heights and the globe overview: 0.01 / 0.1
+  plan refusals, sweep, repro files and the preview end: 0.00 / 0.0
+  coupled lens and plan refusals: 0.00 / 0.0
+  horizon frame (frame_step): 0.00 / 0.0
+  scale references: 0.00 / 0.0
+  edit republish (set_definition, field, tile refresh): 0.00 / 0.0
+  horizon frame and upload: 0.00 / 0.0
+  field rebuild (a new lens): 0.00 / 0.0
+  editor update (picks, outlines, lists): 0.00 / 0.0
+  regions overlay: 0.00 / 0.0
+frame phases over 24 frames (mean / longest ms):
+  render submit: 934.26 / 4014.9
+  title, exposure readback: 207.26 / 2840.6
+  input, commands and the smoke script: 88.52 / 2025.5
+  wait for the GPU (frames in flight) and the lit plan with the water: 39.49 / 611.4
+  present (swapchain, tone map, egui paint): 10.74 / 165.9
+  plan and residency (begin_frame): 2.16 / 4.3
+  editor panels (egui frame): 0.41 / 4.4
+  the rest of the frame: 0.02 / 0.1
+  camera, ground heights and the globe overview: 0.01 / 0.1
+  plan refusals, sweep, repro files and the preview end: 0.00 / 0.0
+  coupled lens and plan refusals: 0.00 / 0.0
+  horizon frame (frame_step): 0.00 / 0.0
+  scale references: 0.00 / 0.0
+  edit republish (set_definition, field, tile refresh): 0.00 / 0.0
+  horizon frame and upload: 0.00 / 0.0
+  field rebuild (a new lens): 0.00 / 0.0
+  editor update (picks, outlines, lists): 0.00 / 0.0
+  regions overlay: 0.00 / 0.0
+frame phases over 29 frames (mean / longest ms):
+  render submit: 1127.95 / 4014.9
+  title, exposure readback: 172.00 / 2840.6
+  input, commands and the smoke script: 73.26 / 2025.5
+  wait for the GPU (frames in flight) and the lit plan with the water: 32.69 / 611.4
+  present (swapchain, tone map, egui paint): 9.03 / 165.9
+  plan and residency (begin_frame): 3.06 / 8.6
+  editor panels (egui frame): 0.39 / 4.4
+  the rest of the frame: 0.02 / 0.1
+  camera, ground heights and the globe overview: 0.01 / 0.1
+  plan refusals, sweep, repro files and the preview end: 0.01 / 0.0
+  coupled lens and plan refusals: 0.00 / 0.0
+  horizon frame (frame_step): 0.00 / 0.0
+  scale references: 0.00 / 0.0
+  edit republish (set_definition, field, tile refresh): 0.00 / 0.0
+  horizon frame and upload: 0.00 / 0.0
+  field rebuild (a new lens): 0.00 / 0.0
+  editor update (picks, outlines, lists): 0.00 / 0.0
+  regions overlay: 0.00 / 0.0
+frame phases over 38 frames (mean / longest ms):
+  render submit: 1068.48 / 4014.9
+  title, exposure readback: 178.27 / 2840.6
+  input, commands and the smoke script: 55.91 / 2025.5
+  wait for the GPU (frames in flight) and the lit plan with the water: 24.97 / 611.4
+  present (swapchain, tone map, egui paint): 7.49 / 165.9
+  plan and residency (begin_frame): 3.72 / 9.1
+  editor panels (egui frame): 0.43 / 4.4
+  the rest of the frame: 0.02 / 0.1
+  camera, ground heights and the globe overview: 0.01 / 0.1
+  plan refusals, sweep, repro files and the preview end: 0.01 / 0.0
+  coupled lens and plan refusals: 0.00 / 0.0
+  horizon frame (frame_step): 0.00 / 0.0
+  scale references: 0.00 / 0.0
+  edit republish (set_definition, field, tile refresh): 0.00 / 0.0
+  regions overlay: 0.00 / 0.0
+  horizon frame and upload: 0.00 / 0.0
+  field rebuild (a new lens): 0.00 / 0.0
+  editor update (picks, outlines, lists): 0.00 / 0.0
+frame phases over 42 frames (mean / longest ms):
+  render submit: 1226.60 / 4014.9
+  title, exposure readback: 161.85 / 2840.6
+  wait for the GPU (frames in flight) and the lit plan with the water: 90.03 / 2832.2
+  input, commands and the smoke script: 50.58 / 2025.5
+  present (swapchain, tone map, egui paint): 6.87 / 165.9
+  plan and residency (begin_frame): 3.69 / 9.1
+  editor panels (egui frame): 0.43 / 4.4
+  the rest of the frame: 0.02 / 0.1
+  camera, ground heights and the globe overview: 0.01 / 0.1
+  plan refusals, sweep, repro files and the preview end: 0.01 / 0.0
+  coupled lens and plan refusals: 0.00 / 0.0
+  horizon frame (frame_step): 0.00 / 0.0
+  scale references: 0.00 / 0.0
+  edit republish (set_definition, field, tile refresh): 0.00 / 0.0
+  regions overlay: 0.00 / 0.0
+  field rebuild (a new lens): 0.00 / 0.0
+  horizon frame and upload: 0.00 / 0.0
+  editor update (picks, outlines, lists): 0.00 / 0.0
+frame phases over 46 frames (mean / longest ms):
+  render submit: 1395.15 / 4014.9
+  title, exposure readback: 148.60 / 2840.6
+  wait for the GPU (frames in flight) and the lit plan with the water: 82.21 / 2832.2
+  input, commands and the smoke script: 46.19 / 2025.5
+  present (swapchain, tone map, egui paint): 6.33 / 165.9
+  plan and residency (begin_frame): 3.49 / 9.1
+  editor panels (egui frame): 0.42 / 4.4
+  the rest of the frame: 0.02 / 0.1
+  camera, ground heights and the globe overview: 0.01 / 0.1
+  plan refusals, sweep, repro files and the preview end: 0.01 / 0.0
+  coupled lens and plan refusals: 0.00 / 0.0
+  horizon frame (frame_step): 0.00 / 0.0
+  scale references: 0.00 / 0.0
+  edit republish (set_definition, field, tile refresh): 0.00 / 0.0
+  regions overlay: 0.00 / 0.0
+  field rebuild (a new lens): 0.00 / 0.0
+  horizon frame and upload: 0.00 / 0.0
+  editor update (picks, outlines, lists): 0.00 / 0.0
+adapter: Dx12 Microsoft Basic Render Driver (Cpu), key dx12-microsoft-basic-render-driver
+planet editor [smoke ok]: 48 frames drawn (44 lit, 44 with the atmosphere, 21 with water, 4 debug, 9 with an overlay (3 the mesh), 5 coarse LOD, 0 refused, 2 stale-tile overlay, 4 editing light), 48 presented (44 lit, 4 debug), 37 exposure reading(s), 1 view change(s), present mode Fifo, adapter: Dx12 Microsoft Basic Render Driver (Cpu), key dx12-microsoft-basic-render-driver
+  last title: planet | 0 fps | cpu 11.70 ms | gpu 2996.85 ms | vsync on (Fifo) | lit + atmosphere | EV 16.0 (adapted) | free camera | alt 3259.1 m | loading - bake 1536/1536, prefill 1920/1920, view 4% (lag 1.45) | keys - | pointer free | no horizon shadows (open a store with a coupled run) | detail natural | store C:/DEV/SeriousPlanetData/global16384
+  ui: 48 frames with the editor UI, 0.382 ms mean CPU per frame (egui run and tessellation), pointer events to the UI 0 and to the world 0
+  globe: 8 frames of the overview, up to 1 markers shown, 1 flights started, 1 landings
+  horizon step: frames 0, horizon 0 frames, 0 maps landed, plan-cache announcements 0

@@ -110,3 +110,35 @@ Scope: project (real-GPU window tests, the real-store gate, acceptance)
 - While the Windows session is locked or in modern standby, present stalls 1.3 to 2.7 s or the device is lost; unlocked, the same test passes in 26 s. A remote unlock (Chrome Remote Desktop) counts.
 - Headless scenes, the software adapter and CI are unaffected. Window checks report NOT RUN when locked (TEST-073).
 
+
+## 2026-11-01 The clipmap gather needs one atomic, against ADR 0085 point 9
+Scope: render (REND-047, REND-053; ADR 0085 point 9)
+- Point 9 says layer 1 uses no atomics. Overlapping blocks written by unordered dispatches raced on the software adapter (an incremental gather differed from a full one at random). The gather now clears, claims (`atomicMax` of the job index) and writes, so the finest block wins in any dispatch order.
+- The result of an integer maximum does not depend on order, which is what point 9 protects. REND-053 now says that (the march, upsample and temporal passes stay atomic-free; a tier A scan checks the shaders). The ADR wording needs a one-line amendment (ADR 0078): "no atomics except the owner pass's integer `atomicMax`".
+- Obsolete when the gather resolves overlaps without an atomic (for example one thread per texel scanning the level's blocks, or a spatial index of winners).
+
+## 2026-11-01 nextest runs each test in its own process: an in-memory fixture shares nothing
+Scope: tests (nextest; SPIKE-84 fix 2)
+- SPIKE-84 proposed a `OnceLock` fixture to build the `concurrent_source` store once per binary. Under nextest every test is a process of its own, so a static is built once per test, as before.
+- A fixture worth sharing lives on disk (`CARGO_TARGET_TMPDIR`), named by the test binary, built into a private directory and renamed into place (`crates/cache/tests/support/concurrent_source.rs`).
+- Obsolete if the tests move to a runner that shares one process per binary.
+
+## 2026-11-02 A belt narrower than about 190 km cannot meet GEN-097's step limit of 2.0
+Scope: generators (GEN-094, GEN-097; `classes.rs`)
+- The class lattice has a cell of about 39 km and `k` runs from 1 to 7.5, so a step of at most 2.0 needs the weights to change over about 130 km (190 km for a smoothstep). Gaussian belts of 130 km half-width gave steps of 6.5; tent belts of 220 to 500 km and gates over 250 km give 4.9, with 0.22 % of steps over 2.0.
+- A pair of plates must contribute a term that does not change when the two plates swap (distance, convergence and the continental difference are symmetric), and the third plate's weight must fall to 0 where it trades places with the fourth; otherwise the mask jumps at plate bisectors and triple junctions (the straight edges of iteration 0).
+- Obsolete when the limit is restated (a feathering rule, a smaller `k` range) or the lattice is finer.
+
+## 2026-11-01 An edit re-keys coarse tiles far beyond its reach
+Scope: project (editor refresh find; WDEF-008, STRM-070, ADR 0045 point 7)
+- A coarse tile (levels 0-5 at Earth's radius) that holds an item reads its region summary over its cells and `margin_rings` rings of cells, sized for the 40 km maximum reach plus whole cells: about 13 rings (450-500 km) at level 5, the whole body at levels 0-2. Any edit anchored there re-keys it, whatever its own reach.
+- The editor's find named a tile only when the edit's reach touched it, so such tiles were never marked stale and stayed on their old version (the `gpu_edit_perf` flake: 8 substituted nodes, nothing pending). The find now walks `neighbors8` from the anchor cells and compares with the rings (edit-stale-diagnostics).
+- ADR 0045 point 7 meant about one coarse tile per level per edit; today's margins re-key more (a Tracked architect item).
+- Obsolete when the summary margins are sized from the reaches present, or coarse keys stop reading margins.
+
+## 2026-11-02 A Git Bash loop survives TaskStop
+Scope: project (agent tooling; perf windows)
+What happened: SPIKE-90 window 2 ran its runs from a Git Bash script started as a background command. TaskStop at 09:51 reported success, but the `bash.exe` running the script kept launching perf runs until its process was stopped at 09:58, so the planned cooling pause had no idle.
+Assumption it changes: that TaskStop ends a background command's whole process tree (perf-window practice; the quiet-machine rule of CLAUDE.md).
+Proposed follow-up: after TaskStop on a script runner, find it by its command line (`Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*<script>*' }`) and `Stop-Process` it; check `tasklist` for `planet.exe`/`xtask.exe` before declaring a pause. A run already started is better left to finish than killed mid-measurement.
+Obsolete when: TaskStop ends Git Bash children, or perf runners become an xtask command (no shell loop).

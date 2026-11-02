@@ -1,0 +1,1 @@
+- 2026-11-01 rtx-known-answers: the RTX known-answer hashes re-recorded under MESH_VERSION 10 on driver 621.01, commented with date and adapter (REND-016, ATMO-004)

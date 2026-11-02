@@ -1,0 +1,1 @@
+- 2026-11-02 window-resize-target: the 3D target follows a window resize (TerrainRenderer::resize, a 150 ms settle, the camera's aspect); VIEW-006 modified; tier C gpu_resize and tier A resize_due (VIEW-006)

@@ -39,4 +39,8 @@ Source: opus-planner (2026-10-27, window 8), ADR 0083 point 2, ADR 0085
 
 ### Requirement: STRM-064 The horizon maps are baked without a chunk stage
 **Reason**: ADR 0085 point 7.
-**Migration**: PR 7; the open change `m8-horizon-share` (STRM-061) is archived without syncing.
+**Migration**: PR 7.
+
+### Requirement: STRM-061 A horizon bake stops when an edit makes it stale
+**Reason**: ADR 0085 point 7 (synced from `m8-horizon-share` at its archive, 2026-11-01).
+**Migration**: PR 7.

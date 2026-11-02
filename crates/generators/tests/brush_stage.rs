@@ -222,8 +222,8 @@ fn the_height_is_a_function_of_the_direction_alone_whatever_cap_the_items_came_f
             dirs.push(unit(19.995 + 0.0008 * f64::from(i), 29.995 + 0.0013 * f64::from(j)));
         }
     }
-    let one = stage.heights_threaded_until(&dirs, &|| false, 1);
-    let four = stage.heights_threaded_until(&dirs, &|| false, 4);
+    let one = stage.heights_threaded_until(&dirs, &|| false, &1);
+    let four = stage.heights_threaded_until(&dirs, &|| false, &4);
     assert_eq!(
         one.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
         four.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),

@@ -23,20 +23,25 @@ pub const REF_BYTES: u64 = 16;
 pub fn compact_terrain_shader(cells: u32) -> String {
     let (head, tail) = (SHADER_HEAD, SHADER_TAIL);
     assert!(head.contains("@group(0) @binding(1) var<storage, read> nodes: array<Node>;"), "product node binding changed");
-    let vertex = COMPACT_VERTEX
+    let access = slot_access_wgsl(cells);
+    format!("{head}{access}{PREVIEW_STAMPS}{COMPACT_VERTEX}{tail}")
+}
+
+/// The slot reader (block binding, header, texels, the biquadratic base) for tiles of `cells`: shared by the vertex stage and the clipmap
+/// gather, so the two read a slot the same way.
+pub(crate) fn slot_access_wgsl(cells: u32) -> String {
+    SLOT_ACCESS
         .replace("{CELLS}", &cells.to_string())
         .replace("{CLIMATE_WORD}", &(SLOT_CLIMATE_OFFSET / 4).to_string())
         .replace("{DRIVER_WORD}", &(SLOT_DRIVER_OFFSET / 4).to_string())
         .replace("{TEXEL_WORD}", &(SLOT_TEXEL_OFFSET / 4).to_string())
-        .replace("{NORMAL_SCALE}", &format!("{NORMAL_SCALE:?}"));
-    format!("{head}{vertex}{tail}")
+        .replace("{NORMAL_SCALE}", &format!("{NORMAL_SCALE:?}"))
 }
 
-const COMPACT_VERTEX: &str = r#"
+pub(crate) const SLOT_ACCESS: &str = r#"
 // Compact tiles (REND-016, GEN-025). Group 1: the per-frame tile reference of each node (first word of its slot in the block, reserved, slot
 // index, reserved). Group 2: the block, read as words: the slot's header (nine control points as 27 f32, hr_min, hr_step,
 // h_origin, skirt depth, the flags word), the climate block (81 words), the driver block (81 words) and the texels (two words each).
-@group(1) @binding(0) var<storage, read> tile_refs: array<vec4<u32>>;
 @group(2) @binding(0) var<storage, read> block: array<u32>;
 
 const CELLS: i32 = {CELLS};
@@ -153,7 +158,9 @@ fn oct_decode(e: vec2<f32>) -> vec3<f32> {
     return normalize(n);
 }
 
-// The edit preview (REND-033): the profiles of GEN-026 at x = distance / reach, kind 1 hill, 2 crater, 3 plateau, `a` the amount (the plateau's
+"#;
+
+pub(crate) const PREVIEW_STAMPS: &str = r#"// The edit preview (REND-033): the profiles of GEN-026 at x = distance / reach, kind 1 hill, 2 crater, 3 plateau, `a` the amount (the plateau's
 // target is absolute), `m` the bound, `h` the running height above the reference sphere.
 fn smooth01(t: f32) -> f32 {
     return t * t * (3.0 - 2.0 * t);
@@ -218,6 +225,9 @@ fn preview_bump(p_rel: vec3<f32>, up: vec3<f32>, h0: f32, k0: u32) -> Bump {
     return Bump(total, grad, flat_w);
 }
 
+"#;
+
+const COMPACT_VERTEX: &str = r#"@group(1) @binding(0) var<storage, read> tile_refs: array<vec4<u32>>;
 // A lattice vertex placed with the preview's delta along its own radial up (the position and, in w, the height with the delta), so the
 // parent-grid target built from displaced neighbours is the displaced parent grid.
 fn preview_place(o_rel: vec3<f32>, nup: vec4<f32>, i: i32, j: i32, hr: f32, k0: u32) -> vec4<f32> {

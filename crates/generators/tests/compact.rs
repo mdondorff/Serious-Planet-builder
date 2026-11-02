@@ -476,3 +476,20 @@ fn a_ramp_tile_of_about_8_km_reconstructs_within_a_millimetre() {
     eprintln!("ramp tile: relief {:.0} m, reconstruction error {worst:.2e} m", c.relief_m);
     assert!(worst <= 1.0e-3, "reconstruction error {worst} m at {} m of relief", c.relief_m);
 }
+
+// spec: GEN-074
+#[test]
+fn every_texel_of_the_driver_block_holds_the_neutral_codes_of_its_latitude() {
+    use planet_generators::drivers::{encode_soil, neutral_codes, unpack_driver_word, DriverParams, NeutralInsolation};
+    let params = DriverParams::default();
+    let insolation = NeutralInsolation::new();
+    let far = id(4, 15, 16 * 300, 16 * 300);
+    let tile = compact_tile_field(&Reference(3), &TangentWarp, far, 32, R);
+    for (k, w) in tile.driver_words.iter().enumerate() {
+        let (codes, top) = unpack_driver_word(*w);
+        let dir = far.sample_direction(&TangentWarp, 8, (k % 9) as u32, (k / 9) as u32);
+        let neutral = neutral_codes(libm::asin(dir.z), &params, &insolation);
+        assert_eq!((codes, top), (neutral, neutral[2]), "texel {k}");
+        assert_eq!(codes[0], encode_soil(1.0, &params));
+    }
+}

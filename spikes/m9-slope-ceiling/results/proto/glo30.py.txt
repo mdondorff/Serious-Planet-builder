@@ -1,0 +1,33 @@
+"""Decode a GLO-30 COG tile (deflate + floating point predictor) with tifffile (offsets only), zlib and numpy. No imagecodecs."""
+import zlib, numpy as np, tifffile
+
+def read_tile(path):
+    with tifffile.TiffFile(path) as t:
+        p = t.pages[0]
+        h, w = p.shape
+        bo = t.byteorder  # '<' or '>'
+        tw, th = p.tilewidth, p.tilelength
+        offs, cnts = p.dataoffsets, p.databytecounts
+        out = np.zeros((h, w), np.float32)
+        ntx = (w + tw - 1) // tw
+        fh = t.filehandle
+        for i, (o, c) in enumerate(zip(offs, cnts)):
+            fh.seek(o); raw = zlib.decompress(fh.read(c))
+            a = np.frombuffer(raw, np.uint8).reshape(th, tw * 4).copy()
+            a = np.cumsum(a, axis=1, dtype=np.uint64).astype(np.uint8)  # undo horizontal differencing on bytes
+            planes = a.reshape(th, 4, tw)  # byte planes, most significant first
+            be = np.stack([planes[:, 0], planes[:, 1], planes[:, 2], planes[:, 3]], axis=2).reshape(th, tw * 4)
+            vals = np.frombuffer(be.tobytes(), '>f4').reshape(th, tw).astype(np.float32)
+            ty, tx = divmod(i, ntx)
+            y0, x0 = ty * th, tx * tw
+            hh, ww = min(th, h - y0), min(tw, w - x0)
+            out[y0:y0 + hh, x0:x0 + ww] = vals[:hh, :ww]
+        scale = p.tags['ModelPixelScaleTag'].value
+        tie = p.tags['ModelTiepointTag'].value
+        return out, scale, tie, (tw, th, bo)
+
+if __name__ == '__main__':
+    import sys
+    for f in sys.argv[1:]:
+        a, sc, tie, meta = read_tile(f)
+        print(f.split('_')[-3] + f.split('_')[-2], a.shape, 'min %.1f max %.1f mean %.1f' % (a.min(), a.max(), a.mean()), 'scale', sc[:2], 'tie', tie[3:5], meta)

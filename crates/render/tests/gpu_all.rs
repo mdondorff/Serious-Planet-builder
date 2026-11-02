@@ -1,5 +1,9 @@
 #[path = "gpu_atmosphere.rs"]
 mod gpu_atmosphere;
+#[path = "gpu_burn.rs"]
+mod gpu_burn;
+#[path = "gpu_clipmap.rs"]
+mod gpu_clipmap;
 #[path = "gpu_compact.rs"]
 mod gpu_compact;
 #[path = "gpu_compact_blocks.rs"]
@@ -18,6 +22,8 @@ mod gpu_horizon;
 mod gpu_indirect;
 #[path = "gpu_lit.rs"]
 mod gpu_lit;
+#[path = "gpu_march.rs"]
+mod gpu_march;
 #[path = "gpu_overlay.rs"]
 mod gpu_overlay;
 #[path = "gpu_pipelined.rs"]
@@ -32,8 +38,14 @@ mod gpu_quadrants;
 mod gpu_reference;
 #[path = "gpu_renderer.rs"]
 mod gpu_renderer;
+#[path = "gpu_resize.rs"]
+mod gpu_resize;
+#[path = "gpu_resolve.rs"]
+mod gpu_resolve;
 #[path = "gpu_shading.rs"]
 mod gpu_shading;
+#[path = "gpu_shadow_frame.rs"]
+mod gpu_shadow_frame;
 #[path = "gpu_stamps.rs"]
 mod gpu_stamps;
 #[path = "gpu_steep_terrain.rs"]

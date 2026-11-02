@@ -18,7 +18,7 @@
 | Every experiment, one line each | `docs/spikes.md` (register) |
 | An experiment's report, numbers and pictures | `spikes/<name>/results/` |
 | Pictures of SPIKE-03 to 07 that accepted ADRs link to | `docs/spikes/` (frozen) |
-| Performance windows and CI history | `docs/perf/` (`window-<N>.md`, raw data in `window-<N>/`) |
+| Performance windows and CI history | `docs/perf/` (`window-<N>.md`, raw data in `window-<N>/`) up to M7; a milestone's later windows in `docs/milestones/<M>/` |
 | Surprises and corrected assumptions still in force | `docs/learnings.md` |
 | Progress screenshots | `docs/dev_screenshots/` |
 | The original research and set-up documents | `docs/background/` (frozen, non-normative) |

@@ -1,0 +1,39 @@
+# SPIKE-64 still: tile 1 (rough upland), 1024-cell crops (104 km) at the core's centre: carved, carved + deposition (mid), the deposit
+# thickness, the carve scaled x4, and the scaled ground after 100 thermal passes at 33 degrees; hillshade from the north-west.
+import sys, numpy as np
+from PIL import Image, ImageDraw, ImageFont
+d, out = sys.argv[1], sys.argv[2]
+N, C = 3072, 1024
+o = (N - C) // 2
+def load(v): return np.fromfile(f"{d}/tile1-{v}.f32", "<f4").reshape(N, N)[o:o + C, o:o + C].astype(np.float64)
+def shade(h, z=1.0):
+    gy, gx = np.gradient(h * z, 101.8)
+    az, el = np.radians(315), np.radians(40)
+    lx, ly, lz = np.cos(el) * np.sin(az), np.cos(el) * np.cos(az), np.sin(el)
+    s = np.clip((-gx * lx + gy * ly + lz) / np.sqrt(gx * gx + gy * gy + 1), 0, 1) * 215 + 25
+    rgb = np.stack([s] * 3, -1)
+    rgb[h <= 0] = [40, 70, 120]
+    return rgb
+car, dep = load("carved"), load("dep-mid")
+th = dep - car
+dm = np.stack([shade(car, 3)[..., 0]] * 3, -1) * 0.6
+mask = th > 0.05
+t = np.clip(th / 20.0, 0, 1)
+dm[mask] = (np.array([230, 160, 40]) * t[mask, None] + dm[mask] * (1 - t[mask, None]) + 40)
+sc, st = load("scaled"), load("scaled-thermal33")
+tm = np.stack([shade(sc)[..., 0]] * 3, -1) * 0.6
+ch = np.clip(np.abs(st - sc) / 20.0, 0, 1)
+mk = ch > 0.01
+tm[mk] = np.array([220, 60, 60]) * ch[mk, None] + tm[mk] * (1 - ch[mk, None]) + 30
+panels = [("1 carved (shading x3)", shade(car, 3)), ("2 + deposition (shading x3)", shade(dep, 3)),
+          ("3 deposit (orange 20 m+)", dm), ("4 carved x4", shade(sc)), ("5 x4 + thermal 33 deg", shade(st)), ("6 thermal change (red 20 m+)", tm)]
+font = ImageFont.load_default(size=26)
+W = C // 2
+sheet = Image.new("RGB", (3 * W + 16, 2 * (W + 44) + 8), "white")
+dr = ImageDraw.Draw(sheet)
+for k, (name, rgb) in enumerate(panels):
+    im = Image.fromarray(np.clip(rgb, 0, 255).astype(np.uint8)).resize((W, W), Image.LANCZOS)
+    x, y = (k % 3) * (W + 8), (k // 3) * (W + 52)
+    dr.text((x + 4, y + 6), name, fill="black", font=font)
+    sheet.paste(im, (x, y + 44))
+sheet.save(out, optimize=True); print(out, sheet.size)

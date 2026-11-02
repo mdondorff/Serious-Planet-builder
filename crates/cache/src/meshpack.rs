@@ -37,6 +37,7 @@ use planet_world_def::{body_radius_path, ReadRecord};
 
 use crate::key::{cache_key, mesh_key_inputs, CacheKey, Kind};
 use crate::pack::{PackError, PackWriter, Record, StoreParams, TileStore};
+use planet_core::par::Par;
 
 /// The kind byte of a pre-filled render tile.
 pub const KIND_MESH: u8 = Kind::Mesh as u8;
@@ -463,21 +464,15 @@ pub fn prefill(
     // Generate in parallel, heaviest first (the order of `prefill_tiles` is by level); keep each result at its own index so the
     // append order is the fixed one whichever thread finished first.
     let results: Vec<Mutex<Option<Result<Record, MeshCodecError>>>> = missing.iter().map(|_| Mutex::new(None)).collect();
-    let next = AtomicUsize::new(0);
     let done_per_level: Vec<AtomicUsize> = (0..=levels).map(|_| AtomicUsize::new(0)).collect();
     let in_level: Vec<usize> = (0..=levels).map(|l| missing.iter().filter(|t| t.level() == l).count()).collect();
-    std::thread::scope(|s| {
-        for _ in 0..threads.max(1) {
-            planet_core::thread::spawn_named(s, "prefill-worker", || loop {
-                let i = next.fetch_add(1, Ordering::SeqCst);
-                let Some(tile) = missing.get(i) else { break };
-                let made = spec.record(&spec.generate(*tile));
-                *results[i].lock().expect("a result slot") = Some(made);
-                let level = usize::from(tile.level());
-                if done_per_level[level].fetch_add(1, Ordering::SeqCst) + 1 == in_level[level] {
-                    progress(tile.level(), in_level[level]);
-                }
-            });
+    threads.max(1).run(missing.len(), &|i| {
+        let tile = &missing[i];
+        let made = spec.record(&spec.generate(*tile));
+        *results[i].lock().expect("a result slot") = Some(made);
+        let level = usize::from(tile.level());
+        if done_per_level[level].fetch_add(1, Ordering::SeqCst) + 1 == in_level[level] {
+            progress(tile.level(), in_level[level]);
         }
     });
     let mut writer = PackWriter::open(dir, store_params(), max_pack_bytes)?;

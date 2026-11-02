@@ -1,0 +1,63 @@
+N52E012 REAL slope 1.15 r1 22.9 r5 51 flat 22.6
+  N52E012 site1 today-at-new-site        slope 0.50 (0.19) r1 0.41 (0.33) r5 0.64 (0.36) flat 90.8% L1 1.39
+    N52E012 site1 (-8, -86.75) | window mean today 47 m | delta p10/p50/p90 -17/-12/-7 m | k p10/p50/p90 1.00/1.00/1.00 | floor p50 0.20
+  N52E012 site1 derived+hb               slope 1.86 (0.09) r1 1.10 (0.10) r5 1.23 (0.24) flat 2.6% L1 0.82
+  N52E012 site2 today-at-new-site        slope 0.43 (0.19) r1 0.33 (0.38) r5 0.50 (0.50) flat 96.7% L1 1.48
+    N52E012 site2 (41.75, 16.5) | window mean today 34 m | delta p10/p50/p90 -26/-11/2 m | k p10/p50/p90 1.17/1.90/2.56 | floor p50 0.15
+  N52E012 site2 derived+hb               slope 1.86 (0.08) r1 1.13 (0.11) r5 1.35 (0.37) flat 2.6% L1 0.80
+N41W096 REAL slope 3.88 r1 38.2 r5 70 flat 1.0
+  N41W096 site1 today-at-new-site        slope 1.25 (0.17) r1 2.24 (1.84) r5 4.22 (5.13) flat 0.0% L1 0.59
+    N41W096 site1 (6.5, -119.5) | window mean today 2739 m | delta p10/p50/p90 -2511/-2420/-2313 m | k p10/p50/p90 1.00/1.00/1.00 | floor p50 0.35
+  N41W096 site1 derived+hb               slope 1.61 (0.48) r1 1.89 (1.26) r5 2.91 (2.88) flat 0.4% L1 0.49
+  N41W096 site2 today-at-new-site        slope 0.22 (0.39) r1 0.33 (0.78) r5 0.60 (0.67) flat 53.4% L1 1.50
+    N41W096 site2 (17.75, -77.25) | window mean today 363 m | delta p10/p50/p90 -15/-14/-13 m | k p10/p50/p90 1.00/1.00/1.00 | floor p50 0.33
+  N41W096 site2 derived+hb               slope 0.72 (0.10) r1 0.74 (0.27) r5 0.98 (0.08) flat 1.3% L1 0.57
+N43W102 REAL slope 3.04 r1 39.5 r5 108 flat 2.6
+  N43W102 site1 today-at-new-site        slope 0.28 (0.29) r1 0.33 (0.44) r5 0.43 (0.64) flat 51.5% L1 1.41
+    N43W102 site1 (18.25, 128) | window mean today 805 m | delta p10/p50/p90 -13/-10/-9 m | k p10/p50/p90 1.72/1.73/1.73 | floor p50 0.06
+  N43W102 site1 derived+hb               slope 1.34 (0.14) r1 1.20 (0.12) r5 1.18 (0.18) flat 0.3% L1 0.63
+  N43W102 site2 today-at-new-site        slope 0.29 (0.29) r1 0.33 (0.43) r5 0.43 (0.64) flat 49.8% L1 1.37
+    N43W102 site2 (20.25, 144.25) | window mean today 802 m | delta p10/p50/p90 -17/-15/-13 m | k p10/p50/p90 1.54/1.56/1.57 | floor p50 0.09
+  N43W102 site2 derived+hb               slope 1.30 (0.15) r1 1.16 (0.14) r5 1.09 (0.20) flat 0.4% L1 0.60
+N31W004 REAL slope 0.86 r1 11.8 r5 41 flat 47.9
+  N31W004 site1 today-at-new-site        slope 1.00 (0.13) r1 1.09 (0.11) r5 1.05 (0.18) flat 52.0% L1 0.31
+    N31W004 site1 (-24, 18) | window mean today 907 m | delta p10/p50/p90 98/104/108 m | k p10/p50/p90 1.11/1.17/1.23 | floor p50 0.00
+  N31W004 site1 derived+hb               slope 1.89 (0.19) r1 1.88 (0.16) r5 1.61 (0.20) flat 7.5% L1 0.90
+  N31W004 site2 today-at-new-site        slope 1.56 (0.15) r1 1.72 (0.15) r5 1.62 (0.20) flat 7.6% L1 0.82
+    N31W004 site2 (-19.5, 123) | window mean today 599 m | delta p10/p50/p90 379/614/695 m | k p10/p50/p90 0.40/0.44/0.84 | floor p50 0.00
+  N31W004 site2 derived+hb               slope 2.29 (0.48) r1 2.70 (0.37) r5 3.15 (0.58) flat 8.7% L1 0.98
+N40W078 REAL slope 8.11 r1 120.3 r5 397 flat 0.0
+  N40W078 site1 today-at-new-site        slope 0.18 (0.36) r1 0.17 (0.46) r5 0.16 (0.88) flat 3.8% L1 0.51
+    N40W078 site1 (32.75, 128.25) | window mean today 602 m | delta p10/p50/p90 -399/-340/-264 m | k p10/p50/p90 4.18/4.61/4.72 | floor p50 0.00
+  N40W078 site1 derived+hb               slope 1.93 (0.29) r1 1.55 (0.20) r5 1.43 (0.57) flat 0.0% L1 0.39
+  N40W078 site2 today-at-new-site        slope 1.34 (0.10) r1 1.63 (0.29) r5 1.64 (0.93) flat 0.0% L1 0.23
+    N40W078 site2 (40.5, 137.5) | window mean today 3837 m | delta p10/p50/p90 -3910/-3681/-3377 m | k p10/p50/p90 1.93/2.51/3.17 | floor p50 0.22
+  N40W078 site2 derived+hb               slope 2.38 (0.45) r1 2.28 (0.58) r5 1.91 (1.39) flat 0.0% L1 0.22
+N48E008 REAL slope 9.06 r1 140.6 r5 315 flat 0.0
+  N48E008 site1 today-at-new-site        slope 0.09 (0.39) r1 0.09 (0.51) r5 0.13 (0.62) flat 54.1% L1 1.57
+    N48E008 site1 (-7.75, 10.25) | window mean today 502 m | delta p10/p50/p90 39/52/69 m | k p10/p50/p90 5.00/5.00/5.00 | floor p50 0.00
+  N48E008 site1 derived+hb               slope 0.95 (0.07) r1 0.72 (0.17) r5 0.90 (0.16) flat 0.0% L1 0.42
+  N48E008 site2 today-at-new-site        slope 0.09 (0.39) r1 0.09 (0.51) r5 0.13 (0.62) flat 53.4% L1 1.56
+    N48E008 site2 (1.25, 3.75) | window mean today 546 m | delta p10/p50/p90 39/51/68 m | k p10/p50/p90 4.76/4.99/5.00 | floor p50 0.00
+  N48E008 site2 derived+hb               slope 1.00 (0.06) r1 0.75 (0.15) r5 0.98 (0.15) flat 0.1% L1 0.40
+N57W005 REAL slope 6.58 r1 127.1 r5 389 flat 4.9
+  N57W005 site1 today-at-new-site        slope 0.45 (0.23) r1 0.34 (0.31) r5 0.36 (0.45) flat 0.0% L1 0.22
+    N57W005 site1 (42.75, 140.75) | window mean today 1341 m | delta p10/p50/p90 -1430/-1171/-942 m | k p10/p50/p90 4.22/4.86/5.00 | floor p50 0.01
+  N57W005 site1 derived+hb               slope 2.63 (0.42) r1 1.65 (0.27) r5 1.50 (0.34) flat 0.0% L1 0.44
+  N57W005 site2 today-at-new-site        slope 0.21 (0.30) r1 0.15 (0.39) r5 0.17 (0.58) flat 4.6% L1 0.41
+    N57W005 site2 (-50, 7.75) | window mean today 506 m | delta p10/p50/p90 -385/-373/-354 m | k p10/p50/p90 4.61/4.94/5.00 | floor p50 0.01
+  N57W005 site2 derived+hb               slope 1.38 (0.13) r1 0.80 (0.10) r5 0.78 (0.16) flat 0.0% L1 0.71
+N47E011 REAL slope 22.35 r1 391.1 r5 1039 flat 1.3
+  N47E011 site1 today-at-new-site        slope 0.10 (0.44) r1 0.08 (0.48) r5 0.09 (0.62) flat 0.0% L1 0.18
+    N47E011 site1 (13.5, -117.25) | window mean today 522 m | delta p10/p50/p90 733/998/1245 m | k p10/p50/p90 5.31/5.57/5.80 | floor p50 0.00
+  N47E011 site1 derived+hb               slope 1.03 (0.04) r1 0.71 (0.16) r5 0.72 (0.21) flat 0.0% L1 0.31
+  N47E011 site2 today-at-new-site        slope 0.07 (0.46) r1 0.06 (0.49) r5 0.06 (0.64) flat 1.7% L1 0.35
+    N47E011 site2 (43.25, 143.25) | window mean today 273 m | delta p10/p50/p90 849/1221/1496 m | k p10/p50/p90 5.22/5.62/5.92 | floor p50 0.00
+  N47E011 site2 derived+hb               slope 1.02 (0.05) r1 0.72 (0.16) r5 0.75 (0.20) flat 0.0% L1 0.28
+N27E086 REAL slope 29.14 r1 523.7 r5 1573 flat 0.0
+  N27E086 site1 today-at-new-site        slope 0.04 (0.82) r1 0.03 (1.02) r5 0.04 (1.19) flat 24.3% L1 1.07
+    N27E086 site1 (-55, -110) | window mean today 280 m | delta p10/p50/p90 1691/2042/2145 m | k p10/p50/p90 5.27/6.01/6.65 | floor p50 0.00
+  N27E086 site1 derived+hb               slope 0.97 (0.10) r1 0.77 (0.21) r5 0.71 (0.34) flat 0.0% L1 0.37
+  N27E086 site2 today-at-new-site        slope 0.10 (0.76) r1 0.08 (0.96) r5 0.09 (1.13) flat 0.0% L1 0.14
+    N27E086 site2 (11.75, -111.25) | window mean today 1791 m | delta p10/p50/p90 682/862/947 m | k p10/p50/p90 6.09/6.47/6.61 | floor p50 0.00
+  N27E086 site2 derived+hb               slope 1.15 (0.17) r1 0.98 (0.12) r5 0.90 (0.17) flat 0.0% L1 0.40

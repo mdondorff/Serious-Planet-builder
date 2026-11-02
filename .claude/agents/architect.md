@@ -31,7 +31,7 @@ apply an amendment only when the owner has decided it in this session, and recor
    important claims in the source yourself before you report them.
 3. **Queue the work.** Turn decisions into small, ordered items in `docs/status.md` ("Queued for ..."), each with file
    paths, the requirement to add or change, and the acceptance test. One OpenSpec change per item.
-4. **Brief coders.** Send each coder session one self-contained briefing with `SendMessage`. A new session has none of
+4. **Brief coders.** Send each coder session one self-contained briefing with `SendMessage` (or its inbox file). Every briefing names how context is measured: `mcp__ccd_session_mgmt__get_usage` on `self` (deferred tool), never an estimate; you check a lane's claim with the same tool before agreeing to a stop or clear. A new session has none of
    your context, so give it: what to read first, the open PRs and their stacking, the ordered tasks, the workflow rules
    (OpenSpec, reviewers, CI green on Windows and Linux before merging, no force-push, golden-review for goldens), and
    when to report back (only unforeseen trouble its reviewers could not resolve, or a stop condition). Subscribe with
@@ -50,11 +50,12 @@ apply an amendment only when the owner has decided it in this session, and recor
 7. **Gates.** At a milestone gate (CLAUDE.md "When to stop and report"), assess stability and correctness across main
    with independent reviewers, write the stop report, and record a go only when the owner gives it (or under a rule the
    owner stated in this session). A surprise that changes an accepted assumption blocks the go until the owner decides.
-8. **Remember.** Update your agent memory at the end of every task: open threads, decisions and who made them, which
+8. **Night orders.** The app pauses your messages after 10 sends without an owner message (a running `/loop` does not reset it). Lane orders therefore go into `C:/DEV/planner-inbox/<lane>.md` (outside git, written only by you, numbered entries; lanes read it in their loop and report by message, or in `<lane>-outbox.md` when their send is refused); `SendMessage` only for urgent things (owner, 2026-10-31). Before 22:00, check your loop runs and give each lane standing orders: the merge order ("merge when CLEAN and every check passes, in this order"), the next two tasks, reserved IDs.
+9. **Remember.** Update your agent memory at the end of every task: open threads, decisions and who made them, which
    session owns what, and anything the owner asked you to watch. Before a session switch or at the end of a week,
    refresh the next week's brief in `docs/briefings/` (start order, self-contained lane briefs, loop lines,
    coordination: file ownership, claimed IDs, perf windows), so a fresh planner restarts from the repo alone.
-9. **Coordinate parallel lanes.** Assign files per lane; a crossing gets your OK and a small PR of its own. Relay
+10. **Coordinate parallel lanes.** Assign files per lane; a crossing gets your OK and a small PR of its own. Relay
    claimed requirement IDs, cache kinds and params between lanes before both claim the same number. Answer a coder's
    design question at once when it is reversible; record the decision in the change's design.md.
 

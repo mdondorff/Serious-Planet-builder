@@ -360,6 +360,11 @@ impl ViewerState {
         self
     }
 
+    /// Ask for the exposure to snap to its target on the next lit frame (the lit targets were made again at a new size).
+    pub fn reset_exposure(&mut self) {
+        self.exposure_reset = true;
+    }
+
     /// Whether the next lit frame snaps the exposure to its target, once: true for the first lit frame, after the lit path was
     /// switched back on and after a restart of the flight (a cut).
     pub fn take_exposure_reset(&mut self) -> bool {
@@ -917,6 +922,17 @@ pub fn smoke_verdict(c: &SmokeCounts, atmosphere_wanted: bool) -> Result<(), Str
 mod tests {
     use super::*;
     use planet_core::Vec3;
+
+    // spec: VIEW-006
+    #[test]
+    fn a_resize_asks_for_the_exposure_to_snap_once() {
+        let mut v = ViewerState::new(0, 3, 0, true);
+        assert!(v.take_exposure_reset(), "the first lit frame snaps");
+        assert!(!v.take_exposure_reset(), "and only that one");
+        v.reset_exposure();
+        assert!(v.take_exposure_reset(), "a resize asks for the next lit frame to snap");
+        assert!(!v.take_exposure_reset());
+    }
 
     fn cam(x: f64) -> Camera {
         Camera {

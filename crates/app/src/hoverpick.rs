@@ -7,10 +7,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
 
-/// What a pick needs to run: the ray, the limits and the tile level of the heights it reads; it makes the field it picks against.
-pub type PickSource = Arc<dyn Fn(Ray, PickLimits, u8) -> Option<SurfaceHit> + Send + Sync>;
+/// What a pick needs to run: the ray and the limits; it makes the field it picks against.
+pub type PickSource = Arc<dyn Fn(Ray, PickLimits) -> Option<SurfaceHit> + Send + Sync>;
 
-type Request = (Ray, PickLimits, u8);
+type Request = (Ray, PickLimits);
 /// A finished pick: the epoch it started in and what it found.
 type Finished = Option<(u64, Option<SurfaceHit>)>;
 
@@ -36,8 +36,8 @@ impl HoverPicker {
         std::thread::Builder::new()
             .name("hover pick".into())
             .spawn(move || {
-                while let Ok((started, (ray, limits, level))) = rx.recv() {
-                    let hit = source(ray, limits, level);
+                while let Ok((started, (ray, limits))) = rx.recv() {
+                    let hit = source(ray, limits);
                     *slot.lock().expect("hover pick slot") = Some((started, hit));
                     flag.store(false, Ordering::Release);
                 }
@@ -74,7 +74,7 @@ mod tests {
     use std::sync::mpsc::sync_channel;
 
     fn request() -> Request {
-        (Ray { origin: Vec3::new(2.0, 0.0, 0.0), dir: Vec3::new(-1.0, 0.0, 0.0) }, PickLimits::new(1.0, 0.1), 5)
+        (Ray { origin: Vec3::new(2.0, 0.0, 0.0), dir: Vec3::new(-1.0, 0.0, 0.0) }, PickLimits::new(1.0, 0.1))
     }
 
     fn hit(distance_m: f64) -> SurfaceHit {
@@ -84,18 +84,23 @@ mod tests {
     // spec: VIEW-061
     #[test]
     fn a_pick_that_blocks_never_holds_the_frame_and_its_hit_arrives_on_a_later_poll() {
-        let (release, wait) = sync_channel::<()>(0);
+        // The pick blocks until it is released after the frames; had a frame waited for it, it would have given up first (an order, not
+        // a time: the 10 s only ends a pick that is never released).
+        let (release, wait) = channel::<()>();
         let wait = Mutex::new(wait);
-        let source: PickSource = Arc::new(move |_, _, level| {
-            wait.lock().unwrap().recv_timeout(std::time::Duration::from_secs(2)).ok();
-            Some(hit(f64::from(level)))
+        let gave_up = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&gave_up);
+        let source: PickSource = Arc::new(move |_, _| {
+            if wait.lock().unwrap().recv_timeout(std::time::Duration::from_secs(10)).is_err() {
+                flag.store(true, Ordering::SeqCst);
+            }
+            Some(hit(5.0))
         });
         let mut picker = HoverPicker::new(source);
-        let t = std::time::Instant::now();
         assert_eq!(picker.poll(request()), None, "nothing has finished");
         assert_eq!(picker.poll(request()), None, "the pick is still blocked and the frame did not wait");
-        assert!(t.elapsed() < std::time::Duration::from_millis(500));
         release.send(()).unwrap();
+        assert!(!gave_up.load(Ordering::SeqCst), "the pick gave up before the frames returned: a frame waited for it");
         let start = std::time::Instant::now();
         let got = loop {
             if let Some(h) = picker.poll(request()) {
@@ -112,7 +117,7 @@ mod tests {
     fn a_pick_that_started_before_a_clear_is_dropped_when_it_finishes() {
         let (release, wait) = sync_channel::<()>(0);
         let wait = Mutex::new(wait);
-        let source: PickSource = Arc::new(move |_, _, _| {
+        let source: PickSource = Arc::new(move |_, _| {
             wait.lock().unwrap().recv_timeout(std::time::Duration::from_secs(2)).ok();
             Some(hit(1.0))
         });

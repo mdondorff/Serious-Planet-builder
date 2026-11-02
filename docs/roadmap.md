@@ -7,7 +7,7 @@ Status: direction, not a plan (owner and opus-planner, 2026-10-23). Each milesto
 |---|---|---|---|
 | M0 to M7 | Foundations to cities | coordinates, LOD, fields and cache, streaming, atmosphere and ocean, editor, cities | done |
 | M8 | Natural landscape | global coupled river network, plausible relief, horizon shadows, the speed envelope, the no-degradation gate; fine erosion per 5 km square failed its stop rule and moved to M9 (`docs/milestones/M8-report.md`) | done 2026-10-30 |
-| M9 | Realistic terrain | hill terrain against the owner's look reference: erosion that shapes hills and forms its own tributaries, baked (SPIKE-57, SPIKE-60); slope targets checked on real elevation samples (owner, 2026-10-25: likely M9's main focus; hydrology and relief together were too much for one milestone) | next |
+| M9 | Realistic terrain | the generator redesigned (continents, relief to Earth's bands, belts at convergent margins), the two-pass erosion bake (ADR 0088), relief classes (ADR 0089), channels, ground detail, the look against the reference; plan and iterations: `docs/briefings/m9-plan.md` | active since 2026-11-01 |
 | M10 | Living surface | vegetation, rocks and ground cover placed from the driver maps (wetness, soil depth); GPU instancing (SPIKE-28); the speed envelope stays a regression check | open |
 | M11 | Water and sky | rivers and lakes as water surfaces from the global network, FFT ocean, clouds, weather light | open |
 | M12 | Settled world | cities on the natural landscape: roads follow terrain and cross rivers, settlement placement from the driver maps, night lights | open |
@@ -24,33 +24,26 @@ Generator polish, after M8: why a stamped hill in the ocean ends just below sea 
 Data later (owner's idea, 2026-10-25): stores read through a local or remote data server, the local disk a cache, larger bakes streamed on demand; a backend behind the pack store's interface.
 
 ## Deferred to M9 (running list, opus-planner)
-- Uplift that does not follow the input network (SPIKE-45; ADR 0080 point 4: the coupled run has no stream-power erosion at M8).
-- Coarse/fine network: the coarse network climbs beyond a 1 km node slide; deep cuts where the routed ground rises (Tracked).
-- Fine tributary tier inside chunks (ADR 0081 point 3; SPIKE-40 drainage density 0.5-3 km per km2).
-- Hill terrain realism against the look reference; slope targets from real elevation samples.
-- An elevation data source and its licence.
-- Edits on top of the erosion (D3, per-layer setting).
-- The photo layer (D6).
-- Flight lead margin (Tracked): ask the next chunk on entering the current one; lead at least the solve time.
+Folded into `docs/briefings/m9-plan.md` (2026-11-02): uplift independent of the input network and hill realism (I3, I5, I9); edits on top of the erosion (D3, ADR 0088's separate layer). Still open, not scheduled: the coarse/fine network beyond a 1 km node slide (Tracked); the photo layer (D6); the flight lead margin (Tracked).
 
 ## Game layer: direction
 - One workspace and one technology: the planet crates (`core`, `world-def`, `generators`, `cache`, `streaming`, `frame`, `render`) stay a library without game logic; a game is its own crate and run mode on top.
 - Embedding into another engine (Bevy, Unreal) is not planned: it would give up the frame loop and the test harness.
-- Determinism serves physics and multiplayer: collision comes from the same chunk fields as the image; clients regenerate identical terrain from the world definition, so only edits and moving objects need syncing. Multiplayer stays a non-goal of v1.
+- Determinism serves physics and multiplayer: collision comes from the same stored field and its tiles as the image; clients regenerate identical terrain from the world definition, so only edits and moving objects need syncing. Multiplayer stays a non-goal of v1.
 - Three seams keep the door open at no game cost:
 
 | # | Seam | First user |
 |---|---|---|
-| 1 | One query interface: height, normal, material and water at a point, and a collision patch around a point, from the chunk fields (`height_at_level` is its start) | M8 chunks |
+| 1 | One query interface: height, normal, material and water at a point, and a collision patch around a point, from the stored field and its tiles (`height_at_level` is its start) | the stored field and its tiles |
 | 2 | The renderer draws outside objects in the same camera-relative frame and depth | M9 instancing |
 | 3 | A fixed-step simulation clock separate from the frame clock | the spike below |
 
 ## Proposed spike: game-layer exploration (after M8)
 | Field | Value |
 |---|---|
-| Question | Do the query interface and local physics frames carry a driven vehicle on chunk terrain at ground level without precision or seam faults? |
-| Setup | Rapier (Rust; f64 option) in a local ENU frame (background report §5) around the vehicle; collision patch from chunk heights at 1.8 m; fixed 60 Hz step; the existing renderer draws the vehicle |
-| Measures | contact jitter at chunk borders and frame rebases, collision patch build time, step time, height difference between collision and the drawn surface |
+| Question | Do the query interface and local physics frames carry a driven vehicle on the stored field and its tiles at ground level without precision or seam faults? |
+| Setup | Rapier (Rust; f64 option) in a local ENU frame (background report §5) around the vehicle; collision patch from the stored field's tile heights at 1.8 m; fixed 60 Hz step; the existing renderer draws the vehicle |
+| Measures | contact jitter at tile borders and frame rebases, collision patch build time, step time, height difference between collision and the drawn surface |
 | Time box | 1 day, on a spike branch; no merge into the main crates |
 | Decides | whether a game run mode needs new engine seams before M12 |
 

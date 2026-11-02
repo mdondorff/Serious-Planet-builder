@@ -97,6 +97,8 @@ pub struct EditStats {
     pub published: u64,
     /// The previews set with at least one stamp (VIEW-023).
     pub previews: u64,
+    /// The previews that ended because the exact tiles were in (VIEW-023).
+    pub previews_ended: u64,
     /// The most nodes a frame drew previewed.
     pub previewed_max: usize,
 }
@@ -222,6 +224,17 @@ pub fn exact_and_idle(managed: &planet_frame::managed::ManagedLoop, frame: &plan
         && managed.manager().streamer().held_refreshes() == 0
         && !managed.pipeline().worker().busy()
         && managed.pending().is_empty()
+}
+
+/// Whether the key of `tile` reads its region summary in `def` (WDEF-008): a root always does; any other tile when an item of a stamp layer
+/// touches it with the stage's halo (a tile with an empty footprint keeps the base's key, `StampStage::passes_through`). The predicate of
+/// `planet_editor::feed::edited_tiles_reading`.
+pub fn reads_summary(def: &WorldDefinition, body: BodyId, tile: TileId) -> bool {
+    tile.level() == 0
+        || def
+            .stamp_layers(body)
+            .iter()
+            .any(|l| def.footprint_items(body, l, tile, planet_generators::stamp::STAGE_HALO).is_ok_and(|v| !v.is_empty()))
 }
 
 fn open_store(dir: Option<&Path>) -> (EditStore, String) {
@@ -435,6 +448,7 @@ impl EditRuntime {
     /// The exact tiles are in: the preview ends and the oldest state is forgotten.
     pub fn preview_end(&mut self) {
         self.feed.oldest = None;
+        self.stats.previews_ended += 1;
     }
 
     /// The tiles of `resident` the commands since the last call changed (the footprint find, `planet_editor::feed`), counted; every
@@ -448,7 +462,15 @@ impl EditRuntime {
         if affected.is_empty() {
             return Vec::new();
         }
-        let tiles = planet_editor::feed::edited_tiles(&affected, BodyId::PLANET, resident, self.radius_m, &planet_core::cube::TangentWarp);
+        let def = self.session.editor().definition();
+        let tiles = planet_editor::feed::edited_tiles_reading(
+            &affected,
+            BodyId::PLANET,
+            resident,
+            self.radius_m,
+            &planet_core::cube::TangentWarp,
+            &|t| reads_summary(def, BodyId::PLANET, t),
+        );
         self.stats.refresh_tiles += tiles.len() as u64;
         tiles
     }
@@ -503,31 +525,6 @@ impl EditRuntime {
     }
 
     /// The surface under a cursor (render pixels).
-    /// The tile level whose vertex spacing is about one pixel of the view at the camera's height over the surface: the finest height a pick can use,
-    /// since the screen cannot show more (the hover of the editor reads this level, not the finest one: a ray through the planet-scale view
-    /// takes a thousand times less, VIEW-056). Never below level 3, never above the pyramid's finest level.
-    pub fn pick_level(camera: &Camera, viewport: Viewport, radius_m: f64, max_height_m: f64) -> u8 {
-        // The height over the surface is unknown before the pick: over the sea level less the tallest the field can be, so the level is never coarser
-        // than the surface under the camera asks for.
-        let altitude = (camera.position.0.length() - radius_m - max_height_m).max(1.0);
-        let pixel_m = altitude * 2.0 * libm::tan(0.5 * camera.fov_y_rad) / viewport.height_px.max(1.0);
-        let level = libm::ceil(libm::log2(radius_m * core::f64::consts::FRAC_PI_2 / 32.0 / pixel_m.max(1e-3)));
-        level.clamp(3.0, f64::from(planet_core::tile::MAX_LEVEL)) as u8
-    }
-
-    /// [`EditWindow::hit_at`] with the height of tile level `level` (the hover; a click places at [`EditWindow::hit_at`]'s exact surface).
-    pub fn hit_at_level(
-        camera: &Camera,
-        viewport: Viewport,
-        cursor: [f64; 2],
-        limits: &PickLimits,
-        field: &dyn HeightField,
-        level: u8,
-    ) -> Option<SurfaceHit> {
-        let ray = cursor_ray(camera, cursor[0], cursor[1], viewport.width_px, viewport.height_px);
-        pick_surface(&ray, limits, &|d| field.height_at_level(d, level))
-    }
-
     pub fn hit_at(
         camera: &Camera,
         viewport: Viewport,
@@ -577,9 +574,7 @@ impl EditRuntime {
         };
         self.overlay = overlay::build(&self.session, &self.shown, &view, &ground);
         self.handles = overlay::handle_pixels(&self.overlay);
-        // The hover, the draft and the brush ring read the height of the level a pixel of this view can show.
-        let level = Self::pick_level(camera, viewport, self.radius_m, limits.max_height_m);
-        self.draft = overlay::draft(&self.session, &view, &|d| field.height_at_level(d, level), (!over_ui).then_some(cursor));
+        self.draft = overlay::draft(&self.session, &view, &|d| field.height(d), (!over_ui).then_some(cursor));
         // The hover pick finds the ground along the whole ray: its first read of a bake block nobody has touched decodes it, so with a source it runs on its own
         // thread and the frame takes the last pick that finished (VIEW-059, CON-22).
         let hit = match (over_ui, self.hover.as_mut()) {
@@ -590,11 +585,11 @@ impl EditRuntime {
             (true, None) => None,
             (false, Some(h)) => {
                 let ray = cursor_ray(camera, cursor[0], cursor[1], viewport.width_px, viewport.height_px);
-                h.poll((ray, *limits, level))
+                h.poll((ray, *limits))
             }
-            (false, None) => Self::hit_at_level(camera, viewport, cursor, limits, field, level),
+            (false, None) => Self::hit_at(camera, viewport, cursor, limits, field),
         };
-        self.brush = overlay::brush(&self.session, &view, &|d| field.height_at_level(d, level), hit.map(|h| h.dir));
+        self.brush = overlay::brush(&self.session, &view, &|d| field.height(d), hit.map(|h| h.dir));
         if !over_ui {
             let mpp = self.height_mpp(camera, viewport);
             let v = PointerView { cursor, hit, shown: &self.shown, handles: &self.handles, metres_per_pixel: mpp };
@@ -673,6 +668,7 @@ impl EditRuntime {
             saved: &self.saved,
             view_status,
             keys: &self.keys,
+            store: Some(s.editor().store_watch()),
         }
     }
 
@@ -1064,8 +1060,8 @@ impl EditRuntime {
     pub fn summary(&self) -> String {
         let s = &self.stats;
         format!(
-            "{} frames in the editor mode, {} placed, {} selected, {} dragged, {} typed, {} deleted, {} undone, {} redone, {} flights, {} refused, up to {} edits shown, {} tiles sent to refresh, {} definitions handed to the generator, {} previews set, up to {} nodes previewed",
-            s.frames, s.placed, s.selected, s.dragged, s.typed, s.deleted, s.undone, s.redone, s.flights, s.refused, s.shown_max, s.refresh_tiles, s.published, s.previews, s.previewed_max
+            "{} frames in the editor mode, {} placed, {} selected, {} dragged, {} typed, {} deleted, {} undone, {} redone, {} flights, {} refused, up to {} edits shown, {} tiles sent to refresh, {} definitions handed to the generator, {} previews set, {} previews ended on the exact tiles, up to {} nodes previewed",
+            s.frames, s.placed, s.selected, s.dragged, s.typed, s.deleted, s.undone, s.redone, s.flights, s.refused, s.shown_max, s.refresh_tiles, s.published, s.previews, s.previews_ended, s.previewed_max
         )
     }
 }
@@ -1174,38 +1170,6 @@ mod tests {
         let d = std::env::temp_dir().join(format!("planet-editwin-{tag}-{}-{:?}", std::process::id(), std::thread::current().id()));
         let _ = std::fs::remove_dir_all(&d);
         d
-    }
-
-    // spec: VIEW-059
-    #[test]
-    fn the_pick_level_is_coarse_at_the_planet_view_and_the_finest_close_to_the_ground() {
-        let viewport = Viewport { width_px: 2560.0, height_px: 1440.0 };
-        let at = |altitude_m: f64| {
-            let camera = Camera::at_surface_point(
-                planet_core::PlanetFixed(Vec3::new(1.0, 0.0, 0.0) * (R + altitude_m)),
-                Vec3::new(0.0, 0.0, 1.0),
-                0.3,
-                90f64.to_radians(),
-                16.0 / 9.0,
-                0.5,
-            );
-            EditRuntime::pick_level(&camera, viewport, R, 0.0)
-        };
-        let (far, mid, near, ground) = (at(20_000_000.0), at(5_000_000.0), at(1_000.0), at(0.01));
-        assert!(far >= 3 && mid <= 6, "planet view: {far}, {mid}");
-        assert!(far <= mid && mid < near && near < ground, "finer as the camera comes down: {far} {mid} {near} {ground}");
-        assert_eq!(ground, planet_core::tile::MAX_LEVEL, "a hand over the ground reads the finest level");
-        // Over a plateau the surface may be nearer than the sea level says: the tallest the field can be is taken off the height, so a camera that
-        // low reads the finest level and never a coarser one than the ground under it asks for.
-        let camera = Camera::at_surface_point(
-            planet_core::PlanetFixed(Vec3::new(1.0, 0.0, 0.0) * (R + 5_000.0)),
-            Vec3::new(0.0, 0.0, 1.0),
-            0.3,
-            90f64.to_radians(),
-            16.0 / 9.0,
-            0.5,
-        );
-        assert!(EditRuntime::pick_level(&camera, viewport, R, 6_000.0) > EditRuntime::pick_level(&camera, viewport, R, 0.0));
     }
 
     // spec: VIEW-041
@@ -1324,17 +1288,22 @@ mod tests {
         let cam = above(at, 3_000.0);
         let mut e = runtime(None);
         e.toggle();
-        let (release, wait) = std::sync::mpsc::sync_channel::<()>(0);
+        // The pick blocks until it is released after the frames; had a frame waited for it, it would have given up first (an order, not
+        // a time: the 10 s only ends a pick that is never released).
+        let (release, wait) = std::sync::mpsc::channel::<()>();
         let wait = std::sync::Mutex::new(wait);
-        e.set_hover_source(Arc::new(move |_, _, _| {
-            wait.lock().unwrap().recv_timeout(std::time::Duration::from_secs(3)).ok();
+        let gave_up = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = Arc::clone(&gave_up);
+        e.set_hover_source(Arc::new(move |_, _| {
+            if wait.lock().unwrap().recv_timeout(std::time::Duration::from_secs(10)).is_err() {
+                flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
             None
         }));
-        let t = std::time::Instant::now();
         frame(&mut e, &cam, false);
         frame(&mut e, &cam, false);
-        assert!(t.elapsed() < std::time::Duration::from_millis(1500), "two frames with the pick blocked took {:?}", t.elapsed());
         release.send(()).unwrap();
+        assert!(!gave_up.load(std::sync::atomic::Ordering::SeqCst), "the pick gave up before the frames returned: a frame waited for it");
         // A click still picks on the spot, on the exact surface.
         let field = Flat;
         let hit = EditRuntime::hit_at(&cam, VIEWPORT, CENTRE, &limits(), &field);
@@ -2042,6 +2011,7 @@ mod tests {
         assert!(e.preview_active());
         e.preview_end();
         assert!(!e.preview_active() && e.preview_stamps(cam.position.0).is_empty(), "ended: nothing to preview");
+        assert!(e.stats.previews_ended == 1 && e.summary().contains(" 1 previews ended on the exact tiles"), "{}", e.summary());
         e.session.set_param_text("radius_m", "777").unwrap();
         let second = hand_over(&mut e);
         let stamps = e.preview_stamps(cam.position.0);

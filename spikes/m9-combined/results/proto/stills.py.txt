@@ -1,0 +1,81 @@
+# SPIKE-80 (from SPIKE-74's script): rows real / baseline (today, SPIKE-74's raster dir) / combined (SPIKE-80's dir, re-matched site 1). SPIKE-74 still sheets for the owner: per landform, rows real / baseline / pipeline (site 1), columns eye 300 m (pitch 8) and eye 30 m (pitch 4),
+# heading 90, from the scorecard's 30 m rasters (1,853^2): SPIKE-65's column-cast render (not the engine's renderer), sun at azimuth 290, elevation 15.
+# The eye is the window's centre for every row. Usage: python -I stills.py <raster dir> <sheet dir> <tile> <title>
+import sys, math, os
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont
+
+d, sd, tile, title, d80, variant = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6]
+N, DX, R = 1853, 30.0, 6.371e6
+IW, IH = 640, 360
+
+
+def render(path, alt, heading, pitch):
+    h = np.fromfile(path, "<f4").reshape(N, N).astype(np.float64)
+    h = np.nan_to_num(h, nan=0.0)
+    gy, gx = np.gradient(h, DX)
+    az, el = math.radians(290), math.radians(15)
+    sun = np.array([math.cos(el) * math.sin(az), math.cos(el) * math.cos(az), math.sin(el)])
+    nrm = np.sqrt(gx * gx + gy * gy + 1)
+    lam = np.clip((-gx * sun[0] + gy * sun[1] + sun[2]) / nrm, 0, 1)
+    slope = np.degrees(np.arctan(np.hypot(gx, gy)))
+    rock = np.clip((slope - 25) / 15, 0, 1)[..., None]
+    base = (1 - rock) * np.array([0.30, 0.42, 0.18]) + rock * np.array([0.45, 0.43, 0.40])
+    base[h <= 0] = [0.10, 0.20, 0.35]
+    col = base * (0.25 + 0.95 * lam[..., None])
+
+    def bil(a, x, y):
+        x = np.clip(x, 0, N - 1.001)
+        y = np.clip(y, 0, N - 1.001)
+        i, j = x.astype(int), y.astype(int)
+        fx, fy = x - i, y - j
+        if a.ndim == 3:
+            fx, fy = fx[:, None], fy[:, None]
+        return a[j, i] * (1 - fx) * (1 - fy) + a[j, i + 1] * fx * (1 - fy) + a[j + 1, i] * (1 - fx) * fy + a[j + 1, i + 1] * fx * fy
+
+    cx = cy = N / 2
+    ground = bil(h, np.array([cx]), np.array([cy]))[0]
+    eye = max(ground, 0) + alt
+    f = (IW / 2) / math.tan(math.radians(35))
+    hor = IH / 2 + f * math.tan(math.radians(pitch))
+    cols = np.arange(IW)
+    ang = math.radians(heading) + np.arctan((cols - IW / 2) / f)
+    dx, dy = np.sin(ang), np.cos(ang)
+    cosf = np.cos(ang - math.radians(heading))
+    img = np.zeros((IH, IW, 3))
+    sky = np.linspace(0.55, 0.85, IH)[:, None] * np.array([0.55, 0.70, 0.95])
+    img[:] = sky[:, None, :]
+    ybuf = np.full(IW, IH, int)
+    zmax = min(N / 2 * DX - 50, 120 * alt + 15000)
+    zs = np.geomspace(max(3.0, alt * 0.3), zmax, 1400)
+    for z in zs:
+        px, py = cx + dx * z / DX, cy - dy * z / DX
+        inside = (px > 0) & (px < N - 1) & (py > 0) & (py < N - 1)
+        hz = bil(h, px, py) - z * z / (2 * R)
+        y = np.clip((hor - (hz - eye) / (z * cosf) * f).astype(int), 0, IH)
+        c = bil(col, px, py)
+        t = 1 - np.exp(-z / 40000.0)
+        c = c * (1 - t[..., None]) + t[..., None] * np.array([0.62, 0.72, 0.88])
+        for k in np.nonzero(inside & (y < ybuf))[0]:
+            img[y[k]:ybuf[k], k] = c[k]
+            ybuf[k] = y[k]
+    return Image.fromarray((np.clip(img, 0, 1) ** (1 / 1.4) * 255).astype(np.uint8))
+
+
+os.makedirs(sd, exist_ok=True)
+rows = [("real (GLO-30)", f"{d}/{tile}-real.f32"), ("baseline (today)", f"{d}/{tile}-site1-baseline.f32"), ("combined (re-matched)", f"{d80}/{tile}-site1-{variant}.f32")]
+LW, TH = 210, 30
+font = ImageFont.load_default(size=18)
+sheet = Image.new("RGB", (LW + 2 * IW + 6, TH + len(rows) * (IH + 6)), "white")
+dr = ImageDraw.Draw(sheet)
+dr.text((6, 6), title, fill="black", font=font)
+dr.text((LW + 8, 6), "eye 300 m", fill="black", font=font)
+dr.text((LW + IW + 14, 6), "eye 30 m", fill="black", font=font)
+for r, (label, path) in enumerate(rows):
+    y = TH + r * (IH + 6)
+    dr.text((6, y + IH // 2 - 10), label, fill="black", font=font)
+    for c, (alt, pitch) in enumerate([(300, 8), (30, 4)]):
+        sheet.paste(render(path, alt, 90, pitch), (LW + c * (IW + 6), y))
+out = f"{sd}/{tile}-stills.jpg"
+sheet.save(out, quality=82)
+print(out, sheet.size, os.path.getsize(out))

@@ -8,7 +8,7 @@ include!("support/concurrent_source.rs");
 fn tiles_over_the_store_are_identical_at_1_and_3_threads_and_to_the_in_memory_bake() {
     // The small variant (tier A): one thread against three, on four tiles of every face (levels 0 to 2 and a fine edge tile, so a face
     // edge and block borders still occur); 1, 4 and 20 threads on all tiles is `oracle_concurrent_source.rs` (tier B).
-    let (d, w) = stored("tiles");
+    let (d, w) = stored();
     let store = TileStore::open(d.path(), w.params()).unwrap();
     let grid = bake(7, &TangentWarp, RES, 2).unwrap();
     let def = WorldDefinition::single_planet(R, 7);
@@ -56,7 +56,7 @@ fn tiles_over_the_store_are_identical_at_1_and_3_threads_and_to_the_in_memory_ba
 // spec: STRM-014
 #[test]
 fn threads_that_want_one_block_share_one_decode() {
-    let (d, w) = stored("one-decode");
+    let (d, w) = stored();
     let store = TileStore::open(d.path(), w.params()).unwrap();
     let grid = bake(7, &TangentWarp, RES, 2).unwrap();
     let src = StoreSource::with_budget(&store, &w, RES, BLOCKS * BLOCK_BYTES).unwrap();
@@ -74,7 +74,7 @@ fn threads_that_want_one_block_share_one_decode() {
 // spec: STRM-014
 #[test]
 fn resident_bytes_never_exceed_the_budget_and_reads_stay_exact() {
-    let (d, w) = stored("budget");
+    let (d, w) = stored();
     let store = TileStore::open(d.path(), w.params()).unwrap();
     let grid = bake(7, &TangentWarp, RES, 2).unwrap();
     for budget_blocks in [0u64, 1, 5, 40] {
@@ -194,9 +194,7 @@ fn work_tiles() -> Vec<TileId> {
 fn twenty_threads_take_the_shared_lock_only_on_a_change_of_block_and_decode_each_block_once() {
     // The deterministic proxy of "the 20-thread rate over the store is at least 80 % of the in-memory rate": what made the
     // rate 20 tiles/s on 20 threads was a lock per lattice read. The measured rate is not asserted (wall clock is not stable
-    // on shared CI, and this 64-cell grid has blocks so small that tiles change block often): run by hand on the real store,
-    //   cargo run --release -p planet --example store_blocks -- --store DIR --global-res 16384 --part rate --memory-rate N
-    // where N is the 20-thread tiles/s of the same tiles over an in-memory bake; it prints the ratio and PASS or FAIL at 80 %.
+    // on shared CI, and this 64-cell grid has blocks so small that tiles change block often): run by hand on the real store (the removed `store_blocks` example did: the ratio to the 20-thread tiles/s of the same tiles over an in-memory bake, PASS at 80 %).
     // Recorded (ad hoc, Rasierklinge, 2026-10-15, M4 item 7b, cells 32, ground-1m draw set): 1,000-1,190 tiles/s on 20 threads
     // over the store against 1,207 in memory (83-98 %); 152 on one thread (111 before); 20 on 20 threads with a mutex per read.
     // Blocks of 16 cells (a 64-cell grid is 4 x 4 blocks per face): the shape of the product, where a tile lies in a few blocks.
@@ -242,7 +240,7 @@ fn twenty_threads_take_the_shared_lock_only_on_a_change_of_block_and_decode_each
 // spec: GEN-020
 #[test]
 fn a_tile_decodes_each_block_it_touches_once_even_with_a_cache_of_one_block() {
-    let (d, w) = stored("block-order");
+    let (d, w) = stored();
     let store = TileStore::open(d.path(), w.params()).unwrap();
     let def = WorldDefinition::single_planet(R, 7);
     let key = w.stage_key(RES).0;
@@ -273,7 +271,7 @@ fn a_threaded_batch_over_the_store_decodes_each_block_once_whatever_the_budget_a
     use planet_core::hash::SplitMix64;
     use planet_core::Vec3;
     use planet_generators::height::HeightField;
-    let (d, w) = stored("threaded-batch");
+    let (d, w) = stored();
     let store = TileStore::open(d.path(), w.params()).unwrap();
     let def = WorldDefinition::single_planet(R, 7);
     let key = w.stage_key(RES).0;
@@ -297,7 +295,7 @@ fn a_threaded_batch_over_the_store_decodes_each_block_once_whatever_the_budget_a
         for threads in [1usize, 3] {
             let src = StoreSource::with_budget(&store, &w, RES, blocks * BLOCK_BYTES).unwrap();
             let field = ErosionGenerator.field(&GenContext::new(&def), BodyId::PLANET, &src, key).unwrap();
-            let got: Vec<u64> = field.heights_threaded(&dirs, threads).iter().map(|h| h.to_bits()).collect();
+            let got: Vec<u64> = field.heights_threaded(&dirs, &threads).iter().map(|h| h.to_bits()).collect();
             assert!(got == reference, "budget {blocks} blocks, {threads} threads: heights differ");
             assert!(
                 src.stats().decodes <= distinct,
@@ -311,7 +309,7 @@ fn a_threaded_batch_over_the_store_decodes_each_block_once_whatever_the_budget_a
 // spec: STRM-022
 #[test]
 fn the_source_counts_its_cache_behaviour_exactly_and_the_reads_stay_the_stored_bits() {
-    let (d, w) = stored("counters");
+    let (d, w) = stored();
     let store = TileStore::open(d.path(), w.params()).unwrap();
     let grid = bake(7, &TangentWarp, RES, 2).unwrap();
     // One thread, a budget of five blocks: every miss decodes and inserts one block, so the evictions are the decodes beyond the
@@ -349,7 +347,7 @@ fn the_source_counts_its_cache_behaviour_exactly_and_the_reads_stay_the_stored_b
 // spec: STRM-022
 #[test]
 fn the_pack_counts_its_lookups_and_the_ones_that_found_a_record() {
-    let (d, w) = stored("pack-counts");
+    let (d, w) = stored();
     let store = TileStore::open(d.path(), w.params()).unwrap();
     assert_eq!(store.read_stats(), planet_cache::pack::StoreReadStats::default());
     let src = StoreSource::with_budget(&store, &w, RES, BLOCKS * BLOCK_BYTES).unwrap();
@@ -364,4 +362,44 @@ fn the_pack_counts_its_lookups_and_the_ones_that_found_a_record() {
     assert!(store.get(planet_cache::global_store::KIND_GLOBAL_BLOCK, tile, missing).unwrap().is_none());
     let after = store.read_stats();
     assert_eq!((after.gets, after.found), (reads.gets + 1, reads.found));
+}
+
+// spec: VIEW-061
+#[test]
+fn pinned_blocks_stay_resident_under_loader_pressure() {
+    // The camera's ground read touches a block or two; pinned, they survive loader threads that read every block of the world through
+    // a budget of 4 blocks, so the next ground read decodes nothing.
+    let (d, w) = stored();
+    let store = TileStore::open(d.path(), w.params()).unwrap();
+    let src = StoreSource::with_budget(&store, &w, RES, 4 * BLOCK_BYTES).unwrap();
+    // A read across a block corner touches several blocks.
+    let ground = || src.at(Face(2), 4, 4).unwrap().elevation_m + src.at(Face(2), 3, 3).unwrap().elevation_m;
+    let (h0, touched) = planet_cache::global_store::record_touched_blocks(ground);
+    assert!(touched.len() >= 2, "a corner read touches two or more blocks: {touched:?}");
+    src.pin_touched(&touched);
+    assert_eq!(src.pinned_blocks().len(), touched.len().min(3), "the pins stay fewer than the budget");
+    let grid = bake(7, &TangentWarp, RES, 2).unwrap();
+    std::thread::scope(|s| {
+        for t in 0..4 {
+            let (src, grid) = (&src, &grid);
+            s.spawn(move || read_all(src, &GridSource(grid), t));
+        }
+    });
+    let st = src.stats();
+    assert!(st.evictions > BLOCKS, "the loaders pushed blocks out: {st:?}");
+    assert!(st.peak_resident_blocks <= 4, "the budget holds with pins: {st:?}");
+    // A fresh thread (no thread-local block) reads the ground again: no decode.
+    let before = src.stats().decodes;
+    let h1 = std::thread::scope(|s| s.spawn(ground).join().unwrap());
+    assert_eq!(h1, h0, "the same ground");
+    assert_eq!(src.stats().decodes, before, "the pinned blocks were still resident");
+    // Unpinned, the same pressure pushes them out.
+    src.pin_touched(&[]);
+    std::thread::scope(|s| {
+        let (src, grid) = (&src, &grid);
+        s.spawn(move || read_all(src, &GridSource(grid), 1));
+    });
+    let before = src.stats().decodes;
+    std::thread::scope(|s| s.spawn(ground).join().unwrap());
+    assert!(src.stats().decodes > before, "without the pins the ground decodes again");
 }

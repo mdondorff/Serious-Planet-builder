@@ -1,0 +1,6 @@
+SPIKE-69 (k from L): plains 0.626 hills 0.124 mountains 0.250 (high 0.061) | dk p99 1.60 max 3.50 | land above 0.5/1/2 km 0.423/0.121/0.043
+L + mountain strength: plains 0.626 hills 0.124 mountains 0.250 (high 0.061) | dk p99 1.74 max 5.05 | land above 0.5/1/2 km 0.423/0.121/0.043
+L + mountain strength + plateau (k 1): plains 0.632 hills 0.135 mountains 0.233 (high 0.060) | dk p99 1.70 max 5.05 | land above 0.5/1/2 km 0.512/0.256/0.051
+plateau share of land (Q > 0.5): 0.127
+plateau cells: r14 p50 67.28009033203125 base elevation p50 before/after 444.77020263671875 1515.9993591308594
+seconds 0.7

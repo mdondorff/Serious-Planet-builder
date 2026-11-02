@@ -1,6 +1,7 @@
 //! The single binary's run modes (CON-01): `editor` (interactive viewer), `generate` (headless CLI)
 //! and `test-render` (headless harness). It wires the other crates together: the window and the editor mode (`window`, `editwin`, `panels`), the world's field chain (`worldfield`), the stores and bakes, and the perf and stress scenes.
 
+pub mod cameraground;
 pub mod coupledworld;
 pub mod crash;
 pub mod editperf;
@@ -22,12 +23,15 @@ mod plancheck;
 pub mod prefill;
 pub mod preflightperf;
 pub mod reproworld;
+pub mod reserveload;
+pub mod shadowrig;
 pub mod sheet;
 pub mod skeleton;
 pub mod stall;
 pub mod stills;
 pub mod streamperf;
 pub mod sweep;
+pub mod terrainscore;
 pub mod ui;
 pub mod window;
 pub mod worldfield;
@@ -41,7 +45,7 @@ use planet_render::{AdapterPolicy, GpuContext};
 
 pub const USAGE: &str = "usage: planet <mode> [options]
 modes:
-  editor        the viewer window (VIEW-001..VIEW-007): the scripted orbit-to-1 m flight on the pipelined loop; keys P/Space pause, R restart, L lit (with the atmosphere) or debug path, V debug view, T vsync, C flight or free camera (WASD move, Q/E down/up, arrows look, Shift boost), Esc quit; the window opens on the lit path with the atmosphere, the look file drawn (sun, adaptive exposure); the title shows frame rate, CPU and GPU time, the path (or the debug view), on the lit path the exposure, and the readiness report; runs on a discrete GPU only (an integrated GPU, a software adapter or an adapter missing a feature or limit is refused with the reason); [--world F --global-res N | --store DIR] [--look F] [--size WxH] [--view NAME] [--cells N --tau PX --finest-level N] [--no-vsync] [--no-ui] (the editor UI, an egui layer drawn after the tone map, VIEW-011) [--edit] (start in the editor mode, VIEW-022: Tab toggles it; the panels, stamps by 2-4 and a click, handles on the planet, Ctrl+Z / Ctrl+Y) [--items DIR] (the edits as one TOML file each in DIR, loaded at the start) [--editor-layout F] (the panel layout, VIEW-018) [--marker LAT,LON[,RADIUS_M]]... (item markers of the globe overview, G, VIEW-013) [--site LAT,LON] (the scripted flight descends over this point, default 20,30); --smoke opens the window, drives the keys for a few dozen frames and closes it (test mode: PLANET_ADAPTER or --adapter, software by default; exits with `no display` where there is none); --no-window starts and exits without a window; --offscreen runs the skeleton without a window
+  editor        the viewer window (VIEW-001..VIEW-007): the scripted orbit-to-1 m flight on the pipelined loop; keys P/Space pause, R restart, L lit (with the atmosphere) or debug path, V debug view, T vsync, C flight or free camera (WASD move, Q/E down/up, arrows look, Shift boost), Esc quit; the window opens on the lit path with the atmosphere, the look file drawn (sun, adaptive exposure); the title shows frame rate, CPU and GPU time, the path (or the debug view), on the lit path the exposure, and the readiness report; runs on a discrete GPU only (an integrated GPU, a software adapter or an adapter missing a feature or limit is refused with the reason); [--world F --global-res N | --store DIR] [--look F] [--size WxH] [--view NAME] [--cells N --tau PX --finest-level N] [--no-vsync] [--shadow-march] (the clipmap shadow pass, off by default; J shows it) [--no-ui] (the editor UI, an egui layer drawn after the tone map, VIEW-011) [--edit] (start in the editor mode, VIEW-022; with --site it turns on where the scripted descent over the site ends: Tab toggles it; the panels, stamps by 2-4 and a click, handles on the planet, Ctrl+Z / Ctrl+Y) [--items DIR] (the edits as one TOML file each in DIR, loaded at the start) [--editor-layout F] (the panel layout, VIEW-018) [--marker LAT,LON[,RADIUS_M]]... (item markers of the globe overview, G, VIEW-013) [--site LAT,LON] (the scripted flight descends over this point, default 20,30); --smoke opens the window, drives the keys for a few dozen frames and closes it (test mode: PLANET_ADAPTER or --adapter, software by default; exits with `no display` where there is none); --no-window starts and exits without a window; --offscreen runs the skeleton without a window
   generate      headless generator CLI: --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --manifest <file> writes the determinism manifest (GEN-003); --cache-dir <dir> --region F,L [--res N] writes a tile face region into a tile store; --verify-cache <dir> [--sample N] regenerates stored tiles and compares (both take --world <definition.toml> or --seed N; --verify-cache fails when nothing could be compared, --allow-stale accepts that); --global-dir <dir> [--global-res N, default 256] bakes the global-coarse field (continents, elevation, climate) of N cells per face edge into a tile store as blocks in the canonical layout (blocks of min(N, 1024) cells) together with its ocean-connectivity channel (one bit per vertex; the area threshold is the definition's `body.0.sea.min_area_fraction`) and prints the time per sample and the channel's cost; --verify-global <dir> [--sample N] regenerates stored blocks and compares; --global-products <dir> [--global-res N] writes cube nets and maps of an in-memory bake (these take --world or --seed and --threads N); --coupled-run <dir> --global-res N (required) makes the coupled run of the bake stored in <dir> (or finds it there) and stores it, with a progress line at most every 10 s during the reduction of the bake and the wall time (STRM-051); --coarse-horizon <dir> --global-res N (required) [--threads N] makes the coarse horizon (far-field shadows, STRM-045) from the coupled run stored beside the bake in <dir> and stores it there, with a progress line and the wall time (the coupled run is made and stored by the viewer or `test-render --scene coupled`); --plan-check <dir> --global-res N (required) plans the standard flight at cells 32 and viewport / tau 240 over the stored bake with the terrain and the eroded field and fails if a view is rejected (M3 acceptance); --prefill-dir <dir> --global-res N [--prefill-levels L] [--floor-level F] writes the coarse tiles of levels F..=L (F the render floor, default 3; L default 4; an L below F writes nothing and says so; the tiles of cells 32, finest level 22, compact form, as the streamer generates them) of the stored bake into its tile pack, skipping what is there; --global-dir pre-fills the same way after the bake (--prefill-levels 0 disables; --floor-level takes both); --smoke starts and exits
   test-render   headless render harness
     --scene hello-triangle|tiles|terrain   render a scene (default hello-triangle)
@@ -83,6 +87,8 @@ modes:
     --perf                   performance-harness skeleton (needs --adapter hardware; the readiness gate decides, ADR 0020)
     --calibrate              measure the CPU calibration in a smoke run too (TEST-039; a measured run always does): proves the logging on any adapter, the log is still no measurement
     --machine-ready          owner override of a failed readiness gate (ADR 0020); recorded in the log
+    --reserve                run the streaming scenes with the synthetic loads of the reserved shares on (BUDG-011, BUDG-012) and print the reserve report
+    --loaded                 loaded mode (ADR 0087, BUILD-030): the load of the machine is recorded, not refused; the hard conditions still refuse
     --smoke                  start and exit";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -112,6 +118,10 @@ pub struct Options {
     pub gen_priority: Option<planet_streaming::Priority>,
     pub perf: bool,
     pub machine_ready: bool,
+    /// Loaded mode (BUILD-030): the readiness gate records the load of the machine instead of refusing on it.
+    pub loaded: bool,
+    /// The streaming scenes run beside the synthetic loads of the reserved shares (BUDG-012).
+    pub reserve: bool,
     pub view: String,
     pub tiles: Vec<String>,
     pub seed: u64,
@@ -153,11 +163,11 @@ pub struct Options {
     pub radii_m: Option<String>,
     /// `--altitudes-m`: cameras at these altitudes (metres separated by commas) in the `edit-latency` and envelope scenes; none: the scene's own.
     pub altitudes_m: Option<String>,
-    /// `--horizon-threads N`: the scoped threads one horizon bake of the chunk stage uses in the `edit-latency` scene (default: the cores, at most 4).
+    /// `--horizon-threads N`: the scoped threads one horizon bake uses in the `edit-latency` scene (default: the cores, at most 4).
     pub horizon_threads: Option<usize>,
     /// `--repeats N`: the runs of every case of the `edit-latency` scene (default 3).
     pub repeats: Option<usize>,
-    /// `--no-horizon-jobs`: the `edit-latency` scene's chunk stage without the horizon jobs (they share the chunk pool).
+    /// `--no-horizon-jobs`: the `edit-latency` scene without the horizon jobs (the edit's tile refresh alone).
     pub no_horizon_jobs: bool,
     /// `perf coupled --store DIR --remake-into OUT`: time a fresh make of the coupled run from the stored bake, written to `OUT` under `target/`, never into the store (GEN-042).
     pub remake_into: Option<PathBuf>,
@@ -231,6 +241,8 @@ pub struct Options {
     pub size: Option<(u32, u32)>,
     /// `editor --no-vsync`: start with vsync off (the `T` key toggles it).
     pub no_vsync: bool,
+    /// `editor --shadow-march`: run the clipmap shadow pass (ADR 0085, REND-050) beside the lit frames; nothing shades with it yet, J's shadow view shows it.
+    pub shadow_march: bool,
     /// `editor --no-window`: do not open the window (the start check of CON-01 on a machine without a display).
     pub no_window: bool,
     /// Every option given on the command line, so modes can reject options they would otherwise ignore.
@@ -304,6 +316,8 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         gen_reserve: None,
         perf: false,
         machine_ready: false,
+        loaded: false,
+        reserve: false,
         view: "face".into(),
         tiles: vec![],
         seed: 1,
@@ -373,6 +387,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         out_dir: None,
         size: None,
         no_vsync: false,
+        shadow_march: false,
         no_window: false,
         given: Default::default(),
     };
@@ -381,6 +396,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         match a.as_str() {
             "--smoke" => o.smoke = true,
             "--no-vsync" => o.no_vsync = true,
+            "--shadow-march" => o.shadow_march = true,
             "--no-window" => o.no_window = true,
             "--perf" => o.perf = true,
             "--offscreen" => o.offscreen = true,
@@ -523,6 +539,8 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--manifest" => o.manifest = Some(PathBuf::from(it.next().ok_or("--manifest needs a path")?)),
             "--face-net" => o.face_net = Some(PathBuf::from(it.next().ok_or("--face-net needs a path")?)),
             "--machine-ready" => o.machine_ready = true,
+            "--loaded" => o.loaded = true,
+            "--reserve" => o.reserve = true,
             "--scene" => o.scene = it.next().ok_or("--scene needs a value")?.clone(),
             "--out" => o.out = Some(PathBuf::from(it.next().ok_or("--out needs a value")?)),
             "--upload" => {
@@ -564,6 +582,9 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             }
             other => return Err(format!("unknown option '{other}'\n{USAGE}")),
         }
+    }
+    if o.loaded && o.machine_ready {
+        return Err("--loaded and --machine-ready exclude each other: loaded mode records the load, the owner's override ignores a failed gate (BUILD-030)".into());
     }
     Ok(o)
 }
@@ -718,19 +739,8 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
         } else if stream_scene {
             // `--prefill-levels`: the levels of the tile pack the gated dives require pre-filled at their start (default 4).
             // `--altitudes-m`: the altitudes of the envelope scene (`--only-steady`, TEST-057).
-            // `--base-threads`: the threads of a batch of the A-net's base heights in the edit-latency scene.
             // `--radii-m`: with `--altitudes-m`, the hill stamps of the edit-latency scene to run (a diagnosis of one case).
-            &[
-                "--world",
-                "--global-res",
-                "--prefill-levels",
-                "--base-threads",
-                "--horizon-threads",
-                "--repeats",
-                "--altitudes-m",
-                "--radii-m",
-                "--places",
-            ]
+            &["--world", "--global-res", "--prefill-levels", "--horizon-threads", "--repeats", "--altitudes-m", "--radii-m", "--places"]
         } else if window {
             &["--world", "--global-res", "--prefill-levels"]
         } else if terrain_scene {
@@ -775,7 +785,14 @@ pub(crate) fn err(e: std::io::Error) -> String {
 /// The adapter itself is checked by the caller before this (it is never overridable and costs no sampling time).
 pub(crate) fn readiness_gate(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<Vec<String>, String> {
     writeln!(out, "readiness gate: sampling the machine for {} s ...", planet_perf::gate::LOAD_WINDOW_S).map_err(err)?;
-    let failures = planet_perf::gate::readiness(&planet_perf::gate::measure_machine(facts(ctx)));
+    let mode = if o.loaded { planet_perf::gate::Mode::Loaded } else { planet_perf::gate::Mode::Quiet };
+    let gate = planet_perf::gate::readiness_mode(&planet_perf::gate::measure_machine(facts(ctx)), mode);
+    // Loaded mode: the load is recorded with the session and printed; the hard conditions below still refuse.
+    if let Some(load) = &gate.load {
+        writeln!(out, "readiness gate (loaded mode, load recorded not judged): {}", load.text()).map_err(err)?;
+    }
+    planet_perf::gate::record_load(gate.load.clone());
+    let failures = gate.failures;
     if failures.is_empty() {
         writeln!(out, "readiness gate: ok").map_err(err)?;
         return Ok(Vec::new());
@@ -1459,6 +1476,39 @@ mod tests {
         assert!(e.contains("--cells 8") && e.contains("at least 16"), "{e}");
     }
 
+    // spec: VIEW-061
+    #[test]
+    fn the_camera_phase_decodes_no_block_on_the_main_thread_and_the_ground_arrives_pinned_and_exact() {
+        // A cold store: the camera's first ground read decodes a block. The frame polls the ground thread inside its camera phase; the decode
+        // happens on that thread, the phase records none, and the answer equals the field's own height bit for bit with its blocks pinned.
+        let d = TempDir::new("camera-ground");
+        let store = d.s("store");
+        run_str(&["generate", "--global-dir", &store, "--global-res", "8", "--seed", "3", "--prefill-levels", "0"]).unwrap();
+        let def = planet_world_def::WorldDefinition::single_planet(skeleton::RADIUS_M, 3);
+        let world = std::sync::Arc::new(worldfield::WorldTerrain::open_store(def, std::path::Path::new(&store), 8).unwrap());
+        assert!(world.pinned_blocks().is_empty(), "nothing pinned before the first ground read");
+        let w = std::sync::Arc::clone(&world);
+        let mut ground = cameraground::CameraGround::new(std::sync::Arc::new(move |d| w.ground_pinned(d)));
+        let nadir = planet_core::Vec3::new(0.3, -0.6, 0.74).normalized();
+        let mut probe = stall::StallProbe::default();
+        let start = std::time::Instant::now();
+        let answer = loop {
+            probe.begin();
+            let a = ground.poll(nadir);
+            probe.mark("camera, ground heights and the globe overview");
+            assert!(probe.main_decodes().is_empty(), "the camera phase decoded a block on the main thread: {:?}", probe.main_decodes());
+            if let Some(a) = a {
+                break a;
+            }
+            assert!(start.elapsed() < std::time::Duration::from_secs(20), "the ground never arrived");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        };
+        assert_eq!(answer.0, nadir);
+        let exact = world.field().unwrap().height(nadir);
+        assert_eq!(answer.1.to_bits(), exact.to_bits(), "the ground thread reads the same field: {} against {exact}", answer.1);
+        assert!(!world.pinned_blocks().is_empty(), "the blocks under the camera are pinned");
+    }
+
     // spec: STRM-021, STRM-022
     #[test]
     fn a_pre_filled_tile_read_by_the_streamer_equals_the_generated_one_bit_for_bit_and_a_cold_reader_ignores_the_pack() {
@@ -1754,6 +1804,24 @@ mod tests {
         assert!(run_str(&["test-render", "--out-dir", p]).unwrap_err().contains("--out-dir only applies to --flight"));
         assert!(run_str(&["test-render", "--size", "12x12"]).unwrap_err().contains("--size must be WxH"));
         assert!(!d.exists(), "no rejected run may create the output directory");
+    }
+
+    // spec: BUDG-012
+    #[test]
+    fn the_reserve_option_is_parsed() {
+        let args = |a: &[&str]| parse_args(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        assert!(args(&["test-render", "--perf", "--reserve"]).unwrap().reserve);
+        assert!(!args(&["test-render", "--perf"]).unwrap().reserve);
+    }
+
+    // spec: BUILD-030
+    #[test]
+    fn loaded_mode_is_an_option_and_excludes_the_owners_override() {
+        let args = |a: &[&str]| parse_args(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        assert!(args(&["test-render", "--perf", "--loaded"]).unwrap().loaded);
+        assert!(!args(&["test-render", "--perf"]).unwrap().loaded);
+        let e = args(&["test-render", "--perf", "--loaded", "--machine-ready"]).unwrap_err();
+        assert!(e.contains("--loaded and --machine-ready exclude each other"), "{e}");
     }
 
     // spec: GEN-003

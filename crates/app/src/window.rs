@@ -105,6 +105,28 @@ pub fn edit_mouse_action(button: MouseButton, state: ElementState, world: bool, 
     }
 }
 
+/// Whether the scripted descent (`cameras` of it, one per frame step) has played to its last camera at flight time `t_s`: the editor mode of
+/// `--edit --site` turns on there, where the free camera takes the flight's landing pose (VIEW-022).
+pub fn descent_finished(t_s: f64, cameras: usize) -> bool {
+    t_s >= cameras.saturating_sub(1) as f64 * planet_frame::scenes::FRAME_STEP_S
+}
+
+/// Whether the window plays the scripted descent over `--site` before the editor mode (`--edit`) turns on: not in a smoke run, which turns the
+/// mode on itself, and not without a site, where the mode starts on as before (VIEW-022).
+pub fn site_descent_wanted(edit: bool, site_given: bool, smoke: bool) -> bool {
+    edit && site_given && !smoke
+}
+
+/// One frame of the wait for the end of the descent, as (still waiting, turn the editor mode on now): a mode already on (a Tab) ends the wait
+/// without a toggle, the last camera of the flight turns it on, and otherwise the wait goes on (VIEW-022).
+pub fn descent_wait_step(waiting: bool, edit_on: bool, t_s: f64, cameras: usize) -> (bool, bool) {
+    if !waiting || edit_on {
+        return (false, false);
+    }
+    let done = descent_finished(t_s, cameras);
+    (!done, done)
+}
+
 /// What the editor mode does to the camera and the overview this frame (VIEW-022), as (end the overview, take the free camera): turning
 /// the mode on ends the overview once (`end_overview` is that one request, taken by the caller), and while the mode is on and no overview
 /// is shown the camera is the free one. The overview shown later with G stays.
@@ -161,6 +183,8 @@ struct Config {
     ui: bool,
     /// Start in the editor mode (`--edit`, VIEW-022).
     edit: bool,
+    /// `--edit` with `--site` (not a smoke run): the scripted flight descends over the site first, and the editor mode turns on where it ends.
+    site_descent: bool,
     /// The directory the edits are written to and loaded from (`--items`).
     items: Option<PathBuf>,
     /// The panel layout (`--editor-layout`, VIEW-018).
@@ -168,6 +192,8 @@ struct Config {
     /// Frames a smoke run drives before it closes the window (`--frames`, default [`SMOKE_FRAMES`]).
     smoke_frames: u64,
     vsync: bool,
+    /// `--shadow-march`: the clipmap shadow pass runs beside the lit frames.
+    shadow_march: bool,
     policy: AdapterPolicy,
     gen: planet_streaming::GenWorkers,
     initial_view: usize,
@@ -293,6 +319,8 @@ struct Running {
     last_wanted: Vec<TileId>,
     /// Turning the mode on ends the overview, once.
     end_overview: bool,
+    /// The editor mode waits for the end of the scripted descent (`--edit --site`, VIEW-022).
+    descent_wait: bool,
     window: Arc<Window>,
     ctx: GpuContext,
     surface: WindowSurface,
@@ -346,11 +374,15 @@ struct Running {
     camera_position: planet_core::Vec3,
     /// The slots, versions and uploads of the horizon shadows (REND-038).
     horizon: crate::horizonworld::HorizonRig,
+    /// The clipmap shadow pass's planner and last plan (`--shadow-march`).
+    shadow: Option<crate::shadowrig::ShadowRig>,
     coupled_standing: Standing,
     /// The item markers of the globe overview, the ones the overview shows this frame (window pixels) and the one under the cursor.
     markers: Vec<Marker>,
     screen_markers: Vec<ScreenMarker>,
     hover: Option<u64>,
+    /// The free camera's ground, read on a thread of its own (VIEW-061).
+    ground: crate::cameraground::CameraGround,
     /// The cursor in render pixels, the camera of the last frame (what a click on the overview is traced through) and a press in progress.
     cursor: [f64; 2],
     /// What a click at the cursor would do in the overview (VIEW-045), kept from the last cursor move; `None` outside the overview.
@@ -385,11 +417,45 @@ struct App<'w> {
     /// The plan parameters: the configured ones, with the height bound raised to the field's maximum when the stamps lift it (VIEW-022).
     lod: LodParams,
     cameras: &'w [Camera],
+    /// The size of the 3D target in pixels: the window's inner size, as of the last resize that has settled (it starts as `--size`).
+    size: (u32, u32),
+    /// A resize the window reported and the time it did (the target follows when the size has held for [`RESIZE_SETTLE_MS`]).
+    pending_resize: Option<((u32, u32), u64)>,
     clock: Arc<SystemClock>,
     params: ControllerParams,
     state: Option<Running>,
     error: Option<String>,
     summary: Option<String>,
+}
+
+/// How long a window size must hold before the 3D target is made again at it, milliseconds (an edge drag sends a size per mouse move).
+const RESIZE_SETTLE_MS: u64 = 150;
+
+/// The target size a pending window resize asks for now: the pending size when it differs from the current one and has held for
+/// [`RESIZE_SETTLE_MS`].
+pub fn resize_due(current: (u32, u32), pending: Option<((u32, u32), u64)>, now_ms: u64) -> Option<(u32, u32)> {
+    pending.filter(|(size, at)| *size != current && now_ms.saturating_sub(*at) >= RESIZE_SETTLE_MS).map(|(size, _)| size)
+}
+
+/// The window's report of a new size: the pending resize it makes (a size of 0, a minimised window, leaves what was pending).
+pub fn on_resized(pending: Option<((u32, u32), u64)>, width: u32, height: u32, now_ms: u64) -> Option<((u32, u32), u64)> {
+    if width > 0 && height > 0 {
+        Some(((width, height), now_ms))
+    } else {
+        pending
+    }
+}
+
+/// The plan parameters for a target of `size`: the viewport height is the target's (the error tolerance stays in pixels); `None` when the
+/// parameters then fail their own check (a window too small for the cell count), and the old ones stay.
+pub fn lod_for_size(base: &LodParams, size: (u32, u32)) -> Option<LodParams> {
+    let lod = LodParams { viewport_h_px: f64::from(size.1), ..base.clone() };
+    lod.validate().ok().map(|()| lod)
+}
+
+/// The aspect (width over height) of a target size, as the camera's projection takes it.
+pub fn aspect_of(size: (u32, u32)) -> f64 {
+    f64::from(size.0) / f64::from(size.1.max(1))
 }
 
 /// How long the title keeps the notice of an F9 capture, milliseconds (VIEW-026).
@@ -439,6 +505,7 @@ impl App<'_> {
             mesh_version: planet_generators::mesh::MESH_VERSION,
             definition_hash: definition.hash(),
             adapter: st.ctx.adapter_key(),
+            commit: crate::crash::bundle_commit(),
             world: Some(planet_frame::BundleWorld {
                 height_field: self.world.id().to_string(),
                 global_res: self.world.global_res(),
@@ -483,23 +550,23 @@ impl App<'_> {
         crate::stall::phase_mark("floor tiles");
         // The horizon maps are baked from the base terrain and the stamps (STRM-064), on the idle class of the same pool (the chunk stage is removed).
         if self.world.has_bake() && self.world.store_dir().is_some() && (!cfg.smoke || std::env::var_os("PLANET_GATE").is_some()) {
-            if let Err(e) = self.world.enable_viewer_horizon(cfg.gen, self.clock.clone()) {
+            if let Err(e) = self.world.enable_viewer_horizon_on(cfg.gen, rig.horizon_pool.clone(), self.clock.clone()) {
                 eprintln!("horizon: {e}");
             }
         }
         // `enable_lit` is not part of `warm_up`: the lit and atmosphere passes are enabled and used once per ring set here, before the
         // first measured frame, whether the window starts lit or on the debug path (REND-017, VIEW-007).
-        let warm_lit = viewer_lit_plan(&cfg.look, cfg.radius_m, 0.0, true, cfg.atmosphere)?.with_water_level(cfg.water_level_m);
-        rig.renderer
-            .warm_up_lit(&ctx, &{
-                let mut warm = lit_warm_plan(self.cameras[0], cfg.size, cfg.lod.cells, warm_lit);
-                // A world with water warms the water pass too (no node: the pipelines and the copy target exist before frame 0).
-                if self.world.has_water() {
-                    warm.water = Some(empty_water_plan(&cfg.look.water));
-                }
-                warm
-            })
-            .map_err(|e| format!("warming the lit path: {e}"))?;
+        rig.renderer.warm_up_lit(&ctx, &self.lit_warm(cfg.size)?).map_err(|e| format!("warming the lit path: {e}"))?;
+        // The clipmap shadow pass (ADR 0085 layer 1), off unless asked for: the planner runs on the terrain share.
+        // A smoke run uses 256-texel levels (the software adapter gathers 1024^2 levels in seconds a frame); a real run the full size.
+        let shadow = cfg.shadow_march.then(|| {
+            let params = planet_frame::clipmap::ClipmapParams {
+                texels: if cfg.smoke { 256 } else { planet_frame::clipmap::CLIPMAP_TEXELS },
+                ..planet_frame::clipmap::ClipmapParams::new(cfg.radius_m, cfg.lod.cells)
+            };
+            rig.renderer.enable_shadow(&ctx, params.texels, params.levels, cfg.radius_m);
+            crate::shadowrig::ShadowRig::new(rig.horizon_pool.clone(), params)
+        });
         let now = self.clock.now_ms();
         // The editor holds a re-keyed tile's refresh until its edits have been quiet for a moment (STRM-031, ADR 0072).
         if cfg.ui {
@@ -510,15 +577,15 @@ impl App<'_> {
         let edit = if cfg.ui {
             let mut e = EditRuntime::new(self.world.definition().as_ref().clone(), cfg.radius_m, cfg.items.as_ref(), cfg.layout.clone())?;
             // A smoke run turns the mode on itself, at the frame its script says, after the overview phases.
-            e.on = cfg.edit && !cfg.smoke;
+            e.on = cfg.edit && !cfg.smoke && !cfg.site_descent;
             if std::env::var_os("PLANET_GATE").is_some() {
                 e.set_gate();
             }
             // The hover pick runs on a thread of its own against a field it makes (the current definition and stamps): a cold bake block is decoded there (VIEW-059).
             let world = self.world.clone();
-            e.set_hover_source(std::sync::Arc::new(move |ray, limits, level| {
+            e.set_hover_source(std::sync::Arc::new(move |ray, limits| {
                 let field = world.field().ok()?;
-                planet_frame::pick::pick_surface(&ray, &limits, &|d| field.height_at_level(d, level))
+                planet_frame::pick::pick_surface(&ray, &limits, &|d| field.height(d))
             }));
             // The brush guard limits the stack of strokes by what these parameters can draw (VIEW-043).
             e.session.set_drawable_slope(cfg.lod.drawable_slope());
@@ -526,7 +593,11 @@ impl App<'_> {
         } else {
             None
         };
+        // The free camera's ground is read on a thread of its own, with the blocks under the camera pinned (VIEW-061, CON-22).
+        let ground_world = self.world.clone();
+        let ground = crate::cameraground::CameraGround::new(std::sync::Arc::new(move |d| ground_world.ground_pinned(d)));
         self.state = Some(Running {
+            ground,
             ui,
             edit,
             ctrl: false,
@@ -536,6 +607,7 @@ impl App<'_> {
             marker_labels: HashMap::new(),
             last_wanted: Vec::new(),
             end_overview: false,
+            descent_wait: cfg.site_descent,
             window,
             ctx,
             surface,
@@ -573,6 +645,7 @@ impl App<'_> {
             sun_dir: [0.0, 0.0, 1.0],
             camera_position: planet_core::Vec3::new(1.0, 0.0, 0.0),
             horizon: Default::default(),
+            shadow,
             coupled_standing: Standing::Idle,
             markers: cfg.markers.clone(),
             screen_markers: Vec::new(),
@@ -597,7 +670,7 @@ impl App<'_> {
     /// A click on the globe overview at the cursor: a marker or the surface under it, and the flight there starts (VIEW-013).
     fn globe_click(&mut self) {
         let Some(st) = self.state.as_mut() else { return };
-        let viewport = Viewport { width_px: f64::from(self.cfg.size.0), height_px: f64::from(self.cfg.size.1) };
+        let viewport = Viewport { width_px: f64::from(self.size.0), height_px: f64::from(self.size.1) };
         let limits = planet_frame::pick::PickLimits::new(self.cfg.radius_m, self.lod.max_height_m);
         let field = self.field.as_ref();
         let height = |d: planet_core::Vec3| field.height(d);
@@ -623,7 +696,7 @@ impl App<'_> {
     /// arrow elsewhere. Outside the overview the cursor is the arrow and there is no target.
     fn update_click_target(&mut self) {
         let Some(st) = self.state.as_mut() else { return };
-        let viewport = Viewport { width_px: f64::from(self.cfg.size.0), height_px: f64::from(self.cfg.size.1) };
+        let viewport = Viewport { width_px: f64::from(self.size.0), height_px: f64::from(self.size.1) };
         let limits = planet_frame::pick::PickLimits::new(self.cfg.radius_m, self.lod.max_height_m);
         let field = self.field.as_ref();
         let height = |d: planet_core::Vec3| field.height(d);
@@ -638,11 +711,41 @@ impl App<'_> {
         }
     }
 
+    /// The lit plan the renderer is warmed with at `size`: the look's plan with the atmosphere, and the water pass where the world has water.
+    fn lit_warm(&self, size: (u32, u32)) -> Result<planet_frame::TerrainPlan, String> {
+        let cfg = self.cfg;
+        let lit = viewer_lit_plan(&cfg.look, cfg.radius_m, 0.0, true, cfg.atmosphere)?.with_water_level(cfg.water_level_m);
+        let mut warm = lit_warm_plan(self.cameras[0], size, cfg.lod.cells, lit);
+        // A world with water warms the water pass too (no node: the pipelines and the copy target exist before frame 0).
+        if self.world.has_water() {
+            warm.water = Some(empty_water_plan(&cfg.look.water));
+        }
+        Ok(warm)
+    }
+
+    /// The 3D target takes the window's size (VIEW-006): the renderer makes its targets again, the plan's viewport height follows, the
+    /// exposure snaps, and the lit path is warmed again at once so the first drawn frame after the resize creates and first-uses nothing
+    /// (REND-017).
+    fn apply_resize(&mut self, new: (u32, u32)) -> Result<(), String> {
+        self.size = new;
+        self.pending_resize = None;
+        if let Some(lod) = lod_for_size(&self.lod, new) {
+            self.lod = lod;
+        }
+        let warm = self.lit_warm(new)?;
+        if let Some(st) = self.state.as_mut() {
+            st.rig.renderer.resize(&st.ctx, new);
+            st.viewer.reset_exposure();
+            st.rig.renderer.warm_up_lit(&st.ctx, &warm).map_err(|e| format!("warming the lit path after a resize: {e}"))?;
+        }
+        Ok(())
+    }
+
     /// The request of a frame; `coarse` is the editor's coarse-LOD inspection view (the error bound times four, VIEW-014).
     fn request(&self, camera: Camera, view: TerrainView, coarse: bool) -> TerrainRequest {
         TerrainRequest {
             camera,
-            size: self.cfg.size,
+            size: self.size,
             view,
             lod: planet_frame::viewer::effective_lod(&self.lod, coarse),
             face_mapping: planet_core::cube::FaceMapping::id(&planet_core::cube::TangentWarp).to_string(),
@@ -655,6 +758,12 @@ impl App<'_> {
         let cfg = self.cfg;
         let began = Instant::now();
         let now_ms = self.clock.now_ms();
+        // The 3D target takes the window's size once it has settled; every size the frame reads comes from `self.size`.
+        if let Some(new) = resize_due(self.size, self.pending_resize, now_ms) {
+            self.apply_resize(new)?;
+        } else if self.pending_resize.is_some_and(|(sz, _)| sz == self.size) {
+            self.pending_resize = None;
+        }
         if let Some(st) = self.state.as_mut() {
             st.stall.begin();
         }
@@ -746,6 +855,16 @@ impl App<'_> {
             if cfg.smoke {
                 quit |= smoke_keys(&mut st, self.cameras, now_ms)?;
             }
+            // `--edit --site`: the flight descends over the site first and the editor mode turns on where it ends (a Tab before then turns it on at once).
+            if st.descent_wait {
+                let t_s = st.viewer.clock.time_s(now_ms);
+                let (still_waiting, turn_on) = descent_wait_step(true, st.edit.as_ref().is_some_and(|e| e.on), t_s, self.cameras.len());
+                st.descent_wait = still_waiting;
+                if let (true, Some(e)) = (turn_on, st.edit.as_mut()) {
+                    e.toggle();
+                    st.end_overview = e.on;
+                }
+            }
             // The editor mode edits from the free camera: turning it on ended the overview once (G may show it again).
             {
                 let flight = planet_frame::viewer::camera_at(self.cameras, st.viewer.clock.time_s(now_ms));
@@ -760,7 +879,7 @@ impl App<'_> {
                 }
             }
             if cfg.smoke && cfg.edit {
-                let viewport = Viewport { width_px: f64::from(cfg.size.0), height_px: f64::from(cfg.size.1) };
+                let viewport = Viewport { width_px: f64::from(self.size.0), height_px: f64::from(self.size.1) };
                 let limits = PickLimits::new(radius, lod_max_height_m);
                 let camera = st.last_camera;
                 let frames = st.frames;
@@ -771,20 +890,20 @@ impl App<'_> {
             // A command of this frame (C back to the flight, restart) may have released the mouse.
             apply_grab(&mut st);
             st.stall.mark("input, commands and the smoke script");
-            // The ground under the camera reads the height of the tile level a pixel of this view can show, like the pick (VIEW-056); the bake blocks the
-            // camera is about to fly over are read ahead on a thread of their own (CON-22).
-            let ground_level = crate::editwin::EditRuntime::pick_level(
-                &st.last_camera,
-                Viewport { width_px: f64::from(cfg.size.0), height_px: f64::from(cfg.size.1) },
-                radius,
-                lod_max_height_m,
-            );
-            let ground = |p: planet_core::PlanetFixed| radius + field.height_at_level(p.0.normalized(), ground_level);
+            // The bake blocks the camera is about to fly over are read ahead on a thread of their own (CON-22). The free camera's ground is the
+            // ground thread's last answer, for the nadir of a frame at most one request old (VIEW-061); before the first answer and after a jump
+            // (`usable_ground`) the field is read here.
+            let nadir = st.last_camera.position.0;
+            let answer = if nadir.length() > 0.0 { st.ground.poll(nadir.normalized()) } else { st.ground.last() };
+            let ground_m = crate::cameraground::usable_ground(answer, nadir, radius);
+            let ground = |p: planet_core::PlanetFixed| radius + ground_m.unwrap_or_else(|| field.height(p.0.normalized()));
             let height = |p: planet_core::PlanetFixed| p.0.length() - ground(p);
             let had_globe = st.viewer.globe.is_some();
-            let camera = st.viewer.camera(self.cameras, now_ms, dt, &self.params, &height, &ground);
+            let mut camera = st.viewer.camera(self.cameras, now_ms, dt, &self.params, &height, &ground);
+            // The scripted cameras carry the aspect of the start size: the projection follows the window.
+            camera.aspect = aspect_of(self.size);
             let camera = match st.sweep.as_ref() {
-                Some(s) if !s.done() => s.camera(&|d| field.height(d), radius, f64::from(cfg.size.0) / f64::from(cfg.size.1)),
+                Some(s) if !s.done() => s.camera(&|d| field.height(d), radius, f64::from(self.size.0) / f64::from(self.size.1)),
                 _ => camera,
             };
             // The gate holds the first pose of its path while the edit script runs, then replays the path in real time.
@@ -832,7 +951,7 @@ impl App<'_> {
             }
             st.globe_stats.landings += u64::from(had_globe && st.viewer.globe.is_none() && st.viewer.is_free());
             // The globe overview: the markers it shows (render pixels to window pixels) and the one under the cursor.
-            let viewport = Viewport { width_px: f64::from(cfg.size.0), height_px: f64::from(cfg.size.1) };
+            let viewport = Viewport { width_px: f64::from(self.size.0), height_px: f64::from(self.size.1) };
             if st.viewer.globe.is_some() {
                 // The edits the camera shows are markers too (VIEW-022), found over the tiles the last plan wanted.
                 if let Some(e) = st.edit.as_mut() {
@@ -1069,6 +1188,33 @@ impl App<'_> {
                 }
             }
             st.stall.mark("horizon frame and upload");
+            // The clipmap shadow pass (`--shadow-march`): the planner job on the terrain share, the plan that landed (or the last one, unchanged)
+            // with this frame's camera, sun and preview.
+            if let (Some(shadow), Some(lit)) = (st.shadow.as_mut(), plan.lit.as_ref()) {
+                let mut resident: Vec<TileId> = st.rig.managed.resident().keys().copied().collect();
+                resident.sort();
+                let placed = st.rig.renderer.take_placed_tiles();
+                let landed = shadow.step(crate::shadowrig::ShadowInputs {
+                    camera: plan.camera.position,
+                    resident,
+                    placed,
+                    stamps: draw.preview.clone(),
+                });
+                let sun = planet_core::Vec3::new(f64::from(lit.sun_dir[0]), f64::from(lit.sun_dir[1]), f64::from(lit.sun_dir[2]));
+                if let Some(f) = shadow.frame(
+                    landed,
+                    &plan.camera,
+                    sun,
+                    cfg.radius_m,
+                    self.lod.max_height_m,
+                    &draw.preview,
+                    draw.preview_delta_len,
+                    &plan.nodes,
+                ) {
+                    st.rig.renderer.set_shadow_frame(f);
+                }
+            }
+            st.stall.mark("shadow plan and frame");
             // The regions overlay (VIEW-030): the region items of the editor's definition nearest the camera, decided here, drawn by the renderer.
             if plan.lit.is_some_and(|l| l.overlay == planet_frame::look::Overlay::Regions) {
                 let list = st.edit.as_ref().map(|e| e.region_list(plan.camera.position.0)).unwrap_or_default();
@@ -1257,6 +1403,15 @@ impl App<'_> {
         if let Some(h) = self.world.horizon_stats() {
             extra += &format!("horizon jobs: {h:?}\n");
         }
+        {
+            // A refresh that waits shows here (edit-stale-diagnostics): held by the settle window, or queued per class.
+            let streamer = st.rig.managed.manager().streamer();
+            extra += &format!(
+                "refreshes held by the settle window: {}; requests queued draw/residency/prefetch: {:?}\n",
+                streamer.held_refreshes(),
+                streamer.queued_by_class()
+            );
+        }
         extra += &format!("stalls so far: {}\n", st.stall.stalls);
         let text = stall.text(&extra);
         let now_ms = self.clock.now_ms();
@@ -1278,7 +1433,7 @@ impl App<'_> {
     /// A mouse button in the editor mode: the left one edits (a press in the world presses, a release always releases), the right one looks
     /// around while it is held.
     fn edit_mouse(&mut self, state: ElementState, button: MouseButton, world: bool) {
-        let viewport = Viewport { width_px: f64::from(self.cfg.size.0), height_px: f64::from(self.cfg.size.1) };
+        let viewport = Viewport { width_px: f64::from(self.size.0), height_px: f64::from(self.size.1) };
         let limits = PickLimits::new(self.cfg.radius_m, self.lod.max_height_m);
         let field = self.field.as_ref();
         let Some(st) = self.state.as_mut() else { return };
@@ -1568,6 +1723,8 @@ impl ApplicationHandler for App<'_> {
                 if let Some(st) = self.state.as_mut() {
                     st.surface.resize(&st.ctx, (size.width, size.height));
                 }
+                // The 3D target follows the window once the size holds (dragging an edge sends a stream of sizes); a minimised window (0) keeps it.
+                self.pending_resize = on_resized(self.pending_resize, size.width, size.height, self.clock.now_ms());
             }
             WindowEvent::KeyboardInput { event, is_synthetic, .. } if !self.cfg.smoke => {
                 let PhysicalKey::Code(code) = event.physical_key else { return };
@@ -1629,10 +1786,8 @@ impl ApplicationHandler for App<'_> {
             WindowEvent::CursorMoved { position, .. } => {
                 if let Some(st) = self.state.as_mut() {
                     let inner = st.window.inner_size();
-                    let (sx, sy) = (
-                        f64::from(self.cfg.size.0) / f64::from(inner.width.max(1)),
-                        f64::from(self.cfg.size.1) / f64::from(inner.height.max(1)),
-                    );
+                    let (sx, sy) =
+                        (f64::from(self.size.0) / f64::from(inner.width.max(1)), f64::from(self.size.1) / f64::from(inner.height.max(1)));
                     let now = [position.x * sx, position.y * sy];
                     // A press only counts while the overview is shown; otherwise it is stale.
                     if st.viewer.globe.is_none() {
@@ -1641,12 +1796,12 @@ impl ApplicationHandler for App<'_> {
                     let d = [now[0] - st.cursor[0], now[1] - st.cursor[1]];
                     if world && st.press.moved_by(libm::hypot(d[0], d[1])) {
                         if let Some(g) = st.viewer.globe.as_mut() {
-                            g.drag(d[0], d[1], self.cameras[0].fov_y_rad, f64::from(self.cfg.size.1));
+                            g.drag(d[0], d[1], self.cameras[0].fov_y_rad, f64::from(self.size.1));
                         }
                     }
                     st.cursor = now;
                     if world && st.edit_down {
-                        let viewport = Viewport { width_px: f64::from(self.cfg.size.0), height_px: f64::from(self.cfg.size.1) };
+                        let viewport = Viewport { width_px: f64::from(self.size.0), height_px: f64::from(self.size.1) };
                         let limits = PickLimits::new(self.cfg.radius_m, self.lod.max_height_m);
                         let camera = st.last_camera;
                         if let Some(e) = st.edit.as_mut() {
@@ -1788,6 +1943,13 @@ fn smoke_summary(st: &Running) -> String {
             if e.on { "mode on" } else { "mode off" }
         )
     });
+    let shadow = st.shadow.as_ref().map_or(String::new(), |_| {
+        format!(
+            "
+  shadow pass: {} frames resolved",
+            st.rig.renderer.shadow_frames_run()
+        )
+    });
     // The F9 files of the run, when the script pressed it (`PLANET_REPRO_DIR` set).
     let repro = if st.repro_files > 0 {
         format!(
@@ -1829,6 +1991,7 @@ fn smoke_summary(st: &Running) -> String {
         st.last_title
     ) + &ui
         + &edit
+        + &shadow
         + &globe
         + &repro
         + &format!("
@@ -1943,6 +2106,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         smoke: o.smoke,
         ui: !o.no_ui,
         edit: o.edit,
+        site_descent: site_descent_wanted(o.edit, o.site.is_some(), o.smoke),
         items: o.items.clone(),
         layout: match &o.editor_layout {
             Some(p) => Layout::from_toml(&std::fs::read_to_string(p).map_err(|e| format!("--editor-layout {}: {e}", p.display()))?)
@@ -1957,6 +2121,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
             SMOKE_FRAMES
         },
         vsync: !o.no_vsync,
+        shadow_march: o.shadow_march,
         policy,
         gen: o.gen_workers(),
         initial_view,
@@ -1992,6 +2157,8 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         field_stage: world.field_stage(),
         lod: cfg.lod.clone(),
         cameras: &script.cameras,
+        size: cfg.size,
+        pending_resize: None,
         clock: Arc::new(SystemClock::new()),
         params: ControllerParams::for_radius(radius_m),
         state: None,
@@ -2564,5 +2731,52 @@ mod tests {
                 assert_eq!(mode_camera_steps(false, false, globe, free), (false, false));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod resize_tests {
+    use super::*;
+
+    // spec: VIEW-006
+    #[test]
+    fn a_window_size_that_has_held_becomes_the_target_size_and_one_that_has_not_waits() {
+        let now = 10_000;
+        assert_eq!(resize_due((1280, 720), None, now), None, "nothing pending");
+        assert_eq!(resize_due((1280, 720), Some(((1920, 1080), now - 10)), now), None, "still being dragged");
+        assert_eq!(resize_due((1280, 720), Some(((1920, 1080), now - RESIZE_SETTLE_MS)), now), Some((1920, 1080)), "it has held");
+        assert_eq!(resize_due((1280, 720), Some(((1280, 720), now - 5_000)), now), None, "back to the current size: nothing to do");
+        assert_eq!(resize_due((1280, 720), Some(((1920, 1080), now + 5)), now), None, "a clock that stepped back waits");
+    }
+
+    // spec: VIEW-006
+    #[test]
+    fn the_projection_aspect_is_the_targets() {
+        assert!((aspect_of((1920, 1080)) - 16.0 / 9.0).abs() < 1e-12);
+        assert!((aspect_of((800, 800)) - 1.0).abs() < 1e-12);
+        assert_eq!(aspect_of((640, 0)), 640.0, "a zero height is read as one pixel, never a division by zero");
+    }
+
+    // spec: VIEW-006
+    #[test]
+    fn a_drag_of_sizes_waits_for_the_last_and_a_minimised_window_changes_nothing() {
+        let mut pending = None;
+        for (i, (w, h)) in [(900, 600), (950, 620), (1000, 640)].into_iter().enumerate() {
+            pending = on_resized(pending, w, h, 1_000 + 10 * i as u64);
+        }
+        assert_eq!(pending, Some(((1000, 640), 1_020)), "the last size of the drag, at its time");
+        assert_eq!(resize_due((1280, 720), pending, 1_030), None, "10 ms after the last size: still dragging");
+        assert_eq!(resize_due((1280, 720), pending, 1_020 + RESIZE_SETTLE_MS), Some((1000, 640)));
+        assert_eq!(on_resized(pending, 0, 0, 5_000), pending, "a minimised window keeps what was pending");
+        assert_eq!(on_resized(None, 0, 480, 5_000), None);
+    }
+
+    // spec: VIEW-006
+    #[test]
+    fn the_plan_parameters_follow_the_targets_height_and_keep_the_old_ones_when_they_would_fail() {
+        let base = LodParams { cells: 16, viewport_h_px: 720.0, tau_px: 2.5, max_level: 26, ..LodParams::earth_1080p() };
+        let tall = lod_for_size(&base, (1920, 1080)).expect("a taller target");
+        assert_eq!((tall.viewport_h_px, tall.tau_px, tall.max_height_m), (1080.0, 2.5, base.max_height_m));
+        assert!(lod_for_size(&base, (64, 20)).is_none(), "20 px high and 16 cells fail the parameters' own check (viewport / tau > 32)");
     }
 }

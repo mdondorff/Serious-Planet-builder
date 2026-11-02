@@ -1,0 +1,1 @@
+- 2026-11-01 m8-horizon-share: archived; a horizon bake made stale by an edit is dropped and baked again (STRM-061, #789; the one-thread rule removed by ADR 0086), synced for removal in shadow-clipmap-march PR 7.

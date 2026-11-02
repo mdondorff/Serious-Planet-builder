@@ -7,6 +7,7 @@
 
 use crate::ids::IdMaker;
 use crate::polyline::{self, GeoPoint, PolylineError};
+use crate::store_watch::{LoadTimer, StoreWatch, WallTimer};
 use planet_core::Vec3;
 use planet_world_def::item::{ActiveVersions, Anchor, Item, ItemFileError, ItemStroke, PutError};
 use planet_world_def::item_store::{ItemStore, StoreError};
@@ -258,6 +259,9 @@ pub struct Editor<S: ItemStore> {
     changes: Vec<ItemId>,
     /// The sequence number of `changes[0]`.
     changes_base: u64,
+    /// The item counts and the last load against the revisit trigger of ADR 0066 point 6 (AUTH-006).
+    watch: StoreWatch,
+    timer: Box<dyn LoadTimer>,
 }
 
 /// The entries of the change log kept; a reader further behind than this starts again from all the items.
@@ -282,6 +286,32 @@ impl<S: ItemStore> Editor<S> {
             inconsistent: Vec::new(),
             changes: Vec::new(),
             changes_base: 0,
+            watch: StoreWatch::default(),
+            timer: Box::new(WallTimer::new()),
+        }
+    }
+
+    /// The timer of loads (tests inject a fixed duration; the editor times with the wall clock).
+    pub fn with_load_timer(mut self, timer: Box<dyn LoadTimer>) -> Editor<S> {
+        self.timer = timer;
+        self
+    }
+
+    /// The item counts and the last load as the revisit trigger sees them (AUTH-006): for the diagnostics.
+    pub fn store_watch(&self) -> &StoreWatch {
+        &self.watch
+    }
+
+    /// The items the editor holds of `body`.
+    fn items_of(&self, body: BodyId) -> usize {
+        self.items.values().filter(|i| i.body == body).count()
+    }
+
+    /// An item of `body` was added (`+1`) or removed (`-1`): the live count of the revisit trigger (AUTH-006), one map update, and the warning
+    /// when the body has just crossed the limit.
+    fn count_changed(&mut self, body: BodyId, delta: isize) {
+        if let Some(w) = self.watch.adjust(body, delta) {
+            self.watch.issue(&w);
         }
     }
 
@@ -315,7 +345,11 @@ impl<S: ItemStore> Editor<S> {
     /// [`load`](Editor::load), saying which items were re-keyed under the active stage version (AUTH-002).
     pub fn load_report(&mut self, body: BodyId) -> Result<LoadReport, EditError> {
         self.no_open_edit()?;
-        let items = self.store.load_all(body)?;
+        self.timer.begin();
+        let read = self.store.load_all(body);
+        // The time of the store's read alone (ADR 0066 point 6): re-keying older items and writing them back is not the backend's cost.
+        let elapsed = self.timer.end();
+        let items = read?;
         let versions = ActiveVersions {
             generator_version: self.generator_version,
             stage_version: self.stage_version,
@@ -352,6 +386,10 @@ impl<S: ItemStore> Editor<S> {
             self.note_changed(item.id);
             self.items.insert(item.id, item.canonical());
         }
+        let count = self.items_of(body);
+        for w in self.watch.record_load(body, count, elapsed) {
+            self.watch.issue(&w);
+        }
         Ok(LoadReport { loaded, restaged })
     }
 
@@ -386,6 +424,10 @@ impl<S: ItemStore> Editor<S> {
         for item in &from_store {
             self.note_changed(item.id);
             self.items.insert(item.id, item.clone().canonical());
+        }
+        let count = self.items_of(body);
+        if let Some(w) = self.watch.record_count(body, count) {
+            self.watch.issue(&w);
         }
         self.undo.clear();
         self.redo.clear();
@@ -1085,13 +1127,17 @@ impl<S: ItemStore> Editor<S> {
                     return Err(e.into());
                 }
                 self.note_changed(id);
-                self.items.insert(id, after.clone());
+                if self.items.insert(id, after.clone()).is_none() {
+                    self.count_changed(after.body, 1);
+                }
             }
             (None, Some(item)) => {
                 self.store.delete(item.body, id)?;
                 self.def.remove_item(item.body, id);
                 self.note_changed(id);
-                self.items.remove(&id);
+                if self.items.remove(&id).is_some() {
+                    self.count_changed(item.body, -1);
+                }
             }
             (None, None) => {}
         }

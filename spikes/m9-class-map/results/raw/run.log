@@ -1,0 +1,59 @@
+=== s77 20:00:13 cpu 30%
+S77PREVIEW landform lattice (257^2 x 6) built in 0.08 s
+S77PREVIEW global-coarse sample and landform at 2343750 points (625^2 per face, about 16 km): 0.7 s
+S77PREVIEW global-coarse sample and landform at 37500000 points (2500^2 per face, about 4 km): 11.5 s
+S77 N43W102 real | flat 2.6% | slope=3.035 profile_curvature=0.000 contour_curvature=-0.001 relief_1km=39.465 relief_5km=108.238 tpi_300m=-0.260 tpi_2km=-1.878 drainage_area=1800.000
+S77 N43W102 site1 baseline | flat 0.0% | classes L1 0.31 | density ratio 1.89 | slope=2.512/0.12 profile_curvature=-0.000/0.06 contour_curvature=-0.002/0.04 relief_1km=34.478/0.11 relief_5km=103.905/0.04 tpi_300m=0.233/0.08 tpi_2km=-0.539/0.02 drainage_area=3600.000/0.25
+S77SITE N43W102 site1 | L 0.397 | k ref 1.00 (window p10/p50/p90 1.00/1.00/1.00) | k arid 1.00 | bake elevation 812 m | precipitation 1011 mm | temperature 22.8 C | zone 0.68 inland 0.58 ridge 0.30 hill band 72 m
+S77CLASS N43W102 site1 | badlands (arid rugged) | k 1 | floor 0
+S77 N43W102 site1 k1 | flat 0.1% | classes L1 0.43 | density ratio 1.05 | slope=2.904/0.06 profile_curvature=-0.000/0.06 contour_curvature=-0.002/0.19 relief_1km=24.873/0.22 relief_5km=45.931/0.53 tpi_300m=0.136/0.06 tpi_2km=-0.333/0.10 drainage_area=1800.000/0.14
+S77 N43W102 site1 k1: 6 s
+S77 N43W102 site1 k0.6 | flat 2.4% | classes L1 0.36 | density ratio 1.10 | slope=1.856/0.16 profile_curvature=-0.000/0.06 contour_curvature=-0.002/0.20 relief_1km=16.219/0.36 relief_5km=29.969/0.72 tpi_300m=0.110/0.11 tpi_2km=-0.099/0.14 drainage_area=1800.000/0.14
+S77 N43W102 site1 k0.6: 6 s
+S77 N43W102 site1 k1-carve50 | flat 0.2% | classes L1 0.33 | density ratio 1.03 | slope=2.524/0.10 profile_curvature=-0.000/0.05 contour_curvature=-0.002/0.14 relief_1km=24.506/0.23 relief_5km=47.421/0.51 tpi_300m=0.178/0.07 tpi_2km=-0.277/0.09 drainage_area=1800.000/0.16
+S77 N43W102 site1 k1-carve50: 6 s
+S77 N43W102 site1 k0.6-carve50 | flat 4.3% | classes L1 0.37 | density ratio 1.04 | slope=1.555/0.21 profile_curvature=-0.000/0.08 contour_curvature=-0.002/0.14 relief_1km=15.262/0.38 relief_5km=29.321/0.73 tpi_300m=0.118/0.12 tpi_2km=-0.099/0.14 drainage_area=1800.000/0.14
+S77 N43W102 site1 k0.6-carve50: 6 s
+S77 N43W102 site1 k0.35-carve50 | flat 35.1% | classes L1 1.13 | density ratio 1.15 | slope=0.962/0.27 profile_curvature=-0.000/0.12 contour_curvature=-0.002/0.13 relief_1km=9.978/0.47 relief_5km=19.139/0.84 tpi_300m=0.074/0.16 tpi_2km=-0.019/0.17 drainage_area=1800.000/0.12
+S77 N43W102 site1 k0.35-carve50: 6 s
+S77 N43W102 site2 baseline | flat 0.0% | classes L1 0.23 | density ratio 1.41 | slope=4.209/0.10 profile_curvature=-0.000/0.09 contour_curvature=-0.002/0.06 relief_1km=53.593/0.21 relief_5km=144.022/0.36 tpi_300m=0.450/0.05 tpi_2km=-0.164/0.10 drainage_area=2700.000/0.20
+S77SITE N43W102 site2 | L 0.854 | k ref 0.35 (window p10/p50/p90 0.35/0.35/0.35) | k arid 0.35 | bake elevation 876 m | precipitation 410 mm | temperature 7.3 C | zone 0.85 inland 1.00 ridge 0.10 hill band 90 m
+S77CLASS N43W102 site2 | badlands (arid rugged) | k 1 | floor 0
+S77 N43W102 site2 k1 | flat 0.0% | classes L1 0.57 | density ratio 1.04 | slope=7.379/0.48 profile_curvature=-0.001/0.37 contour_curvature=-0.002/0.20 relief_1km=72.088/0.58 relief_5km=173.116/0.78 tpi_300m=0.742/0.19 tpi_2km=0.635/0.26 drainage_area=900.000/0.16
+S77 N43W102 site2 k1: 8 s
+S77 N43W102 site2 k0.6 | flat 0.0% | classes L1 0.62 | density ratio 1.04 | slope=4.857/0.21 profile_curvature=-0.001/0.24 contour_curvature=-0.002/0.21 relief_1km=50.231/0.18 relief_5km=128.128/0.19 tpi_300m=0.715/0.07 tpi_2km=1.067/0.10 drainage_area=900.000/0.15
+S77 N43W102 site2 k0.6: 7 s
+S77 N43W102 site2 k1-carve50 | flat 0.1% | classes L1 0.48 | density ratio 1.04 | slope=5.138/0.19 profile_curvature=-0.000/0.17 contour_curvature=-0.003/0.15 relief_1km=58.563/0.31 relief_5km=151.424/0.45 tpi_300m=0.303/0.08 tpi_2km=-0.181/0.16 drainage_area=1800.000/0.15
+S77 N43W102 site2 k1-carve50: 6 s
+S77 N43W102 site2 k0.6-carve50 | flat 0.4% | classes L1 0.47 | density ratio 1.03 | slope=3.245/0.04 profile_curvature=-0.000/0.06 contour_curvature=-0.003/0.15 relief_1km=37.547/0.08 relief_5km=100.371/0.10 tpi_300m=0.300/0.05 tpi_2km=0.195/0.04 drainage_area=900.000/0.14
+S77 N43W102 site2 k0.6-carve50: 6 s
+S77 N43W102 site2 k0.35-carve50 | flat 1.2% | classes L1 0.44 | density ratio 1.05 | slope=2.092/0.14 profile_curvature=-0.000/0.06 contour_curvature=-0.003/0.15 relief_1km=25.723/0.22 relief_5km=78.307/0.32 tpi_300m=0.263/0.10 tpi_2km=0.585/0.08 drainage_area=900.000/0.12
+S77 N43W102 site2 k0.35-carve50: 6 s
+S77 N31W004 real | flat 47.9% | slope=0.859 profile_curvature=-0.000 contour_curvature=-0.000 relief_1km=11.825 relief_5km=40.764 tpi_300m=0.007 tpi_2km=0.072 drainage_area=2700.000
+S77 N31W004 site1 baseline | flat 0.0% | classes L1 1.28 | density ratio 1.76 | slope=2.366/0.32 profile_curvature=-0.000/0.28 contour_curvature=-0.002/0.06 relief_1km=33.465/0.26 relief_5km=105.822/0.29 tpi_300m=0.236/0.17 tpi_2km=-0.506/0.16 drainage_area=3600.000/0.24
+S77SITE N31W004 site1 | L 0.359 | k ref 0.35 (window p10/p50/p90 0.35/0.35/0.35) | k arid 0.35 | bake elevation 989 m | precipitation 179 mm | temperature 15.5 C | zone 0.67 inland 0.54 ridge 0.42 hill band 94 m
+S77CLASS N31W004 site1 | sand sea (arid flat) | k 0.35 | floor 0
+S77 N31W004 site1 k1 | flat 0.0% | classes L1 1.39 | density ratio 1.09 | slope=5.355/1.25 profile_curvature=-0.001/1.40 contour_curvature=-0.001/0.25 relief_1km=58.871/0.64 relief_5km=155.447/0.68 tpi_300m=0.929/0.56 tpi_2km=1.264/0.43 drainage_area=900.000/0.20
+S77 N31W004 site1 k1: 7 s
+S77 N31W004 site1 k0.6 | flat 0.1% | classes L1 1.39 | density ratio 1.11 | slope=3.850/0.87 profile_curvature=-0.000/1.12 contour_curvature=-0.001/0.25 relief_1km=44.180/0.41 relief_5km=129.341/0.42 tpi_300m=0.798/0.35 tpi_2km=1.880/0.27 drainage_area=900.000/0.21
+S77 N31W004 site1 k0.6: 7 s
+S77 N31W004 site1 k1-carve50 | flat 0.7% | classes L1 1.27 | density ratio 1.08 | slope=3.281/0.56 profile_curvature=-0.000/0.61 contour_curvature=-0.003/0.18 relief_1km=42.131/0.35 relief_5km=122.535/0.40 tpi_300m=0.403/0.26 tpi_2km=0.182/0.25 drainage_area=900.000/0.17
+S77 N31W004 site1 k1-carve50: 6 s
+S77 N31W004 site1 k0.6-carve50 | flat 1.5% | classes L1 1.18 | density ratio 1.09 | slope=2.155/0.30 profile_curvature=-0.000/0.36 contour_curvature=-0.002/0.18 relief_1km=28.820/0.21 relief_5km=89.938/0.22 tpi_300m=0.322/0.14 tpi_2km=0.692/0.13 drainage_area=900.000/0.17
+S77 N31W004 site1 k0.6-carve50: 6 s
+S77 N31W004 site1 k0.35-carve50 | flat 8.7% | classes L1 0.89 | density ratio 1.11 | slope=1.460/0.16 profile_curvature=-0.000/0.20 contour_curvature=-0.002/0.18 relief_1km=20.796/0.14 relief_5km=70.537/0.18 tpi_300m=0.276/0.08 tpi_2km=0.945/0.07 drainage_area=900.000/0.17
+S77 N31W004 site1 k0.35-carve50: 6 s
+S77 N31W004 site2 baseline | flat 0.0% | classes L1 1.30 | density ratio 1.53 | slope=3.149/0.48 profile_curvature=-0.000/0.43 contour_curvature=-0.002/0.06 relief_1km=43.200/0.37 relief_5km=126.632/0.38 tpi_300m=0.317/0.27 tpi_2km=-0.513/0.23 drainage_area=3600.000/0.27
+S77SITE N31W004 site2 | L 0.550 | k ref 0.35 (window p10/p50/p90 0.35/0.35/0.35) | k arid 0.35 | bake elevation 954 m | precipitation 1274 mm | temperature 23.3 C | zone 0.55 inland 1.00 ridge 0.18 hill band 95 m
+S77CLASS N31W004 site2 | sand sea (arid flat) | k 0.35 | floor 0
+S77 N31W004 site2 k1 | flat 0.5% | classes L1 1.31 | density ratio 1.05 | slope=4.001/0.72 profile_curvature=-0.000/0.89 contour_curvature=-0.002/0.24 relief_1km=36.164/0.30 relief_5km=90.322/0.19 tpi_300m=0.127/0.37 tpi_2km=-1.157/0.15 drainage_area=1800.000/0.16
+S77 N31W004 site2 k1: 6 s
+S77 N31W004 site2 k0.6 | flat 1.2% | classes L1 1.23 | density ratio 1.07 | slope=2.598/0.40 profile_curvature=-0.000/0.56 contour_curvature=-0.002/0.24 relief_1km=23.265/0.17 relief_5km=58.460/0.11 tpi_300m=0.183/0.19 tpi_2km=-0.319/0.07 drainage_area=900.000/0.15
+S77 N31W004 site2 k0.6: 6 s
+S77 N31W004 site2 k1-carve50 | flat 0.5% | classes L1 1.25 | density ratio 1.05 | slope=3.379/0.53 profile_curvature=-0.000/0.61 contour_curvature=-0.003/0.18 relief_1km=36.373/0.30 relief_5km=99.271/0.22 tpi_300m=0.157/0.30 tpi_2km=-1.173/0.15 drainage_area=1800.000/0.17
+S77 N31W004 site2 k1-carve50: 6 s
+S77 N31W004 site2 k0.6-carve50 | flat 1.7% | classes L1 1.16 | density ratio 1.05 | slope=2.099/0.27 profile_curvature=-0.000/0.31 contour_curvature=-0.003/0.18 relief_1km=22.217/0.16 relief_5km=60.293/0.13 tpi_300m=0.157/0.15 tpi_2km=-0.328/0.07 drainage_area=1800.000/0.16
+S77 N31W004 site2 k0.6-carve50: 6 s
+S77 N31W004 site2 k0.35-carve50 | flat 13.6% | classes L1 0.70 | density ratio 1.07 | slope=1.290/0.13 profile_curvature=-0.000/0.13 contour_curvature=-0.002/0.17 relief_1km=13.720/0.10 relief_5km=36.015/0.17 tpi_300m=0.122/0.08 tpi_2km=-0.076/0.06 drainage_area=1800.000/0.14
+S77 N31W004 site2 k0.35-carve50: 6 s
+=== done 20:03:03

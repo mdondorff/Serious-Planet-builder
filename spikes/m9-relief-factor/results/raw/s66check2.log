@@ -1,0 +1,71 @@
+$ C:/Program Files/Git/usr/bin/bash.exe C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/570e124f-4ca5-49b4-8bf6-680604dce399/scratchpad/s66/check2.sh C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/570e124f-4ca5-49b4-8bf6-680604dce399/scratchpad/s66
+    Finished `release` profile [optimized] target(s) in 33.49s
+=== k6all level error 09:48:41 cpu 3%
+LEVELERR alps: L10 p99 32.512 max 81.494; L12 p99 10.023 max 21.387; L14 p99 2.980 max 6.649; L16 p99 0.804 max 2.030; L18 p99 0.166 max 0.490; L20 p99 0.015 max 0.060; L22 p99 0.000 max 0.001;
+LEVELERR blackforest: L10 p99 24.829 max 53.974; L12 p99 7.750 max 16.238; L14 p99 2.331 max 4.856; L16 p99 0.630 max 1.641; L18 p99 0.136 max 0.301; L20 p99 0.006 max 0.073; L22 p99 0.000 max 0.000;
+=== k6all plan-check 09:49:20
+  erosion low-2km: 435 nodes, deepest level 8, 0.4 s
+  erosion ground-200m: 404 nodes, deepest level 8, 0.6 s
+  erosion ground-1m: 401 nodes, deepest level 8, 0.8 s
+  erosion north-pole-1km: 308 nodes, deepest level 8, 0.6 s
+  erosion cube-corner-1km: 443 nodes, deepest level 8, 1.0 s
+  erosion face-edge-1km: 434 nodes, deepest level 8, 0.7 s
+  erosion: the bake could not be read: the global bake cannot be read: cell (1043, 1031) of face 0 was not in the batch's footprint
+error: plan-check: 1 view(s) rejected or unreadable
+=== k6all stills alps 09:49:53
+cannot normalise Vec3 { x: NaN, y: NaN, z: NaN }
+crash report: target/review/crashes\20261031-085008Z.txt
+thread 'main' (1108) panicked at crates\app\src\skeleton.rs:1115:51:
+mesh thread: Any { .. }
+cat: target/s66/stills/alps-k6all/stills.txt: No such file or directory
+# level edge_m grid_res height_min_m height_max_m max_slope morph_start_m morph_end_m chunk_edge_distance_m
+8 39092 128 -145.8 5362.5 4.26 387976 507820 0
+8 39092 128 194.8 6675.6 4.34 387976 507820 0
+8 39092 128 271.2 5813.7 3.91 387976 507820 0
+8 39092 128 -173.4 7166.8 4.75 387976 507820 0
+=== k6all stills blackforest 09:50:08
+cannot normalise Vec3 { x: NaN, y: NaN, z: NaN }
+thread 'skeleton-tile' (10812) panicked at crates\core\src\vec3.rs:35:9:
+cannot normalise Vec3 { x: NaN, y: NaN, z: NaN }
+crash report: target/review/crashes\20261031-085019Z.txt
+cat: target/s66/stills/blackforest-k6all/stills.txt: No such file or directory
+# level edge_m grid_res height_min_m height_max_m max_slope morph_start_m morph_end_m chunk_edge_distance_m
+8 39092 128 -288.4 525.2 0.38 387976 507820 0
+8 39092 128 -173.0 961.0 0.55 387976 507820 0
+8 39092 128 -184.6 876.7 0.53 387976 507820 0
+8 39092 128 92.5 1096.3 0.63 387976 507820 0
+=== k6m10 level error 09:50:19 cpu 0%
+LEVELERR alps: L10 p99 15.855 max 37.430; L12 p99 4.584 max 9.694; L14 p99 1.354 max 3.024; L16 p99 0.366 max 0.923; L18 p99 0.075 max 0.223; L20 p99 0.007 max 0.027; L22 p99 0.000 max 0.000;
+LEVELERR blackforest: L10 p99 7.849 max 17.135; L12 p99 2.423 max 5.106; L14 p99 0.730 max 1.521; L16 p99 0.198 max 0.515; L18 p99 0.043 max 0.094; L20 p99 0.002 max 0.023; L22 p99 0.000 max 0.000;
+=== k6m10 plan-check 09:50:24
+  erosion low-2km: 548 nodes, deepest level 8, 0.8 s
+  erosion ground-200m: 543 nodes, deepest level 8, 1.1 s
+  erosion ground-1m: 541 nodes, deepest level 8, 1.4 s
+  erosion north-pole-1km: 440 nodes, deepest level 8, 0.9 s
+  erosion cube-corner-1km: 593 nodes, deepest level 8, 2.2 s
+  erosion face-edge-1km: 608 nodes, deepest level 8, 1.2 s
+  erosion: the bake could not be read: the global bake cannot be read: cell (1043, 1031) of face 0 was not in the batch's footprint
+error: plan-check: 1 view(s) rejected or unreadable
+=== k6m10 stills alps 09:51:01
+cannot normalise Vec3 { x: NaN, y: NaN, z: NaN }
+crash report: target/review/crashes\20261031-085118Z.txt
+thread 'main' (9576) panicked at crates\app\src\skeleton.rs:1115:51:
+mesh thread: Any { .. }
+cat: target/s66/stills/alps-k6m10/stills.txt: No such file or directory
+# level edge_m grid_res height_min_m height_max_m max_slope morph_start_m morph_end_m chunk_edge_distance_m
+8 39092 128 665.7 3062.7 1.69 459772 507820 0
+8 39092 128 597.3 5207.0 3.24 459772 507820 0
+8 39092 128 816.8 4456.9 2.67 459772 507820 0
+8 39092 128 -2494.4 8308.9 8.57 459772 507820 0
+=== k6m10 stills blackforest 09:51:18
+cannot normalise Vec3 { x: NaN, y: NaN, z: NaN }
+thread 'main' (25296) panicked at crates\app\src\skeleton.rs:1115:51:
+mesh thread: Any { .. }
+crash report: target/review/crashes\20261031-085132Z.txt
+cat: target/s66/stills/blackforest-k6m10/stills.txt: No such file or directory
+# level edge_m grid_res height_min_m height_max_m max_slope morph_start_m morph_end_m chunk_edge_distance_m
+8 39092 128 1142.3 1912.5 0.48 459772 507820 0
+8 39092 128 661.1 1129.1 0.28 459772 507820 0
+8 39092 128 888.5 1836.6 0.48 459772 507820 0
+8 39092 128 712.1 1696.8 0.47 459772 507820 0
+=== done 09:51:32

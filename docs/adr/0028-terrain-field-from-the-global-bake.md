@@ -1,5 +1,5 @@
 # 0028 The terrain field: a pure function of the direction over the global bake
-Status: accepted (owner's delegation of 2026-10-12: the architect accepts ADRs that reviewers find sound and unambiguous; accepted by opus-planner after the numerics review and its fixes (Lipschitz constant, f32 coverage, detail bound); drafted by sonnet-explorer)
+Status: accepted (owner's delegation of 2026-10-12: the architect accepts ADRs that reviewers find sound and unambiguous; accepted by opus-planner after the numerics review and its fixes (Lipschitz constant, f32 coverage, detail bound); drafted by sonnet-explorer); point 6 amended by ADR 0089 decisions 5 and 6 (owner, 2026-11-01): the detail amplitude follows the relief class, not the base elevation
 Date: 2026-10-12
 Source: ADR 0027 (reading the global bake, proposed), ADR 0026, ADR 0016 (height-aware LOD), ADR 0025 point 2 (what cache-verify compares), ADR 0022, ADR 0006; constitution CON-05, CON-08, CON-11, CON-14; COORD-007
 

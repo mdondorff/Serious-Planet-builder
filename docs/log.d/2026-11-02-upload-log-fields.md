@@ -1,0 +1,1 @@
+- 2026-11-02 upload-log-fields: the streaming frames log gains `deferred` and `node_bytes` (the upload cap reached, the node records), TEST-031; upload pacing waits for the measurement

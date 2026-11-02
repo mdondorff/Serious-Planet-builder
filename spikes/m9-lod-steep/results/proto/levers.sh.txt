@@ -1,0 +1,9 @@
+#!/bin/bash
+# SPIKE-82: LOD levers at the Alps and Himalaya sites (tau, morph band, cells), plans only matter; same test as run.sh.
+cd C:/DEV/Serious-Planet-Builder/.claude/worktrees/sonnet-spikes-36fc88
+for v in "S82_TAU=4.5" "S82_TAU=8" "S82_MORPH=0.15" "S82_MORPH=0.5" "S82_CELLS=64"; do
+  echo "=== lever $v $(date +%H:%M:%S)"
+  env $v S82_FIELDS=target/s81/s81-fields.f32 S82_NCH=4 S82_SITES=alps:13.5:-117.25,himalaya:11.75:-111.25 \
+    cargo xtask heavy cmd //c start "" //b //wait //belownormal target/release/deps/planet-f7ec3bd3dbee2d4c.exe spike82_lod --ignored --nocapture 2>&1 | grep -E "S82PLAN|panicked"
+done
+echo "=== done $(date +%H:%M:%S)"

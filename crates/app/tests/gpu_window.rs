@@ -132,6 +132,21 @@ max_ev100 = 16.0
     the_look_file_is_drawn_by_the_window(&second);
 }
 
+// spec: REND-050
+#[test]
+fn the_shadow_march_flag_runs_the_clipmap_shadow_pass_beside_the_lit_frames() {
+    let Some(stdout) = smoke(&["--shadow-march", "--no-ui", "--size", "320x180"]) else { return };
+    assert!(stdout.contains("[smoke ok]"), "{stdout}");
+    // The planner job landed its first plan and the pass resolved shadow frames (a number after the colon, more than none).
+    let frames: u64 = stdout
+        .split("shadow pass: ")
+        .nth(1)
+        .and_then(|t| t.split_whitespace().next())
+        .and_then(|n| n.parse().ok())
+        .unwrap_or_else(|| panic!("the summary names the shadow pass: {stdout}"));
+    assert!(frames > 0, "the shadow pass resolved frames: {stdout}");
+}
+
 fn the_window_runs_lit_with_the_atmosphere(stdout: &str) {
     assert!(stdout.contains("[smoke ok]"), "{stdout}");
     // The adapter line names what ran, and the run presented frames to the window.
@@ -212,7 +227,7 @@ fn a_world_with_a_bake_has_an_ocean_and_the_window_draws_its_water_through_the_w
     assert!(count_before(&stdout, " with the atmosphere") >= planet_frame::viewer::SMOKE_MIN_LIT_FRAMES, "{stdout}");
 }
 
-// spec: VIEW-022
+// spec: VIEW-022, VIEW-023, VIEW-024, VIEW-026
 #[test]
 fn the_editor_mode_places_drags_types_undoes_and_deletes_in_the_real_window_and_writes_the_item_file() {
     let dir = std::env::temp_dir().join(format!("planet-editor-smoke-{}", std::process::id()));
@@ -250,6 +265,9 @@ fn the_editor_mode_places_drags_types_undoes_and_deletes_in_the_real_window_and_
     assert!(count(" definitions handed to the generator") >= 1, "the edits reached the generator: {line}");
     // spec: VIEW-023
     assert!(count(" previews set") >= 1, "the window fed the preview of the edit in flight: {line}");
+    // The previews that ended on the exact tiles are counted, not asserted: the smoke run ends before they land (0 of 6 on 2026-11-01, with
+    // 0 nodes drawn previewed), a finding tracked by the planner; the end of a preview is tier A (`editwin`).
+    let _ = count(" previews ended on the exact tiles");
     // spec: VIEW-024
     let repro_line = stdout.lines().find(|l| l.trim_start().starts_with("repro:")).unwrap_or_else(|| panic!("no repro line in: {stdout}"));
     assert!(repro_line.contains(" 1 F9 write(s)"), "the script pressed F9 once: {repro_line}");

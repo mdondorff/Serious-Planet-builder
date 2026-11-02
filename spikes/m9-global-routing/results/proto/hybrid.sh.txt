@@ -1,0 +1,5 @@
+#!/bin/bash
+cd C:/DEV/Serious-Planet-Builder/.claude/worktrees/sonnet-spikes-36fc88
+echo "=== hybrid $(date +%H:%M:%S) cpu $(powershell -NoProfile -Command "(Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average")%"
+S70_MODE=hybrid cmd //c start "" //b //wait //belownormal target/s70build2/release/s70carve.exe C:/DEV/SeriousPlanetData/spike-r3/relief68 C:/DEV/SeriousPlanetData/spike-r3/relief70 blackforest,highlands,valleyridge,alps
+echo "=== done $(date +%H:%M:%S)"

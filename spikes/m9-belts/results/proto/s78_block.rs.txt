@@ -1,0 +1,181 @@
+    // SPIKE-78 (spike code, never merged; from SPIKE-76's class pipeline): `S78_DIR=DIR` runs the Alps, Himalaya and Badlands sites.
+    // `class` is SPIKE-76's class pipeline as run; `class+belt` adds the belt change (5200 -> S78_AMP m on `ridge zone inland`) to the fine and coarse
+    // windows as a height delta before the pipeline (a stand-in for a re-baked store: the delta has wavelengths over 100 km); the Badlands get
+    // `nocarve` (k S78_BK, no floor, neither carve pass, thermal and deposition kept) and `nocarve-bare` (k S78_BK, no floor, no pass at all).
+    if let Ok(dir) = std::env::var("S78_DIR") {
+        use planet_generators::height::HeightField as _;
+        use std::sync::atomic::Ordering::Relaxed;
+        let dir = PathBuf::from(dir);
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let amp: f64 = std::env::var("S78_AMP").ok().and_then(|v| v.parse().ok()).unwrap_or(7000.0);
+        let bk: f64 = std::env::var("S78_BK").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0);
+        let g = ts::GRID;
+        let seed = field_s74.seed();
+        let smooth = |x: f64, a: f64, b: f64| {
+            let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
+            t * t * (3.0 - 2.0 * t)
+        };
+        let delta = |d: planet_core::Vec3| -> f64 {
+            let p = planet_generators::global::spike69_parts(seed, d);
+            if p[0] <= planet_generators::global::SEA_LEVEL_C {
+                return 0.0;
+            }
+            (amp - 5200.0) * p[3] * p[1] * p[2]
+        };
+        let box_mean = |z: &[f64], n: usize, r: usize| -> Vec<f64> {
+            let w = n + 1;
+            let mut s = vec![0f64; w * w];
+            for j in 0..n {
+                let mut row = 0.0;
+                for i in 0..n {
+                    row += z[j * n + i];
+                    s[(j + 1) * w + i + 1] = s[j * w + i + 1] + row;
+                }
+            }
+            let mut out = vec![0f64; n * n];
+            for j in 0..n {
+                for i in 0..n {
+                    let (i0, i1, j0, j1) = (i.saturating_sub(r), (i + r + 1).min(n), j.saturating_sub(r), (j + r + 1).min(n));
+                    out[j * n + i] = (s[j1 * w + i1] - s[j0 * w + i1] - s[j1 * w + i0] + s[j0 * w + i0]) / ((i1 - i0) * (j1 - j0)) as f64;
+                }
+            }
+            out
+        };
+        let frame = |lat: f64, lon: f64| {
+            let (la, lo) = (lat.to_radians(), lon.to_radians());
+            let (sla, cla, slo, clo) = (libm::sin(la), libm::cos(la), libm::sin(lo), libm::cos(lo));
+            (
+                planet_core::Vec3::new(cla * clo, cla * slo, sla),
+                planet_core::Vec3::new(-slo, clo, 0.0),
+                planet_core::Vec3::new(-sla * clo, -sla * slo, cla),
+            )
+        };
+        const NC: usize = 491;
+        const CC: f64 = 814.0;
+        let report = |label: &str, s: &RasterStats, real: &RasterStats| -> String {
+            let d = ts::distances(real, s);
+            let cs: Vec<String> = ts::CONTINUOUS
+                .iter()
+                .enumerate()
+                .map(|(k, c)| format!("{}={:.3}/{}", c.id, s.series[k].p(50), d.continuous[k].map_or("-".into(), |x| format!("{x:.2}"))))
+                .collect();
+            format!(
+                "S78 {label} | flat {:.1}% | classes L1 {:.2} | density ratio {} | {}",
+                100.0 * s.forms[0],
+                d.forms_l1,
+                d.density_ratio.map_or("-".into(), |x| format!("{x:.2}")),
+                cs.join(" ")
+            )
+        };
+        let half_m = ts::HALF_DEG.to_radians() * radius;
+        for (i, s) in specs.iter().enumerate() {
+            let mountains = matches!(s.tile.as_str(), "N47E011" | "N27E086");
+            if !mountains && s.tile != "N43W102" {
+                continue;
+            }
+            let (rs, _) = ts::analyse(&reals[i], g, g, threads, false);
+            let cs: Vec<String> = ts::CONTINUOUS.iter().enumerate().map(|(k, c)| format!("{}={:.3}", c.id, rs.series[k].p(50))).collect();
+            println!("S78 {} real | flat {:.1}% | {}", s.tile, 100.0 * rs.forms[0], cs.join(" "));
+            for (k, &(lat, lon)) in s.sites.iter().enumerate() {
+                let z0 = &gens[i][k];
+                let (bs, _) = ts::analyse(z0, g, g, threads, false);
+                println!("{}", report(&format!("{} site{} baseline", s.tile, k + 1), &bs, &rs));
+                let dirs = ts::generator_directions(lat, lon, radius);
+                planet_generators::erosion::spike73_set_floor(0.35);
+                let z1 = field_s74.heights_threaded(&dirs, &threads);
+                let (c, east, north) = frame(lat, lon);
+                let mut dc = Vec::with_capacity(NC * NC);
+                for row in 0..NC {
+                    for col in 0..NC {
+                        let (x, y) = ((col as f64 - (NC / 2) as f64) * CC, ((NC / 2) as f64 - row as f64) * CC);
+                        let p = c * radius + east * x + north * y;
+                        dc.push(p * (1.0 / libm::sqrt(p.x * p.x + p.y * p.y + p.z * p.z)));
+                    }
+                }
+                let zc = field_s74.heights_threaded(&dc, &threads);
+                planet_generators::erosion::spike73_set_floor(0.0);
+                let d1: Vec<f64> = dirs.iter().map(|d| delta(*d)).collect();
+                let dcv: Vec<f64> = dc.iter().map(|d| delta(*d)).collect();
+                {
+                    let d0 = planet_core::Vec3::new(c.x, c.y, c.z);
+                    let gs = planet_generators::global::sample(seed, d0);
+                    let mut sd: Vec<f64> = d1.clone();
+                    sd.sort_by(f64::total_cmp);
+                    let m1 = z1.iter().sum::<f64>() / z1.len() as f64;
+                    println!(
+                        "S78SITE {} site{} | sample elevation {:.0} m | window mean today {:.0} m | belt delta p10/p50/p90 {:.0}/{:.0}/{:.0} m (amp {amp})",
+                        s.tile,
+                        k + 1,
+                        gs.elevation_m,
+                        m1,
+                        sd[sd.len() / 10],
+                        sd[sd.len() / 2],
+                        sd[sd.len() * 9 / 10]
+                    );
+                }
+                let names: &[&str] = if mountains { &["class", "class+belt"] } else { &["class", "nocarve", "nocarve-bare"] };
+                for &name in names {
+                    let t = Instant::now();
+                    let belt = name == "class+belt";
+                    let (ck, cfloor) = if mountains { (7.5, 0.0) } else if name == "class" { (1.0, 0.0) } else { (bk, 0.0) };
+                    let carve = name.starts_with("class");
+                    let passes = name != "nocarve-bare";
+                    let zb: Vec<f64> = (0..g * g).map(|p| z0[p] + (z1[p] - z0[p]) * (cfloor / 0.35) + if belt && z1[p] > 0.0 { d1[p] } else { 0.0 }).collect();
+                    let zcb: Vec<f64> = (0..NC * NC).map(|q| zc[q] + if belt && zc[q] > 0.0 { dcv[q] } else { 0.0 }).collect();
+                    let k_of = |e: f64| 1.0 + smooth(e, 0.0, 400.0) * (ck - 1.0);
+                    let mf = box_mean(&zb, g, 167);
+                    let h: Vec<f64> = (0..g * g).map(|p| if zb[p] > 0.0 { mf[p] + k_of(mf[p]) * (zb[p] - mf[p]) } else { zb[p] }).collect();
+                    let mut h2: Vec<f32> = h.iter().map(|x| *x as f32).collect();
+                    if carve {
+                        let at_coarse = |a: &[f64], row: usize, col: usize| -> f64 {
+                            let (x, y) = (-half_m + (col as f64 + 0.5) * ts::CELL_M, half_m - (row as f64 + 0.5) * ts::CELL_M);
+                            let fx = (x / CC + (NC / 2) as f64).clamp(0.0, (NC - 2) as f64);
+                            let fy = ((NC / 2) as f64 - y / CC).clamp(0.0, (NC - 2) as f64);
+                            let (x0, y0) = (fx as usize, fy as usize);
+                            let (tx, ty) = (fx - x0 as f64, fy - y0 as f64);
+                            (a[y0 * NC + x0] * (1.0 - tx) + a[y0 * NC + x0 + 1] * tx) * (1.0 - ty) + (a[(y0 + 1) * NC + x0] * (1.0 - tx) + a[(y0 + 1) * NC + x0 + 1] * tx) * ty
+                        };
+                        let mcs = box_mean(&zcb, NC, 6);
+                        let hc: Vec<f32> = (0..NC * NC).map(|q| if zcb[q] > 0.0 { (mcs[q] + k_of(mcs[q]) * (zcb[q] - mcs[q])) as f32 } else { zcb[q] as f32 }).collect();
+                        let mut cc = hc.clone();
+                        let gc = k74::G { w: NC, ox: 0, oy: 0, fix: &[], dx: CC, frec: &[], farea: &[], amax: 0.0 };
+                        k74::UK.store(20, Relaxed);
+                        k74::LOCAL.store(0, Relaxed);
+                        k74::carve(gc, &mut cc, &[]);
+                        let dcf: Vec<f64> = (0..NC * NC).map(|q| f64::from(cc[q] - hc[q])).collect();
+                        for row in 0..g {
+                            for col in 0..g {
+                                let p = row * g + col;
+                                if zb[p] > 0.0 {
+                                    h2[p] = (h[p] + at_coarse(&dcf, row, col)) as f32;
+                                }
+                            }
+                        }
+                    }
+                    let orig: Vec<f32> = h.iter().map(|x| *x as f32).collect();
+                    let g2 = k74::G { w: g, ox: 0, oy: 0, fix: &[], dx: ts::CELL_M, frec: &[], farea: &[], amax: 1e6 };
+                    if carve {
+                        k74::LOCAL.store(2, Relaxed);
+                        k74::UK.store(0, Relaxed);
+                        k74::carve(g2, &mut h2, &[]);
+                    }
+                    if passes {
+                        k74::thermal_active(g2, &mut h2, 33.0, 100, threads);
+                        k74::deposit(g2, &mut h2, &orig, 1e5, 0.5);
+                    }
+                    k74::LOCAL.store(0, Relaxed);
+                    k74::UK.store(20, Relaxed);
+                    let hf: Vec<f64> = h2.iter().map(|x| f64::from(*x)).collect();
+                    let (ps, _) = ts::analyse(&hf, g, g, threads, false);
+                    println!("{}", report(&format!("{} site{} {}", s.tile, k + 1, name), &ps, &rs));
+                    if k == 0 {
+                        let b: Vec<u8> = hf.iter().flat_map(|x| (*x as f32).to_le_bytes()).collect();
+                        std::fs::write(dir.join(format!("{}-site1-{}.f32", s.tile, name.replace('+', "-"))), b).map_err(|e| e.to_string())?;
+                    }
+                    eprintln!("S78 {} site{} {}: {:.0} s", s.tile, k + 1, name, t.elapsed().as_secs_f64());
+                }
+            }
+        }
+        return Ok(());
+    }
+

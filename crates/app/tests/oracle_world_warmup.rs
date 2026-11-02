@@ -71,21 +71,21 @@ fn the_hover_pick_decodes_its_cold_block_on_its_own_thread_and_the_stall_probe_n
     let limits = PickLimits::new(radius, 9_000.0);
     let source: PickSource = {
         let world = world.clone();
-        std::sync::Arc::new(move |ray, limits, level| {
+        std::sync::Arc::new(move |ray, limits| {
             let field = world.field().ok()?;
-            planet_frame::pick::pick_surface(&ray, &limits, &|d| field.height_at_level(d, level))
+            planet_frame::pick::pick_surface(&ray, &limits, &|d| field.height(d))
         })
     };
     let mut picker = HoverPicker::new(source);
     // The frame polls: the pick is another thread's, so this thread decodes no block, and the pick finds the ground once it has finished.
     let before = thread_block_decodes();
-    let mut hit = picker.poll((ray(cold), limits, 5));
+    let mut hit = picker.poll((ray(cold), limits));
     assert_eq!(thread_block_decodes(), before, "the main thread decoded a block for the hover pick");
     let started = std::time::Instant::now();
     while hit.is_none() {
         assert!(started.elapsed().as_secs() < 60, "the hover pick never finished");
         std::thread::sleep(std::time::Duration::from_millis(5));
-        hit = picker.poll((ray(cold), limits, 5));
+        hit = picker.poll((ray(cold), limits));
     }
     assert_eq!(thread_block_decodes(), before, "polling the finished pick decoded nothing on this thread");
     // A phase that reads a cold block on the main thread is named with its count by the probe.

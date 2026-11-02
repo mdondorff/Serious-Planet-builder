@@ -11,10 +11,11 @@ use planet_frame::managed::{FrameCounts, ManagedLoop, TileSink, UploadStats};
 use planet_frame::pipeline::{
     residency_of, DrawKind, FrameColumns, FramesInFlight, PlanField, PlanPipeline, PlanWorker, MAX_FRAMES_IN_FLIGHT,
 };
-use planet_frame::{plan_terrain_threaded, PlanError, ResidencySet, SelectionCache, TerrainPlan, TerrainRequest};
+use planet_frame::{PlanError, ResidencySet, SelectionCache, TerrainPlan, TerrainRequest};
 use planet_generators::compact::CompactTile;
 use planet_render::{GpuContext, RgbaFrame, TerrainRenderer};
-use planet_streaming::{ResidencyManager, SlotRef, StreamConfig, Streamer, SystemClock, ThreadPool};
+use planet_streaming::jobs::{Class, JobSystem};
+use planet_streaming::{Priority, ResidencyManager, SlotRef, Spawner, StreamConfig, Streamer, SystemClock};
 use std::io::Write;
 use std::sync::Arc;
 use std::time::Instant;
@@ -27,9 +28,9 @@ impl PlanField for WorldPlanner {
         self.0.definition().revision()
     }
 
-    fn plan(&self, req: &TerrainRequest, cache: &mut SelectionCache, threads: usize) -> Result<TerrainPlan, PlanError> {
+    fn plan(&self, req: &TerrainRequest, cache: &mut SelectionCache, par: &dyn planet_core::par::Par) -> Result<TerrainPlan, PlanError> {
         let field = self.0.field().map_err(PlanError::HeightField)?;
-        plan_terrain_threaded(req, field.as_ref(), cache, threads)
+        planet_frame::plan_terrain_par(req, field.as_ref(), cache, par)
     }
 
     fn residency(&self, req: &TerrainRequest, cache: &mut SelectionCache) -> Result<ResidencySet, PlanError> {
@@ -91,6 +92,19 @@ pub(crate) struct Rig {
     /// The start-up load of the roots (the tiles of the render floor, STRM-001): how many and how long it waited for them (a reading,
     /// STRM-022: the cold start of a run without a pre-fill is the one without the pack's tiles).
     pub roots: (usize, std::time::Duration),
+    /// The horizon bakes' pool: the idle class of the terrain share (`WorldTerrain::enable_viewer_horizon_on`).
+    pub horizon_pool: Arc<dyn Spawner>,
+    /// The terrain share (tile, plan and horizon jobs): the reserve test reads its peak of busy threads (BUDG-012).
+    pub terrain: planet_streaming::jobs::Share,
+    /// The job system the tile and plan workers run on (BUDG-004); last, so it is dropped after the streamer and the plan worker that feed it.
+    pub _system: Arc<planet_streaming::jobs::JobSystem>,
+}
+
+/// The tile workers and the ceiling of the terrain share for `workers` tile threads wanted, `horizon` idle bake threads and a cap of `cap` busy threads (BUDG-003): the plan
+/// worker takes one thread of the cap, the tile workers the rest, and the ceiling is the cap (or the sum of the threads when that is less, a small machine).
+pub(crate) fn terrain_sizes(workers: usize, horizon: usize, cap: usize) -> (usize, usize) {
+    let tile = workers.min(cap.saturating_sub(1)).max(1);
+    (tile, cap.min(tile + 1 + horizon))
 }
 
 impl Rig {
@@ -119,16 +133,31 @@ impl Rig {
         // a measured frame, ADR 0032).
         renderer.warm_up(ctx);
         crate::stall::phase_mark("renderer warm-up");
-        let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
-        let plan_pool = Arc::new(ThreadPool::new(1));
-        let pipe = PlanPipeline::new(PlanWorker::new(plan_pool, Arc::new(WorldPlanner(Arc::clone(world))), threads));
+        // One job system for the rig (BUDG-004): the tile workers below normal priority (ADR 0046) and the plan worker, a frame-critical thread at normal priority,
+        // on the one share `terrain`, whose ceiling holds both.
+        // The terrain share holds at most BUDG-003's busy threads (the limit of the spec, `planet_perf::reserve::TERRAIN_CORES`): the tile workers, the plan worker and the horizon
+        // bakes together. The tile pool shrinks to what is left beside the plan worker (and the streamer's limit with it, STRM-020); a machine with fewer threads is not capped.
+        let cap = planet_perf::reserve::TERRAIN_CORES as usize;
+        let horizon = crate::horizonworld::horizon_workers(gen);
+        let (tile_workers, ceiling) = terrain_sizes(gen.workers, horizon, cap);
+        let gen = planet_streaming::GenWorkers { workers: tile_workers, ..gen };
+        // The horizon bakes (STRM-060, STRM-064) are the idle class of the same share: `horizon` more threads that run idle jobs only, so a bake never holds a worker a visible job needs and the tile jobs keep their `gen.workers` threads.
+        let system = Arc::new(JobSystem::with_dedicated_workers(gen.workers, gen.priority, 1, Priority::Normal, horizon));
+        let terrain = system.share_with_idle("terrain", ceiling, horizon);
+        let horizon_pool: Arc<dyn Spawner> = Arc::new(terrain.clone());
+        let terrain_share = terrain.clone();
+        world.set_job_par(Arc::new(terrain.par()));
+        let plan_pool: Arc<dyn Spawner> = Arc::new(terrain.classed(Class::FrameCritical));
+        let plan_par = Arc::new(terrain.par());
+        let tile_pool: Arc<dyn Spawner> = Arc::new(terrain);
+        let pipe = PlanPipeline::new(PlanWorker::with_par(plan_pool, Arc::new(WorldPlanner(Arc::clone(world))), plan_par));
         // The streamer counts its slots in the renderer's pools: what it places, the renderer can hold.
         let pool = *renderer.pool_config();
         let clock: Arc<dyn planet_streaming::Clock> = Arc::new(SystemClock::new());
         let mut streamer = Streamer::new(
             Arc::new(MeshSource { world: Arc::clone(world), max_level: first.lod.max_level, cells: first.lod.cells }),
             // The tile threads and the jobs running at once are one number (STRM-020).
-            gen.pool(),
+            tile_pool,
             Arc::clone(&clock),
             gen.apply(StreamConfig {
                 capacity: pool.main_slots() as usize,
@@ -156,7 +185,16 @@ impl Rig {
         // The roots go to the GPU here too (STRM-001, ADR 0064): the start-up load is a step of the body, so frame 0 is a steady frame and
         // carries no root upload (a measured frame stays under the cap of STRM-006 and the CON-21 limits).
         managed.upload_roots(&mut RendererSink { ctx, renderer: &mut renderer })?;
-        Ok(Rig { renderer, managed, fi: FramesInFlight::new(MAX_FRAMES_IN_FLIGHT), pool, roots })
+        Ok(Rig {
+            renderer,
+            managed,
+            fi: FramesInFlight::new(MAX_FRAMES_IN_FLIGHT),
+            pool,
+            roots,
+            horizon_pool,
+            terrain: terrain_share,
+            _system: system,
+        })
     }
 }
 
@@ -195,7 +233,8 @@ pub fn run_script(
             r.lod.floor_level()
         ));
     }
-    let Rig { mut renderer, mut managed, mut fi, pool, .. } = Rig::new(ctx, world, first, gen)?;
+    // The job system stays bound for the whole run: dropping it ends the workers.
+    let Rig { mut renderer, mut managed, mut fi, pool, _system, .. } = Rig::new(ctx, world, first, gen)?;
     let mut log: Vec<FrameLog> = Vec::new();
     let mut last_drawn: Option<TerrainPlan> = None;
     let mut iteration = 0u64;
@@ -329,4 +368,23 @@ pub fn log_text(log: &[FrameLog]) -> String {
         ));
     }
     s
+}
+
+#[cfg(test)]
+mod size_tests {
+    use super::terrain_sizes;
+
+    // spec: BUDG-003
+    #[test]
+    fn the_terrain_share_never_holds_more_than_the_cap_and_a_small_machine_is_not_capped() {
+        // The reference machine: 15 tile threads wanted and 7 bakes: capped to 11 tile workers, the plan worker and the ceiling 12.
+        assert_eq!(terrain_sizes(15, 7, 12), (11, 12));
+        // A 4-core CI machine: 1 tile worker, 1 bake: the sum of threads, below the cap.
+        assert_eq!(terrain_sizes(1, 1, 12), (1, 3));
+        assert_eq!(terrain_sizes(10, 5, 12), (10, 12));
+        assert_eq!(terrain_sizes(11, 0, 12), (11, 12));
+        // Never below one tile worker, whatever the cap.
+        assert_eq!(terrain_sizes(8, 2, 1), (1, 1));
+        assert_eq!(terrain_sizes(8, 2, 0), (1, 0));
+    }
 }

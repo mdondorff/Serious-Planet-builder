@@ -6,10 +6,10 @@
 |---|---|---|
 | Frames over budget, stalls | gate (TEST-061, TEST-062): frames over 100 ms, main-thread decodes, panics | none |
 | Held-back tiles | gate counters at the capture sites (TEST-061) | none |
-| Level step at a boundary | gate `levels` check at the entry step and 15/14 (TEST-061) | measures heights at sites; a moving descent is not scripted |
+| Level step at a boundary | gate `levels` check, measured on the base field (TEST-064) | measures heights at sites; a moving descent is not scripted |
 | Tile coarsening while the camera nears | TEST-067 through the managed loop with manual spawners | on a generated world, not the real store |
 | Still-camera flicker | TEST-068, TEST-069, TEST-070 (level, relief, normals, lit, streamed lit) | not covered: the editor hover, wall-clock water (status Tracked) |
-| Uphill rivers | GEN-048 (breach rule, chunk level) | no check of the bed rise along the routed path on the real store |
+| Uphill rivers | the breach rule of the removed chunk stage (ADR 0086) | no check of the bed rise along the routed path on the real store |
 | Edit shows differently dragged than at rest | REND-033 preview bound (5 % of the pixels the edit changes); a measurement was queued to crusader (2026-10-29) | no automated pair test on the real store |
 | Pop when a chunk or edit lands | none | needs a frame-pair detector at the swap |
 

@@ -1,7 +1,7 @@
 # 0076 Driver maps: physical fields decide materials, plants and shapes through suitability rules
-Status: proposed (opus-planner, 2026-10-21); open (opus-planner, 2026-10-30): the chunk stage's driver channels leave with the chunk stage (ADR 0086); driver maps are decided again with M9's bake
+Status: proposed (opus-planner, 2026-10-21); open (opus-planner, 2026-10-30): the chunk stage's driver channels leave with the chunk stage (ADR 0086); driver maps are decided again with M9's bake; point 9 added 2026-11-01 for ADR 0089 (owner, group 3)
 Date: 2026-10-21
-Source: owner, 2026-10-21 (generation principles; materials and plants from physical maps such as soil depth, not from painted type maps); `docs/archive/M8/briefings/m8-driver-maps.md`; ADR 0022, 0026, 0030, 0035, 0039, 0066; constitution CON-06, CON-07, CON-08, CON-14
+Source: owner, 2026-10-21 (generation principles; materials and plants from physical maps such as soil depth, not from painted type maps); `docs/archive/M8/briefings/m8-driver-maps.md`; ADR 0022, 0026, 0030, 0035, 0039, 0066, 0089; constitution CON-06, CON-07, CON-08, CON-14
 
 ## Context
 - The generator has four global channels (continentalness, elevation, temperature, precipitation; ADR 0026) and a local erosion filter (ADR 0030 point 1); the global stream-power stage (ADR 0030 point 2) is not built.
@@ -19,6 +19,7 @@ Source: owner, 2026-10-21 (generation principles; materials and plants from phys
 6. **Processes are pre-bake stages**, one field each: first the stream-power routing of ADR 0030 point 2 (flow accumulation, incision), then soil depth and moisture from it. A new process adds a stage and re-keys only the fields that read it.
 7. **Authoring acts on drivers or on suitability**, softly and feathered (owner Q8): a region adds to a driver (wetter, deeper soil) or scales a kind's suitability; it never paints a type.
 8. **Every driver and every kind's suitability has a debug view** (CON-18); the overview maps of M9 are these views in a rectangular projection.
+9. **The relief class is a consumer of drivers** (ADR 0089 decisions 4 and 8): once the derived class source is adopted and active, the class weights are a suitability of the driver vector through a rule table; class paint then acts on the drivers (point 7), never on a type, and overrides as ADR 0089 decision 8 says.
 
 ## Consequences
 - Materials (G2a, G2b) already read an inputs-to-weights function, so they move to the driver vector without a shader interface change.

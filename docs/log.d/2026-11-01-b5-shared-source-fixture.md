@@ -1,0 +1,1 @@
+- 2026-11-01 b5-shared-source-fixture: the concurrent_source tests share one store per test binary on disk instead of a rebuild per test; planet-cache tier A 8.5 s → 4.6 s (median of 5, parallel) (STRM-014; SPIKE-84 fix 2)

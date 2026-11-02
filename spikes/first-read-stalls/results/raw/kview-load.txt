@@ -1,0 +1,5 @@
+alone: 40 cold reads, p50 19.9 ms, p90 23.3 ms, max 96.9 ms, sum 892 ms; warm mean 21.022 ms; coupled "loading"
+spike88: the coupled run was loaded from the store
+K on, round 0 at 0.0 s: 40 cold reads, p50 22.0 ms, p90 23.9 ms, max 46.7 ms, sum 882 ms; warm mean 21.291 ms; coupled "ready"
+coupled run ready after 1.7 s
+K on, run settled: 40 cold reads, p50 20.7 ms, p90 22.5 ms, max 24.9 ms, sum 828 ms; warm mean 21.361 ms; coupled "ready"

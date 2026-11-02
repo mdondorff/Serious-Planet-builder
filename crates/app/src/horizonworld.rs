@@ -1,7 +1,7 @@
 //! The chunk horizon in a world (M8-5, STRM-049): the baker that gives `streaming::horizonjobs::HorizonJobs` its maps, and the world's methods to
 //! enable the jobs, run a frame of them and read a map. Additive to the chunk wiring of `worldfield` (one field, no change to its methods).
 //!
-//! A chunk's horizon is baked from the world's own field (base, stamps and the changes of the chunks that are ready), sampled at the cell
+//! A chunk's horizon is baked from the world's own field (base and stamps), sampled at the cell
 //! directions of the chunk lattice over the chunk and a halo of `ceil(range / cell) + 2` cells, on the extended cube plane past a face edge.
 //! The chunk's map is one byte per azimuth for each of its cells, row `j` outer (`HorizonMap` of GEN-044).
 
@@ -12,7 +12,7 @@ use planet_cache::global_store::HorizonSpec;
 use planet_cache::horizon_store::{load_horizon, store_horizon};
 use planet_cache::pack::{TileStore, DEFAULT_MAX_PACK_BYTES};
 use planet_core::{Face, PlanetFixed, TileId};
-use planet_generators::chunkfield::{ChunkKey, ChunkLattice, ChunkResult};
+use planet_generators::chunkfield::{ChunkKey, ChunkLattice};
 use planet_generators::coarsehorizon::{coarse_horizon_range, CoarseParams};
 use planet_generators::global::LatticeSource;
 use planet_generators::horizon::{bake_horizon, halo_texels, HeightRaster, HorizonParams};
@@ -48,6 +48,11 @@ pub const HORIZON_WORKERS_MAX: usize = 8;
 
 /// Version of the world's horizon bake (what it samples and how); part of the march's hash, so a change re-bakes every map.
 pub const BAKE_VERSION: u32 = 1;
+
+/// The versions of the removed A-net and chunk-stage code (ADR 0086), kept as numbers in the world state of a horizon map: the state word is part of the key of the
+/// maps stored on the pack, so the values stay what they were when the chunk stage went (B6, ADR 0086) and no stored map is lost to the removal.
+const CODE_VERSION_ANET: u64 = 10;
+const CODE_VERSION_CHUNK_STAGE: u64 = 1;
 
 /// Bakes the horizon of a chunk from the world's field.
 pub struct ChunkHorizonBaker {
@@ -278,8 +283,8 @@ impl ChunkHorizonBaker {
         TileStats { evaluated: t.evaluated, hits: t.hits, held: t.held.len() }
     }
 
-    /// What the heights of a block depend on besides its items and its chunk: the base of the definition (seed, radius, height field, stage order), the baked input, the code that makes the chunks and the field above them
-    /// (`ANET_VERSION`, the chunk stage, this bake), the lattice, and the coupled lens, which the field chain does not hash into a tile key.
+    /// What the heights of a block depend on besides its items: the base of the definition (seed, radius, height field, stage order), the baked input, the code that makes the field
+    /// (the versions of the removed A-net and chunk-stage code, this bake), the lattice, and the coupled lens, which the field chain does not hash into a tile key.
     fn world_state(&self, world: &WorldTerrain) -> u64 {
         let lens = world.coupled_lens().map_or(0, |l| 1 + l as u64);
         let ready = matches!(world.coupled_standing(), crate::coupledworld::Standing::Ready(..));
@@ -295,8 +300,8 @@ impl ChunkHorizonBaker {
             0x4854_5753,
             &[
                 u64::from(BAKE_VERSION),
-                u64::from(planet_generators::anet::ANET_VERSION),
-                u64::from(planet_generators::chunkfield::CHUNK_STAGE_VERSION),
+                CODE_VERSION_ANET,
+                CODE_VERSION_CHUNK_STAGE,
                 u64::from(self.lat.cells_per_chunk()),
                 self.params.radius_m.to_bits(),
                 lens,
@@ -317,7 +322,7 @@ impl ChunkHorizonBaker {
                 dirs.push(self.lat.direction_ext(face, x0 + i as i64, y0 + j as i64));
             }
         }
-        field.heights_threaded_until(&dirs, &|| false, self.threads).into_iter().map(|h| h as f32).collect()
+        field.heights_threaded_until(&dirs, &|| false, &self.threads).into_iter().map(|h| h as f32).collect()
     }
 
     /// The heights of the chunk-sized block `(bx, by)` of `face`'s plane: from the cache under `tile_key`, else from the field (and kept under
@@ -396,7 +401,7 @@ impl HorizonBaker for ChunkHorizonBaker {
 
     /// The map of `key`; a world that is gone or a field that cannot be built gives a map of zeros of the right length (no shadow), never a
     /// short one, so a consumer indexing by cell and azimuth stays inside it.
-    fn bake(&self, key: ChunkKey, _ready: &[(ChunkKey, Arc<ChunkResult>)]) -> Option<Vec<u8>> {
+    fn bake(&self, key: ChunkKey) -> Option<Vec<u8>> {
         let n = self.lat.cells_per_chunk() as usize;
         let none = || Some(vec![0u8; n * n * self.params.azimuths as usize]);
         let record = BakeGuard::new(key);
@@ -456,8 +461,8 @@ impl HorizonBaker for ChunkHorizonBaker {
         map.map_or_else(|_| none(), |m| Some(m.data))
     }
 
-    /// The items of every stamp layer that touch the chunk and the halo the march reads around it (the horizon samples the whole field, so the layers
-    /// above the chunk stage count too): the hash of those items, 0 for none. The cap is the chunk's own with a halo of the march's cells.
+    /// The items of every stamp layer that touch the chunk and the halo the march reads around it (the horizon samples the whole field, so every
+    /// stamp layer counts): the hash of those items, 0 for none. The cap is the chunk's own with a halo of the march's cells.
     fn edit_word(&self, key: ChunkKey) -> u64 {
         self.items_word(key, self.halo_cells() as f64)
     }
@@ -487,15 +492,15 @@ pub fn max_range_m(lat: &ChunkLattice, radius_m: f64) -> f64 {
 }
 
 /// The march of a world's chunk horizons: SPIKE-32's 16 azimuths and 5 km, the range cut to what a chunk edge allows (4.8 km at the 8 m lattice
-/// of the A-net default; a 5 km range would need 627 cells of halo against a chunk of 614).
+/// of the default; a 5 km range would need 627 cells of halo against a chunk of 614).
 pub fn chunk_horizon_params(lat: &ChunkLattice, radius_m: f64) -> HorizonParams {
     let base = HorizonParams::chunk(radius_m);
     HorizonParams { range_m: base.range_m.min(max_range_m(lat, radius_m)), ..base }
 }
 
 impl WorldTerrain {
-    /// Give a world that has a chunk stage the horizon jobs (STRM-049): a second job per ready chunk on `spawner`, `clock` for the settle window,
-    /// `params` the march (its cell is the chunk lattice's). Errors without a chunk stage. A second call replaces the first.
+    /// Give a world that has a chunk lattice (one that reads a bake) the horizon jobs (STRM-049): a job per chunk the plan reads on `spawner`, `clock` for the settle window,
+    /// `params` the march (its cell is the chunk lattice's). Errors without a lattice. A second call replaces the first.
     pub fn enable_horizon(
         self: &Arc<Self>,
         params: HorizonParams,
@@ -545,6 +550,19 @@ impl WorldTerrain {
     /// the stamps on a pool of their own ([`horizon_workers`] threads, all in the idle class, one thread a bake: the march scales poorly inside a map
     /// and linearly across maps), and the stored far-field horizon is requested.
     pub fn enable_viewer_horizon(self: &Arc<Self>, gen: planet_streaming::GenWorkers, clock: Arc<dyn Clock>) -> Result<(), String> {
+        let workers = horizon_workers(gen);
+        let pool: Arc<dyn Spawner> = planet_streaming::GenWorkers::new(1).with_priority(gen.priority).pool_with_idle(workers);
+        self.enable_viewer_horizon_on(gen, pool, clock)
+    }
+
+    /// [`enable_viewer_horizon`](WorldTerrain::enable_viewer_horizon) on `pool`, the idle class of a rig's terrain share (BUDG-004): the horizon bakes then count in the same
+    /// share as the tile and plan jobs. The tools without a rig make a pool of their own.
+    pub fn enable_viewer_horizon_on(
+        self: &Arc<Self>,
+        gen: planet_streaming::GenWorkers,
+        pool: Arc<dyn Spawner>,
+        clock: Arc<dyn Clock>,
+    ) -> Result<(), String> {
         let lat = self.horizon_lattice().ok_or("the world has no bake: no horizon shadows")?;
         let mut params = chunk_horizon_params(&lat, self.radius_m());
         // A test run (the software adapter in CI) asks for a short march so that a map is a small raster: `PLANET_HORIZON_RANGE_M`, never below one chunk cell.
@@ -552,7 +570,6 @@ impl WorldTerrain {
             params.range_m = params.range_m.min(r.max(lat.cell_m(self.radius_m()) * 4.0));
         }
         let workers = horizon_workers(gen);
-        let pool: Arc<dyn Spawner> = planet_streaming::GenWorkers::new(1).with_priority(gen.priority).pool_with_idle(workers);
         let cfg = HorizonConfig { workers, ..Default::default() };
         self.enable_horizon(params, pool, clock, cfg, self.horizon_threads_set().unwrap_or(1))?;
         self.request_coarse_horizon();
@@ -904,7 +921,7 @@ impl HorizonRig {
     }
 
     /// One frame: with the horizon update of the chunk step (`frame_step` ran the jobs for the plan tiles `tiles`), hand the renderer the table of the frame, the next map to upload and
-    /// (once) the coarse map. `sun` is the lit plan sun direction. Does nothing without the chunk stage of the world.
+    /// (once) the coarse map. `sun` is the lit plan sun direction. Does nothing without the horizon jobs of the world.
     pub fn frame(
         &mut self,
         world: &WorldTerrain,

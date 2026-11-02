@@ -364,18 +364,6 @@ impl HeightField for Timed<'_> {
     fn height(&self, d: Vec3) -> f64 {
         self.timed(0, || self.inner.height(d))
     }
-    fn height_at_level(&self, d: Vec3, level: u8) -> f64 {
-        self.timed(0, || self.inner.height_at_level(d, level))
-    }
-    fn level_aware(&self) -> bool {
-        self.inner.level_aware()
-    }
-    fn level_drivers(&self, dirs: &[Vec3], level: u8) -> Option<Vec<Option<[u8; 3]>>> {
-        self.inner.level_drivers(dirs, level)
-    }
-    fn level_change(&self, dirs: &[Vec3], level: u8) -> Option<Vec<f64>> {
-        self.inner.level_change(dirs, level)
-    }
     fn heights_and_climate(
         &self,
         map: &dyn FaceMapping,
@@ -600,10 +588,6 @@ pub fn run(o: &Options, out: &mut dyn Write) -> Result<(), String> {
             let rr_ms = t.elapsed().as_secs_f64() * 1000.0;
             writeln!(out, "once per plan: inputs_hash {hash_ms:.2} ms; read_records ({recs}) {rec_ms:.2} ms; item_revision {rev_ms:.3} ms; MeshKeyer::new {keyer_ms:.2} ms; key of a cluster tile {key_ms:.2} ms; read_records_for it ({rr}) {rr_ms:.2} ms  [{h} {rev} {k}]").map_err(err)?;
         }
-        if std::env::var_os("PLANET_SCALE_NOPLAN").is_some() {
-            continue;
-        }
-
         // --- the plan job: cold (a fresh field and selection cache, the first plan at a place) and warm (the camera drifting 0.5 m a frame)
         let mut frames = frames_env;
         let mut edit_counter = 0u128;
@@ -664,9 +648,9 @@ pub fn run(o: &Options, out: &mut dyn Write) -> Result<(), String> {
                     .map_err(err)?;
                 }
                 // The plan right after one edit: a hill is put at the view, the definition handed to the field and the change announced to the plan
-                // cache as the window does (STRM-034; `PLANET_SCALE_UNANNOUNCED` leaves it out, so every tile is checked again), no tile named
+                // cache as the window does (STRM-034), no tile named
                 // (`invalidate_tiles(&[])`: the content keys of the tiles find what the edit changed, STRM-027), the plan made again.
-                if std::env::var_os("PLANET_SCALE_NOEDITPLAN").is_none() {
+                {
                     // A hill of 400 m reach put into a copy of the definition (in memory: the set's files are not touched).
                     let old_def = world.definition();
                     let old_revision = fresh.item_revision();
@@ -695,9 +679,7 @@ pub fn run(o: &Options, out: &mut dyn Write) -> Result<(), String> {
                         .map(|(dir, reach_m)| planet_frame::lod::ItemChange { dir, reach_m })
                         .collect();
                     let announced = changes.len();
-                    if std::env::var_os("PLANET_SCALE_UNANNOUNCED").is_none() {
-                        cache.note_item_change(old_revision, after.item_revision(), changes);
-                    }
+                    cache.note_item_change(old_revision, after.item_revision(), changes);
                     cache.invalidate_tiles(&[]);
                     let mut cam = base_cam;
                     cam.position =

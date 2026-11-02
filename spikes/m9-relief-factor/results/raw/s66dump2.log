@@ -1,0 +1,12 @@
+$ C:/Program Files/Git/usr/bin/bash.exe C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/570e124f-4ca5-49b4-8bf6-680604dce399/scratchpad/s66/dump2.sh
+=== k6all K=6 KM=6 W=1 09:51:34 cpu 1%
+RELIEF alps: face 0 cells i 27665 j 61097 (2560^2), dx 99.98 m, land 92.1 %, min -337 max 6324 m, sampled in 7.2 s
+RELIEF blackforest: face 3 cells i 10188 j 51184 (2560^2), dx 101.75 m, land 84.7 %, min -381 max 2271 m, sampled in 7.3 s
+RELIEF highlands: face 3 cells i 12373 j 61409 (2560^2), dx 100.77 m, land 67.8 %, min -383 max 2572 m, sampled in 7.5 s
+RELIEF valleyridge: face 3 cells i 24388 j 67161 (2560^2), dx 98.22 m, land 69.6 %, min -361 max 1094 m, sampled in 8.0 s
+=== k8all K=8 KM=8 W=1 09:52:08 cpu 3%
+RELIEF alps: face 0 cells i 27665 j 61097 (2560^2), dx 99.98 m, land 89.3 %, min -1418 max 7166 m, sampled in 6.9 s
+RELIEF blackforest: face 3 cells i 10188 j 51184 (2560^2), dx 101.75 m, land 76.9 %, min -608 max 2391 m, sampled in 7.6 s
+RELIEF highlands: face 3 cells i 12373 j 61409 (2560^2), dx 100.77 m, land 61.7 %, min -585 max 2826 m, sampled in 7.8 s
+RELIEF valleyridge: face 3 cells i 24388 j 67161 (2560^2), dx 98.22 m, land 59.6 %, min -593 max 1221 m, sampled in 7.2 s
+=== done 09:53:02

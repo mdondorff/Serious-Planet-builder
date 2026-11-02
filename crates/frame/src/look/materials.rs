@@ -53,22 +53,13 @@ pub enum Input {
 /// The inputs of one ground point, in the order of [`Input`].
 pub type MaterialInputs = [f64; INPUTS];
 
-/// The neutral driver inputs at a latitude, in the order soil depth (m), moisture, insolation: what a ground point reads where no chunk has landed
-/// (GEN-071).
+/// The neutral driver inputs at a latitude, in the order soil depth (m), moisture, insolation: what every tile's driver block holds (GEN-071).
 pub fn neutral_drivers(lat_rad: f64) -> [f64; 3] {
     [
         planet_generators::drivers::NEUTRAL_SOIL_M,
         planet_generators::drivers::NEUTRAL_MOISTURE,
         planet_generators::drivers::neutral_insolation(lat_rad),
     ]
-}
-
-/// The driver inputs of a ground point (GEN-072): `neutral + w (chunk - neutral)` for each of soil depth, moisture and insolation, with `w` the draw
-/// node's chunk weight (the per-node weight of STRM-047 that fades the height), so a first landing fades the materials in with the relief. The caller
-/// passes the weight; nothing here reads a chunk.
-pub fn driver_inputs(neutral: [f64; 3], chunk: [f64; 3], w: f64) -> [f64; 3] {
-    let blend = planet_generators::drivers::blend_driver;
-    [blend(neutral[0], chunk[0], w), blend(neutral[1], chunk[1], w), blend(neutral[2], chunk[2], w)]
 }
 
 /// `inputs` with the three reserved slots set to `drivers` (soil depth, moisture, insolation).

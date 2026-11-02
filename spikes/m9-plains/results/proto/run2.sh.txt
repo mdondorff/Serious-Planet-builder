@@ -1,0 +1,7 @@
+#!/bin/bash
+cd C:/DEV/Serious-Planet-Builder/.claude/worktrees/sonnet-spikes-36fc88
+echo "=== carve $(date +%H:%M:%S) cpu $(powershell -NoProfile -Command "(Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average")%"
+cmd //c start "" //b //wait //belownormal target/s73build/release/s73carve.exe target/s73/r N52E012-site1,N52E012-site2,N41W096-site1,N41W096-site2,N31W004-site1,N31W004-site2
+echo "=== score $(date +%H:%M:%S)"
+S73_DIR=target/s73/r cmd //c start "" //b //wait //belownormal target/release/examples/terrain_score.exe 2>&1 | grep -E "S73 .*(real  |base|carve)"
+echo "=== done $(date +%H:%M:%S)"

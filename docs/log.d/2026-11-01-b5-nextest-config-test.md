@@ -1,0 +1,1 @@
+- 2026-11-01 b5-nextest-config-test: the xtask config test checks #1021's nextest limits (gpu-tier cap 8, the five 450 s overrides before the gpu_ one, the heavy-window tests named and existing, groups in tier C only) and the vacuous "no test group" assertion is replaced (BUILD-003)

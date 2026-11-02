@@ -206,7 +206,7 @@ fn a_plan_of_an_earlier_camera_is_drawn_where_it_covers_the_frame_and_the_cover_
     assert!(stale > 0 && cover_frames > 0, "the fixture must draw the plan on some frames and the cover on others: {stale}/{cover_frames}");
 }
 
-// spec: STRM-033, STRM-016
+// spec: STRM-069, STRM-016
 #[test]
 fn while_the_camera_only_turns_the_cover_tiles_at_the_plans_level_are_exact_and_only_what_stands_in_for_a_missing_tile_is_a_stand_in() {
     // The owner saw every tile turn "stand-in" in the F3 overlay while the camera only turned: the frame draws the cover when the plan of an

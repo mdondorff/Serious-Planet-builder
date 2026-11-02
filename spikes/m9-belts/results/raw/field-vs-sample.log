@@ -1,0 +1,8 @@
+field height at the pixel centre (store 16384) vs global::sample, land under 60 deg
+1000 sample 0.1208 field 0.1142
+2000 sample 0.0433 field 0.0417
+3000 sample 0.0159 field 0.0150
+4000 sample 0.0072 field 0.0066
+5000 sample 0.0022 field 0.0018
+field - sample: p1 -90 p50 -20 p99 17 m
+where sample>3 km: field-sample p50 -56 m, n=825

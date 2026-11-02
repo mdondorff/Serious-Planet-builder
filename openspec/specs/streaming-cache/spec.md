@@ -803,6 +803,10 @@ Source: SPIKE-13 variant D, ADR 0066, ADR 0021 point 2, M6 plan row E1, window 1
 - **WHEN** a refresh is queued for a resident tile of a residency set made from a selection (closed under its ancestors) and the wants then change so that the tile is in no class before the request starts
 - **THEN** no job starts, the request is dropped and counted as cancelled, the tile stays resident with its old payload, and when it is wanted again the new version replaces it
 
+#### Scenario: Every re-keyed tile is in the edit's set
+- **WHEN** a hill is added inside a face, near a face edge, near a cube corner and with a 40 km reach, and the mesh keys of every tile of levels 0 to 5 and of the tiles round the edit down to level 12 are taken before and after
+- **THEN** every tile whose key changed is in the edit's set (`planet_editor::feed::edited_tiles`), including the coarse tiles whose region summary covers the whole body (WDEF-008, levels 0 to 2 at Earth's radius), which every edit re-keys
+
 ### Requirement: STRM-028 The terrain reads the current definition
 A world's terrain SHALL hold its definition as a replaceable shared value and SHALL build every field from a snapshot of it taken when the field is built; a field built before a replacement SHALL keep the definition it was built from (a plan or tile job in flight finishes on the definition it started with, and its keys name it through the item revision and the footprint entries). A replacement SHALL be refused, naming both hashes, when the new definition's base hash differs from the current one's, because the bake the fields read was made from the base. The field of a definition that holds stamps SHALL be the base field with one stamp stage (GEN-026) per layer that holds a stamp, lowest layer first (the layer stack of ADR 0007, then other layer names by name), each at its place in the stack (layers outside it follow the stack's seven, in name order), below the water bound; the field of a definition without stamps SHALL be what it was. The plan worker's residency set SHALL be selected again when the definition's revision changes, whatever the camera did. A caller that edits items SHALL replace the definition first and then name the edited tiles to the managed loop.
 
@@ -930,15 +934,41 @@ Source: ADR 0068, ADR 0066 point 4
 - **THEN** a tile out of reach keeps the key it had in the plain world, and the tile under the stamp is re-keyed
 
 ### Requirement: STRM-033 The RAM share of terrain is capped by counts
-Terrain's RAM share SHALL be 3 GiB of the 8 GiB of CON-21. Its parts SHALL be capped by counts asserted at tier A (CON-20): the bake blocks alive at most 0.5 GB (20 blocks of 1024 cells while baking; the runtime reader's cache holds at most 16 blocks), the tile pack index at most 1 GB, staged and in-flight tile bytes at most 0.1 GB, plan caches at most 0.1 GB, the chunk horizon's height tiles at most 64 (96.5 MB at 614 cells, STRM-059), and generated but deferred tiles at most 2,048. The process working set is measured in the dive perf scene (TEST-019), not in a test.
+Terrain's RAM share SHALL be 3 GiB of the 8 GiB of CON-21. Its parts SHALL be capped by counts asserted at tier A (CON-20): the bake blocks alive at most 0.5 GiB (20 blocks of 1024 cells while baking; the runtime reader's cache holds at most 512 MiB, `SOURCE_CACHE_BYTES`, 31 blocks of 1024 cells), the tile pack index at most 1 GB, staged and in-flight tile bytes at most 0.1 GB, plan caches at most 0.1 GB, the chunk horizon's height tiles at most 64 (96.5 MB at 614 cells, STRM-059), and generated but deferred tiles at most 2,048. The process working set is measured in the dive perf scene (TEST-019), not in a test.
 
 Verify: A
 Status: planned
-Source: ADR 0033 point 8 (accepted 2026-10-16), opus-planner (2026-10-22, M7 H2: a cap a test asserts becomes active; the rest stay planned), STRM-059
+Source: ADR 0033 point 8 (accepted 2026-10-16), opus-planner (2026-10-22, M7 H2: a cap a test asserts becomes active; the rest stay planned), STRM-059; the reader's cache from 16 blocks to `SOURCE_CACHE_BYTES` (ADR 0033 point 6) and 0.5 GB to 0.5 GiB, errata (SPIKE-89, opus-planner 2026-11-01)
 
 #### Scenario: A cap
 - **WHEN** a part of the share reaches its cap
 - **THEN** the count stops at the cap (blocks evicted, tiles deferred or refused) and the test names the part, its count and its cap
+
+### Requirement: STRM-069 Cover tile states
+The frame that draws the cover (`DrawKind::Cover`, STRM-016) SHALL label each cover tile by whether it is the tile the plan of the frame's camera would draw: a resident tile drawn whole at the level the plan's selection gives it is exact; only a tile that stands in for a tile of the plan that is not resident (a coarser tile, a tile drawn over some quadrants, or a tile the balancing made by splitting one of those) is a stand-in. With every tile of the residency set resident no cover tile is a stand-in, so the F3 stale-tile overlay (VIEW-014) does not show a camera that only turns as a stand-in.
+
+Verify: A
+Status: active
+Source: owner (2026-10-21, P1-4), STRM-016, VIEW-014; added by turn-cover (#522) as STRM-033, an ID already taken by the RAM share, so never synced; synced as STRM-069 (opus-planner, 2026-11-01)
+
+#### Scenario: A turn
+- **WHEN** the camera turns away from the view of the plan in hand over a residency set that is complete, and again over one with tiles missing
+- **THEN** the first frame draws the cover with every tile exact; the second draws exact the tiles at the plan's level and stand-in exactly the tiles that stand in for a missing one
+
+### Requirement: STRM-070 The refresh set holds the coarse tiles re-keyed through their region summary
+The tiles an item edit names for refresh (STRM-026, `planet_editor::feed::edited_tiles_reading`) SHALL include every resident coarse tile (WDEF-008) that reads its region summary and whose summary cover holds the anchor cell of an edited item, in its state before or after the edit, whether or not the item's reach touches the tile. A tile reads its summary when it is a root or an item of a stamp layer touches it with the stage's halo. The cover SHALL be tested without building it: the fewest `neighbors8` steps from the anchor cell to the tile's cells, at most its margin rings (any anchor for a whole-body cover). The find SHALL use the stamp stage's halo.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-11-01, inbox #62, option 2), WDEF-007, WDEF-008, ADR 0045 point 7, ADR 0066, VIEW-061, edit-stale-diagnostics
+
+#### Scenario: An edit in a coarse tile's summary margin
+- **WHEN** a hill is the only item in a level-5 tile and a 3 km-reach hill is added 250 km outside that tile's edge, and the mesh keys of the coarse tiles round it are taken before and after
+- **THEN** every tile whose key changed (tiles of levels 3, 4 and 5) is in the edit's set, and the set holds no coarse tile whose key did not change
+
+#### Scenario: The find's halo is the stage's
+- **WHEN** the find's halo and the stamp stage's halo are compared
+- **THEN** their bits are equal, so the covers the find walks are the ones the keys read
 
 ### Requirement: STRM-034 The plan cache keeps what an edit cannot reach
 `SelectionCache::note_item_change(from, to, changes)` SHALL announce that the field's item revision went from `from` to `to` and where the items that differ were and are (`ItemChange`). The next plan SHALL keep, as checked at the new revision, the footprint hashes of tiles whose reads the changes cannot reach (the tile's cap with its halo, or the cover of a coarse tile, widened by the change's reach; never a tile that reads the whole body) and the certificates and cap bounds beyond eight radii of a change; the others SHALL be checked again. A revision that is not announced, or whose chain of announcements is broken, SHALL start the checks from all tiles. Plans SHALL equal a fresh cache's, node for node.
@@ -1009,7 +1039,7 @@ Verify: A
 Status: active
 Source: opus-planner (2026-10-24, M8-5), STRM-043
 
-Detail: A block read back SHALL equal what was written bit for bit; a block of another `B`, another azimuth count, a short or damaged payload, or one missing under the current key SHALL be an error naming the block. A world with a store SHALL read the stored channel on a thread of its own when it gets its chunk stage and never wait for it on the frame path (CON-22): a world without a stored map shades with the chunk horizon alone and says once how to make it (`planet generate --coarse-horizon <store dir> --global-res N`, which reads the stored coupled run, marches and stores the channel, printing a progress line and its wall time); a stored map that the renderer cannot read (not 16 azimuths, fewer than 2 cells a face edge) is a failure naming the counts.
+Detail: A block read back SHALL equal what was written bit for bit; a block of another `B`, another azimuth count, a short or damaged payload, or one missing under the current key SHALL be an error naming the block. A world with a store SHALL read the stored channel on a thread of its own when it gets its horizon jobs and never wait for it on the frame path (CON-22): a world without a stored map shades with the chunk horizon alone and says once how to make it (`planet generate --coarse-horizon <store dir> --global-res N`, which reads the stored coupled run, marches and stores the channel, printing a progress line and its wall time); a stored map that the renderer cannot read (not 16 azimuths, fewer than 2 cells a face edge) is a failure naming the counts.
 
 #### Scenario: Round trip and keys
 - **WHEN** the coarse horizon of a small run is written and read back, and a march parameter, the observer lattice or the coupled run changes
@@ -1033,16 +1063,16 @@ Detail: Each map carries a state word, the hash of the march and of the results 
 - **THEN** the chunk's map is dropped with it, a map of another march is not taken for the first, the same chunk with the same neighbourhood reads its map from the disk with no bake, and one with another neighbourhood is a miss
 
 ### Requirement: STRM-049 The world bakes the chunk horizon
-A world with a chunk stage SHALL be able to enable the horizon jobs (`WorldTerrain::enable_horizon`, refused without the stage) with a baker that samples the world's own field over the chunk and a halo and bakes its horizon (GEN-044). `horizon_frame` SHALL run one frame of the jobs for the chunks the plan's tiles read, nearest first, and `horizon_map` SHALL return the landed map or none. The same world SHALL give the same map.
+A world with a chunk lattice (one that reads a bake) SHALL be able to enable the horizon jobs (`WorldTerrain::enable_horizon`, refused without the lattice) with a baker that samples the world's own field over the chunk and a halo and bakes its horizon (GEN-044). `horizon_frame` SHALL run one frame of the jobs for the chunks the plan's tiles read, nearest first, and `horizon_map` SHALL return the landed map or none. The same world SHALL give the same map.
 
 Verify: A
 Status: active
 Source: opus-planner (2026-10-24, M8-5), STRM-048, STRM-026
 
-Detail: A world with a chunk stage SHALL be able to enable the horizon jobs (`WorldTerrain::enable_horizon`, refused without the stage), with a baker that samples the world's own field (the base, the stamps and the changes of the chunks that are ready) at the cell directions of the chunk lattice over the chunk and a halo of `ceil(range / cell) + 2` cells (past a face edge on the extended cube plane), bakes the horizon of the chunk's cells (GEN-044) and reads the chunk and the chunks around it, nine in all and eight at a cube corner (STRM-048's state word), which holds only while the halo fits in one chunk edge: `enable_horizon` refuses a range whose halo is longer, and a march the bake would refuse, naming the cause (`chunk_horizon_params` gives the world's own, the range cut to a chunk edge less two cells). A world that is gone or a field that cannot be built gives a map of zeros of the right length, never a short one. `horizon_frame` SHALL run one frame of the jobs for the chunks the plan's tiles read, nearest first, and `horizon_map` SHALL return the landed map or none. The march's hash SHALL carry the lattice and the bake version; the edits enter through the chunk's edit word (STRM-057). The same world SHALL give the same map. The cell is the chunk lattice's (8 m at the A-net default).
+Detail: A world with a chunk lattice SHALL be able to enable the horizon jobs (`WorldTerrain::enable_horizon`, refused without the lattice), with a baker that samples the world's own field (the base and the stamps) at the cell directions of the chunk lattice over the chunk and a halo of `ceil(range / cell) + 2` cells (past a face edge on the extended cube plane), bakes the horizon of the chunk's cells (GEN-044) and reads the chunk and the chunks around it, nine in all and eight at a cube corner (STRM-048's state word), which holds only while the halo fits in one chunk edge: `enable_horizon` refuses a range whose halo is longer, and a march the bake would refuse, naming the cause (`chunk_horizon_params` gives the world's own, the range cut to a chunk edge less two cells). A world that is gone or a field that cannot be built gives a map of zeros of the right length, never a short one. `horizon_frame` SHALL run one frame of the jobs for the chunks the plan's tiles read, nearest first, and `horizon_map` SHALL return the landed map or none. The march's hash SHALL carry the lattice and the bake version; the edits enter through the chunk's edit word (STRM-057). The same world SHALL give the same map. The cell is the chunk lattice's (8 m at the default).
 
 #### Scenario: A flight
-- **WHEN** a world with the stand-in chunk stage and a small lattice flies 12 s on a fake clock, then stands still, then gets an edit
+- **WHEN** a world over the base terrain with a small lattice flies 12 s on a fake clock, then stands still, then gets an edit
 - **THEN** every ready chunk has its map after its heights, the maps are one byte per azimuth per cell, the same world gives the same maps, the re-bakes stay within two per chunk, an unchanged world bakes nothing more, and an edit at the chunks bakes the maps it touches again
 
 ### Requirement: STRM-050 The chunk horizon on the pack disk cache
@@ -1056,8 +1086,8 @@ Source: opus-planner (2026-10-24, M8-5), STRM-048
 - **WHEN** a world flies over the same chunks twice with a pack on disk
 - **THEN** the second run reads the maps from the pack and bakes none
 
-### Requirement: STRM-046 The viewer runs A-net chunks at runtime when asked
-No app code starts a chunk stage (the flag `--chunks` and the world's stage are removed, ADR 0086), so every tile the viewer, the editor and the scenes draw SHALL be the base. No frame SHALL wait for a bake (CON-22).
+### Requirement: STRM-046 The viewer draws the base terrain only
+No app code computes detail on top of the base terrain (ADR 0086), so every tile the viewer, the editor and the scenes draw SHALL be the base. No frame SHALL wait for a bake (CON-22).
 
 Verify: A
 Status: active
@@ -1065,18 +1095,7 @@ Source: D7 (runtime generation, disk cache), ADR 0077 point 7, STRM-043, owner f
 
 #### Scenario: Off by default
 - **WHEN** the window opens a world with a stored coupled channel
-- **THEN** it starts no chunk job and computes no chunk
-
-### Requirement: STRM-047 The compact tile carries the chunk change
-The compact tile builder SHALL store the chunk change of a tile at the tile's own level beside its heights (`HeightField::level_change`, forwarded by every wrapper that forwards `height_at_level`), and the CPU mirror `CompactTile::shade_vertex_faded` SHALL take `fade x change` off a vertex. The renderer and the plan do not read the change or a weight since ADR 0086; the requirement goes with the generators' chunk field.
-
-Verify: A
-Status: active
-Source: GEN-025, ADR 0086
-
-#### Scenario: Change
-- **WHEN** a tile at the pyramid top over a ready chunk is built
-- **THEN** the stored change equals the field's height at the tile's level minus the base's, and the mirror's vertices at fade `f` are the final ones minus `f` times the change
+- **THEN** it starts no job but the tile and horizon jobs and computes nothing on top of the base
 
 ### Requirement: STRM-055 The job log tells a refresh and its waits
 The job log (STRM-022) SHALL record for each job the milliseconds from the request of its tile to its dispatch (the wait in the streamer's queue) and whether it rebuilds a stale resident tile (a refresh, STRM-026). `refresh_summary` SHALL put the refresh jobs of a slice in one line: their count and the median, 90th percentile and largest of the streamer-queue wait, the spawner-queue wait and the load, in milliseconds; none without a refresh. The viewer SHALL write that line every 10 s while there are refreshes. The readings decide nothing (CON-14).
@@ -1147,14 +1166,14 @@ Verify: A
 Status: active
 Source: opus-planner (2026-10-26, criterion 6), STRM-048, STRM-049, GEN-085, ADR 0083 point 4
 
-Detail: Blocks inside the face are kept; a block past a face edge is evaluated each time. The cache is bounded (`HEIGHT_TILES_MAX`, 64: 96.5 MB at 614 cells) and evicts the least recently used. A block is kept under a key of everything its heights depend on: the bake version, `ANET_VERSION`, the chunk stage version, the lattice, the world's baked input, the definition apart from its items, the coupled lens and its readiness, the items that touch the block with the stamp stage's halo, and the hash of its ready result. A block whose chunk result changed while the field was built SHALL NOT be kept. The result part of the key is that of every chunk the block's heights read (its own and the neighbours whose cells the spline reads across its edge). Limit: the position of the chunk stage of a layer outside `LAYER_STACK` is not in the key.
+Detail: Blocks inside the face are kept; a block past a face edge is evaluated each time. The cache is bounded (`HEIGHT_TILES_MAX`, 64: 96.5 MB at 614 cells) and evicts the least recently used. A block is kept under a key of everything its heights depend on: the bake version, the two version numbers kept from the removed code (10 and 1, so no stored map is lost), the lattice, the world's baked input, the definition apart from its items, the coupled lens and its readiness, and the items that touch the block with the stamp stage's halo. Limit: the position setting of a layer outside `LAYER_STACK` is not in the key.
 
 #### Scenario: Neighbours and edits
 - **WHEN** a chunk and then its eastern neighbour are baked, a hill is put in the neighbour, and the chunk is baked again
 - **THEN** the second bake evaluates the three blocks it lacks and reads six, the third evaluates the blocks the hill reaches and no others, and every map equals the uncached one
 
-### Requirement: STRM-064 The horizon maps are baked without a chunk stage
-With no chunk stage the horizon jobs SHALL bake the maps of the chunks of the plan's tiles (chunk-grid level 11 and finer) from the base terrain and the stamps, in the format, march and slots of a run with a stage, and SHALL bake a map again when an edit or a change of the world word reaches it.
+### Requirement: STRM-064 The horizon maps are baked from the base terrain
+The horizon jobs SHALL bake the maps of the chunks of the plan's tiles (chunk-grid level 11 and finer) from the base terrain and the stamps, in the format, march and slots of STRM-048, and SHALL bake a map again when an edit or a change of the world word reaches it.
 
 Verify: A
 Status: active
@@ -1163,7 +1182,7 @@ Source: owner fallback 2026-10-28, opus-planner M8-F step 2, STRM-048, STRM-060,
 Detail: Every chunk counts as ready with no change. The bakes run on a pool of their own in the idle class, at most 8 at once (half the generation workers) and one thread a bake: a map takes about 6 s on one thread and the march scales poorly inside a map (4 threads: 1.5x) and linearly across maps; bakes that need the same height tile at once wait for the first to evaluate it. The result does not depend on how many bakes run at once (CON-14). The jobs keep the maps of the wanted chunks (at most 24) and, of the others, the most recently wanted up to the configured number beyond them. An edit that reaches a chunk or the halo of its march, a neighbour included, changes its edit word; a change of the world word (the coupled lens, the base of the definition, the stage) changes every word; the map is baked again once its word has been unchanged for the settle window. A height tile of the bake is kept only if no edit was published since the field it was evaluated from was built.
 
 #### Scenario: Base-only maps
-- **WHEN** the horizon jobs run over a source with no chunk stage and two chunks are wanted
+- **WHEN** the horizon jobs run over the base terrain and two chunks are wanted
 - **THEN** both start at once, land, and are baked again after an edit word change and the settle window; maps of chunks no longer wanted go beyond the cap, the oldest first
 
 #### Scenario: Window without a stage
@@ -1180,3 +1199,14 @@ Source: opus-planner (2026-10-27, window 8), ADR 0083 point 2, STRM-049, ADR 008
 #### Scenario: A queued job against waiting bakes
 - **WHEN** a one-worker pool is busy and idle, prefetch and visible jobs are submitted in that order
 - **THEN** the visible jobs start first, then the prefetch job, then the idle jobs; with an idle cap of 1 on three workers, a second idle job does not start while the first runs and two visible jobs run beside it
+
+### Requirement: STRM-061 A horizon bake stops when an edit makes it stale
+The chunk horizon baker SHALL march on its configured threads. A bake whose chunk's edit word (STRM-057) changed while it ran SHALL return no map: the job SHALL publish and store nothing, free its slot, and the chunk SHALL be baked again against the new word once the neighbourhood has settled (STRM-048).
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-27, window 10), STRM-048, STRM-057, STRM-060, ADR 0086
+
+#### Scenario: A bake made stale by an edit
+- **WHEN** a horizon job's baker reports that the heights went stale while it ran
+- **THEN** no map lands or is published for the chunk, the cancelled count is 1, the job's slot is free, and the next update bakes the chunk again and that map lands

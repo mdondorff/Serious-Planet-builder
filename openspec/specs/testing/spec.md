@@ -6,11 +6,11 @@ How the project proves itself: spec traceability and the A/B/C/D verification ti
 ## Requirements
 
 ### Requirement: TEST-001 Spec traceability
-Every requirement in the specs SHALL have a unique trace ID, a verification tier (A, B, C or D) and a status (active, planned or deprecated); every `// spec: ID` citation in the code SHALL name an existing requirement or constitution rule; every active tier A, B or C requirement SHALL be cited by at least one test of its own tier, where a citation counts only when the `// spec:` comment sits directly above a `#[test]` function (only comments and attributes, including wrapped multi-line ones, may sit between; only the `#[test]` attribute counts) and integration test files `tests/gpu_*.rs` are tier C, `tests/oracle_*.rs` tier B and all others (including unit tests under `src/`) tier A, matching the test runner, and a `// spec:` comment directly above a performance-harness scene entry point (a `fn perf_*` item under `crates/app/src/`, with the same comments-and-attributes rule between) counts as tier C evidence only (CON-17: the scene measures what no test may; there is no further tier); every tier D requirement SHALL name its review artefact; and every main spec SHALL have a Purpose section that is not empty and does not contain the placeholder "TBD" (in any case).
+Every requirement in the specs SHALL have a unique trace ID, a verification tier (A, B, C or D) and a status (active, planned or deprecated); every `// spec: ID` citation in the code SHALL name an existing requirement or constitution rule; every active tier A, B or C requirement SHALL be cited by at least one test of each declared tier, where a citation counts only when the `// spec:` comment sits directly above a `#[test]` function (only comments and attributes, including wrapped multi-line ones, may sit between; only the `#[test]` attribute counts) and integration test files `tests/gpu_*.rs` are tier C, `tests/oracle_*.rs` tier B and all others (including unit tests under `src/`) tier A, matching the test runner, and a `// spec:` comment directly above a performance-harness scene entry point (a `fn perf_*` item under `crates/app/src/`, with the same comments-and-attributes rule between) counts as tier C evidence only (CON-17: the scene measures what no test may; there is no further tier); every tier D requirement SHALL name its review artefact; and every main spec SHALL have a Purpose section that is not empty and does not contain the placeholder "TBD" (in any case).
 
 Verify: A
 Status: active
-Source: CON-16, ADR 0009, ADR 0012
+Source: CON-16, ADR 0009, ADR 0012, planner inbox #44 (2026-11-01)
 
 #### Scenario: Placeholder Purpose
 - **WHEN** a spec's Purpose is missing, empty or contains "TBD"
@@ -28,9 +28,15 @@ Source: CON-16, ADR 0009, ADR 0012
 - **WHEN** a `// spec:` comment sits above a helper function, a constant or a module instead of a `#[test]` function
 - **THEN** it does not count towards coverage and the requirement is reported as not cited
 
+#### Scenario: Ignored test
+- **WHEN** a `// spec:` comment sits above a `#[test]` function that is also marked `#[ignore]` (with or without a reason, before or after `#[test]`)
+- **THEN** it counts for no tier, and a requirement cited only by ignored tests is reported as not cited
+- **AND** the citation must still name an existing requirement; a wall-clock check (BUILD-003) is such a test
+
 #### Scenario: Wrong tier
 - **WHEN** an active tier C requirement is cited only by tests outside `gpu_*` files
 - **THEN** `cargo xtask spec-lint` fails and says which tiers cite it and which tier is required
+- **AND** a requirement of several tiers (`Verify: A, C`) fails for each declared tier no test of that tier cites, and a tier other than A, B, C or D on the line is refused
 
 #### Scenario: Perf scene citation
 - **WHEN** a `// spec:` comment sits directly above a `fn perf_*` item under `crates/app/src/`
@@ -737,7 +743,7 @@ Source: window 6 (single-scene `--out DIR`), TEST-019, TEST-025
 - **THEN** the log path is `<dir>/<scene>-lit.json`, the same under the new directory, the file itself, and a refusal by the option check before the case
 
 ### Requirement: TEST-031 Water plan counters in the streaming frames log
-The `frames.txt` of a streaming case SHALL end with the columns `queries`, `tile_misses`, `band_queries` and `lit_plan_ms`: the field queries, the tiles asked of the tile jobs' water book that had no entry, the coastal-band queries and the milliseconds of the lit path's water plan on the frame thread, per frame (all 0 on the debug path). They are recorded only: no verdict, count digest or comparison reads them. `WaterTileCache::counters()` gives the cumulative counts; a frame's share is the difference of two snapshots. A log without the columns is refused as old-format.
+The `frames.txt` of a streaming case SHALL end with the columns `queries`, `tile_misses`, `band_queries`, `lit_plan_ms`, `deferred` and `node_bytes`, per frame: the water plan's field queries, book misses, band queries and milliseconds on the frame thread (all 0 on the debug path), the finished tiles that waited for the upload budget (the cap was reached) and the node-record bytes of the plan. With `upload_bytes`, `uploaded` and `upload_calls` they show whether a slow frame was an upload-capped one. They are recorded only: no verdict, count digest or comparison reads them. A log without the columns is refused as old-format.
 
 Verify: A
 Status: active
@@ -745,7 +751,7 @@ Source: M5 item 9a.1 (status.md), TEST-012, TEST-021
 
 #### Scenario: The columns round-trip
 - **WHEN** a frames log with counter values is written and read back
-- **THEN** the values are equal and the header ends `queries tile_misses band_queries lit_plan_ms`
+- **THEN** the values are equal and the header ends `queries tile_misses band_queries lit_plan_ms deferred node_bytes`
 
 #### Scenario: A memoised plan asks nothing
 - **WHEN** the same terrain plan is planned twice with one cache
@@ -963,6 +969,10 @@ Source: window 13 (2026-10-19), window 14 (2026-10-19), window 15 (2026-10-20), 
 - **WHEN** the scene runs in smoke mode
 - **THEN** it prints the refreshed-set table with at least one row for the case, the named tiles are the sum of the drawn and the resident-only ones, and `edit-latency.md` holds the table
 
+#### Scenario: An edit that never becomes exact names what it waits for
+- **WHEN** a resident tile's refresh is held by the settle window, then queued behind a busy job, then run
+- **THEN** the streamer's report of the tile (the data the scene's error prints for each substituted node, with the wanted against the resident key and whether the edit's set named it, and the window's stall report prints as held and queued counts) says held, then queued in the draw class (the queued count per class includes it), then resident and no longer stale
+
 ### Requirement: TEST-042 The brush cases of the edit-latency scene
 The `edit-latency` scene (TEST-019, TEST-041) SHALL run, after the hill cases of each altitude it is measured at 200 m and 2 km, brush cases: one brush item in the layer `brush` holding one raise stroke of 20 points a quarter of the radius apart, running east and centred on the place the views look at, with a strength of a fifth of the radius up to 100 m, a reach that holds the stroke and its radius and a bound on the change equal to the strength, at the radii 150 m and 1 km (`editperf::case_brush`). The case SHALL be edited and taken back as a hill case is (the same sequence and stages; the footprint find from the item's anchor and reach; the preview delta with the brushes (`preview_delta_on`, as the editor sets it), so the preview column reads the first frame that shows the chain of preview stamps), and its rows in the budget table, the stages table and the refreshed-set table SHALL print the radius as `<r> m brush` so that no brush row is read as a stamp. A smoke run SHALL add the 150 m case at 200 m, and fail when the brush edit never becomes exact. The brush rows are read against the same exact budgets by radius and altitude as the hill rows. A gated row with no frame that showed the preview SHALL be judged on its exact time alone and say `(no preview)` in its verdict; `no result` stays for a row with no exact frame.
 
@@ -1096,7 +1106,7 @@ Source: opus-planner (2026-10-25), look review 1 second site, TEST-050, ADR 0086
 - **THEN** all the land is in the band of 600 m with no slope, and the same table comes out every time
 
 ### Requirement: TEST-054 The envelope scene runs the horizon jobs
-The envelope scene (TEST-047) SHALL run the horizon jobs from the base terrain when its world has a store, and no chunk stage (ADR 0086: the stage is removed). The jobs are driven every frame from the plan's tiles and every flight starts with no horizon map resident. A world without a store SHALL keep the tile-only scene.
+The envelope scene (TEST-047) SHALL run the horizon jobs from the base terrain when its world has a store (ADR 0086: no stage runs on top of the base). The jobs are driven every frame from the plan's tiles and every flight starts with no horizon map resident. A world without a store SHALL keep the tile-only scene.
 
 Verify: A
 Status: active
@@ -1104,7 +1114,7 @@ Source: M8 plan, TEST-047, STRM-064, ADR 0086
 
 #### Scenario: The stage of a flight
 - **WHEN** the envelope scene is set up with a store and with an in-memory bake
-- **THEN** the first runs the horizon jobs and no chunk stage, and the second has none
+- **THEN** the first runs the horizon jobs from the base terrain, and the second has none
 
 #### Scenario: A frame waits for the horizon jobs
 - **WHEN** a frame has a horizon job in flight, and when it has none
@@ -1157,7 +1167,7 @@ Per-scene table (the counters each scene checks; a scene with the feature off ch
 - **THEN** the first fails the check naming the horizon and the counter table, and the second is not checked and logs `off`
 
 ### Requirement: TEST-060 Milestone M8 acceptance
-`cargo xtask accept M8` SHALL run the automated steps of `accept M5`, the discrete-GPU tier C run and `gate --small` (TEST-063), and SHALL judge M8's criteria 4 to 7 only from the logs of a valid window, never from a measurement of its own. A missing, smoke, other-scene or overridden log SHALL be MISSING, not a pass; a failed row fails the command, otherwise a MISSING row makes it incomplete. Criterion 3 (`cargo xtask gate` on the real store, chunk stage off) SHALL be listed as a manual item.
+`cargo xtask accept M8` SHALL run the automated steps of `accept M5`, the discrete-GPU tier C run and `gate --small` (TEST-063), and SHALL judge M8's criteria 4 to 7 only from the logs of a valid window, never from a measurement of its own. A missing, smoke, other-scene or overridden log SHALL be MISSING, not a pass; a failed row fails the command, otherwise a MISSING row makes it incomplete. Criterion 3 (`cargo xtask gate` on the real store) SHALL be listed as a manual item.
 
 Verify: A
 Status: active
@@ -1174,13 +1184,13 @@ Detail: The logs in `perf/logs/` or `--logs DIR`: `coupled-make.json` (at most 6
 - **THEN** criterion 6 passes in all three cases while the M6 table is within budget, and the horizon rows are not judged; an over row of the M6 table FAILS and a log without the M6 table is MISSING
 
 ### Requirement: TEST-061 The no-degradation gate counters and limits
-The window SHALL, when `PLANET_GATE` is set, count the main-thread time of every frame, the tiles the plan holds back (ADR 0074), the horizon maps baked, the bake blocks the main thread decodes itself (VIEW-061) and the panics caught, and the gate SHALL fail the run on a frame over 100 ms, a held-back tile with no edit in reach, a decoded block, no horizon map over a lit run with a chunk stage, a caught panic, or a step between levels over the bound of M8 exit criterion 3. A failure SHALL name the counter, the frame, the phase or the tile IDs.
+The window SHALL, when `PLANET_GATE` is set, count the main-thread time of every frame, the tiles the plan holds back (ADR 0074), the horizon maps baked, the bake blocks the main thread decodes itself (VIEW-061) and the panics caught, and the gate SHALL fail the run on a frame over 100 ms, a held-back tile with no edit in reach, a decoded block, no horizon map over a lit run with the horizon jobs, a caught panic, or a step between levels over the bound of M8 exit criterion 3. A failure SHALL name the counter, the frame, the phase or the tile IDs.
 
 Verify: A, C
 Status: active
 Source: owner (2026-10-28), owner test 2026-10-27 findings 7, 11 and 16, ADR 0074, TEST-058, VIEW-061
 
-Detail: A frame's time is its phases without the waits for the GPU, and the phase of the longest one is named. Held-back tiles are listed with their IDs and whether an edit is in reach; those under an edit are reported and not failed. The first 20 frames are not judged. On the software adapter (`PLANET_GATE_SOFTWARE`, the CI run) frame time, decoded blocks and horizon maps are reported and not judged, because its rendering shares the CPU with the main thread; held-back tiles and panics are always judged. The step between levels is measured by `cargo xtask gate` (the field-side `anet_steps_report`, levels above the entry level), not by the window.
+Detail: A frame's time is its phases without the waits for the GPU, and the phase of the longest one is named. Held-back tiles are listed with their IDs and whether an edit is in reach; those under an edit are reported and not failed. The first 20 frames are not judged. On the software adapter (`PLANET_GATE_SOFTWARE`, the CI run) frame time, decoded blocks and horizon maps are reported and not judged, because its rendering shares the CPU with the main thread; held-back tiles and panics are always judged. The step between levels is measured by `cargo xtask gate` (the field-side `base_steps_report`, levels 12 to 16), not by the window.
 
 #### Scenario: A held-back tile away from an edit
 - **WHEN** the counters record a frame whose plan holds back 3 tiles and no edit reaches them
@@ -1220,16 +1230,16 @@ Source: owner (2026-10-28), CLAUDE.md prepush rule
 - **WHEN** the changed paths include `crates/streaming/src/chunks.rs`
 - **THEN** the pre-push run includes the small gate; for `docs/status.md` alone it does not
 
-### Requirement: TEST-064 The gate runs without the chunk stage by default
-`cargo xtask gate` SHALL run the sites of TEST-062 over the base terrain and report the step between levels of the base field alone; the stage-on run (`gate --chunks`) no longer exists (ADR 0086). `gate --small` SHALL run the small world once.
+### Requirement: TEST-064 The gate runs on the base terrain
+`cargo xtask gate` SHALL run the sites of TEST-062 over the base terrain and SHALL measure the step between levels on the base field: the tiles under one river's tile at levels 12 to 16 are generated and each vertex they share with their parent is compared with the parent's height, p99 and maximum in metres, with the bound 0.25 m (`base_steps_report`). The row names the figures ("measured on the base field"). The stage-on run (`gate --chunks`) no longer exists (ADR 0086). `gate --small` SHALL run the small world once.
 
 Verify: C
 Status: active
 Source: opus-planner (2026-10-28), owner fallback 2026-10-28, TEST-061, TEST-062, ADR 0086
 
-#### Scenario: Stage off
+#### Scenario: Base terrain
 - **WHEN** the window runs over a store with a coupled run
-- **THEN** no chunk job is computed and the gate line names the horizon jobs and no chunk jobs
+- **THEN** no chunk job is computed and the gate line names the horizon jobs and no chunk jobs; the levels row says it was measured on the base field
 
 ### Requirement: TEST-065 The gate reports the horizon re-bake after its edit; the edit-latency scene tabulates it
 The gate SHALL fail a lit run with the horizon jobs on when no horizon map was baked. It SHALL report, and not judge, the time from the scripted edit to the first landing of a map the edit touched, or that none landed (owner decision 2026-10-29: the horizon-map shadows are redone after SPIKE-56, M8 criterion 6 is decided by the drawn tiles). The edit-latency scene SHALL print a table headed `edit to map ms`, one row per touched map, with no verdict column.
@@ -1249,7 +1259,7 @@ Detail: A map is on screen with its landing plus the frames of its upload; the w
 - **THEN** the gate fails naming the horizon maps
 
 ### Requirement: TEST-066 The edit-latency horizon rows are measured on a quiet horizon
-The edit-latency scene, with the horizon jobs and no chunk stage, SHALL:
+The edit-latency scene, with the horizon jobs, SHALL:
 1. make each edit of the table `edit to map ms` only after the horizon jobs have had no bake in flight and no start for at least 1.5 s;
 2. wait for the same quiet after taking the edit back;
 3. run the first case of each altitude once more, right after the view settled, into a table without a verdict column.
@@ -1358,11 +1368,11 @@ Detail: The pixel bounds are proposed from the morph design (LOD-008: a node is 
 - **THEN** the verdict is NOT EXERCISED, never PASS
 
 ### Requirement: TEST-071 A bundle of a stored bake replays from the store
-A terrain bundle that records a bake of more cells than a run makes in memory (1024 per face edge) SHALL replay with `--store DIR`, the stored bake of that size opened read-only, and SHALL be refused without it, naming the recorded size and `--store DIR`. The replay SHALL check the recorded definition hash, field id and radius as for any recorded world (TEST-008).
+A terrain bundle that records a bake of more than 1024 cells per face edge SHALL replay with `--store DIR` (opened read-only) and be refused without it, naming the recorded size and `--store DIR`; the recorded definition hash, field id and radius are checked (TEST-008). A bundle SHALL record its build's commit (`commit <sha>`, `+dirty` for a dirty tree; optional on read). A version mismatch SHALL name that commit and `--at-commit`, or how to find the build. `cargo xtask repro <bundle> --at-commit` SHALL replay in a worktree of the commit under `target/repro-worktree/`, handing the build the bundle without the line, and SHALL refuse a bundle without a commit or of a dirty tree, saying how to go on.
 
 Verify: A
 Status: active
-Source: opus-planner (2026-10-30, B5), CON-19, TEST-008
+Source: opus-planner (2026-10-30, B5; 2026-11-01, SPIKE-84 fix 5), CON-19, TEST-008
 
 #### Scenario: A bake beyond the memory limit
 - **WHEN** a bundle records a bake of 4096 cells and is replayed without a store
@@ -1371,6 +1381,14 @@ Source: opus-planner (2026-10-30, B5), CON-19, TEST-008
 #### Scenario: From the store
 - **WHEN** a bundle of a small bake is replayed with the stored bake of the same size and again with the bake made in memory
 - **THEN** both worlds give the same heights bit for bit, and a directory that is no store is refused naming it
+
+#### Scenario: The recorded commit
+- **WHEN** a bundle is written with a commit, read back, and then written and read without one
+- **THEN** the first reads the same commit, the second reads none, and neither is refused for the line
+
+#### Scenario: Replay at the commit
+- **WHEN** `repro --at-commit` is given a bundle with a commit, and then one without
+- **THEN** the first is replayed in the worktree of that commit, and the second is refused naming the file, the versions to look for and `git log -S`
 
 ### Requirement: TEST-046 The coarse share of a frame
 `planet_frame::scenes::detail_lag` SHALL also give the coarse share of a frame: the share of the screen, weighted by the projected pixels of the nodes of the fresh selection ([`node_weight`]), whose node is drawn from a tile coarser than the selection wanted or is not covered at all. A node drawn at its own level, or covered by finer tiles, counts 0; a node drawn from an ancestor or uncovered counts its whole weight. The share is a number in `[0, 1]` (0 for a selection without weight) and a pure function of the fresh plan and the drawn set.
@@ -1422,6 +1440,47 @@ Detail:
 - **WHEN** the scene runs with `--smoke` over an in-memory bake
 - **THEN** it ends without error, writes the log with four altitudes, and says it is not a measurement
 
+### Requirement: TEST-078 The GLO-30 reader
+`planet_testkit::glo30` SHALL read a Copernicus GLO-30 COG GeoTIFF tile: the TIFF tags, deflate (through `miniz_oxide`) with the floating-point predictor, tiles or strips, the georeference (origin and pixel scale) and the no-data value, into an f32 raster with marked no-data cells. It SHALL refuse a tile with any other compression, predictor or sample format, naming the tag. `planet-testkit` stays a dev-dependency.
+
+Verify: A
+Status: active
+Source: SPIKE-55 (reader in Python, outside the repo), SPIKE-57, GLO-30 licence notes, ADR 0009
+
+#### Scenario: Round trip
+- **WHEN** a test writes a small TIFF with deflate and predictor 3 in two tiles and reads it back
+- **THEN** the floats, the georeference and the no-data cells equal the input, and a tile with LZW compression is refused naming the compression tag
+
+#### Scenario: A real tile
+- **WHEN** `PLANET_GLO30_DIR` names the sample tiles and N47E011 is read
+- **THEN** the p50 slope of the whole tile (central differences at the true metric spacing) lies within 0.5 degrees of SPIKE-55's 19.3, which checks the decoder; without the variable the check is NOT RUN, never a pass
+
+### Requirement: TEST-079 The terrain scorecard run
+The scorecard run SHALL compute, for each landform of the sites file, the seven descriptors (GEN-089 to GEN-092) on three rasters: the real tile's central 0.5-degree square and the generator's two matched sites (`world.field()` of the store), each 1,853 x 1,853 cells at 30 m on an east-north grid. Per site and descriptor it SHALL give a distance to the tile: Wasserstein-1 over percentiles p1 to p99 divided by the real p5-to-p95 range for continuous descriptors, L1 between class histograms for geomorphons, and the generator-to-real ratio for drainage density.
+
+Verify: A
+Status: active
+Source: SPIKE-57 (seven descriptors, about 1 minute), SPIKE-55 (sites, 30 m windows), ADR 0009
+
+#### Scenario: Distances
+- **WHEN** two identical percentile sets and two sets shifted by a quarter of the real p5-to-p95 range are compared, and two class histograms with disjoint support
+- **THEN** the distances are 0, 0.25 and 2
+
+#### Scenario: SPIKE-55 reproduced
+- **WHEN** the ignored test `the_scorecard_reproduces_spike_55` runs over the store (`cargo test -p planet --release --test it the_scorecard_reproduces_spike_55 -- --ignored --nocapture`)
+- **THEN** each generator site's slope and 1 km and 5 km relief p50 and p99 lie within 2 % of SPIKE-55's generator rows (`crates/app/data/spike55-generator-rows.toml`); the real rows are re-stated on the central 0.5-degree square (N47E011 slope p50 is 23.7, not the whole tile's 19.3), not compared; without the store the check is NOT RUN, never a pass; it is run by hand (by the lane that changes the scorecard or the generator rows, or the owner), not by a tier, `gate` or `accept`
+
+### Requirement: TEST-080 The scorecard report reads on a phone
+The run SHALL write `report.md` and `report.json` under `target/review/terrain-score/<date>/`. `report.md` begins with the Copernicus WorldDEM-30 notice for derived data and the no-liability sentence (`LICENCE-NOTES.md` of the tiles), then the run's inputs (date, commit, store, tiles, sites file), then one section per landform holding one table per generator site (at most four columns: descriptor, real p50, generator p50, distance) and, under each table, one line naming that site's three descriptors with the largest distance. `report.json` holds every percentile, histogram and distance with the run's inputs and the wall time per phase.
+
+Verify: A
+Status: active
+Source: SPIKE-57, GLO-30 licence (Art. 6), owner (2026-10-28: honour the licence for derived data)
+
+#### Scenario: Notice and width
+- **WHEN** a report is written from a synthetic run result
+- **THEN** the notice follows the title, the inputs follow it, every landform has one table per site with at most four columns, and a line naming three descriptors follows each table
+
 ### Requirement: TEST-077 The preview pair comparison
 `planet_testkit::pair::compare_pair` SHALL take the stale frame, the preview frame and the exact frame of one pose and a grey threshold, and SHALL report the pixels the stale frame has more than the threshold from the exact frame, the pixels the preview frame has, the mean and largest channel difference of the preview and the bounding box of its differing pixels. The verdict SHALL be Within when the preview leaves at most a twentieth of the changed pixels, Over otherwise, and TooSmall, never a pass, when the edit changes 50 pixels or fewer. Frames of different sizes SHALL be refused.
 
@@ -1455,6 +1514,27 @@ Detail: The pair is a measurement of the preview, not a gate: a pair over the bo
 #### Scenario: A verdict over the bound
 - **WHEN** the preview leaves more than a twentieth of the changed pixels in a view
 - **THEN** the test still passes and the verdict is printed
+
+#### Scenario: The pair over a real store (by hand)
+- **WHEN** the ignored tests `gpu_edit_pair::the_pair_over_a_real_store` (the discrete GPU, `PLANET_ADAPTER=hardware`, and an unlocked desktop) and `…the_plan_over_a_real_store_is_reported_per_parameter_set` (CPU only) run with `PLANET_PAIR_STORE` naming a store
+- **THEN** each case's pair and plan are printed, with the pictures in `target/review/edit-pair/`; this is run by hand for the owner's drag report, not by a tier, `gate` or `accept`, and the owner checks the pictures
+
+### Requirement: TEST-075 The definition hash and the production store survive the removal
+A world definition SHALL hash to the value it had before ADR 0086's removal: without items, with an item and the default `Under` setting, and with the layer set `OnTop`. The `chunk_stage` setting SHALL stay parseable and hashed, so a store built before the removal opens without a rebuild. The production store (`C:/DEV/SeriousPlanetData/global16384`) SHALL open with the current build, read only: `cargo xtask gate` runs the ignored `the_real_store_opens_without_a_rebuild` and prints MATCH, NOT RUN (the store is absent; the gate is then incomplete, exit code 3, never a pass) or a failure.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-31), ADR 0086 decision 3, GEN-039, WDEF-018
+
+Detail: The expected values were computed on main before the generator cut; the test pins them as literals. The store records no whole-definition hash: a record is found by the keys its definition derives, so the check opens the store as the viewer does (the packs load without a problem, the bake, ocean channel, wet floor and water summary open) and loads the stored coupled run by its key; it writes nothing.
+
+#### Scenario: The pinned hashes
+- **WHEN** the three definitions are built and hashed
+- **THEN** each equals its pinned value and `CHAIN_ORDER_ERA` is 2
+
+#### Scenario: The production store
+- **WHEN** the default world (seed 1, Earth radius) is opened over the store of 16384 cells and its coupled run is loaded by key
+- **THEN** both succeed with no rebuild, or the check says NOT RUN when the store is absent and the gate exits as incomplete
 
 ### Requirement: TEST-074 The owner package says what ran
 `cargo xtask package` SHALL run the `capture stills` of the default look of each look-review site and `capture flights` into `target/review/owner-package/<date>/` and SHALL write `package.md` there with one row per item: PASS, FAIL or NOT RUN, with its reason, and its files. An item with no store SHALL be NOT RUN, a failed command FAIL with its message, a command that wrote no file FAIL. A failed item SHALL NOT stop the others, and the command SHALL fail when an item failed.
@@ -1503,3 +1583,26 @@ Source: owner (2026-10-30), explorer's measurement of the locked-session stalls,
 #### Scenario: Accept
 - **WHEN** an acceptance step has NOT RUN checks
 - **THEN** its row says INCOMPLETE and not pass, and the acceptance run returns an error
+
+#### Scenario: A step that gave no verdict
+- **WHEN** an acceptance step ends `INCOMPLETE:` and left no marker (for example `perf wallclock` refused by the readiness gate, BUILD-003)
+- **THEN** the text of its error is the step's NOT RUN line, its row says INCOMPLETE and not pass, and the run returns an error; a step with markers keeps its markers
+
+### Requirement: TEST-085 The gate smokes the real store on the software adapter
+`cargo xtask gate` on the real store SHALL also run `editor --smoke --edit --no-vsync --adapter software --store DIR` once and print its PASS or FAIL whether or not the desktop is locked. The run passes when it exits successfully and prints its `[smoke ok]` line. The store SHALL stay read only: the gate compares the store's top-level entries (names, sizes, modification times) before and after the run, and any addition, removal or change SHALL fail it, naming the file. The gate's exit SHALL be the worst of its parts: a failed software smoke exits 1, a passed one beside a locked desktop leaves the hardware part NOT RUN and exits 3 (TEST-073).
+
+Verify: A
+Status: active
+Source: opus-planner (2026-11-01, SPIKE-84 fix 6), TEST-073, CON-19
+
+#### Scenario: The verdict
+- **WHEN** a smoke run exits successfully with a `[smoke ok]` line, then without the line, then with an error status
+- **THEN** the first passes and the others fail, naming the last line of stderr
+
+#### Scenario: The store is opened read only
+- **WHEN** a run adds, resizes, touches or removes a file of the store, and when it changes none
+- **THEN** the first is named by file and fails the gate, and an untouched store passes
+
+#### Scenario: Locked desktop
+- **WHEN** the desktop is locked and the software smoke passes
+- **THEN** the hardware part is NOT RUN and the gate exits 3, and a failed software smoke exits 1

@@ -6,6 +6,7 @@
 
 use planet_core::cube::FaceMapping;
 use planet_core::hash::{hash_u64s, unit_f64, HASH_VERSION};
+use planet_core::par::Par;
 use planet_core::{TileId, Vec3};
 pub use planet_world_def::BodyId;
 use planet_world_def::{
@@ -200,31 +201,29 @@ pub(crate) fn layer_noise_bounds(seed: u64, layer: u64, octave: u32, centre: Vec
     (lo.max(hlo), hi.min(hhi))
 }
 
-/// `eval` on every direction of `dirs`, in the caller's order, split over up to `threads` scoped threads in contiguous chunks
-/// (a batch of fewer than 8 directions per thread uses fewer threads; a single chunk runs on the calling thread, several on scoped threads). `stop` is polled
-/// every 64 samples of each chunk; once it answers true the unfinished results are 0.0. The values do not depend on `threads`.
-pub fn eval_chunked(dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), threads: usize, eval: &(dyn Fn(Vec3) -> f64 + Sync)) -> Vec<f64> {
-    let mut out = vec![0.0; dirs.len()];
-    let workers = threads.clamp(1, (dirs.len() / 8).max(1));
+/// `eval` on every direction of `dirs`, in the caller's order, split over up to `par.threads()` threads in contiguous chunks
+/// (a batch of fewer than 8 directions per thread uses fewer threads; a single chunk runs on the calling thread). `stop` is polled
+/// every 64 samples of each chunk; once it answers true the unfinished results are 0.0. The values do not depend on the threads (CON-14).
+pub fn eval_chunked(dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), par: &dyn Par, eval: &(dyn Fn(Vec3) -> f64 + Sync)) -> Vec<f64> {
+    let workers = par.threads().clamp(1, (dirs.len() / 8).max(1));
     let chunk = dirs.len().div_ceil(workers).max(1);
-    let run = |dirs: &[Vec3], out: &mut [f64]| {
+    let run = |dirs: &[Vec3]| -> Vec<f64> {
+        let mut out = vec![0.0; dirs.len()];
         for (k, (&d, o)) in dirs.iter().zip(out.iter_mut()).enumerate() {
             if k % 64 == 0 && stop() {
                 break;
             }
             *o = eval(d);
         }
+        out
     };
     if workers == 1 {
-        run(dirs, &mut out);
-    } else {
-        std::thread::scope(|s| {
-            for (d, o) in dirs.chunks(chunk).zip(out.chunks_mut(chunk)) {
-                planet_core::thread::spawn_named(s, "heights-worker", move || run(d, o));
-            }
-        });
+        return run(dirs);
     }
-    out
+    let parts: Vec<&[Vec3]> = dirs.chunks(chunk).collect();
+    let done: Vec<std::sync::Mutex<Vec<f64>>> = parts.iter().map(|_| std::sync::Mutex::new(Vec::new())).collect();
+    par.run(parts.len(), &|i| *done[i].lock().expect("a chunk's heights") = run(parts[i]));
+    done.into_iter().flat_map(|m| m.into_inner().expect("a chunk's heights")).collect()
 }
 
 /// A height field over unit directions. The reference generator is [`Reference`]; the test-only stress field
@@ -235,39 +234,6 @@ pub fn eval_chunked(dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), threads: us
 pub trait HeightField: Send + Sync {
     /// Height in metres at a unit direction.
     fn height(&self, dir: Vec3) -> f64;
-    /// Height in metres at a unit direction as drawn at tile level `level` (GEN-036): a field with level-dependent detail (a chunk field,
-    /// ADR 0077) reads the pyramid level of that tile level; every other field is level-independent, which is this default. A wrapper
-    /// forwards it to the field it wraps (a stage adds its own change on top), or the detail is lost.
-    fn height_at_level(&self, dir: Vec3, _level: u8) -> f64 {
-        self.height(dir)
-    }
-    /// Whether [`height_at_level`](HeightField::height_at_level) can differ from `height`: false for every field without chunk detail, so the
-    /// batch forms that ignore the level stay the fast path for them. A wrapper forwards it with `height_at_level`.
-    fn level_aware(&self) -> bool {
-        false
-    }
-    /// The chunk change at `dirs` as tile level `level` reads it, in metres: `height_at_level` less the height of the field below the chunk stage
-    /// (STRM-047). `None` for every field without chunk detail and for a chunk field with no chunk ready, so a world without chunks builds the
-    /// tiles it always built. A wrapper forwards it with `height_at_level`, or the change is lost on its way to the compact builder; a wrapper that
-    /// is not additive in its input height (a stage that clamps toward a target) recomputes it as the difference of its own heights with and
-    /// without the chunk change, because the change that reaches the texel is that difference.
-    fn level_change(&self, _dirs: &[Vec3], _level: u8) -> Option<Vec<f64>> {
-        None
-    }
-    /// The driver codes `[soil depth, moisture, insolation]` of the ready chunks at `dirs` as tile level `level` reads them (GEN-071), `None` for a direction
-    /// no chunk covers and for every field without chunks (the tile then holds the neutral drivers). A wrapper forwards it with `level_change`.
-    fn level_drivers(&self, _dirs: &[Vec3], _level: u8) -> Option<Vec<Option<[u8; 3]>>> {
-        None
-    }
-    /// [`heights_threaded`](HeightField::heights_threaded) as drawn at tile level `level` (the plan's origin heights, GEN-036): the same values as
-    /// `height_at_level` per direction in the caller's order for every `threads`; a field that is not level-aware takes its batch path.
-    fn heights_threaded_at_level(&self, dirs: &[Vec3], level: u8, threads: usize) -> Vec<f64> {
-        if self.level_aware() {
-            eval_chunked(dirs, &|| false, threads, &|d| self.height_at_level(d, level))
-        } else {
-            self.heights_threaded(dirs, threads)
-        }
-    }
     /// The heights of `dirs`, in the caller's order: element `k` is bit for bit `self.height(dirs[k])` (GEN-020). A field is free to
     /// evaluate the directions in any other order internally (one that reads a block store groups them by block) because every
     /// height is a pure function of its direction. `stop` is polled during the batch (at least every 64 samples); once it
@@ -283,12 +249,12 @@ pub trait HeightField: Send + Sync {
     /// values in the same order for every `threads` (CON-14), because each height is a pure function of its direction and the
     /// threads only split the work. The default splits the directions into chunks and evaluates each with `height`; a field
     /// that reads a block store overrides it to read the distinct blocks of the whole batch on the threads (GEN-020).
-    fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), threads: usize) -> Vec<f64> {
-        eval_chunked(dirs, stop, threads, &|d| self.height(d))
+    fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), par: &dyn Par) -> Vec<f64> {
+        eval_chunked(dirs, stop, par, &|d| self.height(d))
     }
     /// [`HeightField::heights_threaded_until`] without a stop flag.
-    fn heights_threaded(&self, dirs: &[Vec3], threads: usize) -> Vec<f64> {
-        self.heights_threaded_until(dirs, &|| false, threads)
+    fn heights_threaded(&self, dirs: &[Vec3], par: &dyn Par) -> Vec<f64> {
+        self.heights_threaded_until(dirs, &|| false, par)
     }
     /// The seed (part of every key).
     fn seed(&self) -> u64;
@@ -511,7 +477,7 @@ pub fn generate_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: T
     let mut heights = Vec::with_capacity(((res + 1) * (res + 1)) as usize);
     for l in 0..=res {
         for k in 0..=res {
-            heights.push(field.height_at_level(id.sample_direction(map, res, k, l), id.level()) as f32);
+            heights.push(field.height(id.sample_direction(map, res, k, l)) as f32);
         }
     }
     TileData { id, res, heights }
@@ -522,21 +488,11 @@ pub fn generate_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: T
 pub fn generate_region(seed: u64, map: &(dyn FaceMapping + Sync), ids: &[TileId], res: u32, threads: usize) -> Vec<TileData> {
     let threads = threads.max(1).min(ids.len().max(1));
     let chunk = ids.len().div_ceil(threads).max(1);
-    let mut out: Vec<TileData> = Vec::with_capacity(ids.len());
-    std::thread::scope(|scope| {
-        let handles: Vec<_> = ids
-            .chunks(chunk)
-            .map(|part| {
-                planet_core::thread::spawn_named(scope, "tile-worker", move || {
-                    part.iter().map(|&id| generate_tile(seed, map, id, res)).collect::<Vec<_>>()
-                })
-            })
-            .collect();
-        for h in handles {
-            out.extend(h.join().expect("generator thread panicked"));
-        }
-    });
-    out
+    let chunks: Vec<&[TileId]> = ids.chunks(chunk).collect();
+    planet_core::par::map(&threads, chunks.len(), &|c| chunks[c].iter().map(|&id| generate_tile(seed, map, id, res)).collect::<Vec<_>>())
+        .into_iter()
+        .flatten()
+        .collect()
 }
 
 pub(crate) fn fold_str(s: &str) -> Vec<u64> {
@@ -607,23 +563,11 @@ impl<F: HeightField> HeightField for Bound<F> {
     fn height(&self, dir: Vec3) -> f64 {
         self.field.height(dir)
     }
-    fn height_at_level(&self, dir: Vec3, level: u8) -> f64 {
-        self.field.height_at_level(dir, level)
-    }
-    fn level_aware(&self) -> bool {
-        self.field.level_aware()
-    }
-    fn level_drivers(&self, dirs: &[Vec3], level: u8) -> Option<Vec<Option<[u8; 3]>>> {
-        self.field.level_drivers(dirs, level)
-    }
-    fn level_change(&self, dirs: &[Vec3], level: u8) -> Option<Vec<f64>> {
-        self.field.level_change(dirs, level)
-    }
     fn heights_until(&self, dirs: &[Vec3], stop: &dyn Fn() -> bool) -> Vec<f64> {
         self.field.heights_until(dirs, stop)
     }
-    fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), threads: usize) -> Vec<f64> {
-        self.field.heights_threaded_until(dirs, stop, threads)
+    fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), par: &dyn Par) -> Vec<f64> {
+        self.field.heights_threaded_until(dirs, stop, par)
     }
     fn seed(&self) -> u64 {
         self.field.seed()
@@ -684,26 +628,11 @@ impl<F: HeightField> HeightField for Bound<F> {
     }
 }
 
-/// A boxed field is the field it holds: every method forwards, so a stage that wraps a field generically (the chunk stage) can wrap the
+/// A boxed field is the field it holds: every method forwards, so a stage that wraps a field generically can wrap the
 /// chain a world builds.
 impl<T: HeightField + ?Sized> HeightField for Box<T> {
     fn height(&self, dir: Vec3) -> f64 {
         (**self).height(dir)
-    }
-    fn height_at_level(&self, dir: Vec3, level: u8) -> f64 {
-        (**self).height_at_level(dir, level)
-    }
-    fn level_aware(&self) -> bool {
-        (**self).level_aware()
-    }
-    fn level_drivers(&self, dirs: &[Vec3], level: u8) -> Option<Vec<Option<[u8; 3]>>> {
-        (**self).level_drivers(dirs, level)
-    }
-    fn level_change(&self, dirs: &[Vec3], level: u8) -> Option<Vec<f64>> {
-        (**self).level_change(dirs, level)
-    }
-    fn heights_threaded_at_level(&self, dirs: &[Vec3], level: u8, threads: usize) -> Vec<f64> {
-        (**self).heights_threaded_at_level(dirs, level, threads)
     }
     fn heights_until(&self, dirs: &[Vec3], stop: &dyn Fn() -> bool) -> Vec<f64> {
         (**self).heights_until(dirs, stop)
@@ -711,11 +640,11 @@ impl<T: HeightField + ?Sized> HeightField for Box<T> {
     fn heights(&self, dirs: &[Vec3]) -> Vec<f64> {
         (**self).heights(dirs)
     }
-    fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), threads: usize) -> Vec<f64> {
-        (**self).heights_threaded_until(dirs, stop, threads)
+    fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), par: &dyn Par) -> Vec<f64> {
+        (**self).heights_threaded_until(dirs, stop, par)
     }
-    fn heights_threaded(&self, dirs: &[Vec3], threads: usize) -> Vec<f64> {
-        (**self).heights_threaded(dirs, threads)
+    fn heights_threaded(&self, dirs: &[Vec3], par: &dyn Par) -> Vec<f64> {
+        (**self).heights_threaded(dirs, par)
     }
     fn seed(&self) -> u64 {
         (**self).seed()
@@ -817,43 +746,5 @@ impl HeightGenerator for ReferenceGenerator {
     fn field(&self, ctx: &GenContext, body: BodyId) -> Result<Box<dyn HeightField>, MissingNode> {
         let seed = ctx.body_seed(body)?;
         Ok(Box::new(Bound::new(Reference(seed), ctx, body)))
-    }
-}
-
-#[cfg(test)]
-mod level_tests {
-    use super::*;
-
-    struct Leveled;
-
-    impl HeightField for Leveled {
-        fn height(&self, _: Vec3) -> f64 {
-            1.0
-        }
-        fn height_at_level(&self, _: Vec3, level: u8) -> f64 {
-            1.0 + f64::from(level)
-        }
-        fn seed(&self) -> u64 {
-            1
-        }
-        fn implementation_id(&self) -> &'static str {
-            "leveled-test"
-        }
-        fn version(&self) -> u32 {
-            1
-        }
-        fn max_abs_height_m(&self) -> f64 {
-            100.0
-        }
-    }
-
-    // spec: GEN-036
-    #[test]
-    fn the_bound_wrapper_answers_the_level_as_its_inner_field_does() {
-        let def = planet_world_def::WorldDefinition::single_planet(6_371_000.0, 7);
-        let bound = Bound::new(Leveled, &GenContext::new(&def), BodyId::PLANET);
-        for level in [0u8, 11, 15, 22] {
-            assert_eq!(bound.height_at_level(Vec3::new(1.0, 0.0, 0.0), level), 1.0 + f64::from(level));
-        }
     }
 }

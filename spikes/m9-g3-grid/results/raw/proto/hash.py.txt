@@ -1,0 +1,30 @@
+import numpy as np, sys
+from PIL import Image
+M32 = np.uint64(0xffffffff)
+def u32(x): return (x.astype(np.uint64) & M32)
+def finish(x):
+    h = u32(x)
+    h = h ^ (h >> np.uint64(15))
+    h = u32(h * np.uint64(0x2c1b3c6d))
+    h = h ^ (h >> np.uint64(12))
+    return (h >> np.uint64(8)).astype(np.float64) * 1.1920929e-7 - 1.0
+def corners(cx, cy, k, axis):
+    A, B = 0x8da6b343, 0xd8163841
+    kx = (((k + 1) * 0x9e3779b1) & 0xffffffff) ^ (((axis + 1) * 0xcb1ab31f) & 0xffffffff)
+    cx = np.asarray(cx, np.int64) & 0xffffffff; cy = np.asarray(cy, np.int64) & 0xffffffff
+    pu0 = (cx * A) & 0xffffffff
+    pv0 = ((cy * B) & 0xffffffff) ^ kx
+    return finish(np.asarray(pu0 ^ pv0, np.uint64))
+# corner values on a 64x64 lattice near a world-like offset
+off = int(sys.argv[1]) if len(sys.argv) > 1 else 123456789
+n = 64
+cx, cy = np.meshgrid(np.arange(n) + off, np.arange(n) + off * 3 // 7)
+v = corners(cx, cy, 3, 0)
+print('mean', v.mean(), 'std', v.std())
+# neighbour correlations
+print('corr x', np.corrcoef(v[:, :-1].ravel(), v[:, 1:].ravel())[0, 1])
+print('corr y', np.corrcoef(v[:-1, :].ravel(), v[1:, :].ravel())[0, 1])
+for d in (2, 3, 4, 8):
+    print('corr y+%d' % d, np.corrcoef(v[:-d, :].ravel(), v[d:, :].ravel())[0, 1], 'x+%d' % d, np.corrcoef(v[:, :-d].ravel(), v[:, d:].ravel())[0, 1])
+img = ((v + 1) * 127.5).clip(0, 255).astype(np.uint8)
+Image.fromarray(img).resize((512, 512), Image.NEAREST).save('corners.png')

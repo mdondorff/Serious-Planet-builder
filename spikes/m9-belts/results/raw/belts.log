@@ -1,0 +1,38 @@
+today (5200 ridge^2 zone inland)                           | 1/2/3/4/5 km 0.121/0.043/0.016/0.007/0.0022 | log err 3.37 | max 6333
+today (5200 ridge^2 zone inland) + plateau                 | 1/2/3/4/5 km 0.256/0.051/0.017/0.007/0.0022 | log err 3.12 | max 6333
+amplitude 7000                                             | 1/2/3/4/5 km 0.145/0.062/0.029/0.014/0.0075 | log err 0.52 | max 8125
+amplitude 7000 + plateau                                   | 1/2/3/4/5 km 0.277/0.071/0.032/0.014/0.0075 | log err 0.42 | max 8125
+amplitude 8000                                             | 1/2/3/4/5 km 0.156/0.070/0.038/0.018/0.0106 | log err 0.62 | max 9000
+amplitude 8000 + plateau                                   | 1/2/3/4/5 km 0.287/0.080/0.040/0.019/0.0107 | log err 0.77 | max 9000
+ridge^1 (wider ridges)                                     | 1/2/3/4/5 km 0.161/0.067/0.028/0.012/0.0048 | log err 1.07 | max 6346
+ridge^1 (wider ridges) + plateau                           | 1/2/3/4/5 km 0.291/0.079/0.030/0.012/0.0048 | log err 1.16 | max 6346
+inland as a coast gate                                     | 1/2/3/4/5 km 0.159/0.062/0.025/0.011/0.0028 | log err 1.90 | max 6333
+inland as a coast gate + plateau                           | 1/2/3/4/5 km 0.294/0.070/0.026/0.011/0.0028 | log err 1.82 | max 6333
+range uplift 1500 (broad, no ridge)                        | 1/2/3/4/5 km 0.175/0.079/0.037/0.017/0.0091 | log err 0.65 | max 7833
+range uplift 1500 (broad, no ridge) + plateau              | 1/2/3/4/5 km 0.304/0.091/0.040/0.017/0.0091 | log err 0.86 | max 7833
+range uplift 1500 + amplitude 6000                         | 1/2/3/4/5 km 0.182/0.086/0.044/0.021/0.0113 | log err 1.07 | max 8630
+range uplift 1500 + amplitude 6000 + plateau               | 1/2/3/4/5 km 0.311/0.098/0.047/0.022/0.0113 | log err 1.28 | max 8630
+range uplift 2000 + amplitude 6000                         | 1/2/3/4/5 km 0.195/0.097/0.053/0.028/0.0140 | log err 1.84 | max 9000
+range uplift 2000 + amplitude 6000 + plateau               | 1/2/3/4/5 km 0.322/0.110/0.056/0.028/0.0140 | log err 2.05 | max 9000
+range uplift 1500 + amplitude 6500, gate                   | 1/2/3/4/5 km 0.232/0.134/0.077/0.040/0.0225 | log err 3.38 | max 9000
+range uplift 1500 + amplitude 6500, gate + plateau         | 1/2/3/4/5 km 0.360/0.147/0.080/0.041/0.0225 | log err 3.55 | max 9000
+Earth without Antarctica                                   | 1/2/3/4/5 km 0.200/0.067/0.032/0.019/0.008
+Earth with ice                                             | 1/2/3/4/5 km 0.272/0.117/0.051/0.018/0.007
+grid best (plateau on):
+  A 7000 U 0 product: 1/2/3/4/5 km 0.277/0.071/0.032/0.014/0.0075 | err 0.42 | max 8125
+  A 6500 U 250 product: 1/2/3/4/5 km 0.280/0.072/0.031/0.013/0.0072 | err 0.54 | max 7877
+  A 6000 U 750 product: 1/2/3/4/5 km 0.290/0.078/0.034/0.015/0.0080 | err 0.56 | max 7880
+  A 7000 U 250 product: 1/2/3/4/5 km 0.285/0.077/0.035/0.016/0.0086 | err 0.56 | max 8375
+  A 5500 U 1000 product: 1/2/3/4/5 km 0.292/0.080/0.034/0.014/0.0076 | err 0.58 | max 7632
+  A 6000 U 0 gate: 1/2/3/4/5 km 0.307/0.084/0.035/0.017/0.0070 | err 0.58 | max 7130
+  A 6500 U 500 product: 1/2/3/4/5 km 0.288/0.077/0.035/0.015/0.0084 | err 0.58 | max 8127
+  A 7500 U 0 product: 1/2/3/4/5 km 0.282/0.076/0.036/0.016/0.0091 | err 0.59 | max 8622
+diag {
+"zone>0.5": 0.2115360569222756,
+"inland>0.5": 0.6550921361503208,
+"ridge>0.5": 0.46568141770529786,
+"zone*inland>0.5": 0.06210756314845477,
+"P(inland>0.5 | zone>0.5)": 0.3734320789251106,
+"mean ridge where zone*inland>0.5": 0.4366326310694513
+}
+chosen 7000 0 product

@@ -1,0 +1,66 @@
+=== lever S82_TAU=4.5 21:50:04
+S82PLAN alps today 200 m | 1654 nodes, 0 capped, deepest 18 | 0.1 s | levels 8:96 9:156 10:161 11:154 12:151 13:151 14:163 15:155 16:152 17:162 18:153
+S82PLAN alps today 2000 m | 1240 nodes, 0 capped, deepest 15 | 0.0 s | levels 7:5 8:143 9:152 10:157 11:153 12:151 13:163 14:167 15:149
+S82PLAN alps steep-nohb 200 m | 2015 nodes, 0 capped, deepest 19 | 0.3 s | levels 7:21 8:157 9:159 10:173 11:165 12:168 13:169 14:222 15:179 16:176 17:195 18:209 19:22
+S82PLAN alps steep-nohb 2000 m | 1427 nodes, 0 capped, deepest 15 | 0.3 s | levels 7:35 8:154 9:159 10:167 11:162 12:168 13:181 14:220 15:181
+S82PLAN alps steep 200 m | 2094 nodes, 0 capped, deepest 19 | 0.3 s | levels 7:22 8:157 9:159 10:173 11:165 12:167 13:174 14:221 15:201 16:190 17:213 18:218 19:34
+S82PLAN alps steep 2000 m | 1460 nodes, 0 capped, deepest 15 | 0.3 s | levels 7:36 8:154 9:159 10:168 11:162 12:168 13:182 14:224 15:207
+S82PLAN himalaya today 200 m | 1644 nodes, 0 capped, deepest 19 | 0.1 s | levels 8:126 9:153 10:149 11:149 12:143 13:145 14:155 15:158 16:153 17:161 18:148 19:4
+S82PLAN himalaya today 2000 m | 1200 nodes, 0 capped, deepest 15 | 0.0 s | levels 7:10 8:145 9:153 10:148 11:149 12:142 13:147 14:162 15:144
+S82PLAN himalaya steep-nohb 200 m | 1138 nodes, 98 capped, deepest 14 | 0.3 s | levels 7:27 8:147 9:156 10:174 11:155 12:167 13:283 14:29
+S82PLAN himalaya steep-nohb 2000 m | 1146 nodes, 91 capped, deepest 14 | 0.3 s | levels 7:40 8:145 9:153 10:171 11:153 12:164 13:288 14:32
+S82PLAN himalaya steep 200 m | 1113 nodes, 110 capped, deepest 14 | 0.3 s | levels 7:31 8:147 9:157 10:174 11:156 12:177 13:267 14:4
+S82PLAN himalaya steep 2000 m | 1116 nodes, 105 capped, deepest 14 | 0.3 s | levels 7:42 8:145 9:153 10:171 11:154 12:178 13:269 14:4
+=== lever S82_TAU=8 21:50:10
+S82PLAN alps today 200 m | 655 nodes, 0 capped, deepest 18 | 0.1 s | levels 7:25 8:55 9:62 10:67 11:60 12:62 13:58 14:55 15:64 16:61 17:65 18:21
+S82PLAN alps today 2000 m | 478 nodes, 0 capped, deepest 15 | 0.1 s | levels 7:41 8:54 9:62 10:66 11:61 12:60 13:60 14:68 15:6
+S82PLAN alps steep-nohb 200 m | 424 nodes, 41 capped, deepest 13 | 0.1 s | levels 6:2 7:57 8:55 9:65 10:69 11:65 12:107 13:4
+S82PLAN alps steep-nohb 2000 m | 432 nodes, 41 capped, deepest 13 | 0.1 s | levels 6:6 7:64 8:55 9:65 10:69 11:65 12:104 13:4
+S82PLAN alps steep 200 m | 421 nodes, 38 capped, deepest 12 | 0.1 s | levels 6:2 7:57 8:55 9:65 10:69 11:65 12:108
+S82PLAN alps steep 2000 m | 433 nodes, 39 capped, deepest 12 | 0.1 s | levels 6:6 7:64 8:55 9:65 10:69 11:65 12:109
+S82PLAN himalaya today 200 m | 646 nodes, 0 capped, deepest 18 | 0.1 s | levels 7:35 8:54 9:57 10:59 11:57 12:58 13:56 14:62 15:65 16:60 17:59 18:24
+S82PLAN himalaya today 2000 m | 460 nodes, 0 capped, deepest 15 | 0.1 s | levels 7:44 8:54 9:56 10:58 11:57 12:58 13:64 14:64 15:5
+S82PLAN himalaya steep-nohb 200 m | 376 nodes, 36 capped, deepest 12 | 0.1 s | levels 6:6 7:51 8:56 9:62 10:74 11:83 12:44
+S82PLAN himalaya steep-nohb 2000 m | 382 nodes, 36 capped, deepest 12 | 0.1 s | levels 6:8 7:54 8:56 9:62 10:74 11:85 12:43
+S82PLAN himalaya steep 200 m | 359 nodes, 31 capped, deepest 12 | 0.1 s | levels 6:6 7:54 8:56 9:62 10:74 11:94 12:13
+S82PLAN himalaya steep 2000 m | 365 nodes, 31 capped, deepest 12 | 0.1 s | levels 6:11 7:54 8:56 9:62 10:74 11:93 12:15
+=== lever S82_MORPH=0.15 21:50:14
+S82PLAN alps today 200 m | 1039 nodes, 0 capped, deepest 18 | 0.1 s | levels 7:10 8:97 9:99 10:100 11:91 12:93 13:90 14:101 15:99 16:94 17:97 18:68
+S82PLAN alps today 2000 m | 758 nodes, 0 capped, deepest 15 | 0.0 s | levels 7:26 8:96 9:96 10:99 11:91 12:93 13:102 14:103 15:52
+S82PLAN alps steep-nohb 200 m | 1277 nodes, 4 capped, deepest 18 | 0.2 s | levels 7:43 8:97 9:97 10:118 11:94 12:102 13:120 14:128 15:119 16:123 17:123 18:113
+S82PLAN alps steep-nohb 2000 m | 898 nodes, 3 capped, deepest 15 | 0.2 s | levels 7:57 8:97 9:97 10:116 11:93 12:104 13:124 14:136 15:74
+S82PLAN alps steep 200 m | 968 nodes, 85 capped, deepest 15 | 0.2 s | levels 7:44 8:97 9:97 10:116 11:102 12:102 13:133 14:143 15:134
+S82PLAN alps steep 2000 m | 897 nodes, 28 capped, deepest 15 | 0.2 s | levels 7:58 8:97 9:97 10:116 11:93 12:104 13:139 14:140 15:53
+S82PLAN himalaya today 200 m | 1022 nodes, 0 capped, deepest 18 | 0.1 s | levels 7:20 8:92 9:96 10:97 11:90 12:89 13:93 14:91 15:95 16:92 17:97 18:70
+S82PLAN himalaya today 2000 m | 742 nodes, 0 capped, deepest 15 | 0.0 s | levels 7:30 8:91 9:95 10:96 11:90 12:90 13:93 14:104 15:53
+S82PLAN himalaya steep-nohb 200 m | 626 nodes, 60 capped, deepest 13 | 0.2 s | levels 7:47 8:92 9:99 10:113 11:97 12:161 13:17
+S82PLAN himalaya steep-nohb 2000 m | 632 nodes, 56 capped, deepest 13 | 0.2 s | levels 7:60 8:91 9:98 10:112 11:97 12:155 13:19
+S82PLAN himalaya steep 200 m | 625 nodes, 62 capped, deepest 13 | 0.2 s | levels 7:51 8:92 9:99 10:113 11:97 12:169 13:4
+S82PLAN himalaya steep 2000 m | 635 nodes, 62 capped, deepest 13 | 0.2 s | levels 7:62 8:91 9:98 10:112 11:97 12:171 13:4
+=== lever S82_MORPH=0.5 21:50:19
+S82PLAN alps today 200 m | 1039 nodes, 0 capped, deepest 18 | 0.2 s | levels 7:10 8:97 9:99 10:100 11:91 12:93 13:90 14:101 15:99 16:94 17:97 18:68
+S82PLAN alps today 2000 m | 758 nodes, 0 capped, deepest 15 | 0.1 s | levels 7:26 8:96 9:96 10:99 11:91 12:93 13:102 14:103 15:52
+S82PLAN alps steep-nohb 200 m | 1277 nodes, 4 capped, deepest 18 | 0.2 s | levels 7:43 8:97 9:97 10:118 11:94 12:102 13:120 14:128 15:119 16:123 17:123 18:113
+S82PLAN alps steep-nohb 2000 m | 898 nodes, 3 capped, deepest 15 | 0.1 s | levels 7:57 8:97 9:97 10:116 11:93 12:104 13:124 14:136 15:74
+S82PLAN alps steep 200 m | 968 nodes, 85 capped, deepest 15 | 0.2 s | levels 7:44 8:97 9:97 10:116 11:102 12:102 13:133 14:143 15:134
+S82PLAN alps steep 2000 m | 897 nodes, 28 capped, deepest 15 | 0.1 s | levels 7:58 8:97 9:97 10:116 11:93 12:104 13:139 14:140 15:53
+S82PLAN himalaya today 200 m | 1022 nodes, 0 capped, deepest 18 | 0.1 s | levels 7:20 8:92 9:96 10:97 11:90 12:89 13:93 14:91 15:95 16:92 17:97 18:70
+S82PLAN himalaya today 2000 m | 742 nodes, 0 capped, deepest 15 | 0.1 s | levels 7:30 8:91 9:95 10:96 11:90 12:90 13:93 14:104 15:53
+S82PLAN himalaya steep-nohb 200 m | 626 nodes, 60 capped, deepest 13 | 0.2 s | levels 7:47 8:92 9:99 10:113 11:97 12:161 13:17
+S82PLAN himalaya steep-nohb 2000 m | 632 nodes, 56 capped, deepest 13 | 0.1 s | levels 7:60 8:91 9:98 10:112 11:97 12:155 13:19
+S82PLAN himalaya steep 200 m | 625 nodes, 62 capped, deepest 13 | 0.2 s | levels 7:51 8:92 9:99 10:113 11:97 12:169 13:4
+S82PLAN himalaya steep 2000 m | 635 nodes, 62 capped, deepest 13 | 0.1 s | levels 7:62 8:91 9:98 10:112 11:97 12:171 13:4
+=== lever S82_CELLS=64 21:50:25
+S82PLAN alps today 200 m | 377 nodes, 0 capped, deepest 17 | 0.1 s | levels 6:4 7:29 8:39 9:33 10:38 11:30 12:32 13:35 14:32 15:35 16:39 17:31
+S82PLAN alps today 2000 m | 268 nodes, 0 capped, deepest 14 | 0.0 s | levels 6:9 7:30 8:37 9:33 10:38 11:31 12:32 13:34 14:24
+S82PLAN alps steep-nohb 200 m | 100 nodes, 18 capped, deepest 8 | 0.0 s | levels 6:14 7:30 8:56
+S82PLAN alps steep-nohb 2000 m | 104 nodes, 18 capped, deepest 8 | 0.0 s | levels 6:18 7:30 8:56
+S82PLAN alps steep 200 m | 100 nodes, 18 capped, deepest 8 | 0.0 s | levels 6:14 7:30 8:56
+S82PLAN alps steep 2000 m | 104 nodes, 18 capped, deepest 8 | 0.0 s | levels 6:18 7:30 8:56
+S82PLAN himalaya today 200 m | 365 nodes, 0 capped, deepest 17 | 0.0 s | levels 6:7 7:31 8:30 9:32 10:39 11:25 12:34 13:31 14:34 15:36 16:32 17:34
+S82PLAN himalaya today 2000 m | 267 nodes, 0 capped, deepest 14 | 0.0 s | levels 6:9 7:30 8:30 9:32 10:39 11:25 12:34 13:37 14:31
+S82PLAN himalaya steep-nohb 200 m | 95 nodes, 16 capped, deepest 8 | 0.0 s | levels 6:15 7:29 8:51
+S82PLAN himalaya steep-nohb 2000 m | 95 nodes, 15 capped, deepest 8 | 0.0 s | levels 6:17 7:28 8:50
+S82PLAN himalaya steep 200 m | 95 nodes, 16 capped, deepest 8 | 0.0 s | levels 6:15 7:29 8:51
+S82PLAN himalaya steep 2000 m | 98 nodes, 15 capped, deepest 8 | 0.0 s | levels 6:20 7:28 8:50
+=== done 21:50:29

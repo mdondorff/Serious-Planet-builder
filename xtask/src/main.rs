@@ -9,13 +9,17 @@ mod heavy;
 mod layering;
 mod logcmd;
 mod package;
+mod perfab;
 mod prepush;
+mod preview;
 mod repocheck;
 mod retired;
 mod speclint;
 mod storecmd;
+mod terrainscore;
 mod testcmd;
 mod testlog;
+mod threadscan;
 mod util;
 
 use std::process::ExitCode;
@@ -35,14 +39,17 @@ const USAGE: &str = "cargo xtask <command>
   store [--res N] [--relief-scale S] [--link DIR]   build the production store (default 16384 cells, into target/stores/global<N>) and point the editor at it, or only link an existing one (VIEW-052); with --relief-scale S (1 to 4) an exaggerated world into its own store, and the editor command line for it (WDEF-017)
   repro <bundle> [--real] [--every N] [--store DIR]   replay a repro bundle or an F9 path; --store DIR replays a bundle of a stored bake read-only (TEST-071)
   capture stills --poses FILE [--store DIR | --allow-memory-bake --global-res N] [--out-dir DIR] [--size WxH] [--views A,B] [--smoke]   one PNG per pose of the poses file over the base terrain of a world, with the horizon maps near the eye baked (TEST-048; default directory target/review/m8-stills)
-  perf [--machine-ready]   performance harness on Rasierklinge; the harness measures readiness and refuses (ADR 0020);
+  perf [--machine-ready] [--loaded]   performance harness on Rasierklinge; the harness measures readiness and refuses (ADR 0020); --loaded records the load instead of refusing on it (ADR 0087, BUILD-030);
                            --machine-ready is the owner's override. Only the architect session runs it
+  perf --ab REF [--rounds N] [--retries N] [--metrics a,b] [--log FILE] PERF-COMMAND...   the A/B helper (BUILD-033, ADR 0087): the working tree and REF run alternately (a worktree under target/ab), a gate refusal is retried, one table of the medians, the change and the verdict
+  perf reserve [--rounds N] [--retries N] [--lit] [--store DIR] [--loaded] ...   the reserve test (BUDG-012): the five standard flights without and with the synthetic loads of the reserved shares, alternating, one table and the reserve report per flight; the planner gives the go
   perf stream [SCENE|all] --store DIR   the streaming scenes dive, dive-fast, teleport-1m, teleport-2km, look-1m, look-2km (ADR 0032) and dive-cold (the dive over a reader that ignores the pre-filled coarse tiles, report-only) over a stored 16384-cell bake; --allow-memory-bake runs over an in-memory bake labelled NOT the production source; `all` runs one child process per scene (the scene's own RAM peak, gate per child);
                            --smoke proves the scenes on the software adapter (never a measurement) and, with --store, first checks the store read-only (ocean channel, pre-filled compact tiles of levels F-4 (F the render floor, default 3), TEST-024; --prefill-levels N changes N and --floor-level F the floor, both passed through test-render); also --global-res N, --out PATH, --machine-ready, --gen-workers N (tile generation threads, default the machine's), --gen-ahead N, --gen-reserve N, --gen-priority below-normal|normal (STRM-020)
   package [--store DIR] [--date YYYY-MM-DD] [--out DIR] [--dry-run]   the owner package (TEST-074): the default-look stills of the three look-review sites and the coastal flights over the store, and a package.md with PASS, FAIL or NOT RUN per item, in target/review/owner-package/<date>/; never a measurement
   capture flights [--store DIR | --allow-memory-bake --global-res N] [--out-dir DIR] [--size WxH] [--flight-frames N] [--smoke]   the two coastal flights as PNG sequences at 1440p with shore_filter 1 and 0 in target/review/m5-flights (and mp4 videos when ffmpeg is on the PATH) for the owner's look review (TEST-027); never a measurement, never during a perf window; --smoke uses the software adapter
   perf lit [--store DIR] [--out PATH] [--frames N] [--flight-frames N] [--views a,b,c] [--smoke] [--machine-ready]   the M5 lit perf scenes (TEST-025): per-pass GPU time over the viewer's views and the coastal flights
   perf m5 --store DIR [--out DIR] [--machine-ready]   the first M5 window in order: lit and the seven streaming scenes with --lit (one child per streaming scene); `cargo xtask accept M5` judges the logs
+  perf wallclock [--machine-ready]   the wall-clock checks that left tier A (BUILD-003): builds them, runs the readiness gate (ADR 0020; the adapter condition does not apply, CPU only), then each ignored check alone in release, PASS or FAIL per check; a refused gate is NOT RUN (exit code 3), no verdict; run at the start of every perf window and by `cargo xtask accept`
   perf preflight [--out DIR] [--smoke] [--machine-ready]   the check before a perf window (about 70 s): the readiness gate, three CPU calibrations, the top 5 CPU processes, AC state and power plan; refuses with the causes (TEST-040)
   perf envelope [--store DIR | --allow-memory-bake --global-res N] [--share-bound F] [--steady-window-s S] [--altitudes-m M,M] [--only-steady] [--places K] [--out FILE] [--smoke] [--machine-ready]   the M8 speed envelope (TEST-047, TEST-054): the highest level-flight speed per altitude (30 m, 100 m, 300 m, 1 km) at which the coarse share of the screen (over a `--store` world with the horizon jobs cold per flight) stays within the bound (default 0.01) over every 1 s window, plus 300 m with the horizon jobs off, written to perf/logs/envelope.json; the architect authorizes the window
   perf coupled [--global-res N] [--machine-ready]   the GEN-042 coupled run (default 2048 cells per face edge, 100 steps) under the same gate
@@ -51,6 +58,8 @@ const USAGE: &str = "cargo xtask <command>
   cache-compact <dir> [--world <file>|--seed N] [--cap-bytes N]   rewrite a tile store keeping the records the definition still produces, evicting the oldest packs first under a cap (STRM-013)
   ci-stats [--runs N] | --record --since YYYY-MM-DD [--until YYYY-MM-DD]   median and p90 of each CI job over the last N (default 20) completed main runs, read with gh; a median over 16 min is flagged (BUILD-014)
   heavy <command> [args]   run any command (a diagnostic example, a replay) under the machine-wide heavy-run lock
+  preview world --seed N [--out DIR]   the whole-planet preview of the default class source (GEN-103): equirectangular PNGs at 2048x1024 (land and sea; elevation with hillshade, today's and the new side by side; the plate mask; plateau and back-arc; relief classes, argmax and blended; k) with the seed, versions and a legend, and a report of the class shares; CPU only, no store, about 10 s; default out target/preview/world-seed-N
+  terrain-score [--store DIR] [--dem DIR] [--sites FILE] [--out DIR] [--maps]   the terrain scorecard (TEST-079, BUILD-029): seven descriptors on nine GLO-30 tiles and the generator's two matched sites each (world.field() of the store, read only), distances and a phone-readable report.md and report.json in target/review/terrain-score/<date>/ with the Copernicus notice; CPU only, about 1 minute; --maps adds one 512 px PNG per descriptor per raster
   quiet on|off|status   the owner's flag file: while it is up every heavy command (test, prepush, perf, capture, accept, store, heavy) waits (BUILD-026)
   det-diff <a> <b>    compare two determinism manifests (GEN-003; CI diffs Windows against Linux)
   golden-review [--proposal <file>] [--extra <dir>]... [--tests <junit.xml>]... [--apply]   classify golden candidates under ADR 0017, and ADR 0037 for first goldens of M5 classes (auto-bless or escalate)
@@ -75,6 +84,8 @@ fn main() -> ExitCode {
         Some("perf") => heavy::with(&format!("perf {}", args[1..].join(" ")), || testcmd::perf(&root, &args[1..])),
         Some("capture") => heavy::with(&format!("capture {}", args[1..].join(" ")), || testcmd::capture_cmd(&root, &args[1..])),
         Some("package") => heavy::with(&format!("package {}", args[1..].join(" ")), || package::run(&root, &args[1..])),
+        Some("preview") => heavy::with(&format!("preview {}", args[1..].join(" ")), || preview::run_cmd(&root, &args[1..])),
+        Some("terrain-score") => heavy::with("terrain-score", || terrainscore::run_cmd(&root, &args[1..])),
         Some("heavy") => heavy::run_wrapped(&root, &args[1..]),
         Some("quiet") => heavy::quiet(&args[1..]),
         Some("cache-verify") => testcmd::cache_verify(&root, &args[1..]),

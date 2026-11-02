@@ -2,6 +2,7 @@
 //! warm-up, medians and p99, JSON run logs. GPU-free: adapter facts arrive as plain structs and the
 //! frame loop itself is supplied by the renderer once it exists (M2).
 
+pub mod ab;
 pub mod accept;
 pub mod accept_m5;
 pub mod accept_m8;
@@ -13,8 +14,10 @@ pub mod gate;
 pub mod host;
 pub mod lit;
 pub mod load;
+pub mod loaded;
 pub mod prefill;
 pub mod preflight;
+pub mod reserve;
 pub mod session;
 pub mod smoke;
 pub mod streaming;
@@ -394,6 +397,88 @@ pub fn report_json_with_warmups(
     report_json_full(adapter, power_scheme, owner_override, validity, protocol, runs, warmups, &[])
 }
 
+/// `loaded` or `quiet`: the mode of a session (BUILD-032).
+fn mode_name(validity: &gate::Validity) -> &'static str {
+    if validity.load.is_some() {
+        "loaded"
+    } else {
+        "quiet"
+    }
+}
+
+/// The `loaded_verdicts` of a run row in a loaded session (BUILD-032): each time reading of the row with the rule of BUILD-031 and its answer; empty in a quiet session.
+fn loaded_verdicts_json(validity: &gate::Validity, r: &RunReport) -> String {
+    if validity.load.is_none() {
+        return String::new();
+    }
+    let rows: Vec<String> = loaded::row_verdicts(r)
+        .iter()
+        .map(|v| {
+            format!(
+                "{{\"metric\":{},\"reading\":{},\"budget\":{},\"verdict\":{}}}",
+                json_str(v.metric),
+                json_f(v.reading),
+                json_f(v.budget),
+                json_str(&v.judged.text())
+            )
+        })
+        .collect();
+    format!(",\"loaded_verdicts\":[{}]", rows.join(","))
+}
+
+/// The leading keys of a log: the mode and, in loaded mode, the load the gate recorded (each ends in a comma).
+fn mode_json(validity: &gate::Validity) -> String {
+    let load = validity.load.as_ref().map_or(String::new(), |l| format!("\"load_record\":{},", l.json()));
+    format!("\"mode\":{},{load}", json_str(mode_name(validity)))
+}
+
+/// One time reading of a one-off scene with the budget it is judged against (same unit, lower is better).
+pub struct OneOffReading {
+    pub metric: &'static str,
+    pub reading: f64,
+    pub budget: f64,
+}
+
+/// A one-off JSON log (`global-bake`, `coupled`, `coupled-make`, `envelope`: a single object written by hand) stamped like the flight logs
+/// (BUILD-032): the `mode` key and, in loaded mode, the `load_record` open the object, and `loaded_verdicts` (each reading judged as an
+/// unpinned CPU time, BUILD-031) closes it. A quiet session adds the mode only.
+pub fn stamp_one_off_json(json: &str, validity: &gate::Validity, readings: &[OneOffReading]) -> String {
+    let body = json.strip_prefix("{\n").unwrap_or(json);
+    let mut s = format!("{{\n  {}\n{body}", mode_json(validity));
+    if validity.load.is_some() && !readings.is_empty() {
+        let rows: Vec<String> = readings
+            .iter()
+            .map(|r| {
+                let judged = loaded::loaded_verdict(loaded::Kind::Cpu { pinned: false }, r.reading, r.budget);
+                format!(
+                    "{{\"metric\":{},\"reading\":{},\"budget\":{},\"verdict\":{}}}",
+                    json_str(r.metric),
+                    json_f(r.reading),
+                    json_f(r.budget),
+                    json_str(&judged.text())
+                )
+            })
+            .collect();
+        if let Some(end) = s.trim_end().strip_suffix('}') {
+            s = format!("{},\n  \"loaded_verdicts\": [{}]\n}}\n", end.trim_end(), rows.join(","));
+        }
+    }
+    s
+}
+
+/// The mode lines that open a one-off report in markdown (`edit-latency.md`): `mode: quiet` or `mode: loaded` with the load readings.
+pub fn mode_lines(validity: &gate::Validity) -> String {
+    match &validity.load {
+        Some(l) => format!("mode: loaded\nload: {}\n", l.text()),
+        None => "mode: quiet\n".to_string(),
+    }
+}
+
+/// The validity of this process's run for a one-off log: the load the gate recorded, if it ran in loaded mode.
+pub fn run_validity() -> gate::Validity {
+    gate::Validity { reasons: Vec::new(), load: gate::recorded_load() }
+}
+
 /// [`report_json_with_warmups`] plus the host load of each view or scene (`load` in the run's object, `load_notes` at the top;
 /// TEST-023): `loads` are keyed by the run's path name, a run without an entry carries none. Recorded only: nothing here changes a
 /// validity answer.
@@ -421,7 +506,8 @@ pub fn report_json_full(
         .map(|r| {
             let gv = gpu_valid_json(&view_gpu_validity(runs, &r.path_name));
             format!(
-                "{{\"path\":{},\"vram_cap_gb\":{},\"samples\":{},\"median_ms\":{},\"p99_ms\":{},\"min_ms\":{},\"max_ms\":{},\"mean_ms\":{},\"clocks_before\":{},\"clocks_after\":{},\"gpu_valid\":{},\"gpu_clock_state\":{},\"power_cap\":{},\"metrics\":{{{}}},\"counts\":{{{}}}{}}}",
+                "{{\"mode\":{},\"path\":{},\"vram_cap_gb\":{},\"samples\":{},\"median_ms\":{},\"p99_ms\":{},\"min_ms\":{},\"max_ms\":{},\"mean_ms\":{},\"clocks_before\":{},\"clocks_after\":{},\"gpu_valid\":{},\"gpu_clock_state\":{},\"power_cap\":{},\"metrics\":{{{}}},\"counts\":{{{}}}{}{}}}",
+                json_str(mode_name(validity)),
                 json_str(&r.path_name),
                 r.vram_cap_gb,
                 r.stats.samples,
@@ -437,12 +523,14 @@ pub fn report_json_full(
                 view_power_cap(runs, &r.path_name),
                 r.metrics.iter().map(|(n, s)| format!("{}:{{\"median\":{},\"p99\":{},\"max\":{},\"mean\":{},\"samples\":{}}}", json_str(n), json_f(s.median), json_f(s.p99), json_f(s.max), json_f(s.mean), s.samples)).collect::<Vec<_>>().join(","),
                 r.counts.iter().map(|(n, v)| format!("{}:{v}", json_str(n))).collect::<Vec<_>>().join(","),
-                load_of(&r.path_name).map_or(String::new(), |l| format!(",\"load\":{}", load::load_json(l)))
+                load_of(&r.path_name).map_or(String::new(), |l| format!(",\"load\":{}", load::load_json(l))),
+                loaded_verdicts_json(validity, r)
             )
         })
         .collect();
     format!(
-        "{{\"adapter\":{{\"name\":{},\"backend\":{}}},\"power_scheme\":{},\"owner_override\":[{}],\"valid_for_budgets\":{},\"frame_valid\":{},\"gpu_session_valid\":{},\"gpu_only_causes\":[{}],\"cpu_calibration_valid\":{},\"cpu_calibration_reasons\":[{}],\"warnings\":[{}],\"load_notes\":[{}],\"warmups\":[{}],\"protocol\":{{\"warmup_frames\":{},\"measured_frames\":{},\"runs\":{},\"vram_caps_gb\":{:?},\"internal_resolution\":[{},{}],\"field\":{},\"source\":{},\"gen\":{}}},\"runs\":[{}]}}\n",
+        "{{{}\"adapter\":{{\"name\":{},\"backend\":{}}},\"power_scheme\":{},\"owner_override\":[{}],\"valid_for_budgets\":{},\"frame_valid\":{},\"gpu_session_valid\":{},\"gpu_only_causes\":[{}],\"cpu_calibration_valid\":{},\"cpu_calibration_reasons\":[{}],\"warnings\":[{}],\"load_notes\":[{}],\"warmups\":[{}],\"protocol\":{{\"warmup_frames\":{},\"measured_frames\":{},\"runs\":{},\"vram_caps_gb\":{:?},\"internal_resolution\":[{},{}],\"field\":{},\"source\":{},\"gen\":{}}},\"runs\":[{}]}}\n",
+        mode_json(validity),
         json_str(&adapter.name),
         json_str(&adapter.backend),
         power_scheme.map_or("null".to_string(), json_str),

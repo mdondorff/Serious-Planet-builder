@@ -721,6 +721,7 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
             mesh_version: planet_generators::mesh::MESH_VERSION,
             definition_hash,
             adapter: ctx.adapter_key(),
+            commit: crate::crash::bundle_commit(),
             world: world_section,
             request,
             plan,
@@ -729,6 +730,18 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
         writeln!(out, "wrote repro bundle {}", path.display()).map_err(err)?;
     }
     Ok(())
+}
+
+/// What to do about a bundle of another version (TEST-071): replay it at the commit it records, or find that commit.
+fn commit_advice(commit: Option<&str>) -> String {
+    match commit {
+        Some(c) => format!("it was recorded at commit {c}: `cargo xtask repro <bundle> --at-commit` replays it there"),
+        None => concat!(
+            "it records no commit (made before bundles did): find the commit whose generator and mesh versions match ",
+            "(`git log -S\"MESH_VERSION: u32 = N\"`), check it out and replay there"
+        )
+        .to_string(),
+    }
 }
 
 /// Read a terrain repro bundle and refuse it on a version mismatch; rebuild the world it recorded (none for a seed-only bundle).
@@ -742,8 +755,14 @@ pub(crate) fn open_terrain_bundle(
     let mesh_version = planet_generators::mesh::MESH_VERSION;
     if b.generator_version != GENERATOR_VERSION || b.implementation_id != IMPLEMENTATION_ID || b.mesh_version != mesh_version {
         return Err(format!(
-            "bundle was recorded with generator {} ({}) and mesh version {}, this build has {} ({}) and {}; check out the matching commit to replay it",
-            b.generator_version, b.implementation_id, b.mesh_version, GENERATOR_VERSION, IMPLEMENTATION_ID, mesh_version
+            "bundle was recorded with generator {} ({}) and mesh version {}, this build has {} ({}) and {}; {}",
+            b.generator_version,
+            b.implementation_id,
+            b.mesh_version,
+            GENERATOR_VERSION,
+            IMPLEMENTATION_ID,
+            mesh_version,
+            commit_advice(b.commit.as_deref())
         ));
     }
     // A bundle that recorded a world rebuilds its field from the recorded definition and bake size; one that recorded none is
@@ -921,30 +940,14 @@ impl planet_generators::height::HeightField for CancelGuarded<'_> {
             self.inner.height(dir)
         }
     }
-    fn height_at_level(&self, dir: Vec3, level: u8) -> f64 {
-        if self.cancel.is_cancelled() {
-            0.0
-        } else {
-            self.inner.height_at_level(dir, level)
-        }
-    }
-    fn level_aware(&self) -> bool {
-        self.inner.level_aware()
-    }
-    fn level_drivers(&self, dirs: &[Vec3], level: u8) -> Option<Vec<Option<[u8; 3]>>> {
-        self.inner.level_drivers(dirs, level)
-    }
-    fn level_change(&self, dirs: &[Vec3], level: u8) -> Option<Vec<f64>> {
-        self.inner.level_change(dirs, level)
-    }
     /// The inner field's batch (it may order the samples by block, GEN-020), stopped by the token or the caller's flag.
     // Invariant: once `stop` or the cancel flag answers true the batch returns 0.0 for the unfinished directions; whoever cancels
     // must discard the results of the batch (the plan of a cancelled job is never used or memoised).
     fn heights_until(&self, dirs: &[Vec3], stop: &dyn Fn() -> bool) -> Vec<f64> {
         self.inner.heights_until(dirs, &|| stop() || self.cancel.is_cancelled())
     }
-    fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), threads: usize) -> Vec<f64> {
-        self.inner.heights_threaded_until(dirs, &|| stop() || self.cancel.is_cancelled(), threads)
+    fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), par: &dyn planet_core::par::Par) -> Vec<f64> {
+        self.inner.heights_threaded_until(dirs, &|| stop() || self.cancel.is_cancelled(), par)
     }
     fn seed(&self) -> u64 {
         self.inner.seed()
@@ -1092,25 +1095,22 @@ pub(crate) fn upload_missing_meshes(
     let missing: Vec<TileId> = plan.nodes.iter().filter(|n| !renderer.has_mesh(n.tile, n.mesh_key)).map(|n| n.tile).collect();
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
     let chunk = missing.len().div_ceil(threads).max(1);
-    let meshes: Vec<CompactTile> = std::thread::scope(|s| {
-        let handles: Vec<_> = missing
-            .chunks(chunk)
-            .map(|part| {
-                planet_core::thread::spawn_named(s, "skeleton-tile", move || {
-                    part.iter()
-                        .map(|&t| {
-                            let made = tile_for(field, t, cells, radius_m);
-                            if let Some(w) = world {
-                                w.fill_water(t, &made);
-                            }
-                            made
-                        })
-                        .collect::<Vec<_>>()
-                })
+    let parts: Vec<&[TileId]> = missing.chunks(chunk).collect();
+    let meshes: Vec<CompactTile> = planet_core::par::map(&threads, parts.len(), &|c| {
+        parts[c]
+            .iter()
+            .map(|&t| {
+                let made = tile_for(field, t, cells, radius_m);
+                if let Some(w) = world {
+                    w.fill_water(t, &made);
+                }
+                made
             })
-            .collect();
-        handles.into_iter().flat_map(|h| h.join().expect("mesh thread")).collect()
-    });
+            .collect::<Vec<_>>()
+    })
+    .into_iter()
+    .flatten()
+    .collect();
     for m in &meshes {
         renderer.upload_tile(ctx, m).map_err(|e| e.to_string())?;
     }
@@ -1620,23 +1620,20 @@ mod tests {
         }
     }
 
-    // spec: GEN-036
+    // spec: STRM-005
     #[test]
-    fn the_cancel_guard_answers_the_level_as_its_inner_field_does_and_nothing_once_cancelled() {
+    fn the_cancel_guard_answers_as_its_inner_field_does_and_nothing_once_cancelled() {
         use planet_generators::height::HeightField;
-        struct Leveled;
-        impl HeightField for Leveled {
+        struct Flat;
+        impl HeightField for Flat {
             fn height(&self, _: Vec3) -> f64 {
                 1.0
-            }
-            fn height_at_level(&self, _: Vec3, level: u8) -> f64 {
-                1.0 + f64::from(level)
             }
             fn seed(&self) -> u64 {
                 1
             }
             fn implementation_id(&self) -> &'static str {
-                "leveled-test"
+                "flat-test"
             }
             fn version(&self) -> u32 {
                 1
@@ -1646,10 +1643,10 @@ mod tests {
             }
         }
         let (never, cancelled) = (planet_streaming::CancelToken::never(), planet_streaming::CancelToken::cancelled());
-        let (live, dead) = (CancelGuarded { inner: &Leveled, cancel: &never }, CancelGuarded { inner: &Leveled, cancel: &cancelled });
+        let (live, dead) = (CancelGuarded { inner: &Flat, cancel: &never }, CancelGuarded { inner: &Flat, cancel: &cancelled });
         let d = Vec3::new(1.0, 0.0, 0.0);
-        assert_eq!(live.height_at_level(d, 15), 16.0);
-        assert_eq!(dead.height_at_level(d, 15), 0.0);
+        assert_eq!(live.height(d), 1.0);
+        assert_eq!(dead.height(d), 0.0);
     }
 
     // spec: STRM-005
@@ -1734,6 +1731,7 @@ mod tests {
             mesh_version: 1,
             definition_hash: def.hash(),
             adapter: "a".into(),
+            commit: None,
             world: Some(world.clone()),
             request,
             plan,
@@ -1746,6 +1744,35 @@ mod tests {
         let mut other_radius = bundle.clone();
         other_radius.request.lod.radius_m += 1.0;
         assert!(world_of_bundle(&world, &other_radius, None).err().unwrap().contains("radius"));
+    }
+
+    // spec: TEST-071
+    #[test]
+    fn a_bundle_of_another_version_is_refused_naming_its_commit_or_the_way_to_find_it() {
+        use planet_frame::{plan_terrain, TerrainBundle, TerrainRequest, TerrainView};
+        let (_, camera) = planet_frame::scripted_views(RADIUS_M, 4.0 / 3.0, 1)[3];
+        let lod = planet_frame::LodParams { cells: 16, viewport_h_px: 192.0, tau_px: 4.0, ..planet_frame::LodParams::earth_1080p() };
+        let request = TerrainRequest { camera, size: (64, 48), view: TerrainView::Level, lod, face_mapping: "tangent-v1".into(), seed: 1 };
+        let plan = plan_terrain(&request).unwrap();
+        let other_build = |commit: Option<&str>| {
+            TerrainBundle {
+                generator_version: GENERATOR_VERSION,
+                implementation_id: "another-build".into(),
+                mesh_version: planet_generators::mesh::MESH_VERSION,
+                definition_hash: 0,
+                adapter: "a".into(),
+                commit: commit.map(str::to_string),
+                world: None,
+                request: request.clone(),
+                plan: plan.clone(),
+            }
+            .to_text()
+        };
+        let path = Path::new("b.bundle");
+        let with = open_terrain_bundle(&other_build(Some("0123abc")), path, None).err().unwrap();
+        assert!(with.contains("commit 0123abc") && with.contains("repro <bundle> --at-commit"), "{with}");
+        let without = open_terrain_bundle(&other_build(None), path, None).err().unwrap();
+        assert!(without.contains("records no commit") && without.contains("git log -S"), "{without}");
     }
 
     // spec: TEST-071
@@ -1768,6 +1795,7 @@ mod tests {
                 mesh_version: 1,
                 definition_hash: def.hash(),
                 adapter: "a".into(),
+                commit: None,
                 world: Some(world.clone()),
                 request: request.clone(),
                 plan: plan.clone(),

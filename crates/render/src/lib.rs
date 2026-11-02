@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 #[macro_use]
 mod horizon_wgsl;
 pub mod atmosphere;
+pub mod burn;
 pub mod compact;
 pub mod exec;
 pub mod gate;
@@ -15,15 +16,20 @@ pub mod graph;
 pub mod horizon;
 pub use horizon::{probe_horizon, HorizonAnswer, HorizonQuery};
 pub mod lit;
+pub mod march;
 #[cfg(feature = "reference-renderer")]
 pub mod reference;
 pub(crate) mod refs;
+pub mod resolve;
+pub mod shadow;
+pub mod shadow_path;
 pub mod terrain;
 pub mod ui;
 pub mod water;
 pub mod water_gpu;
 pub mod window;
 pub use atmosphere::{atmosphere_shaders, AtmospherePath, ProbeKind};
+pub use burn::{BurnCalibration, BurnPass};
 pub use compact::compact_terrain_shader;
 pub use exec::{execute, reference_frame, ExecError, ExecStats, TileResource, EXEC_SHADERS};
 pub use gate::requirements as adapter_requirements;

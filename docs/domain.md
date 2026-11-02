@@ -180,7 +180,7 @@ No erosion runs after the edits today: the chunk stage that did is removed (owne
 - `Owner` names crates.
 
 ## 8. Former terms (non-normative)
-History for reading old ADRs, logs and spike results. Nothing here describes the current system; never use these terms in new specs or code. Rows marked *code removal pending* are still in the code until the chunk-stage removal (B6, `openspec/changes/remove-chunk-stage/`) lands; they are listed here already because no new work may use them.
+History for reading old ADRs, logs and spike results. Nothing here describes the current system; never use these terms in new specs or code. Rows marked *code removal pending*: the chunk-stage removal (B6, `openspec/changes/archive/2026-10-31-remove-chunk-stage/`) landed 2026-10-31; the remaining mentions are history comments and the definition's chunk-stage setting kept for hash stability (ADR 0086 decision 3). No new work may use them.
 | Former term | What it was | Left | Now |
 |---|---|---|---|
 | chunk stage, A-net erosion | fine erosion and river routing per 5 km chunk on a 4 to 10 m raster, on top of the base field (ADR 0077 points on regional stages, GEN-036 to GEN-078) | off by default 2026-10-28; removed after M8 (owner, 2026-10-29); *code removal pending* | M9's erosion design (bake-side erosion; SPIKE-57) |

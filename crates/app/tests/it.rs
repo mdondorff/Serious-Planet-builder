@@ -2,12 +2,22 @@
 mod coarse_horizon_world;
 #[path = "coupled_remake.rs"]
 mod coupled_remake;
+#[path = "edit_keys.rs"]
+mod edit_keys;
 #[path = "horizon_world.rs"]
 mod horizon_world;
 #[path = "live_definition.rs"]
 mod live_definition;
+#[path = "real_store.rs"]
+mod real_store;
 #[path = "residency_headroom.rs"]
 mod residency_headroom;
+#[path = "shadow_rig.rs"]
+mod shadow_rig;
+#[path = "site_descent.rs"]
+mod site_descent;
+#[path = "ts_reproduce.rs"]
+mod ts_reproduce;
 #[path = "water_reach.rs"]
 mod water_reach;
 #[path = "world_field.rs"]

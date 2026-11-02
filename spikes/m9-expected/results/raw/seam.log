@@ -1,0 +1,12 @@
+heavy-run lock: the machine is free after 262 s: running `C:/Program Files/Git/usr/bin/bash.exe C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/570e124f-4ca5-49b4-8bf6-680604dce399/scratchpad/s74/seam.sh`
+$ C:/Program Files/Git/usr/bin/bash.exe C:/Users/matth/AppData/Local/Temp/claude/C--DEV-Serious-Planet-Builder--claude-worktrees-sonnet-spikes-36fc88/570e124f-4ca5-49b4-8bf6-680604dce399/scratchpad/s74/seam.sh
+=== seam 18:39:45 cpu 79%
+highlands: hybrid1 incise-only no uplift, 4 tiles 108 s
+highlands hybrid1-incise-nouplift hard: step over 9186 edge pairs p50 7.01 p99 78.55 max 206.07 m | |s-j| by distance (p50/p99 m) 0-1: 78.18/426.11, 2-8: 77.24/440.11, 9-32: 72.79/462.71, 33-128: 71.67/525.11, 129-512: 79.07/528.46, 513-4000: 86.03/410.37 | crossings mosaic 146 joint 160 matched 43 | ponds near seams mosaic 7961 joint 883
+blackforest: hybrid1 incise-only no uplift, 4 tiles 131 s
+blackforest hybrid1-incise-nouplift hard: step over 12254 edge pairs p50 6.86 p99 68.11 max 136.76 m | |s-j| by distance (p50/p99 m) 0-1: 58.62/336.04, 2-8: 57.66/338.30, 9-32: 60.73/330.94, 33-128: 61.55/317.65, 129-512: 62.05/339.25, 513-4000: 57.05/405.64 | crossings mosaic 237 joint 281 matched 72 | ponds near seams mosaic 12607 joint 1116
+valleyridge: hybrid1 incise-only no uplift, 4 tiles 74 s
+valleyridge hybrid1-incise-nouplift hard: step over 10559 edge pairs p50 5.68 p99 56.85 max 101.78 m | |s-j| by distance (p50/p99 m) 0-1: 47.00/176.67, 2-8: 48.29/178.57, 9-32: 48.80/174.51, 33-128: 48.31/173.90, 129-512: 49.30/177.43, 513-4000: 59.55/196.05 | crossings mosaic 168 joint 220 matched 48 | ponds near seams mosaic 10187 joint 641
+alps: hybrid1 incise-only no uplift, 4 tiles 150 s
+alps hybrid1-incise-nouplift hard: step over 12124 edge pairs p50 11.21 p99 87.46 max 165.75 m | |s-j| by distance (p50/p99 m) 0-1: 133.55/813.58, 2-8: 133.69/818.70, 9-32: 131.05/874.80, 33-128: 127.55/913.72, 129-512: 123.32/860.96, 513-4000: 111.58/781.16 | crossings mosaic 185 joint 223 matched 47 | ponds near seams mosaic 11198 joint 2189
+=== done 18:49:47

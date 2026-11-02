@@ -56,7 +56,7 @@ Source: CON-25, CLAUDE.md
 
 Verify: A
 Status: active
-Source: ADR 0009, report §16
+Source: ADR 0009, report §16, ADR 0020, planner inbox #44 (2026-11-01)
 
 #### Scenario: Change in a middle crate
 - **WHEN** only files of `streaming` changed
@@ -78,6 +78,7 @@ Source: ADR 0009, report §16
 #### Scenario: The GPU tests have a hang limit of 300 s
 - **WHEN** a test of a `gpu_*` binary runs under the default nextest profile (the software-adapter tier C, CI's WARP and lavapipe runs, and the `real-gpu` profile that inherits it)
 - **THEN** nextest marks it slow every 60 s and terminates it after 300 s (5 periods), where every other test terminates after 180 s; the limit catches a hang and is not a budget: the heavy `gpu_*` tests take 40 to 66 s alone and up to 144 s beside the other processes of a full run, and grouping them did not shorten the run
+- **AND** a test with a declared limit in `.config/nextest.toml` (its measured durations and the planner's approval in a comment beside it) terminates after 450 s (5 x 90 s) instead; today the window flight, the coastal flight, the lit coast view, the edit-latency smoke scene and the stills scene; no test is skipped, retried or changed
 
 #### Scenario: The GPU tier runs every test
 - **WHEN** `cargo xtask test gpu` runs (software or `--real`)
@@ -94,6 +95,27 @@ Source: ADR 0009, report §16
 #### Scenario: Slowest tests named
 - **WHEN** a nextest JUnit report of a `test fast` run is read
 - **THEN** the five tests with the greatest times are listed, slowest first, each as its binary and test name
+
+#### Scenario: A WARP access violation is named, not hidden
+- **WHEN** a `cargo xtask test`, `test fast` or `test gpu` run on the software adapter ends with a test process aborted by `0xc0000005` (the access violation in `d3d10warp.dll`, docs/learnings.md)
+- **THEN** the summary names each such test as `WARP crash (d3d10warp), CI judges: <test>` before the log path
+- **AND** the step still counts as failed with its own exit code: no retry, no skip, no test changed
+
+#### Scenario: The software GPU tier runs at most 8 GPU tests at once
+- **WHEN** a `gpu_*` test runs under the default nextest profile
+- **THEN** it is in the test group `gpu-tier` of at most 8 processes at once, unless an earlier override puts it in a heavier group; the window, water-coverage, stream-perf, envelope-perf, edit-perf and stills tests and the three loop tests of `gpu_skeleton` are in `heavy-window` of at most 2; tier A and B tests are not capped
+- **AND** a machine with 8 cores or fewer (CI's runners) runs as before; on the 20-thread reference laptop the software tier C no longer runs about 20 rasterising processes at once (SPIKE-84: the 12 timeouts of 2026-10-20 and 3 load timeouts on 2026-10-31)
+
+#### Scenario: Wall-clock checks run with perf, not in tier A
+- **WHEN** a test would assert on the time real work takes (a timing ratio, a spin's milliseconds, a lock wait on real threads)
+- **THEN** it is an ignored test with the reason `wall clock: cargo xtask perf wallclock`, listed in xtask's `WALLCLOCK`, and `cargo xtask perf wallclock` runs each alone in release, naming each PASS or FAIL; tier A asserts the counts, the results and the order of events instead, and a tier-A test checks that every listed check exists as such an ignored test
+- **AND** a wall-clock check is evidence of the reference machine outside the tiers: its `// spec:` citation does not stand in for a tier-A test of the same scenario, and CI and `test` do not run it
+- **AND** today the list is the real spin within 5 % (BUDG-011), the lock held 40 ms (VIEW-056) and the cost of the margin of a seam cell against an interior one (the picking query of VIEW-022; no spec states its number, the check guards the seam form of `with_margin` against a return to the geometric walk); a hang guard (a deadline after which a test fails rather than stalls) is not a wall-clock check
+
+#### Scenario: The wall-clock checks run under the readiness gate
+- **WHEN** `cargo xtask perf wallclock` runs, on its own or as the last step of `cargo xtask accept`
+- **THEN** it builds the checks, then runs the readiness gate of ADR 0020 without its reference-adapter condition (the checks use the CPU only), then each check; a refused gate is NOT RUN with the refused conditions (`INCOMPLETE:`, exit code 3), no verdict and never a failure, and `--machine-ready` (the owner's override) runs the checks anyway
+- **AND** in `accept` a step that ends `INCOMPLETE:` without a locked-desktop marker lists its text as a NOT RUN line, so the step and the run are INCOMPLETE, never a pass (see TEST-073)
 
 ### Requirement: BUILD-004 Three run modes
 The single binary SHALL provide the modes `editor`, `generate` and `test-render`, each of which starts and exits cleanly with `--smoke`; for `editor`, `--smoke` opens the viewer window (VIEW-005) and the display-free start check is `editor --smoke --no-window`; headless PNG output of `test-render` is covered by TEST-004 and REND-007.
@@ -488,3 +510,78 @@ Source: owner (2026-10-30), opus-planner, docs/domain.md section 8
 #### Scenario: A pending term
 - **WHEN** a checked file holds a term whose row says code removal pending
 - **THEN** spec-lint passes and prints the count of such mentions
+
+### Requirement: BUILD-029 `cargo xtask terrain-score`
+`cargo xtask terrain-score [--store DIR] [--dem DIR] [--sites FILE] [--out DIR] [--maps]` SHALL run the scorecard (TEST-079) in release under the heavy lock (BUILD-026), on the CPU only; `--maps` also writes a 512 px PNG per descriptor per raster under `maps/`. Defaults: the linked production store, `C:/DEV/SeriousPlanetData/dem/glo30-samples`, `crates/app/data/terrain-score-sites.toml`, and `target/review/terrain-score/<date>`. It SHALL print the report's path and its wall time, take at most 60 s on the reference machine, and refuse a missing store or tile directory by name.
+
+Verify: A
+Status: active
+Source: SPIKE-57 (about 1 minute), BUILD-002, BUILD-026
+
+#### Scenario: Arguments
+- **WHEN** the command is parsed with no options, with every option, and with an unknown option
+- **THEN** the first runs the example with the defaults, the second passes each option through, and the third is refused naming the known options
+
+#### Scenario: Missing input
+- **WHEN** the tile directory does not exist
+- **THEN** the command fails naming the directory and the `--dem` option
+
+### Requirement: BUILD-030 The gate records the load in loaded mode
+`cargo xtask perf` with `--loaded` SHALL run the readiness gate (ADR 0020) with its hard conditions (AC power, power scheme, reference adapter, GPU temperature, GPU throttling) and SHALL record the load conditions (build and test processes, CPU load, GPU utilisation, the CPU calibration of ADR 0065) as readings instead of refusing on them. `--machine-ready` SHALL stay the owner's override, and `--loaded` with `--machine-ready` SHALL be refused. Quiet mode SHALL behave as before.
+
+Verify: A
+Status: active
+Source: ADR 0087 consequences, ADR 0020, owner 2026-10-31
+
+#### Scenario: A loaded machine
+- **WHEN** the gate runs in loaded mode with a build process, 40 % CPU load and a calibration over its limit
+- **THEN** it passes, and the readings are in the load record
+
+#### Scenario: A hard condition
+- **WHEN** the gate runs in loaded mode on battery, or with the GPU over its temperature limit
+- **THEN** it refuses naming the reading and the limit
+
+### Requirement: BUILD-031 The loaded verdict rules
+A pure function SHALL give a time verdict measured under load per ADR 0087: a reading under budget by at least 5 % is a loaded pass; over budget is inconclusive, never a fail; within the margin goes to a window. The frame time with streaming, a cross-session regression comparison and a milestone acceptance run SHALL need a quiet window. A CPU-timed scene SHALL count only when pinned, or with a 30 % margin. A GPU timing SHALL carry the +18 % note.
+
+Verify: A
+Status: active
+Source: ADR 0087 points 1 to 5
+
+#### Scenario: Margins
+- **WHEN** readings of 94 %, 97 % and 110 % of a GPU budget are judged
+- **THEN** they are a loaded pass with the note, a window case and inconclusive
+
+#### Scenario: CPU and exclusive kinds
+- **WHEN** an unpinned CPU reading at 80 % of its budget and a frame p99 with streaming are judged
+- **THEN** the first needs 70 % or less to be a loaded pass, and the second needs a quiet window
+
+### Requirement: BUILD-032 The report states loaded or quiet
+Every row of a perf report, and every perf log (the one-off logs `global-bake`, `coupled`, `coupled-make`, `envelope` and `edit-latency` included), SHALL state `loaded` or `quiet`; a loaded one SHALL carry the load readings (CPU load, competing load, the top processes, GPU utilisation, CPU performance %, calibration). A loaded row with a time reading and a budget (the streaming and terrain rows, the lit passes, the bake and coupled times, the gated edit rows) SHALL carry its verdict of BUILD-031.
+
+Verify: A
+Status: active
+Source: ADR 0087 points 1 and 2, planner (2026-11-01, perf-one-off-mode)
+
+#### Scenario: Rows
+- **WHEN** a loaded and a quiet session are reported
+- **THEN** each row names its mode and readings, and the loaded rows their verdicts
+
+#### Scenario: One-off logs
+- **WHEN** a one-off log is written in a quiet and in a loaded session
+- **THEN** both open with their mode, the loaded one also with its load record, and a log with a time budget closes with its verdicts in the loaded case only
+
+#### Scenario: Lit rows
+- **WHEN** a loaded session reports a `lit/` row
+- **THEN** its GPU passes and its frame p99 carry the verdicts of BUILD-031 against their budgets
+
+### Requirement: BUILD-033 The A/B helper
+`cargo xtask perf --ab <ref> <perf command>` SHALL run the command in the working tree and in a worktree of `<ref>` in alternating order for N rounds (default 5), SHALL retry a gate refusal up to a cap and report how often and why, SHALL keep every run's log, and SHALL print one table: per metric both medians, the change in %, the verdict against the 5 % margin and the rule that judges the metric under load (the metric table of the design: tile-ready and frame p99 by default). It SHALL not write the store or the main tree's `perf/logs`.
+
+Verify: A
+Status: active
+Source: ADR 0087, the job-system A/B of 2026-10-31
+
+#### Scenario: Rounds
+- **WHEN** the helper runs 5 rounds with fake runs of two builds
+- **THEN** the order alternates, each log is kept, and the table gives both medians and the change

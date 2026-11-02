@@ -2,10 +2,11 @@
 
 use planet_core::cube::{face_to_direction, TangentWarp};
 use planet_core::hash::SplitMix64;
-use planet_core::{Face, Vec3};
+use planet_core::{Face, TileId, Vec3};
 use planet_generators::erosion::{ErosionField, ErosionGenerator, EROSION_IMPLEMENTATION_ID, EROSION_VERSION, MAX_ABS_HEIGHT_M};
 use planet_generators::global::{bake, GlobalGrid, GlobalSample, GridSource, LatticeSource, ReadError};
 use planet_generators::height::HeightField;
+use planet_generators::mesh::tile_mesh_field;
 use planet_world_def::{BodyId, GenContext, WorldDefinition};
 
 const R: f64 = 6_371_000.0;
@@ -287,4 +288,109 @@ fn bounds_hold_over_small_caps_where_the_landform_is_neither_0_nor_1() {
         }
     }
     assert!(checked >= 10, "{checked} centres with a landform between 0.05 and 0.95");
+}
+
+/// The directions a mesh of `cells` cells evaluates for the tile, as production builds them: the lattice and the ring around it (ADR 0073).
+fn lattice(tile: TileId, cells: u32) -> Vec<Vec3> {
+    planet_generators::normals::lattice_directions(&TangentWarp, tile, cells)
+}
+
+fn bits(v: &[f64]) -> Vec<u64> {
+    v.iter().map(|h| h.to_bits()).collect()
+}
+
+fn key(d: Vec3) -> [u64; 3] {
+    [d.x.to_bits(), d.y.to_bits(), d.z.to_bits()]
+}
+
+// spec: GEN-017
+#[test]
+fn a_direction_has_one_height_whichever_tile_asks_for_it() {
+    let g = grid(64);
+    let src = GridSource(&g);
+    let f = field(&src);
+    let mut rng = SplitMix64(5);
+    let mut asked = 0;
+    for level in [3u8, 6, 9, 12, 15, 18] {
+        for _ in 0..3 {
+            let tile = TileId::from_direction(&TangentWarp, random_dir(&mut rng), level);
+            let dirs = lattice(tile, 16);
+            let expect: Vec<u64> = dirs.iter().map(|&d| f.height(d).to_bits()).collect();
+            // The tile itself, a neighbour (across a face edge at times), the tile on the far side of the planet, its parent and its child.
+            let mut askers = vec![tile, tile.neighbors8()[0], TileId::from_direction(&TangentWarp, -dirs[dirs.len() / 2], level)];
+            askers.extend(tile.parent());
+            askers.extend(tile.children().map(|c| c[0]));
+            for asker in askers {
+                let (batch, _) = f.heights_and_climate(&TangentWarp, asker, &dirs, &|| false);
+                assert_eq!(bits(&batch), expect, "level {level}: tile {asker:?} gave other heights for the directions of {tile:?}");
+                asked += 1;
+            }
+            // The batches of the tile at 8 and at 16 cells, as the meshes ask for them, give the same f64 bits at the lattice points they share.
+            let (c8, c16) = (lattice(tile, 8), lattice(tile, 16));
+            let (h8, _) = f.heights_and_climate(&TangentWarp, tile, &c8, &|| false);
+            let (h16, _) = f.heights_and_climate(&TangentWarp, tile, &c16, &|| false);
+            for j in 0..=8usize {
+                for i in 0..=8usize {
+                    assert_eq!(
+                        h8[j * 9 + i].to_bits(),
+                        h16[2 * j * 17 + 2 * i].to_bits(),
+                        "level {level}: lattice point ({i}, {j}) of {tile:?} at 8 and at 16 cells"
+                    );
+                }
+            }
+            // And the vertices the meshes keep are those heights rounded to f32.
+            let (m8, m16) = (tile_mesh_field(&f, &TangentWarp, tile, 8, R), tile_mesh_field(&f, &TangentWarp, tile, 16, R));
+            for j in 0..=8usize {
+                for i in 0..=8usize {
+                    assert_eq!(m8.vertices[j * 9 + i].height.to_bits(), m16.vertices[2 * j * 17 + 2 * i].height.to_bits());
+                    assert_eq!(m8.vertices[j * 9 + i].height, h8[j * 9 + i] as f32);
+                }
+            }
+        }
+    }
+    assert!(asked >= 18 * 4, "{asked} askers over 18 tiles");
+}
+
+// spec: GEN-017
+#[test]
+fn the_points_two_tiles_share_get_the_same_height_from_either_tile_across_tile_and_face_edges() {
+    let g = grid(64);
+    let src = GridSource(&g);
+    let f = field(&src);
+    let mut rng = SplitMix64(11);
+    let mut tiles: Vec<TileId> = (0..6).map(|_| TileId::from_direction(&TangentWarp, random_dir(&mut rng), 9)).collect();
+    // Tiles on a face edge and at the cube corner, where the neighbour is on another face.
+    for &(s, t) in &[(1.0, 0.3), (1.0, 1.0), (-1.0, 0.5)] {
+        tiles.push(TileId::from_direction(&TangentWarp, face_to_direction(&TangentWarp, Face(0), s, t), 9));
+    }
+    let mut cross_face = 0;
+    for tile in tiles {
+        let mine = lattice(tile, 16);
+        let (mine_h, _) = f.heights_and_climate(&TangentWarp, tile, &mine, &|| false);
+        let mut with_a_full_edge = 0;
+        // (a corner tile has seven neighbours: the eighth does not exist at the cube corner)
+        for other in tile.neighbors8() {
+            let theirs = lattice(other, 16);
+            let (their_h, _) = f.heights_and_climate(&TangentWarp, other, &theirs, &|| false);
+            let at: std::collections::HashMap<[u64; 3], usize> = theirs.iter().enumerate().map(|(i, &d)| (key(d), i)).collect();
+            // The same point of the sphere is the same bits of direction from both tiles (COORD-007), and so one height from both batches.
+            let mut shared = 0;
+            for (i, &d) in mine.iter().enumerate() {
+                if let Some(&j) = at.get(&key(d)) {
+                    assert_eq!(mine_h[i].to_bits(), their_h[j].to_bits(), "{tile:?} and {other:?} give other heights for one point");
+                    shared += 1;
+                }
+            }
+            assert!(shared >= 1, "{tile:?} and its neighbour {other:?} share no point at all");
+            if shared > 16 {
+                with_a_full_edge += 1;
+            }
+            if other.face() != tile.face() {
+                assert!(shared >= 1);
+                cross_face += 1;
+            }
+        }
+        assert!(with_a_full_edge >= 3, "{tile:?}: only {with_a_full_edge} neighbours share an edge of points");
+    }
+    assert!(cross_face >= 3, "{cross_face} neighbour pairs across a face edge were compared");
 }

@@ -1,5 +1,7 @@
 #[path = "atmosphere.rs"]
 mod atmosphere;
+#[path = "clipmap.rs"]
+mod clipmap;
 #[path = "coarsening_loop.rs"]
 mod coarsening_loop;
 #[path = "compact_pool.rs"]
@@ -58,6 +60,8 @@ mod morph;
 mod mouselook_replay;
 #[path = "overlay.rs"]
 mod overlay;
+#[path = "par_cost.rs"]
+mod par_cost;
 #[path = "pick.rs"]
 mod pick;
 #[path = "pipeline.rs"]
@@ -92,6 +96,8 @@ mod scheduler_incremental;
 mod scheduler_rotation;
 #[path = "shading.rs"]
 mod shading;
+#[path = "shadowview.rs"]
+mod shadowview;
 #[path = "stamp_cache.rs"]
 mod stamp_cache;
 #[path = "stamp_steep.rs"]
@@ -112,6 +118,8 @@ mod wall_repose;
 mod water;
 #[path = "water_band.rs"]
 mod water_band;
+#[path = "water_book.rs"]
+mod water_book;
 #[path = "water_cut.rs"]
 mod water_cut;
 #[path = "water_plan.rs"]

@@ -106,15 +106,11 @@ pub struct CompactTile {
     pub relief_m: f64,
     /// The climate block (GEN-021), 81 words: temperature `f16` low, precipitation `f16` high.
     pub climate_words: [u32; CLIMATE_TEXELS],
-    /// The driver block (GEN-071, ADR 0076), 81 words: soil depth code, moisture code, insolation code and the neutral insolation code of the texel's
-    /// latitude, one byte each (`drivers::pack_driver_word`). The chunk's values where a chunk is ready under the tile, the neutral values elsewhere.
+    /// The driver block (GEN-074, ADR 0076), 81 words: soil depth code, moisture code, insolation code and the neutral insolation code of the texel's
+    /// latitude, one byte each (`drivers::pack_driver_word`). The neutral values: the builder makes no other.
     pub driver_words: [u32; DRIVER_TEXELS],
     /// `(cells + 1)^2` texels `[height step count, two 15-bit normal components]`, row `j` major.
     pub texels: Vec<[u32; 2]>,
-    /// The chunk change of every texel in metres, row `j` major like the texels (STRM-047, REND-039): the texel heights already include it, so a
-    /// vertex fades it with `h_q - (1 - w) change`. `None` for a tile without chunk detail (and for every tile of a world without chunks); it is
-    /// not part of the slot, so the slot bytes, the pack payloads and the hashes of GEN-025 are what they were.
-    pub change: Option<Vec<f32>>,
 }
 
 impl CompactTile {
@@ -227,7 +223,6 @@ impl CompactTile {
             climate_words,
             driver_words,
             texels,
-            change: None,
         })
     }
 
@@ -249,30 +244,6 @@ impl CompactTile {
     /// Height of a texel relative to the origin height, as the shader computes it.
     pub fn rel_height(&self, i: usize, j: usize) -> f32 {
         self.hr_min + self.texels[j * (self.cells as usize + 1) + i][0] as f32 * self.hr_step
-    }
-
-    // spec: STRM-047
-    /// The change plane of this tile as the replacement of `old`, the same tile as it is being drawn, `old_weight` of its own change in
-    /// (REND-039): per texel the difference of this tile's final height and the height `old` is drawn at, so that at weight 0 this tile draws
-    /// what `old` drew and at weight 1 its own final heights; a plane made of the change against the base would drop whatever `old` already
-    /// showed. `None` when the two draw alike everywhere (no plane is needed) or are not the same tile.
-    pub fn change_replacing(&self, old: &CompactTile, old_weight: f32) -> Option<Vec<f32>> {
-        if old.id != self.id || old.cells != self.cells {
-            return None;
-        }
-        let w = self.cells as usize + 1;
-        let fade_old = f64::from(1.0 - old_weight);
-        let mut plane = Vec::with_capacity(w * w);
-        for j in 0..w {
-            for i in 0..w {
-                let k = j * w + i;
-                let drawn_old = f64::from(old.h_origin) + f64::from(old.rel_height(i, j))
-                    - old.change.as_ref().map_or(0.0, |c| fade_old * f64::from(c[k]));
-                let fin = f64::from(self.h_origin) + f64::from(self.rel_height(i, j));
-                plane.push((fin - drawn_old) as f32);
-            }
-        }
-        plane.iter().any(|&v| v != 0.0).then_some(plane)
     }
 
     /// The largest error the 32-bit height quantisation can cause: half a step.
@@ -324,11 +295,6 @@ impl CompactTile {
             self.origin.0.z.to_bits(),
         ];
         v.extend(self.slot_data().chunks(4).map(|c| u64::from(u32::from_le_bytes(c.try_into().expect("a slot is a multiple of 4 bytes")))));
-        // A tile with a change plane hashes it too (after a marker); a tile without one hashes exactly as it always did.
-        if let Some(change) = &self.change {
-            v.push(0x0063_6870);
-            v.extend(change.iter().map(|c| u64::from(c.to_bits())));
-        }
         hash_u64s(0x0063_706b, &v)
     }
 }
@@ -391,25 +357,22 @@ fn f32_up(x: f64) -> f32 {
     }
 }
 
-/// The driver block of tile `id` (GEN-071) and whether a ready chunk gave any of it: at each of the 9 x 9 climate texels the codes of the ready chunk under it as the tile's level reads them
-/// (`HeightField::level_drivers`) or the neutral codes, with the neutral insolation of the texel's latitude in the top byte.
-fn driver_block(field: &dyn HeightField, map: &dyn FaceMapping, id: TileId) -> ([u32; DRIVER_TEXELS], bool) {
+/// The driver block of tile `id` (GEN-074): at each of the 9 x 9 climate texels the neutral codes, with the neutral insolation of the texel's latitude in the top byte.
+fn driver_block(map: &dyn FaceMapping, id: TileId) -> [u32; DRIVER_TEXELS] {
     use crate::climate::{CLIMATE_CELLS, CLIMATE_EDGE};
     use crate::drivers::{neutral_codes, pack_driver_word, DriverParams, NeutralInsolation};
     let dirs: Vec<Vec3> = (0..CLIMATE_EDGE)
         .flat_map(|b| (0..CLIMATE_EDGE).map(move |a| (a, b)))
         .map(|(a, b)| id.sample_direction(map, CLIMATE_CELLS, a as u32, b as u32))
         .collect();
-    let chunk = field.level_drivers(&dirs, id.level());
     let params = DriverParams::default();
     let insolation = NeutralInsolation::new();
     let mut words = [0u32; DRIVER_TEXELS];
     for (k, w) in words.iter_mut().enumerate() {
         let neutral = neutral_codes(libm::asin(dirs[k].z.clamp(-1.0, 1.0)), &params, &insolation);
-        let codes = chunk.as_ref().and_then(|c| c[k]).unwrap_or(neutral);
-        *w = pack_driver_word(codes, neutral[2]);
+        *w = pack_driver_word(neutral, neutral[2]);
     }
-    (words, chunk.is_some_and(|c| c.iter().any(Option::is_some)))
+    words
 }
 
 /// Build the compact tile from a height field (all geometry in f64, rounded once).
@@ -426,20 +389,7 @@ pub fn compact_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: Ti
     dirs.push(centre);
     dirs.extend(crate::normals::lattice_directions(map, id, cells));
     let (all, climate) = field.heights_and_climate(map, id, &dirs, &|| false);
-    // The chunk change at the lattice points (the origin and the ring excluded), when the field has chunk detail here (STRM-047): stored only
-    // when some texel moved, so a tile away from every chunk is the tile it was.
-    let change = field
-        .level_change(&dirs[1..1 + count], id.level())
-        .filter(|c| c.iter().any(|&v| v != 0.0))
-        // A value that is not finite as an f32 is no change (the renderer refuses a plane with one, which would fail the frame's whole upload batch).
-        .map(|c| c.into_iter().map(|v| Some(v as f32).filter(|x| x.is_finite()).unwrap_or(0.0)).collect::<Vec<f32>>());
-    // The drivers fade in with the node's chunk weight, which reaches the fragment stage through the tile's change plane: a tile under a chunk gets a
-    // plane of zeros when the chunk moved no height of it, so its drivers do not appear at full weight in the first frame.
-    let (driver_words, has_chunk_drivers) = driver_block(field, map, id);
-    let change = match change {
-        None if has_chunk_drivers => Some(vec![0.0f32; count]),
-        other => other,
-    };
+    let driver_words = driver_block(map, id);
     let h_origin = all[0];
     let origin = PlanetFixed(centre * (radius_m + h_origin));
     // The shell through the origin: control points are small tile-local numbers (CON-11), not heights from the sea level.
@@ -487,7 +437,6 @@ pub fn compact_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: Ti
         climate_words: climate.to_words(),
         driver_words,
         texels,
-        change,
     };
     let (du, dv) = tile.base_derivs(0.5, 0.5);
     let c = [centre.x as f32, centre.y as f32, centre.z as f32];
@@ -558,28 +507,17 @@ impl CompactTile {
         }
     }
 
-    /// Position (tile-local) and tile-relative height of lattice vertex `(i, j)` with `fade` of the chunk change taken off (REND-039): the shader's
-    /// `h_q - fade x change`, `fade` being `1 - w` for the tile's weight `w`. Without a plane, or at fade 0, it is the texel's height bit for bit.
-    fn place(&self, i: i64, j: i64, fade: f32) -> (V, f32) {
+    /// Position (tile-local) and tile-relative height of lattice vertex `(i, j)`.
+    fn place(&self, i: i64, j: i64) -> (V, f32) {
         let c = self.cells as f32;
         let (u, v) = (i as f32 / c, j as f32 / c);
-        let mut hr = self.rel_height(i as usize, j as usize);
-        // At fade 0 nothing is taken off: no `0 x change` is formed, so a plane's value cannot reach the texel's height (the shader returns it unchanged).
-        if let (Some(change), true) = (&self.change, fade != 0.0) {
-            hr -= fade * change[j as usize * (self.cells as usize + 1) + i as usize];
-        }
+        let hr = self.rel_height(i as usize, j as usize);
         (add(self.base_point(u, v), scale(self.base_normal(u, v), hr)), hr)
     }
 
     /// What the vertex shader computes for vertex `vi` of the shared grid (grid vertices, then the four skirt runs): position,
     /// morph target, normal and heights, in the vertex format's terms.
     pub fn shade_vertex(&self, vi: usize) -> MeshVertex {
-        self.shade_vertex_faded(vi, 0.0)
-    }
-
-    /// [`shade_vertex`](CompactTile::shade_vertex) with `fade` (`1 - w`) of the chunk change taken off every height the vertex reads, its morph
-    /// target included (REND-039). The normals are the final surface's (the first version, `design.md` decision 4).
-    pub fn shade_vertex_faded(&self, vi: usize, fade: f32) -> MeshVertex {
         let cells = self.cells as i64;
         let w = cells + 1;
         let grid = (w * w) as usize;
@@ -597,10 +535,10 @@ impl CompactTile {
         };
         let c = self.cells as f32;
         let n_own = self.base_normal(i as f32 / c, j as f32 / c);
-        let (own_p, own_h) = self.place(i, j, fade);
+        let (own_p, own_h) = self.place(i, j);
         let avg = |a: (i64, i64), b: (i64, i64)| {
-            let (pa, ha) = self.place(a.0, a.1, fade);
-            let (pb, hb) = self.place(b.0, b.1, fade);
+            let (pa, ha) = self.place(a.0, a.1);
+            let (pb, hb) = self.place(b.0, b.1);
             (scale(add(pa, pb), 0.5), (ha + hb) * 0.5)
         };
         let (cp, ch) = match (i & 1, j & 1) {
@@ -622,11 +560,6 @@ impl CompactTile {
 
     /// Every vertex as the shader computes it, in the vertex format's order.
     pub fn shade_all(&self) -> Vec<MeshVertex> {
-        self.shade_all_faded(0.0)
-    }
-
-    /// [`shade_all`](CompactTile::shade_all) with `fade` of the chunk change taken off (REND-039).
-    pub fn shade_all_faded(&self, fade: f32) -> Vec<MeshVertex> {
-        (0..vertex_count(self.cells)).map(|vi| self.shade_vertex_faded(vi, fade)).collect()
+        (0..vertex_count(self.cells)).map(|vi| self.shade_vertex(vi)).collect()
     }
 }

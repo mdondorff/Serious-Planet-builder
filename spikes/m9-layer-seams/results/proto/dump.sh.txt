@@ -1,0 +1,6 @@
+#!/bin/bash
+cd C:/DEV/Serious-Planet-Builder/.claude/worktrees/sonnet-spikes-36fc88
+cpu=$(powershell -NoProfile -Command "(Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average")
+echo "=== dump $(date +%H:%M:%S) cpu ${cpu}%"
+PLANET_ANET_STORE=C:/DEV/SeriousPlanetData/global16384 PLANET_ANET_RES=16384 RELIEF_SITES=alps:11.5:-18.5,blackforest:2.5:-124.5 RELIEF_W=6656 RELIEF_DIR=C:/DEV/SeriousPlanetData/spike-r3/relief68 cargo test -p planet --release --lib relief_window_dump -- --ignored --nocapture 2>&1 | grep -E "RELIEF|test result|error"
+echo "=== done $(date +%H:%M:%S)"

@@ -1,0 +1,37 @@
+# SPIKE-73: a crate from SPIKE-72's: the incising local carve (no fill, no breach, area cap 1 km^2) on the 1,853^2 plains rasters at 30 m,
+# with uplift (U/K 20, as the hybrid) and without (U 0).
+import os, re
+S = os.path.dirname(os.path.abspath(__file__))
+src = open(os.path.join(S, '..', 's72', 'bake', 'src', 'main.rs'), encoding='utf-8').read()
+os.makedirs(os.path.join(S, 'carve', 'src'), exist_ok=True)
+open(os.path.join(S, 'carve', 'Cargo.toml'), 'w').write('[package]\nname = "s73carve"\nversion = "0.1.0"\nedition = "2021"\n\n[profile.release]\ndebug = false\n')
+t = src.replace("//! SPIKE-72 (spike code, never merged)", "//! SPIKE-73 (spike code, never merged): the local carve on 30 m plains rasters. SPIKE-72", 1)
+# U/K from a static so the run can switch uplift off.
+a = "    let (u_over_k, kdt, steps, reroute) = (20.0, 0.05, 20, 5);"
+assert t.count(a) == 1
+t = t.replace(a, "    let (u_over_k, kdt, steps, reroute) = (f64::from(UK.load(std::sync::atomic::Ordering::Relaxed)), 0.05, 20, 5);")
+t = t.replace("static LOCAL: std::sync::atomic::AtomicU32", "static UK: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(20);\nstatic LOCAL: std::sync::atomic::AtomicU32", 1)
+i = t.index('fn main() {')
+t = t[:i] + '''fn main() {
+    let a: Vec<String> = std::env::args().collect();
+    let dir = &a[1];
+    const N: usize = 1853;
+    LOCAL.store(2, std::sync::atomic::Ordering::Relaxed);
+    for name in a[2].split(',') {
+        let z = read(&format!("{dir}/{name}.f32"));
+        for (uk, tag) in [(20u32, "carve"), (0, "carve-nouplift")] {
+            UK.store(uk, std::sync::atomic::Ordering::Relaxed);
+            let g = G { w: N, ox: 0, oy: 0, fix: &[], dx: 30.0, frec: &[], farea: &[], amax: 1e6 };
+            let mut h = z.clone();
+            let t = Instant::now();
+            carve(g, &mut h, &[]);
+            let d: Vec<f64> = h.iter().zip(&z).map(|(x, y)| f64::from(y - x)).collect();
+            let mx = d.iter().cloned().fold(0f64, f64::max);
+            println!("{name} {tag}: {:.1} s, max cut {mx:.1} m, mean change {:.2} m", t.elapsed().as_secs_f64(), d.iter().sum::<f64>() / d.len() as f64);
+            write(&format!("{dir}/{name}-{tag}.f32"), &h);
+        }
+    }
+}
+'''
+open(os.path.join(S, 'carve', 'src', 'main.rs'), 'w', encoding='utf-8', newline='').write(t)
+print('ok')

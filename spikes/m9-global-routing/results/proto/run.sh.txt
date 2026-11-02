@@ -1,0 +1,13 @@
+#!/bin/bash
+# SPIKE-70 sequence under one heavy lock: dump two more windows (branch spike/m9-relief-source), the variants, then SPIKE-61's run d with the inflow fixed (branch spike/m9-bake-prerun).
+cd C:/DEV/Serious-Planet-Builder/.claude/worktrees/sonnet-spikes-36fc88
+cpu() { powershell -NoProfile -Command "(Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average"; }
+git checkout -q spike/m9-relief-source || exit 1
+echo "=== dump $(date +%H:%M:%S) cpu $(cpu)%"
+PLANET_ANET_STORE=C:/DEV/SeriousPlanetData/global16384 PLANET_ANET_RES=16384 RELIEF_SITES=highlands:10.5:-122.5,valleyridge:16.5:-111.5 RELIEF_W=6656 RELIEF_DIR=C:/DEV/SeriousPlanetData/spike-r3/relief68 cmd //c start "" //b //wait //belownormal cargo test -p planet --release --lib relief_window_dump -- --ignored --nocapture 2>&1 | grep -E "RELIEF|test result|panicked"
+echo "=== s70 $(date +%H:%M:%S) cpu $(cpu)%"
+cmd //c start "" //b //wait //belownormal target/s70build/release/s70carve.exe C:/DEV/SeriousPlanetData/spike-r3/relief68 C:/DEV/SeriousPlanetData/spike-r3/relief70 blackforest,highlands,valleyridge,alps
+git checkout -q spike/m9-bake-prerun || exit 1
+echo "=== prerun d, inflow on interior cells $(date +%H:%M:%S) cpu $(cpu)%"
+PLANET_ANET_STORE=C:/DEV/SeriousPlanetData/global16384 PLANET_ANET_RES=16384 PRERUN_FACE=3 PRERUN_STRIDE=4 PRERUN_OFFSET=2 PRERUN_PAR=4 PRERUN_SAMPLE_THREADS=4 PRERUN_STEPS=10 PRERUN_OUT=C:/DEV/Serious-Planet-Builder/.claude/worktrees/sonnet-spikes-36fc88/target/s70/d-face3-s4-inflow.txt cmd //c start "" //b //wait //belownormal cargo test -p planet --release --lib bake_prerun_report -- --ignored --nocapture 2>&1 | grep -E "test result|panicked"
+echo "=== done $(date +%H:%M:%S)"

@@ -1,0 +1,15 @@
+#!/bin/bash
+# SPIKE-67 driver: one process per site and variant, low-sun poses, G3 strength 1.0, terrain-pass timing after each still.
+cd C:/DEV/Serious-Planet-Builder/.claude/worktrees/sonnet-spikes-36fc88
+LOG=target/s67/driver.log
+for site in alps hills-b; do
+  for v in base grad3 gradall off3; do
+    cpu=$(powershell -NoProfile -Command "(Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average")
+    echo "=== $site $v $(date +%H:%M:%S) cpu ${cpu}%" >> $LOG
+    if [ "$v" = base ]; then unset SPIKE67_G3; else export SPIKE67_G3=$v; fi
+    SPIKE63_COST=1 target/release/planet.exe test-render --scene capture-stills --adapter hardware \
+      --store C:/DEV/SeriousPlanetData/global16384 --poses target/s67/poses/$site-s67.toml \
+      --out-dir target/s67/$site/$v >> $LOG 2>&1
+  done
+done
+echo "=== done $(date +%H:%M:%S)" >> $LOG

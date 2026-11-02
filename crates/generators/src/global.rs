@@ -11,6 +11,7 @@
 //! snapshots and known answers do not move. Hydrology is not here (SPIKE-03).
 
 use planet_core::cube::{face_to_direction, FaceMapping};
+use planet_core::par::Par;
 use planet_core::{Face, TileId, Vec3};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -135,7 +136,7 @@ impl GlobalSample {
     }
 }
 
-fn fbm(seed: u64, layer: u64, p: Vec3, base_frequency: f64, octaves: u32) -> f64 {
+pub(crate) fn fbm(seed: u64, layer: u64, p: Vec3, base_frequency: f64, octaves: u32) -> f64 {
     let (mut sum, mut amp, mut norm, mut freq) = (0.0, 1.0, 0.0, base_frequency);
     for o in 0..octaves {
         sum += amp * layer_noise(seed, layer, o, p * freq);
@@ -161,15 +162,15 @@ pub fn sin_latitude(d: Vec3) -> f64 {
 }
 
 /// The terms of the elevation that the landform driver and the hill band share: the warped direction, the continent value and the range zone.
-struct Terrain {
-    warped: Vec3,
-    continent: f64,
-    land_depth: f64,
-    zone: f64,
-    inland: f64,
+pub(crate) struct Terrain {
+    pub(crate) warped: Vec3,
+    pub(crate) continent: f64,
+    pub(crate) land_depth: f64,
+    pub(crate) zone: f64,
+    pub(crate) inland: f64,
 }
 
-fn terrain(seed: u64, d: Vec3) -> Terrain {
+pub(crate) fn terrain(seed: u64, d: Vec3) -> Terrain {
     // Continents: low-frequency fBm of a domain-warped direction, so coastlines are not round blobs.
     let warp = Vec3::new(
         fbm(seed, LAYER_WARP, d + Vec3::new(0.0, 0.0, 0.0), 1.3, 3),
@@ -186,7 +187,7 @@ fn terrain(seed: u64, d: Vec3) -> Terrain {
 }
 
 /// The ridge term of the mountain ranges at the warped direction, in `[0, 1]`.
-fn ridge_at(seed: u64, warped: Vec3) -> f64 {
+pub(crate) fn ridge_at(seed: u64, warped: Vec3) -> f64 {
     let n = fbm(seed, LAYER_RIDGE, warped, 3.0, 5);
     let r = 1.0 - libm::fabs(n) * 2.0;
     r.max(0.0) * r.max(0.0)
@@ -217,22 +218,15 @@ impl LandformLattice {
         let n = LANDFORM_LATTICE_N;
         let map = planet_core::cube::TangentWarp;
         // One thread per face: every value is independent of the others, so the lattice does not depend on the thread count (CON-14).
-        let faces = std::thread::scope(|scope| {
-            let handles: Vec<_> = (0..6u8)
-                .map(|f| {
-                    scope.spawn(move || {
-                        let mut values = Vec::with_capacity((n + 1) * (n + 1));
-                        for j in 0..=n {
-                            for i in 0..=n {
-                                let (s, t) = (2.0 * i as f64 / n as f64 - 1.0, 2.0 * j as f64 / n as f64 - 1.0);
-                                values.push(landform(seed, face_to_direction(&map, Face(f), s, t)) as f32);
-                            }
-                        }
-                        values
-                    })
-                })
-                .collect();
-            handles.into_iter().map(|h| h.join().expect("a landform lattice thread")).collect()
+        let faces = planet_core::par::map(&6usize, 6, &|f| {
+            let mut values = Vec::with_capacity((n + 1) * (n + 1));
+            for j in 0..=n {
+                for i in 0..=n {
+                    let (s, t) = (2.0 * i as f64 / n as f64 - 1.0, 2.0 * j as f64 / n as f64 - 1.0);
+                    values.push(landform(seed, face_to_direction(&map, Face(f as u8), s, t)) as f32);
+                }
+            }
+            values
         });
         LandformLattice { faces }
     }
@@ -332,6 +326,11 @@ fn hill_band(seed: u64, t: &Terrain, ridge: f64) -> f64 {
         return 0.0;
     }
     let m = t.zone * t.inland * (0.25 + 0.75 * ridge);
+    hill_amplitude_m(m) * hill_octaves(seed, t) * smoothstep(0.0, 0.1, t.land_depth)
+}
+
+/// The three octaves of the hill band, in `[0, 1]` (the shape of GEN-064's band before its amplitude and the coast ramp; GEN-098 gives it another amplitude).
+pub(crate) fn hill_octaves(seed: u64, t: &Terrain) -> f64 {
     let (mut sum, mut amp, mut norm, mut freq) = (0.0, 1.0, 0.0, HILL_BAND_FREQ);
     for o in 0..HILL_BAND_OCTAVES {
         let n = layer_noise(seed, LAYER_HILL, o, t.warped * freq);
@@ -341,7 +340,7 @@ fn hill_band(seed: u64, t: &Terrain, ridge: f64) -> f64 {
         amp *= 0.5;
         freq *= 2.0;
     }
-    hill_amplitude_m(m) * (sum / norm) * smoothstep(0.0, 0.1, t.land_depth)
+    sum / norm
 }
 
 /// The hill band in metres at the unit direction `d` (GEN-064): what the bake adds to the elevation for wavelengths of 2 to 8 km.
@@ -469,27 +468,20 @@ pub fn bake(seed: u64, map: &(dyn FaceMapping + Sync), res: u32, threads: usize)
         let threads = threads.max(1).min(rows.len());
         let chunk = rows.len().div_ceil(threads);
         let mut out = Vec::with_capacity((n * n) as usize);
-        std::thread::scope(|scope| {
-            let handles: Vec<_> = rows
-                .chunks(chunk)
-                .map(|rs| {
-                    planet_core::thread::spawn_named(scope, "bake-rows", move || {
-                        let mut v = Vec::with_capacity(rs.len() * n as usize);
-                        for &l in rs {
-                            let t = face_coord(l, res);
-                            for k in 0..n {
-                                let s = face_coord(k, res);
-                                v.push(sample(seed, face_to_direction(map, face, s, t)));
-                            }
-                        }
-                        v
-                    })
-                })
-                .collect();
-            for h in handles {
-                out.extend(h.join().expect("bake thread panicked"));
+        let chunks: Vec<&[u32]> = rows.chunks(chunk).collect();
+        for part in planet_core::par::map(&threads, chunks.len(), &|c| {
+            let mut v = Vec::with_capacity(chunks[c].len() * n as usize);
+            for &l in chunks[c] {
+                let t = face_coord(l, res);
+                for k in 0..n {
+                    let s = face_coord(k, res);
+                    v.push(sample(seed, face_to_direction(map, face, s, t)));
+                }
             }
-        });
+            v
+        }) {
+            out.extend(part);
+        }
         out
     });
     Ok(GlobalGrid { seed, res, faces })
@@ -624,20 +616,11 @@ pub fn bake_blocks_with<A: Send>(
             next = end;
             continue;
         }
-        let blocks: Vec<(Vec<GlobalSample>, A)> = std::thread::scope(|scope| {
-            let (live, peak) = (&live, &peak);
-            let handles: Vec<_> = batch
-                .iter()
-                .map(|t| {
-                    planet_core::thread::spawn_named(scope, "bake-block", move || {
-                        let block = bake_block(seed, map, *t, cells);
-                        peak.fetch_max(live.fetch_add(1, Ordering::SeqCst) + 1, Ordering::SeqCst);
-                        let a = analyse(*t, &block);
-                        (block, a)
-                    })
-                })
-                .collect();
-            handles.into_iter().map(|h| h.join().expect("bake thread panicked")).collect()
+        let blocks: Vec<(Vec<GlobalSample>, A)> = planet_core::par::map(&batch.len(), batch.len(), &|i| {
+            let block = bake_block(seed, map, batch[i], cells);
+            peak.fetch_max(live.fetch_add(1, Ordering::SeqCst) + 1, Ordering::SeqCst);
+            let a = analyse(batch[i], &block);
+            (block, a)
         });
         for (t, (b, a)) in batch.iter().zip(blocks) {
             sink(*t, b, a);
@@ -1230,16 +1213,17 @@ pub fn eval_gathered_threads(
     src: &dyn LatticeSource,
     dirs: &[Vec3],
     stop: &(dyn Fn() -> bool + Sync),
-    threads: usize,
+    par: &dyn Par,
     footprint: &(dyn Fn(&dyn LatticeSource, Vec3) + Sync),
     reach: Option<u32>,
     eval: &(dyn Fn(&dyn LatticeSource, Vec3) -> f64 + Sync),
 ) -> Vec<f64> {
+    let threads = par.threads();
     if threads <= 1 {
         return eval_gathered_from(src, dirs, stop, footprint, reach, eval, 2);
     }
     if !gatherable(src, dirs.len(), 2) {
-        return crate::height::eval_chunked(dirs, stop, threads, &|d| eval(src, d));
+        return crate::height::eval_chunked(dirs, stop, par, &|d| eval(src, d));
     }
     let out = vec![0.0; dirs.len()];
     let Some(by_block) = footprint_by_block(src, dirs, stop, footprint, reach, None) else { return out };
@@ -1253,33 +1237,31 @@ pub fn eval_gathered_threads(
     }
     let next = std::sync::atomic::AtomicUsize::new(0);
     let stopped = std::sync::atomic::AtomicBool::new(false);
-    let parts: Vec<Vec<(u64, Result<GlobalSample, ReadError>)>> = std::thread::scope(|s| {
-        let handles: Vec<_> = (0..threads.min(groups.len()))
-            .map(|_| {
-                planet_core::thread::spawn_named(s, "lattice-gather", || {
-                    let mut mine = Vec::new();
-                    loop {
-                        let g = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        if g >= groups.len() {
-                            return mine;
-                        }
-                        if stop() {
-                            stopped.store(true, std::sync::atomic::Ordering::Relaxed);
-                            return mine;
-                        }
-                        for (n, &(face, _, k)) in by_block[groups[g].clone()].iter().enumerate() {
-                            if n % 64 == 63 && stop() {
-                                stopped.store(true, std::sync::atomic::Ordering::Relaxed);
-                                return mine;
-                            }
-                            mine.push(read_cell(src, face, k));
-                        }
-                    }
-                })
-            })
-            .collect();
-        handles.into_iter().map(|h| h.join().expect("block read thread")).collect()
+    type Cells = Vec<(u64, Result<GlobalSample, ReadError>)>;
+    let readers = threads.min(groups.len());
+    let slots: Vec<std::sync::Mutex<Cells>> = (0..readers).map(|_| std::sync::Mutex::new(Vec::new())).collect();
+    par.run(readers, &|slot| {
+        let mut mine = Vec::new();
+        'groups: loop {
+            let g = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if g >= groups.len() {
+                break;
+            }
+            if stop() {
+                stopped.store(true, std::sync::atomic::Ordering::Relaxed);
+                break;
+            }
+            for (n, &(face, _, k)) in by_block[groups[g].clone()].iter().enumerate() {
+                if n % 64 == 63 && stop() {
+                    stopped.store(true, std::sync::atomic::Ordering::Relaxed);
+                    break 'groups;
+                }
+                mine.push(read_cell(src, face, k));
+            }
+        }
+        *slots[slot].lock().expect("block read slot") = mine;
     });
+    let parts: Vec<Cells> = slots.into_iter().map(|m| m.into_inner().expect("block read slot")).collect();
     // (A thread that saw the flag recorded it: the table may be partial, whatever the flag says now.)
     if stopped.load(std::sync::atomic::Ordering::Relaxed) || stop() {
         return out;
@@ -1287,7 +1269,7 @@ pub fn eval_gathered_threads(
     let mut cells: Vec<_> = parts.into_iter().flatten().collect();
     cells.sort_unstable_by_key(|c| c.0);
     let table = CellTable { res: src.res(), cells };
-    crate::height::eval_chunked(dirs, stop, threads, &|d| eval(&table, d))
+    crate::height::eval_chunked(dirs, stop, par, &|d| eval(&table, d))
 }
 
 /// The cells a set of reads needs, fetched once from a block-structured source in block order (GEN-020): a source of its own that

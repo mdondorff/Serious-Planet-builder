@@ -1,5 +1,5 @@
 # 0016 Height-aware terrain selection and morph
-Status: accepted (owner, 2026-10-11; decided in the opus-planner session)
+Status: accepted (owner, 2026-10-11; decided in the opus-planner session); amended by ADR 0088 point 8 and ADR 0089 (owner, 2026-11-01): cap bounds read the erosion layer's min/max pyramid and carry the class hill band's and the detail's bounds
 Date: 2026-10-11
 Source: learnings 2026-10-11 (steep ground-1m), M2 gate follow-ups, LOD-008, TEST-015; supersedes the height note of ADR 0014 ("selection ignores terrain height ... per-node height bounds (M3) fix that") and its "height-free reference position" morph distance; constitution CON-03, CON-11
 

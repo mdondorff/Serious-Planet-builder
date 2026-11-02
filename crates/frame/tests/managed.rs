@@ -88,7 +88,6 @@ impl TileSource<CompactTile> for Source {
             climate_words: [0; planet_generators::climate::CLIMATE_TEXELS],
             driver_words: [0; planet_generators::drivers::DRIVER_TEXELS],
             texels: Vec::new(),
-            change: None,
         })
     }
 }
@@ -1237,7 +1236,7 @@ impl PlanField for CountedField {
         &self,
         req: &TerrainRequest,
         cache: &mut SelectionCache,
-        threads: usize,
+        threads: &dyn planet_core::par::Par,
     ) -> Result<planet_frame::TerrainPlan, planet_frame::PlanError> {
         if self.plans.fetch_add(1, Ordering::SeqCst) == 0 {
             if let Some((entered, release)) = &self.gate {
@@ -1871,7 +1870,7 @@ impl PlanField for CacheWatcher {
         &self,
         _req: &TerrainRequest,
         cache: &mut SelectionCache,
-        _threads: usize,
+        _threads: &dyn planet_core::par::Par,
     ) -> Result<planet_frame::TerrainPlan, planet_frame::PlanError> {
         self.seen.lock().unwrap().push(self.tiles.iter().map(|&t| (t, cache.has_origin_for_test(t))).collect());
         Err(planet_frame::PlanError::HeightField("recorded".into()))

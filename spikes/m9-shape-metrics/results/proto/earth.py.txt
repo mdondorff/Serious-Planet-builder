@@ -1,0 +1,188 @@
+"""SPIKE-91 follow-up: S1-S8 on Earth (ETOPO 2022 60 arc-second surface elevation, block-averaged to 0.25 degree) next to today's map and
+SPIKE-80's combined map, all with the high-ground metrics (S4-S8) restricted to latitudes within 60 degrees (the ice sheets of Antarctica and
+Greenland are surface elevation above 2 km, not orogens). Source: NOAA NCEI ETOPO 2022, DOI 10.25921/fd45-gt74 (CC0-1.0).
+Usage: python earth.py <etopo .tif> <map13.f32> <s80-fields.f32> <out.json> <out.png>"""
+import ctypes, json, sys
+import numpy as np
+import tifffile
+from scipy import ndimage
+from skimage.morphology import skeletonize
+
+try:  # idle priority: other sessions measure beside this
+    ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x40)
+except Exception:
+    pass
+
+R = 6371.0
+H, W = 720, 1440
+lat = 90 - (np.arange(H) + 0.5) * 0.25
+cell_km2 = (R * np.radians(0.25)) ** 2 * np.cos(np.radians(lat))[:, None] * np.ones((1, W))
+dy_km = R * np.radians(0.25)
+band = (np.abs(lat) < 60)[:, None] * np.ones((1, W), bool)
+
+
+def earth_grid(path):
+    from glo30 import read_tile  # SPIKE-55's decoder: deflate with the floating-point predictor, no imagecodecs
+    a, _, _, _ = read_tile(path)
+    # 60 arc-second grid, 21600 x 10800 cells (or one more row and column of pixel-is-point edges): crop to whole 15 x 15 blocks
+    a = a[: (a.shape[0] // 15) * 15, : (a.shape[1] // 15) * 15]
+    a = a[: 10800, : 21600]
+    return a.reshape(720, 15, 1440, 15).mean(axis=(1, 3)).astype(np.float64)
+
+
+def generator_grids(map13, fields):
+    a = np.fromfile(map13, dtype='<f4').reshape(360, 720, 13).astype(np.float64)
+    fy = np.clip((90 - lat) / 0.5 - 0.5, 0, 359)
+    lon = -180 + (np.arange(W) + 0.5) * 0.25
+    fx = (lon + 180) / 0.5 - 0.5
+    y0 = np.minimum(np.floor(fy).astype(int), 358); ty = (fy - y0)[:, None]
+    x0 = np.floor(fx).astype(int) % 720; x1 = (x0 + 1) % 720; tx = (fx - np.floor(fx))[None, :]
+    c = np.nan_to_num(a[..., 7])
+    e = (c[y0][:, x0] * (1 - tx) + c[y0][:, x1] * tx) * (1 - ty) + (c[y0 + 1][:, x0] * (1 - tx) + c[y0 + 1][:, x1] * tx) * ty
+    f = np.fromfile(fields, dtype='<f4').reshape(H, W, 3).astype(np.float64)
+    return e, e + f[..., 0]
+
+
+def wrap_label(mask):
+    lab, n = ndimage.label(mask, structure=np.ones((3, 3)))
+    parent = list(range(n + 1))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for y in range(H):
+        for yy in (y - 1, y, y + 1):
+            if 0 <= yy < H and lab[y, 0] and lab[yy, W - 1]:
+                ra, rb = find(lab[y, 0]), find(lab[yy, W - 1])
+                if ra != rb:
+                    parent[ra] = rb
+    roots = np.array([find(i) for i in range(n + 1)])
+    return roots[lab]
+
+
+def longest_path_km(sk, dyk, dxk):
+    """S8's path: the longest shortest path through the skeleton (two breadth-first sweeps), in km."""
+    ys, xs = np.nonzero(sk)
+    if len(ys) < 2:
+        return 0.0, 0.0
+    idx = {(y, x): i for i, (y, x) in enumerate(zip(ys, xs))}
+    nbrs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def sweep(start):
+        import heapq
+        dist = {start: 0.0}
+        pq = [(0.0, start)]
+        while pq:
+            d, p = heapq.heappop(pq)
+            if d > dist[p]:
+                continue
+            y, x = ys[p], xs[p]
+            for ddy, ddx in nbrs:
+                q = idx.get((y + ddy, x + ddx))
+                if q is None:
+                    continue
+                nd = d + np.hypot(ddy * dyk, ddx * dxk)
+                if nd < dist.get(q, 1e30):
+                    dist[q] = nd
+                    heapq.heappush(pq, (nd, q))
+        far = max(dist, key=dist.get)
+        return far, dist[far]
+
+    a, _ = sweep(0)
+    b, length = sweep(a)
+    chord = np.hypot((ys[a] - ys[b]) * dyk, (xs[a] - xs[b]) * dxk)
+    return float(length), float(chord)
+
+
+def high_regions(e):
+    lab = wrap_label((e >= 2000) & band)
+    out = []
+    for r in np.unique(lab):
+        if r == 0:
+            continue
+        m = lab == r
+        if m.sum() < 4:
+            continue
+        ys, xs = np.nonzero(m)
+        if xs.min() == 0 and xs.max() == W - 1:
+            m = np.roll(m, W // 2, axis=1)
+            ys, xs = np.nonzero(m)
+        sub = np.pad(m[ys.min(): ys.max() + 1, xs.min(): xs.max() + 1], 1)
+        dxk = dy_km * max(np.cos(np.radians(lat[ys.min(): ys.max() + 1].mean())), 0.1)
+        dist = ndimage.distance_transform_edt(sub, sampling=(dy_km, dxk))
+        sk = skeletonize(sub)
+        path, chord = longest_path_km(sk, dy_km, dxk)
+        out.append(dict(area_km2=float(cell_km2[lab == r].sum()), width_km=2 * float(dist[sk].mean()) if sk.any() else 0.0,
+                        length_km=path, sinuosity=path / chord if chord > 0 else 1.0))
+    return out, lab
+
+
+def enclosed(e):
+    m = (e >= 2000) & band
+    best = 0.0
+    for sh in (0, W // 2, W // 4):
+        mm = np.roll(m, sh, 1)
+        holes = ndimage.binary_fill_holes(mm) & ~mm
+        lab, n = ndimage.label(holes)
+        ck = np.roll(cell_km2, sh, 1)
+        best = max(best, sum(a for a in (float(ck[lab == i].sum()) for i in range(1, n + 1)) if a >= 0.5e6))
+    return best
+
+
+def coast_dimension(land):
+    coast = land & ~ndimage.binary_erosion(land, structure=np.ones((3, 3)))
+    sizes, counts = [2, 4, 8, 16, 32], []
+    for s in sizes:
+        hh, ww = H // s * s, W // s * s
+        counts.append(coast[:hh, :ww].reshape(hh // s, s, ww // s, s).any(axis=(1, 3)).sum())
+    return float(-np.polyfit(np.log(sizes), np.log(counts), 1)[0])
+
+
+def summary(e, name):
+    land = e > 0
+    land_area = float(cell_km2[land].sum())
+    lab = wrap_label(land)
+    areas = sorted((float(cell_km2[lab == r].sum()) for r in np.unique(lab) if r), reverse=True)
+    hg, _ = high_regions(e)
+    aw = np.array([r['area_km2'] for r in hg]) if hg else np.zeros(0)
+    w = np.array([r['width_km'] for r in hg]) if hg else np.zeros(0)
+    L = np.array([r['length_km'] for r in hg]) if hg else np.zeros(0)
+    S = np.array([r['sinuosity'] for r in hg]) if hg else np.zeros(0)
+    big = L >= 500
+    res = dict(
+        land_fraction=land_area / float(cell_km2.sum()),
+        S1_land_masses_ge_1Mkm2=sum(1 for x in areas if x >= 1e6),
+        top6_Mkm2=[round(x / 1e6, 2) for x in areas[:6]],
+        S2_largest_share_of_land=areas[0] / land_area,
+        S3_coast_dimension=coast_dimension(land),
+        high_regions=len(hg),
+        S4_width_km_areaweighted_median=float(np.median(np.repeat(w, np.maximum((aw / 1e4).astype(int), 1)))) if len(w) else None,
+        S4_width_km_p10_p90=[float(np.percentile(w, 10)), float(np.percentile(w, 90))] if len(w) else None,
+        S5_longest5_km=sorted([round(x) for x in L], reverse=True)[:5],
+        S6_enclosed_Mkm2=enclosed(e) / 1e6,
+        S7_high_share_of_land_lat60=float(cell_km2[(e >= 2000) & band].sum()) / float(cell_km2[land & band].sum()),
+        S8_sinuosity_areaweighted_regions_ge_500km=float((S[big] * aw[big]).sum() / aw[big].sum()) if big.any() else None,
+    )
+    print(name, json.dumps(res), flush=True)
+    return res
+
+
+if __name__ == '__main__':
+    earth = earth_grid(sys.argv[1])
+    today, comb = generator_grids(sys.argv[2], sys.argv[3])
+    out = {n: summary(e, n) for n, e in (('earth', earth), ('today', today), ('combined', comb))}
+    json.dump(out, open(sys.argv[4], 'w'), indent=1)
+    from PIL import Image, ImageDraw
+    rng = np.random.default_rng(3)
+    img = np.zeros((H, W, 3), np.uint8)
+    img[:] = (25, 40, 70)
+    img[earth > 0] = (150, 150, 140)
+    _, lab = high_regions(earth)
+    cols = rng.integers(60, 255, (lab.max() + 1, 3)).astype(np.uint8)
+    img[lab > 0] = cols[lab[lab > 0]]
+    im = Image.fromarray(img).resize((720, 360), Image.NEAREST)
+    ImageDraw.Draw(im).text((6, 4), 'Earth (ETOPO 2022, 0.25 deg): each connected region above 2 km within 60 deg one colour', fill=(255, 255, 255))
+    im.save(sys.argv[5], optimize=True)

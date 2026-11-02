@@ -14,4 +14,8 @@
 
 ### Requirement: GEN-085 The horizon march walks a step table
 **Reason**: ADR 0085 point 7; the bake it speeds up is removed.
-**Migration**: PR 8; the open change `m8-horizon-march-simd` (GEN-086) is archived without syncing.
+**Migration**: PR 8.
+
+### Requirement: GEN-086 The horizon march has an AVX2 kernel with the bytes of the scalar one
+**Reason**: ADR 0085 point 7; the march it vectorises is removed (synced from `m8-horizon-march-simd` at its archive, 2026-11-01).
+**Migration**: PR 8.

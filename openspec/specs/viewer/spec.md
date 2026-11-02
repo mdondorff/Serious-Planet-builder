@@ -129,15 +129,23 @@ Source: ADR 0042 point 4, ADR 0015, owner 2026-10-16, owner 2026-10-17 (item 5b)
 - **THEN** it exits non-zero with `no display: ...`; the test reports a skip with that reason when `PLANET_NO_DISPLAY` is set and fails when it is not
 
 ### Requirement: VIEW-006 Presentation blit
-The window surface SHALL show the terrain renderer's colour target scaled to fit the window keeping its aspect, centred, with black bars, without rebuilding the renderer on a resize; an outdated, lost, timed-out or occluded surface SHALL be a skipped frame (reconfigured where that recovers it), not an error.
+The window surface SHALL show the terrain renderer's colour target scaled to fit the window keeping its aspect, centred, with black bars; an outdated, lost, timed-out or occluded surface SHALL be a skipped frame (reconfigured where that recovers it), not an error. The 3D target SHALL follow the window: once a size has held for 150 ms the renderer SHALL make its targets again at it (the lit, atmosphere and water ones included; tiles, pools and terrain pipelines are kept), warm the lit path again outside any frame (REND-017), and the plan's viewport height and the camera's aspect SHALL be the new size's.
 
-Verify: C
+Verify: A, C
 Status: active
-Source: ADR 0015, ADR 0042 point 4
+Source: ADR 0015, ADR 0042 point 4, owner 2026-10-30 (the 3D target kept its size after a window resize)
 
 #### Scenario: Fit
 - **WHEN** a 4x2 frame is blitted into a square target
 - **THEN** the middle rows hold the frame, scaled, each source texel's colour at its centre, and the rows above and below are black
+
+#### Scenario: Resize
+- **WHEN** a lit renderer (also with the atmosphere) that drew at one size is resized to another and draws a plan of the new size, and then back
+- **THEN** the frame is the frame of a renderer built at that size, byte for byte, the colour, depth, lit, atmosphere and water targets are made again, the exposure snaps on the next lit frame, and a plan of the old size is refused with a size mismatch
+
+#### Scenario: Settle
+- **WHEN** a window size is reported and 10 ms later, and again after 150 ms
+- **THEN** the target follows the second only, a size equal to the current one asks for nothing, the projection's aspect is the target's width over its height, and a minimised window (size 0) keeps the target
 
 ### Requirement: VIEW-007 Lit path in the window
 The viewer window SHALL start on the lit path with the atmosphere and draw the body's look (`--look`, else the file beside `--world`, else the Earth defaults): the lit plan of each frame SHALL be a pure function of the look, the world's radius, the frame clock's dt (capped at 0.25 s) and a reset flag (`viewer_lit_plan`), carrying the look's sun direction, tone curve, scene units, histogram and albedo, the adaptive exposure (range and speeds of the look, the pre-exposure of the body: 12 stops moved by the stops its sun differs from the Earth's) and the atmosphere of a body of the world's radius; a look whose atmosphere does not fit the body SHALL leave the lit path without the atmosphere and the run SHALL say why. The exposure SHALL snap to its target on the first lit frame, on the return to the lit path and on a restart of the flight, and adapt otherwise. L SHALL switch to the debug path, which draws the plan as the pipelined loop decided it, and back; the free camera and the scripted flight SHALL work on both. `enable_lit` is not part of `warm_up`: the window SHALL enable the lit path and the atmosphere and draw the first lit frame once per ring set before frame 0, whichever path it opens on, so that no lit frame creates a long-lived GPU object or uses a part of the renderer for the first time. The title SHALL show the exposure of the last sampled lit frame as `EV <ev100> (adapted)` within 0.05 stop of the target and `EV <ev100> (adapting to <target>)` otherwise. The debug-path defaults of `test-render` and the tests SHALL NOT change.
@@ -547,7 +555,7 @@ Source: owner (M6 step U3: map first, list, search, inspector bound to the comma
 
 ### Requirement: VIEW-022 The editor mode of the window
 `planet editor` SHALL have an editor mode (`planet::editwin`, with `window`) that edits the world's definition through the session (VIEW-017) and the panels (VIEW-021).
-- Tab turns the mode on and off; `--edit` starts the window with it on.
+- Tab turns the mode on and off; `--edit` starts it on (`--site`: after descent).
 - `--items DIR` is the directory the edits are written to and loaded from: one TOML file per edit (AUTH-001), every command writes its file; without it the edits live in memory and the status line says they are not saved.
 - `--editor-layout F` is the layout file (VIEW-018).
 - `--edit` with `--no-ui` is an error that says the mode needs the UI.
@@ -633,6 +641,10 @@ Source: owner (M6 step U3, 2026-10-19), VIEW-003, VIEW-010, VIEW-011, VIEW-017, 
 - **WHEN** `planet editor --smoke --edit --items DIR` runs on the selected adapter
 - **THEN** the run succeeds with one edit placed, one drag, one typed value, one delete, two undos and one redo and nothing refused, definitions handed to the generator, tiles sent to refresh, and one item file in DIR
 
+#### Scenario: Site descent
+- **WHEN** the window starts with `--edit --site LAT,LON`
+- **THEN** the scripted flight starts high above the site and descends over it with the mode off, the mode turns on where the last camera is reached (or at a Tab before then), and the free camera takes over there
+
 ### Requirement: VIEW-030 Region overlay
 The debug overlay enum `planet_frame::look::Overlay` (VIEW-014) SHALL have a fourth value `Regions` (shader code 3, plan token `overlay regions`) that tints the lit terrain by the surface type of the region over each fragment. For each frame that shows it the app SHALL decide a `planet_frame::regions::RegionList` and hand it to the renderer (the renderer decides nothing, CON-03): the at most 8 region items of the definition nearest the camera (ties by item id), each as a polygon of its 3 to 64 points in the orthographic frame of its anchor (the anchor relative to the camera, the tangent plane's basis, and the points in metres in that plane; f64 on the CPU, rounded once to f32, CON-11), with the surface type's tint as linear light, and the count of the regions it left out (the farthest). The list SHALL have a stable text form (a header line and one line per polygon, floats as bit patterns) that round-trips, and an empty list has no text. The lit fragment stage SHALL take the fragment's position relative to the camera, subtract the anchor, project onto the basis, and test the point against the polygons nearest first by the even-odd rule, skipping a polygon whose plane is farther from the fragment than its band or whose reach the fragment is beyond; where it is inside a polygon it SHALL mix the tint at the weight 0.45 into the lit colour (`mix(lit, tint * 0.8 * pre-exposure, 0.45)`), with no texture and no planet-radius value in the shader. F3 cycles the overlay through off, tiles, mesh, regions, off, and the corner label names it. With the overlay not `Regions`, or with no polygon in the list, the frame is the lit frame bit for bit, and the headless modes and goldens never set the overlay (VIEW-014).
 
@@ -681,7 +693,7 @@ Source: owner (M6 step U4, 2026-10-19), REND-033, ADR 0066 points 3 and 5, ADR 0
 
 #### Scenario: The real window previews
 - **WHEN** the real window on the software adapter places and drags a stamp with the editor mode (`--smoke --edit`)
-- **THEN** at least one preview was set, and the run still ends exact
+- **THEN** at least one preview was set, and the summary reports the number of previews that ended on the exact tiles
 
 ### Requirement: VIEW-024 The window keeps the camera's last minute and F9 writes it
 The window SHALL keep a rolling log of the camera path (`planet_frame::pathlog::PathLog`): a pose recorded at most every 100 ms of the window's clock (the first always), each with the time, the position, the view direction and the up vector in f64, the altitude above the terrain and the frame time, and nothing older than 60 s before the newest; in the viewer and in the editor mode alike. F9 (`Command::SaveRepro`, which changes nothing in the viewer and is never blocked by the editor mode) SHALL write `frame-<n>-path.txt` (the log) and `frame-<n>.bundle` (a terrain repro bundle, TEST-008, of that frame's request over the world as the window holds it, edits included) with `<n>` the frame count, to `target/review` or to the directory `PLANET_REPRO_DIR` names, and print their names. The path file SHALL be written first, so a bundle that fails never loses it. With authored items the bundle's world section SHALL carry the definition text without items and each item as its item-file TOML (`world_item` lines), so that the replay builds a definition equal to the window's, items included; a record that does not rebuild to the definition the frame was planned from SHALL be refused with both hashes. A path file is `planet-path 1`, the window and period, the sample count and one line per sample, with floats in the shortest round-trip form so that reading restores them bit for bit; an unknown header, a wrong count, a malformed line or a time that goes back SHALL be refused with the line. The `--smoke` script SHALL press F9 once where `PLANET_REPRO_DIR` is set and the summary SHALL report the writes.
@@ -1196,8 +1208,12 @@ A frame that takes at least one second SHALL be a stall: the report `stall (the 
 - **THEN** the first is a stall listing the phases longest first and the second is none, and a report is due at most once in ten seconds
 
 #### Scenario: A lock waited on
-- **WHEN** another thread holds a mutex for 40 ms while the main thread acquires it through the timed acquire, and an uncontended acquire is made too
-- **THEN** only the held lock is recorded, with its name and a wait of at least 20 ms, and the next frame starts with no waits
+- **WHEN** the timed acquires report waits of 40 ms, 2 ms and 1.999 ms under three names in a frame that is a stall
+- **THEN** the 40 ms and 2 ms waits are recorded with their names, longest first, the shorter one is not, and the next frame starts with no waits
+
+#### Scenario: A lock waited on, real threads
+- **WHEN** `cargo xtask perf wallclock` runs, another thread holds a mutex for 40 ms while the main thread acquires it through the timed acquire, and an uncontended acquire is made too
+- **THEN** only the held lock is recorded, with its name and a wait of at least 20 ms, and the next frame starts with no waits; a wall-clock check (BUILD-003), not tier A
 
 #### Scenario: Named workers
 - **WHEN** a scoped worker is started with `spawn_named`
@@ -1222,8 +1238,8 @@ The title SHALL name a shade view other than normal, the local solar time at the
 - **THEN** the camera reads 12:00; six hours later the sun is on the -y axis and the camera reads 18:00; a camera 90 degrees west of the first reads 12:00 for that sun; a sun of another declination keeps it
 
 #### Scenario: The title
-- **WHEN** the title is made at the start over a world with a chunk stage, over a world without one, and with the horizon view and a sun six hours later
-- **THEN** it adds nothing, adds the chunk-stage notice, and adds "shade view horizon" and "sun 18:00 local solar time"; with the editing light on it does not claim the time
+- **WHEN** the title is made at the start and with the horizon view and a sun six hours later
+- **THEN** it adds nothing, and adds "shade view horizon" and "sun 18:00 local solar time"; with the editing light on it does not claim the time
 
 ### Requirement: VIEW-060 F8 switches the ground look
 The lit window SHALL show the ground look `LookChoice` names: F8 cycles the defaults (the Earth curves at the strength F6 names) and the look file's `ground` table (LOOK-011; its curves, and its detail strength in place of the natural mode's, while full and off stay what F6 says); the window starts on the defaults. The window's title SHALL name the choice when it is not the default (`look look file`), the key table SHALL list F8 with its state (`default` or `look file`), and `LitPlan::with_ground_look` SHALL make the plan so that a test can read it. A look file without a ground table shows the same in both. Nothing is stored or keyed (ADR 0035).
@@ -1237,11 +1253,11 @@ Source: owner (2026-10-28, via opus-planner): compare the default look and the l
 - **THEN** the choice is the look file, the defaults, the look file; the defaults plan has the Earth curves and the mode's strength; the look file plan has the table's curves and 0.3 at the natural mode and 1 and 0 at full and off; the other switches are unchanged, the help names F8 and the ground look
 
 ### Requirement: VIEW-061 No main-thread phase waits for a bake block, and the stall report names the ones that do
-The editor's hover pick SHALL run on a thread of its own against a field that thread makes, and a frame SHALL use the last pick that finished and start the next, so that a block the pick is the first to read is decoded off the main thread; a click that places or drags an edit SHALL still pick on the spot. The stall probe SHALL count, per phase of a frame, the bake blocks the main thread decoded itself, and a stall report SHALL name each phase with a count above zero (CON-22).
+The hover pick and the free camera's ground read SHALL each run on their own thread against a field it makes; a frame SHALL use the last finished read and start the next. A ground answer SHALL stand within max(1 km, half the camera's height) of the nadir; otherwise, or before the first answer, the frame SHALL read the ground itself. The bake cache SHALL keep the ground read's blocks out of eviction. A click that places or drags an edit SHALL pick on the spot. The stall probe SHALL count per phase the blocks the main thread decoded itself and the time it spent getting blocks; a stall report SHALL name each phase with a count above zero (CON-22).
 
 Verify: A
 Status: active
-Source: opus-planner (2026-10-28), gate slow frames at frame-102263, VIEW-056, VIEW-059, CON-22
+Source: opus-planner (2026-10-28, 2026-11-01), gate slow frames at frame-102263, VIEW-056, VIEW-059, CON-22, SPIKE-88
 
 #### Scenario: A pick that blocks
 - **WHEN** the hover pick of a frame is blocked inside the field for longer than the test waits
@@ -1249,19 +1265,28 @@ Source: opus-planner (2026-10-28), gate slow frames at frame-102263, VIEW-056, V
 
 #### Scenario: A phase that decodes
 - **WHEN** a frame's phase reads a bake block nobody has decoded
-- **THEN** the probe names that phase with the count of blocks the main thread decoded in it
+- **THEN** the probe names that phase with the count of blocks the main thread decoded in it and the time it spent getting blocks, as in `blocks the main thread decoded in camera, ground heights and the globe overview: 4 (1050 ms getting blocks)`
 
-### Requirement: VIEW-059 The editor's hover and the camera's ground read what a pixel can show, and bake blocks are read ahead off the main thread
-The editor's hover pick, its draft outline, its brush ring and the ground height under the camera SHALL read the height of the tile level whose vertex spacing is about one pixel of the view at the camera's height over the surface (`EditRuntime::pick_level`, level 3 at the coarsest); a click that places or drags an edit SHALL still read the exact surface. The window SHALL read the bake blocks under the camera and where it will be in 1, 2 and 4 s on a thread of its own (`WorldTerrain::warm_heights`, at most one batch queued, a full queue drops the batch), so the main thread reads a warmed block without decoding it (CON-22).
+#### Scenario: The camera's ground off the main thread
+- **WHEN** the free camera's ground is polled each frame inside the camera phase over a cold stored bake, and when its read is blocked (a slow decode) for ten frames
+- **THEN** the camera phase decodes no block on the main thread, every frame returns while the read is blocked, the first answer is the height at the nadir that was asked for, equal bit for bit to the field's own height there, and each later answer is for a request at most one behind the frame
 
-Verify: A
+#### Scenario: A jump reads the ground again
+- **WHEN** the ground answer is for a nadir 0.9 km and 1.1 km from the camera's nadir at 2 m up, and 40 km and 60 km at 100 km up
+- **THEN** it stands at 0.9 km and 40 km, and the frame reads the ground itself at 1.1 km and 60 km, as with no answer or a height that is not finite
+
+#### Scenario: The camera's blocks are pinned
+- **WHEN** the ground read's blocks are pinned in a stored bake's cache with a budget of 4 blocks, and four loader threads then read every block of the world
+- **THEN** the budget holds, the loaders push blocks out, and the next ground read decodes nothing; with the pins removed the same pressure pushes the blocks out and the ground read decodes again
+
+### Requirement: VIEW-059 Bake blocks are read ahead off the main thread
+The window SHALL read the bake blocks under the camera and where it will be in 1, 2 and 4 s on a thread of its own (`WorldTerrain::warm_heights`, at most one batch queued, a full queue drops the batch), so the main thread reads a warmed block without decoding it (CON-22).
+
+Verify: B
 Status: active
 Source: opus-planner (2026-10-27), owner test 2026-10-27 group A item 2, VIEW-056, CON-22
-
-#### Scenario: A pick at the planet view
-- **WHEN** the camera is 5000 km over the surface of a 1440 px high view with a 90 degree field of view
-- **THEN** the pick level is 6 or coarser, and at 10 m it is the finest level of the pyramid
 
 #### Scenario: A warmed block
 - **WHEN** a direction on a block nobody has read is warmed and the warm-up thread has read it
 - **THEN** the height read at that direction on the main thread decodes no block, where the same read on a cold block decodes one on the thread that reads it
+

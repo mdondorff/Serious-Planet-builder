@@ -41,4 +41,24 @@ fn every_shader_module_validates() {
             panic!("{e}");
         }
     }
+    // The clipmap gather (REND-047) is built at run time like the compact shader, for the tile size of the renderer.
+    for cells in [4, 16, 32, 64] {
+        if let Err(e) = ctx.validate_wgsl("clipmap-gather", &planet_render::shadow::gather_shader(cells)) {
+            panic!("{e}");
+        }
+    }
+    for cells in [4, 16, 32, 64] {
+        if let Err(e) = ctx.validate_wgsl("coarse-cube", &planet_render::shadow::cube_shader(cells)) {
+            panic!("{e}");
+        }
+    }
+    if let Err(e) = ctx.validate_wgsl("coarse-cube-mip", &planet_render::shadow::cube_mip_shader()) {
+        panic!("{e}");
+    }
+    if let Err(e) = ctx.validate_wgsl("shadow-march", &planet_render::march::march_shader()) {
+        panic!("{e}");
+    }
+    if let Err(e) = ctx.validate_wgsl("clipmap-mip", &planet_render::shadow::mip_shader()) {
+        panic!("{e}");
+    }
 }

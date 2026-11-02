@@ -1,0 +1,1 @@
+- 2026-11-01 spec-lint-all-tiers: spec-lint checks every declared tier; the 14 gaps closed by 9 citations, 3 new tests (GEN-025 slot round trip, GEN-073 driver-independent default look, LOD-011 orbit floor) and 4 Verify corrections (TEST-001)

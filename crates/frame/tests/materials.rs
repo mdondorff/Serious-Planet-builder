@@ -228,8 +228,8 @@ fn the_default_look_gives_the_same_weights_for_any_driver_values() {
 
 // spec: GEN-072
 #[test]
-fn a_look_with_a_curve_on_the_moisture_gives_soil_to_the_wet_hollow_and_not_to_the_dry_flank_and_the_blend_fades_it_in() {
-    use planet_frame::look::materials::{driver_inputs, neutral_drivers, with_drivers};
+fn a_look_with_a_curve_on_the_moisture_gives_soil_to_the_wet_hollow_and_not_to_the_dry_flank() {
+    use planet_frame::look::materials::with_drivers;
     let mut curves = MaterialParams::EARTH.curves;
     curves[3][Input::Moisture as usize] = [0.5, 0.9];
     let look = MaterialParams { curves };
@@ -237,15 +237,4 @@ fn a_look_with_a_curve_on_the_moisture_gives_soil_to_the_wet_hollow_and_not_to_t
     let (hollow, flank) = ([2.0, 1.0, 0.9], [2.0, 0.1, 0.9]);
     assert!(look.weights(&with_drivers(flat, hollow))[3] > 0.1, "soil takes weight in the wet hollow");
     assert_eq!(look.weights(&with_drivers(flat, flank))[3], 0.0, "and none on the dry flank");
-    // The materials fade in with the chunk weight: neutral at 0, the chunk's at 1, between in steps that never pass either.
-    let neutral = neutral_drivers(0.3);
-    assert_eq!(driver_inputs(neutral, hollow, 0.0), neutral);
-    assert_eq!(driver_inputs(neutral, hollow, 1.0), hollow);
-    let mut last = look.weights(&with_drivers(flat, driver_inputs(neutral, hollow, 0.0)))[3];
-    for k in 1..=20 {
-        let soil = look.weights(&with_drivers(flat, driver_inputs(neutral, hollow, f64::from(k) / 20.0)))[3];
-        assert!(soil >= last - 1e-12, "the soil weight falls at weight {k}/20: {soil} after {last}");
-        last = soil;
-    }
-    assert!(last > 0.1);
 }

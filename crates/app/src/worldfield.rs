@@ -12,7 +12,7 @@ use planet_cache::global_store::{GlobalWorld, StoreSource};
 use planet_cache::meshpack::TileSpec;
 use planet_core::cube::TangentWarp;
 use planet_core::{Face, TileId};
-use planet_generators::chain::{field_chain_with, CoupledLensField, NoBake, OwnedBake, OwnedOcean};
+use planet_generators::chain::{field_chain, CoupledLensField, NoBake, OwnedBake, OwnedOcean};
 use planet_generators::coupled::CoupledLens;
 use planet_generators::global::{GlobalCoarseGenerator, GlobalSample, LatticeSource, ReadError};
 use planet_generators::height::{HeightField, IMPLEMENTATION_ID as REFERENCE_ID};
@@ -197,6 +197,8 @@ pub struct WorldTerrain {
     /// The queue of the height warm-up thread (made on the first [`WorldTerrain::warm_heights`]) and the batches it has read.
     warm: std::sync::Mutex<Option<std::sync::mpsc::SyncSender<Vec<planet_core::Vec3>>>>,
     warmed: std::sync::atomic::AtomicU64,
+    /// The helper threads of a tile job's water reads (BUDG-004): the rig sets the terrain share's; 8 plain scoped threads without one.
+    job_par: std::sync::RwLock<Arc<dyn planet_core::par::Par + Send + Sync>>,
 }
 
 /// The ocean channel of a stored bake as the water field's lattice.
@@ -291,6 +293,7 @@ impl WorldTerrain {
             coupled: Default::default(),
             warm: Default::default(),
             warmed: Default::default(),
+            job_par: std::sync::RwLock::new(Arc::new(8usize)),
             coarse: Default::default(),
             horizon_threads: std::sync::atomic::AtomicUsize::new(0),
             horizon_cells: std::sync::atomic::AtomicU32::new(0),
@@ -376,6 +379,7 @@ impl WorldTerrain {
             coupled: Default::default(),
             warm: Default::default(),
             warmed: Default::default(),
+            job_par: std::sync::RwLock::new(Arc::new(8usize)),
             coarse: Default::default(),
             horizon_threads: std::sync::atomic::AtomicUsize::new(0),
             horizon_cells: std::sync::atomic::AtomicU32::new(0),
@@ -611,7 +615,8 @@ impl WorldTerrain {
         }
         let radius_m = self.radius_m;
         let book = &self.water_book;
-        if matches!(self.with_water(|f| book.fill(f, &TangentWarp, tile, radius_m)), Ok(Some(Ok(())))) {
+        let par = Arc::clone(&self.job_par.read().expect("job par"));
+        if matches!(self.with_water(|f| book.fill_par(f, &TangentWarp, tile, radius_m, par.as_ref())), Ok(Some(Ok(())))) {
             book.set_min_height(tile, built.min_height_m());
         }
     }
@@ -745,6 +750,11 @@ impl WorldTerrain {
         self.store_dir.as_deref()
     }
 
+    /// The parallelism the tile jobs' helper threads are asked from (the terrain share of the rig, BUDG-004).
+    pub fn set_job_par(&self, par: Arc<dyn planet_core::par::Par + Send + Sync>) {
+        *self.job_par.write().expect("job par") = par;
+    }
+
     /// Set the scoped threads one horizon bake uses (at least 1).
     pub fn set_horizon_threads(&self, n: usize) {
         self.horizon_threads.store(n.max(1), std::sync::atomic::Ordering::Relaxed);
@@ -782,6 +792,23 @@ impl WorldTerrain {
         let _ = tx.try_send(dirs);
     }
 
+    /// The camera's ground read (VIEW-061), for the ground thread of [`crate::cameraground::CameraGround`]: the height at `dir` from a field
+    /// made for it, with the bake blocks the read touched pinned in the stored bake's cache, so that the tile streamer cannot push the blocks
+    /// under the camera out. NaN when no field can be made (the frame keeps its last answer).
+    pub fn ground_pinned(&self, dir: planet_core::Vec3) -> f64 {
+        let Ok(field) = self.field() else { return f64::NAN };
+        let (h, touched) = planet_cache::global_store::record_touched_blocks(|| field.height(dir));
+        if let Some(src) = self.store_source {
+            src.pin_touched(&touched);
+        }
+        h
+    }
+
+    /// The blocks the stored bake's cache keeps out of eviction now (VIEW-061); none for an in-memory bake.
+    pub fn pinned_blocks(&self) -> Vec<planet_core::TileId> {
+        self.store_source.map(|s| s.pinned_blocks()).unwrap_or_default()
+    }
+
     /// Batches the warm-up thread has read so far.
     pub fn warmed_batches(&self) -> u64 {
         self.warmed.load(std::sync::atomic::Ordering::SeqCst)
@@ -791,7 +818,7 @@ impl WorldTerrain {
     pub fn field(&self) -> Result<Box<dyn HeightField + '_>, String> {
         let started = std::time::Instant::now();
         let def = self.definition();
-        let built = field_chain_with(self.kind, &def, self.src.as_ref(), self.bake_key, self.bound_water, None);
+        let built = field_chain(self.kind, &def, self.src.as_ref(), self.bake_key, self.bound_water);
         // The lens over the whole chain (GEN-043); while the run is not ready the field is the plain one.
         let built = match (self.coupled_lens(), self.coupled.standing()) {
             (Some(lens), Standing::Ready(maps, _)) => {

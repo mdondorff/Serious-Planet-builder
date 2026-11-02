@@ -355,15 +355,6 @@ fn canonical_bits(v: f64) -> u64 {
     }
 }
 
-/// An item that differs between two definitions, as the places it had and has: its anchor, its reach and, for a brush, its strokes
-/// ([`WorldDefinition::changed_items_from`]).
-#[derive(Clone, Debug)]
-pub struct ChangedItem {
-    pub dir: Vec3,
-    pub reach_m: f64,
-    pub strokes: Vec<stamp::StrokeBits>,
-}
-
 /// The world: a seed and the parameters of its bodies, as a sorted set of nodes, and the authored items filed in
 /// spatial cells.
 #[derive(Clone, Debug, PartialEq)]
@@ -392,8 +383,8 @@ pub struct WorldDefinition {
 }
 
 /// Where a layer's chunk stage sits in the chain (GEN-039, M8 plan D3, owner 2026-10-26): `Under` is base, stamps, chunk (the chunks read the
-/// edits, and an edit changes the version of the chunks whose read set it reaches, GEN-082); it is the default. `OnTop` is base, chunk, stamps
-/// (an edit never invalidates a chunk).
+/// edits); it is the default. `OnTop` is base, chunk, stamps
+/// (an edit never invalidates a chunk). The setting is read into the definition hash and acts on no build since ADR 0086.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ChunkStagePosition {
     OnTop,
@@ -871,29 +862,13 @@ impl WorldDefinition {
         self.items.get(&(body, id)).map(|rec| (rec.unit(), f64::from_bits(rec.reach_bits)))
     }
 
-    /// Whether `other` differs from this definition at most in its authored items: the same nodes and height field (the procedural base) and the same
-    /// `chunk_stage` settings. What `item_changes_from` reports is then everything that differs for the field below the chunk stage (GEN-087).
-    pub fn same_but_items(&self, other: &WorldDefinition) -> bool {
-        self.base_hash() == other.base_hash() && self.chunk_stages == other.chunk_stages
-    }
-
     /// Where the items that differ between `older` and `self` were and are, as `(unit direction, reach in metres)`: for every item that is in one
     /// and not in the other, or is in both with another record (place, reach, layer, priority, amount or stroke), the place it had in `older` and the
     /// place it has now. What the tiles that read the definition can have to recompute is what these places reach (STRM-034); a change of the
     /// nodes is not among them (the base is the same for the definitions the caller compares).
     pub fn item_changes_from(&self, older: &WorldDefinition) -> Vec<(Vec3, f64)> {
-        self.changed_items_from(older).into_iter().map(|c| (c.dir, c.reach_m)).collect()
-    }
-
-    /// [`item_changes_from`](Self::item_changes_from) with what bounds each change inside its reach disc: the strokes of a brush (WDEF-007), empty for
-    /// every other item. A brush changes nothing beyond the radius of its strokes' polylines (GEN-030), so a read that only needs the points an edit can
-    /// change tests the strokes, not the disc that holds them all (GEN-087).
-    pub fn changed_items_from(&self, older: &WorldDefinition) -> Vec<ChangedItem> {
         let mut out = Vec::new();
-        let mut push = |rec: &ItemRec| {
-            let strokes = rec.stamp.as_ref().filter(|s| s.kind.is_brush()).map(|s| s.strokes().to_vec()).unwrap_or_default();
-            out.push(ChangedItem { dir: rec.unit(), reach_m: f64::from_bits(rec.reach_bits), strokes });
-        };
+        let mut push = |rec: &ItemRec| out.push((rec.unit(), f64::from_bits(rec.reach_bits)));
         let (mut a, mut b) = (self.items.iter().peekable(), older.items.iter().peekable());
         loop {
             match (a.peek(), b.peek()) {
@@ -1057,8 +1032,6 @@ pub enum ReadRecord {
     Footprint { body: BodyId, layer: String, tile: TileId, halo_bits: u64, items: Vec<footprint::FootprintItem> },
     /// One node of the region summary tree a coarse tile reads (query kind 4, WDEF-008) and its hash.
     SummaryNode { body: BodyId, layer: String, node: TileId, hash: [u8; 16] },
-    /// The state of one chunk of a chunk field a tile reads (STRM-038): 0 when the chunk is not ready, else a content hash of its result.
-    Chunk { body: BodyId, chunk: TileId, state: u64 },
 }
 
 impl ReadRecord {
@@ -1070,7 +1043,6 @@ impl ReadRecord {
             ReadRecord::Body { body, .. } => cell_query_all_path(*body),
             ReadRecord::Footprint { body, layer, tile, halo_bits, .. } => footprint_query_path(*body, layer, *tile, *halo_bits),
             ReadRecord::SummaryNode { body, layer, node, .. } => summary_node_path(*body, layer, *node),
-            ReadRecord::Chunk { body, chunk, .. } => format!("derived.chunk.{}.{}.{:016x}", body.0, chunk.level(), chunk.raw()),
         }
     }
 
@@ -1080,7 +1052,6 @@ impl ReadRecord {
             ReadRecord::Node { path, value } => node_hash(path, *value),
             ReadRecord::Cell { items, .. } | ReadRecord::Body { items, .. } => cells::cell_hash(items),
             ReadRecord::Footprint { items, .. } => footprint_hash(items),
-            ReadRecord::Chunk { state, .. } => hash_u64s(0x0063_686b, &[u64::from(HASH_VERSION), *state]),
             ReadRecord::SummaryNode { hash, .. } => {
                 let words = [
                     u64::from_le_bytes(hash[..8].try_into().expect("8 bytes")),

@@ -1,0 +1,4 @@
+# anchor: latitude 11.5000 longitude -18.5000 degrees, ground 1316.3 m
+# pose width height eye_lat_deg eye_lon_deg eye_height_m heading_deg pitch_deg sun_local_hours horizon_maps horizon_s nodes capped_nodes
+eye-lowsun 2560 1440 11.49946 -18.50000 1317.2 0 6 17.25 9 13.2 2294 0
+feet-lowsun 2560 1440 11.49946 -18.50000 1317.2 0 35 17.25 9 0.0 1671 0

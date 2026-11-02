@@ -598,14 +598,11 @@ fn par_rows<F: Fn(usize, &mut [[f64; 3]]) + Sync>(out: &mut [[f64; 3]], row_len:
     let rows = out.len() / row_len;
     let threads = threads.clamp(1, rows.max(1));
     let per = rows.div_ceil(threads);
-    std::thread::scope(|s| {
-        for (chunk_index, chunk) in out.chunks_mut(per * row_len).enumerate() {
-            let f = &f;
-            planet_core::thread::spawn_named(s, "atmosphere-rows", move || {
-                for (k, row) in chunk.chunks_mut(row_len).enumerate() {
-                    f(chunk_index * per + k, row);
-                }
-            });
+    let chunks: Vec<std::sync::Mutex<&mut [[f64; 3]]>> = out.chunks_mut(per * row_len).map(std::sync::Mutex::new).collect();
+    planet_core::par::Par::run(&threads, chunks.len(), &|chunk_index| {
+        let mut chunk = chunks[chunk_index].lock().expect("an atmosphere row chunk");
+        for (k, row) in chunk.chunks_mut(row_len).enumerate() {
+            f(chunk_index * per + k, row);
         }
     });
 }

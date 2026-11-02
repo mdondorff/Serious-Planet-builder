@@ -2,7 +2,7 @@ use crate::layering::CHAIN;
 use crate::testlog;
 use crate::util::{capture, files_with_ext, run, Res};
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 /// Test binaries named `gpu_*` are tier C, `oracle_*` tier B; everything else is tier A.
@@ -476,20 +476,21 @@ fn repro_pair(file: &str) -> (String, Option<String>) {
 pub fn repro(root: &Path, args: &[String]) -> Res {
     let mut it = args.iter();
     let mut file = None;
-    let (mut every, mut real, mut store) = (None, false, None);
+    let (mut every, mut real, mut store, mut at_commit) = (None, false, None, false);
     while let Some(a) = it.next() {
         match a.as_str() {
             "--real" => real = true,
+            "--at-commit" => at_commit = true,
             "--every" => every = Some(it.next().ok_or("--every needs a count")?.clone()),
             "--store" => store = Some(it.next().ok_or("--store needs a directory")?.clone()),
             other if other.starts_with("--") => {
-                return Err(format!("unknown repro option '{other}' (known: --real, --every N, --store DIR)"))
+                return Err(format!("unknown repro option '{other}' (known: --real, --every N, --store DIR, --at-commit)"))
             }
             other => file = Some(other.to_string()),
         }
     }
     let Some(file) = file else {
-        return Err("usage: cargo xtask repro <bundle | frame-N-path.txt> [--real] [--every N] [--store DIR]".into());
+        return Err("usage: cargo xtask repro <bundle | frame-N-path.txt> [--real] [--every N] [--store DIR] [--at-commit]".into());
     };
     let resolve = |name: &str| {
         std::fs::canonicalize(name)
@@ -497,8 +498,28 @@ pub fn repro(root: &Path, args: &[String]) -> Res {
             .map(|p| p.to_string_lossy().trim_start_matches("\\?\\").to_string())
     };
     let (bundle_name, path_name) = repro_pair(&file);
-    let bundle = resolve(&bundle_name).map_err(|e| format!("repro bundle '{bundle_name}' not found: {e}"))?;
+    let mut bundle = resolve(&bundle_name).map_err(|e| format!("repro bundle '{bundle_name}' not found: {e}"))?;
     let adapter = if real { "hardware" } else { "software" };
+    // `--at-commit` (TEST-071): the replay runs in a worktree of the commit the bundle was recorded at, building into its own target
+    // folder; the images still land in this tree's `target/review`.
+    let (run_root, env_target, review) = if at_commit {
+        let text = std::fs::read_to_string(&bundle).map_err(|e| format!("reading {bundle}: {e}"))?;
+        let commit = bundle_commit(&text, &bundle)?;
+        if commit.ends_with("+dirty") {
+            return Err(format!(
+                "{bundle} was recorded at commit {} with uncommitted changes in the tree, so that commit does not reproduce its build and --at-commit cannot replay it; check out that commit, re-apply the changes you made at the time, and replay there",
+                commit.trim_end_matches("+dirty")
+            ));
+        }
+        let tree = repro_worktree(root, &commit)?;
+        bundle = strip_commit_line(&text, &tree)?;
+        let target = root.join("target").join("repro-target").to_string_lossy().into_owned();
+        (tree, Some(target), root.join("target").join("review"))
+    } else {
+        (root.to_path_buf(), None, Path::new("target").join("review"))
+    };
+    let env: Vec<(&str, &str)> = env_target.iter().map(|t| ("CARGO_TARGET_DIR", t.as_str())).collect();
+    let replay_dir = review.join("replay").to_string_lossy().into_owned();
     if file.ends_with("-path.txt") {
         let path = resolve(&file).map_err(|e| format!("camera path '{file}' not found: {e}"))?;
         let mut cargo: Vec<String> = [
@@ -515,7 +536,7 @@ pub fn repro(root: &Path, args: &[String]) -> Res {
             "--replay-path",
             &path,
             "--out-dir",
-            "target/review/replay",
+            &replay_dir,
         ]
         .iter()
         .map(|s| s.to_string())
@@ -527,7 +548,7 @@ pub fn repro(root: &Path, args: &[String]) -> Res {
             cargo.extend(["--store".to_string(), dir.clone()]);
         }
         let refs: Vec<&str> = cargo.iter().map(String::as_str).collect();
-        return run(root, "cargo", &refs, &[]);
+        return run(&run_root, "cargo", &refs, &env);
     }
     if every.is_some() {
         return Err("--every applies to a camera path file (frame-N-path.txt)".into());
@@ -535,12 +556,70 @@ pub fn repro(root: &Path, args: &[String]) -> Res {
     if let Some(p) = path_name.filter(|p| resolve(p).is_ok()) {
         println!("a camera path lies beside this bundle: cargo xtask repro {p} replays it pose by pose");
     }
-    let out = "target/review/repro.png";
-    let mut cargo = vec!["run", "-q", "-p", "planet", "--", "test-render", "--adapter", adapter, "--repro", &bundle, "--out", out];
+    let out = review.join("repro.png").to_string_lossy().into_owned();
+    let mut cargo = vec!["run", "-q", "-p", "planet", "--", "test-render", "--adapter", adapter, "--repro", &bundle, "--out", &out];
     if let Some(dir) = &store {
         cargo.extend(["--store", dir]);
     }
-    run(root, "cargo", &cargo, &[])
+    run(&run_root, "cargo", &cargo, &env)
+}
+
+/// The commit a bundle records (`commit <sha>` in its head), or a refusal that says what to do about a bundle without one (TEST-071).
+fn bundle_commit(text: &str, bundle: &str) -> Res<String> {
+    let head = text.split("\n---\n").next().unwrap_or("");
+    head.lines()
+        .find_map(|l| l.strip_prefix("commit "))
+        .map(|c| c.trim().to_string())
+        .filter(|c| !c.is_empty() && c.trim_end_matches("+dirty").chars().all(|ch| ch.is_ascii_hexdigit()))
+        .ok_or_else(|| {
+            format!(
+                concat!(
+                    "{} records no commit (bundles made before 2026-11-01 do not), so --at-commit cannot find its build; read the ",
+                    "generator and mesh versions in its head (`generator_version`, `mesh_version`), find the commit that had them ",
+                    "(`git log -S\"MESH_VERSION: u32 = N\" -- crates/generators`), check it out and replay there; bundles made from now on record theirs",
+                ),
+                bundle
+            )
+        })
+}
+
+/// The bundle without its `commit` line, written beside the worktree: the old build that replays it need not know the line (TEST-071).
+fn strip_commit_line(text: &str, tree: &Path) -> Res<String> {
+    let (head, rest) = text
+        .split_once(
+            "
+---
+",
+        )
+        .unwrap_or((text, ""));
+    let head: Vec<&str> = head.lines().filter(|l| !l.starts_with("commit ")).collect();
+    let path = tree.with_extension("bundle");
+    std::fs::write(
+        &path,
+        format!(
+            "{}
+---
+{rest}",
+            head.join(
+                "
+"
+            )
+        ),
+    )
+    .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// The worktree of `commit` under `target/repro-worktree/`, made on first use and kept for the next replay of the same commit.
+fn repro_worktree(root: &Path, commit: &str) -> Res<PathBuf> {
+    let dir = root.join("target").join("repro-worktree").join(&commit[..commit.len().min(12)]);
+    if dir.join(".git").exists() {
+        return Ok(dir);
+    }
+    let path = dir.to_string_lossy().into_owned();
+    capture(root, "git", &["worktree", "add", "--detach", &path, commit])
+        .map_err(|e| format!("cannot check out commit {commit} for the replay ({e}); is it fetched? `git fetch origin` and retry"))?;
+    Ok(dir)
 }
 
 /// The `cargo` arguments of a perf run. The harness decides readiness itself (ADR 0020: AC power, performance scheme,
@@ -551,9 +630,10 @@ fn perf_cargo_args(args: &[String]) -> Result<Vec<&'static str>, String> {
     for a in args {
         match a.as_str() {
             "--machine-ready" => v.push("--machine-ready"),
+            "--loaded" => v.push("--loaded"),
             other => {
                 return Err(format!(
-                    "unknown perf option '{other}' (known: --machine-ready, the owner's override of a failed readiness gate)"
+                    "unknown perf option '{other}' (known: --machine-ready, the owner's override of a failed readiness gate; --loaded, loaded mode, BUILD-030)"
                 ))
             }
         }
@@ -610,7 +690,7 @@ fn perf_lit_args(scene: &str, args: &[String]) -> Result<Vec<String>, String> {
     while let Some(a) = it.next() {
         match a.as_str() {
             "--smoke" => smoke = true,
-            "--machine-ready" | "--allow-memory-bake" => tail.push(a.clone()),
+            "--machine-ready" | "--loaded" | "--allow-memory-bake" => tail.push(a.clone()),
             "--store" | "--global-res" | "--out" | "--frames" | "--flight-frames" | "--views" | "--prefill-levels" | "--look" | "--world" => {
                 let value = it.next().ok_or_else(|| format!("{a} needs a value"))?;
                 tail.push(a.clone());
@@ -883,8 +963,8 @@ fn perf_stream_args(args: &[String]) -> Result<Vec<String>, String> {
     while let Some(a) = it.next() {
         match a.as_str() {
             "--smoke" => smoke = true,
-            "--machine-ready" | "--allow-memory-bake" | "--lit" | "--no-horizon-jobs" | "--only-steady" => tail.push(a.clone()),
-            "--store" | "--global-res" | "--out" | "--upload" | "--prefill-levels" | "--gen-workers" | "--base-threads" | "--horizon-threads" | "--repeats" | "--gen-ahead" | "--gen-reserve" | "--gen-priority" | "--settle-ms" | "--share-bound" | "--steady-window-s" | "--altitudes-m" | "--places" | "--poses" | "--out-dir" => {
+            "--machine-ready" | "--loaded" | "--reserve" | "--allow-memory-bake" | "--lit" | "--no-horizon-jobs" | "--only-steady" => tail.push(a.clone()),
+            "--store" | "--global-res" | "--out" | "--upload" | "--prefill-levels" | "--gen-workers" | "--horizon-threads" | "--repeats" | "--gen-ahead" | "--gen-reserve" | "--gen-priority" | "--settle-ms" | "--share-bound" | "--steady-window-s" | "--altitudes-m" | "--places" | "--poses" | "--out-dir" => {
                 let value = it.next().ok_or_else(|| format!("{a} needs a value"))?;
                 tail.push(a.clone());
                 tail.push(value.clone());
@@ -1053,7 +1133,86 @@ fn perf_stream_all(root: &Path, rest: &[String], settle: bool) -> Res {
     }
 }
 
+/// The `#[ignore]` reason of a wall-clock check: a test that times real work, which tier A does not (BUILD-003; it flaked on shared runners).
+pub const WALLCLOCK_IGNORE: &str = "wall clock: cargo xtask perf wallclock";
+
+/// The wall-clock checks `cargo xtask perf wallclock` runs, in release, under the readiness gate (ADR 0020): the package, the cargo target
+/// and the test's path in it. Each is an ignored test with [`WALLCLOCK_IGNORE`] (a tier-A test checks that every one exists).
+pub const WALLCLOCK: [(&str, &str, &str); 3] = [
+    ("planet-perf", "--lib", "reserve::tests::the_real_spin_takes_its_milliseconds_within_five_percent"),
+    (
+        "planet-world-def",
+        "--test=cell_index",
+        "the_margin_of_a_cell_on_a_face_edge_or_a_cube_corner_costs_a_small_multiple_of_one_inside_a_face",
+    ),
+    ("planet", "--lib", "stall::tests::a_lock_another_thread_holds_for_40_ms_is_recorded_with_a_wait_of_at_least_20_ms"),
+];
+
+/// The cargo arguments of one wall-clock check: only that test, the ignored one, in release.
+fn wallclock_args(package: &str, target: &str, test: &str) -> Vec<String> {
+    ["test", "-p", package, "--release", target, test, "--", "--ignored", "--exact", "--nocapture"].map(String::from).to_vec()
+}
+
+/// The readiness gate's refusals for the wall-clock checks: every condition of ADR 0020 except the reference adapter, which CPU-only checks
+/// do not use (xtask has no GPU adapter to name). Empty means the machine is ready.
+fn wallclock_refusals(facts: &planet_perf::gate::MachineFacts) -> Vec<String> {
+    planet_perf::gate::readiness(facts).into_iter().filter(|f| f.condition != "reference adapter").map(|f| f.to_string()).collect()
+}
+
+/// `perf wallclock [--machine-ready]`: the checks of [`WALLCLOCK`] under the readiness gate. They are built first (a build beside the gate
+/// is a busy machine), then the gate measures the machine; a refusal is no verdict (`INCOMPLETE:`, exit code 3), never a failure, unless
+/// `--machine-ready` (the owner's override) runs them anyway. Each runs in its own `cargo test`; a failing one does not stop the others.
+fn perf_wallclock(root: &Path, args: &[String]) -> Res {
+    let machine_ready = match args {
+        [] => false,
+        [a] if a == "--machine-ready" => true,
+        _ => {
+            return Err(format!(
+                "unknown perf wallclock option(s) {args:?} (known: --machine-ready, the owner's override of a failed gate)"
+            ))
+        }
+    };
+    println!("wallclock: {} checks, the ignored tests marked `{WALLCLOCK_IGNORE}`", WALLCLOCK.len());
+    for (package, target, _) in WALLCLOCK {
+        run(root, "cargo", &["test", "-p", package, "--release", target, "--no-run"], &[])?;
+    }
+    let adapter =
+        planet_perf::AdapterFacts { name: "none (CPU checks)".into(), backend: "none".into(), kind: planet_perf::DeviceKind::Cpu };
+    let refusals = wallclock_refusals(&planet_perf::gate::measure_machine(adapter));
+    if !refusals.is_empty() {
+        let text = format!("the readiness gate refused (ADR 0020): {}", refusals.join("; "));
+        if !machine_ready {
+            return Err(format!("{} perf wallclock NOT RUN: {text}", crate::util::INCOMPLETE));
+        }
+        println!("wallclock: --machine-ready, the owner's override: {text}");
+    }
+    let mut failed = Vec::new();
+    for (package, target, test) in WALLCLOCK {
+        let args = wallclock_args(package, target, test);
+        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        let ok = run(root, "cargo", &refs, &[]).is_ok();
+        println!("wallclock: {} {package} {test}", if ok { "PASS" } else { "FAIL" });
+        if !ok {
+            failed.push(test);
+        }
+    }
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{} of {} wall-clock checks failed: {}", failed.len(), WALLCLOCK.len(), failed.join(", ")))
+    }
+}
+
 pub fn perf(root: &Path, args: &[String]) -> Res {
+    if args.first().map(String::as_str) == Some("wallclock") {
+        return perf_wallclock(root, &args[1..]);
+    }
+    if args.first().map(String::as_str) == Some("--ab") {
+        return crate::perfab::run(root, args);
+    }
+    if args.first().map(String::as_str) == Some("reserve") {
+        return crate::perfab::reserve(root, &args[1..]);
+    }
     if args.first().map(String::as_str) == Some("stream") {
         if stream_runs_all(&args[1..]) {
             let rest = if args.get(1).is_some_and(|a| a == "all") { &args[2..] } else { &args[1..] };
@@ -1522,12 +1681,15 @@ mod tests {
 
     // spec: BUILD-003
     #[test]
-    fn the_real_gpu_profile_groups_existing_binaries_only_and_leaves_the_default_profile_alone() {
+    fn the_real_gpu_profile_groups_existing_binaries_only_and_its_heavy_group_stays_in_that_profile() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
         let toml = std::fs::read_to_string(root.join(".config/nextest.toml")).unwrap();
-        let (default_part, real_part) = toml.split_once("[profile.real-gpu]").expect("the real-gpu profile exists");
-        assert!(!default_part.contains("test-group ="), "the default profile (software, WARP, CI) has no test group");
+        let (_, real_part) = toml.split_once("[profile.real-gpu]").expect("the real-gpu profile exists");
         assert!(toml.contains("real-gpu-heavy = { max-threads ="));
+        // The real-GPU heavy group is the `--real` run's own: the software, WARP and CI runs never use it.
+        for o in nextest_overrides(&toml).iter().filter(|o| o.body.contains(r#"test-group = "real-gpu-heavy""#)) {
+            assert_eq!(o.profile, "real-gpu", "{}", o.filter);
+        }
         // Every binary the group names is a test binary somewhere in the workspace (a test file, or a `[[test]]` of a crate with one
         // binary per tier, BUILD-015), and every module of a `test(/^(a|b)::/)` pattern is a test file (a typo would silently leave a
         // heavy test uncapped).
@@ -1560,6 +1722,150 @@ mod tests {
         }
     }
 
+    // spec: BUILD-003
+    #[test]
+    fn the_wall_clock_checks_run_on_a_ready_machine_without_a_gpu_adapter_and_a_busy_one_is_refused() {
+        use planet_perf::gate::{MachineFacts, ProcInfo};
+        let ready = MachineFacts {
+            adapter: planet_perf::AdapterFacts {
+                name: "none (CPU checks)".into(),
+                backend: "none".into(),
+                kind: planet_perf::DeviceKind::Cpu,
+            },
+            ac_power: Some(true),
+            power_scheme: Some("Power Scheme GUID: 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c  (High performance)".into()),
+            processes: Some(vec![ProcInfo { pid: 10, ppid: 1, created: 10, name: "explorer.exe".into() }]),
+            own_pid: 20,
+            cpu_load_pct: Some(3.0),
+            gpu_util_pct: Some(1.0),
+            gpu_temp_c: Some(45.0),
+            cpu_perf_pct: Some(90.0),
+        };
+        // The CPU checks use no adapter: its condition is the only one that does not apply.
+        assert!(!planet_perf::gate::readiness(&ready).is_empty(), "the full gate refuses a machine without the discrete GPU");
+        assert_eq!(wallclock_refusals(&ready), Vec::<String>::new());
+        let busy = MachineFacts {
+            processes: Some(vec![ProcInfo { pid: 30, ppid: 1, created: 30, name: "cargo.exe".into() }]),
+            cpu_load_pct: Some(40.0),
+            ..ready.clone()
+        };
+        let r = wallclock_refusals(&busy);
+        assert!(r.len() == 2 && r[0].contains("cargo.exe") && r[1].starts_with("CPU load"), "{r:?}");
+        assert!(wallclock_refusals(&MachineFacts { ac_power: Some(false), ..ready }).iter().any(|f| f.contains("battery")));
+        // Options are checked before anything runs.
+        let e = perf_wallclock(std::path::Path::new("."), &["--fast".to_string()]).unwrap_err();
+        assert!(e.contains("--machine-ready"), "{e}");
+    }
+
+    // spec: BUILD-003
+    #[test]
+    fn every_wall_clock_check_exists_as_an_ignored_test_of_its_package_and_runs_alone_in_release() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        for (package, target, test) in WALLCLOCK {
+            let krate = std::fs::read_dir(root.join("crates"))
+                .unwrap()
+                .flatten()
+                .find(|k| {
+                    std::fs::read_to_string(k.path().join("Cargo.toml"))
+                        .is_ok_and(|m| m.lines().any(|l| l.trim() == format!("name = \"{package}\"")))
+                })
+                .unwrap_or_else(|| panic!("no crate named {package}"));
+            let dir = if target == "--lib" { krate.path().join("src") } else { krate.path().join("tests") };
+            let name = test.rsplit("::").next().unwrap();
+            let ignored = format!("#[ignore = \"{WALLCLOCK_IGNORE}\"]");
+            // The ignore attribute sits directly above the function (a moved or renamed test would silently drop out of the run).
+            let found = std::fs::read_dir(&dir).unwrap().flatten().filter_map(|e| std::fs::read_to_string(e.path()).ok()).any(|text| {
+                let lines: Vec<&str> = text.lines().map(str::trim).collect();
+                lines.windows(2).any(|w| w[0] == ignored && w[1].starts_with(&format!("fn {name}(")))
+            });
+            assert!(found, "{package} {target}: no `{ignored}` directly above `fn {name}(` in {}", dir.display());
+            if let Some(file) = target.strip_prefix("--test=") {
+                assert!(dir.join(format!("{file}.rs")).is_file(), "{package}: no test binary {file}");
+            }
+        }
+        assert_eq!(
+            wallclock_args("planet-perf", "--lib", "a::b"),
+            ["test", "-p", "planet-perf", "--release", "--lib", "a::b", "--", "--ignored", "--exact", "--nocapture"]
+        );
+    }
+
+    /// One `[[profile.<p>.overrides]]` table of `.config/nextest.toml`: its profile, its filter (one line or `'''` block) and its text.
+    struct NextestOverride {
+        profile: String,
+        filter: String,
+        body: String,
+    }
+
+    /// The override tables of a nextest config, in file order (the first matching one sets a value, so the order matters).
+    fn nextest_overrides(toml: &str) -> Vec<NextestOverride> {
+        toml.split("[[profile.")
+            .skip(1)
+            .filter_map(|part| {
+                let (profile, rest) = part.split_once(".overrides]]")?;
+                let body = rest.split("\n[").next().unwrap_or(rest);
+                let filter = match body.split_once("filter = '''") {
+                    Some((_, f)) => f.split("'''").next()?,
+                    None => body.split_once("filter = '")?.1.split('\'').next()?,
+                };
+                Some(NextestOverride { profile: profile.into(), filter: filter.trim().into(), body: body.into() })
+            })
+            .collect()
+    }
+
+    // spec: BUILD-003
+    #[test]
+    fn the_default_profile_declares_its_450_s_limits_before_the_gpu_tier_and_caps_only_gpu_tests() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let toml = std::fs::read_to_string(root.join(".config/nextest.toml")).unwrap();
+        assert!(toml.contains("gpu-tier = { max-threads = 8 }"), "the software GPU tier runs at most 8 at once");
+        assert!(toml.contains("heavy-window = { max-threads = 2 }"));
+        let all = nextest_overrides(&toml);
+        let defaults: Vec<&NextestOverride> = all.iter().filter(|o| o.profile == "default").collect();
+        let position = |pred: &dyn Fn(&NextestOverride) -> bool, what: &str| defaults.iter().position(|o| pred(o)).expect(what);
+        let gpu = position(&|o| o.filter == "binary(/^gpu_/)", "the gpu_ tier override");
+        // Every test a filter names by its full name is a test function of some crate (a renamed test would silently lose its limit).
+        let sources: String = std::fs::read_dir(root.join("crates"))
+            .unwrap()
+            .flatten()
+            .filter_map(|k| std::fs::read_dir(k.path().join("tests")).ok())
+            .flat_map(|rd| rd.flatten().filter_map(|e| std::fs::read_to_string(e.path()).ok()))
+            .collect();
+        let exists = |name: &str| sources.contains(&format!("fn {name}("));
+        // The declared 450 s limits: each its own override, before the 300 s of the `gpu_` tier (the first match sets the value).
+        for name in [
+            "the_window_path_opens_runs_the_flight_lit_with_the_atmosphere_and_closes",
+            "a_coastal_flight_at_low_altitude_flickers_within_the_budget_while_the_lod_changes_under_it",
+            "the_lit_coast_view_over_streamed_tiles_draws_the_same_pixels_still_and_after_a_small_turn_and_back",
+            "the_edit_latency_scene_runs_end_to_end_in_smoke_mode_and_prints_its_table",
+            "the_stills_scene_draws_each_pose_with_its_horizon_maps_baked",
+            "the_gate_passes_on_a_small_world_without_the_chunk_stage_which_is_the_default",
+        ] {
+            let at = position(&|o| o.filter.contains(&format!("test({name})")), name);
+            assert!(at < gpu, "{name}: its limit comes after the gpu_ override and would never apply");
+            assert!(defaults[at].body.contains(r#"slow-timeout = { period = "90s", terminate-after = 5 }"#), "{name}: 450 s");
+            assert!(exists(name), "{name} is not a test function");
+        }
+        // The heavy-window group holds the named heavy tests, and its override comes before the `gpu-tier` one.
+        let heavy = position(&|o| o.body.contains(r#"test-group = "heavy-window""#), "the heavy-window override");
+        let tier = position(&|o| o.body.contains(r#"test-group = "gpu-tier""#), "the gpu-tier override");
+        assert!(heavy < tier, "a heavy test would land in gpu-tier (the first matching override sets the group)");
+        assert_eq!(defaults[tier].filter, "binary(gpu_all)");
+        let hf = &defaults[heavy].filter;
+        for module in ["gpu_window", "gpu_water_coverage", "gpu_stream_perf", "gpu_envelope_perf", "gpu_edit_perf", "gpu_stills"] {
+            assert!(hf.contains(&format!("test(/^{module}::/)")), "{module} is not in heavy-window");
+        }
+        let named: Vec<&str> =
+            hf.match_indices("test(").map(|(i, _)| hf[i + 5..].split(')').next().unwrap()).filter(|n| !n.starts_with('/')).collect();
+        assert_eq!(named.len(), 3, "the three gpu_skeleton loop tests: {named:?}");
+        for name in named {
+            assert!(exists(name), "{name} is not a test function");
+        }
+        // Tier A and B are not capped: every group of the default profile holds `gpu_all` tests only.
+        for o in defaults.iter().filter(|o| o.body.contains("test-group =")) {
+            assert!(o.filter.starts_with("binary(gpu_all)"), "a group outside tier C: {}", o.filter);
+        }
+    }
+
     // spec: STRM-004
     #[test]
     fn cache_verify_passes_the_directory_and_known_options_to_the_generate_mode_and_refuses_the_rest() {
@@ -1582,6 +1888,14 @@ mod tests {
         assert_eq!(over.last(), Some(&"--machine-ready"));
         let e = perf_cargo_args(&s(&["--force"])).unwrap_err();
         assert!(e.contains("--force") && e.contains("override"), "{e}");
+    }
+
+    // spec: BUILD-030
+    #[test]
+    fn perf_passes_the_loaded_mode_through_and_the_streaming_scenes_do_too() {
+        assert_eq!(perf_cargo_args(&s(&["--loaded"])).unwrap().last(), Some(&"--loaded"));
+        let stream = perf_stream_args(&s(&["dive", "--loaded", "--store", "D:/bake"]));
+        assert!(stream.is_ok_and(|a| a.iter().any(|x| x == "--loaded")), "the stream scenes forward --loaded");
     }
 
     // spec: TEST-048
@@ -1727,6 +2041,81 @@ mod repro_tests {
     fn repro_needs_an_existing_bundle() {
         assert!(repro(Path::new("."), &[]).unwrap_err().contains("usage"));
         assert!(repro(Path::new("."), &["no-such-bundle.repro".to_string()]).unwrap_err().contains("not found"));
+    }
+
+    // spec: TEST-071
+    #[test]
+    fn at_commit_reads_the_recorded_commit_and_refuses_an_old_bundle_with_the_way_forward() {
+        let text = "planet-terrain-repro 2
+adapter x
+commit 0123abcdef
+seed 1
+---
+commit not-a-line-of-the-head
+";
+        assert_eq!(bundle_commit(text, "b").unwrap(), "0123abcdef");
+        let old = "planet-terrain-repro 2
+adapter x
+seed 1
+---
+commit 0123abcdef
+";
+        let e = bundle_commit(old, "old.bundle").unwrap_err();
+        assert!(e.contains("old.bundle records no commit") && e.contains("mesh_version") && e.contains("git log -S"), "{e}");
+        assert_eq!(
+            bundle_commit(
+                "planet-terrain-repro 2
+commit 0123ab+dirty
+---
+",
+                "b"
+            )
+            .unwrap(),
+            "0123ab+dirty"
+        );
+        let stripped = std::env::temp_dir().join("strip-commit-test");
+        std::fs::create_dir_all(&stripped).unwrap();
+        let p = strip_commit_line(
+            "planet-terrain-repro 2
+adapter x
+commit 0123ab
+seed 1
+---
+plan commit
+",
+            &stripped.join("w"),
+        )
+        .unwrap();
+        let got = std::fs::read_to_string(&p).unwrap();
+        assert_eq!(
+            got,
+            "planet-terrain-repro 2
+adapter x
+seed 1
+---
+plan commit
+"
+        );
+        let dirty = std::env::temp_dir().join("dirty-bundle-test.bundle");
+        std::fs::write(
+            &dirty,
+            "planet-terrain-repro 2
+commit 0123ab+dirty
+---
+",
+        )
+        .unwrap();
+        let e = repro(Path::new("."), &[dirty.to_string_lossy().into_owned(), "--at-commit".into()]).unwrap_err();
+        assert!(e.contains("uncommitted changes") && e.contains("0123ab"), "{e}");
+        let bad = bundle_commit(
+            "planet-terrain-repro 2
+commit zz
+---
+",
+            "b",
+        )
+        .unwrap_err();
+        assert!(bad.contains("records no commit"), "{bad}");
     }
 
     // spec: VIEW-026

@@ -1,0 +1,17 @@
+import ctypes, sys, numpy as np
+from PIL import Image, ImageDraw
+try: ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x40)
+except Exception: pass
+sys.argv=['x','../s69/map13.f32','s80-fields.f32','/dev/null']
+src=open('shape.py',encoding='utf-8').read().split("out = {'today'")[0]
+exec(src)
+rng=np.random.default_rng(3)
+def panel(e,title):
+    img=np.zeros((H,W,3),np.uint8); img[:]=(25,40,70); img[e>0]=(150,150,140)
+    lab=wrap_label(e>=2000)
+    cols=rng.integers(60,255,(lab.max()+1,3)).astype(np.uint8)
+    m=lab>0; img[m]=cols[lab[m]]
+    im=Image.fromarray(img).resize((720,360),Image.NEAREST); ImageDraw.Draw(im).text((6,4),title,fill=(255,255,255)); return im
+a1=panel(e_today,'today: land grey, each connected region above 2 km one colour')
+a2=panel(e_comb,'SPIKE-80 combined: same continents, belts as long connected regions')
+out=Image.new('RGB',(720,724),(0,0,0)); out.paste(a1,(0,0)); out.paste(a2,(0,364)); out.save('high-ground-regions.png',optimize=True)

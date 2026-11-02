@@ -701,8 +701,15 @@ fn shade_lit(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up: vec3<f
 // The sun direction and the pre-exposure factor travel in the otherwise unused words of the globals (mode.yzw as bits, range.z), the
 // view in mode.x and the water level in extra.x. The up vector is formed from the node's tile-local numbers and the fragment's
 // tile-local position: no planet-radius value reaches this stage.
+// The lit fragment's two outputs (REND-051): the scene target, and `sun-direct` with the direct-sun radiance the shadow applies to.
+// The plain path puts the whole radiance of the lit views in `sun-direct` (it has no ambient); the other views write the scene only.
+struct LitOut {
+    @location(0) scene: vec4<f32>,
+    @location(1) direct: vec4<f32>,
+}
+
 @fragment
-fn fs_lit(in: VsOut) -> @location(0) vec4<f32> {
+fn fs_lit(in: VsOut) -> LitOut {
     let c = fs_lit_view(in);
     if (CUT_QUADRANTS && quadrant_cut(in)) {
         discard;
@@ -710,7 +717,7 @@ fn fs_lit(in: VsOut) -> @location(0) vec4<f32> {
     return c;
 }
 
-fn fs_lit_view(in: VsOut) -> vec4<f32> {
+fn fs_lit_view(in: VsOut) -> LitOut {
     let sun = vec3<f32>(bitcast<f32>(g.mode.y), bitcast<f32>(g.mode.z), bitcast<f32>(g.mode.w));
     let up = up_at(nodes[in.node_index].up, in.local);
     let climate = tile_climate(in);
@@ -722,20 +729,29 @@ fn fs_lit_view(in: VsOut) -> vec4<f32> {
     var rgb = sun_vis * shade_lit(g.mode.x, g.albedo, gd.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), sun, g.range.z) * detail_mul(gd, g.mode.x, g.albedo, climate.x, climate.y, clamp(dot(normalize(gd.normal), up), 0.0, 1.0), in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)));
     // The sum is clamped like the rest of the lit radiance: the scene target is f16.
     rgb = min(rgb + vec3<f32>(ground_gloss(in.node_index, in.local, gd, sun) * (g.range.z * sun_vis)), vec3<f32>(60000.0));
+    var sunlit = g.mode.x == 0u || g.mode.x == 2u;
     if (g.mode.x == 5u || g.mode.x == 6u) {
         rgb = horizon_view_colour(g.mode.x, in.node_index, in.aux, up, sun, coarse_fade, max(in.height, 0.0)) * g.range.z;
+        sunlit = false;
     }
     if (g.mode.x >= 7u) {
         rgb = clamp(driver_colour(g.mode.x, drv) * 0.31830988618 * g.range.z, vec3<f32>(0.0), vec3<f32>(60000.0));
+        sunlit = false;
     }
     if (g.extra.y > 3.5) {
         rgb = stale_tint(in, rgb, g.range.z);
+        sunlit = false;
     } else if (g.extra.y > 2.5) {
         rgb = region_tint(nodes[in.node_index].origin_rel.xyz + in.local, rgb, g.range.z);
+        sunlit = false;
     } else if (g.extra.y > 0.5) {
         rgb = overlay_wire(in, rgb, g.range.z, g.extra.y);
+        sunlit = false;
     }
-    return vec4<f32>(rgb, 1.0);
+    if (sunlit) {
+        return LitOut(vec4<f32>(0.0, 0.0, 0.0, 1.0), vec4<f32>(rgb, 1.0));
+    }
+    return LitOut(vec4<f32>(rgb, 1.0), vec4<f32>(0.0));
 }
 
 // The region tint (VIEW-030): the lit colour mixed with the tint of the nearest region polygon the fragment lies in. Plain arithmetic on
@@ -1099,6 +1115,13 @@ pub struct TerrainRenderer {
     ring: Vec<FrameSet>,
     /// The horizon shadows' textures (REND-038), dummies until [`set_horizon`](TerrainRenderer::set_horizon) gives a capacity.
     horizon: crate::horizon::HorizonGpu,
+    /// The shadow pass (REND-050), once enabled, and the frame's data for it (set by the app, as the horizon data was).
+    shadow: Option<crate::shadow_path::ShadowPath>,
+    shadow_frame: Option<crate::shadow_path::ShadowFrame>,
+    /// Tiles the shadow pass found not resident in its last frame.
+    shadow_unresident: Vec<planet_core::TileId>,
+    /// Tiles placed since the app last asked (kept only while the shadow pass is enabled): the clipmap plan refreshes them.
+    placed_log: Vec<planet_core::TileId>,
     /// The frame's horizon table (REND-041), written beside the node records; `None`: every node has slot -1.
     horizon_frame: Option<planet_frame::horizonview::HorizonFrame>,
     node_capacity: usize,
@@ -1147,6 +1170,8 @@ pub struct TerrainRenderer {
     measure_variant: MeasureVariant,
     /// The water pass (ADR 0041, ADR 0042 point 2): None until [`enable_water`](TerrainRenderer::enable_water).
     water: Option<WaterGpu>,
+    /// The body the atmosphere was enabled for: a resize makes the atmosphere path again over the new targets.
+    atmosphere_body: Option<planet_frame::look::atmosphere::Atmosphere>,
 }
 
 /// The lit path's terrain pipelines (HDR target, `fs_lit`) and its post chain.
@@ -1280,6 +1305,49 @@ impl TerrainRenderer {
     /// End the horizon shadows: every node reads slot -1 again (the frame is then the frame of a build without the term).
     pub fn clear_horizon(&mut self) {
         self.horizon_frame = None;
+    }
+
+    /// Build the shadow pass (REND-050): the clipmap of `texels` per level edge and `levels` levels, the coarse cube and the resolve targets,
+    /// for a body of radius `radius_m`. Lit frames with a shadow frame set then run it after the terrain pass.
+    pub fn enable_shadow(&mut self, ctx: &GpuContext, texels: u32, levels: usize, radius_m: f64) {
+        self.shadow = Some(crate::shadow_path::ShadowPath::new(ctx, texels, levels, self.cells, radius_m));
+    }
+
+    /// Give the next frame's shadow pass its data (the plan, the preview, the camera and the sun). The frame is used once: a lit frame
+    /// drawn without a new one runs no shadow pass.
+    pub fn set_shadow_frame(&mut self, frame: crate::shadow_path::ShadowFrame) {
+        self.shadow_frame = Some(frame);
+    }
+
+    /// End the shadow pass: lit frames draw as before.
+    pub fn clear_shadow_frame(&mut self) {
+        self.shadow_frame = None;
+    }
+
+    /// The tiles placed (uploaded or replaced) since the last call, while the shadow pass is enabled: the app hands them to the clipmap
+    /// planner as refreshed.
+    pub fn take_placed_tiles(&mut self) -> Vec<planet_core::TileId> {
+        std::mem::take(&mut self.placed_log)
+    }
+
+    /// The tiles the shadow pass found not resident in its last frame (the gather's blocks and the cube's floor tiles).
+    pub fn shadow_unresident(&self) -> &[planet_core::TileId] {
+        &self.shadow_unresident
+    }
+
+    /// How many frames the shadow pass has run (tests).
+    pub fn shadow_frames_run(&self) -> u32 {
+        self.shadow.as_ref().map_or(0, |s| s.frames_run())
+    }
+
+    /// How many half-resolution marches of the last shadow frame crossed a clipmap cell that changed this frame or the last (tests).
+    pub fn shadow_changed_pixels(&self, ctx: &GpuContext) -> Option<usize> {
+        self.shadow.as_ref().map(|s| s.changed_pixels(ctx))
+    }
+
+    /// The resolved shadow visibility of the last frame that ran the shadow pass, `width * height` values in [0, 1].
+    pub fn read_shadow(&self, ctx: &GpuContext) -> Option<Vec<f32>> {
+        self.shadow.as_ref().map(|s| s.read_visibility(ctx))
     }
 
     /// Bytes the horizon array holds (0 before a capacity is set).
@@ -1419,6 +1487,10 @@ impl TerrainRenderer {
             ring,
             horizon,
             horizon_frame: None,
+            shadow: None,
+            shadow_frame: None,
+            shadow_unresident: Vec::new(),
+            placed_log: Vec::new(),
             node_capacity,
             draw_mode: ctx.default_draw_mode(),
             indices,
@@ -1447,6 +1519,7 @@ impl TerrainRenderer {
             lit_objects: 0,
             measure_variant: MeasureVariant::Product,
             water: None,
+            atmosphere_body: None,
         }
     }
 
@@ -1620,7 +1693,11 @@ impl TerrainRenderer {
             stencil: Default::default(),
             bias: Default::default(),
         };
-        let targets = [Some(wgpu::ColorTargetState { format: hdr, blend: None, write_mask: wgpu::ColorWrites::ALL })];
+        // The scene target and `sun-direct` (REND-051).
+        let targets = [
+            Some(wgpu::ColorTargetState { format: hdr, blend: None, write_mask: wgpu::ColorWrites::ALL }),
+            Some(wgpu::ColorTargetState { format: hdr, blend: None, write_mask: wgpu::ColorWrites::ALL }),
+        ];
         let c = &self.compact;
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("terrain-compact-lit"),
@@ -1656,8 +1733,8 @@ impl TerrainRenderer {
         };
         let (pipeline, pipeline_cut) = (make(false), make(true));
         let path = LitPath::new(ctx, self.size);
-        // The scene target, the exposure buffers, three post pipelines and the terrain pipelines (whole nodes, nodes over some quadrants).
-        self.lit_objects = 1 + 3 + 2 + 1;
+        // The scene target, `sun-direct` and its apply pipeline, the exposure buffers, three post pipelines and the terrain pipelines (whole nodes, nodes over some quadrants).
+        self.lit_objects = 1 + 1 + 3 + 1 + 2 + 1;
         let refs = crate::refs::RefPass::new(ctx);
         self.lit = Some(LitGpu { path, pipeline, pipeline_cut, atmosphere_pipeline: None, atmosphere_pipeline_cut: None, refs });
     }
@@ -1674,7 +1751,10 @@ impl TerrainRenderer {
             stencil: Default::default(),
             bias: Default::default(),
         };
-        let targets = [Some(wgpu::ColorTargetState { format: crate::lit::HDR_FORMAT, blend: None, write_mask: wgpu::ColorWrites::ALL })];
+        let targets = [
+            Some(wgpu::ColorTargetState { format: crate::lit::HDR_FORMAT, blend: None, write_mask: wgpu::ColorWrites::ALL }),
+            Some(wgpu::ColorTargetState { format: crate::lit::HDR_FORMAT, blend: None, write_mask: wgpu::ColorWrites::ALL }),
+        ];
         // The atmosphere's group is 3 (groups 1 and 2 are the tile references and the block), so one bind group set once per pass stays
         // bound for the whole pass.
         let c = &self.compact;
@@ -1749,6 +1829,7 @@ impl TerrainRenderer {
             return;
         }
         lit.path.enable_atmosphere(ctx, &self.depth_view, atmosphere);
+        self.atmosphere_body = Some(*atmosphere);
         let (pipeline, pipeline_cut) = self.atmosphere_terrain_pipelines(ctx);
         // Counted by declaration: the atmosphere path's scene target, two tables, two products, the uniform buffer and three
         // pipelines (sky view, aerial perspective, composite) beside the two terrain pipelines made here.
@@ -1783,6 +1864,53 @@ impl TerrainRenderer {
         }
         self.lit_objects += water.objects;
         self.water = Some(water);
+    }
+
+    /// Draw at another size from the next frame on (a window resize): the colour and depth targets and, where enabled, the lit path's
+    /// targets (scene target, exposure state, atmosphere products) and the water pass's copy are made again at `size`; pipelines, tiles and
+    /// pools are kept. The adapted exposure starts over (the plan's reset flag snaps it). Frames in flight keep the targets they use.
+    /// A plan of the old size is refused afterwards (`SizeMismatch`).
+    pub fn resize(&mut self, ctx: &GpuContext, size: (u32, u32)) {
+        assert!(size.0 > 0 && size.1 > 0, "a target needs a size");
+        if size == self.size {
+            return;
+        }
+        let device = &ctx.device;
+        let target = |label, format, usage| {
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage,
+                view_formats: &[],
+            })
+        };
+        self.color = target(
+            "terrain-color",
+            wgpu::TextureFormat::Rgba8Unorm,
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::TEXTURE_BINDING,
+        );
+        let depth = target("terrain-depth", DEPTH_FORMAT, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING);
+        self.color_view = self.color.create_view(&Default::default());
+        self.depth_view = depth.create_view(&Default::default());
+        self.size = size;
+        if let Some(lit) = self.lit.as_mut() {
+            lit.path = LitPath::new(ctx, size);
+            if let Some(body) = self.atmosphere_body {
+                lit.path.enable_atmosphere(ctx, &self.depth_view, &body);
+            }
+        }
+        if self.water.is_some() {
+            let layouts = CompactLayouts { frame: &self.compact.bgl_frame, block: &self.compact.bgl_block, cells: self.cells };
+            let mut water = WaterGpu::new(device, size, &self.bgl, &layouts);
+            if let Some(a) = self.lit.as_ref().and_then(|l| l.path.atmosphere()) {
+                water.add_atmosphere(device, &self.bgl, &layouts, a);
+            }
+            self.water = Some(water);
+        }
     }
 
     /// Whether the water pass is enabled.
@@ -1988,6 +2116,9 @@ impl TerrainRenderer {
         if cells != self.cells {
             return Err(ExecError::BadResolution { id, res: cells });
         }
+        if self.shadow.is_some() {
+            self.placed_log.push(id);
+        }
         // Resident with the same key: nothing to do for a tile the renderer places itself. A different key (other seed, radius,
         // mesh version) replaces it.
         if at.is_none() && self.tiles.get(&id).is_some_and(|r| r.key == key) {
@@ -2191,6 +2322,19 @@ impl TerrainRenderer {
         self.tiles.get(&tile).map(|r| r.slot)
     }
 
+    /// Where a resident tile's slot is for the clipmap gather (REND-047): its block, the block's buffer and the slot's first word in it.
+    pub(crate) fn slot_words(&self, tile: planet_core::TileId) -> Option<(usize, &wgpu::Buffer, u32)> {
+        let slot = self.slot_of(tile)?;
+        let (block, local) = ((slot.index / self.pool.block_slots) as usize, slot.index % self.pool.block_slots);
+        let buffer = &self.compact.blocks.get(block)?.as_ref()?.buffer;
+        Some((block, buffer, local * (self.pool.slot_bytes / 4) as u32))
+    }
+
+    /// Cells per tile edge.
+    pub(crate) fn compact_cells(&self) -> u32 {
+        self.cells
+    }
+
     /// The pool configuration whose `allocated_bytes` bound this renderer's allocations.
     pub fn pool_config(&self) -> &PoolConfig {
         &self.pool
@@ -2326,6 +2470,8 @@ impl TerrainRenderer {
         }
         // A frame draws the water pass only when some node carries water.
         let water_frame = plan.lit.is_some() && plan.water.as_ref().is_some_and(|w| !w.nodes.is_empty());
+        // The shadow pass reads the lit pass's depth after it: the depth is kept.
+        let shadow_frame = plan.lit.is_some() && self.shadow.is_some() && self.shadow_frame.is_some();
         self.frame += 1;
         let device = &ctx.device;
         if plan.nodes.len() > self.node_capacity {
@@ -2449,20 +2595,30 @@ impl TerrainRenderer {
         let any_masked = masked.iter().any(|m| *m);
         {
             let [r, g, b, a] = if lit_gpu.is_some() { [0.0; 4] } else { plan.clear_color.map(|v| f64::from(v) / 255.0) };
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("terrain-pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            // The lit pipelines write `sun-direct` (REND-051) as their second target; the debug path has one target.
+            let attachments = [
+                Some(wgpu::RenderPassColorAttachment {
                     view: color_target,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r, g, b, a }), store: wgpu::StoreOp::Store },
-                })],
+                }),
+                lit_gpu.map(|l| wgpu::RenderPassColorAttachment {
+                    view: l.path.sun_direct_view(),
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
+                }),
+            ];
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("terrain-pass"),
+                color_attachments: &attachments[..if lit_gpu.is_some() { 2 } else { 1 }],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &self.depth_view,
                     // The composite and the water pass read the depth, so an atmosphere or water frame keeps it.
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(0.0),
-                        store: if atmosphere_frame || water_frame { wgpu::StoreOp::Store } else { wgpu::StoreOp::Discard },
+                        store: if atmosphere_frame || water_frame || shadow_frame { wgpu::StoreOp::Store } else { wgpu::StoreOp::Discard },
                     }),
                     stencil_ops: None,
                 }),
@@ -2546,6 +2702,10 @@ impl TerrainRenderer {
                 }
             }
         }
+        // The shadow applies to the direct sun term before the water pass copies the scene (the seabed seen through the water is lit).
+        if let (Some(l), Some(lit)) = (lit_gpu, plan.lit.as_ref()) {
+            l.path.record_shadow_apply(&mut encoder, lit);
+        }
         if let (true, Some(w), Some(wp), Some(l), Some(lit)) =
             (water_frame, self.water.as_ref(), plan.water.as_ref(), lit_gpu, plan.lit.as_ref())
         {
@@ -2623,6 +2783,19 @@ impl TerrainRenderer {
         }
         let command_buffer = encoder.finish();
         let index = ctx.queue.submit([command_buffer]);
+        if shadow_frame {
+            // Queue order puts the shadow passes after the terrain pass that wrote the depth; the path is taken out so it can read the renderer.
+            let mut path = self.shadow.take().expect("shadow enabled");
+            let frame = self.shadow_frame.take().expect("shadow frame set");
+            self.shadow_unresident = path.run(ctx, self, &frame, &self.depth_view, self.size);
+            // J's shadow view (VIEW-054): the resolved visibility as grey over the picture.
+            if plan.lit.as_ref().is_some_and(|l| l.view == planet_frame::look::shading::ShadeView::Shadow) {
+                path.draw_visibility(ctx, &self.depth_view, &self.color_view);
+            }
+            // The frame carries this frame's deltas (dirty rectangles, floor tiles, a cut): it is spent, the app sets the next.
+            drop(frame);
+            self.shadow = Some(path);
+        }
         let retired = std::sync::Arc::clone(&self.retired);
         ctx.queue.on_submitted_work_done(move || {
             retired.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
