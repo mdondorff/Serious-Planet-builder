@@ -56,7 +56,7 @@ After Option B: M9 R3 to R6 (week plan section 4). B6 (chunk stage removed) and 
 - **Flaky `gpu_window` flight test**: one failure after 7.5 s, 0 of 5 since; probably the lock (first item). On a second failure keep the full output.
 - **WARP device removal with the compact format and the atmosphere**: test-only, accepted; the software smoke stays on the vertex format. Re-test when WARP, wgpu or Windows changes (Windows changed 2026-10-30).
 - **Beach shading flashes on WARP** (36.8 % of shore-band pixels on the coastal descent): unchecked since REND-030; check with the next look review.
-- **ADR 0056 limits**: steep coastal ground and inlets under 4 km stay dry (fix: per-vertex sea mask); `WaterBook` is never evicted (watch its growth).
+- **Coastal water limits** (ADR 0071 replaced ADR 0056's 4 km reach by connectivity, ATMO-019): (a) steep coastal ground cut under the level above `B(W)` does not conduct (ADR 0071 point 2; a fix is a slope-aware wet floor: a new store pass and coast goldens); (b) below the block level a band strip narrower than a parent's sample spacing can leave the parent dry (ATMO-019). Measure on the real store if the owner saw a dry coast. `WaterBook` is never evicted (`waterbook-eviction`).
 - **ADR 0051 (superseded by 0055)**: point 1 (liquid parameters in the definition) awaits the planner's acceptance; point 6 (per-tile W storage) is open.
 - **Cold start without the pre-fill**: 384 roots in 17.76 s (indicative, software adapter); no budget set.
 - **Flight clock collapse follows run order** (windows 10, 11): the first run of a flight pair drops to P5 or P8; cause open.
