@@ -9,5 +9,5 @@ SPIKE-95 (B9): in the last three perf windows 53-75 % of attempts gave no verdic
 
 ## Impact
 - Code: `planet_perf` (`streaming.rs`, `validity.rs`, `calibration.rs`), `planet` app (`streamperf.rs`). GPU-free logic, tier A.
-- Specs: TEST-039, STRM-022 (modified). ADR 0093 amends ADR 0065.
+- Specs: TEST-039 (modified), TEST-089 (added; the rules split out of TEST-039 for its word limit, BUILD-024). ADR 0093 amends ADR 0065.
 - No perf window in this PR; the proving measurement (20 preflights, old against new, plus the slow terminal) waits for the planner's quiet slot.

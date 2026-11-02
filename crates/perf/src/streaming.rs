@@ -1322,7 +1322,7 @@ mod load_tests {
         assert_eq!(calibrate_cpu(0).threads, 1, "at least one thread");
     }
 
-    // spec: STRM-022
+    // spec: TEST-089
     #[test]
     fn the_calibration_reading_is_the_smallest_single_timing_and_the_parallel_repetition_with_the_smallest_median() {
         let singles = [61_000, 47_800, 52_300, 48_100, 49_000];
@@ -1337,7 +1337,7 @@ mod load_tests {
         assert_eq!((CALIBRATION_SINGLE_TIMINGS, CALIBRATION_PARALLEL_REPS), (5, 3));
     }
 
-    // spec: TEST-039
+    // spec: TEST-039, TEST-089
     #[test]
     fn a_case_with_its_own_load_declares_it_beside_its_calibration_counts() {
         let c = CpuCalibration { threads: 18, single_us: 62_183, parallel_median_us: 96_759, parallel_max_us: 110_666 };

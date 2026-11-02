@@ -403,7 +403,7 @@ mod tests {
         assert!(frame_row.fails(), "p99 31 ms is over 20 ms at any clock state: {frame_row:?}");
     }
 
-    // spec: TEST-039
+    // spec: TEST-039, TEST-089
     #[test]
     fn a_failing_gpu_row_counts_without_frame_verdicts_and_the_frame_row_needs_them() {
         let over = metrics_of(&(0..5).map(|_| lit(1.5, 2.2)).collect::<Vec<_>>());

@@ -851,7 +851,7 @@ mod tests {
         assert!(!log_frame_valid(&kept), "no counts to judge again: the recorded reason stands");
     }
 
-    // spec: TEST-039
+    // spec: TEST-039, TEST-089
     #[test]
     fn the_calibration_voids_the_frame_verdicts_only_and_the_console_and_accept_agree() {
         let mut r = run("P0", 1500);
@@ -880,7 +880,7 @@ mod tests {
         assert!(!assess(std::slice::from_ref(&r), false, &throttled, &[]).gpu_session_valid());
     }
 
-    // spec: TEST-039
+    // spec: TEST-039, TEST-089
     #[test]
     fn a_declared_load_records_its_calibration_and_voids_nothing_at_run_time_or_in_accept() {
         let mut r = run("P0", 1500);
