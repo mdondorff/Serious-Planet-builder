@@ -1149,3 +1149,88 @@ fn the_shading_normal_of_the_sea_does_not_depend_on_the_grid_spacing_of_the_tile
     );
     assert!(mean < 0.004, "the normal depends on the tile's spacing: mean difference {mean} over {water} pixels (worst {worst})");
 }
+
+// spec: ATMO-013
+/// The stills of the owner package for the sun glint (inbox #29): the lit water at the pose of the recorded hash, without and with the atmosphere,
+/// and the same frames with every other tile taken for a coarse stand-in (what a turn draws), written to `target/review/sun-glint-turn/`
+/// under the adapter's name and `PLANET_STILLS_TAG` (`before` on the old shader, `after` on the fix). By hand:
+/// `PLANET_STILLS_TAG=after cargo test -p planet-render --test gpu_all sun_glint_stills -- --ignored` (add `PLANET_ADAPTER=hardware` for the RTX).
+#[test]
+#[ignore = "writes the stills of the owner package, run by hand"]
+fn sun_glint_stills() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let tag = std::env::var("PLANET_STILLS_TAG").unwrap_or_else(|_| "after".into());
+    let adapter: String = ctx.adapter_name().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+    let dir = planet_testkit::repo_root().join("target").join("review").join("sun-glint-turn");
+    std::fs::create_dir_all(&dir).unwrap();
+    let field = Reference(1);
+    let size = (512, 320);
+    let (c, heading) = coast(&field, 0.0);
+    let table = LiquidTable::earth();
+    let src = HeightSea { field: &field, level: 0.0 };
+    let aspect = f64::from(size.0) / f64::from(size.1);
+    for (pose, camera) in [
+        ("recorded-pose", coast_camera(c, heading, 0.0, 120.0, 800.0, 0.0, 12.0, aspect)),
+        ("low-sea-glint", coast_camera(c, heading, 0.0, 6.0, 300.0, 0.0, 3.0, aspect)),
+    ] {
+        let plan = Scene { camera, size, field: &field }.terrain();
+        let wp = water_plan(&plan, &src, &table, size, 2.0, WaterView::Lit);
+        let mut stand_in = wp.clone();
+        for (i, n) in stand_in.nodes.iter_mut().enumerate() {
+            if i % 2 == 1 {
+                n.spacing_m *= 64.0;
+            }
+        }
+        // The shading normal itself (the normal view), where a tile's border shows as a step.
+        let normals = water_plan(&plan, &src, &table, size, 2.0, WaterView::Normals);
+        let mut normals_stand_in = normals.clone();
+        for (i, n) in normals_stand_in.nodes.iter_mut().enumerate() {
+            if i % 2 == 1 {
+                n.spacing_m *= 64.0;
+            }
+        }
+        for atmosphere in [false, true] {
+            let mut r = new_renderer(&ctx, size);
+            upload_all(&ctx, &mut r, &plan, &field);
+            if atmosphere {
+                r.enable_atmosphere(&ctx, &Atmosphere::earth(R));
+            }
+            r.enable_water(&ctx);
+            // The step the stand-ins make in the shading normal, 40 times amplified (black: no difference).
+            let mut shot = |w: &WaterPlan| {
+                let mut p = plan.clone();
+                p.lit = Some(lit_plan(atmosphere));
+                p.water = Some(w.clone());
+                r.render(&ctx, &p, false).unwrap();
+                r.read_color(&ctx)
+            };
+            let (n0, n1) = (shot(&normals), shot(&normals_stand_in));
+            let diff: Vec<u8> = n0
+                .rgba
+                .chunks(4)
+                .zip(n1.rgba.chunks(4))
+                .flat_map(|(a, b)| {
+                    let d = (0..3).map(|k| a[k].abs_diff(b[k])).max().unwrap_or(0);
+                    let v = (u32::from(d) * 40).min(255) as u8;
+                    [v, v, v, 255]
+                })
+                .collect();
+            let name = format!("{adapter}-{tag}-{pose}-normal-step-x40{}", if atmosphere { "-atmosphere" } else { "" });
+            planet_testkit::write_png(&dir.join(format!("{name}.png")), &Image::new(n0.width, n0.height, diff)).unwrap();
+            for (kind, w) in [("as-planned", &wp), ("turn-stand-ins", &stand_in)] {
+                // The sun low over the horizon ahead of the camera: its glint path on the sea runs to the lens.
+                let up = camera.position.0.normalized();
+                let ahead = (camera.forward - up * camera.forward.dot(up)).normalized();
+                let sun = (ahead * libm::cos(5.0f64.to_radians()) + up * libm::sin(5.0f64.to_radians())).normalized();
+                let mut p = plan.clone();
+                let mut lit = lit_plan(atmosphere);
+                lit.sun_dir = [sun.x as f32, sun.y as f32, sun.z as f32];
+                p.lit = Some(lit);
+                p.water = Some(w.clone());
+                r.render(&ctx, &p, false).unwrap();
+                let name = format!("{adapter}-{tag}-{pose}-{kind}{}", if atmosphere { "-atmosphere" } else { "" });
+                planet_testkit::write_png(&dir.join(format!("{name}.png")), &image_of(&r, &ctx)).unwrap();
+            }
+        }
+    }
+}
