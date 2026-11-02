@@ -1,3 +1,320 @@
+diff --git a/crates/app/src/window.rs b/crates/app/src/window.rs
+index fbf58420..a52a9d91 100644
+--- a/crates/app/src/window.rs
++++ b/crates/app/src/window.rs
+@@ -391,10 +391,6 @@ struct App<'w> {
+     /// The plan parameters: the configured ones, with the height bound raised to the field's maximum when the stamps lift it (VIEW-022).
+     lod: LodParams,
+     cameras: &'w [Camera],
+-    /// The size of the 3D target in pixels: the window's inner size, as of the last resize that has settled (it starts as `--size`).
+-    size: (u32, u32),
+-    /// A resize the window reported and the time it did (the target follows when the size has held for [`RESIZE_SETTLE_MS`]).
+-    pending_resize: Option<((u32, u32), u64)>,
+     clock: Arc<SystemClock>,
+     params: ControllerParams,
+     state: Option<Running>,
+@@ -402,36 +398,6 @@ struct App<'w> {
+     summary: Option<String>,
+ }
+ 
+-/// How long a window size must hold before the 3D target is made again at it, milliseconds (an edge drag sends a size per mouse move).
+-const RESIZE_SETTLE_MS: u64 = 150;
+-
+-/// The target size a pending window resize asks for now: the pending size when it differs from the current one and has held for
+-/// [`RESIZE_SETTLE_MS`].
+-pub fn resize_due(current: (u32, u32), pending: Option<((u32, u32), u64)>, now_ms: u64) -> Option<(u32, u32)> {
+-    pending.filter(|(size, at)| *size != current && now_ms.saturating_sub(*at) >= RESIZE_SETTLE_MS).map(|(size, _)| size)
+-}
+-
+-/// The window's report of a new size: the pending resize it makes (a size of 0, a minimised window, leaves what was pending).
+-pub fn on_resized(pending: Option<((u32, u32), u64)>, width: u32, height: u32, now_ms: u64) -> Option<((u32, u32), u64)> {
+-    if width > 0 && height > 0 {
+-        Some(((width, height), now_ms))
+-    } else {
+-        pending
+-    }
+-}
+-
+-/// The plan parameters for a target of `size`: the viewport height is the target's (the error tolerance stays in pixels); `None` when the
+-/// parameters then fail their own check (a window too small for the cell count), and the old ones stay.
+-pub fn lod_for_size(base: &LodParams, size: (u32, u32)) -> Option<LodParams> {
+-    let lod = LodParams { viewport_h_px: f64::from(size.1), ..base.clone() };
+-    lod.validate().ok().map(|()| lod)
+-}
+-
+-/// The aspect (width over height) of a target size, as the camera's projection takes it.
+-pub fn aspect_of(size: (u32, u32)) -> f64 {
+-    f64::from(size.0) / f64::from(size.1.max(1))
+-}
+-
+ /// How long the title keeps the notice of an F9 capture, milliseconds (VIEW-026).
+ const NOTICE_MS: u64 = 8_000;
+ 
+@@ -530,7 +496,17 @@ impl App<'_> {
+         }
+         // `enable_lit` is not part of `warm_up`: the lit and atmosphere passes are enabled and used once per ring set here, before the
+         // first measured frame, whether the window starts lit or on the debug path (REND-017, VIEW-007).
+-        rig.renderer.warm_up_lit(&ctx, &self.lit_warm(cfg.size)?).map_err(|e| format!("warming the lit path: {e}"))?;
++        let warm_lit = viewer_lit_plan(&cfg.look, cfg.radius_m, 0.0, true, cfg.atmosphere)?.with_water_level(cfg.water_level_m);
++        rig.renderer
++            .warm_up_lit(&ctx, &{
++                let mut warm = lit_warm_plan(self.cameras[0], cfg.size, cfg.lod.cells, warm_lit);
++                // A world with water warms the water pass too (no node: the pipelines and the copy target exist before frame 0).
++                if self.world.has_water() {
++                    warm.water = Some(empty_water_plan(&cfg.look.water));
++                }
++                warm
++            })
++            .map_err(|e| format!("warming the lit path: {e}"))?;
+         // The clipmap shadow pass (ADR 0085 layer 1), off unless asked for: the planner runs on the terrain share.
+         // A smoke run uses 256-texel levels (the software adapter gathers 1024^2 levels in seconds a frame); a real run the full size.
+         let shadow = cfg.shadow_march.then(|| {
+@@ -643,7 +619,7 @@ impl App<'_> {
+     /// A click on the globe overview at the cursor: a marker or the surface under it, and the flight there starts (VIEW-013).
+     fn globe_click(&mut self) {
+         let Some(st) = self.state.as_mut() else { return };
+-        let viewport = Viewport { width_px: f64::from(self.size.0), height_px: f64::from(self.size.1) };
++        let viewport = Viewport { width_px: f64::from(self.cfg.size.0), height_px: f64::from(self.cfg.size.1) };
+         let limits = planet_frame::pick::PickLimits::new(self.cfg.radius_m, self.lod.max_height_m);
+         let field = self.field.as_ref();
+         let height = |d: planet_core::Vec3| field.height(d);
+@@ -669,7 +645,7 @@ impl App<'_> {
+     /// arrow elsewhere. Outside the overview the cursor is the arrow and there is no target.
+     fn update_click_target(&mut self) {
+         let Some(st) = self.state.as_mut() else { return };
+-        let viewport = Viewport { width_px: f64::from(self.size.0), height_px: f64::from(self.size.1) };
++        let viewport = Viewport { width_px: f64::from(self.cfg.size.0), height_px: f64::from(self.cfg.size.1) };
+         let limits = planet_frame::pick::PickLimits::new(self.cfg.radius_m, self.lod.max_height_m);
+         let field = self.field.as_ref();
+         let height = |d: planet_core::Vec3| field.height(d);
+@@ -684,41 +660,11 @@ impl App<'_> {
+         }
+     }
+ 
+-    /// The lit plan the renderer is warmed with at `size`: the look's plan with the atmosphere, and the water pass where the world has water.
+-    fn lit_warm(&self, size: (u32, u32)) -> Result<planet_frame::TerrainPlan, String> {
+-        let cfg = self.cfg;
+-        let lit = viewer_lit_plan(&cfg.look, cfg.radius_m, 0.0, true, cfg.atmosphere)?.with_water_level(cfg.water_level_m);
+-        let mut warm = lit_warm_plan(self.cameras[0], size, cfg.lod.cells, lit);
+-        // A world with water warms the water pass too (no node: the pipelines and the copy target exist before frame 0).
+-        if self.world.has_water() {
+-            warm.water = Some(empty_water_plan(&cfg.look.water));
+-        }
+-        Ok(warm)
+-    }
+-
+-    /// The 3D target takes the window's size (VIEW-006): the renderer makes its targets again, the plan's viewport height follows, the
+-    /// exposure snaps, and the lit path is warmed again at once so the first drawn frame after the resize creates and first-uses nothing
+-    /// (REND-017).
+-    fn apply_resize(&mut self, new: (u32, u32)) -> Result<(), String> {
+-        self.size = new;
+-        self.pending_resize = None;
+-        if let Some(lod) = lod_for_size(&self.lod, new) {
+-            self.lod = lod;
+-        }
+-        let warm = self.lit_warm(new)?;
+-        if let Some(st) = self.state.as_mut() {
+-            st.rig.renderer.resize(&st.ctx, new);
+-            st.viewer.reset_exposure();
+-            st.rig.renderer.warm_up_lit(&st.ctx, &warm).map_err(|e| format!("warming the lit path after a resize: {e}"))?;
+-        }
+-        Ok(())
+-    }
+-
+     /// The request of a frame; `coarse` is the editor's coarse-LOD inspection view (the error bound times four, VIEW-014).
+     fn request(&self, camera: Camera, view: TerrainView, coarse: bool) -> TerrainRequest {
+         TerrainRequest {
+             camera,
+-            size: self.size,
++            size: self.cfg.size,
+             view,
+             lod: planet_frame::viewer::effective_lod(&self.lod, coarse),
+             face_mapping: planet_core::cube::FaceMapping::id(&planet_core::cube::TangentWarp).to_string(),
+@@ -731,12 +677,6 @@ impl App<'_> {
+         let cfg = self.cfg;
+         let began = Instant::now();
+         let now_ms = self.clock.now_ms();
+-        // The 3D target takes the window's size once it has settled; every size the frame reads comes from `self.size`.
+-        if let Some(new) = resize_due(self.size, self.pending_resize, now_ms) {
+-            self.apply_resize(new)?;
+-        } else if self.pending_resize.is_some_and(|(sz, _)| sz == self.size) {
+-            self.pending_resize = None;
+-        }
+         if let Some(st) = self.state.as_mut() {
+             st.stall.begin();
+         }
+@@ -842,7 +782,7 @@ impl App<'_> {
+                 }
+             }
+             if cfg.smoke && cfg.edit {
+-                let viewport = Viewport { width_px: f64::from(self.size.0), height_px: f64::from(self.size.1) };
++                let viewport = Viewport { width_px: f64::from(cfg.size.0), height_px: f64::from(cfg.size.1) };
+                 let limits = PickLimits::new(radius, lod_max_height_m);
+                 let camera = st.last_camera;
+                 let frames = st.frames;
+@@ -862,11 +802,9 @@ impl App<'_> {
+             let ground = |p: planet_core::PlanetFixed| radius + ground_m.unwrap_or_else(|| field.height(p.0.normalized()));
+             let height = |p: planet_core::PlanetFixed| p.0.length() - ground(p);
+             let had_globe = st.viewer.globe.is_some();
+-            let mut camera = st.viewer.camera(self.cameras, now_ms, dt, &self.params, &height, &ground);
+-            // The scripted cameras carry the aspect of the start size: the projection follows the window.
+-            camera.aspect = aspect_of(self.size);
++            let camera = st.viewer.camera(self.cameras, now_ms, dt, &self.params, &height, &ground);
+             let camera = match st.sweep.as_ref() {
+-                Some(s) if !s.done() => s.camera(&|d| field.height(d), radius, f64::from(self.size.0) / f64::from(self.size.1)),
++                Some(s) if !s.done() => s.camera(&|d| field.height(d), radius, f64::from(cfg.size.0) / f64::from(cfg.size.1)),
+                 _ => camera,
+             };
+             // The gate holds the first pose of its path while the edit script runs, then replays the path in real time.
+@@ -914,7 +852,7 @@ impl App<'_> {
+             }
+             st.globe_stats.landings += u64::from(had_globe && st.viewer.globe.is_none() && st.viewer.is_free());
+             // The globe overview: the markers it shows (render pixels to window pixels) and the one under the cursor.
+-            let viewport = Viewport { width_px: f64::from(self.size.0), height_px: f64::from(self.size.1) };
++            let viewport = Viewport { width_px: f64::from(cfg.size.0), height_px: f64::from(cfg.size.1) };
+             if st.viewer.globe.is_some() {
+                 // The edits the camera shows are markers too (VIEW-022), found over the tiles the last plan wanted.
+                 if let Some(e) = st.edit.as_mut() {
+@@ -1396,7 +1334,7 @@ impl App<'_> {
+     /// A mouse button in the editor mode: the left one edits (a press in the world presses, a release always releases), the right one looks
+     /// around while it is held.
+     fn edit_mouse(&mut self, state: ElementState, button: MouseButton, world: bool) {
+-        let viewport = Viewport { width_px: f64::from(self.size.0), height_px: f64::from(self.size.1) };
++        let viewport = Viewport { width_px: f64::from(self.cfg.size.0), height_px: f64::from(self.cfg.size.1) };
+         let limits = PickLimits::new(self.cfg.radius_m, self.lod.max_height_m);
+         let field = self.field.as_ref();
+         let Some(st) = self.state.as_mut() else { return };
+@@ -1686,8 +1624,6 @@ impl ApplicationHandler for App<'_> {
+                 if let Some(st) = self.state.as_mut() {
+                     st.surface.resize(&st.ctx, (size.width, size.height));
+                 }
+-                // The 3D target follows the window once the size holds (dragging an edge sends a stream of sizes); a minimised window (0) keeps it.
+-                self.pending_resize = on_resized(self.pending_resize, size.width, size.height, self.clock.now_ms());
+             }
+             WindowEvent::KeyboardInput { event, is_synthetic, .. } if !self.cfg.smoke => {
+                 let PhysicalKey::Code(code) = event.physical_key else { return };
+@@ -1749,8 +1685,10 @@ impl ApplicationHandler for App<'_> {
+             WindowEvent::CursorMoved { position, .. } => {
+                 if let Some(st) = self.state.as_mut() {
+                     let inner = st.window.inner_size();
+-                    let (sx, sy) =
+-                        (f64::from(self.size.0) / f64::from(inner.width.max(1)), f64::from(self.size.1) / f64::from(inner.height.max(1)));
++                    let (sx, sy) = (
++                        f64::from(self.cfg.size.0) / f64::from(inner.width.max(1)),
++                        f64::from(self.cfg.size.1) / f64::from(inner.height.max(1)),
++                    );
+                     let now = [position.x * sx, position.y * sy];
+                     // A press only counts while the overview is shown; otherwise it is stale.
+                     if st.viewer.globe.is_none() {
+@@ -1759,12 +1697,12 @@ impl ApplicationHandler for App<'_> {
+                     let d = [now[0] - st.cursor[0], now[1] - st.cursor[1]];
+                     if world && st.press.moved_by(libm::hypot(d[0], d[1])) {
+                         if let Some(g) = st.viewer.globe.as_mut() {
+-                            g.drag(d[0], d[1], self.cameras[0].fov_y_rad, f64::from(self.size.1));
++                            g.drag(d[0], d[1], self.cameras[0].fov_y_rad, f64::from(self.cfg.size.1));
+                         }
+                     }
+                     st.cursor = now;
+                     if world && st.edit_down {
+-                        let viewport = Viewport { width_px: f64::from(self.size.0), height_px: f64::from(self.size.1) };
++                        let viewport = Viewport { width_px: f64::from(self.cfg.size.0), height_px: f64::from(self.cfg.size.1) };
+                         let limits = PickLimits::new(self.cfg.radius_m, self.lod.max_height_m);
+                         let camera = st.last_camera;
+                         if let Some(e) = st.edit.as_mut() {
+@@ -2119,8 +2057,6 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
+         field_stage: world.field_stage(),
+         lod: cfg.lod.clone(),
+         cameras: &script.cameras,
+-        size: cfg.size,
+-        pending_resize: None,
+         clock: Arc::new(SystemClock::new()),
+         params: ControllerParams::for_radius(radius_m),
+         state: None,
+@@ -2695,50 +2631,3 @@ mod tests {
+         }
+     }
+ }
+-
+-#[cfg(test)]
+-mod resize_tests {
+-    use super::*;
+-
+-    // spec: VIEW-006
+-    #[test]
+-    fn a_window_size_that_has_held_becomes_the_target_size_and_one_that_has_not_waits() {
+-        let now = 10_000;
+-        assert_eq!(resize_due((1280, 720), None, now), None, "nothing pending");
+-        assert_eq!(resize_due((1280, 720), Some(((1920, 1080), now - 10)), now), None, "still being dragged");
+-        assert_eq!(resize_due((1280, 720), Some(((1920, 1080), now - RESIZE_SETTLE_MS)), now), Some((1920, 1080)), "it has held");
+-        assert_eq!(resize_due((1280, 720), Some(((1280, 720), now - 5_000)), now), None, "back to the current size: nothing to do");
+-        assert_eq!(resize_due((1280, 720), Some(((1920, 1080), now + 5)), now), None, "a clock that stepped back waits");
+-    }
+-
+-    // spec: VIEW-006
+-    #[test]
+-    fn the_projection_aspect_is_the_targets() {
+-        assert!((aspect_of((1920, 1080)) - 16.0 / 9.0).abs() < 1e-12);
+-        assert!((aspect_of((800, 800)) - 1.0).abs() < 1e-12);
+-        assert_eq!(aspect_of((640, 0)), 640.0, "a zero height is read as one pixel, never a division by zero");
+-    }
+-
+-    // spec: VIEW-006
+-    #[test]
+-    fn a_drag_of_sizes_waits_for_the_last_and_a_minimised_window_changes_nothing() {
+-        let mut pending = None;
+-        for (i, (w, h)) in [(900, 600), (950, 620), (1000, 640)].into_iter().enumerate() {
+-            pending = on_resized(pending, w, h, 1_000 + 10 * i as u64);
+-        }
+-        assert_eq!(pending, Some(((1000, 640), 1_020)), "the last size of the drag, at its time");
+-        assert_eq!(resize_due((1280, 720), pending, 1_030), None, "10 ms after the last size: still dragging");
+-        assert_eq!(resize_due((1280, 720), pending, 1_020 + RESIZE_SETTLE_MS), Some((1000, 640)));
+-        assert_eq!(on_resized(pending, 0, 0, 5_000), pending, "a minimised window keeps what was pending");
+-        assert_eq!(on_resized(None, 0, 480, 5_000), None);
+-    }
+-
+-    // spec: VIEW-006
+-    #[test]
+-    fn the_plan_parameters_follow_the_targets_height_and_keep_the_old_ones_when_they_would_fail() {
+-        let base = LodParams { cells: 16, viewport_h_px: 720.0, tau_px: 2.5, max_level: 26, ..LodParams::earth_1080p() };
+-        let tall = lod_for_size(&base, (1920, 1080)).expect("a taller target");
+-        assert_eq!((tall.viewport_h_px, tall.tau_px, tall.max_height_m), (1080.0, 2.5, base.max_height_m));
+-        assert!(lod_for_size(&base, (64, 20)).is_none(), "20 px high and 16 cells fail the parameters' own check (viewport / tau > 32)");
+-    }
+-}
+diff --git a/crates/frame/src/viewer.rs b/crates/frame/src/viewer.rs
+index e98ca394..87e962b5 100644
+--- a/crates/frame/src/viewer.rs
++++ b/crates/frame/src/viewer.rs
+@@ -360,11 +360,6 @@ impl ViewerState {
+         self
+     }
+ 
+-    /// Ask for the exposure to snap to its target on the next lit frame (the lit targets were made again at a new size).
+-    pub fn reset_exposure(&mut self) {
+-        self.exposure_reset = true;
+-    }
+-
+     /// Whether the next lit frame snaps the exposure to its target, once: true for the first lit frame, after the lit path was
+     /// switched back on and after a restart of the flight (a cut).
+     pub fn take_exposure_reset(&mut self) -> bool {
+@@ -923,17 +918,6 @@ mod tests {
+     use super::*;
+     use planet_core::Vec3;
+ 
+-    // spec: VIEW-006
+-    #[test]
+-    fn a_resize_asks_for_the_exposure_to_snap_once() {
+-        let mut v = ViewerState::new(0, 3, 0, true);
+-        assert!(v.take_exposure_reset(), "the first lit frame snaps");
+-        assert!(!v.take_exposure_reset(), "and only that one");
+-        v.reset_exposure();
+-        assert!(v.take_exposure_reset(), "a resize asks for the next lit frame to snap");
+-        assert!(!v.take_exposure_reset());
+-    }
+-
+     fn cam(x: f64) -> Camera {
+         Camera {
+             position: PlanetFixed(Vec3::new(6.4e6 + x, 0.0, 0.0)),
 diff --git a/crates/generators/examples/preview_world.rs b/crates/generators/examples/preview_world.rs
 index 7f89bcea..a926c4e8 100644
 --- a/crates/generators/examples/preview_world.rs
@@ -13,37 +330,38 @@ index 7f89bcea..a926c4e8 100644
      std::fs::write(out.join("report.txt"), &report).unwrap_or_else(|e| fail(&format!("cannot write the report: {e}")));
      print!("{report}");
 diff --git a/crates/generators/src/global.rs b/crates/generators/src/global.rs
-index f8c212bb..b4648413 100644
+index f8c212bb..d5ceaf1d 100644
 --- a/crates/generators/src/global.rs
 +++ b/crates/generators/src/global.rs
-@@ -179,7 +179,8 @@ pub(crate) fn terrain(seed: u64, d: Vec3) -> Terrain {
+@@ -179,7 +179,9 @@ pub(crate) fn terrain(seed: u64, d: Vec3) -> Terrain {
      );
      let warped = d + warp * 0.45;
      // Rounded to the stored f32 first, so land and the sign of the elevation are decided from the same number.
 -    let continent = f64::from((fbm(seed, LAYER_CONTINENT, warped, 1.1, 5) * 1.7) as f32);
 +    // SPIKE-92 (spike branch only): a continent candidate in place of today's value.
-+    let continent = f64::from((crate::spike92::continent(seed, d).unwrap_or_else(|| fbm(seed, LAYER_CONTINENT, warped, 1.1, 5) * 1.7)) as f32);
++    let continent =
++        f64::from((crate::spike92::continent(seed, d).unwrap_or_else(|| fbm(seed, LAYER_CONTINENT, warped, 1.1, 5) * 1.7)) as f32);
      let land_depth = continent - SEA_LEVEL_C;
      let zone = smoothstep(0.1, 0.6, fbm(seed, LAYER_RANGE_MASK, warped, 1.7, 3) + 0.2);
      let inland = smoothstep(0.02, 0.35, land_depth);
 diff --git a/crates/generators/src/lib.rs b/crates/generators/src/lib.rs
-index a03f762c..ab936768 100644
+index a03f762c..a9a0dc41 100644
 --- a/crates/generators/src/lib.rs
 +++ b/crates/generators/src/lib.rs
-@@ -28,6 +28,7 @@ pub mod normals;
+@@ -27,6 +27,7 @@ pub mod mesh;
+ pub mod normals;
  pub mod ocean;
  pub mod preview;
- pub mod stage;
 +pub mod spike92;
+ pub mod stage;
  pub mod stamp;
  /// Test-only stress terrain; only test builds enable the `stress` feature (dev-dependencies).
- #[cfg(feature = "stress")]
 diff --git a/crates/generators/src/spike92.rs b/crates/generators/src/spike92.rs
 new file mode 100644
-index 00000000..c3a00927
+index 00000000..25e7804b
 --- /dev/null
 +++ b/crates/generators/src/spike92.rs
-@@ -0,0 +1,208 @@
+@@ -0,0 +1,439 @@
 +//! SPIKE-92 (spike branch only, never merged): continent candidates for M9 generator round 2. `S92_CANDIDATE` picks the continent value of
 +//! `global::terrain`: `base` (today's), `A` (tuned fBm: `S92_FREQ`, `S92_OCT`, `S92_WARP`) or `B` (cratons with multi-scale detail:
 +//! `S92_CRATONS`, `S92_RADIUS`, `S92_SPREAD`, `S92_MID`, `S92_HIGH`). A and B are shifted per seed so that about `S92_LAND` (0.29) of the
@@ -63,10 +381,39 @@ index 00000000..c3a00927
 +#[derive(Clone, Copy, Debug)]
 +pub enum Candidate {
 +    Base,
-+    A { freq: f64, oct: u32, warp: f64, gain: f64 },
-+    B { cratons: u32, radius: f64, spread: f64, mid: f64, high: f64, gain: f64 },
++    A {
++        freq: f64,
++        oct: u32,
++        warp: f64,
++        gain: f64,
++    },
++    B {
++        cratons: u32,
++        radius: f64,
++        spread: f64,
++        mid: f64,
++        high: f64,
++        gain: f64,
++    },
 +    /// Ranked cratons: area shares of the land (`S92_SIZES`, largest first), centres kept apart, one profile slope for every craton.
-+    B2 { mid: f64, high: f64, gain: f64 },
++    B2 {
++        mid: f64,
++        high: f64,
++        gain: f64,
++    },
++    /// Round 2 hybrid: A's warped fBm plus `k` times the sum of soft elongated craton weights exp(-(rho^2)^pw) (ranked sizes, each craton
++    /// a chain of lobes, aspect `amin..amax`), the craton field warped by `cwarp`.
++    H {
++        freq: f64,
++        oct: u32,
++        warp: f64,
++        gain: f64,
++        k: f64,
++        amin: f64,
++        amax: f64,
++        cwarp: f64,
++        pw: f64,
++    },
 +}
 +
 +fn env(k: &str, d: f64) -> f64 {
@@ -91,6 +438,17 @@ index 00000000..c3a00927
 +            gain: env("S92_GAIN", 0.6),
 +        },
 +        Ok("B2") => Candidate::B2 { mid: env("S92_MID", 0.12), high: env("S92_HIGH", 0.12), gain: env("S92_GAIN", 0.65) },
++        Ok("H") => Candidate::H {
++            freq: env("S92_FREQ", 1.6),
++            oct: env("S92_OCT", 8.0) as u32,
++            warp: env("S92_WARP", 0.6),
++            gain: env("S92_GAIN", 0.65),
++            k: env("S92_K", 1.0),
++            amin: env("S92_AMIN", 1.5),
++            amax: env("S92_AMAX", 3.0),
++            cwarp: env("S92_CWARP", 0.3),
++            pw: env("S92_PW", 1.0),
++        },
 +        _ => Candidate::Base,
 +    })
 +}
@@ -181,6 +539,80 @@ index 00000000..c3a00927
 +    out
 +}
 +
++/// An elongated lobe: centre, major axis (tangent at the centre), minor axis, major and minor angular radii (their product is r²).
++type Ellipse = (Vec3, Vec3, Vec3, f64, f64);
++
++/// The ranked cratons of a seed as lobes. Each craton of at least 20 % of the land is a chain of `S92_LOBES` lobes, of 4-20 % 1 to `S92_LOBES` (smaller ones: 1)
++/// along a spine that turns by up to `S92_TURN` rad per lobe, lobe centres `S92_SPACING` times the two major radii apart; the lobes split the craton's cap area at random (radii r·√a and r/√a, aspect
++/// uniform in `amin..amax`, the major axis along the spine). Craton centres are at least the two extents plus 0.1 rad apart (up to 200
++/// draws).
++fn ellipses(seed: u64, amin: f64, amax: f64) -> Vec<Ellipse> {
++    static M: OnceLock<Mutex<HashMap<u64, Vec<Ellipse>>>> = OnceLock::new();
++    let m = M.get_or_init(Default::default);
++    if let Some(v) = m.lock().expect("ellipse memo").get(&seed) {
++        return v.clone();
++    }
++    let (lobes_max, turn, spacing) = ((env("S92_LOBES", 1.0) as u32).max(1), env("S92_TURN", 0.8), env("S92_SPACING", 0.8));
++    let mut s = seed ^ 0x5392_e11e;
++    let mut out: Vec<Ellipse> = Vec::new();
++    let mut placed: Vec<(Vec3, f64)> = Vec::new();
++    for share in sizes() {
++        let n = if *share >= 0.2 {
++            lobes_max
++        } else if *share >= 0.04 {
++            (1 + (unit(&mut s) * f64::from(lobes_max)) as u32).min(lobes_max)
++        } else {
++            1
++        };
++        let weights: Vec<f64> = (0..n).map(|_| 0.5 + unit(&mut s)).collect();
++        let total: f64 = weights.iter().sum();
++        // The spine in the craton's tangent plane (radians): (x, y, direction, area weight r², ra, rb) per lobe.
++        let (mut x, mut y, mut dir) = (0.0f64, 0.0f64, core::f64::consts::TAU * unit(&mut s));
++        let mut local: Vec<(f64, f64, f64, f64, f64, f64)> = Vec::new();
++        for (j, w) in weights.iter().enumerate() {
++            let r = libm::acos((1.0 - 2.0 * land_target() * share * w / total).clamp(-1.0, 1.0));
++            let a = amin + (amax - amin) * unit(&mut s);
++            let (ra, rb) = (r * libm::sqrt(a), r / libm::sqrt(a));
++            if j > 0 {
++                dir += (2.0 * unit(&mut s) - 1.0) * turn;
++                let prev = local[j - 1].4;
++                x += libm::cos(dir) * spacing * (prev + ra);
++                y += libm::sin(dir) * spacing * (prev + ra);
++            }
++            local.push((x, y, dir, r * r, ra, rb));
++        }
++        let area: f64 = local.iter().map(|l| l.3).sum();
++        let cx = local.iter().map(|l| l.0 * l.3).sum::<f64>() / area;
++        let cy = local.iter().map(|l| l.1 * l.3).sum::<f64>() / area;
++        let extent = local.iter().map(|l| libm::hypot(l.0 - cx, l.1 - cy) + l.4).fold(0.0, f64::max);
++        let mut c = Vec3::new(0.0, 0.0, 1.0);
++        for _ in 0..200 {
++            let z = 2.0 * unit(&mut s) - 1.0;
++            let az = core::f64::consts::TAU * unit(&mut s);
++            let q = libm::sqrt((1.0 - z * z).max(0.0));
++            c = Vec3::new(q * libm::cos(az), q * libm::sin(az), z);
++            if placed.iter().all(|(o, eo)| angle(c, *o) >= extent + eo + 0.1) {
++                break;
++            }
++        }
++        placed.push((c, extent));
++        let helper = if c.z.abs() < 0.9 { Vec3::new(0.0, 0.0, 1.0) } else { Vec3::new(1.0, 0.0, 0.0) };
++        let e1 = c.cross(helper).normalized();
++        let e2 = c.cross(e1);
++        for (lx, ly, ldir, _, ra, rb) in local {
++            // The exponential map from the craton's tangent plane to the sphere.
++            let (dx, dy) = (lx - cx, ly - cy);
++            let rho = libm::hypot(dx, dy);
++            let pc = if rho < 1e-12 { c } else { (c * libm::cos(rho) + (e1 * dx + e2 * dy) * (libm::sin(rho) / rho)).normalized() };
++            let d3 = e1 * libm::cos(ldir) + e2 * libm::sin(ldir);
++            let t = (d3 - pc * d3.dot(pc)).normalized();
++            out.push((pc, t, pc.cross(t), ra, rb));
++        }
++    }
++    m.lock().expect("ellipse memo").insert(seed, out.clone());
++    out
++}
++
 +fn angle(a: Vec3, b: Vec3) -> f64 {
 +    libm::atan2(a.cross(b).length(), a.dot(b))
 +}
@@ -218,7 +650,124 @@ index 00000000..c3a00927
 +            let core = ranked(seed).iter().map(|(c, r)| r - angle(p, *c)).fold(f64::NEG_INFINITY, f64::max);
 +            core + mid * fbm(seed, LAYER_MID, p, 3.0, 3) + high * fbm_gain(seed, LAYER_HIGH, p, 6.0, 7, gain)
 +        }
++        Candidate::H { .. } => h_value(seed, layout(seed, c), d, c),
 +    }
++}
++
++/// The hybrid's raw value at `d` with the craton layout drawn from `lseed`.
++fn h_value(seed: u64, lseed: u64, d: Vec3, c: Candidate) -> f64 {
++    let Candidate::H { freq, oct, warp, gain, k, amin, amax, cwarp, pw } = c else { return 0.0 };
++    {
++        let w = Vec3::new(
++            fbm(seed, LAYER_WARP, d, 1.3, 3),
++            fbm(seed, LAYER_WARP, d + Vec3::new(17.0, 0.0, 0.0), 1.3, 3),
++            fbm(seed, LAYER_WARP, d + Vec3::new(0.0, 31.0, 0.0), 1.3, 3),
++        );
++        let shape = fbm_gain(seed, LAYER_A, d + w * warp, freq, oct, gain) * 1.7;
++        let pc = (d + w * cwarp).normalized();
++        // rho is the elliptical distance in the tangent frame of each lobe (front hemisphere only).
++        let bias: f64 = ellipses(lseed, amin, amax)
++            .iter()
++            .map(|(c, t, b, ra, rb)| {
++                let z = pc.dot(*c);
++                if z <= 0.0 {
++                    return 0.0;
++                }
++                let (u, v) = (libm::atan2(pc.dot(*t), z) / ra, libm::atan2(pc.dot(*b), z) / rb);
++                libm::exp(-libm::pow(u * u + v * v, pw))
++            })
++            .sum();
++        // The fBm's amplitude peaks on the craton margins (bias 0.5) and falls to `S92_DEEP` in the deep ocean and the interiors.
++        let deep = env("S92_DEEP", 1.0);
++        let wm = bias.min(1.0);
++        shape * (deep + (1.0 - deep) * 4.0 * wm * (1.0 - wm)) + k * bias
++    }
++}
++
++/// The craton layout seed of a seed: draws `seed`, then derived seeds (up to `S92_RETRY` draws), until a coarse land map (2 degree cells,
++/// 29 % land by area) has 4-7 masses of at least 1 Mkm2 and the largest holds 47-60 % of the land; else the draw closest to that. Deterministic
++/// per seed (CON-14): the grid, the draw order and the tie-break are fixed.
++fn layout(seed: u64, c: Candidate) -> u64 {
++    static M: OnceLock<Mutex<HashMap<u64, u64>>> = OnceLock::new();
++    let m = M.get_or_init(Default::default);
++    if let Some(v) = m.lock().expect("layout memo").get(&seed) {
++        return *v;
++    }
++    let tries = (env("S92_RETRY", 1.0) as u64).max(1);
++    let (h, w) = (90usize, 180usize);
++    let cell: Vec<f64> = (0..h)
++        .map(|i| {
++            let lat = (90.0 - (i as f64 + 0.5) * 2.0).to_radians();
++            let s = 6371.0 * 2.0f64.to_radians();
++            s * s * libm::cos(lat)
++        })
++        .collect();
++    let (mut best, mut best_cost) = (seed, f64::INFINITY);
++    for t in 0..tries {
++        let lseed = if t == 0 { seed } else { seed ^ (0x5392_7e7e_u64.wrapping_mul(t + 1)) };
++        let v: Vec<f64> = (0..h * w)
++            .map(|k| {
++                let (i, j) = (k / w, k % w);
++                let lat = (90.0 - (i as f64 + 0.5) * 2.0).to_radians();
++                let lon = (-180.0 + (j as f64 + 0.5) * 2.0).to_radians();
++                h_value(seed, lseed, Vec3::new(libm::cos(lat) * libm::cos(lon), libm::cos(lat) * libm::sin(lon), libm::sin(lat)), c)
++            })
++            .collect();
++        // The area-weighted (1 - land) quantile.
++        let mut order: Vec<usize> = (0..h * w).collect();
++        order.sort_by(|a, b| v[*b].total_cmp(&v[*a]).then(a.cmp(b)));
++        let total: f64 = cell.iter().sum::<f64>() * w as f64;
++        let mut land = vec![false; h * w];
++        let mut acc = 0.0;
++        for k in order {
++            if acc >= land_target() * total {
++                break;
++            }
++            land[k] = true;
++            acc += cell[k / w];
++        }
++        // Masses: 8-connected, wrapping in longitude.
++        let mut label = vec![usize::MAX; h * w];
++        let mut areas: Vec<f64> = Vec::new();
++        for k0 in 0..h * w {
++            if !land[k0] || label[k0] != usize::MAX {
++                continue;
++            }
++            let id = areas.len();
++            let mut a = 0.0;
++            let mut stack = vec![k0];
++            label[k0] = id;
++            while let Some(k) = stack.pop() {
++                a += cell[k / w];
++                let (i, j) = ((k / w) as i64, (k % w) as i64);
++                for di in -1..=1i64 {
++                    for dj in -1..=1i64 {
++                        let ii = i + di;
++                        if ii < 0 || ii >= h as i64 {
++                            continue;
++                        }
++                        let n = ii as usize * w + (j + dj).rem_euclid(w as i64) as usize;
++                        if land[n] && label[n] == usize::MAX {
++                            label[n] = id;
++                            stack.push(n);
++                        }
++                    }
++                }
++            }
++            areas.push(a);
++        }
++        let s1 = areas.iter().filter(|a| **a >= 1e6).count() as f64;
++        let s2 = areas.iter().cloned().fold(0.0, f64::max) / acc;
++        let cost = (4.0 - s1).max(0.0) + (s1 - 7.0).max(0.0) + 10.0 * ((0.47 - s2).max(0.0) + (s2 - 0.60).max(0.0));
++        if cost < best_cost {
++            (best, best_cost) = (lseed, cost);
++        }
++        if cost == 0.0 {
++            break;
++        }
++    }
++    m.lock().expect("layout memo").insert(seed, best);
++    best
 +}
 +
 +/// The land offset of a seed: the `1 - land` quantile of the raw value over a fixed Fibonacci grid of 20,000 directions.
@@ -252,3 +801,206 @@ index 00000000..c3a00927
 +    }
 +    Some(raw(seed, d, c) - offset(seed, c) + crate::global::SEA_LEVEL_C)
 +}
+diff --git a/crates/render/src/terrain.rs b/crates/render/src/terrain.rs
+index 56ef77fc..6140d6d3 100644
+--- a/crates/render/src/terrain.rs
++++ b/crates/render/src/terrain.rs
+@@ -1154,8 +1154,6 @@ pub struct TerrainRenderer {
+     measure_variant: MeasureVariant,
+     /// The water pass (ADR 0041, ADR 0042 point 2): None until [`enable_water`](TerrainRenderer::enable_water).
+     water: Option<WaterGpu>,
+-    /// The body the atmosphere was enabled for: a resize makes the atmosphere path again over the new targets.
+-    atmosphere_body: Option<planet_frame::look::atmosphere::Atmosphere>,
+ }
+ 
+ /// The lit path's terrain pipelines (HDR target, `fs_lit`) and its post chain.
+@@ -1503,7 +1501,6 @@ impl TerrainRenderer {
+             lit_objects: 0,
+             measure_variant: MeasureVariant::Product,
+             water: None,
+-            atmosphere_body: None,
+         }
+     }
+ 
+@@ -1806,7 +1803,6 @@ impl TerrainRenderer {
+             return;
+         }
+         lit.path.enable_atmosphere(ctx, &self.depth_view, atmosphere);
+-        self.atmosphere_body = Some(*atmosphere);
+         let (pipeline, pipeline_cut) = self.atmosphere_terrain_pipelines(ctx);
+         // Counted by declaration: the atmosphere path's scene target, two tables, two products, the uniform buffer and three
+         // pipelines (sky view, aerial perspective, composite) beside the two terrain pipelines made here.
+@@ -1843,53 +1839,6 @@ impl TerrainRenderer {
+         self.water = Some(water);
+     }
+ 
+-    /// Draw at another size from the next frame on (a window resize): the colour and depth targets and, where enabled, the lit path's
+-    /// targets (scene target, exposure state, atmosphere products) and the water pass's copy are made again at `size`; pipelines, tiles and
+-    /// pools are kept. The adapted exposure starts over (the plan's reset flag snaps it). Frames in flight keep the targets they use.
+-    /// A plan of the old size is refused afterwards (`SizeMismatch`).
+-    pub fn resize(&mut self, ctx: &GpuContext, size: (u32, u32)) {
+-        assert!(size.0 > 0 && size.1 > 0, "a target needs a size");
+-        if size == self.size {
+-            return;
+-        }
+-        let device = &ctx.device;
+-        let target = |label, format, usage| {
+-            device.create_texture(&wgpu::TextureDescriptor {
+-                label: Some(label),
+-                size: wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 },
+-                mip_level_count: 1,
+-                sample_count: 1,
+-                dimension: wgpu::TextureDimension::D2,
+-                format,
+-                usage,
+-                view_formats: &[],
+-            })
+-        };
+-        self.color = target(
+-            "terrain-color",
+-            wgpu::TextureFormat::Rgba8Unorm,
+-            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::TEXTURE_BINDING,
+-        );
+-        let depth = target("terrain-depth", DEPTH_FORMAT, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING);
+-        self.color_view = self.color.create_view(&Default::default());
+-        self.depth_view = depth.create_view(&Default::default());
+-        self.size = size;
+-        if let Some(lit) = self.lit.as_mut() {
+-            lit.path = LitPath::new(ctx, size);
+-            if let Some(body) = self.atmosphere_body {
+-                lit.path.enable_atmosphere(ctx, &self.depth_view, &body);
+-            }
+-        }
+-        if self.water.is_some() {
+-            let layouts = CompactLayouts { frame: &self.compact.bgl_frame, block: &self.compact.bgl_block, cells: self.cells };
+-            let mut water = WaterGpu::new(device, size, &self.bgl, &layouts);
+-            if let Some(a) = self.lit.as_ref().and_then(|l| l.path.atmosphere()) {
+-                water.add_atmosphere(device, &self.bgl, &layouts, a);
+-            }
+-            self.water = Some(water);
+-        }
+-    }
+-
+     /// Whether the water pass is enabled.
+     pub fn water_enabled(&self) -> bool {
+         self.water.is_some()
+diff --git a/crates/render/tests/gpu_all.rs b/crates/render/tests/gpu_all.rs
+index f9e0f3dc..0350c819 100644
+--- a/crates/render/tests/gpu_all.rs
++++ b/crates/render/tests/gpu_all.rs
+@@ -38,8 +38,6 @@ mod gpu_quadrants;
+ mod gpu_reference;
+ #[path = "gpu_renderer.rs"]
+ mod gpu_renderer;
+-#[path = "gpu_resize.rs"]
+-mod gpu_resize;
+ #[path = "gpu_resolve.rs"]
+ mod gpu_resolve;
+ #[path = "gpu_shading.rs"]
+diff --git a/crates/render/tests/gpu_resize.rs b/crates/render/tests/gpu_resize.rs
+deleted file mode 100644
+index 9ba57e68..00000000
+--- a/crates/render/tests/gpu_resize.rs
++++ /dev/null
+@@ -1,101 +0,0 @@
+-//! VIEW-006, tier C: a resize of the 3D target (owner, 2026-10-30: the target kept its size after a window resize). The renderer makes its
+-//! colour and depth targets, the lit path's targets and the atmosphere's products again at the new size, keeps its tiles, pipelines and pools,
+-//! and then draws the frame of a renderer built at that size from the start, byte for byte.
+-
+-use planet_core::cube::TangentWarp;
+-use planet_frame::look::atmosphere::Atmosphere;
+-use planet_frame::look::file::LookParams;
+-use planet_frame::look::LitPlan;
+-use planet_frame::pool::compact_format_pool_with;
+-use planet_frame::{plan_terrain, scripted_views, LodParams, TerrainPlan, TerrainRequest, TerrainView};
+-use planet_generators::compact::compact_tile_field;
+-use planet_generators::height::Reference;
+-use planet_render::{AdapterPolicy, ExecError, GpuContext, TerrainRenderer};
+-
+-const R: f64 = 6_371_000.0;
+-const CELLS: u32 = 16;
+-const EV: f32 = 15.0;
+-const SMALL: (u32, u32) = (96, 64);
+-const WIDE: (u32, u32) = (160, 72);
+-
+-/// The plan of scripted view 3 at `size`, its camera's aspect the size's.
+-fn plan_at(size: (u32, u32), atmosphere: bool) -> TerrainPlan {
+-    let aspect = f64::from(size.0) / f64::from(size.1);
+-    let (_, camera) = scripted_views(R, aspect, 1)[3];
+-    let lod = LodParams { cells: CELLS, viewport_h_px: 96.0, tau_px: 2.5, max_level: 26, ..LodParams::earth_1080p() };
+-    let mut p =
+-        plan_terrain(&TerrainRequest { camera, size, view: TerrainView::Level, lod, face_mapping: "tangent-v1".into(), seed: 1 }).unwrap();
+-    p.lit = Some(if atmosphere { LitPlan::fixed(EV).with_atmosphere(&LookParams::default(), R).unwrap() } else { LitPlan::fixed(EV) });
+-    p
+-}
+-
+-fn renderer_with_water(ctx: &GpuContext, size: (u32, u32), plans: &[&TerrainPlan], atmosphere: bool, water: bool) -> TerrainRenderer {
+-    let block_slots = 24 * 24;
+-    let pool = compact_format_pool_with(
+-        (128 << 20) + 4 * u64::from(block_slots) * planet_generators::compact::slot_bytes(CELLS),
+-        CELLS,
+-        block_slots,
+-        1,
+-    )
+-    .unwrap();
+-    let mut r = TerrainRenderer::with_pools(ctx, size, CELLS, pool);
+-    r.enable_lit(ctx);
+-    if atmosphere {
+-        r.enable_atmosphere(ctx, &Atmosphere::earth(R));
+-    }
+-    if water {
+-        r.enable_water(ctx);
+-    }
+-    for p in plans {
+-        for n in &p.nodes {
+-            if r.slot_of(n.tile).is_none() {
+-                r.upload_tile(ctx, &compact_tile_field(&Reference(1), &TangentWarp, n.tile, CELLS, R)).unwrap();
+-            }
+-        }
+-    }
+-    r
+-}
+-
+-fn resize_draws_what_a_fresh_renderer_draws(atmosphere: bool, water: bool) {
+-    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+-    let (small, wide) = (plan_at(SMALL, atmosphere), plan_at(WIDE, atmosphere));
+-    let mut resized = renderer_with_water(&ctx, SMALL, &[&small, &wide], atmosphere, water);
+-    resized.render(&ctx, &small, false).unwrap();
+-    let slots: Vec<_> = small.nodes.iter().map(|n| resized.slot_of(n.tile)).collect();
+-    resized.resize(&ctx, WIDE);
+-    assert!(small.nodes.iter().zip(&slots).all(|(n, s)| resized.slot_of(n.tile) == *s), "the tiles stay where they were");
+-    assert_eq!(resized.target_size(), WIDE);
+-    // The old size is refused, the new one is drawn.
+-    let e = resized.render(&ctx, &small, false).unwrap_err();
+-    assert!(matches!(e, ExecError::SizeMismatch { .. }), "{e}");
+-    resized.render(&ctx, &wide, false).unwrap();
+-    let got = resized.read_color(&ctx);
+-    assert_eq!((got.width, got.height), WIDE);
+-    let mut fresh = renderer_with_water(&ctx, WIDE, &[&wide], atmosphere, water);
+-    fresh.render(&ctx, &wide, false).unwrap();
+-    assert!(got.rgba == fresh.read_color(&ctx).rgba, "the resized renderer draws the frame of a fresh one (atmosphere: {atmosphere})");
+-    // And back again.
+-    resized.resize(&ctx, SMALL);
+-    resized.render(&ctx, &small, false).unwrap();
+-    let mut back = renderer_with_water(&ctx, SMALL, &[&small], atmosphere, water);
+-    back.render(&ctx, &small, false).unwrap();
+-    assert!(resized.read_color(&ctx).rgba == back.read_color(&ctx).rgba, "and back to the first size (atmosphere: {atmosphere})");
+-}
+-
+-// spec: VIEW-006
+-#[test]
+-fn a_resized_lit_renderer_draws_the_frame_of_a_fresh_one() {
+-    resize_draws_what_a_fresh_renderer_draws(false, false);
+-}
+-
+-// spec: VIEW-006
+-#[test]
+-fn a_resized_renderer_with_the_atmosphere_draws_the_frame_of_a_fresh_one() {
+-    resize_draws_what_a_fresh_renderer_draws(true, false);
+-}
+-
+-// spec: VIEW-006
+-#[test]
+-fn a_resized_renderer_with_the_water_pass_and_the_atmosphere_draws_the_frame_of_a_fresh_one() {
+-    resize_draws_what_a_fresh_renderer_draws(true, true);
+-}

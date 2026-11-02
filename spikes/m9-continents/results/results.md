@@ -1,6 +1,7 @@
 # SPIKE-92: continent candidates for M9 generator round 2
 
-Status: closed 2026-11-02. Prototype on `spike/m9-continents` (7e68ebb8, never merged); patch in `proto/spike92.patch`.
+Status: round 1 closed 2026-11-02 (7e68ebb8); round 2 (inbox #65, the hybrid and S9/S10) closed 2026-11-02 (efec4475 on `spike/m9-continents`, never merged); patch of both rounds in `proto/spike92.patch`.
+Planner review of round 1: B2 passes S1-S3 but is round blobs with noisy rims (S3 met by rim noise); A looks Earth-like but fails on sizes. Round 2 answers that.
 
 ## Question
 Which continent stage passes S1-S3 (SPIKE-91) and about 29 % land on seeds 1-5: a tuned fBm (A) or constrained multi-scale noise (B)?
@@ -86,3 +87,76 @@ Raw per-seed scores, including the largest seven areas: `raw/scores.json`.
 - Craton centres are uniform random with a separation rule; there is no plate or supercontinent logic, so placement is not Earth-like (S4+ of SPIKE-91 not scored).
 - Belts and classes still come from today's stage and do not follow the new coasts; round 1 (belts) and round 2 must be joined in M9.
 - One resolution only (0.25°); S3 at other scales not checked.
+
+# Round 2: the hybrid and two shape metrics (inbox #65)
+
+## Shape metrics (new; `proto/s92_shape.py`, masses of at least 1 Mkm²)
+
+| Metric | Definition | Earth (ETOPO 2022, 0.25°) | Disc | Gate |
+|---|---|---|---|---|
+| S9 compactness | area-weighted median of 4πA/P²; P the contour length (marching squares at 0.5) of the mass's land fraction on a 1° grid (about 111 km), E-W steps scaled by cos(latitude) | 0.096 (per mass 0.10-0.49) | 1.00 | ≤ 0.20 |
+| S10 elongation | median over masses of √(λ1/λ2), the eigenvalues of the area-weighted second moment in the tangent plane at the mass's mean direction | 1.77 (per mass 1.19-3.10) | 1.0 | 1.5-2.5 |
+
+- Earth's masses at 0.25° (ETOPO surface > 0; mask by `proto/s92_earthmask.py`): Afro-Eurasia 79.8 Mkm² (S9 0.10, S10 1.77), the Americas 38.9 (0.10, 3.10), Antarctica 13.7 (0.37, 1.19), Australia 7.7 (0.49, 1.51), Greenland 2.2 (0.39, 2.09).
+- The disc reference scores 1.00-1.07 (2-40 Mkm²): the contour perimeter removes the staircase bias of a cell-edge perimeter (which gives a disc 0.65).
+- The area-weighted S9 is dominated by the largest mass; the S9 gate is about twice Earth's value. The S10 band is the planner's, around Earth's 1.77.
+- Round 1 against them: B2 scores S9 0.33-0.48 and S10 1.1-1.3 (fails both on every seed); A scores S9 0.06-0.15, S10 1.6-2.4 (passes both).
+
+## Hybrid H (`S92_CANDIDATE=H`)
+raw = A's warped fBm × margin weight + k × Σ lobe weights, then round 1's per-seed land offset.
+
+| Part | Definition | Knob (final) |
+|---|---|---|
+| Shape | A's warped fBm, 8 octaves | `S92_FREQ` 1.6, `S92_GAIN` 0.72, `S92_WARP` 0.6 |
+| Cratons | ranked area shares of the land | `S92_SIZES` 0.50,0.26,0.10,0.06,0.03,0.02,0.01,0.01 |
+| Lobes | a craton of ≥ 20 % of the land is a chain of `S92_LOBES` lobes, of 4-20 % 1 to `S92_LOBES`, smaller 1; lobes split the craton's area at random; the spine turns up to `S92_TURN` rad per lobe; centres `S92_SPACING` × the two major radii apart | 3, 1.2, 0.6 |
+| Lobe weight | exp(-ρ²), ρ the elliptical distance (radii r·√a and r/√a, aspect a uniform in 1.5..`S92_AMAX`), on the point warped by `S92_CWARP` | `S92_AMAX` 2.5 or 3.0, `S92_CWARP` 0.3 |
+| Bias strength | k | `S92_K` 0.8-1.0 |
+| Margin weight | the fBm's amplitude is 1 on craton margins (bias 0.5), `S92_DEEP` in the deep ocean and craton interiors: deep + (1 − deep)·4w(1 − w), w = min(bias, 1) | `S92_DEEP` 0.3 |
+| Layout retry | the generator scores its own craton layout on a 2° grid (29 % land by area, 8-connected masses with wrap) and redraws it from a derived seed (up to `S92_RETRY` draws) until 4-7 masses ≥ 1 Mkm² and the largest 47-60 %; else it keeps the closest draw | `S92_RETRY` 12 |
+
+- Deterministic and libm only (CON-14): the layout grid, the draw order and the tie-break are fixed per seed. The retry costs up to 12 × 16,200 evaluations per seed, once per process.
+
+## Results (seeds 1-5)
+
+| Config | S1 | S2 % | S3 | S9 | S10 | all |
+|---|---|---|---|---|---|---|
+| A-f1.0-g.60 (8 oct) | 5 6 8 6 4 | 68 47 32 54 61 | 1.21 1.21 1.22 1.19 1.23 | 0.15 0.12 0.06 0.15 0.06 | 1.8 1.6 2.4 1.8 1.6 | 3/5 |
+| B2e-m.20-h.30-g.65 | 4 6 6 7 7 | 54 58 53 51 54 | 1.24 1.26 1.25 1.19 1.24 | 0.37 0.48 0.33 0.42 0.37 | 1.1 1.3 1.2 1.3 1.2 | 0/5 |
+| H-k.3 (f1.0, single ellipses) | 6 6 10 4 7 | 64 44 22 69 45 | 1.18 1.19 1.18 1.14 1.22 | 0.21 0.10 0.15 0.10 0.09 | 1.5 2.0 2.6 2.3 1.9 | 1/5 |
+| H-f1.6-k1.0 | 7 8 7 6 11 | 48 39 46 52 34 | 1.28 1.25 1.22 1.23 1.27 | 0.11 0.09 0.16 0.07 0.13 | 2.3 1.8 1.9 2.0 1.8 | 3/5 |
+| H-f2.0-k.8 | 10 9 4 7 5 | 43 31 73 30 75 | 1.29 1.29 1.26 1.30 1.30 | 0.06 0.11 0.04 0.08 0.03 | 1.9 1.5 2.2 2.1 1.7 | 0/5 |
+| H-k1.5-p2 (flat-top weights) | 8 6 6 5 7 | 42 50 53 51 47 | 1.18 1.19 1.15 1.18 1.19 | 0.37 0.18 0.36 0.30 0.40 | 1.7 2.2 2.2 2.2 2.0 | 1/5 |
+| H-k2.0-p2-a2.2 | 5 7 6 9 6 | 45 53 52 56 49 | 1.11 1.12 1.08 1.15 1.15 | 0.54 0.50 0.75 0.46 0.55 | 1.6 1.9 1.5 2.6 1.6 | 0/5 |
+| L3-k1.5 (3 lobes) | 6 4 10 5 3 | 39 95 43 62 59 | 1.24 1.23 1.19 1.19 1.23 | 0.16 0.05 0.19 0.10 0.15 | 1.6 1.9 2.3 2.1 2.0 | 1/5 |
+| L3-k1.0-d.3 (+ margin weight) | 4 3 6 4 3 | 45 60 45 60 60 | 1.23 1.19 1.20 1.24 1.23 | 0.17 0.09 0.19 0.09 0.15 | 1.8 1.9 2.1 1.5 1.7 | 1/5 |
+| L3z-k1.0-sp.5 (+ sizes, spacing) | 6 7 6 6 7 | 39 45 50 49 56 | 1.23 1.17 1.19 1.14 1.25 | 0.15 0.23 0.12 0.31 0.11 | 2.0 2.5 2.1 1.9 1.7 | 2/5 |
+| R-k1.0-sp.6-g.7 (+ retry) | 7 4 6 5 5 | 55 59 56 52 52 | 1.22 1.22 1.27 1.23 1.27 | 0.40 0.13 0.16 0.19 0.12 | 1.4 1.8 2.1 2.0 2.3 | 4/5 |
+| R3-k1.0-sp.6 (+ full lobes ≥ 20 %) | 4 5 6 5 5 | 56 56 52 51 50 | 1.20 1.18 1.24 1.23 1.24 | 0.14 0.16 0.16 0.16 0.12 | 1.6 2.3 2.4 1.6 1.6 | 4/5 |
+| R4-k0.8-sp.6 (4 lobes) | 4 6 4 6 5 | 58 58 57 50 57 | 1.23 1.18 1.29 1.25 1.23 | 0.09 0.23 0.08 0.14 0.17 | 2.1 2.3 2.6 2.9 2.1 | 2/5 |
+| R3-k0.8-a2.5 | 5 7 7 5 4 | 58 53 49 52 56 | 1.25 1.21 1.24 1.25 1.28 | 0.14 0.17 0.19 0.13 0.09 | 2.0 2.4 2.1 1.8 2.2 | 5/5 |
+| **H1: R3-k1.0-g.72** | 4 5 6 5 5 | 56 56 52 51 51 | 1.22 1.20 1.27 1.25 1.25 | 0.13 0.15 0.14 0.15 0.11 | 1.6 2.3 2.4 1.6 1.6 | **5/5** |
+| **H2: R3-k0.8-a2.5-g.72** | 5 7 7 5 4 | 58 52 50 52 56 | 1.27 1.23 1.26 1.28 1.29 | 0.12 0.15 0.18 0.11 0.09 | 2.0 2.4 2.1 1.8 2.2 | **5/5** |
+
+- Land is 29 % on every seed of every row. Raw scores: `raw/scores-round2.json`.
+- Rows above `R3-` ran on intermediate states of the spike code (the lobe draw order changed between them); the `R3-` rows, A and B2 reproduce on efec4475.
+
+## Findings (round 2)
+1. S9 and S10 separate the candidates: B2's discs fail both on every seed and A passes both; Earth sits at S9 0.10, S10 1.77.
+2. Biasing A's fBm with single elongated ellipses trades shape for size control: a weak bias keeps A's unstable sizes (S2 22-69 %); a strong or flat-topped bias makes blobs (S9 0.30-0.75) and smooths coasts (S3 1.08-1.19).
+3. Lobed cratons (chains of 2-3 ellipses along a bending spine) give continent-scale non-convexity, so a strong bias no longer makes blobs.
+4. Damping the fBm in the deep ocean and craton interiors stops it creating extra masses or splitting cratons; coast detail stays on the margins.
+5. Sizes still depend on each seed's layout; the deterministic layout retry on a 2° grid makes S1 and S2 pass on every seed in every retry row.
+6. H1 is closest to Earth on S3 (1.20-1.27) and S10 (1.6-2.4); H2 has more S3 margin (1.23-1.29) and more masses (up to 7).
+
+## Visuals (round 2)
+- `images/land-sea-A-H1-H2.png`: seeds 1-5 (rows) for A-f1.0-g.60, H1 and H2 (columns).
+- `images/R3-k1.0-g.72/land-sea-seed-N.png` and `images/R3-k0.8-a2.5-g.72/land-sea-seed-N.png`: H1 and H2 at 1440 × 720.
+- Elevation maps (local, not committed): `target/s92/R3-k1.0-g.72/seed-N/elevation.png` and `target/s92/R3-k0.8-a2.5-g.72/seed-N/elevation.png`.
+
+## Limits (round 2)
+- By eye, H has fewer small islands, archipelagos and inland seas than A: the margin weight damps the fBm in the deep ocean. No metric scores islands below 1 Mkm²; an island-count metric (masses of 10^4-10^6 km² against Earth) would catch it.
+- Lobe centres are random; several seeds put a large mass over a pole (exaggerated by the equirectangular map). Placement is still not plate-driven.
+- Thin streaks along the polar rows come from the warp at the poles (present in A as well).
+- Margins are thin: H1's S1 is 4 on seed 1 (band edge) and its S3 1.20 on seed 2; H2's S1 is 7 on seeds 2 and 3.
+- The S9 gate (≤ 0.20) and the S10 band (1.5-2.5) rest on Earth's single sample; 5 seeds only.
