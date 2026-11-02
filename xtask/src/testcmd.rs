@@ -1856,6 +1856,13 @@ mod tests {
             assert!(defaults[at].body.contains(r#"slow-timeout = { period = "90s", terminate-after = 5 }"#), "{name}: 450 s");
             assert!(exists(name), "{name} is not a test function");
         }
+        // The coastal flight and the real-window tests run one at a time (`warp-heavy`), and that override comes before `heavy-window`.
+        let warp = position(&|o| o.body.contains(r#"test-group = "warp-heavy""#), "the warp-heavy override");
+        let heavy_at = position(&|o| o.body.contains(r#"test-group = "heavy-window""#), "the heavy-window override");
+        assert!(warp < heavy_at, "a window test would land in heavy-window (the first matching override sets the group)");
+        for member in ["a_coastal_flight_at_low_altitude_flickers_within_the_budget_while_the_lod_changes_under_it", "/^gpu_window::/"] {
+            assert!(defaults[warp].filter.contains(&format!("test({member})")), "{member} is not in warp-heavy");
+        }
         // The heavy-window group holds the named heavy tests, and its override comes before the `gpu-tier` one.
         let heavy = position(&|o| o.body.contains(r#"test-group = "heavy-window""#), "the heavy-window override");
         let tier = position(&|o| o.body.contains(r#"test-group = "gpu-tier""#), "the gpu-tier override");

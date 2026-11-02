@@ -115,7 +115,7 @@ test-group = "real-gpu-heavy"
 # `gpu_water_coverage` (114 s) and the item sweep (60 s) ran at the same time; the flight draws no shadow march, so its own work did not change. The first
 # matching override sets the group, so this one comes before the `heavy-window` one. Only the overlap changes: no test is skipped, retried or changed.
 [[profile.default.overrides]]
-filter = '(package(=planet-render) and binary(gpu_all) and test(a_coastal_flight_at_low_altitude_flickers_within_the_budget_while_the_lod_changes_under_it)) or (package(=planet) and binary(gpu_all) and test(/^gpu_window::/))'
+filter = 'binary(gpu_all) and (test(a_coastal_flight_at_low_altitude_flickers_within_the_budget_while_the_lod_changes_under_it) or test(/^gpu_window::/))'
 test-group = "warp-heavy"
 
 # The heavy software-adapter window and scene tests (the tracked tier-C timeouts: `gpu_window`, `gpu_water_coverage`, `gpu_stream_perf`,
