@@ -13,8 +13,9 @@ Sources: `docs/briefings/m9-decisions.md`; ADR 0088, 0089, 0091, 0092 (proposed)
 | I1 | Continents (generator round 2) | S1-S3, S9-S11 on seeds 1-5; the owner's seed | explorer | #1078: seed 14 picked; the test field's climate aligned before the bless (delegated to the planner) |
 | I2 | Relief to Earth's bands (round 3) | TEST-082 gate (median in band +-10 %, each seed within one width); GEN-097 p99 at most 2.0 | explorer | #1086 draft; owner: p99 form; class bands proposed, owner yes pending (not blocking) |
 | I3 | Belts at convergent margins only (round 4) | belt land 13-23 %; south polar land under 2 km mostly; seed 4 in band | explorer | next |
-| I4 | Engine preview approval | the owner approves seed 14's preview | owner | after I3 |
+| I4 | Engine preview approval | the owner approves seed 14's preview (generator only) | owner | after I3 |
 | I5 | Bake code (ADR 0088) | channels, runtime base behind a switch, pass 1 carve, pass 2 incise, thermal and deposition, min/max pyramid, checkpoints; tier A/B on regions | explorer | PR 1 (channels and stored form) done locally; PR 2 next |
+| I5b | Pipeline snapshot before the bake (owner, 2026-11-02) | the full pipeline with erosion, fast: the first pass over the planet, the second pass on 30-40 sample tiles at full resolution and optionally the planet at reduced resolution (estimate under an hour); preview maps and stills; the owner approves before I6. Built as a non-editor workflow (an app mode or `generate` modes `--planet-res`, `--region`) reusable for global authoring | explorer | bake code takes resolution and region as parameters (planned) |
 | I6 | Pre-run and planet bake | one face at full resolution timed; then the overnight planet bake (6-7.5 h) with checkpoints | explorer | after I4 and I5 |
 | I7 | Channels as per-point primitives (R5) | rises 0, gate, stills; behind a switch | tbd | open |
 | I8 | Ground detail at walking height (R6) | 1.8 m stills at fixed sites, GPU time; behind a switch | tbd | open |
@@ -28,6 +29,10 @@ Sources: `docs/briefings/m9-decisions.md`; ADR 0088, 0089, 0091, 0092 (proposed)
 | `node-buffer-delta` | crusader | after B4 |
 | B9 perf-window process (SPIKE-95) | spikes | started 2026-11-02 |
 | Relative compute shares (ADR 0092) | owner decision, then 4 PRs | proposed |
+
+## Later, not M9 exit
+- A runtime view of a pre-baked world from the snapshot (owner, 2026-11-02: interesting, a second step after I5b).
+- The snapshot workflow is the base of the dormant "global authoring preview" item (status.md).
 
 ## Dates (estimates, not commitments)
 - I1-I3 and I5: this week (owner away until about 2026-11-08).
