@@ -129,15 +129,23 @@ Source: ADR 0042 point 4, ADR 0015, owner 2026-10-16, owner 2026-10-17 (item 5b)
 - **THEN** it exits non-zero with `no display: ...`; the test reports a skip with that reason when `PLANET_NO_DISPLAY` is set and fails when it is not
 
 ### Requirement: VIEW-006 Presentation blit
-The window surface SHALL show the terrain renderer's colour target scaled to fit the window keeping its aspect, centred, with black bars, without rebuilding the renderer on a resize; an outdated, lost, timed-out or occluded surface SHALL be a skipped frame (reconfigured where that recovers it), not an error.
+The window surface SHALL show the terrain renderer's colour target scaled to fit the window keeping its aspect, centred, with black bars; an outdated, lost, timed-out or occluded surface SHALL be a skipped frame (reconfigured where that recovers it), not an error. The 3D target SHALL follow the window: once a size has held for 150 ms the renderer SHALL make its targets again at it (the lit, atmosphere and water ones included; tiles, pools and terrain pipelines are kept), warm the lit path again outside any frame (REND-017), and the plan's viewport height and the camera's aspect SHALL be the new size's.
 
-Verify: C
+Verify: A, C
 Status: active
-Source: ADR 0015, ADR 0042 point 4
+Source: ADR 0015, ADR 0042 point 4, owner 2026-10-30 (the 3D target kept its size after a window resize)
 
 #### Scenario: Fit
 - **WHEN** a 4x2 frame is blitted into a square target
 - **THEN** the middle rows hold the frame, scaled, each source texel's colour at its centre, and the rows above and below are black
+
+#### Scenario: Resize
+- **WHEN** a lit renderer (also with the atmosphere) that drew at one size is resized to another and draws a plan of the new size, and then back
+- **THEN** the frame is the frame of a renderer built at that size, byte for byte, the colour, depth, lit, atmosphere and water targets are made again, the exposure snaps on the next lit frame, and a plan of the old size is refused with a size mismatch
+
+#### Scenario: Settle
+- **WHEN** a window size is reported and 10 ms later, and again after 150 ms
+- **THEN** the target follows the second only, a size equal to the current one asks for nothing, the projection's aspect is the target's width over its height, and a minimised window (size 0) keeps the target
 
 ### Requirement: VIEW-007 Lit path in the window
 The viewer window SHALL start on the lit path with the atmosphere and draw the body's look (`--look`, else the file beside `--world`, else the Earth defaults): the lit plan of each frame SHALL be a pure function of the look, the world's radius, the frame clock's dt (capped at 0.25 s) and a reset flag (`viewer_lit_plan`), carrying the look's sun direction, tone curve, scene units, histogram and albedo, the adaptive exposure (range and speeds of the look, the pre-exposure of the body: 12 stops moved by the stops its sun differs from the Earth's) and the atmosphere of a body of the world's radius; a look whose atmosphere does not fit the body SHALL leave the lit path without the atmosphere and the run SHALL say why. The exposure SHALL snap to its target on the first lit frame, on the return to the lit path and on a restart of the flight, and adapt otherwise. L SHALL switch to the debug path, which draws the plan as the pipelined loop decided it, and back; the free camera and the scripted flight SHALL work on both. `enable_lit` is not part of `warm_up`: the window SHALL enable the lit path and the atmosphere and draw the first lit frame once per ring set before frame 0, whichever path it opens on, so that no lit frame creates a long-lived GPU object or uses a part of the renderer for the first time. The title SHALL show the exposure of the last sampled lit frame as `EV <ev100> (adapted)` within 0.05 stop of the target and `EV <ev100> (adapting to <target>)` otherwise. The debug-path defaults of `test-render` and the tests SHALL NOT change.
@@ -547,7 +555,7 @@ Source: owner (M6 step U3: map first, list, search, inspector bound to the comma
 
 ### Requirement: VIEW-022 The editor mode of the window
 `planet editor` SHALL have an editor mode (`planet::editwin`, with `window`) that edits the world's definition through the session (VIEW-017) and the panels (VIEW-021).
-- Tab turns the mode on and off; `--edit` starts the window with it on.
+- Tab turns the mode on and off; `--edit` starts it on (`--site`: after descent).
 - `--items DIR` is the directory the edits are written to and loaded from: one TOML file per edit (AUTH-001), every command writes its file; without it the edits live in memory and the status line says they are not saved.
 - `--editor-layout F` is the layout file (VIEW-018).
 - `--edit` with `--no-ui` is an error that says the mode needs the UI.
@@ -632,6 +640,10 @@ Source: owner (M6 step U3, 2026-10-19), VIEW-003, VIEW-010, VIEW-011, VIEW-017, 
 #### Scenario: The real window
 - **WHEN** `planet editor --smoke --edit --items DIR` runs on the selected adapter
 - **THEN** the run succeeds with one edit placed, one drag, one typed value, one delete, two undos and one redo and nothing refused, definitions handed to the generator, tiles sent to refresh, and one item file in DIR
+
+#### Scenario: Site descent
+- **WHEN** the window starts with `--edit --site LAT,LON`
+- **THEN** the scripted flight starts high above the site and descends over it with the mode off, the mode turns on where the last camera is reached (or at a Tab before then), and the free camera takes over there
 
 ### Requirement: VIEW-030 Region overlay
 The debug overlay enum `planet_frame::look::Overlay` (VIEW-014) SHALL have a fourth value `Regions` (shader code 3, plan token `overlay regions`) that tints the lit terrain by the surface type of the region over each fragment. For each frame that shows it the app SHALL decide a `planet_frame::regions::RegionList` and hand it to the renderer (the renderer decides nothing, CON-03): the at most 8 region items of the definition nearest the camera (ties by item id), each as a polygon of its 3 to 64 points in the orthographic frame of its anchor (the anchor relative to the camera, the tangent plane's basis, and the points in metres in that plane; f64 on the CPU, rounded once to f32, CON-11), with the surface type's tint as linear light, and the count of the regions it left out (the farthest). The list SHALL have a stable text form (a header line and one line per polygon, floats as bit patterns) that round-trips, and an empty list has no text. The lit fragment stage SHALL take the fragment's position relative to the camera, subtract the anchor, project onto the basis, and test the point against the polygons nearest first by the even-odd rule, skipping a polygon whose plane is farther from the fragment than its band or whose reach the fragment is beyond; where it is inside a polygon it SHALL mix the tint at the weight 0.45 into the lit colour (`mix(lit, tint * 0.8 * pre-exposure, 0.45)`), with no texture and no planet-radius value in the shader. F3 cycles the overlay through off, tiles, mesh, regions, off, and the corner label names it. With the overlay not `Regions`, or with no polygon in the list, the frame is the lit frame bit for bit, and the headless modes and goldens never set the overlay (VIEW-014).

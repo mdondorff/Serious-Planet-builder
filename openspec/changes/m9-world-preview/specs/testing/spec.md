@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: TEST-086 The world preview runs and reports the class shares
-A tier-B check SHALL run the preview for seed 1 (at a reduced size) and report the class shares of land under 60 degrees latitude, the shares of land above 2 and 4 km, the highest land and the largest step of the untapered `k` between lattice points, each beside TEST-082's band. The report is not judged here (TEST-082 judges with the bake); the check SHALL fail if the shares do not sum to 1 or the report omits a measure.
+A tier-B check SHALL run the preview for seed 1 (at a reduced size) and report the class shares of land under 60 degrees latitude, the shares of land above 2 and 4 km, the highest land and the largest step of the untapered `k` between lattice points and the shape metrics S1 to S7 of SPIKE-91, each beside TEST-082's band or its Earth reference. The report is not judged here (TEST-082 judges with the bake); the check SHALL fail if the shares do not sum to 1 or the report omits a measure.
 
 Verify: B
 Status: planned

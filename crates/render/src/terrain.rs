@@ -1154,6 +1154,8 @@ pub struct TerrainRenderer {
     measure_variant: MeasureVariant,
     /// The water pass (ADR 0041, ADR 0042 point 2): None until [`enable_water`](TerrainRenderer::enable_water).
     water: Option<WaterGpu>,
+    /// The body the atmosphere was enabled for: a resize makes the atmosphere path again over the new targets.
+    atmosphere_body: Option<planet_frame::look::atmosphere::Atmosphere>,
 }
 
 /// The lit path's terrain pipelines (HDR target, `fs_lit`) and its post chain.
@@ -1501,6 +1503,7 @@ impl TerrainRenderer {
             lit_objects: 0,
             measure_variant: MeasureVariant::Product,
             water: None,
+            atmosphere_body: None,
         }
     }
 
@@ -1803,6 +1806,7 @@ impl TerrainRenderer {
             return;
         }
         lit.path.enable_atmosphere(ctx, &self.depth_view, atmosphere);
+        self.atmosphere_body = Some(*atmosphere);
         let (pipeline, pipeline_cut) = self.atmosphere_terrain_pipelines(ctx);
         // Counted by declaration: the atmosphere path's scene target, two tables, two products, the uniform buffer and three
         // pipelines (sky view, aerial perspective, composite) beside the two terrain pipelines made here.
@@ -1837,6 +1841,53 @@ impl TerrainRenderer {
         }
         self.lit_objects += water.objects;
         self.water = Some(water);
+    }
+
+    /// Draw at another size from the next frame on (a window resize): the colour and depth targets and, where enabled, the lit path's
+    /// targets (scene target, exposure state, atmosphere products) and the water pass's copy are made again at `size`; pipelines, tiles and
+    /// pools are kept. The adapted exposure starts over (the plan's reset flag snaps it). Frames in flight keep the targets they use.
+    /// A plan of the old size is refused afterwards (`SizeMismatch`).
+    pub fn resize(&mut self, ctx: &GpuContext, size: (u32, u32)) {
+        assert!(size.0 > 0 && size.1 > 0, "a target needs a size");
+        if size == self.size {
+            return;
+        }
+        let device = &ctx.device;
+        let target = |label, format, usage| {
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage,
+                view_formats: &[],
+            })
+        };
+        self.color = target(
+            "terrain-color",
+            wgpu::TextureFormat::Rgba8Unorm,
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::TEXTURE_BINDING,
+        );
+        let depth = target("terrain-depth", DEPTH_FORMAT, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING);
+        self.color_view = self.color.create_view(&Default::default());
+        self.depth_view = depth.create_view(&Default::default());
+        self.size = size;
+        if let Some(lit) = self.lit.as_mut() {
+            lit.path = LitPath::new(ctx, size);
+            if let Some(body) = self.atmosphere_body {
+                lit.path.enable_atmosphere(ctx, &self.depth_view, &body);
+            }
+        }
+        if self.water.is_some() {
+            let layouts = CompactLayouts { frame: &self.compact.bgl_frame, block: &self.compact.bgl_block, cells: self.cells };
+            let mut water = WaterGpu::new(device, size, &self.bgl, &layouts);
+            if let Some(a) = self.lit.as_ref().and_then(|l| l.path.atmosphere()) {
+                water.add_atmosphere(device, &self.bgl, &layouts, a);
+            }
+            self.water = Some(water);
+        }
     }
 
     /// Whether the water pass is enabled.

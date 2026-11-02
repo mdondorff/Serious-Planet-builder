@@ -13,7 +13,7 @@ use planet_core::{smoothstep, Face, Vec3};
 /// The version of the class list (GEN-093): plain, rolling plain, hills, mountains, high mountains, plateau, badlands, sand sea, in that order.
 pub const CLASS_LIST_VERSION: u32 = 1;
 /// Bump whenever the default source's output changes for a seed (the rules of GEN-094 and GEN-095, their constants, or the plate construction).
-pub const CLASS_SOURCE_VERSION: u32 = 1;
+pub const CLASS_SOURCE_VERSION: u32 = 2;
 pub const CLASS_COUNT: usize = 8;
 pub const CLASS_NAMES: [&str; CLASS_COUNT] =
     ["plain", "rolling plain", "hills", "mountains", "high mountains", "plateau", "badlands", "sand sea"];
@@ -40,12 +40,18 @@ const SHARE_POINTS: usize = 2048;
 const GRADIENT_STEP: f64 = 0.004;
 /// The land depth of the coastal line the Andean arcs follow (GEN-094).
 const COAST_LINE_DEPTH: f64 = 0.10;
+/// The belt term's amplitude in metres (GEN-096; 5500 m in the first start values, raised because the belts are now cut into segments of lower height).
+const BELT_AMPLITUDE_M: f64 = 7000.0;
+/// Distance over which the mask's coast gate rises, in km.
+const COAST_RAMP_KM: f64 = 250.0;
 
 const LAYER_PLATE_WARP: u64 = 0x474c_0010;
 const LAYER_WIDTH: u64 = 0x474c_0011;
 const LAYER_COAST_ARC: u64 = 0x474c_0012;
 const LAYER_PLATEAU: u64 = 0x474c_0013;
 const LAYER_ROLLING: u64 = 0x474c_0014;
+const LAYER_SEGMENT: u64 = 0x474c_0015;
+const LAYER_STRIKE: u64 = 0x474c_0016;
 
 fn splitmix(mut x: u64) -> u64 {
     x = x.wrapping_add(0x9e37_79b9_7f4a_7c15);
@@ -78,13 +84,15 @@ struct Plate {
 pub struct MaskTerms {
     /// Distance to the nearest plate margin in km (half the angular difference of the two nearest centres, times the radius).
     pub margin_km: f64,
-    /// The margin's convergence, positive where the nearest plate moves towards the other (not bounded by 1).
+    /// The convergence of the nearest and second-nearest plate (a diagnostic: it changes sign where the second plate changes), positive where they move towards each other (not bounded by 1).
     pub convergence: f64,
     pub core: f64,
     pub flank: f64,
     pub old_margin: f64,
     pub back_arc: f64,
     pub plateau_field: f64,
+    /// The along-strike factor of the belts in `[0, 1]`: 0 in a gap between segments, below 1 where a segment is lower.
+    pub strike: f64,
     /// Index of the plate the direction lies on.
     pub plate: usize,
 }
@@ -137,7 +145,7 @@ impl ClassSource {
             let r = libm::sqrt((1.0 - z * z).max(0.0));
             let phi = golden * i as f64;
             let d = Vec3::new(r * libm::cos(phi), r * libm::sin(phi), z);
-            let (nearest, _, _, _) = self.nearest_two(self.warp(d));
+            let nearest = self.nearest_three(self.warp(d)).0[0];
             total[nearest] += 1;
             if terrain(self.seed, d).land_depth > 0.0 {
                 land[nearest] += 1;
@@ -156,19 +164,22 @@ impl ClassSource {
         (d + w * 0.35).normalized()
     }
 
-    /// The nearest and second-nearest centres to `q` and their angles (ties go to the lower index).
-    fn nearest_two(&self, q: Vec3) -> (usize, usize, f64, f64) {
-        let (mut i1, mut i2, mut a1, mut a2) = (0usize, 0usize, f64::INFINITY, f64::INFINITY);
+    /// The three nearest centres to `q` and the angles of the four nearest, nearest first (ties go to the lower index).
+    fn nearest_three(&self, q: Vec3) -> ([usize; 3], [f64; 4]) {
+        let (mut idx, mut ang) = ([0usize; 3], [f64::INFINITY; 4]);
         for (i, p) in self.plates.iter().enumerate() {
             let a = q.angle_to(p.centre);
-            if a < a1 {
-                (i2, a2) = (i1, a1);
-                (i1, a1) = (i, a);
-            } else if a < a2 {
-                (i2, a2) = (i, a);
+            if a < ang[0] {
+                (idx, ang) = ([i, idx[0], idx[1]], [a, ang[0], ang[1], ang[2]]);
+            } else if a < ang[1] {
+                (idx[1], idx[2], ang[1], ang[2], ang[3]) = (i, idx[1], a, ang[1], ang[2]);
+            } else if a < ang[2] {
+                (idx[2], ang[2], ang[3]) = (i, a, ang[2]);
+            } else if a < ang[3] {
+                ang[3] = a;
             }
         }
-        (i1, i2, a1, a2)
+        (idx, ang)
     }
 
     /// The land depth (continent value minus the sea level) at `d`, the term the coastal arcs follow.
@@ -176,57 +187,95 @@ impl ClassSource {
         terrain(self.seed, d).continent - SEA_LEVEL_C
     }
 
-    /// The distance in km from `d` to the line of land depth [`COAST_LINE_DEPTH`], by the first-order estimate `|f| / |grad f|` with a central difference.
-    fn coast_line_km(&self, d: Vec3, land_depth: f64) -> f64 {
+    /// The gradient magnitude of the land depth at `d` per radian, by a central difference of [`GRADIENT_STEP`] in two tangent directions.
+    fn land_gradient(&self, d: Vec3) -> f64 {
         let (e1, e2) = d.tangent_basis();
         let h = GRADIENT_STEP;
         let at = |t: Vec3, s: f64| self.land_depth((d + t * s).normalized());
         let g1 = (at(e1, h) - at(e1, -h)) / (2.0 * h);
         let g2 = (at(e2, h) - at(e2, -h)) / (2.0 * h);
-        let grad = libm::sqrt(g1 * g1 + g2 * g2);
-        if grad < 1e-9 {
-            return f64::INFINITY;
-        }
-        libm::fabs(land_depth - COAST_LINE_DEPTH) / grad * self.radius_m / 1000.0
+        libm::sqrt(g1 * g1 + g2 * g2)
     }
 
-    /// The plate mask at `d` (GEN-094). `land_depth` and `inland` come from the global stage's terrain at `d`.
+    /// The first-order estimate in km of the distance over which the land depth changes by `delta` at `d`: `|delta| / |gradient|` (valid near `d`), infinite
+    /// where the gradient vanishes.
+    fn distance_km(&self, delta: f64, gradient: f64) -> f64 {
+        if gradient < 1e-9 {
+            return f64::INFINITY;
+        }
+        libm::fabs(delta) / gradient * self.radius_m / 1000.0
+    }
+
+    /// The continental weight of a plate in `[0, 1]`: 0 for a plate that is mostly ocean (land share under 0.15), 1 for one with 0.40 of its area land.
+    fn continental(&self, plate: usize) -> f64 {
+        smoothstep(0.15, 0.40, self.land_share[plate])
+    }
+
+    /// The plate mask at `d` (GEN-094, round 1). `land_depth` and `inland` come from the global stage's terrain at `d`.
+    ///
+    /// Every term is a maximum over the pairs of the three nearest plates, each pair's term symmetric in its two plates (the margin distance, the convergence and
+    /// the continental difference do not change when the plates swap), so the mask is continuous where the nearest plate changes. Gates ramp over 100 to 300 km.
     pub fn mask_terms(&self, d: Vec3, land_depth: f64, inland: f64) -> MaskTerms {
         let q = self.warp(d);
-        let (i1, i2, a1, a2) = self.nearest_two(q);
-        let (p1, p2) = (&self.plates[i1], &self.plates[i2]);
-        let margin_km = 0.5 * (a2 - a1) * self.radius_m / 1000.0;
-        // The margin normal: from the nearest towards the second-nearest centre, in the tangent plane at d.
-        let mut n = p2.centre - p1.centre;
-        n = n - d * n.dot(d);
-        let nl = n.length();
-        let n = if nl > 1e-12 { n * (1.0 / nl) } else { Vec3::ZERO };
-        let rel = p1.rotation.cross(d) - p2.rotation.cross(d);
-        let convergence = rel.dot(n);
-
-        let conv_gate = smoothstep(0.05, 0.35, convergence);
-        let width_km = 90.0 * (0.6 + 0.9 * (0.5 + 0.5 * fbm(self.seed, LAYER_WIDTH, d, 2.5, 2)));
-        let arc = smoothstep(0.40, 0.52, 0.5 + 0.5 * fbm(self.seed, LAYER_COAST_ARC, d, 0.9, 2));
-        let line_km = self.coast_line_km(d, land_depth);
-        let term = |w: f64| {
-            let belt = conv_gate * libm::exp(-(margin_km / w) * (margin_km / w));
-            let coast = arc * libm::exp(-(line_km / (0.8 * w)) * (line_km / (0.8 * w)));
-            belt.max(coast)
-        };
-        let coast_gate = smoothstep(0.0, 0.04, land_depth);
-        let core = term(width_km) * coast_gate;
-        let flank = term(3.0 * width_km) * coast_gate;
-        let old_margin = (1.0 - smoothstep(-0.05, 0.15, convergence)) * libm::exp(-(margin_km / 150.0) * (margin_km / 150.0)) * coast_gate;
-        // The back-arc lies on the plate of the pair with the larger land share.
-        let on_bigger_plate = self.land_share[i1] > self.land_share[i2];
-        let back_arc = if on_bigger_plate {
-            smoothstep(0.7, 0.95, convergence) * (1.0 - smoothstep(450.0, 700.0, margin_km)) * smoothstep(0.1, 0.5, inland)
-        } else {
-            0.0
-        };
+        let (idx, ang) = self.nearest_three(q);
+        // The pair of the second and third plate is a real margin only next to the margin of the first two (where the nearest plate changes, it takes the place of the pair (0, 2)).
+        // Each plate's weight depends on its own angle, so a pair of plates that trade places has the same weight before and after (the margin factor of (second, third) too).
+        let rank = |r: usize| smoothstep(0.0, 0.05, ang[3] - ang[r]);
+        let pair_weight = [rank(0) * rank(1), rank(0) * rank(2), rank(1) * rank(2) * (1.0 - smoothstep(0.0, 0.04, ang[1] - ang[0]))];
+        // The width of a belt: a tent profile of 220 to 500 km half-width (220 to 500 km across at half height); the belt is cut into segments and its height varies along it.
+        let width_km = 220.0 + 280.0 * (0.5 + 0.5 * fbm(self.seed, LAYER_WIDTH, d, 2.5, 2));
+        let segment = smoothstep(0.25, 0.55, 0.5 + 0.5 * fbm(self.seed, LAYER_SEGMENT, d, 2.2, 2));
+        let strike = segment * (0.55 + 0.45 * (0.5 + 0.5 * fbm(self.seed, LAYER_STRIKE, d, 5.0, 2)));
+        let arc = smoothstep(0.38, 0.56, 0.5 + 0.5 * fbm(self.seed, LAYER_COAST_ARC, d, 0.9, 2));
+        let gradient = self.land_gradient(d);
+        let line_km = self.distance_km(land_depth - COAST_LINE_DEPTH, gradient);
+        // The gate of the land: 0 at the coast and 1 over 250 km inland, so that no belt stops at the coast in a step (GEN-097's limit on the step of `k`).
+        let coast_gate = if land_depth <= 0.0 { 0.0 } else { smoothstep(0.0, COAST_RAMP_KM, self.distance_km(land_depth, gradient)) };
+        let (mut core, mut flank, mut old_margin, mut back_arc) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+        let (mut margin_km, mut convergence) = (0.0, 0.0);
+        for (n, &(x, y)) in [(0usize, 1usize), (0, 2), (1, 2)].iter().enumerate() {
+            let (px, py) = (&self.plates[idx[x]], &self.plates[idx[y]]);
+            let dist_km = 0.5 * (ang[y] - ang[x]) * self.radius_m / 1000.0;
+            // The margin normal: from plate x towards plate y, in the tangent plane at d (symmetric: swapping the plates flips it and the velocity difference).
+            let mut nrm = py.centre - px.centre;
+            nrm = nrm - d * nrm.dot(d);
+            let nl = nrm.length();
+            let nrm = if nl > 1e-12 { nrm * (1.0 / nl) } else { Vec3::ZERO };
+            let conv = (px.rotation.cross(d) - py.rotation.cross(d)).dot(nrm);
+            if n == 0 {
+                (margin_km, convergence) = (dist_km, conv);
+            }
+            let conv_gate = smoothstep(0.05, 0.35, conv) * pair_weight[n];
+            // A coastal belt only where a convergent margin with an oceanic side lies within a few hundred km: one plate continental, the other oceanic.
+            let (cx, cy) = (self.continental(idx[x]), self.continental(idx[y]));
+            let one_oceanic = cx * (1.0 - cy) + cy * (1.0 - cx);
+            let near = 1.0 - smoothstep(250.0, 500.0, dist_km);
+            let term = |w: f64| {
+                let belt = conv_gate * (1.0 - dist_km / w).max(0.0);
+                let coast = arc * one_oceanic * near * conv_gate * (1.0 - line_km / (0.8 * w)).max(0.0);
+                belt.max(coast)
+            };
+            core = core.max(term(width_km));
+            flank = flank.max(term(3.0 * width_km));
+            old_margin = old_margin.max(pair_weight[n] * (1.0 - smoothstep(-0.05, 0.15, conv)) * (1.0 - dist_km / 300.0).max(0.0));
+            if x == 0 {
+                // The back-arc lies behind the margin, on the plate of the pair with the larger land share (a smooth preference), and starts 0 at the margin.
+                let prefer = smoothstep(-0.08, 0.08, self.land_share[idx[0]] - self.land_share[idx[y]]);
+                let b = smoothstep(0.7, 0.95, conv)
+                    * (1.0 - smoothstep(450.0, 700.0, dist_km))
+                    * smoothstep(0.0, 150.0, dist_km)
+                    * smoothstep(0.0, 150.0, margin_km)
+                    * pair_weight[n]
+                    * smoothstep(0.1, 0.5, inland)
+                    * prefer;
+                back_arc = back_arc.max(b);
+            }
+        }
+        let (core, flank) = (core * strike * coast_gate, flank * strike * coast_gate);
+        let old_margin = old_margin * coast_gate;
         let c = 0.5 + 0.5 * fbm(self.seed, LAYER_PLATEAU, d, 1.6, 3);
         let plateau_field = smoothstep(0.50, 0.62, c) * smoothstep(0.2, 0.6, inland) * (1.0 - smoothstep(0.2, 0.6, flank.max(back_arc)));
-        MaskTerms { margin_km, convergence, core, flank, old_margin, back_arc, plateau_field, plate: i1 }
+        MaskTerms { margin_km, convergence, core, flank, old_margin, back_arc, plateau_field, strike, plate: idx[0] }
     }
 
     /// The default source at the unit direction `d`: the mask, the base elevation without the hill band (GEN-096), and the class weights (GEN-095).
@@ -237,13 +286,20 @@ impl ClassSource {
             if t.land_depth < 0.0 { -4500.0 * smoothstep(0.0, 0.9, -t.land_depth) } else { 1000.0 * smoothstep(0.0, 0.9, t.land_depth) };
         let ridge = ridge_at(self.seed, t.warped);
         let e0 = (coast
-            + 5500.0 * terms.core * (0.5 + 0.5 * ridge)
+            + BELT_AMPLITUDE_M * terms.core * (0.5 + 0.5 * ridge)
             + 2000.0 * terms.back_arc
             + 200.0 * terms.old_margin.max(0.5 * terms.flank)
             + 1200.0 * terms.plateau_field)
             .clamp(MIN_ELEVATION_M, MAX_ELEVATION_M);
         let rolling = smoothstep(0.45, 0.6, 0.5 + 0.5 * fbm(self.seed, LAYER_ROLLING, d, 3.0, 3));
-        ClassPoint { terms, land_depth: t.land_depth, e0, weights: class_weights(&terms, e0, rolling) }
+        // The class decision reads the base elevation without the ridge term's fine structure, so that the weights change gently (GEN-097's step limit).
+        let e_smooth = (coast
+            + BELT_AMPLITUDE_M * terms.core * 0.75
+            + 2000.0 * terms.back_arc
+            + 200.0 * terms.old_margin.max(0.5 * terms.flank)
+            + 1200.0 * terms.plateau_field)
+            .clamp(MIN_ELEVATION_M, MAX_ELEVATION_M);
+        ClassPoint { terms, land_depth: t.land_depth, e0, weights: class_weights(&terms, e_smooth, rolling) }
     }
 
     /// The elevation of GEN-096 at `d` given the untapered blended `k` there: `e0` plus the class hill band (GEN-098), clamped. `point` is `eval(d)`.
@@ -263,10 +319,10 @@ pub fn hill_amplitude_for_k(k: f64) -> f64 {
     30.0 + 145.0 * smoothstep(1.0, 5.0, k) + 650.0 * smoothstep(5.0, 7.5, k)
 }
 
-/// The default class weights from the mask terms, the base elevation `e0` (GEN-096 without the band) and the rolling-plain membership (GEN-095), summing to 1.
+/// The default class weights from the mask terms, the class elevation `e_class` (GEN-096 without the band and the ridge factor) and the rolling-plain membership (GEN-095), summing to 1.
 pub fn class_weights(terms: &MaskTerms, e0: f64, rolling: f64) -> [f64; CLASS_COUNT] {
-    let mt = smoothstep(0.25, 0.55, terms.core);
-    let high = mt * smoothstep(2000.0, 3000.0, e0);
+    let mt = terms.core;
+    let high = mt * smoothstep(1500.0, 3500.0, e0);
     let hills = (1.0 - mt) * smoothstep(0.2, 0.45, terms.flank.max(terms.old_margin));
     // What mountains and hills leave is shared by the plateau and the rest, so the memberships partition 1 before the normalisation.
     let left = 1.0 - mt - hills;
@@ -386,24 +442,62 @@ impl ClassLattice {
 
     /// The largest step of the untapered `k` between neighbouring lattice points (GEN-097's limit of 2.0).
     pub fn largest_k_step(&self) -> f64 {
+        self.largest_k_step_at().0
+    }
+
+    /// The largest step of the untapered `k` and where it is: the lattice point `(face, i, j)` of the pair's first point.
+    pub fn largest_k_step_at(&self) -> (f64, Face, usize, usize) {
         let n = self.cells;
         let k = |face: usize, i: usize, j: usize| {
             let p = self.faces[face][j * (n + 1) + i];
             p.iter().zip(CLASS_K).map(|(&w, k)| f64::from(w) / 255.0 * k).sum::<f64>()
         };
-        let mut worst = 0.0f64;
+        let mut worst = (0.0f64, Face(0), 0usize, 0usize);
         for face in 0..6 {
             for j in 0..=n {
                 for i in 0..=n {
-                    if i < n {
-                        worst = worst.max(libm::fabs(k(face, i + 1, j) - k(face, i, j)));
-                    }
-                    if j < n {
-                        worst = worst.max(libm::fabs(k(face, i, j + 1) - k(face, i, j)));
+                    for (di, dj) in [(1, 0), (0, 1)] {
+                        if i + di <= n && j + dj <= n {
+                            let step = libm::fabs(k(face, i + di, j + dj) - k(face, i, j));
+                            if step > worst.0 {
+                                worst = (step, Face(face as u8), i, j);
+                            }
+                        }
                     }
                 }
             }
         }
         worst
+    }
+
+    /// The share of neighbouring lattice point pairs whose untapered `k` differs by more than `limit` (the report beside the largest step).
+    pub fn k_steps_over(&self, limit: f64) -> f64 {
+        let n = self.cells;
+        let k = |face: usize, i: usize, j: usize| {
+            let p = self.faces[face][j * (n + 1) + i];
+            p.iter().zip(CLASS_K).map(|(&w, k)| f64::from(w) / 255.0 * k).sum::<f64>()
+        };
+        let (mut over, mut total) = (0u64, 0u64);
+        for face in 0..6 {
+            for j in 0..=n {
+                for i in 0..=n {
+                    for (di, dj) in [(1, 0), (0, 1)] {
+                        if i + di <= n && j + dj <= n {
+                            total += 1;
+                            if libm::fabs(k(face, i + di, j + dj) - k(face, i, j)) > limit {
+                                over += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        over as f64 / total as f64
+    }
+
+    /// The unit direction of lattice point `(i, j)` of `face`.
+    pub fn direction(&self, face: Face, i: usize, j: usize) -> Vec3 {
+        let n = self.cells as f64;
+        face_to_direction(&TangentWarp, face, 2.0 * i as f64 / n - 1.0, 2.0 * j as f64 / n - 1.0)
     }
 }

@@ -123,6 +123,12 @@ Scope: tests (nextest; SPIKE-84 fix 2)
 - A fixture worth sharing lives on disk (`CARGO_TARGET_TMPDIR`), named by the test binary, built into a private directory and renamed into place (`crates/cache/tests/support/concurrent_source.rs`).
 - Obsolete if the tests move to a runner that shares one process per binary.
 
+## 2026-11-02 A belt narrower than about 190 km cannot meet GEN-097's step limit of 2.0
+Scope: generators (GEN-094, GEN-097; `classes.rs`)
+- The class lattice has a cell of about 39 km and `k` runs from 1 to 7.5, so a step of at most 2.0 needs the weights to change over about 130 km (190 km for a smoothstep). Gaussian belts of 130 km half-width gave steps of 6.5; tent belts of 220 to 500 km and gates over 250 km give 4.9, with 0.22 % of steps over 2.0.
+- A pair of plates must contribute a term that does not change when the two plates swap (distance, convergence and the continental difference are symmetric), and the third plate's weight must fall to 0 where it trades places with the fourth; otherwise the mask jumps at plate bisectors and triple junctions (the straight edges of iteration 0).
+- Obsolete when the limit is restated (a feathering rule, a smaller `k` range) or the lattice is finer.
+
 ## 2026-11-01 An edit re-keys coarse tiles far beyond its reach
 Scope: project (editor refresh find; WDEF-008, STRM-070, ADR 0045 point 7)
 - A coarse tile (levels 0-5 at Earth's radius) that holds an item reads its region summary over its cells and `margin_rings` rings of cells, sized for the 40 km maximum reach plus whole cells: about 13 rings (450-500 km) at level 5, the whole body at levels 0-2. Any edit anchored there re-keys it, whatever its own reach.
