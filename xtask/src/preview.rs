@@ -5,7 +5,7 @@ use crate::util::{run, Res};
 use std::path::Path;
 
 /// The reference world the owner picked (inbox #43); the default of the previews.
-const DEFAULT_SEED: u64 = 3;
+const DEFAULT_SEED: u64 = 14;
 const KNOWN: &str = "--seed N, --out DIR";
 
 #[derive(Debug, PartialEq)]

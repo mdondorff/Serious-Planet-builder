@@ -52,7 +52,7 @@ fn the_continentalness_is_pinned_so_that_a_change_bumps_the_global_version() {
     // Bump GLOBAL_VERSION whenever this fingerprint changes (the stored fields carry the version).
     let dirs = directions();
     let mut h = 0xcbf2_9ce4_8422_2325u64;
-    for seed in [1u64, 3] {
+    for seed in [1u64, 14] {
         for b in bits(seed, &dirs, 4) {
             h = (h ^ b).wrapping_mul(0x0000_0100_0000_01b3);
         }
@@ -65,7 +65,7 @@ fn the_continentalness_is_pinned_so_that_a_change_bumps_the_global_version() {
     );
 }
 
-const PINNED: u64 = 9625272270713348575;
+const PINNED: u64 = 3875448375184263834;
 
 // spec: GEN-104
 #[test]

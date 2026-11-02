@@ -342,8 +342,11 @@ mod tests {
     // spec: GEN-105
     #[test]
     fn the_kept_layout_draw_of_seeds_1_to_5_is_pinned_so_that_a_swapped_layout_needs_a_declared_re_pin() {
-        // The island term is part of the layout score (GEN-105): changing it, or any constant of the shape, may swap a seed's layout. Seed 3 is the reference world.
-        let kept: Vec<u64> = (1..=5u64).map(|seed| (0..RETRY_DRAWS).find(|&t| layout_draw(seed, t) == layout_seed(seed)).expect("a kept draw")).collect();
-        assert_eq!(kept, vec![2, 1, 1, 2, 3], "a seed's craton layout changed (seed 3 is the reference world): declare the re-pin");
+        // The island term is part of the layout score (GEN-105): changing it, or any constant of the shape, may swap a seed's layout. Seed 14 is the reference world (the owner's pick from the engine gallery).
+        let kept: Vec<u64> = [1u64, 2, 3, 4, 5, 14]
+            .into_iter()
+            .map(|seed| (0..RETRY_DRAWS).find(|&t| layout_draw(seed, t) == layout_seed(seed)).expect("a kept draw"))
+            .collect();
+        assert_eq!(kept, vec![2, 1, 1, 2, 3, 1], "a seed's craton layout changed (seed 14 is the reference world): declare the re-pin");
     }
 }
