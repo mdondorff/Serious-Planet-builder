@@ -6,4 +6,4 @@
 ## 3. Checks
 - [x] 3.1 Re-pin the class fingerprint and the threshold tests
 - [x] 2.3 GEN-097 gates the p99 of the lattice steps (the preview report, TEST-082's gate test, the delta)
-- [x] 3.2 numerics-reviewer, verifier, spec-guardian
+- [ ] 3.2 verifier before the PR (numerics-reviewer and spec-guardian ran and their findings are fixed)
