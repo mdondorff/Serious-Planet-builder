@@ -211,6 +211,39 @@ fn the_hills_cast_the_march_shadow_onto_the_ground_at_ten_and_two_degrees_of_sun
         let covered = r.lit_path().expect("lit").read_hdr(&ctx).iter().filter(|px| px[3] > 0.0).count();
         assert!(covered > 10_000, "{golden}: only {covered} terrain pixels");
         let dark = visibility.iter().filter(|v| **v < 0.2).count();
+        // No acne: shadowed pixels that belong to no real shadow. The march used to shadow a receiver by the gap between the tile mesh and the
+        // clipmap's bilinear lattice, in contour bands of short dashes on a lit flank; the cast shadows here are regions of thousands of
+        // pixels, so a connected group of fewer than 40 shadowed pixels is a speck.
+        let (w, h) = (SIZE.0 as usize, SIZE.1 as usize);
+        let mut seen = vec![false; w * h];
+        let mut specks = 0;
+        for start in 0..w * h {
+            if seen[start] || visibility[start] >= 0.2 {
+                continue;
+            }
+            let mut group = vec![start];
+            seen[start] = true;
+            let mut k = 0;
+            while k < group.len() {
+                let (x, y) = ((group[k] % w) as isize, (group[k] / w) as isize);
+                k += 1;
+                for (dx, dy) in [(-1isize, -1isize), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)] {
+                    let (nx, ny) = (x + dx, y + dy);
+                    if nx < 0 || ny < 0 || nx >= w as isize || ny >= h as isize {
+                        continue;
+                    }
+                    let n = ny as usize * w + nx as usize;
+                    if !seen[n] && visibility[n] < 0.2 {
+                        seen[n] = true;
+                        group.push(n);
+                    }
+                }
+            }
+            if group.len() < 40 {
+                specks += group.len();
+            }
+        }
+        assert!(specks <= 40, "{golden}: {specks} shadowed pixels in specks (shadow acne)");
         let lit_px = visibility.iter().filter(|v| **v > 0.8).count();
         assert!(dark > 500 && lit_px > 5_000, "{golden}: the hills shadow part of the ground ({dark} dark, {lit_px} lit)");
         goldens.check(golden, &img, Tolerance::Exact);

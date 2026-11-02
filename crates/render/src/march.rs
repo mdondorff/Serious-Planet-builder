@@ -44,6 +44,13 @@ struct March {
 @group(0) @binding(6) var gens: texture_2d_array<u32>;
 
 const MAX_STEPS: i32 = 2048;
+// The rendered surface is the tile mesh (a triangle plane per cell) and the clipmap holds the lattice sampled bilinearly, so the two differ
+// by up to a fraction of a texel on a curved flank; a receiver whose ray skims such a slope (the sun just above the slope) shadowed itself in
+// contour bands. The ground is lowered by RELAX_BIAS texels of the receiver level, at most RELAX_MAX_M metres, falling to nothing over
+// RELAX_REACH texels (a shadow ends up to RELAX_MAX_M / tan(sun elevation) early).
+const RELAX_BIAS: f32 = 1.0;
+const RELAX_MAX_M: f32 = 1.0;
+const RELAX_REACH: f32 = 128;
 const START_MIP: i32 = 2;
 const MAX_CUBE_STEPS: i32 = 256;
 const QUARTER_TURN_ANGLE: f32 = 0.7853982;
@@ -182,6 +189,7 @@ fn march(o: vec3<f32>) -> vec3<f32> {
     var dirty = false;
     var mip = min(START_MIP, i32(m.info.w));
     var last_level = level_at(o.x, o.y);
+    let tl0 = m.texel[max(last_level, 0)].x;
     // The ray is above the world's highest terrain from here on: nothing it passes can shade it (the sun is above the horizon here).
     // Within the penumbra search a ray clears the highest terrain for good only once its clearance over it reaches the sun disc's
     // (slope - w) tau >= H - z; beyond the search only the sign counts, so the plain height does.
@@ -236,7 +244,7 @@ fn march(o: vec3<f32>) -> vec3<f32> {
         let low = min(o.z + slope * tau, o.z + slope * (tau + dt));
         // The ground is a box a texel wide at its sample; a receiver on it or on a slope would shadow itself, so the box is lowered by half a
         // texel over the first four texels.
-        let relax = 0.5 * tl * clamp(1.0 - tau / (4.0 * tl), 0.0, 1.0);
+        let relax = 0.5 * tl * clamp(1.0 - tau / (4.0 * tl), 0.0, 1.0) + min(RELAX_BIAS * tl0, RELAX_MAX_M) * clamp(1.0 - tau / (RELAX_REACH * tl0), 0.0, 1.0);
         let top = level_max(lv, mip, cx, cy) - relax;
         steps = steps + 1.0;
         let dist = max(tau + 0.5 * dt, 1.0);
