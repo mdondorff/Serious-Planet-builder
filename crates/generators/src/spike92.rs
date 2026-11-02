@@ -17,10 +17,39 @@ const LAYER_HIGH: u64 = 0x5392_0004;
 #[derive(Clone, Copy, Debug)]
 pub enum Candidate {
     Base,
-    A { freq: f64, oct: u32, warp: f64, gain: f64 },
-    B { cratons: u32, radius: f64, spread: f64, mid: f64, high: f64, gain: f64 },
+    A {
+        freq: f64,
+        oct: u32,
+        warp: f64,
+        gain: f64,
+    },
+    B {
+        cratons: u32,
+        radius: f64,
+        spread: f64,
+        mid: f64,
+        high: f64,
+        gain: f64,
+    },
     /// Ranked cratons: area shares of the land (`S92_SIZES`, largest first), centres kept apart, one profile slope for every craton.
-    B2 { mid: f64, high: f64, gain: f64 },
+    B2 {
+        mid: f64,
+        high: f64,
+        gain: f64,
+    },
+    /// Round 2 hybrid: A's warped fBm plus `k` times the sum of soft elongated craton weights exp(-(rho^2)^pw) (ranked sizes, each craton
+    /// a chain of lobes, aspect `amin..amax`), the craton field warped by `cwarp`.
+    H {
+        freq: f64,
+        oct: u32,
+        warp: f64,
+        gain: f64,
+        k: f64,
+        amin: f64,
+        amax: f64,
+        cwarp: f64,
+        pw: f64,
+    },
 }
 
 fn env(k: &str, d: f64) -> f64 {
@@ -45,6 +74,17 @@ pub fn candidate() -> Candidate {
             gain: env("S92_GAIN", 0.6),
         },
         Ok("B2") => Candidate::B2 { mid: env("S92_MID", 0.12), high: env("S92_HIGH", 0.12), gain: env("S92_GAIN", 0.65) },
+        Ok("H") => Candidate::H {
+            freq: env("S92_FREQ", 1.6),
+            oct: env("S92_OCT", 8.0) as u32,
+            warp: env("S92_WARP", 0.6),
+            gain: env("S92_GAIN", 0.65),
+            k: env("S92_K", 1.0),
+            amin: env("S92_AMIN", 1.5),
+            amax: env("S92_AMAX", 3.0),
+            cwarp: env("S92_CWARP", 0.3),
+            pw: env("S92_PW", 1.0),
+        },
         _ => Candidate::Base,
     })
 }
@@ -135,6 +175,80 @@ fn ranked(seed: u64) -> Vec<(Vec3, f64)> {
     out
 }
 
+/// An elongated lobe: centre, major axis (tangent at the centre), minor axis, major and minor angular radii (their product is r²).
+type Ellipse = (Vec3, Vec3, Vec3, f64, f64);
+
+/// The ranked cratons of a seed as lobes. Each craton of at least 20 % of the land is a chain of `S92_LOBES` lobes, of 4-20 % 1 to `S92_LOBES` (smaller ones: 1)
+/// along a spine that turns by up to `S92_TURN` rad per lobe, lobe centres `S92_SPACING` times the two major radii apart; the lobes split the craton's cap area at random (radii r·√a and r/√a, aspect
+/// uniform in `amin..amax`, the major axis along the spine). Craton centres are at least the two extents plus 0.1 rad apart (up to 200
+/// draws).
+fn ellipses(seed: u64, amin: f64, amax: f64) -> Vec<Ellipse> {
+    static M: OnceLock<Mutex<HashMap<u64, Vec<Ellipse>>>> = OnceLock::new();
+    let m = M.get_or_init(Default::default);
+    if let Some(v) = m.lock().expect("ellipse memo").get(&seed) {
+        return v.clone();
+    }
+    let (lobes_max, turn, spacing) = ((env("S92_LOBES", 1.0) as u32).max(1), env("S92_TURN", 0.8), env("S92_SPACING", 0.8));
+    let mut s = seed ^ 0x5392_e11e;
+    let mut out: Vec<Ellipse> = Vec::new();
+    let mut placed: Vec<(Vec3, f64)> = Vec::new();
+    for share in sizes() {
+        let n = if *share >= 0.2 {
+            lobes_max
+        } else if *share >= 0.04 {
+            (1 + (unit(&mut s) * f64::from(lobes_max)) as u32).min(lobes_max)
+        } else {
+            1
+        };
+        let weights: Vec<f64> = (0..n).map(|_| 0.5 + unit(&mut s)).collect();
+        let total: f64 = weights.iter().sum();
+        // The spine in the craton's tangent plane (radians): (x, y, direction, area weight r², ra, rb) per lobe.
+        let (mut x, mut y, mut dir) = (0.0f64, 0.0f64, core::f64::consts::TAU * unit(&mut s));
+        let mut local: Vec<(f64, f64, f64, f64, f64, f64)> = Vec::new();
+        for (j, w) in weights.iter().enumerate() {
+            let r = libm::acos((1.0 - 2.0 * land_target() * share * w / total).clamp(-1.0, 1.0));
+            let a = amin + (amax - amin) * unit(&mut s);
+            let (ra, rb) = (r * libm::sqrt(a), r / libm::sqrt(a));
+            if j > 0 {
+                dir += (2.0 * unit(&mut s) - 1.0) * turn;
+                let prev = local[j - 1].4;
+                x += libm::cos(dir) * spacing * (prev + ra);
+                y += libm::sin(dir) * spacing * (prev + ra);
+            }
+            local.push((x, y, dir, r * r, ra, rb));
+        }
+        let area: f64 = local.iter().map(|l| l.3).sum();
+        let cx = local.iter().map(|l| l.0 * l.3).sum::<f64>() / area;
+        let cy = local.iter().map(|l| l.1 * l.3).sum::<f64>() / area;
+        let extent = local.iter().map(|l| libm::hypot(l.0 - cx, l.1 - cy) + l.4).fold(0.0, f64::max);
+        let mut c = Vec3::new(0.0, 0.0, 1.0);
+        for _ in 0..200 {
+            let z = 2.0 * unit(&mut s) - 1.0;
+            let az = core::f64::consts::TAU * unit(&mut s);
+            let q = libm::sqrt((1.0 - z * z).max(0.0));
+            c = Vec3::new(q * libm::cos(az), q * libm::sin(az), z);
+            if placed.iter().all(|(o, eo)| angle(c, *o) >= extent + eo + 0.1) {
+                break;
+            }
+        }
+        placed.push((c, extent));
+        let helper = if c.z.abs() < 0.9 { Vec3::new(0.0, 0.0, 1.0) } else { Vec3::new(1.0, 0.0, 0.0) };
+        let e1 = c.cross(helper).normalized();
+        let e2 = c.cross(e1);
+        for (lx, ly, ldir, _, ra, rb) in local {
+            // The exponential map from the craton's tangent plane to the sphere.
+            let (dx, dy) = (lx - cx, ly - cy);
+            let rho = libm::hypot(dx, dy);
+            let pc = if rho < 1e-12 { c } else { (c * libm::cos(rho) + (e1 * dx + e2 * dy) * (libm::sin(rho) / rho)).normalized() };
+            let d3 = e1 * libm::cos(ldir) + e2 * libm::sin(ldir);
+            let t = (d3 - pc * d3.dot(pc)).normalized();
+            out.push((pc, t, pc.cross(t), ra, rb));
+        }
+    }
+    m.lock().expect("ellipse memo").insert(seed, out.clone());
+    out
+}
+
 fn angle(a: Vec3, b: Vec3) -> f64 {
     libm::atan2(a.cross(b).length(), a.dot(b))
 }
@@ -172,7 +286,124 @@ fn raw(seed: u64, d: Vec3, c: Candidate) -> f64 {
             let core = ranked(seed).iter().map(|(c, r)| r - angle(p, *c)).fold(f64::NEG_INFINITY, f64::max);
             core + mid * fbm(seed, LAYER_MID, p, 3.0, 3) + high * fbm_gain(seed, LAYER_HIGH, p, 6.0, 7, gain)
         }
+        Candidate::H { .. } => h_value(seed, layout(seed, c), d, c),
     }
+}
+
+/// The hybrid's raw value at `d` with the craton layout drawn from `lseed`.
+fn h_value(seed: u64, lseed: u64, d: Vec3, c: Candidate) -> f64 {
+    let Candidate::H { freq, oct, warp, gain, k, amin, amax, cwarp, pw } = c else { return 0.0 };
+    {
+        let w = Vec3::new(
+            fbm(seed, LAYER_WARP, d, 1.3, 3),
+            fbm(seed, LAYER_WARP, d + Vec3::new(17.0, 0.0, 0.0), 1.3, 3),
+            fbm(seed, LAYER_WARP, d + Vec3::new(0.0, 31.0, 0.0), 1.3, 3),
+        );
+        let shape = fbm_gain(seed, LAYER_A, d + w * warp, freq, oct, gain) * 1.7;
+        let pc = (d + w * cwarp).normalized();
+        // rho is the elliptical distance in the tangent frame of each lobe (front hemisphere only).
+        let bias: f64 = ellipses(lseed, amin, amax)
+            .iter()
+            .map(|(c, t, b, ra, rb)| {
+                let z = pc.dot(*c);
+                if z <= 0.0 {
+                    return 0.0;
+                }
+                let (u, v) = (libm::atan2(pc.dot(*t), z) / ra, libm::atan2(pc.dot(*b), z) / rb);
+                libm::exp(-libm::pow(u * u + v * v, pw))
+            })
+            .sum();
+        // The fBm's amplitude peaks on the craton margins (bias 0.5) and falls to `S92_DEEP` in the deep ocean and the interiors.
+        let deep = env("S92_DEEP", 1.0);
+        let wm = bias.min(1.0);
+        shape * (deep + (1.0 - deep) * 4.0 * wm * (1.0 - wm)) + k * bias
+    }
+}
+
+/// The craton layout seed of a seed: draws `seed`, then derived seeds (up to `S92_RETRY` draws), until a coarse land map (2 degree cells,
+/// 29 % land by area) has 4-7 masses of at least 1 Mkm2 and the largest holds 47-60 % of the land; else the draw closest to that. Deterministic
+/// per seed (CON-14): the grid, the draw order and the tie-break are fixed.
+fn layout(seed: u64, c: Candidate) -> u64 {
+    static M: OnceLock<Mutex<HashMap<u64, u64>>> = OnceLock::new();
+    let m = M.get_or_init(Default::default);
+    if let Some(v) = m.lock().expect("layout memo").get(&seed) {
+        return *v;
+    }
+    let tries = (env("S92_RETRY", 1.0) as u64).max(1);
+    let (h, w) = (90usize, 180usize);
+    let cell: Vec<f64> = (0..h)
+        .map(|i| {
+            let lat = (90.0 - (i as f64 + 0.5) * 2.0).to_radians();
+            let s = 6371.0 * 2.0f64.to_radians();
+            s * s * libm::cos(lat)
+        })
+        .collect();
+    let (mut best, mut best_cost) = (seed, f64::INFINITY);
+    for t in 0..tries {
+        let lseed = if t == 0 { seed } else { seed ^ (0x5392_7e7e_u64.wrapping_mul(t + 1)) };
+        let v: Vec<f64> = (0..h * w)
+            .map(|k| {
+                let (i, j) = (k / w, k % w);
+                let lat = (90.0 - (i as f64 + 0.5) * 2.0).to_radians();
+                let lon = (-180.0 + (j as f64 + 0.5) * 2.0).to_radians();
+                h_value(seed, lseed, Vec3::new(libm::cos(lat) * libm::cos(lon), libm::cos(lat) * libm::sin(lon), libm::sin(lat)), c)
+            })
+            .collect();
+        // The area-weighted (1 - land) quantile.
+        let mut order: Vec<usize> = (0..h * w).collect();
+        order.sort_by(|a, b| v[*b].total_cmp(&v[*a]).then(a.cmp(b)));
+        let total: f64 = cell.iter().sum::<f64>() * w as f64;
+        let mut land = vec![false; h * w];
+        let mut acc = 0.0;
+        for k in order {
+            if acc >= land_target() * total {
+                break;
+            }
+            land[k] = true;
+            acc += cell[k / w];
+        }
+        // Masses: 8-connected, wrapping in longitude.
+        let mut label = vec![usize::MAX; h * w];
+        let mut areas: Vec<f64> = Vec::new();
+        for k0 in 0..h * w {
+            if !land[k0] || label[k0] != usize::MAX {
+                continue;
+            }
+            let id = areas.len();
+            let mut a = 0.0;
+            let mut stack = vec![k0];
+            label[k0] = id;
+            while let Some(k) = stack.pop() {
+                a += cell[k / w];
+                let (i, j) = ((k / w) as i64, (k % w) as i64);
+                for di in -1..=1i64 {
+                    for dj in -1..=1i64 {
+                        let ii = i + di;
+                        if ii < 0 || ii >= h as i64 {
+                            continue;
+                        }
+                        let n = ii as usize * w + (j + dj).rem_euclid(w as i64) as usize;
+                        if land[n] && label[n] == usize::MAX {
+                            label[n] = id;
+                            stack.push(n);
+                        }
+                    }
+                }
+            }
+            areas.push(a);
+        }
+        let s1 = areas.iter().filter(|a| **a >= 1e6).count() as f64;
+        let s2 = areas.iter().cloned().fold(0.0, f64::max) / acc;
+        let cost = (4.0 - s1).max(0.0) + (s1 - 7.0).max(0.0) + 10.0 * ((0.47 - s2).max(0.0) + (s2 - 0.60).max(0.0));
+        if cost < best_cost {
+            (best, best_cost) = (lseed, cost);
+        }
+        if cost == 0.0 {
+            break;
+        }
+    }
+    m.lock().expect("layout memo").insert(seed, best);
+    best
 }
 
 /// The land offset of a seed: the `1 - land` quantile of the raw value over a fixed Fibonacci grid of 20,000 directions.
