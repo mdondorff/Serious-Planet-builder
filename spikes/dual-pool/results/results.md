@@ -85,5 +85,38 @@ Medians over the 3 rounds. Tile-ready = `load_run_us_median` + `load_wait_us_med
 ## Next step (SPIKE-90 stays open)
 A throttled background pool: `PLANET_DUAL_POOL_BG=2` and `4`, or EcoQoS on the E threads, to find a setting where d passes against c. The measurement plan and the verdict rule stay as written.
 
+## Second window: a background setting that does not slow (plan, 2026-11-02)
+Prototype: branch `spike/dual-pool-2` at 3af166f1 (from a4878fe9; never merged; patch in `proto/dual-pool-window2.patch.txt`). New knobs, all on the background pool only and only with `PLANET_DUAL_POOL=1` on a hybrid CPU:
+| Knob | Switch | What it does |
+|---|---|---|
+| Pool size | `PLANET_DUAL_POOL_BG=N` (existed) | N background workers on the E-cores instead of one per E thread (8) |
+| EcoQoS | `PLANET_DUAL_POOL_ECOQOS=1` | each background thread asks for power throttling (`SetThreadInformation(ThreadPowerThrottling, EXECUTION_SPEED)`, the existing `windows` crate); returns `true` on Rasierklinge |
+| Duty cap | `PLANET_DUAL_POOL_DUTY=P` | a background worker pauses `t (100 - P) / P` after a job of `t`: busy at most P % of the time |
+- The synthetic load (`PLANET_DUAL_POOL_LOAD=N`) now runs in jobs of about 10 ms that queue their successor (a bake is many short jobs; a cap between jobs could not act on window 1's endless jobs). At exit the run prints `dual pool: synthetic load chunks finished: K`: the background's throughput, so a knob cannot pass by starving the background unseen.
+- Smoke (WARP, `test-render --perf-smoke --scene dive --gen-workers 5`, 2026-11-02): every configuration below runs and exits; EcoQoS `true` on every background thread; the duty cap and pool sizes are applied (startup lines); chunks finished in one dive smoke: 1,792 with 8 workers, 967 with BG 2, 646 with duty 50 % (WARP frame times are not evidence).
+
+### Configurations
+| | Name | Switches (all with `PLANET_DUAL_POOL=1`, `--gen-workers 5`) |
+|---|---|---|
+| c | dual pool, baseline | none |
+| d-plain | 8 background workers, saturated by the new load, no knob | `PLANET_DUAL_POOL_LOAD=8` |
+| d-BG2 | 2 background workers, saturated | `PLANET_DUAL_POOL_LOAD=8 PLANET_DUAL_POOL_BG=2` |
+| d-Eco | EcoQoS, saturated | `PLANET_DUAL_POOL_LOAD=8 PLANET_DUAL_POOL_ECOQOS=1` |
+| d-Duty50 | duty cap 50 %, saturated | `PLANET_DUAL_POOL_LOAD=8 PLANET_DUAL_POOL_DUTY=50` |
+- d-plain is the like-for-like reference for the knobs (the load changed from window 1's endless jobs to ~10 ms chained jobs) and re-checks window 1's verdict "d slows c" with the new load (planner, 2026-11-02).
+- Not in this window: BG 4 (more load than BG 2: only worth running if BG 2 passes) and combinations (BG 4 + EcoQoS); a third window takes the best one further if needed.
+
+### Runs and time
+- Flights: `dive` (3 rounds) and `teleport-1m` (2 rounds; window 1's teleport-2km behaved like teleport-1m in every verdict); quiet only; configurations rotated per round (round 1 c, d-plain, BG2, Eco, Duty; round 2 d-plain, BG2, Eco, Duty, c; round 3, dive only, BG2, Eco, Duty, c, d-plain).
+- 5 configurations x (3 dive + 2 teleport-1m) = 25 runs: `cargo xtask perf stream <flight> --store C:/DEV/SeriousPlanetData/global16384 --gen-workers 5` with the environment of the row; release build of `spike/dual-pool-2` at 3af166f1 in its own worktree.
+- Estimate: window 1 took 118 min for 36 runs including 40 refused or INVALID attempts (about 3.3 min per kept run), so 25 runs take about 80 min; without a refusal storm about 60 min. If the window runs short, stop after dive round 3's last configuration; teleport-1m's two rounds come first in the run order of each round.
+- Each run also keeps its stderr line `dual pool: synthetic load chunks finished: K` and the run's wall time (chunks per second for the background's throughput).
+
+### Verdict rule (unchanged from window 1, fixed before the run)
+- For each knob and for d-plain against c, per flight, medians of the rounds (3 for dive, 2 for teleport-1m): tile-ready (`load_run_us_median` + `load_wait_us_median`) and frame p99 at most 5 % above c, and no knob round more than 10 % worse than the worst c round. A knob passes "does not slow" only in both flights.
+- Report for each passing knob its background throughput (chunks per second) against d-plain's, so the owner sees what the pass costs the background.
+- With 2 rounds the worst-round rule compares the worse of the knob's two rounds with the worse of c's two.
+- A run INVALID by the calibration stays "no verdict" for its own number, as in window 1; a knob with fewer than 2 valid rounds in a flight is "no verdict" there.
+
 ## Visuals
 Timings only: no images.

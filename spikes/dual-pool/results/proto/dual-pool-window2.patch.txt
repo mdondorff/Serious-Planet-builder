@@ -1,0 +1,186 @@
+diff --git a/crates/streaming/src/cpusets.rs b/crates/streaming/src/cpusets.rs
+index bc1f511b..784dbde0 100644
+--- a/crates/streaming/src/cpusets.rs
++++ b/crates/streaming/src/cpusets.rs
+@@ -47,6 +47,12 @@ pub fn pin_current(class: CoreClass) -> bool {
+     imp::select(&ids)
+ }
+ 
++/// Ask the OS to run the calling thread power-throttled (Windows EcoQoS, `ThreadPowerThrottling` execution-speed throttling): on a hybrid CPU it
++/// prefers the efficiency cores at a low clock. `false` where the platform has no such call or refused it.
++pub fn eco_qos_current() -> bool {
++    imp::eco_qos()
++}
++
+ #[derive(Clone, Copy, Debug)]
+ struct CpuSet {
+     id: u32,
+@@ -98,6 +104,28 @@ mod imp {
+         out
+     }
+ 
++    pub fn eco_qos() -> bool {
++        use windows::Win32::System::Threading::{
++            SetThreadInformation, ThreadPowerThrottling, THREAD_POWER_THROTTLING_CURRENT_VERSION, THREAD_POWER_THROTTLING_EXECUTION_SPEED,
++            THREAD_POWER_THROTTLING_STATE,
++        };
++        let state = THREAD_POWER_THROTTLING_STATE {
++            Version: THREAD_POWER_THROTTLING_CURRENT_VERSION,
++            ControlMask: THREAD_POWER_THROTTLING_EXECUTION_SPEED,
++            StateMask: THREAD_POWER_THROTTLING_EXECUTION_SPEED,
++        };
++        // SAFETY: the pseudo handle of the calling thread is always valid; the state is a live local of the size passed.
++        unsafe {
++            SetThreadInformation(
++                GetCurrentThread(),
++                ThreadPowerThrottling,
++                std::ptr::from_ref(&state).cast(),
++                std::mem::size_of::<THREAD_POWER_THROTTLING_STATE>() as u32,
++            )
++            .is_ok()
++        }
++    }
++
+     pub fn select(ids: &[u32]) -> bool {
+         if ids.is_empty() {
+             return false;
+@@ -118,6 +146,10 @@ mod imp {
+     pub fn select(_: &[u32]) -> bool {
+         false
+     }
++
++    pub fn eco_qos() -> bool {
++        false
++    }
+ }
+ 
+ #[cfg(test)]
+diff --git a/crates/streaming/src/jobs.rs b/crates/streaming/src/jobs.rs
+index d812ca45..c574ebcb 100644
+--- a/crates/streaming/src/jobs.rs
++++ b/crates/streaming/src/jobs.rs
+@@ -203,6 +203,23 @@ impl JobSystem {
+                             } else {
+                                 crate::cpusets::CoreClass::Performance
+                             });
++                            // SPIKE-90 second window: PLANET_DUAL_POOL_ECOQOS=1 asks Windows to run the background threads power-throttled.
++                            if kind == Kind::Idle && std::env::var("PLANET_DUAL_POOL_ECOQOS").is_ok_and(|v| v != "0") {
++                                let ok = crate::cpusets::eco_qos_current();
++                                if n == 0 || std::thread::current().name().is_some_and(|t| t.ends_with(&format!("-{n}"))) {
++                                    eprintln!("dual pool: EcoQoS on {}: {ok}", std::thread::current().name().unwrap_or("?"));
++                                }
++                            }
++                        }
++                        // SPIKE-90 second window: PLANET_DUAL_POOL_DUTY=P keeps a background worker busy at most P % of the time: after a job of
++                        // t it pauses t (100 - P) / P before the next.
++                        let duty = if dual && kind == Kind::Idle {
++                            std::env::var("PLANET_DUAL_POOL_DUTY").ok().and_then(|v| v.parse::<u32>().ok()).filter(|p| (1..100).contains(p))
++                        } else {
++                            None
++                        };
++                        if let Some(p) = duty {
++                            eprintln!("dual pool: duty cap {p} % on {}", std::thread::current().name().unwrap_or("?"));
+                         }
+                         loop {
+                             let queued = {
+@@ -219,7 +236,11 @@ impl JobSystem {
+                                 }
+                             };
+                             // A panic of a job ends the job, not the worker.
++                            let started = std::time::Instant::now();
+                             let _ = catch_unwind(AssertUnwindSafe(queued.job));
++                            if let Some(p) = duty {
++                                std::thread::sleep(started.elapsed() * (100 - p) / p);
++                            }
+                             let idle_waits = {
+                                 let mut st = shared.state.lock().expect("job state");
+                                 let s = &mut st.shares[queued.share];
+@@ -238,36 +259,15 @@ impl JobSystem {
+             })
+             .collect();
+         let system = Self { shared, workers: Mutex::new(workers) };
+-        // SPIKE-90 configuration (d): PLANET_DUAL_POOL_LOAD=N keeps N idle-class jobs spinning on the background pool for the system's life (a
+-        // synthetic bake: integer hashing over a 4 MiB buffer per job, so it loads the caches and memory as a bake does).
++        // SPIKE-90 configuration (d): PLANET_DUAL_POOL_LOAD=N keeps N idle-class jobs busy on the background pool for the system's life (a
++        // synthetic bake: integer hashing over a 4 MiB buffer per job, so it loads the caches and memory as a bake does). Each job runs about
++        // 10 ms and queues its successor, so a duty-cycle cap between jobs applies to it as to a real bake's tiles.
+         if dual {
+             if let Some(n) = std::env::var("PLANET_DUAL_POOL_LOAD").ok().and_then(|v| v.parse::<usize>().ok()).filter(|n| *n > 0) {
+-                eprintln!("dual pool: {n} synthetic background jobs");
++                eprintln!("dual pool: {n} synthetic background jobs of about 10 ms, each queueing the next");
+                 let share = system.share_with_idle("spike90-load", n, n);
+                 for k in 0..n {
+-                    let shared = Arc::clone(&system.shared);
+-                    share.spawn_class(
+-                        Class::Idle,
+-                        Box::new(move || {
+-                            let mut buf = vec![0u64; 1 << 19];
+-                            let mut x = 0x9E37_79B9_7F4A_7C15u64 ^ k as u64;
+-                            let mut i = 0usize;
+-                            loop {
+-                                for _ in 0..4096 {
+-                                    x ^= x << 13;
+-                                    x ^= x >> 7;
+-                                    x ^= x << 17;
+-                                    let at = (x as usize) & (buf.len() - 1);
+-                                    buf[at] = buf[at].wrapping_add(x);
+-                                    i = i.wrapping_add(1);
+-                                }
+-                                if shared.state.lock().expect("job state").closed {
+-                                    std::hint::black_box((&buf, i));
+-                                    return;
+-                                }
+-                            }
+-                        }),
+-                    );
++                    load_chunk(share.clone(), Arc::clone(&system.shared), k as u64, Arc::new(Mutex::new(vec![0u64; 1 << 19])));
+                 }
+             }
+         }
+@@ -297,8 +297,46 @@ impl JobSystem {
+     }
+ }
+ 
++/// SPIKE-90: the chunks of synthetic background load finished in this process (the background's throughput under a knob).
++static LOAD_CHUNKS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
++
++/// One chunk of SPIKE-90's synthetic background load (about 10 ms of hashing over the job's buffer), then the next chunk, until the system closes.
++fn load_chunk(share: Share, shared: Arc<Shared>, k: u64, buf: Arc<Mutex<Vec<u64>>>) {
++    let next = share.clone();
++    share.spawn_class(
++        Class::Idle,
++        Box::new(move || {
++            if shared.state.lock().expect("job state").closed {
++                return;
++            }
++            {
++                let mut b = buf.lock().expect("load buffer");
++                let len = b.len();
++                let mut x = 0x9E37_79B9_7F4A_7C15u64 ^ k;
++                let t = std::time::Instant::now();
++                while t.elapsed() < std::time::Duration::from_millis(10) {
++                    for _ in 0..4096 {
++                        x ^= x << 13;
++                        x ^= x >> 7;
++                        x ^= x << 17;
++                        let at = (x as usize) & (len - 1);
++                        b[at] = b[at].wrapping_add(x);
++                    }
++                }
++                std::hint::black_box(&*b);
++            }
++            LOAD_CHUNKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
++            load_chunk(next, shared, k.wrapping_add(1), buf);
++        }),
++    );
++}
++
+ impl Drop for JobSystem {
+     fn drop(&mut self) {
++        let chunks = LOAD_CHUNKS.swap(0, std::sync::atomic::Ordering::Relaxed);
++        if chunks > 0 {
++            eprintln!("dual pool: synthetic load chunks finished: {chunks} (about 10 ms of work each)");
++        }
+         self.shared.state.lock().expect("job state").closed = true;
+         self.shared.wake.notify_all();
+         self.shared.wake_idle.notify_all();
