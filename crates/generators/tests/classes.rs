@@ -244,12 +244,12 @@ fn the_class_source_version_goes_with_its_output() {
     }
     assert_eq!(
         (CLASS_SOURCE_VERSION, hash),
-        (2, FINGERPRINT),
+        (3, FINGERPRINT),
         "the default source's output changed: bump CLASS_SOURCE_VERSION and record the new fingerprint"
     );
 }
 
-const FINGERPRINT: u64 = 4895128674126474520;
+const FINGERPRINT: u64 = 11776409573502279601;
 
 // spec: GEN-103
 #[test]
@@ -305,4 +305,30 @@ fn a_world_of_one_small_island_has_all_its_land_in_the_largest_mass() {
     let m = shape_metrics(&Grid { width: w, height: h, land: &land, high: &vec![false; w * h] });
     assert!(m.land_masses.is_empty(), "under 1 Mkm2");
     assert!((m.largest_share - 1.0).abs() < 1e-9, "{}", m.largest_share);
+}
+
+// spec: GEN-103
+#[test]
+fn the_mask_has_no_step_at_the_latitudes_where_a_tangent_basis_would_change() {
+    let source = ClassSource::new(SEED);
+    // The tangent basis of Vec3 switches its helper axis at |z| = 0.9; the estimate of the coast distance must not.
+    let at = |phi: f64, z: f64| {
+        let r = libm::sqrt(1.0 - z * z);
+        Vec3::new(r * libm::cos(phi), r * libm::sin(phi), z).normalized()
+    };
+    for sign in [-1.0, 1.0] {
+        for k in 0..400u32 {
+            let phi = f64::from(k) * 0.01571;
+            let (a, b) = (source.eval(at(phi, sign * (0.9 - 1e-13))), source.eval(at(phi, sign * (0.9 + 1e-13))));
+            for (name, x, y) in [
+                ("core", a.terms.core, b.terms.core),
+                ("flank", a.terms.flank, b.terms.flank),
+                ("old margin", a.terms.old_margin, b.terms.old_margin),
+                ("plateau", a.terms.plateau_field, b.terms.plateau_field),
+                ("e0", a.e0 / 1000.0, b.e0 / 1000.0),
+            ] {
+                assert!((x - y).abs() < 1e-6, "{name} steps at z = {} and longitude {phi}: {x} against {y}", sign * 0.9);
+            }
+        }
+    }
 }
