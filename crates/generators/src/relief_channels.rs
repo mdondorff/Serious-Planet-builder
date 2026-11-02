@@ -35,36 +35,60 @@ pub struct ReliefChannels {
     ranges: Vec<Vec<[f32; 4]>>,
 }
 
-/// `k` and `m` at a direction: `classes` read bilinearly, `elevation` the bake's elevation in metres at a direction, `radius_m` the body's radius.
+/// The 8 compass points of the ring and its angular radius, computed once per radius (the trigonometry is the same for every lattice point).
+pub struct Ring {
+    cos_a: f64,
+    sin_a: f64,
+    compass: [(f64, f64); 8],
+}
+
+impl Ring {
+    /// The ring of [`RING_RADIUS_M`] on a body of radius `radius_m` (more than the ring's radius).
+    pub fn new(radius_m: f64) -> Ring {
+        assert!(radius_m > RING_RADIUS_M, "the body's radius must exceed the ring's {RING_RADIUS_M} m, not {radius_m} m");
+        let a = RING_RADIUS_M / radius_m;
+        let mut compass = [(0.0, 0.0); 8];
+        for (q, c) in compass.iter_mut().enumerate() {
+            let theta = core::f64::consts::FRAC_PI_4 * q as f64;
+            *c = (libm::cos(theta), libm::sin(theta));
+        }
+        Ring { cos_a: libm::cos(a), sin_a: libm::sin(a), compass }
+    }
+}
+
+/// `k` and `m` at a direction: `classes` read bilinearly, `elevation` the bake's elevation in metres at a direction.
 /// A pure function of the direction, so the same on both faces of a shared edge point.
-pub fn point(classes: &ClassLattice, elevation: &dyn Fn(Vec3) -> f64, radius_m: f64, d: Vec3) -> (f64, f64) {
-    let m = ring_mean(elevation, radius_m, d);
+pub fn point(classes: &ClassLattice, elevation: &dyn Fn(Vec3) -> f64, ring: &Ring, d: Vec3) -> (f64, f64) {
+    let m = ring_mean_with(elevation, ring, d);
+    debug_assert!(m.is_finite(), "the bake's elevation is not finite around {d:?}");
     let k = blended_k(&classes.weights_at(d));
     (1.0 + smoothstep(0.0, TAPER_FULL_M, m) * (k - 1.0), m)
 }
 
 /// The mean of the elevation at `d` and at the 8 compass points of the ring of [`RING_RADIUS_M`] around it, in a fixed order.
-///
-/// The tangent basis comes from the coordinate axis along which `d` has the smallest component, so a ring is the same at a given direction whichever face asks.
 pub fn ring_mean(elevation: &dyn Fn(Vec3) -> f64, radius_m: f64, d: Vec3) -> f64 {
-    let helper = {
-        let (ax, ay, az) = (libm::fabs(d.x), libm::fabs(d.y), libm::fabs(d.z));
-        if ax <= ay && ax <= az {
-            Vec3::new(1.0, 0.0, 0.0)
-        } else if ay <= az {
-            Vec3::new(0.0, 1.0, 0.0)
+    ring_mean_with(elevation, &Ring::new(radius_m), d)
+}
+
+/// [`ring_mean`] for a prepared ring.
+///
+/// The compass is east and north (east is the Z axis crossed with `d`, north completes the frame): it is singular only at the two poles, so the ring's orientation
+/// is continuous over every face edge and diagonal (a frame chosen from the smallest coordinate rotates by up to 30 degrees across the face diagonals, and
+/// 8 samples do not cancel the angular harmonics of a rough surface under that). At a pole east is the Y axis, the same at every pole point.
+pub fn ring_mean_with(elevation: &dyn Fn(Vec3) -> f64, ring: &Ring, d: Vec3) -> f64 {
+    let east = {
+        let e = Vec3::new(-d.y, d.x, 0.0);
+        let l = e.length();
+        if l > 1e-12 {
+            e * (1.0 / l)
         } else {
-            Vec3::new(0.0, 0.0, 1.0)
+            Vec3::new(0.0, 1.0, 0.0)
         }
     };
-    let t1 = d.cross(helper).normalized();
-    let t2 = d.cross(t1);
-    let a = RING_RADIUS_M.min(radius_m) / radius_m;
-    let (ca, sa) = (libm::cos(a), libm::sin(a));
+    let north = d.cross(east);
     let mut sum = elevation(d);
-    for q in 0..8 {
-        let theta = core::f64::consts::FRAC_PI_4 * f64::from(q);
-        let dir = d * ca + (t1 * libm::cos(theta) + t2 * libm::sin(theta)) * sa;
+    for &(c, s) in &ring.compass {
+        let dir = d * ring.cos_a + (east * c + north * s) * ring.sin_a;
         sum += elevation(dir.normalized());
     }
     sum / 9.0
@@ -90,6 +114,7 @@ impl ReliefChannels {
             "the channels have a power of two cells per face edge of at least {BLOCK_CELLS}, not {cells}"
         );
         let n = cells;
+        let ring = Ring::new(radius_m);
         let map = TangentWarp;
         let par: &dyn Par = &threads;
         // One row of one face per piece of work: every value is independent of the others.
@@ -99,7 +124,7 @@ impl ReliefChannels {
             (0..=n)
                 .map(|i| {
                     let s = 2.0 * i as f64 / n as f64 - 1.0;
-                    let (k, m) = point(classes, elevation, radius_m, face_to_direction(&map, Face(f as u8), s, t));
+                    let (k, m) = point(classes, elevation, &ring, face_to_direction(&map, Face(f as u8), s, t));
                     (k as f32, m as f32)
                 })
                 .collect::<Vec<_>>()
@@ -113,7 +138,8 @@ impl ReliefChannels {
             }
         }
         let b = n / BLOCK_CELLS;
-        // A block holds the points of its cells, so the shared row and column of the next block are in both: a bilinear read inside a block stays inside its range.
+        // A block holds the points of its cells, so the shared row and column of the next block are in both: a bilinear read inside a block stays inside its range
+        // (in exact arithmetic: a reader must interpolate in f64, or allow one f32 ulp, since `a + t (b - a)` in f32 can overshoot).
         let ranges = (0..6)
             .map(|f| {
                 let mut out = Vec::with_capacity(b * b);
@@ -153,7 +179,8 @@ impl ReliefChannels {
         self.ranges[face.0 as usize][bj * (self.cells / BLOCK_CELLS) + bi]
     }
 
-    /// The share of neighbouring lattice point pairs whose `k` differs by more than `max_step`.
+    /// The share of neighbouring lattice point pairs (within a face) whose TAPERED `k` differs by more than `max_step`: a diagnostic of the taper. GEN-097's gate is on the
+    /// untapered blended `k` (`ClassLattice::k_step_quantile`).
     pub fn k_steps_over(&self, max_step: f64) -> f64 {
         let n = self.cells;
         let (mut over, mut total) = (0u64, 0u64);
@@ -176,7 +203,7 @@ impl ReliefChannels {
 
     /// The channels' bytes, for the identity checks of the tests and the stored form's key: the version, the cells, then `k` and `m` of every face, f32 little-endian.
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut out = Vec::new();
+        let mut out = Vec::with_capacity(8 + 8 * 6 * (self.cells + 1) * (self.cells + 1));
         out.extend(RELIEF_CHANNELS_VERSION.to_le_bytes());
         out.extend((self.cells as u32).to_le_bytes());
         for f in 0..6 {

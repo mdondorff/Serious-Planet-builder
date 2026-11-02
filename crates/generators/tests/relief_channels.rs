@@ -6,6 +6,11 @@ use planet_core::{Face, Vec3};
 use planet_generators::classes::{blended_k, ClassLattice, ClassSource};
 use planet_generators::relief_channels::*;
 
+/// A rough surface with relief at a wavelength of about 7 to 9 km: the ring mean depends on how the ring is oriented.
+fn rough(d: Vec3) -> f64 {
+    1000.0 * libm::sin(d.x * R / 1500.0 + 0.3) * libm::cos(d.y * R / 1100.0 + 0.7) + 400.0 * libm::sin(d.z * R / 900.0)
+}
+
 const R: f64 = 6_371_000.0;
 const CELLS: usize = 64;
 
@@ -103,9 +108,9 @@ fn the_ring_mean_of_a_constant_surface_is_that_constant_and_of_a_ramp_is_its_cen
 #[test]
 fn a_point_on_the_edge_of_two_faces_has_the_same_values_on_both() {
     let c = classes();
-    let ch = ReliefChannels::compute(&c, &surface, R, CELLS, 2);
+    let ch = ReliefChannels::compute(&c, &rough, R, CELLS, 2);
     // For every point on the +X face's edge s = 1, find the point of another face that is the same direction (within 1e-12) and compare the values.
-    let (mut checked, mut worst) = (0, 0.0f64);
+    let mut checked = 0;
     for j in 0..=CELLS {
         let d = face_to_direction(&TangentWarp, Face(0), 1.0, 2.0 * j as f64 / CELLS as f64 - 1.0);
         for f in 1..6u8 {
@@ -119,14 +124,17 @@ fn a_point_on_the_edge_of_two_faces_has_the_same_values_on_both() {
                     );
                     if (d2 - d).length() < 1e-12 {
                         let (a, b) = (ch.at(Face(0), CELLS, j), ch.at(Face(f), i2, j2));
-                        worst = worst.max(f64::from((a.0 - b.0).abs())).max(f64::from((a.1 - b.1).abs()) / 1000.0);
+                        assert!(
+                            (a.0.to_bits(), a.1.to_bits()) == (b.0.to_bits(), b.1.to_bits()),
+                            "face 0 point ({CELLS}, {j}) and face {f} point ({i2}, {j2}) differ: {a:?} against {b:?}"
+                        );
                         checked += 1;
                     }
                 }
             }
         }
     }
-    assert!(checked > 0 && worst < 1e-3, "{checked} edge points checked, worst difference {worst}");
+    assert!(checked > 0, "no edge point was found");
 }
 
 // spec: GEN-097
@@ -140,4 +148,51 @@ fn the_step_limit_is_a_parameter_of_the_feathering_and_the_check() {
     let (loose, tight) = (ch.k_steps_over(100.0), ch.k_steps_over(0.01));
     assert_eq!(loose, 0.0, "no step is over 100");
     assert!(tight > loose && tight <= 1.0, "a tighter limit has more steps over it: {tight}");
+}
+
+// spec: GEN-099
+#[test]
+fn the_ring_mean_is_continuous_across_the_face_diagonals_of_a_rough_surface() {
+    // Points 1e-12 either side of the diagonal |x| = |y| of the +Z face: a frame that rotates there would jump by hundreds of metres on this surface.
+    let ring = Ring::new(R);
+    let mut worst = 0.0f64;
+    for t in [0.05, 0.2, 0.4, 0.6, 0.8] {
+        let u = libm::tan(t * core::f64::consts::FRAC_PI_4);
+        let (a, b) = (Vec3::new(u * (1.0 + 1e-12), u, 1.0).normalized(), Vec3::new(u, u * (1.0 + 1e-12), 1.0).normalized());
+        worst = worst.max((ring_mean_with(&rough, &ring, a) - ring_mean_with(&rough, &ring, b)).abs());
+    }
+    assert!(worst < 1.0, "the ring mean jumps by {worst} m across a face diagonal");
+}
+
+// spec: GEN-099
+#[test]
+fn a_block_range_is_tight_and_the_shared_row_is_in_both_neighbouring_blocks() {
+    let c = classes();
+    let ch = ReliefChannels::compute(&c, &rough, R, CELLS, 2);
+    for f in 0..6u8 {
+        for (bi, bj) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+            let r = ch.block_range(Face(f), bi, bj);
+            let mut pts = Vec::new();
+            for j in bj * BLOCK_CELLS..=(bj + 1) * BLOCK_CELLS {
+                for i in bi * BLOCK_CELLS..=(bi + 1) * BLOCK_CELLS {
+                    pts.push(ch.at(Face(f), i, j));
+                }
+            }
+            assert!(pts.iter().any(|p| p.0 == r[0]) && pts.iter().any(|p| p.0 == r[1]), "k's range is not met by a point of its block");
+            assert!(pts.iter().any(|p| p.1 == r[2]) && pts.iter().any(|p| p.1 == r[3]), "m's range is not met by a point of its block");
+        }
+    }
+    // The points of the shared row (j = 32) of blocks (0, 0) and (0, 1) lie in both ranges.
+    let (lo, hi) = (ch.block_range(Face(0), 0, 0), ch.block_range(Face(0), 0, 1));
+    for i in 0..=BLOCK_CELLS {
+        let (k, m) = ch.at(Face(0), i, BLOCK_CELLS);
+        assert!(lo[0] <= k && k <= lo[1] && hi[0] <= k && k <= hi[1] && lo[2] <= m && m <= lo[3] && hi[2] <= m && m <= hi[3]);
+    }
+}
+
+// spec: GEN-099
+#[test]
+#[should_panic(expected = "the body's radius must exceed the ring's")]
+fn a_body_smaller_than_the_ring_is_refused_with_a_message() {
+    let _ = Ring::new(0.0);
 }
