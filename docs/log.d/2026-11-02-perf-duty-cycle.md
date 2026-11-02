@@ -1,0 +1,1 @@
+- 2026-11-02 perf-duty-cycle (SPIKE-95 PR 2, ADR 0094): streaming scenes take no cool start (a hot start above 70 C is named), the views' cool start caps at 30 s, and the A/B helper, the reserve test and stream all keep a duty idle of half the previous run, at most 45 s (TEST-033, TEST-037, TEST-089 modified; BUILD-035 added)
