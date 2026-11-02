@@ -170,6 +170,9 @@ pub trait Runner {
     fn run(&mut self, side: Side, round: usize) -> Outcome;
     /// Wait before a refused run is tried again.
     fn wait(&mut self);
+    /// Keep the duty idle before the next run (ADR 0094, [`crate::clock::duty_idle_s`] of the run before); called between two runs,
+    /// never before the first.
+    fn rest(&mut self) {}
 }
 
 /// One finished run.
@@ -197,6 +200,9 @@ pub fn execute(spec: &AbSpec, runner: &mut dyn Runner) -> Result<Comparison, Str
     let mut out = Comparison::default();
     for round in 0..spec.rounds {
         for side in order(round) {
+            if !out.runs.is_empty() {
+                runner.rest();
+            }
             let mut tries = 0;
             loop {
                 match runner.run(side, round) {
@@ -392,6 +398,7 @@ mod tests {
     struct Fake {
         calls: Vec<(Side, usize)>,
         waits: usize,
+        rests: usize,
         refuse_next: usize,
         fail: bool,
     }
@@ -412,13 +419,17 @@ mod tests {
         fn wait(&mut self) {
             self.waits += 1;
         }
+
+        fn rest(&mut self) {
+            self.rests += 1;
+        }
     }
 
     // spec: BUILD-033
     #[test]
     fn five_rounds_alternate_keep_every_log_retry_refusals_and_give_one_table() {
         let spec = parse(&s(&["--ab", "origin/main", "stream", "dive"])).unwrap();
-        let mut fake = Fake { calls: vec![], waits: 0, refuse_next: 3, fail: false };
+        let mut fake = Fake { calls: vec![], waits: 0, rests: 0, refuse_next: 3, fail: false };
         let cmp = execute(&spec, &mut fake).unwrap();
         assert_eq!(cmp.runs.len(), 10, "every round ran both builds");
         assert_eq!(cmp.runs.iter().filter(|r| r.side == Side::Tree).count(), 5);
@@ -426,6 +437,7 @@ mod tests {
         let sides: Vec<Side> = fake.calls.iter().map(|c| c.0).collect();
         assert_eq!(&sides[3..7], &[Side::Base, Side::Tree, Side::Tree, Side::Base], "refused tries repeat the same run; rounds alternate");
         assert_eq!((fake.waits, cmp.refused_runs), (3, 3));
+        assert_eq!(fake.rests, 9, "a duty idle between two runs, none before the first (ADR 0094); refused tries wait, they do not rest");
         assert_eq!(cmp.refusals, vec![("quiet machine: no build or test processes: cargo.exe (pid 7)".to_string(), 3)]);
         let t = table(&spec, &cmp);
         assert!(t[0].contains("5 rounds") && t[0].contains("origin/main"), "{t:?}");
@@ -440,10 +452,10 @@ mod tests {
     #[test]
     fn a_gate_that_keeps_refusing_or_a_failing_command_stops_the_helper_with_the_reasons() {
         let spec = AbSpec { retries: 2, ..parse(&s(&["--ab", "x", "stream", "dive"])).unwrap() };
-        let mut stuck = Fake { calls: vec![], waits: 0, refuse_next: 99, fail: false };
+        let mut stuck = Fake { calls: vec![], waits: 0, rests: 0, refuse_next: 99, fail: false };
         let e = execute(&spec, &mut stuck).unwrap_err();
         assert!(e.contains("still refused after 2 retries") && e.contains("cargo.exe (pid 7) x3"), "{e}");
-        let mut broken = Fake { calls: vec![], waits: 0, refuse_next: 0, fail: true };
+        let mut broken = Fake { calls: vec![], waits: 0, rests: 0, refuse_next: 0, fail: true };
         assert!(execute(&spec, &mut broken).unwrap_err().contains("the command failed: exit 1"));
     }
 

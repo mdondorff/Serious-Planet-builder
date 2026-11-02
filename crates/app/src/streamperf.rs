@@ -47,8 +47,9 @@ pub fn scenes_of(name: &str) -> Vec<StreamScene> {
     }
 }
 
-/// What a streaming scene does before its measured span (TEST-037): the cool start (ADR 0057, TEST-033: wait for the GPU to read
-/// 60 C or less) in a measured run, nothing in a smoke run (no measurement, perhaps no `nvidia-smi`). There is no warm-up: the loop
+/// What a streaming scene does before its measured span (TEST-037): nothing. No cool start since ADR 0094: the scenes' verdicts are
+/// CPU wall time and take no GPU rows, the GPU's temperature at the start stays in the log's clock sample, and the runner's duty idle
+/// keeps the machine from heating run after run. There is no warm-up: the loop
 /// is paced to 60 Hz and CPU-bound, so no amount of rendering it brings the GPU to the loaded clock (look-2km at 58 C stayed at P3
 /// 1,087 MHz after 30 s unpaced), and the scenes take no GPU time for the clock to matter to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,8 +57,8 @@ pub struct StartSteps {
     pub cool: bool,
 }
 
-pub fn start_steps(smoke: bool) -> StartSteps {
-    StartSteps { cool: !smoke }
+pub fn start_steps(_smoke: bool) -> StartSteps {
+    StartSteps { cool: false }
 }
 
 /// The source of the bake for the log (`protocol.source`) and whether it is the production one: the stored bake is, an
@@ -563,8 +564,8 @@ fn run_case(
         writeln!(out, "{}: settled at the start view after {:.1} s ({frames} frames)", script.scene.name(), settle_s.unwrap_or(0.0))
             .map_err(err)?;
     }
-    // Both device losses of the lit dive (window 8) came after long runs on a hot GPU, so the measured span starts cool (ADR 0057,
-    // TEST-033). No warm-up: see `StartSteps`.
+    // No cool start and no warm-up (ADR 0094, TEST-037): see `StartSteps`. Window 8's device losses on a hot GPU were most likely the
+    // locked desktop (`docs/status.md`); the GPU temperature at the start is in the clock sample below.
     if start_steps(smoke).cool {
         writeln!(out, "{}", planet_perf::cool_gpu().line(script.scene.name())).map_err(err)?;
     }
@@ -976,8 +977,13 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
                 counts.push((name.into(), c.effective_mhz().round() as u64));
             }
         }
+        let path_name = format!("{}/{}", if o.lit { "stream-lit" } else { "stream" }, scene.name());
+        // ADR 0094 point 4: a hot start is named, so a device loss or throttling after one is seen against it.
+        if let Some(line) = run.clocks.first().and_then(|c| planet_perf::clock::hot_start_line(&path_name, c)) {
+            writeln!(out, "{line}").map_err(err)?;
+        }
         let report = RunReport {
-            path_name: format!("{}/{}", if o.lit { "stream-lit" } else { "stream" }, scene.name()),
+            path_name,
             vram_cap_gb: 8,
             stats,
             clocks_before: run.clocks.first().cloned(),
@@ -1401,16 +1407,16 @@ mod tests {
 
     // spec: TEST-037
     #[test]
-    fn a_streaming_scene_cools_down_in_a_measured_run_and_never_warms_up() {
-        // A smoke run takes no step (no measurement, perhaps no nvidia-smi); a measured run cools the GPU first.
+    fn a_streaming_scene_neither_cools_down_nor_warms_up() {
+        // No step in a smoke run or a measured one (ADR 0094): the verdicts are CPU wall time, the GPU temperature is logged.
         assert_eq!(start_steps(true), StartSteps { cool: false });
-        assert_eq!(start_steps(false), StartSteps { cool: true });
+        assert_eq!(start_steps(false), StartSteps { cool: false });
         // No scene warms up, whether it starts from a settled view or from an empty cache: the loop is CPU-bound at 60 Hz, so a warm-up
         // cannot reach the clock floor (look-2km: P3 1,087 MHz after 30 s unpaced), and a warm-up from an empty cache would load what
         // the scene measures. The steps have no warm-up field to set.
         for scene in planet_frame::scenes::StreamScene::ALL {
             let script = planet_frame::scenes::build_script(scene, 6_371_000.0, 16.0 / 9.0, &planet_generators::height::Reference(1), 1);
-            assert!(start_steps(false).cool, "{scene:?} ({} a settled start)", if script.prelude.is_some() { "has" } else { "has not" });
+            assert!(!start_steps(false).cool, "{scene:?} ({} a settled start)", if script.prelude.is_some() { "has" } else { "has not" });
         }
     }
 

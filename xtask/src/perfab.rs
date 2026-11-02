@@ -32,7 +32,7 @@ pub fn run(root: &Path, args: &[String]) -> Res {
         out_dir.display()
     );
     let mut runner =
-        TreeRunner { tree: root.to_path_buf(), base, spec: spec.clone(), out_dir: out_dir.clone(), extra: [Vec::new(), Vec::new()] };
+        TreeRunner { tree: root.to_path_buf(), base, spec: spec.clone(), out_dir: out_dir.clone(), extra: [Vec::new(), Vec::new()], last_run_s: None };
     let cmp = ab::execute(&spec, &mut runner)?;
     let lines = ab::table(&spec, &cmp);
     for l in &lines {
@@ -60,6 +60,8 @@ struct TreeRunner {
     out_dir: PathBuf,
     /// Arguments added to the command of each side after the perf arguments: `[base, tree]` (the reserve comparison runs the tree twice, without and with `--reserve`).
     extra: [Vec<String>; 2],
+    /// The wall time of the last run, for the duty idle before the next one (ADR 0094).
+    last_run_s: Option<f64>,
 }
 
 impl Runner for TreeRunner {
@@ -69,6 +71,7 @@ impl Runner for TreeRunner {
         let log_path = dir.join("perf").join("logs").join(&self.spec.log);
         let _ = std::fs::remove_file(&log_path);
         eprintln!("A/B: {tag}: cargo xtask perf {}", self.spec.command.join(" "));
+        let started = std::time::Instant::now();
         let out = match Command::new("cargo")
             .arg("xtask")
             .arg("perf")
@@ -80,6 +83,7 @@ impl Runner for TreeRunner {
             Ok(o) => o,
             Err(e) => return Outcome::Failed(format!("cannot start cargo in {}: {e}", dir.display())),
         };
+        self.last_run_s = Some(started.elapsed().as_secs_f64());
         let text = format!("{}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
         let _ = std::fs::write(self.out_dir.join(format!("{tag}.out.txt")), &text);
         if let Some(conditions) = ab::gate_refusal(&text) {
@@ -101,6 +105,14 @@ impl Runner for TreeRunner {
     fn wait(&mut self) {
         eprintln!("A/B: the readiness gate refused; trying again in {} s", REFUSAL_WAIT.as_secs());
         std::thread::sleep(REFUSAL_WAIT);
+    }
+
+    fn rest(&mut self) {
+        let idle = planet_perf::clock::duty_idle_s(self.last_run_s);
+        if idle > 0.0 {
+            eprintln!("A/B: duty idle {idle:.0} s before the next run (ADR 0094)");
+            std::thread::sleep(Duration::from_secs_f64(idle));
+        }
     }
 }
 
@@ -156,6 +168,7 @@ pub fn reserve(root: &Path, args: &[String]) -> Res {
             spec: spec.clone(),
             out_dir: flight_dir.clone(),
             extra: [Vec::new(), vec!["--reserve".to_string()]],
+            last_run_s: None,
         };
         let cmp = ab::execute(&spec, &mut runner)?;
         let mut lines = vec![format!("== {flight}: loads off (ref column) against loads on (tree column)")];

@@ -1078,8 +1078,10 @@ fn perf_stream_child_args(scene: &str, rest: &[String]) -> Result<Vec<String>, S
 /// The real [`ChildRunner`]: `cargo` with the child's arguments, stdout teed to the console and kept for the summary.
 struct CargoChildren<'a> {
     root: &'a Path,
-    /// Wait for the system CPU load to settle between children (the measured window, `perf m5`).
+    /// Wait for the system CPU load to settle between children (the measured window, `perf m5`); otherwise keep the duty idle (ADR 0094).
     settle: bool,
+    /// The wall time of the last child, for the duty idle before the next one.
+    last_run_s: Option<f64>,
 }
 
 /// Wait until the system CPU load is below the readiness gate's limit (polling one gate window at a time, capped) and say so.
@@ -1093,12 +1095,20 @@ impl planet_perf::session::ChildRunner for CargoChildren<'_> {
     fn settle_after(&mut self, scene: &str) {
         if self.settle {
             settle_cpu_after(scene);
+            return;
+        }
+        // Scene after scene without a cool start (ADR 0094, TEST-037): the duty idle keeps the machine from heating run after run.
+        let idle = planet_perf::clock::duty_idle_s(self.last_run_s);
+        if idle > 0.0 {
+            eprintln!("duty idle {idle:.0} s after {scene} (ADR 0094)");
+            std::thread::sleep(std::time::Duration::from_secs_f64(idle));
         }
     }
 
     fn run(&mut self, args: &[String]) -> Result<planet_perf::session::ChildResult, String> {
         use std::io::BufRead;
         eprintln!("$ cargo {}", args.join(" "));
+        let started = std::time::Instant::now();
         let mut child = std::process::Command::new("cargo")
             .args(args)
             .current_dir(self.root)
@@ -1114,6 +1124,7 @@ impl planet_perf::session::ChildRunner for CargoChildren<'_> {
             }
         }
         let status = child.wait().map_err(|e| format!("cannot wait for `cargo`: {e}"))?;
+        self.last_run_s = Some(started.elapsed().as_secs_f64());
         Ok(planet_perf::session::ChildResult { code: status.code(), output })
     }
 }
@@ -1122,7 +1133,7 @@ impl planet_perf::session::ChildRunner for CargoChildren<'_> {
 /// The readiness gate (ADR 0020) runs in every child, before its measured case: each scene is gated on the machine as it is then.
 /// A failing scene does not stop the others; the exit is non-zero if any failed.
 fn perf_stream_all(root: &Path, rest: &[String], settle: bool) -> Res {
-    let mut runner = CargoChildren { root, settle };
+    let mut runner = CargoChildren { root, settle, last_run_s: None };
     let outcomes = planet_perf::session::run_scenes(&mut runner, &STREAM_SCENES, &|scene| perf_stream_child_args(scene, rest))?;
     let (text, ok) = planet_perf::session::summary(&outcomes);
     println!("{text}");
