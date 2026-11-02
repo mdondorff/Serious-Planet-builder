@@ -346,10 +346,10 @@ fn the_same_sequence_draws_the_same_bytes_and_the_passes_hold_no_atomics() {
 #[test]
 fn a_still_scene_with_a_shadow_edge_in_view_does_not_flicker_under_the_spread() {
     let s = scene();
-    // A 5 m wall under a 2 degree sun: the shadow ends at 199 m, inside the frame (x from 100 to 300 m).
-    set_wall_of(&s, Some(48), 5.0);
+    // An 8 m wall under a 3 degree sun: the shadow ends near 201 m, inside the frame (x from 100 to 300 m). The march lowers the ground by up to a texel (8 m here) within 16 texels of the receiver (REND-049), so only the receivers beyond 128 m of the wall are shadowed by it.
+    set_wall_of(&s, Some(48), 8.0);
     let depth = depth_target(&s, &depths(None, 0));
-    let sun = 2.0f32;
+    let sun = 3.0f32;
     let mut r = ShadowResolveGpu::new(&s.ctx, &s.clip);
     let mut frames = Vec::new();
     for frame in 1..=4u32 {
