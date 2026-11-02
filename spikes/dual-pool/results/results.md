@@ -118,5 +118,67 @@ Prototype: branch `spike/dual-pool-2` at 3af166f1 (from a4878fe9; never merged; 
 - With 2 rounds the worst-round rule compares the worse of the knob's two rounds with the worse of c's two.
 - A run INVALID by the calibration stays "no verdict" for its own number, as in window 1; a knob with fewer than 2 valid rounds in a flight is "no verdict" there.
 
+## Second window: results (2026-11-02, 09:05-10:55)
+Run by the spikes lane on the planner's go (inbox #70); build `spike/dual-pool-2` at 3af166f1 in its own worktree; quiet, gate-decided, never `--machine-ready`; teleport-2km skipped (planner); BG4 not run (time).
+
+### What happened
+| Block | Time | Runs | Outcome |
+|---|---|---|---|
+| 1 | 09:11-09:23 | round 1, both flights | 4 valid of 10; teleport-1m 40 s and dive 77 s per run |
+| 2 | 09:23-09:58 | redos of round 1 (up to 3 tries) | all INVALID: the CPU stayed at 60-64 °C, the harness's cool-down hit its 120 s cap on every run (runs took 160 s) and calibration missed by 3-5 %; stopped |
+| pause | 09:58-10:07 | | idle (the runner kept going until 09:58: see learnings 2026-11-02) |
+| 3 | 10:07-10:51 | rounds 2-3, 45 s idle before each run, at most 2 tries | 52-58 °C, no cool-down waits; loaded runs still INVALID about half the time |
+- 42 attempts, 11 valid, 31 INVALID; every INVALID is a CPU calibration limit (single before > 52 ms or after > 56 ms). Every attempt with its temperature and calibration: `raw/window2-attempts.md`.
+- Once the CPU was cool (block 3), the INVALIDs are the load itself: c's single-thread calibration is 48.9-49.5 ms, the loaded configurations' 49.9-56.5 ms before and 52.5-58.5 ms after (medians over attempts). The background load on the E-cores slows a single P-core thread by 2-19 %.
+
+### Verdicts by the fixed rule (valid rounds only)
+| Flight | Config | Valid rounds | Tile-ready vs c | p99 vs c | Verdict |
+|---|---|---|---|---|---|
+| teleport-1m | c | 2 | 4.02 ms | 4.52 ms | reference |
+| teleport-1m | d-plain | 1 | +10.1 % | +24.9 % | no verdict |
+| teleport-1m | BG2 | 0 | | | no verdict |
+| teleport-1m | Eco | 0 | | | no verdict |
+| teleport-1m | Duty | 1 | +2.4 % | +42.7 % | no verdict |
+| dive | c | 3 | 4.24 ms | 8.79 ms | reference |
+| dive | d-plain | 1 | +20.3 % | +49.9 % | no verdict |
+| dive | BG2 | 0 | | | no verdict |
+| dive | Eco | 2 | +33.6 % | +67.4 % | **FAIL** |
+| dive | Duty | 1 | +37.9 % | +87.7 % | no verdict |
+
+### Every attempt, valid or not (indicative only, no verdict)
+| Flight | Config | Attempts | Calib single before / after ms | Tile-ready ms | Frame p99 ms | Background chunks per run |
+|---|---|---|---|---|---|---|
+| teleport-1m | c | 2 | 49.1 / 49.5 | 4.02 | 4.52 | |
+| teleport-1m | d-plain | 4 | 53.6 / 58.4 | 6.11 | 6.92 | 75,816 |
+| teleport-1m | BG2 | 4 | 56.5 / 55.9 | 4.50 | 6.28 | 28,145 |
+| teleport-1m | Eco | 4 | 51.5 / 57.8 | 6.17 | 7.11 | 99,975 |
+| teleport-1m | Duty | 4 | 53.4 / 52.5 | 4.73 | 7.44 | 37,084 |
+| dive | c | 4 | 48.9 / 49.1 | 4.38 | 9.18 | |
+| dive | d-plain | 5 | 53.0 / 57.7 | 5.10 | 13.17 | 29,302 |
+| dive | BG2 | 5 | 54.7 / 58.1 | 4.41 | 14.23 | 8,145 |
+| dive | Eco | 5 | 49.9 / 58.5 | 4.79 | 13.63 | 31,757 |
+| dive | Duty | 5 | 50.5 / 56.3 | 4.66 | 14.48 | 14,529 |
+- teleport-1m's chunk counts include block 2's 160 s runs (more wall time per run); dive's are like for like.
+
+### Reading
+1. No knob passes "does not slow". Eco fails dive by the rule; every other knob has too few valid rounds for a verdict, and every attempt of every knob raises frame p99 by 39-65 % in dive (13.2-14.5 ms against 8.8-9.2 ms) and 39-65 % in teleport-1m.
+2. EcoQoS does not throttle the background on Rasierklinge: its chunk count equals or exceeds d-plain's (31,757 against 29,302 per dive).
+3. BG2 and the 50 % duty cap cut the background to 28 % and 50 % of d-plain's throughput and still raise dive's p99 by about 55 %: the slowdown is not proportional to the background's work. A shared resource (package power, L3, memory bandwidth) is the likely channel, not E-core scheduling.
+4. The calibration check refuses most loaded runs, so "does not slow" cannot pass with any load that measurably slows a P-core thread: the gate and the question are the same measurement.
+5. Recommendation (the planner's call): close SPIKE-90's background question as "a saturated background pool slows the critical path on this machine; no tested knob prevents it"; keep the dual pool (c, which passed window 1) without a saturated background, and size background work by a budget (BUDG reserve) instead of a throttle.
+
+## Same window: upload attribution run (for crusader, #1076)
+- `main` at 97c4bdd8 (with the frames log's `deferred` and `node_bytes`), `cargo xtask perf stream teleport-2km --store C:/DEV/SeriousPlanetData/global16384 --lit`, 3 rounds, 45 s idle between, all valid on the first try (54-56 °C).
+
+| Round | Frame median ms | Frame p99 ms | Frames with upload bytes over the median (median 0) | Slowest 1 % (6 frames) with an upload | Slowest 1 % with `deferred` > 0 | Mean `upload_ms`, slowest 1 % / all |
+|---|---|---|---|---|---|---|
+| 1 | 1.98 | 4.28 | 37.5 % | 83 % | 0 % | 0.23 / 0.08 |
+| 2 | 1.75 | 4.07 | 37.7 % | 100 % | 0 % | 0.23 / 0.08 |
+| 3 | 1.91 | 4.81 | 37.8 % | 100 % | 0 % | 0.27 / 0.09 |
+- p99 median 4.28 ms: the Tracked 4.5 -> 6.2 ms rise did not reproduce in this window (all three rounds at or under 4.81 ms).
+- The slowest frames carry uploads (5.5 of 6 against 38 % of all frames), but the upload call itself takes 0.2-0.3 ms; no frame was upload-capped (`deferred` 0 everywhere).
+- Their time is in `record_ms` when `node_bytes` is the full node buffer (288,420 bytes: record 2.1-5.1 ms in frames 78-101 of each round) and, in frame 14 of every round (5.97-6.94 ms with record 0.55-0.71 ms), outside the logged phases.
+- Frames logs and JSON stay local (`target/perf-upload/` in the `spikes-main` worktree).
+
 ## Visuals
 Timings only: no images.
