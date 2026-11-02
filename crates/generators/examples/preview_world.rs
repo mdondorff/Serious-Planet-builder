@@ -38,6 +38,9 @@ fn main() {
     // SPIKE-92: the land mask as raw bytes (1 land, 0 sea), row 0 north, for the shape metrics.
     let mask: Vec<u8> = fields.pixels.iter().map(|p| u8::from(p.land_depth > 0.0)).collect();
     std::fs::write(out.join("land.u8"), &mask).unwrap_or_else(|e| fail(&format!("cannot write the land mask: {e}")));
+    // SPIKE-93: per pixel the new base elevation (m), the untapered k and the land depth, as little-endian f32 triples, row 0 north.
+    let raw: Vec<u8> = fields.pixels.iter().flat_map(|p| [p.new_m, p.k, p.land_depth]).flat_map(f32::to_le_bytes).collect();
+    std::fs::write(out.join("fields.f32"), &raw).unwrap_or_else(|e| fail(&format!("cannot write the fields: {e}")));
     let report = preview::report(&fields);
     std::fs::write(out.join("report.txt"), &report).unwrap_or_else(|e| fail(&format!("cannot write the report: {e}")));
     print!("{report}");
