@@ -255,6 +255,11 @@ impl ShadowPath {
         ctx.queue.submit([encoder.finish()]);
     }
 
+    /// The resolved visibility of the last frame as a sampled `R32Float` view of the frame's size (the shadow-apply pass reads it).
+    pub(crate) fn visibility_view(&self) -> Option<wgpu::TextureView> {
+        self.resolve.shadow_texture_view()
+    }
+
     /// The resolved visibility of the last frame, `width * height` values in [0, 1], row-major (tests and the shadow view).
     pub fn read_visibility(&self, ctx: &GpuContext) -> Vec<f32> {
         self.resolve.read_shadow(ctx)

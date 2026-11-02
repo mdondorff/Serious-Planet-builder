@@ -858,17 +858,16 @@ fn fs_lit_atmo_view(in: VsOut) -> LitOut {
     let climate = tile_climate(in);
     let drv = tile_drivers(in);
     let gd = ground_detail(in.node_index, in.local, in.normal, up, climate.x, climate.y, in.height - g.extra.x, drv);
-    // The horizon shadow multiplies the direct sun term (REND-038): 1.0 where no horizon map is there.
+    // The direct sun term is unshadowed here: the shadow of the march applies to `sun-direct` in the shadow-apply pass (REND-051).
     let coarse_fade = horizon_coarse_fade(camera_distance(nodes[in.node_index].origin_rel, in.local));
-    let sun_vis = select(1.0, shadow_factor(in.node_index, in.aux, up, sun, coarse_fade, max(in.height, 0.0)), g.mode.x == 0u || g.mode.x == 2u);
-    let parts = atm_shade_lit_parts(g.mode.x, g.albedo, gd.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), in.height, sun, sun_vis, g.range.z);
+    let parts = atm_shade_lit_parts(g.mode.x, g.albedo, gd.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), in.height, sun, 1.0, g.range.z);
     let dm = detail_mul(gd, g.mode.x, g.albedo, climate.x, climate.y, clamp(dot(normalize(gd.normal), up), 0.0, 1.0), in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)));
     // The ambient goes to the scene target, the direct term to `sun-direct`, where the shadow applies to it (REND-051).
     var amb = parts.amb * dm;
     var dir = parts.dir * dm;
     let gloss = ground_gloss(in.node_index, in.local, gd, sun);
     if (gloss > 0.0) {
-        dir = dir + atm_sun_direct(up, in.height, sun) * (gloss * g.range.z * sun_vis);
+        dir = dir + atm_sun_direct(up, in.height, sun) * (gloss * g.range.z);
     }
     // The two targets add up in the scene target (f16): the sum is bounded here, as the single clamp of the unsplit radiance did.
     amb = min(amb, vec3<f32>(60000.0));
@@ -1309,8 +1308,13 @@ impl AtmospherePath {
     }
 
     /// The water pass's group 3 with the atmosphere: the uniform block (0), the two static tables (1, 2), the sky-view table (3) and
-    /// the copy of the scene target (4). Returns the layout and the bind group.
-    pub(crate) fn water_group(&self, device: &wgpu::Device, scene_copy: &wgpu::TextureView) -> (wgpu::BindGroupLayout, wgpu::BindGroup) {
+    /// the copy of the scene target (4) and the march visibility (5, REND-051). Returns the layout and the bind group.
+    pub(crate) fn water_group(
+        &self,
+        device: &wgpu::Device,
+        scene_copy: &wgpu::TextureView,
+        visibility: &wgpu::TextureView,
+    ) -> (wgpu::BindGroupLayout, wgpu::BindGroup) {
         let tex = |binding| wgpu::BindGroupLayoutEntry {
             binding,
             visibility: wgpu::ShaderStages::FRAGMENT,
@@ -1338,25 +1342,38 @@ impl AtmospherePath {
                 tex(2),
                 tex(3),
                 tex(4),
+                tex(5),
             ],
         });
+        let bind = self.water_bind(device, &layout, scene_copy, visibility);
+        (layout, bind)
+    }
+
+    /// The water pass group 3 over `layout` with this frame visibility.
+    pub(crate) fn water_bind(
+        &self,
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        scene_copy: &wgpu::TextureView,
+        visibility: &wgpu::TextureView,
+    ) -> wgpu::BindGroup {
         let (tr, ms, sky) = (
             self.tr_lut.create_view(&Default::default()),
             self.ms_lut.create_view(&Default::default()),
             self.sky_view.create_view(&Default::default()),
         );
-        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("water-atmosphere"),
-            layout: &layout,
+            layout,
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: self.uniform.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&tr) },
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&ms) },
                 wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&sky) },
                 wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(scene_copy) },
+                wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(visibility) },
             ],
-        });
-        (layout, bind)
+        })
     }
 
     /// The scene target's texture (copy source of the water pass).

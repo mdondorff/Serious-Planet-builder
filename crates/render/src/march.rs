@@ -44,6 +44,13 @@ struct March {
 @group(0) @binding(6) var gens: texture_2d_array<u32>;
 
 const MAX_STEPS: i32 = 2048;
+// The rendered surface is the tile mesh and the clipmap holds the lattice as boxes a texel wide, so on a flank the two differ by a fraction of
+// a texel; a receiver whose ray skims such a slope (the sun just above the slope) shadowed itself in contour bands (shadow acne), the more
+// the coarser the level the receiver is read at. The ground is lowered by RELAX_BIAS texels of the receiver's own level, falling to nothing
+// over RELAX_REACH texels of that level: a feature lower than a texel is ignored near the receiver, and a shadow ends up to RELAX_BIAS
+// texels / tan(sun elevation) early.
+const RELAX_BIAS: f32 = 1.0;
+const RELAX_REACH: f32 = 16;
 const START_MIP: i32 = 2;
 const MAX_CUBE_STEPS: i32 = 256;
 const QUARTER_TURN_ANGLE: f32 = 0.7853982;
@@ -52,12 +59,12 @@ fn slot(c: i32, n: i32) -> i32 {
     return ((c % n) + n) % n;
 }
 
-// The finest level whose window holds the point with a margin of two texels, or -1.
+// The finest level whose window holds the point with a margin of two texels and that has ground there, or -1. A level holds ground only
+// where tiles of its own size were gathered: the levels are windows around the camera, the tiles are finer near it and coarser far off, so
+// the finest window that holds a point can be empty there (a camera high above the ground has no fine tiles under it).
 fn level_at(x: f32, y: f32) -> i32 {
     for (var k = 0; k < i32(m.info.y); k = k + 1) {
-        let t = m.texel[k].x;
-        let w = m.windows[k];
-        if (x >= (f32(w.x) + 2.0) * t && x < (f32(w.z) - 2.0) * t && y >= (f32(w.y) + 2.0) * t && y < (f32(w.w) - 2.0) * t) {
+        if (usable(k, x, y)) {
             return k;
         }
     }
@@ -82,21 +89,60 @@ fn in_window(k: i32, x: f32, y: f32) -> bool {
     return x >= (f32(w.x) + 2.0) * t && x < (f32(w.z) - 2.0) * t && y >= (f32(w.y) + 2.0) * t && y < (f32(w.w) - 2.0) * t;
 }
 
+// The ground at a point of level k, interpolated bilinearly between the four texel samples around it (a sample sits at its texel's centre);
+// below -1e29 where one of them holds no ground.
+fn surface_at(k: i32, p: vec2<f32>) -> f32 {
+    let t = m.texel[k].x;
+    let f = p / t - vec2<f32>(0.5);
+    let fl = floor(f);
+    let w = f - fl;
+    let i = vec2<i32>(fl);
+    let h00 = level_max(k, 0, i.x, i.y);
+    let h10 = level_max(k, 0, i.x + 1, i.y);
+    let h01 = level_max(k, 0, i.x, i.y + 1);
+    let h11 = level_max(k, 0, i.x + 1, i.y + 1);
+    if (min(min(h00, h10), min(h01, h11)) < -1.0e29) {
+        return -2.0e30;
+    }
+    return mix(mix(h00, h10, w.x), mix(h01, h11, w.x), w.y);
+}
+
+// The highest the ground gets along the walk's step at mip 0: the interpolated surface at its two ends and its middle (the box top where a
+// sample is missing). A box a texel wide at its sample makes a shadow edge step with the texels; the surface does not.
+fn step_surface(k: i32, a: vec2<f32>, b: vec2<f32>, box_top: f32) -> f32 {
+    let sa = surface_at(k, a);
+    let sm = surface_at(k, 0.5 * (a + b));
+    let sb = surface_at(k, b);
+    if (min(sa, min(sm, sb)) < -1.0e29) {
+        return box_top;
+    }
+    return max(sa, max(sm, sb));
+}
+
+// The level holds the point in its window and a tile wrote the texel there.
+fn usable(k: i32, x: f32, y: f32) -> bool {
+    if (!in_window(k, x, y)) {
+        return false;
+    }
+    let t = m.texel[k].x;
+    return level_max(k, 0, i32(floor(x / t)), i32(floor(y / t))) > -1.0e29;
+}
+
 // The same as level_at, searched outward from the level the walk was on: a step moves a point to a neighbouring level or none, so one or two
 // window tests answer where the scan of every level did.
 fn level_near(x: f32, y: f32, hint: i32) -> i32 {
     let n = i32(m.info.y);
     var k = clamp(hint, 0, n - 1);
-    if (in_window(k, x, y)) {
+    if (usable(k, x, y)) {
         for (; k > 0; k = k - 1) {
-            if (!in_window(k - 1, x, y)) {
+            if (!usable(k - 1, x, y)) {
                 break;
             }
         }
         return k;
     }
     for (var j = k + 1; j < n; j = j + 1) {
-        if (in_window(j, x, y)) {
+        if (usable(j, x, y)) {
             return j;
         }
     }
@@ -182,6 +228,7 @@ fn march(o: vec3<f32>) -> vec3<f32> {
     var dirty = false;
     var mip = min(START_MIP, i32(m.info.w));
     var last_level = level_at(o.x, o.y);
+    let tl0 = m.texel[max(last_level, 0)].x;
     // The ray is above the world's highest terrain from here on: nothing it passes can shade it (the sun is above the horizon here).
     // Within the penumbra search a ray clears the highest terrain for good only once its clearance over it reaches the sun disc's
     // (slope - w) tau >= H - z; beyond the search only the sign counts, so the plain height does.
@@ -236,7 +283,7 @@ fn march(o: vec3<f32>) -> vec3<f32> {
         let low = min(o.z + slope * tau, o.z + slope * (tau + dt));
         // The ground is a box a texel wide at its sample; a receiver on it or on a slope would shadow itself, so the box is lowered by half a
         // texel over the first four texels.
-        let relax = 0.5 * tl * clamp(1.0 - tau / (4.0 * tl), 0.0, 1.0);
+        let relax = 0.5 * tl * clamp(1.0 - tau / (4.0 * tl), 0.0, 1.0) + RELAX_BIAS * tl0 * clamp(1.0 - tau / (RELAX_REACH * tl0), 0.0, 1.0);
         let top = level_max(lv, mip, cx, cy) - relax;
         steps = steps + 1.0;
         let dist = max(tau + 0.5 * dt, 1.0);
@@ -252,7 +299,10 @@ fn march(o: vec3<f32>) -> vec3<f32> {
             // A near miss or a hit against a maximum: look at the cells inside, down to the texels, where the clearance is exact.
             mip = mip - 1;
         } else {
-            let clearance = (low - top) / dist;
+            // At the texels the ground is the interpolated surface, not the box: the clearance (and with it the penumbra and the edge of the
+            // shadow) varies smoothly with the ray instead of stepping with the texels.
+            let ground = step_surface(lv, q, o.xy + d * (tau + dt), top + relax) - relax;
+            let clearance = (low - ground) / dist;
             if (tau < m.curv.z) {
                 pen = min(pen, clearance);
             } else if (clearance < 0.0) {
