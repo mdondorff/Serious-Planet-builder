@@ -1117,6 +1117,29 @@ pub(crate) fn upload_missing_meshes(
     Ok(meshes.len())
 }
 
+/// Upload the tiles of `tiles` the renderer does not hold yet (the ancestors the clipmap shadow reads beside the drawn tiles); the number made.
+pub(crate) fn upload_tiles(
+    ctx: &GpuContext,
+    world: Option<&WorldTerrain>,
+    renderer: &mut planet_render::TerrainRenderer,
+    tiles: &[TileId],
+    field: &dyn planet_generators::height::HeightField,
+    radius_m: f64,
+    cells: u32,
+) -> Result<usize, String> {
+    let missing: Vec<TileId> = tiles.iter().copied().filter(|t| renderer.slot_of(*t).is_none()).collect();
+    let mut made = 0;
+    for t in missing {
+        let tile = tile_for(field, t, cells, radius_m);
+        if let Some(w) = world {
+            w.fill_water(t, &tile);
+        }
+        renderer.upload_tile(ctx, &tile).map_err(|e| e.to_string())?;
+        made += 1;
+    }
+    Ok(made)
+}
+
 /// Most meshes a flight keeps resident; the renderer is rebuilt (dropping every mesh) when a frame would exceed it.
 const FLIGHT_RESIDENT_CAP: usize = 12_000;
 /// The flight's contact sheet: this many frames from orbit to 1 m, in this many columns, thumbnails at most this wide.

@@ -11,7 +11,7 @@ use planet_core::{PlanetFixed, TileId, Vec3};
 use planet_frame::{Camera, SelectionCache};
 use planet_generators::chunkfield::ChunkKey;
 use planet_render::GpuContext;
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::io::Write;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -760,6 +760,11 @@ fn run_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write, mut cost: Opti
         crate::skeleton::upload_missing_meshes(ctx, Some(&world), &mut r, &plan, rig.field, radius_m, o.cells)?;
         let (_, eye_lon) = camera.position.0.lat_lon();
         let sun = sun_for(pose.sun_local_hours, eye_lon.to_degrees(), pose.sun_declination_deg);
+        let mut march = if o.shadow_march && cost.is_none() {
+            Some(StillShadow::new(ctx, o, &world, rig.field, &mut r, &tiles, radius_m, lod.max_height_m)?)
+        } else {
+            None
+        };
         let mut horizon = crate::horizonworld::HorizonRig::default();
         // The exposure adapts over a few frames of half a second, the first snapping to its target.
         for k in 0..4 {
@@ -785,7 +790,18 @@ fn run_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write, mut cost: Opti
             config.look.apply(l);
             l.view = pose.view.unwrap_or(l.view);
         }
-        r.render(ctx, &lit, false).map_err(|e| e.to_string())?;
+        match march.as_mut() {
+            Some(m) => {
+                let sun64 = Vec3::new(f64::from(sun[0]), f64::from(sun[1]), f64::from(sun[2]));
+                for k in 0..SHADOW_STILL_FRAMES {
+                    r.set_shadow_frame(m.frame(&camera, sun64, k));
+                    r.render(ctx, &lit, false).map_err(|e| e.to_string())?;
+                }
+            }
+            None => {
+                r.render(ctx, &lit, false).map_err(|e| e.to_string())?;
+            }
+        }
         if let Some(rows) = cost.as_deref_mut() {
             rows.push(measure_cost(ctx, &mut r, &mut lit, &pose.name)?);
         }
@@ -794,8 +810,9 @@ fn run_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write, mut cost: Opti
         let height = camera.position.0.length() - radius_m;
         writeln!(
             out,
-            "{}: {horizon_maps} horizon maps in {horizon_s:.1} s, drawn in {:.1} s -> {}",
+            "{}: {horizon_maps} horizon maps in {horizon_s:.1} s, {} shadow frames, drawn in {:.1} s -> {}",
             pose.name,
+            r.shadow_frames_run(),
             started.elapsed().as_secs_f64(),
             dir.join(format!("{}.png", pose.name)).display()
         )
@@ -820,6 +837,102 @@ fn run_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write, mut cost: Opti
     std::fs::write(dir.join("stills.txt"), index).map_err(err)?;
     writeln!(out, "wrote {} (one PNG per pose and stills.txt)", dir.display()).map_err(err)
 }
+
+/// The clipmap shadow of a still (ADR 0085, REND-051): what the viewer draws by default. The resident set is the drawn tiles and their ancestors down to the
+/// render floor (the streamer keeps them; a clipmap level coarser than a drawn tile is written from its ancestor), planned at once on this thread.
+pub(crate) struct StillShadow {
+    planner: planet_frame::clipmap::ClipmapPlanner,
+    set: BTreeSet<TileId>,
+    resident: Vec<TileId>,
+    floor: Vec<TileId>,
+    max_height_m: f64,
+    radius_m: f64,
+}
+
+impl StillShadow {
+    /// Enable the shadow pass of `r` and upload the ancestors of `tiles`.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new(
+        ctx: &GpuContext,
+        o: &Options,
+        world: &WorldTerrain,
+        field: &dyn planet_generators::height::HeightField,
+        r: &mut planet_render::TerrainRenderer,
+        tiles: &[TileId],
+        radius_m: f64,
+        max_height_m: f64,
+    ) -> Result<StillShadow, String> {
+        let mut set: BTreeSet<TileId> = BTreeSet::new();
+        // The coarse cube beyond the clipmap is made from the floor tiles of every face.
+        let floor_edge = 1u32 << planet_frame::DEFAULT_RENDER_FLOOR;
+        for face in 0..6 {
+            for x in 0..floor_edge {
+                for y in 0..floor_edge {
+                    set.insert(TileId::new(planet_core::Face(face), planet_frame::DEFAULT_RENDER_FLOOR, x, y).expect("a floor tile"));
+                }
+            }
+        }
+        // A software adapter gathers 1024^2 levels in seconds a frame: its stills use the smoke size of the viewer's smoke run.
+        let texels = if ctx.driver_string().contains("Cpu") { 256 } else { planet_frame::clipmap::CLIPMAP_TEXELS };
+        let params = planet_frame::clipmap::ClipmapParams { texels, ..planet_frame::clipmap::ClipmapParams::new(radius_m, o.cells) };
+        r.enable_shadow(ctx, params.texels, params.levels, radius_m);
+        let mut me = StillShadow {
+            floor: Vec::new(),
+            planner: planet_frame::clipmap::ClipmapPlanner::new(params),
+            set,
+            resident: Vec::new(),
+            max_height_m,
+            radius_m,
+        };
+        me.extend(ctx, o, world, field, r, tiles)?;
+        me.floor = crate::shadowrig::floor_leaves(&me.resident);
+        Ok(me)
+    }
+
+    /// Add `tiles` (the drawn ones of a frame) and their ancestors down to the render floor to the resident set and upload what the renderer lacks.
+    pub(crate) fn extend(
+        &mut self,
+        ctx: &GpuContext,
+        o: &Options,
+        world: &WorldTerrain,
+        field: &dyn planet_generators::height::HeightField,
+        r: &mut planet_render::TerrainRenderer,
+        tiles: &[TileId],
+    ) -> Result<(), String> {
+        let before = self.set.len();
+        for &t in tiles {
+            let mut t = t;
+            self.set.insert(t);
+            while let Some(parent) = t.parent().filter(|p| p.level() >= planet_frame::DEFAULT_RENDER_FLOOR) {
+                if !self.set.insert(parent) {
+                    break;
+                }
+                t = parent;
+            }
+        }
+        if self.set.len() == before && !self.resident.is_empty() {
+            return Ok(());
+        }
+        self.resident = self.set.iter().copied().collect();
+        crate::skeleton::upload_tiles(ctx, Some(world), r, &self.resident, field, self.radius_m, o.cells)?;
+        Ok(())
+    }
+    /// The shadow frame of the still camera at its `k`-th frame (the first is a cut, the next ones fill the low sun's rays and settle the history).
+    pub(crate) fn frame(&mut self, camera: &Camera, sun: Vec3, k: usize) -> planet_render::shadow_path::ShadowFrame {
+        let plan = self.planner.plan(camera.position, &self.resident, &[], &[], &planet_core::cube::TangentWarp);
+        planet_render::shadow_path::ShadowFrame {
+            view: planet_frame::shadowview::ShadowView::new(plan.anchor, camera, sun, self.radius_m),
+            plan,
+            preview: planet_render::shadow::ClipmapPreview::default(),
+            floor_tiles: if k == 0 { self.floor.clone() } else { Vec::new() },
+            cut: k == 0,
+            ceiling_m: planet_frame::shadowview::ceiling_m(self.max_height_m, &[]),
+        }
+    }
+}
+
+/// Frames a still renders with the shadow so that the temporal pass settles (the checkerboard of a low sun fills every ray within two).
+const SHADOW_STILL_FRAMES: usize = 6;
 
 /// Whether `--scene NAME` names the shadow and material cost scene (REND-044).
 pub fn is_cost_scene(name: &str) -> bool {
