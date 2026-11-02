@@ -583,6 +583,17 @@ impl CancelToken {
     }
 }
 
+/// A tile's state in the streamer ([`Streamer::tile_report`]): what a stuck refresh is waiting for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TileReport {
+    pub resident: bool,
+    pub stale: bool,
+    pub held: bool,
+    pub in_flight: bool,
+    pub queued: bool,
+    pub class: Option<RequestClass>,
+}
+
 /// The request class of a tile, highest priority first (STRM-005).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum RequestClass {
@@ -1039,6 +1050,24 @@ impl<T: Send + Sync + 'static> Streamer<T> {
     /// The stale tiles whose refresh request still waits for the settle window (STRM-031): a loop is not idle while there are any.
     pub fn held_refreshes(&self) -> usize {
         self.held.len()
+    }
+
+    /// The requests waiting in the queue per class (draw, residency, prefetch): a diagnostic (an edit that never becomes exact names them).
+    pub fn queued_by_class(&self) -> [usize; 3] {
+        self.queue.by_class()
+    }
+
+    /// What the streamer knows of `tile`, for a diagnostic: resident, marked stale by a refresh, held by the settle window, its job in
+    /// flight, its request queued, and its class now.
+    pub fn tile_report(&self, tile: TileId) -> TileReport {
+        TileReport {
+            resident: self.resident.contains_key(&tile),
+            stale: self.stale.contains(&tile),
+            held: self.held.contains_key(&tile),
+            in_flight: self.in_flight.contains_key(&tile),
+            queued: self.queue.contains(tile),
+            class: self.class_of(tile),
+        }
     }
 
     /// Set the settle window of the refresh pre-emption (STRM-031, ADR 0072) in milliseconds of the injected clock: a resident tile a

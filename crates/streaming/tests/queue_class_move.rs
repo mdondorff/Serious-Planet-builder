@@ -56,3 +56,48 @@ fn a_queued_refresh_the_settle_window_holds_follows_its_tile_from_the_draw_class
     }
     assert!(s.is_resident(t));
 }
+
+// spec: STRM-031, TEST-041
+#[test]
+fn a_tile_report_says_whether_a_refresh_is_held_queued_or_running() {
+    // What the edit-latency error prints for a tile that never becomes exact (edit-stale-diagnostics).
+    let spawner = Arc::new(ManualSpawner::default());
+    let clock = Arc::new(FakeClock::default());
+    let config = StreamConfig { max_in_flight: 1, queue_ahead: 0, retry_after_ms: 100, ..Default::default() };
+    let mut s = Streamer::new(Arc::new(Raw) as Arc<dyn TileSource<u64>>, spawner.clone() as Arc<dyn Spawner>, clock.clone(), config);
+    s.load_roots_blocking().unwrap();
+    let (t, busy) = (id(2, 3, 1, 2), id(4, 3, 5, 5));
+    let draw = Wants { draw: vec![(t, 1.0)], ..Wants::default() };
+    for _ in 0..40 {
+        if s.is_resident(t) && s.stats().in_flight == 0 {
+            break;
+        }
+        s.begin_frame_wants(&draw);
+        spawner.run(4);
+    }
+    let r = s.tile_report(t);
+    assert!(r.resident && !r.stale && !r.held && !r.in_flight && !r.queued, "{r:?}");
+    assert_eq!(r.class, Some(planet_streaming::RequestClass::Draw));
+    // The only slot is busy; the settle window holds the refresh.
+    let with_busy = Wants { draw: vec![(busy, 0.0), (t, 1.0)], ..Wants::default() };
+    s.begin_frame_wants(&with_busy);
+    s.set_refresh_settle(40);
+    s.refresh(&[t]);
+    let r = s.tile_report(t);
+    assert!(r.stale && r.held && !r.queued && !r.in_flight, "held by the window: {r:?}");
+    assert_eq!(s.held_refreshes(), 1);
+    // The window ends: the request waits in the draw class behind the busy job.
+    clock.advance(50);
+    s.begin_frame_wants(&with_busy);
+    let r = s.tile_report(t);
+    assert!(r.stale && !r.held && r.queued && !r.in_flight, "queued: {r:?}");
+    assert!(s.queued_by_class()[0] >= 1, "the refresh waits among the draw-class requests: {:?}", s.queued_by_class());
+    // The busy job ends: the refresh runs and lands.
+    for _ in 0..8 {
+        spawner.run(4);
+        clock.advance(10);
+        s.begin_frame_wants(&with_busy);
+    }
+    let r = s.tile_report(t);
+    assert!(r.resident && !r.stale && !r.held && !r.queued, "refreshed: {r:?}");
+}
