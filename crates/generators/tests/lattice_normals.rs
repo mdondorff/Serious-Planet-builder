@@ -40,6 +40,10 @@ impl HeightField for Counting {
     fn max_abs_height_m(&self) -> f64 {
         350.0
     }
+    /// The test counts the lattice's evaluations: the climate of a field of its own heights reads 81 more (GEN-021), so this field gives a fixed one.
+    fn climate(&self, _: &dyn planet_core::cube::FaceMapping, _: planet_core::TileId) -> planet_generators::climate::ClimateTexture {
+        planet_generators::climate::ClimateTexture::from_f32(&[0.0; 81], &[0.0; 81])
+    }
 }
 
 // spec: GEN-020

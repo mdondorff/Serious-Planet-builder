@@ -136,6 +136,12 @@ Scope: project (editor refresh find; WDEF-008, STRM-070, ADR 0045 point 7)
 - ADR 0045 point 7 meant about one coarse tile per level per edit; today's margins re-key more (a Tracked architect item).
 - Obsolete when the summary margins are sized from the reaches present, or coarse keys stop reading margins.
 
+## 2026-11-02 A rough coast has no gradient at the lattice's scale
+Scope: generators (continent stage GEN-104, class source GEN-094, landform driver GEN-064)
+- The continent value has 8 octaves at gain 0.72 (wavelengths down to about 30 km), so `land depth / |gradient|` is not a distance to the coast: on seed 1 the coast gate went from 0.0003 to 0.70 over one 40 km lattice cell and the step of `k` was 6.5.
+- The class source's coast distances and coastal arcs read the smooth value (4 octaves, no islands), the landform driver the coarse value (3 octaves); both are the full value without its detail terms (the octave series is normalised by its full weight sum, or the low octaves would be rescaled). A driver on the full value fails the lattice's closeness test (0.05 to 0.33 against 0.03).
+- Obsolete when the bake replaces the landform driver (m9-bake) and the class lattice's cell is finer than the roughest octave.
+
 ## 2026-11-02 A Git Bash loop survives TaskStop
 Scope: project (agent tooling; perf windows)
 What happened: SPIKE-90 window 2 ran its runs from a Git Bash script started as a background command. TaskStop at 09:51 reported success, but the `bash.exe` running the script kept launching perf runs until its process was stopped at 09:58, so the planned cooling pause had no idle.
