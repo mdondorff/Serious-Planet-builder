@@ -218,3 +218,31 @@ Planner's pick after round 2: H2 (R3-k0.8-a2.5-g.72). Round 3 varies H2 only; sp
 - Margins are thin: S1 7 on seeds 2-5, S11 68 on seed 1 (band 35-70), S11 share 2.2 % on seed 2.
 - The S11 band and the polar rule rest on Earth's single sample (Earth fails the polar rule).
 - Warp striations in the island fields (above).
+
+# H2r3 seeds 1-24 (inbox #67)
+Owner request, 2026-11-02: more H2r3 seeds to pick a favourite (seed 4 is liked but has no polar land). Images only; spike code 79c9d663, H2r3's environment as in round 3.
+
+| Sheet | Content |
+|---|---|
+| `images/seeds/H2r3-seeds-land-sea.png` | land-sea, 4 × 6, seed label, PASS or the failed checks, polar mass count and island count |
+| `images/seeds/H2r3-seeds-elevation.png` | the preview's elevation (hillshade) map, same layout |
+| `images/seeds/H2r3-seeds-polar.png` | north and south azimuthal views to 40° from each pole per seed, with the polar mass count |
+
+- Scores: `raw/scores-H2r3-seeds-1-24.json`; sheets by `proto/s92_seedsheets.py` (palette PNGs, each under 1 MB).
+- 16 of 24 seeds pass S1-S3, S9-S11 and the polar rule: 1-6, 8, 10, 13-16, 19, 21, 23, 24.
+- Fails, all near the band edges:
+
+| Seed | Failed checks |
+|---|---|
+| 7 | S1 8; S11 100 islands (4.7 %) |
+| 9 | S11 71 islands |
+| 11 | S1 8 |
+| 12 | S1 9 |
+| 17 | S10 1.4 |
+| 18 | S11 87 islands |
+| 20 | S1 8 |
+| 22 | S11 75 islands |
+
+- Polar land (a mass of at least 1 Mkm² centred poleward of 70°) on 10 seeds: 1, 2, 3, 5, 8, 12, 15, 18, 22, 23; passing seeds with polar land: 1, 2, 3, 5, 8, 15, 23.
+- The mountain belts in the elevation sheet are today's belt stage (round 1 belts are explorer's); they do not follow the new coasts yet.
+- Earth-likeness is one family; other layouts (Pangaea-like and others) would be another generator or parameter set (owner, later).

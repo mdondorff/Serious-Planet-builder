@@ -1,0 +1,1 @@
+- 2026-11-02 sun-glint-turn: the sea's shading normal no longer depends on the grid spacing of the tile that draws it (the glint broke into rectangles at stand-in tiles while turning); ATMO-013; the recorded lit-water hash awaits the owner's /bless

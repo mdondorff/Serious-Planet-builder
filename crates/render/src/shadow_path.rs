@@ -8,7 +8,7 @@ use planet_frame::clipmap::{ClipmapPlan, TexelRect};
 use planet_frame::shadowview::ShadowView;
 
 use crate::march::{MarchParams, ShadowMarchGpu, MAX_MARCH_M, PENUMBRA_SEARCH_M, SUN_DISC_TAN};
-use crate::resolve::{spread_for_sun, ResolveCamera, ResolveParams, ShadowResolveGpu, MAX_HISTORY_WEIGHT};
+use crate::resolve::{march_scale_for_sun, spread_for_sun, ResolveCamera, ResolveParams, ShadowResolveGpu, MAX_HISTORY_WEIGHT};
 use crate::shadow::{ClipmapGpu, ClipmapPreview, CoarseCubeGpu, COARSE_CUBE_TEXELS};
 use crate::terrain::TerrainRenderer;
 use crate::GpuContext;
@@ -61,6 +61,8 @@ pub struct ShadowPath {
     frame: u32,
     generation: Option<u64>,
     previous: Option<ResolveCamera>,
+    /// The march's pixels per ray edge now (half or quarter resolution, with the hysteresis of `march_scale_for_sun`).
+    march_scale: u32,
     /// Floor tiles the cube found not resident: asked for again next frame.
     pending_floor: Vec<TileId>,
     grey: Option<wgpu::RenderPipeline>,
@@ -88,6 +90,7 @@ impl ShadowPath {
             frame: 0,
             generation: None,
             previous: None,
+            march_scale: crate::resolve::HALF_RES_SCALE,
             pending_floor: Vec::new(),
             grey: None,
         }
@@ -107,6 +110,7 @@ impl ShadowPath {
         let frame = self.frame;
         let reanchored = self.generation != Some(f.plan.generation) || f.plan.reanchored;
         self.generation = Some(f.plan.generation);
+        self.march_scale = march_scale_for_sun(self.march_scale, f.view.sun[2]);
         let cut = f.cut || reanchored || self.previous.is_none();
         let skipped = self.clip.gather(ctx, terrain, &f.plan, &f.preview);
         let generations = self.resolve.generations_mut();
@@ -146,6 +150,7 @@ impl ShadowPath {
             frame,
             // Chosen from the sun's elevation at the anchor; receivers far off see it up to about 9 degrees away (a stated limit).
             spread: spread_for_sun(f.view.sun[2]),
+            march_scale: self.march_scale,
         };
         self.resolve.resolve_view(ctx, &self.march, &self.clip, &self.cube, &march, depth_view, size, &params);
         self.previous = Some(camera);

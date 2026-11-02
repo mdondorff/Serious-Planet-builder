@@ -19,6 +19,30 @@ pub const MAX_HISTORY_WEIGHT: f32 = 0.8;
 pub const SPREAD_BELOW_SUN_DEG: f32 = 5.0;
 /// The sine of [`SPREAD_BELOW_SUN_DEG`].
 pub const SPREAD_BELOW_SUN_SIN: f32 = 0.087_155_74;
+/// Below this sun elevation the march runs at quarter resolution (a ray per 4x4 pixels, REND-049), above [`QUARTER_ABOVE_SUN_DEG`] at half
+/// (a ray per 2x2); between the two the resolution stays what it was, so a sun hovering at the switch does not remake the targets every frame.
+pub const QUARTER_BELOW_SUN_DEG: f32 = 5.0;
+pub const QUARTER_ABOVE_SUN_DEG: f32 = 5.5;
+/// The sines of [`QUARTER_BELOW_SUN_DEG`] and [`QUARTER_ABOVE_SUN_DEG`].
+pub const QUARTER_BELOW_SUN_SIN: f32 = 0.087_155_74;
+pub const QUARTER_ABOVE_SUN_SIN: f32 = 0.095_845_75;
+/// The march's pixels per ray edge at half and at quarter resolution.
+pub const HALF_RES_SCALE: u32 = 2;
+pub const QUARTER_RES_SCALE: u32 = 4;
+
+/// The march resolution for a sun at `sin_elevation`: [`QUARTER_RES_SCALE`] below 5 degrees, [`HALF_RES_SCALE`] from 5.5 degrees on, and
+/// `previous` between (REND-049).
+pub fn march_scale_for_sun(previous: u32, sin_elevation: f32) -> u32 {
+    if sin_elevation < QUARTER_BELOW_SUN_SIN {
+        QUARTER_RES_SCALE
+    } else if sin_elevation >= QUARTER_ABOVE_SUN_SIN {
+        HALF_RES_SCALE
+    } else if previous == QUARTER_RES_SCALE {
+        QUARTER_RES_SCALE
+    } else {
+        HALF_RES_SCALE
+    }
+}
 
 /// Whether a sun at `sin_elevation` (the z of its unit direction at the receivers) calls for the two-frame spread.
 pub fn spread_for_sun(sin_elevation: f32) -> bool {
@@ -40,9 +64,10 @@ struct Resolve {
     // The full-resolution size, the half-resolution size.
     dims: vec4<u32>,
     // x: 1 when half of the rays are skipped this frame; y: the parity of the rays that are marched; z: 1 when history is void;
-    // w: unused.
+    // w: the march's pixels per ray edge (2: a ray per 2x2 pixels, 4: per 4x4).
     mode: vec4<u32>,
-    // x: the history weight; y: the drop coefficient 1 / (2 R) (a uniform, never R itself).
+    // x: the history weight; y: the drop coefficient 1 / (2 R) (a uniform, never R itself); z: 1 over the march's pixels per ray edge (0.5 or
+    // 0.25, exact, so a multiply is exact on every adapter).
     blend: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> r: Resolve;
@@ -94,9 +119,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // The receiver of a half-resolution pixel is the nearest of its 2x2 full-resolution pixels (reversed-Z: the largest depth).
     var best = 0.0;
     var bp = vec2<i32>(0, 0);
-    for (var j = 0; j < 2; j = j + 1) {
-        for (var i = 0; i < 2; i = i + 1) {
-            let fp = min(hp * 2 + vec2<i32>(i, j), last);
+    let s = i32(r.mode.w);
+    for (var j = 0; j < s; j = j + 1) {
+        for (var i = 0; i < s; i = i + 1) {
+            let fp = min(hp * s + vec2<i32>(i, j), last);
             let d = textureLoad(depth, fp, 0);
             if (d > best) {
                 best = d;
@@ -161,7 +187,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             let ndc = vec2<f32>(dot(rel, r.prev.right.xyz) / (zc * r.prev.k.x), dot(rel, r.prev.up.xyz) / (zc * r.prev.k.y));
             let uv = vec2<f32>((ndc.x * 0.5 + 0.5) * f32(r.dims.x), (0.5 - ndc.y * 0.5) * f32(r.dims.y));
             if (uv.x >= 0.0 && uv.y >= 0.0 && uv.x < f32(r.dims.x) && uv.y < f32(r.dims.y)) {
-                out = textureLoad(prev_filled, clamp(vec2<i32>(floor(uv * 0.5)), vec2<i32>(0, 0), hmax), 0).x;
+                out = textureLoad(prev_filled, clamp(vec2<i32>(floor(uv * r.blend.z)), vec2<i32>(0, 0), hmax), 0).x;
             }
         }
     }
@@ -177,20 +203,11 @@ const UPSAMPLE_BODY: &str = r#"
 // x: the visibility, -1 when no marched tap lies on this pixel's surface; y: 1 when a tap crossed a changed clipmap cell.
 @group(0) @binding(5) var out_up: texture_storage_2d<rg32float, write>;
 
-@compute @workgroup_size(8, 8, 1)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    if (gid.x >= r.dims.x || gid.y >= r.dims.y) {
-        return;
-    }
-    let p = vec2<i32>(gid.xy);
-    let d = textureLoad(depth, p, 0);
-    if (d <= 0.0) {
-        textureStore(out_up, p, vec4<f32>(-1.0, 0.0, 0.0, 0.0));
-        return;
-    }
-    let zf = r.cur.k.z / d;
-    let hx = (f32(p.x) + 0.5) * 0.5 - 0.5;
-    let hy = (f32(p.y) + 0.5) * 0.5 - 0.5;
+// The marched taps around a full-resolution pixel with their depth-aware weights: (weight sum, weighted visibility, 1 when a tap crossed a
+// changed clipmap cell, 1 when a tap was refused for being another surface).
+fn taps(p: vec2<i32>, zf: f32, tolerance: f32) -> vec4<f32> {
+    let hx = (f32(p.x) + 0.5) * r.blend.z - 0.5;
+    let hy = (f32(p.y) + 0.5) * r.blend.z - 0.5;
     let x0 = i32(floor(hx));
     let y0 = i32(floor(hy));
     let fx = hx - floor(hx);
@@ -199,6 +216,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     var sum = 0.0;
     var acc = 0.0;
     var changed = 0.0;
+    var refused = 0.0;
     for (var j = 0; j < 2; j = j + 1) {
         for (var i = 0; i < 2; i = i + 1) {
             let tp = clamp(vec2<i32>(x0 + i, y0 + j), vec2<i32>(0, 0), hmax);
@@ -217,9 +235,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 continue;
             }
             // A tap on another surface counts for little: the weight falls with the relative depth difference.
-            let rel = abs(zh - zf) / (0.03 * zf + 0.5);
+            let rel = abs(zh - zf) / tolerance;
             // A tap past a few times the depth tolerance is another surface altogether and counts for nothing.
             if (rel > 3.0) {
+                refused = 1.0;
                 continue;
             }
             let w = bw / (1.0 + 16.0 * rel * rel);
@@ -230,11 +249,61 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             }
         }
     }
-    var vis = -1.0;
-    if (sum > 1.0e-6) {
-        vis = acc / sum;
+    return vec4<f32>(sum, acc, changed, refused);
+}
+
+// The pixel's own depth gradient: per axis the smaller of the differences to its two neighbours (at an edge one side is still the pixel's own
+// surface, so the edge keeps its tolerance), the larger of the two axes.
+fn depth_gradient(p: vec2<i32>, zf: f32) -> f32 {
+    let last = vec2<i32>(i32(r.dims.x) - 1, i32(r.dims.y) - 1);
+    var gx = 0.0;
+    var gy = 0.0;
+    var seen_x = false;
+    var seen_y = false;
+    for (var k = 0; k < 4; k = k + 1) {
+        var o = vec2<i32>(0, 0);
+        if (k == 0) { o = vec2<i32>(-1, 0); }
+        if (k == 1) { o = vec2<i32>(1, 0); }
+        if (k == 2) { o = vec2<i32>(0, -1); }
+        if (k == 3) { o = vec2<i32>(0, 1); }
+        let dn = textureLoad(depth, clamp(p + o, vec2<i32>(0, 0), last), 0);
+        if (dn > 0.0) {
+            let dz = abs(r.cur.k.z / dn - zf);
+            if (k < 2) {
+                gx = select(min(gx, dz), dz, !seen_x);
+                seen_x = true;
+            } else {
+                gy = select(min(gy, dz), dz, !seen_y);
+                seen_y = true;
+            }
+        }
     }
-    textureStore(out_up, p, vec4<f32>(vis, changed, 0.0, 0.0));
+    return max(gx, gy);
+}
+
+@compute @workgroup_size(8, 8, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if (gid.x >= r.dims.x || gid.y >= r.dims.y) {
+        return;
+    }
+    let p = vec2<i32>(gid.xy);
+    let d = textureLoad(depth, p, 0);
+    if (d <= 0.0) {
+        textureStore(out_up, p, vec4<f32>(-1.0, 0.0, 0.0, 0.0));
+        return;
+    }
+    let zf = r.cur.k.z / d;
+    var t = taps(p, zf, 0.03 * zf + 0.5);
+    // Taps `scale` pixels apart on a grazing plane differ in depth by what the plane's slope says, not by what an edge says: past half
+    // resolution a pixel that refused a tap tries again with a tolerance that grows with its own depth gradient. Half resolution never does.
+    if (r.mode.w > 2u && t.w > 0.5) {
+        t = taps(p, zf, 0.03 * zf + 0.5 + 1.5 * f32(r.mode.w) * depth_gradient(p, zf));
+    }
+    var vis = -1.0;
+    if (t.x > 1.0e-6) {
+        vis = t.y / t.x;
+    }
+    textureStore(out_up, p, vec4<f32>(vis, t.z, 0.0, 0.0));
 }
 "#;
 
@@ -378,6 +447,8 @@ pub struct ResolveParams {
     pub frame: u32,
     /// The sun is low enough for the checkerboard ([`spread_for_sun`]).
     pub spread: bool,
+    /// The march's pixels per ray edge: [`HALF_RES_SCALE`] or [`QUARTER_RES_SCALE`] ([`march_scale_for_sun`]).
+    pub march_scale: u32,
 }
 
 const DEPTH_WRITE_SHADER: &str = r#"
@@ -659,6 +730,7 @@ impl GenerationMap {
 struct Targets {
     width: u32,
     height: u32,
+    scale: u32,
     receivers: wgpu::Texture,
     world: wgpu::Texture,
     half_depth: wgpu::Texture,
@@ -877,11 +949,11 @@ impl ShadowResolveGpu {
         &mut self.generations
     }
 
-    fn ensure(&mut self, ctx: &GpuContext, width: u32, height: u32) {
-        if self.targets.as_ref().is_some_and(|t| t.width == width && t.height == height) {
+    fn ensure(&mut self, ctx: &GpuContext, width: u32, height: u32, scale: u32) {
+        if self.targets.as_ref().is_some_and(|t| t.width == width && t.height == height && t.scale == scale) {
             return;
         }
-        let (hw, hh) = (width.div_ceil(2), height.div_ceil(2));
+        let (hw, hh) = (width.div_ceil(scale), height.div_ceil(scale));
         let make = |label: &str, w: u32, h: u32, format, usage| {
             ctx.device.create_texture(&wgpu::TextureDescriptor {
                 label: Some(label),
@@ -899,6 +971,7 @@ impl ShadowResolveGpu {
         self.targets = Some(Targets {
             width,
             height,
+            scale,
             receivers: make("shadow-receivers", hw, hh, wgpu::TextureFormat::Rgba32Float, rw),
             world: make("shadow-receivers-world", hw, hh, wgpu::TextureFormat::Rgba32Float, rw),
             half_depth: make("shadow-half-depth", hw, hh, wgpu::TextureFormat::R32Float, rw),
@@ -951,10 +1024,15 @@ impl ShadowResolveGpu {
                 "a camera needs a near plane and a field of view"
             );
         }
-        self.ensure(ctx, size.0, size.1);
+        assert!(
+            params.march_scale == HALF_RES_SCALE || params.march_scale == QUARTER_RES_SCALE,
+            "the march runs at half or quarter resolution"
+        );
+        let scale = params.march_scale;
+        self.ensure(ctx, size.0, size.1, scale);
         let device = &ctx.device;
         let (width, height) = size;
-        let (hw, hh) = (width.div_ceil(2), height.div_ceil(2));
+        let (hw, hh) = (width.div_ceil(scale), height.div_ceil(scale));
         let cut = params.cut || self.fresh;
         let mut p = march_params.clone();
         // The march looks for changed cells only while one was marked this frame or the last: in a quiet frame it skips the lookups.
@@ -982,10 +1060,10 @@ impl ShadowResolveGpu {
             f(&mut bytes, &[cam.tan_half_fov[0], cam.tan_half_fov[1], cam.near_m, 0.0]);
         }
         let skip = u32::from(params.spread && !cut);
-        for v in [width, height, hw, hh, skip, params.frame & 1, u32::from(cut), 0] {
+        for v in [width, height, hw, hh, skip, params.frame & 1, u32::from(cut), scale] {
             bytes.extend_from_slice(&v.to_le_bytes());
         }
-        f(&mut bytes, &[params.history_weight.clamp(0.0, MAX_HISTORY_WEIGHT), march_params.drop_coefficient, 0.0, 0.0]);
+        f(&mut bytes, &[params.history_weight.clamp(0.0, MAX_HISTORY_WEIGHT), march_params.drop_coefficient, 1.0 / scale as f32, 0.0]);
         let uniform = self.uniform.get_or_insert_with(|| {
             device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("shadow-resolve-uniform"),
@@ -1114,13 +1192,13 @@ impl ShadowResolveGpu {
     /// The march's half-resolution visibility of the last frame: -1 where the checkerboard skipped the ray.
     pub fn read_half_visibility(&self, ctx: &GpuContext) -> Vec<f32> {
         let t = self.targets.as_ref().expect("a frame was resolved");
-        floats(&read_texture(ctx, &t.half_vis, t.width.div_ceil(2), t.height.div_ceil(2)))
+        floats(&read_texture(ctx, &t.half_vis, t.width.div_ceil(t.scale), t.height.div_ceil(t.scale)))
     }
 
     /// Per half-resolution pixel, whether its march crossed a clipmap cell that changed this frame or the last.
     pub fn read_half_changed(&self, ctx: &GpuContext) -> Vec<bool> {
         let t = self.targets.as_ref().expect("a frame was resolved");
-        read_texture(ctx, &t.half_steps, t.width.div_ceil(2), t.height.div_ceil(2))
+        read_texture(ctx, &t.half_steps, t.width.div_ceil(t.scale), t.height.div_ceil(t.scale))
             .chunks(4)
             .map(|b| u32::from_le_bytes(b.try_into().unwrap()) & crate::march::STEPS_CHANGED_BIT != 0)
             .collect()
@@ -1129,7 +1207,7 @@ impl ShadowResolveGpu {
     /// The step count of each half-resolution march of the last frame (0 for a pixel without a receiver or a skipped ray).
     pub fn read_half_steps(&self, ctx: &GpuContext) -> Vec<u32> {
         let t = self.targets.as_ref().expect("a frame was resolved");
-        read_texture(ctx, &t.half_steps, t.width.div_ceil(2), t.height.div_ceil(2))
+        read_texture(ctx, &t.half_steps, t.width.div_ceil(t.scale), t.height.div_ceil(t.scale))
             .chunks(4)
             .map(|b| u32::from_le_bytes(b.try_into().unwrap()) & !crate::march::STEPS_CHANGED_BIT)
             .collect()
@@ -1138,13 +1216,13 @@ impl ShadowResolveGpu {
     /// The receivers' distances along the camera's forward at half resolution (0 without a receiver).
     pub fn read_half_depth(&self, ctx: &GpuContext) -> Vec<f32> {
         let t = self.targets.as_ref().expect("a frame was resolved");
-        floats(&read_texture(ctx, &t.half_depth, t.width.div_ceil(2), t.height.div_ceil(2)))
+        floats(&read_texture(ctx, &t.half_depth, t.width.div_ceil(t.scale), t.height.div_ceil(t.scale)))
     }
 
     /// The receivers of the last frame at half resolution, `[x, y, z, w]` (see the receivers shader).
     pub fn read_receivers(&self, ctx: &GpuContext) -> Vec<[f32; 4]> {
         let t = self.targets.as_ref().expect("a frame was resolved");
-        let (w, h) = (t.width.div_ceil(2), t.height.div_ceil(2));
+        let (w, h) = (t.width.div_ceil(t.scale), t.height.div_ceil(t.scale));
         let row = (w * 16).next_multiple_of(256);
         let buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("receivers-readback"),

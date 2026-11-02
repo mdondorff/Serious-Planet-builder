@@ -1,0 +1,58 @@
+"""SPIKE-90 window 2: every attempt (validity, calibration, temperature) and the verdicts by the fixed rule. Usage: python w2_analyse.py <perf-w2 dir>"""
+import glob, json, os, re, statistics, sys
+root = sys.argv[1]
+CFG = ['c', 'd-plain', 'BG2', 'Eco', 'Duty']
+attempts = []  # every try
+best = {}  # (flight, cfg, round) -> metrics of the first valid try
+for f in ('teleport-1m', 'dive'):
+    for c in CFG:
+        for r in (1, 2, 3):
+            n = f'{root}/{f}-{c}-r{r}'
+            tries = sorted(glob.glob(n + '.try*.json'), key=lambda p: int(re.search(r'try(\d+)', p).group(1)))
+            if not tries and os.path.exists(n + '.json'):
+                tries = [n + '.json']
+            for p in tries:
+                d = json.load(open(p)); run = d['runs'][0]; cn = run['counts']
+                t = re.search(r'try(\d+)', p); t = int(t.group(1)) if t else 1
+                log = f'{n}.try{t}.log'
+                temp = ''
+                if os.path.exists(log):
+                    m = re.search(r'cool-down [^:]*: (NOT cooled, )?(\d+) C -> (\d+) C', open(log).read())
+                    temp = f'{m.group(3)} C' + (' (not cooled)' if m.group(1) else '') if m else ''
+                    ch = re.findall(r'synthetic load chunks finished: (\d+)', open(log).read())
+                else:
+                    ch = []
+                a = dict(flight=f, cfg=c, round=r, tryno=t, valid=d['cpu_calibration_valid'], temp=temp,
+                         cal=f"{cn.get('load_calib_before_single_us', 0) / 1000:.1f}/{cn.get('load_calib_after_single_us', 0) / 1000:.1f}",
+                         ready_ms=(cn['load_run_us_median'] + cn['load_wait_us_median']) / 1000, p99=run['p99_ms'], med=run['median_ms'],
+                         chunks=int(ch[-1]) if ch else None, reasons='; '.join(d['cpu_calibration_reasons']))
+                attempts.append(a)
+                if a['valid'] and (f, c, r) not in best:
+                    best[(f, c, r)] = a
+print('## Attempts')
+print('| Flight | Config | Round | Try | Valid | Temp | Calib single before/after ms | Tile-ready ms | p99 ms | Chunks |')
+print('|---|---|---|---|---|---|---|---|---|---|')
+for a in attempts:
+    print(f"| {a['flight']} | {a['cfg']} | {a['round']} | {a['tryno']} | {'yes' if a['valid'] else 'INVALID'} | {a['temp']} | {a['cal']} | {a['ready_ms']:.2f} | {a['p99']:.2f} | {a['chunks'] if a['chunks'] is not None else ''} |")
+nv = sum(1 for a in attempts if a['valid']); print(f'\nattempts {len(attempts)}, valid {nv}, INVALID {len(attempts) - nv}')
+print('\n## Medians of valid rounds and verdicts (5 % on median tile-ready and p99 against c; worst round within 10 % of c\'s worst)')
+for f, rounds in (('teleport-1m', (1, 2)), ('dive', (1, 2, 3))):
+    cv = [best[(f, 'c', r)] for r in rounds if (f, 'c', r) in best]
+    cr, cp = statistics.median(x['ready_ms'] for x in cv), statistics.median(x['p99'] for x in cv)
+    cwr, cwp = max(x['ready_ms'] for x in cv), max(x['p99'] for x in cv)
+    print(f'\n{f}: c tile-ready {cr:.2f} ms, p99 {cp:.2f} ms ({len(cv)} valid rounds)')
+    print('| Config | Valid rounds | Tile-ready ms | vs c | p99 ms | vs c | worst ready / p99 vs c worst | Verdict |')
+    print('|---|---|---|---|---|---|---|---|')
+    for c in CFG:
+        v = [best[(f, c, r)] for r in rounds if (f, c, r) in best]
+        if not v:
+            print(f'| {c} | 0 | | | | | | no verdict |'); continue
+        rr, pp = statistics.median(x['ready_ms'] for x in v), statistics.median(x['p99'] for x in v)
+        wr, wp = max(x['ready_ms'] for x in v), max(x['p99'] for x in v)
+        ok = rr <= 1.05 * cr and pp <= 1.05 * cp and wr <= 1.10 * cwr and wp <= 1.10 * cwp
+        verdict = 'reference' if c == 'c' else ('no verdict' if len(v) < 2 else ('PASS' if ok else 'FAIL'))
+        print(f"| {c} | {len(v)} | {rr:.2f} | {100 * (rr / cr - 1):+.1f} % | {pp:.2f} | {100 * (pp / cp - 1):+.1f} % | {100 * (wr / cwr - 1):+.1f} % / {100 * (wp / cwp - 1):+.1f} % | {verdict} |")
+    # Throughput of the background, chunks per second of run, over every attempt with a count (valid or not).
+    for c in CFG[1:]:
+        ch = [a['chunks'] for a in attempts if a['flight'] == f and a['cfg'] == c and a['chunks']]
+        if ch: print(f'  {c}: chunks per run median {statistics.median(ch):.0f} ({len(ch)} attempts)')

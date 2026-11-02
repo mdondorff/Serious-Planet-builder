@@ -15,16 +15,17 @@ def polar(m, north):
     return img
 def rgb(a):
     pal = np.array([(40, 70, 120), (150, 180, 110), (255, 255, 255)], np.uint8); return pal[a]
-rows = []
-for spec in sys.argv[2:]:
-    label, path = spec.split('=')
-    m = np.fromfile(path, dtype=np.uint8).reshape(H, W) > 0
-    eq = Image.fromarray(rgb(m.astype(int))).resize((800, 400))
-    row = Image.new('RGB', (800 + 2 * N + 20, N + 16), (255, 255, 255))
-    row.paste(eq, (0, 16)); row.paste(Image.fromarray(rgb(polar(m, True))), (810, 16)); row.paste(Image.fromarray(rgb(polar(m, False))), (820 + N, 16))
-    d = ImageDraw.Draw(row); d.text((4, 2), label + ': equirectangular | north pole (to 40 N) | south pole (to 40 S)', fill=(0, 0, 0))
-    rows.append(row)
-sheet = Image.new('RGB', (rows[0].width, sum(r.height for r in rows)), (255, 255, 255))
-y = 0
-for r in rows: sheet.paste(r, (0, y)); y += r.height
-sheet.save(sys.argv[1], optimize=True)
+if __name__ == '__main__':
+    rows = []
+    for spec in sys.argv[2:]:
+        label, path = spec.split('=')
+        m = np.fromfile(path, dtype=np.uint8).reshape(H, W) > 0
+        eq = Image.fromarray(rgb(m.astype(int))).resize((800, 400))
+        row = Image.new('RGB', (800 + 2 * N + 20, N + 16), (255, 255, 255))
+        row.paste(eq, (0, 16)); row.paste(Image.fromarray(rgb(polar(m, True))), (810, 16)); row.paste(Image.fromarray(rgb(polar(m, False))), (820 + N, 16))
+        d = ImageDraw.Draw(row); d.text((4, 2), label + ': equirectangular | north pole (to 40 N) | south pole (to 40 S)', fill=(0, 0, 0))
+        rows.append(row)
+    sheet = Image.new('RGB', (rows[0].width, sum(r.height for r in rows)), (255, 255, 255))
+    y = 0
+    for r in rows: sheet.paste(r, (0, y)); y += r.height
+    sheet.save(sys.argv[1], optimize=True)
