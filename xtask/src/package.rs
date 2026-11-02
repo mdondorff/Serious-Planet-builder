@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 /// The default output directory under the repository root: `<DIR>/<date>`.
 const PACKAGE_DIR: &str = "target/review/owner-package";
 /// The sites of the owner's look reviews (`docs/milestones/M8/look-review-2b/`), each drawn at its default look.
-const SITES: [&str; 3] = ["hills-b", "river-r1", "hills-r1"];
+const SITES: [&str; 2] = ["hills-b", "river-r1"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Status {
@@ -232,10 +232,10 @@ mod tests {
     #[test]
     fn without_a_store_every_step_is_not_run_and_never_a_pass() {
         let steps = plan(None, "target/p");
-        assert_eq!(steps.len(), 4, "three sites and the flights");
+        assert_eq!(steps.len(), 3, "two sites and the flights");
         let items = run_steps(&steps, &mut |_| panic!("no step may run without a store"), &|_| Vec::new());
         assert!(items.iter().all(|i| i.status == Status::NotRun && i.detail.contains("--store")));
-        assert!(render("2026-10-30", "abc", &items).contains("4 items: 0 PASS, 0 FAIL, 4 NOT RUN"));
+        assert!(render("2026-10-30", "abc", &items).contains("3 items: 0 PASS, 0 FAIL, 3 NOT RUN"));
     }
 
     // spec: TEST-074
@@ -295,6 +295,6 @@ mod tests {
         assert!(parse_args(&a(&["--store"])).unwrap_err().contains("needs a value"));
         let steps = plan(Some("S"), "target/p/2026-10-30");
         assert_eq!(steps[0].capture_args[..3], ["stills", "--poses", "docs/milestones/M8/look-review-2b/hills-b/default/poses.toml"]);
-        assert_eq!(steps[3].capture_args, ["flights", "--store", "S", "--out-dir", "target/p/2026-10-30/flights"]);
+        assert_eq!(steps[2].capture_args, ["flights", "--store", "S", "--out-dir", "target/p/2026-10-30/flights"]);
     }
 }
