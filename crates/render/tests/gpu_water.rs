@@ -245,9 +245,9 @@ fn the_lit_water_and_atmosphere_frames_over_compact_blocks_are_the_recorded_pixe
     // water without and with the atmosphere), as the atlas textures drew them (recorded by the differential of ADR 0054's change,
     // byte-identical to the buffer blocks on WARP and on the RTX; re-recorded by the pixel-footprint fade of the waves, ADR 0056, and by the grid-independent shading normal, ATMO-013). A driver not in the table prints its hash and records nothing.
     const KNOWN: [(&str, u64); 2] = [
-        ("Microsoft Basic Render Driver | Dx12 | Cpu | driver '10.0.26100.9711' ''", 0xcb76_74ec_ad7a_973c),
-        // The RTX hash: re-recorded 2026-11-02 by the sun-glint-turn fix (ATMO-013), owner bless 2026-11-02 (`test gpu --real`); another adapter or driver skips with a printed hash.
-        ("NVIDIA GeForce RTX 3080 Ti Laptop GPU | Vulkan | DiscreteGpu | driver 'NVIDIA' '621.01'", 0x7f5e_9697_4390_1fb1),
+        ("Microsoft Basic Render Driver | Dx12 | Cpu | driver '10.0.26100.9711' ''", 0x49d4_7b78_3a6f_cffb),
+        // The RTX hash: re-recorded 2026-11-02 by the sun-direct split (REND-051, rounding of the two targets) after the sun-glint-turn fix (ATMO-013, owner bless 2026-11-02) (`test gpu --real`); another adapter or driver skips with a printed hash.
+        ("NVIDIA GeForce RTX 3080 Ti Laptop GPU | Vulkan | DiscreteGpu | driver 'NVIDIA' '621.01'", 0x8a4b_cfac_9200_7552),
     ];
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let field = Reference(1);
@@ -709,6 +709,7 @@ fn nothing_is_created_per_frame_after_enable_water_and_the_frame_targets_equal_t
             "sky-view",
             "aerial-perspective",
             "terrain",
+            "shadow-apply",
             "scene-copy",
             "water",
             "sky-composite",

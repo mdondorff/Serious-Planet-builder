@@ -1,0 +1,12 @@
+# ADR 0092: the flight scenes at the terrain share. 6 workers = 0.6 x B (B = 10 on this machine) per ADR 0092's worked example, not a rule.
+# Flights judged: dive, dive-fast, look-1m, look-2km; teleport-1m and teleport-2km recorded, not judged.
+# One configuration: no stop rule applies (it needs a reference and another configuration); every round runs.
+rounds 3
+retries 1
+config share6
+flight dive stream dive --store C:/DEV/SeriousPlanetData/global16384 --gen-workers 6
+flight dive-fast stream dive-fast --store C:/DEV/SeriousPlanetData/global16384 --gen-workers 6
+flight look-1m stream look-1m --store C:/DEV/SeriousPlanetData/global16384 --gen-workers 6
+flight look-2km stream look-2km --store C:/DEV/SeriousPlanetData/global16384 --gen-workers 6
+flight teleport-1m stream teleport-1m --store C:/DEV/SeriousPlanetData/global16384 --gen-workers 6
+flight teleport-2km stream teleport-2km --store C:/DEV/SeriousPlanetData/global16384 --gen-workers 6

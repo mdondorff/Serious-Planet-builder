@@ -73,9 +73,9 @@ fn frame_bytes(r: &TerrainRenderer, ctx: &GpuContext) -> Vec<u8> {
     r.read_color(ctx).rgba
 }
 
-// spec: REND-050
+// spec: REND-050, REND-051
 #[test]
-fn a_lit_frame_with_a_shadow_frame_resolves_a_visibility_and_draws_the_same_picture() {
+fn a_lit_frame_with_a_shadow_frame_resolves_a_visibility_and_applies_it_to_the_direct_sun() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let p = plan();
     let (mut with, tiles) = renderer(&ctx, &p);
@@ -85,11 +85,26 @@ fn a_lit_frame_with_a_shadow_frame_resolves_a_visibility_and_draws_the_same_pict
     with.set_shadow_frame(shadow_frame(&p, &tiles, &mut planner));
     with.render(&ctx, &p, false).unwrap();
     without.render(&ctx, &p, false).unwrap();
-    assert_eq!(frame_bytes(&with, &ctx), frame_bytes(&without, &ctx), "the lit picture is the picture without the shadow pass");
     let visibility = with.read_shadow(&ctx).expect("the shadow pass ran");
     assert_eq!(visibility.len(), (SIZE.0 * SIZE.1) as usize);
     assert!(visibility.iter().all(|v| (0.0..=1.0).contains(v)), "visibility lies in [0, 1]");
     assert!(without.read_shadow(&ctx).is_none(), "a renderer without the shadow pass has none");
+    // Where the visibility is 1 the frame is the frame without shadows, to the byte; where it is below 1 the direct sun is reduced.
+    let (a, b) = (frame_bytes(&with, &ctx), frame_bytes(&without, &ctx));
+    let (mut lit, mut shadowed) = (0, 0);
+    for (i, v) in visibility.iter().enumerate() {
+        let (pa, pb) = (&a[4 * i..4 * i + 3], &b[4 * i..4 * i + 3]);
+        if *v >= 1.0 {
+            assert_eq!(pa, pb, "pixel {i}: visibility 1 draws the unshadowed pixel");
+            lit += 1;
+        } else {
+            let (sa, sb): (u32, u32) = (pa.iter().map(|c| u32::from(*c)).sum(), pb.iter().map(|c| u32::from(*c)).sum());
+            assert!(sa <= sb, "pixel {i}: visibility {v} does not brighten ({sa} against {sb})");
+            shadowed += usize::from(sa < sb);
+        }
+    }
+    println!("REND-051: {lit} pixels at visibility 1, {shadowed} darkened");
+    assert!(lit > 100, "{lit} pixels at visibility 1");
 }
 
 // spec: REND-050
@@ -163,4 +178,33 @@ fn the_shadow_view_draws_the_resolved_visibility_as_grey_over_the_surface() {
         }
     }
     assert!(grey * 2 > visibility.len(), "most pixels show the visibility as grey: {grey} of {}", visibility.len());
+}
+
+// spec: REND-051
+#[test]
+fn a_visibility_of_zero_leaves_no_direct_sun_on_the_terrain_of_the_plain_lit_frame() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let p = plan();
+    let (mut r, tiles) = renderer(&ctx, &p);
+    r.enable_shadow(&ctx, TEXELS, LEVELS, R);
+    let mut planner = ClipmapPlanner::new(ClipmapParams { texels: TEXELS, ..ClipmapParams::new(R, CELLS) });
+    let mut f = shadow_frame(&p, &tiles, &mut planner);
+    // A sun below the geometric horizon at the anchor: the march returns 0 without marching (REND-049), and the plain lit frame has no
+    // ambient, so nothing else lights the terrain. (The lit plan's own sun stays up: the two are independent inputs.)
+    let up = p.camera.position.0.normalized();
+    f.view = ShadowView::new(f.plan.anchor, &p.camera, (up * -0.6 + Vec3::new(0.0, 0.0, 1.0)).normalized(), R);
+    r.set_shadow_frame(f);
+    r.render(&ctx, &p, false).unwrap();
+    let visibility = r.read_shadow(&ctx).expect("the shadow pass ran");
+    let frame = frame_bytes(&r, &ctx);
+    // The same frame without the shadow pass is lit where the terrain is.
+    let (mut plain, _) = renderer(&ctx, &p);
+    plain.render(&ctx, &p, false).unwrap();
+    let unshadowed = frame_bytes(&plain, &ctx);
+    let covered: Vec<usize> =
+        (0..visibility.len()).filter(|i| visibility[*i] < 1.0e-6 && unshadowed[4 * *i..4 * *i + 3] != [0, 0, 0]).collect();
+    assert!(covered.len() > 100, "{} lit terrain pixels at visibility 0", covered.len());
+    for i in covered {
+        assert_eq!(frame[4 * i..4 * i + 3], [0, 0, 0], "pixel {i}: visibility 0 leaves no direct sun");
+    }
 }

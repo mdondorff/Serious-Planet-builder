@@ -22,9 +22,39 @@ pub const WARMUP_HOLD_READINGS: usize = 3;
 /// The GPU temperature (Celsius) a view's warm-up starts at or below (ADR 0057). Window 7: the views that started at 54 to 59 C held
 /// 1,455 to 1,567 MHz under the software power cap, those that started at 66 to 77 C read 1,282 to 1,380 MHz.
 pub const COOL_START_C: f64 = 60.0;
-/// How long the cool-down waits for [`COOL_START_C`], in seconds, and the pause between two temperature readings.
-pub const COOL_CAP_S: f64 = 120.0;
+/// How long the cool-down waits for [`COOL_START_C`], in seconds, and the pause between two temperature readings. 30 s since ADR
+/// 0094: SPIKE-90 window 2 hit the old 120 s cap on every hot run, and the clock floor (ADR 0057 point 2) judges what a hot start does.
+pub const COOL_CAP_S: f64 = 30.0;
 pub const COOL_POLL_S: f64 = 5.0;
+/// The idle a runner of several perf processes keeps between two runs, as a share of the previous run's wall time, and its cap in
+/// seconds (ADR 0094): a fixed duty cycle instead of a wait on a sensor. SPIKE-90 window 2: 45 s of idle before each run held the
+/// GPU at 52 to 58 C with no cool-down wait.
+pub const DUTY_IDLE_SHARE: f64 = 0.5;
+pub const DUTY_IDLE_CAP_S: f64 = 45.0;
+
+/// A streaming scene that starts with the GPU above this temperature (Celsius) is named in the console (ADR 0094 point 4): the
+/// readiness gate's limit (ADR 0020), above which a device loss or throttling after the start brings the cool start back.
+pub const HOT_START_C: f64 = 70.0;
+
+/// The console line of a streaming run whose first clock sample reads above [`HOT_START_C`], with its throttle reasons; `None` at
+/// or below it.
+pub fn hot_start_line(path: &str, first: &ClockSample) -> Option<String> {
+    (first.temperature_c > HOT_START_C).then(|| {
+        format!(
+            "hot start: {path} began with the GPU at {:.0} C (above {HOT_START_C:.0} C; throttle {}): a device loss or throttling in this run brings back the cool start (ADR 0094 point 4)",
+            first.temperature_c, first.throttle_reasons
+        )
+    })
+}
+
+/// The idle before the next run of a runner, in seconds, after a run of `previous_run_s` (ADR 0094): [`DUTY_IDLE_SHARE`] of it, at
+/// most [`DUTY_IDLE_CAP_S`]; none before the first run or after a run that did not take time.
+pub fn duty_idle_s(previous_run_s: Option<f64>) -> f64 {
+    match previous_run_s {
+        Some(s) if s.is_finite() && s > 0.0 => (s * DUTY_IDLE_SHARE).min(DUTY_IDLE_CAP_S),
+        _ => 0.0,
+    }
+}
 /// A warm-up chunk of the lit views renders at least this long (seconds), so the readings see a sustained load, not a burst.
 pub const WARMUP_MIN_CHUNK_S: f64 = 1.0;
 
@@ -498,23 +528,45 @@ mod tests {
         let mut t = 0.0;
         let out = cool_down(
             60.0,
-            120.0,
+            COOL_CAP_S,
             || Some(72.0),
             || {},
             || {
-                t += 40.0;
+                t += 10.0;
                 t
             },
         );
-        assert!(!out.cooled && out.seconds >= 120.0 && out.end_c == Some(72.0), "{out:?}");
+        assert!(!out.cooled && out.seconds >= 30.0 && out.seconds < 40.0 && out.end_c == Some(72.0), "{out:?}");
         let line = out.line("orbit");
-        assert!(line.contains("NOT cooled") && line.contains("cap 120 s"), "{line}");
+        assert!(line.contains("NOT cooled") && line.contains("cap 30 s"), "{line}");
         // An unreadable sensor ends the wait at once.
         let mut pauses = 0;
-        let out = cool_down(60.0, 120.0, || None, || pauses += 1, || 0.0);
+        let out = cool_down(60.0, COOL_CAP_S, || None, || pauses += 1, || 0.0);
         assert!(!out.cooled && pauses == 0 && out.end_c.is_none() && out.line("v").contains("unreadable"), "{out:?}");
-        // The target is the temperature the held views of window 7 started at.
-        assert_eq!((COOL_START_C, COOL_CAP_S, COOL_POLL_S), (60.0, 120.0, 5.0));
+        // The target is the temperature the held views of window 7 started at; the cap is ADR 0094's.
+        assert_eq!((COOL_START_C, COOL_CAP_S, COOL_POLL_S), (60.0, 30.0, 5.0));
+    }
+
+    // spec: TEST-037
+    #[test]
+    fn a_streaming_run_that_starts_above_70_c_is_named_with_its_throttle_reasons() {
+        let sample = |t: f64| crate::parse_nvidia_smi(&format!("X, 1500, 7001, 80, {t}, P0, 0x4")).unwrap();
+        assert_eq!(hot_start_line("stream-lit/dive", &sample(70.0)), None, "at the limit: not named");
+        let line = hot_start_line("stream-lit/dive", &sample(74.0)).unwrap();
+        assert!(line.starts_with("hot start: stream-lit/dive began with the GPU at 74 C") && line.contains("throttle 0x4"), "{line}");
+        assert_eq!(HOT_START_C, 70.0);
+    }
+
+    // spec: BUILD-035
+    #[test]
+    fn the_duty_idle_is_half_the_previous_run_capped_and_none_before_the_first() {
+        assert_eq!(duty_idle_s(None), 0.0);
+        assert_eq!(duty_idle_s(Some(40.0)), 20.0, "teleport-1m's 40 s run");
+        assert_eq!(duty_idle_s(Some(77.0)), 38.5, "dive's 77 s run");
+        assert_eq!(duty_idle_s(Some(160.0)), DUTY_IDLE_CAP_S, "a long run waits the cap, not 80 s");
+        assert_eq!(duty_idle_s(Some(0.0)), 0.0);
+        assert_eq!(duty_idle_s(Some(f64::NAN)), 0.0);
+        assert_eq!((DUTY_IDLE_SHARE, DUTY_IDLE_CAP_S), (0.5, 45.0));
     }
 
     // spec: TEST-034

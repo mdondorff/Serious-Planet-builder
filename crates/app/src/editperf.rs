@@ -1677,6 +1677,128 @@ pub fn pair_frames(
     Ok(all)
 }
 
+/// One probe of [`pair_metres`]: the height change an edit makes at a place, as the exact tile has it and as the preview's node has it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MetreRow {
+    /// Metres from the case centre, east.
+    pub at_m: f64,
+    /// The field's own change there (edited minus stale), metres.
+    pub true_delta_m: f64,
+    /// The change of the drawn node's surface there: the node's lattice with the stamp's delta at its vertices, interpolated, minus the stale lattice, metres.
+    pub node_delta_m: f64,
+    /// `node_delta_m - true_delta_m`: the error of the node's resolution.
+    pub error_m: f64,
+}
+
+/// The pair in metres (TEST-076), on the CPU: where the case's stamp changes the ground and how closely the drawn node can show that change. The node is the deepest one
+/// the CPU plan (the pair's own parameters) has over the case centre; its cell is `edge / cells` metres. The preview adds the stamp's delta at the node's vertices
+/// (REND-033: one function with the stage), so the previewed node's surface is the edited field sampled on the stale node's lattice: its change against the true change
+/// is the interpolation error of that lattice, in metres, with no pixels in it. Returns the node's level and cell size beside the rows (centre, a quarter, a half,
+/// three quarters and the whole radius, east of the centre).
+pub fn pair_metres(o: &Options, altitude_m: f64, radius_m: f64, site: Option<(f64, f64)>) -> Result<(u8, f64, Vec<MetreRow>), String> {
+    let world = Arc::new(crate::streamperf::open_world(o, false)?);
+    let planet_m = world.radius_m();
+    let mut case = cases_at(altitude_m, true, planet_m)
+        .into_iter()
+        .find(|c| c.kind == CaseKind::Stamp && (c.size_m - radius_m).abs() < 1e-6)
+        .ok_or_else(|| format!("the scene has no stamp case of radius {radius_m} m at {altitude_m} m"))?;
+    if let Some((lat, lon)) = site {
+        let d = Vec3::from_lat_lon(lat.to_radians(), lon.to_radians());
+        case.centre = d;
+        case.spec.dir = d;
+    }
+    let before_def = world.definition();
+    let mut edited = (*before_def).clone();
+    edited.put_item_spec(BodyId::PLANET, case.spec.clone()).map_err(|e| format!("the case's stamp: {e:?}"))?;
+    let (level, plan_edge_m, cells) = {
+        let field = world.field()?;
+        let size = (768u32, 432u32);
+        let lod = LodParams {
+            cells: o.cells,
+            viewport_h_px: f64::from(size.1),
+            tau_px: o.tau,
+            max_level: o.finest_level_for(o.cells),
+            min_level: o.min_level(),
+            radius_m: planet_m,
+            max_height_m: LodParams::earth_1080p().max_height_m.max(field.max_abs_height_m() + 200.0),
+            ..LodParams::earth_1080p()
+        };
+        let ground = |d: Vec3| field.height(d);
+        let rho = (1.5 * case.size_m).max(200.0);
+        let req = TerrainRequest {
+            camera: camera_for(case.centre, &ground, planet_m, rho, altitude_m, f64::from(size.0) / f64::from(size.1)),
+            size,
+            view: TerrainView::Level,
+            lod,
+            face_mapping: TangentWarp.id().to_string(),
+            seed: field.seed(),
+        };
+        let plan = planet_frame::plan_terrain_field(&req, field.as_ref()).map_err(|e| format!("plan: {e:?}"))?;
+        let level = plan
+            .nodes
+            .iter()
+            .filter(|n| TileId::from_direction(&TangentWarp, case.centre, n.level) == n.tile)
+            .map(|n| n.level)
+            .max()
+            .ok_or("no node over the case centre")?;
+        // A tile of this level spans 2 / 2^level of the face's s range; the face edge of a cube of this radius is about pi/2 R across.
+        (level, core::f64::consts::FRAC_PI_2 * planet_m / (1u64 << level) as f64, o.cells)
+    };
+    // The probe points and their lattice cells.
+    let east = Vec3::new(0.0, 0.0, 1.0).cross(case.centre).normalized();
+    let fractions = [0.0, 0.25, 0.5, 0.75, 1.0];
+    struct Probe {
+        at_m: f64,
+        dir: Vec3,
+        weights: [f64; 4],
+        lattice: [Vec3; 4],
+    }
+    let probes: Vec<Probe> = fractions
+        .iter()
+        .map(|f| {
+            let at_m = f * radius_m;
+            let dir = (case.centre * libm::cos(at_m / planet_m) + east * libm::sin(at_m / planet_m)).normalized();
+            let tile = TileId::from_direction(&TangentWarp, dir, level);
+            let (face, s, t) = planet_core::cube::direction_to_face(&TangentWarp, dir);
+            debug_assert_eq!(face, tile.face());
+            let (s0, s1, t0, t1) = tile.bounds();
+            let (u, v) = ((s - s0) / (s1 - s0) * f64::from(cells), (t - t0) / (t1 - t0) * f64::from(cells));
+            let (k, l) = ((u.floor() as u32).min(cells - 1), (v.floor() as u32).min(cells - 1));
+            let (fu, fv) = (u - f64::from(k), v - f64::from(l));
+            Probe {
+                at_m,
+                dir,
+                weights: [(1.0 - fu) * (1.0 - fv), fu * (1.0 - fv), (1.0 - fu) * fv, fu * fv],
+                lattice: [
+                    tile.sample_direction(&TangentWarp, cells, k, l),
+                    tile.sample_direction(&TangentWarp, cells, k + 1, l),
+                    tile.sample_direction(&TangentWarp, cells, k, l + 1),
+                    tile.sample_direction(&TangentWarp, cells, k + 1, l + 1),
+                ],
+            }
+        })
+        .collect();
+    let sample = |world: &WorldTerrain| -> Result<Vec<(f64, [f64; 4])>, String> {
+        let field = world.field()?;
+        Ok(probes.iter().map(|p| (field.height(p.dir), p.lattice.map(|d| field.height(d)))).collect())
+    };
+    let stale = sample(&world)?;
+    world.set_definition(Arc::new(edited))?;
+    let after = sample(&world);
+    world.set_definition(before_def)?;
+    let after = after?;
+    let rows = probes
+        .iter()
+        .zip(stale.iter().zip(&after))
+        .map(|(p, ((h0, l0), (h1, l1)))| {
+            let lattice = |l: &[f64; 4]| l.iter().zip(&p.weights).map(|(h, w)| h * w).sum::<f64>();
+            let (true_delta_m, node_delta_m) = (h1 - h0, lattice(l1) - lattice(l0));
+            MetreRow { at_m: p.at_m, true_delta_m, node_delta_m, error_m: node_delta_m - true_delta_m }
+        })
+        .collect();
+    Ok((level, plan_edge_m / f64::from(cells), rows))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

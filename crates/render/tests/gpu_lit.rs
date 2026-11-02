@@ -222,11 +222,11 @@ fn the_renderers_frame_targets_equal_the_compiled_graphs_count_and_fit_the_share
     let compiled = lit_frame_graph(&LitShape { size: SIZE, adaptive: true, atmosphere: false, water: false }).compile().unwrap();
     let held = r.lit_frame_target_bytes().unwrap();
     assert_eq!(held, compiled.frame_target_bytes(), "what the renderer allocates is what the compiled graph counts");
-    assert_eq!(held, 128 * 96 * (8 + 4) + 256 + 16);
+    assert_eq!(held, 128 * 96 * (8 + 4 + 8) + 256 + 16);
     assert!(held <= frame_target_share_bytes(SIZE), "{held} B over the share of {} B", frame_target_share_bytes(SIZE));
     // The same count at 1440p from the same formula: HDR 29.5 MB, depth 14.7 MB.
     let big = lit_frame_graph(&LitShape { size: (2560, 1440), adaptive: true, atmosphere: false, water: false }).compile().unwrap();
-    assert_eq!(big.frame_target_bytes(), 44_237_072);
+    assert_eq!(big.frame_target_bytes(), 73_728_272);
 }
 
 // spec: REND-017, REND-020
@@ -236,7 +236,7 @@ fn lit_frames_create_nothing_after_the_lit_path_is_enabled() {
     let p = plan(3);
     let mut r = renderer(&ctx, &[&p], true);
     let (built, objects) = (r.init_counts(), r.lit_objects());
-    assert_eq!(objects, 7, "the scene target, the three post pipelines, the scale references pipeline (REND-036) and the two compact lit pipelines (whole nodes, nodes over some quadrants, STRM-016; the vertex lit pipeline went with the vertex format): {objects}");
+    assert_eq!(objects, 11, "the scene target, `sun-direct`, its two apply pipelines and their one-texel texture (REND-051), the three post pipelines, the scale references pipeline (REND-036) and the two compact lit pipelines (whole nodes, nodes over some quadrants, STRM-016; the vertex lit pipeline went with the vertex format): {objects}");
     for plan in [lit(p.clone(), LitPlan::fixed(EV)), lit(p.clone(), LitPlan::adaptive(EV, 0.016)), lit(p.clone(), LitPlan::fixed(EV))] {
         r.render(&ctx, &plan, false).unwrap();
         assert_eq!(r.lit_objects(), objects);
@@ -350,4 +350,41 @@ fn scale_references_are_drawn_into_the_lit_frame_with_the_terrains_depth() {
     r.set_scale_refs(&[]);
     r.render(&ctx, &base, false).unwrap();
     assert_eq!(image(&r, &ctx), debug_with, "the debug frame does not draw them");
+}
+
+// spec: REND-051
+#[test]
+fn the_plain_lit_frame_keeps_its_sun_term_in_sun_direct_and_shadow_apply_adds_it_to_the_scene() {
+    use planet_frame::look::shading::ShadeView;
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let base = plan(3);
+    let mut r = renderer(&ctx, &[&base], true);
+    let mut frame = |view: ShadeView| {
+        let mut l = LitPlan::fixed(EV);
+        l.view = view;
+        r.render(&ctx, &lit(base.clone(), l), false).unwrap();
+        let path = r.lit_path().unwrap();
+        (path.read_hdr(&ctx), path.read_sun_direct(&ctx))
+    };
+    // The plain path has no ambient: the terrain writes zero to the scene target and its whole radiance to `sun-direct`, and with the
+    // visibility forced to 1 the scene target after the apply pass equals `sun-direct` exactly.
+    let (hdr, direct) = frame(ShadeView::Lit);
+    let mut lit_pixels = 0;
+    for (i, (h, d)) in hdr.iter().zip(&direct).enumerate() {
+        // Exact, except that a blend unit may flush an f16 subnormal (below 2^-14) to zero.
+        for c in 0..3 {
+            assert!(
+                h[c] == d[c] || (h[c].abs() < 6.2e-5 && d[c].abs() < 6.2e-5),
+                "pixel {i} channel {c}: scene {} vs sun-direct {}",
+                h[c],
+                d[c]
+            );
+        }
+        lit_pixels += usize::from(d[..3].iter().any(|v| *v > 0.0));
+    }
+    assert!(lit_pixels > 100, "the planet carries a sun term in {lit_pixels} pixels");
+    // A view without a sun term writes the scene only, and the apply pass adds nothing.
+    let (hdr, direct) = frame(ShadeView::Albedo);
+    assert!(direct.iter().all(|d| d[..3] == [0.0; 3]), "the albedo view has no sun-direct term");
+    assert!(hdr.iter().filter(|h| h[3] > 0.0 && h[..3].iter().any(|v| *v > 0.0)).count() > 100);
 }

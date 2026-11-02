@@ -18,12 +18,14 @@ fn names(g: &RenderGraph, c: &CompiledGraph) -> Vec<&'static str> {
 #[test]
 fn the_adaptive_lit_frame_runs_terrain_histogram_adaptation_and_tone_map_in_that_order() {
     let (g, c) = compile(P1440, true);
-    assert_eq!(names(&g, &c), ["terrain", "exposure-histogram", "exposure-adapt", "tonemap"]);
+    assert_eq!(names(&g, &c), ["terrain", "shadow-apply", "exposure-histogram", "exposure-adapt", "tonemap"]);
     assert!(c.culled.is_empty(), "{:?}", c.culled);
     // The scene target lives from the terrain pass to the tone map; the histogram from its pass to the adaptation.
     let life = |r: &str| c.lifetimes.iter().find(|l| l.resource == r).unwrap_or_else(|| panic!("no lifetime for {r}")).clone();
-    assert_eq!((life("hdr").first, life("hdr").last), (0, 3));
-    assert_eq!((life("histogram").first, life("histogram").last), (1, 2));
+    assert_eq!((life("hdr").first, life("hdr").last), (0, 4));
+    assert_eq!((life("histogram").first, life("histogram").last), (2, 3));
+    // The terrain writes `sun-direct` and the shadow-apply pass reads it (REND-051).
+    assert_eq!((life("sun-direct").first, life("sun-direct").last), (0, 1));
     assert_eq!((life("depth").first, life("depth").last), (0, 0));
     assert!(c.lifetimes.iter().all(|l| l.resource != "presentable"), "the presentable target is external, not a frame target");
 }
@@ -32,7 +34,7 @@ fn the_adaptive_lit_frame_runs_terrain_histogram_adaptation_and_tone_map_in_that
 #[test]
 fn fixed_exposure_culls_the_histogram_in_the_compile_and_keeps_the_rest() {
     let (g, c) = compile(P1440, false);
-    assert_eq!(names(&g, &c), ["terrain", "exposure-adapt", "tonemap"]);
+    assert_eq!(names(&g, &c), ["terrain", "shadow-apply", "exposure-adapt", "tonemap"]);
     assert_eq!(c.culled, ["exposure-histogram"]);
     assert!(c.lifetimes.iter().all(|l| l.resource != "histogram"));
 }
@@ -70,11 +72,12 @@ fn the_frame_targets_at_1440p_are_counted_from_the_compiled_graph() {
     assert_eq!(bytes("depth"), 14_745_600);
     assert_eq!(bytes("histogram"), 256);
     assert_eq!(c.persistent, [("exposure-state", 16)]);
-    assert_eq!(c.transient_bytes(), 29_491_200 + 14_745_600 + 256);
-    assert_eq!(c.frame_target_bytes(), 44_237_072, "the adaptive lit frame at 1440p");
+    assert_eq!(bytes("sun-direct"), 29_491_200);
+    assert_eq!(c.transient_bytes(), 29_491_200 + 14_745_600 + 29_491_200 + 256);
+    assert_eq!(c.frame_target_bytes(), 73_728_272, "the adaptive lit frame at 1440p");
     // Fixed exposure allocates no histogram pass; the renderer still owns the buffer (see the tier C allocation test).
     let (_, f) = compile(P1440, false);
-    assert_eq!(f.frame_target_bytes(), 44_237_072 - 256);
+    assert_eq!(f.frame_target_bytes(), 73_728_272 - 256);
 }
 
 // spec: REND-020
@@ -133,6 +136,7 @@ fn the_atmosphere_frame_runs_the_tables_the_products_the_terrain_and_the_composi
             "sky-view",
             "aerial-perspective",
             "terrain",
+            "shadow-apply",
             "sky-composite",
             "exposure-histogram",
             "exposure-adapt",
@@ -142,15 +146,15 @@ fn the_atmosphere_frame_runs_the_tables_the_products_the_terrain_and_the_composi
     assert!(c.culled.is_empty(), "{:?}", c.culled);
     let life = |r: &str| c.lifetimes.iter().find(|l| l.resource == r).unwrap_or_else(|| panic!("no lifetime for {r}")).clone();
     // The terrain draws into the scene target and the one depth buffer; the composite reads both and writes the HDR target.
-    assert_eq!((life("hdr-scene").first, life("hdr-scene").last), (3, 4));
-    assert_eq!((life("depth").first, life("depth").last), (3, 4), "the composite reads the terrain's depth");
-    assert_eq!((life("hdr").first, life("hdr").last), (4, 7));
-    assert_eq!((life("sky-view-lut").first, life("sky-view-lut").last), (1, 4));
-    assert_eq!((life("aerial-perspective-volume").first, life("aerial-perspective-volume").last), (2, 4));
+    assert_eq!((life("hdr-scene").first, life("hdr-scene").last), (3, 5));
+    assert_eq!((life("depth").first, life("depth").last), (3, 5), "the composite reads the terrain's depth");
+    assert_eq!((life("hdr").first, life("hdr").last), (5, 8));
+    assert_eq!((life("sky-view-lut").first, life("sky-view-lut").last), (1, 5));
+    assert_eq!((life("aerial-perspective-volume").first, life("aerial-perspective-volume").last), (2, 5));
     // Fixed exposure still culls only the histogram.
     let (g, f) = compile_atmosphere(P1440, false);
     assert_eq!(f.culled, ["exposure-histogram"]);
-    assert_eq!(names(&g, &f).len(), 7);
+    assert_eq!(names(&g, &f).len(), 8);
 }
 
 // spec: ATMO-011

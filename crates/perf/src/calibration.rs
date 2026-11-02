@@ -1,6 +1,6 @@
 //! The CPU calibration decides whether a perf scene counts (TEST-039, ADR 0065): a scene whose fixed-kernel times (STRM-022) lie outside the
-//! limits below, before or after the case, gets no verdict, with the reading, the limit and the moment named. Logs without a calibration
-//! are not judged. A pure function over the logged counts, used by the harness (the session verdict) and by `accept` (judging a log
+//! limits below, before or after the case, gets no frame verdict (its GPU verdicts stand, ADR 0093), with the reading, the limit and the
+//! moment named; a run that declared a load of its own is recorded only. Logs without a calibration are not judged. A pure function over the logged counts, used by the harness (the session verdict) and by `accept` (judging a log
 //! again), so that they cannot disagree.
 //!
 //! The limits are the maximum of the quiet-machine readings (Rasierklinge, 18 threads on 20 logical CPUs, the native-UI coder
@@ -31,6 +31,17 @@ pub const AFTER_PARALLEL_MEDIAN_MAX_US: u64 = 112_000;
 
 /// The start of every reason this module words.
 pub const REASON_PREFIX: &str = "no verdict: CPU calibration";
+
+/// The count a run logs as 1 when its scene started a load of its own before its calibration (the reserve test's loads, BUDG-012):
+/// its readings are recorded, not a session cause (ADR 0093 point 4).
+pub const DECLARED_LOAD_COUNT: &str = "load_calib_declared_load";
+/// What a declared-load run's reason carries at its end in `cpu_calibration_reasons`.
+pub const DECLARED_LOAD_SUFFIX: &str = " (declared load: recorded, not voiding)";
+
+/// Whether the run whose counts `count` reads declared a load of its own ([`DECLARED_LOAD_COUNT`]).
+pub fn declared_load(count: &dyn Fn(&str) -> Option<u64>) -> bool {
+    count(DECLARED_LOAD_COUNT) == Some(1)
+}
 
 /// What the calibration of one scene says.
 #[derive(Clone, Debug, PartialEq, Eq)]

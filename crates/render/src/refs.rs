@@ -51,12 +51,18 @@ fn vs(i: VsIn) -> VsOut {
     return o;
 }
 
+struct FsOut {
+    @location(0) scene: vec4<f32>,
+    // Nothing of the terrain behind a reference takes the sun term from `sun-direct` (REND-051): the reference writes zero there.
+    @location(1) direct: vec4<f32>,
+}
+
 @fragment
-fn fs(in: VsOut) -> @location(0) vec4<f32> {
+fn fs(in: VsOut) -> FsOut {
     let ndl = max(dot(normalize(in.n), u.sun.xyz), 0.0);
     let inv_pi = 0.31830988618;
     let rgb = in.colour * (ndl + u.params.y) * inv_pi * u.params.x;
-    return vec4<f32>(clamp(rgb, vec3<f32>(0.0), vec3<f32>(60000.0)), 1.0);
+    return FsOut(vec4<f32>(clamp(rgb, vec3<f32>(0.0), vec3<f32>(60000.0)), 1.0), vec4<f32>(0.0));
 }
 "#;
 
@@ -168,11 +174,10 @@ impl RefPass {
                 module: &module,
                 entry_point: Some("fs"),
                 compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: crate::lit::HDR_FORMAT,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
+                targets: &[
+                    Some(wgpu::ColorTargetState { format: crate::lit::HDR_FORMAT, blend: None, write_mask: wgpu::ColorWrites::ALL }),
+                    Some(wgpu::ColorTargetState { format: crate::lit::HDR_FORMAT, blend: None, write_mask: wgpu::ColorWrites::ALL }),
+                ],
             }),
             // No culling: the depth test picks the nearest face whatever the handedness of the projection.
             primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
