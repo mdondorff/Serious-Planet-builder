@@ -21,7 +21,7 @@ fn the_preview_of_seed_1_reports_the_class_shares_beside_the_bands() {
         ("land above 2 km", "band 5-10 %"),
         ("land above 4 km", "band 1-3 %"),
         ("highest land", "band 7-9 km"),
-        ("largest step", "limit 2.0"),
+        ("p99 of the lattice steps", "limit 2.0"),
         ("S1 ", "Earth 5"),
         ("S2 ", "Earth about 57 %"),
         ("S3 ", "Earth 1.1-1.3"),
@@ -58,9 +58,11 @@ fn seeds_1_to_5_pass_the_relief_bands_of_spike_93_in_the_gate_form() {
     .collect();
     let mut belt = Vec::new();
     let mut largest_k = Vec::new();
+    let mut p99_k = Vec::new();
     for seed in 1..=5u64 {
         let f = compute(seed, 1440, 720, 256, 8);
         let (s, r) = (shares(&f), relief(&f));
+        p99_k.push(s.k_step_p99);
         let values = [
             100.0 * r.under_500m,
             r.median_m,
@@ -83,6 +85,34 @@ fn seeds_1_to_5_pass_the_relief_bands_of_spike_93_in_the_gate_form() {
     println!(
         "belt land % per seed (reported, gated with the convergent-only arc round): {belt:.1?}; largest k step per seed: {largest_k:.2?}"
     );
+    // The reference world (seed 14), reported beside seeds 1 to 5 and not gated.
+    let f14 = compute(14, 1440, 720, 256, 8);
+    let (s14, r14) = (shares(&f14), relief(&f14));
+    println!(
+        "seed 14: under 500 m {:.1} %, median {:.0} m, coastal {:.0} m, above 1 / 2 / 3 / 4 km {:.1} / {:.1} / {:.1} / {:.1} %, highest {:.2} km, plains / hills / mountains {:.1} / {:.1} / {:.1} %, belt land {:.1} %, k step p99 {:.2}, largest {:.2}",
+        100.0 * r14.under_500m,
+        r14.median_m,
+        r14.coastal_median_m,
+        100.0 * r14.above_1km,
+        100.0 * s14.above_2km,
+        100.0 * r14.above_3km,
+        100.0 * s14.above_4km,
+        s14.highest_m / 1000.0,
+        100.0 * s14.plains,
+        100.0 * s14.hills,
+        100.0 * s14.mountains,
+        100.0 * r14.belt_land,
+        s14.k_step_p99,
+        s14.largest_k_step
+    );
+    assert!(
+        rows.iter().all(|r| r.3.iter().all(|v| v.is_finite())),
+        "every measure is finite on every seed (an empty coastal list gives NaN)"
+    );
+    // GEN-097 (owner, 2026-11-02): the 99th percentile of the lattice steps of k is at most 2.0 on every seed; the largest step is reported, with a ceiling
+    // for regressions.
+    assert!(p99_k.iter().all(|&p| p <= 2.0), "the p99 of the lattice steps of k exceeds 2.0 (GEN-097): {p99_k:.2?}");
+    assert!(largest_k.iter().all(|&k| k <= 6.5), "the largest lattice step of k regressed: {largest_k:.2?}");
     let mut failures = Vec::new();
     for (name, lo, hi, v) in &rows {
         let w = hi - lo;

@@ -34,6 +34,8 @@ pub struct Fields {
     pub largest_k_step: f64,
     /// The share of neighbouring lattice point pairs whose `k` differs by more than GEN-097's limit of 2.0.
     pub k_edges_over: f64,
+    /// The 99th percentile of the lattice steps of the untapered `k` (GEN-097: at most 2.0).
+    pub k_step_p99: f64,
 }
 
 /// The pixel centre's latitude in radians.
@@ -86,6 +88,7 @@ pub fn compute(seed: u64, width: usize, height: usize, lattice_cells: usize, thr
         pixels: rows.into_iter().flatten().collect(),
         largest_k_step: lattice.largest_k_step(),
         k_edges_over: lattice.k_steps_over(2.0),
+        k_step_p99: lattice.k_step_quantile(0.99),
     }
 }
 
@@ -465,6 +468,7 @@ pub struct Shares {
     pub above_4km: f64,
     pub highest_m: f64,
     pub largest_k_step: f64,
+    pub k_step_p99: f64,
 }
 
 pub fn shares(f: &Fields) -> Shares {
@@ -515,6 +519,7 @@ pub fn shares(f: &Fields) -> Shares {
         above_4km: above4 / norm,
         highest_m: if highest == f64::MIN { 0.0 } else { highest },
         largest_k_step: f.largest_k_step,
+        k_step_p99: f.k_step_p99,
     }
 }
 
@@ -697,9 +702,11 @@ pub fn report(f: &Fields) -> String {
     r += &format!("  land above 4 km {:.1} % (band 1-3 %, {})\n", 100.0 * s.above_4km, band(100.0 * s.above_4km, 1.0, 3.0));
     r += &format!("  highest land {:.2} km (band 7-9 km, {})\n", s.highest_m / 1000.0, band(s.highest_m / 1000.0, 7.0, 9.0));
     r += &format!(
-        "  largest step of the untapered k between lattice points {:.2} (limit 2.0, {})\n",
-        s.largest_k_step,
-        if s.largest_k_step <= 2.0 { "within" } else { "OVER" }
+        "  p99 of the lattice steps of the untapered k {:.2} (limit 2.0, {}); largest step {:.2} (reported, not gated)
+",
+        s.k_step_p99,
+        if s.k_step_p99 <= 2.0 { "within" } else { "OVER" },
+        s.largest_k_step
     );
     r += &format!("  share of lattice steps of k over 2.0: {:.2} %\n", 100.0 * f.k_edges_over);
     r += "  per class:";

@@ -10,4 +10,4 @@ Seeds 1-5, medians, with seed 3 beside (preview grid, before the bake): see the 
 
 ## Open
 - Belt land: median 9.7 %, seed 4 at 5.4 % (convergent-only arcs, a later round).
-- The step limit of `k`: largest step 5.1-5.8, a geometric consequence of belts narrower than 200 km each side; the owner decides the form.
+- The largest step of `k` (5.1-5.8) stays: a geometric consequence of belts narrower than 200 km each side; GEN-097 gates the p99 (owner, 2026-11-02).

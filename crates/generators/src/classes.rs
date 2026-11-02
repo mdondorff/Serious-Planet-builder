@@ -605,6 +605,29 @@ impl ClassLattice {
         over as f64 / total as f64
     }
 
+    /// The quantile `q` (in `[0, 1]`) of the steps of the untapered `k` between neighbouring lattice points: GEN-097's limit applies to the 0.99 quantile (the largest step is reported).
+    pub fn k_step_quantile(&self, q: f64) -> f64 {
+        let n = self.cells;
+        let k = |face: usize, i: usize, j: usize| {
+            let p = self.faces[face][j * (n + 1) + i];
+            p.iter().zip(CLASS_K).map(|(&w, k)| f64::from(w) / 255.0 * k).sum::<f64>()
+        };
+        let mut steps = Vec::with_capacity(6 * (n + 1) * (n + 1) * 2);
+        for face in 0..6 {
+            for j in 0..=n {
+                for i in 0..=n {
+                    for (di, dj) in [(1, 0), (0, 1)] {
+                        if i + di <= n && j + dj <= n {
+                            steps.push(libm::fabs(k(face, i + di, j + dj) - k(face, i, j)));
+                        }
+                    }
+                }
+            }
+        }
+        steps.sort_by(f64::total_cmp);
+        steps.get(((q.clamp(0.0, 1.0) * steps.len() as f64).ceil() as usize).saturating_sub(1)).copied().unwrap_or(0.0)
+    }
+
     /// The unit direction of lattice point `(i, j)` of `face`.
     pub fn direction(&self, face: Face, i: usize, j: usize) -> Vec3 {
         let n = self.cells as f64;

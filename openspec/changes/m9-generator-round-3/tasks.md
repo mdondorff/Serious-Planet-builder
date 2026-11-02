@@ -5,4 +5,5 @@
 - [x] 2.2 TEST-082's gate test over seeds 1-5 (tolerance per the planner's answer)
 ## 3. Checks
 - [x] 3.1 Re-pin the class fingerprint and the threshold tests
-- [ ] 3.2 numerics-reviewer, verifier, spec-guardian
+- [x] 2.3 GEN-097 gates the p99 of the lattice steps (the preview report, TEST-082's gate test, the delta)
+- [x] 3.2 numerics-reviewer, verifier, spec-guardian
