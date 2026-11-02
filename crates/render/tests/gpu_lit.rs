@@ -373,7 +373,12 @@ fn the_plain_lit_frame_keeps_its_sun_term_in_sun_direct_and_shadow_apply_adds_it
     for (i, (h, d)) in hdr.iter().zip(&direct).enumerate() {
         // Exact, except that a blend unit may flush an f16 subnormal (below 2^-14) to zero.
         for c in 0..3 {
-            assert!(h[c] == d[c] || (h[c].abs() < 6.2e-5 && d[c].abs() < 6.2e-5), "pixel {i} channel {c}: scene {} vs sun-direct {}", h[c], d[c]);
+            assert!(
+                h[c] == d[c] || (h[c].abs() < 6.2e-5 && d[c].abs() < 6.2e-5),
+                "pixel {i} channel {c}: scene {} vs sun-direct {}",
+                h[c],
+                d[c]
+            );
         }
         lit_pixels += usize::from(d[..3].iter().any(|v| *v > 0.0));
     }

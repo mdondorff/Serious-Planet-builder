@@ -188,7 +188,10 @@ fn the_frame_targets_with_an_atmosphere_equal_the_compiled_graphs_count_and_noth
     assert_eq!(path.atmosphere().unwrap().table_uploads(), 1, "the tables are uploaded once for the body, not per frame");
     assert_eq!(path.graph_compiles(), 3, "atmosphere, none, atmosphere: each change of shape compiles");
     let names = path.executed_passes();
-    assert_eq!(names, ["atmosphere-luts", "sky-view", "aerial-perspective", "terrain", "shadow-apply", "sky-composite", "exposure-adapt", "tonemap"]);
+    assert_eq!(
+        names,
+        ["atmosphere-luts", "sky-view", "aerial-perspective", "terrain", "shadow-apply", "sky-composite", "exposure-adapt", "tonemap"]
+    );
 }
 
 // spec: ATMO-011
