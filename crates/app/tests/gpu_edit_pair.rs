@@ -161,3 +161,73 @@ fn the_plan_over_a_real_store_is_reported_per_parameter_set() {
         println!("at {altitude} m:\n{}", planet::editperf::plan_probe(&o, altitude, site).unwrap_or_else(|e| e));
     }
 }
+
+/// The pair in metres over the scene smoke world (CPU only): a hill of 50 m radius (10 m high) at 200 m. The change the edit makes at the centre is the hill height, the node
+/// that is drawn over the centre has a cell of a few metres, and the error of its lattice is a share of the change, in metres, that falls away from the centre.
+// spec: TEST-076
+#[test]
+fn the_pair_in_metres_names_the_change_of_the_edit_and_what_the_drawn_node_can_show_of_it() {
+    let args: Vec<String> = [
+        "test-render",
+        "--perf-smoke",
+        "--scene",
+        "edit-latency",
+        "--adapter",
+        "software",
+        "--gen-priority",
+        "normal",
+        "--global-res",
+        "128",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    let o = planet::parse_args(&args).expect("options");
+    let (level, cell_m, rows) = planet::editperf::pair_metres(&o, 200.0, 50.0, None).expect("the pair in metres");
+    println!("node level {level}, cell {cell_m:.2} m");
+    for r in &rows {
+        println!(
+            "  {:5.1} m east: the edit changes the ground by {:7.3} m, the node shows {:7.3} m, error {:+7.3} m",
+            r.at_m, r.true_delta_m, r.node_delta_m, r.error_m
+        );
+    }
+    assert_eq!(rows.len(), 5);
+    assert!(rows.iter().all(|r| r.true_delta_m.is_finite() && r.node_delta_m.is_finite()));
+    assert!((rows[0].true_delta_m - 10.0).abs() < 0.5, "the hill of 50 m radius is 10 m high at its centre: {:?}", rows[0]);
+    assert!(rows[4].true_delta_m.abs() < 1.0, "at the radius the hill has fallen away: {:?}", rows[4]);
+    // The node's lattice cannot show more error than the change itself.
+    assert!(rows.iter().all(|r| r.error_m.abs() <= r.true_delta_m.abs().max(1.0)), "{rows:?}");
+}
+
+/// The same over a real store (run by hand like `the_plan_over_a_real_store`): `PLANET_PAIR_STORE=... [PLANET_PAIR_SITE=lat,lon] cargo nextest run -p planet
+/// -E 'test(/gpu_edit_pair::the_pair_in_metres_over_a_real_store/)' --run-ignored only --no-capture`. Prints the rows of the cases the pair has (the small hill at 200 m and at 2 km).
+// spec: TEST-076
+#[test]
+#[ignore = "needs a real store (PLANET_PAIR_STORE)"]
+fn the_pair_in_metres_over_a_real_store() {
+    let store = std::env::var("PLANET_PAIR_STORE").expect("PLANET_PAIR_STORE names the store");
+    let args: Vec<String> =
+        ["test-render", "--perf-smoke", "--scene", "edit-latency", "--adapter", "software", "--store", store.as_str(), "--tau", "2.4"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+    let o = planet::parse_args(&args).expect("options");
+    let site = std::env::var("PLANET_PAIR_SITE").ok().map(|s| {
+        let (a, b) = s.split_once(',').expect("PLANET_PAIR_SITE is lat,lon");
+        (a.trim().parse::<f64>().expect("lat"), b.trim().parse::<f64>().expect("lon"))
+    });
+    for (altitude, radius) in [(200.0, 50.0), (2000.0, 50.0)] {
+        match planet::editperf::pair_metres(&o, altitude, radius, site) {
+            Ok((level, cell_m, rows)) => {
+                println!("{altitude} m, stamp {radius} m: node level {level}, cell {cell_m:.2} m");
+                for r in &rows {
+                    println!(
+                        "  {:6.1} m east: change {:8.3} m, node {:8.3} m, error {:+8.3} m",
+                        r.at_m, r.true_delta_m, r.node_delta_m, r.error_m
+                    );
+                }
+            }
+            Err(e) => println!("{altitude} m, stamp {radius} m: NOT RUN: {e}"),
+        }
+    }
+}

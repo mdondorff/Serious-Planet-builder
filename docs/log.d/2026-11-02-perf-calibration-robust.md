@@ -1,0 +1,1 @@
+- 2026-11-02 perf-calibration-robust (SPIKE-95 PR 1, ADR 0093): the CPU calibration reads the smallest of 5 timings and the best of 3 parallel medians, after the cool-down; it voids frame verdicts only; the reserve test's own load is declared and recorded, not voiding (TEST-039 modified, TEST-089 added)
