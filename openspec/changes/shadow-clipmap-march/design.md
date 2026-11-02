@@ -117,6 +117,32 @@ Until ADR 0087 is accepted, every perf check runs in a planner-authorized window
 - J's shadow view draws the resolved visibility as grey over the surface when a shadow frame ran (`ShadowPath::draw_visibility`); nothing else reads it before PR 5b.
 - A smoke run uses 256-texel levels and the test a 320x180 window (WARP gathers 1024^2 levels in seconds a frame).
 
+## The march cost (PR `shadow-march-cost`, inbox #26)
+Probe `march_cost_probe_over_eleven_levels` (ignored, by hand; re-measured 2026-11-02 after the review fixes (the cube continues below the ceiling, the exit waits for the penumbra); RTX 3080 Ti Laptop, machine shared with other lanes; 11 levels of 1024^2 texels with rolling relief up to 1,200 m, 1440p, a camera 20 km up; GPU timestamps, median of 11 frames; steps are per marched ray):
+| Pose | Early exit | GPU total | March | Steps median / p99 / max |
+|---|---|---|---|---|
+| 45 degrees | none | 13.95 ms | 13.20 ms | 87 / 208 / 308 |
+| 45 degrees | above 1,300 m | 1.22 ms | 0.63 ms | 6 / 25 / 161 |
+| 2 degrees (spread) | none | 5.25 ms | 4.61 ms | 9 / 214 / 820 |
+| 2 degrees (spread) | above 1,300 m | 2.72 ms | 2.07 ms | 7 / 124 / 744 |
+- Cause of the reversed ordering: a high sun's rays never met the end of the walk; they ran to the end of the outermost level (87 steps median). The walk now ends where the ray passes the world's highest terrain (`MarchParams::ceiling_m`, `LodParams::max_height_m`; the terrain in the walk's frame is at most that high, so a ray above it hits nothing), and the cube continuation is skipped then.
+- Review of the early exit (numerics-reviewer): the ceiling is decided per frame by the app (`planet_frame::shadowview::ceiling_m`: the field's current maximum, which follows the stamps, plus the bounds of the preview stamps, since the gather adds the preview before any republish) and travels in `ShadowFrame`; the cube continuation is cut at the ceiling, not skipped (a ray that leaves the clipmap below the ceiling still meets the cube); inside the penumbra search the exit waits for the clearance over the ceiling to reach the sun disc (`rise / (slope - w)`), so the outer penumbra of the highest peaks is kept.
+- The level lookup searches outward from the level the walk was on (one or two window tests instead of a scan of every level, and for the window-edge split too). A higher start mip (4, 6) changed nothing (2.82 and 2.69 ms at 2 degrees, 1.31 and 1.36 ms at 45): the start mip is not where the steps go.
+- The 2 degree pose is still 1.8x the budget for layer 1 in total (0.7 ms of that is the four full-resolution passes, 2.07 ms the march). Its steps are a long tail (median 7, p99 124, max 744): grazing rays that stay within the penumbra search's clearance demand along the relief. What is left changes the look (quarter resolution) or the design (ADR 0085), so it goes to the owner as asked by inbox #26.
+
+### Options for the 2 degree pose (for the owner; inbox #27)
+Same probe and caveats; baseline at 2 degrees with the spread and the early exit: 2.60 to 2.85 ms across runs (march 1.94 to 2.16 ms, the four other passes about 0.7 ms), budget 1.5 ms. The probe reads `PLANET_PROBE_PENUMBRA`, `PLANET_PROBE_SPREAD=0` and `PLANET_PROBE_SIZE`; the step cap was edited by hand.
+| Option | Layer 1 at 2 degrees | Saved | Look change |
+|---|---|---|---|
+| Penumbra search 2 km -> 1 km, or 0.5 km | 2.59 / 2.61 ms | 0 (measured) | none worth having: the tail is not the search |
+| Drop the checkerboard spread | 2.87 ms | -0.27 (measured: worse) | none, but history no longer carries half the rays; the spread stays |
+| Cap the walk at 128 steps | 2.53 ms | 0.07 (measured) | shadows that need more steps leak light |
+| Cap the walk at 64 steps | 1.94 ms | 0.66 (measured) | as above, more often: long relief shadows at a low sun lose their far part |
+| March at quarter resolution below 5 degrees (a quarter of the rays, depth-aware upsample from 4x4 pixels) | march 0.99 ms; layer about 1.7 ms | about 0.95 (measured on a 1280x720 frame, whose other passes are cheaper: the 1440p total is the march plus the 0.7 ms of the full-resolution passes) | softer shadow edges, thin shadows (poles, fences) shimmer or vanish; the upsample keeps depth edges |
+| Quarter resolution and a 64-step cap | about 1.3 ms (estimate) | about 1.3 | both looks above |
+| Accept 2.6 to 2.85 ms at a sun under 5 degrees | 2.6 to 2.85 ms | 0 | none; a frame at 60 fps has 16.6 ms and a low sun is a part of the day |
+Reading: the march cost is not proportional to the rays (4x fewer rays cost half, the checkerboard saves a sixth): at a low sun the time is the long grazing rays of each workgroup (median 7 steps, p99 124, max 744) and cache misses over the 61 MB of levels. So a fewer-rays option helps less than it looks, and a cap on steps helps only when it is low. A smaller clipmap (512^2 levels) would shrink the footprint; not measured.
+
 ## What needs the owner
 - Look review before the horizon maps are deleted (PR 5): stills at river-r1, hills-b and the Plateau 6 drag (300 m, 30 m, 1.8 m; sunset, midday, 2-degree sun), old against new, plus a 5-10 s drag video of a plateau stamp, through `cargo xtask package` (TEST-074).
 - `/bless` of the first lit goldens of the new shadow, per adapter (ADR 0017, ADR 0061).

@@ -1102,7 +1102,16 @@ impl App<'_> {
                     stamps: draw.preview.clone(),
                 });
                 let sun = planet_core::Vec3::new(f64::from(lit.sun_dir[0]), f64::from(lit.sun_dir[1]), f64::from(lit.sun_dir[2]));
-                if let Some(f) = shadow.frame(landed, &plan.camera, sun, cfg.radius_m, &draw.preview, draw.preview_delta_len, &plan.nodes) {
+                if let Some(f) = shadow.frame(
+                    landed,
+                    &plan.camera,
+                    sun,
+                    cfg.radius_m,
+                    self.lod.max_height_m,
+                    &draw.preview,
+                    draw.preview_delta_len,
+                    &plan.nodes,
+                ) {
                     st.rig.renderer.set_shadow_frame(f);
                 }
             }
@@ -1294,6 +1303,15 @@ impl App<'_> {
         );
         if let Some(h) = self.world.horizon_stats() {
             extra += &format!("horizon jobs: {h:?}\n");
+        }
+        {
+            // A refresh that waits shows here (edit-stale-diagnostics): held by the settle window, or queued per class.
+            let streamer = st.rig.managed.manager().streamer();
+            extra += &format!(
+                "refreshes held by the settle window: {}; requests queued draw/residency/prefetch: {:?}\n",
+                streamer.held_refreshes(),
+                streamer.queued_by_class()
+            );
         }
         extra += &format!("stalls so far: {}\n", st.stall.stalls);
         let text = stall.text(&extra);

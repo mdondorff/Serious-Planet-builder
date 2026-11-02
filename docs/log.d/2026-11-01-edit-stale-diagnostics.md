@@ -1,0 +1,1 @@
+- 2026-11-01 edit-stale-diagnostics: the edit's refresh set holds the coarse tiles re-keyed through their region summary (an exact neighbors8 walk, no cover built), and the edit-latency error and the stall report name what a stale tile waits for (STRM-070, STRM-026, TEST-041)
