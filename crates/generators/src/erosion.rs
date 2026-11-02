@@ -165,7 +165,10 @@ impl ErosionField<'_> {
     /// enters the inputs hash and the implementation id). The channels are of the bake as it is, so the body's relief scale must be 1.
     pub fn with_relief(mut self, channels: Arc<crate::relief_lattice::ReliefLattice>) -> Self {
         assert!(self.relief == 1.0, "the relief channels are of the bake at relief scale 1, not {}", self.relief);
-        self.inputs = hash_u64s(0x7265_6c66, &[self.inputs, channels.id(), u64::from(crate::relief_channels::RELIEF_CHANNELS_VERSION)]);
+        self.inputs = hash_u64s(
+            0x7265_6c66,
+            &[self.inputs, channels.id(), channels.cells() as u64, u64::from(crate::relief_channels::RELIEF_CHANNELS_VERSION)],
+        );
         self.relief_channels = Some(channels);
         self
     }
@@ -196,11 +199,12 @@ impl ErosionField<'_> {
         let today = MAX_ELEVATION_M.max(-MIN_ELEVATION_M) * self.relief + DETAIL_DOWN_M;
         match &self.relief_channels {
             None => today,
-            // `m + k (e - m) + k detail` with `e` and the detail inside `today` and `k`, `m` inside the channels' planet range.
+            // `m + k (e - m) + k detail = (1 - k) m + k (e + detail)`: with `|e + detail|` inside `today` and `k`, `m` inside the channels' planet range, `|1 - k| m + k today`.
             Some(r) => {
                 let g = r.global_range();
-                let (k, m) = (g[1].max(1.0), g[2].abs().max(g[3].abs()));
-                m + k * (today + m)
+                let (k, m) = (g[1].max(0.0), g[2].abs().max(g[3].abs()));
+                let one_minus_k = (1.0 - g[0]).abs().max((g[1] - 1.0).abs());
+                one_minus_k * m + k * today
             }
         }
     }

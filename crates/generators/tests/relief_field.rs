@@ -77,7 +77,7 @@ fn with_k_1_the_relief_field_is_todays_field_and_with_k_and_m_it_is_m_plus_k_tim
         let d = random_dir(&mut rng);
         let h = off.height(d);
         let a = ones.height(d);
-        assert!((a - h).abs() < 1e-6 * (1.0 + h.abs()), "k 1 changes the height: {a} against {h}");
+        assert!((a - h).abs() < 1e-9 * (1.0 + h.abs() + 300.0), "k 1 changes the height: {a} against {h}");
         let b = twice.height(d);
         let want = 100.0 + 2.0 * (h - 100.0);
         assert!((b - want).abs() < 1e-6 * (1.0 + want.abs()), "m + k (h - m) = {want}, got {b}");
@@ -171,4 +171,124 @@ fn the_ranges_over_a_cap_hold_every_value_read_in_it_include_the_face_edges_and_
     let g = lat.global_range();
     let all = lat.range_over_cap(Vec3::new(0.0, 0.0, 1.0), std::f64::consts::PI);
     assert_eq!(all, g, "a cap over the whole sphere takes the global range");
+}
+
+// spec: GEN-102
+#[test]
+fn the_range_over_a_cap_below_a_block_comes_from_the_lattice_points_around_it_not_from_the_whole_block() {
+    use planet_core::cube::direction_to_face;
+    let lat = ReliefLattice::new(varying(), 1);
+    let mut rng = SplitMix64(21);
+    let (mut tight, mut block_width, mut checked) = (0.0f64, 0.0f64, 0);
+    for _ in 0..400 {
+        let c = random_dir(&mut rng);
+        let (face, s, t) = direction_to_face(&TangentWarp, c);
+        let (x, y) = ((s + 1.0) * 0.5 * CELLS as f64, (t + 1.0) * 0.5 * CELLS as f64);
+        let (i, j) = (x as usize, y as usize);
+        // Away from the face edges, so that the neighbourhood lies on this face.
+        if i < 4 || j < 4 || i + 5 > CELLS || j + 5 > CELLS {
+            continue;
+        }
+        let r = lat.range_over_cap(c, 1e-7);
+        let mut hood = [f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY];
+        for jj in j - 3..=j + 4 {
+            for ii in i - 3..=i + 4 {
+                let (k, m) = lat.channels().at(face, ii, jj);
+                hood = [hood[0].min(f64::from(k)), hood[1].max(f64::from(k)), hood[2].min(f64::from(m)), hood[3].max(f64::from(m))];
+            }
+        }
+        assert!(
+            hood[0] <= r[0] && r[1] <= hood[1] && hood[2] <= r[2] && r[3] <= hood[3],
+            "the range {r:?} of a tiny cap leaves the lattice points around it {hood:?}"
+        );
+        let block = lat.channels().block_range(face, i / 32, j / 32).map(f64::from);
+        tight += (r[1] - r[0]) + (r[3] - r[2]);
+        block_width += (block[1] - block[0]) + (block[3] - block[2]);
+        checked += 1;
+    }
+    assert!(checked > 100, "{checked} caps away from the face edges");
+    assert!(tight < 0.5 * block_width, "the ranges of tiny caps ({tight}) are not much tighter than their blocks' ({block_width})");
+}
+
+// spec: GEN-102
+#[test]
+fn the_global_height_bound_with_the_relief_on_holds_every_height_and_is_not_wildly_loose() {
+    let g = grid();
+    let src = GridSource(&g);
+    let steep = channels(&|d| 1.0 + 3.0 * (0.5 + 0.5 * libm::sin(5.0 * d.x + 2.0) * libm::cos(3.0 * d.z)), &|d| {
+        600.0 * libm::sin(5.0 * d.y) + 100.0
+    });
+    let f = field(&src).with_relief(Arc::new(ReliefLattice::new(steep, 1)));
+    let mut rng = SplitMix64(33);
+    let (bound, mut seen) = (f.max_abs_height_m(), 0.0f64);
+    for _ in 0..4_000 {
+        let h = f.height(random_dir(&mut rng)).abs();
+        assert!(h <= bound, "height {h} over max_abs_height_m {bound}");
+        seen = seen.max(h);
+    }
+    assert!(bound < 5.0 * (seen + 1.0e4), "the bound {bound} against the largest height seen {seen}");
+}
+
+// spec: GEN-099
+#[test]
+fn channels_of_another_resolution_or_id_key_the_field_differently_and_a_non_finite_channel_is_refused() {
+    let g = grid();
+    let src = GridSource(&g);
+    let coarse = channels(&|_| 2.0, &|_| 100.0);
+    let fine_like = {
+        let faces = (0..6)
+            .map(|f| {
+                let n = 2 * CELLS;
+                let plane = vec![2.0f32; (n + 1) * (n + 1)];
+                let _ = f;
+                (plane.clone(), vec![100.0f32; (n + 1) * (n + 1)])
+            })
+            .collect();
+        ReliefChannels::from_planes(2 * CELLS, faces).unwrap()
+    };
+    let (a, b) = (
+        field(&src).with_relief(Arc::new(ReliefLattice::new(coarse, 7))),
+        field(&src).with_relief(Arc::new(ReliefLattice::new(fine_like, 7))),
+    );
+    assert_ne!(a.inputs_hash(), b.inputs_hash(), "the same id at another resolution is another key");
+    // `from_planes` already refuses a non-finite value; a channel made by `compute` over a failed bake read is refused by the reader.
+    let bad = std::panic::catch_unwind(|| {
+        let faces: Vec<(Vec<f32>, Vec<f32>)> =
+            (0..6).map(|_| (vec![1.0f32; (CELLS + 1) * (CELLS + 1)], vec![0.0f32; (CELLS + 1) * (CELLS + 1)])).collect();
+        let ok = ReliefChannels::from_planes(CELLS, faces.clone()).expect("finite channels");
+        let _ = ReliefLattice::new(ok, 1);
+        let mut nan = faces;
+        nan[2].1[5] = f32::NAN;
+        assert!(ReliefChannels::from_planes(CELLS, nan).is_none(), "a NaN plane is refused by from_planes");
+    });
+    assert!(bad.is_ok());
+}
+
+// spec: GEN-102
+#[test]
+fn ranges_hold_for_caps_over_a_face_or_the_hemisphere_and_non_concentric_caps_nest() {
+    let lat = ReliefLattice::new(varying(), 1);
+    let mut rng = SplitMix64(44);
+    for theta in [0.8, 1.0, std::f64::consts::FRAC_PI_2, 2.0, 3.0] {
+        let c = random_dir(&mut rng);
+        let r = lat.range_over_cap(c, theta);
+        for _ in 0..400 {
+            let d = random_dir(&mut rng);
+            if c.angle_to(d) <= theta {
+                let (k, m) = lat.at(d);
+                assert!(r[0] <= k && k <= r[1] && r[2] <= m && m <= r[3], "({k}, {m}) outside {r:?} in the cap {c:?} {theta}");
+            }
+        }
+    }
+    for _ in 0..300 {
+        let outer_c = random_dir(&mut rng);
+        let outer_r = 0.05 + rng.next_f64() * 0.6;
+        let inner_r = rng.next_f64() * outer_r * 0.4;
+        let inner_c = offset(outer_c, rng.next_f64() * (outer_r - inner_r) * 0.99, rng.next_f64() * std::f64::consts::TAU);
+        let (o, i) = (lat.range_over_cap(outer_c, outer_r), lat.range_over_cap(inner_c, inner_r));
+        assert!(
+            o[0] <= i[0] && i[1] <= o[1] && o[2] <= i[2] && i[3] <= o[3],
+            "an inner cap at another centre {i:?} leaves its outer cap {o:?}"
+        );
+    }
 }

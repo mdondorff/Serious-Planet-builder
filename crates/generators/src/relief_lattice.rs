@@ -7,6 +7,9 @@ use crate::relief_channels::{ReliefChannels, BLOCK_CELLS};
 use planet_core::cube::{direction_to_face, face_to_direction, TangentWarp};
 use planet_core::{Face, Vec3};
 
+/// The smallest node, in cells, a range over a cap is taken from below the blocks (2 cells: 9 lattice points).
+const MIN_NODE_CELLS: usize = 2;
+
 /// The channels of a bake read at directions and over caps.
 pub struct ReliefLattice {
     channels: ReliefChannels,
@@ -22,6 +25,15 @@ fn merge(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
 impl ReliefLattice {
     /// The reader of `channels`; `id` names the channels' content for the keys of a field that reads it (the caller derives it from the stored channels' key or hash).
     pub fn new(channels: ReliefChannels, id: u64) -> ReliefLattice {
+        let n = channels.cells();
+        for f in 0..6u8 {
+            let planes = channels.face_planes(Face(f));
+            assert!(
+                planes.k.iter().chain(planes.m).all(|v| v.is_finite()),
+                "the relief channels of face {f} hold a value that is not finite (a failed read of the bake?): a block range would leave it out"
+            );
+        }
+        assert!(n >= BLOCK_CELLS, "the channels have at least {BLOCK_CELLS} cells per face edge");
         let b = channels.cells() / BLOCK_CELLS;
         let mut levels: Vec<Vec<Vec<[f32; 4]>>> = Vec::new();
         levels.push((0..6u8).map(|f| (0..b * b).map(|i| channels.block_range(Face(f), i % b, i / b)).collect()).collect());
@@ -123,12 +135,49 @@ impl ReliefLattice {
             return;
         }
         let nb = b >> level;
-        if apart + corner_radius <= radius || level == 0 {
+        if apart + corner_radius <= radius {
             *acc = merge(*acc, self.levels[level][face.0 as usize][y * nb + x]);
+            return;
+        }
+        if level == 0 {
+            // A block the cap only touches: below it the ranges come from the lattice points of the cells the cap touches, so that a small cap's bounds do not carry the whole block's range.
+            self.descend_cells(face, x * BLOCK_CELLS, y * BLOCK_CELLS, BLOCK_CELLS, centre, radius, acc);
             return;
         }
         for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
             self.descend(face, level - 1, 2 * x + dx, 2 * y + dy, centre, radius, acc);
+        }
+    }
+
+    /// The node of `size` x `size` cells at cell `(ci, cj)` of `face` against the cap, down to [`MIN_NODE_CELLS`]: its range is the min and max of its lattice points.
+    #[allow(clippy::too_many_arguments)]
+    fn descend_cells(&self, face: Face, ci: usize, cj: usize, size: usize, centre: Vec3, radius: f64, acc: &mut [f32; 4]) {
+        let n = self.channels.cells() as f64;
+        let w = 2.0 * size as f64 / n;
+        let (s0, t0) = (-1.0 + 2.0 * ci as f64 / n, -1.0 + 2.0 * cj as f64 / n);
+        let c = Self::dir(face, s0 + 0.5 * w, t0 + 0.5 * w);
+        let corner_radius = [(s0, t0), (s0 + w, t0), (s0, t0 + w), (s0 + w, t0 + w)]
+            .iter()
+            .map(|&(s, t)| c.angle_to(Self::dir(face, s, t)))
+            .fold(0.0, f64::max)
+            * (1.0 + 1e-9)
+            + 1e-12;
+        let apart = c.angle_to(centre);
+        if apart > radius + corner_radius {
+            return;
+        }
+        if size <= MIN_NODE_CELLS {
+            for j in cj..=cj + size {
+                for i in ci..=ci + size {
+                    let (k, m) = self.channels.at(face, i, j);
+                    *acc = merge(*acc, [k, k, m, m]);
+                }
+            }
+            return;
+        }
+        let half = size / 2;
+        for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+            self.descend_cells(face, ci + dx * half, cj + dy * half, half, centre, radius, acc);
         }
     }
 }

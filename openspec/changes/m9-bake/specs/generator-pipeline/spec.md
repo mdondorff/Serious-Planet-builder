@@ -161,7 +161,7 @@ The field's height bounds over a cap SHALL take the layer's part from the min/ma
 - it is read at the finest pyramid level whose blocks are at least half the box, or from the layer's nodes for a box under 16 cells;
 - the runtime detail below the layer's cells adds its analytic per-octave bound;
 - a cap that crosses a face edge reads both faces' blocks.
-The relief channels' part of the bounds (m9-bake PR 2) is the range `[k_min, k_max, m_min, m_max]` of the blocks the cap touches (a pyramid of the block ranges; a node wholly inside the cap is taken whole), and the base is `m + k (e - m) + k detail` over the intervals of `e`, `m`, `k` and the detail (products of intervals, a sound bound that ignores the correlation of `e` and `m`).
+The relief channels' part of the bounds (m9-bake PR 2) is the range `[k_min, k_max, m_min, m_max]` of the blocks the cap touches (a pyramid of the block ranges; a node wholly inside the cap is taken whole; a block the cap only touches is split down to nodes of 2 cells, whose range is that of their lattice points). The planet-wide bound with the relief on is `max|1 - k| max|m| + k_max (max|e| + max|detail|)` (`(1 - k) m + k (e + detail)`). The channels' resolution is part of the field's key, and a channel with a value that is not finite is refused by the reader, and the base is `m + k (e - m) + k detail` over the intervals of `e`, `m`, `k` and the detail (products of intervals, a sound bound that ignores the correlation of `e` and `m`).
 Because each pyramid level holds the range of the levels below and of the nodes, the bounds of nested caps SHALL nest (LOD-012). The plan check at production parameters is TEST-083.
 
 Verify: A
