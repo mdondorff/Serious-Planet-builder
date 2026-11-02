@@ -31,8 +31,14 @@ pub fn run(root: &Path, args: &[String]) -> Res {
         spec.rounds,
         out_dir.display()
     );
-    let mut runner =
-        TreeRunner { tree: root.to_path_buf(), base, spec: spec.clone(), out_dir: out_dir.clone(), extra: [Vec::new(), Vec::new()], last_run_s: None };
+    let mut runner = TreeRunner {
+        tree: root.to_path_buf(),
+        base,
+        spec: spec.clone(),
+        out_dir: out_dir.clone(),
+        extra: [Vec::new(), Vec::new()],
+        last_run_s: None,
+    };
     let cmp = ab::execute(&spec, &mut runner)?;
     let lines = ab::table(&spec, &cmp);
     for l in &lines {
