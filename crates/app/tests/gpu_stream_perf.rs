@@ -18,7 +18,20 @@ impl std::io::Write for Shared {
 /// The longest a run may take: under nextest's 300 s, so that a run that stalls fails with what it printed so far (CI showed a bare timeout).
 const RUN_LIMIT: std::time::Duration = std::time::Duration::from_secs(240);
 
+/// A run of the scene `args` names with the pool pinned to two workers unless the args size it: a run that must be reproducible pins the
+/// pool (STRM-020), and the scenes' wall-clock limits (this file's [`RUN_LIMIT`] among them) were set with two workers on a 4-thread CI
+/// runner, where the default terrain share leaves one since #1117.
 fn run(args: &[&str]) -> Result<String, String> {
+    let sized = args.iter().any(|a| *a == "--gen-workers" || *a == "--gen-reserve");
+    let mut pinned: Vec<&str> = args.to_vec();
+    if args.first() == Some(&"test-render") && !sized {
+        pinned.extend(["--gen-workers", "2"]);
+    }
+    run_as_given(&pinned)
+}
+
+/// [`run`] with the pool the args give, the machine's terrain share by default: for the test that judges the share itself (BUDG-003).
+fn run_as_given(args: &[&str]) -> Result<String, String> {
     let owned: Vec<String> = args.iter().map(|s| s.to_string()).collect();
     let out = Shared::default();
     let (tx, rx) = std::sync::mpsc::channel();
@@ -579,11 +592,11 @@ fn a_lit_view_a_lit_flight_and_a_stream_scene_log_their_cpu_calibration_when_ask
         assert_eq!(n.len(), 3, "{key}: one reading in the view's run and in each of the flight's two shore-filter runs: {json}");
         assert!(n.iter().all(|v| *v > 0), "{key}: {n:?}");
     }
+    // The software adapter is not the reference machine: the readings are logged and give no verdict (ADR 0092 point 5).
     assert!(
-        json.contains("\"cpu_calibration_valid\":true") || json.contains("\"cpu_calibration_valid\":false"),
-        "judged, not null: {json}"
+        json.contains("\"cpu_calibration_valid\":null,\"cpu_calibration_reasons\":[\"no verdict (not the reference machine)\"]"),
+        "logged, no verdict off the reference machine: {json}"
     );
-    assert!(!json.contains("\"cpu_calibration_valid\":null"), "{json}");
     let _ = std::fs::remove_file(&log);
     // Without the option a smoke run measures none and the log says it was not judged.
     let none = tmp("calib-none.json");
@@ -625,7 +638,7 @@ fn a_lit_view_a_lit_flight_and_a_stream_scene_log_their_cpu_calibration_when_ask
     for key in keys {
         assert_eq!(numbers_of(&json, key).len(), 1, "{key}: {json}");
     }
-    assert!(!json.contains("\"cpu_calibration_valid\":null"), "{json}");
+    assert!(json.contains("\"cpu_calibration_reasons\":[\"no verdict (not the reference machine)\"]"), "{json}");
     let _ = std::fs::remove_file(&stream);
 }
 
@@ -633,7 +646,8 @@ fn a_lit_view_a_lit_flight_and_a_stream_scene_log_their_cpu_calibration_when_ask
 #[test]
 fn a_smoke_run_with_the_reserve_loads_calibrates_them_and_prints_the_reserve_report() {
     let dir = tmp("reserve");
-    let out = run(&[
+    // At the machine's terrain share: the report judges the share itself (BUDG-003), so the pool is not pinned.
+    let out = run_as_given(&[
         "test-render",
         "--perf-smoke",
         "--scene",

@@ -56,6 +56,8 @@ mod pipeline;
 mod reads_contract;
 #[path = "region_mask.rs"]
 mod region_mask;
+#[path = "relief_channels.rs"]
+mod relief_channels;
 #[path = "relief_scale.rs"]
 mod relief_scale;
 #[path = "stages.rs"]
