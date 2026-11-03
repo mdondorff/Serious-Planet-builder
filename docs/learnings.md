@@ -162,3 +162,10 @@ What happened: `gpu_edit_perf` did not settle at 5 tile workers ("kind Stale, su
 Assumption it changes: STRM-026's "the footprint find of the edit" named resident tiles only; the earlier "did not settle under load" failures of `gpu_edit_perf` were blamed on load. The stale-find entry above (region summary rings, `neighbors8`, edit-stale-diagnostics) is a different gap: resident tiles the reach missed.
 Proposed follow-up: none; `ManagedLoop::edit_candidates` (resident plus in flight) is the find's input (STRM-071, tier A in `crates/frame/tests/managed.rs`). A request still queued needs no name: a job reads the field when it starts, and one handed to the spawner is already in flight.
 Obsolete when: tile jobs carry the field version they read and the streamer drops a result whose version is older than the current one.
+
+## 2026-11-03 A `find /` outlived its session and failed a perf slot
+Scope: project (agent tooling; perf windows)
+What happened: on 2026-11-02 22:09 sonnet-crusader ran `find / -name pp-warp.txt 2>/dev/null | head -2` in a Bash call. Git Bash's `/` walks every drive, nothing matched, so `head` never closed the pipe. The tool's 120 s timeout moved the call to the background; the session later cleared, its shell exited, and `find.exe` kept running orphaned, holding one core for about 10 h. The next morning the owner's perf slot refused 7 of 7 preflights (singles 52.5-64.0 ms against 52.0; parallel fine) until the owner stopped it. The owner reports an earlier occurrence some days before (not traced).
+Assumption it changes: that a background command ends with its session, and that a quiet machine needs only the lanes to be idle.
+Proposed follow-up: standing lane rule (no search from `/` or a drive root; TaskStop any command moved to the background); the planner checks for stray long-running processes before a slot and the owner stops them; a PreToolUse hook refusing `find /` is the owner's call.
+Obsolete when: background commands are ended with their session, or a hook refuses root searches.

@@ -5,8 +5,10 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 ## Waiting for the owner
 - **For M9 planning** (after the away week): owner test 2026-10-27 groups E (edits on top as default, erosion keeping mass), F and G scope, the 1 m / 500 m exception (`docs/milestones/M8/owner-test-2026-10-27/README.md`); where edits sit relative to M9's erosion (D3, owner 2026-10-26: under the erosion by default).
 - **Sunset shadow look** (ADR 0095 draft, crusader): the sky ambient as a hemisphere average is physically consistent and dark at a 7° sun; options: sky light plus a lift (planner's pick), sky light as is, or the old term. Every lit and sky golden moves with it. SPIKE-96 (sky visibility) follows the choice.
-- **Unlocked slot** (~70-85 min, `spikes/perf-window-process/results/slot/slot.md`): window proofs, the 2° shadow probe and scene, flights at the ADR 0092 share. #1109 (horizon removal) merges after it.
-- **Erosion layer format** (kind 13, #1119): measured 14.4 MB per full tile, ~28-39 GB for the planet against the design's 7-10 GB; compression options being measured on 12 tiles before the decision.
+- **Perf machine state** (2026-11-03 slot, `spikes/perf-window-process/results/slot/results-2026-11-03.md`): since a Synapse change ~10:10 the all-core preflight reads 128-136k us (morning 67-95k; limit 112k), singles normal; restoring the profile did not help. Owner: check the CPU power setting or an EC reset. The next window (flights at the ADR 0092 share, REND-052 2° and the march fix, E2b stills) waits for it.
+- **Erosion layer format** (kind 13, #1119): measured 14.4 MB per full tile, ~28-39 GB for the planet against the design's 7-10 GB; pure-Rust codecs only (owner, 2026-11-03), explorer measures ratio, encode/decode speed and licence before the decision.
+- **World-build share values** (ADR 0097, BUDG-014): terrain 40 %, future content 40 %, margin 20 % of a 24 h day, proposed; confirm or change.
+- **Root-search hook** (learning 2026-11-03): a PreToolUse hook refusing `find /`; a settings change, the owner's call.
 - **Cliffs** (SPIKE-94, #1082): asset library or procedural only; the Alps' 4.3 % of area above 45° as the v1 coverage; a coarse collision proxy for now. Trigger: after M9's generator rounds.
 - **Optional, when convenient:** the M6 retest list (`docs/archive/M6/briefings/m6-owner-test-plan.md`, "Retest"); a live check of the flickers (Tracked); excluding the repo's `target` folders from Windows Search indexing. One editor session at the marker "TheEdgeHill" on the RTX (SPIKE-87 measured 0.17 ms editor cost on WARP; the 10-21 report predates the off-main block decodes).
 
@@ -20,10 +22,11 @@ Dormant (no near trigger; not asked now):
 | # | Step | Lane |
 |---|---|---|
 | NR | Real-GPU window checks NOT RUN on a locked desktop (TEST-073) | crusader |
-| Shadows | #1109 horizon removal (sun shadowing only; the horizon bake stays for SPIKE-96, owner 2026-11-03) waits for the slot; ADR 0095 sky ambient waits for the owner's look | crusader |
-| Shares | ADR 0092: #1117 (shares in code) waits for the edit-find race fix (STRM-071); then PR 4 (cross-references), `calibration-reference-machine` (ADR 0092 point 5), the settle diagnostic | spikes |
+| Shadows | march fix over flat land (flat 2° 3.33 -> 1.31 ms; a 10° WARP golden for the owner's bless), then the shadow-layer1 poses re-picked on m9r2; #1109 horizon removal after it; ADR 0095 sky ambient waits for the owner's look | crusader |
+| Shares | ADR 0092: #1117 (shares in code, main merged in); then PR 4 (cross-references), `calibration-reference-machine` (ADR 0092 point 5), the settle diagnostic | spikes |
 | CI | A named heavy-test part for WARP C 2/3 (21-22 min against 16) | spikes, after Shares |
-| M9 | #1086 round 3 blocked by its own regression (an atmosphere oracle 3x slower on WARP); bake stack #1104 → #1119 (I5b snapshot runnable: coarse planet 3.4 min, 12 full-res tiles 30-77 s each); kind 12 approved as temporary (owner, 2026-11-03); no planet bake before the owner approves the preview | explorer |
+| World build | `global-bake` perf scene reports against BUDG-014 instead of failing at 600 s (`crates/app/src/globalperf.rs`, ADR 0097 point 3) | spikes, after CI |
+| M9 | Shared store now `C:/DEV/SeriousPlanetData/global16384-m9r2` (seed 1, read-only; field bake 1020 s, 14 GB; `global16384` kept until the owner says). #1086 round 3: threads-required fix for its gate test; bake stack #1104 → #1119 (I5b snapshot runnable: coarse planet 3.4 min, 12 full-res tiles 30-77 s each); kind 12 approved as temporary (owner, 2026-11-03); no planet bake before the owner approves the preview | explorer |
 
 ## Tracked
 - **Reserve test result** (BUDG-012, loaded, 3 rounds, 2026-11-01): dive, look-1m, look-2km, teleport-2km pass; teleport-1m fails by +1 % (frame median 16.75 against 16.60 ms; the spin runs 5-18 % over its 6-9 ms target). Frame p99 over 20 ms includes the spin by construction. A quiet window decides the absolute rows.
