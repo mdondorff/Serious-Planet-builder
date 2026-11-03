@@ -351,10 +351,10 @@ pub trait HeightField: Send + Sync {
         SPHERE_SURFACE_ID
     }
     /// The climate field of tile `id` (ADR 0039 point 2, GEN-021): temperature and precipitation at 9 x 9 points, stored with the
-    /// tile. The default is the analytic global-coarse function of the field's seed at those directions (a pure function of
-    /// `(seed, mapping, tile)`), for fields without a bake; a field over a bake reads it with the integer reader (ADR 0027).
+    /// tile. The default is the global-coarse climate formula over the field's OWN seed and heights at those directions (a pure function of
+    /// `(seed, mapping, tile, heights)`, not of the generator's world), for fields without a bake; a field over a bake reads it with the integer reader (ADR 0027).
     fn climate(&self, map: &dyn FaceMapping, id: TileId) -> crate::climate::ClimateTexture {
-        crate::climate::analytic_climate(self.seed(), map, id)
+        crate::climate::height_climate(self.seed(), map, id, &|d| self.height(d))
     }
     /// The heights of `dirs` (as [`heights`](HeightField::heights)) and the climate of tile `id`, together: a field over a block store
     /// gathers the cells of both in one pass so a tile decodes each block once (GEN-020). The default is the two calls.
@@ -365,7 +365,14 @@ pub trait HeightField: Send + Sync {
         dirs: &[Vec3],
         stop: &dyn Fn() -> bool,
     ) -> (Vec<f64>, crate::climate::ClimateTexture) {
-        (self.heights_until(dirs, stop), self.climate(map, id))
+        let heights = self.heights_until(dirs, stop);
+        // A stopped batch is discarded by whoever stopped it: its climate is not worth the field's heights it would read (the climate of a field of its own heights reads them).
+        let climate = if stop() {
+            crate::climate::ClimateTexture::from_f32(&[0f32; crate::climate::CLIMATE_TEXELS], &[0f32; crate::climate::CLIMATE_TEXELS])
+        } else {
+            self.climate(map, id)
+        };
+        (heights, climate)
     }
     /// The word of everything the climate depends on besides the tile and the field's inputs, folded into every mesh key
     /// (the climate version, the reader version and the bake format version for a field over a bake).

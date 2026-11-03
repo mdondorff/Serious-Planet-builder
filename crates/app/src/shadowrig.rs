@@ -51,7 +51,7 @@ pub struct ShadowRig {
 
 /// The resident floor tiles whose footprints are disjoint and cover every face (the coarse cube's input): a floor-level tile, replaced by its
 /// four children only where all four are resident.
-fn floor_leaves(resident: &[TileId]) -> Vec<TileId> {
+pub(crate) fn floor_leaves(resident: &[TileId]) -> Vec<TileId> {
     let has = |t: &TileId| resident.binary_search(t).is_ok();
     let mut out = Vec::new();
     for t in resident.iter().filter(|t| t.level() == DEFAULT_RENDER_FLOOR) {

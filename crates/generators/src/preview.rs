@@ -89,6 +89,21 @@ pub fn compute(seed: u64, width: usize, height: usize, lattice_cells: usize, thr
     }
 }
 
+/// The land mask of the global stage alone (the continent stage, GEN-104) on a `width x height` equirectangular grid, row 0 north: what TEST-087 and TEST-088 score.
+pub fn land_mask(seed: u64, width: usize, height: usize, threads: usize) -> Vec<bool> {
+    let par: &dyn Par = &threads;
+    let rows = par::map(par, height, &|y| {
+        let lat = latitude(y, height);
+        (0..width)
+            .map(|x| {
+                let lon = -core::f64::consts::PI + (x as f64 + 0.5) / width as f64 * 2.0 * core::f64::consts::PI;
+                global::continent_land_depth(seed, Vec3::from_lat_lon(lat, lon)) > 0.0
+            })
+            .collect::<Vec<_>>()
+    });
+    rows.into_iter().flatten().collect()
+}
+
 // ---- text: a 5 x 7 pixel font for the headers and legends ----
 
 fn glyph(c: char) -> [u8; 7] {
@@ -547,6 +562,35 @@ pub fn report(f: &Fields) -> String {
     r += &format!("  S6 enclosed area (holes of at least 0.5 Mkm2): {:.1} Mkm2; Earth about 0-1\n", m.enclosed_mkm2);
     r +=
         &format!("  S7 high ground's share of land under 60 degrees: {:.1} %; Earth about 7 % (without Antarctica)\n", 100.0 * s.above_2km);
+    if f.width >= 360 && f.height >= 180 {
+        let c = crate::shape::continent_metrics(&land, f.width, f.height);
+        r += "continent stage (SPIKE-92, GEN-104; TEST-087 and TEST-088 score these on a 1440 x 720 land grid; reported here on the preview grid):
+    ";
+        r += &format!(
+            "  S9 compactness (area-weighted median of 4 pi A / P^2): {:.2}; Earth 0.10, gate at most 0.20
+    ",
+            c.compactness
+        );
+        r += &format!(
+            "  S10 elongation (median sqrt(l1 / l2)): {:.2}; Earth 1.77, band 1.5-2.5
+    ",
+            c.elongation
+        );
+        r += &format!(
+            "  S11 islands (masses of 10^4 to 10^6 km2): {}, {:.1} % of land; Earth 50, 3.9 %, band 35-70 and 1.9-6 %
+    ",
+            c.islands,
+            100.0 * c.island_share
+        );
+        r += &format!(
+            "  masses of at least 1 Mkm2 centred poleward of 70 degrees: {}; limit 1
+    ",
+            c.polar_masses
+        );
+    } else {
+        r += "continent stage metrics S9 to S11: not measured (they need a grid of at least 360 x 180)
+";
+    }
     r += "  S8 sinuosity: not measured (SPIKE-91 has no comparable measure yet)\n";
     r
 }
