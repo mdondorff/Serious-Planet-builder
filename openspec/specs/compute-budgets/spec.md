@@ -222,3 +222,14 @@ Source: ADR 0097
 #### Scenario: A share over its hours
 - **WHEN** the terrain stages together take 11 h
 - **THEN** the report names terrain's share with 11 h against 9.6 h, and the world build fails
+
+### Requirement: BUDG-015 World build threads
+Every world-build stage (field bake, erosion bake, pre-fill) SHALL run by default on the background capacity B of BUDG-013, never on every logical thread, and SHALL log its thread count; an explicit thread count overrides it and is logged as an override. Results SHALL not depend on the thread count (CON-14).
+
+Verify: A
+Status: planned
+Source: ADR 0097 point 7 (owner, 2026-11-03); #1132
+
+#### Scenario: Default and override
+- **WHEN** a bake command runs without a thread count on a machine with P = 12
+- **THEN** it runs on B = 10 workers and its log says "B = 10 (P = 12)"; with `--threads 4` the log says "override 4 (B = 10)"
