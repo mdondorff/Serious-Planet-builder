@@ -37,3 +37,4 @@ Revised 2026-10-31 (SPIKE-70): the carve moves to a face pass before the tile dr
 | Face carve | about 800 m (one point sample per cell), about 3 min and 5.5 GB a face | SPIKE-70, SPIKE-71 |
 | Local carve cap | about 1 km^2 | SPIKE-70 |
 | Bake estimate | about 6-7.5 h (central 6.9 h) for 2,140 land tiles at 4 at a time | SPIKE-61, SPIKE-70, SPIKE-71 |
+- [ ] 2.x PR `change/pass1-mfd`: the drainage area by multiple flow direction (Freeman 1.1, receivers D8), the C1 read of the pass-1 change, kernel versions 2, pass 1 at 12,288 by default (GEN-100, GEN-101); tier A: area shared and jitter-independent, a smooth read, thread-count equality; `numerics-reviewer`, `spec-guardian`, `verifier`

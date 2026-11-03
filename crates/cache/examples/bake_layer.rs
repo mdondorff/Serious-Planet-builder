@@ -22,7 +22,8 @@ use planet_world_def::WorldDefinition;
 const RADIUS_M: f64 = 6_371_000.0;
 /// The largest `--planet-res` of a planet pass and of `--face-res` a run takes without the planner's go.
 const PLANET_LIMIT: usize = 12_288;
-const FACE_LIMIT: usize = 4096;
+/// GEN-100's pass-1 grid (814 m, owner 2026-11-03): the default and the largest.
+const FACE_LIMIT: usize = 12_288;
 const REGION_LIMIT: usize = 64;
 /// The largest tile (core cells a side) a run takes: its window and the arrays of its kernels are `(tile + 2 halo)^2` cells of several f64 each.
 const TILE_LIMIT: usize = 4096;
@@ -62,7 +63,9 @@ fn main() {
         fail(&format!("--tile above {TILE_LIMIT} cells builds a window of several GB: refused"));
     }
     if o.face_res < 8 || o.face_res > FACE_LIMIT {
-        fail(&format!("--face-res must be 8 to {FACE_LIMIT} (a larger pass 1 is a full-resolution bake and needs the planner's go)"));
+        fail(&format!(
+            "--face-res must be 8 to {FACE_LIMIT} (GEN-100's grid is {FACE_LIMIT}; a larger pass 1 is not a bake this command runs)"
+        ));
     }
     if o.map_width < 64 || !o.map_width.is_multiple_of(2) {
         fail("--map-width must be an even number of at least 64");
@@ -234,7 +237,7 @@ fn parse() -> Opts {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut o = Opts {
         seed: 14,
-        face_res: 768,
+        face_res: FACE_LIMIT,
         planet_res: 3072,
         tile: None,
         halo: None,

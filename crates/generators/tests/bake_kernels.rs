@@ -103,9 +103,11 @@ fn a_ramp_drains_downhill_the_order_follows_the_receivers_and_the_area_is_conser
             assert!(at[r.receiver[p] as usize] < at[p], "cell {p} comes before its receiver");
         }
     }
-    // The area leaving the outlets is the area of the grid (each cell counts once; the sums are integer multiples of the cell area: exact).
+    // The area leaving the outlets is the area of the grid (each cell's area is shared, none is lost or counted twice; the shares are not integer multiples of the cell area, so
+    // the sum is judged to rounding).
     let total: f64 = (0..n * n).filter(|&p| outlet[p]).map(|p| r.area[p]).sum();
-    assert_eq!(total, (n * n) as f64 * DX * DX);
+    let whole = (n * n) as f64 * DX * DX;
+    assert!((total - whole).abs() <= 1e-9 * whole, "{total} against {whole}");
     let capped = route(&g, &z, &outlet, 1e-3, 7, 4.0 * DX * DX);
     assert!(capped.area.iter().all(|&a| a <= 4.0 * DX * DX));
 }
@@ -169,6 +171,11 @@ fn the_carve_keeps_the_outlets_uplifts_the_land_stays_above_the_receivers_and_is
             }
         }
     }
+    // With the area shared among the lower neighbours (the multiple-flow-direction area, kernel version 2) the default uplift of 20 m is out-incised on this cone; an uplift ten times
+    // the default is not, so the uplift term is still applied and shows.
+    let mut z_up = cone.clone();
+    carve(&g, &mut z_up, &outlet, &CarveParams { u_over_k: 10.0 * params.u_over_k, ..params }, None, 11);
+    rose += (0..n * n).filter(|&p| !outlet[p] && z_up[p] > cone[p]).count();
     assert!(rose > 0, "no cell was uplifted");
     let (trunk, _) = (0..n * n).filter(|&p| !outlet[p]).map(|p| (p, r.area[p])).fold((0, 0.0), |b, x| if x.1 > b.1 { x } else { b });
     assert!(
@@ -178,7 +185,7 @@ fn the_carve_keeps_the_outlets_uplifts_the_land_stays_above_the_receivers_and_is
     );
 }
 
-const CONE_FINGERPRINT: u64 = 11301127703910047072;
+const CONE_FINGERPRINT: u64 = 1974223322930457283;
 
 // spec: GEN-100
 #[test]
@@ -384,4 +391,37 @@ fn land_stays_above_a_sea_level_that_is_not_zero_and_the_jitter_lies_in_its_rang
         }
     }
     assert!(lo >= -1.0 && hi < 1.0 && lo < -0.99 && hi > 0.99, "the jitter spans [{lo}, {hi}]");
+}
+
+// spec: GEN-100
+#[test]
+fn the_drainage_area_is_shared_among_the_lower_neighbours_whatever_the_jitter_and_the_grid_axes() {
+    // A plane falling along the diagonal towards the (0, 0) corner, its other edges the outlets: heights `10 (i + j) + 5`.
+    let n = 24;
+    let g = grid(n);
+    let z: Vec<f64> = (0..n * n).map(|p| 10.0 * ((p % n) + (p / n)) as f64 + 5.0).collect();
+    let outlet: Vec<bool> = (0..n * n).map(|p| p % n == 0 || p / n == 0 || p % n == n - 1 || p / n == n - 1).collect();
+    let (a, b) = (route(&g, &z, &outlet, 1e-3, 1, 0.0), route(&g, &z, &outlet, 1e-3, 2, 0.0));
+    // The receivers follow the jitter, the area does not.
+    assert!(a.receiver != b.receiver, "the two jitter streams routed alike: the test proves nothing");
+    assert_eq!(
+        a.area.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+        b.area.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+        "the area depends on the jitter"
+    );
+    // Mirror symmetry about the diagonal: the area does not prefer the i axis to the j axis.
+    for (i, j) in [(3, 6), (10, 4), (7, 15), (12, 12)] {
+        let (p, q) = (j * n + i, i * n + j);
+        assert!(
+            (a.area[p] - a.area[q]).abs() <= 1e-9 * a.area[p],
+            "cells ({i}, {j}) and ({j}, {i}) differ: {} against {}",
+            a.area[p],
+            a.area[q]
+        );
+    }
+    // A cell off the diagonal receives from the cells above it, which a D8 tree sends elsewhere; every interior cell holds more than its own cell.
+    let own = DX * DX;
+    assert!(a.area[6 * n + 3] > 1.5 * own, "cell (3, 6) holds {} cells of area", a.area[6 * n + 3] / own);
+    let total: f64 = (0..n * n).filter(|&p| outlet[p]).map(|p| a.area[p]).sum();
+    assert!((total - (n * n) as f64 * own).abs() <= 1e-9 * total, "the area is not conserved: {total}");
 }
