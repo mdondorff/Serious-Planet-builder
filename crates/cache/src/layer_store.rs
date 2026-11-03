@@ -58,6 +58,8 @@ impl LayerSpec {
         for v in [c.u_over_k, c.k_dt, c.epsilon, c.breach_slope, c.breach_max_m] {
             b.extend(v.to_bits().to_le_bytes());
         }
+        b.extend(c.max_area.to_bits().to_le_bytes());
+        b.push(u8::from(c.incise_only));
         b.extend((c.steps as u64).to_le_bytes());
         b.extend((c.reroute_every as u64).to_le_bytes());
         b.extend(self.inputs_id.to_le_bytes());
@@ -79,7 +81,7 @@ impl std::fmt::Display for LayerStoreError {
     }
 }
 
-fn face_key(world: &GlobalWorld, res: u32, spec: &LayerSpec, face: Face) -> CacheKey {
+pub fn face_key(world: &GlobalWorld, res: u32, spec: &LayerSpec, face: Face) -> CacheKey {
     let mut inputs = world.base_key_inputs(Kind::LayerFace, face_tile(face), res, LAYER_IMPLEMENTATION_ID);
     inputs.output_params.insert(PARAM_RESOLUTION, (spec.cells as u32).to_le_bytes().to_vec());
     inputs.output_params.insert(PARAM_LAYER, spec.bytes());

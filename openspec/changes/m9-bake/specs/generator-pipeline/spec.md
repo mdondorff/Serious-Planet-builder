@@ -161,7 +161,7 @@ Source: ADR 0088 points 4.2 and 6, ADR 0088/0089 accepted 2026-11-01; SPIKE-61, 
 
 #### Scenario: Incise only
 - **WHEN** pass 2's local carve runs on a synthetic tile with a closed basin
-- **THEN** no cell ends higher than its input, and the basin keeps its pour point
+- **THEN** no cell ends higher than its input, and the basin is not filled
 
 ### Requirement: GEN-102 Cap bounds read the layer's pyramid
 The field's height bounds over a cap SHALL take the layer's part from the min/max pyramid (STRM-066):
