@@ -1925,6 +1925,7 @@ mod tests {
             "the_stills_scene_draws_each_pose_with_its_horizon_maps_baked",
             "a_still_runs_the_clipmap_shadow_by_default_and_not_with_the_flag",
             "the_gate_passes_on_a_small_world_without_the_chunk_stage_which_is_the_default",
+            "the_draw_flag_selects_the_path_and_every_loop_draws_the_same_frame_on_either",
         ] {
             let at = position(&|o| o.filter.contains(&format!("test({name})")), name);
             assert!(at < gpu, "{name}: its limit comes after the gpu_ override and would never apply");
@@ -1942,6 +1943,8 @@ mod tests {
             "a_lit_view_a_lit_flight_and_a_stream_scene_log_their_cpu_calibration_when_asked_even_in_a_smoke_run",
             "a_streaming_scene_on_the_lit_path_logs_beside_the_debug_path_under_its_own_name",
             "the_lit_coast_view_over_streamed_tiles_draws_the_same_pixels_still_and_after_a_small_turn_and_back",
+            // The draw-flag loop test of `gpu_skeleton`: five relief runs, cut off at 300 s beside two of the above (planner, 2026-11-03).
+            "the_draw_flag_selects_the_path_and_every_loop_draws_the_same_frame_on_either",
         ] {
             assert!(defaults[warp].filter.contains(&format!("test({member})")), "{member} is not in warp-heavy");
         }
@@ -1956,7 +1959,9 @@ mod tests {
         }
         let named: Vec<&str> =
             hf.match_indices("test(").map(|(i, _)| hf[i + 5..].split(')').next().unwrap()).filter(|n| !n.starts_with('/')).collect();
-        assert_eq!(named.len(), 3, "the three gpu_skeleton loop tests: {named:?}");
+        // The draw-flag loop test sits in `warp-heavy`; a name in both filters would be dead text here (the first match sets the group).
+        assert_eq!(named.len(), 2, "two of the gpu_skeleton loop tests: {named:?}");
+        assert!(!hf.contains("the_draw_flag_selects_the_path"), "the draw-flag test is in warp-heavy, not heavy-window");
         for name in named {
             assert!(exists(name), "{name} is not a test function");
         }
