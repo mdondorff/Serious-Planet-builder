@@ -13,7 +13,7 @@ use planet_core::{smoothstep, Face, Vec3};
 /// The version of the class list (GEN-093): plain, rolling plain, hills, mountains, high mountains, plateau, badlands, sand sea, in that order.
 pub const CLASS_LIST_VERSION: u32 = 1;
 /// Bump whenever the default source's output changes for a seed (the rules of GEN-094 and GEN-095, their constants, or the plate construction).
-pub const CLASS_SOURCE_VERSION: u32 = 3;
+pub const CLASS_SOURCE_VERSION: u32 = 4;
 pub const CLASS_COUNT: usize = 8;
 pub const CLASS_NAMES: [&str; CLASS_COUNT] =
     ["plain", "rolling plain", "hills", "mountains", "high mountains", "plateau", "badlands", "sand sea"];
@@ -32,6 +32,9 @@ pub const CLASS_LATTICE_N: usize = 256;
 
 /// Plates of the default source (GEN-094).
 const PLATES: usize = 14;
+/// Plate draws and the points that score them (GEN-105).
+const PLATE_DRAWS: u64 = 16;
+const PLATE_SCORE_POINTS: usize = 8192;
 /// Radius of the body in metres used for the margin distances; the default source is defined for Earth's radius (GEN-094's kilometres).
 pub const EARTH_RADIUS_M: f64 = 6_371_000.0;
 /// Land-share sample points per plate set (a Fibonacci sphere), for the back-arc's choice of the plate with more land.
@@ -46,12 +49,20 @@ const BELT_AMPLITUDE_M: f64 = 7500.0;
 const PLATEAU_UPLIFT_M: f64 = 800.0;
 /// The narrowest half-width a belt has, in km (a belt tapers in width and height towards the ends of its segment, never below this).
 const MIN_BELT_KM: f64 = 125.0;
-/// The gain from the core to the mountains' membership.
-const MOUNTAIN_GAIN: f64 = 2.0;
+/// The core value at which the mountains' membership is 1 (it rises smoothly from 0 at the belt's edge, so the class weights change over the belt's width and not in one lattice step).
+const MOUNTAIN_FULL_CORE: f64 = 0.7;
+/// The share of the flank term (a tent three times as wide as the core's) that counts towards the mountains' membership, so that the mountains cover the flanks of a belt and not only its core.
+const FLANK_MEMBERSHIP: f64 = 0.8;
+/// The class elevation over which a mountain becomes a high mountain, in metres.
+const HIGH_FROM_M: f64 = 1000.0;
+const HIGH_TO_M: f64 = 5500.0;
 /// The largest sideways shift of a belt's centreline, in km (low-frequency noise bends the trace).
 const BEND_KM: f64 = 120.0;
-/// Distance over which the mask's coast gate rises, in km.
-const COAST_RAMP_KM: f64 = 250.0;
+/// The mask's coast gate is 0 within this distance of the smooth coast and 1 from the second distance inland, in km.
+const COAST_BUFFER_KM: f64 = 50.0;
+const COAST_RAMP_KM: f64 = 300.0;
+/// The land depth over which the gate rises from the true coast.
+const COAST_DEPTH_RAMP: f64 = 0.25;
 
 const LAYER_PLATE_WARP: u64 = 0x474c_0010;
 const LAYER_WIDTH: u64 = 0x474c_0011;
@@ -80,6 +91,31 @@ fn on_sphere(u: f64, v: f64) -> Vec3 {
     let r = libm::sqrt((1.0 - z * z).max(0.0));
     let phi = 2.0 * core::f64::consts::PI * v;
     Vec3::new(r * libm::cos(phi), r * libm::sin(phi), z)
+}
+
+/// The plates of a draw seed: a centre, an Euler pole and a rate each.
+fn draw_plates(seed: u64) -> Vec<Plate> {
+    (0..PLATES as u64)
+        .map(|i| {
+            let centre = on_sphere(unit(seed, 1, 2 * i), unit(seed, 1, 2 * i + 1));
+            let pole = on_sphere(unit(seed, 2, 2 * i), unit(seed, 2, 2 * i + 1));
+            let rate = 0.3 + 0.7 * unit(seed, 3, i);
+            Plate { centre, rotation: pole * rate }
+        })
+        .collect()
+}
+
+/// `n` directions of a Fibonacci sphere.
+fn fibonacci_points(n: usize) -> Vec<Vec3> {
+    let golden = core::f64::consts::PI * (3.0 - libm::sqrt(5.0));
+    (0..n)
+        .map(|i| {
+            let z = 1.0 - 2.0 * (i as f64 + 0.5) / n as f64;
+            let r = libm::sqrt((1.0 - z * z).max(0.0));
+            let phi = golden * i as f64;
+            Vec3::new(r * libm::cos(phi), r * libm::sin(phi), z)
+        })
+        .collect()
 }
 
 struct Plate {
@@ -124,21 +160,54 @@ pub struct ClassSource {
     radius_m: f64,
     plates: Vec<Plate>,
     land_share: Vec<f64>,
+    /// The index of the plate draw that was kept (GEN-105): 0 is the seed's own draw.
+    plate_draw: u64,
 }
 
 impl ClassSource {
     pub fn new(seed: u64) -> ClassSource {
-        let plates: Vec<Plate> = (0..PLATES as u64)
-            .map(|i| {
-                let centre = on_sphere(unit(seed, 1, 2 * i), unit(seed, 1, 2 * i + 1));
-                let pole = on_sphere(unit(seed, 2, 2 * i), unit(seed, 2, 2 * i + 1));
-                let rate = 0.3 + 0.7 * unit(seed, 3, i);
-                Plate { centre, rotation: pole * rate }
-            })
-            .collect();
-        let mut source = ClassSource { seed, radius_m: EARTH_RADIUS_M, plates, land_share: vec![0.0; PLATES] };
+        // The plates are drawn up to PLATE_DRAWS times (GEN-105); the draw with the most land next to a convergent margin is kept (the first on ties), so that the belts stand on the continents.
+        let points = fibonacci_points(PLATE_SCORE_POINTS);
+        let land: Vec<bool> = points.iter().map(|&d| terrain(seed, d).land_depth > 0.0).collect();
+        let land_count = land.iter().filter(|&&l| l).count().max(1) as f64;
+        let mut best: Option<(f64, ClassSource)> = None;
+        for t in 0..PLATE_DRAWS {
+            let draw = if t == 0 { seed } else { splitmix(seed ^ (t << 40) ^ 0x71a7_e500) };
+            let plates = draw_plates(draw);
+            let source = ClassSource { seed, radius_m: EARTH_RADIUS_M, plates, land_share: vec![0.0; PLATES], plate_draw: t };
+            let score =
+                points.iter().zip(&land).filter(|(_, &l)| l).map(|(&d, _)| source.convergent_margin_near(d)).sum::<f64>() / land_count;
+            if best.as_ref().is_none_or(|(b, _)| score > *b) {
+                best = Some((score, source));
+            }
+        }
+        let mut source = best.expect("at least one plate draw").1;
         source.land_share = source.measure_land_shares();
         source
+    }
+
+    /// In `[0, 1]`: how much of a convergent margin of the two nearest plates lies within a few hundred km of `d` (the score of a plate draw).
+    fn convergent_margin_near(&self, d: Vec3) -> f64 {
+        let (idx, ang) = self.nearest_three(self.warp(d));
+        let dist_km = 0.5 * (ang[1] - ang[0]) * self.radius_m / 1000.0;
+        let (px, py) = (&self.plates[idx[0]], &self.plates[idx[1]]);
+        let nrm = {
+            let n = py.centre - px.centre;
+            let n = n - d * n.dot(d);
+            let l = n.length();
+            if l > 1e-12 {
+                n * (1.0 / l)
+            } else {
+                Vec3::ZERO
+            }
+        };
+        let conv = (px.rotation.cross(d) - py.rotation.cross(d)).dot(nrm);
+        (1.0 - smoothstep(150.0, 450.0, dist_km)) * smoothstep(0.05, 0.35, conv)
+    }
+
+    /// The index of the plate draw kept by the retry (GEN-105): 0 is the seed's own draw.
+    pub fn plate_draw(&self) -> u64 {
+        self.plate_draw
     }
 
     pub fn seed(&self) -> u64 {
@@ -191,9 +260,9 @@ impl ClassSource {
         (idx, ang)
     }
 
-    /// The land depth (continent value minus the sea level) at `d`, the term the coastal arcs follow.
+    /// The smooth land depth (the continent stage without its detail, GEN-104) at `d`: what the coast distance and the coastal arcs follow, because the full value's gradient is not defined at the lattice's scale.
     fn land_depth(&self, d: Vec3) -> f64 {
-        terrain(self.seed, d).continent - SEA_LEVEL_C
+        crate::continents::continent_smooth(self.seed, d) - SEA_LEVEL_C
     }
 
     /// The gradient magnitude of the land depth at `d` per radian: central differences of [`GRADIENT_STEP`] along the fixed axes x, y and z, with the radial part removed, so
@@ -241,10 +310,18 @@ impl ClassSource {
         let belt_km = (width_km * (0.55 + 0.45 * segment) * (0.9 + 0.2 * along)).max(MIN_BELT_KM);
         let bend_km = BEND_KM * fbm(self.seed, LAYER_BEND, d, 3.0, 2);
         let arc = smoothstep(0.38, 0.56, 0.5 + 0.5 * fbm(self.seed, LAYER_COAST_ARC, d, 0.9, 2));
-        let gradient = self.land_gradient(d);
-        let line_km = self.signed_km(land_depth - COAST_LINE_DEPTH, gradient);
-        // The gate of the land: 0 at the coast and 1 over 250 km inland, so that no belt stops at the coast in a step (GEN-097's limit on the step of `k`).
-        let coast_gate = if land_depth <= 0.0 { 0.0 } else { smoothstep(0.0, COAST_RAMP_KM, self.distance_km(land_depth, gradient)) };
+        let smooth = self.land_depth(d);
+        // The gate below is 0 unless both depths are positive, and every term that reads the gradient is multiplied by it: elsewhere the gradient is not computed (7 of 10 points).
+        let on_land = land_depth > 0.0 && smooth > 0.0;
+        let gradient = if on_land { self.land_gradient(d) } else { 0.0 };
+        let line_km = self.signed_km(smooth - COAST_LINE_DEPTH, gradient);
+        // The gate of the land: 0 within COAST_BUFFER_KM of the smooth coast and 1 from COAST_RAMP_KM inland, and 0 at the true coast (a depth ramp), so that no belt stops at the
+        // coast in a step (GEN-097's limit on the step of `k`) and none stands in the sea or on a peninsula that the smooth coast does not hold.
+        let coast_gate = if !on_land {
+            0.0
+        } else {
+            smoothstep(COAST_BUFFER_KM, COAST_RAMP_KM, self.distance_km(smooth, gradient)) * smoothstep(0.0, COAST_DEPTH_RAMP, land_depth)
+        };
         let (mut core, mut flank, mut old_margin, mut back_arc) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
         let (mut margin_km, mut convergence) = (0.0, 0.0);
         for (n, &(x, y)) in [(0usize, 1usize), (0, 2), (1, 2)].iter().enumerate() {
@@ -338,8 +415,8 @@ pub fn hill_amplitude_for_k(k: f64) -> f64 {
 /// The default class weights from the mask terms, the class elevation `e_class` (GEN-096 without the band and the ridge factor) and the rolling-plain membership (GEN-095), summing to 1.
 pub fn class_weights(terms: &MaskTerms, e0: f64, rolling: f64) -> [f64; CLASS_COUNT] {
     // Mountains follow the core with a gain, so the flanks of a belt that is high enough to be above 2 km are mountains, not hills.
-    let mt = (MOUNTAIN_GAIN * terms.core).min(1.0);
-    let high = mt * smoothstep(1500.0, 3500.0, e0);
+    let mt = smoothstep(0.0, MOUNTAIN_FULL_CORE, terms.core.max(FLANK_MEMBERSHIP * terms.flank));
+    let high = mt * smoothstep(HIGH_FROM_M, HIGH_TO_M, e0);
     let hills = (1.0 - mt) * smoothstep(0.2, 0.45, terms.flank.max(terms.old_margin));
     // What mountains and hills leave is shared by the plateau and the rest, so the memberships partition 1 before the normalisation.
     let left = 1.0 - mt - hills;

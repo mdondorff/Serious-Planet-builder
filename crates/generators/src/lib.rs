@@ -11,6 +11,7 @@ pub mod classes;
 pub mod climate;
 pub mod coarsehorizon;
 pub mod compact;
+pub mod continents;
 pub mod coupled;
 pub mod coupledinput;
 pub mod descriptors;

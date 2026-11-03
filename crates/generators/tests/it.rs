@@ -20,6 +20,8 @@ mod classes;
 mod climate;
 #[path = "compact.rs"]
 mod compact;
+#[path = "continents.rs"]
+mod continents;
 #[path = "coupled_fill.rs"]
 mod coupled_fill;
 #[path = "coupled_lens.rs"]

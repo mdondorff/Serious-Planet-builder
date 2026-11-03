@@ -36,6 +36,7 @@ pub fn is_stream_scene(name: &str) -> bool {
         || crate::editperf::is_edit_scene(name)
         || crate::envelopeperf::is_envelope_scene(name)
         || crate::stills::is_cost_scene(name)
+        || crate::stills::is_layer1_scene(name)
 }
 
 /// The scenes a `--scene` value runs.

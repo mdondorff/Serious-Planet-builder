@@ -60,7 +60,15 @@ impl Fixture {
         f
     }
 
+    /// A run with the clipmap shadow off: the subject of the tests that use it is the stills scene (poses, files, refusals), not the shadow, and the march
+    /// more than doubles a software run (WARP CI). [`Fixture::call_with_march`] keeps the default.
     fn call(&self, extra: &[&str]) -> Result<String, String> {
+        let mut extra = extra.to_vec();
+        extra.push("--no-shadow-march");
+        self.call_with_march(&extra)
+    }
+
+    fn call_with_march(&self, extra: &[&str]) -> Result<String, String> {
         let mut a = vec![
             "test-render",
             "--scene",
@@ -146,4 +154,27 @@ fn the_stills_scene_draws_one_pose_by_name_and_refuses_a_bad_call() {
     assert!(e.contains("--flight-frames"), "{e}");
     let e = run(&["test-render", "--scene", "lit", "--poses", f.poses.to_str().unwrap(), "--adapter", "software"]).unwrap_err();
     assert!(e.contains("--poses applies to the scene `capture-stills`"), "{e}");
+}
+
+/// A still shows what the viewer shows by default, the clipmap shadow (REND-051): every pose runs the shadow pass for its frames unless
+/// `--no-shadow-march` turns it off. (The smoke world is smooth: that a low sun then casts the hills' shadows is the render goldens' check,
+/// `gpu_ground_look`; here the wiring is what is checked.) The shadow only takes light away.
+// spec: REND-051
+#[test]
+fn a_still_runs_the_clipmap_shadow_by_default_and_not_with_the_flag() {
+    let f = Fixture::new("march");
+    let png = |name: &str| -> Vec<u8> {
+        planet_testkit::read_png(&f.dir.join(format!("{name}.png"))).unwrap_or_else(|e| panic!("{name}: {e}")).rgba
+    };
+    let off = f.call(&["--no-shadow-march"]).unwrap();
+    assert!(off.contains("ground-sunset: ") && off.contains(" 0 shadow frames"), "{off}");
+    let off_sunset = png("ground-sunset");
+    // One pose with the march on: its six shadow frames are most of a software run (the test timed out at 302 s with both poses on WARP CI); the poses
+    // share one code path, and the off run above names both.
+    let on = f.call_with_march(&["--views", "ground-sunset"]).unwrap();
+    assert!(on.contains("ground-sunset: ") && on.contains(" 6 shadow frames"), "the pose runs the shadow frames: {on}");
+    let on_sunset = png("ground-sunset");
+    assert_eq!(off_sunset.len(), on_sunset.len());
+    let sum = |v: &[u8]| v.iter().map(|b| u64::from(*b)).sum::<u64>();
+    assert!(sum(&on_sunset) <= sum(&off_sunset), "a shadow takes light away, it never adds any");
 }

@@ -859,6 +859,12 @@ pub fn capture_flights(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Re
     let default = setup.look.water.shore_filter;
     let first = views[0].cameras[0];
     let mut r = new_renderer(&rig, &setup, first)?;
+    // The flights show what the viewer shows by default: the clipmap shadow (REND-051).
+    let mut march = if o.shadow_march {
+        Some(crate::stills::StillShadow::new(ctx, o, rig.world, rig.field, &mut r, &[], radius_m, rig.lod.max_height_m)?)
+    } else {
+        None
+    };
     for view in views.iter().filter(|v| v.kind == ViewKind::Flight) {
         for filter in [default, if default == 0.0 { 1.0 } else { 0.0 }] {
             setup.look.water.shore_filter = filter;
@@ -871,6 +877,12 @@ pub fn capture_flights(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Re
                 let plan = planet_frame::plan_terrain_cached(&request(&rig, *camera), rig.field, &mut cache).map_err(|e| e.to_string())?;
                 crate::skeleton::upload_missing_meshes(ctx, Some(rig.world), &mut r, &plan, rig.field, radius_m, o.cells)?;
                 let lit = setup.plan(&world, rig.field, &plan, WATER_T0 + k as f64 / 60.0, 1.0 / 60.0, k == 0)?;
+                if let (Some(m), Some(l)) = (march.as_mut(), lit.lit.as_ref()) {
+                    let tiles: Vec<planet_core::TileId> = plan.nodes.iter().map(|n| n.tile).collect();
+                    m.extend(ctx, o, rig.world, rig.field, &mut r, &tiles)?;
+                    let sun = planet_core::Vec3::new(f64::from(l.sun_dir[0]), f64::from(l.sun_dir[1]), f64::from(l.sun_dir[2]));
+                    r.set_shadow_frame(m.frame(camera, sun, k));
+                }
                 r.render(ctx, &lit, false).map_err(|e| e.to_string())?;
                 let image = r.read_color(ctx);
                 image.write_png(&sub.join(format!("frame_{k:04}.png"))).map_err(|e| format!("writing frame {k} of {name}: {e}"))?;
