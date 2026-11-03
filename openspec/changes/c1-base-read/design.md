@@ -19,7 +19,7 @@
    - multiplies the largest step (the slope bound) by 4: within a face the Catmull-Rom derivative is at most 1.5 times the largest of the three differences it spans (0.125 + 1.25 + 0.125 at t = 0.5), times 1.25 for the four rows, 1.875 in all; 4 leaves room for the ghosts.
    - The erosion bound's Lipschitz term takes the factor through `max_du` and `max_dv`.
    - Tests hold every height of random caps, of caps on edges and corners, of caps in the last cell before an edge over a step lattice (res 64 and 16384), and of caps over a lattice with spikes and steps. The factor 4 and the pad 3 are validated by those tests, not proved for the ghosts.
-5. Cost. The read touches 16 nodes instead of 4 (the gradient stencil adds six reads): about 1.9x on `height(dir)` and per tile, 1.45x on `height_bounds` (PR body table).
+5. Cost. The read touches 16 nodes instead of 4 (the gradient stencil adds six reads): about 2.1x on a single `height(dir)`, 1.15x per tile (a per-thread cache of the 4 x 4 stencils, used only in the batch paths and bypassed by the footprint pass: same values, same arithmetic, same bits), 1.4x on `height_bounds` (PR body table).
 
 ## Open
 - Which goldens move when the default switches: none in this change; the list is made in the follow-up.

@@ -688,6 +688,10 @@ pub trait LatticeSource: Sync {
     fn relief_scale(&self) -> f64 {
         1.0
     }
+    /// Whether the source only records which cells are asked for and answers placeholders (the footprint pass of a gathered batch): nothing read from it may be kept.
+    fn records_reads(&self) -> bool {
+        false
+    }
 }
 
 /// A lattice source with the elevation of every sample multiplied by the body's relief scale (WDEF-017): the exaggeration is part of the
@@ -885,12 +889,84 @@ fn c1_node(src: &dyn LatticeSource, map: &dyn FaceMapping, face: Face, i: i64, j
 /// neighbour's `f32` read, so it was rounded before). A pure function of
 /// `dir`: a point on a face edge or a cube corner reads the same bits whichever face's coordinates it was given in.
 pub fn read_elevation_c1(src: &dyn LatticeSource, map: &dyn FaceMapping, dir: Vec3) -> Result<f32, ReadError> {
+    c1_blend(src, map, dir, None)
+}
+
+/// [`read_elevation_c1`] keeping the 4 x 4 stencils it loads in `cache` (owned by one field, `owner`; one thread): the samples of a tile and the six
+/// stencil points of each sample fall in a few lattice cells, so the nodes and the ghosts are loaded once. The same values in the same arithmetic order:
+/// the bits equal the plain read's. A source that only records reads (a footprint pass) bypasses the cache, so its footprint is never short.
+pub fn read_elevation_c1_cached(
+    src: &dyn LatticeSource,
+    map: &dyn FaceMapping,
+    dir: Vec3,
+    cache: &mut StencilCache,
+    owner: u64,
+) -> Result<f32, ReadError> {
+    if src.records_reads() {
+        return c1_blend(src, map, dir, None);
+    }
+    c1_blend(src, map, dir, Some((cache, owner)))
+}
+
+/// Stencils of the C1 read kept for reuse: `(owner, face, i0, j0)` with the nodes loaded (a bit each of the sixteen) and their values.
+pub struct StencilCache {
+    entries: Vec<(u64, u8, i64, i64, u16, [f64; 16])>,
+    next: usize,
+}
+
+const STENCIL_CACHE_ENTRIES: usize = 48;
+
+impl StencilCache {
+    pub fn new() -> StencilCache {
+        StencilCache { entries: Vec::with_capacity(STENCIL_CACHE_ENTRIES), next: 0 }
+    }
+}
+
+impl Default for StencilCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn c1_blend(
+    src: &dyn LatticeSource,
+    map: &dyn FaceMapping,
+    dir: Vec3,
+    mut cache: Option<(&mut StencilCache, u64)>,
+) -> Result<f32, ReadError> {
     if src.res() < 2 {
         return Err(ReadError::Shape(format!("the C1 reader needs a bake of at least 2 cells per face edge (res {})", src.res())));
     }
     let at = locate_direction(src.res(), map, dir)?;
     let (wu, wv) = (catmull_rom(at.wu), catmull_rom(at.wv));
     let (i0, j0) = (i64::from(at.i) - 1, i64::from(at.j) - 1);
+    // The nodes this position needs (a node of weight zero is not read).
+    let mut need = 0u16;
+    for (r, &w_row) in wv.iter().enumerate() {
+        for (c, &w_col) in wu.iter().enumerate() {
+            if w_row != 0.0 && w_col != 0.0 {
+                need |= 1 << (r * 4 + c);
+            }
+        }
+    }
+    let slot = cache.as_mut().map(|(cache, owner)| {
+        let key = (*owner, at.face.0, i0, j0);
+        match cache.entries.iter().position(|e| (e.0, e.1, e.2, e.3) == key) {
+            Some(k) => k,
+            None => {
+                let e = (key.0, key.1, key.2, key.3, 0u16, [0.0; 16]);
+                if cache.entries.len() < STENCIL_CACHE_ENTRIES {
+                    cache.entries.push(e);
+                    cache.entries.len() - 1
+                } else {
+                    let k = cache.next;
+                    cache.next = (cache.next + 1) % STENCIL_CACHE_ENTRIES;
+                    cache.entries[k] = e;
+                    k
+                }
+            }
+        }
+    });
     // -0.0 is the identity of the sum, so a stored -0.0 at a lattice point reads back as -0.0.
     let mut rows = -0.0;
     for (r, &w_row) in wv.iter().enumerate() {
@@ -902,10 +978,23 @@ pub fn read_elevation_c1(src: &dyn LatticeSource, map: &dyn FaceMapping, dir: Ve
             if w_col == 0.0 {
                 continue;
             }
-            cols += w_col * c1_node(src, map, at.face, i0 + c as i64, j0 + r as i64)?;
+            let bit = 1u16 << (r * 4 + c);
+            let node = match (&mut cache, slot) {
+                (Some((cache, _)), Some(k)) => {
+                    if cache.entries[k].4 & bit == 0 {
+                        let v = c1_node(src, map, at.face, i0 + c as i64, j0 + r as i64)?;
+                        cache.entries[k].5[r * 4 + c] = v;
+                        cache.entries[k].4 |= bit;
+                    }
+                    cache.entries[k].5[r * 4 + c]
+                }
+                _ => c1_node(src, map, at.face, i0 + c as i64, j0 + r as i64)?,
+            };
+            cols += w_col * node;
         }
         rows += w_row * cols;
     }
+    debug_assert!(need != 0);
     Ok(rows as f32)
 }
 
@@ -995,6 +1084,9 @@ struct Gather {
 impl LatticeSource for Gather {
     fn res(&self) -> u32 {
         self.res
+    }
+    fn records_reads(&self) -> bool {
+        true
     }
     fn at(&self, face: Face, i: u32, j: u32) -> Result<GlobalSample, ReadError> {
         self.seen.lock().expect("gather mutex").push(cell_key(face.0, i, j));

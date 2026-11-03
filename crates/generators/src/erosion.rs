@@ -19,10 +19,17 @@ use planet_core::Vec3;
 use planet_world_def::{records_hash64, BodyId, GenContext, MissingNode, ReadRecord};
 
 use crate::global::{
-    read_direction, read_elevation_c1, LatticeSource, GLOBAL_VERSION, MAX_ELEVATION_M, MIN_ELEVATION_M, READER_C1_VERSION,
+    read_direction, read_elevation_c1, read_elevation_c1_cached, LatticeSource, StencilCache, GLOBAL_VERSION, MAX_ELEVATION_M,
+    MIN_ELEVATION_M, READER_C1_VERSION,
 };
 use crate::height::{layer_noise, layer_noise_bounds, HeightField};
 use crate::terrain::scan_base;
+
+thread_local! {
+    /// The C1 stencils this thread loaded (see [`read_elevation_c1_cached`]).
+    static STENCILS: std::cell::RefCell<StencilCache> = std::cell::RefCell::new(StencilCache::new());
+}
+static NEXT_FIELD_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 /// Bump whenever any output of this module changes (ADR 0006); it also covers [`GLOBAL_VERSION`] through the bake key.
 pub const EROSION_VERSION: u32 = 2;
@@ -30,7 +37,7 @@ pub const EROSION_VERSION: u32 = 2;
 pub const EROSION_IMPLEMENTATION_ID: &str = "cpu-erosion-v1";
 /// Bump whenever any output of the C1 variant changes (it also covers [`READER_C1_VERSION`] through its key).
 pub const EROSION_C1_VERSION: u32 = 1;
-/// Names the C1 variant in cache keys (GEN-107): the same field with the bake read by [`read_elevation_c1`] instead of the bilinear blend.
+/// Names the C1 variant in cache keys (GEN-107): the same field with the bake read by `read_elevation_c1` instead of the bilinear blend.
 pub const EROSION_C1_IMPLEMENTATION_ID: &str = "cpu-erosion-v2";
 
 /// Domain tag of the crease lattice.
@@ -161,6 +168,8 @@ pub struct ErosionField<'a> {
     landform: OnceLock<Arc<crate::global::LandformLattice>>,
     /// Whether the base is read by the C1 interpolant ([`EROSION_C1_IMPLEMENTATION_ID`]).
     c1: bool,
+    /// Names this field in the thread's stencil cache (one per built field).
+    id: u64,
 }
 
 impl ErosionField<'_> {
@@ -191,8 +200,19 @@ impl ErosionField<'_> {
     }
 
     fn base_via(&self, src: &dyn LatticeSource, dir: Vec3) -> f64 {
-        let read =
-            if self.c1 { read_elevation_c1(src, &TangentWarp, dir) } else { read_direction(src, &TangentWarp, dir).map(|s| s.elevation_m) };
+        self.base_via_c(src, dir, false)
+    }
+
+    /// [`Self::base_via`], with `cached` the C1 stencils kept in the thread's cache (a batch revisits the cells of its neighbours; one read does not).
+    fn base_via_c(&self, src: &dyn LatticeSource, dir: Vec3, cached: bool) -> f64 {
+        let read = if self.c1 && cached {
+            // One cache a thread: the same field's stencils are the same values from any source of the same bake.
+            STENCILS.with(|c| read_elevation_c1_cached(src, &TangentWarp, dir, &mut c.borrow_mut(), self.id))
+        } else if self.c1 {
+            read_elevation_c1(src, &TangentWarp, dir)
+        } else {
+            read_direction(src, &TangentWarp, dir).map(|s| s.elevation_m)
+        };
         match read {
             Ok(e) => f64::from(e),
             Err(e) => {
@@ -215,11 +235,16 @@ impl ErosionField<'_> {
     }
 
     fn gradient_via(&self, src: &dyn LatticeSource, d: Vec3) -> f64 {
+        self.gradient_via_c(src, d, false)
+    }
+
+    fn gradient_via_c(&self, src: &dyn LatticeSource, d: Vec3, cached: bool) -> f64 {
         let delta = self.delta();
         let mut g = Vec3::new(0.0, 0.0, 0.0);
         for a in [Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)] {
             let t = a - d * a.dot(d);
-            let rise = self.base_via(src, (d + t * delta).normalized()) - self.base_via(src, (d - t * delta).normalized());
+            let rise =
+                self.base_via_c(src, (d + t * delta).normalized(), cached) - self.base_via_c(src, (d - t * delta).normalized(), cached);
             g = g + t * (rise / (2.0 * delta));
         }
         g.length()
@@ -229,8 +254,12 @@ impl ErosionField<'_> {
 impl ErosionField<'_> {
     /// [`HeightField::height`] reading the lattice through `src`.
     fn height_via(&self, src: &dyn LatticeSource, dir: Vec3) -> f64 {
-        let e = self.base_via(src, dir);
-        let slope = self.gradient_via(src, dir) / self.radius_m;
+        self.height_via_c(src, dir, false)
+    }
+
+    fn height_via_c(&self, src: &dyn LatticeSource, dir: Vec3, cached: bool) -> f64 {
+        let e = self.base_via_c(src, dir, cached);
+        let slope = self.gradient_via_c(src, dir, cached) / self.radius_m;
         let c = carve(slope);
         // Where the slope factor is 1 the landform changes nothing (`fine_carve(1, L)` is 1), so it is not evaluated.
         let l = if c >= 1.0 { 0.0 } else { self.landform().at(dir) };
@@ -249,7 +278,7 @@ impl HeightField for ErosionField<'_> {
             self.base_via(g, d);
             self.gradient_via(g, d);
         };
-        crate::global::eval_gathered(&self.src, dirs, stop, &footprint, Some(GRADIENT_REACH_CELLS), &|s, d| self.height_via(s, d))
+        crate::global::eval_gathered(&self.src, dirs, stop, &footprint, Some(GRADIENT_REACH_CELLS), &|s, d| self.height_via_c(s, d, true))
     }
 
     /// [`HeightField::heights_until`] with the distinct blocks of the batch read on `threads` threads (GEN-020, LOD-009).
@@ -259,7 +288,7 @@ impl HeightField for ErosionField<'_> {
             self.gradient_via(g, d);
         };
         crate::global::eval_gathered_threads(&self.src, dirs, stop, par, &footprint, Some(GRADIENT_REACH_CELLS), &|s, d| {
-            self.height_via(s, d)
+            self.height_via_c(s, d, true)
         })
     }
 
@@ -305,7 +334,7 @@ impl HeightField for ErosionField<'_> {
             stop,
             &footprint,
             Some(GRADIENT_REACH_CELLS),
-            &|s, d| self.height_via(s, d),
+            &|s, d| self.height_via_c(s, d, true),
             &climate,
         )
     }
@@ -528,6 +557,7 @@ impl ErosionGenerator {
             error: Mutex::new(None),
             landform: OnceLock::new(),
             c1,
+            id: NEXT_FIELD_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         })
     }
 }
