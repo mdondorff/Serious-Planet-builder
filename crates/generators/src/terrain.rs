@@ -318,10 +318,19 @@ pub(crate) fn scan_base(
         }
         let (pu, pv) = ((s + 1.0) * half, (t + 1.0) * half);
         let clamp = |x: f64| x.clamp(0.0, f64::from(res));
+        // C1: the window is the stencil's own span (one cell below the cap's first cell, two above its last) in the interior of a face; within the stencil's reach
+        // of a face edge (ghosts of the neighbour) it takes the wide pad.
+        let near_edge = c1
+            && (pu - reach < C1_PAD_CELLS
+                || pu + reach > f64::from(res) - C1_PAD_CELLS
+                || pv - reach < C1_PAD_CELLS
+                || pv + reach > f64::from(res) - C1_PAD_CELLS);
+        let pad = if near_edge { pad } else { 0.0 };
         let (u0, u1, v0, v1) = (clamp(pu - reach - pad), clamp(pu + reach + pad), clamp(pv - reach - pad), clamp(pv + reach + pad));
         // Cells read: floor(u0) ..= floor(u1) and one more for the far neighbour of the blend, clamped to the lattice.
-        let (i0, i1) = (libm::floor(u0) as u32, (libm::floor(u1) as u32 + 1).min(res));
-        let (j0, j1) = (libm::floor(v0) as u32, (libm::floor(v1) as u32 + 1).min(res));
+        let (lo_pad, hi_pad) = if c1 && !near_edge { (1u32, 2u32) } else { (0, 1) };
+        let (i0, i1) = ((libm::floor(u0) as u32).saturating_sub(lo_pad), (libm::floor(u1) as u32 + hi_pad).min(res));
+        let (j0, j1) = ((libm::floor(v0) as u32).saturating_sub(lo_pad), (libm::floor(v1) as u32 + hi_pad).min(res));
         let (w, h) = ((i1 - i0 + 1) as usize, (j1 - j0 + 1) as usize);
         cells += (w * h) as u64;
         if cells > MAX_BOUNDS_CELLS {
