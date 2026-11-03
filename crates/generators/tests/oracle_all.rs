@@ -1,3 +1,5 @@
+#[path = "oracle_bake_thermal.rs"]
+mod oracle_bake_thermal;
 #[path = "oracle_compact_mirror.rs"]
 mod oracle_compact_mirror;
 #[path = "oracle_continents.rs"]
