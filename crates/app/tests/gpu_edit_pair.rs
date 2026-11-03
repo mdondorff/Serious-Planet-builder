@@ -26,6 +26,10 @@ fn the_pair_of_an_edit_is_trustworthy_and_its_verdict_per_view_is_reported() {
         "software",
         "--gen-priority",
         "normal",
+        // A run that must be reproducible pins the pool (STRM-020): the default is the machine's terrain share, one tile worker
+        // on a 4-thread CI runner since #1117, where the scene's wall-clock limits were set with two.
+        "--gen-workers",
+        "2",
         "--global-res",
         "128",
     ]
@@ -176,6 +180,10 @@ fn the_pair_in_metres_names_the_change_of_the_edit_and_what_the_drawn_node_can_s
         "software",
         "--gen-priority",
         "normal",
+        // A run that must be reproducible pins the pool (STRM-020): the default is the machine's terrain share, one tile worker
+        // on a 4-thread CI runner since #1117, where the scene's wall-clock limits were set with two.
+        "--gen-workers",
+        "2",
         "--global-res",
         "128",
     ]
