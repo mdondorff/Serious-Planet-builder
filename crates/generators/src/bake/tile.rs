@@ -4,7 +4,8 @@
 //! The layer grid has `cells` cells per face edge (98,304 for 101.8 m at Earth's size; fewer for a coarse planet pass), cut into square tiles of `tile` core cells (3,072) with a halo of
 //! `halo` cells (256) around each. A tile's window is `tile + 2 halo` cells a side; a window may reach past the face's edge, where the plane of the face continues over the neighbouring
 //! ground (the base and the face change are functions of the direction). The routing's jitter and the thermal's pair hash follow the GLOBAL cell of the face's grid, so two windows that
-//! hold a cell treat it alike: the tiles' seams show only what a window's border does within the halo.
+//! hold a cell treat it alike. A window's border still matters: the local carve caps the catchment area, but the deposition sweep routes the whole window, so its loads and capacities
+//! depend on where the border falls; the seam this leaves is measured (TEST-084), not assumed away.
 
 use super::carve::{carve, CarveParams};
 use super::deposit::{deposit_on_own_route, DepositParams, Kc};
@@ -69,6 +70,9 @@ impl TileGrid {
         if self.halo * 2 >= self.tile {
             return Err(format!("the halo ({} cells) must be under half the tile ({} cells)", self.halo, self.tile));
         }
+        if self.halo * 8 > self.cells {
+            return Err(format!("the halo ({} cells) must be at most an eighth of the face edge ({} cells): beyond that the extended plane stretches the cells", self.halo, self.cells));
+        }
         if self.window() < 3 || self.window().checked_mul(self.window()).is_none_or(|n| n >= u32::MAX as usize) {
             return Err(format!("a window of {} cells a side is too small or too large", self.window()));
         }
@@ -94,6 +98,9 @@ pub struct Pass2Params {
     /// The deposition's `kc` when no per-cell value is given, and its `zeta`.
     pub kc: f64,
     pub zeta: f64,
+    /// The local carve's catchments are capped at this many cells of area (96 is about 1 km^2 at 101.8 m); the cap in square metres follows the grid's cell size, so a coarse planet pass
+    /// keeps a cap of the same number of cells. `carve.max_area` is overwritten by it.
+    pub local_area_cells: f64,
     pub sea_level: f64,
     pub seed: u64,
 }
@@ -107,13 +114,14 @@ impl Pass2Params {
                 steps: 10,
                 breach_max_m: 0.0,
                 sea_level,
-                max_area: 1.0e6,
+                max_area: 0.0,
                 incise_only: true,
                 ..CarveParams::default()
             },
             thermal: ThermalParams { sea_level, ..ThermalParams::default() },
             kc: 1.0e5,
             zeta: 0.5,
+            local_area_cells: 96.0,
             sea_level,
             seed,
         }
@@ -128,9 +136,12 @@ pub struct TileStats {
     pub thermal_passes: usize,
     /// Cells that still gave in the last thermal pass: the unsettled slopes at the pass cap.
     pub thermal_moving_at_cap: usize,
+    /// Volumes of the deposition sweep over the whole window (the halo included), in cubic metres: eroded = deposited + exported.
     pub eroded_m3: f64,
     pub deposited_m3: f64,
     pub exported_m3: f64,
+    /// Cells of the core whose change is beyond the quantisation range (+-8,191.75 m) and is stored clamped.
+    pub clamped_cells: usize,
 }
 
 /// A tile's result: the core's change against the base field (final minus base, f32, row-major `tile x tile`; it contains the face carve's change) and the statistics.
@@ -195,7 +206,8 @@ pub fn pass2_tile(
     let outlet = grid.outlets(&z0, p.sea_level);
     let stream = face_stream(p.seed, id.face);
     let mut z = z0.clone();
-    carve(&grid, &mut z, &outlet, &p.carve, factors.as_deref(), stream);
+    let local = CarveParams { max_area: p.local_area_cells * g.dx() * g.dx(), ..p.carve };
+    carve(&grid, &mut z, &outlet, &local, factors.as_deref(), stream);
     drop(factors);
     let thermal_report = thermal(&grid, &mut z, &p.thermal, threads);
     let dep = deposit_on_own_route(
@@ -216,6 +228,7 @@ pub fn pass2_tile(
             land += usize::from(z0[q] > p.sea_level);
         }
     }
+    let core_clamped = core.iter().filter(|v| v.abs() > f32::from(i16::MAX) * QUANT_STEP_M).count();
     TileResult {
         id,
         core,
@@ -226,6 +239,7 @@ pub fn pass2_tile(
             eroded_m3: dep.eroded,
             deposited_m3: dep.deposited,
             exported_m3: dep.exported,
+            clamped_cells: core_clamped,
         },
     }
 }

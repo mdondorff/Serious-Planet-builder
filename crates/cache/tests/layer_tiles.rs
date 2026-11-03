@@ -167,13 +167,13 @@ fn a_damaged_tile_record_is_an_error_naming_the_tile() {
     let r = pass2_tile(&s.grid, tiles()[1], &base, &reader, None, &s.params, 2);
     let good = tile_record(&w, RES, &s, &r).unwrap();
     assert_eq!(good.kind, 13);
-    assert_eq!(&good.payload[49..65], &good.key.0[..]);
+    assert_eq!(&good.payload[57..73], &good.key.0[..]);
     for (name, damage) in [
         ("a short payload", Box::new(|p: &mut Vec<u8>| p.truncate(40)) as Box<dyn Fn(&mut Vec<u8>)>),
         ("another codec", Box::new(|p: &mut Vec<u8>| p[0] = 9)),
         ("another tile size", Box::new(|p: &mut Vec<u8>| p[1] = 25)),
-        ("another key inside", Box::new(|p: &mut Vec<u8>| p[50] ^= 1)),
-        ("counts that do not decompress", Box::new(|p: &mut Vec<u8>| p.truncate(70))),
+        ("another key inside", Box::new(|p: &mut Vec<u8>| p[58] ^= 1)),
+        ("counts that do not decompress", Box::new(|p: &mut Vec<u8>| p.truncate(80))),
     ] {
         let d = Dir::new("damaged");
         let mut bad = good.clone();

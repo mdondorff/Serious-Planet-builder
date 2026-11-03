@@ -19,8 +19,8 @@ use crate::relief_store::face_tile;
 
 /// The kind byte of a face's pass-1 change.
 pub const KIND_LAYER_FACE: u8 = Kind::LayerFace as u8;
-/// Version of the layer's record layout and of the meaning of its key. History: 1 = this layout.
-pub const LAYER_VERSION: u32 = 1;
+/// Version of the layer's record layout and of the meaning of its key. History: 1 = PR 4 first push, 2 = the carve's area cap and incise-only flag joined the key (a store of version 1 is refused as another key and is deleted by hand).
+pub const LAYER_VERSION: u32 = 2;
 const LAYER_IMPLEMENTATION_ID: &str = "erosion-layer-face";
 const CODEC_VERSION: u8 = 1;
 const HEADER_LEN: usize = 1 + 4 + 4 + 16;

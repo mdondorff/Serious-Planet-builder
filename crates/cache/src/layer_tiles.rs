@@ -4,7 +4,7 @@
 //! Record kind 13 ([`KIND_LAYER_TILE`]) filed under the tile's id at the level whose grid is the tile grid (`2^level` tiles a face edge). The key is the bake's stage key (the source), the
 //! bake's resolution, and under tag 16 the layer version, the kernel version, the tile grid, the radius, the pass-2 parameters, `inputs_id`, whether the carve factor is applied
 //! and a digest of the keys of the six pass-1 face records the tile was computed from (a changed pass 1 is another layer, ADR 0006). The payload is
-//! `codec (u8) | tile (u32 LE, core cells a side) | stats (land u64, thermal passes u32, thermal still moving u64, eroded, deposited, exported f64 LE) | key (16 bytes) |`
+//! `codec (u8) | tile (u32 LE, core cells a side) | stats (land u64, thermal passes u32, thermal still moving u64, eroded, deposited, exported f64 LE, clamped cells u64) | key (16 bytes) |`
 //! an lz4 block of the core's `i16` counts of 0.25 m (little-endian, row `j` outer, then `i`).
 
 use std::path::Path;
@@ -24,7 +24,7 @@ pub const KIND_LAYER_TILE: u8 = Kind::LayerTile as u8;
 pub const TILE_LAYER_VERSION: u32 = 1;
 const IMPLEMENTATION_ID: &str = "erosion-layer-tile";
 const CODEC_VERSION: u8 = 1;
-const HEADER_LEN: usize = 1 + 4 + 8 + 4 + 8 + 8 + 8 + 8 + 16;
+const HEADER_LEN: usize = 1 + 4 + 8 + 4 + 8 + 8 + 8 + 8 + 8 + 16;
 
 /// What a tile layer is made of besides the bake it is beside.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -43,6 +43,7 @@ impl TileLayerSpec {
         let mut b = Vec::with_capacity(256);
         b.extend(TILE_LAYER_VERSION.to_le_bytes());
         b.extend(planet_generators::bake::BAKE_KERNEL_VERSION.to_le_bytes());
+        b.extend(planet_generators::bake::PASS2_KERNEL_VERSION.to_le_bytes());
         for v in [self.grid.cells, self.grid.tile, self.grid.halo] {
             b.extend((v as u64).to_le_bytes());
         }
@@ -67,7 +68,7 @@ impl TileLayerSpec {
             b.extend(v.to_bits().to_le_bytes());
         }
         b.extend((t.passes as u64).to_le_bytes());
-        for v in [p.kc, p.zeta, p.sea_level] {
+        for v in [p.kc, p.zeta, p.local_area_cells, p.sea_level] {
             b.extend(v.to_bits().to_le_bytes());
         }
         b.extend(p.seed.to_le_bytes());
@@ -126,6 +127,7 @@ pub fn tile_record(world: &GlobalWorld, res: u32, spec: &TileLayerSpec, r: &Tile
     for v in [s.eroded_m3, s.deposited_m3, s.exported_m3] {
         payload.extend(v.to_bits().to_le_bytes());
     }
+    payload.extend((s.clamped_cells as u64).to_le_bytes());
     payload.extend(key.0);
     payload.extend(lz4_flex::compress(&raw));
     Ok(Record {
@@ -167,7 +169,7 @@ pub fn load_tile(
     let word = |a: usize, n: usize| &p[a..a + n];
     let u64_at = |a: usize| u64::from_le_bytes(word(a, 8).try_into().expect("eight bytes"));
     let f64_at = |a: usize| f64::from_bits(u64_at(a));
-    if word(5 + 8 + 4 + 8 + 24, 16) != key.0 {
+    if word(5 + 8 + 4 + 8 + 24 + 8, 16) != key.0 {
         return Err(what("its payload names another key than its record".into()));
     }
     let raw = lz4_flex::decompress(&p[HEADER_LEN..], t * t * 2).map_err(|e| what(format!("its counts do not decompress: {e}")))?;
@@ -182,6 +184,7 @@ pub fn load_tile(
         eroded_m3: f64_at(25),
         deposited_m3: f64_at(33),
         exported_m3: f64_at(41),
+        clamped_cells: u64_at(49) as usize,
     };
     Ok(Some(TileResult { id, core: dequantise(&counts), stats }))
 }

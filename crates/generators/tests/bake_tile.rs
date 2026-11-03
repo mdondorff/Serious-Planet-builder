@@ -44,7 +44,6 @@ fn the_local_carve_only_incises_and_does_not_fill_a_pit() {
     carve(&g, &mut z, &outlet, &p.carve, None, 11);
     assert!(z.iter().zip(&z0).all(|(a, b)| a <= b), "the local carve raised a cell");
     assert!(z.iter().zip(&z0).any(|(a, b)| a < b), "the local carve changed nothing");
-    assert!(z[pit] <= z0[pit], "the pit was filled");
 }
 
 // spec: GEN-101
@@ -125,10 +124,48 @@ fn the_cells_still_moving_at_the_pass_cap_are_reported_and_a_bad_geometry_is_ref
         ("a tile that does not divide the face", TileGrid { tile: 25, ..g }),
         ("a halo of half the tile", TileGrid { halo: 12, ..g }),
         ("no tile", TileGrid { tile: 0, ..g }),
+        ("a halo over an eighth of the face edge", TileGrid { cells: 64, tile: 64, halo: 31, radius_m: g.radius_m }),
     ] {
         assert!(bad.check().is_err(), "{what} was accepted");
     }
     assert!(g.check().is_ok());
-    // Two windows that hold the same cell agree on it: tiles (0, 0) and (1, 0) overlap in the halo, and their core cells next to the shared edge are within the quantisation of each other's window.
     assert_eq!(g.all_tiles().len(), 6 * 16);
+}
+
+// spec: GEN-101
+#[test]
+fn the_catchment_cap_follows_the_cell_size_so_a_coarse_grid_keeps_its_drainage() {
+    // The same ground on a grid of 100 m cells and on one of 3 km cells: the cap is 96 cells of area on both, so the coarse carve is not a uniform lowering.
+    let p = Pass2Params::standard(9, 0.0);
+    assert_eq!(p.local_area_cells, 96.0);
+    let coarse = TileGrid { cells: 96, tile: 24, halo: 6, radius_m: 3000.0 * 96.0 / core::f64::consts::FRAC_PI_2 };
+    let fine = grid();
+    let lowered = |g: &TileGrid| pass2_tile(g, tile(1, 1), &base, &nothing, None, &p, 2).core.iter().filter(|v| **v < -0.25).count();
+    let (c, f) = (lowered(&coarse), lowered(&fine));
+    assert!(c > 0 && f > 0, "a grid changed nothing: {c}, {f}");
+}
+
+// spec: TEST-084
+// Reported, not judged: on a smooth base the seam of the tiles' change next to the step between neighbouring cells (a tier A stand-in; TEST-084 stays NOT RUN until SPIKE-70's four sites).
+#[test]
+fn the_seam_on_a_smooth_base_is_reported() {
+    let (g, p) = (grid(), Pass2Params::standard(9, 0.0));
+    let n = g.tile;
+    let smooth = |d: Vec3| 150.0 + 90.0 * libm::sin(3.0 * d.x + 0.4) * libm::cos(2.0 * d.y) + 40.0 * libm::sin(5.0 * d.z);
+    let results: Vec<_> = (0..3u32).map(|ti| pass2_tile(&g, tile(ti, 1), &smooth, &nothing, None, &p, 2)).collect();
+    let (mut seam, mut inner) = (Vec::new(), Vec::new());
+    for ti in 0..2 {
+        for j in 0..n {
+            let (a, b) = (&results[ti], &results[ti + 1]);
+            seam.push(f64::from(a.core[j * n + n - 1] - b.core[j * n]).abs());
+            inner.push(f64::from(a.core[j * n + n - 2] - a.core[j * n + n - 1]).abs());
+        }
+    }
+    let p99 = |v: &mut Vec<f64>| {
+        v.sort_by(f64::total_cmp);
+        v[(v.len() as f64 * 0.99) as usize]
+    };
+    let (s, i) = (p99(&mut seam), p99(&mut inner));
+    println!("smooth base: seam p99 {s:.2} m, inner p99 {i:.2} m");
+    assert!(s.is_finite() && i.is_finite());
 }

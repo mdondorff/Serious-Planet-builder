@@ -140,14 +140,15 @@ fn main() {
     let surface = |d: Vec3| base(d) + reader(d);
     let planet_pass = tiles_wanted.is_none();
     let tiles: Vec<PassTile> = tiles_wanted.unwrap_or_else(|| {
-        let stride = (tile / 96).max(1);
+        // The look is at pass 1's own lattice (a tile with no land cell there has no pass-1 change to keep when pass 1 is dropped).
+        let stride = (grid.cells / o.face_res).max(1);
         let all = grid.all_tiles();
         let land: Vec<PassTile> = all.iter().copied().filter(|&t| tile_has_land(&grid, t, &surface, 0.0, stride)).collect();
-        println!("pass 2: {} land tiles of {} (looked at every {stride}th cell)", land.len(), all.len());
+        println!("pass 2: {} land tiles of {} (looked at every {stride}th cell, pass 1's lattice)", land.len(), all.len());
         land
     });
     let mut report =
-        String::from("face tile_i tile_j land_cells thermal_passes thermal_moving_at_cap eroded_m3 deposited_m3 exported_m3 seconds\n");
+        String::from("face tile_i tile_j land_cells thermal_passes thermal_moving_at_cap window_eroded_m3 window_deposited_m3 window_exported_m3 clamped_cells seconds\n");
     let tile_res = o.planet_res as u32;
     let mut clock = Instant::now();
     let done = run_pass2(
@@ -174,8 +175,8 @@ fn main() {
                 mib()
             );
             report.push_str(&format!(
-                "{} {} {} {} {} {} {:.6e} {:.6e} {:.6e} {secs:.2}\n",
-                r.id.face.0, r.id.ti, r.id.tj, s.land_cells, s.thermal_passes, s.thermal_moving_at_cap, s.eroded_m3, s.deposited_m3, s.exported_m3
+                "{} {} {} {} {} {} {:.6e} {:.6e} {:.6e} {} {secs:.2}\n",
+                r.id.face.0, r.id.ti, r.id.tj, s.land_cells, s.thermal_passes, s.thermal_moving_at_cap, s.eroded_m3, s.deposited_m3, s.exported_m3, s.clamped_cells
             ));
         },
     )
