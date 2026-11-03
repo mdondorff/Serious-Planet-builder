@@ -301,7 +301,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     var vis = -1.0;
     if (t.x > 1.0e-6) {
-        vis = t.y / t.x;
+        // A weighted mean of values in [0, 1] can land an ulp above 1 (observed on the RTX: 1.0000001): the visibility is a share.
+        vis = clamp(t.y / t.x, 0.0, 1.0);
     }
     textureStore(out_up, p, vec4<f32>(vis, t.z, 0.0, 0.0));
 }
@@ -395,7 +396,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             result = mean / n;
         }
     }
-    textureStore(out_shadow, p, vec4<f32>(result, 0.0, 0.0, 0.0));
+    textureStore(out_shadow, p, vec4<f32>(clamp(result, 0.0, 1.0), 0.0, 0.0, 0.0));
 }
 "#;
 
