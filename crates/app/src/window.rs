@@ -47,29 +47,16 @@ pub const NO_DISPLAY: &str = "no display: ";
 /// Frames the smoke run drives before it closes the window.
 const SMOKE_FRAMES: u64 = 48;
 
-/// The land the default descent snaps to lies this far inland of the shore it finds, metres (the shore walk keeps land 500 m in; a kilometre is a beach, not the surf).
-const SNAP_INLAND_M: f64 = 1_000.0;
-
-/// The `(latitude, longitude)` in degrees the scripted descent opens over (GEN-108): the `--site` option if given, else the world definition's `[world] site`, else the default
-/// site (20 N, 30 E) when that is land, else the first land of the shore walk from it ([`planet_frame::litscenes::find_coast`], `SNAP_INLAND_M` inland): a pure function of
-/// the world, so every run opens on the same land. The default site itself when the walk finds no shore.
+/// The `(latitude, longitude)` in degrees the scripted descent opens over (GEN-108): the `--site` option if given, else the world definition's `[world] site`, else the land
+/// the default site's shore walk finds ([`planet_frame::litscenes::default_land_site`], at the definition's sea level): a pure function of the world.
 pub fn descent_site(option: Option<(f64, f64)>, world: &WorldTerrain, field: &dyn HeightField, radius_m: f64) -> (f64, f64) {
-    if let Some(site) = option.or_else(|| world.definition().site()) {
+    let def = world.definition();
+    if let Some(site) = option.or_else(|| def.site()) {
         return site;
     }
-    let default = planet_core::Vec3::from_lat_lon(SITE_LAT_DEG.to_radians(), SITE_LON_DEG.to_radians());
+    let level_m = def.sea(planet_world_def::BodyId::PLANET).map_or(0.0, |s| s.level_m);
     let is_sea = |d: planet_core::Vec3| crate::litperf::carries_sea(world, d);
-    if field.height(default) >= 0.0 && !is_sea(default) {
-        return (SITE_LAT_DEG, SITE_LON_DEG);
-    }
-    match planet_frame::litscenes::find_coast(&is_sea, &|d| field.height(d), 0.0, SITE_LAT_DEG, SITE_LON_DEG, radius_m) {
-        Some(coast) => {
-            let land = (coast.dir + coast.heading * (SNAP_INLAND_M / radius_m)).normalized();
-            let (lat, lon) = land.lat_lon();
-            (lat.to_degrees(), lon.to_degrees())
-        }
-        None => (SITE_LAT_DEG, SITE_LON_DEG),
-    }
+    planet_frame::litscenes::default_land_site(&is_sea, &|d| field.height(d), level_m, (SITE_LAT_DEG, SITE_LON_DEG), radius_m)
 }
 /// Frames after which a smoke run that has presented nothing gives up (a window that is never shown is not a pass).
 const SMOKE_GIVE_UP: u64 = 1500;
@@ -2701,6 +2688,7 @@ mod site_tests {
         }
         eprintln!("default site: {kept} seeds kept 20,30 and {moved} moved to a shore");
         assert_eq!(kept + moved, 6);
+        assert!(moved >= 1, "at least one seed has sea at 20 N 30 E, so the snap is exercised");
     }
 }
 

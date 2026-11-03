@@ -18,7 +18,8 @@ use std::fmt;
 use crate::{is_height_field_path, valid_implementation_id, NodeValue, WorldDefinition, HEIGHT_FIELD_PATH, SITE_PATH};
 
 /// Schema version this build writes and reads without migration.
-/// History: 1 = the first layout; 2 = adds the liquid table (`liquid.<k>.*`) and the sea of a body (`body.<n>.sea.*`), WDEF-006.
+/// History: 1 = the first layout; 2 = adds the liquid table (`liquid.<k>.*`) and the sea of a body (`body.<n>.sea.*`), WDEF-006; `world.site` (GEN-108) was added within 2: an optional key, so
+/// older files load unchanged (the migration is the identity), and a build from before it refuses a file that has it, naming the path.
 pub const SCHEMA_VERSION: u32 = 2;
 
 const VERSION_KEY: &str = "schema_version";

@@ -394,3 +394,11 @@ fn a_bad_descent_site_is_refused_naming_the_key() {
         assert!(e.contains("world.site"), "{bad}: {e}");
     }
 }
+
+// spec: GEN-108
+#[test]
+#[should_panic(expected = "reserved for the descent site")]
+fn the_site_path_is_not_available_to_nodes() {
+    let mut d = planet();
+    d.set("world.site", NodeValue::F64(1.0));
+}

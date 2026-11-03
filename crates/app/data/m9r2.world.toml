@@ -1,6 +1,6 @@
 # The world of the shared store `global16384-m9r2` (seed 1, the default world's radius), with the descent site the viewer opens over (GEN-108): the hills of the
 # m9r2 world, ground 1,353 m with 948 m of relief within 3 km. The site is presentation: this definition hashes as the default seed-1 world does, so it opens the same store.
-# Use: `planet editor --store C:/DEV/SeriousPlanetData/global16384-m9r2 --world crates/app/data/m9r2.world.toml`
+# Use: `planet editor --store <the m9r2 store directory> --world crates/app/data/m9r2.world.toml`
 schema_version = 2
 
 [body.0]
