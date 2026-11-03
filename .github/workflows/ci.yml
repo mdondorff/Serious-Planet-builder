@@ -20,15 +20,16 @@ env:
 
 jobs:
   # Each OS runs its jobs in parallel (SPIKE-15 / BUILD-014: the WARP job took about 20 min as one job, the sum of its steps):
-  # `test` (tiers A+B in two parts; part 2 also checks, the determinism manifest and the run modes) and tier C on the software adapter
+  # `test` (tiers A+B in three parts; part 2 also checks, the determinism manifest and the run modes) and tier C on the software adapter
   # (`gpu-build` and `gpu` on Windows, `gpu-linux`). `test`, `gpu-build` and `gpu-linux` build the workspace; the Windows tier-C parts
   # run `gpu-build`'s archive.
-  # Tiers A+B run in two parts per OS (`--partition count:N/2`, every test in exactly one part; BUILD-036): as one job the Windows test
-  # step took 806 s (257 s build, 548 s tests) beside the manifest and checks, 16.4 min against BUILD-014's 16 (#1128). Part 2 also runs
-  # the manifest, check, spec-lint, licences and the run-mode starts: the count partition gives part 1 the slower tests (495 s against
-  # 272 s on Windows, #1134), so the checks go to part 2.
+  # Tiers A+B run in three parts per OS (`--partition hash:N/3`, every test in exactly one part, placed by its name alone; BUILD-036). With
+  # two count parts Windows part 1 took 16m20s against 14m08s (test steps 535 s against 209 s, #1134): the relief-band gate holds every
+  # slot for 137 s, and no two-part split of the measured durations leaves both jobs under BUILD-014's 16 min (ab-balanced-parts). Hash
+  # does not reshuffle the parts when a test is added. Part 2 also runs the manifest, check, spec-lint, licences and the run-mode starts
+  # (about 216 s on Windows); the gate falls in part 3.
   test:
-    name: ${{ matrix.name }} A+B ${{ matrix.part }}/2
+    name: ${{ matrix.name }} A+B ${{ matrix.part }}/3
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -40,12 +41,18 @@ jobs:
           - name: windows (WARP)
             os: windows-latest
             part: 2
+          - name: windows (WARP)
+            os: windows-latest
+            part: 3
           - name: linux (lavapipe)
             os: ubuntu-24.04
             part: 1
           - name: linux (lavapipe)
             os: ubuntu-24.04
             part: 2
+          - name: linux (lavapipe)
+            os: ubuntu-24.04
+            part: 3
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -90,7 +97,7 @@ jobs:
         if: matrix.part == 2
         run: cargo deny check licenses bans sources
       - name: test (tiers A+B)
-        run: cargo xtask test -- --partition count:${{ matrix.part }}/2
+        run: cargo xtask test -- --partition hash:${{ matrix.part }}/3
       - name: run modes start (CON-01)
         if: matrix.part == 2
         run: |
