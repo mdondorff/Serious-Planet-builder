@@ -80,3 +80,21 @@
 
 ### 6. Open for R7 (the scorecard)
 - A 9-sample ring on a 4.9 km lattice aliases relief under 10 km (the numerics review measured a neighbour-to-neighbour `|dm|` of about 122 m on a 7-9 km test surface), and the runtime base `m + k (e - m)` multiplies it by `(1 - k)`, up to 6.5. SPIKE-66 and ADR 0088 chose the stencil; the scorecard on the baked field is where it shows. No change now.
+
+### 7. Run modes: a coarse planet pass and full-resolution regions (owner, 2026-11-02, the I5b snapshot)
+The bake code takes the resolution and the region as parameters, so one code path serves the snapshot (I5b), the full bake (I6) and, later, global authoring.
+| Parameter | Full bake | I5b snapshot |
+|---|---|---|
+| Planet resolution (`--planet-res N`, cells per face edge of pass 2's grid) | 98,304 (101.8 m) | a divisor of it, e.g. 12,288 (814 m: pass 2 on the face-carve grid, about 1/64 of the cost) |
+| Face carve grid (pass 1) | 12,288 (814 m) | the same (pass 1 is the cheap pass: 3 min a face) |
+| Region (`--region <tile list>`) | every land tile (2,140) | 30-40 sample tiles at full resolution (101.8 m), picked from a list file |
+| Channels (`k`, `m`) | 2048 cells per face edge | the same or coarser: the reader takes the cells from the channels |
+- The erosion layer's key carries the grid resolution (cells per face edge) and the region mode, so a coarse layer and a full layer never share a key; a tile record carries its level and cells (STRM-066 follows).
+- A region run reads the face change from pass 1 (bilinear) and runs the tile driver on the listed tiles only; a planet pass at reduced resolution runs the same tile driver with a coarser grid over every land tile. The two do not need each other: a region can be run without the planet pass.
+- Non-editor: the modes are `generate` options (`--planet-res`, `--region`, `--erosion-layer DIR`) under the heavy-run lock, with checkpoints and `--resume`; they write the layer and preview maps (land and sea, elevation with hillshade, the layer's change, the `k` and `m` channels) beside it, so the snapshot needs no viewer.
+- **Which PR makes I5b runnable:** PR 3 (kernels) and PR 4 (face carve, `--planet-res`, parameterized resolution) come first; **PR 5 (tile driver with `--region` and the layer writer) is the first PR that makes the snapshot runnable in full** (pass 1 on the planet, pass 2 on the sample tiles and optionally at the reduced planet resolution, preview maps from the stored layer). After PR 4 alone a planet-level preview of pass 1 (the carved base at 814 m, no thermal or deposition) can be rendered; it is a partial look, not the snapshot. PR 6 (the runtime layer) and PR 7 (the overnight bake) are not needed for the snapshot.
+- Order for the earliest snapshot: PR 3 splits into 3a (flood, receivers, order, carve, breach: what pass 1 needs) and 3b (active-cell thermal, deposition and the timing gate: what pass 2 needs); the order is 3a, 4, 3b, 5. The snapshot's maps are produced by PR 5.
+
+### 8. Open points
+- A body whose relief scale is not 1: the relief channels are of the unscaled bake, so `ErosionField::with_relief` returns an error naming the scale (interim departure, accepted by the planner 2026-11-02, no ADR). How a scaled body's `m` and `e` scale together is decided at the app wiring.
+- The plan check (TEST-083) and the level-step probe with the switch on need the baked channels of `global16384`.
