@@ -36,6 +36,8 @@ mod continents;
 mod coupled_fill;
 #[path = "coupled_lens.rs"]
 mod coupled_lens;
+#[path = "crease_band.rs"]
+mod crease_band;
 #[path = "descriptors.rs"]
 mod descriptors;
 #[path = "erosion.rs"]

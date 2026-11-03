@@ -1,0 +1,1 @@
+- 2026-11-03 creases-below-layer (inbox #54): GEN-109, ADR 0098: `ErosionField::with_crease_band` drops the crease octaves above the erosion layer's grid (2 to 4 cells, a log-wavelength fade) on land, off unless called (today's field bit for bit); the runtime layer read (m9-bake PR 6) calls it

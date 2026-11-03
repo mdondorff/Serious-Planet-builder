@@ -21,7 +21,7 @@
 
 ### 2. Runtime base and bounds
 - `h = m + k (e - m) + k A(e, carve) S`, plus the erosion layer (decision 4). With the switch off, `k = 1` and `m` is not read: today's field bit for bit.
-- Bounds over a cap: `e` from the bake scan, `k` and `m` from their blocks. Then `m + k (e - m)` from the intervals, the creases times `[k_lo, k_hi]`, and the layer's block range added. The bounds of nested caps nest (LOD-012).
+- Bounds over a cap: `e` from the bake scan, `k` and `m` from their blocks. Then `m + k (e - m)` from the intervals, the creases (GEN-109: the band's octaves where the layer is read) times `[k_lo, k_hi]`, and the layer's block range added. The bounds of nested caps nest (LOD-012).
 - Level steps grow with `k` (SPIKE-66: x6 at every level). The gate (criterion 6) and a tier-B level-step check on the baked field decide whether tau or the morph range needs a change.
 
 ### 3. Bake kernels (`generators/src/bake/`)
