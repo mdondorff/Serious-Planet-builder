@@ -158,25 +158,31 @@ fn the_carve_keeps_the_outlets_uplifts_the_land_stays_above_the_receivers_and_is
     println!("cone carve fingerprint {}", fnv(&bits(&z)));
     assert_eq!(fnv(&bits(&z)), CONE_FINGERPRINT, "the carve's output changed (or differs on this platform)");
     let uplift = params.u_over_k * params.k_dt * params.steps as f64;
-    let mut rose = 0;
     for p in 0..n * n {
         if outlet[p] {
             assert_eq!(z[p].to_bits(), cone[p].to_bits(), "an outlet moved");
         } else {
             assert!(z[p] <= cone[p] + uplift + 1e-9, "cell {p} rose by more than the uplift");
-            rose += usize::from(z[p] > cone[p]);
             let rec = r.receiver[p];
             if rec != NONE {
                 assert!(z[p] > z[rec as usize], "cell {p} is not above its receiver after the carve");
             }
         }
     }
-    // With the area shared among the lower neighbours (the multiple-flow-direction area, kernel version 2) the default uplift of 20 m is out-incised on this cone; an uplift ten times
-    // the default is not, so the uplift term is still applied and shows.
-    let mut z_up = cone.clone();
-    carve(&g, &mut z_up, &outlet, &CarveParams { u_over_k: 10.0 * params.u_over_k, ..params }, None, 11);
-    rose += (0..n * n).filter(|&p| !outlet[p] && z_up[p] > cone[p]).count();
-    assert!(rose > 0, "no cell was uplifted");
+    // The uplift is applied at the default parameters: against the same carve without it (`u_over_k` 0) far more cells end higher than lower. (With the area shared among the
+    // lower neighbours the default uplift of 20 m is out-incised on this cone, so no cell rises above its input, which is why the comparison is with the carve without uplift.)
+    let mut z_flat = cone.clone();
+    carve(&g, &mut z_flat, &outlet, &CarveParams { u_over_k: 0.0, ..params }, None, 11);
+    let (mut higher, mut lower) = (0, 0);
+    for p in (0..n * n).filter(|&p| !outlet[p]) {
+        higher += usize::from(z[p] > z_flat[p] + 1e-9);
+        lower += usize::from(z[p] < z_flat[p] - 1e-9);
+    }
+    // (A cell or two end lower: the uplift moves a drainage path a little.)
+    assert!(
+        higher > 100 && lower * 50 <= higher,
+        "the uplift of {uplift} m is not applied: {higher} cells end higher and {lower} lower than the carve without uplift"
+    );
     let (trunk, _) = (0..n * n).filter(|&p| !outlet[p]).map(|p| (p, r.area[p])).fold((0, 0.0), |b, x| if x.1 > b.1 { x } else { b });
     assert!(
         r.area[trunk] > 10.0 * DX * DX && cone[trunk] - z[trunk] > 0.0,

@@ -38,6 +38,9 @@ pub fn route(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64, seed: u64, m
     let n = grid.len();
     let filled = priority_flood(grid, z, outlet, epsilon);
     let receiver = receivers(grid, &filled, outlet, seed);
+    // The area comes first so that the filled surface (8 bytes a cell) is dropped before the donor lists and the order are built: a face at 12,288 cells has 1.6e8 cells.
+    let mut area = mfd_area(grid, &filled, outlet);
+    drop(filled);
     // The donors in compressed form, then the stack from the outlets: each cell comes after its receiver.
     let mut order = Vec::with_capacity(n);
     {
@@ -67,7 +70,6 @@ pub fn route(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64, seed: u64, m
         }
     }
     assert_eq!(order.len(), n, "the order does not reach every cell: a cell drains in a cycle");
-    let mut area = mfd_area(grid, &filled, outlet);
     if max_area > 0.0 {
         for a in &mut area {
             *a = a.min(max_area);
@@ -109,7 +111,7 @@ fn receivers(grid: &Grid, filled: &[f64], outlet: &[bool], seed: u64) -> Vec<u32
 fn mfd_area(grid: &Grid, filled: &[f64], outlet: &[bool]) -> Vec<f64> {
     let n = grid.len();
     let mut by_height: Vec<u32> = (0..n as u32).collect();
-    by_height.sort_by(|&a, &b| filled[b as usize].total_cmp(&filled[a as usize]).then(a.cmp(&b)));
+    by_height.sort_unstable_by(|&a, &b| filled[b as usize].total_cmp(&filled[a as usize]).then(a.cmp(&b)));
     let mut area = vec![grid.dx() * grid.dx(); n];
     for &p in &by_height {
         let p = p as usize;

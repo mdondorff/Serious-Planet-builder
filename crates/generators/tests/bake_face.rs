@@ -208,3 +208,31 @@ fn the_pass_1_change_is_read_with_catmull_rom_exact_at_the_cells_and_smooth_acro
         assert!((left_j - right_j).abs() < 0.03 * scale(left_j, right_j), "kink along j at ({ci}, {cj}): {left_j} against {right_j}");
     }
 }
+
+// spec: GEN-101
+#[test]
+fn the_pass_1_change_read_stays_within_the_cells_around_the_point() {
+    use planet_generators::bake::map::change_in_face;
+    // One cell cut by 100 m in a plane of zeros: a Catmull-Rom read alone would rise above 0 beside it (levees) by about 7 % of the cut; the read stays within the four cells' range.
+    let s = FaceSpec { halo: 2, ..spec(0, 16) };
+    let m = s.cells + 2 * s.halo;
+    let mut change = vec![0.0f32; m * m];
+    let (ci, cj) = (8usize + s.halo, 8usize + s.halo);
+    change[cj * m + ci] = -100.0;
+    let fc = FaceChange { face: s.face, cells: s.cells, halo: s.halo, change };
+    let dir = |si: f64, sj: f64| {
+        use planet_core::cube::{face_to_direction, TangentWarp};
+        let n = s.cells as f64;
+        face_to_direction(&TangentWarp, s.face, 2.0 * (si + 0.5) / n - 1.0, 2.0 * (sj + 0.5) / n - 1.0)
+    };
+    let mut lowest = 0.0f64;
+    for a in 0..40 {
+        for b in 0..40 {
+            let (si, sj) = (6.0 + f64::from(a) * 0.1, 6.0 + f64::from(b) * 0.1);
+            let v = change_in_face(&fc, dir(si, sj));
+            assert!((-100.0 - 1e-9..=1e-9).contains(&v), "a read of {v} at ({si}, {sj}) leaves the range of the cells");
+            lowest = lowest.min(v);
+        }
+    }
+    assert!(lowest < -99.0, "the cut cell's value was not reached: {lowest}");
+}
