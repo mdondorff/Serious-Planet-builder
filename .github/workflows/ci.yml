@@ -20,11 +20,12 @@ env:
 
 jobs:
   # Each OS runs its jobs in parallel (SPIKE-15 / BUILD-014: the WARP job took about 20 min as one job, the sum of its steps):
-  # `test` (tiers A+B in two parts; part 1 also checks, the determinism manifest and the run modes) and `gpu` (tier C on the software
+  # `test` (tiers A+B in two parts; part 2 also checks, the determinism manifest and the run modes) and `gpu` (tier C on the software
   # adapter). Every job builds the workspace.
   # Tiers A+B run in two parts per OS (`--partition count:N/2`, every test in exactly one part; BUILD-036): as one job the Windows test
-  # step took 806 s (257 s build, 548 s tests) beside the manifest and checks, 16.4 min against BUILD-014's 16 (#1128). Part 1 also runs
-  # the manifest, check, spec-lint, licences and the run-mode starts.
+  # step took 806 s (257 s build, 548 s tests) beside the manifest and checks, 16.4 min against BUILD-014's 16 (#1128). Part 2 also runs
+  # the manifest, check, spec-lint, licences and the run-mode starts: the count partition gives part 1 the slower tests (495 s against
+  # 272 s on Windows, #1134), so the checks go to part 2.
   test:
     name: ${{ matrix.name }} A+B ${{ matrix.part }}/2
     runs-on: ${{ matrix.os }}
@@ -69,28 +70,28 @@ jobs:
           vulkaninfo --summary
           apt-cache policy mesa-vulkan-drivers | head -4
       - name: determinism manifest (GEN-003)
-        if: matrix.part == 1
+        if: matrix.part == 2
         run: cargo run -q -p planet -- generate --manifest target/det/manifest-${{ runner.os }}.txt
       - name: upload determinism manifest
-        if: matrix.part == 1
+        if: matrix.part == 2
         uses: actions/upload-artifact@v4
         with:
           name: det-manifest-${{ runner.os }}
           path: target/det/manifest-${{ runner.os }}.txt
           if-no-files-found: error
       - name: check (fmt, clippy, layering)
-        if: matrix.part == 1
+        if: matrix.part == 2
         run: cargo xtask check
       - name: spec-lint
-        if: matrix.part == 1
+        if: matrix.part == 2
         run: cargo xtask spec-lint
       - name: licences (CON-27)
-        if: matrix.part == 1
+        if: matrix.part == 2
         run: cargo deny check licenses bans sources
       - name: test (tiers A+B)
         run: cargo xtask test -- --partition count:${{ matrix.part }}/2
       - name: run modes start (CON-01)
-        if: matrix.part == 1
+        if: matrix.part == 2
         run: |
           cargo run -q -p planet -- editor --smoke --no-window
           cargo run -q -p planet -- generate --smoke

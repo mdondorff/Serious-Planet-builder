@@ -82,7 +82,7 @@ mod tests {
 
     // spec: BUILD-036
     #[test]
-    fn tiers_a_and_b_run_in_two_parts_per_os_and_part_one_alone_runs_the_checks_and_the_manifest() {
+    fn tiers_a_and_b_run_in_two_parts_per_os_and_part_two_alone_runs_the_checks_and_the_manifest() {
         let w = workflow();
         let job = w
             .split(
@@ -103,8 +103,8 @@ mod tests {
         assert_eq!(job.matches("os: windows-latest").count(), 2, "two Windows parts");
         assert_eq!(job.matches("os: ubuntu-24.04").count(), 2, "two Linux parts");
         assert_eq!((job.matches("part: 1").count(), job.matches("part: 2").count()), (2, 2));
-        // The determinism manifest (its upload too), check, spec-lint, licences and the run-mode starts run once per OS, in part 1.
-        assert_eq!(job.matches("if: matrix.part == 1").count(), 6, "{job}");
+        // The determinism manifest (its upload too), check, spec-lint, licences and the run-mode starts run once per OS, in part 2.
+        assert_eq!(job.matches("if: matrix.part == 2").count(), 6, "{job}");
         for step in [
             "determinism manifest (GEN-003)",
             "check (fmt, clippy, layering)",
@@ -113,7 +113,7 @@ mod tests {
             "run modes start (CON-01)",
         ] {
             let after = job.split(&format!("name: {step}")).nth(1).unwrap_or_else(|| panic!("no step `{step}`"));
-            assert!(after.trim_start().starts_with("if: matrix.part == 1"), "`{step}` runs in part 1 only");
+            assert!(after.trim_start().starts_with("if: matrix.part == 2"), "`{step}` runs in part 2 only");
         }
         assert!(
             job.contains("name: test-logs-${{ runner.os }}-ab-${{ matrix.part }}")
