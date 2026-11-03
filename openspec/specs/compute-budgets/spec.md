@@ -207,3 +207,18 @@ Source: ADR 0092 point 4, SPIKE-89 (topology detection)
 #### Scenario: The cap and the override
 - **WHEN** 12 performance threads are detected in a process allowed 8, and the overrides `12,8`, `0,4` and `x` are read
 - **THEN** P is 8; the first override gives 12 and 8, the others are refused with their text
+
+### Requirement: BUDG-014 World build time shares
+The world build (the whole offline run from a WorldDefinition to a store, ADR 0097) SHALL finish within 24 h on the reference machine, split into shares of that day: terrain 40 % (field bake, erosion bake passes 1 and 2, wet floor, coupled run, pre-fill), future content 40 % (fauna, instancing, cities), margin 20 % (values proposed; the owner confirms them). The world build SHALL report each stage's wall time and each share's sum against the share's hours; a stage has no limit of its own. A full world build SHALL start only after the owner approves its preview (a coarse-planet or region mode of every stage).
+
+Verify: C
+Status: planned
+Source: ADR 0097
+
+#### Scenario: A slow stage inside its share
+- **WHEN** the field bake takes 17 min and the terrain stages together take 6 h
+- **THEN** the report lists every stage, terrain's 6 h against its 9.6 h, and the world build passes
+
+#### Scenario: A share over its hours
+- **WHEN** the terrain stages together take 11 h
+- **THEN** the report names terrain's share with 11 h against 9.6 h, and the world build fails

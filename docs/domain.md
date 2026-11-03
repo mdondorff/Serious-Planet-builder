@@ -107,11 +107,16 @@ A tile is what the camera sees and changes with distance; a fixed grid (CON-08's
 | reach | the distance beyond which an item changes nothing | world-def | accepted |
 | footprint | the items whose reach touches a tile | world-def | accepted |
 | summary node | a hash over the items in a quadtree cell; makes coarse tiles' keys change when an item inside changes | world-def | accepted |
-| global bake | the planet-wide coarse lattice, a pure function of the seed (channels in section 1) | generators, cache | accepted |
+| world build | the whole offline run from a WorldDefinition to a store; within a day, in shares (ADR 0097, BUDG-014) | generators, cache | accepted |
+| field bake | the planet-wide coarse lattice, a pure function of the seed (channels in section 1); the first stage of the world build | generators, cache | accepted |
+| global bake | former name of the field bake (ADR 0097 point 6); identifiers are renamed when touched | generators, cache | retiring |
+| erosion bake | passes 1 and 2 of M9's offline erosion (ADR 0088); writes the erosion layer | generators | accepted |
+| pre-fill | the world-build stage that writes coarse tiles into the store before the first flight | cache | accepted |
+| wet floor | per lattice vertex, the lowest level the ocean reaches it at over any path (GEN-031) | generators | accepted |
 | global coupled run | drainage and the river network over time on the bake lattice, stored beside the bake (ADR 0077) | generators | accepted |
 | hill band | a ridged three-octave band (8, 4 and 2 km wavelengths) the bake adds to land elevation, 0 at the coast, at most 1,000 m (GEN-064) | generators | accepted |
 | landform driver | a 0..1 value per bake direction that sets how much fine relief the hill band and the detail octaves get (GEN-062, GEN-064) | generators | accepted |
-| store | a directory holding a stored bake, its coupled run and pre-filled coarse tiles | cache | accepted |
+| store | the result of the world build: a directory holding the field bake, its channels, the coupled run, the erosion layer and pre-filled coarse tiles; versioned by generator round (`global16384-m9r2`) | cache | accepted |
 | tile pack | append-only file of cached records (tiles, bake blocks) keyed by cache key | cache | accepted |
 | cache key | a hash of everything a result depends on: field, version, implementation, read set, upstream keys | cache, generators | accepted |
 | field | a pure function from a direction on the sphere to a value (height in metres for `HeightField`) | generators | accepted |
@@ -163,7 +168,7 @@ A tile is what the camera sees and changes with distance; a fixed grid (CON-08's
 ## 5. What runs where
 | When | What | Editor-off viewer |
 |---|---|---|
-| Offline, once per world | global bake and its channels, the global coupled run, store, pre-filled coarse tiles | reads the results |
+| Offline, once per world (the world build) | field bake and its channels, erosion bake, the global coupled run, pre-fill, written to the store | reads the results |
 | Per tile, on demand | the field chain sampled into a compact tile | yes |
 | Per frame, CPU | LOD selection, plan, residency, streaming, water selection | yes |
 | Per frame, GPU | morph, lighting, materials, ground detail, atmosphere, water, shadows | yes |
