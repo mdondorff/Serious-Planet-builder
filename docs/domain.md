@@ -137,7 +137,7 @@ A tile is what the camera sees and changes with distance; a fixed grid (CON-08's
 | horizon map | per-chunk tables of the horizon angle used for terrain shadows, with a coarse horizon from the coupled run for far terrain (GEN-044/045, REND-038) | generators, streaming, render | retiring (ADR 0085) |
 | shadow march | per-pixel ray march toward the sun over the height clipmap, at half resolution, with a penumbra from the closest approach to the sun's disc (ADR 0085 layer 1) | render, frame | accepted, not built |
 | cascaded shadow maps | shadows cast by objects, near the camera (ADR 0085 layer 2) | render | accepted, not built |
-| compute share, reserve | a subsystem's budget of main-thread time, GPU time, cores and memory per frame; a reserve is a share held for a subsystem not built yet (ADR 0083, BUDG-001 to BUDG-007) | perf, frame | accepted, not built |
+| compute share, reserve | a subsystem's budget of main-thread time, GPU time, cores and memory per frame; a reserve is a share held for a subsystem not built yet; core shares are fractions of the machine's P-thread capacity, detected from the CPU topology (ADR 0083, ADR 0092, BUDG-001 to BUDG-007, BUDG-013) | perf, frame, streaming | accepted; core shares built (ADR 0092), reserves not built |
 | job system | the one worker pool with priority classes that every background job runs on (ADR 0083, BUDG-004) | streaming | accepted, not built |
 | perf window | a measurement on Rasierklinge with the other lanes stopped, authorised by the architect (ADR 0020) | perf | accepted |
 | heavy lock, quiet flag | one machine-wide lock that heavy xtask commands (test, prepush, perf, capture, accept, store) queue on; the owner's quiet flag file holds them until it is removed (BUILD-026) | xtask | accepted |
