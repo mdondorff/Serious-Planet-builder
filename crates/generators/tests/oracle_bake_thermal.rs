@@ -29,7 +29,7 @@ fn tile(w: usize, relief: f64) -> Vec<f64> {
 }
 
 /// Runs thermal on a tile and returns the share of the full run's cell evaluations that the active-cell run needed.
-fn gate(relief: f64) -> f64 {
+fn gate(relief: f64, bound_time: bool) -> f64 {
     let g = Grid::new(W, W, DX);
     let mut z = tile(W, relief);
     let mass: f64 = z.iter().sum();
@@ -45,10 +45,13 @@ fn gate(relief: f64) -> f64 {
         report.moved_volume_first
     );
     assert!(report.moved_volume_first > 0.0, "the tile has no ground over the critical slope: the gate measured nothing");
-    assert!(
-        seconds < GATE_S * LOADED_MARGIN,
-        "thermal on one tile took {seconds:.2} s (reference gate {GATE_S} s, loaded margin {LOADED_MARGIN})"
-    );
+    // The steep tile is gated by the count alone: its time is reported, a wall-time bound there would fail under load (ADR 0087 point 6).
+    if bound_time {
+        assert!(
+            seconds < GATE_S * LOADED_MARGIN,
+            "thermal on one tile took {seconds:.2} s (reference gate {GATE_S} s, loaded margin {LOADED_MARGIN})"
+        );
+    }
     let after: f64 = z.iter().sum();
     assert!((after - mass).abs() < 1e-9 * mass, "the mass changed by {} m", after - mass);
     share
@@ -57,14 +60,14 @@ fn gate(relief: f64) -> f64 {
 // spec: GEN-101
 #[test]
 fn thermal_on_active_cells_needs_a_few_per_cent_of_the_cell_evaluations_on_an_upland_tile() {
-    let share = gate(1.0);
+    let share = gate(1.0, true);
     assert!(share < 0.05, "the active-cell run evaluated {:.1} % of the full run's cells (gate 5 %)", share * 100.0);
 }
 
 // spec: GEN-101
 #[test]
 fn thermal_on_a_steep_tile_is_gated_by_its_share_of_the_cell_evaluations() {
-    let share = gate(1.4);
+    let share = gate(1.4, false);
     assert!(share < 0.25, "the active-cell run evaluated {:.1} % of the full run's cells on steep ground (gate 25 %)", share * 100.0);
 }
 
