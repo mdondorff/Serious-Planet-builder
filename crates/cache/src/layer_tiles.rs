@@ -5,9 +5,14 @@
 //! bake's resolution, and under tag 16 the layer version, the kernel version, the tile grid, the radius, the pass-2 parameters, `inputs_id`, whether the carve factor is applied
 //! and a digest of the keys of the six pass-1 face records the tile was computed from (a changed pass 1 is another layer, ADR 0006). The payload is
 //! `codec (u8) | tile (u32 LE, core cells a side) | stats (land u64, thermal passes u32, thermal still moving u64, eroded, deposited, exported f64 LE, clamped cells u64) | key (16 bytes) |`
-//! an lz4 block of the core's `i16` counts of 0.25 m (little-endian, row `j` outer, then `i`).
+//! a brotli stream (quality 5, 22-bit window; SPIKE-97, owner 2026-11-03) of the core's `i16` counts of 0.25 m (little-endian, row `j` outer, then `i`), each row stored as its first count and the wrapping
+//! differences to the left neighbour (about 0.92 bytes a land cell, 20 GB for the planet against lz4's 34 GB). A decoder refuses a codec byte it does not know and a stream that does not
+//! decode to exactly `tile x tile x 2` bytes, and never reserves more than that.
 
+use std::collections::{HashMap, VecDeque};
+use std::io::{Read, Write};
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use planet_core::{Face, TileId, Vec3};
 use planet_generators::bake::face::FaceChange;
@@ -20,10 +25,14 @@ use crate::pack::{PackWriter, Record, TileStore, DEFAULT_MAX_PACK_BYTES};
 
 /// The kind byte of a tile's pass-2 change.
 pub const KIND_LAYER_TILE: u8 = Kind::LayerTile as u8;
-/// Version of the tile record's layout and of the meaning of its key. History: 1 = this layout.
-pub const TILE_LAYER_VERSION: u32 = 1;
+/// Version of the tile record's layout and of the meaning of its key. History: 1 = counts in an lz4 block; 2 = row-delta counts in a brotli stream (codec 2).
+pub const TILE_LAYER_VERSION: u32 = 2;
 const IMPLEMENTATION_ID: &str = "erosion-layer-tile";
-const CODEC_VERSION: u8 = 1;
+/// The codec byte of the payload: 2 = row-delta `i16` counts, brotli quality 5. (1, an lz4 block, was never a released layer.)
+const CODEC_VERSION: u8 = 2;
+const BROTLI_QUALITY: u32 = 5;
+const BROTLI_WINDOW_BITS: u32 = 22;
+const BROTLI_BUFFER: usize = 64 * 1024;
 const HEADER_LEN: usize = 1 + 4 + 8 + 4 + 8 + 8 + 8 + 8 + 8 + 16;
 
 /// What a tile layer is made of besides the bake it is beside.
@@ -113,10 +122,7 @@ pub fn tile_record(world: &GlobalWorld, res: u32, spec: &TileLayerSpec, r: &Tile
     assert_eq!(r.core.len(), spec.grid.tile * spec.grid.tile, "a tile result holds tile x tile cells");
     let key = tile_key(world, res, spec, r.id)?;
     let counts = quantise(&r.core);
-    let mut raw = Vec::with_capacity(counts.len() * 2);
-    for c in &counts {
-        raw.extend(c.to_le_bytes());
-    }
+    let raw = pack_counts(&counts, spec.grid.tile);
     let s = &r.stats;
     let mut payload = Vec::with_capacity(HEADER_LEN + raw.len() / 2);
     payload.push(CODEC_VERSION);
@@ -129,7 +135,10 @@ pub fn tile_record(world: &GlobalWorld, res: u32, spec: &TileLayerSpec, r: &Tile
     }
     payload.extend((s.clamped_cells as u64).to_le_bytes());
     payload.extend(key.0);
-    payload.extend(lz4_flex::compress(&raw));
+    {
+        let mut w = brotli::CompressorWriter::new(&mut payload, BROTLI_BUFFER, BROTLI_QUALITY, BROTLI_WINDOW_BITS);
+        w.write_all(&raw).expect("writing to a vector");
+    }
     Ok(Record {
         key,
         kind: KIND_LAYER_TILE,
@@ -172,11 +181,7 @@ pub fn load_tile(
     if word(5 + 8 + 4 + 8 + 24 + 8, 16) != key.0 {
         return Err(what("its payload names another key than its record".into()));
     }
-    let raw = lz4_flex::decompress(&p[HEADER_LEN..], t * t * 2).map_err(|e| what(format!("its counts do not decompress: {e}")))?;
-    if raw.len() != t * t * 2 {
-        return Err(what(format!("{} bytes of counts, expected {}", raw.len(), t * t * 2)));
-    }
-    let counts: Vec<i16> = raw.as_chunks::<2>().0.iter().map(|c| i16::from_le_bytes(*c)).collect();
+    let counts = unpack_counts(&p[HEADER_LEN..], t).map_err(what)?;
     let stats = TileStats {
         land_cells: u64_at(5) as usize,
         thermal_passes: u32::from_le_bytes(word(13, 4).try_into().expect("four bytes")) as usize,
@@ -187,6 +192,109 @@ pub fn load_tile(
         clamped_cells: u64_at(49) as usize,
     };
     Ok(Some(TileResult { id, core: dequantise(&counts), stats }))
+}
+
+/// The core's counts as bytes: little-endian, each row of `t` as its first count and the wrapping differences along the row.
+fn pack_counts(counts: &[i16], t: usize) -> Vec<u8> {
+    let mut raw = Vec::with_capacity(counts.len() * 2);
+    for row in counts.chunks(t) {
+        let mut prev = 0i16;
+        for &c in row {
+            raw.extend(c.wrapping_sub(prev).to_le_bytes());
+            prev = c;
+        }
+    }
+    raw
+}
+
+/// The counts of a brotli stream of `t x t` row-delta counts; an error text when the stream is damaged or does not hold exactly that many bytes (reading stops one byte past it).
+fn unpack_counts(stream: &[u8], t: usize) -> Result<Vec<i16>, String> {
+    let want = t * t * 2;
+    let mut raw = Vec::with_capacity(want);
+    brotli::Decompressor::new(stream, BROTLI_BUFFER)
+        .take(want as u64 + 1)
+        .read_to_end(&mut raw)
+        .map_err(|e| format!("its counts do not decompress: {e}"))?;
+    if raw.len() != want {
+        return Err(format!("{} bytes of counts{}, expected {want}", raw.len(), if raw.len() > want { " or more" } else { "" }));
+    }
+    let mut counts = Vec::with_capacity(t * t);
+    for row in raw.as_chunks::<2>().0.chunks(t) {
+        let mut acc = 0i16;
+        for d in row {
+            acc = acc.wrapping_add(i16::from_le_bytes(*d));
+            counts.push(acc);
+        }
+    }
+    Ok(counts)
+}
+
+/// A bounded cache of decoded tiles for the read side (SPIKE-97: a decode per render tile would cost 3.1 times terrain's share, and a tile serves every render tile of its 312.7 km square).
+/// Least recently used out first; `capacity` is in tiles (a decoded core is `tile x tile` f32). Safe to share between threads; two threads asking for the same absent tile may both decode it.
+pub struct DecodedTileCache {
+    capacity: usize,
+    inner: Mutex<CacheInner>,
+}
+
+#[derive(Default)]
+struct CacheInner {
+    tiles: HashMap<PassTile, Arc<TileResult>>,
+    /// Oldest use first.
+    order: VecDeque<PassTile>,
+    decodes: u64,
+}
+
+impl DecodedTileCache {
+    /// A cache of at most `capacity` tiles (at least 1).
+    pub fn new(capacity: usize) -> DecodedTileCache {
+        DecodedTileCache { capacity: capacity.max(1), inner: Mutex::new(CacheInner::default()) }
+    }
+
+    /// The tile `id`, decoded once while it stays cached; `None` when the store holds none (not cached).
+    pub fn get(
+        &self,
+        store: &TileStore,
+        world: &GlobalWorld,
+        res: u32,
+        spec: &TileLayerSpec,
+        id: PassTile,
+    ) -> Result<Option<Arc<TileResult>>, LayerStoreError> {
+        {
+            let mut g = self.inner.lock().expect("cache lock");
+            if let Some(t) = g.tiles.get(&id).cloned() {
+                g.order.retain(|x| *x != id);
+                g.order.push_back(id);
+                return Ok(Some(t));
+            }
+        }
+        let Some(r) = load_tile(store, world, res, spec, id)? else { return Ok(None) };
+        let r = Arc::new(r);
+        let mut g = self.inner.lock().expect("cache lock");
+        g.decodes += 1;
+        if g.tiles.insert(id, r.clone()).is_none() {
+            g.order.push_back(id);
+        }
+        while g.tiles.len() > self.capacity {
+            if let Some(old) = g.order.pop_front() {
+                g.tiles.remove(&old);
+            }
+        }
+        Ok(Some(r))
+    }
+
+    /// Tiles decoded so far (a hit is not a decode).
+    pub fn decodes(&self) -> u64 {
+        self.inner.lock().expect("cache lock").decodes
+    }
+
+    /// Tiles held now.
+    pub fn len(&self) -> usize {
+        self.inner.lock().expect("cache lock").tiles.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 /// What a run did.

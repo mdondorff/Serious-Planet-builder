@@ -24,6 +24,7 @@ planet-world-def.workspace = true
 planet-generators.workspace = true
 blake3.workspace = true
 lz4_flex.workspace = true
+brotli.workspace = true
 
 [dev-dependencies]
 libm.workspace = true

@@ -171,6 +171,7 @@ fn a_damaged_tile_record_is_an_error_naming_the_tile() {
     for (name, damage) in [
         ("a short payload", Box::new(|p: &mut Vec<u8>| p.truncate(40)) as Box<dyn Fn(&mut Vec<u8>)>),
         ("another codec", Box::new(|p: &mut Vec<u8>| p[0] = 9)),
+        ("the lz4 codec of an earlier layout", Box::new(|p: &mut Vec<u8>| p[0] = 1)),
         ("another tile size", Box::new(|p: &mut Vec<u8>| p[1] = 25)),
         ("another key inside", Box::new(|p: &mut Vec<u8>| p[58] ^= 1)),
         ("counts that do not decompress", Box::new(|p: &mut Vec<u8>| p.truncate(80))),
@@ -215,4 +216,95 @@ fn a_grid_that_cannot_be_filed_and_a_factor_that_disagrees_with_the_spec_are_ref
     let with_factor = TileLayerSpec { uses_factor: true, ..s };
     let e = run(Dir::new("factor").path(), &w, &with_factor, &f, &tiles()[..1], 1).expect_err("a factor that is absent").to_string();
     assert!(e.contains("uses_factor"), "{e}");
+}
+
+/// A payload of `r`'s record with its stream replaced by a brotli stream of `raw`.
+fn with_stream(good: &planet_cache::pack::Record, raw: &[u8]) -> planet_cache::pack::Record {
+    use std::io::Write;
+    let mut bad = good.clone();
+    bad.payload.truncate(73);
+    let mut w = brotli::CompressorWriter::new(&mut bad.payload, 4096, 5, 22);
+    w.write_all(raw).unwrap();
+    drop(w);
+    bad
+}
+
+// spec: STRM-065
+#[test]
+fn a_stream_that_decodes_to_more_or_fewer_bytes_than_the_tile_is_refused_without_reading_it_all() {
+    let (w, p1) = (world(), Dir::new("p1"));
+    let s = spec(&w);
+    let f = faces(p1.path(), &w);
+    let reader = face_change_reader(&f);
+    let good = tile_record(&w, RES, &s, &pass2_tile(&s.grid, tiles()[1], &base, &reader, None, &s.params, 2)).unwrap();
+    let t = s.grid.tile;
+    // A bomb: a megabyte of zeros where 24 x 24 x 2 bytes are expected.
+    for (name, raw) in [
+        ("too many bytes", vec![0u8; 1 << 20]),
+        ("one byte too many", vec![0u8; t * t * 2 + 1]),
+        ("one byte too few", vec![0u8; t * t * 2 - 1]),
+    ] {
+        let d = Dir::new("stream");
+        let bad = with_stream(&good, &raw);
+        let mut writer = PackWriter::open(d.path(), w.params(), DEFAULT_MAX_PACK_BYTES).unwrap();
+        writer.append(&bad).unwrap();
+        writer.write_index().unwrap();
+        writer.finish().unwrap();
+        let store = TileStore::open(d.path(), w.params()).unwrap();
+        let e = load_tile(&store, &w, RES, &s, tiles()[1]).expect_err(name).to_string();
+        assert!(e.contains("expected") && e.contains("layer tile 0/1/0"), "{name}: {e}");
+    }
+}
+
+// spec: STRM-065
+#[test]
+fn counts_at_the_ends_of_the_i16_range_survive_the_row_delta() {
+    let (w, p1) = (world(), Dir::new("p1"));
+    let s = spec(&w);
+    let f = faces(p1.path(), &w);
+    let reader = face_change_reader(&f);
+    let mut r = pass2_tile(&s.grid, tiles()[0], &base, &reader, None, &s.params, 2);
+    let t = s.grid.tile;
+    // Alternate the extreme counts along a row (differences of 65,535 steps wrap) and down a column.
+    for (k, v) in r.core.iter_mut().enumerate() {
+        *v = if (k % t + k / t).is_multiple_of(2) { -32768.0 * QUANT_STEP_M } else { 32767.0 * QUANT_STEP_M };
+    }
+    let d = Dir::new("extremes");
+    let rec = tile_record(&w, RES, &s, &r).unwrap();
+    let mut writer = PackWriter::open(d.path(), w.params(), DEFAULT_MAX_PACK_BYTES).unwrap();
+    writer.append(&rec).unwrap();
+    writer.write_index().unwrap();
+    writer.finish().unwrap();
+    let store = TileStore::open(d.path(), w.params()).unwrap();
+    let back = load_tile(&store, &w, RES, &s, tiles()[0]).unwrap().expect("the tile");
+    assert_eq!(back.core, r.core, "extreme counts changed in the record");
+}
+
+// spec: STRM-065
+#[test]
+fn the_decoded_tile_cache_decodes_a_tile_once_holds_its_capacity_and_forgets_the_oldest() {
+    let (w, p1) = (world(), Dir::new("p1"));
+    let s = spec(&w);
+    let f = faces(p1.path(), &w);
+    let d = Dir::new("cache");
+    run(d.path(), &w, &s, &f, &tiles(), 2).unwrap();
+    let store = TileStore::open(d.path(), w.params()).unwrap();
+    let cache = DecodedTileCache::new(2);
+    let t = tiles();
+    let a = cache.get(&store, &w, RES, &s, t[0]).unwrap().expect("tile 0");
+    let again = cache.get(&store, &w, RES, &s, t[0]).unwrap().expect("tile 0");
+    assert!(std::sync::Arc::ptr_eq(&a, &again), "a hit returned another copy");
+    assert_eq!(cache.decodes(), 1, "a hit decoded again");
+    cache.get(&store, &w, RES, &s, t[1]).unwrap().expect("tile 1");
+    cache.get(&store, &w, RES, &s, t[0]).unwrap(); // tile 0 is now the newest
+    cache.get(&store, &w, RES, &s, t[2]).unwrap().expect("tile 2"); // evicts tile 1
+    assert_eq!((cache.len(), cache.decodes()), (2, 3));
+    cache.get(&store, &w, RES, &s, t[0]).unwrap();
+    assert_eq!(cache.decodes(), 3, "the newest tile was evicted");
+    cache.get(&store, &w, RES, &s, t[1]).unwrap();
+    assert_eq!(cache.decodes(), 4, "the oldest tile was kept");
+    // A tile the store does not hold is not cached.
+    let none = PassTile { face: Face(5), ti: 3, tj: 3 };
+    assert!(cache.get(&store, &w, RES, &s, none).unwrap().is_none());
+    assert_eq!(cache.len(), 2);
 }
