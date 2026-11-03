@@ -432,6 +432,8 @@ fn the_capture_adds_the_shore_flights_and_the_close_stills_and_says_the_stills_b
         "test-render",
         "--scene",
         "capture-flights",
+        // The subject is the flights and stills (their files, the clamp note), not the shadow: the march is off (it more than doubles a software run).
+        "--no-shadow-march",
         "--adapter",
         "software",
         "--allow-memory-bake",
@@ -470,6 +472,8 @@ fn the_capture_adds_the_shore_flights_and_the_close_stills_and_says_the_stills_b
         "test-render",
         "--scene",
         "capture-flights",
+        // The subject is the flights and stills (their files, the clamp note), not the shadow: the march is off (it more than doubles a software run).
+        "--no-shadow-march",
         "--adapter",
         "software",
         "--allow-memory-bake",
@@ -493,6 +497,8 @@ fn the_flight_capture_writes_a_png_sequence_per_flight_and_shore_filter_and_is_n
         "test-render",
         "--scene",
         "capture-flights",
+        // The subject is the flights and stills (their files, the clamp note), not the shadow: the march is off (it more than doubles a software run).
+        "--no-shadow-march",
         "--adapter",
         "software",
         "--allow-memory-bake",

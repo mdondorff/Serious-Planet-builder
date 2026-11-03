@@ -1,0 +1,1 @@
+- 2026-11-02 perf-window-runner (SPIKE-95 PR 3, ADR 0087 point 7): `cargo xtask perf window <plan>` runs a declared window in one process: one release build, the preflight, rotated rounds with the duty idle, bounded retries, a stop rule (settled worse beyond 15 %, within after two rounds within 5 %) and every attempt timed (BUILD-034 added, BUILD-035 modified)

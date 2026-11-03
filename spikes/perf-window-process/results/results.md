@@ -94,3 +94,9 @@ Closed: 2026-11-02
 
 ## Visuals
 Tables only: no images.
+
+## Proofs (quiet slot 2026-11-03)
+Details: `slot/results-2026-11-03.md`.
+- PR 2 and PR 3 (duty idle, window runner): 10 of 10 valid, 1.4 min per valid run (windows 1 and 2: 3.3 and 10 min).
+- PR 1 (the estimator): 4 of 21 quiet rounds over a limit, all single and all the first round of a preflight; the slow state (1b) was not available.
+- Flight verdicts at the terrain share (ADR 0092) and REND-052's 2° verdict: void (another lane's load, a heat soak, then a changed machine state); moved to the next window.
