@@ -688,6 +688,10 @@ pub trait LatticeSource: Sync {
     fn relief_scale(&self) -> f64 {
         1.0
     }
+    /// Whether the source only records which cells are asked for and answers placeholders (the footprint pass of a gathered batch): nothing read from it may be kept.
+    fn records_reads(&self) -> bool {
+        false
+    }
 }
 
 /// A lattice source with the elevation of every sample multiplied by the body's relief scale (WDEF-017): the exaggeration is part of the
@@ -723,6 +727,10 @@ impl LatticeSource for ScaledLattice<'_> {
 
     fn relief_scale(&self) -> f64 {
         self.scale * self.inner.relief_scale()
+    }
+
+    fn records_reads(&self) -> bool {
+        self.inner.records_reads()
     }
 }
 
@@ -843,6 +851,159 @@ pub fn read_direction(src: &dyn LatticeSource, map: &dyn FaceMapping, dir: Vec3)
     blend_cell(src, at.face, at.i, at.j, at.wu, at.wv)
 }
 
+/// Version of the C1 elevation reader ([`read_elevation_c1`], GEN-107): the interpolant, the stencil and the rule beyond a face edge. The field
+/// that reads with it folds it into its own key; changing any of them bumps it.
+pub const READER_C1_VERSION: u32 = 1;
+
+/// The most a [`read_elevation_c1`] value can leave the range of its sixteen lattice samples, as a share of that range, on each side: the
+/// positive weights of the separable Catmull-Rom blend sum to at most 1.28125 (1 + 0.28125), and the weights sum to 1.
+pub const C1_OVERSHOOT: f64 = 0.28125;
+
+/// The factor on the largest difference of adjacent lattice samples (metres per cell) that bounds the slope of [`read_elevation_c1`]: 1.875 within a face
+/// (the Catmull-Rom derivative is at most `0.125 + 1.25 + 0.125 = 1.5` times the largest of the three differences it spans, times 1.25 for the four rows),
+/// rounded up to 2.25 for the stencil nodes beyond a face edge (interpolated in the neighbour face: the ghost lies one cell inside the neighbour and at most one cell
+/// along the edge from the edge node, so its step is bounded by the neighbour's perpendicular plus parallel steps, 2.125 at an edge and 2.157 in a corner cell in the
+/// sum form `du + dv` the bounds use). This needs the copies of an edge node on the two faces to be equal (the bake guarantees it): the bound takes the largest
+/// step over every scanned face, the neighbour's included.
+pub const C1_SLOPE_FACTOR: f64 = 2.25;
+
+/// The four Catmull-Rom weights at `t` in `[0, 1]` for the samples at `-1, 0, 1, 2`. They sum to 1; at `t = 0` they are exactly `(0, 1, 0, 0)` and at
+/// `t = 1` exactly `(0, 0, 1, 0)`, so a lattice point is its own sample.
+fn catmull_rom(t: f64) -> [f64; 4] {
+    let (t2, t3) = (t * t, t * t * t);
+    [0.5 * (-t3 + 2.0 * t2 - t), 0.5 * (3.0 * t3 - 5.0 * t2 + 2.0), 0.5 * (-3.0 * t3 + 4.0 * t2 + t), 0.5 * (t3 - t2)]
+}
+
+/// The elevation of lattice node `(i, j)` of `face`, where the node may lie one cell beyond a face edge (a ghost: the far nodes of a stencil are skipped at weight zero): there it is the bilinear read
+/// ([`read_direction`]) of the direction of the extended face coordinates, that is the neighbour face's own samples (at a cube corner the
+/// third face's, on the diagonal beyond both edges).
+fn c1_node(src: &dyn LatticeSource, map: &dyn FaceMapping, face: Face, i: i64, j: i64) -> Result<f64, ReadError> {
+    let res = i64::from(src.res());
+    if (0..=res).contains(&i) && (0..=res).contains(&j) {
+        return Ok(f64::from(src.at(face, i as u32, j as u32)?.elevation_m));
+    }
+    let half = f64::from(src.res()) * 0.5;
+    let d = face_to_direction(map, face, i as f64 / half - 1.0, j as f64 / half - 1.0);
+    Ok(f64::from(read_direction(src, map, d)?.elevation_m))
+}
+
+/// The elevation at a unit direction by a C1 interpolant of the bake's lattice (GEN-107): the separable Catmull-Rom blend of the 4 x 4 samples around
+/// the position (the interpolant passes through every sample, and its slope is continuous across every cell edge, which the bilinear [`read_direction`]'s
+/// is not). Samples beyond a face edge come from the neighbour face ([`c1_node`]); the two faces' lattices are warped differently, so the ghost does not sit
+/// on a vertex of the neighbour and the slope break across a face edge is reduced (about threefold in the tests), not removed. A node whose weight is exactly
+/// zero is not read, so a lattice point is its own sample and reads touch no block they do not need. The value is rounded to `f32` once (a ghost node is the
+/// neighbour's `f32` read, so it was rounded before). A pure function of
+/// `dir`: a point on a face edge or a cube corner reads the same bits whichever face's coordinates it was given in.
+pub fn read_elevation_c1(src: &dyn LatticeSource, map: &dyn FaceMapping, dir: Vec3) -> Result<f32, ReadError> {
+    c1_blend(src, map, dir, None)
+}
+
+/// [`read_elevation_c1`] keeping the 4 x 4 stencils it loads in `cache` (owned by one field, `owner`; one thread): the samples of a tile and the six
+/// stencil points of each sample fall in a few lattice cells, so the nodes and the ghosts are loaded once. The same values in the same arithmetic order:
+/// the bits equal the plain read's. A source that only records reads (a footprint pass) bypasses the cache, so its footprint is never short.
+pub fn read_elevation_c1_cached(
+    src: &dyn LatticeSource,
+    map: &dyn FaceMapping,
+    dir: Vec3,
+    cache: &mut StencilCache,
+    owner: u64,
+) -> Result<f32, ReadError> {
+    if src.records_reads() {
+        return c1_blend(src, map, dir, None);
+    }
+    c1_blend(src, map, dir, Some((cache, owner)))
+}
+
+/// Stencils of the C1 read kept for reuse: `(owner, face, i0, j0)` with the nodes loaded (a bit each of the sixteen) and their values.
+pub struct StencilCache {
+    entries: Vec<(u64, u8, i64, i64, u16, [f64; 16])>,
+    next: usize,
+}
+
+const STENCIL_CACHE_ENTRIES: usize = 48;
+
+impl StencilCache {
+    pub fn new() -> StencilCache {
+        StencilCache { entries: Vec::with_capacity(STENCIL_CACHE_ENTRIES), next: 0 }
+    }
+}
+
+impl Default for StencilCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn c1_blend(
+    src: &dyn LatticeSource,
+    map: &dyn FaceMapping,
+    dir: Vec3,
+    mut cache: Option<(&mut StencilCache, u64)>,
+) -> Result<f32, ReadError> {
+    if src.res() < 2 {
+        return Err(ReadError::Shape(format!("the C1 reader needs a bake of at least 2 cells per face edge (res {})", src.res())));
+    }
+    let at = locate_direction(src.res(), map, dir)?;
+    let (wu, wv) = (catmull_rom(at.wu), catmull_rom(at.wv));
+    let (i0, j0) = (i64::from(at.i) - 1, i64::from(at.j) - 1);
+    // The nodes this position needs (a node of weight zero is not read).
+    let mut need = 0u16;
+    for (r, &w_row) in wv.iter().enumerate() {
+        for (c, &w_col) in wu.iter().enumerate() {
+            if w_row != 0.0 && w_col != 0.0 {
+                need |= 1 << (r * 4 + c);
+            }
+        }
+    }
+    let slot = cache.as_mut().map(|(cache, owner)| {
+        let key = (*owner, at.face.0, i0, j0);
+        match cache.entries.iter().position(|e| (e.0, e.1, e.2, e.3) == key) {
+            Some(k) => k,
+            None => {
+                let e = (key.0, key.1, key.2, key.3, 0u16, [0.0; 16]);
+                if cache.entries.len() < STENCIL_CACHE_ENTRIES {
+                    cache.entries.push(e);
+                    cache.entries.len() - 1
+                } else {
+                    let k = cache.next;
+                    cache.next = (cache.next + 1) % STENCIL_CACHE_ENTRIES;
+                    cache.entries[k] = e;
+                    k
+                }
+            }
+        }
+    });
+    // -0.0 is the identity of the sum, so a stored -0.0 at a lattice point reads back as -0.0.
+    let mut rows = -0.0;
+    for (r, &w_row) in wv.iter().enumerate() {
+        if w_row == 0.0 {
+            continue;
+        }
+        let mut cols = -0.0;
+        for (c, &w_col) in wu.iter().enumerate() {
+            if w_col == 0.0 {
+                continue;
+            }
+            let bit = 1u16 << (r * 4 + c);
+            let node = match (&mut cache, slot) {
+                (Some((cache, _)), Some(k)) => {
+                    if cache.entries[k].4 & bit == 0 {
+                        let v = c1_node(src, map, at.face, i0 + c as i64, j0 + r as i64)?;
+                        cache.entries[k].5[r * 4 + c] = v;
+                        cache.entries[k].4 |= bit;
+                    }
+                    cache.entries[k].5[r * 4 + c]
+                }
+                _ => c1_node(src, map, at.face, i0 + c as i64, j0 + r as i64)?,
+            };
+            cols += w_col * node;
+        }
+        rows += w_row * cols;
+    }
+    debug_assert!(need != 0);
+    Ok(rows as f32)
+}
+
 /// Where a direction falls in the bake's lattice: the face, the cell `(i, j)` (the lower corner vertex) and the exact weights of
 /// the next vertex along each axis (ADR 0027 point 2; a weight of 0 means the far vertex is not read).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -929,6 +1090,9 @@ struct Gather {
 impl LatticeSource for Gather {
     fn res(&self) -> u32 {
         self.res
+    }
+    fn records_reads(&self) -> bool {
+        true
     }
     fn at(&self, face: Face, i: u32, j: u32) -> Result<GlobalSample, ReadError> {
         self.seen.lock().expect("gather mutex").push(cell_key(face.0, i, j));

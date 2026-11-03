@@ -50,8 +50,8 @@ slow-timeout = { period = "90s", terminate-after = 5 }
 # Declared limit (planner, 2026-11-03, BUILD-003; #1103). `gpu_stills::a_still_runs_the_clipmap_shadow_by_default_and_not_with_the_flag` generates a store,
 # runs the stills scene without the march and then one pose with it. It does not hang: on the Windows CI runner (WARP, partition `C 2/2`) it was cut off
 # at 302 s and 300.2 s (the march-on run drawing both poses, then one), and locally on the software adapter it takes 176 s to 280 s with the run's load. The
-# horizon bake the stills still do per run is about 130 s of it (the sibling test above) and goes with the horizon removal (`rm-horizon-render`); lift this
-# limit then. A declared 450 s (5 x 90 s) still catches a hang. The first matching override sets a value, so this one comes before the `gpu_` one.
+# horizon bake the stills did per run was about 130 s of it (the sibling test above); `rm-horizon-render` removed it and the test took 279.8 s on CI WARP
+# (f1cb6e1e, with this limit lifted). Lift this limit when it is measured under ~200 s on CI WARP. A declared 450 s (5 x 90 s) still catches a hang. The first matching override sets a value, so this one comes before the `gpu_` one.
 [[profile.default.overrides]]
 filter = 'binary(gpu_all) and test(a_still_runs_the_clipmap_shadow_by_default_and_not_with_the_flag)'
 slow-timeout = { period = "90s", terminate-after = 5 }
@@ -64,6 +64,17 @@ slow-timeout = { period = "90s", terminate-after = 5 }
 # one. No test is skipped, retried or changed.
 [[profile.default.overrides]]
 filter = 'binary(gpu_all) and test(the_gate_passes_on_a_small_world_without_the_chunk_stage_which_is_the_default)'
+slow-timeout = { period = "90s", terminate-after = 5 }
+
+# Declared limit (planner, 2026-11-03, BUILD-003; #1108). `gpu_skeleton::the_draw_flag_selects_the_path_and_every_loop_draws_the_same_frame_on_either`
+# runs the aerial-200km relief view five times (per-draw, indirect, streamed, and the pipelined loop on both draw paths; each pipelined run draws 20
+# frames). On the Windows CI runner (WARP, partition `C 2/4`) it took 57.5 s to 199.7 s in 12 runs of 2026-11-03 (57 s when it started before the heavy
+# tests, 140-200 s beside them; lavapipe 8.1-16.7 s), and it was cut off at 300.3 s in #1108's run beside the water coverage (189 s), the lit stream scene
+# (157 s), the edit pair (175 s) and the editor window (100 s): runner load, not a hang. Locally each run costs 1.6-2.7 s, almost all of it per run
+# (the field, the device and its pipelines), so fewer frames would not remove the load; it joins `warp-heavy` below. A declared 450 s (5 x 90 s) still
+# catches a hang. The first matching override sets a value, so this one comes before the `gpu_` one. No test is skipped, retried or changed.
+[[profile.default.overrides]]
+filter = 'binary(gpu_all) and test(the_draw_flag_selects_the_path_and_every_loop_draws_the_same_frame_on_either)'
 slow-timeout = { period = "90s", terminate-after = 5 }
 
 # The software-adapter GPU tier (BUILD-003): the heavy `gpu_*` tests take 40 to 66 s alone and up to 144 s beside the other processes of
@@ -142,9 +153,12 @@ test-group = "real-gpu-heavy"
 # - `gpu_lit_stream_flicker::the_lit_coast_view_over_streamed_tiles_draws_the_same_pixels_still_and_after_a_small_turn_and_back` streams the lit coast
 #   view: 292 s on `C 2/3` (#1114's first run), then cut off by its 300 s wall-clock settle limit after 264 ticks (1.1 s a tick) beside the
 #   window flight and the skeleton tests (#1114 at a876ea2c).
+# - `gpu_skeleton::the_draw_flag_selects_the_path_and_every_loop_draws_the_same_frame_on_either` (planner, 2026-11-03; #1108) is not lit: five
+#   relief runs whose WARP time swings 57 s to 200 s with the tests beside it, cut off at 300.3 s beside two members of this group (its limit above).
+#   It moved here from `heavy-window`.
 # nextest's slow timer starts when a test starts, not while it waits for the group, so their limits stay as they are.
 [[profile.default.overrides]]
-filter = 'binary(gpu_all) and (test(a_coastal_flight_at_low_altitude_flickers_within_the_budget_while_the_lod_changes_under_it) or test(/^gpu_window::/) or test(a_lit_view_a_lit_flight_and_a_stream_scene_log_their_cpu_calibration_when_asked_even_in_a_smoke_run) or test(a_streaming_scene_on_the_lit_path_logs_beside_the_debug_path_under_its_own_name) or test(the_lit_coast_view_over_streamed_tiles_draws_the_same_pixels_still_and_after_a_small_turn_and_back))'
+filter = 'binary(gpu_all) and (test(a_coastal_flight_at_low_altitude_flickers_within_the_budget_while_the_lod_changes_under_it) or test(/^gpu_window::/) or test(a_lit_view_a_lit_flight_and_a_stream_scene_log_their_cpu_calibration_when_asked_even_in_a_smoke_run) or test(a_streaming_scene_on_the_lit_path_logs_beside_the_debug_path_under_its_own_name) or test(the_lit_coast_view_over_streamed_tiles_draws_the_same_pixels_still_and_after_a_small_turn_and_back) or test(the_draw_flag_selects_the_path_and_every_loop_draws_the_same_frame_on_either))'
 test-group = "warp-heavy"
 
 # The heavy software-adapter window and scene tests (the tracked tier-C timeouts: `gpu_window`, `gpu_water_coverage`, `gpu_stream_perf`,
@@ -153,9 +167,9 @@ test-group = "warp-heavy"
 # They share a group that runs at most 2 at once; the lighter tests still fill the other threads. Only the overlap changes: no test is skipped,
 # retried or changed (the planner's proposal, 2026-10-29; CI is the judge of what it does to the per-test and the job time). Joined 2026-11-01
 # (BUILD-003; SPIKE-84): `gpu_edit_perf`, `gpu_stills` and the three `gpu_skeleton` loop tests, which timed out under the same load on WARP CI
-# (37 runs in 14 days) and locally (2026-10-31).
+# (37 runs in 14 days) and locally (2026-10-31). The third loop test, the draw-flag one, moved to `warp-heavy` (2026-11-03).
 [[profile.default.overrides]]
-filter = 'binary(gpu_all) and (test(/^gpu_window::/) or test(/^gpu_water_coverage::/) or test(/^gpu_stream_perf::/) or test(/^gpu_envelope_perf::/) or test(/^gpu_edit_perf::/) or test(/^gpu_stills::/) or test(the_pipelined_loop_settles_on_the_synchronous_frame_from_a_cold_start_and_after_a_jump) or test(the_draw_flag_selects_the_path_and_every_loop_draws_the_same_frame_on_either) or test(the_upload_flag_selects_the_write_path_and_the_batched_loop_draws_the_same_frames_in_fewer_calls))'
+filter = 'binary(gpu_all) and (test(/^gpu_window::/) or test(/^gpu_water_coverage::/) or test(/^gpu_stream_perf::/) or test(/^gpu_envelope_perf::/) or test(/^gpu_edit_perf::/) or test(/^gpu_stills::/) or test(the_pipelined_loop_settles_on_the_synchronous_frame_from_a_cold_start_and_after_a_jump) or test(the_upload_flag_selects_the_write_path_and_the_batched_loop_draws_the_same_frames_in_fewer_calls))'
 test-group = "heavy-window"
 
 # The software GPU tier runs at most 8 `gpu_*` tests at once (BUILD-003; SPIKE-84); every `gpu_*` test lives in a `gpu_all` binary (BUILD-015).

@@ -1,3 +1,11 @@
+#[path = "bake_face.rs"]
+mod bake_face;
+#[path = "bake_kernels.rs"]
+mod bake_kernels;
+#[path = "bake_thermal.rs"]
+mod bake_thermal;
+#[path = "bake_tile.rs"]
+mod bake_tile;
 #[path = "block_order.rs"]
 mod block_order;
 #[path = "body_keys.rs"]
@@ -8,6 +16,8 @@ mod bounds;
 mod bounds_monotone;
 #[path = "brush_stage.rs"]
 mod brush_stage;
+#[path = "c1_base.rs"]
+mod c1_base;
 #[path = "cell_keys.rs"]
 mod cell_keys;
 #[path = "chain.rs"]
@@ -26,6 +36,8 @@ mod continents;
 mod coupled_fill;
 #[path = "coupled_lens.rs"]
 mod coupled_lens;
+#[path = "crease_band.rs"]
+mod crease_band;
 #[path = "descriptors.rs"]
 mod descriptors;
 #[path = "erosion.rs"]
@@ -56,6 +68,10 @@ mod pipeline;
 mod reads_contract;
 #[path = "region_mask.rs"]
 mod region_mask;
+#[path = "relief_channels.rs"]
+mod relief_channels;
+#[path = "relief_field.rs"]
+mod relief_field;
 #[path = "relief_scale.rs"]
 mod relief_scale;
 #[path = "stages.rs"]

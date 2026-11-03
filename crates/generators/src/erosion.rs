@@ -18,14 +18,40 @@ use planet_core::hash::hash_u64s;
 use planet_core::Vec3;
 use planet_world_def::{records_hash64, BodyId, GenContext, MissingNode, ReadRecord};
 
-use crate::global::{read_direction, LatticeSource, GLOBAL_VERSION, MAX_ELEVATION_M, MIN_ELEVATION_M};
+use crate::global::{
+    read_direction, read_elevation_c1, read_elevation_c1_cached, LatticeSource, StencilCache, GLOBAL_VERSION, MAX_ELEVATION_M,
+    MIN_ELEVATION_M, READER_C1_VERSION,
+};
 use crate::height::{layer_noise, layer_noise_bounds, HeightField};
 use crate::terrain::scan_base;
+
+thread_local! {
+    /// The C1 stencils this thread loaded (see [`read_elevation_c1_cached`]).
+    static STENCILS: std::cell::RefCell<StencilCache> = std::cell::RefCell::new(StencilCache::new());
+}
+static NEXT_FIELD_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 /// Bump whenever any output of this module changes (ADR 0006); it also covers [`GLOBAL_VERSION`] through the bake key.
 pub const EROSION_VERSION: u32 = 2;
 /// Names this implementation in cache keys (CON-07).
 pub const EROSION_IMPLEMENTATION_ID: &str = "cpu-erosion-v1";
+/// Bump whenever any output of the C1 variant changes (it also covers [`READER_C1_VERSION`] through its key).
+pub const EROSION_C1_VERSION: u32 = 1;
+/// Names the C1 variant in cache keys (GEN-107): the same field with the bake read by `read_elevation_c1` instead of the bilinear blend.
+pub const EROSION_C1_IMPLEMENTATION_ID: &str = "cpu-erosion-v2";
+
+/// Names this implementation with the relief channels on (CON-07): another field, another key.
+pub const EROSION_RELIEF_IMPLEMENTATION_ID: &str = "cpu-erosion-v1+relief";
+
+/// Names the C1 variant with the relief channels on (CON-07): another field, another key.
+pub const EROSION_C1_RELIEF_IMPLEMENTATION_ID: &str = "cpu-erosion-v2+relief";
+
+/// Names the relief field with the crease band on (CON-07): the creases above the layer's grid dropped (GEN-109), another field, another key.
+pub const EROSION_BAND_IMPLEMENTATION_ID: &str = "cpu-erosion-v1+relief+band";
+/// [`EROSION_BAND_IMPLEMENTATION_ID`] over the C1 base.
+pub const EROSION_C1_BAND_IMPLEMENTATION_ID: &str = "cpu-erosion-v2+relief+band";
+/// Bump whenever the crease band's weights or the way they apply change (it enters the inputs hash of a field with the band on).
+pub const CREASE_BAND_VERSION: u32 = 1;
 
 /// Domain tag of the crease lattice.
 const LAYER_CREASE: u64 = 0x4552_0001;
@@ -39,7 +65,7 @@ const AMPLITUDE_LAND_M: f64 = 900.0;
 /// Bake cells either side of a point over which the slope is measured.
 const SLOPE_CELLS: f64 = 3.0;
 /// How far from the cell of a direction the lattice reads of a height reach, in cells (GEN-020): the gradient stencil reaches [`SLOPE_CELLS`] cells (a bit
-/// more on the chart, 2/sqrt(3) at most) and the bilinear read one more; a footprint taken from this hint is a superset of the exact one.
+/// more on the chart, 2/sqrt(3) at most) and the bilinear read one more (the C1 read one below and two above: still within 8); a footprint taken from this hint is a superset of the exact one.
 pub const GRADIENT_REACH_CELLS: u32 = 8;
 /// The slope factor: this share of the amplitude on flat ground, the rest from slope 0.01 (rise over run) to 0.2.
 const CARVE_FLOOR: f64 = 0.15;
@@ -109,10 +135,28 @@ fn crease_range(nlo: f64, nhi: f64) -> (f64, f64) {
 }
 
 /// The normalised crease sum at a direction in two parts, the coarse octaves (below [`CREASE_SPLIT`]) and the fine ones: their sum lies in [-0.75, 0.25].
+#[cfg(test)]
 fn crease_parts(seed: u64, dir: Vec3) -> (f64, f64) {
+    crease_parts_weighted(seed, dir, None)
+}
+
+/// [`crease_parts`] with an optional weight per octave (the crease band, GEN-109): an octave of weight 0 is not evaluated, one of weight `w` adds `w` times its term, and the
+/// normaliser stays the sum of every octave's amplitude, so a kept octave keeps its own amplitude. With `None`, or all weights 1, the bits are those of the plain sum.
+fn crease_parts_weighted(seed: u64, dir: Vec3, weights: Option<&[f64; OCTAVES as usize]>) -> (f64, f64) {
     let (mut coarse, mut fine, mut amp, mut norm, mut freq) = (0.0, 0.0, 1.0, 0.0, BASE_FREQUENCY);
     for o in 0..OCTAVES {
-        let term = amp * crease(layer_noise(seed, LAYER_CREASE, o, dir * freq));
+        let w = weights.map_or(1.0, |w| w[o as usize]);
+        if w == 0.0 {
+            norm += amp;
+            amp *= PERSISTENCE;
+            freq *= 2.0;
+            continue;
+        }
+        let term = if w == 1.0 {
+            amp * crease(layer_noise(seed, LAYER_CREASE, o, dir * freq))
+        } else {
+            w * amp * crease(layer_noise(seed, LAYER_CREASE, o, dir * freq))
+        };
         if o < CREASE_SPLIT {
             coarse += term;
         } else {
@@ -134,8 +178,84 @@ fn fine_carve(carve: f64, landform: f64) -> f64 {
 /// The detail in metres at a point of ground elevation `e`, bake slope factor `carve` and landform `landform`: the coarse creases at the amplitude of the
 /// slope, the fine ones at the amplitude lifted by the landform.
 fn detail_m(seed: u64, dir: Vec3, e: f64, carve: f64, landform: f64) -> f64 {
-    let (coarse, fine) = crease_parts(seed, dir);
+    detail_m_weighted(seed, dir, e, carve, landform, None)
+}
+
+/// [`detail_m`] over the crease octaves of the band's weights (GEN-109).
+fn detail_m_weighted(seed: u64, dir: Vec3, e: f64, carve: f64, landform: f64, weights: Option<&[f64; OCTAVES as usize]>) -> f64 {
+    let (coarse, fine) = crease_parts_weighted(seed, dir, weights);
     amplitude_m(e, carve) * coarse + amplitude_m(e, fine_carve(carve, landform)) * fine
+}
+
+/// The crease band (GEN-109, ADR 0098): where the erosion layer is read, the layer alone shapes erosion at its scales, so the crease octaves whose wavelength is at most `near_cells`
+/// of the layer's cells keep their weight, those of `far_cells` or more are dropped, and in between the weight falls by a smoothstep in the logarithm of the wavelength. An octave's
+/// wavelength is its lattice cell, `radius / (BASE_FREQUENCY 2^o)` (about 25 km for octave 0, 12 m for octave 11). Only the ground at or above `sea_level_m` takes the band: the sea
+/// floor keeps today's creases (the layer is carved on land).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CreaseBand {
+    /// The layer's cell in metres (pass 2 of the bake: 101.8 m).
+    pub layer_cell_m: f64,
+    /// Octaves of at most this many layer cells keep their weight (2).
+    pub near_cells: f64,
+    /// Octaves of at least this many layer cells are dropped (4).
+    pub far_cells: f64,
+    /// The base elevation below which the creases stay as they are: the sea level of the definition.
+    pub sea_level_m: f64,
+    /// The height above the sea level over which the creases join: the detail is `(1 - s) plain + s banded` with `s` a smoothstep of the base elevation from the level to the level
+    /// plus this (0: a hard step at the level, a cliff along every shoreline). Default 200 m.
+    pub blend_m: f64,
+}
+
+impl CreaseBand {
+    /// The band of the pass-2 cell of the bake: 101.8 m, 2 and 4 cells, over a sea at `sea_level_m`.
+    pub fn of_the_bake(sea_level_m: f64) -> CreaseBand {
+        CreaseBand { layer_cell_m: 101.8, near_cells: 2.0, far_cells: 4.0, sea_level_m, blend_m: 200.0 }
+    }
+
+    /// The share of the band's detail at a point of base elevation `e`: 0 below the sea level, 1 from the level plus the blend, a smoothstep between (1 at the level for a blend of 0).
+    pub fn share(&self, e: f64) -> f64 {
+        if e < self.sea_level_m {
+            0.0
+        } else if self.blend_m == 0.0 || e >= self.sea_level_m + self.blend_m {
+            1.0
+        } else {
+            smoothstep(self.sea_level_m, self.sea_level_m + self.blend_m, e)
+        }
+    }
+
+    /// The weight of an octave of lattice cell `wavelength_m`: 1 up to `near_cells` layer cells, 0 from `far_cells`, between `1 - smoothstep` of its place on the log scale.
+    pub fn weight(&self, wavelength_m: f64) -> f64 {
+        let (near, far) = (self.near_cells * self.layer_cell_m, self.far_cells * self.layer_cell_m);
+        if wavelength_m <= near {
+            return 1.0;
+        }
+        if wavelength_m >= far {
+            return 0.0;
+        }
+        let t = libm::log2(wavelength_m / near) / libm::log2(far / near);
+        1.0 - smoothstep(0.0, 1.0, t)
+    }
+
+    /// The weights of the field's octaves on a body of `radius_m`.
+    fn octave_weights(&self, radius_m: f64) -> [f64; OCTAVES as usize] {
+        let mut w = [0.0; OCTAVES as usize];
+        for (o, slot) in w.iter_mut().enumerate() {
+            *slot = self.weight(radius_m / (BASE_FREQUENCY * f64::from(1u32 << o)));
+        }
+        w
+    }
+
+    fn valid(&self) -> bool {
+        self.layer_cell_m.is_finite()
+            && self.layer_cell_m > 0.0
+            && self.near_cells.is_finite()
+            && self.near_cells > 0.0
+            && self.far_cells.is_finite()
+            && self.far_cells > self.near_cells
+            && self.sea_level_m.is_finite()
+            && self.blend_m.is_finite()
+            && self.blend_m >= 0.0
+    }
 }
 
 /// The eroded terrain field of one body over a baked global-coarse grid.
@@ -153,9 +273,72 @@ pub struct ErosionField<'a> {
     error: Mutex<Option<String>>,
     /// The landform lattice of the seed (GEN-062), taken from the shared cache on first use.
     landform: OnceLock<Arc<crate::global::LandformLattice>>,
+    /// Whether the base is read by the C1 interpolant ([`EROSION_C1_IMPLEMENTATION_ID`]).
+    c1: bool,
+    /// Names this field in the thread's stencil cache (one per built field).
+    id: u64,
+    /// The relief channels `k` and `m` (GEN-099): when present the height is `m + k (e - m) + k detail`, else today's `e + detail` (`k` 1, `m` not read).
+    relief_channels: Option<Arc<crate::relief_lattice::ReliefLattice>>,
+    /// The crease band and its octave weights (GEN-109), off unless [`ErosionField::with_crease_band`] is called.
+    crease_band: Option<(CreaseBand, [f64; OCTAVES as usize])>,
 }
 
 impl ErosionField<'_> {
+    /// Turns the relief channels on (GEN-099, the m9-bake switch, off by default): the field reads `k` and `m` once at each point and its keys change (the channels' content
+    /// hash, their resolution and the channels' version enter the inputs hash, and the implementation id changes). The channels are of the bake as it is, so the body's relief scale must be 1:
+    /// an error naming the scale otherwise.
+    pub fn with_relief(mut self, channels: Arc<crate::relief_lattice::ReliefLattice>) -> Result<Self, String> {
+        if self.crease_band.is_some() {
+            return Err("turn the relief channels on before the crease band: the keys follow the order of the calls".into());
+        }
+        if self.relief != 1.0 {
+            return Err(format!("the relief channels are of the bake at relief scale 1, the body's is {}", self.relief));
+        }
+        self.inputs = hash_u64s(
+            0x7265_6c66,
+            &[self.inputs, channels.id(), channels.cells() as u64, u64::from(crate::relief_channels::RELIEF_CHANNELS_VERSION)],
+        );
+        self.relief_channels = Some(channels);
+        Ok(self)
+    }
+
+    /// Turns the crease band on (GEN-109, ADR 0098): the creases above the layer's grid are dropped where the base is at or above the band's sea level. The band is what the runtime
+    /// layer read calls when it attaches the layer: without this call the field is today's field, whatever the relief switch says. It needs the relief channels on (the layer is read
+    /// with them) and a valid band, an error naming the problem otherwise; its parameters and [`CREASE_BAND_VERSION`] enter the keys and the implementation id changes.
+    pub fn with_crease_band(mut self, band: CreaseBand) -> Result<Self, String> {
+        if self.relief_channels.is_none() {
+            return Err("the crease band goes with the relief channels (the layer is read with them): turn them on first".into());
+        }
+        if !band.valid() {
+            return Err(format!("the crease band needs a positive layer cell and 0 < near < far cells, got {band:?}"));
+        }
+        self.inputs = hash_u64s(
+            0x6372_6273,
+            &[
+                self.inputs,
+                band.layer_cell_m.to_bits(),
+                band.near_cells.to_bits(),
+                band.far_cells.to_bits(),
+                band.sea_level_m.to_bits(),
+                band.blend_m.to_bits(),
+                u64::from(CREASE_BAND_VERSION),
+            ],
+        );
+        let weights = band.octave_weights(self.radius_m);
+        self.crease_band = Some((band, weights));
+        Ok(self)
+    }
+
+    /// Whether the crease band is on.
+    pub fn crease_band_on(&self) -> bool {
+        self.crease_band.is_some()
+    }
+
+    /// Whether the relief channels are on.
+    pub fn relief_on(&self) -> bool {
+        self.relief_channels.is_some()
+    }
+
     /// The first error reading the bake since the field was built, if any.
     pub fn error(&self) -> Option<String> {
         self.error.lock().expect("erosion error mutex").clone()
@@ -172,9 +355,26 @@ impl ErosionField<'_> {
         }
     }
 
-    /// The largest height the field takes in magnitude at its relief scale (WDEF-017): the elevation clamp times the scale plus the deepest incision.
+    /// The largest height the field takes in magnitude at its relief scale (WDEF-017): the elevation clamp times the scale plus the deepest incision; with the relief channels on,
+    /// `max|1 - k| max|m| + k_max` times that (`m + k (e - m) + k detail = (1 - k) m + k (e + detail)`).
     fn max_abs_height(&self) -> f64 {
-        MAX_ELEVATION_M.max(-MIN_ELEVATION_M) * self.relief + DETAIL_DOWN_M
+        let today = MAX_ELEVATION_M.max(-MIN_ELEVATION_M) * self.relief + DETAIL_DOWN_M;
+        match &self.relief_channels {
+            None => today,
+            // `m + k (e - m) + k detail = (1 - k) m + k (e + detail)`: with `|e + detail|` inside `today` and `k`, `m` inside the channels' planet range, `|1 - k| m + k today`.
+            Some(r) => {
+                let g = r.global_range();
+                let (k, m) = (g[1].max(0.0), g[2].abs().max(g[3].abs()));
+                let one_minus_k = (1.0 - g[0]).abs().max((g[1] - 1.0).abs());
+                one_minus_k * m + k * today
+            }
+        }
+    }
+
+    /// The bounds of the bake's elevation read over a cap (the base alone, no creases): `None` where the scan declines (a cap too wide, or the C1 read below res 4). For tests.
+    #[doc(hidden)]
+    pub fn base_bounds(&self, centre: Vec3, angular_radius: f64) -> Option<(f64, f64)> {
+        scan_base(&self.src, centre, angular_radius, self.c1).ok().flatten().map(|s| (s.lo, s.hi))
     }
 
     /// The ground elevation of the bake at a direction, without creases.
@@ -183,8 +383,21 @@ impl ErosionField<'_> {
     }
 
     fn base_via(&self, src: &dyn LatticeSource, dir: Vec3) -> f64 {
-        match read_direction(src, &TangentWarp, dir) {
-            Ok(s) => f64::from(s.elevation_m),
+        self.base_via_c(src, dir, false)
+    }
+
+    /// [`Self::base_via`], with `cached` the C1 stencils kept in the thread's cache (a batch revisits the cells of its neighbours; one read does not).
+    fn base_via_c(&self, src: &dyn LatticeSource, dir: Vec3, cached: bool) -> f64 {
+        let read = if self.c1 && cached {
+            // One cache a thread: the same field's stencils are the same values from any source of the same bake.
+            STENCILS.with(|c| read_elevation_c1_cached(src, &TangentWarp, dir, &mut c.borrow_mut(), self.id))
+        } else if self.c1 {
+            read_elevation_c1(src, &TangentWarp, dir)
+        } else {
+            read_direction(src, &TangentWarp, dir).map(|s| s.elevation_m)
+        };
+        match read {
+            Ok(e) => f64::from(e),
             Err(e) => {
                 self.fail(&e);
                 f64::NAN
@@ -205,11 +418,16 @@ impl ErosionField<'_> {
     }
 
     fn gradient_via(&self, src: &dyn LatticeSource, d: Vec3) -> f64 {
+        self.gradient_via_c(src, d, false)
+    }
+
+    fn gradient_via_c(&self, src: &dyn LatticeSource, d: Vec3, cached: bool) -> f64 {
         let delta = self.delta();
         let mut g = Vec3::new(0.0, 0.0, 0.0);
         for a in [Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)] {
             let t = a - d * a.dot(d);
-            let rise = self.base_via(src, (d + t * delta).normalized()) - self.base_via(src, (d - t * delta).normalized());
+            let rise =
+                self.base_via_c(src, (d + t * delta).normalized(), cached) - self.base_via_c(src, (d - t * delta).normalized(), cached);
             g = g + t * (rise / (2.0 * delta));
         }
         g.length()
@@ -219,12 +437,36 @@ impl ErosionField<'_> {
 impl ErosionField<'_> {
     /// [`HeightField::height`] reading the lattice through `src`.
     fn height_via(&self, src: &dyn LatticeSource, dir: Vec3) -> f64 {
-        let e = self.base_via(src, dir);
-        let slope = self.gradient_via(src, dir) / self.radius_m;
+        self.height_via_c(src, dir, false)
+    }
+
+    fn height_via_c(&self, src: &dyn LatticeSource, dir: Vec3, cached: bool) -> f64 {
+        let e = self.base_via_c(src, dir, cached);
+        let slope = self.gradient_via_c(src, dir, cached) / self.radius_m;
         let c = carve(slope);
         // Where the slope factor is 1 the landform changes nothing (`fine_carve(1, L)` is 1), so it is not evaluated.
         let l = if c >= 1.0 { 0.0 } else { self.landform().at(dir) };
-        e + detail_m(self.seed, dir, e, c, l)
+        let detail = match &self.crease_band {
+            Some((band, weights)) => {
+                let s = band.share(e);
+                if s <= 0.0 {
+                    detail_m(self.seed, dir, e, c, l)
+                } else if s >= 1.0 {
+                    detail_m_weighted(self.seed, dir, e, c, l, Some(weights))
+                } else {
+                    (1.0 - s) * detail_m(self.seed, dir, e, c, l) + s * detail_m_weighted(self.seed, dir, e, c, l, Some(weights))
+                }
+            }
+            None => detail_m(self.seed, dir, e, c, l),
+        };
+        match &self.relief_channels {
+            None => e + detail,
+            // GEN-099: each term one read at the point.
+            Some(r) => {
+                let (k, m) = r.at(dir);
+                m + k * (e - m) + k * detail
+            }
+        }
     }
 }
 
@@ -239,7 +481,7 @@ impl HeightField for ErosionField<'_> {
             self.base_via(g, d);
             self.gradient_via(g, d);
         };
-        crate::global::eval_gathered(&self.src, dirs, stop, &footprint, Some(GRADIENT_REACH_CELLS), &|s, d| self.height_via(s, d))
+        crate::global::eval_gathered(&self.src, dirs, stop, &footprint, Some(GRADIENT_REACH_CELLS), &|s, d| self.height_via_c(s, d, true))
     }
 
     /// [`HeightField::heights_until`] with the distinct blocks of the batch read on `threads` threads (GEN-020, LOD-009).
@@ -249,7 +491,7 @@ impl HeightField for ErosionField<'_> {
             self.gradient_via(g, d);
         };
         crate::global::eval_gathered_threads(&self.src, dirs, stop, par, &footprint, Some(GRADIENT_REACH_CELLS), &|s, d| {
-            self.height_via(s, d)
+            self.height_via_c(s, d, true)
         })
     }
 
@@ -295,7 +537,7 @@ impl HeightField for ErosionField<'_> {
             stop,
             &footprint,
             Some(GRADIENT_REACH_CELLS),
-            &|s, d| self.height_via(s, d),
+            &|s, d| self.height_via_c(s, d, true),
             &climate,
         )
     }
@@ -305,11 +547,22 @@ impl HeightField for ErosionField<'_> {
     }
 
     fn implementation_id(&self) -> &'static str {
-        EROSION_IMPLEMENTATION_ID
+        match (self.relief_channels.is_some(), self.c1) {
+            (true, true) if self.crease_band.is_some() => EROSION_C1_BAND_IMPLEMENTATION_ID,
+            (true, false) if self.crease_band.is_some() => EROSION_BAND_IMPLEMENTATION_ID,
+            (true, true) => EROSION_C1_RELIEF_IMPLEMENTATION_ID,
+            (true, false) => EROSION_RELIEF_IMPLEMENTATION_ID,
+            (false, true) => EROSION_C1_IMPLEMENTATION_ID,
+            (false, false) => EROSION_IMPLEMENTATION_ID,
+        }
     }
 
     fn version(&self) -> u32 {
-        EROSION_VERSION
+        if self.c1 {
+            EROSION_C1_VERSION
+        } else {
+            EROSION_VERSION
+        }
     }
 
     fn max_abs_height_m(&self) -> f64 {
@@ -341,10 +594,11 @@ impl HeightField for ErosionField<'_> {
     /// Bounds over a cap (GEN-017). The bake's range over the cap is the terrain field's. The slope at a cap point differs
     /// from the slope at the centre by at most `delta_g` (below), so the slope factor lies in an interval, the amplitude in
     /// another (it grows with the elevation and the slope factor), the crease sum in a third (from the per-octave noise
-    /// bounds), and the detail is the product of the last two. A cap too wide for the scan takes the global range.
+    /// bounds), and the detail is the product of the last two. A cap too wide for the scan takes the global range. With the relief channels on, the base is `m + k (e - m) + k detail`
+    /// over the intervals of the four terms (the range of the channels over the cap from [`crate::relief_lattice::ReliefLattice::range_over_cap`]).
     fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
         let global = (-self.max_abs_height(), self.max_abs_height());
-        let base = match scan_base(&self.src, centre, angular_radius) {
+        let base = match scan_base(&self.src, centre, angular_radius, self.c1) {
             Ok(Some(s)) => s,
             Ok(None) => return global,
             Err(e) => {
@@ -360,7 +614,7 @@ impl HeightField for ErosionField<'_> {
         // coordinate, at most 2 face coordinates per radian: ADR 0028 point 3).
         let k = (1.0 + 2.0 * delta) / (1.0 - delta);
         let (carve_lo, carve_hi) = if delta < 0.4 {
-            match scan_base(&self.src, centre, (angular_radius + delta) * (1.0 + 1e-9)) {
+            match scan_base(&self.src, centre, (angular_radius + delta) * (1.0 + 1e-9), self.c1) {
                 Ok(Some(wide)) => {
                     let lip = f64::from(self.src.res()) * (wide.max_du + wide.max_dv);
                     let g_centre = self.gradient(centre);
@@ -392,32 +646,67 @@ impl HeightField for ErosionField<'_> {
         let (f_lo, f_hi) = (fine_carve(carve_lo, l_lo), fine_carve(carve_hi, l_hi));
         let (a_lo, a_hi) = (amplitude_m(blo, carve_lo), amplitude_m(bhi, carve_hi));
         let (fa_lo, fa_hi) = (amplitude_m(blo, f_lo), amplitude_m(bhi, f_hi));
-        // The two parts of the crease sum, each from its octaves' noise bounds.
-        let (mut clo_sum, mut chi_sum, mut flo_sum, mut fhi_sum, mut amp, mut norm, mut freq) =
-            (0.0, 0.0, 0.0, 0.0, 1.0, 0.0, BASE_FREQUENCY);
-        for o in 0..OCTAVES {
-            let (nlo, nhi) = layer_noise_bounds(self.seed, LAYER_CREASE, o, centre, angular_radius, freq);
-            let (clo, chi) = crease_range(nlo.max(-1.0), nhi.min(1.0));
-            if o < CREASE_SPLIT {
-                clo_sum += amp * clo;
-                chi_sum += amp * chi;
-            } else {
-                flo_sum += amp * clo;
-                fhi_sum += amp * chi;
+        // The two parts of the crease sum, each from its octaves' noise bounds (over the band's octaves and weights when the band applies).
+        let crease_bounds = |weights: Option<&[f64; OCTAVES as usize]>| {
+            let (mut clo_sum, mut chi_sum, mut flo_sum, mut fhi_sum, mut amp, mut norm, mut freq) =
+                (0.0, 0.0, 0.0, 0.0, 1.0, 0.0, BASE_FREQUENCY);
+            for o in 0..OCTAVES {
+                let w = weights.map_or(1.0, |w| w[o as usize]);
+                if w != 0.0 {
+                    let (nlo, nhi) = layer_noise_bounds(self.seed, LAYER_CREASE, o, centre, angular_radius, freq);
+                    let (clo, chi) = crease_range(nlo.max(-1.0), nhi.min(1.0));
+                    if o < CREASE_SPLIT {
+                        clo_sum += w * amp * clo;
+                        chi_sum += w * amp * chi;
+                    } else {
+                        flo_sum += w * amp * clo;
+                        fhi_sum += w * amp * chi;
+                    }
+                }
+                norm += amp;
+                amp *= PERSISTENCE;
+                freq *= 2.0;
             }
-            norm += amp;
-            amp *= PERSISTENCE;
-            freq *= 2.0;
-        }
-        let (clo, chi) = (clo_sum / norm - 1e-9, chi_sum / norm + 1e-9);
-        let (flo, fhi) = (flo_sum / norm - 1e-9, fhi_sum / norm + 1e-9);
+            ((clo_sum / norm - 1e-9, chi_sum / norm + 1e-9), (flo_sum / norm - 1e-9, fhi_sum / norm + 1e-9))
+        };
         let part = |amp_lo: f64, amp_hi: f64, lo: f64, hi: f64| {
             (if lo >= 0.0 { amp_lo * lo } else { amp_hi * lo }, if hi >= 0.0 { amp_hi * hi } else { amp_lo * hi })
         };
-        let ((c1, c2), (f1, f2)) = (part(a_lo, a_hi, clo, chi), part(fa_lo, fa_hi, flo, fhi));
-        let (dlo, dhi) = ((c1 + f1).max(-0.75 * AMPLITUDE_MAX_M), (c2 + f2).min(0.25 * AMPLITUDE_MAX_M));
+        let detail_range = |weights: Option<&[f64; OCTAVES as usize]>| {
+            let ((clo, chi), (flo, fhi)) = crease_bounds(weights);
+            let ((c1, c2), (f1, f2)) = (part(a_lo, a_hi, clo, chi), part(fa_lo, fa_hi, flo, fhi));
+            ((c1 + f1).max(-0.75 * AMPLITUDE_MAX_M), (c2 + f2).min(0.25 * AMPLITUDE_MAX_M))
+        };
+        let (dlo, dhi) = match &self.crease_band {
+            // Every point of the cap is below the band's sea level (today's creases), or at or above the level plus the blend (the band's), or the cap reaches the blend zone: the
+            // blended detail is a convex combination of the two, so the union holds it.
+            Some((band, weights)) => {
+                if bhi < band.sea_level_m {
+                    detail_range(None)
+                } else if blo >= band.sea_level_m + band.blend_m {
+                    detail_range(Some(weights))
+                } else {
+                    let (a, b) = (detail_range(None), detail_range(Some(weights)));
+                    (a.0.min(b.0), a.1.max(b.1))
+                }
+            }
+            None => detail_range(None),
+        };
         let pad = |x: f64| 1e-6 + x.abs() * 1.2e-7;
-        let (l, h) = (blo + dlo, bhi + dhi);
+        let (l, h) = match &self.relief_channels {
+            None => (blo + dlo, bhi + dhi),
+            // `m + k (e - m) + k detail` over the intervals of `e`, `m`, `k` and the detail: the products of intervals (GEN-099, GEN-102).
+            Some(r) => {
+                let [klo, khi, mlo, mhi] = r.range_over_cap(centre, angular_radius);
+                let product = |alo: f64, ahi: f64, blo_: f64, bhi_: f64| {
+                    let p = [alo * blo_, alo * bhi_, ahi * blo_, ahi * bhi_];
+                    (p.iter().cloned().fold(f64::INFINITY, f64::min), p.iter().cloned().fold(f64::NEG_INFINITY, f64::max))
+                };
+                let (rise_lo, rise_hi) = product(klo, khi, blo - mhi, bhi - mlo);
+                let (det_lo, det_hi) = product(klo, khi, dlo, dhi);
+                (mlo + rise_lo + det_lo, mhi + rise_hi + det_hi)
+            }
+        };
         ((l - pad(l)).max(global.0), (h + pad(h)).min(global.1))
     }
 }
@@ -445,16 +734,59 @@ impl ErosionGenerator {
         bake: &'a dyn LatticeSource,
         bake_key: [u8; 16],
     ) -> Result<ErosionField<'a>, MissingNode> {
+        self.field_with(ctx, body, bake, bake_key, false)
+    }
+
+    /// [`ErosionGenerator::field`] with the bake read by the C1 interpolant (GEN-107): `cpu-erosion-v2`.
+    pub fn field_c1<'a>(
+        &self,
+        ctx: &GenContext,
+        body: BodyId,
+        bake: &'a dyn LatticeSource,
+        bake_key: [u8; 16],
+    ) -> Result<ErosionField<'a>, MissingNode> {
+        self.field_with(ctx, body, bake, bake_key, true)
+    }
+
+    fn field_with<'a>(
+        &self,
+        ctx: &GenContext,
+        body: BodyId,
+        bake: &'a dyn LatticeSource,
+        bake_key: [u8; 16],
+        c1: bool,
+    ) -> Result<ErosionField<'a>, MissingNode> {
         assert!(ctx.reads().is_empty(), "a field is built from a fresh context: its key covers the whole read set of the context");
         let seed = ctx.body_seed(body)?;
         let relief = ctx.relief_scale(body)?;
         let radius_m = ctx.body_radius_m(body)?;
         let records = ctx.read_records();
         let half = |b: &[u8]| u64::from_le_bytes(b.try_into().expect("8 bytes"));
-        let inputs = hash_u64s(
-            0x6572_6f73,
-            &[records_hash64(&records), half(&bake_key[..8]), half(&bake_key[8..]), u64::from(GLOBAL_VERSION), u64::from(EROSION_VERSION)],
-        );
+        let inputs = if c1 {
+            hash_u64s(
+                0x6572_6f74,
+                &[
+                    records_hash64(&records),
+                    half(&bake_key[..8]),
+                    half(&bake_key[8..]),
+                    u64::from(GLOBAL_VERSION),
+                    u64::from(EROSION_VERSION),
+                    u64::from(EROSION_C1_VERSION),
+                    u64::from(READER_C1_VERSION),
+                ],
+            )
+        } else {
+            hash_u64s(
+                0x6572_6f73,
+                &[
+                    records_hash64(&records),
+                    half(&bake_key[..8]),
+                    half(&bake_key[8..]),
+                    u64::from(GLOBAL_VERSION),
+                    u64::from(EROSION_VERSION),
+                ],
+            )
+        };
         Ok(ErosionField {
             seed,
             body,
@@ -466,6 +798,10 @@ impl ErosionGenerator {
             relief,
             error: Mutex::new(None),
             landform: OnceLock::new(),
+            c1,
+            id: NEXT_FIELD_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            relief_channels: None,
+            crease_band: None,
         })
     }
 }
@@ -474,6 +810,91 @@ impl ErosionGenerator {
 mod tests {
     use super::*;
     use planet_core::hash::SplitMix64;
+
+    const EARTH_R: f64 = 6_371_000.0;
+
+    // spec: GEN-109
+    #[test]
+    fn the_band_weights_are_one_up_to_two_cells_zero_from_four_and_half_at_the_geometric_mean() {
+        let b = CreaseBand::of_the_bake(0.0);
+        let c = b.layer_cell_m;
+        assert_eq!((b.weight(0.5 * c), b.weight(2.0 * c), b.weight(4.0 * c), b.weight(10.0 * c)), (1.0, 1.0, 0.0, 0.0));
+        let mid = b.weight(2.0 * core::f64::consts::SQRT_2 * c);
+        assert!((mid - 0.5).abs() < 1e-12, "the geometric mean of 2 and 4 cells weighs {mid}");
+        // Non-increasing, in [0, 1], and continuous across the two ends.
+        let mut prev = 1.0;
+        for k in 0..=2000 {
+            let lambda = 2.0 * c * libm::pow(2.0, f64::from(k) / 1000.0);
+            let w = b.weight(lambda);
+            assert!((0.0..=1.0).contains(&w) && w <= prev + 1e-15, "weight {w} after {prev} at {lambda} m");
+            prev = w;
+        }
+        assert!(b.weight(2.0 * c * 1.000_001) > 0.999_999 && b.weight(4.0 * c * 0.999_999) < 1e-6);
+        // The octaves of the Earth: 24.9 km, halving; the 194.5 m octave keeps its weight, the 389 m one is nearly gone, the coarser ones are dropped, the finer ones kept.
+        let w = b.octave_weights(EARTH_R);
+        assert!(w[..6].iter().all(|x| *x == 0.0), "octaves 0 to 5 (780 m and more): {w:?}");
+        assert!(w[6] > 0.0 && w[6] < 0.02, "octave 6 (389 m) is nearly gone: {}", w[6]);
+        assert!(w[7..].iter().all(|x| *x == 1.0), "octaves 7 to 11 (195 m and less) keep their weight: {w:?}");
+    }
+
+    // spec: GEN-109
+    #[test]
+    fn weights_of_one_are_the_plain_sum_to_the_bit_and_dropped_octaves_are_removed_exactly() {
+        let ones = [1.0; OCTAVES as usize];
+        let mut rng = SplitMix64(109);
+        let mut weights = [0.0; OCTAVES as usize];
+        weights[6] = 0.25;
+        weights[7] = 1.0;
+        weights[8] = 0.5;
+        weights[9] = 1.0;
+        weights[10] = 1.0;
+        weights[11] = 1.0;
+        for _ in 0..200 {
+            let d = random_dir(&mut rng);
+            let (c0, f0) = crease_parts(11, d);
+            let (c1, f1) = crease_parts_weighted(11, d, Some(&ones));
+            assert_eq!((c0.to_bits(), f0.to_bits()), (c1.to_bits(), f1.to_bits()), "all weights 1 are the plain sum");
+            let (c2, f2) = crease_parts_weighted(11, d, None);
+            assert_eq!((c0.to_bits(), f0.to_bits()), (c2.to_bits(), f2.to_bits()));
+            // The reference: the same octaves summed by hand with their weights over the full normaliser.
+            let (mut coarse, mut fine, mut amp, mut norm, mut freq) = (0.0, 0.0, 1.0, 0.0, BASE_FREQUENCY);
+            for o in 0..OCTAVES {
+                let term = weights[o as usize] * amp * crease(layer_noise(11, LAYER_CREASE, o, d * freq));
+                if o < CREASE_SPLIT {
+                    coarse += term;
+                } else {
+                    fine += term;
+                }
+                norm += amp;
+                amp *= PERSISTENCE;
+                freq *= 2.0;
+            }
+            let (cb, fb) = crease_parts_weighted(11, d, Some(&weights));
+            assert!(
+                (cb - coarse / norm).abs() < 1e-15 && (fb - fine / norm).abs() < 1e-15,
+                "the band's sum is the weighted octaves over the full normaliser"
+            );
+            // The dropped coarse octaves leave nothing in the coarse part, and a kept octave has the amplitude it had.
+            assert_eq!(cb, 0.0, "every coarse octave is dropped");
+            let kept_octave_10 = {
+                let w10 = {
+                    let mut w = [0.0; OCTAVES as usize];
+                    w[10] = 1.0;
+                    w
+                };
+                crease_parts_weighted(11, d, Some(&w10)).1
+            };
+            let (mut amp10, mut norm_all) = (1.0, 0.0);
+            for o in 0..OCTAVES {
+                if o == 10 {
+                    amp10 = libm::pow(PERSISTENCE, 10.0);
+                }
+                norm_all += libm::pow(PERSISTENCE, f64::from(o));
+            }
+            let want = amp10 * crease(layer_noise(11, LAYER_CREASE, 10, d * (BASE_FREQUENCY * 1024.0))) / norm_all;
+            assert!((kept_octave_10 - want).abs() < 1e-14, "octave 10 alone: {kept_octave_10} against {want}");
+        }
+    }
 
     fn random_dir(rng: &mut SplitMix64) -> Vec3 {
         Vec3::new(rng.next_f64() * 2.0 - 1.0, rng.next_f64() * 2.0 - 1.0, rng.next_f64() * 2.0 - 1.0).normalized()

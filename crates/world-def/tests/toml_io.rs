@@ -361,3 +361,44 @@ fn a_bad_height_field_id_cannot_be_set_in_code() {
 fn the_height_field_path_cannot_be_a_node() {
     planet().set("world.height_field", NodeValue::U64(1));
 }
+
+// spec: GEN-108
+#[test]
+fn the_descent_site_loads_round_trips_and_enters_no_hash() {
+    let text = "schema_version = 2\n\n[body.0]\nradius_m = 6371000.0\n\n[world]\nseed = 42\nsite = [10.0946, -26.2573]\n";
+    let mut named = planet();
+    named.set_site(10.0946, -26.2573);
+    assert_eq!(parse_definition(text).unwrap(), named);
+    assert_eq!(parse_definition(text).unwrap().site(), Some((10.0946, -26.2573)));
+    assert_eq!(to_toml(&named).unwrap(), text, "canonical text: sorted inside the table, the pair in brackets");
+    // Integers are numbers too; the site is presentation: no hash, base hash or item hash moves with it.
+    let ints = "schema_version = 2\n[body.0]\nradius_m = 6371000.0\n[world]\nseed = 42\nsite = [20, 30]\n";
+    assert_eq!(parse_definition(ints).unwrap().site(), Some((20.0, 30.0)));
+    assert_eq!(named.hash(), planet().hash());
+    assert_eq!(named.base_hash(), planet().base_hash());
+    assert_eq!(planet().site(), None);
+    // A site and a height field side by side keep the canonical order.
+    let mut both = named.clone();
+    both.set_height_field("cpu-erosion-v2");
+    let t = to_toml(&both).unwrap();
+    assert!(t.contains("height_field = \"cpu-erosion-v2\"\nseed = 42\nsite = [10.0946, -26.2573]\n"), "{t}");
+    assert_eq!(parse_definition(&t).unwrap(), both);
+}
+
+// spec: GEN-108
+#[test]
+fn a_bad_descent_site_is_refused_naming_the_key() {
+    let wrap = |v: &str| format!("schema_version = 2\n[body.0]\nradius_m = 6371000.0\n[world]\nseed = 42\nsite = {v}\n");
+    for bad in ["[10.0]", "[1, 2, 3]", "\"20,30\"", "12.5", "[91.0, 0.0]", "[0.0, 181.0]", "[\"a\", 1.0]", "[nan, 0.0]"] {
+        let e = parse_definition(&wrap(bad)).unwrap_err().to_string();
+        assert!(e.contains("world.site"), "{bad}: {e}");
+    }
+}
+
+// spec: GEN-108
+#[test]
+#[should_panic(expected = "reserved for the descent site")]
+fn the_site_path_is_not_available_to_nodes() {
+    let mut d = planet();
+    d.set("world.site", NodeValue::F64(1.0));
+}

@@ -4,6 +4,7 @@
 //! renderer. Everything here is integer hashing plus IEEE `+ - * /` and `libm::floor`, so results are
 //! bit-identical across platforms and thread counts.
 
+pub mod bake;
 pub mod chain;
 pub mod chunk;
 pub mod chunkfield;
@@ -28,6 +29,8 @@ pub mod mesh;
 pub mod normals;
 pub mod ocean;
 pub mod preview;
+pub mod relief_channels;
+pub mod relief_lattice;
 pub mod shape;
 pub mod stage;
 pub mod stamp;

@@ -45,7 +45,7 @@ use planet_render::{AdapterPolicy, GpuContext};
 
 pub const USAGE: &str = "usage: planet <mode> [options]
 modes:
-  editor        the viewer window (VIEW-001..VIEW-007): the scripted orbit-to-1 m flight on the pipelined loop; keys P/Space pause, R restart, L lit (with the atmosphere) or debug path, V debug view, T vsync, C flight or free camera (WASD move, Q/E down/up, arrows look, Shift boost), Esc quit; the window opens on the lit path with the atmosphere, the look file drawn (sun, adaptive exposure); the title shows frame rate, CPU and GPU time, the path (or the debug view), on the lit path the exposure, and the readiness report; runs on a discrete GPU only (an integrated GPU, a software adapter or an adapter missing a feature or limit is refused with the reason); [--world F --global-res N | --store DIR] [--look F] [--size WxH] [--view NAME] [--cells N --tau PX --finest-level N] [--no-vsync] [--no-shadow-march] (turn the clipmap shadow off: the march shades the terrain and the water by default, REND-051; J shows its visibility; --shadow-march is accepted and does nothing) [--no-ui] (the editor UI, an egui layer drawn after the tone map, VIEW-011) [--edit] (start in the editor mode, VIEW-022; with --site it turns on where the scripted descent over the site ends: Tab toggles it; the panels, stamps by 2-4 and a click, handles on the planet, Ctrl+Z / Ctrl+Y) [--items DIR] (the edits as one TOML file each in DIR, loaded at the start) [--editor-layout F] (the panel layout, VIEW-018) [--marker LAT,LON[,RADIUS_M]]... (item markers of the globe overview, G, VIEW-013) [--site LAT,LON] (the scripted flight descends over this point, default 20,30); --smoke opens the window, drives the keys for a few dozen frames and closes it (test mode: PLANET_ADAPTER or --adapter, software by default; exits with `no display` where there is none); --no-window starts and exits without a window; --offscreen runs the skeleton without a window
+  editor        the viewer window (VIEW-001..VIEW-007): the scripted orbit-to-1 m flight on the pipelined loop; keys P/Space pause, R restart, L lit (with the atmosphere) or debug path, V debug view, T vsync, C flight or free camera (WASD move, Q/E down/up, arrows look, Shift boost), Esc quit; the window opens on the lit path with the atmosphere, the look file drawn (sun, adaptive exposure); the title shows frame rate, CPU and GPU time, the path (or the debug view), on the lit path the exposure, and the readiness report; runs on a discrete GPU only (an integrated GPU, a software adapter or an adapter missing a feature or limit is refused with the reason); [--world F --global-res N | --store DIR] [--look F] [--size WxH] [--view NAME] [--cells N --tau PX --finest-level N] [--no-vsync] [--no-shadow-march] (turn the clipmap shadow off: the march shades the terrain and the water by default, REND-051; J shows its visibility; --shadow-march is accepted and does nothing) [--no-ui] (the editor UI, an egui layer drawn after the tone map, VIEW-011) [--edit] (start in the editor mode, VIEW-022; with --site it turns on where the scripted descent over the site ends: Tab toggles it; the panels, stamps by 2-4 and a click, handles on the planet, Ctrl+Z / Ctrl+Y) [--items DIR] (the edits as one TOML file each in DIR, loaded at the start) [--editor-layout F] (the panel layout, VIEW-018) [--marker LAT,LON[,RADIUS_M]]... (item markers of the globe overview, G, VIEW-013) [--site LAT,LON] (the scripted flight descends over this point; without it the world definition's `[world] site = [lat, lon]`, else 20,30 where that is land, else the first shore of the walk from there, GEN-108); --smoke opens the window, drives the keys for a few dozen frames and closes it (test mode: PLANET_ADAPTER or --adapter, software by default; exits with `no display` where there is none); --no-window starts and exits without a window; --offscreen runs the skeleton without a window
   generate      headless generator CLI: --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --manifest <file> writes the determinism manifest (GEN-003); --cache-dir <dir> --region F,L [--res N] writes a tile face region into a tile store; --verify-cache <dir> [--sample N] regenerates stored tiles and compares (both take --world <definition.toml> or --seed N; --verify-cache fails when nothing could be compared, --allow-stale accepts that); --global-dir <dir> [--global-res N, default 256] bakes the global-coarse field (continents, elevation, climate) of N cells per face edge into a tile store as blocks in the canonical layout (blocks of min(N, 1024) cells) together with its ocean-connectivity channel (one bit per vertex; the area threshold is the definition's `body.0.sea.min_area_fraction`) and prints the time per sample and the channel's cost; --verify-global <dir> [--sample N] regenerates stored blocks and compares; --global-products <dir> [--global-res N] writes cube nets and maps of an in-memory bake (these take --world or --seed and --threads N); --coupled-run <dir> --global-res N (required) makes the coupled run of the bake stored in <dir> (or finds it there) and stores it, with a progress line at most every 10 s during the reduction of the bake and the wall time (STRM-051); --coarse-horizon <dir> --global-res N (required) [--threads N] makes the coarse horizon (far-field shadows, STRM-045) from the coupled run stored beside the bake in <dir> and stores it there, with a progress line and the wall time (the coupled run is made and stored by the viewer or `test-render --scene coupled`); --plan-check <dir> --global-res N (required) plans the standard flight at cells 32 and viewport / tau 240 over the stored bake with the terrain and the eroded field and fails if a view is rejected (M3 acceptance); --prefill-dir <dir> --global-res N [--prefill-levels L] [--floor-level F] writes the coarse tiles of levels F..=L (F the render floor, default 3; L default 4; an L below F writes nothing and says so; the tiles of cells 32, finest level 22, compact form, as the streamer generates them) of the stored bake into its tile pack, skipping what is there; --global-dir pre-fills the same way after the bake (--prefill-levels 0 disables; --floor-level takes both); --smoke starts and exits
   test-render   headless render harness
     --scene hello-triangle|tiles|terrain   render a scene (default hello-triangle)
@@ -75,13 +75,13 @@ modes:
     --adapter software|hardware   adapter policy (default: PLANET_ADAPTER or software)
     --draw per-draw|indirect   how the terrain renderer submits draws (REND-015): per-draw is the reference loop, indirect one multi-draw per buffer run from a CPU-built argument buffer (default indirect where the adapter supports it, else per-draw)
     --upload per-slot|batched   how a frame's tile writes reach the queue (REND-016): batched (default) writes each run of adjacent slots with one call, per-slot is the reference (one or two calls per tile); the pool contents are identical
-    --gen-workers N          threads of the tile generation pool and so jobs running at once in the pipelined loop and the streaming perf scenes (STRM-020; default: the machine's hardware threads; the plan worker's threads are separate)
-    --gen-reserve N          hardware threads the default generation pool leaves free for the frame thread, the plan worker and the driver (STRM-020; default 2; ignored when --gen-workers is given)
+    --gen-workers N          threads of the tile generation pool and so jobs running at once in the pipelined loop and the streaming perf scenes (STRM-020; default: the terrain share, BUDG-003; the rig keeps the pool inside that share; the plan worker's threads are separate)
+    --gen-reserve N          size the generation pool as the hardware threads less N instead of the terrain share (STRM-020; ignored when --gen-workers is given)
     --gen-ahead N            jobs queued behind the running ones so a worker that finishes between two frames takes the next at once (STRM-020; default: the worker count; 0: refill at frame boundaries only)
     --gen-priority below-normal|normal   OS priority of the generation workers (STRM-020, ADR 0046; default below-normal: the frame thread wins a core both want; no result depends on it)
     --lit                    the streaming perf scenes on the lit path with the atmosphere and water (TEST-025): same scripts, same verdicts, logs named <scene>-lit
     --views a,b,c            only these views of the lit perf scenes (ground-1m, aerial-20km, coast-2km, coast-3m, orbit, coast-glide, coast-descent); a partial log is not a window
-    --scene capture-stills   one PNG per pose of --poses FILE (TEST-048) in --out-dir, over the base terrain of a world, with the horizon maps near the eye baked (a headless scene; no viewer starts it); needs --store DIR or --allow-memory-bake, takes --size WxH and --views (pose names); never a measurement
+    --scene capture-stills   one PNG per pose of --poses FILE (TEST-048) in --out-dir, over the base terrain of a world (a headless scene; no viewer starts it); needs --store DIR or --allow-memory-bake, takes --size WxH and --views (pose names); never a measurement
     --scene capture-flights  the two coastal flights as 1440p PNG sequences (shore_filter at the look default, 0, and then 1) in --out-dir, never a measurement (TEST-027; `cargo xtask capture flights` also makes the videos); needs --store DIR or --allow-memory-bake, takes --size WxH, --flight-frames N
     --flight-frames N        frames of each coastal flight of the lit perf scenes (default 240; --scene lit, TEST-025)
     --perf                   performance-harness skeleton (needs --adapter hardware; the readiness gate decides, ADR 0020)
@@ -109,10 +109,10 @@ pub struct Options {
     pub draw: Option<planet_render::DrawMode>,
     /// `--upload per-slot|batched`: how a frame's tile writes reach the queue (REND-016); default batched, per-slot the reference.
     pub upload: Option<planet_render::UploadMode>,
-    /// `--gen-workers N` and `--gen-ahead N`: the tile generation pool (STRM-020); default the machine's threads and as many queued.
+    /// `--gen-workers N` and `--gen-ahead N`: the tile generation pool (STRM-020); default the terrain share (BUDG-003) and as many queued.
     pub gen_workers: Option<usize>,
     pub gen_ahead: Option<usize>,
-    /// `--gen-reserve N`: cores the default pool size leaves free (`planet_streaming::GEN_RESERVE` when absent).
+    /// `--gen-reserve N`: size the pool as the machine's threads less N instead of the terrain share (none when absent).
     pub gen_reserve: Option<usize>,
     /// `--gen-priority below-normal|normal`: the priority of the generation workers (STRM-020, ADR 0046); below-normal when absent.
     pub gen_priority: Option<planet_streaming::Priority>,
@@ -251,21 +251,27 @@ pub struct Options {
 }
 
 impl Options {
-    /// The tile generation pool of the pipelined loop and the streaming scenes (STRM-020): `--gen-workers` threads (default the
-    /// machine's hardware threads less `--gen-reserve`, 2 unless given) with `--gen-ahead` jobs queued behind them (default as
-    /// many).
+    /// The tile generation pool of the pipelined loop and the streaming scenes (STRM-020): `--gen-workers` threads, else the machine's
+    /// hardware threads less `--gen-reserve` when given, else the terrain share (BUDG-003); with `--gen-ahead` jobs queued behind them
+    /// (default as many).
     pub fn gen_workers(&self) -> planet_streaming::GenWorkers {
-        let reserve = self.gen_reserve.unwrap_or(planet_streaming::GEN_RESERVE);
-        let g =
-            self.gen_workers.map_or_else(|| planet_streaming::GenWorkers::machine_reserving(reserve), planet_streaming::GenWorkers::new);
+        let g = match (self.gen_workers, self.gen_reserve) {
+            (Some(n), _) => planet_streaming::GenWorkers::new(n),
+            (None, Some(reserve)) => planet_streaming::GenWorkers::machine_reserving(reserve),
+            (None, None) => planet_streaming::GenWorkers::machine(),
+        };
         let g = self.gen_priority.map_or(g, |p| g.with_priority(p));
         self.gen_ahead.map_or(g, |a| g.with_ahead(a))
     }
 
-    /// The reserve behind the pool size, for the perf log: `None` when `--gen-workers` fixed the size and the reserve decided
-    /// nothing.
+    /// The reserve behind the pool size, for the perf log: `None` when `--gen-workers` fixed the size or the terrain share set it
+    /// (no `--gen-reserve`), so the reserve decided nothing.
     pub fn gen_reserve_used(&self) -> Option<usize> {
-        self.gen_workers.is_none().then(|| self.gen_reserve.unwrap_or(planet_streaming::GEN_RESERVE))
+        if self.gen_workers.is_some() {
+            None
+        } else {
+            self.gen_reserve
+        }
     }
 
     /// The finest geometry level of a run with tiles of `cells` cells: `--finest-level`, else the production default
@@ -1093,8 +1099,8 @@ mod tests {
         let cores = std::thread::available_parallelism().map_or(4, |n| n.get());
         let o = args(&["test-render", "--scene", "terrain"]);
         let g = o.gen_workers();
-        assert_eq!(g.workers, planet_streaming::GenWorkers::workers_for(cores, planet_streaming::GEN_RESERVE));
-        assert_eq!((g.ahead, o.gen_reserve_used()), (g.workers, Some(planet_streaming::GEN_RESERVE)));
+        assert_eq!(g.workers, planet_streaming::shares::Shares::machine().terrain, "the default is the terrain share (BUDG-003)");
+        assert_eq!((g.ahead, o.gen_reserve_used()), (g.workers, None));
         let o = args(&["test-render", "--gen-reserve", "5"]);
         assert_eq!(o.gen_workers().workers, planet_streaming::GenWorkers::workers_for(cores, 5));
         assert_eq!(o.gen_reserve_used(), Some(5));

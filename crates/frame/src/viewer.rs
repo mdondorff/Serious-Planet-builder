@@ -126,7 +126,7 @@ pub enum Command {
     CycleCoupledLens,
     /// H: the editing light, a sun fixed in camera space over the viewer's shoulder, or back to the look's sun (VIEW-042).
     ToggleEditingLight,
-    /// J: the lit shade view, cycling normal, horizon and shadow (REND-038; VIEW-054).
+    /// J: the lit shade view, cycling normal, shadow, soil depth, moisture and insolation (VIEW-054).
     CycleShadeView,
     /// `[`: the sun half an hour earlier in local solar time at the camera, over the look's sun (VIEW-054).
     SunEarlier,
@@ -294,7 +294,7 @@ pub struct ViewerState {
     pub coarse_lod: bool,
     /// The editing light (VIEW-042): the lit frames take [`editing_sun_dir`] for the sun; off at the start, so the look's sun and every golden stay.
     pub editing_light: bool,
-    /// Which image the lit terrain shows (VIEW-054): the lit surface at the start; J cycles it through the horizon elevation and the shadow factor.
+    /// Which image the lit terrain shows (VIEW-054): the lit surface at the start; J cycles it through the shadow, soil depth, moisture and insolation views.
     pub shade_view: crate::look::shading::ShadeView,
     /// Hours the sun is moved from the look's sun in local solar time (VIEW-054); 0 at the start, so the look's sun and every golden stay.
     pub sun_offset_h: f64,
@@ -747,13 +747,12 @@ pub fn editing_sun_dir(camera: &crate::camera::Camera) -> [f32; 3] {
 /// The step of `[` and `]`, hours (VIEW-054).
 pub const SUN_STEP_H: f64 = 0.5;
 
-/// The shade view after `view` in the cycle of J: normal, horizon, shadow, soil depth, moisture, insolation, normal (VIEW-054; the three driver views of
+/// The shade view after `view` in the cycle of J: normal, shadow, soil depth, moisture, insolation, normal (VIEW-054; the three driver views of
 /// GEN-074 since M8-6). A view outside the cycle goes to normal.
 pub fn next_shade_view(view: crate::look::shading::ShadeView) -> crate::look::shading::ShadeView {
-    use crate::look::shading::ShadeView::{Horizon, Insolation, Lit, Moisture, Shadow, SoilDepth};
+    use crate::look::shading::ShadeView::{Insolation, Lit, Moisture, Shadow, SoilDepth};
     match view {
-        Lit => Horizon,
-        Horizon => Shadow,
+        Lit => Shadow,
         Shadow => SoilDepth,
         SoilDepth => Moisture,
         Moisture => Insolation,
@@ -1893,7 +1892,7 @@ mod tests {
     // spec: VIEW-054
     #[test]
     fn j_cycles_the_shade_view_and_the_bracket_keys_move_the_sun_half_an_hour_until_reset() {
-        use crate::look::shading::ShadeView::{Horizon, Insolation, Lit, Moisture, Shadow, SoilDepth};
+        use crate::look::shading::ShadeView::{Insolation, Lit, Moisture, Shadow, SoilDepth};
         let c = crate::camera::Camera::at_surface_point(
             planet_core::PlanetFixed(Vec3::new(6_371_000.0, 0.0, 0.0)),
             Vec3::new(0.0, 0.0, 1.0),
@@ -1904,14 +1903,14 @@ mod tests {
         );
         let mut v = ViewerState::new(0, 3, 0, false);
         assert_eq!((v.shade_view, v.sun_offset_h), (Lit, 0.0), "the look's sun and the lit view at the start");
-        let seen: Vec<_> = (0..7)
+        let seen: Vec<_> = (0..6)
             .map(|_| {
                 v.command(Command::CycleShadeView, 0, &c);
                 v.shade_view
             })
             .collect();
-        // The driver views of M8-6 (GEN-074) follow the horizon views.
-        assert_eq!(seen, [Horizon, Shadow, SoilDepth, Moisture, Insolation, Lit, Horizon]);
+        // The driver views of M8-6 (GEN-074) follow the shadow view.
+        assert_eq!(seen, [Shadow, SoilDepth, Moisture, Insolation, Lit, Shadow]);
         v.command(Command::SunLater, 0, &c);
         v.command(Command::SunLater, 0, &c);
         v.command(Command::SunEarlier, 0, &c);

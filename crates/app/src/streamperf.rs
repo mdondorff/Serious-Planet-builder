@@ -561,7 +561,8 @@ fn run_case(
         }
         d.reserve = Some(r);
     }
-    let calib_threads = gen.workers;
+    // The calibration's thread count is fixed, not the pool's (TEST-039): a share-sized pool keeps the parallel limits.
+    let calib_threads = planet_perf::calibration::calibration_threads();
     writeln!(out, "{}: rig built in {:.2} s", script.scene.name(), rig_started.elapsed().as_secs_f64()).map_err(err)?;
     // The start-up load of the roots, before frame 0 (STRM-001): a reading of the cold start (with the pack ignored, `dive-cold`, it is
     // every root generated), recorded under the `load_` prefix like the tile loads.
@@ -685,16 +686,16 @@ fn run_case(
             .map(|r| r.peaks())
             .unwrap_or_default()
             .into_iter()
-            .zip(planet_perf::reserve::LOADS)
-            .map(|((name, peak), l)| planet_perf::reserve::ShareReading {
+            .map(|(name, peak, cores)| planet_perf::reserve::ShareReading {
                 share: name.to_string(),
                 resource: "cores",
                 measured: peak as f64,
-                limit: l.cores as f64,
+                limit: cores as f64,
                 decides: false,
             })
             .collect();
-        let report = planet_perf::reserve::ReserveReport::new(main_ms, gpu_ms, peak, frame_ms, loads);
+        let terrain_share = planet_streaming::shares::Shares::machine().terrain as f64;
+        let report = planet_perf::reserve::ReserveReport::new(main_ms, gpu_ms, peak, terrain_share, frame_ms, loads);
         writeln!(
             out,
             "{}: reserve report (loads on: spin {spin_ms:.2} ms per frame, burn {:.2} ms GPU; {} GPU samples):",
@@ -1057,6 +1058,10 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
     } else {
         crate::session_verdict_line_for(out, &verdict, false)?;
     }
+    // STRM-020: a flag that overrode the terrain share marks the run's frame verdicts.
+    if let Some(line) = planet_perf::pool_override_line(&gen_settings(o)) {
+        writeln!(out, "{line}").map_err(err)?;
+    }
     let protocol = Protocol {
         warmup_frames: 0,
         measured_frames: 0,
@@ -1166,6 +1171,7 @@ fn gen_settings(o: &Options) -> planet_perf::GenSettings {
         ahead: g.ahead,
         reserve: o.gen_reserve_used(),
         below_normal: g.priority == planet_streaming::Priority::BelowNormal,
+        override_of_share: (!g.from_share).then(|| planet_streaming::shares::Shares::machine().terrain),
     }
 }
 

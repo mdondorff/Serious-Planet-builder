@@ -106,8 +106,12 @@ Source: ADR 0089 decision 6, ADR 0088/0089 accepted 2026-11-01; SPIKE-80 (the hi
 ### Requirement: GEN-099 The relief channels and the runtime base field
 The bake SHALL compute two channels on the coupled lattice (2048 cells per face edge, about 4.9 km), as f32 with min and max per 32 x 32 block:
 - the relief driver `k` (GEN-097, tapered);
-- the ring mean `m`, the mean of the bake's elevation over a ring of 10 km radius.
-The runtime base field SHALL be `m + k (e - m)` plus `k` times the creases, with `e` the bake, each term one read at the point.
+- the ring mean `m`, the mean of the bake's elevation at the point and at the 8 compass points of a ring of 10 km radius (9 samples, a fixed order; the compass is east and north, east being the Z axis crossed with the direction (the Y axis at a pole), so the ring's orientation is continuous over every face edge and diagonal and a point shared by two faces has the same value on both).
+The tapered `k` is `1 + smoothstep(0, 400 m, m) (k - 1)` of the class weights' blended driver (GEN-097). The channels are computed from the direction alone (the bake's elevation and the class weights as inputs), f64 with `libm`, stored as f32, and the same bytes for any thread count. A block's range covers the points of its cells (including the shared row and column of the next block). `RELIEF_CHANNELS_VERSION` 1 (`relief_channels.rs`).
+The runtime base field SHALL be `m + k (e - m)` plus `k` times the creases (above the erosion layer's grid only the octaves GEN-109's band keeps, where the layer read calls it), with `e` the bake, each term one read at the point. It is behind a switch (`ErosionField::with_relief`), off by default:
+- off: `k` is 1 and `m` is not read, today's field bit for bit, its key and implementation id unchanged;
+- on: the implementation id is `cpu-erosion-v1+relief`, and the inputs hash folds the channels' identity (a hash of their content), their resolution and the channels' version; the body's relief scale SHALL be 1 (the channels are of the bake as it is), else the switch returns an error naming the scale;
+- the reader (`relief_lattice.rs`) interpolates the stored f32 points in f64, continuous across face edges, takes the channels' cells per face edge from the channels (a coarse planet pass and a full one read through the same code), and returns an error naming the face for a channel with a value that is not finite.
 
 Verify: A
 Status: planned
@@ -121,9 +125,10 @@ Source: ADR 0088 points 1 and 2, ADR 0088/0089 accepted 2026-11-01; m9-bake PR 1
 The bake's first pass SHALL, per cube face:
 - sample the base field (GEN-099) once per cell of 814 m (one point sample per cell);
 - carve it with implicit stream power with uplift (`U / K` 20, `K dt` 0.05 times the carve factor of GEN-097), 20 steps, not to steady state;
-- breach before the fill (at most 0.1 % of the cells, at most 50 m deep);
-- route with Barnes' improved priority flood, jittered D8 receivers and the order from the receivers, re-routing every 5th step;
-- not route across cube edges.
+- breach after each route (the next fill sees the breached surface): from the leaves down, the receiver of a cell that stands higher than 0.1 % of the cell distance below it is lowered to that level, by at most 50 m, never an outlet (the sea and the face's border cells) and never below the sea level;
+- keep land above the sea level (plus the flood's epsilon) whatever depth the sea outlets have;
+- route with Barnes' improved priority flood (epsilon 1 mm), jittered D8 receivers (the jitter an integer hash of the GLOBAL cell and the direction, so a cell routes alike in every window that holds it) and the order from the receivers, re-routing every 5th step; the carve factor multiplies `K dt` and the uplift (`U / K` stays 20); a height or factor that is not finite, a flood without an outlet or with an epsilon that is not positive SHALL be refused;
+- not route across cube edges: each face is carved on its own grid extended by a halo of `ceil(cells / 128)` cells (at least 4) beyond each edge over the plane that continues the face, so the face's own border is an ordinary cell; the stored change keeps the halo; a reader SHALL cross-fade the faces within the halo's width of an edge (the face's own weight 1 and a neighbour's `1 - smoothstep(distance to the shared edge / halo)`, normalised; at a corner both neighbours count), so that the change is continuous across the edges and around the corners; a halo of half the face or more SHALL be refused.
 It SHALL keep each face's change as a record of the layer store (STRM-065) and checkpoint per face. The constants are start values (SPIKE-62, SPIKE-65, SPIKE-66, SPIKE-70, SPIKE-71).
 
 Verify: A, B
@@ -140,19 +145,23 @@ Source: ADR 0088 point 4.1, ADR 0088/0089 accepted 2026-11-01; SPIKE-62, SPIKE-6
 
 ### Requirement: GEN-101 Pass 2 works per tile of the layer's grid
 The bake's second pass SHALL work per tile of the layer grid: 98,304 cells per face edge (101.8 m), tiles of 3,072 x 3,072 core cells with a 256-cell halo (SPIKE-61's tiles). Per tile it SHALL take:
-- the base field plus the face carve's change, bilinear;
-- a local carve of catchments up to 1 km^2 that only incises: no fill, no breach, no uplift;
-- thermal at a critical slope of 33 degrees, perturbed by up to 25 %, moving 1/16 of the excess per pass, on active cells;
-- one deposition sweep with `kc` from GEN-097 and `zeta` 0.5 on the last route.
-It SHALL store the core's change against the base field and checkpoint per tile. Every kernel SHALL be a Jacobi gather or a fixed topological sweep in f64 with `libm`. The constants are start values (SPIKE-61, SPIKE-64, SPIKE-70, SPIKE-72). The seam check is TEST-084.
+- the base field plus the face carve's change (bilinear in a face, cross-faded within the halo of a cube edge: GEN-100);
+- a local carve of catchments up to 96 cells (1 km^2 at 101.8 m) that only incises: no fill, no breach, no uplift;
+- thermal at a critical slope of 33 degrees, perturbed by up to 25 % (an integer hash of the unordered pair of global cell ids), moving 1/16 of the excess per pass (a share over 1/8 SHALL be refused: a cell would overshoot), at most 100 passes, on active cells (the cells that moved and their neighbours: bit for bit the run over every cell); a pair over the critical difference by under 1 mm does not move (the excess would never reach 0), and a cell whose height rounding leaves unchanged wakes no neighbour; the sweep keeps a cell at or below the lowest final height of its donors; land above the sea level off the grid's border gives, any cell receives;
+- one deposition sweep with `kc` (1e5 uniform while every class of GEN-097 has 1e5; per class when they differ) and `zeta` 0.5 on a route of its own on the carved and thermally settled window (the load of a cell is its donors' plus its eroded column; it fills the depression first, then `zeta` of the excess over the capacity `kc sqrt(A) S` settles, at most to the filled level plus half the drop to the receiver; what reaches an outlet leaves; eroded = deposited + exported).
+It SHALL store the core's change against the base field (STRM-065) and checkpoint per tile, with per tile the cells that still gave in the last thermal pass (the unsettled slopes at the pass cap; the pass cap is the only bound on thermal: no wall-clock budget, which would make the result depend on the machine, CON-14). The tile grid, the halo and the tiles of a run (every land tile, or a region list) are parameters of the run; the local carve runs 10 steps without uplift, breach or fill, with the drainage area capped at 96 cells (1 km^2 at 101.8 m; the cap follows the cell size, so a coarse planet pass keeps the same number of cells), and a window's cells follow the global cell of the face's grid in the jitter and the thermal's pair hash. Every kernel SHALL be a Jacobi gather or a fixed topological sweep in f64 with `libm`. The constants are start values (SPIKE-61, SPIKE-64, SPIKE-70, SPIKE-72). The seam check is TEST-084.
 
-Verify: A
+Verify: A, B
 Status: planned
 Source: ADR 0088 points 4.2 and 6, ADR 0088/0089 accepted 2026-11-01; SPIKE-61, SPIKE-64, SPIKE-70, SPIKE-71, SPIKE-72, SPIKE-73
 
+#### Scenario: Thermal on active cells
+- **WHEN** thermal runs on one synthetic tile of 3,584 cells a side (100 passes, 4 threads), an upland and a steeper one
+- **THEN** it keeps the mass, gives the bytes of the run over every cell, evaluates at most 5 % (upland) or 25 % (steeper) of the cells of the full run, and takes 5 s on the reference machine for the upland (the test bounds the time by ADR 0087's loaded margin; the cost grows steeply with relief: see the design)
+
 #### Scenario: Incise only
 - **WHEN** pass 2's local carve runs on a synthetic tile with a closed basin
-- **THEN** no cell ends higher than its input, and the basin keeps its pour point
+- **THEN** no cell ends higher than its input, and the basin is not filled
 
 ### Requirement: GEN-102 Cap bounds read the layer's pyramid
 The field's height bounds over a cap SHALL take the layer's part from the min/max pyramid (STRM-066):
@@ -160,6 +169,10 @@ The field's height bounds over a cap SHALL take the layer's part from the min/ma
 - it is read at the finest pyramid level whose blocks are at least half the box, or from the layer's nodes for a box under 16 cells;
 - the runtime detail below the layer's cells adds its analytic per-octave bound;
 - a cap that crosses a face edge reads both faces' blocks.
+With the relief channels on the bounds SHALL also take:
+- the channels' range `[k_min, k_max, m_min, m_max]` over the cap: the union of the ranges of the blocks the cap touches, from a pyramid of the block ranges (a node wholly inside the cap is taken whole), and for a block the cap only touches the min and max of the lattice points of the nodes of 2 cells it touches;
+- the base `m + k (e - m) + k detail` over the intervals of `e`, `m`, `k` and the detail (products of intervals, a sound bound that ignores the correlation of `e` and `m`);
+- the planet-wide bound `max|1 - k| max|m| + k_max (max|e| + max|detail|)`, from `(1 - k) m + k (e + detail)`.
 Because each pyramid level holds the range of the levels below and of the nodes, the bounds of nested caps SHALL nest (LOD-012). The plan check at production parameters is TEST-083.
 
 Verify: A

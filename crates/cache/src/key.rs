@@ -85,6 +85,14 @@ pub enum Kind {
     // 8 was the result of one chunk of a chunk field (removed with the chunk stage, ADR 0086); the number is not reused.
     /// A block of the coarse horizon of the global run (M8-5, GEN-045): per observer cell and azimuth one byte.
     GlobalHorizon = 9,
+    /// The relief channels `k` and `m` of the global bake (M9, GEN-099, STRM-068): one record per cube face.
+    GlobalRelief = 10,
+    /// The class-weights lattice of the global bake (M9, GEN-093, STRM-067): one record per cube face.
+    GlobalClassWeights = 11,
+    /// The pass-1 change of one cube face of the erosion layer (M9 bake PR 4, GEN-100, STRM-065): one record per face.
+    LayerFace = 12,
+    /// The pass-2 change of one tile of the erosion layer (M9 bake PR 5, GEN-101, STRM-065): one record per tile.
+    LayerTile = 13,
 }
 
 /// One entry of a read set, in its 128-bit form (ADR 0018).
@@ -333,6 +341,14 @@ pub const PARAM_COUPLED: u8 = 10;
 // Output parameter 11 was the definition of a chunk field (removed with the chunk stage, ADR 0086); the number is not reused.
 /// The coarse horizon of a block: observer cells per face edge, azimuths, range, step, radius and the version of the march (STRM-045).
 pub const PARAM_HORIZON: u8 = 12;
+/// What the relief channels of a face depend on: the channels' version, the class-list and class-source versions, the class lattice's hash, the step limit, the ring and the taper (STRM-068).
+pub const PARAM_RELIEF: u8 = 13;
+/// The number of classes of a stored class-weights lattice (STRM-067).
+pub const PARAM_CLASS_WEIGHTS: u8 = 14;
+/// What an erosion layer is made of: its version, the face grid's cells, the radius, the sea level, the seed, every parameter of the carve and the inputs' identity (STRM-065).
+pub const PARAM_LAYER: u8 = 15;
+/// What a tile of the erosion layer is made of: its version, the tile grid, the pass-2 parameters, the inputs' identity and the digest of the pass-1 faces it read (STRM-065).
+pub const PARAM_TILE_LAYER: u8 = 16;
 
 fn field_inputs(kind: Kind, field: &dyn HeightField, map: &dyn FaceMapping, tile: TileId, radius_m: f64) -> KeyInputs {
     assert!(

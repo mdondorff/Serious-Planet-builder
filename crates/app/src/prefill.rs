@@ -85,7 +85,7 @@ pub(crate) fn prefill_store(o: &Options, dir: &Path, out: &mut dyn Write) -> Res
         .map_err(err);
     }
     let spec = TileSpec::new(field.as_ref(), world.radius_m(), o.cells, max_level).with_floor(floor);
-    let threads = if o.threads == 0 { std::thread::available_parallelism().map_or(1, |n| n.get()) } else { o.threads };
+    let (threads, threads_note) = planet_streaming::topology::bake_threads(o.threads)?;
     let (bytes_before, started) = (pack_bytes(dir), std::time::Instant::now());
     let report = prefill(dir, &spec, levels, threads, DEFAULT_MAX_PACK_BYTES, &|level, n| {
         eprintln!("pre-fill: level {level} done ({n} tiles)");
@@ -96,7 +96,7 @@ pub(crate) fn prefill_store(o: &Options, dir: &Path, out: &mut dyn Write) -> Res
     writeln!(
         out,
         "pre-fill {}: levels {floor}..={levels} of cells {}, compact form, finest level {max_level}: {} tiles, {} written, {} already stored; \
-         {} payload bytes, packs grew by {grown} bytes; {secs:.1} s on {threads} threads",
+         {} payload bytes, packs grew by {grown} bytes; {secs:.1} s on {threads} threads ({threads_note})",
         dir.display(),
         o.cells,
         report.total,

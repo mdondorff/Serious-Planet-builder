@@ -56,7 +56,7 @@ Source: CON-25, CLAUDE.md
 
 Verify: A
 Status: active
-Source: ADR 0009, report §16, ADR 0020, planner inbox #44 (2026-11-01)
+Source: ADR 0009, report §16, ADR 0020, planner inbox #44 (2026-11-01), opus-planner (2026-11-03, #1108)
 
 #### Scenario: Change in a middle crate
 - **WHEN** only files of `streaming` changed
@@ -78,7 +78,7 @@ Source: ADR 0009, report §16, ADR 0020, planner inbox #44 (2026-11-01)
 #### Scenario: The GPU tests have a hang limit of 300 s
 - **WHEN** a test of a `gpu_*` binary runs under the default nextest profile (the software-adapter tier C, CI's WARP and lavapipe runs, and the `real-gpu` profile that inherits it)
 - **THEN** nextest marks it slow every 60 s and terminates it after 300 s (5 periods), where every other test terminates after 180 s; the limit catches a hang and is not a budget: the heavy `gpu_*` tests take 40 to 66 s alone and up to 144 s beside the other processes of a full run, and grouping them did not shorten the run
-- **AND** a test with a declared limit in `.config/nextest.toml` (its measured durations and the planner's approval in a comment beside it) terminates after 450 s (5 x 90 s) instead; today the window flight, the coastal flight, the lit coast view, the edit-latency smoke scene and the stills scene; no test is skipped, retried or changed
+- **AND** a test with a declared limit in `.config/nextest.toml` (its measured durations and the planner's approval in a comment beside it) terminates after 450 s (5 x 90 s) instead; today the window flight, the coastal flight, the lit coast view, the edit-latency smoke scene, the two stills scenes, the small-world window gate and the draw-flag loop test of `gpu_skeleton`; no test is skipped, retried or changed
 
 #### Scenario: The GPU tier runs every test
 - **WHEN** `cargo xtask test gpu` runs (software or `--real`)
@@ -103,7 +103,7 @@ Source: ADR 0009, report §16, ADR 0020, planner inbox #44 (2026-11-01)
 
 #### Scenario: The software GPU tier runs at most 8 GPU tests at once
 - **WHEN** a `gpu_*` test runs under the default nextest profile
-- **THEN** it is in the test group `gpu-tier` of at most 8 processes at once, unless an earlier override puts it in a heavier group; the window, water-coverage, stream-perf, envelope-perf, edit-perf and stills tests and the three loop tests of `gpu_skeleton` are in `heavy-window` of at most 2; tier A and B tests are not capped
+- **THEN** it is in the test group `gpu-tier` of at most 8 processes at once, unless an earlier override puts it in a heavier group; the window, water-coverage, stream-perf, envelope-perf, edit-perf and stills tests and two loop tests of `gpu_skeleton` are in `heavy-window` of at most 2; the coastal flight, the real-window tests, the lit flight and lit streaming process tests and the draw-flag loop test of `gpu_skeleton` are in `warp-heavy` of 1, which comes first; tier A and B tests are not capped
 - **AND** a machine with 8 cores or fewer (CI's runners) runs as before; on the 20-thread reference laptop the software tier C no longer runs about 20 rasterising processes at once (SPIKE-84: the 12 timeouts of 2026-10-20 and 3 load timeouts on 2026-10-31)
 
 #### Scenario: Wall-clock checks run with perf, not in tier A
@@ -355,16 +355,20 @@ Source: opus-planner (2026-10-19), actions/partner-runner-images#169
 - **WHEN** `ci.yml` is read
 - **THEN** every install step has its retry with the same tools right after it, the first with `continue-on-error`, the retry with the failure condition
 
-### Requirement: BUILD-018 Tier C on Windows runs in three parts
-The CI job that runs tier C SHALL run its Windows leg as three jobs, `windows (WARP) C 1/3`, `C 2/3` and `C 3/3`, each `cargo xtask test gpu -- --partition count:N/3`, so that every tier-C test runs in exactly one part and each part's job time stays under the 16 min budget of BUILD-014. The test groups (the serialised `warp-heavy` group among them) hold within each part. The Linux leg SHALL run whole. The artifacts of a part SHALL carry its number (`review-Windows-N`, `test-logs-Windows-gpu-N`).
+### Requirement: BUILD-018 Tier C on Windows runs in four parts from one build
+The CI job that runs tier C SHALL build the tier-C binaries once on Windows into a nextest archive (`windows (WARP) C build`, `test gpu --archive-out FILE`) and SHALL run them as four jobs, `windows (WARP) C 1/4` to `C 4/4`, each `test gpu --archive-file FILE -- --partition count:N/4` with no build of its own, so that every tier-C test runs in exactly one part and each part's job time stays under the 16 min budget of BUILD-014. The test groups (the serialised `warp-heavy` group among them) hold within each part. The Linux leg SHALL run whole. The artifacts of a part SHALL carry its number (`review-Windows-N`, `test-logs-Windows-gpu-N`).
 
 Verify: A
 Status: active
-Source: opus-planner (2026-10-19; 2026-11-03, inbox #74: two halves took 21.2 and 20.6 min after #1103), BUILD-005, BUILD-014
+Source: opus-planner (2026-10-19; 2026-11-03, inbox #74: two halves took 21.2 and 20.6 min after #1103; 2026-11-03, options 2 and 4: with three parts one drew 878 s of serialised `warp-heavy` tests and ran 21-22 min, #1125, and each part spent 5-6 min building), BUILD-005, BUILD-014
 
-#### Scenario: Three parts
+#### Scenario: Four parts from one archive
 - **WHEN** the repository check test reads the workflow file
-- **THEN** the tier-C matrix holds a Windows entry for parts 1, 2 and 3, the test command takes `--partition count:{part}/3`, and the artifact names carry the part
+- **THEN** the build job makes the archive and uploads it, the tier-C matrix holds a Windows entry for parts 1 to 4 that needs the build job and runs the archive with `--partition count:{part}/4`, and the artifact names carry the part
+
+#### Scenario: The archive arguments
+- **WHEN** `test gpu --archive-out FILE` and `--archive-file FILE` are given, alone, together, or with `test fast`
+- **THEN** the first builds only the `gpu_all` binaries of `planet` and `planet-render` into FILE; both together and either with `test fast` are refused with their reason
 
 ### Requirement: BUILD-019 Test fast keeps a series of its times
 After every `cargo xtask test fast` run whose build succeeded, the command SHALL append one tab-separated line to `target/test-logs/test-fast-series.tsv`: the UTC time (`YYYY-MM-DDTHH:MM:SSZ`), the selection (`every crate` or the selected crate names joined by `+`), the build seconds, the test seconds, their sum (one decimal each) and `pass` or `fail`. A file that cannot be written SHALL be a warning, not a failure. The log rotation of BUILD-012 SHALL leave the file alone.
@@ -623,3 +627,14 @@ Source: ADR 0087 point 7, ADR 0094, SPIKE-95 (PR 3 of its plan; SPIKE-90 windows
 #### Scenario: Retries and failures
 - **WHEN** the first run is refused and its retry comes out invalid with retries 1, and another window's child fails
 - **THEN** the refusal waits once with no duty idle before its retry, both attempts are kept with their reasons, nothing settles without a valid reference round, and the failure stops the window naming the run with the attempts before it kept and the table saying STOPPED
+
+### Requirement: BUILD-036 Tiers A and B run in three parts per operating system
+The CI job that runs tiers A and B SHALL run as three jobs per operating system, `windows (WARP) A+B 1/3` to `3/3` and `linux (lavapipe) A+B 1/3` to `3/3`, each `cargo xtask test -- --partition hash:N/3`, so that every tier-A and tier-B test runs in exactly one part, a test's part depends on its name alone, and each job stays under the 16 min budget of BUILD-014. Part 2 SHALL also run the determinism manifest and its upload (GEN-003), check, spec-lint, the licence check and the run-mode starts (BUILD-005); parts 1 and 3 run only their tests. The artifacts of a part SHALL carry its number (`test-logs-<OS>-ab-N`, `review-<OS>-ab-N`).
+
+Verify: A
+Status: active
+Source: opus-planner (2026-11-03: the Windows A+B job took 16.4 min in #1128's run, its test step 806 s of which 257 s build and 548 s tests; the critical path of a CI round after BUILD-018's archive; 2026-11-03, inbox #79, #1134; ab-balanced-parts), BUILD-005, BUILD-014
+
+#### Scenario: Three parts, the checks once in part 2
+- **WHEN** the repository check test reads the workflow file
+- **THEN** the A+B matrix holds parts 1 to 3 for Windows and for Linux, the test command takes `--partition hash:{part}/3`, the manifest, its upload, check, spec-lint, licences and the run-mode starts run in part 2 only, and the artifact names carry the part

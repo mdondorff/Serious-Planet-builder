@@ -46,6 +46,7 @@ use crate::key::{
     PARAM_OCEAN_AREA_FRACTION, PARAM_RESOLUTION,
 };
 use crate::pack::{PackError, PackWriter, Record, StoreParams, TileStore};
+use crate::relief_store::{KIND_GLOBAL_CLASS_WEIGHTS, KIND_GLOBAL_RELIEF};
 use crate::stage_key::{stage_key, StageKeyContext};
 use crate::tiles::{Mismatch, VerifyReport};
 
@@ -745,6 +746,26 @@ impl GlobalWorld {
         self.coupled
     }
 
+    /// The common part of the key inputs of a whole-bake channel (the relief channels and the class weights): `kind`, the root tile of a face, the bake of `res` cells per face
+    /// edge as the source (so a new bake is a new key), `res` under tag 4, an empty read set; the caller adds its own parameters.
+    pub fn base_key_inputs(&self, kind: Kind, tile: TileId, res: u32, implementation_id: &str) -> KeyInputs {
+        let mut output_params = BTreeMap::new();
+        output_params.insert(PARAM_GRID_RES, res.to_le_bytes().to_vec());
+        KeyInputs {
+            kind,
+            hash_version: HASH_VERSION,
+            generator_version: GLOBAL_VERSION,
+            implementation_id: implementation_id.to_string(),
+            face_mapping_id: TangentWarp.id().to_string(),
+            body: self.body,
+            body_params: self.body_params(),
+            tile,
+            source: Some(self.stage_key(res)),
+            output_params,
+            reads: Vec::new(),
+        }
+    }
+
     /// The inputs of the content key of one coupled block: kind 7, the tile, the bake's stage key at the run's base resolution as the
     /// source, `B` under tag 1, the lattice size under tag 4 and the whole run under tag 10.
     pub fn coupled_key_inputs(&self, tile: TileId, cells: u32) -> KeyInputs {
@@ -1066,7 +1087,11 @@ impl GlobalWorld {
         (record.kind != KIND_GLOBAL_BLOCK
             && record.kind != KIND_GLOBAL_OCEAN
             && record.kind != KIND_GLOBAL_WET_FLOOR
-            && record.kind != KIND_GLOBAL_WATER_SUMMARY)
+            && record.kind != KIND_GLOBAL_WATER_SUMMARY
+            && record.kind != KIND_GLOBAL_RELIEF
+            && record.kind != KIND_GLOBAL_CLASS_WEIGHTS
+            && record.kind != crate::layer_store::KIND_LAYER_FACE
+            && record.kind != crate::layer_tiles::KIND_LAYER_TILE)
             || (record.generator_version == GLOBAL_VERSION && record.hash_version == HASH_VERSION && record.node_set_id == self.node_set_id)
     }
 
