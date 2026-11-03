@@ -71,6 +71,13 @@ pub struct FrameRecord {
     /// bytes of the frame's plan (an own line against CON-21's 2 ms, STRM-006): recorded only, they say whether a slow frame was a capped one.
     pub deferred: usize,
     pub node_bytes: u64,
+    /// Where `record_ms` went (the renderer's CPU phases): the node-record build and write, the tile references and draw arguments, recording the
+    /// passes, and submitting. The rest of `record_ms` is uniforms and pass preparation. Recorded only (zero where the frame did not render).
+    pub node_build_ms: f64,
+    pub node_write_ms: f64,
+    pub refs_ms: f64,
+    pub encode_ms: f64,
+    pub submit_ms: f64,
 }
 
 /// How a lag rule counts towards the verdict (the owner's decision of 2026-10-15, ADR 0032).
@@ -512,12 +519,12 @@ pub fn column_metrics(frames: &[FrameRecord]) -> Vec<(String, Stats)> {
 /// The per-frame log as text (one line per frame): the columns of TEST-012 and the counts of the frame.
 pub fn frames_text(frames: &[FrameRecord]) -> String {
     let mut s = String::from(
-        "# frame plan_ms scheduler_ms upload_ms record_ms gpu_ms wall_ms lag uncovered blank upload_bytes resident in_flight queued dispatched uploaded cancelled degraded allocated_bytes upload_calls queries tile_misses band_queries lit_plan_ms deferred node_bytes\n",
+        "# frame plan_ms scheduler_ms upload_ms record_ms gpu_ms wall_ms lag uncovered blank upload_bytes resident in_flight queued dispatched uploaded cancelled degraded allocated_bytes upload_calls queries tile_misses band_queries lit_plan_ms deferred node_bytes node_build_ms node_write_ms refs_ms encode_ms submit_ms\n",
     );
     for (k, f) in frames.iter().enumerate() {
         let opt = |v: Option<f64>| v.map_or("-".to_string(), |v| format!("{v:.3}"));
         s.push_str(&format!(
-            "{k} {:.3} {:.3} {:.3} {:.3} {} {:.3} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {:.3} {} {}\n",
+            "{k} {:.3} {:.3} {:.3} {:.3} {} {:.3} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {:.3} {} {} {:.3} {:.3} {:.3} {:.3} {:.3}\n",
             f.plan_ms,
             f.scheduler_ms,
             f.upload_ms,
@@ -542,7 +549,12 @@ pub fn frames_text(frames: &[FrameRecord]) -> String {
             f.band_queries,
             f.lit_plan_ms,
             f.deferred,
-            f.node_bytes
+            f.node_bytes,
+            f.node_build_ms,
+            f.node_write_ms,
+            f.refs_ms,
+            f.encode_ms,
+            f.submit_ms
         ));
     }
     s
