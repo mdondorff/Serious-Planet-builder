@@ -74,10 +74,14 @@ impl FaceSpec {
     }
 
     /// The jitter stream of this face.
-    fn stream(&self) -> u64 {
-        // A multiplier other than the jitter hash's own (0x9E37..), so that (face, cell) pairs of two faces do not collide in the hash's input.
-        self.seed ^ (u64::from(self.face.0) + 1).wrapping_mul(0xD6E8_FEB8_6659_FD93)
+    pub fn stream(&self) -> u64 {
+        face_stream(self.seed, self.face)
     }
+}
+
+/// The jitter stream of a face of the world `seed`: a multiplier other than the jitter hash's own (0x9E37..), so that (face, cell) pairs of two faces do not collide in the hash's input.
+pub fn face_stream(seed: u64, face: Face) -> u64 {
+    seed ^ (u64::from(face.0) + 1).wrapping_mul(0xD6E8_FEB8_6659_FD93)
 }
 
 /// A field sampled once per cell of the carved grid (the face and its halo), row-major, `threads` threads (a value per cell: the same bits for any count).

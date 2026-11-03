@@ -20,6 +20,8 @@ mod keys_footprint;
 mod keys_wide_ids;
 #[path = "layer_store.rs"]
 mod layer_store;
+#[path = "layer_tiles.rs"]
+mod layer_tiles;
 #[path = "meshpack.rs"]
 mod meshpack;
 #[path = "pack.rs"]

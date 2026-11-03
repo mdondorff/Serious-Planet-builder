@@ -227,7 +227,7 @@ Source: ADR 0097
 Every world-build stage (field bake, erosion bake, pre-fill) SHALL run by default on the background capacity B of BUDG-013, never on every logical thread, and SHALL log its thread count; an explicit thread count overrides it and is logged as an override. Results SHALL not depend on the thread count (CON-14).
 
 Verify: A
-Status: planned
+Status: active
 Source: ADR 0097 point 7 (owner, 2026-11-03); #1132
 
 #### Scenario: Default and override

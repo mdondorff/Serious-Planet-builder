@@ -22,6 +22,10 @@ pub struct CarveParams {
     pub breach_max_m: f64,
     /// The sea level: land never falls below it plus `epsilon`, whatever depth the outlets have (a sea outlet is a base level at the sea, not at its floor).
     pub sea_level: f64,
+    /// The drainage area is capped at this many square metres (0: no cap): the local carve of pass 2 incises catchments up to 1 km^2 only (GEN-101).
+    pub max_area: f64,
+    /// The carve only lowers: a cell never ends higher than it began (no fill under a pit, GEN-101). With `u_over_k` 0 and `breach_max_m` 0 it is the local carve.
+    pub incise_only: bool,
 }
 
 impl Default for CarveParams {
@@ -35,6 +39,8 @@ impl Default for CarveParams {
             breach_slope: 1e-3,
             breach_max_m: 50.0,
             sea_level: 0.0,
+            max_area: 0.0,
+            incise_only: false,
         }
     }
 }
@@ -45,6 +51,7 @@ impl Default for CarveParams {
 /// would fill; the next flood sees the breached surface.
 pub fn carve(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, factor: Option<&[f64]>, seed: u64) -> Routing {
     assert!(p.steps > 0 && p.reroute_every > 0, "a carve has steps and a re-route interval");
+    assert!(p.max_area >= 0.0 && p.max_area.is_finite(), "the area cap is finite and not negative, not {}", p.max_area);
     assert_finite("the heights", z);
     if let Some(f) = factor {
         assert_eq!(f.len(), grid.len(), "one carve factor per cell");
@@ -57,7 +64,7 @@ pub fn carve(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, facto
         if step % p.reroute_every == 0 {
             // The previous routing is dropped before the next is built: two live routings of a face would not fit its memory budget.
             drop(routing.take());
-            let r = route(grid, z, outlet, p.epsilon, seed, 0.0);
+            let r = route(grid, z, outlet, p.epsilon, seed, p.max_area);
             for &c in r.order.iter().rev() {
                 let c = c as usize;
                 let rec = r.receiver[c];
@@ -84,7 +91,8 @@ pub fn carve(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, facto
             let f = p.k_dt * scale * libm::sqrt(r.area[c]) / distance(grid, c, rec);
             let hr = z[rec];
             let hn = (z[c] + uplift * scale + f * hr) / (1.0 + f);
-            z[c] = hn.max(hr + p.epsilon).max(floor);
+            let new = hn.max(hr + p.epsilon).max(floor);
+            z[c] = if p.incise_only { new.min(z[c]) } else { new };
         }
     }
     routing.expect("a carve has at least one step")
