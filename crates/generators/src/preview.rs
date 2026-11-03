@@ -34,6 +34,8 @@ pub struct Fields {
     pub largest_k_step: f64,
     /// The share of neighbouring lattice point pairs whose `k` differs by more than GEN-097's limit of 2.0.
     pub k_edges_over: f64,
+    /// The 99th percentile of the lattice steps of the untapered `k` (GEN-097: at most 2.0).
+    pub k_step_p99: f64,
 }
 
 /// The pixel centre's latitude in radians.
@@ -86,6 +88,7 @@ pub fn compute(seed: u64, width: usize, height: usize, lattice_cells: usize, thr
         pixels: rows.into_iter().flatten().collect(),
         largest_k_step: lattice.largest_k_step(),
         k_edges_over: lattice.k_steps_over(2.0),
+        k_step_p99: lattice.k_step_quantile(0.99),
     }
 }
 
@@ -465,6 +468,7 @@ pub struct Shares {
     pub above_4km: f64,
     pub highest_m: f64,
     pub largest_k_step: f64,
+    pub k_step_p99: f64,
 }
 
 pub fn shares(f: &Fields) -> Shares {
@@ -515,7 +519,169 @@ pub fn shares(f: &Fields) -> Shares {
         above_4km: above4 / norm,
         highest_m: if highest == f64::MIN { 0.0 } else { highest },
         largest_k_step: f.largest_k_step,
+        k_step_p99: f.k_step_p99,
     }
+}
+
+/// The relief measures of SPIKE-93 (Earth's hypsometry, coastal land, belt land and the k-step distribution), land under 60 degrees latitude, area weighted by cos(latitude).
+pub struct Relief {
+    pub under_500m: f64,
+    pub median_m: f64,
+    pub coastal_median_m: f64,
+    pub above_1km: f64,
+    pub above_3km: f64,
+    pub belt_land: f64,
+    /// `|dk|` between 4-neighbouring 2 x 2 pixel cells (about 0.35 degrees, 40 km) of at least half land: the share over 2.0, the 99th and the 90th percentile.
+    pub k_over_2: f64,
+    pub k_p99: f64,
+    pub k_p90: f64,
+}
+
+/// The weighted quantile `q` of `(value, weight)` pairs (sorted by value with a total order).
+fn weighted_quantile(v: &mut [(f64, f64)], q: f64) -> f64 {
+    v.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let total: f64 = v.iter().map(|x| x.1).sum();
+    let mut acc = 0.0;
+    for (x, w) in v.iter() {
+        acc += w;
+        if acc >= q * total {
+            return *x;
+        }
+    }
+    v.last().map_or(f64::NAN, |x| x.0)
+}
+
+pub fn relief(f: &Fields) -> Relief {
+    let (w, h) = (f.width, f.height);
+    let px = |x: usize, y: usize| &f.pixels[y * w + x];
+    let cell_deg = 180.0 / h as f64;
+    // About 55 km (the coast band) and 50 km (the belt box) in pixels.
+    let coast_r = (55.0 / (111.2 * cell_deg)).round().max(1.0) as isize;
+    let box_r = (50.0 / (111.2 * cell_deg)).round().max(1.0) as isize;
+    let (mut land, mut under, mut a1, mut a3, mut belt) = (0.0, 0.0, 0.0, 0.0, 0.0);
+    let mut elev: Vec<(f64, f64)> = Vec::new();
+    let mut coastal: Vec<(f64, f64)> = Vec::new();
+    for y in 0..h {
+        let lat = latitude(y, h);
+        if libm::fabs(lat) >= 60f64.to_radians() {
+            continue;
+        }
+        let area = libm::cos(lat);
+        let cols = |r: isize| ((r as f64) / libm::cos(lat).max(0.2)).round() as isize;
+        for x in 0..w {
+            let p = px(x, y);
+            if p.land_depth <= 0.0 {
+                continue;
+            }
+            let e = f64::from(p.new_m).max(0.0);
+            land += area;
+            under += area * f64::from(u8::from(e < 500.0));
+            a1 += area * f64::from(u8::from(e >= 1000.0));
+            a3 += area * f64::from(u8::from(e >= 3000.0));
+            elev.push((e, area));
+            let near_sea = |r: isize| {
+                let c = cols(r);
+                (-r..=r).any(|dy| {
+                    let yy = y as isize + dy;
+                    yy >= 0
+                        && yy < h as isize
+                        && (-c..=c).any(|dx| px((x as isize + dx).rem_euclid(w as isize) as usize, yy as usize).land_depth <= 0.0)
+                })
+            };
+            if near_sea(coast_r) {
+                coastal.push((e, area));
+            }
+            let (mut lo, mut hi) = (f64::MAX, f64::MIN);
+            let c = cols(box_r);
+            for dy in -box_r..=box_r {
+                let yy = (y as isize + dy).clamp(0, h as isize - 1) as usize;
+                for dx in -c..=c {
+                    let q = f64::from(px((x as isize + dx).rem_euclid(w as isize) as usize, yy).new_m).max(0.0);
+                    lo = lo.min(q);
+                    hi = hi.max(q);
+                }
+            }
+            belt += area * f64::from(u8::from(hi - lo >= 1000.0));
+        }
+    }
+    let norm = if land > 0.0 { land } else { 1.0 };
+    // The k of 2 x 2 pixel cells with at least two land pixels (the mean over the land pixels, as the SPIKE-93 reference), under 60 degrees latitude, and the steps between 4-neighbours.
+    let (cw, ch) = (w / 2, h / 2);
+    let cell: Vec<Option<f64>> = (0..cw * ch)
+        .map(|i| {
+            let (cx, cy) = (i % cw, i / cw);
+            if libm::fabs(latitude(2 * cy + 1, h)) >= 60f64.to_radians() {
+                return None;
+            }
+            let ps = [px(2 * cx, 2 * cy), px(2 * cx + 1, 2 * cy), px(2 * cx, 2 * cy + 1), px(2 * cx + 1, 2 * cy + 1)];
+            let on: Vec<f64> = ps.iter().filter(|p| p.land_depth > 0.0).map(|p| f64::from(p.k)).collect();
+            (on.len() >= 2).then(|| on.iter().sum::<f64>() / on.len() as f64)
+        })
+        .collect();
+    let mut steps: Vec<(f64, f64)> = Vec::new();
+    for cy in 0..ch {
+        for cx in 0..cw {
+            let Some(a) = cell[cy * cw + cx] else { continue };
+            if let Some(b) = cell[cy * cw + (cx + 1) % cw] {
+                steps.push((libm::fabs(a - b), 1.0));
+            }
+            if cy + 1 < ch {
+                if let Some(b) = cell[(cy + 1) * cw + cx] {
+                    steps.push((libm::fabs(a - b), 1.0));
+                }
+            }
+        }
+    }
+    let over = steps.iter().filter(|s| s.0 > 2.0).count() as f64 / steps.len().max(1) as f64;
+    Relief {
+        under_500m: under / norm,
+        median_m: weighted_quantile(&mut elev, 0.5),
+        coastal_median_m: weighted_quantile(&mut coastal, 0.5),
+        above_1km: a1 / norm,
+        above_3km: a3 / norm,
+        belt_land: belt / norm,
+        k_over_2: over,
+        k_p99: weighted_quantile(&mut steps.clone(), 0.99),
+        k_p90: weighted_quantile(&mut steps, 0.90),
+    }
+}
+
+/// The report lines of the relief measures beside SPIKE-93's bands (class bands approved by the owner, 2026-11-02, the others the planner's; Earth from ETOPO 2022, land under 60 degrees).
+fn relief_report(f: &Fields) -> String {
+    let r = relief(f);
+    let band = |v: f64, lo: f64, hi: f64| if v >= lo && v <= hi { "in band" } else { "OUT OF BAND" };
+    let mut t = String::from("relief against Earth (SPIKE-93, class bands approved by the owner 2026-11-02, the others the planner's; land under 60 degrees; on the preview grid, before any bake):
+");
+    let pct = |name: &str, v: f64, earth: &str, lo: f64, hi: f64| {
+        format!(
+            "  {name} {:.1} % (Earth {earth}, band {lo}-{hi} %, {})
+",
+            100.0 * v,
+            band(100.0 * v, lo, hi)
+        )
+    };
+    t += &pct("land under 500 m", r.under_500m, "58.4 %", 50.0, 65.0);
+    t += &format!(
+        "  median land elevation {:.0} m (Earth about 410 m, band 300-550 m, {})
+",
+        r.median_m,
+        band(r.median_m, 300.0, 550.0)
+    );
+    t += &format!(
+        "  coastal land (within about 55 km of the sea) median {:.0} m (Earth 82 m, band under 200 m, {})
+",
+        r.coastal_median_m,
+        if r.coastal_median_m < 200.0 { "in band" } else { "OUT OF BAND" }
+    );
+    t += &pct("land above 1 km", r.above_1km, "21.6 %", 17.0, 27.0);
+    t += &pct("land above 3 km", r.above_3km, "3.5 %", 2.0, 5.0);
+    t += &pct("belt land (R50 at least 1 km)", r.belt_land, "17.6 %", 13.0, 23.0);
+    t += &format!(
+        "  k steps between 40 km cells: over 2.0 on {:.1} % of pairs (Earth 6.7 %), p99 {:.2} (Earth 3.31, realism band at most 3.5), p90 {:.2} (Earth 1.63)
+",
+        100.0 * r.k_over_2, r.k_p99, r.k_p90
+    );
+    t
 }
 
 /// The report text: each measure beside TEST-082's band; reported, not judged (the judgement belongs to TEST-082 with the bake).
@@ -527,18 +693,20 @@ pub fn report(f: &Fields) -> String {
         f.seed, f.width, f.height
     );
     r += &format!("land fraction {:.1} %\nland under 60 degrees latitude, by the class weights (TEST-082's bands, reported not judged; its classes come from k R14 once the bake exists):\n", 100.0 * s.land_fraction);
-    r += &format!("  plains (plain + rolling) {:.1} % (band 55-67 %, {})\n", 100.0 * s.plains, band(100.0 * s.plains, 55.0, 67.0));
-    r += &format!("  hills {:.1} % (band 10-25 %, {})\n", 100.0 * s.hills, band(100.0 * s.hills, 10.0, 25.0));
+    r += &format!("  plains (plain + rolling) {:.1} % (band 45-62 %, {})\n", 100.0 * s.plains, band(100.0 * s.plains, 45.0, 62.0));
+    r += &format!("  hills {:.1} % (band 15-30 %, {})\n", 100.0 * s.hills, band(100.0 * s.hills, 15.0, 30.0));
     r +=
-        &format!("  mountains (mountains + high) {:.1} % (band 14-30 %, {})\n", 100.0 * s.mountains, band(100.0 * s.mountains, 14.0, 30.0));
+        &format!("  mountains (mountains + high) {:.1} % (band 20-32 %, {})\n", 100.0 * s.mountains, band(100.0 * s.mountains, 20.0, 32.0));
     r += &format!("  plateau {:.1} % (no band; counted with the plains by TEST-082)\n", 100.0 * s.plateau);
     r += &format!("  land above 2 km {:.1} % (band 5-10 %, {})\n", 100.0 * s.above_2km, band(100.0 * s.above_2km, 5.0, 10.0));
     r += &format!("  land above 4 km {:.1} % (band 1-3 %, {})\n", 100.0 * s.above_4km, band(100.0 * s.above_4km, 1.0, 3.0));
     r += &format!("  highest land {:.2} km (band 7-9 km, {})\n", s.highest_m / 1000.0, band(s.highest_m / 1000.0, 7.0, 9.0));
     r += &format!(
-        "  largest step of the untapered k between lattice points {:.2} (limit 2.0, {})\n",
-        s.largest_k_step,
-        if s.largest_k_step <= 2.0 { "within" } else { "OVER" }
+        "  p99 of the lattice steps of the untapered k {:.2} (limit 2.0, {}); largest step {:.2} (reported, not gated)
+",
+        s.k_step_p99,
+        if s.k_step_p99 <= 2.0 { "within" } else { "OVER" },
+        s.largest_k_step
     );
     r += &format!("  share of lattice steps of k over 2.0: {:.2} %\n", 100.0 * f.k_edges_over);
     r += "  per class:";
@@ -565,32 +733,28 @@ pub fn report(f: &Fields) -> String {
     if f.width >= 360 && f.height >= 180 {
         let c = crate::shape::continent_metrics(&land, f.width, f.height);
         r += "continent stage (SPIKE-92, GEN-104; TEST-087 and TEST-088 score these on a 1440 x 720 land grid; reported here on the preview grid):
-    ";
+";
         r += &format!(
             "  S9 compactness (area-weighted median of 4 pi A / P^2): {:.2}; Earth 0.10, gate at most 0.20
-    ",
+",
             c.compactness
         );
         r += &format!(
             "  S10 elongation (median sqrt(l1 / l2)): {:.2}; Earth 1.77, band 1.5-2.5
-    ",
+",
             c.elongation
         );
         r += &format!(
             "  S11 islands (masses of 10^4 to 10^6 km2): {}, {:.1} % of land; Earth 50, 3.9 %, band 35-70 and 1.9-6 %
-    ",
+",
             c.islands,
             100.0 * c.island_share
         );
-        r += &format!(
-            "  masses of at least 1 Mkm2 centred poleward of 70 degrees: {}; limit 1
-    ",
-            c.polar_masses
-        );
+        r += &format!("  masses of at least 1 Mkm2 centred poleward of 70 degrees: {}; limit 1\n", c.polar_masses);
     } else {
-        r += "continent stage metrics S9 to S11: not measured (they need a grid of at least 360 x 180)
-";
+        r += "continent stage metrics S9 to S11: not measured (they need a grid of at least 360 x 180)\n";
     }
     r += "  S8 sinuosity: not measured (SPIKE-91 has no comparable measure yet)\n";
+    r += &relief_report(f);
     r
 }

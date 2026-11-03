@@ -891,7 +891,8 @@ fn run_once(
     out.stages.set_definition_ms = ms(call);
     let call = Instant::now();
     announce_item_change(h, world, &before_def, old_revision);
-    let resident: Vec<TileId> = h.rig.managed.resident().keys().copied().collect();
+    // The resident tiles and those still loading from the old field (STRM-071).
+    let resident: Vec<TileId> = h.rig.managed.edit_candidates();
     let found = Instant::now();
     let tiles = found_tiles(&edited, stamp, &resident, world.radius_m());
     out.stages.find_ms = ms(found);
@@ -1374,7 +1375,8 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
                 with_base.put_item_spec(BodyId::PLANET, base.clone()).map_err(|e| format!("the case's earlier state: {e:?}"))?;
                 world.set_definition(Arc::new(with_base))?;
                 // The tiles the earlier state touches are refreshed, as an edit's are, so that the frames settle on the world as it is.
-                let resident: Vec<TileId> = h.rig.managed.resident().keys().copied().collect();
+                // The resident tiles and those still loading from the old field (STRM-071).
+                let resident: Vec<TileId> = h.rig.managed.edit_candidates();
                 h.rig.managed.edit(&found_tiles(&world.definition(), base, &resident, radius_m));
             }
             // A smoke run needs the frames to be exact once, not a long calm: every frame is slow on the software adapter.
@@ -1393,7 +1395,8 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
             }
             world.set_definition(original)?;
             if let Some(base) = &case.base {
-                let resident: Vec<TileId> = h.rig.managed.resident().keys().copied().collect();
+                // The resident tiles and those still loading from the old field (STRM-071).
+                let resident: Vec<TileId> = h.rig.managed.edit_candidates();
                 h.rig.managed.edit(&found_tiles(&world.definition(), base, &resident, radius_m));
             }
             rows.push(CaseRow { kind: case.kind, altitude_m: altitude, radius_m: case.size_m, runs });
@@ -1657,7 +1660,8 @@ pub fn pair_frames(
         let old_revision = world.field()?.item_revision();
         world.set_definition(Arc::clone(&edited))?;
         announce_item_change(&mut h, &world, &before_def, old_revision);
-        let resident: Vec<TileId> = h.rig.managed.resident().keys().copied().collect();
+        // The resident tiles and those still loading from the old field (STRM-071).
+        let resident: Vec<TileId> = h.rig.managed.edit_candidates();
         let tiles = found_tiles(&edited, &case.spec, &resident, planet_m);
         h.rig.managed.edit(&tiles);
         h.rig.managed.set_preview_list(case_preview_list(&before_def, &edited, &case.spec, req.camera.position.0, planet_m));

@@ -13,8 +13,9 @@
 //! nothing escalates and 3 otherwise (`cargo xtask golden-review` then reports a failure); 2 on bad arguments.
 
 use planet_testkit::review::{
-    bound_test_declarations, classify, classify_look_change, debug_views_unchanged, declared_goldens, driver_gate, enforce_bound_tests,
-    look_declarations, look_diff_ok, parse_classes, Change, GoldenClass, LookEvidence, Observation, TestOutcomes, Verdict,
+    anchor_commit, bound_test_declarations, classify_anchored, classify_look_change, debug_views_unchanged, declared_goldens, driver_gate,
+    enforce_bound_tests, file_at_commit, look_declarations, look_diff_ok, parse_classes, Anchor, Change, GoldenClass, LookEvidence,
+    Observation, TestOutcomes, Verdict,
 };
 use planet_testkit::{read_png, repo_root, write_png, Image};
 use std::collections::{BTreeMap, BTreeSet};
@@ -207,6 +208,27 @@ fn git(root: &Path, args: &[&str]) -> String {
         .unwrap_or_default()
 }
 
+/// ADR 0096 point 2: how far the candidate of a lit, sky or water golden is from the golden's anchor, the file at its latest commit with an
+/// `Owner-approved:` trailer (else its first commit); the second value is the report text (the commit and the numbers).
+fn anchor_of(root: &Path, scratch: &Path, adapter: &str, name: &str, candidate: &Image) -> (Anchor, String) {
+    let rel = format!("tests/goldens/{adapter}/{name}.png");
+    let result = anchor_commit(root, &rel).and_then(|sha| {
+        let bytes = file_at_commit(root, &sha, &rel)?;
+        std::fs::create_dir_all(scratch).map_err(|e| e.to_string())?;
+        let file = scratch.join(format!("{adapter}-{name}.png"));
+        std::fs::write(&file, bytes).map_err(|e| e.to_string())?;
+        let image = read_png(&file).map_err(|e| format!("{rel} at {sha}: {e}"))?;
+        if (image.width, image.height) != (candidate.width, candidate.height) {
+            return Err(format!("{rel} at {sha} has another size"));
+        }
+        Ok((sha, change(&image, candidate)))
+    });
+    match result {
+        Ok((sha, c)) => (Anchor::Change(c), format!("{} px, max delta {} against {}", c.pixels, c.max_delta, &sha[..sha.len().min(8)])),
+        Err(why) => (Anchor::Unavailable(why.clone()), format!("none: {why}")),
+    }
+}
+
 /// ADR 0037 point 2: the evidence for a change that declares look parameter changes under `Look changes:`. The files the change
 /// touches (against the base branch, plus the working tree), the zero-context diff of each look data file
 /// (`tests/goldens/look_data.txt`), and whether any debug or shaded golden moved beyond rounding on any adapter.
@@ -364,7 +386,9 @@ fn main() {
         outcomes.0.len(),
         tests.len()
     ));
-    report.push_str("| Adapter | Golden | Changed px | Max delta | Class | Declared | Verdict |\n|---|---|---|---|---|---|---|\n");
+    report.push_str(
+        "| Adapter | Golden | Changed px | Max delta | Class | Declared | Anchor (ADR 0096) | Verdict |\n|---|---|---|---|---|---|---|---|\n",
+    );
     // ADR 0037 point 2: the look path is computed once, and only when the proposal declares look changes.
     let look = (!look_declarations(&proposal_text).is_empty()).then(|| look_evidence(&root, &run, &proposal_text));
     let mut escalated = 0;
@@ -376,12 +400,20 @@ fn main() {
         for adapter in adapters.iter().filter(|a| candidates.contains_key(&((*a).clone(), name.clone()))) {
             let src = &candidates[&(adapter.clone(), name.clone())];
             let is_declared = declared.contains(name);
+            // ADR 0096: a lit, sky or water candidate is also compared with the anchor, the owner's last bless of the golden.
+            let (anchor, anchor_text) = match (class, images.get(adapter)) {
+                (Some(c), Some((_, cand))) if c.is_look_class() => {
+                    let (a, t) = anchor_of(&root, &out.join("anchors"), adapter, name, cand);
+                    (Some(a), t)
+                }
+                _ => (None, "-".to_string()),
+            };
             let verdict = match run.gate(adapter, name) {
                 Some(reason) => Verdict::Escalate(reason),
                 None => look
                     .as_ref()
                     .and_then(|l| classify_look_change(adapter, name, &seen, class, is_declared, l))
-                    .unwrap_or_else(|| classify(adapter, name, &seen, class, is_declared)),
+                    .unwrap_or_else(|| classify_anchored(adapter, name, &seen, class, is_declared, anchor.as_ref())),
             };
             // ADR 0061 point 3: a blessed change needs its declared bound tests green in the --tests reports of this run.
             let verdict = enforce_bound_tests(verdict, name, bound.get(name), &outcomes, !tests.is_empty());
@@ -398,9 +430,9 @@ fn main() {
                 Verdict::AutoLook(e) => format!("AUTO-L {e}"),
                 Verdict::Escalate(r) => format!("ESCALATE {r}"),
             };
-            println!("{adapter} {name}: {px} px, max delta {delta}: {v}");
+            println!("{adapter} {name}: {px} px, max delta {delta}, anchor {anchor_text}: {v}");
             report.push_str(&format!(
-                "| {adapter} | {name} | {px} | {delta} | {} | {} | {v} |\n",
+                "| {adapter} | {name} | {px} | {delta} | {} | {} | {anchor_text} | {v} |\n",
                 class.map_or("none".into(), |c| c.as_str().to_string()),
                 if is_declared { "yes" } else { "no" }
             ));

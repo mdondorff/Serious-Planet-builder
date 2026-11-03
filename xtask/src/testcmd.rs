@@ -935,6 +935,8 @@ const EDIT_SCENE: &str = "edit-latency";
 const ENVELOPE_SCENE: &str = "envelope";
 /// The shadow and material cost scene (REND-044, M8 criterion 5): run by name (`perf stream shadow-cost`), not part of `all`.
 const COST_SCENE: &str = "shadow-cost";
+/// The layer-1 frame scene (REND-052): run by name (`perf stream shadow-layer1`), not part of `all`.
+const LAYER1_SCENE: &str = "shadow-layer1";
 
 const STREAM_SCENES: [&str; 7] = ["dive", "dive-fast", "teleport-1m", "teleport-2km", "look-1m", "look-2km", "dive-cold"];
 
@@ -947,11 +949,16 @@ fn perf_stream_args(args: &[String]) -> Result<Vec<String>, String> {
     if let Some(first) = args.first().filter(|a| !a.starts_with("--")) {
         if first == "all" {
             scene = "streaming".into();
-        } else if STREAM_SCENES.contains(&first.as_str()) || first == EDIT_SCENE || first == ENVELOPE_SCENE || first == COST_SCENE {
+        } else if STREAM_SCENES.contains(&first.as_str())
+            || first == EDIT_SCENE
+            || first == ENVELOPE_SCENE
+            || first == COST_SCENE
+            || first == LAYER1_SCENE
+        {
             scene = first.clone();
         } else {
             return Err(format!(
-                "unknown streaming scene '{first}' (known: {}, {EDIT_SCENE}, {ENVELOPE_SCENE}, {COST_SCENE}, all)",
+                "unknown streaming scene '{first}' (known: {}, {EDIT_SCENE}, {ENVELOPE_SCENE}, {COST_SCENE}, {LAYER1_SCENE}, all)",
                 STREAM_SCENES.join(", ")
             ));
         }
@@ -1221,6 +1228,9 @@ pub fn perf(root: &Path, args: &[String]) -> Res {
     if args.first().map(String::as_str) == Some("--ab") {
         return crate::perfab::run(root, args);
     }
+    if args.first().map(String::as_str) == Some("window") {
+        return crate::perfwindow::run(root, &args[1..]);
+    }
     if args.first().map(String::as_str) == Some("reserve") {
         return crate::perfab::reserve(root, &args[1..]);
     }
@@ -1307,6 +1317,16 @@ mod tests {
             a.windows(2).any(|w| w[0] == "--poses" && w[1] == "p.toml") && a.windows(2).any(|w| w[0] == "--out-dir" && w[1] == "target/sc")
         );
         assert!(!STREAM_SCENES.contains(&COST_SCENE), "`perf stream all` does not run it");
+    }
+
+    // spec: REND-052
+    #[test]
+    fn the_layer1_scene_runs_by_name_with_the_poses_file_and_is_not_part_of_all() {
+        let a = perf_stream_args(&s(&["shadow-layer1", "--poses", "p.toml", "--out-dir", "target/l1"])).unwrap();
+        let at = a.iter().position(|x| x == "--scene").unwrap();
+        assert_eq!(a[at + 1], "shadow-layer1");
+        assert!(a.windows(2).any(|w| w[0] == "--poses" && w[1] == "p.toml"));
+        assert!(!STREAM_SCENES.contains(&LAYER1_SCENE));
     }
 
     // spec: TEST-019
@@ -1867,6 +1887,7 @@ mod tests {
             // Process tests that run a lit flight or lit streaming scene on the software adapter (planner, 2026-11-03).
             "a_lit_view_a_lit_flight_and_a_stream_scene_log_their_cpu_calibration_when_asked_even_in_a_smoke_run",
             "a_streaming_scene_on_the_lit_path_logs_beside_the_debug_path_under_its_own_name",
+            "the_lit_coast_view_over_streamed_tiles_draws_the_same_pixels_still_and_after_a_small_turn_and_back",
         ] {
             assert!(defaults[warp].filter.contains(&format!("test({member})")), "{member} is not in warp-heavy");
         }

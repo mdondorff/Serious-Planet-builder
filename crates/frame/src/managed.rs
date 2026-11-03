@@ -352,6 +352,17 @@ impl ManagedLoop {
         self.pipe.worker().note_item_change(from, to, changes);
     }
 
+    /// The tiles an edit's footprint find runs over (STRM-071): the resident ones and those whose job is in flight. A job reads the field
+    /// when it starts, so a tile still loading when the definition changes would land a version of the old field; named here, its job is
+    /// told to stop and the tile loads again from the new field. A request still queued in the streamer needs no name: its job starts later.
+    /// Sorted, so the find's input does not depend on map order.
+    pub fn edit_candidates(&self) -> Vec<TileId> {
+        let mut out: Vec<TileId> = self.resident.keys().copied().chain(self.manager.streamer().in_flight_tiles()).collect();
+        out.sort_by_key(|t| t.raw());
+        out.dedup();
+        out
+    }
+
     /// An item edit changed what `tiles` read (STRM-026, E1): the plan cache forgets them, the resident ones are refreshed (drawn from
     /// their old version until the new one is uploaded, REND-032), and a new plan is asked for at the next frame although the camera
     /// did not move. `tiles` is the footprint find of the edit (WDEF-007). Returns the refresh requests queued.

@@ -654,6 +654,7 @@ fn check_flight_options(o: &Options) -> Result<(), String> {
             && !((o.pipelined || o.replay_path.is_some()) && **f == "--out-dir")
             && !litperf::is_capture_scene(&o.scene)
             && !stills::is_cost_scene(&o.scene)
+            && !stills::is_layer1_scene(&o.scene)
     }) {
         return Err(format!("{f} only applies to --flight"));
     }
@@ -898,8 +899,12 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     {
         return Err("--views applies to the scenes `lit` and `capture-flights`, --flight-frames to those".into());
     }
-    if o.given.contains("--poses") && !stills::is_stills_scene(&o.scene) && !stills::is_cost_scene(&o.scene) {
-        return Err("--poses applies to the scene `capture-stills` (and to `shadow-cost`)".into());
+    if o.given.contains("--poses")
+        && !stills::is_stills_scene(&o.scene)
+        && !stills::is_cost_scene(&o.scene)
+        && !stills::is_layer1_scene(&o.scene)
+    {
+        return Err("--poses applies to the scene `capture-stills` (and to `shadow-cost` and `shadow-layer1`)".into());
     }
     if stills::is_stills_scene(&o.scene) && o.given.contains("--flight-frames") {
         return Err("--flight-frames does not apply to `capture-stills` (one frame per pose)".into());
@@ -924,6 +929,7 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
             s if preflightperf::is_preflight_scene(s) => preflightperf::perf_preflight(o, &ctx, out),
             s if editperf::is_edit_scene(s) => editperf::perf_edit_latency(o, &ctx, out),
             s if stills::is_cost_scene(s) => stills::perf_shadow_cost(o, &ctx, out),
+            s if stills::is_layer1_scene(s) => stills::perf_shadow_layer1(o, &ctx, out),
             s if streamperf::is_stream_scene(s) => streamperf::perf_streaming(o, &ctx, out),
             s if litperf::is_lit_scene(s) => litperf::perf_lit(o, &ctx, out),
             _ => perf_skeleton(o, &ctx, out),
