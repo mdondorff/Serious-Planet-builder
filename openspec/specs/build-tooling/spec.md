@@ -633,7 +633,7 @@ The CI job that runs tiers A and B SHALL run as three jobs per operating system,
 
 Verify: A
 Status: active
-Source: opus-planner (2026-11-03: the Windows A+B job took 16.4 min in #1128's run, its test step 806 s of which 257 s build and 548 s tests; the critical path of a CI round after BUILD-018's archive; 2026-11-03, inbox #79: with `count:N/2` Windows part 1 took 16m20s against 14m08s, test steps 535 s against 209 s, #1134), BUILD-005, BUILD-014
+Source: opus-planner (2026-11-03: the Windows A+B job took 16.4 min in #1128's run, its test step 806 s of which 257 s build and 548 s tests; the critical path of a CI round after BUILD-018's archive; 2026-11-03, inbox #79, #1134; ab-balanced-parts), BUILD-005, BUILD-014
 
 #### Scenario: Three parts, the checks once in part 2
 - **WHEN** the repository check test reads the workflow file

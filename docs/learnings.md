@@ -169,3 +169,10 @@ What happened: on 2026-11-02 22:09 sonnet-crusader ran `find / -name pp-warp.txt
 Assumption it changes: that a background command ends with its session, and that a quiet machine needs only the lanes to be idle.
 Proposed follow-up: standing lane rule (no search from `/` or a drive root; TaskStop any command moved to the background); the planner checks for stray long-running processes before a slot and the owner stops them; a PreToolUse hook refusing `find /` is the owner's call.
 Obsolete when: background commands are ended with their session, or a hook refuses root searches.
+
+## 2026-11-03 nextest's count partition balances test counts, not time
+Scope: project (CI partitions, BUILD-018 and BUILD-036)
+What happened: `count:N/2` split the A+B tests 1,179 / 1,146 but 1,563 s / 829 s of test time; Windows part 1 ran 16m20s (#1134). `count` and `slice` assign by position, so every added test reshuffles the parts; one 137 s test that takes every slot (`threads-required = "num-cpus"`) decides which part is slowest.
+Assumption it changes: that an even test count gives even parts.
+Proposed follow-up: choose a partition by replaying the measured durations on each scheme's real membership (`cargo nextest list --partition`); prefer `hash`, which places a test by its name alone (ab-balanced-parts). Tier C's `count:N/4` may want the same check.
+Obsolete when: nextest partitions by recorded duration.
