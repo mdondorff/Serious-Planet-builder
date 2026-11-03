@@ -5,7 +5,7 @@ use planet_cache::layer_tiles::face_change_reader;
 use planet_core::{Face, Vec3};
 use planet_generators::bake::carve::CarveParams;
 use planet_generators::bake::experiment as ex;
-use planet_generators::bake::face::{pass1_face, FaceChange, FaceSpec};
+use planet_generators::bake::face::{pass1_face, sample_base, FaceChange, FaceSpec};
 use planet_generators::bake::inputs::BakeInputs;
 use planet_generators::bake::tile::{pass2_tile, Pass2Params, TileGrid, TileId};
 
@@ -18,7 +18,14 @@ fn main() {
     let res: usize = val("--face-res").map_or(4096, |v| v.parse().unwrap());
     let out = val("--out").expect("--out FILE (with --tiles, a directory: tile-F-I-J.f32 files)");
     let face_no: u8 = val("--face").map_or(2, |v| v.parse().unwrap());
-    let tiles: Vec<(u32, u32)> = val("--tiles").map_or(vec![(12, 10)], |v| v.split(';').map(|t| { let (a, b) = t.split_once(',').expect("TI,TJ"); (a.parse().unwrap(), b.parse().unwrap()) }).collect());
+    let tiles: Vec<(u32, u32)> = val("--tiles").map_or(vec![(12, 10)], |v| {
+        v.split(';')
+            .map(|t| {
+                let (a, b) = t.split_once(',').expect("TI,TJ");
+                (a.parse().unwrap(), b.parse().unwrap())
+            })
+            .collect()
+    });
     if let Some(j) = val("--jitter") {
         ex::set_jitter_amp(j.parse().unwrap());
     }
@@ -26,6 +33,13 @@ fn main() {
     ex::set_c1_face_read(flag("--c1-face-read"));
     ex::set_smooth_flow(val("--smooth-flow").map_or(0, |v| v.parse().unwrap()));
     ex::set_smooth_iso(val("--smooth-iso").map_or(0, |v| v.parse().unwrap()));
+    // SPIKE-99: k = 1 in the base, and a pass-1 uplift map from the class weights (metres over the run per class: plain, rolling, hills, mountains, high mountains, plateau,
+    // badlands, sand sea).
+    ex::set_k_one(flag("--k-one"));
+    let uplift_by_class: Option<[f64; 8]> = val("--uplift").map(|v| {
+        let u: Vec<f64> = v.split(',').map(|x| x.parse().unwrap()).collect();
+        u.try_into().expect("--uplift takes 8 comma-separated metres, one per class")
+    });
     let threads = planet_streaming::topology::bake_threads(0).expect("topology").0;
     let inputs = BakeInputs::new(14, threads);
     let (base, factor) = (|d: Vec3| inputs.base(d), |d: Vec3| inputs.carve_factor(d));
@@ -33,10 +47,33 @@ fn main() {
     let t0 = std::time::Instant::now();
     // Pass 1 with the experiment switches ON for face 2 only (the other faces are zero: the tile is far from the edges).
     let spec = FaceSpec { face: Face(face_no), cells: res, radius_m: R, sea_level: 0.0, seed: 14, halo };
+    if let Some(u) = uplift_by_class {
+        let map = |d: Vec3| inputs.weights(d).iter().zip(u.iter()).map(|(w, m)| w * m).sum::<f64>();
+        let grid = sample_base(&spec, &map, threads);
+        let land = grid.iter().filter(|v| **v > 0.0).count().max(1);
+        println!(
+            "uplift map: {u:?} m over the run; mean over uplifted cells {:.0} m, max {:.0} m",
+            grid.iter().sum::<f64>() / land as f64,
+            grid.iter().cloned().fold(0.0, f64::max)
+        );
+        ex::set_uplift(Some(grid));
+    }
+    println!("k = 1 in the base: {}", ex::k_one());
     let face2 = pass1_face(&spec, &base, Some(&factor), &CarveParams::default(), threads);
-    println!("pass 1 face {face_no} at {res} cells ({:.0} m): {:.1} s", R * core::f64::consts::FRAC_PI_2 / res as f64, t0.elapsed().as_secs_f64());
+    ex::set_uplift(None);
+    println!(
+        "pass 1 face {face_no} at {res} cells ({:.0} m): {:.1} s",
+        R * core::f64::consts::FRAC_PI_2 / res as f64,
+        t0.elapsed().as_secs_f64()
+    );
     let faces: Vec<FaceChange> = (0..6u8)
-        .map(|f| if f == face_no { face2.clone() } else { FaceChange { face: Face(f), cells: res, halo, change: vec![0.0; face2.change.len()] } })
+        .map(|f| {
+            if f == face_no {
+                face2.clone()
+            } else {
+                FaceChange { face: Face(f), cells: res, halo, change: vec![0.0; face2.change.len()] }
+            }
+        })
         .collect();
     let faces: [FaceChange; 6] = faces.try_into().expect("six faces");
     let reader = face_change_reader(&faces);
@@ -44,7 +81,15 @@ fn main() {
     std::fs::create_dir_all(&out).expect("output directory");
     for (ti, tj) in tiles {
         let t1 = std::time::Instant::now();
-        let r = pass2_tile(&grid, TileId { face: Face(face_no), ti, tj }, &base, &reader, Some(&factor), &Pass2Params::standard(14, 0.0), threads);
+        let r = pass2_tile(
+            &grid,
+            TileId { face: Face(face_no), ti, tj },
+            &base,
+            &reader,
+            Some(&factor),
+            &Pass2Params::standard(14, 0.0),
+            threads,
+        );
         println!(
             "pass 2 tile {face_no}/{ti}/{tj}: {:.1} s, thermal {} passes, {} still moving at the cap",
             t1.elapsed().as_secs_f64(),

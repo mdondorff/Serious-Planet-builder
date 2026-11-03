@@ -24,7 +24,18 @@ impl BakeInputs {
     /// The base elevation at a direction: the class source's, with the class-blended relief driver.
     pub fn base(&self, d: Vec3) -> f64 {
         let p = self.source.eval(d);
-        self.source.elevation_m(d, &p, blended_k(&self.lattice.weights_at(d)))
+        let k = if crate::bake::experiment::k_one() { 1.0 } else { blended_k(&self.lattice.weights_at(d)) };
+        self.source.elevation_m(d, &p, k)
+    }
+
+    /// The class weights of the lattice at a direction (SPIKE-99: the uplift map and the per-class statistics).
+    pub fn weights(&self, d: Vec3) -> [f64; 8] {
+        self.lattice.weights_at(d)
+    }
+
+    /// The blended k at a direction (SPIKE-99: logged beside the statistics).
+    pub fn k(&self, d: Vec3) -> f64 {
+        blended_k(&self.lattice.weights_at(d))
     }
 
     /// The carve factor of GEN-097 at a direction.

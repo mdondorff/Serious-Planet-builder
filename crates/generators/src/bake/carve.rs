@@ -59,6 +59,9 @@ pub fn carve(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, facto
     }
     let floor = p.sea_level + p.epsilon;
     let uplift = p.u_over_k * p.k_dt;
+    // SPIKE-99: a per-cell uplift map, metres over the run, when the experiment sets one for this grid.
+    let extra = crate::bake::experiment::uplift().filter(|u| u.len() == grid.len());
+    let steps = p.steps as f64;
     let mut routing: Option<Routing> = None;
     for step in 0..p.steps {
         if step % p.reroute_every == 0 {
@@ -90,7 +93,8 @@ pub fn carve(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, facto
             let scale = factor.map_or(1.0, |f| f[c]);
             let f = p.k_dt * scale * libm::sqrt(r.area[c]) / distance(grid, c, rec);
             let hr = z[rec];
-            let hn = (z[c] + uplift * scale + f * hr) / (1.0 + f);
+            let u_cell = extra.as_ref().map_or(0.0, |u| u[c] / steps);
+            let hn = (z[c] + uplift * scale + u_cell + f * hr) / (1.0 + f);
             let new = hn.max(hr + p.epsilon).max(floor);
             z[c] = if p.incise_only { new.min(z[c]) } else { new };
         }

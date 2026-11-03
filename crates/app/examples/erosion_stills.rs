@@ -134,6 +134,7 @@ fn main() {
     let (mut c1, mut detail, mut alts) = (false, NATURAL_STRENGTH, vec!["300m".to_string(), "2km".to_string()]);
     let mut skip_before = false;
     let mut fade_sea = 0.0f64;
+    let mut k_one = false;
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -145,6 +146,8 @@ fn main() {
             "--alts" => alts = value().split(',').map(str::to_string).collect(),
             "--skip-before" => skip_before = true,
             "--fade-sea" => fade_sea = value().parse().unwrap_or_else(|_| fail("--fade-sea needs metres")),
+            // SPIKE-99: render with k = 1 in the base; the pose is still searched on the as-built base without the layer, so every base is seen from the same camera.
+            "--k-one" => k_one = true,
             "--seed" => seed = value().parse().unwrap_or_else(|_| fail("--seed needs an integer")),
             "--out" => out = PathBuf::from(value()),
             "--site" => {
@@ -209,6 +212,7 @@ fn main() {
             let (e, n) = frame(d);
             [e, n, e * -1.0, n * -1.0]
         };
+        planet_generators::bake::experiment::set_k_one(false);
         let mut centre = at_cell(1, 1, 2);
         let mut sea_heading: Option<Vec3> = None;
         if site.name.starts_with("coast") {
@@ -295,20 +299,21 @@ fn main() {
                     .map(|k| {
                         let a = f64::from(k) * 45f64.to_radians();
                         let h = east * libm::sin(a) + north * libm::cos(a);
-                        let mean = (1..=4).map(|s| after.height(at(h, f64::from(s) * 1250.0))).sum::<f64>() / 4.0;
+                        let mean = (1..=4).map(|s| before.height(at(h, f64::from(s) * 1250.0))).sum::<f64>() / 4.0;
                         (mean, h)
                     })
                     .fold((f64::MIN, north), |b, c| if c.0 > b.0 { c } else { b })
                     .1
             }
         };
-        let ground = before.height(centre);
+        let pose_ground = before.height(centre);
+        planet_generators::bake::experiment::set_k_one(k_one);
         // The sun 30 degrees up, from behind the camera's right shoulder.
         let right = heading.cross(centre).normalized() * -1.0;
         let sun = (centre * libm::sin(30f64.to_radians()) + (right * 0.6 - heading * 0.8).normalized() * libm::cos(30f64.to_radians()))
             .normalized();
         println!(
-            "{}: face {} tile {}/{}, ground {ground:.0} m, heading {:.0} deg",
+            "{}: face {} tile {}/{}, ground {pose_ground:.0} m (as built), heading {:.0} deg, k = 1: {k_one}",
             site.name,
             site.face,
             site.ti,
@@ -318,15 +323,17 @@ fn main() {
         for (alt_name, eye, pitch_deg) in
             [("300m", 300.0, 12.0), ("2km", 2000.0, 22.0)].into_iter().filter(|a| alts.iter().any(|x| x == a.0))
         {
-            let camera = Camera::at_surface_point(
-                PlanetFixed(centre * (R + ground + eye)),
-                heading,
-                f64::to_radians(pitch_deg),
-                60f64.to_radians(),
-                aspect,
-                1.0,
-            );
             for (variant, field) in [("before", &before), ("after", &after)].into_iter().filter(|v| !(skip_before && v.0 == "before")) {
+                // The eye stands `eye` above this field's own ground (an uplifted base raises the ground).
+                let ground = field.height(centre);
+                let camera = Camera::at_surface_point(
+                    PlanetFixed(centre * (R + ground + eye)),
+                    heading,
+                    f64::to_radians(pitch_deg),
+                    60f64.to_radians(),
+                    aspect,
+                    1.0,
+                );
                 let lod = LodParams {
                     cells: CELLS,
                     viewport_h_px: f64::from(SIZE.1),
