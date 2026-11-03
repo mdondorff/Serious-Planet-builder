@@ -1849,7 +1849,6 @@ mod tests {
             "the_lit_coast_view_over_streamed_tiles_draws_the_same_pixels_still_and_after_a_small_turn_and_back",
             "the_edit_latency_scene_runs_end_to_end_in_smoke_mode_and_prints_its_table",
             "the_stills_scene_draws_each_pose_with_its_horizon_maps_baked",
-            "a_still_runs_the_clipmap_shadow_by_default_and_not_with_the_flag",
             "the_gate_passes_on_a_small_world_without_the_chunk_stage_which_is_the_default",
         ] {
             let at = position(&|o| o.filter.contains(&format!("test({name})")), name);

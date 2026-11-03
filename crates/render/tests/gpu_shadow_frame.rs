@@ -189,6 +189,31 @@ fn the_shadow_view_draws_the_resolved_visibility_as_grey_over_the_surface() {
     assert!(grey * 2 > visibility.len(), "most pixels show the visibility as grey: {grey} of {}", visibility.len());
 }
 
+// spec: VIEW-054
+#[test]
+fn the_shadow_view_without_the_shadow_pass_shows_the_surface_as_one_uniform_grey_and_not_a_driver_colour() {
+    use planet_frame::look::shading::ShadeView;
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    // The surface value of the Shadow view (the CPU reference `terrain_radiance(Shadow)` is the unit 1/pi on every channel) is what shows where the shadow
+    // pass draws nothing: with `--no-shadow-march`, and under the march's visibility everywhere it is 1. A slip in the view's index would draw a driver
+    // colour (soil depth, moisture, insolation: different channels, varying with the terrain) or the lit colour instead.
+    let draw = |view: ShadeView| -> Vec<u8> {
+        let mut p = plan();
+        p.lit.as_mut().unwrap().view = view;
+        let (mut r, _) = renderer(&ctx, &p);
+        r.render(&ctx, &p, false).unwrap();
+        frame_bytes(&r, &ctx)
+    };
+    let shadow = draw(ShadeView::Shadow);
+    let covered: Vec<&[u8]> = shadow.chunks(4).filter(|px| px[..3] != [0, 0, 0]).collect();
+    assert!(covered.len() > 100, "{} terrain pixels", covered.len());
+    assert!(covered.iter().all(|px| px[0] == px[1] && px[1] == px[2]), "the Shadow view's surface is grey on every channel");
+    assert!(covered.windows(2).all(|w| w[0][..3] == w[1][..3]), "the Shadow view's surface is one value over the whole terrain");
+    for view in [ShadeView::SoilDepth, ShadeView::Moisture, ShadeView::Insolation, ShadeView::Lit] {
+        assert_ne!(draw(view), shadow, "{view:?} is not drawn as the Shadow view");
+    }
+}
+
 // spec: REND-051
 #[test]
 fn a_visibility_of_zero_leaves_no_direct_sun_on_the_terrain_of_the_plain_lit_frame() {
