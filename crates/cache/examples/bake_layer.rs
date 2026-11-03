@@ -18,7 +18,7 @@ use planet_generators::bake::carve::CarveParams;
 use planet_generators::bake::face::FaceChange;
 use planet_generators::bake::inputs::BakeInputs;
 use planet_generators::bake::map::{field_maps, layer_change_at, tile_image};
-use planet_generators::bake::tile::{quantise, tile_has_land, Pass2Params, TileGrid, TileId as PassTile, QUANT_STEP_M};
+use planet_generators::bake::tile::{quantise, tile_has_land, Pass2Params, TileGrid, TileId as PassTile, TileResult, QUANT_STEP_M};
 use planet_world_def::WorldDefinition;
 
 const RADIUS_M: f64 = 6_371_000.0;
@@ -44,6 +44,10 @@ struct Opts {
     /// Stage ablation for the size and change split of a preview (the layer is not a real layer then): no thermal passes, no deposition sweep.
     no_thermal: bool,
     no_deposit: bool,
+    /// Writes every stored tile's core change as raw little-endian f32 (`tile-<face>-<ti>-<tj>.f32`, row `j` outer) into this directory, for the preview stills.
+    export: Option<PathBuf>,
+    /// Also sizes each tile's record with the pass-1 face change taken out (what pass 2 adds on its own), a column of the size report.
+    size_split: bool,
 }
 
 fn main() {
@@ -199,34 +203,55 @@ fn main() {
         let r = load_tile(&tstore, &world, tile_res, &spec, t)
             .unwrap_or_else(|e| fail(&e.to_string()))
             .unwrap_or_else(|| fail("a tile is missing from the store"));
+        let residual = if o.size_split {
+            // The tile's record with the pass-1 face change taken out: what the local carve, thermal and deposition add on their own.
+            let (i0, j0) = (t.ti as i64 * tile as i64, t.tj as i64 * tile as i64);
+            let core: Vec<f32> = (0..tile * tile)
+                .map(|p| r.core[p] - reader(grid.direction(t.face, i0 + (p % tile) as i64, j0 + (p / tile) as i64)) as f32)
+                .collect();
+            let rest = TileResult { id: r.id, core, stats: r.stats };
+            tile_record(&world, tile_res, &spec, &rest).unwrap_or_else(|e| fail(&e.to_string())).payload.len()
+        } else {
+            0
+        };
         sizes.push((
             t,
             r.stats.land_cells,
             tile_record(&world, tile_res, &spec, &r).unwrap_or_else(|e| fail(&e.to_string())).payload.len(),
             quantise(&r.core),
+            residual,
         ));
         stored.insert((t.face.0, t.ti, t.tj), r.core);
     }
     // Size by tile (the record's payload with the brotli stream), the share of cells that did not change, and the largest change (a preview's size split by stage).
-    let mut size_report = String::from(
-        "face tile_i tile_j land_cells payload_bytes bytes_per_land_cell unchanged_cells_share max_abs_change_m
-",
-    );
-    for (t, land, bytes, counts) in &sizes {
+    let mut size_report =
+        String::from("face tile_i tile_j land_cells payload_bytes bytes_per_land_cell unchanged_cells_share max_abs_change_m residual_bytes_per_land_cell
+");
+    for (t, land, bytes, counts, residual) in &sizes {
         let zero = counts.iter().filter(|c| **c == 0).count() as f64 / counts.len() as f64;
         let max = counts.iter().map(|c| c.unsigned_abs()).max().unwrap_or(0) as f64 * QUANT_STEP_M as f64;
+        let per_land = |b: usize| b as f64 / (*land).max(1) as f64;
         size_report.push_str(&format!(
-            "{} {} {} {} {} {:.4} {:.4} {:.1}
+            "{} {} {} {} {} {:.4} {:.4} {:.1} {:.4}
 ",
             t.face.0,
             t.ti,
             t.tj,
             land,
             bytes,
-            *bytes as f64 / (*land).max(1) as f64,
+            per_land(*bytes),
             zero,
-            max
+            max,
+            per_land(*residual)
         ));
+    }
+    if let Some(dir) = &o.export {
+        std::fs::create_dir_all(dir).unwrap_or_else(|e| fail(&e.to_string()));
+        for (&(f, ti, tj), core) in &stored {
+            let bytes: Vec<u8> = core.iter().flat_map(|v| v.to_le_bytes()).collect();
+            std::fs::write(dir.join(format!("tile-{f}-{ti}-{tj}.f32")), bytes).unwrap_or_else(|e| fail(&e.to_string()));
+        }
+        println!("exported {} tile cores to {}", stored.len(), dir.display());
     }
     std::fs::write(out.join("sizes.txt"), &size_report).unwrap_or_else(|e| fail(&e.to_string()));
     print!("{size_report}");
@@ -282,6 +307,8 @@ fn parse() -> Opts {
         image_step: None,
         no_thermal: false,
         no_deposit: false,
+        export: None,
+        size_split: false,
     };
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -300,9 +327,11 @@ fn parse() -> Opts {
             "--image-step" => o.image_step = Some(number("--image-step")),
             "--keep-pass1" => o.keep_pass1 = true,
             "--no-thermal" => o.no_thermal = true,
+            "--export" => o.export = Some(PathBuf::from(value())),
+            "--size-split" => o.size_split = true,
             "--no-deposit" => o.no_deposit = true,
             other => fail(&format!(
-                "unknown option '{other}' (known: --seed N, --face-res N, --planet-res N, --tile N, --halo N, --region FILE, --keep-pass1, --out DIR, --threads N, --map-width W, --image-step N, --no-thermal, --no-deposit)"
+                "unknown option '{other}' (known: --seed N, --face-res N, --planet-res N, --tile N, --halo N, --region FILE, --keep-pass1, --out DIR, --threads N, --map-width W, --image-step N, --no-thermal, --no-deposit, --export DIR, --size-split)"
             )),
         }
     }
