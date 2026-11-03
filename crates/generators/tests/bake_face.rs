@@ -88,3 +88,18 @@ fn the_six_faces_make_a_planet_map_with_its_base_carved_base_and_change() {
         }
     }
 }
+
+// spec: GEN-097
+#[test]
+fn the_carve_factor_is_one_but_half_in_a_sand_sea() {
+    use planet_generators::classes::{blended_carve_factor, CLASS_COUNT};
+    let mut w = [0.0; CLASS_COUNT];
+    w[0] = 1.0;
+    assert_eq!(blended_carve_factor(&w), 1.0);
+    w = [0.0; CLASS_COUNT];
+    w[CLASS_COUNT - 1] = 1.0;
+    assert_eq!(blended_carve_factor(&w), 0.5);
+    w[CLASS_COUNT - 1] = 0.5;
+    w[3] = 0.5;
+    assert_eq!(blended_carve_factor(&w), 0.75);
+}

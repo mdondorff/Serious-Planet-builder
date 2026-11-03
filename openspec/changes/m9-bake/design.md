@@ -85,8 +85,8 @@
 The bake code takes the resolution and the region as parameters, so one code path serves the snapshot (I5b), the full bake (I6) and, later, global authoring.
 | Parameter | Full bake | I5b snapshot |
 |---|---|---|
-| Planet resolution (`--planet-res N`, cells per face edge of pass 2's grid) | 98,304 (101.8 m) | a divisor of it, e.g. 12,288 (814 m: pass 2 on the face-carve grid, about 1/64 of the cost) |
-| Face carve grid (pass 1) | 12,288 (814 m) | the same (pass 1 is the cheap pass: 3 min a face) |
+| Planet resolution (`--planet-res N`, cells per face edge of the grid of the pass that runs; PR 4 runs pass 1 only, so there it is pass 1's grid) | 98,304 (101.8 m) | a divisor of it, e.g. 12,288 (814 m: pass 2 on the face-carve grid, about 1/64 of the cost) |
+| Face carve grid (pass 1) | 12,288 (814 m) | the same (SPIKE-71 estimated 3 min a face; PR 4 measured about 4 us per cell, so 10 to 13 min and 6 GB a face at 12,288: point 8) |
 | Region (`--region <tile list>`) | every land tile (2,140) | 30-40 sample tiles at full resolution (101.8 m), picked from a list file |
 | Channels (`k`, `m`) | 2048 cells per face edge | the same or coarser: the reader takes the cells from the channels |
 - The erosion layer's key carries the grid resolution (cells per face edge) and the region mode, so a coarse layer and a full layer never share a key; a tile record carries its level and cells (STRM-066 follows).

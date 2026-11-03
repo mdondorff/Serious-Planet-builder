@@ -125,3 +125,40 @@ fn a_store_without_the_layer_reads_as_absent() {
     run_pass1(d.path(), &w, RES, &s, &base, None, &[], 1).unwrap();
     assert!(stored(d.path(), &w, &s).is_empty());
 }
+
+// spec: STRM-065
+#[test]
+fn a_record_has_the_pinned_layout_and_a_damaged_one_is_an_error() {
+    use planet_cache::pack::{PackWriter, DEFAULT_MAX_PACK_BYTES};
+    let (w, s) = (world(), spec());
+    let change = planet_generators::bake::face::pass1_face(
+        &planet_generators::bake::face::FaceSpec { face: Face(2), cells: s.cells, radius_m: R, sea_level: 0.0, seed: 17 },
+        &base,
+        None,
+        &s.carve,
+        1,
+    );
+    let r = face_record(&w, RES, &s, &change);
+    assert_eq!((r.kind, r.kind), (12, KIND_LAYER_FACE));
+    assert_eq!(r.tile, planet_cache::relief_store::face_tile(Face(2)));
+    assert_eq!((r.payload[0], u32::from_le_bytes(r.payload[1..5].try_into().unwrap()), &r.payload[5..21]), (1, 24, &r.key.0[..]));
+    assert_eq!(r.payload.len(), 21 + 4 * 24 * 24);
+    assert!(w.is_live(&r));
+    for (name, damage) in [
+        ("a short payload", Box::new(|p: &mut Vec<u8>| p.truncate(30)) as Box<dyn Fn(&mut Vec<u8>)>),
+        ("another codec", Box::new(|p: &mut Vec<u8>| p[0] = 9)),
+        ("other cells", Box::new(|p: &mut Vec<u8>| p[1] = 25)),
+        ("another key inside", Box::new(|p: &mut Vec<u8>| p[7] ^= 1)),
+    ] {
+        let d = Dir::new("damaged");
+        let mut bad = r.clone();
+        damage(&mut bad.payload);
+        let mut writer = PackWriter::open(d.path(), w.params(), DEFAULT_MAX_PACK_BYTES).unwrap();
+        writer.append(&bad).unwrap();
+        writer.write_index().unwrap();
+        writer.finish().unwrap();
+        let store = TileStore::open(d.path(), w.params()).unwrap();
+        let e = load_face_change(&store, &w, RES, &s, Face(2)).expect_err(name).to_string();
+        assert!(e.contains("layer face 2") && e.contains("key"), "{name}: {e}");
+    }
+}
