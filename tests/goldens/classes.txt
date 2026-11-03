@@ -32,3 +32,7 @@ water_class_orbit water
 water_class_lava_lake water
 lit_ground_eye1p8m_natural_ev14p5 lit
 lit_ground_eye0p5m_natural_ev14p5 lit
+lit_ground_march_10deg_ev14p5 lit
+lit_ground_march_2deg_ev14p5 lit
+lit_ground_march_aerial_10deg_ev14p5 lit
+lit_ground_march_aerial_2deg_ev14p5 lit
