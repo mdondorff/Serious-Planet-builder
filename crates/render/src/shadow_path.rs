@@ -265,6 +265,16 @@ impl ShadowPath {
         self.resolve.read_shadow(ctx)
     }
 
+    /// Time each pass of the resolve with GPU timestamps from the next frame on (REND-052); false when the device has no timestamp queries.
+    pub fn enable_timing(&mut self, ctx: &GpuContext) -> bool {
+        self.resolve.enable_timing(ctx)
+    }
+
+    /// The GPU milliseconds of each resolve pass of the last frame ([`crate::resolve::RESOLVE_PASS_NAMES`] order).
+    pub fn pass_ms(&self, ctx: &GpuContext) -> Option<[f64; 5]> {
+        self.resolve.pass_ms(ctx)
+    }
+
     /// How many frames this pass has run.
     pub fn frames_run(&self) -> u32 {
         self.frame
