@@ -1221,6 +1221,9 @@ pub fn perf(root: &Path, args: &[String]) -> Res {
     if args.first().map(String::as_str) == Some("--ab") {
         return crate::perfab::run(root, args);
     }
+    if args.first().map(String::as_str) == Some("window") {
+        return crate::perfwindow::run(root, &args[1..]);
+    }
     if args.first().map(String::as_str) == Some("reserve") {
         return crate::perfab::reserve(root, &args[1..]);
     }
