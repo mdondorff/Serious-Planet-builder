@@ -88,6 +88,16 @@ or test(every_standard_view_of_the_default_world_stays_within_its_own_pinned_cou
 '''
 priority = 50
 
+# The relief-band gate of the class source (TEST-082; `oracle_world_preview::seeds_1_to_5_pass_the_relief_bands_of_spike_93_in_the_gate_form`) computes six
+# whole-planet previews of 1,440 x 720 pixels, 8 threads each, about 117 CPU-seconds (15.5 us a pixel: the class source 8 us, the global stage 4 us; the
+# same per-sample cost on main and on round 3). It is a whole-planet gate that holds every core; WARP, the CPU rasteriser of the Windows runner, shares those cores: beside it the gate took 169 s and starved
+# `planet-render::oracle_all oracle_atmosphere::a_camera_walking_at_one_metre_in_millimetre_steps_makes_no_step_the_reference_does_not` (47.7 to 77.5 s
+# on main, a timeout at 180 s in two runs of #1086, WARP A+B). It runs alone: it takes every test slot. Only the overlap changes: no test is skipped,
+# retried or changed, and no timeout is changed (the planner's order, 2026-11-03).
+[[profile.default.overrides]]
+filter = 'package(=planet-generators) and binary(oracle_all) and test(seeds_1_to_5_pass_the_relief_bands_of_spike_93_in_the_gate_form)'
+threads-required = "num-cpus"
+
 # `cargo xtask test fast` reads this to print the slowest tests (TEST-001 budget guard).
 [profile.default.junit]
 path = "junit.xml"

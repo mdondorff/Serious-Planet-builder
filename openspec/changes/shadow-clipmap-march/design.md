@@ -70,7 +70,7 @@
 ## Perf checks under ADR 0087
 | Check | Measure | Where | Window? |
 |---|---|---|---|
-| Layer 1 total at 1440p, river-r1 and hills-b poses, 300 m sunset and midday | GPU timestamps around gather, march, resolve | `perf stream shadow-cost` (extended with layer 1 rows) | loaded pass if at least 5 % under 1.5 ms (ADR 0087 point 1, once accepted); else, and for the acceptance row, a window |
+| Layer 1 total at 1440p, hills and flat-lowland poses (m9r2, docs/milestones/M9/shadow-layer1), 300 m sunset and midday | GPU timestamps around gather, march, resolve | `perf stream shadow-cost` (extended with layer 1 rows) | loaded pass if at least 5 % under 1.5 ms (ADR 0087 point 1, once accepted); else, and for the acceptance row, a window |
 | Low sun (2 degrees) with the two-frame spread | the same | the same, a 2-degree pose added | window (SPIKE-56: 1.6-2.2 ms before the spread, a close call) |
 | Clipmap upkeep per frame in a flight and on a teleport | gather timestamps | `perf stream dive` with the layer 1 rows | loaded pass (prediction 0.05 ms per frame, 0.3 ms on a teleport) |
 | VRAM | allocation counter | tier A | no |
@@ -145,7 +145,7 @@ Same probe and caveats; baseline at 2 degrees with the spread and the early exit
 Reading: the march cost is not proportional to the rays (4x fewer rays cost half, the checkerboard saves a sixth): at a low sun the time is the long grazing rays of each workgroup (median 7 steps, p99 124, max 744) and cache misses over the 61 MB of levels. So a fewer-rays option helps less than it looks, and a cap on steps helps only when it is low. A smaller clipmap (512^2 levels) would shrink the footprint; not measured.
 
 ## What needs the owner
-- Look review before the horizon maps are deleted (PR 5): stills at river-r1, hills-b and the Plateau 6 drag (300 m, 30 m, 1.8 m; sunset, midday, 2-degree sun), old against new, plus a 5-10 s drag video of a plateau stamp, through `cargo xtask package` (TEST-074).
+- Look review before the horizon maps are deleted (PR 5): stills at hills, flat-lowland (m9r2) and the Plateau 6 drag (300 m, 30 m, 1.8 m; sunset, midday, 2-degree sun), old against new, plus a 5-10 s drag video of a plateau stamp, through `cargo xtask package` (TEST-074).
 - `/bless` of the first lit goldens of the new shadow, per adapter (ADR 0017, ADR 0061).
 - Nothing else: the perf windows are the planner's (ADR 0020, ADR 0087).
 

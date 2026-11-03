@@ -149,6 +149,13 @@ Assumption it changes: that TaskStop ends a background command's whole process t
 Proposed follow-up: after TaskStop on a script runner, find it by its command line (`Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*<script>*' }`) and `Stop-Process` it; check `tasklist` for `planet.exe`/`xtask.exe` before declaring a pause. A run already started is better left to finish than killed mid-measurement.
 Obsolete when: TaskStop ends Git Bash children, or perf runners become an xtask command (no shell loop).
 
+## 2026-11-02 The coast gate on the rough depth sets the largest steps of k
+Scope: generators (class source GEN-094, GEN-097's step limit)
+- The coast gate switched at the full continent value's coast, which is rough at the lattice's scale: the gate went from 0 to 0.6 over one 40 km cell (largest `k` step 6.0).
+- Ramping over the smooth depth (0.3) and the true depth (0.2) took it to 5.1-5.8; the rest is geometric (a belt flank changes by 0.2-0.3 of its core per cell while the classes differ by 4-6 in `k`).
+- Plate draws beyond 64 widen the seed spread (seed 2's land above 2 km went to 27.7 % at 256 draws): the retry scores land at a convergent margin, not relief.
+- Obsolete when the arcs are convergent-only or the owner moves GEN-097 to a p99 form.
+
 ## 2026-11-03 Edit finds must cover in-flight tiles
 Scope: project (editor refresh find; STRM-026, STRM-071)
 What happened: `gpu_edit_perf` did not settle at 5 tile workers ("kind Stale, substituted 2-6, unfinished jobs 0, pending 0"; #1117's default share on Rasierklinge) and passed at 6 and 18. The stuck tiles were resident level-14 tiles with another mesh key than the plan's, with the streamer reporting them not stale, not held, not queued. Every find (window.rs, editperf.rs, the coupled-lens refresh) ran over `managed.resident()` only. A tile whose job was in flight when `set_definition` swapped the field had read the old field, landed after the edit with the old key, and nothing ever marked it stale. A larger pool finished those jobs first: timing, not a thread-count-dependent result (CON-14 holds).
