@@ -24,17 +24,19 @@ const PIN_BAKE_RES: u32 = 256;
 /// Re-pinned 2026-11-02 by `m9-generator-round-2` (GEN-104, declared): the continents change the field the plans read (GLOBAL_VERSION 6); aerial-200km 634 to 633,
 /// aerial-20km 900 to 890, low-2km 1,300 to 1,244, ground-200m 1,723 to 1,671, ground-1m 2,415 to 2,373, north-pole-1km 1,128 to 1,184 (+5 %),
 /// cube-corner-1km 1,594 to 1,528, face-edge-1km 1,551 to 1,514.
+/// Re-pinned 2026-11-03 by `c1-default` (GEN-107, declared): the default field is `cpu-erosion-v2` (the bake read C1, with its own bounds); aerial-20km 890 to 891,
+/// north-pole-1km 1,184 to 1,194 (+0.8 %), face-edge-1km 1,514 to 1,515; the other views hold.
 const EROSION_VIEW_NODE_PINS: [(&str, u32); 10] = [
     ("orbit-20000km", 182), // 52 until render-floor-3 (LOD-011): the 182 level-3 tiles of the visible hemisphere (181 over the reference field)
     ("high-2000km", 430),
     ("aerial-200km", 633),
-    ("aerial-20km", 890),
+    ("aerial-20km", 891),
     ("low-2km", 1244),
     ("ground-200m", 1671),
     ("ground-1m", 2373),
-    ("north-pole-1km", 1184),
+    ("north-pole-1km", 1194),
     ("cube-corner-1km", 1528),
-    ("face-edge-1km", 1514),
+    ("face-edge-1km", 1515),
 ];
 
 /// The ground-1m node count of the default world at the reference finest level 26 (the cap before ADR 0033 point 6).

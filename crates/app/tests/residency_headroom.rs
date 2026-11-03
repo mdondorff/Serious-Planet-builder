@@ -82,23 +82,26 @@ fn measure(world: &WorldTerrain, max_level: u8) -> Vec<(String, usize, usize, us
 /// field's bounds over wide caps: ground-200m R 8,675 to 8,679, D 2,385 to 2,387; ground-1m R 11,496 to 11,500, D 3,337 to 3,340 (at most +0.05 %).
 /// Re-pinned 2026-11-02 by `m9-generator-round-2` (GEN-104, declared): the continents change the field (GLOBAL_VERSION 6); the slot demand of the views falls 1 to 4 %
 /// except north-pole-1km (R 5,624 to 5,940, D 1,598 to 1,676).
+/// Re-pinned 2026-11-03 by `c1-default` (GEN-107, declared): the default field is `cpu-erosion-v2`; aerial-20km D 1,238 to 1,239, ground-1m R 11,299 to 11,307,
+/// north-pole-1km D 1,676 to 1,691 (+0.9 %), cube-corner-1km R 7,550 to 7,558, face-edge-1km D 2,080 to 2,081; the other views hold.
 const PINS: [(&str, usize, usize); 10] = [
     ("orbit-20000km", 182, 182),
     ("high-2000km", 911, 574),
     ("aerial-200km", 2628, 885),
-    ("aerial-20km", 4227, 1238),
+    ("aerial-20km", 4227, 1239),
     ("low-2km", 6118, 1726),
     ("ground-200m", 8431, 2313),
-    ("ground-1m", 11299, 3282),
-    ("north-pole-1km", 5940, 1676),
-    ("cube-corner-1km", 7550, 2088),
-    ("face-edge-1km", 7628, 2080),
+    ("ground-1m", 11307, 3282),
+    ("north-pole-1km", 5940, 1691),
+    ("cube-corner-1km", 7558, 2088),
+    ("face-edge-1km", 7628, 2081),
 ];
 
 /// The same at the reference finest level 26 (the cap before ADR 0033 point 6, `--finest-level 26`), where it differs: only ground-1m.
 /// (14,325 and 4,063 before render-floor-3, which drops the 4 and 3 ancestors above the floor.)
 /// Re-pinned 2026-10-25 by `m8-relief-creases` (declared, as `PINS`): R 14,328 to 14,340, D 4,064 to 4,077 (+0.08 and +0.3 %).
-const PINS_L26_GROUND_1M: (usize, usize) = (14139, 3997);
+/// Re-pinned 2026-11-03 by `c1-default` (declared, as `PINS`): R 14,139 to 14,147.
+const PINS_L26_GROUND_1M: (usize, usize) = (14147, 3997);
 
 fn check_pins(measured: &[(String, usize, usize, usize)], pins: &[(&str, usize, usize)]) -> Vec<String> {
     let mut failures = Vec::new();
