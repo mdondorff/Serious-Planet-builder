@@ -56,7 +56,11 @@ fn every_known_id_resolves_to_a_field_that_reports_it() {
     let g = grid();
     let src = GridSource(&g);
     let ids = known_ids();
-    assert_eq!(ids, [EROSION_IMPLEMENTATION_ID, TERRAIN_IMPLEMENTATION_ID, REFERENCE_ID], "the default comes first");
+    assert_eq!(
+        ids,
+        [EROSION_IMPLEMENTATION_ID, TERRAIN_IMPLEMENTATION_ID, REFERENCE_ID, planet_generators::erosion::EROSION_C1_IMPLEMENTATION_ID],
+        "the default comes first"
+    );
     for id in ids {
         let def = world(Some(id));
         let kind = resolve(&def).unwrap();

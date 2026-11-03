@@ -4,7 +4,7 @@
 //! [`resolve`] turns it into a [`HeightFieldKind`]: the eroded field (GEN-017) when none is named, the named one when the
 //! build knows the id, otherwise an error that lists the known ids. [`build_field`] builds the field of a body over a bake.
 
-use crate::erosion::{ErosionGenerator, EROSION_IMPLEMENTATION_ID};
+use crate::erosion::{ErosionGenerator, EROSION_C1_IMPLEMENTATION_ID, EROSION_IMPLEMENTATION_ID};
 use crate::global::LatticeSource;
 use crate::height::{HeightField, HeightGenerator, ReferenceGenerator, IMPLEMENTATION_ID as REFERENCE_IMPLEMENTATION_ID};
 use crate::terrain::{TerrainGenerator, TERRAIN_IMPLEMENTATION_ID};
@@ -15,6 +15,8 @@ use planet_world_def::{BodyId, GenContext, MissingNode, WorldDefinition};
 pub enum HeightFieldKind {
     /// `cpu-erosion-v1` (GEN-017): the bake plus the erosion filter. Reads a bake.
     Eroded,
+    /// `cpu-erosion-v2` (GEN-107): the eroded field with the bake read by a C1 interpolant (no slope breaks at the lattice edges). Reads a bake.
+    ErodedC1,
     /// `cpu-terrain-v1` (GEN-016): the bake plus fBm detail. Reads a bake.
     Terrain,
     /// `cpu-ref-height-v2`: the seed-only value-noise reference every golden was made with. Reads no bake.
@@ -25,12 +27,14 @@ pub enum HeightFieldKind {
 pub const DEFAULT_HEIGHT_FIELD: HeightFieldKind = HeightFieldKind::Eroded;
 
 impl HeightFieldKind {
-    pub const ALL: [HeightFieldKind; 3] = [HeightFieldKind::Eroded, HeightFieldKind::Terrain, HeightFieldKind::Reference];
+    pub const ALL: [HeightFieldKind; 4] =
+        [HeightFieldKind::Eroded, HeightFieldKind::Terrain, HeightFieldKind::Reference, HeightFieldKind::ErodedC1];
 
     /// The implementation id the world names this field by.
     pub fn id(self) -> &'static str {
         match self {
             HeightFieldKind::Eroded => EROSION_IMPLEMENTATION_ID,
+            HeightFieldKind::ErodedC1 => EROSION_C1_IMPLEMENTATION_ID,
             HeightFieldKind::Terrain => TERRAIN_IMPLEMENTATION_ID,
             HeightFieldKind::Reference => REFERENCE_IMPLEMENTATION_ID,
         }
@@ -47,8 +51,8 @@ impl HeightFieldKind {
 }
 
 /// Every known id, the default first.
-pub fn known_ids() -> [&'static str; 3] {
-    [DEFAULT_HEIGHT_FIELD.id(), HeightFieldKind::Terrain.id(), HeightFieldKind::Reference.id()]
+pub fn known_ids() -> [&'static str; 4] {
+    [DEFAULT_HEIGHT_FIELD.id(), HeightFieldKind::Terrain.id(), HeightFieldKind::Reference.id(), HeightFieldKind::ErodedC1.id()]
 }
 
 /// A definition named an id this build does not know.
@@ -90,6 +94,7 @@ pub fn build_field<'a>(
 ) -> Result<Box<dyn HeightField + 'a>, MissingNode> {
     Ok(match kind {
         HeightFieldKind::Eroded => Box::new(ErosionGenerator.field(ctx, body, bake, bake_key)?),
+        HeightFieldKind::ErodedC1 => Box::new(ErosionGenerator.field_c1(ctx, body, bake, bake_key)?),
         HeightFieldKind::Terrain => Box::new(TerrainGenerator.field(ctx, body, bake, bake_key)?),
         HeightFieldKind::Reference => ReferenceGenerator.field(ctx, body)?,
     })

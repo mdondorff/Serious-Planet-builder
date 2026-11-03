@@ -18,7 +18,9 @@ use planet_core::hash::hash_u64s;
 use planet_core::Vec3;
 use planet_world_def::{records_hash64, BodyId, GenContext, MissingNode, ReadRecord};
 
-use crate::global::{read_direction, LatticeSource, GLOBAL_VERSION, MAX_ELEVATION_M, MIN_ELEVATION_M};
+use crate::global::{
+    read_direction, read_elevation_c1, LatticeSource, GLOBAL_VERSION, MAX_ELEVATION_M, MIN_ELEVATION_M, READER_C1_VERSION,
+};
 use crate::height::{layer_noise, layer_noise_bounds, HeightField};
 use crate::terrain::scan_base;
 
@@ -26,6 +28,10 @@ use crate::terrain::scan_base;
 pub const EROSION_VERSION: u32 = 2;
 /// Names this implementation in cache keys (CON-07).
 pub const EROSION_IMPLEMENTATION_ID: &str = "cpu-erosion-v1";
+/// Bump whenever any output of the C1 variant changes (it also covers [`READER_C1_VERSION`] through its key).
+pub const EROSION_C1_VERSION: u32 = 1;
+/// Names the C1 variant in cache keys (GEN-107): the same field with the bake read by [`read_elevation_c1`] instead of the bilinear blend.
+pub const EROSION_C1_IMPLEMENTATION_ID: &str = "cpu-erosion-v2";
 
 /// Domain tag of the crease lattice.
 const LAYER_CREASE: u64 = 0x4552_0001;
@@ -153,6 +159,8 @@ pub struct ErosionField<'a> {
     error: Mutex<Option<String>>,
     /// The landform lattice of the seed (GEN-062), taken from the shared cache on first use.
     landform: OnceLock<Arc<crate::global::LandformLattice>>,
+    /// Whether the base is read by the C1 interpolant ([`EROSION_C1_IMPLEMENTATION_ID`]).
+    c1: bool,
 }
 
 impl ErosionField<'_> {
@@ -183,8 +191,10 @@ impl ErosionField<'_> {
     }
 
     fn base_via(&self, src: &dyn LatticeSource, dir: Vec3) -> f64 {
-        match read_direction(src, &TangentWarp, dir) {
-            Ok(s) => f64::from(s.elevation_m),
+        let read =
+            if self.c1 { read_elevation_c1(src, &TangentWarp, dir) } else { read_direction(src, &TangentWarp, dir).map(|s| s.elevation_m) };
+        match read {
+            Ok(e) => f64::from(e),
             Err(e) => {
                 self.fail(&e);
                 f64::NAN
@@ -305,11 +315,19 @@ impl HeightField for ErosionField<'_> {
     }
 
     fn implementation_id(&self) -> &'static str {
-        EROSION_IMPLEMENTATION_ID
+        if self.c1 {
+            EROSION_C1_IMPLEMENTATION_ID
+        } else {
+            EROSION_IMPLEMENTATION_ID
+        }
     }
 
     fn version(&self) -> u32 {
-        EROSION_VERSION
+        if self.c1 {
+            EROSION_C1_VERSION
+        } else {
+            EROSION_VERSION
+        }
     }
 
     fn max_abs_height_m(&self) -> f64 {
@@ -344,7 +362,7 @@ impl HeightField for ErosionField<'_> {
     /// bounds), and the detail is the product of the last two. A cap too wide for the scan takes the global range.
     fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
         let global = (-self.max_abs_height(), self.max_abs_height());
-        let base = match scan_base(&self.src, centre, angular_radius) {
+        let base = match scan_base(&self.src, centre, angular_radius, self.c1) {
             Ok(Some(s)) => s,
             Ok(None) => return global,
             Err(e) => {
@@ -360,7 +378,7 @@ impl HeightField for ErosionField<'_> {
         // coordinate, at most 2 face coordinates per radian: ADR 0028 point 3).
         let k = (1.0 + 2.0 * delta) / (1.0 - delta);
         let (carve_lo, carve_hi) = if delta < 0.4 {
-            match scan_base(&self.src, centre, (angular_radius + delta) * (1.0 + 1e-9)) {
+            match scan_base(&self.src, centre, (angular_radius + delta) * (1.0 + 1e-9), self.c1) {
                 Ok(Some(wide)) => {
                     let lip = f64::from(self.src.res()) * (wide.max_du + wide.max_dv);
                     let g_centre = self.gradient(centre);
@@ -445,16 +463,59 @@ impl ErosionGenerator {
         bake: &'a dyn LatticeSource,
         bake_key: [u8; 16],
     ) -> Result<ErosionField<'a>, MissingNode> {
+        self.field_with(ctx, body, bake, bake_key, false)
+    }
+
+    /// [`ErosionGenerator::field`] with the bake read by the C1 interpolant (GEN-107): `cpu-erosion-v2`.
+    pub fn field_c1<'a>(
+        &self,
+        ctx: &GenContext,
+        body: BodyId,
+        bake: &'a dyn LatticeSource,
+        bake_key: [u8; 16],
+    ) -> Result<ErosionField<'a>, MissingNode> {
+        self.field_with(ctx, body, bake, bake_key, true)
+    }
+
+    fn field_with<'a>(
+        &self,
+        ctx: &GenContext,
+        body: BodyId,
+        bake: &'a dyn LatticeSource,
+        bake_key: [u8; 16],
+        c1: bool,
+    ) -> Result<ErosionField<'a>, MissingNode> {
         assert!(ctx.reads().is_empty(), "a field is built from a fresh context: its key covers the whole read set of the context");
         let seed = ctx.body_seed(body)?;
         let relief = ctx.relief_scale(body)?;
         let radius_m = ctx.body_radius_m(body)?;
         let records = ctx.read_records();
         let half = |b: &[u8]| u64::from_le_bytes(b.try_into().expect("8 bytes"));
-        let inputs = hash_u64s(
-            0x6572_6f73,
-            &[records_hash64(&records), half(&bake_key[..8]), half(&bake_key[8..]), u64::from(GLOBAL_VERSION), u64::from(EROSION_VERSION)],
-        );
+        let inputs = if c1 {
+            hash_u64s(
+                0x6572_6f74,
+                &[
+                    records_hash64(&records),
+                    half(&bake_key[..8]),
+                    half(&bake_key[8..]),
+                    u64::from(GLOBAL_VERSION),
+                    u64::from(EROSION_VERSION),
+                    u64::from(EROSION_C1_VERSION),
+                    u64::from(READER_C1_VERSION),
+                ],
+            )
+        } else {
+            hash_u64s(
+                0x6572_6f73,
+                &[
+                    records_hash64(&records),
+                    half(&bake_key[..8]),
+                    half(&bake_key[8..]),
+                    u64::from(GLOBAL_VERSION),
+                    u64::from(EROSION_VERSION),
+                ],
+            )
+        };
         Ok(ErosionField {
             seed,
             body,
@@ -466,6 +527,7 @@ impl ErosionGenerator {
             relief,
             error: Mutex::new(None),
             landform: OnceLock::new(),
+            c1,
         })
     }
 }
