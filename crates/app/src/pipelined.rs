@@ -135,10 +135,12 @@ impl Rig {
         crate::stall::phase_mark("renderer warm-up");
         // One job system for the rig (BUDG-004): the tile workers below normal priority (ADR 0046) and the plan worker, a frame-critical thread at normal priority,
         // on the one share `terrain`, whose ceiling holds both.
-        // The terrain share holds at most BUDG-003's busy threads (the limit of the spec, `planet_perf::reserve::TERRAIN_CORES`): the tile workers, the plan worker and the horizon
-        // bakes together. The tile pool shrinks to what is left beside the plan worker (and the streamer's limit with it, STRM-020); a machine with fewer threads is not capped.
-        let cap = planet_perf::reserve::TERRAIN_CORES as usize;
-        let horizon = crate::horizonworld::horizon_workers(gen);
+        // The terrain share holds at most the machine's terrain share of busy threads (BUDG-003, ADR 0092): the tile workers, the plan worker and the horizon bakes together.
+        // The tile pool shrinks to what is left beside the plan worker (and the streamer's limit with it, STRM-020); the bakes are half the share (STRM-064). An explicit
+        // size (`--gen-workers`, `--gen-reserve`) overrides the share, uncapped (STRM-020): its threads, the plan worker and the bakes.
+        let share = planet_streaming::shares::Shares::machine().terrain;
+        let horizon = crate::horizonworld::horizon_workers(share);
+        let cap = if gen.from_share { share } else { gen.workers + 1 + horizon };
         let (tile_workers, ceiling) = terrain_sizes(gen.workers, horizon, cap);
         let gen = planet_streaming::GenWorkers { workers: tile_workers, ..gen };
         // The horizon bakes (STRM-060, STRM-064) are the idle class of the same share: `horizon` more threads that run idle jobs only, so a bake never holds a worker a visible job needs and the tile jobs keep their `gen.workers` threads.
@@ -377,7 +379,7 @@ mod size_tests {
     // spec: BUDG-003
     #[test]
     fn the_terrain_share_never_holds_more_than_the_cap_and_a_small_machine_is_not_capped() {
-        // The reference machine: 15 tile threads wanted and 7 bakes: capped to 11 tile workers, the plan worker and the ceiling 12.
+        // A cap of 12 (a large machine's share would be at most 10; a model value): 15 tile threads wanted and 7 bakes: 11 tile workers, the plan worker and the ceiling 12.
         assert_eq!(terrain_sizes(15, 7, 12), (11, 12));
         // A 4-core CI machine: 1 tile worker, 1 bake: the sum of threads, below the cap.
         assert_eq!(terrain_sizes(1, 1, 12), (1, 3));

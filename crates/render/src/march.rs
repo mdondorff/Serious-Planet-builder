@@ -248,13 +248,13 @@ fn march(o: vec3<f32>) -> vec3<f32> {
             break;
         }
         let q = o.xy + d * tau;
-        let lv = level_near(q.x, q.y, last_level);
+        var lv = level_near(q.x, q.y, last_level);
         if (lv < 0) {
             left = true;
             break;
         }
         last_level = lv;
-        let tl = m.texel[lv].x;
+        var tl = m.texel[lv].x;
         let cs = tl * f32(1 << u32(mip));
         let cx = i32(floor(q.x / cs));
         let cy = i32(floor(q.y / cs));
@@ -274,8 +274,16 @@ fn march(o: vec3<f32>) -> vec3<f32> {
         // A coarse cell that reaches past the level's window is looked at in its parts, so no part is judged by the far side of the torus.
         let exit = o.xy + d * (tau + dt);
         if (mip > 0 && level_near(exit.x, exit.y, lv) != lv) {
-            mip = mip - 1;
-            continue;
+            // The same cell in the next coarser level (its texel is twice as wide, so one mip less): near the window's edge the walk would
+            // otherwise halve its cell down to the texels at every level it crosses.
+            if (lv + 1 < i32(m.info.y) && usable(lv + 1, q.x, q.y) && usable(lv + 1, exit.x, exit.y)) {
+                lv = lv + 1;
+                tl = m.texel[lv].x;
+                mip = mip - 1;
+            } else {
+                mip = mip - 1;
+                continue;
+            }
         }
         if (!dirty && changed_at(lv, mip, cx, cy)) {
             dirty = true;
