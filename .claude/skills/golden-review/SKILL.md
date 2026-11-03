@@ -1,6 +1,6 @@
 ---
 name: golden-review
-description: Review candidate golden images against the owner's policy (ADR 0017 as amended by ADR 0061), auto-bless rounding noise, declared changes of debug and shaded views (judged per adapter) and pure look changes, and escalate everything else (first goldens of any class, lit, sky and water views, driver changes) to the owner's /bless. Use whenever a change produces golden candidates (a golden test mismatch or PENDING) before declaring the change done.
+description: Review candidate golden images against the owner's policy (ADR 0017 as amended by ADR 0061 and ADR 0096), auto-bless rounding noise (lit, sky and water views too, against the owner's last bless), declared changes of debug and shaded views (judged per adapter) and pure look changes, and escalate everything else (first goldens of any class, lit, sky and water views, driver changes) to the owner's /bless. Use whenever a change produces golden candidates (a golden test mismatch or PENDING) before declaring the change done.
 ---
 Policy and thresholds: `docs/adr/0017-golden-review-policy.md`; goldens after M5: `docs/adr/0061-goldens-after-m5.md` (the window of ADR 0037 point 1 is closed; ADR 0052 is superseded). Never bless outside them; when unsure, escalate.
 
@@ -24,6 +24,10 @@ Policy and thresholds: `docs/adr/0017-golden-review-policy.md`; goldens after M5
    which adapters took part (an adapter that has goldens but delivered no candidates is printed as NOT RUN) and one verdict per candidate: `AUTO-R`, `AUTO-E`,
    `AUTO-L` or `ESCALATE <reason>`. Each adapter's candidate is judged against that adapter's own golden: agreement between adapters
    is not a condition (ADR 0061), so a declared change of a debug or shaded view is `AUTO-E` on each adapter that shows it, whatever the others show.
+   **Rounding on lit, sky and water views (ADR 0096):** `AUTO-R` covers every class: at most 32 changed pixels and max channel delta 1 on that adapter, same driver. For a lit, sky or water view
+   the report also compares the candidate with the **anchor**: that golden's file at the latest commit with an `Owner-approved:` trailer (else its first commit); the numbers against both golden and anchor
+   are in the report's Anchor column. Drift beyond rounding from the anchor (above 32 px or delta 1), or no anchor, escalates ("drift from the owner's bless"). Every lit, sky or water auto-bless goes into
+   the planner's next summary to the owner, with both sets of numbers. Everything else is unchanged: first goldens, driver changes, size changes, larger changes and look changes outside the look path escalate.
    Look at every enlarged triptych and crop yourself; if a picture contradicts its verdict (a hole, a seam, a colour that should not exist), treat it as `ESCALATE`.
    An `AUTO-L` needs the same oracle check as an `AUTO-E` (commit it as `bless(auto): <tests> [L]`).
    An `AUTO-E` also needs, per ADR 0017 and ADR 0061 point 3: at least one adapter with a candidate, the declared bound tests green in the same run (enforced by the tool from the `--tests` reports), the test's own oracles passing on the candidate frame (no holes, coverage, colour
@@ -46,6 +50,6 @@ Policy and thresholds: `docs/adr/0017-golden-review-policy.md`; goldens after M5
    A full-size inspection render (RTX, 1280x720 or larger, old code against new) is not made by default: offer it only when a diff looks odd and the owner or a reviewer asks.
 
 Never delete or overwrite a golden by hand, never relax a tolerance to make a candidate pass, never bless a lit, sky or water view
-outside the look path (a changed existing one escalates), a first golden of any class, or a new adapter family.
+beyond rounding of both its golden and its anchor (ADR 0096) outside the look path, a first golden of any class, or a new adapter family.
 
 Scope: $ARGUMENTS
