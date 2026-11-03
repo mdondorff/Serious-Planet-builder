@@ -1480,6 +1480,7 @@ dependencies = [
  "lz4_flex",
  "planet-core",
  "planet-generators",
+ "planet-streaming",
  "planet-world-def",
 ]
 

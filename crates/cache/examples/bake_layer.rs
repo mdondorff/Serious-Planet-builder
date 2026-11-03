@@ -43,7 +43,7 @@ struct Opts {
 
 fn main() {
     let o = parse();
-    let threads = if o.threads == 0 { std::thread::available_parallelism().map_or(1, |n| n.get()) } else { o.threads };
+    let (threads, threads_note) = planet_streaming::topology::bake_threads(o.threads).unwrap_or_else(|e| fail(&e));
     let out = o.out.clone().unwrap_or_else(|| PathBuf::from(format!("target/bake/layer-seed-{}", o.seed)));
     let tile = o.tile.unwrap_or(o.planet_res.min(3072));
     let halo = o.halo.unwrap_or(tile / 12);
@@ -103,12 +103,13 @@ fn main() {
     let (face_dir, tile_dir) = (out.join("layer"), out.join("tiles"));
     let face_bake_res = o.face_res as u32;
     println!(
-        "layer: seed {}, pass 1 at {} cells a face edge (halo {face_halo}), pass 2 at {} cells ({:.0} m), tiles of {tile} with a halo of {halo}, {} threads",
+        "layer: seed {}, pass 1 at {} cells a face edge (halo {face_halo}), pass 2 at {} cells ({:.0} m), tiles of {tile} with a halo of {halo}, {} threads ({})",
         o.seed,
         o.face_res,
         o.planet_res,
         grid.dx(),
-        threads
+        threads,
+        threads_note
     );
     for f in 0..6u8 {
         let t = Instant::now();
