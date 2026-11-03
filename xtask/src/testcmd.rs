@@ -1849,12 +1849,26 @@ mod tests {
             "the_lit_coast_view_over_streamed_tiles_draws_the_same_pixels_still_and_after_a_small_turn_and_back",
             "the_edit_latency_scene_runs_end_to_end_in_smoke_mode_and_prints_its_table",
             "the_stills_scene_draws_each_pose_with_its_horizon_maps_baked",
+            "a_still_runs_the_clipmap_shadow_by_default_and_not_with_the_flag",
             "the_gate_passes_on_a_small_world_without_the_chunk_stage_which_is_the_default",
         ] {
             let at = position(&|o| o.filter.contains(&format!("test({name})")), name);
             assert!(at < gpu, "{name}: its limit comes after the gpu_ override and would never apply");
             assert!(defaults[at].body.contains(r#"slow-timeout = { period = "90s", terminate-after = 5 }"#), "{name}: 450 s");
             assert!(exists(name), "{name} is not a test function");
+        }
+        // The coastal flight and the real-window tests run one at a time (`warp-heavy`), and that override comes before `heavy-window`.
+        let warp = position(&|o| o.body.contains(r#"test-group = "warp-heavy""#), "the warp-heavy override");
+        let heavy_at = position(&|o| o.body.contains(r#"test-group = "heavy-window""#), "the heavy-window override");
+        assert!(warp < heavy_at, "a window test would land in heavy-window (the first matching override sets the group)");
+        for member in [
+            "a_coastal_flight_at_low_altitude_flickers_within_the_budget_while_the_lod_changes_under_it",
+            "/^gpu_window::/",
+            // Process tests that run a lit flight or lit streaming scene on the software adapter (planner, 2026-11-03).
+            "a_lit_view_a_lit_flight_and_a_stream_scene_log_their_cpu_calibration_when_asked_even_in_a_smoke_run",
+            "a_streaming_scene_on_the_lit_path_logs_beside_the_debug_path_under_its_own_name",
+        ] {
+            assert!(defaults[warp].filter.contains(&format!("test({member})")), "{member} is not in warp-heavy");
         }
         // The heavy-window group holds the named heavy tests, and its override comes before the `gpu-tier` one.
         let heavy = position(&|o| o.body.contains(r#"test-group = "heavy-window""#), "the heavy-window override");
