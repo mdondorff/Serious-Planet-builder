@@ -6,7 +6,7 @@ use planet_generators::bake::carve::{carve, CarveParams};
 use planet_generators::bake::deposit::{deposit, deposit_on_own_route, DepositParams, Kc};
 use planet_generators::bake::flood::priority_flood;
 use planet_generators::bake::route::{route, NONE};
-use planet_generators::bake::thermal::{thermal, thermal_all_cells, ThermalParams};
+use planet_generators::bake::thermal::{pair_u, thermal, thermal_all_cells, ThermalParams};
 use planet_generators::bake::Grid;
 
 const DX: f64 = 100.0;
@@ -62,7 +62,7 @@ fn thermal_keeps_the_mass_and_gives_the_same_bytes_on_1_and_8_threads() {
     thermal(&g, &mut eight, &p, 8);
     assert_eq!(bits(&one), bits(&eight));
     let (before, after): (f64, f64) = (z0.iter().sum(), one.iter().sum());
-    assert!((before - after).abs() < 1e-9 * before, "the mass changed from {before} to {after}");
+    assert!((before - after).abs() < 1e-9 * before.abs(), "the mass changed from {before} to {after}");
     assert!(one != z0, "nothing moved on rough ground");
 }
 
@@ -81,13 +81,18 @@ fn ground_under_the_critical_slope_is_left_alone_and_a_tower_relaxes_to_it() {
     let long = ThermalParams { passes: 20_000, ..p };
     let r = thermal(&g, &mut z, &long, 2);
     assert!(r.passes_run < 20_000 && r.moved_last == 0, "the tower did not settle in {} passes", r.passes_run);
-    let crit = libm::tan(33f64.to_radians()) * 1.25;
+    // Every land pair stands under its own critical difference, up to the minimum excess that does not move.
+    let tan = libm::tan(33f64.to_radians());
     for q in 0..48 * 48 {
         for d in 0..8 {
             if let Some(o) = g.neighbour(q, d) {
                 if !g.is_edge(q) {
-                    let slope = (z[q] - z[o]) / g.distance(d);
-                    assert!(slope <= crit + 1e-5, "cell {q} stands over its neighbour {o} at a slope of {slope}");
+                    let crit = tan * (1.0 + 0.25 * pair_u(g.global_id(q), g.global_id(o))) * g.distance(d);
+                    assert!(
+                        z[q] - z[o] <= crit + 1.5e-3,
+                        "cell {q} stands over its neighbour {o} by {} m, the critical difference is {crit}",
+                        z[q] - z[o]
+                    );
                 }
             }
         }
@@ -141,7 +146,7 @@ fn valley() -> (Grid, Vec<f64>, Vec<f64>, usize) {
 
 // spec: GEN-101
 #[test]
-fn deposition_fills_a_pit_loses_no_volume_and_keeps_every_receiver_lower() {
+fn deposition_fills_a_pit_loses_no_volume_and_a_receiver_that_deposited_stays_below_its_donors() {
     let (g, orig, mut z, pit) = valley();
     let (z0, outlet) = (z.clone(), g.outlets(&z, 0.0));
     let filled = priority_flood(&g, &z, &outlet, 1e-3);
@@ -160,6 +165,15 @@ fn deposition_fills_a_pit_loses_no_volume_and_keeps_every_receiver_lower() {
             assert!(z[p] >= z0[p], "cell {p} was lowered");
             let drop = filled[p] - filled[rec as usize];
             assert!(z[p] <= filled[p] + 0.5 * drop.max(0.0) + 1e-9, "cell {p} rose above the filled level and half the drop");
+            // A receiver that deposited stays at or below the cells that drain into it.
+            if z[rec as usize] > z0[rec as usize] {
+                assert!(
+                    z[rec as usize] <= z[p] + 1e-9,
+                    "the receiver {rec} of cell {p} deposited above it ({} against {})",
+                    z[rec as usize],
+                    z[p]
+                );
+            }
         }
     }
 }
@@ -194,4 +208,53 @@ fn deposition_on_a_carved_surface_keeps_the_mass_and_a_zero_zeta_fills_only_depr
     for q in 0..g.len() {
         assert!(a[q] >= carved[q] && b[q] >= carved[q] && c[q] >= carved[q], "cell {q} was lowered");
     }
+}
+
+// spec: GEN-101
+#[test]
+fn a_per_cell_kc_equal_to_a_uniform_one_gives_the_same_deposit_and_bad_inputs_are_refused() {
+    let (g, orig, z0, _) = valley();
+    let (mut a, mut b) = (z0.clone(), z0.clone());
+    let kc = vec![1e5; g.len()];
+    let uniform = DepositParams { kc: Kc::Uniform(1e5), zeta: 0.5, sea_level: 0.0 };
+    let per_cell = DepositParams { kc: Kc::PerCell(&kc), ..uniform };
+    let ra = deposit_on_own_route(&g, &mut a, &orig, 1e-3, 7, &uniform);
+    let rb = deposit_on_own_route(&g, &mut b, &orig, 1e-3, 7, &per_cell);
+    assert_eq!((ra, bits(&a)), (rb, bits(&b)));
+    let refused = |what: &str, f: &dyn Fn()| {
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).is_err(), "{what} was not refused");
+    };
+    refused("a zeta over 1", &|| {
+        deposit_on_own_route(&g, &mut z0.clone(), &orig, 1e-3, 7, &DepositParams { zeta: 1.5, ..uniform });
+    });
+    refused("a negative kc", &|| {
+        deposit_on_own_route(&g, &mut z0.clone(), &orig, 1e-3, 7, &DepositParams { kc: Kc::Uniform(-1.0), ..uniform });
+    });
+    refused("a kc per cell of the wrong length", &|| {
+        deposit_on_own_route(&g, &mut z0.clone(), &orig, 1e-3, 7, &DepositParams { kc: Kc::PerCell(&kc[1..]), ..uniform });
+    });
+    refused("a height that is not finite", &|| {
+        let mut z = z0.clone();
+        z[5] = f64::NAN;
+        deposit_on_own_route(&g, &mut z, &orig, 1e-3, 7, &uniform);
+    });
+    for (what, p) in [
+        ("a critical angle of 0", ThermalParams { theta_deg: 0.0, ..ThermalParams::default() }),
+        ("a perturbation of 1", ThermalParams { perturb: 1.0, ..ThermalParams::default() }),
+        ("a negative minimum excess", ThermalParams { min_excess: -1.0, ..ThermalParams::default() }),
+        ("a sea level that is not finite", ThermalParams { sea_level: f64::NAN, ..ThermalParams::default() }),
+    ] {
+        refused(what, &|| {
+            thermal(&Grid::new(8, 8, DX), &mut tower(8, 500.0), &p, 1);
+        });
+    }
+}
+
+// spec: GEN-101
+#[test]
+fn a_zero_minimum_excess_stops_when_rounding_absorbs_the_rest() {
+    let g = Grid::new(24, 24, DX);
+    let mut z = tower(24, 900.0);
+    let r = thermal(&g, &mut z, &ThermalParams { min_excess: 0.0, passes: 5000, ..ThermalParams::default() }, 2);
+    assert!(r.passes_run < 5000 && r.moved_last == 0, "{} passes, {} cells still moving", r.passes_run, r.moved_last);
 }

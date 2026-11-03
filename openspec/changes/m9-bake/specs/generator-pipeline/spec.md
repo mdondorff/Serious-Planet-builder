@@ -147,17 +147,17 @@ Source: ADR 0088 point 4.1, ADR 0088/0089 accepted 2026-11-01; SPIKE-62, SPIKE-6
 The bake's second pass SHALL work per tile of the layer grid: 98,304 cells per face edge (101.8 m), tiles of 3,072 x 3,072 core cells with a 256-cell halo (SPIKE-61's tiles). Per tile it SHALL take:
 - the base field plus the face carve's change, bilinear;
 - a local carve of catchments up to 1 km^2 that only incises: no fill, no breach, no uplift;
-- thermal at a critical slope of 33 degrees, perturbed by up to 25 % (an integer hash of the unordered pair of global cell ids), moving 1/16 of the excess per pass, at most 100 passes, on active cells (the cells that moved and their neighbours: bit for bit the run over every cell); a pair over the critical difference by under 1 mm does not move (the excess would never reach 0); land above the sea level off the grid's border gives, any cell receives;
+- thermal at a critical slope of 33 degrees, perturbed by up to 25 % (an integer hash of the unordered pair of global cell ids), moving 1/16 of the excess per pass (a share over 1/8 SHALL be refused: a cell would overshoot), at most 100 passes, on active cells (the cells that moved and their neighbours: bit for bit the run over every cell); a pair over the critical difference by under 1 mm does not move (the excess would never reach 0), and a cell whose height rounding leaves unchanged wakes no neighbour; the sweep keeps a cell at or below the lowest final height of its donors; land above the sea level off the grid's border gives, any cell receives;
 - one deposition sweep with `kc` from GEN-097 and `zeta` 0.5 on the last route (the load of a cell is its donors' plus its eroded column; it fills the depression first, then `zeta` of the excess over the capacity `kc sqrt(A) S` settles, at most to the filled level plus half the drop to the receiver; what reaches an outlet leaves; eroded = deposited + exported).
 It SHALL store the core's change against the base field and checkpoint per tile. Every kernel SHALL be a Jacobi gather or a fixed topological sweep in f64 with `libm`. The constants are start values (SPIKE-61, SPIKE-64, SPIKE-70, SPIKE-72). The seam check is TEST-084.
 
-Verify: A
+Verify: A, B
 Status: planned
 Source: ADR 0088 points 4.2 and 6, ADR 0088/0089 accepted 2026-11-01; SPIKE-61, SPIKE-64, SPIKE-70, SPIKE-71, SPIKE-72, SPIKE-73
 
 #### Scenario: Thermal on active cells
-- **WHEN** thermal runs on one tile of 3,584 cells a side (100 passes, 4 threads) on a rough upland
-- **THEN** it takes under 5 s, keeps the mass, and gives the bytes of the run over every cell
+- **WHEN** thermal runs on one synthetic tile of 3,584 cells a side (100 passes, 4 threads), an upland and a steeper one
+- **THEN** it keeps the mass, gives the bytes of the run over every cell, evaluates at most 5 % (upland) or 25 % (steeper) of the cells of the full run, and takes 5 s on the reference machine for the upland (the test bounds the time by ADR 0087's loaded margin; the cost grows steeply with relief: see the design)
 
 #### Scenario: Incise only
 - **WHEN** pass 2's local carve runs on a synthetic tile with a closed basin

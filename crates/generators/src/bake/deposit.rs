@@ -3,7 +3,9 @@
 //! The load of a cell is its donors' plus its own eroded column (`original - current` where it is positive, times the cell area; land only). The load first fills the cell's
 //! depression up to the filled level, then, where it exceeds the capacity `kc sqrt(A) S` (cubic metres per step, `A` the drainage area, `S` the filled slope to the receiver),
 //! `zeta` of the excess settles, raising the cell at most to the filled level plus half the drop to the receiver, so that the receiver stays lower. The rest moves on; what reaches
-//! an outlet (the sea or the grid's border) leaves. Mass is kept: what was eroded is deposited or leaves.
+//! an outlet (the sea or the grid's border) leaves. A cell never ends above the lowest final height of its donors (so a settled cell stays below the cells that drain into it); what
+//! the ceiling holds back moves on. Mass is kept: what was eroded is deposited or leaves. The eroded column is counted on land only (`z` above the sea level): a carve that
+//! lowers land below the sea would lose that volume here, as the carve of this crate does not.
 
 use super::flood::priority_flood;
 use super::route::{route, Routing, NONE};
@@ -47,7 +49,11 @@ pub fn deposit(grid: &Grid, z: &mut [f64], original: &[f64], filled: &[f64], rou
         assert_eq!(k.len(), n, "one kc per cell");
     }
     let ca = grid.dx() * grid.dx();
+    super::assert_finite("the filled heights", filled);
+    assert!(routing.area.len() == n && routing.order.len() == n, "one drainage area and one order entry per cell");
+    assert!(routing.area.iter().all(|a| a.is_finite() && *a >= 0.0), "the drainage areas are finite and not negative");
     let mut carried = vec![0.0f64; n];
+    let mut ceiling = vec![f64::INFINITY; n];
     let mut report = DepositReport { eroded: 0.0, deposited: 0.0, exported: 0.0 };
     for &p in routing.order.iter().rev() {
         let p = p as usize;
@@ -82,9 +88,16 @@ pub fn deposit(grid: &Grid, z: &mut [f64], original: &[f64], filled: &[f64], rou
             rise += settled / ca;
             load -= settled;
         }
+        // Not above the lowest donor's final height: what does not fit moves on.
+        let allowed = (ceiling[p] - zp).max(0.0);
+        if rise > allowed {
+            load += (rise - allowed) * ca;
+            rise = allowed;
+        }
         z[p] = zp + rise;
         report.deposited += rise * ca;
         carried[r] += load;
+        ceiling[r] = ceiling[r].min(z[p]);
     }
     report
 }

@@ -47,7 +47,7 @@ pub struct ThermalReport {
 }
 
 /// A number in `[-1, 1)`: an integer hash of the unordered pair of global cell ids.
-fn pair_u(a: u64, b: u64) -> f64 {
+pub fn pair_u(a: u64, b: u64) -> f64 {
     let (a, b) = if a < b { (a, b) } else { (b, a) };
     let x = a.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ b.wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
     let x = (x ^ (x >> 31)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
@@ -80,6 +80,8 @@ const CHUNK: usize = 4096;
 fn run(grid: &Grid, z: &mut [f64], params: &ThermalParams, threads: usize, all_cells: bool) -> ThermalReport {
     assert_eq!(z.len(), grid.len(), "one height per cell");
     super::assert_finite("the heights", z);
+    assert!(grid.len() <= u32::MAX as usize, "the active set holds u32 cell indices: {} cells are too many", grid.len());
+    assert!(params.sea_level.is_finite(), "the sea level is finite, not {}", params.sea_level);
     assert!(
         params.min_excess >= 0.0 && params.min_excess.is_finite(),
         "the minimum excess is finite and not negative, not {}",
@@ -120,11 +122,15 @@ fn run(grid: &Grid, z: &mut [f64], params: &ThermalParams, threads: usize, all_c
             for (o, &dh) in piece.iter().enumerate() {
                 if dh != 0.0 {
                     let p = active[c * CHUNK + o];
+                    let before = z[p as usize];
                     z[p as usize] += dh;
-                    changed.push(p);
-                    if dh < 0.0 {
-                        moved += 1;
-                        volume -= dh;
+                    // A change that rounding absorbed moves nothing and wakes no neighbour (its inputs are the same next pass).
+                    if z[p as usize].to_bits() != before.to_bits() {
+                        changed.push(p);
+                        if dh < 0.0 {
+                            moved += 1;
+                            volume -= dh;
+                        }
                     }
                 }
             }
@@ -141,7 +147,7 @@ fn run(grid: &Grid, z: &mut [f64], params: &ThermalParams, threads: usize, all_c
             continue;
         }
         // The cells that changed and their neighbours are the next pass's: nothing else can move.
-        let mut next: Vec<u32> = Vec::with_capacity(changed.len() * 4);
+        let mut next: Vec<u32> = Vec::with_capacity(changed.len() * 9);
         for &p in &changed {
             next.push(p);
             next.extend((0..8).filter_map(|d| grid.neighbour(p as usize, d)).map(|q| q as u32));
