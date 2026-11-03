@@ -18,14 +18,33 @@ use planet_core::hash::hash_u64s;
 use planet_core::Vec3;
 use planet_world_def::{records_hash64, BodyId, GenContext, MissingNode, ReadRecord};
 
-use crate::global::{read_direction, LatticeSource, GLOBAL_VERSION, MAX_ELEVATION_M, MIN_ELEVATION_M};
+use crate::global::{
+    read_direction, read_elevation_c1, read_elevation_c1_cached, LatticeSource, StencilCache, GLOBAL_VERSION, MAX_ELEVATION_M,
+    MIN_ELEVATION_M, READER_C1_VERSION,
+};
 use crate::height::{layer_noise, layer_noise_bounds, HeightField};
 use crate::terrain::scan_base;
+
+thread_local! {
+    /// The C1 stencils this thread loaded (see [`read_elevation_c1_cached`]).
+    static STENCILS: std::cell::RefCell<StencilCache> = std::cell::RefCell::new(StencilCache::new());
+}
+static NEXT_FIELD_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 /// Bump whenever any output of this module changes (ADR 0006); it also covers [`GLOBAL_VERSION`] through the bake key.
 pub const EROSION_VERSION: u32 = 2;
 /// Names this implementation in cache keys (CON-07).
 pub const EROSION_IMPLEMENTATION_ID: &str = "cpu-erosion-v1";
+/// Bump whenever any output of the C1 variant changes (it also covers [`READER_C1_VERSION`] through its key).
+pub const EROSION_C1_VERSION: u32 = 1;
+/// Names the C1 variant in cache keys (GEN-107): the same field with the bake read by `read_elevation_c1` instead of the bilinear blend.
+pub const EROSION_C1_IMPLEMENTATION_ID: &str = "cpu-erosion-v2";
+
+/// Names this implementation with the relief channels on (CON-07): another field, another key.
+pub const EROSION_RELIEF_IMPLEMENTATION_ID: &str = "cpu-erosion-v1+relief";
+
+/// Names the C1 variant with the relief channels on (CON-07): another field, another key.
+pub const EROSION_C1_RELIEF_IMPLEMENTATION_ID: &str = "cpu-erosion-v2+relief";
 
 /// Names this implementation with the relief channels on (CON-07): another field, another key.
 pub const EROSION_RELIEF_IMPLEMENTATION_ID: &str = "cpu-erosion-v1+relief";
@@ -42,7 +61,7 @@ const AMPLITUDE_LAND_M: f64 = 900.0;
 /// Bake cells either side of a point over which the slope is measured.
 const SLOPE_CELLS: f64 = 3.0;
 /// How far from the cell of a direction the lattice reads of a height reach, in cells (GEN-020): the gradient stencil reaches [`SLOPE_CELLS`] cells (a bit
-/// more on the chart, 2/sqrt(3) at most) and the bilinear read one more; a footprint taken from this hint is a superset of the exact one.
+/// more on the chart, 2/sqrt(3) at most) and the bilinear read one more (the C1 read one below and two above: still within 8); a footprint taken from this hint is a superset of the exact one.
 pub const GRADIENT_REACH_CELLS: u32 = 8;
 /// The slope factor: this share of the amplitude on flat ground, the rest from slope 0.01 (rise over run) to 0.2.
 const CARVE_FLOOR: f64 = 0.15;
@@ -156,6 +175,10 @@ pub struct ErosionField<'a> {
     error: Mutex<Option<String>>,
     /// The landform lattice of the seed (GEN-062), taken from the shared cache on first use.
     landform: OnceLock<Arc<crate::global::LandformLattice>>,
+    /// Whether the base is read by the C1 interpolant ([`EROSION_C1_IMPLEMENTATION_ID`]).
+    c1: bool,
+    /// Names this field in the thread's stencil cache (one per built field).
+    id: u64,
     /// The relief channels `k` and `m` (GEN-099): when present the height is `m + k (e - m) + k detail`, else today's `e + detail` (`k` 1, `m` not read).
     relief_channels: Option<Arc<crate::relief_lattice::ReliefLattice>>,
 }
@@ -213,14 +236,33 @@ impl ErosionField<'_> {
         }
     }
 
+    /// The bounds of the bake's elevation read over a cap (the base alone, no creases): `None` where the scan declines (a cap too wide, or the C1 read below res 4). For tests.
+    #[doc(hidden)]
+    pub fn base_bounds(&self, centre: Vec3, angular_radius: f64) -> Option<(f64, f64)> {
+        scan_base(&self.src, centre, angular_radius, self.c1).ok().flatten().map(|s| (s.lo, s.hi))
+    }
+
     /// The ground elevation of the bake at a direction, without creases.
     pub fn base_elevation(&self, dir: Vec3) -> f64 {
         self.base_via(&self.src, dir)
     }
 
     fn base_via(&self, src: &dyn LatticeSource, dir: Vec3) -> f64 {
-        match read_direction(src, &TangentWarp, dir) {
-            Ok(s) => f64::from(s.elevation_m),
+        self.base_via_c(src, dir, false)
+    }
+
+    /// [`Self::base_via`], with `cached` the C1 stencils kept in the thread's cache (a batch revisits the cells of its neighbours; one read does not).
+    fn base_via_c(&self, src: &dyn LatticeSource, dir: Vec3, cached: bool) -> f64 {
+        let read = if self.c1 && cached {
+            // One cache a thread: the same field's stencils are the same values from any source of the same bake.
+            STENCILS.with(|c| read_elevation_c1_cached(src, &TangentWarp, dir, &mut c.borrow_mut(), self.id))
+        } else if self.c1 {
+            read_elevation_c1(src, &TangentWarp, dir)
+        } else {
+            read_direction(src, &TangentWarp, dir).map(|s| s.elevation_m)
+        };
+        match read {
+            Ok(e) => f64::from(e),
             Err(e) => {
                 self.fail(&e);
                 f64::NAN
@@ -241,11 +283,16 @@ impl ErosionField<'_> {
     }
 
     fn gradient_via(&self, src: &dyn LatticeSource, d: Vec3) -> f64 {
+        self.gradient_via_c(src, d, false)
+    }
+
+    fn gradient_via_c(&self, src: &dyn LatticeSource, d: Vec3, cached: bool) -> f64 {
         let delta = self.delta();
         let mut g = Vec3::new(0.0, 0.0, 0.0);
         for a in [Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)] {
             let t = a - d * a.dot(d);
-            let rise = self.base_via(src, (d + t * delta).normalized()) - self.base_via(src, (d - t * delta).normalized());
+            let rise =
+                self.base_via_c(src, (d + t * delta).normalized(), cached) - self.base_via_c(src, (d - t * delta).normalized(), cached);
             g = g + t * (rise / (2.0 * delta));
         }
         g.length()
@@ -255,8 +302,12 @@ impl ErosionField<'_> {
 impl ErosionField<'_> {
     /// [`HeightField::height`] reading the lattice through `src`.
     fn height_via(&self, src: &dyn LatticeSource, dir: Vec3) -> f64 {
-        let e = self.base_via(src, dir);
-        let slope = self.gradient_via(src, dir) / self.radius_m;
+        self.height_via_c(src, dir, false)
+    }
+
+    fn height_via_c(&self, src: &dyn LatticeSource, dir: Vec3, cached: bool) -> f64 {
+        let e = self.base_via_c(src, dir, cached);
+        let slope = self.gradient_via_c(src, dir, cached) / self.radius_m;
         let c = carve(slope);
         // Where the slope factor is 1 the landform changes nothing (`fine_carve(1, L)` is 1), so it is not evaluated.
         let l = if c >= 1.0 { 0.0 } else { self.landform().at(dir) };
@@ -283,7 +334,7 @@ impl HeightField for ErosionField<'_> {
             self.base_via(g, d);
             self.gradient_via(g, d);
         };
-        crate::global::eval_gathered(&self.src, dirs, stop, &footprint, Some(GRADIENT_REACH_CELLS), &|s, d| self.height_via(s, d))
+        crate::global::eval_gathered(&self.src, dirs, stop, &footprint, Some(GRADIENT_REACH_CELLS), &|s, d| self.height_via_c(s, d, true))
     }
 
     /// [`HeightField::heights_until`] with the distinct blocks of the batch read on `threads` threads (GEN-020, LOD-009).
@@ -293,7 +344,7 @@ impl HeightField for ErosionField<'_> {
             self.gradient_via(g, d);
         };
         crate::global::eval_gathered_threads(&self.src, dirs, stop, par, &footprint, Some(GRADIENT_REACH_CELLS), &|s, d| {
-            self.height_via(s, d)
+            self.height_via_c(s, d, true)
         })
     }
 
@@ -339,7 +390,7 @@ impl HeightField for ErosionField<'_> {
             stop,
             &footprint,
             Some(GRADIENT_REACH_CELLS),
-            &|s, d| self.height_via(s, d),
+            &|s, d| self.height_via_c(s, d, true),
             &climate,
         )
     }
@@ -349,15 +400,20 @@ impl HeightField for ErosionField<'_> {
     }
 
     fn implementation_id(&self) -> &'static str {
-        if self.relief_channels.is_some() {
-            EROSION_RELIEF_IMPLEMENTATION_ID
-        } else {
-            EROSION_IMPLEMENTATION_ID
+        match (self.relief_channels.is_some(), self.c1) {
+            (true, true) => EROSION_C1_RELIEF_IMPLEMENTATION_ID,
+            (true, false) => EROSION_RELIEF_IMPLEMENTATION_ID,
+            (false, true) => EROSION_C1_IMPLEMENTATION_ID,
+            (false, false) => EROSION_IMPLEMENTATION_ID,
         }
     }
 
     fn version(&self) -> u32 {
-        EROSION_VERSION
+        if self.c1 {
+            EROSION_C1_VERSION
+        } else {
+            EROSION_VERSION
+        }
     }
 
     fn max_abs_height_m(&self) -> f64 {
@@ -393,7 +449,7 @@ impl HeightField for ErosionField<'_> {
     /// over the intervals of the four terms (the range of the channels over the cap from [`crate::relief_lattice::ReliefLattice::range_over_cap`]).
     fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
         let global = (-self.max_abs_height(), self.max_abs_height());
-        let base = match scan_base(&self.src, centre, angular_radius) {
+        let base = match scan_base(&self.src, centre, angular_radius, self.c1) {
             Ok(Some(s)) => s,
             Ok(None) => return global,
             Err(e) => {
@@ -409,7 +465,7 @@ impl HeightField for ErosionField<'_> {
         // coordinate, at most 2 face coordinates per radian: ADR 0028 point 3).
         let k = (1.0 + 2.0 * delta) / (1.0 - delta);
         let (carve_lo, carve_hi) = if delta < 0.4 {
-            match scan_base(&self.src, centre, (angular_radius + delta) * (1.0 + 1e-9)) {
+            match scan_base(&self.src, centre, (angular_radius + delta) * (1.0 + 1e-9), self.c1) {
                 Ok(Some(wide)) => {
                     let lip = f64::from(self.src.res()) * (wide.max_du + wide.max_dv);
                     let g_centre = self.gradient(centre);
@@ -507,16 +563,59 @@ impl ErosionGenerator {
         bake: &'a dyn LatticeSource,
         bake_key: [u8; 16],
     ) -> Result<ErosionField<'a>, MissingNode> {
+        self.field_with(ctx, body, bake, bake_key, false)
+    }
+
+    /// [`ErosionGenerator::field`] with the bake read by the C1 interpolant (GEN-107): `cpu-erosion-v2`.
+    pub fn field_c1<'a>(
+        &self,
+        ctx: &GenContext,
+        body: BodyId,
+        bake: &'a dyn LatticeSource,
+        bake_key: [u8; 16],
+    ) -> Result<ErosionField<'a>, MissingNode> {
+        self.field_with(ctx, body, bake, bake_key, true)
+    }
+
+    fn field_with<'a>(
+        &self,
+        ctx: &GenContext,
+        body: BodyId,
+        bake: &'a dyn LatticeSource,
+        bake_key: [u8; 16],
+        c1: bool,
+    ) -> Result<ErosionField<'a>, MissingNode> {
         assert!(ctx.reads().is_empty(), "a field is built from a fresh context: its key covers the whole read set of the context");
         let seed = ctx.body_seed(body)?;
         let relief = ctx.relief_scale(body)?;
         let radius_m = ctx.body_radius_m(body)?;
         let records = ctx.read_records();
         let half = |b: &[u8]| u64::from_le_bytes(b.try_into().expect("8 bytes"));
-        let inputs = hash_u64s(
-            0x6572_6f73,
-            &[records_hash64(&records), half(&bake_key[..8]), half(&bake_key[8..]), u64::from(GLOBAL_VERSION), u64::from(EROSION_VERSION)],
-        );
+        let inputs = if c1 {
+            hash_u64s(
+                0x6572_6f74,
+                &[
+                    records_hash64(&records),
+                    half(&bake_key[..8]),
+                    half(&bake_key[8..]),
+                    u64::from(GLOBAL_VERSION),
+                    u64::from(EROSION_VERSION),
+                    u64::from(EROSION_C1_VERSION),
+                    u64::from(READER_C1_VERSION),
+                ],
+            )
+        } else {
+            hash_u64s(
+                0x6572_6f73,
+                &[
+                    records_hash64(&records),
+                    half(&bake_key[..8]),
+                    half(&bake_key[8..]),
+                    u64::from(GLOBAL_VERSION),
+                    u64::from(EROSION_VERSION),
+                ],
+            )
+        };
         Ok(ErosionField {
             seed,
             body,
@@ -528,6 +627,8 @@ impl ErosionGenerator {
             relief,
             error: Mutex::new(None),
             landform: OnceLock::new(),
+            c1,
+            id: NEXT_FIELD_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             relief_channels: None,
         })
     }

@@ -1,0 +1,1 @@
+- 2026-11-03 ci-smokes-pin-workers: the CI smokes with wall-clock limits pin --gen-workers 2 (STRM-020); the default terrain share left one tile worker on a 4-thread runner since #1117. The Tracked `gpu_edit_perf` no-settle (first on #1117, again on #1134's WARP C 3/4) is closed by the pin, not quarantined

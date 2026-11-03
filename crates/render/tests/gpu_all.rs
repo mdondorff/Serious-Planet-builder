@@ -16,8 +16,6 @@ mod gpu_diagnostics;
 mod gpu_ground_look;
 #[path = "gpu_hello_triangle.rs"]
 mod gpu_hello_triangle;
-#[path = "gpu_horizon.rs"]
-mod gpu_horizon;
 #[path = "gpu_indirect.rs"]
 mod gpu_indirect;
 #[path = "gpu_lit.rs"]

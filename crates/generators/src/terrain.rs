@@ -229,7 +229,7 @@ impl HeightField for TerrainField<'_> {
     /// [`MAX_BOUNDS_CELLS`] cells, takes the global range.
     fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
         let global = (-self.max_abs_height(), self.max_abs_height());
-        let scan = match scan_base(&self.src, centre, angular_radius) {
+        let scan = match scan_base(&self.src, centre, angular_radius, false) {
             Ok(Some(scan)) => scan,
             Ok(None) => return global,
             Err(err) => {
@@ -261,6 +261,10 @@ impl HeightField for TerrainField<'_> {
     }
 }
 
+/// Cells added around the scanned window when the field reads the bake C1: the 4 x 4 stencil reaches one cell below and two above its cell, and a ghost beyond a
+/// face edge (only ever one cell beyond it) is read in the neighbour face from the cell it falls in and one more.
+const C1_PAD_CELLS: f64 = 3.0;
+
 /// The range of the bake's elevation over a cap and the steepest lattice step on the way (see [`scan_base`]).
 pub(crate) struct BaseScan {
     pub lo: f64,
@@ -272,9 +276,22 @@ pub(crate) struct BaseScan {
 
 /// Bounds of the bake's elevation over the cap of `angular_radius` about `centre`, and the largest lattice steps of the
 /// cells it reads (ADR 0028 point 3). `None`: the cap is too wide or leaves the scanned region, take the global range.
-pub(crate) fn scan_base(src: &dyn LatticeSource, centre: Vec3, angular_radius: f64) -> Result<Option<BaseScan>, crate::global::ReadError> {
+///
+/// With `c1` the field reads the bake by [`crate::global::read_elevation_c1`] (GEN-107): the window grows by [`C1_PAD_CELLS`] cells (the 4 x 4 stencil
+/// and the neighbour-face ghosts), and the range and the steps are taken over every scanned face together (a ghost is a value of the neighbour), the range
+/// widened by [`crate::global::C1_OVERSHOOT`] of itself on each side and the steps scaled by [`crate::global::C1_SLOPE_FACTOR`].
+pub(crate) fn scan_base(
+    src: &dyn LatticeSource,
+    centre: Vec3,
+    angular_radius: f64,
+    c1: bool,
+) -> Result<Option<BaseScan>, crate::global::ReadError> {
     let res = src.res();
     if res == 0 || !angular_radius.is_finite() || angular_radius < 0.0 {
+        return Ok(None);
+    }
+    // At res 2 a ghost sits two cells beyond the edge, in a face the scan does not visit: no C1 bounds below res 4 (the global range then).
+    if c1 && res < 4 {
         return Ok(None);
     }
     // Face coordinates are Lipschitz (FACE_LIPSCHITZ) in the angle while they stay within 1.14 (u within 1.2). With a
@@ -287,8 +304,9 @@ pub(crate) fn scan_base(src: &dyn LatticeSource, centre: Vec3, angular_radius: f
     }
     let half = f64::from(res) * 0.5;
     let reach = rw * half + 1e-9;
-    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
-    let (mut max_du, mut max_dv) = (0.0f64, 0.0f64);
+    let pad = if c1 { C1_PAD_CELLS } else { 0.0 };
+    // Per scanned face: its sample range, its largest steps, the anchor and the clamped anchor's lattice position.
+    let mut scanned: Vec<(f64, f64, f64, f64, f64)> = Vec::new();
     let mut cells = 0u64;
     for f in 0..6u8 {
         let face = Face(f);
@@ -299,15 +317,24 @@ pub(crate) fn scan_base(src: &dyn LatticeSource, centre: Vec3, angular_radius: f
         // The extended coordinate (`plane_to_face` clamps beyond the face): `(4 / pi) atan(u)`.
         let coord = |axis: Vec3| libm::atan(centre.dot(axis) / w) / core::f64::consts::FRAC_PI_4;
         let (s, t) = (coord(face.u_axis()), coord(face.v_axis()));
-        if s.abs() > 1.0 + rw + 1e-9 || t.abs() > 1.0 + rw + 1e-9 {
+        if s.abs() > 1.0 + rw + pad / half + 1e-9 || t.abs() > 1.0 + rw + pad / half + 1e-9 {
             continue;
         }
         let (pu, pv) = ((s + 1.0) * half, (t + 1.0) * half);
         let clamp = |x: f64| x.clamp(0.0, f64::from(res));
-        let (u0, u1, v0, v1) = (clamp(pu - reach), clamp(pu + reach), clamp(pv - reach), clamp(pv + reach));
+        // C1: the window is the stencil's own span (one cell below the cap's first cell, two above its last) in the interior of a face; within the stencil's reach
+        // of a face edge (ghosts of the neighbour) it takes the wide pad.
+        let near_edge = c1
+            && (pu - reach < C1_PAD_CELLS
+                || pu + reach > f64::from(res) - C1_PAD_CELLS
+                || pv - reach < C1_PAD_CELLS
+                || pv + reach > f64::from(res) - C1_PAD_CELLS);
+        let pad = if near_edge { pad } else { 0.0 };
+        let (u0, u1, v0, v1) = (clamp(pu - reach - pad), clamp(pu + reach + pad), clamp(pv - reach - pad), clamp(pv + reach + pad));
         // Cells read: floor(u0) ..= floor(u1) and one more for the far neighbour of the blend, clamped to the lattice.
-        let (i0, i1) = (libm::floor(u0) as u32, (libm::floor(u1) as u32 + 1).min(res));
-        let (j0, j1) = (libm::floor(v0) as u32, (libm::floor(v1) as u32 + 1).min(res));
+        let (lo_pad, hi_pad) = if c1 && !near_edge { (1u32, 2u32) } else { (0, 1) };
+        let (i0, i1) = ((libm::floor(u0) as u32).saturating_sub(lo_pad), (libm::floor(u1) as u32 + hi_pad).min(res));
+        let (j0, j1) = ((libm::floor(v0) as u32).saturating_sub(lo_pad), (libm::floor(v1) as u32 + hi_pad).min(res));
         let (w, h) = ((i1 - i0 + 1) as usize, (j1 - j0 + 1) as usize);
         cells += (w * h) as u64;
         if cells > MAX_BOUNDS_CELLS {
@@ -320,7 +347,7 @@ pub(crate) fn scan_base(src: &dyn LatticeSource, centre: Vec3, angular_radius: f
             }
         }
         let (flo, fhi) = (e.iter().copied().fold(f64::INFINITY, f64::min), e.iter().copied().fold(f64::NEG_INFINITY, f64::max));
-        // The blend is bilinear in the lattice position, so its slope along an axis is at most the largest difference of
+        // The blend is bilinear (C1: scaled by C1_SLOPE_FACTOR below) in the lattice position, so its slope along an axis is at most the largest difference of
         // adjacent samples along that axis. Every cap point of this face is within the rectangle's half-width (per
         // axis, in lattice units) of the anchor, the centre clamped to the face; the base elevation there is the
         // blend at the anchor (read from this face's own samples) plus or minus the slope times that half-width.
@@ -337,7 +364,36 @@ pub(crate) fn scan_base(src: &dyn LatticeSource, centre: Vec3, angular_radius: f
         }
         let (au, av) = (clamp(pu), clamp(pv));
         let (ci, cj) = (libm::floor(au).min(f64::from(res)) as u32, libm::floor(av).min(f64::from(res)) as u32);
-        let anchor = f64::from(blend_cell(src, face, ci, cj, au - f64::from(ci), av - f64::from(cj))?.elevation_m);
+        let anchor = if c1 {
+            // The anchor is the C1 read at the anchor position: its direction from the face coordinates.
+            let d = planet_core::cube::face_to_direction(&planet_core::cube::TangentWarp, face, au / half - 1.0, av / half - 1.0);
+            f64::from(crate::global::read_elevation_c1(src, &planet_core::cube::TangentWarp, d)?)
+        } else {
+            f64::from(blend_cell(src, face, ci, cj, au - f64::from(ci), av - f64::from(cj))?.elevation_m)
+        };
+        scanned.push((flo, fhi, du, dv, anchor));
+    }
+    // Bilinear: each face's interval from its own samples. C1: a stencil beside a face edge reads ghost nodes of the neighbour face, so the range and the
+    // steps are taken over every scanned face together (the neighbour's window covers the ghosts' cells) and widened for the blend's overshoot and slope.
+    let (mut g_lo, mut g_hi, mut g_du, mut g_dv) = (f64::INFINITY, f64::NEG_INFINITY, 0.0f64, 0.0f64);
+    for &(flo, fhi, du, dv, _) in &scanned {
+        g_lo = g_lo.min(flo);
+        g_hi = g_hi.max(fhi);
+        g_du = g_du.max(du);
+        g_dv = g_dv.max(dv);
+    }
+    if c1 {
+        // The C1 value is a combination of sixteen samples whose weights sum to 1 and whose negative weights sum to at most C1_OVERSHOOT.
+        let range = g_hi - g_lo;
+        // And the margin for the rounding of the value to f32 (the anchor side has its own below).
+        let round = 1e-6 + 1.2e-7 * g_lo.abs().max(g_hi.abs());
+        (g_lo, g_hi) = (g_lo - crate::global::C1_OVERSHOOT * range - round, g_hi + crate::global::C1_OVERSHOOT * range + round);
+        (g_du, g_dv) = (g_du * crate::global::C1_SLOPE_FACTOR, g_dv * crate::global::C1_SLOPE_FACTOR);
+    }
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    let (mut max_du, mut max_dv) = (0.0f64, 0.0f64);
+    for &(flo, fhi, du, dv, anchor) in &scanned {
+        let (flo, fhi, du, dv) = if c1 { (g_lo, g_hi, g_du, g_dv) } else { (flo, fhi, du, dv) };
         // The anchor and the base at a cap point are both rounded to f32 by the blend: one ulp (2^-23 relative) apart at most
         // beyond the slope term.
         let spread = (du + dv) * reach * (1.0 + 1e-9) + 1e-6 + anchor.abs() * 2.4e-7;
