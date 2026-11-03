@@ -72,3 +72,12 @@ Scope: `edit-latency` with a chunk stage (TEST-056), the M6 and M8 criterion 6 c
 Scope: `ChunkManager::update_with`, `WorldChunkVersions::version`, the editor's chunk step; `app::globalperf` `chunk_frame_cost_report`.
 - A chunk's version with an item in a stamp layer needs its read set (0.2 to 0.85 s at 8 m cells); it was made on the main thread for every new chunk: 37 stalls of 1 to 15 s in the owner's hour. The edit-latency scene (7 chunks, cached after frame 1) cannot show it; a probe that moves the camera over new chunks can (21 of 30 frames over 20 ms before, none after).
 - Obsolete when the read set takes a few ms.
+
+## 2026-10-25 The coupled run's steady state does not hold on the real bake (mechanism not found)
+Scope: generators::coupled (GEN-040, GEN-063), app::coupledworld; M8 rebuild at the 16384 bake, run at 2048 cells
+- The stationary uplift `rho K A^m S` computed from the input holds it at 0.00 m median drift over 20 steps on the smooth synthetic test world, and not on the reduced real bake: run minus input after N steps, median by input band (0-500, 500-1000, 1000-2500, 2500-5000, over 5000 m): N=2 about 0 (p10 to p90 up to -80 to +180 m); N=8 -50, -208, -445, -899, -1010; N=24 -99, -640, -1088, -2432, -4056; N=80 -104, -675, -1186, -2630, -4471 (saturating near step 24).
+- Step 1 alone: no land cell goes down by more than 1 m, 4.24 million of 7.37 million land cells go up by more than 1 m (the flood's fill raises pit and lake cells and their donors follow; the other effects are not separated).
+- Not found: why the run then relaxes to a much lower surface. Candidates: receiver and area changes after step 1, the fill, ties on the 2048 flats. The planner decided not to spend more time (2026-10-25): the run keeps the input and only fills (GEN-065); the erosion option stays for M9.
+- Tool: a scratch diagnostic (run minus input by band after N steps) was not committed; the stored-run report is `chunk_incision --run-vs-base`.
+- Obsolete when the stream-power run is calibrated so that its steady state holds on a real bake.
+- Moved from docs/learnings.md 2026-11-03 (milestone M8; M9 erosion replaces the coupled run).

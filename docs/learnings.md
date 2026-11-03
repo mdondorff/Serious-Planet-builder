@@ -86,14 +86,6 @@ Scope: project (streaming cache, LOD, authored items; STRM-027, STRM-034)
 - An edit announced with where the items changed lets the cache keep every tile the change cannot reach (`SelectionCache::note_item_change`); the content keys stay the guarantee for anything not announced. Test the reach rule against the real tile hashes, on small bodies too: the touch test's relative margin is a millionth of `reach / R`.
 - Obsolete when the read set of a coarse tile stops listing its cover nodes one by one.
 
-## 2026-10-25 The coupled run's steady state does not hold on the real bake (mechanism not found)
-Scope: generators::coupled (GEN-040, GEN-063), app::coupledworld; M8 rebuild at the 16384 bake, run at 2048 cells
-- The stationary uplift `rho K A^m S` computed from the input holds it at 0.00 m median drift over 20 steps on the smooth synthetic test world, and not on the reduced real bake: run minus input after N steps, median by input band (0-500, 500-1000, 1000-2500, 2500-5000, over 5000 m): N=2 about 0 (p10 to p90 up to -80 to +180 m); N=8 -50, -208, -445, -899, -1010; N=24 -99, -640, -1088, -2432, -4056; N=80 -104, -675, -1186, -2630, -4471 (saturating near step 24).
-- Step 1 alone: no land cell goes down by more than 1 m, 4.24 million of 7.37 million land cells go up by more than 1 m (the flood's fill raises pit and lake cells and their donors follow; the other effects are not separated).
-- Not found: why the run then relaxes to a much lower surface. Candidates: receiver and area changes after step 1, the fill, ties on the 2048 flats. The planner decided not to spend more time (2026-10-25): the run keeps the input and only fills (GEN-065); the erosion option stays for M9.
-- Tool: a scratch diagnostic (run minus input by band after N steps) was not committed; the stored-run report is `chunk_incision --run-vs-base`.
-- Obsolete when the stream-power run is calibrated so that its steady state holds on a real bake.
-
 ## 2026-10-29 A still-frame detector must assert content
 Scope: project (tier C detectors, TEST-068 to TEST-070)
 - Two TEST-069 cases passed on black frames: an "identical pixels" check holds trivially for an empty image.
@@ -169,3 +161,10 @@ What happened: on 2026-11-02 22:09 sonnet-crusader ran `find / -name pp-warp.txt
 Assumption it changes: that a background command ends with its session, and that a quiet machine needs only the lanes to be idle.
 Proposed follow-up: standing lane rule (no search from `/` or a drive root; TaskStop any command moved to the background); the planner checks for stray long-running processes before a slot and the owner stops them; a PreToolUse hook refusing `find /` is the owner's call.
 Obsolete when: background commands are ended with their session, or a hook refuses root searches.
+
+## 2026-11-03 Count partitions balance test counts, not time
+Scope: project (CI partitions; BUILD-018, BUILD-036)
+What happened: nextest `count:N/K` gave tier A+B parts of 535 s and 209 s, and tier C a part of 22 min beside two of 15 min: slow tests cluster by name order. A replay of measured durations on each scheme's real membership predicted the jobs exactly.
+Assumption it changes: that equal test counts give equal job times.
+Proposed follow-up: none; A+B runs `hash:N/3` (stable when tests are added); check a split by replaying recorded durations before changing it.
+Obsolete when: CI splits by recorded durations.
