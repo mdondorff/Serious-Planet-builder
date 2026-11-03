@@ -31,13 +31,14 @@ pub fn perf_global_bake(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> R
     let res = if o.given.contains("--global-res") { o.global_res } else { 16384 };
     let world = crate::skeleton::global_world_of(o)?;
     let (level, cells) = world.layout(res).map_err(|e| e.to_string())?;
-    let threads = if o.threads == 0 { std::thread::available_parallelism().map_or(1, |n| n.get()) } else { o.threads };
+    let (threads, threads_note) = planet_streaming::topology::bake_threads(o.threads)?;
     let dir = Path::new("target").join("perf").join("global-bake");
     if dir.exists() {
         std::fs::remove_dir_all(&dir).map_err(|e| format!("clearing {}: {e}", dir.display()))?;
     }
     std::fs::create_dir_all(&dir).map_err(err)?;
-    writeln!(out, "global bake perf: {res} cells per face edge, blocks of {cells} (level {level}), {threads} threads").map_err(err)?;
+    writeln!(out, "global bake perf: {res} cells per face edge, blocks of {cells} (level {level}), {threads} threads ({threads_note})")
+        .map_err(err)?;
     let start = Instant::now();
     let report = planet_cache::global_store::build_global(&dir, &world, res, threads, planet_cache::pack::DEFAULT_MAX_PACK_BYTES)
         .map_err(|e| e.to_string())?;
