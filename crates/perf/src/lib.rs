@@ -511,7 +511,7 @@ pub fn report_json_full(
     }
     let verdict = crate::validity::SessionVerdict::assess(adapter, power_scheme, runs, protocol.smoke, validity, owner_override);
     let warnings = verdict.warnings();
-    let (calibration_valid, calibration_reasons) = crate::validity::calibration_status(runs);
+    let (calibration_valid, calibration_reasons) = crate::validity::calibration_status(adapter, runs);
     let run_json: Vec<String> = runs
         .iter()
         .map(|r| {
