@@ -1,0 +1,1 @@
+- 2026-11-03 ab-two-parts: tiers A+B run in two parts per OS; part 1 also runs the determinism manifest, check, spec-lint, licences and the run modes (BUILD-036)
