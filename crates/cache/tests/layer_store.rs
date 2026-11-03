@@ -49,7 +49,7 @@ fn base(d: Vec3) -> f64 {
 }
 
 fn spec() -> LayerSpec {
-    LayerSpec { cells: 24, radius_m: R, sea_level: 0.0, seed: 17, carve: CarveParams::default(), inputs_id: 1 }
+    LayerSpec { cells: 24, radius_m: R, sea_level: 0.0, seed: 17, carve: CarveParams::default(), inputs_id: 1, uses_factor: false }
 }
 
 fn faces() -> Vec<Face> {
@@ -104,10 +104,13 @@ fn a_layer_made_for_other_parameters_is_refused_naming_both_keys() {
         LayerSpec { seed: 18, ..s },
         LayerSpec { sea_level: 5.0, ..s },
         LayerSpec { inputs_id: 2, ..s },
+        LayerSpec { uses_factor: true, ..s },
         LayerSpec { carve: CarveParams { steps: s.carve.steps + 1, ..s.carve }, ..s },
     ];
+    let half = |_: Vec3| 0.5;
     for o in other {
-        let e = run_pass1(d.path(), &w, RES, &o, &base, None, &faces()[..1], 2).expect_err("another layer must be refused").to_string();
+        let f: Option<&(dyn Fn(Vec3) -> f64 + Sync)> = o.uses_factor.then_some(&half as &(dyn Fn(Vec3) -> f64 + Sync));
+        let e = run_pass1(d.path(), &w, RES, &o, &base, f, &faces()[..1], 2).expect_err("another layer must be refused").to_string();
         assert!(e.contains("another bake or other parameters") && e.contains("key"), "{e}");
     }
     // The bake's resolution is part of the key too.

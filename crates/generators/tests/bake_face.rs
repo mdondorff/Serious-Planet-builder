@@ -103,3 +103,12 @@ fn the_carve_factor_is_one_but_half_in_a_sand_sea() {
     w[3] = 0.5;
     assert_eq!(blended_carve_factor(&w), 0.75);
 }
+
+// spec: GEN-100
+#[test]
+fn the_change_is_the_same_bytes_on_1_and_8_threads_with_a_carve_factor() {
+    let (s, params) = (spec(1, 48), CarveParams::default());
+    let factor = |d: Vec3| 0.6 + 0.4 * libm::sin(3.0 * d.x + d.z);
+    let (one, eight) = (pass1_face(&s, &base, Some(&factor), &params, 1), pass1_face(&s, &base, Some(&factor), &params, 8));
+    assert_eq!(bits(&one), bits(&eight));
+}

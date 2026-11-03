@@ -16,9 +16,18 @@ use planet_generators::classes::{blended_carve_factor, blended_k, ClassLattice, 
 use planet_world_def::WorldDefinition;
 
 const RADIUS_M: f64 = 6_371_000.0;
-/// The identity of the bake's inputs in the layer's key until the relief channels are a stored input of the run (PR 5): the class source's and the class list's versions.
-const INPUTS_ID: u64 =
-    (planet_generators::classes::CLASS_SOURCE_VERSION as u64) << 32 | planet_generators::classes::CLASS_LIST_VERSION as u64;
+/// The identity of the bake's inputs in the layer's key until the relief channels are a stored input of the run (PR 5): the class source's and class list's versions, the lattice
+/// size and the class tables of `k` and of the carve factor.
+fn inputs_id() -> u64 {
+    use planet_generators::classes::{CLASS_CARVE, CLASS_K, CLASS_LIST_VERSION, CLASS_SOURCE_VERSION};
+    let mut h = 0xCBF2_9CE4_8422_2325u64;
+    let mut put = |v: u64| h = (h ^ v).wrapping_mul(0x0000_0100_0000_01B3);
+    put(u64::from(CLASS_SOURCE_VERSION));
+    put(u64::from(CLASS_LIST_VERSION));
+    put(CLASS_LATTICE_N as u64);
+    CLASS_K.iter().chain(CLASS_CARVE.iter()).for_each(|v| put(v.to_bits()));
+    h
+}
 /// The largest `--planet-res` a run takes without the planner's go (the full resolution is 12,288).
 const COARSE_LIMIT: usize = 4096;
 
@@ -67,7 +76,15 @@ fn main() {
         source.elevation_m(d, &p, blended_k(&lattice.weights_at(d)))
     };
     let factor = |d: Vec3| blended_carve_factor(&lattice.weights_at(d));
-    let spec = LayerSpec { cells: res, radius_m: RADIUS_M, sea_level: 0.0, seed, carve: CarveParams::default(), inputs_id: INPUTS_ID };
+    let spec = LayerSpec {
+        cells: res,
+        radius_m: RADIUS_M,
+        sea_level: 0.0,
+        seed,
+        carve: CarveParams::default(),
+        inputs_id: inputs_id(),
+        uses_factor: true,
+    };
     let bake_res = res as u32;
     println!(
         "pass 1: seed {seed}, {res} cells per face edge ({:.0} m), faces {faces:?}, one at a time on {threads} threads",

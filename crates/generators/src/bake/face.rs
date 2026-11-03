@@ -47,7 +47,8 @@ impl FaceSpec {
 
     /// The jitter stream of this face.
     fn stream(&self) -> u64 {
-        self.seed ^ (u64::from(self.face.0) + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        // A multiplier other than the jitter hash's own (0x9E37..), so that (face, cell) pairs of two faces do not collide in the hash's input.
+        self.seed ^ (u64::from(self.face.0) + 1).wrapping_mul(0xD6E8_FEB8_6659_FD93)
     }
 }
 

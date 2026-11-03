@@ -36,12 +36,16 @@ pub struct LayerSpec {
     pub carve: CarveParams,
     /// An identity of the inputs of the base field and the carve factor that the bake's key does not cover (the relief channels' hash, the class lattice's, the erosion field's).
     pub inputs_id: u64,
+    /// Whether the carve factor of GEN-097 is applied (it is part of the key; `run_pass1` refuses a factor that disagrees).
+    pub uses_factor: bool,
 }
 
 impl LayerSpec {
     fn bytes(&self) -> Vec<u8> {
         let mut b = Vec::with_capacity(120);
         b.extend(LAYER_VERSION.to_le_bytes());
+        b.extend(planet_generators::bake::BAKE_KERNEL_VERSION.to_le_bytes());
+        b.push(u8::from(self.uses_factor));
         b.extend((self.cells as u64).to_le_bytes());
         for v in [self.radius_m, self.sea_level] {
             b.extend(v.to_bits().to_le_bytes());
@@ -164,8 +168,18 @@ pub fn run_pass1(
     let err = |e: crate::pack::PackError| LayerStoreError(format!("the layer store {}: {e}", dir.display()));
     let mut writer = PackWriter::open(dir, world.params(), DEFAULT_MAX_PACK_BYTES).map_err(err)?;
     let store = TileStore::open(dir, world.params()).map_err(err)?;
+    if spec.uses_factor != factor.is_some() {
+        return Err(LayerStoreError(format!(
+            "the layer spec says uses_factor = {} but the carve factor given is {}",
+            spec.uses_factor,
+            if factor.is_some() { "present" } else { "absent" }
+        )));
+    }
     let mut report = Pass1Report { computed: Vec::new(), skipped: Vec::new() };
     for &face in faces {
+        if report.computed.contains(&face) || report.skipped.contains(&face) {
+            continue;
+        }
         if load_face_change(&store, world, res, spec, face)?.is_some() {
             report.skipped.push(face);
             continue;
