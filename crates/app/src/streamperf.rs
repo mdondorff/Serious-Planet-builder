@@ -208,8 +208,7 @@ pub(crate) fn settle_error(
     phase: &str,
     ticks: usize,
     seconds: f64,
-    quiet: usize,
-    need: usize,
+    (quiet, need): (usize, usize),
     cap_ticks: usize,
     t: &Tick,
     ev100: f32,
@@ -1299,7 +1298,7 @@ pub fn lit_stream_stills(o: &Options, ctx: &GpuContext, size: (u32, u32), frames
             ticks += 1;
             quiet = if t.settled { quiet + 1 } else { 0 };
             if ticks >= SETTLE_CAP_TICKS || started.elapsed() > limit {
-                return Err(settle_error(phase, ticks, started.elapsed().as_secs_f64(), quiet, need, SETTLE_CAP_TICKS, &t, ev(d)));
+                return Err(settle_error(phase, ticks, started.elapsed().as_secs_f64(), (quiet, need), SETTLE_CAP_TICKS, &t, ev(d)));
             }
         }
         eprintln!(
@@ -1389,12 +1388,12 @@ mod tests {
             worker_busy,
         };
         // The wall clock stops it with streaming drained: what is left busy is named (here the plan worker and a deferred upload).
-        let e = settle_error("streaming settle", 264, 302.4, 12, 60, 900, &tick(DrawKind::Exact, 0, 3, true), 15.89);
+        let e = settle_error("streaming settle", 264, 302.4, (12, 60), 900, &tick(DrawKind::Exact, 0, 3, true), 15.89);
         assert!(e.contains("after 264 ticks in 302 s (stopped by the wall-clock limit)"), "{e}");
         assert!(e.contains("12 of 60 quiet ticks in a row"), "{e}");
         assert!(e.contains("draw Exact, 0 in flight, 0 queued, 3 deferred, plan worker busy, 1292 resident, EV 15.89"), "{e}");
         // The tick cap stops it with a tile still in flight and an inexact draw.
-        let e = settle_error("resettle", 900, 41.0, 0, 20, 900, &tick(DrawKind::Stale, 1, 0, false), 15.0);
+        let e = settle_error("resettle", 900, 41.0, (0, 20), 900, &tick(DrawKind::Stale, 1, 0, false), 15.0);
         assert!(e.contains("(stopped by the cap of 900 ticks)"), "{e}");
         assert!(e.contains("0 of 20 quiet ticks"), "{e}");
         assert!(e.contains("draw Stale, 1 in flight, 0 queued, 0 deferred, plan worker idle"), "{e}");
