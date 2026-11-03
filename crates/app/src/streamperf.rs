@@ -196,6 +196,33 @@ pub(crate) struct Tick {
     pub(crate) horizon_busy: bool,
     /// Plan nodes of the frame that carry water (zero without the lit path).
     pub(crate) water_nodes: usize,
+    /// The frame's draw kind and whether the plan worker was busy: with the record's counts, the conditions of `settled`.
+    pub(crate) kind: DrawKind,
+    pub(crate) worker_busy: bool,
+}
+
+/// The error of a settle that did not get `need` quiet ticks in a row: the run of quiet ticks it reached, which limit stopped it (the tick
+/// cap or the wall clock), and each condition of a quiet tick in the last frame, so that a timeout says whether streaming or the loop
+/// itself was still busy (in flight, queued, deferred, the draw kind, the plan worker).
+pub(crate) fn settle_error(
+    phase: &str,
+    ticks: usize,
+    seconds: f64,
+    (quiet, need): (usize, usize),
+    cap_ticks: usize,
+    t: &Tick,
+    ev100: f32,
+) -> String {
+    let stopped = if ticks >= cap_ticks { format!("the cap of {cap_ticks} ticks") } else { "the wall-clock limit".to_string() };
+    format!(
+        "{phase}: the lit view did not settle after {ticks} ticks in {seconds:.0} s (stopped by {stopped}): {quiet} of {need} quiet ticks in a row; last tick: draw {:?}, {} in flight, {} queued, {} deferred, plan worker {}, {} resident, EV {ev100}",
+        t.kind,
+        t.record.in_flight,
+        t.record.queued,
+        t.record.deferred,
+        if t.worker_busy { "busy" } else { "idle" },
+        t.record.resident,
+    )
 }
 
 /// The horizon jobs a driver runs every frame (TEST-054): what the viewer's window does after the plan of a frame.
@@ -367,11 +394,9 @@ impl Driver<'_> {
             blank_nodes = blank_nodes.max(1);
         }
         let c = frame.counts;
-        let settled = draw.kind == DrawKind::Exact
-            && c.in_flight == 0
-            && c.queued == 0
-            && c.deferred == 0
-            && !self.rig.managed.pipeline().worker().busy();
+        let worker_busy = self.rig.managed.pipeline().worker().busy();
+        let settled = draw.kind == DrawKind::Exact && c.in_flight == 0 && c.queued == 0 && c.deferred == 0 && !worker_busy;
+        let kind = draw.kind;
         let record = FrameRecord {
             plan_ms: frame.pipeline.delivered.map_or(0.0, |d| d.1),
             scheduler_ms: frame.scheduler_ms,
@@ -406,7 +431,7 @@ impl Driver<'_> {
             submit_ms: timing.cpu_phases.submit_ms,
         };
         self.pace();
-        Ok(Tick { record, settled, drawn, horizon_busy, water_nodes })
+        Ok(Tick { record, settled, drawn, horizon_busy, water_nodes, kind, worker_busy })
     }
 
     /// Hold the loop to the frame step of script time: the next iteration starts one step after this one was due (a late frame
@@ -536,7 +561,8 @@ fn run_case(
         }
         d.reserve = Some(r);
     }
-    let calib_threads = gen.workers;
+    // The calibration's thread count is fixed, not the pool's (TEST-039): a share-sized pool keeps the parallel limits.
+    let calib_threads = planet_perf::calibration::calibration_threads();
     writeln!(out, "{}: rig built in {:.2} s", script.scene.name(), rig_started.elapsed().as_secs_f64()).map_err(err)?;
     // The start-up load of the roots, before frame 0 (STRM-001): a reading of the cold start (with the pack ignored, `dive-cold`, it is
     // every root generated), recorded under the `load_` prefix like the tile loads.
@@ -660,16 +686,16 @@ fn run_case(
             .map(|r| r.peaks())
             .unwrap_or_default()
             .into_iter()
-            .zip(planet_perf::reserve::LOADS)
-            .map(|((name, peak), l)| planet_perf::reserve::ShareReading {
+            .map(|(name, peak, cores)| planet_perf::reserve::ShareReading {
                 share: name.to_string(),
                 resource: "cores",
                 measured: peak as f64,
-                limit: l.cores as f64,
+                limit: cores as f64,
                 decides: false,
             })
             .collect();
-        let report = planet_perf::reserve::ReserveReport::new(main_ms, gpu_ms, peak, frame_ms, loads);
+        let terrain_share = planet_streaming::shares::Shares::machine().terrain as f64;
+        let report = planet_perf::reserve::ReserveReport::new(main_ms, gpu_ms, peak, terrain_share, frame_ms, loads);
         writeln!(
             out,
             "{}: reserve report (loads on: spin {spin_ms:.2} ms per frame, burn {:.2} ms GPU; {} GPU samples):",
@@ -1032,6 +1058,10 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
     } else {
         crate::session_verdict_line_for(out, &verdict, false)?;
     }
+    // STRM-020: a flag that overrode the terrain share marks the run's frame verdicts.
+    if let Some(line) = planet_perf::pool_override_line(&gen_settings(o)) {
+        writeln!(out, "{line}").map_err(err)?;
+    }
     let protocol = Protocol {
         warmup_frames: 0,
         measured_frames: 0,
@@ -1141,6 +1171,7 @@ fn gen_settings(o: &Options) -> planet_perf::GenSettings {
         ahead: g.ahead,
         reserve: o.gen_reserve_used(),
         below_normal: g.priority == planet_streaming::Priority::BelowNormal,
+        override_of_share: (!g.from_share).then(|| planet_streaming::shares::Shares::machine().terrain),
     }
 }
 
@@ -1273,14 +1304,7 @@ pub fn lit_stream_stills(o: &Options, ctx: &GpuContext, size: (u32, u32), frames
             ticks += 1;
             quiet = if t.settled { quiet + 1 } else { 0 };
             if ticks >= SETTLE_CAP_TICKS || started.elapsed() > limit {
-                return Err(format!(
-                    "{phase}: the lit view did not settle after {ticks} ticks in {:.0} s: {} in flight, {} queued, {} resident, EV {}",
-                    started.elapsed().as_secs_f64(),
-                    t.record.in_flight,
-                    t.record.queued,
-                    t.record.resident,
-                    ev(d)
-                ));
+                return Err(settle_error(phase, ticks, started.elapsed().as_secs_f64(), (quiet, need), SETTLE_CAP_TICKS, &t, ev(d)));
             }
         }
         eprintln!(
@@ -1356,6 +1380,30 @@ pub fn lit_stream_stills(o: &Options, ctx: &GpuContext, size: (u32, u32), frames
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // spec: TEST-070
+    #[test]
+    fn a_settle_that_times_out_names_its_quiet_run_the_limit_that_stopped_it_and_each_condition_of_the_last_tick() {
+        let tick = |kind, in_flight, deferred, worker_busy| Tick {
+            record: FrameRecord { in_flight, queued: 0, deferred, resident: 1292, ..Default::default() },
+            settled: false,
+            drawn: Vec::new(),
+            horizon_busy: false,
+            water_nodes: 0,
+            kind,
+            worker_busy,
+        };
+        // The wall clock stops it with streaming drained: what is left busy is named (here the plan worker and a deferred upload).
+        let e = settle_error("streaming settle", 264, 302.4, (12, 60), 900, &tick(DrawKind::Exact, 0, 3, true), 15.89);
+        assert!(e.contains("after 264 ticks in 302 s (stopped by the wall-clock limit)"), "{e}");
+        assert!(e.contains("12 of 60 quiet ticks in a row"), "{e}");
+        assert!(e.contains("draw Exact, 0 in flight, 0 queued, 3 deferred, plan worker busy, 1292 resident, EV 15.89"), "{e}");
+        // The tick cap stops it with a tile still in flight and an inexact draw.
+        let e = settle_error("resettle", 900, 41.0, (0, 20), 900, &tick(DrawKind::Stale, 1, 0, false), 15.0);
+        assert!(e.contains("(stopped by the cap of 900 ticks)"), "{e}");
+        assert!(e.contains("0 of 20 quiet ticks"), "{e}");
+        assert!(e.contains("draw Stale, 1 in flight, 0 queued, 0 deferred, plan worker idle"), "{e}");
+    }
 
     fn opts(args: &[&str]) -> Options {
         let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();

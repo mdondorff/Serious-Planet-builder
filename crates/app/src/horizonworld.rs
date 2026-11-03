@@ -36,15 +36,12 @@ pub fn cells_per_chunk_for(radius_m: f64, cell_m: f64) -> u32 {
     ((edge / cell_m / 16.0).round().max(1.0) as u32) * 16
 }
 
-/// Horizon bakes at once of a viewer: half the generation workers, at most [`HORIZON_WORKERS_MAX`] (ADR 0083: the idle class, busy only for the
-/// seconds after an edit or a move into new chunks).
-pub fn horizon_workers(gen: planet_streaming::GenWorkers) -> usize {
-    (gen.workers / 2).clamp(1, HORIZON_WORKERS_MAX)
+/// Horizon bakes at once of a viewer: half the terrain share, at least one (STRM-064, ADR 0092; ADR 0083: the idle class of the terrain
+/// share, so a bake never holds a thread a visible job needs). Measured on Rasierklinge (12 warm maps): 1 bake at a time on 20 threads
+/// 24.1 s, 4 x 5 threads 9.9 s, 6 x 3 7.4 s, 12 x 1 6.4 s.
+pub fn horizon_workers(terrain_share: usize) -> usize {
+    (terrain_share / 2).max(1)
 }
-
-/// Most horizon bakes at once. Measured on Rasierklinge (12 warm maps): 1 bake at a time on 20 threads 24.1 s, 4 x 5 threads
-/// 9.9 s, 6 x 3 7.4 s, 12 x 1 6.4 s; 8 leaves cores to the frame.
-pub const HORIZON_WORKERS_MAX: usize = 8;
 
 /// Version of the world's horizon bake (what it samples and how); part of the march's hash, so a change re-bakes every map.
 pub const BAKE_VERSION: u32 = 1;
@@ -550,26 +547,21 @@ impl WorldTerrain {
     /// the stamps on a pool of their own ([`horizon_workers`] threads, all in the idle class, one thread a bake: the march scales poorly inside a map
     /// and linearly across maps), and the stored far-field horizon is requested.
     pub fn enable_viewer_horizon(self: &Arc<Self>, gen: planet_streaming::GenWorkers, clock: Arc<dyn Clock>) -> Result<(), String> {
-        let workers = horizon_workers(gen);
+        let workers = horizon_workers(planet_streaming::shares::Shares::machine().terrain);
         let pool: Arc<dyn Spawner> = planet_streaming::GenWorkers::new(1).with_priority(gen.priority).pool_with_idle(workers);
-        self.enable_viewer_horizon_on(gen, pool, clock)
+        self.enable_viewer_horizon_on(pool, clock)
     }
 
     /// [`enable_viewer_horizon`](WorldTerrain::enable_viewer_horizon) on `pool`, the idle class of a rig's terrain share (BUDG-004): the horizon bakes then count in the same
     /// share as the tile and plan jobs. The tools without a rig make a pool of their own.
-    pub fn enable_viewer_horizon_on(
-        self: &Arc<Self>,
-        gen: planet_streaming::GenWorkers,
-        pool: Arc<dyn Spawner>,
-        clock: Arc<dyn Clock>,
-    ) -> Result<(), String> {
+    pub fn enable_viewer_horizon_on(self: &Arc<Self>, pool: Arc<dyn Spawner>, clock: Arc<dyn Clock>) -> Result<(), String> {
         let lat = self.horizon_lattice().ok_or("the world has no bake: no horizon shadows")?;
         let mut params = chunk_horizon_params(&lat, self.radius_m());
         // A test run (the software adapter in CI) asks for a short march so that a map is a small raster: `PLANET_HORIZON_RANGE_M`, never below one chunk cell.
         if let Some(r) = std::env::var("PLANET_HORIZON_RANGE_M").ok().and_then(|v| v.parse::<f64>().ok()) {
             params.range_m = params.range_m.min(r.max(lat.cell_m(self.radius_m()) * 4.0));
         }
-        let workers = horizon_workers(gen);
+        let workers = horizon_workers(planet_streaming::shares::Shares::machine().terrain);
         let cfg = HorizonConfig { workers, ..Default::default() };
         self.enable_horizon(params, pool, clock, cfg, self.horizon_threads_set().unwrap_or(1))?;
         self.request_coarse_horizon();

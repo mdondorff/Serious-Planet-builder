@@ -12,6 +12,7 @@
    - Horizon bakes `terrain / 2`, replacing `HORIZON_WORKERS_MAX`; the coupled reduction from `B`; the BUDG-011 loads from their shares; the BUDG-012 scenario.
    - Tier A over synthetic topologies (Rasierklinge 6P+8E, an 8-core desktop, a 4-core laptop, below minimum).
    - BUDG-003 active; deltas of BUDG-011, BUDG-012, STRM-020, STRM-064, and TEST-039/040 (the calibration on a fixed `min(18, logical threads)`, accepted).
+   - At archive: lower `STRM-020 546` to its new count in `xtask/src/long_statements.txt`.
    - numerics-reviewer is not needed (no core, generator or shader code); verifier, spec-guardian, prepush.
 4. **Cross-references (docs).**
    - TEST-039 and TEST-040 named as reference-machine calibrations (no verdict elsewhere).

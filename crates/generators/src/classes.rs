@@ -13,7 +13,7 @@ use planet_core::{smoothstep, Face, Vec3};
 /// The version of the class list (GEN-093): plain, rolling plain, hills, mountains, high mountains, plateau, badlands, sand sea, in that order.
 pub const CLASS_LIST_VERSION: u32 = 1;
 /// Bump whenever the default source's output changes for a seed (the rules of GEN-094 and GEN-095, their constants, or the plate construction).
-pub const CLASS_SOURCE_VERSION: u32 = 4;
+pub const CLASS_SOURCE_VERSION: u32 = 5;
 pub const CLASS_COUNT: usize = 8;
 pub const CLASS_NAMES: [&str; CLASS_COUNT] =
     ["plain", "rolling plain", "hills", "mountains", "high mountains", "plateau", "badlands", "sand sea"];
@@ -33,7 +33,7 @@ pub const CLASS_LATTICE_N: usize = 256;
 /// Plates of the default source (GEN-094).
 const PLATES: usize = 14;
 /// Plate draws and the points that score them (GEN-105).
-const PLATE_DRAWS: u64 = 16;
+const PLATE_DRAWS: u64 = 64;
 const PLATE_SCORE_POINTS: usize = 8192;
 /// Radius of the body in metres used for the margin distances; the default source is defined for Earth's radius (GEN-094's kilometres).
 pub const EARTH_RADIUS_M: f64 = 6_371_000.0;
@@ -44,15 +44,18 @@ const GRADIENT_STEP: f64 = 0.004;
 /// The land depth of the coastal line the Andean arcs follow (GEN-094).
 const COAST_LINE_DEPTH: f64 = 0.10;
 /// The belt term's amplitude in metres (GEN-096; 5500 m in the first start values, raised because the belts are now cut into segments of lower height).
-const BELT_AMPLITUDE_M: f64 = 7500.0;
+const BELT_AMPLITUDE_M: f64 = 7800.0;
 /// The plateau field's uplift in metres (GEN-096).
-const PLATEAU_UPLIFT_M: f64 = 800.0;
+const PLATEAU_UPLIFT_M: f64 = 600.0;
+/// The base elevation of the land far from the coast and the land depth over which it is reached (GEN-096).
+const COAST_TOP_M: f64 = 620.0;
+const COAST_RAMP_DEPTH: f64 = 1.2;
 /// The narrowest half-width a belt has, in km (a belt tapers in width and height towards the ends of its segment, never below this).
 const MIN_BELT_KM: f64 = 125.0;
 /// The core value at which the mountains' membership is 1 (it rises smoothly from 0 at the belt's edge, so the class weights change over the belt's width and not in one lattice step).
-const MOUNTAIN_FULL_CORE: f64 = 0.7;
+const MOUNTAIN_FULL_CORE: f64 = 0.4;
 /// The share of the flank term (a tent three times as wide as the core's) that counts towards the mountains' membership, so that the mountains cover the flanks of a belt and not only its core.
-const FLANK_MEMBERSHIP: f64 = 0.8;
+const FLANK_MEMBERSHIP: f64 = 1.0;
 /// The class elevation over which a mountain becomes a high mountain, in metres.
 const HIGH_FROM_M: f64 = 1000.0;
 const HIGH_TO_M: f64 = 5500.0;
@@ -62,7 +65,9 @@ const BEND_KM: f64 = 120.0;
 const COAST_BUFFER_KM: f64 = 50.0;
 const COAST_RAMP_KM: f64 = 300.0;
 /// The land depth over which the gate rises from the true coast.
-const COAST_DEPTH_RAMP: f64 = 0.25;
+const COAST_DEPTH_RAMP: f64 = 0.3;
+/// The land depth over which the gate rises from the true coast, on top of the smooth ramp (the full value is rough at the lattice scale).
+const TRUE_COAST_RAMP: f64 = 0.2;
 
 const LAYER_PLATE_WARP: u64 = 0x474c_0010;
 const LAYER_WIDTH: u64 = 0x474c_0011;
@@ -72,6 +77,7 @@ const LAYER_ROLLING: u64 = 0x474c_0014;
 const LAYER_SEGMENT: u64 = 0x474c_0015;
 const LAYER_STRIKE: u64 = 0x474c_0016;
 const LAYER_BEND: u64 = 0x474c_0017;
+const LAYER_HILLY: u64 = 0x474c_0018;
 
 fn splitmix(mut x: u64) -> u64 {
     x = x.wrapping_add(0x9e37_79b9_7f4a_7c15);
@@ -136,6 +142,8 @@ pub struct MaskTerms {
     pub old_margin: f64,
     pub back_arc: f64,
     pub plateau_field: f64,
+    /// Hilly country away from the belts, in `[0, 1]`: a low-frequency field gated to the interior (round 3: hills are 15 to 30 % of the land on Earth, and belts alone give under 10 %).
+    pub hilly: f64,
     /// The along-strike factor of the belts in `[0, 1]`: 0 in a gap between segments, below 1 where a segment is lower.
     pub strike: f64,
     /// Index of the plate the direction lies on.
@@ -302,7 +310,7 @@ impl ClassSource {
         let rank = |r: usize| smoothstep(0.0, 0.05, ang[3] - ang[r]);
         let pair_weight = [rank(0) * rank(1), rank(0) * rank(2), rank(1) * rank(2) * (1.0 - smoothstep(0.0, 0.04, ang[1] - ang[0]))];
         // The width of a belt: a tent profile of 260 to 560 km half-width before the taper (never under 125 km after it); the belt is cut into segments and its height varies along it.
-        let width_km = 260.0 + 300.0 * (0.5 + 0.5 * fbm(self.seed, LAYER_WIDTH, d, 2.5, 2));
+        let width_km = 200.0 + 220.0 * (0.5 + 0.5 * fbm(self.seed, LAYER_WIDTH, d, 2.5, 2));
         let segment = smoothstep(0.25, 0.55, 0.5 + 0.5 * fbm(self.seed, LAYER_SEGMENT, d, 2.8, 2));
         let along = 0.5 + 0.5 * fbm(self.seed, LAYER_STRIKE, d, 5.0, 2);
         let strike = segment * (0.45 + 0.55 * along);
@@ -320,7 +328,9 @@ impl ClassSource {
         let coast_gate = if !on_land {
             0.0
         } else {
-            smoothstep(COAST_BUFFER_KM, COAST_RAMP_KM, self.distance_km(smooth, gradient)) * smoothstep(0.0, COAST_DEPTH_RAMP, land_depth)
+            smoothstep(COAST_BUFFER_KM, COAST_RAMP_KM, self.distance_km(smooth, gradient))
+                * smoothstep(0.0, COAST_DEPTH_RAMP, smooth)
+                * smoothstep(0.0, TRUE_COAST_RAMP, land_depth)
         };
         let (mut core, mut flank, mut old_margin, mut back_arc) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
         let (mut margin_km, mut convergence) = (0.0, 0.0);
@@ -367,16 +377,22 @@ impl ClassSource {
         let (core, flank) = (core * strike * coast_gate, flank * strike * coast_gate);
         let old_margin = old_margin * coast_gate;
         let c = 0.5 + 0.5 * fbm(self.seed, LAYER_PLATEAU, d, 1.6, 3);
-        let plateau_field = smoothstep(0.50, 0.62, c) * smoothstep(0.2, 0.6, inland) * (1.0 - smoothstep(0.2, 0.6, flank.max(back_arc)));
-        MaskTerms { margin_km, convergence, core, flank, old_margin, back_arc, plateau_field, strike, plate: idx[0] }
+        let plateau_field = smoothstep(0.45, 0.70, c) * smoothstep(0.2, 0.6, inland) * (1.0 - smoothstep(0.2, 0.6, flank.max(back_arc)));
+        let hilly = smoothstep(0.50, 0.76, 0.5 + 0.5 * fbm(self.seed, LAYER_HILLY, d, 2.2, 3))
+            * smoothstep(0.1, 0.4, smooth)
+            * smoothstep(0.0, TRUE_COAST_RAMP, land_depth);
+        MaskTerms { margin_km, convergence, core, flank, old_margin, back_arc, plateau_field, hilly, strike, plate: idx[0] }
     }
 
     /// The default source at the unit direction `d`: the mask, the base elevation without the hill band (GEN-096), and the class weights (GEN-095).
     pub fn eval(&self, d: Vec3) -> ClassPoint {
         let t = terrain(self.seed, d);
         let terms = self.mask_terms(d, t.land_depth, t.inland);
-        let coast =
-            if t.land_depth < 0.0 { -4500.0 * smoothstep(0.0, 0.9, -t.land_depth) } else { 1000.0 * smoothstep(0.0, 0.9, t.land_depth) };
+        let coast = if t.land_depth < 0.0 {
+            -4500.0 * smoothstep(0.0, 0.9, -t.land_depth)
+        } else {
+            COAST_TOP_M * smoothstep(0.0, COAST_RAMP_DEPTH, t.land_depth)
+        };
         let ridge = ridge_at(self.seed, t.warped);
         let e0 = (coast
             + BELT_AMPLITUDE_M * terms.core * (0.5 + 0.5 * ridge)
@@ -417,7 +433,7 @@ pub fn class_weights(terms: &MaskTerms, e0: f64, rolling: f64) -> [f64; CLASS_CO
     // Mountains follow the core with a gain, so the flanks of a belt that is high enough to be above 2 km are mountains, not hills.
     let mt = smoothstep(0.0, MOUNTAIN_FULL_CORE, terms.core.max(FLANK_MEMBERSHIP * terms.flank));
     let high = mt * smoothstep(HIGH_FROM_M, HIGH_TO_M, e0);
-    let hills = (1.0 - mt) * smoothstep(0.2, 0.45, terms.flank.max(terms.old_margin));
+    let hills = (1.0 - mt) * smoothstep(0.1, 0.35, terms.flank.max(terms.old_margin).max(terms.hilly));
     // What mountains and hills leave is shared by the plateau and the rest, so the memberships partition 1 before the normalisation.
     let left = 1.0 - mt - hills;
     let plateau = left * smoothstep(0.3, 0.6, terms.plateau_field.max(terms.back_arc));
@@ -587,6 +603,29 @@ impl ClassLattice {
             }
         }
         over as f64 / total as f64
+    }
+
+    /// The quantile `q` (in `[0, 1]`) of the steps of the untapered `k` between neighbouring lattice points: GEN-097's limit applies to the 0.99 quantile (the largest step is reported).
+    pub fn k_step_quantile(&self, q: f64) -> f64 {
+        let n = self.cells;
+        let k = |face: usize, i: usize, j: usize| {
+            let p = self.faces[face][j * (n + 1) + i];
+            p.iter().zip(CLASS_K).map(|(&w, k)| f64::from(w) / 255.0 * k).sum::<f64>()
+        };
+        let mut steps = Vec::with_capacity(6 * (n + 1) * (n + 1) * 2);
+        for face in 0..6 {
+            for j in 0..=n {
+                for i in 0..=n {
+                    for (di, dj) in [(1, 0), (0, 1)] {
+                        if i + di <= n && j + dj <= n {
+                            steps.push(libm::fabs(k(face, i + di, j + dj) - k(face, i, j)));
+                        }
+                    }
+                }
+            }
+        }
+        steps.sort_by(f64::total_cmp);
+        steps.get(((q.clamp(0.0, 1.0) * steps.len() as f64).ceil() as usize).saturating_sub(1)).copied().unwrap_or(0.0)
     }
 
     /// The unit direction of lattice point `(i, j)` of `face`.

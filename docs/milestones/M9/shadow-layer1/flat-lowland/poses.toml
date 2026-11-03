@@ -1,0 +1,61 @@
+# The REND-052 frame scene's poses (`perf stream shadow-layer1`) on the m9r2 world: flat lowland (within 3 km the ground spans at most 20 m; the worst case of a low sun: few occluders, long marches), at 300 m and 30 m, at midday, at sunset (17.5 h) and at a sun of about 2 degrees
+# (17.86 h; sin(elevation) = cos(latitude) cos(hour angle) at declination 0, so the elevation depends on the anchor's latitude: the run prints the sun it used).
+# The anchor is chosen on the store's coupled run (deterministic per store), so the file names no latitude.
+# Run: cargo xtask perf stream shadow-layer1 --poses docs/milestones/M9/shadow-layer1/flat-lowland/poses.toml --store C:/DEV/SeriousPlanetData/global16384-m9r2 --global-res 16384 --out-dir target/shadow-layer1/flat-lowland
+
+chunk_timeout_s = 3600
+
+[place]
+anchor = "largest-river"
+min_height_m = 10
+relief_radius_m = 3000
+relief_min_m = 0
+relief_max_m = 20
+
+[[pose]]
+name = "300m-midday"
+altitude_m = 300
+back_m = 1500
+heading_deg = 90
+pitch_deg = 15
+sun_local_hours = 12
+
+[[pose]]
+name = "300m-sunset"
+altitude_m = 300
+back_m = 1500
+heading_deg = 90
+pitch_deg = 15
+sun_local_hours = 17.5
+
+[[pose]]
+name = "300m-2deg"
+altitude_m = 300
+back_m = 1500
+heading_deg = 90
+pitch_deg = 15
+sun_local_hours = 17.86
+
+[[pose]]
+name = "30m-midday"
+altitude_m = 30
+back_m = 400
+heading_deg = 90
+pitch_deg = 8
+sun_local_hours = 12
+
+[[pose]]
+name = "30m-sunset"
+altitude_m = 30
+back_m = 400
+heading_deg = 90
+pitch_deg = 8
+sun_local_hours = 17.5
+
+[[pose]]
+name = "30m-2deg"
+altitude_m = 30
+back_m = 400
+heading_deg = 90
+pitch_deg = 8
+sun_local_hours = 17.86
