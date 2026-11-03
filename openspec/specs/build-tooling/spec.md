@@ -355,16 +355,16 @@ Source: opus-planner (2026-10-19), actions/partner-runner-images#169
 - **WHEN** `ci.yml` is read
 - **THEN** every install step has its retry with the same tools right after it, the first with `continue-on-error`, the retry with the failure condition
 
-### Requirement: BUILD-018 Tier C on Windows runs in two halves
-The CI job that runs tier C SHALL run its Windows leg as two jobs, `windows (WARP) C 1/2` and `windows (WARP) C 2/2`, each `cargo xtask test gpu -- --partition count:N/2`, so that every tier-C test runs in exactly one half and each half's job time stays under the 16 min budget of BUILD-014. The Linux leg SHALL run whole. The artifacts of a half SHALL carry its number (`review-Windows-N`, `test-logs-Windows-gpu-N`).
+### Requirement: BUILD-018 Tier C on Windows runs in three parts
+The CI job that runs tier C SHALL run its Windows leg as three jobs, `windows (WARP) C 1/3`, `C 2/3` and `C 3/3`, each `cargo xtask test gpu -- --partition count:N/3`, so that every tier-C test runs in exactly one part and each part's job time stays under the 16 min budget of BUILD-014. The test groups (the serialised `warp-heavy` group among them) hold within each part. The Linux leg SHALL run whole. The artifacts of a part SHALL carry its number (`review-Windows-N`, `test-logs-Windows-gpu-N`).
 
 Verify: A
 Status: active
-Source: opus-planner (2026-10-19), BUILD-005, BUILD-014
+Source: opus-planner (2026-10-19; 2026-11-03, inbox #74: two halves took 21.2 and 20.6 min after #1103), BUILD-005, BUILD-014
 
-#### Scenario: Two halves
+#### Scenario: Three parts
 - **WHEN** the repository check test reads the workflow file
-- **THEN** the tier-C matrix holds a Windows entry for part 1 and one for part 2, the test command takes `--partition count:{part}/2`, and the artifact names carry the part
+- **THEN** the tier-C matrix holds a Windows entry for parts 1, 2 and 3, the test command takes `--partition count:{part}/3`, and the artifact names carry the part
 
 ### Requirement: BUILD-019 Test fast keeps a series of its times
 After every `cargo xtask test fast` run whose build succeeded, the command SHALL append one tab-separated line to `target/test-logs/test-fast-series.tsv`: the UTC time (`YYYY-MM-DDTHH:MM:SSZ`), the selection (`every crate` or the selected crate names joined by `+`), the build seconds, the test seconds, their sum (one decimal each) and `pass` or `fail`. A file that cannot be written SHALL be a warning, not a failure. The log rotation of BUILD-012 SHALL leave the file alone.
@@ -587,7 +587,7 @@ Source: ADR 0087, the job-system A/B of 2026-10-31
 - **THEN** the order alternates, each log is kept, and the table gives both medians and the change
 
 ### Requirement: BUILD-035 The duty idle between perf runs
-`cargo xtask perf --ab` (BUILD-033), `cargo xtask perf reserve` (BUDG-012) and `cargo xtask perf stream all` SHALL idle between two runs for half the previous run's wall time, at most 45 s, and print it (ADR 0094): never before the first run, and not between a refused try and its retry, which waits for the gate. `planet_perf::clock::duty_idle_s` SHALL be the one rule.
+`cargo xtask perf --ab` (BUILD-033), `cargo xtask perf reserve` (BUDG-012), `cargo xtask perf stream all` and `cargo xtask perf window` (BUILD-034) SHALL idle between two runs for half the previous run's wall time, at most 45 s, and print it (ADR 0094): never before the first run, and not between a refused try and its retry, which waits for the gate. `planet_perf::clock::duty_idle_s` SHALL be the one rule.
 
 Verify: A
 Status: active
@@ -600,3 +600,26 @@ Source: ADR 0094 (SPIKE-95: 45 s idle before each run held SPIKE-90 window 2 at 
 #### Scenario: Between runs only
 - **WHEN** the A/B helper runs 5 rounds with fake runs of two builds and 3 refused tries
 - **THEN** the runner rests 9 times: between the 10 runs, not before the first and not for the refused tries
+
+### Requirement: BUILD-034 The perf window runner
+`cargo xtask perf window <plan> [--no-preflight]` SHALL run a plan of configurations and flights in one process: one release build, the preflight (TEST-040; a refusal stops the window), then the plan's rounds, configurations rotated each round, and the duty idle between runs (BUILD-035). Invalid or refused runs SHALL be retried up to the plan's count; a failed run stops the window, keeping earlier attempts. A configuration SHALL stop once settled against the reference: after a valid round more than 15 % worse on a metric, or after two valid rounds within 5 % on every metric (ADR 0087 point 7). Every attempt SHALL keep its start, end and idle time; a table gives medians, changes and minutes per valid run.
+
+Verify: A
+Status: active
+Source: ADR 0087 point 7, ADR 0094, SPIKE-95 (PR 3 of its plan; SPIKE-90 windows 1 and 2: shell-loop runners, a copied log, a runner that outlived TaskStop), opus-planner (inbox #72)
+
+#### Scenario: A plan
+- **WHEN** a plan names 3 rounds, 1 retry, the reference `c`, three configurations with their environment and a `stream dive` flight, and plans with a zero round count, an unknown statement or metric, a missing log name or no flight are parsed
+- **THEN** the first gives those values and the log `dive.json`, and each other is refused naming the fault; round k runs the configurations rotated by k
+
+#### Scenario: The stop rule
+- **WHEN** a configuration reads p99 +62 % against the reference after one valid round, another +3 % after one and after two, another +10 % after two
+- **THEN** the first settles worse after round 1, the second stays open after one and settles within after two, and the third runs every round
+
+#### Scenario: A window
+- **WHEN** a fake window of 3 configurations and one 40 s flight runs, one configuration far worse and one within the margin
+- **THEN** the runs are c, d, e, then e, c; the runner rests 20 s between runs, never before the first; every attempt has its start, end and idle; the table names who settled after which round and the minutes per valid run
+
+#### Scenario: Retries and failures
+- **WHEN** the first run is refused and its retry comes out invalid with retries 1, and another window's child fails
+- **THEN** the refusal waits once with no duty idle before its retry, both attempts are kept with their reasons, nothing settles without a valid reference round, and the failure stops the window naming the run with the attempts before it kept and the table saying STOPPED
