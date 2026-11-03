@@ -1083,9 +1083,22 @@ impl BatchScratch {
     }
 }
 
+/// Where the CPU time of [`TerrainRenderer::render`] went, milliseconds (the frames log's phase columns): building the node records, writing them,
+/// the tile references and the draw arguments, recording the passes, and submitting. The rest of `cpu_ms` (uniforms, pass preparation) is the remainder.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CpuPhases {
+    pub node_build_ms: f64,
+    pub node_write_ms: f64,
+    pub refs_ms: f64,
+    pub encode_ms: f64,
+    pub submit_ms: f64,
+}
+
 /// Per-frame timings of [`TerrainRenderer::render`].
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FrameTiming {
+    /// The phases of `cpu_ms`.
+    pub cpu_phases: CpuPhases,
     /// CPU time to update uniforms, record and submit, milliseconds.
     pub cpu_ms: f64,
     /// Wall time from the start of the call until the GPU finished the frame, milliseconds.
@@ -2540,8 +2553,13 @@ impl TerrainRenderer {
             ctx.queue.write_buffer(&set.water_globals, 0, &crate::water::globals_bytes(w));
             ctx.queue.write_buffer(&set.water_nodes, 0, &crate::water::node_records(w, plan.nodes.len()));
         }
+        let phase = std::time::Instant::now();
         let nodes = node_record_bytes(plan);
+        let node_build_ms = phase.elapsed().as_secs_f64() * 1000.0;
+        let phase = std::time::Instant::now();
         ctx.queue.write_buffer(&set.nodes, 0, &nodes);
+        let node_write_ms = phase.elapsed().as_secs_f64() * 1000.0;
+        let refs_phase = std::time::Instant::now();
         ctx.queue.write_buffer(&set.horizon_nodes, 0, &crate::horizon::table_bytes(self.horizon_frame.as_ref(), plan.nodes.len()));
         let mut stats = TerrainStats { node_record_bytes: nodes.len() as u64, ..Default::default() };
         // The argument records come from the plan and the slots alone (CON-03: the GPU culls and decides nothing).
@@ -2567,10 +2585,12 @@ impl TerrainRenderer {
             ctx.queue.write_buffer(&set.args, 0, &list.record_bytes());
             stats.argument_bytes = list.argument_bytes();
         }
+        let refs_ms = refs_phase.elapsed().as_secs_f64() * 1000.0;
 
         let timing = if timed { self.timing.as_ref() } else { None };
         let stamps = timing.map(|t| crate::gpu_timing::Stamps::new(&t.queries));
         self.used.timestamps |= timing.is_some() && wait;
+        let encode_phase = std::time::Instant::now();
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("terrain") });
         // The lit path draws into its scene target with its own pipelines and clears to black without coverage; the debug path
         // is the plan's colour target as before.
@@ -2803,7 +2823,11 @@ impl TerrainRenderer {
             }
         }
         let command_buffer = encoder.finish();
+        let encode_ms = encode_phase.elapsed().as_secs_f64() * 1000.0;
+        let submit_phase = std::time::Instant::now();
         let index = ctx.queue.submit([command_buffer]);
+        let submit_ms = submit_phase.elapsed().as_secs_f64() * 1000.0;
+        let cpu_phases = CpuPhases { node_build_ms, node_write_ms, refs_ms, encode_ms, submit_ms };
         if let Some(mut path) = shadow_path {
             // J's shadow view (VIEW-054): the resolved visibility as grey over the picture.
             if plan.lit.as_ref().is_some_and(|l| l.view == planet_frame::look::shading::ShadeView::Shadow) {
@@ -2818,7 +2842,7 @@ impl TerrainRenderer {
         self.in_flight.push_back(index);
         let cpu_ms = started.elapsed().as_secs_f64() * 1000.0;
         if !wait {
-            return Ok((FrameTiming { cpu_ms, total_ms: cpu_ms, ..Default::default() }, stats));
+            return Ok((FrameTiming { cpu_ms, total_ms: cpu_ms, cpu_phases, ..Default::default() }, stats));
         }
         ctx.device.poll(wgpu::PollType::wait_indefinitely()).expect("device poll failed");
         let total_ms = started.elapsed().as_secs_f64() * 1000.0;
@@ -2841,7 +2865,7 @@ impl TerrainRenderer {
             .unwrap_or_default();
         let (gpu_ms, water_gpu_ms) = (passes.get(crate::gpu_timing::GpuPass::Terrain), passes.get(crate::gpu_timing::GpuPass::Water));
         self.reap();
-        Ok((FrameTiming { cpu_ms, total_ms, gpu_ms, water_gpu_ms, passes }, stats))
+        Ok((FrameTiming { cpu_ms, total_ms, gpu_ms, water_gpu_ms, passes, cpu_phases }, stats))
     }
 
     /// The colour target the terrain pass draws into, for the window's blit (`window.rs`).
