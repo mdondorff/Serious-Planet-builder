@@ -284,3 +284,104 @@ fn the_carve_factor_scales_the_uplift_and_input_that_cannot_be_routed_is_refused
         "a negative carve factor is refused"
     );
 }
+
+/// The flood with every outlet seeded into the heap (the textbook seeding), for the comparison below.
+fn flood_seeding_every_outlet(g: &Grid, z: &[f64], outlet: &[bool], eps: f64) -> Vec<f64> {
+    use std::cmp::Reverse;
+    use std::collections::{BinaryHeap, VecDeque};
+    let key = |v: f64| {
+        let b = v.to_bits();
+        if b & (1 << 63) != 0 {
+            !b
+        } else {
+            b | (1 << 63)
+        }
+    };
+    let n = g.len();
+    let (mut filled, mut seen) = (vec![0.0; n], vec![false; n]);
+    let (mut heap, mut flat) = (BinaryHeap::new(), VecDeque::new());
+    for p in 0..n {
+        if outlet[p] {
+            filled[p] = z[p];
+            seen[p] = true;
+            heap.push(Reverse((key(z[p]), p as u32)));
+        }
+    }
+    loop {
+        let p = if let Some(p) = flat.pop_front() {
+            p as usize
+        } else if let Some(Reverse((_, p))) = heap.pop() {
+            p as usize
+        } else {
+            break;
+        };
+        for d in 0..8 {
+            let Some(q) = g.neighbour(p, d) else { continue };
+            if seen[q] {
+                continue;
+            }
+            seen[q] = true;
+            let lowest = filled[p] + eps;
+            if z[q] <= lowest {
+                filled[q] = lowest;
+                flat.push_back(q as u32);
+            } else {
+                filled[q] = z[q];
+                heap.push(Reverse((key(z[q]), q as u32)));
+            }
+        }
+    }
+    filled
+}
+
+// spec: GEN-100
+#[test]
+fn seeding_only_the_outlets_that_expand_gives_the_same_filled_surface_as_seeding_every_outlet() {
+    let n = 40;
+    let g = grid(n);
+    // A face that is mostly sea: a cone island in a sea of -50 m, and the bowl with a sea of its own.
+    for z in [
+        (0..n * n)
+            .map(|p| {
+                let r = libm::hypot((p % n) as f64 - 20.0, (p / n) as f64 - 20.0);
+                if r < 8.0 {
+                    400.0 * (1.0 - r / 8.0) + 3.0 * libm::sin(1.3 * (p % n) as f64)
+                } else {
+                    -50.0
+                }
+            })
+            .collect::<Vec<f64>>(),
+        bowl(n),
+        ramp(n),
+    ] {
+        let outlet = g.outlets(&z, 0.0);
+        let (a, b) = (priority_flood(&g, &z, &outlet, 1e-3), flood_seeding_every_outlet(&g, &z, &outlet, 1e-3));
+        assert_eq!(bits(&a), bits(&b), "the two seedings fill differently");
+    }
+}
+
+// spec: GEN-100
+#[test]
+fn land_stays_above_a_sea_level_that_is_not_zero_and_the_jitter_lies_in_its_range() {
+    let n = 12;
+    let g = grid(n);
+    let mut z: Vec<f64> = (0..n * n).map(|p| if p % n < 2 { 40.0 } else { 150.0 }).collect();
+    let outlet = g.outlets(&z, 100.0);
+    let params = CarveParams { sea_level: 100.0, ..CarveParams::default() };
+    carve(&g, &mut z, &outlet, &params, None, 5);
+    for (p, &h) in z.iter().enumerate() {
+        if !outlet[p] {
+            assert!(h > 100.0, "land cell {p} is at {h} m, below the sea level of 100 m");
+        }
+    }
+    let mut lo = f64::MAX;
+    let mut hi = f64::MIN;
+    for id in 0..5_000u64 {
+        for d in 0..8 {
+            let u = planet_generators::bake::route::jitter(3, id | (id << 33), d);
+            lo = lo.min(u);
+            hi = hi.max(u);
+        }
+    }
+    assert!(lo >= -1.0 && hi < 1.0 && lo < -0.99 && hi > 0.99, "the jitter spans [{lo}, {hi}]");
+}
