@@ -1542,12 +1542,7 @@ impl TerrainRenderer {
     }
 
     /// The ring of per-frame buffers for plans of up to `capacity` nodes.
-    fn make_ring(
-        device: &wgpu::Device,
-        bgl: &wgpu::BindGroupLayout,
-        capacity: usize,
-        compact: &CompactGpu,
-    ) -> Vec<FrameSet> {
+    fn make_ring(device: &wgpu::Device, bgl: &wgpu::BindGroupLayout, capacity: usize, compact: &CompactGpu) -> Vec<FrameSet> {
         (0..RING)
             .map(|_| {
                 let buffer = |label, size, usage| {

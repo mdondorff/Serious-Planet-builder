@@ -208,10 +208,7 @@ pub fn parse_config(text: &str) -> Result<StillsConfig, String> {
             view: match t.get("view") {
                 None => None,
                 Some(v) => Some(v.as_str().and_then(planet_frame::look::shading::ShadeView::parse).ok_or_else(|| {
-                    format!(
-                        "{whose}: view {} is not a view of the J cycle (lit, shadow, soil, moisture, insolation, ...)",
-                        show(v)
-                    )
+                    format!("{whose}: view {} is not a view of the J cycle (lit, shadow, soil, moisture, insolation, ...)", show(v))
                 })?),
             },
             name,
@@ -1056,7 +1053,13 @@ mod tests {
     // spec: REND-044
     #[test]
     fn the_cost_share_is_a_difference_and_a_pose_near_the_budget_is_flagged_not_called_met() {
-        let row = |pose: &str, full: f64, material: f64| CostRow { pose: pose.into(), full, no_material: material, compiled_out: None, spread: None };
+        let row = |pose: &str, full: f64, material: f64| CostRow {
+            pose: pose.into(),
+            full,
+            no_material: material,
+            compiled_out: None,
+            spread: None,
+        };
         // The compiled-out variant, when a row has it, is what the share and the verdict read.
         let with = CostRow { compiled_out: Some(4.2), ..row("w", 5.0, 4.6) };
         assert_eq!(with.share(), 5.0 - 4.2);
