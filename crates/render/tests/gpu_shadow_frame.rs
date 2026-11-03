@@ -87,7 +87,16 @@ fn a_lit_frame_with_a_shadow_frame_resolves_a_visibility_and_applies_it_to_the_d
     without.render(&ctx, &p, false).unwrap();
     let visibility = with.read_shadow(&ctx).expect("the shadow pass ran");
     assert_eq!(visibility.len(), (SIZE.0 * SIZE.1) as usize);
-    assert!(visibility.iter().all(|v| (0.0..=1.0).contains(v)), "visibility lies in [0, 1]");
+    let bad: Vec<(usize, f32)> = visibility.iter().copied().enumerate().filter(|(_, v)| !(0.0..=1.0).contains(v)).collect();
+    assert!(
+        bad.is_empty(),
+        "visibility lies in [0, 1]: {} of {} pixels outside it, first {:?}, extremes {:?} {:?}",
+        bad.len(),
+        visibility.len(),
+        &bad[..bad.len().min(5)],
+        visibility.iter().copied().fold(f32::INFINITY, f32::min),
+        visibility.iter().copied().fold(f32::NEG_INFINITY, f32::max)
+    );
     assert!(without.read_shadow(&ctx).is_none(), "a renderer without the shadow pass has none");
     // Where the visibility is 1 the frame is the frame without shadows, to the byte; where it is below 1 the direct sun is reduced.
     let (a, b) = (frame_bytes(&with, &ctx), frame_bytes(&without, &ctx));

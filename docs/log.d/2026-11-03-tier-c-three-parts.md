@@ -1,0 +1,1 @@
+- 2026-11-03 tier-c-three-parts (inbox #74): the Windows tier-C leg runs in three parts (`--partition count:N/3`) to stay under BUILD-014's 16 min after #1103 (BUILD-018 modified and renamed)

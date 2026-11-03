@@ -165,3 +165,18 @@ Source: ADR 0083 point 3, BUDG-006, BUDG-007, ADR 0087, planner inbox #6 (2026-1
 #### Scenario: An overrun
 - **WHEN** terrain's busy threads reach 14 with the loads on
 - **THEN** the verdict fails and names the terrain core share with its overrun
+
+### Requirement: BUDG-014 World build time shares
+The world build (the whole offline run from a WorldDefinition to a store, ADR 0097) SHALL finish within 24 h on the reference machine, split into shares of that day: terrain 40 % (field bake, erosion bake passes 1 and 2, wet floor, coupled run, pre-fill), future content 40 % (fauna, instancing, cities), margin 20 % (values proposed; the owner confirms them). The world build SHALL report each stage's wall time and each share's sum against the share's hours; a stage has no limit of its own. A full world build SHALL start only after the owner approves its preview (a coarse-planet or region mode of every stage).
+
+Verify: C
+Status: planned
+Source: ADR 0097
+
+#### Scenario: A slow stage inside its share
+- **WHEN** the field bake takes 17 min and the terrain stages together take 6 h
+- **THEN** the report lists every stage, terrain's 6 h against its 9.6 h, and the world build passes
+
+#### Scenario: A share over its hours
+- **WHEN** the terrain stages together take 11 h
+- **THEN** the report names terrain's share with 11 h against 9.6 h, and the world build fails

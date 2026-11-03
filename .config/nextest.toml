@@ -47,6 +47,15 @@ slow-timeout = { period = "90s", terminate-after = 5 }
 filter = 'binary(gpu_all) and test(the_stills_scene_draws_each_pose_with_its_horizon_maps_baked)'
 slow-timeout = { period = "90s", terminate-after = 5 }
 
+# Declared limit (planner, 2026-11-03, BUILD-003; #1103). `gpu_stills::a_still_runs_the_clipmap_shadow_by_default_and_not_with_the_flag` generates a store,
+# runs the stills scene without the march and then one pose with it. It does not hang: on the Windows CI runner (WARP, partition `C 2/2`) it was cut off
+# at 302 s and 300.2 s (the march-on run drawing both poses, then one), and locally on the software adapter it takes 176 s to 280 s with the run's load. The
+# horizon bake the stills still do per run is about 130 s of it (the sibling test above) and goes with the horizon removal (`rm-horizon-render`); lift this
+# limit then. A declared 450 s (5 x 90 s) still catches a hang. The first matching override sets a value, so this one comes before the `gpu_` one.
+[[profile.default.overrides]]
+filter = 'binary(gpu_all) and test(a_still_runs_the_clipmap_shadow_by_default_and_not_with_the_flag)'
+slow-timeout = { period = "90s", terminate-after = 5 }
+
 # Declared limit (approved by the planner, 2026-11-02, BUILD-003; #1056). `gpu_window::the_gate_passes_on_a_small_world_without_the_chunk_stage_which_is_the_default`
 # runs the window gate on a small world (480x270, the editor, a scripted edit and flight). Locally it takes 51 s to 140 s alone on main (the spread is the
 # machine's load), 59 s to 82 s on the branch of #1056 and 68 s to 93 s beside the window smoke of `--shadow-march`; on the Windows CI runner (WARP,
@@ -79,6 +88,16 @@ or test(every_standard_view_of_the_default_world_stays_within_its_own_pinned_cou
 '''
 priority = 50
 
+# The relief-band gate of the class source (TEST-082; `oracle_world_preview::seeds_1_to_5_pass_the_relief_bands_of_spike_93_in_the_gate_form`) computes six
+# whole-planet previews of 1,440 x 720 pixels, 8 threads each, about 117 CPU-seconds (15.5 us a pixel: the class source 8 us, the global stage 4 us; the
+# same per-sample cost on main and on round 3). It is a whole-planet gate that holds every core; WARP, the CPU rasteriser of the Windows runner, shares those cores: beside it the gate took 169 s and starved
+# `planet-render::oracle_all oracle_atmosphere::a_camera_walking_at_one_metre_in_millimetre_steps_makes_no_step_the_reference_does_not` (47.7 to 77.5 s
+# on main, a timeout at 180 s in two runs of #1086, WARP A+B). It runs alone: it takes every test slot. Only the overlap changes: no test is skipped,
+# retried or changed, and no timeout is changed (the planner's order, 2026-11-03).
+[[profile.default.overrides]]
+filter = 'package(=planet-generators) and binary(oracle_all) and test(seeds_1_to_5_pass_the_relief_bands_of_spike_93_in_the_gate_form)'
+threads-required = "num-cpus"
+
 # `cargo xtask test fast` reads this to print the slowest tests (TEST-001 budget guard).
 [profile.default.junit]
 path = "junit.xml"
@@ -89,6 +108,7 @@ path = "junit.xml"
 # Only the start order and the overlap change: no test is skipped, retried or changed, and the software and WARP runs keep the
 # default profile.
 [test-groups]
+warp-heavy = { max-threads = 1 }
 real-gpu-heavy = { max-threads = 2 }
 heavy-window = { max-threads = 2 }
 gpu-tier = { max-threads = 8 }
@@ -107,6 +127,25 @@ or (package(=planet) and binary(gpu_all) and test(/^(gpu_water_coverage|gpu_stre
 or (package(=planet-cache) and binary(oracle_all) and test(/^oracle_concurrent_source::/))
 '''
 test-group = "real-gpu-heavy"
+
+# The coastal flight and the real-window tests run one at a time (planner, 2026-11-02). Each software rasteriser uses every core, and the flight is
+# the last test of the Windows CI partition `C 1/2`: in the CI run of #1100 it took 390.7 s (120 s on main at ff86ac73, 147, 170, 352 since) while
+# `gpu_window::the_window_path_opens_runs_the_flight_lit_with_the_atmosphere_and_closes` (249 s), `gpu_window::the_editor_mode_places_drags_types_undoes_and_deletes_in_the_real_window_and_writes_the_item_file` (123 s),
+# `gpu_water_coverage` (114 s) and the item sweep (60 s) ran at the same time; the flight draws no shadow march, so its own work did not change. The first
+# matching override sets the group, so this one comes before the `heavy-window` one. Only the overlap changes: no test is skipped, retried or changed.
+# The rule for the rest of the group (planner, 2026-11-03): process tests that run a lit flight or lit streaming scene on the software adapter.
+# - `gpu_stream_perf::a_lit_view_a_lit_flight_and_a_stream_scene_log_their_cpu_calibration_when_asked_even_in_a_smoke_run` runs the lit coast-glide
+#   flight (two shore-filter runs): 30 to 70 s and 128 to 235 s on the two Windows CI partitions before and after the calibration changes (#1091,
+#   #1095), cut off at 300.5, 301.2 and 305.3 s only in this branch's runs, beside the serialised tests; the CPU calibration is about 1 s of it.
+# - `gpu_stream_perf::a_streaming_scene_on_the_lit_path_logs_beside_the_debug_path_under_its_own_name` runs look-1m with `--lit`: 172 s and 222 s on
+#   `C 1/2`, then stopped by its own 240 s RUN_LIMIT.
+# - `gpu_lit_stream_flicker::the_lit_coast_view_over_streamed_tiles_draws_the_same_pixels_still_and_after_a_small_turn_and_back` streams the lit coast
+#   view: 292 s on `C 2/3` (#1114's first run), then cut off by its 300 s wall-clock settle limit after 264 ticks (1.1 s a tick) beside the
+#   window flight and the skeleton tests (#1114 at a876ea2c).
+# nextest's slow timer starts when a test starts, not while it waits for the group, so their limits stay as they are.
+[[profile.default.overrides]]
+filter = 'binary(gpu_all) and (test(a_coastal_flight_at_low_altitude_flickers_within_the_budget_while_the_lod_changes_under_it) or test(/^gpu_window::/) or test(a_lit_view_a_lit_flight_and_a_stream_scene_log_their_cpu_calibration_when_asked_even_in_a_smoke_run) or test(a_streaming_scene_on_the_lit_path_logs_beside_the_debug_path_under_its_own_name) or test(the_lit_coast_view_over_streamed_tiles_draws_the_same_pixels_still_and_after_a_small_turn_and_back))'
+test-group = "warp-heavy"
 
 # The heavy software-adapter window and scene tests (the tracked tier-C timeouts: `gpu_window`, `gpu_water_coverage`, `gpu_stream_perf`,
 # `gpu_envelope_perf`) are CPU-bound (each software rasteriser uses every core) and their wall time swings 2 to 5 times with how many of them run
