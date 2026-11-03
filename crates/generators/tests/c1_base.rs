@@ -514,3 +514,180 @@ const PINNED: [(u32, u64); 4] = [
     (3_311_221_168, 13_883_385_936_620_562_706),
     (3_308_198_617, 13_881_764_335_007_643_907),
 ];
+
+/// What an adversarial lattice puts at a node: a step, a spike line, a ramp, or noise, deterministic in `(face, i, j)`.
+#[derive(Clone, Copy)]
+enum Feature {
+    Step,
+    Spike,
+    Ramp,
+    Noise,
+}
+
+struct Adversarial {
+    res: u32,
+    feature: Feature,
+    seed: u64,
+}
+
+impl Adversarial {
+    /// The lattice index the feature sits at: the middle of the face.
+    fn at_index(&self) -> u32 {
+        self.res / 2
+    }
+}
+
+impl LatticeSource for Adversarial {
+    fn res(&self) -> u32 {
+        self.res
+    }
+    fn at(&self, f: Face, i: u32, j: u32) -> Result<GlobalSample, ReadError> {
+        let s = self.at_index();
+        let h = planet_core::hash::hash_u64s(self.seed, &[u64::from(f.0), u64::from(i), u64::from(j)]);
+        let noise = (h >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0;
+        let e = match self.feature {
+            Feature::Step => {
+                if i >= s {
+                    4000.0
+                } else {
+                    -500.0
+                }
+            }
+            Feature::Spike => {
+                if i == s && j.is_multiple_of(3) {
+                    6000.0
+                } else {
+                    0.0
+                }
+            }
+            Feature::Ramp => (f64::from(i) - f64::from(s)).clamp(-2.0, 2.0) * 1500.0 + f64::from(j % 5) * 40.0,
+            Feature::Noise => noise * 3000.0,
+        };
+        Ok(GlobalSample { continent: 1.0, elevation_m: e as f32, temperature_c: 0.0, precipitation_mm: 0.0 })
+    }
+}
+
+// spec: GEN-107
+#[test]
+fn bounds_hold_beside_a_step_a_spike_a_ramp_and_noise_in_the_interior_stencil_for_caps_of_ten_metres_to_three_kilometres() {
+    let mut rng = SplitMix64(21);
+    let mut checked = 0;
+    for res in [64u32, 16384] {
+        let cell_m = 2.0 * std::f64::consts::PI * R / 4.0 / f64::from(res);
+        for feature in [Feature::Step, Feature::Spike, Feature::Ramp, Feature::Noise] {
+            let src = Adversarial { res, feature, seed: 5 };
+            let f = c1_field(&src);
+            let s = f64::from(src.at_index());
+            for face in 0..6u8 {
+                // Centres across the cells next to the feature (the stencil's own edge: one cell either side and the cell on it), at random heights along it.
+                for k in 0..24 {
+                    let u = s - 2.5 + f64::from(k) * 0.21;
+                    let v = f64::from(res) * (0.2 + 0.6 * rng.next_f64());
+                    let c = at_lattice(face, u, v, res);
+                    for theta_m in [10.0, 30.0, 100.0, 300.0, 1000.0, 3000.0] {
+                        check_cap(&f, c, theta_m / R);
+                        checked += 1;
+                    }
+                    // Caps of a fraction of a cell too (the whole of res 64's cell is 156 km).
+                    for share in [0.02, 0.3, 1.0] {
+                        check_cap(&f, c, share * cell_m / R);
+                        checked += 1;
+                    }
+                }
+            }
+            assert!(f.error().is_none(), "res {res}");
+        }
+    }
+    assert!(checked > 6000, "{checked} caps");
+}
+
+/// The base alone (no creases) is within `ErosionField::base_bounds` over the rings of a cap: the detail interval's slack hides a miss of the base in `check_cap`.
+fn check_base(f: &ErosionField, c: Vec3, theta: f64) {
+    let (lo, hi) = f.base_bounds(c, theta).unwrap_or_else(|| panic!("no base bounds for the cap {c:?} {theta}"));
+    let a = if c.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
+    let e1 = c.cross(a).normalized();
+    let e2 = c.cross(e1);
+    for ring in [0.0, 0.5, 1.0] {
+        for k in 0..16 {
+            let phi = f64::from(k) * std::f64::consts::TAU / 16.0;
+            let th = theta * ring;
+            let d = (c * libm::cos(th) + (e1 * libm::cos(phi) + e2 * libm::sin(phi)) * libm::sin(th)).normalized();
+            let e = f.base_elevation(d);
+            assert!(lo <= e && e <= hi, "base {e} outside [{lo}, {hi}] at {d:?} in the cap {c:?} {theta}");
+        }
+    }
+}
+
+// spec: GEN-107
+#[test]
+fn the_base_alone_stays_within_its_bounds_beside_features_and_at_the_f32_rounding_of_the_overshoot() {
+    let mut rng = SplitMix64(33);
+    let mut checked = 0;
+    for res in [64u32, 16384] {
+        for feature in [Feature::Step, Feature::Spike, Feature::Ramp, Feature::Noise] {
+            let src = Adversarial { res, feature, seed: 9 };
+            let f = c1_field(&src);
+            let s = f64::from(src.at_index());
+            for face in 0..6u8 {
+                for k in 0..20 {
+                    let u = s - 2.5 + f64::from(k) * 0.25;
+                    let v = f64::from(res) * (0.2 + 0.6 * rng.next_f64());
+                    let c = at_lattice(face, u, v, res);
+                    for theta_m in [10.0, 100.0, 1000.0, 3000.0] {
+                        check_base(&f, c, theta_m / R);
+                        checked += 1;
+                    }
+                }
+            }
+        }
+    }
+    assert!(checked > 3000);
+    // The f32 rounding of the value: the four inner nodes and the four corners of one stencil at `hi`, the eight edge nodes at 0, read at the cell's middle, where the
+    // blend reaches the top of the overshoot bound.
+    struct Peak(f64);
+    impl LatticeSource for Peak {
+        fn res(&self) -> u32 {
+            64
+        }
+        fn at(&self, f: Face, i: u32, j: u32) -> Result<GlobalSample, ReadError> {
+            let (a, b) = (i as i64 - 31, j as i64 - 31);
+            let inner = (1..=2).contains(&a) && (1..=2).contains(&b);
+            let corner = (a == 0 || a == 3) && (b == 0 || b == 3);
+            let e = if f.0 == 0 && (inner || corner) { self.0 } else { 0.0 };
+            Ok(GlobalSample { continent: 1.0, elevation_m: e as f32, temperature_c: 0.0, precipitation_mm: 0.0 })
+        }
+    }
+    for k in 0..200 {
+        let hi = 1000.0 + f64::from(k) * 1.0137;
+        let src = Peak(hi);
+        let f = c1_field(&src);
+        let d = at_lattice(0, 32.5, 32.5, 64);
+        let (lo_b, hi_b) = f.base_bounds(d, 0.0).unwrap();
+        let e = f.base_elevation(d);
+        assert!(lo_b <= e && e <= hi_b, "peak {hi}: base {e} outside [{lo_b}, {hi_b}]");
+    }
+}
+
+// spec: GEN-107
+#[test]
+fn a_bake_of_two_cells_has_no_c1_bounds_but_the_global_range_still_holds_every_height() {
+    // At res 2 a ghost sits two cells beyond the edge, in a face the scan does not visit.
+    struct OneNode;
+    impl LatticeSource for OneNode {
+        fn res(&self) -> u32 {
+            2
+        }
+        fn at(&self, f: Face, i: u32, j: u32) -> Result<GlobalSample, ReadError> {
+            let e = if f.0 == 5 && (i, j) == (1, 2) { 9000.0 } else { 0.0 };
+            Ok(GlobalSample { continent: 1.0, elevation_m: e, temperature_c: 0.0, precipitation_mm: 0.0 })
+        }
+    }
+    let src = OneNode;
+    let f = c1_field(&src);
+    assert!(f.base_bounds(Vec3::new(0.3, 0.2, -1.0).normalized(), 0.04).is_none(), "no base bounds below res 4");
+    let mut rng = SplitMix64(41);
+    for _ in 0..300 {
+        let c = Vec3::new(rng.next_f64() * 2.0 - 1.0, rng.next_f64() * 2.0 - 1.0, rng.next_f64() * 2.0 - 1.0).normalized();
+        check_cap(&f, c, 0.04);
+    }
+}

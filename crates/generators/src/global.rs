@@ -861,8 +861,10 @@ pub const C1_OVERSHOOT: f64 = 0.28125;
 
 /// The factor on the largest difference of adjacent lattice samples (metres per cell) that bounds the slope of [`read_elevation_c1`]: 1.875 within a face
 /// (the Catmull-Rom derivative is at most `0.125 + 1.25 + 0.125 = 1.5` times the largest of the three differences it spans, times 1.25 for the four rows),
-/// rounded up to 2.25 with the stencil nodes beyond a face edge (interpolated in the neighbour face: a ghost's step to the edge node is at most twice the neighbour's largest step, 2.03 in all): the bound takes the largest step over every
-/// scanned face, the neighbour's included.
+/// rounded up to 2.25 for the stencil nodes beyond a face edge (interpolated in the neighbour face: the ghost lies one cell inside the neighbour and at most one cell
+/// along the edge from the edge node, so its step is bounded by the neighbour's perpendicular plus parallel steps, 2.125 at an edge and 2.157 in a corner cell in the
+/// sum form `du + dv` the bounds use). This needs the copies of an edge node on the two faces to be equal (the bake guarantees it): the bound takes the largest
+/// step over every scanned face, the neighbour's included.
 pub const C1_SLOPE_FACTOR: f64 = 2.25;
 
 /// The four Catmull-Rom weights at `t` in `[0, 1]` for the samples at `-1, 0, 1, 2`. They sum to 1; at `t = 0` they are exactly `(0, 1, 0, 0)` and at
