@@ -4,6 +4,8 @@
 use crate::util::{run, Res};
 use std::path::Path;
 
+/// The reference world the owner picked (inbox #43); the default of the previews.
+const DEFAULT_SEED: u64 = 14;
 const KNOWN: &str = "--seed N, --out DIR";
 
 #[derive(Debug, PartialEq)]
@@ -18,7 +20,7 @@ pub fn parse_args(args: &[String]) -> Res<Opts> {
         Some(other) => return Err(format!("unknown preview '{other}' (known: world)")),
         None => return Err("usage: cargo xtask preview world --seed N [--out DIR]".into()),
     }
-    let mut o = Opts { seed: 1, out: None };
+    let mut o = Opts { seed: DEFAULT_SEED, out: None };
     let mut it = args[1..].iter();
     while let Some(a) = it.next() {
         let mut value = || it.next().cloned().ok_or_else(|| format!("{a} needs a value"));
@@ -67,7 +69,7 @@ mod tests {
         assert_eq!(o, Opts { seed: 7, out: Some("D".into()) });
         let c = cargo_args(&o);
         assert!(c.windows(2).any(|w| w == ["--seed", "7"]) && c.windows(2).any(|w| w == ["--out", "D"]), "{c:?}");
-        assert_eq!(parse_args(&a(&["world"])).unwrap(), Opts { seed: 1, out: None });
+        assert_eq!(parse_args(&a(&["world"])).unwrap(), Opts { seed: DEFAULT_SEED, out: None });
     }
 
     // spec: GEN-103

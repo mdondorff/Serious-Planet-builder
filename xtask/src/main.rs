@@ -10,6 +10,7 @@ mod layering;
 mod logcmd;
 mod package;
 mod perfab;
+mod perfwindow;
 mod prepush;
 mod preview;
 mod repocheck;
@@ -50,6 +51,7 @@ const USAGE: &str = "cargo xtask <command>
   perf lit [--store DIR] [--out PATH] [--frames N] [--flight-frames N] [--views a,b,c] [--smoke] [--machine-ready]   the M5 lit perf scenes (TEST-025): per-pass GPU time over the viewer's views and the coastal flights
   perf m5 --store DIR [--out DIR] [--machine-ready]   the first M5 window in order: lit and the seven streaming scenes with --lit (one child per streaming scene); `cargo xtask accept M5` judges the logs
   perf wallclock [--machine-ready]   the wall-clock checks that left tier A (BUILD-003): builds them, runs the readiness gate (ADR 0020; the adapter condition does not apply, CPU only), then each ignored check alone in release, PASS or FAIL per check; a refused gate is NOT RUN (exit code 3), no verdict; run at the start of every perf window and by `cargo xtask accept`
+  perf window PLAN [--no-preflight]   a declared perf window in one process (BUILD-034, ADR 0087 point 7): one release build, the preflight, rotated rounds of the plan's configurations and flights with the duty idle between runs (BUILD-035), bounded retries, the stop rule, and every attempt timed in target/perf-window/<time>/; the architect authorizes the window, and --machine-ready in a flight stays the owner's override
   perf preflight [--out DIR] [--smoke] [--machine-ready]   the check before a perf window (about 70 s): the readiness gate, three CPU calibrations, the top 5 CPU processes, AC state and power plan; refuses with the causes (TEST-040)
   perf envelope [--store DIR | --allow-memory-bake --global-res N] [--share-bound F] [--steady-window-s S] [--altitudes-m M,M] [--only-steady] [--places K] [--out FILE] [--smoke] [--machine-ready]   the M8 speed envelope (TEST-047, TEST-054): the highest level-flight speed per altitude (30 m, 100 m, 300 m, 1 km) at which the coarse share of the screen (over a `--store` world with the horizon jobs cold per flight) stays within the bound (default 0.01) over every 1 s window, plus 300 m with the horizon jobs off, written to perf/logs/envelope.json; the architect authorizes the window
   perf coupled [--global-res N] [--machine-ready]   the GEN-042 coupled run (default 2048 cells per face edge, 100 steps) under the same gate
@@ -58,7 +60,7 @@ const USAGE: &str = "cargo xtask <command>
   cache-compact <dir> [--world <file>|--seed N] [--cap-bytes N]   rewrite a tile store keeping the records the definition still produces, evicting the oldest packs first under a cap (STRM-013)
   ci-stats [--runs N] | --record --since YYYY-MM-DD [--until YYYY-MM-DD]   median and p90 of each CI job over the last N (default 20) completed main runs, read with gh; a median over 16 min is flagged (BUILD-014)
   heavy <command> [args]   run any command (a diagnostic example, a replay) under the machine-wide heavy-run lock
-  preview world --seed N [--out DIR]   the whole-planet preview of the default class source (GEN-103): equirectangular PNGs at 2048x1024 (land and sea; elevation with hillshade, today's and the new side by side; the plate mask; plateau and back-arc; relief classes, argmax and blended; k) with the seed, versions and a legend, and a report of the class shares; CPU only, no store, about 10 s; default out target/preview/world-seed-N
+  preview world [--seed N] [--out DIR]   (default seed 14, the reference world) the whole-planet preview of the default class source (GEN-103): equirectangular PNGs at 2048x1024 (land and sea; elevation with hillshade, today's and the new side by side; the plate mask; plateau and back-arc; relief classes, argmax and blended; k) with the seed, versions and a legend, and a report of the class shares; CPU only, no store, about 10 s; default out target/preview/world-seed-N
   terrain-score [--store DIR] [--dem DIR] [--sites FILE] [--out DIR] [--maps]   the terrain scorecard (TEST-079, BUILD-029): seven descriptors on nine GLO-30 tiles and the generator's two matched sites each (world.field() of the store, read only), distances and a phone-readable report.md and report.json in target/review/terrain-score/<date>/ with the Copernicus notice; CPU only, about 1 minute; --maps adds one 512 px PNG per descriptor per raster
   quiet on|off|status   the owner's flag file: while it is up every heavy command (test, prepush, perf, capture, accept, store, heavy) waits (BUILD-026)
   det-diff <a> <b>    compare two determinism manifests (GEN-003; CI diffs Windows against Linux)

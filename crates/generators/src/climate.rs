@@ -20,7 +20,7 @@
 use crate::global::{gather_cells, read_tile_sample, sample, LatticeSource, ReadError, GLOBAL_VERSION, READER_VERSION};
 use planet_core::cube::FaceMapping;
 use planet_core::hash::hash_u64s;
-use planet_core::TileId;
+use planet_core::{TileId, Vec3};
 
 /// Bump whenever any output of this module changes (ADR 0006): the layout of the texture, the sampling positions, the rounding.
 pub const CLIMATE_VERSION: u32 = 1;
@@ -187,11 +187,30 @@ pub fn climate_version_word() -> u64 {
     hash_u64s(0x636c_7672, &v)
 }
 
-/// The version word of the analytic climate (fields without a bake): the climate version and the analytic function's version.
+/// The version word of the climate a field without a bake takes from its own heights ([`height_climate`]): the climate version and that function's version. It does
+/// not fold `GLOBAL_VERSION`: the climate of such a field is not a function of the generator (GEN-021).
 pub fn analytic_version_word() -> u64 {
-    let mut v = vec![u64::from(CLIMATE_VERSION), u64::from(GLOBAL_VERSION)];
+    let mut v = vec![u64::from(CLIMATE_VERSION), u64::from(HEIGHT_CLIMATE_VERSION)];
     v.extend(crate::height::fold_str(CLIMATE_IMPLEMENTATION_ID));
-    hash_u64s(0x636c_7673, &v)
+    hash_u64s(0x636c_7674, &v)
+}
+
+/// The version of [`height_climate`]'s function. History: 1 = the global-coarse climate formula ([`crate::global::climate_from_elevation`]) over the field's own heights.
+pub const HEIGHT_CLIMATE_VERSION: u32 = 1;
+
+/// The climate of tile `id` for a field with no bake: the global-coarse climate formula at the texel directions with the field's OWN seed and OWN heights
+/// (`height`, in metres, no inland measure), not the generator's world (GEN-021). A pure function of `(seed, mapping, tile, height)`.
+pub fn height_climate(seed: u64, map: &dyn FaceMapping, id: TileId, height: &dyn Fn(Vec3) -> f64) -> ClimateTexture {
+    let (mut t, mut p) = ([0f32; CLIMATE_TEXELS], [0f32; CLIMATE_TEXELS]);
+    for b in 0..CLIMATE_EDGE {
+        for a in 0..CLIMATE_EDGE {
+            let d = id.sample_direction(map, CLIMATE_CELLS, a as u32, b as u32);
+            let (temperature, precipitation) = crate::global::climate_from_elevation(seed, d, height(d), 0.0);
+            t[b * CLIMATE_EDGE + a] = temperature;
+            p[b * CLIMATE_EDGE + a] = precipitation;
+        }
+    }
+    ClimateTexture::from_f32(&t, &p)
 }
 
 /// The climate of tile `id` read from the bake `src` (ADR 0027 integer reader). An unreadable block is an error naming it, never a
@@ -220,8 +239,8 @@ pub fn climate_tile_direct(src: &dyn LatticeSource, id: TileId) -> Result<Climat
     Ok(ClimateTexture::from_f32(&t, &p))
 }
 
-/// The climate of tile `id` from the analytic global-coarse function of `seed` at the texel directions: for fields that have no
-/// bake. A pure function of `(seed, mapping, tile)`.
+/// The climate of tile `id` from the GENERATOR's global-coarse field of `seed` at the texel directions ([`sample`]): what a field that renders the generator's own world
+/// without a bake takes. A field of its own heights (the reference generator, synthetic fields) takes [`height_climate`]. A pure function of `(seed, mapping, tile)`.
 pub fn analytic_climate(seed: u64, map: &dyn FaceMapping, id: TileId) -> ClimateTexture {
     let (mut t, mut p) = ([0f32; CLIMATE_TEXELS], [0f32; CLIMATE_TEXELS]);
     for b in 0..CLIMATE_EDGE {

@@ -972,7 +972,7 @@ Status: active
 Source: owner (2026-10-25, via opus-planner): plausible relief in M8; ADR 0080 points 1, 3 and 5, `openspec/changes/m8-relief/proposal.md`
 
 #### Detail
-The amplitude SHALL be `30 + 145 smoothstep(0, 0.25, m) + 825 smoothstep(0.25, 0.7, m)` m for the mountain strength `m = landform x (0.25 + 0.75 ridge)`. `global::landform(seed, d)` SHALL be the range-zone strength times the distance from the coast, in `[0, 1]`, a pure function of the seed and the direction that does not read the band. The bake's elevation clamp and the field's `max_abs_height_m` SHALL stay as they are while the highest base and range (6200 m) plus `HILL_BAND_MAX_M` stay below the clamp. `GLOBAL_VERSION` SHALL be 5.
+The amplitude SHALL be `30 + 145 smoothstep(0, 0.25, m) + 825 smoothstep(0.25, 0.7, m)` m for the mountain strength `m = landform x (0.25 + 0.75 ridge)`. `global::landform(seed, d)` SHALL be the range-zone strength times the distance from the coarse coast (`smoothstep(0.02, 0.35, depth)` of the coarse continent value of GEN-104, whose rough full coast the driver's lattice could not hold; the driver is 0 at the coarse coast, not exactly at the full value's), in `[0, 1]`, a pure function of the seed and the direction that does not read the band. The bake's elevation clamp and the field's `max_abs_height_m` SHALL stay as they are while the highest base and range (6200 m) plus `HILL_BAND_MAX_M` stay below the clamp. The hill band's mountain strength SHALL read the same driver. `GLOBAL_VERSION` SHALL be 6 (the continent stage, GEN-104).
 
 #### Scenario: Where the band is and how large
 - **WHEN** 40,000 directions spread over the sphere are sampled
