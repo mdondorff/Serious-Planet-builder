@@ -37,6 +37,8 @@ struct Field<'a> {
     seed: u64,
     /// Reads the change with Catmull-Rom (C1) instead of bilinear (C0).
     c1: bool,
+    /// The change is faded to 0 within this many metres above sea level (0: not faded).
+    fade_sea_m: f64,
 }
 
 impl Field<'_> {
@@ -71,7 +73,13 @@ impl Field<'_> {
 
 impl HeightField for Field<'_> {
     fn height(&self, d: Vec3) -> f64 {
-        self.inputs.base(d) + self.change(d)
+        let base = self.inputs.base(d);
+        let change = self.change(d);
+        if self.fade_sea_m > 0.0 && change != 0.0 {
+            let u = (base / self.fade_sea_m).clamp(0.0, 1.0);
+            return base + change * u * u * (3.0 - 2.0 * u);
+        }
+        base + change
     }
     fn seed(&self) -> u64 {
         self.seed
@@ -125,6 +133,7 @@ fn main() {
         (None::<PathBuf>, 14u64, PathBuf::from("target/review/erosion-preview"), Vec::<Site>::new());
     let (mut c1, mut detail, mut alts) = (false, NATURAL_STRENGTH, vec!["300m".to_string(), "2km".to_string()]);
     let mut skip_before = false;
+    let mut fade_sea = 0.0f64;
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -135,6 +144,7 @@ fn main() {
             "--detail" => detail = value().parse().unwrap_or_else(|_| fail("--detail needs a number")),
             "--alts" => alts = value().split(',').map(str::to_string).collect(),
             "--skip-before" => skip_before = true,
+            "--fade-sea" => fade_sea = value().parse().unwrap_or_else(|_| fail("--fade-sea needs metres")),
             "--seed" => seed = value().parse().unwrap_or_else(|_| fail("--seed needs an integer")),
             "--out" => out = PathBuf::from(value()),
             "--site" => {
@@ -177,8 +187,8 @@ fn main() {
     println!("{} tile cores read from {}", tiles.len(), export.display());
     std::fs::create_dir_all(&out).unwrap_or_else(|e| fail(&e.to_string()));
     let inputs = BakeInputs::new(seed, planet_streaming::topology::bake_threads(0).map_or(4, |t| t.0));
-    let before = Field { inputs: &inputs, tiles: None, seed, c1 };
-    let after = Field { inputs: &inputs, tiles: Some(&tiles), seed, c1 };
+    let before = Field { inputs: &inputs, tiles: None, seed, c1, fade_sea_m: 0.0 };
+    let after = Field { inputs: &inputs, tiles: Some(&tiles), seed, c1, fade_sea_m: fade_sea };
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let grid = TileGrid { cells: FACE_CELLS, tile: TILE, halo: 256, radius_m: R };
     let aspect = f64::from(SIZE.0) / f64::from(SIZE.1);
