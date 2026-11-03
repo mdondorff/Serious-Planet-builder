@@ -19,10 +19,17 @@ env:
   PLANET_REQUIRE_ADAPTER_GOLDENS: "1"
 
 jobs:
-  # Each OS runs two jobs in parallel (SPIKE-15 / BUILD-014: the WARP job took about 20 min as one job, the sum of its steps):
-  # `test` (checks, determinism manifest, tiers A+B, run modes) and `gpu` (tier C on the software adapter). Both build the workspace.
+  # Each OS runs its jobs in parallel (SPIKE-15 / BUILD-014: the WARP job took about 20 min as one job, the sum of its steps):
+  # `test` (tiers A+B in three parts; part 2 also checks, the determinism manifest and the run modes) and tier C on the software adapter
+  # (`gpu-build` and `gpu` on Windows, `gpu-linux`). `test`, `gpu-build` and `gpu-linux` build the workspace; the Windows tier-C parts
+  # run `gpu-build`'s archive.
+  # Tiers A+B run in three parts per OS (`--partition hash:N/3`, every test in exactly one part, placed by its name alone; BUILD-036). With
+  # two count parts Windows part 1 took 16m20s against 14m08s (test steps 535 s against 209 s, #1134): the relief-band gate holds every
+  # slot for 137 s, and no two-part split of the measured durations leaves both jobs under BUILD-014's 16 min (ab-balanced-parts). Hash
+  # does not reshuffle the parts when a test is added. Part 2 also runs the manifest, check, spec-lint, licences and the run-mode starts
+  # (about 216 s on Windows); the gate falls in part 3.
   test:
-    name: ${{ matrix.name }} A+B
+    name: ${{ matrix.name }} A+B ${{ matrix.part }}/3
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -30,8 +37,22 @@ jobs:
         include:
           - name: windows (WARP)
             os: windows-latest
+            part: 1
+          - name: windows (WARP)
+            os: windows-latest
+            part: 2
+          - name: windows (WARP)
+            os: windows-latest
+            part: 3
           - name: linux (lavapipe)
             os: ubuntu-24.04
+            part: 1
+          - name: linux (lavapipe)
+            os: ubuntu-24.04
+            part: 2
+          - name: linux (lavapipe)
+            os: ubuntu-24.04
+            part: 3
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -57,22 +78,28 @@ jobs:
           vulkaninfo --summary
           apt-cache policy mesa-vulkan-drivers | head -4
       - name: determinism manifest (GEN-003)
+        if: matrix.part == 2
         run: cargo run -q -p planet -- generate --manifest target/det/manifest-${{ runner.os }}.txt
       - name: upload determinism manifest
+        if: matrix.part == 2
         uses: actions/upload-artifact@v4
         with:
           name: det-manifest-${{ runner.os }}
           path: target/det/manifest-${{ runner.os }}.txt
           if-no-files-found: error
       - name: check (fmt, clippy, layering)
+        if: matrix.part == 2
         run: cargo xtask check
       - name: spec-lint
+        if: matrix.part == 2
         run: cargo xtask spec-lint
       - name: licences (CON-27)
+        if: matrix.part == 2
         run: cargo deny check licenses bans sources
       - name: test (tiers A+B)
-        run: cargo xtask test
+        run: cargo xtask test -- --partition hash:${{ matrix.part }}/3
       - name: run modes start (CON-01)
+        if: matrix.part == 2
         run: |
           cargo run -q -p planet -- editor --smoke --no-window
           cargo run -q -p planet -- generate --smoke
@@ -81,21 +108,52 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-logs-${{ runner.os }}-ab
+          name: test-logs-${{ runner.os }}-ab-${{ matrix.part }}
           path: target/test-logs/
           if-no-files-found: ignore
       - name: review images (tiers A+B)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: review-${{ runner.os }}-ab
+          name: review-${{ runner.os }}-ab-${{ matrix.part }}
           path: target/review/
           if-no-files-found: ignore
 
-  # Tier C on WARP runs in three parts (`--partition count:N/3`, every test in exactly one part; BUILD-018): two halves took 21.2 and
-  # 20.6 min after the heavy WARP tests were serialised (#1103), over BUILD-014's 16 min budget. Lavapipe runs about 13.5 min and stays whole.
+  # Tier C on WARP: one build of the tier-C binaries into a nextest archive (`gpu-build`), then four parts that run it (`--partition
+  # count:N/4`, every test in exactly one part; BUILD-018) without building: each part's job time is its tests plus the download, not
+  # another 5-6 min compile. With three parts and a build each, the part that drew most of the serialised `warp-heavy` tests ran 21-22 min
+  # (#1125), over BUILD-014's 16 min budget. Lavapipe runs about 14 min whole, beside them.
+  gpu-build:
+    name: windows (WARP) C build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # The dependencies are those of the `test` job (same profile): restore its cache and leave saving to it.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test
+          save-if: "false"
+      - uses: taiki-e/install-action@v2
+        id: install
+        continue-on-error: true
+        with:
+          tool: cargo-nextest
+      - uses: taiki-e/install-action@v2
+        if: steps.install.outcome == 'failure'
+        with:
+          tool: cargo-nextest
+      - name: tier-C archive
+        run: cargo xtask test gpu --archive-out target/gpu-archive.tar.zst
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gpu-archive
+          path: target/gpu-archive.tar.zst
+          retention-days: 1
+
   gpu:
-    name: ${{ matrix.name }} C${{ matrix.part && format(' {0}/3', matrix.part) || '' }}
+    name: ${{ matrix.name }} C${{ matrix.part && format(' {0}/4', matrix.part) || '' }}
+    needs: gpu-build
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -110,6 +168,55 @@ jobs:
           - name: windows (WARP)
             os: windows-latest
             part: 3
+          - name: windows (WARP)
+            os: windows-latest
+            part: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # The dependencies are those of the `test` job (same profile): restore its cache and leave saving to it.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test
+          save-if: "false"
+      - uses: taiki-e/install-action@v2
+        id: install
+        continue-on-error: true
+        with:
+          tool: cargo-nextest
+      - uses: taiki-e/install-action@v2
+        if: steps.install.outcome == 'failure'
+        with:
+          tool: cargo-nextest
+      - uses: actions/download-artifact@v4
+        with:
+          name: gpu-archive
+          path: target
+      - name: test gpu (tier C, software adapter)
+        run: cargo xtask test gpu --archive-file target/gpu-archive.tar.zst -- --partition count:${{ matrix.part }}/4
+      - name: test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-${{ runner.os }}-gpu${{ matrix.part && format('-{0}', matrix.part) || '' }}
+          path: target/test-logs/
+          if-no-files-found: ignore
+      # The golden candidates: the name the golden-review and bless skills download.
+      - name: review images
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-${{ runner.os }}${{ matrix.part && format('-{0}', matrix.part) || '' }}
+          path: target/review/
+          if-no-files-found: ignore
+
+  gpu-linux:
+    name: ${{ matrix.name }} C
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
           - name: linux (lavapipe)
             os: ubuntu-24.04
     steps:
@@ -130,25 +237,23 @@ jobs:
         with:
           tool: cargo-nextest
       - name: Software Vulkan (lavapipe)
-        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y mesa-vulkan-drivers libvulkan1 vulkan-tools
           vulkaninfo --summary
       - name: test gpu (tier C, software adapter)
-        run: cargo xtask test gpu ${{ matrix.part && format('-- --partition count:{0}/3', matrix.part) || '' }}
+        run: cargo xtask test gpu
         env:
           # The viewer window smoke (VIEW-005) needs a display. The Linux runner has none: the skip is declared here with its
           # reason (the test fails without the declaration) and noted in the job summary below.
-          PLANET_NO_DISPLAY: ${{ runner.os == 'Linux' && 'the ubuntu runner has no display' || '' }}
+          PLANET_NO_DISPLAY: the ubuntu runner has no display
       - name: viewer window smoke (VIEW-005)
-        if: runner.os == 'Linux'
         run: echo "viewer window smoke (VIEW-005) SKIPPED on this runner - no display; it runs on Windows CI and on Rasierklinge with test gpu --real" >> "$GITHUB_STEP_SUMMARY"
       - name: test logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-logs-${{ runner.os }}-gpu${{ matrix.part && format('-{0}', matrix.part) || '' }}
+          name: test-logs-${{ runner.os }}-gpu
           path: target/test-logs/
           if-no-files-found: ignore
       # The golden candidates: the name the golden-review and bless skills download.
@@ -156,7 +261,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: review-${{ runner.os }}${{ matrix.part && format('-{0}', matrix.part) || '' }}
+          name: review-${{ runner.os }}
           path: target/review/
           if-no-files-found: ignore
 

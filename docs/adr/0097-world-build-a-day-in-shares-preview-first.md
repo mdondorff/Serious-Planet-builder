@@ -1,5 +1,5 @@
 # 0097 World build: one day in shares, and a preview before every full run
-Status: accepted (owner, 2026-11-03: terms "work out", shares "make sense", "All 'day long builds' will require previews"); the share values of point 2 are proposed until the owner confirms them
+Status: accepted (owner, 2026-11-03: terms "work out", shares "make sense", "All 'day long builds' will require previews"; point 7: "don't saturate all conceptual threads and rather use p cores"); the share values of point 2 are proposed until the owner confirms them
 Date: 2026-11-03
 Source: owner, 2026-11-03; SPIKE-95 slot results (`spikes/perf-window-process/results/slot/results-2026-11-03.md`); GEN-014
 
@@ -17,6 +17,7 @@ Source: owner, 2026-11-03; SPIKE-95 slot results (`spikes/perf-window-process/re
 4. A world-build algorithm that also runs at runtime stays within the runtime budgets (flight speed, BUDG-001 to BUDG-003).
 5. Every stage offers a preview mode (a coarse planet or a region). A full world build starts only after the owner approves its preview.
 6. Terms: world build; field bake (was "global bake"); erosion bake (passes 1 and 2); pre-fill; wet floor; store (the result). "Global bake" is retiring (`docs/domain.md`).
+7. The world build runs on the background capacity B of ADR 0092 (performance cores, B = max(P - 2, 1)), not on every logical thread; each stage logs its thread count (owner, 2026-11-03).
 
 ## Consequences
 - A slower generator is acceptable while terrain's share holds.

@@ -1,28 +1,23 @@
 //! The pose stills (TEST-048): `test-render --scene capture-stills --poses FILE --out-dir DIR`, the lit path drawn at fixed poses over a
 //! world from the base terrain, for the owner's look reviews (M8-4, M8-8) and later regression checks.
 //!
-//! A still waits for the horizon maps of the chunks near its eye (REND-038): when they are not all baked within the timeout the run fails and
-//! names what was missing.
+//! A still draws the lit frame with the sun shadow of the march (`--shadow-march`, REND-051) and no horizon data.
 
 use crate::litperf::{capture_lod, new_renderer, request, LitSetup, Rig, WATER_T0};
 use crate::worldfield::WorldTerrain;
 use crate::{err, Options};
 use planet_core::{PlanetFixed, TileId, Vec3};
 use planet_frame::{Camera, SelectionCache};
-use planet_generators::chunkfield::ChunkKey;
 use planet_render::GpuContext;
-use std::collections::{BTreeSet, HashSet};
+use std::collections::BTreeSet;
 use std::io::Write;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 /// Whether `--scene NAME` names the pose stills.
 pub fn is_stills_scene(name: &str) -> bool {
     name == "capture-stills"
 }
-
-/// Seconds a pose may wait for its horizon maps when the file gives no `chunk_timeout_s`.
-pub const DEFAULT_CHUNK_TIMEOUT_S: f64 = 900.0;
 
 /// The local relief an anchor must stand in: the highest minus the lowest coupled-run height within `radius_m` of the cell.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -67,12 +62,6 @@ pub struct Pose {
 #[derive(Clone, Debug, PartialEq)]
 pub struct StillsConfig {
     pub anchor: Anchor,
-    pub chunk_timeout_s: f64,
-    /// The cell of the horizon chunks in metres (the viewer's 8 m unless the file says otherwise, `horizon_cell_m`; a test uses coarse chunks to stay quick).
-    pub horizon_cell_m: f64,
-    /// `coarse_horizon = false`: the stills are drawn without the coarse horizon map (the far-field shadows of the global run, REND-043), to tell what
-    /// it adds to a frame; the chunk horizons stay. A diagnostic of the owner's frames, on by default.
-    pub coarse_horizon: bool,
     /// `[place] slope_table_stride`: write `slopes.txt` ([`slope_table`]) over every this-many-th cell of the coupled lattice before the poses.
     pub slope_table_stride: Option<usize>,
     pub poses: Vec<Pose>,
@@ -151,7 +140,7 @@ fn required(t: &toml::Table, key: &str, whose: &str) -> Result<f64, String> {
     number(t, key, whose)?.ok_or_else(|| format!("{whose}: '{key}' is missing"))
 }
 
-/// Read the poses file: `[place]` (`anchor = "largest-river"`, or `lat` and `lon` in degrees), an optional `chunk_timeout_s`, and one
+/// Read the poses file: `[place]` (`anchor = "largest-river"`, or `lat` and `lon` in degrees) and one
 /// `[[pose]]` per still with `name`, `altitude_m`, `back_m`, `heading_deg`, `pitch_deg` and `sun_local_hours` (`sun_declination_deg`
 /// defaults to 0). A bad file is refused naming the key and the value.
 pub fn parse_config(text: &str) -> Result<StillsConfig, String> {
@@ -197,18 +186,6 @@ pub fn parse_config(text: &str) -> Result<StillsConfig, String> {
         }
         _ => return Err("[place]: give anchor = \"largest-river\", or lat and lon".into()),
     };
-    let chunk_timeout_s = number(&root, "chunk_timeout_s", "the poses file")?.unwrap_or(DEFAULT_CHUNK_TIMEOUT_S);
-    if chunk_timeout_s <= 0.0 {
-        return Err(format!("chunk_timeout_s must be positive, got {chunk_timeout_s}"));
-    }
-    let coarse_horizon = match root.get("coarse_horizon") {
-        None => true,
-        Some(v) => v.as_bool().ok_or_else(|| format!("coarse_horizon must be true or false, got {}", show(v)))?,
-    };
-    let horizon_cell_m = number(&root, "horizon_cell_m", "the poses file")?.unwrap_or(crate::horizonworld::HORIZON_CELL_M);
-    if horizon_cell_m <= 0.0 {
-        return Err(format!("horizon_cell_m must be positive, got {horizon_cell_m}"));
-    }
     let list = root.get("pose").and_then(|v| v.as_array()).ok_or("the poses file: no [[pose]]")?;
     let mut poses: Vec<Pose> = Vec::new();
     for (i, v) in list.iter().enumerate() {
@@ -231,10 +208,7 @@ pub fn parse_config(text: &str) -> Result<StillsConfig, String> {
             view: match t.get("view") {
                 None => None,
                 Some(v) => Some(v.as_str().and_then(planet_frame::look::shading::ShadeView::parse).ok_or_else(|| {
-                    format!(
-                        "{whose}: view {} is not a view of the J cycle (lit, horizon, shadow, soil, moisture, insolation, ...)",
-                        show(v)
-                    )
+                    format!("{whose}: view {} is not a view of the J cycle (lit, shadow, soil, moisture, insolation, ...)", show(v))
                 })?),
             },
             name,
@@ -258,7 +232,7 @@ pub fn parse_config(text: &str) -> Result<StillsConfig, String> {
         Some(k) if k >= 1.0 && k.fract() == 0.0 => Some(k as usize),
         Some(k) => return Err(format!("[place]: slope_table_stride {k} must be a whole number of at least 1")),
     };
-    Ok(StillsConfig { anchor, chunk_timeout_s, horizon_cell_m, coarse_horizon, slope_table_stride, poses, look: parse_look(&root)? })
+    Ok(StillsConfig { anchor, slope_table_stride, poses, look: parse_look(&root)? })
 }
 
 /// The unit vector towards the sun when it stands at `local_hours` of local solar time (12 is noon) at longitude `lon_deg`, with
@@ -302,53 +276,6 @@ pub fn pose_camera(
     let ahead = if pose.back_m > 0.0 { (anchor - eye_dir * anchor.dot(eye_dir)).normalized() } else { heading };
     let near = (pose.altitude_m * 0.05).clamp(0.05, 0.1);
     Camera::at_surface_point(PlanetFixed(eye_dir * (radius_m + eye_alt)), ahead, pose.pitch_deg.to_radians(), fov_y_rad, aspect, near)
-}
-
-/// How far from the eye a still waits for chunk horizon maps, metres (two chunk edges and a bit).
-const HORIZON_WAIT_M: f64 = 12_000.0;
-
-/// A still waited too long for the horizon maps of the chunks near its eye.
-fn no_map_message(pose: &str, secs: f64, missing: &[ChunkKey], wanted: usize) -> String {
-    let some: Vec<String> = missing.iter().take(4).map(|k| format!("face {} x {} y {}", k.0, k.1, k.2)).collect();
-    format!(
-        "pose '{pose}': {} of {wanted} chunks had no horizon map after {secs:.0} s (first missing: {}); raise chunk_timeout_s",
-        missing.len(),
-        some.join(", ")
-    )
-}
-
-/// Run the horizon jobs for the plan `tiles` until every chunk a tile lies in has its map and no job is in flight, or `timeout_s` passes
-/// (an error naming the chunks that have none). Returns the number of maps.
-fn settle_horizon(world: &WorldTerrain, pose: &str, tiles: &[TileId], camera: PlanetFixed, timeout_s: f64) -> Result<usize, String> {
-    let started = Instant::now();
-    // The chunks within `HORIZON_WAIT_M` of the eye: the farther ones read the coarse horizon (the stand-in rule), as they do in the viewer.
-    let radius_m = world.radius_m();
-    let keys: Vec<ChunkKey> = {
-        let mut seen = HashSet::new();
-        tiles
-            .iter()
-            .filter_map(|&t| planet_frame::horizonview::tile_in_chunk(t).map(|(k, _)| k))
-            .filter(|k| seen.insert(*k))
-            .filter(|k| {
-                let tile =
-                    TileId::new(planet_core::Face(k.0), planet_generators::chunk::CHUNK_GRID_LEVEL, k.1, k.2).expect("a chunk of the grid");
-                (tile.center_direction(&planet_core::cube::TangentWarp) * radius_m - camera.0).length() <= HORIZON_WAIT_M
-            })
-            .collect()
-    };
-    loop {
-        crate::horizonstep::frame_step(world, tiles, camera, &crate::horizonstep::settling_features(true), &mut Default::default());
-        let missing: Vec<&ChunkKey> = keys.iter().filter(|k| world.horizon_map(**k).is_none()).collect();
-        if missing.is_empty() {
-            return Ok(keys.len());
-        }
-        let waited = started.elapsed().as_secs_f64();
-        if waited > timeout_s {
-            let missing: Vec<ChunkKey> = missing.into_iter().copied().collect();
-            return Err(no_map_message(pose, waited, &missing, keys.len()));
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
 }
 
 /// The highest minus the lowest height of the coupled run over the cells within `radius_m` of cell `c` (flood over the eight neighbours, by
@@ -697,9 +624,6 @@ fn run_stills(
     )
     .map_err(err)?;
     let maps = crate::horizonstep::wait_coupled(&world, out)?;
-    world.set_horizon_cells(crate::horizonworld::cells_per_chunk_for(radius_m, config.horizon_cell_m));
-    world.enable_viewer_horizon(o.gen_workers(), Arc::new(planet_streaming::SystemClock::new()))?;
-    crate::horizonstep::wait_coarse_horizon(&world, out)?;
     let base = world.field()?;
     let step_m = std::f64::consts::FRAC_PI_2 * radius_m / f64::from(world.global_res());
     let (anchor, flow, measured) = anchor_direction(config.anchor, &maps, &|d| base.height(d), step_m)?;
@@ -732,7 +656,7 @@ fn run_stills(
     }
     std::fs::create_dir_all(&dir).map_err(err)?;
     let mut index =
-        notes + "# pose width height eye_lat_deg eye_lon_deg eye_height_m heading_deg pitch_deg sun_local_hours horizon_maps horizon_s nodes capped_nodes\n";
+        notes + "# pose width height eye_lat_deg eye_lon_deg eye_height_m heading_deg pitch_deg sun_local_hours nodes capped_nodes\n";
     for pose in &config.poses {
         let pose = &Pose { heading_deg: pose.heading_deg.rem_euclid(360.0), ..pose.clone() };
         let started = Instant::now();
@@ -764,10 +688,6 @@ fn run_stills(
             std::fs::write(dir.join("capped.txt"), report).map_err(err)?;
         }
         let tiles: Vec<TileId> = plan.nodes.iter().map(|n| n.tile).collect();
-        // The horizon maps of the chunks the tiles lie in (REND-038): a still shows the shadows, never the stand-in.
-        let horizon_started = Instant::now();
-        let horizon_maps = settle_horizon(&world, &pose.name, &tiles, camera.position, config.chunk_timeout_s)?;
-        let horizon_s = horizon_started.elapsed().as_secs_f64();
         let mut r = new_renderer(&rig, &setup, camera)?;
         crate::skeleton::upload_missing_meshes(ctx, Some(&world), &mut r, &plan, rig.field, radius_m, o.cells)?;
         let (_, eye_lon) = camera.position.0.lat_lon();
@@ -777,7 +697,6 @@ fn run_stills(
         } else {
             None
         };
-        let mut horizon = crate::horizonworld::HorizonRig::default();
         // The exposure adapts over a few frames of half a second, the first snapping to its target.
         for k in 0..4 {
             let mut lit = setup.plan(&world, rig.field, &plan, WATER_T0 + k as f64 * 0.5, 0.5, k == 0)?;
@@ -786,15 +705,7 @@ fn run_stills(
                 config.look.apply(l);
                 l.view = pose.view.unwrap_or(l.view);
             }
-            // One map is uploaded a frame: the frames of the exposure give the first four, the settling frames the rest.
-            horizon.frame(&world, ctx, &mut r, &tiles, &world.horizon_frame(&tiles, camera.position), sun);
             r.render(ctx, &lit, false).map_err(|e| e.to_string())?;
-        }
-        for _ in 0..horizon_maps {
-            horizon.frame(&world, ctx, &mut r, &tiles, &world.horizon_frame(&tiles, camera.position), sun);
-        }
-        if !config.coarse_horizon {
-            r.set_horizon_coarse(ctx, None);
         }
         let mut lit = setup.plan(&world, rig.field, &plan, WATER_T0 + 2.0, 0.5, false)?;
         if let Some(l) = lit.lit.as_mut() {
@@ -826,7 +737,7 @@ fn run_stills(
         let height = camera.position.0.length() - radius_m;
         writeln!(
             out,
-            "{}: {horizon_maps} horizon maps in {horizon_s:.1} s, {} shadow frames, drawn in {:.1} s -> {}",
+            "{}: {} shadow frames, drawn in {:.1} s -> {}",
             pose.name,
             r.shadow_frames_run(),
             started.elapsed().as_secs_f64(),
@@ -834,7 +745,7 @@ fn run_stills(
         )
         .map_err(err)?;
         index += &format!(
-            "{} {} {} {:.5} {:.5} {:.1} {} {} {} {} {:.1} {} {}\n",
+            "{} {} {} {:.5} {:.5} {:.1} {} {} {} {} {}\n",
             pose.name,
             size.0,
             size.1,
@@ -844,8 +755,6 @@ fn run_stills(
             pose.heading_deg,
             pose.pitch_deg,
             pose.sun_local_hours,
-            horizon_maps,
-            horizon_s,
             plan.nodes.len(),
             plan.nodes.iter().filter(|n| n.capped).count()
         );
@@ -1076,7 +985,7 @@ pub fn is_cost_scene(name: &str) -> bool {
     name == "shadow-cost"
 }
 
-/// The budget of the horizon shadows and the material map together, milliseconds of terrain-pass GPU time at 1440p (REND-044, M8 criterion 5).
+/// The budget of the material map, milliseconds of terrain-pass GPU time at 1440p (REND-044, M8 criterion 5).
 pub const COST_BUDGET_MS: f64 = 1.5;
 /// A share within this fraction of the budget is flagged, not called met (the compiled-out variants have no branch left) (opus-planner, 2026-10-27).
 pub const COST_NEAR: f64 = 0.2;
@@ -1086,37 +995,30 @@ const COST_FRAMES: usize = 41;
 /// Seconds of untimed frames before the first variant of a pose (the GPU idled while the pose settled) and before each later one.
 const COST_WARM_FIRST_S: f64 = 3.0;
 const COST_WARM_S: f64 = 1.0;
-/// Rounds of the round-robin over the product shader and the three compiled-out builds.
+/// Rounds of the round-robin over the product shader and the build with the material map compiled out.
 const COST_ROUNDS: usize = 3;
 
 /// The terrain-pass GPU time of one pose, milliseconds, medians of [`COST_FRAMES`] waited frames (REND-044).
 #[derive(Clone, Debug, PartialEq)]
 pub struct CostRow {
     pub pose: String,
-    /// Shadows on, ground detail at full strength.
+    /// Ground detail at full strength.
     pub full: f64,
-    /// Horizon maps cleared (every node reads slot -1) and the coarse map off.
-    pub no_shadow: f64,
     /// Ground detail at strength 0.
     pub no_material: f64,
-    /// Both off.
-    pub neither: f64,
-    /// The same three variants with the code compiled out of the shader (`MeasureVariant`: no shadow, no material, neither); no branch is left,
-    /// so the shares from them neither under-read the shadows nor over-read the material map.
-    pub compiled_out: Option<[f64; 3]>,
-    /// The spread (largest minus smallest) of the round medians of `full` and the three compiled-out variants; `full` and `compiled_out` are
-    /// the medians of those [`COST_ROUNDS`] round medians, the variants interleaved round-robin so a slow period hits every variant alike.
-    pub spread: Option<[f64; 4]>,
+    /// The same without the material map with the code compiled out of the shader (`MeasureVariant::NoMaterial`); no branch is left, so the
+    /// share from it does not over-read the material map.
+    pub compiled_out: Option<f64>,
+    /// The spread (largest minus smallest) of the round medians of `full` and the compiled-out variant; `full` and `compiled_out` are the
+    /// medians of those [`COST_ROUNDS`] round medians, the variants interleaved round-robin so a slow period hits both alike.
+    pub spread: Option<[f64; 2]>,
 }
 
 impl CostRow {
-    /// The shadows' share, the material map's share and both together (full minus the variant without them), from the compiled-out
-    /// variants when the row has them, else from the runtime ones.
-    pub fn shares(&self) -> (f64, f64, f64) {
-        match self.compiled_out {
-            Some([shadow, material, both]) => (self.full - shadow, self.full - material, self.full - both),
-            None => (self.full - self.no_shadow, self.full - self.no_material, self.full - self.neither),
-        }
+    /// The material map's share (full minus the variant without it), from the compiled-out variant when the row has it, else from the
+    /// runtime one.
+    pub fn share(&self) -> f64 {
+        self.full - self.compiled_out.unwrap_or(self.no_material)
     }
 }
 
@@ -1156,8 +1058,8 @@ fn terrain_ms(
     Ok(median(v))
 }
 
-/// Time the terrain pass of the settled pose in the four variants. The renderer keeps no way to put the horizon maps back, so the shadows are
-/// cleared after the variants that need them: full, no material, then neither, then no shadow.
+/// Time the terrain pass of the settled pose in the two variants: the product shader and the build with the material map compiled out,
+/// round-robin, then the runtime-off draw (ground detail at strength 0).
 fn measure_cost(
     ctx: &GpuContext,
     r: &mut planet_render::TerrainRenderer,
@@ -1170,13 +1072,12 @@ fn measure_cost(
         }
     };
     detail(plan, 1.0);
-    // The product shader and the three builds with the code compiled out (REND-044), while the maps and the detail are still on, round-robin
-    // for [`COST_ROUNDS`] rounds: a slow period of the machine falls on every variant alike, and the value of a variant is the median of its
-    // round medians (the minimum would bias the shares low).
+    // The product shader and the build with the material map compiled out (REND-044), round-robin for [`COST_ROUNDS`] rounds: a slow period
+    // of the machine falls on both alike, and the value of a variant is the median of its round medians (the minimum would bias the share low).
     use planet_render::MeasureVariant as V;
-    let variants = [V::Product, V::NoShadow, V::NoMaterial, V::Neither];
+    let variants = [V::Product, V::NoMaterial];
     // `rounds[round][variant]`: the median of one round of one variant.
-    let mut rounds = [[0.0; 4]; COST_ROUNDS];
+    let mut rounds = [[0.0; 2]; COST_ROUNDS];
     let mut first = true;
     for row in rounds.iter_mut() {
         for (slot, variant) in row.iter_mut().zip(variants) {
@@ -1188,30 +1089,25 @@ fn measure_cost(
     let column = |k: usize| rounds.iter().map(|row| row[k]).collect::<Vec<f64>>();
     let med = |k: usize| median(column(k));
     let spread = |k: usize| column(k).iter().cloned().fold(f64::MIN, f64::max) - column(k).iter().cloned().fold(f64::MAX, f64::min);
-    let full = med(0);
-    let compiled_out = [med(1), med(2), med(3)];
-    let spread = [spread(0), spread(1), spread(2), spread(3)];
+    let (full, compiled_out) = (med(0), med(1));
+    let spread = [spread(0), spread(1)];
     detail(plan, 0.0);
     let no_material = terrain_ms(ctx, r, plan, COST_WARM_S)?;
-    r.clear_horizon();
-    r.set_horizon_coarse(ctx, None);
-    let neither = terrain_ms(ctx, r, plan, COST_WARM_S)?;
     detail(plan, 1.0);
-    let no_shadow = terrain_ms(ctx, r, plan, COST_WARM_S)?;
-    Ok(CostRow { pose: pose.to_string(), full, no_shadow, no_material, neither, compiled_out: Some(compiled_out), spread: Some(spread) })
+    Ok(CostRow { pose: pose.to_string(), full, no_material, compiled_out: Some(compiled_out), spread: Some(spread) })
 }
 
-/// The failures of the budget (the shadows and the material map together at most [`COST_BUDGET_MS`] in every pose) and the poses within
+/// The failures of the budget (the material map at most [`COST_BUDGET_MS`] in every pose) and the poses within
 /// [`COST_NEAR`] of it, which are flagged, not called met (REND-044).
 pub fn cost_verdict(rows: &[CostRow]) -> (Vec<String>, Vec<String>) {
     let (mut over, mut near) = (Vec::new(), Vec::new());
     for r in rows {
-        let both = r.shares().2;
-        if !(both.is_finite() && both <= COST_BUDGET_MS) {
-            over.push(format!("{}: shadows and material map {both:.3} ms exceed {COST_BUDGET_MS} ms (REND-044)", r.pose));
-        } else if both > COST_BUDGET_MS * (1.0 - COST_NEAR) {
+        let m = r.share();
+        if !(m.is_finite() && m <= COST_BUDGET_MS) {
+            over.push(format!("{}: material map {m:.3} ms exceeds {COST_BUDGET_MS} ms (REND-044)", r.pose));
+        } else if m > COST_BUDGET_MS * (1.0 - COST_NEAR) {
             near.push(format!(
-                "{}: {both:.3} ms is within 20 % of the {COST_BUDGET_MS} ms budget (by the compiled-out shader variants when the row has them): not called met",
+                "{}: {m:.3} ms is within 20 % of the {COST_BUDGET_MS} ms budget (by the compiled-out shader variant when the row has it): not called met",
                 r.pose
             ));
         }
@@ -1221,7 +1117,7 @@ pub fn cost_verdict(rows: &[CostRow]) -> (Vec<String>, Vec<String>) {
 
 // spec: REND-044
 /// `test-render --perf --scene shadow-cost --poses FILE --out-dir DIR --store DIR --global-res N`: after the readiness gate, the settled poses of
-/// the stills at 1440p with the terrain pass timed in four variants; the log is `perf/logs/shadow-cost.json`.
+/// the stills at 1440p with the terrain pass timed in two variants (the product shader and the material map compiled out); the log is `perf/logs/shadow-cost.json`.
 pub fn perf_shadow_cost(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<(), String> {
     planet_perf::check_reference_adapter(&crate::facts(ctx)).map_err(|r| r.to_string())?;
     let owner_override = crate::readiness_gate(o, ctx, out)?;
@@ -1229,23 +1125,21 @@ pub fn perf_shadow_cost(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> R
     run_stills(o, ctx, out, Some(&mut rows), None)?;
     let (over, near) = cost_verdict(&rows);
     for r in &rows {
-        let (s, m, both) = r.shares();
+        let m = r.share();
         writeln!(
             out,
-            "{}: terrain pass {:.3} ms; shadows {s:.3} ms, material map {m:.3} ms, together {both:.3} ms (runtime off: without shadows {:.3}, without material {:.3}, without both {:.3}; compiled out: {}; spread across rounds: {})",
+            "{}: terrain pass {:.3} ms; material map {m:.3} ms (runtime off: without material {:.3}; compiled out: {}; spread across rounds: {})",
             r.pose,
             r.full,
-            r.no_shadow,
             r.no_material,
-            r.neither,
-            r.compiled_out.map_or("none".to_string(), |c| format!("{:.3}, {:.3}, {:.3}", c[0], c[1], c[2])),
-            r.spread.map_or("none".to_string(), |c| format!("{:.3}, {:.3}, {:.3}, {:.3}", c[0], c[1], c[2], c[3]))
+            r.compiled_out.map_or("none".to_string(), |c| format!("{c:.3}")),
+            r.spread.map_or("none".to_string(), |c| format!("{:.3}, {:.3}", c[0], c[1]))
         )
         .map_err(err)?;
     }
     writeln!(
         out,
-        "the shares are full minus the shader with the code compiled out (no branch left; the runtime-off variants under-read the shadows and over-read the material map); 1440p, each variant the median of {COST_ROUNDS} round medians of {COST_FRAMES} frames, interleaved round-robin"
+        "the share is full minus the shader with the material map compiled out (no branch left; the runtime-off draw over-reads it); 1440p, each variant the median of {COST_ROUNDS} round medians of {COST_FRAMES} frames, interleaved round-robin"
     )
     .map_err(err)?;
     for n in &near {
@@ -1254,16 +1148,14 @@ pub fn perf_shadow_cost(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> R
     let poses: Vec<String> = rows
         .iter()
         .map(|r| {
-            let (s, m, both) = r.shares();
+            let m = r.share();
             format!(
-                "    {{\"pose\": {:?}, \"full_ms\": {:.4}, \"no_shadow_ms\": {:.4}, \"no_material_ms\": {:.4}, \"neither_ms\": {:.4}, \"compiled_out_ms\": {}, \"round_spread_ms\": {}, \"shadow_ms\": {s:.4}, \"material_ms\": {m:.4}, \"together_ms\": {both:.4}}}",
+                "    {{\"pose\": {:?}, \"full_ms\": {:.4}, \"no_material_ms\": {:.4}, \"compiled_out_ms\": {}, \"round_spread_ms\": {}, \"material_ms\": {m:.4}, \"together_ms\": {m:.4}}}",
                 r.pose,
                 r.full,
-                r.no_shadow,
                 r.no_material,
-                r.neither,
-                r.compiled_out.map_or("null".to_string(), |c| format!("[{:.4}, {:.4}, {:.4}]", c[0], c[1], c[2])),
-                r.spread.map_or("null".to_string(), |c| format!("[{:.4}, {:.4}, {:.4}, {:.4}]", c[0], c[1], c[2], c[3]))
+                r.compiled_out.map_or("null".to_string(), |c| format!("[{c:.4}]")),
+                r.spread.map_or("null".to_string(), |c| format!("[{:.4}, {:.4}]", c[0], c[1]))
             )
         })
         .collect();
@@ -1297,31 +1189,41 @@ mod tests {
 
     // spec: REND-044
     #[test]
-    fn the_cost_shares_are_differences_and_a_pose_near_the_budget_is_flagged_not_called_met() {
-        let row = |pose: &str, full: f64, shadow: f64, material: f64, neither: f64| CostRow {
+    fn the_cost_share_is_a_difference_and_a_pose_near_the_budget_is_flagged_not_called_met() {
+        let row = |pose: &str, full: f64, material: f64| CostRow {
             pose: pose.into(),
             full,
-            no_shadow: shadow,
             no_material: material,
-            neither,
             compiled_out: None,
             spread: None,
         };
-        // The compiled-out variants, when a row has them, are what the shares and the verdict read.
-        let with = CostRow { compiled_out: Some([4.6, 4.2, 3.9]), ..row("w", 5.0, 4.5, 4.6, 4.0) };
-        assert_eq!(with.shares(), (5.0 - 4.6, 5.0 - 4.2, 5.0 - 3.9));
-        let ok = row("a", 5.0, 4.5, 4.6, 4.0);
-        assert_eq!(ok.shares().2, 1.0);
+        // The compiled-out variant, when a row has it, is what the share and the verdict read.
+        let with = CostRow { compiled_out: Some(4.2), ..row("w", 5.0, 4.6) };
+        assert_eq!(with.share(), 5.0 - 4.2);
+        let ok = row("a", 5.0, 4.0);
+        assert_eq!(ok.share(), 1.0);
         assert_eq!(cost_verdict(&[ok]), (vec![], vec![]));
-        let (over, flagged) = cost_verdict(&[row("b", 5.0, 4.0, 4.0, 3.7)]);
+        let (over, flagged) = cost_verdict(&[row("b", 5.0, 3.7)]);
         assert!(over.is_empty() && flagged.len() == 1 && flagged[0].contains("within 20 %"), "{flagged:?}");
-        let (over, _) = cost_verdict(&[row("c", 5.0, 4.0, 4.0, 3.0)]);
+        let (over, _) = cost_verdict(&[row("c", 5.0, 3.0)]);
         assert!(over.len() == 1 && over[0].starts_with("c:") && over[0].contains("REND-044"), "{over:?}");
         // A pose with no reading is not met.
-        assert_eq!(cost_verdict(&[row("d", f64::NAN, 1.0, 1.0, 1.0)]).0.len(), 1);
+        assert_eq!(cost_verdict(&[row("d", f64::NAN, 1.0)]).0.len(), 1);
         assert_eq!(median(vec![3.0, 1.0, 2.0]), 2.0);
         assert_eq!(median(vec![4.0, 1.0, 2.0, 3.0]), 2.5);
         assert!(median(vec![]).is_nan());
+    }
+
+    // spec: TEST-050
+    #[test]
+    fn the_keys_of_the_horizon_era_in_an_old_poses_file_are_ignored_not_refused() {
+        let old = format!(
+            "chunk_timeout_s = 300
+horizon_cell_m = 300
+coarse_horizon = true
+{GOOD}"
+        );
+        assert_eq!(parse_config(&old).unwrap().poses.len(), parse_config(GOOD).unwrap().poses.len());
     }
 
     // spec: REND-052
@@ -1358,34 +1260,6 @@ pitch_deg = 0
 sun_local_hours = 12
 sun_declination_deg = 10
 "#;
-
-    // spec: TEST-048
-    #[test]
-    fn the_coarse_horizon_is_on_unless_the_file_turns_it_off_and_a_non_boolean_is_refused() {
-        assert!(parse_config(GOOD).unwrap().coarse_horizon, "on by default");
-        assert!(
-            !parse_config(&format!(
-                "coarse_horizon = false
-{GOOD}"
-            ))
-            .unwrap()
-            .coarse_horizon
-        );
-        assert!(
-            parse_config(&format!(
-                "coarse_horizon = true
-{GOOD}"
-            ))
-            .unwrap()
-            .coarse_horizon
-        );
-        let e = parse_config(&format!(
-            "coarse_horizon = 0
-{GOOD}"
-        ))
-        .unwrap_err();
-        assert!(e.contains("coarse_horizon must be true or false"), "{e}");
-    }
 
     // spec: LOOK-011
     #[test]
@@ -1568,8 +1442,6 @@ min_area_m2 = 1e9",
     fn the_poses_file_is_read_with_its_defaults_and_a_bad_one_names_the_key() {
         let c = parse_config(GOOD).unwrap();
         assert_eq!(c.anchor, Anchor::LargestRiver { min_height_m: 0.0, relief: None });
-        assert_eq!(c.chunk_timeout_s, DEFAULT_CHUNK_TIMEOUT_S);
-        assert_eq!(c.horizon_cell_m, 8.0);
         assert_eq!(c.poses.len(), 2);
         assert_eq!(c.poses[0].sun_declination_deg, 0.0);
         assert_eq!(c.poses[1].sun_declination_deg, 10.0);
@@ -1651,15 +1523,5 @@ min_area_m2 = 1e9",
         // The sea is the floor of the ground: over deep water the eye keeps `altitude_m` above the level.
         let sea = pose_camera(anchor, &pose, &|_| -4000.0, radius, 0.0, 1.0, 1.0);
         assert!((sea.position.0.length() - radius - 300.0).abs() < 1e-6);
-    }
-
-    // spec: TEST-048
-    #[test]
-    fn the_wait_names_the_pose_and_the_chunks_without_a_horizon_map() {
-        let m = no_map_message("300m-sunset", 900.4, &[(2, 5, 7), (2, 5, 8)], 12);
-        assert!(
-            m.contains("pose '300m-sunset'") && m.contains("2 of 12 chunks") && m.contains("900 s") && m.contains("face 2 x 5 y 7"),
-            "{m}"
-        );
     }
 }

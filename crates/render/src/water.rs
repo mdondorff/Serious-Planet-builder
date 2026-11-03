@@ -277,7 +277,7 @@ const WATER_ATMOSPHERE_LIGHT: &str = r#"
 
 fn water_light(n: vec3<f32>, up: vec3<f32>, h_alt: f32, sun: vec3<f32>, refl: vec3<f32>) -> WLight {
     var l: WLight;
-    let parts = atm_terrain_lighting_parts(n, up, h_alt, sun, 1.0);
+    let parts = atm_terrain_lighting_parts(n, up, h_alt, sun);
     l.ambient = parts.amb;
     l.direct = parts.dir;
     let mu_s = clamp(dot(up, sun), -1.0, 1.0);

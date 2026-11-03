@@ -9,11 +9,12 @@ pub struct SyntheticLoad {
     pub main_ms: f64,
     /// Milliseconds of GPU work per frame, 0 for a share without GPU time.
     pub gpu_ms: f64,
-    /// Cores kept busy for the whole run (the share's ceiling in BUDG-003).
+    /// Cores kept busy for the whole run: the share's ceiling (BUDG-003), set from the machine's shares by [`with_cores`].
     pub cores: usize,
 }
 
-/// The four reserved shares: sky and weather, physics, game logic, networking.
+/// The four reserved shares: sky and weather, physics, game logic, networking. Their `cores` are the desktop-sized defaults of the tests
+/// only; a run sizes the loads from the machine's shares with [`with_cores`] (BUDG-011).
 pub const LOADS: [SyntheticLoad; 4] = [
     SyntheticLoad { name: "sky", main_ms: 1.5, gpu_ms: 3.0, cores: 1 },
     SyntheticLoad { name: "physics", main_ms: 2.0, gpu_ms: 0.5, cores: 2 },
@@ -32,8 +33,14 @@ pub fn total_gpu_ms() -> f64 {
 }
 
 /// The cores of all loads (6).
-pub fn total_cores() -> usize {
-    LOADS.iter().map(|l| l.cores).sum()
+pub fn total_cores(loads: &[SyntheticLoad]) -> usize {
+    loads.iter().map(|l| l.cores).sum()
+}
+
+/// [`LOADS`] with each load's cores set to its share (BUDG-011, BUDG-003): `cores_of(name)` gives the share of the load's name (`sky`,
+/// `physics`, `game-logic`, `networking`, the names of the shares table), at least 1.
+pub fn with_cores(cores_of: &dyn Fn(&str) -> usize) -> [SyntheticLoad; 4] {
+    LOADS.map(|l| SyntheticLoad { cores: cores_of(l.name).max(1), ..l })
 }
 
 /// A monotonic clock in nanoseconds.
@@ -116,10 +123,10 @@ pub fn calibrate_spin() -> Option<Calibration> {
     )
 }
 
-/// Terrain's main-thread share in milliseconds per frame (BUDG-001), its GPU share (BUDG-002) and its cores (BUDG-003), and the frame median (BUDG-001).
+/// Terrain's main-thread share in milliseconds per frame (BUDG-001) and its GPU share (BUDG-002), and the frame median (BUDG-001); terrain's
+/// cores are the machine's terrain share (BUDG-003), given to [`ReserveReport::new`].
 pub const TERRAIN_MAIN_MS: f64 = 10.0;
 pub const TERRAIN_GPU_MS: f64 = 5.0;
-pub const TERRAIN_CORES: f64 = 12.0;
 pub const FRAME_MEDIAN_MS: f64 = 16.6;
 
 /// One reading of the reserve scene against the limit of its share.
@@ -151,11 +158,13 @@ pub struct ReserveReport {
 }
 
 impl ReserveReport {
-    /// The report of terrain's measured main-thread ms, GPU ms, busy threads and the frame median, and the reserved loads' own readings.
+    /// The report of terrain's measured main-thread ms, GPU ms, busy threads against its share `terrain_share` (BUDG-003) and the frame
+    /// median, and the reserved loads' own readings.
     pub fn new(
         terrain_main_ms: f64,
         terrain_gpu_ms: f64,
         terrain_cores: f64,
+        terrain_share: f64,
         frame_median_ms: f64,
         loads: Vec<ShareReading>,
     ) -> ReserveReport {
@@ -164,7 +173,7 @@ impl ReserveReport {
         let mut rows = vec![
             row("terrain", "main-thread ms", terrain_main_ms, TERRAIN_MAIN_MS),
             row("terrain", "GPU ms", terrain_gpu_ms, TERRAIN_GPU_MS),
-            row("terrain", "cores", terrain_cores, TERRAIN_CORES),
+            row("terrain", "cores", terrain_cores, terrain_share),
             row("frame", "median ms", frame_median_ms, FRAME_MEDIAN_MS),
         ];
         rows.extend(loads);
@@ -244,7 +253,13 @@ mod tests {
             LOADS.map(|l| (l.name, l.main_ms, l.gpu_ms, l.cores)),
             [("sky", 1.5, 3.0, 1), ("physics", 2.0, 0.5, 2), ("game-logic", 2.0, 0.0, 2), ("networking", 0.5, 0.0, 1),]
         );
-        assert_eq!((total_main_ms(), total_gpu_ms(), total_cores()), (6.0, 3.5, 6));
+        assert_eq!((total_main_ms(), total_gpu_ms(), total_cores(&LOADS)), (6.0, 3.5, 6));
+        // The cores come from the machine's shares (BUDG-011): Rasierklinge's worked example 1, 1, 1, 1.
+        let one = with_cores(&|_| 1);
+        assert_eq!((total_cores(&one), one[1].name, one[1].cores, one[1].main_ms), (4, "physics", 1, 2.0));
+        let desktop = with_cores(&|n| if n == "physics" || n == "game-logic" { 2 } else { 1 });
+        assert_eq!(total_cores(&desktop), 6);
+        assert_eq!(with_cores(&|_| 0)[0].cores, 1, "at least one core each");
     }
 
     // spec: BUDG-011
@@ -305,11 +320,11 @@ mod tests {
     // spec: BUDG-012, BUDG-007
     #[test]
     fn terrain_inside_its_shares_and_a_frame_under_16_6_ms_is_a_pass_listing_every_share() {
-        let r = ReserveReport::new(8.5, 4.2, 12.0, 12.0, vec![load_row("physics", 2.4)]);
+        let r = ReserveReport::new(8.5, 4.2, 6.0, 6.0, 12.0, vec![load_row("physics", 2.4)]);
         assert!(r.pass() && r.largest_overrun().is_none(), "a load over its own share does not decide");
         let lines = r.lines();
         assert!(lines[0].starts_with("  terrain main-thread ms: 8.50 (limit 10.00) ok"), "{lines:?}");
-        assert!(lines.iter().any(|l| l.contains("terrain cores: 12.00 (limit 12.00) ok")), "{lines:?}");
+        assert!(lines.iter().any(|l| l.contains("terrain cores: 6.00 (limit 6.00) ok")), "{lines:?}");
         assert!(lines.iter().any(|l| l.contains("physics main-thread ms: 2.40 (limit 2.00) OVER [load, not decisive]")), "{lines:?}");
         assert!(lines.last().unwrap().starts_with("reserve verdict: pass"), "{lines:?}");
     }
@@ -317,14 +332,14 @@ mod tests {
     // spec: BUDG-012, BUDG-007
     #[test]
     fn an_overrun_fails_the_verdict_and_names_the_largest_one() {
-        let r = ReserveReport::new(10.5, 4.0, 14.0, 17.0, vec![]);
+        let r = ReserveReport::new(10.5, 4.0, 8.0, 6.0, 17.0, vec![]);
         assert!(!r.pass());
         let big = r.largest_overrun().unwrap();
         assert_eq!((big.share.as_str(), big.resource), ("terrain", "cores"));
         let last = r.lines().pop().unwrap();
-        assert!(last.contains("FAIL") && last.contains("terrain cores at 14.00 against 12.00 (+17 %)"), "{last}");
+        assert!(last.contains("FAIL") && last.contains("terrain cores at 8.00 against 6.00 (+33 %)"), "{last}");
         // The frame alone over its median fails and is named.
-        let r = ReserveReport::new(9.0, 4.0, 12.0, 18.0, vec![]);
+        let r = ReserveReport::new(9.0, 4.0, 6.0, 6.0, 18.0, vec![]);
         assert!(!r.pass() && r.largest_overrun().unwrap().share == "frame");
     }
 }

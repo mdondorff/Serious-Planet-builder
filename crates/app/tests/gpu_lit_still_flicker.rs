@@ -25,6 +25,10 @@ fn the_lit_coast_view_draws_the_same_pixels_frame_after_frame_with_the_exposure_
         // The software rasteriser takes every core of a small runner; below-normal generation workers then never finish a job.
         "--gen-priority",
         "normal",
+        // A run that must be reproducible pins the pool (STRM-020): the default is the machine's terrain share, one tile worker
+        // on a 4-thread CI runner since #1117, where the scene's wall-clock limits were set with two.
+        "--gen-workers",
+        "2",
         "--global-res",
         "128",
     ]
