@@ -1,0 +1,1 @@
+- 2026-11-03 calibration-reference-machine: the calibration limits give no verdict off the reference machine ("no verdict (not the reference machine)") in the session, the log, accept and the preflight (TEST-039, TEST-040, ADR 0092 point 5)

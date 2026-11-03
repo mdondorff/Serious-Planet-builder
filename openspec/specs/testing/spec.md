@@ -909,7 +909,7 @@ Verify: A
 Status: active
 Source: ADR 0065, ADR 0093 (SPIKE-95), STRM-022, TEST-012, TEST-021, perf windows 7 and 11 and the desktop-app smoke (`docs/perf/smoke-desktop-app.md`), owner (2026-10-19)
 
-Scope: the limits are the reference machine's calibration (Rasierklinge, ADR 0065), and they give no verdict on another machine (ADR 0092 point 5). Today the parallel limits apply only at its 18 threads (TEST-089); until the change `calibration-reference-machine`, the single limits apply on any machine (a departure from ADR 0092 point 5, tracked in docs/status.md).
+Scope: the limits are the reference machine's calibration (Rasierklinge, ADR 0065), and they give no verdict on another machine (ADR 0092 point 5): readings logged on another adapter than the reference one (by the readiness gate's rule; a log names its adapter) are recorded and judged `no verdict (not the reference machine)`, neither a session cause nor `cpu_calibration_valid` false; on the reference machine the parallel limits apply at its 18 threads (TEST-089).
 
 Rationale (the data of 2026-10-19, in microseconds): on the quiet machine (native-UI coder session; competing processes 0.8 to 3.8 % of the CPU) before single spreads 46,170 to 49,913, before parallel median 85,042 to 106,885, after single 46,329 to 51,080 (59,335 in the one dive with `git` at up to 17 %), after parallel median 90,357 to 103,874; the slow planner terminal (2026-10-16) read before single 56,696 to 78,076 and before parallel median 127,845 to 131,044. The first rule (single 50,000, parallel 100,000, before and after) would have voided, on the quiet data, 2 of 7 window-11 scenes and 2 of 3 smoke dives on the before parallel median and 4 of 10 after single readings; the limits above, the quiet maximum plus about 5 %, void every scene of the slow state and the git-disturbed dive and none of the quiet scenes. SPIKE-95 (2026-11-02): with one timing per reading and the reading before the cool-down, the rule voided 36 % of the unloaded attempts of SPIKE-90 window 1 and 5 of 6 quiet reserve sessions; the readings of 2026-10-19 were single timings, so the limits are kept until the first window measures the new estimator.
 
@@ -931,7 +931,7 @@ Rationale (the data of 2026-10-19, in microseconds): on the quiet machine (nativ
 
 #### Scenario: The logging is wired in every kind of scene
 - **WHEN** a smoke run of one lit view, one lit flight (both shore-filter runs) and one streaming scene is given `--calibrate` on the software adapter, and a smoke run of a lit view is given none
-- **THEN** every run of the first logs the four readings and the two thread counts (positive), the log has `cpu_calibration_valid` true or false and not null, and the run without the option logs none and has `cpu_calibration_valid` null
+- **THEN** every run of the first logs the four readings and the two thread counts (positive), and the log has `cpu_calibration_valid` null with the reason `no verdict (not the reference machine)` (the software adapter is not the reference machine, ADR 0092 point 5); the run without the option logs none and has `cpu_calibration_valid` null with no reason
 
 ### Requirement: TEST-089 The CPU calibration's estimator, moment and scope
 A calibration reading SHALL be the smallest of 5 single timings and the median and maximum of the parallel repetition with the smallest median of 3 (STRM-022) on 18 threads (fewer on a smaller machine), not the pool's, the one before the case taken right before the first measured frame, after the settle and, where the scene has them, the cool-down and warm-up (ADR 0094). A reading outside TEST-039's limits SHALL void frame verdicts only; GPU rows stand. A run whose own load runs then (the reserve loads, BUDG-012) SHALL log `load_calib_declared_load` = 1; its reasons get the suffix ` (declared load: recorded, not voiding)` and void nothing. `accept` SHALL judge likewise; acceptance still needs frame validity.
@@ -963,7 +963,7 @@ Verify: A, C
 Status: active
 Source: M5 process review improvement 3, ADR 0020, ADR 0065
 
-Scope: its calibration limits are the reference machine's (TEST-039), at the reference thread count; a preflight serves the reference machine's perf windows (ADR 0020).
+Scope: its calibration limits are the reference machine's (TEST-039), at the reference thread count; a preflight serves the reference machine's perf windows (ADR 0020). On another machine its rounds are reported as `no verdict (not the reference machine)` and never refuse; the gate refuses the adapter there.
 
 #### Scenario: Ready machine
 - **WHEN** the gate has no failure and all three calibrations are within the limits
