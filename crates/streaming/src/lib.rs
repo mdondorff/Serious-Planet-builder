@@ -1237,6 +1237,12 @@ impl<T: Send + Sync + 'static> Streamer<T> {
         self.resident.contains_key(&tile)
     }
 
+    /// The tiles whose job is in flight (dispatched and not yet collected, a job queued in the spawner included): a job reads the field
+    /// when it starts, so one dispatched before an edit may land a version of the field before it (STRM-071).
+    pub fn in_flight_tiles(&self) -> impl Iterator<Item = TileId> + '_ {
+        self.in_flight.keys().copied()
+    }
+
     pub fn stats(&self) -> StreamStats {
         StreamStats {
             resident: self.resident.len(),
