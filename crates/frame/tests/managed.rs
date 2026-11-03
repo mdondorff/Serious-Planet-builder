@@ -98,6 +98,16 @@ struct EditField {
     inner: Reference,
     rev: Arc<std::sync::atomic::AtomicU64>,
     region: TileId,
+    /// When set, the first job of a tile the edit touches stops after it has read the field, names its tile and waits for the release:
+    /// a job that started before an edit and lands after it (STRM-071).
+    gate: std::sync::Mutex<Option<EditGate>>,
+}
+
+struct EditGate {
+    /// The tiles it may hold (the draw set's touched tiles): the first of them to load is held.
+    only: BTreeSet<TileId>,
+    started: std::sync::mpsc::Sender<TileId>,
+    release: std::sync::mpsc::Receiver<()>,
 }
 
 impl EditField {
@@ -159,7 +169,22 @@ struct EditSource {
 impl TileSource<CompactTile> for EditSource {
     fn load(&self, tile: TileId) -> Result<CompactTile, String> {
         let rec = ResidentRecords::new(self.field.as_ref(), &TangentWarp, &self.lod).record(tile);
-        Source { lod: self.lod.clone() }.load(tile).map(|t| CompactTile { key: rec.mesh_key, origin: rec.origin, ..t })
+        let made = Source { lod: self.lod.clone() }.load(tile).map(|t| CompactTile { key: rec.mesh_key, origin: rec.origin, ..t });
+        if self.field.touches(tile) {
+            let gate = {
+                let mut g = self.field.gate.lock().unwrap();
+                if g.as_ref().is_some_and(|g| g.only.contains(&tile)) {
+                    g.take()
+                } else {
+                    None
+                }
+            };
+            if let Some(g) = gate {
+                g.started.send(tile).unwrap();
+                g.release.recv().unwrap();
+            }
+        }
+        made
     }
 }
 
@@ -1594,7 +1619,7 @@ fn an_edit_refreshes_the_tiles_it_touches_while_their_old_versions_stay_drawn_an
     let rev = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let req = request(here(), 0.0, -0.4);
     let region = TileId::from_direction(&TangentWarp, here().0.normalized(), 6);
-    let field = Arc::new(EditField { inner: Reference(1), rev: Arc::clone(&rev), region });
+    let field = Arc::new(EditField { inner: Reference(1), rev: Arc::clone(&rev), region, gate: Default::default() });
     let mut rig = Rig::build_edited(1_000_000, false, 0, UploadBudget::default(), 64, Some(Arc::clone(&field)));
     rig.settle(&req);
     let drawn_before: BTreeSet<TileId> = rig.step(&req).pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
@@ -1644,7 +1669,7 @@ fn twenty_quick_edits_of_the_same_tiles_start_at_most_two_refresh_jobs_for_each_
     let rev = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let req = request(here(), 0.0, -0.4);
     let region = TileId::from_direction(&TangentWarp, here().0.normalized(), 6);
-    let field = Arc::new(EditField { inner: Reference(1), rev: Arc::clone(&rev), region });
+    let field = Arc::new(EditField { inner: Reference(1), rev: Arc::clone(&rev), region, gate: Default::default() });
     let mut rig = Rig::build_edited(1_000_000, false, 0, UploadBudget::default(), 64, Some(Arc::clone(&field)));
     rig.settle(&req);
     let affected: Vec<TileId> = rig.lp.resident().keys().filter(|t| field.touches(**t)).copied().collect();
@@ -1677,7 +1702,7 @@ fn the_edited_tiles_are_previewed_in_the_frame_after_the_edit_before_any_new_pla
     let rev = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let req = request(here(), 0.0, -0.4);
     let region = TileId::from_direction(&TangentWarp, here().0.normalized(), 6);
-    let field = Arc::new(EditField { inner: Reference(1), rev: Arc::clone(&rev), region });
+    let field = Arc::new(EditField { inner: Reference(1), rev: Arc::clone(&rev), region, gate: Default::default() });
     let mut rig = Rig::build_edited(1_000_000, false, 0, UploadBudget::default(), 64, Some(Arc::clone(&field)));
     rig.settle(&req);
     let affected: Vec<TileId> = rig.lp.resident().keys().filter(|t| field.touches(**t)).copied().collect();
@@ -1721,7 +1746,7 @@ fn a_tile_refreshed_in_the_first_step_of_a_drag_is_not_previewed_with_the_delta_
     let rev = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let req = request(here(), 0.0, -0.4);
     let region = TileId::from_direction(&TangentWarp, here().0.normalized(), 6);
-    let field = Arc::new(EditField { inner: Reference(1), rev: Arc::clone(&rev), region });
+    let field = Arc::new(EditField { inner: Reference(1), rev: Arc::clone(&rev), region, gate: Default::default() });
     let mut rig = Rig::build_edited(1_000_000, false, 0, UploadBudget::default(), 64, Some(Arc::clone(&field)));
     rig.settle(&req);
     let affected: Vec<TileId> = rig.lp.resident().keys().filter(|t| field.touches(**t)).copied().collect();
@@ -1910,4 +1935,114 @@ fn the_queue_of_cache_changes_stays_bounded_and_means_what_the_asks_meant() {
     w.submit(1, request(here(), 0.0, -0.4));
     spawner.run(1);
     assert_eq!(w.queued_for_test(), (0, 0));
+}
+
+/// An edit at the first frame of a view, with the jobs of that frame dispatched and not run: `gated` holds the first touched tile's job
+/// after it read the field until the edit is made; the find runs over `candidates(loop)`. Returns the rig, the gated tile (if any) and
+/// the touched tiles that were still queued in the streamer at the edit.
+fn edit_while_loading(
+    gated: bool,
+    max_in_flight: usize,
+    candidates: impl Fn(&ManagedLoop) -> Vec<TileId>,
+) -> (Rig, Arc<EditField>, TerrainRequest, Option<TileId>, Vec<TileId>) {
+    let rev = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let req = request(here(), 0.0, -0.4);
+    let region = TileId::from_direction(&TangentWarp, here().0.normalized(), 6);
+    let field = Arc::new(EditField { inner: Reference(1), rev: Arc::clone(&rev), region, gate: Default::default() });
+    let mut rig = Rig::build_edited(1_000_000, false, 0, UploadBudget::default(), max_in_flight, Some(Arc::clone(&field)));
+    // Frames until the view's draw set has touched tiles whose jobs are dispatched and not run (the machine stops between frames there).
+    let loading = |rig: &Rig| -> BTreeSet<TileId> {
+        let in_flight: BTreeSet<TileId> = rig.lp.manager().streamer().in_flight_tiles().collect();
+        rig.lp.wants().draw.iter().map(|(t, _)| *t).filter(|t| field.touches(*t) && in_flight.contains(t)).collect()
+    };
+    let mut frames = 0;
+    loop {
+        rig.begin(&req);
+        if !loading(&rig).is_empty() {
+            break;
+        }
+        rig.finish();
+        frames += 1;
+        assert!(frames < 200, "the view never dispatched a drawn tile the edit touches");
+    }
+    // The plan worker runs (the frame's plan), the tile jobs wait for the machine below.
+    rig.plan_spawner.run(4);
+    let mut held = None;
+    let (release_tx, worker) = if gated {
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let only = loading(&rig);
+        *field.gate.lock().unwrap() = Some(EditGate { only, started: started_tx, release: release_rx });
+        let spawner = Arc::clone(&rig.tile_spawner);
+        let worker = std::thread::spawn(move || spawner.run(usize::MAX));
+        held = Some(started_rx.recv_timeout(std::time::Duration::from_secs(60)).expect("a touched tile was dispatched"));
+        (Some(release_tx), Some(worker))
+    } else {
+        (None, None)
+    };
+    let streamer = rig.lp.manager().streamer();
+    let in_flight: BTreeSet<TileId> = streamer.in_flight_tiles().collect();
+    let queued: Vec<TileId> = rig
+        .lp
+        .wants()
+        .draw
+        .iter()
+        .map(|(t, _)| *t)
+        .filter(|t| field.touches(*t) && !in_flight.contains(t) && !rig.lp.resident().contains_key(t))
+        .collect();
+    // The edit as the editor makes it: the field changes, then the find over the candidates names the tiles it touches.
+    rev.store(1, Ordering::SeqCst);
+    let found: Vec<TileId> = candidates(&rig.lp).into_iter().filter(|t| field.touches(*t)).collect();
+    rig.lp.edit(&found);
+    if let (Some(tx), Some(w)) = (release_tx, worker) {
+        tx.send(()).unwrap();
+        w.join().unwrap();
+    }
+    rig.tile_jobs_per_frame = 10_000;
+    (rig, field, req, held, queued)
+}
+
+/// Frames until the view is exact and quiet, at most `frames`: whether it got there.
+fn becomes_exact(rig: &mut Rig, req: &TerrainRequest, frames: usize) -> bool {
+    (0..frames).any(|_| {
+        let f = rig.step(req);
+        f.counts.queued == 0 && f.counts.in_flight == 0 && f.pipeline.draw.kind == DrawKind::Exact
+    })
+}
+
+// spec: STRM-071, STRM-026
+#[test]
+fn a_tile_still_loading_from_the_old_field_when_an_edit_lands_is_found_and_loaded_again_from_the_new_one() {
+    let (mut rig, field, req, held, _) = edit_while_loading(true, 64, ManagedLoop::edit_candidates);
+    let held = held.expect("a gated tile");
+    assert!(becomes_exact(&mut rig, &req, 200), "the edit's find over the candidates leaves no tile on the old field");
+    assert_eq!(rig.step(&req).pipeline.draw.plan, plan_terrain_field(&req, field.as_ref()).unwrap(), "the frame of the new field");
+    let wanted = ResidentRecords::new(field.as_ref(), &TangentWarp, &lod()).record(held).mesh_key;
+    assert_eq!(rig.lp.resident().get(&held).map(|r| r.mesh_key), Some(wanted), "{held:?} holds the version of the new field");
+}
+
+// spec: STRM-071
+#[test]
+fn a_find_over_the_resident_tiles_alone_leaves_a_tile_that_was_loading_on_the_old_field_for_good() {
+    // The find as the window and the edit scene made it before STRM-071: the gated tile is not resident at the edit, so nothing names it,
+    // it lands with the old field's key, and the view never becomes exact again (the edit-latency smoke's "did not settle").
+    let (mut rig, _, req, held, _) = edit_while_loading(true, 64, |lp| lp.resident().keys().copied().collect());
+    let held = held.expect("a gated tile");
+    assert!(!becomes_exact(&mut rig, &req, 200), "{held:?} would have to be refreshed by something");
+    let r = rig.lp.manager().streamer().tile_report(held);
+    assert!(r.resident && !r.stale && !r.in_flight && !r.queued, "resident on the old field and not stale: {r:?}");
+}
+
+// spec: STRM-071
+#[test]
+fn touched_tiles_still_queued_in_the_streamer_at_an_edit_need_no_name_since_their_jobs_start_on_the_new_field() {
+    // Two jobs at a time: most of the view's touched tiles wait in the streamer's queue when the edit lands. A job reads the field when
+    // it starts, so they load the new version without being named.
+    let (mut rig, field, req, _, queued) = edit_while_loading(false, 2, ManagedLoop::edit_candidates);
+    assert!(!queued.is_empty(), "touched tiles were queued at the edit");
+    assert!(becomes_exact(&mut rig, &req, 2_000), "the queued tiles loaded the new version");
+    let records = ResidentRecords::new(field.as_ref(), &TangentWarp, &lod());
+    for t in &queued {
+        assert_eq!(rig.lp.resident().get(t).map(|r| r.mesh_key), Some(records.record(*t).mesh_key), "{t:?}");
+    }
 }
