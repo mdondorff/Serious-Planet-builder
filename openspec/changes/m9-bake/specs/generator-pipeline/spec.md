@@ -108,7 +108,10 @@ The bake SHALL compute two channels on the coupled lattice (2048 cells per face 
 - the relief driver `k` (GEN-097, tapered);
 - the ring mean `m`, the mean of the bake's elevation at the point and at the 8 compass points of a ring of 10 km radius (9 samples, a fixed order; the compass is east and north, east being the Z axis crossed with the direction (the Y axis at a pole), so the ring's orientation is continuous over every face edge and diagonal and a point shared by two faces has the same value on both).
 The tapered `k` is `1 + smoothstep(0, 400 m, m) (k - 1)` of the class weights' blended driver (GEN-097). The channels are computed from the direction alone (the bake's elevation and the class weights as inputs), f64 with `libm`, stored as f32, and the same bytes for any thread count. A block's range covers the points of its cells (including the shared row and column of the next block). `RELIEF_CHANNELS_VERSION` 1 (`relief_channels.rs`).
-The runtime base field SHALL be `m + k (e - m)` plus `k` times the creases, with `e` the bake, each term one read at the point.
+The runtime base field SHALL be `m + k (e - m)` plus `k` times the creases, with `e` the bake, each term one read at the point. It is behind a switch (`ErosionField::with_relief`), off by default:
+- off: `k` is 1 and `m` is not read, today's field bit for bit, its key and implementation id unchanged;
+- on: the implementation id is `cpu-erosion-v1+relief`, and the inputs hash folds the channels' identity (a hash of their content), their resolution and the channels' version; the body's relief scale SHALL be 1 (the channels are of the bake as it is), else the switch returns an error naming the scale;
+- the reader (`relief_lattice.rs`) interpolates the stored f32 points in f64, continuous across face edges, takes the channels' cells per face edge from the channels (a coarse planet pass and a full one read through the same code), and returns an error naming the face for a channel with a value that is not finite.
 
 Verify: A
 Status: planned
@@ -161,6 +164,10 @@ The field's height bounds over a cap SHALL take the layer's part from the min/ma
 - it is read at the finest pyramid level whose blocks are at least half the box, or from the layer's nodes for a box under 16 cells;
 - the runtime detail below the layer's cells adds its analytic per-octave bound;
 - a cap that crosses a face edge reads both faces' blocks.
+With the relief channels on the bounds SHALL also take:
+- the channels' range `[k_min, k_max, m_min, m_max]` over the cap: the union of the ranges of the blocks the cap touches, from a pyramid of the block ranges (a node wholly inside the cap is taken whole), and for a block the cap only touches the min and max of the lattice points of the nodes of 2 cells it touches;
+- the base `m + k (e - m) + k detail` over the intervals of `e`, `m`, `k` and the detail (products of intervals, a sound bound that ignores the correlation of `e` and `m`);
+- the planet-wide bound `max|1 - k| max|m| + k_max (max|e| + max|detail|)`, from `(1 - k) m + k (e + detail)`.
 Because each pyramid level holds the range of the levels below and of the nodes, the bounds of nested caps SHALL nest (LOD-012). The plan check at production parameters is TEST-083.
 
 Verify: A
