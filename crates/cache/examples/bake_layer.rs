@@ -209,7 +209,7 @@ fn main() {
             let b: Vec<f64> =
                 (0..tile * tile).map(|p| base(grid.direction(t.face, i0 + (p % tile) as i64, j0 + (p / tile) as i64))).collect();
             let path = out.join(format!("tile-{}-{}-{}.png", t.face.0, t.ti, t.tj));
-            tile_image(tile, grid.dx(), &b, core, 100.0)
+            tile_image(tile, grid.dx(), &b, core, 400.0)
                 .write_png(&path)
                 .unwrap_or_else(|e| fail(&format!("cannot write {}: {e}", path.display())));
             println!("wrote {}", path.display());
