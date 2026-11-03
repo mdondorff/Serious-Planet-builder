@@ -3,7 +3,7 @@
 //!
 //! Record kind 12 ([`KIND_LAYER_FACE`]) filed under the face's root tile. The key is the bake's stage key (the source), the bake's resolution, and under tag 15 the layer's
 //! version, the face grid's cells, the radius, the sea level, the seed, every parameter of the carve, and `inputs_id` (an identity of what the base field and the carve factor read: the
-//! class weights and relief channels, the erosion field's key). The payload is `codec (u8) | cells (u32 LE) | key (16 bytes) |` the face's `f32` plane (row `j` outer, then `i`, little-endian).
+//! class weights and relief channels, the erosion field's key). The payload is `codec (u8) | cells (u32 LE) | halo (u32 LE) | key (16 bytes) |` the face's `f32` plane of `cells + 2 halo` cells a side (row `j` outer, then `i`, little-endian).
 //! A face found under another key is an error naming both keys, not a silent recompute (ADR 0006: a changed input is another layer, never a mix).
 
 use std::path::Path;
@@ -23,7 +23,7 @@ pub const KIND_LAYER_FACE: u8 = Kind::LayerFace as u8;
 pub const LAYER_VERSION: u32 = 1;
 const LAYER_IMPLEMENTATION_ID: &str = "erosion-layer-face";
 const CODEC_VERSION: u8 = 1;
-const HEADER_LEN: usize = 1 + 4 + 16;
+const HEADER_LEN: usize = 1 + 4 + 4 + 16;
 
 /// What a layer is made of besides the bake it is beside.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -38,6 +38,8 @@ pub struct LayerSpec {
     pub inputs_id: u64,
     /// Whether the carve factor of GEN-097 is applied (it is part of the key; `run_pass1` refuses a factor that disagrees).
     pub uses_factor: bool,
+    /// Cells carved beyond each edge of a face ([`FaceSpec::halo`]); part of the key.
+    pub halo: usize,
 }
 
 impl LayerSpec {
@@ -46,6 +48,7 @@ impl LayerSpec {
         b.extend(LAYER_VERSION.to_le_bytes());
         b.extend(planet_generators::bake::BAKE_KERNEL_VERSION.to_le_bytes());
         b.push(u8::from(self.uses_factor));
+        b.extend((self.halo as u64).to_le_bytes());
         b.extend((self.cells as u64).to_le_bytes());
         for v in [self.radius_m, self.sea_level] {
             b.extend(v.to_bits().to_le_bytes());
@@ -62,7 +65,7 @@ impl LayerSpec {
     }
 
     fn face(&self, face: Face) -> FaceSpec {
-        FaceSpec { face, cells: self.cells, radius_m: self.radius_m, sea_level: self.sea_level, seed: self.seed }
+        FaceSpec { face, cells: self.cells, radius_m: self.radius_m, sea_level: self.sea_level, seed: self.seed, halo: self.halo }
     }
 }
 
@@ -89,6 +92,7 @@ pub fn face_record(world: &GlobalWorld, res: u32, spec: &LayerSpec, change: &Fac
     let mut payload = Vec::with_capacity(HEADER_LEN + 4 * change.change.len());
     payload.push(CODEC_VERSION);
     payload.extend((change.cells as u32).to_le_bytes());
+    payload.extend((change.halo as u32).to_le_bytes());
     payload.extend(key.0);
     for v in &change.change {
         payload.extend(v.to_le_bytes());
@@ -118,23 +122,25 @@ pub fn load_face_change(
     match store.get(KIND_LAYER_FACE, face_tile(face), key).map_err(|e| what(e.to_string()))? {
         Some(r) => {
             let p = &r.payload;
-            let plane = spec.cells * spec.cells;
+            let plane = (spec.cells + 2 * spec.halo).pow(2);
             if p.len() != HEADER_LEN + 4 * plane
                 || p[0] != CODEC_VERSION
                 || u32::from_le_bytes(p[1..5].try_into().expect("four bytes")) as usize != spec.cells
+                || u32::from_le_bytes(p[5..9].try_into().expect("four bytes")) as usize != spec.halo
             {
                 return Err(what(format!(
-                    "a payload of {} bytes that is not {} cells in codec {CODEC_VERSION} ({} bytes)",
+                    "a payload of {} bytes that is not {} cells and halo {} in codec {CODEC_VERSION} ({} bytes)",
                     p.len(),
                     spec.cells,
+                    spec.halo,
                     HEADER_LEN + 4 * plane
                 )));
             }
-            if p[5..21] != key.0 {
+            if p[9..25] != key.0 {
                 return Err(what("its payload names another key than its record".into()));
             }
             let change = p[HEADER_LEN..].as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
-            Ok(Some(FaceChange { face, cells: spec.cells, change }))
+            Ok(Some(FaceChange { face, cells: spec.cells, halo: spec.halo, change }))
         }
         None => match store.keys_for(KIND_LAYER_FACE, face_tile(face)).first() {
             Some(other) => Err(what(format!(

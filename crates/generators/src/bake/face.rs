@@ -19,21 +19,49 @@ pub struct FaceSpec {
     pub sea_level: f64,
     /// The world's stream: a face's jitter is `seed` mixed with the face, so two faces never share it.
     pub seed: u64,
+    /// Cells carved beyond each edge of the face, on the plane that continues the face over the neighbouring faces' ground (a halo): the face's own border is then an ordinary
+    /// cell, not an outlet, and the two faces that meet at an edge agree up to what the halo's width lets the water see. Only the face's own cells are kept. 0 is no halo.
+    pub halo: usize,
 }
 
-/// The change of one face: carved minus base, in metres, per cell (f32 as stored), row-major.
+/// The change of one face: carved minus base, in metres, per cell (f32 as stored), row-major, over the face's own cells and a halo of `halo` cells beyond each edge (the plane is
+/// `(cells + 2 halo)` cells wide; cell `(i, j)` of the face is at `(i + halo, j + halo)` of the plane).
 #[derive(Clone, Debug, PartialEq)]
 pub struct FaceChange {
     pub face: Face,
     pub cells: usize,
+    pub halo: usize,
     pub change: Vec<f32>,
 }
 
+impl FaceChange {
+    /// Cells per edge of the stored plane.
+    pub fn plane_cells(&self) -> usize {
+        self.cells + 2 * self.halo
+    }
+
+    /// The change of cell `(i, j)` of the face (`-halo <= i < cells + halo`: the halo cells have negative or large indices).
+    pub fn at(&self, i: i64, j: i64) -> f64 {
+        let (h, m) = (self.halo as i64, self.plane_cells());
+        f64::from(self.change[(j + h) as usize * m + (i + h) as usize])
+    }
+}
+
 impl FaceSpec {
-    /// The direction of the centre of cell `(i, j)`.
+    /// The direction of the centre of cell `(i, j)` of the face (the face's own cells; `i` and `j` below 0 or from `cells` on are the halo, see [`FaceSpec::halo_direction`]).
     pub fn direction(&self, i: usize, j: usize) -> Vec3 {
+        self.halo_direction(i as i64, j as i64)
+    }
+
+    /// The direction of the centre of cell `(i, j)`, which may lie in the halo (`-halo <= i < cells + halo`): the plane coordinate continues past the face's edge.
+    pub fn halo_direction(&self, i: i64, j: i64) -> Vec3 {
         let n = self.cells as f64;
         face_to_direction(&TangentWarp, self.face, 2.0 * (i as f64 + 0.5) / n - 1.0, 2.0 * (j as f64 + 0.5) / n - 1.0)
+    }
+
+    /// Cells per edge of the carved grid: the face and its halo.
+    pub fn grid_cells(&self) -> usize {
+        self.cells + 2 * self.halo
     }
 
     /// The cell size at the face's centre line.
@@ -42,7 +70,7 @@ impl FaceSpec {
     }
 
     fn grid(&self) -> Grid {
-        Grid::new(self.cells, self.cells, self.dx())
+        Grid::new(self.grid_cells(), self.grid_cells(), self.dx())
     }
 
     /// The jitter stream of this face.
@@ -52,17 +80,22 @@ impl FaceSpec {
     }
 }
 
-/// The base field sampled once per cell of the face, `threads` threads (a value per cell: the same bits for any count).
-pub fn sample_base(spec: &FaceSpec, base: &(dyn Fn(Vec3) -> f64 + Sync), threads: usize) -> Vec<f64> {
-    let par: &dyn Par = &threads;
-    par::map(par, spec.cells, &|j| (0..spec.cells).map(|i| base(spec.direction(i, j))).collect::<Vec<f64>>())
+/// A field sampled once per cell of the carved grid (the face and its halo), row-major, `threads` threads (a value per cell: the same bits for any count).
+fn sample_grid(spec: &FaceSpec, field: &(dyn Fn(Vec3) -> f64 + Sync), threads: usize) -> Vec<f64> {
+    let (par, h, m): (&dyn Par, i64, usize) = (&threads, spec.halo as i64, spec.grid_cells());
+    par::map(par, m, &|j| (0..m).map(|i| field(spec.halo_direction(i as i64 - h, j as i64 - h))).collect::<Vec<f64>>())
         .into_iter()
         .flatten()
         .collect()
 }
 
+/// The base field sampled once per cell of the carved grid (the face and its halo).
+pub fn sample_base(spec: &FaceSpec, base: &(dyn Fn(Vec3) -> f64 + Sync), threads: usize) -> Vec<f64> {
+    sample_grid(spec, base, threads)
+}
+
 /// Pass 1 on a face: samples `base` once per cell, carves it ([`carve`]; `factor` the carve factor of GEN-097 at a direction, 1 when absent) and returns the change.
-/// The outlets are the face's border cells and the cells of the base at or below the sea level.
+/// The outlets are the carved grid's border cells (the face's own, without a halo) and the cells of the base at or below the sea level.
 pub fn pass1_face(
     spec: &FaceSpec,
     base: &(dyn Fn(Vec3) -> f64 + Sync),
@@ -73,15 +106,9 @@ pub fn pass1_face(
     let grid = spec.grid();
     let z0 = sample_base(spec, base, threads);
     let outlet = grid.outlets(&z0, spec.sea_level);
-    let factors: Option<Vec<f64>> = factor.map(|f| {
-        let par: &dyn Par = &threads;
-        par::map(par, spec.cells, &|j| (0..spec.cells).map(|i| f(spec.direction(i, j))).collect::<Vec<f64>>())
-            .into_iter()
-            .flatten()
-            .collect()
-    });
+    let factors: Option<Vec<f64>> = factor.map(|f| sample_grid(spec, f, threads));
     let mut z = z0.clone();
     let params = CarveParams { sea_level: spec.sea_level, ..*params };
     carve(&grid, &mut z, &outlet, &params, factors.as_deref(), spec.stream());
-    FaceChange { face: spec.face, cells: spec.cells, change: z.iter().zip(&z0).map(|(a, b)| (a - b) as f32).collect() }
+    FaceChange { face: spec.face, cells: spec.cells, halo: spec.halo, change: z.iter().zip(&z0).map(|(a, b)| (a - b) as f32).collect() }
 }

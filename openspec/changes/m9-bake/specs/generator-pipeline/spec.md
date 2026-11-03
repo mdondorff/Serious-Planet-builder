@@ -128,7 +128,7 @@ The bake's first pass SHALL, per cube face:
 - breach after each route (the next fill sees the breached surface): from the leaves down, the receiver of a cell that stands higher than 0.1 % of the cell distance below it is lowered to that level, by at most 50 m, never an outlet (the sea and the face's border cells) and never below the sea level;
 - keep land above the sea level (plus the flood's epsilon) whatever depth the sea outlets have;
 - route with Barnes' improved priority flood (epsilon 1 mm), jittered D8 receivers (the jitter an integer hash of the GLOBAL cell and the direction, so a cell routes alike in every window that holds it) and the order from the receivers, re-routing every 5th step; the carve factor multiplies `K dt` and the uplift (`U / K` stays 20); a height or factor that is not finite, a flood without an outlet or with an epsilon that is not positive SHALL be refused;
-- not route across cube edges.
+- not route across cube edges: each face is carved on its own grid extended by a halo of `ceil(cells / 128)` cells (at least 4) beyond each edge over the plane that continues the face, so the face's own border is an ordinary cell; the stored change keeps the halo; a reader SHALL cross-fade the two faces within the halo's width of an edge (the face's own weight 0.5 at the edge rising to 1 by a smoothstep at the halo's width), so that the change is continuous across the edge.
 It SHALL keep each face's change as a record of the layer store (STRM-065) and checkpoint per face. The constants are start values (SPIKE-62, SPIKE-65, SPIKE-66, SPIKE-70, SPIKE-71).
 
 Verify: A, B

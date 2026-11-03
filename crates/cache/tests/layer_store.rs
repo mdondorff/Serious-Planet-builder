@@ -49,7 +49,7 @@ fn base(d: Vec3) -> f64 {
 }
 
 fn spec() -> LayerSpec {
-    LayerSpec { cells: 24, radius_m: R, sea_level: 0.0, seed: 17, carve: CarveParams::default(), inputs_id: 1, uses_factor: false }
+    LayerSpec { cells: 24, radius_m: R, sea_level: 0.0, seed: 17, carve: CarveParams::default(), inputs_id: 1, uses_factor: false, halo: 4 }
 }
 
 fn faces() -> Vec<Face> {
@@ -105,6 +105,7 @@ fn a_layer_made_for_other_parameters_is_refused_naming_both_keys() {
         LayerSpec { sea_level: 5.0, ..s },
         LayerSpec { inputs_id: 2, ..s },
         LayerSpec { uses_factor: true, ..s },
+        LayerSpec { halo: 5, ..s },
         LayerSpec { carve: CarveParams { steps: s.carve.steps + 1, ..s.carve }, ..s },
     ];
     let half = |_: Vec3| 0.5;
@@ -135,7 +136,7 @@ fn a_record_has_the_pinned_layout_and_a_damaged_one_is_an_error() {
     use planet_cache::pack::{PackWriter, DEFAULT_MAX_PACK_BYTES};
     let (w, s) = (world(), spec());
     let change = planet_generators::bake::face::pass1_face(
-        &planet_generators::bake::face::FaceSpec { face: Face(2), cells: s.cells, radius_m: R, sea_level: 0.0, seed: 17 },
+        &planet_generators::bake::face::FaceSpec { face: Face(2), cells: s.cells, radius_m: R, sea_level: 0.0, seed: 17, halo: s.halo },
         &base,
         None,
         &s.carve,
@@ -144,14 +145,15 @@ fn a_record_has_the_pinned_layout_and_a_damaged_one_is_an_error() {
     let r = face_record(&w, RES, &s, &change);
     assert_eq!((r.kind, r.kind), (12, KIND_LAYER_FACE));
     assert_eq!(r.tile, planet_cache::relief_store::face_tile(Face(2)));
-    assert_eq!((r.payload[0], u32::from_le_bytes(r.payload[1..5].try_into().unwrap()), &r.payload[5..21]), (1, 24, &r.key.0[..]));
-    assert_eq!(r.payload.len(), 21 + 4 * 24 * 24);
+    let word = |a: usize| u32::from_le_bytes(r.payload[a..a + 4].try_into().unwrap());
+    assert_eq!((r.payload[0], word(1), word(5), &r.payload[9..25]), (1, 24, 4, &r.key.0[..]));
+    assert_eq!(r.payload.len(), 25 + 4 * 32 * 32);
     assert!(w.is_live(&r));
     for (name, damage) in [
         ("a short payload", Box::new(|p: &mut Vec<u8>| p.truncate(30)) as Box<dyn Fn(&mut Vec<u8>)>),
         ("another codec", Box::new(|p: &mut Vec<u8>| p[0] = 9)),
         ("other cells", Box::new(|p: &mut Vec<u8>| p[1] = 25)),
-        ("another key inside", Box::new(|p: &mut Vec<u8>| p[7] ^= 1)),
+        ("another key inside", Box::new(|p: &mut Vec<u8>| p[11] ^= 1)),
     ] {
         let d = Dir::new("damaged");
         let mut bad = r.clone();

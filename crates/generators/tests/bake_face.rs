@@ -19,7 +19,7 @@ fn base(d: Vec3) -> f64 {
 }
 
 fn spec(face: u8, cells: usize) -> FaceSpec {
-    FaceSpec { face: Face(face), cells, radius_m: R, sea_level: 0.0, seed: 17 }
+    FaceSpec { face: Face(face), cells, radius_m: R, sea_level: 0.0, seed: 17, halo: 0 }
 }
 
 fn bits(c: &FaceChange) -> Vec<u32> {
@@ -73,7 +73,7 @@ fn the_six_faces_make_a_planet_map_with_its_base_carved_base_and_change() {
     // The change at a cell centre is the cell's value; between centres it is bilinear.
     let s = spec(2, 48);
     let d = s.direction(10, 20);
-    assert!((change_at(&faces, d) - f64::from(faces[2].change[20 * 48 + 10])).abs() < 1e-4);
+    assert!((change_at(&faces, d) - faces[2].at(10, 20)).abs() < 1e-4);
     let maps = pass1_maps(256, 17, &base, &faces);
     assert_eq!(maps.iter().map(|m| m.0.as_str()).collect::<Vec<_>>(), ["base", "carved", "change"]);
     for (name, img) in &maps {
@@ -111,4 +111,27 @@ fn the_change_is_the_same_bytes_on_1_and_8_threads_with_a_carve_factor() {
     let factor = |d: Vec3| 0.6 + 0.4 * libm::sin(3.0 * d.x + d.z);
     let (one, eight) = (pass1_face(&s, &base, Some(&factor), &params, 1), pass1_face(&s, &base, Some(&factor), &params, 8));
     assert_eq!(bits(&one), bits(&eight));
+}
+
+// spec: GEN-100
+#[test]
+fn a_halo_makes_the_border_an_ordinary_cell_and_the_change_continuous_across_an_edge() {
+    use planet_core::cube::{face_to_direction, TangentWarp};
+    let params = CarveParams::default();
+    let with_halo = |face: u8| FaceSpec { halo: 6, ..spec(face, 48) };
+    let faces: Vec<FaceChange> = (0..6).map(|f| pass1_face(&with_halo(f), &base, None, &params, 4)).collect();
+    let faces: [FaceChange; 6] = faces.try_into().expect("six faces");
+    assert_eq!((faces[0].cells, faces[0].halo, faces[0].change.len()), (48, 6, 60 * 60));
+    // Without a halo the border is an outlet and keeps its height; with one, some border cells are carved.
+    let carved_border = (0..48).filter(|&k| faces[0].at(0, k) != 0.0 || faces[0].at(k, 0) != 0.0).count();
+    assert!(carved_border > 0, "no border cell was carved with a halo");
+    // The cross-faded field is the same from both sides of an edge, to rounding.
+    for t in [-0.7, -0.2, 0.3, 0.8] {
+        let (a, b) = (face_to_direction(&TangentWarp, Face(0), 1.0 - 1e-9, t), face_to_direction(&TangentWarp, Face(0), 1.0 + 1e-9, t));
+        let (ca, cb) = (change_at(&faces, a), change_at(&faces, b));
+        assert!((ca - cb).abs() < 1e-3, "the change jumps by {} m across the edge at t = {t}", (ca - cb).abs());
+    }
+    // Deep inside a face the cross-fade does not act: the value is the face's own.
+    let s = with_halo(2);
+    assert!((change_at(&faces, s.direction(24, 24)) - faces[2].at(24, 24)).abs() < 1e-4);
 }

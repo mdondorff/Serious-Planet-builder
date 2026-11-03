@@ -11,7 +11,7 @@ use planet_cache::pack::TileStore;
 use planet_core::{Face, Vec3};
 use planet_generators::bake::carve::CarveParams;
 use planet_generators::bake::face::FaceChange;
-use planet_generators::bake::map::pass1_maps;
+use planet_generators::bake::map::{edge_steps, pass1_maps};
 use planet_generators::classes::{blended_carve_factor, blended_k, ClassLattice, ClassSource, CLASS_LATTICE_N};
 use planet_world_def::WorldDefinition;
 
@@ -33,6 +33,7 @@ const COARSE_LIMIT: usize = 4096;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut halo: Option<usize> = None;
     let (mut seed, mut res, mut out, mut threads, mut concurrency, mut width) =
         (14u64, 768usize, None::<PathBuf>, 0usize, 1usize, 1024usize);
     let mut faces: Vec<u8> = (0..6).collect();
@@ -42,6 +43,7 @@ fn main() {
         match a.as_str() {
             "--seed" => seed = value().parse().unwrap_or_else(|_| fail("--seed needs a non-negative integer")),
             "--planet-res" => res = value().parse().unwrap_or_else(|_| fail("--planet-res needs an integer (cells per face edge)")),
+            "--halo" => halo = Some(value().parse().unwrap_or_else(|_| fail("--halo needs an integer (cells beyond each face edge)"))),
             "--out" => out = Some(PathBuf::from(value())),
             "--threads" => threads = value().parse().unwrap_or_else(|_| fail("--threads needs an integer")),
             "--concurrency" => concurrency = value().parse().unwrap_or_else(|_| fail("--concurrency needs an integer")),
@@ -50,7 +52,7 @@ fn main() {
                 faces = value().split(',').map(|f| f.parse().ok().filter(|f| *f < 6).unwrap_or_else(|| fail("--faces needs a list of 0..5"))).collect()
             }
             other => fail(&format!(
-                "unknown option '{other}' (known: --seed N, --planet-res N, --out DIR, --threads N, --concurrency N, --map-width W, --faces LIST)"
+                "unknown option '{other}' (known: --seed N, --planet-res N, --halo N, --out DIR, --threads N, --concurrency N, --map-width W, --faces LIST)"
             )),
         }
     }
@@ -76,6 +78,7 @@ fn main() {
         source.elevation_m(d, &p, blended_k(&lattice.weights_at(d)))
     };
     let factor = |d: Vec3| blended_carve_factor(&lattice.weights_at(d));
+    let halo = halo.unwrap_or((res / 128).max(4));
     let spec = LayerSpec {
         cells: res,
         radius_m: RADIUS_M,
@@ -84,10 +87,11 @@ fn main() {
         carve: CarveParams::default(),
         inputs_id: inputs_id(),
         uses_factor: true,
+        halo,
     };
     let bake_res = res as u32;
     println!(
-        "pass 1: seed {seed}, {res} cells per face edge ({:.0} m), faces {faces:?}, one at a time on {threads} threads",
+        "pass 1: seed {seed}, {res} cells per face edge ({:.0} m), halo {halo} cells, faces {faces:?}, one at a time on {threads} threads",
         RADIUS_M * core::f64::consts::FRAC_PI_2 / res as f64
     );
     let started = Instant::now();
@@ -162,18 +166,8 @@ fn peak_memory_bytes() -> Option<u64> {
     line.split_whitespace().nth(1)?.parse::<u64>().ok().map(|kb| kb << 10)
 }
 
-/// The step of the change across a cube edge: the border cells are outlets and keep their heights (change 0), so the cells one in from the border carry the change that the
-/// two faces meet with. Prints the largest and the 99th percentile of its magnitude over all six faces' rings and the share of ring cells over 1 m.
+/// The step of the change across the cube edges against the step between neighbouring cells inside a face (the halo and the cross-fade of the reader keep it small).
 fn edge_report(changes: &[FaceChange; 6]) {
-    let mut ring: Vec<f32> = Vec::new();
-    for f in changes {
-        let n = f.cells;
-        for k in 1..n - 1 {
-            ring.extend([f.change[n + k], f.change[(n - 2) * n + k], f.change[k * n + 1], f.change[k * n + n - 2]].map(f32::abs));
-        }
-    }
-    ring.sort_by(f32::total_cmp);
-    let (max, p99) = (ring[ring.len() - 1], ring[(ring.len() as f64 * 0.99) as usize]);
-    let over = ring.iter().filter(|v| **v > 1.0).count() as f64 / ring.len() as f64;
-    println!("cube edges: the change one cell in from a face's border is at most {max:.1} m (99 % under {p99:.1} m, {:.1} % of the ring over 1 m)", over * 100.0);
+    let ((seam_max, seam_p99), (inner_max, inner_p99)) = edge_steps(changes);
+    println!("cube edges: the change steps by at most {seam_max:.1} m (99 % under {seam_p99:.1} m) from the cell at an edge to the cell across it; between neighbouring cells inside a face at most {inner_max:.1} m (99 % under {inner_p99:.1} m)");
 }
