@@ -103,6 +103,12 @@ pub fn pass1_face(
     params: &CarveParams,
     threads: usize,
 ) -> FaceChange {
+    assert!(
+        spec.halo * 2 < spec.cells,
+        "the halo ({} cells) must be under half the face ({} cells): beyond that the extended plane leaves the neighbouring ground",
+        spec.halo,
+        spec.cells
+    );
     let grid = spec.grid();
     let z0 = sample_base(spec, base, threads);
     let outlet = grid.outlets(&z0, spec.sea_level);

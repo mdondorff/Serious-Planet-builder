@@ -88,6 +88,15 @@ fn face_key(world: &GlobalWorld, res: u32, spec: &LayerSpec, face: Face) -> Cach
 
 /// The record of a face's change under `spec`.
 pub fn face_record(world: &GlobalWorld, res: u32, spec: &LayerSpec, change: &FaceChange) -> Record {
+    assert!(
+        (change.cells, change.halo) == (spec.cells, spec.halo),
+        "the change of face {} has {} cells and halo {}, the spec {} and {}",
+        change.face.0,
+        change.cells,
+        change.halo,
+        spec.cells,
+        spec.halo
+    );
     let key = face_key(world, res, spec, change.face);
     let mut payload = Vec::with_capacity(HEADER_LEN + 4 * change.change.len());
     payload.push(CODEC_VERSION);

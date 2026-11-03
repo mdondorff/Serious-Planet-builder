@@ -135,3 +135,46 @@ fn a_halo_makes_the_border_an_ordinary_cell_and_the_change_continuous_across_an_
     let s = with_halo(2);
     assert!((change_at(&faces, s.direction(24, 24)) - faces[2].at(24, 24)).abs() < 1e-4);
 }
+
+// spec: GEN-100
+#[test]
+fn the_cross_fade_reads_the_neighbours_halo_and_is_continuous_around_a_corner() {
+    use planet_core::cube::{direction_to_face, face_to_direction, TangentWarp};
+    use planet_generators::bake::map::change_in_face;
+    let (n, h) = (48usize, 6usize);
+    let m = n + 2 * h;
+    let step = 2.0 / n as f64;
+    // The face across face 0's edge s = 1; its plane holds its plane index (so a read of its halo shows), the other faces a constant of their own.
+    let nb = direction_to_face(&TangentWarp, face_to_direction(&TangentWarp, Face(0), 1.0 + step, 0.1)).0;
+    let faces: Vec<FaceChange> = (0..6u8)
+        .map(|f| FaceChange {
+            face: Face(f),
+            cells: n,
+            halo: h,
+            change: (0..m * m).map(|p| if Face(f) == nb { p as f32 } else { 3.0 * f32::from(f) }).collect(),
+        })
+        .collect();
+    let faces: [FaceChange; 6] = faces.try_into().expect("six faces");
+    // A direction on face 0 two and a half cells from the edge reads the neighbour's halo cells at that depth: its plane index there is not the edge line's.
+    let a = face_to_direction(&TangentWarp, Face(0), 1.0 - 2.5 * step, 0.1);
+    let deep = change_in_face(&faces[nb.0 as usize], a);
+    let b = face_to_direction(&TangentWarp, Face(0), 1.0 - 0.5 * step, 0.1);
+    let near = change_in_face(&faces[nb.0 as usize], b);
+    assert!((deep - near).abs() > 1.0, "the neighbour's halo is not read: {near} at the edge, {deep} two cells in");
+    // Around the vertex of face 0 with its two neighbours the field has no jump: points a cell either side of the diagonal, and at the vertex from each side, agree.
+    let flat: Vec<FaceChange> =
+        (0..6u8).map(|f| FaceChange { face: Face(f), cells: n, halo: h, change: vec![3.0 * f32::from(f); m * m] }).collect();
+    let flat: [FaceChange; 6] = flat.try_into().expect("six faces");
+    let vertex = |ds: f64, dt: f64| face_to_direction(&TangentWarp, Face(0), 1.0 - ds * step, 1.0 - dt * step);
+    let (p, q) = (change_at(&flat, vertex(1.0, 1.1)), change_at(&flat, vertex(1.1, 1.0)));
+    assert!((p - q).abs() < 0.5, "a jump of {} m across the corner diagonal", (p - q).abs());
+    let (p, q, r) = (change_at(&flat, vertex(1e-6, 1e-6)), change_at(&flat, vertex(-1e-6, 1e-6)), change_at(&flat, vertex(1e-6, -1e-6)));
+    assert!((p - q).abs() < 1e-3 && (p - r).abs() < 1e-3, "the vertex reads {p}, {q}, {r}");
+}
+
+// spec: GEN-100
+#[test]
+#[should_panic(expected = "under half the face")]
+fn a_halo_of_half_the_face_or_more_is_refused() {
+    pass1_face(&FaceSpec { halo: 3, ..spec(0, 6) }, &base, None, &CarveParams::default(), 1);
+}

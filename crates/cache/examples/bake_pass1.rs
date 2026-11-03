@@ -78,7 +78,7 @@ fn main() {
         source.elevation_m(d, &p, blended_k(&lattice.weights_at(d)))
     };
     let factor = |d: Vec3| blended_carve_factor(&lattice.weights_at(d));
-    let halo = halo.unwrap_or((res / 128).max(4));
+    let halo = halo.unwrap_or(res.div_ceil(128).max(4).min((res - 1) / 2));
     let spec = LayerSpec {
         cells: res,
         radius_m: RADIUS_M,
