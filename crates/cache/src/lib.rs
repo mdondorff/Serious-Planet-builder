@@ -7,6 +7,7 @@ pub mod hilbert;
 pub mod horizon_store;
 pub mod key;
 pub mod layer_store;
+pub mod layer_tiles;
 pub mod meshpack;
 pub mod pack;
 pub mod relief_store;

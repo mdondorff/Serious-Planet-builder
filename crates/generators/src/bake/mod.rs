@@ -8,13 +8,18 @@
 /// Version of the pass-1 kernels' behaviour (flood, receivers, jitter, carve, breach, the face grid): part of the layer's key (CON-07), bumped with any change that moves a bit. History: 1 = PR 3a/4.
 pub const BAKE_KERNEL_VERSION: u32 = 1;
 
+/// Version of pass 2's behaviour (the window and the face-change blend of `map::change_at`, the local carve, thermal, deposition, the quantisation): part of every tile's key. History: 1 = PR 3b/5.
+pub const PASS2_KERNEL_VERSION: u32 = 1;
+
 pub mod carve;
 pub mod deposit;
 pub mod face;
 pub mod flood;
+pub mod inputs;
 pub mod map;
 pub mod route;
 pub mod thermal;
+pub mod tile;
 
 /// A `w x h` grid of cells `dx` metres apart, row-major (`p = j w + i`), 8-connected, not wrapping, whose cell `(0, 0)` is the global cell `(origin.0, origin.1)`.
 #[derive(Clone, Copy, Debug, PartialEq)]
