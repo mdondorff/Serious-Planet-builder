@@ -205,8 +205,8 @@ pub fn parse_frames(text: &str) -> Result<Vec<FrameRecord>, String> {
             continue;
         }
         let t: Vec<&str> = line.split_whitespace().collect();
-        if t.len() != 26 {
-            return Err(format!("frames.txt line {}: {} columns, expected 26", n + 2, t.len()));
+        if t.len() != 31 {
+            return Err(format!("frames.txt line {}: {} columns, expected 31", n + 2, t.len()));
         }
         let bad = |what: &str| format!("frames.txt line {}: `{}` is not a {what}", n + 2, line);
         let f = |i: usize| t[i].parse::<f64>().map_err(|_| bad("number"));
@@ -241,6 +241,11 @@ pub fn parse_frames(text: &str) -> Result<Vec<FrameRecord>, String> {
             lit_plan_ms: f(23)?,
             deferred: u(24)? as usize,
             node_bytes: u(25)?,
+            node_build_ms: f(26)?,
+            node_write_ms: f(27)?,
+            refs_ms: f(28)?,
+            encode_ms: f(29)?,
+            submit_ms: f(30)?,
             ..FrameRecord::default()
         });
     }
@@ -1192,6 +1197,7 @@ mod tests {
         fr[3].upload_calls = 17;
         (fr[4].queries, fr[4].tile_misses, fr[4].band_queries, fr[4].lit_plan_ms) = (1089, 2, 3400, 12.5);
         (fr[6].deferred, fr[6].node_bytes, fr[6].upload_bytes, fr[6].uploaded) = (37, 4_096, 1 << 20, 110);
+        (fr[7].node_build_ms, fr[7].node_write_ms, fr[7].refs_ms, fr[7].encode_ms, fr[7].submit_ms) = (0.25, 0.125, 0.5, 1.5, 0.75);
         let back = parse_frames(&frames_text(&fr)).unwrap();
         assert_eq!(back.len(), fr.len());
         assert_eq!((back[0].gpu_ms, back[1].lag, back[2].uncovered_nodes, back[5].allocated_bytes), (Some(1.25), None, 4, 1 << 30));
@@ -1204,7 +1210,7 @@ mod tests {
         assert!(
             frames_text(&[])
                 .trim_end()
-                .ends_with("allocated_bytes upload_calls queries tile_misses band_queries lit_plan_ms deferred node_bytes"),
+                .ends_with("allocated_bytes upload_calls queries tile_misses band_queries lit_plan_ms deferred node_bytes node_build_ms node_write_ms refs_ms encode_ms submit_ms"),
             "the header names them (TEST-012)"
         );
         assert_eq!(
@@ -1214,12 +1220,17 @@ mod tests {
         );
         // A log from before the column (19 columns, the old header) is refused as old-format, never read with a zero.
         let old = frames_text(&fr).replace(
-            " upload_calls queries tile_misses band_queries lit_plan_ms deferred node_bytes
+            " node_build_ms node_write_ms refs_ms encode_ms submit_ms
 ",
             "
 ",
         );
         assert!(parse_frames(&old).unwrap_err().contains("old-format"));
+        assert_eq!(
+            (back[7].node_build_ms, back[7].node_write_ms, back[7].refs_ms, back[7].encode_ms, back[7].submit_ms),
+            (0.25, 0.125, 0.5, 1.5, 0.75),
+            "the CPU phase columns are the last five (recorded only)"
+        );
         assert!(parse_frames("").unwrap_err().contains("old-format"));
         assert!(parse_frames(&format!("{}1 2 3\n", frames_text(&[]))).unwrap_err().contains("columns"));
     }
