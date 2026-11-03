@@ -50,8 +50,8 @@ slow-timeout = { period = "90s", terminate-after = 5 }
 # Declared limit (planner, 2026-11-03, BUILD-003; #1103). `gpu_stills::a_still_runs_the_clipmap_shadow_by_default_and_not_with_the_flag` generates a store,
 # runs the stills scene without the march and then one pose with it. It does not hang: on the Windows CI runner (WARP, partition `C 2/2`) it was cut off
 # at 302 s and 300.2 s (the march-on run drawing both poses, then one), and locally on the software adapter it takes 176 s to 280 s with the run's load. The
-# horizon bake the stills still do per run is about 130 s of it (the sibling test above) and goes with the horizon removal (`rm-horizon-render`); lift this
-# limit then. A declared 450 s (5 x 90 s) still catches a hang. The first matching override sets a value, so this one comes before the `gpu_` one.
+# horizon bake the stills did per run was about 130 s of it (the sibling test above); `rm-horizon-render` removed it and the test took 279.8 s on CI WARP
+# (f1cb6e1e, with this limit lifted). Lift this limit when it is measured under ~200 s on CI WARP. A declared 450 s (5 x 90 s) still catches a hang. The first matching override sets a value, so this one comes before the `gpu_` one.
 [[profile.default.overrides]]
 filter = 'binary(gpu_all) and test(a_still_runs_the_clipmap_shadow_by_default_and_not_with_the_flag)'
 slow-timeout = { period = "90s", terminate-after = 5 }

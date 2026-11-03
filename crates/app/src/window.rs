@@ -26,7 +26,6 @@ use planet_frame::viewer::{
 };
 use planet_frame::water::{empty_water_plan, plan_water, WaterRequest, WaterTileCache, WaterView};
 use planet_frame::{Camera, ControllerParams, LodParams, TerrainRequest, TerrainView};
-use planet_generators::chunkfield::ChunkKey;
 use planet_generators::height::HeightField;
 use planet_render::{AdapterPolicy, GpuContext, Presented, WindowSurface};
 use planet_streaming::{Clock, SystemClock};
@@ -226,7 +225,7 @@ struct GlobeStats {
     landings: u64,
 }
 
-/// Frames the gate waits after its edit script ends, before the camera path starts: the hill's horizon maps are asked for and the first of them land.
+/// Frames the gate waits after its edit script ends, before the camera path starts: the edited tiles are refreshed.
 const GATE_SETTLE_FRAMES: u64 = 240;
 
 /// The settling frames of this run: `PLANET_GATE_SETTLE` frames, else [`GATE_SETTLE_FRAMES`] (the small world in CI uses fewer: its software frames are slow).
@@ -237,9 +236,6 @@ fn gate_settle_frames() -> u64 {
 /// Frames after which a gate run that has not finished fails (a hung edit script or path).
 const GATE_GIVE_UP: u64 = 400_000;
 
-/// Frames after which a gate run stops waiting for the first horizon map.
-const GATE_BAKE_GIVE_UP: u64 = 6_000;
-
 /// The no-degradation gate of a window run (`PLANET_GATE`, TEST-061): the counters, the camera path of `PLANET_GATE_PATH` and the file of
 /// `PLANET_GATE_REPORT` the report goes to.
 struct GateRun {
@@ -248,10 +244,6 @@ struct GateRun {
     report: Option<PathBuf>,
     /// The frame the edit script ended at.
     edit_done_at: Option<u64>,
-    /// Whether any frame drew lit with the horizon jobs on.
-    lit_with_horizon: bool,
-    /// The edit word of each wanted horizon map before the scripted edit.
-    words: HashMap<ChunkKey, u64>,
 }
 
 impl GateRun {
@@ -271,32 +263,12 @@ impl GateRun {
             replay,
             report: std::env::var_os("PLANET_GATE_REPORT").map(PathBuf::from),
             edit_done_at: None,
-            lit_with_horizon: false,
-            words: HashMap::new(),
         }))
     }
 
-    /// One frame of the horizon side: before the scripted edit the edit word of every wanted map is remembered; at the frame it is published the maps whose word
-    /// changed are the ones it touched; every landing is shown to the gate, which counts only a touched map as the re-bake.
-    fn horizon_step(&mut self, world: &WorldTerrain, wanted: &[ChunkKey], landed: &[ChunkKey], published: bool, now_ms: u64) {
-        if self.gate.edit_at.is_none() {
-            if published {
-                let touched =
-                    wanted.iter().copied().filter(|k| self.words.get(k).is_some_and(|w| *w != world.horizon_edit_word(*k))).collect();
-                self.gate.edit_published(now_ms, touched);
-            } else {
-                for k in wanted {
-                    self.words.entry(*k).or_insert_with(|| world.horizon_edit_word(*k));
-                }
-            }
-        }
-        self.gate.horizon_landed(now_ms, landed);
-    }
-
     /// Whether the edit script ended, the settling frames passed and the path (if any) was replayed to its end.
-    fn finished(&self, frames: u64, now_ms: u64, horizon_waits: bool) -> bool {
+    fn finished(&self, frames: u64, now_ms: u64) -> bool {
         self.edit_done_at.is_some_and(|at| frames >= at + gate_settle_frames())
-            && !horizon_waits
             && self.replay.as_ref().is_none_or(|r| r.started() && r.pose(now_ms).1)
     }
 }
@@ -333,9 +305,6 @@ struct Running {
     warm_prev: Option<(u64, planet_core::Vec3)>,
     /// What the scheduler counted in the last frame, for a stall report.
     last_counts: planet_frame::managed::FrameCounts,
-    /// What the horizon step did, per feature (TEST-058), and the horizon update of the last step (its maps are uploaded in the horizon frame).
-    chunk_counters: crate::horizonstep::FeatureCounters,
-    horizon_update: planet_streaming::horizonjobs::HorizonUpdate,
     last_ms: Option<u64>,
     last_gpu_sample: Instant,
     gpu_ms: Option<f64>,
@@ -364,16 +333,12 @@ struct Running {
     /// The lens the world was asked for and the one the resident tiles were last refreshed with (VIEW-053).
     coupled_asked: Option<planet_generators::coupled::CoupledLens>,
     coupled_shown: Option<planet_generators::coupled::CoupledLens>,
-    /// Whether the world has the horizon jobs (REND-038): the title says so when it has none.
-    horizon_on: bool,
     /// The no-degradation gate (`PLANET_GATE`, TEST-061): its counters, the camera path to replay and the file the report goes to.
     gate: Option<GateRun>,
     /// The sun of the last lit plan before the editing light, for the title's local solar time (VIEW-054).
     sun_dir: [f32; 3],
     /// Where the camera was on the last frame, planet-fixed.
     camera_position: planet_core::Vec3,
-    /// The slots, versions and uploads of the horizon shadows (REND-038).
-    horizon: crate::horizonworld::HorizonRig,
     /// The clipmap shadow pass's planner and last plan (`--shadow-march`).
     shadow: Option<crate::shadowrig::ShadowRig>,
     coupled_standing: Standing,
@@ -548,12 +513,6 @@ impl App<'_> {
             window.set_title(&planet_frame::viewer::roots_title(done, total));
         })?;
         crate::stall::phase_mark("floor tiles");
-        // The horizon maps are baked from the base terrain and the stamps (STRM-064), on the idle class of the same pool (the chunk stage is removed).
-        if self.world.has_bake() && self.world.store_dir().is_some() && (!cfg.smoke || std::env::var_os("PLANET_GATE").is_some()) {
-            if let Err(e) = self.world.enable_viewer_horizon_on(rig.horizon_pool.clone(), self.clock.clone()) {
-                eprintln!("horizon: {e}");
-            }
-        }
         // `enable_lit` is not part of `warm_up`: the lit and atmosphere passes are enabled and used once per ring set here, before the
         // first measured frame, whether the window starts lit or on the debug path (REND-017, VIEW-007).
         rig.renderer.warm_up_lit(&ctx, &self.lit_warm(cfg.size)?).map_err(|e| format!("warming the lit path: {e}"))?;
@@ -617,8 +576,6 @@ impl App<'_> {
             stall: Default::default(),
             warm_prev: None,
             last_counts: Default::default(),
-            chunk_counters: Default::default(),
-            horizon_update: Default::default(),
             last_ms: None,
             last_gpu_sample: Instant::now(),
             gpu_ms: None,
@@ -640,11 +597,9 @@ impl App<'_> {
             scale_refs_on: false,
             coupled_asked: None,
             coupled_shown: None,
-            horizon_on: false,
             gate: GateRun::from_env()?,
             sun_dir: [0.0, 0.0, 1.0],
             camera_position: planet_core::Vec3::new(1.0, 0.0, 0.0),
-            horizon: Default::default(),
             shadow,
             coupled_standing: Standing::Idle,
             markers: cfg.markers.clone(),
@@ -993,23 +948,6 @@ impl App<'_> {
             st.counts.coarse_lod_frames += u64::from(st.viewer.coarse_lod);
             st.last_counts = frame.counts;
             st.stall.mark("plan and residency (begin_frame)");
-            // The horizon jobs bake the maps of the plan's chunks from the base terrain (STRM-064); they run for the lit frames only, their maps are
-            // uploaded below. The lit plan is put on a copy of the draw plan later in the frame (`st.viewer.lit`), so the draw plan's own `lit` is
-            // always None here: reading it switched the horizon jobs off for good (the owner's session of 2026-10-27: no map baked in an hour).
-            st.horizon_on = self.world.horizon_enabled();
-            if st.viewer.lit && st.horizon_on {
-                let tiles: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
-                let features = crate::horizonstep::FrameFeatures::default();
-                let step = crate::horizonstep::frame_step(self.world, &tiles, camera.position, &features, &mut st.chunk_counters);
-                st.horizon_update = step.horizon;
-            }
-            if let Some(g) = st.gate.as_mut().filter(|_| self.world.horizon_enabled()) {
-                let tiles: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
-                let wanted: Vec<ChunkKey> = self.world.horizon_wanted(&tiles, camera.position).into_iter().map(|w| w.0).collect();
-                let published = st.edit.as_ref().is_some_and(|e| e.stats.published >= 1);
-                g.horizon_step(self.world, &wanted, &st.horizon_update.landed, published, now_ms);
-            }
-            st.stall.mark("horizon frame (frame_step)");
             // A refusal of the plan for the base parameters degrades the frame (it draws the newest plan in hand); it is said once, never fatal.
             // One line, one report file and one title notice per cause (kind and level) in 5 s; the title counts all of them.
             let refusal = st.rig.managed.take_plan_refusal();
@@ -1181,15 +1119,6 @@ impl App<'_> {
             }
             st.rig.renderer.set_scale_refs(&st.scale_refs);
             st.stall.mark("scale references");
-            // The horizon shadows (REND-038): the chunk maps in their slots and the coarse map, for the lit frames over a world with the horizon jobs.
-            if let Some(lit) = plan.lit.as_ref().filter(|_| self.world.horizon_enabled()) {
-                let tiles: Vec<TileId> = plan.nodes.iter().map(|n| n.tile).collect();
-                st.horizon.frame(self.world, ctx, &mut st.rig.renderer, &tiles, &std::mem::take(&mut st.horizon_update), lit.sun_dir);
-                if let (Some(key), Some(g)) = (st.horizon.last_uploaded, st.gate.as_mut()) {
-                    g.gate.map_uploaded(key, now_ms, st.frames);
-                }
-            }
-            st.stall.mark("horizon frame and upload");
             // The clipmap shadow pass (`--shadow-march`): the planner job on the terrain share, the plan that landed (or the last one, unchanged)
             // with this frame's camera, sun and preview.
             if let (Some(shadow), Some(lit)) = (st.shadow.as_mut(), plan.lit.as_ref()) {
@@ -1325,9 +1254,6 @@ impl App<'_> {
                     st.presented += 1;
                     if drew_lit {
                         st.counts.lit_presented += 1;
-                        if let (true, Some(g)) = (self.world.horizon_enabled(), st.gate.as_mut()) {
-                            g.lit_with_horizon = true;
-                        }
                     } else {
                         st.counts.debug_presented += 1;
                     }
@@ -1341,15 +1267,7 @@ impl App<'_> {
             if cfg.smoke {
                 // The editing script starts once the camera rests, so the run waits for it (at most until the give-up frame).
                 let editing_done = !cfg.edit || st.edit.as_ref().is_none_or(|e| e.smoke_finished()) || st.frames >= SMOKE_GIVE_UP;
-                // A run with the horizon jobs on also waits for the first map to be baked (a slow adapter bakes in seconds of wall time, not in a count of frames), but not past
-                // [`GATE_BAKE_GIVE_UP`] frames: the verdict then says no map was baked.
-                let maps_baked = self.world.horizon_stats().is_some_and(|h| h.baked + h.disk_hits > 0);
-                let horizon_waits = self.world.horizon_enabled()
-                    && std::env::var_os("PLANET_GATE_SOFTWARE").is_none()
-                    && st.viewer.lit
-                    && !maps_baked
-                    && st.frames < GATE_BAKE_GIVE_UP;
-                let gate_done = st.gate.as_ref().is_none_or(|g| g.finished(st.frames, now_ms, horizon_waits));
+                let gate_done = st.gate.as_ref().is_none_or(|g| g.finished(st.frames, now_ms));
                 if st.gate.is_some() && st.frames > GATE_GIVE_UP {
                     return Err(format!(
                         "gate: the run did not finish in {GATE_GIVE_UP} frames (edit script done at {:?})",
@@ -1367,9 +1285,7 @@ impl App<'_> {
                         }
                     }
                     if let Some(g) = st.gate.as_ref() {
-                        let maps = self.world.horizon_stats().map_or(0, |h| h.baked + h.disk_hits);
-                        let extra = format!("horizon jobs: {:?}", self.world.horizon_stats());
-                        gate_finish(g, maps, &extra)?;
+                        gate_finish(g)?;
                     }
                     quit = true;
                 } else if st.presented == 0 && st.frames >= SMOKE_GIVE_UP {
@@ -1402,9 +1318,6 @@ impl App<'_> {
             "jobs in flight in the tile streamer: {} in flight, {} queued, {} dispatched this frame, {} blocked; resident {}, slots in use {}\n",
             c.in_flight, c.queued, c.dispatched, c.blocked, c.resident, c.slots_in_use
         );
-        if let Some(h) = self.world.horizon_stats() {
-            extra += &format!("horizon jobs: {h:?}\n");
-        }
         {
             // A refresh that waits shows here (edit-stale-diagnostics): held by the settle window, or queued per class.
             let streamer = st.rig.managed.manager().streamer();
@@ -1551,8 +1464,8 @@ fn sun_time_text(sun: [f32; 3], camera: planet_core::Vec3) -> String {
     format!("{:02}:{:02} local solar time", minutes / 60, minutes % 60)
 }
 
-/// What the title adds for the shade view, the moved sun and a world without the horizon jobs (VIEW-054): empty at the start.
-pub fn lit_extras_text(v: &ViewerState, horizon_on: bool, sun: [f32; 3], camera: planet_core::Vec3) -> String {
+/// What the title adds for the shade view and the moved sun (VIEW-054): empty at the start.
+pub fn lit_extras_text(v: &ViewerState, sun: [f32; 3], camera: planet_core::Vec3) -> String {
     let mut out = String::new();
     if v.shade_view != planet_frame::look::shading::ShadeView::Lit {
         out += &format!(" | shade view {}", v.shade_view.name());
@@ -1561,9 +1474,6 @@ pub fn lit_extras_text(v: &ViewerState, horizon_on: bool, sun: [f32; 3], camera:
         let t = planet_frame::viewer::local_solar_hours(sun, camera);
         let minutes = (t * 60.0).round() as u32 % 1440;
         out += &format!(" | sun {:02}:{:02} local solar time", minutes / 60, minutes % 60);
-    }
-    if !horizon_on {
-        out += " | no horizon shadows (open a store with a coupled run)";
     }
     out
 }
@@ -1594,7 +1504,7 @@ fn title_text(st: &Running, now_ms: u64) -> String {
         input += " | editing light";
     }
     if st.viewer.lit {
-        input += &lit_extras_text(&st.viewer, st.horizon_on, st.sun_dir, st.camera_position);
+        input += &lit_extras_text(&st.viewer, st.sun_dir, st.camera_position);
     }
     input += &format!(" | detail {}", st.viewer.ground_detail.name());
     if st.viewer.look_choice != planet_frame::look::materials::LookChoice::default() {
@@ -1996,8 +1906,6 @@ fn smoke_summary(st: &Running) -> String {
         + &shadow
         + &globe
         + &repro
-        + &format!("
-  horizon step: {}", st.chunk_counters.line(&crate::horizonstep::FrameFeatures::default()))
 }
 
 /// `planet editor`: open the window and run the flight until it is closed (or, for `--smoke`, for a few dozen frames).
@@ -2185,14 +2093,14 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
 
 /// The gate's verdict at the end of the run (TEST-061): the counters line to stdout and to the report file, and an error naming every failed
 /// counter when the run fails.
-fn gate_finish(g: &GateRun, horizon_maps: u64, extra: &str) -> Result<(), String> {
+fn gate_finish(g: &GateRun) -> Result<(), String> {
     let panics = crate::gate::panics();
-    let line = format!("{}; {extra}", g.gate.report(horizon_maps, panics));
+    let line = g.gate.report(0, panics);
     println!("{line}");
     if let Some(p) = &g.report {
         std::fs::write(p, format!("{line}\n")).map_err(|e| format!("gate report {}: {e}", p.display()))?;
     }
-    let failures = g.gate.failures(horizon_maps, g.lit_with_horizon, panics, std::env::var_os("PLANET_GATE_SOFTWARE").is_none());
+    let failures = g.gate.failures(0, false, panics, std::env::var_os("PLANET_GATE_SOFTWARE").is_none());
     if failures.is_empty() {
         Ok(())
     } else {
@@ -2405,20 +2313,19 @@ mod tests {
 
     // spec: VIEW-054
     #[test]
-    fn the_title_names_the_shade_view_the_moved_sun_and_a_world_without_the_horizon_jobs() {
+    fn the_title_names_the_shade_view_and_the_moved_sun() {
         use planet_frame::look::shading::{sun_direction, ShadeView};
         let at = planet_core::Vec3::new(6_371_000.0, 0.0, 0.0);
         let sun = sun_direction(12.0, 0.0);
         let mut v = ViewerState::new(0, 3, 0, false);
-        assert_eq!(lit_extras_text(&v, true, sun, at), "", "nothing at the start over a world with the horizon jobs");
-        assert!(lit_extras_text(&v, false, sun, at).contains("no horizon shadows (open a store with a coupled run)"));
-        v.shade_view = ShadeView::Horizon;
+        assert_eq!(lit_extras_text(&v, sun, at), "", "nothing at the start");
+        v.shade_view = ShadeView::Shadow;
         v.sun_offset_h = 6.0;
         let moved = planet_frame::viewer::sun_with_offset(sun, v.sun_offset_h);
-        let text = lit_extras_text(&v, true, moved, at);
-        assert!(text.contains("shade view horizon") && text.contains("sun 18:00 local solar time"), "{text}");
+        let text = lit_extras_text(&v, moved, at);
+        assert!(text.contains("shade view shadow") && text.contains("sun 18:00 local solar time"), "{text}");
         v.editing_light = true;
-        assert!(!lit_extras_text(&v, true, moved, at).contains("sun 18:00"), "the editing light wins, the title does not claim the time");
+        assert!(!lit_extras_text(&v, moved, at).contains("sun 18:00"), "the editing light wins, the title does not claim the time");
     }
 
     /// The keys a person can press that the window might bind: the letters, digits, function keys, arrows and the punctuation and editing keys.
