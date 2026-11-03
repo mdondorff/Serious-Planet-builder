@@ -56,7 +56,15 @@ impl Fixture {
         f
     }
 
+    /// A run with the clipmap shadow off: the subject of the tests that use it is the stills scene (poses, files, refusals), not the shadow, and the march
+    /// more than doubles a software run (WARP CI). [`Fixture::call_with_march`] keeps the default.
     fn call(&self, extra: &[&str]) -> Result<String, String> {
+        let mut extra = extra.to_vec();
+        extra.push("--no-shadow-march");
+        self.call_with_march(&extra)
+    }
+
+    fn call_with_march(&self, extra: &[&str]) -> Result<String, String> {
         let mut a = vec![
             "test-render",
             "--scene",
@@ -156,8 +164,10 @@ fn a_still_runs_the_clipmap_shadow_by_default_and_not_with_the_flag() {
     let off = f.call(&["--no-shadow-march"]).unwrap();
     assert!(off.contains("ground-sunset: ") && off.contains(" 0 shadow frames"), "{off}");
     let off_sunset = png("ground-sunset");
-    let on = f.call(&[]).unwrap();
-    assert!(on.contains(" 6 shadow frames"), "every pose runs the shadow frames: {on}");
+    // One pose with the march on: its six shadow frames are most of a software run (the test timed out at 302 s with both poses on WARP CI); the poses
+    // share one code path, and the off run above names both.
+    let on = f.call_with_march(&["--views", "ground-sunset"]).unwrap();
+    assert!(on.contains("ground-sunset: ") && on.contains(" 6 shadow frames"), "the pose runs the shadow frames: {on}");
     let on_sunset = png("ground-sunset");
     assert_eq!(off_sunset.len(), on_sunset.len());
     let sum = |v: &[u8]| v.iter().map(|b| u64::from(*b)).sum::<u64>();

@@ -26,27 +26,38 @@ fn smoke_in(extra: &[&str], envs: &[(&str, &str)]) -> Option<String> {
     run_editor(&["--smoke"], extra, envs)
 }
 
+/// [`smoke`] with the clipmap shadow on, the viewer's default. The other window tests run with it off: their subjects (the window path, the editor
+/// mode, the item sweeps, the look file, the water pass) do not depend on shadows, and the march more than doubles a software run (WARP CI).
+fn smoke_with_march(extra: &[&str]) -> Option<String> {
+    run_editor_with(&["--smoke"], extra, &[], true)
+}
+
 /// Run `planet editor <flags> <extra>` with the run's adapter; `None` is the declared skip or a NOT RUN, a failure panics. On the discrete GPU a
 /// locked desktop is a NOT RUN (TEST-073): the binary says so itself, and a failure with the desktop locked by the end of the run is the lock's.
 fn run_editor(flags: &[&str], extra: &[&str], envs: &[(&str, &str)]) -> Option<String> {
+    run_editor_with(flags, extra, envs, false)
+}
+
+fn run_editor_with(flags: &[&str], extra: &[&str], envs: &[(&str, &str)], march: bool) -> Option<String> {
     let name = format!("gpu_window editor {flags:?} {extra:?}");
     let hardware = adapter() != "software";
     // A nextest timeout kills the test process and nothing can look at the desktop afterwards: the watchdog looks while it runs and ends the process as
     // a NOT RUN before the shortest timeout (300 s) when the desktop was locked.
     planet_perf::desktop::start_watchdog(&name, hardware, std::time::Duration::from_secs(240));
     planet_perf::desktop::guarded(&name, hardware, &planet_perf::desktop::detect, planet_perf::desktop::marker_dir().as_deref(), || {
-        run_editor_unguarded(flags, extra, envs)
+        run_editor_unguarded(flags, extra, envs, march)
     })
     .flatten()
 }
 
-fn run_editor_unguarded(flags: &[&str], extra: &[&str], envs: &[(&str, &str)]) -> Option<String> {
+fn run_editor_unguarded(flags: &[&str], extra: &[&str], envs: &[(&str, &str)], march: bool) -> Option<String> {
     let started = std::time::Instant::now();
     let adapter = adapter();
     let out = Command::new(env!("CARGO_BIN_EXE_planet"))
         .arg("editor")
         .args(flags)
         .args(extra)
+        .args(if march { None } else { Some("--no-shadow-march") })
         .env("PLANET_ADAPTER", &adapter)
         .env("PLANET_TIMING", "1")
         .envs(envs.iter().copied())
@@ -141,7 +152,7 @@ fn the_clipmap_shadow_pass_runs_with_the_lit_frames_by_default_and_the_flag_turn
         stdout.split("shadow pass: ").nth(1).and_then(|t| t.split_whitespace().next()).and_then(|n| n.parse().ok())
     };
     assert!(frames_of(&off).is_none_or(|n| n == 0), "--no-shadow-march runs no shadow pass: {off}");
-    let Some(stdout) = smoke(&["--no-ui", "--size", "320x180"]) else { return };
+    let Some(stdout) = smoke_with_march(&["--no-ui", "--size", "320x180"]) else { return };
     assert!(stdout.contains("[smoke ok]"), "{stdout}");
     // The planner job landed its first plan and the pass resolved shadow frames (a number after the colon, more than none).
     let frames: u64 = stdout
