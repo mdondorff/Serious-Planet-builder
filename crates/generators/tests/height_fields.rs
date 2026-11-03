@@ -25,16 +25,16 @@ fn grid() -> GlobalGrid {
 
 // spec: GEN-018
 #[test]
-fn the_default_world_resolves_to_the_eroded_field() {
+fn the_default_world_resolves_to_the_c1_eroded_field() {
     let kind = resolve(&world(None)).unwrap();
-    assert_eq!(kind, HeightFieldKind::Eroded);
+    assert_eq!(kind, HeightFieldKind::ErodedC1);
     assert_eq!(kind, DEFAULT_HEIGHT_FIELD);
-    assert_eq!(kind.id(), EROSION_IMPLEMENTATION_ID);
+    assert_eq!(kind.id(), planet_generators::erosion::EROSION_C1_IMPLEMENTATION_ID);
     let g = grid();
     let src = GridSource(&g);
     let def = world(None);
     let f = build_field(kind, &GenContext::new(&def), BodyId::PLANET, &src, [1; 16]).unwrap();
-    assert_eq!(f.implementation_id(), EROSION_IMPLEMENTATION_ID);
+    assert_eq!(f.implementation_id(), planet_generators::erosion::EROSION_C1_IMPLEMENTATION_ID);
 }
 
 // spec: GEN-018
@@ -58,7 +58,7 @@ fn every_known_id_resolves_to_a_field_that_reports_it() {
     let ids = known_ids();
     assert_eq!(
         ids,
-        [EROSION_IMPLEMENTATION_ID, TERRAIN_IMPLEMENTATION_ID, REFERENCE_ID, planet_generators::erosion::EROSION_C1_IMPLEMENTATION_ID],
+        [planet_generators::erosion::EROSION_C1_IMPLEMENTATION_ID, EROSION_IMPLEMENTATION_ID, TERRAIN_IMPLEMENTATION_ID, REFERENCE_ID],
         "the default comes first"
     );
     for id in ids {

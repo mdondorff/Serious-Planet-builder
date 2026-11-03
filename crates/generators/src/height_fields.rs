@@ -1,7 +1,7 @@
 //! The world names its height field by implementation id (GEN-018, owner's decision of 2026-10-13).
 //!
 //! A definition may carry `world.height_field` (world-def stores the string; it cannot know the implementations, CON-02).
-//! [`resolve`] turns it into a [`HeightFieldKind`]: the eroded field (GEN-017) when none is named, the named one when the
+//! [`resolve`] turns it into a [`HeightFieldKind`]: the C1 eroded field (GEN-107) when none is named, the named one when the
 //! build knows the id, otherwise an error that lists the known ids. [`build_field`] builds the field of a body over a bake.
 
 use crate::erosion::{ErosionGenerator, EROSION_C1_IMPLEMENTATION_ID, EROSION_IMPLEMENTATION_ID};
@@ -24,7 +24,7 @@ pub enum HeightFieldKind {
 }
 
 /// The field a world gets when it names none.
-pub const DEFAULT_HEIGHT_FIELD: HeightFieldKind = HeightFieldKind::Eroded;
+pub const DEFAULT_HEIGHT_FIELD: HeightFieldKind = HeightFieldKind::ErodedC1;
 
 impl HeightFieldKind {
     pub const ALL: [HeightFieldKind; 4] =
@@ -52,7 +52,7 @@ impl HeightFieldKind {
 
 /// Every known id, the default first.
 pub fn known_ids() -> [&'static str; 4] {
-    [DEFAULT_HEIGHT_FIELD.id(), HeightFieldKind::Terrain.id(), HeightFieldKind::Reference.id(), HeightFieldKind::ErodedC1.id()]
+    [DEFAULT_HEIGHT_FIELD.id(), HeightFieldKind::Eroded.id(), HeightFieldKind::Terrain.id(), HeightFieldKind::Reference.id()]
 }
 
 /// A definition named an id this build does not know.

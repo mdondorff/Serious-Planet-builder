@@ -26,7 +26,7 @@ fn world(name: &str, extra: &str) -> PathBuf {
 fn the_terrain_scene_renders_the_field_the_world_names_and_the_fields_differ() {
     let mut frames = Vec::new();
     for (name, extra, id) in
-        [("default.toml", "", "cpu-erosion-v1"), ("terrain.toml", "height_field = \"cpu-terrain-v1\"\n", "cpu-terrain-v1")]
+        [("default.toml", "", "cpu-erosion-v2"), ("terrain.toml", "height_field = \"cpu-terrain-v1\"\n", "cpu-terrain-v1")]
     {
         let w = world(name, extra);
         let png = tmp(&format!("{name}.png"));

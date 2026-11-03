@@ -46,7 +46,7 @@ const REFERENCE_L26_GROUND_1M: usize = 2892;
 #[test]
 fn every_standard_view_of_the_default_world_stays_within_its_own_pinned_counts() {
     let world = WorldTerrain::open(WorldDefinition::single_planet(R, 1), PIN_BAKE_RES).unwrap();
-    assert_eq!(world.id(), "cpu-erosion-v1", "the default world is the eroded field");
+    assert_eq!(world.id(), "cpu-erosion-v2", "the default world is the eroded field");
     let field = world.field().unwrap();
     let size = (2560u32, 1440u32);
     let lod = LodParams {

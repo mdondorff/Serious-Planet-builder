@@ -35,8 +35,8 @@ fn write_world(name: &str, extra: &str) -> std::path::PathBuf {
 #[test]
 fn the_default_world_builds_the_eroded_field_and_a_named_world_its_own() {
     let default = WorldTerrain::open(world(None), RES).unwrap();
-    assert_eq!(default.id(), "cpu-erosion-v1");
-    assert_eq!(default.field().unwrap().implementation_id(), "cpu-erosion-v1");
+    assert_eq!(default.id(), "cpu-erosion-v2");
+    assert_eq!(default.field().unwrap().implementation_id(), "cpu-erosion-v2");
     let named = WorldTerrain::open(world(Some("cpu-terrain-v1")), RES).unwrap();
     assert_eq!(named.id(), "cpu-terrain-v1");
     assert_eq!(named.field().unwrap().implementation_id(), "cpu-terrain-v1");
@@ -141,7 +141,7 @@ fn stream_bundle_and_perf_take_the_world_and_perf_without_one_is_the_default_wor
     // The perf scene builds the eroded field without a world file; a view, stream or bundle without one stays the reference.
     let o = parse(&["test-render", "--scene", "terrain", "--perf-smoke", "--seed", "3", "--global-res", "16"]);
     let perf = WorldTerrain::of_perf_options(&o, R).unwrap();
-    assert_eq!(perf.id(), "cpu-erosion-v1");
+    assert_eq!(perf.id(), "cpu-erosion-v2");
     assert!(perf.describe().contains("16-cell bake"), "{}", perf.describe());
     let view = WorldTerrain::of_options(&o, R).unwrap();
     assert_eq!(view.id(), REFERENCE_ID);
