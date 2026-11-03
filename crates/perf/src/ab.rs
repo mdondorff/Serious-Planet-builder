@@ -111,7 +111,7 @@ pub fn parse(args: &[String]) -> Result<AbSpec, String> {
 }
 
 /// The log file of a `stream <scene>` command: `<scene>.json`, `<scene>-lit.json` with `--lit`.
-fn default_log(command: &[String]) -> Option<String> {
+pub(crate) fn default_log(command: &[String]) -> Option<String> {
     if command.first().map(String::as_str) != Some("stream") {
         return None;
     }
@@ -259,6 +259,18 @@ pub enum Change {
     Unknown,
 }
 
+impl Change {
+    /// The table's word for the change.
+    pub fn word(self) -> &'static str {
+        match self {
+            Change::Within => "within the margin",
+            Change::Better => "better",
+            Change::Worse => "WORSE",
+            Change::Unknown => "no reading",
+        }
+    }
+}
+
 /// Compare the medians: within the margin, better or worse.
 pub fn change(base: Option<f64>, tree: Option<f64>) -> (Option<f64>, Change) {
     match (base, tree) {
@@ -294,12 +306,7 @@ pub fn table(spec: &AbSpec, cmp: &Comparison) -> Vec<String> {
         let (b, t) = (med(Side::Base), med(Side::Tree));
         let (rel, c) = change(b, t);
         let num = |v: Option<f64>| v.map_or("-".to_string(), |v| format!("{v:.2}"));
-        let verdict = match c {
-            Change::Within => "within the margin",
-            Change::Better => "better",
-            Change::Worse => "WORSE",
-            Change::Unknown => "no reading",
-        };
+        let verdict = c.word();
         let rule = match (loaded::margin(info.kind), info.budget) {
             (None, _) => "needs a quiet window (BUILD-031)".to_string(),
             (Some(m), Some(b)) => format!("loaded pass at {:.0} % under {b}", m * 100.0),
