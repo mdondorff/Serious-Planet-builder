@@ -8,7 +8,7 @@
 //! depend on where the border falls; the seam this leaves is measured (TEST-084), not assumed away.
 
 use super::carve::{carve, CarveParams};
-use super::deposit::{deposit_on_own_route, DepositParams, Kc};
+use super::deposit::{deposit_on_own_route, DepositParams, DepositReport, Kc};
 use super::face::face_stream;
 use super::thermal::{thermal, ThermalParams};
 use super::Grid;
@@ -103,6 +103,9 @@ pub struct Pass2Params {
     pub local_area_cells: f64,
     pub sea_level: f64,
     pub seed: u64,
+    /// Whether the deposition sweep runs (always, in a layer; off only to split a layer's size and change by stage, with `thermal.passes` 0 for the thermal stage). With it off the
+    /// tile's deposition statistics are zero and its mass is not conserved.
+    pub deposit: bool,
 }
 
 impl Pass2Params {
@@ -124,6 +127,7 @@ impl Pass2Params {
             local_area_cells: 96.0,
             sea_level,
             seed,
+            deposit: true,
         }
     }
 }
@@ -210,14 +214,18 @@ pub fn pass2_tile(
     carve(&grid, &mut z, &outlet, &local, factors.as_deref(), stream);
     drop(factors);
     let thermal_report = thermal(&grid, &mut z, &p.thermal, threads);
-    let dep = deposit_on_own_route(
-        &grid,
-        &mut z,
-        &z0,
-        p.carve.epsilon,
-        stream,
-        &DepositParams { kc: Kc::Uniform(p.kc), zeta: p.zeta, sea_level: p.sea_level },
-    );
+    let dep = if p.deposit {
+        deposit_on_own_route(
+            &grid,
+            &mut z,
+            &z0,
+            p.carve.epsilon,
+            stream,
+            &DepositParams { kc: Kc::Uniform(p.kc), zeta: p.zeta, sea_level: p.sea_level },
+        )
+    } else {
+        DepositReport { eroded: 0.0, deposited: 0.0, exported: 0.0 }
+    };
     let (w, t, h) = (g.window(), g.tile, g.halo);
     let mut core = Vec::with_capacity(t * t);
     let mut land = 0;

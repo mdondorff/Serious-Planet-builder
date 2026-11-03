@@ -80,6 +80,7 @@ impl TileLayerSpec {
         for v in [p.kc, p.zeta, p.local_area_cells, p.sea_level] {
             b.extend(v.to_bits().to_le_bytes());
         }
+        b.push(u8::from(p.deposit));
         b.extend(p.seed.to_le_bytes());
         b.extend(self.inputs_id.to_le_bytes());
         b.push(u8::from(self.uses_factor));

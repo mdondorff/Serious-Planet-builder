@@ -169,3 +169,34 @@ fn the_seam_on_a_smooth_base_is_reported() {
     println!("smooth base: seam p99 {s:.2} m, inner p99 {i:.2} m");
     assert!(s.is_finite() && i.is_finite());
 }
+
+// spec: GEN-101
+#[test]
+fn the_stages_can_be_switched_off_to_split_a_preview_and_each_off_stage_changes_the_tile() {
+    let g = grid();
+    // A small transport capacity, so that the sweep leaves sediment on this steep tile (at the standard `kc` all of it is exported).
+    let full = Pass2Params { kc: 1.0e-3, ..Pass2Params::standard(9, 0.0) };
+    let mut no_deposit = full;
+    no_deposit.deposit = false;
+    let mut carve_only = no_deposit;
+    carve_only.thermal.passes = 0;
+    let run = |p: &Pass2Params| pass2_tile(&g, tile(1, 1), &base, &nothing, None, p, 2);
+    let (a, b, c) = (run(&full), run(&no_deposit), run(&carve_only));
+    assert!(a.stats.deposited_m3 > 0.0, "the full tile deposited nothing: {:?}", a.stats);
+    assert_eq!(
+        (b.stats.eroded_m3, b.stats.deposited_m3, b.stats.exported_m3),
+        (0.0, 0.0, 0.0),
+        "a tile without deposition reports a sweep"
+    );
+    assert!(
+        a.stats.thermal_passes > 0 && b.stats.thermal_passes > 0 && c.stats.thermal_passes == 0,
+        "{:?} {:?} {:?}",
+        a.stats,
+        b.stats,
+        c.stats
+    );
+    assert_ne!(a.core, b.core, "deposition changed nothing");
+    assert_ne!(b.core, c.core, "thermal changed nothing");
+    // Without deposition nothing is raised above the carve's ground except by thermal: carve only never raises a cell.
+    assert!(c.core.iter().all(|v| *v <= 0.0), "the carve alone raised a cell");
+}

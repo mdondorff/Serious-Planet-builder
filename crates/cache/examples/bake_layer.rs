@@ -9,14 +9,16 @@ use std::time::Instant;
 
 use planet_cache::global_store::GlobalWorld;
 use planet_cache::layer_store::{load_face_change, run_pass1, LayerSpec};
-use planet_cache::layer_tiles::{drop_pass1, face_change_reader, faces_digest, load_tile, run_pass2, Pass2Inputs, TileLayerSpec};
+use planet_cache::layer_tiles::{
+    drop_pass1, face_change_reader, faces_digest, load_tile, run_pass2, tile_record, Pass2Inputs, TileLayerSpec,
+};
 use planet_cache::pack::TileStore;
 use planet_core::{Face, Vec3};
 use planet_generators::bake::carve::CarveParams;
 use planet_generators::bake::face::FaceChange;
 use planet_generators::bake::inputs::BakeInputs;
 use planet_generators::bake::map::{field_maps, layer_change_at, tile_image};
-use planet_generators::bake::tile::{tile_has_land, Pass2Params, TileGrid, TileId as PassTile};
+use planet_generators::bake::tile::{quantise, tile_has_land, Pass2Params, TileGrid, TileId as PassTile, QUANT_STEP_M};
 use planet_world_def::WorldDefinition;
 
 const RADIUS_M: f64 = 6_371_000.0;
@@ -39,6 +41,9 @@ struct Opts {
     keep_pass1: bool,
     map_width: usize,
     image_step: Option<usize>,
+    /// Stage ablation for the size and change split of a preview (the layer is not a real layer then): no thermal passes, no deposition sweep.
+    no_thermal: bool,
+    no_deposit: bool,
 }
 
 fn main() {
@@ -132,13 +137,13 @@ fn main() {
         .collect();
     let faces: [FaceChange; 6] = faces.try_into().expect("six faces");
     let reader = face_change_reader(&faces);
-    let spec = TileLayerSpec {
-        grid,
-        params: Pass2Params::standard(o.seed, 0.0),
-        inputs_id: BakeInputs::id(),
-        uses_factor: true,
-        faces: faces_digest(&world, face_bake_res, &layer),
-    };
+    let mut params = Pass2Params::standard(o.seed, 0.0);
+    if o.no_thermal {
+        params.thermal.passes = 0;
+    }
+    params.deposit = !o.no_deposit;
+    let spec =
+        TileLayerSpec { grid, params, inputs_id: BakeInputs::id(), uses_factor: true, faces: faces_digest(&world, face_bake_res, &layer) };
     let surface = |d: Vec3| base(d) + reader(d);
     let planet_pass = tiles_wanted.is_none();
     let tiles: Vec<PassTile> = tiles_wanted.unwrap_or_else(|| {
@@ -189,12 +194,42 @@ fn main() {
     // The maps, from the stored layer.
     let tstore = TileStore::open(&tile_dir, world.params()).unwrap_or_else(|e| fail(&e.to_string()));
     let mut stored: HashMap<(u8, u32, u32), Vec<f32>> = HashMap::new();
+    let mut sizes = Vec::new();
     for &t in &tiles {
         let r = load_tile(&tstore, &world, tile_res, &spec, t)
             .unwrap_or_else(|e| fail(&e.to_string()))
             .unwrap_or_else(|| fail("a tile is missing from the store"));
+        sizes.push((
+            t,
+            r.stats.land_cells,
+            tile_record(&world, tile_res, &spec, &r).unwrap_or_else(|e| fail(&e.to_string())).payload.len(),
+            quantise(&r.core),
+        ));
         stored.insert((t.face.0, t.ti, t.tj), r.core);
     }
+    // Size by tile (the record's payload with the brotli stream), the share of cells that did not change, and the largest change (a preview's size split by stage).
+    let mut size_report = String::from(
+        "face tile_i tile_j land_cells payload_bytes bytes_per_land_cell unchanged_cells_share max_abs_change_m
+",
+    );
+    for (t, land, bytes, counts) in &sizes {
+        let zero = counts.iter().filter(|c| **c == 0).count() as f64 / counts.len() as f64;
+        let max = counts.iter().map(|c| c.unsigned_abs()).max().unwrap_or(0) as f64 * QUANT_STEP_M as f64;
+        size_report.push_str(&format!(
+            "{} {} {} {} {} {:.4} {:.4} {:.1}
+",
+            t.face.0,
+            t.ti,
+            t.tj,
+            land,
+            bytes,
+            *bytes as f64 / (*land).max(1) as f64,
+            zero,
+            max
+        ));
+    }
+    std::fs::write(out.join("sizes.txt"), &size_report).unwrap_or_else(|e| fail(&e.to_string()));
+    print!("{size_report}");
     if planet_pass {
         let t = Instant::now();
         for (name, image) in field_maps(o.map_width, o.seed, &base, &|d| layer_change_at(&grid, &stored, &faces, d), "BAKE LAYER", "LAYER")
@@ -245,6 +280,8 @@ fn parse() -> Opts {
         keep_pass1: false,
         map_width: 1024,
         image_step: None,
+        no_thermal: false,
+        no_deposit: false,
     };
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -262,8 +299,10 @@ fn parse() -> Opts {
             "--region" => o.region = Some(PathBuf::from(value())),
             "--image-step" => o.image_step = Some(number("--image-step")),
             "--keep-pass1" => o.keep_pass1 = true,
+            "--no-thermal" => o.no_thermal = true,
+            "--no-deposit" => o.no_deposit = true,
             other => fail(&format!(
-                "unknown option '{other}' (known: --seed N, --face-res N, --planet-res N, --tile N, --halo N, --region FILE, --keep-pass1, --out DIR, --threads N, --map-width W)"
+                "unknown option '{other}' (known: --seed N, --face-res N, --planet-res N, --tile N, --halo N, --region FILE, --keep-pass1, --out DIR, --threads N, --map-width W, --image-step N, --no-thermal, --no-deposit)"
             )),
         }
     }

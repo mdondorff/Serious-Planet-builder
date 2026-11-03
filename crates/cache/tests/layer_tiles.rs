@@ -150,7 +150,13 @@ fn a_layer_made_for_other_parameters_or_another_pass_1_is_refused_naming_both_ke
     let other_pass1 = TileLayerSpec { faces: faces_digest(&w, RES, &LayerSpec { seed: 18, ..pass1() }), ..s };
     let other_seed = TileLayerSpec { params: Pass2Params::standard(10, 0.0), ..s };
     let other_grid = TileLayerSpec { grid: TileGrid { halo: 5, ..s.grid }, ..s };
-    for (what, o) in [("another pass 1", other_pass1), ("another seed", other_seed), ("another grid", other_grid)] {
+    let other_stage = TileLayerSpec { params: Pass2Params { deposit: false, ..s.params }, ..s };
+    for (what, o) in [
+        ("another pass 1", other_pass1),
+        ("another seed", other_seed),
+        ("another grid", other_grid),
+        ("another stage setting", other_stage),
+    ] {
         let e = run(d.path(), &w, &o, &f, &tiles()[..1], 2).expect_err(what).to_string();
         assert!(e.contains("another bake, other parameters or another pass 1") && e.contains("key"), "{what}: {e}");
     }
