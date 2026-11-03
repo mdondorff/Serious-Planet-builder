@@ -5,7 +5,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use planet_perf::reserve::{calibrate_spin, spin, total_cores, Calibration, SyntheticLoad, LOADS};
+use planet_perf::reserve::{calibrate_spin, spin, total_cores, with_cores, Calibration, SyntheticLoad};
 use planet_render::{BurnPass, GpuContext};
 use planet_streaming::jobs::{Class, JobSystem, Share};
 
@@ -72,6 +72,8 @@ impl Drop for CoreLoad {
 pub struct ReserveRun {
     // Dropped first: the spin jobs stop before their system joins its workers.
     cores: Vec<CoreLoad>,
+    /// The loads with their cores set to the machine's shares (BUDG-011, BUDG-003).
+    loads: [SyntheticLoad; 4],
     _system: JobSystem,
     spin_iterations: u64,
     burns: Vec<(BurnPass, u32)>,
@@ -86,8 +88,10 @@ impl ReserveRun {
     pub fn start(ctx: &GpuContext) -> Result<ReserveRun, String> {
         let cal: Calibration = calibrate_spin().ok_or("the CPU spin cannot be calibrated: the clock does not advance")?;
         let mut notes = vec![format!("spin calibrated: {:.0} iterations per ms", cal.iterations_per_ms)];
-        let system = JobSystem::new(total_cores(), planet_streaming::Priority::Normal);
-        let cores: Vec<CoreLoad> = LOADS.iter().map(|l| CoreLoad::start(&system, l, cal.iterations_per_ms)).collect();
+        let shares = planet_streaming::shares::Shares::machine();
+        let loads = with_cores(&|name| shares.of(name).unwrap_or(1));
+        let system = JobSystem::new(total_cores(&loads), planet_streaming::Priority::Normal);
+        let cores: Vec<CoreLoad> = loads.iter().map(|l| CoreLoad::start(&system, l, cal.iterations_per_ms)).collect();
         // The main-thread spin is calibrated again with the cores running: the loads compete for the machine (shared cores, power, caches), and the main-thread work of a
         // reserved share must take its milliseconds under that competition, not on an idle machine.
         std::thread::sleep(std::time::Duration::from_millis(100));
@@ -96,7 +100,7 @@ impl ReserveRun {
         let spin_iterations = cal.iterations_for(planet_perf::reserve::total_main_ms());
         let mut burns: Vec<(BurnPass, u32)> = Vec::new();
         let mut burn_gpu_ms = 0.0;
-        for l in LOADS.iter().filter(|l| l.gpu_ms > 0.0) {
+        for l in loads.iter().filter(|l| l.gpu_ms > 0.0) {
             let pass = BurnPass::new(ctx);
             match pass.calibrate(ctx, l.gpu_ms, 0.05) {
                 Some(c) => {
@@ -113,7 +117,7 @@ impl ReserveRun {
                 )),
             }
         }
-        Ok(ReserveRun { cores, _system: system, spin_iterations, burns, notes, burn_gpu_ms })
+        Ok(ReserveRun { cores, loads, _system: system, spin_iterations, burns, notes, burn_gpu_ms })
     }
 
     /// One frame of the loads on the frame thread: submit the burns, then spin the main-thread milliseconds of every load. Returns the milliseconds the spin took.
@@ -131,16 +135,16 @@ impl ReserveRun {
         }
     }
 
-    /// The most busy spin jobs of every load, `(name, peak)`.
-    pub fn peaks(&self) -> Vec<(&'static str, usize)> {
-        LOADS.iter().zip(&self.cores).map(|(l, c)| (l.name, c.peak())).collect()
+    /// The most busy spin jobs of every load against its cores, `(name, peak, cores)`.
+    pub fn peaks(&self) -> Vec<(&'static str, usize, usize)> {
+        self.loads.iter().zip(&self.cores).map(|(l, c)| (l.name, c.peak(), l.cores)).collect()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use planet_perf::reserve::LOADS;
+    use planet_perf::reserve::{with_cores, LOADS};
     use planet_streaming::jobs::JobSystem;
     use planet_streaming::Priority;
     use std::sync::atomic::AtomicUsize;
@@ -158,7 +162,9 @@ mod tests {
     #[test]
     fn a_core_load_keeps_exactly_its_cores_busy_and_never_more() {
         let system = JobSystem::new(10, Priority::Normal);
-        let physics = LOADS.iter().find(|l| l.name == "physics").unwrap();
+        // The desktop's worked example: physics 2 (BUDG-003); the cores come from the shares (BUDG-011).
+        let loads = with_cores(&|n| if n == "physics" { 2 } else { 1 });
+        let physics = loads.iter().find(|l| l.name == "physics").unwrap();
         let load = CoreLoad::start(&system, physics, 1000.0);
         until("both physics spin jobs", || load.running() == 2);
         // Queue more work on the same share than its ceiling: it still runs two at once.

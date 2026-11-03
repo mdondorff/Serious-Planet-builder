@@ -60,9 +60,10 @@ pub fn run_cells(bake_res: u32) -> u32 {
     bake_res.min(COUPLED_CELLS)
 }
 
-/// Threads the reduction of a bake onto the run's lattice uses; the result does not depend on it (CON-14).
+/// Threads the reduction of a bake onto the run's lattice uses: the machine's background capacity (BUDG-003, ADR 0092); the result does not
+/// depend on it (CON-14).
 fn reduce_threads() -> usize {
-    std::thread::available_parallelism().map_or(1, |n| n.get()).min(8)
+    planet_streaming::shares::Shares::machine().capacity
 }
 
 /// The input of the run on the lattice `lat` from the bake `src` (a finer lattice whose cells nest in the run's): the bake's elevation reduced
