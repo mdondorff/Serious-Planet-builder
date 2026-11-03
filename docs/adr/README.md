@@ -26,7 +26,7 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0014 | [Terrain LOD algorithm](0014-terrain-lod-algorithm.md) | accepted |  |
 | 0015 | [Window surface and UI painting live in render](0015-window-surface-and-ui-painting-in-render.md) | accepted |  |
 | 0016 | [Height-aware terrain selection and morph](0016-height-aware-terrain-selection.md) | accepted; amended or extended by 0088/0089 (2026-11-01) |  |
-| 0017 | [Golden review policy and agent blessing](0017-golden-review-policy.md) | accepted | cross-adapter agreement amended by 0061 |
+| 0017 | [Golden review policy and agent blessing](0017-golden-review-policy.md) | accepted | cross-adapter agreement amended by 0061; Auto-bless R extended by 0096 |
 | 0018 | [Persistent cache keys: 128 bits from BLAKE3 over a canonical encoding](0018-persistent-cache-keys.md) | accepted |  |
 | 0019 | [Tile storage: an append-only pack with a rebuildable index, Hilbert-ordered](0019-tile-storage-pack-format.md) | accepted |  |
 | 0020 | [Autonomous performance runs behind a measured readiness gate](0020-autonomous-perf-runs.md) | accepted |  |
@@ -104,3 +104,4 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0092 | [Compute shares are fractions of the P-core capacity; background work is budgeted, not pooled on E-cores](0092-compute-shares-are-fractions-of-the-p-core-capacity.md) | accepted | shares as fractions of the P-core capacity, values in BUDG-003 only; flight is the goal, teleport not; amends ADR 0083 point 3; SPIKE-89, SPIKE-90 |
 | 0093 | [The CPU calibration: a robust estimator, read before the frames, voiding frame verdicts only](0093-calibration-estimator-and-scope.md) | accepted (opus-planner, delegated) | amends ADR 0065: minimum of 5 timings, read after the cool-down, GPU verdicts not voided, declared loads recorded; SPIKE-95 |
 | 0094 | [Cool-down by scene kind, and a duty idle between runs](0094-cool-down-by-scene-kind-and-a-duty-idle.md) | accepted (opus-planner, delegated) | amends ADR 0057 point 1: no cool start for streaming scenes, a 30 s cap for views, a duty idle between runs; SPIKE-95 |
+| 0096 | [Rounding auto-bless covers lit, sky and water views, against the owner's last bless](0096-rounding-auto-bless-covers-lit-sky-and-water.md) | accepted (owner) | amends ADR 0017: Auto-bless R for every class; lit, sky and water also checked against the anchor (last owner bless); tool support pending |

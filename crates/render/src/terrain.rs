@@ -1336,6 +1336,16 @@ impl TerrainRenderer {
         &self.shadow_unresident
     }
 
+    /// Time the shadow passes with GPU timestamps from the next frame on (the REND-052 frame scene); false without the pass or the queries.
+    pub fn enable_shadow_timing(&mut self, ctx: &GpuContext) -> bool {
+        self.shadow.as_mut().is_some_and(|s| s.enable_timing(ctx))
+    }
+
+    /// The GPU milliseconds of each shadow resolve pass of the last frame that ran it ([`crate::resolve::RESOLVE_PASS_NAMES`] order).
+    pub fn shadow_pass_ms(&self, ctx: &GpuContext) -> Option<[f64; 5]> {
+        self.shadow.as_ref().and_then(|s| s.pass_ms(ctx))
+    }
+
     /// How many frames the shadow pass has run (tests).
     pub fn shadow_frames_run(&self) -> u32 {
         self.shadow.as_ref().map_or(0, |s| s.frames_run())
