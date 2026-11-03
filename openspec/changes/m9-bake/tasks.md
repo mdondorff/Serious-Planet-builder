@@ -15,7 +15,7 @@ Revised 2026-10-31 (SPIKE-70): the carve moves to a face pass before the tile dr
 - [x] 2.1 Ask the planner for requirement IDs; write the spec deltas (generator-pipeline, streaming-cache) before PR 1; testing (PR 7): TEST-081 to TEST-084
 - [x] 2.2 PR 1: channels (1a: `relief_channels.rs`, the compute side with `max_step` a parameter; 1b: the stored form, `relief_store.rs`, kinds 10 and 11, STRM-067 and STRM-068); spec-guardian on the deltas pending
 - [ ] 2.3 PR 2: runtime base behind the switch (`ErosionField::with_relief`, `relief_lattice.rs`, tier A on synthetic channels: done locally); plan-check and the level-step probe with the switch on (report, not a gate yet): not done, they need the baked channels of `global16384`
-- [ ] 2.4 PR 3: kernels; the active-cell thermal timing gate; `numerics-reviewer`
+- [ ] 2.4 PR 3: kernels (3a done locally: `bake/{flood,route,carve}.rs`, tier A on a pit, a ramp, a cone, a dam and a coast, window-independent routing, refusals, a pinned fingerprint; 3b thermal, deposition and the timing gate after PR 4); the active-cell thermal timing gate; `numerics-reviewer`
 - [ ] 2.5 PR 4: face carve; one face timed (a correctness run, ADR 0087); cube-edge step measured
 - [ ] 2.5b PR 5: tile driver and layer; one tile per landform timed; core-edge seam against off-edge
 - [ ] 2.6 PR 6: runtime layer

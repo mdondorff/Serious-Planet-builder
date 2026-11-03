@@ -125,8 +125,9 @@ Source: ADR 0088 points 1 and 2, ADR 0088/0089 accepted 2026-11-01; m9-bake PR 1
 The bake's first pass SHALL, per cube face:
 - sample the base field (GEN-099) once per cell of 814 m (one point sample per cell);
 - carve it with implicit stream power with uplift (`U / K` 20, `K dt` 0.05 times the carve factor of GEN-097), 20 steps, not to steady state;
-- breach before the fill (at most 0.1 % of the cells, at most 50 m deep);
-- route with Barnes' improved priority flood, jittered D8 receivers and the order from the receivers, re-routing every 5th step;
+- breach after each route (the next fill sees the breached surface): from the leaves down, the receiver of a cell that stands higher than 0.1 % of the cell distance below it is lowered to that level, by at most 50 m, never an outlet (the sea and the face's border cells) and never below the sea level;
+- keep land above the sea level (plus the flood's epsilon) whatever depth the sea outlets have;
+- route with Barnes' improved priority flood (epsilon 1 mm), jittered D8 receivers (the jitter an integer hash of the GLOBAL cell and the direction, so a cell routes alike in every window that holds it) and the order from the receivers, re-routing every 5th step; the carve factor multiplies `K dt` and the uplift (`U / K` stays 20); a height or factor that is not finite, a flood without an outlet or with an epsilon that is not positive SHALL be refused;
 - not route across cube edges.
 It SHALL keep each face's change as a record of the layer store (STRM-065) and checkpoint per face. The constants are start values (SPIKE-62, SPIKE-65, SPIKE-66, SPIKE-70, SPIKE-71).
 
