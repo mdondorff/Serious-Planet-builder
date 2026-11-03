@@ -27,6 +27,9 @@ pub const PLATEAU: usize = 5;
 /// The relief driver `k` of each class (GEN-097, start values).
 pub const CLASS_K: [f64; CLASS_COUNT] = [1.0, 1.0, 5.0, 6.0, 7.5, 1.0, 2.0, 0.35];
 
+/// The carve factor of each class (GEN-097): a factor on the carve's `K dt` and uplift in pass 1 (GEN-100).
+pub const CLASS_CARVE: [f64; CLASS_COUNT] = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.5];
+
 /// Cells per face edge of the class lattice: the landform lattice's geometry (ADR 0080 point 3, GEN-093).
 pub const CLASS_LATTICE_N: usize = 256;
 
@@ -455,6 +458,11 @@ pub fn class_weights(terms: &MaskTerms, e0: f64, rolling: f64) -> [f64; CLASS_CO
 /// The relief driver `k` blended by the weights (GEN-097, untapered).
 pub fn blended_k(weights: &[f64; CLASS_COUNT]) -> f64 {
     weights.iter().zip(CLASS_K).map(|(w, k)| w * k).sum()
+}
+
+/// The carve factor blended by the weights (GEN-097).
+pub fn blended_carve_factor(weights: &[f64; CLASS_COUNT]) -> f64 {
+    weights.iter().zip(CLASS_CARVE).map(|(w, c)| w * c).sum()
 }
 
 /// The `u8` weights of GEN-093: the f64 weights scaled by 255 and rounded down, the remainder given one unit at a time to the classes with the largest

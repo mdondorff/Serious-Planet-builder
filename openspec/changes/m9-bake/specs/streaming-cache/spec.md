@@ -4,7 +4,7 @@
 The erosion layer SHALL be stored as its own store beside the global bake (`global16384`), which it SHALL NOT rewrite. It SHALL hold two kinds of record:
 - each tile's core change against the base field (GEN-101);
 - each face's pass-1 change (GEN-100), kept until the layer is complete and then dropped.
-The store SHALL be keyed by the bake's stage key, the versions of the class-weights and relief channels and the kernels' parameters (ADR 0006). Records are written per tile and per face, so that a bake resumes from its last complete checkpoint. A reader SHALL refuse a layer whose key does not match the bake it opens, naming both keys. The record kinds and their content-key encoding are in the m9-bake design.
+The store SHALL be keyed by the bake's stage key, the versions of the class-weights and relief channels and the kernels' parameters (ADR 0006). Records are written per tile and per face, so that a bake resumes from its last complete checkpoint. A reader SHALL refuse a layer whose key does not match the bake it opens, naming both keys. The face change SHALL be record kind 12 (`LayerFace`), one record per cube face filed under the face's level-0 tile: `codec (u8, value 1) | cells (u32 LE) | key (16 bytes) |` the face's f32 plane (row `j` outer, then `i`, little-endian). The key carries the bake's stage key as its source, the bake's resolution (tag 4), the cells (tag 1) and, under tag 15, the layer version, the radius, the sea level, the seed, every parameter of the carve and an identity of the base field's and the carve factor's inputs; a face stored under another key SHALL be an error naming that key and the expected one, never a recompute or a mix. The tile records' kind and encoding are in the m9-bake design.
 
 Verify: A
 Status: planned

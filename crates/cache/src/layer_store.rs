@@ -150,6 +150,7 @@ pub struct Pass1Report {
 
 /// Pass 1 over `faces`, one at a time, into the layer store in `dir`: a face that is stored under the current key is skipped (a resume), the others are computed and appended
 /// with the index written after each (the checkpoint). `base` and `factor` are the base field and the carve factor (GEN-097) at a direction. A face stored under another key is an error.
+#[allow(clippy::too_many_arguments)]
 pub fn run_pass1(
     dir: &Path,
     world: &GlobalWorld,
