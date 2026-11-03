@@ -23,13 +23,13 @@ Dormant (no near trigger; not asked now):
 |---|---|---|
 | NR | Real-GPU window checks NOT RUN on a locked desktop (TEST-073) | crusader |
 | Shadows | march fix over flat land (flat 2° 3.33 -> 1.31 ms; a 10° WARP golden for the owner's bless), then the shadow-layer1 poses re-picked on m9r2; #1109 horizon removal after it; ADR 0095 sky ambient waits for the owner's look | crusader |
-| Shares | ADR 0092: #1117 (shares in code, main merged in); then PR 4 (cross-references), `calibration-reference-machine` (ADR 0092 point 5), the settle diagnostic | spikes |
+| Shares | ADR 0092: PR 4 (cross-references, archive), then `calibration-reference-machine` (ADR 0092 point 5) | spikes |
 | CI | A named heavy-test part for WARP C 2/3 (21-22 min against 16) | spikes, after Shares |
 | World build | `global-bake` perf scene reports against BUDG-014 instead of failing at 600 s (`crates/app/src/globalperf.rs`, ADR 0097 point 3) | spikes, after CI |
 | M9 | Shared store now `C:/DEV/SeriousPlanetData/global16384-m9r2` (seed 1, read-only; field bake 1020 s, 14 GB; `global16384` kept until the owner says). #1086 round 3: threads-required fix for its gate test; bake stack #1104 → #1119 (I5b snapshot runnable: coarse planet 3.4 min, 12 full-res tiles 30-77 s each); kind 12 approved as temporary (owner, 2026-11-03); no planet bake before the owner approves the preview | explorer |
 
 ## Tracked
-- **Calibration limits off the reference machine** (2026-11-03, a departure from ADR 0092 point 5): `planet_perf::calibration::judge` applies the single limits (TEST-039) on any machine. Fix: change `calibration-reference-machine`, "no verdict (not the reference machine)", identified as the readiness gate does, with tier-A tests for both cases (spikes, after ADR 0092 PR 4).
+- **Calibration limits off the reference machine** (2026-11-03, departs from ADR 0092 point 5): `calibration::judge` applies the single limits (TEST-039) on any machine. Fix: `calibration-reference-machine` (spikes, queued).
 - **`gpu_edit_perf` smoke no-settle on CI** (2026-11-03): WARP C 3/3, run 41614937835 attempt 1, fc20511b (#1117): "the edit did not become exact in 40 s", 3 previewed level-15 tiles in flight with 618 residency requests queued.
   Not reproduced locally (4 threads, 1 tile worker, 3 of 3 pass, edit exact in at most 3.0 s); the rerun passed. Quarantine on the next failure.
 - **Reserve test result** (BUDG-012, loaded, 3 rounds, 2026-11-01): dive, look-1m, look-2km, teleport-2km pass; teleport-1m fails by +1 % (frame median 16.75 against 16.60 ms; the spin runs 5-18 % over its 6-9 ms target). Frame p99 over 20 ms includes the spin by construction. A quiet window decides the absolute rows.
