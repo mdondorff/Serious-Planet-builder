@@ -8,7 +8,7 @@ The store SHALL be keyed by the bake's stage key, the versions of the class-weig
 
 Verify: A
 Status: planned
-Source: ADR 0088 points 4 and 7, M9 draft decision 7 (owner: a separate layer first), ADR 0088/0089 accepted 2026-11-01; SPIKE-61 (tile changes about 7-10 GB)
+Source: ADR 0088 points 4 and 7, M9 draft decision 7 (owner: a separate layer first), ADR 0088/0089 accepted 2026-11-01; SPIKE-61 (tile changes about 7-10 GB); record kind 12 (the face change, about 3.7 GB for six faces at full resolution) approved by the owner 2026-11-03 as temporary working data, dropped after the final layer with `--keep-pass1` to keep it (PR 5)
 
 #### Scenario: Resume and refusal
 - **WHEN** a layer bake is killed after some tiles and resumed, and its layer is later opened against a bake with another key
