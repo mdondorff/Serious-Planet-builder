@@ -16,25 +16,30 @@ Source: M9 draft (`docs/briefings/m9-draft.md`) decision 6, criterion 1's bound;
 - **THEN** criterion 1 is reported NOT RUN, naming the missing layer
 
 ### Requirement: TEST-082 The default classes and the base elevation match Earth's shares
-A tier-B check SHALL evaluate seed 1's default source (GEN-094 to GEN-097) and report each measure against its band. Seed 2 is reported beside it and not judged. Unless a row says otherwise, it samples at 0.25 degree over land under 60 degrees latitude.
-| Measure | Band | Measured |
+A tier-B check SHALL evaluate the default source (GEN-094 to GEN-097) of seeds 1 to 5 and report each measure per seed, with the median, against its band. Unless a row says otherwise, it samples at 0.25 degree over land under 60 degrees latitude, area weighted. Earth's values are from ETOPO 2022 (SPIKE-93). The class bands (plains / hills / mountains 45-62 / 15-30 / 20-32 %) are approved (owner, 2026-11-02); the other bands are the planner's, from SPIKE-93 (2026-11-02). They replace the single-seed bands of SPIKE-80.
+| Measure | Earth | Band |
 |---|---|---|
-| Land with a belt core over 0.5 that lies in regions with length squared over area of 4 or more | at least 90 % | not measured on the core; SPIKE-79 measured 96 % of land above 2 km in such regions |
-| Relief classes, plains / hills / mountains | 55-67 / 10-25 / 14-30 % | 61 / 20 / 19 % (SPIKE-80; Earth 61 / 14 / 25 %, SPIKE-69) |
-| Land above 2 km / 4 km | 5-10 % / 1-3 % | 7.6 / 1.8 % (SPIKE-80; Earth without Antarctica 6.7 / 1.9 %, SPIKE-78) |
-| Highest land | 7-9 km | 8.0 km (SPIKE-80) |
-| Largest step of the untapered `k` between neighbouring lattice points, read at every lattice point of the planet | at most 2.0 | not measured |
-- A point's relief class comes from `k R14`, where `R14` is the elevation range of today's field (the layer switch off) within 7 km of the point at `k` 1. The class is plain under 100 m, hills from 100 to 300 m, and mountains over 300 m or where `e0` (GEN-095) exceeds 2.5 km.
-- The bands are start values around one measured seed.
-- Without the seed's global bake the check SHALL be NOT RUN, never a pass.
+| Land under 500 m | 58.4 % | 50-65 % |
+| Median land elevation | about 410 m | 300-550 m |
+| Median elevation of land within about 55 km of the sea | 82 m | under 200 m |
+| Land above 1 km / 2 km / 3 km / 4 km | 21.6 / 6.5 / 3.5 / 2.2 % | 17-27 / 5-10 / 2-5 / 1-3 % |
+| Highest land | 8.16 km | 7-9 km |
+| Relief classes, plains / hills / mountains | 45.7 / 24.6 / 29.7 % (R7 at 1') | 45-62 / 15-30 / 20-32 % |
+| Belt land (range of +-50 km at least 1,000 m), 0.25 degree | 17.6 % | 13-23 %; reported, gated with the convergent-only arc round (seed 4 holds 5.4 %, the median 9.7 %) |
+| p99 of the step of `k` between 40 km cells | 3.3 | reported, at most 3.5 (realism; SPIKE-93) |
+| p99 of the lattice steps of the untapered `k` (the largest step is reported) | p99 3.3 (largest 5.4) | at most 2.0 (GEN-097; gated on every seed) |
+- **Gate form:** the median of the five seeds SHALL lie within the band widened by 10 % of its width, and no seed SHALL lie outside the band by more than one band width. Earth is one sample and some worlds are more mountainous than others: the seed spread is a feature and the median carries the realism.
+- A point's relief class comes from the class weights; its elevation is the base elevation of GEN-096 before any bake or erosion.
+- Until the bake is wired the check reads the base elevation of the default source (the preview, before any bake or erosion) and its result is not the baked field's; with the bake it SHALL read the seed's global bake, and without that bake it SHALL be NOT RUN, never a pass.
+- The preview report prints each measure beside its band (TEST-086).
 
 Verify: B
 Status: planned
-Source: ADR 0089 decisions 3, 5 and 7, ADR 0088/0089 accepted 2026-11-01; SPIKE-69, SPIKE-78, SPIKE-79, SPIKE-80
+Source: ADR 0089 decisions 3, 5 and 7, ADR 0088/0089 accepted 2026-11-01; SPIKE-69, SPIKE-78, SPIKE-79, SPIKE-80; SPIKE-93 (Earth's bands from ETOPO), planner (2026-11-02, inbox #69 and later); the class bands (plains / hills / mountains 45-62 / 15-30 / 20-32 %) approved by the owner, 2026-11-02
 
-#### Scenario: Seed 1 within its bands
-- **WHEN** the check runs on seed 1
-- **THEN** every measure lies in its band, and each is printed with its band and the measured value; seed 2's values are printed without a verdict
+#### Scenario: Seeds 1 to 5
+- **WHEN** the check runs on seeds 1 to 5
+- **THEN** every gated row passes the gate form, and each seed's value is printed with the median and the band
 
 ### Requirement: TEST-083 Steep classes plan without a capped tile
 A tier-B check SHALL plan at production parameters (`LodParams::earth_1080p`) over a store with the erosion layer and its pyramid (STRM-066). It SHALL plan at one high-mountain, one mountain and one hill pose of the scorecard sites, each at 200 m and 2 km above the ground. At every pose:

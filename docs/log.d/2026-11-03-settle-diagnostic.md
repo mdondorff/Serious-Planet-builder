@@ -1,0 +1,1 @@
+- 2026-11-03 settle-diagnostic: the lit-stream settle's timeout names its quiet run, the limit that stopped it and each condition of the last tick (TEST-070; #1114's C 2/3 failure)
