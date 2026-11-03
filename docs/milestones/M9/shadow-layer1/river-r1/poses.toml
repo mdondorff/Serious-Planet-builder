@@ -1,0 +1,57 @@
+# The REND-052 frame scene's poses (`perf stream shadow-layer1`): river-r1 at 300 m and 30 m, at midday, at sunset (17.5 h) and at a sun of 2 degrees above the horizon
+# (17.86 h at this latitude, declination 0: sin(elevation) = cos(latitude) cos(hour angle)). The geometry is the look review 2b's (docs/milestones/M8/look-review-2b/river-r1).
+# Run: cargo xtask perf stream shadow-layer1 --poses docs/milestones/M9/shadow-layer1/river-r1/poses.toml --store C:/DEV/SeriousPlanetData/global16384 --global-res 16384 --out-dir target/shadow-layer1/river-r1
+
+chunk_timeout_s = 3600
+
+[place]
+lat = -11.1657
+lon = 23.0493
+
+[[pose]]
+name = "300m-midday"
+altitude_m = 300
+back_m = 1500
+heading_deg = 131
+pitch_deg = 15
+sun_local_hours = 12
+
+[[pose]]
+name = "300m-sunset"
+altitude_m = 300
+back_m = 1500
+heading_deg = 131
+pitch_deg = 15
+sun_local_hours = 17.5
+
+[[pose]]
+name = "300m-2deg"
+altitude_m = 300
+back_m = 1500
+heading_deg = 131
+pitch_deg = 15
+sun_local_hours = 17.86
+
+[[pose]]
+name = "30m-midday"
+altitude_m = 30
+back_m = 400
+heading_deg = 131
+pitch_deg = 8
+sun_local_hours = 12
+
+[[pose]]
+name = "30m-sunset"
+altitude_m = 30
+back_m = 400
+heading_deg = 131
+pitch_deg = 8
+sun_local_hours = 17.5
+
+[[pose]]
+name = "30m-2deg"
+altitude_m = 30
+back_m = 400
+heading_deg = 131
+pitch_deg = 8
+sun_local_hours = 17.86
