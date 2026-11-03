@@ -2,19 +2,20 @@
 //! (`spikes/m9-global-routing/results/proto/s70carve.rs.txt`) to f64 with `libm`, the outlets an explicit input.
 //!
 //! Every kernel is single-threaded with a fixed visiting order (the flood's pop order with ties broken by the cell index, the donor stack, the topological order), so the
-//! result is the same bits on any machine and thread count (CON-14); the jitter of the receivers is an integer hash of the cell and the direction.
-//! The grids do not wrap: a cube face does not route across its edges (GEN-100), its edge cells are outlets like the sea.
+//! result is the same bits on any machine and thread count (CON-14); the jitter of the receivers is an integer hash of the GLOBAL cell (the grid's origin plus the cell) and the direction,
+//! so a cell routes the same in every window that holds it. The grids do not wrap: a cube face does not route across its edges (GEN-100), its edge cells are outlets like the sea.
 
 pub mod carve;
 pub mod flood;
 pub mod route;
 
-/// A `w x h` grid of cells `dx` metres apart, row-major (`p = j w + i`), 8-connected, not wrapping.
+/// A `w x h` grid of cells `dx` metres apart, row-major (`p = j w + i`), 8-connected, not wrapping, whose cell `(0, 0)` is the global cell `(origin.0, origin.1)`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Grid {
-    pub w: usize,
-    pub h: usize,
-    pub dx: f64,
+    w: usize,
+    h: usize,
+    dx: f64,
+    origin: (u32, u32),
 }
 
 /// The 8 neighbours as `(di, dj)`: the four axis neighbours first, then the diagonals.
@@ -24,8 +25,26 @@ impl Grid {
     pub fn new(w: usize, h: usize, dx: f64) -> Grid {
         assert!(w >= 3 && h >= 3, "a grid is at least 3 x 3 cells, not {w} x {h}");
         assert!(dx.is_finite() && dx > 0.0, "the cell size is finite and positive, not {dx}");
-        assert!(w * h < u32::MAX as usize, "the cell index is a u32");
-        Grid { w, h, dx }
+        assert!(w.checked_mul(h).is_some_and(|n| n < u32::MAX as usize), "the cell index is a u32: {w} x {h} cells are too many");
+        Grid { w, h, dx, origin: (0, 0) }
+    }
+
+    /// The same grid with its cell `(0, 0)` at the global cell `origin` (a window of a larger grid: the jitter of a cell follows its global position).
+    pub fn with_origin(mut self, origin: (u32, u32)) -> Grid {
+        self.origin = origin;
+        self
+    }
+
+    pub fn w(&self) -> usize {
+        self.w
+    }
+
+    pub fn h(&self) -> usize {
+        self.h
+    }
+
+    pub fn dx(&self) -> f64 {
+        self.dx
     }
 
     pub fn len(&self) -> usize {
@@ -34,6 +53,11 @@ impl Grid {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// The global cell id of cell `p`: the row of the global cell in the high half, its column in the low half.
+    pub fn global_id(&self, p: usize) -> u64 {
+        (u64::from(self.origin.1) + (p / self.w) as u64) << 32 | (u64::from(self.origin.0) + (p % self.w) as u64)
     }
 
     /// The neighbour `d` of cell `p`, if it is on the grid.
@@ -61,5 +85,12 @@ impl Grid {
     pub fn outlets(&self, z: &[f64], sea_level: f64) -> Vec<bool> {
         assert_eq!(z.len(), self.len(), "one height per cell");
         (0..self.len()).map(|p| self.is_edge(p) || z[p] <= sea_level).collect()
+    }
+}
+
+/// Refuses a height field with a value that is not finite (a failed read of the base): a NaN would be left in place by every kernel.
+pub(crate) fn assert_finite(what: &str, v: &[f64]) {
+    if let Some(p) = v.iter().position(|x| !x.is_finite()) {
+        panic!("{what} holds a value that is not finite at cell {p} ({})", v[p]);
     }
 }
