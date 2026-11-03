@@ -54,6 +54,7 @@ pub fn perf_preflight(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         power_plan: machine.power_scheme.clone(),
         calibrations,
         top: load.top_over_case(),
+        reference_machine: planet_perf::check_reference_adapter(&machine.adapter).is_ok(),
     };
     let verdict = decide(&facts);
     for l in &verdict.report {

@@ -15,10 +15,11 @@
 //!
 //! The first limit set (single 50,000, parallel 100,000, before and after) would have voided about one clean scene in five: before
 //! parallel spreads 26 % on a quiet machine, and after single drifts upward after a long scene (the CPU clock falls, the post-pass
-//! still runs). The parallel limits hold for the reference thread count only ([`REFERENCE_THREADS`], the generation pool of the
-//! 20-thread machine); a log with another count is judged on the single readings alone.
+//! still runs). The parallel limits hold for the reference thread count only ([`REFERENCE_THREADS`], the calibration's fixed
+//! `min(18, logical threads)`, TEST-089); a log with another count is judged on the single readings alone.
 
-/// The thread count the parallel limits were measured with: 20 logical CPUs less the generation reserve of 2.
+/// The thread count the parallel limits were measured with (the reference machine's 20 logical CPUs less 2 at the time); the calibration
+/// now runs on a fixed `min(18, logical threads)` (TEST-089, ADR 0092).
 pub const REFERENCE_THREADS: u64 = 18;
 /// The threads a calibration runs its parallel reading on: [`REFERENCE_THREADS`], or the machine's threads when fewer, independent of
 /// the pool under test (TEST-039, ADR 0092), so a log of a share-sized pool keeps the parallel limits.
@@ -63,6 +64,28 @@ pub enum Judgement {
     Within,
     /// The readings outside their limits, one text each: `<when> <kind> <reading> us over <limit> us`.
     Outside(Vec<String>),
+    /// Readings logged on a machine that is not the reference one: the limits are its calibration (ADR 0065), so they give no verdict
+    /// here (ADR 0092 point 5, TEST-039); the readings are recorded.
+    NotReferenceMachine,
+}
+
+/// The words a log or a console gives a calibration that was not judged because the machine is not the reference one.
+pub const NOT_REFERENCE_MACHINE: &str = "no verdict (not the reference machine)";
+
+/// Whether the adapter named `name` is the reference machine's, by the rule of the readiness gate and [`crate::check_reference_adapter`]
+/// (the name holds [`crate::REFERENCE_ADAPTER_NAME`]): a log records only the name, so this is the rule a log is judged again by.
+pub fn is_reference_adapter_name(name: &str) -> bool {
+    name.contains(crate::REFERENCE_ADAPTER_NAME)
+}
+
+/// [`judge`] on the machine the readings were taken on: on another than the reference machine any reading present is
+/// [`Judgement::NotReferenceMachine`], never a verdict (ADR 0092 point 5); a run without readings stays [`Judgement::NotJudged`].
+pub fn judge_for(count: &dyn Fn(&str) -> Option<u64>, on_reference_machine: bool) -> Judgement {
+    match judge(count) {
+        Judgement::NotJudged => Judgement::NotJudged,
+        _ if !on_reference_machine => Judgement::NotReferenceMachine,
+        j => j,
+    }
 }
 
 fn with_commas(n: u64) -> String {
@@ -127,6 +150,25 @@ mod tests {
             "load_calib_after_parallel_median_us" => Some(a.1),
             _ => None,
         }
+    }
+
+    // spec: TEST-039
+    #[test]
+    fn off_the_reference_machine_the_readings_give_no_verdict_and_a_run_without_readings_stays_not_judged() {
+        // The 2026-11-03 slot after the vendor-profile change: parallel medians far over the limit.
+        let slow = counts(18, (55_473, 132_103), (56_083, 130_688));
+        assert!(
+            matches!(judge_for(&slow, true), Judgement::Outside(v) if v.len() == 4),
+            "the reference machine is judged: all four readings over"
+        );
+        assert_eq!(judge_for(&slow, false), Judgement::NotReferenceMachine, "another machine gets no verdict (ADR 0092 point 5)");
+        assert_eq!(judge_for(&counts(18, (46_000, 80_000), (46_000, 80_000)), false), Judgement::NotReferenceMachine);
+        assert_eq!(judge_for(&|_| None, false), Judgement::NotJudged, "no readings: not judged on any machine");
+        assert_eq!(judge_for(&counts(18, (46_000, 80_000), (46_000, 80_000)), true), Judgement::Within);
+        // The machine is named by its adapter, by the gate's rule.
+        assert!(is_reference_adapter_name("NVIDIA GeForce RTX 3080 Ti Laptop GPU"));
+        assert!(!is_reference_adapter_name("Microsoft Basic Render Driver"));
+        assert!(!is_reference_adapter_name("Intel(R) Iris(R) Xe Graphics"));
     }
 
     // spec: TEST-039

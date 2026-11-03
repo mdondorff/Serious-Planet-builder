@@ -80,6 +80,8 @@ pub fn takes_gpu_rows(path_name: &str) -> bool {
 
 /// The session-level causes from the machine and the runs (not the after-the-run rules): smoke, adapter, power scheme, idle start.
 pub fn session_causes(adapter: &AdapterFacts, power_scheme: Option<&str>, runs: &[RunReport], smoke: bool) -> Vec<Cause> {
+    // The calibration limits are the reference machine's: another machine's readings give no verdict (ADR 0092 point 5).
+    let reference = check_reference_adapter(adapter).is_ok();
     let mut c = Vec::new();
     let mut push = |kind, text: String| c.push(Cause { kind, text });
     if smoke {
@@ -125,7 +127,7 @@ pub fn session_causes(adapter: &AdapterFacts, power_scheme: Option<&str>, runs: 
         if calibration::declared_load(&count) {
             continue;
         }
-        if let Judgement::Outside(over) = calibration::judge(&count) {
+        if let Judgement::Outside(over) = calibration::judge_for(&count, reference) {
             judged_paths.push(&r.path_name);
             push(CauseKind::CpuCalibration, calibration::reason(&r.path_name, &over));
         }
@@ -134,16 +136,24 @@ pub fn session_causes(adapter: &AdapterFacts, power_scheme: Option<&str>, runs: 
 }
 
 /// The CPU calibration verdict of a session (ADR 0065) for the log: `Some(true)` when every scene that logged a calibration is within the
-/// limits, `Some(false)` with the reasons (one per scene) when one is not, `None` when no run logged a calibration (not judged).
-pub fn calibration_status(runs: &[RunReport]) -> (Option<bool>, Vec<String>) {
+/// limits, `Some(false)` with the reasons (one per scene) when one is not, `None` when no run logged a calibration (not judged). On
+/// another than the reference machine (`adapter`) the readings give no verdict: `None` with the one reason
+/// [`calibration::NOT_REFERENCE_MACHINE`] (ADR 0092 point 5).
+pub fn calibration_status(adapter: &AdapterFacts, runs: &[RunReport]) -> (Option<bool>, Vec<String>) {
+    let reference = check_reference_adapter(adapter).is_ok();
     let (mut judged, mut reasons, mut seen) = (false, Vec::new(), Vec::<&str>::new());
     for r in runs {
         if seen.contains(&r.path_name.as_str()) {
             continue;
         }
         let count = |k: &str| r.counts.iter().find(|(n, _)| n == k).map(|(_, v)| *v);
-        match calibration::judge(&count) {
+        match calibration::judge_for(&count, reference) {
             Judgement::NotJudged => {}
+            Judgement::NotReferenceMachine => {
+                if reasons.is_empty() {
+                    reasons.push(calibration::NOT_REFERENCE_MACHINE.to_string());
+                }
+            }
             Judgement::Within => judged = true,
             Judgement::Outside(over) => {
                 judged = true;
@@ -278,6 +288,12 @@ fn recomputed_warnings(root: &Json) -> (Vec<String>, Vec<String>) {
         Some(Json::Str(s)) => s.clone(),
         _ => String::new(),
     };
+    // A log records the adapter's name only: the reference machine by the rule of the gate (ADR 0092 point 5). A log that names no
+    // adapter cannot show it came from another machine and is judged as before.
+    let reference = match root.get("adapter").and_then(|a| a.get("name")) {
+        Some(Json::Str(n)) => calibration::is_reference_adapter_name(n),
+        _ => true,
+    };
     let mut kept = Vec::new();
     // Throttling: every run needs both clock samples with a throttle mask.
     let mask = |r: &Json, k: &str| match r.get(k).and_then(|c| c.get("throttle_reasons")) {
@@ -315,12 +331,12 @@ fn recomputed_warnings(root: &Json) -> (Vec<String>, Vec<String>) {
         let count = |k: &str| r.get("counts").and_then(|c| c.get(k)).and_then(Json::num).map(|n| n as u64);
         // A run that declared a load of its own is recorded only (ADR 0093 point 4); its readings still count as a calibration seen.
         if calibration::declared_load(&count) {
-            calibrated |= !matches!(calibration::judge(&count), Judgement::NotJudged);
+            calibrated |= !matches!(calibration::judge_for(&count, reference), Judgement::NotJudged);
             continue;
         }
-        match calibration::judge(&count) {
+        match calibration::judge_for(&count, reference) {
             Judgement::NotJudged => {}
-            Judgement::Within => calibrated = true,
+            Judgement::NotReferenceMachine | Judgement::Within => calibrated = true,
             Judgement::Outside(over) => {
                 calibrated = true;
                 let p = path_of(r);
@@ -740,6 +756,34 @@ mod tests {
         assert!(json.contains("\"cpu_calibration_valid\":null,\"cpu_calibration_reasons\":[]"), "{json}");
     }
 
+    // spec: TEST-039
+    #[test]
+    fn off_the_reference_machine_a_calibration_out_of_limits_is_no_cause_and_the_log_and_accept_say_no_verdict() {
+        let other = AdapterFacts { name: "AMD Radeon RX 7800 XT".into(), backend: "Vulkan".into(), kind: DeviceKind::Discrete };
+        let mut r = run("P0", 1500);
+        r.path_name = "stream-lit/dive".into();
+        r.counts = calib((59_000, 130_000), (59_000, 130_000));
+        // The session: the machine is not the reference one (its own cause); the calibration adds none (ADR 0092 point 5).
+        let v = SessionVerdict::assess(&other, Some(GOOD), std::slice::from_ref(&r), false, &gate::Validity::default(), &[]);
+        assert!(v.causes.iter().any(|c| c.kind == CauseKind::WrongAdapter), "{:?}", v.causes);
+        assert!(!v.causes.iter().any(|c| c.kind == CauseKind::CpuCalibration), "{:?}", v.causes);
+        // The log: not judged, with the reason.
+        let (status, reasons) = calibration_status(&other, std::slice::from_ref(&r));
+        assert_eq!((status, reasons), (None, vec![calibration::NOT_REFERENCE_MACHINE.to_string()]));
+        let json = report_json(&other, Some(GOOD), &[], &gate::Validity::default(), &Protocol::default(), std::slice::from_ref(&r));
+        assert!(
+            json.contains("\"cpu_calibration_valid\":null,\"cpu_calibration_reasons\":[\"no verdict (not the reference machine)\"]"),
+            "{json}"
+        );
+        // Accept, judging the log again from its adapter name: no calibration reason.
+        let j = parse(json.as_bytes()).unwrap();
+        assert!(!recomputed_or_recorded(&j).iter().any(|w| w.starts_with(calibration::REASON_PREFIX)), "{:?}", recomputed_or_recorded(&j));
+        // The same readings on the reference machine are judged.
+        let (status, reasons) = calibration_status(&rtx(), std::slice::from_ref(&r));
+        assert_eq!(status, Some(false));
+        assert_eq!(reasons.len(), 1);
+    }
+
     // spec: BUILD-032
     #[test]
     fn a_one_off_log_is_stamped_with_its_mode_and_load_and_a_loaded_one_carries_verdicts() {
@@ -891,7 +935,7 @@ mod tests {
         r.counts = counts.clone();
         let v = assess(std::slice::from_ref(&r), false, &gate::Validity::default(), &[]);
         assert!(v.causes.is_empty() && v.frame_valid() && v.gpu_session_valid(), "{:?}", v.causes);
-        let (status, reasons) = calibration_status(std::slice::from_ref(&r));
+        let (status, reasons) = calibration_status(&rtx(), std::slice::from_ref(&r));
         assert_eq!(status, Some(false));
         assert_eq!(reasons.len(), 1);
         assert!(reasons[0].contains("before single 62,183 us over 52,000 us") && reasons[0].ends_with(calibration::DECLARED_LOAD_SUFFIX));
