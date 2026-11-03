@@ -16,6 +16,8 @@ mod bounds;
 mod bounds_monotone;
 #[path = "brush_stage.rs"]
 mod brush_stage;
+#[path = "c1_base.rs"]
+mod c1_base;
 #[path = "cell_keys.rs"]
 mod cell_keys;
 #[path = "chain.rs"]

@@ -1,0 +1,1 @@
+- 2026-11-03 compute-shares-fractions (ADR 0092): core shares are fractions of the P-thread capacity; BUDG-003 and BUDG-013 active, the shares in the code, TEST-039/040 labelled as the reference machine's calibration

@@ -212,6 +212,20 @@ fn tier_filter(sub: Option<&str>, real: bool) -> &'static str {
     }
 }
 
+/// The packages whose tier-C binaries (`gpu_all`) a CI archive holds (BUILD-018).
+const GPU_ARCHIVE_PACKAGES: [&str; 2] = ["planet", "planet-render"];
+
+/// The `cargo` arguments that build the tier-C binaries into the nextest archive `file` (BUILD-018): only the `gpu_all` test binaries of
+/// [`GPU_ARCHIVE_PACKAGES`], with the binaries they start (`NEXTEST_BIN_EXE_*`).
+fn gpu_archive_args(file: &str) -> Vec<String> {
+    let mut v: Vec<String> = vec!["nextest".into(), "archive".into()];
+    for p in GPU_ARCHIVE_PACKAGES {
+        v.extend(["-p".into(), p.into()]);
+    }
+    v.extend(["--test".into(), "gpu_all".into(), "--archive-file".into(), file.into()]);
+    v
+}
+
 /// The nextest arguments that cap a run on the discrete GPU (BUILD-003): the `real-gpu` profile and at most [`REAL_GPU_THREADS`]
 /// processes at once, unless the caller passed its own `-j` / `--test-threads`. Nothing for a run on a software adapter.
 fn real_gpu_args(real: bool, passthrough: &[&str]) -> Vec<String> {
@@ -253,6 +267,7 @@ pub fn test(root: &Path, args: &[String]) -> Res {
 pub fn test_timed(root: &Path, args: &[String]) -> Result<TestTiming, String> {
     let mut sub = None;
     let (mut strict, mut real, mut all) = (false, false, false);
+    let (mut archive_out, mut archive_in): (Option<String>, Option<String>) = (None, None);
     let mut passthrough: Vec<&str> = Vec::new();
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -261,15 +276,33 @@ pub fn test_timed(root: &Path, args: &[String]) -> Result<TestTiming, String> {
             "--strict" => strict = true,
             "--real" => real = true,
             "--all" => all = true,
+            "--archive-out" => archive_out = Some(it.next().ok_or("--archive-out needs a file")?.clone()),
+            "--archive-file" => archive_in = Some(it.next().ok_or("--archive-file needs a file")?.clone()),
             "--" => {
                 passthrough.extend(it.by_ref().map(String::as_str));
             }
             other => {
                 return Err(format!(
-                    "unknown test argument '{other}'\n(test fast [--all] | test | test gpu [--strict] [--real] [-- nextest args])"
+                    "unknown test argument '{other}'\n(test fast [--all] | test | test gpu [--strict] [--real] [--archive-out FILE | --archive-file FILE] [-- nextest args])"
                 ))
             }
         }
+    }
+    if (archive_out.is_some() || archive_in.is_some()) && sub != Some("gpu") {
+        return Err("--archive-out and --archive-file belong to `test gpu` (BUILD-018)".to_string());
+    }
+    if archive_out.is_some() && archive_in.is_some() {
+        return Err("--archive-out builds an archive and --archive-file runs one: give one of them".to_string());
+    }
+    // `test gpu --archive-out FILE`: one build of the tier-C binaries into a nextest archive and nothing else (BUILD-018: CI's build job;
+    // the parts run it with `--archive-file`).
+    if let Some(out) = &archive_out {
+        let args = gpu_archive_args(out);
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let built = Instant::now();
+        run(root, "cargo", &args, &[])?;
+        eprintln!("test gpu: archive {out} built in {:.1}s", built.elapsed().as_secs_f64());
+        return Ok(TestTiming { test_secs: 0.0, whole: true });
     }
     let adapter = if real { "hardware" } else { "software" };
     let env_strict = std::env::var("PLANET_GOLDEN_STRICT").unwrap_or_default() == "1";
@@ -301,6 +334,9 @@ pub fn test_timed(root: &Path, args: &[String]) -> Result<TestTiming, String> {
             fast_crates.push(p.clone());
             selection.extend(["-p".into(), p]);
         }
+    } else if let Some(file) = &archive_in {
+        // A run from an archive builds nothing and selects no packages: the archive holds the binaries, the workspace is this checkout.
+        selection.extend(["--archive-file".into(), file.clone(), "--workspace-remap".into(), root.display().to_string()]);
     } else {
         selection.push("--workspace".into());
     }
@@ -333,11 +369,13 @@ pub fn test_timed(root: &Path, args: &[String]) -> Result<TestTiming, String> {
         None => run(root, "cargo", args, &env),
     };
     let built = Instant::now();
-    let mut build: Vec<&str> = vec!["nextest", "run", "--no-run"];
-    build.extend(selection.iter().map(String::as_str));
-    if let Err(e) = go(&build) {
-        say_log();
-        return Err(e);
+    if archive_in.is_none() {
+        let mut build: Vec<&str> = vec!["nextest", "run", "--no-run"];
+        build.extend(selection.iter().map(String::as_str));
+        if let Err(e) = go(&build) {
+            say_log();
+            return Err(e);
+        }
     }
     let build_secs = built.elapsed().as_secs_f64();
     let started = Instant::now();
@@ -1601,6 +1639,22 @@ mod tests {
         assert_eq!(tier_filter(Some("gpu"), true), "binary(/^gpu_/) or binary(/^oracle_/)");
     }
 
+    // spec: BUILD-018
+    #[test]
+    fn the_ci_archive_holds_only_the_tier_c_binaries_and_a_run_from_it_builds_nothing() {
+        assert_eq!(
+            gpu_archive_args("target/gpu.tar.zst"),
+            ["nextest", "archive", "-p", "planet", "-p", "planet-render", "--test", "gpu_all", "--archive-file", "target/gpu.tar.zst"]
+        );
+        // Both directions belong to `test gpu` only, and one at a time.
+        let root = std::path::Path::new(".");
+        let e = test_timed(root, &["fast".into(), "--archive-file".into(), "x".into()]).unwrap_err();
+        assert!(e.contains("belong to `test gpu`"), "{e}");
+        let e = test_timed(root, &["gpu".into(), "--archive-out".into(), "a".into(), "--archive-file".into(), "b".into()]).unwrap_err();
+        assert!(e.contains("give one of them"), "{e}");
+        assert!(test_timed(root, &["gpu".into(), "--archive-out".into()]).unwrap_err().contains("needs a file"));
+    }
+
     // spec: BUILD-003
     #[test]
     fn a_real_gpu_run_uses_the_capped_profile_and_a_software_run_is_untouched() {
@@ -1871,6 +1925,7 @@ mod tests {
             "the_stills_scene_draws_each_pose_with_its_horizon_maps_baked",
             "a_still_runs_the_clipmap_shadow_by_default_and_not_with_the_flag",
             "the_gate_passes_on_a_small_world_without_the_chunk_stage_which_is_the_default",
+            "the_draw_flag_selects_the_path_and_every_loop_draws_the_same_frame_on_either",
         ] {
             let at = position(&|o| o.filter.contains(&format!("test({name})")), name);
             assert!(at < gpu, "{name}: its limit comes after the gpu_ override and would never apply");
@@ -1888,6 +1943,8 @@ mod tests {
             "a_lit_view_a_lit_flight_and_a_stream_scene_log_their_cpu_calibration_when_asked_even_in_a_smoke_run",
             "a_streaming_scene_on_the_lit_path_logs_beside_the_debug_path_under_its_own_name",
             "the_lit_coast_view_over_streamed_tiles_draws_the_same_pixels_still_and_after_a_small_turn_and_back",
+            // The draw-flag loop test of `gpu_skeleton`: five relief runs, cut off at 300 s beside two of the above (planner, 2026-11-03).
+            "the_draw_flag_selects_the_path_and_every_loop_draws_the_same_frame_on_either",
         ] {
             assert!(defaults[warp].filter.contains(&format!("test({member})")), "{member} is not in warp-heavy");
         }
@@ -1902,7 +1959,9 @@ mod tests {
         }
         let named: Vec<&str> =
             hf.match_indices("test(").map(|(i, _)| hf[i + 5..].split(')').next().unwrap()).filter(|n| !n.starts_with('/')).collect();
-        assert_eq!(named.len(), 3, "the three gpu_skeleton loop tests: {named:?}");
+        // The draw-flag loop test sits in `warp-heavy`; a name in both filters would be dead text here (the first match sets the group).
+        assert_eq!(named.len(), 2, "two of the gpu_skeleton loop tests: {named:?}");
+        assert!(!hf.contains("the_draw_flag_selects_the_path"), "the draw-flag test is in warp-heavy, not heavy-window");
         for name in named {
             assert!(exists(name), "{name} is not a test function");
         }

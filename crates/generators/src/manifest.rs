@@ -6,7 +6,7 @@ use planet_core::cube::{face_to_direction, TangentWarp};
 use planet_core::hash::{hash_u64s, HASH_VERSION};
 use planet_core::{Face, Geo, ReferenceSurface, Sphere, TileId};
 
-use crate::erosion::{ErosionGenerator, EROSION_IMPLEMENTATION_ID, EROSION_VERSION};
+use crate::erosion::{ErosionGenerator, EROSION_C1_IMPLEMENTATION_ID, EROSION_C1_VERSION, EROSION_IMPLEMENTATION_ID, EROSION_VERSION};
 use crate::global::{
     bake, bake_blocks, grid_hash, GlobalGrid, GlobalSample, GridSource, GLOBAL_VERSION, IMPLEMENTATION_ID as GLOBAL_IMPLEMENTATION_ID,
 };
@@ -128,6 +128,10 @@ pub fn determinism_manifest_perturbed(perturb: &dyn Fn(&str, &str) -> Option<usi
         "version global {GLOBAL_IMPLEMENTATION_ID} {GLOBAL_VERSION}\nversion terrain {TERRAIN_IMPLEMENTATION_ID} {TERRAIN_VERSION}\n"
     ));
     s.push_str(&format!("version erosion {EROSION_IMPLEMENTATION_ID} {EROSION_VERSION}\n"));
+    s.push_str(&format!(
+        "version erosionc1 {EROSION_C1_IMPLEMENTATION_ID} {EROSION_C1_VERSION} reader {}\n",
+        crate::global::READER_C1_VERSION
+    ));
     // A moon built through the generator: the body id, the derived seed and the read set are part of its keys.
     let mut def = WorldDefinition::single_planet(MANIFEST_RADIUS_M, MANIFEST_SEED);
     def.set_body_radius(BodyId(1), 1_737_400.0);
@@ -186,15 +190,24 @@ impl GlobalFieldValues {
         let src = GridSource(&grid);
         let terrain = TerrainGenerator.field(&GenContext::new(&def), BodyId::PLANET, &src, MANIFEST_BAKE_KEY).expect("seed");
         let eroded = ErosionGenerator.field(&GenContext::new(&def), BodyId::PLANET, &src, MANIFEST_BAKE_KEY).expect("seed and radius");
+        let eroded_c1 =
+            ErosionGenerator.field_c1(&GenContext::new(&def), BodyId::PLANET, &src, MANIFEST_BAKE_KEY).expect("seed and radius");
         let mut heights = Vec::new();
-        for (kind, field) in [("terrain", &terrain as &dyn HeightField), ("erosion", &eroded as &dyn HeightField)] {
+        for (kind, field) in [
+            ("terrain", &terrain as &dyn HeightField),
+            ("erosion", &eroded as &dyn HeightField),
+            ("erosionc1", &eroded_c1 as &dyn HeightField),
+        ] {
             for f in 0..6u8 {
                 for (st, tt) in MANIFEST_FIELD_POINTS {
                     heights.push((kind, format!("{f}/{st:?}/{tt:?}"), field.height(face_to_direction(&TangentWarp, Face(f), st, tt))));
                 }
             }
         }
-        assert!(terrain.error().is_none() && eroded.error().is_none(), "the manifest's bake reads must succeed");
+        assert!(
+            terrain.error().is_none() && eroded.error().is_none() && eroded_c1.error().is_none(),
+            "the manifest's bake reads must succeed"
+        );
         assert!(heights.iter().all(|h| h.2.is_finite()), "a NaN height would pass the cross-OS diff silently");
         GlobalFieldValues { grid, ocean, blocks, heights }
     }

@@ -621,6 +621,12 @@ impl WorldTerrain {
         }
     }
 
+    /// The bake's elevation at `dir` by the C1 interpolant ([`planet_generators::global::read_elevation_c1`], GEN-107): the base of `cpu-erosion-v2`, for diagnostics and the
+    /// pyramid evidence. `None` on a read error.
+    pub fn base_elevation_c1(&self, dir: planet_core::Vec3) -> Option<f64> {
+        planet_generators::global::read_elevation_c1(self.src.as_ref(), &TangentWarp, dir).ok().map(f64::from)
+    }
+
     /// Whether this world has water: a bake with its ocean channel (the sea of the definition, ADR 0041).
     /// The bake's continentalness and elevation at `dir` and whether a vertex of its cell is ocean (ADR 0041 point 2): the facts the
     /// water field decides from, for diagnostics and the coverage oracle. `None` without a bake or an ocean channel, or on a read error.
@@ -744,10 +750,6 @@ impl WorldTerrain {
 
     pub(crate) fn bake_key(&self) -> [u8; 16] {
         self.bake_key
-    }
-
-    pub(crate) fn store_dir(&self) -> Option<&Path> {
-        self.store_dir.as_deref()
     }
 
     /// The parallelism the tile jobs' helper threads are asked from (the terrain share of the rig, BUDG-004).
