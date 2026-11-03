@@ -25,6 +25,10 @@ fn the_envelope_scene_runs_end_to_end_in_smoke_mode_and_writes_its_log_with_ever
         // The software rasteriser takes every core of a small runner; below-normal generation workers then never finish a job.
         "--gen-priority",
         "normal",
+        // A run that must be reproducible pins the pool (STRM-020): the default is the machine's terrain share, one tile worker
+        // on a 4-thread CI runner since #1117, where the scene's wall-clock limits were set with two.
+        "--gen-workers",
+        "2",
         "--global-res",
         "128",
         "--out",
