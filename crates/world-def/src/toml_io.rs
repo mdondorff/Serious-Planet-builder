@@ -15,7 +15,7 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
-use crate::{is_height_field_path, valid_implementation_id, NodeValue, WorldDefinition, HEIGHT_FIELD_PATH};
+use crate::{is_height_field_path, valid_implementation_id, NodeValue, WorldDefinition, HEIGHT_FIELD_PATH, SITE_PATH};
 
 /// Schema version this build writes and reads without migration.
 /// History: 1 = the first layout; 2 = adds the liquid table (`liquid.<k>.*`) and the sea of a body (`body.<n>.sea.*`), WDEF-006.
@@ -161,6 +161,30 @@ fn flatten(prefix: &str, table: &toml::Table, def: &mut WorldDefinition) -> Resu
         if !valid_segment(key) {
             return Err(LoadError::BadPath { path, why: "keys may contain only letters, digits, `_` and `-`" });
         }
+        if path == SITE_PATH {
+            // The descent site: two numbers, latitude and longitude in degrees (GEN-108).
+            let numbers: Option<Vec<f64>> = match value {
+                toml::Value::Array(a) => a
+                    .iter()
+                    .map(|v| match v {
+                        toml::Value::Float(f) => Some(*f),
+                        toml::Value::Integer(i) => Some(*i as f64),
+                        _ => None,
+                    })
+                    .collect(),
+                _ => None,
+            };
+            match numbers.as_deref() {
+                Some([lat, lon]) if lat.is_finite() && lon.is_finite() => {
+                    if !(-90.0..=90.0).contains(lat) || !(-180.0..=180.0).contains(lon) {
+                        return Err(LoadError::BadPath { path, why: "`world.site` is [latitude, longitude] within 90 and 180 degrees" });
+                    }
+                    def.set_site(*lat, *lon);
+                }
+                _ => return Err(LoadError::BadPath { path, why: "`world.site` is two numbers, [latitude, longitude] in degrees" }),
+            }
+            continue;
+        }
         if is_height_field_path(&path) {
             // The one string value: the implementation id of the world's height field.
             match value {
@@ -272,6 +296,11 @@ pub fn to_toml(def: &WorldDefinition) -> Result<String, LoadError> {
         // `valid_implementation_id` holds by construction, so the id needs no escaping. Sorted by key, as the nodes are.
         let lines = tables.entry("world").or_default();
         lines.push(format!("height_field = \"{id}\""));
+        lines.sort_by(|a, b| a.split(" = ").next().cmp(&b.split(" = ").next()));
+    }
+    if let Some((lat, lon)) = def.site() {
+        let lines = tables.entry("world").or_default();
+        lines.push(format!("site = [{lat:?}, {lon:?}]"));
         lines.sort_by(|a, b| a.split(" = ").next().cmp(&b.split(" = ").next()));
     }
     let mut out = format!("{VERSION_KEY} = {SCHEMA_VERSION}\n");

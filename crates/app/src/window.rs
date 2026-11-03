@@ -46,6 +46,31 @@ pub const NO_DISPLAY: &str = "no display: ";
 
 /// Frames the smoke run drives before it closes the window.
 const SMOKE_FRAMES: u64 = 48;
+
+/// The land the default descent snaps to lies this far inland of the shore it finds, metres (the shore walk keeps land 500 m in; a kilometre is a beach, not the surf).
+const SNAP_INLAND_M: f64 = 1_000.0;
+
+/// The `(latitude, longitude)` in degrees the scripted descent opens over (GEN-108): the `--site` option if given, else the world definition's `[world] site`, else the default
+/// site (20 N, 30 E) when that is land, else the first land of the shore walk from it ([`planet_frame::litscenes::find_coast`], `SNAP_INLAND_M` inland): a pure function of
+/// the world, so every run opens on the same land. The default site itself when the walk finds no shore.
+pub fn descent_site(option: Option<(f64, f64)>, world: &WorldTerrain, field: &dyn HeightField, radius_m: f64) -> (f64, f64) {
+    if let Some(site) = option.or_else(|| world.definition().site()) {
+        return site;
+    }
+    let default = planet_core::Vec3::from_lat_lon(SITE_LAT_DEG.to_radians(), SITE_LON_DEG.to_radians());
+    let is_sea = |d: planet_core::Vec3| crate::litperf::carries_sea(world, d);
+    if field.height(default) >= 0.0 && !is_sea(default) {
+        return (SITE_LAT_DEG, SITE_LON_DEG);
+    }
+    match planet_frame::litscenes::find_coast(&is_sea, &|d| field.height(d), 0.0, SITE_LAT_DEG, SITE_LON_DEG, radius_m) {
+        Some(coast) => {
+            let land = (coast.dir + coast.heading * (SNAP_INLAND_M / radius_m)).normalized();
+            let (lat, lon) = land.lat_lon();
+            (lat.to_degrees(), lon.to_degrees())
+        }
+        None => (SITE_LAT_DEG, SITE_LON_DEG),
+    }
+}
 /// Frames after which a smoke run that has presented nothing gives up (a window that is never shown is not a pass).
 const SMOKE_GIVE_UP: u64 = 1500;
 /// Seconds between the title updates, and between the GPU-time samples.
@@ -1980,14 +2005,8 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         ..LodParams::earth_1080p()
     };
     lod.validate().map_err(|e| format!("--cells {} --tau {}: {e}", o.cells, tau))?;
-    let script = build_script_at(
-        o.site.unwrap_or((SITE_LAT_DEG, SITE_LON_DEG)),
-        StreamScene::Dive,
-        radius_m,
-        f64::from(size.0) / f64::from(size.1),
-        field.as_ref(),
-        field.seed(),
-    );
+    let site = descent_site(o.site, &world, field.as_ref(), radius_m);
+    let script = build_script_at(site, StreamScene::Dive, radius_m, f64::from(size.0) / f64::from(size.1), field.as_ref(), field.seed());
     let views: Vec<&str> = TerrainView::ALL.iter().map(|v| v.name()).collect();
     // A flight shows the relief view unless `--view` says otherwise (the flat-colour views are one colour at 1 m).
     let view_name = if o.given.contains("--view") { o.view.as_str() } else { "relief" };
@@ -2640,6 +2659,48 @@ mod tests {
                 assert_eq!(mode_camera_steps(false, false, globe, free), (false, false));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod site_tests {
+    use super::*;
+    use planet_world_def::WorldDefinition;
+
+    const R: f64 = 6_371_000.0;
+
+    fn world(seed: u64, site: Option<(f64, f64)>) -> WorldTerrain {
+        let mut def = WorldDefinition::single_planet(R, seed);
+        if let Some((lat, lon)) = site {
+            def.set_site(lat, lon);
+        }
+        WorldTerrain::open(def, 256).expect("the world opens").bounding_water()
+    }
+
+    // spec: GEN-108
+    #[test]
+    fn the_option_wins_then_the_worlds_site_then_a_land_default_found_by_the_shore_walk() {
+        let w = world(5, Some((10.0946, -26.2573)));
+        let field = w.field().unwrap();
+        assert_eq!(descent_site(Some((1.0, 2.0)), &w, field.as_ref(), R), (1.0, 2.0), "--site wins over the world's site");
+        assert_eq!(descent_site(None, &w, field.as_ref(), R), (10.0946, -26.2573), "the world's site wins over the default");
+        // No site anywhere: land in every seed tried (the default itself where it is land, else the first land of the walk), the same on a second call.
+        let (mut moved, mut kept) = (0, 0);
+        for seed in 1..=6 {
+            let w = world(seed, None);
+            let field = w.field().unwrap();
+            let site = descent_site(None, &w, field.as_ref(), R);
+            assert_eq!(site, descent_site(None, &w, field.as_ref(), R), "seed {seed}: deterministic");
+            let d = planet_core::Vec3::from_lat_lon(site.0.to_radians(), site.1.to_radians());
+            if site == (SITE_LAT_DEG, SITE_LON_DEG) {
+                kept += 1;
+            } else {
+                moved += 1;
+                assert!(field.height(d) > 0.0, "seed {seed}: the snapped site {site:?} is land ({} m)", field.height(d));
+            }
+        }
+        eprintln!("default site: {kept} seeds kept 20,30 and {moved} moved to a shore");
+        assert_eq!(kept + moved, 6);
     }
 }
 
