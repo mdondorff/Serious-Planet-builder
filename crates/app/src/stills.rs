@@ -140,7 +140,7 @@ fn required(t: &toml::Table, key: &str, whose: &str) -> Result<f64, String> {
     number(t, key, whose)?.ok_or_else(|| format!("{whose}: '{key}' is missing"))
 }
 
-/// Read the poses file: `[place]` (`anchor = "largest-river"`, or `lat` and `lon` in degrees), an optional `chunk_timeout_s`, and one
+/// Read the poses file: `[place]` (`anchor = "largest-river"`, or `lat` and `lon` in degrees) and one
 /// `[[pose]]` per still with `name`, `altitude_m`, `back_m`, `heading_deg`, `pitch_deg` and `sun_local_hours` (`sun_declination_deg`
 /// defaults to 0). A bad file is refused naming the key and the value.
 pub fn parse_config(text: &str) -> Result<StillsConfig, String> {
@@ -1075,6 +1075,18 @@ mod tests {
         assert_eq!(median(vec![3.0, 1.0, 2.0]), 2.0);
         assert_eq!(median(vec![4.0, 1.0, 2.0, 3.0]), 2.5);
         assert!(median(vec![]).is_nan());
+    }
+
+    // spec: TEST-050
+    #[test]
+    fn the_keys_of_the_horizon_era_in_an_old_poses_file_are_ignored_not_refused() {
+        let old = format!(
+            "chunk_timeout_s = 300
+horizon_cell_m = 300
+coarse_horizon = true
+{GOOD}"
+        );
+        assert_eq!(parse_config(&old).unwrap().poses.len(), parse_config(GOOD).unwrap().poses.len());
     }
 
     const GOOD: &str = r#"

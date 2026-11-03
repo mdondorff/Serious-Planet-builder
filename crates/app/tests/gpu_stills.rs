@@ -113,7 +113,7 @@ fn the_stills_scene_draws_each_pose_with_its_horizon_maps_baked() {
     for n in &names {
         assert_eq!(png_size(&dir.join(format!("{n}.png"))), (160, 90));
     }
-    // Each line holds the plan's node count (the ninth word).
+    // Each line holds the plan's node count (the tenth word, index 9).
     for line in index.lines().filter(|l| !l.starts_with('#')) {
         let nodes: usize = line.split_whitespace().nth(9).unwrap().parse().unwrap();
         assert!(nodes >= 1, "{line}");

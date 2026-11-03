@@ -18,4 +18,4 @@ PR 6 of `shadow-clipmap-march` (ADR 0085 point 7). Since PR 5 the lit fragments 
 ## Impact
 - No pixel of any lit, sky, water or debug frame moves: the lit fragments already carried no horizon factor (REND-051) and the lighting functions only lose a factor of 1.0.
 - `stills.txt` loses its two horizon columns; the `shadow-cost` JSON loses `no_shadow_ms`, `neither_ms` and `shadow_ms` (`compiled_out_ms` holds one value, `together_ms` equals `material_ms`).
-- The archive of `shadow-clipmap-march` repeats the removals and rewordings of this change; whichever archives second finds them already applied.
+- The removals and rewordings live only in this change (their deltas were taken out of `shadow-clipmap-march`): this change archives before or with the final `shadow-clipmap-march` archive (its PR 9).

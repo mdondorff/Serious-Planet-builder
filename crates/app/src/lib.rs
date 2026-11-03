@@ -81,7 +81,7 @@ modes:
     --gen-priority below-normal|normal   OS priority of the generation workers (STRM-020, ADR 0046; default below-normal: the frame thread wins a core both want; no result depends on it)
     --lit                    the streaming perf scenes on the lit path with the atmosphere and water (TEST-025): same scripts, same verdicts, logs named <scene>-lit
     --views a,b,c            only these views of the lit perf scenes (ground-1m, aerial-20km, coast-2km, coast-3m, orbit, coast-glide, coast-descent); a partial log is not a window
-    --scene capture-stills   one PNG per pose of --poses FILE (TEST-048) in --out-dir, over the base terrain of a world, with the horizon maps near the eye baked (a headless scene; no viewer starts it); needs --store DIR or --allow-memory-bake, takes --size WxH and --views (pose names); never a measurement
+    --scene capture-stills   one PNG per pose of --poses FILE (TEST-048) in --out-dir, over the base terrain of a world (a headless scene; no viewer starts it); needs --store DIR or --allow-memory-bake, takes --size WxH and --views (pose names); never a measurement
     --scene capture-flights  the two coastal flights as 1440p PNG sequences (shore_filter at the look default, 0, and then 1) in --out-dir, never a measurement (TEST-027; `cargo xtask capture flights` also makes the videos); needs --store DIR or --allow-memory-bake, takes --size WxH, --flight-frames N
     --flight-frames N        frames of each coastal flight of the lit perf scenes (default 240; --scene lit, TEST-025)
     --perf                   performance-harness skeleton (needs --adapter hardware; the readiness gate decides, ADR 0020)
