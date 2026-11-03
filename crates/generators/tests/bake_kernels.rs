@@ -171,6 +171,8 @@ fn the_carve_keeps_the_outlets_uplifts_the_land_stays_above_the_receivers_and_is
     }
     // The uplift is applied at the default parameters: against the same carve without it (`u_over_k` 0) far more cells end higher than lower. (With the area shared among the
     // lower neighbours the default uplift of 20 m is out-incised on this cone, so no cell rises above its input, which is why the comparison is with the carve without uplift.)
+    // Relief check D8 against MFD at 12,288 (seed 14, 7 x 7 pass-1 cells, land of the tile; mountains 2/12/10, hills 0/8/24): result relief p50 -5.1 % / -2.6 %, p90 -14 % / -8 %,
+    // added median relief over the base kept 73 % / 94 %. Uplift is recalibrated with SPIKE-99's outcome (per-class uplift map), not here.
     let mut z_flat = cone.clone();
     carve(&g, &mut z_flat, &outlet, &CarveParams { u_over_k: 0.0, ..params }, None, 11);
     let (mut higher, mut lower) = (0, 0);
