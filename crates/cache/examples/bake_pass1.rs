@@ -53,9 +53,7 @@ fn main() {
     if res > COARSE_LIMIT {
         fail(&format!("--planet-res above {COARSE_LIMIT} is larger than GEN-100's pass-1 grid"));
     }
-    if threads == 0 {
-        threads = std::thread::available_parallelism().map_or(1, |n| n.get());
-    }
+    let (threads, threads_note) = planet_streaming::topology::bake_threads(threads).unwrap_or_else(|e| fail(&e));
     let out = out.unwrap_or_else(|| PathBuf::from(format!("target/bake/pass1-seed-{seed}-res-{res}")));
     let store_dir = out.join("layer");
     let world = GlobalWorld::from_definition(&WorldDefinition::single_planet(RADIUS_M, seed)).unwrap_or_else(|e| fail(&format!("{e:?}")));
@@ -75,7 +73,7 @@ fn main() {
     };
     let bake_res = res as u32;
     println!(
-        "pass 1: seed {seed}, {res} cells per face edge ({:.0} m), halo {halo} cells, faces {faces:?}, one at a time on {threads} threads",
+        "pass 1: seed {seed}, {res} cells per face edge ({:.0} m), halo {halo} cells, faces {faces:?}, one at a time on {threads} threads ({threads_note})",
         RADIUS_M * core::f64::consts::FRAC_PI_2 / res as f64
     );
     let started = Instant::now();

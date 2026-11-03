@@ -29,3 +29,5 @@ brotli.workspace = true
 [dev-dependencies]
 libm.workspace = true
 planet-generators = { workspace = true, features = ["stress"] }
+# The bake examples take their default worker count from the topology detection (owner, 2026-11-03).
+planet-streaming.workspace = true

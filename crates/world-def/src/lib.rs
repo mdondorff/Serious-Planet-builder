@@ -375,6 +375,9 @@ pub struct WorldDefinition {
     /// The implementation id of the height field the world names (GEN-018), if it names one. Not a node (nodes are
     /// numbers); it enters the base hash only when set, so a definition that names none hashes as it always did.
     height_field: Option<String>,
+    /// The descent site the viewer opens over, `(latitude, longitude)` in degrees (GEN-108), if the world names one. Presentation, not a node: it enters no hash (the
+    /// store, the bake and every key are the same with and without it).
+    site: Option<(f64, f64)>,
     /// The `chunk_stage` setting of the layers that have one (GEN-039); a layer without an entry is [`ChunkStagePosition::Under`] (M8-7). It enters the
     /// hash only when an entry exists, so a definition without any hashes as it always did.
     chunk_stages: BTreeMap<(BodyId, String), ChunkStagePosition>,
@@ -420,6 +423,9 @@ pub fn is_height_field_path(path: &str) -> bool {
     path == HEIGHT_FIELD_PATH || path.strip_prefix(HEIGHT_FIELD_PATH).is_some_and(|rest| rest.starts_with('.'))
 }
 
+/// The path the descent site is written under (`world.site = [lat, lon]`, GEN-108).
+pub const SITE_PATH: &str = "world.site";
+
 /// The body whose radius node `path` is (`body.<n>.radius_m`), if it is one.
 fn radius_path_body(path: &str) -> Option<BodyId> {
     let n = path.strip_prefix("body.")?.strip_suffix(".radius_m")?;
@@ -438,6 +444,7 @@ impl WorldDefinition {
             reach: BTreeMap::new(),
             summaries: BTreeMap::new(),
             height_field: None,
+            site: None,
             chunk_stages: BTreeMap::new(),
             revision: revision::Revision::new(),
         }
@@ -462,6 +469,7 @@ impl WorldDefinition {
     pub fn set(&mut self, path: &str, value: NodeValue) {
         assert!(!path.starts_with("derived."), "the path '{path}' is in the reserved derived namespace");
         assert!(!is_height_field_path(path), "the path '{path}' is reserved for the height field id (set_height_field)");
+        assert!(path != SITE_PATH, "the path '{path}' is reserved for the descent site (set_site)");
         self.revision.bump();
         self.nodes.insert(path.to_string(), value);
         if let Some(body) = radius_path_body(path) {
@@ -497,6 +505,19 @@ impl WorldDefinition {
     pub fn check_chunk_stages(&self, _body: BodyId) -> Result<(), String> {
         // Both positions are built since M8-7 (GEN-039); kept for the callers that check before a build.
         Ok(())
+    }
+
+    /// Name the descent site of the viewer (GEN-108): latitude in `[-90, 90]` and longitude in `[-180, 180]` degrees, finite. Not hashed.
+    pub fn set_site(&mut self, lat_deg: f64, lon_deg: f64) {
+        assert!(lat_deg.is_finite() && (-90.0..=90.0).contains(&lat_deg), "the site's latitude is within 90 degrees, got {lat_deg}");
+        assert!(lon_deg.is_finite() && (-180.0..=180.0).contains(&lon_deg), "the site's longitude is within 180 degrees, got {lon_deg}");
+        self.revision.bump();
+        self.site = Some((lat_deg, lon_deg));
+    }
+
+    /// The descent site the world names, `(latitude, longitude)` in degrees, if any.
+    pub fn site(&self) -> Option<(f64, f64)> {
+        self.site
     }
 
     /// The height field the world names, if any.

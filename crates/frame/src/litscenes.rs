@@ -73,6 +73,33 @@ pub fn find_coast(
     None
 }
 
+/// The land the default descent snaps to lies this far inland of the shore it finds, metres (the shore walk keeps land 500 m in; a kilometre is a beach, not the surf).
+pub const SNAP_INLAND_M: f64 = 1_000.0;
+
+/// The `(latitude, longitude)` in degrees of the land a descent opens over when the world names no site (GEN-108): `default` where the terrain there is at or above `level_m`
+/// and carries no sea; else the point [`SNAP_INLAND_M`] inland (east) of the first shore [`find_coast`] finds from `default`; `default` again when the walk finds none. A
+/// pure function of the field and the sea.
+pub fn default_land_site(
+    carries_sea: &dyn Fn(Vec3) -> bool,
+    height: &dyn Fn(Vec3) -> f64,
+    level_m: f64,
+    default: (f64, f64),
+    radius_m: f64,
+) -> (f64, f64) {
+    let at = on_parallel(default.0.to_radians(), default.1.to_radians());
+    if height(at) >= level_m && !carries_sea(at) {
+        return default;
+    }
+    match find_coast(carries_sea, height, level_m, default.0, default.1, radius_m) {
+        Some(coast) => {
+            let land = (coast.dir + coast.heading * (SNAP_INLAND_M / radius_m)).normalized();
+            let (lat, lon) = land.lat_lon();
+            (lat.to_degrees(), lon.to_degrees())
+        }
+        None => default,
+    }
+}
+
 /// A camera `alt_m` above the water level, `back_m` out to sea from the coast plus `along_m` towards the land, looking along the
 /// heading pitched down by `pitch_deg` (the water pass's test geometry).
 #[allow(clippy::too_many_arguments)]
@@ -388,6 +415,31 @@ fn ground_camera(radius_m: f64, field: &dyn HeightField, eye_m: f64, pitch_deg: 
 mod tests {
     use super::*;
     use planet_generators::height::Reference;
+
+    // spec: GEN-108
+    #[test]
+    fn the_default_land_site_keeps_land_snaps_inland_of_a_shore_and_falls_back_to_the_default() {
+        let default = (20.0, 30.0);
+        // Land at the default: kept, whatever the rest of the world is.
+        assert_eq!(default_land_site(&|_| false, &|_| 10.0, 0.0, default, R), default);
+        // Sea at the default and a shore east of it: the terrain rises 2,000 m a degree through the level at 40 E (a beach: sea 2 km out, 3 m or more 500 m in).
+        let lon_of = |d: Vec3| d.lat_lon().1.to_degrees();
+        let height = |d: Vec3| 2_000.0 * (lon_of(d) - 40.0);
+        let is_sea = |d: Vec3| lon_of(d) < 40.0;
+        let (lat, lon) = default_land_site(&is_sea, &height, 0.0, default, R);
+        let d = Vec3::from_lat_lon(lat.to_radians(), lon.to_radians());
+        assert!(height(d) >= 3.0 && !is_sea(d), "the snapped site {lat}, {lon} is land ({} m)", height(d));
+        assert!((lat - 20.0).abs() < 1e-6, "the walk of the default's own parallel finds it first: {lat}");
+        let inland_m = (lon - 40.0).to_radians() * R * libm::cos(20f64.to_radians());
+        assert!((inland_m - SNAP_INLAND_M).abs() < 5.0, "{inland_m} m inland of the shore");
+        assert_eq!(default_land_site(&is_sea, &height, 0.0, default, R), (lat, lon), "deterministic");
+        // A non-zero sea level moves the shore: the same terrain with the level at 1,000 m puts the shore half a degree east.
+        let sea_high = |d: Vec3| height(d) < 1_000.0;
+        let (_, lon_high) = default_land_site(&sea_high, &height, 1_000.0, default, R);
+        assert!(lon_high > lon + 0.4, "the shore at a level of 1,000 m is east of the one at 0: {lon_high} against {lon}");
+        // All sea: no shore anywhere, the default itself.
+        assert_eq!(default_land_site(&|_| true, &|_| -100.0, 0.0, default, R), default);
+    }
 
     const R: f64 = 6_371_000.0;
 
