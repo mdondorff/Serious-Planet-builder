@@ -22,6 +22,8 @@ mod keys_wide_ids;
 mod meshpack;
 #[path = "pack.rs"]
 mod pack;
+#[path = "relief_store.rs"]
+mod relief_store;
 #[path = "stage_keys.rs"]
 mod stage_keys;
 #[path = "stamp_keys.rs"]

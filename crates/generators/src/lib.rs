@@ -28,6 +28,7 @@ pub mod mesh;
 pub mod normals;
 pub mod ocean;
 pub mod preview;
+pub mod relief_channels;
 pub mod shape;
 pub mod stage;
 pub mod stamp;

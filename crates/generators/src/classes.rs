@@ -482,12 +482,38 @@ pub fn quantize_weights(weights: &[f64; CLASS_COUNT]) -> [u8; CLASS_COUNT] {
 }
 
 /// The class weights on a lattice over the cube faces, `u8` per class, read bilinearly (GEN-093). The one interface the consumers read.
+#[derive(Debug)]
 pub struct ClassLattice {
     cells: usize,
     faces: Vec<Vec<[u8; CLASS_COUNT]>>,
 }
 
 impl ClassLattice {
+    /// The weights as bytes, the form the store holds (STRM-067): per face, row `j` outer, then `i`, then the 8 class bytes of a point.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(6 * (self.cells + 1) * (self.cells + 1) * CLASS_COUNT);
+        for face in &self.faces {
+            for p in face {
+                out.extend_from_slice(p);
+            }
+        }
+        out
+    }
+
+    /// The lattice of `cells` cells per face edge (a power of two) from [`to_bytes`](Self::to_bytes): `None` when the length does not fit or a point does not sum to 255.
+    pub fn from_bytes(cells: usize, bytes: &[u8]) -> Option<ClassLattice> {
+        let per_face = (cells + 1) * (cells + 1);
+        if !cells.is_power_of_two() || bytes.len() != 6 * per_face * CLASS_COUNT {
+            return None;
+        }
+        let faces: Vec<Vec<[u8; CLASS_COUNT]>> =
+            bytes.chunks_exact(per_face * CLASS_COUNT).map(|f| f.as_chunks::<CLASS_COUNT>().0.to_vec()).collect();
+        if faces.iter().flatten().any(|p| p.iter().map(|&v| u32::from(v)).sum::<u32>() != 255) {
+            return None;
+        }
+        Some(ClassLattice { cells, faces })
+    }
+
     /// The lattice of the production geometry ([`CLASS_LATTICE_N`] cells per face edge), built on `threads` threads: the bytes do not depend on the count.
     pub fn build(source: &ClassSource, threads: usize) -> ClassLattice {
         Self::build_with(source, CLASS_LATTICE_N, threads)
