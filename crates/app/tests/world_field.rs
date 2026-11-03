@@ -197,3 +197,13 @@ fn a_world_builds_its_fields_from_the_base_terrain() {
     let base = Reference(5).height(centre);
     assert_eq!(field.height(centre).to_bits(), base.to_bits(), "the base");
 }
+
+// spec: GEN-108
+#[test]
+fn the_m9r2_world_file_names_its_site_and_hashes_as_the_default_world_does() {
+    let def = planet::worldfield::load_world(std::path::Path::new("data/m9r2.world.toml")).expect("the bundled world file loads");
+    assert_eq!(def.site(), Some((10.0946, -26.2573)));
+    let default = WorldDefinition::single_planet(6_371_000.0, 1);
+    assert_eq!(def.hash(), default.hash(), "the site is presentation: the store keys of the default seed-1 world still match");
+    assert_eq!(def.base_hash(), default.base_hash());
+}

@@ -1136,7 +1136,7 @@ Source: owner (2026-10-22, via opus-planner): the editor showed a flat world bec
 - **THEN** the choice is none, the accept store, the stores store, the pointer's, the variable's, and a variable naming no directory falls through
 
 ### Requirement: VIEW-058 The flight site
-`planet editor --site LAT,LON` SHALL start the scripted flight (VIEW-005) over that point, in degrees; without it the flight descends over latitude 20, longitude 30. A latitude beyond 90 degrees, a longitude beyond 360 degrees or a value that is not a number SHALL be refused with a message naming the option.
+`planet editor --site LAT,LON` SHALL start the scripted flight (VIEW-005) over that point, in degrees; without it the flight descends over the world definition's `world.site`, else as GEN-108 orders (20 N 30 E where that is land, else the land of the nearest shore). A latitude beyond 90 degrees, a longitude beyond 360 degrees or a value that is not a number SHALL be refused with a message naming the option.
 
 Verify: A
 Status: active
@@ -1145,6 +1145,10 @@ Source: m8-refresh-priority, VIEW-005
 #### Scenario: A flight over another site
 - **WHEN** `--site 45,-100` is given
 - **THEN** the options hold the site (45, -100), the script of the flight starts over it and differs from the default site's, and `--site 95,0` is refused
+
+#### Scenario: A bare run
+- **WHEN** the descent site is asked with no option on a world whose definition names `world.site`, and on a world whose 20 N 30 E is sea
+- **THEN** the first is the definition's site and the second a point of land (GEN-108); the definition's longitude is within 180 degrees, the option's within 360
 
 ### Requirement: VIEW-053 K shows the global coupled run
 K SHALL cycle what the climate views show on the lit path (`Command::CycleCoupledLens`): the climate (at the start), the heights of the global coupled run (temperature view), its drainage area (precipitation view), and the climate again. The window asks the world for the lens (GEN-043, STRM-044), which loads or makes the run on a thread; the resident tiles are refreshed once the run is ready, or at once when the lens goes off, so no frame waits and a tile is drawn from its old version until the new one is uploaded (STRM-026).
