@@ -1887,6 +1887,7 @@ mod tests {
             // Process tests that run a lit flight or lit streaming scene on the software adapter (planner, 2026-11-03).
             "a_lit_view_a_lit_flight_and_a_stream_scene_log_their_cpu_calibration_when_asked_even_in_a_smoke_run",
             "a_streaming_scene_on_the_lit_path_logs_beside_the_debug_path_under_its_own_name",
+            "the_lit_coast_view_over_streamed_tiles_draws_the_same_pixels_still_and_after_a_small_turn_and_back",
         ] {
             assert!(defaults[warp].filter.contains(&format!("test({member})")), "{member} is not in warp-heavy");
         }
