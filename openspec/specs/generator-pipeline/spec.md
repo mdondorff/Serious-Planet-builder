@@ -1123,11 +1123,16 @@ Source: SPIKE-57, SPIKE-40 (drainage density target), SPIKE-47, CON-14
 - **THEN** the pit is filled, the area grows downstream along the axis by one cell row each step, and the density equals the analytic channel length over the area within 1 %
 
 ### Requirement: GEN-109 The crease band
-A relief field MAY drop the crease octaves above the erosion layer's grid (ADR 0098): `with_crease_band(CreaseBand)`, valid only with the relief channels on; without the call the field is today's, bit for bit. At or above the band's sea level an octave whose lattice cell (`radius / (256 2^o)`) is at most `near` layer cells keeps its weight, one of `far` cells or more is dropped, and between the weight falls by a smoothstep in the log of the cell (defaults 101.8 m, 2 and 4); below it the creases are today's. The bounds SHALL take the weighted octaves only, joined with today's where a cap straddles the level; the band SHALL enter the keys and the id.
+`with_crease_band(CreaseBand)` MAY drop a relief field's crease octaves above the erosion layer's grid (ADR 0098):
+- it needs the relief channels on; without the call the field is today's, bit for bit;
+- an octave of at most `near` layer cells (2) keeps its weight, one of `far` (4) or more is dropped, between them a smoothstep in the log of its cell;
+- above the sea level it blends in over `blend_m` (200 m); below it the creases are today's;
+- the bounds take the weighted octaves, and today's where a cap reaches the blend;
+- the band enters the keys and the implementation id, not the field version.
 
 Verify: A
 Status: active
-Source: ADR 0098 (owner, 2026-11-03), ADR 0088 points 2 and 5, GEN-099, inbox #54
+Source: ADR 0098 (owner, 2026-11-03), ADR 0088 points 2 and 5, GEN-099
 
 #### Scenario: Off
 - **WHEN** the field has the relief channels on and the call is not made, or the band keeps every octave, or its sea level is above every ground
@@ -1135,16 +1140,16 @@ Source: ADR 0098 (owner, 2026-11-03), ADR 0088 points 2 and 5, GEN-099, inbox #5
 
 #### Scenario: The weights
 - **WHEN** the weight is read at 2 cells, 4 cells, their geometric mean and everything between and beyond
-- **THEN** it is 1, 0 and 0.5, non-increasing, and the octaves of the Earth keep octaves 7 to 11, drop octaves 0 to 5 and keep a hundredth of octave 6
+- **THEN** it is 1, 0 and 0.5, non-increasing, and the octaves of the Earth keep octaves 7 to 11, drop octaves 0 to 5 and weigh octave 6 below 0.02
 
-#### Scenario: The sea floor and the land
-- **WHEN** heights are read where the base is below and at or above the band's sea level
-- **THEN** the first equal today's field's to the bit, and nine in ten of the second differ
+#### Scenario: The sea floor, the land and the shore
+- **WHEN** heights are read where the base is below the band's sea level, and along a line across a shore with a blend of 200 m and of 0
+- **THEN** the first equal today's field's to the bit, most of the land's differ, and the largest step per half metre across the shore is a third of the hard step's or less, and under 3 m
 
 #### Scenario: Bounds
-- **WHEN** random caps, caps on cube edges and caps that straddle the band's sea level are bounded, and nested caps are compared
-- **THEN** every height, also rounded to f32, lies within its bounds, the bounds of a cap on land are no wider than today's, and an inner cap's bounds lie within the outer cap's
+- **WHEN** random caps, caps on cube edges and caps that reach the blend are bounded, and nested caps are compared
+- **THEN** every height, also rounded to f32, lies within its bounds, the width of a cap on land is no more than today's, and an inner cap's bounds lie within the outer cap's, on both bases
 
 #### Scenario: Keys
-- **WHEN** the band's cell, cells or sea level change, or it is switched on
-- **THEN** the inputs hash and, on and off, the implementation id differ; a batch and every thread count give the single reads' bits
+- **WHEN** the band's cell, cells, sea level or blend change, or it is switched on, and the relief channels are asked for after the band
+- **THEN** the inputs hash and the implementation id differ, the late call is refused, and a batch and every thread count give the single reads' bits

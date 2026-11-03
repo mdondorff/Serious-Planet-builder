@@ -201,12 +201,26 @@ pub struct CreaseBand {
     pub far_cells: f64,
     /// The base elevation below which the creases stay as they are: the sea level of the definition.
     pub sea_level_m: f64,
+    /// The height above the sea level over which the creases join: the detail is `(1 - s) plain + s banded` with `s` a smoothstep of the base elevation from the level to the level
+    /// plus this (0: a hard step at the level, a cliff along every shoreline). Default 200 m.
+    pub blend_m: f64,
 }
 
 impl CreaseBand {
     /// The band of the pass-2 cell of the bake: 101.8 m, 2 and 4 cells, over a sea at `sea_level_m`.
     pub fn of_the_bake(sea_level_m: f64) -> CreaseBand {
-        CreaseBand { layer_cell_m: 101.8, near_cells: 2.0, far_cells: 4.0, sea_level_m }
+        CreaseBand { layer_cell_m: 101.8, near_cells: 2.0, far_cells: 4.0, sea_level_m, blend_m: 200.0 }
+    }
+
+    /// The share of the band's detail at a point of base elevation `e`: 0 below the sea level, 1 from the level plus the blend, a smoothstep between (1 at the level for a blend of 0).
+    pub fn share(&self, e: f64) -> f64 {
+        if e < self.sea_level_m {
+            0.0
+        } else if self.blend_m == 0.0 || e >= self.sea_level_m + self.blend_m {
+            1.0
+        } else {
+            smoothstep(self.sea_level_m, self.sea_level_m + self.blend_m, e)
+        }
     }
 
     /// The weight of an octave of lattice cell `wavelength_m`: 1 up to `near_cells` layer cells, 0 from `far_cells`, between `1 - smoothstep` of its place on the log scale.
@@ -239,6 +253,8 @@ impl CreaseBand {
             && self.far_cells.is_finite()
             && self.far_cells > self.near_cells
             && self.sea_level_m.is_finite()
+            && self.blend_m.is_finite()
+            && self.blend_m >= 0.0
     }
 }
 
@@ -272,6 +288,9 @@ impl ErosionField<'_> {
     /// hash, their resolution and the channels' version enter the inputs hash, and the implementation id changes). The channels are of the bake as it is, so the body's relief scale must be 1:
     /// an error naming the scale otherwise.
     pub fn with_relief(mut self, channels: Arc<crate::relief_lattice::ReliefLattice>) -> Result<Self, String> {
+        if self.crease_band.is_some() {
+            return Err("turn the relief channels on before the crease band: the keys follow the order of the calls".into());
+        }
         if self.relief != 1.0 {
             return Err(format!("the relief channels are of the bake at relief scale 1, the body's is {}", self.relief));
         }
@@ -301,6 +320,7 @@ impl ErosionField<'_> {
                 band.near_cells.to_bits(),
                 band.far_cells.to_bits(),
                 band.sea_level_m.to_bits(),
+                band.blend_m.to_bits(),
                 u64::from(CREASE_BAND_VERSION),
             ],
         );
@@ -427,8 +447,17 @@ impl ErosionField<'_> {
         // Where the slope factor is 1 the landform changes nothing (`fine_carve(1, L)` is 1), so it is not evaluated.
         let l = if c >= 1.0 { 0.0 } else { self.landform().at(dir) };
         let detail = match &self.crease_band {
-            Some((band, weights)) if e >= band.sea_level_m => detail_m_weighted(self.seed, dir, e, c, l, Some(weights)),
-            _ => detail_m(self.seed, dir, e, c, l),
+            Some((band, weights)) => {
+                let s = band.share(e);
+                if s <= 0.0 {
+                    detail_m(self.seed, dir, e, c, l)
+                } else if s >= 1.0 {
+                    detail_m_weighted(self.seed, dir, e, c, l, Some(weights))
+                } else {
+                    (1.0 - s) * detail_m(self.seed, dir, e, c, l) + s * detail_m_weighted(self.seed, dir, e, c, l, Some(weights))
+                }
+            }
+            None => detail_m(self.seed, dir, e, c, l),
         };
         match &self.relief_channels {
             None => e + detail,
@@ -649,11 +678,12 @@ impl HeightField for ErosionField<'_> {
             ((c1 + f1).max(-0.75 * AMPLITUDE_MAX_M), (c2 + f2).min(0.25 * AMPLITUDE_MAX_M))
         };
         let (dlo, dhi) = match &self.crease_band {
-            // Every point of the cap is below the band's sea level (today's creases), or at or above it (the band's), or the cap straddles it (the union).
+            // Every point of the cap is below the band's sea level (today's creases), or at or above the level plus the blend (the band's), or the cap reaches the blend zone: the
+            // blended detail is a convex combination of the two, so the union holds it.
             Some((band, weights)) => {
                 if bhi < band.sea_level_m {
                     detail_range(None)
-                } else if blo >= band.sea_level_m {
+                } else if blo >= band.sea_level_m + band.blend_m {
                     detail_range(Some(weights))
                 } else {
                     let (a, b) = (detail_range(None), detail_range(Some(weights)));

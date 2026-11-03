@@ -85,7 +85,7 @@ fn without_the_call_the_field_is_todays_whatever_the_relief_switch_says_and_with
         let high = relief(&src, c1).with_crease_band(CreaseBand::of_the_bake(1.0e9)).unwrap();
         // A layer cell so large that every octave is within two cells: the band keeps every octave at weight 1, bit for bit.
         let all_kept = relief(&src, c1)
-            .with_crease_band(CreaseBand { layer_cell_m: 1.0e9, near_cells: 2.0, far_cells: 4.0, sea_level_m: -1.0e9 })
+            .with_crease_band(CreaseBand { layer_cell_m: 1.0e9, near_cells: 2.0, far_cells: 4.0, sea_level_m: -1.0e9, blend_m: 200.0 })
             .unwrap();
         let mut rng = SplitMix64(5);
         for _ in 0..400 {
@@ -205,8 +205,57 @@ fn the_bounds_hold_every_height_with_the_band_including_caps_that_straddle_its_s
                 }
             }
             assert!(f.error().is_none());
+            // The straddling case really ran: caps whose base range reaches the blend zone.
+            let mut rng = SplitMix64(16);
+            let straddling = (0..400)
+                .filter(|_| {
+                    let c = random_dir(&mut rng);
+                    f.base_bounds(c, 0.02).is_some_and(|(lo, hi)| lo < level + 200.0 && hi >= level)
+                })
+                .count();
+            assert!(straddling > 0, "level {level}: no cap reached the blend zone, so the union branch was not exercised");
         }
     }
+}
+
+// spec: GEN-109
+#[test]
+fn the_blend_band_joins_the_two_regimes_where_a_hard_step_leaves_a_cliff_at_the_shore() {
+    let g = grid();
+    let src = GridSource(&g);
+    let mut rng = SplitMix64(17);
+    let (mut worst_hard, mut worst_blend) = (0.0f64, 0.0f64);
+    for _ in 0..24 {
+        let d0 = random_dir(&mut rng);
+        let level = relief(&src, true).base_elevation(d0);
+        let hard = relief(&src, true).with_crease_band(CreaseBand { blend_m: 0.0, ..CreaseBand::of_the_bake(level) }).unwrap();
+        let soft = relief(&src, true).with_crease_band(CreaseBand::of_the_bake(level)).unwrap();
+        // A line through the point where the base crosses the level: half a metre a step, 200 m long.
+        let phi = rng.next_f64() * std::f64::consts::TAU;
+        let line: Vec<Vec3> = (-200..=200).map(|k| offset(d0, f64::from(k) * 0.5 / R, phi)).collect();
+        let step = |f: &ErosionField| {
+            let h: Vec<f64> = line.iter().map(|d| f.height(*d)).collect();
+            h.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f64, f64::max)
+        };
+        worst_hard = worst_hard.max(step(&hard));
+        worst_blend = worst_blend.max(step(&soft));
+    }
+    eprintln!("largest step per half metre across a shore: hard {worst_hard:.2} m, blended {worst_blend:.2} m");
+    assert!(worst_hard > 3.0, "the hard step leaves a cliff ({worst_hard} m)");
+    assert!(worst_blend * 3.0 < worst_hard && worst_blend < 3.0, "the blend joins the regimes ({worst_blend} m against {worst_hard} m)");
+}
+
+// spec: GEN-109
+#[test]
+fn the_relief_channels_cannot_be_turned_on_after_the_band() {
+    let g = grid();
+    let src = GridSource(&g);
+    let on = relief(&src, false).with_crease_band(CreaseBand::of_the_bake(0.0)).unwrap();
+    let e = on.with_relief(Arc::new(ReliefLattice::new(channels()).unwrap())).err().unwrap();
+    assert!(e.contains("before the crease band"), "{e}");
+    assert!(CreaseBand::of_the_bake(0.0).share(-1.0) == 0.0 && CreaseBand::of_the_bake(0.0).share(200.0) == 1.0);
+    let half = CreaseBand::of_the_bake(0.0).share(100.0);
+    assert!((half - 0.5).abs() < 1e-12, "the middle of the blend zone shares {half}");
 }
 
 // spec: GEN-109
@@ -216,6 +265,14 @@ fn the_banded_bounds_are_tighter_than_the_plain_ones_on_land_and_nested_caps_giv
     let src = GridSource(&g);
     let off = relief(&src, true);
     let on = relief(&src, true).with_crease_band(CreaseBand::of_the_bake(-1.0e9)).unwrap();
+    // A small cap too (the per-octave bounds are tight there, where dropping an octave may raise the true heights and the banded interval is not inside the plain one).
+    let mut small = SplitMix64(15);
+    for _ in 0..200 {
+        let c = random_dir(&mut small);
+        let (lo0, hi0) = off.height_bounds(c, 1e-5);
+        let (lo1, hi1) = on.height_bounds(c, 1e-5);
+        assert!(hi1 - lo1 <= hi0 - lo0 + 1e-6, "small cap: width {} against {}", hi1 - lo1, hi0 - lo0);
+    }
     let mut rng = SplitMix64(12);
     let (mut tighter, mut total) = (0, 0);
     for _ in 0..200 {
@@ -227,20 +284,23 @@ fn the_banded_bounds_are_tighter_than_the_plain_ones_on_land_and_nested_caps_giv
         if hi1 - lo1 < hi0 - lo0 {
             tighter += 1;
         }
-        // The band never widens the bounds of a cap that lies wholly on land.
-        assert!(lo1 >= lo0 - 1e-6 && hi1 <= hi0 + 1e-6, "[{lo1}, {hi1}] not inside [{lo0}, {hi0}]");
+        // The band never widens the bounds of a cap that lies wholly on land (the width, not the containment: dropping an octave whose noise range is narrow can raise the
+        // true heights, so the banded interval need not lie inside the plain one).
+        assert!(hi1 - lo1 <= hi0 - lo0 + 1e-6, "width {} against {}", hi1 - lo1, hi0 - lo0);
     }
     assert!(tighter * 10 >= total * 9, "{tighter} of {total} caps have tighter bounds");
-    // LOD-012: an inner cap's bounds lie inside the outer cap's, around the sea level of the band too.
-    let band = relief(&src, true).with_crease_band(CreaseBand::of_the_bake(300.0)).unwrap();
-    let mut rng = SplitMix64(13);
-    for _ in 0..400 {
-        let c = random_dir(&mut rng);
-        let (outer_r, inner_r) = (0.01, 0.003);
-        let inner_c = offset(c, 0.9 * (outer_r - inner_r), rng.next_f64() * std::f64::consts::TAU);
-        let (olo, ohi) = band.height_bounds(c, outer_r);
-        let (ilo, ihi) = band.height_bounds(inner_c, inner_r);
-        assert!(ilo >= olo - 1e-3 && ihi <= ohi + 1e-3, "inner [{ilo}, {ihi}] not within outer [{olo}, {ohi}] at {c:?}");
+    // LOD-012: an inner cap's bounds lie inside the outer cap's, around the sea level of the band too, on both bases.
+    for c1 in [false, true] {
+        let band = relief(&src, c1).with_crease_band(CreaseBand::of_the_bake(300.0)).unwrap();
+        let mut rng = SplitMix64(13);
+        for _ in 0..400 {
+            let c = random_dir(&mut rng);
+            let (outer_r, inner_r) = (0.01, 0.003);
+            let inner_c = offset(c, 0.9 * (outer_r - inner_r), rng.next_f64() * std::f64::consts::TAU);
+            let (olo, ohi) = band.height_bounds(c, outer_r);
+            let (ilo, ihi) = band.height_bounds(inner_c, inner_r);
+            assert!(ilo >= olo - 1e-3 && ihi <= ohi + 1e-3, "c1 {c1}: inner [{ilo}, {ihi}] not within outer [{olo}, {ohi}] at {c:?}");
+        }
     }
 }
 
