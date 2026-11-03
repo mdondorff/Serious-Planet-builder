@@ -38,6 +38,7 @@ struct Opts {
     region: Option<PathBuf>,
     keep_pass1: bool,
     map_width: usize,
+    image_step: Option<usize>,
 }
 
 fn main() {
@@ -209,7 +210,12 @@ fn main() {
             let b: Vec<f64> =
                 (0..tile * tile).map(|p| base(grid.direction(t.face, i0 + (p % tile) as i64, j0 + (p / tile) as i64))).collect();
             let path = out.join(format!("tile-{}-{}-{}.png", t.face.0, t.ti, t.tj));
-            tile_image(tile, grid.dx(), &b, core, 400.0)
+            // A tile image takes every `step`th cell (default: down to about 1,024 cells a side), so a 3,072-cell tile is not a 110 MB picture.
+            let step = o.image_step.unwrap_or(tile.div_ceil(1024)).max(1);
+            let m = tile / step;
+            let (bs, cs): (Vec<f64>, Vec<f32>) =
+                (0..m * m).map(|p| (p / m) * step * tile + (p % m) * step).map(|q| (b[q], core[q])).unzip();
+            tile_image(m, grid.dx() * step as f64, &bs, &cs, 400.0)
                 .write_png(&path)
                 .unwrap_or_else(|e| fail(&format!("cannot write {}: {e}", path.display())));
             println!("wrote {}", path.display());
@@ -237,6 +243,7 @@ fn parse() -> Opts {
         region: None,
         keep_pass1: false,
         map_width: 1024,
+        image_step: None,
     };
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -252,6 +259,7 @@ fn parse() -> Opts {
             "--map-width" => o.map_width = number("--map-width"),
             "--out" => o.out = Some(PathBuf::from(value())),
             "--region" => o.region = Some(PathBuf::from(value())),
+            "--image-step" => o.image_step = Some(number("--image-step")),
             "--keep-pass1" => o.keep_pass1 = true,
             other => fail(&format!(
                 "unknown option '{other}' (known: --seed N, --face-res N, --planet-res N, --tile N, --halo N, --region FILE, --keep-pass1, --out DIR, --threads N, --map-width W)"
