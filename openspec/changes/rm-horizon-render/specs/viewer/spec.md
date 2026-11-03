@@ -8,7 +8,7 @@ Status: active
 Source: opus-planner (2026-10-25), owner: horizon shadows cannot be seen in the viewer; VIEW-042, ADR 0085, REND-051
 
 #### Detail
-The title SHALL name a shade view other than normal, and the local solar time at the camera of a moved sun (`local_solar_hours`: 12 when the sun is on the camera's meridian) while the editing light is off. The usage and editor help texts SHALL name J, `[`, `]` and Backslash. The text is reworded against the spec at the time of PR 6, after B6 has removed the chunk-stage notice.
+The title SHALL name a shade view other than normal, and the local solar time at the camera of a moved sun (`local_solar_hours`: 12 when the sun is on the camera's meridian) while the editing light is off. The usage and editor help texts SHALL name J, `[`, `]` and Backslash.
 
 #### Scenario: Keys and sun
 - **WHEN** J is pressed six times, then `]` twice and `[` once, then `[` twice more, then Backslash

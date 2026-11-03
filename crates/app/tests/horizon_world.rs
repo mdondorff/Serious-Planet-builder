@@ -470,10 +470,10 @@ fn horizon_bake_throughput() {
 
 // spec: STRM-064
 #[test]
-fn the_horizon_bakes_without_a_chunk_stage_run_on_half_the_generation_workers_at_most_eight() {
-    use planet::horizonworld::{horizon_workers, HORIZON_WORKERS_MAX};
-    use planet_streaming::GenWorkers;
-    assert_eq!([1, 2, 5, 8, 16, 18, 40].map(|n| horizon_workers(GenWorkers::new(n))), [1, 1, 2, 4, 8, 8, HORIZON_WORKERS_MAX]);
+fn the_horizon_bakes_without_a_chunk_stage_run_on_half_the_terrain_share() {
+    use planet::horizonworld::horizon_workers;
+    // Terrain shares of the worked examples (BUDG-003): 2 on the laptop, 6 on Rasierklinge, 8 on the desktop, 10 at most.
+    assert_eq!([1, 2, 3, 6, 8, 10].map(horizon_workers), [1, 1, 1, 3, 4, 5]);
 }
 
 /// The march of one map on the real store, one thread, tiles cached (`cargo test --release -p planet --test it horizon_march_time -- --ignored

@@ -48,7 +48,8 @@ mod tests {
             "mesa-vulkan-drivers",
             "cargo xtask check",
             "cargo xtask spec-lint",
-            "cargo xtask test\n",
+            // Tiers A+B (in parts, BUILD-036).
+            "cargo xtask test -- --partition count:",
             "cargo xtask test gpu",
             "--smoke",
             "pull_request",
@@ -61,21 +62,70 @@ mod tests {
 
     // spec: BUILD-018
     #[test]
-    fn tier_c_runs_on_windows_in_three_parts_with_their_own_artifact_names() {
+    fn tier_c_runs_on_windows_in_four_parts_from_one_archive_with_their_own_artifact_names() {
         let w = workflow();
         let gpu = w.split("\n  gpu:\n").nth(1).expect("ci.yml has a `gpu` job").split("\n  determinism:").next().unwrap();
+        // One build of the tier-C binaries into an archive; the Windows parts run it and build nothing.
+        let build = w.split("\n  gpu-build:\n").nth(1).expect("ci.yml has a `gpu-build` job").split("\n  gpu:\n").next().unwrap();
+        assert!(
+            build.contains("cargo xtask test gpu --archive-out target/gpu-archive.tar.zst") && build.contains("name: gpu-archive"),
+            "{build}"
+        );
         for needle in [
+            "needs: gpu-build",
+            "cargo xtask test gpu --archive-file target/gpu-archive.tar.zst -- --partition count:${{ matrix.part }}/4",
             "part: 1",
             "part: 2",
             "part: 3",
-            "--partition count:{0}/3",
+            "part: 4",
             "test-logs-${{ runner.os }}-gpu${{ matrix.part",
             "review-${{ runner.os }}${{ matrix.part",
         ] {
             assert!(gpu.contains(needle), "the gpu job is missing `{needle}`");
         }
-        assert_eq!(gpu.matches("os: windows-latest").count(), 3, "three Windows entries, one per part");
+        assert_eq!(gpu.matches("os: windows-latest").count(), 4, "four Windows entries, one per part");
         assert_eq!(gpu.matches("os: ubuntu-24.04").count(), 1, "the Linux leg runs whole");
+    }
+
+    // spec: BUILD-036
+    #[test]
+    fn tiers_a_and_b_run_in_two_parts_per_os_and_part_two_alone_runs_the_checks_and_the_manifest() {
+        let w = workflow();
+        let job = w
+            .split(
+                "
+  test:
+",
+            )
+            .nth(1)
+            .expect("ci.yml has a `test` job")
+            .split(
+                "
+  gpu",
+            )
+            .next()
+            .unwrap();
+        assert!(job.contains("name: ${{ matrix.name }} A+B ${{ matrix.part }}/2"), "{job}");
+        assert!(job.contains("cargo xtask test -- --partition count:${{ matrix.part }}/2"), "{job}");
+        assert_eq!(job.matches("os: windows-latest").count(), 2, "two Windows parts");
+        assert_eq!(job.matches("os: ubuntu-24.04").count(), 2, "two Linux parts");
+        assert_eq!((job.matches("part: 1").count(), job.matches("part: 2").count()), (2, 2));
+        // The determinism manifest (its upload too), check, spec-lint, licences and the run-mode starts run once per OS, in part 2.
+        assert_eq!(job.matches("if: matrix.part == 2").count(), 6, "{job}");
+        for step in [
+            "determinism manifest (GEN-003)",
+            "check (fmt, clippy, layering)",
+            "spec-lint",
+            "licences (CON-27)",
+            "run modes start (CON-01)",
+        ] {
+            let after = job.split(&format!("name: {step}")).nth(1).unwrap_or_else(|| panic!("no step `{step}`"));
+            assert!(after.trim_start().starts_with("if: matrix.part == 2"), "`{step}` runs in part 2 only");
+        }
+        assert!(
+            job.contains("name: test-logs-${{ runner.os }}-ab-${{ matrix.part }}")
+                && job.contains("name: review-${{ runner.os }}-ab-${{ matrix.part }}")
+        );
     }
 
     // spec: BUILD-017
