@@ -6,7 +6,7 @@
 2. **Topology (code).**
    - `planet_streaming::topology`: Windows `GetLogicalProcessorInformationEx` (feature `Win32_System_SystemInformation` on the existing `windows` dependency), Linux sysfs (`cpu_core`/`cpu_atom`, `cpu_capacity`), `available_parallelism` fallback, and `PLANET_CPU_TOPOLOGY=P,E`.
    - Tier A on recorded API bytes, sysfs strings and overrides.
-   - The detection requirement turns active.
+   - The detection requirement turns active. Done in PR 2: Rasierklinge detects 12 P and 8 E threads (Windows core records), on 20 usable threads.
 3. **Shares in the code.**
    - `Shares::for_topology`; `GenWorkers::machine()` from the terrain share; the rig's ceiling from it, replacing `TERRAIN_CORES`.
    - Horizon bakes `terrain / 2`, replacing `HORIZON_WORKERS_MAX`; the coupled reduction from `B`; the BUDG-011 loads from their shares; the BUDG-012 scenario.

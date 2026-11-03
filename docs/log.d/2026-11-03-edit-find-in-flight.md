@@ -1,0 +1,1 @@
+- 2026-11-03 edit-find-in-flight: an edit's find covers the tiles still loading (STRM-071); a tile in flight at an edit no longer lands on the old field for good (the edit-latency smoke at 5 tile workers, #1117)
