@@ -1,0 +1,33 @@
+tiles 12 (timing/heavy subset: first 3); load: see notes
+== 0.25 m, plain ==
+lz4_flex        12 tiles  1.810 B/land cell   14.38 MB/tile  planet  39.4 GB  | ratio 1.012 | enc  1467.1 MB/s (1.000x lz4) | dec  4168.6 MB/s min (1.000x lz4),  3875.7 median | dec 5 ms/tile min | encode 0.0 s/tile
+ruzstd fastest  12 tiles  1.594 B/land cell   12.66 MB/tile  planet  34.7 GB  | ratio 1.203 | enc    47.2 MB/s (0.032x lz4) | dec   247.2 MB/s min (0.059x lz4),   239.9 median | dec 76 ms/tile min | encode 0.4 s/tile
+brotli 5        12 tiles  1.165 B/land cell    9.26 MB/tile  planet  25.4 GB  | ratio 1.665 | enc    14.2 MB/s (0.010x lz4) | dec   120.2 MB/s min (0.029x lz4),   115.8 median | dec 157 ms/tile min | encode 1.3 s/tile
+brotli 9        3 tiles  1.137 B/land cell   10.73 MB/tile  planet  29.4 GB  | ratio 1.759 | enc     2.6 MB/s (0.002x lz4) | dec   124.3 MB/s min (0.030x lz4),   121.2 median | dec 152 ms/tile min | encode 7.2 s/tile
+brotli 11       3 tiles  1.002 B/land cell    9.46 MB/tile  planet  25.9 GB  | ratio 1.996 | enc     0.5 MB/s (0.000x lz4) | dec   140.8 MB/s min (0.034x lz4),   138.5 median | dec 134 ms/tile min | encode 37.1 s/tile
+deflate 6       12 tiles  1.304 B/land cell   10.36 MB/tile  planet  28.4 GB  | ratio 1.461 | enc    21.7 MB/s (0.015x lz4) | dec   216.4 MB/s min (0.052x lz4),   212.6 median | dec 87 ms/tile min | encode 0.9 s/tile
+deflate 9       12 tiles  1.303 B/land cell   10.35 MB/tile  planet  28.4 GB  | ratio 1.461 | enc    22.2 MB/s (0.015x lz4) | dec   224.2 MB/s min (0.054x lz4),   221.5 median | dec 84 ms/tile min | encode 0.9 s/tile
+== 0.25 m, row-delta ==
+lz4_flex        12 tiles  1.572 B/land cell   12.48 MB/tile  planet  34.2 GB  | ratio 1.243 | enc   341.3 MB/s (1.000x lz4) | dec  1706.2 MB/s min (1.000x lz4),  1666.4 median | dec 11 ms/tile min | encode 0.1 s/tile
+ruzstd fastest  12 tiles  1.381 B/land cell   10.97 MB/tile  planet  30.1 GB  | ratio 1.538 | enc    53.3 MB/s (0.156x lz4) | dec   158.7 MB/s min (0.093x lz4),   157.6 median | dec 119 ms/tile min | encode 0.4 s/tile
+brotli 5        12 tiles  0.922 B/land cell    7.33 MB/tile  planet  20.1 GB  | ratio 2.161 | enc    14.0 MB/s (0.041x lz4) | dec   177.0 MB/s min (0.104x lz4),   170.2 median | dec 107 ms/tile min | encode 1.3 s/tile
+brotli 9        3 tiles  0.916 B/land cell    8.65 MB/tile  planet  23.7 GB  | ratio 2.182 | enc     2.7 MB/s (0.008x lz4) | dec   173.5 MB/s min (0.102x lz4),   165.7 median | dec 109 ms/tile min | encode 7.1 s/tile
+brotli 11       3 tiles  0.834 B/land cell    7.87 MB/tile  planet  21.6 GB  | ratio 2.398 | enc     0.2 MB/s (0.001x lz4) | dec    38.5 MB/s min (0.023x lz4),    30.4 median | dec 491 ms/tile min | encode 101.5 s/tile
+deflate 6       12 tiles  1.014 B/land cell    8.06 MB/tile  planet  22.1 GB  | ratio 1.965 | enc     2.2 MB/s (0.007x lz4) | dec    62.1 MB/s min (0.036x lz4),    47.5 median | dec 304 ms/tile min | encode 8.4 s/tile
+deflate 9       12 tiles  1.011 B/land cell    8.03 MB/tile  planet  22.0 GB  | ratio 1.971 | enc     2.7 MB/s (0.008x lz4) | dec   108.6 MB/s min (0.064x lz4),    93.0 median | dec 174 ms/tile min | encode 7.1 s/tile
+== 1 m, plain ==
+lz4_flex        12 tiles  1.414 B/land cell   11.23 MB/tile  planet  30.8 GB  | ratio 1.337 | enc   127.9 MB/s (1.000x lz4) | dec   681.7 MB/s min (1.000x lz4),   460.1 median | dec 28 ms/tile min | encode 0.1 s/tile
+ruzstd fastest  12 tiles  1.232 B/land cell    9.78 MB/tile  planet  26.8 GB  | ratio 1.643 | enc    19.7 MB/s (0.154x lz4) | dec    70.5 MB/s min (0.103x lz4),    55.2 median | dec 268 ms/tile min | encode 1.0 s/tile
+brotli 5        12 tiles  0.811 B/land cell    6.44 MB/tile  planet  17.7 GB  | ratio 2.391 | enc     4.3 MB/s (0.034x lz4) | dec    77.5 MB/s min (0.114x lz4),    58.8 median | dec 244 ms/tile min | encode 4.3 s/tile
+brotli 9        3 tiles  0.791 B/land cell    7.47 MB/tile  planet  20.5 GB  | ratio 2.527 | enc     1.3 MB/s (0.010x lz4) | dec    99.9 MB/s min (0.147x lz4),    67.1 median | dec 189 ms/tile min | encode 14.5 s/tile
+brotli 11       3 tiles  0.695 B/land cell    6.56 MB/tile  planet  18.0 GB  | ratio 2.878 | enc     0.2 MB/s (0.002x lz4) | dec    84.8 MB/s min (0.124x lz4),    78.5 median | dec 223 ms/tile min | encode 77.0 s/tile
+deflate 6       12 tiles  0.928 B/land cell    7.37 MB/tile  planet  20.2 GB  | ratio 2.063 | enc     6.5 MB/s (0.051x lz4) | dec   106.7 MB/s min (0.156x lz4),    86.5 median | dec 177 ms/tile min | encode 2.9 s/tile
+deflate 9       12 tiles  0.926 B/land cell    7.35 MB/tile  planet  20.2 GB  | ratio 2.065 | enc     4.6 MB/s (0.036x lz4) | dec    70.1 MB/s min (0.103x lz4),    61.3 median | dec 269 ms/tile min | encode 4.1 s/tile
+== 1 m, row-delta ==
+lz4_flex        12 tiles  1.163 B/land cell    9.24 MB/tile  planet  25.3 GB  | ratio 1.738 | enc   226.5 MB/s (1.000x lz4) | dec  1031.6 MB/s min (1.000x lz4),  1005.3 median | dec 18 ms/tile min | encode 0.1 s/tile
+ruzstd fastest  12 tiles  1.023 B/land cell    8.13 MB/tile  planet  22.3 GB  | ratio 2.110 | enc    39.1 MB/s (0.172x lz4) | dec    98.2 MB/s min (0.095x lz4),    81.9 median | dec 192 ms/tile min | encode 0.5 s/tile
+brotli 5        12 tiles  0.656 B/land cell    5.21 MB/tile  planet  14.3 GB  | ratio 3.012 | enc     2.9 MB/s (0.013x lz4) | dec    69.8 MB/s min (0.068x lz4),    42.0 median | dec 270 ms/tile min | encode 6.5 s/tile
+brotli 9        3 tiles  0.656 B/land cell    6.19 MB/tile  planet  17.0 GB  | ratio 3.047 | enc     1.7 MB/s (0.008x lz4) | dec   222.6 MB/s min (0.216x lz4),   214.2 median | dec 85 ms/tile min | encode 10.9 s/tile
+brotli 11       3 tiles  0.582 B/land cell    5.49 MB/tile  planet  15.1 GB  | ratio 3.435 | enc     0.2 MB/s (0.001x lz4) | dec    47.8 MB/s min (0.046x lz4),    43.3 median | dec 395 ms/tile min | encode 107.7 s/tile
+deflate 6       12 tiles  0.711 B/land cell    5.65 MB/tile  planet  15.5 GB  | ratio 2.787 | enc     1.2 MB/s (0.005x lz4) | dec    52.7 MB/s min (0.051x lz4),    43.5 median | dec 358 ms/tile min | encode 15.3 s/tile
+deflate 9       12 tiles  0.703 B/land cell    5.58 MB/tile  planet  15.3 GB  | ratio 2.817 | enc     1.2 MB/s (0.005x lz4) | dec   116.6 MB/s min (0.113x lz4),   105.9 median | dec 162 ms/tile min | encode 15.7 s/tile
