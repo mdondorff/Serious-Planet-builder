@@ -211,7 +211,7 @@ pub fn pass2_tile(
     let stream = face_stream(p.seed, id.face);
     let mut z = z0.clone();
     let local = CarveParams { max_area: p.local_area_cells * g.dx() * g.dx(), ..p.carve };
-    carve(&grid, &mut z, &outlet, &local, factors.as_deref(), stream);
+    let routing = carve(&grid, &mut z, &outlet, &local, factors.as_deref(), stream);
     drop(factors);
     let thermal_report = thermal(&grid, &mut z, &p.thermal, threads);
     let dep = if p.deposit {
@@ -226,6 +226,19 @@ pub fn pass2_tile(
     } else {
         DepositReport { eroded: 0.0, deposited: 0.0, exported: 0.0 }
     };
+    let (sf, si) = (super::experiment::smooth_flow(), super::experiment::smooth_iso());
+    if sf > 0 || si > 0 {
+        let mut c: Vec<f64> = z.iter().zip(&base_w).map(|(a, b)| a - b).collect();
+        if sf > 0 {
+            smooth_along_flow(&routing.receiver, &mut c, sf);
+        }
+        if si > 0 {
+            smooth_binomial(&mut c, g.window(), si);
+        }
+        for (zp, (bp, cp)) in z.iter_mut().zip(base_w.iter().zip(&c)) {
+            *zp = bp + cp;
+        }
+    }
     let (w, t, h) = (g.window(), g.tile, g.halo);
     let mut core = Vec::with_capacity(t * t);
     let mut land = 0;
@@ -260,4 +273,46 @@ pub fn quantise(change: &[f32]) -> Vec<i16> {
 /// The change in metres of quantised counts.
 pub fn dequantise(counts: &[i16]) -> Vec<f32> {
     counts.iter().map(|&c| f32::from(c) * QUANT_STEP_M).collect()
+}
+
+/// Experiment: `passes` of 1-2-1 smoothing of `c` along the flow tree (a cell with its receiver and the mean of its donors; outlets keep their value).
+fn smooth_along_flow(receiver: &[u32], c: &mut [f64], passes: u32) {
+    let n = c.len();
+    for _ in 0..passes {
+        let (mut sum, mut cnt) = (vec![0.0f64; n], vec![0u32; n]);
+        for p in 0..n {
+            let r = receiver[p];
+            if r != u32::MAX {
+                sum[r as usize] += c[p];
+                cnt[r as usize] += 1;
+            }
+        }
+        let old = c.to_vec();
+        for p in 0..n {
+            let r = receiver[p];
+            if r == u32::MAX {
+                continue;
+            }
+            let down = old[r as usize];
+            let up = if cnt[p] > 0 { sum[p] / f64::from(cnt[p]) } else { old[p] };
+            c[p] = 0.5 * old[p] + 0.25 * down + 0.25 * up;
+        }
+    }
+}
+
+/// Experiment: `passes` of 3 x 3 binomial smoothing of `c` on a `w`-wide window (the border cells keep their values).
+fn smooth_binomial(c: &mut [f64], w: usize, passes: u32) {
+    let h = c.len() / w;
+    for _ in 0..passes {
+        let old = c.to_vec();
+        for j in 1..h - 1 {
+            for i in 1..w - 1 {
+                let q = j * w + i;
+                c[q] = (4.0 * old[q]
+                    + 2.0 * (old[q - 1] + old[q + 1] + old[q - w] + old[q + w])
+                    + (old[q - w - 1] + old[q - w + 1] + old[q + w - 1] + old[q + w + 1]))
+                    / 16.0;
+            }
+        }
+    }
 }

@@ -31,7 +31,8 @@ pub fn jitter(seed: u64, id: u64, d: usize) -> f64 {
 /// (SPIKE-70's local carve). Every cell that is not an outlet has a receiver after the flood; a cell without one is an error naming it.
 pub fn route(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64, seed: u64, max_area: f64) -> Routing {
     let n = grid.len();
-    let receiver = receivers(grid, &priority_flood(grid, z, outlet, epsilon), outlet, seed);
+    let filled = priority_flood(grid, z, outlet, epsilon);
+    let receiver = receivers(grid, &filled, outlet, seed);
     // The donors in compressed form, then the stack from the outlets: each cell comes after its receiver.
     let mut order = Vec::with_capacity(n);
     {
@@ -68,6 +69,35 @@ pub fn route(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64, seed: u64, m
             area[r as usize] += area[p as usize];
         }
     }
+    if super::experiment::mfd_area() {
+        // Freeman's multiple flow direction (p = 1.1) over the filled surface, highest cells first (ties by the cell index): the area drives the carve, the receivers stay D8.
+        let mut by_height: Vec<u32> = (0..n as u32).collect();
+        by_height.sort_by(|&a, &b| filled[b as usize].total_cmp(&filled[a as usize]).then(a.cmp(&b)));
+        area = vec![grid.dx() * grid.dx(); n];
+        for &p in &by_height {
+            let p = p as usize;
+            let mut w = [0.0f64; 8];
+            let mut sum = 0.0;
+            for (d, wd) in w.iter_mut().enumerate() {
+                if let Some(q) = grid.neighbour(p, d) {
+                    let s = (filled[p] - filled[q]) / grid.distance(d);
+                    if s > 0.0 {
+                        *wd = libm::pow(s, 1.1);
+                        sum += *wd;
+                    }
+                }
+            }
+            if sum > 0.0 {
+                let a = area[p];
+                for (d, wd) in w.iter().enumerate() {
+                    if *wd > 0.0 {
+                        let q = grid.neighbour(p, d).expect("a weighted neighbour exists");
+                        area[q] += a * wd / sum;
+                    }
+                }
+            }
+        }
+    }
     if max_area > 0.0 {
         for a in &mut area {
             *a = a.min(max_area);
@@ -88,7 +118,7 @@ fn receivers(grid: &Grid, filled: &[f64], outlet: &[bool], seed: u64) -> Vec<u32
             let Some(q) = grid.neighbour(p, d) else { continue };
             let mut s = (filled[p] - filled[q]) / grid.distance(d);
             if s > 0.0 {
-                s *= 1.0 + 0.5 * jitter(seed, grid.global_id(p), d);
+                s *= 1.0 + super::experiment::jitter_amp() * jitter(seed, grid.global_id(p), d);
             }
             if s > best.0 {
                 best = (s, q as u32);

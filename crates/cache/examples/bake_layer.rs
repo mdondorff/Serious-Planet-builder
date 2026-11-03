@@ -48,10 +48,21 @@ struct Opts {
     export: Option<PathBuf>,
     /// Also sizes each tile's record with the pass-1 face change taken out (what pass 2 adds on its own), a column of the size report.
     size_split: bool,
+    jitter: Option<f64>,
+    mfd_area: bool,
+    smooth_flow: u32,
+    smooth_iso: u32,
+    no_images: bool,
 }
 
 fn main() {
     let o = parse();
+    if let Some(j) = o.jitter {
+        planet_generators::bake::experiment::set_jitter_amp(j);
+    }
+    planet_generators::bake::experiment::set_mfd_area(o.mfd_area);
+    planet_generators::bake::experiment::set_smooth_flow(o.smooth_flow);
+    planet_generators::bake::experiment::set_smooth_iso(o.smooth_iso);
     let (threads, threads_note) = planet_streaming::topology::bake_threads(o.threads).unwrap_or_else(|e| fail(&e));
     let out = o.out.clone().unwrap_or_else(|| PathBuf::from(format!("target/bake/layer-seed-{}", o.seed)));
     let tile = o.tile.unwrap_or(o.planet_res.min(3072));
@@ -265,17 +276,17 @@ fn main() {
         }
         println!("maps {:.1} s", t.elapsed().as_secs_f64());
     } else {
-        for &t in &tiles {
+        for &t in tiles.iter().filter(|_| !o.no_images) {
             let core = &stored[&(t.face.0, t.ti, t.tj)];
             let (i0, j0) = (t.ti as i64 * tile as i64, t.tj as i64 * tile as i64);
-            let b: Vec<f64> =
-                (0..tile * tile).map(|p| base(grid.direction(t.face, i0 + (p % tile) as i64, j0 + (p / tile) as i64))).collect();
             let path = out.join(format!("tile-{}-{}-{}.png", t.face.0, t.ti, t.tj));
             // A tile image takes every `step`th cell (default: down to about 1,024 cells a side), so a 3,072-cell tile is not a 110 MB picture.
             let step = o.image_step.unwrap_or(tile.div_ceil(1024)).max(1);
             let m = tile / step;
-            let (bs, cs): (Vec<f64>, Vec<f32>) =
-                (0..m * m).map(|p| (p / m) * step * tile + (p % m) * step).map(|q| (b[q], core[q])).unzip();
+            let (bs, cs): (Vec<f64>, Vec<f32>) = (0..m * m)
+                .map(|p| (p / m) * step * tile + (p % m) * step)
+                .map(|q| (base(grid.direction(t.face, i0 + (q % tile) as i64, j0 + (q / tile) as i64)), core[q]))
+                .unzip();
             tile_image(m, grid.dx() * step as f64, &bs, &cs, 400.0)
                 .write_png(&path)
                 .unwrap_or_else(|e| fail(&format!("cannot write {}: {e}", path.display())));
@@ -309,6 +320,11 @@ fn parse() -> Opts {
         no_deposit: false,
         export: None,
         size_split: false,
+        jitter: None,
+        mfd_area: false,
+        smooth_flow: 0,
+        smooth_iso: 0,
+        no_images: false,
     };
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -329,6 +345,11 @@ fn parse() -> Opts {
             "--no-thermal" => o.no_thermal = true,
             "--export" => o.export = Some(PathBuf::from(value())),
             "--size-split" => o.size_split = true,
+            "--jitter" => o.jitter = Some(value().parse().unwrap_or_else(|_| fail("--jitter needs a number"))),
+            "--mfd-area" => o.mfd_area = true,
+            "--smooth-flow" => o.smooth_flow = number("--smooth-flow") as u32,
+            "--smooth-iso" => o.smooth_iso = number("--smooth-iso") as u32,
+            "--no-images" => o.no_images = true,
             "--no-deposit" => o.no_deposit = true,
             other => fail(&format!(
                 "unknown option '{other}' (known: --seed N, --face-res N, --planet-res N, --tile N, --halo N, --region FILE, --keep-pass1, --out DIR, --threads N, --map-width W, --image-step N, --no-thermal, --no-deposit, --export DIR, --size-split)"

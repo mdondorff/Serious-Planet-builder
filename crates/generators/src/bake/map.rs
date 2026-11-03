@@ -20,6 +20,18 @@ pub fn change_in_face(f: &FaceChange, d: Vec3) -> f64 {
     let (i, j) = ((x as usize).min(m - 2), (y as usize).min(m - 2));
     let (fx, fy) = (x - i as f64, y - j as f64);
     let at = |ii: usize, jj: usize| f64::from(f.change[jj * m + ii]);
+    if super::experiment::c1_face_read() {
+        let atc = |a: i64, b: i64| at(a.clamp(0, m as i64 - 1) as usize, b.clamp(0, m as i64 - 1) as usize);
+        let cr = |p: [f64; 4], t: f64| {
+            0.5 * (2.0 * p[1]
+                + (p[2] - p[0]) * t
+                + (2.0 * p[0] - 5.0 * p[1] + 4.0 * p[2] - p[3]) * t * t
+                + (3.0 * (p[1] - p[2]) + p[3] - p[0]) * t * t * t)
+        };
+        let (ii, jj) = (i as i64, j as i64);
+        let row = |dj: i64| cr([atc(ii - 1, jj + dj), atc(ii, jj + dj), atc(ii + 1, jj + dj), atc(ii + 2, jj + dj)], fx);
+        return cr([row(-1), row(0), row(1), row(2)], fy);
+    }
     let (a, b) = (at(i, j) + (at(i + 1, j) - at(i, j)) * fx, at(i, j + 1) + (at(i + 1, j + 1) - at(i, j + 1)) * fx);
     a + (b - a) * fy
 }

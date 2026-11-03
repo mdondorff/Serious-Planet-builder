@@ -35,6 +35,8 @@ struct Field<'a> {
     inputs: &'a BakeInputs,
     tiles: Option<&'a HashMap<(u8, usize, usize), Vec<f32>>>,
     seed: u64,
+    /// Reads the change with Catmull-Rom (C1) instead of bilinear (C0).
+    c1: bool,
 }
 
 impl Field<'_> {
@@ -48,7 +50,21 @@ impl Field<'_> {
         let Some(core) = tiles.get(&(face.0, i / TILE, j / TILE)) else { return 0.0 };
         let (i0, j0) = ((i / TILE) * TILE, (j / TILE) * TILE);
         let (fx, fy) = ((x - i as f64).clamp(0.0, 1.0), (y - j as f64).clamp(0.0, 1.0));
-        let at = |a: usize, b: usize| f64::from(core[(b.min(j0 + TILE - 1) - j0) * TILE + (a.min(i0 + TILE - 1) - i0)]);
+        let at = |a: i64, b: i64| {
+            let (a, b) = (a.clamp(i0 as i64, (i0 + TILE - 1) as i64) as usize, b.clamp(j0 as i64, (j0 + TILE - 1) as i64) as usize);
+            f64::from(core[(b - j0) * TILE + (a - i0)])
+        };
+        let (i, j) = (i as i64, j as i64);
+        if self.c1 {
+            let cr = |p: [f64; 4], t: f64| {
+                0.5 * (2.0 * p[1]
+                    + (p[2] - p[0]) * t
+                    + (2.0 * p[0] - 5.0 * p[1] + 4.0 * p[2] - p[3]) * t * t
+                    + (3.0 * (p[1] - p[2]) + p[3] - p[0]) * t * t * t)
+            };
+            let row = |dj: i64| cr([at(i - 1, j + dj), at(i, j + dj), at(i + 1, j + dj), at(i + 2, j + dj)], fx);
+            return cr([row(-1), row(0), row(1), row(2)], fy);
+        }
         (1.0 - fy) * ((1.0 - fx) * at(i, j) + fx * at(i + 1, j)) + fy * ((1.0 - fx) * at(i, j + 1) + fx * at(i + 1, j + 1))
     }
 }
@@ -107,12 +123,18 @@ fn fail(m: &str) -> ! {
 fn main() {
     let (mut export, mut seed, mut out, mut sites) =
         (None::<PathBuf>, 14u64, PathBuf::from("target/review/erosion-preview"), Vec::<Site>::new());
+    let (mut c1, mut detail, mut alts) = (false, NATURAL_STRENGTH, vec!["300m".to_string(), "2km".to_string()]);
+    let mut skip_before = false;
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut value = || it.next().cloned().unwrap_or_else(|| fail(&format!("{a} needs a value")));
         match a.as_str() {
             "--export" => export = Some(PathBuf::from(value())),
+            "--read" => c1 = value() == "c1",
+            "--detail" => detail = value().parse().unwrap_or_else(|_| fail("--detail needs a number")),
+            "--alts" => alts = value().split(',').map(str::to_string).collect(),
+            "--skip-before" => skip_before = true,
             "--seed" => seed = value().parse().unwrap_or_else(|_| fail("--seed needs an integer")),
             "--out" => out = PathBuf::from(value()),
             "--site" => {
@@ -155,8 +177,8 @@ fn main() {
     println!("{} tile cores read from {}", tiles.len(), export.display());
     std::fs::create_dir_all(&out).unwrap_or_else(|e| fail(&e.to_string()));
     let inputs = BakeInputs::new(seed, planet_streaming::topology::bake_threads(0).map_or(4, |t| t.0));
-    let before = Field { inputs: &inputs, tiles: None, seed };
-    let after = Field { inputs: &inputs, tiles: Some(&tiles), seed };
+    let before = Field { inputs: &inputs, tiles: None, seed, c1 };
+    let after = Field { inputs: &inputs, tiles: Some(&tiles), seed, c1 };
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let grid = TileGrid { cells: FACE_CELLS, tile: TILE, halo: 256, radius_m: R };
     let aspect = f64::from(SIZE.0) / f64::from(SIZE.1);
@@ -283,7 +305,9 @@ fn main() {
             site.tj,
             libm::atan2(heading.dot(east), heading.dot(north)).to_degrees()
         );
-        for (alt_name, eye, pitch_deg) in [("300m", 300.0, 12.0), ("2km", 2000.0, 22.0)] {
+        for (alt_name, eye, pitch_deg) in
+            [("300m", 300.0, 12.0), ("2km", 2000.0, 22.0)].into_iter().filter(|a| alts.iter().any(|x| x == a.0))
+        {
             let camera = Camera::at_surface_point(
                 PlanetFixed(centre * (R + ground + eye)),
                 heading,
@@ -292,7 +316,7 @@ fn main() {
                 aspect,
                 1.0,
             );
-            for (variant, field) in [("before", &before), ("after", &after)] {
+            for (variant, field) in [("before", &before), ("after", &after)].into_iter().filter(|v| !(skip_before && v.0 == "before")) {
                 let lod = LodParams {
                     cells: CELLS,
                     viewport_h_px: f64::from(SIZE.1),
@@ -326,7 +350,7 @@ fn main() {
                 let mut lit = LitPlan::fixed(EV).with_atmosphere(&look, R).expect("an atmosphere plan");
                 lit.sun_dir = [sun.x as f32, sun.y as f32, sun.z as f32];
                 lit.materials = MaterialParams::EARTH;
-                lit.ground_detail = NATURAL_STRENGTH;
+                lit.ground_detail = detail;
                 let mut p = plan.clone();
                 p.lit = Some(lit);
                 for _ in 0..2 {

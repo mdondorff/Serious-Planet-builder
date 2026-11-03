@@ -13,6 +13,7 @@ pub const PASS2_KERNEL_VERSION: u32 = 1;
 
 pub mod carve;
 pub mod deposit;
+pub mod experiment;
 pub mod face;
 pub mod flood;
 pub mod inputs;
