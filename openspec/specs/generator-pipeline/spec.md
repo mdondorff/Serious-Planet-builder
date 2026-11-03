@@ -1122,6 +1122,25 @@ Source: SPIKE-57, SPIKE-40 (drainage density target), SPIKE-47, CON-14
 - **WHEN** the drainage runs on a tilted V valley holding one pit
 - **THEN** the pit is filled, the area grows downstream along the axis by one cell row each step, and the density equals the analytic channel length over the area within 1 %
 
+### Requirement: GEN-108 The descent site of a world
+A world definition MAY name the viewer's descent site, `[world] site = [latitude, longitude]` in degrees (finite; latitude within 90, longitude within 180), written canonically and otherwise refused naming `world.site`. The site SHALL enter no hash. The viewer SHALL open the descent over the first of: the `--site` option; the definition's site; 20 N 30 E where the field there is land; the land 1 km inland of the first shore `find_coast` finds from 20 N 30 E; 20 N 30 E.
+
+Verify: A
+Status: active
+Source: Owner test 2026-11-03 (the default site is sea on m9r2), inbox #52, #53
+
+#### Scenario: The definition's site
+- **WHEN** a definition with `world.site` is parsed, written and parsed again, and hashed with and without the site
+- **THEN** the site round-trips exactly, the text is canonical, and the hash and base hash are equal
+
+#### Scenario: A bad site
+- **WHEN** `world.site` has one or three numbers, a string, a latitude beyond 90 or a longitude beyond 180 degrees, or a NaN
+- **THEN** loading is refused, naming `world.site`
+
+#### Scenario: The order of the sources
+- **WHEN** the descent site is asked with `--site`, with a definition site, and with neither on worlds where 20 N 30 E is sea
+- **THEN** the option wins, then the definition's, and otherwise the result is land (the field above the sea level there) and the same on a second call
+
 ### Requirement: GEN-109 The crease band
 `with_crease_band(CreaseBand)` MAY drop a relief field's crease octaves above the erosion layer's grid (ADR 0098):
 - it needs the relief channels on; without the call the field is today's, bit for bit;

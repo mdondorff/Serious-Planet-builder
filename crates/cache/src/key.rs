@@ -91,6 +91,8 @@ pub enum Kind {
     GlobalClassWeights = 11,
     /// The pass-1 change of one cube face of the erosion layer (M9 bake PR 4, GEN-100, STRM-065): one record per face.
     LayerFace = 12,
+    /// The pass-2 change of one tile of the erosion layer (M9 bake PR 5, GEN-101, STRM-065): one record per tile.
+    LayerTile = 13,
 }
 
 /// One entry of a read set, in its 128-bit form (ADR 0018).
@@ -345,6 +347,8 @@ pub const PARAM_RELIEF: u8 = 13;
 pub const PARAM_CLASS_WEIGHTS: u8 = 14;
 /// What an erosion layer is made of: its version, the face grid's cells, the radius, the sea level, the seed, every parameter of the carve and the inputs' identity (STRM-065).
 pub const PARAM_LAYER: u8 = 15;
+/// What a tile of the erosion layer is made of: its version, the tile grid, the pass-2 parameters, the inputs' identity and the digest of the pass-1 faces it read (STRM-065).
+pub const PARAM_TILE_LAYER: u8 = 16;
 
 fn field_inputs(kind: Kind, field: &dyn HeightField, map: &dyn FaceMapping, tile: TileId, radius_m: f64) -> KeyInputs {
     assert!(
