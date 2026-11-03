@@ -12,6 +12,7 @@ pub mod carve;
 pub mod deposit;
 pub mod face;
 pub mod flood;
+pub mod inputs;
 pub mod map;
 pub mod route;
 pub mod thermal;
