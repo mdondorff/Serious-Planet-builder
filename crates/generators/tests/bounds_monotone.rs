@@ -130,6 +130,7 @@ fn every_field_that_says_its_bounds_are_monotone_gives_nested_bounds_for_nested_
     let reference: Arc<dyn HeightField> = Arc::new(Reference(1));
     let er: Arc<dyn HeightField> = Arc::from(eroded(HeightFieldKind::Eroded));
     let te: Arc<dyn HeightField> = Arc::from(eroded(HeightFieldKind::Terrain));
+    let c1: Arc<dyn HeightField> = Arc::from(eroded(HeightFieldKind::ErodedC1));
     let st_ref = stage_over(Arc::clone(&reference), items_near(at));
     let st_er = stage_over(Arc::clone(&er), items_near(at));
     let st_te = stage_over(Arc::clone(&te), items_near(at));
@@ -137,6 +138,7 @@ fn every_field_that_says_its_bounds_are_monotone_gives_nested_bounds_for_nested_
         ("reference", reference.as_ref() as &dyn HeightField),
         ("eroded", er.as_ref()),
         ("terrain", te.as_ref()),
+        ("eroded C1", c1.as_ref()),
         ("stamp over reference", &st_ref),
         ("stamp over eroded", &st_er),
         ("stamp over terrain", &st_te),

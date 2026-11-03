@@ -16,7 +16,7 @@ fn manifest_is_reproducible_and_covers_heights_meshes_and_geo() {
     assert_eq!(count("moonheightkey "), tiles);
     assert_eq!(count("moonmeshkey "), tiles);
     assert_eq!(count("geo "), 88, "geo round trips");
-    assert_eq!(count("version "), 8);
+    assert_eq!(count("version "), 9);
     let mut keys: Vec<&str> = a.lines().map(|l| l.rsplit_once(' ').unwrap().0).collect();
     keys.sort_unstable();
     let n = keys.len();
@@ -51,6 +51,7 @@ fn manifest_lists_the_global_bake_and_both_terrain_fields_at_edges_and_corners()
     assert_eq!((count("oceantable"), count("oceangrid")), (1, 1), "the ocean channel: its component table and its bits");
     assert_eq!(count("terrain"), 6 * 12, "the terrain field, 12 directions per face");
     assert_eq!(count("erosion"), 6 * 12, "the eroded field, 12 directions per face");
+    assert_eq!(count("erosionc1"), 6 * 12, "the C1 eroded field, 12 directions per face");
     assert!(
         a.contains(
             "version global cpu-global-coarse-v1 6
@@ -58,12 +59,13 @@ fn manifest_lists_the_global_bake_and_both_terrain_fields_at_edges_and_corners()
         ),
         "the bake's implementation id and version"
     );
-    assert_eq!(count("version"), 8, "bake, terrain and erosion versions join the header");
+    assert_eq!(count("version"), 9, "bake, terrain and erosion versions join the header");
     // The directions include the four corners and the four edge midpoints of every face.
     for f in 0..6 {
         for k in ["-1.0/-1.0", "1.0/-1.0", "-1.0/1.0", "1.0/1.0", "0.0/-1.0", "0.0/1.0", "-1.0/0.0", "1.0/0.0"] {
             assert!(a.contains(&format!("terrain {f}/{k} ")), "face {f} direction {k}");
             assert!(a.contains(&format!("erosion {f}/{k} ")), "face {f} direction {k}");
+            assert!(a.contains(&format!("erosionc1 {f}/{k} ")), "face {f} direction {k}");
         }
     }
 }
@@ -75,12 +77,12 @@ fn one_ulp_in_any_new_entry_changes_the_manifest_in_that_entry_only() {
     let base = values.entries(&|_, _| None);
     assert!(determinism_manifest().contains(&base), "the new entries are the manifest's own section");
     let new: Vec<&str> = base.lines().collect();
-    assert_eq!(new.len(), 96 + 1 + 2 + 72 + 72);
+    assert_eq!(new.len(), 96 + 1 + 2 + 72 + 72 + 72);
     for line in new {
         let (head, value) = line.rsplit_once(' ').unwrap();
         let (kind, key) = head.split_once(' ').unwrap();
         // Bake entries: every channel at the first and at the last sample; fields: one variant.
-        let variants = if kind == "terrain" || kind == "erosion" || kind.starts_with("ocean") { 1 } else { 8 };
+        let variants = if kind == "terrain" || kind == "erosion" || kind == "erosionc1" || kind.starts_with("ocean") { 1 } else { 8 };
         for v in 0..variants {
             let m = values.entries(&|k, kk| (k == kind && kk == key).then_some(v));
             let diff: Vec<(&str, &str)> = base.lines().zip(m.lines()).filter(|(x, y)| x != y).collect();
@@ -104,7 +106,7 @@ fn field_lines_agree_where_faces_share_a_direction_and_are_finite() {
     use planet_core::Face;
     use planet_generators::manifest::MANIFEST_FIELD_POINTS;
     let a = determinism_manifest();
-    for kind in ["terrain", "erosion"] {
+    for kind in ["terrain", "erosion", "erosionc1"] {
         let mut by_dir: std::collections::BTreeMap<[u64; 3], Vec<String>> = Default::default();
         for f in 0..6u8 {
             for (s, t) in MANIFEST_FIELD_POINTS {
