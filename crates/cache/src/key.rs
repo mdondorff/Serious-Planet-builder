@@ -89,6 +89,8 @@ pub enum Kind {
     GlobalRelief = 10,
     /// The class-weights lattice of the global bake (M9, GEN-093, STRM-067): one record per cube face.
     GlobalClassWeights = 11,
+    /// The pass-1 change of one cube face of the erosion layer (M9 bake PR 4, GEN-100, STRM-065): one record per face.
+    LayerFace = 12,
 }
 
 /// One entry of a read set, in its 128-bit form (ADR 0018).
@@ -341,6 +343,8 @@ pub const PARAM_HORIZON: u8 = 12;
 pub const PARAM_RELIEF: u8 = 13;
 /// The number of classes of a stored class-weights lattice (STRM-067).
 pub const PARAM_CLASS_WEIGHTS: u8 = 14;
+/// What an erosion layer is made of: its version, the face grid's cells, the radius, the sea level, the seed, every parameter of the carve and the inputs' identity (STRM-065).
+pub const PARAM_LAYER: u8 = 15;
 
 fn field_inputs(kind: Kind, field: &dyn HeightField, map: &dyn FaceMapping, tile: TileId, radius_m: f64) -> KeyInputs {
     assert!(

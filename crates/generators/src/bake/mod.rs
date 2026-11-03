@@ -6,7 +6,9 @@
 //! so a cell routes the same in every window that holds it. The grids do not wrap: a cube face does not route across its edges (GEN-100), its edge cells are outlets like the sea.
 
 pub mod carve;
+pub mod face;
 pub mod flood;
+pub mod map;
 pub mod route;
 
 /// A `w x h` grid of cells `dx` metres apart, row-major (`p = j w + i`), 8-connected, not wrapping, whose cell `(0, 0)` is the global cell `(origin.0, origin.1)`.
