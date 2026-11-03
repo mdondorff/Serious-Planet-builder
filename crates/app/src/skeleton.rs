@@ -286,7 +286,7 @@ fn generate_global(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     if o.given.contains("--world") && o.given.contains("--seed") {
         return Err("--world and --seed both name the definition: give one".into());
     }
-    let threads = if o.threads == 0 { std::thread::available_parallelism().map_or(1, |n| n.get()) } else { o.threads };
+    let (threads, threads_note) = planet_streaming::topology::bake_threads(o.threads)?;
     let world = global_world_of(o)?;
     if let Some(dir) = &o.verify_global {
         if o.given.contains("--global-res") {
@@ -365,7 +365,7 @@ fn generate_global(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     let samples = report.written as f64 * edge * edge;
     writeln!(
         out,
-        "global bake {}: {} cells per face edge in blocks of {} (level {}): {} blocks written, {} already stored, at most {} blocks in memory; {:.1} s on {} threads, {:.2} us per sample per core",
+        "global bake {}: {} cells per face edge in blocks of {} (level {}): {} blocks written, {} already stored, at most {} blocks in memory; {:.1} s on {} threads ({}), {:.2} us per sample per core",
         dir.display(),
         o.global_res,
         cells,
@@ -375,6 +375,7 @@ fn generate_global(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         report.peak_resident_blocks,
         secs,
         threads,
+        threads_note,
         if samples > 0.0 { secs * threads as f64 / samples * 1e6 } else { 0.0 }
     )
     .map_err(err)?;
