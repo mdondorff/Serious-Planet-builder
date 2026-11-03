@@ -110,10 +110,7 @@ mod tests {
         assert!(job.contains("cargo xtask test -- --partition hash:${{ matrix.part }}/3"), "{job}");
         assert_eq!(job.matches("os: windows-latest").count(), 3, "three Windows parts");
         assert_eq!(job.matches("os: ubuntu-24.04").count(), 3, "three Linux parts");
-        assert_eq!(
-            (job.matches("part: 1").count(), job.matches("part: 2").count(), job.matches("part: 3").count()),
-            (2, 2, 2)
-        );
+        assert_eq!((job.matches("part: 1").count(), job.matches("part: 2").count(), job.matches("part: 3").count()), (2, 2, 2));
         // The determinism manifest (its upload too), check, spec-lint, licences and the run-mode starts run once per OS, in part 2.
         assert_eq!(job.matches("if: matrix.part == 2").count(), 6, "{job}");
         for step in [
