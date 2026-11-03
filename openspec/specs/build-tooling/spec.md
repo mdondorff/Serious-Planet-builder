@@ -56,7 +56,7 @@ Source: CON-25, CLAUDE.md
 
 Verify: A
 Status: active
-Source: ADR 0009, report §16, ADR 0020, planner inbox #44 (2026-11-01)
+Source: ADR 0009, report §16, ADR 0020, planner inbox #44 (2026-11-01), opus-planner (2026-11-03, #1108)
 
 #### Scenario: Change in a middle crate
 - **WHEN** only files of `streaming` changed
@@ -78,7 +78,7 @@ Source: ADR 0009, report §16, ADR 0020, planner inbox #44 (2026-11-01)
 #### Scenario: The GPU tests have a hang limit of 300 s
 - **WHEN** a test of a `gpu_*` binary runs under the default nextest profile (the software-adapter tier C, CI's WARP and lavapipe runs, and the `real-gpu` profile that inherits it)
 - **THEN** nextest marks it slow every 60 s and terminates it after 300 s (5 periods), where every other test terminates after 180 s; the limit catches a hang and is not a budget: the heavy `gpu_*` tests take 40 to 66 s alone and up to 144 s beside the other processes of a full run, and grouping them did not shorten the run
-- **AND** a test with a declared limit in `.config/nextest.toml` (its measured durations and the planner's approval in a comment beside it) terminates after 450 s (5 x 90 s) instead; today the window flight, the coastal flight, the lit coast view, the edit-latency smoke scene and the stills scene; no test is skipped, retried or changed
+- **AND** a test with a declared limit in `.config/nextest.toml` (its measured durations and the planner's approval in a comment beside it) terminates after 450 s (5 x 90 s) instead; today the window flight, the coastal flight, the lit coast view, the edit-latency smoke scene, the two stills scenes, the small-world window gate and the draw-flag loop test of `gpu_skeleton`; no test is skipped, retried or changed
 
 #### Scenario: The GPU tier runs every test
 - **WHEN** `cargo xtask test gpu` runs (software or `--real`)
@@ -103,7 +103,7 @@ Source: ADR 0009, report §16, ADR 0020, planner inbox #44 (2026-11-01)
 
 #### Scenario: The software GPU tier runs at most 8 GPU tests at once
 - **WHEN** a `gpu_*` test runs under the default nextest profile
-- **THEN** it is in the test group `gpu-tier` of at most 8 processes at once, unless an earlier override puts it in a heavier group; the window, water-coverage, stream-perf, envelope-perf, edit-perf and stills tests and the three loop tests of `gpu_skeleton` are in `heavy-window` of at most 2; tier A and B tests are not capped
+- **THEN** it is in the test group `gpu-tier` of at most 8 processes at once, unless an earlier override puts it in a heavier group; the window, water-coverage, stream-perf, envelope-perf, edit-perf and stills tests and two loop tests of `gpu_skeleton` are in `heavy-window` of at most 2; the coastal flight, the real-window tests, the lit flight and lit streaming process tests and the draw-flag loop test of `gpu_skeleton` are in `warp-heavy` of 1, which comes first; tier A and B tests are not capped
 - **AND** a machine with 8 cores or fewer (CI's runners) runs as before; on the 20-thread reference laptop the software tier C no longer runs about 20 rasterising processes at once (SPIKE-84: the 12 timeouts of 2026-10-20 and 3 load timeouts on 2026-10-31)
 
 #### Scenario: Wall-clock checks run with perf, not in tier A

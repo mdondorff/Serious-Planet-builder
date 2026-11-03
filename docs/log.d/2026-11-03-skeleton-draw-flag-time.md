@@ -1,0 +1,1 @@
+- 2026-11-03 skeleton-draw-flag-time: the gpu_skeleton draw-flag loop test joins `warp-heavy` with a declared 450 s limit (BUILD-003); it was cut off at 300 s on WARP C 2/4 in #1108
