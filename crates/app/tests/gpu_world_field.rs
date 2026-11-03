@@ -83,7 +83,7 @@ fn a_streamed_world_run_draws_the_frame_of_the_synchronous_world_run() {
     let mut args = view_args(w.to_str().unwrap(), b.to_str().unwrap());
     args.push("--stream");
     let log = run(&args).unwrap();
-    assert!(log.contains("height field cpu-erosion-v1 over a 32-cell bake"), "{log}");
+    assert!(log.contains("height field cpu-erosion-v2 over a 32-cell bake"), "{log}");
     assert_eq!(read_png(&a).unwrap(), read_png(&b).unwrap(), "the streaming path builds its meshes from the world's field");
     // And it is the eroded field, not the reference the seed-only run draws.
     let c = tmp("world-seed-only.png");
