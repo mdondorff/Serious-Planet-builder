@@ -2,7 +2,7 @@
 //! TEST-082 with the bake).
 
 use planet_generators::classes::CLASS_COUNT;
-use planet_generators::preview::{compute, report, shares};
+use planet_generators::preview::{compute, relief, report, shares};
 
 // spec: TEST-086
 #[test]
@@ -15,13 +15,13 @@ fn the_preview_of_seed_1_reports_the_class_shares_beside_the_bands() {
     assert!((0.2..0.4).contains(&s.land_fraction), "land fraction {}", s.land_fraction);
     assert_eq!((s.per_class[6], s.per_class[7]), (0.0, 0.0), "badlands and the sand sea are 0 in the default source");
     for (needle, band) in [
-        ("plains", "band 55-67 %"),
-        ("hills", "band 10-25 %"),
-        ("mountains", "band 14-30 %"),
+        ("plains", "band 45-62 %"),
+        ("hills", "band 15-30 %"),
+        ("mountains", "band 20-32 %"),
         ("land above 2 km", "band 5-10 %"),
         ("land above 4 km", "band 1-3 %"),
         ("highest land", "band 7-9 km"),
-        ("largest step", "limit 2.0"),
+        ("p99 of the lattice steps", "limit 2.0"),
         ("S1 ", "Earth 5"),
         ("S2 ", "Earth about 57 %"),
         ("S3 ", "Earth 1.1-1.3"),
@@ -34,4 +34,115 @@ fn the_preview_of_seed_1_reports_the_class_shares_beside_the_bands() {
         assert!(line.contains(band), "'{needle}' carries its band '{band}': {line}");
     }
     assert_eq!(s.per_class.len(), CLASS_COUNT);
+}
+
+// spec: TEST-082
+#[test]
+fn seeds_1_to_5_pass_the_relief_bands_of_spike_93_in_the_gate_form() {
+    // (name, band low, band high, value per seed)
+    let mut rows: Vec<(&str, f64, f64, Vec<f64>)> = [
+        ("land under 500 m", 50.0, 65.0),
+        ("median land elevation m", 300.0, 550.0),
+        ("coastal land median m", 0.0, 200.0),
+        ("land above 1 km", 17.0, 27.0),
+        ("land above 2 km", 5.0, 10.0),
+        ("land above 3 km", 2.0, 5.0),
+        ("land above 4 km", 1.0, 3.0),
+        ("highest land km", 7.0, 9.0),
+        ("plains", 45.0, 62.0),
+        ("hills", 15.0, 30.0),
+        ("mountains", 20.0, 32.0),
+    ]
+    .into_iter()
+    .map(|(n, lo, hi)| (n, lo, hi, Vec::new()))
+    .collect();
+    let mut belt = Vec::new();
+    let mut largest_k = Vec::new();
+    let mut p99_k = Vec::new();
+    for seed in 1..=5u64 {
+        let f = compute(seed, 1440, 720, 256, 8);
+        let (s, r) = (shares(&f), relief(&f));
+        p99_k.push(s.k_step_p99);
+        let values = [
+            100.0 * r.under_500m,
+            r.median_m,
+            r.coastal_median_m,
+            100.0 * r.above_1km,
+            100.0 * s.above_2km,
+            100.0 * r.above_3km,
+            100.0 * s.above_4km,
+            s.highest_m / 1000.0,
+            100.0 * s.plains,
+            100.0 * s.hills,
+            100.0 * s.mountains,
+        ];
+        for (row, v) in rows.iter_mut().zip(values) {
+            row.3.push(v);
+        }
+        belt.push(100.0 * r.belt_land);
+        largest_k.push(s.largest_k_step);
+    }
+    println!(
+        "belt land % per seed (reported, gated with the convergent-only arc round): {belt:.1?}; largest k step per seed: {largest_k:.2?}"
+    );
+    // The reference world (seed 14), reported beside seeds 1 to 5 and not gated.
+    let f14 = compute(14, 1440, 720, 256, 8);
+    let (s14, r14) = (shares(&f14), relief(&f14));
+    println!(
+        "seed 14: under 500 m {:.1} %, median {:.0} m, coastal {:.0} m, above 1 / 2 / 3 / 4 km {:.1} / {:.1} / {:.1} / {:.1} %, highest {:.2} km, plains / hills / mountains {:.1} / {:.1} / {:.1} %, belt land {:.1} %, k step p99 {:.2}, largest {:.2}",
+        100.0 * r14.under_500m,
+        r14.median_m,
+        r14.coastal_median_m,
+        100.0 * r14.above_1km,
+        100.0 * s14.above_2km,
+        100.0 * r14.above_3km,
+        100.0 * s14.above_4km,
+        s14.highest_m / 1000.0,
+        100.0 * s14.plains,
+        100.0 * s14.hills,
+        100.0 * s14.mountains,
+        100.0 * r14.belt_land,
+        s14.k_step_p99,
+        s14.largest_k_step
+    );
+    assert!(
+        rows.iter().all(|r| r.3.iter().all(|v| v.is_finite())),
+        "every measure is finite on every seed (an empty coastal list gives NaN)"
+    );
+    // GEN-097 (owner, 2026-11-02): the 99th percentile of the lattice steps of k is at most 2.0 on every seed; the largest step is reported, with a ceiling
+    // for regressions.
+    assert!(p99_k.iter().all(|&p| p <= 2.0), "the p99 of the lattice steps of k exceeds 2.0 (GEN-097): {p99_k:.2?}");
+    assert!(largest_k.iter().all(|&k| k <= 6.5), "the largest lattice step of k regressed: {largest_k:.2?}");
+    let mut failures = Vec::new();
+    for (name, lo, hi, v) in &rows {
+        let w = hi - lo;
+        let mut sorted = v.clone();
+        sorted.sort_by(f64::total_cmp);
+        let median = sorted[2];
+        println!("{name}: {v:.1?}, median {median:.1}, band {lo}-{hi}");
+        if median < lo - 0.1 * w || median > hi + 0.1 * w {
+            failures.push(format!("{name}: median {median:.1} outside the band {lo}-{hi} widened by 10 %"));
+        }
+        for (i, x) in v.iter().enumerate() {
+            if *x < lo - w || *x > hi + w {
+                failures.push(format!("{name}: seed {} has {x:.1}, more than one band width outside {lo}-{hi}", i + 1));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{}",
+        failures.join(
+            "
+"
+        )
+    );
+}
+
+// spec: TEST-086
+#[test]
+fn a_small_preview_says_why_the_continent_metrics_are_missing_and_prints_no_control_characters() {
+    let text = report(&compute(1, 180, 90, 64, 2));
+    assert!(text.contains("need a grid of at least 360 x 180"), "{text}");
+    assert!(text.chars().all(|c| c == '\n' || !c.is_control()), "a control character in the report");
 }
