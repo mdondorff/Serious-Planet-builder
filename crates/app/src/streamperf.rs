@@ -399,6 +399,11 @@ impl Driver<'_> {
             lit_plan_ms,
             deferred: c.deferred,
             node_bytes: c.node_bytes,
+            node_build_ms: timing.cpu_phases.node_build_ms,
+            node_write_ms: timing.cpu_phases.node_write_ms,
+            refs_ms: timing.cpu_phases.refs_ms,
+            encode_ms: timing.cpu_phases.encode_ms,
+            submit_ms: timing.cpu_phases.submit_ms,
         };
         self.pace();
         Ok(Tick { record, settled, drawn, horizon_busy, water_nodes })
