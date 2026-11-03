@@ -746,10 +746,6 @@ impl WorldTerrain {
         self.bake_key
     }
 
-    pub(crate) fn store_dir(&self) -> Option<&Path> {
-        self.store_dir.as_deref()
-    }
-
     /// The parallelism the tile jobs' helper threads are asked from (the terrain share of the rig, BUDG-004).
     pub fn set_job_par(&self, par: Arc<dyn planet_core::par::Par + Send + Sync>) {
         *self.job_par.write().expect("job par") = par;

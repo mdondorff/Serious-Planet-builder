@@ -35,7 +35,7 @@ struct Case {
     table: AlbedoParams,
 }
 
-/// The views `shade_lit` computes (lit to precipitation): `Horizon` and `Shadow` are written by the fragment stage from the horizon maps (REND-038) and have their own tests (`gpu_horizon`).
+/// The views `shade_lit` computes (lit to precipitation): `Shadow` is drawn by the shadow pass over the picture (VIEW-054) and has its own test (`gpu_shadow_frame`); the driver views follow.
 const SHADED: usize = 5;
 
 fn rng(seed: u64) -> impl FnMut() -> f64 {
