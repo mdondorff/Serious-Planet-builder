@@ -290,6 +290,10 @@ pub(crate) fn scan_base(
     if res == 0 || !angular_radius.is_finite() || angular_radius < 0.0 {
         return Ok(None);
     }
+    // At res 2 a ghost sits two cells beyond the edge, in a face the scan does not visit: no C1 bounds below res 4 (the global range then).
+    if c1 && res < 4 {
+        return Ok(None);
+    }
     // Face coordinates are Lipschitz (FACE_LIPSCHITZ) in the angle while they stay within 1.14 (u within 1.2). With a
     // reach `rw` of at most 0.1, every direction of the cap that lies in the cone of a face F is within `rw` of the
     // centre in F's (extended) coordinates, so the faces to scan are those whose extended coordinates of the centre
@@ -318,10 +322,19 @@ pub(crate) fn scan_base(
         }
         let (pu, pv) = ((s + 1.0) * half, (t + 1.0) * half);
         let clamp = |x: f64| x.clamp(0.0, f64::from(res));
+        // C1: the window is the stencil's own span (one cell below the cap's first cell, two above its last) in the interior of a face; within the stencil's reach
+        // of a face edge (ghosts of the neighbour) it takes the wide pad.
+        let near_edge = c1
+            && (pu - reach < C1_PAD_CELLS
+                || pu + reach > f64::from(res) - C1_PAD_CELLS
+                || pv - reach < C1_PAD_CELLS
+                || pv + reach > f64::from(res) - C1_PAD_CELLS);
+        let pad = if near_edge { pad } else { 0.0 };
         let (u0, u1, v0, v1) = (clamp(pu - reach - pad), clamp(pu + reach + pad), clamp(pv - reach - pad), clamp(pv + reach + pad));
         // Cells read: floor(u0) ..= floor(u1) and one more for the far neighbour of the blend, clamped to the lattice.
-        let (i0, i1) = (libm::floor(u0) as u32, (libm::floor(u1) as u32 + 1).min(res));
-        let (j0, j1) = (libm::floor(v0) as u32, (libm::floor(v1) as u32 + 1).min(res));
+        let (lo_pad, hi_pad) = if c1 && !near_edge { (1u32, 2u32) } else { (0, 1) };
+        let (i0, i1) = ((libm::floor(u0) as u32).saturating_sub(lo_pad), (libm::floor(u1) as u32 + hi_pad).min(res));
+        let (j0, j1) = ((libm::floor(v0) as u32).saturating_sub(lo_pad), (libm::floor(v1) as u32 + hi_pad).min(res));
         let (w, h) = ((i1 - i0 + 1) as usize, (j1 - j0 + 1) as usize);
         cells += (w * h) as u64;
         if cells > MAX_BOUNDS_CELLS {
@@ -372,7 +385,9 @@ pub(crate) fn scan_base(
     if c1 {
         // The C1 value is a combination of sixteen samples whose weights sum to 1 and whose negative weights sum to at most C1_OVERSHOOT.
         let range = g_hi - g_lo;
-        (g_lo, g_hi) = (g_lo - crate::global::C1_OVERSHOOT * range, g_hi + crate::global::C1_OVERSHOOT * range);
+        // And the margin for the rounding of the value to f32 (the anchor side has its own below).
+        let round = 1e-6 + 1.2e-7 * g_lo.abs().max(g_hi.abs());
+        (g_lo, g_hi) = (g_lo - crate::global::C1_OVERSHOOT * range - round, g_hi + crate::global::C1_OVERSHOOT * range + round);
         (g_du, g_dv) = (g_du * crate::global::C1_SLOPE_FACTOR, g_dv * crate::global::C1_SLOPE_FACTOR);
     }
     let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);

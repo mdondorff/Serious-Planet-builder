@@ -194,6 +194,12 @@ impl ErosionField<'_> {
         MAX_ELEVATION_M.max(-MIN_ELEVATION_M) * self.relief + DETAIL_DOWN_M
     }
 
+    /// The bounds of the bake's elevation read over a cap (the base alone, no creases): `None` where the scan declines (a cap too wide, or the C1 read below res 4). For tests.
+    #[doc(hidden)]
+    pub fn base_bounds(&self, centre: Vec3, angular_radius: f64) -> Option<(f64, f64)> {
+        scan_base(&self.src, centre, angular_radius, self.c1).ok().flatten().map(|s| (s.lo, s.hi))
+    }
+
     /// The ground elevation of the bake at a direction, without creases.
     pub fn base_elevation(&self, dir: Vec3) -> f64 {
         self.base_via(&self.src, dir)
