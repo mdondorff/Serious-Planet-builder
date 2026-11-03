@@ -20,6 +20,17 @@
 
 /// The thread count the parallel limits were measured with: 20 logical CPUs less the generation reserve of 2.
 pub const REFERENCE_THREADS: u64 = 18;
+/// The threads a calibration runs its parallel reading on: [`REFERENCE_THREADS`], or the machine's threads when fewer, independent of
+/// the pool under test (TEST-039, ADR 0092), so a log of a share-sized pool keeps the parallel limits.
+pub fn calibration_threads() -> usize {
+    calibration_threads_for(std::thread::available_parallelism().map_or(1, |n| n.get()))
+}
+
+/// [`calibration_threads`] on a machine with `available` usable threads.
+pub fn calibration_threads_for(available: usize) -> usize {
+    (REFERENCE_THREADS as usize).min(available).max(1)
+}
+
 /// `load_calib_before_single_us` at most this.
 pub const BEFORE_SINGLE_MAX_US: u64 = 52_000;
 /// `load_calib_before_parallel_median_us` at most this.
@@ -190,5 +201,13 @@ mod tests {
         assert_eq!(with_commas(999), "999");
         assert_eq!(with_commas(1_000), "1,000");
         assert_eq!(with_commas(1_234_567), "1,234,567");
+    }
+
+    // spec: TEST-089
+    #[test]
+    fn the_parallel_reading_runs_on_the_reference_count_whatever_the_pool() {
+        assert_eq!(calibration_threads_for(20), 18, "Rasierklinge: the reference count, not its terrain share of 6");
+        assert_eq!(calibration_threads_for(8), 8, "a smaller machine: all its threads");
+        assert_eq!(calibration_threads_for(0), 1);
     }
 }
