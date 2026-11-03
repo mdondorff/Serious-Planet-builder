@@ -650,11 +650,17 @@ fn anchor_cell(
 /// [--views A,B]` (TEST-048): one PNG per pose, `DIR/<pose>.png`, and `DIR/stills.txt` with the camera and sun of each. A tool beside
 /// the harness, never a measurement: no gate, no timestamps, no log; not to be run during a perf window.
 pub fn capture_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<(), String> {
-    run_stills(o, ctx, out, None)
+    run_stills(o, ctx, out, None, None)
 }
 
 /// The poses of `capture-stills`; with `cost` the terrain pass is timed at each settled pose in four variants (REND-044, the `shadow-cost` scene).
-fn run_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write, mut cost: Option<&mut Vec<CostRow>>) -> Result<(), String> {
+fn run_stills(
+    o: &Options,
+    ctx: &GpuContext,
+    out: &mut dyn Write,
+    mut cost: Option<&mut Vec<CostRow>>,
+    mut layer1: Option<&mut Vec<Layer1Row>>,
+) -> Result<(), String> {
     let dir = o.out_dir.clone().ok_or("capture-stills needs --out-dir")?;
     let file = o.poses.clone().ok_or("capture-stills needs --poses FILE")?;
     let text = std::fs::read_to_string(&file).map_err(|e| format!("--poses {}: {e}", file.display()))?;
@@ -676,7 +682,13 @@ fn run_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write, mut cost: Opti
     writeln!(
         out,
         "{}: {}x{}, {} poses, {}{}",
-        if cost.is_some() { "shadow-cost" } else { "capture-stills: NOT a measurement (no gate, no timestamps, no log)" },
+        if cost.is_some() {
+            "shadow-cost"
+        } else if layer1.is_some() {
+            "shadow-layer1"
+        } else {
+            "capture-stills: NOT a measurement (no gate, no timestamps, no log)"
+        },
         size.0,
         size.1,
         config.poses.len(),
@@ -804,6 +816,10 @@ fn run_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write, mut cost: Opti
         }
         if let Some(rows) = cost.as_deref_mut() {
             rows.push(measure_cost(ctx, &mut r, &mut lit, &pose.name)?);
+        }
+        if let (Some(rows), Some(m)) = (layer1.as_deref_mut(), march.as_mut()) {
+            let sun64 = Vec3::new(f64::from(sun[0]), f64::from(sun[1]), f64::from(sun[2]));
+            rows.push(measure_layer1(ctx, &mut r, m, &camera, sun64, &lit, &pose.name)?);
         }
         r.read_color(ctx).write_png(&dir.join(format!("{}.png", pose.name))).map_err(|e| format!("writing {}: {e}", pose.name))?;
         let (eye_lat, _) = camera.position.0.lat_lon();
@@ -933,6 +949,127 @@ impl StillShadow {
 
 /// Frames a still renders with the shadow so that the temporal pass settles (the checkerboard of a low sun fills every ray within two).
 const SHADOW_STILL_FRAMES: usize = 6;
+
+/// Whether `--scene NAME` names the layer-1 frame scene (REND-052).
+pub fn is_layer1_scene(name: &str) -> bool {
+    name == "shadow-layer1"
+}
+
+/// The GPU time of the clipmap shadow of one pose, milliseconds: the median over the timed frames of each resolve pass
+/// ([`planet_render::resolve::RESOLVE_PASS_NAMES`] order) and of their sum (REND-052).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Layer1Row {
+    pub pose: String,
+    pub passes_ms: [f64; 5],
+    pub total_ms: f64,
+}
+
+/// REND-052's budget for layer 1 at 1440p: the clipmap upkeep, march, upsample and temporal pass together, median GPU milliseconds per pose. The upkeep of a
+/// settled pose is nil (nothing is dirty); the cost of scrolling the clipmap is the one-texel scroll item, not this scene's.
+pub const LAYER1_BUDGET_MS: f64 = 1.5;
+/// A reading within this share of the budget is flagged, not called a pass or a failure (ADR 0087, REND-052).
+pub const LAYER1_NEAR: f64 = 0.05;
+
+/// The failures (above the budget by more than [`LAYER1_NEAR`], or no reading) and the poses within [`LAYER1_NEAR`] of it (REND-052).
+pub fn layer1_verdict(rows: &[Layer1Row]) -> (Vec<String>, Vec<String>) {
+    let (mut over, mut near) = (Vec::new(), Vec::new());
+    for r in rows {
+        let t = r.total_ms;
+        if !t.is_finite() || t > LAYER1_BUDGET_MS * (1.0 + LAYER1_NEAR) {
+            over.push(format!("{}: layer 1 {t:.3} ms exceeds {LAYER1_BUDGET_MS} ms (REND-052)", r.pose));
+        } else if t > LAYER1_BUDGET_MS * (1.0 - LAYER1_NEAR) {
+            near.push(format!("{}: layer 1 {t:.3} ms is within 5 % of the {LAYER1_BUDGET_MS} ms budget: not called met or missed", r.pose));
+        }
+    }
+    (over, near)
+}
+
+/// Time the shadow passes of the settled pose with GPU timestamps: [`COST_WARM`] untimed frames, then [`COST_FRAMES`] timed ones, each with its shadow
+/// frame (not a cut: the history is settled, the sun's march scale and spread as the frame decides, REND-049, REND-050).
+fn measure_layer1(
+    ctx: &GpuContext,
+    r: &mut planet_render::TerrainRenderer,
+    m: &mut StillShadow,
+    camera: &Camera,
+    sun: Vec3,
+    lit: &planet_frame::TerrainPlan,
+    pose: &str,
+) -> Result<Layer1Row, String> {
+    if !r.enable_shadow_timing(ctx) {
+        return Err("the layer-1 scene needs GPU timestamp queries: the discrete GPU".into());
+    }
+    let mut per: [Vec<f64>; 5] = Default::default();
+    let mut totals = Vec::with_capacity(COST_FRAMES);
+    for k in 0..COST_WARM + COST_FRAMES {
+        r.set_shadow_frame(m.frame(camera, sun, k + 1));
+        r.render(ctx, lit, false).map_err(|e| e.to_string())?;
+        if k >= COST_WARM {
+            let ms = r.shadow_pass_ms(ctx).ok_or("the shadow passes gave no timestamps")?;
+            for (v, x) in per.iter_mut().zip(ms) {
+                v.push(x);
+            }
+            totals.push(ms.iter().sum());
+        }
+    }
+    let [a, b, c, d, e] = per;
+    Ok(Layer1Row { pose: pose.to_string(), passes_ms: [median(a), median(b), median(c), median(d), median(e)], total_ms: median(totals) })
+}
+
+/// `test-render --perf --scene shadow-layer1 --poses FILE --out-dir DIR --store DIR --global-res N`: after the readiness gate, the settled poses of
+/// the file at 1440p with the clipmap shadow's passes timed (REND-052); the log is `perf/logs/shadow-layer1.json`. Run by `perf stream shadow-layer1`.
+pub fn perf_shadow_layer1(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<(), String> {
+    planet_perf::check_reference_adapter(&crate::facts(ctx)).map_err(|r| r.to_string())?;
+    let owner_override = crate::readiness_gate(o, ctx, out)?;
+    if !o.shadow_march {
+        return Err("shadow-layer1 measures the clipmap shadow: it cannot run with --no-shadow-march".into());
+    }
+    let mut rows = Vec::new();
+    run_stills(o, ctx, out, None, Some(&mut rows))?;
+    let (over, near) = layer1_verdict(&rows);
+    let names = planet_render::resolve::RESOLVE_PASS_NAMES;
+    for r in &rows {
+        let parts: Vec<String> = names.iter().zip(r.passes_ms).map(|(n, ms)| format!("{n} {ms:.3}")).collect();
+        writeln!(out, "{}: layer 1 {:.3} ms ({})", r.pose, r.total_ms, parts.join(", ")).map_err(err)?;
+    }
+    writeln!(
+        out,
+        "1440p, each pose the median of {COST_FRAMES} frames after {COST_WARM} warm-up frames; the passes are the resolve's ({}); the upkeep of a settled pose is nil",
+        names.join(", ")
+    )
+    .map_err(err)?;
+    for n in &near {
+        writeln!(out, "NEAR: {n}").map_err(err)?;
+    }
+    let poses: Vec<String> = rows
+        .iter()
+        .map(|r| {
+            let passes: Vec<String> = names.iter().zip(r.passes_ms).map(|(n, ms)| format!("{n:?}: {ms:.4}")).collect();
+            format!("    {{\"pose\": {:?}, \"layer1_ms\": {:.4}, \"passes_ms\": {{{}}}}}", r.pose, r.total_ms, passes.join(", "))
+        })
+        .collect();
+    let size = o.size.unwrap_or((2560, 1440));
+    let json = format!(
+        "{{\n  \"scene\": \"shadow-layer1\",\n  \"adapter\": \"{}\",\n  \"owner_override\": {:?},\n  \"size\": [{}, {}],\n  \"frames\": {COST_FRAMES},\n  \"budget_ms\": {LAYER1_BUDGET_MS},\n  \"poses\": [\n{}\n  ],\n  \"near_budget\": {:?},\n  \"over_budget\": {:?}\n}}\n",
+        ctx.adapter_name().replace('"', "'"),
+        owner_override,
+        size.0,
+        size.1,
+        poses.join(",\n"),
+        near,
+        over
+    );
+    let path = o.out.clone().unwrap_or_else(|| std::path::Path::new("perf").join("logs").join("shadow-layer1.json"));
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(err)?;
+    }
+    std::fs::write(&path, json).map_err(err)?;
+    writeln!(out, "wrote {}", path.display()).map_err(err)?;
+    if over.is_empty() {
+        Ok(())
+    } else {
+        Err(over.join("; "))
+    }
+}
 
 /// Whether `--scene NAME` names the shadow and material cost scene (REND-044).
 pub fn is_cost_scene(name: &str) -> bool {
@@ -1089,7 +1226,7 @@ pub fn perf_shadow_cost(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> R
     planet_perf::check_reference_adapter(&crate::facts(ctx)).map_err(|r| r.to_string())?;
     let owner_override = crate::readiness_gate(o, ctx, out)?;
     let mut rows = Vec::new();
-    run_stills(o, ctx, out, Some(&mut rows))?;
+    run_stills(o, ctx, out, Some(&mut rows), None)?;
     let (over, near) = cost_verdict(&rows);
     for r in &rows {
         let (s, m, both) = r.shares();
@@ -1185,6 +1322,19 @@ mod tests {
         assert_eq!(median(vec![3.0, 1.0, 2.0]), 2.0);
         assert_eq!(median(vec![4.0, 1.0, 2.0, 3.0]), 2.5);
         assert!(median(vec![]).is_nan());
+    }
+
+    // spec: REND-052
+    #[test]
+    fn the_layer1_verdict_fails_above_the_budget_and_flags_a_pose_within_five_percent() {
+        let row = |pose: &str, ms: f64| Layer1Row { pose: pose.into(), passes_ms: [ms / 5.0; 5], total_ms: ms };
+        assert_eq!(layer1_verdict(&[row("a", 1.4)]), (vec![], vec![]));
+        let (over, near) = layer1_verdict(&[row("b", 1.6)]);
+        assert!(over.len() == 1 && over[0].starts_with("b:") && over[0].contains("REND-052") && near.is_empty(), "{over:?}");
+        let (over, near) = layer1_verdict(&[row("c", 1.52)]);
+        assert!(over.is_empty() && near.len() == 1 && near[0].contains("within 5 %"), "{near:?}");
+        assert_eq!(layer1_verdict(&[row("d", f64::NAN)]).0.len(), 1);
+        assert!(is_layer1_scene("shadow-layer1") && !is_layer1_scene("shadow-cost"));
     }
 
     const GOOD: &str = r#"
