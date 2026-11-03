@@ -30,8 +30,6 @@ Dormant (no near trigger; not asked now):
 
 ## Tracked
 - **Calibration limits off the reference machine** (2026-11-03, departs from ADR 0092 point 5): `calibration::judge` applies the single limits (TEST-039) on any machine. Fix: `calibration-reference-machine` (spikes, queued).
-- **`gpu_edit_perf` smoke no-settle on CI** (2026-11-03): WARP C 3/3, run 41614937835 attempt 1, fc20511b (#1117): "the edit did not become exact in 40 s", 3 previewed level-15 tiles in flight with 618 residency requests queued.
-  Not reproduced locally (4 threads, 1 tile worker, 3 of 3 pass, edit exact in at most 3.0 s); the rerun passed. Quarantine on the next failure.
 - **Reserve test result** (BUDG-012, loaded, 3 rounds, 2026-11-01): dive, look-1m, look-2km, teleport-2km pass; teleport-1m fails by +1 % (frame median 16.75 against 16.60 ms; the spin runs 5-18 % over its 6-9 ms target). Frame p99 over 20 ms includes the spin by construction. A quiet window decides the absolute rows.
 - **teleport-1m reserve marginal** (quiet window, 2026-11-01): reserve verdict pass in 3 of 3; frame medians with loads 14.33/16.31/16.40 ms against 16.60, but 5 of 6 sessions had no frame verdict (ADR 0065 CPU calibration out of limits). Re-check on a calm CPU, after the terrain cap decision.
 - **Shadow resolve cost** (5a probe, 2026-11-01, RTX by hand, not a perf window): resolve 4.2 ms at a 45° sun, 2.3 ms at 2°, against REND-052's 1.5 ms for layer 1; includes per-frame buffer creation. Re-probe after pooling in 5a2; over 2x the budget goes back to ADR 0085 before 5b.
