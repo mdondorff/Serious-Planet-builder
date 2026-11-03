@@ -210,7 +210,7 @@ pub static KEYS: &[KeyDef] = &[
     // ---- View and debug ----
     k(&["KeyL"], "L", View(Command::ToggleLit), V, Both, "lit path (with the atmosphere) or debug path", Some(StateKey::Lit)),
     k(&["KeyV"], "V", View(Command::NextView), V, Both, "next debug view (debug path)", None),
-    k(&["KeyJ"], "J", View(Command::CycleShadeView), V, Both, "shade view (normal, horizon, shadow, soil, moisture, insolation: the horizon elevation at the sun, its shadow factor, and the tile's soil depth, moisture and insolation; lit path; horizon and shadow need a store with a coupled run, the drivers a chunk stage)", Some(StateKey::ShadeView)),
+    k(&["KeyJ"], "J", View(Command::CycleShadeView), V, Both, "shade view (normal, shadow, soil, moisture, insolation: the sun's shadow, and the tile's soil depth, moisture and insolation; lit path; the drivers need a chunk stage)", Some(StateKey::ShadeView)),
     k(&["BracketLeft"], "[", View(Command::SunEarlier), V, Both, "the sun half an hour earlier in local solar time at the camera (the title shows the time)", Some(StateKey::SunTime)),
     k(&["BracketRight"], "]", View(Command::SunLater), V, Both, "the sun half an hour later in local solar time at the camera", Some(StateKey::SunTime)),
     k(&["Backslash"], "Backslash", View(Command::SunReset), V, Both, "back to the look's sun", Some(StateKey::SunTime)),

@@ -393,9 +393,7 @@ pub enum ShadeView {
     Lighting,
     Temperature,
     Precipitation,
-    /// The horizon elevation at the sun's azimuth as grey (0 at the horizon, white at 30 degrees; REND-038).
-    Horizon,
-    /// The horizon shadow's factor as grey (1 lit, 0 in shadow; REND-038).
+    /// The march's sun visibility as grey (1 lit, 0 in shadow; REND-050, VIEW-054).
     Shadow,
     /// The soil depth of the driver block in false colour (0 to 8 m, square-root scale; GEN-071).
     SoilDepth,
@@ -406,13 +404,12 @@ pub enum ShadeView {
 }
 
 impl ShadeView {
-    pub const ALL: [ShadeView; 10] = [
+    pub const ALL: [ShadeView; 9] = [
         ShadeView::Lit,
         ShadeView::Albedo,
         ShadeView::Lighting,
         ShadeView::Temperature,
         ShadeView::Precipitation,
-        ShadeView::Horizon,
         ShadeView::Shadow,
         ShadeView::SoilDepth,
         ShadeView::Moisture,
@@ -426,7 +423,6 @@ impl ShadeView {
             ShadeView::Lighting => "lighting",
             ShadeView::Temperature => "temperature",
             ShadeView::Precipitation => "precipitation",
-            ShadeView::Horizon => "horizon",
             ShadeView::Shadow => "shadow",
             ShadeView::SoilDepth => "soil",
             ShadeView::Moisture => "moisture",
@@ -523,8 +519,7 @@ pub fn terrain_radiance_with_ramp(
         }
         ShadeView::Lighting => [ndl / pi; 3],
         ShadeView::Temperature | ShadeView::Precipitation => climate_view_colour(view, temperature_c, precipitation_mm).map(|c| c / pi),
-        // With no horizon map the horizon is the sky's own (0) and the sun is never shadowed (1); the maps come from `horizon_lookup` (REND-038).
-        ShadeView::Horizon => [0.0; 3],
+        // The march's visibility is drawn by the shadow pass over the picture (VIEW-054); this reference never shadows (1).
         ShadeView::Shadow => [1.0 / pi; 3],
         // The driver views read the tile's driver block; this reference has none, so it shows the neutral drivers (soil 1 m, moisture 0.5, insolation 0.8).
         ShadeView::SoilDepth | ShadeView::Moisture | ShadeView::Insolation => driver_view_colour(view, 1.0, 0.5, 0.8).map(|c| c / pi),

@@ -1,0 +1,1 @@
+- 2026-11-03 global-bake-report: the field bake's wall time is reported against terrain's world-build share (BUDG-014), no longer judged against ten minutes; the 8 GB verdict stays (GEN-014, ADR 0097, inbox #78)
