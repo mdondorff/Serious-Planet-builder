@@ -92,10 +92,10 @@ jobs:
           path: target/review/
           if-no-files-found: ignore
 
-  # Tier C on WARP is one test step of about 1,000 s (BUILD-014: the job median was 16.9 min against the 16 min budget), so the
-  # Windows leg runs in two halves (`--partition count:N/2`, every test in exactly one half); lavapipe runs 8 min and stays whole.
+  # Tier C on WARP runs in three parts (`--partition count:N/3`, every test in exactly one part; BUILD-018): two halves took 21.2 and
+  # 20.6 min after the heavy WARP tests were serialised (#1103), over BUILD-014's 16 min budget. Lavapipe runs about 13.5 min and stays whole.
   gpu:
-    name: ${{ matrix.name }} C${{ matrix.part && format(' {0}/2', matrix.part) || '' }}
+    name: ${{ matrix.name }} C${{ matrix.part && format(' {0}/3', matrix.part) || '' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -107,6 +107,9 @@ jobs:
           - name: windows (WARP)
             os: windows-latest
             part: 2
+          - name: windows (WARP)
+            os: windows-latest
+            part: 3
           - name: linux (lavapipe)
             os: ubuntu-24.04
     steps:
@@ -133,7 +136,7 @@ jobs:
           sudo apt-get install -y mesa-vulkan-drivers libvulkan1 vulkan-tools
           vulkaninfo --summary
       - name: test gpu (tier C, software adapter)
-        run: cargo xtask test gpu ${{ matrix.part && format('-- --partition count:{0}/2', matrix.part) || '' }}
+        run: cargo xtask test gpu ${{ matrix.part && format('-- --partition count:{0}/3', matrix.part) || '' }}
         env:
           # The viewer window smoke (VIEW-005) needs a display. The Linux runner has none: the skip is declared here with its
           # reason (the test fails without the declaration) and noted in the job summary below.
