@@ -931,7 +931,7 @@ Rationale (the data of 2026-10-19, in microseconds): on the quiet machine (nativ
 
 #### Scenario: The logging is wired in every kind of scene
 - **WHEN** a smoke run of one lit view, one lit flight (both shore-filter runs) and one streaming scene is given `--calibrate` on the software adapter, and a smoke run of a lit view is given none
-- **THEN** every run of the first logs the four readings and the two thread counts (positive), the log has `cpu_calibration_valid` true or false and not null, and the run without the option logs none and has `cpu_calibration_valid` null
+- **THEN** every run of the first logs the four readings and the two thread counts (positive), and the log has `cpu_calibration_valid` null with the reason `no verdict (not the reference machine)` (the software adapter is not the reference machine, ADR 0092 point 5); the run without the option logs none and has `cpu_calibration_valid` null with no reason
 
 ### Requirement: TEST-089 The CPU calibration's estimator, moment and scope
 A calibration reading SHALL be the smallest of 5 single timings and the median and maximum of the parallel repetition with the smallest median of 3 (STRM-022) on 18 threads (fewer on a smaller machine), not the pool's, the one before the case taken right before the first measured frame, after the settle and, where the scene has them, the cool-down and warm-up (ADR 0094). A reading outside TEST-039's limits SHALL void frame verdicts only; GPU rows stand. A run whose own load runs then (the reserve loads, BUDG-012) SHALL log `load_calib_declared_load` = 1; its reasons get the suffix ` (declared load: recorded, not voiding)` and void nothing. `accept` SHALL judge likewise; acceptance still needs frame validity.

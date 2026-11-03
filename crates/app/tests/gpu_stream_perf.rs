@@ -579,11 +579,11 @@ fn a_lit_view_a_lit_flight_and_a_stream_scene_log_their_cpu_calibration_when_ask
         assert_eq!(n.len(), 3, "{key}: one reading in the view's run and in each of the flight's two shore-filter runs: {json}");
         assert!(n.iter().all(|v| *v > 0), "{key}: {n:?}");
     }
+    // The software adapter is not the reference machine: the readings are logged and give no verdict (ADR 0092 point 5).
     assert!(
-        json.contains("\"cpu_calibration_valid\":true") || json.contains("\"cpu_calibration_valid\":false"),
-        "judged, not null: {json}"
+        json.contains("\"cpu_calibration_valid\":null,\"cpu_calibration_reasons\":[\"no verdict (not the reference machine)\"]"),
+        "logged, no verdict off the reference machine: {json}"
     );
-    assert!(!json.contains("\"cpu_calibration_valid\":null"), "{json}");
     let _ = std::fs::remove_file(&log);
     // Without the option a smoke run measures none and the log says it was not judged.
     let none = tmp("calib-none.json");
@@ -625,7 +625,7 @@ fn a_lit_view_a_lit_flight_and_a_stream_scene_log_their_cpu_calibration_when_ask
     for key in keys {
         assert_eq!(numbers_of(&json, key).len(), 1, "{key}: {json}");
     }
-    assert!(!json.contains("\"cpu_calibration_valid\":null"), "{json}");
+    assert!(json.contains("\"cpu_calibration_reasons\":[\"no verdict (not the reference machine)\"]"), "{json}");
     let _ = std::fs::remove_file(&stream);
 }
 
