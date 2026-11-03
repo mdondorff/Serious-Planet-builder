@@ -114,6 +114,76 @@ pub fn classify(adapter: &str, name: &str, seen: &BTreeMap<String, Observation>,
     Verdict::AutoExplained
 }
 
+/// How far a candidate of a lit, sky or water view is from the **anchor** of its golden (ADR 0096 point 2): the golden's file at the latest commit
+/// that carries an `Owner-approved:` trailer, or at its first commit when none does. `Unavailable` says why no anchor could be read.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Anchor {
+    Change(Change),
+    Unavailable(String),
+}
+
+/// [`classify`] with the anchor of ADR 0096: a lit, sky or water candidate within rounding of its own golden (at most [`ROUNDING_MAX_PIXELS`]
+/// pixels, max delta [`ROUNDING_MAX_DELTA`]) is `AutoRounding` only when it is within rounding of the anchor too; drift beyond that, or no anchor,
+/// escalates. Every other candidate, and `anchor: None`, is judged by [`classify`].
+pub fn classify_anchored(
+    adapter: &str,
+    name: &str,
+    seen: &BTreeMap<String, Observation>,
+    class: Option<GoldenClass>,
+    declared: bool,
+    anchor: Option<&Anchor>,
+) -> Verdict {
+    let base = classify(adapter, name, seen, class, declared);
+    if !class.is_some_and(GoldenClass::is_look_class) {
+        return base;
+    }
+    let Some(Observation::Changed(here)) = seen.get(adapter) else { return base };
+    if here.pixels > ROUNDING_MAX_PIXELS || here.max_delta > ROUNDING_MAX_DELTA {
+        return base;
+    }
+    match anchor {
+        None => base,
+        Some(Anchor::Unavailable(why)) => Verdict::Escalate(format!("{name}: no anchor to compare with ({why})")),
+        Some(Anchor::Change(a)) if a.pixels <= ROUNDING_MAX_PIXELS && a.max_delta <= ROUNDING_MAX_DELTA => Verdict::AutoRounding,
+        Some(Anchor::Change(a)) => Verdict::Escalate(format!(
+            "{name}: drift from the owner's bless: {} px, max channel delta {} against the anchor (limit {ROUNDING_MAX_PIXELS} px, delta {ROUNDING_MAX_DELTA})",
+            a.pixels, a.max_delta
+        )),
+    }
+}
+
+/// The commit whose file is the anchor of the golden at `rel` (a path under `root`): the latest commit touching it with an `Owner-approved:` trailer
+/// (a body line starting with it), else the commit that added it (ADR 0096 point 2). `Err` when git has neither.
+pub fn anchor_commit(root: &std::path::Path, rel: &str) -> Result<String, String> {
+    let git = |args: &[&str]| -> Result<String, String> {
+        let out = std::process::Command::new("git").args(args).current_dir(root).output().map_err(|e| format!("git: {e}"))?;
+        if !out.status.success() {
+            return Err(format!("git {}: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim()));
+        }
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    };
+    let approved = git(&["log", "-1", "--format=%H", "--grep=^Owner-approved:", "--", rel])?;
+    if let Some(sha) = approved.lines().next().filter(|l| !l.trim().is_empty()) {
+        return Ok(sha.trim().to_string());
+    }
+    let added = git(&["log", "--diff-filter=A", "--format=%H", "--", rel])?;
+    added.lines().rfind(|l| !l.trim().is_empty()).map(|l| l.trim().to_string()).ok_or_else(|| format!("no commit adds {rel}"))
+}
+
+/// The bytes of `rel` at commit `sha`.
+pub fn file_at_commit(root: &std::path::Path, sha: &str, rel: &str) -> Result<Vec<u8>, String> {
+    let out = std::process::Command::new("git")
+        .args(["show", &format!("{sha}:{rel}")])
+        .current_dir(root)
+        .output()
+        .map_err(|e| format!("git: {e}"))?;
+    if out.status.success() {
+        Ok(out.stdout)
+    } else {
+        Err(format!("git show {sha}:{rel}: {}", String::from_utf8_lossy(&out.stderr).trim()))
+    }
+}
+
 /// What the nextest JUnit reports of this run say: `(classname, test name, green)`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TestOutcomes(pub Vec<(String, String, bool)>);
@@ -490,7 +560,10 @@ mod tests {
         let s = seen(&[("warp", ch(7, 1)), ("nv", ch(400, 9))]);
         assert_eq!(classify("warp", "g", &s, Some(GoldenClass::Debug), false), Verdict::AutoRounding);
         assert_eq!(classify("warp", "g", &s, Some(GoldenClass::Shaded), false), Verdict::AutoRounding);
-        assert!(matches!(classify("warp", "g", &s, Some(GoldenClass::Lit), false), Verdict::Escalate(_)), "lit views always escalate");
+        assert!(
+            matches!(classify("warp", "g", &s, Some(GoldenClass::Lit), false), Verdict::Escalate(_)),
+            "without an anchor a lit view escalates (the anchored policy is `classify_anchored`, ADR 0096)"
+        );
         assert!(matches!(classify("warp", "g", &s, None, false), Verdict::Escalate(_)), "an unclassified golden escalates");
         assert!(matches!(classify("warp", "g", &seen(&[("warp", ch(33, 1))]), Some(GoldenClass::Debug), false), Verdict::Escalate(_)));
         assert!(matches!(classify("warp", "g", &seen(&[("warp", ch(3, 2))]), Some(GoldenClass::Debug), false), Verdict::Escalate(_)));
@@ -876,5 +949,167 @@ mod tests {
         assert_eq!(d[0].affects, [GoldenClass::Water, GoldenClass::Lit]);
         assert_eq!((d[1].path.as_str(), d[1].key.as_str(), d[1].affects.clone()), ("a.look.toml", "max_ev100", vec![GoldenClass::Sky]));
         assert!(look_declarations("no section here").is_empty());
+    }
+    // A throwaway git repository with a scripted history of one golden (`tests/goldens/nv/lit_g.png`, 64 x 64): each step gives the number of
+    // pixels set to a brighter value than the first picture and the commit message.
+    fn scripted_history(tag: &str, steps: &[(usize, &str)]) -> (std::path::PathBuf, Vec<String>) {
+        let root = std::env::temp_dir().join(format!("planet-anchor-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("tests/goldens/nv")).unwrap();
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
+                .args(args)
+                .current_dir(&root)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        git(&["init", "-q"]);
+        let mut shas = Vec::new();
+        for (k, (lit, message)) in steps.iter().enumerate() {
+            let mut img = crate::Image::new(64, 64, vec![100; 64 * 64 * 4]);
+            for i in 0..*lit {
+                img.set_pixel((i % 64) as u32, (i / 64) as u32, [101, 100, 100, 100]);
+            }
+            crate::write_png(&root.join("tests/goldens/nv/lit_g.png"), &img).unwrap();
+            git(&["add", "-A"]);
+            git(&["commit", "-q", "-m", message, "--allow-empty-message"]);
+            shas.push(git(&["rev-parse", "HEAD"]));
+            let _ = k;
+        }
+        (root, shas)
+    }
+
+    // spec: TEST-016
+    #[test]
+    fn the_anchor_is_the_latest_commit_with_an_owner_approved_trailer_else_the_first_commit() {
+        let rel = "tests/goldens/nv/lit_g.png";
+        // Scripted history: first golden, an owner bless (trailer), an auto-bless after it.
+        let (root, shas) = scripted_history(
+            "trailer",
+            &[
+                (0, "first golden"),
+                (
+                    20,
+                    "bless: x
+
+Owner-approved: 2026-11-03",
+                ),
+                (45, "bless(auto): x [R]"),
+            ],
+        );
+        assert_eq!(anchor_commit(&root, rel).unwrap(), shas[1], "the owner's bless is the anchor, not the later auto-bless");
+        assert!(file_at_commit(&root, &shas[1], rel).unwrap().len() > 8, "the file at the anchor");
+        // Two owner blesses: the latest one anchors.
+        let (root2, shas2) = scripted_history(
+            "two",
+            &[
+                (0, "first"),
+                (
+                    20,
+                    "bless
+
+Owner-approved: 2026-10-01",
+                ),
+                (
+                    60,
+                    "bless
+
+Owner-approved: 2026-11-03",
+                ),
+            ],
+        );
+        assert_eq!(anchor_commit(&root2, rel).unwrap(), shas2[2]);
+        // No trailer anywhere: the first commit.
+        let (root3, shas3) = scripted_history("none", &[(0, "first golden"), (20, "bless(auto): a"), (40, "bless(auto): b")]);
+        assert_eq!(anchor_commit(&root3, rel).unwrap(), shas3[0]);
+        // A path git has never seen has no anchor.
+        assert!(anchor_commit(&root3, "tests/goldens/nv/other.png").is_err());
+        for r in [root, root2, root3] {
+            let _ = std::fs::remove_dir_all(r);
+        }
+    }
+
+    // spec: TEST-016
+    #[test]
+    fn a_lit_candidate_within_rounding_of_its_golden_is_auto_blessed_only_within_rounding_of_the_anchor_too() {
+        let s = seen(&[("nv", ch(5, 1))]);
+        let near = Anchor::Change(Change { pixels: 20, max_delta: 1 });
+        let far_px = Anchor::Change(Change { pixels: 33, max_delta: 1 });
+        let far_delta = Anchor::Change(Change { pixels: 4, max_delta: 2 });
+        for class in [GoldenClass::Lit, GoldenClass::Sky, GoldenClass::Water] {
+            assert_eq!(
+                classify_anchored("nv", "g", &s, Some(class), false, Some(&near)),
+                Verdict::AutoRounding,
+                "{class:?} within rounding of both"
+            );
+            for far in [&far_px, &far_delta] {
+                let Verdict::Escalate(why) = classify_anchored("nv", "g", &s, Some(class), false, Some(far)) else {
+                    panic!("drift escalates")
+                };
+                assert!(why.contains("drift from the owner's bless"), "{why}");
+            }
+            let Verdict::Escalate(why) =
+                classify_anchored("nv", "g", &s, Some(class), false, Some(&Anchor::Unavailable("no commit".into())))
+            else {
+                panic!("no anchor escalates")
+            };
+            assert!(why.contains("no anchor"), "{why}");
+            // Not within rounding of its own golden: the old rule (a look view escalates), the anchor does not matter.
+            let big = seen(&[("nv", ch(33, 1))]);
+            assert!(
+                matches!(classify_anchored("nv", "g", &big, Some(class), false, Some(&near)), Verdict::Escalate(w) if w.contains("view"))
+            );
+        }
+        // Debug and shaded views do not use the anchor; a first golden still escalates; no anchor given means the plain rule.
+        assert_eq!(classify_anchored("nv", "g", &s, Some(GoldenClass::Debug), false, Some(&far_px)), Verdict::AutoRounding);
+        assert!(matches!(
+            classify_anchored("nv", "g", &seen(&[("nv", Observation::NoGolden)]), Some(GoldenClass::Lit), false, Some(&near)),
+            Verdict::Escalate(_)
+        ));
+        assert!(matches!(classify_anchored("nv", "g", &s, Some(GoldenClass::Lit), false, None), Verdict::Escalate(_)));
+    }
+
+    // spec: TEST-016
+    #[test]
+    fn a_slow_walk_of_small_blesses_reaches_the_owner_through_the_anchor() {
+        // Each auto-bless is 20 px from its predecessor, so the golden-to-candidate step is always within rounding; against the owner's bless the
+        // candidates drift 20, 40, 60 px: the third and fourth escalate (anchor distance above 32 px).
+        let rel = "tests/goldens/nv/lit_g.png";
+        let (root, shas) = scripted_history(
+            "walk",
+            &[
+                (0, "first"),
+                (
+                    4,
+                    "bless
+
+Owner-approved: 2026-11-03",
+                ),
+                (24, "bless(auto): 1"),
+                (44, "bless(auto): 2"),
+            ],
+        );
+        let anchor_sha = anchor_commit(&root, rel).unwrap();
+        assert_eq!(anchor_sha, shas[1]);
+        let at = |sha: &str| {
+            let f = root.join("anchor.png");
+            std::fs::write(&f, file_at_commit(&root, sha, rel).unwrap()).unwrap();
+            crate::read_png(&f).unwrap()
+        };
+        let anchor_img = at(&anchor_sha);
+        let count = |a: &crate::Image, b: &crate::Image| a.pixels().zip(b.pixels()).filter(|(p, q)| p != q).count();
+        let (step1, step2) = (at(&shas[2]), at(&shas[3]));
+        assert_eq!(count(&anchor_img, &step1), 20);
+        assert_eq!(count(&step1, &step2), 20, "each step is within rounding of the golden it replaces");
+        assert_eq!(count(&anchor_img, &step2), 40, "but 40 px from the owner's bless");
+        let drift = Anchor::Change(Change { pixels: count(&anchor_img, &step2), max_delta: 1 });
+        assert!(matches!(
+            classify_anchored("nv", "lit_g", &seen(&[("nv", ch(20, 1))]), Some(GoldenClass::Lit), false, Some(&drift)),
+            Verdict::Escalate(w) if w.contains("drift")
+        ));
+        let _ = std::fs::remove_dir_all(root);
     }
 }

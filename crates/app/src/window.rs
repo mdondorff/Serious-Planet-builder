@@ -781,8 +781,9 @@ impl App<'_> {
             st.coupled_standing = standing.clone();
             if st.coupled_shown != st.coupled_asked && (st.coupled_asked.is_none() || matches!(standing, Standing::Ready(..))) {
                 st.coupled_shown = st.coupled_asked;
-                let resident: Vec<_> = st.rig.managed.resident().keys().copied().collect();
-                st.rig.managed.edit(&resident);
+                // Every tile of the old lens, the ones still loading from it included (STRM-071).
+                let tiles = st.rig.managed.edit_candidates();
+                st.rig.managed.edit(&tiles);
             }
         }
         if let Some(st) = self.state.as_mut() {
@@ -803,8 +804,9 @@ impl App<'_> {
                                     .collect();
                                 st.rig.managed.note_item_change(old_revision, new_field.item_revision(), changes);
                             }
-                            let resident: Vec<_> = st.rig.managed.resident().keys().copied().collect();
-                            let tiles = e.refresh_tiles(&resident);
+                            // The find runs over the resident tiles and those still loading from the old field (STRM-071).
+                            let candidates = st.rig.managed.edit_candidates();
+                            let tiles = e.refresh_tiles(&candidates);
                             st.rig.managed.edit(&tiles);
                             // The edit in flight is drawn at once from the stale tiles, displaced by the change (VIEW-023).
                             e.preview_begin(&def);
