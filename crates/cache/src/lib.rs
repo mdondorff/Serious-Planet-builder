@@ -8,5 +8,6 @@ pub mod horizon_store;
 pub mod key;
 pub mod meshpack;
 pub mod pack;
+pub mod relief_store;
 pub mod stage_key;
 pub mod tiles;
