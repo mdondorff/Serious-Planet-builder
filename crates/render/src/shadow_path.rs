@@ -1,6 +1,6 @@
 //! The shadow pass of a frame (REND-047 to REND-050, ADR 0085): the clipmap gather over the frame's plan, the coarse cube when a floor tile
 //! changed, then the receivers, the march, the upsample and the temporal pass over the lit pass's depth. The renderer decides nothing
-//! (CON-03): the plan, the preview, the camera and the sun arrive as a [`ShadowFrame`] set by the app, as the horizon data did. The
+//! (CON-03): the plan, the preview, the camera and the sun arrive as a [`ShadowFrame`] set by the app. The
 //! resolved visibility is kept in a target of its own; nothing reads it for shading yet (REND-051 follows).
 
 use planet_core::TileId;

@@ -6,12 +6,25 @@ use std::io::Write;
 use std::path::Path;
 use std::time::Instant;
 
-/// The GEN-014 budgets (CON-20, CON-21): a bake of a 1 km grid takes at most ten minutes and holds at most 8 GB. Returns the
-/// violated budgets, empty when both hold.
+/// Terrain's share of the world-build day (BUDG-014: 40 % of 24 h, values proposed; ADR 0097): the field bake's wall time is reported
+/// against it, with no limit of its own (GEN-014).
+pub(crate) const TERRAIN_BUILD_SHARE_S: f64 = 24.0 * 3600.0 * 40.0 / 100.0;
+
+/// The field bake's time against terrain's world-build share (GEN-014, BUDG-014): a report, not a verdict.
+pub(crate) fn share_report(secs: f64) -> String {
+    format!(
+        "bake time {secs:.1} s is {:.2} % of terrain's world-build share ({:.1} h, BUDG-014); the field bake has no time limit of its own (GEN-014)",
+        100.0 * secs / TERRAIN_BUILD_SHARE_S,
+        TERRAIN_BUILD_SHARE_S / 3600.0
+    )
+}
+
+/// The GEN-014 verdict (CON-21): a bake of a 1 km grid holds at most 8 GB of resident blocks. Its wall time is only reported (see
+/// [`share_report`]); a time that was not measured is no result. Returns the violations, empty when it holds.
 pub(crate) fn budget_failures(secs: f64, peak_resident_bytes: u64) -> Vec<String> {
     let mut v = Vec::new();
-    if !secs.is_finite() || secs > 600.0 {
-        v.push(format!("bake time {secs:.1} s exceeds the ten minute budget (GEN-014)"));
+    if !secs.is_finite() {
+        v.push(format!("bake time {secs} s was not measured (GEN-014)"));
     }
     if peak_resident_bytes > 8 << 30 {
         v.push(format!("peak resident blocks {peak_resident_bytes} bytes exceed the 8 GB budget (CON-21)"));
@@ -22,7 +35,7 @@ pub(crate) fn budget_failures(secs: f64, peak_resident_bytes: u64) -> Vec<String
 // spec: GEN-014
 /// Bake the global-coarse field into a scratch store under `target/perf/global-bake` (the real pipeline: bake, encode, pack)
 /// after the ADR 0020 readiness gate, and report wall time, the most blocks alive at once with the bytes they take, and the
-/// store size, against the GEN-014 budgets. The resident figure is derived from the block counter times the block size (the
+/// store size: the memory against GEN-014's budget, the wall time against terrain's world-build share (BUDG-014, a report). The resident figure is derived from the block counter times the block size (the
 /// blocks are the memory the clause bounds), not a process measurement. The default resolution is the 1 km grid of GEN-014
 /// (16384 cells per face edge); `--global-res`, `--threads`, `--seed`/`--world` and `--out` (the JSON log) apply.
 pub fn perf_global_bake(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<(), String> {
@@ -61,6 +74,7 @@ pub fn perf_global_bake(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> R
         store_bytes as f64 / 1e9
     )
     .map_err(err)?;
+    writeln!(out, "{}", share_report(secs)).map_err(err)?;
     let json = format!(
         "{{\n  \"scene\": \"global-bake\",\n  \"adapter\": \"{}\",\n  \"owner_override\": {:?},\n  \"res\": {res},\n  \"cells\": {cells},\n  \"threads\": {threads},\n  \"seconds\": {secs:.3},\n  \"blocks\": {},\n  \"peak_resident_blocks\": {},\n  \"peak_resident_bytes\": {peak},\n  \"store_bytes\": {store_bytes},\n  \"budget_failures\": {:?}\n}}\n",
         ctx.adapter_name().replace('"', "'"),
@@ -72,7 +86,11 @@ pub fn perf_global_bake(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> R
     let json = planet_perf::stamp_one_off_json(
         &json,
         &planet_perf::run_validity(),
-        &[planet_perf::OneOffReading { metric: "bake seconds (GEN-014)", reading: secs, budget: 600.0 }],
+        &[planet_perf::OneOffReading {
+            metric: "bake seconds against terrain's world-build share (GEN-014, BUDG-014)",
+            reading: secs,
+            budget: TERRAIN_BUILD_SHARE_S,
+        }],
     );
     let path = o.out.clone().unwrap_or_else(|| Path::new("perf").join("logs").join("global-bake.json"));
     if let Some(parent) = path.parent() {
@@ -454,10 +472,16 @@ mod tests {
 
     // spec: GEN-014
     #[test]
-    fn the_budgets_are_ten_minutes_and_eight_gigabytes() {
-        assert!(budget_failures(599.9, 8 << 30).is_empty());
-        assert_eq!(budget_failures(600.1, 0).len(), 1);
+    fn the_memory_budget_is_eight_gigabytes_and_the_time_is_reported_against_terrains_share() {
+        // ADR 0097 retired the ten-minute limit: a bake of any length passes on time; the 8 GB of resident blocks stays a verdict.
+        assert!(budget_failures(600.1, 8 << 30).is_empty());
+        assert!(budget_failures(1020.2, 0).is_empty(), "the 2026-11-03 bake of the round-2 generator");
         assert_eq!(budget_failures(1.0, (8 << 30) + 1).len(), 1);
-        assert_eq!(budget_failures(f64::NAN, 0).len(), 1, "a missing time never passes");
+        assert_eq!(budget_failures(f64::NAN, 0).len(), 1, "a missing time is no result");
+        // The report: the share is 40 % of 24 h (BUDG-014), so 1020.2 s is 2.95 % of 9.6 h.
+        assert_eq!(TERRAIN_BUILD_SHARE_S, 34_560.0);
+        let r = share_report(1020.2);
+        assert!(r.contains("bake time 1020.2 s is 2.95 % of terrain's world-build share (9.6 h, BUDG-014)"), "{r}");
+        assert!(r.contains("no time limit of its own (GEN-014)"), "{r}");
     }
 }
