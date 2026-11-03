@@ -46,9 +46,6 @@ pub const EROSION_RELIEF_IMPLEMENTATION_ID: &str = "cpu-erosion-v1+relief";
 /// Names the C1 variant with the relief channels on (CON-07): another field, another key.
 pub const EROSION_C1_RELIEF_IMPLEMENTATION_ID: &str = "cpu-erosion-v2+relief";
 
-/// Names this implementation with the relief channels on (CON-07): another field, another key.
-pub const EROSION_RELIEF_IMPLEMENTATION_ID: &str = "cpu-erosion-v1+relief";
-
 /// Domain tag of the crease lattice.
 const LAYER_CREASE: u64 = 0x4552_0001;
 const OCTAVES: u32 = 12;
