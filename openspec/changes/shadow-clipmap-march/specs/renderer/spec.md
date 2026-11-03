@@ -123,7 +123,7 @@ Source: ADR 0085 point 6, SPIKE-56 finding 3, VIEW-054
 - **THEN** the first equals the frame without shadows and the second carries no direct sun on terrain and water, and the debug views' goldens do not change
 
 ### Requirement: REND-052 Layer 1 costs at most 1.5 ms of GPU at 1440p
-At 1440p on the reference machine, the clipmap upkeep, march, upsample and temporal pass together SHALL cost at most 1.5 ms of GPU time per frame (median) at each pose of `perf stream shadow-layer1` (river-r1 and hills-b at 300 m and 30 m, midday, sunset and a 2-degree sun; poses files in `docs/milestones/M9/shadow-layer1/`), measured by GPU timestamps around the five resolve passes at a settled pose (the upkeep of a settled pose is nil; the one-texel scroll is its own item), median of 41 waited frames after 8 warm-up frames, under the clock floor (ADR 0036).
+At 1440p on the reference machine, the clipmap upkeep, march, upsample and temporal pass together SHALL cost at most 1.5 ms of GPU time per frame (median) at each pose of `perf stream shadow-layer1` (hills and flat-lowland (m9r2) at 300 m and 30 m, midday, sunset and a 2-degree sun; poses files in `docs/milestones/M9/shadow-layer1/`), measured by GPU timestamps around the five resolve passes at a settled pose (the upkeep of a settled pose is nil; the one-texel scroll is its own item), median of 41 waited frames after 8 warm-up frames, under the clock floor (ADR 0036).
 
 Verify: C
 Status: planned
