@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: GEN-109 The crease band
-A relief field MAY drop the crease octaves above the erosion layer's grid (ADR 0098): `with_crease_band(CreaseBand)`, valid only with the relief channels on and off unless called, so without the call the field is today's, bit for bit. At or above the band's sea level an octave whose lattice cell (`radius / (256 2^o)`) is at most `near` layer cells keeps its weight, one of `far` cells or more is dropped, and between the weight falls by a smoothstep in the log of the cell (defaults 101.8 m, 2 and 4); below it the creases are today's. The bounds SHALL take the weighted octaves only, joined with today's where a cap straddles the level; the band SHALL enter the keys and the id.
+A relief field MAY drop the crease octaves above the erosion layer's grid (ADR 0098): `with_crease_band(CreaseBand)`, valid only with the relief channels on; without the call the field is today's, bit for bit. At or above the band's sea level an octave whose lattice cell (`radius / (256 2^o)`) is at most `near` layer cells keeps its weight, one of `far` cells or more is dropped, and between the weight falls by a smoothstep in the log of the cell (defaults 101.8 m, 2 and 4); below it the creases are today's. The bounds SHALL take the weighted octaves only, joined with today's where a cap straddles the level; the band SHALL enter the keys and the id.
 
 Verify: A
 Status: active
