@@ -728,6 +728,10 @@ impl LatticeSource for ScaledLattice<'_> {
     fn relief_scale(&self) -> f64 {
         self.scale * self.inner.relief_scale()
     }
+
+    fn records_reads(&self) -> bool {
+        self.inner.records_reads()
+    }
 }
 
 /// A [`GlobalGrid`] as a lattice source.
