@@ -1,0 +1,1 @@
+- 2026-11-03 tier-c-four-parts: the Windows tier-C leg runs in four parts (`--partition count:N/4`); with three, one part drew 878 s of serialised warp-heavy tests and ran 21-22 min (BUILD-018 modified and renamed)

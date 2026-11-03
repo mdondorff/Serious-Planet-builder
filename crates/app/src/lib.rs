@@ -75,13 +75,13 @@ modes:
     --adapter software|hardware   adapter policy (default: PLANET_ADAPTER or software)
     --draw per-draw|indirect   how the terrain renderer submits draws (REND-015): per-draw is the reference loop, indirect one multi-draw per buffer run from a CPU-built argument buffer (default indirect where the adapter supports it, else per-draw)
     --upload per-slot|batched   how a frame's tile writes reach the queue (REND-016): batched (default) writes each run of adjacent slots with one call, per-slot is the reference (one or two calls per tile); the pool contents are identical
-    --gen-workers N          threads of the tile generation pool and so jobs running at once in the pipelined loop and the streaming perf scenes (STRM-020; default: the machine's hardware threads; the plan worker's threads are separate)
-    --gen-reserve N          hardware threads the default generation pool leaves free for the frame thread, the plan worker and the driver (STRM-020; default 2; ignored when --gen-workers is given)
+    --gen-workers N          threads of the tile generation pool and so jobs running at once in the pipelined loop and the streaming perf scenes (STRM-020; default: the terrain share, BUDG-003; the rig keeps the pool inside that share; the plan worker's threads are separate)
+    --gen-reserve N          size the generation pool as the hardware threads less N instead of the terrain share (STRM-020; ignored when --gen-workers is given)
     --gen-ahead N            jobs queued behind the running ones so a worker that finishes between two frames takes the next at once (STRM-020; default: the worker count; 0: refill at frame boundaries only)
     --gen-priority below-normal|normal   OS priority of the generation workers (STRM-020, ADR 0046; default below-normal: the frame thread wins a core both want; no result depends on it)
     --lit                    the streaming perf scenes on the lit path with the atmosphere and water (TEST-025): same scripts, same verdicts, logs named <scene>-lit
     --views a,b,c            only these views of the lit perf scenes (ground-1m, aerial-20km, coast-2km, coast-3m, orbit, coast-glide, coast-descent); a partial log is not a window
-    --scene capture-stills   one PNG per pose of --poses FILE (TEST-048) in --out-dir, over the base terrain of a world, with the horizon maps near the eye baked (a headless scene; no viewer starts it); needs --store DIR or --allow-memory-bake, takes --size WxH and --views (pose names); never a measurement
+    --scene capture-stills   one PNG per pose of --poses FILE (TEST-048) in --out-dir, over the base terrain of a world (a headless scene; no viewer starts it); needs --store DIR or --allow-memory-bake, takes --size WxH and --views (pose names); never a measurement
     --scene capture-flights  the two coastal flights as 1440p PNG sequences (shore_filter at the look default, 0, and then 1) in --out-dir, never a measurement (TEST-027; `cargo xtask capture flights` also makes the videos); needs --store DIR or --allow-memory-bake, takes --size WxH, --flight-frames N
     --flight-frames N        frames of each coastal flight of the lit perf scenes (default 240; --scene lit, TEST-025)
     --perf                   performance-harness skeleton (needs --adapter hardware; the readiness gate decides, ADR 0020)
@@ -109,10 +109,10 @@ pub struct Options {
     pub draw: Option<planet_render::DrawMode>,
     /// `--upload per-slot|batched`: how a frame's tile writes reach the queue (REND-016); default batched, per-slot the reference.
     pub upload: Option<planet_render::UploadMode>,
-    /// `--gen-workers N` and `--gen-ahead N`: the tile generation pool (STRM-020); default the machine's threads and as many queued.
+    /// `--gen-workers N` and `--gen-ahead N`: the tile generation pool (STRM-020); default the terrain share (BUDG-003) and as many queued.
     pub gen_workers: Option<usize>,
     pub gen_ahead: Option<usize>,
-    /// `--gen-reserve N`: cores the default pool size leaves free (`planet_streaming::GEN_RESERVE` when absent).
+    /// `--gen-reserve N`: size the pool as the machine's threads less N instead of the terrain share (none when absent).
     pub gen_reserve: Option<usize>,
     /// `--gen-priority below-normal|normal`: the priority of the generation workers (STRM-020, ADR 0046); below-normal when absent.
     pub gen_priority: Option<planet_streaming::Priority>,
@@ -251,21 +251,27 @@ pub struct Options {
 }
 
 impl Options {
-    /// The tile generation pool of the pipelined loop and the streaming scenes (STRM-020): `--gen-workers` threads (default the
-    /// machine's hardware threads less `--gen-reserve`, 2 unless given) with `--gen-ahead` jobs queued behind them (default as
-    /// many).
+    /// The tile generation pool of the pipelined loop and the streaming scenes (STRM-020): `--gen-workers` threads, else the machine's
+    /// hardware threads less `--gen-reserve` when given, else the terrain share (BUDG-003); with `--gen-ahead` jobs queued behind them
+    /// (default as many).
     pub fn gen_workers(&self) -> planet_streaming::GenWorkers {
-        let reserve = self.gen_reserve.unwrap_or(planet_streaming::GEN_RESERVE);
-        let g =
-            self.gen_workers.map_or_else(|| planet_streaming::GenWorkers::machine_reserving(reserve), planet_streaming::GenWorkers::new);
+        let g = match (self.gen_workers, self.gen_reserve) {
+            (Some(n), _) => planet_streaming::GenWorkers::new(n),
+            (None, Some(reserve)) => planet_streaming::GenWorkers::machine_reserving(reserve),
+            (None, None) => planet_streaming::GenWorkers::machine(),
+        };
         let g = self.gen_priority.map_or(g, |p| g.with_priority(p));
         self.gen_ahead.map_or(g, |a| g.with_ahead(a))
     }
 
-    /// The reserve behind the pool size, for the perf log: `None` when `--gen-workers` fixed the size and the reserve decided
-    /// nothing.
+    /// The reserve behind the pool size, for the perf log: `None` when `--gen-workers` fixed the size or the terrain share set it
+    /// (no `--gen-reserve`), so the reserve decided nothing.
     pub fn gen_reserve_used(&self) -> Option<usize> {
-        self.gen_workers.is_none().then(|| self.gen_reserve.unwrap_or(planet_streaming::GEN_RESERVE))
+        if self.gen_workers.is_some() {
+            None
+        } else {
+            self.gen_reserve
+        }
     }
 
     /// The finest geometry level of a run with tiles of `cells` cells: `--finest-level`, else the production default
@@ -1093,8 +1099,8 @@ mod tests {
         let cores = std::thread::available_parallelism().map_or(4, |n| n.get());
         let o = args(&["test-render", "--scene", "terrain"]);
         let g = o.gen_workers();
-        assert_eq!(g.workers, planet_streaming::GenWorkers::workers_for(cores, planet_streaming::GEN_RESERVE));
-        assert_eq!((g.ahead, o.gen_reserve_used()), (g.workers, Some(planet_streaming::GEN_RESERVE)));
+        assert_eq!(g.workers, planet_streaming::shares::Shares::machine().terrain, "the default is the terrain share (BUDG-003)");
+        assert_eq!((g.ahead, o.gen_reserve_used()), (g.workers, None));
         let o = args(&["test-render", "--gen-reserve", "5"]);
         assert_eq!(o.gen_workers().workers, planet_streaming::GenWorkers::workers_for(cores, 5));
         assert_eq!(o.gen_reserve_used(), Some(5));
