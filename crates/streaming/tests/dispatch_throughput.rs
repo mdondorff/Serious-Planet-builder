@@ -176,12 +176,12 @@ fn the_default_pool_leaves_the_reserve_free_never_below_one_and_never_above_the_
     // The named default: Rasierklinge's 20 hardware threads give 18 workers, a 4-thread machine 2, one thread 1.
     assert_eq!(GEN_RESERVE, 2);
     assert_eq!([20, 8, 4, 2, 1].map(|c| GenWorkers::workers_for(c, GEN_RESERVE)), [18, 6, 2, 1, 1]);
-    // The machine's default is that rule on the machine's threads, with as many jobs queued as workers.
+    // The machine's default is its terrain share (BUDG-003, ADR 0092), with as many jobs queued as workers; the reserve rule stays for
+    // `--gen-reserve`.
     let m = GenWorkers::machine();
-    assert_eq!(m, GenWorkers::machine_reserving(GEN_RESERVE));
+    assert_eq!(m.workers, planet_streaming::shares::Shares::machine().terrain);
     assert_eq!(m.ahead, m.workers);
     let cores = std::thread::available_parallelism().map_or(4, |n| n.get());
-    assert_eq!(m.workers, GenWorkers::workers_for(cores, GEN_RESERVE));
     assert_eq!(GenWorkers::machine_reserving(0).workers, cores, "no reserve: one worker per hardware thread, as before");
 }
 

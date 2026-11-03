@@ -1,5 +1,5 @@
 # 0083 Runtime compute budgets
-Status: accepted (owner, 2026-10-26; drafted by opus-planner; owner's targets 2026-10-26)
+Status: accepted (owner, 2026-10-26; drafted by opus-planner; owner's targets 2026-10-26); point 3 amended by ADR 0092 (owner, 2026-11-02): core shares are fractions of the P-thread capacity, no machine's counts as rules
 Date: 2026-10-26
 Source: owner, 2026-10-26 (1440p at 60 fps on Rasierklinge; weaker machines degrade later); SPIKE-44 (`spikes/compute-inventory/results/results.md`, #737, #738)
 

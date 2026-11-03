@@ -296,7 +296,7 @@ mod tests {
 
     #[test]
     fn the_bake_default_is_the_background_capacity_and_an_override_is_logged_beside_it() {
-        // spec: BUDG-013
+        // spec: BUDG-013, BUDG-015
         let cases = [(12, 10), (20, 18), (2, 1), (1, 1), (3, 1)];
         for (p, b) in cases {
             let t = CpuTopology { p, e: 8 };

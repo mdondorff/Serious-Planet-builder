@@ -494,6 +494,10 @@ fn receivers_far_from_the_anchor_land_in_the_clipmaps_azimuthal_frame() {
 }
 
 fn relief(x: f64, y: f64) -> f64 {
+    // PLANET_PROBE_FLAT=1: flat lowland at 29.5 m (the worst case of the round-2 world: few occluders, long marches).
+    if std::env::var("PLANET_PROBE_FLAT").is_ok_and(|v| v == "1") {
+        return 29.5;
+    }
     let h = 600.0 * libm::sin(x / 9000.0) * libm::cos(y / 7000.0)
         + 300.0 * libm::sin(x / 1300.0 + 1.3) * libm::sin(y / 1700.0)
         + 120.0 * libm::sin(x / 190.0) * libm::sin(y / 230.0)
@@ -552,7 +556,9 @@ fn march_cost_probe_over_eleven_levels() {
     }
     let target = DepthTarget::new(&ctx, w, h);
     target.write(&ctx, &depths);
-    for (ceiling, label) in [(f32::MAX, "no early exit"), (1_300.0, "early exit above 1,300 m")] {
+    for (ceiling, label) in
+        [(f32::MAX, "no early exit"), (1_300.0, "early exit above 1,300 m"), (8_800.0, "early exit above 8,800 m (the world's highest)")]
+    {
         for sun in [45.0f32, 2.0] {
             let mut mp = march_params(sun);
             mp.levels = (0..LV).map(|k| ([-512, -512, 512, 512], (1u64 << k) as f32)).collect();

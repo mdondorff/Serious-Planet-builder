@@ -221,10 +221,10 @@ fn warm_clock(
     .map(Some)
 }
 
-/// The thread count of the CPU calibration: the generation pool's default (the machine less the reserve), the count the limits of
+/// The thread count of the CPU calibration: fixed at the reference count (or the machine's threads when fewer), independent of the pool, the count the limits of
 /// `planet_perf::calibration` were measured with (ADR 0065).
 pub(crate) fn calibration_threads() -> usize {
-    planet_streaming::GenWorkers::workers_for(std::thread::available_parallelism().map_or(4, |n| n.get()), planet_streaming::GEN_RESERVE)
+    planet_perf::calibration::calibration_threads()
 }
 
 /// Measure the CPU calibration of a view's session now (not in a smoke run unless `--calibrate` asks for it): the fixed job alone and on all the threads (STRM-022).
