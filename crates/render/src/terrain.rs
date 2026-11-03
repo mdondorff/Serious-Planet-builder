@@ -144,8 +144,7 @@ struct VsOut {
 
 /// The product shader after the vertex stage (the helpers, the debug fragment stage and the lit fragment stages), shared by the compact
 /// vertex stage (`compact_terrain_shader`) and the test-only reference renderer.
-pub(crate) const SHADER_TAIL: &str = concat!(
-    r#"
+pub(crate) const SHADER_TAIL: &str = r#"
 // Distance in pixels to the nearest integer of `x`, so lines stay about one pixel wide at any scale.
 fn line(x: f32, w: f32) -> f32 {
     let d = abs(fract(x + 0.5) - 0.5);
@@ -782,8 +781,7 @@ fn region_tint(rel: vec3<f32>, rgb: vec3<f32>, factor: f32) -> vec3<f32> {
     }
     return rgb;
 }
-"#
-);
+"#;
 
 /// Depth target format and test: reversed-Z `Depth32Float` with the clear value 0 (CON-12, ADR 0002), for the debug and lit paths alike.
 pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;

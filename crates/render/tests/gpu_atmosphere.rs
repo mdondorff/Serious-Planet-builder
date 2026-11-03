@@ -106,14 +106,12 @@ fn the_measurement_variant_compiles_draws_and_the_product_source_comes_back_pixe
     let mut r = renderer_atmosphere(&ctx, &[&base]);
     r.render(&ctx, &drawn, false).unwrap();
     let product = r.lit_path().unwrap().read_hdr(&ctx);
-    for variant in [MeasureVariant::NoMaterial] {
-        r.set_measure_variant(&ctx, variant).unwrap();
-        r.render(&ctx, &drawn, false).unwrap();
-        let hdr = r.lit_path().unwrap().read_hdr(&ctx);
-        assert!(hdr.iter().all(|p| p.iter().all(|v| v.is_finite())), "{variant:?}: finite");
-        let covered = |h: &[[f32; 4]]| h.iter().map(|p| p[3] > 0.0).collect::<Vec<_>>();
-        assert_eq!(covered(&hdr), covered(&product), "{variant:?}: same coverage");
-    }
+    r.set_measure_variant(&ctx, MeasureVariant::NoMaterial).unwrap();
+    r.render(&ctx, &drawn, false).unwrap();
+    let hdr = r.lit_path().unwrap().read_hdr(&ctx);
+    assert!(hdr.iter().all(|p| p.iter().all(|v| v.is_finite())), "no material: finite");
+    let covered = |h: &[[f32; 4]]| h.iter().map(|p| p[3] > 0.0).collect::<Vec<_>>();
+    assert_eq!(covered(&hdr), covered(&product), "no material: same coverage");
     r.set_measure_variant(&ctx, MeasureVariant::Product).unwrap();
     r.render(&ctx, &drawn, false).unwrap();
     assert_eq!(r.lit_path().unwrap().read_hdr(&ctx), product, "the product shader again draws what it drew");
