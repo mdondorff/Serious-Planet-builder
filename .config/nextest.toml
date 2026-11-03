@@ -129,9 +129,12 @@ test-group = "real-gpu-heavy"
 #   #1095), cut off at 300.5, 301.2 and 305.3 s only in this branch's runs, beside the serialised tests; the CPU calibration is about 1 s of it.
 # - `gpu_stream_perf::a_streaming_scene_on_the_lit_path_logs_beside_the_debug_path_under_its_own_name` runs look-1m with `--lit`: 172 s and 222 s on
 #   `C 1/2`, then stopped by its own 240 s RUN_LIMIT.
+# - `gpu_lit_stream_flicker::the_lit_coast_view_over_streamed_tiles_draws_the_same_pixels_still_and_after_a_small_turn_and_back` streams the lit coast
+#   view: 292 s on `C 2/3` (#1114's first run), then cut off by its 300 s wall-clock settle limit after 264 ticks (1.1 s a tick) beside the
+#   window flight and the skeleton tests (#1114 at a876ea2c).
 # nextest's slow timer starts when a test starts, not while it waits for the group, so their limits stay as they are.
 [[profile.default.overrides]]
-filter = 'binary(gpu_all) and (test(a_coastal_flight_at_low_altitude_flickers_within_the_budget_while_the_lod_changes_under_it) or test(/^gpu_window::/) or test(a_lit_view_a_lit_flight_and_a_stream_scene_log_their_cpu_calibration_when_asked_even_in_a_smoke_run) or test(a_streaming_scene_on_the_lit_path_logs_beside_the_debug_path_under_its_own_name))'
+filter = 'binary(gpu_all) and (test(a_coastal_flight_at_low_altitude_flickers_within_the_budget_while_the_lod_changes_under_it) or test(/^gpu_window::/) or test(a_lit_view_a_lit_flight_and_a_stream_scene_log_their_cpu_calibration_when_asked_even_in_a_smoke_run) or test(a_streaming_scene_on_the_lit_path_logs_beside_the_debug_path_under_its_own_name) or test(the_lit_coast_view_over_streamed_tiles_draws_the_same_pixels_still_and_after_a_small_turn_and_back))'
 test-group = "warp-heavy"
 
 # The heavy software-adapter window and scene tests (the tracked tier-C timeouts: `gpu_window`, `gpu_water_coverage`, `gpu_stream_perf`,

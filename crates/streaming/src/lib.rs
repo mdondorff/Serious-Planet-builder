@@ -25,6 +25,7 @@ pub mod manager;
 pub mod priority;
 mod queue;
 pub mod slots;
+pub mod topology;
 
 pub use budget::{PoolConfig, Tier};
 pub use layer::SchedWork;
