@@ -53,7 +53,7 @@ fn run_editor_with(flags: &[&str], extra: &[&str], envs: &[(&str, &str)], march:
 fn run_editor_unguarded(flags: &[&str], extra: &[&str], envs: &[(&str, &str)], march: bool) -> Option<String> {
     let started = std::time::Instant::now();
     let adapter = adapter();
-    let out = Command::new(env!("CARGO_BIN_EXE_planet"))
+    let out = Command::new(planet_exe())
         .arg("editor")
         .args(flags)
         .args(extra)
@@ -103,6 +103,13 @@ fn count_before(stdout: &str, after: &str) -> u64 {
         .and_then(|s| s.rsplit(|c: char| !c.is_ascii_digit()).next())
         .and_then(|n| n.parse().ok())
         .unwrap_or_else(|| panic!("no count before '{after}' in: {stdout}"))
+}
+
+/// The `planet` binary: nextest's `NEXTEST_BIN_EXE_planet` when it runs the tests from an archive (CI's tier-C parts, BUILD-018), where
+/// the path cargo baked in at compile time belongs to the build job; else that path.
+fn planet_exe() -> std::path::PathBuf {
+    std::env::var_os("NEXTEST_BIN_EXE_planet")
+        .map_or_else(|| std::path::PathBuf::from(env!("CARGO_BIN_EXE_planet")), std::path::PathBuf::from)
 }
 
 // spec: VIEW-005, VIEW-007, LOOK-005
@@ -301,7 +308,7 @@ fn the_editor_mode_places_drags_types_undoes_and_deletes_in_the_real_window_and_
     assert!(bundle.contains("world_toml "), "the bundle records the world, edits included");
     // spec: VIEW-026
     let replay_dir = repro.join("replay");
-    let replay = Command::new(env!("CARGO_BIN_EXE_planet"))
+    let replay = Command::new(planet_exe())
         .args(["test-render", "--adapter", &adapter()])
         .arg("--repro")
         .arg(repro.join(&bundle_name))
@@ -571,7 +578,7 @@ fn the_item_sweep_over_a_dense_brush_cluster_a_ridge_a_hill_and_a_crater_has_no_
 
 /// Run `planet generate <args>` and return its stdout; a failure panics with both streams.
 fn generate(args: &[&str]) -> String {
-    let out = Command::new(env!("CARGO_BIN_EXE_planet")).arg("generate").args(args).output().expect("the planet binary starts");
+    let out = Command::new(planet_exe()).arg("generate").args(args).output().expect("the planet binary starts");
     assert!(
         out.status.success(),
         "planet generate {args:?} failed:\n{}\n{}",
