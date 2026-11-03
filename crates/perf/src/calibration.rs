@@ -15,10 +15,11 @@
 //!
 //! The first limit set (single 50,000, parallel 100,000, before and after) would have voided about one clean scene in five: before
 //! parallel spreads 26 % on a quiet machine, and after single drifts upward after a long scene (the CPU clock falls, the post-pass
-//! still runs). The parallel limits hold for the reference thread count only ([`REFERENCE_THREADS`], the generation pool of the
-//! 20-thread machine); a log with another count is judged on the single readings alone.
+//! still runs). The parallel limits hold for the reference thread count only ([`REFERENCE_THREADS`], the calibration's fixed
+//! `min(18, logical threads)`, TEST-089); a log with another count is judged on the single readings alone.
 
-/// The thread count the parallel limits were measured with: 20 logical CPUs less the generation reserve of 2.
+/// The thread count the parallel limits were measured with (the reference machine's 20 logical CPUs less 2 at the time); the calibration
+/// now runs on a fixed `min(18, logical threads)` (TEST-089, ADR 0092).
 pub const REFERENCE_THREADS: u64 = 18;
 /// The threads a calibration runs its parallel reading on: [`REFERENCE_THREADS`], or the machine's threads when fewer, independent of
 /// the pool under test (TEST-039, ADR 0092), so a log of a share-sized pool keeps the parallel limits.
