@@ -149,7 +149,7 @@ Assumption it changes: that TaskStop ends a background command's whole process t
 Proposed follow-up: after TaskStop on a script runner, find it by its command line (`Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*<script>*' }`) and `Stop-Process` it; check `tasklist` for `planet.exe`/`xtask.exe` before declaring a pause. A run already started is better left to finish than killed mid-measurement.
 Obsolete when: TaskStop ends Git Bash children, or perf runners become an xtask command (no shell loop).
 
-## 2026-11-03 Edit finds must cover in-flight (and queued) tiles
+## 2026-11-03 Edit finds must cover in-flight tiles
 Scope: project (editor refresh find; STRM-026, STRM-071)
 What happened: `gpu_edit_perf` did not settle at 5 tile workers ("kind Stale, substituted 2-6, unfinished jobs 0, pending 0"; #1117's default share on Rasierklinge) and passed at 6 and 18. The stuck tiles were resident level-14 tiles with another mesh key than the plan's, with the streamer reporting them not stale, not held, not queued. Every find (window.rs, editperf.rs, the coupled-lens refresh) ran over `managed.resident()` only. A tile whose job was in flight when `set_definition` swapped the field had read the old field, landed after the edit with the old key, and nothing ever marked it stale. A larger pool finished those jobs first: timing, not a thread-count-dependent result (CON-14 holds).
 Assumption it changes: STRM-026's "the footprint find of the edit" named resident tiles only; the earlier "did not settle under load" failures of `gpu_edit_perf` were blamed on load. The stale-find entry above (region summary rings, `neighbors8`, edit-stale-diagnostics) is a different gap: resident tiles the reach missed.

@@ -8,7 +8,11 @@ Source: opus-planner (2026-11-03), the edit-latency smoke at 5 tile workers (#11
 
 #### Scenario: A tile loading at the edit
 - **WHEN** a drawn tile the edit touches has read the old field and its job waits, the edit lands with the find over the candidates, and the job then finishes
-- **THEN** the view becomes exact and the tile holds the new field's key; with the find over the resident tiles alone it stays resident, not stale, on the old key, and the view never becomes exact
+- **THEN** the view becomes exact and the tile holds the new field's key
+
+#### Scenario: The find over the resident tiles alone
+- **WHEN** the same edit lands with the find over the resident tiles only
+- **THEN** the tile stays resident, not stale, on the old key, and the view never becomes exact
 
 #### Scenario: Tiles queued at the edit
 - **WHEN** two jobs run at a time, so touched tiles of the view still wait in the streamer's queue when the edit lands

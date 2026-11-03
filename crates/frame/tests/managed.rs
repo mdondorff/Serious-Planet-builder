@@ -2024,6 +2024,7 @@ fn a_tile_still_loading_from_the_old_field_when_an_edit_lands_is_found_and_loade
 // spec: STRM-071
 #[test]
 fn a_find_over_the_resident_tiles_alone_leaves_a_tile_that_was_loading_on_the_old_field_for_good() {
+    // A control that pins the race (delete it if tile jobs ever carry the field version they read and stale results are dropped).
     // The find as the window and the edit scene made it before STRM-071: the gated tile is not resident at the edit, so nothing names it,
     // it lands with the old field's key, and the view never becomes exact again (the edit-latency smoke's "did not settle").
     let (mut rig, _, req, held, _) = edit_while_loading(true, 64, |lp| lp.resident().keys().copied().collect());
