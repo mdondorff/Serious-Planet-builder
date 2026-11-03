@@ -2,6 +2,8 @@
 mod bake_face;
 #[path = "bake_kernels.rs"]
 mod bake_kernels;
+#[path = "bake_thermal.rs"]
+mod bake_thermal;
 #[path = "block_order.rs"]
 mod block_order;
 #[path = "body_keys.rs"]

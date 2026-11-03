@@ -9,10 +9,12 @@
 pub const BAKE_KERNEL_VERSION: u32 = 1;
 
 pub mod carve;
+pub mod deposit;
 pub mod face;
 pub mod flood;
 pub mod map;
 pub mod route;
+pub mod thermal;
 
 /// A `w x h` grid of cells `dx` metres apart, row-major (`p = j w + i`), 8-connected, not wrapping, whose cell `(0, 0)` is the global cell `(origin.0, origin.1)`.
 #[derive(Clone, Copy, Debug, PartialEq)]
