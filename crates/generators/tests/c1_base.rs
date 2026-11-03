@@ -92,6 +92,31 @@ fn slope_jump(src: &dyn LatticeSource, read: &dyn Fn(&dyn LatticeSource, Vec3) -
     ((c - b) - (b - a)) / eps
 }
 
+/// Every node is a stored -0.0.
+struct NegZero;
+
+impl LatticeSource for NegZero {
+    fn res(&self) -> u32 {
+        64
+    }
+    fn at(&self, _: Face, _: u32, _: u32) -> Result<GlobalSample, ReadError> {
+        Ok(GlobalSample { continent: 1.0, elevation_m: -0.0, temperature_c: 0.0, precipitation_mm: 0.0 })
+    }
+}
+
+// spec: GEN-107
+#[test]
+fn a_stored_negative_zero_and_a_degenerate_bake_resolution_are_handled() {
+    let d = at_lattice(2, 32.0, 32.0, 64);
+    let want = read_direction(&NegZero, &TangentWarp, d).unwrap().elevation_m.to_bits();
+    assert_eq!(want, 0x8000_0000);
+    assert_eq!(read_elevation_c1(&NegZero, &TangentWarp, d).unwrap().to_bits(), want, "a lattice point reads its stored -0.0");
+    // A bake of one cell has no neighbour rows for the ghosts: refused, naming the resolution.
+    let g = grid(1);
+    let err = read_elevation_c1(&GridSource(&g), &TangentWarp, d).unwrap_err();
+    assert!(err.to_string().contains("res 1"), "{err}");
+}
+
 // spec: GEN-107
 #[test]
 fn across_a_cell_edge_inside_a_face_the_slope_breaks_far_less_than_the_bilinears() {
@@ -364,11 +389,69 @@ fn bounds_hold_over_isolated_spikes_and_steps_where_the_blend_overshoots() {
     assert!(outside > 0, "the interpolant overshoots next to a step");
 }
 
+/// Face 0 sits low and every other face high, the shared edges low: beside an edge of face 0 the stencil reads ghosts from a face 7,000 m higher.
+struct Step(u32);
+
+impl LatticeSource for Step {
+    fn res(&self) -> u32 {
+        self.0
+    }
+    fn at(&self, f: Face, i: u32, j: u32) -> Result<GlobalSample, ReadError> {
+        let edge = i == 0 || i == self.0 || j == 0 || j == self.0;
+        let e = if f.0 == 0 || edge { 1000.0 } else { 8000.0 };
+        Ok(GlobalSample { continent: 1.0, elevation_m: e, temperature_c: 0.0, precipitation_mm: 0.0 })
+    }
+}
+
+// spec: GEN-107
+#[test]
+fn bounds_hold_in_the_last_cell_before_a_face_edge_where_the_stencil_reads_a_higher_neighbour() {
+    for res in [64u32, 16384] {
+        let src = Step(res);
+        let f = c1_field(&src);
+        let cell = std::f64::consts::FRAC_PI_2 / f64::from(res);
+        let mut checked = 0;
+        for &frac in &[0.05, 0.2, 1.0 / 3.0, 0.5, 0.8, 0.97] {
+            // Last cell of the u = res edge (and of the u = 0 edge), mid-edge, then the corner cell.
+            for (u, v) in [
+                (f64::from(res) - frac, f64::from(res) * 0.5 + 0.3),
+                (frac, f64::from(res) * 0.5 + 0.3),
+                (f64::from(res) - frac, f64::from(res) - frac),
+                (frac, frac),
+            ] {
+                let c = at_lattice(0, u, v, res);
+                for &theta in &[0.0, 1e-4 * cell, 3e-3 * cell, 0.05 * cell, 0.5 * cell] {
+                    check_cap(&f, c, theta);
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 100 && f.error().is_none(), "res {res}");
+    }
+}
+
+/// A grid that reports blocks of 16 cells (a hint only; it never changes a value).
+struct Blocked<'a>(&'a GridSource<'a>);
+
+impl LatticeSource for Blocked<'_> {
+    fn res(&self) -> u32 {
+        self.0.res()
+    }
+    fn at(&self, f: Face, i: u32, j: u32) -> Result<GlobalSample, ReadError> {
+        self.0.at(f, i, j)
+    }
+    fn block_cells(&self) -> u32 {
+        16
+    }
+}
+
 // spec: GEN-107
 #[test]
 fn heights_do_not_depend_on_the_batch_or_the_thread_count() {
     let g = grid(RES);
-    let src = GridSource(&g);
+    let plain = GridSource(&g);
+    // A source with a block structure, so the gathered and hinted footprint paths run (a plain grid has none).
+    let src = Blocked(&plain);
     let f = c1_field(&src);
     let mut rng = SplitMix64(13);
     let mut dirs: Vec<Vec3> = (0..600)

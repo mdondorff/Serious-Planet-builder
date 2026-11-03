@@ -851,9 +851,10 @@ pub const READER_C1_VERSION: u32 = 1;
 /// positive weights of the separable Catmull-Rom blend sum to at most 1.28125 (1 + 0.28125), and the weights sum to 1.
 pub const C1_OVERSHOOT: f64 = 0.28125;
 
-/// The factor on the largest difference of adjacent lattice samples (metres per cell) that bounds the slope of [`read_elevation_c1`]: 2.8125 within
-/// a face (the Catmull-Rom derivative is at most 2.25 times the largest of the three differences it spans, times 1.25 for the four rows),
-/// rounded up to 4 for the stencil nodes beyond a face edge, which are interpolated in the neighbour face.
+/// The factor on the largest difference of adjacent lattice samples (metres per cell) that bounds the slope of [`read_elevation_c1`]: 1.875 within a face
+/// (the Catmull-Rom derivative is at most `0.125 + 1.25 + 0.125 = 1.5` times the largest of the three differences it spans, times 1.25 for the four rows),
+/// rounded up to 4 for the stencil nodes beyond a face edge, which are interpolated in the neighbour face: the bound takes the largest step over every
+/// scanned face, the neighbour's included.
 pub const C1_SLOPE_FACTOR: f64 = 4.0;
 
 /// The four Catmull-Rom weights at `t` in `[0, 1]` for the samples at `-1, 0, 1, 2`. They sum to 1; at `t = 0` they are exactly `(0, 1, 0, 0)` and at
@@ -863,7 +864,7 @@ fn catmull_rom(t: f64) -> [f64; 4] {
     [0.5 * (-t3 + 2.0 * t2 - t), 0.5 * (3.0 * t3 - 5.0 * t2 + 2.0), 0.5 * (-3.0 * t3 + 4.0 * t2 + t), 0.5 * (t3 - t2)]
 }
 
-/// The elevation of lattice node `(i, j)` of `face`, where the node may lie up to two cells beyond a face edge: there it is the bilinear read
+/// The elevation of lattice node `(i, j)` of `face`, where the node may lie one cell beyond a face edge (a ghost: the far nodes of a stencil are skipped at weight zero): there it is the bilinear read
 /// ([`read_direction`]) of the direction of the extended face coordinates, that is the neighbour face's own samples (at a cube corner the
 /// third face's, on the diagonal beyond both edges).
 fn c1_node(src: &dyn LatticeSource, map: &dyn FaceMapping, face: Face, i: i64, j: i64) -> Result<f64, ReadError> {
@@ -880,18 +881,23 @@ fn c1_node(src: &dyn LatticeSource, map: &dyn FaceMapping, face: Face, i: i64, j
 /// the position (the interpolant passes through every sample, and its slope is continuous across every cell edge, which the bilinear [`read_direction`]'s
 /// is not). Samples beyond a face edge come from the neighbour face ([`c1_node`]); the two faces' lattices are warped differently, so the ghost does not sit
 /// on a vertex of the neighbour and the slope break across a face edge is reduced (about threefold in the tests), not removed. A node whose weight is exactly
-/// zero is not read, so a lattice point is its own sample and reads touch no block they do not need. The value is rounded to `f32` once. A pure function of
+/// zero is not read, so a lattice point is its own sample and reads touch no block they do not need. The value is rounded to `f32` once (a ghost node is the
+/// neighbour's `f32` read, so it was rounded before). A pure function of
 /// `dir`: a point on a face edge or a cube corner reads the same bits whichever face's coordinates it was given in.
 pub fn read_elevation_c1(src: &dyn LatticeSource, map: &dyn FaceMapping, dir: Vec3) -> Result<f32, ReadError> {
+    if src.res() < 2 {
+        return Err(ReadError::Shape(format!("the C1 reader needs a bake of at least 2 cells per face edge (res {})", src.res())));
+    }
     let at = locate_direction(src.res(), map, dir)?;
     let (wu, wv) = (catmull_rom(at.wu), catmull_rom(at.wv));
     let (i0, j0) = (i64::from(at.i) - 1, i64::from(at.j) - 1);
-    let mut rows = 0.0;
+    // -0.0 is the identity of the sum, so a stored -0.0 at a lattice point reads back as -0.0.
+    let mut rows = -0.0;
     for (r, &w_row) in wv.iter().enumerate() {
         if w_row == 0.0 {
             continue;
         }
-        let mut cols = 0.0;
+        let mut cols = -0.0;
         for (c, &w_col) in wu.iter().enumerate() {
             if w_col == 0.0 {
                 continue;

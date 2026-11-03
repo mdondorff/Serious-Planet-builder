@@ -261,8 +261,8 @@ impl HeightField for TerrainField<'_> {
     }
 }
 
-/// Cells added around the scanned window when the field reads the bake C1 (the 4 x 4 stencil reaches two cells out and the ghosts beyond a face edge
-/// interpolate one more).
+/// Cells added around the scanned window when the field reads the bake C1: the 4 x 4 stencil reaches one cell below and two above its cell, and a ghost beyond a
+/// face edge (only ever one cell beyond it) is read in the neighbour face from the cell it falls in and one more.
 const C1_PAD_CELLS: f64 = 3.0;
 
 /// The range of the bake's elevation over a cap and the steepest lattice step on the way (see [`scan_base`]).
@@ -278,7 +278,8 @@ pub(crate) struct BaseScan {
 /// cells it reads (ADR 0028 point 3). `None`: the cap is too wide or leaves the scanned region, take the global range.
 ///
 /// With `c1` the field reads the bake by [`crate::global::read_elevation_c1`] (GEN-107): the window grows by [`C1_PAD_CELLS`] cells (the 4 x 4 stencil
-/// and the neighbour-face ghosts), the range by [`crate::global::C1_OVERSHOOT`] of itself on each side, and the steps by [`crate::global::C1_SLOPE_FACTOR`].
+/// and the neighbour-face ghosts), and the range and the steps are taken over every scanned face together (a ghost is a value of the neighbour), the range
+/// widened by [`crate::global::C1_OVERSHOOT`] of itself on each side and the steps scaled by [`crate::global::C1_SLOPE_FACTOR`].
 pub(crate) fn scan_base(
     src: &dyn LatticeSource,
     centre: Vec3,
@@ -300,8 +301,8 @@ pub(crate) fn scan_base(
     let half = f64::from(res) * 0.5;
     let reach = rw * half + 1e-9;
     let pad = if c1 { C1_PAD_CELLS } else { 0.0 };
-    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
-    let (mut max_du, mut max_dv) = (0.0f64, 0.0f64);
+    // Per scanned face: its sample range, its largest steps, the anchor and the clamped anchor's lattice position.
+    let mut scanned: Vec<(f64, f64, f64, f64, f64)> = Vec::new();
     let mut cells = 0u64;
     for f in 0..6u8 {
         let face = Face(f);
@@ -332,13 +333,8 @@ pub(crate) fn scan_base(
                 e.push(f64::from(src.at(face, i, j)?.elevation_m));
             }
         }
-        let (mut flo, mut fhi) = (e.iter().copied().fold(f64::INFINITY, f64::min), e.iter().copied().fold(f64::NEG_INFINITY, f64::max));
-        if c1 {
-            // The C1 value is a combination of sixteen samples whose weights sum to 1 and whose negative weights sum to at most C1_OVERSHOOT.
-            let range = fhi - flo;
-            (flo, fhi) = (flo - crate::global::C1_OVERSHOOT * range, fhi + crate::global::C1_OVERSHOOT * range);
-        }
-        // The blend is bilinear in the lattice position, so its slope along an axis is at most the largest difference of
+        let (flo, fhi) = (e.iter().copied().fold(f64::INFINITY, f64::min), e.iter().copied().fold(f64::NEG_INFINITY, f64::max));
+        // The blend is bilinear (C1: scaled by C1_SLOPE_FACTOR below) in the lattice position, so its slope along an axis is at most the largest difference of
         // adjacent samples along that axis. Every cap point of this face is within the rectangle's half-width (per
         // axis, in lattice units) of the anchor, the centre clamped to the face; the base elevation there is the
         // blend at the anchor (read from this face's own samples) plus or minus the slope times that half-width.
@@ -362,7 +358,27 @@ pub(crate) fn scan_base(
         } else {
             f64::from(blend_cell(src, face, ci, cj, au - f64::from(ci), av - f64::from(cj))?.elevation_m)
         };
-        let (du, dv) = if c1 { (du * crate::global::C1_SLOPE_FACTOR, dv * crate::global::C1_SLOPE_FACTOR) } else { (du, dv) };
+        scanned.push((flo, fhi, du, dv, anchor));
+    }
+    // Bilinear: each face's interval from its own samples. C1: a stencil beside a face edge reads ghost nodes of the neighbour face, so the range and the
+    // steps are taken over every scanned face together (the neighbour's window covers the ghosts' cells) and widened for the blend's overshoot and slope.
+    let (mut g_lo, mut g_hi, mut g_du, mut g_dv) = (f64::INFINITY, f64::NEG_INFINITY, 0.0f64, 0.0f64);
+    for &(flo, fhi, du, dv, _) in &scanned {
+        g_lo = g_lo.min(flo);
+        g_hi = g_hi.max(fhi);
+        g_du = g_du.max(du);
+        g_dv = g_dv.max(dv);
+    }
+    if c1 {
+        // The C1 value is a combination of sixteen samples whose weights sum to 1 and whose negative weights sum to at most C1_OVERSHOOT.
+        let range = g_hi - g_lo;
+        (g_lo, g_hi) = (g_lo - crate::global::C1_OVERSHOOT * range, g_hi + crate::global::C1_OVERSHOOT * range);
+        (g_du, g_dv) = (g_du * crate::global::C1_SLOPE_FACTOR, g_dv * crate::global::C1_SLOPE_FACTOR);
+    }
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    let (mut max_du, mut max_dv) = (0.0f64, 0.0f64);
+    for &(flo, fhi, du, dv, anchor) in &scanned {
+        let (flo, fhi, du, dv) = if c1 { (g_lo, g_hi, g_du, g_dv) } else { (flo, fhi, du, dv) };
         // The anchor and the base at a cap point are both rounded to f32 by the blend: one ulp (2^-23 relative) apart at most
         // beyond the slope term.
         let spread = (du + dv) * reach * (1.0 + 1e-9) + 1e-6 + anchor.abs() * 2.4e-7;

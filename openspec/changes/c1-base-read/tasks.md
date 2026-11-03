@@ -10,7 +10,7 @@
 - [x] 2.3 batch and thread independence; identity and keys; known answers pinned
 
 ## 3. Review and evidence
-- [ ] 3.1 numerics-reviewer
+- [x] 3.1 numerics-reviewer (one HIGH: bounds beside a face edge, fixed with a test; four LOW fixed)
 - [x] 3.2 field_probe re-run on v2 (flank and belt-east): base slope and profiles in target/e2b-v2
 - [x] 3.3 CPU cost table (c1_cost example) in the PR body
 

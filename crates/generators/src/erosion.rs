@@ -45,7 +45,7 @@ const AMPLITUDE_LAND_M: f64 = 900.0;
 /// Bake cells either side of a point over which the slope is measured.
 const SLOPE_CELLS: f64 = 3.0;
 /// How far from the cell of a direction the lattice reads of a height reach, in cells (GEN-020): the gradient stencil reaches [`SLOPE_CELLS`] cells (a bit
-/// more on the chart, 2/sqrt(3) at most) and the bilinear read one more; a footprint taken from this hint is a superset of the exact one.
+/// more on the chart, 2/sqrt(3) at most) and the bilinear read one more (the C1 read one below and two above: still within 8); a footprint taken from this hint is a superset of the exact one.
 pub const GRADIENT_REACH_CELLS: u32 = 8;
 /// The slope factor: this share of the amplitude on flat ground, the rest from slope 0.01 (rise over run) to 0.2.
 const CARVE_FLOOR: f64 = 0.15;

@@ -8,16 +8,17 @@
    - C1 across every cell edge; small overshoot beside steps and spikes (at most 0.119 of the local sample range in the tests; bound 0.28125, see 4).
    - Rejected: smoothstep weights (zero slope at every node gives terraces); a quadratic or cubic B-spline (no overshoot, but it does not interpolate: every peak and coast of the bake lowers or moves, and the calibrations made on the bake shift).
 2. Face edges and corners.
-   - The stencil of a point within two cells of a face edge reaches nodes beyond it. Such a node is the bilinear read (`read_direction`) of the direction of the extended face coordinates, that is the neighbour face's own samples (at a cube corner the third face's, on the diagonal beyond both edges).
+   - The stencil of a point in the last or first cell of a face edge reaches nodes one cell beyond it. Such a node is the bilinear read (`read_direction`) of the direction of the extended face coordinates, that is the neighbour face's own samples (at a cube corner the third face's, on the diagonal beyond both edges).
    - Across a face edge the two faces' lattices are warped differently, so the ghost does not sit on a vertex of the neighbour: the slope break across a face edge falls about threefold (tests: mean 161 m per cell against 459 for bilinear), it is not removed. A second pass reading the ghost by C1 gave no gain and is not used.
    - Same bits from either face: the read is a pure function of the direction; edge points and corners given in either adjacent face's coordinates read the same bits (tested on 371 directions on all 12 edges, near the corners, and on the 8 corners).
 3. A field beside the old one, not a replacement. `cpu-erosion-v2` stands beside `cpu-erosion-v1` with a new key family (inputs hash with `EROSION_C1_VERSION` and `READER_C1_VERSION`), selected by `world.height_field`. The default switch, and with it every pin and golden of the default field, is a follow-up after the preview.
 4. Bounds. A C1 value is a combination of 16 samples whose weights sum to 1 with negative weights summing to at most 0.28125 (1.25 per axis, so 1.5625 in two dimensions). The scan therefore:
-   - reads the window 3 cells wider (the stencil's two cells and one for the neighbour ghosts);
-   - widens its sample range by 0.28125 of itself on each side;
-   - multiplies the largest lattice step (the slope bound) by 4: 2.8125 within a face (the Catmull-Rom derivative is at most 2.25 times the largest of the three differences it spans, times 1.25 for the four rows), rounded up for the ghosts.
+   - reads the window 3 cells wider (the stencil reaches one cell below and two above its cell; a ghost is one cell beyond the face edge, read in the neighbour from its cell and one more);
+   - takes the sample range and the largest lattice steps over every scanned face together, because a stencil beside a face edge reads the neighbour's values (the first version took them per face and missed heights by hundreds of metres in the last cell before an edge: the numerics review's step lattice, now a test);
+   - widens that range by 0.28125 of itself on each side;
+   - multiplies the largest step (the slope bound) by 4: within a face the Catmull-Rom derivative is at most 1.5 times the largest of the three differences it spans (0.125 + 1.25 + 0.125 at t = 0.5), times 1.25 for the four rows, 1.875 in all; 4 leaves room for the ghosts.
    - The erosion bound's Lipschitz term takes the factor through `max_du` and `max_dv`.
-   - Tests hold every height of random caps, of caps on edges and corners, and of caps over a lattice with spikes and steps. The factor 4 and the pad 3 are validated by those tests, not proved for the ghosts.
+   - Tests hold every height of random caps, of caps on edges and corners, of caps in the last cell before an edge over a step lattice (res 64 and 16384), and of caps over a lattice with spikes and steps. The factor 4 and the pad 3 are validated by those tests, not proved for the ghosts.
 5. Cost. The read touches 16 nodes instead of 4 (the gradient stencil adds six reads): about 1.9x on `height(dir)` and per tile, 1.45x on `height_bounds` (PR body table).
 
 ## Open

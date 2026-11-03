@@ -192,9 +192,11 @@ fn run() -> Result<(), String> {
         }
         // Profiles: three lines through the centre across about 5 lattice cells (611 m), sampled every 10 m.
         let len = 320usize;
-        for (pname, (ux, uy)) in
-            [("east-west", (1.0, 0.0)), ("north-south", (0.0, 1.0)), ("diagonal", (std::f64::consts::FRAC_1_SQRT_2, std::f64::consts::FRAC_1_SQRT_2))]
-        {
+        for (pname, (ux, uy)) in [
+            ("east-west", (1.0, 0.0)),
+            ("north-south", (0.0, 1.0)),
+            ("diagonal", (std::f64::consts::FRAC_1_SQRT_2, std::f64::consts::FRAC_1_SQRT_2)),
+        ] {
             let pd: Vec<Vec3> = (0..len)
                 .map(|i| {
                     let s = (i as f64 - len as f64 / 2.0) * STEP_M * 10.0 / 10.0;
