@@ -63,7 +63,7 @@ fn main() {
     if o.face_res < 8 || o.face_res > FACE_LIMIT {
         fail(&format!("--face-res must be 8 to {FACE_LIMIT} (a larger pass 1 is a full-resolution bake and needs the planner's go)"));
     }
-    if o.map_width < 64 || o.map_width % 2 != 0 {
+    if o.map_width < 64 || !o.map_width.is_multiple_of(2) {
         fail("--map-width must be an even number of at least 64");
     }
     let tiles_wanted = o.region.as_ref().map(|p| read_region(p, &grid));
