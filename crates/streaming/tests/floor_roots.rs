@@ -67,12 +67,19 @@ fn the_roots_are_the_384_tiles_of_the_floor_and_all_are_dispatched_before_the_wa
     assert!(!s.is_resident(TileId::new(Face::ALL[0], 0, 0, 0).unwrap()), "no tile above the floor is loaded");
 }
 
-/// Blocks each load until all of them are inside `load` at once (or a timeout): proves the pool runs them concurrently.
+/// A barrier: each load waits inside `load` until every root load has been admitted, so none leaves before the last arrives. A pool
+/// that holds every root load at once releases it by arrival; a smaller pool cannot admit the last loads while the first ones wait,
+/// and only the timeout releases it. The timeout is generous so that a loaded machine that schedules the threads slowly still
+/// releases by arrival: the check counts admissions, not how soon the OS runs the threads.
 struct Rendezvous {
     arrived: AtomicUsize,
     inside: AtomicUsize,
     peak: AtomicUsize,
+    timed_out: AtomicUsize,
 }
+
+/// How long a load waits at the barrier before giving up (a pool too small for the roots then fails the test, after this wait).
+const BARRIER_TIMEOUT: Duration = Duration::from_secs(120);
 
 impl TileSource<u64> for Rendezvous {
     fn load(&self, tile: TileId) -> Result<u64, String> {
@@ -80,8 +87,12 @@ impl TileSource<u64> for Rendezvous {
         self.peak.fetch_max(n, Ordering::SeqCst);
         self.arrived.fetch_add(1, Ordering::SeqCst);
         let t0 = Instant::now();
-        while self.arrived.load(Ordering::SeqCst) < ROOTS && t0.elapsed() < Duration::from_secs(5) {
-            std::thread::yield_now();
+        while self.arrived.load(Ordering::SeqCst) < ROOTS {
+            if t0.elapsed() >= BARRIER_TIMEOUT {
+                self.timed_out.fetch_add(1, Ordering::SeqCst);
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(1));
         }
         self.inside.fetch_sub(1, Ordering::SeqCst);
         Ok(tile.raw() ^ 0x5a5a)
@@ -91,9 +102,16 @@ impl TileSource<u64> for Rendezvous {
 // spec: STRM-001
 #[test]
 fn a_pool_as_large_as_the_root_count_has_every_load_in_flight_together() {
-    let src = Arc::new(Rendezvous { arrived: AtomicUsize::new(0), inside: AtomicUsize::new(0), peak: AtomicUsize::new(0) });
+    let src = Arc::new(Rendezvous {
+        arrived: AtomicUsize::new(0),
+        inside: AtomicUsize::new(0),
+        peak: AtomicUsize::new(0),
+        timed_out: AtomicUsize::new(0),
+    });
     let mut s = streamer(Arc::new(ThreadPool::new(ROOTS)), src.clone());
     s.load_roots_blocking().unwrap();
+    // No load left the barrier before the last one was admitted: all 384 were in flight together.
+    assert_eq!(src.timed_out.load(Ordering::SeqCst), 0, "a load gave up at the barrier: the pool did not hold every root load at once");
     assert_eq!(src.peak.load(Ordering::SeqCst), ROOTS, "all 384 loads were in flight together");
     assert_eq!(s.stats().resident, ROOTS);
 }
