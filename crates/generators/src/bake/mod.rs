@@ -5,8 +5,13 @@
 //! result is the same bits on any machine and thread count (CON-14); the jitter of the receivers is an integer hash of the GLOBAL cell (the grid's origin plus the cell) and the direction,
 //! so a cell routes the same in every window that holds it. The grids do not wrap: a cube face does not route across its edges (GEN-100), its edge cells are outlets like the sea.
 
+/// Version of the pass-1 kernels' behaviour (flood, receivers, jitter, carve, breach, the face grid): part of the layer's key (CON-07), bumped with any change that moves a bit. History: 1 = PR 3a/4.
+pub const BAKE_KERNEL_VERSION: u32 = 1;
+
 pub mod carve;
+pub mod face;
 pub mod flood;
+pub mod map;
 pub mod route;
 
 /// A `w x h` grid of cells `dx` metres apart, row-major (`p = j w + i`), 8-connected, not wrapping, whose cell `(0, 0)` is the global cell `(origin.0, origin.1)`.

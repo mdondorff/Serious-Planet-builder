@@ -1,3 +1,5 @@
+#[path = "bake_face.rs"]
+mod bake_face;
 #[path = "bake_kernels.rs"]
 mod bake_kernels;
 #[path = "block_order.rs"]

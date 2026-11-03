@@ -293,6 +293,26 @@ fn hillshade(f: &Fields, elevation: impl Fn(&Pixel) -> f64) -> Vec<f64> {
     out
 }
 
+/// An equirectangular elevation image of `f` with hillshade, a header and a legend (for the bake's pass 1 maps, `bake::map`).
+pub fn elevation_map(f: &Fields, title: &str, elevation: impl Fn(&Pixel) -> f64) -> Rgba {
+    elevation_image(f, title, elevation)
+}
+
+/// An equirectangular image of a signed change in metres: grey at 0, blue towards `-scale_m` (cut), red towards `+scale_m` (raised), with a legend (for the bake's pass 1 maps).
+pub fn change_map(f: &Fields, title: &str, scale_m: f64, value: impl Fn(&Pixel) -> f64) -> Rgba {
+    let tone = |v: f64| {
+        let t = (v / scale_m).clamp(-1.0, 1.0);
+        let grey = [150.0, 150.0, 150.0];
+        to_u8(if t < 0.0 { mix(grey, [20.0, 60.0, 220.0], -t) } else { mix(grey, [230.0, 40.0, 30.0], t) })
+    };
+    let body: Vec<[u8; 3]> = f.pixels.iter().map(|p| tone(value(p))).collect();
+    let legend: Legend = [(-scale_m, format!("-{scale_m:.0} M")), (0.0, "0".to_string()), (scale_m, format!("+{scale_m:.0} M"))]
+        .into_iter()
+        .map(|(v, l)| (tone(v), l))
+        .collect();
+    frame(&body, f.width, f.height, f.seed, title, &legend)
+}
+
 fn elevation_image(f: &Fields, title: &str, elevation: impl Fn(&Pixel) -> f64) -> Rgba {
     let shade = hillshade(f, &elevation);
     let body: Vec<[u8; 3]> = f

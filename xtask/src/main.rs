@@ -1,6 +1,7 @@
 //! `cargo xtask`: the only command surface (CON-25). std only, so it builds in about a second.
 
 mod accept;
+mod bakecmd;
 mod blesscmd;
 mod cistats;
 mod detdiff;
@@ -61,6 +62,7 @@ const USAGE: &str = "cargo xtask <command>
   ci-stats [--runs N] | --record --since YYYY-MM-DD [--until YYYY-MM-DD]   median and p90 of each CI job over the last N (default 20) completed main runs, read with gh; a median over 16 min is flagged (BUILD-014)
   heavy <command> [args]   run any command (a diagnostic example, a replay) under the machine-wide heavy-run lock
   preview world [--seed N] [--out DIR]   (default seed 14, the reference world) the whole-planet preview of the default class source (GEN-103): equirectangular PNGs at 2048x1024 (land and sea; elevation with hillshade, today's and the new side by side; the plate mask; plateau and back-arc; relief classes, argmax and blended; k) with the seed, versions and a legend, and a report of the class shares; CPU only, no store, about 10 s; default out target/preview/world-seed-N
+  bake pass1 [--planet-res N] [--seed N] [--out DIR] [--threads N] [--faces LIST] [--map-width W]   (m9-bake, GEN-100) pass 1 of the erosion layer at a reduced resolution (default 768 cells per face edge; above 4096 refused: a full bake needs the planner's go), one face at a time into a layer store in DIR/layer (a killed run resumes), then the maps of the carved base; prints the wall time and the peak memory of each face
   terrain-score [--store DIR] [--dem DIR] [--sites FILE] [--out DIR] [--maps]   the terrain scorecard (TEST-079, BUILD-029): seven descriptors on nine GLO-30 tiles and the generator's two matched sites each (world.field() of the store, read only), distances and a phone-readable report.md and report.json in target/review/terrain-score/<date>/ with the Copernicus notice; CPU only, about 1 minute; --maps adds one 512 px PNG per descriptor per raster
   quiet on|off|status   the owner's flag file: while it is up every heavy command (test, prepush, perf, capture, accept, store, heavy) waits (BUILD-026)
   det-diff <a> <b>    compare two determinism manifests (GEN-003; CI diffs Windows against Linux)
@@ -87,6 +89,7 @@ fn main() -> ExitCode {
         Some("capture") => heavy::with(&format!("capture {}", args[1..].join(" ")), || testcmd::capture_cmd(&root, &args[1..])),
         Some("package") => heavy::with(&format!("package {}", args[1..].join(" ")), || package::run(&root, &args[1..])),
         Some("preview") => heavy::with(&format!("preview {}", args[1..].join(" ")), || preview::run_cmd(&root, &args[1..])),
+        Some("bake") => heavy::with(&format!("bake {}", args[1..].join(" ")), || bakecmd::run_cmd(&root, &args[1..])),
         Some("terrain-score") => heavy::with("terrain-score", || terrainscore::run_cmd(&root, &args[1..])),
         Some("heavy") => heavy::run_wrapped(&root, &args[1..]),
         Some("quiet") => heavy::quiet(&args[1..]),
