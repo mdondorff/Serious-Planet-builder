@@ -58,6 +58,8 @@ mod reads_contract;
 mod region_mask;
 #[path = "relief_channels.rs"]
 mod relief_channels;
+#[path = "relief_field.rs"]
+mod relief_field;
 #[path = "relief_scale.rs"]
 mod relief_scale;
 #[path = "stages.rs"]
