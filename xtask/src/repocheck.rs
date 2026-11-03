@@ -61,15 +61,22 @@ mod tests {
 
     // spec: BUILD-018
     #[test]
-    fn tier_c_runs_on_windows_in_four_parts_with_their_own_artifact_names() {
+    fn tier_c_runs_on_windows_in_four_parts_from_one_archive_with_their_own_artifact_names() {
         let w = workflow();
         let gpu = w.split("\n  gpu:\n").nth(1).expect("ci.yml has a `gpu` job").split("\n  determinism:").next().unwrap();
+        // One build of the tier-C binaries into an archive; the Windows parts run it and build nothing.
+        let build = w.split("\n  gpu-build:\n").nth(1).expect("ci.yml has a `gpu-build` job").split("\n  gpu:\n").next().unwrap();
+        assert!(
+            build.contains("cargo xtask test gpu --archive-out target/gpu-archive.tar.zst") && build.contains("name: gpu-archive"),
+            "{build}"
+        );
         for needle in [
+            "needs: gpu-build",
+            "cargo xtask test gpu --archive-file target/gpu-archive.tar.zst -- --partition count:${{ matrix.part }}/4",
             "part: 1",
             "part: 2",
             "part: 3",
             "part: 4",
-            "--partition count:{0}/4",
             "test-logs-${{ runner.os }}-gpu${{ matrix.part",
             "review-${{ runner.os }}${{ matrix.part",
         ] {

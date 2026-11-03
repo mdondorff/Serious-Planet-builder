@@ -23,15 +23,12 @@ Dormant (no near trigger; not asked now):
 |---|---|---|
 | NR | Real-GPU window checks NOT RUN on a locked desktop (TEST-073) | crusader |
 | Shadows | march fix over flat land (flat 2° 3.33 -> 1.31 ms; a 10° WARP golden for the owner's bless), then the shadow-layer1 poses re-picked on m9r2; #1109 horizon removal after it; ADR 0095 sky ambient waits for the owner's look | crusader |
-| Shares | ADR 0092: PR 4 (cross-references, archive), then `calibration-reference-machine` (ADR 0092 point 5) | spikes |
+| Shares | ADR 0092: PR 4 (cross-references, archive), then `calibration-reference-machine` (ADR 0092 point 5, stacked on PR 4) | spikes |
 | CI | A named heavy-test part for WARP C 2/3 (21-22 min against 16) | spikes, after Shares |
 | World build | `global-bake` perf scene reports against BUDG-014 instead of failing at 600 s (`crates/app/src/globalperf.rs`, ADR 0097 point 3) | spikes, after CI |
 | M9 | Shared store now `C:/DEV/SeriousPlanetData/global16384-m9r2` (seed 1, read-only; field bake 1020 s, 14 GB; `global16384` kept until the owner says). #1086 round 3: threads-required fix for its gate test; bake stack #1104 → #1119 (I5b snapshot runnable: coarse planet 3.4 min, 12 full-res tiles 30-77 s each); kind 12 approved as temporary (owner, 2026-11-03); no planet bake before the owner approves the preview | explorer |
 
 ## Tracked
-- **Calibration limits off the reference machine** (2026-11-03, departs from ADR 0092 point 5): `calibration::judge` applies the single limits (TEST-039) on any machine. Fix: `calibration-reference-machine` (spikes, queued).
-- **`gpu_edit_perf` smoke no-settle on CI** (2026-11-03): WARP C 3/3, run 41614937835 attempt 1, fc20511b (#1117): "the edit did not become exact in 40 s", 3 previewed level-15 tiles in flight with 618 residency requests queued.
-  Not reproduced locally (4 threads, 1 tile worker, 3 of 3 pass, edit exact in at most 3.0 s); the rerun passed. Quarantine on the next failure.
 - **Reserve test result** (BUDG-012, loaded, 3 rounds, 2026-11-01): dive, look-1m, look-2km, teleport-2km pass; teleport-1m fails by +1 % (frame median 16.75 against 16.60 ms; the spin runs 5-18 % over its 6-9 ms target). Frame p99 over 20 ms includes the spin by construction. A quiet window decides the absolute rows.
 - **teleport-1m reserve marginal** (quiet window, 2026-11-01): reserve verdict pass in 3 of 3; frame medians with loads 14.33/16.31/16.40 ms against 16.60, but 5 of 6 sessions had no frame verdict (ADR 0065 CPU calibration out of limits). Re-check on a calm CPU, after the terrain cap decision.
 - **Shadow resolve cost** (5a probe, 2026-11-01, RTX by hand, not a perf window): resolve 4.2 ms at a 45° sun, 2.3 ms at 2°, against REND-052's 1.5 ms for layer 1; includes per-frame buffer creation. Re-probe after pooling in 5a2; over 2x the budget goes back to ADR 0085 before 5b.
