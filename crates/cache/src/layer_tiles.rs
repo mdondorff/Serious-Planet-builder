@@ -174,7 +174,7 @@ pub fn load_tile(
     if raw.len() != t * t * 2 {
         return Err(what(format!("{} bytes of counts, expected {}", raw.len(), t * t * 2)));
     }
-    let counts: Vec<i16> = raw.chunks_exact(2).map(|c| i16::from_le_bytes([c[0], c[1]])).collect();
+    let counts: Vec<i16> = raw.as_chunks::<2>().0.iter().map(|c| i16::from_le_bytes(*c)).collect();
     let stats = TileStats {
         land_cells: u64_at(5) as usize,
         thermal_passes: u32::from_le_bytes(word(13, 4).try_into().expect("four bytes")) as usize,
@@ -202,6 +202,7 @@ pub struct Pass2Inputs<'a> {
 
 /// Pass 2 over `tiles`, one at a time, into the tile layer store in `dir`: a tile stored under the current key is skipped (a resume), the others are computed and appended with the
 /// index written after each (the checkpoint). A tile stored under another key is an error. `on_tile` is called after each computed tile (progress).
+#[allow(clippy::too_many_arguments)]
 pub fn run_pass2(
     dir: &Path,
     world: &GlobalWorld,

@@ -24,6 +24,8 @@ const RADIUS_M: f64 = 6_371_000.0;
 const PLANET_LIMIT: usize = 12_288;
 const FACE_LIMIT: usize = 4096;
 const REGION_LIMIT: usize = 64;
+/// The largest tile (core cells a side) a run takes: its window and the arrays of its kernels are `(tile + 2 halo)^2` cells of several f64 each.
+const TILE_LIMIT: usize = 4096;
 
 struct Opts {
     seed: u64,
@@ -55,6 +57,9 @@ fn main() {
             o.planet_res
         ));
     }
+    if tile > TILE_LIMIT {
+        fail(&format!("--tile above {TILE_LIMIT} cells builds a window of several GB: refused"));
+    }
     if o.face_res < 8 || o.face_res > FACE_LIMIT {
         fail(&format!("--face-res must be 8 to {FACE_LIMIT} (a larger pass 1 is a full-resolution bake and needs the planner's go)"));
     }
@@ -72,6 +77,14 @@ fn main() {
         _ => {}
     }
     let started = Instant::now();
+    // A planet pass that was complete (its pass 1 dropped) has nothing to resume: pass 1 would be computed again only to find every tile stored.
+    if tiles_wanted.is_none() && !out.join("layer").exists() && out.join("tiles").exists() {
+        println!(
+            "layer: {} holds a complete layer (pass 1 dropped); nothing to do (run with --keep-pass1 to keep pass 1 for iteration)",
+            out.display()
+        );
+        return;
+    }
     let world = GlobalWorld::from_definition(&WorldDefinition::single_planet(RADIUS_M, o.seed)).unwrap_or_else(|e| fail(&format!("{e:?}")));
     let inputs = BakeInputs::new(o.seed, threads);
     let (base, factor) = (|d: Vec3| inputs.base(d), |d: Vec3| inputs.carve_factor(d));

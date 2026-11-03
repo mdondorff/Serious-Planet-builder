@@ -201,3 +201,18 @@ fn the_pass_1_faces_are_dropped_from_a_store_and_never_from_another_folder() {
     let e = drop_pass1(other.path()).expect_err("a folder that is not a store").to_string();
     assert!(e.contains("refused") && other.path().join("notes.txt").exists(), "{e}");
 }
+
+// spec: STRM-065
+#[test]
+fn a_grid_that_cannot_be_filed_and_a_factor_that_disagrees_with_the_spec_are_refused() {
+    let (w, p1) = (world(), Dir::new("p1"));
+    let s = spec(&w);
+    let f = faces(p1.path(), &w);
+    // Three tiles a face edge are not a power of two: no quadtree id.
+    let odd = TileLayerSpec { grid: TileGrid { cells: 72, ..s.grid }, ..s };
+    let e = run(Dir::new("odd").path(), &w, &odd, &f, &tiles()[..1], 1).expect_err("a grid of 3 tiles").to_string();
+    assert!(e.contains("power of two"), "{e}");
+    let with_factor = TileLayerSpec { uses_factor: true, ..s };
+    let e = run(Dir::new("factor").path(), &w, &with_factor, &f, &tiles()[..1], 1).expect_err("a factor that is absent").to_string();
+    assert!(e.contains("uses_factor"), "{e}");
+}

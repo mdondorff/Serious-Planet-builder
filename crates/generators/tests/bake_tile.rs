@@ -1,5 +1,5 @@
 //! Tier A, GEN-101 and TEST-084's judged half on a synthetic planet (m9-bake PR 5): pass 2 on one tile. A tiny planet (cells of about 100 m, so the relief is steep at the cell
-//! scale), tiles of 24 core cells with a halo of 6. The local carve only incises and keeps a pit's pour point, a tile is the same bytes on 1 and 8 threads, what was eroded is
+//! scale), tiles of 24 core cells with a halo of 6. The local carve only incises and does not fill a pit, a tile is the same bytes on 1 and 8 threads, what was eroded is
 //! deposited or exported, the shared core edge of two tiles shows no step beyond the step between neighbouring cells, and the quantised change is within half a step.
 
 use planet_core::{Face, Vec3};
@@ -66,6 +66,7 @@ fn a_tile_is_the_same_bytes_on_1_and_8_threads_and_keeps_the_mass_of_what_it_ero
 }
 
 // spec: TEST-084
+// A tier A stand-in on a synthetic planet; TEST-084 (tier B, SPIKE-70's four sites) stays NOT RUN until the store runs it.
 #[test]
 fn the_shared_core_edge_of_two_tiles_has_no_larger_a_step_than_the_cells_beside_it() {
     let (g, p) = (grid(), Pass2Params::standard(9, 0.0));
@@ -107,4 +108,27 @@ fn a_quantised_change_is_within_half_a_step_and_a_tile_with_land_is_found() {
     let sea = |_: Vec3| -100.0;
     assert!(!tile_has_land(&g, tile(0, 0), &sea, 0.0, 4));
     assert!((0..4).flat_map(|j| (0..4).map(move |i| tile(i, j))).any(|t| tile_has_land(&g, t, &base, 0.0, 4)));
+}
+
+// spec: GEN-101
+#[test]
+fn the_cells_still_moving_at_the_pass_cap_are_reported_and_a_bad_geometry_is_refused() {
+    let g = grid();
+    let capped = Pass2Params {
+        thermal: planet_generators::bake::thermal::ThermalParams { passes: 1, ..Pass2Params::standard(9, 0.0).thermal },
+        ..Pass2Params::standard(9, 0.0)
+    };
+    let r = pass2_tile(&g, tile(1, 1), &base, &nothing, None, &capped, 2);
+    assert_eq!(r.stats.thermal_passes, 1);
+    assert!(r.stats.thermal_moving_at_cap > 0, "a steep tile cut at one pass has no cell still moving: {:?}", r.stats);
+    for (what, bad) in [
+        ("a tile that does not divide the face", TileGrid { tile: 25, ..g }),
+        ("a halo of half the tile", TileGrid { halo: 12, ..g }),
+        ("no tile", TileGrid { tile: 0, ..g }),
+    ] {
+        assert!(bad.check().is_err(), "{what} was accepted");
+    }
+    assert!(g.check().is_ok());
+    // Two windows that hold the same cell agree on it: tiles (0, 0) and (1, 0) overlap in the halo, and their core cells next to the shared edge are within the quantisation of each other's window.
+    assert_eq!(g.all_tiles().len(), 6 * 16);
 }

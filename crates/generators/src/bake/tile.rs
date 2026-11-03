@@ -63,7 +63,7 @@ impl TileGrid {
 
     /// Refuses a geometry that does not tile the face, has a halo of half a tile or more, or is too large for the cell index.
     pub fn check(&self) -> Result<(), String> {
-        if self.tile == 0 || self.cells % self.tile != 0 {
+        if self.tile == 0 || !self.cells.is_multiple_of(self.tile) {
             return Err(format!("the tile ({} cells) does not divide the face edge ({} cells)", self.tile, self.cells));
         }
         if self.halo * 2 >= self.tile {
