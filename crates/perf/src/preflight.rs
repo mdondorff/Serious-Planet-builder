@@ -27,6 +27,9 @@ pub struct PreflightFacts {
     pub calibrations: Vec<CpuCalibration>,
     /// The top competing processes over the sampled period, largest mean share first.
     pub top: Vec<TopOverCase>,
+    /// Whether the machine is the reference one (its adapter by the gate's rule): elsewhere the calibration limits give no verdict, so
+    /// its rounds are reported and never refuse (ADR 0092 point 5; the gate itself refuses another adapter).
+    pub reference_machine: bool,
 }
 
 /// The decision and the report that goes with it.
@@ -68,7 +71,7 @@ pub fn decide(f: &PreflightFacts) -> Preflight {
     for (i, c) in f.calibrations.iter().enumerate() {
         let counts = calibration_counts("before", c);
         let count = |name: &str| counts.iter().find(|(k, _)| k == name).map(|(_, v)| *v);
-        if let Judgement::Outside(over) = calibration::judge(&count) {
+        if let Judgement::Outside(over) = calibration::judge_for(&count, f.reference_machine) {
             failures.push(format!("CPU calibration round {}: {} (ADR 0065)", i + 1, over.join("; ")));
         }
     }
@@ -93,6 +96,12 @@ pub fn decide(f: &PreflightFacts) -> Preflight {
     }
     for (i, c) in f.calibrations.iter().enumerate() {
         report.push(reading_line(i, c));
+    }
+    if !f.reference_machine && !f.calibrations.is_empty() {
+        report.push(format!(
+            "CPU calibration: {} (the limits are the reference machine's, ADR 0092 point 5)",
+            calibration::NOT_REFERENCE_MACHINE
+        ));
     }
     if failures.is_empty() {
         report.push("PREFLIGHT OK".to_string());
@@ -125,7 +134,21 @@ mod tests {
             power_plan: Some("High performance".into()),
             calibrations: vec![calib(47_000, 90_000), calib(48_000, 100_000), calib(49_000, 95_000)],
             top: vec![TopOverCase { name: "chrome".into(), mean_pct: 1.2, max_pct: 3.0, seen: 10 }],
+            reference_machine: true,
         }
+    }
+
+    // spec: TEST-040
+    #[test]
+    fn off_the_reference_machine_the_calibration_rounds_are_reported_and_never_refuse() {
+        let mut f = quiet();
+        f.calibrations = vec![calib(55_000, 130_000), calib(56_000, 132_000), calib(54_000, 128_000)];
+        f.reference_machine = false;
+        let p = decide(&f);
+        assert!(p.passed(), "no calibration failure off the reference machine: {:?}", p.failures);
+        assert!(p.report.iter().any(|l| l.contains("CPU calibration: no verdict (not the reference machine)")), "{:?}", p.report);
+        f.reference_machine = true;
+        assert_eq!(decide(&f).failures.len(), 3, "on the reference machine every round over a limit refuses");
     }
 
     // spec: TEST-040
