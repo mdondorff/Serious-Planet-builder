@@ -225,7 +225,7 @@ pub struct OctaveCoef {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DetailCoefficients {
     pub octaves: [OctaveCoef; COEF_OCTAVES],
-    /// How dark the rock's cracks are at the crest of the 25 cm octave (a share of the rock's weight).
+    /// How dark the rock's cracks are at the crest of the 25 cm octave (a weight on the rock, in the shared 0 to 4 range).
     pub crack: f64,
 }
 

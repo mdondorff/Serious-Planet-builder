@@ -6,5 +6,5 @@
 - The lit plan carries the table (text and key only when not the Earth default); the globals carry 13 more vec4s.
 
 ## Impact
-- Code: `frame` (look file, plan, materials), `render` (globals, terrain shader). Requirements: LOOK-013 added, LOOK-002 modified.
+- Code: `frame` (look file, plan, materials), `render` (globals, terrain shader). Requirements: LOOK-013 added, LOOK-002 wording (schema 7, the version 7 fixture) edited in the unarchived delta of `ground-detail-patch`, which owns that text; whichever archives later keeps the schema 7 wording.
 - Steps (b) REND-056 and (c) REND-057 follow in their own changes.

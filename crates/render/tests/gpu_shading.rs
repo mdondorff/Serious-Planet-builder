@@ -377,6 +377,19 @@ fn the_octave_coefficients_drive_the_picture_and_the_strength_zero_is_inert() {
     assert!(hdr_of(&mut r, &ctx, &p, off) == hdr_of(&mut r, &ctx, &p, detail_plan(ShadeView::Lit, 0.0)), "the strength 0 is not inert");
 }
 
+// spec: LOOK-013
+#[test]
+fn a_changed_16_m_tilt_moves_the_picture() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let (p, _) = plan(6);
+    let mut r = renderer(&ctx, &p);
+    let plain = hdr_of(&mut r, &ctx, &p, detail_plan(ShadeView::Lit, 1.0));
+    let mut tilted = detail_plan(ShadeView::Lit, 1.0);
+    tilted.coef.octaves[0].tilt = [4.0; 4];
+    let img = hdr_of(&mut r, &ctx, &p, tilted);
+    assert!(img != plain, "a 16 m tilt of 4 changed nothing");
+}
+
 // spec: REND-037
 #[test]
 fn each_material_alone_reads_as_itself_in_colour_and_value() {
