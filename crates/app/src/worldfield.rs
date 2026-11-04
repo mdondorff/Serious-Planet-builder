@@ -623,7 +623,11 @@ impl WorldTerrain {
     /// A line for the run's output: which field, over which bake.
     pub fn describe(&self) -> String {
         let mut s = if self.has_bake {
-            format!("height field {} over a {}-cell bake ({})", self.id(), self.res, self.field_source_name())
+            // The perf logs record this text as the measured field (TEST-012): a legacy world keeps the text it had, a class-source world says so.
+            match self.store_world {
+                Some(w) if w.class_source().is_some() => format!("height field {} over a {}-cell bake (class source)", self.id(), self.res),
+                _ => format!("height field {} over a {}-cell bake", self.id(), self.res),
+            }
         } else {
             format!("height field {}", self.id())
         };

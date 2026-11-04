@@ -1,6 +1,6 @@
 ## ADDED Requirements
 ### Requirement: VIEW-065 The viewer shows the world a store records
-The viewer, `generate --plan-check` and `generate --coarse-horizon` SHALL open the world a store records (STRM-073): a class-source store as the class world, a legacy store as the legacy one, a store of both bakes only with `--class-source` or `--legacy-source` (refused naming both bakes otherwise). The viewer's title SHALL name the field source (`class source` or `legacy source`) and, with the erosion layer on, `erosion layer`; the log of the run SHALL print the description.
+The viewer, `generate --plan-check` and `generate --coarse-horizon` SHALL open the world a store records (STRM-073): a class-source store as the class world, a legacy store as the legacy one, a store of both bakes only with `--class-source` or `--legacy-source` (refused naming both bakes otherwise). The viewer's title SHALL name the field source (`class source` or `legacy source`) and, with the erosion layer on, `erosion layer`; the log of the run SHALL print the world's description, which names the class source when it is one (a legacy world's description is what it was: the perf logs record it as the measured field, TEST-012).
 
 Verify: A
 Status: planned
