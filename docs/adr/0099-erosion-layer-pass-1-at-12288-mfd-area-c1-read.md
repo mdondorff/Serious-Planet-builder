@@ -1,7 +1,7 @@
 # 0099 Erosion layer: pass 1 at 12,288 cells, MFD area, C1 read of the pass-1 change
 Status: accepted (owner, 2026-11-03: "12,288 it is"; planner inbox #55 and #56)
 Date: 2026-11-04
-Source: owner, 2026-11-03; ADR 0088 point 4; GEN-100, GEN-101; SPIKE-98 stair and block diagnosis (`target/review/erosion-diag/` of the explorer worktree), `spikes/erosion-bake-cost/results/`; change `pass1-mfd` (#1145)
+Source: owner, 2026-11-03; ADR 0088 point 4; GEN-100, GEN-101; stair and block diagnosis (explorer, planner inbox #51/#52; `target/review/erosion-diag/` of the explorer worktree); SPIKE-98 cost results (`spikes/erosion-bake-cost/results/`); change `pass1-mfd` (#1145)
 
 ## Context
 - ADR 0088 point 4 reads the pass-1 change bilinearly in pass 2 and routes pass 1 on a D8 area at a coarse grid.
@@ -14,7 +14,7 @@ Source: owner, 2026-11-03; ADR 0088 point 4; GEN-100, GEN-101; SPIKE-98 stair an
 2. The drainage area of pass 1 is shared among the lower neighbours (multiple flow direction, Freeman, exponent 1.1, highest cells first, ties by cell index; outlets pass nothing on). The receivers stay the jittered D8 of ADR 0088 for the implicit carve.
 3. Pass 2 reads the pass-1 change by Catmull-Rom (C1), clamped to the range of the four surrounding cells (a spline overshoots 7.4 % of a step: levees, and the sea floor). This replaces "bilinear" in ADR 0088 point 4.2.
 4. The kernel versions rise (bake 2, pass 2 2), so the keys follow (CON-07).
-5. Uplift (U/K) is not recalibrated by this decision; it is recalibrated with SPIKE-99's outcome (a per-class uplift map).
+5. Uplift (U/K) is not recalibrated by this decision; it follows the owner's decision on SPIKE-99.
 
 ## Consequences
 - Amends ADR 0088 point 4 (points 4.1 and 4.2; the rest stands). Point 5 (the runtime adds the layer bilinearly) is unchanged: the pass-2 tiles are the stored layer.
