@@ -1,5 +1,5 @@
 # M9 Realistic terrain: plan and iterations
-Status: active (started 2026-11-01 with the owner's M9 decisions; plan written by opus-planner, 2026-11-02). Updated at every iteration boundary; an iteration closes with a line per item: done, carried or dropped.
+Status: active (started 2026-11-01 with the owner's M9 decisions; plan written by opus-planner, 2026-11-02; re-planned 2026-11-04 after the erosion preview). Updated at every iteration boundary; an iteration closes with a line per item: done, carried or dropped.
 Sources: `docs/briefings/m9-decisions.md`; ADR 0088, 0089, 0091, 0092 (proposed); `docs/roadmap.md`.
 
 ## Exit (milestone acceptance, `cargo xtask accept M9`)
@@ -8,18 +8,21 @@ Sources: `docs/briefings/m9-decisions.md`; ADR 0088, 0089, 0091, 0092 (proposed)
 3. No-degradation gate and the speed envelope hold with the bake on.
 
 ## Iterations
-| # | Iteration | Exit | Lane | State (2026-11-02) |
+| # | Iteration | Exit | Lane | State (2026-11-04) |
 |---|---|---|---|---|
-| I1 | Continents (generator round 2) | S1-S3, S9-S11 on seeds 1-5; the owner's seed | explorer | #1078: seed 14 picked; the test field's climate aligned before the bless (delegated to the planner) |
-| I2 | Relief to Earth's bands (round 3) | TEST-082 gate (median in band +-10 %, each seed within one width); GEN-097 p99 at most 2.0 | explorer | #1086 draft; owner: p99 form; class bands proposed, owner yes pending (not blocking) |
-| I3 | Belts at convergent margins only (round 4) | belt land 13-23 %; south polar land under 2 km mostly; seed 4 in band | explorer | next |
-| I4 | Engine preview approval | the owner approves seed 14's preview (generator only) | owner | after I3 |
-| I5 | Bake code (ADR 0088) | channels, runtime base behind a switch, pass 1 carve, pass 2 incise, thermal and deposition, min/max pyramid, checkpoints; tier A/B on regions | explorer | PR 1 (channels and stored form) done locally; PR 2 next |
-| I5b | Pipeline snapshot before the bake (owner, 2026-11-02) | the full pipeline with erosion, fast: the first pass over the planet, the second pass on 30-40 sample tiles at full resolution and optionally the planet at reduced resolution (estimate under an hour); preview maps and stills; the owner approves before I6. Built as a non-editor workflow (an app mode or `generate` modes `--planet-res`, `--region`) reusable for global authoring | explorer | bake code takes resolution and region as parameters (planned) |
-| I6 | Pre-run and planet bake | one face at full resolution timed; then the overnight planet bake (6-7.5 h) with checkpoints | explorer | after I4 and I5 |
+| I1-I3 | Generator rounds 2-4 (continents, relief bands, belts) | as before | explorer | done to the preview level; high mountains reach 0.21 of GLO-30 3 km relief (SPIKE-99): a carried generator item for I9 |
+| I5 | Bake code (ADR 0088, 0098, 0099) | passes, kinds 12/13, pass 1 at 12,288 with MFD | explorer | merged (#1104-#1145) |
+| I5a | Bake fixes before the preview (owner, 2026-11-04) | (a) SPIKE-98 settings: halo 128, base every 4 cells, thermal 300 passes; (b) no one-cell pits or pillars: the depression fill capped by the receiver, what remains spread over neighbours, variety at 200 m-1 km kept (measured before and after); (c) two baked channels kept for ground detail: drainage area (pass 1, MFD) and erosion/deposition depth (pass 2) | explorer | next |
+| I5c | Runtime read of the layer (PR 6) | the field reads the layer C1, the crease band on (ADR 0098), the coast fade within 3 m; previews render through it | crusader | next |
+| I8a | Ground detail, first step (R6, pulled forward) | shader detail with variety: more than one scale, varied by slope and by the channels of I5a(c); 1.8 m, 10 m, 50 m stills; GPU time; behind a switch | crusader after I5c; design by spikes | design now |
+| I4b | Integrated preview (owner, 2026-11-04) | through the viewer's path, everything the product shows (labelled omissions only): mountains incl. the owner's circled wall, hills, a plains site, a coast; 2 km, 300 m, 50 m, 10 m, 1.8 m; low sun | explorer + crusader | after I5a, I5c, I8a |
+| I6 | Planet bake | the owner's go after I4b; about 6-7 h projected (SPIKE-98; single-thread figures until the machine is restarted) | explorer | after I4b |
 | I7 | Channels as per-point primitives (R5) | rises 0, gate, stills; behind a switch | tbd | open |
-| I8 | Ground detail at walking height (R6) | 1.8 m stills at fixed sites, GPU time; behind a switch | tbd | open |
-| I9 | Look against the reference (R7) | scorecard on the bake; owner judgement | explorer + owner | open |
+| I8b | Ground materials from the channels (owner, 2026-11-04: in M9, so the channels are used) | material mix (rock, scree, soil, grass, wet ground) from slope, drainage area and deposition depth; ground-detail variety by material; owner's look | crusader | after I6 |
+| I9 | Look against the reference (R7) | scorecard on the bake; high-mountain relief; owner judgement | explorer + owner | open |
+| B | k renamed to a per-class band amplitude; kinds 10/11 and `m + k (e - m)` retired (SPIKE-99, owner yes 2026-11-04) | spec and code; no look change | tbd | after I4b |
+
+Ground-detail noise and materials are runtime only: they iterate after the bake without a rebuild. The baked channels are not: they go into the bake now.
 
 ## Beside M9 in the same weeks (not M9 exit items)
 | Item | Lane | State |
@@ -35,6 +38,6 @@ Sources: `docs/briefings/m9-decisions.md`; ADR 0088, 0089, 0091, 0092 (proposed)
 - The snapshot workflow is the base of the dormant "global authoring preview" item (status.md).
 
 ## Dates (estimates, not commitments)
-- I1-I3 and I5: this week (owner away until about 2026-11-08).
-- I4 and I6: after the owner's preview approval; the bake runs the following night.
-- I7-I9: after the owner's return; acceptance not before 2026-11-16.
+- I5a, I5c, I8a design: 2026-11-04 to 11-06.
+- I4b: about 2026-11-06; I6 the night after the owner's go (the machine restart is not before Sat 2026-11-07).
+- I8b, I7, I9: from 2026-11-09; acceptance not before 2026-11-16.
