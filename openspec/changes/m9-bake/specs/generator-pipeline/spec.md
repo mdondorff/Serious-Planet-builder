@@ -179,6 +179,32 @@ Source: ADR 0088 points 4.2 and 6, ADR 0088/0089 accepted 2026-11-01; SPIKE-61, 
 - **WHEN** pass 2's local carve runs on a synthetic tile with a closed basin
 - **THEN** no cell ends higher than its input, and the basin is not filled
 
+### Requirement: GEN-110 Pass 1 keeps the drainage area of its final route
+Pass 1 SHALL return, with the face's change, the drainage area of the face's own cells from the last route of its carve (by multiple flow direction, GEN-100) as one byte a cell: `round(8 log2(area / cell area))`, so 0 is a cell's own area, one step is a ninth more area, and 255 is 2^31.9 cells; a larger area is stored as 255. The face's change SHALL be the same bytes with and without the area, and the codes the same bytes on any thread count (CON-14). The area serves the viewer's ground materials and detail; it is not an input of pass 2.
+
+Verify: A
+Status: planned
+Source: owner 2026-11-04 (planner inbox #58.3, M9 plan I5a(c)); GEN-100
+
+#### Scenario: The area codes
+- **WHEN** pass 1 runs on a synthetic face on 1 and on 2 threads, with and without the area
+- **THEN** the change is equal in both, the codes are equal on both thread counts, a cell with nothing above it has code 0, and some cell has at least 8 (an area of two cells)
+
+### Requirement: GEN-111 Pass 2 keeps the deposited depth of its core
+Pass 2 SHALL return, with the core's change, one byte plane over the core: the depth deposited, `round(m)` of the depth in metres (0 to 255 m in steps of 1 m; more is stored as 255; owner 2026-11-04):
+- deposited is the deposition sweep's rise plus thermal's gain, `max(0, z_final - z_thermal) + max(0, z_thermal - ref)`, `ref` the base plus the pass-1 change where it is positive (a raise by uplift or a filled pit is not a deposit);
+- the depth removed is not stored: a reader derives it as `max(0, deposited - change)` with the layer's change at the cell (`removed_depth_m`); it is exact where pass 1 did not raise the cell, short by the raise where it did (15 % of mountain land and 35 % of hills in seed 14's samples), and clipped where the deposited depth is 255;
+- the plane SHALL be the same bytes on any thread count.
+It serves the viewer's ground materials (soil and scree where deposited, rock where the change is deep and little is deposited).
+
+Verify: A
+Status: planned
+Source: owner 2026-11-04 (planner inbox #58.3, M9 plan I5a(c); the one-plane, 1 m form chosen on the sizes); GEN-101
+
+#### Scenario: The deposited depth and what is removed
+- **WHEN** one synthetic tile is run with a face change of -30 m, of +10 m and with none
+- **THEN** the plane holds deposits in places and none elsewhere, the codes are 0 for 0 m, 255 beyond the range, steps of 1 m and increasing, and the depth removed that is derived from a cell's deposited depth and change is never negative and is at most the pass-1 raise (zero where pass 1 did not raise) away from deposited minus change, within the 1 m step
+
 ### Requirement: GEN-102 Cap bounds read the layer's pyramid
 The field's height bounds over a cap SHALL take the layer's part from the layer's min/max pyramid (STRM-066):
 - the nodes the cap reaches, widened by 4 cells (2 for the stencil, 2 for the cross-fade at a cube edge), on every face it touches; a node wholly inside is taken whole;

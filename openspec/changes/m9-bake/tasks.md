@@ -39,4 +39,5 @@ Revised 2026-10-31 (SPIKE-70): the carve moves to a face pass before the tile dr
 | Local carve cap | about 1 km^2 | SPIKE-70 |
 | Bake estimate | about 6-7.5 h (central 6.9 h) for 2,140 land tiles at 4 at a time (superseded: SPIKE-98 projects about 42-63 h as built on today's machine, a cheaper pass 2 is its subject) | SPIKE-61, SPIKE-70, SPIKE-71, SPIKE-98 |
 - [ ] 2.x PR `change/pass1-mfd`: the drainage area by multiple flow direction (Freeman 1.1, receivers D8), the C1 read of the pass-1 change, kernel versions 2, pass 1 at 12,288 by default (GEN-100, GEN-101); tier A: area shared and jitter-independent, a smooth read, thread-count equality; `numerics-reviewer`, `spec-guardian`, `verifier`
+- [ ] 2.z PR `change/bake-channels`: the drainage area (GEN-110, record kind 14), the deposited depth (GEN-111, kind 15, 1 m steps), the keys and the reader (STRM-072); size per land cell and for the planet reported; numerics-reviewer, spec-guardian, verifier.
 - [ ] 2.y PR `change/pass2-cost`: SPIKE-98 candidate B: the base sampled every 4 cells and interpolated, halo 128, thermal 300 passes of 1/8, pass-2 kernel version 3 (GEN-101).

@@ -107,6 +107,29 @@ pub fn pass1_face(
     params: &CarveParams,
     threads: usize,
 ) -> FaceChange {
+    pass1_face_with_area(spec, base, factor, params, threads).0
+}
+
+/// The drainage area of a face's own cells as a byte per cell (GEN-110): `round(8 log2(area / cell area))`, so 0 for a cell's own area and 255 for 2^31.9 cells.
+pub fn area_code(area_m2: f64, cell_m2: f64) -> u8 {
+    (AREA_CODE_STEPS * libm::log2((area_m2 / cell_m2).max(1.0))).round().min(255.0) as u8
+}
+
+/// The area in cells of a code of [`area_code`].
+pub fn area_cells(code: u8) -> f64 {
+    libm::exp2(f64::from(code) / AREA_CODE_STEPS)
+}
+
+const AREA_CODE_STEPS: f64 = 8.0;
+
+/// [`pass1_face`] and the codes of the final route's drainage area (by multiple flow direction, GEN-100) of the face's own cells, row-major `cells x cells` (`j` outer).
+pub fn pass1_face_with_area(
+    spec: &FaceSpec,
+    base: &(dyn Fn(Vec3) -> f64 + Sync),
+    factor: Option<&(dyn Fn(Vec3) -> f64 + Sync)>,
+    params: &CarveParams,
+    threads: usize,
+) -> (FaceChange, Vec<u8>) {
     assert!(
         spec.halo * 2 < spec.cells,
         "the halo ({} cells) must be under half the face ({} cells): beyond that the extended plane leaves the neighbouring ground",
@@ -119,6 +142,21 @@ pub fn pass1_face(
     let factors: Option<Vec<f64>> = factor.map(|f| sample_grid(spec, f, threads));
     let mut z = z0.clone();
     let params = CarveParams { sea_level: spec.sea_level, ..*params };
-    carve(&grid, &mut z, &outlet, &params, factors.as_deref(), spec.stream());
-    FaceChange { face: spec.face, cells: spec.cells, halo: spec.halo, change: z.iter().zip(&z0).map(|(a, b)| (a - b) as f32).collect() }
+    let routing = carve(&grid, &mut z, &outlet, &params, factors.as_deref(), spec.stream());
+    let (m, h, cell_m2) = (spec.cells + 2 * spec.halo, spec.halo, spec.dx() * spec.dx());
+    let mut area = Vec::with_capacity(spec.cells * spec.cells);
+    for j in 0..spec.cells {
+        for i in 0..spec.cells {
+            area.push(area_code(routing.area[(j + h) * m + i + h], cell_m2));
+        }
+    }
+    (
+        FaceChange {
+            face: spec.face,
+            cells: spec.cells,
+            halo: spec.halo,
+            change: z.iter().zip(&z0).map(|(a, b)| (a - b) as f32).collect(),
+        },
+        area,
+    )
 }

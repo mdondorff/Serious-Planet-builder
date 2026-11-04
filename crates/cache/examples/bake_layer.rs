@@ -125,6 +125,17 @@ fn main() {
             mib()
         );
     }
+    // The drainage areas are part of the layer: copy them beside the tiles before the pass-1 store can be dropped.
+    let copied = planet_cache::layer_channels::copy_areas(
+        &face_dir,
+        &tile_dir,
+        &world,
+        face_bake_res,
+        &layer,
+        &(0..6).map(Face).collect::<Vec<_>>(),
+    )
+    .unwrap_or_else(|e| fail(&e.to_string()));
+    println!("drainage area: {} faces copied to the layer store", copied.len());
     let store = TileStore::open(&face_dir, world.params()).unwrap_or_else(|e| fail(&e.to_string()));
     let faces: Vec<FaceChange> = (0..6)
         .map(|f| {
