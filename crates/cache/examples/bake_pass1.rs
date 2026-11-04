@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
-use planet_cache::global_store::GlobalWorld;
+use planet_cache::global_store::{FieldSource, GlobalWorld};
 use planet_cache::layer_store::{load_face_change, run_pass1, LayerSpec};
 use planet_cache::pack::TileStore;
 use planet_core::{Face, Vec3};
@@ -25,6 +25,7 @@ fn main() {
     let (mut seed, mut res, mut out, mut threads, mut concurrency, mut width) =
         (14u64, 12_288usize, None::<PathBuf>, 0usize, 1usize, 1024usize);
     let mut faces: Vec<u8> = (0..6).collect();
+    let (mut global_dir, mut global_res, mut class_source, mut legacy_source) = (None::<PathBuf>, 16_384u32, false, false);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut value = || it.next().cloned().unwrap_or_else(|| fail(&format!("{a} needs a value")));
@@ -36,6 +37,10 @@ fn main() {
             "--threads" => threads = value().parse().unwrap_or_else(|_| fail("--threads needs an integer")),
             "--concurrency" => concurrency = value().parse().unwrap_or_else(|_| fail("--concurrency needs an integer")),
             "--map-width" => width = value().parse().unwrap_or_else(|_| fail("--map-width needs an even integer")),
+            "--global-dir" => global_dir = Some(PathBuf::from(value())),
+            "--global-res" => global_res = value().parse().unwrap_or_else(|_| fail("--global-res needs an integer")),
+            "--class-source" => class_source = true,
+            "--legacy-source" => legacy_source = true,
             "--faces" => {
                 faces = value().split(',').map(|f| f.parse().ok().filter(|f| *f < 6).unwrap_or_else(|| fail("--faces needs a list of 0..5"))).collect()
             }
@@ -56,8 +61,23 @@ fn main() {
     let (threads, threads_note) = planet_streaming::topology::bake_threads(threads).unwrap_or_else(|e| fail(&e));
     let out = out.unwrap_or_else(|| PathBuf::from(format!("target/bake/pass1-seed-{seed}-res-{res}")));
     let store_dir = out.join("layer");
-    let world = GlobalWorld::from_definition(&WorldDefinition::single_planet(RADIUS_M, seed)).unwrap_or_else(|e| fail(&format!("{e:?}")));
-    let inputs = BakeInputs::new(seed, threads);
+    // The world follows the field source: the one the store at --global-dir records (a store of both is refused unless --class-source or --legacy-source says which), or the class source
+    // with --class-source alone, else the legacy generator (STRM-073).
+    let def = WorldDefinition::single_planet(RADIUS_M, seed);
+    let choice = match (class_source, legacy_source) {
+        (true, true) => fail("--class-source and --legacy-source exclude each other"),
+        (true, false) => Some(FieldSource::Class),
+        (false, true) => Some(FieldSource::Legacy),
+        (false, false) => None,
+    };
+    let inputs = std::sync::Arc::new(BakeInputs::new(seed, threads));
+    let world = match &global_dir {
+        Some(dir) => GlobalWorld::for_store(&def, dir, global_res, choice, threads).unwrap_or_else(|e| fail(&e)),
+        None if choice == Some(FieldSource::Class) => {
+            GlobalWorld::from_definition(&def).unwrap_or_else(|e| fail(&format!("{e:?}"))).with_class_source(inputs.clone())
+        }
+        None => GlobalWorld::from_definition(&def).unwrap_or_else(|e| fail(&format!("{e:?}"))),
+    };
     let base = |d: Vec3| inputs.base(d);
     let factor = |d: Vec3| inputs.carve_factor(d);
     let halo = halo.unwrap_or(res.div_ceil(128).max(4).min((res - 1) / 2));

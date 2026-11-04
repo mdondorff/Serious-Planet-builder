@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use planet_cache::global_store::GlobalWorld;
+use planet_cache::global_store::{FieldSource, GlobalWorld};
 use planet_cache::layer_store::{load_face_change, run_pass1, LayerSpec};
 use planet_cache::layer_tiles::{drop_pass1, face_change_reader, faces_digest, load_tile, run_pass2, Pass2Inputs, TileLayerSpec};
 use planet_cache::pack::TileStore;
@@ -38,6 +38,11 @@ struct Opts {
     threads: usize,
     region: Option<PathBuf>,
     keep_pass1: bool,
+    /// `--global-dir DIR`: the stored field bake whose recorded source the layer follows; `--global-res` its cells a face edge.
+    global_dir: Option<PathBuf>,
+    global_res: u32,
+    class_source: bool,
+    legacy_source: bool,
     map_width: usize,
     image_step: Option<usize>,
 }
@@ -89,8 +94,23 @@ fn main() {
         );
         return;
     }
-    let world = GlobalWorld::from_definition(&WorldDefinition::single_planet(RADIUS_M, o.seed)).unwrap_or_else(|e| fail(&format!("{e:?}")));
-    let inputs = BakeInputs::new(o.seed, threads);
+    // The world follows the field source: the one the store at --global-dir records (a store of both is refused unless --class-source or --legacy-source says which), or the class source with
+    // --class-source alone, else the legacy generator. The layer's keys follow the world (STRM-073).
+    let def = WorldDefinition::single_planet(RADIUS_M, o.seed);
+    let choice = match (o.class_source, o.legacy_source) {
+        (true, true) => fail("--class-source and --legacy-source exclude each other"),
+        (true, false) => Some(FieldSource::Class),
+        (false, true) => Some(FieldSource::Legacy),
+        (false, false) => None,
+    };
+    let inputs = std::sync::Arc::new(BakeInputs::new(o.seed, threads));
+    let world = match &o.global_dir {
+        Some(dir) => GlobalWorld::for_store(&def, dir, o.global_res, choice, threads).unwrap_or_else(|e| fail(&e)),
+        None if choice == Some(FieldSource::Class) => {
+            GlobalWorld::from_definition(&def).unwrap_or_else(|e| fail(&format!("{e:?}"))).with_class_source(inputs.clone())
+        }
+        None => GlobalWorld::from_definition(&def).unwrap_or_else(|e| fail(&format!("{e:?}"))),
+    };
     let (base, factor) = (|d: Vec3| inputs.base(d), |d: Vec3| inputs.carve_factor(d));
     let face_halo = o.face_res.div_ceil(128).max(4).min((o.face_res - 1) / 2);
     let layer = LayerSpec {
@@ -246,6 +266,10 @@ fn parse() -> Opts {
         threads: 0,
         region: None,
         keep_pass1: false,
+        global_dir: None,
+        global_res: 16_384,
+        class_source: false,
+        legacy_source: false,
         map_width: 1024,
         image_step: None,
     };
@@ -265,6 +289,10 @@ fn parse() -> Opts {
             "--region" => o.region = Some(PathBuf::from(value())),
             "--image-step" => o.image_step = Some(number("--image-step")),
             "--keep-pass1" => o.keep_pass1 = true,
+            "--global-dir" => o.global_dir = Some(PathBuf::from(value())),
+            "--global-res" => o.global_res = number("--global-res") as u32,
+            "--class-source" => o.class_source = true,
+            "--legacy-source" => o.legacy_source = true,
             other => fail(&format!(
                 "unknown option '{other}' (known: --seed N, --face-res N, --planet-res N, --tile N, --halo N, --region FILE, --keep-pass1, --out DIR, --threads N, --map-width W)"
             )),

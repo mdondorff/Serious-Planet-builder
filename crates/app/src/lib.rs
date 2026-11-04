@@ -153,6 +153,8 @@ pub struct Options {
     pub allow_stale: bool,
     /// `generate --global-dir` and `--verify-global`: sample the class source's surface (GEN-115) instead of the legacy generator's; the store's keys differ (STRM-073).
     pub class_source: bool,
+    /// `--legacy-source`: the store's legacy bake when it holds both (STRM-073).
+    pub legacy_source: bool,
     /// `generate`: bake the global-coarse field into a tile store in this directory as blocks (STRM-012).
     pub global_dir: Option<PathBuf>,
     /// `generate`: regenerate a sample of the global bake stored in this directory and compare.
@@ -262,6 +264,16 @@ pub struct Options {
 }
 
 impl Options {
+    /// Which field source of a store to read when it holds both (`--class-source` or `--legacy-source`, STRM-073), or none to let the store decide.
+    pub fn field_source_choice(&self) -> Result<Option<planet_cache::global_store::FieldSource>, String> {
+        match (self.class_source, self.legacy_source) {
+            (true, true) => Err("--class-source and --legacy-source exclude each other".into()),
+            (true, false) => Ok(Some(planet_cache::global_store::FieldSource::Class)),
+            (false, true) => Ok(Some(planet_cache::global_store::FieldSource::Legacy)),
+            (false, false) => Ok(None),
+        }
+    }
+
     /// The tile generation pool of the pipelined loop and the streaming scenes (STRM-020): `--gen-workers` threads, else the machine's
     /// hardware threads less `--gen-reserve` when given, else the terrain share (BUDG-003); with `--gen-ahead` jobs queued behind them
     /// (default as many).
@@ -356,6 +368,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         sample: 0,
         allow_stale: false,
         class_source: false,
+        legacy_source: false,
         global_dir: None,
         verify_global: None,
         plan_check: None,
@@ -541,6 +554,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             }
             "--allow-stale" => o.allow_stale = true,
             "--class-source" => o.class_source = true,
+            "--legacy-source" => o.legacy_source = true,
             "--global-dir" => o.global_dir = Some(PathBuf::from(it.next().ok_or("--global-dir needs a directory")?)),
             "--repeats" => o.repeats = Some(it.next().ok_or("--repeats needs a number")?.parse().map_err(|e| format!("--repeats: {e}"))?),
             "--horizon-threads" => {
@@ -1299,6 +1313,23 @@ mod tests {
         // The legacy world asks for other keys: the entries are stale and nothing is compared.
         let e = run_str(&["generate", "--verify-global", &store, "--seed", "3"]).unwrap_err();
         assert!(e.contains("compared nothing"), "{e}");
+        // The pre-fill after the bake follows the store's recorded source (one level: the class store gets its coarse tiles through the class world).
+        let pre = run_str(&[
+            "generate",
+            "--prefill-dir",
+            &store,
+            "--global-res",
+            "8",
+            "--seed",
+            "3",
+            "--class-source",
+            "--prefill-levels",
+            "3",
+            "--floor-level",
+            "3",
+        ])
+        .unwrap();
+        assert!(pre.contains("pre-fill"), "{pre}");
         // The same directory holds the legacy bake beside it without either reading the other's blocks.
         let legacy = run_str(&args(&[])).unwrap();
         assert!(legacy.contains("6 blocks written, 0 already stored"), "{legacy}");

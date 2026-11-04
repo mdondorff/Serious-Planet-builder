@@ -147,7 +147,11 @@ fn prepare(def: &WorldDefinition, src: &dyn LatticeSource, n: u32, steps: u32) -
         params: run_params(),
         inputs: declared_inputs_hash(radius_m, UPLIFT_RHO, ERODIBILITY, src.relief_scale()),
     };
-    let world = GlobalWorld::from_definition(def).map_err(|e| format!("the definition cannot be generated: {e}"))?.with_coupled(spec);
+    let mut world = GlobalWorld::from_definition(def).map_err(|e| format!("the definition cannot be generated: {e}"))?.with_coupled(spec);
+    // The run follows the field source of the bake it starts from: a class-source bake keys the run (and what is stored beside it) through a class world (STRM-073).
+    if let Some(class) = src.class_source() {
+        world = world.with_class_source(class);
+    }
     let (level, cells) = world.layout(n).map_err(|e| format!("a coupled run of {n} cells: {e:?}"))?;
     let key = world.coupled_key(TileId::new(Face(0), level, 0, 0).expect("tile of the layout"), cells).0;
     let id = u64::from_le_bytes(key[..8].try_into().expect("8 bytes"));
@@ -255,7 +259,8 @@ pub fn generate_coupled_run(o: &crate::Options, out: &mut dyn std::io::Write) ->
         }
         None => WorldDefinition::single_planet(crate::skeleton::RADIUS_M, o.seed),
     };
-    let world = GlobalWorld::from_definition(&def).map_err(|e| format!("the definition cannot be generated: {e}"))?;
+    let threads = planet_streaming::topology::bake_threads(0).map_or(4, |t| t.0);
+    let world = GlobalWorld::for_store(&def, dir, o.global_res, o.field_source_choice()?, threads)?;
     let store = TileStore::open(dir, world.params()).map_err(|e| e.to_string())?;
     let src = planet_cache::global_store::StoreSource::new(&store, &world, o.global_res).map_err(|e| e.to_string())?;
     let n = run_cells(o.global_res);
@@ -292,7 +297,8 @@ pub fn timed_remake(o: &crate::Options, store: &Path, out: &Path) -> Result<(f64
         }
         None => WorldDefinition::single_planet(crate::skeleton::RADIUS_M, o.seed),
     };
-    let world = GlobalWorld::from_definition(&def).map_err(|e| format!("the definition cannot be generated: {e}"))?;
+    let threads = planet_streaming::topology::bake_threads(0).map_or(4, |t| t.0);
+    let world = GlobalWorld::for_store(&def, store, o.global_res, o.field_source_choice()?, threads)?;
     let bake = TileStore::open(store, world.params()).map_err(|e| e.to_string())?;
     let src = planet_cache::global_store::StoreSource::new(&bake, &world, o.global_res).map_err(|e| e.to_string())?;
     let n = run_cells(o.global_res);

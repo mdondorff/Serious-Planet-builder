@@ -948,6 +948,47 @@ impl GlobalWorld {
         self
     }
 
+    /// The world of the bake of `res` cells stored in `dir`, with the field source the store records (STRM-073): the class source's when the store holds its blocks, the legacy generator's when it
+    /// holds those. A store that holds both is refused unless `choice` says which; a `choice` the store does not hold is refused, and so is a store that holds neither (another seed, version or
+    /// resolution), naming the keys. The class source's lattice is built on `threads` threads (the same result for any count).
+    pub fn for_store(
+        def: &WorldDefinition,
+        dir: &Path,
+        res: u32,
+        choice: Option<FieldSource>,
+        threads: usize,
+    ) -> Result<GlobalWorld, String> {
+        let legacy = GlobalWorld::from_definition(def).map_err(|e| format!("the definition cannot be generated: {e}"))?;
+        let store = TileStore::open(dir, legacy.params()).map_err(|e| format!("{}: {e}", dir.display()))?;
+        let legacy_check = legacy.check_source(&store, res);
+        let has_legacy = legacy_check == Ok(true);
+        if choice == Some(FieldSource::Legacy) {
+            return if has_legacy {
+                Ok(legacy)
+            } else {
+                Err(format!("{}: asked for the legacy source: {}", dir.display(), explain_source(&legacy_check, res)))
+            };
+        }
+        let class = GlobalWorld::from_definition(def)
+            .map_err(|e| format!("the definition cannot be generated: {e}"))?
+            .with_class_source(Arc::new(BakeInputs::new(legacy.seed(), threads)));
+        let class_check = class.check_source(&store, res);
+        let has_class = class_check == Ok(true);
+        match (has_legacy, has_class) {
+            (true, true) if choice.is_none() => Err(format!(
+                "{}: the store holds a legacy bake and a class-source bake of {res} cells: say which (--class-source or --legacy-source)",
+                dir.display()
+            )),
+            (_, true) => Ok(class),
+            (true, false) if choice.is_none() => Ok(legacy),
+            _ => Err(format!(
+                "{}: {}",
+                dir.display(),
+                explain_source(if choice == Some(FieldSource::Class) { &class_check } else { &legacy_check }, res)
+            )),
+        }
+    }
+
     /// The class source this bake samples, if any.
     pub fn class_source(&self) -> Option<&Arc<BakeInputs>> {
         self.class_source.as_ref()
@@ -1457,6 +1498,10 @@ impl<'a> StoreSource<'a> {
 }
 
 impl LatticeSource for StoreSource<'_> {
+    fn class_source(&self) -> Option<Arc<BakeInputs>> {
+        self.world.class_source().cloned()
+    }
+
     fn res(&self) -> u32 {
         self.res
     }
@@ -2562,4 +2607,18 @@ pub fn load_coupled(store: &TileStore, world: &GlobalWorld) -> Result<StoredCoup
         }
     }
     Ok(out)
+}
+
+/// Which field source a store's bake was made from (STRM-073).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FieldSource {
+    Legacy,
+    Class,
+}
+
+fn explain_source(check: &Result<bool, String>, res: u32) -> String {
+    match check {
+        Err(e) => e.clone(),
+        Ok(_) => format!("the store holds no bake of {res} cells for this definition"),
+    }
 }
