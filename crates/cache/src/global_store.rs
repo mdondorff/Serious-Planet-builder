@@ -20,12 +20,13 @@ use std::time::Instant;
 
 use planet_core::cube::TangentWarp;
 use planet_core::hash::HASH_VERSION;
-use planet_core::{Face, FaceMapping, TileId};
+use planet_core::{Face, FaceMapping, TileId, Vec3};
+use planet_generators::bake::inputs::BakeInputs;
 use planet_generators::coarsehorizon::{CoarseParams, COARSE_HORIZON_VERSION, MAX_AZIMUTHS};
 use planet_generators::coupled::{CoupledParams, CoupledState, COUPLED_VERSION, NONE as COUPLED_NONE};
 use planet_generators::global::{
-    bake_block, bake_blocks_with, check_tiled, BakeError, GlobalCoarseGenerator, GlobalSample, LatticeSource, ReadError, GLOBAL_VERSION,
-    IMPLEMENTATION_ID, MAX_BATCH_BYTES, MAX_BLOCK_CELLS, MAX_TILED_RES,
+    bake_block_sampled, bake_blocks_sampled, check_tiled, class_sample, BakeError, GlobalCoarseGenerator, GlobalSample, LatticeSource,
+    ReadError, GLOBAL_VERSION, IMPLEMENTATION_ID, MAX_BATCH_BYTES, MAX_BLOCK_CELLS, MAX_TILED_RES,
 };
 use planet_generators::ocean::{
     analyse_block, ocean_bits, parallel_map, BlockAnalysis, CubeIndex, OceanBits, OceanError, OceanLattice, OceanMerger, OceanTable,
@@ -43,7 +44,7 @@ use planet_world_def::{
 use crate::codec::shuffle;
 use crate::key::{
     body_params_hash128, cache_key, read_entry, CacheKey, KeyInputs, Kind, ReadEntry, PARAM_COUPLED, PARAM_GRID_RES, PARAM_HORIZON,
-    PARAM_OCEAN_AREA_FRACTION, PARAM_RESOLUTION,
+    PARAM_OCEAN_AREA_FRACTION, PARAM_RESOLUTION, QUERY_FIELD_SOURCE,
 };
 use crate::pack::{PackError, PackWriter, Record, StoreParams, TileStore};
 use crate::relief_store::{KIND_GLOBAL_CLASS_WEIGHTS, KIND_GLOBAL_RELIEF};
@@ -705,6 +706,8 @@ pub struct GlobalWorld {
     coupled: CoupledSpec,
     /// The coarse horizon its channel stores (STRM-045): observer lattice and march, over the coupled run above.
     horizon: HorizonSpec,
+    /// The class source the bake samples instead of the legacy generator (GEN-115): its inputs, whose identity is part of the bake's read set (STRM-073).
+    class_source: Option<Arc<BakeInputs>>,
 }
 
 impl GlobalWorld {
@@ -733,6 +736,27 @@ impl GlobalWorld {
         let level = (res / cells).trailing_zeros() as u8;
         check_tiled(level, cells)?;
         Ok((level, cells))
+    }
+
+    /// Whether the store holds the first block of a bake of `res` cells under this world's keys (STRM-073): `Ok(true)` when it does, `Ok(false)` when it holds no block of that tile, and an
+    /// error naming the expected key, the key found and the field source this world samples when it holds the tile under another key, which is a bake of another field source (the legacy
+    /// generator or another class source), another seed or other versions: refused, never mixed (ADR 0006). The viewer's `--erosion on` asks it once the layer manifest records the source (change `layer-manifest`).
+    pub fn check_source(&self, store: &TileStore, res: u32) -> Result<bool, String> {
+        let (level, cells) = self.layout(res).map_err(|e| e.to_string())?;
+        let tile = tile_at(level, 0);
+        let key = self.block_key(tile, cells);
+        let keys = store.keys_for(KIND_GLOBAL_BLOCK, tile);
+        match keys.first() {
+            None => Ok(false),
+            Some(_) if keys.contains(&key) => Ok(true),
+            Some(other) => Err(format!(
+                "the store holds its first block of the {res}-cell bake under key {other}, this world expects {key} ({}): the store was baked from another field source, seed, version or resolution",
+                match &self.class_source {
+                    Some(_) => format!("the class source, id {:016x}", BakeInputs::id()),
+                    None => "the legacy generator".to_string(),
+                }
+            )),
+        }
     }
 
     /// The coupled run this world's channel stores.
@@ -905,7 +929,36 @@ impl GlobalWorld {
             sea,
             coupled: CoupledSpec::default(),
             horizon: HorizonSpec { params: CoarseParams::for_lattice(2048, radius_m), ..HorizonSpec::default() },
+            class_source: None,
         })
+    }
+
+    /// The bake samples the class source `inputs` (GEN-115) instead of the legacy generator: the elevation is `BakeInputs::base`, the climate follows it, the shore is the legacy one. Its
+    /// identity ([`BakeInputs::id`], the seed) joins the bake's read set, so every key of the store (the stage key and all it sources) is another bake's than the legacy world's (STRM-073).
+    ///
+    /// # Panics
+    /// When the class source is of another seed than the world's: it would bake its elevation over this world's coasts and store that under this world's key.
+    pub fn with_class_source(mut self, inputs: Arc<BakeInputs>) -> GlobalWorld {
+        assert_eq!(inputs.seed(), self.seed, "the class source is of seed {} but the world's seed is {}", inputs.seed(), self.seed);
+        let mut params = BakeInputs::id().to_le_bytes().to_vec();
+        params.extend(self.seed.to_le_bytes());
+        self.reads.retain(|r| !matches!(r, ReadEntry::Query { kind: QUERY_FIELD_SOURCE, .. }));
+        self.reads.push(ReadEntry::Query { kind: QUERY_FIELD_SOURCE, params, result: [0; 16] });
+        self.class_source = Some(inputs);
+        self
+    }
+
+    /// The class source this bake samples, if any.
+    pub fn class_source(&self) -> Option<&Arc<BakeInputs>> {
+        self.class_source.as_ref()
+    }
+
+    /// The pointwise field this world bakes: the class source's [`class_sample`] when it has one, the legacy generator's otherwise.
+    pub fn field(&self, d: Vec3) -> GlobalSample {
+        match &self.class_source {
+            Some(inputs) => class_sample(self.seed, d, inputs),
+            None => planet_generators::global::sample(self.seed, d),
+        }
     }
 
     /// The sea of this body as the definition gives it (Earth defaults for what it does not set).
@@ -1611,8 +1664,8 @@ pub fn build_global(
     let (mut written, mut failed) = (0usize, None);
     let stop = AtomicBool::new(false);
     let in_bake_ns = AtomicU64::new(0);
-    let stats = bake_blocks_with(
-        world.seed(),
+    let stats = bake_blocks_sampled(
+        &|d| world.field(d),
         &TangentWarp,
         level,
         cells,
@@ -2450,7 +2503,7 @@ pub fn verify_global(store: &TileStore, world: &GlobalWorld, sample: usize) -> V
             )));
             continue;
         }
-        let fresh = bake_block(world.seed, &TangentWarp, r.tile, cells);
+        let fresh = bake_block_sampled(&|d| world.field(d), &TangentWarp, r.tile, cells);
         let bits =
             |s: &GlobalSample| [s.continent.to_bits(), s.elevation_m.to_bits(), s.temperature_c.to_bits(), s.precipitation_mm.to_bits()];
         match (0..fresh.len()).position(|i| bits(&fresh[i]) != bits(&kept[i])) {

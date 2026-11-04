@@ -1,3 +1,5 @@
+#[path = "class_source_store.rs"]
+mod class_source_store;
 #[path = "compact.rs"]
 mod compact;
 #[path = "concurrent_source.rs"]
