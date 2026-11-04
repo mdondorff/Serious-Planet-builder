@@ -1,3 +1,3 @@
 - [x] 1.1 Six slots in `MaterialParams`, `GlossParams`, `DetailCoefficients`; the look file keys, schema 8, the shader and the globals
-- [x] 1.2 Tests: look file (fixture v8, bad values, older build), GPU (slots off equal plain, each slot and each octave entry read)
+- [x] 1.2 Tests: look file (fixture v8, bad values, older build), GPU (each slot, each octave entry and the albedo-versus-tilt split read; the lit goldens unchanged)
 - [ ] 1.3 Reviews (`numerics-reviewer`, `spec-guardian`), `verifier`, `test gpu --real` goldens, prepush, PR
