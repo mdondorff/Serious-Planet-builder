@@ -15,20 +15,16 @@ Source: ADR 0088 points 4 and 7, M9 draft decision 7 (owner: a separate layer fi
 - **WHEN** a layer bake is killed after some tiles and resumed, and its layer is later opened against a bake with another key
 - **THEN** the resumed layer equals an uninterrupted one byte for byte, and the second open is refused with both keys named
 
-### Requirement: STRM-066 The layer stores a min/max pyramid
-The layer SHALL store beside each tile's heights the min and max of:
-- each 32 x 32 block of the tile's core (its 33 x 33 nodes, edges shared), 96 x 96 blocks a tile;
-- each coarser level from four blocks below, down to 3 x 3;
-- the whole tile.
-Each value SHALL be a `u16` over `[-H, H]` with `H` the body field's `max_abs_height_m`, in steps of `2 H / 65535`, the min rounded down and the max rounded up. The pyramid SHALL be written and read with its tile, through a `planet-generators` trait that `planet-cache` implements (CON-02). The block size and the precision are start values (SPIKE-83).
+### Requirement: STRM-066 The layer has a min/max pyramid
+The layer SHALL hold, with each tile, the min and max of each block of 32 x 32 cells of the tile's core, of each coarser level from 2 x 2 blocks below, and of the whole tile. It SHALL be stored with its tile or built when the tile is decoded (PR 6 builds it at decode, in f32, exactly over the dequantised core), and read through a `planet-generators` trait that `planet-cache` implements (CON-02). A stored pyramid holds `u16` over `[-H, H]` with `H` the body field's `max_abs_height_m`, the min rounded down and the max up.
 
 Verify: A
 Status: planned
-Source: ADR 0088 point 8, ADR 0088/0089 accepted 2026-11-01; SPIKE-83 (32 x 32 blocks; about 90 MB for the planet, built in seconds)
+Source: ADR 0088 point 8, ADR 0088/0089 accepted 2026-11-01; SPIKE-83 (32 x 32 blocks; about 90 MB for the planet, built in seconds); built at decode accepted by the planner 2026-11-04 (kind 13's format stays as it is)
 
-#### Scenario: Rounded outward and nested
-- **WHEN** a tile's pyramid is built and read back
-- **THEN** every stored min is at most and every stored max at least the true value of its block, each by under two steps, and each coarser block holds its children's range
+#### Scenario: Exact, rounded outward and nested
+- **WHEN** a tile's pyramid is built at decode, or stored and read back, for tiles of 96, 100 and 40 cells
+- **THEN** each node's range equals (built) or holds with an outward error under two steps (stored) the range of its cells, and each coarser node holds its children's range
 
 ### Requirement: STRM-067 The class weights are stored with the bake
 The class-weights lattice (GEN-093, its geometry and its `u8` weights) SHALL be stored with the global bake as one channel with its class-list version, because class paint makes it more than a function of the seed. A store whose class-list version differs from the generator's SHALL be refused, naming both versions. A store without the channel SHALL open as before the channel existed. The channel is record kind 11 (`GlobalClassWeights`), one record per cube face filed under the face's level-0 tile; its key carries the bake's stage key as its source, the bake's resolution under tag 4, the cells per face edge under tag 1 and the number of classes under tag 14 (not the class-list version, so that a store of another version is found and refused). A record's payload is `codec (u8, value 1) | class-list version (u32 LE) | class-source version (u32 LE) | cells (u32 LE) | the lattice's content hash (16 bytes) |` the face's weights (`u8`, row `j` outer, then `i`, 8 bytes a point). A store with records of the kind but of another class-list version, an incomplete face set or weights that do not match the hash is an error naming the record. The reader returns the stored class-source version and the caller compares it with the generator's (the key does not carry it); the class weights SHALL be loaded before the relief channels, because a changed class-list version is refused for the weights but reads as absent for the channels. The layout is in the m9-bake design.

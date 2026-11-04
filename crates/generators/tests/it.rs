@@ -74,6 +74,8 @@ mod relief_channels;
 mod relief_field;
 #[path = "relief_scale.rs"]
 mod relief_scale;
+#[path = "runtime_layer.rs"]
+mod runtime_layer;
 #[path = "stages.rs"]
 mod stages;
 #[path = "stamp_stage.rs"]
