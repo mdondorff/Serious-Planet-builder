@@ -175,10 +175,11 @@ fn sample_window(g: &TileGrid, id: TileId, field: &(dyn Fn(Vec3) -> f64 + Sync),
 /// [`BASE_STRIDE`] every window's nodes fall on the same global cells (`TileGrid::check` refuses another tile). The interpolation error is cancelled by taking the change against this
 /// window. A change of the stride moves bits: bump `PASS2_KERNEL_VERSION`.
 pub fn sample_window_coarse(g: &TileGrid, id: TileId, field: &(dyn Fn(Vec3) -> f64 + Sync), threads: usize, s: usize) -> Vec<f64> {
+    assert!(s > 0, "the stride is at least 1");
     let par: &dyn Par = &threads;
     let (w, t, h) = (g.window(), g.tile as i64, g.halo as i64);
     let (i0, j0) = (i64::from(id.ti) * t - h, i64::from(id.tj) * t - h);
-    let n = (w - 1).div_ceil(s) + 3; // nodes -1 ..= (w-1)/s + 1: one beyond each side
+    let n = (w - 1) / s + 4; // nodes -1 ..= (w-1)/s + 2: the last cell reads one node past the cell after its own
     let coarse: Vec<f64> = par::map(par, n, &|b| {
         (0..n).map(|a| field(g.direction(id.face, i0 + (a as i64 - 1) * s as i64, j0 + (b as i64 - 1) * s as i64))).collect::<Vec<f64>>()
     })
@@ -192,7 +193,10 @@ pub fn sample_window_coarse(g: &TileGrid, id: TileId, field: &(dyn Fn(Vec3) -> f
             .map(|i| {
                 let (ca, fx) = ((i / s) as i64, (i % s) as f64 / s as f64);
                 let row = |db: i64| catmull_rom([at(ca - 1, cb + db), at(ca, cb + db), at(ca + 1, cb + db), at(ca + 2, cb + db)], fx);
-                catmull_rom([row(-1), row(0), row(1), row(2)], fy)
+                // Kept within the range of the four nodes around the point, as the pass-1 read is (map.rs): a spline overshoots beside a sharp feature, which would put a coastal plain below the sea.
+                let four = [at(ca, cb), at(ca + 1, cb), at(ca, cb + 1), at(ca + 1, cb + 1)];
+                let (lo, hi) = four.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, u), v| (l.min(*v), u.max(*v)));
+                catmull_rom([row(-1), row(0), row(1), row(2)], fy).clamp(lo, hi)
             })
             .collect::<Vec<f64>>()
     })

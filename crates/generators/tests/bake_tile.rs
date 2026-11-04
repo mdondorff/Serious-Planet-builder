@@ -194,7 +194,8 @@ fn the_base_sampled_every_4_cells_is_exact_at_the_nodes_close_between_them_and_t
             worst = worst.max(e);
         }
     }
-    assert!(worst < 1.0, "between the nodes the interpolation is off by {worst} m on a field of wavelength over 20 cells");
+    // The clamp to the range of the four nodes clips a crest between nodes by up to about 3.4 m on this field (amplitude 550 m); the stored change is taken against this window, so it is not an error of the layer.
+    assert!(worst < 5.0, "between the nodes the interpolation is off by {worst} m on a field of wavelength over 20 cells");
 }
 
 // spec: GEN-101
@@ -205,4 +206,30 @@ fn thermal_at_the_standard_parameters_runs_300_passes_of_an_eighth_which_the_ker
     let (g, id) = (grid(), tile(1, 1));
     let r = pass2_tile(&g, id, &base, &nothing, None, &p, 2);
     assert!(r.stats.thermal_passes <= 300 && r.stats.land_cells > 100, "{:?}", r.stats);
+}
+
+// spec: GEN-101
+#[test]
+fn the_sparse_base_works_for_any_stride_stays_in_range_beside_a_cliff_and_agrees_between_overlapping_windows() {
+    let g = grid();
+    let smooth = |d: Vec3| 100.0 * libm::sin(5.0 * d.x) + 40.0 * libm::cos(7.0 * d.y);
+    // Any stride, including those that divide the window's last index (stride 1 and 2 read one node past the edge case).
+    for s in [1usize, 2, 3, 4, 6] {
+        let v = sample_window_coarse(&g, tile(1, 1), &smooth, 2, s);
+        assert_eq!(v.len(), g.window() * g.window());
+        assert!(v.iter().all(|x| x.is_finite()), "stride {s}");
+    }
+    // A 400 m cliff between land at 20 m and sea at -380 m: the interpolation stays within the field's own range (no undershoot of a coastal plain below the sea).
+    let cliff = |d: Vec3| if d.x + 0.3 * d.y > 0.2 { 20.0 } else { -380.0 };
+    let v = sample_window_coarse(&g, tile(1, 1), &cliff, 1, 4);
+    assert!(v.iter().all(|x| (-380.0..=20.0).contains(x)), "the sparse base left the field's range");
+    // Two overlapping windows give the same bytes on the cells they share (the lattices fall on the same global cells because the tile is a multiple of the stride).
+    let (a, b) = (sample_window_coarse(&g, tile(1, 1), &smooth, 1, 4), sample_window_coarse(&g, tile(2, 1), &smooth, 1, 4));
+    let (w, t) = (g.window(), g.tile);
+    for j in 0..w {
+        for i in 0..2 * g.halo {
+            // Cell (t + i) of tile (1, 1)'s window is cell i of tile (2, 1)'s window.
+            assert_eq!(a[j * w + t + i].to_bits(), b[j * w + i].to_bits(), "window cell ({i}, {j}) differs between the tiles");
+        }
+    }
 }
