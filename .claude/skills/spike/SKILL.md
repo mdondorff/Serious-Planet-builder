@@ -2,6 +2,8 @@
 name: spike
 description: Open or close a time-boxed spike in docs/spikes.md. Use when a question must be answered by experiment before a decision, e.g. erosion strategy or wgpu feature fit.
 ---
+**On closing, also add the spike's row to the catalogue in `spikes/README.md`** (owner, 2026-11-04: `Id | Folder | Question | Result | Pick up | Archive`; the housekeeping skill checks it).
+
 **The register is an index (ADR 0075):** `docs/spikes.md` stays at most 10 KB, one table row per spike (`Id | Title | Status | Results`); details live in the spike's results file.
 
 **Opening a spike** (`/spike open <question>`): add a row to `docs/spikes.md` with status `open`, and write the details at the top of `spikes/<name>/results/results.md`:
