@@ -125,7 +125,7 @@ pub fn deposit_on_own_route(
 /// `min_depth_m`. Returns the passes run. Deterministic: serial, fixed order, no hash or thread.
 pub fn spread_pits(grid: &Grid, z: &mut [f64], sea_level: f64, min_depth_m: f64, max_passes: usize) -> usize {
     let w = grid.w();
-    assert!(w > 0 && z.len() % w == 0, "one height per cell");
+    assert!(w > 0 && z.len().is_multiple_of(w), "one height per cell");
     let h = z.len() / w;
     super::assert_finite("the heights", z);
     let around = [-1i64, 0, 1]
