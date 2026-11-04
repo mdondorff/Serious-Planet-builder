@@ -54,6 +54,14 @@ pub const EROSION_C1_BAND_IMPLEMENTATION_ID: &str = "cpu-erosion-v2+relief+band"
 pub const CREASE_BAND_VERSION: u32 = 1;
 /// The implementation id of a field that reads the erosion layer (GEN-112) over the v1 base.
 pub const EROSION_LAYER_IMPLEMENTATION_ID: &str = "cpu-erosion-v1+relief+band+layer";
+/// The crease band without the relief channels (`k` 1, `m` unread) over the v1 base (GEN-109).
+pub const EROSION_BAND_ONLY_IMPLEMENTATION_ID: &str = "cpu-erosion-v1+band";
+/// [`EROSION_BAND_ONLY_IMPLEMENTATION_ID`] over the C1 base.
+pub const EROSION_C1_BAND_ONLY_IMPLEMENTATION_ID: &str = "cpu-erosion-v2+band";
+/// The erosion layer without the relief channels over the v1 base (GEN-112).
+pub const EROSION_LAYER_ONLY_IMPLEMENTATION_ID: &str = "cpu-erosion-v1+band+layer";
+/// [`EROSION_LAYER_ONLY_IMPLEMENTATION_ID`] over the C1 base.
+pub const EROSION_C1_LAYER_ONLY_IMPLEMENTATION_ID: &str = "cpu-erosion-v2+band+layer";
 /// [`EROSION_LAYER_IMPLEMENTATION_ID`] over the C1 base.
 pub const EROSION_C1_LAYER_IMPLEMENTATION_ID: &str = "cpu-erosion-v2+relief+band+layer";
 
@@ -312,9 +320,6 @@ impl ErosionField<'_> {
     /// layer read calls when it attaches the layer: without this call the field is today's field, whatever the relief switch says. It needs the relief channels on (the layer is read
     /// with them) and a valid band, an error naming the problem otherwise; its parameters and [`CREASE_BAND_VERSION`] enter the keys and the implementation id changes.
     pub fn with_crease_band(mut self, band: CreaseBand) -> Result<Self, String> {
-        if self.relief_channels.is_none() {
-            return Err("the crease band goes with the relief channels (the layer is read with them): turn them on first".into());
-        }
         if !band.valid() {
             return Err(format!("the crease band needs a positive layer cell and 0 < near < far cells, got {band:?}"));
         }
@@ -340,9 +345,6 @@ impl ErosionField<'_> {
     /// It needs the relief channels on and the band off (the layer switches it on), an error naming the problem otherwise; the layer's identity, the sea level and the read's version enter
     /// the keys, and the implementation id changes. Without the call the field is today's, bit for bit.
     pub fn with_layer(self, layer: Arc<crate::erosion_layer::ErosionLayer>, sea_level_m: f64) -> Result<Self, String> {
-        if self.relief_channels.is_none() {
-            return Err("the erosion layer goes with the relief channels: turn them on first".into());
-        }
         if self.crease_band.is_some() {
             return Err("the erosion layer switches the crease band on itself: call with_layer without with_crease_band".into());
         }
@@ -612,6 +614,10 @@ impl HeightField for ErosionField<'_> {
 
     fn implementation_id(&self) -> &'static str {
         match (self.relief_channels.is_some(), self.c1) {
+            (false, true) if self.layer.is_some() => EROSION_C1_LAYER_ONLY_IMPLEMENTATION_ID,
+            (false, false) if self.layer.is_some() => EROSION_LAYER_ONLY_IMPLEMENTATION_ID,
+            (false, true) if self.crease_band.is_some() => EROSION_C1_BAND_ONLY_IMPLEMENTATION_ID,
+            (false, false) if self.crease_band.is_some() => EROSION_BAND_ONLY_IMPLEMENTATION_ID,
             (true, true) if self.layer.is_some() => EROSION_C1_LAYER_IMPLEMENTATION_ID,
             (true, false) if self.layer.is_some() => EROSION_LAYER_IMPLEMENTATION_ID,
             (true, true) if self.crease_band.is_some() => EROSION_C1_BAND_IMPLEMENTATION_ID,

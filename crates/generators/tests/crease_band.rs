@@ -129,9 +129,14 @@ fn the_band_changes_the_land_and_leaves_the_sea_floor_alone() {
 fn the_band_needs_the_relief_channels_a_valid_band_and_changes_the_keys_and_the_id() {
     let g = grid();
     let src = GridSource(&g);
-    // No relief channels: refused, naming the switch.
-    let e = plain(&src, false).with_crease_band(CreaseBand::of_the_bake(0.0)).err().unwrap();
-    assert!(e.contains("relief channels"), "{e}");
+    // Without the relief channels the band still applies (`k` 1, `m` unread): a field of its own id and key.
+    let alone = plain(&src, false).with_crease_band(CreaseBand::of_the_bake(0.0)).unwrap();
+    assert_eq!(alone.implementation_id(), planet_generators::erosion::EROSION_BAND_ONLY_IMPLEMENTATION_ID);
+    assert_eq!(
+        plain(&src, true).with_crease_band(CreaseBand::of_the_bake(0.0)).unwrap().implementation_id(),
+        planet_generators::erosion::EROSION_C1_BAND_ONLY_IMPLEMENTATION_ID
+    );
+    assert_ne!(alone.inputs_hash(), plain(&src, false).inputs_hash());
     for bad in [
         CreaseBand { layer_cell_m: 0.0, ..CreaseBand::of_the_bake(0.0) },
         CreaseBand { near_cells: 4.0, far_cells: 4.0, ..CreaseBand::of_the_bake(0.0) },

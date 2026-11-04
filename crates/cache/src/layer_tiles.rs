@@ -297,6 +297,59 @@ impl DecodedTileCache {
     }
 }
 
+/// The shape of a bake of the erosion layer: what `bake_layer` takes as options and the viewer must know to rebuild the layer's keys (until the layer's manifest records them).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BakeShape {
+    pub seed: u64,
+    pub radius_m: f64,
+    /// Cells a face edge of pass 1 (`--face-res`, GEN-100: 12,288).
+    pub face_res: usize,
+    /// Cells a face edge of pass 2 (`--planet-res`: 98,304).
+    pub planet_res: usize,
+    /// Core cells a tile edge (`--tile`; default the smaller of `planet_res` and 3,072).
+    pub tile: Option<usize>,
+    /// Halo cells around a tile (`--halo`; default a twenty-fourth of the tile).
+    pub halo: Option<usize>,
+}
+
+impl BakeShape {
+    /// The production bake of `seed`: pass 1 at 12,288 cells, pass 2 at 98,304.
+    pub fn production(seed: u64, radius_m: f64) -> BakeShape {
+        BakeShape { seed, radius_m, face_res: 12_288, planet_res: 98_304, tile: None, halo: None }
+    }
+}
+
+/// The specs of pass 1 and pass 2 of a bake of `shape`, derived once for the command and the viewer so that they cannot drift: the key of every tile record follows them (an error from
+/// [`TileGrid::check`] when the geometry does not fit).
+pub fn bake_specs(world: &GlobalWorld, shape: &BakeShape) -> Result<(LayerSpec, TileLayerSpec), String> {
+    let tile = shape.tile.unwrap_or(shape.planet_res.min(3072));
+    let halo = shape.halo.unwrap_or(tile / 24);
+    let grid = TileGrid { cells: shape.planet_res, tile, halo, radius_m: shape.radius_m };
+    grid.check()?;
+    if shape.face_res < 8 {
+        return Err(format!("pass 1 has {} cells a face edge, at least 8 are needed", shape.face_res));
+    }
+    let face_halo = shape.face_res.div_ceil(128).max(4).min((shape.face_res - 1) / 2);
+    let layer = LayerSpec {
+        cells: shape.face_res,
+        radius_m: shape.radius_m,
+        sea_level: 0.0,
+        seed: shape.seed,
+        carve: planet_generators::bake::carve::CarveParams::default(),
+        inputs_id: planet_generators::bake::inputs::BakeInputs::id(),
+        uses_factor: true,
+        halo: face_halo,
+    };
+    let spec = TileLayerSpec {
+        grid,
+        params: Pass2Params::standard(shape.seed, 0.0),
+        inputs_id: planet_generators::bake::inputs::BakeInputs::id(),
+        uses_factor: true,
+        faces: faces_digest(world, shape.face_res as u32, &layer),
+    };
+    Ok((layer, spec))
+}
+
 /// The tiles of a [`StoreLayer`] whose pyramid is built, and the order they were last used (oldest first).
 type BuiltTiles = (HashMap<PassTile, Arc<planet_generators::erosion_layer::LayerTile>>, VecDeque<PassTile>);
 
@@ -351,6 +404,27 @@ impl StoreLayer {
             range,
             id,
         })
+    }
+
+    /// Opens the layer of `shape` in `dir` (a folder of tile packs, or a bake's output folder holding `tiles/`) beside the bake `world` and checks that it holds tiles under the keys of
+    /// that shape: the first stored tile is decoded, so a layer made for another bake, other parameters or another pass 1 is refused here, naming both keys (STRM-065), and a store with no
+    /// tile of this shape says so. `capacity` as [`StoreLayer::new`], `range` the layer's global change range ([`default_change_range`] when the manifest gives none).
+    pub fn open(dir: &Path, world: Arc<GlobalWorld>, shape: &BakeShape, capacity: usize, range: (f64, f64)) -> Result<StoreLayer, String> {
+        let tiles_dir = if dir.join("tiles").is_dir() { dir.join("tiles") } else { dir.to_path_buf() };
+        if !tiles_dir.is_dir() {
+            return Err(format!("{}: no such folder (the erosion layer of `bake_layer`: its output folder or its tiles/ folder)", dir.display()));
+        }
+        let (_, spec) = bake_specs(&world, shape)?;
+        let store = TileStore::open(&tiles_dir, world.params()).map_err(|e| format!("{}: {e}", tiles_dir.display()))?;
+        let layer = StoreLayer::new(Arc::new(store), world, shape.planet_res as u32, spec, capacity, range)?;
+        let grid = layer.spec.grid;
+        let first = grid
+            .all_tiles()
+            .into_iter()
+            .find(|t| layer_tile_id(&grid, *t).is_ok_and(|id| !layer.store.keys_for(KIND_LAYER_TILE, id).is_empty()))
+            .ok_or_else(|| format!("{}: the folder holds no layer tile (record kind {KIND_LAYER_TILE}) of any level of a {}-cell grid", tiles_dir.display(), grid.cells))?;
+        planet_generators::erosion_layer::LayerSource::tile(&layer, first.face, first.ti, first.tj)?;
+        Ok(layer)
     }
 
     /// Tiles decoded so far (a hit is not a decode; a tile that left the cache and comes back is).
