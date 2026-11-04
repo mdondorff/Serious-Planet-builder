@@ -5,4 +5,4 @@
 - `shadow-cost` logs, with the plan's patch above 0, `no_patch_ms` and `patch_ms` per pose (full minus the draw with the patch 0), and prints it.
 
 ## Impact
-- Code: `app` (`stills`). REND-044 modified (one sentence). No key, id, picture or golden moves; the budget verdict is unchanged.
+- Code: `app` (`stills`). REND-055 extended by one sentence (in the ground-detail-patch delta, which is not archived yet). No key, id, picture or golden moves; the budget verdict is unchanged.
