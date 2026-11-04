@@ -110,6 +110,10 @@ fn a_run_of_another_shape_version_or_source_is_refused_naming_both_and_a_layer_o
     let old = LayerManifest { bake_kernel_version: 1, channels_version: 99, ..manifest() };
     let e = old.check_current().unwrap_err();
     assert!(e.contains("bake kernel version 1") && e.contains("channels version 99"), "{e}");
+    // A layer of another quantisation step or pyramid block is named too.
+    let other = LayerManifest { quant_step_m: 0.5, pyramid_block_cells: 64, ..manifest() };
+    let e = other.check_current().unwrap_err();
+    assert!(e.contains("quantisation step 0.5 m") && e.contains("pyramid block of 64 cells"), "{e}");
 }
 
 // spec: STRM-074
