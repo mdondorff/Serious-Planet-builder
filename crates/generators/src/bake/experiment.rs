@@ -62,3 +62,47 @@ pub fn uplift() -> Option<std::sync::Arc<Vec<f64>>> {
 pub fn set_uplift(v: Option<Vec<f64>>) {
     *UPLIFT.lock().expect("uplift lock") = v.map(std::sync::Arc::new);
 }
+
+// SPIKE-101 (high-mountain relief; spike branch only, never merged). f64 values as bits.
+static HM_BAND_SCALE: AtomicU64 = AtomicU64::new(0x3FF0_0000_0000_0000); // 1.0
+static HM_RIDGED: AtomicBool = AtomicBool::new(false);
+static HM_MID_AMP: AtomicU64 = AtomicU64::new(0); // 0.0 m
+static HM_PARTS: AtomicU32 = AtomicU32::new(0);
+
+/// The hill band's amplitude times this where the class is mountains or high mountains (blended by their weight).
+pub fn hm_band_scale() -> f64 {
+    f64::from_bits(HM_BAND_SCALE.load(Ordering::Relaxed))
+}
+pub fn set_hm_band_scale(v: f64) {
+    HM_BAND_SCALE.store(v.to_bits(), Ordering::Relaxed);
+}
+/// The band's noise is a ridged multifractal (16 km to 1 km) where the class is mountains or high mountains, blended by their weight.
+pub fn hm_ridged() -> bool {
+    HM_RIDGED.load(Ordering::Relaxed)
+}
+pub fn set_hm_ridged(v: bool) {
+    HM_RIDGED.store(v, Ordering::Relaxed);
+}
+/// Metres of mid-scale (80 km down to 20 km) ridges added to the base inside the belt core (times the core).
+pub fn hm_mid_amp() -> f64 {
+    f64::from_bits(HM_MID_AMP.load(Ordering::Relaxed))
+}
+pub fn set_hm_mid_amp(v: f64) {
+    HM_MID_AMP.store(v.to_bits(), Ordering::Relaxed);
+}
+/// Decomposition: 0 the full base, 1 the base without the band, 2 the band alone (over land, plus 1,000 m).
+pub fn hm_parts() -> u32 {
+    HM_PARTS.load(Ordering::Relaxed)
+}
+pub fn set_hm_parts(v: u32) {
+    HM_PARTS.store(v, Ordering::Relaxed);
+}
+
+static HM_CENTRE: AtomicU64 = AtomicU64::new(0); // 0.0: no centring
+/// The band's noise minus this (its mean, about 0.45) where the class is mountains or high mountains, so a larger band does not lift the median.
+pub fn hm_centre() -> f64 {
+    f64::from_bits(HM_CENTRE.load(Ordering::Relaxed))
+}
+pub fn set_hm_centre(v: f64) {
+    HM_CENTRE.store(v.to_bits(), Ordering::Relaxed);
+}

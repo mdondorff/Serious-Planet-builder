@@ -36,6 +36,12 @@ fn main() {
     // SPIKE-99: k = 1 in the base, and a pass-1 uplift map from the class weights (metres over the run per class: plain, rolling, hills, mountains, high mountains, plateau,
     // badlands, sand sea).
     ex::set_k_one(flag("--k-one"));
+    // SPIKE-101 candidates.
+    ex::set_hm_band_scale(val("--band-scale").map_or(1.0, |v| v.parse().unwrap()));
+    ex::set_hm_ridged(flag("--ridged"));
+    ex::set_hm_centre(val("--centre").map_or(0.0, |v| v.parse().unwrap()));
+    ex::set_hm_mid_amp(val("--mid-amp").map_or(0.0, |v| v.parse().unwrap()));
+    ex::set_hm_parts(val("--parts").map_or(0, |v| v.parse().unwrap()));
     let uplift_by_class: Option<[f64; 8]> = val("--uplift").map(|v| {
         let u: Vec<f64> = v.split(',').map(|x| x.parse().unwrap()).collect();
         u.try_into().expect("--uplift takes 8 comma-separated metres, one per class")
@@ -59,7 +65,10 @@ fn main() {
         ex::set_uplift(Some(grid));
     }
     println!("k = 1 in the base: {}", ex::k_one());
-    let face2 = pass1_face(&spec, &base, Some(&factor), &CarveParams::default(), threads);
+    // SPIKE-101 C4: more pass-1 steps (the re-route interval stays 5).
+    let steps: usize = val("--steps").map_or(CarveParams::default().steps, |v| v.parse().unwrap());
+    println!("pass 1 steps: {steps}");
+    let face2 = pass1_face(&spec, &base, Some(&factor), &CarveParams { steps, breach_max_m: val("--breach-max").map_or(CarveParams::default().breach_max_m, |v| v.parse().unwrap()), ..CarveParams::default() }, threads);
     ex::set_uplift(None);
     println!(
         "pass 1 face {face_no} at {res} cells ({:.0} m): {:.1} s",
@@ -80,25 +89,38 @@ fn main() {
     let grid = TileGrid { cells: 98_304, tile: 3072, halo: 256, radius_m: R };
     std::fs::create_dir_all(&out).expect("output directory");
     for (ti, tj) in tiles {
-        let t1 = std::time::Instant::now();
-        let r = pass2_tile(
-            &grid,
-            TileId { face: Face(face_no), ti, tj },
-            &base,
-            &reader,
-            Some(&factor),
-            &Pass2Params::standard(14, 0.0),
-            threads,
-        );
-        println!(
-            "pass 2 tile {face_no}/{ti}/{tj}: {:.1} s, thermal {} passes, {} still moving at the cap",
-            t1.elapsed().as_secs_f64(),
-            r.stats.thermal_passes,
-            r.stats.thermal_moving_at_cap
-        );
-        let bytes: Vec<u8> = r.core.iter().flat_map(|v| v.to_le_bytes()).collect();
-        let file = format!("{out}/tile-{face_no}-{ti}-{tj}.f32");
-        std::fs::write(&file, bytes).expect("write");
-        println!("wrote {file}");
+        // SPIKE-101: `--pass2-variants a,b,...` runs pass 2 once per variant on the same pass 1, each into `<out>/<variant>/`: `std` (as
+        // built), `nothermal` (thermal passes 0), `thetaNN` (the repose angle NN degrees on the whole tile).
+        let variants: Vec<String> = val("--pass2-variants").map_or(vec!["std".to_string()], |v| v.split(',').map(str::to_string).collect());
+        for variant in &variants {
+            let mut params = Pass2Params::standard(14, 0.0);
+            if variant == "p1" {
+                // Pass 1's change alone: no thermal and no deposition; the local carve only lowers (incise-only), so every raised cell is pass 1's.
+                params.thermal.passes = 0;
+                params.deposit = false;
+            } else if variant == "nodeposit" {
+                params.deposit = false;
+            } else if variant == "nothermal" {
+                params.thermal.passes = 0;
+            } else if let Some(t) = variant.strip_prefix("theta") {
+                params.thermal.theta_deg = t.parse().expect("thetaNN");
+            }
+            let dir = if variants.len() == 1 { out.clone() } else { format!("{out}/{variant}") };
+            std::fs::create_dir_all(&dir).expect("output directory");
+            let t1 = std::time::Instant::now();
+            let r = pass2_tile(&grid, TileId { face: Face(face_no), ti, tj }, &base, &reader, Some(&factor), &params, threads);
+            println!(
+                "pass 2 tile {face_no}/{ti}/{tj} [{variant}, theta {} deg, {} passes]: {:.1} s, thermal {} passes, {} still moving at the cap",
+                params.thermal.theta_deg,
+                params.thermal.passes,
+                t1.elapsed().as_secs_f64(),
+                r.stats.thermal_passes,
+                r.stats.thermal_moving_at_cap
+            );
+            let bytes: Vec<u8> = r.core.iter().flat_map(|v| v.to_le_bytes()).collect();
+            let file = format!("{dir}/tile-{face_no}-{ti}-{tj}.f32");
+            std::fs::write(&file, bytes).expect("write");
+            println!("wrote {file}");
+        }
     }
 }

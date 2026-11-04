@@ -135,6 +135,7 @@ fn main() {
     let mut skip_before = false;
     let mut fade_sea = 0.0f64;
     let mut k_one = false;
+    let mut sun_deg = 30.0f64;
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -148,6 +149,13 @@ fn main() {
             "--fade-sea" => fade_sea = value().parse().unwrap_or_else(|_| fail("--fade-sea needs metres")),
             // SPIKE-99: render with k = 1 in the base; the pose is still searched on the as-built base without the layer, so every base is seen from the same camera.
             "--k-one" => k_one = true,
+            // SPIKE-101: the sun's elevation in degrees (default 30).
+            "--sun-deg" => sun_deg = value().parse().unwrap_or_else(|_| fail("--sun-deg")),
+            // SPIKE-101 candidates (spike branch only).
+            "--band-scale" => planet_generators::bake::experiment::set_hm_band_scale(value().parse().unwrap_or_else(|_| fail("--band-scale"))),
+            "--ridged" => planet_generators::bake::experiment::set_hm_ridged(true),
+            "--centre" => planet_generators::bake::experiment::set_hm_centre(value().parse().unwrap_or_else(|_| fail("--centre"))),
+            "--mid-amp" => planet_generators::bake::experiment::set_hm_mid_amp(value().parse().unwrap_or_else(|_| fail("--mid-amp"))),
             "--seed" => seed = value().parse().unwrap_or_else(|_| fail("--seed needs an integer")),
             "--out" => out = PathBuf::from(value()),
             "--site" => {
@@ -310,7 +318,7 @@ fn main() {
         planet_generators::bake::experiment::set_k_one(k_one);
         // The sun 30 degrees up, from behind the camera's right shoulder.
         let right = heading.cross(centre).normalized() * -1.0;
-        let sun = (centre * libm::sin(30f64.to_radians()) + (right * 0.6 - heading * 0.8).normalized() * libm::cos(30f64.to_radians()))
+        let sun = (centre * libm::sin(sun_deg.to_radians()) + (right * 0.6 - heading * 0.8).normalized() * libm::cos(sun_deg.to_radians()))
             .normalized();
         println!(
             "{}: face {} tile {}/{}, ground {pose_ground:.0} m (as built), heading {:.0} deg, k = 1: {k_one}",
@@ -321,7 +329,7 @@ fn main() {
             libm::atan2(heading.dot(east), heading.dot(north)).to_degrees()
         );
         for (alt_name, eye, pitch_deg) in
-            [("300m", 300.0, 12.0), ("2km", 2000.0, 22.0)].into_iter().filter(|a| alts.iter().any(|x| x == a.0))
+            [("300m", 300.0, 12.0), ("2km", 2000.0, 22.0), ("10km", 10000.0, 30.0)].into_iter().filter(|a| alts.iter().any(|x| x == a.0))
         {
             for (variant, field) in [("before", &before), ("after", &after)].into_iter().filter(|v| !(skip_before && v.0 == "before")) {
                 // The eye stands `eye` above this field's own ground (an uplifted base raises the ground).

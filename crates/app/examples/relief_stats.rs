@@ -224,6 +224,12 @@ fn main() {
         let seed: u64 = val("--seed").map_or(14, |v| v.parse().unwrap());
         let stride: usize = val("--stride").map_or(1, |v| v.parse().unwrap());
         ex::set_k_one(flag("--k-one"));
+    // SPIKE-101 candidates.
+    ex::set_hm_band_scale(val("--band-scale").map_or(1.0, |v| v.parse().unwrap()));
+    ex::set_hm_ridged(flag("--ridged"));
+    ex::set_hm_centre(val("--centre").map_or(0.0, |v| v.parse().unwrap()));
+    ex::set_hm_mid_amp(val("--mid-amp").map_or(0.0, |v| v.parse().unwrap()));
+    ex::set_hm_parts(val("--parts").map_or(0, |v| v.parse().unwrap()));
         let uplift: Option<[f64; 8]> = val("--uplift").map(|v| {
             let u: Vec<f64> = v.split(',').map(|x| x.parse().unwrap()).collect();
             u.try_into().unwrap_or_else(|_| fail("--uplift takes 8 metres"))

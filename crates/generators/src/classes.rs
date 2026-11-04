@@ -403,6 +403,17 @@ impl ClassSource {
             + 200.0 * terms.old_margin.max(0.5 * terms.flank)
             + PLATEAU_UPLIFT_M * terms.plateau_field)
             .clamp(MIN_ELEVATION_M, MAX_ELEVATION_M);
+        // SPIKE-101 C3b: mid-scale ridges inside the belt core (spike branch only).
+        let e0 = {
+            let a = crate::bake::experiment::hm_mid_amp();
+            if a > 0.0 {
+                let n = fbm(self.seed, 0x5101_0001, t.warped, 80.0, 3);
+                let r = (1.0 - 2.0 * libm::fabs(n)).max(0.0);
+                (e0 + a * terms.core * (r * r - 0.35)).clamp(MIN_ELEVATION_M, MAX_ELEVATION_M)
+            } else {
+                e0
+            }
+        };
         let rolling = smoothstep(0.45, 0.6, 0.5 + 0.5 * fbm(self.seed, LAYER_ROLLING, d, 3.0, 3));
         // The class decision reads the base elevation without the ridge term's fine structure, so that the weights change gently (GEN-097's step limit).
         let e_smooth = (coast
@@ -417,12 +428,26 @@ impl ClassSource {
     /// The elevation of GEN-096 at `d` given the untapered blended `k` there: `e0` plus the class hill band (GEN-098), clamped. `point` is `eval(d)`.
     pub fn elevation_m(&self, d: Vec3, point: &ClassPoint, k: f64) -> f64 {
         let t = terrain(self.seed, d);
+        // SPIKE-101 (spike branch only): the mountain weight scales the band and blends in a ridged multifractal.
+        let wm = point.weights[MOUNTAINS] + point.weights[HIGH_MOUNTAINS];
         let band = if t.land_depth <= 0.0 {
             0.0
         } else {
-            hill_amplitude_for_k(k) * hill_octaves(self.seed, &t) * smoothstep(0.0, 0.1, t.land_depth)
+            let ex = crate::bake::experiment::hm_band_scale();
+            let amp = hill_amplitude_for_k(k) * (1.0 + (ex - 1.0) * wm);
+            let noise = if crate::bake::experiment::hm_ridged() {
+                wm * ridged_mf(self.seed, &t) + (1.0 - wm) * hill_octaves(self.seed, &t)
+            } else {
+                hill_octaves(self.seed, &t)
+            };
+            let noise = noise - crate::bake::experiment::hm_centre() * wm;
+            amp * noise * smoothstep(0.0, 0.1, t.land_depth)
         };
-        (point.e0 + band).clamp(MIN_ELEVATION_M, MAX_ELEVATION_M)
+        match crate::bake::experiment::hm_parts() {
+            1 => point.e0.clamp(MIN_ELEVATION_M, MAX_ELEVATION_M),
+            2 => if t.land_depth > 0.0 { 1000.0 + band } else { point.e0.min(0.0) },
+            _ => (point.e0 + band).clamp(MIN_ELEVATION_M, MAX_ELEVATION_M),
+        }
     }
 }
 
@@ -667,4 +692,21 @@ impl ClassLattice {
         let n = self.cells as f64;
         face_to_direction(&TangentWarp, face, 2.0 * i as f64 / n - 1.0, 2.0 * j as f64 / n - 1.0)
     }
+}
+
+/// SPIKE-101 C1 (spike branch only): a ridged multifractal (Musgrave) of five octaves at 16, 8, 4, 2 and 1 km, each octave weighted by the
+/// previous one's ridge so the ridges stay connected; in [0, 1], mean about 0.4 like `hill_octaves`.
+fn ridged_mf(seed: u64, t: &crate::global::Terrain) -> f64 {
+    let (mut sum, mut amp, mut norm, mut freq, mut weight) = (0.0, 1.0, 0.0, 398.0, 1.0);
+    for o in 0..5u32 {
+        let n = crate::height::layer_noise(seed, 0x5101_0002, o, t.warped * freq);
+        let r = (1.0 - libm::fabs(n)).max(0.0);
+        let sig = r * r * weight;
+        sum += amp * sig;
+        norm += amp;
+        weight = (sig * 2.0).clamp(0.0, 1.0);
+        amp *= 0.5;
+        freq *= 2.0;
+    }
+    sum / norm
 }
