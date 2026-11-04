@@ -218,6 +218,8 @@ impl LayerManifest {
 
     /// Whether this build reads a layer made with these versions: an error naming each version that differs (a layer of another kernel or record layout is another layer, ADR 0006).
     pub fn check_current(&self) -> Result<(), String> {
+        let step = f64::from(QUANT_STEP_M);
+        let block = planet_generators::erosion_layer::BLOCK_CELLS;
         let current = [
             ("bake kernel", self.bake_kernel_version, planet_generators::bake::BAKE_KERNEL_VERSION),
             ("pass-2 kernel", self.pass2_kernel_version, planet_generators::bake::PASS2_KERNEL_VERSION),
@@ -225,8 +227,15 @@ impl LayerManifest {
             ("pass-1 layer record", self.layer_version, LAYER_VERSION),
             ("channels", self.channels_version, CHANNELS_VERSION),
         ];
-        let bad: Vec<String> =
+        let mut bad: Vec<String> =
             current.iter().filter(|(_, m, c)| m != c).map(|(what, m, c)| format!("{what} version {m} (this build {c})")).collect();
+        // The quantisation step and the pyramid's block size are not versions but decide what a stored count means and where a block's range lies: a layer of another step or block is another layer.
+        if self.quant_step_m.to_bits() != step.to_bits() {
+            bad.push(format!("quantisation step {} m (this build {step} m)", self.quant_step_m));
+        }
+        if self.pyramid_block_cells != block {
+            bad.push(format!("pyramid block of {} cells (this build {block})", self.pyramid_block_cells));
+        }
         if bad.is_empty() {
             Ok(())
         } else {
