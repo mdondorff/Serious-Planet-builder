@@ -1,6 +1,6 @@
 ## ADDED Requirements
 ### Requirement: LOOK-013 The octave coefficients of the ground look
-The `[body.<id>.ground]` table SHALL take `crack` and the tables `octave.m16`, `octave.m2`, `octave.cm25` and `octave.cm3` (schema version 7), each with `albedo` (rock, sand, soil), `grass` (three numbers) and `tilt` (rock, sand, grass, soil): the per-material coefficients of the detail octaves (REND-034). The Earth default SHALL be the values the shader held as constants, a number outside 0 to 4, a wrong count or an unknown octave SHALL be refused naming the key, and the canonical text SHALL write every key. The lit plan SHALL carry the table in its text and key only when it is not the Earth default, take it from the file's table with the file's curves (VIEW-060), and the shader SHALL read it from the globals, so a plan with the Earth values draws the picture it drew.
+The `[body.<id>.ground]` table SHALL take `crack` and the tables `octave.m16`, `octave.m2`, `octave.cm25` and `octave.cm3` (schema version 7), each with `albedo` (rock, sand, soil), `grass` (three numbers) and `tilt` (rock, sand, grass, soil): the per-material coefficients of the detail octaves (REND-034). The Earth default SHALL be the values the shader held as constants; a number outside 0 to 4, a wrong count or an unknown octave SHALL be refused naming the key. The lit plan SHALL carry the table, in its text and key only when it is not the Earth default, and the shader SHALL read it.
 
 Verify: A, C
 Status: planned

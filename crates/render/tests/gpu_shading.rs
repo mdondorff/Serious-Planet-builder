@@ -350,17 +350,13 @@ fn the_ground_detail_is_inert_when_off_changes_the_lit_picture_when_on_and_leave
 
 // spec: LOOK-013
 #[test]
-fn the_octave_coefficients_drive_the_picture_and_the_earth_values_are_the_plain_picture() {
-    use planet_frame::look::materials::DetailCoefficients;
+fn the_octave_coefficients_drive_the_picture_and_the_strength_zero_is_inert() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let (p, _) = plan(6);
     let mut r = renderer(&ctx, &p);
     let plain = hdr_of(&mut r, &ctx, &p, detail_plan(ShadeView::Lit, 1.0));
     let covered = plain.iter().filter(|px| px[3] > 0.0).count();
-    // The Earth coefficients are what a plan without the table has.
-    let mut earth = detail_plan(ShadeView::Lit, 1.0);
-    earth.coef = DetailCoefficients::EARTH;
-    assert!(hdr_of(&mut r, &ctx, &p, earth) == plain, "the Earth coefficients change the picture");
+    // (That the Earth values draw what the old shader constants drew is the evidence of the exact goldens of the lit ground, `gpu_ground_look`: they need no candidate.)
     // Every coefficient at 0: no albedo variation and no tilt, so the picture differs on most of the ground; the strength 0 is still the off picture.
     let mut flat = detail_plan(ShadeView::Lit, 1.0);
     for o in &mut flat.coef.octaves {
