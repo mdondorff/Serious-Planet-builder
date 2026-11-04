@@ -265,7 +265,15 @@ pub(crate) fn global_world_of(o: &Options) -> Result<planet_cache::global_store:
         }
         None => planet_world_def::WorldDefinition::single_planet(RADIUS_M, o.seed),
     };
-    planet_cache::global_store::GlobalWorld::from_definition(&def).map_err(|e| format!("the definition cannot be generated: {e}"))
+    let world =
+        planet_cache::global_store::GlobalWorld::from_definition(&def).map_err(|e| format!("the definition cannot be generated: {e}"))?;
+    if !o.class_source {
+        return Ok(world);
+    }
+    // The class source's lattice is built once, on the threads of the run (the same result for any count).
+    let threads = planet_streaming::topology::bake_threads(o.threads)?.0;
+    let inputs = planet_generators::bake::inputs::BakeInputs::new(world.seed(), threads);
+    Ok(world.with_class_source(std::sync::Arc::new(inputs)))
 }
 
 /// `generate --global-dir DIR`: bake the global-coarse field (continents, elevation, climate) into a tile store as blocks and
