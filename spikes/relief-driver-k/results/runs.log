@@ -1,0 +1,65 @@
+2026-11-03T20:15:59Z start A mountains b1
+2026-11-03T20:16:44Z end A mountains b1 45 s
+2026-11-03T20:16:44Z start A b2 
+2026-11-03T20:16:44Z end A b2  0 s
+2026-11-03T20:16:44Z start A b2 b3
+2026-11-03T20:16:44Z end A b2 b3 0 s
+2026-11-03T20:16:44Z start A hills b1
+2026-11-03T20:17:27Z end A hills b1 43 s
+2026-11-03T20:17:27Z start A b2 
+2026-11-03T20:17:27Z end A b2  0 s
+2026-11-03T20:17:27Z start A b2 b3
+2026-11-03T20:17:27Z end A b2 b3 0 s
+2026-11-03T20:17:27Z start A coast b1
+2026-11-03T20:20:30Z end A coast b1 183 s
+2026-11-03T20:20:30Z start A b2 
+2026-11-03T20:20:30Z end A b2  1 s
+2026-11-03T20:20:31Z start A b2 b3
+2026-11-03T20:20:31Z end A b2 b3 0 s
+2026-11-03T20:20:43Z start A mountains-b2-nolayer
+2026-11-03T20:21:50Z end A mountains-b2-nolayer 67 s
+2026-11-03T20:21:50Z start A mountains-b3-nolayer
+2026-11-03T20:22:59Z end A mountains-b3-nolayer 69 s
+2026-11-03T20:22:59Z start A hills-b2-nolayer
+2026-11-03T20:23:53Z end A hills-b2-nolayer 54 s
+2026-11-03T20:23:53Z start A hills-b3-nolayer
+2026-11-03T20:24:43Z end A hills-b3-nolayer 50 s
+2026-11-03T20:24:43Z start A coast-b2-nolayer
+2026-11-03T20:25:44Z end A coast-b2-nolayer 61 s
+2026-11-03T20:25:44Z start A coast-b3-nolayer
+2026-11-03T20:26:32Z end A coast-b3-nolayer 48 s
+2026-11-03T20:26:48Z start D b1
+2026-11-03T20:44:28Z end D b1 rc=0
+2026-11-03T20:44:28Z start D b2
+2026-11-03T20:57:33Z end D b2 rc=0
+2026-11-03T20:58:18Z start B b1 face 2
+2026-11-03T21:36:14Z end B b1 face 2 rc=0
+2026-11-03T21:36:14Z start B b1 face 0
+2026-11-03T22:11:46Z end B b1 face 0 rc=0
+2026-11-03T22:11:47Z start B b2 face 2
+2026-11-03T22:31:13Z end B b2 face 2 rc=0
+2026-11-03T22:31:13Z start B b2 face 0
+2026-11-03T22:52:42Z end B b2 face 0 rc=0
+2026-11-03T22:52:42Z start B b3 face 2
+2026-11-03T23:11:02Z end B b3 face 2 rc=0
+2026-11-03T23:11:02Z start B b3 face 0
+2026-11-03T23:29:58Z end B b3 face 0 rc=0
+2026-11-03T23:30:14Z start C mountains-b1-layer
+2026-11-03T23:30:57Z end C mountains-b1-layer 43 s
+2026-11-03T23:30:57Z start C mountains-b2-layer
+2026-11-03T23:32:08Z end C mountains-b2-layer 71 s
+2026-11-03T23:32:08Z start C mountains-b3-layer
+2026-11-03T23:33:18Z end C mountains-b3-layer 70 s
+2026-11-03T23:33:18Z start C hills-b1-layer
+2026-11-03T23:34:27Z end C hills-b1-layer 69 s
+2026-11-03T23:34:27Z start C hills-b2-layer
+2026-11-03T23:35:35Z end C hills-b2-layer 68 s
+2026-11-03T23:35:35Z start C hills-b3-layer
+2026-11-03T23:36:43Z end C hills-b3-layer 68 s
+2026-11-03T23:36:43Z start C coast-b1-layer
+2026-11-03T23:37:45Z end C coast-b1-layer 62 s
+2026-11-03T23:37:45Z start C coast-b2-layer
+2026-11-03T23:38:47Z end C coast-b2-layer 62 s
+2026-11-03T23:38:47Z start C coast-b3-layer
+2026-11-03T23:39:49Z end C coast-b3-layer 62 s
+2026-11-03T23:39:58Z start D b1 layer
