@@ -1956,10 +1956,13 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         None if o.smoke || o.world.is_some() || o.given.contains("--global-res") => None,
         None => crate::worldfield::default_store(&std::env::current_dir().map_err(|e| e.to_string())?),
     };
-    let world_label = match &store {
+    let mut world_label = match &store {
         Some(dir) => format!("store {}", dir.display()),
         None => format!("preview bake {} cells", o.global_res),
     };
+    if o.erosion {
+        world_label += " + erosion layer";
+    }
     let world = Arc::new(
         match &store {
             Some(dir) => {
@@ -1972,9 +1975,14 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
             }
             None => WorldTerrain::of_perf_options(o, crate::skeleton::RADIUS_M)?,
         }
+        .with_erosion_if(o)?
         // The viewer's plans keep the tiles whose water the view sees even where their terrain is culled (ADR 0053).
         .bounding_water(),
     );
+    if o.erosion {
+        // What is on, in the log of the run (the title carries "erosion layer").
+        let _ = writeln!(out, "{}", world.describe());
+    }
     crate::stall::phase_mark("world");
     let field = world.field()?;
     crate::stall::phase_mark("field");

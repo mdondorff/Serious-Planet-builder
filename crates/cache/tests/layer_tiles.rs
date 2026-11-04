@@ -385,3 +385,23 @@ fn a_store_layer_refuses_a_tile_outside_its_global_range_and_forgets_the_oldest_
     layer.tile(t0.face, t0.ti, t0.tj).unwrap();
     assert_eq!(layer.decodes(), 4, "the oldest tile was kept");
 }
+
+// spec: VIEW-062
+#[test]
+fn the_bake_specs_of_a_shape_are_the_commands_derivation_and_refuse_a_geometry_that_does_not_fit() {
+    use planet_generators::bake::inputs::BakeInputs;
+    let w = world();
+    let shape = BakeShape { seed: 9, radius_m: R, face_res: 96, planet_res: 96, tile: Some(48), halo: None };
+    let (layer, spec) = bake_specs(&w, &shape).unwrap();
+    // The derivation of `cache/examples/bake_layer.rs`, written out: a halo of a twenty-fourth of the tile, pass 1's halo an eighth of a percent of the face edge (at least 4), the standard parameters.
+    assert_eq!(spec.grid, TileGrid { cells: 96, tile: 48, halo: 2, radius_m: R });
+    assert_eq!((layer.cells, layer.halo, layer.seed, layer.inputs_id, layer.uses_factor), (96, 4, 9, BakeInputs::id(), true));
+    assert_eq!((spec.params, spec.inputs_id, spec.uses_factor), (Pass2Params::standard(9, 0.0), BakeInputs::id(), true));
+    assert_eq!(spec.faces, faces_digest(&w, 96, &layer), "the pass-1 digest is the layer's own");
+    let production = BakeShape::production(9, R);
+    assert_eq!((production.face_res, production.planet_res), (12_288, 98_304));
+    let (_, big) = bake_specs(&w, &production).unwrap();
+    assert_eq!((big.grid.tile, big.grid.halo), (3072, 128));
+    assert!(bake_specs(&w, &BakeShape { tile: Some(50), ..shape }).is_err(), "a tile that does not divide the face edge");
+    assert!(bake_specs(&w, &BakeShape { face_res: 4, ..shape }).is_err(), "a pass 1 of 4 cells");
+}
