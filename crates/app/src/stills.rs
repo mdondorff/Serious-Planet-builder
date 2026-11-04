@@ -609,7 +609,8 @@ fn run_stills(
         }
         config.poses.retain(|p| names.contains(&p.name));
     }
-    let world = Arc::new(crate::streamperf::open_world(o, false)?.bounding_water());
+    // `--erosion on` draws the erosion layer in the stills as the viewer does (VIEW-062); the header line says what the world is.
+    let world = Arc::new(crate::streamperf::open_world(o, false)?.with_erosion_if(o)?.bounding_water());
     if !world.has_bake() {
         return Err("the stills need a world with a bake (--store DIR, or --allow-memory-bake with --global-res N): the anchor reads the coupled run".into());
     }

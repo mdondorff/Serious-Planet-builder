@@ -1,6 +1,6 @@
 ## ADDED Requirements
 ### Requirement: VIEW-062 The erosion options of the viewer
-The viewer SHALL take `--erosion on|off` (off by default: nothing changes, no key, id or golden) and, only with `on`, `--erosion-store DIR` (a bake's output folder or its `tiles/`; the world's store when not given), `--erosion-face-res N` and `--erosion-res N` (replacements of the layer manifest's pass-1 and pass-2 cells; none: the manifest's, or the production 12,288 and 98,304 for a layer without a manifest) and `--erosion-unchecked`. The options SHALL be refused outside the viewer, and without `on`; there is no definition key.
+The viewer SHALL take `--erosion on|off` (off by default: nothing changes, no key, id or golden) and, only with `on`, `--erosion-store DIR` (a bake's output folder or its `tiles/`; the world's store when not given), `--erosion-face-res N` and `--erosion-res N` (replacements of the layer manifest's pass-1 and pass-2 cells; none: the manifest's, or the production 12,288 and 98,304 for a layer without a manifest) and `--erosion-unchecked`. The options SHALL be refused outside the viewer and the stills of the product path (`test-render --scene capture-stills`, which draws the layer as the viewer does), and without `on`; there is no definition key.
 
 Verify: A
 Status: planned
