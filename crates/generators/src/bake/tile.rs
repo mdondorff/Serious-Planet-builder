@@ -71,6 +71,9 @@ impl TileGrid {
         if self.tile == 0 || !self.cells.is_multiple_of(self.tile) {
             return Err(format!("the tile ({} cells) does not divide the face edge ({} cells)", self.tile, self.cells));
         }
+        if !self.tile.is_multiple_of(BASE_STRIDE) {
+            return Err(format!("the tile ({} cells) must be a multiple of the base stride ({BASE_STRIDE}): the sparse base lattice of every window falls on the same global cells", self.tile));
+        }
         if self.halo * 2 >= self.tile {
             return Err(format!("the halo ({} cells) must be under half the tile ({} cells)", self.halo, self.tile));
         }
@@ -168,8 +171,9 @@ fn sample_window(g: &TileGrid, id: TileId, field: &(dyn Fn(Vec3) -> f64 + Sync),
 }
 
 /// `field` evaluated every `s` cells of the window (on a lattice that reaches one node beyond the window on each side) and interpolated between the nodes with Catmull-Rom, row-major.
-/// A node is the field at the direction of its cell, so a window cell on a node holds the field exactly, and the same node gives the same value in every window that holds it only if
-/// the windows' lattices agree (they do not in general: the interpolation error is cancelled by taking the change against this window, see [`BASE_STRIDE`]).
+/// A node is the field at its cell's direction, so a window cell on a node holds the field exactly. The lattice is anchored at the window's origin; with a tile that is a multiple of
+/// [`BASE_STRIDE`] every window's nodes fall on the same global cells (`TileGrid::check` refuses another tile). The interpolation error is cancelled by taking the change against this
+/// window. A change of the stride moves bits: bump `PASS2_KERNEL_VERSION`.
 pub fn sample_window_coarse(g: &TileGrid, id: TileId, field: &(dyn Fn(Vec3) -> f64 + Sync), threads: usize, s: usize) -> Vec<f64> {
     let par: &dyn Par = &threads;
     let (w, t, h) = (g.window(), g.tile as i64, g.halo as i64);

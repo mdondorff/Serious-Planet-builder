@@ -125,6 +125,7 @@ fn the_cells_still_moving_at_the_pass_cap_are_reported_and_a_bad_geometry_is_ref
     for (what, bad) in [
         ("a tile that does not divide the face", TileGrid { tile: 25, ..g }),
         ("a halo of half the tile", TileGrid { halo: 12, ..g }),
+        ("a tile that is not a multiple of the base stride", TileGrid { cells: 90, tile: 18, halo: 6, radius_m: g.radius_m }),
         ("no tile", TileGrid { tile: 0, ..g }),
         ("a halo over an eighth of the face edge", TileGrid { cells: 64, tile: 64, halo: 31, radius_m: g.radius_m }),
     ] {
