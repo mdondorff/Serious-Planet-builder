@@ -1575,7 +1575,8 @@ mod tests {
         assert!(e.contains("only applies to `editor`"), "{e}");
     }
 
-    // spec: VIEW-062
+    // spec: VIEW-063
+    // spec: VIEW-064
     #[test]
     fn the_erosion_layer_is_drawn_over_a_stored_world_under_the_keys_of_its_bake_and_refuses_anything_else() {
         use planet_cache::global_store::GlobalWorld;
@@ -1583,7 +1584,7 @@ mod tests {
         use planet_cache::layer_tiles::{bake_specs, face_change_reader, run_pass2, BakeShape, Pass2Inputs};
         use planet_cache::pack::TileStore;
         use planet_generators::bake::inputs::BakeInputs;
-        use planet_generators::erosion::EROSION_LAYER_ONLY_IMPLEMENTATION_ID;
+        use planet_generators::erosion::{EROSION_C1_LAYER_ONLY_IMPLEMENTATION_ID, EROSION_LAYER_ONLY_IMPLEMENTATION_ID};
         let d = TempDir::new("erosion-on");
         let (store, bake_dir) = (d.s("store"), d.0.join("bake"));
         run_str(&["generate", "--global-dir", &store, "--global-res", "8", "--seed", "3", "--prefill-levels", "0"]).unwrap();
@@ -1626,8 +1627,8 @@ mod tests {
         assert!(e.contains("needs --store"), "{e}");
         let e = open().with_erosion(&options(Some(bake_dir.clone()), true, 48)).err().unwrap();
         assert!(
-            e.contains("another") || e.contains("refused") || e.contains("holds no layer tile"),
-            "a layer of another pass 1 is refused, not mixed: {e}"
+            e.contains("another bake") && e.contains("refused, not mixed"),
+            "a layer of another pass 1 is refused naming both keys, not mixed: {e}"
         );
         let e = open().with_erosion(&options(Some(d.0.join("nowhere")), true, 24)).err().unwrap();
         assert!(e.contains("no such folder"), "{e}");
@@ -1635,8 +1636,28 @@ mod tests {
         let plain = open();
         let on = open().with_erosion(&options(Some(bake_dir.clone()), true, 24)).unwrap();
         assert!(on.erosion_note().contains("erosion layer") && on.describe().contains("erosion layer"), "{}", on.describe());
-        assert_eq!(on.id(), EROSION_LAYER_ONLY_IMPLEMENTATION_ID);
+        // The default world's field is the v1 (bilinear) one: with the layer it is upgraded to the C1 base the layer's ground is read with.
+        assert_eq!(plain.id(), planet_generators::erosion::EROSION_IMPLEMENTATION_ID);
+        assert_eq!(on.id(), EROSION_C1_LAYER_ONLY_IMPLEMENTATION_ID);
         assert_ne!(on.id(), plain.id());
+        assert_ne!(on.id(), EROSION_LAYER_ONLY_IMPLEMENTATION_ID);
+        // A definition whose relief scale or sea differs from what the layer was carved on is refused.
+        let mut scaled = def();
+        scaled.set(&planet_world_def::body_relief_scale_path(planet_world_def::BodyId::PLANET), planet_world_def::NodeValue::F64(1.5));
+        let e = worldfield::WorldTerrain::open_store(scaled, std::path::Path::new(&store), 8)
+            .unwrap()
+            .with_erosion(&options(Some(bake_dir.clone()), true, 24))
+            .err()
+            .unwrap();
+        assert!(e.contains("relief scale 1") && e.contains("1.5"), "{e}");
+        let mut high_sea = def();
+        high_sea.set(&planet_world_def::body_sea_level_path(planet_world_def::BodyId::PLANET), planet_world_def::NodeValue::F64(100.0));
+        let e = worldfield::WorldTerrain::open_store(high_sea, std::path::Path::new(&store), 8)
+            .unwrap()
+            .with_erosion(&options(Some(bake_dir.clone()), true, 24))
+            .err()
+            .unwrap();
+        assert!(e.contains("sea at 0 m") && e.contains("100"), "{e}");
         let (a, b) = (plain.field().unwrap(), on.field().unwrap());
         assert_eq!(b.implementation_id(), on.id());
         let mut rng = planet_core::hash::SplitMix64(5);

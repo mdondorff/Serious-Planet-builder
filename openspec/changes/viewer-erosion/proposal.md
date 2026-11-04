@@ -6,9 +6,9 @@
 - Viewer options (VIEW-062): `--erosion on|off` (off by default), `--erosion-store DIR` (the bake's output folder or its `tiles/`; the world's `--store` when not given), `--erosion-face-res N` and `--erosion-res N` (the bake's `--face-res` and `--planet-res`, 12,288 and 98,304 by default), `--erosion-unchecked`. The run refuses unless the store says it was baked from the class source (no store writes that marker yet, so `--erosion-unchecked` is the way until explorer's bake does), and names what is on in the log and the title.
 - `planet-cache`: `layer_tiles::bake_specs` (one derivation of the layer's keys from a bake shape, for the command and the viewer), `StoreLayer::open` (finds the tiles folder, checks that a stored tile decodes under these keys).
 - `planet-generators`: `with_layer` and `with_crease_band` work without the relief channels (`k` 1, `m` unread; own implementation ids `cpu-erosion-v1+band`, `+band+layer`, and the C1 pair); `ErosionSwitch`, `build_field_erosion`, `chain::field_chain_erosion`.
-- `WorldTerrain::with_erosion`: the field chain builds with the switch, the terrain's `id()` and `describe()` carry it.
+- `WorldTerrain::with_erosion`: the field chain builds with the switch (the default field upgraded to the C1 base), the terrain's `id()` and `describe()` carry it; a definition with a relief scale other than 1 or a sea other than at 0 m is refused.
 
 ## Impact
-- Requirements: VIEW-062 added; GEN-109 modified (no relief channels needed), and GEN-112 and GEN-114 (m9-bake's delta) follow.
+- Requirements: VIEW-062 to VIEW-064 added (VIEW-063 and VIEW-064 taken by the crusader from the split of VIEW-062; the planner is asked to confirm); GEN-109 modified (no relief channels needed), and GEN-112 and GEN-114 (m9-bake's delta) follow.
 - Code: `app` (options, `worldfield`, `window`), `cache` (`layer_tiles`), `generators` (`erosion`, `height_fields`, `chain`); dev tools `examples/base_gap.rs`, `examples/base_lattice_gap.rs`.
 - With the switch off nothing changes: no golden, key or id moves. On a store that is not marked it refuses.

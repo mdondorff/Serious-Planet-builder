@@ -9,6 +9,12 @@
 - The terrain's `id()` is the layered field's implementation id, so a repro bundle made with `--erosion on` is refused by a replay without it (and the reverse) instead of replaying other pixels.
 - The status text: `describe()` and the title say "erosion layer", with the layer's folder, the bake shape, the seed and the sea level; the log of the run prints it.
 
+- `--erosion on` upgrades the default eroded field (v1, a bilinear read of the lattice) to the C1 one (`cpu-erosion-v2`): the measured gap (3.4 m rms) is that of the C1 read, and a bilinear base would crease at every lattice cell under the layer. The id says so.
+- The layer was carved on the class source at relief scale 1 and sea level 0 (`bake_layer`: `sea_level` 0.0): a definition with another relief scale or sea is refused (VIEW-063), because the keys would be distinct but the ground wrong.
+- Hand-off to explorer (planner's standing rule: the writer of a format owns it): `bake_specs` is a reader-side copy of `bake_layer`'s derivation, pinned by a test against the derivation written out; `bake_layer` should call `bake_specs` (and its default `--planet-res` 3,072 is not the viewer's 98,304: a default bake is refused by a default viewer run, clearly), and the layer's manifest should record the shape, the global change range and the class-source marker (`BakeInputs::id()`), after which `--erosion-unchecked` and the shape options become overrides.
+- ADR 0100 point 4 and ADR 0098 point 3 say "behind the relief switch"; the layer no longer needs the relief channels (planner, 2026-11-04). A one-line amendment is asked of the planner.
+- `examples/base_gap.rs` and `examples/base_lattice_gap.rs` are the measurements behind the Context numbers (2,064 m, 2,061 m, 3.4 m; run on seed 14, tile 2/12/10); dev tools, no test.
+
 ## Risks
 - On today's stores the layer lands on the wrong ground: the refusal is the guard.
 - The probe at open decodes one tile (about a second at 3,072 cells).

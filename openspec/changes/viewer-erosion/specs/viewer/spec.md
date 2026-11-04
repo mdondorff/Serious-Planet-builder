@@ -1,19 +1,33 @@
 ## ADDED Requirements
-### Requirement: VIEW-062 The viewer draws the erosion layer on request
-The viewer SHALL draw the erosion layer of a bake over a stored world when `--erosion on` is given, and not otherwise (off by default; no definition key, no key, id or golden moves with it off):
-- `--erosion-store DIR` names the layer (a bake's output folder or its `tiles/`; the world's store when not given), `--erosion-face-res` and `--erosion-res` the bake's pass-1 and pass-2 cells (12,288 and 98,304 by default);
-- it needs `--store` and an eroded field, and refuses a store that does not say it was baked from the class source unless `--erosion-unchecked`;
-- the layer's keys follow the bake's shape and the definition's seed: a layer made under other keys is refused, naming both;
-- the log and the title say the layer is on, and the terrain's id is the layered field's.
+### Requirement: VIEW-062 The erosion options of the viewer
+The viewer SHALL take `--erosion on|off` (off by default: nothing changes, no key, id or golden) and, only with `on`, `--erosion-store DIR` (a bake's output folder or its `tiles/`; the world's store when not given), `--erosion-face-res N` and `--erosion-res N` (the bake's pass-1 and pass-2 cells, 12,288 and 98,304 by default) and `--erosion-unchecked`. The options SHALL be refused outside the viewer, and without `on`; there is no definition key.
 
 Verify: A
 Status: planned
-Source: Owner 2026-11-04 (integrated preview), inbox #56 item 1b, GEN-112
+Source: Planner 2026-11-04 (inbox #56 item 1b), owner 2026-11-04 (integrated preview), GEN-112
 
 #### Scenario: Options
 - **WHEN** the options are parsed, and given without `--erosion on` or outside the viewer
 - **THEN** the defaults are off and the production bake, bad values are refused, and the options without `on` are refused
 
-#### Scenario: On, and the refusals
-- **WHEN** a stored world and a tiny layer made under the shape's keys are opened with `--erosion on`, with and without the marker, without a store, with a pass-1 size the layer was not made for, and over a missing folder
-- **THEN** the unmarked store, the missing store, the other keys and the missing folder are refused with their reasons, and the layer's field has the layered id, says so in `describe()` and moves land heights
+### Requirement: VIEW-063 The viewer refuses a layer that does not fit its world
+`--erosion on` SHALL be refused, naming the problem, without `--store`, with a field that is not an eroded one, with a relief scale other than 1 or a sea other than at 0 m (what the layer was carved on), over a folder with no layer tile, with a layer made under other keys (the refusal names both, STRM-065), and over a store that does not say it was baked from the class source unless `--erosion-unchecked` is given.
+
+Verify: A
+Status: planned
+Source: Planner 2026-11-04 (the layer must land on the surface it was carved on), STRM-065
+
+#### Scenario: Refusals
+- **WHEN** a stored world and a tiny layer made under the shape's keys are opened with `--erosion on` without `--erosion-unchecked`, without a store, with a pass-1 size the layer was not made for, over a missing folder, and over definitions with relief scale 1.5 and a sea at 100 m
+- **THEN** each is refused with its reason, and the one with `--erosion-unchecked` and the right keys opens
+
+### Requirement: VIEW-064 The viewer says the layer is on
+With the layer on, the terrain's implementation id SHALL be the layered field's (`cpu-erosion-v2+band+layer`: the default field is upgraded to the C1 base the layer is read over), `describe()` and the log of the run SHALL name the layer's folder, the bake shape, the seed, the coast fade and the sea level, and the title SHALL carry "erosion layer"; a repro bundle made with the layer on is refused by a replay without it.
+
+Verify: A
+Status: planned
+Source: Planner 2026-11-04 (log what is on), CON-05 to CON-08
+
+#### Scenario: What is on
+- **WHEN** the layer is opened over a stored world
+- **THEN** the id is the C1 layered field's and differs from the plain world's, `describe()` names the layer, and the field moves land heights (the title is set from the same state and is not drawn in tier A)

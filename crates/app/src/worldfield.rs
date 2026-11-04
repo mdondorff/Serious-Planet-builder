@@ -65,7 +65,7 @@ pub struct ErosionOptions {
     pub unchecked: bool,
 }
 
-/// Decoded tiles the layer keeps (a cap's bounds read up to 36, a read a stencil's four; a core is 37.7 MB at 3,072 cells).
+/// Decoded tiles the layer keeps (a cap's bounds read up to 36, a read a stencil's four; a core is 37.7 MB at 3,072 cells, so up to about 1.7 GB with the pyramids).
 const LAYER_CACHE_TILES: usize = 44;
 
 /// The leaked stored bake as the field's lattice: it keeps the handle for the counters (`WorldTerrain::counters`).
@@ -636,15 +636,27 @@ impl WorldTerrain {
     }
 
     /// Turns the erosion layer of a bake on over this stored world (VIEW-062, GEN-112): the layer is read from `o.layer_dir` (the bake's output folder or its `tiles/`, else the world's
-    /// store) under the keys of the bake shape `o` names and the definition's seed, added to the C1 read of the stored lattice with the crease band, the relief channels not read.
-    /// An error naming the problem when the world has no stored bake, its field is not an eroded one, the store does not say it was baked from the class source (unless `o.unchecked`),
-    /// or the layer holds no tile under these keys (the existing refusal names both keys).
+    /// store) under the keys of the bake shape `o` names and the definition's seed, added to the C1 read of the stored lattice (the default eroded field is upgraded to the C1 one) with
+    /// the crease band, the relief channels not read. An error naming the problem when the world has no stored bake, its field is not an eroded one, its relief scale is not 1 or its
+    /// sea is not at 0 m (what the layer was carved on), the store does not say it was baked from the class source (unless `o.unchecked`), or the layer holds no tile under these keys
+    /// (the existing refusal names both keys).
     pub fn with_erosion(mut self, o: &ErosionOptions) -> Result<WorldTerrain, String> {
         let Some(store_dir) = self.store_dir.clone() else {
             return Err("--erosion needs --store: the layer is drawn over a stored bake".into());
         };
         if !matches!(self.kind, HeightFieldKind::Eroded | HeightFieldKind::ErodedC1) {
             return Err(format!("--erosion applies to the eroded fields, the world's is {}", self.kind.id()));
+        }
+        // The layer was carved on the class source's surface at relief scale 1 and sea level 0: a definition that differs would draw it on another ground without a word.
+        let def = self.definition();
+        let ctx = GenContext::new(&def);
+        let relief = ctx.relief_scale(BodyId::PLANET).map_err(|e| format!("the relief scale of the definition: {e}"))?;
+        if relief != 1.0 {
+            return Err(format!("--erosion: the layer was carved at relief scale 1, the definition's is {relief}"));
+        }
+        let sea = def.sea(BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;
+        if sea != 0.0 {
+            return Err(format!("--erosion: the layer was carved over a sea at 0 m, the definition's is {sea} m"));
         }
         if !o.unchecked {
             return Err(format!(
@@ -676,8 +688,10 @@ impl WorldTerrain {
         .map_err(|e| format!("--erosion: {e}"))?;
         let layer = planet_generators::erosion_layer::ErosionLayer::new(Arc::new(layer)).map_err(|e| format!("--erosion: {e}"))?;
         let sea_level_m = def.sea(BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;
+        // The layer's ground is the lattice read C1 (a bilinear read leaves a crease along every lattice cell under it): the default field is upgraded.
+        self.kind = HeightFieldKind::ErodedC1;
         self.erosion_note = format!(
-            "erosion layer {} (pass 1 at {} cells, pass 2 at {}, seed {seed}, coast fade {} m over the sea level {sea_level_m} m, crease band on, relief channels off)",
+            "erosion layer {} (pass 1 at {} cells, pass 2 at {}, seed {seed}, coast fade {} m over the sea level {sea_level_m} m, crease band on, relief channels off, C1 base)",
             dir.display(),
             o.face_res,
             o.planet_res,

@@ -126,7 +126,7 @@ fn the_band_changes_the_land_and_leaves_the_sea_floor_alone() {
 
 // spec: GEN-109
 #[test]
-fn the_band_needs_the_relief_channels_a_valid_band_and_changes_the_keys_and_the_id() {
+fn the_band_works_with_and_without_the_relief_channels_needs_a_valid_band_and_changes_the_keys_and_the_id() {
     let g = grid();
     let src = GridSource(&g);
     // Without the relief channels the band still applies (`k` 1, `m` unread): a field of its own id and key.
