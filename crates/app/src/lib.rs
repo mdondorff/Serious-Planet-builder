@@ -1641,6 +1641,15 @@ mod tests {
         assert_eq!(on.id(), EROSION_C1_LAYER_ONLY_IMPLEMENTATION_ID);
         assert_ne!(on.id(), plain.id());
         assert_ne!(on.id(), EROSION_LAYER_ONLY_IMPLEMENTATION_ID);
+        // A field that is not an eroded one has nothing to add the layer to.
+        let mut terrain_field = def();
+        terrain_field.set_height_field("cpu-terrain-v1");
+        let e = worldfield::WorldTerrain::open_store(terrain_field, std::path::Path::new(&store), 8)
+            .unwrap()
+            .with_erosion(&options(Some(bake_dir.clone()), true, 24))
+            .err()
+            .unwrap();
+        assert!(e.contains("applies to the eroded fields"), "{e}");
         // A definition whose relief scale or sea differs from what the layer was carved on is refused.
         let mut scaled = def();
         scaled.set(&planet_world_def::body_relief_scale_path(planet_world_def::BodyId::PLANET), planet_world_def::NodeValue::F64(1.5));

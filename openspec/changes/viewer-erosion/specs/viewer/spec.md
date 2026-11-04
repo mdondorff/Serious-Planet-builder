@@ -22,12 +22,12 @@ Source: Planner 2026-11-04 (the layer must land on the surface it was carved on)
 - **THEN** each is refused with its reason, and the one with `--erosion-unchecked` and the right keys opens
 
 ### Requirement: VIEW-064 The viewer says the layer is on
-With the layer on, the terrain's implementation id SHALL be the layered field's (`cpu-erosion-v2+band+layer`: the default field is upgraded to the C1 base the layer is read over), `describe()` and the log of the run SHALL name the layer's folder, the bake shape, the seed, the coast fade and the sea level, and the title SHALL carry "erosion layer"; a repro bundle made with the layer on is refused by a replay without it.
+With the layer on, the terrain's implementation id SHALL be the layered field's (`cpu-erosion-v2+band+layer`: the default field is upgraded to the C1 base the layer is read over), `describe()` and the log of the run SHALL name the layer's folder, the bake shape, the seed, the coast fade and the sea level, and the title SHALL carry "erosion layer". A repro bundle records that id, so a replay without the layer meets another id.
 
 Verify: A
 Status: planned
 Source: Planner 2026-11-04 (log what is on), CON-05 to CON-08
 
 #### Scenario: What is on
-- **WHEN** the layer is opened over a stored world
-- **THEN** the id is the C1 layered field's and differs from the plain world's, `describe()` names the layer, and the field moves land heights (the title is set from the same state and is not drawn in tier A)
+- **WHEN** the layer is opened over a stored world, and over a world whose field is not an eroded one
+- **THEN** the id is the C1 layered field's and differs from the plain world's, `describe()` names the layer, the field moves land heights, and the other world is refused (the log line and the title are set from the same state and are not asserted in tier A)
