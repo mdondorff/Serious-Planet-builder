@@ -1,5 +1,5 @@
 # 0100 Runtime read of the erosion layer: C1, clamped, with a coast fade
-Status: accepted (owner, 2026-11-04: the erosion remedies "lgtm", including the runtime C1 read and the coast fade)
+Status: accepted (owner, 2026-11-04: the erosion remedies "lgtm", including the runtime C1 read and the coast fade); point 4 amended 2026-11-04: the read needs no relief channels; the layer sits on the field-bake lattice read C1 at k = 1 (SPIKE-99, owner B; #1158)
 Date: 2026-11-04
 Source: owner, 2026-11-03 and 2026-11-04; ADR 0088 point 5; ADR 0099; erosion preview and diagnosis (explorer, 2026-11-03); GEN-112 to GEN-114; change `runtime-layer-read` (#1153)
 
