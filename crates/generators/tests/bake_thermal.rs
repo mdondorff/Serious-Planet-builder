@@ -3,7 +3,7 @@
 //! the critical slope, and the deposition fills a pit, keeps every receiver lower and loses no volume. Small grids; no store.
 
 use planet_generators::bake::carve::{carve, CarveParams};
-use planet_generators::bake::deposit::{deposit, deposit_on_own_route, DepositParams, Kc};
+use planet_generators::bake::deposit::{deposit, deposit_on_own_route, spread_pits, DepositParams, Kc};
 use planet_generators::bake::flood::priority_flood;
 use planet_generators::bake::route::{route, NONE};
 use planet_generators::bake::thermal::{pair_u, thermal, thermal_all_cells, ThermalParams};
@@ -257,4 +257,99 @@ fn a_zero_minimum_excess_stops_when_rounding_absorbs_the_rest() {
     let mut z = tower(24, 900.0);
     let r = thermal(&g, &mut z, &ThermalParams { min_excess: 0.0, passes: 5000, ..ThermalParams::default() }, 2);
     assert!(r.passes_run < 5000 && r.moved_last == 0, "{} passes, {} cells still moving", r.passes_run, r.moved_last);
+}
+
+/// The land cells (above 0, off the border, none of the 8 neighbours at or below 0) lower than all 8 neighbours by more than `min` metres.
+fn pits_over(g: &Grid, z: &[f64], min: f64) -> usize {
+    let w = g.w();
+    let h = z.len() / w;
+    let mut n = 0;
+    for j in 1..h - 1 {
+        for i in 1..w - 1 {
+            let p = j * w + i;
+            let lowest = (-1i64..=1)
+                .flat_map(|dj| (-1i64..=1).map(move |di| (di, dj)))
+                .filter(|d| *d != (0, 0))
+                .map(|(di, dj)| z[((j as i64 + dj) as usize) * w + (i as i64 + di) as usize])
+                .fold(f64::INFINITY, f64::min);
+            n += usize::from(z[p] > 0.0 && lowest > 0.0 && lowest - z[p] > min);
+        }
+    }
+    n
+}
+
+// spec: GEN-101
+#[test]
+fn spreading_the_one_cell_pits_keeps_the_volume_leaves_no_pit_over_the_threshold_and_touches_neither_the_border_nor_the_sea() {
+    let g = Grid::new(40, 40, DX);
+    // A rolling land at 200 to 400 m with pits of 3, 20 and 70 m, one pair of adjacent pits, one beside the border and one beside the sea.
+    let mut z: Vec<f64> =
+        (0..40 * 40).map(|p| 300.0 + 40.0 * libm::sin((p % 40) as f64 * 0.5) * libm::cos((p / 40) as f64 * 0.4)).collect();
+    for p in [10 * 40 + 10, 20 * 40 + 20, 30 * 40 + 8, 25 * 40 + 30, 25 * 40 + 31, 2 * 40 + 20, 33 * 40 + 35] {
+        z[p] -= [3.0, 20.0, 70.0, 12.0, 15.0, 30.0, 25.0][[
+            10 * 40 + 10,
+            20 * 40 + 20,
+            30 * 40 + 8,
+            25 * 40 + 30,
+            25 * 40 + 31,
+            2 * 40 + 20,
+            33 * 40 + 35,
+        ]
+        .iter()
+        .position(|q| *q == p)
+        .unwrap()];
+    }
+    for j in 34..40 {
+        for i in 36..40 {
+            z[j * 40 + i] = -5.0; // a sea in the corner
+        }
+    }
+    assert!(pits_over(&g, &z, 2.0) >= 5, "the fixture has pits");
+    let (before, sum0) = (z.clone(), z.iter().sum::<f64>());
+    let passes = spread_pits(&g, &mut z, 0.0, 0.5, 32);
+    assert!(passes < 32, "the spreading settles: {passes} passes");
+    assert_eq!(pits_over(&g, &z, 0.5), 0, "a pit over 0.5 m is left");
+    assert!((z.iter().sum::<f64>() - sum0).abs() < 1e-9 * sum0, "the volume changed");
+    // The border and the sea are not touched; a cell next to the sea or the border keeps its height unless a pit beside it gave to it.
+    for p in 0..40 * 40 {
+        let (i, j) = (p % 40, p / 40);
+        if i == 0 || j == 0 || i == 39 || j == 39 || before[p] <= 0.0 {
+            assert_eq!(z[p].to_bits(), before[p].to_bits(), "cell {p} at the border or in the sea changed");
+        }
+    }
+    // The same input, the same bits.
+    let mut again = before.clone();
+    spread_pits(&g, &mut again, 0.0, 0.5, 32);
+    assert_eq!(z.iter().map(|v| v.to_bits()).collect::<Vec<_>>(), again.iter().map(|v| v.to_bits()).collect::<Vec<_>>());
+    // Switched off by a pass count of 0: nothing moves.
+    let mut off = before.clone();
+    assert_eq!(spread_pits(&g, &mut off, 0.0, 0.5, 0), 0);
+    assert_eq!(off, before);
+}
+
+// spec: GEN-101
+#[test]
+fn the_fill_of_a_closed_bowl_is_not_a_pillar_on_its_route_and_the_sweep_keeps_the_mass() {
+    // A bowl 16 cells wide and 80 m deep in a plateau of 400 m that drains west across a lip at 360 m; the ground was 400 m before the carve.
+    let g = Grid::new(30, 30, DX);
+    let orig = vec![400.0; 30 * 30];
+    let mut z = orig.clone();
+    for j in 8..24 {
+        for i in 8..24 {
+            z[j * 30 + i] = 320.0;
+        }
+    }
+    for j in 14..18 {
+        z[j * 30 + 7] = 360.0; // the lip
+    }
+    for (p, v) in z.iter_mut().enumerate() {
+        *v += 0.01 * (p % 30) as f64; // a slope to the west so that the routing has a direction
+    }
+    let carved = z.clone();
+    let r = deposit_on_own_route(&g, &mut z, &orig, 1e-3, 5, &DepositParams { kc: Kc::Uniform(1e5), zeta: 0.5, sea_level: 0.0 });
+    assert!((r.eroded - (r.deposited + r.exported)).abs() < 1e-9 * r.eroded.max(1.0), "{r:?}");
+    // No cell of the bowl stands a pillar over the bowl's carved floor: the fill rises no cell by more than the receiver's carved ground and half the drop allow, so the route does not climb
+    // the full 80 m of the bowl in single cells.
+    let tallest = (0..30 * 30).map(|p| z[p] - carved[p]).fold(0.0, f64::max);
+    assert!(tallest < 60.0, "a cell of the bowl rose {tallest} m, a pillar in a bowl of 80 m");
 }
