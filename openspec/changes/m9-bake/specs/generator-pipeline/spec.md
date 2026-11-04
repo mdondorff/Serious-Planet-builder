@@ -176,11 +176,11 @@ Source: ADR 0088 points 4.2 and 6, ADR 0088/0089 accepted 2026-11-01; SPIKE-61, 
 - **THEN** no cell ends higher than its input, and the basin is not filled
 
 ### Requirement: GEN-102 Cap bounds read the layer's pyramid
-The field's height bounds over a cap SHALL take the layer's part from the min/max pyramid (STRM-066):
-- the cap's face box is twice its angular radius in face units;
-- it is read at the finest pyramid level whose blocks are at least half the box, or from the layer's nodes for a box under 16 cells;
-- the runtime detail below the layer's cells adds its analytic per-octave bound;
-- a cap that crosses a face edge reads both faces' blocks.
+The field's height bounds over a cap SHALL take the layer's part from the layer's min/max pyramid (STRM-066):
+- the nodes the cap reaches, widened by 4 cells (2 for the stencil, 2 for the cross-fade at a cube edge), on every face it touches; a node wholly inside is taken whole;
+- below the 32-cell blocks only for a cap of at most 8 cells' radius, down to nodes of 2 cells;
+- a cap that reaches more than 36 tiles takes the layer's global range;
+- the layer adds the product of that range and the coast fade's interval over the cap's base elevation (GEN-112).
 With the relief channels on the bounds SHALL also take:
 - the channels' range `[k_min, k_max, m_min, m_max]` over the cap: the union of the ranges of the blocks the cap touches, from a pyramid of the block ranges (a node wholly inside the cap is taken whole), and for a block the cap only touches the min and max of the lattice points of the nodes of 2 cells it touches;
 - the base `m + k (e - m) + k detail` over the intervals of `e`, `m`, `k` and the detail (products of intervals, a sound bound that ignores the correlation of `e` and `m`);
@@ -194,6 +194,36 @@ Source: ADR 0088 points 3 and 8, ADR 0088/0089 accepted 2026-11-01; SPIKE-82, SP
 #### Scenario: Sound and nested
 - **WHEN** 20,000 random caps of radius 1e-6 to 0.01 rad over a synthetic layer are bounded, rims and face edges included, each with a nested cap inside it
 - **THEN** every sampled height lies in its cap's bounds, and each inner cap's bounds lie within its outer cap's (within LOD-012's slack)
+
+### Requirement: GEN-112 The runtime read of the erosion layer
+`ErosionField::with_layer(layer, sea_level)` MAY add the stored layer (STRM-065) to a relief field; without the call the field is today's, bit for bit:
+- it needs the relief channels, switches the crease band of the bake on (GEN-109), and the inputs hash and the implementation id (`+layer`) follow the layer, the sea level and the read's version, not the field version;
+- the height is the relief base plus the layer's change times a smoothstep fade from 0 at the sea level to 1 at 3 m above it, not scaled by `k`;
+- the change is a Catmull-Rom (C1) read of the cell centres, kept within the four cells around the point, cross-faded over 2 cells at a cube edge; a tile the layer lacks is 0.
+
+Verify: A
+Status: planned
+Source: ADR 0088 point 5, ADR 0098, ADR 0099; owner 2026-11-04 (coast fade, I5c); m9-bake PR 6. Departs from ADR 0088 point 5 ("bilinearly"): a bilinear read leaves a crease along every cell line (ADR 0099 gives that reason for pass 1); the planner is asked to amend point 5.
+
+#### Scenario: Off and zeros
+- **WHEN** the call is not made, or the layer holds only zeros
+- **THEN** every height equals the relief field's (with the band, for zeros) to the bit, on both bases
+
+#### Scenario: The read
+- **WHEN** the change is read at cell centres, at random points, along cell lines and across tile seams, and a tile of the layer is absent
+- **THEN** a centre reads its stored value, every read lies within its four cells' range, the one-sided slopes at a knot agree, a cell of an absent tile counts as 0, and the stencil reads the neighbouring tile's cells
+
+#### Scenario: The cube edge
+- **WHEN** a layer that is a smooth function of the direction is read within 1e-9 rad either side of every cube edge and around every corner
+- **THEN** the reads differ by under a millimetre, where one face's clamped read alone steps by about a cell's change
+
+#### Scenario: Coast and order
+- **WHEN** heights are read over land, over the first 3 m above the sea level and over the sea
+- **THEN** land adds the change, the coast adds a smoothstep share of it by the bake's elevation, the sea adds none, the change is not scaled by `k`, and a batch of reads equals the single reads' bits
+
+#### Scenario: Keys
+- **WHEN** the layer, its sea level or the call order changes
+- **THEN** the inputs hash differs, the implementation id gains `+layer`, the version is unchanged, a call without the relief channels or after the band is refused, and the relief channels cannot be asked for after the layer
 
 ## REMOVED Requirements
 

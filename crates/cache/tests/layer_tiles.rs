@@ -308,3 +308,73 @@ fn the_decoded_tile_cache_decodes_a_tile_once_holds_its_capacity_and_forgets_the
     assert!(cache.get(&store, &w, RES, &s, none).unwrap().is_none());
     assert_eq!(cache.len(), 2);
 }
+
+// spec: GEN-112
+// spec: STRM-066
+#[test]
+fn a_store_layer_reads_the_stored_change_at_a_cell_centre_decodes_a_tile_once_and_builds_its_pyramid() {
+    use planet_generators::erosion_layer::{ErosionLayer, LayerSource};
+    use std::sync::Arc;
+    let (w, p1) = (world(), Dir::new("p1"));
+    let s = spec(&w);
+    let f = faces(p1.path(), &w);
+    let d = Dir::new("store-layer");
+    run(d.path(), &w, &s, &f, &tiles(), 2).unwrap();
+    let store = Arc::new(TileStore::open(d.path(), w.params()).unwrap());
+    let t0 = tiles()[0];
+    let want = load_tile(&store, &w, RES, &s, t0).unwrap().expect("tile 0");
+    let layer = Arc::new(StoreLayer::new(store.clone(), Arc::new(world()), RES, s, 4, default_change_range()).unwrap());
+    let el = ErosionLayer::new(layer.clone()).unwrap();
+    // Cell (10, 7) of tile (0, 0) of face 0: the centre of that cell reads its stored value (the change of the tile's core, dequantised).
+    let g = &s.grid;
+    let dir = g.direction(Face(0), 10, 7);
+    let got = el.change_at(dir).unwrap();
+    assert!((got - f64::from(want.core[7 * g.tile + 10])).abs() < 1e-6, "read {got}, stored {}", want.core[7 * g.tile + 10]);
+    let decodes = layer.decodes();
+    for _ in 0..50 {
+        el.change_at(dir).unwrap();
+    }
+    assert_eq!(layer.decodes(), decodes, "a tile already decoded was decoded again");
+    // The pyramid of the tile holds its cells; a tile the store does not hold is absent.
+    let tile = layer.tile(Face(0), 0, 0).unwrap().expect("tile 0");
+    let [lo, hi] = tile.range();
+    assert!(want.core.iter().all(|v| *v >= lo && *v <= hi));
+    assert!(layer.tile(Face(5), 3, 3).unwrap().is_none());
+    // A store opened beside another bake's key refuses, naming the tile, instead of mixing.
+    let mut other = s;
+    other.inputs_id = 2;
+    let wrong = StoreLayer::new(store, Arc::new(world()), RES, other, 4, default_change_range()).unwrap();
+    let e = wrong.tile(Face(0), 0, 0).err().expect("a refusal");
+    assert!(e.contains("layer tile 0/0/0") && e.contains("refused"), "{e}");
+}
+
+// spec: GEN-112
+#[test]
+fn a_store_layer_refuses_a_tile_outside_its_global_range_and_forgets_the_oldest_tile() {
+    use planet_generators::erosion_layer::LayerSource;
+    use std::sync::Arc;
+    let (w, p1) = (world(), Dir::new("p1"));
+    let s = spec(&w);
+    let f = faces(p1.path(), &w);
+    let d = Dir::new("store-layer-range");
+    run(d.path(), &w, &s, &f, &tiles(), 2).unwrap();
+    let store = Arc::new(TileStore::open(d.path(), w.params()).unwrap());
+    let t0 = tiles()[0];
+    let stored = load_tile(&store, &w, RES, &s, t0).unwrap().expect("tile 0");
+    let top = stored.core.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    assert!(top > 1.0, "a tile with a change to refuse ({top})");
+    // A range that does not hold the tile's change is an error naming the tile, not a silently unsound bound.
+    let narrow = StoreLayer::new(store.clone(), Arc::new(world()), RES, s, 4, (-0.5, 0.5)).unwrap();
+    let e = narrow.tile(Face(0), 0, 0).err().expect("a refusal");
+    assert!(e.contains("layer tile 0/0/0") && e.contains("global range"), "{e}");
+    // A cache of two tiles decodes the third, forgets the oldest, and decodes it again when it is asked for.
+    let layer = StoreLayer::new(store, Arc::new(world()), RES, s, 2, default_change_range()).unwrap();
+    for t in tiles() {
+        layer.tile(t.face, t.ti, t.tj).unwrap();
+    }
+    assert_eq!(layer.decodes(), 3);
+    layer.tile(tiles()[1].face, tiles()[1].ti, tiles()[1].tj).unwrap();
+    assert_eq!(layer.decodes(), 3, "a tile still held was decoded again");
+    layer.tile(t0.face, t0.ti, t0.tj).unwrap();
+    assert_eq!(layer.decodes(), 4, "the oldest tile was kept");
+}
