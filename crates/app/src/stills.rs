@@ -70,11 +70,12 @@ pub struct StillsConfig {
     pub look: LookOverride,
 }
 
-/// The `[look]` table of a poses file: `ground_detail = 0.6` and any number of `[[look.curve]]` with `material` (rock, sand, grass, soil), `input`
+/// The `[look]` table of a poses file: `ground_detail = 0.6`, `ground_patch = 0.12` (the patch break-up of the material boundaries, REND-055) and any number of `[[look.curve]]` with `material` (rock, sand, grass, soil), `input`
 /// (slope_cos, height, temperature, precipitation, surface_type, soil_depth, moisture, insolation), `lo` and `hi` (a `lo == hi` pair leaves the input out).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LookOverride {
     pub ground_detail: Option<f64>,
+    pub ground_patch: Option<f64>,
     pub curves: Vec<(usize, usize, [f64; 2])>,
 }
 
@@ -83,6 +84,9 @@ impl LookOverride {
     pub fn apply(&self, lit: &mut planet_frame::look::LitPlan) {
         if let Some(d) = self.ground_detail {
             lit.ground_detail = d;
+        }
+        if let Some(p) = self.ground_patch {
+            lit.ground_patch = p;
         }
         for &(material, input, pair) in &self.curves {
             lit.materials.curves[material][input] = pair;
@@ -99,6 +103,12 @@ fn parse_look(root: &toml::Table) -> Result<LookOverride, String> {
     if let Some(d) = ground_detail {
         if !(0.0..=1.0).contains(&d) {
             return Err(format!("[look]: ground_detail {d} must be from 0 to 1"));
+        }
+    }
+    let ground_patch = number(look, "ground_patch", "[look]")?;
+    if let Some(p) = ground_patch {
+        if !(0.0..=planet_frame::look::file::PATCH_MAX).contains(&p) {
+            return Err(format!("[look]: ground_patch {p} must be from 0 to {}", planet_frame::look::file::PATCH_MAX));
         }
     }
     let mut curves = Vec::new();
@@ -118,7 +128,7 @@ fn parse_look(root: &toml::Table) -> Result<LookOverride, String> {
             curves.push((material, input, [required(t, "lo", &whose)?, required(t, "hi", &whose)?]));
         }
     }
-    Ok(LookOverride { ground_detail, curves })
+    Ok(LookOverride { ground_detail, ground_patch, curves })
 }
 
 /// A value as the file wrote it, for a message.
@@ -1274,6 +1284,33 @@ sun_declination_deg = 10
         assert_eq!((g.detail, g.materials), (lit.ground_detail, lit.materials), "F8 shows what the stills of the sample look show");
     }
 
+    // spec: LOOK-012
+    #[test]
+    fn the_poses_file_sets_the_patch_break_up_within_its_range() {
+        let c = parse_config(&format!(
+            "{GOOD}
+[look]
+ground_patch = 0.12
+"
+        ))
+        .unwrap();
+        assert_eq!(c.look, LookOverride { ground_patch: Some(0.12), ..LookOverride::default() });
+        let mut lit = planet_frame::look::LitPlan::fixed(12.0);
+        assert_eq!(lit.ground_patch, 0.0);
+        c.look.apply(&mut lit);
+        assert_eq!(lit.ground_patch, 0.12);
+        for bad in ["0.9", "-0.1"] {
+            let e = parse_config(&format!(
+                "{GOOD}
+[look]
+ground_patch = {bad}
+"
+            ))
+            .unwrap_err();
+            assert!(e.contains("ground_patch") && e.contains(bad), "{bad}: {e}");
+        }
+    }
+
     // spec: TEST-053
     #[test]
     fn the_look_table_and_a_poses_view_are_read_and_a_bad_name_is_refused_with_the_names_it_knows() {
@@ -1294,7 +1331,7 @@ hi = 0.8
         let c = parse_config(&text).unwrap();
         assert_eq!(c.poses[1].view, Some(ShadeView::SoilDepth));
         assert_eq!(c.poses[0].view, None);
-        assert_eq!(c.look, LookOverride { ground_detail: Some(0.6), curves: vec![(3, 6, [0.5, 0.8])] });
+        assert_eq!(c.look, LookOverride { ground_detail: Some(0.6), ground_patch: None, curves: vec![(3, 6, [0.5, 0.8])] });
         let mut lit = planet_frame::look::LitPlan::fixed(12.0);
         c.look.apply(&mut lit);
         assert_eq!((lit.ground_detail, lit.materials.curves[3][6]), (0.6, [0.5, 0.8]));
