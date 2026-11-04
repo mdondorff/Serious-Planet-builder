@@ -43,6 +43,8 @@ struct Opts {
     global_res: u32,
     class_source: bool,
     legacy_source: bool,
+    /// `--tile-dir DIR`: the directory of the layer's tile records (default `<out>/tiles`); the viewer reads the layer from the field store's own directory when it has no other, so a layer baked beside a store is written there.
+    tile_dir: Option<PathBuf>,
     map_width: usize,
     image_step: Option<usize>,
 }
@@ -87,7 +89,7 @@ fn main() {
     }
     let started = Instant::now();
     // A planet pass that was complete (its pass 1 dropped) has nothing to resume: pass 1 would be computed again only to find every tile stored.
-    if tiles_wanted.is_none() && !out.join("layer").exists() && out.join("tiles").exists() {
+    if tiles_wanted.is_none() && !out.join("layer").exists() && o.tile_dir.clone().unwrap_or_else(|| out.join("tiles")).exists() {
         println!(
             "layer: {} holds a complete layer (pass 1 dropped); nothing to do (run with --keep-pass1 to keep pass 1 for iteration)",
             out.display()
@@ -116,7 +118,7 @@ fn main() {
     let shape = BakeShape { seed: o.seed, radius_m: RADIUS_M, face_res: o.face_res, planet_res: o.planet_res, tile: o.tile, halo: o.halo };
     let (layer, spec) = bake_specs(&world, &shape).unwrap_or_else(|e| fail(&e));
     let face_halo = layer.halo;
-    let (face_dir, tile_dir) = (out.join("layer"), out.join("tiles"));
+    let (face_dir, tile_dir) = (out.join("layer"), o.tile_dir.clone().unwrap_or_else(|| out.join("tiles")));
     let face_bake_res = o.face_res as u32;
     println!(
         "layer: seed {}, pass 1 at {} cells a face edge (halo {face_halo}), pass 2 at {} cells ({:.0} m), tiles of {tile} with a halo of {halo}, {} threads ({})",
@@ -276,6 +278,7 @@ fn parse() -> Opts {
         global_res: 16_384,
         class_source: false,
         legacy_source: false,
+        tile_dir: None,
         map_width: 1024,
         image_step: None,
     };
@@ -299,8 +302,9 @@ fn parse() -> Opts {
             "--global-res" => o.global_res = number("--global-res") as u32,
             "--class-source" => o.class_source = true,
             "--legacy-source" => o.legacy_source = true,
+            "--tile-dir" => o.tile_dir = Some(PathBuf::from(value())),
             other => fail(&format!(
-                "unknown option '{other}' (known: --seed N, --face-res N, --planet-res N, --tile N, --halo N, --region FILE, --keep-pass1, --out DIR, --threads N, --map-width W)"
+                "unknown option '{other}' (known: --tile-dir DIR, --seed N, --face-res N, --planet-res N, --tile N, --halo N, --region FILE, --keep-pass1, --out DIR, --threads N, --map-width W)"
             )),
         }
     }
