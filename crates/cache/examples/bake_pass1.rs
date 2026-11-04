@@ -17,13 +17,13 @@ use planet_world_def::WorldDefinition;
 
 const RADIUS_M: f64 = 6_371_000.0;
 /// The largest `--planet-res` a run takes without the planner's go (the full resolution is 12,288).
-const COARSE_LIMIT: usize = 4096;
+const COARSE_LIMIT: usize = 12_288;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut halo: Option<usize> = None;
     let (mut seed, mut res, mut out, mut threads, mut concurrency, mut width) =
-        (14u64, 768usize, None::<PathBuf>, 0usize, 1usize, 1024usize);
+        (14u64, 12_288usize, None::<PathBuf>, 0usize, 1usize, 1024usize);
     let mut faces: Vec<u8> = (0..6).collect();
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -51,7 +51,7 @@ fn main() {
         fail("--planet-res must be at least 8 and --map-width an even number of at least 64");
     }
     if res > COARSE_LIMIT {
-        fail(&format!("--planet-res above {COARSE_LIMIT} is a full-resolution bake and needs the planner's go"));
+        fail(&format!("--planet-res above {COARSE_LIMIT} is larger than GEN-100's pass-1 grid"));
     }
     let (threads, threads_note) = planet_streaming::topology::bake_threads(threads).unwrap_or_else(|e| fail(&e));
     let out = out.unwrap_or_else(|| PathBuf::from(format!("target/bake/pass1-seed-{seed}-res-{res}")));
