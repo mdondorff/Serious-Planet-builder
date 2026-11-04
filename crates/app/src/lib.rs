@@ -1712,7 +1712,7 @@ mod tests {
         assert!(on.erosion_note().contains("no manifest: the options and the production shape"), "{}", on.erosion_note());
         let bare = worldfield::ErosionOptions { face_res: None, planet_res: None, ..options(Some(bake_dir.clone()), true, 24) };
         let e = open().with_erosion(&bare).err().unwrap();
-        assert!(e.contains("another bake") && e.contains("refused, not mixed"), "the production shape is not the tiny layer's: {e}");
+        assert!(e.contains("holds no layer tile") && e.contains("98304-cell"), "the production shape is not the tiny layer's: {e}");
         // The default world's field is the v1 (bilinear) one: with the layer it is upgraded to the C1 base the layer's ground is read with.
         assert_eq!(plain.id(), planet_generators::erosion::EROSION_IMPLEMENTATION_ID);
         assert_eq!(on.id(), EROSION_C1_LAYER_ONLY_IMPLEMENTATION_ID);
