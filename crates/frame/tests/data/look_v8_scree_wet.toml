@@ -1,0 +1,18 @@
+# A hand-written look file, schema version 8 (the version that added the `scree` and `wet` materials and the `scree` and `wet` octave entries of the `ground` table, REND-056):
+# comments, key order and spacing never matter. Body 1 turns scree on over steep ground and gives the 25 cm octave scree and wet entries; every key it leaves out is the Earth default.
+schema_version = 8
+kind = "look"
+
+[body.1.ground]
+detail = 0.6
+
+[body.1.ground.scree]
+slope_cos = [0.80, 0.55]
+height = [0.0, 0.0]
+
+[body.1.ground.wet]
+moisture = [0.0, 0.6]
+
+[body.1.ground.octave.cm25]
+scree = [0.30, 0.25]
+wet = [0.12, 0.08]
