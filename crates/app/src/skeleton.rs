@@ -191,9 +191,12 @@ pub fn generate(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         && o.verify_global.is_none()
         && o.prefill_dir.is_none()
         && o.coupled_run.is_none()
+        && o.coarse_horizon.is_none()
+        && o.plan_check.is_none()
     {
         return Err(
-            "--class-source and --legacy-source apply to --global-dir, --verify-global, --prefill-dir and --coupled-run only".into()
+            "--class-source and --legacy-source apply to --global-dir, --verify-global, --prefill-dir, --coupled-run, --coarse-horizon and --plan-check only (and to the viewer's store)"
+                .into(),
         );
     }
     if o.compact_cache.is_some() {

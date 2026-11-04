@@ -57,7 +57,9 @@ pub fn plan_check(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         }
         None => WorldDefinition::single_planet(crate::skeleton::RADIUS_M, o.seed),
     };
-    let world = GlobalWorld::from_definition(&def).map_err(|e| format!("the definition cannot be generated: {e}"))?;
+    // The world of the store as it records its field source (STRM-073): a class-source store opens as one, a store of both needs --class-source or --legacy-source.
+    let threads = planet_streaming::topology::bake_threads(0).map_or(4, |t| t.0);
+    let world = GlobalWorld::for_store(&def, dir, o.global_res, o.field_source_choice()?, threads)?;
     let store = planet_cache::pack::TileStore::open(dir, world.params()).map_err(|e| e.to_string())?;
     let src = StoreSource::new(&store, &world, o.global_res).map_err(|e| e.to_string())?;
     let bake_key = world.stage_key(o.global_res).0;
