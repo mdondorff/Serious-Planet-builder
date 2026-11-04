@@ -200,7 +200,7 @@ fn a_channel_of_another_layer_or_a_damaged_stream_is_refused_and_a_store_without
     writer.finish().unwrap();
     let bad_store = TileStore::open(bad.path(), w.params()).unwrap();
     let e = load_depth(&bad_store, &w, RES, &s, id).unwrap_err().to_string();
-    assert!(e.contains("layer depth"), "{e}");
+    assert!(e.contains("layer depth 0/0/0"), "{e}");
     // A layer stored before the channels: the tile is there, the run computes again for the depth only and writes no tile twice.
     let old = Dir::new("old");
     let mut writer = PackWriter::open(old.path(), w.params(), DEFAULT_MAX_PACK_BYTES).unwrap();
