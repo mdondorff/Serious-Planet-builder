@@ -815,8 +815,12 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
     }
     // The erosion layer is drawn by the viewer over a stored bake (VIEW-062); no other mode reads it, and its options mean nothing without `--erosion on`.
     const EROSION_OPTIONS: [&str; 4] = ["--erosion-store", "--erosion-face-res", "--erosion-res", "--erosion-unchecked"];
-    if o.given.contains("--erosion") && o.erosion && !matches!(o.mode, Mode::Editor) {
-        return Err("--erosion on only applies to `editor` (the viewer draws the layer over a stored bake)".into());
+    let capture_stills = matches!(o.mode, Mode::TestRender) && o.scene == "capture-stills";
+    if o.given.contains("--erosion") && o.erosion && !matches!(o.mode, Mode::Editor) && !capture_stills {
+        return Err(
+            "--erosion on only applies to `editor` and `test-render --scene capture-stills` (they draw the layer over a stored bake)"
+                .into(),
+        );
     }
     if !o.erosion {
         if let Some(f) = EROSION_OPTIONS.iter().find(|f| o.given.contains(**f)) {
@@ -1645,6 +1649,9 @@ mod tests {
         assert!(e.contains("--erosion-store only applies with --erosion on"), "{e}");
         let e = run_str(&["test-render", "--scene", "hello-triangle", "--erosion", "on"]).unwrap_err();
         assert!(e.contains("only applies to `editor`"), "{e}");
+        // The stills of the product path draw the layer too (VIEW-062): the option is accepted there and the run goes on to what it needs (the poses file).
+        let e = run_str(&["test-render", "--scene", "capture-stills", "--erosion", "on"]).unwrap_err();
+        assert!(!e.contains("only applies to"), "{e}");
     }
 
     // spec: VIEW-063
