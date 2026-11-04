@@ -6,4 +6,4 @@ Why it matters: M9 items I8a (ground detail) and I8b (materials from the baked c
 Time box: about 1 day of agent work.
 Success criteria: per relief class, plains included, the runtime detail's std per band (30-200 m) and 3 km relief against GLO-30; a multi-scale design for 1.8-50 m that varies with slope, the two channels and the material; a material mix (rock, scree, soil, grass, wet ground) from slope, drainage area and deposition depth; the GPU cost per frame against the REND budgets; what stays runtime and what is baked; stills from the viewer path, anything not in the product labelled; a ranked design.
 Fallback if it fails: keep SPIKE-67's shader detail and the current materials; record the measured gap.
-Code location: branch `spike/ground-detail` (throwaway; never merged into the main crates).
+Code location: branch `spike/spike-100-ground-detail` (throwaway; never merged into the main crates). `spike/ground-detail` is SPIKE-27's older prototype, read for reference only.
