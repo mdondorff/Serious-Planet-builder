@@ -212,6 +212,8 @@ pub struct LitPlan {
     pub ground_detail: f64,
     /// The patch break-up of the material boundaries (REND-055, `ground.patch` of the look file): 0 off, the default.
     pub ground_patch: f64,
+    /// The per-material coefficients of the detail octaves (LOOK-013, schema version 7 of the look file).
+    pub coef: materials::DetailCoefficients,
     /// The specular term of the ground that goes with the detail (M7 G2b, LOOK-010): roughness per material and modifier, and the base reflectance.
     pub gloss: materials::GlossParams,
     /// The water level W in metres above the reference surface (ADR 0041; until the water-level field exists the sea's constant
@@ -332,6 +334,7 @@ impl LitPlan {
             materials: materials::MaterialParams::EARTH,
             ground_detail: 0.0,
             ground_patch: 0.0,
+            coef: materials::DetailCoefficients::EARTH,
             gloss: materials::GlossParams::EARTH,
             water_level_m: 0.0,
             view: ShadeView::Lit,
@@ -384,6 +387,7 @@ impl LitPlan {
             }
             self.materials = ground.materials;
             self.ground_patch = ground.patch;
+            self.coef = ground.coef;
         }
         self
     }
@@ -464,6 +468,12 @@ impl LitPlan {
         if self.ground_patch != 0.0 {
             look.push_str(&format!(" patch {:016x}", self.ground_patch.to_bits()));
         }
+        if self.coef != materials::DetailCoefficients::EARTH {
+            look.push_str(" coef");
+            for b in self.coef.bits() {
+                look.push_str(&format!(" {b:016x}"));
+            }
+        }
         format!(
             "lit {mode} dt {} sun {} {} {} reset {} tonemap {}{look}",
             h(self.dt_s),
@@ -495,7 +505,7 @@ impl LitPlan {
             }
             u64::from_str_radix(s, 16).map(f64::from_bits).map_err(|e| format!("bad f64 bits '{s}': {e}"))
         };
-        let usage = "lit line is not 'dt .. sun .. reset .. tonemap ..' (optionally followed by 'units .. hist ..', 'albedo ..', 'water ..', 'view ..', 'atmosphere ..', 'overlay ..', 'materials ..', 'detail ..', 'gloss ..' and 'patch ..' in this order)";
+        let usage = "lit line is not 'dt .. sun .. reset .. tonemap ..' (optionally followed by 'units .. hist ..', 'albedo ..', 'water ..', 'view ..', 'atmosphere ..', 'overlay ..', 'materials ..', 'detail ..', 'gloss ..', 'patch ..' and 'coef ..' in this order)";
         let ["dt", dt, "sun", sx, sy, sz, "reset", reset, "tonemap", tm, tail @ ..] = rest else {
             return Err(usage.into());
         };
@@ -515,6 +525,7 @@ impl LitPlan {
             materials: materials::MaterialParams::EARTH,
             ground_detail: 0.0,
             ground_patch: 0.0,
+            coef: materials::DetailCoefficients::EARTH,
             gloss: materials::GlossParams::EARTH,
             water_level_m: 0.0,
             view: ShadeView::Lit,
@@ -536,6 +547,7 @@ impl LitPlan {
                 "detail" => (8, 1),
                 "gloss" => (9, materials::GLOSS_VALUES),
                 "patch" => (10, 1),
+                "coef" => (11, materials::COEF_VALUES),
                 _ => return Err(usage.into()),
             };
             if rank <= stage || more.len() < arity {
@@ -573,6 +585,13 @@ impl LitPlan {
                 }
                 8 => plan.ground_detail = f64_of(args[0])?,
                 10 => plan.ground_patch = f64_of(args[0])?,
+                11 => {
+                    let mut bits = [0u64; materials::COEF_VALUES];
+                    for (b, a) in bits.iter_mut().zip(args) {
+                        *b = f64_of(a)?.to_bits();
+                    }
+                    plan.coef = materials::DetailCoefficients::from_bits(&bits);
+                }
                 9 => {
                     let mut bits = [0u64; materials::GLOSS_VALUES];
                     for (b, a) in bits.iter_mut().zip(args) {
@@ -617,6 +636,7 @@ impl LitPlan {
         self.albedo.validate().map_err(|(k, v, why)| format!("lit plan: `{k}` = {v}: {why}"))?;
         self.materials.validate().map_err(|(k, v, why)| format!("lit plan: `{k}` = {v}: {why}"))?;
         self.gloss.validate().map_err(|(k, v, why)| format!("lit plan: `{k}` = {v}: {why}"))?;
+        self.coef.validate().map_err(|(k, v, why)| format!("lit plan: `{k}` = {v}: {why}"))?;
         if self.ground_detail != 0.0 && !(1.0e-6..=1.0).contains(&self.ground_detail) {
             return Err(format!("lit plan: `ground_detail` = {}: the strength must be 0 or a number from 1e-6 to 1", self.ground_detail));
         }

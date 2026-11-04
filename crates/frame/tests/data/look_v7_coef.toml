@@ -1,0 +1,12 @@
+# A hand-written look file, schema version 7 (the version that added the `octave` tables and `crack` of the `ground` table, LOOK-013): comments, key order and spacing never
+# matter. Body 1 gives the 25 cm octave a stronger rock tilt and deeper cracks; every key it leaves out is the Earth default.
+schema_version = 7
+kind = "look"
+
+[body.1.ground]
+detail = 0.6
+crack = 0.7
+
+[body.1.ground.octave.cm25]
+tilt = [0.3, 0.05, 0.1, 0.12]
+grass = [0.34, 0.30, 0.30]

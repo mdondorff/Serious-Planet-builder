@@ -348,6 +348,57 @@ fn the_ground_detail_is_inert_when_off_changes_the_lit_picture_when_on_and_leave
     assert!(hdr_of(&mut scattered, &ctx, &p, detail_plan(ShadeView::Lit, 1.0)) == on, "the detail depends on where the tiles sit");
 }
 
+// spec: LOOK-013
+#[test]
+fn the_octave_coefficients_drive_the_picture_and_the_strength_zero_is_inert() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let (p, _) = plan(6);
+    let mut r = renderer(&ctx, &p);
+    let plain = hdr_of(&mut r, &ctx, &p, detail_plan(ShadeView::Lit, 1.0));
+    let covered = plain.iter().filter(|px| px[3] > 0.0).count();
+    // (That the Earth values draw what the old shader constants drew is the evidence of the exact goldens of the lit ground, `gpu_ground_look`: they need no candidate.)
+    // Every coefficient at 0: no albedo variation and no tilt, so the picture differs on most of the ground; the strength 0 is still the off picture.
+    let mut flat = detail_plan(ShadeView::Lit, 1.0);
+    for o in &mut flat.coef.octaves {
+        o.albedo = [0.0; 3];
+        o.grass = [0.0; 3];
+        o.tilt = [0.0; 4];
+    }
+    flat.coef.crack = 0.0;
+    let flat_img = hdr_of(&mut r, &ctx, &p, flat);
+    let apart = plain
+        .iter()
+        .zip(&flat_img)
+        .filter(|(a, b)| a[3] > 0.0 && (luminance(a) - luminance(b)).abs() > 0.02 * luminance(a).max(1e-6))
+        .count();
+    assert!(apart * 5 > covered, "zero coefficients differ on {apart} of {covered} pixels only");
+    let mut off = detail_plan(ShadeView::Lit, 0.0);
+    off.coef = flat.coef;
+    assert!(hdr_of(&mut r, &ctx, &p, off) == hdr_of(&mut r, &ctx, &p, detail_plan(ShadeView::Lit, 0.0)), "the strength 0 is not inert");
+}
+
+// spec: LOOK-013
+#[test]
+fn a_changed_16_m_tilt_moves_the_picture() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let (p, _) = plan(6);
+    let mut r = renderer(&ctx, &p);
+    let plain = hdr_of(&mut r, &ctx, &p, detail_plan(ShadeView::Lit, 1.0));
+    let mut tilted = detail_plan(ShadeView::Lit, 1.0);
+    tilted.coef.octaves[0].tilt = [4.0; 4];
+    let img = hdr_of(&mut r, &ctx, &p, tilted);
+    assert!(img != plain, "a 16 m tilt of 4 changed nothing");
+    // (The 3 cm octave fades out at this distance, so it is left out.) Each octave's tilt and grass entries are read from their own place (a lane's material may be absent from the frame, so a lane alone proves nothing).
+    for octave in 0..3 {
+        let mut c = detail_plan(ShadeView::Lit, 1.0);
+        c.coef.octaves[octave].tilt = [4.0; 4];
+        assert!(hdr_of(&mut r, &ctx, &p, c) != plain, "octave {octave} tilt is not read");
+        let mut c = detail_plan(ShadeView::Lit, 1.0);
+        c.coef.octaves[octave].grass = [4.0; 3];
+        assert!(hdr_of(&mut r, &ctx, &p, c) != plain, "octave {octave} grass is not read");
+    }
+}
+
 // spec: REND-037
 #[test]
 fn each_material_alone_reads_as_itself_in_colour_and_value() {

@@ -198,6 +198,120 @@ impl MaterialParams {
     }
 }
 
+/// The detail octaves the coefficient table covers (LOOK-013): cells of 16 m, 2 m, 25 cm and 3 cm.
+pub const COEF_OCTAVES: usize = 4;
+/// The names of the octaves in the look file (`ground.octave.<name>`).
+pub const OCTAVE_NAMES: [&str; COEF_OCTAVES] = ["m16", "m2", "cm25", "cm3"];
+/// Values of one octave: the albedo coefficient of rock, sand and soil, the colour coefficient of grass, and the tilt of rock, sand, grass and soil.
+pub const OCTAVE_VALUES: usize = 3 + 3 + 4;
+/// Values of [`DetailCoefficients`]: the octaves, then the depth of the rock's cracks.
+pub const COEF_VALUES: usize = COEF_OCTAVES * OCTAVE_VALUES + 1;
+/// Number of `vec4<f32>` words the table occupies: per octave the albedo (rock, sand, 0, soil), the grass colour and the tilt, then one for the cracks.
+pub const COEF_VEC4S: usize = COEF_OCTAVES * 3 + 1;
+
+/// What one detail octave does to each material (LOOK-013): the albedo multiplier's coefficient of the octave's value and the tilt of the shading normal by its gradient.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OctaveCoef {
+    /// The albedo coefficient of rock, sand and soil (each is times a fixed tint in the shader).
+    pub albedo: [f64; 3],
+    /// The colour coefficient of grass.
+    pub grass: [f64; 3],
+    /// The tilt of rock, sand, grass and soil.
+    pub tilt: [f64; 4],
+}
+
+/// The per-material coefficients of the ground detail octaves (M7 G2c; LOOK-013): what were constants of the shader. The Earth default is those constants, so a
+/// plan without the table draws what it drew. Presentation data (ADR 0035).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DetailCoefficients {
+    pub octaves: [OctaveCoef; COEF_OCTAVES],
+    /// How dark the rock's cracks are at the crest of the 25 cm octave (a weight on the rock, in the shared 0 to 4 range).
+    pub crack: f64,
+}
+
+impl DetailCoefficients {
+    pub const EARTH: DetailCoefficients = DetailCoefficients {
+        octaves: [
+            OctaveCoef { albedo: [0.10, 0.09, 0.06], grass: [0.10; 3], tilt: [0.0; 4] },
+            OctaveCoef { albedo: [0.0, 0.05, 0.0], grass: [0.08; 3], tilt: [0.05, 0.03, 0.0, 0.0] },
+            OctaveCoef { albedo: [0.34, 0.05, 0.18], grass: [0.34, 0.30, 0.30], tilt: [0.20, 0.05, 0.10, 0.12] },
+            OctaveCoef { albedo: [0.10, 0.04, 0.08], grass: [0.30; 3], tilt: [0.10, 0.08, 0.15, 0.06] },
+        ],
+        crack: 0.55,
+    };
+
+    /// The values in a fixed order: per octave the albedo, the grass colour and the tilt, then the crack depth.
+    pub fn values(&self) -> [f64; COEF_VALUES] {
+        let mut v = [0.0; COEF_VALUES];
+        for (k, o) in self.octaves.iter().enumerate() {
+            let at = k * OCTAVE_VALUES;
+            v[at..at + 3].copy_from_slice(&o.albedo);
+            v[at + 3..at + 6].copy_from_slice(&o.grass);
+            v[at + 6..at + 10].copy_from_slice(&o.tilt);
+        }
+        v[COEF_VALUES - 1] = self.crack;
+        v
+    }
+
+    /// Inverse of [`values`](DetailCoefficients::values).
+    pub fn from_values(v: &[f64; COEF_VALUES]) -> DetailCoefficients {
+        let mut octaves = [OctaveCoef { albedo: [0.0; 3], grass: [0.0; 3], tilt: [0.0; 4] }; COEF_OCTAVES];
+        for (k, o) in octaves.iter_mut().enumerate() {
+            let at = k * OCTAVE_VALUES;
+            o.albedo.copy_from_slice(&v[at..at + 3]);
+            o.grass.copy_from_slice(&v[at + 3..at + 6]);
+            o.tilt.copy_from_slice(&v[at + 6..at + 10]);
+        }
+        DetailCoefficients { octaves, crack: v[COEF_VALUES - 1] }
+    }
+
+    /// Bit patterns of every value (the plan text form).
+    pub fn bits(&self) -> [u64; COEF_VALUES] {
+        self.values().map(f64::to_bits)
+    }
+
+    /// Inverse of [`bits`](DetailCoefficients::bits).
+    pub fn from_bits(b: &[u64; COEF_VALUES]) -> DetailCoefficients {
+        DetailCoefficients::from_values(&b.map(f64::from_bits))
+    }
+
+    /// The table as the shader holds it: per octave three `vec4<f32>` (rock, sand, 0, soil albedo; the grass colour and 0; the tilts), then the cracks in the first lane.
+    pub fn to_words(&self) -> [f32; COEF_VEC4S * 4] {
+        let mut w = [0f32; COEF_VEC4S * 4];
+        for (k, o) in self.octaves.iter().enumerate() {
+            let at = k * 12;
+            w[at] = o.albedo[0] as f32;
+            w[at + 1] = o.albedo[1] as f32;
+            w[at + 3] = o.albedo[2] as f32;
+            for c in 0..3 {
+                w[at + 4 + c] = o.grass[c] as f32;
+            }
+            for c in 0..4 {
+                w[at + 8 + c] = o.tilt[c] as f32;
+            }
+        }
+        w[COEF_OCTAVES * 12] = self.crack as f32;
+        w
+    }
+
+    /// Every value must be a finite number from 0 to 4 that fits f32; the first violation names the key (`ground.octave.<name>.<albedo|grass|tilt>` or `ground.crack`).
+    pub fn validate(&self) -> Result<(), (String, String, String)> {
+        let ok = |v: f64| v.is_finite() && (0.0..=4.0).contains(&v) && (v as f32).is_finite();
+        let why = "every coefficient must be a number from 0 to 4";
+        for (name, o) in OCTAVE_NAMES.iter().zip(&self.octaves) {
+            for (what, vals) in [("albedo", &o.albedo[..]), ("grass", &o.grass[..]), ("tilt", &o.tilt[..])] {
+                if !vals.iter().all(|v| ok(*v)) {
+                    return Err((format!("ground.octave.{name}.{what}"), format!("{vals:?}"), why.into()));
+                }
+            }
+        }
+        if !ok(self.crack) {
+            return Err(("ground.crack".into(), format!("{}", self.crack), why.into()));
+        }
+        Ok(())
+    }
+}
+
 /// The strength of the ground detail the window starts with and F6 calls "natural" (the owner's tuning pass sets it; 1 is full).
 pub const NATURAL_STRENGTH: f64 = 0.6;
 
