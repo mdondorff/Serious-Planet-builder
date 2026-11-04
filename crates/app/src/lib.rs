@@ -1708,6 +1708,11 @@ mod tests {
         let plain = open();
         let on = open().with_erosion(&options(Some(bake_dir.clone()), true, 24)).unwrap();
         assert!(on.erosion_note().contains("erosion layer") && on.describe().contains("erosion layer"), "{}", on.describe());
+        // A layer without a manifest takes the options, or the production shape without them (which a tiny layer was not made for: refused by its keys).
+        assert!(on.erosion_note().contains("no manifest: the options and the production shape"), "{}", on.erosion_note());
+        let bare = worldfield::ErosionOptions { face_res: None, planet_res: None, ..options(Some(bake_dir.clone()), true, 24) };
+        let e = open().with_erosion(&bare).err().unwrap();
+        assert!(e.contains("another bake") && e.contains("refused, not mixed"), "the production shape is not the tiny layer's: {e}");
         // The default world's field is the v1 (bilinear) one: with the layer it is upgraded to the C1 base the layer's ground is read with.
         assert_eq!(plain.id(), planet_generators::erosion::EROSION_IMPLEMENTATION_ID);
         assert_eq!(on.id(), EROSION_C1_LAYER_ONLY_IMPLEMENTATION_ID);
