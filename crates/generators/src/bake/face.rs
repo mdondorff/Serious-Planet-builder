@@ -150,5 +150,13 @@ pub fn pass1_face_with_area(
             area.push(area_code(routing.area[(j + h) * m + i + h], cell_m2));
         }
     }
-    (FaceChange { face: spec.face, cells: spec.cells, halo: spec.halo, change: z.iter().zip(&z0).map(|(a, b)| (a - b) as f32).collect() }, area)
+    (
+        FaceChange {
+            face: spec.face,
+            cells: spec.cells,
+            halo: spec.halo,
+            change: z.iter().zip(&z0).map(|(a, b)| (a - b) as f32).collect(),
+        },
+        area,
+    )
 }

@@ -121,14 +121,14 @@ fn the_depth_codes_are_exact_at_zero_monotone_and_clamped_and_the_net_equals_the
         assert!((f64::from(depth_m(depth_code(m))) - m).abs() <= 0.07 * m.sqrt() + 1e-3, "{m} m round trips to {}", depth_m(depth_code(m)));
     }
     let g = TileGrid { cells: 96, tile: 24, halo: 6, radius_m: R };
-    for face_change in [0.0, -30.0] {
+    for face_change in [0.0, -30.0, 10.0] {
         let r = pass2_tile(&g, tiles()[0], &base, &|_: Vec3| face_change, None, &Pass2Params::standard(9, 0.0), 2);
         assert_eq!((r.eroded.len(), r.deposited.len()), (24 * 24, 24 * 24));
         assert!(r.eroded.iter().any(|&c| c > 0) && r.deposited.iter().any(|&c| c > 0), "both signs are kept");
         for (p, c) in r.core.iter().enumerate() {
             let (e, d) = (f64::from(depth_m(r.eroded[p])), f64::from(depth_m(r.deposited[p])));
             assert!(
-                (d - e - f64::from(*c)).abs() <= 0.14 * e.max(d).sqrt() + 0.3,
+                (d - e - (f64::from(*c) - face_change.max(0.0))).abs() <= 0.13 * e.max(d).sqrt() + 0.003,
                 "face change {face_change}, cell {p}: deposited {d} - eroded {e} is not the change {c}"
             );
         }
@@ -235,4 +235,37 @@ fn the_reader_returns_the_stored_depth_at_a_cell_centre_and_the_area_in_log2_cel
     let l = ch.area_log2_cells(d).unwrap().expect("area there");
     assert!((0.0..32.0).contains(&l), "{l}");
     assert!(ch.area_cells(d).unwrap().unwrap() >= 1.0);
+}
+
+// spec: STRM-072
+#[test]
+fn the_depth_reads_across_a_tile_border_without_a_step() {
+    let (w, p1) = (world(), Dir::new("p1"));
+    let s = spec(&w);
+    let f = faces(p1.path(), &w);
+    let a = pass2_dir(&w, &s, &f, "a", 2);
+    let store = TileStore::open(a.path(), w.params()).unwrap();
+    let ch = LayerChannels::new(&store, &w, RES, pass1(), s, 2, 4);
+    // Tiles (0, 0) and (1, 0) of face 0 meet between cells 23 and 24 of the 96-cell grid; read along row 10 in tenths of a cell.
+    let at = |i: f64| {
+        let n = 96.0;
+        let d = planet_core::cube::face_to_direction(
+            &planet_core::cube::TangentWarp,
+            Face(0),
+            2.0 * (i + 0.5) / n - 1.0,
+            2.0 * (10.0 + 0.5) / n - 1.0,
+        );
+        ch.depth_m(d).unwrap().expect("depth")
+    };
+    let (c23, c24) = (at(23.0), at(24.0));
+    let mut prev = c23;
+    for k in 1..=10 {
+        let v = at(23.0 + f64::from(k) / 10.0);
+        assert!(
+            (v.0 - prev.0).abs() <= (c24.0 - c23.0).abs() + 1e-3 && (v.1 - prev.1).abs() <= (c24.1 - c23.1).abs() + 1e-3,
+            "a step at {k}/10: {prev:?} to {v:?}"
+        );
+        assert!(v.0 >= c23.0.min(c24.0) - 1e-3 && v.0 <= c23.0.max(c24.0) + 1e-3, "{v:?} leaves {c23:?} {c24:?}");
+        prev = v;
+    }
 }

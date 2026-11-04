@@ -217,6 +217,8 @@ pub fn pass2_tile(
     let base_w = sample_window(g, id, base, threads);
     let fc_w = sample_window(g, id, face_change, threads);
     let z0: Vec<f64> = base_w.iter().zip(&fc_w).map(|(b, c)| b + c).collect();
+    // The surface the depth channels count from: the base plus what pass 1 raised (uplift or a filled pit is neither eroded nor deposited, GEN-111); pass 1's incision counts as eroded.
+    let reference: Vec<f64> = base_w.iter().zip(&fc_w).map(|(b, c)| b + c.max(0.0)).collect();
     drop(fc_w);
     let factors = factor.map(|f| sample_window(g, id, f, threads));
     let outlet = grid.outlets(&z0, p.sea_level);
@@ -243,9 +245,10 @@ pub fn pass2_tile(
         for i in 0..t {
             let q = (j + h) * w + i + h;
             core.push((z[q] - base_w[q]) as f32);
-            // Against the base window, so the pass-1 change counts: deposited - eroded is the core's change. What the face carve and the local carve took, net of thermal's refill, is eroded; the
-            // deposition sweep's rise and thermal's gain over the base are deposited.
-            let (lost, gained) = ((base_w[q] - z_thermal[q]).max(0.0), (z[q] - z_thermal[q]).max(0.0) + (z_thermal[q] - base_w[q]).max(0.0));
+            // What pass 1's incision and the local carve took, net of thermal's refill, is eroded; the deposition sweep's rise and thermal's gain over the reference are deposited: deposited
+            // - eroded is the core's change except where pass 1 raised the ground.
+            let (lost, gained) =
+                ((reference[q] - z_thermal[q]).max(0.0), (z[q] - z_thermal[q]).max(0.0) + (z_thermal[q] - reference[q]).max(0.0));
             eroded.push(depth_code(lost));
             deposited.push(depth_code(gained));
             land += usize::from(z0[q] > p.sea_level);

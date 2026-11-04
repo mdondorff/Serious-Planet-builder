@@ -60,7 +60,7 @@ The drainage area (GEN-110) and the erosion and deposition depth (GEN-111) SHALL
 - a decoder refuses an unknown codec and a stream that does not decode to exactly the expected bytes, and reserves no more than that;
 - the pass-1 store is temporary (STRM-065): the areas are copied beside the tiles before it is dropped, and a run over a layer stored before the channels existed computes the missing channels and writes what is stored no second time;
 - liveness (STRM-013) is judged like the bake's blocks; a store without the kinds opens and reads as absent;
-- the read API (`LayerChannels`) SHALL return, at a direction, the drainage area as log2 of cells (bilinear in codes over the four pass-1 cells around the point) and the eroded and deposited depth in metres (bilinear in metres between the cell centres of the tile that holds the point, clamped to that tile), with bounded caches of the decoded faces and tiles; where the store holds no record it returns none.
+- the read API (`LayerChannels`) SHALL return, at a direction, the drainage area as log2 of cells (bilinear in codes over the four pass-1 cells around the point) and the eroded and deposited depth in metres (bilinear in metres between the cell centres around the point, read across tile borders; the area is not blended across a cube edge, where a catchment is cut at each face's halo), with bounded caches of the decoded faces and tiles; where the store holds no record it returns none.
 The size of the channels for a planet SHALL be reported with the run that makes them, not bounded (the owner's approval of the persisted format is open: planner, 2026-11-03).
 
 Verify: A

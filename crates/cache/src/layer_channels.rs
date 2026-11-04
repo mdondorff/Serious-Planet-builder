@@ -323,36 +323,49 @@ impl<'a> LayerChannels<'a> {
         Ok(self.area_log2_cells(d)?.map(|l| area_cells((f64::from(l) * f64::from(AREA_STEPS)).round() as u8)))
     }
 
-    /// The erosion and deposition depth in metres at `d`: bilinear in metres between the cell centres of the tile that holds the point (indices clamped to that tile), or `None` where the
-    /// store holds no depth for the tile.
+    /// The erosion and deposition depth in metres at `d`: bilinear in metres between the cell centres around the point, across tile borders (a neighbour tile without a record is read as
+    /// the home tile's nearest cell), or `None` where the store holds no depth for the tile that holds the point.
     pub fn depth_m(&self, d: Vec3) -> Result<Option<(f32, f32)>, LayerStoreError> {
         let (face, s, t) = direction_to_face(&TangentWarp, d);
         let (n, tile) = (self.tiles.grid.cells, self.tiles.grid.tile);
         let (x, y) = ((s + 1.0) * 0.5 * n as f64 - 0.5, (t + 1.0) * 0.5 * n as f64 - 0.5);
         let (i, j) = (x.floor().clamp(0.0, (n - 1) as f64) as usize, y.floor().clamp(0.0, (n - 1) as f64) as usize);
-        let (ti, tj) = ((i / tile) as u32, (j / tile) as u32);
-        let depth = {
-            let key = (face.0, ti, tj);
-            let cached = self.depths.lock().expect("depth cache").get(key);
-            if let Some(a) = cached {
-                a
-            } else {
-                let id = PassTile { face, ti, tj };
-                let Some(a) = load_depth(self.store, self.world, self.res, &self.tiles, id)? else { return Ok(None) };
-                let a = Arc::new(a);
-                self.depths.lock().expect("depth cache").put(key, a.clone());
-                a
-            }
-        };
-        let (i0, j0) = (ti as usize * tile, tj as usize * tile);
         let (fx, fy) = ((x - i as f64).clamp(0.0, 1.0), (y - j as f64).clamp(0.0, 1.0));
-        let at =
-            |plane: &[u8], a: usize, b: usize| f64::from(depth_m(plane[(b.min(j0 + tile - 1) - j0) * tile + (a.min(i0 + tile - 1) - i0)]));
-        let bil = |plane: &[u8]| {
-            (1.0 - fy) * ((1.0 - fx) * at(plane, i, j) + fx * at(plane, i + 1, j))
-                + fy * ((1.0 - fx) * at(plane, i, j + 1) + fx * at(plane, i + 1, j + 1))
+        let (hi, hj) = (i / tile, j / tile);
+        let Some(home) = self.depth_tile(face, hi as u32, hj as u32)? else { return Ok(None) };
+        // The four cells around the point: one that lies in the next tile is read from it, so no seam shows at a tile border; a cell past the face's edge, or in a tile without a
+        // record, is read as the nearest cell of the home tile.
+        let mut cells = [(0.0f64, 0.0f64); 4];
+        for (k, (a, b)) in [(i, j), (i + 1, j), (i, j + 1), (i + 1, j + 1)].into_iter().enumerate() {
+            let (a, b) = (a.min(n - 1), b.min(n - 1));
+            let (ta, tb) = (a / tile, b / tile);
+            let other = if (ta, tb) == (hi, hj) { None } else { self.depth_tile(face, ta as u32, tb as u32)? };
+            let (d, a, b, ox, oy) = match other {
+                Some(o) => (o, a, b, ta * tile, tb * tile),
+                None => {
+                    (home.clone(), a.clamp(hi * tile, hi * tile + tile - 1), b.clamp(hj * tile, hj * tile + tile - 1), hi * tile, hj * tile)
+                }
+            };
+            let p = (b - oy) * tile + (a - ox);
+            cells[k] = (f64::from(depth_m(d.eroded[p])), f64::from(depth_m(d.deposited[p])));
+        }
+        let mix = |f: fn(&(f64, f64)) -> f64| {
+            (1.0 - fy) * ((1.0 - fx) * f(&cells[0]) + fx * f(&cells[1])) + fy * ((1.0 - fx) * f(&cells[2]) + fx * f(&cells[3]))
         };
-        Ok(Some((bil(&depth.eroded) as f32, bil(&depth.deposited) as f32)))
+        Ok(Some((mix(|c| c.0) as f32, mix(|c| c.1) as f32)))
+    }
+
+    /// The decoded depth channels of a tile of `face` through the cache (`None` where the store holds none).
+    fn depth_tile(&self, face: Face, ti: u32, tj: u32) -> Result<Option<Arc<TileDepth>>, LayerStoreError> {
+        let key = (face.0, ti, tj);
+        let cached = self.depths.lock().expect("depth cache").get(key);
+        if cached.is_some() {
+            return Ok(cached);
+        }
+        let Some(a) = load_depth(self.store, self.world, self.res, &self.tiles, PassTile { face, ti, tj })? else { return Ok(None) };
+        let a = Arc::new(a);
+        self.depths.lock().expect("depth cache").put(key, a.clone());
+        Ok(Some(a))
     }
 }
 
