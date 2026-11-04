@@ -173,8 +173,10 @@ mod tests {
         let ci = workflow();
         let docs =
             std::fs::read_to_string(repo_root().join(".github/workflows/docs.yml")).expect("docs workflow .github/workflows/docs.yml");
-        let mut expected: Vec<String> =
-            ["docs/**", "openspec/**", ".claude/**", "*.md", "spikes/**/results/**"].iter().map(|s| s.to_string()).collect();
+        let mut expected: Vec<String> = ["docs/**", "openspec/**", ".claude/**", "*.md", "spikes/**/results/**", "spikes/README.md"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         expected.sort();
         for (name, text, key) in [("ci.yml", &ci, "paths-ignore"), ("docs.yml", &docs, "paths")] {
             for trigger in ["push:", "pull_request:"] {
