@@ -151,29 +151,25 @@ pub struct TileStats {
     pub clamped_cells: usize,
 }
 
-/// A tile's result: the core's change against the base field (final minus base, f32, row-major `tile x tile`; it contains the face carve's change), the depth channels (GEN-111) and
-/// the statistics. `eroded` and `deposited` are codes of [`depth_code`] per core cell, or empty when the result was read from a record that holds no channels.
+/// A tile's result: the core's change against the base field (final minus base, f32, row-major `tile x tile`; it contains the face carve's change), the deposited depth (GEN-111) and
+/// the statistics. `deposited` holds codes of [`depth_code`] per core cell, or is empty when the result was read from a record that holds no channel.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TileResult {
     pub id: TileId,
     pub core: Vec<f32>,
-    pub eroded: Vec<u8>,
     pub deposited: Vec<u8>,
     pub stats: TileStats,
 }
 
-/// A depth in metres as a byte (GEN-111): `round(16 sqrt(m))`, so 0 to 254 m with a step of 0.125 m at 1 m and 0.5 m at 16 m; deeper is stored as 255.
+/// A depth in metres as a byte (GEN-111): `round(m)`, so 0 to 255 m in steps of 1 m; deeper is stored as 255.
 pub fn depth_code(m: f64) -> u8 {
-    (DEPTH_CODE_SCALE * m.max(0.0).sqrt()).round().min(255.0) as u8
+    m.max(0.0).round().min(255.0) as u8
 }
 
 /// The depth in metres of a code of [`depth_code`].
 pub fn depth_m(code: u8) -> f32 {
-    let c = f32::from(code) / DEPTH_CODE_SCALE as f32;
-    c * c
+    f32::from(code)
 }
-
-const DEPTH_CODE_SCALE: f64 = 16.0;
 
 /// A field evaluated on every cell of the tile's window, row-major, on `threads` threads (a value per cell: the same bits for any count).
 fn sample_window(g: &TileGrid, id: TileId, field: &(dyn Fn(Vec3) -> f64 + Sync), threads: usize) -> Vec<f64> {
@@ -259,7 +255,7 @@ pub fn pass2_tile(
     let base_w = sample_window_coarse(g, id, base, threads, BASE_STRIDE);
     let fc_w = sample_window(g, id, face_change, threads);
     let z0: Vec<f64> = base_w.iter().zip(&fc_w).map(|(b, c)| b + c).collect();
-    // The surface the depth channels count from: the base plus what pass 1 raised (uplift or a filled pit is neither eroded nor deposited, GEN-111); pass 1's incision counts as eroded.
+    // The surface the deposited depth counts from: the base plus what pass 1 raised (a raise by uplift or a filled pit is not a deposit, GEN-111).
     let reference: Vec<f64> = base_w.iter().zip(&fc_w).map(|(b, c)| b + c.max(0.0)).collect();
     drop(fc_w);
     let factors = factor.map(|f| sample_window(g, id, f, threads));
@@ -281,17 +277,14 @@ pub fn pass2_tile(
     );
     let (w, t, h) = (g.window(), g.tile, g.halo);
     let mut core = Vec::with_capacity(t * t);
-    let (mut eroded, mut deposited) = (Vec::with_capacity(t * t), Vec::with_capacity(t * t));
+    let mut deposited = Vec::with_capacity(t * t);
     let mut land = 0;
     for j in 0..t {
         for i in 0..t {
             let q = (j + h) * w + i + h;
             core.push((z[q] - base_w[q]) as f32);
-            // What pass 1's incision and the local carve took, net of thermal's refill, is eroded; the deposition sweep's rise and thermal's gain over the reference are deposited: deposited
-            // - eroded is the core's change except where pass 1 raised the ground.
-            let (lost, gained) =
-                ((reference[q] - z_thermal[q]).max(0.0), (z[q] - z_thermal[q]).max(0.0) + (z_thermal[q] - reference[q]).max(0.0));
-            eroded.push(depth_code(lost));
+            // The deposition sweep's rise plus thermal's gain over the reference. What was removed is derived by the reader: max(0, deposited - change), exact where pass 1 did not raise the cell.
+            let gained = (z[q] - z_thermal[q]).max(0.0) + (z_thermal[q] - reference[q]).max(0.0);
             deposited.push(depth_code(gained));
             land += usize::from(z0[q] > p.sea_level);
         }
@@ -300,7 +293,6 @@ pub fn pass2_tile(
     TileResult {
         id,
         core,
-        eroded,
         deposited,
         stats: TileStats {
             land_cells: land,

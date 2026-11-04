@@ -49,15 +49,15 @@ Source: ADR 0088 point 1, ADR 0088/0089 accepted 2026-11-01; SPIKE-66, m9-bake d
 - **THEN** every value lies in its block's stored range, and the planet size is under 1 GB
 
 ### Requirement: STRM-072 The layer's channels are stored beside kinds 12 and 13
-The drainage area (GEN-110) and the erosion and deposition depth (GEN-111) SHALL be stored in the layer's store as record kinds 14 and 15, versioned and keyed, and read through a small API:
+The drainage area (GEN-110) and the deposited depth (GEN-111) SHALL be stored in the layer's store as record kinds 14 and 15, versioned and keyed, and read through a small API:
 - kind 14 (`LayerArea`), one record per cube face filed under the face's root tile: `codec (u8, value 1) | cells (u32 LE, pass 1's cells a face edge) | key (16 bytes) |` a brotli stream (quality 5, window 22 bits) of the face's own cells as area codes (row `j` outer, then `i`), each row as its first byte and the wrapping differences along the row;
-- kind 15 (`LayerDepth`), one record per tile filed like kind 13: `codec (u8, value 1) | tile (u32 LE) | key (16 bytes) |` a brotli stream of the eroded plane then the deposited plane of the core (codes of GEN-111, same row coding);
+- kind 15 (`LayerDepth`), one record per tile filed like kind 13: `codec (u8, value 1) | tile (u32 LE) | key (16 bytes) |` a brotli stream of the deposited plane of the core (codes of GEN-111, steps of 1 m, same row coding); the depth removed is derived by the reader as `max(0, deposited - change)` from the tile's kind 13;
 - the keys carry, under tag 17, the channels' version, the scales of the codes and the key parameters of the layer they were made beside (the pass-1 layer's for kind 14, the tile layer's for kind 15), so a channel of another layer is an error naming both keys, never a recompute or a mix;
 - a decoder refuses an unknown codec and a stream that does not decode to exactly the expected bytes, and reserves no more than that;
 - the pass-1 store is temporary (STRM-065): the areas are copied beside the tiles before it is dropped, and a run over a layer stored before the channels existed computes the missing channels and writes what is stored no second time;
 - liveness (STRM-013) is judged like the bake's blocks; a store without the kinds opens and reads as absent;
-- the read API (`LayerChannels`) SHALL return, at a direction, the drainage area as log2 of cells (bilinear in codes over the four pass-1 cells around the point) and the eroded and deposited depth in metres (bilinear in metres between the cell centres around the point, read across tile borders; the area is not blended across a cube edge, where a catchment is cut at each face's halo), with bounded caches of the decoded faces and tiles; where the store holds no record it returns none.
-The size of the channels for a planet SHALL be reported with the run that makes them, not bounded (the owner's approval of the persisted format is open: planner, 2026-11-03).
+- the read API (`LayerChannels`) SHALL return, at a direction, the drainage area as log2 of cells (bilinear in codes over the four pass-1 cells around the point) and the deposited depth in metres (bilinear in metres between the cell centres around the point, read across tile borders; `removed_depth_m(deposited, change)` gives the depth removed; the area is not blended across a cube edge, where a catchment is cut at each face's halo), with bounded caches of the decoded faces and tiles; where the store holds no record it returns none.
+The size of the channels for a planet SHALL be reported with the run that makes them, not bounded (the one-plane, 1 m form was chosen by the owner on 2026-11-04 at about 0.13 to 0.17 bytes a land cell for the depth, about 4 GB for the planet beside kind 13's 20 GB, 24 GB together; the rest of the persisted format awaits the owner's approval).
 
 Verify: A
 Status: planned

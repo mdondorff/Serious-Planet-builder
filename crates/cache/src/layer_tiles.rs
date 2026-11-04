@@ -191,7 +191,7 @@ pub fn load_tile(
         exported_m3: f64_at(41),
         clamped_cells: u64_at(49) as usize,
     };
-    Ok(Some(TileResult { id, core: dequantise(&counts), eroded: Vec::new(), deposited: Vec::new(), stats }))
+    Ok(Some(TileResult { id, core: dequantise(&counts), deposited: Vec::new(), stats }))
 }
 
 /// The core's counts as bytes: little-endian, each row of `t` as its first count and the wrapping differences along the row.

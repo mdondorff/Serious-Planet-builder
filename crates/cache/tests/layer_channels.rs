@@ -112,25 +112,37 @@ fn all_faces() -> Vec<Face> {
 
 // spec: GEN-111
 #[test]
-fn the_depth_codes_are_exact_at_zero_monotone_and_clamped_and_the_net_equals_the_change() {
+fn the_deposited_depth_codes_are_1_m_steps_and_the_removed_depth_is_what_the_change_leaves() {
     assert_eq!(depth_code(0.0), 0);
     assert_eq!(depth_code(-3.0), 0);
+    assert_eq!(depth_code(0.49), 0);
+    assert_eq!(depth_code(0.51), 1);
+    assert_eq!(depth_code(254.6), 255);
     assert_eq!(depth_code(1.0e6), 255);
     assert!((0..255u8).all(|c| depth_m(c) < depth_m(c + 1)));
-    for m in [0.3, 1.0, 7.0, 40.0, 200.0] {
-        assert!((f64::from(depth_m(depth_code(m))) - m).abs() <= 0.07 * m.sqrt() + 1e-3, "{m} m round trips to {}", depth_m(depth_code(m)));
-    }
+    assert_eq!((depth_m(0), depth_m(7), depth_m(255)), (0.0, 7.0, 255.0));
+    assert_eq!((removed_depth_m(5.0, -3.0), removed_depth_m(5.0, 8.0), removed_depth_m(0.0, 0.0)), (8.0, 0.0, 0.0));
     let g = TileGrid { cells: 96, tile: 24, halo: 6, radius_m: R };
     for face_change in [0.0, -30.0, 10.0] {
         let r = pass2_tile(&g, tiles()[0], &base, &|_: Vec3| face_change, None, &Pass2Params::standard(9, 0.0), 2);
-        assert_eq!((r.eroded.len(), r.deposited.len()), (24 * 24, 24 * 24));
-        assert!(r.eroded.iter().any(|&c| c > 0) && r.deposited.iter().any(|&c| c > 0), "both signs are kept");
+        assert_eq!(r.deposited.len(), 24 * 24);
+        assert!(r.deposited.iter().any(|&c| c > 0) && r.deposited.iter().any(|&c| c == 0), "deposition happens in places");
+        // The removed depth the reader derives, max(0, deposited - change), is what the cell lost net of its deposit, and never negative: eroded = deposited - change + the pass-1 raise, so
+        // the reading is short by the raise where pass 1 raised the cell (the caveat) and equal elsewhere, to the 1 m step of the code and the 0.125 m step of the change.
         for (p, c) in r.core.iter().enumerate() {
-            let (e, d) = (f64::from(depth_m(r.eroded[p])), f64::from(depth_m(r.deposited[p])));
+            let (d, c) = (f64::from(depth_m(r.deposited[p])), f64::from(*c));
+            let removed = f64::from(removed_depth_m(d as f32, c as f32));
+            assert!(removed >= 0.0);
             assert!(
-                (d - e - (f64::from(*c) - face_change.max(0.0))).abs() <= 0.13 * e.max(d).sqrt() + 0.003,
-                "face change {face_change}, cell {p}: deposited {d} - eroded {e} is not the change {c}"
+                d - c >= -face_change.max(0.0) - 0.7,
+                "face change {face_change}, cell {p}: deposited {d} less the change {c} is more negative than the raise allows"
             );
+            if face_change <= 0.0 && r.deposited[p] < 255 {
+                assert!(
+                    d - c >= -0.7,
+                    "face change {face_change}, cell {p}: what was removed would be negative: deposited {d}, change {c}"
+                );
+            }
         }
     }
 }
@@ -162,7 +174,7 @@ fn the_channels_come_back_as_computed_and_a_run_stores_the_same_bytes_on_1_and_8
     for id in tiles() {
         let computed = pass2_tile(&s.grid, id, &base, &face_change_reader(&f), None, &s.params, 2);
         let d = load_depth(&store, &w, RES, &s, id).unwrap().expect("depth");
-        assert_eq!((d.eroded, d.deposited), (computed.eroded, computed.deposited), "tile {}/{}/{}", id.face.0, id.ti, id.tj);
+        assert_eq!(d.deposited, computed.deposited, "tile {}/{}/{}", id.face.0, id.ti, id.tj);
     }
     let other = PassTile { face: Face(1), ti: 0, tj: 0 };
     assert_eq!(load_depth(&store, &w, RES, &s, other).unwrap(), None);
@@ -230,8 +242,8 @@ fn the_reader_returns_the_stored_depth_at_a_cell_centre_and_the_area_in_log2_cel
     let r = pass2_tile(&s.grid, tiles()[0], &base, &face_change_reader(&f), None, &s.params, 2);
     // The centre of core cell (10, 7) of tile (0, 0) of face 0.
     let d = s.grid.direction(Face(0), 10, 7);
-    let (e, dep) = ch.depth_m(d).unwrap().expect("depth there");
-    assert!((e - depth_m(r.eroded[7 * 24 + 10])).abs() < 1e-3 && (dep - depth_m(r.deposited[7 * 24 + 10])).abs() < 1e-3, "{e} {dep}");
+    let dep = ch.depth_m(d).unwrap().expect("depth there");
+    assert!((dep - depth_m(r.deposited[7 * 24 + 10])).abs() < 1e-3, "{dep}");
     let l = ch.area_log2_cells(d).unwrap().expect("area there");
     assert!((0.0..32.0).contains(&l), "{l}");
     assert!(ch.area_cells(d).unwrap().unwrap() >= 1.0);
@@ -261,11 +273,8 @@ fn the_depth_reads_across_a_tile_border_without_a_step() {
     let mut prev = c23;
     for k in 1..=10 {
         let v = at(23.0 + f64::from(k) / 10.0);
-        assert!(
-            (v.0 - prev.0).abs() <= (c24.0 - c23.0).abs() + 1e-3 && (v.1 - prev.1).abs() <= (c24.1 - c23.1).abs() + 1e-3,
-            "a step at {k}/10: {prev:?} to {v:?}"
-        );
-        assert!(v.0 >= c23.0.min(c24.0) - 1e-3 && v.0 <= c23.0.max(c24.0) + 1e-3, "{v:?} leaves {c23:?} {c24:?}");
+        assert!((v - prev).abs() <= (c24 - c23).abs() + 1e-3, "a step at {k}/10: {prev} to {v}");
+        assert!(v >= c23.min(c24) - 1e-3 && v <= c23.max(c24) + 1e-3, "{v} leaves {c23} {c24}");
         prev = v;
     }
 }

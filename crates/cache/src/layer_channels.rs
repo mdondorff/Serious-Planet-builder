@@ -1,10 +1,11 @@
-//! The erosion layer's two baked channels beside kinds 12 and 13 (GEN-110, GEN-111, STRM-072; m9-bake): the drainage area of pass 1 and the erosion and deposition depth of pass 2, kept for
-//! the viewer's ground materials and detail.
+//! The erosion layer's two baked channels beside kinds 12 and 13 (GEN-110, GEN-111, STRM-072; m9-bake): the drainage area of pass 1 and the deposited depth of pass 2, kept for the viewer's
+//! ground materials and detail.
 //!
 //! Record kind 14 ([`KIND_LAYER_AREA`]) is one record per cube face filed under the face's root tile: `codec (u8) | cells (u32 LE, pass 1's cells a face edge) | key (16 bytes) |` a brotli
 //! stream (quality 5, window 22 bits) of the face's own cells as `u8` codes of the drainage area by multiple flow direction (`round(8 log2(area / cell area))`), row `j` outer, each row as its
 //! first byte and the wrapping differences along the row. Record kind 15 ([`KIND_LAYER_DEPTH`]) is one record per tile filed like kind 13: `codec (u8) | tile (u32 LE) | key (16 bytes) |` a
-//! brotli stream of the eroded plane then the deposited plane of the core (`u8` codes `round(16 sqrt(m))`, 0 to 254 m), each row as in kind 14. A decoder refuses an unknown codec and a stream
+//! brotli stream of the deposited plane of the core (`u8` codes `round(m)`, 0 to 255 m in steps of 1 m), each row as in kind 14. The depth removed is not stored: it is
+//! `max(0, deposited - change)` of the tile's kind 13 ([`removed_depth_m`]). A decoder refuses an unknown codec and a stream
 //! that does not decode to exactly the expected bytes, and never reserves more than that. Both keys carry the version of the channels, the scales of the codes and the key parameters of the layer
 //! they were computed beside, so a channel of another layer is refused by name, never mixed.
 //!
@@ -42,7 +43,7 @@ const BROTLI_BUFFER: usize = 64 * 1024;
 const HEADER_LEN: usize = 1 + 4 + 16;
 /// The scales of the codes, part of the keys: 8 steps of area a doubling, 16 steps a square root of a metre.
 const AREA_STEPS: u32 = 8;
-const DEPTH_SCALE: u32 = 16;
+const DEPTH_SCALE: u32 = 1;
 
 fn channel_bytes(layer: &[u8]) -> Vec<u8> {
     let mut b = Vec::with_capacity(12 + layer.len());
@@ -131,16 +132,13 @@ pub fn area_record(world: &GlobalWorld, res: u32, spec: &LayerSpec, face: Face, 
     record(world, KIND_LAYER_AREA, face_tile(face), area_key(world, res, spec, face), spec.cells as u32, codes, spec.cells)
 }
 
-/// The record of a tile's depth channels under `spec`; refused when the result holds none.
+/// The record of a tile's deposited depth under `spec`; refused when the result holds none.
 pub fn depth_record(world: &GlobalWorld, res: u32, spec: &TileLayerSpec, r: &TileResult) -> Result<Record, LayerStoreError> {
     let t = spec.grid.tile;
-    if r.eroded.len() != t * t || r.deposited.len() != t * t {
-        return Err(LayerStoreError(format!("tile {}/{}/{} holds no depth channels of {t} x {t} cells", r.id.face.0, r.id.ti, r.id.tj)));
+    if r.deposited.len() != t * t {
+        return Err(LayerStoreError(format!("tile {}/{}/{} holds no deposited depth of {t} x {t} cells", r.id.face.0, r.id.ti, r.id.tj)));
     }
-    let mut both = Vec::with_capacity(2 * t * t);
-    both.extend_from_slice(&r.eroded);
-    both.extend_from_slice(&r.deposited);
-    Ok(record(world, KIND_LAYER_DEPTH, layer_tile_id(&spec.grid, r.id)?, depth_key(world, res, spec, r.id)?, t as u32, &both, t))
+    Ok(record(world, KIND_LAYER_DEPTH, layer_tile_id(&spec.grid, r.id)?, depth_key(world, res, spec, r.id)?, t as u32, &r.deposited, t))
 }
 
 /// Whether the store holds the face's area under the current key: an error naming both keys when it holds the face under another.
@@ -203,15 +201,20 @@ pub fn load_area(
     Ok(Some(raw))
 }
 
-/// A tile's decoded depth channels, `tile x tile` codes each.
+/// A tile's decoded deposited depth, `tile x tile` codes of 1 m.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TileDepth {
     pub tile: usize,
-    pub eroded: Vec<u8>,
     pub deposited: Vec<u8>,
 }
 
-/// The depth channels of tile `id`: `Ok(None)` when the store holds none.
+/// The depth removed at a cell in metres: `max(0, deposited - change)`, the deposited depth and the layer's change (kind 13) at the cell. Exact where pass 1 did not raise the cell; where it
+/// did (uplift, a filled pit: 15 % of mountain land and 35 % of hills in seed 14's samples) it is short by the raise, and where the deposited depth is 255 m it is clipped.
+pub fn removed_depth_m(deposited_m: f32, change_m: f32) -> f32 {
+    (deposited_m - change_m).max(0.0)
+}
+
+/// The deposited depth of tile `id`: `Ok(None)` when the store holds none.
 pub fn load_depth(
     store: &TileStore,
     world: &GlobalWorld,
@@ -230,10 +233,9 @@ pub fn load_depth(
     let Some(r) = store.get(KIND_LAYER_DEPTH, tile, key).map_err(|e| what(e.to_string()))? else { return Ok(None) };
     let t = spec.grid.tile;
     let stream = checked(&r, key, t, &what)?;
-    let mut raw = decompress(stream, 2 * t * t).map_err(what)?;
+    let mut raw = decompress(stream, t * t).map_err(what)?;
     undelta_rows(&mut raw, t);
-    let deposited = raw.split_off(t * t);
-    Ok(Some(TileDepth { tile: t, eroded: raw, deposited }))
+    Ok(Some(TileDepth { tile: t, deposited: raw }))
 }
 
 /// A bounded least-recently-used cache of decoded values.
@@ -323,9 +325,9 @@ impl<'a> LayerChannels<'a> {
         Ok(self.area_log2_cells(d)?.map(|l| area_cells((f64::from(l) * f64::from(AREA_STEPS)).round() as u8)))
     }
 
-    /// The erosion and deposition depth in metres at `d`: bilinear in metres between the cell centres around the point, across tile borders (a neighbour tile without a record is read as
+    /// The deposited depth in metres at `d`: bilinear in metres between the cell centres around the point, across tile borders (a neighbour tile without a record is read as
     /// the home tile's nearest cell), or `None` where the store holds no depth for the tile that holds the point.
-    pub fn depth_m(&self, d: Vec3) -> Result<Option<(f32, f32)>, LayerStoreError> {
+    pub fn depth_m(&self, d: Vec3) -> Result<Option<f32>, LayerStoreError> {
         let (face, s, t) = direction_to_face(&TangentWarp, d);
         let (n, tile) = (self.tiles.grid.cells, self.tiles.grid.tile);
         let (x, y) = ((s + 1.0) * 0.5 * n as f64 - 0.5, (t + 1.0) * 0.5 * n as f64 - 0.5);
@@ -335,7 +337,7 @@ impl<'a> LayerChannels<'a> {
         let Some(home) = self.depth_tile(face, hi as u32, hj as u32)? else { return Ok(None) };
         // The four cells around the point: one that lies in the next tile is read from it, so no seam shows at a tile border; a cell past the face's edge, or in a tile without a
         // record, is read as the nearest cell of the home tile.
-        let mut cells = [(0.0f64, 0.0f64); 4];
+        let mut cells = [0.0f64; 4];
         for (k, (a, b)) in [(i, j), (i + 1, j), (i, j + 1), (i + 1, j + 1)].into_iter().enumerate() {
             let (a, b) = (a.min(n - 1), b.min(n - 1));
             let (ta, tb) = (a / tile, b / tile);
@@ -347,12 +349,10 @@ impl<'a> LayerChannels<'a> {
                 }
             };
             let p = (b - oy) * tile + (a - ox);
-            cells[k] = (f64::from(depth_m(d.eroded[p])), f64::from(depth_m(d.deposited[p])));
+            cells[k] = f64::from(depth_m(d.deposited[p]));
         }
-        let mix = |f: fn(&(f64, f64)) -> f64| {
-            (1.0 - fy) * ((1.0 - fx) * f(&cells[0]) + fx * f(&cells[1])) + fy * ((1.0 - fx) * f(&cells[2]) + fx * f(&cells[3]))
-        };
-        Ok(Some((mix(|c| c.0) as f32, mix(|c| c.1) as f32)))
+        let v = (1.0 - fy) * ((1.0 - fx) * cells[0] + fx * cells[1]) + fy * ((1.0 - fx) * cells[2] + fx * cells[3]);
+        Ok(Some(v as f32))
     }
 
     /// The decoded depth channels of a tile of `face` through the cache (`None` where the store holds none).
