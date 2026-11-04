@@ -166,7 +166,7 @@ pub(crate) fn open_world(o: &Options, cold: bool) -> Result<WorldTerrain, String
                 Some(p) => crate::worldfield::load_world(p)?,
                 None => planet_world_def::WorldDefinition::single_planet(crate::skeleton::RADIUS_M, o.seed),
             };
-            WorldTerrain::open_store(def, dir, res).map(|w| if cold { w.cold() } else { w })
+            WorldTerrain::open_store_as(def, dir, res, o.field_source_choice()?).map(|w| if cold { w.cold() } else { w })
         }
         None => WorldTerrain::of_perf_options(o, crate::skeleton::RADIUS_M),
     }
