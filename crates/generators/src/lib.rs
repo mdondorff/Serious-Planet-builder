@@ -19,6 +19,7 @@ pub mod descriptors;
 pub mod drivers;
 pub mod dump;
 pub mod erosion;
+pub mod erosion_layer;
 pub mod global;
 pub mod height;
 pub mod height_fields;

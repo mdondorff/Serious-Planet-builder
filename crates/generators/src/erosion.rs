@@ -52,6 +52,10 @@ pub const EROSION_BAND_IMPLEMENTATION_ID: &str = "cpu-erosion-v1+relief+band";
 pub const EROSION_C1_BAND_IMPLEMENTATION_ID: &str = "cpu-erosion-v2+relief+band";
 /// Bump whenever the crease band's weights or the way they apply change (it enters the inputs hash of a field with the band on).
 pub const CREASE_BAND_VERSION: u32 = 1;
+/// The implementation id of a field that reads the erosion layer (GEN-112) over the v1 base.
+pub const EROSION_LAYER_IMPLEMENTATION_ID: &str = "cpu-erosion-v1+relief+band+layer";
+/// [`EROSION_LAYER_IMPLEMENTATION_ID`] over the C1 base.
+pub const EROSION_C1_LAYER_IMPLEMENTATION_ID: &str = "cpu-erosion-v2+relief+band+layer";
 
 /// Domain tag of the crease lattice.
 const LAYER_CREASE: u64 = 0x4552_0001;
@@ -281,6 +285,8 @@ pub struct ErosionField<'a> {
     relief_channels: Option<Arc<crate::relief_lattice::ReliefLattice>>,
     /// The crease band and its octave weights (GEN-109), off unless [`ErosionField::with_crease_band`] is called.
     crease_band: Option<(CreaseBand, [f64; OCTAVES as usize])>,
+    /// The erosion layer and the sea level its coast fade follows (GEN-112), off unless [`ErosionField::with_layer`] is called.
+    layer: Option<(Arc<crate::erosion_layer::ErosionLayer>, f64)>,
 }
 
 impl ErosionField<'_> {
@@ -329,6 +335,40 @@ impl ErosionField<'_> {
         Ok(self)
     }
 
+    /// Turns the erosion layer on (GEN-112 to GEN-114, ADR 0088 point 5, m9-bake PR 6): the height is the relief base plus the layer's change (read C1, [`ErosionLayer::change_at`]) faded to 0 within
+    /// [`crate::erosion_layer::COAST_FADE_M`] above `sea_level_m`, and the crease band of the bake ([`CreaseBand::of_the_bake`] over the same sea level) is switched on with it (ADR 0098).
+    /// It needs the relief channels on and the band off (the layer switches it on), an error naming the problem otherwise; the layer's identity, the sea level and the read's version enter
+    /// the keys, and the implementation id changes. Without the call the field is today's, bit for bit.
+    pub fn with_layer(self, layer: Arc<crate::erosion_layer::ErosionLayer>, sea_level_m: f64) -> Result<Self, String> {
+        if self.relief_channels.is_none() {
+            return Err("the erosion layer goes with the relief channels: turn them on first".into());
+        }
+        if self.crease_band.is_some() {
+            return Err("the erosion layer switches the crease band on itself: call with_layer without with_crease_band".into());
+        }
+        if !sea_level_m.is_finite() {
+            return Err(format!("the erosion layer needs a finite sea level, got {sea_level_m}"));
+        }
+        let mut f = self.with_crease_band(CreaseBand::of_the_bake(sea_level_m))?;
+        f.inputs = hash_u64s(
+            0x6c61_7972,
+            &[
+                f.inputs,
+                layer.id(),
+                sea_level_m.to_bits(),
+                crate::erosion_layer::COAST_FADE_M.to_bits(),
+                u64::from(crate::erosion_layer::LAYER_READ_VERSION),
+            ],
+        );
+        f.layer = Some((layer, sea_level_m));
+        Ok(f)
+    }
+
+    /// Whether the erosion layer is on.
+    pub fn layer_on(&self) -> bool {
+        self.layer.is_some()
+    }
+
     /// Whether the crease band is on.
     pub fn crease_band_on(&self) -> bool {
         self.crease_band.is_some()
@@ -348,6 +388,13 @@ impl ErosionField<'_> {
         self.landform.get_or_init(|| crate::global::landform_lattice(self.seed))
     }
 
+    fn fail_text(&self, e: &str) {
+        let mut slot = self.error.lock().expect("erosion error mutex");
+        if slot.is_none() {
+            *slot = Some(e.to_string());
+        }
+    }
+
     fn fail(&self, e: &crate::global::ReadError) {
         let mut slot = self.error.lock().expect("erosion error mutex");
         if slot.is_none() {
@@ -359,16 +406,22 @@ impl ErosionField<'_> {
     /// `max|1 - k| max|m| + k_max` times that (`m + k (e - m) + k detail = (1 - k) m + k (e + detail)`).
     fn max_abs_height(&self) -> f64 {
         let today = MAX_ELEVATION_M.max(-MIN_ELEVATION_M) * self.relief + DETAIL_DOWN_M;
-        match &self.relief_channels {
-            None => today,
-            // `m + k (e - m) + k detail = (1 - k) m + k (e + detail)`: with `|e + detail|` inside `today` and `k`, `m` inside the channels' planet range, `|1 - k| m + k today`.
-            Some(r) => {
-                let g = r.global_range();
-                let (k, m) = (g[1].max(0.0), g[2].abs().max(g[3].abs()));
-                let one_minus_k = (1.0 - g[0]).abs().max((g[1] - 1.0).abs());
-                one_minus_k * m + k * today
+        // The layer adds its change times a fade of at most 1: the largest magnitude of its planet-wide range, a sound bound.
+        let layer = self.layer.as_ref().map_or(0.0, |(l, _)| {
+            let (lo, hi) = l.global_range();
+            lo.abs().max(hi.abs())
+        });
+        layer
+            + match &self.relief_channels {
+                None => today,
+                // `m + k (e - m) + k detail = (1 - k) m + k (e + detail)`: with `|e + detail|` inside `today` and `k`, `m` inside the channels' planet range, `|1 - k| m + k today`.
+                Some(r) => {
+                    let g = r.global_range();
+                    let (k, m) = (g[1].max(0.0), g[2].abs().max(g[3].abs()));
+                    let one_minus_k = (1.0 - g[0]).abs().max((g[1] - 1.0).abs());
+                    one_minus_k * m + k * today
+                }
             }
-        }
     }
 
     /// The bounds of the bake's elevation read over a cap (the base alone, no creases): `None` where the scan declines (a cap too wide, or the C1 read below res 4). For tests.
@@ -459,13 +512,24 @@ impl ErosionField<'_> {
             }
             None => detail_m(self.seed, dir, e, c, l),
         };
-        match &self.relief_channels {
+        let base = match &self.relief_channels {
             None => e + detail,
             // GEN-099: each term one read at the point.
             Some(r) => {
                 let (k, m) = r.at(dir);
                 m + k * (e - m) + k * detail
             }
+        };
+        match &self.layer {
+            None => base,
+            // GEN-112: the layer's change, faded at the coast, added after the relief base (not scaled by `k`).
+            Some((layer, sea)) => match layer.change_at(dir) {
+                Ok(change) => base + crate::erosion_layer::coast_fade(e, *sea) * change,
+                Err(e) => {
+                    self.fail_text(&e);
+                    f64::NAN
+                }
+            },
         }
     }
 }
@@ -548,6 +612,8 @@ impl HeightField for ErosionField<'_> {
 
     fn implementation_id(&self) -> &'static str {
         match (self.relief_channels.is_some(), self.c1) {
+            (true, true) if self.layer.is_some() => EROSION_C1_LAYER_IMPLEMENTATION_ID,
+            (true, false) if self.layer.is_some() => EROSION_LAYER_IMPLEMENTATION_ID,
             (true, true) if self.crease_band.is_some() => EROSION_C1_BAND_IMPLEMENTATION_ID,
             (true, false) if self.crease_band.is_some() => EROSION_BAND_IMPLEMENTATION_ID,
             (true, true) => EROSION_C1_RELIEF_IMPLEMENTATION_ID,
@@ -707,6 +773,23 @@ impl HeightField for ErosionField<'_> {
                 (mlo + rise_lo + det_lo, mhi + rise_hi + det_hi)
             }
         };
+        // GEN-102, GEN-112: the layer's change over the cap (from its pyramid, or the global range for a cap too wide) times the fade over the cap's base interval.
+        let (l, h) = match &self.layer {
+            None => (l, h),
+            Some((layer, sea)) => {
+                let (clo, chi) = match layer.range_over_cap(centre, angular_radius) {
+                    Ok(Some(r)) => r,
+                    Ok(None) => layer.global_range(),
+                    Err(e) => {
+                        self.fail_text(&e);
+                        return global;
+                    }
+                };
+                let (flo, fhi) = (crate::erosion_layer::coast_fade(blo, *sea), crate::erosion_layer::coast_fade(bhi, *sea));
+                let p = [flo * clo, flo * chi, fhi * clo, fhi * chi];
+                (l + p.iter().cloned().fold(f64::INFINITY, f64::min), h + p.iter().cloned().fold(f64::NEG_INFINITY, f64::max))
+            }
+        };
         ((l - pad(l)).max(global.0), (h + pad(h)).min(global.1))
     }
 }
@@ -802,6 +885,7 @@ impl ErosionGenerator {
             id: NEXT_FIELD_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             relief_channels: None,
             crease_band: None,
+            layer: None,
         })
     }
 }
