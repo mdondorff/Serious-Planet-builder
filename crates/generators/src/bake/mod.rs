@@ -5,8 +5,8 @@
 //! result is the same bits on any machine and thread count (CON-14); the jitter of the receivers is an integer hash of the GLOBAL cell (the grid's origin plus the cell) and the direction,
 //! so a cell routes the same in every window that holds it. The grids do not wrap: a cube face does not route across its edges (GEN-100), its edge cells are outlets like the sea.
 
-/// Version of the pass-1 kernels' behaviour (flood, receivers, jitter, carve, breach, the face grid): part of the layer's key (CON-07), bumped with any change that moves a bit. History: 1 = PR 3a/4; 2 = the drainage area by multiple flow direction (Freeman, p 1.1) with D8 receivers kept (SPIKE-98 diagnosis, owner 2026-11-03).
-pub const BAKE_KERNEL_VERSION: u32 = 2;
+/// Version of the pass-1 kernels' behaviour (flood, receivers, jitter, carve, breach, the face grid): part of the layer's key (CON-07), bumped with any change that moves a bit. History: 1 = PR 3a/4; 2 = the drainage area by multiple flow direction (Freeman, p 1.1) with D8 receivers kept (SPIKE-98 diagnosis, owner 2026-11-03); 3 = the uplift tapered by the height above the sea (coast diagnosis, owner 2026-11-04).
+pub const BAKE_KERNEL_VERSION: u32 = 3;
 
 /// Version of pass 2's behaviour (the window and the face-change blend of `map::change_at`, the local carve, thermal, deposition, the quantisation): part of every tile's key. History: 1 = PR 3b/5; 2 = the pass-1 change read by Catmull-Rom (C1) instead of bilinear, and the multiple-flow-direction area in the local carve and the deposition sweep; 3 = the base sampled every 4 cells and interpolated (Catmull-Rom) in a window, thermal 300 passes of 1/8 (SPIKE-98), halo 128; 4 = the depression fill capped by the receiver and the one-cell pits spread over their neighbours (volume kept).
 pub const PASS2_KERNEL_VERSION: u32 = 4;
