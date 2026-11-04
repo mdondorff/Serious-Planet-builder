@@ -25,9 +25,9 @@ Dormant (no near trigger; not asked now):
 | # | Step | Lane |
 |---|---|---|
 | NR | Real-GPU window checks NOT RUN on a locked desktop (TEST-073) | crusader |
-| M9 bake | #1132 (bake threads = B, BUDG-015); the by-stage preview for the owner; `change/pass1-mfd` (GEN-100/101); SPIKE-98 (erosion bake cost); runtime C1 read of the layer (PR 6, calls the crease band); no planet pass before the owner approves | explorer |
-| Base | #1141 land default site (GEN-108), #1143 creases below the layer (GEN-109); #1137 default switch to v2: draft until the owner decides | crusader |
-| Relief | SPIKE-99 (relief driver k), heavy runs in planner slots; then the fast-tier results docs PR | spikes |
+| M9 bake | I5a (owner, 2026-11-04): SPIKE-98 settings; the pit fix with a variety check; two baked channels (drainage area GEN-110, erosion/deposition depth GEN-111, STRM-072); then the integrated preview (I4b); no planet bake before the owner's go | explorer |
+| Base | I5c runtime read of the layer (PR 6: C1, crease band, coast fade); then I8a ground detail; #1137 waits for the owner | crusader |
+| Ground | SPIKE-100: ground-detail design (variety across scales, by slope and the baked channels; owner: SPIKE-67 detail looked uniform and low-frequency) | spikes |
 | Shadows | ADR 0095 sky ambient waits for the owner's look; REND-052 verdicts wait for a perf window | crusader |
 | Store | Shared store `C:/DEV/SeriousPlanetData/global16384-m9r2` (seed 1, read-only); `global16384` kept until the owner says | all |
 
