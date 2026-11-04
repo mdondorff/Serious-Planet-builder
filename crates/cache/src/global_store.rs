@@ -1091,7 +1091,9 @@ impl GlobalWorld {
             && record.kind != KIND_GLOBAL_RELIEF
             && record.kind != KIND_GLOBAL_CLASS_WEIGHTS
             && record.kind != crate::layer_store::KIND_LAYER_FACE
-            && record.kind != crate::layer_tiles::KIND_LAYER_TILE)
+            && record.kind != crate::layer_tiles::KIND_LAYER_TILE
+            && record.kind != crate::layer_channels::KIND_LAYER_AREA
+            && record.kind != crate::layer_channels::KIND_LAYER_DEPTH)
             || (record.generator_version == GLOBAL_VERSION && record.hash_version == HASH_VERSION && record.node_set_id == self.node_set_id)
     }
 

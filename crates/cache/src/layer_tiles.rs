@@ -48,7 +48,7 @@ pub struct TileLayerSpec {
 }
 
 impl TileLayerSpec {
-    fn bytes(&self) -> Vec<u8> {
+    pub(crate) fn bytes(&self) -> Vec<u8> {
         let mut b = Vec::with_capacity(256);
         b.extend(TILE_LAYER_VERSION.to_le_bytes());
         b.extend(planet_generators::bake::BAKE_KERNEL_VERSION.to_le_bytes());
@@ -191,7 +191,7 @@ pub fn load_tile(
         exported_m3: f64_at(41),
         clamped_cells: u64_at(49) as usize,
     };
-    Ok(Some(TileResult { id, core: dequantise(&counts), stats }))
+    Ok(Some(TileResult { id, core: dequantise(&counts), eroded: Vec::new(), deposited: Vec::new(), stats }))
 }
 
 /// The core's counts as bytes: little-endian, each row of `t` as its first count and the wrapping differences along the row.
@@ -340,12 +340,20 @@ pub fn run_pass2(
         if report.computed.contains(&id) || report.skipped.contains(&id) {
             continue;
         }
-        if load_tile(&store, world, res, spec, id)?.is_some() {
+        let have_tile = load_tile(&store, world, res, spec, id)?.is_some();
+        let have_depth = crate::layer_channels::has_depth(&store, world, res, spec, id)?;
+        if have_tile && have_depth {
             report.skipped.push(id);
             continue;
         }
         let r = pass2_tile(&spec.grid, id, inputs.base, inputs.face_change, inputs.factor, &spec.params, threads);
-        writer.append(&tile_record(world, res, spec, &r)?).map_err(err)?;
+        // A tile stored before the channels existed is computed again for its depth only; what is stored is not written twice.
+        if !have_tile {
+            writer.append(&tile_record(world, res, spec, &r)?).map_err(err)?;
+        }
+        if !have_depth {
+            writer.append(&crate::layer_channels::depth_record(world, res, spec, &r)?).map_err(err)?;
+        }
         writer.write_index().map_err(err)?;
         on_tile(&r);
         report.computed.push(id);

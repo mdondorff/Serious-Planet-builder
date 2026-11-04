@@ -144,13 +144,29 @@ pub struct TileStats {
     pub clamped_cells: usize,
 }
 
-/// A tile's result: the core's change against the base field (final minus base, f32, row-major `tile x tile`; it contains the face carve's change) and the statistics.
+/// A tile's result: the core's change against the base field (final minus base, f32, row-major `tile x tile`; it contains the face carve's change), the depth channels (GEN-111) and
+/// the statistics. `eroded` and `deposited` are codes of [`depth_code`] per core cell, or empty when the result was read from a record that holds no channels.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TileResult {
     pub id: TileId,
     pub core: Vec<f32>,
+    pub eroded: Vec<u8>,
+    pub deposited: Vec<u8>,
     pub stats: TileStats,
 }
+
+/// A depth in metres as a byte (GEN-111): `round(16 sqrt(m))`, so 0 to 254 m with a step of 0.06 m at 1 m and 0.5 m at 16 m; deeper is stored as 255.
+pub fn depth_code(m: f64) -> u8 {
+    (DEPTH_CODE_SCALE * m.max(0.0).sqrt()).round().min(255.0) as u8
+}
+
+/// The depth in metres of a code of [`depth_code`].
+pub fn depth_m(code: u8) -> f32 {
+    let c = f32::from(code) / DEPTH_CODE_SCALE as f32;
+    c * c
+}
+
+const DEPTH_CODE_SCALE: f64 = 16.0;
 
 /// A field evaluated on every cell of the tile's window, row-major, on `threads` threads (a value per cell: the same bits for any count).
 fn sample_window(g: &TileGrid, id: TileId, field: &(dyn Fn(Vec3) -> f64 + Sync), threads: usize) -> Vec<f64> {
@@ -210,6 +226,7 @@ pub fn pass2_tile(
     carve(&grid, &mut z, &outlet, &local, factors.as_deref(), stream);
     drop(factors);
     let thermal_report = thermal(&grid, &mut z, &p.thermal, threads);
+    let z_thermal = z.clone();
     let dep = deposit_on_own_route(
         &grid,
         &mut z,
@@ -220,11 +237,16 @@ pub fn pass2_tile(
     );
     let (w, t, h) = (g.window(), g.tile, g.halo);
     let mut core = Vec::with_capacity(t * t);
+    let (mut eroded, mut deposited) = (Vec::with_capacity(t * t), Vec::with_capacity(t * t));
     let mut land = 0;
     for j in 0..t {
         for i in 0..t {
             let q = (j + h) * w + i + h;
             core.push((z[q] - base_w[q]) as f32);
+            // The net change from the carve's start is deposited - eroded: the thermal sweep's net loss and the incision count as eroded, the deposition sweep's rise and the thermal gain as deposited.
+            let (lost, gained) = ((z0[q] - z_thermal[q]).max(0.0), (z[q] - z_thermal[q]).max(0.0) + (z_thermal[q] - z0[q]).max(0.0));
+            eroded.push(depth_code(lost));
+            deposited.push(depth_code(gained));
             land += usize::from(z0[q] > p.sea_level);
         }
     }
@@ -232,6 +254,8 @@ pub fn pass2_tile(
     TileResult {
         id,
         core,
+        eroded,
+        deposited,
         stats: TileStats {
             land_cells: land,
             thermal_passes: thermal_report.passes_run,

@@ -50,3 +50,31 @@ Source: ADR 0088 point 1, ADR 0088/0089 accepted 2026-11-01; SPIKE-66, m9-bake d
 #### Scenario: Block ranges and size
 - **WHEN** the channels of a synthetic bake are stored and read back, and their size for a planet is computed from the lattice sizes
 - **THEN** every value lies in its block's stored range, and the planet size is under 1 GB
+
+### Requirement: STRM-072 The layer's channels are stored beside kinds 12 and 13
+The drainage area (GEN-110) and the erosion and deposition depth (GEN-111) SHALL be stored in the layer's store as record kinds 14 and 15, versioned and keyed, and read through a small API:
+- kind 14 (`LayerArea`), one record per cube face filed under the face's root tile: `codec (u8, value 1) | cells (u32 LE, pass 1's cells a face edge) | key (16 bytes) |` a brotli stream (quality 5, window 22 bits) of the face's own cells as area codes (row `j` outer, then `i`), each row as its first byte and the wrapping differences along the row;
+- kind 15 (`LayerDepth`), one record per tile filed like kind 13: `codec (u8, value 1) | tile (u32 LE) | key (16 bytes) |` a brotli stream of the eroded plane then the deposited plane of the core (codes of GEN-111, same row coding);
+- the keys carry, under tag 17, the channels' version, the scales of the codes and the key parameters of the layer they were made beside (the pass-1 layer's for kind 14, the tile layer's for kind 15), so a channel of another layer is an error naming both keys, never a recompute or a mix;
+- a decoder refuses an unknown codec and a stream that does not decode to exactly the expected bytes, and reserves no more than that;
+- the pass-1 store is temporary (STRM-065): the areas are copied beside the tiles before it is dropped, and a run over a layer stored before the channels existed computes the missing channels and writes what is stored no second time;
+- liveness (STRM-013) is judged like the bake's blocks; a store without the kinds opens and reads as absent;
+- the read API (`LayerChannels`) SHALL return, at a direction, the drainage area as log2 of cells (bilinear in codes over the four pass-1 cells around the point) and the eroded and deposited depth in metres (bilinear in metres between the cell centres of the tile that holds the point, clamped to that tile), with bounded caches of the decoded faces and tiles; where the store holds no record it returns none.
+The size of the channels for a planet SHALL be reported with the run that makes them, not bounded (the owner's approval of the persisted format is open: planner, 2026-11-03).
+
+Verify: A
+Status: planned
+Source: owner 2026-11-04 (planner inbox #58.3, M9 plan I5a(c)); STRM-065, GEN-110, GEN-111
+
+#### Scenario: The channels come back as computed
+- **WHEN** three tiles are run into stores on 1 and on 8 threads and the six faces' areas are copied from the pass-1 store
+- **THEN** the pack bytes are equal on both thread counts, the stored depth of every tile equals the computed one, a tile without a record reads as none, the copy writes nothing the second time, and the stored area equals the pass-1 store's
+
+#### Scenario: Refusal and completion
+- **WHEN** a depth is read under another layer's parameters, a record under the right key has its stream cut, and a store holds a tile without its depth
+- **THEN** the first is an error naming both keys, the second an error naming the tile, and a run computes the third tile again, stores its depth only (the tile record stays one), and skips it on the next run
+
+#### Scenario: The reader
+- **WHEN** the depth is read at the centre of a core cell and the area at the same direction
+- **THEN** the depth equals the cell's stored depth within 1 mm and the area is between 0 and 32 in log2 cells (at least one cell)
+

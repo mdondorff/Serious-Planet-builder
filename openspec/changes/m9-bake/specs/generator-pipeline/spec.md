@@ -175,6 +175,28 @@ Source: ADR 0088 points 4.2 and 6, ADR 0088/0089 accepted 2026-11-01; SPIKE-61, 
 - **WHEN** pass 2's local carve runs on a synthetic tile with a closed basin
 - **THEN** no cell ends higher than its input, and the basin is not filled
 
+### Requirement: GEN-110 Pass 1 keeps the drainage area of its final route
+Pass 1 SHALL return, with the face's change, the drainage area of the face's own cells from the last route of its carve (by multiple flow direction, GEN-100) as one byte a cell: `round(8 log2(area / cell area))`, so 0 is a cell's own area, one step is a ninth more area, and 255 is 2^31.9 cells; a larger area is stored as 255. The face's change SHALL be the same bytes with and without the area, and the codes the same bytes on any thread count (CON-14). The area serves the viewer's ground materials and detail; it is not an input of pass 2.
+
+Verify: A
+Status: planned
+Source: owner 2026-11-04 (planner inbox #58.3, M9 plan I5a(c)); GEN-100
+
+#### Scenario: The area codes
+- **WHEN** pass 1 runs on a synthetic face on 1 and on 2 threads, with and without the area
+- **THEN** the change is equal in both, the codes are equal on both thread counts, a cell with nothing above it has code 0, and some cell has at least 8 (an area of two cells)
+
+### Requirement: GEN-111 Pass 2 keeps the erosion and deposition depth of its core
+Pass 2 SHALL return, with the core's change, two byte planes over the core: the depth eroded and the depth deposited, each `round(16 sqrt(m))` of the depth in metres (0 to 254 m in steps of 0.06 m at 1 m and 0.5 m at 16 m; more is stored as 255). Eroded is the ground the carve and thermal took from a cell net of what thermal gave it (`max(0, z0 - z_thermal)`, `z0` the window before the local carve); deposited is the deposition sweep's rise plus thermal's gain (`max(0, z_final - z_thermal) + max(0, z_thermal - z0)`), so that deposited minus eroded is the change of the window from the carve's start and both signs stay where a cell lost and gained. The planes SHALL be the same bytes on any thread count. They serve the viewer's ground materials (rock and scree where eroded, soil where deposited).
+
+Verify: A
+Status: planned
+Source: owner 2026-11-04 (planner inbox #58.3, M9 plan I5a(c)); GEN-101
+
+#### Scenario: Both signs and the net
+- **WHEN** one synthetic tile is run
+- **THEN** both planes hold nonzero cells, every cell's deposited minus eroded equals the core's change within the codes' step (0.14 sqrt(m) + 0.3 m), the codes are 0 for 0 m and 255 beyond the range and increase with the depth
+
 ### Requirement: GEN-102 Cap bounds read the layer's pyramid
 The field's height bounds over a cap SHALL take the layer's part from the min/max pyramid (STRM-066):
 - the cap's face box is twice its angular radius in face units;
