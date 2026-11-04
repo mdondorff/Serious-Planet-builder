@@ -121,15 +121,17 @@ fn the_depth_codes_are_exact_at_zero_monotone_and_clamped_and_the_net_equals_the
         assert!((f64::from(depth_m(depth_code(m))) - m).abs() <= 0.07 * m.sqrt() + 1e-3, "{m} m round trips to {}", depth_m(depth_code(m)));
     }
     let g = TileGrid { cells: 96, tile: 24, halo: 6, radius_m: R };
-    let r = pass2_tile(&g, tiles()[0], &base, &|_: Vec3| 0.0, None, &Pass2Params::standard(9, 0.0), 2);
-    assert_eq!((r.eroded.len(), r.deposited.len()), (24 * 24, 24 * 24));
-    assert!(r.eroded.iter().any(|&c| c > 0) && r.deposited.iter().any(|&c| c > 0), "both signs are kept");
-    for (p, c) in r.core.iter().enumerate() {
-        let (e, d) = (f64::from(depth_m(r.eroded[p])), f64::from(depth_m(r.deposited[p])));
-        assert!(
-            (d - e - f64::from(*c)).abs() <= 0.14 * e.max(d).sqrt() + 0.3,
-            "cell {p}: deposited {d} - eroded {e} is not the change {c}"
-        );
+    for face_change in [0.0, -30.0] {
+        let r = pass2_tile(&g, tiles()[0], &base, &|_: Vec3| face_change, None, &Pass2Params::standard(9, 0.0), 2);
+        assert_eq!((r.eroded.len(), r.deposited.len()), (24 * 24, 24 * 24));
+        assert!(r.eroded.iter().any(|&c| c > 0) && r.deposited.iter().any(|&c| c > 0), "both signs are kept");
+        for (p, c) in r.core.iter().enumerate() {
+            let (e, d) = (f64::from(depth_m(r.eroded[p])), f64::from(depth_m(r.deposited[p])));
+            assert!(
+                (d - e - f64::from(*c)).abs() <= 0.14 * e.max(d).sqrt() + 0.3,
+                "face change {face_change}, cell {p}: deposited {d} - eroded {e} is not the change {c}"
+            );
+        }
     }
 }
 

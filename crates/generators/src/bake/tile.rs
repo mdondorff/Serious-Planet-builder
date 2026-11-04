@@ -155,7 +155,7 @@ pub struct TileResult {
     pub stats: TileStats,
 }
 
-/// A depth in metres as a byte (GEN-111): `round(16 sqrt(m))`, so 0 to 254 m with a step of 0.06 m at 1 m and 0.5 m at 16 m; deeper is stored as 255.
+/// A depth in metres as a byte (GEN-111): `round(16 sqrt(m))`, so 0 to 254 m with a step of 0.125 m at 1 m and 0.5 m at 16 m; deeper is stored as 255.
 pub fn depth_code(m: f64) -> u8 {
     (DEPTH_CODE_SCALE * m.max(0.0).sqrt()).round().min(255.0) as u8
 }
@@ -243,8 +243,9 @@ pub fn pass2_tile(
         for i in 0..t {
             let q = (j + h) * w + i + h;
             core.push((z[q] - base_w[q]) as f32);
-            // The net change from the carve's start is deposited - eroded: the thermal sweep's net loss and the incision count as eroded, the deposition sweep's rise and the thermal gain as deposited.
-            let (lost, gained) = ((z0[q] - z_thermal[q]).max(0.0), (z[q] - z_thermal[q]).max(0.0) + (z_thermal[q] - z0[q]).max(0.0));
+            // Against the base window, so the pass-1 change counts: deposited - eroded is the core's change. What the face carve and the local carve took, net of thermal's refill, is eroded; the
+            // deposition sweep's rise and thermal's gain over the base are deposited.
+            let (lost, gained) = ((base_w[q] - z_thermal[q]).max(0.0), (z[q] - z_thermal[q]).max(0.0) + (z_thermal[q] - base_w[q]).max(0.0));
             eroded.push(depth_code(lost));
             deposited.push(depth_code(gained));
             land += usize::from(z0[q] > p.sea_level);

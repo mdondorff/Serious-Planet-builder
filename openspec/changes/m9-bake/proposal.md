@@ -26,7 +26,7 @@ ADR 0088 (proposed) fixes the format. This change builds it as M9 item R4.
 
 ### Modified Capabilities
 - `generator-pipeline`: the relief classes and their default source, the base elevation, the class amplitudes and hill band, the relief channels and the runtime base formula, the two bake passes, the cap bounds (GEN-093 to GEN-102, planned)
-- `streaming-cache`: the erosion layer's storage and keys, its min/max pyramid, the class-weights and relief channels (STRM-065 to STRM-068, planned)
+- `streaming-cache`: the erosion layer's storage and keys, its min/max pyramid, the class-weights and relief channels (STRM-065 to STRM-068 and STRM-072, planned)
 - `testing`: criterion 1 on the baked field, the default classes' shares and hypsometry, plans with no capped tile, the core-edge seam (TEST-081 to TEST-084, planned)
 
 ## Impact
@@ -37,7 +37,7 @@ ADR 0088 (proposed) fixes the format. This change builds it as M9 item R4.
   - `cache` (the layer);
   - `app` (the `generate` command, the switch);
   - `xtask` (the command under the heavy lock).
-- Data: a new layer of about 7-10 GB beside `global16384` and channels under 1 GB; `global16384` is not rewritten.
+- Data: a new layer of about 7-10 GB beside `global16384` and relief and class channels under 1 GB; the drainage-area and depth channels of STRM-072 are reported with the run; `global16384` is not rewritten.
 - Behaviour: none by default (the switch is off) until the owner's look at R4; then every consumer reads the baked field.
 - Runs: one overnight bake (estimated 2.5-4 h, criterion 7 at most 10 h), BelowNormal, machine reserved.
 - Goldens: none while the switch is off; turning it on is a declared look change through `golden-review`.
