@@ -193,7 +193,8 @@ fn the_carve_keeps_the_outlets_uplifts_the_land_stays_above_the_receivers_and_is
     );
 }
 
-const CONE_FINGERPRINT: u64 = 1974223322930457283;
+// Re-pinned for bake kernel version 3 (the uplift tapered by 60 m of height above the sea: the cone has cells near the sea).
+const CONE_FINGERPRINT: u64 = 7826976054379310016;
 
 // spec: GEN-100
 #[test]
@@ -432,4 +433,33 @@ fn the_drainage_area_is_shared_among_the_lower_neighbours_whatever_the_jitter_an
     assert!(a.area[6 * n + 3] > 1.5 * own, "cell (3, 6) holds {} cells of area", a.area[6 * n + 3] / own);
     let total: f64 = (0..n * n).filter(|&p| outlet[p]).map(|p| a.area[p]).sum();
     assert!((total - (n * n) as f64 * own).abs() <= 1e-9 * total, "the area is not conserved: {total}");
+}
+
+// spec: GEN-100
+#[test]
+fn the_uplift_is_tapered_by_the_height_above_the_sea_so_a_coastal_plain_is_not_lifted_and_a_high_plateau_is_untouched() {
+    let g = Grid::new(24, 24, 800.0);
+    let border = |p: usize| p % 24 == 0 || p % 24 == 23 || p / 24 == 0 || p / 24 == 23;
+    let run = |level: f64, taper: f64| {
+        let z0 = vec![level; 24 * 24];
+        let mut z = z0.clone();
+        let outlet: Vec<bool> = (0..24 * 24).map(border).collect();
+        let p = CarveParams { uplift_taper_m: taper, sea_level: 0.0, ..CarveParams::default() };
+        carve(&g, &mut z, &outlet, &p, None, 3);
+        (0..24 * 24).filter(|q| !border(*q)).map(|q| z[q] - z0[q]).fold(f64::MIN, f64::max)
+    };
+    // A plain at 3 m: the whole uplift of 20 m lifts it without the taper, almost none with it (smoothstep(0, 40, 3) is 0.02).
+    let (plain_flat, plain_tapered) = (run(3.0, 0.0), run(3.0, 40.0));
+    assert!(plain_flat > 5.0, "the uplift lifted the plain by {plain_flat} m");
+    assert!(plain_tapered < 1.5, "the tapered uplift lifted the plain by {plain_tapered} m");
+    // A plateau at 500 m is above the taper: the same bits with and without it.
+    let (a, b) = (run(500.0, 0.0), run(500.0, 40.0));
+    assert_eq!(a.to_bits(), b.to_bits(), "the taper changed a plateau above it: {a} against {b}");
+    // The taper is switched off by 0 and does nothing without uplift.
+    let no_uplift = CarveParams { u_over_k: 0.0, uplift_taper_m: 40.0, ..CarveParams::default() };
+    let (mut z1, mut z2) = (vec![3.0; 24 * 24], vec![3.0; 24 * 24]);
+    let outlet: Vec<bool> = (0..24 * 24).map(border).collect();
+    carve(&g, &mut z1, &outlet, &no_uplift, None, 3);
+    carve(&g, &mut z2, &outlet, &CarveParams { uplift_taper_m: 0.0, ..no_uplift }, None, 3);
+    assert_eq!(z1, z2);
 }

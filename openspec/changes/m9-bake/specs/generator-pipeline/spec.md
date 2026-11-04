@@ -124,7 +124,7 @@ Source: ADR 0088 points 1 and 2, ADR 0088/0089 accepted 2026-11-01; m9-bake PR 1
 ### Requirement: GEN-100 Pass 1 carves each cube face on a coarse grid
 The bake's first pass SHALL, per cube face:
 - sample the base field (GEN-099) once per cell of 814 m (one point sample per cell);
-- carve it with implicit stream power with uplift (`U / K` 20, `K dt` 0.05 times the carve factor of GEN-097), 20 steps, not to steady state;
+- carve it with implicit stream power with uplift (`U / K` 20, `K dt` 0.05 times the carve factor of GEN-097), 20 steps, not to steady state; the uplift of a cell is tapered by its starting height `h` above the sea level, `smoothstep(0, 60 m, h)` of it (a coastal plain that barely erodes is not lifted by the whole 20 m: owner 2026-11-04, the coast diagnosis);
 - breach after each route (the next fill sees the breached surface): from the leaves down, the receiver of a cell that stands higher than 0.1 % of the cell distance below it is lowered to that level, by at most 50 m, never an outlet (the sea and the face's border cells) and never below the sea level;
 - keep land above the sea level (plus the flood's epsilon) whatever depth the sea outlets have;
 - route with Barnes' improved priority flood (epsilon 1 mm), jittered D8 receivers (the jitter an integer hash of the GLOBAL cell and the direction, so a cell routes alike in every window that holds it) and the order from the receivers, and the drainage area by multiple flow direction (Freeman, exponent 1.1: a cell shares its area among its lower neighbours in proportion to the slope to the power 1.1, highest cells first, ties by the cell index; an outlet passes nothing on) which drives the carve while the receivers stay D8 (a D8 area imprints the grid's eight directions as staircase valleys: SPIKE-98 diagnosis, owner 2026-11-03), re-routing every 5th step; the carve factor multiplies `K dt` and the uplift (`U / K` stays 20); a height or factor that is not finite, a flood without an outlet or with an epsilon that is not positive SHALL be refused;
@@ -134,6 +134,14 @@ It SHALL keep each face's change as a record of the layer store (STRM-065) and c
 Verify: A, B
 Status: planned
 Source: ADR 0088 point 4.1, ADR 0088/0089 accepted 2026-11-01; SPIKE-62, SPIKE-65, SPIKE-66, SPIKE-70, SPIKE-71
+
+#### Scenario: The uplift is tapered
+- **WHEN** a plain at 3 m and a plateau at 500 m, each ringed by outlets, are carved with the taper of 40 m and without it
+- **THEN** the plain is lifted by over 5 m without the taper and by under 1.5 m with it, the plateau's bits are the same with and without it, and a carve without uplift is the same with either setting
+
+#### Scenario: The change over the shallow sea
+- **WHEN** pass 1 runs on a face of a low plain beside a shallow sea, and the change is read at the cell centres and at 4 x 4 points a cell (as pass 2 reads it) wherever the base is at or below the sea level, with the taper of 40 m and without it
+- **THEN** without the taper the uplift of the shore bleeds more than 2 m onto the sea points, with it the change over the sea is at most 0.01 m
 
 #### Scenario: A small face
 - **WHEN** pass 1 runs on a synthetic face of 64 x 64 cells uninterrupted on 1 thread (the reference), on 8 threads, and on 1 thread killed and resumed

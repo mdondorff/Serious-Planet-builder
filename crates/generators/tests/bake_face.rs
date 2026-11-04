@@ -236,3 +236,54 @@ fn the_pass_1_change_read_stays_within_the_cells_around_the_point() {
     }
     assert!(lowest < -99.0, "the cut cell's value was not reached: {lowest}");
 }
+
+/// A low plain meeting a shallow sea: gentle swells of up to 60 m on land, down to -60 m under the sea, a function of the direction only.
+fn shore(d: Vec3) -> f64 {
+    60.0 * libm::sin(6.0 * d.x + 0.4) * libm::cos(5.0 * d.y + 0.2)
+}
+
+// spec: GEN-100
+#[test]
+fn the_pass_1_change_over_the_shallow_sea_is_never_positive_where_the_taper_keeps_the_plain_from_being_lifted() {
+    use planet_core::cube::{face_to_direction, TangentWarp};
+    let (face, cells) = (0u8, 64usize);
+    let s = spec(face, cells);
+    let read_max = |taper: f64| {
+        let params = CarveParams { uplift_taper_m: taper, ..CarveParams::default() };
+        let fc = pass1_face(&s, &shore, None, &params, 2);
+        let faces: Vec<FaceChange> = (0..6u8)
+            .map(|f| if f == face { fc.clone() } else { FaceChange { face: Face(f), cells, halo: 0, change: vec![0.0; fc.change.len()] } })
+            .collect();
+        let faces: [FaceChange; 6] = faces.try_into().unwrap();
+        let (mut max, mut sea_points) = (f64::MIN, 0usize);
+        // Every pass-1 cell centre and four sub-points of each (what pass 2 reads between the cells), where the base is at or below the sea.
+        for j in 0..cells {
+            for i in 0..cells {
+                for sj in 0..4 {
+                    for si in 0..4 {
+                        let (x, y) = (i as f64 + (si as f64 + 0.5) / 4.0 - 0.5, j as f64 + (sj as f64 + 0.5) / 4.0 - 0.5);
+                        let d = face_to_direction(
+                            &TangentWarp,
+                            Face(face),
+                            2.0 * (x + 0.5) / cells as f64 - 1.0,
+                            2.0 * (y + 0.5) / cells as f64 - 1.0,
+                        );
+                        if shore(d) <= 0.0 {
+                            sea_points += 1;
+                            max = max.max(change_at(&faces, d));
+                        }
+                    }
+                }
+            }
+        }
+        (max, sea_points)
+    };
+    let (untapered, points) = read_max(0.0);
+    let (tapered, _) = read_max(40.0);
+    assert!(points > 1000, "the fixture has a sea: {points} points");
+    assert!(
+        untapered > 2.0,
+        "without the taper the uplift of the shore bleeds {untapered} m onto the sea (the fixture would not show the fault)"
+    );
+    assert!(tapered <= 0.01, "with the taper the change over the sea is {tapered} m, not at most 0");
+}

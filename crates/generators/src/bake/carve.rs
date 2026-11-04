@@ -26,6 +26,9 @@ pub struct CarveParams {
     pub max_area: f64,
     /// The carve only lowers: a cell never ends higher than it began (no fill under a pit, GEN-101). With `u_over_k` 0 and `breach_max_m` 0 it is the local carve.
     pub incise_only: bool,
+    /// The uplift is tapered by the height above the sea level at the start of the carve: a cell `h` metres above it gets `smoothstep(0, uplift_taper_m, h)` of the uplift, so a coastal plain
+    /// that barely erodes is not lifted by the full uplift (SPIKE-99 and the coast diagnosis: 14 m over the whole plain); 0 switches the taper off (the whole uplift everywhere).
+    pub uplift_taper_m: f64,
 }
 
 impl Default for CarveParams {
@@ -41,6 +44,7 @@ impl Default for CarveParams {
             sea_level: 0.0,
             max_area: 0.0,
             incise_only: false,
+            uplift_taper_m: 60.0,
         }
     }
 }
@@ -59,6 +63,9 @@ pub fn carve(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, facto
     }
     let floor = p.sea_level + p.epsilon;
     let uplift = p.u_over_k * p.k_dt;
+    // The taper of the uplift by the starting height above the sea, kept per cell as an f32 (a face of 1.6e8 cells would not fit another f64 array in its budget).
+    let taper: Option<Vec<f32>> = (p.uplift_taper_m > 0.0 && p.u_over_k != 0.0)
+        .then(|| z.iter().map(|h| planet_core::smoothstep(0.0, p.uplift_taper_m, h - p.sea_level) as f32).collect());
     let mut routing: Option<Routing> = None;
     for step in 0..p.steps {
         if step % p.reroute_every == 0 {
@@ -90,7 +97,8 @@ pub fn carve(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, facto
             let scale = factor.map_or(1.0, |f| f[c]);
             let f = p.k_dt * scale * libm::sqrt(r.area[c]) / distance(grid, c, rec);
             let hr = z[rec];
-            let hn = (z[c] + uplift * scale + f * hr) / (1.0 + f);
+            let up = uplift * scale * taper.as_ref().map_or(1.0, |t| f64::from(t[c]));
+            let hn = (z[c] + up + f * hr) / (1.0 + f);
             let new = hn.max(hr + p.epsilon).max(floor);
             z[c] = if p.incise_only { new.min(z[c]) } else { new };
         }
