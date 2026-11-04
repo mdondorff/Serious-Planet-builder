@@ -144,7 +144,43 @@ pub fn plan_steps(changed: &[String]) -> Vec<&'static str> {
     steps
 }
 
+/// The paths a pre-push run would not check what the push sends (BUILD-037): from `git status --porcelain --untracked-files=all`, every tracked file that differs from HEAD (staged
+/// or not) and every untracked file under `crates/` or `xtask/`. The checks read the working tree and the push sends the commit, so these would be checked and not pushed (or pushed
+/// without having been checked).
+pub fn uncommitted(porcelain: &str) -> Vec<String> {
+    porcelain
+        .lines()
+        .filter(|l| l.len() > 3)
+        .filter_map(|l| {
+            let (status, rest) = l.split_at(2);
+            let path = rest.trim_start();
+            // A rename is `old -> new`: the new path is the one in the tree.
+            let path = path.rsplit(" -> ").next().unwrap_or(path).trim_matches('"').replace('\\', "/");
+            let untracked = status == "??";
+            let in_code = path.starts_with("crates/") || path.starts_with("xtask/");
+            (!untracked || in_code).then_some(path)
+        })
+        .collect()
+}
+
+/// Refuses a working tree that differs from HEAD (BUILD-037), naming the paths.
+pub fn require_committed(root: &Path) -> Res {
+    let out = capture(root, "git", &["status", "--porcelain", "--untracked-files=all"])?;
+    let dirty = uncommitted(&out);
+    if dirty.is_empty() {
+        return Ok(());
+    }
+    let shown: Vec<&str> = dirty.iter().map(String::as_str).take(8).collect();
+    Err(format!(
+        "prepush checks the working tree but the push sends the commit, and {} path(s) differ from HEAD (e.g. {}{}): commit or stash them, then run prepush again",
+        dirty.len(),
+        shown.join(", "),
+        if dirty.len() > shown.len() { ", ..." } else { "" }
+    ))
+}
+
 pub fn run(root: &Path) -> Res {
+    require_committed(root)?;
     let changed = testcmd::changed_paths(root);
     let triggers = golden_triggers(&changed);
     let with_gpu = !triggers.is_empty();
@@ -227,6 +263,53 @@ mod tests {
         assert_eq!(tree_id(&format!("{id}{id}\n")).as_deref(), None, "80 digits");
         assert_eq!(tree_id("CONFLICT (content): Merge conflict in x\n"), None);
         assert_eq!(tree_id(""), None);
+    }
+
+    // spec: BUILD-037
+    #[test]
+    fn a_tree_that_differs_from_head_is_named_and_a_clean_one_and_untracked_notes_are_not() {
+        assert!(uncommitted("").is_empty(), "a clean tree");
+        // Tracked changes count anywhere, staged or not; renames name the new path.
+        assert_eq!(
+            uncommitted(
+                " M crates/app/src/lib.rs
+M  docs/status.md
+A  xtask/src/new.rs
+ D CLAUDE.md
+R  a.md -> docs/b.md
+"
+            ),
+            ["crates/app/src/lib.rs", "docs/status.md", "xtask/src/new.rs", "CLAUDE.md", "docs/b.md"]
+        );
+        // Untracked files count only under crates/ and xtask/ (a scratch note elsewhere is not checked or pushed by prepush).
+        assert_eq!(
+            uncommitted(
+                "?? crates/app/examples/x.rs
+?? xtask/src/y.rs
+?? notes.md
+?? target/review/a.png
+?? docs/tmp.md
+"
+            ),
+            ["crates/app/examples/x.rs", "xtask/src/y.rs"]
+        );
+        // The message names the count and the first paths; a real repository is read through git.
+        let dir = std::env::temp_dir().join(format!("planet-prepush-clean-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("crates")).unwrap();
+        let git = |args: &[&str]| capture(&dir, "git", args).unwrap();
+        git(&["init", "--quiet"]);
+        git(&["config", "user.email", "t@example.com"]);
+        git(&["config", "user.name", "t"]);
+        std::fs::write(dir.join("a.txt"), "1").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "x"]);
+        assert!(require_committed(&dir).is_ok(), "a committed tree passes");
+        std::fs::write(dir.join("a.txt"), "2").unwrap();
+        std::fs::write(dir.join("crates/new.rs"), "x").unwrap();
+        let e = require_committed(&dir).unwrap_err();
+        assert!(e.contains("2 path(s)") && e.contains("a.txt") && e.contains("crates/new.rs") && e.contains("commit or stash"), "{e}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // spec: BUILD-016
