@@ -1,0 +1,63 @@
+site	plain	0.000	-79.500	purity 1.00
+runtime	plain	band_30-60m	0.306
+runtime	plain	band_60-120m	0.150
+runtime	plain	band_120-240m	0.254
+runtime	plain	band_240-960m	1.220
+runtime	plain	relief_300m_p50	3.577
+runtime	plain	relief_3km_p50	23.773
+runtime	plain	slope_p50	0.874
+runtime	plain	slope_p90	1.623
+site	rolling	0.000	-85.500	purity 1.00
+runtime	rolling	band_30-60m	0.298
+runtime	rolling	band_60-120m	0.141
+runtime	rolling	band_120-240m	0.240
+runtime	rolling	band_240-960m	1.185
+runtime	rolling	relief_300m_p50	3.473
+runtime	rolling	relief_3km_p50	24.466
+runtime	rolling	slope_p50	0.848
+runtime	rolling	slope_p90	1.571
+site	hills	0.000	-63.000	purity 1.00
+runtime	hills	band_30-60m	0.292
+runtime	hills	band_60-120m	0.150
+runtime	hills	band_120-240m	0.253
+runtime	hills	band_240-960m	1.183
+runtime	hills	relief_300m_p50	3.354
+runtime	hills	relief_3km_p50	20.095
+runtime	hills	slope_p50	0.841
+runtime	hills	slope_p90	1.566
+site	mountains	0.000	-142.500	purity 0.99
+runtime	mountains	band_30-60m	0.299
+runtime	mountains	band_60-120m	0.150
+runtime	mountains	band_120-240m	0.253
+runtime	mountains	band_240-960m	1.209
+runtime	mountains	relief_300m_p50	3.477
+runtime	mountains	relief_3km_p50	21.923
+runtime	mountains	slope_p50	0.862
+runtime	mountains	slope_p90	1.589
+site	high-mountains	-21.000	-6.000	purity 0.96
+runtime	high-mountains	band_30-60m	0.711
+runtime	high-mountains	band_60-120m	0.396
+runtime	high-mountains	band_120-240m	0.659
+runtime	high-mountains	band_240-960m	2.961
+runtime	high-mountains	relief_300m_p50	7.874
+runtime	high-mountains	relief_3km_p50	40.623
+runtime	high-mountains	slope_p50	2.029
+runtime	high-mountains	slope_p90	3.784
+site	plateau	0.000	-25.500	purity 1.00
+runtime	plateau	band_30-60m	1.107
+runtime	plateau	band_60-120m	0.621
+runtime	plateau	band_120-240m	1.026
+runtime	plateau	band_240-960m	4.338
+runtime	plateau	relief_300m_p50	11.561
+runtime	plateau	relief_3km_p50	54.692
+runtime	plateau	slope_p50	3.052
+runtime	plateau	slope_p90	5.694
+site	hills	10.095	-26.257	purity 1.00
+runtime-steep-anchor	hills	band_30-60m	2.990
+runtime-steep-anchor	hills	band_60-120m	0.932
+runtime-steep-anchor	hills	band_120-240m	1.825
+runtime-steep-anchor	hills	band_240-960m	14.542
+runtime-steep-anchor	hills	relief_300m_p50	38.564
+runtime-steep-anchor	hills	relief_3km_p50	289.043
+runtime-steep-anchor	hills	slope_p50	8.628
+runtime-steep-anchor	hills	slope_p90	17.305

@@ -1,0 +1,36 @@
+# SPIKE-100: today's ground detail on the production field (m9r2), natural strength, sunset
+chunk_timeout_s = 3600
+
+[place]
+anchor = "largest-river"
+min_height_m = 10
+relief_radius_m = 3000
+relief_min_m = 0
+relief_max_m = 20
+
+[look]
+ground_detail = 0.6
+
+[[pose]]
+name = "1.8m-sunset"
+altitude_m = 1.8
+back_m = 60
+heading_deg = 90
+pitch_deg = 6
+sun_local_hours = 17.5
+
+[[pose]]
+name = "10m-sunset"
+altitude_m = 10
+back_m = 150
+heading_deg = 90
+pitch_deg = 10
+sun_local_hours = 17.5
+
+[[pose]]
+name = "50m-sunset"
+altitude_m = 50
+back_m = 400
+heading_deg = 90
+pitch_deg = 15
+sun_local_hours = 17.5

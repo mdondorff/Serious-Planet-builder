@@ -1,4 +1,4 @@
-//! Tier B, GEN-101's cost gate (m9-bake PR 3b): thermal stabilisation on active cells over one synthetic pass-2 tile (3,072 core cells and a 256-cell halo, 3,584 a side, 101.8 m),
+//! Tier B, GEN-101's cost gate (m9-bake PR 3b): thermal stabilisation on active cells over one synthetic pass-2 tile (3,072 core cells and a 256-cell halo, 3,584 a side, 101.8 m: the kernel's gate geometry and defaults of 100 passes of 1/16, not the production halo of 128 and 300 passes of 1/8, which GEN-101 sets in `Pass2Params::standard`),
 //! 100 passes on 4 threads. The gate is a count (ADR 0087 point 6): the cells evaluated over all passes against the passes times the cells of the full run; the wall time is
 //! reported and bounded only by a loaded-pass margin (CON-20, ADR 0087: a CPU time under load runs 3.6 to 5.6 times slower), the 5 s of the reference machine being measured there.
 //! The ground is synthetic (SPIKE-61's real tiles are not in the repository), a rough upland and a steeper one; the real-tile gate is PR 5's.

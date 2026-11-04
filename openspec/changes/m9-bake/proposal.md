@@ -16,7 +16,7 @@ ADR 0088 (proposed) fixes the format. This change builds it as M9 item R4.
   - an implicit stream-power carve with uplift, with a breach before the fill;
   - an active-cell thermal pass at repose;
   - one deposition sweep.
-- **The erosion layer:** a tile driver over the 100 m grid of SPIKE-61 (256-cell halo, core stored, the coupled network's inflow). It checkpoints per tile and writes the change against the sampled base as a separate layer beside `global16384` (M9 draft decision 7). A `generate` command bakes it; `--resume` continues.
+- **The erosion layer:** a tile driver over the 100 m grid of SPIKE-61 (128-cell halo, core stored, the coupled network's inflow). It checkpoints per tile and writes the change against the sampled base as a separate layer beside `global16384` (M9 draft decision 7). A `generate` command bakes it; `--resume` continues.
 - **Runtime layer:** the field adds the layer bilinearly at 100 m, with its block ranges in the bounds; behind the same switch.
 - **Scorecard report** on the baked field at the four hill sites and the other landforms.
 

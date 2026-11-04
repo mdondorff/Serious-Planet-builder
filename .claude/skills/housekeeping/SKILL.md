@@ -22,6 +22,7 @@ Housekeeping is split (owner, 2026-10-16): the **architect** curates, deciding w
 
    Target: under 10 KB.
 2. **Archives per milestone.** Move the finished milestone's lines of `docs/log.md` and its fragments of `docs/log.d/` (delete the files; merge them with `cargo xtask log`) to `docs/archive/<M>/log.md`, and its closed spikes from `docs/spikes.md` to `docs/archive/<M>/spikes.md`. Leave a one-line pointer per archive in the current file's header.
+2a. **Spike catalogue** (owner, 2026-11-04). `spikes/README.md` keeps one table of every spike, open and closed, across all milestones: `Id | Folder | Question | Result (one line) | Pick up (learning, approach or warning) | Archive`. Add the rows of the spikes closed since the last run, and fill the rows still missing from earlier milestones (the folders under `spikes/` and the archives `docs/archive/*/spikes.md` are the sources). A spike folder without an Id, or an Id without a folder, is listed as such. The `spike` skill adds the row when a spike closes, so this step only checks and fills.
 3. **Learnings by scope.** For each entry of `docs/learnings.md`, decide:
    - **project** learning (still true and useful beyond the milestone): it stays;
    - **milestone** learning (useful as history): it moves to `docs/archive/<M>/learnings.md`;

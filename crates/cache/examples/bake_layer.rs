@@ -47,7 +47,7 @@ fn main() {
     let (threads, threads_note) = planet_streaming::topology::bake_threads(o.threads).unwrap_or_else(|e| fail(&e));
     let out = o.out.clone().unwrap_or_else(|| PathBuf::from(format!("target/bake/layer-seed-{}", o.seed)));
     let tile = o.tile.unwrap_or(o.planet_res.min(3072));
-    let halo = o.halo.unwrap_or(tile / 12);
+    let halo = o.halo.unwrap_or(tile / 24);
     let grid = TileGrid { cells: o.planet_res, tile, halo, radius_m: RADIUS_M };
     if let Err(e) = grid.check() {
         fail(&e);
