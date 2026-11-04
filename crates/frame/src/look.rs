@@ -210,6 +210,8 @@ pub struct LitPlan {
     pub materials: materials::MaterialParams,
     /// The strength of the procedural ground detail (M7 G2a, LOOK-009): 0 off (the default, the picture is what it was), 1 full.
     pub ground_detail: f64,
+    /// The patch break-up of the material boundaries (REND-055, `ground.patch` of the look file): 0 off, the default.
+    pub ground_patch: f64,
     /// The specular term of the ground that goes with the detail (M7 G2b, LOOK-010): roughness per material and modifier, and the base reflectance.
     pub gloss: materials::GlossParams,
     /// The water level W in metres above the reference surface (ADR 0041; until the water-level field exists the sea's constant
@@ -329,6 +331,7 @@ impl LitPlan {
             albedo: look.albedo,
             materials: materials::MaterialParams::EARTH,
             ground_detail: 0.0,
+            ground_patch: 0.0,
             gloss: materials::GlossParams::EARTH,
             water_level_m: 0.0,
             view: ShadeView::Lit,
@@ -360,6 +363,12 @@ impl LitPlan {
         self
     }
 
+    /// This plan with the patch break-up of the material boundaries (REND-055): how far the patch octaves shift the slope cosine, 0 off.
+    pub fn with_ground_patch(mut self, patch: f64) -> LitPlan {
+        self.ground_patch = patch;
+        self
+    }
+
     /// This plan with the ground look the window shows (VIEW-060): `LookChoice::Default` leaves the plan with the strength `mode` names and the Earth curves;
     /// `File` takes the curves of the look file's `ground` table, and its detail strength in place of the natural mode's (full and off stay full and off).
     pub fn with_ground_look(
@@ -374,6 +383,7 @@ impl LitPlan {
                 self.ground_detail = ground.detail;
             }
             self.materials = ground.materials;
+            self.ground_patch = ground.patch;
         }
         self
     }
@@ -451,6 +461,9 @@ impl LitPlan {
                 look.push_str(&format!(" {b:016x}"));
             }
         }
+        if self.ground_patch != 0.0 {
+            look.push_str(&format!(" patch {:016x}", self.ground_patch.to_bits()));
+        }
         format!(
             "lit {mode} dt {} sun {} {} {} reset {} tonemap {}{look}",
             h(self.dt_s),
@@ -482,7 +495,7 @@ impl LitPlan {
             }
             u64::from_str_radix(s, 16).map(f64::from_bits).map_err(|e| format!("bad f64 bits '{s}': {e}"))
         };
-        let usage = "lit line is not 'dt .. sun .. reset .. tonemap ..' (optionally followed by 'units .. hist ..', 'albedo ..', 'water ..', 'view ..', 'atmosphere ..', 'overlay ..', 'materials ..', 'detail ..' and 'gloss ..' in this order)";
+        let usage = "lit line is not 'dt .. sun .. reset .. tonemap ..' (optionally followed by 'units .. hist ..', 'albedo ..', 'water ..', 'view ..', 'atmosphere ..', 'overlay ..', 'materials ..', 'detail ..', 'gloss ..' and 'patch ..' in this order)";
         let ["dt", dt, "sun", sx, sy, sz, "reset", reset, "tonemap", tm, tail @ ..] = rest else {
             return Err(usage.into());
         };
@@ -501,6 +514,7 @@ impl LitPlan {
             albedo: AlbedoParams::EARTH,
             materials: materials::MaterialParams::EARTH,
             ground_detail: 0.0,
+            ground_patch: 0.0,
             gloss: materials::GlossParams::EARTH,
             water_level_m: 0.0,
             view: ShadeView::Lit,
@@ -521,6 +535,7 @@ impl LitPlan {
                 "materials" => (7, materials::MATERIALS * materials::INPUTS * 2),
                 "detail" => (8, 1),
                 "gloss" => (9, materials::GLOSS_VALUES),
+                "patch" => (10, 1),
                 _ => return Err(usage.into()),
             };
             if rank <= stage || more.len() < arity {
@@ -557,6 +572,7 @@ impl LitPlan {
                     plan.materials = materials::MaterialParams::from_bits(&bits);
                 }
                 8 => plan.ground_detail = f64_of(args[0])?,
+                10 => plan.ground_patch = f64_of(args[0])?,
                 9 => {
                     let mut bits = [0u64; materials::GLOSS_VALUES];
                     for (b, a) in bits.iter_mut().zip(args) {
@@ -603,6 +619,13 @@ impl LitPlan {
         self.gloss.validate().map_err(|(k, v, why)| format!("lit plan: `{k}` = {v}: {why}"))?;
         if self.ground_detail != 0.0 && !(1.0e-6..=1.0).contains(&self.ground_detail) {
             return Err(format!("lit plan: `ground_detail` = {}: the strength must be 0 or a number from 1e-6 to 1", self.ground_detail));
+        }
+        if !(self.ground_patch == 0.0 || (1.0e-6..=file::PATCH_MAX).contains(&self.ground_patch)) {
+            return Err(format!(
+                "lit plan: `ground_patch` = {}: the patch shift must be 0 or a number from 1e-6 to {}",
+                self.ground_patch,
+                file::PATCH_MAX
+            ));
         }
         if !self.water_level_m.is_finite() {
             return Err(format!("lit plan: water level is {}, not finite", self.water_level_m));
