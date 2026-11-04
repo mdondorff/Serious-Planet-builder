@@ -134,14 +134,17 @@ fn a_reader_of_another_field_source_is_refused_naming_both_keys() {
 fn an_offline_reader_picks_the_world_by_the_recorded_source_and_refuses_a_store_of_both_unless_told_which() {
     use planet_cache::global_store::FieldSource;
     let def = WorldDefinition::single_planet(R, 3);
+    // One class source for the worlds of this test (its lattice is the slow part).
+    let inputs = Arc::new(BakeInputs::new(3, 2));
+    let class_world = || legacy(3).with_class_source(inputs.clone());
     let (class_store, legacy_store, both, empty) = (Dir::new("c"), Dir::new("l"), Dir::new("b"), Dir::new("e"));
-    build_global(class_store.path(), &class(3), RES, 2, DEFAULT_MAX_PACK_BYTES).unwrap();
+    build_global(class_store.path(), &class_world(), RES, 2, DEFAULT_MAX_PACK_BYTES).unwrap();
     build_global(legacy_store.path(), &legacy(3), RES, 2, DEFAULT_MAX_PACK_BYTES).unwrap();
-    build_global(both.path(), &class(3), RES, 2, DEFAULT_MAX_PACK_BYTES).unwrap();
+    build_global(both.path(), &class_world(), RES, 2, DEFAULT_MAX_PACK_BYTES).unwrap();
     build_global(both.path(), &legacy(3), RES, 2, DEFAULT_MAX_PACK_BYTES).unwrap();
     // The store decides: a class store opens as a class world, a legacy store as the legacy one.
     let w = GlobalWorld::for_store(&def, class_store.path(), RES, None, 2).unwrap();
-    assert!(w.class_source().is_some() && w.stage_key(RES) == class(3).stage_key(RES));
+    assert!(w.class_source().is_some() && w.stage_key(RES) == class_world().stage_key(RES));
     let w = GlobalWorld::for_store(&def, legacy_store.path(), RES, None, 2).unwrap();
     assert!(w.class_source().is_none() && w.stage_key(RES) == legacy(3).stage_key(RES));
     // A store of both is refused unless told which, and then it follows the choice.
@@ -151,8 +154,10 @@ fn an_offline_reader_picks_the_world_by_the_recorded_source_and_refuses_a_store_
     assert!(GlobalWorld::for_store(&def, both.path(), RES, Some(FieldSource::Legacy), 2).unwrap().class_source().is_none());
     // A choice the store does not hold, another seed and a store with no bake are refused, naming the keys or the resolution.
     assert!(GlobalWorld::for_store(&def, class_store.path(), RES, Some(FieldSource::Legacy), 2).is_err());
-    assert!(GlobalWorld::for_store(&WorldDefinition::single_planet(R, 4), class_store.path(), RES, None, 2).is_err());
-    assert!(GlobalWorld::for_store(&def, class_store.path(), RES * 2, None, 2).is_err());
+    let e = GlobalWorld::for_store(&WorldDefinition::single_planet(R, 4), class_store.path(), RES, None, 2).err().expect("another seed is refused");
+    assert!(e.contains("holds no bake of 8 cells for this definition"), "{e}");
+    let e = GlobalWorld::for_store(&def, class_store.path(), RES * 2, None, 2).err().expect("another resolution is refused");
+    assert!(e.contains("holds no bake of 16 cells for this definition"), "{e}");
     fs::create_dir_all(empty.path()).unwrap();
     planet_cache::pack::PackWriter::open(empty.path(), legacy(3).params(), DEFAULT_MAX_PACK_BYTES).unwrap().finish().unwrap();
     assert!(GlobalWorld::for_store(&def, empty.path(), RES, None, 2).is_err());

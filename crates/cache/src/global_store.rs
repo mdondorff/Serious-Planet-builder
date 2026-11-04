@@ -940,11 +940,18 @@ impl GlobalWorld {
     /// When the class source is of another seed than the world's: it would bake its elevation over this world's coasts and store that under this world's key.
     pub fn with_class_source(mut self, inputs: Arc<BakeInputs>) -> GlobalWorld {
         assert_eq!(inputs.seed(), self.seed, "the class source is of seed {} but the world's seed is {}", inputs.seed(), self.seed);
+        self = self.keyed_as_class_source();
+        self.class_source = Some(inputs);
+        self
+    }
+
+    /// This world with the class source's identity in its read set and no inputs: its keys are the class world's, so it can ask a store whether it holds a class bake ([`GlobalWorld::check_source`])
+    /// without building the class lattice; it cannot bake (`field` would sample the legacy generator).
+    fn keyed_as_class_source(mut self) -> GlobalWorld {
         let mut params = BakeInputs::id().to_le_bytes().to_vec();
         params.extend(self.seed.to_le_bytes());
         self.reads.retain(|r| !matches!(r, ReadEntry::Query { kind: QUERY_FIELD_SOURCE, .. }));
         self.reads.push(ReadEntry::Query { kind: QUERY_FIELD_SOURCE, params, result: [0; 16] });
-        self.class_source = Some(inputs);
         self
     }
 
@@ -969,17 +976,22 @@ impl GlobalWorld {
                 Err(format!("{}: asked for the legacy source: {}", dir.display(), explain_source(&legacy_check, res)))
             };
         }
-        let class = GlobalWorld::from_definition(def)
-            .map_err(|e| format!("the definition cannot be generated: {e}"))?
-            .with_class_source(Arc::new(BakeInputs::new(legacy.seed(), threads)));
-        let class_check = class.check_source(&store, res);
+        // A class world is asked by its keys alone: the lattice of the class source is built only when the store turns out to hold the class bake.
+        let probe =
+            GlobalWorld::from_definition(def).map_err(|e| format!("the definition cannot be generated: {e}"))?.keyed_as_class_source();
+        let class_check = probe.check_source(&store, res);
         let has_class = class_check == Ok(true);
+        let class = || {
+            GlobalWorld::from_definition(def)
+                .map(|w| w.with_class_source(Arc::new(BakeInputs::new(legacy.seed(), threads))))
+                .map_err(|e| format!("the definition cannot be generated: {e}"))
+        };
         match (has_legacy, has_class) {
             (true, true) if choice.is_none() => Err(format!(
                 "{}: the store holds a legacy bake and a class-source bake of {res} cells: say which (--class-source or --legacy-source)",
                 dir.display()
             )),
-            (_, true) => Ok(class),
+            (_, true) => class(),
             (true, false) if choice.is_none() => Ok(legacy),
             _ => Err(format!(
                 "{}: {}",
@@ -2617,8 +2629,9 @@ pub enum FieldSource {
 }
 
 fn explain_source(check: &Result<bool, String>, res: u32) -> String {
+    let base = format!("the store holds no bake of {res} cells for this definition (--seed, --world, --global-res)");
     match check {
-        Err(e) => e.clone(),
-        Ok(_) => format!("the store holds no bake of {res} cells for this definition"),
+        Err(e) => format!("{base}: {e}"),
+        Ok(_) => base,
     }
 }
