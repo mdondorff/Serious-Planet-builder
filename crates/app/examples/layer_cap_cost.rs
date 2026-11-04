@@ -43,7 +43,13 @@ fn main() {
         exported_m3: 0.0,
         clamped_cells: 0,
     };
-    let tile = Arc::new(LayerTile::new(Arc::new(TileResult { id: TileId { face: Face(0), ti: 0, tj: 0 }, core, stats }), t).unwrap());
+    let tile = Arc::new(
+        LayerTile::new(
+            Arc::new(TileResult { id: TileId { face: Face(0), ti: 0, tj: 0 }, core, eroded: Vec::new(), deposited: Vec::new(), stats }),
+            t,
+        )
+        .unwrap(),
+    );
     let grid = TileGrid { cells: 98_304, tile: t, halo: 256, radius_m: 6_371_000.0 };
     let layer = ErosionLayer::new(Arc::new(One { grid, tile })).unwrap();
     let mut rng = SplitMix64(1);
