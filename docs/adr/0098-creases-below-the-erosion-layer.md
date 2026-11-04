@@ -1,5 +1,5 @@
 # 0098 Creases only below the erosion layer's grid; the layer owns erosion at its scales
-Status: accepted (owner, 2026-11-03: "creases like above are better suited for lower scale noise and the erosion term needs to be having control over the erosion effects at its scale"; "Creases then become however very similar to the 'fine detail' term"); the fade band of point 2 and the coast blend of point 3 are start values; points 3 and the version consequence amended 2026-11-03 (GEN-109 reviews, #1143)
+Status: accepted (owner, 2026-11-03: "creases like above are better suited for lower scale noise and the erosion term needs to be having control over the erosion effects at its scale"; "Creases then become however very similar to the 'fine detail' term"); the fade band of point 2 and the coast blend of point 3 are start values; points 3 and the version consequence amended 2026-11-03 (GEN-109 reviews, #1143); point 3 amended 2026-11-04: the layer read switches the band on, not the relief switch, and no relief channels are needed (SPIKE-99, owner B; #1158)
 Date: 2026-11-03
 Source: owner, 2026-11-03; ADR 0088 points 2 and 5; GEN-060, GEN-061, GEN-099; erosion-bake preview and diagnosis (explorer, 2026-11-03)
 
