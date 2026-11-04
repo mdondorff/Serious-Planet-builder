@@ -335,7 +335,7 @@ impl ErosionField<'_> {
         Ok(self)
     }
 
-    /// Turns the erosion layer on (GEN-112, ADR 0088 point 5, m9-bake PR 6): the height is the relief base plus the layer's change (read C1, [`ErosionLayer::change_at`]) faded to 0 within
+    /// Turns the erosion layer on (GEN-112 to GEN-114, ADR 0088 point 5, m9-bake PR 6): the height is the relief base plus the layer's change (read C1, [`ErosionLayer::change_at`]) faded to 0 within
     /// [`crate::erosion_layer::COAST_FADE_M`] above `sea_level_m`, and the crease band of the bake ([`CreaseBand::of_the_bake`] over the same sea level) is switched on with it (ADR 0098).
     /// It needs the relief channels on and the band off (the layer switches it on), an error naming the problem otherwise; the layer's identity, the sea level and the read's version enter
     /// the keys, and the implementation id changes. Without the call the field is today's, bit for bit.

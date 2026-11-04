@@ -306,7 +306,7 @@ fn an_absent_tile_reads_as_zero_and_the_neighbours_stencil_sees_it() {
     }
 }
 
-// spec: GEN-112
+// spec: GEN-113
 #[test]
 fn the_coast_fade_is_zero_at_the_sea_and_one_three_metres_above_it() {
     assert_eq!(COAST_FADE_M, 3.0);
@@ -342,7 +342,7 @@ fn off_is_the_field_with_the_band_and_a_layer_of_zeros_changes_nothing() {
     }
 }
 
-// spec: GEN-112
+// spec: GEN-113
 #[test]
 fn the_layer_is_added_after_the_relief_base_faded_at_the_coast_and_not_scaled_by_k() {
     let g = grid();
@@ -403,7 +403,7 @@ fn a_batch_of_heights_is_the_single_reads_bit_for_bit() {
     assert!(f.error().is_none());
 }
 
-// spec: GEN-112
+// spec: GEN-114
 #[test]
 fn the_keys_follow_the_layer_and_the_order_of_the_calls() {
     let g = grid();

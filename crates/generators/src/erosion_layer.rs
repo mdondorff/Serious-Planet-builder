@@ -1,4 +1,4 @@
-//! The erosion layer read at runtime (GEN-112, GEN-102; m9-bake PR 6): the stored change of pass 2 against the base, as a C1 height term and as a range over a cap.
+//! The erosion layer read at runtime (GEN-112 to GEN-114, GEN-102; m9-bake PR 6): the stored change of pass 2 against the base, as a C1 height term and as a range over a cap.
 //!
 //! The layer is a grid of tiles, each the change of its core's cells (`TileGrid`, the cell centres being the samples), held by a [`LayerSource`] that decodes a tile once while it stays
 //! cached (the cache crate implements it over the store, CON-02). A decoded tile ([`LayerTile`]) carries a min/max pyramid built when it is decoded: blocks of 32 cells, then 2 x 2

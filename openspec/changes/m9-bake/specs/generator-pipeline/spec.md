@@ -184,7 +184,7 @@ The field's height bounds over a cap SHALL take the layer's part from the layer'
 - the nodes the cap reaches, widened by 4 cells (2 for the stencil, 2 for the cross-fade at a cube edge), on every face it touches; a node wholly inside is taken whole;
 - below the 32-cell blocks only for a cap of at most 8 cells' radius, down to nodes of 2 cells;
 - a cap that reaches more than 36 tiles takes the layer's global range;
-- the layer adds the product of that range and the coast fade's interval over the cap's base elevation (GEN-112).
+- the layer adds the product of that range and the coast fade's interval over the cap's base elevation (GEN-113).
 With the relief channels on the bounds SHALL also take:
 - the channels' range `[k_min, k_max, m_min, m_max]` over the cap: the union of the ranges of the blocks the cap touches, from a pyramid of the block ranges (a node wholly inside the cap is taken whole), and for a block the cap only touches the min and max of the lattice points of the nodes of 2 cells it touches;
 - the base `m + k (e - m) + k detail` over the intervals of `e`, `m`, `k` and the detail (products of intervals, a sound bound that ignores the correlation of `e` and `m`);
@@ -201,13 +201,13 @@ Source: ADR 0088 points 3 and 8, ADR 0088/0089 accepted 2026-11-01; SPIKE-82, SP
 
 ### Requirement: GEN-112 The runtime read of the erosion layer
 `ErosionField::with_layer(layer, sea_level)` MAY add the stored layer (STRM-065) to a relief field; without the call the field is today's, bit for bit:
-- it needs the relief channels, switches the crease band of the bake on (GEN-109), and the inputs hash and the implementation id (`+layer`) follow the layer, the sea level and the read's version, not the field version;
-- the height is the relief base plus the layer's change times a smoothstep fade from 0 at the sea level to 1 at 3 m above it, not scaled by `k`;
-- the change is a Catmull-Rom (C1) read of the cell centres, kept within the four cells around the point, cross-faded over 2 cells at a cube edge; a tile the layer lacks is 0.
+- it needs the relief channels and switches the crease band of the bake on (GEN-109);
+- the height is the relief base plus the layer's change times the coast fade (GEN-113), not scaled by `k`;
+- the change is a Catmull-Rom (C1) read of the cell centres, kept within the four cells around the point, reading the neighbouring tiles' cells, clamped at a face edge and cross-faded over 2 cells with the neighbouring face's read; a tile the layer lacks is 0.
 
 Verify: A
 Status: planned
-Source: ADR 0088 point 5, ADR 0098, ADR 0099; owner 2026-11-04 (coast fade, I5c); m9-bake PR 6. Departs from ADR 0088 point 5 ("bilinearly"): a bilinear read leaves a crease along every cell line (ADR 0099 gives that reason for pass 1); the planner is asked to amend point 5.
+Source: ADR 0088 point 5 as amended by ADR 0100 (the runtime read is C1, with the coast fade and the cube-edge cross-fade; owner 2026-11-04), ADR 0098, ADR 0099; m9-bake PR 6
 
 #### Scenario: Off and zeros
 - **WHEN** the call is not made, or the layer holds only zeros
@@ -215,19 +215,33 @@ Source: ADR 0088 point 5, ADR 0098, ADR 0099; owner 2026-11-04 (coast fade, I5c)
 
 #### Scenario: The read
 - **WHEN** the change is read at cell centres, at random points, along cell lines and across tile seams, and a tile of the layer is absent
-- **THEN** a centre reads its stored value, every read lies within its four cells' range, the one-sided slopes at a knot agree, a cell of an absent tile counts as 0, and the stencil reads the neighbouring tile's cells
+- **THEN** a centre reads its stored value, every read lies within its four cells' range, the one-sided slopes at a knot agree, a cell of an absent tile counts as 0, the stencil reads the neighbouring tile's cells, and a batch of heights equals the single reads' bits
 
 #### Scenario: The cube edge
 - **WHEN** a layer that is a smooth function of the direction is read within 1e-9 rad either side of every cube edge and around every corner
 - **THEN** the reads differ by under a millimetre, where one face's clamped read alone steps by about a cell's change
 
+### Requirement: GEN-113 The coast fade of the layer
+The layer's change SHALL be multiplied by a smoothstep fade of the bake's elevation `e`: 0 at or below the sea level, 1 from 3 m above it. The sea level is the one `with_layer` is given (the definition's). The fade follows `e`, not the relief base `m + k (e - m)`, and the bounds take its interval over the cap's base elevation.
+
+Verify: A
+Status: planned
+Source: Owner 2026-11-04 (the coast remedy, I5c), ADR 0100; m9-bake PR 6
+
 #### Scenario: Coast and order
 - **WHEN** heights are read over land, over the first 3 m above the sea level and over the sea
-- **THEN** land adds the change, the coast adds a smoothstep share of it by the bake's elevation, the sea adds none, the change is not scaled by `k`, and a batch of reads equals the single reads' bits
+- **THEN** land adds the change, a point at elevation `e` inside the first 3 m adds the fade's share of it, the sea adds none, and the change is not scaled by `k`
+
+### Requirement: GEN-114 The keys of a layered field
+A field with the layer on SHALL fold the layer's identity, the sea level, the fade's width and the read's version into its inputs hash, and its implementation id SHALL gain `+layer` over the band's. The field's version SHALL NOT change. `with_layer` SHALL be refused without the relief channels or after the crease band, and the relief channels SHALL be refused after the layer.
+
+Verify: A
+Status: planned
+Source: ADR 0098 consequence (the id and the hash change when the band is on), ADR 0100; m9-bake PR 6
 
 #### Scenario: Keys
 - **WHEN** the layer, its sea level or the call order changes
-- **THEN** the inputs hash differs, the implementation id gains `+layer`, the version is unchanged, a call without the relief channels or after the band is refused, and the relief channels cannot be asked for after the layer
+- **THEN** the inputs hash differs, the implementation id gains `+layer`, the version is unchanged, and the refusals name the problem
 
 ## REMOVED Requirements
 
