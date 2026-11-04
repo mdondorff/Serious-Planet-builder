@@ -412,7 +412,10 @@ impl StoreLayer {
     pub fn open(dir: &Path, world: Arc<GlobalWorld>, shape: &BakeShape, capacity: usize, range: (f64, f64)) -> Result<StoreLayer, String> {
         let tiles_dir = if dir.join("tiles").is_dir() { dir.join("tiles") } else { dir.to_path_buf() };
         if !tiles_dir.is_dir() {
-            return Err(format!("{}: no such folder (the erosion layer of `bake_layer`: its output folder or its tiles/ folder)", dir.display()));
+            return Err(format!(
+                "{}: no such folder (the erosion layer of `bake_layer`: its output folder or its tiles/ folder)",
+                dir.display()
+            ));
         }
         let (_, spec) = bake_specs(&world, shape)?;
         let store = TileStore::open(&tiles_dir, world.params()).map_err(|e| format!("{}: {e}", tiles_dir.display()))?;
@@ -422,7 +425,13 @@ impl StoreLayer {
             .all_tiles()
             .into_iter()
             .find(|t| layer_tile_id(&grid, *t).is_ok_and(|id| !layer.store.keys_for(KIND_LAYER_TILE, id).is_empty()))
-            .ok_or_else(|| format!("{}: the folder holds no layer tile (record kind {KIND_LAYER_TILE}) of any level of a {}-cell grid", tiles_dir.display(), grid.cells))?;
+            .ok_or_else(|| {
+                format!(
+                    "{}: the folder holds no layer tile (record kind {KIND_LAYER_TILE}) of any level of a {}-cell grid",
+                    tiles_dir.display(),
+                    grid.cells
+                )
+            })?;
         planet_generators::erosion_layer::LayerSource::tile(&layer, first.face, first.ti, first.tj)?;
         Ok(layer)
     }
