@@ -13,7 +13,7 @@ use crate::climate::ClimateTexture;
 use crate::coupled::{lens_climate, lens_version_word, CoupledLens, CoupledMaps};
 use crate::global::{GlobalGrid, GlobalSample, GridSource, LatticeSource, ReadError};
 use crate::height::HeightField;
-use crate::height_fields::{build_field, HeightFieldKind};
+use crate::height_fields::{build_field, build_field_erosion, ErosionSwitch, HeightFieldKind};
 use crate::ocean::{OceanGrid, OceanLattice};
 use crate::water::WaterBounded;
 
@@ -66,10 +66,24 @@ pub fn field_chain<'a>(
     bake_key: [u8; 16],
     bound_water: bool,
 ) -> Result<Box<dyn HeightField + 'a>, String> {
+    field_chain_erosion(kind, def, src, bake_key, bound_water, None)
+}
+
+/// [`field_chain`] with the relief channels and the erosion layer on when `erosion` is given (GEN-099, GEN-112; the viewer's `--erosion on`).
+pub fn field_chain_erosion<'a>(
+    kind: HeightFieldKind,
+    def: &Arc<WorldDefinition>,
+    src: &'a dyn LatticeSource,
+    bake_key: [u8; 16],
+    bound_water: bool,
+    erosion: Option<&ErosionSwitch>,
+) -> Result<Box<dyn HeightField + 'a>, String> {
     let ctx = GenContext::new(def);
-    let built = build_field(kind, &ctx, BodyId::PLANET, src, bake_key)
-        .map_err(|e| format!("the definition cannot be generated: {e}"))
-        .and_then(|base| with_stamps(base, def));
+    let base = match erosion {
+        None => build_field(kind, &ctx, BodyId::PLANET, src, bake_key).map_err(|e| format!("the definition cannot be generated: {e}")),
+        Some(e) => build_field_erosion(kind, &ctx, BodyId::PLANET, src, bake_key, e),
+    };
+    let built = base.and_then(|base| with_stamps(base, def));
     match (built, bound_water) {
         (Ok(f), true) => {
             let level = def.sea(BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;
