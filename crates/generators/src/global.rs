@@ -728,6 +728,11 @@ pub trait LatticeSource: Sync {
     fn records_reads(&self) -> bool {
         false
     }
+    /// The class source the bake behind this source sampled (GEN-115), or none for the legacy generator's bake. A stored result made from the source (the coupled run, the coarse horizon)
+    /// is keyed through a world that carries it, so a result of one field source is never read as another's (STRM-073).
+    fn class_source(&self) -> Option<Arc<crate::bake::inputs::BakeInputs>> {
+        None
+    }
 }
 
 /// A lattice source with the elevation of every sample multiplied by the body's relief scale (WDEF-017): the exaggeration is part of the

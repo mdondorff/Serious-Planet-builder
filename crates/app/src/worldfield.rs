@@ -328,6 +328,16 @@ impl WorldTerrain {
     /// `dir`. The store and its world are leaked: the field borrows them for the life of the process, a CLI run. Refuses a field
     /// that reads no bake, a directory that is not a store, and a store that does not hold the bake of this definition at `res`.
     pub fn open_store(def: WorldDefinition, dir: &Path, res: u32) -> Result<WorldTerrain, String> {
+        Self::open_store_as(def, dir, res, None)
+    }
+
+    /// [`WorldTerrain::open_store`] with the field source to read when the store holds both bakes (STRM-073).
+    pub fn open_store_as(
+        def: WorldDefinition,
+        dir: &Path,
+        res: u32,
+        choice: Option<planet_cache::global_store::FieldSource>,
+    ) -> Result<WorldTerrain, String> {
         let kind = resolve(&def).map_err(|e| e.to_string())?;
         if !kind.needs_bake() {
             return Err(format!("height field {} reads no bake: --store has nothing to read", kind.id()));
@@ -337,7 +347,9 @@ impl WorldTerrain {
         if !dir.is_dir() {
             return Err(format!("{}: no such store directory (a bake made by `generate --global-dir`)", dir.display()));
         }
-        let world = GlobalWorld::from_definition(&def).map_err(|e| format!("the definition cannot be generated: {e}"))?;
+        // The store records its field source (STRM-073): a class-source store opens as a class world, a legacy store as the legacy one, a store of both is refused.
+        let threads = planet_streaming::topology::bake_threads(0).map_or(4, |t| t.0);
+        let world = GlobalWorld::for_store(&def, dir, res, choice, threads)?;
         let world: &'static GlobalWorld = Box::leak(Box::new(world));
         let store = planet_cache::pack::TileStore::open(dir, world.params()).map_err(|e| format!("{}: {e}", dir.display()))?;
         let store: &'static planet_cache::pack::TileStore = Box::leak(Box::new(store));

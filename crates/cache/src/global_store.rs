@@ -940,12 +940,65 @@ impl GlobalWorld {
     /// When the class source is of another seed than the world's: it would bake its elevation over this world's coasts and store that under this world's key.
     pub fn with_class_source(mut self, inputs: Arc<BakeInputs>) -> GlobalWorld {
         assert_eq!(inputs.seed(), self.seed, "the class source is of seed {} but the world's seed is {}", inputs.seed(), self.seed);
+        self = self.keyed_as_class_source();
+        self.class_source = Some(inputs);
+        self
+    }
+
+    /// This world with the class source's identity in its read set and no inputs: its keys are the class world's, so it can ask a store whether it holds a class bake ([`GlobalWorld::check_source`])
+    /// without building the class lattice; it cannot bake (`field` would sample the legacy generator).
+    fn keyed_as_class_source(mut self) -> GlobalWorld {
         let mut params = BakeInputs::id().to_le_bytes().to_vec();
         params.extend(self.seed.to_le_bytes());
         self.reads.retain(|r| !matches!(r, ReadEntry::Query { kind: QUERY_FIELD_SOURCE, .. }));
         self.reads.push(ReadEntry::Query { kind: QUERY_FIELD_SOURCE, params, result: [0; 16] });
-        self.class_source = Some(inputs);
         self
+    }
+
+    /// The world of the bake of `res` cells stored in `dir`, with the field source the store records (STRM-073): the class source's when the store holds its blocks, the legacy generator's when it
+    /// holds those. A store that holds both is refused unless `choice` says which; a `choice` the store does not hold is refused, and so is a store that holds neither (another seed, version or
+    /// resolution), naming the keys. The class source's lattice is built on `threads` threads (the same result for any count).
+    pub fn for_store(
+        def: &WorldDefinition,
+        dir: &Path,
+        res: u32,
+        choice: Option<FieldSource>,
+        threads: usize,
+    ) -> Result<GlobalWorld, String> {
+        let legacy = GlobalWorld::from_definition(def).map_err(|e| format!("the definition cannot be generated: {e}"))?;
+        let store = TileStore::open(dir, legacy.params()).map_err(|e| format!("{}: {e}", dir.display()))?;
+        let legacy_check = legacy.check_source(&store, res);
+        let has_legacy = legacy_check == Ok(true);
+        if choice == Some(FieldSource::Legacy) {
+            return if has_legacy {
+                Ok(legacy)
+            } else {
+                Err(format!("{}: asked for the legacy source: {}", dir.display(), explain_source(&legacy_check, res)))
+            };
+        }
+        // A class world is asked by its keys alone: the lattice of the class source is built only when the store turns out to hold the class bake.
+        let probe =
+            GlobalWorld::from_definition(def).map_err(|e| format!("the definition cannot be generated: {e}"))?.keyed_as_class_source();
+        let class_check = probe.check_source(&store, res);
+        let has_class = class_check == Ok(true);
+        let class = || {
+            GlobalWorld::from_definition(def)
+                .map(|w| w.with_class_source(Arc::new(BakeInputs::new(legacy.seed(), threads))))
+                .map_err(|e| format!("the definition cannot be generated: {e}"))
+        };
+        match (has_legacy, has_class) {
+            (true, true) if choice.is_none() => Err(format!(
+                "{}: the store holds a legacy bake and a class-source bake of {res} cells: say which (--class-source or --legacy-source)",
+                dir.display()
+            )),
+            (_, true) => class(),
+            (true, false) if choice.is_none() => Ok(legacy),
+            _ => Err(format!(
+                "{}: {}",
+                dir.display(),
+                explain_source(if choice == Some(FieldSource::Class) { &class_check } else { &legacy_check }, res)
+            )),
+        }
     }
 
     /// The class source this bake samples, if any.
@@ -1459,6 +1512,10 @@ impl<'a> StoreSource<'a> {
 }
 
 impl LatticeSource for StoreSource<'_> {
+    fn class_source(&self) -> Option<Arc<BakeInputs>> {
+        self.world.class_source().cloned()
+    }
+
     fn res(&self) -> u32 {
         self.res
     }
@@ -2564,4 +2621,19 @@ pub fn load_coupled(store: &TileStore, world: &GlobalWorld) -> Result<StoredCoup
         }
     }
     Ok(out)
+}
+
+/// Which field source a store's bake was made from (STRM-073).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FieldSource {
+    Legacy,
+    Class,
+}
+
+fn explain_source(check: &Result<bool, String>, res: u32) -> String {
+    let base = format!("the store holds no bake of {res} cells for this definition (--seed, --world, --global-res)");
+    match check {
+        Err(e) => format!("{base}: {e}"),
+        Ok(_) => base,
+    }
 }
