@@ -93,7 +93,7 @@ Source: ADR 0089 decisions 5 and 6, ADR 0088 point 1, ADR 0088/0089 accepted 202
 - **THEN** its untapered `k` is `(128 x 5 + 127 x 6) / 255`, and at a ring mean of 0 m the tapered `k` is 1
 
 ### Requirement: GEN-098 The hill band follows the class
-The hill band SHALL keep GEN-064's three octaves, weights, warped direction and coast ramp, and SHALL take the amplitude `30 + 145 smoothstep(1, 5, k) + 650 smoothstep(5, 7.5, k)` m from the untapered blended `k` (GEN-097) instead of the range zone's mountain strength. `HILL_BAND_MAX_M` SHALL become 825 m. Where the class is mountains or high mountains the band SHALL be x4.5 as high (the factor is blended by the two classes' weight), its noise a ridged multifractal of five octaves (16, 8, 4, 2 and 1 km, each octave weighted by the previous one's ridge so that the ridges stay connected) in place of the three octaves, blended by the same weight, and centred (0.45 of the unit noise, its mean, is subtracted, so that the larger band does not lift the median elevation); land SHALL stay at least 1 m above the sea level where the base is (the shore of the continent stage is kept). A cap's bounds SHALL carry the band's per-octave noise bounds at the cap. The curve and the factors are start values (SPIKE-80; SPIKE-101, SPIKE-102 run a: x4.5 ridged centred reaches 0.79 of Everest's 3 km relief on the base); R7 tunes them. `CLASS_SOURCE_VERSION` SHALL become 6.
+The hill band SHALL keep GEN-064's three octaves, weights, warped direction and coast ramp, and SHALL take the amplitude `30 + 145 smoothstep(1, 5, k) + 650 smoothstep(5, 7.5, k)` m from the untapered blended `k` (GEN-097) instead of the range zone's mountain strength. `HILL_BAND_MAX_M` SHALL become 825 m. Where the class is mountains or high mountains the band SHALL be x4.5 as high (the factor is blended by the two classes' weight), its noise a ridged multifractal of five octaves (16, 8, 4, 2 and 1 km, each octave weighted by the previous one's ridge so that the ridges stay connected) in place of the three octaves, blended by the same weight, and centred (0.45 of the unit noise, its mean, is subtracted, so that the larger band does not lift the median elevation); land SHALL stay at least 1 m above the sea level where the base is (the shore of the continent stage is kept). A cap's bounds SHALL carry the band's per-octave noise bounds at the cap: for the hill octaves as before (`HILL_BAND_MAX_M`), and where the mountain weights are not 0 the ridged octaves' bound in `[0, 1]` and the factor 4.5 (the band's maximum is `0.55 * 4.5 * 825` m, about 2.0 km, and its minimum `-0.45 * 4.5 * 825` m before the land floor), all inside the clamp of 9000 m. The curve and the factors are start values (SPIKE-80; SPIKE-101, SPIKE-102 run a: x4.5 ridged centred reaches 0.79 of Everest's 3 km relief on the base); R7 tunes them. `CLASS_SOURCE_VERSION` SHALL become 6.
 
 Verify: A
 Status: planned
@@ -138,6 +138,10 @@ It SHALL keep each face's change as a record of the layer store (STRM-065) and c
 Verify: A, B
 Status: planned
 Source: ADR 0088 point 4.1, ADR 0088/0089 accepted 2026-11-01; SPIKE-62, SPIKE-65, SPIKE-66, SPIKE-70, SPIKE-71
+
+#### Scenario: The breach limit
+- **WHEN** a basin ringed by a 400 m dam is carved for one step with the default breach and with a limit of 50 m, and with the height scaling at 2000 m
+- **THEN** the dam is lowered further with the default than with 50 m, the scaled limit gives a dam between the two, and `breach_height_scale_m` is part of the layer key
 
 #### Scenario: The uplift is tapered
 - **WHEN** a plain at 3 m and a plateau at 500 m, each ringed by outlets, are carved with the taper of 40 m and without it

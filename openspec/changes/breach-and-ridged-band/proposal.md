@@ -12,3 +12,5 @@ SPIKE-101 (2026-11-04): high mountains reach 0.21 of GLO-30's 3 km relief as bui
 - `generator-pipeline`: GEN-098, GEN-100 (planned, in `m9-bake`)
 
 Expected golden changes: none (the class source is not on a render path before the bake).
+
+Supersedes the numbers of ADR 0088 point 4 / ADR 0099's context that were measured with a 50 m breach (relief kept 73 % and 94 %); the spec is the home of the values (ADR 0055), so no new ADR. Flagged to the planner before merge.

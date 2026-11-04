@@ -20,7 +20,7 @@ pub struct CarveParams {
     pub breach_slope: f64,
     /// ... by at most this many metres (500: a ridge's basins are breached, not filled, so the carve keeps its relief; SPIKE-101).
     pub breach_max_m: f64,
-    /// Height scaling of the breach limit, off at 0: with a value above 0 the limit is `breach_min_m` at the sea level and rises to `breach_max_m` over this many metres of height
+    /// Height scaling of the breach limit, off at 0: with a value above 0 the limit is `BREACH_MIN_M` at the sea level and rises to `breach_max_m` over this many metres of height
     /// above it (`smoothstep`), so plains keep the small limit. The height of the receiver stands in for the local relief.
     pub breach_height_scale_m: f64,
     /// The sea level: land never falls below it plus `epsilon`, whatever depth the outlets have (a sea outlet is a base level at the sea, not at its floor).
