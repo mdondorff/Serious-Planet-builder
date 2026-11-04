@@ -1,0 +1,4 @@
+2026-11-04T20:19:53Z start a --face-res 12288 --mfd-area --c1-face-read --ridged --band-scale 4.5 --centre 0.45 --breach-max 500 
+2026-11-04T21:00:18Z end a rc=0
+2026-11-04T21:00:18Z start b --face-res 12288 --mfd-area --c1-face-read --ridged --band-scale 4.5 --centre 0.45 --breach-max 500 --keep-pits
+2026-11-04T21:27:00Z end b rc=0
