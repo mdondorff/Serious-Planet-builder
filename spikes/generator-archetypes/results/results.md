@@ -183,7 +183,7 @@ All boundary fields run before pass 1 and are cheap. Each has a whole-planet pre
 | F5 | Ice history | ELA from T + ΔT (about −6 °C at the glacial maximum) and P; ice extent where ground lies above the ELA, and continental sheets where the glacial-maximum MAAT is low and P is enough | cell rule plus a fixed-radius smoothing | seconds | one small driver channel on the class lattice |
 | F6 | Volcanic sources | Points along arc belts (plate mask), hotspots (Poisson, hashed) and rifts; type (strato, shield, caldera, cinder field) and age | hashed point process | negligible | a list per face, keyed |
 | F7 | Coast type | Cliffed where wave exposure (fetch along F2) × hard K × near-shore relief is high; depositional otherwise; fjord where F5's ice reached the sea | derived per coast cell | seconds | small channel, or derived on the fly |
-| F8 | Pit tolerance | Kept depression depth: high where ice history (kettles, overdeepenings), permafrost (thermokarst), soluble rock (dolines), arid (playas) or a caldera applies; 0 elsewhere | derived | negligible | none (derived) |
+| F8 | Pit tolerance (runtime choice, not a bake input) | Which kept depressions show as lakes or dry pits: ice history (kettles, overdeepenings), permafrost (thermokarst), soluble rock (dolines), arid (playas), calderas. Everywhere else the runtime adds the stored fill depth, which gives today's filled look. | derived | negligible | none: the bake keeps every pit that survives the breach, and stores the fill depth (P1b) |
 | F9 | Default classes, arid rules | Badlands where soft K × semi-arid × moderate height; sand sea where arid × low relief × supply. These give the two classes a rule (today 0; GEN-095) | rule table, option C interface | negligible | class lattice (exists) |
 
 **Processes (the bake)**
@@ -191,7 +191,7 @@ All boundary fields run before pass 1 and are cheap. Each has a whole-planet pre
 | # | Stage | Change against today | Cost (estimate) | Rebuild if added later |
 |---|---|---|---|---|
 | P1a | Pass 1 carve with K(x, z), U(x) and runoff from F3 | A per-cell K and U instead of scalars | about +5 % of pass 1 (lookups) ≈ +1 thread-h | full pass 1 and pass 2 |
-| P1b | Route over a filled copy, carve the unfilled heights | The flood gives receivers only. Depressions deeper than the breach (500 m; SPIKE-101) stay where F8 allows. Store the fill depth. | about 0: the flood exists | full pass 1 and pass 2 |
+| P1b | Route over a filled copy, carve the unfilled heights | The flood gives receivers only. A cell below its receiver keeps its height plus uplift; deposition may partly fill it. Every pit that survives the breach (500 m; SPIKE-101) stays in the heights. The fill depth to the spill level is stored: from pass 1's face flood for large basins, and from pass 2's tile-plus-halo flood for small ones. | about 0: the flood exists | full pass 1 and pass 2 |
 | P1c | Glacial erosion by ice flux | On F5's ice cells: ice flux from accumulation above the ELA routed on the same receivers; erosion ∝ sliding speed; overdeepening allowed (F8) | +30-60 % of pass 1 on faces with ice ≈ +6-12 thread-h | full pass 1 and pass 2 on ice-affected tiles |
 | P2a | Glacial cross-section | Widen the trough to a parabolic profile by the flux; cirque bowls at the ELA heads; moraine ridges at F5's margin; kettles kept | 10-20 s a tile on about 30 % of land tiles ≈ +1.8-3.6 thread-h | pass 2 on ice tiles |
 | P2b | Coast step | On cliffed coasts (F7): a wave-cut platform at the sea level and a cliff line with retreat ∝ 1/K; terrace steps where U > 0. The taper, fade and band act only on depositional coasts. | 2-5 s a tile on about 40 % of land tiles ≈ +0.5-1.2 thread-h | pass 2 on coastal tiles, or an additive coast layer |
@@ -233,26 +233,50 @@ The ranking weighs three things:
 - whether it forces a rebuild if left out (3.3);
 - its risk: a new process is a risk, a field is cheap.
 
-### 4.1 In M9: before I6's planet bake (about 2026-11-06 or later)
-1. **The SPIKE-101 pair: breach 500 m and the ridged ×4.5 band, centred.**
-   - Scope: alpine and fluvial; in the queue already.
-   - It needs the combined run on 2/12/10. That run also tests P1b (below), so both share one slot.
-2. **P1b: route over the filled copy, carve the unfilled heights, store the fill depth.** Pit tolerance (F8) starts at 0 where no driver exists yet, so heights stay as today except where a pit is kept.
-   - This is the one format change that keeps lakes open without a later rebuild.
-   - The runtime adds the fill depth back, so the look stays today's until lake water exists.
-   - Risk: low. It reuses the flood.
-3. **F1 lithology (hardness and strata K(z)) into the carve (P1a).** Benefits badlands, mesas, cuestas, the coast choice and alpine contrast.
-   - Analytic, previewable and cheap.
-   - Risk: medium. It changes relief everywhere, so R7 re-tunes the class amplitudes.
-4. **F2 + F3 wind and orographic precipitation, plus F9's arid default rules.**
-   - This gives badlands and sand sea a rule, rain shadows, and aridity for I8b's materials.
-   - It is a GLOBAL_VERSION bump that the class store re-bake already takes.
-   - Risk: low to medium. It changes material colours globally (the owner's look).
-5. **Shelf profile (part of F7) in the field bake.** Benefits coastal, through the shallow water colour and the coast in distant views.
-   - Analytic and cheap.
-   - Risk: low.
+### 4.1 In M9: before I6's planet bake (owner D7, 2026-11-04: "Yes, delay the bake for this research")
 
-Cost: items 2-5 are about 4-6 PRs of generator code plus one preview round. At today's pace (0.5-3 h per code change; `docs/briefings/estimates.md`) that is about 1-2 lane-days. It moves I6 by about that much unless it runs beside I4b.
+**Items, in rank order**
+
+| Item | What | Archetypes | Risk |
+|---|---|---|---|
+| 1 | The SPIKE-101 pair: breach 500 m and the ridged ×4.5 band, centred on the mountain classes | alpine, fluvial | low; measured on 2/12/10 (section 6) |
+| 2 | P1b: route over the filled copy, carve the unfilled heights, store the fill depth. The runtime adds the fill depth back, so the look stays today's until lake water and F8 exist; neither then needs a rebuild. | tundra, glacial, karst, desert, volcanic (later); alpine relief now | low to medium: the fill depth of basins that cross a tile edge needs pass 1's face flood (section 6 gives the pit share) |
+| 3 | F1 lithology (hardness by province, strata K(z), soluble flag) and K(x, z) in both carves (P1a) | badlands, mesas, cuestas, coast choice, alpine contrast; karst later | medium: relief changes everywhere, so R7 re-tunes the class amplitudes |
+| 4 | F2 + F3 wind and orographic precipitation (aridity), runoff in K·t, and F9's arid default rules | badlands and sand sea get a rule; rain shadows; aridity for I8b's materials | low to medium: material colours change globally (the owner's look); GLOBAL_VERSION bump |
+| 5 | Shelf profile in the field bake | coastal (shallow water colour, distant coasts) | low |
+
+**Buildable plan: one row per PR**
+
+- Lanes: explorer for the bake kernels, crusader for the generator fields, either for the docs.
+- Effort follows `docs/briefings/estimates.md`: one code change is 0.5-3 h including CI; research-like items are ×2.
+- Requirement IDs come from the planner.
+- Each PR's preview follows ADR 0097 point 5; the owner approves before the next dependent bake.
+
+| PR | Scope | Requirement areas | Lane | Depends on | Effort (lane-h) | Preview must show |
+|---|---|---|---|---|---|---|
+| 0 | OpenSpec change `m9-archetype-drivers`: proposal, design (this section), tasks; deltas for GEN (fields, carve), STRM (fill-depth channel), TEST (class shares, pit share), VIEW (the driver maps) | GEN, STRM, TEST, VIEW | planner or spikes | — | 1 | — |
+| 1 | Band ridged ×4.5, centred, on the mountain classes; breach_max_m 500 | GEN-098, GEN-100 | explorer | section 6 | 1-2 | 2/12/10 stills at 2 km and 10 km, low sun; 3 km relief p50 against Everest and the Alps |
+| 2 | P1b in pass 1 and pass 2: route over the filled copy, keep pits, fill depth per pass-2 tile from pass 1's face flood plus the tile-plus-halo flood; a byte channel like GEN-111; the runtime adds it (filled look); the bounds pyramid includes it | GEN-100, GEN-101, GEN-111-like, STRM-066, GEN-102 | explorer | 1 (same kernels) | 3-6 (×2: new channel and format) | pit share and depth per class at the preview tiles; stills with the fill on (today's look) and off (pits visible), to show what lake water would show |
+| 3 | F1 lithology field: analytic H per plate province (SPIKE-81), strata K(z) with a caprock flag, soluble flag; CPU-canonical (`libm`, hash); whole-planet preview map | GEN (new), CON-14 tests | crusader | 0 | 2-4 | planet maps of H, strata and soluble at 16 km; the preview takes seconds |
+| 4 | K(x, z) in both carves (P1a): K from F1 per cell, sampled every 4 cells in pass 2 | GEN-100, GEN-101 | explorer | 2, 3 | 1-3 | stills at a mesa-prone (badlands) site and at 2/12/10; relief per class against the step 1 baseline |
+| 5 | F2 wind field + F3 orographic precipitation: an upwind sweep on 2048 per face, fixed order, f64; aridity AI; GLOBAL_VERSION bump; climate channel values | GEN-013, GEN-021 (climate), new GEN | crusader (or a third lane) | 0 | 4-8 (×2: a new process) | planet maps of P against today's, aridity, wind arrows; rain shadows behind the belts; material colours at the four preview regions |
+| 6 | Runoff in K·t: the carve's K·t scaled by P from 5 | GEN-100 | explorer | 4, 5 | 1-2 | relief per class, wet against dry flanks of a belt |
+| 7 | F9 arid default class rules: badlands from soft K × semi-arid × 250-2,200 m; sand sea from arid × low relief × supply; class shares against Earth (SPIKE-81: badlands 3.3 %, sand sea 7.9 % overshoot, to tune) | GEN-095, GEN-097 | crusader | 3, 5 | 2-3 | planet class map; shares against Earth; Badlands and Erg Chebbi sites "not worse" (TEST-081-084) |
+| 8 | Shelf profile: ocean floor to about −130 m over a shelf width set by the coast type (passive wide, active narrow; plate mask), then the slope to −4,500 m | GEN-096 (ocean), GEN-013 | crusader or spikes | 0 | 1-3 | coast region at 2 km and 10 km (shallow water colour); planet bathymetry map |
+| 9 | Integrated preview and scorecard: all of 1-8 on the three preview regions plus one coast region; TEST-081-084 and the new class shares; then the owner's approval of I6 | TEST, VIEW-062 | explorer | 1-8 | 3-5 | everything above, through the product path (capture-stills) |
+
+**Order and parallelism**
+
+- Explorer: 1 → 2 → 4 → 6 → 9.
+- Crusader: 3 → 5 → 7, with 8 anywhere.
+- 0 opens first.
+- The longest chain is 0 → 3 → 4 → 6 → 9, with 5 needed before 6 and 7.
+
+**Total**
+
+- 10 PRs, about 19-37 lane-h over two lanes.
+- That is about 1.5-2.5 lane-days at the calibrated pace, plus one owner preview round before I6.
+- These are estimates, not measured.
 
 ### 4.2 After M9 (M10 or a terrain round 2)
 
@@ -269,28 +293,28 @@ Cost: items 2-5 are about 4-6 PRs of generator code plus one preview round. At t
 
 | # | Decision | Kind | Recommendation | Cost to reverse |
 |---|---|---|---|---|
-| D1 | Store the fill depth and keep depressions under a pit-tolerance driver (P1b) | data format | yes, in M9 | a byte channel; a re-bake to drop it |
+| D1 | Keep every pit that survives the breach and store the fill depth (P1b); the runtime adds it back until lake water and F8 exist | data format | yes, in M9 | a byte channel; a re-bake to drop it |
 | D2 | Lithology K(x, z) in the carve (F1, P1a) | generator architecture | yes, in M9, with a preview | a re-bake (the version switches it off) |
 | D3 | Wind and orographic P, plus arid default rules (F2, F3, F9); option C stays | generator; owner's look | yes, in M9, with a preview | a GLOBAL_VERSION re-bake |
 | D4 | Glacial process: a stand-in spike now, the build after M9 | scope | yes | none until built |
 | D5 | Volcanic edifices as a post-erosion additive layer (a new layer kind) | architecture | yes, after M9 | none until built |
 | D6 | Coast type: the taper, fade and band act only on depositional coasts; cliffs wait for ADR 0091's technology | scope, look | yes; ADR when built | none until built |
-| D7 | Move I6 by about 1-2 lane-days for 4.1 items 2-5, or bake now and re-bake in M10 | schedule | move I6. A re-bake costs a night, but R7's tuning, I8b's materials and the goldens on the old bake also move. | — |
+| D7 | Move I6 for 4.1 items 1-5, or bake now and re-bake in M10 | schedule | **decided (owner, 2026-11-04): delay the bake** | — |
 
-## 5. GLO-30 reference tiles wanted (not downloaded)
+## 5. GLO-30 reference tiles (downloaded 2026-11-04 with the owner's go)
 
 The tiles are Copernicus GLO-30 DSM COG, `Copernicus_DSM_COG_10_<lat>_00_<lon>_00_DEM.tif`. Each covers 1° × 1°; above 50° latitude the longitude spacing widens, which makes the files smaller. Sizes are estimated from the nine tiles on disk (29-45 MB); coastal tiles with sea are smaller. The licence and notice are the same as for the existing samples.
 
-| Rank | Tile | Site | Archetype | Size (est.) |
+| Rank | Tile | Site | Archetype | Size |
 |---|---|---|---|---|
-| 1 | N61 E006 | Sognefjord, Norway (61.1 N, 6-7 E) | fjord, cliffed coast, glacial troughs, hanging valleys | 25-35 MB |
-| 2 | N70 W154 | Teshekpuk Lake, Alaska North Slope (70.5 N, 153.5 W) | tundra, thermokarst lakes | 10-20 MB |
-| 3 | N45 E014 | Kras and Postojna, Slovenia (45.7 N, 14.2 E) | karst, dolines, poljes | 35-45 MB |
-| 4 | N42 W123 | Crater Lake and the Cascades, Oregon (42.9 N, 122.1 W) | volcanic: caldera, stratovolcano, cinder cones | 35-45 MB |
-| 5 | N35 W076 | Outer Banks and Pamlico Sound, North Carolina (35.3 N, 75.5 W) | sandy barrier and marsh coast | 5-15 MB |
-| 6 | S25 E015 | Namib Sand Sea, Namibia (24.5 S, 15.3 E) | linear dunes (Erg Chebbi has star dunes) | 30-40 MB |
+| 1 | N61 E006 | Sognefjord, Norway (61.1 N, 6-7 E) | fjord, cliffed coast, glacial troughs, hanging valleys | 20.7 MB |
+| 2 | N70 W154 | Teshekpuk Lake, Alaska North Slope (70.5 N, 153.5 W) | tundra, thermokarst lakes | 15.6 MB |
+| 3 | N45 E014 | Kras and Postojna, Slovenia (45.7 N, 14.2 E) | karst, dolines, poljes | 39.6 MB |
+| 4 | N42 W123 | Crater Lake and the Cascades, Oregon (42.9 N, 122.1 W) | volcanic: caldera, stratovolcano, cinder cones | 41.2 MB |
+| 5 | N35 W076 | Outer Banks and Pamlico Sound, North Carolina (35.3 N, 75.5 W) | sandy barrier and marsh coast | 6.7 MB |
+| 6 | S25 E015 | Namib Sand Sea, Namibia (24.5 S, 15.3 E) | linear dunes (Erg Chebbi has star dunes) | 41.4 MB |
 
-- Total for 1-6: about 140-200 MB.
+- Total for 1-6: 165 MB, in `C:/DEV/SeriousPlanetData/dem/glo30-samples/`, one subfolder per tile; never committed. Derived figures carry the Copernicus notice.
 - Ranks 1-3 cover the three archetypes with no reference at all.
 - Two alternatives: N19 W156 (Mauna Loa, a shield with lava flows) for 4, and N52 W010 (Cliffs of Moher, a cliffed coast without glaciation) for 1.
 
