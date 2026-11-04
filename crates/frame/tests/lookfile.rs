@@ -15,6 +15,7 @@ const FIXTURE_V3: &str = include_str!("data/look_v3_atmosphere.toml");
 const FIXTURE_V4: &str = include_str!("data/look_v4_water.toml");
 const FIXTURE_V5: &str = include_str!("data/look_v5_ground.toml");
 const FIXTURE_V6: &str = include_str!("data/look_v6_patch.toml");
+const FIXTURE_V7: &str = include_str!("data/look_v7_coef.toml");
 
 fn err(text: &str) -> String {
     parse_look(text).unwrap_err().to_string()
@@ -30,7 +31,7 @@ fn custom() -> LookParams {
         sun: SunLook { direction: [0.0, 1.0, 0.0] },
         atmosphere: AtmosphereParams { mie_g: 0.55, top_height_m: 80_000.0, ..AtmosphereParams::EARTH },
         water: WaterLook { absorption_per_m: 0.35, foam_width_m: 0.6, wave_scale: 1.5, ..WaterLook::EARTH },
-        ground: GroundLook { detail: 0.8, materials: ground_curves(), patch: 0.0 },
+        ground: GroundLook { detail: 0.8, materials: ground_curves(), patch: 0.0, ..GroundLook::default() },
     }
 }
 
@@ -73,7 +74,7 @@ fn canonical_text_is_deterministic_and_round_trips_bit_for_bit() {
     let text = to_toml(&f);
     assert_eq!(parse_look(&text).unwrap(), f);
     assert_eq!(to_toml(&parse_look(&text).unwrap()), text, "writing what was read gives the same text");
-    assert!(text.starts_with("schema_version = 6\nkind = \"look\"\n"));
+    assert!(text.starts_with("schema_version = 7\nkind = \"look\"\n"));
     let order: Vec<usize> = ["[body.0.units]", "[body.7.units]", "[body.12.units]"].iter().map(|k| text.find(k).unwrap()).collect();
     assert!(order[0] < order[1] && order[1] < order[2], "bodies are written in id order");
     // The same content from a differently formatted file writes the same text.
@@ -252,11 +253,11 @@ fn migration_failures_name_the_step_and_the_gap() {
 #[test]
 fn the_production_chain_reads_the_version_1_fixture_and_writes_the_current_layout() {
     assert_eq!(
-        SCHEMA_VERSION, 6,
+        SCHEMA_VERSION, 7,
         "a new table or key needs a new version, an identity step in MIGRATIONS and a fixture of this version kept"
     );
     assert_eq!(MIGRATIONS.len() as u32, SCHEMA_VERSION - 1, "one step per older version");
-    assert_eq!(MIGRATIONS.iter().map(|m| m.from).collect::<Vec<_>>(), [1, 2, 3, 4, 5], "the steps run from version 1 up without a gap");
+    assert_eq!(MIGRATIONS.iter().map(|m| m.from).collect::<Vec<_>>(), [1, 2, 3, 4, 5, 6], "the steps run from version 1 up without a gap");
     // The version 1 fixture goes through the real chain (the identity step 1 to 2) and reads as written.
     let f = parse_look(FIXTURE_V1).unwrap();
     assert_eq!(f.body(BodyId(3)).units.solar_illuminance_lux, 25_000.0);
@@ -629,4 +630,49 @@ patch = {bad}
         &file_ground,
     );
     assert_eq!(by_default.ground_patch, 0.0);
+}
+
+// spec: LOOK-013, LOOK-002
+#[test]
+fn the_octave_coefficients_of_the_ground_look_are_read_written_and_checked_and_a_version_6_file_reads_with_the_earth_values() {
+    use planet_frame::look::materials::DetailCoefficients;
+    let f = parse_look(FIXTURE_V7).unwrap();
+    let g = f.body(BodyId(1)).ground;
+    assert_eq!(g.coef.crack, 0.7);
+    assert_eq!(g.coef.octaves[2].tilt, [0.3, 0.05, 0.1, 0.12]);
+    assert_eq!(g.coef.octaves[0], DetailCoefficients::EARTH.octaves[0], "an octave left out is the Earth default");
+    assert_eq!(parse_look(&to_toml(&f)).unwrap(), f);
+    assert_eq!(to_toml(&parse_look(&to_toml(&f)).unwrap()), to_toml(&f));
+    // A version 6 file reads equal with the Earth coefficients, and a build that knows only version 6 refuses the version 7 file as newer.
+    let v6 = parse_look(FIXTURE_V6).unwrap();
+    assert_eq!(v6.body(BodyId(1)).ground.coef, DetailCoefficients::EARTH);
+    let older = parse_with(FIXTURE_V7, 6, &MIGRATIONS[..5]).unwrap_err();
+    assert_eq!(older, LookError::NewerSchema { found: 7, known: 6 });
+    // Values outside their range and keys that do not exist are refused naming the key.
+    let head = "schema_version = 7\nkind = \"look\"\n[body.0.ground]\n";
+    for (text, key) in [
+        (format!("{head}crack = 5.0\n"), "ground.crack"),
+        (format!("{head}[body.0.ground.octave.m2]\ntilt = [0.1, 0.1, 0.1, -0.2]\n"), "ground.octave.m2.tilt"),
+        (format!("{head}[body.0.ground.octave.m2]\nalbedo = [0.1, 0.1]\n"), "ground.octave.m2.albedo"),
+        (format!("{head}[body.0.ground.octave.m3]\ntilt = [0.1, 0.1, 0.1, 0.2]\n"), "ground.octave.m3"),
+    ] {
+        let e = parse_look(&text).unwrap_err().to_string();
+        assert!(e.contains(key), "{key}: {e}");
+    }
+    // The plan: the file's table is taken with the file look, the Earth values keep the plan's text and key, and the text with them round-trips and refuses a bad value.
+    let plain = LitPlan::fixed(15.0);
+    assert_eq!(plain.coef, DetailCoefficients::EARTH);
+    assert!(!plain.to_text().contains(" coef "), "{}", plain.to_text());
+    let plan = plain.with_ground_look(look::materials::LookChoice::File, look::materials::GroundDetailMode::Natural, &g);
+    assert_eq!(plan.coef, g.coef);
+    assert_ne!(plan.hash(), plain.hash(), "the coefficients are part of the plan's key");
+    let text = plan.to_text();
+    assert!(text.contains(" coef "), "{text}");
+    let tokens: Vec<&str> = text.split_whitespace().collect();
+    assert_eq!(LitPlan::from_tokens(&tokens[1..]).unwrap(), plan);
+    let mut wrong = plan;
+    wrong.coef.crack = 9.0;
+    assert!(plan.validate().is_ok() && wrong.validate().unwrap_err().contains("ground.crack"));
+    let by_default = plain.with_ground_look(look::materials::LookChoice::Default, look::materials::GroundDetailMode::Natural, &g);
+    assert_eq!(by_default.coef, DetailCoefficients::EARTH);
 }
