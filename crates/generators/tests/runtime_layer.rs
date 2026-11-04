@@ -367,6 +367,25 @@ fn the_layer_is_added_after_the_relief_base_faded_at_the_coast_and_not_scaled_by
         }
     }
     assert!(high > 100 && sea > 100, "the sample covers land and sea ({high} high, {coast} coast, {sea} sea)");
+    // The first 3 m above the sea: directions whose bake elevation lies strictly inside the fade, read through the field.
+    let mut coast = Vec::new();
+    for _ in 0..400_000 {
+        let d = random_dir(&mut rng);
+        let e = on.base_elevation(d);
+        if e > 0.1 && e < 2.9 {
+            coast.push((d, e));
+            if coast.len() == 5 {
+                break;
+            }
+        }
+    }
+    assert!(coast.len() >= 3, "directions on the first 3 m above the sea ({})", coast.len());
+    for (d, e) in coast {
+        let fade = coast_fade(e, 0.0);
+        let change = l.change_at(d).unwrap();
+        assert!(fade > 0.0 && fade < 1.0 && change.abs() > 1e-3, "a coast point with a share of a change (fade {fade}, change {change})");
+        assert_eq!(on.height(d).to_bits(), (band.height(d) + fade * change).to_bits(), "the coast adds the fade's share of the change");
+    }
 }
 
 // spec: GEN-112
