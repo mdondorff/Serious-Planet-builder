@@ -750,7 +750,7 @@ impl GlobalWorld {
             None => Ok(false),
             Some(_) if keys.contains(&key) => Ok(true),
             Some(other) => Err(format!(
-                "the store holds its first block of the {res}-cell bake under key {other}, this world expects {key} ({}): the store was baked from another field source, seed or version",
+                "the store holds its first block of the {res}-cell bake under key {other}, this world expects {key} ({}): the store was baked from another field source, seed, version or resolution",
                 match &self.class_source {
                     Some(_) => format!("the class source, id {:016x}", BakeInputs::id()),
                     None => "the legacy generator".to_string(),
@@ -935,7 +935,11 @@ impl GlobalWorld {
 
     /// The bake samples the class source `inputs` (GEN-115) instead of the legacy generator: the elevation is `BakeInputs::base`, the climate follows it, the shore is the legacy one. Its
     /// identity ([`BakeInputs::id`], the seed) joins the bake's read set, so every key of the store (the stage key and all it sources) is another bake's than the legacy world's (STRM-073).
+    ///
+    /// # Panics
+    /// When the class source is of another seed than the world's: it would bake its elevation over this world's coasts and store that under this world's key.
     pub fn with_class_source(mut self, inputs: Arc<BakeInputs>) -> GlobalWorld {
+        assert_eq!(inputs.seed(), self.seed, "the class source is of seed {} but the world's seed is {}", inputs.seed(), self.seed);
         let mut params = BakeInputs::id().to_le_bytes().to_vec();
         params.extend(self.seed.to_le_bytes());
         self.reads.retain(|r| !matches!(r, ReadEntry::Query { kind: QUERY_FIELD_SOURCE, .. }));

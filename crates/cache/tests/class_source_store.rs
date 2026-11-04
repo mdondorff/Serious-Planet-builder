@@ -101,6 +101,13 @@ fn a_class_store_holds_the_class_fields_blocks_on_any_thread_count() {
 
 // spec: STRM-073
 #[test]
+#[should_panic(expected = "the class source is of seed 4")]
+fn a_class_source_of_another_seed_than_the_worlds_is_refused() {
+    let _ = legacy(3).with_class_source(Arc::new(BakeInputs::new(4, 2)));
+}
+
+// spec: STRM-073
+#[test]
 fn a_reader_of_another_field_source_is_refused_naming_both_keys() {
     let (l, c) = (legacy(3), class(3));
     let (class_store, legacy_store, empty) = (Dir::new("class"), Dir::new("legacy"), Dir::new("empty"));

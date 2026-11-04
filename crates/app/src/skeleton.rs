@@ -427,6 +427,14 @@ fn generate_global(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     } else {
         writeln!(out, "global water summary: already stored under its current key, nothing recomputed").map_err(err)?;
     }
+    if o.class_source {
+        // The pre-fill reads the store through the legacy world (`WorldTerrain::open_store`): a class store gets no coarse tiles until the viewer reads class stores.
+        return writeln!(
+            out,
+            "pre-fill skipped: the class-source store is read by the viewer's class-source path, not by the legacy pre-fill"
+        )
+        .map_err(err);
+    }
     // The coarse tiles go into the same pack (STRM-021, ADR 0045 point 3): levels 0..=4 unless `--prefill-levels` says otherwise.
     crate::prefill::prefill_store(o, dir, out)
 }

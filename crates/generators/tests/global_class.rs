@@ -36,10 +36,10 @@ fn the_class_sample_keeps_the_continent_and_the_shore_and_takes_the_class_elevat
         );
         let expected = inputs.base(d);
         assert_eq!(class.elevation_m, expected as f32, "the elevation is the class source's");
-        // The climate follows the elevation it colours: the temperature is the formula's at the class elevation, the rain the same within rounding of the interior.
-        let (t, p) = climate_from_elevation(SEED, d, expected, interior_of(d));
+        // The climate follows the elevation it colours: the temperature is the formula's at the class elevation; the rain does not depend on the elevation, so it is the legacy rain to the bit.
+        let (t, _) = climate_from_elevation(SEED, d, expected, 0.0);
         assert_eq!(class.temperature_c.to_bits(), t.to_bits(), "temperature at {d:?}");
-        assert!((class.precipitation_mm - p).abs() < 1.0, "rain at {d:?}: {} against {p}", class.precipitation_mm);
+        assert_eq!(class.precipitation_mm.to_bits(), legacy.precipitation_mm.to_bits(), "rain at {d:?}");
         if class.elevation_m > 0.0 {
             land += 1;
             differ += usize::from((class.elevation_m - legacy.elevation_m).abs() > 1.0);
@@ -47,19 +47,6 @@ fn the_class_sample_keeps_the_continent_and_the_shore_and_takes_the_class_elevat
     }
     assert!(land > 200, "land points sampled: {land}");
     assert!(differ * 2 > land, "the class elevation differs from the legacy one over land (the point of the change): {differ} of {land}");
-}
-
-/// The inland measure the climate used for `d`: read back from the legacy sample's own climate (the legacy field uses the same interior), so the test needs no private terrain.
-fn interior_of(d: Vec3) -> f64 {
-    // The legacy sample's climate is climate_from_elevation(seed, d, legacy elevation, interior): solve for the interior that reproduces the legacy precipitation.
-    let s = sample(SEED, d);
-    let e = f64::from(s.elevation_m);
-    let (_, p0) = climate_from_elevation(SEED, d, e, 0.0);
-    let (_, p1) = climate_from_elevation(SEED, d, e, 1.0);
-    if (p1 - p0).abs() < 1e-3 {
-        return 0.0;
-    }
-    f64::from((s.precipitation_mm - p0) / (p1 - p0)).clamp(0.0, 1.0)
 }
 
 // spec: GEN-115
@@ -90,3 +77,39 @@ fn class_blocks_are_the_same_bytes_on_1_and_4_threads_and_the_legacy_sample_is_u
         planet_generators::global::bake_block_sampled(&|d| sample(SEED, d), &TangentWarp, tile, 4)
     );
 }
+
+// spec: GEN-115
+#[test]
+fn the_shore_is_the_legacy_one_down_to_the_first_land_value_and_the_seed_of_the_source_must_be_the_worlds() {
+    let inputs = BakeInputs::new(SEED, 2);
+    // Bisect between a land and a sea point to the first f32 continent value that is land: both fields agree on each side of that step.
+    let dirs = directions();
+    let land = dirs.iter().copied().find(|d| sample(SEED, *d).elevation_m > 100.0).expect("a land point");
+    let sea = dirs.iter().copied().find(|d| sample(SEED, *d).elevation_m < -100.0).expect("a sea point");
+    let (mut a, mut b) = (land, sea);
+    for _ in 0..60 {
+        let m = Vec3::new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0, (a.z + b.z) / 2.0).normalized();
+        if sample(SEED, m).elevation_m > 0.0 {
+            a = m;
+        } else {
+            b = m;
+        }
+    }
+    let (la, lb) = ((sample(SEED, a), class_sample(SEED, a, &inputs)), (sample(SEED, b), class_sample(SEED, b, &inputs)));
+    assert!(la.0.elevation_m > 0.0 && la.1.elevation_m > 0.0, "the land side of the shore: {} and {}", la.0.elevation_m, la.1.elevation_m);
+    assert!(lb.0.elevation_m <= 0.0 && lb.1.elevation_m <= 0.0, "the sea side of the shore: {} and {}", lb.0.elevation_m, lb.1.elevation_m);
+}
+
+// spec: GEN-115
+#[test]
+fn the_class_field_is_pinned_so_that_a_change_of_the_class_source_must_bump_its_version() {
+    // Elevations (f32 bits) of the class field at six directions: a change in anything the class source reads that its identity does not hash (the continent smoothing, the band's
+    // constants) moves one of them and has to come with a bump of the class source's version, which re-keys the stores.
+    let inputs = BakeInputs::new(SEED, 2);
+    let probes = [(0.3, -0.5, 0.8), (-0.7, 0.1, 0.4), (0.1, 0.9, -0.2), (0.6, 0.6, 0.5), (-0.2, -0.8, -0.5), (0.9, -0.1, 0.1)];
+    let bits: Vec<u32> =
+        probes.iter().map(|&(x, y, z)| class_sample(SEED, Vec3::new(x, y, z).normalized(), &inputs).elevation_m.to_bits()).collect();
+    assert_eq!(bits, PINNED_BITS, "the class field changed: bump CLASS_SOURCE_VERSION and re-pin");
+}
+
+const PINNED_BITS: [u32; 6] = [1116318747, 3248088590, 1159266484, 3225611300, 3303498003, 3286086460];

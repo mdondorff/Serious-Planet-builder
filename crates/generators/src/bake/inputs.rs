@@ -21,6 +21,11 @@ impl BakeInputs {
         BakeInputs { source, lattice }
     }
 
+    /// The seed of the class source (a bake that samples it must be the world of this seed).
+    pub fn seed(&self) -> u64 {
+        self.source.seed()
+    }
+
     /// The base elevation at a direction: the class source's, with the class-blended relief driver.
     pub fn base(&self, d: Vec3) -> f64 {
         let p = self.source.eval(d);
