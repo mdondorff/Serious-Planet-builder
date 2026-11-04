@@ -297,6 +297,116 @@ impl DecodedTileCache {
     }
 }
 
+/// The tiles of a [`StoreLayer`] whose pyramid is built, and the order they were last used (oldest first).
+type BuiltTiles = (HashMap<PassTile, Arc<planet_generators::erosion_layer::LayerTile>>, VecDeque<PassTile>);
+
+/// The pass-2 layer of a store as a [`planet_generators::erosion_layer::LayerSource`] (GEN-112): tiles decoded once while they stay in a bounded least-recently-used cache (SPIKE-97: one
+/// decode serves every render tile of its 312.7 km square), each held with its min/max pyramid, built when the tile is decoded (STRM-066: built at decode, not stored). A tile the store
+/// does not hold is a tile with no land: `None`. A record made under another key, or a damaged one, is an error naming the tile (never mixed, STRM-065); so is a tile whose change lies
+/// outside the global range the layer was opened with (a range from a manifest that is too narrow would make the bounds unsound).
+///
+/// `capacity` should be at least [`planet_generators::erosion_layer::MAX_CAP_TILES`] + 4 tiles (a cap's bounds read that many, and a read a stencil's four): a decoded core is `tile x tile` f32
+/// (37.7 MB at 3,072 cells). The cache holds the decoded core once, in the tile's own `Arc`.
+pub struct StoreLayer {
+    store: Arc<TileStore>,
+    world: Arc<GlobalWorld>,
+    res: u32,
+    spec: TileLayerSpec,
+    built: Mutex<BuiltTiles>,
+    decodes: std::sync::atomic::AtomicU64,
+    capacity: usize,
+    range: (f64, f64),
+    id: u64,
+}
+
+/// The range of the change when the layer's manifest gives none: the representable range of the stored counts (`i16` of [`planet_generators::bake::tile::QUANT_STEP_M`]).
+pub fn default_change_range() -> (f64, f64) {
+    let limit = f64::from(i16::MAX) * f64::from(planet_generators::bake::tile::QUANT_STEP_M);
+    (-limit, limit)
+}
+
+impl StoreLayer {
+    /// The layer of `spec` in `store` beside the bake `world` at `res`, with `capacity` decoded tiles cached and `range` the change's range over the planet (the layer's manifest, else
+    /// [`default_change_range`]). An error when the key of the layer cannot be formed (the tile grid does not fit the store's levels).
+    pub fn new(
+        store: Arc<TileStore>,
+        world: Arc<GlobalWorld>,
+        res: u32,
+        spec: TileLayerSpec,
+        capacity: usize,
+        range: (f64, f64),
+    ) -> Result<StoreLayer, String> {
+        // The layer's identity is the key of its first tile: the bake, its resolution, and every parameter of the layer and of the pass 1 it was made from.
+        let k = tile_key(&world, res, &spec, PassTile { face: Face(0), ti: 0, tj: 0 }).map_err(|e| e.to_string())?;
+        let word = |a: usize| u64::from_le_bytes(k.0[a..a + 8].try_into().expect("eight bytes"));
+        let id = planet_core::hash::hash_u64s(0x7374_6c79, &[word(0), word(8)]);
+        Ok(StoreLayer {
+            store,
+            world,
+            res,
+            spec,
+            built: Mutex::new((HashMap::new(), VecDeque::new())),
+            decodes: 0.into(),
+            capacity: capacity.max(1),
+            range,
+            id,
+        })
+    }
+
+    /// Tiles decoded so far (a hit is not a decode; a tile that left the cache and comes back is).
+    pub fn decodes(&self) -> u64 {
+        self.decodes.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+impl planet_generators::erosion_layer::LayerSource for StoreLayer {
+    fn grid(&self) -> &TileGrid {
+        &self.spec.grid
+    }
+
+    fn tile(&self, face: Face, ti: u32, tj: u32) -> Result<Option<Arc<planet_generators::erosion_layer::LayerTile>>, String> {
+        let id = PassTile { face, ti, tj };
+        {
+            let mut g = self.built.lock().expect("built lock");
+            if let Some(t) = g.0.get(&id).cloned() {
+                g.1.retain(|x| *x != id);
+                g.1.push_back(id);
+                return Ok(Some(t));
+            }
+        }
+        let Some(result) = load_tile(&self.store, &self.world, self.res, &self.spec, id).map_err(|e| e.to_string())? else {
+            return Ok(None);
+        };
+        let tile = Arc::new(planet_generators::erosion_layer::LayerTile::new(Arc::new(result), self.spec.grid.tile)?);
+        let [lo, hi] = tile.range();
+        if f64::from(lo) < self.range.0 || f64::from(hi) > self.range.1 {
+            return Err(format!(
+                "layer tile {}/{ti}/{tj}: its change [{lo}, {hi}] m lies outside the layer's global range [{}, {}] m (a manifest range that is too narrow)",
+                face.0, self.range.0, self.range.1
+            ));
+        }
+        self.decodes.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut g = self.built.lock().expect("built lock");
+        if g.0.insert(id, tile.clone()).is_none() {
+            g.1.push_back(id);
+        }
+        while g.0.len() > self.capacity {
+            if let Some(old) = g.1.pop_front() {
+                g.0.remove(&old);
+            }
+        }
+        Ok(Some(tile))
+    }
+
+    fn global_range(&self) -> (f64, f64) {
+        self.range
+    }
+
+    fn id(&self) -> u64 {
+        self.id
+    }
+}
+
 /// What a run did.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Pass2Report {
