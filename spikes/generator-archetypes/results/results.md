@@ -393,6 +393,38 @@ The filled surface is what the runtime shows with the stored fill depth added (n
 
 Karst and dune fields are the archetypes where open pits are the real signal, at depths the bake reaches. That confirms F8 as a per-archetype choice rather than a global one.
 
+## 7. Integrated preview (I4b): the pose list (inbox #87)
+
+The preview runs through the product path, `test-render --scene capture-stills --poses FILE --erosion on`. It uses the m9c14 store re-baked with PRs 1-8 of 4.1, so it is PR 9.
+- One poses file per site in the format of `crates/app/src/stills.rs`. The `[look]` sets `ground_detail = 0.6` and `ground_patch = 0.12`, as on main.
+- Low sun means `sun_local_hours = 17.5`, as in the m9c14 sheets.
+- Every set ends with a low-sun oblique.
+- Any omission is written on the sheet: water (sea shaded as seabed, no lakes), instancing, and cliff faces over 45° (ADR 0091).
+
+### Sites
+| Site | Tile (face, ti, tj) | Anchor (lat, lon) | Where the poses look |
+|---|---|---|---|
+| Mountains: the owner's circled wall | 2, 12, 10 | from explorer's `--look-at I,J` of `target/review/erosion-stages/oblique/mountains_oblique_h90_*.png` (start-879e4b), converted with `examples/tile_latlon.rs` | the wall: the oblique h90 pose (back 8 km, heading 90, sun 10°). **Explorer supplies the cell; it is in no log.** |
+| Mountains: where the change acts | 2, 12, 10 | the cell at the change's p5 (the deepest carve) in the tile core | heading along the valley, downstream |
+| Hills | 0, 8, 24 | 22.4689, −21.0933 (tile centre), moved to the change's p5 cell | heading 90 |
+| Plains | to be chosen | a land tile at least 80 % plain or rolling-plain weight, 100 % land, with the largest fine-crease relief (SPIKE-73's plains gap) | heading 90 |
+| Coast | 0, 14, 3 | −35.0827, −4.2183, moved 800 m inland of the coastline | heading to the sea; the shelf (PR 8) in view |
+
+### Poses per site (eye `back_m` behind the anchor, `altitude_m` above the ground there)
+| Name | altitude_m | back_m | pitch_deg | sun_local_hours | Shows |
+|---|---|---|---|---|---|
+| 2km | 2,000 | 4,000 | 8 | 17.5 | the erosion layer's valleys and the class band |
+| 300m | 300 | 600 | 10 | 17.5 | layer and creases below 200 m |
+| 50m | 50 | 120 | 12 | 17.5 | ground detail (I8a) and the material patches |
+| 10m | 10 | 30 | 12 | 17.5 | detail octaves at 6 m and 3 m; the material mix |
+| 1.8m | 1.8 | 4 | 4 | 17.5 | eye height: the 1.8 m end of the detail stack |
+| oblique | 3,000 | 8,000 | from the ground at the anchor (as `erosion_stills`) | 17.5 (sun about 10°) | the whole landform, low raking light |
+
+### Archetype checks inside the same run (PRs 2-8)
+- Mountains change pose, run twice: fill depth added (the product look) and fill depth off (pits open). This shows what lake ground would add (PR 2).
+- Plains and hills at 2 km: material colour with orographic P (PR 5) against main's sheet, at the same pose and sun.
+- A badlands-weighted tile and a sand-sea tile, if PR 7 gives them weight: 2 km and 300 m, in their own sets.
+
 ## Visuals
 
 ![keep-pits](images/sheet-keep-pits.jpg)
