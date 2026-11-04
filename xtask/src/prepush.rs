@@ -22,17 +22,30 @@ pub fn touches_goldens(path: &str) -> bool {
     if p.ends_with(".wgsl") || p.starts_with("tests/goldens/") || p == "Cargo.toml" || p == "Cargo.lock" || p.starts_with(".cargo/") {
         return true;
     }
-    p.strip_prefix("crates/").and_then(|rest| rest.split('/').next()).is_some_and(|dir| GOLDEN_CRATES.contains(&dir))
+    // Not the files that no golden test runs (BUILD-016): an example or a bench of a crate, and a test file other than the GPU tier's (`tests/gpu_*.rs`, the tier-C binaries).
+    let Some(rest) = p.strip_prefix("crates/") else { return false };
+    let mut parts = rest.split('/');
+    if !parts.next().is_some_and(|dir| GOLDEN_CRATES.contains(&dir)) {
+        return false;
+    }
+    match parts.next() {
+        Some("examples" | "benches") => false,
+        Some("tests") => parts.next().is_some_and(|f| parts.next().is_none() && f.starts_with("gpu_") && f.ends_with(".rs")),
+        _ => true,
+    }
 }
 
 /// Directories under `crates/` whose changes can degrade what the owner saw on 2026-10-27 (TEST-063): generation, streaming, rendering, the editor
 /// and the window that joins them (the shaders live under `render`).
 const GATE_CRATES: [&str; 7] = ["generators", "streaming", "render", "editor", "frame", "app", "cache"];
 
-/// True when a changed path makes `gate --small` part of the pre-push run.
+/// True when a changed path makes `gate --small` part of the pre-push run: a file of one of those crates that the running program is made of (not an example, a bench or a test file:
+/// no run of the gate reaches them, BUILD-016).
 pub fn touches_gate(path: &str) -> bool {
     let p = path.replace('\\', "/");
-    p.strip_prefix("crates/").and_then(|rest| rest.split('/').next()).is_some_and(|dir| GATE_CRATES.contains(&dir))
+    let Some(rest) = p.strip_prefix("crates/") else { return false };
+    let mut parts = rest.split('/');
+    parts.next().is_some_and(|dir| GATE_CRATES.contains(&dir)) && !matches!(parts.next(), Some("examples" | "benches" | "tests"))
 }
 
 /// The paths among `changed` that make `test gpu` part of the run, in the order given.
@@ -330,6 +343,34 @@ R  a.md -> docs/b.md
         ] {
             assert!(touches_goldens(p), "{p}");
         }
+    }
+
+    // spec: BUILD-016
+    #[test]
+    fn an_example_a_bench_and_a_test_other_than_the_gpu_tiers_do_not_need_the_gpu_tier() {
+        for p in [
+            "crates/app/examples/field_probe.rs",
+            "crates/cache/examples/bake_layer.rs",
+            "crates/render/benches/draw.rs",
+            "crates/generators/tests/runtime_layer.rs",
+            "crates/frame/tests/lookfile.rs",
+            "crates/frame/tests/data/look_v6_patch.toml",
+            r"crates\app\examples\base_gap.rs",
+        ] {
+            assert!(!touches_goldens(p), "{p}");
+        }
+        // The GPU tier's own test files, the library code beside the examples, and a file named like a directory still count.
+        for p in [
+            "crates/render/tests/gpu_shading.rs",
+            "crates/app/tests/gpu_stills.rs",
+            "crates/app/src/window.rs",
+            "crates/app/src/examples.rs",
+            "crates/frame/src/look.rs",
+        ] {
+            assert!(touches_goldens(p), "{p}");
+        }
+        // The one-option change of an app example (explorer's #1165) selects no GPU step.
+        assert_eq!(plan_steps(&paths(&["crates/cache/examples/bake_layer.rs"])), ["merged spec-lint", "check", "test fast"]);
     }
 
     // spec: BUILD-016
