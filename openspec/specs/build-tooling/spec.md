@@ -133,7 +133,7 @@ Source: CON-01, ADR 0008, ADR 0042
 - **THEN** the program exits non-zero and prints the usage text
 
 ### Requirement: BUILD-005 CI on both operating systems
-Continuous integration SHALL run check, spec-lint, licence check, tiers A to C and the run-mode smoke starts on Windows (software adapter WARP) and on Linux (software Vulkan lavapipe) for every pull request and every push to `main`. A change that touches only `docs/`, `openspec/`, `.claude/`, root `*.md` files or `spikes/**/results/**` (owner, 2026-10-16) SHALL run the light `docs` workflow (spec-lint on Linux) instead; both workflows SHALL name the same list of those paths, and any other file in a change runs the full workflow.
+Continuous integration SHALL run check, spec-lint, licence check, tiers A to C and the run-mode smoke starts on Windows (software adapter WARP) and on Linux (software Vulkan lavapipe) for every pull request and every push to `main`. A change that touches only `docs/`, `openspec/`, `.claude/`, root `*.md` files, `spikes/**/results/**` or `spikes/README.md` (owner, 2026-10-16; the spike catalogue, 2026-11-04) SHALL run the light `docs` workflow (spec-lint on Linux) instead; both workflows SHALL name the same list of those paths, and any other file in a change runs the full workflow.
 
 Verify: A
 Status: active
@@ -145,7 +145,7 @@ Source: CON-26, report §9
 
 #### Scenario: Docs-only paths agree
 - **WHEN** the repository check test reads both workflows
-- **THEN** the paths the full workflow ignores equal the paths the docs workflow runs on, and include `spikes/**/results/**`
+- **THEN** the paths the full workflow ignores equal the paths the docs workflow runs on, and include `spikes/**/results/**` and `spikes/README.md`
 
 ### Requirement: BUILD-006 Licence policy
 Dependency licences SHALL be checked by `cargo deny` against an explicit allow-list in `deny.toml`, and CI SHALL run that check.
