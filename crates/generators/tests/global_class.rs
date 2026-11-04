@@ -83,7 +83,10 @@ fn class_blocks_are_the_same_bytes_on_1_and_4_threads_and_the_legacy_sample_is_u
     let (a, b) = (run(1), run(4));
     assert_eq!(a.len(), 6 * 4);
     assert_eq!(a, b);
-    // The legacy sample at a known direction is what it was: the field of the legacy stores (a pinned bit pattern of one point).
-    let d = Vec3::new(0.3, -0.5, 0.8).normalized();
-    assert_eq!(sample(SEED, d), sample(SEED, d));
+    // The legacy entry point is the sampled one over the legacy field: the same blocks.
+    let tile = TileId::new(planet_core::Face(1), 1, 1, 0).unwrap();
+    assert_eq!(
+        planet_generators::global::bake_block(SEED, &TangentWarp, tile, 4),
+        planet_generators::global::bake_block_sampled(&|d| sample(SEED, d), &TangentWarp, tile, 4)
+    );
 }

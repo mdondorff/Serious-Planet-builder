@@ -68,6 +68,11 @@ fn the_class_source_is_part_of_every_key_and_the_legacy_keys_are_untouched() {
     // Asking twice gives the same key, and a world that never asks keeps the key it had.
     assert_eq!(c.stage_key(RES), class(3).stage_key(RES));
     assert_eq!(l.stage_key(RES), legacy(3).stage_key(RES));
+    assert_eq!(
+        l.stage_key(RES).to_string(),
+        "62c78c8b3d81fc13b27d66fe0b4d18a1",
+        "the legacy world's stage key (seed 3, 8 cells) is a pinned value"
+    );
     assert!(l.class_source().is_none() && c.class_source().is_some());
 }
 
@@ -88,7 +93,9 @@ fn a_class_store_holds_the_class_fields_blocks_on_any_thread_count() {
     assert_ne!(expected, legacy_block);
     let store = TileStore::open(one.path(), c.params()).unwrap();
     let record = store.get(KIND_GLOBAL_BLOCK, tile, c.block_key(tile, cells)).unwrap().expect("the block under the class world's key");
-    assert!(!record.payload.is_empty());
+    // The stored record is the class block's record: the same payload as the freshly baked class block under the same key.
+    let fresh = c.block_record(tile, cells, &expected).unwrap();
+    assert_eq!((record.key, &record.payload), (fresh.key, &fresh.payload));
     assert_eq!(c.field(tile.sample_direction(&TangentWarp, cells, 1, 1)), expected[(cells as usize + 1) + 1]);
 }
 

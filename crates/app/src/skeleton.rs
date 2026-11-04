@@ -186,6 +186,9 @@ pub fn generate(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         std::fs::write(path, &text).map_err(|e| format!("writing {}: {e}", path.display()))?;
         return writeln!(out, "wrote {} ({} lines)", path.display(), text.lines().count()).map_err(err);
     }
+    if o.class_source && o.global_dir.is_none() && o.verify_global.is_none() {
+        return Err("--class-source applies to --global-dir and --verify-global only".into());
+    }
     if o.compact_cache.is_some() {
         return compact_cache(o, out);
     }

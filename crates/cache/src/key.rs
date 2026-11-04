@@ -112,10 +112,10 @@ pub const QUERY_FOOTPRINT: u8 = 3;
 /// One node of the region summary tree a coarse tile reads (WDEF-008, ADR 0066 point 3): a key carrying one has
 /// [`KEY_FORMAT_TAG_FOOTPRINT`] too.
 pub const QUERY_SUMMARY: u8 = 4;
-/// The field source of a bake that is not the legacy generator (GEN-115, STRM-073): the class source's identity (its versions, class tables and lattice size) is the parameter, the seed the
-/// result. A key that carries one is another bake's, so every channel derived from it is too.
-pub const QUERY_FIELD_SOURCE: u8 = 5;
 // Query kind 5 was the state of one chunk of a chunk field (removed with the chunk stage, ADR 0086); the number is not reused.
+/// The field source of a bake that is not the legacy generator (GEN-115, STRM-073). The parameters are the class source's identity (its versions, class tables and lattice size) then the seed,
+/// both little-endian; the result is zero. A key that carries one is another bake's, and so is every key sourced from it.
+pub const QUERY_FIELD_SOURCE: u8 = 6;
 
 /// Everything a key covers (ADR 0018).
 #[derive(Clone, Debug, PartialEq, Eq)]

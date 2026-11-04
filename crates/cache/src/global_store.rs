@@ -740,7 +740,7 @@ impl GlobalWorld {
 
     /// Whether the store holds the first block of a bake of `res` cells under this world's keys (STRM-073): `Ok(true)` when it does, `Ok(false)` when it holds no block of that tile, and an
     /// error naming the expected key, the key found and the field source this world samples when it holds the tile under another key, which is a bake of another field source (the legacy
-    /// generator or another class source), another seed or other versions: refused, never mixed (ADR 0006). The viewer's `--erosion on` asks this before it reads a store.
+    /// generator or another class source), another seed or other versions: refused, never mixed (ADR 0006). The viewer's `--erosion on` asks it once the layer manifest records the source (change `layer-manifest`).
     pub fn check_source(&self, store: &TileStore, res: u32) -> Result<bool, String> {
         let (level, cells) = self.layout(res).map_err(|e| e.to_string())?;
         let tile = tile_at(level, 0);
