@@ -46,7 +46,7 @@ use planet_render::{AdapterPolicy, GpuContext};
 pub const USAGE: &str = "usage: planet <mode> [options]
 modes:
   editor        the viewer window (VIEW-001..VIEW-007): the scripted orbit-to-1 m flight on the pipelined loop; keys P/Space pause, R restart, L lit (with the atmosphere) or debug path, V debug view, T vsync, C flight or free camera (WASD move, Q/E down/up, arrows look, Shift boost), Esc quit; the window opens on the lit path with the atmosphere, the look file drawn (sun, adaptive exposure); the title shows frame rate, CPU and GPU time, the path (or the debug view), on the lit path the exposure, and the readiness report; runs on a discrete GPU only (an integrated GPU, a software adapter or an adapter missing a feature or limit is refused with the reason); [--world F --global-res N | --store DIR] [--look F] [--size WxH] [--view NAME] [--cells N --tau PX --finest-level N] [--no-vsync] [--erosion on|off] (draw the erosion layer of a bake over the stored world, off by default, VIEW-062: --store holds the world, the layer is read from --erosion-store DIR, the bake's output folder, or the same store; --erosion-face-res N and --erosion-res N name the bake's --face-res and --planet-res, 12288 and 98304 by default; the run refuses a store that does not say it was baked from the class source unless --erosion-unchecked; the title and the log say what is on) [--no-shadow-march] (turn the clipmap shadow off: the march shades the terrain and the water by default, REND-051; J shows its visibility; --shadow-march is accepted and does nothing) [--no-ui] (the editor UI, an egui layer drawn after the tone map, VIEW-011) [--edit] (start in the editor mode, VIEW-022; with --site it turns on where the scripted descent over the site ends: Tab toggles it; the panels, stamps by 2-4 and a click, handles on the planet, Ctrl+Z / Ctrl+Y) [--items DIR] (the edits as one TOML file each in DIR, loaded at the start) [--editor-layout F] (the panel layout, VIEW-018) [--marker LAT,LON[,RADIUS_M]]... (item markers of the globe overview, G, VIEW-013) [--site LAT,LON] (the scripted flight descends over this point; without it the world definition's `[world] site = [lat, lon]`, else 20,30 where that is land, else the first shore of the walk from there, GEN-108); --smoke opens the window, drives the keys for a few dozen frames and closes it (test mode: PLANET_ADAPTER or --adapter, software by default; exits with `no display` where there is none); --no-window starts and exits without a window; --offscreen runs the skeleton without a window
-  generate      headless generator CLI: --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --manifest <file> writes the determinism manifest (GEN-003); --cache-dir <dir> --region F,L [--res N] writes a tile face region into a tile store; --verify-cache <dir> [--sample N] regenerates stored tiles and compares (both take --world <definition.toml> or --seed N; --verify-cache fails when nothing could be compared, --allow-stale accepts that); --global-dir <dir> [--global-res N, default 256] bakes the global-coarse field (continents, elevation, climate) of N cells per face edge into a tile store as blocks in the canonical layout (blocks of min(N, 1024) cells) together with its ocean-connectivity channel (one bit per vertex; the area threshold is the definition's `body.0.sea.min_area_fraction`) and prints the time per sample and the channel's cost; --verify-global <dir> [--sample N] regenerates stored blocks and compares; --global-products <dir> [--global-res N] writes cube nets and maps of an in-memory bake (these take --world or --seed and --threads N); --coupled-run <dir> --global-res N (required) makes the coupled run of the bake stored in <dir> (or finds it there) and stores it, with a progress line at most every 10 s during the reduction of the bake and the wall time (STRM-051); --coarse-horizon <dir> --global-res N (required) [--threads N] makes the coarse horizon (far-field shadows, STRM-045) from the coupled run stored beside the bake in <dir> and stores it there, with a progress line and the wall time (the coupled run is made and stored by the viewer or `test-render --scene coupled`); --plan-check <dir> --global-res N (required) plans the standard flight at cells 32 and viewport / tau 240 over the stored bake with the terrain and the eroded field and fails if a view is rejected (M3 acceptance); --prefill-dir <dir> --global-res N [--prefill-levels L] [--floor-level F] writes the coarse tiles of levels F..=L (F the render floor, default 3; L default 4; an L below F writes nothing and says so; the tiles of cells 32, finest level 22, compact form, as the streamer generates them) of the stored bake into its tile pack, skipping what is there; --global-dir pre-fills the same way after the bake (--prefill-levels 0 disables; --floor-level takes both); --smoke starts and exits
+  generate      headless generator CLI: --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --manifest <file> writes the determinism manifest (GEN-003); --cache-dir <dir> --region F,L [--res N] writes a tile face region into a tile store; --verify-cache <dir> [--sample N] regenerates stored tiles and compares (both take --world <definition.toml> or --seed N; --verify-cache fails when nothing could be compared, --allow-stale accepts that); --global-dir <dir> [--global-res N, default 256] bakes the global-coarse field (continents, elevation, climate) of N cells per face edge into a tile store as blocks in the canonical layout (blocks of min(N, 1024) cells) together with its ocean-connectivity channel (one bit per vertex; the area threshold is the definition's `body.0.sea.min_area_fraction`) and prints the time per sample and the channel's cost; --class-source (with --global-dir or --verify-global) samples the class source's surface instead of the legacy generator's and keys the store by it (GEN-115, STRM-073); --verify-global <dir> [--sample N] regenerates stored blocks and compares; --global-products <dir> [--global-res N] writes cube nets and maps of an in-memory bake (these take --world or --seed and --threads N); --coupled-run <dir> --global-res N (required) makes the coupled run of the bake stored in <dir> (or finds it there) and stores it, with a progress line at most every 10 s during the reduction of the bake and the wall time (STRM-051); --coarse-horizon <dir> --global-res N (required) [--threads N] makes the coarse horizon (far-field shadows, STRM-045) from the coupled run stored beside the bake in <dir> and stores it there, with a progress line and the wall time (the coupled run is made and stored by the viewer or `test-render --scene coupled`); --plan-check <dir> --global-res N (required) plans the standard flight at cells 32 and viewport / tau 240 over the stored bake with the terrain and the eroded field and fails if a view is rejected (M3 acceptance); --prefill-dir <dir> --global-res N [--prefill-levels L] [--floor-level F] writes the coarse tiles of levels F..=L (F the render floor, default 3; L default 4; an L below F writes nothing and says so; the tiles of cells 32, finest level 22, compact form, as the streamer generates them) of the stored bake into its tile pack, skipping what is there; --global-dir pre-fills the same way after the bake (--prefill-levels 0 disables; --floor-level takes both); --smoke starts and exits
   test-render   headless render harness
     --scene hello-triangle|tiles|terrain   render a scene (default hello-triangle)
     --script N|name          scripted terrain camera 0..9 or its name (default 3 = aerial-20km)
@@ -151,6 +151,10 @@ pub struct Options {
     pub sample: usize,
     /// `--verify-cache`: entries that are all stale are expected (the definition changed on purpose), not a failure.
     pub allow_stale: bool,
+    /// `generate --global-dir` and `--verify-global`: sample the class source's surface (GEN-115) instead of the legacy generator's; the store's keys differ (STRM-073).
+    pub class_source: bool,
+    /// `--legacy-source`: the store's legacy bake when it holds both (STRM-073).
+    pub legacy_source: bool,
     /// `generate`: bake the global-coarse field into a tile store in this directory as blocks (STRM-012).
     pub global_dir: Option<PathBuf>,
     /// `generate`: regenerate a sample of the global bake stored in this directory and compare.
@@ -260,6 +264,16 @@ pub struct Options {
 }
 
 impl Options {
+    /// Which field source of a store to read when it holds both (`--class-source` or `--legacy-source`, STRM-073), or none to let the store decide.
+    pub fn field_source_choice(&self) -> Result<Option<planet_cache::global_store::FieldSource>, String> {
+        match (self.class_source, self.legacy_source) {
+            (true, true) => Err("--class-source and --legacy-source exclude each other".into()),
+            (true, false) => Ok(Some(planet_cache::global_store::FieldSource::Class)),
+            (false, true) => Ok(Some(planet_cache::global_store::FieldSource::Legacy)),
+            (false, false) => Ok(None),
+        }
+    }
+
     /// The tile generation pool of the pipelined loop and the streaming scenes (STRM-020): `--gen-workers` threads, else the machine's
     /// hardware threads less `--gen-reserve` when given, else the terrain share (BUDG-003); with `--gen-ahead` jobs queued behind them
     /// (default as many).
@@ -353,6 +367,8 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         cap_bytes: None,
         sample: 0,
         allow_stale: false,
+        class_source: false,
+        legacy_source: false,
         global_dir: None,
         verify_global: None,
         plan_check: None,
@@ -537,6 +553,8 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
                 o.cap_bytes = Some(it.next().ok_or("--cap-bytes needs a byte count")?.parse().map_err(|e| format!("--cap-bytes: {e}"))?)
             }
             "--allow-stale" => o.allow_stale = true,
+            "--class-source" => o.class_source = true,
+            "--legacy-source" => o.legacy_source = true,
             "--global-dir" => o.global_dir = Some(PathBuf::from(it.next().ok_or("--global-dir needs a directory")?)),
             "--repeats" => o.repeats = Some(it.next().ok_or("--repeats needs a number")?.parse().map_err(|e| format!("--repeats: {e}"))?),
             "--horizon-threads" => {
@@ -1262,6 +1280,59 @@ mod tests {
         let lone = run_str(&["generate", "--cap-bytes", "5", "--seed", "3"]).unwrap_err();
         assert!(lone.contains("belongs to --compact-cache"), "{lone}");
         assert!(run_str(&["generate", "--compact-cache", &d.s("missing")]).unwrap_err().contains("no such cache directory"));
+    }
+
+    // spec: STRM-073
+    #[test]
+    fn generate_bakes_the_class_source_with_class_source_and_a_verify_without_it_compares_nothing() {
+        let d = TempDir::new("class-global");
+        let store = d.s("store");
+        let args = |extra: &[&'static str]| {
+            let mut v = vec![
+                "generate",
+                "--global-dir",
+                store.as_str(),
+                "--global-res",
+                "8",
+                "--seed",
+                "3",
+                "--threads",
+                "2",
+                "--prefill-levels",
+                "0",
+            ];
+            v.extend_from_slice(extra);
+            v
+        };
+        let built = run_str(&args(&["--class-source"])).unwrap();
+        assert!(built.contains("6 blocks written, 0 already stored"), "{built}");
+        let again = run_str(&args(&["--class-source"])).unwrap();
+        assert!(again.contains("0 blocks written, 6 already stored"), "{again}");
+        let ok = run_str(&["generate", "--verify-global", &store, "--seed", "3", "--class-source"]).unwrap();
+        assert!(ok.contains("checked 19 of 19 entries: 19 match") && ok.contains("0 differ"), "{ok}");
+        // The legacy world asks for other keys: the entries are stale and nothing is compared.
+        let e = run_str(&["generate", "--verify-global", &store, "--seed", "3"]).unwrap_err();
+        assert!(e.contains("compared nothing"), "{e}");
+        // The pre-fill after the bake follows the store's recorded source (one level: the class store gets its coarse tiles through the class world).
+        let pre = run_str(&[
+            "generate",
+            "--prefill-dir",
+            &store,
+            "--global-res",
+            "8",
+            "--seed",
+            "3",
+            "--class-source",
+            "--prefill-levels",
+            "3",
+            "--floor-level",
+            "3",
+        ])
+        .unwrap();
+        assert!(pre.contains("pre-fill"), "{pre}");
+        // The same directory holds the legacy bake beside it without either reading the other's blocks.
+        let legacy = run_str(&args(&[])).unwrap();
+        assert!(legacy.contains("6 blocks written, 0 already stored"), "{legacy}");
     }
 
     // spec: STRM-012

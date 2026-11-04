@@ -1,3 +1,5 @@
+#[path = "class_source_store.rs"]
+mod class_source_store;
 #[path = "compact.rs"]
 mod compact;
 #[path = "concurrent_source.rs"]
@@ -18,6 +20,8 @@ mod keys;
 mod keys_footprint;
 #[path = "keys_wide_ids.rs"]
 mod keys_wide_ids;
+#[path = "layer_channels.rs"]
+mod layer_channels;
 #[path = "layer_store.rs"]
 mod layer_store;
 #[path = "layer_tiles.rs"]
