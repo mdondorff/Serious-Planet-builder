@@ -554,3 +554,60 @@ fn a_ramp_in_the_driver_block_shows_in_the_views_between_the_cpu_mirrors_extreme
         assert!(distinct.len() > 3, "{view:?}: the ramp shows as one colour");
     }
 }
+
+// spec: REND-055
+#[test]
+fn the_patch_break_up_is_inert_when_off_and_moves_the_material_boundary_when_on() {
+    use planet_frame::look::materials::{Input, MaterialParams, INPUTS, MATERIALS};
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let (p, _) = plan(6);
+    let mut r = renderer(&ctx, &p);
+    // A table whose rock rises as the slope cosine falls from 1 to 0.9 (rock where the ground is steeper), soil everywhere: the boundary the patches shift.
+    let mut curves = [[[0.0, 0.0]; INPUTS]; MATERIALS];
+    curves[0][Input::SlopeCos as usize] = [1.0, 0.9];
+    curves[3][Input::SoilDepth as usize] = [-1.0, 0.0];
+    let table = MaterialParams { curves };
+    let with = |patch: f64| {
+        let mut l = detail_plan(ShadeView::Lit, 1.0);
+        l.materials = table;
+        l.ground_patch = patch;
+        l
+    };
+    let off = hdr_of(&mut r, &ctx, &p, with(0.0));
+    let covered = off.iter().filter(|px| px[3] > 0.0).count();
+    assert!(covered > 1000, "{covered} covered pixels");
+    // Off is today's picture (the default plan has patch 0, and the shader's patch branch is not taken).
+    assert!(
+        hdr_of(&mut r, &ctx, &p, {
+            let mut l = detail_plan(ShadeView::Lit, 1.0);
+            l.materials = table;
+            l
+        }) == off,
+        "patch 0 is not inert"
+    );
+    let on = hdr_of(&mut r, &ctx, &p, with(0.25));
+    assert!(on == hdr_of(&mut r, &ctx, &p, with(0.25)), "two renders of the same plan differ");
+    let changed =
+        off.iter().zip(&on).filter(|(a, b)| a[3] > 0.0 && (luminance(a) - luminance(b)).abs() > 0.01 * luminance(a).max(1e-6)).count();
+    // The patches are 8 and 32 m cells and the scene a few metres across: where the noise leaves the boundary alone nothing changes, so the check is that the boundary moves somewhere, by a lot.
+    let worst = off
+        .iter()
+        .zip(&on)
+        .filter(|(a, _)| a[3] > 0.0)
+        .map(|(a, b)| (luminance(a) - luminance(b)).abs() / luminance(a).max(1e-6))
+        .fold(0.0, f64::max);
+    assert!(
+        changed >= 100 && worst > 0.2,
+        "the patches changed {changed} of {covered} pixels by more than 1 %, the largest change {worst}"
+    );
+    let mean = |img: &[[f32; 4]]| img.iter().filter(|px| px[3] > 0.0).map(luminance).sum::<f64>() / covered as f64;
+    let ratio = mean(&on) / mean(&off);
+    assert!((0.7..1.4).contains(&ratio), "mean brightness ratio {ratio}");
+    // The detail's strength 0 still returns before the patches: the picture is the off picture whatever the patch.
+    let mut none = detail_plan(ShadeView::Lit, 0.0);
+    none.ground_patch = 0.25;
+    assert!(
+        hdr_of(&mut r, &ctx, &p, none) == hdr_of(&mut r, &ctx, &p, detail_plan(ShadeView::Lit, 0.0)),
+        "the patch acts with the detail off"
+    );
+}

@@ -143,17 +143,23 @@ pub struct LookParams {
     pub ground: GroundLook,
 }
 
+/// The largest patch shift of the slope cosine (REND-055).
+pub const PATCH_MAX: f64 = 0.5;
+
 /// The ground look of a body: the strength of the procedural ground detail (LOOK-009) and the response curves of the ground materials
 /// (LOOK-008). The default is the window's natural detail and the Earth curves, so a file without the table shows what the window shows.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GroundLook {
     pub detail: f64,
     pub materials: MaterialParams,
+    /// The patch break-up of the material boundaries (REND-055): how far, as a share of the slope cosine, two patch octaves of 32 m and 8 m shift the slope input of the material weights;
+    /// 0 is off (the default: the picture is what it was, and the key does not change).
+    pub patch: f64,
 }
 
 impl Default for GroundLook {
     fn default() -> Self {
-        Self { detail: NATURAL_STRENGTH, materials: MaterialParams::EARTH }
+        Self { detail: NATURAL_STRENGTH, materials: MaterialParams::EARTH, patch: 0.0 }
     }
 }
 
@@ -162,6 +168,9 @@ impl GroundLook {
     pub fn validate(&self) -> Result<(), ParamError> {
         if !(self.detail == 0.0 || (1e-6..=1.0).contains(&self.detail)) {
             return Err(bad("ground.detail", self.detail, "the strength must be 0 or from 1e-6 to 1"));
+        }
+        if !(0.0..=PATCH_MAX).contains(&self.patch) {
+            return Err(bad("ground.patch", self.patch, "the patch shift is from 0 (off) to 0.5 of the slope cosine"));
         }
         self.materials.validate().map_err(|(key, value, why)| ParamError {
             key: leak_key(&key.replacen("materials.", "ground.", 1)),
@@ -647,6 +656,7 @@ fn read_body(path: &str, mut t: toml::Table) -> Result<LookParams, LookError> {
     if let Some(mut s) = ground {
         let k = format!("{path}.ground");
         take_f64(&k, &mut s, "detail", &mut p.ground.detail)?;
+        take_f64(&k, &mut s, "patch", &mut p.ground.patch)?;
         for (m, material) in MATERIAL_NAMES.iter().enumerate() {
             let mk = format!("{k}.{material}");
             match s.remove(*material) {
@@ -876,6 +886,10 @@ pub fn to_toml(file: &LookFile) -> String {
             out.push_str(&line(name, *v));
         }
         out.push_str(&format!("\n[body.{b}.ground]\n{}", line("detail", p.ground.detail)));
+        // The key is written only when it is on, so a file made before it reads back as it was written.
+        if p.ground.patch != 0.0 {
+            out.push_str(&line("patch", p.ground.patch));
+        }
         for (material, row) in MATERIAL_NAMES.iter().zip(&p.ground.materials.curves) {
             out.push_str(&format!("\n[body.{b}.ground.{material}]\n"));
             for (input, [lo, hi]) in INPUT_NAMES.iter().zip(row) {

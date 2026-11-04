@@ -29,7 +29,7 @@ fn custom() -> LookParams {
         sun: SunLook { direction: [0.0, 1.0, 0.0] },
         atmosphere: AtmosphereParams { mie_g: 0.55, top_height_m: 80_000.0, ..AtmosphereParams::EARTH },
         water: WaterLook { absorption_per_m: 0.35, foam_width_m: 0.6, wave_scale: 1.5, ..WaterLook::EARTH },
-        ground: GroundLook { detail: 0.8, materials: ground_curves() },
+        ground: GroundLook { detail: 0.8, materials: ground_curves(), patch: 0.0 },
     }
 }
 
@@ -548,4 +548,46 @@ fn histogram_params_generalise_the_axis_and_the_band() {
     assert_eq!(g.target_ev(&h, &params, 0.0), want.clamp(-2.0, 16.0));
     let px = [[0.5, 0.5, 0.5], [0.0; 3]];
     assert_eq!(g.histogram_of(&px, 12.0).iter().sum::<u32>(), 1, "black is not counted");
+}
+
+// spec: LOOK-012
+#[test]
+fn the_patch_key_of_the_ground_table_is_off_by_default_validated_written_only_when_on_and_carried_by_the_plan() {
+    let head = "schema_version = 5\nkind = \"look\"\n";
+    let ground = |patch: &str| parse_look(&format!("{head}[body.0.ground]\ndetail = 0.6\n{patch}")).unwrap().body(BodyId(0)).ground;
+    // Off by default, and a default file writes no key (a file made before the key reads back as it was written).
+    assert_eq!(ground("").patch, 0.0);
+    let f = parse_look(&format!("{head}[body.0.ground]\ndetail = 0.6\n")).unwrap();
+    assert!(!to_toml(&f).contains("patch"), "a plan without the key keeps its text");
+    // On: the value, round-tripping through the canonical text.
+    let on = parse_look(&format!("{head}[body.0.ground]\ndetail = 0.6\npatch = 0.12\n")).unwrap();
+    assert_eq!(on.body(BodyId(0)).ground.patch, 0.12);
+    assert!(to_toml(&on).contains("patch = 0.12"), "{}", to_toml(&on));
+    assert_eq!(parse_look(&to_toml(&on)).unwrap(), on);
+    // Outside 0 to 0.5: refused, naming the key.
+    for bad in ["0.7", "-0.01"] {
+        let e = err(&format!("{head}[body.0.ground]\npatch = {bad}\n"));
+        assert!(e.contains("body.0.ground.patch") && e.contains(bad), "{bad}: {e}");
+    }
+    // The plan: the file's patch is taken with its curves, a plan without it keeps the text, and the text with it round-trips and refuses a bad value.
+    let file_ground = on.body(BodyId(0)).ground;
+    let plan =
+        LitPlan::fixed(15.0).with_ground_look(look::materials::LookChoice::File, look::materials::GroundDetailMode::Natural, &file_ground);
+    assert_eq!(plan.ground_patch, 0.12);
+    let plain = LitPlan::fixed(15.0);
+    assert!(!plain.to_text().contains(" patch "), "{}", plain.to_text());
+    let patched = plain.with_ground_patch(0.12);
+    assert_ne!(patched.hash(), plain.hash(), "the patch is part of the plan's key");
+    let text = patched.to_text();
+    assert!(text.contains(" patch "), "{text}");
+    let tokens: Vec<&str> = text.split_whitespace().collect();
+    assert_eq!(LitPlan::from_tokens(&tokens[1..]).unwrap(), patched);
+    assert!(patched.validate().is_ok() && plain.with_ground_patch(0.9).validate().is_err());
+    // The default look choice leaves the plan's patch alone.
+    let by_default = LitPlan::fixed(15.0).with_ground_look(
+        look::materials::LookChoice::Default,
+        look::materials::GroundDetailMode::Natural,
+        &file_ground,
+    );
+    assert_eq!(by_default.ground_patch, 0.0);
 }
