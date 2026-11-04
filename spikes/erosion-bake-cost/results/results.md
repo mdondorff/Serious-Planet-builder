@@ -35,6 +35,12 @@ Both B and C meet the 100 s target; C leaves a 3.5x margin.
 
 The maxima sit in carve-route changes (a channel moving by a cell), not in a smooth bias. C is coarser by design (the 200 m grid), so its error is the resolution step, not the stride.
 
+## Where the base's interpolation error ends up (candidate B)
+- The tile stores `z - base_w`, the change against the window that was actually sampled (the interpolated base in B); the runtime adds it to the exact base.
+- The base's own interpolation error therefore does not enter the final heights as an addend: it cancels in the stored change.
+- What remains is the carve's response to the slightly smoother base (routes, incision depth): the table above compares the stored changes of B and A, and the exact base is the same in both, so those numbers are the error of the final surface: mountains rms 4.0 m, p99 16.8 m; hills rms 1.0 m, p99 4.0 m.
+- The maxima (412 m, 69 m) are single channels that moved by a cell. Not measured: the same comparison on the coast tile, and a rendered before-after of B.
+
 ## Thermal residual at the cap (largest excess of a pair over the talus, m)
 | Setting | Mountains residual m | Pairs over 1 m | Cells still moving |
 |---|---|---|---|
