@@ -1,6 +1,6 @@
 //! `cargo xtask bake pass1 [--planet-res N] [--seed N] [--out DIR] ...` (m9-bake PR 4, GEN-100): pass 1 of the erosion layer at a reduced resolution, one cube face at a time,
 //! into a layer store, then the preview maps of the carved base. The work is the `bake_pass1` example of planet-cache; this file picks the subcommand and runs it in release.
-//! The example refuses a resolution above its coarse limit (a full-resolution bake needs the planner's go) and a concurrency above 1 (not measured yet).
+//! The example refuses a resolution above GEN-100's pass-1 grid (12,288 cells a face edge) and a concurrency above 1 (not measured yet).
 
 use crate::util::{run, Res};
 use std::path::Path;
