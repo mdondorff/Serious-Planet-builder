@@ -8,7 +8,7 @@
 //! depend on where the border falls; the seam this leaves is measured (TEST-084), not assumed away.
 
 use super::carve::{carve, CarveParams};
-use super::deposit::{deposit_on_own_route, DepositParams, Kc};
+use super::deposit::{deposit_on_own_route, spread_pits, DepositParams, Kc};
 use super::face::face_stream;
 use super::map::catmull_rom;
 use super::thermal::{thermal, ThermalParams};
@@ -110,6 +110,10 @@ pub struct Pass2Params {
     pub local_area_cells: f64,
     pub sea_level: f64,
     pub seed: u64,
+    /// A pit deeper than this many metres (a land cell lower than its 8 neighbours) is spread over its neighbours after the sweep, with the volume kept (GEN-101); 0 and no passes switch it off.
+    pub pit_min_m: f64,
+    /// At most this many passes of the pit spreading.
+    pub pit_passes: usize,
 }
 
 impl Pass2Params {
@@ -131,6 +135,8 @@ impl Pass2Params {
             local_area_cells: 96.0,
             sea_level,
             seed,
+            pit_min_m: 0.5,
+            pit_passes: 32,
         }
     }
 }
@@ -275,6 +281,8 @@ pub fn pass2_tile(
         stream,
         &DepositParams { kc: Kc::Uniform(p.kc), zeta: p.zeta, sea_level: p.sea_level },
     );
+    // What is left of the one-cell pits (thermal's and the sweep's) goes to the neighbours, volume kept.
+    spread_pits(&grid, &mut z, p.sea_level, p.pit_min_m, p.pit_passes);
     let (w, t, h) = (g.window(), g.tile, g.halo);
     let mut core = Vec::with_capacity(t * t);
     let mut deposited = Vec::with_capacity(t * t);

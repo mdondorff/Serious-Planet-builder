@@ -124,7 +124,7 @@ Source: ADR 0088 points 1 and 2, ADR 0088/0089 accepted 2026-11-01; m9-bake PR 1
 ### Requirement: GEN-100 Pass 1 carves each cube face on a coarse grid
 The bake's first pass SHALL, per cube face:
 - sample the base field (GEN-099) once per cell of 814 m (one point sample per cell);
-- carve it with implicit stream power with uplift (`U / K` 20, `K dt` 0.05 times the carve factor of GEN-097), 20 steps, not to steady state;
+- carve it with implicit stream power with uplift (`U / K` 20, `K dt` 0.05 times the carve factor of GEN-097), 20 steps, not to steady state; the uplift of a cell is tapered by its starting height `h` above the sea level, `smoothstep(0, 60 m, h)` of it (a coastal plain that barely erodes is not lifted by the whole 20 m: owner 2026-11-04, the coast diagnosis);
 - breach after each route (the next fill sees the breached surface): from the leaves down, the receiver of a cell that stands higher than 0.1 % of the cell distance below it is lowered to that level, by at most 50 m, never an outlet (the sea and the face's border cells) and never below the sea level;
 - keep land above the sea level (plus the flood's epsilon) whatever depth the sea outlets have;
 - route with Barnes' improved priority flood (epsilon 1 mm), jittered D8 receivers (the jitter an integer hash of the GLOBAL cell and the direction, so a cell routes alike in every window that holds it) and the order from the receivers, and the drainage area by multiple flow direction (Freeman, exponent 1.1: a cell shares its area among its lower neighbours in proportion to the slope to the power 1.1, highest cells first, ties by the cell index; an outlet passes nothing on) which drives the carve while the receivers stay D8 (a D8 area imprints the grid's eight directions as staircase valleys: SPIKE-98 diagnosis, owner 2026-11-03), re-routing every 5th step; the carve factor multiplies `K dt` and the uplift (`U / K` stays 20); a height or factor that is not finite, a flood without an outlet or with an epsilon that is not positive SHALL be refused;
@@ -134,6 +134,14 @@ It SHALL keep each face's change as a record of the layer store (STRM-065) and c
 Verify: A, B
 Status: planned
 Source: ADR 0088 point 4.1, ADR 0088/0089 accepted 2026-11-01; SPIKE-62, SPIKE-65, SPIKE-66, SPIKE-70, SPIKE-71
+
+#### Scenario: The uplift is tapered
+- **WHEN** a plain at 3 m and a plateau at 500 m, each ringed by outlets, are carved with the taper of 40 m and without it
+- **THEN** the plain is lifted by over 5 m without the taper and by under 1.5 m with it, the plateau's bits are the same with and without it, and a carve without uplift is the same with either setting
+
+#### Scenario: The change over the shallow sea
+- **WHEN** pass 1 runs on a face of a low plain beside a shallow sea, and the change is read at the cell centres and at 4 x 4 points a cell (as pass 2 reads it) wherever the base is at or below the sea level, with the taper of 40 m and without it
+- **THEN** without the taper the uplift of the shore bleeds more than 2 m onto the sea points, with it the change over the sea is at most 0.01 m
 
 #### Scenario: A small face
 - **WHEN** pass 1 runs on a synthetic face of 64 x 64 cells uninterrupted on 1 thread (the reference), on 8 threads, and on 1 thread killed and resumed
@@ -152,7 +160,8 @@ The bake's second pass SHALL work per tile of the layer grid: 98,304 cells per f
 - the base field, evaluated on every 4th cell of the window and interpolated between by Catmull-Rom kept within the range of the four nodes around the point (the base is 86 % of a tile's cost; the stored change is taken against this interpolated window, so the interpolation error cancels in it: design.md), plus the face carve's change (read by Catmull-Rom (C1) in a face, kept within the range of the four cells around the point (a Catmull-Rom spline overshoots by up to 7.4 % of a step beside a sharp feature, which would read a one-cell channel as a levee and could put a coastal plain below the sea), since a bilinear read leaves a crease along every cell line of the pass-1 grid that the carve and the viewer would show; cross-faded within the halo of a cube edge: GEN-100);
 - a local carve of catchments up to 96 cells (1 km^2 at 101.8 m) that only incises: no fill, no breach, no uplift (the routing of GEN-100, the area by multiple flow direction);
 - thermal at a critical slope of 33 degrees, perturbed by up to 25 % (an integer hash of the unordered pair of global cell ids), moving 1/8 of the excess per pass (a share over 1/8 SHALL be refused: a cell would overshoot), at most 300 passes, on active cells (the cells that moved and their neighbours: bit for bit the run over every cell); a pair over the critical difference by under 1 mm does not move (the excess would never reach 0), and a cell whose height rounding leaves unchanged wakes no neighbour; the sweep keeps a cell at or below the lowest final height of its donors; land above the sea level off the grid's border gives, any cell receives;
-- one deposition sweep (on its own route, whose area is by multiple flow direction too) with `kc` (1e5 uniform while every class of GEN-097 has 1e5; per class when they differ) and `zeta` 0.5 on a route of its own on the carved and thermally settled window (the load of a cell is its donors' plus its eroded column; it fills the depression first, then `zeta` of the excess over the capacity `kc sqrt(A) S` settles, at most to the filled level plus half the drop to the receiver; what reaches an outlet leaves; eroded = deposited + exported).
+- one deposition sweep (on its own route, whose area is by multiple flow direction too) with `kc` (1e5 uniform while every class of GEN-097 has 1e5; per class when they differ) and `zeta` 0.5 on a route of its own on the carved and thermally settled window (the load of a cell is its donors' plus its eroded column; it fills the depression first (at most to the receiver's carved height plus half the filled drop: a closed bowl's route does not become a pillar of the bowl's fill), then `zeta` of the excess over the capacity `kc sqrt(A) S` settles, at most to the filled level plus half the drop to the receiver; what reaches an outlet leaves; eroded = deposited + exported).
+- a pit spreading after the sweep (`pit_min_m` 0.5 m, at most `pit_passes` 32): a land cell whose 8 neighbours are inside the grid's border, none at or below the sea level, and all higher than it by more than `pit_min_m` rises by 0.8 of its depth below the lowest neighbour while its 8 neighbours each fall by an eighth of that rise, so the sum of the heights is unchanged; the pits are taken in cell order, the pass repeats until none is deeper than `pit_min_m` (the neighbours' fall can make a smaller one), and the border cells are never lowered; serial and deterministic.
 It SHALL store the core's change against the base field (STRM-065) and checkpoint per tile, with per tile the cells that still gave in the last thermal pass (the unsettled slopes at the pass cap; the pass cap is the only bound on thermal: no wall-clock budget, which would make the result depend on the machine, CON-14). The tile grid, the halo and the tiles of a run (every land tile, or a region list) are parameters of the run; the local carve runs 10 steps without uplift, breach or fill, with the drainage area capped at 96 cells (1 km^2 at 101.8 m; the cap follows the cell size, so a coarse planet pass keeps the same number of cells), and a window's cells follow the global cell of the face's grid in the jitter and the thermal's pair hash. Every kernel SHALL be a Jacobi gather or a fixed topological sweep in f64 with `libm`. The constants are start values (SPIKE-61, SPIKE-64, SPIKE-70, SPIKE-72). The seam check is TEST-084.
 
 Verify: A, B
@@ -174,6 +183,14 @@ Source: ADR 0088 points 4.2 and 6, ADR 0088/0089 accepted 2026-11-01; SPIKE-61, 
 #### Scenario: The read stays in range
 - **WHEN** the pass-1 change holds one cell of -100 m among zeros and is read at points around it
 - **THEN** every read lies between -100 and 0 m
+
+#### Scenario: Pits are spread
+- **WHEN** a land with pits of 3 to 70 m (two adjacent, one beside the border, one beside the sea) is spread with a threshold of 0.5 m, and a tile of the synthetic planet is run
+- **THEN** no pit over 0.5 m is left, the sum of the heights is unchanged to 1e-9, the border and the sea cells keep their bits, the same input gives the same bits, a pass count of 0 moves nothing, and no one-cell pit over 0.5 m is left in the tile's core
+
+#### Scenario: A bowl's fill is not a pillar
+- **WHEN** the deposition sweep runs on a closed bowl of 80 m in a plateau
+- **THEN** what was eroded is deposited or exported to 1e-9 and no cell of the bowl rises by 60 m or more
 
 #### Scenario: Incise only
 - **WHEN** pass 2's local carve runs on a synthetic tile with a closed basin

@@ -1,0 +1,41 @@
+2026-11-04T08:54:02Z start A built
+2026-11-04T08:56:15Z end A built 133 s
+2026-11-04T08:56:15Z start A e0only
+2026-11-04T08:57:45Z end A e0only 90 s
+2026-11-04T08:57:45Z start A bandonly
+2026-11-04T08:58:50Z end A bandonly 65 s
+2026-11-04T08:58:50Z start A ridged
+2026-11-04T09:00:00Z end A ridged 70 s
+2026-11-04T09:00:00Z start A band2
+2026-11-04T09:01:16Z end A band2 76 s
+2026-11-04T09:01:16Z start A band3
+2026-11-04T09:02:53Z end A band3 97 s
+2026-11-04T09:02:54Z start A ridged-band2
+2026-11-04T09:04:27Z end A ridged-band2 94 s
+2026-11-04T09:04:27Z start A mid1500
+2026-11-04T09:06:28Z end A mid1500 121 s
+2026-11-04T09:06:28Z start A combo
+2026-11-04T09:07:34Z end A combo 66 s
+2026-11-04T09:08:56Z start A band3c
+2026-11-04T09:09:49Z end A band3c 53 s
+2026-11-04T09:09:49Z start A band2.5c
+2026-11-04T09:10:41Z end A band2.5c 52 s
+2026-11-04T09:10:41Z start A ridged4.5c
+2026-11-04T09:11:27Z end A ridged4.5c 46 s
+2026-11-04T09:12:07Z start B built20
+2026-11-04T09:54:56Z end B built20 rc=0
+2026-11-04T09:54:57Z start B built60
+2026-11-04T10:43:57Z note: explorer's seed-14 class-source store bake starts now beside built60 (about 17 min plus channels; planner, 2026-11-04); the 60/20 ratio is indicative
+2026-11-04T11:33:04Z end B built60 rc=0
+2026-11-04T11:33:04Z start B band3c
+2026-11-04T12:29:34Z end B band3c rc=0
+2026-11-04T12:29:34Z start B ridged45c
+2026-11-04T13:13:27Z end B ridged45c rc=0
+2026-11-04T13:17:31Z start B band3c-thermal (pass 2 variants std, nothermal, theta40; explorer's store bake shares the machine)
+2026-11-04T13:18:00Z start D stills
+2026-11-04T13:56:09Z end D stills
+2026-11-04T14:34:55Z end B band3c-thermal rc=0
+2026-11-04T14:40:32Z start B split-built
+2026-11-04T15:37:55Z end B split-built rc=0
+2026-11-04T15:37:55Z start B split-band3c-breach500
+2026-11-04T16:10:54Z end B split-band3c-breach500 rc=0

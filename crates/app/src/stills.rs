@@ -609,7 +609,8 @@ fn run_stills(
         }
         config.poses.retain(|p| names.contains(&p.name));
     }
-    let world = Arc::new(crate::streamperf::open_world(o, false)?.bounding_water());
+    // `--erosion on` draws the erosion layer in the stills as the viewer does (VIEW-062); the header line says what the world is.
+    let world = Arc::new(crate::streamperf::open_world(o, false)?.with_erosion_if(o)?.bounding_water());
     if !world.has_bake() {
         return Err("the stills need a world with a bake (--store DIR, or --allow-memory-bake with --global-res N): the anchor reads the coupled run".into());
     }
@@ -1022,9 +1023,16 @@ pub struct CostRow {
     /// The spread (largest minus smallest) of the round medians of `full` and the compiled-out variant; `full` and `compiled_out` are the
     /// medians of those [`COST_ROUNDS`] round medians, the variants interleaved round-robin so a slow period hits both alike.
     pub spread: Option<[f64; 2]>,
+    /// The draw with the patch break-up at 0 (REND-055) and everything else as `full`; none when the plan's patch is 0.
+    pub no_patch: Option<f64>,
 }
 
 impl CostRow {
+    /// The patch break-up's share (full minus the draw with the patch 0), the runtime-off difference; none without a patch.
+    pub fn patch_share(&self) -> Option<f64> {
+        self.no_patch.map(|n| self.full - n)
+    }
+
     /// The material map's share (full minus the variant without it), from the compiled-out variant when the row has it, else from the
     /// runtime one.
     pub fn share(&self) -> f64 {
@@ -1104,7 +1112,21 @@ fn measure_cost(
     detail(plan, 0.0);
     let no_material = terrain_ms(ctx, r, plan, COST_WARM_S)?;
     detail(plan, 1.0);
-    Ok(CostRow { pose: pose.to_string(), full, no_material, compiled_out: Some(compiled_out), spread: Some(spread) })
+    // The patch's own share: the same draw with the patch 0 (the plan keeps its value afterwards).
+    let patch = plan.lit.as_ref().map_or(0.0, |l| l.ground_patch);
+    let no_patch = if patch > 0.0 {
+        if let Some(l) = plan.lit.as_mut() {
+            l.ground_patch = 0.0;
+        }
+        let ms = terrain_ms(ctx, r, plan, COST_WARM_S)?;
+        if let Some(l) = plan.lit.as_mut() {
+            l.ground_patch = patch;
+        }
+        Some(ms)
+    } else {
+        None
+    };
+    Ok(CostRow { pose: pose.to_string(), full, no_material, compiled_out: Some(compiled_out), spread: Some(spread), no_patch })
 }
 
 /// The failures of the budget (the material map at most [`COST_BUDGET_MS`] in every pose) and the poses within
@@ -1146,6 +1168,10 @@ pub fn perf_shadow_cost(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> R
             r.spread.map_or("none".to_string(), |c| format!("{:.3}, {:.3}", c[0], c[1]))
         )
         .map_err(err)?;
+        if let Some(p) = r.patch_share() {
+            writeln!(out, "{}: patch break-up {p:.3} ms (full minus the draw with the patch 0; runtime difference, in the material map's share above)", r.pose)
+                .map_err(err)?;
+        }
     }
     writeln!(
         out,
@@ -1160,12 +1186,14 @@ pub fn perf_shadow_cost(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> R
         .map(|r| {
             let m = r.share();
             format!(
-                "    {{\"pose\": {:?}, \"full_ms\": {:.4}, \"no_material_ms\": {:.4}, \"compiled_out_ms\": {}, \"round_spread_ms\": {}, \"material_ms\": {m:.4}, \"together_ms\": {m:.4}}}",
+                "    {{\"pose\": {:?}, \"full_ms\": {:.4}, \"no_material_ms\": {:.4}, \"compiled_out_ms\": {}, \"round_spread_ms\": {}, \"no_patch_ms\": {}, \"patch_ms\": {}, \"material_ms\": {m:.4}, \"together_ms\": {m:.4}}}",
                 r.pose,
                 r.full,
                 r.no_material,
                 r.compiled_out.map_or("null".to_string(), |c| format!("[{c:.4}]")),
-                r.spread.map_or("null".to_string(), |c| format!("[{:.4}, {:.4}]", c[0], c[1]))
+                r.spread.map_or("null".to_string(), |c| format!("[{:.4}, {:.4}]", c[0], c[1])),
+                r.no_patch.map_or("null".to_string(), |c| format!("{c:.4}")),
+                r.patch_share().map_or("null".to_string(), |c| format!("{c:.4}"))
             )
         })
         .collect();
@@ -1206,10 +1234,14 @@ mod tests {
             no_material: material,
             compiled_out: None,
             spread: None,
+            no_patch: None,
         };
         // The compiled-out variant, when a row has it, is what the share and the verdict read.
         let with = CostRow { compiled_out: Some(4.2), ..row("w", 5.0, 4.6) };
         assert_eq!(with.share(), 5.0 - 4.2);
+        // The patch's share is the difference to the draw with the patch 0, and absent without a patch.
+        assert_eq!(with.patch_share(), None);
+        assert_eq!(CostRow { no_patch: Some(4.75), ..row("p", 5.0, 4.6) }.patch_share(), Some(0.25));
         let ok = row("a", 5.0, 4.0);
         assert_eq!(ok.share(), 1.0);
         assert_eq!(cost_verdict(&[ok]), (vec![], vec![]));

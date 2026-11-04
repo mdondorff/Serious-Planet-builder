@@ -44,7 +44,8 @@ fn plan_check_plans_the_standard_flight_over_a_stored_bake_with_both_fields() {
     assert!(!ok.contains("REJECTED"), "{ok}");
     // A bake of another resolution is not found under the keys of this one: an error naming the problem, not a default.
     let wrong = run_str(&["generate", "--plan-check", &store, "--global-res", "512", "--seed", "3"]).unwrap_err();
-    assert!(wrong.contains("rejected or unreadable"), "{wrong}");
+    // The store is asked for the world it records first (STRM-073): no bake of this resolution is a refusal naming the cells and the keys, before any plan is made.
+    assert!(wrong.contains("holds no bake of 512 cells") || wrong.contains("rejected or unreadable"), "{wrong}");
     // The refusals.
     assert!(run_str(&["generate", "--plan-check", &d.s("nowhere"), "--global-res", "256"])
         .unwrap_err()

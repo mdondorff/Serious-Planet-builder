@@ -1,6 +1,6 @@
 ## ADDED Requirements
 ### Requirement: REND-055 The patch break-up of the material boundaries
-With the ground detail on (REND-034) and the plan's patch above 0 (LOOK-012), the lit terrain shader SHALL shift the slope cosine that feeds the material weights by up to that share of it with two gradient-noise octaves of 32 m and 8 m cells (weights 0.65 and 0.35), anchored to the world like the detail octaves and fading out between 0.12 and 0.5 of a cell a pixel (twice the detail octaves' footprint). The roughness and the albedo follow the shifted weights. With the patch 0 the picture SHALL be what it was, bit for bit, and with the detail strength 0 it SHALL be the off picture.
+With the ground detail on (REND-034) and the plan's patch above 0 (LOOK-012), the lit terrain shader SHALL shift the slope cosine that feeds the material weights by up to that share of it with two gradient-noise octaves of 32 m and 8 m cells (weights 0.65 and 0.35), anchored to the world like the detail octaves and fading out between 0.12 and 0.5 of a cell a pixel (twice the detail octaves' footprint). The roughness and the albedo follow the shifted weights. With the patch 0 the picture SHALL be what it was, bit for bit, and with the detail strength 0 it SHALL be the off picture. The `shadow-cost` log (REND-044) SHALL carry the patch's share of the terrain pass at each pose: the full draw minus the draw with the patch 0.
 
 Verify: C
 Status: planned

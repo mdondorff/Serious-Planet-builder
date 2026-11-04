@@ -4,5 +4,5 @@
 - [x] 1.3 `WorldTerrain::with_erosion`, the options, the viewer hook (tier A in `app` tests: options, refusals, a tiny bake end to end)
 - [x] 1.4a Reviews: `numerics-reviewer` and `spec-guardian` (applied)
 - [ ] 1.4b `verifier`, prepush, PR
-- [ ] 1.5 (explorer's hand-off, design.md) `bake_layer` adopts `bake_specs`; the layer manifest and the class-source marker; then
-- [ ] 1.6 When explorer's marker and manifest land: check the marker instead of `--erosion-unchecked`, read the bake shape and the global change range from the manifest (the options become overrides)
+- [x] 1.5 (explorer's hand-off, design.md) `bake_layer` adopts `bake_specs`, the layer manifest (STRM-074) and the field source record (STRM-073): done by explorer (#1162, #1164)
+- [x] 1.6 (change `viewer-class-store`) When explorer's marker and manifest land: check the marker instead of `--erosion-unchecked`, read the bake shape and the global change range from the manifest (the options become overrides)
