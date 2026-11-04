@@ -55,7 +55,7 @@ impl LayerSpec {
         }
         b.extend(self.seed.to_le_bytes());
         let c = &self.carve;
-        for v in [c.u_over_k, c.k_dt, c.epsilon, c.breach_slope, c.breach_max_m, c.uplift_taper_m] {
+        for v in [c.u_over_k, c.k_dt, c.epsilon, c.breach_slope, c.breach_max_m, c.breach_height_scale_m, c.uplift_taper_m] {
             b.extend(v.to_bits().to_le_bytes());
         }
         b.extend(c.max_area.to_bits().to_le_bytes());

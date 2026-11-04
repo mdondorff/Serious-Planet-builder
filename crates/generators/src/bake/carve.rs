@@ -18,8 +18,11 @@ pub struct CarveParams {
     pub epsilon: f64,
     /// A breach lowers a receiver to this fraction of the distance below its donor (0.1 %) ...
     pub breach_slope: f64,
-    /// ... by at most this many metres.
+    /// ... by at most this many metres (500: a ridge's basins are breached, not filled, so the carve keeps its relief; SPIKE-101).
     pub breach_max_m: f64,
+    /// Height scaling of the breach limit, off at 0: with a value above 0 the limit is `breach_min_m` at the sea level and rises to `breach_max_m` over this many metres of height
+    /// above it (`smoothstep`), so plains keep the small limit. The height of the receiver stands in for the local relief.
+    pub breach_height_scale_m: f64,
     /// The sea level: land never falls below it plus `epsilon`, whatever depth the outlets have (a sea outlet is a base level at the sea, not at its floor).
     pub sea_level: f64,
     /// The drainage area is capped at this many square metres (0: no cap): the local carve of pass 2 incises catchments up to 1 km^2 only (GEN-101).
@@ -31,6 +34,9 @@ pub struct CarveParams {
     pub uplift_taper_m: f64,
 }
 
+/// The breach limit of a cell at the sea level when the limit scales with height (the former default).
+pub const BREACH_MIN_M: f64 = 50.0;
+
 impl Default for CarveParams {
     fn default() -> CarveParams {
         CarveParams {
@@ -40,7 +46,8 @@ impl Default for CarveParams {
             reroute_every: 5,
             epsilon: 1e-3,
             breach_slope: 1e-3,
-            breach_max_m: 50.0,
+            breach_max_m: 500.0,
+            breach_height_scale_m: 0.0,
             sea_level: 0.0,
             max_area: 0.0,
             incise_only: false,
@@ -81,7 +88,12 @@ pub fn carve(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, facto
                 let rec = rec as usize;
                 let want = (z[c] - p.breach_slope * distance(grid, c, rec)).max(floor);
                 if z[rec] > want {
-                    z[rec] = want.max(z[rec] - p.breach_max_m);
+                    let limit = if p.breach_height_scale_m > 0.0 {
+                        BREACH_MIN_M + (p.breach_max_m - BREACH_MIN_M).max(0.0) * planet_core::smoothstep(0.0, p.breach_height_scale_m, z[rec] - p.sea_level)
+                    } else {
+                        p.breach_max_m
+                    };
+                    z[rec] = want.max(z[rec] - limit);
                 }
             }
             routing = Some(r);

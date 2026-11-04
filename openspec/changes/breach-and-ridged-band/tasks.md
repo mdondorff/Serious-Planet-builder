@@ -1,0 +1,4 @@
+- [x] Ridged centred x4.5 band on the mountain classes, `CLASS_SOURCE_VERSION` 6
+- [x] `breach_max_m` 500, optional height scaling, `BAKE_KERNEL_VERSION` 4, layer keys
+- [x] Tier A tests, re-recorded pins
+- [ ] Preview on 2/12/10 after the M9 items (planner's order)
