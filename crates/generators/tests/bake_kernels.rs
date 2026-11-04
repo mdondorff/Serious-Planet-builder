@@ -439,7 +439,7 @@ fn the_drainage_area_is_shared_among_the_lower_neighbours_whatever_the_jitter_an
 #[test]
 fn the_uplift_is_tapered_by_the_height_above_the_sea_so_a_coastal_plain_is_not_lifted_and_a_high_plateau_is_untouched() {
     let g = Grid::new(24, 24, 800.0);
-    let border = |p: usize| p % 24 == 0 || p % 24 == 23 || p / 24 == 0 || p / 24 == 23;
+    let border = |p: usize| p.is_multiple_of(24) || p % 24 == 23 || p / 24 == 0 || p / 24 == 23;
     let run = |level: f64, taper: f64| {
         let z0 = vec![level; 24 * 24];
         let mut z = z0.clone();
