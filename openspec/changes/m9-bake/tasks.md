@@ -31,10 +31,11 @@ Revised 2026-10-31 (SPIKE-70): the carve moves to a face pass before the tile dr
 | Ring | 10 km | SPIKE-66 |
 | Carve | U/K 20, K dt 0.05, 20 steps, re-route every 5th | SPIKE-62, SPIKE-65 |
 | Breach | 0.1 %, at most 50 m | SPIKE-66 |
-| Thermal | 33 degrees, +-25 %, 1/16 per pass | SPIKE-64 |
+| Thermal | 33 degrees, +-25 %, 1/8 per pass, at most 300 passes (1/16 and 100 until SPIKE-98) | SPIKE-64, SPIKE-98 |
 | Deposition | kc 1e5, zeta 0.5 | SPIKE-64 |
 | Layer | 7-10 GB | SPIKE-61 |
 | Face carve | about 800 m (one point sample per cell), about 17-23 min a face at 10 threads with the area by multiple flow direction (SPIKE-71's 3 min and 5.5 GB are superseded) | SPIKE-70, SPIKE-71, SPIKE-98 |
 | Local carve cap | about 1 km^2 | SPIKE-70 |
 | Bake estimate | about 6-7.5 h (central 6.9 h) for 2,140 land tiles at 4 at a time (superseded: SPIKE-98 projects about 42-63 h as built on today's machine, a cheaper pass 2 is its subject) | SPIKE-61, SPIKE-70, SPIKE-71, SPIKE-98 |
 - [ ] 2.x PR `change/pass1-mfd`: the drainage area by multiple flow direction (Freeman 1.1, receivers D8), the C1 read of the pass-1 change, kernel versions 2, pass 1 at 12,288 by default (GEN-100, GEN-101); tier A: area shared and jitter-independent, a smooth read, thread-count equality; `numerics-reviewer`, `spec-guardian`, `verifier`
+- [ ] 2.y PR `change/pass2-cost`: SPIKE-98 candidate B: the base sampled every 4 cells and interpolated, halo 128, thermal 300 passes of 1/8, pass-2 kernel version 3 (GEN-101).

@@ -4,7 +4,9 @@
 
 use planet_core::{Face, Vec3};
 use planet_generators::bake::carve::carve;
-use planet_generators::bake::tile::{dequantise, pass2_tile, quantise, tile_has_land, Pass2Params, TileGrid, TileId, QUANT_STEP_M};
+use planet_generators::bake::tile::{
+    dequantise, pass2_tile, quantise, sample_window_coarse, tile_has_land, Pass2Params, TileGrid, TileId, QUANT_STEP_M,
+};
 use planet_generators::bake::Grid;
 
 /// Cells of 100 m on a face of 96 cells: a planet of about 6.1 km radius.
@@ -168,4 +170,38 @@ fn the_seam_on_a_smooth_base_is_reported() {
     let (s, i) = (p99(&mut seam), p99(&mut inner));
     println!("smooth base: seam p99 {s:.2} m, inner p99 {i:.2} m");
     assert!(s.is_finite() && i.is_finite());
+}
+
+// spec: GEN-101
+#[test]
+fn the_base_sampled_every_4_cells_is_exact_at_the_nodes_close_between_them_and_the_same_on_any_thread_count() {
+    let g = grid();
+    let smooth = |d: Vec3| 400.0 * libm::sin(6.0 * d.x + 0.4) * libm::cos(5.0 * d.y) + 150.0 * libm::sin(9.0 * d.z);
+    let id = tile(1, 1);
+    let (w, h, t) = (g.window(), g.halo as i64, g.tile as i64);
+    let a = sample_window_coarse(&g, id, &smooth, 1, 4);
+    let b = sample_window_coarse(&g, id, &smooth, 8, 4);
+    assert_eq!(a.iter().map(|v| v.to_bits()).collect::<Vec<_>>(), b.iter().map(|v| v.to_bits()).collect::<Vec<_>>());
+    let exact = |i: usize, j: usize| smooth(g.direction(id.face, i64::from(id.ti) * t - h + i as i64, i64::from(id.tj) * t - h + j as i64));
+    let mut worst = 0.0f64;
+    for j in 0..w {
+        for i in 0..w {
+            let e = (a[j * w + i] - exact(i, j)).abs();
+            if i % 4 == 0 && j % 4 == 0 {
+                assert!(e < 1e-9, "node ({i}, {j}) is off by {e} m");
+            }
+            worst = worst.max(e);
+        }
+    }
+    assert!(worst < 1.0, "between the nodes the interpolation is off by {worst} m on a field of wavelength over 20 cells");
+}
+
+// spec: GEN-101
+#[test]
+fn thermal_at_the_standard_parameters_runs_300_passes_of_an_eighth_which_the_kernel_accepts() {
+    let p = Pass2Params::standard(1, 0.0);
+    assert_eq!((p.thermal.passes, p.thermal.k), (300, 0.125));
+    let (g, id) = (grid(), tile(1, 1));
+    let r = pass2_tile(&g, id, &base, &nothing, None, &p, 2);
+    assert!(r.stats.thermal_passes <= 300 && r.stats.land_cells > 100, "{:?}", r.stats);
 }
