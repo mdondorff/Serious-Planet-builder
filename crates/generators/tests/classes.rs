@@ -423,9 +423,9 @@ fn the_mountain_band_is_ridged_four_and_a_half_times_as_high_and_centred() {
     for i in 0..60_000u32 {
         // A golden-angle spiral over the sphere: deterministic, evenly spread.
         let z = 1.0 - 2.0 * (f64::from(i) + 0.5) / 60_000.0;
-        let r = (1.0 - z * z).sqrt();
+        let r = libm::sqrt(1.0 - z * z);
         let phi = f64::from(i) * 2.399_963_229_728_653;
-        let d = Vec3::new(r * phi.cos(), r * phi.sin(), z);
+        let d = Vec3::new(r * libm::cos(phi), r * libm::sin(phi), z);
         let p = source.eval(d);
         let wm = p.weights[MOUNTAINS] + p.weights[HIGH_MOUNTAINS];
         if wm < 0.99 || p.land_depth < 0.2 || p.e0 > 8000.0 {
