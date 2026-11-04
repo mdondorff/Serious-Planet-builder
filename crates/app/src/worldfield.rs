@@ -58,11 +58,21 @@ pub fn default_store_in(root: &Path, env: Option<std::path::PathBuf>) -> Option<
 pub struct ErosionOptions {
     /// The folder of the layer; the world's store when none.
     pub layer_dir: Option<std::path::PathBuf>,
-    /// The bake's pass-1 and pass-2 cells a face edge (`--face-res`, `--planet-res`).
-    pub face_res: usize,
-    pub planet_res: usize,
-    /// Draw the layer although the store does not say it was baked from the class source.
+    /// Replacements of the layer manifest's pass-1 and pass-2 cells a face edge (`--face-res`, `--planet-res`); none: the manifest's, or the production bake's when the layer has no manifest.
+    pub face_res: Option<usize>,
+    pub planet_res: Option<usize>,
+    /// Draw the layer although the store holds the legacy generator's bake.
     pub unchecked: bool,
+}
+
+/// The pass-1 and pass-2 cells the layer was opened with: the override, else the manifest's, else the production bake's.
+fn layer_shape_cells(
+    manifest: &Option<planet_cache::layer_manifest::LayerManifest>,
+    defaults: &planet_cache::layer_tiles::BakeShape,
+    over: &planet_cache::layer_tiles::ShapeOverride,
+) -> (usize, usize) {
+    let base = manifest.as_ref().map_or((defaults.face_res, defaults.planet_res), |m| (m.shape.face_res, m.shape.planet_res));
+    (over.face_res.unwrap_or(base.0), over.planet_res.unwrap_or(base.1))
 }
 
 /// Decoded tiles the layer keeps (a cap's bounds read up to 36, a read a stencil's four; a core is 37.7 MB at 3,072 cells, so up to about 1.7 GB with the pyramids).
@@ -203,6 +213,8 @@ pub struct WorldTerrain {
     coupled_lens: std::sync::atomic::AtomicU8,
     /// The directory of the stored bake the coupled channel lives beside; none for an in-memory bake.
     store_dir: Option<std::path::PathBuf>,
+    /// The world of the stored bake (its field source, STRM-073), kept for the keys of the erosion layer; none for an in-memory bake.
+    store_world: Option<&'static GlobalWorld>,
     /// The erosion layer of a bake drawn over the stored world (VIEW-062, GEN-112), when the run asked for it ([`WorldTerrain::with_erosion`]).
     erosion: Option<planet_generators::height_fields::ErosionSwitch>,
     /// What the layer is, for the log and the title.
@@ -319,6 +331,7 @@ impl WorldTerrain {
             horizon: Default::default(),
             coupled_lens: Default::default(),
             store_dir: None,
+            store_world: None,
             erosion: None,
             erosion_note: String::new(),
         })
@@ -419,6 +432,7 @@ impl WorldTerrain {
             horizon: Default::default(),
             coupled_lens: Default::default(),
             store_dir: Some(dir.to_path_buf()),
+            store_world: Some(world),
             erosion: None,
             erosion_note: String::new(),
         })
@@ -619,7 +633,7 @@ impl WorldTerrain {
     /// A line for the run's output: which field, over which bake.
     pub fn describe(&self) -> String {
         let mut s = if self.has_bake {
-            format!("height field {} over a {}-cell bake", self.id(), self.res)
+            format!("height field {} over a {}-cell bake ({})", self.id(), self.res, self.field_source_name())
         } else {
             format!("height field {}", self.id())
         };
@@ -640,6 +654,15 @@ impl WorldTerrain {
             planet_res: o.erosion_res,
             unchecked: o.erosion_unchecked,
         })
+    }
+
+    /// The field source of the bake this world reads, for the log and the title (STRM-073, VIEW-065): the class source's, the legacy generator's, or the in-memory preview bake's.
+    pub fn field_source_name(&self) -> &'static str {
+        match self.store_world {
+            Some(w) if w.class_source().is_some() => "class source",
+            Some(_) => "legacy source",
+            None => "legacy source, in memory",
+        }
     }
 
     /// What the erosion layer is when it is on (`--erosion on`): empty otherwise.
@@ -670,43 +693,34 @@ impl WorldTerrain {
         if sea != 0.0 {
             return Err(format!("--erosion: the layer was carved over a sea at 0 m, the definition's is {sea} m"));
         }
-        if !o.unchecked {
+        // The world of the store records its field source (STRM-073): the layer was carved on the class source's surface, today's legacy stores hold another one (2 km apart on the mountains tile).
+        let Some(stored) = self.store_world else {
+            return Err("--erosion needs --store: the layer is drawn over a stored bake".into());
+        };
+        if stored.class_source().is_none() && !o.unchecked {
             return Err(format!(
-                "{}: the store does not say it was baked from the class source (BakeInputs::id() {:016x}): the erosion layer was carved on that surface, and today's stores hold the legacy generator's \
-                 (about 2 km apart on the mountains tile); a store written by the class-source bake carries the marker. --erosion-unchecked draws the layer anyway (a test of the plumbing, not a look)",
-                store_dir.display(),
-                planet_generators::bake::inputs::BakeInputs::id()
+                "{}: the store holds the legacy generator's bake, and the erosion layer was carved on the class source's surface (about 2 km apart on the mountains tile): bake the field from the class source (`generate --global-dir --class-source`). \
+                 --erosion-unchecked draws the layer anyway (a test of the plumbing, not a look)",
+                store_dir.display()
             ));
         }
         let def = self.definition();
         let seed = GenContext::new(&def).body_seed(BodyId::PLANET).map_err(|e| format!("the definition has no body seed: {e}"))?;
-        let world = Arc::new(GlobalWorld::from_definition(&def).map_err(|e| format!("the definition cannot be generated: {e}"))?);
-        let shape = planet_cache::layer_tiles::BakeShape {
-            seed,
-            radius_m: self.radius_m,
-            face_res: o.face_res,
-            planet_res: o.planet_res,
-            tile: None,
-            halo: None,
-        };
+        let world = Arc::new(stored.clone());
+        let defaults = planet_cache::layer_tiles::BakeShape::production(seed, self.radius_m);
+        let over = planet_cache::layer_tiles::ShapeOverride { face_res: o.face_res, planet_res: o.planet_res };
         let dir = o.layer_dir.clone().unwrap_or(store_dir);
-        let layer = planet_cache::layer_tiles::StoreLayer::open(
-            &dir,
-            world,
-            &shape,
-            LAYER_CACHE_TILES,
-            planet_cache::layer_tiles::default_change_range(),
-        )
-        .map_err(|e| format!("--erosion: {e}"))?;
+        let (layer, manifest) = planet_cache::layer_tiles::StoreLayer::open_recorded(&dir, world, &defaults, over, LAYER_CACHE_TILES)
+            .map_err(|e| format!("--erosion: {e}"))?;
+        let (face_res, planet_res) = (layer_shape_cells(&manifest, &defaults, &over).0, layer_shape_cells(&manifest, &defaults, &over).1);
         let layer = planet_generators::erosion_layer::ErosionLayer::new(Arc::new(layer)).map_err(|e| format!("--erosion: {e}"))?;
         let sea_level_m = def.sea(BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;
         // The layer's ground is the lattice read C1 (a bilinear read leaves a crease along every lattice cell under it): the default field is upgraded.
         self.kind = HeightFieldKind::ErodedC1;
         self.erosion_note = format!(
-            "erosion layer {} (pass 1 at {} cells, pass 2 at {}, seed {seed}, coast fade {} m over the sea level {sea_level_m} m, crease band on, relief channels off, C1 base)",
+            "erosion layer {} ({}; pass 1 at {face_res} cells, pass 2 at {planet_res}, seed {seed}, coast fade {} m over the sea level {sea_level_m} m, crease band on, relief channels off, C1 base)",
             dir.display(),
-            o.face_res,
-            o.planet_res,
+            if manifest.is_some() { "its manifest" } else { "no manifest: the options and the production shape" },
             planet_generators::erosion_layer::COAST_FADE_M
         );
         self.source = format!("{} + {}", self.source, self.erosion_note);

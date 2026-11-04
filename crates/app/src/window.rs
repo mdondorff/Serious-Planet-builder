@@ -1971,7 +1971,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
                     Some(p) => crate::worldfield::load_world(p)?,
                     None => planet_world_def::WorldDefinition::single_planet(crate::skeleton::RADIUS_M, o.seed),
                 };
-                WorldTerrain::open_store(def, dir, res)?
+                WorldTerrain::open_store_as(def, dir, res, o.field_source_choice()?)?
             }
             None => WorldTerrain::of_perf_options(o, crate::skeleton::RADIUS_M)?,
         }
@@ -1979,6 +1979,8 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         // The viewer's plans keep the tiles whose water the view sees even where their terrain is culled (ADR 0053).
         .bounding_water(),
     );
+    // The title names the world's field source (class or legacy) and whether the layer is on, so a screenshot says which world it shows (VIEW-065).
+    world_label += &format!(", {}", world.field_source_name());
     if o.erosion {
         // What is on, in the log of the run (the title carries "erosion layer").
         let _ = writeln!(out, "{}", world.describe());

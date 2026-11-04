@@ -20,6 +20,7 @@ use planet_generators::bake::tile::{dequantise, pass2_tile, quantise, Pass2Param
 
 use crate::global_store::GlobalWorld;
 use crate::key::{cache_key, CacheKey, Kind, PARAM_RESOLUTION, PARAM_TILE_LAYER};
+use crate::layer_manifest::{LayerManifest, ManifestSource};
 use crate::layer_store::{face_key, LayerSpec, LayerStoreError};
 use crate::pack::{PackWriter, Record, TileStore, DEFAULT_MAX_PACK_BYTES};
 
@@ -372,6 +373,13 @@ pub struct StoreLayer {
     id: u64,
 }
 
+/// What a caller may replace of a layer manifest's shape (the bake's `--face-res` and `--planet-res`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ShapeOverride {
+    pub face_res: Option<usize>,
+    pub planet_res: Option<usize>,
+}
+
 /// The range of the change when the layer's manifest gives none: the representable range of the stored counts (`i16` of [`planet_generators::bake::tile::QUANT_STEP_M`]).
 pub fn default_change_range() -> (f64, f64) {
     let limit = f64::from(i16::MAX) * f64::from(planet_generators::bake::tile::QUANT_STEP_M);
@@ -434,6 +442,64 @@ impl StoreLayer {
             })?;
         planet_generators::erosion_layer::LayerSource::tile(&layer, first.face, first.ti, first.tj)?;
         Ok(layer)
+    }
+
+    /// Opens the layer in `dir` the way the layer says it was made (STRM-074): the manifest of its `tiles/` folder gives the bake shape, the versions this build must still read
+    /// ([`LayerManifest::check_current`]), the field source (refused when it is not the one of `world`, naming both) and the range of the change for the bounds; `over` replaces its pass-1 or
+    /// pass-2 cells. A layer without a manifest (made before it) takes `defaults` and the representable range. Returns the layer and the manifest it was read from.
+    pub fn open_recorded(
+        dir: &Path,
+        world: Arc<GlobalWorld>,
+        defaults: &BakeShape,
+        over: ShapeOverride,
+        capacity: usize,
+    ) -> Result<(StoreLayer, Option<LayerManifest>), String> {
+        let tiles_dir = if dir.join("tiles").is_dir() { dir.join("tiles") } else { dir.to_path_buf() };
+        let manifest = if tiles_dir.is_dir() { LayerManifest::read(&tiles_dir)? } else { None };
+        let (shape, range) = match &manifest {
+            Some(m) => {
+                m.check_current().map_err(|e| format!("{}: {e}", tiles_dir.display()))?;
+                let world_source = match world.class_source() {
+                    Some(_) => ManifestSource::Class(planet_generators::bake::inputs::BakeInputs::id()),
+                    None => ManifestSource::Legacy,
+                };
+                if m.source != world_source {
+                    return Err(format!(
+                        "{}: the layer manifest says the layer was carved on the field source {:?}, the world of the store is {:?}: a layer is drawn only on the ground it was carved on",
+                        tiles_dir.display(),
+                        m.source,
+                        world_source
+                    ));
+                }
+                if (m.shape.seed, m.shape.radius_m) != (defaults.seed, defaults.radius_m) {
+                    return Err(format!(
+                        "{}: the layer manifest says seed {} and radius {} m, the world is seed {} and radius {} m",
+                        tiles_dir.display(),
+                        m.shape.seed,
+                        m.shape.radius_m,
+                        defaults.seed,
+                        defaults.radius_m
+                    ));
+                }
+                (
+                    BakeShape {
+                        face_res: over.face_res.unwrap_or(m.shape.face_res),
+                        planet_res: over.planet_res.unwrap_or(m.shape.planet_res),
+                        ..m.shape
+                    },
+                    m.range(),
+                )
+            }
+            None => (
+                BakeShape {
+                    face_res: over.face_res.unwrap_or(defaults.face_res),
+                    planet_res: over.planet_res.unwrap_or(defaults.planet_res),
+                    ..*defaults
+                },
+                default_change_range(),
+            ),
+        };
+        Ok((StoreLayer::open(dir, world, &shape, capacity, range)?, manifest))
     }
 
     /// Tiles decoded so far (a hit is not a decode; a tile that left the cache and comes back is).

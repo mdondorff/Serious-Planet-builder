@@ -690,6 +690,7 @@ pub struct StoredCoupled {
 
 /// The global-coarse bake of one body of a definition as the store sees it: its seed (through the recording context), radius,
 /// the entries of its read set and what identifies its store and its blocks.
+#[derive(Clone)]
 pub struct GlobalWorld {
     seed: u64,
     body: BodyId,
