@@ -1121,3 +1121,54 @@ Source: SPIKE-57, SPIKE-40 (drainage density target), SPIKE-47, CON-14
 #### Scenario: A tilted V valley with a pit
 - **WHEN** the drainage runs on a tilted V valley holding one pit
 - **THEN** the pit is filled, the area grows downstream along the axis by one cell row each step, and the density equals the analytic channel length over the area within 1 %
+
+### Requirement: GEN-108 The descent site of a world
+A world definition MAY name the viewer's descent site, `[world] site = [latitude, longitude]` in degrees (finite; latitude within 90, longitude within 180), written canonically and otherwise refused naming `world.site`. The site SHALL enter no hash. The viewer SHALL open the descent over the first of: the `--site` option; the definition's site; 20 N 30 E where the field there is land; the land 1 km inland of the first shore `find_coast` finds from 20 N 30 E; 20 N 30 E.
+
+Verify: A
+Status: active
+Source: Owner test 2026-11-03 (the default site is sea on m9r2), inbox #52, #53
+
+#### Scenario: The definition's site
+- **WHEN** a definition with `world.site` is parsed, written and parsed again, and hashed with and without the site
+- **THEN** the site round-trips exactly, the text is canonical, and the hash and base hash are equal
+
+#### Scenario: A bad site
+- **WHEN** `world.site` has one or three numbers, a string, a latitude beyond 90 or a longitude beyond 180 degrees, or a NaN
+- **THEN** loading is refused, naming `world.site`
+
+#### Scenario: The order of the sources
+- **WHEN** the descent site is asked with `--site`, with a definition site, and with neither on worlds where 20 N 30 E is sea
+- **THEN** the option wins, then the definition's, and otherwise the result is land (the field above the sea level there) and the same on a second call
+
+### Requirement: GEN-109 The crease band
+`with_crease_band(CreaseBand)` MAY drop a relief field's crease octaves above the erosion layer's grid (ADR 0098):
+- it needs the relief channels on; without the call the field is today's, bit for bit;
+- an octave of at most `near` layer cells (2) keeps its weight, one of `far` (4) or more is dropped, between them a smoothstep in the log of its cell;
+- above the sea level it blends in over `blend_m` (200 m); below it the creases are today's;
+- the bounds take the weighted octaves, and today's where a cap reaches the blend;
+- the band enters the keys and the implementation id, not the field version.
+
+Verify: A
+Status: active
+Source: ADR 0098 (owner, 2026-11-03), ADR 0088 points 2 and 5, GEN-099
+
+#### Scenario: Off
+- **WHEN** the field has the relief channels on and the call is not made, or the band keeps every octave, or its sea level is above every ground
+- **THEN** every height equals today's field's to the bit, with and without the C1 base
+
+#### Scenario: The weights
+- **WHEN** the weight is read at 2 cells, 4 cells, their geometric mean and everything between and beyond
+- **THEN** it is 1, 0 and 0.5, non-increasing, and the octaves of the Earth keep octaves 7 to 11, drop octaves 0 to 5 and weigh octave 6 below 0.02
+
+#### Scenario: The sea floor, the land and the shore
+- **WHEN** heights are read where the base is below the band's sea level, and along a line across a shore with a blend of 200 m and of 0
+- **THEN** the first equal today's field's to the bit, most of the land's differ, and the largest step per half metre across the shore is a third of the hard step's or less, and under 3 m
+
+#### Scenario: Bounds
+- **WHEN** random caps, caps on cube edges and caps that reach the blend are bounded, and nested caps are compared
+- **THEN** every height, also rounded to f32, lies within its bounds, the width of a cap on land is no more than today's, and an inner cap's bounds lie within the outer cap's, on both bases
+
+#### Scenario: Keys
+- **WHEN** the band's cell, cells, sea level or blend change, or it is switched on, and the relief channels are asked for after the band
+- **THEN** the inputs hash and the implementation id differ, the late call is refused, and a batch and every thread count give the single reads' bits

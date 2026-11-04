@@ -1,0 +1,1 @@
+- 2026-11-03 land-default-site (inbox #53): GEN-108, an optional `[world] site = [lat, lon]` (no hash) and a viewer default that snaps to land with `find_coast` when 20 N 30 E is sea; the m9r2 world file names the hills site

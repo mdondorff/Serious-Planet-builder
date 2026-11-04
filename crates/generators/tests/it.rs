@@ -4,6 +4,8 @@ mod bake_face;
 mod bake_kernels;
 #[path = "bake_thermal.rs"]
 mod bake_thermal;
+#[path = "bake_tile.rs"]
+mod bake_tile;
 #[path = "block_order.rs"]
 mod block_order;
 #[path = "body_keys.rs"]
@@ -34,6 +36,8 @@ mod continents;
 mod coupled_fill;
 #[path = "coupled_lens.rs"]
 mod coupled_lens;
+#[path = "crease_band.rs"]
+mod crease_band;
 #[path = "descriptors.rs"]
 mod descriptors;
 #[path = "erosion.rs"]

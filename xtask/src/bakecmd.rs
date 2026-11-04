@@ -5,19 +5,18 @@
 use crate::util::{run, Res};
 use std::path::Path;
 
-/// The `cargo` arguments that run the example with the user's options.
+/// The `cargo` arguments that run the example of a step with the user's options.
 pub fn cargo_args(args: &[String]) -> Res<Vec<String>> {
-    match args.first().map(String::as_str) {
-        Some("pass1") => {}
-        Some(other) => return Err(format!("unknown bake step '{other}' (known: pass1)")),
+    let example = match args.first().map(String::as_str) {
+        Some("pass1") => "bake_pass1",
+        Some("layer") => "bake_layer",
+        Some(other) => return Err(format!("unknown bake step '{other}' (known: pass1, layer)")),
         None => {
-            return Err(
-                "usage: cargo xtask bake pass1 [--planet-res N] [--seed N] [--out DIR] [--threads N] [--faces LIST] [--map-width W]".into(),
-            )
+            return Err("usage: cargo xtask bake pass1 [--planet-res N] [--seed N] [--out DIR] [--threads N] [--faces LIST] [--map-width W] | bake layer [--face-res N] [--planet-res N] [--tile N] [--halo N] [--region FILE] [--keep-pass1] [--seed N] [--out DIR] [--threads N] [--map-width W]".into())
         }
-    }
+    };
     let mut v: Vec<String> =
-        ["run", "--release", "-q", "-p", "planet-cache", "--example", "bake_pass1", "--"].iter().map(|s| s.to_string()).collect();
+        ["run", "--release", "-q", "-p", "planet-cache", "--example", example, "--"].iter().map(|s| s.to_string()).collect();
     v.extend(args[1..].iter().cloned());
     Ok(v)
 }
@@ -44,10 +43,22 @@ mod tests {
         assert!(c.contains(&"bake_pass1".to_string()), "{c:?}");
     }
 
+    // spec: GEN-101
+    #[test]
+    fn the_layer_step_runs_its_own_example() {
+        let c = cargo_args(&a(&["layer", "--planet-res", "3072", "--keep-pass1"])).unwrap();
+        assert!(
+            c.contains(&"bake_layer".to_string())
+                && c.windows(2).any(|w| w == ["--planet-res", "3072"])
+                && c.contains(&"--keep-pass1".to_string()),
+            "{c:?}"
+        );
+    }
+
     // spec: GEN-100
     #[test]
     fn an_unknown_step_is_refused_naming_what_is_known() {
         assert!(cargo_args(&a(&[])).unwrap_err().contains("usage"));
-        assert!(cargo_args(&a(&["pass2"])).unwrap_err().contains("pass1"));
+        assert!(cargo_args(&a(&["pass2"])).unwrap_err().contains("pass1, layer"));
     }
 }

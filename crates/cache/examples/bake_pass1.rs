@@ -11,23 +11,11 @@ use planet_cache::pack::TileStore;
 use planet_core::{Face, Vec3};
 use planet_generators::bake::carve::CarveParams;
 use planet_generators::bake::face::FaceChange;
+use planet_generators::bake::inputs::BakeInputs;
 use planet_generators::bake::map::{edge_steps, pass1_maps};
-use planet_generators::classes::{blended_carve_factor, blended_k, ClassLattice, ClassSource, CLASS_LATTICE_N};
 use planet_world_def::WorldDefinition;
 
 const RADIUS_M: f64 = 6_371_000.0;
-/// The identity of the bake's inputs in the layer's key until the relief channels are a stored input of the run (PR 5): the class source's and class list's versions, the lattice
-/// size and the class tables of `k` and of the carve factor.
-fn inputs_id() -> u64 {
-    use planet_generators::classes::{CLASS_CARVE, CLASS_K, CLASS_LIST_VERSION, CLASS_SOURCE_VERSION};
-    let mut h = 0xCBF2_9CE4_8422_2325u64;
-    let mut put = |v: u64| h = (h ^ v).wrapping_mul(0x0000_0100_0000_01B3);
-    put(u64::from(CLASS_SOURCE_VERSION));
-    put(u64::from(CLASS_LIST_VERSION));
-    put(CLASS_LATTICE_N as u64);
-    CLASS_K.iter().chain(CLASS_CARVE.iter()).for_each(|v| put(v.to_bits()));
-    h
-}
 /// The largest `--planet-res` a run takes without the planner's go (the full resolution is 12,288).
 const COARSE_LIMIT: usize = 4096;
 
@@ -65,19 +53,13 @@ fn main() {
     if res > COARSE_LIMIT {
         fail(&format!("--planet-res above {COARSE_LIMIT} is a full-resolution bake and needs the planner's go"));
     }
-    if threads == 0 {
-        threads = std::thread::available_parallelism().map_or(1, |n| n.get());
-    }
+    let (threads, threads_note) = planet_streaming::topology::bake_threads(threads).unwrap_or_else(|e| fail(&e));
     let out = out.unwrap_or_else(|| PathBuf::from(format!("target/bake/pass1-seed-{seed}-res-{res}")));
     let store_dir = out.join("layer");
     let world = GlobalWorld::from_definition(&WorldDefinition::single_planet(RADIUS_M, seed)).unwrap_or_else(|e| fail(&format!("{e:?}")));
-    let source = ClassSource::new(seed);
-    let lattice = ClassLattice::build_with(&source, CLASS_LATTICE_N, threads);
-    let base = |d: Vec3| {
-        let p = source.eval(d);
-        source.elevation_m(d, &p, blended_k(&lattice.weights_at(d)))
-    };
-    let factor = |d: Vec3| blended_carve_factor(&lattice.weights_at(d));
+    let inputs = BakeInputs::new(seed, threads);
+    let base = |d: Vec3| inputs.base(d);
+    let factor = |d: Vec3| inputs.carve_factor(d);
     let halo = halo.unwrap_or(res.div_ceil(128).max(4).min((res - 1) / 2));
     let spec = LayerSpec {
         cells: res,
@@ -85,13 +67,13 @@ fn main() {
         sea_level: 0.0,
         seed,
         carve: CarveParams::default(),
-        inputs_id: inputs_id(),
+        inputs_id: BakeInputs::id(),
         uses_factor: true,
         halo,
     };
     let bake_res = res as u32;
     println!(
-        "pass 1: seed {seed}, {res} cells per face edge ({:.0} m), halo {halo} cells, faces {faces:?}, one at a time on {threads} threads",
+        "pass 1: seed {seed}, {res} cells per face edge ({:.0} m), halo {halo} cells, faces {faces:?}, one at a time on {threads} threads ({threads_note})",
         RADIUS_M * core::f64::consts::FRAC_PI_2 / res as f64
     );
     let started = Instant::now();

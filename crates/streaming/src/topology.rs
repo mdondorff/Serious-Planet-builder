@@ -20,6 +20,28 @@ impl CpuTopology {
     pub fn capped(self, available: usize) -> CpuTopology {
         CpuTopology { p: self.p.min(available).max(1), e: self.e }
     }
+
+    /// The background capacity `B = max(P - 2, 1)` (BUDG-013, ADR 0092): the threads that work beside a frame; two stay for the frame's main and render threads.
+    pub fn background_capacity(self) -> usize {
+        self.p.saturating_sub(2).max(1)
+    }
+}
+
+/// The worker count of a bake command (owner, 2026-11-03: the world build runs on the performance cores, not on every logical thread): `requested` when the command was given one, else
+/// the background capacity `B` of the detected topology. Returns the count and the text for the command's log: `B = 18 (P = 20)` or `override 4 (B = 18)`. The results of the bakes
+/// do not depend on the count (CON-14); only the time does.
+pub fn bake_threads(requested: usize) -> Result<(usize, String), String> {
+    bake_threads_in(detect()?, requested)
+}
+
+/// [`bake_threads`] on a given topology.
+pub fn bake_threads_in(topology: CpuTopology, requested: usize) -> Result<(usize, String), String> {
+    let b = topology.background_capacity();
+    if requested == 0 {
+        Ok((b, format!("B = {b} (P = {})", topology.p)))
+    } else {
+        Ok((requested, format!("override {requested} (B = {b})")))
+    }
 }
 
 /// Parse the override `P,E`: two counts, P at least 1.
@@ -270,5 +292,19 @@ mod tests {
             assert!(t.p >= 1 && t.p <= available_threads(), "{t:?} on {} usable threads", available_threads());
             eprintln!("detected {t:?} on {} usable threads", available_threads());
         }
+    }
+
+    // spec: BUDG-015
+    #[test]
+    fn the_bake_default_is_the_background_capacity_and_an_override_is_logged_beside_it() {
+        // spec: BUDG-013
+        let cases = [(12, 10), (20, 18), (2, 1), (1, 1), (3, 1)];
+        for (p, b) in cases {
+            let t = CpuTopology { p, e: 8 };
+            assert_eq!(t.background_capacity(), b, "P = {p}");
+            assert_eq!(bake_threads_in(t, 0).unwrap(), (b, format!("B = {b} (P = {p})")));
+        }
+        assert_eq!(bake_threads_in(CpuTopology { p: 20, e: 8 }, 4).unwrap(), (4, "override 4 (B = 18)".to_string()));
+        assert_eq!(bake_threads_in(CpuTopology { p: 20, e: 8 }, 40).unwrap().0, 40, "an override above B is kept");
     }
 }
