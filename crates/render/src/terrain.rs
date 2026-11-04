@@ -467,13 +467,6 @@ fn ground_detail(node_index: u32, local: vec3<f32>, normal: vec3<f32>, up: vec3<
     }
     let n = normalize(normal);
     let cs = clamp(dot(n, up), 0.0, 1.0);
-    let ia = vec4<f32>(cs, h, t, p);
-    // The surface type is 0 outside regions; the three driver slots (LOOK-008) are the tile's blended soil depth, moisture and insolation.
-    let ib = vec4<f32>(0.0, drv.x, drv.y, drv.z);
-    let w = material_weights(ia, ib);
-    if (w.x + w.y + w.z + w.w <= 0.0) {
-        return out;
-    }
     let cell = vec3<i32>(bitcast<i32>(nodes[node_index].phase[0].w), bitcast<i32>(nodes[node_index].phase[1].w), bitcast<i32>(nodes[node_index].phase[2].w));
     let frac = vec3<f32>(nodes[node_index].phase[3].w, nodes[node_index].phase[4].w, nodes[node_index].phase[5].w);
     // The planes of the noise: the plane that drops the lattice axis the normal lies closest to is the main one (the noise is planar on the other two,
@@ -483,6 +476,24 @@ fn ground_detail(node_index: u32, local: vec3<f32>, normal: vec3<f32>, up: vec3<
     let top = max(an.x, max(an.y, an.z));
     let axes0 = clamp((an - vec3<f32>(top - 0.12)) / 0.12, vec3<f32>(0.0), vec3<f32>(1.0));
     let axes = axes0 / (axes0.x + axes0.y + axes0.z);
+    // SPIKE-100 prototype (spike branch only; `g.detail.z` > 0, PLANET_SPIKE100_PATCH): two patch octaves at 32 m and 8 m shift the slope input of the
+    // material weights by up to `g.detail.z` of its cosine, so the rock / ground boundary breaks into patches; they fade at four times the footprint
+    // of the detail octaves, so the patches hold out to a few hundred metres.
+    var cs_w = cs;
+    var steep = 0.0;
+    if (g.detail.z > 0.0) {
+        let p32 = gd_octave(cell, frac, local, foot * 0.25, 10u, 4u, axes);
+        let p8 = gd_octave(cell, frac, local, foot * 0.25, 8u, 5u, axes);
+        cs_w = clamp(cs + g.detail.z * (0.65 * p32.w + 0.35 * p8.w), 0.0, 1.0);
+        steep = 1.0 - smoothstep(0.5, 0.86, cs);
+    }
+    let ia = vec4<f32>(cs_w, h, t, p);
+    // The surface type is 0 outside regions; the three driver slots (LOOK-008) are the tile's blended soil depth, moisture and insolation.
+    let ib = vec4<f32>(0.0, drv.x, drv.y, drv.z);
+    let w = material_weights(ia, ib);
+    if (w.x + w.y + w.z + w.w <= 0.0) {
+        return out;
+    }
     // The detail is a sum over the octaves of the materials' coefficients, weighted by the material weights: the albedo multiplier is linear in
     // the octaves' values and the shading tilt in their gradients, so each octave is added as soon as it is evaluated and none is kept (G2c: the
     // results kept for per-material mixes were most of the register pressure of the pass). The octaves are unrolled with constant arguments (a
@@ -501,7 +512,7 @@ fn ground_detail(node_index: u32, local: vec3<f32>, normal: vec3<f32>, up: vec3<
         // 2 m: the mounds and the clumps.
         let o = gd_octave(cell, frac, local, foot, 6u, 1u, axes);
         mul = mul + o.w * gd_tint(w, vec4<f32>(0.0, 0.05, 0.0, 0.0), 0.08 * grass_mean);
-        slope = slope + dot(w, vec4<f32>(0.05, 0.03, 0.0, 0.0)) * o.xyz;
+        slope = slope + dot(w, vec4<f32>(0.05 * (1.0 + 2.0 * steep), 0.03, 0.0, 0.0)) * o.xyz;
     }
     {
         // 25 cm: the stones, the tufts and the ripples.
@@ -511,7 +522,7 @@ fn ground_detail(node_index: u32, local: vec3<f32>, normal: vec3<f32>, up: vec3<
         let fade3 = 1.0 - smoothstep(0.06, 0.25, foot * 4.0);
         let crack = smoothstep(0.80, 1.0, 1.0 - abs(o.w / max(fade3, 1.0e-3))) * fade3;
         mul = mul + o.w * gd_tint(w, vec4<f32>(0.34, 0.05, 0.0, 0.18), grass_half) - (0.55 * crack * w.x) * vec3<f32>(1.0, 0.98, 0.95);
-        slope = slope + dot(w, vec4<f32>(0.20, 0.05, 0.10, 0.12)) * o.xyz;
+        slope = slope + dot(w, vec4<f32>(0.20 * (1.0 + 1.0 * steep), 0.05, 0.10, 0.12)) * o.xyz;
     }
     {
         // 3 cm: the grain and the blades.
@@ -2413,7 +2424,7 @@ impl TerrainRenderer {
                 );
                 globals.extend(f32_bytes(&[lit.water_level_m, lit.overlay.shader_code(), plan.shore_ramp_per_m, 0.0]));
                 globals.extend(f32_bytes(&lit.albedo.to_words()));
-                globals.extend(f32_bytes(&[lit.ground_detail as f32, lit.gloss.f0 as f32, 0.0, 0.0]));
+                globals.extend(f32_bytes(&[lit.ground_detail as f32, lit.gloss.f0 as f32, spike100_patch(), 0.0]));
                 globals.extend(f32_bytes(&lit.materials.to_words()));
                 globals.extend(f32_bytes(&lit.gloss.to_words()));
             }
@@ -3088,4 +3099,9 @@ mod one_shot_tests {
             assert!(pool.block_bytes() <= planet_frame::pool::COMPACT_BLOCK_BYTES);
         }
     }
+}
+
+/// SPIKE-100 prototype switch (spike branch only): `PLANET_SPIKE100_PATCH` = the patch octaves' shift of the slope cosine (0 or unset: off).
+fn spike100_patch() -> f32 {
+    std::env::var("PLANET_SPIKE100_PATCH").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0)
 }
