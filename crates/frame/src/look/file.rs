@@ -62,7 +62,7 @@
 //! step. What a generator reads (kind ids, liquid kinds, thresholds that shape the world) stays in the world definition, never here.
 
 use super::atmosphere::AtmosphereParams;
-use super::materials::{MaterialParams, INPUT_NAMES, MATERIAL_NAMES, NATURAL_STRENGTH};
+use super::materials::{DetailCoefficients, MaterialParams, INPUT_NAMES, MATERIAL_NAMES, NATURAL_STRENGTH, OCTAVE_NAMES};
 use super::shading::AlbedoParams;
 use super::water::WaterLook;
 use super::{ExposureParams, HistogramParams, SceneUnits, ToneMapMode, DEFAULT_SUN};
@@ -71,7 +71,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 /// Schema version this build writes and reads without migration.
-pub const SCHEMA_VERSION: u32 = 6;
+pub const SCHEMA_VERSION: u32 = 7;
 
 const VERSION_KEY: &str = "schema_version";
 const KIND_KEY: &str = "kind";
@@ -155,11 +155,13 @@ pub struct GroundLook {
     /// The patch break-up of the material boundaries (REND-055): how far, as a share of the slope cosine, two patch octaves of 32 m and 8 m shift the slope input of the material weights;
     /// 0 is off (the default: the picture is what it was, and the key does not change).
     pub patch: f64,
+    /// The coefficients of the detail octaves per material (schema version 7, LOOK-013).
+    pub coef: DetailCoefficients,
 }
 
 impl Default for GroundLook {
     fn default() -> Self {
-        Self { detail: NATURAL_STRENGTH, materials: MaterialParams::EARTH, patch: 0.0 }
+        Self { detail: NATURAL_STRENGTH, materials: MaterialParams::EARTH, patch: 0.0, coef: DetailCoefficients::EARTH }
     }
 }
 
@@ -172,6 +174,7 @@ impl GroundLook {
         if !(self.patch == 0.0 || (1e-6..=PATCH_MAX).contains(&self.patch)) {
             return Err(bad("ground.patch", self.patch, "the patch shift must be 0 (off) or from 1e-6 to 0.5 of the slope cosine"));
         }
+        self.coef.validate().map_err(|(key, value, why)| ParamError { key: leak_key(&key), value, why })?;
         self.materials.validate().map_err(|(key, value, why)| ParamError {
             key: leak_key(&key.replacen("materials.", "ground.", 1)),
             value,
@@ -451,6 +454,11 @@ fn v5_to_v6(_: &mut toml::Table) -> Result<(), String> {
     Ok(())
 }
 
+/// Version 6 to 7 adds the optional `octave` tables and `crack` of the `ground` table (LOOK-013); again no existing key moves.
+fn v6_to_v7(_: &mut toml::Table) -> Result<(), String> {
+    Ok(())
+}
+
 /// Migrations from every older version to the current one.
 pub const MIGRATIONS: &[Migration] = &[
     Migration { from: 1, apply: v1_to_v2 },
@@ -458,6 +466,7 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { from: 3, apply: v3_to_v4 },
     Migration { from: 4, apply: v4_to_v5 },
     Migration { from: 5, apply: v5_to_v6 },
+    Migration { from: 6, apply: v6_to_v7 },
 ];
 
 /// The look of every body that has an entry. A body without an entry has the Earth default.
@@ -663,6 +672,30 @@ fn read_body(path: &str, mut t: toml::Table) -> Result<LookParams, LookError> {
         let k = format!("{path}.ground");
         take_f64(&k, &mut s, "detail", &mut p.ground.detail)?;
         take_f64(&k, &mut s, "patch", &mut p.ground.patch)?;
+        take_f64(&k, &mut s, "crack", &mut p.ground.coef.crack)?;
+        match s.remove("octave") {
+            None => {}
+            Some(toml::Value::Table(mut octaves)) => {
+                let ok = format!("{k}.octave");
+                for (name, o) in OCTAVE_NAMES.iter().zip(&mut p.ground.coef.octaves) {
+                    match octaves.remove(*name) {
+                        None => {}
+                        Some(toml::Value::Table(mut t)) => {
+                            let tk = format!("{ok}.{name}");
+                            take_array(&tk, &mut t, "albedo", &mut o.albedo)?;
+                            take_array(&tk, &mut t, "grass", &mut o.grass)?;
+                            take_array(&tk, &mut t, "tilt", &mut o.tilt)?;
+                            no_more(&tk, &t)?;
+                        }
+                        Some(other) => {
+                            return Err(LookError::WrongType { key: format!("{ok}.{name}"), expected: "a table", found: other.type_str() })
+                        }
+                    }
+                }
+                no_more(&ok, &octaves)?;
+            }
+            Some(other) => return Err(LookError::WrongType { key: format!("{k}.octave"), expected: "a table", found: other.type_str() }),
+        }
         for (m, material) in MATERIAL_NAMES.iter().enumerate() {
             let mk = format!("{k}.{material}");
             match s.remove(*material) {
@@ -680,6 +713,32 @@ fn read_body(path: &str, mut t: toml::Table) -> Result<LookParams, LookError> {
     }
     p.validate().map_err(|e| LookError::BadValue { key: format!("{path}.{}", e.key), value: e.value, why: e.why })?;
     Ok(p)
+}
+
+/// Read an array of exactly `N` numbers into `slot` when the key is present.
+fn take_array<const N: usize>(table_path: &str, t: &mut toml::Table, key: &str, slot: &mut [f64; N]) -> Result<(), LookError> {
+    let full = format!("{table_path}.{key}");
+    match t.remove(key) {
+        None => Ok(()),
+        Some(toml::Value::Array(items)) => {
+            if items.len() != N {
+                return Err(LookError::BadValue {
+                    key: full,
+                    value: format!("{} values", items.len()),
+                    why: format!("must be an array of exactly {N} numbers"),
+                });
+            }
+            let mut out = [0.0; N];
+            for (k, item) in items.into_iter().enumerate() {
+                let mut one = toml::Table::new();
+                one.insert("v".to_string(), item);
+                take_f64(&format!("{full}[{k}]"), &mut one, "v", &mut out[k])?;
+            }
+            *slot = out;
+            Ok(())
+        }
+        Some(other) => Err(LookError::WrongType { key: full, expected: "an array of numbers", found: other.type_str() }),
+    }
 }
 
 /// Read an array of exactly two numbers into `slot` when the key is present.
@@ -893,6 +952,14 @@ pub fn to_toml(file: &LookFile) -> String {
         }
         out.push_str(&format!("\n[body.{b}.ground]\n{}", line("detail", p.ground.detail)));
         out.push_str(&line("patch", p.ground.patch));
+        out.push_str(&line("crack", p.ground.coef.crack));
+        for (name, o) in OCTAVE_NAMES.iter().zip(&p.ground.coef.octaves) {
+            out.push_str(&format!("\n[body.{b}.ground.octave.{name}]\n"));
+            for (key, vals) in [("albedo", &o.albedo[..]), ("grass", &o.grass[..]), ("tilt", &o.tilt[..])] {
+                let list: Vec<String> = vals.iter().map(|v| format!("{v:?}")).collect();
+                out.push_str(&format!("{key} = [{}]\n", list.join(", ")));
+            }
+        }
         for (material, row) in MATERIAL_NAMES.iter().zip(&p.ground.materials.curves) {
             out.push_str(&format!("\n[body.{b}.ground.{material}]\n"));
             for (input, [lo, hi]) in INPUT_NAMES.iter().zip(row) {

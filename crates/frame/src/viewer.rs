@@ -1490,7 +1490,7 @@ mod tests {
         for word in ["F8", "ground look"] {
             assert!(KEYS_HELP.contains(word), "the help names {word}: {}", *KEYS_HELP);
         }
-        let mut ground = GroundLook { detail: 0.3, materials: MaterialParams::EARTH, patch: 0.12 };
+        let mut ground = GroundLook { detail: 0.3, materials: MaterialParams::EARTH, patch: 0.12, ..GroundLook::default() };
         ground.materials.curves[3][Input::Moisture as usize] = [0.55, 0.85];
         let plan = |choice, mode| LitPlan::fixed(0.0).with_ground_look(choice, mode, &ground);
         let base = plan(LookChoice::Default, GroundDetailMode::Natural);

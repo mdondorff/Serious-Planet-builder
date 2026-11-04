@@ -1,12 +1,10 @@
 ## Why
-- I8a slice 2a (planner, 2026-11-04): SPIKE-100 D1 (five-material mix) and D2 (six detail octaves per material), slope inputs only; the channels follow in slice 2b.
+- I8a slice 2a (planner, 2026-11-04), three PRs in sequence, each golden-neutral: (a) the detail coefficients as look data, (b) six material slots, (c) six octaves. This is step (a).
 
 ## What Changes
-- The material table grows by `scree` and `wet` (slots 4 and 5; `sand` stays: desert ground exists today); both are off in the Earth default curves, so no picture moves until a look turns them on.
-- The shader's per-material coefficients move from constants into the look file (`ground.<material>` octave amplitudes and tilts), so a look can differ per material.
-- Six octaves (50 m, 12 m, 3 m, 0.75 m, 0.2 m, 3 cm) behind the look: a look with the old four-octave coefficients draws the old picture bit for bit.
-- Look file schema 7.
+- The per-material coefficients of the four detail octaves (albedo, grass colour, tilt, the rock's crack depth) move from constants of the terrain shader into the look file: `ground.crack` and `ground.octave.{m16,m2,cm25,cm3}` (LOOK-013, schema version 7). The Earth default is the former constants, so no picture or golden moves.
+- The lit plan carries the table (text and key only when not the Earth default); the globals carry 13 more vec4s.
 
 ## Impact
-- Code: `frame` (look), `render` (terrain shader, globals), `app` (poses `[look]`). Goldens: none move with the Earth default.
-- Cost: measured with `shadow-cost` after the PR, against REND-034's 1.0 ms.
+- Code: `frame` (look file, plan, materials), `render` (globals, terrain shader). Requirements: LOOK-013 added, LOOK-002 modified.
+- Steps (b) REND-056 and (c) REND-057 follow in their own changes.

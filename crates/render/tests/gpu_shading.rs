@@ -348,6 +348,39 @@ fn the_ground_detail_is_inert_when_off_changes_the_lit_picture_when_on_and_leave
     assert!(hdr_of(&mut scattered, &ctx, &p, detail_plan(ShadeView::Lit, 1.0)) == on, "the detail depends on where the tiles sit");
 }
 
+// spec: LOOK-013
+#[test]
+fn the_octave_coefficients_drive_the_picture_and_the_earth_values_are_the_plain_picture() {
+    use planet_frame::look::materials::DetailCoefficients;
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let (p, _) = plan(6);
+    let mut r = renderer(&ctx, &p);
+    let plain = hdr_of(&mut r, &ctx, &p, detail_plan(ShadeView::Lit, 1.0));
+    let covered = plain.iter().filter(|px| px[3] > 0.0).count();
+    // The Earth coefficients are what a plan without the table has.
+    let mut earth = detail_plan(ShadeView::Lit, 1.0);
+    earth.coef = DetailCoefficients::EARTH;
+    assert!(hdr_of(&mut r, &ctx, &p, earth) == plain, "the Earth coefficients change the picture");
+    // Every coefficient at 0: no albedo variation and no tilt, so the picture differs on most of the ground; the strength 0 is still the off picture.
+    let mut flat = detail_plan(ShadeView::Lit, 1.0);
+    for o in &mut flat.coef.octaves {
+        o.albedo = [0.0; 3];
+        o.grass = [0.0; 3];
+        o.tilt = [0.0; 4];
+    }
+    flat.coef.crack = 0.0;
+    let flat_img = hdr_of(&mut r, &ctx, &p, flat);
+    let apart = plain
+        .iter()
+        .zip(&flat_img)
+        .filter(|(a, b)| a[3] > 0.0 && (luminance(a) - luminance(b)).abs() > 0.02 * luminance(a).max(1e-6))
+        .count();
+    assert!(apart * 5 > covered, "zero coefficients differ on {apart} of {covered} pixels only");
+    let mut off = detail_plan(ShadeView::Lit, 0.0);
+    off.coef = flat.coef;
+    assert!(hdr_of(&mut r, &ctx, &p, off) == hdr_of(&mut r, &ctx, &p, detail_plan(ShadeView::Lit, 0.0)), "the strength 0 is not inert");
+}
+
 // spec: REND-037
 #[test]
 fn each_material_alone_reads_as_itself_in_colour_and_value() {
