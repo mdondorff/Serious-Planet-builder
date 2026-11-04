@@ -293,5 +293,11 @@ fn main() {
         );
         Grid { nx: n, ny: n, dx, h, class }
     };
+    // SPIKE-102: `--dump PREFIX` writes the heights (f32) and the classes (u8) for the pit measure.
+    if let Some(prefix) = val("--dump") {
+        let hb: Vec<u8> = grid.h.iter().flat_map(|v| (*v as f32).to_le_bytes()).collect();
+        std::fs::write(format!("{prefix}.h.f32"), hb).expect("dump heights");
+        std::fs::write(format!("{prefix}.class.u8"), &grid.class).expect("dump classes");
+    }
     stats(&grid, &label);
 }
