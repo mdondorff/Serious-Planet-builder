@@ -360,13 +360,20 @@ fn a_store_layer_refuses_a_tile_outside_its_global_range_and_forgets_the_oldest_
     run(d.path(), &w, &s, &f, &tiles(), 2).unwrap();
     let store = Arc::new(TileStore::open(d.path(), w.params()).unwrap());
     let t0 = tiles()[0];
-    let stored = load_tile(&store, &w, RES, &s, t0).unwrap().expect("tile 0");
-    let top = stored.core.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-    assert!(top > 1.0, "a tile with a change to refuse ({top})");
+    // The tile with the largest change: a range of half of it must be refused.
+    let (big, top) = tiles()
+        .into_iter()
+        .map(|t| {
+            let r = load_tile(&store, &w, RES, &s, t).unwrap().expect("a tile");
+            (t, r.core.iter().fold(0.0f32, |m, v| m.max(v.abs())))
+        })
+        .fold((t0, 0.0f32), |a, b| if b.1 > a.1 { b } else { a });
+    assert!(top > 0.5, "a tile with a change to refuse ({top})");
     // A range that does not hold the tile's change is an error naming the tile, not a silently unsound bound.
-    let narrow = StoreLayer::new(store.clone(), Arc::new(world()), RES, s, 4, (-0.5, 0.5)).unwrap();
-    let e = narrow.tile(Face(0), 0, 0).err().expect("a refusal");
-    assert!(e.contains("layer tile 0/0/0") && e.contains("global range"), "{e}");
+    let half = f64::from(top) * 0.5;
+    let narrow = StoreLayer::new(store.clone(), Arc::new(world()), RES, s, 4, (-half, half)).unwrap();
+    let e = narrow.tile(big.face, big.ti, big.tj).err().expect("a refusal");
+    assert!(e.contains(&format!("layer tile {}/{}/{}", big.face.0, big.ti, big.tj)) && e.contains("global range"), "{e}");
     // A cache of two tiles decodes the third, forgets the oldest, and decodes it again when it is asked for.
     let layer = StoreLayer::new(store, Arc::new(world()), RES, s, 2, default_change_range()).unwrap();
     for t in tiles() {
