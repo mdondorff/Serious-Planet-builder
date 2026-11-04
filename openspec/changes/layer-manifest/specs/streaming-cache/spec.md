@@ -7,7 +7,7 @@ The erosion layer's store directory SHALL hold a manifest, one plain text file (
 - it is written atomically: a temporary file in the directory, then a rename over the manifest, so a killed run or two runs leave no half manifest (a temporary file of a process killed between the write and the rename may remain and is never read; runs are not locked against each other, so two simultaneous runs can lose a widening: runs of one layer are sequential);
 - a run adds to the manifest that is there: the shape, the versions and the source must be equal, else an error naming both texts (another layer's run is never mixed), and the range only widens, so after a planet run it is exactly the range of the layer's tiles;
 - a reader compares the versions with its build's (`check_current`): each version that differs is named, and a layer of another version is refused, never read;
-- the layer's command (`bake layer`) writes it after each run, over the tiles of the run, and its default pass-2 grid is the production one (98,304 cells a face edge) the viewer expects.
+- the layer's command (`bake layer`) writes it after each run, over the tiles of the run, and its default pass-2 grid is the production one (98,304 cells a face edge) the viewer expects; `--tile-dir` writes the tile records and the manifest into a chosen directory, such as the field store's own, where the viewer reads the layer when it is given no other.
 
 Verify: A
 Status: planned
