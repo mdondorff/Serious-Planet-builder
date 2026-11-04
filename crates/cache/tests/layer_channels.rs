@@ -126,7 +126,7 @@ fn the_deposited_depth_codes_are_1_m_steps_and_the_removed_depth_is_what_the_cha
     for face_change in [0.0, -30.0, 10.0] {
         let r = pass2_tile(&g, tiles()[0], &base, &|_: Vec3| face_change, None, &Pass2Params::standard(9, 0.0), 2);
         assert_eq!(r.deposited.len(), 24 * 24);
-        assert!(r.deposited.iter().any(|&c| c > 0) && r.deposited.iter().any(|&c| c == 0), "deposition happens in places");
+        assert!(r.deposited.iter().any(|&c| c > 0) && r.deposited.contains(&0), "deposition happens in places");
         // The removed depth the reader derives, max(0, deposited - change), is what the cell lost net of its deposit, and never negative: eroded = deposited - change + the pass-1 raise, so
         // the reading is short by the raise where pass 1 raised the cell (the caveat) and equal elsewhere, to the 1 m step of the code and the 0.125 m step of the change.
         for (p, c) in r.core.iter().enumerate() {
