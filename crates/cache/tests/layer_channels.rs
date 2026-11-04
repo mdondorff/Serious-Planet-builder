@@ -141,7 +141,7 @@ fn the_drainage_area_codes_start_at_a_cells_own_area_and_the_face_change_is_the_
     let spec = FaceSpec { face: Face(0), cells: 24, radius_m: R, sea_level: 0.0, seed: 17, halo: 4 };
     let (change, area) = pass1_face_with_area(&spec, &base, None, &CarveParams::default(), 2);
     assert_eq!(area.len(), 24 * 24);
-    assert!(area.iter().any(|&c| c == 0), "a cell with nothing above it holds its own area");
+    assert!(area.contains(&0), "a cell with nothing above it holds its own area");
     assert!(*area.iter().max().unwrap() >= 8, "somewhere the area is at least two cells");
     assert!((0..255u8).all(|c| area_cells(c) < area_cells(c + 1)) && area_cells(0) == 1.0);
     let plain = planet_generators::bake::face::pass1_face(&spec, &base, None, &CarveParams::default(), 2);
