@@ -444,5 +444,8 @@ fn the_mountain_band_is_ridged_four_and_a_half_times_as_high_and_centred() {
     let mean = sum / f64::from(count);
     assert!(amp_sum / f64::from(count) > 2000.0, "the mountain band is x4.5: mean amplitude {} m", amp_sum / f64::from(count));
     assert!(mean.abs() < 0.12, "the band is centred: mean {mean} of the amplitude");
-    assert!(max <= 1.0 - MOUNTAIN_BAND_CENTRE + 1e-9 && min >= -MOUNTAIN_BAND_CENTRE - 1e-9, "the band lies in [-0.45, 0.55] of its amplitude: {min}..{max}");
+    assert!(
+        max <= 1.0 - MOUNTAIN_BAND_CENTRE + 1e-9 && min >= -MOUNTAIN_BAND_CENTRE - 1e-9,
+        "the band lies in [-0.45, 0.55] of its amplitude: {min}..{max}"
+    );
 }

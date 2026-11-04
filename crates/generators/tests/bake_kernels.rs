@@ -488,11 +488,16 @@ fn the_default_breach_is_500_m_and_an_optional_height_scale_keeps_the_small_limi
         let outlet = g.outlets(&z, 0.0);
         carve(&g, &mut z, &outlet, &CarveParams { steps: 1, u_over_k: 0.0, ..params }, None, 3);
         // The spill point of the basin is its lowest rim cell, whichever the jitter picks.
-        (0..n * n).filter(|p| p % n == 5 || p % n == n - 1 || p / n == 0 || p / n == n - 1).filter(|p| p % n >= 5).map(|p| z[p]).fold(f64::MAX, f64::min)
+        (0..n * n)
+            .filter(|p| p % n == 5 || p % n == n - 1 || p / n == 0 || p / n == n - 1)
+            .filter(|p| p % n >= 5)
+            .map(|p| z[p])
+            .fold(f64::MAX, f64::min)
     };
     assert_eq!(CarveParams::default().breach_max_m, 500.0);
     assert_eq!(CarveParams::default().breach_height_scale_m, 0.0, "the height scaling is off by default");
-    let (old, new) = (one_step(400.0, CarveParams { breach_max_m: 50.0, ..CarveParams::default() }), one_step(400.0, CarveParams::default()));
+    let (old, new) =
+        (one_step(400.0, CarveParams { breach_max_m: 50.0, ..CarveParams::default() }), one_step(400.0, CarveParams::default()));
     assert!(new < old - 50.0, "the default limit of 500 m breaches the crest far lower than 50 m does: {new} against {old}");
     let scaled = one_step(400.0, CarveParams { breach_height_scale_m: 2000.0, ..CarveParams::default() });
     assert!(scaled > new && scaled < old, "a scaled limit lies between 50 and 500 m at 400 m of height: {scaled}");
