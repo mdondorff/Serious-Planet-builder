@@ -223,8 +223,8 @@ Source: ADR 0088 points 3 and 8, ADR 0088/0089 accepted 2026-11-01; SPIKE-82, SP
 
 ### Requirement: GEN-112 The runtime read of the erosion layer
 `ErosionField::with_layer(layer, sea_level)` MAY add the stored layer (STRM-065) to a relief field; without the call the field is today's, bit for bit:
-- it needs the relief channels and switches the crease band of the bake on (GEN-109);
-- the height is the relief base plus the layer's change times the coast fade (GEN-113), not scaled by `k`;
+- it switches the crease band of the bake on (GEN-109) and needs no relief channels (without them the base is the lattice read at `k` 1, `m` unread);
+- the height is the base (the relief base with the channels) plus the layer's change times the coast fade (GEN-113), not scaled by `k`;
 - the change is a Catmull-Rom (C1) read of the cell centres, kept within the four cells around the point, reading the neighbouring tiles' cells, clamped at a face edge and cross-faded over 2 cells with the neighbouring face's read; a tile the layer lacks is 0.
 
 Verify: A
@@ -255,7 +255,7 @@ Source: Owner 2026-11-04 (the coast remedy, I5c), ADR 0100; m9-bake PR 6
 - **THEN** land adds the change, a point at elevation `e` inside the first 3 m adds the fade's share of it, the sea adds none, and the change is not scaled by `k`
 
 ### Requirement: GEN-114 The keys of a layered field
-A field with the layer on SHALL fold the layer's identity, the sea level, the fade's width and the read's version into its inputs hash, and its implementation id SHALL gain `+layer` over the band's. The field's version SHALL NOT change. `with_layer` SHALL be refused without the relief channels or after the crease band, and the relief channels SHALL be refused after the layer.
+A field with the layer on SHALL fold the layer's identity, the sea level, the fade's width and the read's version into its inputs hash, and its implementation id SHALL gain `+layer` over the band's. The field's version SHALL NOT change. `with_layer` SHALL be refused after the crease band, and the relief channels SHALL be refused after the layer; without the channels the id is `cpu-erosion-v1+band+layer` (v2 over the C1 base).
 
 Verify: A
 Status: planned
@@ -263,7 +263,7 @@ Source: ADR 0098 consequence (the id and the hash change when the band is on), A
 
 #### Scenario: Keys
 - **WHEN** the layer, its sea level or the call order changes
-- **THEN** the inputs hash differs, the implementation id gains `+layer`, the version is unchanged, and the refusals name the problem
+- **THEN** the inputs hash differs, the implementation id gains `+layer`, the version is unchanged, the ids differ with and without the channels, and the refusals name the problem
 
 ## REMOVED Requirements
 

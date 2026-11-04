@@ -12,7 +12,7 @@ use planet_cache::global_store::{GlobalWorld, StoreSource};
 use planet_cache::meshpack::TileSpec;
 use planet_core::cube::TangentWarp;
 use planet_core::{Face, TileId};
-use planet_generators::chain::{field_chain, CoupledLensField, NoBake, OwnedBake, OwnedOcean};
+use planet_generators::chain::{field_chain_erosion, CoupledLensField, NoBake, OwnedBake, OwnedOcean};
 use planet_generators::coupled::CoupledLens;
 use planet_generators::global::{GlobalCoarseGenerator, GlobalSample, LatticeSource, ReadError};
 use planet_generators::height::{HeightField, IMPLEMENTATION_ID as REFERENCE_ID};
@@ -52,6 +52,21 @@ pub fn default_store_in(root: &Path, env: Option<std::path::PathBuf>) -> Option<
     let found = [env, pointer, Some(root.join("target/stores/global16384")), Some(root.join("target/accept/global16384"))];
     found.into_iter().flatten().map(|p| if p.is_relative() { root.join(p) } else { p }).find(|p| p.is_dir())
 }
+
+/// What `--erosion on` takes besides the world (VIEW-062).
+#[derive(Clone, Debug)]
+pub struct ErosionOptions {
+    /// The folder of the layer; the world's store when none.
+    pub layer_dir: Option<std::path::PathBuf>,
+    /// The bake's pass-1 and pass-2 cells a face edge (`--face-res`, `--planet-res`).
+    pub face_res: usize,
+    pub planet_res: usize,
+    /// Draw the layer although the store does not say it was baked from the class source.
+    pub unchecked: bool,
+}
+
+/// Decoded tiles the layer keeps (a cap's bounds read up to 36, a read a stencil's four; a core is 37.7 MB at 3,072 cells, so up to about 1.7 GB with the pyramids).
+const LAYER_CACHE_TILES: usize = 44;
 
 /// The leaked stored bake as the field's lattice: it keeps the handle for the counters (`WorldTerrain::counters`).
 struct SharedStore(&'static StoreSource<'static>);
@@ -188,6 +203,10 @@ pub struct WorldTerrain {
     coupled_lens: std::sync::atomic::AtomicU8,
     /// The directory of the stored bake the coupled channel lives beside; none for an in-memory bake.
     store_dir: Option<std::path::PathBuf>,
+    /// The erosion layer of a bake drawn over the stored world (VIEW-062, GEN-112), when the run asked for it ([`WorldTerrain::with_erosion`]).
+    erosion: Option<planet_generators::height_fields::ErosionSwitch>,
+    /// What the layer is, for the log and the title.
+    erosion_note: String,
     /// Scoped threads of one horizon bake (0: the cores, at most 4).
     horizon_threads: std::sync::atomic::AtomicUsize,
     /// Cells per chunk edge of the horizon lattice (0: the default of [`crate::horizonworld::HORIZON_CELL_M`]); a test sets a coarse one to stay quick.
@@ -300,6 +319,8 @@ impl WorldTerrain {
             horizon: Default::default(),
             coupled_lens: Default::default(),
             store_dir: None,
+            erosion: None,
+            erosion_note: String::new(),
         })
     }
 
@@ -386,6 +407,8 @@ impl WorldTerrain {
             horizon: Default::default(),
             coupled_lens: Default::default(),
             store_dir: Some(dir.to_path_buf()),
+            erosion: None,
+            erosion_note: String::new(),
         })
     }
 
@@ -566,7 +589,10 @@ impl WorldTerrain {
 
     /// The implementation id of the field.
     pub fn id(&self) -> &'static str {
-        self.kind.id()
+        match &self.erosion {
+            Some(e) => e.implementation_id(self.kind),
+            None => self.kind.id(),
+        }
     }
 
     pub fn radius_m(&self) -> f64 {
@@ -580,11 +606,100 @@ impl WorldTerrain {
 
     /// A line for the run's output: which field, over which bake.
     pub fn describe(&self) -> String {
-        if self.has_bake {
-            format!("height field {} over a {}-cell bake", self.kind.id(), self.res)
+        let mut s = if self.has_bake {
+            format!("height field {} over a {}-cell bake", self.id(), self.res)
         } else {
-            format!("height field {}", self.kind.id())
+            format!("height field {}", self.id())
+        };
+        if !self.erosion_note.is_empty() {
+            s += &format!(", {}", self.erosion_note);
         }
+        s
+    }
+
+    /// [`WorldTerrain::with_erosion`] when the run asked for `--erosion on`, the world unchanged otherwise.
+    pub fn with_erosion_if(self, o: &Options) -> Result<WorldTerrain, String> {
+        if !o.erosion {
+            return Ok(self);
+        }
+        self.with_erosion(&ErosionOptions {
+            layer_dir: o.erosion_store.clone(),
+            face_res: o.erosion_face_res,
+            planet_res: o.erosion_res,
+            unchecked: o.erosion_unchecked,
+        })
+    }
+
+    /// What the erosion layer is when it is on (`--erosion on`): empty otherwise.
+    pub fn erosion_note(&self) -> &str {
+        &self.erosion_note
+    }
+
+    /// Turns the erosion layer of a bake on over this stored world (VIEW-062, GEN-112): the layer is read from `o.layer_dir` (the bake's output folder or its `tiles/`, else the world's
+    /// store) under the keys of the bake shape `o` names and the definition's seed, added to the C1 read of the stored lattice (the default eroded field is upgraded to the C1 one) with
+    /// the crease band, the relief channels not read. An error naming the problem when the world has no stored bake, its field is not an eroded one, its relief scale is not 1 or its
+    /// sea is not at 0 m (what the layer was carved on), the store does not say it was baked from the class source (unless `o.unchecked`), or the layer holds no tile under these keys
+    /// (the existing refusal names both keys).
+    pub fn with_erosion(mut self, o: &ErosionOptions) -> Result<WorldTerrain, String> {
+        let Some(store_dir) = self.store_dir.clone() else {
+            return Err("--erosion needs --store: the layer is drawn over a stored bake".into());
+        };
+        if !matches!(self.kind, HeightFieldKind::Eroded | HeightFieldKind::ErodedC1) {
+            return Err(format!("--erosion applies to the eroded fields, the world's is {}", self.kind.id()));
+        }
+        // The layer was carved on the class source's surface at relief scale 1 and sea level 0: a definition that differs would draw it on another ground without a word.
+        let def = self.definition();
+        let ctx = GenContext::new(&def);
+        let relief = ctx.relief_scale(BodyId::PLANET).map_err(|e| format!("the relief scale of the definition: {e}"))?;
+        if relief != 1.0 {
+            return Err(format!("--erosion: the layer was carved at relief scale 1, the definition's is {relief}"));
+        }
+        let sea = def.sea(BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;
+        if sea != 0.0 {
+            return Err(format!("--erosion: the layer was carved over a sea at 0 m, the definition's is {sea} m"));
+        }
+        if !o.unchecked {
+            return Err(format!(
+                "{}: the store does not say it was baked from the class source (BakeInputs::id() {:016x}): the erosion layer was carved on that surface, and today's stores hold the legacy generator's \
+                 (about 2 km apart on the mountains tile); a store written by the class-source bake carries the marker. --erosion-unchecked draws the layer anyway (a test of the plumbing, not a look)",
+                store_dir.display(),
+                planet_generators::bake::inputs::BakeInputs::id()
+            ));
+        }
+        let def = self.definition();
+        let seed = GenContext::new(&def).body_seed(BodyId::PLANET).map_err(|e| format!("the definition has no body seed: {e}"))?;
+        let world = Arc::new(GlobalWorld::from_definition(&def).map_err(|e| format!("the definition cannot be generated: {e}"))?);
+        let shape = planet_cache::layer_tiles::BakeShape {
+            seed,
+            radius_m: self.radius_m,
+            face_res: o.face_res,
+            planet_res: o.planet_res,
+            tile: None,
+            halo: None,
+        };
+        let dir = o.layer_dir.clone().unwrap_or(store_dir);
+        let layer = planet_cache::layer_tiles::StoreLayer::open(
+            &dir,
+            world,
+            &shape,
+            LAYER_CACHE_TILES,
+            planet_cache::layer_tiles::default_change_range(),
+        )
+        .map_err(|e| format!("--erosion: {e}"))?;
+        let layer = planet_generators::erosion_layer::ErosionLayer::new(Arc::new(layer)).map_err(|e| format!("--erosion: {e}"))?;
+        let sea_level_m = def.sea(BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;
+        // The layer's ground is the lattice read C1 (a bilinear read leaves a crease along every lattice cell under it): the default field is upgraded.
+        self.kind = HeightFieldKind::ErodedC1;
+        self.erosion_note = format!(
+            "erosion layer {} (pass 1 at {} cells, pass 2 at {}, seed {seed}, coast fade {} m over the sea level {sea_level_m} m, crease band on, relief channels off, C1 base)",
+            dir.display(),
+            o.face_res,
+            o.planet_res,
+            planet_generators::erosion_layer::COAST_FADE_M
+        );
+        self.source = format!("{} + {}", self.source, self.erosion_note);
+        self.erosion = Some(planet_generators::height_fields::ErosionSwitch { relief: None, layer: Arc::new(layer), sea_level_m });
+        Ok(self)
     }
 
     /// This world with the fields it builds bounded up to the sea level (see the field `bound_water`); a world without water is
@@ -820,7 +935,7 @@ impl WorldTerrain {
     pub fn field(&self) -> Result<Box<dyn HeightField + '_>, String> {
         let started = std::time::Instant::now();
         let def = self.definition();
-        let built = field_chain(self.kind, &def, self.src.as_ref(), self.bake_key, self.bound_water);
+        let built = field_chain_erosion(self.kind, &def, self.src.as_ref(), self.bake_key, self.bound_water, self.erosion.as_ref());
         // The lens over the whole chain (GEN-043); while the run is not ready the field is the plain one.
         let built = match (self.coupled_lens(), self.coupled.standing()) {
             (Some(lens), Standing::Ready(maps, _)) => {

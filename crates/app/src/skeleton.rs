@@ -186,6 +186,9 @@ pub fn generate(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         std::fs::write(path, &text).map_err(|e| format!("writing {}: {e}", path.display()))?;
         return writeln!(out, "wrote {} ({} lines)", path.display(), text.lines().count()).map_err(err);
     }
+    if o.class_source && o.global_dir.is_none() && o.verify_global.is_none() {
+        return Err("--class-source applies to --global-dir and --verify-global only".into());
+    }
     if o.compact_cache.is_some() {
         return compact_cache(o, out);
     }
@@ -265,7 +268,15 @@ pub(crate) fn global_world_of(o: &Options) -> Result<planet_cache::global_store:
         }
         None => planet_world_def::WorldDefinition::single_planet(RADIUS_M, o.seed),
     };
-    planet_cache::global_store::GlobalWorld::from_definition(&def).map_err(|e| format!("the definition cannot be generated: {e}"))
+    let world =
+        planet_cache::global_store::GlobalWorld::from_definition(&def).map_err(|e| format!("the definition cannot be generated: {e}"))?;
+    if !o.class_source {
+        return Ok(world);
+    }
+    // The class source's lattice is built once, on the threads of the run (the same result for any count).
+    let threads = planet_streaming::topology::bake_threads(o.threads)?.0;
+    let inputs = planet_generators::bake::inputs::BakeInputs::new(world.seed(), threads);
+    Ok(world.with_class_source(std::sync::Arc::new(inputs)))
 }
 
 /// `generate --global-dir DIR`: bake the global-coarse field (continents, elevation, climate) into a tile store as blocks and
@@ -415,6 +426,14 @@ fn generate_global(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         .map_err(err)?;
     } else {
         writeln!(out, "global water summary: already stored under its current key, nothing recomputed").map_err(err)?;
+    }
+    if o.class_source {
+        // The pre-fill reads the store through the legacy world (`WorldTerrain::open_store`): a class store gets no coarse tiles until the viewer reads class stores.
+        return writeln!(
+            out,
+            "pre-fill skipped: the class-source store is read by the viewer's class-source path, not by the legacy pre-fill"
+        )
+        .map_err(err);
     }
     // The coarse tiles go into the same pack (STRM-021, ADR 0045 point 3): levels 0..=4 unless `--prefill-levels` says otherwise.
     crate::prefill::prefill_store(o, dir, out)

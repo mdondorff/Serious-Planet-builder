@@ -361,7 +361,7 @@ pub fn hill_band_m(seed: u64, d: Vec3) -> f64 {
 /// The global-coarse field at the unit direction `d`. Pure: the same `(seed, d)` gives the same bits everywhere.
 pub fn sample(seed: u64, d: Vec3) -> GlobalSample {
     let t = terrain(seed, d);
-    let (continent, inland, zone) = (t.continent, t.inland, t.zone);
+    let (inland, zone) = (t.inland, t.zone);
 
     // Elevation: ocean basins and shelves from the continent value, mountain ranges from ridged noise inside range
     // zones, rising inland.
@@ -375,11 +375,21 @@ pub fn sample(seed: u64, d: Vec3) -> GlobalSample {
     };
     let ridge = ridge_at(seed, t.warped);
     let elevation = (base + 5200.0 * ridge * zone * inland + hill_band(seed, &t, ridge)).clamp(MIN_ELEVATION_M, MAX_ELEVATION_M);
+    finish_sample(seed, d, &t, elevation)
+}
 
-    let (temperature_c, precipitation_mm) = climate_from_elevation(seed, d, elevation, if land_depth > 0.0 { inland } else { 0.0 });
+/// The sample at `d` whose elevation is the class source's ([`crate::bake::inputs::BakeInputs::base`], GEN-115): the same continent, coast and climate formula as [`sample`], over the
+/// class source's surface. The shore is the same as the legacy field's (both are 0 where the land depth is 0 and the band only lifts), so the ocean and coast channels keep their shape.
+pub fn class_sample(seed: u64, d: Vec3, inputs: &crate::bake::inputs::BakeInputs) -> GlobalSample {
+    let t = terrain(seed, d);
+    finish_sample(seed, d, &t, inputs.base(d).clamp(MIN_ELEVATION_M, MAX_ELEVATION_M))
+}
 
+/// The sample of a point with terrain `t` and `elevation` in metres: the continent value, the elevation and the climate that follows the elevation.
+fn finish_sample(seed: u64, d: Vec3, t: &Terrain, elevation: f64) -> GlobalSample {
+    let (temperature_c, precipitation_mm) = climate_from_elevation(seed, d, elevation, if t.land_depth > 0.0 { t.inland } else { 0.0 });
     GlobalSample {
-        continent: continent as f32, // exact: already rounded above
+        continent: t.continent as f32, // exact: already rounded above
         elevation_m: elevation as f32,
         temperature_c,
         precipitation_mm,
@@ -514,11 +524,21 @@ pub const MAX_TILED_LEVEL: u8 = 12;
 /// direction, fastest). They are the samples of the level-0 lattice of `cells << level` cells per face edge at the tile's
 /// position, bit for bit: both come from `TileId::sample_direction`, whose lattice index is exact (GEN-013).
 pub fn bake_block(seed: u64, map: &dyn FaceMapping, tile: TileId, cells: u32) -> Vec<GlobalSample> {
+    bake_block_sampled(&|d| sample(seed, d), map, tile, cells)
+}
+
+/// [`bake_block`] of any pointwise field `field` (the class source's [`class_sample`], GEN-115).
+pub fn bake_block_sampled(
+    field: &(dyn Fn(Vec3) -> GlobalSample + Sync),
+    map: &dyn FaceMapping,
+    tile: TileId,
+    cells: u32,
+) -> Vec<GlobalSample> {
     let n = cells + 1;
     let mut v = Vec::with_capacity((n * n) as usize);
     for l in 0..n {
         for k in 0..n {
-            v.push(sample(seed, tile.sample_direction(map, cells, k, l)));
+            v.push(field(tile.sample_direction(map, cells, k, l)));
         }
     }
     v
@@ -605,6 +625,22 @@ pub fn bake_blocks_with<A: Send>(
     analyse: &(dyn Fn(TileId, &[GlobalSample]) -> A + Sync),
     sink: &mut dyn FnMut(TileId, Vec<GlobalSample>, A),
 ) -> Result<TiledBakeStats, BakeError> {
+    bake_blocks_sampled(&|d| sample(seed, d), map, level, cells, threads, want, analyse, sink)
+}
+
+/// [`bake_blocks_with`] of any pointwise field `field` (the class source's [`class_sample`], GEN-115): every sample is the field at its lattice direction, so the result does not depend on
+/// the thread count or the block size (CON-14).
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+pub fn bake_blocks_sampled<A: Send>(
+    field: &(dyn Fn(Vec3) -> GlobalSample + Sync),
+    map: &(dyn FaceMapping + Sync),
+    level: u8,
+    cells: u32,
+    threads: usize,
+    want: &(dyn Fn(TileId) -> bool + Sync),
+    analyse: &(dyn Fn(TileId, &[GlobalSample]) -> A + Sync),
+    sink: &mut dyn FnMut(TileId, Vec<GlobalSample>, A),
+) -> Result<TiledBakeStats, BakeError> {
     check_tiled(level, cells)?;
     let side = 1u64 << level;
     let total = 6 * side * side;
@@ -633,7 +669,7 @@ pub fn bake_blocks_with<A: Send>(
             continue;
         }
         let blocks: Vec<(Vec<GlobalSample>, A)> = planet_core::par::map(&batch.len(), batch.len(), &|i| {
-            let block = bake_block(seed, map, batch[i], cells);
+            let block = bake_block_sampled(field, map, batch[i], cells);
             peak.fetch_max(live.fetch_add(1, Ordering::SeqCst) + 1, Ordering::SeqCst);
             let a = analyse(batch[i], &block);
             (block, a)
