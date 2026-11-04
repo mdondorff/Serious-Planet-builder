@@ -388,6 +388,15 @@ fn a_changed_16_m_tilt_moves_the_picture() {
     tilted.coef.octaves[0].tilt = [4.0; 4];
     let img = hdr_of(&mut r, &ctx, &p, tilted);
     assert!(img != plain, "a 16 m tilt of 4 changed nothing");
+    // (The 3 cm octave fades out at this distance, so it is left out.) Each octave's tilt and grass entries are read from their own place (a lane's material may be absent from the frame, so a lane alone proves nothing).
+    for octave in 0..3 {
+        let mut c = detail_plan(ShadeView::Lit, 1.0);
+        c.coef.octaves[octave].tilt = [4.0; 4];
+        assert!(hdr_of(&mut r, &ctx, &p, c) != plain, "octave {octave} tilt is not read");
+        let mut c = detail_plan(ShadeView::Lit, 1.0);
+        c.coef.octaves[octave].grass = [4.0; 3];
+        assert!(hdr_of(&mut r, &ctx, &p, c) != plain, "octave {octave} grass is not read");
+    }
 }
 
 // spec: REND-037
