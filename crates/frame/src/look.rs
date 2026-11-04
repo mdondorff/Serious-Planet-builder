@@ -495,7 +495,7 @@ impl LitPlan {
             }
             u64::from_str_radix(s, 16).map(f64::from_bits).map_err(|e| format!("bad f64 bits '{s}': {e}"))
         };
-        let usage = "lit line is not 'dt .. sun .. reset .. tonemap ..' (optionally followed by 'units .. hist ..', 'albedo ..', 'water ..', 'view ..', 'atmosphere ..', 'overlay ..', 'materials ..', 'detail ..' and 'gloss ..' in this order)";
+        let usage = "lit line is not 'dt .. sun .. reset .. tonemap ..' (optionally followed by 'units .. hist ..', 'albedo ..', 'water ..', 'view ..', 'atmosphere ..', 'overlay ..', 'materials ..', 'detail ..', 'gloss ..' and 'patch ..' in this order)";
         let ["dt", dt, "sun", sx, sy, sz, "reset", reset, "tonemap", tm, tail @ ..] = rest else {
             return Err(usage.into());
         };
@@ -620,9 +620,9 @@ impl LitPlan {
         if self.ground_detail != 0.0 && !(1.0e-6..=1.0).contains(&self.ground_detail) {
             return Err(format!("lit plan: `ground_detail` = {}: the strength must be 0 or a number from 1e-6 to 1", self.ground_detail));
         }
-        if !(0.0..=file::PATCH_MAX).contains(&self.ground_patch) {
+        if !(self.ground_patch == 0.0 || (1.0e-6..=file::PATCH_MAX).contains(&self.ground_patch)) {
             return Err(format!(
-                "lit plan: `ground_patch` = {}: the patch shift must be from 0 (off) to {}",
+                "lit plan: `ground_patch` = {}: the patch shift must be 0 or a number from 1e-6 to {}",
                 self.ground_patch,
                 file::PATCH_MAX
             ));

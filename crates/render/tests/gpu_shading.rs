@@ -602,7 +602,7 @@ fn the_patch_break_up_is_inert_when_off_and_moves_the_material_boundary_when_on(
     );
     let mean = |img: &[[f32; 4]]| img.iter().filter(|px| px[3] > 0.0).map(luminance).sum::<f64>() / covered as f64;
     let ratio = mean(&on) / mean(&off);
-    assert!((0.7..1.4).contains(&ratio), "mean brightness ratio {ratio}");
+    assert!((1.0 / 1.4..1.4).contains(&ratio), "mean brightness ratio {ratio}");
     // The detail's strength 0 still returns before the patches: the picture is the off picture whatever the patch.
     let mut none = detail_plan(ShadeView::Lit, 0.0);
     none.ground_patch = 0.25;

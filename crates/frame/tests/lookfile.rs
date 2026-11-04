@@ -14,6 +14,7 @@ const FIXTURE_V2: &str = include_str!("data/look_v2_albedo_and_sun.toml");
 const FIXTURE_V3: &str = include_str!("data/look_v3_atmosphere.toml");
 const FIXTURE_V4: &str = include_str!("data/look_v4_water.toml");
 const FIXTURE_V5: &str = include_str!("data/look_v5_ground.toml");
+const FIXTURE_V6: &str = include_str!("data/look_v6_patch.toml");
 
 fn err(text: &str) -> String {
     parse_look(text).unwrap_err().to_string()
@@ -72,7 +73,7 @@ fn canonical_text_is_deterministic_and_round_trips_bit_for_bit() {
     let text = to_toml(&f);
     assert_eq!(parse_look(&text).unwrap(), f);
     assert_eq!(to_toml(&parse_look(&text).unwrap()), text, "writing what was read gives the same text");
-    assert!(text.starts_with("schema_version = 5\nkind = \"look\"\n"));
+    assert!(text.starts_with("schema_version = 6\nkind = \"look\"\n"));
     let order: Vec<usize> = ["[body.0.units]", "[body.7.units]", "[body.12.units]"].iter().map(|k| text.find(k).unwrap()).collect();
     assert!(order[0] < order[1] && order[1] < order[2], "bodies are written in id order");
     // The same content from a differently formatted file writes the same text.
@@ -251,11 +252,11 @@ fn migration_failures_name_the_step_and_the_gap() {
 #[test]
 fn the_production_chain_reads_the_version_1_fixture_and_writes_the_current_layout() {
     assert_eq!(
-        SCHEMA_VERSION, 5,
+        SCHEMA_VERSION, 6,
         "a new table or key needs a new version, an identity step in MIGRATIONS and a fixture of this version kept"
     );
     assert_eq!(MIGRATIONS.len() as u32, SCHEMA_VERSION - 1, "one step per older version");
-    assert_eq!(MIGRATIONS.iter().map(|m| m.from).collect::<Vec<_>>(), [1, 2, 3, 4], "the steps run from version 1 up without a gap");
+    assert_eq!(MIGRATIONS.iter().map(|m| m.from).collect::<Vec<_>>(), [1, 2, 3, 4, 5], "the steps run from version 1 up without a gap");
     // The version 1 fixture goes through the real chain (the identity step 1 to 2) and reads as written.
     let f = parse_look(FIXTURE_V1).unwrap();
     assert_eq!(f.body(BodyId(3)).units.solar_illuminance_lux, 25_000.0);
@@ -324,6 +325,10 @@ fn the_production_chain_reads_the_version_1_fixture_and_writes_the_current_layou
     let f = parse_look(FIXTURE_V5).unwrap();
     assert_eq!(parse_look(&to_toml(&f)).unwrap(), f);
     assert_eq!(to_toml(&parse_look(&to_toml(&f)).unwrap()), to_toml(&f));
+    // The same content as a version 6 file reads equal (the identity step 5 to 6), with the patch key at its default.
+    let w6 = FIXTURE_V5.replacen("schema_version = 5", "schema_version = 6", 1);
+    assert_eq!(parse_look(&w6).unwrap(), f);
+    assert_eq!(f.body(BodyId(1)).ground.patch, 0.0);
 }
 
 // spec: LOOK-002, LOOK-011
@@ -550,23 +555,55 @@ fn histogram_params_generalise_the_axis_and_the_band() {
     assert_eq!(g.histogram_of(&px, 12.0).iter().sum::<u32>(), 1, "black is not counted");
 }
 
-// spec: LOOK-012
+// spec: LOOK-002, LOOK-012
 #[test]
-fn the_patch_key_of_the_ground_table_is_off_by_default_validated_written_only_when_on_and_carried_by_the_plan() {
-    let head = "schema_version = 5\nkind = \"look\"\n";
-    let ground = |patch: &str| parse_look(&format!("{head}[body.0.ground]\ndetail = 0.6\n{patch}")).unwrap().body(BodyId(0)).ground;
-    // Off by default, and a default file writes no key (a file made before the key reads back as it was written).
+fn the_patch_key_is_off_by_default_written_always_validated_and_a_build_that_knows_version_5_refuses_it_as_newer() {
+    let head = "schema_version = 6
+kind = \"look\"
+";
+    let ground = |patch: &str| {
+        parse_look(&format!(
+            "{head}[body.0.ground]
+detail = 0.6
+{patch}"
+        ))
+        .unwrap()
+        .body(BodyId(0))
+        .ground
+    };
+    // Off by default, and the canonical text writes the key (LOOK-011: every key).
     assert_eq!(ground("").patch, 0.0);
-    let f = parse_look(&format!("{head}[body.0.ground]\ndetail = 0.6\n")).unwrap();
-    assert!(!to_toml(&f).contains("patch"), "a plan without the key keeps its text");
-    // On: the value, round-tripping through the canonical text.
-    let on = parse_look(&format!("{head}[body.0.ground]\ndetail = 0.6\npatch = 0.12\n")).unwrap();
+    let f = parse_look(&format!(
+        "{head}[body.0.ground]
+detail = 0.6
+"
+    ))
+    .unwrap();
+    assert!(to_toml(&f).contains("patch = 0.0"), "{}", to_toml(&f));
+    // On: the value, round-tripping through the canonical text; the version 6 fixture.
+    let on = parse_look(&format!(
+        "{head}[body.0.ground]
+detail = 0.6
+patch = 0.12
+"
+    ))
+    .unwrap();
     assert_eq!(on.body(BodyId(0)).ground.patch, 0.12);
     assert!(to_toml(&on).contains("patch = 0.12"), "{}", to_toml(&on));
     assert_eq!(parse_look(&to_toml(&on)).unwrap(), on);
-    // Outside 0 to 0.5: refused, naming the key.
-    for bad in ["0.7", "-0.01"] {
-        let e = err(&format!("{head}[body.0.ground]\npatch = {bad}\n"));
+    let fixture = parse_look(FIXTURE_V6).unwrap();
+    assert_eq!((fixture.body(BodyId(1)).ground.detail, fixture.body(BodyId(1)).ground.patch), (0.6, 0.12));
+    assert_eq!(to_toml(&parse_look(&to_toml(&fixture)).unwrap()), to_toml(&fixture));
+    // A build that knows versions up to 5 refuses the file as a newer schema, not as an unknown key.
+    let e = parse_with(FIXTURE_V6, 5, &MIGRATIONS[..4]).unwrap_err().to_string();
+    assert!(e.contains("newer") && e.contains('6') && e.contains('5') && e.contains("update the program"), "{e}");
+    // Outside 0, 1e-6 to 0.5: refused, naming the key.
+    for bad in ["0.7", "-0.01", "1e-9"] {
+        let e = err(&format!(
+            "{head}[body.0.ground]
+patch = {bad}
+"
+        ));
         assert!(e.contains("body.0.ground.patch") && e.contains(bad), "{bad}: {e}");
     }
     // The plan: the file's patch is taken with its curves, a plan without it keeps the text, and the text with it round-trips and refuses a bad value.
@@ -582,7 +619,9 @@ fn the_patch_key_of_the_ground_table_is_off_by_default_validated_written_only_wh
     assert!(text.contains(" patch "), "{text}");
     let tokens: Vec<&str> = text.split_whitespace().collect();
     assert_eq!(LitPlan::from_tokens(&tokens[1..]).unwrap(), patched);
-    assert!(patched.validate().is_ok() && plain.with_ground_patch(0.9).validate().is_err());
+    assert!(
+        patched.validate().is_ok() && plain.with_ground_patch(0.9).validate().is_err() && plain.with_ground_patch(1e-9).validate().is_err()
+    );
     // The default look choice leaves the plan's patch alone.
     let by_default = LitPlan::fixed(15.0).with_ground_look(
         look::materials::LookChoice::Default,

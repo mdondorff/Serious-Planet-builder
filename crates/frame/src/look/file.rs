@@ -71,7 +71,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 /// Schema version this build writes and reads without migration.
-pub const SCHEMA_VERSION: u32 = 5;
+pub const SCHEMA_VERSION: u32 = 6;
 
 const VERSION_KEY: &str = "schema_version";
 const KIND_KEY: &str = "kind";
@@ -169,8 +169,8 @@ impl GroundLook {
         if !(self.detail == 0.0 || (1e-6..=1.0).contains(&self.detail)) {
             return Err(bad("ground.detail", self.detail, "the strength must be 0 or from 1e-6 to 1"));
         }
-        if !(0.0..=PATCH_MAX).contains(&self.patch) {
-            return Err(bad("ground.patch", self.patch, "the patch shift is from 0 (off) to 0.5 of the slope cosine"));
+        if !(self.patch == 0.0 || (1e-6..=PATCH_MAX).contains(&self.patch)) {
+            return Err(bad("ground.patch", self.patch, "the patch shift must be 0 (off) or from 1e-6 to 0.5 of the slope cosine"));
         }
         self.materials.validate().map_err(|(key, value, why)| ParamError {
             key: leak_key(&key.replacen("materials.", "ground.", 1)),
@@ -446,12 +446,18 @@ fn v4_to_v5(_: &mut toml::Table) -> Result<(), String> {
     Ok(())
 }
 
+/// Version 5 to 6 adds the optional `patch` key of the `ground` table (LOOK-012); again no existing key moves.
+fn v5_to_v6(_: &mut toml::Table) -> Result<(), String> {
+    Ok(())
+}
+
 /// Migrations from every older version to the current one.
 pub const MIGRATIONS: &[Migration] = &[
     Migration { from: 1, apply: v1_to_v2 },
     Migration { from: 2, apply: v2_to_v3 },
     Migration { from: 3, apply: v3_to_v4 },
     Migration { from: 4, apply: v4_to_v5 },
+    Migration { from: 5, apply: v5_to_v6 },
 ];
 
 /// The look of every body that has an entry. A body without an entry has the Earth default.
@@ -886,10 +892,7 @@ pub fn to_toml(file: &LookFile) -> String {
             out.push_str(&line(name, *v));
         }
         out.push_str(&format!("\n[body.{b}.ground]\n{}", line("detail", p.ground.detail)));
-        // The key is written only when it is on, so a file made before it reads back as it was written.
-        if p.ground.patch != 0.0 {
-            out.push_str(&line("patch", p.ground.patch));
-        }
+        out.push_str(&line("patch", p.ground.patch));
         for (material, row) in MATERIAL_NAMES.iter().zip(&p.ground.materials.curves) {
             out.push_str(&format!("\n[body.{b}.ground.{material}]\n"));
             for (input, [lo, hi]) in INPUT_NAMES.iter().zip(row) {

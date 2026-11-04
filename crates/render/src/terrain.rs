@@ -477,13 +477,14 @@ fn ground_detail(node_index: u32, local: vec3<f32>, normal: vec3<f32>, up: vec3<
     let axes0 = clamp((an - vec3<f32>(top - 0.12)) / 0.12, vec3<f32>(0.0), vec3<f32>(1.0));
     let axes = axes0 / (axes0.x + axes0.y + axes0.z);
     // The patch break-up of the material boundaries (REND-055; `g.detail.z`, the look's `ground.patch`, 0 off): two patch octaves, 32 m and 8 m, shift the slope input of the material
-    // weights by up to that share of its cosine, so the rock / ground boundary breaks into irregular patches instead of one smooth line; they fade at four times the footprint of the
-    // detail octaves, so the patches hold out to a few hundred metres. `steep` (0 on flat ground, 1 beyond about 60 degrees) grows the rock's tilt below.
+    // weights by up to that share of its cosine, so the rock / ground boundary breaks into irregular patches instead of one smooth line; they fade at twice the footprint of the
+    // detail octaves (the fade starts at 0.12 and ends at 0.5 of a cell a pixel, so no patch octave is left above the Nyquist limit), which holds the 8 m octave out to a
+    // footprint of about 1 m and the 32 m one (its lattice turned, sides of 22.6 m) to about 5 m. `steep` (0 on flat ground, 1 beyond about 60 degrees) grows the rock's tilt below.
     var cs_w = cs;
     var steep = 0.0;
     if (g.detail.z > 0.0) {
-        let p32 = gd_octave(cell, frac, local, foot * 0.25, 10u, 4u, axes);
-        let p8 = gd_octave(cell, frac, local, foot * 0.25, 8u, 5u, axes);
+        let p32 = gd_octave(cell, frac, local, foot * 0.5, 10u, 4u, axes);
+        let p8 = gd_octave(cell, frac, local, foot * 0.5, 8u, 5u, axes);
         cs_w = clamp(cs + g.detail.z * (0.65 * p32.w + 0.35 * p8.w), 0.0, 1.0);
         steep = 1.0 - smoothstep(0.5, 0.86, cs);
     }
