@@ -17,7 +17,7 @@ pub const LAYER_READ_VERSION: u32 = 1;
 /// The height above the sea level, in metres, within which the layer's change is faded to 0 (the owner's coast remedy: a coastal plain keeps its sea level).
 pub const COAST_FADE_M: f64 = 3.0;
 /// Cells a side of a block of the pyramid's finest level.
-const BLOCK_CELLS: usize = 32;
+pub const BLOCK_CELLS: usize = 32;
 /// The smallest node, in cells, a range is taken from below the blocks (2 cells).
 const MIN_NODE_CELLS: usize = 2;
 /// The width, in cells, over which a face's change is cross-faded with the neighbouring face's at a cube edge (the layer holds no halo: at the edge each face reads its own border cell, and the
