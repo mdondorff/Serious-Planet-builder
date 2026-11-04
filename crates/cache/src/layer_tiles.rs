@@ -373,6 +373,14 @@ pub struct StoreLayer {
     id: u64,
 }
 
+/// A field source in words, for a refusal.
+fn source_words(s: ManifestSource) -> String {
+    match s {
+        ManifestSource::Class(id) => format!("class source (identity {id:016x})"),
+        ManifestSource::Legacy => "legacy generator".to_string(),
+    }
+}
+
 /// What a caller may replace of a layer manifest's shape (the bake's `--face-res` and `--planet-res`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ShapeOverride {
@@ -453,7 +461,7 @@ impl StoreLayer {
         defaults: &BakeShape,
         over: ShapeOverride,
         capacity: usize,
-    ) -> Result<(StoreLayer, Option<LayerManifest>), String> {
+    ) -> Result<(StoreLayer, Option<LayerManifest>, BakeShape), String> {
         let tiles_dir = if dir.join("tiles").is_dir() { dir.join("tiles") } else { dir.to_path_buf() };
         let manifest = if tiles_dir.is_dir() { LayerManifest::read(&tiles_dir)? } else { None };
         let (shape, range) = match &manifest {
@@ -465,10 +473,10 @@ impl StoreLayer {
                 };
                 if m.source != world_source {
                     return Err(format!(
-                        "{}: the layer manifest says the layer was carved on the field source {:?}, the world of the store is {:?}: a layer is drawn only on the ground it was carved on",
+                        "{}: the layer manifest says the layer was carved on the {}, the world of the store is the {}: a layer is drawn only on the ground it was carved on",
                         tiles_dir.display(),
-                        m.source,
-                        world_source
+                        source_words(m.source),
+                        source_words(world_source)
                     ));
                 }
                 if (m.shape.seed, m.shape.radius_m) != (defaults.seed, defaults.radius_m) {
@@ -499,7 +507,7 @@ impl StoreLayer {
                 default_change_range(),
             ),
         };
-        Ok((StoreLayer::open(dir, world, &shape, capacity, range)?, manifest))
+        Ok((StoreLayer::open(dir, world, &shape, capacity, range)?, manifest, shape))
     }
 
     /// Tiles decoded so far (a hit is not a decode; a tile that left the cache and comes back is).

@@ -1921,6 +1921,19 @@ fn smoke_summary(st: &Running) -> String {
 }
 
 /// `planet editor`: open the window and run the flight until it is closed (or, for `--smoke`, for a few dozen frames).
+/// The world part of the window's title (VIEW-065): where the world comes from, its field source (`class source` or `legacy source`) and `+ erosion layer` when the layer is on.
+pub fn title_world_label(store: Option<&std::path::Path>, global_res: u32, source: &str, erosion: bool) -> String {
+    let mut label = match store {
+        Some(dir) => format!("store {}", dir.display()),
+        None => format!("preview bake {global_res} cells"),
+    };
+    label += &format!(", {source}");
+    if erosion {
+        label += " + erosion layer";
+    }
+    label
+}
+
 pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     crate::stall::phase_mark("start");
     crate::worldfield::check_options(o)?;
@@ -1956,12 +1969,10 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         None if o.smoke || o.world.is_some() || o.given.contains("--global-res") => None,
         None => crate::worldfield::default_store(&std::env::current_dir().map_err(|e| e.to_string())?),
     };
-    let mut world_label = match &store {
-        Some(dir) => format!("store {}", dir.display()),
-        None => format!("preview bake {} cells", o.global_res),
-    };
-    if o.erosion {
-        world_label += " + erosion layer";
+    if store.is_none() && (o.class_source || o.legacy_source) {
+        return Err(
+            "--class-source and --legacy-source choose between the bakes of a stored world: they need --store (or a default store)".into(),
+        );
     }
     let world = Arc::new(
         match &store {
@@ -1979,12 +1990,9 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         // The viewer's plans keep the tiles whose water the view sees even where their terrain is culled (ADR 0053).
         .bounding_water(),
     );
-    // The title names the world's field source (class or legacy) and whether the layer is on, so a screenshot says which world it shows (VIEW-065).
-    world_label += &format!(", {}", world.field_source_name());
-    if o.erosion {
-        // What is on, in the log of the run (the title carries "erosion layer").
-        let _ = writeln!(out, "{}", world.describe());
-    }
+    // The title names the world's field source (class or legacy) and whether the layer is on, so a screenshot says which world it shows (VIEW-065); the log prints the description.
+    let world_label = title_world_label(store.as_deref(), o.global_res, world.field_source_name(), o.erosion);
+    let _ = writeln!(out, "{}", world.describe());
     crate::stall::phase_mark("world");
     let field = world.field()?;
     crate::stall::phase_mark("field");

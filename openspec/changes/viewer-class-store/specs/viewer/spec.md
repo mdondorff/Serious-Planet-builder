@@ -8,8 +8,8 @@ Source: Owner 2026-11-04 (the integrated preview: the viewer must show the class
 
 #### Scenario: The recorded world
 - **WHEN** a class-source store, then a store of both bakes, are opened by the viewer's terrain, by the plan check and by the coarse horizon, with and without the options
-- **THEN** the class store opens as the class world and says `class source`, the store of both is refused naming both bakes and opens with either option, and the plan check and the horizon do not find "no bake" in a class store
+- **THEN** the class store opens as the class world and says `class source`, the store of both is refused naming both bakes and opens with either option, the plan check and the horizon do not find "no bake" in a class store, and the title's world label names the source and the layer (the drawn title is tier D)
 
 #### Scenario: The layer by its manifest
 - **WHEN** a layer with a manifest is opened over the class store, with a manifest of another kernel version, with one of another field source, and with a replacement of the pass-1 cells
-- **THEN** the layer opens without a marker flag and says it came from its manifest, the other two are refused naming the version and both sources, and the replaced cells are refused by the layer's keys
+- **THEN** the layer opens without a marker flag, says it came from its manifest and bounds by the manifest's range, the other two are refused naming the version and both sources (also with `--erosion-unchecked` on a legacy world), and the replaced cells are refused by the layer's keys

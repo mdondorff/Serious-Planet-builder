@@ -1826,8 +1826,32 @@ mod tests {
         legacy.source = ManifestSource::Legacy;
         legacy.write(&bake_dir.join("tiles")).unwrap();
         let e = open().with_erosion(&options(&bake_dir, false)).err().unwrap();
-        assert!(e.contains("Legacy") && e.contains("Class"), "{e}");
+        assert!(e.contains("legacy generator") && e.contains("class source (identity"), "{e}");
+        // Another seed in the manifest is refused naming both.
+        let mut other_seed = manifest.clone();
+        other_seed.shape.seed = 4;
+        other_seed.write(&bake_dir.join("tiles")).unwrap();
+        let e = open().with_erosion(&options(&bake_dir, false)).err().unwrap();
+        assert!(e.contains("seed 4") && e.contains("seed 3"), "{e}");
         manifest.write(&bake_dir.join("tiles")).unwrap();
+        // The manifest's change range is the layer's bound (not the representable one), and the replaced cells show in the log line.
+        let (opened, _, shape_used) = planet_cache::layer_tiles::StoreLayer::open_recorded(
+            &bake_dir,
+            std::sync::Arc::new(world.clone()),
+            &BakeShape::production(3, skeleton::RADIUS_M),
+            planet_cache::layer_tiles::ShapeOverride::default(),
+            4,
+        )
+        .unwrap();
+        assert_eq!(planet_generators::erosion_layer::LayerSource::global_range(&opened), manifest.range());
+        assert!(manifest.range().1 < planet_cache::layer_tiles::default_change_range().1, "a tighter bound than the representable range");
+        assert_eq!((shape_used.face_res, shape_used.planet_res), (24, 24), "the shape is the manifest's, not the production one");
+        // The title names the world's source and whether the layer is on (VIEW-065).
+        assert_eq!(window::title_world_label(None, 8, "legacy source", false), "preview bake 8 cells, legacy source");
+        assert_eq!(
+            window::title_world_label(Some(std::path::Path::new("s")), 8, "class source", true),
+            "store s, class source + erosion layer"
+        );
         // A store that holds both bakes refuses without a choice and opens with it (STRM-073).
         run_str(&["generate", "--global-dir", &store, "--global-res", "8", "--seed", "3", "--prefill-levels", "0"]).unwrap();
         let e = worldfield::WorldTerrain::open_store(def(), std::path::Path::new(&store), 8).err().unwrap();
@@ -1835,6 +1859,9 @@ mod tests {
         let chosen = |c| worldfield::WorldTerrain::open_store_as(def(), std::path::Path::new(&store), 8, Some(c)).unwrap();
         assert_eq!(chosen(FieldSource::Class).field_source_name(), "class source");
         assert_eq!(chosen(FieldSource::Legacy).field_source_name(), "legacy source");
+        // A legacy world with `--erosion-unchecked` still never draws a layer whose manifest says class source.
+        let e = chosen(FieldSource::Legacy).with_erosion(&options(&bake_dir, true)).err().unwrap();
+        assert!(e.contains("class source (identity") && e.contains("legacy generator"), "{e}");
         // The viewer's options carry the choice.
         let o = parse_args(&["editor".to_string(), "--legacy-source".to_string()]).unwrap();
         assert_eq!(o.field_source_choice().unwrap(), Some(FieldSource::Legacy));

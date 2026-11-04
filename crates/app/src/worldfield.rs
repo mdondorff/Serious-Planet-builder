@@ -65,16 +65,6 @@ pub struct ErosionOptions {
     pub unchecked: bool,
 }
 
-/// The pass-1 and pass-2 cells the layer was opened with: the override, else the manifest's, else the production bake's.
-fn layer_shape_cells(
-    manifest: &Option<planet_cache::layer_manifest::LayerManifest>,
-    defaults: &planet_cache::layer_tiles::BakeShape,
-    over: &planet_cache::layer_tiles::ShapeOverride,
-) -> (usize, usize) {
-    let base = manifest.as_ref().map_or((defaults.face_res, defaults.planet_res), |m| (m.shape.face_res, m.shape.planet_res));
-    (over.face_res.unwrap_or(base.0), over.planet_res.unwrap_or(base.1))
-}
-
 /// Decoded tiles the layer keeps (a cap's bounds read up to 36, a read a stencil's four; a core is 37.7 MB at 3,072 cells, so up to about 1.7 GB with the pyramids).
 const LAYER_CACHE_TILES: usize = 44;
 
@@ -656,12 +646,12 @@ impl WorldTerrain {
         })
     }
 
-    /// The field source of the bake this world reads, for the log and the title (STRM-073, VIEW-065): the class source's, the legacy generator's, or the in-memory preview bake's.
+    /// The field source of the bake this world reads, for the log and the title (STRM-073, VIEW-065): `class source`, or `legacy source` (the legacy generator's, and the in-memory preview bake's).
     pub fn field_source_name(&self) -> &'static str {
         match self.store_world {
             Some(w) if w.class_source().is_some() => "class source",
             Some(_) => "legacy source",
-            None => "legacy source, in memory",
+            None => "legacy source",
         }
     }
 
@@ -710,9 +700,11 @@ impl WorldTerrain {
         let defaults = planet_cache::layer_tiles::BakeShape::production(seed, self.radius_m);
         let over = planet_cache::layer_tiles::ShapeOverride { face_res: o.face_res, planet_res: o.planet_res };
         let dir = o.layer_dir.clone().unwrap_or(store_dir);
-        let (layer, manifest) = planet_cache::layer_tiles::StoreLayer::open_recorded(&dir, world, &defaults, over, LAYER_CACHE_TILES)
-            .map_err(|e| format!("--erosion: {e}"))?;
-        let (face_res, planet_res) = (layer_shape_cells(&manifest, &defaults, &over).0, layer_shape_cells(&manifest, &defaults, &over).1);
+        let (layer, manifest, shape) =
+            planet_cache::layer_tiles::StoreLayer::open_recorded(&dir, world, &defaults, over, LAYER_CACHE_TILES)
+                .map_err(|e| format!("--erosion: {e}"))?;
+        let (face_res, planet_res) = (shape.face_res, shape.planet_res);
+        let replaced = o.face_res.is_some() || o.planet_res.is_some();
         let layer = planet_generators::erosion_layer::ErosionLayer::new(Arc::new(layer)).map_err(|e| format!("--erosion: {e}"))?;
         let sea_level_m = def.sea(BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;
         // The layer's ground is the lattice read C1 (a bilinear read leaves a crease along every lattice cell under it): the default field is upgraded.
@@ -720,7 +712,11 @@ impl WorldTerrain {
         self.erosion_note = format!(
             "erosion layer {} ({}; pass 1 at {face_res} cells, pass 2 at {planet_res}, seed {seed}, coast fade {} m over the sea level {sea_level_m} m, crease band on, relief channels off, C1 base)",
             dir.display(),
-            if manifest.is_some() { "its manifest" } else { "no manifest: the options and the production shape" },
+            match (manifest.is_some(), replaced) {
+                (true, false) => "its manifest",
+                (true, true) => "its manifest, the cells replaced by the options",
+                (false, _) => "no manifest: the options and the production shape",
+            },
             planet_generators::erosion_layer::COAST_FADE_M
         );
         self.source = format!("{} + {}", self.source, self.erosion_note);
