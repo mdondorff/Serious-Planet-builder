@@ -22,17 +22,30 @@ pub fn touches_goldens(path: &str) -> bool {
     if p.ends_with(".wgsl") || p.starts_with("tests/goldens/") || p == "Cargo.toml" || p == "Cargo.lock" || p.starts_with(".cargo/") {
         return true;
     }
-    p.strip_prefix("crates/").and_then(|rest| rest.split('/').next()).is_some_and(|dir| GOLDEN_CRATES.contains(&dir))
+    // Not the files that no golden test runs (BUILD-016): an example or a bench of a crate, and a test file other than the GPU tier's (`tests/gpu_*.rs`, the tier-C binaries).
+    let Some(rest) = p.strip_prefix("crates/") else { return false };
+    let mut parts = rest.split('/');
+    if !parts.next().is_some_and(|dir| GOLDEN_CRATES.contains(&dir)) {
+        return false;
+    }
+    match parts.next() {
+        Some("examples" | "benches") => false,
+        Some("tests") => parts.next().is_some_and(|f| parts.next().is_none() && f.starts_with("gpu_") && f.ends_with(".rs")),
+        _ => true,
+    }
 }
 
 /// Directories under `crates/` whose changes can degrade what the owner saw on 2026-10-27 (TEST-063): generation, streaming, rendering, the editor
 /// and the window that joins them (the shaders live under `render`).
 const GATE_CRATES: [&str; 7] = ["generators", "streaming", "render", "editor", "frame", "app", "cache"];
 
-/// True when a changed path makes `gate --small` part of the pre-push run.
+/// True when a changed path makes `gate --small` part of the pre-push run: a file of one of those crates that the running program is made of (not an example, a bench or a test file:
+/// no run of the gate reaches them, BUILD-016).
 pub fn touches_gate(path: &str) -> bool {
     let p = path.replace('\\', "/");
-    p.strip_prefix("crates/").and_then(|rest| rest.split('/').next()).is_some_and(|dir| GATE_CRATES.contains(&dir))
+    let Some(rest) = p.strip_prefix("crates/") else { return false };
+    let mut parts = rest.split('/');
+    parts.next().is_some_and(|dir| GATE_CRATES.contains(&dir)) && !matches!(parts.next(), Some("examples" | "benches" | "tests"))
 }
 
 /// The paths among `changed` that make `test gpu` part of the run, in the order given.
@@ -144,7 +157,43 @@ pub fn plan_steps(changed: &[String]) -> Vec<&'static str> {
     steps
 }
 
+/// The paths a pre-push run would not check what the push sends (BUILD-037): from `git status --porcelain --untracked-files=all`, every tracked file that differs from HEAD (staged
+/// or not) and every untracked file under `crates/` or `xtask/`. The checks read the working tree and the push sends the commit, so these would be checked and not pushed (or pushed
+/// without having been checked).
+pub fn uncommitted(porcelain: &str) -> Vec<String> {
+    porcelain
+        .lines()
+        .filter(|l| l.len() > 3)
+        .filter_map(|l| {
+            let (status, rest) = l.split_at(2);
+            let path = rest.trim_start();
+            // A rename is `old -> new`: the new path is the one in the tree.
+            let path = path.rsplit(" -> ").next().unwrap_or(path).trim_matches('"').replace('\\', "/");
+            let untracked = status == "??";
+            let in_code = path.starts_with("crates/") || path.starts_with("xtask/");
+            (!untracked || in_code).then_some(path)
+        })
+        .collect()
+}
+
+/// Refuses a working tree that differs from HEAD (BUILD-037), naming the paths.
+pub fn require_committed(root: &Path) -> Res {
+    let out = capture(root, "git", &["status", "--porcelain", "--untracked-files=all"])?;
+    let dirty = uncommitted(&out);
+    if dirty.is_empty() {
+        return Ok(());
+    }
+    let shown: Vec<&str> = dirty.iter().map(String::as_str).take(8).collect();
+    Err(format!(
+        "prepush checks the working tree but the push sends the commit, and {} path(s) differ from HEAD (e.g. {}{}): commit or stash them, then run prepush again",
+        dirty.len(),
+        shown.join(", "),
+        if dirty.len() > shown.len() { ", ..." } else { "" }
+    ))
+}
+
 pub fn run(root: &Path) -> Res {
+    require_committed(root)?;
     let changed = testcmd::changed_paths(root);
     let triggers = golden_triggers(&changed);
     let with_gpu = !triggers.is_empty();
@@ -229,6 +278,53 @@ mod tests {
         assert_eq!(tree_id(""), None);
     }
 
+    // spec: BUILD-037
+    #[test]
+    fn a_tree_that_differs_from_head_is_named_and_a_clean_one_and_untracked_notes_are_not() {
+        assert!(uncommitted("").is_empty(), "a clean tree");
+        // Tracked changes count anywhere, staged or not; renames name the new path.
+        assert_eq!(
+            uncommitted(
+                " M crates/app/src/lib.rs
+M  docs/status.md
+A  xtask/src/new.rs
+ D CLAUDE.md
+R  a.md -> docs/b.md
+"
+            ),
+            ["crates/app/src/lib.rs", "docs/status.md", "xtask/src/new.rs", "CLAUDE.md", "docs/b.md"]
+        );
+        // Untracked files count only under crates/ and xtask/ (a scratch note elsewhere is not checked or pushed by prepush).
+        assert_eq!(
+            uncommitted(
+                "?? crates/app/examples/x.rs
+?? xtask/src/y.rs
+?? notes.md
+?? target/review/a.png
+?? docs/tmp.md
+"
+            ),
+            ["crates/app/examples/x.rs", "xtask/src/y.rs"]
+        );
+        // The message names the count and the first paths; a real repository is read through git.
+        let dir = std::env::temp_dir().join(format!("planet-prepush-clean-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("crates")).unwrap();
+        let git = |args: &[&str]| capture(&dir, "git", args).unwrap();
+        git(&["init", "--quiet"]);
+        git(&["config", "user.email", "t@example.com"]);
+        git(&["config", "user.name", "t"]);
+        std::fs::write(dir.join("a.txt"), "1").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "x"]);
+        assert!(require_committed(&dir).is_ok(), "a committed tree passes");
+        std::fs::write(dir.join("a.txt"), "2").unwrap();
+        std::fs::write(dir.join("crates/new.rs"), "x").unwrap();
+        let e = require_committed(&dir).unwrap_err();
+        assert!(e.contains("2 path(s)") && e.contains("a.txt") && e.contains("crates/new.rs") && e.contains("commit or stash"), "{e}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     // spec: BUILD-016
     #[test]
     fn a_change_to_the_renderer_or_what_it_draws_from_needs_the_gpu_tier() {
@@ -247,6 +343,34 @@ mod tests {
         ] {
             assert!(touches_goldens(p), "{p}");
         }
+    }
+
+    // spec: BUILD-016
+    #[test]
+    fn an_example_a_bench_and_a_test_other_than_the_gpu_tiers_do_not_need_the_gpu_tier() {
+        for p in [
+            "crates/app/examples/field_probe.rs",
+            "crates/cache/examples/bake_layer.rs",
+            "crates/render/benches/draw.rs",
+            "crates/generators/tests/runtime_layer.rs",
+            "crates/frame/tests/lookfile.rs",
+            "crates/frame/tests/data/look_v6_patch.toml",
+            r"crates\app\examples\base_gap.rs",
+        ] {
+            assert!(!touches_goldens(p), "{p}");
+        }
+        // The GPU tier's own test files, the library code beside the examples, and a file named like a directory still count.
+        for p in [
+            "crates/render/tests/gpu_shading.rs",
+            "crates/app/tests/gpu_stills.rs",
+            "crates/app/src/window.rs",
+            "crates/app/src/examples.rs",
+            "crates/frame/src/look.rs",
+        ] {
+            assert!(touches_goldens(p), "{p}");
+        }
+        // The one-option change of an app example (explorer's #1165) selects no GPU step.
+        assert_eq!(plan_steps(&paths(&["crates/cache/examples/bake_layer.rs"])), ["merged spec-lint", "check", "test fast"]);
     }
 
     // spec: BUILD-016

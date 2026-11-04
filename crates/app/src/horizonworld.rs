@@ -781,8 +781,9 @@ pub fn generate_coarse_horizon(o: &crate::Options, out: &mut dyn std::io::Write)
         }
         None => WorldDefinition::single_planet(crate::skeleton::RADIUS_M, o.seed),
     };
-    let world =
-        planet_cache::global_store::GlobalWorld::from_definition(&def).map_err(|e| format!("the definition cannot be generated: {e}"))?;
+    // The world of the store as it records its field source (STRM-073).
+    let world_threads = planet_streaming::topology::bake_threads(o.threads).map_or(4, |t| t.0);
+    let world = planet_cache::global_store::GlobalWorld::for_store(&def, dir, o.global_res, o.field_source_choice()?, world_threads)?;
     let store = TileStore::open(dir, world.params()).map_err(|e| e.to_string())?;
     let src = planet_cache::global_store::StoreSource::new(&store, &world, o.global_res).map_err(|e| e.to_string())?;
     let n = crate::coupledworld::run_cells(o.global_res);
