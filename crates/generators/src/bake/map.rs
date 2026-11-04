@@ -7,7 +7,8 @@ use planet_core::cube::{direction_to_face, face_to_direction, TangentWarp};
 use planet_core::{Face, Vec3};
 
 /// The change of one face read at a direction on the plane of that face (a direction of a neighbouring face reads at the plane's continuation, inside the halo; clamped to the
-/// stored plane): the bilinear interpolant of the cells' values, the cell centres being the samples.
+/// stored plane): the Catmull-Rom (C1) interpolant of the cells' values, the cell centres being the samples, kept within the range of the four cells around the point (GEN-101: a bilinear read leaves a crease along every cell line, which a
+/// pass 2 on a finer grid carves into and the viewer shades).
 pub fn change_in_face(f: &FaceChange, d: Vec3) -> f64 {
     let w = d.dot(f.face.normal());
     assert!(w > 0.0 && w.is_finite(), "direction {d:?} is not in front of face {}", f.face.0);
@@ -20,8 +21,24 @@ pub fn change_in_face(f: &FaceChange, d: Vec3) -> f64 {
     let (i, j) = ((x as usize).min(m - 2), (y as usize).min(m - 2));
     let (fx, fy) = (x - i as f64, y - j as f64);
     let at = |ii: usize, jj: usize| f64::from(f.change[jj * m + ii]);
-    let (a, b) = (at(i, j) + (at(i + 1, j) - at(i, j)) * fx, at(i, j + 1) + (at(i + 1, j + 1) - at(i, j + 1)) * fx);
-    a + (b - a) * fy
+    // The four cells around the point on each axis; past the stored plane the index is clamped to it (the plane is wide enough: the halo reaches beyond any face read).
+    let clamped = |a: i64, b: i64| at(a.clamp(0, m as i64 - 1) as usize, b.clamp(0, m as i64 - 1) as usize);
+    let (ii, jj) = (i as i64, j as i64);
+    let row =
+        |dj: i64| catmull_rom([clamped(ii - 1, jj + dj), clamped(ii, jj + dj), clamped(ii + 1, jj + dj), clamped(ii + 2, jj + dj)], fx);
+    let v = catmull_rom([row(-1), row(0), row(1), row(2)], fy);
+    // Catmull-Rom overshoots by up to 7.4 % of a step beside a sharp feature (a one-cell channel would read as a levee, and a coastal plain could dip below the sea): the read stays
+    // within the range of the four cells around the point, as a bilinear read does, and is C1 except at an extremum.
+    let around = [at(i, j), at(i + 1, j), at(i, j + 1), at(i + 1, j + 1)];
+    v.clamp(around.iter().copied().fold(f64::INFINITY, f64::min), around.iter().copied().fold(f64::NEG_INFINITY, f64::max))
+}
+
+/// The Catmull-Rom spline through `p[1]` (at 0) and `p[2]` (at 1), evaluated at `t` in `[0, 1]`: continuous with its first derivative across the points.
+pub fn catmull_rom(p: [f64; 4], t: f64) -> f64 {
+    0.5 * (2.0 * p[1]
+        + (p[2] - p[0]) * t
+        + (2.0 * p[0] - 5.0 * p[1] + 4.0 * p[2] - p[3]) * t * t
+        + (3.0 * (p[1] - p[2]) + p[3] - p[0]) * t * t * t)
 }
 
 /// The change of the six faces read at a direction. Within `halo` cells of a cube edge the face's change is cross-faded with the neighbouring face's, which carved the same ground

@@ -1,0 +1,1 @@
+tile 2/12/10 threads 1 ratio 2 halo 128: wall 32.2 s; stages: sampling 18.4, carve 4.5, thermal 6.8, residual scan 0.2, deposition 2.4; thermal 300 passes, 16182 cells still moving, residual 13.7314 m (3941 pairs over 1 m); land 2359171
