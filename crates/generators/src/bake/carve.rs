@@ -63,6 +63,8 @@ pub fn carve(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, facto
     let extra = crate::bake::experiment::uplift().filter(|u| u.len() == grid.len());
     let steps = p.steps as f64;
     let mut routing: Option<Routing> = None;
+    let keep = crate::bake::experiment::keep_pits();
+    let mut kept = 0u64;
     for step in 0..p.steps {
         if step % p.reroute_every == 0 {
             // The previous routing is dropped before the next is built: two live routings of a face would not fit its memory budget.
@@ -83,6 +85,7 @@ pub fn carve(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, facto
             routing = Some(r);
         }
         let r = routing.as_ref().expect("routed at the first step");
+        let last = step + 1 == p.steps;
         for &c in &r.order {
             let c = c as usize;
             let rec = r.receiver[c];
@@ -95,9 +98,19 @@ pub fn carve(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, facto
             let hr = z[rec];
             let u_cell = extra.as_ref().map_or(0.0, |u| u[c] / steps);
             let hn = (z[c] + uplift * scale + u_cell + f * hr) / (1.0 + f);
-            let new = hn.max(hr + p.epsilon).max(floor);
+            let new = if keep && z[c] < hr && !p.incise_only {
+                if last {
+                    kept += 1;
+                }
+                z[c] + uplift * scale + u_cell
+            } else {
+                hn.max(hr + p.epsilon).max(floor)
+            };
             z[c] = if p.incise_only { new.min(z[c]) } else { new };
         }
+    }
+    if keep && !p.incise_only {
+        crate::bake::experiment::set_kept_pit_cells(kept);
     }
     routing.expect("a carve has at least one step")
 }

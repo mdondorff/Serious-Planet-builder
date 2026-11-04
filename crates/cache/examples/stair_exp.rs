@@ -42,6 +42,8 @@ fn main() {
     ex::set_hm_centre(val("--centre").map_or(0.0, |v| v.parse().unwrap()));
     ex::set_hm_mid_amp(val("--mid-amp").map_or(0.0, |v| v.parse().unwrap()));
     ex::set_hm_parts(val("--parts").map_or(0, |v| v.parse().unwrap()));
+    ex::set_keep_pits(flag("--keep-pits"));
+    println!("keep pits (SPIKE-102): {}", ex::keep_pits());
     let uplift_by_class: Option<[f64; 8]> = val("--uplift").map(|v| {
         let u: Vec<f64> = v.split(',').map(|x| x.parse().unwrap()).collect();
         u.try_into().expect("--uplift takes 8 comma-separated metres, one per class")
@@ -70,6 +72,7 @@ fn main() {
     println!("pass 1 steps: {steps}");
     let face2 = pass1_face(&spec, &base, Some(&factor), &CarveParams { steps, breach_max_m: val("--breach-max").map_or(CarveParams::default().breach_max_m, |v| v.parse().unwrap()), ..CarveParams::default() }, threads);
     ex::set_uplift(None);
+    println!("pass 1 kept-pit cells in the last step: {}", ex::kept_pit_cells());
     println!(
         "pass 1 face {face_no} at {res} cells ({:.0} m): {:.1} s",
         R * core::f64::consts::FRAC_PI_2 / res as f64,

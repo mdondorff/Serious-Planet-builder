@@ -106,3 +106,21 @@ pub fn hm_centre() -> f64 {
 pub fn set_hm_centre(v: f64) {
     HM_CENTRE.store(v.to_bits(), Ordering::Relaxed);
 }
+
+// SPIKE-102 (archetypes; spike branch only, never merged).
+static KEEP_PITS: AtomicBool = AtomicBool::new(false);
+static KEPT_PIT_CELLS: AtomicU64 = AtomicU64::new(0);
+/// The carve routes over the flooded copy but does not raise a cell that lies below its receiver (a depression): the pit keeps its height plus the uplift, no fill.
+pub fn keep_pits() -> bool {
+    KEEP_PITS.load(Ordering::Relaxed)
+}
+pub fn set_keep_pits(v: bool) {
+    KEEP_PITS.store(v, Ordering::Relaxed);
+}
+/// Cells left below their receiver in the last step of the last carve with `keep_pits` (a count, for the log).
+pub fn kept_pit_cells() -> u64 {
+    KEPT_PIT_CELLS.load(Ordering::Relaxed)
+}
+pub fn set_kept_pit_cells(v: u64) {
+    KEPT_PIT_CELLS.store(v, Ordering::Relaxed);
+}
