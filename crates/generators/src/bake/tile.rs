@@ -2,7 +2,7 @@
 //! deposition sweep, and the change of the tile's core against the base field.
 //!
 //! The layer grid has `cells` cells per face edge (98,304 for 101.8 m at Earth's size; fewer for a coarse planet pass), cut into square tiles of `tile` core cells (3,072) with a halo of
-//! `halo` cells (256) around each. A tile's window is `tile + 2 halo` cells a side; a window may reach past the face's edge, where the plane of the face continues over the neighbouring
+//! `halo` cells (128) around each. A tile's window is `tile + 2 halo` cells a side; a window may reach past the face's edge, where the plane of the face continues over the neighbouring
 //! ground (the base and the face change are functions of the direction). The routing's jitter and the thermal's pair hash follow the GLOBAL cell of the face's grid, so two windows that
 //! hold a cell treat it alike. A window's border still matters: the local carve caps the catchment area, but the deposition sweep routes the whole window, so its loads and capacities
 //! depend on where the border falls; the seam this leaves is measured (TEST-084), not assumed away.
@@ -10,6 +10,7 @@
 use super::carve::{carve, CarveParams};
 use super::deposit::{deposit_on_own_route, DepositParams, Kc};
 use super::face::face_stream;
+use super::map::catmull_rom;
 use super::thermal::{thermal, ThermalParams};
 use super::Grid;
 use planet_core::cube::{face_to_direction, TangentWarp};
@@ -18,6 +19,9 @@ use planet_core::{Face, Vec3};
 
 /// The quantisation step of a stored change in metres (a change is stored as an `i16` count of steps: `+-8 km` at 0.25 m).
 pub const QUANT_STEP_M: f32 = 0.25;
+/// The base field is evaluated on every `BASE_STRIDE`-th cell of a window and interpolated between (Catmull-Rom): the base is 86 % of a tile's cost (SPIKE-98), and the stored change is taken
+/// against the interpolated window, so the interpolation error cancels in it (measured against the every-cell window: rms 4.0 m on a mountain tile, 1.0 m on hills).
+pub const BASE_STRIDE: usize = 4;
 /// Added to a window's cell indices in the global cell id so that a halo past the face's edge (a negative index) stays a `u32`.
 const ID_OFFSET: i64 = 1 << 20;
 
@@ -67,6 +71,9 @@ impl TileGrid {
         if self.tile == 0 || !self.cells.is_multiple_of(self.tile) {
             return Err(format!("the tile ({} cells) does not divide the face edge ({} cells)", self.tile, self.cells));
         }
+        if !self.tile.is_multiple_of(BASE_STRIDE) {
+            return Err(format!("the tile ({} cells) must be a multiple of the base stride ({BASE_STRIDE}): the sparse base lattice of every window falls on the same global cells", self.tile));
+        }
         if self.halo * 2 >= self.tile {
             return Err(format!("the halo ({} cells) must be under half the tile ({} cells)", self.halo, self.tile));
         }
@@ -106,7 +113,7 @@ pub struct Pass2Params {
 }
 
 impl Pass2Params {
-    /// GEN-101's start values: the local carve of 10 steps without uplift, breach or fill and with the area capped at 1 km^2; thermal at the default; `kc` 1e5 and `zeta` 0.5.
+    /// GEN-101's start values: the local carve of 10 steps without uplift, breach or fill and with the area capped at 1 km^2; thermal at 300 passes of 1/8 of the excess (SPIKE-98: the 100-pass cap left 73 m of excess on a mountain tile); `kc` 1e5 and `zeta` 0.5.
     pub fn standard(seed: u64, sea_level: f64) -> Pass2Params {
         Pass2Params {
             carve: CarveParams {
@@ -118,7 +125,7 @@ impl Pass2Params {
                 incise_only: true,
                 ..CarveParams::default()
             },
-            thermal: ThermalParams { sea_level, ..ThermalParams::default() },
+            thermal: ThermalParams { sea_level, passes: 300, k: 1.0 / 8.0, ..ThermalParams::default() },
             kc: 1.0e5,
             zeta: 0.5,
             local_area_cells: 96.0,
@@ -163,6 +170,41 @@ fn sample_window(g: &TileGrid, id: TileId, field: &(dyn Fn(Vec3) -> f64 + Sync),
         .collect()
 }
 
+/// `field` evaluated every `s` cells of the window (on a lattice that reaches one node beyond the window on each side) and interpolated between the nodes with Catmull-Rom, row-major.
+/// A node is the field at its cell's direction, so a window cell on a node holds the field exactly. The lattice is anchored at the window's origin; with a tile that is a multiple of
+/// [`BASE_STRIDE`] every window's nodes fall on the same global cells (`TileGrid::check` refuses another tile). The interpolation error is cancelled by taking the change against this
+/// window. A change of the stride moves bits: bump `PASS2_KERNEL_VERSION`.
+pub fn sample_window_coarse(g: &TileGrid, id: TileId, field: &(dyn Fn(Vec3) -> f64 + Sync), threads: usize, s: usize) -> Vec<f64> {
+    assert!(s > 0, "the stride is at least 1");
+    let par: &dyn Par = &threads;
+    let (w, t, h) = (g.window(), g.tile as i64, g.halo as i64);
+    let (i0, j0) = (i64::from(id.ti) * t - h, i64::from(id.tj) * t - h);
+    let n = (w - 1) / s + 4; // nodes -1 ..= (w-1)/s + 2: the last cell reads one node past the cell after its own
+    let coarse: Vec<f64> = par::map(par, n, &|b| {
+        (0..n).map(|a| field(g.direction(id.face, i0 + (a as i64 - 1) * s as i64, j0 + (b as i64 - 1) * s as i64))).collect::<Vec<f64>>()
+    })
+    .into_iter()
+    .flatten()
+    .collect();
+    let at = |a: i64, b: i64| coarse[(b + 1) as usize * n + (a + 1) as usize];
+    par::map(par, w, &|j| {
+        let (cb, fy) = ((j / s) as i64, (j % s) as f64 / s as f64);
+        (0..w)
+            .map(|i| {
+                let (ca, fx) = ((i / s) as i64, (i % s) as f64 / s as f64);
+                let row = |db: i64| catmull_rom([at(ca - 1, cb + db), at(ca, cb + db), at(ca + 1, cb + db), at(ca + 2, cb + db)], fx);
+                // Kept within the range of the four nodes around the point, as the pass-1 read is (map.rs): a spline overshoots beside a sharp feature, which would put a coastal plain below the sea.
+                let four = [at(ca, cb), at(ca + 1, cb), at(ca, cb + 1), at(ca + 1, cb + 1)];
+                let (lo, hi) = four.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, u), v| (l.min(*v), u.max(*v)));
+                catmull_rom([row(-1), row(0), row(1), row(2)], fy).clamp(lo, hi)
+            })
+            .collect::<Vec<f64>>()
+    })
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
 /// The window's grid: cell `(0, 0)` is the global cell `(i0 + offset, j0 + offset)` of the face's grid, so a cell hashes alike in every window.
 fn window_grid(g: &TileGrid, id: TileId) -> Grid {
     let (t, h) = (g.tile as i64, g.halo as i64);
@@ -198,7 +240,7 @@ pub fn pass2_tile(
         id.tj
     );
     let grid = window_grid(g, id);
-    let base_w = sample_window(g, id, base, threads);
+    let base_w = sample_window_coarse(g, id, base, threads, BASE_STRIDE);
     let fc_w = sample_window(g, id, face_change, threads);
     let z0: Vec<f64> = base_w.iter().zip(&fc_w).map(|(b, c)| b + c).collect();
     drop(fc_w);

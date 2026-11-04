@@ -4,7 +4,9 @@
 
 use planet_core::{Face, Vec3};
 use planet_generators::bake::carve::carve;
-use planet_generators::bake::tile::{dequantise, pass2_tile, quantise, tile_has_land, Pass2Params, TileGrid, TileId, QUANT_STEP_M};
+use planet_generators::bake::tile::{
+    dequantise, pass2_tile, quantise, sample_window_coarse, tile_has_land, Pass2Params, TileGrid, TileId, QUANT_STEP_M,
+};
 use planet_generators::bake::Grid;
 
 /// Cells of 100 m on a face of 96 cells: a planet of about 6.1 km radius.
@@ -123,6 +125,7 @@ fn the_cells_still_moving_at_the_pass_cap_are_reported_and_a_bad_geometry_is_ref
     for (what, bad) in [
         ("a tile that does not divide the face", TileGrid { tile: 25, ..g }),
         ("a halo of half the tile", TileGrid { halo: 12, ..g }),
+        ("a tile that is not a multiple of the base stride", TileGrid { cells: 90, tile: 18, halo: 6, radius_m: g.radius_m }),
         ("no tile", TileGrid { tile: 0, ..g }),
         ("a halo over an eighth of the face edge", TileGrid { cells: 64, tile: 64, halo: 31, radius_m: g.radius_m }),
     ] {
@@ -168,4 +171,65 @@ fn the_seam_on_a_smooth_base_is_reported() {
     let (s, i) = (p99(&mut seam), p99(&mut inner));
     println!("smooth base: seam p99 {s:.2} m, inner p99 {i:.2} m");
     assert!(s.is_finite() && i.is_finite());
+}
+
+// spec: GEN-101
+#[test]
+fn the_base_sampled_every_4_cells_is_exact_at_the_nodes_close_between_them_and_the_same_on_any_thread_count() {
+    let g = grid();
+    let smooth = |d: Vec3| 400.0 * libm::sin(6.0 * d.x + 0.4) * libm::cos(5.0 * d.y) + 150.0 * libm::sin(9.0 * d.z);
+    let id = tile(1, 1);
+    let (w, h, t) = (g.window(), g.halo as i64, g.tile as i64);
+    let a = sample_window_coarse(&g, id, &smooth, 1, 4);
+    let b = sample_window_coarse(&g, id, &smooth, 8, 4);
+    assert_eq!(a.iter().map(|v| v.to_bits()).collect::<Vec<_>>(), b.iter().map(|v| v.to_bits()).collect::<Vec<_>>());
+    let exact = |i: usize, j: usize| smooth(g.direction(id.face, i64::from(id.ti) * t - h + i as i64, i64::from(id.tj) * t - h + j as i64));
+    let mut worst = 0.0f64;
+    for j in 0..w {
+        for i in 0..w {
+            let e = (a[j * w + i] - exact(i, j)).abs();
+            if i % 4 == 0 && j % 4 == 0 {
+                assert!(e < 1e-9, "node ({i}, {j}) is off by {e} m");
+            }
+            worst = worst.max(e);
+        }
+    }
+    // The clamp to the range of the four nodes clips a crest between nodes by up to about 3.4 m on this field (amplitude 550 m); the stored change is taken against this window, so it is not an error of the layer.
+    assert!(worst < 5.0, "between the nodes the interpolation is off by {worst} m on a field of wavelength over 20 cells");
+}
+
+// spec: GEN-101
+#[test]
+fn thermal_at_the_standard_parameters_runs_300_passes_of_an_eighth_which_the_kernel_accepts() {
+    let p = Pass2Params::standard(1, 0.0);
+    assert_eq!((p.thermal.passes, p.thermal.k), (300, 0.125));
+    let (g, id) = (grid(), tile(1, 1));
+    let r = pass2_tile(&g, id, &base, &nothing, None, &p, 2);
+    assert!(r.stats.thermal_passes <= 300 && r.stats.land_cells > 100, "{:?}", r.stats);
+}
+
+// spec: GEN-101
+#[test]
+fn the_sparse_base_works_for_any_stride_stays_in_range_beside_a_cliff_and_agrees_between_overlapping_windows() {
+    let g = grid();
+    let smooth = |d: Vec3| 100.0 * libm::sin(5.0 * d.x) + 40.0 * libm::cos(7.0 * d.y);
+    // Any stride, including those that divide the window's last index (stride 1 and 2 read one node past the edge case).
+    for s in [1usize, 2, 3, 4, 6] {
+        let v = sample_window_coarse(&g, tile(1, 1), &smooth, 2, s);
+        assert_eq!(v.len(), g.window() * g.window());
+        assert!(v.iter().all(|x| x.is_finite()), "stride {s}");
+    }
+    // A 400 m cliff between land at 20 m and sea at -380 m: the interpolation stays within the field's own range (no undershoot of a coastal plain below the sea).
+    let cliff = |d: Vec3| if d.x + 0.3 * d.y > 0.2 { 20.0 } else { -380.0 };
+    let v = sample_window_coarse(&g, tile(1, 1), &cliff, 1, 4);
+    assert!(v.iter().all(|x| (-380.0..=20.0).contains(x)), "the sparse base left the field's range");
+    // Two overlapping windows give the same bytes on the cells they share (the lattices fall on the same global cells because the tile is a multiple of the stride).
+    let (a, b) = (sample_window_coarse(&g, tile(1, 1), &smooth, 1, 4), sample_window_coarse(&g, tile(2, 1), &smooth, 1, 4));
+    let (w, t) = (g.window(), g.tile);
+    for j in 0..w {
+        for i in 0..2 * g.halo {
+            // Cell (t + i) of tile (1, 1)'s window is cell i of tile (2, 1)'s window.
+            assert_eq!(a[j * w + t + i].to_bits(), b[j * w + i].to_bits(), "window cell ({i}, {j}) differs between the tiles");
+        }
+    }
 }
