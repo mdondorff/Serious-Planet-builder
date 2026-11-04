@@ -45,6 +45,8 @@ struct Opts {
     legacy_source: bool,
     /// `--tile-dir DIR`: the directory of the layer's tile records (default `<out>/tiles`); the viewer reads the layer from the field store's own directory when it has no other, so a layer baked beside a store is written there.
     tile_dir: Option<PathBuf>,
+    /// `--faces LIST` (a region run only): the cube faces whose pass 1 is computed; the other faces read as no change. For a preview whose tiles all lie well inside those faces (beyond the halo's cross-fade).
+    faces: Option<Vec<u8>>,
     map_width: usize,
     image_step: Option<usize>,
 }
@@ -129,7 +131,16 @@ fn main() {
         threads,
         threads_note
     );
-    for f in 0..6u8 {
+    // A region run may compute pass 1 on some faces only (`--faces`): the others read as no change, which is exact for a tile whose window stays clear of the cube edges (the halo's cross-fade, GEN-100).
+    let computed_faces: Vec<u8> = match &o.faces {
+        Some(list) if tiles_wanted.is_some() => list.clone(),
+        Some(_) => fail("--faces applies to a --region run only: a planet pass computes every face"),
+        None => (0..6).collect(),
+    };
+    if computed_faces.len() < 6 {
+        println!("pass 1 on faces {computed_faces:?} only: the other faces read as no change; the tiles of this run must lie beyond the halo's cross-fade of the cube edges");
+    }
+    for &f in &computed_faces {
         let t = Instant::now();
         let r = run_pass1(&face_dir, &world, face_bake_res, &layer, &base, Some(&factor), &[Face(f)], threads)
             .unwrap_or_else(|e| fail(&e.to_string()));
@@ -147,13 +158,17 @@ fn main() {
         &world,
         face_bake_res,
         &layer,
-        &(0..6).map(Face).collect::<Vec<_>>(),
+        &computed_faces.iter().map(|&f| Face(f)).collect::<Vec<_>>(),
     )
     .unwrap_or_else(|e| fail(&e.to_string()));
     println!("drainage area: {} faces copied to the layer store", copied.len());
     let store = TileStore::open(&face_dir, world.params()).unwrap_or_else(|e| fail(&e.to_string()));
-    let faces: Vec<FaceChange> = (0..6)
+    let faces: Vec<FaceChange> = (0..6u8)
         .map(|f| {
+            if !computed_faces.contains(&f) {
+                let n = layer.cells + 2 * layer.halo;
+                return FaceChange { face: Face(f), cells: layer.cells, halo: layer.halo, change: vec![0.0; n * n] };
+            }
             load_face_change(&store, &world, face_bake_res, &layer, Face(f))
                 .unwrap_or_else(|e| fail(&e.to_string()))
                 .unwrap_or_else(|| fail("a pass-1 face is missing"))
@@ -279,6 +294,7 @@ fn parse() -> Opts {
         class_source: false,
         legacy_source: false,
         tile_dir: None,
+        faces: None,
         map_width: 1024,
         image_step: None,
     };
@@ -303,8 +319,13 @@ fn parse() -> Opts {
             "--class-source" => o.class_source = true,
             "--legacy-source" => o.legacy_source = true,
             "--tile-dir" => o.tile_dir = Some(PathBuf::from(value())),
+            "--faces" => {
+                o.faces = Some(
+                    value().split(',').map(|f| f.parse().ok().filter(|f| *f < 6).unwrap_or_else(|| fail("--faces needs a list of 0..5"))).collect(),
+                )
+            }
             other => fail(&format!(
-                "unknown option '{other}' (known: --tile-dir DIR, --seed N, --face-res N, --planet-res N, --tile N, --halo N, --region FILE, --keep-pass1, --out DIR, --threads N, --map-width W)"
+                "unknown option '{other}' (known: --faces LIST, --tile-dir DIR, --seed N, --face-res N, --planet-res N, --tile N, --halo N, --region FILE, --keep-pass1, --out DIR, --threads N, --map-width W)"
             )),
         }
     }
