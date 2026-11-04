@@ -233,3 +233,27 @@ fn the_sparse_base_works_for_any_stride_stays_in_range_beside_a_cliff_and_agrees
         }
     }
 }
+
+// spec: GEN-101
+#[test]
+fn a_tile_leaves_no_one_cell_pit_over_the_threshold_in_its_core() {
+    let (g, p) = (grid(), Pass2Params::standard(9, 0.0));
+    assert_eq!((p.pit_min_m, p.pit_passes), (0.5, 32));
+    let id = tile(1, 1);
+    let r = pass2_tile(&g, id, &base, &nothing, None, &p, 2);
+    let (t, h, w) = (g.tile, g.halo, g.window());
+    let base_w = planet_generators::bake::tile::sample_window_coarse(&g, id, &base, 2, planet_generators::bake::tile::BASE_STRIDE);
+    let z = |i: usize, j: usize| f64::from(r.core[j * t + i]) + base_w[(j + h) * w + i + h];
+    let mut pits = 0;
+    for j in 1..t - 1 {
+        for i in 1..t - 1 {
+            let lowest = (-1i64..=1)
+                .flat_map(|dj| (-1i64..=1).map(move |di| (di, dj)))
+                .filter(|d| *d != (0, 0))
+                .map(|(di, dj)| z((i as i64 + di) as usize, (j as i64 + dj) as usize))
+                .fold(f64::INFINITY, f64::min);
+            pits += usize::from(z(i, j) > 0.0 && lowest > 0.0 && lowest - z(i, j) > 0.5);
+        }
+    }
+    assert_eq!(pits, 0, "a one-cell pit over 0.5 m is left in the core");
+}

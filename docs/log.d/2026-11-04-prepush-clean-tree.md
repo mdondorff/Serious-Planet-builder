@@ -1,0 +1,1 @@
+- 2026-11-04 prepush-clean-tree: `cargo xtask prepush` refuses a working tree that differs from HEAD (tracked changes, untracked files under crates/ and xtask/): the checks must read what the push sends (BUILD-037)
