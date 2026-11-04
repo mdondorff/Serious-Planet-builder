@@ -4,15 +4,20 @@ Why it matters: the owner judges realism by archetype, not only by mountains (ow
 Time box: about 2 days of agent work (Opus); an interim note after deliverables 1 and 2.
 Success criteria: per archetype the current behaviour with evidence, the drivers mapped to boundary fields, pass 1, pass 2 or runtime, a staged design with cost estimates, a ranked M9-vs-later plan with the owner decisions it needs, and a GLO-30 reference tile list (not downloaded).
 Fallback if it fails: rank the archetypes by what the M9 bake must hold, and leave the processes to later layers.
-Code location: none (analysis from code, specs and earlier spike numbers; no probe runs).
+Code location: `spike/generator-archetypes` (the keep-pits switch, `relief_stats --dump`; never merged); everything else is analysis.
 
 # SPIKE-102: the generator by landscape archetype
 
-Status: deliverables 1-5 drafted (2026-11-04). Pending: the combined run on 2/12/10 with the P1b variant (slot asked), then stills and the close.
+Status: closed 2026-11-04. Deliverables 1-5 are complete, and the combined run on 2/12/10 is in section 6.
 
 Code paths are relative to `crates/`; `gen` = `generators/src`. State: origin/main at 22f01b48 (#1173, uplift taper).
 
 ## 0. Findings first
+
+0. **Measured (section 6): keeping the pits in pass 1 is the strongest relief lever found so far.**
+   - On top of the SPIKE-101 pair it reaches 0.85 of Everest's 3 km relief (against 0.62) and 0.94 of the Alps (against 0.86).
+   - The gain survives when the runtime fills the pits.
+   - The pits are about 10× deeper than real mountain pits, so they stay filled until lake water and a pit-tolerance rule exist.
 
 1. **One pipeline produces every archetype, and its driver set is too small to tell them apart.**
    - The field bake has four channels: continentalness, elevation, temperature and precipitation (`gen/global.rs:121-130`).
@@ -239,8 +244,8 @@ The ranking weighs three things:
 
 | Item | What | Archetypes | Risk |
 |---|---|---|---|
-| 1 | The SPIKE-101 pair: breach 500 m and the ridged ×4.5 band, centred on the mountain classes | alpine, fluvial | low; measured on 2/12/10 (section 6) |
-| 2 | P1b: route over the filled copy, carve the unfilled heights, store the fill depth. The runtime adds the fill depth back, so the look stays today's until lake water and F8 exist; neither then needs a rebuild. | tundra, glacial, karst, desert, volcanic (later); alpine relief now | low to medium: the fill depth of basins that cross a tile edge needs pass 1's face flood (section 6 gives the pit share) |
+| 1 | The SPIKE-101 pair: breach 500 m and the ridged ×4.5 band, centred on the mountain classes | alpine, fluvial | low; measured on 2/12/10: 0.62 of Everest, 0.86 of the Alps (section 6) |
+| 2 | P1b: route over the filled copy, carve the unfilled heights, store the fill depth. The runtime adds the fill depth back, so the look stays today's until lake water and F8 exist; neither then needs a rebuild. | tundra, glacial, karst, desert, volcanic (later); alpine relief now | low to medium: measured with 1 at 0.85 of Everest and 0.94 of the Alps, and the gain survives the fill (section 6); pits are about 10× deeper than real ones, so the runtime must add the fill depth; the fill depth of basins that cross a tile edge needs pass 1's face flood |
 | 3 | F1 lithology (hardness by province, strata K(z), soluble flag) and K(x, z) in both carves (P1a) | badlands, mesas, cuestas, coast choice, alpine contrast; karst later | medium: relief changes everywhere, so R7 re-tunes the class amplitudes |
 | 4 | F2 + F3 wind and orographic precipitation (aridity), runoff in K·t, and F9's arid default rules | badlands and sand sea get a rule; rain shadows; aridity for I8b's materials | low to medium: material colours change globally (the owner's look); GLOBAL_VERSION bump |
 | 5 | Shelf profile in the field bake | coastal (shallow water colour, distant coasts) | low |
@@ -318,5 +323,80 @@ The tiles are Copernicus GLO-30 DSM COG, `Copernicus_DSM_COG_10_<lat>_00_<lon>_0
 - Ranks 1-3 cover the three archetypes with no reference at all.
 - Two alternatives: N19 W156 (Mauna Loa, a shield with lava flows) for 4, and N52 W010 (Cliffs of Moher, a cliffed coast without glaciation) for 1.
 
+## 6. The combined run with keep-pits (tile 2/12/10, seed 14)
+
+### Setup
+- Spike branch `spike/generator-archetypes` = cd1ae099 (SPIKE-101) plus a keep-pits switch, never merged.
+- That base predates #1173's uplift taper. The taper only touches land below 60 m, so this mountain tile is unaffected (planner).
+- Both runs: pass 1 of face 2 at 12,288 with MFD and the C1 read; pass 2 standard; the layer read C1 with the 3 m coast fade.
+- (a) is the SPIKE-101 pair: the ridged band ×4.5, centred, on the mountain classes, and breach_max_m 500.
+- (b) is (a) plus keep-pits: pass 1 routes over the flooded copy, but a cell below its receiver keeps its height plus uplift and is no longer raised to the spill.
+- GLO-30 references are SPIKE-101's sites on the same 101.8 m grid. Runs (UTC) are in `runs.log`; raw lines are in `layer.tsv` and `dem.tsv`. Timings are indicative only (throttled machine).
+
+### Relief and hypsometry (relief_stats, per argmax class)
+
+| Measure | (a) | (b) | GLO-30 |
+|---|---|---|---|
+| High mountains, 3 km relief p50 | 497 m (0.62) | **682 m (0.85)** | Everest 804 m |
+| High mountains, 10 km relief p50 | 1,082 m | 1,527 m | Everest 1,467 m |
+| High mountains, slope p50 / p90 | 12.3° / 31.1° | 17.5° / 34.4° | Everest 26.9° / – |
+| High mountains, elevation p5 / p50 / p95 | 2,557 / 3,236 / 4,281 m | 1,820 / 2,940 / 4,266 m | Everest 662 / 2,157 / 5,344 m |
+| Mountains, 3 km relief p50 | 468 m (0.86) | **511 m (0.94)** | Alps 543 m |
+| Mountains, 10 km relief p50 | 993 m | 1,142 m | Alps 935 m |
+| Mountains, elevation p50 | 1,974 m | 1,862 m | Alps 1,076 m |
+
+- The crests (p95) stay in both runs, so the snow line is not wrecked.
+- Keep-pits deepens the valleys (p5 drops 740 m on the high mountains), which moves the spread towards Everest's.
+
+### Pits ("lake ground"): share of land cells deeper than 0.5 m below the spill, and their depth
+
+| Tile | Land in pits | Depth p50 / p95 | Note |
+|---|---|---|---|
+| (a), all land | 4.6 % | 15 / 129 m | high mountains 8.6 % |
+| (b), all land | 6.4 % | 63 / 221 m | mountains 5.4 %, high mountains 11.1 % |
+| Pass 1 of (b), last step | 1,243,257 of about 1.5e8 face cells kept below their receiver (0.8 %) | – | – |
+| GLO-30 Alps | 5.3 % | 3 / 15 m | lake surfaces are flat in a DSM, so depths are lower bounds |
+| GLO-30 Everest | 1.1 % | 7 / 35 m | |
+| GLO-30 Highlands | 2.9 % | 3 / 9 m | |
+
+### 3 km relief p50, unfilled against filled
+The filled surface is what the runtime shows with the stored fill depth added (non-overlapping 3 km blocks, so the values sit near relief_stats').
+
+| | Mountains, unfilled / filled | High mountains, unfilled / filled |
+|---|---|---|
+| (a) | 479 / 475 m | 512 / 506 m |
+| (b) | 518 / 508 m | 690 / 679 m |
+
+### Findings
+1. **Keep-pits is the larger relief lever of the two.**
+   - On top of the SPIKE-101 pair it lifts the high mountains from 0.62 to 0.85 of Everest's 3 km relief, and the mountains from 0.86 to 0.94 of the Alps.
+   - The basins stop eating the carve's work, which is SPIKE-101's cause.
+2. **The gain survives the fill: 679 m against 506 m on the filled surface.**
+   - P1b's design holds: bake the pits, store the fill depth, and the runtime shows today's filled look.
+   - The relief comes from the carve around the basins, not from open holes.
+3. **The pits are about 10× deeper than real mountain pits** (p50 63 m against 3-7 m). Open, they read as a pocked texture on the flanks (the stills).
+   - Without lake water they must stay filled at runtime.
+   - With lake water, F8 (pit tolerance) must keep only the plausible ones. GLO-30 shows 1-5 % of mountain land with shallow pits.
+4. **Pass 1 took 1,471 s for (b) against 2,233 s for (a), on the same machine.**
+   - The fill-raise in (a) moves more cells per step. The timing is indicative only, but keep-pits does not cost bake time.
+
+### Other GLO-30 tiles, as references for later archetype work (101.8 m)
+
+| Tile | 1 km / 3 km / 10 km relief p50 | Slope p50 / p90 | Land in pits; depth p50 / p95 |
+|---|---|---|---|
+| Sognefjord N61 E006 | 300 / 642 / 1,089 m | 19.3° / 39.1° | 2.9 %; 4 / 13 m |
+| Teshekpuk N70 W154 | 8 / 13 / 18 m | 0.4° / 1.6° | 14.2 %; 1.1 / 2.5 m (lakes flat in the DSM) |
+| Kras N45 E014 | 118 / 239 / 455 m | 9.2° / 20.7° | **15.6 %; 16 / 78 m** (dolines) |
+| Crater Lake N42 W123 | 128 / 288 / 559 m | 9.0° / 21.4° | 2.8 %; 3 / 19 m (the caldera lake surface is flat) |
+| Outer Banks N35 W076 | 9 / 14 / – m | 0.8° / 2.4° | 10.0 %; 1.4 / 4.4 m |
+| Namib S25 E015 | 56 / 88 / 133 m | 3.7° / 12.0° | **22.9 %; 10 / 42 m** (interdunes) |
+
+Karst and dune fields are the archetypes where open pits are the real signal, at depths the bake reaches. That confirms F8 as a per-archetype choice rather than a global one.
+
 ## Visuals
-None yet (interim). Section 4's combined run brings stills through the product path.
+
+![keep-pits](images/sheet-keep-pits.jpg)
+Mountains tile 2/12/10, seed 14, stills tool (`erosion_stills` on the spike branch; not the product path, because the candidates exist only there). The layer is read C1 with the coast fade; sun 8°; 2 km (top) and 10 km (bottom) above the ground; software adapter.
+- Left, (a): the SPIKE-101 pair.
+- Right, (b): (a) plus keep-pits, drawn unfilled (the pits open), which is the worst case.
+- (b) has sharper crests and deeper valley shadows, and a pocked texture of open pits on the right-hand flank. With the stored fill depth added, the runtime would draw those pits as flats.
