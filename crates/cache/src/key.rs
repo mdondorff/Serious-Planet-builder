@@ -93,6 +93,10 @@ pub enum Kind {
     LayerFace = 12,
     /// The pass-2 change of one tile of the erosion layer (M9 bake PR 5, GEN-101, STRM-065): one record per tile.
     LayerTile = 13,
+    /// The drainage area of one cube face of the erosion layer, a byte per pass-1 cell on a log scale (M9, GEN-110, STRM-072): one record per face.
+    LayerArea = 14,
+    /// The erosion and deposition depth of one tile of the erosion layer, two bytes per core cell (M9, GEN-111, STRM-072): one record per tile.
+    LayerDepth = 15,
 }
 
 /// One entry of a read set, in its 128-bit form (ADR 0018).
@@ -113,6 +117,9 @@ pub const QUERY_FOOTPRINT: u8 = 3;
 /// [`KEY_FORMAT_TAG_FOOTPRINT`] too.
 pub const QUERY_SUMMARY: u8 = 4;
 // Query kind 5 was the state of one chunk of a chunk field (removed with the chunk stage, ADR 0086); the number is not reused.
+/// The field source of a bake that is not the legacy generator (GEN-115, STRM-073). The parameters are the class source's identity (its versions, class tables and lattice size) then the seed,
+/// both little-endian; the result is zero. A key that carries one is another bake's, and so is every key sourced from it.
+pub const QUERY_FIELD_SOURCE: u8 = 6;
 
 /// Everything a key covers (ADR 0018).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -349,6 +356,8 @@ pub const PARAM_CLASS_WEIGHTS: u8 = 14;
 pub const PARAM_LAYER: u8 = 15;
 /// What a tile of the erosion layer is made of: its version, the tile grid, the pass-2 parameters, the inputs' identity and the digest of the pass-1 faces it read (STRM-065).
 pub const PARAM_TILE_LAYER: u8 = 16;
+/// What the layer's channels are made of: the channels' version, the byte codes' scales and the key parameters of the layer they were computed beside (STRM-072).
+pub const PARAM_LAYER_CHANNELS: u8 = 17;
 
 fn field_inputs(kind: Kind, field: &dyn HeightField, map: &dyn FaceMapping, tile: TileId, radius_m: f64) -> KeyInputs {
     assert!(

@@ -71,7 +71,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 /// Schema version this build writes and reads without migration.
-pub const SCHEMA_VERSION: u32 = 5;
+pub const SCHEMA_VERSION: u32 = 6;
 
 const VERSION_KEY: &str = "schema_version";
 const KIND_KEY: &str = "kind";
@@ -143,17 +143,23 @@ pub struct LookParams {
     pub ground: GroundLook,
 }
 
+/// The largest patch shift of the slope cosine (REND-055).
+pub const PATCH_MAX: f64 = 0.5;
+
 /// The ground look of a body: the strength of the procedural ground detail (LOOK-009) and the response curves of the ground materials
 /// (LOOK-008). The default is the window's natural detail and the Earth curves, so a file without the table shows what the window shows.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GroundLook {
     pub detail: f64,
     pub materials: MaterialParams,
+    /// The patch break-up of the material boundaries (REND-055): how far, as a share of the slope cosine, two patch octaves of 32 m and 8 m shift the slope input of the material weights;
+    /// 0 is off (the default: the picture is what it was, and the key does not change).
+    pub patch: f64,
 }
 
 impl Default for GroundLook {
     fn default() -> Self {
-        Self { detail: NATURAL_STRENGTH, materials: MaterialParams::EARTH }
+        Self { detail: NATURAL_STRENGTH, materials: MaterialParams::EARTH, patch: 0.0 }
     }
 }
 
@@ -162,6 +168,9 @@ impl GroundLook {
     pub fn validate(&self) -> Result<(), ParamError> {
         if !(self.detail == 0.0 || (1e-6..=1.0).contains(&self.detail)) {
             return Err(bad("ground.detail", self.detail, "the strength must be 0 or from 1e-6 to 1"));
+        }
+        if !(self.patch == 0.0 || (1e-6..=PATCH_MAX).contains(&self.patch)) {
+            return Err(bad("ground.patch", self.patch, "the patch shift must be 0 (off) or from 1e-6 to 0.5 of the slope cosine"));
         }
         self.materials.validate().map_err(|(key, value, why)| ParamError {
             key: leak_key(&key.replacen("materials.", "ground.", 1)),
@@ -437,12 +446,18 @@ fn v4_to_v5(_: &mut toml::Table) -> Result<(), String> {
     Ok(())
 }
 
+/// Version 5 to 6 adds the optional `patch` key of the `ground` table (LOOK-012); again no existing key moves.
+fn v5_to_v6(_: &mut toml::Table) -> Result<(), String> {
+    Ok(())
+}
+
 /// Migrations from every older version to the current one.
 pub const MIGRATIONS: &[Migration] = &[
     Migration { from: 1, apply: v1_to_v2 },
     Migration { from: 2, apply: v2_to_v3 },
     Migration { from: 3, apply: v3_to_v4 },
     Migration { from: 4, apply: v4_to_v5 },
+    Migration { from: 5, apply: v5_to_v6 },
 ];
 
 /// The look of every body that has an entry. A body without an entry has the Earth default.
@@ -647,6 +662,7 @@ fn read_body(path: &str, mut t: toml::Table) -> Result<LookParams, LookError> {
     if let Some(mut s) = ground {
         let k = format!("{path}.ground");
         take_f64(&k, &mut s, "detail", &mut p.ground.detail)?;
+        take_f64(&k, &mut s, "patch", &mut p.ground.patch)?;
         for (m, material) in MATERIAL_NAMES.iter().enumerate() {
             let mk = format!("{k}.{material}");
             match s.remove(*material) {
@@ -876,6 +892,7 @@ pub fn to_toml(file: &LookFile) -> String {
             out.push_str(&line(name, *v));
         }
         out.push_str(&format!("\n[body.{b}.ground]\n{}", line("detail", p.ground.detail)));
+        out.push_str(&line("patch", p.ground.patch));
         for (material, row) in MATERIAL_NAMES.iter().zip(&p.ground.materials.curves) {
             out.push_str(&format!("\n[body.{b}.ground.{material}]\n"));
             for (input, [lo, hi]) in INPUT_NAMES.iter().zip(row) {

@@ -1490,13 +1490,18 @@ mod tests {
         for word in ["F8", "ground look"] {
             assert!(KEYS_HELP.contains(word), "the help names {word}: {}", *KEYS_HELP);
         }
-        let mut ground = GroundLook { detail: 0.3, materials: MaterialParams::EARTH };
+        let mut ground = GroundLook { detail: 0.3, materials: MaterialParams::EARTH, patch: 0.12 };
         ground.materials.curves[3][Input::Moisture as usize] = [0.55, 0.85];
         let plan = |choice, mode| LitPlan::fixed(0.0).with_ground_look(choice, mode, &ground);
         let base = plan(LookChoice::Default, GroundDetailMode::Natural);
         assert_eq!((base.ground_detail, base.materials), (GroundDetailMode::Natural.strength(), MaterialParams::EARTH));
         let file = plan(LookChoice::File, GroundDetailMode::Natural);
         assert_eq!((file.ground_detail, file.materials), (0.3, ground.materials), "the file's strength stands for natural");
+        assert_eq!(
+            (file.ground_patch, base.ground_patch),
+            (0.12, 0.0),
+            "F8 carries the look file's patch break-up and the defaults have none"
+        );
         let full = plan(LookChoice::File, GroundDetailMode::Full);
         let off = plan(LookChoice::File, GroundDetailMode::Off);
         assert_eq!((full.ground_detail, off.ground_detail), (1.0, 0.0), "full and off stay what F6 says");

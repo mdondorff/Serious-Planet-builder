@@ -7,16 +7,16 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use planet_cache::global_store::GlobalWorld;
-use planet_cache::layer_store::{load_face_change, run_pass1, LayerSpec};
-use planet_cache::layer_tiles::{drop_pass1, face_change_reader, faces_digest, load_tile, run_pass2, Pass2Inputs, TileLayerSpec};
+use planet_cache::global_store::{FieldSource, GlobalWorld};
+use planet_cache::layer_manifest::LayerManifest;
+use planet_cache::layer_store::{load_face_change, run_pass1};
+use planet_cache::layer_tiles::{bake_specs, drop_pass1, face_change_reader, load_tile, run_pass2, BakeShape, Pass2Inputs};
 use planet_cache::pack::TileStore;
 use planet_core::{Face, Vec3};
-use planet_generators::bake::carve::CarveParams;
 use planet_generators::bake::face::FaceChange;
 use planet_generators::bake::inputs::BakeInputs;
 use planet_generators::bake::map::{field_maps, layer_change_at, tile_image};
-use planet_generators::bake::tile::{tile_has_land, Pass2Params, TileGrid, TileId as PassTile};
+use planet_generators::bake::tile::{tile_has_land, TileGrid, TileId as PassTile};
 use planet_world_def::WorldDefinition;
 
 const RADIUS_M: f64 = 6_371_000.0;
@@ -38,6 +38,13 @@ struct Opts {
     threads: usize,
     region: Option<PathBuf>,
     keep_pass1: bool,
+    /// `--global-dir DIR`: the stored field bake whose recorded source the layer follows; `--global-res` its cells a face edge.
+    global_dir: Option<PathBuf>,
+    global_res: u32,
+    class_source: bool,
+    legacy_source: bool,
+    /// `--tile-dir DIR`: the directory of the layer's tile records (default `<out>/tiles`); the viewer reads the layer from the field store's own directory when it has no other, so a layer baked beside a store is written there.
+    tile_dir: Option<PathBuf>,
     map_width: usize,
     image_step: Option<usize>,
 }
@@ -82,28 +89,36 @@ fn main() {
     }
     let started = Instant::now();
     // A planet pass that was complete (its pass 1 dropped) has nothing to resume: pass 1 would be computed again only to find every tile stored.
-    if tiles_wanted.is_none() && !out.join("layer").exists() && out.join("tiles").exists() {
+    if tiles_wanted.is_none() && !out.join("layer").exists() && o.tile_dir.clone().unwrap_or_else(|| out.join("tiles")).exists() {
         println!(
             "layer: {} holds a complete layer (pass 1 dropped); nothing to do (run with --keep-pass1 to keep pass 1 for iteration)",
             out.display()
         );
         return;
     }
-    let world = GlobalWorld::from_definition(&WorldDefinition::single_planet(RADIUS_M, o.seed)).unwrap_or_else(|e| fail(&format!("{e:?}")));
-    let inputs = BakeInputs::new(o.seed, threads);
-    let (base, factor) = (|d: Vec3| inputs.base(d), |d: Vec3| inputs.carve_factor(d));
-    let face_halo = o.face_res.div_ceil(128).max(4).min((o.face_res - 1) / 2);
-    let layer = LayerSpec {
-        cells: o.face_res,
-        radius_m: RADIUS_M,
-        sea_level: 0.0,
-        seed: o.seed,
-        carve: CarveParams::default(),
-        inputs_id: BakeInputs::id(),
-        uses_factor: true,
-        halo: face_halo,
+    // The world follows the field source: the one the store at --global-dir records (a store of both is refused unless --class-source or --legacy-source says which), or the class source with
+    // --class-source alone, else the legacy generator. The layer's keys follow the world (STRM-073).
+    let def = WorldDefinition::single_planet(RADIUS_M, o.seed);
+    let choice = match (o.class_source, o.legacy_source) {
+        (true, true) => fail("--class-source and --legacy-source exclude each other"),
+        (true, false) => Some(FieldSource::Class),
+        (false, true) => Some(FieldSource::Legacy),
+        (false, false) => None,
     };
-    let (face_dir, tile_dir) = (out.join("layer"), out.join("tiles"));
+    let inputs = std::sync::Arc::new(BakeInputs::new(o.seed, threads));
+    let world = match &o.global_dir {
+        Some(dir) => GlobalWorld::for_store(&def, dir, o.global_res, choice, threads).unwrap_or_else(|e| fail(&e)),
+        None if choice == Some(FieldSource::Class) => {
+            GlobalWorld::from_definition(&def).unwrap_or_else(|e| fail(&format!("{e:?}"))).with_class_source(inputs.clone())
+        }
+        None => GlobalWorld::from_definition(&def).unwrap_or_else(|e| fail(&format!("{e:?}"))),
+    };
+    let (base, factor) = (|d: Vec3| inputs.base(d), |d: Vec3| inputs.carve_factor(d));
+    // The specs of both passes come from the one derivation the viewer also uses (`bake_specs`), so a record's key cannot drift between the command and the reader.
+    let shape = BakeShape { seed: o.seed, radius_m: RADIUS_M, face_res: o.face_res, planet_res: o.planet_res, tile: o.tile, halo: o.halo };
+    let (layer, spec) = bake_specs(&world, &shape).unwrap_or_else(|e| fail(&e));
+    let face_halo = layer.halo;
+    let (face_dir, tile_dir) = (out.join("layer"), o.tile_dir.clone().unwrap_or_else(|| out.join("tiles")));
     let face_bake_res = o.face_res as u32;
     println!(
         "layer: seed {}, pass 1 at {} cells a face edge (halo {face_halo}), pass 2 at {} cells ({:.0} m), tiles of {tile} with a halo of {halo}, {} threads ({})",
@@ -125,6 +140,17 @@ fn main() {
             mib()
         );
     }
+    // The drainage areas are part of the layer: copy them beside the tiles before the pass-1 store can be dropped.
+    let copied = planet_cache::layer_channels::copy_areas(
+        &face_dir,
+        &tile_dir,
+        &world,
+        face_bake_res,
+        &layer,
+        &(0..6).map(Face).collect::<Vec<_>>(),
+    )
+    .unwrap_or_else(|e| fail(&e.to_string()));
+    println!("drainage area: {} faces copied to the layer store", copied.len());
     let store = TileStore::open(&face_dir, world.params()).unwrap_or_else(|e| fail(&e.to_string()));
     let faces: Vec<FaceChange> = (0..6)
         .map(|f| {
@@ -135,13 +161,6 @@ fn main() {
         .collect();
     let faces: [FaceChange; 6] = faces.try_into().expect("six faces");
     let reader = face_change_reader(&faces);
-    let spec = TileLayerSpec {
-        grid,
-        params: Pass2Params::standard(o.seed, 0.0),
-        inputs_id: BakeInputs::id(),
-        uses_factor: true,
-        faces: faces_digest(&world, face_bake_res, &layer),
-    };
     let surface = |d: Vec3| base(d) + reader(d);
     let planet_pass = tiles_wanted.is_none();
     let tiles: Vec<PassTile> = tiles_wanted.unwrap_or_else(|| {
@@ -198,6 +217,15 @@ fn main() {
             .unwrap_or_else(|| fail("a tile is missing from the store"));
         stored.insert((t.face.0, t.ti, t.tj), r.core);
     }
+    // The manifest (STRM-074): the shape, versions and source, and the range of the change over the tiles of this run added to what the directory already says (the range only widens).
+    let mut manifest = LayerManifest::new(&world, &shape).unwrap_or_else(|e| fail(&e));
+    for core in stored.values() {
+        let (lo, hi) = core.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(l, h), v| (l.min(*v), h.max(*v)));
+        manifest.widen(f64::from(lo), f64::from(hi));
+    }
+    let written = manifest.merge_into(&tile_dir).unwrap_or_else(|e| fail(&e));
+    let (lo, hi) = written.range();
+    println!("layer manifest: {} (change range [{lo}, {hi}] m)", tile_dir.join(planet_cache::layer_manifest::MANIFEST_FILE).display());
     if planet_pass {
         let t = Instant::now();
         for (name, image) in field_maps(o.map_width, o.seed, &base, &|d| layer_change_at(&grid, &stored, &faces, d), "BAKE LAYER", "LAYER")
@@ -239,13 +267,18 @@ fn parse() -> Opts {
     let mut o = Opts {
         seed: 14,
         face_res: FACE_LIMIT,
-        planet_res: 3072,
+        planet_res: 98_304,
         tile: None,
         halo: None,
         out: None,
         threads: 0,
         region: None,
         keep_pass1: false,
+        global_dir: None,
+        global_res: 16_384,
+        class_source: false,
+        legacy_source: false,
+        tile_dir: None,
         map_width: 1024,
         image_step: None,
     };
@@ -265,8 +298,13 @@ fn parse() -> Opts {
             "--region" => o.region = Some(PathBuf::from(value())),
             "--image-step" => o.image_step = Some(number("--image-step")),
             "--keep-pass1" => o.keep_pass1 = true,
+            "--global-dir" => o.global_dir = Some(PathBuf::from(value())),
+            "--global-res" => o.global_res = number("--global-res") as u32,
+            "--class-source" => o.class_source = true,
+            "--legacy-source" => o.legacy_source = true,
+            "--tile-dir" => o.tile_dir = Some(PathBuf::from(value())),
             other => fail(&format!(
-                "unknown option '{other}' (known: --seed N, --face-res N, --planet-res N, --tile N, --halo N, --region FILE, --keep-pass1, --out DIR, --threads N, --map-width W)"
+                "unknown option '{other}' (known: --tile-dir DIR, --seed N, --face-res N, --planet-res N, --tile N, --halo N, --region FILE, --keep-pass1, --out DIR, --threads N, --map-width W)"
             )),
         }
     }

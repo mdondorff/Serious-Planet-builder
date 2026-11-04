@@ -168,3 +168,10 @@ What happened: nextest `count:N/K` gave tier A+B parts of 535 s and 209 s, and t
 Assumption it changes: that equal test counts give equal job times.
 Proposed follow-up: none; A+B runs `hash:N/3` (stable when tests are added); check a split by replaying recorded durations before changing it.
 Obsolete when: CI splits by recorded durations.
+
+## 2026-11-04 The runtime lattice and the surface the layer was carved on are two generators
+Scope: project (M9 bake; the erosion layer's runtime read, GEN-112)
+What happened: on seed 14, mountains tile 2/12/10, the stored bake's surface (`global::sample`, the legacy generator, read C1 from a 611 m lattice) is 2,064 m rms from `BakeInputs::base` (the class source the layer was carved on): p5 -3,372 m, p95 +125 m; the relief channels `m + k (e - m)` (512-cell estimate) leave 2,061 m. A lattice of `BakeInputs::base` itself read C1 is 3.4 m rms (p95 5.5 m, max 28 m) at 611 m, 4.9 m at 1.2 km, 2.0 m at 305 m.
+Assumption it changes: that the layer can be added to the runtime base plus `k` and `m`; and that the lattice of a store is the surface a bake read.
+Proposed follow-up: the product's field bake is made from the class source and carries `BakeInputs::id()` (the viewer refuses `--erosion on` without that marker); `with_layer` needs no relief channels.
+Obsolete when: the field bake is made from the class source and the legacy generator is retired.

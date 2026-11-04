@@ -72,7 +72,7 @@ pub(crate) fn prefill_store(o: &Options, dir: &Path, out: &mut dyn Write) -> Res
         Some(p) => load_world(p)?,
         None => planet_world_def::WorldDefinition::single_planet(crate::skeleton::RADIUS_M, o.seed),
     };
-    let world = WorldTerrain::open_store(def, dir, o.global_res)?;
+    let world = WorldTerrain::open_store_as(def, dir, o.global_res, o.field_source_choice()?)?;
     let field = world.field()?;
     let max_level = o.finest_level_for(o.cells);
     let floor = o.floor_for(o.cells);

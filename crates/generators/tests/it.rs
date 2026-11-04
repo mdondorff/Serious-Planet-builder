@@ -46,6 +46,8 @@ mod erosion;
 mod generator_contract;
 #[path = "global.rs"]
 mod global;
+#[path = "global_class.rs"]
+mod global_class;
 #[path = "global_contract.rs"]
 mod global_contract;
 #[path = "global_reader.rs"]

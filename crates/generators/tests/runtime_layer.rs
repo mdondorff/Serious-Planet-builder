@@ -145,7 +145,7 @@ impl LayerSource for MemoryLayer {
         }
         let core: Vec<f32> =
             (0..TILE * TILE).map(|k| (self.value)(face.0, ti as usize * TILE + k % TILE, tj as usize * TILE + k / TILE) as f32).collect();
-        let result = Arc::new(TileResult { id: PassTile { face, ti, tj }, core, stats: zero_stats() });
+        let result = Arc::new(TileResult { id: PassTile { face, ti, tj }, core, deposited: Vec::new(), stats: zero_stats() });
         let tile = Arc::new(LayerTile::new(result, TILE)?);
         self.held.lock().unwrap().insert((face.0, ti, tj), tile.clone());
         Ok(Some(tile))
@@ -418,8 +418,14 @@ fn the_keys_follow_the_layer_and_the_order_of_the_calls() {
     assert_eq!(a.implementation_id(), EROSION_LAYER_IMPLEMENTATION_ID);
     assert_eq!(layered(&src, true, 1.0).implementation_id(), EROSION_C1_LAYER_IMPLEMENTATION_ID);
     assert_eq!(a.version(), band.version(), "the field version does not change");
-    let e = plain(&src, false).with_layer(layer(1.0, 3), 0.0).err().unwrap();
-    assert!(e.contains("relief channels"), "{e}");
+    // Without the relief channels the layer still applies (`k` 1, `m` unread), under its own ids.
+    let alone = plain(&src, false).with_layer(layer(1.0, 3), 0.0).unwrap();
+    assert_eq!(alone.implementation_id(), planet_generators::erosion::EROSION_LAYER_ONLY_IMPLEMENTATION_ID);
+    assert_eq!(
+        plain(&src, true).with_layer(layer(1.0, 3), 0.0).unwrap().implementation_id(),
+        planet_generators::erosion::EROSION_C1_LAYER_ONLY_IMPLEMENTATION_ID
+    );
+    assert_ne!(alone.inputs_hash(), a.inputs_hash(), "the channels are part of the key when on");
     let e = relief(&src, false)
         .with_crease_band(planet_generators::erosion::CreaseBand::of_the_bake(0.0))
         .unwrap()
@@ -493,7 +499,7 @@ fn the_pyramid_holds_every_cell_and_each_level_its_children() {
     // A damaged tile is refused, naming it.
     let mut core = t.result().core.clone();
     core[5] = f32::NAN;
-    let bad = TileResult { id: t.result().id, core, stats: zero_stats() };
+    let bad = TileResult { id: t.result().id, core, deposited: Vec::new(), stats: zero_stats() };
     let e = LayerTile::new(Arc::new(bad), TILE).err().unwrap();
     assert!(e.contains("layer tile 1/1/2") && e.contains("not finite"), "{e}");
 }
@@ -575,7 +581,12 @@ fn the_pyramid_of_a_tile_of_odd_sizes_holds_exactly_its_nodes_at_every_level() {
     for cells in [96usize, 100, 40] {
         let core: Vec<f32> =
             (0..cells * cells).map(|k| ((hash_u64s(5, &[cells as u64, k as u64]) >> 40) as f32 / 1000.0) - 8000.0).collect();
-        let result = Arc::new(TileResult { id: PassTile { face: Face(0), ti: 0, tj: 0 }, core: core.clone(), stats: zero_stats() });
+        let result = Arc::new(TileResult {
+            id: PassTile { face: Face(0), ti: 0, tj: 0 },
+            core: core.clone(),
+            deposited: Vec::new(),
+            stats: zero_stats(),
+        });
         let t = LayerTile::new(result, cells).unwrap();
         let block = t.block_cells();
         let mut seen_levels = 0;
@@ -600,5 +611,41 @@ fn the_pyramid_of_a_tile_of_odd_sizes_holds_exactly_its_nodes_at_every_level() {
             seen_levels >= 2 && t.node_range(t.levels() - 1, 0, 0) == t.range(),
             "{cells} cells: the last level is one node, the tile's range"
         );
+    }
+}
+
+// spec: GEN-112
+#[test]
+fn without_the_relief_channels_the_layer_is_added_to_the_lattice_read_with_the_band_and_the_bounds_hold() {
+    let g = grid();
+    let src = GridSource(&g);
+    let l = layer(1.0, 3);
+    for c1 in [false, true] {
+        let on = plain(&src, c1).with_layer(l.clone(), 0.0).unwrap();
+        let band = plain(&src, c1).with_crease_band(planet_generators::erosion::CreaseBand::of_the_bake(0.0)).unwrap();
+        assert!(on.layer_on() && on.crease_band_on() && !on.relief_on());
+        let mut rng = SplitMix64(31);
+        for _ in 0..1500 {
+            let d = random_dir(&mut rng);
+            let want = band.height(d) + coast_fade(on.base_elevation(d), 0.0) * l.change_at(d).unwrap();
+            assert_eq!(on.height(d).to_bits(), want.to_bits(), "c1 {c1}: k is 1, m unread: the band's height plus the faded change");
+        }
+        let dirs: Vec<Vec3> = (0..300).map(|_| random_dir(&mut rng)).collect();
+        for (d, h) in dirs.iter().zip(on.heights(&dirs)) {
+            assert_eq!(on.height(*d).to_bits(), h.to_bits());
+        }
+        for n in 0..200 {
+            let c = random_dir(&mut rng);
+            let r = 1e-4 + rng.next_f64() * 0.02 * (f64::from(n % 4) + 0.3);
+            let (lo, hi) = on.height_bounds(c, r);
+            for _ in 0..20 {
+                let d = offset(c, r * rng.next_f64().sqrt(), rng.next_f64() * std::f64::consts::TAU);
+                let h = on.height(d);
+                assert!(h >= lo - 1e-3 && h <= hi + 1e-3, "c1 {c1}: height {h} outside [{lo}, {hi}]");
+            }
+            let (ilo, ihi) = on.height_bounds(offset(c, 0.6 * r, rng.next_f64() * std::f64::consts::TAU), r * 0.3);
+            assert!(ilo >= lo - 1e-3 && ihi <= hi + 1e-3, "c1 {c1}: inner [{ilo}, {ihi}] not within outer [{lo}, {hi}]");
+        }
+        assert!(on.error().is_none());
     }
 }
