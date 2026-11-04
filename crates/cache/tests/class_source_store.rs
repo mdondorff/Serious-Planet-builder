@@ -154,7 +154,9 @@ fn an_offline_reader_picks_the_world_by_the_recorded_source_and_refuses_a_store_
     assert!(GlobalWorld::for_store(&def, both.path(), RES, Some(FieldSource::Legacy), 2).unwrap().class_source().is_none());
     // A choice the store does not hold, another seed and a store with no bake are refused, naming the keys or the resolution.
     assert!(GlobalWorld::for_store(&def, class_store.path(), RES, Some(FieldSource::Legacy), 2).is_err());
-    let e = GlobalWorld::for_store(&WorldDefinition::single_planet(R, 4), class_store.path(), RES, None, 2).err().expect("another seed is refused");
+    let e = GlobalWorld::for_store(&WorldDefinition::single_planet(R, 4), class_store.path(), RES, None, 2)
+        .err()
+        .expect("another seed is refused");
     assert!(e.contains("holds no bake of 8 cells for this definition"), "{e}");
     let e = GlobalWorld::for_store(&def, class_store.path(), RES * 2, None, 2).err().expect("another resolution is refused");
     assert!(e.contains("holds no bake of 16 cells for this definition"), "{e}");
