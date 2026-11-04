@@ -501,9 +501,10 @@ fn the_default_breach_is_500_m_and_an_optional_height_scale_keeps_the_small_limi
     assert!(new < old - 50.0, "the default limit of 500 m breaches the crest far lower than 50 m does: {new} against {old}");
     let scaled = one_step(400.0, CarveParams { breach_height_scale_m: 2000.0, ..CarveParams::default() });
     assert!(scaled > new && scaled < old, "a scaled limit lies between 50 and 500 m at 400 m of height: {scaled}");
-    let (low, low_old) = (
-        one_step(230.0, CarveParams { breach_height_scale_m: 2000.0, ..CarveParams::default() }),
-        one_step(230.0, CarveParams { breach_max_m: 50.0, ..CarveParams::default() }),
+    // With no breach allowed, the scaling breaches nothing either.
+    let (none, none_scaled) = (
+        one_step(400.0, CarveParams { breach_max_m: 0.0, ..CarveParams::default() }),
+        one_step(400.0, CarveParams { breach_max_m: 0.0, breach_height_scale_m: 2000.0, ..CarveParams::default() }),
     );
-    assert!((low - low_old).abs() < 15.0, "near the sea the scaled limit is about the old 50 m: {low} against {low_old}");
+    assert_eq!(none.to_bits(), none_scaled.to_bits(), "a limit of 0 with the scaling on breached: {none_scaled} against {none}");
 }

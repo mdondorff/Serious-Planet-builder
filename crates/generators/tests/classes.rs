@@ -432,18 +432,19 @@ fn the_mountain_band_is_ridged_four_and_a_half_times_as_high_and_centred() {
             continue;
         }
         let k = blended_k(&p.weights);
-        let amp = hill_amplitude_for_k(k) * MOUNTAIN_BAND_SCALE;
+        let amp = hill_amplitude_for_k(k) * (1.0 + (MOUNTAIN_BAND_SCALE - 1.0) * wm);
         let band = source.elevation_m(d, &p, k) - p.e0;
         sum += band / amp;
         amp_sum += amp;
-        max = max.max(band / amp);
+        // The residual weight (1 - wm) of the plain hill noise adds at most (1 - wm) of the amplitude.
+        max = max.max(band / amp - (1.0 - wm));
         min = min.min(band / amp);
         count += 1;
     }
     assert!(count > 500, "only {count} mountain points");
     let mean = sum / f64::from(count);
     assert!(amp_sum / f64::from(count) > 2000.0, "the mountain band is x4.5: mean amplitude {} m", amp_sum / f64::from(count));
-    assert!(mean.abs() < 0.12, "the band is centred: mean {mean} of the amplitude");
+    assert!(mean.abs() < 0.05, "the band is centred: mean {mean} of the amplitude");
     assert!(
         max <= 1.0 - MOUNTAIN_BAND_CENTRE + 1e-9 && min >= -MOUNTAIN_BAND_CENTRE - 1e-9,
         "the band lies in [-0.45, 0.55] of its amplitude: {min}..{max}"

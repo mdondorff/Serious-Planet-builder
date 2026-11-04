@@ -89,7 +89,7 @@ pub fn carve(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, facto
                 let want = (z[c] - p.breach_slope * distance(grid, c, rec)).max(floor);
                 if z[rec] > want {
                     let limit = if p.breach_height_scale_m > 0.0 {
-                        BREACH_MIN_M
+                        p.breach_max_m.min(BREACH_MIN_M)
                             + (p.breach_max_m - BREACH_MIN_M).max(0.0)
                                 * planet_core::smoothstep(0.0, p.breach_height_scale_m, z[rec] - p.sea_level)
                     } else {
