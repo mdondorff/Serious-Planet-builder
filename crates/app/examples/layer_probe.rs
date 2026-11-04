@@ -20,14 +20,9 @@ fn main() {
     let min_c: f64 = a.get(4).map_or(1.0, |v| v.parse().unwrap());
     let def = planet_world_def::WorldDefinition::single_planet(6_371_000.0, seed);
     let world = GlobalWorld::for_store(&def, &dir, 16384, None, 8).expect("the store's world");
-    let (layer, manifest, shape) = StoreLayer::open_recorded(
-        &dir,
-        Arc::new(world),
-        &BakeShape::production(seed, 6_371_000.0),
-        ShapeOverride::default(),
-        4,
-    )
-    .expect("the layer");
+    let (layer, manifest, shape) =
+        StoreLayer::open_recorded(&dir, Arc::new(world), &BakeShape::production(seed, 6_371_000.0), ShapeOverride::default(), 4)
+            .expect("the layer");
     println!("layer: shape {shape:?}, manifest {}, range {:?}", manifest.is_some(), layer.global_range());
     let tile = layer.tile(Face(t[0] as u8), t[1] as u32, t[2] as u32).unwrap().expect("a tile");
     let inputs = BakeInputs::new(seed, 8);
@@ -52,7 +47,19 @@ fn main() {
         for i in (0..3072).step_by(6) {
             let d = grid.direction(Face(t[0] as u8), (t[1] * 3072 + i) as i64, (t[2] * 3072 + j) as i64);
             let e = inputs.base(d);
-            let b = if e <= 0.0 { continue } else if e < 3.0 { 0 } else if e < 6.0 { 1 } else if e < 10.0 { 2 } else if e < 30.0 { 3 } else { continue };
+            let b = if e <= 0.0 {
+                continue;
+            } else if e < 3.0 {
+                0
+            } else if e < 6.0 {
+                1
+            } else if e < 10.0 {
+                2
+            } else if e < 30.0 {
+                3
+            } else {
+                continue;
+            };
             bins[b].push(f64::from(tile.cell(i, j)));
         }
     }

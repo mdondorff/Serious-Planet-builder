@@ -817,7 +817,10 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
     const EROSION_OPTIONS: [&str; 4] = ["--erosion-store", "--erosion-face-res", "--erosion-res", "--erosion-unchecked"];
     let capture_stills = matches!(o.mode, Mode::TestRender) && o.scene == "capture-stills";
     if o.given.contains("--erosion") && o.erosion && !matches!(o.mode, Mode::Editor) && !capture_stills {
-        return Err("--erosion on only applies to `editor` and `test-render --scene capture-stills` (they draw the layer over a stored bake)".into());
+        return Err(
+            "--erosion on only applies to `editor` and `test-render --scene capture-stills` (they draw the layer over a stored bake)"
+                .into(),
+        );
     }
     if !o.erosion {
         if let Some(f) = EROSION_OPTIONS.iter().find(|f| o.given.contains(**f)) {
