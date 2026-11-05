@@ -1822,6 +1822,7 @@ mod tests {
         let (layer_spec, tile_spec) = bake_specs(&world, &shape).unwrap();
         let inputs = BakeInputs::new(3, 2);
         let (base, factor) = (|v: planet_core::Vec3| inputs.base(v), |v: planet_core::Vec3| inputs.carve_factor(v));
+        inputs.lithology(); // built here, on its threads, not inside the carve's parallel pass
         let (rock_k, rock_u) = (|v: planet_core::Vec3, z: f64| inputs.rock_k(v, z), |v: planet_core::Vec3| inputs.uplift_at(v));
         let rock = planet_generators::bake::face::RockFields { k: Some(&rock_k), uplift: Some(&rock_u) };
         let faces: Vec<planet_core::Face> = (0..6).map(planet_core::Face).collect();
@@ -1957,6 +1958,7 @@ mod tests {
         let shape = BakeShape { seed: 3, radius_m: skeleton::RADIUS_M, face_res: 24, planet_res: 24, tile: None, halo: None };
         let (layer_spec, tile_spec) = bake_specs(&world, &shape).unwrap();
         let (base, factor) = (|v: planet_core::Vec3| inputs.base(v), |v: planet_core::Vec3| inputs.carve_factor(v));
+        inputs.lithology(); // built here, on its threads, not inside the carve's parallel pass
         let (rock_k, rock_u) = (|v: planet_core::Vec3, z: f64| inputs.rock_k(v, z), |v: planet_core::Vec3| inputs.uplift_at(v));
         let rock = planet_generators::bake::face::RockFields { k: Some(&rock_k), uplift: Some(&rock_u) };
         let faces: Vec<planet_core::Face> = (0..6).map(planet_core::Face).collect();

@@ -15,7 +15,7 @@ use planet_core::Vec3;
 pub struct BakeInputs {
     source: ClassSource,
     lattice: ClassLattice,
-    lithology: Lithology,
+    lithology: std::sync::OnceLock<Lithology>,
     uplift: Uplift,
     threads: usize,
     orography_cells: usize,
@@ -27,12 +27,11 @@ impl BakeInputs {
     pub fn new(seed: u64, threads: usize) -> BakeInputs {
         let source = ClassSource::new(seed);
         let lattice = ClassLattice::build_with(&source, CLASS_LATTICE_N, threads);
-        let lithology = Lithology::new(&source, threads);
         let uplift = Uplift::new(source.seed());
         BakeInputs {
             source,
             lattice,
-            lithology,
+            lithology: std::sync::OnceLock::new(),
             uplift,
             threads,
             orography_cells: crate::orography::default_cells(),
@@ -76,18 +75,18 @@ impl BakeInputs {
 
     /// The erodibility K of the lithology at a direction and a height with the lower edge of its band (GEN-116, GEN-127).
     pub fn rock_k(&self, d: Vec3, z: f64) -> Layer {
-        let s = self.lithology.strata(d, z);
+        let s = self.lithology().strata(d, z);
         Layer { k: s.k * ROCK_K_SCALE, floor: s.lower_m }
     }
 
     /// The uplift `U / K` at K 1 at a direction (GEN-123).
     pub fn uplift_at(&self, d: Vec3) -> f64 {
-        self.uplift.at(self.lithology.provinces(), d)
+        self.uplift.at(self.lithology().provinces(), d)
     }
 
-    /// The lithology field the bake reads.
+    /// The lithology field the bake reads, its province lattice built on first use (the class source's terms, on the threads of [`BakeInputs::new`]).
     pub fn lithology(&self) -> &Lithology {
-        &self.lithology
+        self.lithology.get_or_init(|| Lithology::new(&self.source, self.threads))
     }
 
     /// An identity of what the base, the carve factor, the lithology and the uplift read besides the seed: the class source's and class list's versions, the lattice size and the class tables of `k` and of the

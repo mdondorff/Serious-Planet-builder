@@ -51,6 +51,7 @@ fn main() {
         PathBuf::from(d)
     } else {
         let out = PathBuf::from(arg("--out").expect("--out DIR"));
+        inputs.lithology(); // built here, on its threads, not inside the carve's parallel pass
         let (rock_k, rock_u) = (|d: Vec3, z: f64| inputs.rock_k(d, z), |d: Vec3| inputs.uplift_at(d));
         let rock = RockFields { k: (mask & 1 != 0).then_some(&rock_k as _), uplift: (mask & 2 != 0).then_some(&rock_u as _) };
         println!("rock fields: mask {mask} (bit 0 the erodibility, bit 1 the uplift; 0 is today's carve)");
