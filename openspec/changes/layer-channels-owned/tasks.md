@@ -1,0 +1,3 @@
+- [x] 1.1 The owned reader, windows, byte caps, the trait, the diagnostic and its guard, tests
+- [x] 1.2 The probe and the figures (design.md)
+- [ ] 1.3 Reviews (`spec-guardian`), `verifier`, prepush, PR; archive in the same PR

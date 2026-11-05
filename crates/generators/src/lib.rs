@@ -6,6 +6,7 @@
 
 pub mod bake;
 pub mod chain;
+pub mod channels;
 pub mod chunk;
 pub mod chunkfield;
 pub mod classes;

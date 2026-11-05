@@ -201,6 +201,79 @@ pub fn load_area(
     Ok(Some(raw))
 }
 
+/// DIAGNOSTIC, never for the viewer or the generation path (STRM-075): the codes of a channel record of `cells x cells` (kind 14: a face's area; kind 15: `cells` the tile's side) decoded **without the key
+/// check**, for tools that inspect a store made under the keys of another build (a measurement, a probe). The header's codec and cell count are still checked and the stream must decode to exactly the
+/// expected bytes. A test pins that nothing but the probes calls it; the runtime reads through [`LayerChannels`], which refuses a channel of another layer by name.
+pub fn diagnostic_decode_unchecked(r: &Record, cells: usize) -> Result<Vec<u8>, String> {
+    let p = &r.payload;
+    if p.len() < HEADER_LEN || p[0] != CODEC_VERSION || u32::from_le_bytes(p[1..5].try_into().expect("four bytes")) as usize != cells {
+        return Err(format!("a payload of {} bytes that is not {cells} cells in codec {CODEC_VERSION}", p.len()));
+    }
+    let mut raw = decompress(&p[HEADER_LEN..], cells * cells)?;
+    undelta_rows(&mut raw, cells);
+    Ok(raw)
+}
+
+/// A window of a face's decoded area plane: columns `x0..x0 + w` of rows `y0..y0 + h` (`cells x cells` in all), row-major.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AreaWindow {
+    pub x0: usize,
+    pub y0: usize,
+    pub w: usize,
+    pub h: usize,
+    pub codes: Vec<u8>,
+}
+
+impl AreaWindow {
+    /// The code at cell `(i, j)` of the face, which the window must hold.
+    pub fn at(&self, i: usize, j: usize) -> u8 {
+        self.codes[(j - self.y0) * self.w + (i - self.x0)]
+    }
+}
+
+/// The window of `face`'s area codes: rows `rows` and columns `cols`, streamed so that only the window is kept (the face is `cells x cells` bytes: 151 MB at 12,288 cells). The stream is read from its start
+/// to the last row of the window (a brotli stream cannot be entered in the middle), so a cold window costs up to one face's decode time and no more memory than the window; `Ok(None)` when the store holds
+/// no area for the face. The record's header and key are checked as in [`load_area`].
+pub fn load_area_window(
+    store: &TileStore,
+    world: &GlobalWorld,
+    res: u32,
+    spec: &LayerSpec,
+    face: Face,
+    rows: std::ops::Range<usize>,
+    cols: std::ops::Range<usize>,
+) -> Result<Option<AreaWindow>, LayerStoreError> {
+    let key = area_key(world, res, spec, face);
+    let what = |why: String| LayerStoreError(format!("layer area of face {} (record kind {KIND_LAYER_AREA}) key {key}: {why}", face.0));
+    if !has_area(store, world, res, spec, face)? {
+        return Ok(None);
+    }
+    let Some(r) = store.get(KIND_LAYER_AREA, face_tile(face), key).map_err(|e| what(e.to_string()))? else { return Ok(None) };
+    let stream = checked(&r, key, spec.cells, &what)?;
+    let codes = stream_window(stream, spec.cells, rows.clone(), cols.clone()).map_err(what)?;
+    Ok(Some(AreaWindow { x0: cols.start, y0: rows.start, w: cols.len(), h: rows.len(), codes }))
+}
+
+/// The window of a delta-coded `cells x cells` plane in a raw brotli stream (no header or key check: the callers have made them), row by row: the rows before the window are read and dropped, the rows of the window are undone to codes and cut to the columns.
+pub fn stream_window(stream: &[u8], cells: usize, rows: std::ops::Range<usize>, cols: std::ops::Range<usize>) -> Result<Vec<u8>, String> {
+    if rows.end > cells || cols.end > cells || rows.is_empty() || cols.is_empty() {
+        return Err(format!("the window rows {rows:?} columns {cols:?} is not inside {cells} cells"));
+    }
+    let mut r = brotli::Decompressor::new(stream, BROTLI_BUFFER);
+    let mut row = vec![0u8; cells];
+    let mut out = Vec::with_capacity(rows.len() * cols.len());
+    for j in 0..rows.end {
+        r.read_exact(&mut row).map_err(|e| format!("the stream does not decode to {cells} rows: {e}"))?;
+        if j >= rows.start {
+            for i in 1..cols.end {
+                row[i] = row[i].wrapping_add(row[i - 1]);
+            }
+            out.extend_from_slice(&row[cols.clone()]);
+        }
+    }
+    Ok(out)
+}
+
 /// A tile's decoded deposited depth, `tile x tile` codes of 1 m.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TileDepth {
@@ -238,16 +311,19 @@ pub fn load_depth(
     Ok(Some(TileDepth { tile: t, deposited: raw }))
 }
 
-/// A bounded least-recently-used cache of decoded values.
+/// A least-recently-used cache of decoded values bounded by their bytes: it evicts from the cold end while the total is over the cap, but always keeps the entry just put (a face larger than the cap is
+/// held alone, never refused).
 struct Lru<K: std::hash::Hash + Eq + Copy, V> {
-    capacity: usize,
+    cap_bytes: usize,
+    used: usize,
+    weigh: fn(&V) -> usize,
     map: HashMap<K, Arc<V>>,
     order: VecDeque<K>,
 }
 
 impl<K: std::hash::Hash + Eq + Copy, V> Lru<K, V> {
-    fn new(capacity: usize) -> Self {
-        Lru { capacity: capacity.max(1), map: HashMap::new(), order: VecDeque::new() }
+    fn new(cap_bytes: usize, weigh: fn(&V) -> usize) -> Self {
+        Lru { cap_bytes, used: 0, weigh, map: HashMap::new(), order: VecDeque::new() }
     }
 
     fn get(&mut self, k: K) -> Option<Arc<V>> {
@@ -258,41 +334,128 @@ impl<K: std::hash::Hash + Eq + Copy, V> Lru<K, V> {
     }
 
     fn put(&mut self, k: K, v: Arc<V>) {
-        if self.map.insert(k, v).is_none() {
-            self.order.push_back(k);
+        self.used += (self.weigh)(&v);
+        match self.map.insert(k, v) {
+            None => self.order.push_back(k),
+            Some(old) => {
+                self.used -= (self.weigh)(&old);
+                self.order.retain(|x| *x != k);
+                self.order.push_back(k);
+            }
         }
-        while self.map.len() > self.capacity {
-            if let Some(old) = self.order.pop_front() {
-                self.map.remove(&old);
+        // Cold end first; the entry just put is last in the order, so it is never the one evicted while another remains.
+        while self.used > self.cap_bytes && self.order.len() > 1 {
+            let Some(old) = self.order.pop_front() else { break };
+            if let Some(v) = self.map.remove(&old) {
+                self.used -= (self.weigh)(&v);
             }
         }
     }
+
+    fn bytes(&self) -> usize {
+        self.used
+    }
 }
 
-/// The read API of the channels over a store: the drainage area and the erosion and deposition depth at a direction. Caches the decoded face areas (a face of 12,288 cells is 151 MB) and
-/// tiles (`2 x tile x tile` bytes); safe to share between threads.
-pub struct LayerChannels<'a> {
-    store: &'a TileStore,
-    world: &'a GlobalWorld,
+/// The caches of [`LayerChannels`]: the windows of kind 14 (a window of `area_window + 1` cells a side, cut from a face of 151 MB at 12,288 cells) and the tiles of kind 15 (`tile^2` bytes each), each under a byte cap.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChannelCaches {
+    /// The most bytes of decoded area windows held.
+    pub area_bytes: usize,
+    /// The cells a side that a window advances (a window holds one more row and column, so a bilinear read never leaves it).
+    pub area_window: usize,
+    /// The most bytes of decoded depth tiles held.
+    pub tile_bytes: usize,
+}
+
+impl ChannelCaches {
+    /// 256-cell windows (about 208 km of the 12,288-cell face, 66 KB each) under 16 MB, and 256 MB of depth tiles.
+    pub const DEFAULT: ChannelCaches = ChannelCaches { area_bytes: 16 << 20, area_window: 256, tile_bytes: 256 << 20 };
+}
+
+/// What a [`LayerChannels`] has done so far: the reads served from its caches, the windows and tiles it decoded, and the time those decodes took (the measurement of ground-channels-2b PR 1).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ChannelStats {
+    pub window_hits: u64,
+    pub window_decodes: u64,
+    pub window_decode_us: u64,
+    pub tile_hits: u64,
+    pub tile_decodes: u64,
+    pub tile_decode_us: u64,
+}
+
+/// The read API of the channels over a store: the drainage area and the erosion and deposition depth at a direction. It owns its handles (the store and the world are shared, so its lifetime is
+/// the viewer's world's) and caches windows of the decoded face areas (a whole face of 12,288 cells would be 151 MB) and tiles (`tile x tile` bytes) under byte caps; safe to share between threads. A miss
+/// decodes under a lock of its own, so concurrent workers asking for one window decode it once.
+pub struct LayerChannels {
+    store: Arc<TileStore>,
+    world: Arc<GlobalWorld>,
     res: u32,
     layer: LayerSpec,
     tiles: TileLayerSpec,
-    areas: Mutex<Lru<u8, Vec<u8>>>,
+    area_window: usize,
+    areas: Mutex<Lru<(u8, u32, u32), AreaWindow>>,
     depths: Mutex<Lru<(u8, u32, u32), TileDepth>>,
+    area_load: Mutex<()>,
+    depth_load: Mutex<()>,
+    stats: Mutex<ChannelStats>,
 }
 
-impl<'a> LayerChannels<'a> {
-    /// A reader over `store` for the layer `layer` (pass 1) and `tiles` (pass 2); the caches hold `faces` faces and `tiles_cached` tiles.
+impl LayerChannels {
+    /// A reader over `store` for the layer `layer` (pass 1) and `tiles` (pass 2); the decoded caches hold at most `caches` bytes (one face or tile is always kept).
     pub fn new(
-        store: &'a TileStore,
-        world: &'a GlobalWorld,
+        store: Arc<TileStore>,
+        world: Arc<GlobalWorld>,
         res: u32,
         layer: LayerSpec,
         tiles: TileLayerSpec,
-        faces: usize,
-        tiles_cached: usize,
-    ) -> LayerChannels<'a> {
-        LayerChannels { store, world, res, layer, tiles, areas: Mutex::new(Lru::new(faces)), depths: Mutex::new(Lru::new(tiles_cached)) }
+        caches: ChannelCaches,
+    ) -> LayerChannels {
+        LayerChannels {
+            store,
+            world,
+            res,
+            layer,
+            tiles,
+            area_window: caches.area_window.max(1),
+            areas: Mutex::new(Lru::new(caches.area_bytes, |v: &AreaWindow| v.codes.len())),
+            depths: Mutex::new(Lru::new(caches.tile_bytes, |v: &TileDepth| v.deposited.len())),
+            area_load: Mutex::new(()),
+            depth_load: Mutex::new(()),
+            stats: Mutex::new(ChannelStats::default()),
+        }
+    }
+
+    /// What the reader has done so far, and the bytes its two caches hold now (area windows, depth tiles).
+    pub fn stats(&self) -> (ChannelStats, usize, usize) {
+        let s = *self.stats.lock().expect("stats");
+        (s, self.areas.lock().expect("area cache").bytes(), self.depths.lock().expect("depth cache").bytes())
+    }
+
+    /// The window `(wi, wj)` of `face`'s area plane through the cache (`None` where the store holds no area for the face).
+    fn area_window_of(&self, face: Face, wi: u32, wj: u32) -> Result<Option<Arc<AreaWindow>>, LayerStoreError> {
+        let key = (face.0, wi, wj);
+        if let Some(a) = self.areas.lock().expect("area cache").get(key) {
+            self.stats.lock().expect("stats").window_hits += 1;
+            return Ok(Some(a));
+        }
+        let _one = self.area_load.lock().expect("area load");
+        // Another worker may have decoded it while this one waited.
+        if let Some(a) = self.areas.lock().expect("area cache").get(key) {
+            self.stats.lock().expect("stats").window_hits += 1;
+            return Ok(Some(a));
+        }
+        let (n, step) = (self.layer.cells, self.area_window);
+        let (x0, y0) = (wi as usize * step, wj as usize * step);
+        let (cols, rows) = (x0..(x0 + step + 1).min(n), y0..(y0 + step + 1).min(n));
+        let started = std::time::Instant::now();
+        let Some(a) = load_area_window(&self.store, &self.world, self.res, &self.layer, face, rows, cols)? else { return Ok(None) };
+        let a = Arc::new(a);
+        self.areas.lock().expect("area cache").put(key, a.clone());
+        let mut s = self.stats.lock().expect("stats");
+        s.window_decodes += 1;
+        s.window_decode_us += started.elapsed().as_micros() as u64;
+        Ok(Some(a))
     }
 
     /// The drainage area at `d` as log2 of cells of pass 1's grid (the codes' bilinear mean over the four cells around the point, in codes), or `None` where the store holds no area for
@@ -300,22 +463,13 @@ impl<'a> LayerChannels<'a> {
     pub fn area_log2_cells(&self, d: Vec3) -> Result<Option<f32>, LayerStoreError> {
         let (face, s, t) = direction_to_face(&TangentWarp, d);
         let n = self.layer.cells;
-        let cached = self.areas.lock().expect("area cache").get(face.0);
-        let face_codes = {
-            if let Some(a) = cached {
-                a
-            } else {
-                let Some(a) = load_area(self.store, self.world, self.res, &self.layer, face)? else { return Ok(None) };
-                let a = Arc::new(a);
-                self.areas.lock().expect("area cache").put(face.0, a.clone());
-                a
-            }
-        };
         let (x, y) =
             (((s + 1.0) * 0.5 * n as f64 - 0.5).clamp(0.0, (n - 1) as f64), ((t + 1.0) * 0.5 * n as f64 - 0.5).clamp(0.0, (n - 1) as f64));
         let (i, j) = ((x.floor() as usize).min(n - 2), (y.floor() as usize).min(n - 2));
         let (fx, fy) = (x - i as f64, y - j as f64);
-        let c = |a: usize, b: usize| f64::from(face_codes[b * n + a]);
+        // The four cells around the point lie in one window (a window holds the cell past its step), whatever the face's size.
+        let Some(win) = self.area_window_of(face, (i / self.area_window) as u32, (j / self.area_window) as u32)? else { return Ok(None) };
+        let c = |a: usize, b: usize| f64::from(win.at(a, b));
         let v = (1.0 - fy) * ((1.0 - fx) * c(i, j) + fx * c(i + 1, j)) + fy * ((1.0 - fx) * c(i, j + 1) + fx * c(i + 1, j + 1));
         Ok(Some((v / f64::from(AREA_STEPS)) as f32))
     }
@@ -358,14 +512,33 @@ impl<'a> LayerChannels<'a> {
     /// The decoded depth channels of a tile of `face` through the cache (`None` where the store holds none).
     fn depth_tile(&self, face: Face, ti: u32, tj: u32) -> Result<Option<Arc<TileDepth>>, LayerStoreError> {
         let key = (face.0, ti, tj);
-        let cached = self.depths.lock().expect("depth cache").get(key);
-        if cached.is_some() {
-            return Ok(cached);
+        if let Some(a) = self.depths.lock().expect("depth cache").get(key) {
+            self.stats.lock().expect("stats").tile_hits += 1;
+            return Ok(Some(a));
         }
-        let Some(a) = load_depth(self.store, self.world, self.res, &self.tiles, PassTile { face, ti, tj })? else { return Ok(None) };
+        let _one = self.depth_load.lock().expect("depth load");
+        if let Some(a) = self.depths.lock().expect("depth cache").get(key) {
+            self.stats.lock().expect("stats").tile_hits += 1;
+            return Ok(Some(a));
+        }
+        let started = std::time::Instant::now();
+        let Some(a) = load_depth(&self.store, &self.world, self.res, &self.tiles, PassTile { face, ti, tj })? else { return Ok(None) };
         let a = Arc::new(a);
         self.depths.lock().expect("depth cache").put(key, a.clone());
+        let mut s = self.stats.lock().expect("stats");
+        s.tile_decodes += 1;
+        s.tile_decode_us += started.elapsed().as_micros() as u64;
         Ok(Some(a))
+    }
+}
+
+impl planet_generators::channels::ChannelSource for LayerChannels {
+    fn area_log2_cells(&self, d: Vec3) -> Result<Option<f32>, String> {
+        LayerChannels::area_log2_cells(self, d).map_err(|e| e.0)
+    }
+
+    fn deposited_depth_m(&self, d: Vec3) -> Result<Option<f32>, String> {
+        self.depth_m(d).map_err(|e| e.0)
     }
 }
 

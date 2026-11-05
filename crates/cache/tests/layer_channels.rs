@@ -5,6 +5,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use planet_cache::global_store::GlobalWorld;
 use planet_cache::layer_channels::*;
@@ -51,6 +52,10 @@ fn base(d: Vec3) -> f64 {
     } else {
         -300.0 + 0.3 * ridge
     }
+}
+
+fn caches(area_bytes: usize, tile_bytes: usize) -> ChannelCaches {
+    ChannelCaches { area_bytes, area_window: 8, tile_bytes }
 }
 
 fn pass1() -> LayerSpec {
@@ -238,7 +243,7 @@ fn the_reader_returns_the_stored_depth_at_a_cell_centre_and_the_area_in_log2_cel
     let a = pass2_dir(&w, &s, &f, "a", 2);
     copy_areas(p1.path(), a.path(), &w, RES, &pass1(), &all_faces()).unwrap();
     let store = TileStore::open(a.path(), w.params()).unwrap();
-    let ch = LayerChannels::new(&store, &w, RES, pass1(), s, 2, 4);
+    let ch = LayerChannels::new(Arc::new(store), Arc::new(w.clone()), RES, pass1(), s, caches(2 * 24 * 24, 4 * 24 * 24));
     let r = pass2_tile(&s.grid, tiles()[0], &base, &face_change_reader(&f), None, &s.params, 2);
     // The centre of core cell (10, 7) of tile (0, 0) of face 0.
     let d = s.grid.direction(Face(0), 10, 7);
@@ -257,7 +262,7 @@ fn the_depth_reads_across_a_tile_border_without_a_step() {
     let f = faces(p1.path(), &w);
     let a = pass2_dir(&w, &s, &f, "a", 2);
     let store = TileStore::open(a.path(), w.params()).unwrap();
-    let ch = LayerChannels::new(&store, &w, RES, pass1(), s, 2, 4);
+    let ch = LayerChannels::new(Arc::new(store), Arc::new(w.clone()), RES, pass1(), s, caches(2 * 24 * 24, 4 * 24 * 24));
     // Tiles (0, 0) and (1, 0) of face 0 meet between cells 23 and 24 of the 96-cell grid; read along row 10 in tenths of a cell.
     let at = |i: f64| {
         let n = 96.0;
@@ -277,4 +282,124 @@ fn the_depth_reads_across_a_tile_border_without_a_step() {
         assert!(v >= c23.min(c24) - 1e-3 && v <= c23.max(c24) + 1e-3, "{v} leaves {c23} {c24}");
         prev = v;
     }
+}
+
+/// A reader over a layer store of the tiny planet (a face of 24 cells) with windows of 8 cells and the given byte caps; the two directories are the stores' (kept alive).
+fn reader(area_bytes: usize, tile_bytes: usize) -> (LayerChannels, Dir, Dir) {
+    let (w, p1) = (world(), Dir::new("p1"));
+    let s = spec(&w);
+    let f = faces(p1.path(), &w);
+    let a = pass2_dir(&w, &s, &f, "a", 2);
+    copy_areas(p1.path(), a.path(), &w, RES, &pass1(), &all_faces()).unwrap();
+    let store = TileStore::open(a.path(), w.params()).unwrap();
+    let caps = ChannelCaches { area_bytes, area_window: 8, tile_bytes };
+    (LayerChannels::new(Arc::new(store), Arc::new(w), RES, pass1(), s, caps), p1, a)
+}
+
+/// The direction of cell `(x, 7)` of face 0 on pass 2's 96-cell grid: pass 1's cell about a quarter of `x` (windows of 8 cells: `x` 10 is window 0, `x` 40 is window 1).
+fn at(x: i64) -> Vec3 {
+    spec(&world()).grid.direction(Face(0), x, 7)
+}
+
+// spec: STRM-075
+#[test]
+fn a_window_of_the_area_equals_the_same_cells_of_the_whole_face_and_a_bad_window_is_refused() {
+    let (w, p1) = (world(), Dir::new("p1"));
+    let f = faces(p1.path(), &w);
+    let _ = f;
+    let a = Dir::new("a");
+    copy_areas(p1.path(), a.path(), &w, RES, &pass1(), &all_faces()).unwrap();
+    let store = TileStore::open(a.path(), w.params()).unwrap();
+    let n = pass1().cells;
+    let whole = load_area(&store, &w, RES, &pass1(), Face(0)).unwrap().expect("an area");
+    // Every window of 9 cells (8 and the cell past), a window cut off at the face's edge, and the whole face.
+    for (y0, x0) in [(0, 0), (8, 0), (0, 8), (16, 16), (15, 15), (0, 0)] {
+        let (rows, cols) = (y0..(y0 + 9).min(n), x0..(x0 + 9).min(n));
+        let win = load_area_window(&store, &w, RES, &pass1(), Face(0), rows.clone(), cols.clone()).unwrap().expect("a window");
+        assert_eq!((win.x0, win.y0, win.w, win.h), (x0, y0, cols.len(), rows.len()));
+        for j in rows.clone() {
+            for i in cols.clone() {
+                assert_eq!(win.at(i, j), whole[j * n + i], "cell ({i}, {j}) of the window at ({x0}, {y0})");
+            }
+        }
+    }
+    let all = load_area_window(&store, &w, RES, &pass1(), Face(0), 0..n, 0..n).unwrap().unwrap();
+    assert_eq!(all.codes, whole);
+    // A window outside the face is refused, and a face without an area is none.
+    assert!(load_area_window(&store, &w, RES, &pass1(), Face(0), 0..n + 1, 0..n).is_err());
+    assert!(load_area_window(&store, &w, RES, &pass1(), Face(0), 3..3, 0..n).is_err());
+}
+
+// spec: STRM-075
+#[test]
+fn the_decoded_caches_are_bounded_by_bytes_and_a_window_over_the_cap_is_held_alone() {
+    let window_bytes = 9 * 9;
+    // The cap holds one window: reading windows 0, 1, 0 decodes three times (the second evicts the first) and the cache never holds more than one window's bytes.
+    let (ch, _p1, _a) = reader(window_bytes, 24 * 24);
+    for x in [10, 40, 10] {
+        assert!(ch.area_log2_cells(at(x)).unwrap().is_some());
+    }
+    let (s, held, _) = ch.stats();
+    assert_eq!((s.window_decodes, s.window_hits), (3, 0), "{s:?}");
+    assert_eq!(held, window_bytes, "one window is held, not two");
+    // A cap below one window keeps the window just decoded (never refused), and a second read of it is a hit.
+    let (ch, _p1, _a) = reader(1, 1);
+    assert!(ch.area_log2_cells(at(10)).unwrap().is_some() && ch.area_log2_cells(at(12)).unwrap().is_some());
+    let (s, held, _) = ch.stats();
+    assert_eq!((s.window_decodes, s.window_hits, held), (1, 1, window_bytes), "{s:?}");
+    // A roomy cap holds both windows: 0, 1, 0 decodes twice and hits once; a read inside a held window is free.
+    let (ch, _p1, _a) = reader(8 * window_bytes, 8 * 24 * 24);
+    for x in [10, 40, 10] {
+        ch.area_log2_cells(at(x)).unwrap();
+    }
+    assert_eq!((ch.stats().0.window_decodes, ch.stats().0.window_hits), (2, 1));
+}
+
+// spec: STRM-075
+#[test]
+fn workers_asking_for_one_window_at_once_decode_it_once_and_the_trait_reads_what_the_reader_reads() {
+    use planet_generators::channels::ChannelSource;
+    let (ch, _p1, _a) = reader(1 << 20, 1 << 20);
+    let d = at(10);
+    let ch = Arc::new(ch);
+    let handles: Vec<_> = (0..6)
+        .map(|_| {
+            let ch = ch.clone();
+            std::thread::spawn(move || ch.area_log2_cells(d).unwrap().unwrap())
+        })
+        .collect();
+    let values: Vec<f32> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+    assert!(values.iter().all(|v| *v == values[0]));
+    let (s, _, _) = ch.stats();
+    assert_eq!((s.window_decodes, s.window_hits), (1, 5), "six workers, one decode: {s:?}");
+    // The trait gives the same numbers as the inherent reads, and a depth read goes through the tile cache.
+    let src: &dyn ChannelSource = ch.as_ref();
+    assert_eq!(src.area_log2_cells(d).unwrap(), Some(values[0]));
+    assert_eq!(src.deposited_depth_m(d).unwrap(), ch.depth_m(d).unwrap());
+    assert!(ch.stats().0.tile_decodes >= 1);
+}
+
+// spec: STRM-075
+#[test]
+fn the_diagnostic_decode_that_skips_the_key_check_is_called_by_no_runtime_code() {
+    // Every use of the name outside its definition, its tests and the probe examples would make the key check optional in the viewer or the generation path.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let mut uses = Vec::new();
+    let mut stack = vec![root.clone()];
+    while let Some(dir) = stack.pop() {
+        for e in fs::read_dir(&dir).unwrap().flatten() {
+            let path = e.path();
+            if path.is_dir() {
+                let name = e.file_name().to_string_lossy().into_owned();
+                if name != "target" && name != "tests" && name != "examples" {
+                    stack.push(path);
+                }
+            } else if path.extension().is_some_and(|x| x == "rs")
+                && fs::read_to_string(&path).unwrap().contains("diagnostic_decode_unchecked")
+            {
+                uses.push(path.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
+    assert_eq!(uses, ["cache/src/layer_channels.rs"], "the diagnostic decode is used outside its definition: {uses:?}");
 }
