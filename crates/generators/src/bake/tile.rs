@@ -263,7 +263,7 @@ pub fn pass2_tile_with_fill(
     id: TileId,
     base: &(dyn Fn(Vec3) -> f64 + Sync),
     face_change: &(dyn Fn(Vec3) -> f64 + Sync),
-    face_fill: Option<&(dyn Fn(Vec3) -> f64 + Sync)>,
+    face_fill: Option<&(dyn Fn(Vec3) -> (f64, Vec3) + Sync)>,
     factor: Option<&(dyn Fn(Vec3) -> f64 + Sync)>,
     p: &Pass2Params,
     threads: usize,
@@ -283,7 +283,15 @@ pub fn pass2_tile_with_fill(
     let reference: Vec<f64> = base_w.iter().zip(&fc_w).map(|(b, c)| b + c.max(0.0)).collect();
     drop(fc_w);
     // Pass 1's pit depth at every window cell, in metres (0 where it has no pit or none is given).
-    let fill1 = face_fill.map(|f| sample_window(g, id, f, threads));
+    let fill1 = face_fill.map(|f| sample_window_pairs(g, id, f, threads));
+    // Pass 1's spill level at the centre of each pass-1 cell that holds a pit in this window: the carved surface there (base plus the face change) plus the cell's depth. The level is flat over
+    // a basin, where the fine window surface and the cell's value are not.
+    let mut levels: std::collections::HashMap<[u64; 3], f64> = std::collections::HashMap::new();
+    if let Some(pairs) = &fill1 {
+        for (m, c) in pairs.iter().filter(|(m, _)| *m > 0.0) {
+            levels.entry([c.x.to_bits(), c.y.to_bits(), c.z.to_bits()]).or_insert_with(|| base(*c) + face_change(*c) + m);
+        }
+    }
     let factors = factor.map(|f| sample_window(g, id, f, threads));
     let outlet = grid.outlets(&z0, p.sea_level);
     let stream = face_stream(p.seed, id.face);
@@ -315,7 +323,14 @@ pub fn pass2_tile_with_fill(
         for i in 0..t {
             let q = (j + h) * w + i + h;
             let own = f64::from(depth_w[q]);
-            let from_pass1 = fill1.as_ref().map_or(0.0, |f| if f[q] > 0.0 { z0[q] + f[q] - z[q] } else { 0.0 });
+            let from_pass1 = fill1.as_ref().map_or(0.0, |f| {
+                let (m, c) = f[q];
+                if m > 0.0 {
+                    (levels[&[c.x.to_bits(), c.y.to_bits(), c.z.to_bits()]] - z[q]).max(0.0)
+                } else {
+                    0.0
+                }
+            });
             fill.push(fill_code(if z0[q] > p.sea_level { own.max(from_pass1) } else { 0.0 }));
             core.push((z[q] - base_w[q]) as f32);
             // The deposition sweep's rise plus thermal's gain over the reference. What was removed is derived by the reader: max(0, deposited - change), exact where pass 1 did not raise the cell.
@@ -362,4 +377,15 @@ impl TileResult {
         }
         self
     }
+}
+
+/// A pair of values per window cell, row-major, on `threads` threads (as [`sample_window`]).
+fn sample_window_pairs(g: &TileGrid, id: TileId, field: &(dyn Fn(Vec3) -> (f64, Vec3) + Sync), threads: usize) -> Vec<(f64, Vec3)> {
+    let par: &dyn Par = &threads;
+    let (w, t, h) = (g.window(), g.tile as i64, g.halo as i64);
+    let (i0, j0) = (i64::from(id.ti) * t - h, i64::from(id.tj) * t - h);
+    par::map(par, w, &|j| (0..w).map(|i| field(g.direction(id.face, i0 + i as i64, j0 + j as i64))).collect::<Vec<_>>())
+        .into_iter()
+        .flatten()
+        .collect()
 }

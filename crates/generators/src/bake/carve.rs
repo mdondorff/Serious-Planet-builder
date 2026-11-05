@@ -117,7 +117,7 @@ pub fn carve(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, facto
             let hr = z[rec];
             let up = uplift * scale * taper.as_ref().map_or(1.0, |t| f64::from(t[c]));
             let hn = (z[c] + up + f * hr) / (1.0 + f);
-            let new = if p.keep_pits && !p.incise_only && z[c] < hr { z[c] + up } else { hn.max(hr + p.epsilon).max(floor) };
+            let new = if p.keep_pits && !p.incise_only && z[c] < hr { (z[c] + up).max(floor) } else { hn.max(hr + p.epsilon).max(floor) };
             z[c] = if p.incise_only { new.min(z[c]) } else { new };
         }
     }

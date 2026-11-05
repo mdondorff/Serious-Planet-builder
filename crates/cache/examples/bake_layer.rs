@@ -254,12 +254,13 @@ fn main() {
             let pits = r.fill.iter().filter(|c| **c > 0).count();
             let land = r.stats.land_cells.max(1);
             println!(
-                "pits tile {}/{}/{}: {pits} cells ({:.1} % of {land} land), deepest {} m",
+                "pits tile {}/{}/{}: {pits} cells ({:.1} % of {land} land), deepest {} m, {} cells clipped at 255",
                 t.face.0,
                 t.ti,
                 t.tj,
                 100.0 * pits as f64 / land as f64,
-                r.fill.iter().max().copied().unwrap_or(0)
+                r.fill.iter().max().copied().unwrap_or(0),
+                r.fill.iter().filter(|c| **c == 255).count()
             );
             r = r.with_fill_added();
         }

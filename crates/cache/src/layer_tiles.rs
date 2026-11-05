@@ -74,6 +74,7 @@ impl TileLayerSpec {
             b.extend(v.to_bits().to_le_bytes());
         }
         b.push(u8::from(p.carve.incise_only));
+        b.push(u8::from(p.carve.keep_pits));
         b.extend((p.carve.steps as u64).to_le_bytes());
         b.extend((p.carve.reroute_every as u64).to_le_bytes());
         let t = &p.thermal;
@@ -394,8 +395,9 @@ pub struct ShapeOverride {
 
 /// The range of the change when the layer's manifest gives none: the representable range of the stored counts (`i16` of [`planet_generators::bake::tile::QUANT_STEP_M`]).
 pub fn default_change_range() -> (f64, f64) {
+    // The counts' range, widened upward by the deepest pit depth the codes hold (the runtime change is the stored change plus the depth, GEN-120).
     let limit = f64::from(i16::MAX) * f64::from(planet_generators::bake::tile::QUANT_STEP_M);
-    (-limit, limit)
+    (-limit, limit + 255.0 / planet_generators::bake::face::FILL_STEPS_PER_M)
 }
 
 impl StoreLayer {
@@ -587,7 +589,7 @@ pub struct Pass2Inputs<'a> {
     pub face_change: &'a (dyn Fn(Vec3) -> f64 + Sync),
     pub factor: Option<&'a (dyn Fn(Vec3) -> f64 + Sync)>,
     /// Pass 1's pit depth at a direction in metres (GEN-120), or none: the basins a window cuts are then as deep as the window's own flood finds them.
-    pub face_fill: Option<&'a (dyn Fn(Vec3) -> f64 + Sync)>,
+    pub face_fill: Option<&'a (dyn Fn(Vec3) -> (f64, Vec3) + Sync)>,
 }
 
 /// Pass 2 over `tiles`, one at a time, into the tile layer store in `dir`: a tile stored under the current key is skipped (a resume), the others are computed and appended with the
@@ -665,6 +667,6 @@ pub fn drop_pass1(dir: &Path) -> Result<(), LayerStoreError> {
 }
 
 /// The six faces' pit depth as a reader (the nearest cell of the face that holds the direction, in metres).
-pub fn face_fill_reader(faces: &[planet_generators::bake::face::FaceFill; 6]) -> impl Fn(Vec3) -> f64 + Sync + '_ {
+pub fn face_fill_reader(faces: &[planet_generators::bake::face::FaceFill; 6]) -> impl Fn(Vec3) -> (f64, Vec3) + Sync + '_ {
     move |d| planet_generators::bake::face::fill_at(faces, d)
 }

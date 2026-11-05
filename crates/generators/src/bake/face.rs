@@ -210,13 +210,15 @@ pub struct FaceFill {
     pub codes: Vec<u8>,
 }
 
-/// The pit depth of the six faces at a direction in metres: the code of the face cell that holds it (the nearest cell, no cross-fade: the depth is a flood's level difference, not a
+/// The pit depth of the six faces at a direction in metres and the direction of the centre of the face cell that holds it (pass 1's spill level is flat over a basin at that cell's scale, so pass 2 takes the level at the centre): the code of the cell (the nearest cell, no cross-fade: the depth is a flood's level difference, not a
 /// field to be differentiated).
-pub fn fill_at(faces: &[FaceFill; 6], d: Vec3) -> f64 {
+pub fn fill_at(faces: &[FaceFill; 6], d: Vec3) -> (f64, Vec3) {
     let (face, s, t) = planet_core::cube::direction_to_face(&TangentWarp, d);
     let f = &faces[face.0 as usize];
     debug_assert_eq!(f.face, Face(face.0));
     let n = f.cells as f64;
     let cell = |c: f64| ((c + 1.0) * 0.5 * n).floor().clamp(0.0, n - 1.0) as usize;
-    fill_m(f.codes[cell(t) * f.cells + cell(s)])
+    let (i, j) = (cell(s), cell(t));
+    let centre = face_to_direction(&TangentWarp, f.face, 2.0 * (i as f64 + 0.5) / n - 1.0, 2.0 * (j as f64 + 0.5) / n - 1.0);
+    (fill_m(f.codes[j * f.cells + i]), centre)
 }

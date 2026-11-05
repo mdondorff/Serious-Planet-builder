@@ -51,6 +51,7 @@ pub(crate) fn channel_bytes(layer: &[u8]) -> Vec<u8> {
     b.extend(AREA_STEPS.to_le_bytes());
     b.extend(DEPTH_SCALE.to_le_bytes());
     b.extend(planet_generators::bake::face::FILL_STEPS_PER_M.to_bits().to_le_bytes());
+    b.extend(planet_generators::bake::face::FILL_MIN_M.to_bits().to_le_bytes());
     b.extend_from_slice(layer);
     b
 }
@@ -287,6 +288,7 @@ pub struct TileDepth {
     pub deposited: Vec<u8>,
 }
 
+/// Takes the STORED change of kind 13, not the runtime layer's (which has the pit depth of GEN-120 added back and would undercount the removal by it).
 /// The depth removed at a cell in metres: `max(0, deposited - change)`, the deposited depth and the layer's change (kind 13) at the cell. Exact where pass 1 did not raise the cell; where it
 /// did (uplift, a filled pit: 15 % of mountain land and 35 % of hills in seed 14's samples) it is short by the raise, and where the deposited depth is 255 m it is clipped.
 pub fn removed_depth_m(deposited_m: f32, change_m: f32) -> f32 {

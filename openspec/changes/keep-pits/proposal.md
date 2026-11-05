@@ -7,6 +7,7 @@ SPIKE-102 section 6 (tile 2/12/10, seed 14): keeping the pits that survive the b
 - **STRM-076:** record kinds 16 (face) and 17 (tile), keyed with the channels' key, the code's step in the key (`FILL_STEPS_PER_M`, 1 m now; the owner has not fixed the depth code, so it may change before the planet bake). `CHANNELS_VERSION` 2.
 - **Runtime:** `StoreLayer` adds the tile's depth to its change (`TileResult::with_fill_added`), so the pyramid and the manifest range hold the filled change; today's look stays.
 - `bake layer` reads pass 1's fill depth for pass 2 and prints the pit share and deepest pit of each tile.
+- Known limits, measured in the preview: the depth is not blended across cube edges or tile edges (a basin on a seam can step in level); the 1 m code leaves 0.5 m terraces on a flat lake; the local incision after pass 1 can leave a lake above its outlet notch; a pit deeper than 255 m is clipped (the bake prints the clipped count per tile).
 - `BAKE_KERNEL_VERSION` 5, `PASS2_KERNEL_VERSION` 5: every stored layer is another layer.
 
 ## Capabilities
