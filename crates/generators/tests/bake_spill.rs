@@ -58,7 +58,7 @@ impl World {
             adj[self.node(a)].push(self.node(b));
             adj[self.node(b)].push(self.node(a));
         }
-        let zs: Vec<f64> = (0..total).map(|k| self.z[k / (n * n)][k % (n * n)]).collect();
+        let zs: Vec<f64> = (0..total).map(|k| self.z[k / (n * n)][k % (n * n)] + 0.0).collect();
         let key = |v: f64| {
             let b = v.to_bits();
             if b & (1 << 63) != 0 {
@@ -350,4 +350,49 @@ fn the_same_input_gives_the_same_bits_and_a_bad_input_is_refused() {
     assert_eq!(a.iter().map(|v| v.to_bits()).collect::<Vec<_>>(), b.iter().map(|v| v.to_bits()).collect::<Vec<_>>());
     let r = std::panic::catch_unwind(|| flood_labelled(3, 3, &[0.0, 1.0, f64::NAN, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0], &[false; 9]));
     assert!(r.is_err(), "a height that is not finite was accepted");
+}
+
+// spec: GEN-121
+#[test]
+fn a_border_outlet_is_the_sea_a_weight_must_be_finite_and_a_signed_zero_is_one_height() {
+    // Tile A's only drainage is an outlet cell on its border: the cell next to it in tile B reads the sea through `seed_of`, never through an isolated perimeter node.
+    let n = 6usize;
+    let mut z = vec![vec![10.0; n * n]; 2];
+    let mut outlet = vec![vec![false; n * n]; 2];
+    z[0][2 * n + n - 1] = -3.0;
+    outlet[0][2 * n + n - 1] = true;
+    let f = flood_labelled(n, n, &z[0], &outlet[0]);
+    assert_eq!(f.seed_of(n - 1, 2), Some(SEA), "an outlet on the border is the sea");
+    assert_eq!(f.seed_of(0, 0), perimeter_index(n, n, 0, 0), "a border cell that is not an outlet is its own seed");
+    assert_eq!(f.seed_of(2, 2), None, "an inner cell is no seed");
+    let w =
+        World { n, z: z.clone(), outlet, cross: vec![((0, n - 1, 2), (1, 0, 2)), ((0, n - 1, 1), (1, 0, 1)), ((0, n - 1, 3), (1, 0, 3))] };
+    let (raised, _) = assert_equal(&w, "an outlet on the border");
+    assert_eq!(raised, 0, "a flat of 10 m beside the sea is not raised");
+    let weight = std::panic::catch_unwind(|| {
+        let mut g = SpillGraph::new();
+        let (a, b) = (g.add_tile(perimeter_len(3, 3), &[]), g.add_tile(perimeter_len(3, 3), &[]));
+        g.connect(a, 0, b, 0, f64::NAN);
+    });
+    assert!(weight.is_err(), "a weight that is not finite was accepted");
+    // A floor of -0.0 under a rim of 0.0: one height, the same bits as the oracle (which normalises too).
+    let m = 5usize;
+    let mut zz = vec![vec![0.0f64; m * m]; 1];
+    let mut oo = vec![vec![false; m * m]; 1];
+    for j in 0..m {
+        for i in 0..m {
+            let edge = i == 0 || j == 0 || i == m - 1 || j == m - 1;
+            zz[0][j * m + i] = if edge {
+                5.0
+            } else if i == 2 && j == 2 {
+                -0.0
+            } else {
+                0.0
+            };
+        }
+    }
+    zz[0][2] = -4.0;
+    oo[0][2] = true;
+    let sign = World { n: m, z: zz, outlet: oo, cross: Vec::new() };
+    assert_equal(&sign, "signed zero");
 }

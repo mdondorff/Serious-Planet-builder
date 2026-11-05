@@ -14,7 +14,7 @@ Source: Owner and planner 2026-11-05 (inbox #67: the keep-pits preview's seam fa
 
 #### Scenario: The tiled level equals the global flood
 - **WHEN** 12 random terrains of 3 x 3 tiles of 10 cells with basins across tile edges and tile corners, a bowl of a flat 60 m floor across three tiles with a notch at 70 m to the sea, two tiles glued with a rotation (the east column of one against the top row of the other, 8-connected) with a bowl centred on the glued corner, nested basins on a plateau of equal heights, a tile of sea and a world with no outlet are levelled tile by tile and by one global flood
-- **THEN** every cell's level is the same bits in both, the wide bowl's three tiles all read 70 m, a world with no outlet reads `+inf` at every cell, the same input gives the same bits and a height that is not finite is refused
+- **THEN** every cell's level is the same bits in both, the wide bowl's three tiles all read 70 m, a world with no outlet reads `+inf` at every cell, the same input gives the same bits and a height that is not finite is refused; a border cell that is an outlet is the sea through `seed_of`, an edge weight that is not finite is refused, and -0.0 and 0.0 are one height
 
 #### Scenario: The perimeter
 - **WHEN** the perimeter index of every border cell of tiles of 3 x 3 to 10 x 12 cells is taken and inverted

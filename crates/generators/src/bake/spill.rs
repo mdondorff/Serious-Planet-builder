@@ -76,6 +76,7 @@ pub struct TileFlood {
     /// The highest height on the cell's path from its seed (at least its own height).
     pub level: Vec<f64>,
     /// The adjacency of the territories: `(a, b, w)` with `a < b` (labels, [`SEA`] last), the lowest `w` over the neighbouring cell pairs of two territories, sorted.
+    /// A tile of 3072 x 3072 cells holds about 113 MB here (labels and levels): a caller with many tiles keeps only `edges` and runs [`flood_labelled`] again for [`final_level`] (the flood is deterministic).
     pub edges: Vec<(u32, u32, f64)>,
 }
 
@@ -85,6 +86,9 @@ pub fn flood_labelled(w: usize, h: usize, z: &[f64], outlet: &[bool]) -> TileFlo
     let n = grid.len();
     assert!(z.len() == n && outlet.len() == n, "one height and one outlet flag per cell");
     super::assert_finite("the heights", z);
+    // -0.0 and 0.0 are one height (f64::max returns either of them, which would make the bits depend on the operand order): every height is normalised to +0.0.
+    let z: Vec<f64> = z.iter().map(|v| v + 0.0).collect();
+    let z = z.as_slice();
     let mut label = vec![SEA; n];
     let mut level = vec![0.0f64; n];
     let mut seen = vec![false; n];
@@ -137,6 +141,14 @@ pub fn flood_labelled(w: usize, h: usize, z: &[f64], outlet: &[bool]) -> TileFlo
     TileFlood { w, h, label, level, edges }
 }
 
+/// The seed a cell of the tile's border stands for in a [`SpillGraph`]: [`SEA`] when the cell drains to an outlet (it is one, or it was reached from one), its perimeter index when it is a seed. `None` for an inner cell.
+impl TileFlood {
+    pub fn seed_of(&self, i: usize, j: usize) -> Option<u32> {
+        perimeter_index(self.w, self.h, i, j)?;
+        Some(self.label[j * self.w + i])
+    }
+}
+
 /// The level of every cell of a tile given the planet-wide level `g` of its seeds: `max(level, g(label))`, and `level` for a cell that drains to the sea inside its own tile.
 pub fn final_level(tile: &TileFlood, g: &dyn Fn(u32) -> f64) -> Vec<f64> {
     tile.label.iter().zip(&tile.level).map(|(&l, &v)| if l == SEA { v } else { v.max(g(l)) }).collect()
@@ -170,7 +182,7 @@ impl SpillGraph {
 
     fn next_base(&self) -> u32 {
         match (self.base.last(), self.seeds.last()) {
-            (Some(b), Some(s)) => b + s,
+            (Some(b), Some(s)) => b.checked_add(*s).expect("the spill graph has more nodes than a u32 numbers"),
             _ => 1,
         }
     }
@@ -199,6 +211,8 @@ impl SpillGraph {
 
     /// Joins border cell `a` of tile `ta` (a seed, or [`SEA`] when the cell is an outlet) to border cell `b` of tile `tb` with `w = max(z(a), z(b))`: two cells of different tiles that neighbour each other.
     pub fn connect(&mut self, ta: TileRef, a: u32, tb: TileRef, b: u32, w: f64) {
+        assert!(w.is_finite(), "a spill edge needs a finite weight, not {w}");
+        let w = w + 0.0;
         let (na, nb) = (self.node(ta, a), self.node(tb, b));
         self.edges.push((na, nb, w));
     }
