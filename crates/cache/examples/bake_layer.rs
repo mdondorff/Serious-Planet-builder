@@ -8,15 +8,12 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use planet_cache::global_store::{FieldSource, GlobalWorld};
-use planet_cache::layer_fill::load_face_fill;
 use planet_cache::layer_manifest::LayerManifest;
 use planet_cache::layer_store::{load_face_change, run_pass1};
-use planet_cache::layer_tiles::{
-    bake_specs, drop_pass1, face_change_reader, face_fill_reader, load_tile, run_pass2, BakeShape, Pass2Inputs,
-};
+use planet_cache::layer_tiles::{bake_specs, drop_pass1, face_change_reader, load_tile, run_pass2, BakeShape, Pass2Inputs};
 use planet_cache::pack::TileStore;
 use planet_core::{Face, Vec3};
-use planet_generators::bake::face::{FaceChange, FaceFill};
+use planet_generators::bake::face::FaceChange;
 use planet_generators::bake::inputs::BakeInputs;
 use planet_generators::bake::map::{field_maps, layer_change_at, tile_image};
 use planet_generators::bake::tile::{tile_has_land, TileGrid, TileId as PassTile};
@@ -179,19 +176,6 @@ fn main() {
         .collect();
     let faces: [FaceChange; 6] = faces.try_into().expect("six faces");
     let reader = face_change_reader(&faces);
-    // Pass 1's pit depth (GEN-120): pass 2 reads it for the basins its windows cut; a face this run did not compute has no pits.
-    let fills: Vec<FaceFill> = (0..6u8)
-        .map(|f| {
-            if !computed_faces.contains(&f) {
-                return FaceFill { face: Face(f), cells: layer.cells, codes: vec![0; layer.cells * layer.cells] };
-            }
-            load_face_fill(&store, &world, face_bake_res, &layer, Face(f))
-                .unwrap_or_else(|e| fail(&e.to_string()))
-                .unwrap_or_else(|| fail("a pass-1 face holds no pit depth"))
-        })
-        .collect();
-    let fills: [FaceFill; 6] = fills.try_into().expect("six faces");
-    let fill_reader = face_fill_reader(&fills);
     let surface = |d: Vec3| base(d) + reader(d);
     let planet_pass = tiles_wanted.is_none();
     let tiles: Vec<PassTile> = tiles_wanted.unwrap_or_else(|| {
@@ -205,13 +189,15 @@ fn main() {
     let mut report =
         String::from("face tile_i tile_j land_cells thermal_passes thermal_moving_at_cap window_eroded_m3 window_deposited_m3 window_exported_m3 clamped_cells seconds\n");
     let tile_res = o.planet_res as u32;
+    let scratch_dir = out.join("scratch");
+    std::fs::create_dir_all(&scratch_dir).unwrap_or_else(|e| fail(&e.to_string()));
     let mut clock = Instant::now();
     let done = run_pass2(
         &tile_dir,
         &world,
         tile_res,
         &spec,
-        &Pass2Inputs { base: &base, face_change: &reader, factor: Some(&factor), face_fill: Some(&fill_reader) },
+        &Pass2Inputs { base: &base, face_change: &reader, factor: Some(&factor), scratch: Some(&scratch_dir) },
         &tiles,
         threads,
         &mut |r| {
@@ -237,6 +223,33 @@ fn main() {
     )
     .unwrap_or_else(|e| fail(&e.to_string()));
     println!("pass 2: {} tiles computed, {} stored (skipped)", done.computed.len(), done.skipped.len());
+    // The fill depth (GEN-121, STRM-077): the planet-wide spill level of the final surface over the tiles of this run, then the scratch heights are deleted.
+    {
+        let t = Instant::now();
+        let fill = planet_cache::layer_fillpass::run_fill_pass(
+            &tile_dir,
+            &scratch_dir,
+            &world,
+            tile_res,
+            &spec,
+            &tiles,
+            threads,
+            &mut |id, pits| {
+                println!("fill tile {}/{}/{}: {pits} pit cells", id.face.0, id.ti, id.tj);
+            },
+        )
+        .unwrap_or_else(|e| fail(&e.to_string()));
+        println!(
+            "fill pass: {} tiles written, {} stored, {} pit cells, deepest {:.2} m, {} cells no path from the sea reaches, {:.1} s",
+            fill.written.len(),
+            fill.skipped.len(),
+            fill.pit_cells,
+            fill.deepest_m,
+            fill.unreached_cells,
+            t.elapsed().as_secs_f64()
+        );
+        let _ = std::fs::remove_dir_all(&scratch_dir);
+    }
     std::fs::create_dir_all(&out).unwrap_or_else(|e| fail(&e.to_string()));
     std::fs::write(out.join("tiles.txt"), &report).unwrap_or_else(|e| fail(&e.to_string()));
     // The maps, from the stored layer.
@@ -254,13 +267,13 @@ fn main() {
             let pits = r.fill.iter().filter(|c| **c > 0).count();
             let land = r.stats.land_cells.max(1);
             println!(
-                "pits tile {}/{}/{}: {pits} cells ({:.1} % of {land} land), deepest {} m, {} cells clipped at 255",
+                "pits tile {}/{}/{}: {pits} cells ({:.1} % of {land} land), deepest {:.2} m, {} cells at the code's cap",
                 t.face.0,
                 t.ti,
                 t.tj,
                 100.0 * pits as f64 / land as f64,
-                r.fill.iter().max().copied().unwrap_or(0),
-                r.fill.iter().filter(|c| **c == 255).count()
+                planet_generators::bake::face::fill_m(r.fill.iter().max().copied().unwrap_or(0)),
+                r.fill.iter().filter(|c| **c == u16::MAX).count()
             );
             r = r.with_fill_added();
         }

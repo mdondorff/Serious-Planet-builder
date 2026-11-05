@@ -105,7 +105,7 @@ fn pass2_dir(w: &GlobalWorld, s: &TileLayerSpec, f: &[FaceChange; 6], name: &str
         w,
         RES,
         s,
-        &Pass2Inputs { base: &base, face_change: &face_change_reader(f), factor: None, face_fill: None },
+        &Pass2Inputs { base: &base, face_change: &face_change_reader(f), factor: None, scratch: None },
         &tiles(),
         threads,
         &mut |_| {},
@@ -238,7 +238,7 @@ fn a_channel_of_another_layer_or_a_damaged_stream_is_refused_and_a_store_without
     writer.append(&tile_record(&w, RES, &s, &r0).unwrap()).unwrap();
     writer.write_index().unwrap();
     writer.finish().unwrap();
-    let inputs = Pass2Inputs { base: &base, face_change: &face_change_reader(&f), factor: None, face_fill: None };
+    let inputs = Pass2Inputs { base: &base, face_change: &face_change_reader(&f), factor: None, scratch: None };
     let report = run_pass2(old.path(), &w, RES, &s, &inputs, &[id], 2, &mut |_| {}).unwrap();
     assert_eq!((report.computed.len(), report.skipped.len()), (1, 0));
     let old_store = TileStore::open(old.path(), w.params()).unwrap();
@@ -472,24 +472,35 @@ fn the_identity_of_the_channels_follows_the_resolutions_of_their_keys_and_the_re
     assert_eq!(CHANNEL_READER_VERSION, 2, "a change of the sampling rule raises the version, which enters the identity");
 }
 
-/// A layer store of the tiny planet whose pass 2 had pits: the pit depth of pass 1 is 3 m on the half of the planet with x above 0 (a made-up reader, the spill level 3 m over the carved surface).
+/// A layer store of the tiny planet with pits: pass 2 on the ridge terrain for the change and the deposited depth, and a final-heights scratch store of a plateau of 200 m with an 8 x 8 bowl of 150 m in the
+/// middle of every tile (pass 2 smooths a dug bowl away on a planet of 100 m cells), then the post-pass (GEN-121, STRM-077) writes the pit depth: 50 m in the bowls.
 fn pit_store() -> (GlobalWorld, TileLayerSpec, Dir, Dir) {
     let (w, p1) = (world(), Dir::new("p1"));
     let s = spec(&w);
     let f = faces(p1.path(), &w);
     let d = Dir::new("fill");
-    let pits = |v: Vec3| (if v.x > 0.0 { 3.0 } else { 0.0 }, v);
     run_pass2(
         d.path(),
         &w,
         RES,
         &s,
-        &Pass2Inputs { base: &base, face_change: &face_change_reader(&f), factor: None, face_fill: Some(&pits) },
+        &Pass2Inputs { base: &base, face_change: &face_change_reader(&f), factor: None, scratch: None },
         &tiles(),
         2,
         &mut |_| {},
     )
     .unwrap();
+    let scratch = Dir::new("scratch");
+    let t = s.grid.tile;
+    let mut writer = PackWriter::open(scratch.path(), w.params(), DEFAULT_MAX_PACK_BYTES).unwrap();
+    for id in tiles() {
+        let heights: Vec<f32> =
+            (0..t * t).map(|p| if (8..16).contains(&(p % t)) && (8..16).contains(&(p / t)) { 150.0 } else { 200.0 }).collect();
+        writer.append(&planet_cache::layer_fill::heights_record_of(&w, RES, &s, id, &heights).unwrap()).unwrap();
+    }
+    writer.write_index().unwrap();
+    writer.finish().unwrap();
+    planet_cache::layer_fillpass::run_fill_pass(d.path(), scratch.path(), &w, RES, &s, &tiles(), 2, &mut |_, _| {}).unwrap();
     (w, s, p1, d)
 }
 

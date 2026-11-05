@@ -10,7 +10,7 @@ use std::path::Path;
 
 use planet_core::{Face, Vec3};
 use planet_generators::bake::carve::CarveParams;
-use planet_generators::bake::face::{pass1_face_with_channels, FaceChange, FaceSpec};
+use planet_generators::bake::face::{pass1_face_with_area, FaceChange, FaceSpec};
 
 use crate::global_store::GlobalWorld;
 use crate::key::{cache_key, CacheKey, Kind, PARAM_LAYER, PARAM_RESOLUTION};
@@ -200,21 +200,17 @@ pub fn run_pass1(
         }
         let have_change = load_face_change(&store, world, res, spec, face)?.is_some();
         let have_area = crate::layer_channels::has_area(&store, world, res, spec, face)?;
-        let have_fill = crate::layer_fill::has_face_fill(&store, world, res, spec, face)?;
-        if have_change && have_area && have_fill {
+        if have_change && have_area {
             report.skipped.push(face);
             continue;
         }
         // A face stored before the channels existed is carved again for its area only; what is stored is not written twice.
-        let (change, area, fill) = pass1_face_with_channels(&spec.face(face), base, factor, &spec.carve, threads);
+        let (change, area) = pass1_face_with_area(&spec.face(face), base, factor, &spec.carve, threads);
         if !have_change {
             writer.append(&face_record(world, res, spec, &change)).map_err(err)?;
         }
         if !have_area {
             writer.append(&crate::layer_channels::area_record(world, res, spec, face, &area)).map_err(err)?;
-        }
-        if !have_fill {
-            writer.append(&crate::layer_fill::face_fill_record(world, res, spec, face, &fill)).map_err(err)?;
         }
         writer.write_index().map_err(err)?;
         report.computed.push(face);
