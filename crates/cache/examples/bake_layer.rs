@@ -234,6 +234,7 @@ fn main() {
             &spec,
             &tiles,
             threads,
+            &base,
             &mut |id, pits| {
                 println!("fill tile {}/{}/{}: {pits} pit cells", id.face.0, id.ti, id.tj);
             },
