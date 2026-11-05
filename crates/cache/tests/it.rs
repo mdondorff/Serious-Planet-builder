@@ -22,6 +22,8 @@ mod keys_footprint;
 mod keys_wide_ids;
 #[path = "layer_channels.rs"]
 mod layer_channels;
+#[path = "layer_fill.rs"]
+mod layer_fill;
 #[path = "layer_manifest.rs"]
 mod layer_manifest;
 #[path = "layer_store.rs"]

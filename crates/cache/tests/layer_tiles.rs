@@ -87,7 +87,16 @@ fn run(
     threads: usize,
 ) -> Result<Pass2Report, planet_cache::layer_store::LayerStoreError> {
     let reader = face_change_reader(f);
-    run_pass2(dir, w, RES, s, &Pass2Inputs { base: &base, face_change: &reader, factor: None }, which, threads, &mut |_| {})
+    run_pass2(
+        dir,
+        w,
+        RES,
+        s,
+        &Pass2Inputs { base: &base, face_change: &reader, factor: None, face_fill: None },
+        which,
+        threads,
+        &mut |_| {},
+    )
 }
 
 fn stored(dir: &Path, w: &GlobalWorld, s: &TileLayerSpec, which: &[PassTile]) -> Vec<Vec<u32>> {

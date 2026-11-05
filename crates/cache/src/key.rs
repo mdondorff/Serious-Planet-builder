@@ -97,6 +97,10 @@ pub enum Kind {
     LayerArea = 14,
     /// The erosion and deposition depth of one tile of the erosion layer, two bytes per core cell (M9, GEN-111, STRM-072): one record per tile.
     LayerDepth = 15,
+    /// The pit depth of one cube face of the erosion layer, a byte per pass-1 cell (M9, GEN-120, STRM-076): one record per face.
+    LayerFaceFill = 16,
+    /// The pit depth of one tile of the erosion layer, a byte per core cell (M9, GEN-120, STRM-076): one record per tile.
+    LayerFill = 17,
 }
 
 /// One entry of a read set, in its 128-bit form (ADR 0018).

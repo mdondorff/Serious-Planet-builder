@@ -4,6 +4,7 @@
 //! centre line (`radius * pi / 2 / cells`); the face does not route across its edges, its border cells are outlets like the sea.
 
 use super::carve::{carve, CarveParams};
+use super::flood::fill_depth;
 use super::Grid;
 use planet_core::cube::{face_to_direction, TangentWarp};
 use planet_core::par::{self, Par};
@@ -122,6 +123,22 @@ pub fn area_cells(code: u8) -> f64 {
 
 const AREA_CODE_STEPS: f64 = 8.0;
 
+/// A pit depth in metres as a byte (GEN-120, STRM-076): `round(m * FILL_STEPS_PER_M)`, deeper than 255 steps stored as 255. The step is a parameter of the channel's key (the owner has not fixed the code).
+pub fn fill_code(m: f64) -> u8 {
+    (m * FILL_STEPS_PER_M).max(0.0).round().min(255.0) as u8
+}
+
+/// The depth in metres of a code of [`fill_code`].
+pub fn fill_m(code: u8) -> f64 {
+    f64::from(code) / FILL_STEPS_PER_M
+}
+
+/// Steps of the fill-depth code a metre (1: steps of 1 m).
+pub const FILL_STEPS_PER_M: f64 = 1.0;
+
+/// The smallest pit the fill depth records, in metres: the flood's epsilon tilt over a plain and a shallower dent count as no pit (GEN-120).
+pub const FILL_MIN_M: f64 = 0.5;
+
 /// [`pass1_face`] and the codes of the final route's drainage area (by multiple flow direction, GEN-100) of the face's own cells, row-major `cells x cells` (`j` outer).
 pub fn pass1_face_with_area(
     spec: &FaceSpec,
@@ -130,6 +147,19 @@ pub fn pass1_face_with_area(
     params: &CarveParams,
     threads: usize,
 ) -> (FaceChange, Vec<u8>) {
+    let (change, area, _) = pass1_face_with_channels(spec, base, factor, params, threads);
+    (change, area)
+}
+
+/// [`pass1_face_with_area`] and the codes ([`fill_code`]) of the pit depth of the carved surface (GEN-120): how far each of the face's own cells lies below the flood of the carved heights,
+/// which the runtime adds back while the pits are kept in the change.
+pub fn pass1_face_with_channels(
+    spec: &FaceSpec,
+    base: &(dyn Fn(Vec3) -> f64 + Sync),
+    factor: Option<&(dyn Fn(Vec3) -> f64 + Sync)>,
+    params: &CarveParams,
+    threads: usize,
+) -> (FaceChange, Vec<u8>, Vec<u8>) {
     assert!(
         spec.halo * 2 < spec.cells,
         "the halo ({} cells) must be under half the face ({} cells): beyond that the extended plane leaves the neighbouring ground",
@@ -150,6 +180,16 @@ pub fn pass1_face_with_area(
             area.push(area_code(routing.area[(j + h) * m + i + h], cell_m2));
         }
     }
+    // The routing is dropped before the flood: two surfaces of a face would not fit its memory budget.
+    drop(routing);
+    let depth = fill_depth(&grid, &z, &outlet, params.epsilon, FILL_MIN_M);
+    let mut fill = Vec::with_capacity(spec.cells * spec.cells);
+    for j in 0..spec.cells {
+        for i in 0..spec.cells {
+            fill.push(fill_code(f64::from(depth[(j + h) * m + i + h])));
+        }
+    }
+    drop(depth);
     (
         FaceChange {
             face: spec.face,
@@ -158,5 +198,27 @@ pub fn pass1_face_with_area(
             change: z.iter().zip(&z0).map(|(a, b)| (a - b) as f32).collect(),
         },
         area,
+        fill,
     )
+}
+
+/// The pit depth codes ([`fill_code`]) of one face's own cells, row-major `cells x cells` (`j` outer): pass 1's fill depth, which pass 2 reads for the basins that cross its windows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FaceFill {
+    pub face: Face,
+    pub cells: usize,
+    pub codes: Vec<u8>,
+}
+
+/// The pit depth of the six faces at a direction in metres and the direction of the centre of the face cell that holds it (pass 1's spill level is flat over a basin at that cell's scale, so pass 2 takes the level at the centre): the code of the cell (the nearest cell, no cross-fade: the depth is a flood's level difference, not a
+/// field to be differentiated).
+pub fn fill_at(faces: &[FaceFill; 6], d: Vec3) -> (f64, Vec3) {
+    let (face, s, t) = planet_core::cube::direction_to_face(&TangentWarp, d);
+    let f = &faces[face.0 as usize];
+    debug_assert_eq!(f.face, Face(face.0));
+    let n = f.cells as f64;
+    let cell = |c: f64| ((c + 1.0) * 0.5 * n).floor().clamp(0.0, n - 1.0) as usize;
+    let (i, j) = (cell(s), cell(t));
+    let centre = face_to_direction(&TangentWarp, f.face, 2.0 * (i as f64 + 0.5) / n - 1.0, 2.0 * (j as f64 + 0.5) / n - 1.0);
+    (fill_m(f.codes[j * f.cells + i]), centre)
 }

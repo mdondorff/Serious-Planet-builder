@@ -68,3 +68,10 @@ pub fn priority_flood(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64) -> 
     }
     filled
 }
+
+/// The depth each cell of `z` lies below the surface [`priority_flood`] makes of it, in metres, for the cells that hold a pit of at least `min_m` and 0 elsewhere (GEN-120): the epsilon
+/// gradient over flats and a pit shallower than `min_m` count as no pit, so a plain is not lifted by the flood's tilt. An outlet is 0.
+pub fn fill_depth(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64, min_m: f64) -> Vec<f32> {
+    let filled = priority_flood(grid, z, outlet, epsilon);
+    filled.iter().zip(z).map(|(f, h)| if f - h >= min_m { (f - h) as f32 } else { 0.0 }).collect()
+}

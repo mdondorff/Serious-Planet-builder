@@ -32,8 +32,8 @@ use crate::relief_store::face_tile;
 pub const KIND_LAYER_AREA: u8 = Kind::LayerArea as u8;
 /// The kind byte of a tile's erosion and deposition depth.
 pub const KIND_LAYER_DEPTH: u8 = Kind::LayerDepth as u8;
-/// Version of the channels' layout and codes. History: 1 = the first layout.
-pub const CHANNELS_VERSION: u32 = 1;
+/// Version of the channels' layout and codes. History: 1 = the first layout; 2 = the fill-depth scale (GEN-120, STRM-076) joined the channels' key.
+pub const CHANNELS_VERSION: u32 = 2;
 /// Version of the reader's sampling rule (the bilinear read of the area in codes, the scale of its log2, the depth's read across tile borders and its clamp to the home tile): part of the identity of a
 /// [`LayerChannels`], so a change of how a point is read re-keys the tiles whose driver block holds it.
 pub const CHANNEL_READER_VERSION: u32 = 1;
@@ -43,16 +43,18 @@ const CODEC_VERSION: u8 = 1;
 const BROTLI_QUALITY: u32 = 5;
 const BROTLI_WINDOW_BITS: u32 = 22;
 const BROTLI_BUFFER: usize = 64 * 1024;
-const HEADER_LEN: usize = 1 + 4 + 16;
+pub(crate) const HEADER_LEN: usize = 1 + 4 + 16;
 /// The scales of the codes, part of the keys: 8 steps of area a doubling, 16 steps a square root of a metre.
 const AREA_STEPS: u32 = 8;
 const DEPTH_SCALE: u32 = 1;
 
-fn channel_bytes(layer: &[u8]) -> Vec<u8> {
+pub(crate) fn channel_bytes(layer: &[u8]) -> Vec<u8> {
     let mut b = Vec::with_capacity(12 + layer.len());
     b.extend(CHANNELS_VERSION.to_le_bytes());
     b.extend(AREA_STEPS.to_le_bytes());
     b.extend(DEPTH_SCALE.to_le_bytes());
+    b.extend(planet_generators::bake::face::FILL_STEPS_PER_M.to_bits().to_le_bytes());
+    b.extend(planet_generators::bake::face::FILL_MIN_M.to_bits().to_le_bytes());
     b.extend_from_slice(layer);
     b
 }
@@ -84,7 +86,7 @@ fn delta_rows(plane: &[u8], w: usize) -> Vec<u8> {
     out
 }
 
-fn undelta_rows(raw: &mut [u8], w: usize) {
+pub(crate) fn undelta_rows(raw: &mut [u8], w: usize) {
     for row in raw.chunks_exact_mut(w) {
         for i in 1..w {
             row[i] = row[i].wrapping_add(row[i - 1]);
@@ -98,7 +100,7 @@ fn compress(raw: &[u8], payload: &mut Vec<u8>) {
 }
 
 /// The stream as exactly `len` bytes: a stream that holds fewer or more is refused, and no more than `len` bytes (and one to detect a longer stream) is ever read.
-fn decompress(stream: &[u8], len: usize) -> Result<Vec<u8>, String> {
+pub(crate) fn decompress(stream: &[u8], len: usize) -> Result<Vec<u8>, String> {
     let mut out = Vec::with_capacity(len);
     let mut r = brotli::Decompressor::new(stream, BROTLI_BUFFER).take(len as u64 + 1);
     r.read_to_end(&mut out).map_err(|e| format!("the stream does not decode: {e}"))?;
@@ -112,7 +114,7 @@ fn decompress(stream: &[u8], len: usize) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
-fn record(world: &GlobalWorld, kind: u8, tile: planet_core::TileId, key: CacheKey, first: u32, body: &[u8], w: usize) -> Record {
+pub(crate) fn record(world: &GlobalWorld, kind: u8, tile: planet_core::TileId, key: CacheKey, first: u32, body: &[u8], w: usize) -> Record {
     let mut payload = Vec::with_capacity(HEADER_LEN + body.len() / 4);
     payload.push(CODEC_VERSION);
     payload.extend(first.to_le_bytes());
@@ -173,7 +175,12 @@ pub fn has_depth(store: &TileStore, world: &GlobalWorld, res: u32, spec: &TileLa
     }
 }
 
-fn checked<'r>(r: &'r Record, key: CacheKey, first: usize, what: &dyn Fn(String) -> LayerStoreError) -> Result<&'r [u8], LayerStoreError> {
+pub(crate) fn checked<'r>(
+    r: &'r Record,
+    key: CacheKey,
+    first: usize,
+    what: &dyn Fn(String) -> LayerStoreError,
+) -> Result<&'r [u8], LayerStoreError> {
     let p = &r.payload;
     if p.len() < HEADER_LEN || p[0] != CODEC_VERSION || u32::from_le_bytes(p[1..5].try_into().expect("four bytes")) as usize != first {
         return Err(what(format!("a payload of {} bytes that is not {first} cells in codec {CODEC_VERSION}", p.len())));
@@ -284,6 +291,7 @@ pub struct TileDepth {
     pub deposited: Vec<u8>,
 }
 
+/// Takes the STORED change of kind 13, not the runtime layer's (which has the pit depth of GEN-120 added back and would undercount the removal by it).
 /// The depth removed at a cell in metres: `max(0, deposited - change)`, the deposited depth and the layer's change (kind 13) at the cell. Exact where pass 1 did not raise the cell; where it
 /// did (uplift, a filled pit: 15 % of mountain land and 35 % of hills in seed 14's samples) it is short by the raise, and where the deposited depth is 255 m it is clipped.
 pub fn removed_depth_m(deposited_m: f32, change_m: f32) -> f32 {
