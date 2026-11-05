@@ -1,5 +1,5 @@
 # 0104 A relief-aware climate: wind, two-season orographic rain, runoff in the carve, arid class rules
-Status: accepted (owner, 2026-11-05: SPIKE-102 D3 option A, "Full d3", with the two-season sweep and the vegetation curve from the D3 review)
+Status: accepted (owner, 2026-11-05: SPIKE-102 D3 option A, "Full d3", with the two-season sweep and the vegetation curve from the D3 review); point 3 amended 2026-11-05 (independent review): runoff enters the carve as runoff-weighted discharge (sum of runoff times area), not as a local scaling of erodibility; the vegetation curve stays a local factor; the precipitation sweep is a fixed-iteration advection over a class-independent base
 Date: 2026-11-05
 Source: owner, 2026-11-05; SPIKE-102 (`spikes/generator-archetypes/results/results.md` sections 2, 3, 4.1 rows 5-7, 4.3 D3); SPIKE-81 (PET, class shares); Smith and Barstad 2004 (linear orographic precipitation); ADR 0089; ADR 0102; ADR 0103; GEN-117
 

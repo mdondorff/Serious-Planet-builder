@@ -110,7 +110,7 @@ fn main() {
         let deposited = 2.5 * floor + 0.9 * feet(da, 90.0).max(feet(db, 220.0));
         // The drainage area as log2 of cells: 7 (moisture 0.7) on the crater floor, 3 (0.3) on the plain around it, 0.5 elsewhere.
         let log2 = 0.5 + 6.5 * floor + 2.5 * (1.0 - ramp(dc, 80.0, 400.0));
-        ChannelSample { soil_m: Some(deposited as f32), area_log2_cells: Some(log2 as f32) }
+        ChannelSample { soil_m: Some(deposited as f32), area_log2_cells: Some(log2 as f32), ..Default::default() }
     };
     let d1_look =
         parse_look(include_str!("../../../docs/looks/ground-channels-d1.look.toml")).expect("the sample look").body(BodyId::PLANET).ground;

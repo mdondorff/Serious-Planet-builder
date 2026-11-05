@@ -71,7 +71,9 @@ pub const SKIRT_FRACTION: f64 = 0.08;
 /// a pre-filled pack is written again;
 /// 10 = the slot gains the driver block (ADR 0076, GEN-071, GEN-025): 324 bytes after the climate block, the texels at byte 776, the slot 9,488 bytes at
 /// 32 cells; every key changes, the vertex output and the texels are unchanged.
-pub const MESH_VERSION: u32 = 10;
+/// 11 = the slot gains the channel block (GEN-126, GEN-025): 324 bytes after the driver block, the texels at byte 1,100, the slot 9,812 bytes at 32 cells; every key changes,
+/// the vertex output and the texels are unchanged, a pre-filled pack is written again.
+pub const MESH_VERSION: u32 = 11;
 
 /// Key of a mesh: the height key of the tile (generator, seed, mapping, tile; resolution = `cells`), the grid size, the
 /// radius bits, the skirt fraction bits and [`MESH_VERSION`].

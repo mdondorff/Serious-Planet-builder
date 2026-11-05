@@ -89,11 +89,11 @@ fn the_budget_is_the_provisional_1_mib_of_tile_data_and_node_records_are_inside_
 // spec: STRM-006
 #[test]
 fn a_full_ground_1m_fill_takes_the_frames_the_cap_allows_in_both_formats() {
-    // ADR 0033 point 9: a full ground-1m fill is 8,763 compact slots (83 MB at 9,488 B since MESH_VERSION 10, driver block, ADR 0076/GEN-071; 80 MB at 9,168 B
-    // before). Whole tiles only: 110 per frame at 9,488 B (114 at 9,168 B, GEN-025).
+    // ADR 0033 point 9: a full ground-1m fill is 8,763 compact slots (86 MB at 9,812 B since MESH_VERSION 11, channel block, GEN-126; 83 MB at 9,488 B
+    // before). Whole tiles only: 106 per frame at 9,812 B (110 at 9,488 B, GEN-025).
     let slots = 8_763u64;
     let compact = slot_bytes(32);
-    assert_eq!(compact, 9_488);
+    assert_eq!(compact, 9_812);
     let frames = |tile_bytes: u64| {
         let mut list: Vec<Waiting> = (0..slots).map(|i| w(tile(7, i), UploadClass::Draw, i as f64, tile_bytes)).collect();
         sort_waiting(&mut list);
@@ -105,12 +105,12 @@ fn a_full_ground_1m_fill_takes_the_frames_the_cap_allows_in_both_formats() {
         n
     };
     let per_frame = |b: u64| (DEFAULT_TILE_BYTES_PER_FRAME / b).max(1);
-    assert_eq!(per_frame(compact), 110);
-    assert_eq!(frames(compact), slots.div_ceil(110) as usize);
+    assert_eq!(per_frame(compact), 106);
+    assert_eq!(frames(compact), slots.div_ceil(106) as usize);
     assert_eq!(
         frames(compact),
-        80,
-        "83 MB / 1 MiB is 79.3 frames; whole tiles of 9,488 B make it 80 (STRM-006; 77 before MESH_VERSION 10)"
+        83,
+        "86 MB / 1 MiB is 82.0 frames; whole tiles of 9,812 B make it 83 (STRM-006; 80 before MESH_VERSION 11)"
     );
     let vertex = 58_608;
     assert_eq!(per_frame(vertex), 17);
