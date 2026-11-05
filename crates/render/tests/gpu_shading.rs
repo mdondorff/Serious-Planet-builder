@@ -464,6 +464,17 @@ fn the_64_m_and_8_m_octaves_are_off_in_the_earth_default_and_each_draws_when_giv
         }
     }
     assert_eq!(covered, 4);
+    // Each new octave has a lattice of its own: its coefficients copied from a scale neighbour draw another picture than the neighbour alone.
+    for (new, old) in [(4usize, 0usize), (5, 1)] {
+        let mut neighbour = detail_plan(ShadeView::Lit, 1.0);
+        neighbour.coef.octaves[new] = neighbour.coef.octaves[old];
+        neighbour.coef.octaves[new].albedo = [0.3; 3];
+        let mut alone = detail_plan(ShadeView::Lit, 1.0);
+        alone.coef.octaves[new] = alone.coef.octaves[old];
+        alone.coef.octaves[new].albedo = [0.3; 3];
+        alone.coef.octaves[old].albedo = [0.0; 3];
+        assert!(hdr_of(&mut r, &ctx, &p, neighbour) != hdr_of(&mut r, &ctx, &p, alone), "octave {new} is a copy of octave {old}");
+    }
     // The strength 0 is still the off picture with them on.
     let mut off = detail_plan(ShadeView::Lit, 0.0);
     off.coef.octaves[4].albedo = [0.3; 3];
