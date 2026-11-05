@@ -34,6 +34,9 @@ pub const KIND_LAYER_AREA: u8 = Kind::LayerArea as u8;
 pub const KIND_LAYER_DEPTH: u8 = Kind::LayerDepth as u8;
 /// Version of the channels' layout and codes. History: 1 = the first layout; 2 = the fill-depth scale (GEN-120, STRM-076) joined the channels' key.
 pub const CHANNELS_VERSION: u32 = 2;
+/// Version of the reader's sampling rule (the bilinear read of the area in codes, the scale of its log2, the depth's read across tile borders and its clamp to the home tile): part of the identity of a
+/// [`LayerChannels`], so a change of how a point is read re-keys the tiles whose driver block holds it.
+pub const CHANNEL_READER_VERSION: u32 = 1;
 const AREA_ID: &str = "erosion-layer-area";
 const DEPTH_ID: &str = "erosion-layer-depth";
 const CODEC_VERSION: u8 = 1;
@@ -398,7 +401,9 @@ pub struct ChannelStats {
 pub struct LayerChannels {
     store: Arc<TileStore>,
     world: Arc<GlobalWorld>,
-    res: u32,
+    /// The resolution of the keys of the areas (pass 1's cells a face edge in `bake_layer`) and of the depths (pass 2's cells a face edge).
+    area_res: u32,
+    depth_res: u32,
     layer: LayerSpec,
     tiles: TileLayerSpec,
     area_window: usize,
@@ -407,6 +412,7 @@ pub struct LayerChannels {
     area_load: Mutex<()>,
     depth_load: Mutex<()>,
     stats: Mutex<ChannelStats>,
+    identity: u64,
 }
 
 impl LayerChannels {
@@ -414,15 +420,31 @@ impl LayerChannels {
     pub fn new(
         store: Arc<TileStore>,
         world: Arc<GlobalWorld>,
-        res: u32,
+        area_res: u32,
+        depth_res: u32,
         layer: LayerSpec,
         tiles: TileLayerSpec,
         caches: ChannelCaches,
     ) -> LayerChannels {
+        // The identity of the channels: the keys of a face's area and of a tile's depth under these specs, which carry the layer's parameters, the channels' version and their scales.
+        let mut parts: Vec<u64> = area_key(&world, area_res, &layer, Face(0))
+            .0
+            .chunks(8)
+            .map(|c| u64::from_le_bytes(c.try_into().expect("eight bytes")))
+            .collect();
+        // (A tile spec whose first tile has no key is a spec the reader cannot serve anyway: its area keys alone then name the channels.)
+        match depth_key(&world, depth_res, &tiles, PassTile { face: Face(0), ti: 0, tj: 0 }) {
+            Ok(k) => parts.extend(k.0.chunks(8).map(|c| u64::from_le_bytes(c.try_into().expect("eight bytes")))),
+            Err(_) => parts.push(0x6e6f_2064_6570_7468),
+        }
+        parts.push(u64::from(CHANNEL_READER_VERSION));
+        let identity = planet_core::hash::hash_u64s(0x6964_656e, &parts);
         LayerChannels {
+            identity,
             store,
             world,
-            res,
+            area_res,
+            depth_res,
             layer,
             tiles,
             area_window: caches.area_window.max(1),
@@ -432,6 +454,18 @@ impl LayerChannels {
             depth_load: Mutex::new(()),
             stats: Mutex::new(ChannelStats::default()),
         }
+    }
+
+    /// The faces whose drainage area the store holds under the current keys (an error when it holds one under other keys): empty for a layer made before the channels or under other keys, which
+    /// the viewer's `--channels on` refuses.
+    pub fn faces_with_area(&self) -> Result<Vec<Face>, LayerStoreError> {
+        let mut out = Vec::new();
+        for f in 0..6 {
+            if has_area(&self.store, &self.world, self.area_res, &self.layer, Face(f))? {
+                out.push(Face(f));
+            }
+        }
+        Ok(out)
     }
 
     /// What the reader has done so far, and the bytes its two caches hold now (area windows, depth tiles).
@@ -457,7 +491,7 @@ impl LayerChannels {
         let (x0, y0) = (wi as usize * step, wj as usize * step);
         let (cols, rows) = (x0..(x0 + step + 1).min(n), y0..(y0 + step + 1).min(n));
         let started = std::time::Instant::now();
-        let Some(a) = load_area_window(&self.store, &self.world, self.res, &self.layer, face, rows, cols)? else { return Ok(None) };
+        let Some(a) = load_area_window(&self.store, &self.world, self.area_res, &self.layer, face, rows, cols)? else { return Ok(None) };
         let a = Arc::new(a);
         self.areas.lock().expect("area cache").put(key, a.clone());
         let mut s = self.stats.lock().expect("stats");
@@ -530,7 +564,9 @@ impl LayerChannels {
             return Ok(Some(a));
         }
         let started = std::time::Instant::now();
-        let Some(a) = load_depth(&self.store, &self.world, self.res, &self.tiles, PassTile { face, ti, tj })? else { return Ok(None) };
+        let Some(a) = load_depth(&self.store, &self.world, self.depth_res, &self.tiles, PassTile { face, ti, tj })? else {
+            return Ok(None);
+        };
         let a = Arc::new(a);
         self.depths.lock().expect("depth cache").put(key, a.clone());
         let mut s = self.stats.lock().expect("stats");
@@ -541,6 +577,10 @@ impl LayerChannels {
 }
 
 impl planet_generators::channels::ChannelSource for LayerChannels {
+    fn identity(&self) -> u64 {
+        self.identity
+    }
+
     fn area_log2_cells(&self, d: Vec3) -> Result<Option<f32>, String> {
         LayerChannels::area_log2_cells(self, d).map_err(|e| e.0)
     }

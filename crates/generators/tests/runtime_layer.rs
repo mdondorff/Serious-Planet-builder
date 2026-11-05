@@ -651,3 +651,50 @@ fn without_the_relief_channels_the_layer_is_added_to_the_lattice_read_with_the_b
         assert!(on.error().is_none());
     }
 }
+
+/// A channel source of made-up numbers: the deposited depth follows z, the area x, and it can fail at one direction.
+struct FakeChannels(u64, bool);
+
+impl planet_generators::channels::ChannelSource for FakeChannels {
+    fn identity(&self) -> u64 {
+        self.0
+    }
+    fn area_log2_cells(&self, d: Vec3) -> Result<Option<f32>, String> {
+        if self.1 {
+            return Err("the area of a face could not be read".into());
+        }
+        Ok(Some((2.0 + 6.0 * d.x.abs()) as f32))
+    }
+    fn deposited_depth_m(&self, d: Vec3) -> Result<Option<f32>, String> {
+        Ok(if d.z < 0.0 { None } else { Some((0.5 + 3.0 * d.z) as f32) })
+    }
+}
+
+// spec: GEN-119
+#[test]
+fn the_eroded_field_reads_the_channels_for_the_driver_block_and_changes_nothing_else_but_its_version_word() {
+    let grid = grid();
+    let g = GridSource(&grid);
+    let (off, on) = (layered(&g, true, 1.0), layered(&g, true, 1.0).with_channels(Arc::new(FakeChannels(5, false))));
+    let dirs: Vec<Vec3> = (0..40)
+        .map(|k| face_to_direction(&TangentWarp, Face((k % 6) as u8), -0.9 + 0.045 * f64::from(k), 0.3 - 0.03 * f64::from(k)))
+        .collect();
+    assert_eq!(off.driver_channels(&dirs), None, "a field without channels fills no driver block");
+    let samples = on.driver_channels(&dirs).expect("channels");
+    assert_eq!(samples.len(), dirs.len());
+    for (d, s) in dirs.iter().zip(&samples) {
+        assert_eq!(s.area_log2_cells, Some((2.0 + 6.0 * d.x.abs()) as f32));
+        assert_eq!(s.soil_m.is_some(), d.z >= 0.0, "a point the store holds no depth for has none");
+    }
+    // The heights, their keys and the climate are the field's own; the version word (so every mesh key) and nothing else changes with the channels, and with their identity.
+    assert_eq!(off.heights(&dirs), on.heights(&dirs));
+    assert_eq!((off.inputs_hash(), off.implementation_id(), off.version()), (on.inputs_hash(), on.implementation_id(), on.version()));
+    assert_ne!(off.climate_version_word(), on.climate_version_word());
+    let other = layered(&g, true, 1.0).with_channels(Arc::new(FakeChannels(6, false)));
+    assert_ne!(on.climate_version_word(), other.climate_version_word());
+    // A failed read is recorded like a height's and leaves the texel without that channel.
+    let broken = layered(&g, true, 1.0).with_channels(Arc::new(FakeChannels(5, true)));
+    let s = broken.driver_channels(&dirs[..3]).unwrap();
+    assert!(s.iter().all(|s| s.area_log2_cells.is_none()));
+    assert!(broken.error().is_some_and(|e| e.contains("could not be read")), "{:?}", broken.error());
+}

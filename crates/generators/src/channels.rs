@@ -7,6 +7,9 @@ use planet_core::Vec3;
 
 /// The channels at a direction. Every read is bilinear in the channel's own grid and returns `Ok(None)` where the store holds no channel for the ground there; an error names what could not be read.
 pub trait ChannelSource: Send + Sync {
+    /// An identity of the channels (the layer they were made beside, their versions and scales): equal sources give equal numbers, so a field that reads them keys its tiles by it.
+    fn identity(&self) -> u64;
+
     /// The drainage area at `d` as log2 of cells of pass 1's grid.
     fn area_log2_cells(&self, d: Vec3) -> Result<Option<f32>, String>;
 

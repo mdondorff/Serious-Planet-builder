@@ -213,6 +213,9 @@ impl HeightField for CoupledLensField<'_> {
     fn climate_version_word(&self) -> u64 {
         mix64(self.f().climate_version_word() ^ lens_version_word(&self.maps, self.lens))
     }
+    fn driver_channels(&self, dirs: &[Vec3]) -> Option<Vec<crate::drivers::ChannelSample>> {
+        self.f().driver_channels(dirs)
+    }
     fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
         self.f().height_bounds(centre, angular_radius)
     }

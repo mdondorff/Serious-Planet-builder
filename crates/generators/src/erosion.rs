@@ -295,6 +295,8 @@ pub struct ErosionField<'a> {
     crease_band: Option<(CreaseBand, [f64; OCTAVES as usize])>,
     /// The erosion layer and the sea level its coast fade follows (GEN-112), off unless [`ErosionField::with_layer`] is called.
     layer: Option<(Arc<crate::erosion_layer::ErosionLayer>, f64)>,
+    /// The baked channels the tile's driver block is filled from (GEN-119), off unless [`ErosionField::with_channels`] is called.
+    channels: Option<Arc<dyn crate::channels::ChannelSource>>,
 }
 
 impl ErosionField<'_> {
@@ -364,6 +366,13 @@ impl ErosionField<'_> {
         );
         f.layer = Some((layer, sea_level_m));
         Ok(f)
+    }
+
+    /// This field with the driver block of its tiles filled from the baked channels `src` (GEN-119): the deposited depth into the soil code, the drainage area into the moisture code. The heights, their keys
+    /// and the climate are unchanged; the field's climate version word changes (and with it every mesh key), so a tile made without the channels is never mixed with one made with them.
+    pub fn with_channels(mut self, src: Arc<dyn crate::channels::ChannelSource>) -> Self {
+        self.channels = Some(src);
+        self
     }
 
     /// Whether the erosion layer is on.
@@ -574,7 +583,30 @@ impl HeightField for ErosionField<'_> {
     }
 
     fn climate_version_word(&self) -> u64 {
-        crate::climate::climate_version_word()
+        match &self.channels {
+            Some(c) => planet_core::hash::mix64(crate::climate::climate_version_word() ^ crate::drivers::channel_word(c.identity())),
+            None => crate::climate::climate_version_word(),
+        }
+    }
+
+    fn driver_channels(&self, dirs: &[Vec3]) -> Option<Vec<crate::drivers::ChannelSample>> {
+        let src = self.channels.as_ref()?;
+        // A failed read is recorded like a height's and leaves the texel without a channel (the neutral value).
+        let ok = |r: Result<Option<f32>, String>| match r {
+            Ok(v) => v,
+            Err(e) => {
+                self.fail_text(&e);
+                None
+            }
+        };
+        Some(
+            dirs.iter()
+                .map(|&d| crate::drivers::ChannelSample {
+                    soil_m: ok(src.deposited_depth_m(d)),
+                    area_log2_cells: ok(src.area_log2_cells(d)),
+                })
+                .collect(),
+        )
     }
 
     /// The heights and the climate of a tile in one gather: the cells of both are read once, grouped by bake block (GEN-020), so a
@@ -892,6 +924,7 @@ impl ErosionGenerator {
             relief_channels: None,
             crease_band: None,
             layer: None,
+            channels: None,
         })
     }
 }

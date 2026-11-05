@@ -37,6 +37,60 @@ pub fn decode_unit(code: u8) -> f64 {
     f64::from(code) / 255.0
 }
 
+/// Version of the mapping from the baked channels to the driver codes ([`apply_channels`], GEN-119): part of the version word of a field that reads them.
+pub const DRIVER_MAP_VERSION: u32 = 1;
+/// The drainage area, as log2 of pass 1's cells, at which the moisture is 0 (a single cell, about 0.66 km2 at 12,288 cells a face) and 1 (1,024 cells, about 680 km2): starting values for the owner's look.
+pub const AREA_LOG2_DRY: f64 = 0.0;
+pub const AREA_LOG2_WET: f64 = 10.0;
+
+/// The moisture the drainage area `log2_cells` stands for: linear in the log2 between [`AREA_LOG2_DRY`] and [`AREA_LOG2_WET`], clamped to `[0, 1]`.
+pub fn wetness_of_area_log2(log2_cells: f64) -> f64 {
+    if !log2_cells.is_finite() {
+        return 0.0;
+    }
+    ((log2_cells - AREA_LOG2_DRY) / (AREA_LOG2_WET - AREA_LOG2_DRY)).clamp(0.0, 1.0)
+}
+
+/// The channels at one texel of a tile's driver block (GEN-119): the deposited depth in metres and the drainage area as log2 of cells; `None` where the store holds no channel for the ground there.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ChannelSample {
+    pub soil_m: Option<f32>,
+    pub area_log2_cells: Option<f32>,
+}
+
+/// The driver block with the channels written in (GEN-119): where a sample holds the deposited depth, the soil code is its square-root code ([`encode_soil`]); where it holds the area, the moisture code is
+/// the code of [`wetness_of_area_log2`]. Everything else, the insolation and the neutral insolation of each texel, and a texel without a channel, stays as it was. `samples` are the 81 texels in the block's order.
+pub fn apply_channels(words: &mut [u32; DRIVER_TEXELS], samples: &[ChannelSample]) {
+    debug_assert_eq!(samples.len(), DRIVER_TEXELS, "one sample for each texel of the block");
+    let params = DriverParams::default();
+    for (w, s) in words.iter_mut().zip(samples) {
+        let (mut codes, neutral) = unpack_driver_word(*w);
+        // A sample that is not a finite number is no channel (the texel keeps its neutral code).
+        if let Some(d) = s.soil_m.filter(|d| d.is_finite()) {
+            codes[0] = encode_soil(f64::from(d), &params);
+        }
+        if let Some(a) = s.area_log2_cells.filter(|a| a.is_finite()) {
+            codes[1] = encode_unit(wetness_of_area_log2(f64::from(a)));
+        }
+        *w = pack_driver_word(codes, neutral);
+    }
+}
+
+/// The version word of a field that fills the driver block from channels with the identity `identity` (the layer and its channel keys): it enters the field's climate version word, so every mesh key of such
+/// a field differs from the same field without channels, and from one with other channels or another mapping.
+pub fn channel_word(identity: u64) -> u64 {
+    planet_core::hash::hash_u64s(
+        0x6368_616e,
+        &[
+            u64::from(DRIVER_MAP_VERSION),
+            identity,
+            DriverParams::default().soil_max_m.to_bits(),
+            AREA_LOG2_DRY.to_bits(),
+            AREA_LOG2_WET.to_bits(),
+        ],
+    )
+}
+
 /// The days of the year the insolation is integrated over: every fifth day from day 3 (73 days), and the steps of the day.
 const DAY_STEP: usize = 5;
 const DAYS: usize = 73;
