@@ -69,6 +69,8 @@ pub struct ErosionSwitch {
     pub layer: Arc<ErosionLayer>,
     /// The sea level of the definition: the crease band and the coast fade follow it.
     pub sea_level_m: f64,
+    /// The baked channels the tiles' driver block is filled from (GEN-119); none: the neutral block.
+    pub channels: Option<Arc<dyn crate::channels::ChannelSource>>,
 }
 
 impl ErosionSwitch {
@@ -131,7 +133,11 @@ pub fn build_field_erosion<'a>(
         Some(r) => field.with_relief(r.clone())?,
         None => field,
     };
-    Ok(Box::new(field.with_layer(erosion.layer.clone(), erosion.sea_level_m)?))
+    let field = field.with_layer(erosion.layer.clone(), erosion.sea_level_m)?;
+    Ok(Box::new(match &erosion.channels {
+        Some(c) => field.with_channels(c.clone()),
+        None => field,
+    }))
 }
 
 /// The field of `body` of kind `kind` over `bake` (whose stage key is `bake_key`; the reference field reads neither). `ctx` must

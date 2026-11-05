@@ -884,11 +884,11 @@ Source: planner decision 2026-10-26, ADR 0017
 - **THEN** the weights are equal bit for bit and every image equals its golden
 
 ### Requirement: GEN-074 The tile driver block and the driver views
-A compact tile SHALL carry a driver block of 9 x 9 words (GEN-025): at each climate texel the neutral soil depth, moisture and insolation codes, and the neutral insolation of the texel's latitude in the top byte (the builder makes no other since ADR 0086). The fragment stage SHALL read the block bilinearly, blend it as `neutral + w (value - neutral)` with `w` 1 (GEN-071), and fill the reserved material inputs (GEN-072). The debug views `soil`, `moisture` and `insolation` (`ShadeView` 7 to 9, reached by J) SHALL show the blended drivers in false colour.
+A compact tile SHALL carry a driver block of 9 x 9 words (GEN-025): at each climate texel the neutral soil depth, moisture and insolation codes, and the neutral insolation of the texel's latitude in the top byte (neutral unless the field reads baked channels, GEN-119). The fragment stage SHALL read the block bilinearly, blend it as `neutral + w (value - neutral)` with `w` 1 (GEN-071), and fill the reserved material inputs (GEN-072). The debug views `soil`, `moisture` and `insolation` (`ShadeView` 7 to 9, reached by J) SHALL show the blended drivers in false colour.
 
 Verify: A, C
 Status: active
-Source: ADR 0076 point 5, GEN-071, GEN-072, GEN-025, ADR 0086
+Source: ADR 0076 point 5, GEN-071, GEN-072, GEN-025, ADR 0086, GEN-119
 
 #### Scenario: The neutral block
 - **WHEN** compact tiles are built over a field
@@ -1172,3 +1172,14 @@ Source: ADR 0098 (owner, 2026-11-03), ADR 0088 points 2 and 5, GEN-099
 #### Scenario: Keys
 - **WHEN** the band's cell, cells, sea level or blend change, or it is switched on, and the relief channels are asked for after the band
 - **THEN** the inputs hash and the implementation id differ, the late call is refused, and a batch and every thread count give the single reads' bits
+
+### Requirement: GEN-119 The driver block from the baked channels
+A field MAY give the tile builder baked channels at the 81 texels of a driver block (`HeightField::driver_channels`). The builder SHALL then write, at each texel that has them, the deposited depth as the soil code and the drainage area as the moisture code (a linear ramp of its log2 in cells, 0 at 0 and 1 at 10, `DRIVER_MAP_VERSION`); the insolation and a texel without a channel stay neutral. A field without channels gives the neutral block; every wrapper SHALL forward them. A field that reads channels SHALL fold `DRIVER_MAP_VERSION` and the channels' identity into its climate version word: its mesh keys differ from those without, no other field's key changes, and no mesh version bump (GEN-018).
+
+Verify: A, C
+Status: active
+Source: planner inbox #65 (2026-11-05), ground-channels-2b decision 1, STRM-075, GEN-074, ADR 0076, ADR 0086
+
+#### Scenario: Channels in the block
+- **WHEN** compact tiles are built over a field that gives channels, over the same field without them, and over fields wrapping one, and the driver views of the tiles are drawn with the default look
+- **THEN** each texel holds the soil and moisture codes of its channels with the insolation of the neutral block, the field without them has the neutral block and its old keys, the keys with channels differ from those without and between channel identities, every wrapper forwards both, the soil and moisture views show the channels, and the lit picture is the one it was

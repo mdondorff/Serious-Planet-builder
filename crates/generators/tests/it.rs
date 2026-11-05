@@ -40,6 +40,8 @@ mod coupled_lens;
 mod crease_band;
 #[path = "descriptors.rs"]
 mod descriptors;
+#[path = "driver_channels.rs"]
+mod driver_channels;
 #[path = "erosion.rs"]
 mod erosion;
 #[path = "generator_contract.rs"]
