@@ -38,6 +38,8 @@ pub struct LayerSpec {
     pub inputs_id: u64,
     /// Whether the carve factor of GEN-097 is applied (it is part of the key; `run_pass1` refuses a factor that disagrees).
     pub uses_factor: bool,
+    /// Which rock fields the carves read (`RockFields::mask`: bit 0 the erodibility, bit 1 the uplift), part of the key: a store written with other fields is another key (GEN-127).
+    pub rock: u8,
     /// Cells carved beyond each edge of a face ([`FaceSpec::halo`]); part of the key.
     pub halo: usize,
 }
@@ -48,6 +50,7 @@ impl LayerSpec {
         b.extend(LAYER_VERSION.to_le_bytes());
         b.extend(planet_generators::bake::BAKE_KERNEL_VERSION.to_le_bytes());
         b.push(u8::from(self.uses_factor));
+        b.push(self.rock);
         b.extend((self.halo as u64).to_le_bytes());
         b.extend((self.cells as u64).to_le_bytes());
         for v in [self.radius_m, self.sea_level] {
@@ -209,6 +212,13 @@ pub fn run_pass1_rock(
             if factor.is_some() { "present" } else { "absent" }
         )));
     }
+    if spec.rock != rock.mask() {
+        return Err(LayerStoreError(format!(
+            "the layer spec says rock = {} but the rock fields given are {} (bit 0 the erodibility, bit 1 the uplift)",
+            spec.rock,
+            rock.mask()
+        )));
+    }
     let mut report = Pass1Report { computed: Vec::new(), skipped: Vec::new() };
     for &face in faces {
         if report.computed.contains(&face) || report.skipped.contains(&face) {
@@ -250,6 +260,7 @@ mod tests {
             carve: CarveParams::default(),
             inputs_id: 7,
             uses_factor: true,
+            rock: 0,
             halo: 4,
         };
         let key = base.bytes();

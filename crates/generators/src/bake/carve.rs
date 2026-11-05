@@ -157,13 +157,14 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
                 continue;
             }
             let rec = rec as usize;
-            let scale = factor.map_or(1.0, |f| f[c]) * if rock.k.is_some() { f64::from(k[c]) } else { 1.0 };
+            let class = factor.map_or(1.0, |f| f[c]);
+            let scale = class * if rock.k.is_some() { f64::from(k[c]) } else { 1.0 };
             let f = p.k_dt * scale * libm::sqrt(r.area[c]) / distance(grid, c, rec);
             let hr = z[rec];
             let t = taper.as_ref().map_or(1.0, |t| f64::from(t[c]));
             let up = match rock.uplift {
                 Some(u) => p.k_dt * f64::from(u[c]) * t,
-                None => uplift * scale * t,
+                None => uplift * class * t,
             };
             let hn = (z[c] + up + f * hr) / (1.0 + f);
             let new = if p.keep_pits && !p.incise_only && z[c] < hr { (z[c] + up).max(floor) } else { hn.max(hr + p.epsilon).max(floor) };

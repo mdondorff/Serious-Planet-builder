@@ -170,3 +170,39 @@ fn a_face_carve_reads_the_fields_at_the_cells_directions_and_is_the_same_bytes_o
     let mean = |c: &planet_generators::bake::face::FaceChange| c.change.iter().map(|v| f64::from(*v)).sum::<f64>() / c.change.len() as f64;
     assert!((mean(&one.0) - mean(&plain.0)).abs() > 0.01, "the mean change is the same with and without the fields");
 }
+
+// spec: GEN-127
+#[test]
+fn an_erodibility_without_an_uplift_array_does_not_scale_the_uniform_uplift_and_the_row_blocks_of_a_tall_grid_read_the_right_cells() {
+    let (g, z0, outlet) = setup();
+    let p = CarveParams { steps: 3, keep_pits: false, ..CarveParams::default() };
+    let none = |_: usize, _: f64| 0.0;
+    let mut z = z0.clone();
+    carve_rock(&g, &mut z, &outlet, &p, None, &Rock { par: &1usize, k: Some(&none), uplift: None }, 5);
+    let lifted = (0..N * N).filter(|&c| !outlet[c] && z[c] > z0[c]).count();
+    assert!(lifted > 500, "K = 0 stopped the uniform uplift: {lifted} cells rose");
+    // A grid of 130 rows is three blocks of the erodibility pass, the last one partial: every cell is read once at its own height.
+    let n = 130;
+    let g = Grid::new(n, n, DX);
+    let z0: Vec<f64> = (0..n * n).map(|c| 40.0 + (c % n) as f64 * 3.0 + (c / n) as f64).collect();
+    let outlet = g.outlets(&z0, 0.0);
+    let seen = Mutex::new(vec![f64::NAN; n * n]);
+    let calls = std::sync::atomic::AtomicUsize::new(0);
+    let record = |c: usize, z: f64| {
+        seen.lock().unwrap()[c] = z;
+        calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        1.0
+    };
+    let mut z = z0.clone();
+    carve_rock(
+        &g,
+        &mut z,
+        &outlet,
+        &CarveParams { steps: 1, ..CarveParams::default() },
+        None,
+        &Rock { par: &4usize, k: Some(&record), uplift: None },
+        5,
+    );
+    assert_eq!(calls.into_inner(), n * n, "one read of every cell");
+    assert_eq!(seen.into_inner().unwrap(), z0, "a cell was read at another cell's height");
+}

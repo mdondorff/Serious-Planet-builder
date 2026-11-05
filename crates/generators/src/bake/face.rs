@@ -92,6 +92,13 @@ pub struct RockFields<'a> {
     pub uplift: Option<&'a (dyn Fn(Vec3) -> f64 + Sync)>,
 }
 
+impl RockFields<'_> {
+    /// The fields that are present as a key byte: bit 0 the erodibility, bit 1 the uplift.
+    pub fn mask(&self) -> u8 {
+        u8::from(self.k.is_some()) | (u8::from(self.uplift.is_some()) << 1)
+    }
+}
+
 impl RockFields<'static> {
     /// No fields: the carve of the class factor and the uniform `u_over_k`.
     pub const fn none() -> RockFields<'static> {
@@ -185,10 +192,17 @@ pub fn pass1_face_rock(
     let (m, h) = (spec.grid_cells(), spec.halo as i64);
     let uplift: Option<Vec<f32>> = rock.uplift.map(|u| {
         let par: &dyn Par = &threads;
-        par::map(par, m, &|j| (0..m).map(|i| u(spec.halo_direction(i as i64 - h, j as i64 - h)) as f32).collect::<Vec<f32>>())
-            .into_iter()
-            .flatten()
-            .collect()
+        // Filled a block of rows at a time into an exactly sized vector: a flattened iterator would double its capacity and hold both buffers at once.
+        let mut out = Vec::with_capacity(m * m);
+        for j0 in (0..m).step_by(64) {
+            let rows = 64.min(m - j0);
+            for row in par::map(par, rows, &|r| {
+                (0..m).map(|i| u(spec.halo_direction(i as i64 - h, (j0 + r) as i64 - h)) as f32).collect::<Vec<f32>>()
+            }) {
+                out.extend(row);
+            }
+        }
+        out
     });
     let kf = rock.k.map(|k| move |c: usize, zc: f64| k(spec.halo_direction((c % m) as i64 - h, (c / m) as i64 - h), zc));
     let par: &dyn Par = &threads;

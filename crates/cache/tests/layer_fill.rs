@@ -54,7 +54,17 @@ fn world() -> GlobalWorld {
 }
 
 fn pass1() -> LayerSpec {
-    LayerSpec { cells: 24, radius_m: R, sea_level: 0.0, seed: 17, carve: CarveParams::default(), inputs_id: 1, uses_factor: false, halo: 4 }
+    LayerSpec {
+        cells: 24,
+        radius_m: R,
+        sea_level: 0.0,
+        seed: 17,
+        carve: CarveParams::default(),
+        inputs_id: 1,
+        uses_factor: false,
+        rock: 0,
+        halo: 4,
+    }
 }
 
 fn spec(w: &GlobalWorld) -> TileLayerSpec {
@@ -63,6 +73,7 @@ fn spec(w: &GlobalWorld) -> TileLayerSpec {
         params: Pass2Params::standard(9, 0.0),
         inputs_id: 1,
         uses_factor: false,
+        rock: 0,
         faces: faces_digest(w, RES, &pass1()),
     }
 }

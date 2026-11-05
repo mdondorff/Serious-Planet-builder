@@ -1764,7 +1764,8 @@ mod tests {
         // A tiny bake of the layer (pass 1 and pass 2 at 24 cells a face edge, one tile a face) in the folder layout of `bake_layer`.
         let shape = BakeShape { seed: 3, radius_m: skeleton::RADIUS_M, face_res: 24, planet_res: 24, tile: None, halo: None };
         let world = GlobalWorld::from_definition(&def()).unwrap();
-        let (layer_spec, tile_spec) = bake_specs(&world, &shape).unwrap();
+        let (mut layer_spec, mut tile_spec) = bake_specs(&world, &shape).unwrap();
+        (layer_spec.rock, tile_spec.rock) = (0, 0); // these tests bake without the rock fields
         let inputs = BakeInputs::new(3, 2);
         let (base, factor) = (|v: planet_core::Vec3| inputs.base(v), |v: planet_core::Vec3| inputs.carve_factor(v));
         let faces: Vec<planet_core::Face> = (0..6).map(planet_core::Face).collect();
@@ -1904,7 +1905,8 @@ mod tests {
         assert!(class.describe().contains("class source"), "{}", class.describe());
         // A tiny layer carved on the class source, with its manifest (the range of what it holds).
         let shape = BakeShape { seed: 3, radius_m: skeleton::RADIUS_M, face_res: 24, planet_res: 24, tile: None, halo: None };
-        let (layer_spec, tile_spec) = bake_specs(&world, &shape).unwrap();
+        let (mut layer_spec, mut tile_spec) = bake_specs(&world, &shape).unwrap();
+        (layer_spec.rock, tile_spec.rock) = (0, 0); // these tests bake without the rock fields
         let (base, factor) = (|v: planet_core::Vec3| inputs.base(v), |v: planet_core::Vec3| inputs.carve_factor(v));
         let faces: Vec<planet_core::Face> = (0..6).map(planet_core::Face).collect();
         run_pass1(&bake_dir.join("layer"), &world, 24, &layer_spec, &base, Some(&factor), &faces, 2).unwrap();

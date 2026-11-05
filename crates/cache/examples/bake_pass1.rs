@@ -91,6 +91,7 @@ fn main() {
         carve: CarveParams::default(),
         inputs_id: BakeInputs::id(),
         uses_factor: true,
+        rock: 3,
         halo,
     };
     let bake_res = res as u32;

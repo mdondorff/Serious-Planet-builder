@@ -11,4 +11,4 @@ ADR 0102 makes erodibility a field K(x, z) (lithology, GEN-116) and ADR 0103 an 
 ## Impact
 - Code: `generators::bake::{carve, face, tile, inputs}`, `cache::{layer_store, layer_tiles}`, the bake examples. No golden moves.
 - Relief changes where the fields are read; the class amplitudes and the scorecard are re-tuned on the preview (owner's round).
-- Cost: one erodibility evaluation per cell and step (a column, a few `fbm`), parallel over rows; memory +0.6 GB per face for the erodibility and +0.6 GB for the uplift at 12,288 cells.
+- Cost: one erodibility evaluation per cell and step (a column, a few `fbm`), parallel over rows; memory +0.6 GB per face for the erodibility and +0.6 GB for the uplift (an exactly sized array, filled 64 rows at a time) at 12,288 cells.

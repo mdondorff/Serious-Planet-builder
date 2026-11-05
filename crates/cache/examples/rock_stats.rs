@@ -37,14 +37,17 @@ fn main() {
     let world = GlobalWorld::from_definition(&def).unwrap().with_class_source(inputs.clone());
     let (base, factor) = (|d: Vec3| inputs.base(d), |d: Vec3| inputs.carve_factor(d));
     let shape = BakeShape::production(seed, RADIUS_M);
-    let (layer, spec) = bake_specs(&world, &shape).unwrap();
+    let (mut layer, mut spec) = bake_specs(&world, &shape).unwrap();
+    if args.iter().any(|a| a == "--no-rock") {
+        (layer.rock, spec.rock) = (0, 0); // the baseline: no fields, its own key
+    }
     let (res, rp) = (shape.face_res as u32, shape.planet_res as u32);
     let id = PassTile { face: Face(2), ti: 12, tj: 10 };
     let tiles_dir: PathBuf = if let Some(d) = arg("--stats-only") {
         PathBuf::from(d)
     } else {
         let out = PathBuf::from(arg("--out").expect("--out DIR"));
-        let no_rock = args.iter().any(|a| a == "--no-rock");
+        let no_rock = layer.rock == 0;
         let (rock_k, rock_u) = (|d: Vec3, z: f64| inputs.rock_k(d, z), |d: Vec3| inputs.uplift_at(d));
         let rock = if no_rock { RockFields::none() } else { RockFields { k: Some(&rock_k), uplift: Some(&rock_u) } };
         println!("rock fields: {}", if no_rock { "off (today's carve)" } else { "on (lithology K and the uplift field)" });
