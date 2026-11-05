@@ -1,0 +1,12 @@
+## Why
+- I8a slice 2b PR 3 (planner, inbox #66): the ground materials follow the baked channels through the driver block (GEN-119, PR 2); this is the look that puts curves on the two inputs, SPIKE-100 D1's material thresholds (rock, scree, soil, grass, wet ground). It is the owner's look, so it is a sample look file for review, not the default.
+
+## What Changes
+- `docs/looks/ground-channels-d1.look.toml` (look schema 9): rock on slopes over about 38 degrees, scree on steep ground with deposits (0.2 to 0.8 m), soil on moderate ground with a small drainage area in a non-desert climate, grass on gentle ground below the channel threshold, wet ground on ground under 5 degrees with a large drainage area (moisture rising 0.10 to 0.40), sand kept from the Earth curves with a moisture gate so a desert hollow is wet and not sand; ground detail 0.6, patch 0.12. The Earth default is untouched.
+- Not in the table because no input carries it yet: rock "where the erosion depth exceeds 2 m" (the depth removed is derived from kinds 13 and 15) and the fill depth of keep-pits (2b PR 4, after explorer's #1192).
+- `look_stills` gets a `d1` variant and synthetic channels around the scripted site (a crater floor with 2.5 m of deposits and a large drainage area, thin deposits at the hill feet), for the sheet `docs/dev_screenshots/2026-11-05-look-d1-curves-synthetic-sheet.jpg`. The channels are SYNTHETIC: no rebaked store exists yet, so the sheet shows what the curves do, not the planet.
+- A tier-A test (`look_d1.rs`) parses the file and pins the mix at characteristic points (bare steep flank: rock; steep with deposits: scree and rock; moderate with deposits: soil and grass; hollow: wet; desert: sand; neutral drivers: the ground keeps a material and so its detail).
+
+## Impact
+- Files: `docs/looks/`, `docs/README.md`, `crates/frame/tests/look_d1.rs`, `crates/render/examples/look_stills.rs`, `docs/dev_screenshots/`. No requirement is added (LOOK-008 and LOOK-011 carry the tests); no code, plan or golden changes.
+- Findings for the owner's tuning: the plain around the crater turns darker brown with the D1 curves (soil and the moisture gates take weight from sand where the drainage area is above neutral); the wet patches are broken up by `ground.patch` into blotches; the rock-to-scree mix on the hills is subtle at 30 m. All thresholds are starting values (SPIKE-100: "not measured fits").
