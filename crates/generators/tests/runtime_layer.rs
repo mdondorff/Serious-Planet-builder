@@ -683,7 +683,7 @@ impl planet_generators::channels::ChannelSource for FakeChannels {
     }
 }
 
-// spec: GEN-119
+// spec: GEN-119, GEN-126
 #[test]
 fn the_eroded_field_reads_the_channels_for_the_driver_block_and_changes_nothing_else_but_its_version_word() {
     let grid = grid();
@@ -698,6 +698,9 @@ fn the_eroded_field_reads_the_channels_for_the_driver_block_and_changes_nothing_
     for (d, s) in dirs.iter().zip(&samples) {
         assert_eq!(s.area_log2_cells, Some((2.0 + 6.0 * d.x.abs()) as f32));
         assert_eq!(s.soil_m.is_some(), d.z >= 0.0, "a point the store holds no depth for has none");
+        // GEN-126: the fill depth and the erosion depth are read from their own channels, not swapped and not the deposit.
+        let (fill, erosion) = (((0.2 + d.x.abs()) as f32), ((1.0 + d.y.abs()) as f32));
+        assert_eq!((s.fill_m, s.erosion_m), if d.z >= 0.0 { (Some(fill), Some(erosion)) } else { (None, None) });
     }
     // The heights, their keys and the climate are the field's own; the version word (so every mesh key) and nothing else changes with the channels, and with their identity.
     assert_eq!(off.heights(&dirs), on.heights(&dirs));

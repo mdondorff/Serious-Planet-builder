@@ -1,0 +1,1 @@
+- 2026-11-05 channel-block: the channel block of the compact slot (GEN-126: fill and erosion depth codes), MESH_VERSION 11, slot 9,812 B, stride a multiple of 4 (2b PR 4b).

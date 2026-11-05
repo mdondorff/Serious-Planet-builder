@@ -17,8 +17,8 @@ use crate::compare::{parse, Json};
 pub const MIN_JOBS: u64 = 3;
 /// Fewest resident slots at the peak (189 and 11): tiles reached the pool.
 pub const MIN_RESIDENT_SLOTS: u64 = 3;
-/// Fewest slots the pool offers (a tenth of the 212,190 the tier's share holds since the slot of 9,488 B, MESH_VERSION 10; 219,585 at 9,168 B, 231,090 before).
-pub const MIN_POOL_SLOTS: u64 = 21_958;
+/// Fewest slots the pool offers (a tenth of the 205,170 the tier's share holds since the slot of 9,812 B, MESH_VERSION 11; 212,190 at 9,488 B, 219,585 at 9,168 B before).
+pub const MIN_POOL_SLOTS: u64 = 20_517;
 /// Most the median of the scheduler step may cost, ms (measured 0.044 and 0.10 on a development machine), the floor of its limit: the limit is the
 /// larger of this and [`SCHEDULER_SHARE_OF_FRAME`] of the same run's `record_ms` median.
 pub const MAX_SCHEDULER_MEDIAN_MS: f64 = 0.5;

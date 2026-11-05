@@ -6,8 +6,8 @@ use planet_core::hash::SplitMix64;
 use planet_core::{Face, TileId, Vec3};
 use planet_generators::compact::{
     compact_tile_field, oct_decode, oct_encode, pack_normal, slot_bytes, slot_texel_bytes, unpack_normal, CompactTile, COMPACT_MIN_LEVEL,
-    HEIGHT_STEPS, SLOT_CLIMATE_OFFSET, SLOT_DRIVER_BYTES, SLOT_DRIVER_OFFSET, SLOT_HEADER_BYTES, SLOT_TEXEL_OFFSET, TEXEL_BYTES,
-    WIDE_RELIEF_1MM_M,
+    HEIGHT_STEPS, SLOT_CHANNEL_BYTES, SLOT_CHANNEL_OFFSET, SLOT_CLIMATE_OFFSET, SLOT_DRIVER_BYTES, SLOT_DRIVER_OFFSET, SLOT_HEADER_BYTES,
+    SLOT_TEXEL_OFFSET, TEXEL_BYTES, WIDE_RELIEF_1MM_M,
 };
 use planet_generators::global::{bake, GridSource};
 use planet_generators::height::{HeightField, Reference};
@@ -30,18 +30,26 @@ fn angle_deg(a: [f32; 3], b: Vec3) -> f64 {
 
 // spec: GEN-019, GEN-025
 #[test]
-fn a_tile_is_a_slot_of_a_header_a_climate_block_a_driver_block_and_8_byte_texels() {
+fn a_tile_is_a_slot_of_a_header_a_climate_block_a_driver_block_a_channel_block_and_8_byte_texels() {
     assert_eq!(TEXEL_BYTES, 8);
-    // MESH_VERSION 10, driver block, ADR 0076/GEN-071: the driver block (324 B) follows the climate block and the texels start at byte 776 (456 before).
+    // MESH_VERSION 11, channel block, GEN-126: the channel block (324 B) follows the driver block and the texels start at byte 1,100 (776 before).
     assert_eq!(
-        (SLOT_HEADER_BYTES, SLOT_CLIMATE_OFFSET, SLOT_DRIVER_OFFSET, SLOT_DRIVER_BYTES, SLOT_TEXEL_OFFSET),
-        (128, 128, 452, 324, 776)
+        (
+            SLOT_HEADER_BYTES,
+            SLOT_CLIMATE_OFFSET,
+            SLOT_DRIVER_OFFSET,
+            SLOT_DRIVER_BYTES,
+            SLOT_CHANNEL_OFFSET,
+            SLOT_CHANNEL_BYTES,
+            SLOT_TEXEL_OFFSET
+        ),
+        (128, 128, 452, 324, 776, 324, 1_100)
     );
-    // GEN-025: the stride is 776 + 8 (cells + 1)^2, a multiple of 16 for every even cell count.
-    assert_eq!((slot_texel_bytes(32), slot_bytes(32)), (8_712, 9_488));
-    assert_eq!((slot_bytes(16), slot_bytes(64)), (3_088, 34_576));
+    // GEN-025: the stride is 1,100 + 8 (cells + 1)^2, a multiple of 4 for every even cell count (the texels start at a multiple of 4, so does the stride).
+    assert_eq!((slot_texel_bytes(32), slot_bytes(32)), (8_712, 9_812));
+    assert_eq!((slot_bytes(16), slot_bytes(64)), (3_412, 34_900));
     for cells in [16u32, 32, 64] {
-        assert_eq!(slot_bytes(cells) % 16, 0, "cells {cells}");
+        assert_eq!(slot_bytes(cells) % 4, 0, "cells {cells}");
         let t = compact_tile_field(&Reference(1), &TangentWarp, id(2, 12, 100, 200), cells, R);
         let n = (cells as usize + 1) * (cells as usize + 1);
         assert_eq!(t.texels.len(), n);
@@ -337,8 +345,8 @@ fn compact_tiles_are_bit_identical_across_thread_counts_and_match_the_known_answ
     assert_eq!(one, KNOWN_ANSWERS, "compact tile content hashes changed: {one:016x?}");
 }
 
-// Re-recorded 2026-10-26 with MESH_VERSION 10, driver block, ADR 0076/GEN-071 (declared): the slot gained the driver block, so the content hash of every tile moved; heights, normals and climate did not.
-const KNOWN_ANSWERS: [u64; 4] = [1754284132184260611, 7419146711787710879, 5442760274692743579, 3876901192971057133];
+// Re-recorded 2026-11-05 with MESH_VERSION 11, channel block, GEN-126 (declared): the slot gained the channel block, so the content hash of every tile moved; heights, normals, climate and the driver block did not (was [1754284132184260611, 7419146711787710879, 5442760274692743579, 3876901192971057133] under 10).
+const KNOWN_ANSWERS: [u64; 4] = [12070315240097824150, 12799138352771665075, 1583948441519330305, 14061124518246683416];
 
 // spec: GEN-019, CON-13, CON-14
 #[test]
