@@ -1059,15 +1059,13 @@ mod tests {
     #[test]
     fn a_look_files_ground_table_reaches_the_lit_plan_only_when_the_run_names_a_look_file() {
         use planet_frame::look::file::GroundLook;
-        let mut ground = GroundLook::default();
-        ground.detail = 0.4;
-        ground.patch = 0.1;
+        let mut ground = GroundLook { detail: 0.4, patch: 0.1, ..GroundLook::default() };
         ground.coef.octaves[5].tilt = [0.2; 4];
         ground.materials.curves[4][planet_frame::look::materials::Input::SlopeCos as usize] = [0.9, 0.5];
         let plain = planet_frame::look::LitPlan::fixed(15.0);
         // Without a file the plan is as it was; with one it takes the curves, the coefficients, the patch and the detail strength.
-        assert_eq!(with_ground_file(plain.clone(), None), plain);
-        let lit = with_ground_file(plain.clone(), Some(&ground));
+        assert_eq!(with_ground_file(plain, None), plain);
+        let lit = with_ground_file(plain, Some(&ground));
         assert_eq!((lit.ground_detail, lit.ground_patch, lit.coef, lit.materials), (0.4, 0.1, ground.coef, ground.materials));
         assert_ne!(lit, plain);
     }
