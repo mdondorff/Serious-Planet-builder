@@ -45,7 +45,7 @@ use planet_render::{AdapterPolicy, GpuContext};
 
 pub const USAGE: &str = "usage: planet <mode> [options]
 modes:
-  editor        the viewer window (VIEW-001..VIEW-007): the scripted orbit-to-1 m flight on the pipelined loop; keys P/Space pause, R restart, L lit (with the atmosphere) or debug path, V debug view, T vsync, C flight or free camera (WASD move, Q/E down/up, arrows look, Shift boost), Esc quit; the window opens on the lit path with the atmosphere, the look file drawn (sun, adaptive exposure); the title shows frame rate, CPU and GPU time, the path (or the debug view), on the lit path the exposure, and the readiness report; runs on a discrete GPU only (an integrated GPU, a software adapter or an adapter missing a feature or limit is refused with the reason); [--world F --global-res N | --store DIR] [--look F] [--size WxH] [--view NAME] [--cells N --tau PX --finest-level N] [--no-vsync] [--erosion on|off] (draw the erosion layer of a bake over the stored world, off by default, VIEW-062: --store holds the world, the layer is read from --erosion-store DIR, the bake's output folder, or the same store; the layer's manifest gives the bake's shape, versions, field source and change range, and --erosion-face-res N and --erosion-res N replace its pass-1 and pass-2 cells (12288 and 98304 for a layer without a manifest); the run refuses a store that holds the legacy generator's bake unless --erosion-unchecked, and a manifest of another version or field source; the title and the log say what is on and name the field source, VIEW-065) [--class-source | --legacy-source] (which bake to open when the store holds both, STRM-073; the store's recorded source otherwise) [--no-shadow-march] (turn the clipmap shadow off: the march shades the terrain and the water by default, REND-051; J shows its visibility; --shadow-march is accepted and does nothing) [--no-ui] (the editor UI, an egui layer drawn after the tone map, VIEW-011) [--edit] (start in the editor mode, VIEW-022; with --site it turns on where the scripted descent over the site ends: Tab toggles it; the panels, stamps by 2-4 and a click, handles on the planet, Ctrl+Z / Ctrl+Y) [--items DIR] (the edits as one TOML file each in DIR, loaded at the start) [--editor-layout F] (the panel layout, VIEW-018) [--marker LAT,LON[,RADIUS_M]]... (item markers of the globe overview, G, VIEW-013) [--site LAT,LON] (the scripted flight descends over this point; without it the world definition's `[world] site = [lat, lon]`, else 20,30 where that is land, else the first shore of the walk from there, GEN-108); --smoke opens the window, drives the keys for a few dozen frames and closes it (test mode: PLANET_ADAPTER or --adapter, software by default; exits with `no display` where there is none); --no-window starts and exits without a window; --offscreen runs the skeleton without a window
+  editor        the viewer window (VIEW-001..VIEW-007): the scripted orbit-to-1 m flight on the pipelined loop; keys P/Space pause, R restart, L lit (with the atmosphere) or debug path, V debug view, T vsync, C flight or free camera (WASD move, Q/E down/up, arrows look, Shift boost), Esc quit; the window opens on the lit path with the atmosphere, the look file drawn (sun, adaptive exposure); the title shows frame rate, CPU and GPU time, the path (or the debug view), on the lit path the exposure, and the readiness report; runs on a discrete GPU only (an integrated GPU, a software adapter or an adapter missing a feature or limit is refused with the reason); [--world F --global-res N | --store DIR] [--look F] [--size WxH] [--view NAME] [--cells N --tau PX --finest-level N] [--no-vsync] [--erosion on|off] (draw the erosion layer of a bake over the stored world, off by default, VIEW-062: --store holds the world, the layer is read from --erosion-store DIR, the bake's output folder, or the same store; the layer's manifest gives the bake's shape, versions, field source and change range, and --erosion-face-res N and --erosion-res N replace its pass-1 and pass-2 cells (12288 and 98304 for a layer without a manifest); the run refuses a store that holds the legacy generator's bake unless --erosion-unchecked, and a manifest of another version or field source; the title and the log say what is on and name the field source, VIEW-065) [--channels on|off] (fill the tiles' driver block, the soil depth and the moisture of the ground materials, from the layer's baked channels, the deposited depth and the drainage area; off by default, needs --erosion on, and the run refuses a layer that holds no channels, VIEW-066) [--class-source | --legacy-source] (which bake to open when the store holds both, STRM-073; the store's recorded source otherwise) [--no-shadow-march] (turn the clipmap shadow off: the march shades the terrain and the water by default, REND-051; J shows its visibility; --shadow-march is accepted and does nothing) [--no-ui] (the editor UI, an egui layer drawn after the tone map, VIEW-011) [--edit] (start in the editor mode, VIEW-022; with --site it turns on where the scripted descent over the site ends: Tab toggles it; the panels, stamps by 2-4 and a click, handles on the planet, Ctrl+Z / Ctrl+Y) [--items DIR] (the edits as one TOML file each in DIR, loaded at the start) [--editor-layout F] (the panel layout, VIEW-018) [--marker LAT,LON[,RADIUS_M]]... (item markers of the globe overview, G, VIEW-013) [--site LAT,LON] (the scripted flight descends over this point; without it the world definition's `[world] site = [lat, lon]`, else 20,30 where that is land, else the first shore of the walk from there, GEN-108); --smoke opens the window, drives the keys for a few dozen frames and closes it (test mode: PLANET_ADAPTER or --adapter, software by default; exits with `no display` where there is none); --no-window starts and exits without a window; --offscreen runs the skeleton without a window
   generate      headless generator CLI: --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --manifest <file> writes the determinism manifest (GEN-003); --cache-dir <dir> --region F,L [--res N] writes a tile face region into a tile store; --verify-cache <dir> [--sample N] regenerates stored tiles and compares (both take --world <definition.toml> or --seed N; --verify-cache fails when nothing could be compared, --allow-stale accepts that); --global-dir <dir> [--global-res N, default 256] bakes the global-coarse field (continents, elevation, climate) of N cells per face edge into a tile store as blocks in the canonical layout (blocks of min(N, 1024) cells) together with its ocean-connectivity channel (one bit per vertex; the area threshold is the definition's `body.0.sea.min_area_fraction`) and prints the time per sample and the channel's cost; --class-source (with --global-dir or --verify-global) samples the class source's surface instead of the legacy generator's and keys the store by it (GEN-115, STRM-073); --verify-global <dir> [--sample N] regenerates stored blocks and compares; --global-products <dir> [--global-res N] writes cube nets and maps of an in-memory bake (these take --world or --seed and --threads N); --coupled-run <dir> --global-res N (required) makes the coupled run of the bake stored in <dir> (or finds it there) and stores it, with a progress line at most every 10 s during the reduction of the bake and the wall time (STRM-051); --coarse-horizon <dir> --global-res N (required) [--threads N] makes the coarse horizon (far-field shadows, STRM-045) from the coupled run stored beside the bake in <dir> and stores it there, with a progress line and the wall time (the coupled run is made and stored by the viewer or `test-render --scene coupled`); --plan-check <dir> --global-res N (required) plans the standard flight at cells 32 and viewport / tau 240 over the stored bake with the terrain and the eroded field and fails if a view is rejected (M3 acceptance); --prefill-dir <dir> --global-res N [--prefill-levels L] [--floor-level F] writes the coarse tiles of levels F..=L (F the render floor, default 3; L default 4; an L below F writes nothing and says so; the tiles of cells 32, finest level 22, compact form, as the streamer generates them) of the stored bake into its tile pack, skipping what is there; --global-dir pre-fills the same way after the bake (--prefill-levels 0 disables; --floor-level takes both); --smoke starts and exits
   test-render   headless render harness
     --scene hello-triangle|tiles|terrain   render a scene (default hello-triangle)
@@ -250,6 +250,8 @@ pub struct Options {
     pub shadow_march: bool,
     /// `editor --erosion on|off` (VIEW-062): draw the erosion layer of a bake over the stored world (GEN-112); off by default.
     pub erosion: bool,
+    /// `editor --channels on|off` (VIEW-066, GEN-119): fill the tiles' driver block from the layer's baked channels; off by default, needs `--erosion on`.
+    pub channels: bool,
     /// `editor --erosion-store DIR`: the folder of the layer (`bake_layer`'s output folder or its `tiles/`); the world's `--store` when not given.
     pub erosion_store: Option<PathBuf>,
     /// `editor --erosion-face-res N` and `--erosion-res N`: the bake's `--face-res` and `--planet-res` (the layer's keys follow them; GEN-100's 12,288 and 98,304 by default).
@@ -425,6 +427,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         erosion_face_res: None,
         erosion_res: None,
         erosion_unchecked: false,
+        channels: false,
         no_window: false,
         given: Default::default(),
     };
@@ -455,6 +458,13 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
                     Some(it.next().and_then(|v| v.parse().ok()).ok_or("--erosion-res needs a number of cells (the bake's --planet-res)")?)
             }
             "--erosion-unchecked" => o.erosion_unchecked = true,
+            "--channels" => {
+                o.channels = match it.next().map(String::as_str) {
+                    Some("on") => true,
+                    Some("off") => false,
+                    other => return Err(format!("--channels needs on or off, got {}", other.unwrap_or("nothing"))),
+                }
+            }
             "--no-window" => o.no_window = true,
             "--perf" => o.perf = true,
             "--offscreen" => o.offscreen = true,
@@ -825,6 +835,9 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
     if !o.erosion {
         if let Some(f) = EROSION_OPTIONS.iter().find(|f| o.given.contains(**f)) {
             return Err(format!("{f} only applies with --erosion on"));
+        }
+        if o.channels {
+            return Err("--channels on only applies with --erosion on (the channels are read from the erosion layer's store)".into());
         }
     }
     if matches!(o.mode, Mode::Generate) && o.given.contains("--look") {
@@ -1609,6 +1622,7 @@ mod tests {
         assert!(e.contains("--cells 8") && e.contains("at least 16"), "{e}");
     }
 
+    // spec: VIEW-066
     // spec: VIEW-062
     #[test]
     fn the_erosion_options_are_viewer_options_that_need_on_and_default_to_the_production_bake() {
@@ -1647,6 +1661,12 @@ mod tests {
         // The options mean nothing without --erosion on, and only the viewer draws the layer.
         let e = run_str(&["editor", "--no-window", "--erosion-store", "d"]).unwrap_err();
         assert!(e.contains("--erosion-store only applies with --erosion on"), "{e}");
+        // The channels are read from the erosion layer's store: `--channels on` needs `--erosion on`, takes on or off, and is off by default (VIEW-066).
+        let e = run_str(&["editor", "--no-window", "--channels", "on"]).unwrap_err();
+        assert!(e.contains("--channels on only applies with --erosion on"), "{e}");
+        let e = run_str(&["editor", "--no-window", "--erosion", "on", "--channels", "maybe"]).unwrap_err();
+        assert!(e.contains("--channels needs on or off"), "{e}");
+        assert!(USAGE.contains("--channels on|off"));
         let e = run_str(&["test-render", "--scene", "hello-triangle", "--erosion", "on"]).unwrap_err();
         assert!(e.contains("only applies to `editor`"), "{e}");
         // The stills of the product path draw the layer too (VIEW-062): the option is accepted there and the run goes on to what it needs (the poses file).
@@ -1655,6 +1675,7 @@ mod tests {
     }
 
     // spec: VIEW-063
+    // spec: VIEW-066
     // spec: VIEW-064
     #[test]
     fn the_erosion_layer_is_drawn_over_a_stored_world_under_the_keys_of_its_bake_and_refuses_anything_else() {
@@ -1697,6 +1718,7 @@ mod tests {
             face_res: Some(face_res),
             planet_res: Some(24),
             unchecked,
+            channels: false,
         };
         let open = || worldfield::WorldTerrain::open_store(def(), std::path::Path::new(&store), 8).unwrap();
         // Refusals: no marker, no stored bake, a layer made under other keys, a folder with no layer.
@@ -1763,6 +1785,23 @@ mod tests {
             }
         }
         assert!(land > 30 && moved > 0, "the layer or the band changes land heights ({moved} of {land})");
+        // The baked channels (VIEW-066, GEN-119): refused while the layer's folder holds no drainage area, read once the areas are copied beside the tiles; the field's version word (so its mesh keys) differs,
+        // its heights do not, and it hands the tile builder the channels at a direction.
+        let with = |dir: &PathBuf| worldfield::ErosionOptions { channels: true, ..options(Some(dir.clone()), true, 24) };
+        let e = open().with_erosion(&with(&bake_dir)).err().unwrap();
+        assert!(e.contains("--channels on") && e.contains("holds no drainage area"), "{e}");
+        planet_cache::layer_channels::copy_areas(&bake_dir.join("layer"), &bake_dir.join("tiles"), &world, 24, &layer_spec, &faces)
+            .unwrap();
+        let chan = open().with_erosion(&with(&bake_dir)).unwrap();
+        assert!(chan.erosion_note().contains("the driver block from the layer's channels"), "{}", chan.erosion_note());
+        assert!(!on.erosion_note().contains("driver block"), "off by default");
+        let c = chan.field().unwrap();
+        assert_ne!(c.climate_version_word(), b.climate_version_word(), "the channels re-key the tiles");
+        assert_eq!(b.driver_channels(&[planet_core::Vec3::new(0.3, 0.5, 0.8).normalized()]), None);
+        let got = c.driver_channels(&[planet_core::Vec3::new(0.3, 0.5, 0.8).normalized()]).expect("channels");
+        assert!(got[0].area_log2_cells.is_some(), "the area is read from the layer's folder");
+        let v = planet_core::Vec3::new(0.2, -0.4, 0.7).normalized();
+        assert_eq!(b.height(v).to_bits(), c.height(v).to_bits(), "the heights are the layer's, channels or not");
     }
 
     // spec: VIEW-065
@@ -1818,6 +1857,7 @@ mod tests {
             face_res: None,
             planet_res: None,
             unchecked,
+            channels: false,
         };
         let open = || worldfield::WorldTerrain::open_store(def(), std::path::Path::new(&store), 8).unwrap();
         // On a class store with the layer's manifest: no marker flag, no shape options; the manifest gives the shape and the range, and the log says so.

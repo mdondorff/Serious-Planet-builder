@@ -357,8 +357,9 @@ fn f32_up(x: f64) -> f32 {
     }
 }
 
-/// The driver block of tile `id` (GEN-074): at each of the 9 x 9 climate texels the neutral codes, with the neutral insolation of the texel's latitude in the top byte.
-fn driver_block(map: &dyn FaceMapping, id: TileId) -> [u32; DRIVER_TEXELS] {
+/// The driver block of tile `id` (GEN-074): at each of the 9 x 9 climate texels the neutral codes, with the neutral insolation of the texel's latitude in the top byte; where `field` reads baked channels the soil
+/// and moisture codes come from them (GEN-119).
+fn driver_block(field: &dyn HeightField, map: &dyn FaceMapping, id: TileId) -> [u32; DRIVER_TEXELS] {
     use crate::climate::{CLIMATE_CELLS, CLIMATE_EDGE};
     use crate::drivers::{neutral_codes, pack_driver_word, DriverParams, NeutralInsolation};
     let dirs: Vec<Vec3> = (0..CLIMATE_EDGE)
@@ -371,6 +372,9 @@ fn driver_block(map: &dyn FaceMapping, id: TileId) -> [u32; DRIVER_TEXELS] {
     for (k, w) in words.iter_mut().enumerate() {
         let neutral = neutral_codes(libm::asin(dirs[k].z.clamp(-1.0, 1.0)), &params, &insolation);
         *w = pack_driver_word(neutral, neutral[2]);
+    }
+    if let Some(samples) = field.driver_channels(&dirs) {
+        crate::drivers::apply_channels(&mut words, &samples);
     }
     words
 }
@@ -389,7 +393,7 @@ pub fn compact_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: Ti
     dirs.push(centre);
     dirs.extend(crate::normals::lattice_directions(map, id, cells));
     let (all, climate) = field.heights_and_climate(map, id, &dirs, &|| false);
-    let driver_words = driver_block(map, id);
+    let driver_words = driver_block(field, map, id);
     let h_origin = all[0];
     let origin = PlanetFixed(centre * (radius_m + h_origin));
     // The shell through the origin: control points are small tile-local numbers (CON-11), not heights from the sea level.

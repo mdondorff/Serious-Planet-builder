@@ -243,7 +243,7 @@ fn the_reader_returns_the_stored_depth_at_a_cell_centre_and_the_area_in_log2_cel
     let a = pass2_dir(&w, &s, &f, "a", 2);
     copy_areas(p1.path(), a.path(), &w, RES, &pass1(), &all_faces()).unwrap();
     let store = TileStore::open(a.path(), w.params()).unwrap();
-    let ch = LayerChannels::new(Arc::new(store), Arc::new(w.clone()), RES, pass1(), s, caches(2 * 24 * 24, 4 * 24 * 24));
+    let ch = LayerChannels::new(Arc::new(store), Arc::new(w.clone()), RES, RES, pass1(), s, caches(2 * 24 * 24, 4 * 24 * 24));
     let r = pass2_tile(&s.grid, tiles()[0], &base, &face_change_reader(&f), None, &s.params, 2);
     // The centre of core cell (10, 7) of tile (0, 0) of face 0.
     let d = s.grid.direction(Face(0), 10, 7);
@@ -262,7 +262,7 @@ fn the_depth_reads_across_a_tile_border_without_a_step() {
     let f = faces(p1.path(), &w);
     let a = pass2_dir(&w, &s, &f, "a", 2);
     let store = TileStore::open(a.path(), w.params()).unwrap();
-    let ch = LayerChannels::new(Arc::new(store), Arc::new(w.clone()), RES, pass1(), s, caches(2 * 24 * 24, 4 * 24 * 24));
+    let ch = LayerChannels::new(Arc::new(store), Arc::new(w.clone()), RES, RES, pass1(), s, caches(2 * 24 * 24, 4 * 24 * 24));
     // Tiles (0, 0) and (1, 0) of face 0 meet between cells 23 and 24 of the 96-cell grid; read along row 10 in tenths of a cell.
     let at = |i: f64| {
         let n = 96.0;
@@ -293,7 +293,7 @@ fn reader(area_bytes: usize, tile_bytes: usize) -> (LayerChannels, Dir, Dir) {
     copy_areas(p1.path(), a.path(), &w, RES, &pass1(), &all_faces()).unwrap();
     let store = TileStore::open(a.path(), w.params()).unwrap();
     let caps = ChannelCaches { area_bytes, area_window: 8, tile_bytes };
-    (LayerChannels::new(Arc::new(store), Arc::new(w), RES, pass1(), s, caps), p1, a)
+    (LayerChannels::new(Arc::new(store), Arc::new(w), RES, RES, pass1(), s, caps), p1, a)
 }
 
 /// The direction of cell `(x, 7)` of face 0 on pass 2's 96-cell grid: pass 1's cell about a quarter of `x` (windows of 8 cells: `x` 10 is window 0, `x` 40 is window 1).
@@ -420,6 +420,7 @@ fn a_read_at_a_window_boundary_equals_the_bilinear_mean_of_the_whole_face_and_a_
     let ch = LayerChannels::new(
         store.clone(),
         Arc::new(w.clone()),
+        RES,
         RES,
         pass1(),
         spec_t,

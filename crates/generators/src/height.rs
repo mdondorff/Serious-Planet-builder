@@ -356,6 +356,11 @@ pub trait HeightField: Send + Sync {
     fn climate(&self, map: &dyn FaceMapping, id: TileId) -> crate::climate::ClimateTexture {
         crate::climate::height_climate(self.seed(), map, id, &|d| self.height(d))
     }
+    /// The baked channels at `dirs` for the tile's driver block (GEN-119): the deposited depth and the drainage area per direction, or `None` for a field that reads no channels (the block then holds the
+    /// neutral values, GEN-074). A field that returns channels folds [`crate::drivers::channel_word`] into its [`climate_version_word`](HeightField::climate_version_word), and every wrapper forwards both.
+    fn driver_channels(&self, _dirs: &[Vec3]) -> Option<Vec<crate::drivers::ChannelSample>> {
+        None
+    }
     /// The heights of `dirs` (as [`heights`](HeightField::heights)) and the climate of tile `id`, together: a field over a block store
     /// gathers the cells of both in one pass so a tile decodes each block once (GEN-020). The default is the two calls.
     fn heights_and_climate(
@@ -618,6 +623,9 @@ impl<F: HeightField> HeightField for Bound<F> {
     fn climate_version_word(&self) -> u64 {
         self.field.climate_version_word()
     }
+    fn driver_channels(&self, dirs: &[Vec3]) -> Option<Vec<crate::drivers::ChannelSample>> {
+        self.field.driver_channels(dirs)
+    }
     fn heights_and_climate(
         &self,
         map: &dyn FaceMapping,
@@ -718,6 +726,9 @@ impl<T: HeightField + ?Sized> HeightField for Box<T> {
     }
     fn climate_version_word(&self) -> u64 {
         (**self).climate_version_word()
+    }
+    fn driver_channels(&self, dirs: &[Vec3]) -> Option<Vec<crate::drivers::ChannelSample>> {
+        (**self).driver_channels(dirs)
     }
     fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
         (**self).height_bounds(centre, angular_radius)

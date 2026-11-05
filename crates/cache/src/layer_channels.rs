@@ -390,7 +390,9 @@ pub struct ChannelStats {
 pub struct LayerChannels {
     store: Arc<TileStore>,
     world: Arc<GlobalWorld>,
-    res: u32,
+    /// The resolution of the keys of the areas (pass 1's cells a face edge in `bake_layer`) and of the depths (pass 2's cells a face edge).
+    area_res: u32,
+    depth_res: u32,
     layer: LayerSpec,
     tiles: TileLayerSpec,
     area_window: usize,
@@ -399,6 +401,7 @@ pub struct LayerChannels {
     area_load: Mutex<()>,
     depth_load: Mutex<()>,
     stats: Mutex<ChannelStats>,
+    identity: u64,
 }
 
 impl LayerChannels {
@@ -406,15 +409,28 @@ impl LayerChannels {
     pub fn new(
         store: Arc<TileStore>,
         world: Arc<GlobalWorld>,
-        res: u32,
+        area_res: u32,
+        depth_res: u32,
         layer: LayerSpec,
         tiles: TileLayerSpec,
         caches: ChannelCaches,
     ) -> LayerChannels {
+        // The identity of the channels: the keys of a face's area and of a tile's depth under these specs, which carry the layer's parameters, the channels' version and their scales.
+        let mut parts: Vec<u64> = area_key(&world, area_res, &layer, Face(0))
+            .0
+            .chunks(8)
+            .map(|c| u64::from_le_bytes(c.try_into().expect("eight bytes")))
+            .collect();
+        if let Ok(k) = depth_key(&world, depth_res, &tiles, PassTile { face: Face(0), ti: 0, tj: 0 }) {
+            parts.extend(k.0.chunks(8).map(|c| u64::from_le_bytes(c.try_into().expect("eight bytes"))));
+        }
+        let identity = planet_core::hash::hash_u64s(0x6964_656e, &parts);
         LayerChannels {
+            identity,
             store,
             world,
-            res,
+            area_res,
+            depth_res,
             layer,
             tiles,
             area_window: caches.area_window.max(1),
@@ -424,6 +440,18 @@ impl LayerChannels {
             depth_load: Mutex::new(()),
             stats: Mutex::new(ChannelStats::default()),
         }
+    }
+
+    /// The faces whose drainage area the store holds under the current keys (an error when it holds one under other keys): empty for a layer made before the channels or under other keys, which
+    /// the viewer's `--channels on` refuses.
+    pub fn faces_with_area(&self) -> Result<Vec<Face>, LayerStoreError> {
+        let mut out = Vec::new();
+        for f in 0..6 {
+            if has_area(&self.store, &self.world, self.area_res, &self.layer, Face(f))? {
+                out.push(Face(f));
+            }
+        }
+        Ok(out)
     }
 
     /// What the reader has done so far, and the bytes its two caches hold now (area windows, depth tiles).
@@ -449,7 +477,7 @@ impl LayerChannels {
         let (x0, y0) = (wi as usize * step, wj as usize * step);
         let (cols, rows) = (x0..(x0 + step + 1).min(n), y0..(y0 + step + 1).min(n));
         let started = std::time::Instant::now();
-        let Some(a) = load_area_window(&self.store, &self.world, self.res, &self.layer, face, rows, cols)? else { return Ok(None) };
+        let Some(a) = load_area_window(&self.store, &self.world, self.area_res, &self.layer, face, rows, cols)? else { return Ok(None) };
         let a = Arc::new(a);
         self.areas.lock().expect("area cache").put(key, a.clone());
         let mut s = self.stats.lock().expect("stats");
@@ -522,7 +550,9 @@ impl LayerChannels {
             return Ok(Some(a));
         }
         let started = std::time::Instant::now();
-        let Some(a) = load_depth(&self.store, &self.world, self.res, &self.tiles, PassTile { face, ti, tj })? else { return Ok(None) };
+        let Some(a) = load_depth(&self.store, &self.world, self.depth_res, &self.tiles, PassTile { face, ti, tj })? else {
+            return Ok(None);
+        };
         let a = Arc::new(a);
         self.depths.lock().expect("depth cache").put(key, a.clone());
         let mut s = self.stats.lock().expect("stats");
@@ -533,6 +563,10 @@ impl LayerChannels {
 }
 
 impl planet_generators::channels::ChannelSource for LayerChannels {
+    fn identity(&self) -> u64 {
+        self.identity
+    }
+
     fn area_log2_cells(&self, d: Vec3) -> Result<Option<f32>, String> {
         LayerChannels::area_log2_cells(self, d).map_err(|e| e.0)
     }

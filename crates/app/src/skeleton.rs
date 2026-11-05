@@ -1034,6 +1034,9 @@ impl planet_generators::height::HeightField for CancelGuarded<'_> {
     fn climate_version_word(&self) -> u64 {
         self.inner.climate_version_word()
     }
+    fn driver_channels(&self, dirs: &[Vec3]) -> Option<Vec<planet_generators::drivers::ChannelSample>> {
+        self.inner.driver_channels(dirs)
+    }
     fn heights_and_climate(
         &self,
         map: &dyn FaceMapping,

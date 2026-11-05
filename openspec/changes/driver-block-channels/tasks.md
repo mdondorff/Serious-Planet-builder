@@ -1,0 +1,4 @@
+- [x] 1.1 The mapping, the trait method, the builder, the eroded field, the wrappers, the keys
+- [x] 1.2 The option, the world wiring, the refusals
+- [x] 1.3 Tests: mapping, builder, keys, forwarding scan, the eroded field, the option and the tiny layer end to end, a GPU test of the driver views
+- [ ] 1.4 Reviews (`numerics-reviewer`, `spec-guardian`), `verifier`, prepush, PR; archive in the same PR
