@@ -4,7 +4,7 @@ An analytic uplift field SHALL give, at a direction, the uplift of a carve step 
 
 Verify: A
 Status: active
-Source: owner 2026-11-05 (planner inbox #70), ADR 0102, GEN-116
+Source: owner 2026-11-05, ADR 0103, ADR 0102, GEN-116
 
 #### Scenario: The field
 - **WHEN** the field is built on 1 and 8 threads and read at random points, at the province terms of a belt, a back-arc, a craton and a flat, and across a face edge

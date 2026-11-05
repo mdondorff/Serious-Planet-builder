@@ -187,7 +187,7 @@ pub struct Options {
     pub lithology_preview: Option<PathBuf>,
     /// `generate --uplift-preview DIR` (GEN-125): the planet preview maps and section of the uplift field (GEN-123) into DIR.
     pub uplift_preview: Option<PathBuf>,
-    /// `--km N`: kilometres a pixel of the lithology preview's maps (16 by default; 8 to 500).
+    /// `--km N`: kilometres a pixel of the lithology and uplift previews' maps (16 by default; 8 to 500).
     pub preview_km: f64,
     /// `--global-dir` and `--global-products`: cells per face edge of the bake (a power of two; blocks are stored in the canonical layout, ADR 0027).
     pub global_res: u32,

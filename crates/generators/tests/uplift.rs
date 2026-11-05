@@ -5,7 +5,7 @@ use planet_core::hash::SplitMix64;
 use planet_core::Vec3;
 use planet_generators::classes::ClassSource;
 use planet_generators::lithology::{Lithology, ProvinceLattice, Provinces};
-use planet_generators::uplift::{Uplift, NOISE_AMPLITUDE, UPLIFT_VERSION, U_BACKARC, U_BELT, U_CRATON, U_FLAT};
+use planet_generators::uplift::{Uplift, NOISE_AMPLITUDE, UPLIFT_VERSION, U_BACKARC, U_BELT, U_CRATON, U_FLAT, U_RIFT};
 use planet_generators::uplift_preview::preview;
 
 const SEED: u64 = 5;
@@ -74,18 +74,30 @@ fn the_uplift_is_highest_in_a_belt_lowest_on_a_craton_with_the_back_arc_between(
 
 // spec: GEN-123
 #[test]
-fn the_uplift_is_continuous_across_a_face_edge() {
+fn the_uplift_is_continuous_across_every_face_edge_where_the_lattice_terms_are_not_zero() {
     let source = ClassSource::new(SEED);
-    let lith = Lithology::with_provinces(SEED, ProvinceLattice::build_with(&source, 16, 2));
+    let lith = Lithology::with_provinces(SEED, ProvinceLattice::build_with(&source, 64, 2));
     let u = Uplift::new(SEED);
-    let edge = planet_core::cube::face_to_direction(&planet_core::cube::TangentWarp, planet_core::Face(0), 1.0, 0.2);
-    let (a, b) = ((edge + Vec3::new(1e-7, 0.0, 0.0)).normalized(), (edge + Vec3::new(0.0, 1e-7, 0.0)).normalized());
-    assert_ne!(
-        planet_core::cube::direction_to_face(&planet_core::cube::TangentWarp, a).0,
-        planet_core::cube::direction_to_face(&planet_core::cube::TangentWarp, b).0,
-        "the points are on two faces"
-    );
-    assert!((u.at(lith.provinces(), a) - u.at(lith.provinces(), b)).abs() < 1e-3);
+    let tw = planet_core::cube::TangentWarp;
+    let (mut crossed, mut busy) = (0, 0);
+    for f in 0..6u8 {
+        for k in 0..64 {
+            let t = -0.98 + 1.96 * f64::from(k) / 63.0;
+            // The +s edge of the face and the -t edge of it: a point just inside and one just outside, which the next face holds.
+            for (inside, outside) in [((1.0 - 1e-7, t), (1.0 + 1e-7, t)), ((t, -1.0 + 1e-7), (t, -1.0 - 1e-7))] {
+                let a = planet_core::cube::face_to_direction(&tw, planet_core::Face(f), inside.0, inside.1);
+                let b = planet_core::cube::face_to_direction(&tw, planet_core::Face(f), outside.0, outside.1);
+                if planet_core::cube::direction_to_face(&tw, a).0 != planet_core::cube::direction_to_face(&tw, b).0 {
+                    crossed += 1;
+                }
+                let p = lith.provinces().at(a);
+                busy += usize::from(p.core > 0.05 || p.back_arc > 0.05);
+                assert!((u.at(lith.provinces(), a) - u.at(lith.provinces(), b)).abs() < 1e-3, "face {f}, point {inside:?}");
+            }
+        }
+    }
+    assert!(crossed > 600, "the pairs lie on two faces: {crossed}");
+    assert!(busy > 0, "some edge points have a belt or a back-arc term, so the lattice read is exercised");
 }
 
 // spec: GEN-125

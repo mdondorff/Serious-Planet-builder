@@ -7,7 +7,7 @@ use crate::classes::{ClassSource, EARTH_RADIUS_M};
 use crate::dump::Rgba;
 use crate::lithology::Lithology;
 use crate::lithology_preview::{direction, lerp, lon_lat, rgba, slerp, OCEAN};
-use crate::uplift::{Uplift, NOISE_AMPLITUDE, TERM_NAMES, UPLIFT_VERSION, U_BACKARC, U_BELT, U_CRATON, U_FLAT};
+use crate::uplift::{Uplift, NOISE_AMPLITUDE, TERM_NAMES, UPLIFT_VERSION, U_BACKARC, U_BELT, U_CRATON, U_FLAT, U_RIFT};
 use planet_core::par::{self, Par};
 use planet_core::Vec3;
 use std::path::Path;
@@ -125,7 +125,7 @@ fn numbers(rows: &[Vec<Pixel>], height: usize, km: f64, seed: u64, means: (f64, 
         q(0.75),
         q(0.95)
     ));
-    out.push_str(&format!("table: craton {U_CRATON}, flat {U_FLAT}, belt or arc coast {U_BELT}, back-arc {U_BACKARC} (see uplift.rs); times 1 plus or minus {NOISE_AMPLITUDE} noise\n"));
+    out.push_str(&format!("table: craton {U_CRATON}, flat {U_FLAT}, belt or arc coast {U_BELT}, back-arc {U_BACKARC}, rift {U_RIFT} (see uplift.rs); times 1 plus or minus {NOISE_AMPLITUDE} noise\n"));
     for i in 0..TERM_NAMES.len() {
         out.push_str(&format!(
             "  {:<18} {:>5.1} % of land, mean U {:>5.1}\n",
@@ -234,11 +234,13 @@ fn cross_section(source: &ClassSource, lithology: &Lithology, uplift: &Uplift) -
             put(&mut data, x, y.min(H - 1), [120, 120, 125, 255]);
         }
     }
+    let peak = (0..40).map(|k| provinces.at(slerp(belt, craton, f64::from(k) / 39.0)).back_arc).fold(0.0, f64::max);
+    let back_arc = if peak > 0.05 { format!("over a back-arc (peak term {peak:.2})") } else { "(no back-arc on the path)".to_string() };
     let (b_lon, b_lat) = lon_lat(belt);
     let (c_lon, c_lat) = lon_lat(craton);
     let length_km = libm::atan2(a.cross(b).length(), a.dot(b)) * EARTH_RADIUS_M / 1000.0;
     let text = format!(
-        "section: from an active belt (lat {:.1}, lon {:.1}) over a back-arc to a craton (lat {:.1}, lon {:.1}), {:.0} km along a great circle; top: U (red line, 0 to {:.0}) with today's uniform {UNIFORM} dashed; bottom: the class source's base elevation {:.0} m to {:.0} m (not the carved terrain), {W} x {H} pixels\n",
+        "section: from an active belt (lat {:.1}, lon {:.1}) {back_arc} to a craton (lat {:.1}, lon {:.1}), {:.0} km along a great circle; top: U (red line, 0 to {:.0}) with today's uniform {UNIFORM} dashed; bottom: the class source's base elevation {:.0} m to {:.0} m (not the carved terrain), {W} x {H} pixels\n",
         b_lat.to_degrees(),
         b_lon.to_degrees(),
         c_lat.to_degrees(),
