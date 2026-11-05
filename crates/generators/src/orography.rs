@@ -366,6 +366,8 @@ struct Static {
     sea: bool,
 }
 
+// The lattices of one build, passed as they are: a struct of references would only rename them.
+#[allow(clippy::too_many_arguments)]
 fn run_season(
     seed: u64,
     grid: &Grid,
