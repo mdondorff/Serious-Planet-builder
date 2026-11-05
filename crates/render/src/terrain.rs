@@ -557,7 +557,7 @@ fn ground_detail(node_index: u32, local: vec3<f32>, normal: vec3<f32>, up: vec3<
         slope = slope + (dot(w, g.coef[18]) + dot(w2, g.coef[19].zw)) * o.xyz;
     }
     if (any(g.coef[20] != vec4<f32>(0.0)) || any(g.coef[21] != vec4<f32>(0.0)) || any(g.coef[22] != vec4<f32>(0.0)) || any(g.coef[23] != vec4<f32>(0.0))) {
-        let o = gd_octave(cell, frac, local, foot, 8u, 7u, axes);
+        let o = gd_octave(cell, frac, local, foot, 8u, 6u, axes);
         mul = mul + o.w * gd_tint(w, w2, g.coef[20], g.coef[23].xy, g.coef[21].xyz);
         slope = slope + (dot(w, g.coef[22]) + dot(w2, g.coef[23].zw)) * o.xyz;
     }
