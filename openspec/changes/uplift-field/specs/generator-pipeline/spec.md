@@ -3,7 +3,7 @@
 An analytic uplift field SHALL give, at a direction, the uplift of a carve step in units of `k_dt` (the ratio `U / K` at K 1): CPU-canonical (`libm`, integer hashing), never stored, the same bits for any thread count, keyed by `UPLIFT_VERSION`. It SHALL be high in the active belts and the arc coasts, medium in the back-arc, about 0 on the cratons, from the province lattice of GEN-116 and a low-frequency noise. The face carve SHALL take it in place of the uniform ratio, scaled by the coastal taper only, not by the carve factor or by K; without it the carve SHALL give today's bits; `BakeInputs::id` SHALL fold its version and table.
 
 Verify: A
-Status: active
+Status: planned
 Source: planner inbox #70 (owner, 2026-11-05), ADR 0102, GEN-116
 
 #### Scenario: The field in the carve
