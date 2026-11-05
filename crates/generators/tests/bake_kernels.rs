@@ -463,3 +463,48 @@ fn the_uplift_is_tapered_by_the_height_above_the_sea_so_a_coastal_plain_is_not_l
     carve(&g, &mut z2, &outlet, &CarveParams { uplift_taper_m: 0.0, ..no_uplift }, None, 3);
     assert_eq!(z1, z2);
 }
+
+// spec: GEN-100
+#[test]
+fn the_default_breach_is_500_m_and_an_optional_height_scale_keeps_the_small_limit_near_the_sea() {
+    // A basin (200 m) east of a dam whose crest stands `dam` m above the sea, the sea west of it.
+    let n = 24;
+    let g = grid(n);
+    let one_step = |dam: f64, params: CarveParams| {
+        let mut z: Vec<f64> = (0..n * n)
+            .map(|p| {
+                let (i, j) = (p % n, p / n);
+                if i < 3 {
+                    0.0
+                } else if i == 5 || i == n - 1 || j == 0 || j == n - 1 {
+                    dam
+                } else if i < 5 {
+                    50.0
+                } else {
+                    200.0
+                }
+            })
+            .collect();
+        let outlet = g.outlets(&z, 0.0);
+        carve(&g, &mut z, &outlet, &CarveParams { steps: 1, u_over_k: 0.0, ..params }, None, 3);
+        // The spill point of the basin is its lowest rim cell, whichever the jitter picks.
+        (0..n * n)
+            .filter(|p| p % n == 5 || p % n == n - 1 || p / n == 0 || p / n == n - 1)
+            .filter(|p| p % n >= 5)
+            .map(|p| z[p])
+            .fold(f64::MAX, f64::min)
+    };
+    assert_eq!(CarveParams::default().breach_max_m, 500.0);
+    assert_eq!(CarveParams::default().breach_height_scale_m, 0.0, "the height scaling is off by default");
+    let (old, new) =
+        (one_step(400.0, CarveParams { breach_max_m: 50.0, ..CarveParams::default() }), one_step(400.0, CarveParams::default()));
+    assert!(new < old - 50.0, "the default limit of 500 m breaches the crest far lower than 50 m does: {new} against {old}");
+    let scaled = one_step(400.0, CarveParams { breach_height_scale_m: 2000.0, ..CarveParams::default() });
+    assert!(scaled > new && scaled < old, "a scaled limit lies between 50 and 500 m at 400 m of height: {scaled}");
+    // With no breach allowed, the scaling breaches nothing either.
+    let (none, none_scaled) = (
+        one_step(400.0, CarveParams { breach_max_m: 0.0, ..CarveParams::default() }),
+        one_step(400.0, CarveParams { breach_max_m: 0.0, breach_height_scale_m: 2000.0, ..CarveParams::default() }),
+    );
+    assert_eq!(none.to_bits(), none_scaled.to_bits(), "a limit of 0 with the scaling on breached: {none_scaled} against {none}");
+}

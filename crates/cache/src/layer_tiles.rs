@@ -65,6 +65,7 @@ impl TileLayerSpec {
             p.carve.epsilon,
             p.carve.breach_slope,
             p.carve.breach_max_m,
+            p.carve.breach_height_scale_m,
             p.carve.sea_level,
             p.carve.max_area,
         ] {

@@ -242,9 +242,18 @@ fn the_class_source_version_goes_with_its_output() {
     for k in 0..24u32 {
         let d = Vec3::new(f64::from(k % 5) - 2.2, f64::from(k % 7) - 3.1, f64::from(k % 3) - 1.3).normalized();
         let p = source.eval(d);
-        for v in
-            [p.terms.core, p.terms.flank, p.terms.old_margin, p.terms.back_arc, p.terms.plateau_field, p.terms.hilly, p.terms.strike, p.e0]
-        {
+        let k = planet_generators::classes::blended_k(&p.weights);
+        for v in [
+            p.terms.core,
+            p.terms.flank,
+            p.terms.old_margin,
+            p.terms.back_arc,
+            p.terms.plateau_field,
+            p.terms.hilly,
+            p.terms.strike,
+            p.e0,
+            source.elevation_m(d, &p, k),
+        ] {
             for byte in v.to_bits().to_le_bytes() {
                 hash = (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3);
             }
@@ -252,12 +261,12 @@ fn the_class_source_version_goes_with_its_output() {
     }
     assert_eq!(
         (CLASS_SOURCE_VERSION, hash),
-        (5, FINGERPRINT),
+        (6, FINGERPRINT),
         "the default source's output changed: bump CLASS_SOURCE_VERSION and record the new fingerprint"
     );
 }
 
-const FINGERPRINT: u64 = 11516291648435887283;
+const FINGERPRINT: u64 = 17130647235075386674;
 
 // spec: GEN-103
 #[test]
@@ -404,4 +413,40 @@ fn the_k_step_quantile_runs_from_the_smallest_to_the_largest_step_and_is_monoton
     let tiny = ClassLattice::from_bytes(1, &bytes).expect("a lattice of one cell per face");
     assert_eq!(tiny.k_step_quantile(1.0), 5.0, "plain k 1, mountains k 6");
     assert_eq!(tiny.k_step_quantile(0.0), 0.0);
+}
+
+// spec: GEN-098
+#[test]
+fn the_mountain_band_is_ridged_four_and_a_half_times_as_high_and_centred() {
+    let source = ClassSource::new(SEED);
+    let (mut sum, mut max, mut min, mut amp_sum, mut count) = (0.0f64, f64::MIN, f64::MAX, 0.0f64, 0u32);
+    for i in 0..60_000u32 {
+        // A golden-angle spiral over the sphere: deterministic, evenly spread.
+        let z = 1.0 - 2.0 * (f64::from(i) + 0.5) / 60_000.0;
+        let r = libm::sqrt(1.0 - z * z);
+        let phi = f64::from(i) * 2.399_963_229_728_653;
+        let d = Vec3::new(r * libm::cos(phi), r * libm::sin(phi), z);
+        let p = source.eval(d);
+        let wm = p.weights[MOUNTAINS] + p.weights[HIGH_MOUNTAINS];
+        if wm < 0.99 || p.land_depth < 0.2 || p.e0 > 8000.0 {
+            continue;
+        }
+        let k = blended_k(&p.weights);
+        let amp = hill_amplitude_for_k(k) * (1.0 + (MOUNTAIN_BAND_SCALE - 1.0) * wm);
+        let band = source.elevation_m(d, &p, k) - p.e0;
+        sum += band / amp;
+        amp_sum += amp;
+        // The residual weight (1 - wm) of the plain hill noise adds at most (1 - wm) of the amplitude.
+        max = max.max(band / amp - (1.0 - wm));
+        min = min.min(band / amp);
+        count += 1;
+    }
+    assert!(count > 500, "only {count} mountain points");
+    let mean = sum / f64::from(count);
+    assert!(amp_sum / f64::from(count) > 2000.0, "the mountain band is x4.5: mean amplitude {} m", amp_sum / f64::from(count));
+    assert!(mean.abs() < 0.05, "the band is centred: mean {mean} of the amplitude");
+    assert!(
+        max <= 1.0 - MOUNTAIN_BAND_CENTRE + 1e-9 && min >= -MOUNTAIN_BAND_CENTRE - 1e-9,
+        "the band lies in [-0.45, 0.55] of its amplitude: {min}..{max}"
+    );
 }
