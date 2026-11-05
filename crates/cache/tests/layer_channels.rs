@@ -500,7 +500,7 @@ fn pit_store() -> (GlobalWorld, TileLayerSpec, Dir, Dir) {
     }
     writer.write_index().unwrap();
     writer.finish().unwrap();
-    planet_cache::layer_fillpass::run_fill_pass(d.path(), scratch.path(), &w, RES, &s, &tiles(), 2, &mut |_, _| {}).unwrap();
+    planet_cache::layer_fillpass::run_fill_pass(d.path(), scratch.path(), &w, RES, &s, &tiles(), 2, &|_| 0.0, &mut |_, _| {}).unwrap();
     (w, s, p1, d)
 }
 
