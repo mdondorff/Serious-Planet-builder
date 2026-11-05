@@ -2890,6 +2890,46 @@ pub fn execute_terrain_tiles_preview_split(
 mod one_shot_tests {
     use super::*;
 
+    // spec: REND-057
+    #[test]
+    fn the_detail_octaves_of_neighbouring_scales_do_not_share_a_lattice_orientation_and_no_lattice_is_used_twice() {
+        // The calls of the shader: `gd_octave(cell, frac, local, foot [* 0.5], SHIFT u, SALT u, axes)`. An odd salt is the axis-aligned lattice, an even one the lattice turned by 45 degrees
+        // (`gd_shear`). The detail octaves have the footprint `foot`, the patch octaves of REND-055 `foot * 0.5`.
+        let text = format!("{SHADER_HEAD}{SHADER_TAIL}");
+        let mut calls: Vec<(u32, u32, bool)> = Vec::new();
+        for call in text.split("gd_octave(cell, frac, local, ").skip(1) {
+            let args: Vec<&str> = call.split(')').next().unwrap().split(',').map(str::trim).collect();
+            let num = |s: &str| s.trim_end_matches('u').parse::<u32>().unwrap();
+            let patch = args[0] != "foot";
+            calls.push((num(args[args.len() - 3]), num(args[args.len() - 2]), patch));
+        }
+        assert_eq!(calls.len(), 8, "four detail octaves, the 64 m and 8 m ones and two patch octaves: {calls:?}");
+        // No two octaves share a hash salt, and none shares both its cell size and its orientation (their lattices would coincide).
+        let mut salts: Vec<u32> = calls.iter().map(|c| c.1).collect();
+        salts.sort_unstable();
+        salts.dedup();
+        assert_eq!(salts.len(), calls.len(), "a hash salt is used twice: {calls:?}");
+        for (i, a) in calls.iter().enumerate() {
+            for b in &calls[i + 1..] {
+                assert!(!(a.0 == b.0 && a.1 % 2 == b.1 % 2), "two octaves with the same cell size and orientation: {a:?} {b:?}");
+            }
+        }
+        // The detail octaves within a factor of 4 in cell size (shifts at most 2 apart) differ in orientation: a nested lattice shows as a grid of lines where both gradients vanish. The one pair
+        // that cannot: the 16 m and 8 m octaves are both turned (the 8 m one is turned so that it does not repeat the 2 m octave's axis-aligned lattice at a factor 4: the numerics review of
+        // the 8 m lattice, #1186). A change of this pair is a decision, so the list of exceptions is pinned.
+        let mut detail: Vec<(u32, u32)> = calls.iter().filter(|c| !c.2).map(|c| (c.0, c.1)).collect();
+        detail.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+        let mut same: Vec<(u32, u32)> = Vec::new();
+        for (i, a) in detail.iter().enumerate() {
+            for b in &detail[i + 1..] {
+                if a.0 - b.0 <= 2 && a.1 % 2 == b.1 % 2 {
+                    same.push((a.0, b.0));
+                }
+            }
+        }
+        assert_eq!(same, [(9, 8)], "detail octaves of neighbouring scales with one orientation (shift pairs): {same:?}");
+    }
+
     // spec: REND-033
     #[test]
     fn the_shaders_preview_table_holds_the_cap_of_stamps_and_the_globals_fit_the_uniform_limit() {

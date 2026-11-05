@@ -1,0 +1,1 @@
+- 2026-11-05 octave-salt-guard: a test of the terrain shader's source pins the lattice orientation of the detail octaves (no shared salt, no shared size and orientation, neighbouring scales differ except the 16 m and 8 m pair)
