@@ -1,0 +1,1 @@
+- 2026-11-05 orographic-precip: the orographic climate (GEN-117, ADR 0104: wind, two-season Jacobi advection-rainout, aridity, seasonality; P per point), GLOBAL_VERSION 7 for class-source worlds, its planet preview (GEN-130).

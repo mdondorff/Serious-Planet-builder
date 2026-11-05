@@ -1,5 +1,10 @@
 [alias]
 xtask = "run --quiet --package xtask --"
 
+# The tests' orographic climate lattice (GEN-117): coarse, so a test that builds a class-source world does not build the production 512 cells a face edge. Read in builds with debug assertions only
+# (BakeInputs::new): a release bake ignores it.
+[env]
+PLANET_OROGRAPHY_CELLS = "48"
+
 [target.x86_64-pc-windows-msvc]
 linker = "rust-lld"

@@ -187,6 +187,9 @@ pub struct Options {
     pub lithology_preview: Option<PathBuf>,
     /// `generate --uplift-preview DIR` (GEN-125): the planet preview maps and section of the uplift field (GEN-123) into DIR.
     pub uplift_preview: Option<PathBuf>,
+    /// `generate --climate-preview DIR` (GEN-130): the planet preview maps and numbers of the orographic climate (GEN-117) into DIR; `--fine-lattice N` adds the windward and lee ratios on a lattice of N cells a face edge.
+    pub climate_preview: Option<PathBuf>,
+    pub fine_lattice: Option<usize>,
     /// `--km N`: kilometres a pixel of the lithology and uplift previews' maps (16 by default; 8 to 500).
     pub preview_km: f64,
     /// `--global-dir` and `--global-products`: cells per face edge of the bake (a power of two; blocks are stored in the canonical layout, ADR 0027).
@@ -393,6 +396,8 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         global_products: None,
         lithology_preview: None,
         uplift_preview: None,
+        climate_preview: None,
+        fine_lattice: None,
         preview_km: 16.0,
         global_res: 256,
         threads: 0,
@@ -602,6 +607,15 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--global-products" => o.global_products = Some(PathBuf::from(it.next().ok_or("--global-products needs a directory")?)),
             "--lithology-preview" => o.lithology_preview = Some(PathBuf::from(it.next().ok_or("--lithology-preview needs a directory")?)),
             "--uplift-preview" => o.uplift_preview = Some(PathBuf::from(it.next().ok_or("--uplift-preview needs a directory")?)),
+            "--climate-preview" => o.climate_preview = Some(PathBuf::from(it.next().ok_or("--climate-preview needs a directory")?)),
+            "--fine-lattice" => {
+                let n: usize =
+                    it.next().ok_or("--fine-lattice needs a number of cells")?.parse().map_err(|e| format!("--fine-lattice: {e}"))?;
+                if !(64..=1024).contains(&n) {
+                    return Err(format!("--fine-lattice {n} must be from 64 to 1024 cells a face edge"));
+                }
+                o.fine_lattice = Some(n);
+            }
             "--km" => {
                 o.preview_km = it.next().ok_or("--km needs a number of kilometres")?.parse().map_err(|e| format!("--km: {e}"))?;
                 if !(o.preview_km.is_finite() && (8.0..=500.0).contains(&o.preview_km)) {
@@ -679,7 +693,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
 use planet_cache::tiles::MAX_REGION_LEVEL;
 
 /// Options that only the tile store commands of `generate` understand.
-pub(crate) const STORE_OPTIONS: [&str; 24] = [
+pub(crate) const STORE_OPTIONS: [&str; 26] = [
     "--repeats",
     "--horizon-threads",
     "--altitudes-m",
@@ -701,6 +715,8 @@ pub(crate) const STORE_OPTIONS: [&str; 24] = [
     "--global-products",
     "--lithology-preview",
     "--uplift-preview",
+    "--climate-preview",
+    "--fine-lattice",
     "--km",
     "--global-res",
     "--threads",
@@ -1660,7 +1676,7 @@ mod tests {
         let e = run_str(&["generate", "--lithology-preview", &dir, "--seed", "3", "--world", "w.toml"]).unwrap_err();
         assert!(e.contains("--world and --seed"), "{e}");
         let e = run_str(&["generate", "--km", "16", "--seed", "3"]).unwrap_err();
-        assert!(e.contains("--km applies to --lithology-preview or --uplift-preview"), "{e}");
+        assert!(e.contains("--km applies to --lithology-preview, --uplift-preview or --climate-preview"), "{e}");
         let e = run_str(&["generate", "--lithology-preview", &dir, "--km", "0.5"]).unwrap_err();
         assert!(e.contains("--km 0.5 must be from 8 to 500"), "{e}");
         for bad in ["1", "7.9", "501", "NaN"] {
@@ -1689,6 +1705,45 @@ mod tests {
         assert!(e.contains("--world and --seed"), "{e}");
         let e = run_str(&["generate", "--uplift-preview", &dir, "--km", "7.9"]).unwrap_err();
         assert!(e.contains("--km") && e.contains("must be from 8 to 500"), "{e}");
+    }
+
+    // spec: GEN-130
+    #[test]
+    fn generate_writes_the_climate_preview_maps_the_regions_and_the_numbers_and_refuses_what_it_excludes() {
+        let d = TempDir::new("climate-preview");
+        let dir = d.s("out");
+        let out = run_str(&["generate", "--climate-preview", &dir, "--seed", "3", "--km", "400"]).unwrap();
+        assert!(out.contains("orographic climate, an input of the bake, not terrain") && out.contains("400 km a pixel"), "{out}");
+        for f in [
+            "precipitation_annual_wind.png",
+            "precipitation_two_seasons.png",
+            "precipitation_difference.png",
+            "aridity.png",
+            "seasonality.png",
+            "wind_northern_summer.png",
+            "wind_northern_winter.png",
+            "regions.png",
+            "orography.txt",
+        ] {
+            assert!(std::path::Path::new(&dir).join(f).is_file(), "{f}");
+        }
+        let txt = std::fs::read_to_string(std::path::Path::new(&dir).join("orography.txt")).unwrap();
+        assert!(
+            txt.contains("orographic climate (input), not terrain")
+                && txt.contains("windward over lee ratio")
+                && txt.contains("by latitude band"),
+            "{txt}"
+        );
+        let e = run_str(&["generate", "--climate-preview", &dir, "--uplift-preview", &dir]).unwrap_err();
+        assert!(e.contains("excludes") && e.contains("--uplift-preview"), "{e}");
+        let e = run_str(&["generate", "--climate-preview", &dir, "--global-dir", &dir]).unwrap_err();
+        assert!(e.contains("--climate-preview excludes") && e.contains("--global-dir"), "{e}");
+        let e = run_str(&["generate", "--climate-preview", &dir, "--seed", "3", "--world", "w.toml"]).unwrap_err();
+        assert!(e.contains("--world and --seed"), "{e}");
+        let e = run_str(&["generate", "--climate-preview", &dir, "--fine-lattice", "63"]).unwrap_err();
+        assert!(e.contains("--fine-lattice 63 must be from 64 to 1024"), "{e}");
+        let e = run_str(&["generate", "--fine-lattice", "512", "--seed", "3"]).unwrap_err();
+        assert!(e.contains("--fine-lattice applies to --climate-preview"), "{e}");
     }
 
     // spec: VIEW-066

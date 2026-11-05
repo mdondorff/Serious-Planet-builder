@@ -8,6 +8,7 @@ use crate::classes::{
 };
 use crate::lithology::{Lithology, LITHOLOGY_VERSION, ROCK_K_SCALE};
 use crate::uplift::{Uplift, UPLIFT_VERSION};
+use crate::orography::{Orography, OROGRAPHY_VERSION, SEASONS};
 use planet_core::Vec3;
 
 /// The default class source of a seed and its class lattice.
@@ -16,6 +17,9 @@ pub struct BakeInputs {
     lattice: ClassLattice,
     lithology: Lithology,
     uplift: Uplift,
+    threads: usize,
+    orography_cells: usize,
+    orography: std::sync::OnceLock<Orography>,
 }
 
 impl BakeInputs {
@@ -25,7 +29,13 @@ impl BakeInputs {
         let lattice = ClassLattice::build_with(&source, CLASS_LATTICE_N, threads);
         let lithology = Lithology::new(&source, threads);
         let uplift = Uplift::new(source.seed());
-        BakeInputs { source, lattice, lithology, uplift }
+        BakeInputs { source, lattice, lithology, uplift, threads, orography_cells: crate::orography::default_cells(), orography: std::sync::OnceLock::new() }
+    }
+
+    /// The orographic climate of the seed (GEN-117), built on first use from the class source's base elevation `e0` (never from the class weights) on the threads of [`BakeInputs::new`]: the
+    /// precipitation of the global field and, later, the aridity of the class rules and the discharge of the carve read it.
+    pub fn orography(&self) -> &Orography {
+        self.orography.get_or_init(|| Orography::build(self.source.seed(), &self.source, self.orography_cells, &SEASONS, self.threads))
     }
 
     /// The seed of the class source (a bake that samples it must be the world of this seed).
@@ -36,6 +46,13 @@ impl BakeInputs {
     /// The class weights at a direction (the lattice read; the class of a cell is the largest).
     pub fn weights_at(&self, d: Vec3) -> [f64; crate::classes::CLASS_COUNT] {
         self.lattice.weights_at(d)
+    }
+
+    /// An identity of what the climate of a class-source world reads besides the seed and the class source: the orographic climate's version and the cells a face edge of its lattice
+    /// ([`crate::orography::default_cells`]: the production lattice, or the coarse one of a test build). Part of the global store's class-source identity, so that a change of the climate's
+    /// constants or of its lattice re-keys the stored climate; the layer keys do not read the climate and do not carry it.
+    pub fn climate_id() -> u64 {
+        climate_identity(OROGRAPHY_VERSION, crate::orography::default_cells())
     }
 
     /// The base elevation at a direction: the class source's, with the class-blended relief driver.
@@ -79,4 +96,25 @@ impl BakeInputs {
         CLASS_K.iter().chain(CLASS_CARVE.iter()).for_each(|v| put(v.to_bits()));
         h
     }
+}
+
+/// The identity word of a climate of `version` on a lattice of `cells` cells a face edge.
+fn climate_identity(version: u32, cells: usize) -> u64 {
+    planet_core::hash::hash_u64s(0x636c_696d, &[u64::from(version), cells as u64])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // spec: GEN-117
+    #[test]
+    fn the_climate_identity_moves_with_the_orographic_version_and_the_lattice() {
+        let base = climate_identity(OROGRAPHY_VERSION, OROGRAPHY_CELLS_FOR_TEST);
+        assert_ne!(base, climate_identity(OROGRAPHY_VERSION + 1, OROGRAPHY_CELLS_FOR_TEST), "a new version re-keys the climate");
+        assert_ne!(base, climate_identity(OROGRAPHY_VERSION, OROGRAPHY_CELLS_FOR_TEST * 2), "a finer lattice re-keys the climate");
+        assert_eq!(BakeInputs::climate_id(), climate_identity(OROGRAPHY_VERSION, crate::orography::default_cells()));
+    }
+
+    const OROGRAPHY_CELLS_FOR_TEST: usize = 512;
 }

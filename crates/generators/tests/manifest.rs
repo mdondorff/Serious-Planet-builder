@@ -54,7 +54,7 @@ fn manifest_lists_the_global_bake_and_both_terrain_fields_at_edges_and_corners()
     assert_eq!(count("erosionc1"), 6 * 12, "the C1 eroded field, 12 directions per face");
     assert!(
         a.contains(
-            "version global cpu-global-coarse-v1 6
+            "version global cpu-global-coarse-v1 7
 "
         ),
         "the bake's implementation id and version"
