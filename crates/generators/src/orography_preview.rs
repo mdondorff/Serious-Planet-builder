@@ -8,7 +8,7 @@ use crate::classes::EARTH_RADIUS_M;
 use crate::dump::Rgba;
 use crate::lithology::ProvinceLattice;
 use crate::lithology_preview::{direction, lerp, lon_lat, rgba, OCEAN};
-use crate::orography::{aridity_index, BaseElevation, Orography, ANNUAL_WIND, OROGRAPHY_VERSION, SEASONS};
+use crate::orography::{aridity_index, BaseElevation, Orography, ANNUAL_WIND, OROGRAPHY_VERSION};
 use planet_core::par::{self, Par};
 use planet_core::Vec3;
 use std::path::Path;
@@ -126,7 +126,7 @@ fn line(img: &mut Rgba, x0: i64, y0: i64, x1: i64, y1: i64, c: [u8; 4]) {
 }
 
 /// The ratios of the precipitation 100 to 300 km on the windward side of a belt to that on its lee side, over the crossings of the province lattice's belts (core term above 0.6, the wind across the belt at
-/// least 2 m/s, the crest at least 500 m above both sides, both sides land): the number of crossings and the median, p10 and p90 and the shares above 1.5 and 3.
+/// least 2 m/s, the crest at least 300 m above both sides, both sides land): the number of crossings and the median, p10 and p90 and the shares above 1.5 and 3.
 pub struct RatioStats {
     pub crossings: usize,
     pub median: f64,
@@ -375,7 +375,7 @@ pub fn preview(
     text.push_str(&format!(
         "version {OROGRAPHY_VERSION}, seed {seed}, {km} km a pixel, lattice {} cells a face edge, {} seasons, {} land pixels\n",
         two.cells(),
-        SEASONS.len(),
+        two.seasons().len(),
         ps.len()
     ));
     text.push_str(&format!(

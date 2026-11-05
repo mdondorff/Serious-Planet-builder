@@ -1,6 +1,6 @@
 //! The orographic climate: a wind field and a linear orographic precipitation model run for two seasons (GEN-117; ADR 0104 points 1 and 2; SPIKE-102 F2 and F3).
 //!
-//! CPU-canonical: `libm` for every transcendental, integer hashing for every random number, a **fixed number of order-independent iterations** in f64, the same bits for any thread count (CON-14).
+//! CPU-canonical: `libm` for every transcendental, integer hashing for every random number, a **fixed number of order-independent iterations** (f64 forcing, f32 lattices), the same bits for any thread count (CON-14).
 //! The field is built in memory from a [`BaseElevation`] (the class source's base elevation `e0`, before the hill band and before the class relief driver `k`, so the class weights, which read the
 //! aridity, never feed back into the rain), read bilinearly by direction, never stored, and keyed by [`OROGRAPHY_VERSION`], which a consumer folds into its keys. All numbers are start values.
 //!
@@ -64,6 +64,8 @@ pub const WIND_TURN_DEG: f64 = 25.0;
 /// The strength of the land-sea heating term in m/s at most, and the land-fraction gradient (per radian) at which it is full.
 pub const MONSOON_MS: f64 = 6.0;
 const MONSOON_GRADIENT: f64 = 3.0;
+/// The latitude beyond which the wind fades to nothing at the pole, in degrees.
+const POLAR_FADE_DEG: f64 = 80.0;
 /// The fastest wind in m/s.
 pub const WIND_MAX_MS: f64 = 15.0;
 /// One iteration in seconds, the number of iterations (the travel of about 1,300 km at 10 m/s), and the last ones whose rain is averaged.
@@ -202,11 +204,14 @@ fn wind_at(seed: u64, land: &LandField, season: &Season, d: Vec3) -> Vec3 {
         let g = land.gradient(d);
         let len = g.length();
         if len > 1e-9 {
-            let own_summer = if d.z < 0.0 { -season.sign } else { season.sign };
+            // The summer hemisphere changes at the equator over a few degrees (a step would be a line of convergence).
+            let own_summer = season.sign * libm::tanh(lat / 4.0);
             let strength = MONSOON_MS * season.monsoon * (len / MONSOON_GRADIENT).min(1.0) * libm::cos(lat.to_radians());
             w = w + g * (own_summer * strength / len);
         }
     }
+    // Towards the poles the wind fades (the field has no direction at the pole itself).
+    w = w * (libm::cos(lat.to_radians()) / libm::cos(POLAR_FADE_DEG.to_radians())).min(1.0);
     let speed = w.length();
     if speed > WIND_MAX_MS {
         w = w * (WIND_MAX_MS / speed);

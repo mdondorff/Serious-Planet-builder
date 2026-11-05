@@ -611,8 +611,8 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--fine-lattice" => {
                 let n: usize =
                     it.next().ok_or("--fine-lattice needs a number of cells")?.parse().map_err(|e| format!("--fine-lattice: {e}"))?;
-                if !(64..=2048).contains(&n) {
-                    return Err(format!("--fine-lattice {n} must be from 64 to 2048 cells a face edge"));
+                if !(64..=1024).contains(&n) {
+                    return Err(format!("--fine-lattice {n} must be from 64 to 1024 cells a face edge"));
                 }
                 o.fine_lattice = Some(n);
             }
@@ -1741,7 +1741,7 @@ mod tests {
         let e = run_str(&["generate", "--climate-preview", &dir, "--seed", "3", "--world", "w.toml"]).unwrap_err();
         assert!(e.contains("--world and --seed"), "{e}");
         let e = run_str(&["generate", "--climate-preview", &dir, "--fine-lattice", "63"]).unwrap_err();
-        assert!(e.contains("--fine-lattice 63 must be from 64 to 2048"), "{e}");
+        assert!(e.contains("--fine-lattice 63 must be from 64 to 1024"), "{e}");
         let e = run_str(&["generate", "--fine-lattice", "512", "--seed", "3"]).unwrap_err();
         assert!(e.contains("--fine-lattice applies to --climate-preview"), "{e}");
     }

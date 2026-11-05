@@ -33,7 +33,7 @@
 
 ## Start values after the first preview (seed 14, 512 cells)
 - Wind bands: trades 8 m/s easterly at 15 degrees, westerlies 12 m/s at 45, polar easterlies 5 at 78; the wind bands shift 12 degrees with the season, the rain bands 5 (the dry belts stay dry); a monsoon term of up to 6 m/s; condensation efficiency 0.18; an upslope threshold of 0.02 m/s; 96 iterations of 1,300 s; the land recycles up to 0.55 of its saturation column with a lag of 60,000 s.
-- Land mean precipitation 1,054 mm (annual wind alone 689 mm); dry land (aridity under 0.5) 10 % of all land and 20 % of the land warmer than 5 degrees C (Earth's: 30 to 40 %); the subtropical bands are 36 % dry; the equatorial bands are wet (2,900 to 3,100 mm).
+- Land mean precipitation 996 mm (annual wind alone 689 mm); dry land (aridity under 0.5) 10 % of all land and 20 % of the land warmer than 5 degrees C (Earth's: 30 to 40 %); the subtropical bands are 36 % dry; the equatorial bands are wet (2,400 to 2,600 mm).
 - Windward over lee ratio across belts: median 1.62 at 512 cells and 1.53 at 1,024 (25 crossings), inside the start target of 1.5 to 4 and under Earth's references; the first lever is the condensation efficiency, whose rise wets the tropics too.
-- The equatorial convergence line (the thermal equator, 12 degrees either side with the season) draws a thin rain line on a landmass: a start-value artefact the owner can judge.
+- The thermal equator (12 degrees either side with the season) draws a thin convergence rain line on a landmass: a start-value feature the owner can judge; the wind fades to nothing at the poles and the monsoon term changes sign smoothly at the equator.
 - The test hook: `PLANET_OROGRAPHY_CELLS` (`.cargo/config.toml`, 48) gives tests a coarse lattice; a release build ignores it.
