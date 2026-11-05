@@ -3,7 +3,7 @@
 //! terrain share's slots (ADR 0033 point 2). Counts only, no device.
 //!
 //! ADR 0033's fractions (R with ancestors at most 10 % of the mid tier's slots, the ground-1m draw set with ancestors at
-//! most 6 %) are for the compact tile's slot count (212,190 at the mid share since the slot of 9,488 B, MESH_VERSION 10; 219,585 at 9,168 B), which is what the product builds (the pools come
+//! most 6 %) are for the compact tile's slot count (205,170 at the mid share since the slot of 9,812 B, MESH_VERSION 11; 212,190 at 9,488 B), which is what the product builds (the pools come
 //! from `tier_compact_pool`, so the pins follow the real configuration).
 
 use planet::worldfield::WorldTerrain;
@@ -23,10 +23,10 @@ const R: f64 = 6_371_000.0;
 const PIN_BAKE_RES: u32 = 256;
 const CELLS: u32 = 32;
 
-/// Slots of the compact tile at the mid / high share: 15 / 23 blocks of 14,639 slots (cells 32, 128 MiB, slot of 9,168 B, STRM-006).
-// MESH_VERSION 10, driver block, ADR 0076/GEN-071: blocks of 14,146 slots of 9,488 B (14,639 of 9,168 B before): 212,190 and 325,358 slots.
-const COMPACT_MID_SLOTS: u64 = 15 * 14_146;
-const COMPACT_HIGH_SLOTS: u64 = 23 * 14_146;
+/// Slots of the compact tile at the mid / high share: 15 / 23 blocks of 13,678 slots (cells 32, 128 MiB, slot of 9,812 B, STRM-006).
+// MESH_VERSION 11, channel block, GEN-126: blocks of 13,678 slots of 9,812 B (14,146 of 9,488 B before): 205,170 and 314,594 slots.
+const COMPACT_MID_SLOTS: u64 = 15 * 13_678;
+const COMPACT_HIGH_SLOTS: u64 = 23 * 13_678;
 
 /// The tiles with all their ancestors down to the render `floor` (LOD-011: no tile above the floor is ever a member).
 fn closure(tiles: impl IntoIterator<Item = TileId>, floor: u8) -> BTreeSet<TileId> {

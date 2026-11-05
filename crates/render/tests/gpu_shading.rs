@@ -624,7 +624,11 @@ fn tiles_built_from_a_fields_channels_show_them_in_the_driver_views_and_the_defa
         fn driver_channels(&self, dirs: &[planet_core::Vec3]) -> Option<Vec<ChannelSample>> {
             Some(
                 dirs.iter()
-                    .map(|d| ChannelSample { soil_m: Some((2.0 + 1.5 * d.z) as f32), area_log2_cells: Some((5.0 + 5.0 * d.x) as f32) })
+                    .map(|d| ChannelSample {
+                        soil_m: Some((2.0 + 1.5 * d.z) as f32),
+                        area_log2_cells: Some((5.0 + 5.0 * d.x) as f32),
+                        ..Default::default()
+                    })
                     .collect(),
             )
         }
