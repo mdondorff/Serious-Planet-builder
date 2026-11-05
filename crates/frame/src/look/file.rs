@@ -71,7 +71,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 /// Schema version this build writes and reads without migration.
-pub const SCHEMA_VERSION: u32 = 8;
+pub const SCHEMA_VERSION: u32 = 9;
 
 const VERSION_KEY: &str = "schema_version";
 const KIND_KEY: &str = "kind";
@@ -464,6 +464,11 @@ fn v7_to_v8(_: &mut toml::Table) -> Result<(), String> {
     Ok(())
 }
 
+/// Version 8 to 9 adds the optional `m64` and `m8` octave tables of the `ground` table (REND-057); again no existing key moves.
+fn v8_to_v9(_: &mut toml::Table) -> Result<(), String> {
+    Ok(())
+}
+
 /// Migrations from every older version to the current one.
 pub const MIGRATIONS: &[Migration] = &[
     Migration { from: 1, apply: v1_to_v2 },
@@ -473,6 +478,7 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { from: 5, apply: v5_to_v6 },
     Migration { from: 6, apply: v6_to_v7 },
     Migration { from: 7, apply: v7_to_v8 },
+    Migration { from: 8, apply: v8_to_v9 },
 ];
 
 /// The look of every body that has an entry. A body without an entry has the Earth default.

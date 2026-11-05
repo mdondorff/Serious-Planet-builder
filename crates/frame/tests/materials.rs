@@ -243,7 +243,7 @@ fn a_look_with_a_curve_on_the_moisture_gives_soil_to_the_wet_hollow_and_not_to_t
 #[test]
 fn the_six_weights_sum_to_one_with_a_new_slot_on_and_the_words_lay_the_new_slots_where_the_shader_reads_them() {
     use planet_frame::look::materials::{DetailCoefficients, GlossParams, COEF_VEC4S, GLOSS_VEC4S, MATERIAL_VEC4S};
-    assert_eq!((MATERIALS, MATERIAL_VEC4S, GLOSS_VEC4S, COEF_VEC4S), (6, 24, 4, 17));
+    assert_eq!((MATERIALS, MATERIAL_VEC4S, GLOSS_VEC4S, COEF_VEC4S), (6, 24, 4, 25));
     let mut m = MaterialParams::EARTH;
     assert!(!m.is_on(4) && !m.is_on(5));
     let before = m.weights(&at(0.7, 500.0));
@@ -263,7 +263,7 @@ fn the_six_weights_sum_to_one_with_a_new_slot_on_and_the_words_lay_the_new_slots
     c.octaves[1].wet = [0.33, 0.44];
     let cw = c.to_words();
     assert_eq!(&cw[(4 + 3) * 4..(4 + 3) * 4 + 4], &[0.11f32, 0.33, 0.22, 0.44]);
-    assert_eq!(cw[16 * 4], DetailCoefficients::EARTH.crack as f32);
+    assert_eq!(cw[24 * 4], DetailCoefficients::EARTH.crack as f32);
     // The roughness words: the first four, then scree and wet, then the modifiers from the third vec4.
     let g = GlossParams::EARTH.to_words();
     assert_eq!(&g[..8], &[0.85f32, 0.65, 0.75, 0.80, 0.90, 0.35, 0.0, 0.0]);

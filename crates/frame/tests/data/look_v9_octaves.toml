@@ -1,0 +1,15 @@
+# A hand-written look file, schema version 9 (the version that added the `m64` and `m8` octave tables of the `ground` table, REND-057): comments, key order and spacing never matter.
+# Body 1 turns the 64 m and 8 m octaves on; every key it leaves out is the Earth default (those two octaves 0).
+schema_version = 9
+kind = "look"
+
+[body.1.ground]
+detail = 0.6
+
+[body.1.ground.octave.m64]
+albedo = [0.15, 0.10, 0.12]
+grass = [0.20, 0.20, 0.20]
+
+[body.1.ground.octave.m8]
+tilt = [0.25, 0.05, 0.10, 0.10]
+scree = [0.10, 0.20]

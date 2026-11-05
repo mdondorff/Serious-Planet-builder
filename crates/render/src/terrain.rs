@@ -96,7 +96,7 @@ struct Globals {
     gloss: array<vec4<f32>, 4>,
     // The coefficients of the detail octaves per material (LOOK-013): per octave (16 m, 2 m, 25 cm, 3 cm) the albedo of rock, sand, - and soil, the colour of grass, and the tilts of
     // rock, sand, grass and soil, and the albedo and tilt of scree and of wet ground (scree albedo, wet albedo, scree tilt, wet tilt); then the depth of the rock's cracks in x.
-    coef: array<vec4<f32>, 17>,
+    coef: array<vec4<f32>, 25>,
     // The edit preview (REND-033), read only for a previewed node and only when extra.w (the count in the low 6 bits, at most 32, and 64 times the number of stamps of the delta above them) is above 0: per stamp two
     // entries, (anchor relative to the camera, reach in metres) and (amount in metres, kind 1 hill / 2 crater / 3 plateau, sign, bound).
     preview: array<vec4<f32>, 64>,
@@ -541,7 +541,7 @@ fn ground_detail(node_index: u32, local: vec3<f32>, normal: vec3<f32>, up: vec3<
         // (`o.w` is faded with the octave: the crest is judged on the unfaded value.)
         let fade3 = 1.0 - smoothstep(0.06, 0.25, foot * 4.0);
         let crack = smoothstep(0.80, 1.0, 1.0 - abs(o.w / max(fade3, 1.0e-3))) * fade3;
-        mul = mul + o.w * gd_tint(w, w2, g.coef[8], g.coef[11].xy, g.coef[9].xyz) - (g.coef[16].x * crack * w.x) * vec3<f32>(1.0, 0.98, 0.95);
+        mul = mul + o.w * gd_tint(w, w2, g.coef[8], g.coef[11].xy, g.coef[9].xyz) - (g.coef[24].x * crack * w.x) * vec3<f32>(1.0, 0.98, 0.95);
         slope = slope + (dot(w, vec4<f32>(g.coef[10].x * (1.0 + steep), g.coef[10].y, g.coef[10].z, g.coef[10].w)) + dot(w2, g.coef[11].zw)) * o.xyz;
     }
     {
@@ -549,6 +549,17 @@ fn ground_detail(node_index: u32, local: vec3<f32>, normal: vec3<f32>, up: vec3<
         let o = gd_octave(cell, frac, local, foot, 0u, 3u, axes);
         mul = mul + o.w * gd_tint(w, w2, g.coef[12], g.coef[15].xy, g.coef[13].xyz);
         slope = slope + (dot(w, g.coef[14]) + dot(w2, g.coef[15].zw)) * o.xyz;
+    }
+    // The two octaves of REND-057, 64 m (the patches of the ground) and 8 m (the mounds and the rock's faces), are 0 in the Earth default and then skipped (the table is a uniform: the branch costs nothing).
+    if (any(g.coef[16] != vec4<f32>(0.0)) || any(g.coef[17] != vec4<f32>(0.0)) || any(g.coef[18] != vec4<f32>(0.0)) || any(g.coef[19] != vec4<f32>(0.0))) {
+        let o = gd_octave(cell, frac, local, foot, 11u, 6u, axes);
+        mul = mul + o.w * gd_tint(w, w2, g.coef[16], g.coef[19].xy, g.coef[17].xyz);
+        slope = slope + (dot(w, g.coef[18]) + dot(w2, g.coef[19].zw)) * o.xyz;
+    }
+    if (any(g.coef[20] != vec4<f32>(0.0)) || any(g.coef[21] != vec4<f32>(0.0)) || any(g.coef[22] != vec4<f32>(0.0)) || any(g.coef[23] != vec4<f32>(0.0))) {
+        let o = gd_octave(cell, frac, local, foot, 8u, 7u, axes);
+        mul = mul + o.w * gd_tint(w, w2, g.coef[20], g.coef[23].xy, g.coef[21].xyz);
+        slope = slope + (dot(w, g.coef[22]) + dot(w2, g.coef[23].zw)) * o.xyz;
     }
     mul = max(mul, vec3<f32>(0.2));
     // The roughness: the weights' mean of the materials', scaled by the modifiers (the wet and the icy ground are glossy).
