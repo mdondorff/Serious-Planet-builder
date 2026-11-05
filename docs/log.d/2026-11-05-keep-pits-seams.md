@@ -1,0 +1,1 @@
+- 2026-11-05 keep-pits-seams PR 1: bake::spill, the planet-wide spill level of a tiled surface (GEN-121), equal to a global flood bit for bit; the store and post-pass follow.

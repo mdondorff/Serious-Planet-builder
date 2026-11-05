@@ -32,6 +32,7 @@ Dormant (no near trigger; not asked now):
 | Store | Shared store `C:/DEV/SeriousPlanetData/global16384-m9r2` (seed 1, read-only); `global16384` kept until the owner says; preview store `global16384-m9c14` stale since #1180 (re-run after the plan items) | all |
 
 ## Tracked
+- **Kind 17 is tile-local** (2026-11-05, #1192): seam-inconsistent beyond the halo (152 m median step at 2/12 | 2/13); fix keep-pits-seams PR 2 (STRM-077); no planet bake before it
 - **Ocean square at orbit** (owner, viewer main 2fdfeb23 over m9r2, 2026-11-03): at 12,767 km over 20 N 30 E after 240 s of flight, a light square in a ring of dark blotches on the sea; not reproduced headless. Hypotheses: the clipmap shadow on water (sea-floor receivers; `--no-shadow-march`, J view), the water-node cut or the never-evicted WaterBook, the shadow's temporal history. Needs the owner's F9 bundle; replay with `cargo xtask repro`.
 - **CI jobs** (BUILD-014, 2026-11-03 after #1133, #1134, #1138): every job under 16 min (A+B parts 10.7-13.6, C build 3.5 + parts 7.8-10.2, Linux 7-9); `gpu_stills` march test keeps its declared 450 s limit; lift under ~200 s.
 - **Reserve test result** (BUDG-012, loaded, 3 rounds, 2026-11-01): dive, look-1m, look-2km, teleport-2km pass; teleport-1m fails by +1 % (frame median 16.75 against 16.60 ms; the spin runs 5-18 % over its 6-9 ms target). Frame p99 over 20 ms includes the spin by construction. A quiet window decides the absolute rows.
