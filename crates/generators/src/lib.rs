@@ -4,6 +4,8 @@
 //! renderer. Everything here is integer hashing plus IEEE `+ - * /` and `libm::floor`, so results are
 //! bit-identical across platforms and thread counts.
 
+pub mod arid;
+pub mod arid_preview;
 pub mod bake;
 pub mod chain;
 pub mod channels;

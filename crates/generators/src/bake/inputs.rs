@@ -1,10 +1,12 @@
 //! The fields a bake reads (m9-bake): the base elevation of the default class source with its class-blended `k`, and the carve factor of GEN-097, at a direction. One place for the
 //! command and the tests, so that every bake of a seed reads the same function and keys it the same way.
 
+use crate::arid::{AridInputs, AridRules, ARID_RULES_VERSION};
 use crate::classes::{
     blended_carve_factor, blended_k, ClassLattice, ClassSource, CLASS_CARVE, CLASS_K, CLASS_LATTICE_N, CLASS_LIST_VERSION,
     CLASS_SOURCE_VERSION,
 };
+use crate::lithology::{Lithology, ProvinceLattice};
 use crate::orography::{Orography, OROGRAPHY_VERSION, SEASONS};
 use planet_core::Vec3;
 
@@ -15,6 +17,8 @@ pub struct BakeInputs {
     threads: usize,
     orography_cells: usize,
     orography: std::sync::OnceLock<Orography>,
+    lithology: std::sync::OnceLock<Lithology>,
+    arid: AridRules,
 }
 
 impl BakeInputs {
@@ -22,7 +26,15 @@ impl BakeInputs {
     pub fn new(seed: u64, threads: usize) -> BakeInputs {
         let source = ClassSource::new(seed);
         let lattice = ClassLattice::build_with(&source, CLASS_LATTICE_N, threads);
-        BakeInputs { source, lattice, threads, orography_cells: crate::orography::default_cells(), orography: std::sync::OnceLock::new() }
+        BakeInputs {
+            source,
+            lattice,
+            threads,
+            orography_cells: crate::orography::default_cells(),
+            orography: std::sync::OnceLock::new(),
+            lithology: std::sync::OnceLock::new(),
+            arid: AridRules::earth(),
+        }
     }
 
     /// The orographic climate of the seed (GEN-117), built on first use from the class source's base elevation `e0` (never from the class weights) on the threads of [`BakeInputs::new`]: the
@@ -36,14 +48,40 @@ impl BakeInputs {
         self.source.seed()
     }
 
-    /// The class weights at a direction (the lattice read; the class of a cell is the largest).
-    pub fn weights_at(&self, d: Vec3) -> [f64; crate::classes::CLASS_COUNT] {
+    /// The lithology of the seed (GEN-116), built on first use: its hardness and province terms feed the arid class rules. The province lattice has the cells of the climate's, a power of two up
+    /// to the class lattice's.
+    pub fn lithology(&self) -> &Lithology {
+        self.lithology.get_or_init(|| {
+            let cells = self.orography_cells.next_power_of_two().min(CLASS_LATTICE_N);
+            Lithology::with_provinces(self.source.seed(), ProvinceLattice::build_with(&self.source, cells, self.threads))
+        })
+    }
+
+    /// The class lattice (the weights without the arid rules, on its nodes).
+    pub fn class_lattice(&self) -> &ClassLattice {
+        &self.lattice
+    }
+
+    /// The class weights of the class lattice at a direction, without the arid rules (the class of a cell is the largest).
+    pub fn base_weights_at(&self, d: Vec3) -> [f64; crate::classes::CLASS_COUNT] {
         self.lattice.weights_at(d)
+    }
+
+    /// The class weights at a direction: the lattice's with the arid rules (GEN-128) blended over them.
+    pub fn weights_at(&self, d: Vec3) -> [f64; crate::classes::CLASS_COUNT] {
+        let (climate, lithology) = (self.orography(), self.lithology());
+        let inputs = AridInputs {
+            aridity: climate.aridity(d),
+            hardness: lithology.hardness(d),
+            e0: climate.base_elevation_m(d),
+            provinces: lithology.provinces().at(d),
+        };
+        self.arid.blend(&self.lattice.weights_at(d), &inputs)
     }
 
     /// An identity of what the climate of a class-source world reads besides the seed and the class source: the orographic climate's version and the cells a face edge of its lattice
     /// ([`crate::orography::default_cells`]: the production lattice, or the coarse one of a test build). Part of the global store's class-source identity, so that a change of the climate's
-    /// constants or of its lattice re-keys the stored climate; the layer keys do not read the climate and do not carry it.
+    /// constants or of its lattice re-keys the stored climate; [`BakeInputs::id`] folds it too, because the arid rules make the base elevation read the climate.
     pub fn climate_id() -> u64 {
         climate_identity(OROGRAPHY_VERSION, crate::orography::default_cells())
     }
@@ -51,12 +89,12 @@ impl BakeInputs {
     /// The base elevation at a direction: the class source's, with the class-blended relief driver.
     pub fn base(&self, d: Vec3) -> f64 {
         let p = self.source.eval(d);
-        self.source.elevation_m(d, &p, blended_k(&self.lattice.weights_at(d)))
+        self.source.elevation_m(d, &p, blended_k(&self.weights_at(d)))
     }
 
     /// The carve factor of GEN-097 at a direction.
     pub fn carve_factor(&self, d: Vec3) -> f64 {
-        blended_carve_factor(&self.lattice.weights_at(d))
+        blended_carve_factor(&self.weights_at(d))
     }
 
     /// An identity of what the base and the carve factor read besides the seed: the class source's and class list's versions, the lattice size and the class tables of `k` and of the
@@ -67,6 +105,9 @@ impl BakeInputs {
         put(u64::from(CLASS_SOURCE_VERSION));
         put(u64::from(CLASS_LIST_VERSION));
         put(CLASS_LATTICE_N as u64);
+        // The base elevation reads the class weights, which read the arid rules and, through them, the climate: their identities are the layer's.
+        put(u64::from(ARID_RULES_VERSION));
+        put(Self::climate_id());
         CLASS_K.iter().chain(CLASS_CARVE.iter()).for_each(|v| put(v.to_bits()));
         h
     }
