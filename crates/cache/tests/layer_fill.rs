@@ -177,6 +177,7 @@ fn fill_pass(
 }
 
 // spec: GEN-121
+// spec: GEN-120
 #[test]
 fn the_post_pass_depth_is_the_depth_below_the_planet_wide_spill_level_across_tile_edges_and_corners() {
     let (w, scratch, out) = (world(), Dir::new("scratch"), Dir::new("tiles"));
@@ -186,6 +187,7 @@ fn the_post_pass_depth_is_the_depth_below_the_planet_wide_spill_level_across_til
     let report = fill_pass(&w, &s, scratch.path(), out.path(), &tiles, 2);
     assert_eq!(report.written.len(), 16);
     assert_eq!(report.unreached_cells, 0);
+    assert_eq!(report.dropped_pairs, 0, "a neighbour pair inside a face was dropped");
     let level = oracle();
     let store = TileStore::open(out.path(), w.params()).unwrap();
     let (mut pits, mut across) = (0usize, 0usize);
@@ -262,6 +264,9 @@ fn a_run_over_a_region_treats_the_tiles_it_does_not_hold_as_sea() {
 }
 
 // spec: GEN-121
+// spec: GEN-120
+// spec: STRM-076
+// spec: STRM-077
 #[test]
 fn the_runtime_layer_reads_the_change_with_the_post_pass_depth_added_back() {
     let (w, scratch, dir) = (world(), Dir::new("scratch"), Dir::new("layer"));
@@ -324,6 +329,7 @@ fn the_runtime_layer_reads_the_change_with_the_post_pass_depth_added_back() {
 }
 
 // spec: STRM-077
+// spec: STRM-076
 #[test]
 fn the_step_of_the_pit_depth_code_is_part_of_the_key_and_the_records_have_keys_of_their_own() {
     assert_eq!(steps_per_m(), 4.0);

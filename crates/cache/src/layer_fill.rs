@@ -20,6 +20,8 @@ use crate::pack::{Record, TileStore};
 pub const KIND_LAYER_FILL: u8 = Kind::LayerFill as u8;
 /// The kind byte of a tile's final heights (bake scratch).
 pub const KIND_LAYER_HEIGHTS: u8 = Kind::LayerHeights as u8;
+/// Version of the post-pass kernels (the spill flood and graph, the border geometry, the quantisation of the depth): part of the fill and scratch keys, bumped with any change that moves a bit of kind 17. History: 1 = keep-pits-seams PR 2.
+pub const FILL_KERNEL_VERSION: u32 = 1;
 const FILL_ID: &str = "erosion-layer-fill";
 const HEIGHTS_ID: &str = "erosion-layer-heights";
 /// Codec 2: the 16-bit codes (codec 1 held 8-bit codes, keep-pits #1192; those records are another key and never read).
@@ -47,7 +49,9 @@ fn key_of(world: &GlobalWorld, res: u32, spec: &TileLayerSpec, id: PassTile, kin
     let tile = layer_tile_id(&spec.grid, id)?;
     let mut inputs = world.base_key_inputs(kind, tile, res, name);
     inputs.output_params.insert(PARAM_RESOLUTION, (spec.grid.cells as u32).to_le_bytes().to_vec());
-    inputs.output_params.insert(PARAM_LAYER_CHANNELS, channel_bytes(&spec.bytes()));
+    let mut bytes = channel_bytes(&spec.bytes());
+    bytes.extend(FILL_KERNEL_VERSION.to_le_bytes());
+    inputs.output_params.insert(PARAM_LAYER_CHANNELS, bytes);
     Ok(cache_key(&inputs))
 }
 

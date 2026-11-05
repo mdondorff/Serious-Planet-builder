@@ -175,3 +175,10 @@ What happened: on seed 14, mountains tile 2/12/10, the stored bake's surface (`g
 Assumption it changes: that the layer can be added to the runtime base plus `k` and `m`; and that the lattice of a store is the surface a bake read.
 Proposed follow-up: the product's field bake is made from the class source and carries `BakeInputs::id()` (the viewer refuses `--erosion on` without that marker); `with_layer` needs no relief channels.
 Obsolete when: the field bake is made from the class source and the legacy generator is retired.
+
+## 2026-11-05 A tile-local fill depth cannot be seam-consistent for a basin wider than the halo
+Scope: project (M9 bake; the fill depth of the erosion layer, GEN-120, GEN-121)
+What happened: the keep-pits preview (seed 14, 2/12 | 2/13) measured a median 152 m step across a tile seam at pit cells: a window's flood treats its border as an outlet, so a basin wider than the 128-cell halo is closed in one window and drains in the next; pass 1 had no pit there to repair it.
+Assumption it changes: that a per-tile flood of a window is enough for a planet-wide level.
+Proposed follow-up: the fill depth is the planet-wide spill level (Barnes 2016 over tile and cube edges, GEN-121) written by a post-pass over the tiles' final heights (STRM-077).
+Obsolete when: lake water and a pit-tolerance rule replace the filled look.

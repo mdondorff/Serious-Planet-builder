@@ -259,6 +259,7 @@ fn a_tile_leaves_no_one_cell_pit_over_the_threshold_in_its_core() {
 }
 
 // spec: STRM-077
+// spec: GEN-120
 #[test]
 fn a_tile_keeps_its_final_heights_for_the_post_pass_and_no_depth_of_its_own() {
     let (g, p) = (grid(), Pass2Params::standard(9, 0.0));
