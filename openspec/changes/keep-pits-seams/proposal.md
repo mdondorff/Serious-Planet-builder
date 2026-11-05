@@ -22,3 +22,9 @@ Option (a) of the report, split in three changes of one branch each (planner, 20
 - A lake renderer evaluates the exact base at one cell per connected filled region when it builds the tile and draws the water as its own flat surface at that level (the viewer must hold the class source, which it does with `--class-source`).
 - A basin split across tiles gets the same level on both sides: the post-pass is planet-wide (GEN-121).
 - Limits: the level is in the bake's frame (the runtime terrain differs by the lattice read, 3.4 m rms on mountains, so a lake edge meets the drawn terrain with that mismatch); a region separated by outcrops (depth 0 cells) is several connected regions of one basin with one level; a cell clamped to depth 0 carries no level; depth saturates at 16,383.75 m.
+
+## Gate result (2026-11-05, seed 14, 24 tiles; planner inbox #73 accepted)
+- Tile seam 2/12|2/13: the filled step at the pit pairs p50 0.076 m (95 % of pairs over 0.5 m before, 6.7 % now; the rest is a pit cell beside its steep wall); the fill's addition to the step at pit pairs p50 -7.4 m, p99 0, max +1.25 m (one side filled beside an outcrop or shore: accepted).
+- Flatness of the filled floor in the bake's frame: p99 0.125 m, max 0.214 m over 695,689 cells in 1,304 basins; pit share per class on 2/12/10 within 1.5 points of the window-flood preview (plain 3.1 %, mountains 5.6 %, high mountains 14.7 %); 3.18 % of the pit-surface cells are outcrops (clamped); no code at the cap (deepest 527 m).
+- Not met, Tracked, blocks the planet bake: a mountain cube-edge pair with a deep basin (face 2 | face 1 holds no mountains); it runs with the integrated preview's re-run, whose region holds a mountain cube edge.
+- Inland cells at or below the sea level read as sea (1.07 M cells, 14,547 components, 0.94 % of the seam region): the outlet mask is to come from the field bake's ocean connectivity (a follow-up).
