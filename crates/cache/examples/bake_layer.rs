@@ -116,6 +116,15 @@ fn main() {
         None => GlobalWorld::from_definition(&def).unwrap_or_else(|e| fail(&format!("{e:?}"))),
     };
     let (base, factor) = (|d: Vec3| inputs.base(d), |d: Vec3| inputs.carve_factor(d));
+    // The outlets of the fill depth (STRM-077): the cells at or below the sea level that the field bake's ocean connectivity calls ocean; without a store (`--global-dir`) every such cell is an outlet, as before.
+    let ocean_store = o.global_dir.as_ref().map(|dir| TileStore::open(dir, world.params()).unwrap_or_else(|e| fail(&e.to_string())));
+    let ocean_source = ocean_store
+        .as_ref()
+        .map(|s| planet_cache::global_store::StoreOceanSource::new(s, &world, o.global_res).unwrap_or_else(|e| fail(&format!("{e:?}"))));
+    let ocean = |d: Vec3| match &ocean_source {
+        Some(src) => planet_generators::ocean::ocean_at(src, d).unwrap_or_else(|e| fail(&format!("the ocean channel: {e:?}"))),
+        None => true,
+    };
     // The specs of both passes come from the one derivation the viewer also uses (`bake_specs`), so a record's key cannot drift between the command and the reader.
     let shape = BakeShape { seed: o.seed, radius_m: RADIUS_M, face_res: o.face_res, planet_res: o.planet_res, tile: o.tile, halo: o.halo };
     let (layer, spec) = bake_specs(&world, &shape).unwrap_or_else(|e| fail(&e));
@@ -235,18 +244,20 @@ fn main() {
             &tiles,
             threads,
             &base,
+            &ocean,
             &mut |id, pits| {
                 println!("fill tile {}/{}/{}: {pits} pit cells", id.face.0, id.ti, id.tj);
             },
         )
         .unwrap_or_else(|e| fail(&e.to_string()));
         println!(
-            "fill pass: {} tiles written, {} stored, {} pit cells, deepest {:.2} m, {} cells no path from the sea reaches, {:.1} s",
+            "fill pass: {} tiles written, {} stored, {} pit cells, deepest {:.2} m, {} cells no path from the sea reaches, {} inland cells at or below the sea level, {:.1} s",
             fill.written.len(),
             fill.skipped.len(),
             fill.pit_cells,
             fill.deepest_m,
             fill.unreached_cells,
+            fill.inland_low_cells,
             t.elapsed().as_secs_f64()
         );
         let _ = std::fs::remove_dir_all(&scratch_dir);

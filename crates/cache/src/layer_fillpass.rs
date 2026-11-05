@@ -45,10 +45,12 @@ pub struct FillPassReport {
     pub dropped_pairs: u64,
     /// Cells that stand in a basin of the pass-2 surface but whose exact surface (base plus the stored change) is at or above the level: their depth is 0 (outcrops).
     pub clamped_cells: u64,
+    /// Cells at or below the sea level that the ocean connectivity does not call ocean (inland basins below sea level, filled like any pit) in the written tiles.
+    pub inland_low_cells: u64,
 }
 
 /// A tile's stage-3 result: its index, the depth codes, the pit cells, the deepest depth and the cells no path reaches.
-type TileDepth = (usize, Vec<u16>, u64, f64, u64, u64);
+type TileDepth = (usize, Vec<u16>, u64, f64, u64, u64, u64);
 
 /// What stage 1 keeps of a tile.
 struct Info {
@@ -59,11 +61,33 @@ struct Info {
     border_seed: Vec<u32>,
 }
 
-fn flood(heights: &[f32], t: usize, sea_level: f64) -> (Vec<f64>, TileFlood) {
+/// Floods a core: the outlets are the cells at or below the sea level that `ocean` calls ocean (the field bake's ocean connectivity, ADR 0041 point 2); a cell at or below it that is not ocean is an inland basin and
+/// is filled like any other pit. Returns the heights, the flood and the number of such inland cells.
+fn flood(
+    heights: &[f32],
+    g: &planet_generators::bake::tile::TileGrid,
+    id: PassTile,
+    sea_level: f64,
+    ocean: &(dyn Fn(Vec3) -> bool + Sync),
+) -> (Vec<f64>, TileFlood, u64) {
+    let t = g.tile;
     let z: Vec<f64> = heights.iter().map(|h| f64::from(*h) + 0.0).collect();
-    let outlet: Vec<bool> = z.iter().map(|v| *v <= sea_level).collect();
+    let (i0, j0) = (i64::from(id.ti) * t as i64, i64::from(id.tj) * t as i64);
+    let mut inland = 0u64;
+    let outlet: Vec<bool> = z
+        .iter()
+        .enumerate()
+        .map(|(p, v)| {
+            if *v > sea_level {
+                return false;
+            }
+            let sea = ocean(g.direction(id.face, i0 + (p % t) as i64, j0 + (p / t) as i64));
+            inland += u64::from(!sea);
+            sea
+        })
+        .collect();
     let f = flood_labelled(t, t, &z, &outlet);
-    (z, f)
+    (z, f, inland)
 }
 
 fn heights_of(scratch: &TileStore, world: &GlobalWorld, res: u32, spec: &TileLayerSpec, id: PassTile) -> Result<Vec<f32>, LayerStoreError> {
@@ -89,6 +113,7 @@ pub fn run_fill_pass(
     tiles: &[PassTile],
     threads: usize,
     base: &(dyn Fn(Vec3) -> f64 + Sync),
+    ocean: &(dyn Fn(Vec3) -> bool + Sync),
     on_tile: &mut dyn FnMut(PassTile, u64),
 ) -> Result<FillPassReport, LayerStoreError> {
     spec.grid.check().map_err(LayerStoreError)?;
@@ -120,6 +145,7 @@ pub fn run_fill_pass(
             unreached_cells: 0,
             dropped_pairs: 0,
             clamped_cells: 0,
+            inland_low_cells: 0,
         });
     }
     for id in &order {
@@ -134,7 +160,7 @@ pub fn run_fill_pass(
     // Stage 1.
     let infos: Vec<Result<Info, LayerStoreError>> = par::map(par, order.len(), &|k| {
         let heights = heights_of(&scratch, world, res, spec, order[k])?;
-        let (z, f) = flood(&heights, t, sea);
+        let (z, f, _) = flood(&heights, &g, order[k], sea, ocean);
         let (mut border_z, mut border_seed) = (Vec::with_capacity(perimeter_len(t, t)), Vec::with_capacity(perimeter_len(t, t)));
         for s in 0..perimeter_len(t, t) as u32 {
             let (i, j) = perimeter_cell(t, t, s);
@@ -198,6 +224,7 @@ pub fn run_fill_pass(
         unreached_cells: 0,
         dropped_pairs: dropped,
         clamped_cells: 0,
+        inland_low_cells: 0,
     };
     let mut todo: Vec<usize> = Vec::new();
     for (k, id) in order.iter().enumerate() {
@@ -211,7 +238,7 @@ pub fn run_fill_pass(
         let done: Vec<Result<TileDepth, LayerStoreError>> = par::map(par, batch.len(), &|n| {
             let k = batch[n];
             let heights = heights_of(&scratch, world, res, spec, order[k])?;
-            let (z, f) = flood(&heights, t, sea);
+            let (z, f, inland) = flood(&heights, &g, order[k], sea, ocean);
             let level = final_level(&f, &|s| levels.seed(refs[k], s));
             // The depth is taken against the bake's exact base plus the stored change, so a floor is flat to the code's step in the bake's frame (GEN-120; the runtime's lattice read and crease detail are not in it): only the cells that are pits of the pass-2 surface need the base.
             let core = load_tile(&store, world, res, spec, order[k])?
@@ -247,11 +274,12 @@ pub fn run_fill_pass(
                     c
                 })
                 .collect();
-            Ok((k, codes, pits, deepest, unreached, clamped))
+            Ok((k, codes, pits, deepest, unreached, clamped, inland))
         });
         for r in done {
-            let (k, codes, pits, deepest, unreached, clamped) = r?;
+            let (k, codes, pits, deepest, unreached, clamped, inland) = r?;
             report.clamped_cells += clamped;
+            report.inland_low_cells += inland;
             writer.append(&fill_record(world, res, spec, order[k], &codes)?).map_err(err)?;
             writer.write_index().map_err(err)?;
             report.written.push(order[k]);

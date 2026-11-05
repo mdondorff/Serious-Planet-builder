@@ -897,3 +897,12 @@ pub fn parallel_map<T: Sync, R: Send>(items: &[T], threads: usize, f: &(dyn Fn(&
     }
     planet_core::par::map(&threads, items.len(), &|i| f(&items[i]))
 }
+
+/// Whether direction `d` lies on an ocean vertex of the lattice: the nearest bake vertex of the face the direction is on (the plane coordinates rounded to the lattice, clamped to its edge).
+/// The channel is categorical at the lattice's spacing (2.4 km at 16,384 cells), so a point within a vertex's cell of a shore reads the vertex's flag, not the shore's.
+pub fn ocean_at(lattice: &dyn OceanLattice, d: planet_core::Vec3) -> Result<bool, ReadError> {
+    let (face, s, t) = planet_core::cube::direction_to_face(&planet_core::cube::TangentWarp, d);
+    let res = lattice.res();
+    let vertex = |c: f64| (((c + 1.0) * 0.5 * f64::from(res)).round().clamp(0.0, f64::from(res))) as u32;
+    lattice.is_ocean(Face(face.0), vertex(s), vertex(t))
+}

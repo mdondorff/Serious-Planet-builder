@@ -204,7 +204,7 @@ fn fill_pass(
     threads: usize,
 ) -> planet_cache::layer_fillpass::FillPassReport {
     ensure_tile_records(w, s, tiles, which);
-    run_fill_pass(tiles, scratch, w, RES, s, which, threads, &|_| 0.0, &mut |_, _| {}).unwrap()
+    run_fill_pass(tiles, scratch, w, RES, s, which, threads, &|_| 0.0, &|_| true, &mut |_, _| {}).unwrap()
 }
 
 // spec: GEN-121
@@ -271,7 +271,7 @@ fn the_post_pass_stores_the_same_bytes_on_1_and_8_threads_skips_what_it_holds_an
     let few = Dir::new("few");
     write_scratch(few.path(), &w, &s, &tiles[..3]);
     let c = Dir::new("c");
-    let e = run_fill_pass(c.path(), few.path(), &w, RES, &s, &tiles[..4], 1, &|_| 0.0, &mut |_, _| {}).unwrap_err().to_string();
+    let e = run_fill_pass(c.path(), few.path(), &w, RES, &s, &tiles[..4], 1, &|_| 0.0, &|_| true, &mut |_, _| {}).unwrap_err().to_string();
     assert!(e.contains("no final heights") && e.contains("0/3/0"), "{e}");
 }
 
@@ -290,7 +290,7 @@ fn a_run_over_a_region_treats_the_tiles_it_does_not_hold_as_sea() {
     let codes = load_fill(&store, &w, RES, &s, two[1]).unwrap().unwrap();
     assert!(codes.iter().all(|c| *c == 0), "a bowl that reaches the border of the run was filled: the run's edge is sea");
     // The same directory refuses a run over another set of tiles: its depths would be those of the first run.
-    let e = run_fill_pass(out.path(), scratch.path(), &w, RES, &s, &tiles, 2, &|_| 0.0, &mut |_, _| {}).unwrap_err().to_string();
+    let e = run_fill_pass(out.path(), scratch.path(), &w, RES, &s, &tiles, 2, &|_| 0.0, &|_| true, &mut |_, _| {}).unwrap_err().to_string();
     assert!(e.contains("another set of tiles"), "{e}");
 }
 
@@ -326,7 +326,7 @@ fn the_runtime_layer_reads_the_change_with_the_post_pass_depth_added_back() {
     .unwrap();
     assert_eq!(report.computed.len(), 16);
     // The post-pass takes the exact base: the depth is `level - (base + stored change)`, so a floor is flat against the surface the runtime shows (GEN-120).
-    let fp = run_fill_pass(dir.path(), scratch.path(), &w, RES, &s, &tiles, 2, &base, &mut |_, _| {}).unwrap();
+    let fp = run_fill_pass(dir.path(), scratch.path(), &w, RES, &s, &tiles, 2, &base, &|_| true, &mut |_, _| {}).unwrap();
     assert_eq!(fp.written.len(), 16);
     // A rerun after the scratch store is gone: pass 2 does not run again (the tiles hold their fill), and the post-pass finds nothing to do without any scratch.
     let fresh = Dir::new("fresh");
@@ -401,7 +401,7 @@ fn a_filled_floor_is_flat_against_the_exact_base_and_an_outcrop_inside_a_basin_k
         &mut |_| {},
     )
     .unwrap();
-    run_fill_pass(dir.path(), scratch.path(), &w, RES, &s, &tiles, 2, &base, &mut |_, _| {}).unwrap();
+    run_fill_pass(dir.path(), scratch.path(), &w, RES, &s, &tiles, 2, &base, &|_| true, &mut |_, _| {}).unwrap();
     let store = TileStore::open(dir.path(), w.params()).unwrap();
     let (mut worst, mut checked) = (0.0f64, 0usize);
     for &id in &tiles {
@@ -477,7 +477,7 @@ fn a_filled_floor_is_flat_against_the_exact_base_and_an_outcrop_inside_a_basin_k
     writer.append(&tile_record(&w, RES, &s, &r1).unwrap()).unwrap();
     writer.write_index().unwrap();
     writer.finish().unwrap();
-    let report = run_fill_pass(out2.path(), scratch2.path(), &w, RES, &s, &[id, id1], 1, &|_| 0.0, &mut |_, _| {}).unwrap();
+    let report = run_fill_pass(out2.path(), scratch2.path(), &w, RES, &s, &[id, id1], 1, &|_| 0.0, &|_| true, &mut |_, _| {}).unwrap();
     let store2 = TileStore::open(out2.path(), w.params()).unwrap();
     let codes = load_fill(&store2, &w, RES, &s, id).unwrap().unwrap();
     assert_eq!(codes[spire], 0, "the outcrop was lowered to the level");
@@ -487,4 +487,59 @@ fn a_filled_floor_is_flat_against_the_exact_base_and_an_outcrop_inside_a_basin_k
 
 fn fill_code_of(m: f64) -> u16 {
     planet_generators::bake::face::fill_code(m)
+}
+
+// spec: STRM-077
+#[test]
+fn an_inland_basin_below_the_sea_level_is_filled_unless_the_ocean_connectivity_calls_it_ocean() {
+    // A plateau of 200 m with an 8 x 8 bowl whose floor is 5 m BELOW the sea level, in the middle of tile (0, 0): with the ocean mask false (an inland basin) the bowl is a pit of 205 m; with it true (the
+    // sea) the bowl's cells are outlets and hold no depth; the report counts the inland cells.
+    let w = world();
+    let s = spec(&w);
+    let id = face_tiles(0)[0];
+    let heights: Vec<f32> =
+        (0..T * T).map(|p| if (8..16).contains(&(p % T)) && (8..16).contains(&(p / T)) { -5.0 } else { 200.0 }).collect();
+    let (scratch, out) = (Dir::new("scratch"), Dir::new("tiles"));
+    let mut writer = PackWriter::open(scratch.path(), w.params(), DEFAULT_MAX_PACK_BYTES).unwrap();
+    writer.append(&heights_record_of(&w, RES, &s, id, &heights).unwrap()).unwrap();
+    writer.write_index().unwrap();
+    writer.finish().unwrap();
+    let stats = planet_generators::bake::tile::TileStats {
+        land_cells: 0,
+        thermal_passes: 0,
+        thermal_moving_at_cap: 0,
+        eroded_m3: 0.0,
+        deposited_m3: 0.0,
+        exported_m3: 0.0,
+        clamped_cells: 0,
+    };
+    let r = planet_generators::bake::tile::TileResult {
+        id,
+        core: heights.clone(),
+        deposited: Vec::new(),
+        fill: Vec::new(),
+        heights: Vec::new(),
+        stats,
+    };
+    let mut writer = PackWriter::open(out.path(), w.params(), DEFAULT_MAX_PACK_BYTES).unwrap();
+    writer.append(&tile_record(&w, RES, &s, &r).unwrap()).unwrap();
+    writer.write_index().unwrap();
+    writer.finish().unwrap();
+    let bowl = 12 * T + 12;
+    // Not ocean: filled to the rim (205 m deep), 64 inland cells counted.
+    let inland = run_fill_pass(out.path(), scratch.path(), &w, RES, &s, &[id], 1, &|_| 0.0, &|_| false, &mut |_, _| {}).unwrap();
+    let store = TileStore::open(out.path(), w.params()).unwrap();
+    let codes = load_fill(&store, &w, RES, &s, id).unwrap().unwrap();
+    assert_eq!(inland.inland_low_cells, 64);
+    assert_eq!(codes[bowl], planet_generators::bake::face::fill_code(205.0), "an inland basin below 0 m is filled to its rim");
+    // Ocean: the same bowl is sea, an outlet, no depth.
+    let (out2, _) = (Dir::new("tiles2"), ());
+    let mut writer = PackWriter::open(out2.path(), w.params(), DEFAULT_MAX_PACK_BYTES).unwrap();
+    writer.append(&tile_record(&w, RES, &s, &r).unwrap()).unwrap();
+    writer.write_index().unwrap();
+    writer.finish().unwrap();
+    let sea = run_fill_pass(out2.path(), scratch.path(), &w, RES, &s, &[id], 1, &|_| 0.0, &|_| true, &mut |_, _| {}).unwrap();
+    let store2 = TileStore::open(out2.path(), w.params()).unwrap();
+    assert_eq!(sea.inland_low_cells, 0);
+    assert_eq!(load_fill(&store2, &w, RES, &s, id).unwrap().unwrap()[bowl], 0, "an ocean cell is an outlet");
 }
