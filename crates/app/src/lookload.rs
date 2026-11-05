@@ -150,7 +150,7 @@ mod tests {
         let e = load(&options(&["editor", "--no-window", "--look", bad.to_str().unwrap()])).unwrap_err();
         assert!(e.contains("bad.toml") && e.contains("body.0.units.solar_illuminance_lux") && e.contains("-3.0"), "{e}");
         let future = d.join("future.toml");
-        std::fs::write(&future, "schema_version = 9\nkind = \"look\"\n").unwrap();
+        std::fs::write(&future, format!("schema_version = {}\nkind = \"look\"\n", planet_frame::look::file::SCHEMA_VERSION + 1)).unwrap();
         let e = load(&options(&["editor", "--no-window", "--look", future.to_str().unwrap()])).unwrap_err();
         assert!(e.contains("future.toml") && e.contains("newer") && e.contains("update the program"), "{e}");
         let missing = d.join("missing.toml");
