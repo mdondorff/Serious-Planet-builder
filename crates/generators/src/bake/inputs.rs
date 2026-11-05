@@ -5,12 +5,16 @@ use crate::classes::{
     blended_carve_factor, blended_k, ClassLattice, ClassSource, CLASS_CARVE, CLASS_K, CLASS_LATTICE_N, CLASS_LIST_VERSION,
     CLASS_SOURCE_VERSION,
 };
+use crate::orography::{Orography, SEASONS};
 use planet_core::Vec3;
 
 /// The default class source of a seed and its class lattice.
 pub struct BakeInputs {
     source: ClassSource,
     lattice: ClassLattice,
+    threads: usize,
+    orography_cells: usize,
+    orography: std::sync::OnceLock<Orography>,
 }
 
 impl BakeInputs {
@@ -18,7 +22,20 @@ impl BakeInputs {
     pub fn new(seed: u64, threads: usize) -> BakeInputs {
         let source = ClassSource::new(seed);
         let lattice = ClassLattice::build_with(&source, CLASS_LATTICE_N, threads);
-        BakeInputs { source, lattice }
+        BakeInputs { source, lattice, threads, orography_cells: crate::orography::default_cells(), orography: std::sync::OnceLock::new() }
+    }
+
+    /// The orographic climate lattice at `cells` cells a face edge instead of the production [`OROGRAPHY_CELLS`] (tests and the preview's finer lattice); call before the first read of the climate.
+    pub fn with_orography_cells(mut self, cells: usize) -> BakeInputs {
+        assert!(self.orography.get().is_none(), "the climate lattice is already built");
+        self.orography_cells = cells;
+        self
+    }
+
+    /// The orographic climate of the seed (GEN-117), built on first use from the class source's base elevation `e0` (never from the class weights) on the threads of [`BakeInputs::new`]: the
+    /// precipitation of the global field and, later, the aridity of the class rules and the discharge of the carve read it.
+    pub fn orography(&self) -> &Orography {
+        self.orography.get_or_init(|| Orography::build(self.source.seed(), &self.source, self.orography_cells, &SEASONS, self.threads))
     }
 
     /// The seed of the class source (a bake that samples it must be the world of this seed).

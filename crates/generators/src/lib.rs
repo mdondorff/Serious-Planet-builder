@@ -32,6 +32,8 @@ pub mod manifest;
 pub mod mesh;
 pub mod normals;
 pub mod ocean;
+pub mod orography;
+pub mod orography_preview;
 pub mod preview;
 pub mod relief_channels;
 pub mod relief_lattice;

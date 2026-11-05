@@ -5,10 +5,10 @@
 ## What Changes
 - GEN-117: an analytic wind field (prevailing direction by latitude band, noise warp, a steadiness value) and an orographic precipitation field for two seasons, CPU-canonical (`libm`, fixed order, f64, same bits for any thread count), built in memory on a coarse lattice per cube face from the class source's base elevation, never stored, keyed by `OROGRAPHY_VERSION`: annual precipitation (the two seasons summed), aridity `AI = P / PET` (`PET = 300 + 45 T`, SPIKE-81) and a seasonality value.
 - The global field bake reads the annual precipitation from it in place of today's bands times noise for class-source worlds (`class_sample`): `GLOBAL_VERSION` 7. Stores baked before it are refused (owner: older stores need not stay compatible).
-- GEN-129 (requested): `generate --climate-preview DIR [--seed N | --world F] [--km N]`: planet maps of annual precipitation with the single-wind model against the two-season one, aridity, seasonality, wind arrows, the four preview regions' material colours; every image labelled as an input.
+- GEN-130: `generate --climate-preview DIR [--seed N | --world F] [--km N] [--fine-lattice N]`: planet maps of annual precipitation with the single-wind model against the two-season one, aridity, seasonality, wind arrows, the four preview regions' material colours, the land shares by aridity class and by latitude band and the windward over lee ratios across belts (also on a finer lattice); every image labelled as an input.
 - Not here: arid class rules (GEN-128, next change), runoff in the carve (explorer's lane, reads `Orography::precipitation_mm`), a rebaked preview store (explorer), cold-current coastal deserts, dunes.
 
 ## Impact
-- Code: `generators` (`orography.rs`, `orography_preview.rs`, `global.rs`, `bake/inputs.rs`), `app` (the option). Requirements: GEN-117, GEN-129 added; GEN-013 and GEN-021 follow the version.
+- Code: `generators` (`orography.rs`, `orography_preview.rs`, `global.rs`, `bake/inputs.rs`), `app` (the option). Requirements: GEN-117, GEN-130 added; `BakeInputs` holds the climate (built on first use); GEN-013 and GEN-021 follow the version.
 - Material colours that read precipitation change planet-wide (the owner's look, decided on the preview).
 - All numbers are start values for the owner's preview round.

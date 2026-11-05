@@ -23,7 +23,7 @@ fn directions() -> Vec<Vec3> {
 #[test]
 fn the_class_sample_keeps_the_continent_and_the_shore_and_takes_the_class_elevation_and_its_climate() {
     let inputs = BakeInputs::new(SEED, 2);
-    let (mut land, mut differ) = (0, 0);
+    let (mut land, mut differ, mut rain_differs) = (0, 0, 0);
     for d in directions() {
         let (legacy, class) = (sample(SEED, d), class_sample(SEED, d, &inputs));
         assert_eq!(legacy.continent.to_bits(), class.continent.to_bits(), "the continent value is the same at {d:?}");
@@ -36,16 +36,25 @@ fn the_class_sample_keeps_the_continent_and_the_shore_and_takes_the_class_elevat
         );
         let expected = inputs.base(d);
         assert_eq!(class.elevation_m, expected as f32, "the elevation is the class source's");
-        // The climate follows the elevation it colours: the temperature is the formula's at the class elevation; the rain does not depend on the elevation, so it is the legacy rain to the bit.
+        // The climate follows the elevation it colours: the temperature is the formula's at the class elevation; the rain is the orographic climate's (GEN-117, GLOBAL_VERSION 7), in the channel's range.
         let (t, _) = climate_from_elevation(SEED, d, expected, 0.0);
         assert_eq!(class.temperature_c.to_bits(), t.to_bits(), "temperature at {d:?}");
-        assert_eq!(class.precipitation_mm.to_bits(), legacy.precipitation_mm.to_bits(), "rain at {d:?}");
+        assert_eq!(
+            class.precipitation_mm.to_bits(),
+            (inputs.orography().precipitation_mm(d).clamp(0.0, 4500.0) as f32).to_bits(),
+            "rain at {d:?}"
+        );
+        rain_differs += usize::from((class.precipitation_mm - legacy.precipitation_mm).abs() > 1.0);
         if class.elevation_m > 0.0 {
             land += 1;
             differ += usize::from((class.elevation_m - legacy.elevation_m).abs() > 1.0);
         }
     }
     assert!(land > 200, "land points sampled: {land}");
+    assert!(
+        rain_differs * 2 > land,
+        "the class world's rain follows its relief and the winds, not the legacy bands: {rain_differs} points differ"
+    );
     assert!(differ * 2 > land, "the class elevation differs from the legacy one over land (the point of the change): {differ} of {land}");
 }
 

@@ -24,8 +24,9 @@ use crate::height::layer_noise;
 /// Bump whenever any output of this module changes (ADR 0006). History: 2 = the climate's pole axis moved to COORD's +z (3);
 /// 4 = the global stage gains the ocean-connectivity channel (`crate::ocean`, ADR 0041 point 2); the four sample channels are
 /// unchanged, but every key under this version is new, so stored blocks of version 3 are unreachable; 5 = the hill band joins the elevation
-/// (GEN-064, ADR 0080); 6 = the continent value comes from the continent stage (`crate::continents`, GEN-104).
-pub const GLOBAL_VERSION: u32 = 6;
+/// (GEN-064, ADR 0080); 6 = the continent value comes from the continent stage (`crate::continents`, GEN-104); 7 = the precipitation of a class-source world comes from the orographic climate
+/// (`crate::orography`, GEN-117, ADR 0104; the legacy field's formula is unchanged), so stored blocks of version 6 are refused.
+pub const GLOBAL_VERSION: u32 = 7;
 /// Names this implementation in cache keys (CON-07).
 pub const IMPLEMENTATION_ID: &str = "cpu-global-coarse-v1";
 
@@ -375,19 +376,21 @@ pub fn sample(seed: u64, d: Vec3) -> GlobalSample {
     };
     let ridge = ridge_at(seed, t.warped);
     let elevation = (base + 5200.0 * ridge * zone * inland + hill_band(seed, &t, ridge)).clamp(MIN_ELEVATION_M, MAX_ELEVATION_M);
-    finish_sample(seed, d, &t, elevation)
+    finish_sample(seed, d, &t, elevation, None)
 }
 
 /// The sample at `d` whose elevation is the class source's ([`crate::bake::inputs::BakeInputs::base`], GEN-115): the same continent, coast and climate formula as [`sample`], over the
 /// class source's surface. The shore is the same as the legacy field's (both are 0 where the land depth is 0 and the band only lifts), so the ocean and coast channels keep their shape.
 pub fn class_sample(seed: u64, d: Vec3, inputs: &crate::bake::inputs::BakeInputs) -> GlobalSample {
     let t = terrain(seed, d);
-    finish_sample(seed, d, &t, inputs.base(d).clamp(MIN_ELEVATION_M, MAX_ELEVATION_M))
+    finish_sample(seed, d, &t, inputs.base(d).clamp(MIN_ELEVATION_M, MAX_ELEVATION_M), Some(inputs.orography().precipitation_mm(d)))
 }
 
 /// The sample of a point with terrain `t` and `elevation` in metres: the continent value, the elevation and the climate that follows the elevation.
-fn finish_sample(seed: u64, d: Vec3, t: &Terrain, elevation: f64) -> GlobalSample {
+fn finish_sample(seed: u64, d: Vec3, t: &Terrain, elevation: f64, orographic_mm: Option<f64>) -> GlobalSample {
     let (temperature_c, precipitation_mm) = climate_from_elevation(seed, d, elevation, if t.land_depth > 0.0 { t.inland } else { 0.0 });
+    // A class-source world takes its rain from the orographic climate (GEN-117), in the legacy channel's range.
+    let precipitation_mm = orographic_mm.map_or(precipitation_mm, |p| p.clamp(0.0, 4500.0) as f32);
     GlobalSample {
         continent: t.continent as f32, // exact: already rounded above
         elevation_m: elevation as f32,
@@ -400,15 +403,24 @@ fn finish_sample(seed: u64, d: Vec3, t: &Terrain, elevation: f64) -> GlobalSampl
 /// inland measure in `[0, 1]`, 0 over the sea): temperature falls with latitude and, over land, with height; rain follows the latitude bands and dries towards the interior.
 /// [`sample`] calls it with the generator's elevation; a test field calls it with its own heights (GEN-021), so the climate follows the field it colours.
 pub fn climate_from_elevation(seed: u64, d: Vec3, elevation: f64, interior: f64) -> (f32, f32) {
-    let sin_lat = sin_latitude(d);
-    let lat_deg = libm::asin(sin_lat) * (180.0 / core::f64::consts::PI);
-    let abs_lat = libm::fabs(lat_deg);
-    let altitude_km = elevation.max(0.0) / 1000.0;
-    let temperature = 30.0 - 55.0 * sin_lat * sin_lat - 6.5 * altitude_km + 4.0 * fbm(seed, LAYER_TEMPERATURE, d, 2.0, 3);
-    let bands = 700.0 + 1900.0 * gauss(lat_deg, 0.0, 12.0) + 900.0 * gauss(abs_lat, 52.0, 14.0) - 650.0 * gauss(abs_lat, 27.0, 8.0);
+    let temperature = temperature_c(seed, d, elevation);
+    let bands = rain_bands_mm(libm::asin(sin_latitude(d)) * (180.0 / core::f64::consts::PI));
     let wetness = 1.0 + 0.45 * fbm(seed, LAYER_RAIN, d, 2.5, 3) - 0.25 * interior;
     let precipitation = (bands * wetness).clamp(0.0, 4500.0);
     (temperature as f32, precipitation as f32)
+}
+
+/// The annual mean temperature in degrees C at `d` and `elevation` in metres: falls with latitude and, over land, with height (the temperature of [`climate_from_elevation`]).
+pub fn temperature_c(seed: u64, d: Vec3, elevation: f64) -> f64 {
+    let sin_lat = sin_latitude(d);
+    let altitude_km = elevation.max(0.0) / 1000.0;
+    30.0 - 55.0 * sin_lat * sin_lat - 6.5 * altitude_km + 4.0 * fbm(seed, LAYER_TEMPERATURE, d, 2.0, 3)
+}
+
+/// The zonal rain bands in mm a year at latitude `lat_deg` (the equatorial belt, the mid-latitude storm tracks, the subtropical dry belts): the frontal rain of the orographic climate ([`crate::orography`]).
+pub fn rain_bands_mm(lat_deg: f64) -> f64 {
+    let abs_lat = libm::fabs(lat_deg);
+    700.0 + 1900.0 * gauss(lat_deg, 0.0, 12.0) + 900.0 * gauss(abs_lat, 52.0, 14.0) - 650.0 * gauss(abs_lat, 27.0, 8.0)
 }
 
 /// The baked field of one body: `(res + 1)^2` samples per face (`res` cells per face edge), vertices included, so the

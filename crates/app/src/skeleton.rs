@@ -226,8 +226,14 @@ pub fn generate(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     if o.uplift_preview.is_some() {
         return generate_uplift_preview(o, out);
     }
+    if o.climate_preview.is_some() {
+        return generate_climate_preview(o, out);
+    }
+    if o.given.contains("--fine-lattice") {
+        return Err("--fine-lattice applies to --climate-preview".into());
+    }
     if o.given.contains("--km") {
-        return Err("--km applies to --lithology-preview or --uplift-preview".into());
+        return Err("--km applies to --lithology-preview, --uplift-preview or --climate-preview".into());
     }
     if o.global_dir.is_some() || o.verify_global.is_some() || o.global_products.is_some() {
         return generate_global(o, out);
@@ -317,6 +323,7 @@ fn generate_lithology_preview(o: &Options, out: &mut dyn Write) -> Result<(), St
         "--verify-global",
         "--global-products",
         "--uplift-preview",
+        "--climate-preview",
     ]
     .into_iter()
     .filter(|f| o.given.contains(*f))
@@ -365,6 +372,7 @@ fn generate_uplift_preview(o: &Options, out: &mut dyn Write) -> Result<(), Strin
         "--verify-global",
         "--global-products",
         "--lithology-preview",
+        "--climate-preview",
     ]
     .into_iter()
     .filter(|f| o.given.contains(*f))
@@ -389,6 +397,60 @@ fn generate_uplift_preview(o: &Options, out: &mut dyn Write) -> Result<(), Strin
         world.seed(),
         o.preview_km,
         planet_generators::uplift::UPLIFT_VERSION,
+        dir.display(),
+        started.elapsed().as_secs_f64()
+    )
+    .map_err(err)
+}
+
+/// `generate --climate-preview DIR [--seed N | --world F] [--km N] [--fine-lattice N] [--threads N]` (GEN-130): the preview of the orographic climate (GEN-117) with no GPU: maps of the precipitation with the
+/// annual wind and with two seasons, aridity, seasonality and the wind of both seasons, the material colour at four regions, and `orography.txt` with the land shares by aridity class and the windward and lee
+/// precipitation ratios across belts (also on a lattice of `--fine-lattice` cells a face edge). The images show the climate, an input of the bake, not terrain.
+fn generate_climate_preview(o: &Options, out: &mut dyn Write) -> Result<(), String> {
+    let dir = o.climate_preview.as_ref().expect("the option is given");
+    let clash: Vec<&str> = [
+        "--tile",
+        "--out",
+        "--face-net",
+        "--manifest",
+        "--smoke",
+        "--cache-dir",
+        "--verify-cache",
+        "--region",
+        "--res",
+        "--global-dir",
+        "--verify-global",
+        "--global-products",
+        "--lithology-preview",
+        "--uplift-preview",
+    ]
+    .into_iter()
+    .filter(|f| o.given.contains(*f))
+    .collect();
+    if !clash.is_empty() {
+        return Err(format!("--climate-preview excludes {}", clash.join(", ")));
+    }
+    if o.given.contains("--world") && o.given.contains("--seed") {
+        return Err("--world and --seed both name the definition: give one".into());
+    }
+    let (threads, _) = planet_streaming::topology::bake_threads(o.threads)?;
+    let world = global_world_of(o)?;
+    let started = std::time::Instant::now();
+    let source = planet_generators::classes::ClassSource::new(world.seed());
+    let provinces = planet_generators::lithology::ProvinceLattice::build(&source, threads);
+    let seed = world.seed();
+    let climate = planet_generators::orography::Orography::new(seed, &source, threads);
+    let fine = o
+        .fine_lattice
+        .map(|n| planet_generators::orography::Orography::build(seed, &source, n, &planet_generators::orography::SEASONS, threads));
+    let preview = planet_generators::orography_preview::preview(&source, seed, &provinces, &climate, o.preview_km, fine.as_ref(), threads);
+    planet_generators::orography_preview::write(dir, &preview).map_err(|e| format!("writing {}: {e}", dir.display()))?;
+    writeln!(
+        out,
+        "climate preview (orographic climate, an input of the bake, not terrain): seed {seed}, {} km a pixel, lattice {} cells, version {}, written to {} in {:.1} s",
+        o.preview_km,
+        climate.cells(),
+        planet_generators::orography::OROGRAPHY_VERSION,
         dir.display(),
         started.elapsed().as_secs_f64()
     )
