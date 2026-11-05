@@ -1,0 +1,1 @@
+- 2026-11-05 channels-fill-erosion: the channel reader gives the pit depth (kind 17) and the erosion depth max(0, deposited - (change + pit)) at a point, with byte-capped caches for the pit and layer tiles; reader only, no slot, key, shader or look change (STRM-075; I8a slice 2b PR 4a)

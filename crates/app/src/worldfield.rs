@@ -712,6 +712,8 @@ impl WorldTerrain {
                 .map_err(|e| format!("--erosion: {e}"))?;
         let (face_res, planet_res) = (shape.face_res, shape.planet_res);
         let replaced = o.face_res.is_some() || o.planet_res.is_some();
+        // The layer's decoded tiles are shared with the channel reader: the change with the pit depth added back, and the pit codes, are the heights' own tile, not a second copy.
+        let layer = Arc::new(layer);
         // The baked channels beside the layer (VIEW-066): read under the keys of the same shape (the areas at pass 1's cells a face edge, the depths at pass 2's), refused when the store holds none.
         let channels: Option<Arc<dyn planet_generators::channels::ChannelSource>> = if o.channels {
             let tiles_dir = if dir.join("tiles").is_dir() { dir.join("tiles") } else { dir.clone() };
@@ -727,6 +729,7 @@ impl WorldTerrain {
                 shape.planet_res as u32,
                 area_spec,
                 depth_spec,
+                layer.clone(),
                 planet_cache::layer_channels::ChannelCaches::DEFAULT,
             );
             let faces = reader.faces_with_area().map_err(|e| format!("--channels: {e}"))?;
@@ -740,7 +743,7 @@ impl WorldTerrain {
         } else {
             None
         };
-        let layer = planet_generators::erosion_layer::ErosionLayer::new(Arc::new(layer)).map_err(|e| format!("--erosion: {e}"))?;
+        let layer = planet_generators::erosion_layer::ErosionLayer::new(layer).map_err(|e| format!("--erosion: {e}"))?;
         let sea_level_m = def.sea(BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;
         // The layer's ground is the lattice read C1 (a bilinear read leaves a crease along every lattice cell under it): the default field is upgraded.
         self.kind = HeightFieldKind::ErodedC1;

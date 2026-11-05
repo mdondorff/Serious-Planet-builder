@@ -15,4 +15,10 @@ pub trait ChannelSource: Send + Sync {
 
     /// The deposited depth at `d` in metres (codes of 1 m, interpolated bilinearly in metres).
     fn deposited_depth_m(&self, d: Vec3) -> Result<Option<f32>, String>;
+
+    /// The pit depth (the fill depth of keep-pits, GEN-120) at `d` in metres: how far the ground lies below the flood of the final surface, 0 outside pits.
+    fn fill_depth_m(&self, d: Vec3) -> Result<Option<f32>, String>;
+
+    /// The erosion depth at `d` in metres: `max(0, deposited - (change + fill))` of the layer's cell, the depth the carve removed, not counting a pit (which the filled look adds back).
+    fn erosion_depth_m(&self, d: Vec3) -> Result<Option<f32>, String>;
 }
