@@ -21,6 +21,7 @@
 | Performance windows and CI history | `docs/perf/` (`window-<N>.md`, raw data in `window-<N>/`) up to M7; a milestone's later windows in `docs/milestones/<M>/` |
 | Surprises and corrected assumptions still in force | `docs/learnings.md` |
 | Progress screenshots | `docs/dev_screenshots/` |
+| Sample look files for the owner's review (proposals, not defaults) | `docs/looks/` |
 | The original research and set-up documents | `docs/background/` (frozen, non-normative) |
 | Reference images for golden tests | `tests/goldens/<adapter>/` |
 | Agent roles, skills and their memory | `.claude/` and `CLAUDE.md` |
