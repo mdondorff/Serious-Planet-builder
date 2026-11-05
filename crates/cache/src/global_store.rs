@@ -950,6 +950,7 @@ impl GlobalWorld {
     /// without building the class lattice; it cannot bake (`field` would sample the legacy generator).
     fn keyed_as_class_source(mut self) -> GlobalWorld {
         let mut params = BakeInputs::id().to_le_bytes().to_vec();
+        params.extend(BakeInputs::climate_id().to_le_bytes());
         params.extend(self.seed.to_le_bytes());
         self.reads.retain(|r| !matches!(r, ReadEntry::Query { kind: QUERY_FIELD_SOURCE, .. }));
         self.reads.push(ReadEntry::Query { kind: QUERY_FIELD_SOURCE, params, result: [0; 16] });
