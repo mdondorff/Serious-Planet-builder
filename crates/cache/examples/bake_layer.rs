@@ -123,12 +123,7 @@ fn main() {
     let ocean_source = ocean_store
         .as_ref()
         .map(|s| planet_cache::global_store::StoreOceanSource::new(s, &world, o.global_res).unwrap_or_else(|e| fail(&format!("{e:?}"))));
-    let outlet_id = match &o.global_dir {
-        Some(dir) => {
-            format!("ocean res={} store={}", o.global_res, dir.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned()))
-        }
-        None => "all".to_string(),
-    };
+    let outlet_id = planet_cache::layer_fillpass::outlet_identity(o.global_dir.as_deref().map(|d| (o.global_res, d)));
     let ocean = |d: Vec3| match &ocean_source {
         Some(src) => planet_generators::ocean::ocean_at(src, d).unwrap_or_else(|e| fail(&format!("the ocean channel: {e:?}"))),
         None => true,
