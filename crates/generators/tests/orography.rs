@@ -13,7 +13,7 @@ fn lon_lat(d: Vec3) -> (f64, f64) {
 
 fn at(lon: f64, lat: f64) -> Vec3 {
     let (lo, la) = (lon.to_radians(), lat.to_radians());
-    Vec3::new(la.cos() * lo.cos(), la.cos() * lo.sin(), la.sin())
+    Vec3::new(libm::cos(la) * libm::cos(lo), libm::cos(la) * libm::sin(lo), libm::sin(la))
 }
 
 impl BaseElevation for Ridge {
