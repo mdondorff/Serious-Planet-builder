@@ -435,6 +435,16 @@ impl ClassSource {
     }
 }
 
+impl crate::orography::BaseElevation for ClassSource {
+    fn e0(&self, d: Vec3) -> f64 {
+        self.eval(d).e0
+    }
+
+    fn land_depth(&self, d: Vec3) -> f64 {
+        terrain(self.seed, d).land_depth
+    }
+}
+
 /// The least height of a land point under the centred band (GEN-098).
 pub const MIN_LAND_M: f64 = 1.0;
 
