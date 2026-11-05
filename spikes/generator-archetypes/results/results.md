@@ -374,7 +374,7 @@ The filled surface is what the runtime shows with the stored fill depth added (n
 2. **The gain survives the fill: 679 m against 506 m on the filled surface.**
    - P1b's design holds: bake the pits, store the fill depth, and the runtime shows today's filled look.
    - The relief comes from the carve around the basins, not from open holes.
-3. **The pits are about 10× deeper than real mountain pits** (p50 63 m against 3-7 m). Open, they read as a pocked texture on the flanks (the stills).
+3. **The pits are about 10× deeper than real mountain pits** (p50 63 m against 3-7 m). Open, they read as deep ravine floors; the pocked texture on the right flank of the stills is not made of pits (section 8).
    - Without lake water they must stay filled at runtime.
    - With lake water, F8 (pit tolerance) must keep only the plausible ones. GLO-30 shows 1-5 % of mountain land with shallow pits.
 4. **Pass 1 took 1,471 s for (b) against 2,233 s for (a), on the same machine.**
@@ -425,10 +425,47 @@ The preview runs through the product path, `test-render --scene capture-stills -
 - Plains and hills at 2 km: material colour with orographic P (PR 5) against main's sheet, at the same pose and sun.
 - A badlands-weighted tile and a sand-sea tile, if PR 7 gives them weight: 2 km and 300 m, in their own sets.
 
+## 8. The blotches on the right flank: hollows or bumps? (inbox #88)
+
+Question (owner): are the blotches on the right flank of `sheet-keep-pits.jpg` (b) at 2 km kept basins, or small hills?
+
+Answer: **bumps and benches, not kept basins.** The box over them holds no kept basin at all, and the same bumps are in (a), which has no keep-pits. The sentence in the Visuals section below, "a pocked texture of open pits on the right-hand flank", was wrong and is corrected there.
+
+Method:
+- Tile 2/12/10, seed 14, run (b) (a plus keep-pits), unfilled, the `b.h.f32` dump (3,072 x 3,072 cells of 101.8 m); the fill depth is the priority-flood depth of that dump (open at the tile edge and the sea): `depth = filled - h`.
+- The pose of the 2 km still: `erosion_stills` site `mountains=2,12,10`, heading -45° (north-west), 22° down, 60° vertical field of view, eye 2,000 m above the ground at tile cell (2304, 2304); the heading is the tool's own choice of the highest ground ahead.
+- The overlay is not a render pass: `overlay_cam` (spike branch) ray-marches each pixel of that camera against the dump and reads the fill depth at the hit cell. It matches the still: the magenta basins lie exactly in the valley floors that the still shows.
+
+Sun: elevation 8°, azimuth 217° clockwise from the view direction, so the sun is behind the camera and over its left shoulder; with the view heading 315° that is about 172° compass (from the south-south-east). The tool's comment says "right shoulder"; its code (`right = heading x up * -1`) puts the sun on the left, and the lit and shaded sides in the still agree with the left.
+
+| What | Value |
+|---|---|
+| Overlay | kept basins by fill depth, 0.5 m (transparent to pale) to 60 m and more (magenta) |
+| White box (row of blotches) | image x 1,330-1,505, y 440-520; cells i 2,291-2,305, j 2,380-2,402 of the tile |
+| Fill depth in the box | max 0.0 m over 14,000 pixels |
+| Kept basins in the view | 9.6 % of the right flank's pixels (the ravine floors; 9.0 % are 5 m or deeper) |
+| Cross-section line | a straight line in cell space from (2274.9, 2369.6) to (2320.1, 2409.0), 6,108 m, 0.25-cell steps, bilinear; face cells add 12 x 3,072 to i and 10 x 3,072 to j |
+| Line, kept basin | one, at 0-1 km (fill depth up to 190 m, the ravine floor); none along 2.2-3.9 km |
+| Line, the bumps | at 3.33 km a bump of about 25 m over the slope in (b) (about 40 m over the 1.5 km mean); the same bump is in (a) |
+
+Reading:
+- A kept basin lies below the filled surface; the blue (filled) and red (unfilled) lines are the same everywhere except the ravine at 0-1 km, so the filled look would change nothing at the blotches.
+- The blotches are 300-400 m wide, 10-40 m high steps on the flank; the low sun lights their sunward face (tan: the slope material) and leaves a shaded side, which reads as a rock or a hill.
+- They are in (a) as well, so they are not made by keep-pits. Their origin is not traced here (candidates: the base's hill band, pass 2's carve and thermal step). Keep-pits only deepens the ravine next to them (b minus a on the line: p5/p50/p95 of -158/-83/+106 m).
+- One transect and one box: a statement about this row, not a count over the tile. The share of such bumps over the tile would need a detector (a local maximum with a closed contour 10-40 m high); not run.
+
+Visuals: `images/sheet-keep-pits-overlay.jpg` (top: the still, (b), unfilled; bottom: the same pose with the overlay, the box and the line in cyan) and `images/section-right-flank.png` (heights along the line: a, b filled, b unfilled, the kept basin in magenta; the middle panel zooms into 2.2-3.9 km, the bottom panel is (b) minus its 1.5 km mean).
+
 ## Visuals
 
 ![keep-pits](images/sheet-keep-pits.jpg)
 Mountains tile 2/12/10, seed 14, stills tool (`erosion_stills` on the spike branch; not the product path, because the candidates exist only there). The layer is read C1 with the coast fade; sun 8°; 2 km (top) and 10 km (bottom) above the ground; software adapter.
 - Left, (a): the SPIKE-101 pair.
 - Right, (b): (a) plus keep-pits, drawn unfilled (the pits open), which is the worst case.
-- (b) has sharper crests and deeper valley shadows, and a pocked texture of open pits on the right-hand flank. With the stored fill depth added, the runtime would draw those pits as flats.
+- (b) has sharper crests and deeper valley shadows, and a pocked texture of bumps and benches on the right-hand flank. Section 8 shows they are not open pits (the pits are the ravine floors) and that (a) has them too.
+
+![overlay](images/sheet-keep-pits-overlay.jpg)
+The 2 km pose of the sheet above with the kept basins coloured by fill depth (section 8).
+
+![section](images/section-right-flank.png)
+Height cross-section through the row of blotches (section 8).
