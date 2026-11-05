@@ -26,6 +26,11 @@ impl BakeInputs {
         self.source.seed()
     }
 
+    /// The class weights at a direction (the lattice read; the class of a cell is the largest).
+    pub fn weights_at(&self, d: Vec3) -> [f64; crate::classes::CLASS_COUNT] {
+        self.lattice.weights_at(d)
+    }
+
     /// The base elevation at a direction: the class source's, with the class-blended relief driver.
     pub fn base(&self, d: Vec3) -> f64 {
         let p = self.source.eval(d);
