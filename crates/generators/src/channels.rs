@@ -13,7 +13,7 @@ pub trait ChannelSource: Send + Sync {
     /// The drainage area at `d` as log2 of cells of pass 1's grid.
     fn area_log2_cells(&self, d: Vec3) -> Result<Option<f32>, String>;
 
-    /// The deposited depth at `d` in metres (codes of 1 m, interpolated bilinearly in metres).
+    /// The deposited depth at `d` in metres (square-root codes `round(12 sqrt(m))`, interpolated bilinearly in metres).
     fn deposited_depth_m(&self, d: Vec3) -> Result<Option<f32>, String>;
 
     /// The pit depth (the fill depth of keep-pits, GEN-120) at `d` in metres: how far the ground lies below the flood of the final surface, 0 outside pits.

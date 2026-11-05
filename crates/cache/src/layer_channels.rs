@@ -4,7 +4,7 @@
 //! Record kind 14 ([`KIND_LAYER_AREA`]) is one record per cube face filed under the face's root tile: `codec (u8) | cells (u32 LE, pass 1's cells a face edge) | key (16 bytes) |` a brotli
 //! stream (quality 5, window 22 bits) of the face's own cells as `u8` codes of the drainage area by multiple flow direction (`round(8 log2(area / cell area))`), row `j` outer, each row as its
 //! first byte and the wrapping differences along the row. Record kind 15 ([`KIND_LAYER_DEPTH`]) is one record per tile filed like kind 13: `codec (u8) | tile (u32 LE) | key (16 bytes) |` a
-//! brotli stream of the deposited plane of the core (`u8` codes `round(m)`, 0 to 255 m in steps of 1 m), each row as in kind 14. The depth removed is not stored: it is
+//! brotli stream of the deposited plane of the core (`u8` square-root codes `round(12 sqrt(m))`, 0 to 451.6 m), each row as in kind 14. The depth removed is not stored: it is
 //! `max(0, deposited - change)` of the tile's kind 13 ([`removed_depth_m`]). A decoder refuses an unknown codec and a stream
 //! that does not decode to exactly the expected bytes, and never reserves more than that. Both keys carry the version of the channels, the scales of the codes and the key parameters of the layer
 //! they were computed beside, so a channel of another layer is refused by name, never mixed.

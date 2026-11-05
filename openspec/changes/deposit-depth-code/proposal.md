@@ -13,4 +13,6 @@ Owner decision 2026-11-05 (planner inbox #71 item 2): the deposited depth of kin
 - `streaming-cache`: STRM-072 (planned, in `m9-bake`)
 
 ## Impact
+- Size: the compressed plane of tile 2/12/10 (1,754,126 cells with a deposit of 9,437,184) is 2,602,694 bytes as the square-root code against 2,124,377 as the 1 m code (0.276 against 0.225 bytes a cell, +22 %).
+- `CHANNELS_VERSION` is in the key of kinds 14 and 17 too: a store from before is refused as a whole, and a layer whose pass-1 store was already dropped needs pass 1 again (the areas are copied from it).
 - Code: `generators::bake::tile`, `cache::layer_channels` (key). Tests: `cache/tests/layer_channels.rs`. A store baked before is refused as another key. No golden moves.

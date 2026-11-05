@@ -139,6 +139,8 @@ fn the_deposited_depth_code_is_a_square_root_fine_near_zero_and_the_removed_dept
     assert_eq!(depth_code(0.003), 1);
     assert_eq!(depth_code(1.0), 12);
     assert_eq!(depth_m(12), 1.0);
+    assert_eq!(depth_code(449.7), 254);
+    assert_eq!(depth_code(449.8), 255);
     assert_eq!(depth_code(451.6), 255);
     assert_eq!(depth_code(1.0e6), 255);
     assert!((0..255u8).all(|c| depth_m(c) < depth_m(c + 1)));
@@ -171,7 +173,7 @@ fn the_deposited_depth_code_is_a_square_root_fine_near_zero_and_the_removed_dept
         assert!(r.deposited.iter().any(|&c| c > 0) && r.deposited.contains(&0), "deposition happens in places");
         let tol = |d: f64| 0.5 * f64::from(depth_m(depth_code(d).saturating_add(1)) - depth_m(depth_code(d))) + 0.2;
         // The removed depth the reader derives, max(0, deposited - change), is what the cell lost net of its deposit, and never negative: eroded = deposited - change + the pass-1 raise, so
-        // the reading is short by the raise where pass 1 raised the cell (the caveat) and equal elsewhere, to the 1 m step of the code and the 0.125 m step of the change.
+        // the reading is short by the raise where pass 1 raised the cell (the caveat) and equal elsewhere, to the step of the code and the 0.125 m step of the change.
         for (p, c) in r.core.iter().enumerate() {
             let (d, c) = (f64::from(depth_m(r.deposited[p])), f64::from(*c));
             let removed = f64::from(removed_depth_m(d as f32, c as f32));
@@ -679,4 +681,19 @@ fn workers_asking_for_one_pit_or_layer_tile_at_once_decode_it_once_from_the_laye
         ch.fill_depth_m(pt).unwrap();
     }
     assert_eq!(sl.decodes(), 1);
+}
+
+// spec: GEN-111
+#[test]
+fn a_cell_that_only_gained_material_is_removed_by_at_most_the_noise_of_the_two_steps() {
+    // The derived removal on a cell that only gained (change >= 0): at most half a step of the code plus half a step of the change (the change is stored in steps of 0.25 m, so 0.125 m); the 1 m code gave exactly 0 under 0.5 m of deposit.
+    for k in 1..2000 {
+        let gained = f64::from(k) * 0.05;
+        let code = depth_code(gained);
+        let step =
+            f64::from(depth_m(code.saturating_add(1)) - depth_m(code)).max(f64::from(depth_m(code) - depth_m(code.saturating_sub(1))));
+        let change = (gained as f32 / 0.25).round() * 0.25;
+        let removed = f64::from(removed_depth_m(depth_m(code), change));
+        assert!(removed <= 0.5 * step + 0.125 + 1e-6, "gained {gained} m: code {code}, change {change}, removed {removed}");
+    }
 }
