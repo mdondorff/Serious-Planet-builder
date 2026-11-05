@@ -17,3 +17,4 @@
 - One decode per window or tile under concurrent workers (a lock around the miss path, the cache rechecked after it), counted in `ChannelStats` for the measurement.
 - A blocked kind 14 (the explorer lane's format) would make a cold window about 2 ms; not requested.
 - `diagnostic_decode_unchecked` stays in the library because the probe is an example of another crate; its doc names it a diagnostic and a test fails if any file outside its definition (tests and examples excepted) mentions it.
+- For the explorer lane: when m9-bake archives, the cache sentence of STRM-072 ("bounded caches of the decoded faces and tiles", a reader that borrows) is reconciled with STRM-075. A blocked kind 14 (a persisted-format change, the owner's call) would make a cold window about 2 ms.

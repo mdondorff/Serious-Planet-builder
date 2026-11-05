@@ -305,8 +305,7 @@ fn at(x: i64) -> Vec3 {
 #[test]
 fn a_window_of_the_area_equals_the_same_cells_of_the_whole_face_and_a_bad_window_is_refused() {
     let (w, p1) = (world(), Dir::new("p1"));
-    let f = faces(p1.path(), &w);
-    let _ = f;
+    faces(p1.path(), &w);
     let a = Dir::new("a");
     copy_areas(p1.path(), a.path(), &w, RES, &pass1(), &all_faces()).unwrap();
     let store = TileStore::open(a.path(), w.params()).unwrap();
@@ -402,4 +401,45 @@ fn the_diagnostic_decode_that_skips_the_key_check_is_called_by_no_runtime_code()
         }
     }
     assert_eq!(uses, ["cache/src/layer_channels.rs"], "the diagnostic decode is used outside its definition: {uses:?}");
+}
+
+// spec: STRM-075
+#[test]
+fn a_read_at_a_window_boundary_equals_the_bilinear_mean_of_the_whole_face_and_a_channel_of_another_layer_is_refused() {
+    use planet_core::cube::{direction_to_face, TangentWarp};
+    assert_eq!(ChannelCaches::DEFAULT, ChannelCaches { area_bytes: 16 << 20, area_window: 256, tile_bytes: 256 << 20 });
+    let (w, p1) = (world(), Dir::new("p1"));
+    let spec_t = spec(&w);
+    let f = faces(p1.path(), &w);
+    let _ = f;
+    let a = Dir::new("a");
+    copy_areas(p1.path(), a.path(), &w, RES, &pass1(), &all_faces()).unwrap();
+    let store = Arc::new(TileStore::open(a.path(), w.params()).unwrap());
+    let whole = load_area(&store, &w, RES, &pass1(), Face(0)).unwrap().expect("an area");
+    let n = pass1().cells;
+    let ch = LayerChannels::new(
+        store.clone(),
+        Arc::new(w.clone()),
+        RES,
+        pass1(),
+        spec_t,
+        ChannelCaches { area_bytes: 1 << 20, area_window: 8, tile_bytes: 1 << 20 },
+    );
+    // Pass 2's cells 28 to 33 put the point between pass 1's cells 7 and 8, 15 and 16: the cell past the window's step is read from the window's one-past column.
+    for x in [28i64, 29, 30, 31, 32, 33, 60, 61, 62, 63] {
+        let d = spec_t.grid.direction(Face(0), x, 7);
+        let (_, s, t) = direction_to_face(&TangentWarp, d);
+        let (fx, fy) =
+            (((s + 1.0) * 0.5 * n as f64 - 0.5).clamp(0.0, (n - 1) as f64), ((t + 1.0) * 0.5 * n as f64 - 0.5).clamp(0.0, (n - 1) as f64));
+        let (i, j) = ((fx.floor() as usize).min(n - 2), (fy.floor() as usize).min(n - 2));
+        let (ax, ay) = (fx - i as f64, fy - j as f64);
+        let c = |a: usize, b: usize| f64::from(whole[b * n + a]);
+        let expect = (1.0 - ay) * ((1.0 - ax) * c(i, j) + ax * c(i + 1, j)) + ay * ((1.0 - ax) * c(i, j + 1) + ax * c(i + 1, j + 1));
+        let got = ch.area_log2_cells(d).unwrap().expect("an area");
+        assert_eq!(got, (expect / 8.0) as f32, "x {x}: cells ({i}, {j})");
+    }
+    // A window of a layer made with other parameters is refused by name, never mixed.
+    let other = LayerSpec { seed: pass1().seed + 1, ..pass1() };
+    let e = load_area_window(&store, &w, RES, &other, Face(0), 0..9, 0..9).unwrap_err().to_string();
+    assert!(e.contains("another layer") || e.contains("not mixed"), "{e}");
 }
