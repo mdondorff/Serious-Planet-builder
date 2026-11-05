@@ -175,3 +175,9 @@ What happened: on seed 14, mountains tile 2/12/10, the stored bake's surface (`g
 Assumption it changes: that the layer can be added to the runtime base plus `k` and `m`; and that the lattice of a store is the surface a bake read.
 Proposed follow-up: the product's field bake is made from the class source and carries `BakeInputs::id()` (the viewer refuses `--erosion on` without that marker); `with_layer` needs no relief channels.
 Obsolete when: the field bake is made from the class source and the legacy generator is retired.
+
+## 2026-11-05 The stored change of keep-pits includes the pits
+Scope: project (GEN-120, STRM-075)
+What happened: the stored change (kind 13) keeps the pits and the runtime adds kind 17 back, so `removed_depth_m` on the stored change counts a pit as erosion; `erosion_depth_m` adds the pit depth first.
+Assumption it changes: that kind 13 is the change the viewer draws.
+Obsolete when: lake water replaces the filled look.

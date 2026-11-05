@@ -54,6 +54,20 @@ fn base(d: Vec3) -> f64 {
     }
 }
 
+/// A reader over `store` with the layer of the same store as its tile source (what the viewer shares), `StoreLayer` caching four tiles.
+fn new_reader(
+    store: Arc<TileStore>,
+    world: Arc<GlobalWorld>,
+    a: u32,
+    d: u32,
+    layer: LayerSpec,
+    s: TileLayerSpec,
+    caps: ChannelCaches,
+) -> LayerChannels {
+    let sl = StoreLayer::new(store.clone(), world.clone(), d, s, 4, (-1e6, 1e6)).unwrap();
+    LayerChannels::new(store, world, a, d, layer, s, Arc::new(sl), caps)
+}
+
 fn caches(area_bytes: usize, tile_bytes: usize) -> ChannelCaches {
     ChannelCaches { area_bytes, area_window: 8, tile_bytes }
 }
@@ -243,7 +257,7 @@ fn the_reader_returns_the_stored_depth_at_a_cell_centre_and_the_area_in_log2_cel
     let a = pass2_dir(&w, &s, &f, "a", 2);
     copy_areas(p1.path(), a.path(), &w, RES, &pass1(), &all_faces()).unwrap();
     let store = TileStore::open(a.path(), w.params()).unwrap();
-    let ch = LayerChannels::new(Arc::new(store), Arc::new(w.clone()), RES, RES, pass1(), s, caches(2 * 24 * 24, 4 * 24 * 24));
+    let ch = new_reader(Arc::new(store), Arc::new(w.clone()), RES, RES, pass1(), s, caches(2 * 24 * 24, 4 * 24 * 24));
     let r = pass2_tile(&s.grid, tiles()[0], &base, &face_change_reader(&f), None, &s.params, 2);
     // The centre of core cell (10, 7) of tile (0, 0) of face 0.
     let d = s.grid.direction(Face(0), 10, 7);
@@ -262,7 +276,7 @@ fn the_depth_reads_across_a_tile_border_without_a_step() {
     let f = faces(p1.path(), &w);
     let a = pass2_dir(&w, &s, &f, "a", 2);
     let store = TileStore::open(a.path(), w.params()).unwrap();
-    let ch = LayerChannels::new(Arc::new(store), Arc::new(w.clone()), RES, RES, pass1(), s, caches(2 * 24 * 24, 4 * 24 * 24));
+    let ch = new_reader(Arc::new(store), Arc::new(w.clone()), RES, RES, pass1(), s, caches(2 * 24 * 24, 4 * 24 * 24));
     // Tiles (0, 0) and (1, 0) of face 0 meet between cells 23 and 24 of the 96-cell grid; read along row 10 in tenths of a cell.
     let at = |i: f64| {
         let n = 96.0;
@@ -293,7 +307,7 @@ fn reader(area_bytes: usize, tile_bytes: usize) -> (LayerChannels, Dir, Dir) {
     copy_areas(p1.path(), a.path(), &w, RES, &pass1(), &all_faces()).unwrap();
     let store = TileStore::open(a.path(), w.params()).unwrap();
     let caps = ChannelCaches { area_bytes, area_window: 8, tile_bytes };
-    (LayerChannels::new(Arc::new(store), Arc::new(w), RES, RES, pass1(), s, caps), p1, a)
+    (new_reader(Arc::new(store), Arc::new(w), RES, RES, pass1(), s, caps), p1, a)
 }
 
 /// The direction of cell `(x, 7)` of face 0 on pass 2's 96-cell grid: pass 1's cell about a quarter of `x` (windows of 8 cells: `x` 10 is window 0, `x` 40 is window 1).
@@ -417,7 +431,7 @@ fn a_read_at_a_window_boundary_equals_the_bilinear_mean_of_the_whole_face_and_a_
     let store = Arc::new(TileStore::open(a.path(), w.params()).unwrap());
     let whole = load_area(&store, &w, RES, &pass1(), Face(0)).unwrap().expect("an area");
     let n = pass1().cells;
-    let ch = LayerChannels::new(
+    let ch = new_reader(
         store.clone(),
         Arc::new(w.clone()),
         RES,
@@ -451,9 +465,183 @@ fn the_identity_of_the_channels_follows_the_resolutions_of_their_keys_and_the_re
     use planet_generators::channels::ChannelSource;
     let (w, s) = (world(), spec(&world()));
     let store = Arc::new(TileStore::open(Dir::new("empty").path(), w.params()).unwrap_or_else(|_| panic!("a store")));
-    let make = |a: u32, d: u32| LayerChannels::new(store.clone(), Arc::new(w.clone()), a, d, pass1(), s, ChannelCaches::DEFAULT).identity();
+    let make = |a: u32, d: u32| new_reader(store.clone(), Arc::new(w.clone()), a, d, pass1(), s, ChannelCaches::DEFAULT).identity();
     assert_eq!(make(RES, RES), make(RES, RES), "equal specs, equal identity");
     assert_ne!(make(RES, RES), make(RES + 1, RES), "the area keys' resolution is part of it");
     assert_ne!(make(RES, RES), make(RES, RES + 1), "the depth keys' resolution is part of it");
-    assert_eq!(CHANNEL_READER_VERSION, 1, "a change of the sampling rule raises the version, which enters the identity");
+    assert_eq!(CHANNEL_READER_VERSION, 2, "a change of the sampling rule raises the version, which enters the identity");
+}
+
+/// A layer store of the tiny planet whose pass 2 had pits: the pit depth of pass 1 is 3 m on the half of the planet with x above 0 (a made-up reader, the spill level 3 m over the carved surface).
+fn pit_store() -> (GlobalWorld, TileLayerSpec, Dir, Dir) {
+    let (w, p1) = (world(), Dir::new("p1"));
+    let s = spec(&w);
+    let f = faces(p1.path(), &w);
+    let d = Dir::new("fill");
+    let pits = |v: Vec3| (if v.x > 0.0 { 3.0 } else { 0.0 }, v);
+    run_pass2(
+        d.path(),
+        &w,
+        RES,
+        &s,
+        &Pass2Inputs { base: &base, face_change: &face_change_reader(&f), factor: None, face_fill: Some(&pits) },
+        &tiles(),
+        2,
+        &mut |_| {},
+    )
+    .unwrap();
+    (w, s, p1, d)
+}
+
+// spec: STRM-075, STRM-076
+#[test]
+fn the_fill_and_erosion_depths_read_the_stored_cells_and_the_erosion_depth_is_what_the_carve_removed_not_counting_a_pit() {
+    use planet_cache::layer_fill::load_fill;
+    use planet_generators::bake::face::fill_m;
+    use planet_generators::channels::ChannelSource;
+    let (w, s, _p1, d) = pit_store();
+    let store = Arc::new(TileStore::open(d.path(), w.params()).unwrap());
+    // The reader shares the layer's decoded tiles (the heights' own): one `StoreLayer`, whose decodes are counted.
+    let sl = Arc::new(StoreLayer::new(store.clone(), Arc::new(w.clone()), RES, s, 4, (-1e6, 1e6)).unwrap());
+    let ch = LayerChannels::new(store.clone(), Arc::new(w.clone()), RES, RES, pass1(), s, sl.clone(), ChannelCaches::DEFAULT);
+    for id in [tiles()[0], tiles()[1]] {
+        let fill = load_fill(&store, &w, RES, &s, id).unwrap().expect("a fill");
+        let dep = load_depth(&store, &w, RES, &s, id).unwrap().expect("a depth");
+        let change = load_tile(&store, &w, RES, &s, id).unwrap().expect("a tile").core;
+        let t = s.grid.tile;
+        assert!(fill.iter().any(|c| *c > 0), "the tile holds pits: {id:?}");
+        let mut seen = (false, false);
+        for py in (0..t).step_by(5) {
+            for px in (0..t).step_by(5) {
+                let d = s.grid.direction(Face(0), (id.ti as usize * t + px) as i64, (id.tj as usize * t + py) as i64);
+                let p = py * t + px;
+                let want_fill = fill_m(fill[p]) as f32;
+                assert_eq!(ch.fill_depth_m(d).unwrap().expect("a fill"), want_fill, "fill at cell ({px}, {py}) of {id:?}");
+                let removed = (depth_m(dep.deposited[p]) - (change[p] + want_fill)).max(0.0);
+                let got = ch.erosion_depth_m(d).unwrap().expect("an erosion depth");
+                assert!((got - removed).abs() < 1e-4, "erosion {got} against {removed} at ({px}, {py}) of {id:?}");
+                seen = (seen.0 || want_fill > 0.0, seen.1 || removed > 0.0);
+            }
+        }
+        assert!(seen.0 && seen.1, "a pit and an eroded cell in the sample of {id:?}");
+    }
+    // A point in a tile the store holds no record of reads none, and the trait gives the reader's numbers.
+    let other = s.grid.direction(Face(1), 40, 40);
+    assert_eq!((ch.fill_depth_m(other).unwrap(), ch.erosion_depth_m(other).unwrap()), (None, None));
+    let at = s.grid.direction(Face(0), 12, 8);
+    let src: &dyn ChannelSource = &ch;
+    assert_eq!(src.fill_depth_m(at).unwrap(), ch.fill_depth_m(at).unwrap());
+    assert_eq!(src.erosion_depth_m(at).unwrap(), ch.erosion_depth_m(at).unwrap());
+    // The pit codes and the change come from the layer's tile, decoded once for all the reads (no second copy of the 37.7 MB core at 3,072 cells): two tiles, two decodes of the layer.
+    assert_eq!(sl.decodes(), 2, "the layer's tile is shared");
+}
+
+// spec: STRM-075, STRM-076
+#[test]
+fn the_fill_depth_reads_across_a_tile_border_without_a_step_and_the_identity_follows_the_fill_scale() {
+    use planet_generators::channels::ChannelSource;
+    let (w, s, _p1, d) = pit_store();
+    let store = Arc::new(TileStore::open(d.path(), w.params()).unwrap());
+    let ch = new_reader(store.clone(), Arc::new(w.clone()), RES, RES, pass1(), s, ChannelCaches::DEFAULT);
+    let n = 96.0;
+    let at = |i: f64| {
+        let d = planet_core::cube::face_to_direction(
+            &planet_core::cube::TangentWarp,
+            Face(0),
+            2.0 * (i + 0.5) / n - 1.0,
+            2.0 * (10.0 + 0.5) / n - 1.0,
+        );
+        ch.fill_depth_m(d).unwrap().expect("fill")
+    };
+    let (c23, c24) = (at(23.0), at(24.0));
+    let mut prev = c23;
+    for k in 1..=10 {
+        let v = at(23.0 + f64::from(k) / 10.0);
+        assert!((v - prev).abs() <= (c24 - c23).abs() + 1e-3, "a step at {k}/10: {prev} to {v}");
+        prev = v;
+    }
+    // The reader's identity folds the fill's key (which carries the fill scale): another resolution of the keys is another identity, and the reader version is 2.
+    let other = new_reader(store, Arc::new(w.clone()), RES, RES + 1, pass1(), s, ChannelCaches::DEFAULT);
+    assert_ne!(ch.identity(), other.identity());
+    assert_eq!(CHANNEL_READER_VERSION, 2);
+}
+
+// spec: STRM-075, STRM-076
+#[test]
+fn the_erosion_depth_at_a_tile_border_is_the_mean_of_the_two_cells_and_a_tile_without_a_pit_record_counts_no_pit() {
+    use planet_cache::layer_channels::KIND_LAYER_DEPTH;
+    use planet_cache::layer_fill::load_fill;
+    use planet_cache::layer_tiles::KIND_LAYER_TILE;
+    use planet_generators::bake::face::fill_m;
+    let (w, s, _p1, d) = pit_store();
+    let store = Arc::new(TileStore::open(d.path(), w.params()).unwrap());
+    let t = s.grid.tile;
+    let cell = |id: PassTile, px: usize, py: usize| -> f64 {
+        let p = py * t + px;
+        let fill = load_fill(&store, &w, RES, &s, id).unwrap().map_or(0.0, |f| fill_m(f[p]) as f32);
+        let dep = load_depth(&store, &w, RES, &s, id).unwrap().unwrap().deposited[p];
+        let change = load_tile(&store, &w, RES, &s, id).unwrap().unwrap().core[p];
+        f64::from((depth_m(dep) - (change + fill)).max(0.0))
+    };
+    let ch = new_reader(store.clone(), Arc::new(w.clone()), RES, RES, pass1(), s, ChannelCaches::DEFAULT);
+    // Rows 0 to 23 of tiles (0, 0) and (1, 0): the point between cell 23 of the first and cell 0 of the second, on a row centre, is the mean of the two cells (the bilinear read across the border).
+    let n = 96.0;
+    for row in [2usize, 7, 12, 20] {
+        let d = planet_core::cube::face_to_direction(
+            &planet_core::cube::TangentWarp,
+            Face(0),
+            2.0 * (23.5 + 0.5) / n - 1.0,
+            2.0 * (row as f64 + 0.5) / n - 1.0,
+        );
+        let want = 0.5 * (cell(tiles()[0], t - 1, row) + cell(tiles()[1], 0, row));
+        let got = f64::from(ch.erosion_depth_m(d).unwrap().expect("an erosion depth"));
+        assert!((got - want).abs() < 1e-4, "row {row}: {got} against the mean {want}");
+    }
+    // A store that holds the layer tile and the deposited depth of a tile and no pit record: the pit counts 0, so the erosion depth is `max(0, deposited - change)`.
+    let id = tiles()[0];
+    let none = Dir::new("nofill");
+    let mut writer = PackWriter::open(none.path(), w.params(), DEFAULT_MAX_PACK_BYTES).unwrap();
+    for (kind, tile) in [
+        (KIND_LAYER_TILE, planet_cache::layer_tiles::layer_tile_id(&s.grid, id).unwrap()),
+        (KIND_LAYER_DEPTH, planet_cache::layer_tiles::layer_tile_id(&s.grid, id).unwrap()),
+    ] {
+        let key = *store.keys_for(kind, tile).first().expect("a record");
+        writer.append(&store.get(kind, tile, key).unwrap().expect("a record")).unwrap();
+    }
+    writer.write_index().unwrap();
+    writer.finish().unwrap();
+    let bare = Arc::new(TileStore::open(none.path(), w.params()).unwrap());
+    let ch2 = new_reader(bare.clone(), Arc::new(w.clone()), RES, RES, pass1(), s, ChannelCaches::DEFAULT);
+    let d = s.grid.direction(Face(0), 12, 8);
+    assert_eq!(ch2.fill_depth_m(d).unwrap(), None, "the tile holds no pit record");
+    let p = 8 * t + 12;
+    let dep = load_depth(&bare, &w, RES, &s, id).unwrap().unwrap().deposited[p];
+    let change = load_tile(&bare, &w, RES, &s, id).unwrap().unwrap().core[p];
+    let want = (depth_m(dep) - change).max(0.0);
+    assert!((ch2.erosion_depth_m(d).unwrap().expect("an erosion depth") - want).abs() < 1e-4);
+}
+
+// spec: STRM-075
+#[test]
+fn workers_asking_for_one_pit_or_layer_tile_at_once_decode_it_once_from_the_layers_shared_tile() {
+    let (w, s, _p1, d) = pit_store();
+    let store = Arc::new(TileStore::open(d.path(), w.params()).unwrap());
+    let pt = s.grid.direction(Face(0), 12, 8);
+    let sl = Arc::new(StoreLayer::new(store.clone(), Arc::new(w.clone()), RES, s, 4, (-1e6, 1e6)).unwrap());
+    let ch = Arc::new(LayerChannels::new(store.clone(), Arc::new(w.clone()), RES, RES, pass1(), s, sl.clone(), ChannelCaches::DEFAULT));
+    let handles: Vec<_> = (0..6)
+        .map(|_| {
+            let ch = ch.clone();
+            std::thread::spawn(move || (ch.fill_depth_m(pt).unwrap(), ch.erosion_depth_m(pt).unwrap()))
+        })
+        .collect();
+    let values: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+    assert!(values.iter().all(|v| *v == values[0]));
+    assert_eq!(sl.decodes(), 1, "six workers, one decode of the layer's tile");
+    // The reads that follow ask the layer's cache again and decode nothing more.
+    for _ in 0..3 {
+        ch.erosion_depth_m(pt).unwrap();
+        ch.fill_depth_m(pt).unwrap();
+    }
+    assert_eq!(sl.decodes(), 1);
 }
