@@ -382,10 +382,12 @@ fn the_ocean_flag_at_a_direction_is_that_of_the_nearest_vertex_of_its_face() {
     grid.set(Face(0), 4, 4);
     grid.set(Face(2), 0, 8);
     let at = |face: u8, i: f64, j: f64| face_to_direction(&TangentWarp, Face(face), i / 4.0 - 1.0, j / 4.0 - 1.0);
-    // The vertex (4, 4) of face 0 is the face's centre; a point within a quarter cell of it reads it, a point a cell away does not.
+    // A cell is ocean when any of its four vertices is: the vertex (4, 4) of face 0 is shared by the cells (3, 3), (4, 3), (3, 4) and (4, 4).
     assert!(ocean_at(&grid, at(0, 4.2, 3.9)).unwrap());
-    assert!(!ocean_at(&grid, at(0, 5.0, 4.0)).unwrap());
-    // A vertex on the lattice's edge (the corner (0, 8) of face 2) is read at the clamped index.
+    assert!(ocean_at(&grid, at(0, 3.5, 3.5)).unwrap());
+    assert!(!ocean_at(&grid, at(0, 5.5, 4.5)).unwrap());
+    assert!(!ocean_at(&grid, at(0, 2.5, 3.5)).unwrap());
+    // A vertex on the lattice's edge (the corner (0, 8) of face 2) belongs to the last cell of the row and the first of the column.
     assert!(ocean_at(&grid, at(2, 0.1, 7.9)).unwrap());
     assert!(!ocean_at(&grid, at(1, 4.0, 4.0)).unwrap());
 }

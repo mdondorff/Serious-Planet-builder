@@ -99,6 +99,8 @@ fn heights_of(scratch: &TileStore, world: &GlobalWorld, res: u32, spec: &TileLay
     })
 }
 
+/// `ocean` says whether a direction is ocean (the outlets are the cells at or below the sea level it calls ocean) and `outlet_id` names where it comes from (`all` when every such cell is an outlet): the depth depends on it and the
+/// key does not carry it, so the tile directory records the id and refuses a run with another.
 /// `base` MUST be the base field pass 2 was run with (the one `bake layer` reads): the depth is taken against it and the key does not carry it, so another closure writes other depths under the same key (the layer's own
 /// `inputs_id` identifies the field; tests that give synthetic heights pass a closure of their own).
 /// Runs the post-pass over `tiles` (every tile of the layer, or a region with a margin): the final heights come from the scratch store in `scratch_dir`, the fill depth is written to the tile
@@ -114,6 +116,7 @@ pub fn run_fill_pass(
     threads: usize,
     base: &(dyn Fn(Vec3) -> f64 + Sync),
     ocean: &(dyn Fn(Vec3) -> bool + Sync),
+    outlet_id: &str,
     on_tile: &mut dyn FnMut(PassTile, u64),
 ) -> Result<FillPassReport, LayerStoreError> {
     spec.grid.check().map_err(LayerStoreError)?;
@@ -126,7 +129,7 @@ pub fn run_fill_pass(
     order.sort();
     order.dedup();
     // A fill depth depends on which tiles were in the run (the tiles not held are sea): a store written for one tile set is refused for another, so a region run cannot leave cut-off basins to a later planet run.
-    check_run_set(tile_dir, &order)?;
+    check_run_set(tile_dir, &order, outlet_id)?;
     let (t, g, sea) = (spec.grid.tile, spec.grid, spec.params.sea_level);
     let par: &dyn Par = &threads.max(1);
     // Every tile named, and the work it needs: if every tile holds its fill under the current key the run has nothing to do (and needs no scratch); else every tile's heights are needed for the graph.
@@ -294,7 +297,7 @@ pub fn run_fill_pass(
 }
 
 /// The identity of a run's tile set: refused when the tile directory was filled for another set.
-fn check_run_set(tile_dir: &Path, order: &[PassTile]) -> Result<(), LayerStoreError> {
+fn check_run_set(tile_dir: &Path, order: &[PassTile], outlet_id: &str) -> Result<(), LayerStoreError> {
     let mut h = 0xcbf2_9ce4_8422_2325u64;
     let mut put = |v: u64| h = (h ^ v).wrapping_mul(0x0000_0100_0000_01b3);
     put(order.len() as u64);
@@ -304,11 +307,11 @@ fn check_run_set(tile_dir: &Path, order: &[PassTile]) -> Result<(), LayerStoreEr
         put(u64::from(id.tj));
     }
     let path = tile_dir.join("fill-pass-tiles.txt");
-    let mine = format!("{h:016x} {}\n", order.len());
+    let mine = format!("{h:016x} {} outlets={outlet_id}\n", order.len());
     match std::fs::read_to_string(&path) {
         Ok(have) if have == mine => Ok(()),
         Ok(have) => Err(LayerStoreError(format!(
-            "{} was filled for another set of tiles ({}, this run: {}): the fill depth depends on which tiles a run holds (the others are sea), so a run over a different set needs its own directory",
+            "{} was filled for another set of tiles or another outlet mask ({}, this run: {}): the fill depth depends on which tiles a run holds (the others are sea) and on which cells at or below the sea level are outlets, so such a run needs its own directory",
             tile_dir.display(),
             have.trim(),
             mine.trim()

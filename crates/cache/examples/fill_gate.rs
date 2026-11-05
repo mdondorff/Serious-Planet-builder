@@ -180,8 +180,8 @@ fn main() {
     )
     .expect("pass 2");
     let clock = Instant::now();
-    let fp =
-        run_fill_pass(&tile_dir, &scratch_dir, &world, rp, &spec, &tiles, threads, &base, &|_| true, &mut |_, _| {}).expect("fill pass");
+    let fp = run_fill_pass(&tile_dir, &scratch_dir, &world, rp, &spec, &tiles, threads, &base, &|_| true, "all", &mut |_, _| {})
+        .expect("fill pass");
     println!(
         "\nfill pass {:.0} s: {} tiles written, {} pit cells, deepest {:.2} m, {} cells clamped at 0 ({:.2} % of pit-surface cells), {} cells no path reaches, {} pairs dropped",
         clock.elapsed().as_secs_f64(),

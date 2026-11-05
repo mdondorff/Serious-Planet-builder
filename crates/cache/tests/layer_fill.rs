@@ -90,6 +90,12 @@ fn surface(i: usize, j: usize) -> f64 {
     if (46..=50).contains(&j) && (48..N - 6).contains(&i) {
         z = z.min(140.0);
     }
+    // Two lakes below the sea level in the plateau, far from the coast: whether a pit or an outlet depends on the ocean mask.
+    for (cx, cy) in [(72.0, 24.0), (72.0, 72.0)] {
+        if r(cx, cy) < 4.0 {
+            z = -3.0;
+        }
+    }
     (z * 4.0).round() / 4.0
 }
 
@@ -108,6 +114,11 @@ fn write_scratch(dir: &Path, w: &GlobalWorld, s: &TileLayerSpec, tiles: &[PassTi
 
 /// The oracle: the minimax level of the whole face, with a ring of sea around it (the tiles of the other faces are not held, so they are sea).
 fn oracle() -> Vec<f64> {
+    oracle_with(&|_, _| true)
+}
+
+/// The oracle with a mask: a cell at or below the sea level is an outlet only where `ocean(i, j)` says so (the ring of absent tiles is always sea).
+fn oracle_with(ocean: &dyn Fn(usize, usize) -> bool) -> Vec<f64> {
     let m = N + 2;
     let at = |i: usize, j: usize| j * m + i;
     let mut z = vec![-1.0f64; m * m];
@@ -127,7 +138,9 @@ fn oracle() -> Vec<f64> {
     let mut level = vec![f64::INFINITY; m * m];
     let mut heap = BinaryHeap::new();
     for p in 0..m * m {
-        if z[p] <= 0.0 {
+        let (pi, pj) = (p % m, p / m);
+        let ring = pi == 0 || pj == 0 || pi == m - 1 || pj == m - 1;
+        if z[p] <= 0.0 && (ring || ocean(pi - 1, pj - 1)) {
             level[p] = z[p];
             heap.push(Reverse((key(z[p]), p)));
         }
@@ -204,7 +217,7 @@ fn fill_pass(
     threads: usize,
 ) -> planet_cache::layer_fillpass::FillPassReport {
     ensure_tile_records(w, s, tiles, which);
-    run_fill_pass(tiles, scratch, w, RES, s, which, threads, &|_| 0.0, &|_| true, &mut |_, _| {}).unwrap()
+    run_fill_pass(tiles, scratch, w, RES, s, which, threads, &|_| 0.0, &|_| true, "all", &mut |_, _| {}).unwrap()
 }
 
 // spec: GEN-121
@@ -271,7 +284,9 @@ fn the_post_pass_stores_the_same_bytes_on_1_and_8_threads_skips_what_it_holds_an
     let few = Dir::new("few");
     write_scratch(few.path(), &w, &s, &tiles[..3]);
     let c = Dir::new("c");
-    let e = run_fill_pass(c.path(), few.path(), &w, RES, &s, &tiles[..4], 1, &|_| 0.0, &|_| true, &mut |_, _| {}).unwrap_err().to_string();
+    let e = run_fill_pass(c.path(), few.path(), &w, RES, &s, &tiles[..4], 1, &|_| 0.0, &|_| true, "all", &mut |_, _| {})
+        .unwrap_err()
+        .to_string();
     assert!(e.contains("no final heights") && e.contains("0/3/0"), "{e}");
 }
 
@@ -290,7 +305,9 @@ fn a_run_over_a_region_treats_the_tiles_it_does_not_hold_as_sea() {
     let codes = load_fill(&store, &w, RES, &s, two[1]).unwrap().unwrap();
     assert!(codes.iter().all(|c| *c == 0), "a bowl that reaches the border of the run was filled: the run's edge is sea");
     // The same directory refuses a run over another set of tiles: its depths would be those of the first run.
-    let e = run_fill_pass(out.path(), scratch.path(), &w, RES, &s, &tiles, 2, &|_| 0.0, &|_| true, &mut |_, _| {}).unwrap_err().to_string();
+    let e = run_fill_pass(out.path(), scratch.path(), &w, RES, &s, &tiles, 2, &|_| 0.0, &|_| true, "all", &mut |_, _| {})
+        .unwrap_err()
+        .to_string();
     assert!(e.contains("another set of tiles"), "{e}");
 }
 
@@ -326,7 +343,7 @@ fn the_runtime_layer_reads_the_change_with_the_post_pass_depth_added_back() {
     .unwrap();
     assert_eq!(report.computed.len(), 16);
     // The post-pass takes the exact base: the depth is `level - (base + stored change)`, so a floor is flat against the surface the runtime shows (GEN-120).
-    let fp = run_fill_pass(dir.path(), scratch.path(), &w, RES, &s, &tiles, 2, &base, &|_| true, &mut |_, _| {}).unwrap();
+    let fp = run_fill_pass(dir.path(), scratch.path(), &w, RES, &s, &tiles, 2, &base, &|_| true, "all", &mut |_, _| {}).unwrap();
     assert_eq!(fp.written.len(), 16);
     // A rerun after the scratch store is gone: pass 2 does not run again (the tiles hold their fill), and the post-pass finds nothing to do without any scratch.
     let fresh = Dir::new("fresh");
@@ -401,7 +418,7 @@ fn a_filled_floor_is_flat_against_the_exact_base_and_an_outcrop_inside_a_basin_k
         &mut |_| {},
     )
     .unwrap();
-    run_fill_pass(dir.path(), scratch.path(), &w, RES, &s, &tiles, 2, &base, &|_| true, &mut |_, _| {}).unwrap();
+    run_fill_pass(dir.path(), scratch.path(), &w, RES, &s, &tiles, 2, &base, &|_| true, "all", &mut |_, _| {}).unwrap();
     let store = TileStore::open(dir.path(), w.params()).unwrap();
     let (mut worst, mut checked) = (0.0f64, 0usize);
     for &id in &tiles {
@@ -477,7 +494,8 @@ fn a_filled_floor_is_flat_against_the_exact_base_and_an_outcrop_inside_a_basin_k
     writer.append(&tile_record(&w, RES, &s, &r1).unwrap()).unwrap();
     writer.write_index().unwrap();
     writer.finish().unwrap();
-    let report = run_fill_pass(out2.path(), scratch2.path(), &w, RES, &s, &[id, id1], 1, &|_| 0.0, &|_| true, &mut |_, _| {}).unwrap();
+    let report =
+        run_fill_pass(out2.path(), scratch2.path(), &w, RES, &s, &[id, id1], 1, &|_| 0.0, &|_| true, "all", &mut |_, _| {}).unwrap();
     let store2 = TileStore::open(out2.path(), w.params()).unwrap();
     let codes = load_fill(&store2, &w, RES, &s, id).unwrap().unwrap();
     assert_eq!(codes[spire], 0, "the outcrop was lowered to the level");
@@ -527,7 +545,7 @@ fn an_inland_basin_below_the_sea_level_is_filled_unless_the_ocean_connectivity_c
     writer.finish().unwrap();
     let bowl = 12 * T + 12;
     // Not ocean: filled to the rim (205 m deep), 64 inland cells counted.
-    let inland = run_fill_pass(out.path(), scratch.path(), &w, RES, &s, &[id], 1, &|_| 0.0, &|_| false, &mut |_, _| {}).unwrap();
+    let inland = run_fill_pass(out.path(), scratch.path(), &w, RES, &s, &[id], 1, &|_| 0.0, &|_| false, "none", &mut |_, _| {}).unwrap();
     let store = TileStore::open(out.path(), w.params()).unwrap();
     let codes = load_fill(&store, &w, RES, &s, id).unwrap().unwrap();
     assert_eq!(inland.inland_low_cells, 64);
@@ -538,8 +556,41 @@ fn an_inland_basin_below_the_sea_level_is_filled_unless_the_ocean_connectivity_c
     writer.append(&tile_record(&w, RES, &s, &r).unwrap()).unwrap();
     writer.write_index().unwrap();
     writer.finish().unwrap();
-    let sea = run_fill_pass(out2.path(), scratch.path(), &w, RES, &s, &[id], 1, &|_| 0.0, &|_| true, &mut |_, _| {}).unwrap();
+    let sea = run_fill_pass(out2.path(), scratch.path(), &w, RES, &s, &[id], 1, &|_| 0.0, &|_| true, "all", &mut |_, _| {}).unwrap();
     let store2 = TileStore::open(out2.path(), w.params()).unwrap();
     assert_eq!(sea.inland_low_cells, 0);
     assert_eq!(load_fill(&store2, &w, RES, &s, id).unwrap().unwrap()[bowl], 0, "an ocean cell is an outlet");
+}
+
+// spec: STRM-077
+#[test]
+fn a_mask_that_differs_between_tiles_gives_the_depth_of_a_global_flood_with_the_same_outlets_and_another_mask_is_refused() {
+    // Half of the face's coast is called ocean and half is not (by the direction of the cell); the cells at or below 0 m of the other half are inland basins, filled like pits. Every code equals the oracle's.
+    let (w, scratch, out) = (world(), Dir::new("scratch"), Dir::new("tiles"));
+    let s = spec(&w);
+    let tiles = face_tiles(0);
+    write_scratch(scratch.path(), &w, &s, &tiles);
+    ensure_tile_records(&w, &s, out.path(), &tiles);
+    let ycut = s.grid.direction(Face(0), 48, 48).y;
+    let ocean = move |d: Vec3| d.y < ycut;
+    let report = run_fill_pass(out.path(), scratch.path(), &w, RES, &s, &tiles, 2, &|_| 0.0, &ocean, "half", &mut |_, _| {}).unwrap();
+    assert!(report.inland_low_cells > 0, "no cell is called inland");
+    let level = oracle_with(&|i, j| s.grid.direction(Face(0), i as i64, j as i64).y < ycut);
+    let store = TileStore::open(out.path(), w.params()).unwrap();
+    let mut filled_inland = 0;
+    for &id in &tiles {
+        let codes = load_fill(&store, &w, RES, &s, id).unwrap().unwrap();
+        for (p, &c) in codes.iter().enumerate() {
+            let (i, j) = (id.ti as usize * T + p % T, id.tj as usize * T + p / T);
+            let want = fill_code((level[j * N + i] - surface(i, j)).max(0.0));
+            assert_eq!(c, want, "tile {}/{}/{} cell ({i}, {j})", id.face.0, id.ti, id.tj);
+            filled_inland += usize::from(c > 0 && surface(i, j) <= 0.0);
+        }
+    }
+    assert!(filled_inland > 0, "no inland cell at or below the sea level was filled: the mask changed nothing");
+    // Another outlet mask in the same directory is refused, naming both.
+    let e = run_fill_pass(out.path(), scratch.path(), &w, RES, &s, &tiles, 2, &|_| 0.0, &|_| true, "all", &mut |_, _| {})
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("another outlet mask") && e.contains("outlets=half") && e.contains("outlets=all"), "{e}");
 }
