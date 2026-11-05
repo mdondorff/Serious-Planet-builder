@@ -372,6 +372,8 @@ pub struct StoreLayer {
     res: u32,
     spec: TileLayerSpec,
     built: Mutex<BuiltTiles>,
+    /// A lock for each tile being decoded: workers asking for one tile together decode it once (a core is 37.7 MB at 3,072 cells, so a second copy in flight is a second peak).
+    inflight: Mutex<std::collections::HashMap<PassTile, Arc<Mutex<()>>>>,
     decodes: std::sync::atomic::AtomicU64,
     capacity: usize,
     range: (f64, f64),
@@ -421,6 +423,7 @@ impl StoreLayer {
             res,
             spec,
             built: Mutex::new((HashMap::new(), VecDeque::new())),
+            inflight: Mutex::new(HashMap::new()),
             decodes: 0.into(),
             capacity: capacity.max(1),
             range,
@@ -536,6 +539,21 @@ impl planet_generators::erosion_layer::LayerSource for StoreLayer {
                 g.1.push_back(id);
                 return Ok(Some(t));
             }
+        }
+        // One decode for the workers asking together: the first takes the tile's lock and decodes, the others wait for it and find the tile in the cache.
+        let lock = self.inflight.lock().expect("inflight lock").entry(id).or_default().clone();
+        let _one = lock.lock().expect("tile lock");
+        let found = {
+            let mut g = self.built.lock().expect("built lock");
+            let t = g.0.get(&id).cloned();
+            if t.is_some() {
+                g.1.retain(|x| *x != id);
+                g.1.push_back(id);
+            }
+            t
+        };
+        if let Some(t) = found {
+            return Ok(Some(t));
         }
         let Some(result) = load_tile(&self.store, &self.world, self.res, &self.spec, id).map_err(|e| e.to_string())? else {
             return Ok(None);

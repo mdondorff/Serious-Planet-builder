@@ -376,16 +376,13 @@ pub struct ChannelCaches {
     pub area_bytes: usize,
     /// The cells a side that a window advances (a window holds one more row and column, so a bilinear read never leaves it).
     pub area_window: usize,
-    /// The most bytes of decoded depth tiles held, and of decoded fill tiles (each cache its own).
+    /// The most bytes of decoded depth tiles held. The pit depth and the change come from the layer's own decoded tiles (shared with the heights), not from a cache here.
     pub tile_bytes: usize,
-    /// The most bytes of decoded layer tiles (kind 13, 4 bytes a cell: 37.7 MB at 3,072 cells) held for the erosion depth.
-    pub change_bytes: usize,
 }
 
 impl ChannelCaches {
-    /// 256-cell windows (about 208 km of the 12,288-cell face, 66 KB each) under 16 MB, 256 MB of depth tiles and of fill tiles, and 192 MB of layer tiles (a bilinear read at a tile's corner touches four, each 37.7 MB at 3,072 cells).
-    pub const DEFAULT: ChannelCaches =
-        ChannelCaches { area_bytes: 16 << 20, area_window: 256, tile_bytes: 256 << 20, change_bytes: 192 << 20 };
+    /// 256-cell windows (about 208 km of the 12,288-cell face, 66 KB each) under 16 MB, and 256 MB of depth tiles.
+    pub const DEFAULT: ChannelCaches = ChannelCaches { area_bytes: 16 << 20, area_window: 256, tile_bytes: 256 << 20 };
 }
 
 /// What a [`LayerChannels`] has done so far: the reads served from its caches, the windows and tiles it decoded, and the time those decodes took (the measurement of ground-channels-2b PR 1).
@@ -397,10 +394,6 @@ pub struct ChannelStats {
     pub tile_hits: u64,
     pub tile_decodes: u64,
     pub tile_decode_us: u64,
-    pub fill_decodes: u64,
-    pub fill_decode_us: u64,
-    pub change_decodes: u64,
-    pub change_decode_us: u64,
 }
 
 /// The read API of the channels over a store: the drainage area and the erosion and deposition depth at a direction. It owns its handles (the store and the world are shared, so its lifetime is
@@ -417,18 +410,17 @@ pub struct LayerChannels {
     area_window: usize,
     areas: Mutex<Lru<(u8, u32, u32), AreaWindow>>,
     depths: Mutex<Lru<(u8, u32, u32), TileDepth>>,
-    fills: Mutex<Lru<(u8, u32, u32), Vec<u8>>>,
-    changes: Mutex<Lru<(u8, u32, u32), Vec<f32>>>,
+    /// The layer's decoded tiles (the viewer's own, shared with the heights): the change with the pit depth added back and the pit codes of kind 17.
+    tile_source: Arc<dyn planet_generators::erosion_layer::LayerSource>,
     area_load: Mutex<()>,
     depth_load: Mutex<()>,
-    fill_load: Mutex<()>,
-    change_load: Mutex<()>,
     stats: Mutex<ChannelStats>,
     identity: u64,
 }
 
 impl LayerChannels {
     /// A reader over `store` for the layer `layer` (pass 1) and `tiles` (pass 2); the decoded caches hold at most `caches` bytes (one face or tile is always kept).
+    #[allow(clippy::too_many_arguments)] // the two key resolutions, the two specs, the layer's tile source and the caps are all the reader's inputs
     pub fn new(
         store: Arc<TileStore>,
         world: Arc<GlobalWorld>,
@@ -436,6 +428,7 @@ impl LayerChannels {
         depth_res: u32,
         layer: LayerSpec,
         tiles: TileLayerSpec,
+        tile_source: Arc<dyn planet_generators::erosion_layer::LayerSource>,
         caches: ChannelCaches,
     ) -> LayerChannels {
         // The identity of the channels: the keys of a face's area and of a tile's depth under these specs, which carry the layer's parameters, the channels' version and their scales.
@@ -467,12 +460,9 @@ impl LayerChannels {
             area_window: caches.area_window.max(1),
             areas: Mutex::new(Lru::new(caches.area_bytes, |v: &AreaWindow| v.codes.len())),
             depths: Mutex::new(Lru::new(caches.tile_bytes, |v: &TileDepth| v.deposited.len())),
-            fills: Mutex::new(Lru::new(caches.tile_bytes, |v: &Vec<u8>| v.len())),
-            changes: Mutex::new(Lru::new(caches.change_bytes, |v: &Vec<f32>| 4 * v.len())),
+            tile_source,
             area_load: Mutex::new(()),
             depth_load: Mutex::new(()),
-            fill_load: Mutex::new(()),
-            change_load: Mutex::new(()),
             stats: Mutex::new(ChannelStats::default()),
         }
     }
@@ -553,7 +543,9 @@ impl LayerChannels {
     /// The pit depth in metres at `d` (kind 17: how far the ground lies below the flood of the final surface, GEN-120), read like [`Self::depth_m`]; `None` where the store holds no fill for the tile.
     pub fn fill_depth_m(&self, d: Vec3) -> Result<Option<f32>, LayerStoreError> {
         self.tiled_bilinear(d, &|face, ti, tj, px, py| {
-            Ok(self.fill_tile(face, ti, tj)?.map(|t| planet_generators::bake::face::fill_m(t[py * self.tiles.grid.tile + px])))
+            let Some(lt) = self.tile_source.tile(face, ti, tj).map_err(LayerStoreError)? else { return Ok(None) };
+            // A layer tile made before keep-pits holds no pit codes: none there.
+            Ok(lt.result().fill.get(py * self.tiles.grid.tile + px).map(|c| planet_generators::bake::face::fill_m(*c)))
         })
     }
 
@@ -562,9 +554,12 @@ impl LayerChannels {
     pub fn erosion_depth_m(&self, d: Vec3) -> Result<Option<f32>, LayerStoreError> {
         self.tiled_bilinear(d, &|face, ti, tj, px, py| {
             let p = py * self.tiles.grid.tile + px;
-            let (Some(dep), Some(change)) = (self.depth_tile(face, ti, tj)?, self.change_tile(face, ti, tj)?) else { return Ok(None) };
-            let fill = self.fill_tile(face, ti, tj)?.map_or(0.0, |t| planet_generators::bake::face::fill_m(t[p]));
-            Ok(Some(f64::from(removed_depth_m(depth_m(dep.deposited[p]), change[p] + fill as f32))))
+            let (Some(dep), Some(lt)) = (self.depth_tile(face, ti, tj)?, self.tile_source.tile(face, ti, tj).map_err(LayerStoreError)?)
+            else {
+                return Ok(None);
+            };
+            // The layer's cell is the change with the pit depth added back (the filled look the viewer draws), so a pit is not counted as removal.
+            Ok(Some(f64::from(removed_depth_m(depth_m(dep.deposited[p]), lt.cell(px, py)))))
         })
     }
 
@@ -630,54 +625,6 @@ impl LayerChannels {
         let mut s = self.stats.lock().expect("stats");
         s.tile_decodes += 1;
         s.tile_decode_us += started.elapsed().as_micros() as u64;
-        Ok(Some(a))
-    }
-}
-
-impl LayerChannels {
-    /// The decoded fill codes of a tile through the cache (`None` where the store holds none).
-    fn fill_tile(&self, face: Face, ti: u32, tj: u32) -> Result<Option<Arc<Vec<u8>>>, LayerStoreError> {
-        let key = (face.0, ti, tj);
-        if let Some(a) = self.fills.lock().expect("fill cache").get(key) {
-            return Ok(Some(a));
-        }
-        let _one = self.fill_load.lock().expect("fill load");
-        if let Some(a) = self.fills.lock().expect("fill cache").get(key) {
-            return Ok(Some(a));
-        }
-        let started = std::time::Instant::now();
-        let Some(a) = crate::layer_fill::load_fill(&self.store, &self.world, self.depth_res, &self.tiles, PassTile { face, ti, tj })?
-        else {
-            return Ok(None);
-        };
-        let a = Arc::new(a);
-        self.fills.lock().expect("fill cache").put(key, a.clone());
-        let mut s = self.stats.lock().expect("stats");
-        s.fill_decodes += 1;
-        s.fill_decode_us += started.elapsed().as_micros() as u64;
-        Ok(Some(a))
-    }
-
-    /// The decoded change of a layer tile (kind 13) through the cache (`None` where the store holds none).
-    fn change_tile(&self, face: Face, ti: u32, tj: u32) -> Result<Option<Arc<Vec<f32>>>, LayerStoreError> {
-        let key = (face.0, ti, tj);
-        if let Some(a) = self.changes.lock().expect("change cache").get(key) {
-            return Ok(Some(a));
-        }
-        let _one = self.change_load.lock().expect("change load");
-        if let Some(a) = self.changes.lock().expect("change cache").get(key) {
-            return Ok(Some(a));
-        }
-        let started = std::time::Instant::now();
-        let Some(r) = crate::layer_tiles::load_tile(&self.store, &self.world, self.depth_res, &self.tiles, PassTile { face, ti, tj })?
-        else {
-            return Ok(None);
-        };
-        let a = Arc::new(r.core);
-        self.changes.lock().expect("change cache").put(key, a.clone());
-        let mut s = self.stats.lock().expect("stats");
-        s.change_decodes += 1;
-        s.change_decode_us += started.elapsed().as_micros() as u64;
         Ok(Some(a))
     }
 }
