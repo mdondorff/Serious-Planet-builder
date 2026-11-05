@@ -18,6 +18,7 @@ pub mod flood;
 pub mod inputs;
 pub mod map;
 pub mod route;
+pub mod spill;
 pub mod thermal;
 pub mod tile;
 
