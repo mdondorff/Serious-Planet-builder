@@ -1098,14 +1098,14 @@ Source: TEST-048
 - **THEN** the file is refused naming the key and the value
 
 ### Requirement: TEST-053 Look override and views in the poses file
-The poses file (TEST-050) SHALL take the keys of the table; a bad value SHALL be refused naming the key and the value. The override is for a sample look and is never stored or keyed.
+The poses file (TEST-050) SHALL take the keys of the table; a bad value SHALL be refused naming the key and value. The override is a sample look, never stored or keyed.
 
 | Key | Meaning | Default |
 |---|---|---|
-| `[[pose]]` `view` | a view of the viewer's J cycle (`lit`, `soil`, `moisture`, `insolation`, ...), drawn instead of the lit one | `lit` |
-| `[look]` `ground_detail` | ground detail strength, 0 to 1 | the environment's (0) |
-| `[look]` `ground_patch` | the patch break-up of the material boundaries (REND-055, LOOK-012), 0 or 1e-6 to 0.5 | 0 (off) |
-| `[[look.curve]]` `material`, `input`, `lo`, `hi` | one curve of the ground materials (LOOK-008), replacing the pair; materials `rock`, `sand`, `grass`, `soil`; inputs `slope_cos`, `height`, `temperature`, `precipitation`, `surface_type`, `soil_depth`, `moisture`, `insolation` | the look's |
+| `[[pose]]` `view` | a view of the viewer's J cycle, drawn instead of the lit one | `lit` |
+| `[look]` `ground_detail` | detail strength, 0 to 1 | the environment's (0) |
+| `[look]` `ground_patch` | the patch break-up (REND-055, LOOK-012), 0 or 1e-6 to 0.5 | 0 (off) |
+| `[[look.curve]]` `material`, `input`, `lo`, `hi` | one curve of the ground materials (LOOK-008), replacing the pair | the look's |
 
 Verify: A
 Status: active
