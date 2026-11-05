@@ -19,8 +19,14 @@ pub const MIN_JOBS: u64 = 3;
 pub const MIN_RESIDENT_SLOTS: u64 = 3;
 /// Fewest slots the pool offers (a tenth of the 212,190 the tier's share holds since the slot of 9,488 B, MESH_VERSION 10; 219,585 at 9,168 B, 231,090 before).
 pub const MIN_POOL_SLOTS: u64 = 21_958;
-/// Most the median of the scheduler step may cost, ms (measured 0.044).
+/// Most the median of the scheduler step may cost, ms (measured 0.044 and 0.10 on a development machine), the floor of its limit: the limit is the
+/// larger of this and [`SCHEDULER_SHARE_OF_FRAME`] of the same run's `record_ms` median.
 pub const MAX_SCHEDULER_MEDIAN_MS: f64 = 0.5;
+/// The share of the dive's own frame time (`record_ms`, median) the scheduler's median may take, 0.1 (the measured shares: 0.04 on a development
+/// machine, 0.0115 on a loaded 4-core lavapipe runner, where the scheduler step took 1.0 to 1.5 ms while the generation workers ran at their
+/// usual speed and the frame took 132 ms). On a quiet machine the frame is a few ms and the floor above decides; on a loaded one the limit
+/// follows the load, so a stall of the main thread by other processes is not a finding while a scheduler ten times dearer than its frame is.
+pub const SCHEDULER_SHARE_OF_FRAME: f64 = 0.1;
 /// Most the median of the upload step may cost, ms (measured 0.16).
 pub const MAX_UPLOAD_MEDIAN_MS: f64 = 1.6;
 
@@ -77,11 +83,14 @@ pub fn streaming_smoke_findings(log: &str, workers: usize) -> Vec<String> {
     need("load_jobs", MIN_JOBS, "the streamer finished almost no tile jobs", &mut out);
     need("max_resident_slots", MIN_RESIDENT_SLOTS, "too few slots became resident", &mut out);
     need("pool_slots", MIN_POOL_SLOTS, "the pool is a tenth of its size or less (a pool cap?)", &mut out);
-    for (name, max) in [("scheduler_ms", MAX_SCHEDULER_MEDIAN_MS), ("upload_ms", MAX_UPLOAD_MEDIAN_MS)] {
-        match metrics.get(name).and_then(|m| m.get("median")).and_then(Json::num) {
+    let median = |name: &str| metrics.get(name).and_then(|m| m.get("median")).and_then(Json::num);
+    // The scheduler's limit follows the run's own frame time (a log without `record_ms` has the floor alone).
+    let scheduler_max = MAX_SCHEDULER_MEDIAN_MS.max(SCHEDULER_SHARE_OF_FRAME * median("record_ms").unwrap_or(0.0));
+    for (name, max) in [("scheduler_ms", scheduler_max), ("upload_ms", MAX_UPLOAD_MEDIAN_MS)] {
+        match median(name) {
             None => out.push(format!("`{name}` is missing from the log")),
             Some(v) if v > max => {
-                out.push(format!("the {name} median is {v:.3} ms, at most {max} ms expected (ten times the first measurement)"))
+                out.push(format!("the {name} median is {v:.3} ms, at most {max:.3} ms expected (ten times the first measurement, or {SCHEDULER_SHARE_OF_FRAME} of the frame for the scheduler)"))
             }
             Some(_) => {}
         }
@@ -116,6 +125,31 @@ mod tests {
         // The limits are inclusive: exactly at them passes.
         let edge = log(2, MIN_JOBS, MIN_RESIDENT_SLOTS, MIN_POOL_SLOTS, MAX_SCHEDULER_MEDIAN_MS, MAX_UPLOAD_MEDIAN_MS);
         assert!(streaming_smoke_findings(&edge, 6).is_empty(), "{:?}", streaming_smoke_findings(&edge, 6));
+    }
+
+    /// A log whose frame took `record_ms` (median) with the scheduler at `sched`.
+    fn log_with_frame(sched: f64, record_ms: f64) -> String {
+        format!(
+            "{{\"runs\":[{{\"counts\":{{\"load_running_max\":6,\"load_jobs\":348,\"max_resident_slots\":720,\"pool_slots\":651960}},\"metrics\":{{\"scheduler_ms\":{{\"median\":{sched}}},\"upload_ms\":{{\"median\":0.12}},\"record_ms\":{{\"median\":{record_ms}}}}}}}]}}"
+        )
+    }
+
+    // spec: TEST-035
+    #[test]
+    fn the_schedulers_limit_follows_the_runs_own_frame_time_and_a_dear_scheduler_is_still_found() {
+        // The failures of the loaded lavapipe runner (2026-11-04/05): the scheduler's median 1.0 to 1.5 ms in a dive whose frame took 132 ms (workers at their usual speed).
+        assert!(streaming_smoke_findings(&log_with_frame(1.516, 132.7), 6).is_empty());
+        assert!(streaming_smoke_findings(&log_with_frame(1.132, 140.3), 6).is_empty());
+        // A quiet machine (a frame of 2.5 ms, the scheduler at 0.10): the floor decides, and a scheduler ten times dearer is found.
+        assert!(streaming_smoke_findings(&log_with_frame(0.10, 2.5), 6).is_empty());
+        let f = streaming_smoke_findings(&log_with_frame(1.0, 2.5), 6);
+        assert!(f.len() == 1 && f[0].contains("scheduler_ms"), "{f:?}");
+        // On the loaded runner a scheduler ten times its measured share is found too (a cap that makes the step dear in proportion to its frame).
+        let f = streaming_smoke_findings(&log_with_frame(14.0, 132.7), 6);
+        assert!(f.len() == 1 && f[0].contains("scheduler_ms") && f[0].contains("13.27"), "{f:?}");
+        // The limit is inclusive and a log without `record_ms` has the floor alone.
+        assert!(streaming_smoke_findings(&log_with_frame(13.27, 132.7), 6).is_empty());
+        assert!(!streaming_smoke_findings(&log(6, 187, 189, 231_090, 0.6, 0.16), 6).is_empty());
     }
 
     // spec: TEST-035
