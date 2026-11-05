@@ -1,0 +1,3 @@
+- [x] 1.1 `ChannelSource`, the pit and erosion reads, the caches, the identity
+- [x] 1.2 Tests (tiny planet with pits): the stored cells, the erosion rule, the border, the absent tile, the trait, the decode counts, the identity
+- [ ] 1.3 `spec-guardian`, `verifier`, prepush, PR; archive in the same PR
