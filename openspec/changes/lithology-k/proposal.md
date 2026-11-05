@@ -1,0 +1,13 @@
+## Why
+- SPIKE-102 (2026-11-04), finding 1: the generator has no erodibility field. K varies only by the class carve factor (0.5 for sand sea, 1 elsewhere), so badlands, mesas, cuestas, the cliff-or-beach choice and alpine contrast cannot form. Owner D2 (2026-11-05, ADR 0102): lithology K(x, z) in the carve, in M9, with a preview. This change is plan 4.1's PR 3: the field and its planet preview. K in both carves (PR 4) is the explorer lane's, after this is on main. Taken from explorer's draft (#1177).
+
+## What Changes
+- GEN-116: an analytic lithology field, CPU-canonical (`libm`, integer hashing, any thread count the same bits), never stored, keyed by `LITHOLOGY_VERSION`: the hardness H of SPIKE-81 (plate-history terms of the class source, read from a lattice of the class lattice's geometry, plus noise), strata K(z) as bands 30 to 170 m thick tilted and folded by a smooth offset of the height with a caprock flag, and a soluble flag (carbonate bands where the province allows it).
+- GEN-122: `generate --lithology-preview DIR [--seed N | --world F] [--km N]` writes the planet preview (no GPU, seconds): maps of H, of K at the surface (caprock black) and 200 m below it, of the soluble flag, a vertical cross-section from a mountain belt into a basin (K, caprock, the surface on top), and `lithology.txt` with the shares and the band thickness against pass 1's per-step height change. Every image says it shows the lithology field, an input, not terrain.
+- No picture, plan, key or golden changes: nothing reads the field yet.
+
+## Impact
+- Code: `generators` (`lithology.rs`, `lithology_preview.rs`), `app` (the option). Requirements: GEN-116 and GEN-122 added.
+- All numbers are start values (the owner's preview decides): the hardness formula is SPIKE-81's; the band thickness, the offset amplitudes, the caprock threshold 0.92, the carbonate share 0.25 and K's bounds 0.12 to 1.8 are mine.
+- First preview (seed 14): land 33 %; H over land hard (over 0.6) 17.7 %, soft (under 0.4) 39.9 % (SPIKE-81 reported 32 % and 39 % on its own prototype: the hard share is lower here, to be looked at in the preview round); caprock at the surface 15 % of land; soluble over 0.5 at 5.9 % of land. The bands are resolved by pass 1's per-step change under about 1,000 km2 of drainage area and marginally on the largest rivers (1.5 steps to cross the thinnest band at 100,000 km2).
+- Open for the owner: whether the rock model should stay a stack of planet-wide bands varied by province (as here) or carry regional formations; the cross-section answers whether it is volumetric: it is, the carve reads K at the cell's current height.

@@ -183,6 +183,10 @@ pub struct Options {
     pub prefill_levels: Option<u8>,
     /// `generate`: write the data products (cube nets and maps) of an in-memory bake into this directory.
     pub global_products: Option<PathBuf>,
+    /// `generate --lithology-preview DIR` (GEN-122): the planet preview maps and cross-section of the lithology field (ADR 0102) into DIR.
+    pub lithology_preview: Option<PathBuf>,
+    /// `--km N`: kilometres a pixel of the lithology preview's maps (16 by default).
+    pub preview_km: f64,
     /// `--global-dir` and `--global-products`: cells per face edge of the bake (a power of two; blocks are stored in the canonical layout, ADR 0027).
     pub global_res: u32,
     /// `--global-dir`: worker threads (0 = all cores).
@@ -385,6 +389,8 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         prefill_dir: None,
         prefill_levels: None,
         global_products: None,
+        lithology_preview: None,
+        preview_km: 16.0,
         global_res: 256,
         threads: 0,
         offscreen: false,
@@ -591,6 +597,13 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             }
             "--verify-global" => o.verify_global = Some(PathBuf::from(it.next().ok_or("--verify-global needs a directory")?)),
             "--global-products" => o.global_products = Some(PathBuf::from(it.next().ok_or("--global-products needs a directory")?)),
+            "--lithology-preview" => o.lithology_preview = Some(PathBuf::from(it.next().ok_or("--lithology-preview needs a directory")?)),
+            "--km" => {
+                o.preview_km = it.next().ok_or("--km needs a number of kilometres")?.parse().map_err(|e| format!("--km: {e}"))?;
+                if !(o.preview_km.is_finite() && (1.0..=500.0).contains(&o.preview_km)) {
+                    return Err(format!("--km {} must be from 1 to 500", o.preview_km));
+                }
+            }
             "--global-res" => {
                 o.global_res = it.next().ok_or("--global-res needs a value")?.parse().map_err(|e| format!("--global-res: {e}"))?
             }
@@ -662,7 +675,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
 use planet_cache::tiles::MAX_REGION_LEVEL;
 
 /// Options that only the tile store commands of `generate` understand.
-pub(crate) const STORE_OPTIONS: [&str; 21] = [
+pub(crate) const STORE_OPTIONS: [&str; 23] = [
     "--repeats",
     "--horizon-threads",
     "--altitudes-m",
@@ -682,6 +695,8 @@ pub(crate) const STORE_OPTIONS: [&str; 21] = [
     "--global-dir",
     "--verify-global",
     "--global-products",
+    "--lithology-preview",
+    "--km",
     "--global-res",
     "--threads",
 ];
@@ -1620,6 +1635,29 @@ mod tests {
     fn the_compact_format_with_fewer_than_16_cells_is_refused_naming_the_minimum() {
         let e = run_str(&["test-render", "--scene", "terrain", "--cells", "8"]).unwrap_err();
         assert!(e.contains("--cells 8") && e.contains("at least 16"), "{e}");
+    }
+
+    // spec: GEN-122
+    #[test]
+    fn generate_writes_the_lithology_preview_maps_a_cross_section_and_the_numbers_and_refuses_what_it_excludes() {
+        let d = TempDir::new("lithology-preview");
+        let dir = d.s("out");
+        let out = run_str(&["generate", "--lithology-preview", &dir, "--seed", "3", "--km", "400"]).unwrap();
+        assert!(out.contains("lithology field, an input of the carve, not terrain") && out.contains("400 km a pixel"), "{out}");
+        for f in ["hardness.png", "strata_surface.png", "strata_200m_below.png", "soluble.png", "section.png", "lithology.txt"] {
+            assert!(std::path::Path::new(&dir).join(f).is_file(), "{f}");
+        }
+        let txt = std::fs::read_to_string(std::path::Path::new(&dir).join("lithology.txt")).unwrap();
+        assert!(txt.contains("lithology field (input), not terrain") && txt.contains("band thickness 30 to 170 m"), "{txt}");
+        // The preview excludes the other generate commands and a definition named twice, and `--km` belongs to it alone.
+        let e = run_str(&["generate", "--lithology-preview", &dir, "--global-dir", &dir]).unwrap_err();
+        assert!(e.contains("--lithology-preview excludes") && e.contains("--global-dir"), "{e}");
+        let e = run_str(&["generate", "--lithology-preview", &dir, "--seed", "3", "--world", "w.toml"]).unwrap_err();
+        assert!(e.contains("--world and --seed"), "{e}");
+        let e = run_str(&["generate", "--km", "16", "--seed", "3"]).unwrap_err();
+        assert!(e.contains("--km applies to --lithology-preview"), "{e}");
+        let e = run_str(&["generate", "--lithology-preview", &dir, "--km", "0.5"]).unwrap_err();
+        assert!(e.contains("--km 0.5 must be from 1 to 500"), "{e}");
     }
 
     // spec: VIEW-066
