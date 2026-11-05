@@ -132,8 +132,13 @@ pub fn preview(inputs: &BakeInputs, km: f64, threads: usize) -> Preview {
         rows.iter().flatten().filter(|p| p.land).count()
     ));
     text.push_str("land share by class (the mean class weight by area), before the rules and after:\n");
-    for c in 0..CLASS_COUNT {
-        text.push_str(&format!("  {:<14} {:>5.1} % -> {:>5.1} %\n", CLASS_NAMES[c], share(&before, c), share(&after, c)));
+    for (c, name) in CLASS_NAMES.iter().enumerate() {
+        text.push_str(&format!(
+            "  {name:<14} {:>5.1} % -> {:>5.1} %
+",
+            share(&before, c),
+            share(&after, c)
+        ));
     }
     let (plains, hills, mountains) =
         (share(&after, 0) + share(&after, 1) + share(&after, 5), share(&after, 2), share(&after, 3) + share(&after, 4));
