@@ -110,9 +110,16 @@ fn the_preview_is_the_same_bytes_for_any_thread_count_and_labels_its_images_as_i
     let b = preview(&source, &lith, &u, 400.0, 4);
     assert_eq!((a.uplift.clone(), a.steepness.clone(), a.section.clone(), a.text.clone()), (b.uplift, b.steepness, b.section, b.text));
     assert_eq!((a.uplift.width, a.uplift.height), (100, 50));
-    for needle in
-        ["uplift field (input), not terrain", "belt or arc coast", "back-arc", "section: from an active belt", "U / K at the surface"]
-    {
+    let (rift, noise) = (format!("rift {U_RIFT}"), format!("{NOISE_AMPLITUDE} noise"));
+    for needle in [
+        "uplift field (input), not terrain",
+        "belt or arc coast",
+        "back-arc",
+        "section: from an active belt",
+        "U / K at the surface",
+        &rift,
+        &noise,
+    ] {
         assert!(a.text.contains(needle), "{needle}: {}", a.text);
     }
     let dir = std::env::temp_dir().join(format!("planet-uplift-preview-{}", std::process::id()));
