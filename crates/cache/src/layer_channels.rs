@@ -421,6 +421,7 @@ impl LayerChannels {
             .chunks(8)
             .map(|c| u64::from_le_bytes(c.try_into().expect("eight bytes")))
             .collect();
+        // (A tile spec whose first tile has no key is a spec the reader cannot serve anyway: its area keys alone then name the channels.)
         if let Ok(k) = depth_key(&world, depth_res, &tiles, PassTile { face: Face(0), ti: 0, tj: 0 }) {
             parts.extend(k.0.chunks(8).map(|c| u64::from_le_bytes(c.try_into().expect("eight bytes"))));
         }

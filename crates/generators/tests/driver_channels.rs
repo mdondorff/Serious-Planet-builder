@@ -90,6 +90,12 @@ fn the_mapping_writes_the_soil_and_moisture_codes_and_leaves_the_insolation_and_
     );
     assert!((wetness_of_area_log2((AREA_LOG2_DRY + AREA_LOG2_WET) / 2.0) - 0.5).abs() < 1e-12);
     assert!((decode_soil(encode_soil(0.3, &p), &p) - 0.3).abs() < 0.02, "the soil code resolves a third of a metre");
+    // A sample that is not finite is no channel.
+    let mut one = [planet_generators::drivers::pack_driver_word([10, 20, 30], 40); 81];
+    let kept = one;
+    apply_channels(&mut one, &vec![ChannelSample { soil_m: Some(f32::NAN), area_log2_cells: Some(f32::INFINITY) }; 81]);
+    assert_eq!(one, kept);
+    assert_eq!(wetness_of_area_log2(f64::NAN), 0.0);
 }
 
 // spec: GEN-119

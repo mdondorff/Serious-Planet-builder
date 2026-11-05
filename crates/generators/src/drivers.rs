@@ -45,6 +45,9 @@ pub const AREA_LOG2_WET: f64 = 10.0;
 
 /// The moisture the drainage area `log2_cells` stands for: linear in the log2 between [`AREA_LOG2_DRY`] and [`AREA_LOG2_WET`], clamped to `[0, 1]`.
 pub fn wetness_of_area_log2(log2_cells: f64) -> f64 {
+    if !log2_cells.is_finite() {
+        return 0.0;
+    }
     ((log2_cells - AREA_LOG2_DRY) / (AREA_LOG2_WET - AREA_LOG2_DRY)).clamp(0.0, 1.0)
 }
 
@@ -61,10 +64,11 @@ pub fn apply_channels(words: &mut [u32; DRIVER_TEXELS], samples: &[ChannelSample
     let params = DriverParams::default();
     for (w, s) in words.iter_mut().zip(samples) {
         let (mut codes, neutral) = unpack_driver_word(*w);
-        if let Some(d) = s.soil_m {
+        // A sample that is not a finite number is no channel (the texel keeps its neutral code).
+        if let Some(d) = s.soil_m.filter(|d| d.is_finite()) {
             codes[0] = encode_soil(f64::from(d), &params);
         }
-        if let Some(a) = s.area_log2_cells {
+        if let Some(a) = s.area_log2_cells.filter(|a| a.is_finite()) {
             codes[1] = encode_unit(wetness_of_area_log2(f64::from(a)));
         }
         *w = pack_driver_word(codes, neutral);

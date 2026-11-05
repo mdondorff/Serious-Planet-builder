@@ -1672,6 +1672,9 @@ mod tests {
         // The stills of the product path draw the layer too (VIEW-062): the option is accepted there and the run goes on to what it needs (the poses file).
         let e = run_str(&["test-render", "--scene", "capture-stills", "--erosion", "on"]).unwrap_err();
         assert!(!e.contains("only applies to"), "{e}");
+        // ... and the channels of the layer with it (VIEW-066).
+        let e = run_str(&["test-render", "--scene", "capture-stills", "--erosion", "on", "--channels", "on"]).unwrap_err();
+        assert!(!e.contains("only applies to") && !e.contains("--channels"), "{e}");
     }
 
     // spec: VIEW-063

@@ -20,11 +20,11 @@ Source: ADR 0076 point 5, GEN-071, GEN-072, GEN-025, ADR 0086, GEN-119
 
 ## ADDED Requirements
 ### Requirement: GEN-119 The driver block from the baked channels
-A field MAY give the tile builder the baked channels at the 81 texels of a tile's driver block (`HeightField::driver_channels`). The builder SHALL then write, at each texel that has them, the deposited depth as the soil code and the drainage area as the moisture code (a linear ramp of its log2 in cells, 0 at 0 and 1 at 10, `DRIVER_MAP_VERSION`), keeping the insolation codes; a texel without a channel stays neutral. A field without channels SHALL give the neutral block, and every wrapper of a field SHALL forward them. A field that reads channels SHALL fold `DRIVER_MAP_VERSION` and the channels' identity into its climate version word, so its mesh keys differ from the same field without them and no other field's key changes.
+A field MAY give the tile builder the baked channels at the 81 texels of a tile's driver block (`HeightField::driver_channels`). The builder SHALL then write, at each texel that has them, the deposited depth as the soil code and the drainage area as the moisture code (a linear ramp of its log2 in cells, 0 at 0 and 1 at 10, `DRIVER_MAP_VERSION`), keeping the insolation codes; a texel without a channel stays neutral. A field without channels SHALL give the neutral block, and every wrapper of a field SHALL forward them. A field that reads channels SHALL fold `DRIVER_MAP_VERSION` and the channels' identity into its climate version word, so its mesh keys differ from the same field without them and no other field's key changes (no mesh version bump, GEN-018).
 
 Verify: A, C
 Status: active
-Source: planner inbox #65 (2026-11-05), ground-channels-2b decision 1, STRM-075, GEN-074
+Source: planner inbox #65 (2026-11-05), ground-channels-2b decision 1, STRM-075, GEN-074, ADR 0076, ADR 0086
 
 #### Scenario: Channels in the block
 - **WHEN** compact tiles are built over a field that gives channels, over the same field without them, and over fields wrapping one, and the driver views of the tiles are drawn with the default look
