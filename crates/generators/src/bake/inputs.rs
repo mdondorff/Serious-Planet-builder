@@ -7,8 +7,8 @@ use crate::classes::{
     CLASS_SOURCE_VERSION,
 };
 use crate::lithology::{Lithology, LITHOLOGY_VERSION, ROCK_K_SCALE};
-use crate::uplift::{Uplift, UPLIFT_VERSION};
 use crate::orography::{Orography, OROGRAPHY_VERSION, SEASONS};
+use crate::uplift::{Uplift, UPLIFT_VERSION};
 use planet_core::Vec3;
 
 /// The default class source of a seed and its class lattice.
@@ -29,7 +29,15 @@ impl BakeInputs {
         let lattice = ClassLattice::build_with(&source, CLASS_LATTICE_N, threads);
         let lithology = Lithology::new(&source, threads);
         let uplift = Uplift::new(source.seed());
-        BakeInputs { source, lattice, lithology, uplift, threads, orography_cells: crate::orography::default_cells(), orography: std::sync::OnceLock::new() }
+        BakeInputs {
+            source,
+            lattice,
+            lithology,
+            uplift,
+            threads,
+            orography_cells: crate::orography::default_cells(),
+            orography: std::sync::OnceLock::new(),
+        }
     }
 
     /// The orographic climate of the seed (GEN-117), built on first use from the class source's base elevation `e0` (never from the class weights) on the threads of [`BakeInputs::new`]: the
