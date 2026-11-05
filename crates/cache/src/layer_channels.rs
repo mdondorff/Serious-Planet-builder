@@ -4,7 +4,7 @@
 //! Record kind 14 ([`KIND_LAYER_AREA`]) is one record per cube face filed under the face's root tile: `codec (u8) | cells (u32 LE, pass 1's cells a face edge) | key (16 bytes) |` a brotli
 //! stream (quality 5, window 22 bits) of the face's own cells as `u8` codes of the drainage area by multiple flow direction (`round(8 log2(area / cell area))`), row `j` outer, each row as its
 //! first byte and the wrapping differences along the row. Record kind 15 ([`KIND_LAYER_DEPTH`]) is one record per tile filed like kind 13: `codec (u8) | tile (u32 LE) | key (16 bytes) |` a
-//! brotli stream of the deposited plane of the core (`u8` codes `round(m)`, 0 to 255 m in steps of 1 m), each row as in kind 14. The depth removed is not stored: it is
+//! brotli stream of the deposited plane of the core (`u8` square-root codes `round(12 sqrt(m))`, 0 to 451.6 m), each row as in kind 14. The depth removed is not stored: it is
 //! `max(0, deposited - change)` of the tile's kind 13 ([`removed_depth_m`]). A decoder refuses an unknown codec and a stream
 //! that does not decode to exactly the expected bytes, and never reserves more than that. Both keys carry the version of the channels, the scales of the codes and the key parameters of the layer
 //! they were computed beside, so a channel of another layer is refused by name, never mixed.
@@ -32,8 +32,8 @@ use crate::relief_store::face_tile;
 pub const KIND_LAYER_AREA: u8 = Kind::LayerArea as u8;
 /// The kind byte of a tile's erosion and deposition depth.
 pub const KIND_LAYER_DEPTH: u8 = Kind::LayerDepth as u8;
-/// Version of the channels' layout and codes. History: 1 = the first layout; 2 = the fill-depth scale (GEN-120, STRM-076) joined the channels' key; 3 = the fill code is 16 bits at 4 steps a metre and the post-pass writes it (GEN-121, STRM-077).
-pub const CHANNELS_VERSION: u32 = 3;
+/// Version of the channels' layout and codes. History: 1 = the first layout; 2 = the fill-depth scale (GEN-120, STRM-076) joined the channels' key; 3 = the fill code is 16 bits at 4 steps a metre and the post-pass writes it (GEN-121, STRM-077); 4 = the deposited depth is a square-root code, `round(12 sqrt(m))`, 0 to 451.6 m (GEN-111).
+pub const CHANNELS_VERSION: u32 = 4;
 /// Version of the reader's sampling rule (the bilinear read of the area in codes, the scale of its log2, the depth's read across tile borders and its clamp to the home tile): part of the identity of a
 /// [`LayerChannels`], so a change of how a point is read re-keys the tiles whose driver block holds it.
 pub const CHANNEL_READER_VERSION: u32 = 2;
@@ -44,15 +44,16 @@ const BROTLI_QUALITY: u32 = 5;
 const BROTLI_WINDOW_BITS: u32 = 22;
 const BROTLI_BUFFER: usize = 64 * 1024;
 pub(crate) const HEADER_LEN: usize = 1 + 4 + 16;
-/// The scales of the codes, part of the keys: 8 steps of area a doubling, 16 steps a square root of a metre.
+/// The scales of the codes, part of the keys: 8 steps of area a doubling; the deposited depth's code is a square root (`depth_code`, the steps a square-root metre in the key).
 const AREA_STEPS: u32 = 8;
-const DEPTH_SCALE: u32 = 1;
+const DEPTH_SCALE: u32 = 2;
 
 pub(crate) fn channel_bytes(layer: &[u8]) -> Vec<u8> {
     let mut b = Vec::with_capacity(12 + layer.len());
     b.extend(CHANNELS_VERSION.to_le_bytes());
     b.extend(AREA_STEPS.to_le_bytes());
     b.extend(DEPTH_SCALE.to_le_bytes());
+    b.extend(planet_generators::bake::tile::DEPTH_CODE_K.to_bits().to_le_bytes());
     b.extend(planet_generators::bake::face::FILL_STEPS_PER_M.to_bits().to_le_bytes());
     b.extend_from_slice(layer);
     b
@@ -293,7 +294,7 @@ pub struct TileDepth {
 /// The caller chooses which change to pass. With keep-pits (GEN-120) the STORED change of kind 13 includes the pits, so a pit would count as removal: [`LayerChannels::erosion_depth_m`] passes the
 /// stored change plus the pit depth (the runtime's filled change), so a pit is not erosion (docs/learnings.md, 2026-11-05).
 /// The depth removed at a cell in metres: `max(0, deposited - change)`, the deposited depth and the layer's change (kind 13) at the cell. Exact where pass 1 did not raise the cell; where it
-/// did (uplift, a filled pit: 15 % of mountain land and 35 % of hills in seed 14's samples) it is short by the raise, and where the deposited depth is 255 m it is clipped.
+/// did (uplift, a filled pit: 15 % of mountain land and 35 % of hills in seed 14's samples) it is short by the raise, and where the deposited depth is at the code's end (451.6 m) it is clipped.
 pub fn removed_depth_m(deposited_m: f32, change_m: f32) -> f32 {
     (deposited_m - change_m).max(0.0)
 }

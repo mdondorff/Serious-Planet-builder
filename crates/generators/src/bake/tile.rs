@@ -171,14 +171,18 @@ pub struct TileResult {
     pub stats: TileStats,
 }
 
-/// A depth in metres as a byte (GEN-111): `round(m)`, so 0 to 255 m in steps of 1 m; deeper is stored as 255.
+/// The steps of the deposited depth's square-root code: `code = round(DEPTH_CODE_K * sqrt(m))`, so a step is `2 sqrt(m) / K` (about 0.1 m at 0.3 m, 0.12 m at 0.5 m, 0.17 m at 1 m, 0.53 m at 10 m, 3.5 m at the end) and 255 reaches `(255 / K)^2` = 451.6 m (owner 2026-11-05; the deposits of seed 14's mountain tile reach 429 m).
+pub const DEPTH_CODE_K: f64 = 12.0;
+
+/// A depth in metres as a byte (GEN-111): `round(12 sqrt(m))`, fine near 0 for the material thresholds of 0.3, 0.5 and 1 m; from 449.8 m on it is stored as 255, which decodes to 451.56 m (above that the depth is clipped).
 pub fn depth_code(m: f64) -> u8 {
-    m.max(0.0).round().min(255.0) as u8
+    (DEPTH_CODE_K * libm::sqrt(m.max(0.0))).round().min(255.0) as u8
 }
 
-/// The depth in metres of a code of [`depth_code`].
+/// The depth in metres of a code of [`depth_code`]: `(code / 12)^2`.
 pub fn depth_m(code: u8) -> f32 {
-    f32::from(code)
+    let c = f64::from(code) / DEPTH_CODE_K;
+    (c * c) as f32
 }
 
 /// A field evaluated on every cell of the tile's window, row-major, on `threads` threads (a value per cell: the same bits for any count).

@@ -1,0 +1,1 @@
+- 2026-11-05 deposit-depth-code: the deposited depth (kind 15) is a square-root code round(12 sqrt(m)), 0 to 451.6 m, fine near 0 for the 0.3/0.5/1 m thresholds; CHANNELS_VERSION 4.
