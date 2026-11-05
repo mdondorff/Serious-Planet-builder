@@ -36,7 +36,7 @@ pub const KIND_LAYER_DEPTH: u8 = Kind::LayerDepth as u8;
 pub const CHANNELS_VERSION: u32 = 2;
 /// Version of the reader's sampling rule (the bilinear read of the area in codes, the scale of its log2, the depth's read across tile borders and its clamp to the home tile): part of the identity of a
 /// [`LayerChannels`], so a change of how a point is read re-keys the tiles whose driver block holds it.
-pub const CHANNEL_READER_VERSION: u32 = 1;
+pub const CHANNEL_READER_VERSION: u32 = 2;
 const AREA_ID: &str = "erosion-layer-area";
 const DEPTH_ID: &str = "erosion-layer-depth";
 const CODEC_VERSION: u8 = 1;
@@ -375,13 +375,16 @@ pub struct ChannelCaches {
     pub area_bytes: usize,
     /// The cells a side that a window advances (a window holds one more row and column, so a bilinear read never leaves it).
     pub area_window: usize,
-    /// The most bytes of decoded depth tiles held.
+    /// The most bytes of decoded depth tiles held, and of decoded fill tiles (each cache its own).
     pub tile_bytes: usize,
+    /// The most bytes of decoded layer tiles (kind 13, 4 bytes a cell: 37.7 MB at 3,072 cells) held for the erosion depth.
+    pub change_bytes: usize,
 }
 
 impl ChannelCaches {
-    /// 256-cell windows (about 208 km of the 12,288-cell face, 66 KB each) under 16 MB, and 256 MB of depth tiles.
-    pub const DEFAULT: ChannelCaches = ChannelCaches { area_bytes: 16 << 20, area_window: 256, tile_bytes: 256 << 20 };
+    /// 256-cell windows (about 208 km of the 12,288-cell face, 66 KB each) under 16 MB, 256 MB of depth tiles and of fill tiles, and 128 MB of layer tiles.
+    pub const DEFAULT: ChannelCaches =
+        ChannelCaches { area_bytes: 16 << 20, area_window: 256, tile_bytes: 256 << 20, change_bytes: 128 << 20 };
 }
 
 /// What a [`LayerChannels`] has done so far: the reads served from its caches, the windows and tiles it decoded, and the time those decodes took (the measurement of ground-channels-2b PR 1).
@@ -393,6 +396,10 @@ pub struct ChannelStats {
     pub tile_hits: u64,
     pub tile_decodes: u64,
     pub tile_decode_us: u64,
+    pub fill_decodes: u64,
+    pub fill_decode_us: u64,
+    pub change_decodes: u64,
+    pub change_decode_us: u64,
 }
 
 /// The read API of the channels over a store: the drainage area and the erosion and deposition depth at a direction. It owns its handles (the store and the world are shared, so its lifetime is
@@ -409,8 +416,12 @@ pub struct LayerChannels {
     area_window: usize,
     areas: Mutex<Lru<(u8, u32, u32), AreaWindow>>,
     depths: Mutex<Lru<(u8, u32, u32), TileDepth>>,
+    fills: Mutex<Lru<(u8, u32, u32), Vec<u8>>>,
+    changes: Mutex<Lru<(u8, u32, u32), Vec<f32>>>,
     area_load: Mutex<()>,
     depth_load: Mutex<()>,
+    fill_load: Mutex<()>,
+    change_load: Mutex<()>,
     stats: Mutex<ChannelStats>,
     identity: u64,
 }
@@ -437,6 +448,11 @@ impl LayerChannels {
             Ok(k) => parts.extend(k.0.chunks(8).map(|c| u64::from_le_bytes(c.try_into().expect("eight bytes")))),
             Err(_) => parts.push(0x6e6f_2064_6570_7468),
         }
+        // The fill's key carries the fill scale (GEN-120: the code is not decided), so another scale is another identity.
+        match crate::layer_fill::fill_key(&world, depth_res, &tiles, PassTile { face: Face(0), ti: 0, tj: 0 }) {
+            Ok(k) => parts.extend(k.0.chunks(8).map(|c| u64::from_le_bytes(c.try_into().expect("eight bytes")))),
+            Err(_) => parts.push(0x6e6f_2066_696c_6c00),
+        }
         parts.push(u64::from(CHANNEL_READER_VERSION));
         let identity = planet_core::hash::hash_u64s(0x6964_656e, &parts);
         LayerChannels {
@@ -450,8 +466,12 @@ impl LayerChannels {
             area_window: caches.area_window.max(1),
             areas: Mutex::new(Lru::new(caches.area_bytes, |v: &AreaWindow| v.codes.len())),
             depths: Mutex::new(Lru::new(caches.tile_bytes, |v: &TileDepth| v.deposited.len())),
+            fills: Mutex::new(Lru::new(caches.tile_bytes, |v: &Vec<u8>| v.len())),
+            changes: Mutex::new(Lru::new(caches.change_bytes, |v: &Vec<f32>| 4 * v.len())),
             area_load: Mutex::new(()),
             depth_load: Mutex::new(()),
+            fill_load: Mutex::new(()),
+            change_load: Mutex::new(()),
             stats: Mutex::new(ChannelStats::default()),
         }
     }
@@ -524,28 +544,65 @@ impl LayerChannels {
     /// The deposited depth in metres at `d`: bilinear in metres between the cell centres around the point, across tile borders (a neighbour tile without a record is read as
     /// the home tile's nearest cell), or `None` where the store holds no depth for the tile that holds the point.
     pub fn depth_m(&self, d: Vec3) -> Result<Option<f32>, LayerStoreError> {
+        self.tiled_bilinear(d, &|face, ti, tj, px, py| {
+            Ok(self.depth_tile(face, ti, tj)?.map(|t| f64::from(depth_m(t.deposited[py * self.tiles.grid.tile + px]))))
+        })
+    }
+
+    /// The pit depth in metres at `d` (kind 17: how far the ground lies below the flood of the final surface, GEN-120), read like [`Self::depth_m`]; `None` where the store holds no fill for the tile.
+    pub fn fill_depth_m(&self, d: Vec3) -> Result<Option<f32>, LayerStoreError> {
+        self.tiled_bilinear(d, &|face, ti, tj, px, py| {
+            Ok(self.fill_tile(face, ti, tj)?.map(|t| planet_generators::bake::face::fill_m(t[py * self.tiles.grid.tile + px])))
+        })
+    }
+
+    /// The erosion depth in metres at `d`: per cell `max(0, deposited - (change + fill))` (the deposited depth of kind 15, the change of kind 13 and the pit depth of kind 17, a tile without a fill
+    /// counting 0), read bilinearly in metres like [`Self::depth_m`]; `None` where the store holds no depth or no layer tile for the tile that holds the point.
+    pub fn erosion_depth_m(&self, d: Vec3) -> Result<Option<f32>, LayerStoreError> {
+        self.tiled_bilinear(d, &|face, ti, tj, px, py| {
+            let p = py * self.tiles.grid.tile + px;
+            let (Some(dep), Some(change)) = (self.depth_tile(face, ti, tj)?, self.change_tile(face, ti, tj)?) else { return Ok(None) };
+            let fill = self.fill_tile(face, ti, tj)?.map_or(0.0, |t| planet_generators::bake::face::fill_m(t[p]));
+            Ok(Some(f64::from(removed_depth_m(depth_m(dep.deposited[p]), change[p] + fill as f32))))
+        })
+    }
+
+    /// The bilinear read, in metres, of a per-cell value of the pass-2 grid at `d`: `at(face, ti, tj, px, py)` gives the value of core cell `(px, py)` of tile `(ti, tj)`, or `Ok(None)` where the store holds no
+    /// record of that tile. The four cells around the point are read across tile borders (a neighbour tile without a record is read as the home tile's nearest cell), and `None` is returned where the
+    /// tile that holds the point has no record.
+    fn tiled_bilinear(
+        &self,
+        d: Vec3,
+        at: &dyn Fn(Face, u32, u32, usize, usize) -> Result<Option<f64>, LayerStoreError>,
+    ) -> Result<Option<f32>, LayerStoreError> {
         let (face, s, t) = direction_to_face(&TangentWarp, d);
         let (n, tile) = (self.tiles.grid.cells, self.tiles.grid.tile);
         let (x, y) = ((s + 1.0) * 0.5 * n as f64 - 0.5, (t + 1.0) * 0.5 * n as f64 - 0.5);
         let (i, j) = (x.floor().clamp(0.0, (n - 1) as f64) as usize, y.floor().clamp(0.0, (n - 1) as f64) as usize);
         let (fx, fy) = ((x - i as f64).clamp(0.0, 1.0), (y - j as f64).clamp(0.0, 1.0));
         let (hi, hj) = (i / tile, j / tile);
-        let Some(home) = self.depth_tile(face, hi as u32, hj as u32)? else { return Ok(None) };
+        // The home tile's record decides: without it there is nothing to read.
+        if at(face, hi as u32, hj as u32, 0, 0)?.is_none() {
+            return Ok(None);
+        }
         // The four cells around the point: one that lies in the next tile is read from it, so no seam shows at a tile border; a cell past the face's edge, or in a tile without a
         // record, is read as the nearest cell of the home tile.
         let mut cells = [0.0f64; 4];
         for (k, (a, b)) in [(i, j), (i + 1, j), (i, j + 1), (i + 1, j + 1)].into_iter().enumerate() {
             let (a, b) = (a.min(n - 1), b.min(n - 1));
             let (ta, tb) = (a / tile, b / tile);
-            let other = if (ta, tb) == (hi, hj) { None } else { self.depth_tile(face, ta as u32, tb as u32)? };
-            let (d, a, b, ox, oy) = match other {
-                Some(o) => (o, a, b, ta * tile, tb * tile),
-                None => {
-                    (home.clone(), a.clamp(hi * tile, hi * tile + tile - 1), b.clamp(hj * tile, hj * tile + tile - 1), hi * tile, hj * tile)
-                }
+            let other = if (ta, tb) == (hi, hj) { None } else { at(face, ta as u32, tb as u32, a - ta * tile, b - tb * tile)? };
+            cells[k] = match other {
+                Some(v) => v,
+                None => at(
+                    face,
+                    hi as u32,
+                    hj as u32,
+                    a.clamp(hi * tile, hi * tile + tile - 1) - hi * tile,
+                    b.clamp(hj * tile, hj * tile + tile - 1) - hj * tile,
+                )?
+                .expect("the home tile holds a record"),
             };
-            let p = (b - oy) * tile + (a - ox);
-            cells[k] = f64::from(depth_m(d.deposited[p]));
         }
         let v = (1.0 - fy) * ((1.0 - fx) * cells[0] + fx * cells[1]) + fy * ((1.0 - fx) * cells[2] + fx * cells[3]);
         Ok(Some(v as f32))
@@ -576,6 +633,54 @@ impl LayerChannels {
     }
 }
 
+impl LayerChannels {
+    /// The decoded fill codes of a tile through the cache (`None` where the store holds none).
+    fn fill_tile(&self, face: Face, ti: u32, tj: u32) -> Result<Option<Arc<Vec<u8>>>, LayerStoreError> {
+        let key = (face.0, ti, tj);
+        if let Some(a) = self.fills.lock().expect("fill cache").get(key) {
+            return Ok(Some(a));
+        }
+        let _one = self.fill_load.lock().expect("fill load");
+        if let Some(a) = self.fills.lock().expect("fill cache").get(key) {
+            return Ok(Some(a));
+        }
+        let started = std::time::Instant::now();
+        let Some(a) = crate::layer_fill::load_fill(&self.store, &self.world, self.depth_res, &self.tiles, PassTile { face, ti, tj })?
+        else {
+            return Ok(None);
+        };
+        let a = Arc::new(a);
+        self.fills.lock().expect("fill cache").put(key, a.clone());
+        let mut s = self.stats.lock().expect("stats");
+        s.fill_decodes += 1;
+        s.fill_decode_us += started.elapsed().as_micros() as u64;
+        Ok(Some(a))
+    }
+
+    /// The decoded change of a layer tile (kind 13) through the cache (`None` where the store holds none).
+    fn change_tile(&self, face: Face, ti: u32, tj: u32) -> Result<Option<Arc<Vec<f32>>>, LayerStoreError> {
+        let key = (face.0, ti, tj);
+        if let Some(a) = self.changes.lock().expect("change cache").get(key) {
+            return Ok(Some(a));
+        }
+        let _one = self.change_load.lock().expect("change load");
+        if let Some(a) = self.changes.lock().expect("change cache").get(key) {
+            return Ok(Some(a));
+        }
+        let started = std::time::Instant::now();
+        let Some(r) = crate::layer_tiles::load_tile(&self.store, &self.world, self.depth_res, &self.tiles, PassTile { face, ti, tj })?
+        else {
+            return Ok(None);
+        };
+        let a = Arc::new(r.core);
+        self.changes.lock().expect("change cache").put(key, a.clone());
+        let mut s = self.stats.lock().expect("stats");
+        s.change_decodes += 1;
+        s.change_decode_us += started.elapsed().as_micros() as u64;
+        Ok(Some(a))
+    }
+}
+
 impl planet_generators::channels::ChannelSource for LayerChannels {
     fn identity(&self) -> u64 {
         self.identity
@@ -587,6 +692,14 @@ impl planet_generators::channels::ChannelSource for LayerChannels {
 
     fn deposited_depth_m(&self, d: Vec3) -> Result<Option<f32>, String> {
         self.depth_m(d).map_err(|e| e.0)
+    }
+
+    fn fill_depth_m(&self, d: Vec3) -> Result<Option<f32>, String> {
+        LayerChannels::fill_depth_m(self, d).map_err(|e| e.0)
+    }
+
+    fn erosion_depth_m(&self, d: Vec3) -> Result<Option<f32>, String> {
+        LayerChannels::erosion_depth_m(self, d).map_err(|e| e.0)
     }
 }
 

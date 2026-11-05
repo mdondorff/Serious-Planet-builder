@@ -55,7 +55,7 @@ fn base(d: Vec3) -> f64 {
 }
 
 fn caches(area_bytes: usize, tile_bytes: usize) -> ChannelCaches {
-    ChannelCaches { area_bytes, area_window: 8, tile_bytes }
+    ChannelCaches { area_bytes, area_window: 8, tile_bytes, change_bytes: 1 << 20 }
 }
 
 fn pass1() -> LayerSpec {
@@ -292,7 +292,7 @@ fn reader(area_bytes: usize, tile_bytes: usize) -> (LayerChannels, Dir, Dir) {
     let a = pass2_dir(&w, &s, &f, "a", 2);
     copy_areas(p1.path(), a.path(), &w, RES, &pass1(), &all_faces()).unwrap();
     let store = TileStore::open(a.path(), w.params()).unwrap();
-    let caps = ChannelCaches { area_bytes, area_window: 8, tile_bytes };
+    let caps = ChannelCaches { area_bytes, area_window: 8, tile_bytes, change_bytes: 1 << 20 };
     (LayerChannels::new(Arc::new(store), Arc::new(w), RES, RES, pass1(), s, caps), p1, a)
 }
 
@@ -407,7 +407,10 @@ fn the_diagnostic_decode_that_skips_the_key_check_is_called_by_no_runtime_code()
 #[test]
 fn a_read_at_a_window_boundary_equals_the_bilinear_mean_of_the_whole_face_and_a_channel_of_another_layer_is_refused() {
     use planet_core::cube::{direction_to_face, TangentWarp};
-    assert_eq!(ChannelCaches::DEFAULT, ChannelCaches { area_bytes: 16 << 20, area_window: 256, tile_bytes: 256 << 20 });
+    assert_eq!(
+        ChannelCaches::DEFAULT,
+        ChannelCaches { area_bytes: 16 << 20, area_window: 256, tile_bytes: 256 << 20, change_bytes: 128 << 20 }
+    );
     let (w, p1) = (world(), Dir::new("p1"));
     let spec_t = spec(&w);
     let f = faces(p1.path(), &w);
@@ -424,7 +427,7 @@ fn a_read_at_a_window_boundary_equals_the_bilinear_mean_of_the_whole_face_and_a_
         RES,
         pass1(),
         spec_t,
-        ChannelCaches { area_bytes: 1 << 20, area_window: 8, tile_bytes: 1 << 20 },
+        ChannelCaches { area_bytes: 1 << 20, area_window: 8, tile_bytes: 1 << 20, change_bytes: 1 << 20 },
     );
     // Pass 2's cells 28 to 33 put the point between pass 1's cells 7 and 8, 15 and 16: the cell past the window's step is read from the window's one-past column.
     for x in [28i64, 29, 30, 31, 32, 33, 60, 61, 62, 63] {
@@ -455,5 +458,98 @@ fn the_identity_of_the_channels_follows_the_resolutions_of_their_keys_and_the_re
     assert_eq!(make(RES, RES), make(RES, RES), "equal specs, equal identity");
     assert_ne!(make(RES, RES), make(RES + 1, RES), "the area keys' resolution is part of it");
     assert_ne!(make(RES, RES), make(RES, RES + 1), "the depth keys' resolution is part of it");
-    assert_eq!(CHANNEL_READER_VERSION, 1, "a change of the sampling rule raises the version, which enters the identity");
+    assert_eq!(CHANNEL_READER_VERSION, 2, "a change of the sampling rule raises the version, which enters the identity");
+}
+
+/// A layer store of the tiny planet whose pass 2 had pits: the pit depth of pass 1 is 3 m on the half of the planet with x above 0 (a made-up reader, the spill level 3 m over the carved surface).
+fn pit_store() -> (GlobalWorld, TileLayerSpec, Dir, Dir) {
+    let (w, p1) = (world(), Dir::new("p1"));
+    let s = spec(&w);
+    let f = faces(p1.path(), &w);
+    let d = Dir::new("fill");
+    let pits = |v: Vec3| (if v.x > 0.0 { 3.0 } else { 0.0 }, v);
+    run_pass2(
+        d.path(),
+        &w,
+        RES,
+        &s,
+        &Pass2Inputs { base: &base, face_change: &face_change_reader(&f), factor: None, face_fill: Some(&pits) },
+        &tiles(),
+        2,
+        &mut |_| {},
+    )
+    .unwrap();
+    (w, s, p1, d)
+}
+
+// spec: STRM-076
+#[test]
+fn the_fill_and_erosion_depths_read_the_stored_cells_and_the_erosion_depth_is_what_the_carve_removed_not_counting_a_pit() {
+    use planet_cache::layer_fill::load_fill;
+    use planet_generators::bake::face::fill_m;
+    use planet_generators::channels::ChannelSource;
+    let (w, s, _p1, d) = pit_store();
+    let store = Arc::new(TileStore::open(d.path(), w.params()).unwrap());
+    let ch = LayerChannels::new(store.clone(), Arc::new(w.clone()), RES, RES, pass1(), s, ChannelCaches::DEFAULT);
+    for id in [tiles()[0], tiles()[1]] {
+        let fill = load_fill(&store, &w, RES, &s, id).unwrap().expect("a fill");
+        let dep = load_depth(&store, &w, RES, &s, id).unwrap().expect("a depth");
+        let change = load_tile(&store, &w, RES, &s, id).unwrap().expect("a tile").core;
+        let t = s.grid.tile;
+        assert!(fill.iter().any(|c| *c > 0), "the tile holds pits: {id:?}");
+        let mut seen = (false, false);
+        for py in (0..t).step_by(5) {
+            for px in (0..t).step_by(5) {
+                let d = s.grid.direction(Face(0), (id.ti as usize * t + px) as i64, (id.tj as usize * t + py) as i64);
+                let p = py * t + px;
+                let want_fill = fill_m(fill[p]) as f32;
+                assert_eq!(ch.fill_depth_m(d).unwrap().expect("a fill"), want_fill, "fill at cell ({px}, {py}) of {id:?}");
+                let removed = (depth_m(dep.deposited[p]) - (change[p] + want_fill)).max(0.0);
+                let got = ch.erosion_depth_m(d).unwrap().expect("an erosion depth");
+                assert!((got - removed).abs() < 1e-4, "erosion {got} against {removed} at ({px}, {py}) of {id:?}");
+                seen = (seen.0 || want_fill > 0.0, seen.1 || removed > 0.0);
+            }
+        }
+        assert!(seen.0 && seen.1, "a pit and an eroded cell in the sample of {id:?}");
+    }
+    // A point in a tile the store holds no record of reads none, and the trait gives the reader's numbers.
+    let other = s.grid.direction(Face(1), 40, 40);
+    assert_eq!((ch.fill_depth_m(other).unwrap(), ch.erosion_depth_m(other).unwrap()), (None, None));
+    let at = s.grid.direction(Face(0), 12, 8);
+    let src: &dyn ChannelSource = &ch;
+    assert_eq!(src.fill_depth_m(at).unwrap(), ch.fill_depth_m(at).unwrap());
+    assert_eq!(src.erosion_depth_m(at).unwrap(), ch.erosion_depth_m(at).unwrap());
+    // Each tile is decoded once for all the reads: the fill, deposited and layer tiles of the two tiles, and the counts show it.
+    let (stats, _, _) = ch.stats();
+    assert_eq!((stats.fill_decodes, stats.change_decodes), (2, 2), "{stats:?}");
+}
+
+// spec: STRM-076
+#[test]
+fn the_fill_depth_reads_across_a_tile_border_without_a_step_and_the_identity_follows_the_fill_scale() {
+    use planet_generators::channels::ChannelSource;
+    let (w, s, _p1, d) = pit_store();
+    let store = Arc::new(TileStore::open(d.path(), w.params()).unwrap());
+    let ch = LayerChannels::new(store.clone(), Arc::new(w.clone()), RES, RES, pass1(), s, ChannelCaches::DEFAULT);
+    let n = 96.0;
+    let at = |i: f64| {
+        let d = planet_core::cube::face_to_direction(
+            &planet_core::cube::TangentWarp,
+            Face(0),
+            2.0 * (i + 0.5) / n - 1.0,
+            2.0 * (10.0 + 0.5) / n - 1.0,
+        );
+        ch.fill_depth_m(d).unwrap().expect("fill")
+    };
+    let (c23, c24) = (at(23.0), at(24.0));
+    let mut prev = c23;
+    for k in 1..=10 {
+        let v = at(23.0 + f64::from(k) / 10.0);
+        assert!((v - prev).abs() <= (c24 - c23).abs() + 1e-3, "a step at {k}/10: {prev} to {v}");
+        prev = v;
+    }
+    // The reader's identity folds the fill's key (which carries the fill scale): another resolution of the keys is another identity, and the reader version is 2.
+    let other = LayerChannels::new(store, Arc::new(w.clone()), RES, RES + 1, pass1(), s, ChannelCaches::DEFAULT);
+    assert_ne!(ch.identity(), other.identity());
+    assert_eq!(CHANNEL_READER_VERSION, 2);
 }

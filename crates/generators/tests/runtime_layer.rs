@@ -668,6 +668,12 @@ impl planet_generators::channels::ChannelSource for FakeChannels {
     fn deposited_depth_m(&self, d: Vec3) -> Result<Option<f32>, String> {
         Ok(if d.z < 0.0 { None } else { Some((0.5 + 3.0 * d.z) as f32) })
     }
+    fn fill_depth_m(&self, d: Vec3) -> Result<Option<f32>, String> {
+        Ok(if d.z < 0.0 { None } else { Some((0.2 + d.x.abs()) as f32) })
+    }
+    fn erosion_depth_m(&self, d: Vec3) -> Result<Option<f32>, String> {
+        Ok(if d.z < 0.0 { None } else { Some((1.0 + d.y.abs()) as f32) })
+    }
 }
 
 // spec: GEN-119
