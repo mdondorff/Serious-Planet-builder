@@ -4,7 +4,7 @@ An analytic lithology field SHALL give, at a direction and a height, the erodibi
 
 Verify: A
 Status: active
-Source: ADR 0102, SPIKE-102 F1, SPIKE-81, planner inbox #68 (2026-11-05)
+Source: ADR 0102, SPIKE-102 F1, SPIKE-81
 
 #### Scenario: The field
 - **WHEN** the field is built on 1 and 8 threads and read at random points and heights, its hardness is compared with SPIKE-81's formula, a column is scanned over 1.5 km in steps of a quarter metre, and the lattice is read at its nodes and across a face edge
@@ -15,7 +15,7 @@ Source: ADR 0102, SPIKE-102 F1, SPIKE-81, planner inbox #68 (2026-11-05)
 
 Verify: A
 Status: active
-Source: ADR 0102 point 4, planner inbox #68 and #69 (2026-11-05)
+Source: ADR 0102 point 4, SPIKE-102 F1
 
 #### Scenario: The preview
 - **WHEN** the preview is made on 1 and 4 threads, written to a folder, and the option is combined with another generate command, a definition named twice, and `--km` alone or out of range

@@ -1658,6 +1658,10 @@ mod tests {
         assert!(e.contains("--km applies to --lithology-preview"), "{e}");
         let e = run_str(&["generate", "--lithology-preview", &dir, "--km", "0.5"]).unwrap_err();
         assert!(e.contains("--km 0.5 must be from 1 to 500"), "{e}");
+        for bad in ["501", "NaN"] {
+            let e = run_str(&["generate", "--lithology-preview", &dir, "--km", bad]).unwrap_err();
+            assert!(e.contains("--km") && e.contains("must be from 1 to 500"), "{bad}: {e}");
+        }
     }
 
     // spec: VIEW-066

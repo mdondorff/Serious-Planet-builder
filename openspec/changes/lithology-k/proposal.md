@@ -8,6 +8,6 @@
 
 ## Impact
 - Code: `generators` (`lithology.rs`, `lithology_preview.rs`), `app` (the option). Requirements: GEN-116 and GEN-122 added.
-- All numbers are start values (the owner's preview decides): the hardness formula is SPIKE-81's; the band thickness, the offset amplitudes, the caprock threshold 0.92, the carbonate share 0.25 and K's bounds 0.12 to 1.8 are mine.
+- All numbers are start values (the owner's preview decides): the hardness formula is SPIKE-81's; the band thickness, the offset amplitudes, the caprock threshold 0.92, the carbonate share 0.25 and K's bounds 0.12 to 1.8 are start values of this change (not from SPIKE-81).
 - First preview (seed 14): land 33 %; H over land hard (over 0.6) 17.7 %, soft (under 0.4) 39.9 % (SPIKE-81 reported 32 % and 39 % on its own prototype: the hard share is lower here, to be looked at in the preview round); caprock at the surface 15 % of land; soluble over 0.5 at 5.9 % of land. The bands are resolved by pass 1's per-step change under about 1,000 km2 of drainage area and marginally on the largest rivers (1.5 steps to cross the thinnest band at 100,000 km2).
-- Open for the owner: whether the rock model should stay a stack of planet-wide bands varied by province (as here) or carry regional formations; the cross-section answers whether it is volumetric: it is, the carve reads K at the cell's current height.
+- Open for the owner: whether the rock model should stay a stack of planet-wide bands varied by province (as here) or carry regional formations; the cross-section answers whether it is volumetric: the field is, K depends on the height; the carve's own read of K at a cell's current height is PR 4 (GEN-100, GEN-101).
