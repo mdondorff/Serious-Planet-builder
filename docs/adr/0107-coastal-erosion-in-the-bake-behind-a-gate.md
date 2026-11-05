@@ -1,5 +1,5 @@
 # 0107 Coasts from wave erosion and sediment supply in the bake, behind a switch and a gate
-Status: accepted (owner, 2026-11-05: SPIKE-102 D6, option B "with a gate and this fallback option")
+Status: accepted (owner, 2026-11-05: SPIKE-102 D6, option B "with a gate and this fallback option"); point 5 amended 2026-11-05 (owner): the fallback after a failed gate is a rule-based coast type (SPIKE-102 F7 and P2b: cliffed where wave exposure, hard rock and near-shore relief are high, a coast step there, taper, fade and band only on depositional coasts), not today's taper everywhere, which erases cliff heights
 Date: 2026-11-05
 Source: owner, 2026-11-05; SPIKE-102 (F7, P2b, 4.3 D6); SPIKE-94 (cliffs survey); Sunamura 1992 (cliff erosion rate against wave force and rock strength); ADR 0089; ADR 0091; ADR 0102; ADR 0104; ADR 0105
 
