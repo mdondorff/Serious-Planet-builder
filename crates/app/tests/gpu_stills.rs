@@ -123,6 +123,37 @@ fn the_stills_scene_draws_each_pose_with_its_horizon_maps_baked() {
     assert!(!dir.join("lit.json").exists() && !out.contains("budget"), "a tool: no perf log, no budget row: {out}");
 }
 
+// spec: REND-055
+#[test]
+fn a_look_file_changes_the_stills_by_its_ground_table() {
+    let f = Fixture::new("look");
+    let still = |f: &Fixture| std::fs::read(f.dir.join("ground-midday.png")).unwrap();
+    f.call(&["--views", "ground-midday"]).unwrap();
+    let plain = still(&f);
+    // A look file with the ground detail on and the 8 m octave given a tilt and an albedo: the picture differs from the run without one.
+    let look = tmp("look-file.look.toml");
+    std::fs::write(
+        &look,
+        "schema_version = 9
+kind = \"look\"
+[body.0.ground]
+detail = 1.0
+crack = 0.9
+[body.0.ground.octave.m8]
+albedo = [0.6, 0.6, 0.6]
+tilt = [0.6, 0.6, 0.6, 0.6]
+",
+    )
+    .unwrap();
+    f.call(&["--views", "ground-midday", "--look", look.to_str().unwrap()]).unwrap();
+    assert_ne!(plain, still(&f), "the look file's ground table did not reach the stills");
+    // A look file that does not load is refused naming the path.
+    let missing = tmp("no-such.look.toml");
+    let e = f.call(&["--views", "ground-midday", "--look", missing.to_str().unwrap()]).unwrap_err();
+    assert!(e.contains("no-such.look.toml"), "{e}");
+    let _ = std::fs::remove_file(&look);
+}
+
 // spec: TEST-048
 #[test]
 fn the_stills_scene_draws_one_pose_by_name_and_refuses_a_bad_call() {

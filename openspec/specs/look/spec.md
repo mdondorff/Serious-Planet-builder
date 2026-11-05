@@ -52,7 +52,7 @@ Source: ADR 0042 point 6, ADR 0048 point 2, ADR 0041 points 4 to 6, ADR 0035, CO
 - **THEN** loading fails with a message that contains the full key and the value as written
 
 ### Requirement: LOOK-002 Look file migrations
-The look file SHALL have its own schema version (5 since `ground`; 4 `water`, ADR 0041 points 4 to 6; 3 added the `atmosphere` table, ADR 0040; 2 added the `sun` and `albedo` tables, ADR 0039; 1 was the first layout), independent of the world definition's and of any generator version, and tested migrations in the manner of WDEF-002 (CON-10). **Every change that adds a table or a key to the look file SHALL raise the schema version and add an identity migration step**, so that a build that does not know the table says "newer schema version N, update the program" and not "unknown key" (the clearer failure under CON-10); moving or renaming a key needs a real step as well. Loading SHALL require the version, SHALL refuse a newer version with a message that gives both versions and says to update the program, SHALL refuse a gap in the migration chain naming the missing step, SHALL apply the migrations from the file's version to the current one in order, and SHALL fail with the step's message when a migration fails. The layout read after the chain SHALL be the current one, and a migrated file SHALL equal the file of the current layout with the same content and write the same canonical text. A table that no version of this build knows, in a file of the current version, is an unknown key naming the table (a typo, not a release). A look file SHALL NOT load as a world definition and a definition SHALL NOT load as a look file (the `kind` marker). The production chain SHALL have one step per older version (`MIGRATIONS.len() == SCHEMA_VERSION - 1`, a test pins it) and a fixture of every older version SHALL load through it.
+The look file SHALL have its own schema version (9 since the 64 m and 8 m octaves, REND-057; 8 the scree and wet slots, REND-056; 7 the octave coefficients, LOOK-013; 6 `patch`, LOOK-012; 5 `ground`; 4 `water`, ADR 0041 points 4 to 6; 3 added the `atmosphere` table, ADR 0040; 2 added the `sun` and `albedo` tables, ADR 0039; 1 was the first layout), independent of the world definition's and of any generator version, and tested migrations in the manner of WDEF-002 (CON-10). **Every change that adds a table or a key to the look file SHALL raise the schema version and add an identity migration step**, so that a build that does not know the table says "newer schema version N, update the program" and not "unknown key" (the clearer failure under CON-10); moving or renaming a key needs a real step as well. Loading SHALL require the version, SHALL refuse a newer version with a message that gives both versions and says to update the program, SHALL refuse a gap in the migration chain naming the missing step, SHALL apply the migrations from the file's version to the current one in order, and SHALL fail with the step's message when a migration fails. The layout read after the chain SHALL be the current one, and a migrated file SHALL equal the file of the current layout with the same content and write the same canonical text. A table that no version of this build knows, in a file of the current version, is an unknown key naming the table (a typo, not a release). A look file SHALL NOT load as a world definition and a definition SHALL NOT load as a look file (the `kind` marker). The production chain SHALL have one step per older version (`MIGRATIONS.len() == SCHEMA_VERSION - 1`, a test pins it) and a fixture of every older version SHALL load through it.
 
 Verify: A
 Status: active
@@ -86,8 +86,24 @@ Source: CON-10, ADR 0042 point 6, WDEF-002, ADR 0039
 - **WHEN** the version 5 fixture with a partial `ground` table is loaded
 - **THEN** the keys it names are read, the curves and materials it leaves out are the Earth default, the canonical text reads back equal, a version 4 file with the same content reads equal (the identity step 4 to 5) and a build that knows only version 4 refuses the file as a newer schema
 
+#### Scenario: Version 6 fixture
+- **WHEN** the version 6 fixture with a `patch` in the `ground` table is loaded
+- **THEN** the key is read, the canonical text reads back equal, a version 5 file with the same content reads equal with the patch 0 (the identity step 5 to 6) and a build that knows only version 5 refuses the file as a newer schema
+
+#### Scenario: Version 7 fixture
+- **WHEN** the version 7 fixture with `octave` tables in the `ground` table is loaded
+- **THEN** the tables are read, the canonical text reads back equal, a version 6 file with the same content reads equal with the Earth coefficients (the identity step 6 to 7) and a build that knows only version 6 refuses the file as a newer schema
+
+#### Scenario: Version 8 fixture
+- **WHEN** the version 8 fixture with `scree` and `wet` tables in the `ground` table is loaded
+- **THEN** the tables are read, the canonical text reads back equal, a version 7 file with the same content reads equal with scree and wet ground off (the identity step 7 to 8) and a build that knows only version 7 refuses the file as a newer schema
+
+#### Scenario: Version 9 fixture
+- **WHEN** the version 9 fixture with `m64` and `m8` octave tables in the `ground` table is loaded
+- **THEN** the tables are read, the canonical text reads back equal, a version 8 file with the same content reads equal with the two octaves at 0 (the identity step 8 to 9) and a build that knows only version 8 refuses the file as a newer schema
+
 #### Scenario: Unloadable file
-- **WHEN** the version is missing, newer than the build (for example 5), has no migration path, or a migration step fails
+- **WHEN** the version is missing, newer than the build (for example 10), has no migration path, or a migration step fails
 - **THEN** loading fails with an error that names the versions or the step and what to do
 
 #### Scenario: Not interchangeable with a definition
@@ -243,3 +259,14 @@ Source: SPIKE-100 D2, planner 2026-11-04 (I8a slice 2a, step a), REND-034, LOOK-
 #### Scenario: The table
 - **WHEN** a look file gives a `crack`, a changed `tilt` for one octave, a bad number, a wrong count and an unknown octave, a build that knows version 6 reads the version 7 fixture, and the plans of a file and of the default choice are drawn
 - **THEN** the table reads and writes back equal, the bad ones are refused naming the key, the older build refuses the file as a newer schema, the file's plan has a text and key that differ from the plain plan's, the lit ground goldens do not move (the Earth values are the old constants) and zero coefficients draw a picture that differs on over a fifth of the ground
+
+### Requirement: LOOK-012 The patch key of the ground look
+The `[body.<id>.ground]` table of the look file SHALL take an optional `patch` (schema version 6), the patch break-up of the material boundaries (REND-055) as a share of the slope cosine: 0 (the default, off) or from 1e-6 to 0.5; a value outside it SHALL be refused naming `ground.patch`, and the canonical text SHALL write the key. The lit plan SHALL carry the value, in its text and key only when it is not 0, take it from the file's table with the file's curves (VIEW-060), and the poses file's `[look] ground_patch` SHALL set it for the stills (TEST-053).
+
+Verify: A
+Status: active
+Source: REND-055, LOOK-011, LOOK-002; planner 2026-11-04
+
+#### Scenario: The key
+- **WHEN** a look file gives `patch = 0.12`, none, 0.7, -0.01 and 1e-9, a build that knows version 5 reads the version 6 fixture, and the plans of a file and of the default choice are built
+- **THEN** 0.12 reads and writes back equal, none is 0 and is written as `patch = 0.0`, the others are refused naming `ground.patch` with the value, the older build refuses the file as a newer schema, the file's plan carries 0.12 with a text and key that differ from the plain plan's, and the default choice keeps 0

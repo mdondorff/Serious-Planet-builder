@@ -1246,7 +1246,7 @@ The title SHALL name a shade view other than normal, the local solar time at the
 - **THEN** it adds nothing, and adds "shade view horizon" and "sun 18:00 local solar time"; with the editing light on it does not claim the time
 
 ### Requirement: VIEW-060 F8 switches the ground look
-The lit window SHALL show the ground look `LookChoice` names: F8 cycles the defaults (the Earth curves at the strength F6 names) and the look file's `ground` table (LOOK-011; its curves, and its detail strength in place of the natural mode's, while full and off stay what F6 says); the window starts on the defaults. The window's title SHALL name the choice when it is not the default (`look look file`), the key table SHALL list F8 with its state (`default` or `look file`), and `LitPlan::with_ground_look` SHALL make the plan so that a test can read it. A look file without a ground table shows the same in both. Nothing is stored or keyed (ADR 0035).
+The lit window SHALL show the ground look `LookChoice` names: F8 cycles the defaults (the Earth curves at the strength F6 names) and the look file's `ground` table (LOOK-011; its curves, its patch break-up (LOOK-012; the defaults have none), and its detail strength in place of the natural mode's, while full and off stay what F6 says); the window starts on the defaults. The window's title SHALL name the choice when it is not the default (`look look file`), the key table SHALL list F8 with its state (`default` or `look file`), and `LitPlan::with_ground_look` SHALL make the plan so that a test can read it. A look file without a ground table shows the same in both. Nothing is stored or keyed (ADR 0035).
 
 Verify: A
 Status: active
@@ -1254,7 +1254,7 @@ Source: owner (2026-10-28, via opus-planner): compare the default look and the l
 
 #### Scenario: F8
 - **WHEN** F8 is pressed three times in a viewer at its start and plans are made for each choice and mode with a ground table that has a detail of 0.3 and a soil moisture curve
-- **THEN** the choice is the look file, the defaults, the look file; the defaults plan has the Earth curves and the mode's strength; the look file plan has the table's curves and 0.3 at the natural mode and 1 and 0 at full and off; the other switches are unchanged, the help names F8 and the ground look
+- **THEN** the choice is the look file, the defaults, the look file; the defaults plan has the Earth curves and the mode's strength; the look file plan has the table's curves, its patch and 0.3 at the natural mode and 1 and 0 at full and off; the other switches are unchanged, the help names F8 and the ground look
 
 ### Requirement: VIEW-061 No main-thread phase waits for a bake block, and the stall report names the ones that do
 The hover pick and the free camera's ground read SHALL each run on their own thread against a field it makes; a frame SHALL use the last finished read and start the next. A ground answer SHALL stand within max(1 km, half the camera's height) of the nadir; otherwise, or before the first answer, the frame SHALL read the ground itself. The bake cache SHALL keep the ground read's blocks out of eviction. A click that places or drags an edit SHALL pick on the spot. The stall probe SHALL count per phase the blocks the main thread decoded itself and the time it spent getting blocks; a stall report SHALL name each phase with a count above zero (CON-22).
@@ -1293,4 +1293,3 @@ Source: opus-planner (2026-10-27), owner test 2026-10-27 group A item 2, VIEW-05
 #### Scenario: A warmed block
 - **WHEN** a direction on a block nobody has read is warmed and the warm-up thread has read it
 - **THEN** the height read at that direction on the main thread decodes no block, where the same read on a cold block decodes one on the thread that reads it
-

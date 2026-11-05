@@ -1,0 +1,1 @@
+- 2026-11-05 ground-detail-patch: the patch break-up of the material boundaries behind `ground.patch` (REND-055, LOOK-012; #1166), and the stills and cost path take `--look FILE` whose ground table drives the lit plan, with the patch's and the 64 m and 8 m octaves' share in the shadow-cost log
