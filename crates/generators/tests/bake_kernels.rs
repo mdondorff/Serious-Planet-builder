@@ -508,3 +508,47 @@ fn the_default_breach_is_500_m_and_an_optional_height_scale_keeps_the_small_limi
     );
     assert_eq!(none.to_bits(), none_scaled.to_bits(), "a limit of 0 with the scaling on breached: {none_scaled} against {none}");
 }
+
+// spec: GEN-120
+#[test]
+fn a_carve_that_keeps_its_pits_leaves_a_basin_below_its_receiver_and_the_fill_depth_is_the_flood_minus_the_heights() {
+    use planet_generators::bake::flood::fill_depth;
+    let (n, dx_uplift) = (24, 0.0);
+    let g = grid(n);
+    // A plateau at 100 m with a bowl of 20 m, a channel to the west edge at 60 m (the pour point).
+    let mut z = bowl(n);
+    for i in 0..10 {
+        z[12 * n + i] = 60.0;
+    }
+    let outlet = g.outlets(&z, -1.0);
+    let params = CarveParams { steps: 10, u_over_k: dx_uplift, uplift_taper_m: 0.0, ..CarveParams::default() };
+    let mut kept = z.clone();
+    carve(&g, &mut kept, &outlet, &CarveParams { keep_pits: true, ..params }, None, 3);
+    let mut filled_by_carve = z.clone();
+    carve(&g, &mut filled_by_carve, &outlet, &CarveParams { keep_pits: false, ..params }, None, 3);
+    let pit = 12 * n + 12;
+    assert!(kept[pit] <= 20.0 + 1e-9, "the pit was raised to {} although it keeps its pit", kept[pit]);
+    assert!(filled_by_carve[pit] > 59.0, "the filling carve left the pit at {}", filled_by_carve[pit]);
+    // The depth of the pit below the flood of the kept surface is the pour point's level minus its floor, and 0 on the plateau and at the outlets.
+    let depth = fill_depth(&g, &kept, &outlet, params.epsilon, 0.5);
+    assert!((f64::from(depth[pit]) - (60.0 - kept[pit])).abs() < 1.0, "depth {} for a pit at {}", depth[pit], kept[pit]);
+    assert!(depth.iter().zip(&outlet).all(|(d, o)| !*o || *d == 0.0), "an outlet holds a fill depth");
+    assert!(depth.iter().all(|d| *d == 0.0 || *d >= 0.5), "a pit under the minimum is recorded");
+    // Running again gives the same bits.
+    let mut again = z.clone();
+    carve(&g, &mut again, &outlet, &CarveParams { keep_pits: true, ..params }, None, 3);
+    assert_eq!(bits(&kept), bits(&again));
+}
+
+// spec: GEN-120
+#[test]
+fn an_incise_only_carve_ignores_keep_pits() {
+    let g = grid(24);
+    let z0 = bowl(24);
+    let outlet = g.outlets(&z0, -1.0);
+    let base = CarveParams { steps: 5, u_over_k: 0.0, breach_max_m: 0.0, incise_only: true, ..CarveParams::default() };
+    let (mut a, mut b) = (z0.clone(), z0);
+    carve(&g, &mut a, &outlet, &CarveParams { keep_pits: true, ..base }, None, 1);
+    carve(&g, &mut b, &outlet, &CarveParams { keep_pits: false, ..base }, None, 1);
+    assert_eq!(bits(&a), bits(&b));
+}
