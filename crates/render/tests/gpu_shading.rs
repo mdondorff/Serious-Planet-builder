@@ -399,6 +399,47 @@ fn a_changed_16_m_tilt_moves_the_picture() {
     }
 }
 
+// spec: REND-056
+#[test]
+fn scree_and_wet_ground_are_off_in_the_earth_default_and_draw_their_own_look_when_on() {
+    use planet_frame::look::materials::{Input, MaterialParams, INPUTS, MATERIALS};
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let (p, _) = plan(6);
+    let mut r = renderer(&ctx, &p);
+    let plain = hdr_of(&mut r, &ctx, &p, detail_plan(ShadeView::Lit, 1.0));
+    let mut alone = |m: usize| {
+        let mut curves = [[[0.0, 0.0]; INPUTS]; MATERIALS];
+        curves[m][Input::SoilDepth as usize] = [-1.0, 0.0];
+        let mut l = detail_plan(ShadeView::Lit, 1.0);
+        l.materials = MaterialParams { curves };
+        hdr_of(&mut r, &ctx, &p, l)
+    };
+    let (scree, wet, soil) = (alone(4), alone(5), alone(3));
+    assert!(scree != plain && wet != plain, "a slot that is on draws the Earth picture");
+    assert!(scree != wet && scree != soil && wet != soil, "two materials draw the same picture");
+    // Scree is rock-like grey and wet ground is darker than scree.
+    let mean = |img: &[[f32; 4]]| {
+        let px: Vec<_> = img.iter().filter(|x| x[3] > 0.0).collect();
+        px.iter().map(|x| f64::from(x[0] + x[1] + x[2])).sum::<f64>() / px.len() as f64
+    };
+    assert!(mean(&wet) < mean(&scree), "wet ground is not darker than scree");
+    // Each octave's scree and wet entries are read from their own place (the 3 cm octave fades out at this distance).
+    for (m, base) in [(4usize, &scree), (5, &wet)] {
+        for octave in 0..3 {
+            for what in 0..2 {
+                let mut curves = [[[0.0, 0.0]; INPUTS]; MATERIALS];
+                curves[m][Input::SoilDepth as usize] = [-1.0, 0.0];
+                let mut l = detail_plan(ShadeView::Lit, 1.0);
+                l.materials = MaterialParams { curves };
+                let o = &mut l.coef.octaves[octave];
+                let entry = if m == 4 { &mut o.scree } else { &mut o.wet };
+                entry[what] = 4.0;
+                assert!(&hdr_of(&mut r, &ctx, &p, l) != base, "material {m} octave {octave} entry {what} is not read");
+            }
+        }
+    }
+}
+
 // spec: REND-037
 #[test]
 fn each_material_alone_reads_as_itself_in_colour_and_value() {
@@ -457,7 +498,7 @@ fn the_sun_adds_a_highlight_to_the_detailed_ground_that_follows_the_gloss_table_
     // The table drives it: a smoother ground gives another picture, a rougher one another still; the total light differs.
     let mut table = |rough: f64| {
         let mut l = detail_plan(ShadeView::Lit, 1.0);
-        l.gloss = GlossParams { roughness: [rough; 4], ..GlossParams::EARTH };
+        l.gloss = GlossParams { roughness: [rough; 6], ..GlossParams::EARTH };
         hdr_of(&mut r, &ctx, &p, l)
     };
     let (smooth, rough) = (table(0.2), table(1.0));
@@ -465,7 +506,7 @@ fn the_sun_adds_a_highlight_to_the_detailed_ground_that_follows_the_gloss_table_
     // A dark exposure with the smoothest ground multiplies the highlight by a large factor: every pixel stays finite and under the clamp.
     let mut dark = detail_plan(ShadeView::Lit, 1.0);
     dark.exposure = planet_frame::look::ExposureMode::Fixed { ev100: -2.0 };
-    dark.gloss = GlossParams { roughness: [0.2; 4], f0: 1.0, ..GlossParams::EARTH };
+    dark.gloss = GlossParams { roughness: [0.2; 6], f0: 1.0, ..GlossParams::EARTH };
     for px in hdr_of(&mut r, &ctx, &p, dark).iter().filter(|px| px[3] > 0.0) {
         assert!((0..3).all(|c| px[c].is_finite() && px[c] <= 60000.0), "{px:?}");
     }
