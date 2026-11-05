@@ -34,6 +34,9 @@ pub const KIND_LAYER_AREA: u8 = Kind::LayerArea as u8;
 pub const KIND_LAYER_DEPTH: u8 = Kind::LayerDepth as u8;
 /// Version of the channels' layout and codes. History: 1 = the first layout.
 pub const CHANNELS_VERSION: u32 = 1;
+/// Version of the reader's sampling rule (the bilinear read of the area in codes, the scale of its log2, the depth's read across tile borders and its clamp to the home tile): part of the identity of a
+/// [`LayerChannels`], so a change of how a point is read re-keys the tiles whose driver block holds it.
+pub const CHANNEL_READER_VERSION: u32 = 1;
 const AREA_ID: &str = "erosion-layer-area";
 const DEPTH_ID: &str = "erosion-layer-depth";
 const CODEC_VERSION: u8 = 1;
@@ -422,9 +425,11 @@ impl LayerChannels {
             .map(|c| u64::from_le_bytes(c.try_into().expect("eight bytes")))
             .collect();
         // (A tile spec whose first tile has no key is a spec the reader cannot serve anyway: its area keys alone then name the channels.)
-        if let Ok(k) = depth_key(&world, depth_res, &tiles, PassTile { face: Face(0), ti: 0, tj: 0 }) {
-            parts.extend(k.0.chunks(8).map(|c| u64::from_le_bytes(c.try_into().expect("eight bytes"))));
+        match depth_key(&world, depth_res, &tiles, PassTile { face: Face(0), ti: 0, tj: 0 }) {
+            Ok(k) => parts.extend(k.0.chunks(8).map(|c| u64::from_le_bytes(c.try_into().expect("eight bytes")))),
+            Err(_) => parts.push(0x6e6f_2064_6570_7468),
         }
+        parts.push(u64::from(CHANNEL_READER_VERSION));
         let identity = planet_core::hash::hash_u64s(0x6964_656e, &parts);
         LayerChannels {
             identity,

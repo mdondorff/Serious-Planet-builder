@@ -61,6 +61,7 @@ pub struct ChannelSample {
 /// The driver block with the channels written in (GEN-119): where a sample holds the deposited depth, the soil code is its square-root code ([`encode_soil`]); where it holds the area, the moisture code is
 /// the code of [`wetness_of_area_log2`]. Everything else, the insolation and the neutral insolation of each texel, and a texel without a channel, stays as it was. `samples` are the 81 texels in the block's order.
 pub fn apply_channels(words: &mut [u32; DRIVER_TEXELS], samples: &[ChannelSample]) {
+    debug_assert_eq!(samples.len(), DRIVER_TEXELS, "one sample for each texel of the block");
     let params = DriverParams::default();
     for (w, s) in words.iter_mut().zip(samples) {
         let (mut codes, neutral) = unpack_driver_word(*w);

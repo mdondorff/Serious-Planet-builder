@@ -89,7 +89,8 @@ fn the_mapping_writes_the_soil_and_moisture_codes_and_leaves_the_insolation_and_
         (0.0, 0.0, 1.0)
     );
     assert!((wetness_of_area_log2((AREA_LOG2_DRY + AREA_LOG2_WET) / 2.0) - 0.5).abs() < 1e-12);
-    assert!((decode_soil(encode_soil(0.3, &p), &p) - 0.3).abs() < 0.02, "the soil code resolves a third of a metre");
+    assert_eq!(encode_soil(0.3, &p), 49);
+    assert!((decode_soil(49, &p) - 0.3).abs() < 0.0065, "the soil code resolves a third of a metre to half a code step");
     // A sample that is not finite is no channel.
     let mut one = [planet_generators::drivers::pack_driver_word([10, 20, 30], 40); 81];
     let kept = one;

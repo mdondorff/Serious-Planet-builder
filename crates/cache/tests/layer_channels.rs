@@ -444,3 +444,16 @@ fn a_read_at_a_window_boundary_equals_the_bilinear_mean_of_the_whole_face_and_a_
     let e = load_area_window(&store, &w, RES, &other, Face(0), 0..9, 0..9).unwrap_err().to_string();
     assert!(e.contains("another layer") || e.contains("not mixed"), "{e}");
 }
+
+// spec: STRM-075
+#[test]
+fn the_identity_of_the_channels_follows_the_resolutions_of_their_keys_and_the_readers_version() {
+    use planet_generators::channels::ChannelSource;
+    let (w, s) = (world(), spec(&world()));
+    let store = Arc::new(TileStore::open(Dir::new("empty").path(), w.params()).unwrap_or_else(|_| panic!("a store")));
+    let make = |a: u32, d: u32| LayerChannels::new(store.clone(), Arc::new(w.clone()), a, d, pass1(), s, ChannelCaches::DEFAULT).identity();
+    assert_eq!(make(RES, RES), make(RES, RES), "equal specs, equal identity");
+    assert_ne!(make(RES, RES), make(RES + 1, RES), "the area keys' resolution is part of it");
+    assert_ne!(make(RES, RES), make(RES, RES + 1), "the depth keys' resolution is part of it");
+    assert_eq!(CHANNEL_READER_VERSION, 1, "a change of the sampling rule raises the version, which enters the identity");
+}
