@@ -165,6 +165,36 @@ fn pack_bytes(dir: &Path) -> Vec<(String, Vec<u8>)> {
     v
 }
 
+/// The layer's tile records for the synthetic heights (base 0, so the stored change is the height), written where a tile has none, as pass 2 would have left them.
+fn ensure_tile_records(w: &GlobalWorld, s: &TileLayerSpec, tiles: &Path, which: &[PassTile]) {
+    let store = TileStore::open(tiles, w.params()).unwrap();
+    let mut writer = PackWriter::open(tiles, w.params(), DEFAULT_MAX_PACK_BYTES).unwrap();
+    for &id in which {
+        if load_tile(&store, w, RES, s, id).unwrap().is_none() {
+            let stats = planet_generators::bake::tile::TileStats {
+                land_cells: 0,
+                thermal_passes: 0,
+                thermal_moving_at_cap: 0,
+                eroded_m3: 0.0,
+                deposited_m3: 0.0,
+                exported_m3: 0.0,
+                clamped_cells: 0,
+            };
+            let r = planet_generators::bake::tile::TileResult {
+                id,
+                core: tile_heights(id),
+                deposited: Vec::new(),
+                fill: Vec::new(),
+                heights: Vec::new(),
+                stats,
+            };
+            writer.append(&tile_record(w, RES, s, &r).unwrap()).unwrap();
+        }
+    }
+    writer.write_index().unwrap();
+    writer.finish().unwrap();
+}
+
 fn fill_pass(
     w: &GlobalWorld,
     s: &TileLayerSpec,
@@ -173,7 +203,8 @@ fn fill_pass(
     which: &[PassTile],
     threads: usize,
 ) -> planet_cache::layer_fillpass::FillPassReport {
-    run_fill_pass(tiles, scratch, w, RES, s, which, threads, &mut |_, _| {}).unwrap()
+    ensure_tile_records(w, s, tiles, which);
+    run_fill_pass(tiles, scratch, w, RES, s, which, threads, &|_| 0.0, &mut |_, _| {}).unwrap()
 }
 
 // spec: GEN-121
@@ -240,7 +271,7 @@ fn the_post_pass_stores_the_same_bytes_on_1_and_8_threads_skips_what_it_holds_an
     let few = Dir::new("few");
     write_scratch(few.path(), &w, &s, &tiles[..3]);
     let c = Dir::new("c");
-    let e = run_fill_pass(c.path(), few.path(), &w, RES, &s, &tiles[..4], 1, &mut |_, _| {}).unwrap_err().to_string();
+    let e = run_fill_pass(c.path(), few.path(), &w, RES, &s, &tiles[..4], 1, &|_| 0.0, &mut |_, _| {}).unwrap_err().to_string();
     assert!(e.contains("no final heights") && e.contains("0/3/0"), "{e}");
 }
 
@@ -259,7 +290,7 @@ fn a_run_over_a_region_treats_the_tiles_it_does_not_hold_as_sea() {
     let codes = load_fill(&store, &w, RES, &s, two[1]).unwrap().unwrap();
     assert!(codes.iter().all(|c| *c == 0), "a bowl that reaches the border of the run was filled: the run's edge is sea");
     // The same directory refuses a run over another set of tiles: its depths would be those of the first run.
-    let e = run_fill_pass(out.path(), scratch.path(), &w, RES, &s, &tiles, 2, &mut |_, _| {}).unwrap_err().to_string();
+    let e = run_fill_pass(out.path(), scratch.path(), &w, RES, &s, &tiles, 2, &|_| 0.0, &mut |_, _| {}).unwrap_err().to_string();
     assert!(e.contains("another set of tiles"), "{e}");
 }
 
@@ -294,7 +325,8 @@ fn the_runtime_layer_reads_the_change_with_the_post_pass_depth_added_back() {
     )
     .unwrap();
     assert_eq!(report.computed.len(), 16);
-    let fp = fill_pass(&w, &s, scratch.path(), dir.path(), &tiles, 2);
+    // The post-pass takes the exact base: the depth is `level - (base + stored change)`, so a floor is flat against the surface the runtime shows (GEN-120).
+    let fp = run_fill_pass(dir.path(), scratch.path(), &w, RES, &s, &tiles, 2, &base, &mut |_, _| {}).unwrap();
     assert_eq!(fp.written.len(), 16);
     // A rerun after the scratch store is gone: pass 2 does not run again (the tiles hold their fill), and the post-pass finds nothing to do without any scratch.
     let fresh = Dir::new("fresh");

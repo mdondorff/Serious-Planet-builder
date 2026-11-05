@@ -14,6 +14,7 @@
 use std::path::Path;
 
 use planet_core::par::{self, Par};
+use planet_core::Vec3;
 use planet_generators::bake::face::fill_code;
 use planet_generators::bake::fillgeom::border_neighbours;
 use planet_generators::bake::spill::{
@@ -24,7 +25,7 @@ use planet_generators::bake::tile::TileId as PassTile;
 use crate::global_store::GlobalWorld;
 use crate::layer_fill::{fill_record, has_fill, load_heights};
 use crate::layer_store::LayerStoreError;
-use crate::layer_tiles::TileLayerSpec;
+use crate::layer_tiles::{load_tile, TileLayerSpec};
 use crate::pack::{PackWriter, TileStore, DEFAULT_MAX_PACK_BYTES};
 
 /// What a run did.
@@ -42,10 +43,12 @@ pub struct FillPassReport {
     pub unreached_cells: u64,
     /// Neighbour pairs of two tiles dropped because the neighbouring cell is not on its tile's border (0 inside a face; a nonzero count across a cube edge names a mapping to look at).
     pub dropped_pairs: u64,
+    /// Cells that stand in a basin of the pass-2 surface but whose exact surface (base plus the stored change) is at or above the level: their depth is 0 (outcrops).
+    pub clamped_cells: u64,
 }
 
 /// A tile's stage-3 result: its index, the depth codes, the pit cells, the deepest depth and the cells no path reaches.
-type TileDepth = (usize, Vec<u16>, u64, f64, u64);
+type TileDepth = (usize, Vec<u16>, u64, f64, u64, u64);
 
 /// What stage 1 keeps of a tile.
 struct Info {
@@ -83,6 +86,7 @@ pub fn run_fill_pass(
     spec: &TileLayerSpec,
     tiles: &[PassTile],
     threads: usize,
+    base: &(dyn Fn(Vec3) -> f64 + Sync),
     on_tile: &mut dyn FnMut(PassTile, u64),
 ) -> Result<FillPassReport, LayerStoreError> {
     spec.grid.check().map_err(LayerStoreError)?;
@@ -113,6 +117,7 @@ pub fn run_fill_pass(
             deepest_m: 0.0,
             unreached_cells: 0,
             dropped_pairs: 0,
+            clamped_cells: 0,
         });
     }
     for id in &order {
@@ -190,6 +195,7 @@ pub fn run_fill_pass(
         deepest_m: 0.0,
         unreached_cells: 0,
         dropped_pairs: dropped,
+        clamped_cells: 0,
     };
     let mut todo: Vec<usize> = Vec::new();
     for (k, id) in order.iter().enumerate() {
@@ -205,16 +211,32 @@ pub fn run_fill_pass(
             let heights = heights_of(&scratch, world, res, spec, order[k])?;
             let (z, f) = flood(&heights, t, sea);
             let level = final_level(&f, &|s| levels.seed(refs[k], s));
-            let (mut pits, mut deepest, mut unreached) = (0u64, 0.0f64, 0u64);
+            // The depth is taken against the surface the runtime shows, the exact base plus the stored change, so a floor is flat to the code's step (GEN-120): only the cells that are pits of the pass-2 surface need the base.
+            let core = load_tile(&store, world, res, spec, order[k])?
+                .ok_or_else(|| {
+                    LayerStoreError(format!(
+                        "the layer store holds no tile {}/{}/{}: pass 2 was not run for it",
+                        order[k].face.0, order[k].ti, order[k].tj
+                    ))
+                })?
+                .core;
+            let (mut pits, mut deepest, mut unreached, mut clamped) = (0u64, 0.0f64, 0u64, 0u64);
+            let (i0, j0) = (i64::from(order[k].ti) * t as i64, i64::from(order[k].tj) * t as i64);
             let codes: Vec<u16> = level
                 .iter()
                 .zip(&z)
-                .map(|(l, h)| {
+                .enumerate()
+                .map(|(p, (l, h))| {
                     if !l.is_finite() {
                         unreached += 1;
                         return 0;
                     }
-                    let depth = (l - h).max(0.0);
+                    if l - h <= 0.0 {
+                        return 0;
+                    }
+                    let exact = base(g.direction(order[k].face, i0 + (p % t) as i64, j0 + (p / t) as i64)) + f64::from(core[p]);
+                    let depth = (l - exact).max(0.0);
+                    clamped += u64::from(depth == 0.0);
                     let c = fill_code(depth);
                     if c > 0 {
                         pits += 1;
@@ -223,10 +245,11 @@ pub fn run_fill_pass(
                     c
                 })
                 .collect();
-            Ok((k, codes, pits, deepest, unreached))
+            Ok((k, codes, pits, deepest, unreached, clamped))
         });
         for r in done {
-            let (k, codes, pits, deepest, unreached) = r?;
+            let (k, codes, pits, deepest, unreached, clamped) = r?;
+            report.clamped_cells += clamped;
             writer.append(&fill_record(world, res, spec, order[k], &codes)?).map_err(err)?;
             writer.write_index().map_err(err)?;
             report.written.push(order[k]);
