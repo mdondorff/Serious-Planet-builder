@@ -590,7 +590,7 @@ fn anchor_cell(
 }
 
 /// `test-render --scene capture-stills --poses FILE --out-dir DIR [--store DIR | --allow-memory-bake --global-res N] [--size WxH]
-/// [--views A,B]` (TEST-048): one PNG per pose, `DIR/<pose>.png`, and `DIR/stills.txt` with the camera and sun of each. A tool beside
+/// [--views A,B] [--look FILE]` (TEST-048, REND-055; the look file's `ground` table drives the lit plan): one PNG per pose, `DIR/<pose>.png`, and `DIR/stills.txt` with the camera and sun of each. A tool beside
 /// the harness, never a measurement: no gate, no timestamps, no log; not to be run during a perf window.
 pub fn capture_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<(), String> {
     run_stills(o, ctx, out, None, None)
@@ -1031,12 +1031,19 @@ pub struct CostRow {
     pub spread: Option<[f64; 2]>,
     /// The draw with the patch break-up at 0 (REND-055) and everything else as `full`; none when the plan's patch is 0.
     pub no_patch: Option<f64>,
+    /// The draw with the coefficients of the 64 m and 8 m octaves at 0 (REND-057) and everything else as `full`; none when both are 0 in the plan.
+    pub no_octaves: Option<f64>,
 }
 
 impl CostRow {
     /// The patch break-up's share (full minus the draw with the patch 0), the runtime-off difference; none without a patch.
     pub fn patch_share(&self) -> Option<f64> {
         self.no_patch.map(|n| self.full - n)
+    }
+
+    /// The share of the 64 m and 8 m octaves (full minus the draw with them at 0); none when the plan has them at 0.
+    pub fn octave_share(&self) -> Option<f64> {
+        self.no_octaves.map(|n| self.full - n)
     }
 
     /// The material map's share (full minus the variant without it), from the compiled-out variant when the row has it, else from the
@@ -1132,7 +1139,25 @@ fn measure_cost(
     } else {
         None
     };
-    Ok(CostRow { pose: pose.to_string(), full, no_material, compiled_out: Some(compiled_out), spread: Some(spread), no_patch })
+    // The two octaves' own share (REND-057): the same draw with their coefficients 0, which the shader skips (the plan keeps its table afterwards).
+    let zero =
+        planet_frame::look::materials::OctaveCoef { albedo: [0.0; 3], grass: [0.0; 3], tilt: [0.0; 4], scree: [0.0; 2], wet: [0.0; 2] };
+    let coef = plan.lit.as_ref().map(|l| l.coef);
+    let no_octaves = match coef {
+        Some(c) if c.octaves[4..].iter().any(|o| *o != zero) => {
+            if let Some(l) = plan.lit.as_mut() {
+                l.coef.octaves[4] = zero;
+                l.coef.octaves[5] = zero;
+            }
+            let ms = terrain_ms(ctx, r, plan, COST_WARM_S)?;
+            if let Some(l) = plan.lit.as_mut() {
+                l.coef = c;
+            }
+            Some(ms)
+        }
+        _ => None,
+    };
+    Ok(CostRow { pose: pose.to_string(), full, no_material, compiled_out: Some(compiled_out), spread: Some(spread), no_patch, no_octaves })
 }
 
 /// The failures of the budget (the material map at most [`COST_BUDGET_MS`] in every pose) and the poses within
@@ -1192,14 +1217,16 @@ pub fn perf_shadow_cost(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> R
         .map(|r| {
             let m = r.share();
             format!(
-                "    {{\"pose\": {:?}, \"full_ms\": {:.4}, \"no_material_ms\": {:.4}, \"compiled_out_ms\": {}, \"round_spread_ms\": {}, \"no_patch_ms\": {}, \"patch_ms\": {}, \"material_ms\": {m:.4}, \"together_ms\": {m:.4}}}",
+                "    {{\"pose\": {:?}, \"full_ms\": {:.4}, \"no_material_ms\": {:.4}, \"compiled_out_ms\": {}, \"round_spread_ms\": {}, \"no_patch_ms\": {}, \"patch_ms\": {}, \"no_octaves_ms\": {}, \"octaves_ms\": {}, \"material_ms\": {m:.4}, \"together_ms\": {m:.4}}}",
                 r.pose,
                 r.full,
                 r.no_material,
                 r.compiled_out.map_or("null".to_string(), |c| format!("[{c:.4}]")),
                 r.spread.map_or("null".to_string(), |c| format!("[{:.4}, {:.4}]", c[0], c[1])),
                 r.no_patch.map_or("null".to_string(), |c| format!("{c:.4}")),
-                r.patch_share().map_or("null".to_string(), |c| format!("{c:.4}"))
+                r.patch_share().map_or("null".to_string(), |c| format!("{c:.4}")),
+                r.no_octaves.map_or("null".to_string(), |c| format!("{c:.4}")),
+                r.octave_share().map_or("null".to_string(), |c| format!("{c:.4}"))
             )
         })
         .collect();
@@ -1241,6 +1268,7 @@ mod tests {
             compiled_out: None,
             spread: None,
             no_patch: None,
+            no_octaves: None,
         };
         // The compiled-out variant, when a row has it, is what the share and the verdict read.
         let with = CostRow { compiled_out: Some(4.2), ..row("w", 5.0, 4.6) };
@@ -1248,6 +1276,9 @@ mod tests {
         // The patch's share is the difference to the draw with the patch 0, and absent without a patch.
         assert_eq!(with.patch_share(), None);
         assert_eq!(CostRow { no_patch: Some(4.75), ..row("p", 5.0, 4.6) }.patch_share(), Some(0.25));
+        // The octaves' share likewise, absent when the plan has them at 0.
+        assert_eq!(with.octave_share(), None);
+        assert_eq!(CostRow { no_octaves: Some(4.5), ..row("o", 5.0, 4.6) }.octave_share(), Some(0.5));
         let ok = row("a", 5.0, 4.0);
         assert_eq!(ok.share(), 1.0);
         assert_eq!(cost_verdict(&[ok]), (vec![], vec![]));

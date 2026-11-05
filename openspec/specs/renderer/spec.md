@@ -802,3 +802,18 @@ Source: SPIKE-100 D2, planner 2026-11-04 (I8a slice 2a, step c), REND-034, LOOK-
 #### Scenario: Six octaves
 - **WHEN** a look file gives the `m64` and `m8` tables, a bad number and an unknown octave, a build that knows version 8 reads the version 9 fixture, and the version 8 fixture is read; and the ground is drawn with the Earth default, with each new octave given albedo coefficients and given tilts, and with the strength 0 and an octave given; and the goldens of the lit ground are drawn
 - **THEN** the tables read and write back equal, the bad ones are refused naming the key, the older build refuses the file as a newer schema, the version 8 file reads with both octaves at 0, each given octave changes the picture, the strength 0 picture is the off picture, and the goldens need no candidate
+
+### Requirement: REND-055 The patch break-up of the material boundaries
+With the ground detail on (REND-034) and the plan's patch above 0 (LOOK-012), the lit terrain shader SHALL shift the slope cosine that feeds the material weights by up to that share of it with two world-anchored gradient-noise octaves of 32 m and 8 m cells (weights 0.65, 0.35), fading out between 0.12 and 0.5 of a cell a pixel; roughness and albedo follow the shifted weights. With the patch 0 the picture SHALL be what it was, with the strength 0 the off picture. The stills and `shadow-cost` SHALL take `--look FILE`, and the cost log (REND-044) SHALL carry the share of the patch and of the octaves of REND-057.
+
+Verify: C
+Status: active
+Source: SPIKE-100 (D1 patch break-up), owner 2026-11-04, planner 2026-11-04 (slice 1 of I8a), REND-034
+
+#### Scenario: Off and on
+- **WHEN** a ground-level scene with a slope-dependent material table is drawn with the patch 0, with 0.25, twice, and with 0.25 and the detail strength 0; and the goldens of the lit ground at natural strength are drawn
+- **THEN** the patch 0 picture equals the plain detail picture and the goldens need no candidate, the patch picture differs by over 20 % on at least 100 pixels, is equal on a second render and keeps its mean brightness within a factor of 1.4, and the strength 0 picture is the off picture
+
+#### Scenario: A look file in the stills and the cost path
+- **WHEN** a pose is drawn without and with a look file whose `ground` table gives the detail strength, a crack depth and an 8 m octave, a look file that does not load is named, and the cost row of a plan with the patch and the two octaves given is read
+- **THEN** the pictures differ, the unreadable file is refused naming its path, a run without a look file draws what it drew, and the row has the patch's and the octaves' share as the full draw minus the draw with it at 0 (absent when the plan has it at 0)

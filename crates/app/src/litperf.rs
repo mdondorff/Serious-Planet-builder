@@ -40,6 +40,22 @@ pub(crate) struct LitSetup {
     pub has_water: bool,
     /// The strength of the ground detail of every lit plan (`PLANET_GROUND_DETAIL`, 0 to 1, default 0: the scenes the baselines were measured with).
     ground_detail: f64,
+    /// The `ground` table of an explicit `--look` file (curves, coefficients, patch, detail strength), applied to every lit plan; none without one, so the
+    /// scenes the baselines were measured with are unchanged.
+    ground_file: Option<planet_frame::look::file::GroundLook>,
+}
+
+/// `lit` with the ground look of the file named by `--look` (VIEW-060's `File` choice at the natural strength): its curves, octave coefficients, patch and detail
+/// strength; unchanged when the run named no look file.
+pub(crate) fn with_ground_file(
+    lit: planet_frame::look::LitPlan,
+    ground: Option<&planet_frame::look::file::GroundLook>,
+) -> planet_frame::look::LitPlan {
+    use planet_frame::look::materials::{GroundDetailMode, LookChoice};
+    match ground {
+        Some(g) => lit.with_ground_look(LookChoice::File, GroundDetailMode::Natural, g),
+        None => lit,
+    }
 }
 
 impl LitSetup {
@@ -59,6 +75,7 @@ impl LitSetup {
             cache: WaterTileCache::with_book(world.water_book()),
             has_water: world.has_water(),
             ground_detail: std::env::var("PLANET_GROUND_DETAIL").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0),
+            ground_file: o.look.is_some().then_some(look.ground),
         })
     }
 
@@ -83,9 +100,12 @@ impl LitSetup {
     /// The plan of the throwaway frames that warm the lit path, the atmosphere and (in a world with water) the water pass before the
     /// first measured frame (REND-017).
     pub(crate) fn warm_plan(&self, camera: Camera, size: (u32, u32), cells: u32) -> Result<TerrainPlan, String> {
-        let lit = viewer_lit_plan(&self.look, self.radius_m, 0.0, true, true)?
-            .with_water_level(self.level_m)
-            .with_ground_detail(self.ground_detail);
+        let lit = with_ground_file(
+            viewer_lit_plan(&self.look, self.radius_m, 0.0, true, true)?
+                .with_water_level(self.level_m)
+                .with_ground_detail(self.ground_detail),
+            self.ground_file.as_ref(),
+        );
         let mut warm = lit_warm_plan(camera, size, cells, lit);
         if self.has_water {
             warm.water = Some(empty_water_plan(&self.look.water));
@@ -104,9 +124,12 @@ impl LitSetup {
         dt_s: f32,
         reset: bool,
     ) -> Result<TerrainPlan, String> {
-        let lit = viewer_lit_plan(&self.look, self.radius_m, dt_s, reset, true)?
-            .with_water_level(self.level_m)
-            .with_ground_detail(self.ground_detail);
+        let lit = with_ground_file(
+            viewer_lit_plan(&self.look, self.radius_m, dt_s, reset, true)?
+                .with_water_level(self.level_m)
+                .with_ground_detail(self.ground_detail),
+            self.ground_file.as_ref(),
+        );
         let mut plan = base.clone();
         plan.lit = Some(lit);
         let (look, liquids, lod) = (&self.look.water, &self.liquids, &self.lod);
@@ -1030,5 +1053,20 @@ mod tests {
         assert_eq!(render, planet_perf::lit::PASS_NAMES);
         assert!(is_lit_scene("lit") && !is_lit_scene("lit-formats") && !is_lit_scene("dive") && !is_lit_scene("terrain"));
         assert_eq!(FLIGHTS.len(), 2);
+    }
+
+    // spec: REND-055
+    #[test]
+    fn a_look_files_ground_table_reaches_the_lit_plan_only_when_the_run_names_a_look_file() {
+        use planet_frame::look::file::GroundLook;
+        let mut ground = GroundLook { detail: 0.4, patch: 0.1, ..GroundLook::default() };
+        ground.coef.octaves[5].tilt = [0.2; 4];
+        ground.materials.curves[4][planet_frame::look::materials::Input::SlopeCos as usize] = [0.9, 0.5];
+        let plain = planet_frame::look::LitPlan::fixed(15.0);
+        // Without a file the plan is as it was; with one it takes the curves, the coefficients, the patch and the detail strength.
+        assert_eq!(with_ground_file(plain, None), plain);
+        let lit = with_ground_file(plain, Some(&ground));
+        assert_eq!((lit.ground_detail, lit.ground_patch, lit.coef, lit.materials), (0.4, 0.1, ground.coef, ground.materials));
+        assert_ne!(lit, plain);
     }
 }
