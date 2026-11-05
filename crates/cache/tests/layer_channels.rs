@@ -409,7 +409,7 @@ fn a_read_at_a_window_boundary_equals_the_bilinear_mean_of_the_whole_face_and_a_
     use planet_core::cube::{direction_to_face, TangentWarp};
     assert_eq!(
         ChannelCaches::DEFAULT,
-        ChannelCaches { area_bytes: 16 << 20, area_window: 256, tile_bytes: 256 << 20, change_bytes: 128 << 20 }
+        ChannelCaches { area_bytes: 16 << 20, area_window: 256, tile_bytes: 256 << 20, change_bytes: 192 << 20 }
     );
     let (w, p1) = (world(), Dir::new("p1"));
     let spec_t = spec(&w);
@@ -482,7 +482,7 @@ fn pit_store() -> (GlobalWorld, TileLayerSpec, Dir, Dir) {
     (w, s, p1, d)
 }
 
-// spec: STRM-076
+// spec: STRM-075, STRM-076
 #[test]
 fn the_fill_and_erosion_depths_read_the_stored_cells_and_the_erosion_depth_is_what_the_carve_removed_not_counting_a_pit() {
     use planet_cache::layer_fill::load_fill;
@@ -524,7 +524,7 @@ fn the_fill_and_erosion_depths_read_the_stored_cells_and_the_erosion_depth_is_wh
     assert_eq!((stats.fill_decodes, stats.change_decodes), (2, 2), "{stats:?}");
 }
 
-// spec: STRM-076
+// spec: STRM-075, STRM-076
 #[test]
 fn the_fill_depth_reads_across_a_tile_border_without_a_step_and_the_identity_follows_the_fill_scale() {
     use planet_generators::channels::ChannelSource;
@@ -552,4 +552,86 @@ fn the_fill_depth_reads_across_a_tile_border_without_a_step_and_the_identity_fol
     let other = LayerChannels::new(store, Arc::new(w.clone()), RES, RES + 1, pass1(), s, ChannelCaches::DEFAULT);
     assert_ne!(ch.identity(), other.identity());
     assert_eq!(CHANNEL_READER_VERSION, 2);
+}
+
+// spec: STRM-075, STRM-076
+#[test]
+fn the_erosion_depth_at_a_tile_border_is_the_mean_of_the_two_cells_and_a_tile_without_a_pit_record_counts_no_pit() {
+    use planet_cache::layer_channels::KIND_LAYER_DEPTH;
+    use planet_cache::layer_fill::load_fill;
+    use planet_cache::layer_tiles::KIND_LAYER_TILE;
+    use planet_generators::bake::face::fill_m;
+    let (w, s, _p1, d) = pit_store();
+    let store = Arc::new(TileStore::open(d.path(), w.params()).unwrap());
+    let t = s.grid.tile;
+    let cell = |id: PassTile, px: usize, py: usize| -> f64 {
+        let p = py * t + px;
+        let fill = load_fill(&store, &w, RES, &s, id).unwrap().map_or(0.0, |f| fill_m(f[p]) as f32);
+        let dep = load_depth(&store, &w, RES, &s, id).unwrap().unwrap().deposited[p];
+        let change = load_tile(&store, &w, RES, &s, id).unwrap().unwrap().core[p];
+        f64::from((depth_m(dep) - (change + fill)).max(0.0))
+    };
+    let ch = LayerChannels::new(store.clone(), Arc::new(w.clone()), RES, RES, pass1(), s, ChannelCaches::DEFAULT);
+    // Rows 0 to 23 of tiles (0, 0) and (1, 0): the point between cell 23 of the first and cell 0 of the second, on a row centre, is the mean of the two cells (the bilinear read across the border).
+    let n = 96.0;
+    for row in [2usize, 7, 12, 20] {
+        let d = planet_core::cube::face_to_direction(
+            &planet_core::cube::TangentWarp,
+            Face(0),
+            2.0 * (23.5 + 0.5) / n - 1.0,
+            2.0 * (row as f64 + 0.5) / n - 1.0,
+        );
+        let want = 0.5 * (cell(tiles()[0], t - 1, row) + cell(tiles()[1], 0, row));
+        let got = f64::from(ch.erosion_depth_m(d).unwrap().expect("an erosion depth"));
+        assert!((got - want).abs() < 1e-4, "row {row}: {got} against the mean {want}");
+    }
+    // A store that holds the layer tile and the deposited depth of a tile and no pit record: the pit counts 0, so the erosion depth is `max(0, deposited - change)`.
+    let id = tiles()[0];
+    let none = Dir::new("nofill");
+    let mut writer = PackWriter::open(none.path(), w.params(), DEFAULT_MAX_PACK_BYTES).unwrap();
+    for (kind, tile) in [
+        (KIND_LAYER_TILE, planet_cache::layer_tiles::layer_tile_id(&s.grid, id).unwrap()),
+        (KIND_LAYER_DEPTH, planet_cache::layer_tiles::layer_tile_id(&s.grid, id).unwrap()),
+    ] {
+        let key = *store.keys_for(kind, tile).first().expect("a record");
+        writer.append(&store.get(kind, tile, key).unwrap().expect("a record")).unwrap();
+    }
+    writer.write_index().unwrap();
+    writer.finish().unwrap();
+    let bare = Arc::new(TileStore::open(none.path(), w.params()).unwrap());
+    let ch2 = LayerChannels::new(bare.clone(), Arc::new(w.clone()), RES, RES, pass1(), s, ChannelCaches::DEFAULT);
+    let d = s.grid.direction(Face(0), 12, 8);
+    assert_eq!(ch2.fill_depth_m(d).unwrap(), None, "the tile holds no pit record");
+    let p = 8 * t + 12;
+    let dep = load_depth(&bare, &w, RES, &s, id).unwrap().unwrap().deposited[p];
+    let change = load_tile(&bare, &w, RES, &s, id).unwrap().unwrap().core[p];
+    let want = (depth_m(dep) - change).max(0.0);
+    assert!((ch2.erosion_depth_m(d).unwrap().expect("an erosion depth") - want).abs() < 1e-4);
+}
+
+// spec: STRM-075
+#[test]
+fn workers_asking_for_one_pit_or_layer_tile_at_once_decode_it_once_and_a_small_layer_cap_keeps_the_entry_just_decoded() {
+    let (w, s, _p1, d) = pit_store();
+    let store = Arc::new(TileStore::open(d.path(), w.params()).unwrap());
+    let pt = s.grid.direction(Face(0), 12, 8);
+    let ch = Arc::new(LayerChannels::new(store.clone(), Arc::new(w.clone()), RES, RES, pass1(), s, ChannelCaches::DEFAULT));
+    let handles: Vec<_> = (0..6)
+        .map(|_| {
+            let ch = ch.clone();
+            std::thread::spawn(move || (ch.fill_depth_m(pt).unwrap(), ch.erosion_depth_m(pt).unwrap()))
+        })
+        .collect();
+    let values: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+    assert!(values.iter().all(|v| *v == values[0]));
+    let (stats, _, _) = ch.stats();
+    assert_eq!((stats.fill_decodes, stats.change_decodes), (1, 1), "six workers, one decode of each: {stats:?}");
+    // A cap below one layer tile keeps the tile just decoded, and reading the other tile and back decodes again (an eviction).
+    let small =
+        LayerChannels::new(store, Arc::new(w.clone()), RES, RES, pass1(), s, ChannelCaches { change_bytes: 1, ..ChannelCaches::DEFAULT });
+    let other = s.grid.direction(Face(0), 30, 8);
+    for p in [pt, pt, other, pt] {
+        small.erosion_depth_m(p).unwrap().expect("an erosion depth");
+    }
+    assert_eq!(small.stats().0.change_decodes, 3, "the first tile, the other, the first again");
 }

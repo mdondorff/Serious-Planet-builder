@@ -291,7 +291,8 @@ pub struct TileDepth {
     pub deposited: Vec<u8>,
 }
 
-/// Takes the STORED change of kind 13, not the runtime layer's (which has the pit depth of GEN-120 added back and would undercount the removal by it).
+/// The caller chooses which change to pass. With keep-pits (GEN-120) the STORED change of kind 13 includes the pits, so a pit would count as removal: [`LayerChannels::erosion_depth_m`] passes the
+/// stored change plus the pit depth (the runtime's filled change), so a pit is not erosion (docs/learnings.md, 2026-11-05).
 /// The depth removed at a cell in metres: `max(0, deposited - change)`, the deposited depth and the layer's change (kind 13) at the cell. Exact where pass 1 did not raise the cell; where it
 /// did (uplift, a filled pit: 15 % of mountain land and 35 % of hills in seed 14's samples) it is short by the raise, and where the deposited depth is 255 m it is clipped.
 pub fn removed_depth_m(deposited_m: f32, change_m: f32) -> f32 {
@@ -382,9 +383,9 @@ pub struct ChannelCaches {
 }
 
 impl ChannelCaches {
-    /// 256-cell windows (about 208 km of the 12,288-cell face, 66 KB each) under 16 MB, 256 MB of depth tiles and of fill tiles, and 128 MB of layer tiles.
+    /// 256-cell windows (about 208 km of the 12,288-cell face, 66 KB each) under 16 MB, 256 MB of depth tiles and of fill tiles, and 192 MB of layer tiles (a bilinear read at a tile's corner touches four, each 37.7 MB at 3,072 cells).
     pub const DEFAULT: ChannelCaches =
-        ChannelCaches { area_bytes: 16 << 20, area_window: 256, tile_bytes: 256 << 20, change_bytes: 128 << 20 };
+        ChannelCaches { area_bytes: 16 << 20, area_window: 256, tile_bytes: 256 << 20, change_bytes: 192 << 20 };
 }
 
 /// What a [`LayerChannels`] has done so far: the reads served from its caches, the windows and tiles it decoded, and the time those decodes took (the measurement of ground-channels-2b PR 1).

@@ -4,7 +4,7 @@
 ## What Changes
 - `ChannelSource` (generators) gains `fill_depth_m` and `erosion_depth_m`; `LayerChannels` implements them: the pit depth is the stored cell of kind 17 (`fill_m(code)`), the erosion depth per cell is `max(0, deposited - (change + pit))` from kinds 15, 13 and 17 (a tile without a pit record counting 0). The pit depth is added back to the change because the filled look is what the runtime draws, so a pit is not erosion.
 - The bilinear read of a per-cell value across tile borders is one helper (`tiled_bilinear`), used by the deposited, pit and erosion depths.
-- Byte-capped caches for the pit tiles (kind 17, `tile_bytes`) and for the decoded layer tiles (kind 13, `change_bytes`, 128 MB by default: a core is 37.7 MB at 3,072 cells), each decoded once under concurrent workers; `ChannelStats` counts the decodes.
+- Byte-capped caches for the pit tiles (kind 17, `tile_bytes`) and for the decoded layer tiles (kind 13, `change_bytes`, 192 MB by default: a core is 37.7 MB at 3,072 cells, and a read at a tile's corner touches four), each decoded once under concurrent workers; `ChannelStats` counts the decodes.
 - The reader's identity folds the pit key (which carries the fill scale, so a new scale is a new identity) and `CHANNEL_READER_VERSION` is 2.
 
 ## Impact
