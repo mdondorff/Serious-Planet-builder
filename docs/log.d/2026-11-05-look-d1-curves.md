@@ -1,0 +1,1 @@
+- 2026-11-05 look-d1-curves: a sample ground look on the baked channels (SPIKE-100 D1: rock, scree, soil, grass, wet ground from slope, deposited depth and drainage area; docs/looks/ground-channels-d1.look.toml), a stills sheet on synthetic channels for the owner's review; not the default (I8a slice 2b PR 3)

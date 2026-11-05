@@ -1,0 +1,46 @@
+# A sample ground look on the baked channels (SPIKE-100 D1, material thresholds; slice 2b PR 3): a proposal for the owner's review, not a decision, and not the default. Every other table is the Earth default.
+# Use: `planet editor --store <dir> --erosion on --channels on --look docs/looks/ground-channels-d1.look.toml`, then F8 switches between the default ground look and this one. Without `--channels on` the two
+# driver inputs below read the neutral values (soil 1 m, moisture 0.5) and the picture is not what this file is for.
+#
+# The inputs (LOOK-008): `slope_cos` is the cosine of the slope; `soil_depth` is the deposited depth of the layer in metres (the soil code of the driver block, GEN-119: about 0.03 m a step,
+# 8 m at the most; the store's own steps are 1 m, so a threshold below a metre is blended between the cells, not exact); `moisture` is the drainage area (the log2 of its cells, 0 at one cell of about
+# 0.66 km2, 1 at 1,024 cells; `drivers::AREA_LOG2_DRY` and `AREA_LOG2_WET`). A curve is a smoothstep from lo to hi (lo > hi falls), one pair per input; a material's weight is the product over its
+# inputs and the weights are normalised over the materials. A material or input left out keeps its Earth curve (sand: dry flat ground; grass keeps its precipitation).
+#
+# Degrees to cosines: 5 = 0.996, 15 = 0.966, 20 = 0.940, 25 = 0.906, 28 = 0.883, 32 = 0.848, 38 = 0.788, 42 = 0.743.
+# Not in the table of SPIKE-100 D1, because no input carries it yet: rock "where the erosion depth exceeds 2 m" (the depth removed is derived from kind 13 and kind 15, not in the driver block).
+schema_version = 9
+kind = "look"
+
+[body.0.ground]
+detail = 0.6
+patch = 0.12
+
+# Rock: slope over about 38 degrees, growing to full at 42 (cosine falling 0.88 to 0.74: the soil's end at 28 degrees).
+[body.0.ground.rock]
+slope_cos = [0.88, 0.74]
+
+# Scree: steep ground (cosine falling 0.95 to 0.80) with deposits over 0.2 to 0.8 m: the talus at the foot of steep ground. Without deposits it is not there, so a bare steep flank is rock.
+[body.0.ground.scree]
+slope_cos = [0.95, 0.80]
+soil_depth = [0.2, 0.8]
+
+# Sand: the Earth curve (flat, dry climate) with the drainage area added (moisture falling 0.60 to 0.25), so a hollow of a desert is wet ground and not sand.
+[body.0.ground.sand]
+moisture = [0.60, 0.25]
+
+# Soil: moderate and gentle slopes (cosine rising 0.78 to 0.90) with a small drainage area (moisture falling 0.60 to 0.15) in a climate that is not desert (precipitation rising 100 to 600 mm): the drier ground between the rock and the grass.
+[body.0.ground.soil]
+slope_cos = [0.78, 0.90]
+moisture = [0.60, 0.15]
+precipitation = [100.0, 600.0]
+
+# Grass: gentle ground (cosine rising 0.84 to 0.92) below the channel threshold (moisture falling 0.80 to 0.30), where the climate is wet enough (the Earth precipitation curve stays).
+[body.0.ground.grass]
+slope_cos = [0.84, 0.92]
+moisture = [0.80, 0.30]
+
+# Wet ground: a large drainage area (moisture rising 0.10 to 0.40, about 1 to 10 km2 and up) on ground under 5 degrees (cosine rising 0.97 to 0.995): floodplains and hollows; dark and glossy.
+[body.0.ground.wet]
+moisture = [0.10, 0.40]
+slope_cos = [0.97, 0.995]

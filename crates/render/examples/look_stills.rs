@@ -11,6 +11,7 @@ use planet_core::cube::TangentWarp;
 use planet_core::{PlanetFixed, Vec3};
 use planet_frame::camera::Camera;
 use planet_frame::look::atmosphere::Atmosphere;
+use planet_frame::look::file::parse_look;
 use planet_frame::look::file::LookParams;
 use planet_frame::look::materials::{DetailCoefficients, Input, MaterialParams, INPUTS, MATERIALS, MATERIAL_NAMES, NATURAL_STRENGTH};
 use planet_frame::look::LitPlan;
@@ -18,6 +19,7 @@ use planet_frame::pool::compact_format_pool_with;
 use planet_frame::scalerefs::drop_references;
 use planet_frame::{plan_terrain_cached, LodParams, SelectionCache, TerrainRequest, TerrainView};
 use planet_generators::compact::{compact_tile_field, slot_bytes};
+use planet_generators::drivers::{apply_channels, ChannelSample};
 use planet_generators::height::{HeightField, Reference};
 use planet_generators::stamp::StampStage;
 use planet_render::{AdapterPolicy, GpuContext, TerrainRenderer};
@@ -96,6 +98,22 @@ fn main() {
     let base: Arc<dyn HeightField> = Arc::new(Reference(1));
     let field = StampStage::new(base, Arc::new(RwLock::new(def)), BodyId::PLANET, DEFAULT_ITEM_LAYER, 0, 1).expect("a stage");
     let ground = field.height(up);
+    // SYNTHETIC channels for the look sheet of the D1 curves (no rebaked store exists yet): the crater floor holds deposits (2.5 m, fading out by 80 m) and a large drainage area, the plain around it a
+    // medium one, the feet of the hills a thin deposit; elsewhere nothing and a small area. Metres on the ground from the directions (the site is a few hundred metres across).
+    let (crater, hill_a, hill_b) = (at(90.0, -45.0), at(220.0, 90.0), at(450.0, -200.0));
+    let metres = |a: Vec3, b: Vec3| R * libm::atan2(a.cross(b).length(), a.dot(b));
+    let ramp = |x: f64, lo: f64, hi: f64| ((x - lo) / (hi - lo)).clamp(0.0, 1.0);
+    let synthetic = move |d: Vec3| -> ChannelSample {
+        let (dc, da, db) = (metres(d, crater), metres(d, hill_a), metres(d, hill_b));
+        let floor = 1.0 - ramp(dc, 45.0, 80.0);
+        let feet = |dist: f64, r: f64| ramp(dist, 0.8 * r, 1.0 * r) * (1.0 - ramp(dist, 1.1 * r, 1.5 * r));
+        let deposited = 2.5 * floor + 0.9 * feet(da, 90.0).max(feet(db, 220.0));
+        // The drainage area as log2 of cells: 7 (moisture 0.7) on the crater floor, 3 (0.3) on the plain around it, 0.5 elsewhere.
+        let log2 = 0.5 + 6.5 * floor + 2.5 * (1.0 - ramp(dc, 80.0, 400.0));
+        ChannelSample { soil_m: Some(deposited as f32), area_log2_cells: Some(log2 as f32) }
+    };
+    let d1_look =
+        parse_look(include_str!("../../../docs/looks/ground-channels-d1.look.toml")).expect("the sample look").body(BodyId::PLANET).ground;
     let aspect = f64::from(SIZE.0) / f64::from(SIZE.1);
     let look = LookParams::default();
     for (eye, pitch_deg) in [(1.8, 5.0), (0.5, 10.0), (30.0, 14.0)] {
@@ -129,20 +147,29 @@ fn main() {
         r.enable_atmosphere(&ctx, &Atmosphere::earth(R));
         for n in &plan.nodes {
             if r.slot_of(n.tile).is_none() {
-                r.upload_tile(&ctx, &compact_tile_field(&field, &TangentWarp, n.tile, CELLS, R)).expect("upload");
+                let mut tile = compact_tile_field(&field, &TangentWarp, n.tile, CELLS, R);
+                let samples: Vec<ChannelSample> = (0..planet_generators::climate::CLIMATE_EDGE)
+                    .flat_map(|b| (0..planet_generators::climate::CLIMATE_EDGE).map(move |a| (a, b)))
+                    .map(|(a, b)| {
+                        synthetic(n.tile.sample_direction(&TangentWarp, planet_generators::climate::CLIMATE_CELLS, a as u32, b as u32))
+                    })
+                    .collect();
+                apply_channels(&mut tile.driver_words, &samples);
+                r.upload_tile(&ctx, &tile).expect("upload");
             }
         }
         r.set_scale_refs(&drop_references(camera.position, camera.forward, R, &|d| field.height(d)));
         let e = DetailCoefficients::EARTH;
-        let mut variants: Vec<(String, MaterialParams, f64, DetailCoefficients)> = vec![
-            ("natural".into(), MaterialParams::EARTH, NATURAL_STRENGTH, e),
-            ("natural_oct64".into(), MaterialParams::EARTH, NATURAL_STRENGTH, octaves_on(1)),
-            ("natural_oct8".into(), MaterialParams::EARTH, NATURAL_STRENGTH, octaves_on(2)),
-            ("natural_oct64_8".into(), MaterialParams::EARTH, NATURAL_STRENGTH, octaves_on(3)),
-            ("full".into(), MaterialParams::EARTH, 1.0, e),
+        let mut variants: Vec<(String, MaterialParams, f64, DetailCoefficients, Option<planet_frame::look::file::GroundLook>)> = vec![
+            ("natural".into(), MaterialParams::EARTH, NATURAL_STRENGTH, e, None),
+            ("d1".into(), MaterialParams::EARTH, NATURAL_STRENGTH, e, Some(d1_look)),
+            ("natural_oct64".into(), MaterialParams::EARTH, NATURAL_STRENGTH, octaves_on(1), None),
+            ("natural_oct8".into(), MaterialParams::EARTH, NATURAL_STRENGTH, octaves_on(2), None),
+            ("natural_oct64_8".into(), MaterialParams::EARTH, NATURAL_STRENGTH, octaves_on(3), None),
+            ("full".into(), MaterialParams::EARTH, 1.0, e, None),
         ];
         for (m, name) in MATERIAL_NAMES.iter().enumerate() {
-            variants.push(((*name).to_string(), forced(m), 1.0, e));
+            variants.push(((*name).to_string(), forced(m), 1.0, e, None));
         }
         // The cost of the two octaves, indicative: the same plan rendered 40 times each (after two warm-up renders), the colour read back to wait for the GPU, the wall time of
         // the octaves on over the wall time of the Earth default in this one run (a ratio, not a measurement of the budget).
@@ -166,12 +193,19 @@ fn main() {
         };
         let (off1, on, off2) = (time(&mut r, e), time(&mut r, octaves_on(3)), time(&mut r, e));
         println!("cost (indicative, same run) eye {eye} m: octaves off {off1:.2} / {off2:.2} ms a frame, both octaves on {on:.2} ms, ratio {:.2}", on / ((off1 + off2) / 2.0));
-        for (name, materials, strength, coef) in variants {
+        for (name, materials, strength, coef, ground) in variants {
             let mut lit = LitPlan::fixed(EV).with_atmosphere(&look, R).expect("an atmosphere plan");
             lit.sun_dir = [sun.x as f32, sun.y as f32, sun.z as f32];
             lit.materials = materials;
             lit.ground_detail = strength;
             lit.coef = coef;
+            if let Some(g) = &ground {
+                lit = lit.with_ground_look(
+                    planet_frame::look::materials::LookChoice::File,
+                    planet_frame::look::materials::GroundDetailMode::Natural,
+                    g,
+                );
+            }
             let mut p = plan.clone();
             p.lit = Some(lit);
             for _ in 0..2 {
