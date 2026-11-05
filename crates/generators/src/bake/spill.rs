@@ -133,7 +133,7 @@ pub fn flood_labelled(w: usize, h: usize, z: &[f64], outlet: &[bool]) -> TileFlo
         }
     }
     let mut edges: Vec<(u32, u32, f64)> = lowest.into_iter().map(|((a, b), w)| (a, b, w)).collect();
-    edges.sort_by(|x, y| (x.0, x.1).cmp(&(y.0, y.1)));
+    edges.sort_by_key(|x| (x.0, x.1));
     TileFlood { w, h, label, level, edges }
 }
 
