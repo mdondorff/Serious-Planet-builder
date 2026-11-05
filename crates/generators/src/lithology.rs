@@ -21,7 +21,7 @@ use planet_core::par::{self, Par};
 use planet_core::{smoothstep, Face, Vec3};
 
 /// Bump whenever the field's output changes for a seed (the formulas, the constants, the province terms or their lattice); a consumer folds it into its keys.
-pub const LITHOLOGY_VERSION: u32 = 1;
+pub const LITHOLOGY_VERSION: u32 = 2;
 
 /// The nominal thickness of a stratigraphic band in metres; the bands' edges jitter by up to [`BAND_JITTER`] of it, so a band is 30 to 170 m thick.
 pub const BAND_NOMINAL_M: f64 = 100.0;
@@ -70,17 +70,19 @@ pub struct Provinces {
     pub rift: f64,
     /// The old margin.
     pub old_margin: f64,
+    /// The back-arc behind a convergent margin (an input of the uplift field, GEN-123).
+    pub back_arc: f64,
 }
 
-const TERMS: usize = 6;
+const TERMS: usize = 7;
 
 impl Provinces {
     fn to_array(self) -> [f64; TERMS] {
-        [self.craton, self.core, self.foreland, self.basin, self.rift, self.old_margin]
+        [self.craton, self.core, self.foreland, self.basin, self.rift, self.old_margin, self.back_arc]
     }
 
     fn from_array(a: [f64; TERMS]) -> Provinces {
-        Provinces { craton: a[0], core: a[1], foreland: a[2], basin: a[3], rift: a[4], old_margin: a[5] }
+        Provinces { craton: a[0], core: a[1], foreland: a[2], basin: a[3], rift: a[4], old_margin: a[5], back_arc: a[6] }
     }
 
     /// The province terms of the class source at `d` (the ground truth the lattice samples).
@@ -93,7 +95,7 @@ impl Provinces {
         let basin = (1.0 - smoothstep(200.0, 700.0, p.e0)) * smoothstep(0.3, 0.7, t.inland);
         // A divergent margin (the plates move apart) near the margin line.
         let rift = smoothstep(-0.15, -0.35, m.convergence) * (1.0 - smoothstep(100.0, 200.0, m.margin_km));
-        Provinces { craton, core: m.core, foreland, basin, rift, old_margin: m.old_margin }
+        Provinces { craton, core: m.core, foreland, basin, rift, old_margin: m.old_margin, back_arc: m.back_arc }
     }
 }
 

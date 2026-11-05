@@ -54,22 +54,28 @@ fn the_province_lattice_and_the_field_are_bit_identical_for_any_thread_count_and
     let other = Lithology::with_provinces(SEED + 1, ProvinceLattice::build_with(&ClassSource::new(SEED + 1), 16, 2));
     let d = random_dir(&mut rng);
     assert_ne!(one.hardness(d).to_bits(), other.hardness(d).to_bits());
-    assert_eq!(LITHOLOGY_VERSION, 1, "a change of the field's output raises the version, which a consumer folds into its keys");
+    assert_eq!(LITHOLOGY_VERSION, 2, "a change of the field's output raises the version, which a consumer folds into its keys");
 }
 
 // spec: GEN-116
 #[test]
 fn the_hardness_is_spike_81s_formula_of_the_province_terms_and_stays_in_range_with_k_between_its_bounds() {
-    let p = Provinces { craton: 0.8, core: 0.2, foreland: 0.1, basin: 0.3, rift: 0.0, old_margin: 0.0 };
+    let p = Provinces { craton: 0.8, core: 0.2, foreland: 0.1, basin: 0.3, rift: 0.0, old_margin: 0.0, back_arc: 0.0 };
     // 0.45 + 0.4 * 0.8 * 0.7 + 0.35 * 0.2 - 0.4 * 0.1 - 0.35 * 0.3 + 0.25 * 0.5
     let want = 0.45 + 0.4 * 0.8 * 0.7 + 0.35 * 0.2 - 0.4 * 0.1 - 0.35 * 0.3 + 0.25 * 0.5;
     assert!((Lithology::hardness_of(&p, 0.5) - want).abs() < 1e-12);
     assert_eq!(
-        Lithology::hardness_of(&Provinces { craton: 1.0, core: 1.0, foreland: 0.0, basin: 0.0, rift: 0.0, old_margin: 0.0 }, 1.0),
+        Lithology::hardness_of(
+            &Provinces { craton: 1.0, core: 1.0, foreland: 0.0, basin: 0.0, rift: 0.0, old_margin: 0.0, back_arc: 0.0 },
+            1.0
+        ),
         1.0
     );
     assert_eq!(
-        Lithology::hardness_of(&Provinces { craton: 0.0, core: 0.0, foreland: 1.0, basin: 1.0, rift: 0.0, old_margin: 0.0 }, -1.0),
+        Lithology::hardness_of(
+            &Provinces { craton: 0.0, core: 0.0, foreland: 1.0, basin: 1.0, rift: 0.0, old_margin: 0.0, back_arc: 0.0 },
+            -1.0
+        ),
         0.0
     );
     // The erodibility falls with the hardness, from the soft bound to the hard one.
