@@ -778,3 +778,27 @@ Source: owner (2026-10-29, drag vs rest), opus-planner (2026-10-29), REND-033
 #### Scenario: The edit named a tile that was refreshed ahead of the plan
 - **WHEN** a tile the edit named holds the new key before the plan made after the edit is delivered
 - **THEN** it is not flagged: it holds the edit already
+
+### Requirement: REND-056 Scree and wet ground as material slots
+The ground materials (REND-034, LOOK-008) SHALL be six slots, rock, sand, grass, soil, scree and wet ground, with the weights normalised over all six; the roughness (LOOK-010) and the octave coefficients (LOOK-013) SHALL have an entry for each new slot, and the look file SHALL take their curve tables and `scree` and `wet` octave entries (look schema version 8). The Earth default and a look of an older version SHALL have both new slots off. This supersedes the four-material wording of LOOK-008, LOOK-010, LOOK-013, REND-034 and REND-035.
+With both slots off the picture SHALL be what it was (no golden candidate; the claim is at the 8-bit output).
+
+Verify: A, C
+Status: active
+Source: SPIKE-100 D1, planner 2026-11-04 (I8a slice 2a, step b), REND-034, LOOK-013
+
+#### Scenario: Six slots
+- **WHEN** a look file gives scree and wet curves and octave entries, a bad number, a wrong count and an unknown key, a build that knows version 7 reads the version 8 fixture, and the version 7 fixture is read; and scenes with only scree, only wet ground and only soil are drawn, each entry of the 16 m, 2 m and 25 cm octaves is raised in turn (the 3 cm octave fades out at the pose; its words are checked by the layout test), and the goldens of the lit ground are drawn
+- **THEN** the table reads and writes back equal, the bad ones are refused naming the key, the older build refuses the file as a newer schema, the version 7 file reads with both slots off, the three scenes differ from each other and from the plain picture, wet ground is darker than scree, each raised entry changes the picture, and the goldens need no candidate
+
+### Requirement: REND-057 The 64 m and 8 m detail octaves
+The ground detail (REND-034) SHALL have six octaves: the four of 16 m, 2 m, 25 cm and 3 cm cells and two more of 64 m and 8 m, each with the coefficients of LOOK-013 and REND-056, from the look's `ground.octave.m64` and `ground.octave.m8` (look schema version 9). The Earth default and a look of an older version SHALL have both new octaves at 0, and an octave at 0 SHALL add nothing. This supersedes the four-octave wording of REND-034 and LOOK-013.
+With both at 0 the picture SHALL be what it was (the exact goldens of the lit ground need no candidate; the claim is at the 8-bit output).
+
+Verify: A, C
+Status: active
+Source: SPIKE-100 D2, planner 2026-11-04 (I8a slice 2a, step c), REND-034, LOOK-013, REND-056
+
+#### Scenario: Six octaves
+- **WHEN** a look file gives the `m64` and `m8` tables, a bad number and an unknown octave, a build that knows version 8 reads the version 9 fixture, and the version 8 fixture is read; and the ground is drawn with the Earth default, with each new octave given albedo coefficients and given tilts, and with the strength 0 and an octave given; and the goldens of the lit ground are drawn
+- **THEN** the tables read and write back equal, the bad ones are refused naming the key, the older build refuses the file as a newer schema, the version 8 file reads with both octaves at 0, each given octave changes the picture, the strength 0 picture is the off picture, and the goldens need no candidate

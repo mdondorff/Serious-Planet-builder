@@ -1,0 +1,1 @@
+- 2026-11-05 ground-materials-6: the ground materials are six slots, scree and wet ground added and off in the Earth default; roughness, coefficient and curve tables and the shader take them (REND-056, look schema 8; #1181)
