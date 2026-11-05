@@ -1,0 +1,1 @@
+- 2026-11-05 ground-octave-8m-lattice: the 8 m detail octave takes the turned lattice (hash salt 6) so the axis-aligned diamond pattern on steep rock is gone; still 0 by default (REND-057)
