@@ -589,6 +589,10 @@ impl HeightField for StampStage<'_> {
         self.base.climate_version_word()
     }
 
+    fn driver_channels(&self, dirs: &[Vec3]) -> Option<Vec<crate::drivers::ChannelSample>> {
+        self.base.driver_channels(dirs)
+    }
+
     fn heights_and_climate(
         &self,
         map: &dyn FaceMapping,

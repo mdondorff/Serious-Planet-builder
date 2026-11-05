@@ -433,6 +433,9 @@ impl crate::height::HeightField for WaterBounded<'_> {
     fn climate_version_word(&self) -> u64 {
         self.f().climate_version_word()
     }
+    fn driver_channels(&self, dirs: &[Vec3]) -> Option<Vec<crate::drivers::ChannelSample>> {
+        self.f().driver_channels(dirs)
+    }
     fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
         self.f().height_bounds(centre, angular_radius)
     }

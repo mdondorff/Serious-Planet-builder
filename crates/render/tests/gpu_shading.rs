@@ -599,6 +599,73 @@ fn the_driver_views_show_the_drivers_of_the_tiles_driver_block() {
     assert_ne!(lit_hdr, soil_hdr);
 }
 
+// spec: GEN-119
+#[test]
+fn tiles_built_from_a_fields_channels_show_them_in_the_driver_views_and_the_default_look_draws_what_it_drew() {
+    use planet_generators::drivers::ChannelSample;
+    // The reference surface with made-up channels: the deposited depth follows z (0.5 to 3.5 m), the area x.
+    struct Channelled(Reference);
+    impl planet_generators::height::HeightField for Channelled {
+        fn height(&self, dir: planet_core::Vec3) -> f64 {
+            self.0.height(dir)
+        }
+        fn seed(&self) -> u64 {
+            self.0.seed()
+        }
+        fn implementation_id(&self) -> &'static str {
+            self.0.implementation_id()
+        }
+        fn version(&self) -> u32 {
+            self.0.version()
+        }
+        fn max_abs_height_m(&self) -> f64 {
+            self.0.max_abs_height_m()
+        }
+        fn driver_channels(&self, dirs: &[planet_core::Vec3]) -> Option<Vec<ChannelSample>> {
+            Some(
+                dirs.iter()
+                    .map(|d| ChannelSample { soil_m: Some((2.0 + 1.5 * d.z) as f32), area_log2_cells: Some((5.0 + 5.0 * d.x) as f32) })
+                    .collect(),
+            )
+        }
+    }
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let (p, _) = plan(3);
+    let draw = |channels: bool| {
+        let mut r = TerrainRenderer::with_pools(&ctx, SIZE, CELLS, compact_pool());
+        r.enable_lit(&ctx);
+        for n in &p.nodes {
+            if r.slot_of(n.tile).is_none() {
+                let tile = if channels {
+                    compact_tile_field(&Channelled(Reference(1)), &TangentWarp, n.tile, CELLS, R)
+                } else {
+                    compact_tile_field(&Reference(1), &TangentWarp, n.tile, CELLS, R)
+                };
+                r.upload_tile(&ctx, &tile).unwrap();
+            }
+        }
+        [ShadeView::Lit, ShadeView::SoilDepth, ShadeView::Moisture].map(|v| hdr_of(&mut r, &ctx, &p, view_plan(v)))
+    };
+    let (neutral, filled) = (draw(false), draw(true));
+    // The default look ignores the drivers (GEN-073): the lit picture is the same bit for bit; the two driver views show the channels and differ from the neutral ones.
+    let bits = |img: &[[f32; 4]]| -> Vec<[u32; 4]> { img.iter().map(|px| px.map(f32::to_bits)).collect() };
+    assert_eq!(bits(&neutral[0]), bits(&filled[0]), "the default look draws what it drew");
+    for (k, name) in [(1usize, "soil depth"), (2, "moisture")] {
+        assert_ne!(bits(&neutral[k]), bits(&filled[k]), "the {name} view shows the channels");
+        // The neutral view is one colour over the planet, the filled one is not.
+        let spread = |img: &[[f32; 4]]| {
+            let l: Vec<f64> = img.iter().filter(|px| px[3] > 0.0).map(|px| f64::from(px[0] + px[1] + px[2])).collect();
+            l.iter().cloned().fold(f64::MIN, f64::max) - l.iter().cloned().fold(f64::MAX, f64::min)
+        };
+        assert!(
+            spread(&filled[k]) > 4.0 * spread(&neutral[k]).max(1e-3),
+            "the {name} view varies over the planet: {} against {}",
+            spread(&filled[k]),
+            spread(&neutral[k])
+        );
+    }
+}
+
 // spec: GEN-073
 #[test]
 fn the_default_look_draws_the_same_pixels_whatever_the_driver_block_holds() {

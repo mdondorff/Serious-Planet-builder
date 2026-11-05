@@ -63,6 +63,8 @@ pub struct ErosionOptions {
     pub planet_res: Option<usize>,
     /// Draw the layer although the store holds the legacy generator's bake.
     pub unchecked: bool,
+    /// Fill the tiles' driver block from the layer's baked channels (VIEW-066, GEN-119).
+    pub channels: bool,
 }
 
 /// Decoded tiles the layer keeps (a cap's bounds read up to 36, a read a stencil's four; a core is 37.7 MB at 3,072 cells, so up to about 1.7 GB with the pyramids).
@@ -647,6 +649,7 @@ impl WorldTerrain {
             face_res: o.erosion_face_res,
             planet_res: o.erosion_res,
             unchecked: o.erosion_unchecked,
+            channels: o.channels,
         })
     }
 
@@ -705,10 +708,38 @@ impl WorldTerrain {
         let over = planet_cache::layer_tiles::ShapeOverride { face_res: o.face_res, planet_res: o.planet_res };
         let dir = o.layer_dir.clone().unwrap_or(store_dir);
         let (layer, manifest, shape) =
-            planet_cache::layer_tiles::StoreLayer::open_recorded(&dir, world, &defaults, over, LAYER_CACHE_TILES)
+            planet_cache::layer_tiles::StoreLayer::open_recorded(&dir, world.clone(), &defaults, over, LAYER_CACHE_TILES)
                 .map_err(|e| format!("--erosion: {e}"))?;
         let (face_res, planet_res) = (shape.face_res, shape.planet_res);
         let replaced = o.face_res.is_some() || o.planet_res.is_some();
+        // The baked channels beside the layer (VIEW-066): read under the keys of the same shape (the areas at pass 1's cells a face edge, the depths at pass 2's), refused when the store holds none.
+        let channels: Option<Arc<dyn planet_generators::channels::ChannelSource>> = if o.channels {
+            let tiles_dir = if dir.join("tiles").is_dir() { dir.join("tiles") } else { dir.clone() };
+            let (area_spec, depth_spec) = planet_cache::layer_tiles::bake_specs(&world, &shape).map_err(|e| format!("--channels: {e}"))?;
+            let store = Arc::new(
+                planet_cache::pack::TileStore::open(&tiles_dir, world.params())
+                    .map_err(|e| format!("--channels: {}: {e}", tiles_dir.display()))?,
+            );
+            let reader = planet_cache::layer_channels::LayerChannels::new(
+                store,
+                world.clone(),
+                shape.face_res as u32,
+                shape.planet_res as u32,
+                area_spec,
+                depth_spec,
+                planet_cache::layer_channels::ChannelCaches::DEFAULT,
+            );
+            let faces = reader.faces_with_area().map_err(|e| format!("--channels: {e}"))?;
+            if faces.is_empty() {
+                return Err(format!(
+                    "--channels on: {} holds no drainage area (record kind 14) under the keys of this layer: bake the layer with a build that stores the channels, or turn --channels off",
+                    tiles_dir.display()
+                ));
+            }
+            Some(Arc::new(reader))
+        } else {
+            None
+        };
         let layer = planet_generators::erosion_layer::ErosionLayer::new(Arc::new(layer)).map_err(|e| format!("--erosion: {e}"))?;
         let sea_level_m = def.sea(BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;
         // The layer's ground is the lattice read C1 (a bilinear read leaves a crease along every lattice cell under it): the default field is upgraded.
@@ -723,8 +754,12 @@ impl WorldTerrain {
             },
             planet_generators::erosion_layer::COAST_FADE_M
         );
+        if channels.is_some() {
+            self.erosion_note.push_str("; the driver block from the layer's channels (drainage area, deposited depth)");
+        }
         self.source = format!("{} + {}", self.source, self.erosion_note);
-        self.erosion = Some(planet_generators::height_fields::ErosionSwitch { relief: None, layer: Arc::new(layer), sea_level_m });
+        self.erosion =
+            Some(planet_generators::height_fields::ErosionSwitch { relief: None, layer: Arc::new(layer), sea_level_m, channels });
         Ok(self)
     }
 
