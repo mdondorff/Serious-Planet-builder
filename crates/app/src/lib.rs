@@ -1686,7 +1686,7 @@ mod tests {
             &world,
             24,
             &tile_spec,
-            &Pass2Inputs { base: &base, face_change: &reader, factor: Some(&factor) },
+            &Pass2Inputs { base: &base, face_change: &reader, factor: Some(&factor), face_fill: None },
             &tile_spec.grid.all_tiles(),
             2,
             &mut |_| {},
@@ -1802,7 +1802,7 @@ mod tests {
             &world,
             24,
             &tile_spec,
-            &Pass2Inputs { base: &base, face_change: &reader, factor: Some(&factor) },
+            &Pass2Inputs { base: &base, face_change: &reader, factor: Some(&factor), face_fill: None },
             &tile_spec.grid.all_tiles(),
             2,
             &mut |r| {

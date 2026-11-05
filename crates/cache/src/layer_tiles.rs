@@ -16,7 +16,9 @@ use std::sync::{Arc, Mutex};
 
 use planet_core::{Face, TileId, Vec3};
 use planet_generators::bake::face::FaceChange;
-use planet_generators::bake::tile::{dequantise, pass2_tile, quantise, Pass2Params, TileGrid, TileId as PassTile, TileResult, TileStats};
+use planet_generators::bake::tile::{
+    dequantise, pass2_tile_with_fill, quantise, Pass2Params, TileGrid, TileId as PassTile, TileResult, TileStats,
+};
 
 use crate::global_store::GlobalWorld;
 use crate::key::{cache_key, CacheKey, Kind, PARAM_RESOLUTION, PARAM_TILE_LAYER};
@@ -194,7 +196,7 @@ pub fn load_tile(
         exported_m3: f64_at(41),
         clamped_cells: u64_at(49) as usize,
     };
-    Ok(Some(TileResult { id, core: dequantise(&counts), deposited: Vec::new(), stats }))
+    Ok(Some(TileResult { id, core: dequantise(&counts), deposited: Vec::new(), fill: Vec::new(), stats }))
 }
 
 /// The core's counts as bytes: little-endian, each row of `t` as its first count and the wrapping differences along the row.
@@ -536,6 +538,12 @@ impl planet_generators::erosion_layer::LayerSource for StoreLayer {
         let Some(result) = load_tile(&self.store, &self.world, self.res, &self.spec, id).map_err(|e| e.to_string())? else {
             return Ok(None);
         };
+        // The change keeps the pits (GEN-120); the runtime shows them filled, so the stored pit depth is added back before the pyramid is built.
+        let mut result = result;
+        if let Some(codes) = crate::layer_fill::load_fill(&self.store, &self.world, self.res, &self.spec, id).map_err(|e| e.to_string())? {
+            result.fill = codes;
+            result = result.with_fill_added();
+        }
         let tile = Arc::new(planet_generators::erosion_layer::LayerTile::new(Arc::new(result), self.spec.grid.tile)?);
         let [lo, hi] = tile.range();
         if f64::from(lo) < self.range.0 || f64::from(hi) > self.range.1 {
@@ -578,6 +586,8 @@ pub struct Pass2Inputs<'a> {
     pub base: &'a (dyn Fn(Vec3) -> f64 + Sync),
     pub face_change: &'a (dyn Fn(Vec3) -> f64 + Sync),
     pub factor: Option<&'a (dyn Fn(Vec3) -> f64 + Sync)>,
+    /// Pass 1's pit depth at a direction in metres (GEN-120), or none: the basins a window cuts are then as deep as the window's own flood finds them.
+    pub face_fill: Option<&'a (dyn Fn(Vec3) -> f64 + Sync)>,
 }
 
 /// Pass 2 over `tiles`, one at a time, into the tile layer store in `dir`: a tile stored under the current key is skipped (a resume), the others are computed and appended with the
@@ -611,17 +621,22 @@ pub fn run_pass2(
         }
         let have_tile = load_tile(&store, world, res, spec, id)?.is_some();
         let have_depth = crate::layer_channels::has_depth(&store, world, res, spec, id)?;
-        if have_tile && have_depth {
+        let have_fill = crate::layer_fill::has_fill(&store, world, res, spec, id)?;
+        if have_tile && have_depth && have_fill {
             report.skipped.push(id);
             continue;
         }
-        let r = pass2_tile(&spec.grid, id, inputs.base, inputs.face_change, inputs.factor, &spec.params, threads);
+        let r =
+            pass2_tile_with_fill(&spec.grid, id, inputs.base, inputs.face_change, inputs.face_fill, inputs.factor, &spec.params, threads);
         // A tile stored before the channels existed is computed again for its depth only; what is stored is not written twice.
         if !have_tile {
             writer.append(&tile_record(world, res, spec, &r)?).map_err(err)?;
         }
         if !have_depth {
             writer.append(&crate::layer_channels::depth_record(world, res, spec, &r)?).map_err(err)?;
+        }
+        if !have_fill {
+            writer.append(&crate::layer_fill::fill_record(world, res, spec, &r)?).map_err(err)?;
         }
         writer.write_index().map_err(err)?;
         on_tile(&r);
@@ -647,4 +662,9 @@ pub fn drop_pass1(dir: &Path) -> Result<(), LayerStoreError> {
         return Err(e(format!("the folder holds files that are not a tile store's ({names:?}): refused")));
     }
     std::fs::remove_dir_all(dir).map_err(|x| e(x.to_string()))
+}
+
+/// The six faces' pit depth as a reader (the nearest cell of the face that holds the direction, in metres).
+pub fn face_fill_reader(faces: &[planet_generators::bake::face::FaceFill; 6]) -> impl Fn(Vec3) -> f64 + Sync + '_ {
+    move |d| planet_generators::bake::face::fill_at(faces, d)
 }

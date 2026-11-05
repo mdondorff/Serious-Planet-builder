@@ -32,6 +32,9 @@ pub struct CarveParams {
     /// The uplift is tapered by the height above the sea level at the start of the carve: a cell `h` metres above it gets `smoothstep(0, uplift_taper_m, h)` of the uplift, so a coastal plain
     /// that barely erodes is not lifted by the full uplift (SPIKE-99 and the coast diagnosis: 14 m over the whole plain); 0 switches the taper off (the whole uplift everywhere).
     pub uplift_taper_m: f64,
+    /// Keep the pits (GEN-120): the route runs over the filled copy, but a cell that stands below its receiver (a pit of the unfilled surface) is not raised to it; it only gains its uplift,
+    /// so the donors above it carve toward its floor and the basin keeps the relief the fill would have eaten. An incise-only carve never raises, so it ignores the flag.
+    pub keep_pits: bool,
 }
 
 /// The breach limit of a cell at the sea level when the limit scales with height (the former default).
@@ -52,6 +55,7 @@ impl Default for CarveParams {
             max_area: 0.0,
             incise_only: false,
             uplift_taper_m: 60.0,
+            keep_pits: true,
         }
     }
 }
@@ -113,7 +117,7 @@ pub fn carve(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, facto
             let hr = z[rec];
             let up = uplift * scale * taper.as_ref().map_or(1.0, |t| f64::from(t[c]));
             let hn = (z[c] + up + f * hr) / (1.0 + f);
-            let new = hn.max(hr + p.epsilon).max(floor);
+            let new = if p.keep_pits && !p.incise_only && z[c] < hr { z[c] + up } else { hn.max(hr + p.epsilon).max(floor) };
             z[c] = if p.incise_only { new.min(z[c]) } else { new };
         }
     }

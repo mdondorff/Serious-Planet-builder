@@ -8,12 +8,15 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use planet_cache::global_store::{FieldSource, GlobalWorld};
+use planet_cache::layer_fill::load_face_fill;
 use planet_cache::layer_manifest::LayerManifest;
 use planet_cache::layer_store::{load_face_change, run_pass1};
-use planet_cache::layer_tiles::{bake_specs, drop_pass1, face_change_reader, load_tile, run_pass2, BakeShape, Pass2Inputs};
+use planet_cache::layer_tiles::{
+    bake_specs, drop_pass1, face_change_reader, face_fill_reader, load_tile, run_pass2, BakeShape, Pass2Inputs,
+};
 use planet_cache::pack::TileStore;
 use planet_core::{Face, Vec3};
-use planet_generators::bake::face::FaceChange;
+use planet_generators::bake::face::{FaceChange, FaceFill};
 use planet_generators::bake::inputs::BakeInputs;
 use planet_generators::bake::map::{field_maps, layer_change_at, tile_image};
 use planet_generators::bake::tile::{tile_has_land, TileGrid, TileId as PassTile};
@@ -176,6 +179,19 @@ fn main() {
         .collect();
     let faces: [FaceChange; 6] = faces.try_into().expect("six faces");
     let reader = face_change_reader(&faces);
+    // Pass 1's pit depth (GEN-120): pass 2 reads it for the basins its windows cut; a face this run did not compute has no pits.
+    let fills: Vec<FaceFill> = (0..6u8)
+        .map(|f| {
+            if !computed_faces.contains(&f) {
+                return FaceFill { face: Face(f), cells: layer.cells, codes: vec![0; layer.cells * layer.cells] };
+            }
+            load_face_fill(&store, &world, face_bake_res, &layer, Face(f))
+                .unwrap_or_else(|e| fail(&e.to_string()))
+                .unwrap_or_else(|| fail("a pass-1 face holds no pit depth"))
+        })
+        .collect();
+    let fills: [FaceFill; 6] = fills.try_into().expect("six faces");
+    let fill_reader = face_fill_reader(&fills);
     let surface = |d: Vec3| base(d) + reader(d);
     let planet_pass = tiles_wanted.is_none();
     let tiles: Vec<PassTile> = tiles_wanted.unwrap_or_else(|| {
@@ -195,7 +211,7 @@ fn main() {
         &world,
         tile_res,
         &spec,
-        &Pass2Inputs { base: &base, face_change: &reader, factor: Some(&factor) },
+        &Pass2Inputs { base: &base, face_change: &reader, factor: Some(&factor), face_fill: Some(&fill_reader) },
         &tiles,
         threads,
         &mut |r| {
@@ -227,9 +243,26 @@ fn main() {
     let tstore = TileStore::open(&tile_dir, world.params()).unwrap_or_else(|e| fail(&e.to_string()));
     let mut stored: HashMap<(u8, u32, u32), Vec<f32>> = HashMap::new();
     for &t in &tiles {
-        let r = load_tile(&tstore, &world, tile_res, &spec, t)
+        let mut r = load_tile(&tstore, &world, tile_res, &spec, t)
             .unwrap_or_else(|e| fail(&e.to_string()))
             .unwrap_or_else(|| fail("a tile is missing from the store"));
+        // The maps and the manifest's range are of what the runtime reads: the change with the pit depth added back (GEN-120).
+        if let Some(codes) =
+            planet_cache::layer_fill::load_fill(&tstore, &world, tile_res, &spec, t).unwrap_or_else(|e| fail(&e.to_string()))
+        {
+            r.fill = codes;
+            let pits = r.fill.iter().filter(|c| **c > 0).count();
+            let land = r.stats.land_cells.max(1);
+            println!(
+                "pits tile {}/{}/{}: {pits} cells ({:.1} % of {land} land), deepest {} m",
+                t.face.0,
+                t.ti,
+                t.tj,
+                100.0 * pits as f64 / land as f64,
+                r.fill.iter().max().copied().unwrap_or(0)
+            );
+            r = r.with_fill_added();
+        }
         stored.insert((t.face.0, t.ti, t.tj), r.core);
     }
     // The manifest (STRM-074): the shape, versions and source, and the range of the change over the tiles of this run added to what the directory already says (the range only widens).

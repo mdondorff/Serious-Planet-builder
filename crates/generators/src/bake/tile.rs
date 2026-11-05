@@ -9,7 +9,8 @@
 
 use super::carve::{carve, CarveParams};
 use super::deposit::{deposit_on_own_route, spread_pits, DepositParams, Kc};
-use super::face::face_stream;
+use super::face::{face_stream, fill_code, fill_m, FILL_MIN_M};
+use super::flood::fill_depth;
 use super::map::catmull_rom;
 use super::thermal::{thermal, ThermalParams};
 use super::Grid;
@@ -164,6 +165,8 @@ pub struct TileResult {
     pub id: TileId,
     pub core: Vec<f32>,
     pub deposited: Vec<u8>,
+    /// The pit depth of the core (GEN-120, codes of [`fill_code`]): how far each cell lies below the flood of the final surface, or of pass 1's flood where that holds a deeper basin. Empty when the result was read from a record that holds no such plane.
+    pub fill: Vec<u8>,
     pub stats: TileStats,
 }
 
@@ -239,13 +242,28 @@ pub fn tile_has_land(g: &TileGrid, id: TileId, surface: &(dyn Fn(Vec3) -> f64 + 
         .any(|j| (0..g.tile).step_by(stride).any(|i| surface(g.direction(id.face, i0 + i as i64, j0 + j as i64)) > sea_level))
 }
 
-/// Pass 2 on one tile. `base` is the base field, `face_change` the face carve's change at a direction (the blended reader, GEN-100), `factor` the optional carve factor of GEN-097.
-/// The window is `base + face_change`; the local carve incises it; thermal and the deposition sweep follow; the result is the core's change against `base`.
+/// [`pass2_tile_with_fill`] without pass 1's fill depth: the pits are those the tile's own window floods.
 pub fn pass2_tile(
     g: &TileGrid,
     id: TileId,
     base: &(dyn Fn(Vec3) -> f64 + Sync),
     face_change: &(dyn Fn(Vec3) -> f64 + Sync),
+    factor: Option<&(dyn Fn(Vec3) -> f64 + Sync)>,
+    p: &Pass2Params,
+    threads: usize,
+) -> TileResult {
+    pass2_tile_with_fill(g, id, base, face_change, None, factor, p, threads)
+}
+
+/// Pass 2 on one tile. `base` is the base field, `face_change` the face carve's change at a direction (the blended reader, GEN-100), `factor` the optional carve factor of GEN-097.
+/// The window is `base + face_change`; the local carve incises it; thermal and the deposition sweep follow; the result is the core's change against `base`.
+#[allow(clippy::too_many_arguments)]
+pub fn pass2_tile_with_fill(
+    g: &TileGrid,
+    id: TileId,
+    base: &(dyn Fn(Vec3) -> f64 + Sync),
+    face_change: &(dyn Fn(Vec3) -> f64 + Sync),
+    face_fill: Option<&(dyn Fn(Vec3) -> f64 + Sync)>,
     factor: Option<&(dyn Fn(Vec3) -> f64 + Sync)>,
     p: &Pass2Params,
     threads: usize,
@@ -264,6 +282,8 @@ pub fn pass2_tile(
     // The surface the deposited depth counts from: the base plus what pass 1 raised (a raise by uplift or a filled pit is not a deposit, GEN-111).
     let reference: Vec<f64> = base_w.iter().zip(&fc_w).map(|(b, c)| b + c.max(0.0)).collect();
     drop(fc_w);
+    // Pass 1's pit depth at every window cell, in metres (0 where it has no pit or none is given).
+    let fill1 = face_fill.map(|f| sample_window(g, id, f, threads));
     let factors = factor.map(|f| sample_window(g, id, f, threads));
     let outlet = grid.outlets(&z0, p.sea_level);
     let stream = face_stream(p.seed, id.face);
@@ -283,13 +303,20 @@ pub fn pass2_tile(
     );
     // What is left of the one-cell pits (thermal's and the sweep's) goes to the neighbours, volume kept.
     spread_pits(&grid, &mut z, p.sea_level, p.pit_min_m, p.pit_passes);
+    // The pits of the final surface (GEN-120): the depth below the window's flood, and where pass 1 floods a basin the window cuts, the depth below pass 1's spill level (its
+    // surface at the start of this pass plus its fill depth), whichever is deeper. An outlet and a pit under `FILL_MIN_M` count 0.
+    let depth_w = fill_depth(&grid, &z, &outlet, p.carve.epsilon, FILL_MIN_M);
     let (w, t, h) = (g.window(), g.tile, g.halo);
     let mut core = Vec::with_capacity(t * t);
     let mut deposited = Vec::with_capacity(t * t);
+    let mut fill = Vec::with_capacity(t * t);
     let mut land = 0;
     for j in 0..t {
         for i in 0..t {
             let q = (j + h) * w + i + h;
+            let own = f64::from(depth_w[q]);
+            let from_pass1 = fill1.as_ref().map_or(0.0, |f| if f[q] > 0.0 { z0[q] + f[q] - z[q] } else { 0.0 });
+            fill.push(fill_code(if z0[q] > p.sea_level { own.max(from_pass1) } else { 0.0 }));
             core.push((z[q] - base_w[q]) as f32);
             // The deposition sweep's rise plus thermal's gain over the reference. What was removed is derived by the reader: max(0, deposited - change), exact where pass 1 did not raise the cell.
             let gained = (z[q] - z_thermal[q]).max(0.0) + (z_thermal[q] - reference[q]).max(0.0);
@@ -302,6 +329,7 @@ pub fn pass2_tile(
         id,
         core,
         deposited,
+        fill,
         stats: TileStats {
             land_cells: land,
             thermal_passes: thermal_report.passes_run,
@@ -322,4 +350,16 @@ pub fn quantise(change: &[f32]) -> Vec<i16> {
 /// The change in metres of quantised counts.
 pub fn dequantise(counts: &[i16]) -> Vec<f32> {
     counts.iter().map(|&c| f32::from(c) * QUANT_STEP_M).collect()
+}
+
+impl TileResult {
+    /// The core with the pit depth added back: the filled look the runtime shows while lake water and a pit-tolerance rule do not exist (GEN-120). A result without a fill plane is returned as it is.
+    pub fn with_fill_added(mut self) -> TileResult {
+        if self.fill.len() == self.core.len() {
+            for (c, f) in self.core.iter_mut().zip(&self.fill) {
+                *c += fill_m(*f) as f32;
+            }
+        }
+        self
+    }
 }

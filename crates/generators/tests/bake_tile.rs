@@ -5,7 +5,8 @@
 use planet_core::{Face, Vec3};
 use planet_generators::bake::carve::carve;
 use planet_generators::bake::tile::{
-    dequantise, pass2_tile, quantise, sample_window_coarse, tile_has_land, Pass2Params, TileGrid, TileId, QUANT_STEP_M,
+    dequantise, pass2_tile, pass2_tile_with_fill, quantise, sample_window_coarse, tile_has_land, Pass2Params, TileGrid, TileId,
+    QUANT_STEP_M,
 };
 use planet_generators::bake::Grid;
 
@@ -256,4 +257,27 @@ fn a_tile_leaves_no_one_cell_pit_over_the_threshold_in_its_core() {
         }
     }
     assert_eq!(pits, 0, "a one-cell pit over 0.5 m is left in the core");
+}
+
+// spec: GEN-120
+#[test]
+fn a_tile_keeps_the_depth_of_its_pits_on_any_thread_count_and_pass_1s_deeper_basin_counts() {
+    let (g, p) = (grid(), Pass2Params::standard(9, 0.0));
+    let a = pass2_tile_with_fill(&g, tile(1, 1), &base, &nothing, None, None, &p, 1);
+    let b = pass2_tile_with_fill(&g, tile(1, 1), &base, &nothing, None, None, &p, 8);
+    assert_eq!(a.fill, b.fill, "the pit depth differs between 1 and 8 threads");
+    assert_eq!(a.fill.len(), 24 * 24);
+    let wrapper = pass2_tile(&g, tile(1, 1), &base, &nothing, None, &p, 2);
+    assert_eq!(wrapper.fill, a.fill, "pass2_tile is the fill version without pass 1's depth");
+    // The sea (land below the sea level) holds no pit depth.
+    let sea = pass2_tile_with_fill(&g, tile(0, 3), &|_: Vec3| -300.0, &nothing, None, None, &p, 2);
+    assert!(sea.fill.iter().all(|c| *c == 0), "water holds a pit depth");
+    // A basin pass 1 floods and the window cuts: a 30 m depth from pass 1 on flat ground makes every cell of the core 30 m deep (the window alone sees no pit).
+    let flat = |_: Vec3| 300.0;
+    let deep = |_: Vec3| 30.0;
+    let with = pass2_tile_with_fill(&g, tile(2, 2), &flat, &nothing, Some(&deep), None, &p, 2);
+    let without = pass2_tile_with_fill(&g, tile(2, 2), &flat, &nothing, None, None, &p, 2);
+    assert!(without.fill.iter().all(|c| *c == 0), "a flat tile holds a pit by itself");
+    assert!(with.fill.iter().all(|c| *c >= 29), "pass 1's depth of 30 m reads {:?}", &with.fill[..4]);
+    assert_eq!(with.core, without.core, "the pit depth moved the change");
 }
