@@ -1,2 +1,2 @@
 - [x] 1.1 The scheduler limit follows the frame (`smoke.rs`), tests, TEST-090
-- [ ] 1.2 `verifier`, prepush, PR; remove the Tracked entry from `docs/status.md`
+- [x] 1.2 `verifier`, prepush, PR; remove the Tracked entry from `docs/status.md`
