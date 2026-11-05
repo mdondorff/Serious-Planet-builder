@@ -52,10 +52,14 @@ pub fn wetness_of_area_log2(log2_cells: f64) -> f64 {
 }
 
 /// The channels at one texel of a tile's driver block (GEN-119): the deposited depth in metres and the drainage area as log2 of cells; `None` where the store holds no channel for the ground there.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ChannelSample {
     pub soil_m: Option<f32>,
     pub area_log2_cells: Option<f32>,
+    /// The fill depth of keep-pits (kind 16 and 17) in metres, for the channel block (GEN-126).
+    pub fill_m: Option<f32>,
+    /// The erosion depth in metres, for the channel block (GEN-126).
+    pub erosion_m: Option<f32>,
 }
 
 /// The driver block with the channels written in (GEN-119): where a sample holds the deposited depth, the soil code is its square-root code ([`encode_soil`]); where it holds the area, the moisture code is
@@ -76,6 +80,41 @@ pub fn apply_channels(words: &mut [u32; DRIVER_TEXELS], samples: &[ChannelSample
     }
 }
 
+/// The depth in metres that code 255 of the channel block stands for (GEN-126): square-root coded, so a code step is 0.004 m at the first code, 0.03 m at 1 m and 2 m at 256 m.
+pub const DEPTH_MAX_M: f64 = 256.0;
+/// Version of the channel block's layout and codes (GEN-126): part of the version word of a field that reads the channels.
+pub const CHANNEL_BLOCK_VERSION: u32 = 1;
+
+/// A depth in metres as 8 bits, square-root coded: `round(255 sqrt(depth / DEPTH_MAX_M))`.
+pub fn encode_depth(depth_m: f64) -> u8 {
+    libm::round(255.0 * libm::sqrt((depth_m / DEPTH_MAX_M).clamp(0.0, 1.0))) as u8
+}
+
+/// The depth in metres of an 8-bit code of the channel block.
+pub fn decode_depth(code: u8) -> f64 {
+    let u = f64::from(code) / 255.0;
+    u * u * DEPTH_MAX_M
+}
+
+/// The word of one texel of the tile's channel block (GEN-126): the fill depth code in bits 0-7, the erosion depth code in bits 8-15, every other bit zero. The neutral word is 0: no fill, no erosion.
+pub fn pack_channel_word(fill: u8, erosion: u8) -> u32 {
+    u32::from(fill) | u32::from(erosion) << 8
+}
+
+/// The codes `[fill, erosion]` of a channel word.
+pub fn unpack_channel_word(word: u32) -> [u8; 2] {
+    [word as u8, (word >> 8) as u8]
+}
+
+/// The channel block with the depths written in (GEN-126): where a sample holds the fill depth or the erosion depth its code is [`encode_depth`] of it; a texel without a depth stays 0. `samples` are the 81 texels in the block's order.
+pub fn apply_depths(words: &mut [u32; DRIVER_TEXELS], samples: &[ChannelSample]) {
+    debug_assert_eq!(samples.len(), DRIVER_TEXELS, "one sample for each texel of the block");
+    for (w, s) in words.iter_mut().zip(samples) {
+        let code = |m: Option<f32>| m.filter(|d| d.is_finite()).map_or(0, |d| encode_depth(f64::from(d)));
+        *w = pack_channel_word(code(s.fill_m), code(s.erosion_m));
+    }
+}
+
 /// The version word of a field that fills the driver block from channels with the identity `identity` (the layer and its channel keys): it enters the field's climate version word, so every mesh key of such
 /// a field differs from the same field without channels, and from one with other channels or another mapping.
 pub fn channel_word(identity: u64) -> u64 {
@@ -87,6 +126,8 @@ pub fn channel_word(identity: u64) -> u64 {
             DriverParams::default().soil_max_m.to_bits(),
             AREA_LOG2_DRY.to_bits(),
             AREA_LOG2_WET.to_bits(),
+            u64::from(CHANNEL_BLOCK_VERSION),
+            DEPTH_MAX_M.to_bits(),
         ],
     )
 }

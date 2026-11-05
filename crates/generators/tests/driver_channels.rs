@@ -7,10 +7,11 @@ use planet_core::cube::TangentWarp;
 use planet_core::hash::mix64;
 use planet_core::{Face, TileId, Vec3};
 use planet_generators::climate::{CLIMATE_CELLS, CLIMATE_EDGE};
-use planet_generators::compact::compact_tile_field;
+use planet_generators::compact::{compact_tile_field, slot_bytes, CompactTile};
 use planet_generators::drivers::{
-    apply_channels, channel_word, decode_soil, decode_unit, encode_soil, encode_unit, unpack_driver_word, wetness_of_area_log2,
-    ChannelSample, DriverParams, AREA_LOG2_DRY, AREA_LOG2_WET, DRIVER_MAP_VERSION,
+    apply_channels, apply_depths, channel_word, decode_depth, decode_soil, decode_unit, encode_depth, encode_soil, encode_unit,
+    pack_channel_word, unpack_channel_word, unpack_driver_word, wetness_of_area_log2, ChannelSample, DriverParams, AREA_LOG2_DRY,
+    AREA_LOG2_WET, CHANNEL_BLOCK_VERSION, DEPTH_MAX_M, DRIVER_MAP_VERSION,
 };
 use planet_generators::height::{HeightField, Reference};
 use planet_generators::mesh::mesh_key_field;
@@ -25,7 +26,12 @@ fn tile() -> TileId {
 
 /// The channels of a made-up planet: the deposited depth follows the height of the point's z, the area its x.
 fn sample_at(d: Vec3) -> ChannelSample {
-    ChannelSample { soil_m: Some((0.5 + 3.0 * d.z.abs()) as f32), area_log2_cells: Some((2.0 + 6.0 * d.x.abs()) as f32) }
+    ChannelSample {
+        soil_m: Some((0.5 + 3.0 * d.z.abs()) as f32),
+        area_log2_cells: Some((2.0 + 6.0 * d.x.abs()) as f32),
+        fill_m: Some((40.0 * d.y.abs()) as f32),
+        erosion_m: Some((9.0 * d.x.abs() + 1.0) as f32),
+    }
 }
 
 /// `Reference(seed)` with the channels of [`sample_at`] when `identity` is some, keyed like a field that reads them.
@@ -73,10 +79,10 @@ fn the_mapping_writes_the_soil_and_moisture_codes_and_leaves_the_insolation_and_
         *w = planet_generators::drivers::pack_driver_word([10, 20, 30], (k % 200) as u8);
     }
     let before = words;
-    let mut samples = vec![ChannelSample { soil_m: None, area_log2_cells: None }; 81];
-    samples[0] = ChannelSample { soil_m: Some(2.0), area_log2_cells: Some(5.0) };
-    samples[1] = ChannelSample { soil_m: Some(2.0), area_log2_cells: None };
-    samples[2] = ChannelSample { soil_m: None, area_log2_cells: Some(AREA_LOG2_WET as f32 + 3.0) };
+    let mut samples = vec![ChannelSample { soil_m: None, area_log2_cells: None, ..Default::default() }; 81];
+    samples[0] = ChannelSample { soil_m: Some(2.0), area_log2_cells: Some(5.0), ..Default::default() };
+    samples[1] = ChannelSample { soil_m: Some(2.0), area_log2_cells: None, ..Default::default() };
+    samples[2] = ChannelSample { soil_m: None, area_log2_cells: Some(AREA_LOG2_WET as f32 + 3.0), ..Default::default() };
     apply_channels(&mut words, &samples);
     // The soil code is the square-root code of the depth, the moisture the code of the ramp; the insolation and the neutral insolation stay.
     assert_eq!(unpack_driver_word(words[0]), ([encode_soil(2.0, &p), encode_unit(0.5), 30], 0));
@@ -94,7 +100,10 @@ fn the_mapping_writes_the_soil_and_moisture_codes_and_leaves_the_insolation_and_
     // A sample that is not finite is no channel.
     let mut one = [planet_generators::drivers::pack_driver_word([10, 20, 30], 40); 81];
     let kept = one;
-    apply_channels(&mut one, &vec![ChannelSample { soil_m: Some(f32::NAN), area_log2_cells: Some(f32::INFINITY) }; 81]);
+    apply_channels(
+        &mut one,
+        &vec![ChannelSample { soil_m: Some(f32::NAN), area_log2_cells: Some(f32::INFINITY), ..Default::default() }; 81],
+    );
     assert_eq!(one, kept);
     assert_eq!(wetness_of_area_log2(f64::NAN), 0.0);
 }
@@ -189,4 +198,66 @@ fn every_source_file_that_forwards_the_climate_version_word_forwards_the_channel
     }
     missing.sort();
     assert_eq!(missing, ["generators/src/terrain.rs"], "a file that defines the version word and not the channels: {missing:?}");
+}
+
+// spec: GEN-126
+#[test]
+fn the_depth_codes_are_square_root_codes_of_the_range_to_256_metres_and_a_texel_without_a_depth_is_zero() {
+    assert_eq!((encode_depth(0.0), encode_depth(DEPTH_MAX_M), encode_depth(10.0 * DEPTH_MAX_M), encode_depth(-3.0)), (0, 255, 255, 0));
+    // The resolution: about 4 mm at the first code, 3 cm at 1 m, 2 m at the top.
+    assert!((decode_depth(1) - 0.0039).abs() < 1e-4, "{}", decode_depth(1));
+    assert!((decode_depth(16) - 1.0).abs() < 0.07 && (decode_depth(255) - DEPTH_MAX_M).abs() < 1e-9);
+    for m in [0.01, 0.2, 1.0, 7.5, 60.0, 200.0] {
+        let code = encode_depth(m);
+        let step = decode_depth(code.saturating_add(1)) - decode_depth(code);
+        assert!((decode_depth(code) - m).abs() <= step.max(1e-3), "{m} m through code {code}");
+    }
+    assert_eq!(unpack_channel_word(pack_channel_word(7, 200)), [7, 200]);
+    assert_eq!(pack_channel_word(255, 255) >> 16, 0, "bits 16-31 stay zero");
+    let mut words = [pack_channel_word(9, 9); 81];
+    let mut samples = vec![ChannelSample::default(); 81];
+    samples[0] = ChannelSample { fill_m: Some(4.0), erosion_m: Some(100.0), ..Default::default() };
+    samples[1] = ChannelSample { fill_m: Some(f32::NAN), erosion_m: Some(f32::INFINITY), ..Default::default() };
+    samples[2] = ChannelSample { fill_m: Some(2.0), erosion_m: None, ..Default::default() };
+    apply_depths(&mut words, &samples);
+    assert_eq!(unpack_channel_word(words[0]), [encode_depth(4.0), encode_depth(100.0)]);
+    assert_eq!(words[1], 0, "a depth that is not a finite number is no depth");
+    assert_eq!(unpack_channel_word(words[2]), [encode_depth(2.0), 0]);
+    assert!(words[3..].iter().all(|w| *w == 0), "a texel without a depth is 0");
+    assert_eq!(CHANNEL_BLOCK_VERSION, 1, "a new layout or scale raises the version, which enters the channel word");
+}
+
+// spec: GEN-126
+#[test]
+fn the_builder_writes_the_depths_of_a_fields_channels_in_the_channel_block_and_a_field_without_them_has_the_zero_block() {
+    let (plain, with) = (WithChannels(Reference(7), None), WithChannels(Reference(7), Some(42)));
+    assert_eq!(compact_tile_field(&plain, &TangentWarp, tile(), 32, R).channel_words, [0u32; 81]);
+    assert_eq!(compact_tile_field(&Reference(7), &TangentWarp, tile(), 32, R).channel_words, [0u32; 81]);
+    let t = compact_tile_field(&with, &TangentWarp, tile(), 32, R);
+    for (k, d) in texel_dirs().into_iter().enumerate() {
+        let s = sample_at(d);
+        assert_eq!(
+            unpack_channel_word(t.channel_words[k]),
+            [encode_depth(f64::from(s.fill_m.unwrap())), encode_depth(f64::from(s.erosion_m.unwrap()))],
+            "texel {k}"
+        );
+        assert_eq!(t.channel_words[k] >> 16, 0, "texel {k}: the reserved bits are zero");
+    }
+    // The driver block and the heights are the ones of GEN-119 and the field: the depths add no other change.
+    let b = compact_tile_field(&plain, &TangentWarp, tile(), 32, R);
+    assert_eq!((&t.texels, t.climate_words), (&b.texels, b.climate_words));
+    assert_ne!(t.driver_words, b.driver_words);
+    // The slot holds the block after the driver block, round-trips, and a reserved bit is refused.
+    let bytes = t.slot_data();
+    assert_eq!(bytes.len() as u64, slot_bytes(32));
+    assert_eq!(bytes.len(), 9_812);
+    let back = CompactTile::from_slot_data(t.id, 32, t.key, t.origin, t.relief_m, &bytes).expect("a slot");
+    assert_eq!(back.channel_words, t.channel_words);
+    assert_eq!(back, t);
+    let mut bad = bytes.clone();
+    bad[planet_generators::compact::SLOT_CHANNEL_OFFSET as usize + 2] = 1;
+    let e = CompactTile::from_slot_data(t.id, 32, t.key, t.origin, t.relief_m, &bad).unwrap_err();
+    assert!(e.contains("channel word 0") && e.contains("reserved"), "{e}");
+    // Keys: the channel identity moves the key (GEN-119), and the mesh version is the one of this layout.
+    assert_eq!(planet_generators::mesh::MESH_VERSION, 11);
 }

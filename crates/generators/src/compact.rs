@@ -49,8 +49,14 @@ pub const SLOT_DRIVER_OFFSET: u64 = SLOT_CLIMATE_OFFSET + SLOT_CLIMATE_BYTES;
 /// Bytes of the driver block: 81 words (soil depth, moisture, insolation and the neutral insolation, one byte each).
 pub const SLOT_DRIVER_BYTES: u64 = 4 * DRIVER_TEXELS as u64;
 
-/// Offset of the texels in the slot: 776 bytes of header, climate block and driver block (GEN-025), a multiple of 8.
-pub const SLOT_TEXEL_OFFSET: u64 = SLOT_DRIVER_OFFSET + SLOT_DRIVER_BYTES;
+/// Offset of the channel block in the slot (GEN-025, MESH_VERSION 11): right after the driver block.
+pub const SLOT_CHANNEL_OFFSET: u64 = SLOT_DRIVER_OFFSET + SLOT_DRIVER_BYTES;
+
+/// Bytes of the channel block: 81 words (fill depth code, erosion depth code, two zero bytes, GEN-126).
+pub const SLOT_CHANNEL_BYTES: u64 = 4 * DRIVER_TEXELS as u64;
+
+/// Offset of the texels in the slot: 1,100 bytes of header, climate block, driver block and channel block (GEN-025), a whole number of words (the slot is read as words).
+pub const SLOT_TEXEL_OFFSET: u64 = SLOT_CHANNEL_OFFSET + SLOT_CHANNEL_BYTES;
 
 /// Scale of the 15-bit normal components: `2^14 - 1`.
 pub const NORMAL_SCALE: f32 = 16_383.0;
@@ -75,7 +81,7 @@ pub const fn slot_texel_bytes(cells: u32) -> u64 {
     texel_count(cells) as u64 * TEXEL_BYTES
 }
 
-/// The stride of a slot at `cells`: `776 + 8 (cells + 1)^2` (GEN-025: 3,088, 9,488 and 34,576 B at cells 16, 32 and 64).
+/// The stride of a slot at `cells`: `1,100 + 8 (cells + 1)^2` (GEN-025: 3,412, 9,812 and 34,900 B at cells 16, 32 and 64).
 pub const fn slot_bytes(cells: u32) -> u64 {
     SLOT_TEXEL_OFFSET + slot_texel_bytes(cells)
 }
@@ -109,6 +115,8 @@ pub struct CompactTile {
     /// The driver block (GEN-074, ADR 0076), 81 words: soil depth code, moisture code, insolation code and the neutral insolation code of the texel's
     /// latitude, one byte each (`drivers::pack_driver_word`). The neutral values: the builder makes no other.
     pub driver_words: [u32; DRIVER_TEXELS],
+    /// The channel block (GEN-126), 81 words: fill depth code, erosion depth code, two zero bytes (`drivers::pack_channel_word`). Neutral: all zero.
+    pub channel_words: [u32; DRIVER_TEXELS],
     /// `(cells + 1)^2` texels `[height step count, two 15-bit normal components]`, row `j` major.
     pub texels: Vec<[u32; 2]>,
 }
@@ -160,6 +168,9 @@ impl CompactTile {
         for w in &self.driver_words {
             out.extend_from_slice(&w.to_le_bytes());
         }
+        for w in &self.channel_words {
+            out.extend_from_slice(&w.to_le_bytes());
+        }
         for t in &self.texels {
             out.extend_from_slice(&t[0].to_le_bytes());
             out.extend_from_slice(&t[1].to_le_bytes());
@@ -195,6 +206,13 @@ impl CompactTile {
         for (k, w) in driver_words.iter_mut().enumerate() {
             *w = word(SLOT_DRIVER_OFFSET as usize + 4 * k);
         }
+        let mut channel_words = [0u32; DRIVER_TEXELS];
+        for (k, w) in channel_words.iter_mut().enumerate() {
+            *w = word(SLOT_CHANNEL_OFFSET as usize + 4 * k);
+            if *w >> 16 != 0 {
+                return Err(format!("the channel word {k} has its reserved bits set ({:#x})", *w));
+            }
+        }
         let mut climate_words = [0u32; CLIMATE_TEXELS];
         for (k, w) in climate_words.iter_mut().enumerate() {
             *w = word(SLOT_CLIMATE_OFFSET as usize + 4 * k);
@@ -222,6 +240,7 @@ impl CompactTile {
             relief_m,
             climate_words,
             driver_words,
+            channel_words,
             texels,
         })
     }
@@ -357,9 +376,9 @@ fn f32_up(x: f64) -> f32 {
     }
 }
 
-/// The driver block of tile `id` (GEN-074): at each of the 9 x 9 climate texels the neutral codes, with the neutral insolation of the texel's latitude in the top byte; where `field` reads baked channels the soil
+/// The driver block and the channel block of tile `id` (GEN-074, GEN-126): at each of the 9 x 9 climate texels the neutral codes, with the neutral insolation of the texel's latitude in the top byte; where `field` reads baked channels the soil
 /// and moisture codes come from them (GEN-119).
-fn driver_block(field: &dyn HeightField, map: &dyn FaceMapping, id: TileId) -> [u32; DRIVER_TEXELS] {
+fn driver_blocks(field: &dyn HeightField, map: &dyn FaceMapping, id: TileId) -> ([u32; DRIVER_TEXELS], [u32; DRIVER_TEXELS]) {
     use crate::climate::{CLIMATE_CELLS, CLIMATE_EDGE};
     use crate::drivers::{neutral_codes, pack_driver_word, DriverParams, NeutralInsolation};
     let dirs: Vec<Vec3> = (0..CLIMATE_EDGE)
@@ -373,10 +392,12 @@ fn driver_block(field: &dyn HeightField, map: &dyn FaceMapping, id: TileId) -> [
         let neutral = neutral_codes(libm::asin(dirs[k].z.clamp(-1.0, 1.0)), &params, &insolation);
         *w = pack_driver_word(neutral, neutral[2]);
     }
+    let mut channel_words = [0u32; DRIVER_TEXELS];
     if let Some(samples) = field.driver_channels(&dirs) {
         crate::drivers::apply_channels(&mut words, &samples);
+        crate::drivers::apply_depths(&mut channel_words, &samples);
     }
-    words
+    (words, channel_words)
 }
 
 /// Build the compact tile from a height field (all geometry in f64, rounded once).
@@ -393,7 +414,7 @@ pub fn compact_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: Ti
     dirs.push(centre);
     dirs.extend(crate::normals::lattice_directions(map, id, cells));
     let (all, climate) = field.heights_and_climate(map, id, &dirs, &|| false);
-    let driver_words = driver_block(field, map, id);
+    let (driver_words, channel_words) = driver_blocks(field, map, id);
     let h_origin = all[0];
     let origin = PlanetFixed(centre * (radius_m + h_origin));
     // The shell through the origin: control points are small tile-local numbers (CON-11), not heights from the sea level.
@@ -440,6 +461,7 @@ pub fn compact_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: Ti
         relief_m: hi - lo,
         climate_words: climate.to_words(),
         driver_words,
+        channel_words,
         texels,
     };
     let (du, dv) = tile.base_derivs(0.5, 0.5);

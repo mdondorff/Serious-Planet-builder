@@ -41,11 +41,11 @@ pub(crate) fn slot_access_wgsl(cells: u32) -> String {
 pub(crate) const SLOT_ACCESS: &str = r#"
 // Compact tiles (REND-016, GEN-025). Group 1: the per-frame tile reference of each node (first word of its slot in the block, reserved, slot
 // index, reserved). Group 2: the block, read as words: the slot's header (nine control points as 27 f32, hr_min, hr_step,
-// h_origin, skirt depth, the flags word), the climate block (81 words), the driver block (81 words) and the texels (two words each).
+// h_origin, skirt depth, the flags word), the climate block (81 words), the driver block (81 words), the channel block (81 words) and the texels (two words each).
 @group(2) @binding(0) var<storage, read> block: array<u32>;
 
 const CELLS: i32 = {CELLS};
-// Word offsets inside the slot (GEN-025: climate block at byte 128, driver block at byte 452, texels at byte 776).
+// Word offsets inside the slot (GEN-025: climate block at byte 128, driver block at byte 452, channel block at byte 776, texels at byte 1,100).
 const CLIMATE_WORD: u32 = {CLIMATE_WORD}u;
 const DRIVER_WORD: u32 = {DRIVER_WORD}u;
 const TEXEL_WORD: u32 = {TEXEL_WORD}u;
