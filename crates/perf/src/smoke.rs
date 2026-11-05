@@ -134,7 +134,7 @@ mod tests {
         )
     }
 
-    // spec: TEST-035
+    // spec: TEST-090
     #[test]
     fn the_schedulers_limit_follows_the_runs_own_frame_time_and_a_dear_scheduler_is_still_found() {
         // The failures of the loaded lavapipe runner (2026-11-04/05): the scheduler's median 1.0 to 1.5 ms in a dive whose frame took 132 ms (workers at their usual speed).
