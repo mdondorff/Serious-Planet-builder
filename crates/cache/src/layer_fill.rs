@@ -20,8 +20,8 @@ use crate::pack::{Record, TileStore};
 pub const KIND_LAYER_FILL: u8 = Kind::LayerFill as u8;
 /// The kind byte of a tile's final heights (bake scratch).
 pub const KIND_LAYER_HEIGHTS: u8 = Kind::LayerHeights as u8;
-/// Version of the post-pass kernels (the spill flood and graph, the border geometry, the quantisation of the depth): part of the fill and scratch keys, bumped with any change that moves a bit of kind 17. History: 1 = keep-pits-seams PR 2; 2 = the depth is taken against the exact base plus the stored change, clamped at 0 (PR 3).
-pub const FILL_KERNEL_VERSION: u32 = 2;
+/// Version of the post-pass kernels (the spill flood and graph, the border geometry, the quantisation of the depth): part of the fill and scratch keys, bumped with any change that moves a bit of kind 17. History: 1 = keep-pits-seams PR 2; 2 = the depth is taken against the exact base plus the stored change, clamped at 0 (PR 3); 3 = the outlets are the cells at or below the sea level that the ocean connectivity calls ocean.
+pub const FILL_KERNEL_VERSION: u32 = 3;
 const FILL_ID: &str = "erosion-layer-fill";
 const HEIGHTS_ID: &str = "erosion-layer-heights";
 /// Codec 2: the 16-bit codes (codec 1 held 8-bit codes, keep-pits #1192; those records are another key and never read).
