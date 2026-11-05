@@ -2,7 +2,7 @@
 The gate of keep-pits-seams (planner inbox #73, 2026-11-05) found that the post-pass treats every cell at or below the sea level as sea: 1.07 million cells in 14,547 inland components (0.94 % of the seam region of 2/12 | 2/13) read as sea, so an inland basin below 0 m would stay a hole. Owner and planner: only cells connected to the open ocean are outlets; inland basins at or below 0 m are filled like any other pit (later lakes or salt flats).
 
 ## What Changes
-- `generators::ocean::ocean_at(lattice, direction)`: whether any of the four bake vertices of the lattice cell holding the direction is ocean (the water field's wet rule).
+- `generators::ocean::ocean_at(lattice, direction)`: whether any of the four bake vertices of the lattice cell holding the direction is ocean (a superset of the vertices the water field draws as sea: no continentalness test).
 - `layer_fillpass::run_fill_pass` takes an `ocean` closure; the outlets of a core are the cells at or below the sea level that it calls ocean; the others are inland basins, filled like any pit; the report counts them (`inland_low_cells`). `bake layer --global-dir` passes the stored field bake's ocean channel (`StoreOceanSource`); without a store every such cell is an outlet, as before.
 - `FILL_KERNEL_VERSION` 3 (the fill keys change). STRM-077 amended in the keep-pits-seams delta.
 - Tests: `ocean_at` on a small lattice; an inland bowl 5 m below the sea level is filled to its rim (205 m) when the mask says inland and holds no depth when it says ocean, and the report counts the 64 inland cells; a mask that differs across tile seams gives the depth of a global flood with the same outlets, code for code; another outlet mask in a filled directory is refused.

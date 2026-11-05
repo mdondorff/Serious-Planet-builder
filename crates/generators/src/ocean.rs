@@ -898,7 +898,7 @@ pub fn parallel_map<T: Sync, R: Send>(items: &[T], threads: usize, f: &(dyn Fn(&
     planet_core::par::map(&threads, items.len(), &|i| f(&items[i]))
 }
 
-/// Whether the lattice cell that holds direction `d` touches the ocean: any of its four bake vertices is ocean, the rule that draws the sea (`water::SeaProducer::vertex_wet`, ADR 0071 point 2). The cell is the one of the
+/// Whether the lattice cell that holds direction `d` touches the ocean: any of its four bake vertices is ocean (a superset of the vertices the water field draws as sea: the continentalness test of `water::SeaProducer::vertex_wet` is not applied; STRM-077). The cell is the one of the
 /// face the direction is on (plane coordinates through TangentWarp, `floor((c + 1) / 2 res)` clamped to the last cell), so there are no ties and a point on a lattice line reads the cell on its far side.
 /// The channel is categorical at the lattice's spacing (2.4 km at 16,384 cells): a point within a cell of a shore reads the cell's flags, not the shore's.
 pub fn ocean_at(lattice: &dyn OceanLattice, d: planet_core::Vec3) -> Result<bool, ReadError> {

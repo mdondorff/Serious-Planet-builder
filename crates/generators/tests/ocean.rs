@@ -374,7 +374,7 @@ fn the_copies_of_an_edge_vertex_of_a_real_bake_agree_on_sea_or_land() {
 
 // spec: GEN-022
 #[test]
-fn the_ocean_flag_at_a_direction_is_that_of_the_nearest_vertex_of_its_face() {
+fn the_ocean_flag_at_a_direction_is_set_when_any_of_the_four_vertices_of_its_cell_is_ocean() {
     use planet_core::cube::{face_to_direction, TangentWarp};
     use planet_core::Face;
     use planet_generators::ocean::ocean_at;
