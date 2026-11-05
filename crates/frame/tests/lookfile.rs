@@ -17,6 +17,7 @@ const FIXTURE_V5: &str = include_str!("data/look_v5_ground.toml");
 const FIXTURE_V6: &str = include_str!("data/look_v6_patch.toml");
 const FIXTURE_V7: &str = include_str!("data/look_v7_coef.toml");
 const FIXTURE_V8: &str = include_str!("data/look_v8_scree_wet.toml");
+const FIXTURE_V9: &str = include_str!("data/look_v9_octaves.toml");
 
 fn err(text: &str) -> String {
     parse_look(text).unwrap_err().to_string()
@@ -75,7 +76,7 @@ fn canonical_text_is_deterministic_and_round_trips_bit_for_bit() {
     let text = to_toml(&f);
     assert_eq!(parse_look(&text).unwrap(), f);
     assert_eq!(to_toml(&parse_look(&text).unwrap()), text, "writing what was read gives the same text");
-    assert!(text.starts_with("schema_version = 8\nkind = \"look\"\n"));
+    assert!(text.starts_with("schema_version = 9\nkind = \"look\"\n"));
     let order: Vec<usize> = ["[body.0.units]", "[body.7.units]", "[body.12.units]"].iter().map(|k| text.find(k).unwrap()).collect();
     assert!(order[0] < order[1] && order[1] < order[2], "bodies are written in id order");
     // The same content from a differently formatted file writes the same text.
@@ -254,13 +255,13 @@ fn migration_failures_name_the_step_and_the_gap() {
 #[test]
 fn the_production_chain_reads_the_version_1_fixture_and_writes_the_current_layout() {
     assert_eq!(
-        SCHEMA_VERSION, 8,
+        SCHEMA_VERSION, 9,
         "a new table or key needs a new version, an identity step in MIGRATIONS and a fixture of this version kept"
     );
     assert_eq!(MIGRATIONS.len() as u32, SCHEMA_VERSION - 1, "one step per older version");
     assert_eq!(
         MIGRATIONS.iter().map(|m| m.from).collect::<Vec<_>>(),
-        [1, 2, 3, 4, 5, 6, 7],
+        [1, 2, 3, 4, 5, 6, 7, 8],
         "the steps run from version 1 up without a gap"
     );
     // The version 1 fixture goes through the real chain (the identity step 1 to 2) and reads as written.
@@ -743,4 +744,52 @@ heat = [0.0, 1.0]
     }
     // The Earth default has both off and the Earth plan is the plain one.
     assert!(!MaterialParams::EARTH.is_on(4) && !MaterialParams::EARTH.is_on(5));
+}
+
+// spec: REND-057
+#[test]
+fn the_64_m_and_8_m_octaves_are_read_written_and_checked_and_a_version_8_file_reads_with_them_off() {
+    use planet_frame::look::materials::{DetailCoefficients, COEF_OCTAVES, COEF_VEC4S, OCTAVE_NAMES};
+    assert_eq!((COEF_OCTAVES, COEF_VEC4S, OCTAVE_NAMES[4], OCTAVE_NAMES[5]), (6, 25, "m64", "m8"));
+    let f = parse_look(FIXTURE_V9).unwrap();
+    let g = f.body(BodyId(1)).ground;
+    assert_eq!(g.coef.octaves[4].albedo, [0.15, 0.10, 0.12]);
+    assert_eq!(g.coef.octaves[5].tilt, [0.25, 0.05, 0.10, 0.10]);
+    assert_eq!(g.coef.octaves[5].scree, [0.10, 0.20]);
+    assert_eq!(g.coef.octaves[0], DetailCoefficients::EARTH.octaves[0], "an octave left out is the Earth default");
+    assert_eq!(parse_look(&to_toml(&f)).unwrap(), f);
+    assert_eq!(to_toml(&parse_look(&to_toml(&f)).unwrap()), to_toml(&f));
+    // The Earth default has the two octaves at 0; a version 8 file reads equal with them so, and a build that knows only version 8 refuses the version 9 file as newer.
+    for o in &DetailCoefficients::EARTH.octaves[4..] {
+        assert!(o.albedo.iter().chain(&o.grass).chain(&o.tilt).chain(&o.scree).chain(&o.wet).all(|v| *v == 0.0));
+    }
+    let v8 = parse_look(FIXTURE_V8).unwrap();
+    assert_eq!(v8.body(BodyId(1)).ground.coef.octaves[4], DetailCoefficients::EARTH.octaves[4]);
+    assert_eq!(parse_with(FIXTURE_V9, 8, &MIGRATIONS[..7]).unwrap_err(), LookError::NewerSchema { found: 9, known: 8 });
+    // A bad number and an unknown octave are refused naming the key.
+    let head = "schema_version = 9
+kind = \"look\"
+[body.0.ground]
+";
+    for (text, key) in [
+        (
+            format!(
+                "{head}[body.0.ground.octave.m64]
+tilt = [0.1, 0.1, 0.1, 9.0]
+"
+            ),
+            "ground.octave.m64.tilt",
+        ),
+        (
+            format!(
+                "{head}[body.0.ground.octave.m128]
+tilt = [0.1, 0.1, 0.1, 0.1]
+"
+            ),
+            "ground.octave.m128",
+        ),
+    ] {
+        let e = parse_look(&text).unwrap_err().to_string();
+        assert!(e.contains(key), "{key}: {e}");
+    }
 }

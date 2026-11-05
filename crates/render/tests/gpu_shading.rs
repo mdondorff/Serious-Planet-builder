@@ -440,6 +440,47 @@ fn scree_and_wet_ground_are_off_in_the_earth_default_and_draw_their_own_look_whe
     }
 }
 
+// spec: REND-057
+#[test]
+fn the_64_m_and_8_m_octaves_are_off_in_the_earth_default_and_each_draws_when_given_coefficients() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let (p, _) = plan(6);
+    let mut r = renderer(&ctx, &p);
+    let plain = hdr_of(&mut r, &ctx, &p, detail_plan(ShadeView::Lit, 1.0));
+    let mut covered = 0;
+    for octave in [4usize, 5] {
+        for tilt_only in [false, true] {
+            let mut l = detail_plan(ShadeView::Lit, 1.0);
+            let o = &mut l.coef.octaves[octave];
+            if tilt_only {
+                o.tilt = [0.3; 4];
+            } else {
+                o.albedo = [0.3; 3];
+                o.grass = [0.3; 3];
+            }
+            let img = hdr_of(&mut r, &ctx, &p, l);
+            assert!(img != plain, "octave {octave} (tilt only: {tilt_only}) changed nothing");
+            covered += 1;
+        }
+    }
+    assert_eq!(covered, 4);
+    // Each new octave has a lattice of its own: its coefficients copied from a scale neighbour draw another picture than the neighbour alone.
+    for (new, old) in [(4usize, 0usize), (5, 1)] {
+        let mut neighbour = detail_plan(ShadeView::Lit, 1.0);
+        neighbour.coef.octaves[new] = neighbour.coef.octaves[old];
+        neighbour.coef.octaves[new].albedo = [0.3; 3];
+        let mut alone = detail_plan(ShadeView::Lit, 1.0);
+        alone.coef.octaves[new] = alone.coef.octaves[old];
+        alone.coef.octaves[new].albedo = [0.3; 3];
+        alone.coef.octaves[old].albedo = [0.0; 3];
+        assert!(hdr_of(&mut r, &ctx, &p, neighbour) != hdr_of(&mut r, &ctx, &p, alone), "octave {new} is a copy of octave {old}");
+    }
+    // The strength 0 is still the off picture with them on.
+    let mut off = detail_plan(ShadeView::Lit, 0.0);
+    off.coef.octaves[4].albedo = [0.3; 3];
+    assert!(hdr_of(&mut r, &ctx, &p, off) == hdr_of(&mut r, &ctx, &p, detail_plan(ShadeView::Lit, 0.0)), "the strength 0 is not inert");
+}
+
 // spec: REND-037
 #[test]
 fn each_material_alone_reads_as_itself_in_colour_and_value() {

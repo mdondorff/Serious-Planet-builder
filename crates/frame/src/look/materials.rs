@@ -198,10 +198,10 @@ impl MaterialParams {
     }
 }
 
-/// The detail octaves the coefficient table covers (LOOK-013): cells of 16 m, 2 m, 25 cm and 3 cm.
-pub const COEF_OCTAVES: usize = 4;
+/// The detail octaves the coefficient table covers (LOOK-013, REND-057): cells of 16 m, 2 m, 25 cm and 3 cm, then 64 m and 8 m (off in the Earth default).
+pub const COEF_OCTAVES: usize = 6;
 /// The names of the octaves in the look file (`ground.octave.<name>`).
-pub const OCTAVE_NAMES: [&str; COEF_OCTAVES] = ["m16", "m2", "cm25", "cm3"];
+pub const OCTAVE_NAMES: [&str; COEF_OCTAVES] = ["m16", "m2", "cm25", "cm3", "m64", "m8"];
 /// Values of one octave: the albedo coefficient of rock, sand and soil, the colour coefficient of grass, the tilt of rock, sand, grass and soil, and the
 /// albedo coefficient and tilt of scree and of wet ground.
 pub const OCTAVE_VALUES: usize = 3 + 3 + 4 + 2 + 2;
@@ -254,6 +254,8 @@ impl DetailCoefficients {
                 scree: [0.10, 0.10],
                 wet: [0.06, 0.05],
             },
+            OctaveCoef { albedo: [0.0; 3], grass: [0.0; 3], tilt: [0.0; 4], scree: [0.0; 2], wet: [0.0; 2] },
+            OctaveCoef { albedo: [0.0; 3], grass: [0.0; 3], tilt: [0.0; 4], scree: [0.0; 2], wet: [0.0; 2] },
         ],
         crack: 0.55,
     };
