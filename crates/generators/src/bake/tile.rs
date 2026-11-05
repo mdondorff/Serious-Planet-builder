@@ -9,8 +9,7 @@
 
 use super::carve::{carve, CarveParams};
 use super::deposit::{deposit_on_own_route, spread_pits, DepositParams, Kc};
-use super::face::{face_stream, fill_code, fill_m, FILL_MIN_M};
-use super::flood::fill_depth;
+use super::face::{face_stream, fill_m};
 use super::map::catmull_rom;
 use super::thermal::{thermal, ThermalParams};
 use super::Grid;
@@ -165,8 +164,10 @@ pub struct TileResult {
     pub id: TileId,
     pub core: Vec<f32>,
     pub deposited: Vec<u8>,
-    /// The pit depth of the core (GEN-120, codes of [`fill_code`]): how far each cell lies below the flood of the final surface, or of pass 1's flood where that holds a deeper basin. Empty when the result was read from a record that holds no such plane.
-    pub fill: Vec<u8>,
+    /// The pit depth of the core (GEN-120, codes of [`fill_code`]): how far each cell lies below the planet-wide spill level of the final surface. Empty from pass 2 (the post-pass writes it, GEN-121) and when the result was read from a record that holds no such plane.
+    pub fill: Vec<u16>,
+    /// The final height of every core cell in metres (f32, the surface the post-pass floods; bake scratch, STRM-077). Empty when the result was read from a record.
+    pub heights: Vec<f32>,
     pub stats: TileStats,
 }
 
@@ -242,28 +243,13 @@ pub fn tile_has_land(g: &TileGrid, id: TileId, surface: &(dyn Fn(Vec3) -> f64 + 
         .any(|j| (0..g.tile).step_by(stride).any(|i| surface(g.direction(id.face, i0 + i as i64, j0 + j as i64)) > sea_level))
 }
 
-/// [`pass2_tile_with_fill`] without pass 1's fill depth: the pits are those the tile's own window floods.
+/// Pass 2 on one tile. `base` is the base field, `face_change` the face carve's change at a direction (the blended reader, GEN-100), `factor` the optional carve factor of GEN-097.
+/// The window is `base + face_change`; the local carve incises it; thermal and the deposition sweep follow; the result is the core's change against `base`.
 pub fn pass2_tile(
     g: &TileGrid,
     id: TileId,
     base: &(dyn Fn(Vec3) -> f64 + Sync),
     face_change: &(dyn Fn(Vec3) -> f64 + Sync),
-    factor: Option<&(dyn Fn(Vec3) -> f64 + Sync)>,
-    p: &Pass2Params,
-    threads: usize,
-) -> TileResult {
-    pass2_tile_with_fill(g, id, base, face_change, None, factor, p, threads)
-}
-
-/// Pass 2 on one tile. `base` is the base field, `face_change` the face carve's change at a direction (the blended reader, GEN-100), `factor` the optional carve factor of GEN-097.
-/// The window is `base + face_change`; the local carve incises it; thermal and the deposition sweep follow; the result is the core's change against `base`.
-#[allow(clippy::too_many_arguments)]
-pub fn pass2_tile_with_fill(
-    g: &TileGrid,
-    id: TileId,
-    base: &(dyn Fn(Vec3) -> f64 + Sync),
-    face_change: &(dyn Fn(Vec3) -> f64 + Sync),
-    face_fill: Option<&(dyn Fn(Vec3) -> (f64, Vec3) + Sync)>,
     factor: Option<&(dyn Fn(Vec3) -> f64 + Sync)>,
     p: &Pass2Params,
     threads: usize,
@@ -282,16 +268,6 @@ pub fn pass2_tile_with_fill(
     // The surface the deposited depth counts from: the base plus what pass 1 raised (a raise by uplift or a filled pit is not a deposit, GEN-111).
     let reference: Vec<f64> = base_w.iter().zip(&fc_w).map(|(b, c)| b + c.max(0.0)).collect();
     drop(fc_w);
-    // Pass 1's pit depth at every window cell, in metres (0 where it has no pit or none is given).
-    let fill1 = face_fill.map(|f| sample_window_pairs(g, id, f, threads));
-    // Pass 1's spill level at the centre of each pass-1 cell that holds a pit in this window: the carved surface there (base plus the face change) plus the cell's depth. The level is flat over
-    // a basin, where the fine window surface and the cell's value are not.
-    let mut levels: std::collections::HashMap<[u64; 3], f64> = std::collections::HashMap::new();
-    if let Some(pairs) = &fill1 {
-        for (m, c) in pairs.iter().filter(|(m, _)| *m > 0.0) {
-            levels.entry([c.x.to_bits(), c.y.to_bits(), c.z.to_bits()]).or_insert_with(|| base(*c) + face_change(*c) + m);
-        }
-    }
     let factors = factor.map(|f| sample_window(g, id, f, threads));
     let outlet = grid.outlets(&z0, p.sea_level);
     let stream = face_stream(p.seed, id.face);
@@ -311,27 +287,15 @@ pub fn pass2_tile_with_fill(
     );
     // What is left of the one-cell pits (thermal's and the sweep's) goes to the neighbours, volume kept.
     spread_pits(&grid, &mut z, p.sea_level, p.pit_min_m, p.pit_passes);
-    // The pits of the final surface (GEN-120): the depth below the window's flood, and where pass 1 floods a basin the window cuts, the depth below pass 1's spill level (its
-    // surface at the start of this pass plus its fill depth), whichever is deeper. An outlet and a pit under `FILL_MIN_M` count 0.
-    let depth_w = fill_depth(&grid, &z, &outlet, p.carve.epsilon, FILL_MIN_M);
     let (w, t, h) = (g.window(), g.tile, g.halo);
     let mut core = Vec::with_capacity(t * t);
     let mut deposited = Vec::with_capacity(t * t);
-    let mut fill = Vec::with_capacity(t * t);
+    let mut heights: Vec<f32> = Vec::with_capacity(t * t);
     let mut land = 0;
     for j in 0..t {
         for i in 0..t {
             let q = (j + h) * w + i + h;
-            let own = f64::from(depth_w[q]);
-            let from_pass1 = fill1.as_ref().map_or(0.0, |f| {
-                let (m, c) = f[q];
-                if m > 0.0 {
-                    (levels[&[c.x.to_bits(), c.y.to_bits(), c.z.to_bits()]] - z[q]).max(0.0)
-                } else {
-                    0.0
-                }
-            });
-            fill.push(fill_code(if z0[q] > p.sea_level { own.max(from_pass1) } else { 0.0 }));
+            heights.push(z[q] as f32);
             core.push((z[q] - base_w[q]) as f32);
             // The deposition sweep's rise plus thermal's gain over the reference. What was removed is derived by the reader: max(0, deposited - change), exact where pass 1 did not raise the cell.
             let gained = (z[q] - z_thermal[q]).max(0.0) + (z_thermal[q] - reference[q]).max(0.0);
@@ -344,7 +308,8 @@ pub fn pass2_tile_with_fill(
         id,
         core,
         deposited,
-        fill,
+        fill: Vec::new(),
+        heights,
         stats: TileStats {
             land_cells: land,
             thermal_passes: thermal_report.passes_run,
@@ -377,15 +342,4 @@ impl TileResult {
         }
         self
     }
-}
-
-/// A pair of values per window cell, row-major, on `threads` threads (as [`sample_window`]).
-fn sample_window_pairs(g: &TileGrid, id: TileId, field: &(dyn Fn(Vec3) -> (f64, Vec3) + Sync), threads: usize) -> Vec<(f64, Vec3)> {
-    let par: &dyn Par = &threads;
-    let (w, t, h) = (g.window(), g.tile as i64, g.halo as i64);
-    let (i0, j0) = (i64::from(id.ti) * t - h, i64::from(id.tj) * t - h);
-    par::map(par, w, &|j| (0..w).map(|i| field(g.direction(id.face, i0 + i as i64, j0 + j as i64))).collect::<Vec<_>>())
-        .into_iter()
-        .flatten()
-        .collect()
 }

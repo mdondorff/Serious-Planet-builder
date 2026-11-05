@@ -16,9 +16,7 @@ use std::sync::{Arc, Mutex};
 
 use planet_core::{Face, TileId, Vec3};
 use planet_generators::bake::face::FaceChange;
-use planet_generators::bake::tile::{
-    dequantise, pass2_tile_with_fill, quantise, Pass2Params, TileGrid, TileId as PassTile, TileResult, TileStats,
-};
+use planet_generators::bake::tile::{dequantise, pass2_tile, quantise, Pass2Params, TileGrid, TileId as PassTile, TileResult, TileStats};
 
 use crate::global_store::GlobalWorld;
 use crate::key::{cache_key, CacheKey, Kind, PARAM_RESOLUTION, PARAM_TILE_LAYER};
@@ -197,7 +195,7 @@ pub fn load_tile(
         exported_m3: f64_at(41),
         clamped_cells: u64_at(49) as usize,
     };
-    Ok(Some(TileResult { id, core: dequantise(&counts), deposited: Vec::new(), fill: Vec::new(), stats }))
+    Ok(Some(TileResult { id, core: dequantise(&counts), deposited: Vec::new(), fill: Vec::new(), heights: Vec::new(), stats }))
 }
 
 /// The core's counts as bytes: little-endian, each row of `t` as its first count and the wrapping differences along the row.
@@ -606,8 +604,8 @@ pub struct Pass2Inputs<'a> {
     pub base: &'a (dyn Fn(Vec3) -> f64 + Sync),
     pub face_change: &'a (dyn Fn(Vec3) -> f64 + Sync),
     pub factor: Option<&'a (dyn Fn(Vec3) -> f64 + Sync)>,
-    /// Pass 1's pit depth at a direction in metres (GEN-120), or none: the basins a window cuts are then as deep as the window's own flood finds them.
-    pub face_fill: Option<&'a (dyn Fn(Vec3) -> (f64, Vec3) + Sync)>,
+    /// The scratch store of the final heights (STRM-077): a folder that pass 2 writes each tile's heights to for the post-pass (`layer_fillpass`), or none when no post-pass follows.
+    pub scratch: Option<&'a Path>,
 }
 
 /// Pass 2 over `tiles`, one at a time, into the tile layer store in `dir`: a tile stored under the current key is skipped (a resume), the others are computed and appended with the
@@ -635,19 +633,31 @@ pub fn run_pass2(
     let mut writer = PackWriter::open(dir, world.params(), DEFAULT_MAX_PACK_BYTES).map_err(err)?;
     let store = TileStore::open(dir, world.params()).map_err(err)?;
     let mut report = Pass2Report { computed: Vec::new(), skipped: Vec::new() };
+    let scratch = match inputs.scratch {
+        Some(d) => Some(TileStore::open(d, world.params()).map_err(err)?),
+        None => None,
+    };
+    let mut scratch_writer = match inputs.scratch {
+        Some(d) => Some(PackWriter::open(d, world.params(), DEFAULT_MAX_PACK_BYTES).map_err(err)?),
+        None => None,
+    };
     for &id in tiles {
         if report.computed.contains(&id) || report.skipped.contains(&id) {
             continue;
         }
         let have_tile = load_tile(&store, world, res, spec, id)?.is_some();
         let have_depth = crate::layer_channels::has_depth(&store, world, res, spec, id)?;
-        let have_fill = crate::layer_fill::has_fill(&store, world, res, spec, id)?;
-        if have_tile && have_depth && have_fill {
+        let have_heights = match (&scratch, inputs.scratch) {
+            (Some(s), Some(_)) => {
+                crate::layer_fill::has_heights(s, world, res, spec, id)? || crate::layer_fill::has_fill(&store, world, res, spec, id)?
+            }
+            _ => true,
+        };
+        if have_tile && have_depth && have_heights {
             report.skipped.push(id);
             continue;
         }
-        let r =
-            pass2_tile_with_fill(&spec.grid, id, inputs.base, inputs.face_change, inputs.face_fill, inputs.factor, &spec.params, threads);
+        let r = pass2_tile(&spec.grid, id, inputs.base, inputs.face_change, inputs.factor, &spec.params, threads);
         // A tile stored before the channels existed is computed again for its depth only; what is stored is not written twice.
         if !have_tile {
             writer.append(&tile_record(world, res, spec, &r)?).map_err(err)?;
@@ -655,12 +665,18 @@ pub fn run_pass2(
         if !have_depth {
             writer.append(&crate::layer_channels::depth_record(world, res, spec, &r)?).map_err(err)?;
         }
-        if !have_fill {
-            writer.append(&crate::layer_fill::fill_record(world, res, spec, &r)?).map_err(err)?;
+        if let Some(w) = scratch_writer.as_mut() {
+            if !have_heights {
+                w.append(&crate::layer_fill::heights_record(world, res, spec, &r)?).map_err(err)?;
+                w.write_index().map_err(err)?;
+            }
         }
         writer.write_index().map_err(err)?;
         on_tile(&r);
         report.computed.push(id);
+    }
+    if let Some(w) = scratch_writer.take() {
+        w.finish().map_err(err)?;
     }
     writer.finish().map_err(err)?;
     Ok(report)
@@ -682,9 +698,4 @@ pub fn drop_pass1(dir: &Path) -> Result<(), LayerStoreError> {
         return Err(e(format!("the folder holds files that are not a tile store's ({names:?}): refused")));
     }
     std::fs::remove_dir_all(dir).map_err(|x| e(x.to_string()))
-}
-
-/// The six faces' pit depth as a reader (the nearest cell of the face that holds the direction, in metres).
-pub fn face_fill_reader(faces: &[planet_generators::bake::face::FaceFill; 6]) -> impl Fn(Vec3) -> (f64, Vec3) + Sync + '_ {
-    move |d| planet_generators::bake::face::fill_at(faces, d)
 }

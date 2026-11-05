@@ -45,7 +45,14 @@ fn main() {
     };
     let tile = Arc::new(
         LayerTile::new(
-            Arc::new(TileResult { id: TileId { face: Face(0), ti: 0, tj: 0 }, core, deposited: Vec::new(), fill: Vec::new(), stats }),
+            Arc::new(TileResult {
+                id: TileId { face: Face(0), ti: 0, tj: 0 },
+                core,
+                deposited: Vec::new(),
+                fill: Vec::new(),
+                heights: Vec::new(),
+                stats,
+            }),
             t,
         )
         .unwrap(),
