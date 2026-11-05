@@ -2,6 +2,7 @@
 ADR 0102 makes erodibility a field K(x, z) (lithology, GEN-116) and ADR 0103 an uplift field U(x) (GEN-123); both exist on main as analytic fields with previews, but no carve reads them (plan PR 4, planner inbox #75). Hard caps over soft rock, belts that rise faster than cratons and badlands need both carves to read them.
 
 ## What Changes
+- Hardness steps: the rock gives the lower edge of its band and one step never lowers a cell past it (`Layer`, `LAYER_SKIP_M`).
 - `carve::carve_rock(.., &Rock, ..)` (`carve` is the same with no fields): per step the erodibility `K(cell, z)` of every cell at its height at the start of the step multiplies the class carve factor; an uplift array `U` replaces `u_over_k` and is not scaled by K or by the factor, only tapered by the starting height.
 - `face::RockFields` (closures of a direction), `pass1_face_rock`, `tile::pass2_tile_rock`, `layer_store::run_pass1_rock`, `Pass2Inputs::rock`: pass 1 reads K and U, pass 2 (incise only) reads K.
 - `BakeInputs` holds the lithology and the uplift (`rock_k`, `uplift_at`); `BakeInputs::id` folds `LITHOLOGY_VERSION` and `UPLIFT_VERSION`, so every layer key of a bake with the fields is new. The bake examples pass the fields.

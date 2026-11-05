@@ -184,7 +184,7 @@ fn a_store_written_with_other_rock_fields_is_another_key_and_a_run_with_fields_t
     use planet_generators::bake::face::RockFields;
     let (w, base_spec) = (world(), spec());
     let none = |_: Vec3| 0.0;
-    let (rk, ru) = (|_: Vec3, _: f64| 1.0, |_: Vec3| 20.0);
+    let (rk, ru) = (|_: Vec3, _: f64| planet_generators::bake::carve::Layer::of(1.0), |_: Vec3| 20.0);
     let rock = RockFields { k: Some(&rk), uplift: Some(&ru) };
     let with = LayerSpec { rock: rock.mask(), ..base_spec };
     assert_ne!(face_key(&w, RES, &base_spec, Face(0)), face_key(&w, RES, &with, Face(0)), "the rock fields are not part of the face key");

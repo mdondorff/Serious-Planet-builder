@@ -38,19 +38,22 @@ fn main() {
     let (base, factor) = (|d: Vec3| inputs.base(d), |d: Vec3| inputs.carve_factor(d));
     let shape = BakeShape::production(seed, RADIUS_M);
     let (mut layer, mut spec) = bake_specs(&world, &shape).unwrap();
-    if args.iter().any(|a| a == "--no-rock") {
-        (layer.rock, spec.rock) = (0, 0); // the baseline: no fields, its own key
-    }
+    // The fields the carves read, each with its own key: `--no-rock` today's carve (the baseline), `--no-uplift` the erodibility only (the A/B of the uplift), `--no-k` the uplift only.
+    let mask = if args.iter().any(|a| a == "--no-rock") {
+        0
+    } else {
+        3 & !(u8::from(args.iter().any(|a| a == "--no-k")) | (u8::from(args.iter().any(|a| a == "--no-uplift")) << 1))
+    };
+    (layer.rock, spec.rock) = (mask, mask);
     let (res, rp) = (shape.face_res as u32, shape.planet_res as u32);
     let id = PassTile { face: Face(2), ti: 12, tj: 10 };
     let tiles_dir: PathBuf = if let Some(d) = arg("--stats-only") {
         PathBuf::from(d)
     } else {
         let out = PathBuf::from(arg("--out").expect("--out DIR"));
-        let no_rock = layer.rock == 0;
         let (rock_k, rock_u) = (|d: Vec3, z: f64| inputs.rock_k(d, z), |d: Vec3| inputs.uplift_at(d));
-        let rock = if no_rock { RockFields::none() } else { RockFields { k: Some(&rock_k), uplift: Some(&rock_u) } };
-        println!("rock fields: {}", if no_rock { "off (today's carve)" } else { "on (lithology K and the uplift field)" });
+        let rock = RockFields { k: (mask & 1 != 0).then_some(&rock_k as _), uplift: (mask & 2 != 0).then_some(&rock_u as _) };
+        println!("rock fields: mask {mask} (bit 0 the erodibility, bit 1 the uplift; 0 is today's carve)");
         let clock = std::time::Instant::now();
         run_pass1_rock(&out, &world, res, &layer, &base, Some(&factor), &rock, &[Face(2)], threads).unwrap();
         println!("pass 1 of face 2: {:.0} s", clock.elapsed().as_secs_f64());

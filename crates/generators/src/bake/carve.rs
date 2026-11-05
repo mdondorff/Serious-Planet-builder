@@ -74,14 +74,34 @@ pub fn carve(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, facto
 pub struct Rock<'a> {
     /// Runs the erodibility evaluation (every cell, once a step).
     pub par: &'a dyn Par,
-    /// `K(cell, z)`: the erodibility of the rock at the cell's direction and the height `z`, finite and not negative; it multiplies the class carve factor. Absent: 1.
-    pub k: Option<&'a (dyn Fn(usize, f64) -> f64 + Sync)>,
+    /// The rock at the cell's direction and the height `z`: the erodibility K (finite, not negative; it multiplies the class carve factor) and the lower edge of its band, below which a step does not lower the
+    /// cell (the rest is carried to the next step, which reads the band below). Absent: K 1 and no edge.
+    pub k: Option<&'a (dyn Fn(usize, f64) -> Layer + Sync)>,
     /// The ratio `U / K` at K 1 per cell (GEN-123): when given, a cell's uplift is `k_dt * U * taper`, not scaled by K or by the factor, and `u_over_k` is not read. Finite and not negative.
     pub uplift: Option<&'a [f32]>,
 }
 
 /// The rows of the erodibility pass done at once, so that the transient results stay a few rows of the face.
 const K_ROWS_AT_ONCE: usize = 64;
+
+/// What a carve reads of the rock at a cell and a height.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Layer {
+    /// The erodibility.
+    pub k: f64,
+    /// The height of the lower edge of the layer the height lies in (`-inf`: no edge).
+    pub floor: f64,
+}
+
+impl Layer {
+    /// A layer of erodibility `k` without a lower edge.
+    pub fn of(k: f64) -> Layer {
+        Layer { k, floor: f64::NEG_INFINITY }
+    }
+}
+
+/// How far below its lower edge a step may lower a cell that reaches the edge: the cell ends inside the layer below (its erodibility blends across the edge), where the next step reads it.
+pub const LAYER_SKIP_M: f64 = 0.01;
 
 impl Rock<'static> {
     /// No field: the carve is the one of the class factor and the uniform `u_over_k`.
@@ -109,6 +129,7 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
     let taper: Option<Vec<f32>> = (p.uplift_taper_m > 0.0 && (p.u_over_k != 0.0 || rock.uplift.is_some()))
         .then(|| z.iter().map(|h| planet_core::smoothstep(0.0, p.uplift_taper_m, h - p.sea_level) as f32).collect());
     let mut k: Vec<f32> = if rock.k.is_some() { vec![1.0; z.len()] } else { Vec::new() };
+    let mut room: Vec<f32> = if rock.k.is_some() { vec![f32::INFINITY; z.len()] } else { Vec::new() };
     let mut routing: Option<Routing> = None;
     for step in 0..p.steps {
         if step % p.reroute_every == 0 {
@@ -142,10 +163,19 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
             let (w, zr) = (grid.w(), &*z);
             for r0 in (0..grid.h()).step_by(K_ROWS_AT_ONCE) {
                 let rows = K_ROWS_AT_ONCE.min(grid.h() - r0);
-                let block =
-                    par::map(rock.par, rows, &|r| (0..w).map(|i| kf((r0 + r) * w + i, zr[(r0 + r) * w + i]) as f32).collect::<Vec<f32>>());
+                let block = par::map(rock.par, rows, &|r| {
+                    (0..w)
+                        .map(|i| {
+                            let (c, h) = ((r0 + r) * w + i, zr[(r0 + r) * w + i]);
+                            let l = kf(c, h);
+                            (l.k as f32, (h - l.floor + LAYER_SKIP_M) as f32)
+                        })
+                        .collect::<Vec<(f32, f32)>>()
+                });
                 for (r, row) in block.into_iter().enumerate() {
-                    k[(r0 + r) * w..(r0 + r + 1) * w].copy_from_slice(&row);
+                    for (i, (kv, rv)) in row.into_iter().enumerate() {
+                        (k[(r0 + r) * w + i], room[(r0 + r) * w + i]) = (kv, rv);
+                    }
                 }
             }
             assert!(k.iter().all(|v| v.is_finite() && *v >= 0.0), "the erodibilities are finite and not negative");
@@ -168,6 +198,8 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
             };
             let hn = (z[c] + up + f * hr) / (1.0 + f);
             let new = if p.keep_pits && !p.incise_only && z[c] < hr { (z[c] + up).max(floor) } else { hn.max(hr + p.epsilon).max(floor) };
+            // A step does not lower a cell past the lower edge of its layer: a trunk lowered by more than a band is thick would skip a caprock (the rest is carried to the next step).
+            let new = if rock.k.is_some() && new < z[c] { new.max(z[c] - f64::from(room[c])) } else { new };
             z[c] = if p.incise_only { new.min(z[c]) } else { new };
         }
     }

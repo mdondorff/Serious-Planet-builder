@@ -3,7 +3,7 @@
 //! The grid has `cells x cells` cells over the face in the tangent-warped face coordinates (cell `(i, j)` at `s = 2 (i + 0.5) / cells - 1`), `dx` metres apart at the face's
 //! centre line (`radius * pi / 2 / cells`); the face does not route across its edges, its border cells are outlets like the sea.
 
-use super::carve::{carve_rock, CarveParams, Rock};
+use super::carve::{carve_rock, CarveParams, Layer, Rock};
 use super::Grid;
 use planet_core::cube::{face_to_direction, TangentWarp};
 use planet_core::par::{self, Par};
@@ -88,7 +88,7 @@ pub fn face_stream(seed: u64, face: Face) -> u64 {
 /// Pass 1 reads both, pass 2 (incise only, no uplift) only `k`.
 #[derive(Clone, Copy)]
 pub struct RockFields<'a> {
-    pub k: Option<&'a (dyn Fn(Vec3, f64) -> f64 + Sync)>,
+    pub k: Option<&'a (dyn Fn(Vec3, f64) -> Layer + Sync)>,
     pub uplift: Option<&'a (dyn Fn(Vec3) -> f64 + Sync)>,
 }
 
@@ -206,7 +206,7 @@ pub fn pass1_face_rock(
     });
     let kf = rock.k.map(|k| move |c: usize, zc: f64| k(spec.halo_direction((c % m) as i64 - h, (c / m) as i64 - h), zc));
     let par: &dyn Par = &threads;
-    let carve_rock_in = Rock { par, k: kf.as_ref().map(|f| f as &(dyn Fn(usize, f64) -> f64 + Sync)), uplift: uplift.as_deref() };
+    let carve_rock_in = Rock { par, k: kf.as_ref().map(|f| f as &(dyn Fn(usize, f64) -> Layer + Sync)), uplift: uplift.as_deref() };
     let routing = carve_rock(&grid, &mut z, &outlet, &params, factors.as_deref(), &carve_rock_in, spec.stream());
     drop(uplift);
     let (m, h, cell_m2) = (spec.cells + 2 * spec.halo, spec.halo, spec.dx() * spec.dx());

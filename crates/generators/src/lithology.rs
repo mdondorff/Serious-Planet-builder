@@ -192,6 +192,8 @@ pub struct Stratum {
     pub soluble: f64,
     /// The index of the band in the stack (the stratigraphic coordinate's cell).
     pub band: i64,
+    /// The height in metres of the band's lower edge (its stack coordinate times [`BAND_NOMINAL_M`] plus the stack's offset): a carve that lowers a cell by more than the distance to it skips the band below.
+    pub lower_m: f64,
 }
 
 /// The lithology of one seed over a province lattice.
@@ -311,6 +313,6 @@ impl Column {
             k = erodibility(self.band_hardness(n + 1)) * (1.0 - w) + k * w;
         }
         let soluble = if self.band_carbonate(n) { self.soluble_gate } else { 0.0 };
-        Stratum { k, hardness: h, caprock: h > CAPROCK_HARDNESS, soluble, band: n }
+        Stratum { k, hardness: h, caprock: h > CAPROCK_HARDNESS, soluble, band: n, lower_m: lo * BAND_NOMINAL_M + self.offset_m }
     }
 }

@@ -1,6 +1,7 @@
 //! The fields a bake reads (m9-bake): the base elevation of the default class source with its class-blended `k`, and the carve factor of GEN-097, at a direction. One place for the
 //! command and the tests, so that every bake of a seed reads the same function and keys it the same way.
 
+use super::carve::Layer;
 use crate::classes::{
     blended_carve_factor, blended_k, ClassLattice, ClassSource, CLASS_CARVE, CLASS_K, CLASS_LATTICE_N, CLASS_LIST_VERSION,
     CLASS_SOURCE_VERSION,
@@ -48,9 +49,10 @@ impl BakeInputs {
         blended_carve_factor(&self.lattice.weights_at(d))
     }
 
-    /// The erodibility K of the lithology at a direction and a height (GEN-116), which the carves read in place of nothing but the class carve factor (GEN-127).
-    pub fn rock_k(&self, d: Vec3, z: f64) -> f64 {
-        self.lithology.k_at(d, z)
+    /// The erodibility K of the lithology at a direction and a height with the lower edge of its band (GEN-116, GEN-127).
+    pub fn rock_k(&self, d: Vec3, z: f64) -> Layer {
+        let s = self.lithology.strata(d, z);
+        Layer { k: s.k, floor: s.lower_m }
     }
 
     /// The uplift `U / K` at K 1 at a direction (GEN-123).

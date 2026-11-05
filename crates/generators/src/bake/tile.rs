@@ -7,7 +7,7 @@
 //! hold a cell treat it alike. A window's border still matters: the local carve caps the catchment area, but the deposition sweep routes the whole window, so its loads and capacities
 //! depend on where the border falls; the seam this leaves is measured (TEST-084), not assumed away.
 
-use super::carve::{carve_rock, CarveParams, Rock};
+use super::carve::{carve_rock, CarveParams, Layer, Rock};
 use super::deposit::{deposit_on_own_route, spread_pits, DepositParams, Kc};
 use super::face::{face_stream, fill_m, RockFields};
 use super::map::catmull_rom;
@@ -295,7 +295,7 @@ pub fn pass2_tile_rock(
     let (w, i0, j0) = (g.window(), i64::from(id.ti) * g.tile as i64 - g.halo as i64, i64::from(id.tj) * g.tile as i64 - g.halo as i64);
     let kf = rock.k.map(|k| move |c: usize, zc: f64| k(g.direction(id.face, i0 + (c % w) as i64, j0 + (c / w) as i64), zc));
     let par: &dyn Par = &threads;
-    let rock_in = Rock { par, k: kf.as_ref().map(|f| f as &(dyn Fn(usize, f64) -> f64 + Sync)), uplift: None };
+    let rock_in = Rock { par, k: kf.as_ref().map(|f| f as &(dyn Fn(usize, f64) -> Layer + Sync)), uplift: None };
     carve_rock(&grid, &mut z, &outlet, &local, factors.as_deref(), &rock_in, stream);
     drop(factors);
     let thermal_report = thermal(&grid, &mut z, &p.thermal, threads);
