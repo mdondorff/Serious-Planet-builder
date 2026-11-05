@@ -176,9 +176,8 @@ Assumption it changes: that the layer can be added to the runtime base plus `k` 
 Proposed follow-up: the product's field bake is made from the class source and carries `BakeInputs::id()` (the viewer refuses `--erosion on` without that marker); `with_layer` needs no relief channels.
 Obsolete when: the field bake is made from the class source and the legacy generator is retired.
 
-## 2026-11-05 The stored change of keep-pits includes the pits, so the erosion depth must add them back
-Scope: project (M9 keep-pits, GEN-120, STRM-076; the channel reader, STRM-075)
-What happened: since keep-pits the stored change (kind 13) keeps the pits of the carved surface and the runtime adds the pit depth (kind 17) back for the filled look. `removed_depth_m(deposited, change)` on the stored change therefore counts every pit as removal; the reader's `erosion_depth_m` passes stored change plus pit depth.
-Assumption it changes: that the stored change of kind 13 is the change the viewer draws.
-Proposed follow-up: the explorer lane confirms the erosion definition (ground-channels-2b PR 4a).
-Obsolete when: lake water and a pit-tolerance rule replace the filled look.
+## 2026-11-05 The stored change of keep-pits includes the pits
+Scope: project (GEN-120, STRM-075)
+What happened: the stored change (kind 13) keeps the pits and the runtime adds kind 17 back, so `removed_depth_m` on the stored change counts a pit as erosion; `erosion_depth_m` adds the pit depth first.
+Assumption it changes: that kind 13 is the change the viewer draws.
+Obsolete when: lake water replaces the filled look.
