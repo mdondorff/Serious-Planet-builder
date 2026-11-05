@@ -263,7 +263,7 @@ fn a_basin_wider_than_a_tile_is_filled_to_its_one_planet_wide_spill_level() {
     assert!(raised > 100, "the bowl holds only {raised} raised cells");
     let level = w.tiled();
     // The flat floor (60 m) spans three tiles: a cell of each reads the one level of the notch, 70 m.
-    for (t, i, j) in [(1 * cols, 8usize, 4usize), (1 * cols + 1, 4, 4), (1 * cols + 2, 2, 4)] {
+    for (t, i, j) in [(cols, 8usize, 4usize), (cols + 1, 4, 4), (cols + 2, 2, 4)] {
         let l = level[t * n * n + j * n + i];
         assert!((l - 70.0).abs() < 1e-9, "tile {t} cell ({i}, {j}): the bowl's spill level is the notch's 70 m, not {l}");
     }
