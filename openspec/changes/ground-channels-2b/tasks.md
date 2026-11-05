@@ -1,0 +1,4 @@
+- [x] 1.1 Design notes (this change), sent to the planner before any code
+- [ ] 2.1 PR 1: the owned `LayerChannels`, the `ChannelSource` trait, the measurement
+- [ ] 2.2 PR 2: `HeightField::drivers`, the builder, the keys, the debug views
+- [ ] 2.3 PR 3: the curves on `soil_depth` and `moisture`, stills
