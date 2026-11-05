@@ -3,7 +3,7 @@
 - Plan: 2b PR 4 is decided as option A (planner inbox #67): a second per-tile block, `INPUTS` 8 to 10, `MESH_VERSION` 11, look schema 10, in four PRs. This is 4b, the slot, the builder and the keys. 4c adds the inputs, the shader and the debug views; 4d the curves.
 
 ## What Changes
-- GEN-126: a channel block of 81 words after the driver block in every compact slot: fill depth code and erosion depth code per texel (square-root codes of 0 to 256 m), every other bit zero, neutral 0.
+- GEN-126: a channel block of 81 words after the driver block in every compact slot: fill depth code and erosion depth code per texel (square-root codes of 0 to 64 m), every other bit zero, neutral 0.
 - The builder writes it from `HeightField::driver_channels` (`ChannelSample` gains `fill_m` and `erosion_m`; the erosion layer's field reads them through `ChannelSource`, 4a); wrappers forward it with the samples they already forward.
 - `MESH_VERSION` 11: the slot is 9,812 B at cells 32 (3,412 at 16, 34,900 at 64), the texels at byte 1,100; every mesh key changes; `CHANNEL_BLOCK_VERSION` and the depth scale enter the channel identity of a field's version word.
 - The shader does not read the block yet (4c); the neutral block and the unchanged shader keep every picture.

@@ -80,8 +80,8 @@ pub fn apply_channels(words: &mut [u32; DRIVER_TEXELS], samples: &[ChannelSample
     }
 }
 
-/// The depth in metres that code 255 of the channel block stands for (GEN-126): square-root coded, so a code step is 0.004 m at the first code, 0.03 m at 1 m and 2 m at 256 m.
-pub const DEPTH_MAX_M: f64 = 256.0;
+/// The depth in metres that code 255 of the channel block stands for (GEN-126): square-root coded, so a code step is 1 mm at the first code, 3 cm at 0.3 m, 6 cm at 1 m and 0.5 m at the top; a deeper depth is clamped.
+pub const DEPTH_MAX_M: f64 = 64.0;
 /// Version of the channel block's layout and codes (GEN-126): part of the version word of a field that reads the channels.
 pub const CHANNEL_BLOCK_VERSION: u32 = 1;
 

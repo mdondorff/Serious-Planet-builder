@@ -77,7 +77,7 @@ Source: ADR 0062 point 2, ADR 0063, ADR 0076, SPIKE-12 Q3, ADR 0033 points 3-4, 
 
 #### Scenario: Offsets and stride
 - **WHEN** a slot is built at cells 16, 32 and 64
-- **THEN** the strides are 3,412, 9,812 and 34,900 bytes (8,712 B of texels at cells 32), every stride is a multiple of 4, and the header, climate block, driver block, channel block and texels sit at the offsets of the table
+- **THEN** the strides are 3,412, 9,812 and 34,900 bytes (8,712 B of texels at cells 32), every stride is a multiple of 4 and the shader reads the slot only as `u32` words from a block bound whole (REND-016), and the header, climate block, driver block, channel block and texels sit at the offsets of the table
 
 #### Scenario: One byte string
 - **WHEN** a tile's slot is encoded to the pack payload, decoded, uploaded to a block and read back
@@ -89,7 +89,7 @@ Source: ADR 0062 point 2, ADR 0063, ADR 0076, SPIKE-12 Q3, ADR 0033 points 3-4, 
 
 ## ADDED Requirements
 ### Requirement: GEN-126 The channel block of a compact tile
-A compact tile SHALL carry a channel block of 81 words after its driver block (GEN-025), one word per texel of the 9 x 9 grid: bits 0-7 the fill depth code of keep-pits (GEN-120), bits 8-15 the erosion depth code, every other bit zero. A code SHALL be `round(255 sqrt(depth / 256 m))`, the neutral word 0 (no fill, no erosion). A field that reads baked channels SHALL give the two depths per texel and the builder SHALL write them (`apply_depths`); a texel without a depth SHALL be 0, and a field without channels SHALL give the neutral block. The version `CHANNEL_BLOCK_VERSION` and the depth scale SHALL enter the channel identity of a field's climate version word (GEN-119); the slot grows to 9,812 B at cells 32 (`MESH_VERSION` 11, GEN-025).
+A compact tile SHALL carry a channel block of 81 words after its driver block (GEN-025), one word per texel of the 9 x 9 grid: bits 0-7 the fill depth code of keep-pits (GEN-120), bits 8-15 the erosion depth code, every other bit zero. A code SHALL be `round(255 sqrt(depth / 64 m))`, the neutral word 0 (no fill, no erosion). A field that reads baked channels SHALL give the two depths per texel and the builder SHALL write them; a texel without a depth, or one whose read failed, SHALL be 0, a slot read back with a reserved bit set SHALL be refused, and a field without channels SHALL give the neutral block. The version `CHANNEL_BLOCK_VERSION` and the depth scale SHALL enter the channel identity of a field's climate version word (GEN-119); the slot grows to 9,812 B at cells 32 (`MESH_VERSION` 11, GEN-025).
 
 Verify: A
 Status: active

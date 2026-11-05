@@ -202,12 +202,17 @@ fn every_source_file_that_forwards_the_climate_version_word_forwards_the_channel
 
 // spec: GEN-126
 #[test]
-fn the_depth_codes_are_square_root_codes_of_the_range_to_256_metres_and_a_texel_without_a_depth_is_zero() {
+fn the_depth_codes_are_square_root_codes_of_the_range_to_64_metres_and_a_texel_without_a_depth_is_zero() {
     assert_eq!((encode_depth(0.0), encode_depth(DEPTH_MAX_M), encode_depth(10.0 * DEPTH_MAX_M), encode_depth(-3.0)), (0, 255, 255, 0));
-    // The resolution: about 4 mm at the first code, 3 cm at 1 m, 2 m at the top.
-    assert!((decode_depth(1) - 0.0039).abs() < 1e-4, "{}", decode_depth(1));
-    assert!((decode_depth(16) - 1.0).abs() < 0.07 && (decode_depth(255) - DEPTH_MAX_M).abs() < 1e-9);
-    for m in [0.01, 0.2, 1.0, 7.5, 60.0, 200.0] {
+    // The resolution: 1 mm at the first code, about 3 cm at 0.3 m, 6 cm at 1 m, 0.5 m at the top.
+    assert!((decode_depth(1) - 0.001).abs() < 1e-4, "{}", decode_depth(1));
+    assert!((decode_depth(32) - 1.0).abs() < 0.02 && (decode_depth(255) - DEPTH_MAX_M).abs() < 1e-9);
+    let step_at = |m: f64| decode_depth(encode_depth(m).saturating_add(1)) - decode_depth(encode_depth(m));
+    assert!(
+        step_at(0.3) < 0.04 && step_at(0.5) < 0.05 && step_at(1.0) < 0.07 && step_at(2.0) < 0.1,
+        "the steps at the thresholds of SPIKE-100 D1"
+    );
+    for m in [0.01, 0.2, 1.0, 7.5, 40.0, 63.0] {
         let code = encode_depth(m);
         let step = decode_depth(code.saturating_add(1)) - decode_depth(code);
         assert!((decode_depth(code) - m).abs() <= step.max(1e-3), "{m} m through code {code}");
