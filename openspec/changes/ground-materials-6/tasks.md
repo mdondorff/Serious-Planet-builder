@@ -1,4 +1,0 @@
-- [x] 1.1 Six slots in `MaterialParams`, `GlossParams`, `DetailCoefficients`; the look file keys, schema 8, the shader and the globals
-- [x] 1.2 Tests: look file (fixture v8, bad values, older build), GPU (each slot, each octave entry and the albedo-versus-tilt split read; the lit goldens unchanged)
-- [x] 1.3 Reviews (`numerics-reviewer`, `spec-guardian`), `verifier`, `test gpu --real` goldens, prepush, PR
-- [ ] 2.1 Archive (spec delta into the specs, design.md and tasks.md deleted, log fragment) when slice 2a closes with step c, together with ground-materials-5 and the LOOK-002 wording of ground-detail-patch

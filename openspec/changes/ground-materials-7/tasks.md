@@ -1,5 +1,0 @@
-- [x] 1.1 Six octaves in `DetailCoefficients`, the look file keys, schema 9, the shader and the globals
-- [x] 1.2 Tests: look file (fixture v9, bad values, older build), layout, GPU (each new octave draws, strength 0 inert), goldens unchanged
-- [x] 1.3 Reviews (`numerics-reviewer`, `spec-guardian`), `verifier`, `test gpu --real` goldens, prepush, PR
-- [ ] 2.1 Look sheet with the octaves on and the cost ratio via shadow-cost
-- [ ] 2.2 Archive ground-materials-5, -6 and -7 (spec deltas into the specs, design.md and tasks.md deleted, log fragment) with the LOOK-002 wording of ground-detail-patch

@@ -12,7 +12,7 @@ use planet_core::{PlanetFixed, Vec3};
 use planet_frame::camera::Camera;
 use planet_frame::look::atmosphere::Atmosphere;
 use planet_frame::look::file::LookParams;
-use planet_frame::look::materials::{Input, MaterialParams, INPUTS, MATERIALS, MATERIAL_NAMES, NATURAL_STRENGTH};
+use planet_frame::look::materials::{DetailCoefficients, Input, MaterialParams, INPUTS, MATERIALS, MATERIAL_NAMES, NATURAL_STRENGTH};
 use planet_frame::look::LitPlan;
 use planet_frame::pool::compact_format_pool_with;
 use planet_frame::scalerefs::drop_references;
@@ -34,6 +34,29 @@ fn forced(m: usize) -> MaterialParams {
     let mut curves = [[[0.0, 0.0]; INPUTS]; MATERIALS];
     curves[m][Input::SoilDepth as usize] = [-1.0, 0.0];
     MaterialParams { curves }
+}
+
+/// The Earth coefficients with the 64 m and 8 m octaves of REND-057 on (`which`: bit 0 the 64 m one, bit 1 the 8 m one): the 64 m one as broad albedo
+/// patches of the ground, the 8 m one as mounds and the faces of the rock (starting values for the owner's look sheet, not tuned).
+fn octaves_on(which: u32) -> DetailCoefficients {
+    let mut c = DetailCoefficients::EARTH;
+    if which & 1 != 0 {
+        let o = &mut c.octaves[4];
+        o.albedo = [0.12, 0.10, 0.08];
+        o.grass = [0.14, 0.14, 0.12];
+        o.scree = [0.12, 0.0];
+        o.wet = [0.08, 0.0];
+        o.tilt = [0.02, 0.01, 0.02, 0.02];
+    }
+    if which & 2 != 0 {
+        let o = &mut c.octaves[5];
+        o.albedo = [0.10, 0.04, 0.06];
+        o.grass = [0.10, 0.12, 0.08];
+        o.scree = [0.10, 0.12];
+        o.wet = [0.05, 0.04];
+        o.tilt = [0.18, 0.05, 0.06, 0.08];
+    }
+    c
 }
 
 fn item(id: u128, at: Vec3, reach_m: f64, kind: StampKind, amount: f64) -> ItemSpec {
@@ -110,16 +133,45 @@ fn main() {
             }
         }
         r.set_scale_refs(&drop_references(camera.position, camera.forward, R, &|d| field.height(d)));
-        let mut variants: Vec<(String, MaterialParams, f64)> =
-            vec![("natural".into(), MaterialParams::EARTH, NATURAL_STRENGTH), ("full".into(), MaterialParams::EARTH, 1.0)];
+        let e = DetailCoefficients::EARTH;
+        let mut variants: Vec<(String, MaterialParams, f64, DetailCoefficients)> = vec![
+            ("natural".into(), MaterialParams::EARTH, NATURAL_STRENGTH, e),
+            ("natural_oct64".into(), MaterialParams::EARTH, NATURAL_STRENGTH, octaves_on(1)),
+            ("natural_oct8".into(), MaterialParams::EARTH, NATURAL_STRENGTH, octaves_on(2)),
+            ("natural_oct64_8".into(), MaterialParams::EARTH, NATURAL_STRENGTH, octaves_on(3)),
+            ("full".into(), MaterialParams::EARTH, 1.0, e),
+        ];
         for (m, name) in MATERIAL_NAMES.iter().enumerate() {
-            variants.push(((*name).to_string(), forced(m), 1.0));
+            variants.push(((*name).to_string(), forced(m), 1.0, e));
         }
-        for (name, materials, strength) in variants {
+        // The cost of the two octaves, indicative: the same plan rendered 40 times each (after two warm-up renders), the colour read back to wait for the GPU, the wall time of
+        // the octaves on over the wall time of the Earth default in this one run (a ratio, not a measurement of the budget).
+        let time = |r: &mut TerrainRenderer, coef: DetailCoefficients| {
+            let mut lit = LitPlan::fixed(EV).with_atmosphere(&look, R).expect("an atmosphere plan");
+            lit.sun_dir = [sun.x as f32, sun.y as f32, sun.z as f32];
+            lit.ground_detail = NATURAL_STRENGTH;
+            lit.coef = coef;
+            let mut p = plan.clone();
+            p.lit = Some(lit);
+            for _ in 0..2 {
+                r.render(&ctx, &p, false).expect("render");
+            }
+            let _ = r.read_color(&ctx);
+            let t = std::time::Instant::now();
+            for _ in 0..40 {
+                r.render(&ctx, &p, false).expect("render");
+            }
+            let _ = r.read_color(&ctx);
+            t.elapsed().as_secs_f64() * 1000.0 / 40.0
+        };
+        let (off1, on, off2) = (time(&mut r, e), time(&mut r, octaves_on(3)), time(&mut r, e));
+        println!("cost (indicative, same run) eye {eye} m: octaves off {off1:.2} / {off2:.2} ms a frame, both octaves on {on:.2} ms, ratio {:.2}", on / ((off1 + off2) / 2.0));
+        for (name, materials, strength, coef) in variants {
             let mut lit = LitPlan::fixed(EV).with_atmosphere(&look, R).expect("an atmosphere plan");
             lit.sun_dir = [sun.x as f32, sun.y as f32, sun.z as f32];
             lit.materials = materials;
             lit.ground_detail = strength;
+            lit.coef = coef;
             let mut p = plan.clone();
             p.lit = Some(lit);
             for _ in 0..2 {

@@ -1,0 +1,1 @@
+- 2026-11-05 ground-materials-7: two more detail octaves, 64 m and 8 m, 0 in the Earth default and skipped by a uniform branch (REND-057, look schema 9; #1182); look sheet `docs/dev_screenshots/2026-11-05-ground-octaves-scree-wet-sheet.jpg`; cost ratio octaves on over off within noise (0.91 to 0.98, same run, indicative, wall time on the RTX)
