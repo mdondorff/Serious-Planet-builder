@@ -32,8 +32,8 @@ use crate::relief_store::face_tile;
 pub const KIND_LAYER_AREA: u8 = Kind::LayerArea as u8;
 /// The kind byte of a tile's erosion and deposition depth.
 pub const KIND_LAYER_DEPTH: u8 = Kind::LayerDepth as u8;
-/// Version of the channels' layout and codes. History: 1 = the first layout; 2 = the fill-depth scale (GEN-120, STRM-076) joined the channels' key.
-pub const CHANNELS_VERSION: u32 = 2;
+/// Version of the channels' layout and codes. History: 1 = the first layout; 2 = the fill-depth scale (GEN-120, STRM-076) joined the channels' key; 3 = the fill code is 16 bits at 4 steps a metre and the post-pass writes it (GEN-121, STRM-077).
+pub const CHANNELS_VERSION: u32 = 3;
 /// Version of the reader's sampling rule (the bilinear read of the area in codes, the scale of its log2, the depth's read across tile borders and its clamp to the home tile): part of the identity of a
 /// [`LayerChannels`], so a change of how a point is read re-keys the tiles whose driver block holds it.
 pub const CHANNEL_READER_VERSION: u32 = 1;
@@ -54,7 +54,6 @@ pub(crate) fn channel_bytes(layer: &[u8]) -> Vec<u8> {
     b.extend(AREA_STEPS.to_le_bytes());
     b.extend(DEPTH_SCALE.to_le_bytes());
     b.extend(planet_generators::bake::face::FILL_STEPS_PER_M.to_bits().to_le_bytes());
-    b.extend(planet_generators::bake::face::FILL_MIN_M.to_bits().to_le_bytes());
     b.extend_from_slice(layer);
     b
 }

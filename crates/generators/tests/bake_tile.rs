@@ -5,8 +5,7 @@
 use planet_core::{Face, Vec3};
 use planet_generators::bake::carve::carve;
 use planet_generators::bake::tile::{
-    dequantise, pass2_tile, pass2_tile_with_fill, quantise, sample_window_coarse, tile_has_land, Pass2Params, TileGrid, TileId,
-    QUANT_STEP_M,
+    dequantise, pass2_tile, quantise, sample_window_coarse, tile_has_land, Pass2Params, TileGrid, TileId, QUANT_STEP_M,
 };
 use planet_generators::bake::Grid;
 
@@ -259,61 +258,28 @@ fn a_tile_leaves_no_one_cell_pit_over_the_threshold_in_its_core() {
     assert_eq!(pits, 0, "a one-cell pit over 0.5 m is left in the core");
 }
 
-// spec: GEN-120
+// spec: STRM-077
 #[test]
-fn a_tile_keeps_the_depth_of_its_pits_on_any_thread_count_and_pass_1s_deeper_basin_counts() {
+fn a_tile_keeps_its_final_heights_for_the_post_pass_and_no_depth_of_its_own() {
     let (g, p) = (grid(), Pass2Params::standard(9, 0.0));
-    let a = pass2_tile_with_fill(&g, tile(1, 1), &base, &nothing, None, None, &p, 1);
-    let b = pass2_tile_with_fill(&g, tile(1, 1), &base, &nothing, None, None, &p, 8);
-    assert_eq!(a.fill, b.fill, "the pit depth differs between 1 and 8 threads");
-    assert_eq!(a.fill.len(), 24 * 24);
-    let wrapper = pass2_tile(&g, tile(1, 1), &base, &nothing, None, &p, 2);
-    assert_eq!(wrapper.fill, a.fill, "pass2_tile is the fill version without pass 1's depth");
-    // The sea (land below the sea level) holds no pit depth.
-    let sea = pass2_tile_with_fill(&g, tile(0, 3), &|_: Vec3| -300.0, &nothing, None, None, &p, 2);
-    assert!(sea.fill.iter().all(|c| *c == 0), "water holds a pit depth");
-    // A basin pass 1 floods and the window cuts: a 30 m depth from pass 1 on flat ground makes every cell of the core 30 m deep (the window alone sees no pit).
-    let flat = |_: Vec3| 300.0;
-    let deep = |d: Vec3| (30.0, d);
-    let with = pass2_tile_with_fill(&g, tile(2, 2), &flat, &nothing, Some(&deep), None, &p, 2);
-    let without = pass2_tile_with_fill(&g, tile(2, 2), &flat, &nothing, None, None, &p, 2);
-    assert!(without.fill.iter().all(|c| *c == 0), "a flat tile holds a pit by itself");
-    assert!(with.fill.iter().all(|c| *c >= 29), "pass 1's depth of 30 m reads {:?}", &with.fill[..4]);
-    assert_eq!(with.core, without.core, "the pit depth moved the change");
-}
-
-// spec: GEN-120
-#[test]
-fn pass_1s_spill_level_is_flat_over_a_sloped_basin_at_the_fine_scale() {
-    let (g, p) = (grid(), Pass2Params::standard(9, 0.0));
-    // A plane of 5 % slope; pass 1's cells are 8 fine cells wide (its centre is the direction with y snapped to a lattice of 0.131) and its level is 330 m at every cell.
-    let slope = |d: Vec3| 300.0 + 300.0 * d.y;
-    let level = 330.0;
-    let snap = |d: Vec3| Vec3::new(d.x, libm::round(d.y / 0.131) * 0.131, d.z);
-    let coarse = |d: Vec3| {
-        let c = snap(d);
-        ((level - slope(c)).max(0.0), c)
-    };
-    let id = tile(2, 2);
-    let t = pass2_tile_with_fill(&g, id, &slope, &nothing, Some(&coarse), None, &p, 2);
-    let (n, h) = (g.tile as i64, id);
-    let mut checked = 0;
+    let (a, b) = (pass2_tile(&g, tile(1, 1), &base, &nothing, None, &p, 1), pass2_tile(&g, tile(1, 1), &base, &nothing, None, &p, 8));
+    assert_eq!(a.heights.len(), 24 * 24);
+    assert_eq!(
+        a.heights.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+        b.heights.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+        "1 and 8 threads"
+    );
+    assert!(a.heights.iter().all(|v| v.is_finite()));
+    assert!(a.fill.is_empty(), "pass 2 holds no pit depth: the post-pass writes it (GEN-121)");
+    // The heights are the interpolated window base plus the change (the stored change is taken against that window, so it cancels in the sum).
+    let window = sample_window_coarse(&g, tile(1, 1), &base, 2, planet_generators::bake::tile::BASE_STRIDE);
+    let w = g.window();
     for j in 0..g.tile {
         for i in 0..g.tile {
-            let d = g.direction(h.face, i64::from(h.ti) * n + i as i64, i64::from(h.tj) * n + j as i64);
-            let q = j * g.tile + i;
-            let surface = slope(d) + f64::from(t.core[q]);
-            if t.fill[q] > 0 {
-                checked += 1;
-                assert!(
-                    (surface + f64::from(t.fill[q]) - level).abs() <= 1.01,
-                    "cell ({i}, {j}): surface {surface} plus {} is not at {level}",
-                    t.fill[q]
-                );
-            } else if coarse(d).0 > 0.0 {
-                assert!(surface > level - 1.0, "cell ({i}, {j}) below the level at {surface} holds no depth");
-            }
+            let z = f64::from(a.heights[j * g.tile + i]);
+            let core = f64::from(a.core[j * g.tile + i]);
+            let want = window[(j + g.halo) * w + i + g.halo];
+            assert!((z - core - want).abs() < 1e-2, "cell ({i}, {j}): height {z}, change {core}, window base {want}");
         }
     }
-    assert!(checked > 50, "only {checked} cells hold a depth");
 }

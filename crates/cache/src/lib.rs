@@ -8,6 +8,7 @@ pub mod horizon_store;
 pub mod key;
 pub mod layer_channels;
 pub mod layer_fill;
+pub mod layer_fillpass;
 pub mod layer_manifest;
 pub mod layer_store;
 pub mod layer_tiles;

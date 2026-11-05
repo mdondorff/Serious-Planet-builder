@@ -1201,8 +1201,8 @@ impl GlobalWorld {
             && record.kind != crate::layer_tiles::KIND_LAYER_TILE
             && record.kind != crate::layer_channels::KIND_LAYER_AREA
             && record.kind != crate::layer_channels::KIND_LAYER_DEPTH
-            && record.kind != crate::layer_fill::KIND_LAYER_FACE_FILL
-            && record.kind != crate::layer_fill::KIND_LAYER_FILL)
+            && record.kind != crate::layer_fill::KIND_LAYER_FILL
+            && record.kind != crate::layer_fill::KIND_LAYER_HEIGHTS)
             || (record.generator_version == GLOBAL_VERSION && record.hash_version == HASH_VERSION && record.node_set_id == self.node_set_id)
     }
 

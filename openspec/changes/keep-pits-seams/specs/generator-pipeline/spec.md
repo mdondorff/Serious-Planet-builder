@@ -6,7 +6,7 @@ The fill depth of GEN-120 SHALL be a function of the whole surface and not of a 
 - stage 3: the level of a cell is `max(level(c), G(label(c)))`, and `level(c)` for a cell reached from an outlet of its own tile;
 - the result SHALL equal the minimax level of the whole surface bit for bit (the tests' oracle is a global flood over the same neighbour lists), and the same bits on every run (the kernels are single-threaded with a fixed order and no thread-count input, CON-14); heights that are not finite SHALL be refused.
 The level does not change GEN-100's routing (a face does not route across its cube edges): the fill level is not a route, and the pairs the caller names are where basins join. GEN-121 replaces GEN-120's pass-2 tile rule (the depth below the window's flood) when PR 2 lands; until then GEN-120 stands. The 0.5 m floor, the epsilon and the code's cap of GEN-120 stay with the caller (PR 2).
-The kernel holds no store, no tile geometry and no quantisation: PR 2 of the change (STRM-077) feeds it the tiles' quantised final heights.
+The kernel holds no store, no tile geometry and no quantisation: PR 2 of the change (STRM-077) feeds it the tiles' final heights (f32, exact).
 
 Verify: A
 Status: planned

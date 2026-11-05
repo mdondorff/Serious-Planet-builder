@@ -1,5 +1,7 @@
 #[path = "bake_face.rs"]
 mod bake_face;
+#[path = "bake_fillgeom.rs"]
+mod bake_fillgeom;
 #[path = "bake_kernels.rs"]
 mod bake_kernels;
 #[path = "bake_spill.rs"]

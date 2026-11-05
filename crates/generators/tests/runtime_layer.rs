@@ -145,8 +145,14 @@ impl LayerSource for MemoryLayer {
         }
         let core: Vec<f32> =
             (0..TILE * TILE).map(|k| (self.value)(face.0, ti as usize * TILE + k % TILE, tj as usize * TILE + k / TILE) as f32).collect();
-        let result =
-            Arc::new(TileResult { id: PassTile { face, ti, tj }, core, deposited: Vec::new(), fill: Vec::new(), stats: zero_stats() });
+        let result = Arc::new(TileResult {
+            id: PassTile { face, ti, tj },
+            core,
+            deposited: Vec::new(),
+            fill: Vec::new(),
+            heights: Vec::new(),
+            stats: zero_stats(),
+        });
         let tile = Arc::new(LayerTile::new(result, TILE)?);
         self.held.lock().unwrap().insert((face.0, ti, tj), tile.clone());
         Ok(Some(tile))
@@ -500,7 +506,7 @@ fn the_pyramid_holds_every_cell_and_each_level_its_children() {
     // A damaged tile is refused, naming it.
     let mut core = t.result().core.clone();
     core[5] = f32::NAN;
-    let bad = TileResult { id: t.result().id, core, deposited: Vec::new(), fill: Vec::new(), stats: zero_stats() };
+    let bad = TileResult { id: t.result().id, core, deposited: Vec::new(), fill: Vec::new(), heights: Vec::new(), stats: zero_stats() };
     let e = LayerTile::new(Arc::new(bad), TILE).err().unwrap();
     assert!(e.contains("layer tile 1/1/2") && e.contains("not finite"), "{e}");
 }
@@ -587,6 +593,7 @@ fn the_pyramid_of_a_tile_of_odd_sizes_holds_exactly_its_nodes_at_every_level() {
             core: core.clone(),
             deposited: Vec::new(),
             fill: Vec::new(),
+            heights: Vec::new(),
             stats: zero_stats(),
         });
         let t = LayerTile::new(result, cells).unwrap();

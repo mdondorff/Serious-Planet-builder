@@ -91,7 +91,7 @@ fn pass2_dir(w: &GlobalWorld, s: &TileLayerSpec, f: &[FaceChange; 6], name: &str
         w,
         RES,
         s,
-        &Pass2Inputs { base: &base, face_change: &face_change_reader(f), factor: None, face_fill: None },
+        &Pass2Inputs { base: &base, face_change: &face_change_reader(f), factor: None, scratch: None },
         &tiles(),
         threads,
         &mut |_| {},
@@ -224,7 +224,7 @@ fn a_channel_of_another_layer_or_a_damaged_stream_is_refused_and_a_store_without
     writer.append(&tile_record(&w, RES, &s, &r0).unwrap()).unwrap();
     writer.write_index().unwrap();
     writer.finish().unwrap();
-    let inputs = Pass2Inputs { base: &base, face_change: &face_change_reader(&f), factor: None, face_fill: None };
+    let inputs = Pass2Inputs { base: &base, face_change: &face_change_reader(&f), factor: None, scratch: None };
     let report = run_pass2(old.path(), &w, RES, &s, &inputs, &[id], 2, &mut |_| {}).unwrap();
     assert_eq!((report.computed.len(), report.skipped.len()), (1, 0));
     let old_store = TileStore::open(old.path(), w.params()).unwrap();
