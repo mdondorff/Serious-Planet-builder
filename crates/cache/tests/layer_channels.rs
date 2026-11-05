@@ -131,21 +131,45 @@ fn all_faces() -> Vec<Face> {
 
 // spec: GEN-111
 #[test]
-fn the_deposited_depth_codes_are_1_m_steps_and_the_removed_depth_is_what_the_change_leaves() {
+fn the_deposited_depth_code_is_a_square_root_fine_near_zero_and_the_removed_depth_is_what_the_change_leaves() {
+    // round(12 sqrt(m)): 0 for 0 and below, 12 for 1 m exactly, 255 from 451.6 m on, strictly increasing, the step 0.10 m at 0.3 m, 0.12 m at 0.5 m, 0.17 m at 1 m, 0.53 m at 10 m.
     assert_eq!(depth_code(0.0), 0);
     assert_eq!(depth_code(-3.0), 0);
-    assert_eq!(depth_code(0.49), 0);
-    assert_eq!(depth_code(0.51), 1);
-    assert_eq!(depth_code(254.6), 255);
+    assert_eq!(depth_code(0.001), 0);
+    assert_eq!(depth_code(0.003), 1);
+    assert_eq!(depth_code(1.0), 12);
+    assert_eq!(depth_m(12), 1.0);
+    assert_eq!(depth_code(451.6), 255);
     assert_eq!(depth_code(1.0e6), 255);
     assert!((0..255u8).all(|c| depth_m(c) < depth_m(c + 1)));
-    assert_eq!((depth_m(0), depth_m(7), depth_m(255)), (0.0, 7.0, 255.0));
+    assert_eq!((depth_m(0), depth_m(255)), (0.0, 451.5625));
+    let step_at = |m: f64| {
+        let c = depth_code(m);
+        f64::from(depth_m(c + 1) - depth_m(c))
+    };
+    assert!(
+        step_at(0.3) <= 0.11 && step_at(0.5) <= 0.12 && step_at(1.0) <= 0.18 && step_at(10.0) <= 0.56,
+        "steps {} {} {} {}",
+        step_at(0.3),
+        step_at(0.5),
+        step_at(1.0),
+        step_at(10.0)
+    );
+    // The round trip is within half a step.
+    for k in 0..4500 {
+        let m = f64::from(k) * 0.1;
+        let c = depth_code(m);
+        let back = f64::from(depth_m(c));
+        // The code is uniform in the square root: the error there is at most half a step of 1 / 12.
+        assert!((libm::sqrt(back) - libm::sqrt(m)).abs() <= 0.5 / 12.0 + 1e-6, "{m} m -> code {c} -> {back} m");
+    }
     assert_eq!((removed_depth_m(5.0, -3.0), removed_depth_m(5.0, 8.0), removed_depth_m(0.0, 0.0)), (8.0, 0.0, 0.0));
     let g = TileGrid { cells: 96, tile: 24, halo: 6, radius_m: R };
     for face_change in [0.0, -30.0, 10.0] {
         let r = pass2_tile(&g, tiles()[0], &base, &|_: Vec3| face_change, None, &Pass2Params::standard(9, 0.0), 2);
         assert_eq!(r.deposited.len(), 24 * 24);
         assert!(r.deposited.iter().any(|&c| c > 0) && r.deposited.contains(&0), "deposition happens in places");
+        let tol = |d: f64| 0.5 * f64::from(depth_m(depth_code(d).saturating_add(1)) - depth_m(depth_code(d))) + 0.2;
         // The removed depth the reader derives, max(0, deposited - change), is what the cell lost net of its deposit, and never negative: eroded = deposited - change + the pass-1 raise, so
         // the reading is short by the raise where pass 1 raised the cell (the caveat) and equal elsewhere, to the 1 m step of the code and the 0.125 m step of the change.
         for (p, c) in r.core.iter().enumerate() {
@@ -153,12 +177,12 @@ fn the_deposited_depth_codes_are_1_m_steps_and_the_removed_depth_is_what_the_cha
             let removed = f64::from(removed_depth_m(d as f32, c as f32));
             assert!(removed >= 0.0);
             assert!(
-                d - c >= -face_change.max(0.0) - 0.7,
+                d - c >= -face_change.max(0.0) - tol(d),
                 "face change {face_change}, cell {p}: deposited {d} less the change {c} is more negative than the raise allows"
             );
             if face_change <= 0.0 && r.deposited[p] < 255 {
                 assert!(
-                    d - c >= -0.7,
+                    d - c >= -tol(d),
                     "face change {face_change}, cell {p}: what was removed would be negative: deposited {d}, change {c}"
                 );
             }
