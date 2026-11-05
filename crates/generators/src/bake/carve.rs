@@ -3,6 +3,7 @@
 
 use super::route::{route, Routing, NONE};
 use super::{assert_finite, Grid};
+use planet_core::par::{self, Par};
 
 /// The parameters of the carve (start values of SPIKE-65 and SPIKE-70; the spec holds them, R7 tunes them).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -65,6 +66,32 @@ impl Default for CarveParams {
 /// stands higher than its donor allows (never an outlet, never below the sea level), by at most `breach_max_m`, so that a ridge across a valley does not hold a lake the flood
 /// would fill; the next flood sees the breached surface.
 pub fn carve(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, factor: Option<&[f64]>, seed: u64) -> Routing {
+    carve_rock(grid, z, outlet, p, factor, &Rock::none(), seed)
+}
+
+/// What a carve reads besides the class carve factor (GEN-127, ADR 0102 and 0103): the erodibility at a cell and its current height, and the uplift per cell.
+#[derive(Clone, Copy)]
+pub struct Rock<'a> {
+    /// Runs the erodibility evaluation (every cell, once a step).
+    pub par: &'a dyn Par,
+    /// `K(cell, z)`: the erodibility of the rock at the cell's direction and the height `z`, finite and not negative; it multiplies the class carve factor. Absent: 1.
+    pub k: Option<&'a (dyn Fn(usize, f64) -> f64 + Sync)>,
+    /// The ratio `U / K` at K 1 per cell (GEN-123): when given, a cell's uplift is `k_dt * U * taper`, not scaled by K or by the factor, and `u_over_k` is not read. Finite and not negative.
+    pub uplift: Option<&'a [f32]>,
+}
+
+/// The rows of the erodibility pass done at once, so that the transient results stay a few rows of the face.
+const K_ROWS_AT_ONCE: usize = 64;
+
+impl Rock<'static> {
+    /// No field: the carve is the one of the class factor and the uniform `u_over_k`.
+    pub fn none() -> Rock<'static> {
+        Rock { par: &1usize, k: None, uplift: None }
+    }
+}
+
+/// [`carve`] with a [`Rock`]: K at each cell's current height multiplies the carve factor in each step, and the uplift array replaces `u_over_k`.
+pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, factor: Option<&[f64]>, rock: &Rock, seed: u64) -> Routing {
     assert!(p.steps > 0 && p.reroute_every > 0, "a carve has steps and a re-route interval");
     assert!(p.max_area >= 0.0 && p.max_area.is_finite(), "the area cap is finite and not negative, not {}", p.max_area);
     assert_finite("the heights", z);
@@ -73,10 +100,15 @@ pub fn carve(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, facto
         assert!(f.iter().all(|v| v.is_finite() && *v >= 0.0), "the carve factors are finite and not negative");
     }
     let floor = p.sea_level + p.epsilon;
+    if let Some(u) = rock.uplift {
+        assert_eq!(u.len(), grid.len(), "one uplift per cell");
+        assert!(u.iter().all(|v| v.is_finite() && *v >= 0.0), "the uplifts are finite and not negative");
+    }
     let uplift = p.u_over_k * p.k_dt;
     // The taper of the uplift by the starting height above the sea, kept per cell as an f32 (a face of 1.6e8 cells would not fit another f64 array in its budget).
-    let taper: Option<Vec<f32>> = (p.uplift_taper_m > 0.0 && p.u_over_k != 0.0)
+    let taper: Option<Vec<f32>> = (p.uplift_taper_m > 0.0 && (p.u_over_k != 0.0 || rock.uplift.is_some()))
         .then(|| z.iter().map(|h| planet_core::smoothstep(0.0, p.uplift_taper_m, h - p.sea_level) as f32).collect());
+    let mut k: Vec<f32> = if rock.k.is_some() { vec![1.0; z.len()] } else { Vec::new() };
     let mut routing: Option<Routing> = None;
     for step in 0..p.steps {
         if step % p.reroute_every == 0 {
@@ -105,6 +137,19 @@ pub fn carve(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, facto
             routing = Some(r);
         }
         let r = routing.as_ref().expect("routed at the first step");
+        if let Some(kf) = rock.k {
+            // The erodibility of every cell at its height at the start of the step: the sweep changes a cell's own height only when it reaches the cell, after its erodibility is read.
+            let (w, zr) = (grid.w(), &*z);
+            for r0 in (0..grid.h()).step_by(K_ROWS_AT_ONCE) {
+                let rows = K_ROWS_AT_ONCE.min(grid.h() - r0);
+                let block =
+                    par::map(rock.par, rows, &|r| (0..w).map(|i| kf((r0 + r) * w + i, zr[(r0 + r) * w + i]) as f32).collect::<Vec<f32>>());
+                for (r, row) in block.into_iter().enumerate() {
+                    k[(r0 + r) * w..(r0 + r + 1) * w].copy_from_slice(&row);
+                }
+            }
+            assert!(k.iter().all(|v| v.is_finite() && *v >= 0.0), "the erodibilities are finite and not negative");
+        }
         for &c in &r.order {
             let c = c as usize;
             let rec = r.receiver[c];
@@ -112,10 +157,14 @@ pub fn carve(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, facto
                 continue;
             }
             let rec = rec as usize;
-            let scale = factor.map_or(1.0, |f| f[c]);
+            let scale = factor.map_or(1.0, |f| f[c]) * if rock.k.is_some() { f64::from(k[c]) } else { 1.0 };
             let f = p.k_dt * scale * libm::sqrt(r.area[c]) / distance(grid, c, rec);
             let hr = z[rec];
-            let up = uplift * scale * taper.as_ref().map_or(1.0, |t| f64::from(t[c]));
+            let t = taper.as_ref().map_or(1.0, |t| f64::from(t[c]));
+            let up = match rock.uplift {
+                Some(u) => p.k_dt * f64::from(u[c]) * t,
+                None => uplift * scale * t,
+            };
             let hn = (z[c] + up + f * hr) / (1.0 + f);
             let new = if p.keep_pits && !p.incise_only && z[c] < hr { (z[c] + up).max(floor) } else { hn.max(hr + p.epsilon).max(floor) };
             z[c] = if p.incise_only { new.min(z[c]) } else { new };

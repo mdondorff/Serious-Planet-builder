@@ -7,9 +7,9 @@
 //! hold a cell treat it alike. A window's border still matters: the local carve caps the catchment area, but the deposition sweep routes the whole window, so its loads and capacities
 //! depend on where the border falls; the seam this leaves is measured (TEST-084), not assumed away.
 
-use super::carve::{carve, CarveParams};
+use super::carve::{carve_rock, CarveParams, Rock};
 use super::deposit::{deposit_on_own_route, spread_pits, DepositParams, Kc};
-use super::face::{face_stream, fill_m};
+use super::face::{face_stream, fill_m, RockFields};
 use super::map::catmull_rom;
 use super::thermal::{thermal, ThermalParams};
 use super::Grid;
@@ -258,6 +258,21 @@ pub fn pass2_tile(
     p: &Pass2Params,
     threads: usize,
 ) -> TileResult {
+    pass2_tile_rock(g, id, base, face_change, factor, &RockFields::none(), p, threads)
+}
+
+/// [`pass2_tile`] with the erodibility field of GEN-127 in the local carve (the uplift field is not read: the local carve only incises).
+#[allow(clippy::too_many_arguments)]
+pub fn pass2_tile_rock(
+    g: &TileGrid,
+    id: TileId,
+    base: &(dyn Fn(Vec3) -> f64 + Sync),
+    face_change: &(dyn Fn(Vec3) -> f64 + Sync),
+    factor: Option<&(dyn Fn(Vec3) -> f64 + Sync)>,
+    rock: &RockFields,
+    p: &Pass2Params,
+    threads: usize,
+) -> TileResult {
     g.check().expect("a usable tile geometry");
     assert!(
         (id.ti as usize) < g.tiles_per_edge() && (id.tj as usize) < g.tiles_per_edge(),
@@ -277,7 +292,11 @@ pub fn pass2_tile(
     let stream = face_stream(p.seed, id.face);
     let mut z = z0.clone();
     let local = CarveParams { max_area: p.local_area_cells * g.dx() * g.dx(), ..p.carve };
-    carve(&grid, &mut z, &outlet, &local, factors.as_deref(), stream);
+    let (w, i0, j0) = (g.window(), i64::from(id.ti) * g.tile as i64 - g.halo as i64, i64::from(id.tj) * g.tile as i64 - g.halo as i64);
+    let kf = rock.k.map(|k| move |c: usize, zc: f64| k(g.direction(id.face, i0 + (c % w) as i64, j0 + (c / w) as i64), zc));
+    let par: &dyn Par = &threads;
+    let rock_in = Rock { par, k: kf.as_ref().map(|f| f as &(dyn Fn(usize, f64) -> f64 + Sync)), uplift: None };
+    carve_rock(&grid, &mut z, &outlet, &local, factors.as_deref(), &rock_in, stream);
     drop(factors);
     let thermal_report = thermal(&grid, &mut z, &p.thermal, threads);
     let z_thermal = z.clone();

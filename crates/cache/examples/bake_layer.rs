@@ -9,7 +9,7 @@ use std::time::Instant;
 
 use planet_cache::global_store::{FieldSource, GlobalWorld};
 use planet_cache::layer_manifest::LayerManifest;
-use planet_cache::layer_store::{load_face_change, run_pass1};
+use planet_cache::layer_store::{load_face_change, run_pass1_rock};
 use planet_cache::layer_tiles::{bake_specs, drop_pass1, face_change_reader, load_tile, run_pass2, BakeShape, Pass2Inputs};
 use planet_cache::pack::TileStore;
 use planet_core::{Face, Vec3};
@@ -116,6 +116,8 @@ fn main() {
         None => GlobalWorld::from_definition(&def).unwrap_or_else(|e| fail(&format!("{e:?}"))),
     };
     let (base, factor) = (|d: Vec3| inputs.base(d), |d: Vec3| inputs.carve_factor(d));
+    let (rock_k, rock_u) = (|d: Vec3, z: f64| inputs.rock_k(d, z), |d: Vec3| inputs.uplift_at(d));
+    let rock = planet_generators::bake::face::RockFields { k: Some(&rock_k), uplift: Some(&rock_u) };
     // The outlets of the fill depth (STRM-077): the cells at or below the sea level that the field bake's ocean connectivity calls ocean; without a store (`--global-dir`) every such cell is an outlet, as before.
     let ocean_store = o.global_dir.as_ref().map(|dir| TileStore::open(dir, world.params()).unwrap_or_else(|e| fail(&e.to_string())));
     let ocean_source = ocean_store
@@ -157,7 +159,7 @@ fn main() {
     }
     for &f in &computed_faces {
         let t = Instant::now();
-        let r = run_pass1(&face_dir, &world, face_bake_res, &layer, &base, Some(&factor), &[Face(f)], threads)
+        let r = run_pass1_rock(&face_dir, &world, face_bake_res, &layer, &base, Some(&factor), &rock, &[Face(f)], threads)
             .unwrap_or_else(|e| fail(&e.to_string()));
         println!(
             "pass 1 face {f}: {} in {:.1} s, peak memory {} MiB",
@@ -212,7 +214,7 @@ fn main() {
         &world,
         tile_res,
         &spec,
-        &Pass2Inputs { base: &base, face_change: &reader, factor: Some(&factor), scratch: Some(&scratch_dir) },
+        &Pass2Inputs { base: &base, face_change: &reader, factor: Some(&factor), scratch: Some(&scratch_dir), rock },
         &tiles,
         threads,
         &mut |r| {

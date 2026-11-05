@@ -3,7 +3,7 @@
 //! The grid has `cells x cells` cells over the face in the tangent-warped face coordinates (cell `(i, j)` at `s = 2 (i + 0.5) / cells - 1`), `dx` metres apart at the face's
 //! centre line (`radius * pi / 2 / cells`); the face does not route across its edges, its border cells are outlets like the sea.
 
-use super::carve::{carve, CarveParams};
+use super::carve::{carve_rock, CarveParams, Rock};
 use super::Grid;
 use planet_core::cube::{face_to_direction, TangentWarp};
 use planet_core::par::{self, Par};
@@ -84,6 +84,21 @@ pub fn face_stream(seed: u64, face: Face) -> u64 {
     seed ^ (u64::from(face.0) + 1).wrapping_mul(0xD6E8_FEB8_6659_FD93)
 }
 
+/// The rock fields of a carve (GEN-127, ADR 0102 and 0103), read at a direction: `k` the erodibility at a direction and a height (it multiplies the carve factor), `uplift` the ratio `U / K` at K 1.
+/// Pass 1 reads both, pass 2 (incise only, no uplift) only `k`.
+#[derive(Clone, Copy)]
+pub struct RockFields<'a> {
+    pub k: Option<&'a (dyn Fn(Vec3, f64) -> f64 + Sync)>,
+    pub uplift: Option<&'a (dyn Fn(Vec3) -> f64 + Sync)>,
+}
+
+impl RockFields<'static> {
+    /// No fields: the carve of the class factor and the uniform `u_over_k`.
+    pub const fn none() -> RockFields<'static> {
+        RockFields { k: None, uplift: None }
+    }
+}
+
 /// A field sampled once per cell of the carved grid (the face and its halo), row-major, `threads` threads (a value per cell: the same bits for any count).
 fn sample_grid(spec: &FaceSpec, field: &(dyn Fn(Vec3) -> f64 + Sync), threads: usize) -> Vec<f64> {
     let (par, h, m): (&dyn Par, i64, usize) = (&threads, spec.halo as i64, spec.grid_cells());
@@ -143,6 +158,18 @@ pub fn pass1_face_with_area(
     params: &CarveParams,
     threads: usize,
 ) -> (FaceChange, Vec<u8>) {
+    pass1_face_rock(spec, base, factor, &RockFields::none(), params, threads)
+}
+
+/// [`pass1_face_with_area`] with the rock fields (GEN-127): the erodibility at a cell's direction and current height, and the uplift at its direction.
+pub fn pass1_face_rock(
+    spec: &FaceSpec,
+    base: &(dyn Fn(Vec3) -> f64 + Sync),
+    factor: Option<&(dyn Fn(Vec3) -> f64 + Sync)>,
+    rock: &RockFields,
+    params: &CarveParams,
+    threads: usize,
+) -> (FaceChange, Vec<u8>) {
     assert!(
         spec.halo * 2 < spec.cells,
         "the halo ({} cells) must be under half the face ({} cells): beyond that the extended plane leaves the neighbouring ground",
@@ -155,7 +182,19 @@ pub fn pass1_face_with_area(
     let factors: Option<Vec<f64>> = factor.map(|f| sample_grid(spec, f, threads));
     let mut z = z0.clone();
     let params = CarveParams { sea_level: spec.sea_level, ..*params };
-    let routing = carve(&grid, &mut z, &outlet, &params, factors.as_deref(), spec.stream());
+    let (m, h) = (spec.grid_cells(), spec.halo as i64);
+    let uplift: Option<Vec<f32>> = rock.uplift.map(|u| {
+        let par: &dyn Par = &threads;
+        par::map(par, m, &|j| (0..m).map(|i| u(spec.halo_direction(i as i64 - h, j as i64 - h)) as f32).collect::<Vec<f32>>())
+            .into_iter()
+            .flatten()
+            .collect()
+    });
+    let kf = rock.k.map(|k| move |c: usize, zc: f64| k(spec.halo_direction((c % m) as i64 - h, (c / m) as i64 - h), zc));
+    let par: &dyn Par = &threads;
+    let carve_rock_in = Rock { par, k: kf.as_ref().map(|f| f as &(dyn Fn(usize, f64) -> f64 + Sync)), uplift: uplift.as_deref() };
+    let routing = carve_rock(&grid, &mut z, &outlet, &params, factors.as_deref(), &carve_rock_in, spec.stream());
+    drop(uplift);
     let (m, h, cell_m2) = (spec.cells + 2 * spec.halo, spec.halo, spec.dx() * spec.dx());
     let mut area = Vec::with_capacity(spec.cells * spec.cells);
     for j in 0..spec.cells {

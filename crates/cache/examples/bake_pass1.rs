@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use planet_cache::global_store::{FieldSource, GlobalWorld};
-use planet_cache::layer_store::{load_face_change, run_pass1, LayerSpec};
+use planet_cache::layer_store::{load_face_change, run_pass1_rock, LayerSpec};
 use planet_cache::pack::TileStore;
 use planet_core::{Face, Vec3};
 use planet_generators::bake::carve::CarveParams;
@@ -80,6 +80,8 @@ fn main() {
     };
     let base = |d: Vec3| inputs.base(d);
     let factor = |d: Vec3| inputs.carve_factor(d);
+    let (rock_k, rock_u) = (|d: Vec3, z: f64| inputs.rock_k(d, z), |d: Vec3| inputs.uplift_at(d));
+    let rock = planet_generators::bake::face::RockFields { k: Some(&rock_k), uplift: Some(&rock_u) };
     let halo = halo.unwrap_or(res.div_ceil(128).max(4).min((res - 1) / 2));
     let spec = LayerSpec {
         cells: res,
@@ -99,7 +101,7 @@ fn main() {
     let started = Instant::now();
     for &f in &faces {
         let t = Instant::now();
-        let report = run_pass1(&store_dir, &world, bake_res, &spec, &base, Some(&factor), &[Face(f)], threads)
+        let report = run_pass1_rock(&store_dir, &world, bake_res, &spec, &base, Some(&factor), &rock, &[Face(f)], threads)
             .unwrap_or_else(|e| fail(&e.to_string()));
         let what = if report.computed.is_empty() { "stored (skipped)" } else { "computed" };
         println!(

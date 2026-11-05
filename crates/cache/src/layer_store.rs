@@ -10,7 +10,7 @@ use std::path::Path;
 
 use planet_core::{Face, Vec3};
 use planet_generators::bake::carve::CarveParams;
-use planet_generators::bake::face::{pass1_face_with_area, FaceChange, FaceSpec};
+use planet_generators::bake::face::{pass1_face_rock, FaceChange, FaceSpec, RockFields};
 
 use crate::global_store::GlobalWorld;
 use crate::key::{cache_key, CacheKey, Kind, PARAM_LAYER, PARAM_RESOLUTION};
@@ -183,6 +183,22 @@ pub fn run_pass1(
     faces: &[Face],
     threads: usize,
 ) -> Result<Pass1Report, LayerStoreError> {
+    run_pass1_rock(dir, world, res, spec, base, factor, &RockFields::none(), faces, threads)
+}
+
+/// [`run_pass1`] with the rock fields of GEN-127 (the erodibility and the uplift), which the key of the run must name (`inputs_id`).
+#[allow(clippy::too_many_arguments)]
+pub fn run_pass1_rock(
+    dir: &Path,
+    world: &GlobalWorld,
+    res: u32,
+    spec: &LayerSpec,
+    base: &(dyn Fn(Vec3) -> f64 + Sync),
+    factor: Option<&(dyn Fn(Vec3) -> f64 + Sync)>,
+    rock: &RockFields,
+    faces: &[Face],
+    threads: usize,
+) -> Result<Pass1Report, LayerStoreError> {
     let err = |e: crate::pack::PackError| LayerStoreError(format!("the layer store {}: {e}", dir.display()));
     let mut writer = PackWriter::open(dir, world.params(), DEFAULT_MAX_PACK_BYTES).map_err(err)?;
     let store = TileStore::open(dir, world.params()).map_err(err)?;
@@ -205,7 +221,7 @@ pub fn run_pass1(
             continue;
         }
         // A face stored before the channels existed is carved again for its area only; what is stored is not written twice.
-        let (change, area) = pass1_face_with_area(&spec.face(face), base, factor, &spec.carve, threads);
+        let (change, area) = pass1_face_rock(&spec.face(face), base, factor, rock, &spec.carve, threads);
         if !have_change {
             writer.append(&face_record(world, res, spec, &change)).map_err(err)?;
         }

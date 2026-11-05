@@ -92,6 +92,8 @@ fn main() {
     let inputs = Arc::new(BakeInputs::new(seed, threads));
     let world = GlobalWorld::from_definition(&def).expect("world").with_class_source(inputs.clone());
     let (base, factor) = (|d: Vec3| inputs.base(d), |d: Vec3| inputs.carve_factor(d));
+    let (rock_k, rock_u) = (|d: Vec3, z: f64| inputs.rock_k(d, z), |d: Vec3| inputs.uplift_at(d));
+    let rock = planet_generators::bake::face::RockFields { k: Some(&rock_k), uplift: Some(&rock_u) };
     let shape = BakeShape::production(seed, RADIUS_M);
     let (layer, spec) = bake_specs(&world, &shape).expect("specs");
     let g: TileGrid = spec.grid;
@@ -173,7 +175,7 @@ fn main() {
         &world,
         rp,
         &spec,
-        &Pass2Inputs { base: &base, face_change: &reader, factor: Some(&factor), scratch: Some(&scratch_dir) },
+        &Pass2Inputs { base: &base, face_change: &reader, factor: Some(&factor), scratch: Some(&scratch_dir), rock },
         &tiles,
         threads,
         &mut |r| println!("pass 2 tile {}/{}/{}: {:.0} s so far", r.id.face.0, r.id.ti, r.id.tj, clock.elapsed().as_secs_f64()),

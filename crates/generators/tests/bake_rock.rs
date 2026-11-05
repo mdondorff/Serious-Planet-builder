@@ -1,0 +1,172 @@
+//! Tier A, GEN-127 (plan PR 4): the carve's rock fields. The erodibility K(cell, z) multiplies the class carve factor in each step, read at the cell's height at the start of the step;
+//! the uplift array replaces `u_over_k`, tapered by the height and scaled by neither K nor the factor.
+
+use planet_core::par::Par;
+use planet_core::{Face, Vec3};
+use planet_generators::bake::carve::{carve, carve_rock, CarveParams, Rock};
+use planet_generators::bake::face::{pass1_face_rock, FaceSpec, RockFields};
+use planet_generators::bake::Grid;
+use std::sync::Mutex;
+
+const DX: f64 = 800.0;
+const N: usize = 32;
+const R: f64 = 6_371_000.0;
+
+fn cone() -> Vec<f64> {
+    let c = (N as f64 - 1.0) / 2.0;
+    (0..N * N)
+        .map(|p| {
+            let r = libm::hypot((p % N) as f64 - c, (p / N) as f64 - c);
+            (3000.0 * (1.0 - r / c)).max(0.0)
+        })
+        .collect()
+}
+
+fn bits(z: &[f64]) -> Vec<u64> {
+    z.iter().map(|v| v.to_bits()).collect()
+}
+
+fn setup() -> (Grid, Vec<f64>, Vec<bool>) {
+    let g = Grid::new(N, N, DX);
+    let z = cone();
+    let outlet = g.outlets(&z, 0.0);
+    (g, z, outlet)
+}
+
+// spec: GEN-127
+#[test]
+fn a_unit_erodibility_and_the_uniform_uplift_as_an_array_are_the_carve_without_fields_bit_for_bit() {
+    let (g, z0, outlet) = setup();
+    let p = CarveParams::default();
+    let mut plain = z0.clone();
+    carve(&g, &mut plain, &outlet, &p, None, 5);
+    let one = |_: usize, _: f64| 1.0;
+    let u = vec![p.u_over_k as f32; N * N];
+    let mut with = z0.clone();
+    carve_rock(&g, &mut with, &outlet, &p, None, &Rock { par: &2usize, k: Some(&one), uplift: Some(&u) }, 5);
+    assert_eq!(bits(&plain), bits(&with), "K = 1 and U = u_over_k must give today's carve");
+}
+
+// spec: GEN-127
+#[test]
+fn a_harder_rock_settles_higher_at_the_same_uplift_and_a_softer_one_lower() {
+    let (g, z0, outlet) = setup();
+    let p = CarveParams::default();
+    let u = vec![p.u_over_k as f32; N * N];
+    let mean = |k: f64| {
+        let f = move |_: usize, _: f64| k;
+        let mut z = z0.clone();
+        carve_rock(&g, &mut z, &outlet, &p, None, &Rock { par: &2usize, k: Some(&f), uplift: Some(&u) }, 5);
+        z.iter().sum::<f64>() / z.len() as f64
+    };
+    let (hard, mid, soft) = (mean(0.12), mean(1.0), mean(1.8));
+    assert!(hard > mid && mid > soft, "mean height after the carve: hard {hard}, mid {mid}, soft {soft}");
+}
+
+// spec: GEN-127
+#[test]
+fn the_uplift_is_scaled_by_neither_the_erodibility_nor_the_carve_factor() {
+    let (g, z0, outlet) = setup();
+    // Erodibility 0: nothing incises, so a cell rises by k_dt * U * taper in each step whatever the factor is.
+    let p = CarveParams { steps: 3, reroute_every: 5, keep_pits: false, ..CarveParams::default() };
+    let none = |_: usize, _: f64| 0.0;
+    let u: Vec<f32> = (0..N * N).map(|c| 10.0 + (c % 7) as f32).collect();
+    let rise = |factor: f64| {
+        let f = vec![factor; N * N];
+        let mut z = z0.clone();
+        carve_rock(&g, &mut z, &outlet, &p, Some(&f), &Rock { par: &1usize, k: Some(&none), uplift: Some(&u) }, 5);
+        z
+    };
+    let (a, b) = (rise(1.0), rise(5.0));
+    assert_eq!(bits(&a), bits(&b), "the carve factor changed the uplift");
+    let mut moved = 0;
+    for c in 0..N * N {
+        if outlet[c] {
+            continue;
+        }
+        let taper = planet_core::smoothstep(0.0, p.uplift_taper_m, z0[c]) as f32;
+        let want = p.steps as f64 * p.k_dt * f64::from(u[c]) * f64::from(taper);
+        assert!((a[c] - z0[c] - want).abs() < 1e-6, "cell {c} rose by {} m, not {want}", a[c] - z0[c]);
+        moved += usize::from(want > 0.0);
+    }
+    assert!(moved > 500, "{moved} cells were lifted");
+}
+
+// spec: GEN-127
+#[test]
+fn the_erodibility_is_read_at_the_height_the_cell_has_at_the_start_of_the_step() {
+    let (g, z0, outlet) = setup();
+    let p = CarveParams { steps: 2, reroute_every: 5, ..CarveParams::default() };
+    let seen = Mutex::new(Vec::<(usize, f64)>::new());
+    let record = |c: usize, z: f64| {
+        seen.lock().unwrap().push((c, z));
+        1.0
+    };
+    let mut z2 = z0.clone();
+    carve_rock(&g, &mut z2, &outlet, &p, None, &Rock { par: &1usize, k: Some(&record), uplift: None }, 5);
+    let mut z1 = z0.clone();
+    carve(&g, &mut z1, &outlet, &CarveParams { steps: 1, ..p }, None, 5);
+    let seen = seen.into_inner().unwrap();
+    assert_eq!(seen.len(), 2 * N * N, "one read of every cell in each step");
+    let (first, second) = seen.split_at(N * N);
+    let mut changed = 0;
+    for c in 0..N * N {
+        assert_eq!(first[c], (c, z0[c]), "step 1 reads the start height of cell {c}");
+        assert_eq!(second[c], (c, z1[c]), "step 2 reads the height after step 1 of cell {c}");
+        changed += usize::from(z1[c] != z0[c]);
+    }
+    assert!(changed > 300, "{changed} cells changed in the first step: the test would not tell the heights apart");
+}
+
+// spec: GEN-127
+#[test]
+fn the_carve_with_fields_is_the_same_bits_on_any_thread_count_and_refuses_a_negative_uplift_or_erodibility() {
+    let (g, z0, outlet) = setup();
+    let p = CarveParams::default();
+    let k = |c: usize, z: f64| 0.2 + 1.5 * (0.5 + 0.5 * libm::sin(0.01 * z + 0.3 * (c % 11) as f64));
+    let u: Vec<f32> = (0..N * N).map(|c| 5.0 + (c % 13) as f32 * 4.0).collect();
+    let run = |par: &dyn Par| {
+        let mut z = z0.clone();
+        carve_rock(&g, &mut z, &outlet, &p, None, &Rock { par, k: Some(&k), uplift: Some(&u) }, 5);
+        bits(&z)
+    };
+    assert_eq!(run(&1usize), run(&8usize), "the carve differs between 1 and 8 threads");
+    let refused = |k: &'static (dyn Fn(usize, f64) -> f64 + Sync), u: Vec<f32>| {
+        let (g, z0, outlet) = setup();
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            let mut z = z0;
+            carve_rock(&g, &mut z, &outlet, &CarveParams::default(), None, &Rock { par: &1usize, k: Some(k), uplift: Some(&u) }, 1);
+        }))
+        .is_err()
+    };
+    assert!(refused(&|_, _| -0.5, vec![1.0; N * N]), "a negative erodibility was accepted");
+    assert!(refused(&|_, _| 1.0, vec![-1.0; N * N]), "a negative uplift was accepted");
+}
+
+fn base(d: Vec3) -> f64 {
+    let ridge = 2200.0 * libm::sin(5.0 * d.x + 1.0) * libm::cos(4.0 * d.y) + 1400.0 * libm::sin(9.0 * d.z + 0.3);
+    if ridge > 0.0 {
+        ridge + 50.0
+    } else {
+        -2000.0 + 0.5 * ridge
+    }
+}
+
+// spec: GEN-127
+#[test]
+fn a_face_carve_reads_the_fields_at_the_cells_directions_and_is_the_same_bytes_on_any_thread_count() {
+    let spec = FaceSpec { face: Face(0), cells: 64, radius_m: R, sea_level: 0.0, seed: 17, halo: 0 };
+    let p = CarveParams::default();
+    let k = |d: Vec3, z: f64| 0.3 + 1.2 * (0.5 + 0.5 * libm::sin(3.0 * d.x + 0.004 * z));
+    let u = |d: Vec3| 8.0 + 40.0 * (0.5 + 0.5 * libm::cos(4.0 * d.y));
+    let rock = RockFields { k: Some(&k), uplift: Some(&u) };
+    let run = |threads| pass1_face_rock(&spec, &base, None, &rock, &p, threads);
+    let (one, eight) = (run(1), run(8));
+    let bits_of = |c: &planet_generators::bake::face::FaceChange| c.change.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+    assert_eq!(bits_of(&one.0), bits_of(&eight.0), "the face's change differs between 1 and 8 threads");
+    assert_eq!(one.1, eight.1, "the area codes differ between 1 and 8 threads");
+    let plain = pass1_face_rock(&spec, &base, None, &RockFields::none(), &p, 2);
+    assert_ne!(bits_of(&one.0), bits_of(&plain.0), "the fields changed nothing");
+    let mean = |c: &planet_generators::bake::face::FaceChange| c.change.iter().map(|v| f64::from(*v)).sum::<f64>() / c.change.len() as f64;
+    assert!((mean(&one.0) - mean(&plain.0)).abs() > 0.01, "the mean change is the same with and without the fields");
+}

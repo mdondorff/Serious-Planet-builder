@@ -16,7 +16,10 @@ use std::sync::{Arc, Mutex};
 
 use planet_core::{Face, TileId, Vec3};
 use planet_generators::bake::face::FaceChange;
-use planet_generators::bake::tile::{dequantise, pass2_tile, quantise, Pass2Params, TileGrid, TileId as PassTile, TileResult, TileStats};
+use planet_generators::bake::face::RockFields;
+use planet_generators::bake::tile::{
+    dequantise, pass2_tile_rock, quantise, Pass2Params, TileGrid, TileId as PassTile, TileResult, TileStats,
+};
 
 use crate::global_store::GlobalWorld;
 use crate::key::{cache_key, CacheKey, Kind, PARAM_RESOLUTION, PARAM_TILE_LAYER};
@@ -606,6 +609,8 @@ pub struct Pass2Inputs<'a> {
     pub factor: Option<&'a (dyn Fn(Vec3) -> f64 + Sync)>,
     /// The scratch store of the final heights (STRM-077): a folder that pass 2 writes each tile's heights to for the post-pass (`layer_fillpass`), or none when no post-pass follows.
     pub scratch: Option<&'a Path>,
+    /// The erodibility field of the local carve (GEN-127); the uplift is not read in pass 2.
+    pub rock: RockFields<'a>,
 }
 
 /// Pass 2 over `tiles`, one at a time, into the tile layer store in `dir`: a tile stored under the current key is skipped (a resume), the others are computed and appended with the
@@ -657,7 +662,7 @@ pub fn run_pass2(
             report.skipped.push(id);
             continue;
         }
-        let r = pass2_tile(&spec.grid, id, inputs.base, inputs.face_change, inputs.factor, &spec.params, threads);
+        let r = pass2_tile_rock(&spec.grid, id, inputs.base, inputs.face_change, inputs.factor, &inputs.rock, &spec.params, threads);
         // A tile stored before the channels existed is computed again for its depth only; what is stored is not written twice.
         if !have_tile {
             writer.append(&tile_record(world, res, spec, &r)?).map_err(err)?;
