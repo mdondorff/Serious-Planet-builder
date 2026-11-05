@@ -1,0 +1,1 @@
+- 2026-11-05 stream-smoke-calibrated: the streaming smoke judges the scheduler median against the larger of 0.5 ms and 0.1 of the same run's frame-record median, so a stalled main thread on a loaded lavapipe runner is no finding while a scheduler ten times dearer still is (TEST-090)
