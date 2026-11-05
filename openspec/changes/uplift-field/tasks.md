@@ -3,8 +3,7 @@
 - [ ] 1.2 `uplift.rs`: `Uplift::{new, u_at}`, table constants, `UPLIFT_VERSION`; tests: bits for 1 and 8 threads, formula at the terms, continuity across a face edge, range, craton under belt
 
 ## 2. Carve and keys
-- [ ] 2.1 `carve` takes `uplift: Option<&[f32]>`; `face.rs` samples it; `None` reproduces today's bits (test)
-- [ ] 2.2 `BakeInputs::id` folds the versions and the table; key test (the layer key differs with and without)
+- Not here: the explorer's plan PR 4 (with K) wires `uplift: Option<&[f32]>` into `carve`, `face.rs` and `BakeInputs::id`, as design decisions 3 and 4 describe.
 
 ## 3. Preview
 - [ ] 3.1 `uplift_preview.rs`, the option, the app test (files, label, 1 and 4 threads, refusals)
