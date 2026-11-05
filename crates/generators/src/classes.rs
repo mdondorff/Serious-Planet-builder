@@ -5,7 +5,8 @@
 //! is unchanged). [`ClassSource::eval`] is a pure function of `(seed, direction)`; [`ClassLattice`] stores its weights as `u8` on the landform
 //! lattice's geometry and is the one interface consumers read (ADR 0089 decision 1).
 
-use crate::global::{fbm, hill_octaves, ridge_at, terrain, MAX_ELEVATION_M, MIN_ELEVATION_M, SEA_LEVEL_C};
+use crate::global::{fbm, hill_octaves, ridge_at, terrain, Terrain, MAX_ELEVATION_M, MIN_ELEVATION_M, SEA_LEVEL_C};
+use crate::height::layer_noise;
 use planet_core::cube::{direction_to_face, face_to_direction, TangentWarp};
 use planet_core::par::{self, Par};
 use planet_core::{smoothstep, Face, Vec3};
@@ -13,7 +14,7 @@ use planet_core::{smoothstep, Face, Vec3};
 /// The version of the class list (GEN-093): plain, rolling plain, hills, mountains, high mountains, plateau, badlands, sand sea, in that order.
 pub const CLASS_LIST_VERSION: u32 = 1;
 /// Bump whenever the default source's output changes for a seed (the rules of GEN-094 and GEN-095, their constants, or the plate construction).
-pub const CLASS_SOURCE_VERSION: u32 = 5;
+pub const CLASS_SOURCE_VERSION: u32 = 6;
 pub const CLASS_COUNT: usize = 8;
 pub const CLASS_NAMES: [&str; CLASS_COUNT] =
     ["plain", "rolling plain", "hills", "mountains", "high mountains", "plateau", "badlands", "sand sea"];
@@ -77,6 +78,7 @@ const LAYER_WIDTH: u64 = 0x474c_0011;
 const LAYER_COAST_ARC: u64 = 0x474c_0012;
 const LAYER_PLATEAU: u64 = 0x474c_0013;
 const LAYER_ROLLING: u64 = 0x474c_0014;
+const LAYER_RIDGED: u64 = 0x474c_0019;
 const LAYER_SEGMENT: u64 = 0x474c_0015;
 const LAYER_STRIKE: u64 = 0x474c_0016;
 const LAYER_BEND: u64 = 0x474c_0017;
@@ -417,13 +419,45 @@ impl ClassSource {
     /// The elevation of GEN-096 at `d` given the untapered blended `k` there: `e0` plus the class hill band (GEN-098), clamped. `point` is `eval(d)`.
     pub fn elevation_m(&self, d: Vec3, point: &ClassPoint, k: f64) -> f64 {
         let t = terrain(self.seed, d);
+        let wm = point.weights[MOUNTAINS] + point.weights[HIGH_MOUNTAINS];
         let band = if t.land_depth <= 0.0 {
             0.0
         } else {
-            hill_amplitude_for_k(k) * hill_octaves(self.seed, &t) * smoothstep(0.0, 0.1, t.land_depth)
+            // On the mountain classes (blended by their weight) the band is x4.5 as high, ridged, and centred on its mean (GEN-098, SPIKE-101).
+            let amp = hill_amplitude_for_k(k) * (1.0 + (MOUNTAIN_BAND_SCALE - 1.0) * wm);
+            let noise = wm * ridged_octaves(self.seed, &t) + (1.0 - wm) * hill_octaves(self.seed, &t) - MOUNTAIN_BAND_CENTRE * wm;
+            amp * noise * smoothstep(0.0, 0.1, t.land_depth)
         };
-        (point.e0 + band).clamp(MIN_ELEVATION_M, MAX_ELEVATION_M)
+        // The centred band can be negative: land stays land (the shore of the continent stage is kept), at least 1 m above the sea where the base is.
+        let e = point.e0 + band;
+        let e = if t.land_depth > 0.0 { e.max(point.e0.min(MIN_LAND_M)) } else { e };
+        e.clamp(MIN_ELEVATION_M, MAX_ELEVATION_M)
     }
+}
+
+/// The least height of a land point under the centred band (GEN-098).
+pub const MIN_LAND_M: f64 = 1.0;
+
+/// The factor on the hill band's amplitude where the class is mountains or high mountains (GEN-098; SPIKE-101: x4.5 ridged reaches 0.79 of Everest's 3 km relief on the base).
+pub const MOUNTAIN_BAND_SCALE: f64 = 4.5;
+/// What the band's noise loses where the class is mountains or high mountains: its mean (about 0.45), so that the larger band does not lift the median elevation.
+pub const MOUNTAIN_BAND_CENTRE: f64 = 0.45;
+
+/// The mountain band's noise in `[0, 1]`: a ridged multifractal of five octaves at 16, 8, 4, 2 and 1 km on the warped direction, each octave weighted by the
+/// previous one's ridge so that the ridges stay connected (Musgrave).
+fn ridged_octaves(seed: u64, t: &Terrain) -> f64 {
+    let (mut sum, mut amp, mut norm, mut freq, mut weight) = (0.0, 1.0, 0.0, 398.0, 1.0);
+    for o in 0..5u32 {
+        let n = layer_noise(seed, LAYER_RIDGED, o, t.warped * freq);
+        let r = (1.0 - libm::fabs(n)).max(0.0);
+        let sig = r * r * weight;
+        sum += amp * sig;
+        norm += amp;
+        weight = (sig * 2.0).clamp(0.0, 1.0);
+        amp *= 0.5;
+        freq *= 2.0;
+    }
+    sum / norm
 }
 
 /// The hill band's amplitude in metres for the untapered blended `k` (GEN-098).

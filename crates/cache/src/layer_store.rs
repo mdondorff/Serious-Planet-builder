@@ -55,7 +55,7 @@ impl LayerSpec {
         }
         b.extend(self.seed.to_le_bytes());
         let c = &self.carve;
-        for v in [c.u_over_k, c.k_dt, c.epsilon, c.breach_slope, c.breach_max_m, c.uplift_taper_m] {
+        for v in [c.u_over_k, c.k_dt, c.epsilon, c.breach_slope, c.breach_max_m, c.breach_height_scale_m, c.uplift_taper_m] {
             b.extend(v.to_bits().to_le_bytes());
         }
         b.extend(c.max_area.to_bits().to_le_bytes());
@@ -216,4 +216,32 @@ pub fn run_pass1(
     }
     writer.finish().map_err(err)?;
     Ok(report)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // spec: GEN-100
+    #[test]
+    fn every_breach_parameter_is_part_of_the_layer_key() {
+        let base = LayerSpec {
+            cells: 64,
+            radius_m: 6.0e6,
+            sea_level: 0.0,
+            seed: 1,
+            carve: CarveParams::default(),
+            inputs_id: 7,
+            uses_factor: true,
+            halo: 4,
+        };
+        let key = base.bytes();
+        for carve in [
+            CarveParams { breach_max_m: 50.0, ..base.carve },
+            CarveParams { breach_height_scale_m: 2000.0, ..base.carve },
+            CarveParams { breach_slope: 2e-3, ..base.carve },
+        ] {
+            assert_ne!(LayerSpec { carve, ..base }.bytes(), key, "a breach parameter is missing from the key: {carve:?}");
+        }
+    }
 }
