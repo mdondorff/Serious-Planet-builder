@@ -5,9 +5,9 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 ## Waiting for the owner
 - **For M9 planning** (after the away week): owner test 2026-10-27 groups E (edits on top as default, erosion keeping mass), F and G scope, the 1 m / 500 m exception (`docs/milestones/M8/owner-test-2026-10-27/README.md`); where edits sit relative to M9's erosion (D3, owner 2026-10-26: under the erosion by default).
 - **Sunset shadow look** (ADR 0095 draft, crusader): the sky ambient as a hemisphere average is physically consistent and dark at a 7° sun; options: sky light plus a lift (planner's pick), sky light as is, or the old term. Every lit and sky golden moves with it. SPIKE-96 (sky visibility) follows the choice.
-- **Perf machine state** (2026-11-03): since a Synapse change ~10:10 the all-core preflight reads 128-145k us (morning 67-95k; limit 112k), singles normal; Synapse defaults did not help; the all-core clock stays ~2.5 GHz under load. No restart before Sat 2026-11-07 (owner): no perf windows until then; bake timings are single-thread CPU-s per tile (singles are normal) or ratios within one session, never absolute all-core hours; local tier C is not evidence (lane rule).
+- **Perf machine state** (2026-11-03): all-core preflight 128-145k us since a Synapse change (limit 112k), singles normal. No restart before Sat 2026-11-07 (owner): no perf windows until then; bake timings as single-thread CPU-s per tile or same-session ratios; local tier C is not evidence.
 - **Integrated preview before the bake** (M9 I4b, owner 2026-11-04): through the viewer's path (class-source base, erosion layer, fine creases, ground detail), mountains incl. the owner's circled wall (face 2, layer cell 38206, 31520), hills, plains, coast, 2 km to 1.8 m; poses in SPIKE-102 results section 7. After the M9 driver items.
-- **M9 terrain drivers before the bake** (SPIKE-102, `spikes/generator-archetypes/results/results.md` 4.1-4.3, owner D7 2026-11-04 delays the bake for them): decided 2026-11-05: D1 keep the basins (route over the filled copy, carve the real heights, store the fill depth; the runtime fills them back; later lakes and fill-as-sediment materials, owner). Open, owner: the deposited-depth code (1 m steps today; the material thresholds want 0.3-1 m; same byte), D2 lithology K in the carve, D3 wind and orographic rain with arid class rules (look), D4-D6 glacial spike after the quota reset, volcanic layer later, coast scope. Merged: plan PR 1 (#1180, breach 500 m, ridged x4.5 band: 0.62 of Everest, 0.86 of the Alps); with D1 0.85 and 0.94. Bake no earlier than Mon 2026-11-09 (estimate).
+- **M9 terrain drivers before the bake** (SPIKE-102 4.1-4.3; owner D7 delays the bake): decided 2026-11-05: D1 keep the basins (ADR 0101; seams fixed #1197/#1199/#1201, ocean outlets #1205), the depth codes (fill u16 0.25 m against the exact base; deposit square-root byte #1203), D2 lithology (ADR 0102, field #1200), uplift field (ADR 0103, #1202), monsoon seasons, a vegetation-erosion curve; isostasy dropped. Open, owner: D3 confirmation (option A: wind, two-season orographic rain, runoff, arid rules), glaciers (D4) and an independent review of the bake plan, D5-D6. Bake: mid next week at the earliest.
 - **Smooth base as default** (GEN-107, `cpu-erosion-v2` on main): removes the 611 m "pyramid" facets; draft #1137 switches the default (no golden moves; two count pins and the water-cut range re-pinned with reasons). Decide with the erosion preview.
 - **World-build share values** (ADR 0097, BUDG-014): terrain 40 %, future content 40 %, margin 20 % of a 24 h day, proposed; confirm or change.
 - **Root-search hook** (learning 2026-11-03): a PreToolUse hook refusing `find /`; a settings change, the owner's call.
@@ -16,22 +16,24 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 - **Optional, when convenient:** the M6 retest list (`docs/archive/M6/briefings/m6-owner-test-plan.md`, "Retest"); a live check of the flickers (Tracked); excluding the repo's `target` folders from Windows Search indexing. One editor session at the marker "TheEdgeHill" on the RTX (SPIKE-87 measured 0.17 ms editor cost on WARP; the 10-21 report predates the off-main block decodes).
 
 Dormant (no near trigger; not asked now):
+- **Isostatic rebound** (GEN-124, `openspec/changes/isostasy-rebound/proposal.md`): dropped from M9 (owner, 2026-11-05: no relief gain measured, +250-290 m elevation); a full flexural version (loads from deposition and belts, `Te` field) is the improvement candidate. Trigger: hypsometry tuning, rifts, escarpments, foreland basins.
 - **ADR 0045** (bodies, bake resolution, storage budget): proposed. Trigger: multi-body work.
 - **Region keep-inside** (`openspec/changes/region-mode1`): soft influence for Cities, not a hard clip (owner, 2026-10-21, Q8). Trigger: Cities.
 - **Global authoring preview** (owner, 2026-10-31): a coarse whole-planet preview of relief and landforms from the inputs, before the bake, as the step before detailed editing; not runtime. SPIKE-69 rates its k-sources for this. Trigger: after M9's bake, or when SPIKE-69 shows a pre-bake source.
 - **Coarse-first refinement of an edit** (owner, 2026-10-20): parked. Trigger: a brush case of the edit-latency scene that misses its budget.
 
-## Queue (2026-11-05 morning)
+## Queue (2026-11-05 evening)
 | # | Step | Lane |
 |---|---|---|
 | NR | Real-GPU window checks NOT RUN on a locked desktop (TEST-073) | crusader |
-| M9 bake | SPIKE-102 plan 4.1: PR 2 keep-pits (GEN-120, STRM-076, owner D1) now; PRs 4, 6, 9 after the owner's D2/D3; the preview layer re-runs once after the items; then the integrated preview (I4b); no planet bake before the owner's go | explorer |
-| Ground | I8a slice 2a done (#1176, #1181, #1182, #1184, #1186; all off by default); slice 2b: PR 1 reader (#1188), PR 2 driver block from the channels (GEN-119, VIEW-066), PR 3 curves on soil depth and moisture; then PRs 3, 5, 7 of the plan after D2/D3 | crusader |
-| Spikes | Idle until the quota reset (Sun 2026-11-09); glacial stand-in spike (D4) after it | spikes |
-| Shadows | ADR 0095 sky ambient waits for the owner's look; REND-052 verdicts and the ground-detail cost (REND-034, `shadow-cost --look`) wait for a perf window after Sat 2026-11-07 | crusader |
-| Store | Shared store `C:/DEV/SeriousPlanetData/global16384-m9r2` (seed 1, read-only); `global16384` kept until the owner says; preview store `global16384-m9c14` stale since #1180 (re-run after the plan items) | all |
+| M9 bake | Plan PR 4 K and U in both carves (GEN-127); runoff after D3; the preview re-run with a mountain cube edge; the integrated preview (I4b); no planet bake before the owner's go | explorer |
+| Ground | I8a slice 2b PR 4b-4d (channel block GEN-126, MESH_VERSION 11; inputs; curves); D3 fields (wind, two-season rain, arid rules) after the owner confirms | crusader |
+| Perf | After Sat 2026-11-07: REND-052 verdicts, ground-detail cost (REND-034, `shadow-cost --look`), channel-read cost; a writable re-prefilled perf store first (MESH_VERSION 11) | planner |
+| Store | `global16384-m9r2` and `global16384` read-only; preview store `global16384-m9c14` stale (re-run after the plan items) | all |
 
 ## Tracked
+- **Fill depth across a mountain cube edge** (keep-pits-seams, #1201): the seam gate passed on a tile seam; no mountain cube edge was in the stored faces. Blocks the planet bake (I6); run with the integrated-preview re-run.
+- **`test fast` 220-330 s** (BUILD-014, verifier on #1202, 2026-11-05): loaded machine (no restart before Sat 2026-11-07); re-measure after the restart.
 - **Fill gate** (keep-pits-seams PR 3): tile seam met; the mountain cube-edge pair (a region with a mountain cube edge, 2 faces of pass 1) runs with the integrated-preview re-run and BLOCKS the planet bake (I6)
 - **Ocean square at orbit** (owner, viewer main 2fdfeb23 over m9r2, 2026-11-03): at 12,767 km over 20 N 30 E after 240 s of flight, a light square in a ring of dark blotches on the sea; not reproduced headless. Hypotheses: the clipmap shadow on water (sea-floor receivers; `--no-shadow-march`, J view), the water-node cut or the never-evicted WaterBook, the shadow's temporal history. Needs the owner's F9 bundle; replay with `cargo xtask repro`.
 - **CI jobs** (BUILD-014, 2026-11-03 after #1133, #1134, #1138): every job under 16 min (A+B parts 10.7-13.6, C build 3.5 + parts 7.8-10.2, Linux 7-9); `gpu_stills` march test keeps its declared 450 s limit; lift under ~200 s.
