@@ -8,10 +8,10 @@ Source: ADR 0102, SPIKE-102 F1, SPIKE-81
 
 #### Scenario: The field
 - **WHEN** the field is built on 1 and 8 threads and read at random points and heights, its hardness is compared with SPIKE-81's formula, a column is scanned over 1.5 km in steps of a quarter metre, and the lattice is read at its nodes and across a face edge
-- **THEN** the bytes agree for any thread count and differ with the seed, H and K stay in their ranges, the bands are 30 to 170 m thick, K steps by under 0.4 between samples, the stack's offset varies over the planet, the caprock flag follows the hardness, and the lattice reads the class source's terms within one code
+- **THEN** the bytes agree for any thread count and differ with the seed, H and K stay in their ranges, the bands are 30 to 170 m thick, K steps by under 0.11 between samples a quarter metre apart, the stack's offset varies over the planet, the caprock flag follows the hardness, and the lattice reads the class source's terms within one code
 
 ### Requirement: GEN-122 The lithology preview
-`generate --lithology-preview DIR [--seed N | --world F] [--km N]` SHALL write, with no GPU, equirectangular maps of the hardness, of K at the surface (caprock black) and 200 m below it, and of the soluble flag, a vertical cross-section through a mountain belt into a basin (K, caprock, the surface on top), and `lithology.txt` with the shares, the section's place and the band thickness against pass 1's per-step height change. The text and the run's line SHALL say the images show the lithology field, an input, not terrain; the bytes SHALL not depend on the thread count.
+`generate --lithology-preview DIR [--seed N | --world F] [--km N]` SHALL write, with no GPU, equirectangular maps of the hardness, of K at the surface (caprock black) and 200 m below it, and of the soluble flag, a vertical cross-section through a mountain belt into a basin (K, caprock, the surface on top), and `lithology.txt` with the shares, the section's place and the band thickness against the share of the drop to the receiver that a pass-1 step removes. The text and the run's line SHALL say the images show the lithology field, an input, not terrain; the bytes SHALL not depend on the thread count.
 
 Verify: A
 Status: active

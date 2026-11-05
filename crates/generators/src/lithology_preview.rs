@@ -122,7 +122,16 @@ pub fn preview(source: &ClassSource, lithology: &Lithology, km: f64, threads: us
 fn numbers(rows: &[Vec<Pixel>], width: usize, height: usize, km: f64, seed: u64, section: &str) -> String {
     let land: Vec<&Pixel> = rows.iter().flatten().filter(|p| p.land).collect();
     let n = land.len().max(1) as f64;
-    let share = |f: &dyn Fn(&Pixel) -> bool| land.iter().filter(|p| f(p)).count() as f64 / n;
+    // The shares weigh each land pixel by the cosine of its latitude (an equirectangular pixel at a high latitude covers less ground); the quantiles count pixels.
+    let (mut total, mut weights) = (0.0, Vec::new());
+    for (y, row) in rows.iter().enumerate() {
+        let w = libm::cos(core::f64::consts::FRAC_PI_2 - (y as f64 + 0.5) / height as f64 * core::f64::consts::PI);
+        for p in row.iter().filter(|p| p.land) {
+            weights.push((p, w));
+            total += w;
+        }
+    }
+    let share = |f: &dyn Fn(&Pixel) -> bool| weights.iter().filter(|(p, _)| f(p)).map(|(_, w)| w).sum::<f64>() / total.max(1e-9);
     let quantile = |v: &mut Vec<f64>, q: f64| {
         v.sort_by(f64::total_cmp);
         v.get(((v.len().max(1) - 1) as f64 * q) as usize).copied().unwrap_or(0.0)
@@ -137,7 +146,7 @@ fn numbers(rows: &[Vec<Pixel>], width: usize, height: usize, km: f64, seed: u64,
         "version {LITHOLOGY_VERSION}, seed {seed}, {km} km a pixel, {width} x {height} pixels, land {:.1} % of the planet\n",
         100.0 * n / (width * height) as f64
     ));
-    out.push_str(&format!("hardness H over land: hard (H over 0.6) {:.1} %, soft (H under 0.4) {:.1} %; quantiles p5 {:.2}, p25 {:.2}, p50 {:.2}, p75 {:.2}, p95 {:.2}\n", 100.0 * share(&|p| p.hardness > 0.6), 100.0 * share(&|p| p.hardness < 0.4), quantile(&mut h, 0.05), quantile(&mut h, 0.25), quantile(&mut h, 0.5), quantile(&mut h, 0.75), quantile(&mut h, 0.95)));
+    out.push_str(&format!("hardness H over land (shares by area, quantiles by pixel): hard (H over 0.6) {:.1} %, soft (H under 0.4) {:.1} %; quantiles p5 {:.2}, p25 {:.2}, p50 {:.2}, p75 {:.2}, p95 {:.2}\n", 100.0 * share(&|p| p.hardness > 0.6), 100.0 * share(&|p| p.hardness < 0.4), quantile(&mut h, 0.05), quantile(&mut h, 0.25), quantile(&mut h, 0.5), quantile(&mut h, 0.75), quantile(&mut h, 0.95)));
     out.push_str(&format!("erodibility K at the surface over land: p5 {:.2}, p50 {:.2}, p95 {:.2} (a band of hardness 1 has K {K_HARD}, of hardness 0 has K {K_SOFT})\n", quantile(&mut k, 0.05), quantile(&mut k, 0.5), quantile(&mut k, 0.95)));
     out.push_str(&format!("caprock bands (hardness over {CAPROCK_HARDNESS}) at the surface: {:.1} % of land; soluble (over 0.5) at the surface: {:.1} % of land\n", 100.0 * share(&|p| p.caprock), 100.0 * share(&|p| p.soluble > 0.5)));
     out.push_str(section);
@@ -145,16 +154,16 @@ fn numbers(rows: &[Vec<Pixel>], width: usize, height: usize, km: f64, seed: u64,
     let carve = CarveParams::default();
     let dx = EARTH_RADIUS_M * core::f64::consts::FRAC_PI_2 / 12_288.0;
     out.push_str(&format!("band thickness {BAND_MIN_M:.0} to {BAND_MAX_M:.0} m (nominal {:.0} m); the lithology field is a function of height, read by the carve at the cell's current height in each step\n", crate::lithology::BAND_NOMINAL_M));
-    out.push_str(&format!("pass 1 height change a step (k_dt {}, {} steps, cell {:.0} m at 12,288 cells a face edge; the lowering of a cell is k_dt sqrt(A) / dx at its drainage area A):\n", carve.k_dt, carve.steps, dx));
+    out.push_str(&format!("pass 1 height change a step (the implicit carve: a cell moves to (z + uplift + F z_r) / (1 + F), F = k_dt sqrt(A) / dx, k_dt {}, {} steps, cell {:.0} m at 12,288 cells a face edge, the Earth radius assumed):\n", carve.k_dt, carve.steps, dx));
+    out.push_str("  a step removes F / (1 + F) of the drop to the receiver cell, so it never exceeds that drop; metres a step for a drop of 2, 8 and 40 m (a slope of 0.25, 1 and 5 % over a cell), and the steps the thinnest band takes to cross at that rate:\n");
     for area_km2 in [10.0, 100.0, 1_000.0, 10_000.0, 100_000.0] {
-        let step = carve.k_dt * libm::sqrt(area_km2 * 1e6) / dx;
-        out.push_str(&format!(
-            "  A {area_km2:>9.0} km2: {step:>6.2} m a step, {:>6.1} m over the run; the thinnest band takes {:>6.1} steps to cross\n",
-            step * carve.steps as f64,
-            BAND_MIN_M / step
-        ));
+        let f = carve.k_dt * libm::sqrt(area_km2 * 1e6) / dx;
+        let share = f / (1.0 + f);
+        let cells: Vec<String> =
+            [2.0, 8.0, 40.0].iter().map(|drop| format!("{:>5.1} m ({:>5.1} steps)", share * drop, BAND_MIN_M / (share * drop))).collect();
+        out.push_str(&format!("  A {area_km2:>9.0} km2: F {f:>6.2}, {:>4.0} % of the drop a step: {}\n", 100.0 * share, cells.join(", ")));
     }
-    out.push_str("  (a step is small against a band wherever the area is under about 1e3 km2; on the largest rivers (1e5 km2) a thin band is crossed in 1 to 2 steps: marginally resolved, and the carve re-reads K at the new height each step)\n");
+    out.push_str("  (the thinnest band, 30 m, is crossed in 4 or more steps wherever the drop to the receiver is 8 m or less; on a steep slope with a large drainage area (a drop of 40 m, F over 1) a step crosses a thin band: marginally resolved there, and the carve re-reads K at the new height each step. Uplift adds u_over_k * k_dt = 1 m a step)\n");
     out
 }
 

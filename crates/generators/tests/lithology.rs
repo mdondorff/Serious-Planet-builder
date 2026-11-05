@@ -5,7 +5,8 @@ use planet_core::hash::SplitMix64;
 use planet_core::Vec3;
 use planet_generators::classes::ClassSource;
 use planet_generators::lithology::{
-    erodibility, Lithology, ProvinceLattice, Provinces, BAND_MAX_M, BAND_MIN_M, CAPROCK_HARDNESS, K_HARD, K_SOFT, LITHOLOGY_VERSION,
+    erodibility, Lithology, ProvinceLattice, Provinces, BAND_BLEND, BAND_MAX_M, BAND_MIN_M, CAPROCK_HARDNESS, K_HARD, K_SOFT,
+    LITHOLOGY_VERSION,
 };
 use planet_generators::lithology_preview::preview;
 
@@ -102,8 +103,9 @@ fn the_strata_are_bands_of_30_to_170_metres_whose_erodibility_is_continuous_in_t
         let mut z = 0.25;
         while z < 1500.0 {
             let s = col.at(z);
-            // No jump: the blend over a band's edge keeps the erodibility continuous (a step of a quarter metre moves it by under 0.4).
-            assert!((s.k - prev.k).abs() < 0.4, "a jump of {} in K at z {z}", (s.k - prev.k).abs());
+            // No jump: the blend over a band's edge (8 % of the band each side, the thinnest 30 m) moves K by at most half the bounds' span over 2.4 m: a step of a quarter metre moves it by under 0.11.
+            let bound = (K_SOFT - K_HARD) * 0.5 / (BAND_BLEND * BAND_MIN_M) * 0.25 * 1.2;
+            assert!((s.k - prev.k).abs() < bound, "a jump of {} in K at z {z} (bound {bound})", (s.k - prev.k).abs());
             if s.band != band {
                 changes += 1;
                 if changes > 1 {
@@ -145,9 +147,24 @@ fn the_province_lattice_reads_back_the_class_sources_terms_at_its_nodes_and_is_c
     }
     // Two points a hair apart on either side of a cube edge read nearly the same terms.
     let edge = planet_core::cube::face_to_direction(&planet_core::cube::TangentWarp, planet_core::Face(0), 1.0, 0.2);
-    let (a, b) = (edge + Vec3::new(0.0, 0.0, 1e-7), edge + Vec3::new(1e-7, 0.0, 0.0));
-    let (pa, pb) = (lith.provinces().at(a.normalized()), lith.provinces().at(b.normalized()));
-    assert!((pa.core - pb.core).abs() < 0.01 && (pa.basin - pb.basin).abs() < 0.01);
+    // (`x > y` reads face 0, `y > x` face 2: the two points lie on either side of the edge.)
+    let (a, b) = ((edge + Vec3::new(1e-7, 0.0, 0.0)).normalized(), (edge + Vec3::new(0.0, 1e-7, 0.0)).normalized());
+    assert_ne!(
+        planet_core::cube::direction_to_face(&planet_core::cube::TangentWarp, a).0,
+        planet_core::cube::direction_to_face(&planet_core::cube::TangentWarp, b).0,
+        "the points are on two faces"
+    );
+    let (pa, pb) = (lith.provinces().at(a), lith.provinces().at(b));
+    for (x, y) in [
+        (pa.craton, pb.craton),
+        (pa.core, pb.core),
+        (pa.foreland, pb.foreland),
+        (pa.basin, pb.basin),
+        (pa.rift, pb.rift),
+        (pa.old_margin, pb.old_margin),
+    ] {
+        assert!((x - y).abs() < 1e-3, "{x} against {y} across the edge");
+    }
 }
 
 // spec: GEN-122
@@ -168,7 +185,7 @@ fn the_preview_is_the_same_bytes_for_any_thread_count_and_labels_its_images_as_i
     // The text says what the images are, and carries the shares and the band thickness against the carve's per-step change.
     for needle in [
         "lithology field (input), not terrain",
-        "hardness H over land: hard",
+        "hardness H over land (shares by area, quantiles by pixel): hard",
         "caprock bands",
         "soluble",
         "cross-section:",

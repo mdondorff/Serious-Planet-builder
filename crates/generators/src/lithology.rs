@@ -43,7 +43,8 @@ pub const OFFSET_OROGEN_M: f64 = 1200.0;
 const TILT_FREQUENCY: f64 = 60.0;
 const FOLD_FREQUENCY: f64 = 120.0;
 /// The share of a band's thickness over which its erodibility blends into its neighbour's (each side of an edge).
-const BLEND: f64 = 0.08;
+pub const BAND_BLEND: f64 = 0.08;
+const _: () = assert!(BAND_JITTER < 0.5, "the band lookup assumes an edge jitters by under half a nominal thickness");
 
 const LAYER_HARDNESS: u64 = 0x4c49_0001;
 const LAYER_TILT: u64 = 0x4c49_0002;
@@ -259,7 +260,7 @@ impl Lithology {
         self.column(d).at(z)
     }
 
-    /// The erodibility the carve reads at `d` and height `z`.
+    /// The erodibility at `d` and height `z`. It rebuilds the [`Column`] on every call: for many heights at one direction (a carve's steps), take [`Lithology::column`] once and call [`Column::at`].
     pub fn k_at(&self, d: Vec3, z: f64) -> f64 {
         self.strata(d, z).k
     }
@@ -286,20 +287,20 @@ impl Column {
     pub fn at(&self, z: f64) -> Stratum {
         let u = (z - self.offset_m) / BAND_NOMINAL_M;
         let n0 = libm::floor(u) as i64;
-        // The band that holds `u`: its edges jitter by less than half a nominal thickness, so it is one of the three around `n0`.
-        let n = if u < self.edge(n0) {
-            n0 - 1
-        } else if u >= self.edge(n0 + 1) {
-            n0 + 1
+        // The band that holds `u`: its edges jitter by less than half a nominal thickness, so it is one of the three around `n0`; the edges already read are not read again.
+        let (e0, e1) = (self.edge(n0), self.edge(n0 + 1));
+        let (n, lo, hi) = if u < e0 {
+            (n0 - 1, self.edge(n0 - 1), e0)
+        } else if u >= e1 {
+            (n0 + 1, e1, self.edge(n0 + 2))
         } else {
-            n0
+            (n0, e0, e1)
         };
-        let (lo, hi) = (self.edge(n), self.edge(n + 1));
         let thickness = hi - lo;
         let h = self.band_hardness(n);
         let mut k = erodibility(h);
         // Near an edge the erodibility blends into the neighbour's, so that it is continuous in the height (a half-and-half mix at the edge itself).
-        let e = BLEND * thickness;
+        let e = BAND_BLEND * thickness;
         if u - lo < e {
             let w = 0.5 + 0.5 * (u - lo) / e;
             k = erodibility(self.band_hardness(n - 1)) * (1.0 - w) + k * w;
