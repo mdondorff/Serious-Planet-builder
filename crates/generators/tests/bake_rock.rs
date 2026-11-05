@@ -249,3 +249,29 @@ fn a_caprock_over_soft_rock_forms_a_step_because_a_step_never_lowers_a_cell_past
     assert!(skipped > 0, "the carve without the edge lowered no cell through the cap: the test does not tell the edge from none");
     assert!(held > 0, "no cell stopped at the cap's top");
 }
+
+// spec: GEN-127
+#[test]
+fn the_bakes_erodibility_has_a_land_mean_of_one_at_the_surface() {
+    use planet_generators::bake::inputs::BakeInputs;
+    let a = BakeInputs::new(14, 8); // the factor is a serial sum over a fixed sample: the threads only build the lattices
+    assert!(a.k_norm() > 1.2, "seed 14's raw lithology mean is about 0.69, so the factor is above 1: {}", a.k_norm());
+    // A sample other than the normalising one (a spiral of another size): the land mean of the carve's K at the surface is 1 within 3 %.
+    let n = 30_000usize;
+    let golden = core::f64::consts::PI * (3.0 - libm::sqrt(5.0));
+    let (mut sum, mut land) = (0.0, 0usize);
+    for i in 0..n {
+        let y = 1.0 - 2.0 * (i as f64 + 0.37) / n as f64;
+        let r = libm::sqrt(1.0 - y * y);
+        let (s, c) = libm::sincos(golden * i as f64 + 1.3);
+        let d = Vec3::new(r * c, y, r * s);
+        let z = a.base(d);
+        if z > 0.0 {
+            sum += a.rock_k(d, z).k;
+            land += 1;
+        }
+    }
+    let mean = sum / land as f64;
+    assert!(land > 5000, "{land} land points");
+    assert!((mean - 1.0).abs() < 0.03, "the land mean of K is {mean}, not 1");
+}
