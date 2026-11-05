@@ -1231,7 +1231,7 @@ Source: opus-planner (2026-11-03), the edit-latency smoke at 5 tile workers (#11
 - **THEN** they are not named, and each loads the new field's key
 
 ### Requirement: STRM-075 The channel reader owns its handles, reads the area through windows and caches under byte caps
-The channel reader (`LayerChannels`, STRM-072) SHALL own its store and world handles and implement the generators' `ChannelSource` (the area as log2 of cells, the deposited depth in metres). It SHALL read the drainage area through windows of the face (256 cells and the one past) streamed from the record, never holding a face whole, with the same codes as the same cells of the whole face (it checks the rows it reads, the key and the header). It SHALL hold windows and depth tiles under byte caps that keep the entry just decoded, and workers asking for one window together SHALL decode it once. The decode that skips the key check SHALL be a diagnostic that no viewer or generation code calls.
+The channel reader (`LayerChannels`, STRM-072) SHALL own its store and world handles and implement the generators' `ChannelSource` (the area as log2 of cells, the deposited depth in metres). It SHALL read the drainage area through windows of the face (256 cells and the one past) streamed from the record, never holding a face whole, with the same codes as the same cells of the whole face (checking its rows, key and header). It SHALL hold windows and depth tiles under byte caps that keep the entry just decoded, and workers asking for one window together SHALL decode it once. The decode that skips the key check SHALL be a diagnostic no viewer or generation code calls.
 
 Verify: A
 Status: active
