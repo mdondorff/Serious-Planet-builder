@@ -91,12 +91,12 @@ struct Globals {
     // Lit path only: x = the strength of the ground detail (LOOK-009; 0 off), y = the base reflectance f0 of the specular term (LOOK-010); then the response curves of the ground materials (LOOK-008): per
     // material four vec4s of two (lo, hi) pairs each, one pair per input.
     detail: vec4<f32>,
-    materials: array<vec4<f32>, 16>,
-    // The specular term of the ground (LOOK-010): the roughness of the four materials, then two roughness modifiers (input, lo, hi, factor).
-    gloss: array<vec4<f32>, 3>,
+    materials: array<vec4<f32>, 24>,
+    // The specular term of the ground (LOOK-010): the roughness of the first four materials, of scree and wet ground (and two zeros), then two roughness modifiers (input, lo, hi, factor).
+    gloss: array<vec4<f32>, 4>,
     // The coefficients of the detail octaves per material (LOOK-013): per octave (16 m, 2 m, 25 cm, 3 cm) the albedo of rock, sand, - and soil, the colour of grass, and the tilts of
-    // rock, sand, grass and soil; then the depth of the rock's cracks in x.
-    coef: array<vec4<f32>, 13>,
+    // rock, sand, grass and soil, and the albedo and tilt of scree and of wet ground (scree albedo, wet albedo, scree tilt, wet tilt); then the depth of the rock's cracks in x.
+    coef: array<vec4<f32>, 17>,
     // The edit preview (REND-033), read only for a previewed node and only when extra.w (the count in the low 6 bits, at most 32, and 64 times the number of stamps of the delta above them) is above 0: per stamp two
     // entries, (anchor relative to the camera, reach in metres) and (amount in metres, kind 1 hill / 2 crater / 3 plateau, sign, bound).
     preview: array<vec4<f32>, 64>,
@@ -399,10 +399,20 @@ fn pair_response(v: vec4<f32>, x: vec2<f32>) -> vec2<f32> {
     return select(s * s * (vec2<f32>(3.0) - 2.0 * s), vec2<f32>(1.0), lo == hi);
 }
 
-fn material_weights(ia: vec4<f32>, ib: vec4<f32>) -> vec4<f32> {
+// The weights of the six materials: rock, sand, grass and soil in `a`, scree and wet ground in `b`.
+struct MaterialW {
+    a: vec4<f32>,
+    b: vec2<f32>,
+};
+
+fn material_weights(ia: vec4<f32>, ib: vec4<f32>) -> MaterialW {
     let w = vec4<f32>(material_weight(0u, ia, ib), material_weight(4u, ia, ib), material_weight(8u, ia, ib), material_weight(12u, ia, ib));
-    let sum = w.x + w.y + w.z + w.w;
-    return select(vec4<f32>(0.0), w / sum, sum > 0.0);
+    let w2 = vec2<f32>(material_weight(16u, ia, ib), material_weight(20u, ia, ib));
+    let sum = w.x + w.y + w.z + w.w + w2.x + w2.y;
+    if (sum > 0.0) {
+        return MaterialW(w / sum, w2 / sum);
+    }
+    return MaterialW(vec4<f32>(0.0), vec2<f32>(0.0));
 }
 
 // One octave of the ground detail: the gradient in xyz and the value in w, both faded by the pixel footprint `foot` (an octave fades out while
@@ -434,8 +444,10 @@ fn gd_octave(cell: vec3<i32>, frac: vec3<f32>, local: vec3<f32>, foot: f32, shif
 
 // The albedo coefficient of one octave summed over the materials: `a` holds the rock's, the sand's and the soil's scalar coefficients (x, y, w; z
 // unused) times their tints, `grass` the grass's colour coefficient; `w` the material weights (summing to 1).
-fn gd_tint(w: vec4<f32>, a: vec4<f32>, grass: vec3<f32>) -> vec3<f32> {
-    return (w.x * a.x) * vec3<f32>(1.0, 0.98, 0.95) + (w.y * a.y) * vec3<f32>(1.0, 1.0, 0.98) + w.z * grass + (w.w * a.w) * vec3<f32>(1.0, 0.95, 0.90);
+// `w2` the weights of scree and wet ground, `x2` their albedo coefficients (scree, wet).
+fn gd_tint(w: vec4<f32>, w2: vec2<f32>, a: vec4<f32>, x2: vec2<f32>, grass: vec3<f32>) -> vec3<f32> {
+    return (w.x * a.x) * vec3<f32>(1.0, 0.98, 0.95) + (w.y * a.y) * vec3<f32>(1.0, 1.0, 0.98) + w.z * grass + (w.w * a.w) * vec3<f32>(1.0, 0.95, 0.90)
+        + (w2.x * x2.x) * vec3<f32>(1.0, 0.97, 0.94) + (w2.y * x2.y) * vec3<f32>(0.92, 0.92, 0.95);
 }
 
 struct GroundDetail {
@@ -494,8 +506,10 @@ fn ground_detail(node_index: u32, local: vec3<f32>, normal: vec3<f32>, up: vec3<
     let ia = vec4<f32>(cs_w, h, t, p);
     // The surface type is 0 outside regions; the three driver slots (LOOK-008) are the tile's blended soil depth, moisture and insolation.
     let ib = vec4<f32>(0.0, drv.x, drv.y, drv.z);
-    let w = material_weights(ia, ib);
-    if (w.x + w.y + w.z + w.w <= 0.0) {
+    let mw = material_weights(ia, ib);
+    let w = mw.a;
+    let w2 = mw.b;
+    if (w.x + w.y + w.z + w.w + w2.x + w2.y <= 0.0) {
         return out;
     }
     // The detail is a sum over the octaves of the materials' coefficients, weighted by the material weights: the albedo multiplier is linear in
@@ -504,21 +518,21 @@ fn ground_detail(node_index: u32, local: vec3<f32>, normal: vec3<f32>, up: vec3<
     // loop over arrays indexed by its counter puts them in local memory). Four octaves, cells of 16 m, 2 m, 25 cm and 3 cm.
     // `gd_tint(w, (rock, sand, -, soil), grass)` is the weighted albedo coefficient of one octave; `dot(w, (rock, sand, grass, soil))` the tilt's.
     let grass_mean = vec3<f32>(1.0);
-    // The coefficients per octave are the look's (`g.coef`, LOOK-013; the Earth values are the constants this code had): three vec4s an octave, the albedo of rock, sand, - and soil, the
-    // grass colour and the tilts. The rock's tilt grows with the steepness (the patch break-up) at 2 m and 25 cm.
-    var mul = gd_tint(w, vec4<f32>(1.0, 1.0, 0.0, 1.0), grass_mean);
+    // The coefficients per octave are the look's (`g.coef`, LOOK-013; the Earth values are the constants this code had): four vec4s an octave, the albedo of rock, sand, - and soil, the
+    // grass colour, the tilts and the scree and wet albedo and tilt. The rock's tilt grows with the steepness (the patch break-up) at 2 m and 25 cm.
+    var mul = gd_tint(w, w2, vec4<f32>(1.0, 1.0, 0.0, 1.0), vec2<f32>(1.0), grass_mean);
     var slope = vec3<f32>(0.0);
     {
         // 16 m: the patches of the ground.
         let o = gd_octave(cell, frac, local, foot, 9u, 0u, axes);
-        mul = mul + o.w * gd_tint(w, g.coef[0], g.coef[1].xyz);
-        slope = slope + dot(w, g.coef[2]) * o.xyz;
+        mul = mul + o.w * gd_tint(w, w2, g.coef[0], g.coef[3].xy, g.coef[1].xyz);
+        slope = slope + (dot(w, g.coef[2]) + dot(w2, g.coef[3].zw)) * o.xyz;
     }
     {
         // 2 m: the mounds and the clumps.
         let o = gd_octave(cell, frac, local, foot, 6u, 1u, axes);
-        mul = mul + o.w * gd_tint(w, g.coef[3], g.coef[4].xyz);
-        slope = slope + dot(w, vec4<f32>(g.coef[5].x * (1.0 + 2.0 * steep), g.coef[5].y, g.coef[5].z, g.coef[5].w)) * o.xyz;
+        mul = mul + o.w * gd_tint(w, w2, g.coef[4], g.coef[7].xy, g.coef[5].xyz);
+        slope = slope + (dot(w, vec4<f32>(g.coef[6].x * (1.0 + 2.0 * steep), g.coef[6].y, g.coef[6].z, g.coef[6].w)) + dot(w2, g.coef[7].zw)) * o.xyz;
     }
     {
         // 25 cm: the stones, the tufts and the ripples.
@@ -527,19 +541,19 @@ fn ground_detail(node_index: u32, local: vec3<f32>, normal: vec3<f32>, up: vec3<
         // (`o.w` is faded with the octave: the crest is judged on the unfaded value.)
         let fade3 = 1.0 - smoothstep(0.06, 0.25, foot * 4.0);
         let crack = smoothstep(0.80, 1.0, 1.0 - abs(o.w / max(fade3, 1.0e-3))) * fade3;
-        mul = mul + o.w * gd_tint(w, g.coef[6], g.coef[7].xyz) - (g.coef[12].x * crack * w.x) * vec3<f32>(1.0, 0.98, 0.95);
-        slope = slope + dot(w, vec4<f32>(g.coef[8].x * (1.0 + steep), g.coef[8].y, g.coef[8].z, g.coef[8].w)) * o.xyz;
+        mul = mul + o.w * gd_tint(w, w2, g.coef[8], g.coef[11].xy, g.coef[9].xyz) - (g.coef[16].x * crack * w.x) * vec3<f32>(1.0, 0.98, 0.95);
+        slope = slope + (dot(w, vec4<f32>(g.coef[10].x * (1.0 + steep), g.coef[10].y, g.coef[10].z, g.coef[10].w)) + dot(w2, g.coef[11].zw)) * o.xyz;
     }
     {
         // 3 cm: the grain and the blades.
         let o = gd_octave(cell, frac, local, foot, 0u, 3u, axes);
-        mul = mul + o.w * gd_tint(w, g.coef[9], g.coef[10].xyz);
-        slope = slope + dot(w, g.coef[11]) * o.xyz;
+        mul = mul + o.w * gd_tint(w, w2, g.coef[12], g.coef[15].xy, g.coef[13].xyz);
+        slope = slope + (dot(w, g.coef[14]) + dot(w2, g.coef[15].zw)) * o.xyz;
     }
     mul = max(mul, vec3<f32>(0.2));
     // The roughness: the weights' mean of the materials', scaled by the modifiers (the wet and the icy ground are glossy).
-    var rough = dot(w, g.gloss[0]);
-    for (var j = 1u; j < 3u; j = j + 1u) {
+    var rough = dot(w, g.gloss[0]) + dot(w2, g.gloss[1].xy);
+    for (var j = 2u; j < 4u; j = j + 1u) {
         let m = g.gloss[j];
         if (m.y != m.z) {
             let c = u32(m.x);
@@ -549,7 +563,7 @@ fn ground_detail(node_index: u32, local: vec3<f32>, normal: vec3<f32>, up: vec3<
         }
     }
     out.rough = rough;
-    out.tone = w.x * vec3<f32>(0.285, 0.275, 0.265) + w.y * vec3<f32>(0.58, 0.50, 0.36) + w.z * vec3<f32>(0.10, 0.20, 0.045) + w.w * vec3<f32>(0.12, 0.08, 0.05);
+    out.tone = w.x * vec3<f32>(0.285, 0.275, 0.265) + w.y * vec3<f32>(0.58, 0.50, 0.36) + w.z * vec3<f32>(0.10, 0.20, 0.045) + w.w * vec3<f32>(0.12, 0.08, 0.05) + w2.x * vec3<f32>(0.33, 0.31, 0.29) + w2.y * vec3<f32>(0.07, 0.06, 0.05);
     out.mul = mix(vec3<f32>(1.0), mul, strength);
     out.normal = normalize(n - strength * (slope - dot(slope, n) * n));
     return out;

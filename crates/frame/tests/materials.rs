@@ -238,3 +238,37 @@ fn a_look_with_a_curve_on_the_moisture_gives_soil_to_the_wet_hollow_and_not_to_t
     assert!(look.weights(&with_drivers(flat, hollow))[3] > 0.1, "soil takes weight in the wet hollow");
     assert_eq!(look.weights(&with_drivers(flat, flank))[3], 0.0, "and none on the dry flank");
 }
+
+// spec: REND-056
+#[test]
+fn the_six_weights_sum_to_one_with_a_new_slot_on_and_the_words_lay_the_new_slots_where_the_shader_reads_them() {
+    use planet_frame::look::materials::{DetailCoefficients, GlossParams, COEF_VEC4S, GLOSS_VEC4S, MATERIAL_VEC4S};
+    assert_eq!((MATERIALS, MATERIAL_VEC4S, GLOSS_VEC4S, COEF_VEC4S), (6, 24, 4, 17));
+    let mut m = MaterialParams::EARTH;
+    assert!(!m.is_on(4) && !m.is_on(5));
+    let before = m.weights(&at(0.7, 500.0));
+    // Scree on steep-ish ground and wet ground everywhere: both take weight and the six still sum to one.
+    m.curves[4][Input::SlopeCos as usize] = [0.9, 0.5];
+    m.curves[5][Input::Precipitation as usize] = [0.0, 100.0];
+    let w = m.weights(&at(0.7, 500.0));
+    assert!(w[4] > 0.0 && w[5] > 0.0 && (w.iter().sum::<f64>() - 1.0).abs() < 1e-12, "{w:?}");
+    assert!(w[0] < before[0], "the new slots take weight from the old ones");
+    // The curve words: material m, input k at (m * 8 + k) * 2.
+    let words = m.to_words();
+    let k = Input::SlopeCos as usize;
+    assert_eq!([words[(4 * INPUTS + k) * 2], words[(4 * INPUTS + k) * 2 + 1]], [0.9, 0.5]);
+    // The coefficient words: per octave four vec4s, the scree and wet entries in the fourth (scree albedo, wet albedo, scree tilt, wet tilt); the crack after them.
+    let mut c = DetailCoefficients::EARTH;
+    c.octaves[1].scree = [0.11, 0.22];
+    c.octaves[1].wet = [0.33, 0.44];
+    let cw = c.to_words();
+    assert_eq!(&cw[(4 + 3) * 4..(4 + 3) * 4 + 4], &[0.11f32, 0.33, 0.22, 0.44]);
+    assert_eq!(cw[16 * 4], DetailCoefficients::EARTH.crack as f32);
+    // The roughness words: the first four, then scree and wet, then the modifiers from the third vec4.
+    let g = GlossParams::EARTH.to_words();
+    assert_eq!(&g[..8], &[0.85f32, 0.65, 0.75, 0.80, 0.90, 0.35, 0.0, 0.0]);
+    assert_eq!(g[8], GlossParams::EARTH.modifiers[0][0] as f32);
+    let mut bad = GlossParams::EARTH;
+    bad.roughness[5] = 0.0;
+    assert!(bad.validate().unwrap_err().0.contains("wet"));
+}

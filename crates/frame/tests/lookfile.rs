@@ -16,6 +16,7 @@ const FIXTURE_V4: &str = include_str!("data/look_v4_water.toml");
 const FIXTURE_V5: &str = include_str!("data/look_v5_ground.toml");
 const FIXTURE_V6: &str = include_str!("data/look_v6_patch.toml");
 const FIXTURE_V7: &str = include_str!("data/look_v7_coef.toml");
+const FIXTURE_V8: &str = include_str!("data/look_v8_scree_wet.toml");
 
 fn err(text: &str) -> String {
     parse_look(text).unwrap_err().to_string()
@@ -74,7 +75,7 @@ fn canonical_text_is_deterministic_and_round_trips_bit_for_bit() {
     let text = to_toml(&f);
     assert_eq!(parse_look(&text).unwrap(), f);
     assert_eq!(to_toml(&parse_look(&text).unwrap()), text, "writing what was read gives the same text");
-    assert!(text.starts_with("schema_version = 7\nkind = \"look\"\n"));
+    assert!(text.starts_with("schema_version = 8\nkind = \"look\"\n"));
     let order: Vec<usize> = ["[body.0.units]", "[body.7.units]", "[body.12.units]"].iter().map(|k| text.find(k).unwrap()).collect();
     assert!(order[0] < order[1] && order[1] < order[2], "bodies are written in id order");
     // The same content from a differently formatted file writes the same text.
@@ -253,11 +254,15 @@ fn migration_failures_name_the_step_and_the_gap() {
 #[test]
 fn the_production_chain_reads_the_version_1_fixture_and_writes_the_current_layout() {
     assert_eq!(
-        SCHEMA_VERSION, 7,
+        SCHEMA_VERSION, 8,
         "a new table or key needs a new version, an identity step in MIGRATIONS and a fixture of this version kept"
     );
     assert_eq!(MIGRATIONS.len() as u32, SCHEMA_VERSION - 1, "one step per older version");
-    assert_eq!(MIGRATIONS.iter().map(|m| m.from).collect::<Vec<_>>(), [1, 2, 3, 4, 5, 6], "the steps run from version 1 up without a gap");
+    assert_eq!(
+        MIGRATIONS.iter().map(|m| m.from).collect::<Vec<_>>(),
+        [1, 2, 3, 4, 5, 6, 7],
+        "the steps run from version 1 up without a gap"
+    );
     // The version 1 fixture goes through the real chain (the identity step 1 to 2) and reads as written.
     let f = parse_look(FIXTURE_V1).unwrap();
     assert_eq!(f.body(BodyId(3)).units.solar_illuminance_lux, 25_000.0);
@@ -675,4 +680,67 @@ fn the_octave_coefficients_of_the_ground_look_are_read_written_and_checked_and_a
     assert!(plan.validate().is_ok() && wrong.validate().unwrap_err().contains("ground.crack"));
     let by_default = plain.with_ground_look(look::materials::LookChoice::Default, look::materials::GroundDetailMode::Natural, &g);
     assert_eq!(by_default.coef, DetailCoefficients::EARTH);
+}
+
+// spec: REND-056
+#[test]
+fn the_scree_and_wet_materials_and_octave_entries_are_read_written_and_checked_and_a_version_7_file_reads_with_them_off() {
+    use planet_frame::look::materials::{DetailCoefficients, Input, MaterialParams};
+    let f = parse_look(FIXTURE_V8).unwrap();
+    let g = f.body(BodyId(1)).ground;
+    assert_eq!(g.materials.curves[4][Input::SlopeCos as usize], [0.80, 0.55]);
+    assert_eq!(g.materials.curves[5][Input::Moisture as usize], [0.0, 0.6]);
+    assert!(g.materials.is_on(4) && g.materials.is_on(5));
+    assert_eq!(g.coef.octaves[2].scree, [0.30, 0.25]);
+    assert_eq!(g.coef.octaves[2].wet, [0.12, 0.08]);
+    assert_eq!(g.coef.octaves[0], DetailCoefficients::EARTH.octaves[0], "an octave left out is the Earth default");
+    assert_eq!(parse_look(&to_toml(&f)).unwrap(), f);
+    assert_eq!(to_toml(&parse_look(&to_toml(&f)).unwrap()), to_toml(&f));
+    // A version 7 file reads equal with scree and wet ground off, and a build that knows only version 7 refuses the version 8 file as newer.
+    let v7 = parse_look(FIXTURE_V7).unwrap();
+    assert!(!v7.body(BodyId(1)).ground.materials.is_on(4) && !v7.body(BodyId(1)).ground.materials.is_on(5));
+    assert_eq!(v7.body(BodyId(1)).ground.materials.curves, {
+        let mut c = MaterialParams::EARTH.curves;
+        c[4] = [[0.0; 2]; 8];
+        c[5] = [[0.0; 2]; 8];
+        c
+    });
+    let older = parse_with(FIXTURE_V8, 7, &MIGRATIONS[..6]).unwrap_err();
+    assert_eq!(older, LookError::NewerSchema { found: 8, known: 7 });
+    // Bad numbers and unknown keys are refused naming the key.
+    let head = "schema_version = 8
+kind = \"look\"
+[body.0.ground]
+";
+    for (text, key) in [
+        (
+            format!(
+                "{head}[body.0.ground.octave.m2]
+scree = [0.1, -0.2]
+"
+            ),
+            "ground.octave.m2.scree",
+        ),
+        (
+            format!(
+                "{head}[body.0.ground.octave.m2]
+wet = [0.1]
+"
+            ),
+            "ground.octave.m2.wet",
+        ),
+        (
+            format!(
+                "{head}[body.0.ground.scree]
+heat = [0.0, 1.0]
+"
+            ),
+            "ground.scree",
+        ),
+    ] {
+        let e = parse_look(&text).unwrap_err().to_string();
+        assert!(e.contains(key), "{key}: {e}");
+    }
+    // The Earth default has both off and the Earth plan is the plain one.
+    assert!(!MaterialParams::EARTH.is_on(4) && !MaterialParams::EARTH.is_on(5));
 }

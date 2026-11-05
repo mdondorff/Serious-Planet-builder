@@ -71,7 +71,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 /// Schema version this build writes and reads without migration.
-pub const SCHEMA_VERSION: u32 = 7;
+pub const SCHEMA_VERSION: u32 = 8;
 
 const VERSION_KEY: &str = "schema_version";
 const KIND_KEY: &str = "kind";
@@ -459,6 +459,11 @@ fn v6_to_v7(_: &mut toml::Table) -> Result<(), String> {
     Ok(())
 }
 
+/// Version 7 to 8 adds the optional `scree` and `wet` materials and their `scree` and `wet` octave entries of the `ground` table (REND-056); again no existing key moves.
+fn v7_to_v8(_: &mut toml::Table) -> Result<(), String> {
+    Ok(())
+}
+
 /// Migrations from every older version to the current one.
 pub const MIGRATIONS: &[Migration] = &[
     Migration { from: 1, apply: v1_to_v2 },
@@ -467,6 +472,7 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { from: 4, apply: v4_to_v5 },
     Migration { from: 5, apply: v5_to_v6 },
     Migration { from: 6, apply: v6_to_v7 },
+    Migration { from: 7, apply: v7_to_v8 },
 ];
 
 /// The look of every body that has an entry. A body without an entry has the Earth default.
@@ -685,6 +691,8 @@ fn read_body(path: &str, mut t: toml::Table) -> Result<LookParams, LookError> {
                             take_array(&tk, &mut t, "albedo", &mut o.albedo)?;
                             take_array(&tk, &mut t, "grass", &mut o.grass)?;
                             take_array(&tk, &mut t, "tilt", &mut o.tilt)?;
+                            take_array(&tk, &mut t, "scree", &mut o.scree)?;
+                            take_array(&tk, &mut t, "wet", &mut o.wet)?;
                             no_more(&tk, &t)?;
                         }
                         Some(other) => {
@@ -955,7 +963,9 @@ pub fn to_toml(file: &LookFile) -> String {
         out.push_str(&line("crack", p.ground.coef.crack));
         for (name, o) in OCTAVE_NAMES.iter().zip(&p.ground.coef.octaves) {
             out.push_str(&format!("\n[body.{b}.ground.octave.{name}]\n"));
-            for (key, vals) in [("albedo", &o.albedo[..]), ("grass", &o.grass[..]), ("tilt", &o.tilt[..])] {
+            for (key, vals) in
+                [("albedo", &o.albedo[..]), ("grass", &o.grass[..]), ("tilt", &o.tilt[..]), ("scree", &o.scree[..]), ("wet", &o.wet[..])]
+            {
                 let list: Vec<String> = vals.iter().map(|v| format!("{v:?}")).collect();
                 out.push_str(&format!("{key} = [{}]\n", list.join(", ")));
             }

@@ -120,7 +120,13 @@ fn parse_look(root: &toml::Table) -> Result<LookOverride, String> {
             let material = planet_frame::look::materials::MATERIAL_NAMES
                 .iter()
                 .position(|m| *m == name("material").unwrap_or(""))
-                .ok_or_else(|| format!("{whose}: material {:?} is not rock, sand, grass or soil", name("material").unwrap_or("")))?;
+                .ok_or_else(|| {
+                    format!(
+                        "{whose}: material {:?} is not one of {:?}",
+                        name("material").unwrap_or(""),
+                        planet_frame::look::materials::MATERIAL_NAMES
+                    )
+                })?;
             let input = INPUTS
                 .iter()
                 .position(|i| *i == name("input").unwrap_or(""))

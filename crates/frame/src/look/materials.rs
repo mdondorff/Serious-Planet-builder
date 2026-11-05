@@ -18,9 +18,9 @@
 use super::shading::smoothstep;
 
 /// The materials the ground detail knows (slots of the curve table).
-pub const MATERIALS: usize = 4;
+pub const MATERIALS: usize = 6;
 /// The names of the material slots, in order.
-pub const MATERIAL_NAMES: [&str; MATERIALS] = ["rock", "sand", "grass", "soil"];
+pub const MATERIAL_NAMES: [&str; MATERIALS] = ["rock", "sand", "grass", "soil", "scree", "wet"];
 /// The inputs of the weight function.
 pub const INPUTS: usize = 8;
 /// The names of the inputs in the order of [`Input`], as the look file and the poses file write them.
@@ -80,7 +80,7 @@ const OFF: [f64; 2] = [0.0, 0.0];
 
 impl MaterialParams {
     /// The Earth default: rock on steep ground, sand where it is dry, grass where it is wet, both on flat ground; the thresholds are those of the
-    /// base albedo (`AlbedoParams::EARTH`), so the detail and the colour agree on what is rock, desert and vegetation. Soil is off.
+    /// base albedo (`AlbedoParams::EARTH`), so the detail and the colour agree on what is rock, desert and vegetation. Soil, scree and wet ground are off.
     pub const EARTH: MaterialParams = {
         let mut c = [[OFF; INPUTS]; MATERIALS];
         // Rock: falls from 0.86 (flat enough for soil) to 0.62 (bare rock) in the slope cosine.
@@ -202,12 +202,14 @@ impl MaterialParams {
 pub const COEF_OCTAVES: usize = 4;
 /// The names of the octaves in the look file (`ground.octave.<name>`).
 pub const OCTAVE_NAMES: [&str; COEF_OCTAVES] = ["m16", "m2", "cm25", "cm3"];
-/// Values of one octave: the albedo coefficient of rock, sand and soil, the colour coefficient of grass, and the tilt of rock, sand, grass and soil.
-pub const OCTAVE_VALUES: usize = 3 + 3 + 4;
+/// Values of one octave: the albedo coefficient of rock, sand and soil, the colour coefficient of grass, the tilt of rock, sand, grass and soil, and the
+/// albedo coefficient and tilt of scree and of wet ground.
+pub const OCTAVE_VALUES: usize = 3 + 3 + 4 + 2 + 2;
 /// Values of [`DetailCoefficients`]: the octaves, then the depth of the rock's cracks.
 pub const COEF_VALUES: usize = COEF_OCTAVES * OCTAVE_VALUES + 1;
-/// Number of `vec4<f32>` words the table occupies: per octave the albedo (rock, sand, 0, soil), the grass colour and the tilt, then one for the cracks.
-pub const COEF_VEC4S: usize = COEF_OCTAVES * 3 + 1;
+/// Number of `vec4<f32>` words the table occupies: per octave the albedo (rock, sand, 0, soil), the grass colour, the tilt and (scree and wet albedo, scree and
+/// wet tilt), then one for the cracks.
+pub const COEF_VEC4S: usize = COEF_OCTAVES * 4 + 1;
 
 /// What one detail octave does to each material (LOOK-013): the albedo multiplier's coefficient of the octave's value and the tilt of the shading normal by its gradient.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -218,6 +220,10 @@ pub struct OctaveCoef {
     pub grass: [f64; 3],
     /// The tilt of rock, sand, grass and soil.
     pub tilt: [f64; 4],
+    /// The albedo coefficient and the tilt of scree.
+    pub scree: [f64; 2],
+    /// The albedo coefficient and the tilt of wet ground.
+    pub wet: [f64; 2],
 }
 
 /// The per-material coefficients of the ground detail octaves (M7 G2c; LOOK-013): what were constants of the shader. The Earth default is those constants, so a
@@ -232,10 +238,22 @@ pub struct DetailCoefficients {
 impl DetailCoefficients {
     pub const EARTH: DetailCoefficients = DetailCoefficients {
         octaves: [
-            OctaveCoef { albedo: [0.10, 0.09, 0.06], grass: [0.10; 3], tilt: [0.0; 4] },
-            OctaveCoef { albedo: [0.0, 0.05, 0.0], grass: [0.08; 3], tilt: [0.05, 0.03, 0.0, 0.0] },
-            OctaveCoef { albedo: [0.34, 0.05, 0.18], grass: [0.34, 0.30, 0.30], tilt: [0.20, 0.05, 0.10, 0.12] },
-            OctaveCoef { albedo: [0.10, 0.04, 0.08], grass: [0.30; 3], tilt: [0.10, 0.08, 0.15, 0.06] },
+            OctaveCoef { albedo: [0.10, 0.09, 0.06], grass: [0.10; 3], tilt: [0.0; 4], scree: [0.12, 0.0], wet: [0.05, 0.0] },
+            OctaveCoef { albedo: [0.0, 0.05, 0.0], grass: [0.08; 3], tilt: [0.05, 0.03, 0.0, 0.0], scree: [0.10, 0.05], wet: [0.04, 0.0] },
+            OctaveCoef {
+                albedo: [0.34, 0.05, 0.18],
+                grass: [0.34, 0.30, 0.30],
+                tilt: [0.20, 0.05, 0.10, 0.12],
+                scree: [0.34, 0.20],
+                wet: [0.10, 0.05],
+            },
+            OctaveCoef {
+                albedo: [0.10, 0.04, 0.08],
+                grass: [0.30; 3],
+                tilt: [0.10, 0.08, 0.15, 0.06],
+                scree: [0.10, 0.10],
+                wet: [0.06, 0.05],
+            },
         ],
         crack: 0.55,
     };
@@ -248,6 +266,8 @@ impl DetailCoefficients {
             v[at..at + 3].copy_from_slice(&o.albedo);
             v[at + 3..at + 6].copy_from_slice(&o.grass);
             v[at + 6..at + 10].copy_from_slice(&o.tilt);
+            v[at + 10..at + 12].copy_from_slice(&o.scree);
+            v[at + 12..at + 14].copy_from_slice(&o.wet);
         }
         v[COEF_VALUES - 1] = self.crack;
         v
@@ -255,12 +275,14 @@ impl DetailCoefficients {
 
     /// Inverse of [`values`](DetailCoefficients::values).
     pub fn from_values(v: &[f64; COEF_VALUES]) -> DetailCoefficients {
-        let mut octaves = [OctaveCoef { albedo: [0.0; 3], grass: [0.0; 3], tilt: [0.0; 4] }; COEF_OCTAVES];
+        let mut octaves = [OctaveCoef { albedo: [0.0; 3], grass: [0.0; 3], tilt: [0.0; 4], scree: [0.0; 2], wet: [0.0; 2] }; COEF_OCTAVES];
         for (k, o) in octaves.iter_mut().enumerate() {
             let at = k * OCTAVE_VALUES;
             o.albedo.copy_from_slice(&v[at..at + 3]);
             o.grass.copy_from_slice(&v[at + 3..at + 6]);
             o.tilt.copy_from_slice(&v[at + 6..at + 10]);
+            o.scree.copy_from_slice(&v[at + 10..at + 12]);
+            o.wet.copy_from_slice(&v[at + 12..at + 14]);
         }
         DetailCoefficients { octaves, crack: v[COEF_VALUES - 1] }
     }
@@ -275,11 +297,12 @@ impl DetailCoefficients {
         DetailCoefficients::from_values(&b.map(f64::from_bits))
     }
 
-    /// The table as the shader holds it: per octave three `vec4<f32>` (rock, sand, 0, soil albedo; the grass colour and 0; the tilts), then the cracks in the first lane.
+    /// The table as the shader holds it: per octave four `vec4<f32>` (rock, sand, 0, soil albedo; the grass colour and 0; the tilts; scree albedo, wet albedo, scree tilt,
+    /// wet tilt), then the cracks in the first lane.
     pub fn to_words(&self) -> [f32; COEF_VEC4S * 4] {
         let mut w = [0f32; COEF_VEC4S * 4];
         for (k, o) in self.octaves.iter().enumerate() {
-            let at = k * 12;
+            let at = k * 16;
             w[at] = o.albedo[0] as f32;
             w[at + 1] = o.albedo[1] as f32;
             w[at + 3] = o.albedo[2] as f32;
@@ -289,17 +312,23 @@ impl DetailCoefficients {
             for c in 0..4 {
                 w[at + 8 + c] = o.tilt[c] as f32;
             }
+            w[at + 12] = o.scree[0] as f32;
+            w[at + 13] = o.wet[0] as f32;
+            w[at + 14] = o.scree[1] as f32;
+            w[at + 15] = o.wet[1] as f32;
         }
-        w[COEF_OCTAVES * 12] = self.crack as f32;
+        w[COEF_OCTAVES * 16] = self.crack as f32;
         w
     }
 
-    /// Every value must be a finite number from 0 to 4 that fits f32; the first violation names the key (`ground.octave.<name>.<albedo|grass|tilt>` or `ground.crack`).
+    /// Every value must be a finite number from 0 to 4 that fits f32; the first violation names the key (`ground.octave.<name>.<albedo|grass|tilt|scree|wet>` or `ground.crack`).
     pub fn validate(&self) -> Result<(), (String, String, String)> {
         let ok = |v: f64| v.is_finite() && (0.0..=4.0).contains(&v) && (v as f32).is_finite();
         let why = "every coefficient must be a number from 0 to 4";
         for (name, o) in OCTAVE_NAMES.iter().zip(&self.octaves) {
-            for (what, vals) in [("albedo", &o.albedo[..]), ("grass", &o.grass[..]), ("tilt", &o.tilt[..])] {
+            for (what, vals) in
+                [("albedo", &o.albedo[..]), ("grass", &o.grass[..]), ("tilt", &o.tilt[..]), ("scree", &o.scree[..]), ("wet", &o.wet[..])]
+            {
                 if !vals.iter().all(|v| ok(*v)) {
                     return Err((format!("ground.octave.{name}.{what}"), format!("{vals:?}"), why.into()));
                 }
@@ -344,8 +373,8 @@ impl LookChoice {
 pub const GLOSS_MODIFIERS: usize = 2;
 /// Number of values of [`GlossParams`]: the roughness of each material, four per modifier, and `f0`.
 pub const GLOSS_VALUES: usize = MATERIALS + 4 * GLOSS_MODIFIERS + 1;
-/// Number of `vec4<f32>` words the roughness table occupies: the roughness of the materials, then one per modifier.
-pub const GLOSS_VEC4S: usize = 1 + GLOSS_MODIFIERS;
+/// Number of `vec4<f32>` words the roughness table occupies: the roughness of the first four materials, the last two (and two zeros), then one per modifier.
+pub const GLOSS_VEC4S: usize = 2 + GLOSS_MODIFIERS;
 
 /// The specular term of the ground (M7 G2b, LOOK-010): a GGX highlight of the sun with a Schlick Fresnel of the base reflectance `f0`. The
 /// roughness of a point is the weights' mean of the materials' roughness (rock and soil rough, sand and grass less so), scaled by the
@@ -361,7 +390,7 @@ pub struct GlossParams {
 
 impl GlossParams {
     pub const EARTH: GlossParams = GlossParams {
-        roughness: [0.85, 0.65, 0.75, 0.80],
+        roughness: [0.85, 0.65, 0.75, 0.80, 0.90, 0.35],
         modifiers: [[Input::Moisture as usize as f64, 0.0, 0.0, 0.3], [Input::Temperature as usize as f64, 0.0, -5.0, 0.4]],
         f0: 0.04,
     };
@@ -391,7 +420,7 @@ impl GlossParams {
         }
         for (j, m) in self.modifiers.iter().enumerate() {
             for (k, v) in m.iter().enumerate() {
-                w[4 * (1 + j) + k] = *v as f32;
+                w[4 * (2 + j) + k] = *v as f32;
             }
         }
         w
@@ -408,7 +437,7 @@ impl GlossParams {
     pub fn from_bits(b: &[u64; GLOSS_VALUES]) -> GlossParams {
         let f = |i: usize| f64::from_bits(b[i]);
         GlossParams {
-            roughness: [0, 1, 2, 3].map(f),
+            roughness: [0, 1, 2, 3, 4, 5].map(f),
             modifiers: [0, 1].map(|j| [0, 1, 2, 3].map(|k| f(MATERIALS + 4 * j + k))),
             f0: f(GLOSS_VALUES - 1),
         }
