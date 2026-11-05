@@ -10,7 +10,7 @@ Refreshed 2026-10-30 at M8's housekeeping (session `opus-planner`, worktree `.cl
 
 ## Practice
 - Owner decisions are committed in the planner session; coders merge them.
-- Merge slots: one PR merges at a time while the up-to-date ruleset is on (2026-10-30); the planner hands the slot on.
+- Merge slots: the planner hands the slot on; the up-to-date ruleset is off (owner, 2026-11-05): a code PR re-runs CI only if code moved on main since its run.
 - New requirement IDs, ADR and SPIKE numbers are reserved through the planner.
 - A merge a lane's permission check refused goes to the owner, never to another session.
 - Real-GPU window checks need an unlocked desktop; NOT RUN when locked (TEST-073).
