@@ -22,3 +22,19 @@ Owner 2026-11-05 (planner inbox #72 item 1): eroded mass unloads the crust and a
 - The relief does not change (the filled surface keeps 519 m, 0.96 of the Alps', and 675 m, 0.84 of Everest's); the land rises by about 0.82 of the regional mean erosion (+244 and +293 m at the median, +290 m at the peaks): a base re-tune in effect.
 - Separate finding for the tuning round: the elevations are already above GLO-30's (high-mountain p50 2,899 m against 2,157 m on the Everest tile; mountains 1,841 m against 1,076 m on the Alps tile).
 - Not measured: other widths (the local limit would lower the relief, wider is the same uplift).
+
+## Decision (owner, 2026-11-05)
+Dropped from M9. Kept as a known improvement candidate; no code until a trigger.
+
+## The probe against a fuller algorithm
+| Aspect | Probe (measured) | Fuller flexural isostasy |
+|---|---|---|
+| Load | mass removed by erosion only | erosion unloading, deposition loading (deltas, forelands), topographic load of belts, sea-water load |
+| Response | 0.82 of the load (density ratio crust/mantle), smoothed by a fixed Gaussian | thin elastic plate: `D grad^4 w + (rho_m - rho_infill) g w = q`, solved spectrally per face or by iteration |
+| Plate strength | one width (50 km) | effective elastic thickness `Te` as a field: low in rifts and young belts (5-15 km), high in cratons (50-100 km) |
+| Time | instantaneous each step | viscous relaxation (a time constant per step) |
+| Scope | pass 1 only, non-outlet cells | both passes; cube-face seams need a joined solve |
+
+Landforms the fuller version adds that the probe cannot: foreland basins beside belts (flexural moats), peripheral bulges, raised rift shoulders and passive-margin escarpments, subsidence under deltas and sediment basins. Relief at 3 km is expected to stay about the same; the gain is in regional landforms and hypsometry.
+
+Triggers: tuning hypsometry or base elevation against GLO-30, or work on rifts, escarpments or foreland basins. Cost then: a per-face spectral solve (a re-bake of pass 1), plus a `Te` field derived from the lithology provinces (GEN-116).
