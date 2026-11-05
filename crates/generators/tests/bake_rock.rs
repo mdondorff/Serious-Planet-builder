@@ -252,26 +252,35 @@ fn a_caprock_over_soft_rock_forms_a_step_because_a_step_never_lowers_a_cell_past
 
 // spec: GEN-127
 #[test]
-fn the_bakes_erodibility_has_a_land_mean_of_one_at_the_surface() {
-    use planet_generators::bake::inputs::BakeInputs;
-    let a = BakeInputs::new(14, 8); // the factor is a serial sum over a fixed sample: the threads only build the lattices
-    assert!(a.k_norm() > 1.2, "seed 14's raw lithology mean is about 0.69, so the factor is above 1: {}", a.k_norm());
-    // A sample other than the normalising one (a spiral of another size): the land mean of the carve's K at the surface is 1 within 3 %.
-    let n = 30_000usize;
+fn the_k_scale_solver_matches_the_incision_of_a_unit_rock_and_the_constant_lies_among_the_default_lithologys_seeds() {
+    use planet_generators::lithology::{k_scale_for, ROCK_K_SCALE};
+    let g = |f: f64| f / (1.0 + f);
+    // A rock of constant K = 2 over a spread of f: the c that removes as much as K = 1 does is the one with mean g(2 c f) = mean g(f), and applying it does.
+    let fs: Vec<f64> = (0..400).map(|i| 0.02 * libm::pow(1.03, f64::from(i))).collect();
+    let pairs: Vec<(f64, f64)> = fs.iter().map(|f| (2.0, *f)).collect();
+    let c = k_scale_for(&pairs);
+    let (want, got) = (fs.iter().map(|f| g(*f)).sum::<f64>(), fs.iter().map(|f| g(2.0 * c * f)).sum::<f64>());
+    assert!((want - got).abs() < 1e-9 * want, "mean incision {got} against {want} at c = {c}");
+    assert!(c > 0.3 && c < 0.5, "a rock twice as erodible needs a factor under 1/2 but not far under, not {c}");
+    assert_eq!(k_scale_for(&[]), 1.0);
+    // The constant is derived over seeds (`k_calib`): seed 3's own value is 1.04 and the constant lies between the seeds' extremes (0.88 to 1.78).
+    let inputs = planet_generators::bake::inputs::BakeInputs::new(3, 8);
+    let n = 60_000usize;
     let golden = core::f64::consts::PI * (3.0 - libm::sqrt(5.0));
-    let (mut sum, mut land) = (0.0, 0usize);
+    let mut pairs = Vec::new();
     for i in 0..n {
-        let y = 1.0 - 2.0 * (i as f64 + 0.37) / n as f64;
+        let y = 1.0 - 2.0 * (i as f64 + 0.5) / n as f64;
         let r = libm::sqrt(1.0 - y * y);
-        let (s, c) = libm::sincos(golden * i as f64 + 1.3);
+        let (s, c) = libm::sincos(golden * i as f64);
         let d = Vec3::new(r * c, y, r * s);
-        let z = a.base(d);
+        let z = inputs.base(d);
         if z > 0.0 {
-            sum += a.rock_k(d, z).k;
-            land += 1;
+            let u = (i as f64 * 0.618_033_988_749_895).fract();
+            pairs.push((inputs.lithology().k_at(d, z), 0.05 * libm::sqrt(libm::pow(1.0 - u, -1.0 / 0.43).min(1e7))));
         }
     }
-    let mean = sum / land as f64;
-    assert!(land > 5000, "{land} land points");
-    assert!((mean - 1.0).abs() < 0.03, "the land mean of K is {mean}, not 1");
+    let c3 = k_scale_for(&pairs);
+    assert!((c3 - 1.04).abs() < 0.08, "seed 3's factor is {c3}, k_calib gave 1.04");
+    assert!((0.88..=1.78).contains(&ROCK_K_SCALE), "the constant {ROCK_K_SCALE} lies outside the seeds' range");
+    assert_eq!(inputs.rock_k(Vec3::new(0.0, 0.0, 1.0), 300.0).k, inputs.lithology().k_at(Vec3::new(0.0, 0.0, 1.0), 300.0) * ROCK_K_SCALE);
 }
