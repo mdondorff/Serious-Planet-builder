@@ -19,6 +19,7 @@ use planet_generators::stamp::StampStage;
 use planet_world_def::{BodyId, WorldDefinition, DEFAULT_ITEM_LAYER};
 
 const R: f64 = 6_371_000.0;
+const CHANNEL_WORD_1: u64 = 2339158436747412340;
 
 fn tile() -> TileId {
     TileId::new(Face(1), 6, 9, 4).unwrap()
@@ -147,6 +148,9 @@ fn the_keys_of_a_field_with_channels_differ_from_one_without_and_from_other_chan
     assert_eq!(key(&a), key(&a2), "equal channels give equal keys");
     assert_ne!(key(&a), key(&b), "other channels give other keys");
     assert_ne!(channel_word(1), channel_word(2));
+    // Known answer of the channel identity word: it folds DRIVER_MAP_VERSION, the identity, the soil scale, the two area bounds, CHANNEL_BLOCK_VERSION and DEPTH_MAX_M, so a change of any of them
+    // (a new depth scale, a new layout) re-keys the tiles of a field that reads channels.
+    assert_eq!(channel_word(1), CHANNEL_WORD_1, "the channel word changed: bump what changed and record the new value");
     assert_eq!(DRIVER_MAP_VERSION, 1, "a new mapping raises the version, which enters the word");
 }
 
@@ -217,6 +221,9 @@ fn the_depth_codes_are_square_root_codes_of_the_range_to_64_metres_and_a_texel_w
         let step = decode_depth(code.saturating_add(1)) - decode_depth(code);
         assert!((decode_depth(code) - m).abs() <= step.max(1e-3), "{m} m through code {code}");
     }
+    // Rounded, not truncated: 255 sqrt(1 / 64) = 31.9 is code 32; and every code is its own round trip.
+    assert_eq!(encode_depth(1.0), 32);
+    assert!((0..=255u8).all(|c| encode_depth(decode_depth(c)) == c), "decode then encode is the identity");
     assert_eq!(unpack_channel_word(pack_channel_word(7, 200)), [7, 200]);
     assert_eq!(pack_channel_word(255, 255) >> 16, 0, "bits 16-31 stay zero");
     let mut words = [pack_channel_word(9, 9); 81];

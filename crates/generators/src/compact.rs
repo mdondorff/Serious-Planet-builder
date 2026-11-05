@@ -150,7 +150,7 @@ impl CompactTile {
         out
     }
 
-    /// The whole slot, byte for byte as the pool's block holds it (GEN-025): header, climate block, driver block, texels.
+    /// The whole slot, byte for byte as the pool's block holds it (GEN-025): header, climate block, driver block, channel block, texels.
     pub fn slot_data(&self) -> Vec<u8> {
         let mut out = Vec::new();
         self.write_slot_into(&mut out);

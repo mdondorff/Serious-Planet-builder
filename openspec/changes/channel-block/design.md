@@ -7,5 +7,5 @@
 6. **Default look.** The shader and the look are untouched, so no picture changes; goldens stay.
 
 ## Risks
-- A future vec4 read of the slot or a dynamic-offset binding breaks the alignment assumption; the pin test fails then and the fix is padding to 9,824 B.
+- A future vec4 read of the slot or a dynamic-offset binding breaks the alignment assumption; the pin test fails then. Padding the slot to 9,824 B (a multiple of 16) restores the stride; a per-slot binding offset was never possible (storage binding offsets need `min_storage_buffer_offset_alignment`, typically 256 B), so a dynamic offset would need a different pool layout in any case.
 - Memory: +324 B in every resident compact slot (about +3.4 %), +324 B in every prefilled tile of a pack.
