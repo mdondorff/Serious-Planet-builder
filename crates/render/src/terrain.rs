@@ -2918,7 +2918,7 @@ mod one_shot_tests {
         // that cannot: the 16 m and 8 m octaves are both turned (the 8 m one is turned so that it does not repeat the 2 m octave's axis-aligned lattice at a factor 4: the numerics review of
         // the 8 m lattice, #1186). A change of this pair is a decision, so the list of exceptions is pinned.
         let mut detail: Vec<(u32, u32)> = calls.iter().filter(|c| !c.2).map(|c| (c.0, c.1)).collect();
-        detail.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+        detail.sort_unstable_by_key(|a| std::cmp::Reverse(a.0));
         let mut same: Vec<(u32, u32)> = Vec::new();
         for (i, a) in detail.iter().enumerate() {
             for b in &detail[i + 1..] {
