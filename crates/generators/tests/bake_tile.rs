@@ -279,7 +279,7 @@ fn a_tile_keeps_its_final_heights_for_the_post_pass_and_no_depth_of_its_own() {
             let z = f64::from(a.heights[j * g.tile + i]);
             let core = f64::from(a.core[j * g.tile + i]);
             let want = window[(j + g.halo) * w + i + g.halo];
-            assert!((z - core - want).abs() < 1e-2, "cell ({i}, {j}): height {z}, change {core}, window base {want}");
+            assert!((z - core - want).abs() < 1e-3, "cell ({i}, {j}): height {z}, change {core}, window base {want}");
         }
     }
 }

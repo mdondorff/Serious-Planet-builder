@@ -630,7 +630,9 @@ pub fn run_pass2(
         let have_tile = load_tile(&store, world, res, spec, id)?.is_some();
         let have_depth = crate::layer_channels::has_depth(&store, world, res, spec, id)?;
         let have_heights = match (&scratch, inputs.scratch) {
-            (Some(s), Some(_)) => crate::layer_fill::has_heights(s, world, res, spec, id)?,
+            (Some(s), Some(_)) => {
+                crate::layer_fill::has_heights(s, world, res, spec, id)? || crate::layer_fill::has_fill(&store, world, res, spec, id)?
+            }
             _ => true,
         };
         if have_tile && have_depth && have_heights {

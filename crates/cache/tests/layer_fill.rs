@@ -256,6 +256,9 @@ fn a_run_over_a_region_treats_the_tiles_it_does_not_hold_as_sea() {
     let store = TileStore::open(out.path(), w.params()).unwrap();
     let codes = load_fill(&store, &w, RES, &s, two[1]).unwrap().unwrap();
     assert!(codes.iter().all(|c| *c == 0), "a bowl that reaches the border of the run was filled: the run's edge is sea");
+    // The same directory refuses a run over another set of tiles: its depths would be those of the first run.
+    let e = run_fill_pass(out.path(), scratch.path(), &w, RES, &s, &tiles, 2, &mut |_, _| {}).unwrap_err().to_string();
+    assert!(e.contains("another set of tiles"), "{e}");
 }
 
 // spec: GEN-121
@@ -288,6 +291,22 @@ fn the_runtime_layer_reads_the_change_with_the_post_pass_depth_added_back() {
     assert_eq!(report.computed.len(), 16);
     let fp = fill_pass(&w, &s, scratch.path(), dir.path(), &tiles, 2);
     assert_eq!(fp.written.len(), 16);
+    // A rerun after the scratch store is gone: pass 2 does not run again (the tiles hold their fill), and the post-pass finds nothing to do without any scratch.
+    let fresh = Dir::new("fresh");
+    let again = run_pass2(
+        dir.path(),
+        &w,
+        RES,
+        &s,
+        &Pass2Inputs { base: &base, face_change: &none, factor: None, scratch: Some(fresh.path()) },
+        &tiles,
+        2,
+        &mut |_| {},
+    )
+    .unwrap();
+    assert!(again.computed.is_empty() && again.skipped.len() == 16, "a rerun recomputed {:?}", again.computed);
+    let nothing = fill_pass(&w, &s, fresh.path(), dir.path(), &tiles, 2);
+    assert!(nothing.written.is_empty() && nothing.skipped.len() == 16);
     let store = Arc::new(TileStore::open(dir.path(), w.params()).unwrap());
     let layer = StoreLayer::new(store.clone(), Arc::new(world()), RES, s, 4, default_change_range()).unwrap();
     let mut with_pits = 0;

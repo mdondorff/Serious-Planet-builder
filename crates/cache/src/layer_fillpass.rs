@@ -40,6 +40,8 @@ pub struct FillPassReport {
     pub deepest_m: f64,
     /// Cells whose level no path from the sea reaches (a run without any outlet in reach): their depth is written as 0.
     pub unreached_cells: u64,
+    /// Neighbour pairs of two tiles dropped because the neighbouring cell is not on its tile's border (0 inside a face; a nonzero count across a cube edge names a mapping to look at).
+    pub dropped_pairs: u64,
 }
 
 /// A tile's stage-3 result: its index, the depth codes, the pit cells, the deepest depth and the cells no path reaches.
@@ -92,8 +94,35 @@ pub fn run_fill_pass(
     let mut order: Vec<PassTile> = tiles.to_vec();
     order.sort();
     order.dedup();
+    // A fill depth depends on which tiles were in the run (the tiles not held are sea): a store written for one tile set is refused for another, so a region run cannot leave cut-off basins to a later planet run.
+    check_run_set(tile_dir, &order)?;
     let (t, g, sea) = (spec.grid.tile, spec.grid, spec.params.sea_level);
     let par: &dyn Par = &threads.max(1);
+    // Every tile named, and the work it needs: if every tile holds its fill under the current key the run has nothing to do (and needs no scratch); else every tile's heights are needed for the graph.
+    let mut todo_set: Vec<usize> = Vec::new();
+    for (k, id) in order.iter().enumerate() {
+        if !has_fill(&store, world, res, spec, *id)? {
+            todo_set.push(k);
+        }
+    }
+    if todo_set.is_empty() {
+        return Ok(FillPassReport {
+            written: Vec::new(),
+            skipped: order,
+            pit_cells: 0,
+            deepest_m: 0.0,
+            unreached_cells: 0,
+            dropped_pairs: 0,
+        });
+    }
+    for id in &order {
+        if !crate::layer_fill::has_heights(&scratch, world, res, spec, *id)? {
+            return Err(LayerStoreError(format!(
+                "the scratch store holds no final heights of tile {}/{}/{}: pass 2 was not run with a scratch store for it",
+                id.face.0, id.ti, id.tj
+            )));
+        }
+    }
     let index: std::collections::HashMap<PassTile, usize> = order.iter().enumerate().map(|(k, id)| (*id, k)).collect();
     // Stage 1.
     let infos: Vec<Result<Info, LayerStoreError>> = par::map(par, order.len(), &|k| {
@@ -108,9 +137,18 @@ pub fn run_fill_pass(
         Ok(Info { edges: f.edges, border_z, border_seed })
     });
     let infos: Vec<Info> = infos.into_iter().collect::<Result<_, _>>()?;
-    // The graph.
+    // The graph; a tile's edges are moved into it, so only one copy is held.
     let mut graph = SpillGraph::new();
-    let refs: Vec<_> = infos.iter().map(|i| graph.add_tile(perimeter_len(t, t), &i.edges)).collect();
+    let mut infos = infos;
+    let refs: Vec<_> = infos
+        .iter_mut()
+        .map(|i| {
+            let r = graph.add_tile(perimeter_len(t, t), &i.edges);
+            i.edges = Vec::new();
+            r
+        })
+        .collect();
+    let mut dropped = 0u64;
     for (a, id) in order.iter().enumerate() {
         for ka in 0..perimeter_len(t, t) as u32 {
             let (seed_a, za) = (infos[a].border_seed[ka as usize], infos[a].border_z[ka as usize]);
@@ -118,7 +156,10 @@ pub fn run_fill_pass(
             for (other, bi, bj) in border_neighbours(&g, *id, i, j) {
                 match index.get(&other) {
                     Some(&b) => {
-                        let Some(kb) = perimeter_index(t, t, bi, bj) else { continue };
+                        let Some(kb) = perimeter_index(t, t, bi, bj) else {
+                            dropped += 1;
+                            continue;
+                        };
                         // Inside a face the relation is symmetric: one edge a pair. Across a cube edge it can be one-sided: every pair is joined.
                         if id.face == other.face && (*id, ka) > (other, kb) {
                             continue;
@@ -142,7 +183,14 @@ pub fn run_fill_pass(
     let levels = graph.solve();
     drop(graph);
     // Stage 3.
-    let mut report = FillPassReport { written: Vec::new(), skipped: Vec::new(), pit_cells: 0, deepest_m: 0.0, unreached_cells: 0 };
+    let mut report = FillPassReport {
+        written: Vec::new(),
+        skipped: Vec::new(),
+        pit_cells: 0,
+        deepest_m: 0.0,
+        unreached_cells: 0,
+        dropped_pairs: dropped,
+    };
     let mut todo: Vec<usize> = Vec::new();
     for (k, id) in order.iter().enumerate() {
         if has_fill(&store, world, res, spec, *id)? {
@@ -190,4 +238,28 @@ pub fn run_fill_pass(
     }
     writer.finish().map_err(err)?;
     Ok(report)
+}
+
+/// The identity of a run's tile set: refused when the tile directory was filled for another set.
+fn check_run_set(tile_dir: &Path, order: &[PassTile]) -> Result<(), LayerStoreError> {
+    let mut h = 0xcbf2_9ce4_8422_2325u64;
+    let mut put = |v: u64| h = (h ^ v).wrapping_mul(0x0000_0100_0000_01b3);
+    put(order.len() as u64);
+    for id in order {
+        put(u64::from(id.face.0));
+        put(u64::from(id.ti));
+        put(u64::from(id.tj));
+    }
+    let path = tile_dir.join("fill-pass-tiles.txt");
+    let mine = format!("{h:016x} {}\n", order.len());
+    match std::fs::read_to_string(&path) {
+        Ok(have) if have == mine => Ok(()),
+        Ok(have) => Err(LayerStoreError(format!(
+            "{} was filled for another set of tiles ({}, this run: {}): the fill depth depends on which tiles a run holds (the others are sea), so a run over a different set needs its own directory",
+            tile_dir.display(),
+            have.trim(),
+            mine.trim()
+        ))),
+        Err(_) => std::fs::write(&path, mine).map_err(|e| LayerStoreError(format!("{}: {e}", path.display()))),
+    }
 }
