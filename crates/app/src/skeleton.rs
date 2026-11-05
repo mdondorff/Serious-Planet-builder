@@ -223,8 +223,11 @@ pub fn generate(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     if o.lithology_preview.is_some() {
         return generate_lithology_preview(o, out);
     }
+    if o.uplift_preview.is_some() {
+        return generate_uplift_preview(o, out);
+    }
     if o.given.contains("--km") {
-        return Err("--km applies to --lithology-preview".into());
+        return Err("--km applies to --lithology-preview or --uplift-preview".into());
     }
     if o.global_dir.is_some() || o.verify_global.is_some() || o.global_products.is_some() {
         return generate_global(o, out);
@@ -313,6 +316,7 @@ fn generate_lithology_preview(o: &Options, out: &mut dyn Write) -> Result<(), St
         "--global-dir",
         "--verify-global",
         "--global-products",
+        "--uplift-preview",
     ]
     .into_iter()
     .filter(|f| o.given.contains(*f))
@@ -336,6 +340,55 @@ fn generate_lithology_preview(o: &Options, out: &mut dyn Write) -> Result<(), St
         world.seed(),
         o.preview_km,
         planet_generators::lithology::LITHOLOGY_VERSION,
+        dir.display(),
+        started.elapsed().as_secs_f64()
+    )
+    .map_err(err)
+}
+
+/// `generate --uplift-preview DIR [--seed N | --world F] [--km N] [--threads N]` (GEN-125): the preview of the uplift field (GEN-123) with no GPU: equirectangular maps of the uplift and of the
+/// uplift over the lithology's erodibility at the surface, a section from an active belt over a back-arc to a craton, and `uplift.txt` with the mean, the quantiles and the shares by term.
+/// The images show the uplift field, an input of the carve, not terrain.
+fn generate_uplift_preview(o: &Options, out: &mut dyn Write) -> Result<(), String> {
+    let dir = o.uplift_preview.as_ref().expect("the option is given");
+    let clash: Vec<&str> = [
+        "--tile",
+        "--out",
+        "--face-net",
+        "--manifest",
+        "--smoke",
+        "--cache-dir",
+        "--verify-cache",
+        "--region",
+        "--res",
+        "--global-dir",
+        "--verify-global",
+        "--global-products",
+        "--lithology-preview",
+    ]
+    .into_iter()
+    .filter(|f| o.given.contains(*f))
+    .collect();
+    if !clash.is_empty() {
+        return Err(format!("--uplift-preview excludes {}", clash.join(", ")));
+    }
+    if o.given.contains("--world") && o.given.contains("--seed") {
+        return Err("--world and --seed both name the definition: give one".into());
+    }
+    let (threads, _) = planet_streaming::topology::bake_threads(o.threads)?;
+    let world = global_world_of(o)?;
+    let started = std::time::Instant::now();
+    let source = planet_generators::classes::ClassSource::new(world.seed());
+    let lithology = planet_generators::lithology::Lithology::new(&source, threads);
+    let uplift = planet_generators::uplift::Uplift::new(world.seed());
+    let preview = planet_generators::uplift_preview::preview(&source, &lithology, &uplift, o.preview_km, threads);
+    planet_generators::uplift_preview::write(dir, &preview).map_err(|e| format!("writing {}: {e}", dir.display()))?;
+    writeln!(
+        out,
+        "uplift preview (uplift field, an input of the carve, not terrain): seed {}, {} km a pixel, version {}, written to {} in {:.1} s",
+        world.seed(),
+        o.preview_km,
+        planet_generators::uplift::UPLIFT_VERSION,
         dir.display(),
         started.elapsed().as_secs_f64()
     )

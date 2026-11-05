@@ -98,6 +98,8 @@ mod steep;
 mod terrain;
 #[path = "tile_min_height.rs"]
 mod tile_min_height;
+#[path = "uplift.rs"]
+mod uplift;
 #[path = "water.rs"]
 mod water;
 #[path = "water_summary.rs"]

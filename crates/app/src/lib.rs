@@ -185,7 +185,9 @@ pub struct Options {
     pub global_products: Option<PathBuf>,
     /// `generate --lithology-preview DIR` (GEN-122): the planet preview maps and cross-section of the lithology field (ADR 0102) into DIR.
     pub lithology_preview: Option<PathBuf>,
-    /// `--km N`: kilometres a pixel of the lithology preview's maps (16 by default; 8 to 500).
+    /// `generate --uplift-preview DIR` (GEN-125): the planet preview maps and section of the uplift field (GEN-123) into DIR.
+    pub uplift_preview: Option<PathBuf>,
+    /// `--km N`: kilometres a pixel of the lithology and uplift previews' maps (16 by default; 8 to 500).
     pub preview_km: f64,
     /// `--global-dir` and `--global-products`: cells per face edge of the bake (a power of two; blocks are stored in the canonical layout, ADR 0027).
     pub global_res: u32,
@@ -390,6 +392,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         prefill_levels: None,
         global_products: None,
         lithology_preview: None,
+        uplift_preview: None,
         preview_km: 16.0,
         global_res: 256,
         threads: 0,
@@ -598,6 +601,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--verify-global" => o.verify_global = Some(PathBuf::from(it.next().ok_or("--verify-global needs a directory")?)),
             "--global-products" => o.global_products = Some(PathBuf::from(it.next().ok_or("--global-products needs a directory")?)),
             "--lithology-preview" => o.lithology_preview = Some(PathBuf::from(it.next().ok_or("--lithology-preview needs a directory")?)),
+            "--uplift-preview" => o.uplift_preview = Some(PathBuf::from(it.next().ok_or("--uplift-preview needs a directory")?)),
             "--km" => {
                 o.preview_km = it.next().ok_or("--km needs a number of kilometres")?.parse().map_err(|e| format!("--km: {e}"))?;
                 if !(o.preview_km.is_finite() && (8.0..=500.0).contains(&o.preview_km)) {
@@ -675,7 +679,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
 use planet_cache::tiles::MAX_REGION_LEVEL;
 
 /// Options that only the tile store commands of `generate` understand.
-pub(crate) const STORE_OPTIONS: [&str; 23] = [
+pub(crate) const STORE_OPTIONS: [&str; 24] = [
     "--repeats",
     "--horizon-threads",
     "--altitudes-m",
@@ -696,6 +700,7 @@ pub(crate) const STORE_OPTIONS: [&str; 23] = [
     "--verify-global",
     "--global-products",
     "--lithology-preview",
+    "--uplift-preview",
     "--km",
     "--global-res",
     "--threads",
@@ -1655,13 +1660,35 @@ mod tests {
         let e = run_str(&["generate", "--lithology-preview", &dir, "--seed", "3", "--world", "w.toml"]).unwrap_err();
         assert!(e.contains("--world and --seed"), "{e}");
         let e = run_str(&["generate", "--km", "16", "--seed", "3"]).unwrap_err();
-        assert!(e.contains("--km applies to --lithology-preview"), "{e}");
+        assert!(e.contains("--km applies to --lithology-preview or --uplift-preview"), "{e}");
         let e = run_str(&["generate", "--lithology-preview", &dir, "--km", "0.5"]).unwrap_err();
         assert!(e.contains("--km 0.5 must be from 8 to 500"), "{e}");
         for bad in ["1", "7.9", "501", "NaN"] {
             let e = run_str(&["generate", "--lithology-preview", &dir, "--km", bad]).unwrap_err();
             assert!(e.contains("--km") && e.contains("must be from 8 to 500"), "{bad}: {e}");
         }
+    }
+
+    // spec: GEN-125
+    #[test]
+    fn generate_writes_the_uplift_preview_maps_a_section_and_the_numbers_and_refuses_what_it_excludes() {
+        let d = TempDir::new("uplift-preview");
+        let dir = d.s("out");
+        let out = run_str(&["generate", "--uplift-preview", &dir, "--seed", "3", "--km", "400"]).unwrap();
+        assert!(out.contains("uplift field, an input of the carve, not terrain") && out.contains("400 km a pixel"), "{out}");
+        for f in ["uplift.png", "steepness.png", "section.png", "uplift.txt"] {
+            assert!(std::path::Path::new(&dir).join(f).is_file(), "{f}");
+        }
+        let txt = std::fs::read_to_string(std::path::Path::new(&dir).join("uplift.txt")).unwrap();
+        assert!(txt.contains("uplift field (input), not terrain") && txt.contains("belt or arc coast"), "{txt}");
+        let e = run_str(&["generate", "--uplift-preview", &dir, "--lithology-preview", &dir]).unwrap_err();
+        assert!(e.contains("excludes") && e.contains("--lithology-preview") && e.contains("--uplift-preview"), "{e}");
+        let e = run_str(&["generate", "--uplift-preview", &dir, "--global-dir", &dir]).unwrap_err();
+        assert!(e.contains("--uplift-preview excludes") && e.contains("--global-dir"), "{e}");
+        let e = run_str(&["generate", "--uplift-preview", &dir, "--seed", "3", "--world", "w.toml"]).unwrap_err();
+        assert!(e.contains("--world and --seed"), "{e}");
+        let e = run_str(&["generate", "--uplift-preview", &dir, "--km", "7.9"]).unwrap_err();
+        assert!(e.contains("--km") && e.contains("must be from 8 to 500"), "{e}");
     }
 
     // spec: VIEW-066
