@@ -2,6 +2,8 @@
 mod bake_face;
 #[path = "bake_kernels.rs"]
 mod bake_kernels;
+#[path = "bake_spill.rs"]
+mod bake_spill;
 #[path = "bake_thermal.rs"]
 mod bake_thermal;
 #[path = "bake_tile.rs"]
