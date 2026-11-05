@@ -64,6 +64,8 @@ mod height_fields;
 mod lattice_normals;
 #[path = "line_stage.rs"]
 mod line_stage;
+#[path = "lithology.rs"]
+mod lithology;
 #[path = "manifest.rs"]
 mod manifest;
 #[path = "mesh.rs"]

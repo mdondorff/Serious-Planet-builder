@@ -220,6 +220,12 @@ pub fn generate(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     if o.prefill_levels.is_some() && o.global_dir.is_none() {
         return Err("--prefill-levels applies to --global-dir (the pre-fill after the bake) and to --prefill-dir".into());
     }
+    if o.lithology_preview.is_some() {
+        return generate_lithology_preview(o, out);
+    }
+    if o.given.contains("--km") {
+        return Err("--km applies to --lithology-preview".into());
+    }
     if o.global_dir.is_some() || o.verify_global.is_some() || o.global_products.is_some() {
         return generate_global(o, out);
     }
@@ -287,6 +293,53 @@ pub(crate) fn global_world_of(o: &Options) -> Result<planet_cache::global_store:
     let threads = planet_streaming::topology::bake_threads(o.threads)?.0;
     let inputs = planet_generators::bake::inputs::BakeInputs::new(world.seed(), threads);
     Ok(world.with_class_source(std::sync::Arc::new(inputs)))
+}
+
+/// `generate --lithology-preview DIR [--seed N | --world F] [--km N] [--threads N]` (GEN-122): the preview of the lithology field (ADR 0102, GEN-116) with no GPU: equirectangular maps of the
+/// hardness, the strata (the erodibility at the surface and 200 m below it, caprock black) and the soluble flag, a vertical cross-section of the strata through a mountain belt into a basin, and
+/// `lithology.txt` with the shares and the band thickness against the carve's per-step change. The images show the lithology field, an input of the carve, not terrain.
+fn generate_lithology_preview(o: &Options, out: &mut dyn Write) -> Result<(), String> {
+    let dir = o.lithology_preview.as_ref().expect("the option is given");
+    let clash: Vec<&str> = [
+        "--tile",
+        "--out",
+        "--face-net",
+        "--manifest",
+        "--smoke",
+        "--cache-dir",
+        "--verify-cache",
+        "--region",
+        "--res",
+        "--global-dir",
+        "--verify-global",
+        "--global-products",
+    ]
+    .into_iter()
+    .filter(|f| o.given.contains(*f))
+    .collect();
+    if !clash.is_empty() {
+        return Err(format!("--lithology-preview excludes {}", clash.join(", ")));
+    }
+    if o.given.contains("--world") && o.given.contains("--seed") {
+        return Err("--world and --seed both name the definition: give one".into());
+    }
+    let (threads, _) = planet_streaming::topology::bake_threads(o.threads)?;
+    let world = global_world_of(o)?;
+    let started = std::time::Instant::now();
+    let source = planet_generators::classes::ClassSource::new(world.seed());
+    let lithology = planet_generators::lithology::Lithology::new(&source, threads);
+    let preview = planet_generators::lithology_preview::preview(&source, &lithology, o.preview_km, threads);
+    planet_generators::lithology_preview::write(dir, &preview).map_err(|e| format!("writing {}: {e}", dir.display()))?;
+    writeln!(
+        out,
+        "lithology preview (lithology field, an input of the carve, not terrain): seed {}, {} km a pixel, version {}, written to {} in {:.1} s",
+        world.seed(),
+        o.preview_km,
+        planet_generators::lithology::LITHOLOGY_VERSION,
+        dir.display(),
+        started.elapsed().as_secs_f64()
+    )
+    .map_err(err)
 }
 
 /// `generate --global-dir DIR`: bake the global-coarse field (continents, elevation, climate) into a tile store as blocks and
