@@ -33,7 +33,7 @@ Dormant (no near trigger; not asked now):
 
 ## Tracked
 - **Fill depth across a mountain cube edge** (keep-pits-seams, #1201): the seam gate passed on a tile seam; no mountain cube edge was in the stored faces. Blocks the planet bake (I6); run with the integrated-preview re-run.
-- **`test fast` 220-330 s** (BUILD-014, verifier on #1202, 2026-11-05): loaded machine (no restart before Sat 2026-11-07); re-measure after the restart.
+- **`test fast` 220-330 s** (BUILD-014, #1202, 2026-11-05): loaded machine; re-measure after the Saturday restart.
 - **Fill gate** (keep-pits-seams PR 3): tile seam met; the mountain cube-edge pair (a region with a mountain cube edge, 2 faces of pass 1) runs with the integrated-preview re-run and BLOCKS the planet bake (I6)
 - **Ocean square at orbit** (owner, viewer main 2fdfeb23 over m9r2, 2026-11-03): at 12,767 km over 20 N 30 E after 240 s of flight, a light square in a ring of dark blotches on the sea; not reproduced headless. Hypotheses: the clipmap shadow on water (sea-floor receivers; `--no-shadow-march`, J view), the water-node cut or the never-evicted WaterBook, the shadow's temporal history. Needs the owner's F9 bundle; replay with `cargo xtask repro`.
 - **CI jobs** (BUILD-014, 2026-11-03 after #1133, #1134, #1138): every job under 16 min (A+B parts 10.7-13.6, C build 3.5 + parts 7.8-10.2, Linux 7-9); `gpu_stills` march test keeps its declared 450 s limit; lift under ~200 s.
