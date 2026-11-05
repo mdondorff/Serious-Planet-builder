@@ -7,7 +7,7 @@ use crate::classes::{ClassSource, EARTH_RADIUS_M};
 use crate::dump::Rgba;
 use crate::lithology::Lithology;
 use crate::lithology_preview::{direction, lerp, lon_lat, rgba, slerp, OCEAN};
-use crate::uplift::{Uplift, TERM_NAMES, UPLIFT_VERSION, U_BACKARC, U_BELT, U_CRATON, U_FLAT};
+use crate::uplift::{Uplift, NOISE_AMPLITUDE, TERM_NAMES, UPLIFT_VERSION, U_BACKARC, U_BELT, U_CRATON, U_FLAT};
 use planet_core::par::{self, Par};
 use planet_core::Vec3;
 use std::path::Path;
@@ -125,7 +125,7 @@ fn numbers(rows: &[Vec<Pixel>], height: usize, km: f64, seed: u64, means: (f64, 
         q(0.75),
         q(0.95)
     ));
-    out.push_str(&format!("table: craton {U_CRATON}, flat {U_FLAT}, belt or arc coast {U_BELT}, back-arc {U_BACKARC} (see uplift.rs); times 1 plus or minus 0.2 noise\n"));
+    out.push_str(&format!("table: craton {U_CRATON}, flat {U_FLAT}, belt or arc coast {U_BELT}, back-arc {U_BACKARC} (see uplift.rs); times 1 plus or minus {NOISE_AMPLITUDE} noise\n"));
     for i in 0..TERM_NAMES.len() {
         out.push_str(&format!(
             "  {:<18} {:>5.1} % of land, mean U {:>5.1}\n",
