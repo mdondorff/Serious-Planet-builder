@@ -372,3 +372,119 @@ fn the_step_of_the_pit_depth_code_is_part_of_the_key_and_the_records_have_keys_o
     assert_ne!(k, planet_cache::layer_channels::depth_key(&w, RES, &s, id).unwrap(), "the pit depth shares the deposited depth's key");
     assert_ne!(k, heights_key(&w, RES, &s, id).unwrap(), "the pit depth shares the scratch heights' key");
 }
+
+// spec: GEN-120
+#[test]
+fn a_filled_floor_is_flat_against_the_exact_base_and_an_outcrop_inside_a_basin_keeps_its_height() {
+    use std::collections::VecDeque;
+    // Part 1: pass 2 on a smooth bowl terrain, then the post-pass with the exact base: the cells of one connected pit hold one surface (base + stored change + depth) to the code's step.
+    let (w, scratch, dir) = (world(), Dir::new("scratch"), Dir::new("layer"));
+    let s = spec(&w);
+    let tiles = face_tiles(0);
+    let base = |d: Vec3| {
+        let b = 150.0 - 400.0 * libm::exp(-(1.0 - d.x * 0.97 - d.y * 0.24) / 0.0015);
+        if d.x > 0.5 {
+            b.max(5.0)
+        } else {
+            -50.0
+        }
+    };
+    let none = |_: Vec3| 0.0;
+    run_pass2(
+        dir.path(),
+        &w,
+        RES,
+        &s,
+        &Pass2Inputs { base: &base, face_change: &none, factor: None, scratch: Some(scratch.path()) },
+        &tiles,
+        2,
+        &mut |_| {},
+    )
+    .unwrap();
+    run_fill_pass(dir.path(), scratch.path(), &w, RES, &s, &tiles, 2, &base, &mut |_, _| {}).unwrap();
+    let store = TileStore::open(dir.path(), w.params()).unwrap();
+    let (mut worst, mut checked) = (0.0f64, 0usize);
+    for &id in &tiles {
+        let core = load_tile(&store, &w, RES, &s, id).unwrap().unwrap().core;
+        let codes = load_fill(&store, &w, RES, &s, id).unwrap().unwrap();
+        let mut seen = vec![false; T * T];
+        for start in 0..T * T {
+            if codes[start] == 0 || seen[start] {
+                continue;
+            }
+            let (mut members, mut queue) = (Vec::new(), VecDeque::from([start]));
+            seen[start] = true;
+            while let Some(p) = queue.pop_front() {
+                members.push(p);
+                let (i, j) = ((p % T) as i64, (p / T) as i64);
+                for (di, dj) in [(-1i64, 0i64), (1, 0), (0, -1), (0, 1)] {
+                    let (ii, jj) = (i + di, j + dj);
+                    if (0..T as i64).contains(&ii) && (0..T as i64).contains(&jj) {
+                        let q = jj as usize * T + ii as usize;
+                        if codes[q] > 0 && !seen[q] {
+                            seen[q] = true;
+                            queue.push_back(q);
+                        }
+                    }
+                }
+            }
+            if members.len() < 20 {
+                continue;
+            }
+            let mut v: Vec<f64> = members
+                .iter()
+                .map(|&p| {
+                    let d = s.grid.direction(id.face, (id.ti as usize * T + p % T) as i64, (id.tj as usize * T + p / T) as i64);
+                    base(d) + f64::from(core[p]) + fill_m(codes[p])
+                })
+                .collect();
+            v.sort_by(f64::total_cmp);
+            let med = v[v.len() / 2];
+            worst = worst.max(v.iter().map(|x| (x - med).abs()).fold(0.0, f64::max));
+            checked += members.len();
+        }
+    }
+    assert!(checked > 100, "only {checked} pit cells in basins of 20 cells or more");
+    assert!(worst <= 0.26, "a filled floor deviates {worst} m from its level against the exact base: the code's step is 0.25 m");
+    // Part 2: an outcrop. The synthetic surface has a bowl of 150 m (radius 6 cells around cell (24, 12)) in a plateau of 200 m across tiles (0, 0) and (1, 0); the stored change of one cell inside the bowl is 100 m
+    // higher, so its exact surface stands above the level: it keeps its height (depth 0) and is counted, its neighbour is filled to the plateau (50 m deep).
+    let (scratch2, out2) = (Dir::new("scratch2"), Dir::new("tiles2"));
+    let (id, id1) = (tiles[0], tiles[1]);
+    write_scratch(scratch2.path(), &w, &s, &[id, id1]);
+    let mut core = tile_heights(id);
+    let spire = 12 * T + 22;
+    core[spire] += 100.0;
+    let stats = planet_generators::bake::tile::TileStats {
+        land_cells: 0,
+        thermal_passes: 0,
+        thermal_moving_at_cap: 0,
+        eroded_m3: 0.0,
+        deposited_m3: 0.0,
+        exported_m3: 0.0,
+        clamped_cells: 0,
+    };
+    let r = planet_generators::bake::tile::TileResult { id, core, deposited: Vec::new(), fill: Vec::new(), heights: Vec::new(), stats };
+    let r1 = planet_generators::bake::tile::TileResult {
+        id: id1,
+        core: tile_heights(id1),
+        deposited: Vec::new(),
+        fill: Vec::new(),
+        heights: Vec::new(),
+        stats,
+    };
+    let mut writer = PackWriter::open(out2.path(), w.params(), DEFAULT_MAX_PACK_BYTES).unwrap();
+    writer.append(&tile_record(&w, RES, &s, &r).unwrap()).unwrap();
+    writer.append(&tile_record(&w, RES, &s, &r1).unwrap()).unwrap();
+    writer.write_index().unwrap();
+    writer.finish().unwrap();
+    let report = run_fill_pass(out2.path(), scratch2.path(), &w, RES, &s, &[id, id1], 1, &|_| 0.0, &mut |_, _| {}).unwrap();
+    let store2 = TileStore::open(out2.path(), w.params()).unwrap();
+    let codes = load_fill(&store2, &w, RES, &s, id).unwrap().unwrap();
+    assert_eq!(codes[spire], 0, "the outcrop was lowered to the level");
+    assert_eq!(codes[spire - 1], fill_code_of(50.0), "its neighbour is filled to the plateau's 200 m (50 m deep)");
+    assert_eq!(report.clamped_cells, 1, "the clamped cell is counted");
+}
+
+fn fill_code_of(m: f64) -> u16 {
+    planet_generators::bake::face::fill_code(m)
+}

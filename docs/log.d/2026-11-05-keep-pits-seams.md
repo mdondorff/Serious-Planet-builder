@@ -1,1 +1,1 @@
-- 2026-11-05 keep-pits-seams PR 1: bake::spill, the planet-wide spill level of a tiled surface (GEN-121), equal to a global flood bit for bit; the store and post-pass follow.
+- 2026-11-05 keep-pits-seams: the fill depth is the planet-wide spill level (GEN-121) written by a post-pass over the tiles' final heights (STRM-077) as u16 0.25 m against the exact base, clamped at 0; kind 16 is not used; the gate example fill_gate.

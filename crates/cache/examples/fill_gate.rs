@@ -67,7 +67,8 @@ fn report(what: &str, pairs: &[Pair]) {
     stats("filled edge step minus its interior control (m)", &mut excess);
     if !basin.is_empty() {
         let mut f: Vec<f64> = basin.iter().map(|&k| (pairs[k].0 .1 - pairs[k].1 .1).abs()).collect();
-        let mut add: Vec<f64> = basin.iter().map(|&k| (pairs[k].0 .1 - pairs[k].1 .1).abs() - (pairs[k].0 .0 - pairs[k].1 .0).abs()).collect();
+        let mut add: Vec<f64> =
+            basin.iter().map(|&k| (pairs[k].0 .1 - pairs[k].1 .1).abs() - (pairs[k].0 .0 - pairs[k].1 .0).abs()).collect();
         println!("pairs with a pit: share filled step over 0.5 m {:.2} %", share_over(&f, 0.5));
         stats("  filled edge step at pits (m)", &mut f);
         stats("  the fill's addition to the step at pits (m)", &mut add);
@@ -122,7 +123,12 @@ fn main() {
     let (nb0, nb1) = (across(n, cj * t), across(n, cj * t + t - 1));
     let (face_b, tile_b) = (nb0.0, (nb0.1 / t, nb0.2 / t));
     assert!(nb1.0 == face_b);
-    println!("cube edge: face 2 tile ({}, {cj}) ({:.0} % mountain classes) against face {} tile {tile_b:?}", tpe - 1, 100.0 * share, face_b.0);
+    println!(
+        "cube edge: face 2 tile ({}, {cj}) ({:.0} % mountain classes) against face {} tile {tile_b:?}",
+        tpe - 1,
+        100.0 * share,
+        face_b.0
+    );
     // The regions.
     let mut region: BTreeSet<PassTile> = BTreeSet::new();
     for ti in 11..=14u32 {
@@ -189,7 +195,9 @@ fn main() {
     let sstore = TileStore::open(&scratch_dir, world.params()).expect("scratch store");
     let _ = layer_tile_id;
     let dir = |id: PassTile, i: i64, j: i64| g.direction(id.face, i64::from(id.ti) * t + i, i64::from(id.tj) * t + j);
-    let load = |id: PassTile| (load_tile(&tstore, &world, rp, &spec, id).unwrap().unwrap().core, load_fill(&tstore, &world, rp, &spec, id).unwrap().unwrap());
+    let load = |id: PassTile| {
+        (load_tile(&tstore, &world, rp, &spec, id).unwrap().unwrap().core, load_fill(&tstore, &world, rp, &spec, id).unwrap().unwrap())
+    };
     // The (unfilled, filled) height of a core cell on the surface the runtime shows.
     let heights = |id: PassTile, data: &(Vec<f32>, Vec<u16>), i: i64, j: i64| -> (f64, f64) {
         let q = (j * t + i) as usize;
@@ -199,9 +207,14 @@ fn main() {
     // 1. The tile seam and the cube edge.
     let (a_id, b_id) = (PassTile { face: Face(2), ti: 12, tj: 10 }, PassTile { face: Face(2), ti: 13, tj: 10 });
     let (a, b) = (load(a_id), load(b_id));
-    let pairs: Vec<Pair> = (0..t).map(|j| (heights(a_id, &a, t - 1, j), heights(b_id, &b, 0, j), heights(a_id, &a, t - 2, j), heights(a_id, &a, t - 1, j))).collect();
+    let pairs: Vec<Pair> = (0..t)
+        .map(|j| (heights(a_id, &a, t - 1, j), heights(b_id, &b, 0, j), heights(a_id, &a, t - 2, j), heights(a_id, &a, t - 1, j)))
+        .collect();
     report("tile seam 2/12/10 | 2/13/10", &pairs);
-    let (c_id, d_id) = (PassTile { face: Face(2), ti: (tpe - 1) as u32, tj: cj as u32 }, PassTile { face: face_b, ti: tile_b.0 as u32, tj: tile_b.1 as u32 });
+    let (c_id, d_id) = (
+        PassTile { face: Face(2), ti: (tpe - 1) as u32, tj: cj as u32 },
+        PassTile { face: face_b, ti: tile_b.0 as u32, tj: tile_b.1 as u32 },
+    );
     let (c, d) = (load(c_id), load(d_id));
     let pairs: Vec<Pair> = (0..t)
         .map(|j| {

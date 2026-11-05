@@ -75,6 +75,8 @@ fn heights_of(scratch: &TileStore, world: &GlobalWorld, res: u32, spec: &TileLay
     })
 }
 
+/// `base` MUST be the base field pass 2 was run with (the one `bake layer` reads): the depth is taken against it and the key does not carry it, so another closure writes other depths under the same key (the layer's own
+/// `inputs_id` identifies the field; tests that give synthetic heights pass a closure of their own).
 /// Runs the post-pass over `tiles` (every tile of the layer, or a region with a margin): the final heights come from the scratch store in `scratch_dir`, the fill depth is written to the tile
 /// store in `tile_dir`. `threads` tiles are flooded at a time (about 400 MB each at 3,072 cells a side).
 #[allow(clippy::too_many_arguments)]
@@ -211,7 +213,7 @@ pub fn run_fill_pass(
             let heights = heights_of(&scratch, world, res, spec, order[k])?;
             let (z, f) = flood(&heights, t, sea);
             let level = final_level(&f, &|s| levels.seed(refs[k], s));
-            // The depth is taken against the surface the runtime shows, the exact base plus the stored change, so a floor is flat to the code's step (GEN-120): only the cells that are pits of the pass-2 surface need the base.
+            // The depth is taken against the bake's exact base plus the stored change, so a floor is flat to the code's step in the bake's frame (GEN-120; the runtime's lattice read and crease detail are not in it): only the cells that are pits of the pass-2 surface need the base.
             let core = load_tile(&store, world, res, spec, order[k])?
                 .ok_or_else(|| {
                     LayerStoreError(format!(
