@@ -1,5 +1,5 @@
 # 0103 An analytic uplift field replaces the uniform U/K
-Status: accepted (owner, 2026-11-05: "The other positions sound meaningful, please include those", the D3 review's item 1)
+Status: accepted (owner, 2026-11-05: "The other positions sound meaningful, please include those", the D3 review's item 1); amended 2026-11-05 by the independent review: the carve runs 20 steps, far from steady state, so the field is an elevation offset of at most about 84 m (total uplift equals U in metres), not a relief driver; lower K means less incision in the transient
 Date: 2026-11-05
 Source: owner, 2026-11-05; planner inbox #70 item 1; ADR 0088 point 4; ADR 0102; GEN-123; GEN-125; change `uplift-field`
 

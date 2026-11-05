@@ -604,6 +604,8 @@ impl HeightField for ErosionField<'_> {
                 .map(|&d| crate::drivers::ChannelSample {
                     soil_m: ok(src.deposited_depth_m(d)),
                     area_log2_cells: ok(src.area_log2_cells(d)),
+                    fill_m: ok(src.fill_depth_m(d)),
+                    erosion_m: ok(src.erosion_depth_m(d)),
                 })
                 .collect(),
         )

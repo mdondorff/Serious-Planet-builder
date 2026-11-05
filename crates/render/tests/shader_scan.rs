@@ -151,6 +151,62 @@ fn the_compact_shader_takes_the_slot_offsets_and_the_normal_scale_from_the_gener
     assert_eq!((SLOT_CLIMATE_OFFSET % 4, SLOT_DRIVER_OFFSET % 4, SLOT_TEXEL_OFFSET % 4), (0, 0, 0), "offsets are whole words");
 }
 
+// spec: GEN-025, REND-016
+#[test]
+fn the_slot_stride_is_a_whole_number_of_words_because_the_block_is_bound_whole_and_read_as_u32_words() {
+    // The slot is 1,100 + 8 (cells + 1)^2 bytes, a multiple of 4 and not of 16 (MESH_VERSION 11): that is safe only while (1) no binding or dynamic offset starts at a slot boundary and
+    // (2) every read of the slot is a u32 word (no vec4 or struct access into it). Pad the slot to a multiple of 16 if either test below fails.
+    for cells in [16u32, 32, 64] {
+        assert_eq!(planet_generators::compact::slot_bytes(cells) % 4, 0, "cells {cells}");
+    }
+    let src = compact_terrain_shader(32);
+    assert_eq!(src.matches("var<storage, read> block:").count(), 1, "one declaration of the block");
+    assert!(src.contains("var<storage, read> block: array<u32>;"), "the block is read as u32 words");
+    // Every access to the block is a word read `block[...]` whose value is used as a u32 or bitcast to f32; no other type is declared over it.
+    assert!(
+        !src.contains("block: array<vec") && !src.contains("block: array<Slot") && !src.contains("block: array<Texel"),
+        "no vector or struct view of the block"
+    );
+    let bytes = src.as_bytes();
+    let mut reads = 0;
+    for (at, _) in src.match_indices("block[") {
+        if at > 0 && (bytes[at - 1].is_ascii_alphanumeric() || bytes[at - 1] == b'_') {
+            continue;
+        }
+        let (mut depth, mut end) = (0, at + 5);
+        for (k, c) in src[at + 5..].char_indices() {
+            match c {
+                '[' => depth += 1,
+                ']' if depth == 0 => {
+                    end = at + 5 + k;
+                    break;
+                }
+                ']' => depth -= 1,
+                _ => {}
+            }
+        }
+        assert_ne!(bytes.get(end + 1), Some(&b'.'), "a member access on an element of the block: {}", &src[at..(end + 3).min(src.len())]);
+        reads += 1;
+    }
+    assert!(reads >= 3, "the shader reads the block word by word ({reads} reads)");
+    // The block is bound whole: no binding offset, no dynamic offset (REND-016 binds each block as one storage buffer).
+    let host = include_str!("../src/compact.rs");
+    assert!(host.contains("buffer.as_entire_binding()"), "the block's bind group binds the whole buffer");
+    assert!(
+        !host.contains("BufferBinding {") && !host.contains("has_dynamic_offset: true"),
+        "no sub-range or dynamic-offset binding of the block"
+    );
+    let terrain = include_str!("../src/terrain.rs");
+    assert!(!terrain.contains("has_dynamic_offset: true"), "no dynamic offset anywhere in the terrain renderer");
+    // The shadow passes bind the same blocks (the clipmap gather and the coarse cube): whole, by the same call (their `BufferBinding`s are the per-job uniform ranges).
+    let shadow = include_str!("../src/shadow.rs");
+    assert_eq!(
+        shadow.matches("buffer.as_entire_binding()").count(),
+        2,
+        "the two block bind groups of the shadow passes bind the whole block"
+    );
+}
+
 // spec: ATMO-021
 #[test]
 fn the_composite_declares_the_altitude_and_the_steps_of_the_cameras_march_from_the_references_constants() {
