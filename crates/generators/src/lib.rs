@@ -26,6 +26,8 @@ pub mod height;
 pub mod height_fields;
 pub mod horizon;
 pub mod horizon_lookup;
+pub mod lithology;
+pub mod lithology_preview;
 pub mod manifest;
 pub mod mesh;
 pub mod normals;

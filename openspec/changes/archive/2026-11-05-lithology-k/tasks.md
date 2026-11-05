@@ -1,0 +1,4 @@
+- [x] 1.1 The field: provinces, hardness, strata, columns, soluble flag (GEN-116)
+- [x] 1.2 The preview, the option and the numbers (GEN-122); the labelled sheet in `docs/dev_screenshots/`
+- [x] 1.3 Tests: bit-identical on any thread count, H, K and the bands, the lattice, the preview, the option
+- [ ] 1.4 Reviews (`numerics-reviewer`, `spec-guardian`), `verifier`, prepush, PR; archive in the same PR
