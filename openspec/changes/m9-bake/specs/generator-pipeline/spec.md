@@ -217,9 +217,9 @@ Source: owner 2026-11-04 (planner inbox #58.3, M9 plan I5a(c)); GEN-100
 - **THEN** the change is equal in both, the codes are equal on both thread counts, a cell with nothing above it has code 0, and some cell has at least 8 (an area of two cells)
 
 ### Requirement: GEN-111 Pass 2 keeps the deposited depth of its core
-Pass 2 SHALL return, with the core's change, one byte plane over the core: the depth deposited, `round(m)` of the depth in metres (0 to 255 m in steps of 1 m; more is stored as 255; owner 2026-11-04):
+Pass 2 SHALL return, with the core's change, one byte plane over the core: the depth deposited as a square-root code, `round(12 sqrt(m))` of the depth in metres (0 to 451.6 m; the step is 0.10 m at 0.3 m, 0.12 m at 0.5 m, 0.17 m at 1 m and 0.53 m at 10 m, so the material thresholds of 0.3, 0.5 and 1 m are resolved; from 449.8 m on it is stored as 255, which decodes to 451.56 m; owner 2026-11-05, after the linear 1 m form of 2026-11-04):
 - deposited is the deposition sweep's rise plus thermal's gain, `max(0, z_final - z_thermal) + max(0, z_thermal - ref)`, `ref` the base plus the pass-1 change where it is positive (a raise by uplift or a filled pit is not a deposit);
-- the depth removed is not stored: a reader derives it as `max(0, deposited - change)` with the layer's change at the cell (`removed_depth_m`); it is exact where pass 1 did not raise the cell, short by the raise where it did (15 % of mountain land and 35 % of hills in seed 14's samples), and clipped where the deposited depth is 255;
+- the depth removed is not stored: a reader derives it as `max(0, deposited - change)` with the layer's change at the cell (`removed_depth_m`); it is exact where pass 1 did not raise the cell, short by the raise where it did (15 % of mountain land and 35 % of hills in seed 14's samples), and clipped where the deposited depth is at the code's end (451.6 m); on a cell that only gained material the derived removal is at most half a step of the code plus half a step of the change (0.21 m at 1 m of deposit; the change is stored in steps of 0.25 m), so a rock or scree mask must threshold above that, not at `> 0`;
 - the plane SHALL be the same bytes on any thread count.
 It serves the viewer's ground materials (soil and scree where deposited, rock where the change is deep and little is deposited).
 
@@ -229,7 +229,7 @@ Source: owner 2026-11-04 (planner inbox #58.3, M9 plan I5a(c); the one-plane, 1 
 
 #### Scenario: The deposited depth and what is removed
 - **WHEN** one synthetic tile is run with a face change of -30 m, of +10 m and with none
-- **THEN** the plane holds deposits in places and none elsewhere, the codes are 0 for 0 m, 255 beyond the range, steps of 1 m and increasing, and the depth removed that is derived from a cell's deposited depth and change is never negative and is at most the pass-1 raise (zero where pass 1 did not raise) away from deposited minus change, within the 1 m step
+- **THEN** the plane holds deposits in places and none elsewhere, the codes are 0 for 0 m, 12 for 1 m, 255 from 449.8 m (decoding to 451.56 m), strictly increasing with a step of at most 0.11 m at 0.3 m, 0.12 m at 0.5 m, 0.18 m at 1 m and 0.56 m at 10 m, the round trip is within half a step in the square root, and the depth removed that is derived from a cell's deposited depth and change is never negative and is at most the pass-1 raise (zero where pass 1 did not raise) away from deposited minus change, within the code's step
 
 ### Requirement: GEN-102 Cap bounds read the layer's pyramid
 The field's height bounds over a cap SHALL take the layer's part from the layer's min/max pyramid (STRM-066):
