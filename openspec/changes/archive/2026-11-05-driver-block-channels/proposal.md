@@ -10,3 +10,8 @@
 ## Impact
 - Code: `generators` (`drivers.rs`, `channels.rs`, `height.rs`, `erosion.rs`, `height_fields.rs`, `compact.rs`, the forwarding wrappers), `cache` (`LayerChannels` takes the two key resolutions, `identity`, `faces_with_area`), `app` (the option, `worldfield.rs`, `skeleton.rs` guard). Requirements: GEN-119 and VIEW-066 added, GEN-074 modified (its "neutral only" clause).
 - The preview store `global16384-m9c14` was baked before the class source changed (#1180), so current keys refuse it: the live check awaits a rebaked store; tier A, B and C use the tiny planet.
+
+## Notes kept from the design
+- The preview store global16384-m9c14 was baked before the class source changed (#1180): current keys refuse it, so the live per-tile cost of the 162 channel reads a tile (cached windows and tiles, PR 1) is not measured; it needs a rebaked store and the perf window.
+- A failed channel read is recorded in the field's error slot like a height's and leaves the texel neutral; the viewer does not read that slot (as for heights).
+- The reader's identity folds the keys of a face's area and of a tile's depth (which carry the layer's parameters, the channels' version and scales), the resolutions of both and CHANNEL_READER_VERSION; the field's climate version word folds DRIVER_MAP_VERSION and that identity.
