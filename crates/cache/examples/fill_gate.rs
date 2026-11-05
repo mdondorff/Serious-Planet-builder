@@ -5,6 +5,7 @@
 //! - the filled surface's (exact base + stored change + depth) height step across the tile seam and across the cube edge, against the step between interior neighbours;
 //! - the flatness of the filled cells inside the basins, the share of cells clamped at 0 (outcrops), the pit share and depth per class on 2/12/10, the codes at their cap, and the inland cells at
 //!   or below the sea level (the post-pass's outlets) in the seam region.
+//!
 //! Writes only under `--out` (default target/bake/fill-gate). Not part of the product.
 
 use std::collections::{BTreeSet, VecDeque};
@@ -37,7 +38,7 @@ fn quantile(v: &mut [f64], q: f64) -> f64 {
     v[((v.len() - 1) as f64 * q).round() as usize]
 }
 
-fn stats(name: &str, v: &mut Vec<f64>) {
+fn stats(name: &str, v: &mut [f64]) {
     println!("{name}: n {} p50 {:.3} p99 {:.3} max {:.3}", v.len(), quantile(v, 0.5), quantile(v, 0.99), quantile(v, 1.0));
 }
 
