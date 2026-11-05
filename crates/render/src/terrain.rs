@@ -94,8 +94,8 @@ struct Globals {
     materials: array<vec4<f32>, 24>,
     // The specular term of the ground (LOOK-010): the roughness of the first four materials, of scree and wet ground (and two zeros), then two roughness modifiers (input, lo, hi, factor).
     gloss: array<vec4<f32>, 4>,
-    // The coefficients of the detail octaves per material (LOOK-013): per octave (16 m, 2 m, 25 cm, 3 cm) the albedo of rock, sand, - and soil, the colour of grass, and the tilts of
-    // rock, sand, grass and soil, and the albedo and tilt of scree and of wet ground (scree albedo, wet albedo, scree tilt, wet tilt); then the depth of the rock's cracks in x.
+    // The coefficients of the detail octaves per material (LOOK-013): per octave (16 m, 2 m, 25 cm, 3 cm, then 64 m and 8 m, REND-057) the albedo of rock, sand, - and soil, the colour of grass, and the tilts of
+    // rock, sand, grass and soil, and the albedo and tilt of scree and of wet ground (scree albedo, wet albedo, scree tilt, wet tilt); then, after the six octaves, the depth of the rock's cracks in x (index 24).
     coef: array<vec4<f32>, 25>,
     // The edit preview (REND-033), read only for a previewed node and only when extra.w (the count in the low 6 bits, at most 32, and 64 times the number of stamps of the delta above them) is above 0: per stamp two
     // entries, (anchor relative to the camera, reach in metres) and (amount in metres, kind 1 hill / 2 crater / 3 plateau, sign, bound).
@@ -293,9 +293,9 @@ fn fs_view(in: VsOut) -> vec4<f32> {
     return vec4<f32>(v * k, v * k, v * k, 1.0);
 }
 
-// The ground detail of the lit path (M7 G2a, G2c, LOOK-009, SPIKE-27): four noise octaves (cells of 16 m, 2 m, 25 cm, 3 cm) anchored to the world.
+// The ground detail of the lit path (M7 G2a, G2c, LOOK-009, SPIKE-27): six noise octaves (cells of 16 m, 2 m, 25 cm, 3 cm and the optional 64 m and 8 m) anchored to the world.
 // The node record holds the integer cell of the tile origin at 1/32 m (from f64 on the CPU) and its fraction; an octave's cell is that integer
-// shifted right by the octave's bits, 9, 6, 3 and 0 (an arithmetic shift is the floor), its remainder and the fraction are the offset inside the
+// shifted right by the octave's bits, 9, 6, 3 and 0 (11 and 8 for the optional two; an arithmetic shift is the floor), its remainder and the fraction are the offset inside the
 // cell, so neighbouring tiles and levels of detail read the same noise and no planet-radius value reaches the shader (CON-11). The noise is planar
 // value noise with analytic gradients on the plane of the lattice the surface normal lies closest to (two planes blended near their edge), the
 // lattice of every other octave turned by 45 degrees. An octave fades out while a pixel covers 0.06 to 0.25 of its cell. Presentation only: heights,

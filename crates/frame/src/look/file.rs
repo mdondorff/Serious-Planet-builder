@@ -155,7 +155,7 @@ pub struct GroundLook {
     /// The patch break-up of the material boundaries (REND-055): how far, as a share of the slope cosine, two patch octaves of 32 m and 8 m shift the slope input of the material weights;
     /// 0 is off (the default: the picture is what it was, and the key does not change).
     pub patch: f64,
-    /// The coefficients of the detail octaves per material (schema version 7, LOOK-013).
+    /// The coefficients of the detail octaves per material (LOOK-013, REND-056, REND-057).
     pub coef: DetailCoefficients,
 }
 
