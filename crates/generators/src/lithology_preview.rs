@@ -27,13 +27,13 @@ pub struct Preview {
     pub text: String,
 }
 
-const OCEAN: [u8; 4] = [20, 30, 60, 255];
+pub(crate) const OCEAN: [u8; 4] = [20, 30, 60, 255];
 
-fn lerp(a: [f64; 3], b: [f64; 3], t: f64) -> [f64; 3] {
+pub(crate) fn lerp(a: [f64; 3], b: [f64; 3], t: f64) -> [f64; 3] {
     [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
 }
 
-fn rgba(c: [f64; 3]) -> [u8; 4] {
+pub(crate) fn rgba(c: [f64; 3]) -> [u8; 4] {
     [libm::round(c[0]) as u8, libm::round(c[1]) as u8, libm::round(c[2]) as u8, 255]
 }
 
@@ -55,12 +55,12 @@ fn soluble_colour(s: f64) -> [u8; 4] {
 }
 
 /// The unit direction of longitude `lon` and latitude `lat` in radians (+z the north pole, COORD's axes).
-fn direction(lon: f64, lat: f64) -> Vec3 {
+pub(crate) fn direction(lon: f64, lat: f64) -> Vec3 {
     let c = libm::cos(lat);
     Vec3::new(c * libm::cos(lon), c * libm::sin(lon), libm::sin(lat))
 }
 
-fn lon_lat(d: Vec3) -> (f64, f64) {
+pub(crate) fn lon_lat(d: Vec3) -> (f64, f64) {
     (libm::atan2(d.y, d.x), libm::asin(d.z.clamp(-1.0, 1.0)))
 }
 
@@ -269,7 +269,7 @@ fn cross_section(source: &ClassSource, lithology: &Lithology) -> (Rgba, String) 
 }
 
 /// The point at fraction `t` along the great circle from `a` to `b` (`t` outside `[0, 1]` extends it).
-fn slerp(a: Vec3, b: Vec3, t: f64) -> Vec3 {
+pub(crate) fn slerp(a: Vec3, b: Vec3, t: f64) -> Vec3 {
     let omega = libm::atan2(a.cross(b).length(), a.dot(b)).max(1e-9);
     let (sa, sb) = (libm::sin((1.0 - t) * omega) / libm::sin(omega), libm::sin(t * omega) / libm::sin(omega));
     (a * sa + b * sb).normalized()

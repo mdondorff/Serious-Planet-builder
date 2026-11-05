@@ -42,6 +42,8 @@ pub mod stamp;
 #[cfg(feature = "stress")]
 pub mod stress;
 pub mod terrain;
+pub mod uplift;
+pub mod uplift_preview;
 pub mod water;
 pub mod water_summary;
 pub mod wet_floor;

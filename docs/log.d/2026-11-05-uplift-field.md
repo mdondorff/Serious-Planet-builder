@@ -1,0 +1,1 @@
+- 2026-11-05 uplift-field: the analytic uplift field (GEN-123, ADR 0103; belts, back-arc, craton from the province lattice, which gains the back-arc term) and its planet preview (GEN-125); the carve wiring is the explorer's plan PR 4.
