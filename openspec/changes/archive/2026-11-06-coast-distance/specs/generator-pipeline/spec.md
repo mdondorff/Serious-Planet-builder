@@ -11,7 +11,8 @@ The Earth preset of `ShelfProfile`:
 | Parameter | Earth default | Kind |
 |---|---|---|
 | break depth, abyssal depth | 130 m, 4,500 m | Earth state |
-| passive width, active width, slope width | 80 km, 30 km, 90 km | Earth state |
+| active width, slope width | 30 km, 90 km | Earth state |
+| passive width | 80 km | calibration (Earth's mean shelf width, about 80 km; tuned so that the share of the ocean under 200 m is of Earth's order on a coast longer than Earth's) |
 | active within (distance), active convergence | 150 to 450 km, 0.05 to 0.35 | calibration |
 | coast lattice cells, coast ramp (land depth) | 512, 0.01 | calibration |
 | minimum water, its ramp | 5 m, 0.01 | calibration |

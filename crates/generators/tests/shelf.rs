@@ -90,6 +90,7 @@ fn the_parameters_are_validated() {
         ShelfProfile { coast_ramp: -0.1, ..ShelfProfile::earth() },
         ShelfProfile { min_sea_ramp: 0.0, ..ShelfProfile::earth() },
         ShelfProfile { coast_lattice_cells: 100, ..ShelfProfile::earth() },
+        ShelfProfile { coast_lattice_cells: 8192, ..ShelfProfile::earth() },
     ] {
         assert!(std::panic::catch_unwind(|| ShelfProfile::new(bad)).is_err(), "{bad:?} is refused");
     }
@@ -169,7 +170,7 @@ fn a_point_far_from_every_margin_or_on_a_non_converging_one_is_passive_and_the_f
     assert!(one > 0, "some of it is an active margin");
 }
 
-// spec: GEN-136
+// spec: GEN-118
 #[test]
 fn the_floor_meets_the_land_at_every_coast_of_the_field() {
     let s = ClassSource::new(7);
@@ -200,4 +201,27 @@ fn the_floor_meets_the_land_at_every_coast_of_the_field() {
     println!("SHELF coasts {coasts}, worst step {worst:.2} m");
     assert!(coasts > 100, "the walk found {coasts} coasts");
     assert!(worst < 5.0, "the floor steps by {worst} m at a coast");
+}
+
+// spec: GEN-118
+#[test]
+fn the_near_shore_sea_is_not_an_abyss_wall() {
+    // The sea within 0.01 of land depth of a coast (where the fade has not finished) must not sit in the abyss: an islet under a cell of the coast lattice would put it there.
+    let s = ClassSource::new(7);
+    let n = 40_000;
+    let (mut near, mut deep, mut worst) = (0usize, 0usize, 0.0f64);
+    for i in 0..n {
+        let d = fib(i, n);
+        let p = s.eval(d);
+        if p.land_depth < 0.0 && p.land_depth > -0.01 {
+            near += 1;
+            if p.e0 < -1000.0 {
+                deep += 1;
+            }
+            worst = worst.min(p.e0);
+        }
+    }
+    println!("SHELF near-shore sea {near}, deeper than 1,000 m {deep}, deepest {worst:.0} m");
+    assert!(near > 100, "{near} near-shore points");
+    assert!(deep * 20 < near, "{deep} of {near} near-shore sea points lie deeper than 1,000 m");
 }

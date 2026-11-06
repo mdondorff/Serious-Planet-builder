@@ -10,8 +10,8 @@ use planet_core::cube::{direction_to_face, face_to_direction, TangentWarp};
 use planet_core::par::{self, Par};
 use planet_core::{Face, Vec3};
 
-/// Bump whenever the lattice's output changes for the same field.
-pub const COAST_LATTICE_VERSION: u32 = 1;
+/// The narrowest bucket of the nearest-crossing search, in radians.
+const MIN_BUCKET_RAD: f64 = 0.02;
 
 /// The signed distance to the coast of a field on a lattice over the cube faces, and the margin activity at the nearest crossing.
 #[derive(Debug)]
@@ -75,7 +75,8 @@ impl CoastLattice {
         let acts: Vec<u8> = par::map(par, crossings.len(), &|k| libm::round(255.0 * activity(crossings[k]).clamp(0.0, 1.0)) as u8);
         // A 3D grid of cells as wide as the cap's chord: every crossing within the cap of a point lies in the 27 cells around it.
         let cap_rad = cap_km / radius_km;
-        let width = (cap_rad * 1.01).max(1e-6);
+        // At least 0.02 rad (about 130 km): a smaller cap would need a grid of 1/cap^3 cells and a wider cell is always correct.
+        let width = (cap_rad * 1.01).max(MIN_BUCKET_RAD);
         let m = (2.0 / width).ceil() as usize + 1;
         let cell_of = |p: Vec3| {
             (
@@ -120,9 +121,11 @@ impl CoastLattice {
                             }
                         }
                     }
-                    let km = if at == usize::MAX { cap_km } else { (libm::acos(best.clamp(-1.0, 1.0)) * radius_km).min(cap_km) };
+                    // A crossing beyond the cap is not found, wherever the buckets fall: the result is a function of the field only.
+                    let arc_km = if at == usize::MAX { f64::INFINITY } else { libm::acos(best.clamp(-1.0, 1.0)) * radius_km };
+                    let km = arc_km.min(cap_km);
                     let signed_km = if value(f, i, j) < 0.0 { km } else { -km };
-                    (signed_km as f32, if at == usize::MAX { 0 } else { acts[at] })
+                    (signed_km as f32, if arc_km < cap_km { acts[at] } else { 0 })
                 })
                 .collect::<Vec<_>>()
         });

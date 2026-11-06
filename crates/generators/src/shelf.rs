@@ -68,7 +68,7 @@ impl ShelfProfile {
         assert!(positive.iter().all(|v| v.is_finite() && *v > 0.0), "the shelf's depths and widths are positive and finite: {p:?}");
         assert!(p.break_depth_m < p.abyssal_depth_m, "the shelf break lies above the abyssal plain: {p:?}");
         assert!(
-            p.coast_lattice_cells.is_power_of_two() && p.coast_lattice_cells >= 4,
+            p.coast_lattice_cells.is_power_of_two() && (4..=4096).contains(&p.coast_lattice_cells),
             "the coast lattice has a power of two cells per face edge: {p:?}"
         );
         let ramps = [p.active_within_km, p.active_convergence];

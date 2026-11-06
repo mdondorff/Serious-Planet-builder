@@ -189,6 +189,8 @@ pub struct ClassSource {
     shelf: ShelfProfile,
     /// The distance to the coast of the field on a lattice (GEN-136), built on the first read of a sea point.
     coast: std::sync::OnceLock<CoastLattice>,
+    /// The threads the coast lattice is built on (0: the machine's, at most 16); the bytes do not depend on it.
+    coast_threads: usize,
 }
 
 impl ClassSource {
@@ -209,6 +211,7 @@ impl ClassSource {
                 plate_draw: t,
                 shelf: ShelfProfile::earth(),
                 coast: std::sync::OnceLock::new(),
+                coast_threads: 0,
             };
             let score =
                 points.iter().zip(&land).filter(|(_, &l)| l).map(|(&d, _)| source.convergent_margin_near(d)).sum::<f64>() / land_count;
@@ -228,6 +231,12 @@ impl ClassSource {
         self
     }
 
+    /// The source whose coast lattice is built on `threads` threads (the owner's budget; 0 takes the machine's).
+    pub fn with_coast_threads(mut self, threads: usize) -> ClassSource {
+        self.coast_threads = threads;
+        self
+    }
+
     pub fn shelf(&self) -> &ShelfProfile {
         &self.shelf
     }
@@ -236,10 +245,14 @@ impl ClassSource {
     /// the first read on the machine's threads (the bytes do not depend on the count) within the widest shelf plus the slope.
     fn coast_lattice(&self) -> &CoastLattice {
         self.coast.get_or_init(|| {
-            let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(16);
+            let threads = if self.coast_threads > 0 {
+                self.coast_threads
+            } else {
+                std::thread::available_parallelism().map_or(1, |n| n.get()).min(16)
+            };
             let cap_km = self.shelf.passive_width_km.max(self.shelf.active_width_km) + self.shelf.slope_width_km;
             CoastLattice::build(
-                &|d| crate::continents::continent(self.seed, d) - SEA_LEVEL_C,
+                &|d| crate::global::continent_land_depth(self.seed, d),
                 &|d| self.margin_activity(d),
                 self.shelf.coast_lattice_cells,
                 cap_km,

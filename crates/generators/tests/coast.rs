@@ -98,3 +98,29 @@ fn the_cells_must_be_a_power_of_two() {
     let r = std::panic::catch_unwind(|| CoastLattice::build(&|_| -1.0, &|_| 0.0, 100, 250.0, R_KM, 1));
     assert!(r.is_err(), "100 cells are refused");
 }
+
+// spec: GEN-136
+#[test]
+fn the_read_is_continuous_along_a_walk_across_face_edges_and_corners() {
+    let centre = Vec3::new(0.5, 0.5, 0.7).normalized();
+    let l = lattice(centre, 14.0, 128, 700.0, 2);
+    // Great circles through the face edges and a cube corner, in steps of 64 m.
+    let circles = [
+        (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0)),
+        (Vec3::new(1.0, 1.0, 1.0).normalized(), Vec3::new(-1.0, 1.0, 0.0).normalized()),
+    ];
+    let step = 1e-5;
+    let mut worst = 0.0f64;
+    for (a, b) in circles {
+        let mut prev = l.read(a).0;
+        for k in 1..=(core::f64::consts::TAU / step) as usize {
+            let t = step * k as f64;
+            let d = (a * libm::cos(t) + b * libm::sin(t)).normalized();
+            let now = l.read(d).0;
+            worst = worst.max((now - prev).abs());
+            prev = now;
+        }
+    }
+    // The distance is 1-Lipschitz (a km per km) plus the bilinear's own slope: a 64 m step moves it by far under 0.5 km.
+    assert!(worst < 0.5, "a 64 m step changes the distance by {worst} km");
+}
