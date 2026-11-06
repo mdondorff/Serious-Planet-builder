@@ -53,7 +53,17 @@ fn base(d: Vec3) -> f64 {
 }
 
 fn pass1() -> LayerSpec {
-    LayerSpec { cells: 24, radius_m: R, sea_level: 0.0, seed: 17, carve: CarveParams::default(), inputs_id: 1, uses_factor: false, halo: 4 }
+    LayerSpec {
+        cells: 24,
+        radius_m: R,
+        sea_level: 0.0,
+        seed: 17,
+        carve: CarveParams::default(),
+        inputs_id: 1,
+        uses_factor: false,
+        rock: 0,
+        halo: 4,
+    }
 }
 
 fn spec(w: &GlobalWorld) -> TileLayerSpec {
@@ -62,6 +72,7 @@ fn spec(w: &GlobalWorld) -> TileLayerSpec {
         params: Pass2Params::standard(9, 0.0),
         inputs_id: 1,
         uses_factor: false,
+        rock: 0,
         faces: faces_digest(w, RES, &pass1()),
     }
 }
@@ -87,7 +98,22 @@ fn run(
     threads: usize,
 ) -> Result<Pass2Report, planet_cache::layer_store::LayerStoreError> {
     let reader = face_change_reader(f);
-    run_pass2(dir, w, RES, s, &Pass2Inputs { base: &base, face_change: &reader, factor: None, scratch: None }, which, threads, &mut |_| {})
+    run_pass2(
+        dir,
+        w,
+        RES,
+        s,
+        &Pass2Inputs {
+            base: &base,
+            face_change: &reader,
+            factor: None,
+            scratch: None,
+            rock: planet_generators::bake::face::RockFields::none(),
+        },
+        which,
+        threads,
+        &mut |_| {},
+    )
 }
 
 fn stored(dir: &Path, w: &GlobalWorld, s: &TileLayerSpec, which: &[PassTile]) -> Vec<Vec<u32>> {
@@ -213,7 +239,7 @@ fn a_grid_that_cannot_be_filed_and_a_factor_that_disagrees_with_the_spec_are_ref
     let odd = TileLayerSpec { grid: TileGrid { cells: 72, ..s.grid }, ..s };
     let e = run(Dir::new("odd").path(), &w, &odd, &f, &tiles()[..1], 1).expect_err("a grid of 3 tiles").to_string();
     assert!(e.contains("power of two"), "{e}");
-    let with_factor = TileLayerSpec { uses_factor: true, ..s };
+    let with_factor = TileLayerSpec { uses_factor: true, rock: 0, ..s };
     let e = run(Dir::new("factor").path(), &w, &with_factor, &f, &tiles()[..1], 1).expect_err("a factor that is absent").to_string();
     assert!(e.contains("uses_factor"), "{e}");
 }

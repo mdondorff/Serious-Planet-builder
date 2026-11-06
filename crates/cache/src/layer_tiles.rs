@@ -16,7 +16,10 @@ use std::sync::{Arc, Mutex};
 
 use planet_core::{Face, TileId, Vec3};
 use planet_generators::bake::face::FaceChange;
-use planet_generators::bake::tile::{dequantise, pass2_tile, quantise, Pass2Params, TileGrid, TileId as PassTile, TileResult, TileStats};
+use planet_generators::bake::face::RockFields;
+use planet_generators::bake::tile::{
+    dequantise, pass2_tile_rock, quantise, Pass2Params, TileGrid, TileId as PassTile, TileResult, TileStats,
+};
 
 use crate::global_store::GlobalWorld;
 use crate::key::{cache_key, CacheKey, Kind, PARAM_RESOLUTION, PARAM_TILE_LAYER};
@@ -44,6 +47,8 @@ pub struct TileLayerSpec {
     /// An identity of the inputs of the base field and the carve factor that the bake's key does not cover (as [`LayerSpec::inputs_id`]).
     pub inputs_id: u64,
     pub uses_factor: bool,
+    /// Which rock fields the carves read (`RockFields::mask`: bit 0 the erodibility, bit 1 the uplift), part of the key: a store written with other fields is another key (GEN-127).
+    pub rock: u8,
     /// A digest of the six pass-1 face keys ([`faces_digest`]): the tile reads the face change, so the pass 1 it was made from is part of its key.
     pub faces: [u8; 16],
 }
@@ -87,6 +92,7 @@ impl TileLayerSpec {
         b.extend(p.seed.to_le_bytes());
         b.extend(self.inputs_id.to_le_bytes());
         b.push(u8::from(self.uses_factor));
+        b.push(self.rock);
         b.extend(self.faces);
         b
     }
@@ -342,6 +348,7 @@ pub fn bake_specs(world: &GlobalWorld, shape: &BakeShape) -> Result<(LayerSpec, 
         carve: planet_generators::bake::carve::CarveParams::default(),
         inputs_id: planet_generators::bake::inputs::BakeInputs::id(),
         uses_factor: true,
+        rock: 3,
         halo: face_halo,
     };
     let spec = TileLayerSpec {
@@ -349,6 +356,7 @@ pub fn bake_specs(world: &GlobalWorld, shape: &BakeShape) -> Result<(LayerSpec, 
         params: Pass2Params::standard(shape.seed, 0.0),
         inputs_id: planet_generators::bake::inputs::BakeInputs::id(),
         uses_factor: true,
+        rock: 3,
         faces: faces_digest(world, shape.face_res as u32, &layer),
     };
     Ok((layer, spec))
@@ -606,6 +614,8 @@ pub struct Pass2Inputs<'a> {
     pub factor: Option<&'a (dyn Fn(Vec3) -> f64 + Sync)>,
     /// The scratch store of the final heights (STRM-077): a folder that pass 2 writes each tile's heights to for the post-pass (`layer_fillpass`), or none when no post-pass follows.
     pub scratch: Option<&'a Path>,
+    /// The erodibility field of the local carve (GEN-127); the uplift is not read in pass 2.
+    pub rock: RockFields<'a>,
 }
 
 /// Pass 2 over `tiles`, one at a time, into the tile layer store in `dir`: a tile stored under the current key is skipped (a resume), the others are computed and appended with the
@@ -626,6 +636,13 @@ pub fn run_pass2(
             "the tile layer spec says uses_factor = {} but the carve factor given is {}",
             spec.uses_factor,
             if inputs.factor.is_some() { "present" } else { "absent" }
+        )));
+    }
+    if spec.rock != inputs.rock.mask() {
+        return Err(LayerStoreError(format!(
+            "the tile layer spec says rock = {} but the rock fields given are {} (bit 0 the erodibility, bit 1 the uplift)",
+            spec.rock,
+            inputs.rock.mask()
         )));
     }
     spec.grid.check().map_err(LayerStoreError)?;
@@ -657,7 +674,7 @@ pub fn run_pass2(
             report.skipped.push(id);
             continue;
         }
-        let r = pass2_tile(&spec.grid, id, inputs.base, inputs.face_change, inputs.factor, &spec.params, threads);
+        let r = pass2_tile_rock(&spec.grid, id, inputs.base, inputs.face_change, inputs.factor, &inputs.rock, &spec.params, threads);
         // A tile stored before the channels existed is computed again for its depth only; what is stored is not written twice.
         if !have_tile {
             writer.append(&tile_record(world, res, spec, &r)?).map_err(err)?;

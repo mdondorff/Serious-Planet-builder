@@ -10,7 +10,7 @@ use std::path::Path;
 
 use planet_core::{Face, Vec3};
 use planet_generators::bake::carve::CarveParams;
-use planet_generators::bake::face::{pass1_face_with_area, FaceChange, FaceSpec};
+use planet_generators::bake::face::{pass1_face_rock, FaceChange, FaceSpec, RockFields};
 
 use crate::global_store::GlobalWorld;
 use crate::key::{cache_key, CacheKey, Kind, PARAM_LAYER, PARAM_RESOLUTION};
@@ -38,6 +38,8 @@ pub struct LayerSpec {
     pub inputs_id: u64,
     /// Whether the carve factor of GEN-097 is applied (it is part of the key; `run_pass1` refuses a factor that disagrees).
     pub uses_factor: bool,
+    /// Which rock fields the carves read (`RockFields::mask`: bit 0 the erodibility, bit 1 the uplift), part of the key: a store written with other fields is another key (GEN-127).
+    pub rock: u8,
     /// Cells carved beyond each edge of a face ([`FaceSpec::halo`]); part of the key.
     pub halo: usize,
 }
@@ -48,6 +50,7 @@ impl LayerSpec {
         b.extend(LAYER_VERSION.to_le_bytes());
         b.extend(planet_generators::bake::BAKE_KERNEL_VERSION.to_le_bytes());
         b.push(u8::from(self.uses_factor));
+        b.push(self.rock);
         b.extend((self.halo as u64).to_le_bytes());
         b.extend((self.cells as u64).to_le_bytes());
         for v in [self.radius_m, self.sea_level] {
@@ -183,6 +186,22 @@ pub fn run_pass1(
     faces: &[Face],
     threads: usize,
 ) -> Result<Pass1Report, LayerStoreError> {
+    run_pass1_rock(dir, world, res, spec, base, factor, &RockFields::none(), faces, threads)
+}
+
+/// [`run_pass1`] with the rock fields of GEN-127 (the erodibility and the uplift), which the key of the run must name (`inputs_id`).
+#[allow(clippy::too_many_arguments)]
+pub fn run_pass1_rock(
+    dir: &Path,
+    world: &GlobalWorld,
+    res: u32,
+    spec: &LayerSpec,
+    base: &(dyn Fn(Vec3) -> f64 + Sync),
+    factor: Option<&(dyn Fn(Vec3) -> f64 + Sync)>,
+    rock: &RockFields,
+    faces: &[Face],
+    threads: usize,
+) -> Result<Pass1Report, LayerStoreError> {
     let err = |e: crate::pack::PackError| LayerStoreError(format!("the layer store {}: {e}", dir.display()));
     let mut writer = PackWriter::open(dir, world.params(), DEFAULT_MAX_PACK_BYTES).map_err(err)?;
     let store = TileStore::open(dir, world.params()).map_err(err)?;
@@ -191,6 +210,13 @@ pub fn run_pass1(
             "the layer spec says uses_factor = {} but the carve factor given is {}",
             spec.uses_factor,
             if factor.is_some() { "present" } else { "absent" }
+        )));
+    }
+    if spec.rock != rock.mask() {
+        return Err(LayerStoreError(format!(
+            "the layer spec says rock = {} but the rock fields given are {} (bit 0 the erodibility, bit 1 the uplift)",
+            spec.rock,
+            rock.mask()
         )));
     }
     let mut report = Pass1Report { computed: Vec::new(), skipped: Vec::new() };
@@ -205,7 +231,7 @@ pub fn run_pass1(
             continue;
         }
         // A face stored before the channels existed is carved again for its area only; what is stored is not written twice.
-        let (change, area) = pass1_face_with_area(&spec.face(face), base, factor, &spec.carve, threads);
+        let (change, area) = pass1_face_rock(&spec.face(face), base, factor, rock, &spec.carve, threads);
         if !have_change {
             writer.append(&face_record(world, res, spec, &change)).map_err(err)?;
         }
@@ -234,6 +260,7 @@ mod tests {
             carve: CarveParams::default(),
             inputs_id: 7,
             uses_factor: true,
+            rock: 0,
             halo: 4,
         };
         let key = base.bytes();

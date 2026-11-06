@@ -4,6 +4,8 @@ mod bake_face;
 mod bake_fillgeom;
 #[path = "bake_kernels.rs"]
 mod bake_kernels;
+#[path = "bake_rock.rs"]
+mod bake_rock;
 #[path = "bake_spill.rs"]
 mod bake_spill;
 #[path = "bake_thermal.rs"]

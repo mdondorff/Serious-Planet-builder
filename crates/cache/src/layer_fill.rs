@@ -37,20 +37,39 @@ pub fn steps_per_m() -> f64 {
 
 /// The key of a tile's pit depth under `spec`.
 pub fn fill_key(world: &GlobalWorld, res: u32, spec: &TileLayerSpec, id: PassTile) -> Result<CacheKey, LayerStoreError> {
-    key_of(world, res, spec, id, Kind::LayerFill, FILL_ID)
+    key_of(world, res, spec, id, Kind::LayerFill, FILL_ID, FILL_KERNEL_VERSION)
+}
+
+/// The key of a tile's pit depth as the post-pass kernels of `version` would write it (a test of what a bump of [`FILL_KERNEL_VERSION`] re-keys).
+pub fn fill_key_at_version(
+    world: &GlobalWorld,
+    res: u32,
+    spec: &TileLayerSpec,
+    id: PassTile,
+    version: u32,
+) -> Result<CacheKey, LayerStoreError> {
+    key_of(world, res, spec, id, Kind::LayerFill, FILL_ID, version)
 }
 
 /// The key of a tile's scratch heights under `spec`.
 pub fn heights_key(world: &GlobalWorld, res: u32, spec: &TileLayerSpec, id: PassTile) -> Result<CacheKey, LayerStoreError> {
-    key_of(world, res, spec, id, Kind::LayerHeights, HEIGHTS_ID)
+    key_of(world, res, spec, id, Kind::LayerHeights, HEIGHTS_ID, FILL_KERNEL_VERSION)
 }
 
-fn key_of(world: &GlobalWorld, res: u32, spec: &TileLayerSpec, id: PassTile, kind: Kind, name: &str) -> Result<CacheKey, LayerStoreError> {
+fn key_of(
+    world: &GlobalWorld,
+    res: u32,
+    spec: &TileLayerSpec,
+    id: PassTile,
+    kind: Kind,
+    name: &str,
+    version: u32,
+) -> Result<CacheKey, LayerStoreError> {
     let tile = layer_tile_id(&spec.grid, id)?;
     let mut inputs = world.base_key_inputs(kind, tile, res, name);
     inputs.output_params.insert(PARAM_RESOLUTION, (spec.grid.cells as u32).to_le_bytes().to_vec());
     let mut bytes = channel_bytes(&spec.bytes());
-    bytes.extend(FILL_KERNEL_VERSION.to_le_bytes());
+    bytes.extend(version.to_le_bytes());
     inputs.output_params.insert(PARAM_LAYER_CHANNELS, bytes);
     Ok(cache_key(&inputs))
 }

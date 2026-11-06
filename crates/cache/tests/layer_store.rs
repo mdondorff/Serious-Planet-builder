@@ -49,7 +49,17 @@ fn base(d: Vec3) -> f64 {
 }
 
 fn spec() -> LayerSpec {
-    LayerSpec { cells: 24, radius_m: R, sea_level: 0.0, seed: 17, carve: CarveParams::default(), inputs_id: 1, uses_factor: false, halo: 4 }
+    LayerSpec {
+        cells: 24,
+        radius_m: R,
+        sea_level: 0.0,
+        seed: 17,
+        carve: CarveParams::default(),
+        inputs_id: 1,
+        uses_factor: false,
+        rock: 0,
+        halo: 4,
+    }
 }
 
 fn faces() -> Vec<Face> {
@@ -104,7 +114,7 @@ fn a_layer_made_for_other_parameters_is_refused_naming_both_keys() {
         LayerSpec { seed: 18, ..s },
         LayerSpec { sea_level: 5.0, ..s },
         LayerSpec { inputs_id: 2, ..s },
-        LayerSpec { uses_factor: true, ..s },
+        LayerSpec { uses_factor: true, rock: 0, ..s },
         LayerSpec { halo: 5, ..s },
         LayerSpec { carve: CarveParams { steps: s.carve.steps + 1, ..s.carve }, ..s },
     ];
@@ -166,4 +176,21 @@ fn a_record_has_the_pinned_layout_and_a_damaged_one_is_an_error() {
         let e = load_face_change(&store, &w, RES, &s, Face(2)).expect_err(name).to_string();
         assert!(e.contains("layer face 2") && e.contains("key"), "{name}: {e}");
     }
+}
+
+// spec: GEN-127
+#[test]
+fn a_store_written_with_other_rock_fields_is_another_key_and_a_run_with_fields_the_spec_does_not_name_is_refused() {
+    use planet_generators::bake::face::RockFields;
+    let (w, base_spec) = (world(), spec());
+    let none = |_: Vec3| 0.0;
+    let (rk, ru) = (|_: Vec3, _: f64| planet_generators::bake::carve::Layer::of(1.0), |_: Vec3| 20.0);
+    let rock = RockFields { k: Some(&rk), uplift: Some(&ru) };
+    let with = LayerSpec { rock: rock.mask(), ..base_spec };
+    assert_ne!(face_key(&w, RES, &base_spec, Face(0)), face_key(&w, RES, &with, Face(0)), "the rock fields are not part of the face key");
+    let dir = Dir::new("rock-key");
+    let e = run_pass1_rock(dir.path(), &w, RES, &base_spec, &none, None, &rock, &[Face(0)], 1).unwrap_err().to_string();
+    assert!(e.contains("rock = 0") && e.contains("given are 3"), "{e}");
+    let e = run_pass1(dir.path(), &w, RES, &with, &none, None, &[Face(0)], 1).unwrap_err().to_string();
+    assert!(e.contains("rock = 3") && e.contains("given are 0"), "{e}");
 }
