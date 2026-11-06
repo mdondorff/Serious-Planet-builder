@@ -1,8 +1,8 @@
 //! The fields a bake reads (m9-bake): the base elevation of the default class source with its class-blended `k`, and the carve factor of GEN-097, at a direction. One place for the
 //! command and the tests, so that every bake of a seed reads the same function and keys it the same way.
 
-use crate::arid::{AridInputs, AridRules, ARID_RULES_VERSION};
 use super::carve::Layer;
+use crate::arid::{AridInputs, AridRules, ARID_RULES_VERSION};
 use crate::classes::{
     blended_carve_factor, blended_k, ClassLattice, ClassSource, CLASS_CARVE, CLASS_K, CLASS_LATTICE_N, CLASS_LIST_VERSION,
     CLASS_SOURCE_VERSION,
