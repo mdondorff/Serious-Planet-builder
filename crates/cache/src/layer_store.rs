@@ -64,6 +64,7 @@ impl LayerSpec {
         b.extend(c.max_area.to_bits().to_le_bytes());
         b.push(u8::from(c.incise_only));
         b.push(u8::from(c.keep_pits));
+        b.extend(c.deposit_g.to_bits().to_le_bytes());
         b.extend((c.steps as u64).to_le_bytes());
         b.extend((c.reroute_every as u64).to_le_bytes());
         b.extend(self.inputs_id.to_le_bytes());

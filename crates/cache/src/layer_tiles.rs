@@ -78,6 +78,7 @@ impl TileLayerSpec {
         }
         b.push(u8::from(p.carve.incise_only));
         b.push(u8::from(p.carve.keep_pits));
+        b.extend(p.carve.deposit_g.to_bits().to_le_bytes());
         b.extend((p.carve.steps as u64).to_le_bytes());
         b.extend((p.carve.reroute_every as u64).to_le_bytes());
         let t = &p.thermal;
