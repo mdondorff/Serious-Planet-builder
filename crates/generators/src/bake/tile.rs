@@ -294,8 +294,9 @@ pub fn pass2_tile_rock(
     let local = CarveParams { max_area: p.local_area_cells * g.dx() * g.dx(), ..p.carve };
     let (w, i0, j0) = (g.window(), i64::from(id.ti) * g.tile as i64 - g.halo as i64, i64::from(id.tj) * g.tile as i64 - g.halo as i64);
     let kf = rock.k.map(|k| move |c: usize, zc: f64| k(g.direction(id.face, i0 + (c % w) as i64, j0 + (c / w) as i64), zc));
+    let runoff: Option<Vec<f32>> = rock.runoff.map(|r| sample_window(g, id, r, threads).into_iter().map(|v| v as f32).collect());
     let par: &dyn Par = &threads;
-    let rock_in = Rock { par, k: kf.as_ref().map(|f| f as &(dyn Fn(usize, f64) -> Layer + Sync)), uplift: None };
+    let rock_in = Rock { par, k: kf.as_ref().map(|f| f as &(dyn Fn(usize, f64) -> Layer + Sync)), uplift: None, runoff: runoff.as_deref() };
     carve_rock(&grid, &mut z, &outlet, &local, factors.as_deref(), &rock_in, stream);
     drop(factors);
     let thermal_report = thermal(&grid, &mut z, &p.thermal, threads);

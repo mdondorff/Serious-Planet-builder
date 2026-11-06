@@ -1853,9 +1853,15 @@ mod tests {
         let (layer_spec, tile_spec) = bake_specs(&world, &shape).unwrap();
         let inputs = BakeInputs::new(3, 2);
         let (base, factor) = (|v: planet_core::Vec3| inputs.base(v), |v: planet_core::Vec3| inputs.carve_factor(v));
-        inputs.lithology(); // built here, on its threads, not inside the carve's parallel pass
-        let (rock_k, rock_u) = (|v: planet_core::Vec3, z: f64| inputs.rock_k(v, z), |v: planet_core::Vec3| inputs.uplift_at(v));
-        let rock = planet_generators::bake::face::RockFields { k: Some(&rock_k), uplift: Some(&rock_u) };
+        inputs.lithology(); // built here, on their threads, not inside the carve's parallel pass
+        inputs.orography();
+        let (rock_k, rock_u, rock_r) = (
+            |v: planet_core::Vec3, z: f64| inputs.climate_k(v, z),
+            |v: planet_core::Vec3| inputs.uplift_at(v),
+            |v: planet_core::Vec3| inputs.runoff_weight(v),
+        );
+        let rock =
+            planet_generators::bake::face::RockFields { k: Some(&rock_k), uplift: Some(&rock_u), runoff: Some(&rock_r), vegetation: true };
         let faces: Vec<planet_core::Face> = (0..6).map(planet_core::Face).collect();
         run_pass1_rock(&bake_dir.join("layer"), &world, 24, &layer_spec, &base, Some(&factor), &rock, &faces, 2).unwrap();
         let pass1 = TileStore::open(&bake_dir.join("layer"), world.params()).unwrap();
@@ -1990,8 +1996,14 @@ mod tests {
         let (layer_spec, tile_spec) = bake_specs(&world, &shape).unwrap();
         let (base, factor) = (|v: planet_core::Vec3| inputs.base(v), |v: planet_core::Vec3| inputs.carve_factor(v));
         inputs.lithology(); // built here, on its threads, not inside the carve's parallel pass
-        let (rock_k, rock_u) = (|v: planet_core::Vec3, z: f64| inputs.rock_k(v, z), |v: planet_core::Vec3| inputs.uplift_at(v));
-        let rock = planet_generators::bake::face::RockFields { k: Some(&rock_k), uplift: Some(&rock_u) };
+        inputs.orography();
+        let (rock_k, rock_u, rock_r) = (
+            |v: planet_core::Vec3, z: f64| inputs.climate_k(v, z),
+            |v: planet_core::Vec3| inputs.uplift_at(v),
+            |v: planet_core::Vec3| inputs.runoff_weight(v),
+        );
+        let rock =
+            planet_generators::bake::face::RockFields { k: Some(&rock_k), uplift: Some(&rock_u), runoff: Some(&rock_r), vegetation: true };
         let faces: Vec<planet_core::Face> = (0..6).map(planet_core::Face).collect();
         run_pass1_rock(&bake_dir.join("layer"), &world, 24, &layer_spec, &base, Some(&factor), &rock, &faces, 2).unwrap();
         let pass1 = TileStore::open(&bake_dir.join("layer"), world.params()).unwrap();

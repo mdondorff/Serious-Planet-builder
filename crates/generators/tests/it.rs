@@ -8,6 +8,8 @@ mod bake_fillgeom;
 mod bake_kernels;
 #[path = "bake_rock.rs"]
 mod bake_rock;
+#[path = "bake_runoff.rs"]
+mod bake_runoff;
 #[path = "bake_spill.rs"]
 mod bake_spill;
 #[path = "bake_thermal.rs"]

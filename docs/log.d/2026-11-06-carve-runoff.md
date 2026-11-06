@@ -1,0 +1,1 @@
+- 2026-11-06 carve-runoff: the carves read runoff-weighted discharge Q and the vegetation factor of the local precipitation (GEN-129; ADR 0104 point 3, ADR 0108); the area channel of a bake with weights holds Q.

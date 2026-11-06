@@ -90,19 +90,26 @@ pub fn face_stream(seed: u64, face: Face) -> u64 {
 pub struct RockFields<'a> {
     pub k: Option<&'a (dyn Fn(Vec3, f64) -> Layer + Sync)>,
     pub uplift: Option<&'a (dyn Fn(Vec3) -> f64 + Sync)>,
+    /// The runoff weight at a direction (GEN-129): the routing's drainage area becomes the discharge `sum(w dA)`. Pass 1 and pass 2 read it.
+    pub runoff: Option<&'a (dyn Fn(Vec3) -> f64 + Sync)>,
+    /// Whether the erodibility `k` includes the vegetation factor (a flag of the key: the caller's closure applies it).
+    pub vegetation: bool,
 }
 
 impl RockFields<'_> {
-    /// The fields that are present as a key byte: bit 0 the erodibility, bit 1 the uplift.
+    /// The fields that are present as a key byte: bit 0 the erodibility, bit 1 the uplift, bit 2 the runoff weights, bit 3 the vegetation factor.
     pub fn mask(&self) -> u8 {
-        u8::from(self.k.is_some()) | (u8::from(self.uplift.is_some()) << 1)
+        u8::from(self.k.is_some())
+            | (u8::from(self.uplift.is_some()) << 1)
+            | (u8::from(self.runoff.is_some()) << 2)
+            | (u8::from(self.vegetation) << 3)
     }
 }
 
 impl RockFields<'static> {
     /// No fields: the carve of the class factor and the uniform `u_over_k`.
     pub const fn none() -> RockFields<'static> {
-        RockFields { k: None, uplift: None }
+        RockFields { k: None, uplift: None, runoff: None, vegetation: false }
     }
 }
 
@@ -190,7 +197,7 @@ pub fn pass1_face_rock(
     let mut z = z0.clone();
     let params = CarveParams { sea_level: spec.sea_level, ..*params };
     let (m, h) = (spec.grid_cells(), spec.halo as i64);
-    let uplift: Option<Vec<f32>> = rock.uplift.map(|u| {
+    let fill = |u: &(dyn Fn(Vec3) -> f64 + Sync)| -> Vec<f32> {
         let par: &dyn Par = &threads;
         // Filled a block of rows at a time into an exactly sized vector: a flattened iterator would double its capacity and hold both buffers at once.
         let mut out = Vec::with_capacity(m * m);
@@ -203,12 +210,19 @@ pub fn pass1_face_rock(
             }
         }
         out
-    });
+    };
+    let uplift: Option<Vec<f32>> = rock.uplift.map(fill);
+    let runoff: Option<Vec<f32>> = rock.runoff.map(fill);
     let kf = rock.k.map(|k| move |c: usize, zc: f64| k(spec.halo_direction((c % m) as i64 - h, (c / m) as i64 - h), zc));
     let par: &dyn Par = &threads;
-    let carve_rock_in = Rock { par, k: kf.as_ref().map(|f| f as &(dyn Fn(usize, f64) -> Layer + Sync)), uplift: uplift.as_deref() };
+    let carve_rock_in = Rock {
+        par,
+        k: kf.as_ref().map(|f| f as &(dyn Fn(usize, f64) -> Layer + Sync)),
+        uplift: uplift.as_deref(),
+        runoff: runoff.as_deref(),
+    };
     let routing = carve_rock(&grid, &mut z, &outlet, &params, factors.as_deref(), &carve_rock_in, spec.stream());
-    drop(uplift);
+    drop((uplift, runoff));
     let (m, h, cell_m2) = (spec.cells + 2 * spec.halo, spec.halo, spec.dx() * spec.dx());
     let mut area = Vec::with_capacity(spec.cells * spec.cells);
     for j in 0..spec.cells {

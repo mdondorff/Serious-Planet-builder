@@ -38,11 +38,12 @@ fn main() {
     let (base, factor) = (|d: Vec3| inputs.base(d), |d: Vec3| inputs.carve_factor(d));
     let shape = BakeShape::production(seed, RADIUS_M);
     let (mut layer, mut spec) = bake_specs(&world, &shape).unwrap();
-    // The fields the carves read, each with its own key: `--no-rock` today's carve (the baseline), `--no-uplift` the erodibility only (the A/B of the uplift), `--no-k` the uplift only.
+    // The fields the carves read, each with its own key: `--no-rock` today's carve (the baseline), `--no-uplift` the erodibility only (the A/B of the uplift), `--no-k` the uplift only, `--no-runoff` neither the runoff weights nor the vegetation (the carves of GEN-127).
     let mask = if args.iter().any(|a| a == "--no-rock") {
         0
     } else {
-        3 & !(u8::from(args.iter().any(|a| a == "--no-k")) | (u8::from(args.iter().any(|a| a == "--no-uplift")) << 1))
+        let off = |flag: &str, bits: u8| if args.iter().any(|a| a == flag) { bits } else { 0 };
+        15 & !(off("--no-k", 1) | off("--no-uplift", 2) | off("--no-runoff", 4 | 8))
     };
     (layer.rock, spec.rock) = (mask, mask);
     if args.iter().any(|a| a == "--no-edge") {
@@ -58,9 +59,10 @@ fn main() {
         inputs.lithology(); // built here, on its threads, not inside the carve's parallel pass
                             // `--no-edge`: the band edge off (floor -inf), to separate the cap from the K spread (planner inbox #86).
         let no_edge = args.iter().any(|a| a == "--no-edge");
-        let (rock_k, rock_u) = (
+        inputs.orography();
+        let (rock_k, rock_u, rock_r) = (
             |d: Vec3, z: f64| {
-                let l = inputs.rock_k(d, z);
+                let l = if mask & 8 != 0 { inputs.climate_k(d, z) } else { inputs.rock_k(d, z) };
                 if no_edge {
                     planet_generators::bake::carve::Layer::of(l.k)
                 } else {
@@ -68,9 +70,15 @@ fn main() {
                 }
             },
             |d: Vec3| inputs.uplift_at(d),
+            |d: Vec3| inputs.runoff_weight(d),
         );
-        let rock = RockFields { k: (mask & 1 != 0).then_some(&rock_k as _), uplift: (mask & 2 != 0).then_some(&rock_u as _) };
-        println!("rock fields: mask {mask} (bit 0 the erodibility, bit 1 the uplift; 0 is today's carve)");
+        let rock = RockFields {
+            k: (mask & 1 != 0).then_some(&rock_k as _),
+            uplift: (mask & 2 != 0).then_some(&rock_u as _),
+            runoff: (mask & 4 != 0).then_some(&rock_r as _),
+            vegetation: mask & 8 != 0,
+        };
+        println!("rock fields: mask {mask} (bit 0 the erodibility, bit 1 the uplift, bit 2 the runoff weights, bit 3 the vegetation; 0 is today's carve)");
         let clock = std::time::Instant::now();
         run_pass1_rock(&out, &world, res, &layer, &base, Some(&factor), &rock, &[Face(2)], threads).unwrap();
         println!("pass 1 of face 2: {:.0} s", clock.elapsed().as_secs_f64());
@@ -111,18 +119,31 @@ fn main() {
     let g = spec.grid;
     let t = g.tile;
     let par: &dyn Par = &threads;
-    let rows: Vec<Vec<(f64, u8)>> = par::map(par, t, &|j| {
+    let rows: Vec<Vec<(f64, u8, u8)>> = par::map(par, t, &|j| {
         (0..t)
             .map(|i| {
                 let d = g.direction(id.face, (id.ti as usize * t + i) as i64, (id.tj as usize * t + j) as i64);
                 let w = inputs.weights_at(d);
                 let c = (0..CLASS_COUNT).fold(0, |b, k| if w[k] > w[b] { k } else { b });
-                (base(d) + f64::from(core[j * t + i]), c as u8)
+                let p = inputs.orography().precipitation_mm(d);
+                // The climate of the cell: 0 dry (under 500 mm a year), 1 between, 2 wet (over 1,200 mm).
+                (
+                    base(d) + f64::from(core[j * t + i]),
+                    c as u8,
+                    if p < 500.0 {
+                        0
+                    } else if p > 1200.0 {
+                        2
+                    } else {
+                        1
+                    },
+                )
             })
             .collect()
     });
     let z: Vec<f64> = rows.iter().flatten().map(|v| v.0).collect();
     let class: Vec<u8> = rows.iter().flatten().map(|v| v.1).collect();
+    let climate: Vec<u8> = rows.iter().flatten().map(|v| v.2).collect();
     // The same relief on the base alone and on the filled surface (the pit depth added), to see what the layer and the fill add.
     let basez: Vec<f64> = z.iter().zip(core.iter()).map(|(s, c)| s - f64::from(*c)).collect();
     let fill = planet_cache::layer_fill::load_fill(&store, &world, rp, &spec, id).ok().flatten();
@@ -148,6 +169,31 @@ surface comparison (3 km blocks, class of the block's centre)"
     );
     relief("the base alone", &basez);
     relief("base + change", &z);
+    for (km, b) in [("3 km", 30usize), ("10 km", 98usize)] {
+        let mut per = spike_relief(&z, &climate, t, b);
+        for (name, v) in ["dry (P < 500 mm)", "between", "wet (P > 1200 mm)"].iter().zip(per.iter_mut()) {
+            if v.len() >= 5 {
+                println!(
+                    "  {km} relief on base + change by climate {name:<18} blocks {:>4} p50 {:>7.1} m p90 {:>7.1} m",
+                    v.len(),
+                    quantile(v, 0.5),
+                    quantile(v, 0.9)
+                );
+            }
+        }
+    }
+    for (name, k) in ["dry (P < 500 mm)", "between", "wet (P > 1200 mm)"].iter().zip(0u8..) {
+        let mut e: Vec<f64> = (0..t * t).filter(|&p| climate[p] == k && z[p] > 0.0).map(|p| z[p]).collect();
+        if e.len() > 1000 {
+            println!(
+                "  elevation by climate {name:<18} cells {:>8} p5 {:>7.1} p50 {:>7.1} p95 {:>7.1} m",
+                e.len(),
+                quantile(&mut e, 0.05),
+                quantile(&mut e, 0.5),
+                quantile(&mut e, 0.95)
+            );
+        }
+    }
     if let Some(f) = &fill {
         let filled: Vec<f64> = z.iter().zip(f.iter()).map(|(s, c)| s + planet_generators::bake::face::fill_m(*c)).collect();
         relief("filled surface", &filled);

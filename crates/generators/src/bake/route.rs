@@ -35,11 +35,21 @@ pub const MFD_EXPONENT: f64 = 1.1;
 /// (highest cells first, ties by the cell index: a total order, so the sums are the same bits on any machine). `max_area` caps the area when positive
 /// (SPIKE-70's local carve). Every cell that is not an outlet has a receiver after the flood; a cell without one is an error naming it.
 pub fn route(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64, seed: u64, max_area: f64) -> Routing {
+    route_weighted(grid, z, outlet, epsilon, seed, max_area, None)
+}
+
+/// [`route`] with the runoff weight of each cell (GEN-129): every cell starts with the area `w dx^2`, so the returned `area` is the discharge `Q = sum(w dA)` (the area for weights of 1).
+/// The cap applies to `Q`.
+pub fn route_weighted(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64, seed: u64, max_area: f64, weights: Option<&[f32]>) -> Routing {
+    if let Some(w) = weights {
+        assert_eq!(w.len(), grid.len(), "one runoff weight per cell");
+        assert!(w.iter().all(|v| v.is_finite() && *v > 0.0), "the runoff weights are finite and positive");
+    }
     let n = grid.len();
     let filled = priority_flood(grid, z, outlet, epsilon);
     let receiver = receivers(grid, &filled, outlet, seed);
     // The area comes first so that the filled surface (8 bytes a cell) is dropped before the donor lists and the order are built: a face at 12,288 cells has 1.6e8 cells.
-    let mut area = mfd_area(grid, &filled, outlet);
+    let mut area = mfd_area(grid, &filled, outlet, weights);
     drop(filled);
     // The donors in compressed form, then the stack from the outlets: each cell comes after its receiver.
     let mut order = Vec::with_capacity(n);
@@ -108,11 +118,15 @@ fn receivers(grid: &Grid, filled: &[f64], outlet: &[bool], seed: u64) -> Vec<u32
 /// Freeman's multiple flow direction (exponent [`MFD_EXPONENT`]): every cell starts with its own area and, from the highest cell down (ties by the cell index), shares what it holds
 /// among its lower neighbours in proportion to `(drop / distance)^1.1`. An outlet keeps what it receives (it passes nothing on, as in the D8 tree), and so does a cell with no lower
 /// neighbour.
-fn mfd_area(grid: &Grid, filled: &[f64], outlet: &[bool]) -> Vec<f64> {
+fn mfd_area(grid: &Grid, filled: &[f64], outlet: &[bool], weights: Option<&[f32]>) -> Vec<f64> {
     let n = grid.len();
     let mut by_height: Vec<u32> = (0..n as u32).collect();
     by_height.sort_unstable_by(|&a, &b| filled[b as usize].total_cmp(&filled[a as usize]).then(a.cmp(&b)));
-    let mut area = vec![grid.dx() * grid.dx(); n];
+    let cell = grid.dx() * grid.dx();
+    let mut area: Vec<f64> = match weights {
+        Some(w) => w.iter().map(|v| cell * f64::from(*v)).collect(),
+        None => vec![cell; n],
+    };
     for &p in &by_height {
         let p = p as usize;
         if outlet[p] {

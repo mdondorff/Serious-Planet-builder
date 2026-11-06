@@ -348,7 +348,7 @@ pub fn bake_specs(world: &GlobalWorld, shape: &BakeShape) -> Result<(LayerSpec, 
         carve: planet_generators::bake::carve::CarveParams::default(),
         inputs_id: planet_generators::bake::inputs::BakeInputs::id(),
         uses_factor: true,
-        rock: 3,
+        rock: 15,
         halo: face_halo,
     };
     let spec = TileLayerSpec {
@@ -356,7 +356,7 @@ pub fn bake_specs(world: &GlobalWorld, shape: &BakeShape) -> Result<(LayerSpec, 
         params: Pass2Params::standard(shape.seed, 0.0),
         inputs_id: planet_generators::bake::inputs::BakeInputs::id(),
         uses_factor: true,
-        rock: 3,
+        rock: 15,
         faces: faces_digest(world, shape.face_res as u32, &layer),
     };
     Ok((layer, spec))

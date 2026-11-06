@@ -9,6 +9,7 @@ use crate::classes::{
 };
 use crate::lithology::{Lithology, ProvinceLattice, LITHOLOGY_VERSION, ROCK_K_SCALE};
 use crate::orography::{Orography, OROGRAPHY_VERSION, SEASONS};
+use crate::runoff::{discharge_weight, runoff_mm, vegetation_factor, RUNOFF_VERSION};
 use crate::uplift::{Uplift, UPLIFT_VERSION};
 use planet_core::Vec3;
 
@@ -111,6 +112,18 @@ impl BakeInputs {
         Layer { k: s.k * ROCK_K_SCALE, floor: s.lower_m }
     }
 
+    /// The erodibility of the lithology times the vegetation factor of the local precipitation (GEN-129): what a bake with the climate reads as K.
+    pub fn climate_k(&self, d: Vec3, z: f64) -> Layer {
+        let l = self.rock_k(d, z);
+        Layer { k: l.k * vegetation_factor(self.orography().precipitation_mm(d)), floor: l.floor }
+    }
+
+    /// The runoff weight of the carve at a direction (GEN-129): the runoff of the local precipitation and temperature over the reference runoff, within the bounds.
+    pub fn runoff_weight(&self, d: Vec3) -> f64 {
+        let o = self.orography();
+        discharge_weight(runoff_mm(o.precipitation_mm(d), o.temperature_c(d)))
+    }
+
     /// The uplift `U / K` at K 1 at a direction (GEN-123).
     pub fn uplift_at(&self, d: Vec3) -> f64 {
         self.uplift.at(self.lithology().provinces(), d)
@@ -119,11 +132,11 @@ impl BakeInputs {
     /// An identity of what the base, the carve factor, the lithology and the uplift read besides the seed: the class source's and class list's versions, the lattice size and the class tables of `k` and of the
     /// carve factor. Part of every layer key until the relief channels are a stored input of the run.
     pub fn id() -> u64 {
-        Self::id_with(LITHOLOGY_VERSION, UPLIFT_VERSION, ROCK_K_SCALE)
+        Self::id_with(LITHOLOGY_VERSION, UPLIFT_VERSION, ROCK_K_SCALE, RUNOFF_VERSION)
     }
 
     /// [`BakeInputs::id`] for the given lithology and uplift versions and K scale (a test of what a change of each re-keys).
-    pub fn id_with(lithology_version: u32, uplift_version: u32, k_scale: f64) -> u64 {
+    pub fn id_with(lithology_version: u32, uplift_version: u32, k_scale: f64, runoff_version: u32) -> u64 {
         let mut h = 0xCBF2_9CE4_8422_2325u64;
         let mut put = |v: u64| h = (h ^ v).wrapping_mul(0x0000_0100_0000_01B3);
         put(u64::from(CLASS_SOURCE_VERSION));
@@ -134,6 +147,7 @@ impl BakeInputs {
         put(u64::from(lithology_version));
         put(u64::from(uplift_version));
         put(k_scale.to_bits());
+        put(u64::from(runoff_version));
         CLASS_K.iter().chain(CLASS_CARVE.iter()).for_each(|v| put(v.to_bits()));
         h
     }

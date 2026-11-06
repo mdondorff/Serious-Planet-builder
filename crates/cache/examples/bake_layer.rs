@@ -116,9 +116,12 @@ fn main() {
         None => GlobalWorld::from_definition(&def).unwrap_or_else(|e| fail(&format!("{e:?}"))),
     };
     let (base, factor) = (|d: Vec3| inputs.base(d), |d: Vec3| inputs.carve_factor(d));
-    inputs.lithology(); // built here, on its threads, not inside the carve's parallel pass
-    let (rock_k, rock_u) = (|d: Vec3, z: f64| inputs.rock_k(d, z), |d: Vec3| inputs.uplift_at(d));
-    let rock = planet_generators::bake::face::RockFields { k: Some(&rock_k), uplift: Some(&rock_u) };
+    inputs.lithology(); // built here, on their threads, not inside the carve's parallel pass
+    inputs.orography();
+    let (rock_k, rock_u, rock_r) =
+        (|d: Vec3, z: f64| inputs.climate_k(d, z), |d: Vec3| inputs.uplift_at(d), |v: planet_core::Vec3| inputs.runoff_weight(v));
+    let rock =
+        planet_generators::bake::face::RockFields { k: Some(&rock_k), uplift: Some(&rock_u), runoff: Some(&rock_r), vegetation: true };
     // The outlets of the fill depth (STRM-077): the cells at or below the sea level that the field bake's ocean connectivity calls ocean; without a store (`--global-dir`) every such cell is an outlet, as before.
     let ocean_store = o.global_dir.as_ref().map(|dir| TileStore::open(dir, world.params()).unwrap_or_else(|e| fail(&e.to_string())));
     let ocean_source = ocean_store

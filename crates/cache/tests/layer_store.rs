@@ -185,7 +185,7 @@ fn a_store_written_with_other_rock_fields_is_another_key_and_a_run_with_fields_t
     let (w, base_spec) = (world(), spec());
     let none = |_: Vec3| 0.0;
     let (rk, ru) = (|_: Vec3, _: f64| planet_generators::bake::carve::Layer::of(1.0), |_: Vec3| 20.0);
-    let rock = RockFields { k: Some(&rk), uplift: Some(&ru) };
+    let rock = RockFields { k: Some(&rk), uplift: Some(&ru), runoff: None, vegetation: false };
     let with = LayerSpec { rock: rock.mask(), ..base_spec };
     assert_ne!(face_key(&w, RES, &base_spec, Face(0)), face_key(&w, RES, &with, Face(0)), "the rock fields are not part of the face key");
     let dir = Dir::new("rock-key");
@@ -193,4 +193,27 @@ fn a_store_written_with_other_rock_fields_is_another_key_and_a_run_with_fields_t
     assert!(e.contains("rock = 0") && e.contains("given are 3"), "{e}");
     let e = run_pass1(dir.path(), &w, RES, &with, &none, None, &[Face(0)], 1).unwrap_err().to_string();
     assert!(e.contains("rock = 3") && e.contains("given are 0"), "{e}");
+}
+
+// spec: GEN-129
+#[test]
+fn a_run_with_runoff_weights_or_vegetation_the_spec_does_not_name_is_refused() {
+    use planet_generators::bake::face::RockFields;
+    let (w, base_spec) = (world(), spec());
+    let none = |_: Vec3| 0.0;
+    let (rk, rw) = (|_: Vec3, _: f64| planet_generators::bake::carve::Layer::of(1.0), |_: Vec3| 1.0);
+    let with_runoff = RockFields { k: Some(&rk), uplift: None, runoff: Some(&rw), vegetation: false };
+    let with_veg = RockFields { k: Some(&rk), uplift: None, runoff: None, vegetation: true };
+    let spec_k = LayerSpec { rock: 1, ..base_spec };
+    assert_eq!((with_runoff.mask(), with_veg.mask()), (5, 9));
+    let dir = Dir::new("runoff-key");
+    for (rock, bits) in [(&with_runoff, 5), (&with_veg, 9)] {
+        let e = run_pass1_rock(dir.path(), &w, RES, &spec_k, &none, None, rock, &[Face(0)], 1).unwrap_err().to_string();
+        assert!(e.contains("rock = 1") && e.contains(&format!("given are {bits}")), "{e}");
+    }
+    assert_ne!(
+        face_key(&w, RES, &spec_k, Face(0)),
+        face_key(&w, RES, &LayerSpec { rock: 5, ..base_spec }, Face(0)),
+        "the runoff bit is not part of the face key"
+    );
 }
