@@ -66,6 +66,8 @@ mod global_contract;
 mod global_reader;
 #[path = "height_fields.rs"]
 mod height_fields;
+#[path = "ice.rs"]
+mod ice;
 #[path = "lattice_normals.rs"]
 mod lattice_normals;
 #[path = "line_stage.rs"]

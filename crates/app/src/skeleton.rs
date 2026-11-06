@@ -235,11 +235,17 @@ pub fn generate(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     if o.shelf_preview.is_some() {
         return generate_shelf_preview(o, out);
     }
+    if o.ice_preview.is_some() {
+        return generate_ice_preview(o, out);
+    }
     if o.given.contains("--fine-lattice") {
         return Err("--fine-lattice applies to --climate-preview".into());
     }
     if o.given.contains("--km") {
-        return Err("--km applies to --lithology-preview, --uplift-preview, --climate-preview, --arid-preview or --shelf-preview".into());
+        return Err(
+            "--km applies to --lithology-preview, --uplift-preview, --climate-preview, --arid-preview, --shelf-preview or --ice-preview"
+                .into(),
+        );
     }
     if o.global_dir.is_some() || o.verify_global.is_some() || o.global_products.is_some() {
         return generate_global(o, out);
@@ -332,6 +338,7 @@ fn generate_lithology_preview(o: &Options, out: &mut dyn Write) -> Result<(), St
         "--climate-preview",
         "--arid-preview",
         "--shelf-preview",
+        "--ice-preview",
     ]
     .into_iter()
     .filter(|f| o.given.contains(*f))
@@ -383,6 +390,7 @@ fn generate_uplift_preview(o: &Options, out: &mut dyn Write) -> Result<(), Strin
         "--climate-preview",
         "--arid-preview",
         "--shelf-preview",
+        "--ice-preview",
     ]
     .into_iter()
     .filter(|f| o.given.contains(*f))
@@ -435,6 +443,7 @@ fn generate_climate_preview(o: &Options, out: &mut dyn Write) -> Result<(), Stri
         "--uplift-preview",
         "--arid-preview",
         "--shelf-preview",
+        "--ice-preview",
     ]
     .into_iter()
     .filter(|f| o.given.contains(*f))
@@ -491,6 +500,7 @@ fn generate_arid_preview(o: &Options, out: &mut dyn Write) -> Result<(), String>
         "--uplift-preview",
         "--climate-preview",
         "--shelf-preview",
+        "--ice-preview",
         "--fine-lattice",
     ]
     .into_iter()
@@ -560,6 +570,7 @@ fn generate_shelf_preview(o: &Options, out: &mut dyn Write) -> Result<(), String
         "--uplift-preview",
         "--climate-preview",
         "--arid-preview",
+        "--ice-preview",
         "--fine-lattice",
     ]
     .into_iter()
@@ -582,6 +593,74 @@ fn generate_shelf_preview(o: &Options, out: &mut dyn Write) -> Result<(), String
         "shelf preview (the base elevation of the class source, an input of the bake, not terrain): seed {}, {} km a pixel, written to {} in {:.1} s",
         world.seed(),
         o.preview_km,
+        dir.display(),
+        started.elapsed().as_secs_f64()
+    )
+    .map_err(err)
+}
+
+/// `generate --ice-preview DIR [--seed N | --world F] [--km N] [--threads N]` (GEN-134): the preview of the ice history with no GPU: the ice-extent and equilibrium-line maps, `ice.txt` with the land share
+/// under ice against the glacial maximum of Earth and the equilibrium-line quantiles, and the ice cover at the terrain scorecard's Scottish Highlands and Alps generator sites. The images show the
+/// ice history, an input of the bake, not terrain.
+fn generate_ice_preview(o: &Options, out: &mut dyn Write) -> Result<(), String> {
+    let dir = o.ice_preview.as_ref().expect("the option is given");
+    let clash: Vec<&str> = [
+        "--tile",
+        "--out",
+        "--face-net",
+        "--manifest",
+        "--smoke",
+        "--cache-dir",
+        "--verify-cache",
+        "--region",
+        "--res",
+        "--global-dir",
+        "--verify-global",
+        "--global-products",
+        "--lithology-preview",
+        "--uplift-preview",
+        "--climate-preview",
+        "--arid-preview",
+        "--shelf-preview",
+        "--fine-lattice",
+    ]
+    .into_iter()
+    .filter(|f| o.given.contains(*f))
+    .collect();
+    if !clash.is_empty() {
+        return Err(format!("--ice-preview excludes {}", clash.join(", ")));
+    }
+    if o.given.contains("--world") && o.given.contains("--seed") {
+        return Err("--world and --seed both name the definition: give one".into());
+    }
+    let (threads, _) = planet_streaming::topology::bake_threads(o.threads)?;
+    let world = global_world_of(o)?;
+    let started = std::time::Instant::now();
+    let inputs = planet_generators::bake::inputs::BakeInputs::new(world.seed(), threads);
+    let history = planet_generators::ice::IceHistory::earth();
+    let preview = planet_generators::ice_preview::preview(&inputs, &history, o.preview_km, threads);
+    let mut sites = String::from(
+        "ice cover at the terrain scorecard's glaciated sites (the sites file; the Sognefjord is not among them):
+",
+    );
+    let landforms = crate::terrainscore::parse_sites(include_str!("../data/terrain-score-sites.toml"))?;
+    for l in landforms.iter().filter(|l| l.name == "Scottish Highlands" || l.name.starts_with("Alps")) {
+        sites.push_str(&format!(
+            "{} (real tile {}):
+",
+            l.name, l.tile
+        ));
+        for (lat, lon) in &l.sites {
+            sites.push_str(&planet_generators::ice_preview::site_line(&inputs, &history, *lat, *lon));
+        }
+    }
+    planet_generators::ice_preview::write(dir, &preview, &sites).map_err(|e| format!("writing {}: {e}", dir.display()))?;
+    writeln!(
+        out,
+        "ice preview (the ice history, an input of the bake, not terrain): seed {}, {} km a pixel, version {}, written to {} in {:.1} s",
+        world.seed(),
+        o.preview_km,
+        planet_generators::ice::ICE_VERSION,
         dir.display(),
         started.elapsed().as_secs_f64()
     )
