@@ -27,7 +27,7 @@ Dormant (no near trigger; not asked now):
 | # | Step | Lane |
 |---|---|---|
 | NR | Real-GPU window checks NOT RUN on a locked desktop (TEST-073) | crusader |
-| M9 bake | PR 4 on main (#1216); runoff (GEN-129), deposition, arid sinks, coastal process, glacial gate; the preview re-run with a mountain cube edge; the integrated preview (I4b); no planet bake before the owner's go | explorer |
+| M9 bake | runoff (GEN-129), deposition, arid sinks, coastal process, glacial gate; a full-face run with every driver (peak memory, time, a cube edge) and one all-driver preview store opened by the viewer, then the integrated preview (I4b); no planet bake before the owner's go | explorer |
 | Ground | Arid class rules (#1215), shelf profile (GEN-118, before the coastal process), ice history (GEN-134); then I8a 2b PR 4b-4d | crusader |
 | Perf | After Sat 2026-11-07: REND-052 verdicts, ground-detail cost (REND-034, `shadow-cost --look`), channel-read cost; a writable re-prefilled perf store first (MESH_VERSION 11) | planner |
 | Store | `global16384-m9r2` and `global16384` read-only; preview store `global16384-m9c14` stale (re-run after the plan items) | all |
@@ -52,8 +52,8 @@ Dormant (no near trigger; not asked now):
 - **Local test gpu under load** (2026-11-03): local WARP 10.0.26100.9711 fails two per-driver hash pins after #1085 (gpu_compact_blocks persistent, gpu_water lit frames; CI passes them); `gpu_burn` calibration (2.210 vs 1.965 ms) and a `gpu_skeleton` replay crash only under parallel load; RTX failing sets reproducible (crusader, 2026-11-03). CI judges tier C.
 - **Detail blocks** (BUILD-027): 10 in `xtask/src/detail_blocks.txt`: split or shorten each, delete its line; no new blocks.
 - **Frame tail** (SPIKE-44): `draw_plan_transient` 8-14 ms on a plan delivery (24-48 frames/min) + ~9 ms frame work drops a frame at 60 fps; ADR 0083 frame share.
-- **Coupled run key read**: about 25M bake samples are read for the key even when the run is stored; the K view is coarse (climate shading).
-- **Static memo** (CON-06): `global::landform_lattice` is a static Mutex memo of a pure function of the seed; later the bake's owner builds it and passes it to `ErosionGenerator::field`.
+- **Coupled run key read**: about 25M bake samples are read for the key even when the run is stored.
+- **Static memos** (CON-06): `global::landform_lattice` (generators) and the `class_inputs` cache (planet_cache, #1219) memoise pure per-definition functions; the bake's owner should pass them in.
 - **Water cut keeps more nodes after the hill band** (#673): kept share 53-73 % (was 40-50 %); check the water pass's GPU time in the next perf window.
 - **Horizon-map shadows retiring** (ADR 0085): their latency (window 28: 131 of 269 maps over 10 s on large edits), disk cache and edge limits are not worked on. Anything added to the terrain pass keeps criterion 5's 1.5 ms (max 1.42).
 - **Drag residuals** (owner test 2, 2026-10-30): after #900 some tiles are clipped or not drawn while dragging and settle at rest. Real-store pair (#949, RTX and software adapter agree within 2 px, 2026-10-31): preview residue at most 6 % of changed pixels (contour lines), 0 at river-r1; lit frame and metres NOT RUN. No fix scheduled.
