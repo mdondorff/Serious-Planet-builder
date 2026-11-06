@@ -1879,7 +1879,7 @@ mod tests {
         let shape = BakeShape { seed: 3, radius_m: skeleton::RADIUS_M, face_res: 24, planet_res: 24, tile: None, halo: None };
         let world = GlobalWorld::from_definition(&def()).unwrap();
         let (layer_spec, tile_spec) = bake_specs(&world, &shape).unwrap();
-        let inputs = planet_cache::global_store::class_inputs(3, 8);
+        let inputs = planet_cache::global_store::class_inputs(&def(), 3, 8);
         let (base, factor) = (|v: planet_core::Vec3| inputs.base(v), |v: planet_core::Vec3| inputs.carve_factor(v));
         inputs.lithology(); // built here, on their threads, not inside the carve's parallel pass
         inputs.orography();
@@ -2012,7 +2012,7 @@ mod tests {
         run_str(&["generate", "--global-dir", &store, "--global-res", "8", "--seed", "3", "--class-source", "--prefill-levels", "0"])
             .unwrap();
         let def = || planet_world_def::WorldDefinition::single_planet(skeleton::RADIUS_M, 3);
-        let inputs = planet_cache::global_store::class_inputs(3, 8);
+        let inputs = planet_cache::global_store::class_inputs(&def(), 3, 8);
         let world = GlobalWorld::from_definition(&def()).unwrap().with_class_source(inputs.clone());
         // The viewer's terrain over the store is the class world, named so (the title and the log).
         let class = worldfield::WorldTerrain::open_store(def(), std::path::Path::new(&store), 8).unwrap();

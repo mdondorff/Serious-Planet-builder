@@ -306,7 +306,7 @@ pub(crate) fn global_world_of(o: &Options) -> Result<planet_cache::global_store:
     }
     // The class source's lattice is built once, on the threads of the run (the same result for any count).
     let threads = planet_streaming::topology::bake_threads(o.threads)?.0;
-    let inputs = planet_cache::global_store::class_inputs(world.seed(), threads);
+    let inputs = planet_cache::global_store::class_inputs(&def, world.seed(), threads);
     Ok(world.with_class_source(inputs))
 }
 
