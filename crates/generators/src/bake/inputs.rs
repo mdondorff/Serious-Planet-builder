@@ -6,7 +6,7 @@ use crate::classes::{
     blended_carve_factor, blended_k, ClassLattice, ClassSource, CLASS_CARVE, CLASS_K, CLASS_LATTICE_N, CLASS_LIST_VERSION,
     CLASS_SOURCE_VERSION,
 };
-use crate::lithology::{Lithology, ProvinceLattice};
+use crate::lithology::{Lithology, ProvinceLattice, LITHOLOGY_VERSION};
 use crate::orography::{Orography, OROGRAPHY_VERSION, SEASONS};
 use planet_core::Vec3;
 
@@ -68,6 +68,9 @@ impl BakeInputs {
     }
 
     /// The class weights at a direction: the lattice's with the arid rules (GEN-128) blended over them.
+    ///
+    /// The base elevation and the aridity are read from the climate's lattice (bilinear, about 20 km a cell in production), not evaluated at the point: the rules are regional, and a lattice read
+    /// keeps `weights_at` cheap; the land ramp fades the weights in over about 100 m of lattice height, so a coastal point reads them smoothly.
     pub fn weights_at(&self, d: Vec3) -> [f64; crate::classes::CLASS_COUNT] {
         let (climate, lithology) = (self.orography(), self.lithology());
         let inputs = AridInputs {
@@ -106,15 +109,15 @@ impl BakeInputs {
         put(u64::from(CLASS_LIST_VERSION));
         put(CLASS_LATTICE_N as u64);
         // The base elevation reads the class weights, which read the arid rules and, through them, the climate: their identities are the layer's.
-        put(arid_identity(ARID_RULES_VERSION, Self::climate_id()));
+        put(arid_identity(ARID_RULES_VERSION, LITHOLOGY_VERSION, Self::climate_id()));
         CLASS_K.iter().chain(CLASS_CARVE.iter()).for_each(|v| put(v.to_bits()));
         h
     }
 }
 
 /// The identity word of the arid rules of `version` over a climate of identity `climate` (a layer's base elevation reads both).
-fn arid_identity(version: u32, climate: u64) -> u64 {
-    planet_core::hash::hash_u64s(0x6172_6964, &[u64::from(version), climate])
+fn arid_identity(version: u32, lithology_version: u32, climate: u64) -> u64 {
+    planet_core::hash::hash_u64s(0x6172_6964, &[u64::from(version), u64::from(lithology_version), climate])
 }
 
 /// The identity word of a climate of `version` on a lattice of `cells` cells a face edge.
@@ -141,16 +144,16 @@ mod tests {
     #[test]
     fn the_layer_identity_moves_with_the_rules_version_and_the_climate_identity() {
         let climate = climate_identity(OROGRAPHY_VERSION, OROGRAPHY_CELLS_FOR_TEST);
-        let base = arid_identity(ARID_RULES_VERSION, climate);
-        assert_ne!(base, arid_identity(ARID_RULES_VERSION + 1, climate), "a new rules version re-keys the layers");
-        assert_ne!(
-            base,
-            arid_identity(ARID_RULES_VERSION, climate_identity(OROGRAPHY_VERSION + 1, OROGRAPHY_CELLS_FOR_TEST)),
+        let base = arid_identity(ARID_RULES_VERSION, LITHOLOGY_VERSION, climate);
+        let moved = |version: u32, lithology: u32, climate: u64| arid_identity(version, lithology, climate) != base;
+        assert!(moved(ARID_RULES_VERSION + 1, LITHOLOGY_VERSION, climate), "a new rules version re-keys the layers");
+        assert!(moved(ARID_RULES_VERSION, LITHOLOGY_VERSION + 1, climate), "a new lithology re-keys the layers");
+        assert!(
+            moved(ARID_RULES_VERSION, LITHOLOGY_VERSION, climate_identity(OROGRAPHY_VERSION + 1, OROGRAPHY_CELLS_FOR_TEST)),
             "a new climate re-keys the layers"
         );
-        assert_ne!(
-            base,
-            arid_identity(ARID_RULES_VERSION, climate_identity(OROGRAPHY_VERSION, OROGRAPHY_CELLS_FOR_TEST * 2)),
+        assert!(
+            moved(ARID_RULES_VERSION, LITHOLOGY_VERSION, climate_identity(OROGRAPHY_VERSION, OROGRAPHY_CELLS_FOR_TEST * 2)),
             "a finer climate lattice re-keys the layers"
         );
     }

@@ -33,6 +33,8 @@ pub struct AridParams {
     pub arid: (f64, f64),
     /// The height (m) below which dunes can lie: 1 at `low.0`, 0 at `low.1`.
     pub low: (f64, f64),
+    /// The heights (m) over which land begins: 0 at `land.0`, 1 at `land.1` (the rules give no weight at sea, and fade in over the coast).
+    pub land: (f64, f64),
     /// The weight of an orogen core in the broken relief (the foreland and the old margin count in full).
     pub broken_core: f64,
     /// The weights of the sediment sources in the sand supply: the basin, the old margin, the rift.
@@ -53,6 +55,7 @@ impl Default for AridParams {
             moderate_to: (1800.0, 2800.0),
             arid: (0.05, 0.22),
             low: (300.0, 900.0),
+            land: (-50.0, 50.0),
             broken_core: 0.6,
             supply: (1.0, 0.5, 0.4),
             cap: 0.8,
@@ -81,7 +84,16 @@ pub struct AridRules {
 }
 
 impl AridRules {
+    /// # Panics
+    /// When a ramp has equal edges (it would be 0/0) or the caps are not in `[0, 1]` with `cap <= cap_both`: weights that sum over 1 would make the blend negative.
     pub fn new(params: AridParams) -> AridRules {
+        let ramps =
+            [params.soft, params.semi_from, params.semi_to, params.moderate_from, params.moderate_to, params.arid, params.low, params.land];
+        assert!(ramps.iter().all(|r| r.0 != r.1), "every ramp of the arid rules has two different edges");
+        assert!(
+            (0.0..=1.0).contains(&params.cap) && params.cap <= params.cap_both && params.cap_both <= 1.0,
+            "the caps are in [0, 1] and the combined cap is not below one rule's"
+        );
         AridRules { params }
     }
 
@@ -92,6 +104,7 @@ impl AridRules {
 
     /// The weights `(badlands, sand sea)` at a point: each in `[0, cap]`, together at most `cap_both`.
     pub fn weights(&self, i: &AridInputs) -> (f64, f64) {
+        debug_assert!(i.aridity.is_finite() && i.hardness.is_finite() && i.e0.is_finite(), "the arid rules read finite inputs: {i:?}");
         let p = &self.params;
         let ramp = |(a, b): (f64, f64), x: f64| smoothstep(a, b, x);
         let soft = ramp(p.soft, i.hardness);
@@ -99,13 +112,15 @@ impl AridRules {
         let moderate = ramp(p.moderate_from, i.e0) * (1.0 - ramp(p.moderate_to, i.e0));
         // The relief the water can cut: a foreland, an old margin or the flank of a belt.
         let broken = i.provinces.foreland.max(i.provinces.old_margin).max(p.broken_core * i.provinces.core).clamp(0.0, 1.0);
-        let badlands = (soft * semi * moderate * broken).min(p.cap);
+        // No weight at sea: the rules fade in over the coast.
+        let land = ramp(p.land, i.e0);
+        let badlands = (land * soft * semi * moderate * broken).min(p.cap);
         // Falling ramps: 1 at the first value, 0 at the second (`smoothstep` with its edges swapped).
         let arid = ramp((p.arid.1, p.arid.0), i.aridity);
         let low = ramp((p.low.1, p.low.0), i.e0);
         let supply =
             (p.supply.0 * i.provinces.basin).max(p.supply.1 * i.provinces.old_margin).max(p.supply.2 * i.provinces.rift).clamp(0.0, 1.0);
-        let sand = (arid * low * supply).min(p.cap);
+        let sand = (land * arid * low * supply).min(p.cap);
         let total = badlands + sand;
         if total > p.cap_both {
             let k = p.cap_both / total;
@@ -115,8 +130,8 @@ impl AridRules {
         }
     }
 
-    /// The class weights `base` with the two rules blended over them: `(1 - w_bad - w_sand) base + w_bad e_badlands + w_sand e_sand_sea`, summing to what `base` summed to (1). The base weights'
-    /// own badlands and sand-sea shares (0 in the default source) are replaced by the rules'.
+    /// The class weights `base` with the two rules blended over them: `(1 - w_bad - w_sand) base + w_bad e_badlands + w_sand e_sand_sea`, summing to 1 (the other classes keep their proportions
+    /// and share what the rules leave; a base with no other class gives just the rules' weights). The base weights' own badlands and sand-sea shares (0 in the default source) are replaced by the rules'.
     pub fn blend(&self, base: &[f64; CLASS_COUNT], i: &AridInputs) -> [f64; CLASS_COUNT] {
         let (bad, sand) = self.weights(i);
         let rest = 1.0 - bad - sand;

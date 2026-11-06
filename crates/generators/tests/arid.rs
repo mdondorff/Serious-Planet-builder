@@ -47,7 +47,7 @@ fn sand_sea_gains_weight_only_on_arid_low_sediment_fed_ground() {
 
 // spec: GEN-128
 #[test]
-fn the_blend_sums_to_the_base_sum_keeps_the_caps_and_replaces_the_base_arid_shares() {
+fn the_blend_sums_to_one_keeps_the_caps_and_replaces_the_base_arid_shares() {
     let rules = AridRules::earth();
     let mut worst = 0.0f64;
     for a in 0..=20 {
@@ -142,5 +142,46 @@ fn a_bake_input_blends_the_rules_over_the_class_lattice() {
         assert!(base[BADLANDS] == 0.0 && base[SAND_SEA] == 0.0, "the class lattice holds no arid weight");
         changed += usize::from(w[BADLANDS] > 0.0 || w[SAND_SEA] > 0.0);
     }
-    println!("{changed} of 200 points carry an arid weight");
+    assert!(changed > 0, "some of the 200 points of seed 5 lie on arid ground, so the rules reach the weights ({changed})");
+}
+
+// spec: GEN-128
+#[test]
+fn the_earth_preset_is_pinned_so_that_a_change_of_its_values_must_bump_the_rules_version_and_sea_has_no_arid_weight() {
+    let rules = AridRules::earth();
+    // Inside the ramps, away from the caps.
+    let i = inputs(0.5, 0.45, 2000.0, provinces(0.5, 0.0, 0.0, 0.0, 0.0));
+    let sand = inputs(0.12, 0.5, 500.0, provinces(0.0, 0.0, 0.5, 0.0, 0.0));
+    let got = [rules.weights(&i).0.to_bits(), rules.weights(&sand).1.to_bits()];
+    assert_eq!(got, KNOWN_EARTH_WEIGHTS, "the Earth preset or the rules changed: bump ARID_RULES_VERSION and re-pin");
+    // At sea the rules give nothing, whatever the climate and the sources.
+    let sea = inputs(0.03, 0.2, -500.0, provinces(0.8, 0.8, 0.9, 0.8, 0.0));
+    assert_eq!(rules.weights(&sea), (0.0, 0.0));
+}
+
+const KNOWN_EARTH_WEIGHTS: [u64; 2] = [4594397672235432083, 4597587803839757693];
+
+// spec: GEN-128
+#[test]
+fn the_blended_k_step_between_class_lattice_neighbours_stays_within_the_relief_channels_limit() {
+    use planet_generators::bake::inputs::BakeInputs;
+    use planet_generators::relief_channels::DEFAULT_MAX_STEP;
+    let inputs = BakeInputs::new(5, 2);
+    let lattice = inputs.class_lattice();
+    let n = lattice.cells();
+    let k = |i: usize, j: usize, f: u8| {
+        inputs.weights_at(lattice.direction(planet_core::Face(f), i, j)).iter().zip(CLASS_K).map(|(w, k)| w * k).sum::<f64>()
+    };
+    let mut steps = Vec::new();
+    for f in 0..6u8 {
+        for j in (0..n).step_by(8) {
+            for i in (0..n).step_by(2) {
+                steps.push((k(i, j, f) - k(i + 1, j, f)).abs());
+                steps.push((k(i, j, f) - k(i, j + 1, f)).abs());
+            }
+        }
+    }
+    steps.sort_by(f64::total_cmp);
+    let p99 = steps[(steps.len() - 1) * 99 / 100];
+    assert!(p99 <= DEFAULT_MAX_STEP, "the p99 of the blended k step is {p99}, over {DEFAULT_MAX_STEP}");
 }
