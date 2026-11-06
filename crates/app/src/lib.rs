@@ -191,6 +191,8 @@ pub struct Options {
     pub climate_preview: Option<PathBuf>,
     /// `generate --arid-preview DIR` (GEN-128): the class map with the arid rules, their weights, the shares against Earth's and the scorecard sites' classes into DIR.
     pub arid_preview: Option<PathBuf>,
+    /// `generate --shelf-preview DIR` (GEN-118): the bathymetry map, a passive and an active coast region and the shelf numbers against Earth's into DIR.
+    pub shelf_preview: Option<PathBuf>,
     pub fine_lattice: Option<usize>,
     /// `--km N`: kilometres a pixel of the lithology and uplift previews' maps (16 by default; 8 to 500).
     pub preview_km: f64,
@@ -400,6 +402,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         uplift_preview: None,
         climate_preview: None,
         arid_preview: None,
+        shelf_preview: None,
         fine_lattice: None,
         preview_km: 16.0,
         global_res: 256,
@@ -612,6 +615,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--uplift-preview" => o.uplift_preview = Some(PathBuf::from(it.next().ok_or("--uplift-preview needs a directory")?)),
             "--climate-preview" => o.climate_preview = Some(PathBuf::from(it.next().ok_or("--climate-preview needs a directory")?)),
             "--arid-preview" => o.arid_preview = Some(PathBuf::from(it.next().ok_or("--arid-preview needs a directory")?)),
+            "--shelf-preview" => o.shelf_preview = Some(PathBuf::from(it.next().ok_or("--shelf-preview needs a directory")?)),
             "--fine-lattice" => {
                 let n: usize =
                     it.next().ok_or("--fine-lattice needs a number of cells")?.parse().map_err(|e| format!("--fine-lattice: {e}"))?;
@@ -697,7 +701,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
 use planet_cache::tiles::MAX_REGION_LEVEL;
 
 /// Options that only the tile store commands of `generate` understand.
-pub(crate) const STORE_OPTIONS: [&str; 27] = [
+pub(crate) const STORE_OPTIONS: [&str; 28] = [
     "--repeats",
     "--horizon-threads",
     "--altitudes-m",
@@ -721,6 +725,7 @@ pub(crate) const STORE_OPTIONS: [&str; 27] = [
     "--uplift-preview",
     "--climate-preview",
     "--arid-preview",
+    "--shelf-preview",
     "--fine-lattice",
     "--km",
     "--global-res",
@@ -1681,7 +1686,10 @@ mod tests {
         let e = run_str(&["generate", "--lithology-preview", &dir, "--seed", "3", "--world", "w.toml"]).unwrap_err();
         assert!(e.contains("--world and --seed"), "{e}");
         let e = run_str(&["generate", "--km", "16", "--seed", "3"]).unwrap_err();
-        assert!(e.contains("--km applies to --lithology-preview, --uplift-preview, --climate-preview or --arid-preview"), "{e}");
+        assert!(
+            e.contains("--km applies to --lithology-preview, --uplift-preview, --climate-preview, --arid-preview or --shelf-preview"),
+            "{e}"
+        );
         let e = run_str(&["generate", "--lithology-preview", &dir, "--km", "0.5"]).unwrap_err();
         assert!(e.contains("--km 0.5 must be from 8 to 500"), "{e}");
         for bad in ["1", "7.9", "501", "NaN"] {
@@ -1774,6 +1782,27 @@ mod tests {
         let e = run_str(&["generate", "--arid-preview", &dir, "--global-dir", &dir]).unwrap_err();
         assert!(e.contains("--arid-preview excludes") && e.contains("--global-dir"), "{e}");
         let e = run_str(&["generate", "--arid-preview", &dir, "--seed", "3", "--world", "w.toml"]).unwrap_err();
+        assert!(e.contains("--world and --seed"), "{e}");
+    }
+
+    // spec: GEN-118
+    #[test]
+    fn generate_writes_the_shelf_preview_maps_and_numbers_and_refuses_what_it_excludes() {
+        let d = TempDir::new("shelf-preview");
+        let dir = d.s("out");
+        let out = run_str(&["generate", "--shelf-preview", &dir, "--seed", "3", "--km", "500"]).unwrap();
+        assert!(out.contains("an input of the bake, not terrain") && out.contains("500 km a pixel"), "{out}");
+        assert!(std::path::Path::new(&dir).join("bathymetry.png").is_file());
+        let txt = std::fs::read_to_string(std::path::Path::new(&dir).join("shelf.txt")).unwrap();
+        assert!(
+            txt.contains("shelf profile (input), not terrain") && txt.contains("shelf share of the ocean") && txt.contains("passive"),
+            "{txt}"
+        );
+        let e = run_str(&["generate", "--shelf-preview", &dir, "--arid-preview", &dir]).unwrap_err();
+        assert!(e.contains("excludes") && e.contains("--shelf-preview") && e.contains("--arid-preview"), "{e}");
+        let e = run_str(&["generate", "--shelf-preview", &dir, "--global-dir", &dir]).unwrap_err();
+        assert!(e.contains("--shelf-preview excludes") && e.contains("--global-dir"), "{e}");
+        let e = run_str(&["generate", "--shelf-preview", &dir, "--seed", "3", "--world", "w.toml"]).unwrap_err();
         assert!(e.contains("--world and --seed"), "{e}");
     }
 

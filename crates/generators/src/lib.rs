@@ -41,6 +41,8 @@ pub mod relief_channels;
 pub mod relief_lattice;
 pub mod runoff;
 pub mod shape;
+pub mod shelf;
+pub mod shelf_preview;
 pub mod stage;
 pub mod stamp;
 /// Test-only stress terrain; only test builds enable the `stress` feature (dev-dependencies).

@@ -94,6 +94,8 @@ mod relief_field;
 mod relief_scale;
 #[path = "runtime_layer.rs"]
 mod runtime_layer;
+#[path = "shelf.rs"]
+mod shelf;
 #[path = "stages.rs"]
 mod stages;
 #[path = "stamp_stage.rs"]

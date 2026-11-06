@@ -7,6 +7,7 @@
 
 use crate::global::{fbm, hill_octaves, ridge_at, terrain, Terrain, MAX_ELEVATION_M, MIN_ELEVATION_M, SEA_LEVEL_C};
 use crate::height::layer_noise;
+use crate::shelf::ShelfProfile;
 use planet_core::cube::{direction_to_face, face_to_direction, TangentWarp};
 use planet_core::par::{self, Par};
 use planet_core::{smoothstep, Face, Vec3};
@@ -14,7 +15,7 @@ use planet_core::{smoothstep, Face, Vec3};
 /// The version of the class list (GEN-093): plain, rolling plain, hills, mountains, high mountains, plateau, badlands, sand sea, in that order.
 pub const CLASS_LIST_VERSION: u32 = 1;
 /// Bump whenever the default source's output changes for a seed (the rules of GEN-094 and GEN-095, their constants, or the plate construction).
-pub const CLASS_SOURCE_VERSION: u32 = 6;
+pub const CLASS_SOURCE_VERSION: u32 = 7;
 pub const CLASS_COUNT: usize = 8;
 pub const CLASS_NAMES: [&str; CLASS_COUNT] =
     ["plain", "rolling plain", "hills", "mountains", "high mountains", "plateau", "badlands", "sand sea"];
@@ -129,6 +130,14 @@ fn fibonacci_points(n: usize) -> Vec<Vec3> {
         .collect()
 }
 
+/// The weights of the three pairs of the three nearest plates `(0, 1)`, `(0, 2)` and `(1, 2)` from their angles `ang` (nearest first, four of them): the pair of the second and third plate is
+/// a real margin only next to the margin of the first two (where the nearest plate changes, it takes the place of the pair `(0, 2)`). Each plate's weight depends on its own angle, so a pair
+/// of plates that trade places has the same weight before and after (the margin factor of the second and third too).
+fn pair_weights(ang: &[f64; 4]) -> [f64; 3] {
+    let rank = |r: usize| smoothstep(0.0, 0.05, ang[3] - ang[r]);
+    [rank(0) * rank(1), rank(0) * rank(2), rank(1) * rank(2) * (1.0 - smoothstep(0.0, 0.04, ang[1] - ang[0]))]
+}
+
 struct Plate {
     centre: Vec3,
     /// The Euler-pole rotation vector: the pole times the rate (0.3 to 1.0, dimensionless).
@@ -175,6 +184,8 @@ pub struct ClassSource {
     land_share: Vec<f64>,
     /// The index of the plate draw that was kept (GEN-105): 0 is the seed's own draw.
     plate_draw: u64,
+    /// The shelf profile of the ocean floor (GEN-118): Earth's by default.
+    shelf: ShelfProfile,
 }
 
 impl ClassSource {
@@ -187,7 +198,14 @@ impl ClassSource {
         for t in 0..PLATE_DRAWS {
             let draw = if t == 0 { seed } else { splitmix(seed ^ (t << 40) ^ 0x71a7_e500) };
             let plates = draw_plates(draw);
-            let source = ClassSource { seed, radius_m: EARTH_RADIUS_M, plates, land_share: vec![0.0; PLATES], plate_draw: t };
+            let source = ClassSource {
+                seed,
+                radius_m: EARTH_RADIUS_M,
+                plates,
+                land_share: vec![0.0; PLATES],
+                plate_draw: t,
+                shelf: ShelfProfile::earth(),
+            };
             let score =
                 points.iter().zip(&land).filter(|(_, &l)| l).map(|(&d, _)| source.convergent_margin_near(d)).sum::<f64>() / land_count;
             if best.as_ref().is_none_or(|(b, _)| score > *b) {
@@ -197,6 +215,45 @@ impl ClassSource {
         let mut source = best.expect("at least one plate draw").1;
         source.land_share = source.measure_land_shares();
         source
+    }
+
+    /// The source with another shelf profile (a world definition's parameters; ADR 0108).
+    pub fn with_shelf(mut self, shelf: ShelfProfile) -> ClassSource {
+        self.shelf = ShelfProfile::new(shelf);
+        self
+    }
+
+    pub fn shelf(&self) -> &ShelfProfile {
+        &self.shelf
+    }
+
+    /// The ocean floor in metres at `d` where the continent stage puts the sea (`land_depth < 0`): the shelf from the coast, then the slope (GEN-118).
+    ///
+    /// The distance to the coast is the first-order estimate `|smooth land depth| / |gradient|` (the continent stage without its detail, GEN-104: the full value's gradient is not defined at
+    /// the lattice's scale, and its detail would put hundreds of metres of noise into the slope). The smooth coast lies up to a detail amplitude from the field's coast, so the profile fades in
+    /// from 0 at the field's coast over `ShelfProfile::coast_ramp` of sea depth (so that the floor is continuous with the land's coast ramp) and has at least `min_sea_m` of water beyond `min_sea_ramp`.
+    /// The gradient is read only where the smooth sea is shallower than `ShelfProfile::abyss_blend`'s end, and from its start the floor is blended into the abyssal depth by the smooth land depth (not the full
+    /// one, whose detail would pass into the slope), so that no step stands where the gradient stops being read.
+    fn ocean_floor_m(&self, d: Vec3, land_depth: f64) -> f64 {
+        let abyss = -self.shelf.abyssal_depth_m;
+        let sea = -land_depth;
+        let smooth = self.land_depth(d);
+        let (blend_from, blend_to) = self.shelf.abyss_blend;
+        let raw = if -smooth >= blend_to {
+            abyss
+        } else {
+            let g = self.land_gradient_vec(d);
+            let x_km = if smooth < 0.0 { self.distance_km(smooth, g.length()) } else { 0.0 };
+            // The margin type is that of the coast the shelf hangs from, not of the point (the activity falls with the distance from the margin): the point is moved to the smooth coast
+            // along the gradient, which points towards the land.
+            let toward = g * (1.0 / g.length().max(1e-9));
+            let coast = (d + toward * (x_km / (self.radius_m / 1000.0))).normalized();
+            let width = self.shelf.width_km(self.margin_activity(coast));
+            let profile = self.shelf.floor_m(x_km, width);
+            profile + (abyss - profile) * smoothstep(blend_from, blend_to, -smooth)
+        };
+        // The fade covers the whole floor, the abyssal blend too: a coast of the field far out in the smooth sea (an island) is continuous with the land's coast ramp, not a cliff.
+        (raw * smoothstep(0.0, self.shelf.coast_ramp, sea)).min(-self.shelf.min_sea_m * smoothstep(0.0, self.shelf.min_sea_ramp, sea))
     }
 
     /// In `[0, 1]`: how much of a convergent margin of the two nearest plates lies within a few hundred km of `d` (the score of a plate draw).
@@ -255,6 +312,33 @@ impl ClassSource {
         (d + w * 0.35).normalized()
     }
 
+    /// The smooth land depth at `d` (the continent stage without its detail, GEN-104).
+    pub fn smooth_land_depth(&self, d: Vec3) -> f64 {
+        self.land_depth(d)
+    }
+
+    /// The convergence of plates `px` and `py` at `d`: the velocity difference along the margin normal, from plate x towards plate y, in the tangent plane at d (symmetric: swapping the plates
+    /// flips the normal and the velocity difference).
+    fn pair_convergence(d: Vec3, px: &Plate, py: &Plate) -> f64 {
+        let mut nrm = py.centre - px.centre;
+        nrm = nrm - d * nrm.dot(d);
+        let nl = nrm.length();
+        let nrm = if nl > 1e-12 { nrm * (1.0 / nl) } else { Vec3::ZERO };
+        (px.rotation.cross(d) - py.rotation.cross(d)).dot(nrm)
+    }
+
+    /// How much of an active (convergent) plate margin lies near `d`, in `[0, 1]` (GEN-118): the largest over the pairs of the three nearest plates of the pair's weight times
+    /// [`ShelfProfile::margin_term`] of its distance and convergence. Symmetric in the plates of a pair and weighted like the mask's terms, so it is continuous where the nearest plate changes.
+    pub fn margin_activity(&self, d: Vec3) -> f64 {
+        let (idx, ang) = self.nearest_three(self.warp(d));
+        let pair_weight = pair_weights(&ang);
+        [(0usize, 1usize), (0, 2), (1, 2)].iter().enumerate().fold(0.0f64, |a, (n, &(x, y))| {
+            let dist_km = 0.5 * (ang[y] - ang[x]) * self.radius_m / 1000.0;
+            let conv = Self::pair_convergence(d, &self.plates[idx[x]], &self.plates[idx[y]]);
+            a.max(pair_weight[n] * self.shelf.margin_term(dist_km, conv))
+        })
+    }
+
     /// The three nearest centres to `q` and the angles of the four nearest, nearest first (ties go to the lower index).
     fn nearest_three(&self, q: Vec3) -> ([usize; 3], [f64; 4]) {
         let (mut idx, mut ang) = ([0usize; 3], [f64::INFINITY; 4]);
@@ -281,10 +365,15 @@ impl ClassSource {
     /// The gradient magnitude of the land depth at `d` per radian: central differences of [`GRADIENT_STEP`] along the fixed axes x, y and z, with the radial part removed, so
     /// that it does not depend on a tangent basis (a basis that switches its helper axis near the poles would step the estimate).
     fn land_gradient(&self, d: Vec3) -> f64 {
+        self.land_gradient_vec(d).length()
+    }
+
+    /// The tangent gradient of the smooth land depth at `d` per radian (see [`land_gradient`](Self::land_gradient)): it points towards the land.
+    fn land_gradient_vec(&self, d: Vec3) -> Vec3 {
         let h = GRADIENT_STEP;
         let at = |axis: Vec3| (self.land_depth((d + axis * h).normalized()) - self.land_depth((d - axis * h).normalized())) / (2.0 * h);
         let g = Vec3::new(at(Vec3::new(1.0, 0.0, 0.0)), at(Vec3::new(0.0, 1.0, 0.0)), at(Vec3::new(0.0, 0.0, 1.0)));
-        (g - d * g.dot(d)).length()
+        g - d * g.dot(d)
     }
 
     /// The first-order estimate in km of the distance over which the land depth changes by `delta` at `d`: `|delta| / |gradient|` (valid near `d`), the gradient
@@ -312,8 +401,7 @@ impl ClassSource {
         let (idx, ang) = self.nearest_three(q);
         // The pair of the second and third plate is a real margin only next to the margin of the first two (where the nearest plate changes, it takes the place of the pair (0, 2)).
         // Each plate's weight depends on its own angle, so a pair of plates that trade places has the same weight before and after (the margin factor of (second, third) too).
-        let rank = |r: usize| smoothstep(0.0, 0.05, ang[3] - ang[r]);
-        let pair_weight = [rank(0) * rank(1), rank(0) * rank(2), rank(1) * rank(2) * (1.0 - smoothstep(0.0, 0.04, ang[1] - ang[0]))];
+        let pair_weight = pair_weights(&ang);
         // The width of a belt: a tent profile of 260 to 560 km half-width before the taper (never under 125 km after it); the belt is cut into segments and its height varies along it.
         let width_km = 200.0 + 220.0 * (0.5 + 0.5 * fbm(self.seed, LAYER_WIDTH, d, 2.5, 2));
         let segment = smoothstep(0.25, 0.55, 0.5 + 0.5 * fbm(self.seed, LAYER_SEGMENT, d, 2.8, 2));
@@ -344,12 +432,7 @@ impl ClassSource {
             let dist_km = 0.5 * (ang[y] - ang[x]) * self.radius_m / 1000.0;
             // The signed distance to the margin, positive on the side of the plate with the lower index: continuous through the margin where the nearest plate changes.
             let across_km = if idx[x] < idx[y] { dist_km } else { -dist_km };
-            // The margin normal: from plate x towards plate y, in the tangent plane at d (symmetric: swapping the plates flips it and the velocity difference).
-            let mut nrm = py.centre - px.centre;
-            nrm = nrm - d * nrm.dot(d);
-            let nl = nrm.length();
-            let nrm = if nl > 1e-12 { nrm * (1.0 / nl) } else { Vec3::ZERO };
-            let conv = (px.rotation.cross(d) - py.rotation.cross(d)).dot(nrm);
+            let conv = Self::pair_convergence(d, px, py);
             if n == 0 {
                 (margin_km, convergence) = (dist_km, conv);
             }
@@ -394,7 +477,7 @@ impl ClassSource {
         let t = terrain(self.seed, d);
         let terms = self.mask_terms(d, t.land_depth, t.inland);
         let coast = if t.land_depth < 0.0 {
-            -4500.0 * smoothstep(0.0, 0.9, -t.land_depth)
+            self.ocean_floor_m(d, t.land_depth)
         } else {
             COAST_TOP_M * smoothstep(0.0, COAST_RAMP_DEPTH, t.land_depth)
         };
