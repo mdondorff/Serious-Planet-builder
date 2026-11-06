@@ -60,7 +60,7 @@ fn the_continentalness_is_pinned_so_that_a_change_bumps_the_global_version() {
     println!("continent fingerprint {h:#018x} at GLOBAL_VERSION {GLOBAL_VERSION}");
     assert_eq!(
         (GLOBAL_VERSION, h),
-        (8, PINNED),
+        (9, PINNED),
         "the continent stage's output changed: bump GLOBAL_VERSION and record the new fingerprint"
     );
 }

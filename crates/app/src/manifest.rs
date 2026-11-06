@@ -96,10 +96,10 @@ mod tests {
         assert_eq!(get("node"), "dd934e9e858a828bb73c45e8a4eb4d45");
         assert_eq!(get("body"), "91f0cebc78907779e2f87196650d468e");
         assert_eq!(get("emptyquery"), "a97668a9d9614a3f4a73f2fceae97219");
-        assert_eq!(get("stagekey32"), "65cdd8e4d0baf560f78b3fe11eb4424f");
-        assert_eq!(get("blockkey"), "1e16f77e54841f9fb0bacc3336e6dccf");
+        assert_eq!(get("stagekey32"), "ad7f2820858c41fde2c78e8816afa3f6");
+        assert_eq!(get("blockkey"), "983f66fa51bcc9195cb7023aff4888f6");
         assert_eq!(get("nodesetid"), "92572f1974620d913454c89a22aca7be");
-        assert_eq!(get("oceankey"), "364e199d548e97b9f643115102791f25");
+        assert_eq!(get("oceankey"), "31192efd2f311968e196d7330fee3649");
         assert_eq!(m.lines().filter(|l| l.starts_with("persistent ")).count(), 10);
         assert!(m.starts_with(&planet_generators::manifest::determinism_manifest()), "the generators' manifest comes first, unchanged");
         let mut keys: Vec<&str> = m.lines().map(|l| l.rsplit_once(' ').unwrap().0).collect();

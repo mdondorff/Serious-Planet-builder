@@ -28,7 +28,7 @@ pub struct BakeInputs {
 impl BakeInputs {
     /// Builds the class lattice of `seed` on `threads` threads (same result for any count).
     pub fn new(seed: u64, threads: usize) -> BakeInputs {
-        let source = ClassSource::new(seed);
+        let source = ClassSource::new(seed).with_coast_threads(threads);
         let lattice = ClassLattice::build_with(&source, CLASS_LATTICE_N, threads);
         let uplift = Uplift::new(source.seed());
         BakeInputs {
