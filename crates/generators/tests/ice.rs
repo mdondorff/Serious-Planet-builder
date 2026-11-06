@@ -70,6 +70,7 @@ fn the_parameters_are_validated() {
         IceParams { land_ramp_m: -5.0, ..IceParams::earth() },
         IceParams { ela_temp_range_c: (2.0, -12.0), ..IceParams::earth() },
         IceParams { ela_temp_per_decade_c: f64::INFINITY, ..IceParams::earth() },
+        IceParams { ela_temp_per_decade_c: -1.0, ..IceParams::earth() },
     ] {
         assert!(std::panic::catch_unwind(|| IceHistory::new(bad)).is_err(), "{bad:?} is refused");
     }

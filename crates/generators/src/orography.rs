@@ -287,12 +287,12 @@ impl Orography {
         &self.seasons
     }
 
-    /// The cells a face edge of the lattice.
     /// The seed of the planet the climate was made for.
     pub fn seed(&self) -> u64 {
         self.seed
     }
 
+    /// The cells a face edge of the lattice.
     pub fn cells(&self) -> usize {
         self.grid.n
     }

@@ -57,16 +57,17 @@ pub fn preview(inputs: &BakeInputs, history: &IceHistory, km: f64, threads: usiz
     let images = vec![("ice_extent.png", image(&extent)), ("ela.png", image(&ela))];
     // The shares by area (pixels weigh by the cosine of the latitude), over land.
     let (mut land, mut ice, mut ice_high_sheet) = (0.0, 0.0, 0.0);
-    let mut elas: Vec<f64> = Vec::new();
+    let mut elas: Vec<(f64, f64)> = Vec::new();
     // The mid-latitude highlands (the Highlands, the Alps and the fjords of the gate): land of 800 m and more between 40 and 65 degrees of latitude, either hemisphere.
-    let (mut high, mut high_ice) = (0usize, 0usize);
+    let (mut high, mut high_ice, mut high_px) = (0.0, 0.0, 0usize);
     for (y, row) in rows.iter().enumerate() {
         let w = libm::cos(core::f64::consts::FRAC_PI_2 - (y as f64 + 0.5) / height as f64 * core::f64::consts::PI);
         let lat_deg = (core::f64::consts::FRAC_PI_2 - (y as f64 + 0.5) / height as f64 * core::f64::consts::PI).to_degrees().abs();
         for p in row.iter().filter(|p| p.ground_m > 0.0) {
             if (40.0..65.0).contains(&lat_deg) && p.ground_m >= 800.0 {
-                high += 1;
-                high_ice += usize::from(p.cover >= UNDER_ICE);
+                high += w;
+                high_px += 1;
+                high_ice += if p.cover >= UNDER_ICE { w } else { 0.0 };
             }
             land += w;
             if p.cover >= UNDER_ICE {
@@ -75,11 +76,22 @@ pub fn preview(inputs: &BakeInputs, history: &IceHistory, km: f64, threads: usiz
                     ice_high_sheet += w;
                 }
             }
-            elas.push(p.ela_m);
+            elas.push((p.ela_m, w));
         }
     }
-    elas.sort_by(f64::total_cmp);
-    let q = |f: f64| elas.get(((elas.len() as f64 - 1.0) * f) as usize).copied().unwrap_or(f64::NAN);
+    // Quantiles by area: walk the cumulative weight of the lines in order.
+    elas.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let total_w: f64 = elas.iter().map(|e| e.1).sum();
+    let q = |f: f64| {
+        let mut acc = 0.0;
+        for &(v, w) in &elas {
+            acc += w;
+            if acc >= f * total_w {
+                return v;
+            }
+        }
+        f64::NAN
+    };
     let params = &history.params;
     let mut text = String::new();
     text.push_str("ice history (input), not terrain: the preview of GEN-134; every number is a start value for the owner's review\n");
@@ -105,7 +117,7 @@ pub fn preview(inputs: &BakeInputs, history: &IceHistory, km: f64, threads: usiz
         100.0 * ice_high_sheet / land.max(1e-9)
     ));
     text.push_str(&format!(
-        "equilibrium line over the land (m): p5 {:.0}, p25 {:.0}, p50 {:.0}, p75 {:.0}, p95 {:.0}\n",
+        "equilibrium line over the land (m, by area): p5 {:.0}, p25 {:.0}, p50 {:.0}, p75 {:.0}, p95 {:.0}\n",
         q(0.05),
         q(0.25),
         q(0.5),
@@ -113,9 +125,9 @@ pub fn preview(inputs: &BakeInputs, history: &IceHistory, km: f64, threads: usiz
         q(0.95)
     ));
     text.push_str(&format!(
-        "mid-latitude highlands (40 to 65 degrees, ground of 800 m and more, the analogues of the Highlands, the Alps and the fjords): {high} pixels, {:.1} % under ice (the gate's reference sites were all glaciated)
+        "mid-latitude highlands (40 to 65 degrees, ground of 800 m and more, the analogues of the Highlands, the Alps and the fjords): {high_px} pixels, {:.1} % under ice (by area) (the gate's reference sites were all glaciated)
 ",
-        100.0 * high_ice as f64 / high.max(1) as f64
+        100.0 * high_ice / high.max(1e-9)
     ));
     Preview { images, text }
 }

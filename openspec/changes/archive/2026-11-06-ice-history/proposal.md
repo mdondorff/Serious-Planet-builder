@@ -20,7 +20,7 @@ Every value is a field of `IceParams`, Earth as default (`IceParams::earth()`); 
 | cover ramp above the line | 200 | m | calibration | `cover_ramp_m` |
 | land ramp above sea level | 50 | m | calibration | `land_ramp_m` |
 
-The lapse rate is the climate's own (the difference of `temperature_c` at 0 and 1,000 m), not a literal here.
+The preview's reference values (the glacial maximum's 25 % of the land, the 40 to 65 degree and 800 m highland band, the cover of 0.5 that counts as under ice, the colour scales, the three gate sites' real coordinates) are labelled references of the report, not kernel values. The rain floor of 1 mm only guards the logarithm. The lapse rate is the climate's own (the difference of `temperature_c` at 0 and 1,000 m), not a literal here.
 
 ## Capabilities
 ### Modified Capabilities

@@ -640,7 +640,7 @@ fn generate_ice_preview(o: &Options, out: &mut dyn Write) -> Result<(), String> 
     let history = planet_generators::ice::IceHistory::earth();
     let preview = planet_generators::ice_preview::preview(&inputs, &history, o.preview_km, threads);
     let mut sites = String::from(
-        "ice cover at the terrain scorecard's glaciated sites (the sites file; the Sognefjord is not among them):
+        "ice cover at the terrain scorecard's glaciated sites (the sites file, matched on the old world; the Sognefjord is not among them):
 ",
     );
     let landforms = crate::terrainscore::parse_sites(include_str!("../data/terrain-score-sites.toml"))?;
@@ -653,6 +653,15 @@ fn generate_ice_preview(o: &Options, out: &mut dyn Write) -> Result<(), String> 
         for (lat, lon) in &l.sites {
             sites.push_str(&planet_generators::ice_preview::site_line(&inputs, &history, *lat, *lon));
         }
+    }
+    sites.push_str("the gate's three reference sites at their real coordinates (the generator world is not Earth: sea there reads as no ice; the highlands class above is the proxy):
+");
+    for (name, lat, lon) in [("Sognefjord", 61.1, 6.6), ("Scottish Highlands", 57.0, -4.5), ("Alps", 46.5, 10.5)] {
+        sites.push_str(&format!(
+            "{name}:
+"
+        ));
+        sites.push_str(&planet_generators::ice_preview::site_line(&inputs, &history, lat, lon));
     }
     planet_generators::ice_preview::write(dir, &preview, &sites).map_err(|e| format!("writing {}: {e}", dir.display()))?;
     writeln!(

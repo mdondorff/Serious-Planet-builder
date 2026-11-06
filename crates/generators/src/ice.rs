@@ -4,7 +4,7 @@
 //! line sits near 0 degrees C, a dry continental one near -10). Ground above the ELA carries ice; where the sea-level temperature is already under the line's, the ELA lies under the ground
 //! everywhere and the land is a continental sheet: the sheets come out of the same rule, not a second one. The field is analytic over the orographic climate's lattice (never stored).
 //!
-//! Every Earth-specific value is a field of [`IceParams`] with Earth's as the default ([`IceParams::earth`]). GPU-free, `libm`-free closed forms on `f64`, no thread-count dependence (CON-14).
+//! Every Earth-specific value is a field of [`IceParams`] with Earth's as the default ([`IceParams::earth`]). GPU-free, closed forms on `f64` (`libm` for the logarithm), no thread-count dependence (CON-14).
 
 use crate::global::temperature_c;
 use crate::orography::Orography;
@@ -47,7 +47,7 @@ impl IceParams {
     }
 
     /// # Panics
-    /// When a value is not finite, the rain or a ramp is not positive, the cooling is negative, or the temperature range is reversed.
+    /// When a value is not finite, the rain or a ramp is not positive, the cooling or the rise per decade is negative (the line would rise with the rain), or the temperature range is reversed.
     pub fn new(p: IceParams) -> IceParams {
         let finite = [
             p.lgm_cooling_c,
@@ -62,8 +62,8 @@ impl IceParams {
         assert!(finite.iter().all(|v| v.is_finite()), "the ice parameters are finite: {p:?}");
         assert!(p.ela_dry_precip_mm > 0.0 && p.cover_ramp_m > 0.0 && p.land_ramp_m > 0.0, "the rain and the ramps are positive: {p:?}");
         assert!(
-            p.lgm_cooling_c >= 0.0 && p.ela_temp_range_c.0 <= p.ela_temp_range_c.1,
-            "a cooling, and an ordered temperature range: {p:?}"
+            p.lgm_cooling_c >= 0.0 && p.ela_temp_per_decade_c >= 0.0 && p.ela_temp_range_c.0 <= p.ela_temp_range_c.1,
+            "a cooling, a rise of the needed temperature with the rain (the line would rise with it otherwise), and an ordered range: {p:?}"
         );
         p
     }
@@ -108,15 +108,14 @@ impl IceHistory {
         IceHistory::new(IceParams::earth())
     }
 
-    /// The lapse rate in degrees C per km of the climate's temperature (the function's own, not a literal here).
-    fn lapse_c_per_km(seed: u64, d: Vec3) -> f64 {
-        temperature_c(seed, d, 0.0) - temperature_c(seed, d, 1000.0)
-    }
-
     /// The ice history at `d` over `climate`: the ELA from the sea-level temperature and the rain, the ground at the climate's base elevation, and the cover.
     pub fn at(&self, climate: &Orography, d: Vec3) -> IcePoint {
+        // The sea-level temperature is the function the climate itself was built with (`Orography::build` reads `temperature_c(seed, d, 0.0)` for its vapour column).
         let seed = climate.seed();
-        let ela_m = self.params.ela_m(temperature_c(seed, d, 0.0), Self::lapse_c_per_km(seed, d), climate.precipitation_mm(d));
+        let sea_level_c = temperature_c(seed, d, 0.0);
+        let lapse = sea_level_c - temperature_c(seed, d, 1000.0);
+        debug_assert!(lapse > 0.0, "the temperature falls with height: {lapse} C per km at {d:?}");
+        let ela_m = self.params.ela_m(sea_level_c, lapse, climate.precipitation_mm(d));
         let ground_m = climate.base_elevation_m(d);
         IcePoint { ela_m, ground_m, cover: self.params.cover(ground_m, ela_m) }
     }
