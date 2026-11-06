@@ -52,6 +52,6 @@ The constants are module constants until the ADR 0108 audit lifts them into the 
 - Memory, above.
 
 ## Open points for the planner
-- IDs: GEN-131 is reserved; a TEST id is needed for the mass-balance and determinism tests.
+- IDs: GEN-131 (carve) and TEST-095 (mass-balance and determinism tests) are reserved for this change (planner, 2026-11-06).
 - The gate's pit p50 of 20 m is a proposal, not the owner's number.
 - The Yuan coefficient values (`G` 1, the class scales) are start values from the literature and the class factors, not measured here.
