@@ -89,7 +89,7 @@ fn the_parameters_are_validated() {
         ShelfProfile { break_depth_m: f64::NAN, ..ShelfProfile::earth() },
         ShelfProfile { coast_ramp: -0.1, ..ShelfProfile::earth() },
         ShelfProfile { min_sea_ramp: 0.0, ..ShelfProfile::earth() },
-        ShelfProfile { abyss_blend: (0.9, 0.5), ..ShelfProfile::earth() },
+        ShelfProfile { coast_lattice_cells: 100, ..ShelfProfile::earth() },
     ] {
         assert!(std::panic::catch_unwind(|| ShelfProfile::new(bad)).is_err(), "{bad:?} is refused");
     }
@@ -169,24 +169,16 @@ fn a_point_far_from_every_margin_or_on_a_non_converging_one_is_passive_and_the_f
     assert!(one > 0, "some of it is an active margin");
 }
 
-// spec: GEN-118
+// spec: GEN-136
 #[test]
-fn the_floor_meets_the_land_at_every_coast_of_the_field_and_has_no_deep_pit_in_the_smooth_near_shore() {
+fn the_floor_meets_the_land_at_every_coast_of_the_field() {
     let s = ClassSource::new(7);
     let n = 30_000;
-    let (mut coasts, mut worst, mut deepest_smooth) = (0usize, 0.0f64, 0.0f64);
-    let (mut shallow_sea, mut pits) = (0usize, 0usize);
+    let (mut coasts, mut worst) = (0usize, 0.0f64);
     let mut prev = fib(0, n);
     for i in 1..n {
         let cur = fib(i, n);
         let (pa, pb) = (s.eval(prev), s.eval(cur));
-        if pa.land_depth < 0.0 {
-            // A sea point whose smooth sea is shallow must not sit in the abyss: a zero of the smooth gradient would put one there.
-            if s.smooth_land_depth(prev) > -0.03 {
-                shallow_sea += 1;
-                pits += usize::from(pa.e0 < -1000.0);
-            }
-        }
         if (pa.land_depth < 0.0) != (pb.land_depth < 0.0) {
             // Bisect along the arc to the coast of the field, then compare the two sides a hair apart.
             let (mut lo, mut hi) = (prev, cur);
@@ -202,14 +194,10 @@ fn the_floor_meets_the_land_at_every_coast_of_the_field_and_has_no_deep_pit_in_t
             let (sea, land) = if lo_is_sea { (s.eval(lo), s.eval(hi)) } else { (s.eval(hi), s.eval(lo)) };
             coasts += 1;
             worst = worst.max((sea.e0 - land.e0).abs());
-            deepest_smooth = deepest_smooth.max(-s.smooth_land_depth(lo));
         }
         prev = cur;
     }
-    println!(
-        "SHELF coasts {coasts}, worst step {worst:.2} m, deepest smooth sea at a coast {deepest_smooth:.3}, pits {pits} of {shallow_sea}"
-    );
+    println!("SHELF coasts {coasts}, worst step {worst:.2} m");
     assert!(coasts > 100, "the walk found {coasts} coasts");
-    assert!(worst < 5.0, "the floor steps by {worst} m at a coast (the smooth sea there reaches {deepest_smooth})");
-    assert!(pits * 20 < shallow_sea.max(1), "{pits} of {shallow_sea} near-coast smooth-sea points (under 0.03) lie deeper than 1,000 m");
+    assert!(worst < 5.0, "the floor steps by {worst} m at a coast");
 }

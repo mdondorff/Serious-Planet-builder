@@ -1,0 +1,1 @@
+- 2026-11-06 coast-distance: the shelf hangs from a lattice of the signed distance to the field's own coast and the margin activity there (GEN-136, GEN-118 modified; passive width 80 km, coast ramp 0.01), CLASS_SOURCE_VERSION 8, GLOBAL_VERSION 9; active shelf break p50 30 km on seeds 1-3.

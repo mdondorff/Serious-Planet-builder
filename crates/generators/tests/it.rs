@@ -38,6 +38,8 @@ mod chunk;
 mod classes;
 #[path = "climate.rs"]
 mod climate;
+#[path = "coast.rs"]
+mod coast;
 #[path = "compact.rs"]
 mod compact;
 #[path = "continents.rs"]

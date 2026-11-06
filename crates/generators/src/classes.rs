@@ -5,6 +5,7 @@
 //! is unchanged). [`ClassSource::eval`] is a pure function of `(seed, direction)`; [`ClassLattice`] stores its weights as `u8` on the landform
 //! lattice's geometry and is the one interface consumers read (ADR 0089 decision 1).
 
+use crate::coast::CoastLattice;
 use crate::global::{fbm, hill_octaves, ridge_at, terrain, Terrain, MAX_ELEVATION_M, MIN_ELEVATION_M, SEA_LEVEL_C};
 use crate::height::layer_noise;
 use crate::shelf::ShelfProfile;
@@ -15,7 +16,7 @@ use planet_core::{smoothstep, Face, Vec3};
 /// The version of the class list (GEN-093): plain, rolling plain, hills, mountains, high mountains, plateau, badlands, sand sea, in that order.
 pub const CLASS_LIST_VERSION: u32 = 1;
 /// Bump whenever the default source's output changes for a seed (the rules of GEN-094 and GEN-095, their constants, or the plate construction).
-pub const CLASS_SOURCE_VERSION: u32 = 7;
+pub const CLASS_SOURCE_VERSION: u32 = 8;
 pub const CLASS_COUNT: usize = 8;
 pub const CLASS_NAMES: [&str; CLASS_COUNT] =
     ["plain", "rolling plain", "hills", "mountains", "high mountains", "plateau", "badlands", "sand sea"];
@@ -186,6 +187,8 @@ pub struct ClassSource {
     plate_draw: u64,
     /// The shelf profile of the ocean floor (GEN-118): Earth's by default.
     shelf: ShelfProfile,
+    /// The distance to the coast of the field on a lattice (GEN-136), built on the first read of a sea point.
+    coast: std::sync::OnceLock<CoastLattice>,
 }
 
 impl ClassSource {
@@ -205,6 +208,7 @@ impl ClassSource {
                 land_share: vec![0.0; PLATES],
                 plate_draw: t,
                 shelf: ShelfProfile::earth(),
+                coast: std::sync::OnceLock::new(),
             };
             let score =
                 points.iter().zip(&land).filter(|(_, &l)| l).map(|(&d, _)| source.convergent_margin_near(d)).sum::<f64>() / land_count;
@@ -220,6 +224,7 @@ impl ClassSource {
     /// The source with another shelf profile (a world definition's parameters; ADR 0108).
     pub fn with_shelf(mut self, shelf: ShelfProfile) -> ClassSource {
         self.shelf = ShelfProfile::new(shelf);
+        self.coast = std::sync::OnceLock::new();
         self
     }
 
@@ -227,33 +232,38 @@ impl ClassSource {
         &self.shelf
     }
 
-    /// The ocean floor in metres at `d` where the continent stage puts the sea (`land_depth < 0`): the shelf from the coast, then the slope (GEN-118).
+    /// The distance to the coast of the field (GEN-136): the lattice of signed distances to the nearest sea-level crossing of the continent value, with the margin activity at that crossing, built on
+    /// the first read on the machine's threads (the bytes do not depend on the count) within the widest shelf plus the slope.
+    fn coast_lattice(&self) -> &CoastLattice {
+        self.coast.get_or_init(|| {
+            let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(16);
+            let cap_km = self.shelf.passive_width_km.max(self.shelf.active_width_km) + self.shelf.slope_width_km;
+            CoastLattice::build(
+                &|d| crate::continents::continent(self.seed, d) - SEA_LEVEL_C,
+                &|d| self.margin_activity(d),
+                self.shelf.coast_lattice_cells,
+                cap_km,
+                self.radius_m / 1000.0,
+                threads,
+            )
+        })
+    }
+
+    /// The signed distance in km from `d` to the nearest coast of the field (positive in the sea, negative on land, at most the cap in size) and the margin activity in `[0, 1]` at that coast (GEN-136).
+    pub fn coast_read(&self, d: Vec3) -> (f64, f64) {
+        self.coast_lattice().read(d)
+    }
+
+    /// The ocean floor in metres at `d` where the continent stage puts the sea (`land_depth < 0`): the shelf from the coast of the field, then the slope (GEN-118, GEN-136).
     ///
-    /// The distance to the coast is the first-order estimate `|smooth land depth| / |gradient|` (the continent stage without its detail, GEN-104: the full value's gradient is not defined at
-    /// the lattice's scale, and its detail would put hundreds of metres of noise into the slope). The smooth coast lies up to a detail amplitude from the field's coast, so the profile fades in
-    /// from 0 at the field's coast over `ShelfProfile::coast_ramp` of sea depth (so that the floor is continuous with the land's coast ramp) and has at least `min_sea_m` of water beyond `min_sea_ramp`.
-    /// The gradient is read only where the smooth sea is shallower than `ShelfProfile::abyss_blend`'s end, and from its start the floor is blended into the abyssal depth by the smooth land depth (not the full
-    /// one, whose detail would pass into the slope), so that no step stands where the gradient stops being read.
+    /// The distance to the coast is read from the coast lattice ([`coast_lattice`](Self::coast_lattice)), with the margin type of the coast it hangs from, so that the shelf follows the field's own
+    /// coast, islands included. The floor fades in from 0 at the field's coast over `ShelfProfile::coast_ramp` of sea depth (the lattice's coast is within a cell of the field's), and keeps at least
+    /// `min_sea_m` of water beyond `min_sea_ramp` of sea depth. Beyond the cap the distance is the cap, where the profile is the abyssal depth.
     fn ocean_floor_m(&self, d: Vec3, land_depth: f64) -> f64 {
-        let abyss = -self.shelf.abyssal_depth_m;
         let sea = -land_depth;
-        let smooth = self.land_depth(d);
-        let (blend_from, blend_to) = self.shelf.abyss_blend;
-        let raw = if -smooth >= blend_to {
-            abyss
-        } else {
-            let g = self.land_gradient_vec(d);
-            let x_km = if smooth < 0.0 { self.distance_km(smooth, g.length()) } else { 0.0 };
-            // The margin type is that of the coast the shelf hangs from, not of the point (the activity falls with the distance from the margin): the point is moved to the smooth coast
-            // along the gradient, which points towards the land.
-            let toward = g * (1.0 / g.length().max(1e-9));
-            let coast = (d + toward * (x_km / (self.radius_m / 1000.0))).normalized();
-            let width = self.shelf.width_km(self.margin_activity(coast));
-            let profile = self.shelf.floor_m(x_km, width);
-            profile + (abyss - profile) * smoothstep(blend_from, blend_to, -smooth)
-        };
-        // The fade covers the whole floor, the abyssal blend too: a coast of the field far out in the smooth sea (an island) is continuous with the land's coast ramp, not a cliff.
-        (raw * smoothstep(0.0, self.shelf.coast_ramp, sea)).min(-self.shelf.min_sea_m * smoothstep(0.0, self.shelf.min_sea_ramp, sea))
+        let (signed_km, activity) = self.coast_lattice().read(d);
+        let profile = self.shelf.floor_m(signed_km.max(0.0), self.shelf.width_km(activity));
+        (profile * smoothstep(0.0, self.shelf.coast_ramp, sea)).min(-self.shelf.min_sea_m * smoothstep(0.0, self.shelf.min_sea_ramp, sea))
     }
 
     /// In `[0, 1]`: how much of a convergent margin of the two nearest plates lies within a few hundred km of `d` (the score of a plate draw).
@@ -310,11 +320,6 @@ impl ClassSource {
             fbm(self.seed, LAYER_PLATE_WARP, d + Vec3::new(0.0, 23.0, 0.0), 1.3, 2),
         );
         (d + w * 0.35).normalized()
-    }
-
-    /// The smooth land depth at `d` (the continent stage without its detail, GEN-104).
-    pub fn smooth_land_depth(&self, d: Vec3) -> f64 {
-        self.land_depth(d)
     }
 
     /// The convergence of plates `px` and `py` at `d`: the velocity difference along the margin normal, from plate x towards plate y, in the tangent plane at d (symmetric: swapping the plates

@@ -14,6 +14,7 @@ pub mod chunkfield;
 pub mod classes;
 pub mod climate;
 pub mod coarsehorizon;
+pub mod coast;
 pub mod compact;
 pub mod continents;
 pub mod coupled;

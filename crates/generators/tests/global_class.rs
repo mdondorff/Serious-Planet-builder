@@ -121,4 +121,4 @@ fn the_class_field_is_pinned_so_that_a_change_of_the_class_source_must_bump_its_
     assert_eq!(bits, PINNED_BITS, "the class field changed: bump CLASS_SOURCE_VERSION and re-pin");
 }
 
-const PINNED_BITS: [u32; 6] = [1116318747, 3307958967, 1158361031, 3238190687, 3314327552, 3314327552];
+const PINNED_BITS: [u32; 6] = [1116318747, 3290137453, 1158361031, 3248661043, 3314327552, 3314327552];
