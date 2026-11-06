@@ -319,3 +319,14 @@ fn check_run_set(tile_dir: &Path, order: &[PassTile], outlet_id: &str) -> Result
         Err(_) => std::fs::write(&path, mine).map_err(|e| LayerStoreError(format!("{}: {e}", path.display()))),
     }
 }
+
+/// The identity of the outlet mask of a run (the sidecar of [`run_fill_pass`] holds it): `all` when every cell at or below the sea level is an outlet (no field store), else the lattice
+/// resolution and the name of the store directory. Two stores of one name are not told apart.
+pub fn outlet_identity(global: Option<(u32, &Path)>) -> String {
+    match global {
+        Some((res, dir)) => {
+            format!("ocean res={res} store={}", dir.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned()))
+        }
+        None => "all".to_string(),
+    }
+}

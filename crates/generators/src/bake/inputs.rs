@@ -2,18 +2,21 @@
 //! command and the tests, so that every bake of a seed reads the same function and keys it the same way.
 
 use crate::arid::{AridInputs, AridRules, ARID_RULES_VERSION};
+use super::carve::Layer;
 use crate::classes::{
     blended_carve_factor, blended_k, ClassLattice, ClassSource, CLASS_CARVE, CLASS_K, CLASS_LATTICE_N, CLASS_LIST_VERSION,
     CLASS_SOURCE_VERSION,
 };
-use crate::lithology::{Lithology, ProvinceLattice, LITHOLOGY_VERSION};
+use crate::lithology::{Lithology, ProvinceLattice, LITHOLOGY_VERSION, ROCK_K_SCALE};
 use crate::orography::{Orography, OROGRAPHY_VERSION, SEASONS};
+use crate::uplift::{Uplift, UPLIFT_VERSION};
 use planet_core::Vec3;
 
 /// The default class source of a seed and its class lattice.
 pub struct BakeInputs {
     source: ClassSource,
     lattice: ClassLattice,
+    uplift: Uplift,
     threads: usize,
     orography_cells: usize,
     orography: std::sync::OnceLock<Orography>,
@@ -26,6 +29,7 @@ impl BakeInputs {
     pub fn new(seed: u64, threads: usize) -> BakeInputs {
         let source = ClassSource::new(seed);
         let lattice = ClassLattice::build_with(&source, CLASS_LATTICE_N, threads);
+        let uplift = Uplift::new(source.seed());
         BakeInputs {
             source,
             lattice,
@@ -33,6 +37,7 @@ impl BakeInputs {
             orography_cells: crate::orography::default_cells(),
             orography: std::sync::OnceLock::new(),
             lithology: std::sync::OnceLock::new(),
+            uplift,
             arid: AridRules::earth(),
         }
     }
@@ -100,9 +105,25 @@ impl BakeInputs {
         blended_carve_factor(&self.weights_at(d))
     }
 
-    /// An identity of what the base and the carve factor read besides the seed: the class source's and class list's versions, the lattice size and the class tables of `k` and of the
+    /// The erodibility K of the lithology at a direction and a height with the lower edge of its band (GEN-116, GEN-127).
+    pub fn rock_k(&self, d: Vec3, z: f64) -> Layer {
+        let s = self.lithology().strata(d, z);
+        Layer { k: s.k * ROCK_K_SCALE, floor: s.lower_m }
+    }
+
+    /// The uplift `U / K` at K 1 at a direction (GEN-123).
+    pub fn uplift_at(&self, d: Vec3) -> f64 {
+        self.uplift.at(self.lithology().provinces(), d)
+    }
+
+    /// An identity of what the base, the carve factor, the lithology and the uplift read besides the seed: the class source's and class list's versions, the lattice size and the class tables of `k` and of the
     /// carve factor. Part of every layer key until the relief channels are a stored input of the run.
     pub fn id() -> u64 {
+        Self::id_with(LITHOLOGY_VERSION, UPLIFT_VERSION, ROCK_K_SCALE)
+    }
+
+    /// [`BakeInputs::id`] for the given lithology and uplift versions and K scale (a test of what a change of each re-keys).
+    pub fn id_with(lithology_version: u32, uplift_version: u32, k_scale: f64) -> u64 {
         let mut h = 0xCBF2_9CE4_8422_2325u64;
         let mut put = |v: u64| h = (h ^ v).wrapping_mul(0x0000_0100_0000_01B3);
         put(u64::from(CLASS_SOURCE_VERSION));
@@ -110,6 +131,9 @@ impl BakeInputs {
         put(CLASS_LATTICE_N as u64);
         // The base elevation reads the class weights, which read the arid rules and, through them, the climate: their identities are the layer's.
         put(arid_identity(ARID_RULES_VERSION, LITHOLOGY_VERSION, Self::climate_id()));
+        put(u64::from(lithology_version));
+        put(u64::from(uplift_version));
+        put(k_scale.to_bits());
         CLASS_K.iter().chain(CLASS_CARVE.iter()).for_each(|v| put(v.to_bits()));
         h
     }

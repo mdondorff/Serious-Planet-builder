@@ -73,7 +73,17 @@ fn caches(area_bytes: usize, tile_bytes: usize) -> ChannelCaches {
 }
 
 fn pass1() -> LayerSpec {
-    LayerSpec { cells: 24, radius_m: R, sea_level: 0.0, seed: 17, carve: CarveParams::default(), inputs_id: 1, uses_factor: false, halo: 4 }
+    LayerSpec {
+        cells: 24,
+        radius_m: R,
+        sea_level: 0.0,
+        seed: 17,
+        carve: CarveParams::default(),
+        inputs_id: 1,
+        uses_factor: false,
+        rock: 0,
+        halo: 4,
+    }
 }
 
 fn spec(w: &GlobalWorld) -> TileLayerSpec {
@@ -82,6 +92,7 @@ fn spec(w: &GlobalWorld) -> TileLayerSpec {
         params: Pass2Params::standard(9, 0.0),
         inputs_id: 1,
         uses_factor: false,
+        rock: 0,
         faces: faces_digest(w, RES, &pass1()),
     }
 }
@@ -105,7 +116,13 @@ fn pass2_dir(w: &GlobalWorld, s: &TileLayerSpec, f: &[FaceChange; 6], name: &str
         w,
         RES,
         s,
-        &Pass2Inputs { base: &base, face_change: &face_change_reader(f), factor: None, scratch: None },
+        &Pass2Inputs {
+            base: &base,
+            face_change: &face_change_reader(f),
+            factor: None,
+            scratch: None,
+            rock: planet_generators::bake::face::RockFields::none(),
+        },
         &tiles(),
         threads,
         &mut |_| {},
@@ -264,7 +281,13 @@ fn a_channel_of_another_layer_or_a_damaged_stream_is_refused_and_a_store_without
     writer.append(&tile_record(&w, RES, &s, &r0).unwrap()).unwrap();
     writer.write_index().unwrap();
     writer.finish().unwrap();
-    let inputs = Pass2Inputs { base: &base, face_change: &face_change_reader(&f), factor: None, scratch: None };
+    let inputs = Pass2Inputs {
+        base: &base,
+        face_change: &face_change_reader(&f),
+        factor: None,
+        scratch: None,
+        rock: planet_generators::bake::face::RockFields::none(),
+    };
     let report = run_pass2(old.path(), &w, RES, &s, &inputs, &[id], 2, &mut |_| {}).unwrap();
     assert_eq!((report.computed.len(), report.skipped.len()), (1, 0));
     let old_store = TileStore::open(old.path(), w.params()).unwrap();
@@ -510,7 +533,13 @@ fn pit_store() -> (GlobalWorld, TileLayerSpec, Dir, Dir) {
         &w,
         RES,
         &s,
-        &Pass2Inputs { base: &base, face_change: &face_change_reader(&f), factor: None, scratch: None },
+        &Pass2Inputs {
+            base: &base,
+            face_change: &face_change_reader(&f),
+            factor: None,
+            scratch: None,
+            rock: planet_generators::bake::face::RockFields::none(),
+        },
         &tiles(),
         2,
         &mut |_| {},

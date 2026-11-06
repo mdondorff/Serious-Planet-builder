@@ -192,6 +192,8 @@ pub struct Stratum {
     pub soluble: f64,
     /// The index of the band in the stack (the stratigraphic coordinate's cell).
     pub band: i64,
+    /// The height in metres of the band's lower edge (its stack coordinate times [`BAND_NOMINAL_M`] plus the stack's offset): a carve that lowers a cell by more than the distance to it skips the band below.
+    pub lower_m: f64,
 }
 
 /// The lithology of one seed over a province lattice.
@@ -311,6 +313,35 @@ impl Column {
             k = erodibility(self.band_hardness(n + 1)) * (1.0 - w) + k * w;
         }
         let soluble = if self.band_carbonate(n) { self.soluble_gate } else { 0.0 };
-        Stratum { k, hardness: h, caprock: h > CAPROCK_HARDNESS, soluble, band: n }
+        Stratum { k, hardness: h, caprock: h > CAPROCK_HARDNESS, soluble, band: n, lower_m: lo * BAND_NOMINAL_M + self.offset_m }
     }
+}
+
+/// The factor the carves multiply the lithology's K by (GEN-127), a fixed constant of the default lithology, not computed per world (a world of softer or harder rock must erode more or less). It is
+/// the `c` for which the land mean of `g(c K f)` equals the land mean of `g(f)` with `g(f) = f / (1 + f)` (the share of the drop to the receiver that one implicit step removes), `K` the raw
+/// erodibility at the surface and `f = k_dt sqrt(A) / dx` the step's stream-power number of a cell of drainage area `A`: a carve whose rock varies in space then removes as much as one of K = 1 on
+/// the same drainage. Derived by `cargo run --release -p planet-cache --example k_calib -- SEED...`: the geometric mean of the `c` of 12 seeds (0.88 to 1.78 over the area distribution
+/// `P(A > a) = a^-0.43`, 1 to 1e7 cells; seed 14's real face-2 areas give 1.82 against 1.78 parametric). Part of the bake's `inputs_id`.
+pub const ROCK_K_SCALE: f64 = 1.16;
+
+/// The `c` with `mean g(c K f) = mean g(f)` over the `(K, f)` pairs, by bisection (the mean is increasing in `c`); 1 for no pairs.
+pub fn k_scale_for(pairs: &[(f64, f64)]) -> f64 {
+    if pairs.is_empty() {
+        return 1.0;
+    }
+    let g = |f: f64| f / (1.0 + f);
+    let target = pairs.iter().map(|p| g(p.1)).sum::<f64>() / pairs.len() as f64;
+    let mean = |c: f64| pairs.iter().map(|p| g(c * p.0 * p.1)).sum::<f64>() / pairs.len() as f64;
+    let (mut lo, mut hi) = (1e-3f64, 1e3f64);
+    for _ in 0..80 {
+        let mid = libm::sqrt(lo * hi);
+        if mean(mid) < target {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    let c = libm::sqrt(lo * hi);
+    assert!(c > 1.01e-3 && c < 0.99e3, "no factor in [0.001, 1000] matches the incision (K all 0 or f all 0?): {c}");
+    c
 }

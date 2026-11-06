@@ -1838,7 +1838,7 @@ mod tests {
     #[test]
     fn the_erosion_layer_is_drawn_over_a_stored_world_under_the_keys_of_its_bake_and_refuses_anything_else() {
         use planet_cache::global_store::GlobalWorld;
-        use planet_cache::layer_store::{load_face_change, run_pass1};
+        use planet_cache::layer_store::{load_face_change, run_pass1_rock};
         use planet_cache::layer_tiles::{bake_specs, face_change_reader, run_pass2, BakeShape, Pass2Inputs};
         use planet_cache::pack::TileStore;
         use planet_generators::bake::inputs::BakeInputs;
@@ -1853,8 +1853,11 @@ mod tests {
         let (layer_spec, tile_spec) = bake_specs(&world, &shape).unwrap();
         let inputs = BakeInputs::new(3, 2);
         let (base, factor) = (|v: planet_core::Vec3| inputs.base(v), |v: planet_core::Vec3| inputs.carve_factor(v));
+        inputs.lithology(); // built here, on its threads, not inside the carve's parallel pass
+        let (rock_k, rock_u) = (|v: planet_core::Vec3, z: f64| inputs.rock_k(v, z), |v: planet_core::Vec3| inputs.uplift_at(v));
+        let rock = planet_generators::bake::face::RockFields { k: Some(&rock_k), uplift: Some(&rock_u) };
         let faces: Vec<planet_core::Face> = (0..6).map(planet_core::Face).collect();
-        run_pass1(&bake_dir.join("layer"), &world, 24, &layer_spec, &base, Some(&factor), &faces, 2).unwrap();
+        run_pass1_rock(&bake_dir.join("layer"), &world, 24, &layer_spec, &base, Some(&factor), &rock, &faces, 2).unwrap();
         let pass1 = TileStore::open(&bake_dir.join("layer"), world.params()).unwrap();
         let six: Vec<_> =
             (0..6).map(|f| load_face_change(&pass1, &world, 24, &layer_spec, planet_core::Face(f)).unwrap().expect("a face")).collect();
@@ -1865,7 +1868,7 @@ mod tests {
             &world,
             24,
             &tile_spec,
-            &Pass2Inputs { base: &base, face_change: &reader, factor: Some(&factor), scratch: None },
+            &Pass2Inputs { base: &base, face_change: &reader, factor: Some(&factor), scratch: None, rock },
             &tile_spec.grid.all_tiles(),
             2,
             &mut |_| {},
@@ -1967,7 +1970,7 @@ mod tests {
     fn the_viewer_opens_the_world_a_store_records_and_the_layer_by_its_manifest() {
         use planet_cache::global_store::{FieldSource, GlobalWorld};
         use planet_cache::layer_manifest::{LayerManifest, ManifestSource};
-        use planet_cache::layer_store::{load_face_change, run_pass1};
+        use planet_cache::layer_store::{load_face_change, run_pass1_rock};
         use planet_cache::layer_tiles::{bake_specs, face_change_reader, run_pass2, BakeShape, Pass2Inputs};
         use planet_cache::pack::TileStore;
         use planet_generators::bake::inputs::BakeInputs;
@@ -1986,8 +1989,11 @@ mod tests {
         let shape = BakeShape { seed: 3, radius_m: skeleton::RADIUS_M, face_res: 24, planet_res: 24, tile: None, halo: None };
         let (layer_spec, tile_spec) = bake_specs(&world, &shape).unwrap();
         let (base, factor) = (|v: planet_core::Vec3| inputs.base(v), |v: planet_core::Vec3| inputs.carve_factor(v));
+        inputs.lithology(); // built here, on its threads, not inside the carve's parallel pass
+        let (rock_k, rock_u) = (|v: planet_core::Vec3, z: f64| inputs.rock_k(v, z), |v: planet_core::Vec3| inputs.uplift_at(v));
+        let rock = planet_generators::bake::face::RockFields { k: Some(&rock_k), uplift: Some(&rock_u) };
         let faces: Vec<planet_core::Face> = (0..6).map(planet_core::Face).collect();
-        run_pass1(&bake_dir.join("layer"), &world, 24, &layer_spec, &base, Some(&factor), &faces, 2).unwrap();
+        run_pass1_rock(&bake_dir.join("layer"), &world, 24, &layer_spec, &base, Some(&factor), &rock, &faces, 2).unwrap();
         let pass1 = TileStore::open(&bake_dir.join("layer"), world.params()).unwrap();
         let six: Vec<_> =
             (0..6).map(|f| load_face_change(&pass1, &world, 24, &layer_spec, planet_core::Face(f)).unwrap().expect("a face")).collect();
@@ -1999,7 +2005,7 @@ mod tests {
             &world,
             24,
             &tile_spec,
-            &Pass2Inputs { base: &base, face_change: &reader, factor: Some(&factor), scratch: None },
+            &Pass2Inputs { base: &base, face_change: &reader, factor: Some(&factor), scratch: None, rock },
             &tile_spec.grid.all_tiles(),
             2,
             &mut |r| {

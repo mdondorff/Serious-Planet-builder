@@ -54,7 +54,17 @@ fn world() -> GlobalWorld {
 }
 
 fn pass1() -> LayerSpec {
-    LayerSpec { cells: 24, radius_m: R, sea_level: 0.0, seed: 17, carve: CarveParams::default(), inputs_id: 1, uses_factor: false, halo: 4 }
+    LayerSpec {
+        cells: 24,
+        radius_m: R,
+        sea_level: 0.0,
+        seed: 17,
+        carve: CarveParams::default(),
+        inputs_id: 1,
+        uses_factor: false,
+        rock: 0,
+        halo: 4,
+    }
 }
 
 fn spec(w: &GlobalWorld) -> TileLayerSpec {
@@ -63,6 +73,7 @@ fn spec(w: &GlobalWorld) -> TileLayerSpec {
         params: Pass2Params::standard(9, 0.0),
         inputs_id: 1,
         uses_factor: false,
+        rock: 0,
         faces: faces_digest(w, RES, &pass1()),
     }
 }
@@ -335,7 +346,13 @@ fn the_runtime_layer_reads_the_change_with_the_post_pass_depth_added_back() {
         &w,
         RES,
         &s,
-        &Pass2Inputs { base: &base, face_change: &none, factor: None, scratch: Some(scratch.path()) },
+        &Pass2Inputs {
+            base: &base,
+            face_change: &none,
+            factor: None,
+            scratch: Some(scratch.path()),
+            rock: planet_generators::bake::face::RockFields::none(),
+        },
         &tiles,
         2,
         &mut |_| {},
@@ -352,7 +369,13 @@ fn the_runtime_layer_reads_the_change_with_the_post_pass_depth_added_back() {
         &w,
         RES,
         &s,
-        &Pass2Inputs { base: &base, face_change: &none, factor: None, scratch: Some(fresh.path()) },
+        &Pass2Inputs {
+            base: &base,
+            face_change: &none,
+            factor: None,
+            scratch: Some(fresh.path()),
+            rock: planet_generators::bake::face::RockFields::none(),
+        },
         &tiles,
         2,
         &mut |_| {},
@@ -412,7 +435,13 @@ fn a_filled_floor_is_flat_against_the_exact_base_and_an_outcrop_inside_a_basin_k
         &w,
         RES,
         &s,
-        &Pass2Inputs { base: &base, face_change: &none, factor: None, scratch: Some(scratch.path()) },
+        &Pass2Inputs {
+            base: &base,
+            face_change: &none,
+            factor: None,
+            scratch: Some(scratch.path()),
+            rock: planet_generators::bake::face::RockFields::none(),
+        },
         &tiles,
         2,
         &mut |_| {},
@@ -593,4 +622,29 @@ fn a_mask_that_differs_between_tiles_gives_the_depth_of_a_global_flood_with_the_
         .unwrap_err()
         .to_string();
     assert!(e.contains("another outlet mask") && e.contains("outlets=half") && e.contains("outlets=all"), "{e}");
+}
+
+// spec: STRM-077
+#[test]
+fn the_outlet_identity_names_the_lattice_and_the_store_and_a_bump_of_the_kernel_version_re_keys_the_fill() {
+    use planet_cache::layer_fill::fill_key_at_version;
+    use planet_cache::layer_fillpass::outlet_identity;
+    assert_eq!(outlet_identity(None), "all");
+    let a = outlet_identity(Some((2048, Path::new("runs/field-a"))));
+    assert_eq!(a, "ocean res=2048 store=field-a");
+    assert_ne!(a, outlet_identity(Some((4096, Path::new("runs/field-a")))), "another lattice resolution has the same identity");
+    assert_ne!(a, outlet_identity(Some((2048, Path::new("runs/field-b")))), "another store name has the same identity");
+    assert_ne!(a, outlet_identity(None));
+    let (w, s) = (world(), spec(&world()));
+    let id = PassTile { face: Face(0), ti: 1, tj: 2 };
+    assert_eq!(
+        fill_key(&w, RES, &s, id).unwrap(),
+        fill_key_at_version(&w, RES, &s, id, FILL_KERNEL_VERSION).unwrap(),
+        "the key is the one of the current version"
+    );
+    assert_ne!(
+        fill_key(&w, RES, &s, id).unwrap(),
+        fill_key_at_version(&w, RES, &s, id, FILL_KERNEL_VERSION + 1).unwrap(),
+        "a bump of the kernel version leaves the fill key the same"
+    );
 }
