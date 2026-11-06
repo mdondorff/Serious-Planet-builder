@@ -181,10 +181,3 @@ Scope: project (GEN-120, STRM-075)
 What happened: the stored change (kind 13) keeps the pits and the runtime adds kind 17 back, so `removed_depth_m` on the stored change counts a pit as erosion; `erosion_depth_m` adds the pit depth first.
 Assumption it changes: that kind 13 is the change the viewer draws.
 Obsolete when: lake water replaces the filled look.
-
-## 2026-11-06 The climate is colder than Earth at mid latitudes, so the glacial-maximum ice is generous there
-Scope: project (GEN-134, GEN-117 temperature)
-What happened: `temperature_c` is `30 - 55 sin^2 (lat) - 6.5 h` (about -2 C at 50 degrees, Earth 7 C); with a 6 C glacial cooling the equilibrium line lies under sea level at 50 degrees for rain over about 500 mm, so 97 % of the mid-latitude highlands and a sheet over the high-latitude land are under ice (17 %, 38 % and 45 % of the land on seeds 1, 2 and 3, Earth's glacial maximum about 25 %, mostly as sheets).
-Assumption it changes: that the annual temperature of the field is Earth-like outside the tropics; the cooling parameter alone cannot tune both the sheets and the alpine glaciers.
-Proposed follow-up: the owner's tuning round sets the cooling and the temperature field together (ADR 0108: presets, not kernel literals).
-Obsolete when: the temperature field is retuned to Earth's latitude profile.
