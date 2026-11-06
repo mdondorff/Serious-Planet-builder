@@ -1,0 +1,1 @@
+- 2026-11-06 ice-history: the glacial-maximum ice history (GEN-134, ADR 0106 point 1; equilibrium line from the sea-level temperature, a 6 C cooling and the rain; Earth preset in `IceParams`) and `generate --ice-preview`; the erosion law and the gate are later changes.
