@@ -80,9 +80,12 @@ fn main() {
     };
     let base = |d: Vec3| inputs.base(d);
     let factor = |d: Vec3| inputs.carve_factor(d);
-    inputs.lithology(); // built here, on its threads, not inside the carve's parallel pass
-    let (rock_k, rock_u) = (|d: Vec3, z: f64| inputs.rock_k(d, z), |d: Vec3| inputs.uplift_at(d));
-    let rock = planet_generators::bake::face::RockFields { k: Some(&rock_k), uplift: Some(&rock_u) };
+    inputs.lithology(); // built here, on their threads, not inside the carve's parallel pass
+    inputs.orography();
+    let (rock_k, rock_u, rock_r) =
+        (|d: Vec3, z: f64| inputs.climate_k(d, z), |d: Vec3| inputs.uplift_at(d), |v: planet_core::Vec3| inputs.runoff_weight(v));
+    let rock =
+        planet_generators::bake::face::RockFields { k: Some(&rock_k), uplift: Some(&rock_u), runoff: Some(&rock_r), vegetation: true };
     let halo = halo.unwrap_or(res.div_ceil(128).max(4).min((res - 1) / 2));
     let spec = LayerSpec {
         cells: res,
@@ -92,7 +95,7 @@ fn main() {
         carve: CarveParams::default(),
         inputs_id: BakeInputs::id(),
         uses_factor: true,
-        rock: 3,
+        rock: 15,
         halo,
     };
     let bake_res = res as u32;

@@ -92,9 +92,12 @@ fn main() {
     let inputs = Arc::new(BakeInputs::new(seed, threads));
     let world = GlobalWorld::from_definition(&def).expect("world").with_class_source(inputs.clone());
     let (base, factor) = (|d: Vec3| inputs.base(d), |d: Vec3| inputs.carve_factor(d));
-    inputs.lithology(); // built here, on its threads, not inside the carve's parallel pass
-    let (rock_k, rock_u) = (|d: Vec3, z: f64| inputs.rock_k(d, z), |d: Vec3| inputs.uplift_at(d));
-    let rock = planet_generators::bake::face::RockFields { k: Some(&rock_k), uplift: Some(&rock_u) };
+    inputs.lithology(); // built here, on their threads, not inside the carve's parallel pass
+    inputs.orography();
+    let (rock_k, rock_u, rock_r) =
+        (|d: Vec3, z: f64| inputs.climate_k(d, z), |d: Vec3| inputs.uplift_at(d), |v: planet_core::Vec3| inputs.runoff_weight(v));
+    let rock =
+        planet_generators::bake::face::RockFields { k: Some(&rock_k), uplift: Some(&rock_u), runoff: Some(&rock_r), vegetation: true };
     let shape = BakeShape::production(seed, RADIUS_M);
     let (layer, spec) = bake_specs(&world, &shape).expect("specs");
     let g: TileGrid = spec.grid;

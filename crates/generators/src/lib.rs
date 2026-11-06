@@ -39,6 +39,7 @@ pub mod orography_preview;
 pub mod preview;
 pub mod relief_channels;
 pub mod relief_lattice;
+pub mod runoff;
 pub mod shape;
 pub mod shelf;
 pub mod shelf_preview;

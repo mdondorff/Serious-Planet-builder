@@ -985,7 +985,7 @@ impl GlobalWorld {
         let has_class = class_check == Ok(true);
         let class = || {
             GlobalWorld::from_definition(def)
-                .map(|w| w.with_class_source(Arc::new(BakeInputs::new(legacy.seed(), threads))))
+                .map(|w| w.with_class_source(class_inputs(def, legacy.seed(), threads)))
                 .map_err(|e| format!("the definition cannot be generated: {e}"))
         };
         match (has_legacy, has_class) {
@@ -2640,4 +2640,68 @@ fn explain_source(check: &Result<bool, String>, res: u32) -> String {
         Err(e) => format!("{base}: {e}"),
         Ok(_) => base,
     }
+}
+
+/// How many class-source inputs a process keeps: a viewer or a test that opens the same worlds again shares them; a long editor session that changes a world's parameters does not grow the memo.
+pub const CLASS_INPUTS_CAP: usize = 4;
+
+/// A small memo that keeps the `cap` newest entries (the oldest is dropped first): the class-source inputs of a process, kept in `planet_cache` (a static memo; a Tracked item, CON-06 stays clean).
+pub struct Memo<K: PartialEq + Copy, V: Clone> {
+    cap: usize,
+    entries: Vec<(K, V)>,
+}
+
+impl<K: PartialEq + Copy, V: Clone> Memo<K, V> {
+    pub fn new(cap: usize) -> Memo<K, V> {
+        assert!(cap > 0, "a memo keeps at least one entry");
+        Memo { cap, entries: Vec::new() }
+    }
+
+    /// The entry of `key`, made by `make` when there is none (the oldest entry goes when the memo is full).
+    pub fn get_or_insert_with(&mut self, key: K, make: impl FnOnce() -> V) -> V {
+        if let Some((_, v)) = self.entries.iter().find(|(k, _)| *k == key) {
+            return v.clone();
+        }
+        let v = make();
+        if self.entries.len() == self.cap {
+            self.entries.remove(0);
+        }
+        self.entries.push((key, v.clone()));
+        v
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+/// The key of the class-source inputs of a world: everything [`BakeInputs`] depends on. The world's seed and parameter sets (every node of the definition: two worlds that differ in one
+/// parameter never share an entry, ADR 0108), the inputs' identity (the class source's and class list's versions, the lithology, uplift and runoff versions and constants) and the climate's
+/// identity (the orographic version and the lattice size). Authored items are not part of it: an edit of an item does not rebuild the lattices.
+pub fn class_inputs_key(def: &WorldDefinition, seed: u64) -> u64 {
+    let mut h = 0xCBF2_9CE4_8422_2325u64;
+    let mut put = |v: u64| h = (h ^ v).wrapping_mul(0x0000_0100_0000_01B3);
+    put(seed);
+    put(BakeInputs::id());
+    put(BakeInputs::climate_id());
+    for (path, value) in def.nodes() {
+        path.bytes().for_each(|b| put(u64::from(b)));
+        format!("{value:?}").bytes().for_each(|b| put(u64::from(b)));
+        put(0xFF);
+    }
+    h
+}
+
+/// The class source inputs of the world `def` (seed `seed`), built once per process under [`class_inputs_key`] and kept up to [`CLASS_INPUTS_CAP`] at a time: a viewer or a test that
+/// opens the same store again (a refused option, a second view) does not build the class lattice again. The inputs are a pure function of the key (the threads only decide how fast the
+/// lattices are built), so sharing them changes no result.
+pub fn class_inputs(def: &WorldDefinition, seed: u64, threads: usize) -> Arc<BakeInputs> {
+    static MEMO: std::sync::OnceLock<std::sync::Mutex<Memo<u64, Arc<BakeInputs>>>> = std::sync::OnceLock::new();
+    let key = class_inputs_key(def, seed);
+    let mut memo = MEMO.get_or_init(|| std::sync::Mutex::new(Memo::new(CLASS_INPUTS_CAP))).lock().expect("the class inputs memo");
+    memo.get_or_insert_with(key, || Arc::new(BakeInputs::new(seed, threads)))
 }

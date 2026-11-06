@@ -1,7 +1,7 @@
 //! The transient carve of pass 1 (GEN-100, SPIKE-65, SPIKE-66, SPIKE-70): implicit stream power with uplift (Braun and Willett 2013), with a breach before each re-route.
 //! Not run to steady state: a fixed number of steps, `u_over_k * k_dt` of uplift in each.
 
-use super::route::{route, Routing, NONE};
+use super::route::{route_weighted, Routing, NONE};
 use super::{assert_finite, Grid};
 use planet_core::par::{self, Par};
 
@@ -79,6 +79,8 @@ pub struct Rock<'a> {
     pub k: Option<&'a (dyn Fn(usize, f64) -> Layer + Sync)>,
     /// The ratio `U / K` at K 1 per cell (GEN-123): when given, a cell's uplift is `k_dt * U * taper`, not scaled by K or by the factor, and `u_over_k` is not read. Finite and not negative.
     pub uplift: Option<&'a [f32]>,
+    /// The runoff weight of each cell (GEN-129): the routing starts a cell with the area `w dx^2`, so the drainage area `f` reads is the discharge `Q = sum(w dA)`. Finite and positive.
+    pub runoff: Option<&'a [f32]>,
 }
 
 /// The rows of the erodibility pass done at once, so that the transient results stay a few rows of the face.
@@ -120,7 +122,7 @@ fn room_code(room_m: f64) -> u16 {
 impl Rock<'static> {
     /// No field: the carve is the one of the class factor and the uniform `u_over_k`.
     pub fn none() -> Rock<'static> {
-        Rock { par: &1usize, k: None, uplift: None }
+        Rock { par: &1usize, k: None, uplift: None, runoff: None }
     }
 }
 
@@ -149,7 +151,7 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
         if step % p.reroute_every == 0 {
             // The previous routing is dropped before the next is built: two live routings of a face would not fit its memory budget.
             drop(routing.take());
-            let r = route(grid, z, outlet, p.epsilon, seed, p.max_area);
+            let r = route_weighted(grid, z, outlet, p.epsilon, seed, p.max_area, rock.runoff);
             for &c in r.order.iter().rev() {
                 let c = c as usize;
                 let rec = r.receiver[c];

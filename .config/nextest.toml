@@ -109,6 +109,16 @@ priority = 50
 filter = 'package(=planet-generators) and binary(oracle_all) and test(seeds_1_to_5_pass_the_relief_bands_of_spike_93_in_the_gate_form)'
 threads-required = "num-cpus"
 
+# Declared limit (planner, 2026-11-06, BUILD-003; #1219). The same gate, which runs alone (above), was cut off at 180 s on both runners in two runs of #1219 (Windows
+# WARP A+B 3/3 twice, 180.0 s and 180.0 s; Linux lavapipe 175.8 s in the run before) while it passed on main in 89 s, 100 s and 139 s (Windows, three runs of one job) and 118 s (Linux).
+# The code is not the cause: idle here, main and the head take 81.0 s and 80.5 s alone and 81.2 s and 80.8 s in the whole shard (hash:3/3, 891 and 898 tests). The gate is an
+# aggregate over the five seeds (the median of the five against the band and each seed against one band width, TEST-082), so it cannot be split per seed; its work (5 x 16 s on 8
+# threads, about 117 CPU-seconds) is not reducible by sharing (each seed builds its own class source). A declared 450 s (5 x 90 s) is the slowest seen (over 180 s) plus 150 %:
+# it still catches a hang. No test is skipped, retried or changed.
+[[profile.default.overrides]]
+filter = 'package(=planet-generators) and binary(oracle_all) and test(seeds_1_to_5_pass_the_relief_bands_of_spike_93_in_the_gate_form)'
+slow-timeout = { period = "90s", terminate-after = 5 }
+
 # `cargo xtask test fast` reads this to print the slowest tests (TEST-001 budget guard).
 [profile.default.junit]
 path = "junit.xml"
