@@ -1,5 +1,5 @@
 # 0102 Lithology: an analytic erodibility K(x, z) drives the erosion carve
-Status: accepted (owner, 2026-11-05: SPIKE-102 D2, "yes, in M9, with the preview")
+Status: accepted (owner, 2026-11-05: SPIKE-102 D2, "yes, in M9, with the preview"); point 3 read 2026-11-06 (planner, #1216 spec-guardian): K multiplies the class carve factor rather than replacing it (class factors such as the sand sea stay), and K carries a fixed incision-matched scale of the default preset (GEN-127; ADR 0108 point 3)
 Date: 2026-11-05
 Source: owner, 2026-11-05; SPIKE-102 (`spikes/generator-archetypes/results/results.md` sections 2, 3, 4.1 rows 3 and 4); SPIKE-81 (plate provinces); ADR 0088 point 4; GEN-116; change `lithology-k`
 
