@@ -232,11 +232,14 @@ pub fn generate(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     if o.arid_preview.is_some() {
         return generate_arid_preview(o, out);
     }
+    if o.shelf_preview.is_some() {
+        return generate_shelf_preview(o, out);
+    }
     if o.given.contains("--fine-lattice") {
         return Err("--fine-lattice applies to --climate-preview".into());
     }
     if o.given.contains("--km") {
-        return Err("--km applies to --lithology-preview, --uplift-preview, --climate-preview or --arid-preview".into());
+        return Err("--km applies to --lithology-preview, --uplift-preview, --climate-preview, --arid-preview or --shelf-preview".into());
     }
     if o.global_dir.is_some() || o.verify_global.is_some() || o.global_products.is_some() {
         return generate_global(o, out);
@@ -328,6 +331,7 @@ fn generate_lithology_preview(o: &Options, out: &mut dyn Write) -> Result<(), St
         "--uplift-preview",
         "--climate-preview",
         "--arid-preview",
+        "--shelf-preview",
     ]
     .into_iter()
     .filter(|f| o.given.contains(*f))
@@ -378,6 +382,7 @@ fn generate_uplift_preview(o: &Options, out: &mut dyn Write) -> Result<(), Strin
         "--lithology-preview",
         "--climate-preview",
         "--arid-preview",
+        "--shelf-preview",
     ]
     .into_iter()
     .filter(|f| o.given.contains(*f))
@@ -429,6 +434,7 @@ fn generate_climate_preview(o: &Options, out: &mut dyn Write) -> Result<(), Stri
         "--lithology-preview",
         "--uplift-preview",
         "--arid-preview",
+        "--shelf-preview",
     ]
     .into_iter()
     .filter(|f| o.given.contains(*f))
@@ -484,6 +490,7 @@ fn generate_arid_preview(o: &Options, out: &mut dyn Write) -> Result<(), String>
         "--lithology-preview",
         "--uplift-preview",
         "--climate-preview",
+        "--shelf-preview",
         "--fine-lattice",
     ]
     .into_iter()
@@ -525,6 +532,56 @@ fn generate_arid_preview(o: &Options, out: &mut dyn Write) -> Result<(), String>
         world.seed(),
         o.preview_km,
         planet_generators::arid::ARID_RULES_VERSION,
+        dir.display(),
+        started.elapsed().as_secs_f64()
+    )
+    .map_err(err)
+}
+
+/// `generate --shelf-preview DIR [--seed N | --world F] [--km N] [--threads N]` (GEN-118): the preview of the shelf profile with no GPU: the bathymetry map, a passive and an active coast region at 2 km and
+/// 10 km a pixel, and `shelf.txt` with the shelf share of the ocean, the shelf width and the slope width by margin type against Earth's. The images show the class source's base
+/// elevation, an input of the bake, not terrain.
+fn generate_shelf_preview(o: &Options, out: &mut dyn Write) -> Result<(), String> {
+    let dir = o.shelf_preview.as_ref().expect("the option is given");
+    let clash: Vec<&str> = [
+        "--tile",
+        "--out",
+        "--face-net",
+        "--manifest",
+        "--smoke",
+        "--cache-dir",
+        "--verify-cache",
+        "--region",
+        "--res",
+        "--global-dir",
+        "--verify-global",
+        "--global-products",
+        "--lithology-preview",
+        "--uplift-preview",
+        "--climate-preview",
+        "--arid-preview",
+        "--fine-lattice",
+    ]
+    .into_iter()
+    .filter(|f| o.given.contains(*f))
+    .collect();
+    if !clash.is_empty() {
+        return Err(format!("--shelf-preview excludes {}", clash.join(", ")));
+    }
+    if o.given.contains("--world") && o.given.contains("--seed") {
+        return Err("--world and --seed both name the definition: give one".into());
+    }
+    let (threads, _) = planet_streaming::topology::bake_threads(o.threads)?;
+    let world = global_world_of(o)?;
+    let started = std::time::Instant::now();
+    let source = planet_generators::classes::ClassSource::new(world.seed());
+    let preview = planet_generators::shelf_preview::preview(&source, o.preview_km, threads);
+    planet_generators::shelf_preview::write(dir, &preview).map_err(|e| format!("writing {}: {e}", dir.display()))?;
+    writeln!(
+        out,
+        "shelf preview (the base elevation of the class source, an input of the bake, not terrain): seed {}, {} km a pixel, written to {} in {:.1} s",
+        world.seed(),
+        o.preview_km,
         dir.display(),
         started.elapsed().as_secs_f64()
     )

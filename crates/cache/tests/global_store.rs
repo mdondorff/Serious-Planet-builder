@@ -158,7 +158,7 @@ fn a_block_key_covers_the_tile_the_cells_the_grid_and_the_stage_key_and_the_know
     assert_ne!(w.stage_key(32), w.stage_key(64));
     assert_ne!(w.stage_key(32), world(8).stage_key(32));
     assert_eq!(KIND_GLOBAL_BLOCK, 3);
-    assert_eq!(GLOBAL_VERSION, 7, "the known answers belong to this version");
+    assert_eq!(GLOBAL_VERSION, 8, "the known answers belong to this version");
     assert_eq!(w.stage_key(32).to_hex(), KNOWN_STAGE_KEY);
     assert_eq!(base.to_hex(), KNOWN_BLOCK_KEY);
 }
@@ -392,8 +392,8 @@ fn another_body_or_a_missing_node_is_refused_and_the_radius_is_in_the_key_but_no
 }
 
 // Both keys moved with GLOBAL_VERSION 4 (the ocean channel; 3 was the latitude from the +z pole): the stage key names the bake version.
-const KNOWN_STAGE_KEY: &str = "cf713c353372c01fd7b0c1a4ede2df78";
-const KNOWN_BLOCK_KEY: &str = "56c103e268c7ab6aba773ea3c0d91d53";
+const KNOWN_STAGE_KEY: &str = "65cdd8e4d0baf560f78b3fe11eb4424f";
+const KNOWN_BLOCK_KEY: &str = "1e16f77e54841f9fb0bacc3336e6dccf";
 const KNOWN_NODE_SET_ID: &str = "92572f1974620d913454c89a22aca7be";
 
 // spec: STRM-023
@@ -645,7 +645,7 @@ fn the_ocean_channel_needs_the_blocks_and_names_the_missing_one() {
     assert!(ocean_table_of_store(&TileStore::open(d.path(), w.params()).unwrap(), &w, 8, 2).is_ok());
 }
 
-const KNOWN_OCEAN_KEY: &str = "315c1df981d24ac17d5c31b9bf1592be";
+const KNOWN_OCEAN_KEY: &str = "364e199d548e97b9f643115102791f25";
 
 // spec: STRM-023
 // spec: STRM-013

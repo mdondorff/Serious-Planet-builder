@@ -154,7 +154,7 @@ fn the_climate_is_bit_identical_across_thread_counts_and_matches_the_known_answe
 }
 
 const KNOWN_CLIMATE: [u64; 4] = [0xa462d5f57fe8be1f, 0x4066977cddc7c722, 0x13affc8130ddf2d4, 0x910e00dd1bec3c30];
-const KNOWN_VERSION_WORD: u64 = 0x04c6bc3b08350c89; // moved with GLOBAL_VERSION 7 (the orographic climate, GEN-117; was 0x2097a6a7c9a9271c under 6)
+const KNOWN_VERSION_WORD: u64 = 0xbe72ef1acd37fcd8; // moved with GLOBAL_VERSION 8 (the shelf profile, GEN-118; was 0x04c6bc3b08350c89 under 7); then GLOBAL_VERSION 7 (the orographic climate, GEN-117; was 0x2097a6a7c9a9271c under 6)
 
 // spec: GEN-021
 #[test]
