@@ -549,7 +549,7 @@ fn generate_arid_preview(o: &Options, out: &mut dyn Write) -> Result<(), String>
 }
 
 /// `generate --shelf-preview DIR [--seed N | --world F] [--km N] [--threads N]` (GEN-118): the preview of the shelf profile with no GPU: the bathymetry map, a passive and an active coast region at 2 km and
-/// 10 km a pixel, and `shelf.txt` with the shelf share of the ocean, the shelf width and the slope width by margin type against Earth's. The images show the class source's base
+/// 10 km a pixel, and `shelf.txt` with the shelf share of the ocean and, by margin type, the distance from the coast of the field to the shelf break and to the foot of the slope against Earth's. The images show the class source's base
 /// elevation, an input of the bake, not terrain.
 fn generate_shelf_preview(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     let dir = o.shelf_preview.as_ref().expect("the option is given");

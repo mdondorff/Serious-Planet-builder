@@ -264,12 +264,12 @@ fn the_class_source_version_goes_with_its_output() {
     }
     assert_eq!(
         (CLASS_SOURCE_VERSION, hash),
-        (7, FINGERPRINT),
+        (8, FINGERPRINT),
         "the default source's output changed: bump CLASS_SOURCE_VERSION and record the new fingerprint"
     );
 }
 
-const FINGERPRINT: u64 = 15341605630843909218;
+const FINGERPRINT: u64 = 18223967699825403602;
 
 // spec: GEN-103
 #[test]
