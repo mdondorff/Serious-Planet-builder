@@ -1261,3 +1261,22 @@ Source: owner 2026-11-05, ADR 0104 point 5, planner inbox #75, GEN-117
 #### Scenario: The preview
 - **WHEN** the preview is made on 1 and 4 threads, written to a folder, and the option is combined with another generate command, a definition named twice, `--fine-lattice` alone or out of range
 - **THEN** the images and the text agree for any thread count, the nine files exist, the text carries the label, the shares, the latitude bands and the ratios, and each refusal names the option
+
+### Requirement: GEN-128 Arid class rules
+The default class source SHALL give the badlands class a weight where the rock is soft, the climate semi-arid, the height moderate and the relief broken, and the sand-sea class a weight where the climate is arid, the height low and the sand supply high, from the aridity of GEN-117 and the hardness of GEN-116, by smooth ramps with every threshold a named field of a parameter set whose default is the Earth preset. The weights SHALL be capped, blended over the base class weights at read time, and read by the base elevation and the carve factor; the climate SHALL NOT read them. Keys SHALL fold `ARID_RULES_VERSION` and the climate's identity.
+
+Verify: A
+Status: active
+Source: owner 2026-11-05, ADR 0104 point 4, planner inbox #73, #74, GEN-116, GEN-117
+
+#### Scenario: The rules
+- **WHEN** the weights are read on soft semi-arid broken ground, on arid low supplied ground, where each condition fails alone, and across a sweep of the aridity and the height
+- **THEN** badlands is the product of the soft, semi-arid, moderate-height and broken-relief ramps and has weight only where all four hold; sand sea is the product of the arid, low and sand-supply ramps and has weight only where all three hold; each is capped at 0.8 and both together at 0.85 (scaled down together beyond it); the blend rescales the other classes in proportion, replaces any arid share of the base, and sums to 1; a weight moves by under 0.08 and the blended `k` by under 0.25 per 0.01 of aridity or 10 m
+
+#### Scenario: Parameters and keys
+- **WHEN** a parameter set other than the Earth preset is given, and the rules' version, the climate's version or its lattice size change
+- **THEN** the weights follow the parameters with no other literal in the kernels, and the layer identity of a bake changes with each of the three
+
+#### Scenario: The preview
+- **WHEN** `generate --arid-preview DIR [--seed N | --world F] [--km N]` is run, and combined with another generate command or a definition named twice
+- **THEN** it writes the class map before and with the rules, the two weights and `arid.txt` (the land share of every class against Earth's, the step of the blended `k` before and after, the class weights at the terrain scorecard's arid sites), labelled as an input, not terrain, and each refusal names the option

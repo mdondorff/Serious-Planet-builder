@@ -1,0 +1,1 @@
+- 2026-11-05 arid-class-rules: the arid class rules (GEN-128, ADR 0104 point 4: badlands and sand sea from soft rock, aridity, height, relief and sand supply; smooth, blended in BakeInputs; the Earth preset as named parameters) and their planet preview.

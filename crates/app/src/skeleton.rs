@@ -229,11 +229,14 @@ pub fn generate(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     if o.climate_preview.is_some() {
         return generate_climate_preview(o, out);
     }
+    if o.arid_preview.is_some() {
+        return generate_arid_preview(o, out);
+    }
     if o.given.contains("--fine-lattice") {
         return Err("--fine-lattice applies to --climate-preview".into());
     }
     if o.given.contains("--km") {
-        return Err("--km applies to --lithology-preview, --uplift-preview or --climate-preview".into());
+        return Err("--km applies to --lithology-preview, --uplift-preview, --climate-preview or --arid-preview".into());
     }
     if o.global_dir.is_some() || o.verify_global.is_some() || o.global_products.is_some() {
         return generate_global(o, out);
@@ -324,6 +327,7 @@ fn generate_lithology_preview(o: &Options, out: &mut dyn Write) -> Result<(), St
         "--global-products",
         "--uplift-preview",
         "--climate-preview",
+        "--arid-preview",
     ]
     .into_iter()
     .filter(|f| o.given.contains(*f))
@@ -373,6 +377,7 @@ fn generate_uplift_preview(o: &Options, out: &mut dyn Write) -> Result<(), Strin
         "--global-products",
         "--lithology-preview",
         "--climate-preview",
+        "--arid-preview",
     ]
     .into_iter()
     .filter(|f| o.given.contains(*f))
@@ -423,6 +428,7 @@ fn generate_climate_preview(o: &Options, out: &mut dyn Write) -> Result<(), Stri
         "--global-products",
         "--lithology-preview",
         "--uplift-preview",
+        "--arid-preview",
     ]
     .into_iter()
     .filter(|f| o.given.contains(*f))
@@ -451,6 +457,74 @@ fn generate_climate_preview(o: &Options, out: &mut dyn Write) -> Result<(), Stri
         o.preview_km,
         climate.cells(),
         planet_generators::orography::OROGRAPHY_VERSION,
+        dir.display(),
+        started.elapsed().as_secs_f64()
+    )
+    .map_err(err)
+}
+
+/// `generate --arid-preview DIR [--seed N | --world F] [--km N] [--threads N]` (GEN-128): the preview of the arid class rules with no GPU: the class map with and without the rules, the weights of badlands and
+/// sand sea, `arid.txt` with the land shares of every class against Earth's, the step of the blended `k` before and after, and the class weights at the terrain scorecard's Badlands and Erg Chebbi sites.
+/// The images show the class weights, an input of the bake, not terrain.
+fn generate_arid_preview(o: &Options, out: &mut dyn Write) -> Result<(), String> {
+    let dir = o.arid_preview.as_ref().expect("the option is given");
+    let clash: Vec<&str> = [
+        "--tile",
+        "--out",
+        "--face-net",
+        "--manifest",
+        "--smoke",
+        "--cache-dir",
+        "--verify-cache",
+        "--region",
+        "--res",
+        "--global-dir",
+        "--verify-global",
+        "--global-products",
+        "--lithology-preview",
+        "--uplift-preview",
+        "--climate-preview",
+        "--fine-lattice",
+    ]
+    .into_iter()
+    .filter(|f| o.given.contains(*f))
+    .collect();
+    if !clash.is_empty() {
+        return Err(format!("--arid-preview excludes {}", clash.join(", ")));
+    }
+    if o.given.contains("--world") && o.given.contains("--seed") {
+        return Err("--world and --seed both name the definition: give one".into());
+    }
+    let (threads, _) = planet_streaming::topology::bake_threads(o.threads)?;
+    let world = global_world_of(o)?;
+    let started = std::time::Instant::now();
+    let inputs = planet_generators::bake::inputs::BakeInputs::new(world.seed(), threads);
+    let preview = planet_generators::arid_preview::preview(&inputs, o.preview_km, threads);
+    // The scorecard's arid landforms and their generator sites (TEST-079): the class weights there before and after the rules.
+    let mut sites = String::from(
+        "class weights at the terrain scorecard's arid sites (the sites file, before -> after the rules):
+",
+    );
+    let landforms = crate::terrainscore::parse_sites(include_str!("../data/terrain-score-sites.toml"))?;
+    for l in landforms.iter().filter(|l| l.name == "Badlands" || l.name.starts_with("Erg Chebbi")) {
+        sites.push_str(&format!(
+            "{} (real tile {}):
+",
+            l.name, l.tile
+        ));
+        for (lat, lon) in &l.sites {
+            sites.push_str(&planet_generators::arid_preview::site_line(&inputs, *lat, *lon));
+        }
+    }
+    sites.push_str("the terrain scorecard itself (`cargo xtask terrain-score`) reads a baked store; stores baked before this change are refused by their keys, so its before and after wait for the re-baked store
+");
+    planet_generators::arid_preview::write(dir, &preview, &sites).map_err(|e| format!("writing {}: {e}", dir.display()))?;
+    writeln!(
+        out,
+        "arid preview (class weights, an input of the bake, not terrain): seed {}, {} km a pixel, rules version {}, written to {} in {:.1} s",
+        world.seed(),
+        o.preview_km,
+        planet_generators::arid::ARID_RULES_VERSION,
         dir.display(),
         started.elapsed().as_secs_f64()
     )
