@@ -1,0 +1,1 @@
+- 2026-11-06 shelf-profile: the continental shelf of the default class source (GEN-118; break 130 m, passive 150 km, active 30 km, slope 90 km, Earth preset), CLASS_SOURCE_VERSION 7, GLOBAL_VERSION 8, and `generate --shelf-preview`.

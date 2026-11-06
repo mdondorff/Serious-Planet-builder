@@ -70,7 +70,7 @@ fn the_class_source_is_part_of_every_key_and_the_legacy_keys_are_untouched() {
     assert_eq!(l.stage_key(RES), legacy(3).stage_key(RES));
     assert_eq!(
         l.stage_key(RES).to_string(),
-        "0c9ed284ce444896b4138939fda3b025",
+        "0ecdb7a8197486a454c9eacd7ff3e740",
         "the legacy world's stage key (seed 3, 8 cells) is a pinned value"
     );
     assert!(l.class_source().is_none() && c.class_source().is_some());

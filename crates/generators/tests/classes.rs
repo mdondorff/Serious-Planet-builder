@@ -89,7 +89,9 @@ fn the_source_is_continuous_across_cube_edges_and_corners_and_reads_the_same_bit
             ("plateau", ta.plateau_field, tb.plateau_field),
             ("e0", pa.e0 / 1000.0, pb.e0 / 1000.0),
         ] {
-            assert!((x - y).abs() < 1e-9, "{name} jumps across a cube edge at {a:?}: {x} against {y}");
+            // The terms are bounded by 1e-9 over the 2e-12 rad of the pair; e0 (in km) steps by its slope (the shelf slope of the sea reaches 0.2) times the pair's 13 micrometres.
+            let tolerance = if name == "e0" { 1e-7 } else { 1e-9 };
+            assert!((x - y).abs() < tolerance, "{name} jumps across a cube edge at {a:?}: {x} against {y}");
         }
         for c in 0..CLASS_COUNT {
             assert!((pa.weights[c] - pb.weights[c]).abs() < 1e-9, "class {c} jumps across a cube edge at {a:?}");
@@ -261,12 +263,12 @@ fn the_class_source_version_goes_with_its_output() {
     }
     assert_eq!(
         (CLASS_SOURCE_VERSION, hash),
-        (6, FINGERPRINT),
+        (7, FINGERPRINT),
         "the default source's output changed: bump CLASS_SOURCE_VERSION and record the new fingerprint"
     );
 }
 
-const FINGERPRINT: u64 = 17130647235075386674;
+const FINGERPRINT: u64 = 6386072307537632310;
 
 // spec: GEN-103
 #[test]

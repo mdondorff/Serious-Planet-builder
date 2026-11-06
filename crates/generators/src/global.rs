@@ -26,7 +26,7 @@ use crate::height::layer_noise;
 /// unchanged, but every key under this version is new, so stored blocks of version 3 are unreachable; 5 = the hill band joins the elevation
 /// (GEN-064, ADR 0080); 6 = the continent value comes from the continent stage (`crate::continents`, GEN-104); 7 = the precipitation of a class-source world comes from the orographic climate
 /// (`crate::orography`, GEN-117, ADR 0104; the legacy field's formula is unchanged), so stored blocks of version 6 are refused.
-pub const GLOBAL_VERSION: u32 = 7;
+pub const GLOBAL_VERSION: u32 = 8;
 /// Names this implementation in cache keys (CON-07).
 pub const IMPLEMENTATION_ID: &str = "cpu-global-coarse-v1";
 
