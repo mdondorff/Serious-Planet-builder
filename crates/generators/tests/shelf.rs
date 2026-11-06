@@ -7,7 +7,7 @@ use planet_generators::shelf::ShelfProfile;
 fn fib(i: u32, n: u32) -> Vec3 {
     let (lon, z) = (f64::from(i) * 2.399_963, 1.0 - 2.0 * (f64::from(i) + 0.5) / f64::from(n));
     let r = (1.0 - z * z).sqrt();
-    Vec3::new(r * lon.cos(), r * lon.sin(), z)
+    Vec3::new(r * libm::cos(lon), r * libm::sin(lon), z)
 }
 
 // spec: GEN-118
