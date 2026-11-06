@@ -27,12 +27,13 @@ Dormant (no near trigger; not asked now):
 | # | Step | Lane |
 |---|---|---|
 | NR | Real-GPU window checks NOT RUN on a locked desktop (TEST-073) | crusader |
-| M9 bake | Plan PR 4 (GEN-127); runoff (GEN-129), deposition, arid sinks, coastal process, glacial gate; the preview re-run with a mountain cube edge; the integrated preview (I4b); no planet bake before the owner's go | explorer |
-| Ground | Rain on main (#1210); arid class rules (GEN-128), ice history (GEN-134); then I8a 2b PR 4b-4d | crusader |
+| M9 bake | PR 4 on main (#1216); runoff (GEN-129), deposition, arid sinks, coastal process, glacial gate; the preview re-run with a mountain cube edge; the integrated preview (I4b); no planet bake before the owner's go | explorer |
+| Ground | Arid class rules (#1215), shelf profile (GEN-118, before the coastal process), ice history (GEN-134); then I8a 2b PR 4b-4d | crusader |
 | Perf | After Sat 2026-11-07: REND-052 verdicts, ground-detail cost (REND-034, `shadow-cost --look`), channel-read cost; a writable re-prefilled perf store first (MESH_VERSION 11) | planner |
 | Store | `global16384-m9r2` and `global16384` read-only; preview store `global16384-m9c14` stale (re-run after the plan items) | all |
 
 ## Tracked
+- **Rock K residual** (#1216, seed 14 face 2): mountain 3 km relief p50 483 against 534 m (the band edge is 2/3 of it), elevation p50 +170-225 m from the K spread (f/(1+f) is concave), not the K mean; tune in the preview round. The carve adds about 1.55 GB at 12,288 cells: measure the peak against 8 GB (CON-21) on the next pass-1 run.
 - **Fill depth across a mountain cube edge** (keep-pits-seams, #1201): the seam gate passed on a tile seam; no mountain cube edge was in the stored faces. Blocks the planet bake (I6); run with the integrated-preview re-run.
 - **`test fast` 220-330 s** (BUILD-014, #1202, 2026-11-05): loaded machine; re-measure after the Saturday restart.
 - **Ocean square at orbit** (owner, viewer main 2fdfeb23 over m9r2, 2026-11-03): at 12,767 km over 20 N 30 E after 240 s of flight, a light square in a ring of dark blotches on the sea; not reproduced headless. Hypotheses: the clipmap shadow on water (sea-floor receivers; `--no-shadow-march`, J view), the water-node cut or the never-evicted WaterBook, the shadow's temporal history. Needs the owner's F9 bundle; replay with `cargo xtask repro`.
@@ -49,7 +50,6 @@ Dormant (no near trigger; not asked now):
 - **Window checks need an unlocked desktop** (2026-10-30): on the RTX, present stalls 1.3-2.7 s or the device is lost while the session is locked or in modern standby; unlocked the dense sweep takes 26 s. The device losses since 10-18 most likely had this cause. NR handles it. Display off after 2 h (owner, 2026-10-31); the owner unlocks remotely for a batch, which the planner requests 07:00-22:00.
 - **naga panic on a constant ground-detail octave** (SPIKE-67, 2026-10-31): naga 30.0.1 SPIR-V backend `block.rs:1022` "Expression [241] is not cached!" when the lit shader binds an octave to a constant (`let o = vec4<f32>(0.0);` in place of the 3 cm `gd_octave` call), Vulkan on the RTX; not reduced or reported upstream.
 - **Local test gpu under load** (2026-11-03): local WARP 10.0.26100.9711 fails two per-driver hash pins after #1085 (gpu_compact_blocks persistent, gpu_water lit frames; CI passes them); `gpu_burn` calibration (2.210 vs 1.965 ms) and a `gpu_skeleton` replay crash only under parallel load; RTX failing sets reproducible (crusader, 2026-11-03). CI judges tier C.
-- **Fast tier over budget** (BUILD-003, BUILD-014): `test fast` 44-71 s under load, edit-to-first-test 222 s once (cold, loaded, 2026-11-03); 391 s single-thread total, the largest items were chunk tests (removed in B6): re-measure.
 - **Detail blocks** (BUILD-027): 10 in `xtask/src/detail_blocks.txt`: split or shorten each, delete its line; no new blocks.
 - **Frame tail** (SPIKE-44): `draw_plan_transient` 8-14 ms on a plan delivery (24-48 frames/min) + ~9 ms frame work drops a frame at 60 fps; ADR 0083 frame share.
 - **Coupled run key read**: about 25M bake samples are read for the key even when the run is stored; the K view is coarse (climate shading).
