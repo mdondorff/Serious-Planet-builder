@@ -45,6 +45,12 @@ fn a_unit_erodibility_and_the_uniform_uplift_as_an_array_are_the_carve_without_f
     let mut with = z0.clone();
     carve_rock(&g, &mut with, &outlet, &p, None, &Rock { par: &2usize, k: Some(&one), uplift: Some(&u) }, 5);
     assert_eq!(bits(&plain), bits(&with), "K = 1 and U = u_over_k must give today's carve");
+    // ... and with a carve factor of 1 (U is stored as f32: the claim holds for a `u_over_k` that f32 holds exactly, as 20 does).
+    let ones = vec![1.0f64; N * N];
+    let (mut plain1, mut with1) = (z0.clone(), z0.clone());
+    carve(&g, &mut plain1, &outlet, &p, Some(&ones), 5);
+    carve_rock(&g, &mut with1, &outlet, &p, Some(&ones), &Rock { par: &2usize, k: Some(&one), uplift: Some(&u) }, 5);
+    assert_eq!(bits(&plain1), bits(&with1), "with a factor of 1 the carves differ");
 }
 
 // spec: GEN-127
@@ -241,7 +247,7 @@ fn a_caprock_over_soft_rock_forms_a_step_because_a_step_never_lowers_a_cell_past
             continue;
         }
         // No cell ends below the top of the cap by more than the skip after one step with the edge ...
-        assert!(with_edge[c] >= 200.0 - 0.011, "cell {c} went from {} to {} past the cap's top", z0[c], with_edge[c]);
+        assert!(with_edge[c] >= 200.0 - 0.015, "cell {c} went from {} to {} past the cap's top", z0[c], with_edge[c]);
         held += usize::from(with_edge[c] < 200.0 + 1e-9);
         // ... while the same carve without the edge lowers some cells straight through the cap.
         skipped += usize::from(without_edge[c] < 160.0);
@@ -283,4 +289,88 @@ fn the_k_scale_solver_matches_the_incision_of_a_unit_rock_and_the_constant_lies_
     assert!((c3 - 1.04).abs() < 0.08, "seed 3's factor is {c3}, k_calib gave 1.04");
     assert!((0.88..=1.78).contains(&ROCK_K_SCALE), "the constant {ROCK_K_SCALE} lies outside the seeds' range");
     assert_eq!(inputs.rock_k(Vec3::new(0.0, 0.0, 1.0), 300.0).k, inputs.lithology().k_at(Vec3::new(0.0, 0.0, 1.0), 300.0) * ROCK_K_SCALE);
+}
+
+// spec: GEN-127
+#[test]
+fn a_caprock_holds_a_cell_for_the_following_steps_and_the_edge_path_is_the_same_bits_on_any_thread_count() {
+    let n = 24;
+    let g = Grid::new(n, n, DX);
+    let z0: Vec<f64> = (0..n * n).map(|c| 150.0 + 100.0 * (c % n) as f64).collect();
+    let outlet = g.outlets(&z0, 0.0);
+    let cap = |_: usize, z: f64| {
+        if z > 200.0 {
+            Layer { k: 1.8, floor: 200.0 }
+        } else if z > 160.0 {
+            Layer { k: 0.001, floor: 160.0 }
+        } else {
+            Layer { k: 1.8, floor: f64::NEG_INFINITY }
+        }
+    };
+    let p = CarveParams { k_dt: 5.0, u_over_k: 0.0, keep_pits: false, uplift_taper_m: 0.0, max_area: 0.0, ..CarveParams::default() };
+    let run = |steps: usize, par: &dyn Par| {
+        let mut z = z0.clone();
+        carve_rock(&g, &mut z, &outlet, &CarveParams { steps, ..p }, None, &Rock { par, k: Some(&cap), uplift: None }, 5);
+        z
+    };
+    let (one, three) = (run(1, &1usize), run(3, &1usize));
+    let cell = n + 1; // the first cell above the cap: it starts at 250 m beside a receiver at 150 m
+    assert!(one[cell] >= 199.98 && one[cell] <= 200.0, "step 1 ends at {}, not at the cap's top", one[cell]);
+    assert!(
+        three[cell] <= one[cell] && three[cell] > one[cell] - 5.0,
+        "the next steps read the cap (K 0.001): {} after step 1, {} after 3",
+        one[cell],
+        three[cell]
+    );
+    assert!(three[cell] > 160.0, "the cell passed the cap's bottom in 3 steps: {}", three[cell]);
+    assert_eq!(bits(&run(3, &1usize)), bits(&run(3, &8usize)), "the carve with layer edges differs between 1 and 8 threads");
+}
+
+// spec: GEN-127
+#[test]
+fn the_lower_edge_of_the_rock_band_is_where_the_band_below_begins_and_the_key_names_the_versions_and_the_k_scale() {
+    use planet_generators::bake::inputs::BakeInputs;
+    use planet_generators::lithology::{LITHOLOGY_VERSION, ROCK_K_SCALE};
+    use planet_generators::uplift::UPLIFT_VERSION;
+    let inputs = BakeInputs::new(3, 8);
+    let li = inputs.lithology();
+    let mut checked = 0;
+    for i in 0..200 {
+        let a = 0.37 * f64::from(i);
+        let d = Vec3::new(libm::cos(a) * 0.8, libm::sin(a * 1.3) * 0.5, libm::sin(a) * 0.8);
+        let d = d * (1.0 / libm::sqrt(d.x * d.x + d.y * d.y + d.z * d.z));
+        let z = 50.0 + 13.0 * f64::from(i);
+        let s = li.strata(d, z);
+        assert!(s.lower_m <= z + 1e-9, "the lower edge {} lies above the height {z}", s.lower_m);
+        assert_eq!(li.strata(d, s.lower_m + 1e-6).band, s.band, "just above the edge the band is another");
+        assert_eq!(li.strata(d, s.lower_m - 1e-6).band, s.band - 1, "just below the edge the band is not the one below");
+        checked += 1;
+    }
+    assert_eq!(checked, 200);
+    let id = BakeInputs::id();
+    assert_eq!(id, BakeInputs::id_with(LITHOLOGY_VERSION, UPLIFT_VERSION, ROCK_K_SCALE));
+    assert_ne!(id, BakeInputs::id_with(LITHOLOGY_VERSION + 1, UPLIFT_VERSION, ROCK_K_SCALE), "the lithology version is not in the id");
+    assert_ne!(id, BakeInputs::id_with(LITHOLOGY_VERSION, UPLIFT_VERSION + 1, ROCK_K_SCALE), "the uplift version is not in the id");
+    assert_ne!(id, BakeInputs::id_with(LITHOLOGY_VERSION, UPLIFT_VERSION, ROCK_K_SCALE + 0.01), "the K scale is not in the id");
+}
+
+// spec: GEN-127
+#[test]
+fn a_layer_edge_above_the_height_never_raises_a_cell_and_a_nan_edge_or_an_unsolvable_k_scale_is_refused() {
+    use planet_generators::lithology::k_scale_for;
+    let (g, z0, outlet) = setup();
+    let p = CarveParams { steps: 3, keep_pits: false, uplift_taper_m: 0.0, u_over_k: 0.0, ..CarveParams::default() };
+    let above = |_: usize, z: f64| Layer { k: 1.0, floor: z + 5.0 };
+    let mut z = z0.clone();
+    carve_rock(&g, &mut z, &outlet, &p, None, &Rock { par: &1usize, k: Some(&above), uplift: None }, 5);
+    assert!((0..N * N).all(|c| z[c] <= z0[c] + 1e-9), "a cell was raised above its start by an edge above its height");
+    let refused = std::panic::catch_unwind(|| {
+        let (g, z0, outlet) = setup();
+        let nan = |_: usize, _: f64| Layer { k: 1.0, floor: f64::NAN };
+        let mut z = z0;
+        carve_rock(&g, &mut z, &outlet, &CarveParams::default(), None, &Rock { par: &1usize, k: Some(&nan), uplift: None }, 1);
+    })
+    .is_err();
+    assert!(refused, "a NaN layer edge was accepted");
+    assert!(std::panic::catch_unwind(|| k_scale_for(&[(0.0, 1.0)])).is_err(), "an unsolvable K scale returned a number");
 }

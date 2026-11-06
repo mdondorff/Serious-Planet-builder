@@ -45,6 +45,10 @@ fn main() {
         3 & !(u8::from(args.iter().any(|a| a == "--no-k")) | (u8::from(args.iter().any(|a| a == "--no-uplift")) << 1))
     };
     (layer.rock, spec.rock) = (mask, mask);
+    if args.iter().any(|a| a == "--no-edge") {
+        (layer.inputs_id, spec.inputs_id) = (layer.inputs_id ^ 0xED6E, spec.inputs_id ^ 0xED6E);
+        // the carve differs: its own key
+    }
     let (res, rp) = (shape.face_res as u32, shape.planet_res as u32);
     let id = PassTile { face: Face(2), ti: 12, tj: 10 };
     let tiles_dir: PathBuf = if let Some(d) = arg("--stats-only") {
@@ -52,7 +56,19 @@ fn main() {
     } else {
         let out = PathBuf::from(arg("--out").expect("--out DIR"));
         inputs.lithology(); // built here, on its threads, not inside the carve's parallel pass
-        let (rock_k, rock_u) = (|d: Vec3, z: f64| inputs.rock_k(d, z), |d: Vec3| inputs.uplift_at(d));
+                            // `--no-edge`: the band edge off (floor -inf), to separate the cap from the K spread (planner inbox #86).
+        let no_edge = args.iter().any(|a| a == "--no-edge");
+        let (rock_k, rock_u) = (
+            |d: Vec3, z: f64| {
+                let l = inputs.rock_k(d, z);
+                if no_edge {
+                    planet_generators::bake::carve::Layer::of(l.k)
+                } else {
+                    l
+                }
+            },
+            |d: Vec3| inputs.uplift_at(d),
+        );
         let rock = RockFields { k: (mask & 1 != 0).then_some(&rock_k as _), uplift: (mask & 2 != 0).then_some(&rock_u as _) };
         println!("rock fields: mask {mask} (bit 0 the erodibility, bit 1 the uplift; 0 is today's carve)");
         let clock = std::time::Instant::now();

@@ -341,5 +341,7 @@ pub fn k_scale_for(pairs: &[(f64, f64)]) -> f64 {
             hi = mid;
         }
     }
-    libm::sqrt(lo * hi)
+    let c = libm::sqrt(lo * hi);
+    assert!(c > 1.01e-3 && c < 0.99e3, "no factor in [0.001, 1000] matches the incision (K all 0 or f all 0?): {c}");
+    c
 }

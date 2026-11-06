@@ -92,14 +92,19 @@ impl BakeInputs {
     /// An identity of what the base, the carve factor, the lithology and the uplift read besides the seed: the class source's and class list's versions, the lattice size and the class tables of `k` and of the
     /// carve factor. Part of every layer key until the relief channels are a stored input of the run.
     pub fn id() -> u64 {
+        Self::id_with(LITHOLOGY_VERSION, UPLIFT_VERSION, ROCK_K_SCALE)
+    }
+
+    /// [`BakeInputs::id`] for the given lithology and uplift versions and K scale (a test of what a change of each re-keys).
+    pub fn id_with(lithology_version: u32, uplift_version: u32, k_scale: f64) -> u64 {
         let mut h = 0xCBF2_9CE4_8422_2325u64;
         let mut put = |v: u64| h = (h ^ v).wrapping_mul(0x0000_0100_0000_01B3);
         put(u64::from(CLASS_SOURCE_VERSION));
         put(u64::from(CLASS_LIST_VERSION));
         put(CLASS_LATTICE_N as u64);
-        put(u64::from(LITHOLOGY_VERSION));
-        put(u64::from(UPLIFT_VERSION));
-        put(ROCK_K_SCALE.to_bits());
+        put(u64::from(lithology_version));
+        put(u64::from(uplift_version));
+        put(k_scale.to_bits());
         CLASS_K.iter().chain(CLASS_CARVE.iter()).for_each(|v| put(v.to_bits()));
         h
     }

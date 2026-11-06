@@ -103,6 +103,20 @@ impl Layer {
 /// How far below its lower edge a step may lower a cell that reaches the edge: the cell ends inside the layer below (its erodibility blends across the edge), where the next step reads it.
 pub const LAYER_SKIP_M: f64 = 0.01;
 
+/// The room above a layer edge is kept as a 16-bit count of `ROOM_STEP_M` (rounded up, so a cell may end up to one step below the skip under the edge): bands are at most 170 m, a room of
+/// `ROOM_NONE` steps or more (262 m) means no edge.
+const ROOM_STEP_M: f64 = 0.004;
+const ROOM_NONE: u16 = u16::MAX;
+
+fn room_code(room_m: f64) -> u16 {
+    let steps = libm::ceil(room_m.max(0.0) / ROOM_STEP_M);
+    if steps >= f64::from(ROOM_NONE) {
+        ROOM_NONE
+    } else {
+        steps as u16
+    }
+}
+
 impl Rock<'static> {
     /// No field: the carve is the one of the class factor and the uniform `u_over_k`.
     pub fn none() -> Rock<'static> {
@@ -129,7 +143,7 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
     let taper: Option<Vec<f32>> = (p.uplift_taper_m > 0.0 && (p.u_over_k != 0.0 || rock.uplift.is_some()))
         .then(|| z.iter().map(|h| planet_core::smoothstep(0.0, p.uplift_taper_m, h - p.sea_level) as f32).collect());
     let mut k: Vec<f32> = if rock.k.is_some() { vec![1.0; z.len()] } else { Vec::new() };
-    let mut room: Vec<f32> = if rock.k.is_some() { vec![f32::INFINITY; z.len()] } else { Vec::new() };
+    let mut room: Vec<u16> = if rock.k.is_some() { vec![ROOM_NONE; z.len()] } else { Vec::new() };
     let mut routing: Option<Routing> = None;
     for step in 0..p.steps {
         if step % p.reroute_every == 0 {
@@ -168,9 +182,10 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
                         .map(|i| {
                             let (c, h) = ((r0 + r) * w + i, zr[(r0 + r) * w + i]);
                             let l = kf(c, h);
-                            (l.k as f32, (h - l.floor + LAYER_SKIP_M) as f32)
+                            assert!(!l.floor.is_nan(), "the layer edge of cell {c} is not a number");
+                            (l.k as f32, room_code(h - l.floor + LAYER_SKIP_M))
                         })
-                        .collect::<Vec<(f32, f32)>>()
+                        .collect::<Vec<(f32, u16)>>()
                 });
                 for (r, row) in block.into_iter().enumerate() {
                     for (i, (kv, rv)) in row.into_iter().enumerate() {
@@ -199,7 +214,15 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
             let hn = (z[c] + up + f * hr) / (1.0 + f);
             let new = if p.keep_pits && !p.incise_only && z[c] < hr { (z[c] + up).max(floor) } else { hn.max(hr + p.epsilon).max(floor) };
             // A step does not lower a cell past the lower edge of its layer: a trunk lowered by more than a band is thick would skip a caprock (the rest is carried to the next step).
-            let new = if rock.k.is_some() && new < z[c] { new.max(z[c] - f64::from(room[c])) } else { new };
+            let new = if rock.k.is_some() && new < z[c] {
+                if room[c] == ROOM_NONE {
+                    new
+                } else {
+                    new.max(z[c] - f64::from(room[c]) * ROOM_STEP_M)
+                }
+            } else {
+                new
+            };
             z[c] = if p.incise_only { new.min(z[c]) } else { new };
         }
     }

@@ -1,4 +1,5 @@
 ## Context
+- The no-fields carve is pinned by the existing GEN-100 and GEN-101 tests (unchanged) and by the bit-for-bit test of GEN-127.
 - Pass 1 and pass 2 read the lithology erodibility K(x, z) (GEN-116) and pass 1 the uplift field U(x) (GEN-123); GEN-127 states the carve's inputs.
 - The carve is a 20-step transient (`k_dt` 0.05, 20 steps): total uplift is `U` metres, at most 84 m; it does not reach steady state, so no slope law is claimed.
 
@@ -23,3 +24,4 @@ Face 2 of seed 14, tile 2/12/10, unfilled, spike measure (`rock_stats`), K + U +
 - The K scale barely moves the result (effective mean K 0.69, 0.79, 1.0 give p50 2037, 2020, 1994), so the residual (relief -10 % on mountains at 3 km, p50 +180 to +225 m) is not the K mean.
 - By elimination it is the band-edge cap (a trunk's lowering deferred at every band edge over 20 steps) and the K spread (the update removes `f / (1 + f)`, concave in K). Not separated: the next run is an arm without the edge.
 - Seed 14 is the outlier of the constant (its own c is 1.78).
+- The band-edge cap limits a cell to about one band of lowering per step (bands 30 to 170 m, a trunk drops about 250 m a step on a slope of 0.3), so it binds often; it is the likely main cause. Planned: the arm without the edge (`rock_stats --no-edge`).
