@@ -85,6 +85,11 @@ fn the_parameters_are_validated() {
         ShelfProfile { slope_width_km: -1.0, ..ShelfProfile::earth() },
         ShelfProfile { active_within_km: (300.0, 300.0), ..ShelfProfile::earth() },
         ShelfProfile { active_convergence: (0.4, 0.1), ..ShelfProfile::earth() },
+        ShelfProfile { abyssal_depth_m: f64::INFINITY, ..ShelfProfile::earth() },
+        ShelfProfile { break_depth_m: f64::NAN, ..ShelfProfile::earth() },
+        ShelfProfile { coast_ramp: -0.1, ..ShelfProfile::earth() },
+        ShelfProfile { min_sea_ramp: 0.0, ..ShelfProfile::earth() },
+        ShelfProfile { abyss_blend: (0.9, 0.5), ..ShelfProfile::earth() },
     ] {
         assert!(std::panic::catch_unwind(|| ShelfProfile::new(bad)).is_err(), "{bad:?} is refused");
     }
@@ -158,4 +163,15 @@ fn the_margin_activity_and_the_ocean_floor_have_no_jump_where_the_nearest_plate_
     assert!(floor_far < 400.0, "the sea floor steps by {floor_far} m over 0.6 km");
     assert!(floor_near < 0.3 * floor_far, "the sea floor is continuous: a step of {floor_far} m over 0.6 km is {floor_near} m over 64 m");
     assert!(active > 0 && active < n as usize / 2, "some margins are active and most are not: {active} of {n}");
+}
+
+// spec: GEN-118
+#[test]
+fn a_point_far_from_every_margin_or_on_a_non_converging_one_is_passive_and_the_field_has_both_kinds() {
+    let s = ClassSource::new(7);
+    let n = 20_000;
+    let acts: Vec<f64> = (0..n).map(|i| s.margin_activity(fib(i, n))).collect();
+    let (zero, one) = (acts.iter().filter(|a| **a == 0.0).count(), acts.iter().filter(|a| **a > 0.99).count());
+    assert!(zero > n as usize / 2, "most of the sphere is passive: {zero} of {n}");
+    assert!(one > 0, "some of it is an active margin");
 }

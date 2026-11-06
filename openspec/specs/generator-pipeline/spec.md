@@ -1282,11 +1282,20 @@ Source: owner 2026-11-05, ADR 0104 point 4, planner inbox #73, #74, GEN-116, GEN
 - **THEN** it writes the class map before and with the rules, the two weights and `arid.txt` (the land share of every class against Earth's, the step of the blended `k` before and after, the class weights at the terrain scorecard's arid sites), labelled as an input, not terrain, and each refusal names the option
 
 ### Requirement: GEN-118 Shelf profile
-The default class source SHALL give the ocean floor a continental shelf: from the coast the floor falls linearly to the shelf break over a shelf width that blends smoothly between a passive and an active margin value by a weight from the plate mask, then down the continental slope to the abyssal depth, blended into it over land depths 0.5 to 0.9. The distance to the coast SHALL be `|land depth| / |gradient|` (full land depth, smooth gradient). Land SHALL be unchanged. Every depth, width and ramp SHALL be a named parameter of `ShelfProfile`, Earth's values by default (ADR 0108; the values are in the change's proposal), validated on construction; both versions change.
-
+The default class source SHALL give the ocean floor a continental shelf: from the coast the floor falls linearly to the shelf break over a width that blends smoothly between a passive and an active value by margin activity, then down the continental slope to the abyssal depth. The distance to the coast SHALL be the smooth land depth over its gradient (the continent stage without its detail); the profile SHALL fade in from the field's coast, keep a minimum of water and blend into the abyss. Land SHALL be unchanged. Every depth, width and ramp SHALL be a validated field of `ShelfProfile` with the Earth preset below as default (ADR 0108); both versions change.
 Verify: A
 Status: active
 Source: owner 2026-11-05 (planner inbox #83), SPIKE-102, ADR 0107, ADR 0108
+
+The Earth preset of `ShelfProfile`:
+
+| Parameter | Earth default | Kind |
+|---|---|---|
+| break depth, abyssal depth | 130 m, 4,500 m | Earth state |
+| passive width, active width, slope width | 150 km, 30 km, 90 km | Earth state |
+| active within (distance), active convergence | 150 to 450 km, 0.05 to 0.35 | calibration |
+| abyss blend, coast ramp (land depth) | 0.5 to 0.9, 0.06 | calibration |
+| minimum water, its ramp | 5 m, 0.01 | calibration |
 
 #### Scenario: Profile
 - **WHEN** the profile is read at 0 km, at the shelf width, at the foot of the slope and beyond, and along a walk of quarter-km steps

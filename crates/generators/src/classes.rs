@@ -54,13 +54,6 @@ const BELT_AMPLITUDE_M: f64 = 7800.0;
 const PLATEAU_UPLIFT_M: f64 = 600.0;
 /// The base elevation of the land far from the coast and the land depth over which it is reached (GEN-096).
 const COAST_TOP_M: f64 = 620.0;
-/// Where the land depth (negative: the sea) has blended the shelf profile fully into the abyssal depth (GEN-118): from `SHELF_ABYSS_FROM` the blend starts, at `SHELF_ABYSS_TO` the floor is abyssal.
-const SHELF_ABYSS_FROM: f64 = 0.5;
-const SHELF_ABYSS_TO: f64 = 0.9;
-/// The sea depth (land depth) over which the profile fades in from the field's coast, and the water depth in metres a sea has beyond a thin coastal strip (GEN-118).
-const SHELF_COAST_RAMP: f64 = 0.06;
-const MIN_SEA_M: f64 = 5.0;
-const SHELF_MIN_SEA_RAMP: f64 = 0.01;
 const COAST_RAMP_DEPTH: f64 = 1.2;
 /// The narrowest half-width a belt has, in km (a belt tapers in width and height towards the ends of its segment, never below this).
 const MIN_BELT_KM: f64 = 125.0;
@@ -238,21 +231,22 @@ impl ClassSource {
     ///
     /// The distance to the coast is the first-order estimate `|smooth land depth| / |gradient|` (the continent stage without its detail, GEN-104: the full value's gradient is not defined at
     /// the lattice's scale, and its detail would put hundreds of metres of noise into the slope). The smooth coast lies up to a detail amplitude from the field's coast, so the profile fades in
-    /// from 0 at the field's coast over `SHELF_COAST_RAMP` of sea depth (so that the floor is continuous with the land's coast ramp) and has at least `MIN_SEA_M` of water beyond `SHELF_MIN_SEA_RAMP`.
-    /// The gradient is read only where the smooth sea is shallower than `SHELF_ABYSS_TO`, and from `SHELF_ABYSS_FROM` the floor is blended into the abyssal depth by the smooth land depth (not the full
+    /// from 0 at the field's coast over `ShelfProfile::coast_ramp` of sea depth (so that the floor is continuous with the land's coast ramp) and has at least `min_sea_m` of water beyond `min_sea_ramp`.
+    /// The gradient is read only where the smooth sea is shallower than `ShelfProfile::abyss_blend`'s end, and from its start the floor is blended into the abyssal depth by the smooth land depth (not the full
     /// one, whose detail would pass into the slope), so that no step stands where the gradient stops being read.
     fn ocean_floor_m(&self, d: Vec3, land_depth: f64) -> f64 {
         let abyss = -self.shelf.abyssal_depth_m;
         let sea = -land_depth;
         let smooth = self.land_depth(d);
-        if -smooth >= SHELF_ABYSS_TO {
+        let (blend_from, blend_to) = self.shelf.abyss_blend;
+        if -smooth >= blend_to {
             return abyss;
         }
         let width = self.shelf.width_km(self.margin_activity(d));
         let x_km = if smooth < 0.0 { self.distance_km(smooth, self.land_gradient(d)) } else { 0.0 };
-        let profile = self.shelf.floor_m(x_km, width) * smoothstep(0.0, SHELF_COAST_RAMP, sea);
-        let floor = profile.min(-MIN_SEA_M * smoothstep(0.0, SHELF_MIN_SEA_RAMP, sea));
-        floor + (abyss - floor) * smoothstep(SHELF_ABYSS_FROM, SHELF_ABYSS_TO, -smooth)
+        let profile = self.shelf.floor_m(x_km, width) * smoothstep(0.0, self.shelf.coast_ramp, sea);
+        let floor = profile.min(-self.shelf.min_sea_m * smoothstep(0.0, self.shelf.min_sea_ramp, sea));
+        floor + (abyss - floor) * smoothstep(blend_from, blend_to, -smooth)
     }
 
     /// In `[0, 1]`: how much of a convergent margin of the two nearest plates lies within a few hundred km of `d` (the score of a plate draw).

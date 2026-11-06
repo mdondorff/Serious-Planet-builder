@@ -32,9 +32,9 @@ fn e0(source: &ClassSource, d: Vec3) -> f64 {
 }
 
 /// The colour of a base elevation: the sea from turquoise (shallow) to navy (deep) with the shelf break marked by a lighter band, the land by its height.
-fn colour(e: f64) -> [u8; 4] {
+fn colour(e: f64, abyssal_m: f64) -> [u8; 4] {
     if e <= 0.0 {
-        let t = (libm::sqrt(-e) / libm::sqrt(4500.0)).clamp(0.0, 1.0);
+        let t = (libm::sqrt(-e) / libm::sqrt(abyssal_m)).clamp(0.0, 1.0);
         rgba(lerp([110.0, 215.0, 215.0], [15.0, 25.0, 85.0], t))
     } else {
         let t = (libm::sqrt(e) / libm::sqrt(3000.0)).clamp(0.0, 1.0);
@@ -91,7 +91,7 @@ fn region(source: &ClassSource, c: &Coast, km: f64) -> Rgba {
         for x in 0..REGION_PX {
             let lat = c.lat - (y as f64 - REGION_PX as f64 / 2.0) * per_px;
             let lon = c.lon + (x as f64 - REGION_PX as f64 / 2.0) * per_px / cos_lat;
-            data.extend_from_slice(&colour(e0(source, direction(lon, lat.clamp(-1.5, 1.5)))));
+            data.extend_from_slice(&colour(e0(source, direction(lon, lat.clamp(-1.5, 1.5))), source.shelf().abyssal_depth_m));
         }
     }
     Rgba { width: REGION_PX as u32, height: REGION_PX as u32, data }
@@ -114,7 +114,7 @@ pub fn preview(source: &ClassSource, km: f64, threads: usize) -> Preview {
     let mut data = Vec::with_capacity(width * height * 4);
     for row in &rows {
         for &e in row {
-            data.extend_from_slice(&colour(e));
+            data.extend_from_slice(&colour(e, source.shelf().abyssal_depth_m));
         }
     }
     let mut images = vec![("bathymetry.png".to_string(), Rgba { width: width as u32, height: height as u32, data })];

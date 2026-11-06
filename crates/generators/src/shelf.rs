@@ -25,6 +25,13 @@ pub struct ShelfProfile {
     pub active_within_km: (f64, f64),
     /// The convergence rates (the mask's units) over which a margin goes from passive to active.
     pub active_convergence: (f64, f64),
+    /// The smooth land depths (the continent stage without its detail) over which the profile blends into the abyssal depth; the gradient is read only inside the second. Calibration.
+    pub abyss_blend: (f64, f64),
+    /// The sea depth (land depth) over which the profile fades in from the field's coast, so that it meets the land's coast ramp. Calibration.
+    pub coast_ramp: f64,
+    /// The water depth in metres a sea has beyond a thin coastal strip of `min_sea_ramp` of sea depth (a bay is not dry). Calibration.
+    pub min_sea_m: f64,
+    pub min_sea_ramp: f64,
 }
 
 impl ShelfProfile {
@@ -38,16 +45,29 @@ impl ShelfProfile {
             slope_width_km: 90.0,
             active_within_km: (150.0, 450.0),
             active_convergence: (0.05, 0.35),
+            abyss_blend: (0.5, 0.9),
+            coast_ramp: 0.06,
+            min_sea_m: 5.0,
+            min_sea_ramp: 0.01,
         }
     }
 
     /// # Panics
-    /// When a depth or width is not positive and finite, the break is not above the abyssal plain, or a ramp has equal or reversed edges (it would be 0/0).
+    /// When a depth, width or ramp length is not positive and finite, the break is not above the abyssal plain, or a ramp has equal or reversed edges (it would be 0/0).
     pub fn new(p: ShelfProfile) -> ShelfProfile {
-        let positive = [p.break_depth_m, p.abyssal_depth_m, p.passive_width_km, p.active_width_km, p.slope_width_km];
+        let positive = [
+            p.break_depth_m,
+            p.abyssal_depth_m,
+            p.passive_width_km,
+            p.active_width_km,
+            p.slope_width_km,
+            p.coast_ramp,
+            p.min_sea_m,
+            p.min_sea_ramp,
+        ];
         assert!(positive.iter().all(|v| v.is_finite() && *v > 0.0), "the shelf's depths and widths are positive and finite: {p:?}");
         assert!(p.break_depth_m < p.abyssal_depth_m, "the shelf break lies above the abyssal plain: {p:?}");
-        let ramps = [p.active_within_km, p.active_convergence];
+        let ramps = [p.active_within_km, p.active_convergence, p.abyss_blend];
         assert!(
             ramps.iter().all(|r| r.0.is_finite() && r.1.is_finite() && r.0 < r.1),
             "every ramp of the shelf has two ordered edges: {p:?}"
