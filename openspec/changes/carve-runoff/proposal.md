@@ -11,5 +11,5 @@ ADR 0104 point 3 (as amended 2026-11-05): the carve reads the climate. A river f
 
 ## Impact
 - Code: `generators::{runoff, bake::{route, carve, face, tile, inputs}}`, `cache::{layer_store, layer_tiles}` (key bits), the bake examples. No golden moves.
-- Relief and elevation change where the climate is not Earth-average; the preview table and the open findings are in `design.md`.
-- Memory: +0.62 GB per face for the runoff weights (f32 per cell) while the carve runs.
+- Relief and elevation change where the climate is not Earth-average; the preview table is in the PR body.
+- Memory: +0.62 GB per face for the runoff weights (f32 per cell, the face with its halo, 1.56e8 cells) while the carve runs.

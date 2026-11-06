@@ -38,7 +38,7 @@ pub struct LayerSpec {
     pub inputs_id: u64,
     /// Whether the carve factor of GEN-097 is applied (it is part of the key; `run_pass1` refuses a factor that disagrees).
     pub uses_factor: bool,
-    /// Which rock fields the carves read (`RockFields::mask`: bit 0 the erodibility, bit 1 the uplift), part of the key: a store written with other fields is another key (GEN-127).
+    /// Which rock fields the carves read (`RockFields::mask`: bit 0 the erodibility, bit 1 the uplift, bit 2 the runoff weights, bit 3 the vegetation factor), part of the key: a store written with other fields is another key (GEN-127).
     pub rock: u8,
     /// Cells carved beyond each edge of a face ([`FaceSpec::halo`]); part of the key.
     pub halo: usize,
@@ -214,7 +214,7 @@ pub fn run_pass1_rock(
     }
     if spec.rock != rock.mask() {
         return Err(LayerStoreError(format!(
-            "the layer spec says rock = {} but the rock fields given are {} (bit 0 the erodibility, bit 1 the uplift)",
+            "the layer spec says rock = {} but the rock fields given are {} (bit 0 the erodibility, bit 1 the uplift, bit 2 the runoff weights, bit 3 the vegetation factor)",
             spec.rock,
             rock.mask()
         )));

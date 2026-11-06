@@ -47,7 +47,7 @@ pub struct TileLayerSpec {
     /// An identity of the inputs of the base field and the carve factor that the bake's key does not cover (as [`LayerSpec::inputs_id`]).
     pub inputs_id: u64,
     pub uses_factor: bool,
-    /// Which rock fields the carves read (`RockFields::mask`: bit 0 the erodibility, bit 1 the uplift), part of the key: a store written with other fields is another key (GEN-127).
+    /// Which rock fields the carves read (`RockFields::mask`: bit 0 the erodibility, bit 1 the uplift, bit 2 the runoff weights, bit 3 the vegetation factor), part of the key: a store written with other fields is another key (GEN-127).
     pub rock: u8,
     /// A digest of the six pass-1 face keys ([`faces_digest`]): the tile reads the face change, so the pass 1 it was made from is part of its key.
     pub faces: [u8; 16],
@@ -640,7 +640,7 @@ pub fn run_pass2(
     }
     if spec.rock != inputs.rock.mask() {
         return Err(LayerStoreError(format!(
-            "the tile layer spec says rock = {} but the rock fields given are {} (bit 0 the erodibility, bit 1 the uplift)",
+            "the tile layer spec says rock = {} but the rock fields given are {} (bit 0 the erodibility, bit 1 the uplift, bit 2 the runoff weights, bit 3 the vegetation factor)",
             spec.rock,
             inputs.rock.mask()
         )));

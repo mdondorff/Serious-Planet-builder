@@ -43,3 +43,12 @@ pub fn vegetation_factor(p_mm: f64) -> f64 {
     let u = (p_mm / VEG_PEAK_MM).max(0.0);
     VEG_FLOOR + (VEG_PEAK - VEG_FLOOR) * u * libm::exp(1.0 - u)
 }
+
+/// An identity word of the module's constants (the Earth preset), folded into the bake's identity beside [`RUNOFF_VERSION`]: a changed constant re-keys without a version bump.
+pub fn constants_identity() -> u64 {
+    let mut h = 0xCBF2_9CE4_8422_2325u64;
+    for v in [BUDYKO_N, RUNOFF_REF_MM, WEIGHT_MIN, WEIGHT_MAX, VEG_PEAK_MM, VEG_FLOOR, VEG_PEAK] {
+        h = (h ^ v.to_bits()).wrapping_mul(0x0000_0100_0000_01B3);
+    }
+    h
+}

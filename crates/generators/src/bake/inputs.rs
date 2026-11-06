@@ -148,6 +148,7 @@ impl BakeInputs {
         put(u64::from(uplift_version));
         put(k_scale.to_bits());
         put(u64::from(runoff_version));
+        put(crate::runoff::constants_identity());
         CLASS_K.iter().chain(CLASS_CARVE.iter()).for_each(|v| put(v.to_bits()));
         h
     }
