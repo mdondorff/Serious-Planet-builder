@@ -116,13 +116,6 @@ fn the_sea_has_a_shelf_and_no_step_at_the_coast() {
     let share = shelf as f64 / sea as f64;
     assert!(share > 0.03 && share < 0.25, "a shelf share of the ocean of Earth's order: {share}");
     assert!(deepest < -4000.0, "the abyss is reached: {deepest}");
-    // Continuity: a short walk across the coast never steps by more than a slope of the land's own.
-    for i in 0..400 {
-        let a = fib(i, 400);
-        let b = Vec3::new(a.x + 1e-5, a.y, a.z).normalized();
-        let (pa, pb) = (s.eval(a), s.eval(b));
-        assert!((pa.e0 - pb.e0).abs() < 60.0, "a 64 m step changes the base by {} m", (pa.e0 - pb.e0).abs());
-    }
 }
 
 // spec: GEN-118
@@ -174,4 +167,49 @@ fn a_point_far_from_every_margin_or_on_a_non_converging_one_is_passive_and_the_f
     let (zero, one) = (acts.iter().filter(|a| **a == 0.0).count(), acts.iter().filter(|a| **a > 0.99).count());
     assert!(zero > n as usize / 2, "most of the sphere is passive: {zero} of {n}");
     assert!(one > 0, "some of it is an active margin");
+}
+
+// spec: GEN-118
+#[test]
+fn the_floor_meets_the_land_at_every_coast_of_the_field_and_has_no_deep_pit_in_the_smooth_near_shore() {
+    let s = ClassSource::new(7);
+    let n = 30_000;
+    let (mut coasts, mut worst, mut deepest_smooth) = (0usize, 0.0f64, 0.0f64);
+    let (mut shallow_sea, mut pits) = (0usize, 0usize);
+    let mut prev = fib(0, n);
+    for i in 1..n {
+        let cur = fib(i, n);
+        let (pa, pb) = (s.eval(prev), s.eval(cur));
+        if pa.land_depth < 0.0 {
+            // A sea point whose smooth sea is shallow must not sit in the abyss: a zero of the smooth gradient would put one there.
+            if s.smooth_land_depth(prev) > -0.03 {
+                shallow_sea += 1;
+                pits += usize::from(pa.e0 < -1000.0);
+            }
+        }
+        if (pa.land_depth < 0.0) != (pb.land_depth < 0.0) {
+            // Bisect along the arc to the coast of the field, then compare the two sides a hair apart.
+            let (mut lo, mut hi) = (prev, cur);
+            let lo_is_sea = pa.land_depth < 0.0;
+            for _ in 0..60 {
+                let mid = Vec3::new(lo.x + hi.x, lo.y + hi.y, lo.z + hi.z).normalized();
+                if (s.eval(mid).land_depth < 0.0) == lo_is_sea {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            let (sea, land) = if lo_is_sea { (s.eval(lo), s.eval(hi)) } else { (s.eval(hi), s.eval(lo)) };
+            coasts += 1;
+            worst = worst.max((sea.e0 - land.e0).abs());
+            deepest_smooth = deepest_smooth.max(-s.smooth_land_depth(lo));
+        }
+        prev = cur;
+    }
+    println!(
+        "SHELF coasts {coasts}, worst step {worst:.2} m, deepest smooth sea at a coast {deepest_smooth:.3}, pits {pits} of {shallow_sea}"
+    );
+    assert!(coasts > 100, "the walk found {coasts} coasts");
+    assert!(worst < 5.0, "the floor steps by {worst} m at a coast (the smooth sea there reaches {deepest_smooth})");
+    assert!(pits * 20 < shallow_sea.max(1), "{pits} of {shallow_sea} near-coast smooth-sea points (under 0.03) lie deeper than 1,000 m");
 }

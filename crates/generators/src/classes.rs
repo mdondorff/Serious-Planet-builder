@@ -239,14 +239,16 @@ impl ClassSource {
         let sea = -land_depth;
         let smooth = self.land_depth(d);
         let (blend_from, blend_to) = self.shelf.abyss_blend;
-        if -smooth >= blend_to {
-            return abyss;
-        }
-        let width = self.shelf.width_km(self.margin_activity(d));
-        let x_km = if smooth < 0.0 { self.distance_km(smooth, self.land_gradient(d)) } else { 0.0 };
-        let profile = self.shelf.floor_m(x_km, width) * smoothstep(0.0, self.shelf.coast_ramp, sea);
-        let floor = profile.min(-self.shelf.min_sea_m * smoothstep(0.0, self.shelf.min_sea_ramp, sea));
-        floor + (abyss - floor) * smoothstep(blend_from, blend_to, -smooth)
+        let raw = if -smooth >= blend_to {
+            abyss
+        } else {
+            let width = self.shelf.width_km(self.margin_activity(d));
+            let x_km = if smooth < 0.0 { self.distance_km(smooth, self.land_gradient(d)) } else { 0.0 };
+            let profile = self.shelf.floor_m(x_km, width);
+            profile + (abyss - profile) * smoothstep(blend_from, blend_to, -smooth)
+        };
+        // The fade covers the whole floor, the abyssal blend too: a coast of the field far out in the smooth sea (an island) is continuous with the land's coast ramp, not a cliff.
+        (raw * smoothstep(0.0, self.shelf.coast_ramp, sea)).min(-self.shelf.min_sea_m * smoothstep(0.0, self.shelf.min_sea_ramp, sea))
     }
 
     /// In `[0, 1]`: how much of a convergent margin of the two nearest plates lies within a few hundred km of `d` (the score of a plate draw).
@@ -303,6 +305,11 @@ impl ClassSource {
             fbm(self.seed, LAYER_PLATE_WARP, d + Vec3::new(0.0, 23.0, 0.0), 1.3, 2),
         );
         (d + w * 0.35).normalized()
+    }
+
+    /// The smooth land depth at `d` (the continent stage without its detail, GEN-104).
+    pub fn smooth_land_depth(&self, d: Vec3) -> f64 {
+        self.land_depth(d)
     }
 
     /// The convergence of plates `px` and `py` at `d`: the velocity difference along the margin normal, from plate x towards plate y, in the tangent plane at d (symmetric: swapping the plates

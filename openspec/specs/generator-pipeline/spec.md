@@ -1307,7 +1307,7 @@ The Earth preset of `ShelfProfile`:
 
 #### Scenario: The field
 - **WHEN** the field is sampled over the sphere
-- **THEN** land is bit-identical to the field before the shelf (pinned points), the sea is between the abyssal depth and 0, the share of the ocean shallower than 200 m is of Earth's order, the abyss is reached, and a 64 m step across the coast changes the base by under 60 m
+- **THEN** land is bit-identical to the field before the shelf (pinned points), the sea is between the abyssal depth and 0, the share of the ocean shallower than 200 m is of Earth's order, the abyss is reached, and at every coast of the field the floor meets the land within 5 m
 
 #### Scenario: Parameters
 - **WHEN** a parameter set has a non-positive or non-finite depth or width, a break not above the abyssal plain, or a ramp with equal or reversed edges
