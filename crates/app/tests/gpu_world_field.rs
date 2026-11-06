@@ -26,7 +26,7 @@ fn world(name: &str, extra: &str) -> PathBuf {
 fn the_terrain_scene_renders_the_field_the_world_names_and_the_fields_differ() {
     let mut frames = Vec::new();
     for (name, extra, id) in
-        [("default.toml", "", "cpu-erosion-v1"), ("terrain.toml", "height_field = \"cpu-terrain-v1\"\n", "cpu-terrain-v1")]
+        [("default.toml", "", "cpu-erosion-v2"), ("terrain.toml", "height_field = \"cpu-terrain-v1\"\n", "cpu-terrain-v1")]
     {
         let w = world(name, extra);
         let png = tmp(&format!("{name}.png"));
@@ -83,7 +83,7 @@ fn a_streamed_world_run_draws_the_frame_of_the_synchronous_world_run() {
     let mut args = view_args(w.to_str().unwrap(), b.to_str().unwrap());
     args.push("--stream");
     let log = run(&args).unwrap();
-    assert!(log.contains("height field cpu-erosion-v1 over a 32-cell bake"), "{log}");
+    assert!(log.contains("height field cpu-erosion-v2 over a 32-cell bake"), "{log}");
     assert_eq!(read_png(&a).unwrap(), read_png(&b).unwrap(), "the streaming path builds its meshes from the world's field");
     // And it is the eroded field, not the reference the seed-only run draws.
     let c = tmp("world-seed-only.png");

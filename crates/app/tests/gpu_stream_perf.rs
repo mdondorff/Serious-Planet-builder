@@ -156,7 +156,7 @@ fn the_six_scenes_run_end_to_end_on_a_stored_bake_in_smoke_mode_and_log_their_so
         }
         assert!(count("load_pack_gets") >= count("load_block_decodes"), "{scene}: every block decode asked the pack: {json}");
         assert!(!json.contains("load_calib_"), "{scene}: a smoke run measures no calibration: {json}");
-        assert!(json.contains("\"field\":\"height field cpu-erosion-v1 over a 256-cell bake\""), "{json}");
+        assert!(json.contains("\"field\":\"height field cpu-erosion-v2 over a 256-cell bake\""), "{json}");
         for column in ["plan_ms", "scheduler_ms", "upload_ms", "record_ms"] {
             assert!(json.contains(&format!("\"{column}\"")), "{scene} {column}: {json}");
         }

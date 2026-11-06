@@ -2159,7 +2159,7 @@ mod tests {
         let request =
             TerrainRequest { camera, size: (256, 192), view: TerrainView::Level, lod, face_mapping: "tangent-v1".into(), seed: 5 };
         let plan = plan_terrain(&request).unwrap();
-        let world = BundleWorld { height_field: "cpu-erosion-v1".into(), global_res: 8, definition_toml: toml, items: Vec::new() };
+        let world = BundleWorld { height_field: "cpu-erosion-v2".into(), global_res: 8, definition_toml: toml, items: Vec::new() };
         let bundle = TerrainBundle {
             generator_version: 2,
             implementation_id: "x".into(),
@@ -2175,7 +2175,7 @@ mod tests {
         let e = world_of_bundle(&world, &TerrainBundle { definition_hash: def.hash() ^ 1, ..bundle.clone() }, None).err().unwrap();
         assert!(e.contains("its recorded world hashes to"), "{e}");
         let wrong_field = BundleWorld { height_field: "cpu-terrain-v1".into(), ..world.clone() };
-        assert!(world_of_bundle(&wrong_field, &bundle, None).err().unwrap().contains("cpu-erosion-v1"));
+        assert!(world_of_bundle(&wrong_field, &bundle, None).err().unwrap().contains("cpu-erosion-v2"));
         let mut other_radius = bundle.clone();
         other_radius.request.lod.radius_m += 1.0;
         assert!(world_of_bundle(&world, &other_radius, None).err().unwrap().contains("radius"));
@@ -2223,7 +2223,7 @@ mod tests {
         let request = TerrainRequest { camera, size: (256, 192), view: TerrainView::Level, lod, face_mapping: "tangent-v1".into(), seed };
         let plan = plan_terrain(&request).unwrap();
         let bundle_of = |global_res: u32| {
-            let world = BundleWorld { height_field: "cpu-erosion-v1".into(), global_res, definition_toml: toml.clone(), items: Vec::new() };
+            let world = BundleWorld { height_field: "cpu-erosion-v2".into(), global_res, definition_toml: toml.clone(), items: Vec::new() };
             let bundle = TerrainBundle {
                 generator_version: 2,
                 implementation_id: "x".into(),
