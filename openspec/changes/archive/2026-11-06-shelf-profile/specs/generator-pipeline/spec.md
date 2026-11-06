@@ -33,4 +33,4 @@ The Earth preset of `ShelfProfile`:
 
 #### Scenario: The preview
 - **WHEN** `generate --shelf-preview DIR [--seed N | --world F] [--km N]` is run, and combined with another generate command or with `--world` and `--seed`
-- **THEN** it writes the bathymetry map, a passive and an active coast region at 2 km and 10 km and `shelf.txt` (the shelf share of the ocean, the shelf width p10, p50 and p90 by margin type and the depth of the shelf break, against Earth's), and refuses the combinations, naming them
+- **THEN** it writes the bathymetry map, a passive and an active coast region at 2 km and 10 km and `shelf.txt` (the shelf share of the ocean, the shelf width p10, p50 and p90 and the slope width p50 by margin type, against Earth's), and refuses the combinations, naming them

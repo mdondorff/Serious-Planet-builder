@@ -242,8 +242,13 @@ impl ClassSource {
         let raw = if -smooth >= blend_to {
             abyss
         } else {
-            let width = self.shelf.width_km(self.margin_activity(d));
-            let x_km = if smooth < 0.0 { self.distance_km(smooth, self.land_gradient(d)) } else { 0.0 };
+            let g = self.land_gradient_vec(d);
+            let x_km = if smooth < 0.0 { self.distance_km(smooth, g.length()) } else { 0.0 };
+            // The margin type is that of the coast the shelf hangs from, not of the point (the activity falls with the distance from the margin): the point is moved to the smooth coast
+            // along the gradient, which points towards the land.
+            let toward = g * (1.0 / g.length().max(1e-9));
+            let coast = (d + toward * (x_km / (self.radius_m / 1000.0))).normalized();
+            let width = self.shelf.width_km(self.margin_activity(coast));
             let profile = self.shelf.floor_m(x_km, width);
             profile + (abyss - profile) * smoothstep(blend_from, blend_to, -smooth)
         };
@@ -360,10 +365,15 @@ impl ClassSource {
     /// The gradient magnitude of the land depth at `d` per radian: central differences of [`GRADIENT_STEP`] along the fixed axes x, y and z, with the radial part removed, so
     /// that it does not depend on a tangent basis (a basis that switches its helper axis near the poles would step the estimate).
     fn land_gradient(&self, d: Vec3) -> f64 {
+        self.land_gradient_vec(d).length()
+    }
+
+    /// The tangent gradient of the smooth land depth at `d` per radian (see [`land_gradient`](Self::land_gradient)): it points towards the land.
+    fn land_gradient_vec(&self, d: Vec3) -> Vec3 {
         let h = GRADIENT_STEP;
         let at = |axis: Vec3| (self.land_depth((d + axis * h).normalized()) - self.land_depth((d - axis * h).normalized())) / (2.0 * h);
         let g = Vec3::new(at(Vec3::new(1.0, 0.0, 0.0)), at(Vec3::new(0.0, 1.0, 0.0)), at(Vec3::new(0.0, 0.0, 1.0)));
-        (g - d * g.dot(d)).length()
+        g - d * g.dot(d)
     }
 
     /// The first-order estimate in km of the distance over which the land depth changes by `delta` at `d`: `|delta| / |gradient|` (valid near `d`), the gradient

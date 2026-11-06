@@ -1,5 +1,5 @@
 //! The planet preview of the shelf profile (GEN-118; ADR 0107, ADR 0108): the bathymetry map, two coast regions at 2 km and 10 km a pixel (one passive and one active margin), and the numbers against
-//! Earth's: the shelf share of the ocean, the shelf width by margin type and the depth of the shelf break. Every image shows the **base elevation of the class source, an input of the bake, not terrain**.
+//! Earth's: the shelf share of the ocean, the shelf width and the slope width by margin type. Every image shows the **base elevation of the class source, an input of the bake, not terrain**.
 //!
 //! GPU-free, `libm`, integer hashing: the same bytes for any thread count (CON-14).
 
@@ -20,10 +20,12 @@ pub struct Preview {
 const EARTH_SHELF_SHARE: (f64, f64) = (7.0, 9.0);
 /// The depth in metres the shelf share counts (the conventional 200 m isobath).
 const SHELF_ISOBATH_M: f64 = 200.0;
-/// The seaward gradient in m per km from which a walk from the coast counts the shelf break as reached (the shelf's own gradient is about 1 m per km, the slope's 20 to 70).
-const BREAK_GRADIENT_M_PER_KM: f64 = 10.0;
+/// The fraction of the abyssal depth at which a walk counts the foot of the slope as reached.
+const SLOPE_END_FRACTION: f64 = 0.9;
 /// The walk from a coast pixel gives up after this many km (a shelf wider than this is reported as the cap).
 const WALK_CAP_KM: f64 = 800.0;
+/// The step of a walk in km (at most the map's pixel).
+const WALK_STEP_KM: f64 = 4.0;
 /// The side of a region image in pixels.
 const REGION_PX: usize = 256;
 
@@ -42,30 +44,40 @@ fn colour(e: f64, abyssal_m: f64) -> [u8; 4] {
     }
 }
 
-/// A walk seaward from a coast pixel: `(width_km, depth_at_break_m)` where the gradient first exceeds [`BREAK_GRADIENT_M_PER_KM`], or the cap.
-fn walk(source: &ClassSource, from: (f64, f64), way: (f64, f64), km: f64) -> (f64, f64) {
-    let mut prev = e0(source, direction(from.0, from.1));
+/// A walk seaward from a coast pixel: `(shelf_km, slope_km)`: the distance from the first sea step to the first step deeper than the shelf break depth of the preset, and from there to the first
+/// step deeper than [`SLOPE_END_FRACTION`] of the abyssal depth (the cap for what is not reached). Measured on the floor, not on a gradient, so that the coast's own fade does not read as a break.
+fn walk(source: &ClassSource, from: (f64, f64), way: (f64, f64), map_km: f64) -> (f64, f64) {
+    // The walk steps finer than the map: a shelf of a few tens of km is under two pixels of a 20 km map.
+    let km = map_km.min(WALK_STEP_KM);
     let per_px = km / (EARTH_RADIUS_M / 1000.0);
     let (dlon, dlat) = (way.0 * per_px / libm::cos(from.1).max(0.05), way.1 * per_px);
     let steps = (WALK_CAP_KM / km) as usize;
-    // The shelf starts at the first sea pixel: the land's own fall to the coast is not the shelf's.
-    let mut coast_at = None;
+    let (break_m, end_m) = (source.shelf().break_depth_m, SLOPE_END_FRACTION * source.shelf().abyssal_depth_m);
+    let (mut coast_at, mut break_at) = (None, None);
     for i in 1..=steps {
         let lat = (from.1 + dlat * i as f64).clamp(-core::f64::consts::FRAC_PI_2 + 1e-6, core::f64::consts::FRAC_PI_2 - 1e-6);
         let here = e0(source, direction(from.0 + dlon * i as f64, lat));
+        // The shelf starts at the first sea step: the land's own fall to the coast is not the shelf's.
         let Some(start) = coast_at else {
             if here < 0.0 {
                 coast_at = Some(i);
             }
-            prev = here;
             continue;
         };
-        if (prev - here) / km > BREAK_GRADIENT_M_PER_KM {
-            return ((i - start) as f64 * km, prev);
+        let Some(brk) = break_at else {
+            if -here >= break_m {
+                break_at = Some(i);
+            }
+            continue;
+        };
+        if -here >= end_m {
+            return ((brk - start) as f64 * km, (i - brk) as f64 * km);
         }
-        prev = here;
     }
-    (WALK_CAP_KM, prev)
+    match (coast_at, break_at) {
+        (Some(start), Some(brk)) => ((brk - start) as f64 * km, WALK_CAP_KM),
+        _ => (WALK_CAP_KM, WALK_CAP_KM),
+    }
 }
 
 fn quantile(v: &mut [f64], f: f64) -> f64 {
@@ -79,7 +91,7 @@ struct Coast {
     lat: f64,
     active: f64,
     width_km: f64,
-    break_m: f64,
+    slope_km: f64,
 }
 
 /// The region of `REGION_PX` pixels of `km` km centred on a coast point, as an image.
@@ -159,8 +171,8 @@ pub fn preview(source: &ClassSource, km: f64, threads: usize) -> Preview {
         let (lon, lat) = dir_of(x, y);
         let d = direction(lon, lat);
         let active = source.margin_activity(d);
-        let (w, b) = walk(source, (lon, lat), step, km);
-        Coast { lon, lat, active, width_km: w, break_m: b }
+        let (w, sl) = walk(source, (lon, lat), step, km);
+        Coast { lon, lat, active, width_km: w, slope_km: sl }
     });
     let mut text = String::new();
     text.push_str("shelf profile (input), not terrain: the preview of GEN-118; every number is a start value for the owner's review\n");
@@ -182,14 +194,14 @@ pub fn preview(source: &ClassSource, km: f64, threads: usize) -> Preview {
         ("active (active weight > 0.8)", 0.8, 1.01, "Earth: a few tens of km"),
     ] {
         let mut w: Vec<f64> = coasts.iter().filter(|c| c.active >= lo && c.active < hi).map(|c| c.width_km).collect();
-        let mut b: Vec<f64> = coasts.iter().filter(|c| c.active >= lo && c.active < hi).map(|c| c.break_m).collect();
+        let mut b: Vec<f64> = coasts.iter().filter(|c| c.active >= lo && c.active < hi).map(|c| c.slope_km).collect();
         let n = w.len();
         text.push_str(&format!(
-            "  {name:<30} {n:>5} coasts: width p10 {:.0} / p50 {:.0} / p90 {:.0} km, break depth p50 {:.0} m  {earth}\n",
+            "  {name:<30} {n:>5} coasts: width p10 {:.0} / p50 {:.0} / p90 {:.0} km, slope width p50 {:.0} km  {earth}\n",
             quantile(&mut w, 0.1),
             quantile(&mut w, 0.5),
             quantile(&mut w, 0.9),
-            -quantile(&mut b, 0.5)
+            quantile(&mut b, 0.5)
         ));
     }
     let capped = coasts.iter().filter(|c| c.width_km >= WALK_CAP_KM).count();
@@ -212,11 +224,11 @@ pub fn preview(source: &ClassSource, km: f64, threads: usize) -> Preview {
             })
             .expect("a non-empty group");
         text.push_str(&format!(
-            "region {label}: ({:.1} N, {:.1} E), shelf {:.0} km, break {:.0} m\n",
+            "region {label}: ({:.1} N, {:.1} E), shelf {:.0} km, slope {:.0} km\n",
             best.lat.to_degrees(),
             best.lon.to_degrees(),
             best.width_km,
-            -best.break_m
+            best.slope_km
         ));
         for res in [2.0, 10.0] {
             images.push((format!("region_{label}_{res:.0}km.png"), region(source, best, res)));
