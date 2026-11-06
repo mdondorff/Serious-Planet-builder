@@ -133,7 +133,7 @@ impl Rock<'static> {
 
 /// [`carve`] with a [`Rock`]: K at each cell's current height multiplies the carve factor in each step, and the uplift array replaces `u_over_k`.
 pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, factor: Option<&[f64]>, rock: &Rock, seed: u64) -> Routing {
-    carve_rock_report(grid, z, outlet, p, factor, rock, seed).0
+    carve_core(grid, z, outlet, p, factor, rock, seed, false).0
 }
 
 /// [`carve_rock`] and the sediment account of its deposition steps in cubic metres over all steps (GEN-131): `eroded` is the net lowering of the cells that were lowered relative to their
@@ -146,6 +146,20 @@ pub fn carve_rock_report(
     factor: Option<&[f64]>,
     rock: &Rock,
     seed: u64,
+) -> (Routing, DepositReport) {
+    carve_core(grid, z, outlet, p, factor, rock, seed, true)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn carve_core(
+    grid: &Grid,
+    z: &mut [f64],
+    outlet: &[bool],
+    p: &CarveParams,
+    factor: Option<&[f64]>,
+    rock: &Rock,
+    seed: u64,
+    want_report: bool,
 ) -> (Routing, DepositReport) {
     let mut report = DepositReport { eroded: 0.0, deposited: 0.0, exported: 0.0 };
     assert!(p.deposit_g >= 0.0 && p.deposit_g.is_finite(), "the deposition coefficient is finite and not negative, not {}", p.deposit_g);
@@ -221,7 +235,7 @@ pub fn carve_rock_report(
         }
         if deposit {
             let sweep = Sweep { grid, r, p, factor, rock, k: &k, room: &room, taper: taper.as_deref(), uplift, floor };
-            sweep.run(z, &mut report);
+            sweep.run(z, want_report.then_some(&mut report));
             continue;
         }
         for &c in &r.order {
@@ -301,7 +315,7 @@ impl Sweep<'_, '_> {
         (f, up)
     }
 
-    fn run(&self, z: &mut [f64], report: &mut DepositReport) {
+    fn run(&self, z: &mut [f64], report: Option<&mut DepositReport>) {
         let (n, r, p) = (z.len(), self.r, self.p);
         let dx2 = self.grid.dx() * self.grid.dx();
         // A pit of the unfilled surface keeps its height: no stream power, only uplift and the sediment that reaches it.
@@ -312,11 +326,11 @@ impl Sweep<'_, '_> {
             })
             .collect();
         // The land that takes sediment: not the sea's cells.
-        let land = |c: usize, z: &[f64]| z[c] > self.floor;
-        let g_of = |c: usize, z: &[f64]| if land(c, z) && r.area[c] > 0.0 { p.deposit_g / r.area[c] } else { 0.0 };
-        let mut a = vec![0.0f64; n];
-        let mut flux_c = vec![0.0f64; n];
-        let mut slope_d = vec![0.0f64; n];
+        let g_of = |c: usize, z: &[f64]| if z[c] > self.floor && r.area[c] > 0.0 { p.deposit_g / r.area[c] } else { 0.0 };
+        // Three arrays of 4 bytes a cell (1.9 GB with the pit flags on a face of 1.56e8 cells): the relation's constant (later the change), the donors' flux constant and their slope.
+        let mut a = vec![0.0f32; n];
+        let mut flux_c = vec![0.0f32; n];
+        let mut slope_d = vec![0.0f32; n];
         // Leaves to outlets: the affine relation of every cell to its receiver's change, and the flux it hands on.
         for &c in r.order.iter().rev() {
             let c = c as usize;
@@ -328,15 +342,18 @@ impl Sweep<'_, '_> {
             let (f, up) = self.cell(c, rec);
             let f = if pit[c] { 0.0 } else { f };
             let g = g_of(c, z);
-            let (cc, dd) = (flux_c[c], slope_d[c]);
+            let (cc, dd) = (f64::from(flux_c[c]), f64::from(slope_d[c]));
             let denom = 1.0 + f + g * (dx2 - dd);
             let drop = if pit[c] { 0.0 } else { z[c] - z[rec] };
-            a[c] = (up * (1.0 + g * dx2) - f * drop + g * cc) / denom;
+            let ac = (up * (1.0 + g * dx2) - f * drop + g * cc) / denom;
+            a[c] = ac as f32;
+            let ac = f64::from(a[c]);
             let b = f / denom;
-            flux_c[rec] += cc + dx2 * up + (dd - dx2) * a[c];
-            slope_d[rec] += (dd - dx2) * b;
+            flux_c[rec] += (cc + dx2 * up + (dd - dx2) * ac) as f32;
+            slope_d[rec] += ((dd - dx2) * b) as f32;
         }
         // Outlets to leaves: solve the changes, then the clamps of the sweep without deposition. A cell deposits no higher than its receiver's new height plus the drop it had above it.
+        // The change is applied as the f32 that is kept, so that the account below sums what the heights took.
         let mut delta = a;
         for &c in &r.order {
             let c = c as usize;
@@ -346,17 +363,12 @@ impl Sweep<'_, '_> {
             }
             let rec = rec as usize;
             let (f, up) = self.cell(c, rec);
-            let dr = delta[rec];
-            let b = if pit[c] {
-                0.0
-            } else {
-                let g = g_of(c, z);
-                f / (1.0 + f + g * (dx2 - slope_d[c]))
-            };
+            let dr = f64::from(delta[rec]);
+            let b = if pit[c] { 0.0 } else { f / (1.0 + f + g_of(c, z) * (dx2 - f64::from(slope_d[c]))) };
             let hr_new = z[rec];
             let hr_old = hr_new - dr;
             let start = z[c];
-            let mut new = start + delta[c] + b * dr;
+            let mut new = start + f64::from(delta[c]) + b * dr;
             let ceiling = (hr_new + (start - hr_old).max(0.0) + p.epsilon).max(start + up);
             new = new.min(ceiling);
             if pit[c] {
@@ -367,11 +379,14 @@ impl Sweep<'_, '_> {
             if self.rock.k.is_some() && new < start && self.room[c] != ROOM_NONE {
                 new = new.max(start - f64::from(self.room[c]) * ROOM_STEP_M);
             }
-            delta[c] = new - start;
-            z[c] = new;
+            delta[c] = (new - start) as f32;
+            z[c] = start + f64::from(delta[c]);
         }
-        // Leaves to outlets with the final changes: the flux every cell hands on, and the account.
-        flux_c.iter_mut().for_each(|v| *v = 0.0);
+        let Some(report) = report else { return };
+        // Leaves to outlets with the final changes: the flux every cell hands on, and the account (a test and preview aid: the heights do not depend on it).
+        drop(flux_c);
+        drop(slope_d);
+        let mut flux = vec![0.0f64; n];
         for &c in r.order.iter().rev() {
             let c = c as usize;
             let rec = r.receiver[c];
@@ -380,14 +395,14 @@ impl Sweep<'_, '_> {
             }
             let rec = rec as usize;
             let (_, up) = self.cell(c, rec);
-            let net = dx2 * (up - delta[c]);
+            let net = dx2 * (up - f64::from(delta[c]));
             if net > 0.0 {
                 report.eroded += net;
             } else {
                 report.deposited -= net;
             }
-            let out = flux_c[c] + net;
-            flux_c[rec] += out;
+            let out = flux[c] + net;
+            flux[rec] += out;
             if r.receiver[rec] == NONE {
                 report.exported += out;
             }
