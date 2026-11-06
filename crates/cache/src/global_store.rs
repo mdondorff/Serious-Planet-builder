@@ -985,7 +985,7 @@ impl GlobalWorld {
         let has_class = class_check == Ok(true);
         let class = || {
             GlobalWorld::from_definition(def)
-                .map(|w| w.with_class_source(Arc::new(BakeInputs::new(legacy.seed(), threads))))
+                .map(|w| w.with_class_source(class_inputs(legacy.seed(), threads)))
                 .map_err(|e| format!("the definition cannot be generated: {e}"))
         };
         match (has_legacy, has_class) {
@@ -2640,4 +2640,12 @@ fn explain_source(check: &Result<bool, String>, res: u32) -> String {
         Err(e) => format!("{base}: {e}"),
         Ok(_) => base,
     }
+}
+
+/// The class source inputs of `seed`, built once per process: a viewer or a test that opens the same store again (a refused option, a second view) does not build the class lattice again. The inputs are a
+/// pure function of the seed (the threads only decide how fast the lattices are built), so sharing them changes no result.
+pub fn class_inputs(seed: u64, threads: usize) -> Arc<BakeInputs> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<u64, Arc<BakeInputs>>>> = std::sync::OnceLock::new();
+    let mut map = CACHE.get_or_init(Default::default).lock().expect("the class inputs cache");
+    Arc::clone(map.entry(seed).or_insert_with(|| Arc::new(BakeInputs::new(seed, threads))))
 }

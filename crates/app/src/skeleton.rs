@@ -306,8 +306,8 @@ pub(crate) fn global_world_of(o: &Options) -> Result<planet_cache::global_store:
     }
     // The class source's lattice is built once, on the threads of the run (the same result for any count).
     let threads = planet_streaming::topology::bake_threads(o.threads)?.0;
-    let inputs = planet_generators::bake::inputs::BakeInputs::new(world.seed(), threads);
-    Ok(world.with_class_source(std::sync::Arc::new(inputs)))
+    let inputs = planet_cache::global_store::class_inputs(world.seed(), threads);
+    Ok(world.with_class_source(inputs))
 }
 
 /// `generate --lithology-preview DIR [--seed N | --world F] [--km N] [--threads N]` (GEN-122): the preview of the lithology field (ADR 0102, GEN-116) with no GPU: equirectangular maps of the
