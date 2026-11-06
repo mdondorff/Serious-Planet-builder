@@ -236,3 +236,24 @@ fn the_runoff_constants_are_pinned_so_that_a_change_needs_a_version_bump() {
     assert_eq!(planet_generators::runoff::constants_identity(), PINNED, "a runoff constant changed: bump RUNOFF_VERSION and re-pin");
 }
 const PINNED: u64 = 16_050_003_405_106_908_697;
+
+// spec: GEN-129
+#[test]
+fn the_area_channel_code_of_the_discharge_moves_by_eight_log_two_of_the_weight() {
+    use planet_generators::bake::face::area_code;
+    // On one fixed surface (the carve would change it) a constant weight w scales every discharge by w: the stored code moves by 8 log2(w), and a discharge under one cell reads as one cell (code 0).
+    let g = Grid::new(N, N, DX);
+    let z = cone();
+    let outlet = g.outlets(&z, 0.0);
+    let cell = DX * DX;
+    let q = |w: f32| route_weighted(&g, &z, &outlet, 1e-3, 9, 0.0, Some(&vec![w; N * N])).area;
+    let (one, four, quarter) = (q(1.0), q(4.0), q(0.25));
+    let mut shifted = 0;
+    for c in 0..N * N {
+        let (c1, c4, cq) = (area_code(one[c], cell), area_code(four[c], cell), area_code(quarter[c], cell));
+        assert_eq!(u16::from(c4), (u16::from(c1) + 16).min(255), "cell {c}: code {c4} with weight 4, {c1} with weight 1");
+        assert_eq!(cq, c1.saturating_sub(16), "cell {c}: code {cq} with weight 1/4, {c1} with weight 1");
+        shifted += usize::from(c1 > 16);
+    }
+    assert!(shifted > 20, "{shifted} cells have a discharge over 4 cells: the shift is not tested");
+}
