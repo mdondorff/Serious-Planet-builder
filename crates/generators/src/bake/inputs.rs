@@ -106,11 +106,15 @@ impl BakeInputs {
         put(u64::from(CLASS_LIST_VERSION));
         put(CLASS_LATTICE_N as u64);
         // The base elevation reads the class weights, which read the arid rules and, through them, the climate: their identities are the layer's.
-        put(u64::from(ARID_RULES_VERSION));
-        put(Self::climate_id());
+        put(arid_identity(ARID_RULES_VERSION, Self::climate_id()));
         CLASS_K.iter().chain(CLASS_CARVE.iter()).for_each(|v| put(v.to_bits()));
         h
     }
+}
+
+/// The identity word of the arid rules of `version` over a climate of identity `climate` (a layer's base elevation reads both).
+fn arid_identity(version: u32, climate: u64) -> u64 {
+    planet_core::hash::hash_u64s(0x6172_6964, &[u64::from(version), climate])
 }
 
 /// The identity word of a climate of `version` on a lattice of `cells` cells a face edge.
@@ -132,4 +136,22 @@ mod tests {
     }
 
     const OROGRAPHY_CELLS_FOR_TEST: usize = 512;
+
+    // spec: GEN-128
+    #[test]
+    fn the_layer_identity_moves_with_the_rules_version_and_the_climate_identity() {
+        let climate = climate_identity(OROGRAPHY_VERSION, OROGRAPHY_CELLS_FOR_TEST);
+        let base = arid_identity(ARID_RULES_VERSION, climate);
+        assert_ne!(base, arid_identity(ARID_RULES_VERSION + 1, climate), "a new rules version re-keys the layers");
+        assert_ne!(
+            base,
+            arid_identity(ARID_RULES_VERSION, climate_identity(OROGRAPHY_VERSION + 1, OROGRAPHY_CELLS_FOR_TEST)),
+            "a new climate re-keys the layers"
+        );
+        assert_ne!(
+            base,
+            arid_identity(ARID_RULES_VERSION, climate_identity(OROGRAPHY_VERSION, OROGRAPHY_CELLS_FOR_TEST * 2)),
+            "a finer climate lattice re-keys the layers"
+        );
+    }
 }

@@ -33,6 +33,8 @@ pub struct AridParams {
     pub arid: (f64, f64),
     /// The height (m) below which dunes can lie: 1 at `low.0`, 0 at `low.1`.
     pub low: (f64, f64),
+    /// The weight of an orogen core in the broken relief (the foreland and the old margin count in full).
+    pub broken_core: f64,
     /// The weights of the sediment sources in the sand supply: the basin, the old margin, the rift.
     pub supply: (f64, f64, f64),
     /// The most weight one rule gives, and the most both give together (a neighbouring class keeps the rest).
@@ -51,6 +53,7 @@ impl Default for AridParams {
             moderate_to: (1800.0, 2800.0),
             arid: (0.05, 0.22),
             low: (300.0, 900.0),
+            broken_core: 0.6,
             supply: (1.0, 0.5, 0.4),
             cap: 0.8,
             cap_both: 0.85,
@@ -95,7 +98,7 @@ impl AridRules {
         let semi = ramp(p.semi_from, i.aridity) * (1.0 - ramp(p.semi_to, i.aridity));
         let moderate = ramp(p.moderate_from, i.e0) * (1.0 - ramp(p.moderate_to, i.e0));
         // The relief the water can cut: a foreland, an old margin or the flank of a belt.
-        let broken = i.provinces.foreland.max(i.provinces.old_margin).max(0.6 * i.provinces.core).clamp(0.0, 1.0);
+        let broken = i.provinces.foreland.max(i.provinces.old_margin).max(p.broken_core * i.provinces.core).clamp(0.0, 1.0);
         let badlands = (soft * semi * moderate * broken).min(p.cap);
         // Falling ramps: 1 at the first value, 0 at the second (`smoothstep` with its edges swapped).
         let arid = ramp((p.arid.1, p.arid.0), i.aridity);
