@@ -28,6 +28,8 @@ pub mod height;
 pub mod height_fields;
 pub mod horizon;
 pub mod horizon_lookup;
+pub mod ice;
+pub mod ice_preview;
 pub mod lithology;
 pub mod lithology_preview;
 pub mod manifest;
