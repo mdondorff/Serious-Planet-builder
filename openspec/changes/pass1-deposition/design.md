@@ -67,3 +67,18 @@ The constants are module constants until the ADR 0108 audit lifts them into the 
 - Reading (a hypothesis): most of the pit volume is in the base surface's own basins kept by ADR 0101, not made by the carve, so a deposition term fed only by the carve's erosion cannot reach the 20 m p50 gate.
 - Relief against G = 0 is not measured (no relief tool on this branch).
 - Process peak 10.0 GB at G = 0 (above CON-21's 8 GB; an M9.1 item of the planner), 10.9 GB with the probe's flood.
+
+## Basin infill before the carve (ADR 0109, GEN-137; owner D7 a)
+Supersedes the pit goal of the deposition findings above: deposition stays for fans, deltas and valley floors, its check is mass balance and flatness.
+1. Method: the flood of the base surface (GEN-100's priority flood, `epsilon` over flats) gives every cell its spill level. A basin is a connected set (8 neighbours) of cells more than 0.5 m (`PIT_MIN_M`, the minimum of GEN-120's fill-depth channel) under it. A basin smaller than `min_area_km2` or shallower than `min_depth_m` at its deepest cell is raised to the flood; any other is raised to the flood minus `residual_m` where it is deeper.
+2. Properties (tests): never raises a cell above its spill level, never lowers one, keeps outlets, same bits on every run, idempotent (the residual is at least the minimum depth, so a basin left is not filled by a second infill), no basin left under the thresholds.
+3. Where: `pass1_face_rock` runs it on the sampled base surface before the carve; the stored change holds the infill, so base plus change is the infilled and carved surface. The fill-depth channel then measures what is left after the carve (the lake basins). Arid basins stay sinks (ADR 0105 point 2, `arid-sinks`).
+4. Switch: `CarveParams.infill` (`None` = off, today's surface); the thresholds are in the layer keys. `bake layer --infill AREA,DEPTH,RESIDUAL`.
+5. Cost: one more flood and one labelling walk of the face (about one routing's flood, once per face, not per step), a `u32` label plane (0.6 GB at 1.56e8 cells) and the flood surface (1.25 GB) beside the face arrays: a transient peak before the carve's arrays exist. To be measured; the 10 GB process peak is the planner's M9.1 item.
+
+| Name | Start values | Unit | Kind | Parameter |
+|---|---|---|---|---|
+| `min_area_km2` | 25 (set 2: 100) | km^2 | calibration (Earth's lake size distribution, HydroLAKES, Messager et al. 2016: lakes above 10 km^2 are a small share of lakes but most of the area) | `Infill.min_area_km2` |
+| `min_depth_m` | 50 (set 2: 100) | m | calibration (typical lake depth of mid-size lakes) | `Infill.min_depth_m` |
+| `residual_m` | 100 (set 2: 200) | m | calibration (mean depth of the large lakes, Great Lakes 20-150 m; the deep rift lakes are the tail) | `Infill.residual_m` |
+Target of the check: lake share of land 2-3 % (Earth), basin depth per class against GLO-30.

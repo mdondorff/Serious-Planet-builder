@@ -65,6 +65,15 @@ impl LayerSpec {
         b.push(u8::from(c.incise_only));
         b.push(u8::from(c.keep_pits));
         b.extend(c.deposit_g.to_bits().to_le_bytes());
+        match &c.infill {
+            Some(i) => {
+                b.push(1);
+                for v in [i.min_area_km2, i.min_depth_m, i.residual_m] {
+                    b.extend(v.to_bits().to_le_bytes());
+                }
+            }
+            None => b.push(0),
+        }
         b.extend((c.steps as u64).to_le_bytes());
         b.extend((c.reroute_every as u64).to_le_bytes());
         b.extend(self.inputs_id.to_le_bytes());

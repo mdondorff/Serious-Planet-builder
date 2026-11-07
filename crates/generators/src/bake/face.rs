@@ -196,6 +196,9 @@ pub fn pass1_face_rock(
     let factors: Option<Vec<f64>> = factor.map(|f| sample_grid(spec, f, threads));
     let mut z = z0.clone();
     let params = CarveParams { sea_level: spec.sea_level, ..*params };
+    if let Some(i) = &params.infill {
+        super::infill::infill(&grid, &mut z, &outlet, i, params.epsilon);
+    }
     let (m, h) = (spec.grid_cells(), spec.halo as i64);
     let fill = |u: &(dyn Fn(Vec3) -> f64 + Sync)| -> Vec<f32> {
         let par: &dyn Par = &threads;

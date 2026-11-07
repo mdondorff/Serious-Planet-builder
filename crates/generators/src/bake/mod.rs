@@ -16,6 +16,7 @@ pub mod deposit;
 pub mod face;
 pub mod fillgeom;
 pub mod flood;
+pub mod infill;
 pub mod inputs;
 pub mod map;
 pub mod route;

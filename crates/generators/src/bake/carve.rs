@@ -40,6 +40,8 @@ pub struct CarveParams {
     /// The deposition coefficient `G` of Yuan et al. 2019 (GEN-131, ADR 0105): a cell gains `G Qs / Q` metres a step from the sediment flux `Qs` it carries (cubic metres a step) over its discharge `Q`.
     /// 0 (the default) switches deposition off and the carve is the one without a sediment term; an incise-only carve ignores it.
     pub deposit_g: f64,
+    /// The basin infill of the base surface before the carve (GEN-137, ADR 0109); `None` leaves the surface as it is.
+    pub infill: Option<super::infill::Infill>,
 }
 
 /// The breach limit of a cell at the sea level when the limit scales with height (the former default).
@@ -62,6 +64,7 @@ impl Default for CarveParams {
             uplift_taper_m: 60.0,
             keep_pits: true,
             deposit_g: 0.0,
+            infill: None,
         }
     }
 }

@@ -39,6 +39,7 @@ struct Opts {
     region: Option<PathBuf>,
     keep_pass1: bool,
     deposit_g: f64,
+    infill: Option<planet_generators::bake::infill::Infill>,
     /// `--global-dir DIR`: the stored field bake whose recorded source the layer follows; `--global-res` its cells a face edge.
     global_dir: Option<PathBuf>,
     global_res: u32,
@@ -135,7 +136,7 @@ fn main() {
     };
     // The specs of both passes come from the one derivation the viewer also uses (`bake_specs`), so a record's key cannot drift between the command and the reader.
     let shape = BakeShape { seed: o.seed, radius_m: RADIUS_M, face_res: o.face_res, planet_res: o.planet_res, tile: o.tile, halo: o.halo };
-    let carve = planet_generators::bake::carve::CarveParams { deposit_g: o.deposit_g, ..Default::default() };
+    let carve = planet_generators::bake::carve::CarveParams { deposit_g: o.deposit_g, infill: o.infill, ..Default::default() };
     let (layer, spec) = planet_cache::layer_tiles::bake_specs_with(&world, &shape, carve).unwrap_or_else(|e| fail(&e));
     let face_halo = layer.halo;
     let (face_dir, tile_dir) = (out.join("layer"), o.tile_dir.clone().unwrap_or_else(|| out.join("tiles")));
@@ -365,6 +366,7 @@ fn parse() -> Opts {
         region: None,
         keep_pass1: false,
         deposit_g: 0.0,
+        infill: None,
         global_dir: None,
         global_res: 16_384,
         class_source: false,
@@ -390,6 +392,13 @@ fn parse() -> Opts {
             "--region" => o.region = Some(PathBuf::from(value())),
             "--image-step" => o.image_step = Some(number("--image-step")),
             "--keep-pass1" => o.keep_pass1 = true,
+            "--infill" => {
+                let v: Vec<f64> = value().split(',').map(|x| x.parse().unwrap_or_else(|_| fail("--infill needs AREA_KM2,MIN_DEPTH_M,RESIDUAL_M"))).collect();
+                if v.len() != 3 {
+                    fail("--infill needs AREA_KM2,MIN_DEPTH_M,RESIDUAL_M (GEN-137)");
+                }
+                o.infill = Some(planet_generators::bake::infill::Infill { min_area_km2: v[0], min_depth_m: v[1], residual_m: v[2] });
+            }
             "--deposit-g" => o.deposit_g = value().parse().unwrap_or_else(|_| fail("--deposit-g needs a number (0 = off, GEN-131)")),
             "--global-dir" => o.global_dir = Some(PathBuf::from(value())),
             "--global-res" => o.global_res = number("--global-res") as u32,
