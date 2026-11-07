@@ -82,3 +82,14 @@ Supersedes the pit goal of the deposition findings above: deposition stays for f
 | `min_depth_m` | 50 (set 2: 100) | m | calibration (typical lake depth of mid-size lakes) | `Infill.min_depth_m` |
 | `residual_m` | 100 (set 2: 200) | m | calibration (mean depth of the large lakes, Great Lakes 20-150 m; the deep rift lakes are the tail) | `Infill.residual_m` |
 Target of the check: lake share of land 2-3 % (Earth), basin depth per class against GLO-30.
+
+## Findings: where the pit volume is (inbox #96; seed 14, face 2 at 12,288 cells, G = 0, pits = cells more than 0.5 m under the flood; measured at pass 1's grid by `pit_compare`)
+| Surface | Scope | Pit share of land | Depth p50 / p95 / deepest | Volume |
+|---|---|---|---|---|
+| raw base | tile 2/12/10 footprint | 31.5 % | 381 / 1299 / 1818 m | 1.49e13 m3 |
+| raw base | whole face | 34.7 % | 11 / 480 / 1947 m | 8.61e14 m3 |
+| base + pass-1 change | tile 2/12/10 footprint | 0.2 % | 0.9 / 2.0 / 2.9 m | 1.9e8 m3 |
+| base + pass-1 change | whole face | 9.0 % | 5 / 15 / 400 m | 2.09e13 m3 |
+- The carve does not make the pit volume: the raw base holds it, and pass 1's breach and carve remove most of it at pass 1's grid (the face's pit volume falls to 2 %, the tile footprint's to nearly nothing).
+- The pits the bake prints after pass 2 (11.9 % of land, p50 139 m, deepest 710 m) therefore stand at pass 2's 102 m grid: the surface there is the fine base plus the C1-read pass-1 change, and dams of the fine base that the 814 m breach does not reach remain basins. A fix at pass 1's grid (the infill on the 814 m base) does not address them directly.
+- Basin infill probe (the same tile, `--infill` AREA,DEPTH,RESIDUAL, pass-2 fill pit stats): 25 km2 / 50 m / 100 m: 8.3 % of land, p50 14.5 m, p95 99 m, deepest 386 m, change range up to +1759 m; 100 km2 / 100 m / 200 m: 9.8 %, p50 19.5 m, p95 107 m, deepest 364 m, +1659 m. Against G = 0 (11.9 %, p50 139 m, deepest 710 m) the share barely moves, the depth falls strongly; lake share is far above Earth's 2-3 %. The infill raises the base by up to 1.7 km in the deepest basins.
