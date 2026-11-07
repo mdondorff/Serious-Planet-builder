@@ -1,0 +1,21 @@
+exact - pass 1's 814 m view: rms 21.3 m, |d| p50 3.4 p99 84.0 max 312.2 m, d p1 -61.1 p99 77.0 m
+exact - pass 2's 407 m base: rms 8.1 m, |d| p50 0.8 p99 34.2 max 161.8 m, d p1 -23.3 p99 31.5 m
+611 m lattice - pass 2's 407 m base (runtime base against the base the change was taken on): rms 12.3 m, |d| p50 1.8 p99 49.6 max 208.8 m, d p1 -44.0 p99 36.8 m
+breach 50 m at 102 m: 5.99 % of cells lowered, p50 10.1 m, p95 141.5 m
+breach 150 m at 102 m: 6.00 % of cells lowered, p50 10.3 m, p95 162.9 m
+breach 500 m at 102 m: 6.00 % of cells lowered, p50 10.3 m, p95 166.9 m
+surface | land in pits | depth p50 / p95 / max (m) | volume (m3) | 3 km relief p50 (m)
+L D breached at 102 m, limit 50 m | 6.2 % | 131.1 / 368.3 / 582.4 | 9.540e11 | 512
+M D breached at 102 m, limit 150 m | 1.1 % | 88.6 / 326.5 / 464.4 | 1.216e11 | 513
+N D breached at 102 m, limit 500 m | 1.0 % | 103.1 / 328.6 / 483.9 | 1.181e11 | 514
+A exact base (102 m) | 30.6 % | 292.4 / 1246.0 / 1830.9 | 1.253e13 | 478
+B pass 2's base (407 m nodes) | 29.7 % | 298.8 / 1235.1 / 1798.5 | 1.217e13 | 467
+C pass 1's view (814 m nodes) | 28.5 % | 304.0 / 1212.3 / 1777.7 | 1.165e13 | 449
+D pass 2's input: B + pass-1 change (C1) | 14.7 % | 135.7 / 522.4 / 781.9 | 2.543e12 | 508
+E pass 2's output: B + stored change | 11.9 % | 139.3 / 467.3 / 695.8 | 2.042e12 | 508
+F runtime-like: 611 m base + stored change | 12.7 % | 116.2 / 445.3 / 710.8 | 1.975e12 | 504
+G exact base + stored change | 13.7 % | 116.7 / 475.5 / 716.8 | 2.165e12 | 518
+H exact base + pass-1 change (no pass 2) | 15.3 % | 132.6 / 532.6 / 788.0 | 2.646e12 | 517
+I pass 1's carved surface, C1 read at 102 m | 13.3 % | 129.9 / 457.4 / 613.1 | 2.144e12 | 483
+J pass 1's carved surface, nearest pass-1 cell | 0.2 % | 1.1 / 2.2 / 3.0 | 1.988e8 | 465
+K pass 2's base + pass-1 change, nearest cell | 12.7 % | 35.3 / 210.6 / 713.8 | 7.820e11 | 561
