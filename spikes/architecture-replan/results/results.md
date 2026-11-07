@@ -182,3 +182,50 @@ Structural conflicts (the rows that block):
 5. **Scale is a count per face, and the store is close to its limit at Earth** (X11, X13).
 
 What does not conflict: CPU-canonical determinism (CON-07, CON-14), content-addressed keys and versions (ADR 0006), command-style items with stable ids (ADR 0007), stale-result pre-emption (ADR 0072), simulation grids separate from render LOD (ADR 0014, ADR 0088), presentation-only ground detail (ADR 0035). The review asks to keep all of these.
+
+## 4. Options, first sketch (no costs yet; phase 2)
+
+Common target (all three options aim at it; C narrows it):
+- **T1** One authoritative surface: what erosion carved is what the runtime draws (SPIKE-104 D-B; review P6, S3.4).
+- **T2** Hydrology as its own persistent structure: drainage graph, basins with spill level and type, river segments, lakes; the heights are an input to it, not its only carrier (review R4; resolves X9, X10).
+- **T3** Edits as inputs below erosion and drainage: height and driver edits (lithology, uplift, climate) feed the field and the simulation; overlay edits (stamps for roads, plots) stay above (resolves X1, X2).
+- **T4** Recomputation by dependency, not by face: invalidation along the drainage graph, regional solves on watershed domains with boundary conditions from the graph, a preview overlay first and the full result later, each bit-equal to a from-scratch run (resolves X3, X5-X8).
+- **T5** Scale as a parameter: per-body cell sizes, Earth as a preset (ADR 0045 point 2, ADR 0108; resolves X11, X12), a storage plan within 40 GB at Earth (X13).
+
+### Option A: evolve the application step by step
+
+| Keeps | Changes | Drops |
+|---|---|---|
+| everything below `generators` unchanged: `core` (coordinates, tile ids, hashing), `world-def` (items, canonical TOML), `cache` (packs, keys), `streaming`, `frame`, `render`, `editor`, `app`; the determinism contract (CON-07, CON-14, ADR 0010); the field bake, class source and drivers (ADRs 0089, 0102-0104, 0108); the implicit stream-power kernel, priority flood, spill graph and MFD (`bake/`) | in order, each a normal OpenSpec change behind a field version: (1) T1, SPIKE-104 D-A and D-B in the existing bake; (2) a hydrology stage after the erosion bake that turns pass 1's routing and the spill graph into a stored graph, basins and river segments (T2), lakes on the water field (ADR 0041 point 7's retrofit path); (3) T3 as a new layer order (height and driver items read by the field bake and the erosion; ADR 0007 and 0066 amended); (4) regional erosion domains cut by watershed with graph boundary conditions, used for re-bakes, while the first world build may keep the per-face pass 1 (T4); (5) reach along the graph (ADR 0066 amended); (6) the preview overlay field (X6 reading); (7) T5 | the fill-depth add-back as a lake stand-in (ADR 0101 point 3); ADR 0109's infill; the M9 planet bake in its current form (delayed until (1)-(2) at least); M9.1 items that only add work to the per-face pass 1 (pass-1 deposition) |
+
+- The existing tests, goldens, streaming and editor keep running at every step; each step can ship alone.
+- Patchwork risk: steps (3)-(5) amend the stage model that ADRs 0007, 0066 and CON-08 rest on. Without a written target first, they repeat the M9 pattern (five amendments to one chain). The mitigation is a target-architecture document and the vertical prototype as its reference before step (3).
+
+### Option B: a more fundamental re-implementation of the terrain core
+
+| Keeps | Changes | Drops |
+|---|---|---|
+| the engine around the terrain core: `core`, `world-def` (items extended), `cache` (packs, keys), `streaming`, `frame`, `render`, `editor` shell, `app`, CI and the golden process; the determinism contract; the analytic drivers (lithology, uplift, climate, class source) as library code; today's kernels (stream power, flood, spill, MFD, thermal, deposition) as tested building blocks | new subsystems with their own crates or modules, per the review's data model: planet state (definition + presets), terrain state per region (base, displacement, sediment with version links), hydrology (graph, watersheds, basins, rivers), geomorphology (regional solver on watershed domains, local refinement with boundary conditions), simulation (dependency graph, dirty regions, versioned snapshots, preview and full quality); one `TerrainSampler`-like interface that the runtime field reads. Built first as the 500 x 500 km vertical prototype **in this repository** beside the current pipeline (a new field implementation id, CON-07), switched over when it passes | the two-pass erosion bake as the architecture (ADRs 0088, 0099, 0100, 0101, 0105, 0109 superseded by new ADRs); the kind-13 layer format and the fill-depth channel semantics; the M9 planet bake; open M9.1 items that only serve the two-pass bake |
+
+- "Fork" here means a parallel implementation in the same repository and CI, not a separate repository: the streaming, render and test infrastructure is the larger part of the code and is not in question.
+- Patchwork risk is lowest: the new core is designed as one piece against T1-T5. The risk moves to delivery: nothing ships to the owner's view until the prototype passes, and the drivers, look and scorecard tuned on the old bake are tuned again.
+
+### Option C: cut requirements and keep more of today's design
+
+Each cut is independent; A or B can absorb any of them. What each cut lets the design keep:
+
+| Cut | Affects | Lets the design keep | What the owner gives up |
+|---|---|---|---|
+| C-a: erosion fixed at the seed; edits re-route water and update rivers and lakes, but do not re-erode | R1a (half) | the offline erosion bake as is (with T1); hydrology (T2) recomputed on the edited surface only, which is a routing, not a simulation | valleys do not respond to raised mountains or changed rock; "editing bugs" in erosion stay unseen |
+| C-b: hydrology and erosion respond to edits only by an explicit re-bake of whole faces (minutes to an hour), no regional path | R2 (the regional re-bake) | per-face pass 1 as the only unit (no regional solver); the edit is shown on top, flagged stale, until re-bake | no quick regional result; one-sixth-planet waits |
+| C-c: driver edits (climate, lithology, uplift) only before the first world build, not as later edits | R2 (regional property edits) | drivers stay analytic functions of seed and preset; no driver invalidation | regional climate and rock edits after the build |
+| C-d: rivers implicit at runtime (derived per view from stored area and a threshold), no persistent river objects | R4a (partly), R4d | today's channels plus a derived river renderer | stable river ids for gameplay and authoring, rivers as game objects |
+| C-e: engine scale fixed at Earth for the MVP; other radii only by a later per-body `res` | R5a ("in principle") | the fixed bake shape and Earth constants until after the MVP | scale tests now; risk of Earth assumptions hardening further |
+| C-f: a coarser pass-2 grid (about 200 m) to make room in the store | R7, R6 | the store under 40 GB with hydrology added | detail between 100 and 200 m comes from runtime creases only |
+
+Readings:
+- No single cut removes all five structural conflicts. C-a + C-b together keep the bake nearly as is, but they contradict R1a's stated purpose ("else editing is too limited"), which the owner marked firm.
+- C-e and C-f are the cuts that touch the fewest firm requirements; C-d touches a post-MVP item only (R4d) and part of R4a.
+- A and B share the target T1-T5; they differ in order and in whether the old chain is amended in place (A) or replaced beside itself (B). The vertical prototype of the review (R12) is the experiment that decides between them: if the prototype's hydrology and regional solver can be fed by today's drivers and kernels with small changes, A's steps (3)-(5) are cheap; if not, B is the honest route.
+
+Phase 2 (planner's next entry): costs and risks per option, the vertical-prototype plan, feasibility checks by coder agents, the recommendation and the owner decisions.
