@@ -49,3 +49,104 @@ Readings:
 - R5a asks the engine to take the planet's scale as a parameter everywhere; today the bake shape and several kernels take it as a constant.
 - R7 is met today only because hydrology and edits store nothing: about 36 GB of 40 GB is used by two caches.
 - The review's three ticked answers (hydrological network as an output, larger planets and moons, interactive erosion while sculpting) are stronger than R1-R5 in one place: the owner asks for a quick preview, then a re-bake with a delay, not erosion evolving live under the brush (R2). That makes the review's "fast" level a preview of heights and approximate drainage, and its "medium" and "high" levels the owner's on-demand re-bake.
+
+## 2. The review's recommendations against our code and ADRs
+
+Status: **there** (built or decided as recommended), **partly** (a piece exists, or exists at one scale only), **missing**, **n/a** (does not apply to our requirements or contradicts a firm one). Section numbers: "P" = the first part (pipeline review), "R" = the re-review with the architecture, "S" = the non-binding reference specification.
+
+### 2.1 Surface identity and reconstruction
+
+| Recommendation | Where | Status | Ours | Note |
+|---|---|---|---|---|
+| One authoritative base surface; runtime reconstructs exactly what erosion used | P2.3, P6, P11 M1, S3.4 | **missing** | pass 2 takes the change against the base every 4 cells (`bake/tile.rs:203`), the runtime adds it to the store's 611 m lattice read C1 (GEN-099, GEN-112): rms 12 m, max 209 m apart (SPIKE-104 §3) | SPIKE-104 D-B is the minimal fix |
+| Base-surface identity in every baked layer; reject incompatible combinations | P6, S3.3 | **partly** | layer keys fold the bake key, channel versions and kernel parameters (ADR 0088 point 7, GEN-114); a record under another key is refused (`load_tile`, STRM-065). The base the change was taken against (stride 4) is not named as such | the mismatch above passed every key check because both bases come from one bake key |
+| Store displacement, not absolute elevation; split regional, local, hydrological | P6.1 | **partly** | the change is stored per pass-2 tile (kind 13); pass 1's change is folded in, not kept as its own layer | regional/local split exists only inside the bake |
+| `TerrainSampler`: one interface returning elevation, slope, normal, material, geology, erosion, hydrology; elevation independent of camera LOD | S3.4, R8 | **partly** | `HeightField` is the one CPU interface for heights (`height.rs`); batch reads equal single reads (GEN-020); LOD changes only sampling, not identity (CON-08 coarse/fine agreement). Material, geology and hydrology are separate reads (driver block GEN-119, channel block GEN-126) | |
+| Simulation resolution independent of rendering resolution | R3.1, R8 | **there** | bake grids (814 m, 102 m) and the render quadtree are independent (ADR 0088, ADR 0014) | the problem is three bake samplings, not coupling to render LOD |
+| Do not use rendered tiles as simulation domains | R11.3 | **there** | pass-2 tiles are a fixed grid (3,072 cells + halo, GEN-101), not render tiles | |
+| Cross-face continuity in the data, not only a render cross-fade | P5.2, S3.2 | **partly** | pass 1 carves each face with a halo, no routing across cube edges; the change is cross-faded within the halo (GEN-100); the spill level is planet-wide across tile and cube edges (`bake/spill.rs`, GEN-121); one canonical coordinate path (`planet_core::cube`, ADR 0003) | a river crossing a cube edge is two routes joined by a fade, not one river |
+| Physical areas and distances, not grid indices | R3.2 | **partly** | routing uses one `dx` per grid (`bake/mod.rs:39`), so the MFD area is cells x dx^2 (`route.rs:125`); the tangent warp varies cell area 1.41x across a face (ADR 0003) | under 1.5x error, uniform per face; not planet-aware per cell |
+
+### 2.2 Hydrology
+
+| Recommendation | Where | Status | Ours | Note |
+|---|---|---|---|---|
+| Hydrology as an explicit, persistent, hierarchical drainage graph | P2.2, P9, R4, S4 | **missing** | drainage area of pass 1's last route as a byte per cell (GEN-110); receivers are not stored; ADR 0077's global river network left with the chunk stage (ADR 0086) | the review's central investment |
+| River network as vector segments (centreline, width, depth, discharge, profile) | R4.3, S4.4 | **missing** | none; rivers are valleys in the change, drawn as terrain | the coupled run of ADR 0077 had a coarse network; removed |
+| Basins with floor, spill elevation, outlet, area curve, type, water level; separate from fill | P7, R4.1, S4.2 | **partly** | the fill depth is a channel (ADR 0101), the spill level is planet-wide (GEN-121); no basin objects, ids, types or area curves; the runtime adds the fill back (GEN-112) | the review: do not conflate routing fill with water |
+| Priority-Flood for depressions | P10, R4.2A | **there** | Barnes improved priority flood (`bake/flood.rs`); parallel minimax version for the spill level (`bake/spill.rs`) | |
+| Classify depressions (artefact, endorheic, lake, intentional) before breaching or keeping | P3.2, P4.2, R4.2A | **partly** | breach every depression up to a fixed limit (500 m, GEN-100), keep the rest (ADR 0101); arid basins as sinks (ADR 0105 point 2, accepted, not built) | SPIKE-104 adds a breach at 102 m; still not class-aware |
+| D-infinity or MFD routing; different models for channels and hillslopes | P10, R4.2B | **partly** | MFD (Freeman 1.1) for area, jittered D8 receivers for the carve (ADR 0099 point 2) | a two-model split already, but not channel against hillslope by location |
+| Channel initiation by a climate- and geology-dependent threshold | R4.2C | **missing** | none (no channel extraction) | runoff weights exist (GEN-129) |
+| Hierarchical watersheds (coarse regions, refined locally, parent connectivity) | R4.1, S4.3 | **missing** | two passes are a two-level hierarchy of grids, not of watersheds | |
+| Lakes as water bodies | P7, R4.1 | **missing** | the water field has one producer, the sea (ADR 0041); lake ids reserved; F8 pit tolerance proposed (SPIKE-102) | |
+| Area-weighted accumulation with conservation tests | S4.2, S10.2 | **partly** | MFD area conserves the grid's area at outlets (GEN-100 scenario "The area is shared") | not per physical cell area |
+
+### 2.3 Geology and base relief
+
+| Recommendation | Where | Status | Ours | Note |
+|---|---|---|---|---|
+| Plates -> orogenic structure -> mountain geometry (orientation, envelope, chain type) | P3.3 | **partly** | plate mask with convergence and belts (GEN-094, GEN-095), belt core and flank as relief terms (GEN-096), uplift by province (ADR 0103); the ridged band is isotropic noise (GEN-098) | belts have extent and position, not ridge orientation |
+| Different noise per phenomenon; structure fields, not "more ridged noise" | P3.1 | **missing** | one trilinear value noise for bands, creases and detail (`height.rs:51`; SPIKE-104 §1) | |
+| No axis-aligned lattice artefacts | P3.1, P8.1, P11 M4 | **partly** | the shader's ground detail turns its lattices (REND-057); the generator does not | SPIKE-104 D-C |
+| Base terrain that drains by construction or explains its depressions | P3.2 | **missing** | the base holds 30.6 % of mountain land in closed basins (SPIKE-104 §3) | |
+| Creases conditioned by lithology and structure | P8.1 | **missing** | creases are noise octaves 7-11 (GEN-109) | lithology is analytic and could drive them (ADR 0102) |
+| Ground detail aware of material, slope, distance | P8.2 | **there** | detail weights by material, slope and footprint fade (`render/src/terrain.rs:470`, REND-055, REND-057) | |
+
+### 2.4 Geomorphology
+
+| Recommendation | Where | Status | Ours | Note |
+|---|---|---|---|---|
+| Stream-power regional model (FastScape-style implicit) | P10, R5.1 | **there** | implicit stream power with uplift after Braun and Willett (ADR 0088 point 4, `bake/carve.rs`); K from lithology (ADR 0102), U field (ADR 0103), runoff-weighted area (ADR 0104) | 20 steps, transient (ADR 0103 amendment) |
+| Sediment transport and deposition, SPACE-like coupling, sediment conservation tests | P10, R5.1, S5.2 | **partly** | pass-2 deposition sweep with mass balance `eroded = deposited + exported` (GEN-101); pass-1 deposition (Yuan et al.) drafted, not merged (#1223, ADR 0105 point 1) | |
+| Hillslope diffusion separate from thermal | P4.4, R7 | **partly** | thermal at a critical angle (GEN-101); no diffusion | |
+| Glacial erosion as its own operator with characteristic forms | P4.4, R5.3 | **partly** | ice-history field (GEN-134); minimal glacial erosion behind a gate (ADR 0106, open) | |
+| Local refinement driven by regional boundary conditions (upstream discharge, downstream level, sediment input) | R5.2, S5.3 | **partly** | pass 2 reads pass 1's change (C1) as its start and nothing else; no discharge or outlet level passed down | SPIKE-104: the hand-over loses connectivity |
+| Shared boundary conditions, overlap, or a regional network for adjacent tiles | P5.3 | **partly** | pass-2 tiles overlap by a 128-cell halo; the spill level is solved across tiles (GEN-121); no shared network | |
+| Do not raise erosion resolution globally | R11.1 | **there** | pass 1 at 12,288 (ADR 0099), pass 2 at 102 m, nothing finer | |
+| Simulation time distinct from editor time (`SimulationRequest` with duration and quality) | S5.4 | **missing** | carve steps and `K dt` are bake parameters (GEN-100) | |
+
+### 2.5 Editing, versioning, persistence
+
+| Recommendation | Where | Status | Ours | Note |
+|---|---|---|---|---|
+| Command-based edits with stable ids, deterministic semantics, undo/redo | S6.1, S6.4 | **there** | authored items with ULIDs, canonical TOML, application order `(priority, id)` (ADR 0007, ADR 0066); session undo; the command log is not persisted (ADR 0066) | |
+| Edits as commands on drivers (lithology, uplift, rainfall, lake basin) | R6, S6.1 | **partly** | class paint (ADR 0089 point 8) and driver edits by region (ADR 0076 point 7, proposed); no lithology, uplift, rainfall or lake items | |
+| Dependency graph with reverse dependencies; dirty regions per kind (geometric, hydrological, sediment, render) | R6.1, R6.2, S6.2 | **partly** | stage keys chain the read sets (ADR 0006, ADR 0066 point 4); footprint queries and Merkle region summaries (ADR 0066 points 2-3) find re-keyed tiles. No hydrological reach: an item's reach is a radius (ADR 0066 point 1), so an edit cannot invalidate downstream rivers | the key system is the right base; reach is geometric only |
+| Three quality levels: fast preview, regional recomputation, high simulation | R6.3 | **partly** | heights: drawn tiles exact within the edit-latency budget (ADR 0072); world build: preview first (ADR 0097 point 5); nothing between | |
+| Versioned, transactional updates; stale background results never overwrite newer state | R6.4, S6.3 | **there** for tiles | stale refreshes pre-empted, cancelled or dropped by key (ADR 0072 point 3); consumers key by artefact key (ADR 0006) | no transaction across several derived products (heights, rivers, materials) yet |
+| World definition separate from generated state; derived data regenerable | S8.1, S8.2 | **there** | CON-05: the definition is the truth, every runtime representation is a disposable cache; bakes are caches under a disk budget (ADR 0045 point 1, proposed) | an edited, re-simulated region makes "state" more than a cache (§3) |
+| Content-addressed cache keys over canonical inputs | S8.3 | **there** | 128-bit BLAKE3 keys over canonical encodings (ADR 0006, ADR 0018, ADR 0023) | |
+| Generation identity with algorithm and numerical-profile versions | P6, S1.5 | **there** | generator, field, kernel and channel versions plus implementation ids in every key (ADR 0006); a `libm` upgrade is an output change (ADR 0010) | |
+
+### 2.6 Determinism and platform
+
+| Recommendation | Where | Status | Ours | Note |
+|---|---|---|---|---|
+| CPU-only authoritative generation; GPU presentation only | S1.2, R end | **there** | CON-07, CON-14, ADR 0035: CPU canonical; a GPU field must match within bounds; presentation data has no CPU twin | the review asks to keep this |
+| No fast-math, deterministic reductions, fixed order | S1.3 | **there** | CON-14, ADR 0010 (clippy-enforced `libm`, fixed-order chunking) | |
+| Counter-based PRNG from stable ids | S1.3D | **there** | integer hashing of seed and ids (`core::hash::hash_u64s`, SplitMix64 chain; ADR 0006) | not Philox, same property |
+| Integer or fixed-point for topology decisions (spill, ordering, thresholds) | S1.3C | **partly** | wet floor in integer codes (`wet_floor.rs`); ties by cell index (GEN-100); flood and spill in f64 | |
+| Cross-platform CI (Windows, Linux x86-64, Linux ARM64, macOS ARM64) | S10.1 | **partly** | Windows and Linux x86_64 compared in CI (determinism manifest, ADR 0010); ARM and macOS untested | |
+| Edit-replay determinism | S1.6 | **partly** | items apply in canonical order (ADR 0007); no replay test across platforms | |
+
+### 2.7 Scale and storage
+
+| Recommendation | Where | Status | Ours | Note |
+|---|---|---|---|---|
+| No fixed metre resolutions; hierarchical spatial domains per phenomenon | P5.1, R3 | **partly** | per-body `res` from a target cell size (ADR 0045 point 2, proposed); TileId addresses any body (ADR 0003); the M9 bake shape is fixed (`BakeShape::production`) | |
+| Geometric, physical and procedural parameters in a planetary preset | R3.3 | **partly** | ADR 0108 (Earth is the default preset); SPIKE-103 lists about 35 rows of climate literals and four radius copies still to lift; no gravity parameter | |
+| Hierarchical, sparse storage; explicit lifetime of intermediate fields | S9.2 | **partly** | packs with compression and a compaction cap (ADR 0019, ADR 0029); dense per-face arrays in pass 1 (10 GB peak, SPIKE-104 §5) | |
+| Scaling tests by growth (double radius, more watersheds) | S9.4 | **missing** | budgets fixed at Earth (BUDG-014, ADR 0097) | |
+
+### 2.8 Process
+
+| Recommendation | Where | Status | Ours | Note |
+|---|---|---|---|---|
+| Synthetic validation fixtures (mountain and river, coastal range, plain with meander, endorheic basin, glacial valley, cube-face crossing) | P11, S10.2 | **partly** | synthetic grids in unit tests (cone, bowl, closed basin, diagonal plane; GEN-100 and GEN-101 scenarios); no named landscape suite; the scorecard samples real-like tiles (TEST-081 ff) | |
+| Measure connectivity, not a single pit share | S10.2 | **missing** | the measures are pit share and depth (SPIKE-102, SPIKE-104) | |
+| Turn the architecture into ADRs (ADR-0200 to 0212) | S11 | **n/a** as numbered | our series continues at 0110; decisions map to existing ADRs where this section says "there" | |
+| Build a vertical prototype of a 500 x 500 km region before rewriting | R12 | **missing** | the M9 previews are of the existing pipeline (ADR 0097) | phase 2 of this spike |
+| "Stop optimising the erosion passes; fix surface identity and topology first" | P final | **partly** | SPIKE-104's D-A and D-B are these two fixes; the pass-1 memory diet and timing (M9.1 P2, P4) are optimisation | |
+
+Count: of 55 rows, 14 there, 27 partly, 13 missing, 1 n/a. The foundations the review asks to keep (CPU-canonical determinism, keys and versions, item commands, stale-result pre-emption, priority flood, implicit stream power) are built. The missing core is one cluster: **an explicit, persistent hydrology (drainage graph, rivers, basins, lakes) and the edit path that updates it**.
