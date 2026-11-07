@@ -1,5 +1,5 @@
 # 0105 Deposition in pass 1 and endorheic sinks in arid basins
-Status: accepted (owner, 2026-11-05: "All four into m9", the independent review's items 1 and 2)
+Status: accepted (owner, 2026-11-05: "All four into m9", the independent review's items 1 and 2); point 1 amended by ADR 0109 (owner, 2026-11-07): basins are filled by an infill of the base before pass 1, deposition makes fans, deltas and valley floors
 Date: 2026-11-05
 Source: owner, 2026-11-05; independent review of the M9 bake plan (2026-11-05); Yuan et al. 2019 (stream power with deposition, FastScape); Davy and Lague 2009; ADR 0088 point 4; ADR 0101; ADR 0104
 

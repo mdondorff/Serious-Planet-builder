@@ -1,5 +1,5 @@
 # 0101 Keep depressions in the erosion layer; the fill depth is a stored channel
-Status: accepted (owner, 2026-11-05: SPIKE-102 D1, "the most rational"); built by GEN-120, GEN-121 and STRM-076/077: a post-pass fills each basin to one planet-wide spill level across tile and cube edges, from bake-scratch heights; the code (decision 4, owner 2026-11-05): fill depth u16 in 0.25 m steps against the exact base, clamped at 0
+Status: accepted (owner, 2026-11-05: SPIKE-102 D1, "the most rational"); built by GEN-120, GEN-121 and STRM-076/077: a post-pass fills each basin to one planet-wide spill level across tile and cube edges, from bake-scratch heights; the code (decision 4, owner 2026-11-05): fill depth u16 in 0.25 m steps against the exact base, clamped at 0; amended by ADR 0109 (owner, 2026-11-07): an infill of the base surface runs first, depressions are those left after it
 Date: 2026-11-05
 Source: owner, 2026-11-05; SPIKE-101; SPIKE-102 (`spikes/generator-archetypes/results/results.md` sections 4.1, 4.3, 6, 8); ADR 0088 point 4; ADR 0099; GEN-120, STRM-076; change `keep-pits` (#1192)
 
