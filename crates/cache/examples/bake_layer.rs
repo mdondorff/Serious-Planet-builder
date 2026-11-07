@@ -297,6 +297,12 @@ fn main() {
                 planet_generators::bake::face::fill_m(r.fill.iter().max().copied().unwrap_or(0)),
                 r.fill.iter().filter(|c| **c == u16::MAX).count()
             );
+            let mut deep: Vec<u16> = r.fill.iter().copied().filter(|c| *c > 0).collect();
+            deep.sort_unstable();
+            if !deep.is_empty() {
+                let q = |p: usize| planet_generators::bake::face::fill_m(deep[(deep.len() - 1) * p / 100]);
+                println!("pit depth over pit cells tile {}/{}/{}: p50 {:.2} m, p95 {:.2} m", t.face.0, t.ti, t.tj, q(50), q(95));
+            }
             r = r.with_fill_added();
         }
         stored.insert((t.face.0, t.ti, t.tj), r.core);

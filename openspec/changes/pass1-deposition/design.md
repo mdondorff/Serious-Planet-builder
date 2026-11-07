@@ -55,3 +55,15 @@ The constants are module constants until the ADR 0108 audit lifts them into the 
 - IDs: GEN-131 (carve) and TEST-095 (mass-balance and determinism tests) are reserved for this change (planner, 2026-11-06).
 - The gate's pit p50 of 20 m is a proposal, not the owner's number.
 - The Yuan coefficient values (`G` 1, the class scales) are start values from the literature and the class factors, not measured here.
+
+## Findings (2026-11-07, seed 14, tile 2/12/10, face 2 at 12,288; measured, not a gate)
+| Setting | Pit share of land | Deepest pit | Pit depth p50 / p95 (pit cells) | Change range | Pass 1 face time |
+|---|---|---|---|---|---|
+| G = 0 | 11.9 % | 710 m | 139 / 467 m | -1522 to 619 m | 1235 s |
+| G = 1, receiver ceiling | 12.4 % (faces 0 and 2 run) | 826 m | not printed | -1496 to 791 m | about +4 % |
+| G = 1, ceiling relaxed to the flood level (probe `PLANET_DEPOSIT_CEILING=flood`) | 12.2 % | 816 m | 139 / 482 m | -1492 to 798 m | 1799 s (probe floods each step) |
+| G = 4, same probe | 12.9 % | 830 m | 145 / 527 m | -1448 to 1193 m | 1784 s |
+- Relaxing the ceiling does not fill the pits, and G = 4 raises the change range instead (up to +1193 m): the eroded volume of 20 transient steps is small against pits hundreds of metres deep.
+- Reading (a hypothesis): most of the pit volume is in the base surface's own basins kept by ADR 0101, not made by the carve, so a deposition term fed only by the carve's erosion cannot reach the 20 m p50 gate.
+- Relief against G = 0 is not measured (no relief tool on this branch).
+- Process peak 10.0 GB at G = 0 (above CON-21's 8 GB; an M9.1 item of the planner), 10.9 GB with the probe's flood.

@@ -326,6 +326,9 @@ impl Sweep<'_, '_> {
             })
             .collect();
         // The land that takes sediment: not the sea's cells.
+        // PROBE (inbox #94, off by default): `PLANET_DEPOSIT_CEILING=flood` lets a cell deposit up to the flood level of the surface at the start of the step.
+        let flood: Option<Vec<f64>> = (std::env::var("PLANET_DEPOSIT_CEILING").as_deref() == Ok("flood"))
+            .then(|| super::flood::priority_flood(self.grid, z, &r.receiver.iter().map(|&x| x == NONE).collect::<Vec<bool>>(), p.epsilon));
         let g_of = |c: usize, z: &[f64]| if z[c] > self.floor && r.area[c] > 0.0 { p.deposit_g / r.area[c] } else { 0.0 };
         // Three arrays of 4 bytes a cell (1.9 GB with the pit flags on a face of 1.56e8 cells): the relation's constant (later the change), the donors' flux constant and their slope.
         let mut a = vec![0.0f32; n];
@@ -369,7 +372,10 @@ impl Sweep<'_, '_> {
             let hr_old = hr_new - dr;
             let start = z[c];
             let mut new = start + f64::from(delta[c]) + b * dr;
-            let ceiling = (hr_new + (start - hr_old).max(0.0) + p.epsilon).max(start + up);
+            let mut ceiling = (hr_new + (start - hr_old).max(0.0) + p.epsilon).max(start + up);
+            if let Some(fl) = &flood {
+                ceiling = ceiling.max(fl[c]);
+            }
             new = new.min(ceiling);
             if pit[c] {
                 new = new.max(start + up).max(self.floor);
