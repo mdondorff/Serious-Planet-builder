@@ -31,5 +31,6 @@
 |---|---|---|
 | Rules | `docs/constitution.md`, `openspec/specs/`, `docs/adr/` | owner, ADRs, archived changes |
 | Working files (small, current) | `docs/status.md`, `docs/log.md`, `docs/log.d/`, `docs/learnings.md`, `docs/spikes.md`, `docs/briefings/` | every session; size caps (ADR 0075) |
+| Target design (proposed) | `docs/design/` | owner-gated target architecture and its contracts; superseded by accepted ADRs |
 | Evidence | `docs/milestones/`, `docs/perf/`, `spikes/`, `tests/goldens/` | written once per report or run |
 | History | `docs/archive/`, `docs/background/`, `docs/spikes/` | frozen |
