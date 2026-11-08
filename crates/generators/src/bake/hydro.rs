@@ -94,6 +94,8 @@ pub struct HydroStats {
     pub mouths: usize,
     pub segments: usize,
     pub basin_cells: usize,
+    /// Components of pit cells shallower than the pit limit from floor to rim: the epsilon ramp of a flat, not a depression.
+    pub ramps: usize,
     pub basins: usize,
     pub artefacts: usize,
 }
@@ -150,6 +152,9 @@ pub fn hydrology(
     let n = grid.len();
     assert!(z.len() == n && filled.len() == n && outlet.len() == n && routing.receiver.len() == n, "one value per cell");
     assert!(params.initiation_m2 > 0.0 && params.pit_min_m >= 0.0, "initiation is positive, the pit limit not negative");
+    assert!(routing.area.len() == n, "one area per cell");
+    assert!(runoff.is_none_or(|r| r.len() == n) && net_evap.is_none_or(|e| e.len() == n), "one runoff and one net evaporation per cell");
+    assert!(net_evap.is_none() || runoff.is_some(), "a net evaporation (m/s) needs the runoff in m/s: without it Q is an area");
     let (receiver, area) = (&routing.receiver, &routing.area);
 
     // ---- Q: the local term, then the donors, leaves first
@@ -191,13 +196,15 @@ pub fn hydrology(
             continue;
         }
         stats.channel_cells += 1;
+        if donors[p] >= 2 {
+            stats.confluences += 1;
+        }
         if receiver[p] == NONE {
             stats.mouths += 1;
         } else if donors[p] == 0 {
             stats.heads += 1;
             starts.push(p as u32);
         } else if donors[p] >= 2 {
-            stats.confluences += 1;
             starts.push(p as u32);
         }
     }
@@ -269,15 +276,15 @@ pub fn hydrology(
         }
         // The spill point: the rim cell of the lowest filled level, ties by the cell id.
         let mut spill: Option<usize> = None;
-        let mut q_in = 0.0;
+        let mut exits: Vec<usize> = Vec::new();
         let mut area_m2 = 0.0;
         let mut evap = 0.0;
         for &c in &members {
             let c = c as usize;
             area_m2 += grid.cell_area(c);
             evap += net_evap.map_or(0.0, |e| f64::from(e[c]));
-            if receiver[c] == NONE || !pit(receiver[c] as usize) {
-                q_in += q[c];
+            if !pit(receiver[c] as usize) {
+                exits.push(c);
             }
             for d in 0..8 {
                 if let Some(r) = grid.neighbour(c, d) {
@@ -288,7 +295,26 @@ pub fn hydrology(
             }
         }
         let spill = spill.expect("a basin has a rim");
+        // The inflow: `Q` of the exits, but an exit whose flow comes back into the basin a few cells on (over a shallow margin or an island under the water) is inside the next exit's `Q`.
+        let mut q_in = 0.0;
+        'exits: for &e in &exits {
+            let mut r = receiver[e];
+            for _ in 0..256 {
+                if r == NONE {
+                    break;
+                }
+                if members.binary_search(&r).is_ok() {
+                    continue 'exits;
+                }
+                r = receiver[r as usize];
+            }
+            q_in += q[e];
+        }
         let (floor_m, spill_m) = (z[floor], filled[spill].max(z[floor]));
+        if spill_m - floor_m < params.pit_min_m {
+            stats.ramps += 1;
+            continue;
+        }
         if area_m2 < params.min_area_m2 && spill_m - floor_m < params.min_depth_m {
             stats.artefacts += 1;
             continue;
@@ -354,8 +380,8 @@ pub struct Verify {
     pub disconnected_segments: usize,
     /// Channel cells whose receiver is neither a channel cell nor an outlet, or does not stand lower on the filled surface.
     pub broken_channel_cells: usize,
-    /// Channel cells that are in no segment, plus segment cells counted twice: `channel cells - mouths - sum of segment cells`.
-    pub unaccounted_cells: i64,
+    /// Channel cells covered by no segment or by more than one (a mouth is covered by none and is not counted).
+    pub miscovered_cells: usize,
     /// The largest relative error of `Q(c)` against its local term plus its donors, over the channel cells.
     pub max_confluence_error: f64,
     /// Relative error of the sum of `Q` at the outlets against the sum of the local terms.
@@ -399,8 +425,15 @@ pub fn verify(
             v.disconnected_segments += 1;
         }
     }
-    let seg_cells: i64 = h.segments.iter().map(|s| i64::from(s.cells)).sum();
-    v.unaccounted_cells = h.stats.channel_cells as i64 - h.stats.mouths as i64 - seg_cells;
+    let mut cover = vec![0u8; n];
+    for s in &h.segments {
+        let mut c = s.up as usize;
+        while c != s.down as usize {
+            cover[c] = cover[c].saturating_add(1);
+            c = receiver[c] as usize;
+        }
+    }
+    v.miscovered_cells = (0..n).filter(|&p| h.channel[p] && usize::from(cover[p]) + usize::from(receiver[p] == NONE) != 1).count();
     // Q at every channel cell against a recomputation from its donors, summed in the cell order of the neighbours.
     let local = |p: usize| if grid.is_active(p) && !outlet[p] { grid.cell_area(p) * runoff.map_or(1.0, |r| f64::from(r[p])) } else { 0.0 };
     for c in 0..n {

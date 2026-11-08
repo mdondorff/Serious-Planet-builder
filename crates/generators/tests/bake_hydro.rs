@@ -54,7 +54,7 @@ fn the_channel_graph_is_connected_downhill_and_conserves_discharge() {
             assert!(h.stats.segments > 3 && h.stats.confluences > 0 && h.stats.heads > 3, "a river network ({ctx}): {:?}", h.stats);
             assert_eq!(v.disconnected_segments, 0, "G-CON disconnected segments ({ctx})");
             assert_eq!(v.broken_channel_cells, 0, "G-CON channel cells without a downhill channel receiver ({ctx})");
-            assert_eq!(v.unaccounted_cells, 0, "every channel cell is in one segment or is a mouth ({ctx})");
+            assert_eq!(v.miscovered_cells, 0, "every channel cell is in one segment or is a mouth ({ctx})");
             assert!(v.max_confluence_error <= 1e-9, "Q at confluences {} ({ctx})", v.max_confluence_error);
             assert!(v.q_outlets_error <= 1e-9, "Q at the outlets {} ({ctx})", v.q_outlets_error);
             assert!(v.area_outlets_error <= 1e-9, "A_d at the outlets {} ({ctx})", v.area_outlets_error);
@@ -70,11 +70,19 @@ fn the_channel_graph_is_connected_downhill_and_conserves_discharge() {
             assert!(continues > 0, "a channel continues below the threshold ({ctx})");
             for s in &h.segments {
                 assert!(s.q_down >= s.q_up, "Q does not fall along a segment");
-                let head = (0..z.len()).filter(|&p| p == s.up as usize).all(|p| routing.area[p] >= params.initiation_m2 || h.q[p] > 0.0);
-                assert!(head);
             }
-            let heads = (0..z.len()).filter(|&p| h.channel[p] && routing.area[p] >= params.initiation_m2).count();
-            assert!(heads >= h.stats.heads, "every head is an initiated cell ({ctx})");
+            // No restart and no extra channel cells: a channel cell below the threshold has a channel donor; a head is initiated.
+            let mut donor = vec![false; z.len()];
+            for p in 0..z.len() {
+                if h.channel[p] && routing.receiver[p] != NONE {
+                    donor[routing.receiver[p] as usize] = true;
+                }
+            }
+            for p in 0..z.len() {
+                if h.channel[p] && routing.area[p] < params.initiation_m2 && routing.receiver[p] != NONE {
+                    assert!(donor[p], "a channel cell below the threshold has a channel donor ({ctx})");
+                }
+            }
             let again = hydrology(&g, &z, &filled, &routing, &outlet, rr, None, &params);
             assert_eq!(again.segments, h.segments, "the ids and the graph are the same on a second run ({ctx})");
         }
@@ -109,7 +117,7 @@ fn rivers_cross_the_cube_edges_and_the_area_is_conserved() {
         .count();
     assert!(crossing > 0, "a channel crosses a cube edge");
     assert!(h.segments.iter().any(|s| s.up as usize / (n * n) != s.down as usize / (n * n)), "a segment spans a cube edge");
-    assert_eq!((v.disconnected_segments, v.broken_channel_cells, v.unaccounted_cells), (0, 0, 0));
+    assert_eq!((v.disconnected_segments, v.broken_channel_cells, v.miscovered_cells), (0, 0, 0));
     assert!(v.max_confluence_error <= 1e-9 && v.q_outlets_error <= 1e-9 && v.area_outlets_error <= 1e-9, "{v:?}");
 }
 
@@ -156,12 +164,24 @@ fn a_basin_has_floor_spill_curve_class_and_an_identity_of_its_lowest_cell() {
     assert_eq!(b.class, BasinClass::Lake, "no evaporation: it overflows");
     assert!(b.q_in > 0.0 && (b.q_out - b.q_in).abs() <= 1e-9 * b.q_in);
     assert_eq!(b.water_level_m, b.spill_m);
-    // Strong evaporation: no active outlet, the water level sits between the floor and the spill, nothing continues downstream.
-    let evap: Vec<f32> = vec![1.0e3; w * w];
-    let dry = run(&z, Some(&evap));
+    // Net evaporation with a runoff field in m/s: no active outlet, and the water level is where A(h) E meets the inflow on the curve (hand-computed between the 1st and 2nd step).
+    let runoff: Vec<f32> = vec![1.0e-8; w * w];
+    let evap: Vec<f32> = vec![1.0e-6; w * w];
+    let outlet = g.outlets(&z, 0.0);
+    let routing = route_rules(&g, &z, &outlet, EPS, 3, 0.0, None, RoundRules::ROUND);
+    let filled = priority_flood_with(&g, &z, &outlet, EPS, true);
+    let dry = hydrology(&g, &z, &filled, &routing, &outlet, Some(&runoff), Some(&evap), &HydroParams::default());
     let d = &dry.basins[0];
     assert_eq!(d.class, BasinClass::Endorheic);
-    assert!(d.water_level_m >= d.floor_m && d.water_level_m < d.spill_m && d.q_out == 0.0);
+    assert!(d.q_out == 0.0);
+    let (h1, h2) = (d.floor_m + (d.spill_m - d.floor_m) / 16.0, d.floor_m + 2.0 * (d.spill_m - d.floor_m) / 16.0);
+    let (w1, w2) = (d.area_m2[0] * 1.0e-6, d.area_m2[1] * 1.0e-6);
+    assert!(w1 < d.q_in && d.q_in <= w2, "the balance is met between the 1st and 2nd step: {w1} < {} <= {w2}", d.q_in);
+    let want = h1 + (d.q_in - w1) / (w2 - w1) * (h2 - h1);
+    assert!((d.water_level_m - want).abs() < 1e-6, "water level {} against {want}", d.water_level_m);
+    // No water reaches a bowl nobody drains into: the level is the floor.
+    let none = hydrology(&g, &z, &filled, &routing, &outlet, Some(&vec![0.0f32; w * w]), Some(&evap), &HydroParams::default());
+    assert_eq!((none.basins[0].q_in, none.basins[0].water_level_m), (0.0, none.basins[0].floor_m));
     // Identity: a pure function of the lowest cell. An edit elsewhere, or deeper in the same cell, keeps it; a new lowest cell moves it.
     let mut far = z.clone();
     far[30 * w + 30] += 7.0;
@@ -181,4 +201,106 @@ fn a_basin_has_floor_spill_curve_class_and_an_identity_of_its_lowest_cell() {
     let a = run(&dent, None);
     assert_eq!(a.basins.len(), 1);
     assert!(a.stats.artefacts >= 1, "the dent is an artefact");
+}
+
+/// The inflow of a basin by its definition: the local terms of every cell whose D8 path reaches the basin.
+fn reaching(g: &Grid, routing: &planet_generators::bake::route::Routing, members: &[bool], outlet: &[bool]) -> f64 {
+    let n = g.len();
+    let mut reaches = vec![0u8; n]; // 0 unknown, 1 no, 2 yes
+    let mut total = 0.0;
+    for p in 0..n {
+        let mut path = Vec::new();
+        let mut c = p;
+        let answer = loop {
+            if reaches[c] != 0 {
+                break reaches[c] == 2;
+            }
+            path.push(c);
+            if members[c] {
+                break true;
+            }
+            if routing.receiver[c] == NONE {
+                break false;
+            }
+            c = routing.receiver[c] as usize;
+        };
+        for &x in &path {
+            reaches[x] = if answer { 2 } else { 1 };
+        }
+        if answer && !outlet[p] {
+            total += g.cell_area(p);
+        }
+    }
+    total
+}
+
+// spec: GEN-145
+#[test]
+fn the_inflow_of_a_basin_counts_each_cell_once_even_over_shallow_islands() {
+    let w = 40;
+    let g = Grid::new(w, w, 800.0);
+    let mut z = bowl_land();
+    // Islands and sills 0.3 m under the water inside the bowl: flooded but not pit cells, on the flow paths to the pass.
+    for (i, j) in [(13usize, 11usize), (12, 13), (14, 14), (11, 12)] {
+        z[j * w + i] = 589.7;
+    }
+    let outlet = g.outlets(&z, 0.0);
+    let routing = route_rules(&g, &z, &outlet, EPS, 3, 0.0, None, RoundRules::ROUND);
+    let filled = priority_flood_with(&g, &z, &outlet, EPS, true);
+    let h = hydrology(&g, &z, &filled, &routing, &outlet, None, None, &HydroParams::default());
+    assert_eq!(h.basins.len(), 1);
+    let members: Vec<bool> = (0..w * w).map(|p| !outlet[p] && filled[p] - z[p] > 0.5).collect();
+    let want = reaching(&g, &routing, &members, &outlet);
+    assert!(
+        (h.basins[0].q_in - want).abs() <= 1e-9 * want,
+        "inflow {} against the cells that drain into the basin {want}",
+        h.basins[0].q_in
+    );
+}
+
+// spec: GEN-145
+#[test]
+fn the_epsilon_ramp_of_a_flat_is_not_a_basin() {
+    // A flat plane 1,200 cells across: the flood ramps it by 1 mm a cell, 0.6 m at the middle, over the pit limit; no depression.
+    let w = 1200;
+    let g = Grid::new(w, w, 800.0);
+    let z = vec![10.0; w * w];
+    let outlet = g.outlets(&z, 0.0);
+    let routing = route_rules(&g, &z, &outlet, EPS, 3, 0.0, None, RoundRules::ROUND);
+    let filled = priority_flood_with(&g, &z, &outlet, EPS, true);
+    let h = hydrology(&g, &z, &filled, &routing, &outlet, None, None, &HydroParams::default());
+    assert_eq!(h.basins.len(), 0);
+    assert!(h.stats.ramps >= 1, "the ramp is counted: {:?}", h.stats);
+}
+
+// spec: GEN-145
+#[test]
+fn h1_runs_on_a_landmass_of_the_cube() {
+    let n = 24;
+    let full = Grid::cube(n, R);
+    let cube = planet_generators::bake::h0::GlobalGrid::new(n, R);
+    let z: Vec<f64> = (0..full.len())
+        .map(|p| {
+            let d = cube.direction(p as u32);
+            let s = d.x * 0.2 - d.y * 0.3 - d.z * 0.93;
+            1800.0 * (1.0 - s)
+                + 120.0 * libm::sin(9.0 * d.x + 4.0 * d.y) * libm::cos(7.0 * d.z)
+                + 3.0 * planet_generators::bake::route::jitter(5, p as u64, 0)
+                - 400.0 * (s - 0.85).max(0.0) * 8.0
+                - 20.0
+        })
+        .collect();
+    let land: Vec<bool> = z.iter().map(|&v| v > 0.0).collect();
+    let active: Vec<bool> = (0..z.len()).map(|p| land[p] || (0..8).filter_map(|d| full.neighbour(p, d)).any(|q| land[q])).collect();
+    let g = Grid::cube(n, R).with_active(active.clone());
+    let outlet: Vec<bool> = (0..z.len()).map(|p| active[p] && z[p] <= 0.0).collect();
+    let routing = route_rules(&g, &z, &outlet, EPS, 5, 0.0, None, RoundRules::ROUND);
+    let filled = priority_flood_with(&g, &z, &outlet, EPS, true);
+    let params = HydroParams { initiation_m2: 30.0 * g.cell_area(0), ..HydroParams::default() };
+    let h = hydrology(&g, &z, &filled, &routing, &outlet, None, None, &params);
+    let v = verify(&g, &h, &routing, &filled, &outlet, None, None);
+    assert!(h.stats.segments > 0);
+    assert_eq!((v.disconnected_segments, v.broken_channel_cells, v.miscovered_cells), (0, 0, 0));
+    assert!(v.max_confluence_error <= 1e-9 && v.q_outlets_error <= 1e-9 && v.area_outlets_error <= 1e-9, "{v:?}");
+    assert!((0..z.len()).all(|p| active[p] || !h.channel[p]), "no channel off the grid");
 }
