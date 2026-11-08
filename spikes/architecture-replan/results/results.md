@@ -408,3 +408,59 @@ K1 definition + items
 - Memory: a level-2 job must fit beside streaming in terrain's 4.0 GB (BUDG-005). At pass 1's measured 64 bytes a cell (10.0 GB / 1.56e8 cells), a 1.5 GB job is about 2.3e7 cells at 814 m, about 1.5e7 km^2: larger than every catchment but the largest few, which are cut at confluences (§5.1 risk). Local tiles (3,072^2 + halo) already fit (under 2 GB).
 - Rivers and lakes are tile data (segments rasterised into the tile's channel block, water levels per body as today's sea), not per-frame work; their GPU cost is a budget line measured before A6 (BUDG-002).
 - The chunk stage's failure mode (solves on the critical path, ADR 0086) is excluded by construction: no solve is requested by the plan; the plan requests tiles whose keys exist.
+
+## 7. The vertical prototype
+
+### 7.1 Scope
+
+- **Region:** 500 x 500 km of seed 14 holding a mountain range, a plateau, a river system with at least three tributaries above the river threshold, a coastal outlet and one intentional closed basin (arid or tectonic). Chosen by a search over the class map, the coarse routing and the aridity (a spikes task of about half a day; candidate area: around tile 2/12/10, SPIKE-104's mountain tile, which has mountains and a coast on face 2).
+- **Second, small case:** a 100 x 100 km window across a cube edge with one river crossing it.
+- **Chain:** K3 (one base lattice), K4 (H0 at about 3 km over the whole planet, since watersheds can extend beyond the region), K5 on the watershed domains that intersect the region, K6 (graph, basins, rivers, the closed basin as a lake), K7 on the pass-2 tiles of the region, K8 (the surface with channel geometry), K11 (viewer and stills through the product path, rivers and the lake drawn), K9 (one edit's propagation), K10 only as one scripted edit item.
+- **Edit:** raise a 50 x 50 km part of the range by 1,000 m (a height item below erosion), then undo.
+- **Out of scope:** glacial and coastal processes, materials beyond today's, meanders, seasons, other planet sizes (one scaled run of K4 only, §7.2 Q7).
+
+### 7.2 Questions it must answer (A against B)
+
+| # | Question | Decides |
+|---|---|---|
+| Q1 | Do today's kernels (carve, flood, spill, route, breach) run on a watershed domain with outlet levels from H0, unchanged in their core? | A if yes with small changes; B's re-housing if not |
+| Q2 | Is the domain decomposition stable enough: does a re-solve after the edit equal a from-scratch build of the edited definition, bit for bit, on 1 and 8 threads? | the feasibility of X5 under either option |
+| Q3 | Do river segments and basins from H1 keep connectivity through K7 and through every runtime sampling (the C1 read at the store lattice, the render LODs)? | whether the hydrology must be authoritative (graph first) or can stay derived (C-d) |
+| Q4 | Can the runtime field add channel geometry and stay within the plan's bounds (the pyramid, GEN-102) and the frame budget? | A6 / B7 shape |
+| Q5 | Can the derived data (graph, domains, segments) live in today's pack store and key scheme (ADR 0019, ADR 0006), or does it need a new store model? | A (fits) or B (new store) |
+| Q6 | Edit latency and memory per preview level (L1, L2) on terrain's share | R2 and R3 feasibility |
+| Q7 | Store per 500 km region extrapolated to the planet, and H0's cost at 2x radius | R7, R5 |
+
+Decision rule: if Q1, Q2 and Q5 pass with changes confined to new stages plus the amended layer order, **A**. If Q1 or Q5 fails (the kernels or the store cannot carry domains, versions and graph data without a new data model), **B**. Q3, Q4, Q6 and Q7 shape either option; a failure there is a requirement question (C).
+
+### 7.3 Pass and fail criteria (proposed numbers)
+
+| Criterion | Measure | Pass |
+|---|---|---|
+| Surface identity | runtime height minus the bake's surface at the bake's lattice nodes | 0 at nodes (bit-equal before quantisation); within the 0.25 m quantisation step after |
+| Connectivity | river segments disconnected at any supported sampling (814 m, 102 m, runtime read at levels covering 611 m to 1 m) | 0 segments; channel cells with no downhill path to their segment's outlet: 0 |
+| Unintended sinks | land cells more than 0.5 m under the flood that belong to no classified basin | at most 1 % of the region's land (SPIKE-104: 1.0 % with a 102 m breach) |
+| Intentional basin | the chosen closed basin | classified as closed, kept, drawn as a lake (or playa if arid) |
+| Relief | 3 km relief p50 in mountains | at least 0.9 of SPIKE-104's breached surface (514 m on 2/12/10) |
+| Cube edge | the crossing river | one segment chain across the edge, endpoints within one cell, area conserved to 1e-9 relative |
+| Edit result | the raised range | rivers move where the divide moved; downstream discharge changes; re-solve = from-scratch build bit for bit |
+| Edit latency | L1 (H0 re-route) and L2 (domains of the region) on 10 threads | L1 at most 10 s; L2 at most 10 min; peak memory at most 1.5 GB per job |
+| Undo | undo of the edit | the world's key set equals the pre-edit key set |
+| Determinism | 1 and 8 threads; Windows and Linux CI | bit-equal |
+| Runtime | the region's flight in the viewer, rivers and lake drawn | no held-back tiles; frame within BUDG-001/002 (measured in a perf window, owner-free under ADR 0087's rules) |
+| Store | the region's derived data, extrapolated to the planet's land | at most 35 GB at Earth (5 GB margin under R7) |
+
+### 7.4 Effort and what carries over
+
+| | Effort (estimate) | Lanes | Carries into production under A | Under B |
+|---|---|---|---|---|
+| Region search and fixtures | 1-2 | spikes | the region and the cube-edge window become the validation suite (review P11) | same |
+| K4 H0 planet-wide + K5 on domains | 5-8 | explorer | A4 and A8's first half (H0, domains); the kernels unchanged | B4/B5 v0 |
+| K6 graph, basins, segments, lake | 4-7 | explorer | A4, A5 | B4 v0 |
+| K7 with channel boundaries + K8 surface | 3-5 | explorer, crusader | A1 (already planned) and A6's field term | B3, B7 v0 |
+| Runtime: rivers and the lake drawn | 3-5 | crusader | A6 v0 | B7 v0 |
+| The edit and its propagation | 3-5 | explorer, crusader | A7, A9 v0 | B6 v0 |
+| Measurement against §7.3 | 1-2 | spikes | the gates of A's steps | B's switch-over gate |
+| **Total** | **20-34** | three lanes, about 2.5-4 weeks | under A almost all of it is production code of A4-A9 for one region | under B it is the core's v0 |
+
+- Under A the prototype is not throwaway: it is A4-A9 run on one region. That makes the decision cheap to reverse: if Q1 or Q5 fails half way, the region's code becomes B's v0.
