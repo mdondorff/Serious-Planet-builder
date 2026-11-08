@@ -56,6 +56,7 @@ impl Grid {
 
     /// The same grid with its cell `(0, 0)` at the global cell `origin` (a window of a larger grid: the jitter of a cell follows its global position).
     pub fn with_origin(mut self, origin: (u32, u32)) -> Grid {
+        assert!(self.cube.is_none(), "a cube grid has its own cell ids: no origin");
         self.origin = origin;
         self
     }
@@ -75,6 +76,7 @@ impl Grid {
 
     /// The same grid with a physical cell metric (GEN-138): [`Grid::cell_area`] and [`Grid::distance_at`] follow it.
     pub fn with_metric(mut self, metric: metric::Metric) -> Grid {
+        assert!(self.cube.is_none(), "a cube grid has the sphere's metric: no plane metric");
         self.metric = Some(metric);
         self
     }

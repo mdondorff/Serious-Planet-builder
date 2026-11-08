@@ -40,6 +40,10 @@ pub struct DepositReport {
 /// the eroded column of a cell is `original - z` where positive. `area` is the routing's drainage area. Refused: arrays of another length, a `zeta` outside [0, 1], a `kc` that is
 /// negative or not finite, a height that is not finite.
 pub fn deposit(grid: &Grid, z: &mut [f64], original: &[f64], filled: &[f64], routing: &Routing, params: &DepositParams) -> DepositReport {
+    assert!(
+        !grid.is_cube(),
+        "the deposition sweep assume a plane grid (uniform cell size, row and column neighbours): not for a cube grid yet (GEN-144)"
+    );
     let n = grid.len();
     assert!(z.len() == n && original.len() == n && filled.len() == n && routing.receiver.len() == n, "one value per cell");
     assert!((0.0..=1.0).contains(&params.zeta), "zeta is a share in [0, 1], not {}", params.zeta);
@@ -124,6 +128,10 @@ pub fn deposit_on_own_route(
 /// heights' sum is unchanged. The pits are taken in cell order and the pass repeats (the neighbours' fall can make a smaller pit) up to `max_passes` times, until no pit is deeper than
 /// `min_depth_m`. Returns the passes run. Deterministic: serial, fixed order, no hash or thread.
 pub fn spread_pits(grid: &Grid, z: &mut [f64], sea_level: f64, min_depth_m: f64, max_passes: usize) -> usize {
+    assert!(
+        !grid.is_cube(),
+        "spreading the pits assume a plane grid (uniform cell size, row and column neighbours): not for a cube grid yet (GEN-144)"
+    );
     let w = grid.w();
     assert!(w > 0 && z.len().is_multiple_of(w), "one height per cell");
     let h = z.len() / w;

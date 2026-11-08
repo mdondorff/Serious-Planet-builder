@@ -7,7 +7,8 @@
 3. Across an edge the faces are turned, so the direction in which a cell reaches back is not the opposite slot. The partitioned route looks the reverse direction up on a cube grid (a plane keeps the opposite-slot table).
 4. A landmass is a mask (`with_active`): the active cells are the land cells connected through the cube graph and the sea cells that touch them; the coast ring is the outlets. The partitioned route runs on a mask (the mask is part of the memo key); `round::cut_in` leaves the inactive cells out of the catchments.
 5. The region is found at the working resolution from the region's centre. The H0 coarse landmass as the definition is not used here.
-6. The jitter stream is one for the whole sphere (the face stream of `FaceSpec::stream` is per face); the cube grid's global id is the cell id.
+6. The jitter stream is one for the whole sphere (the face stream of `FaceSpec::stream` is per face); the cube grid's global id is the cell id. Cube results are therefore not bit-comparable to window or face runs; the comparison with the window runs below mixes the jitter with the border.
+7. Kernels that assume a plane (the deposition sweep, spreading pits, thermal erosion) refuse a cube grid. The base is read as f32 in the example.
 
 ## Measurements (`examples/landmass_region`, release, 8 threads, 3,072 cells a face edge, round rules, seed 14, one machine)
 | Value | Result |
@@ -18,6 +19,7 @@
 | G-PART, tiles of 256 | 864 tiles, 6 sweeps, 667 tile floods, 47.4 s; against the resident route 0 receivers, 0 `A_d` differ |
 | E2 pass (2031, 311) lowered by 100 m | 3 of 667 tile floods (0.4 %); tiles changed: filled 1, receivers 1, `A_d` 2; 60.6 s; 0 receivers, 0 `A_d` differ against the resident route |
 | 4 rounds of 5 steps | 83.6 s; rounds route 100,602 catchments each, largest 389,016 to 389,079 cells |
+| G-ROUND on the landmass | whole-region carve (same rules, 20 steps) 111.8 s; the round solver (4 rounds) 83.6 s; 0 cells differ |
 | Region land change (n 16,730) | p5 -566.7 m, p50 -133.2 m, p95 -1.6 m, max +14.6 m |
 - The window runs (GEN-142, an outlet at the window border): p5 -565.4 m, p50 -132.4 m, p95 -1.7 m, max +16.0 m. Difference at p50: 0.8 m.
 - The edit time (60.6 s) is dominated by what is not memoised (A3 section 6.5, GEN-143).

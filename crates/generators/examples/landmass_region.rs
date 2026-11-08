@@ -2,6 +2,7 @@
 //! the land cells connected through the cube graph, its coast ring as outlets, then the resident route, the partitioned route (G-PART), 4 rounds of 5 steps (the round solver) and, with
 //! `reference`, the whole-region carve (G-ROUND). The region's change is compared with the window runs of `rounds_region` (an artificial border).
 //! Usage: landmass_region [cells_a_face_edge] [tile] [threads] [reference]. The base heights are cached in `target/landmass_base_<n>.f32`.
+#![allow(clippy::needless_range_loop, clippy::chunks_exact_to_as_chunks)]
 use planet_core::{Face, Vec3};
 use planet_generators::bake::carve::{carve, CarveParams};
 use planet_generators::bake::face::FaceSpec;
@@ -22,6 +23,7 @@ fn main() {
     let tile: usize = a.get(2).map_or(256, |s| s.parse().unwrap());
     let threads: usize = a.get(3).map_or(8, |s| s.parse().unwrap());
     let reference = a.get(4).is_some_and(|s| s == "reference");
+    assert_eq!(n, 3072, "the seed cell, the region and the edit are the 3,072-cell grid's");
     let total = 6 * n * n;
     let seed = 14u64;
     let t0 = Instant::now();

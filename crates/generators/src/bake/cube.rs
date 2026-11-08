@@ -7,13 +7,19 @@ use super::h0::GlobalGrid;
 use super::NEIGHBOURS;
 
 /// The cube topology of a [`super::Grid`].
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Cube {
     n: usize,
     radius_m: f64,
     g: GlobalGrid,
     /// The neighbour across an edge: `[face][side][k]`, side 0 = `i = 0` (k = j), 1 = `i = n - 1` (k = j), 2 = `j = 0` (k = i), 3 = `j = n - 1` (k = i).
     links: Vec<u32>,
+}
+
+impl std::fmt::Debug for Cube {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Cube {{ n: {}, radius_m: {} }}", self.n, self.radius_m)
+    }
 }
 
 impl PartialEq for Cube {

@@ -118,7 +118,7 @@ fn flood_tile(grid: &Grid, r: Rect, z: &[f64], outlet: &[bool], ext: &[(usize, f
     let mut heap: BinaryHeap<Reverse<(u64, u32)>> = BinaryHeap::new();
     for l in 0..dist.len() {
         let p = global(l);
-        if outlet[p] {
+        if outlet[p] && grid.is_active(p) {
             dist[l] = z[p];
             heap.push(Reverse((key(z[p]), l as u32)));
         }
@@ -209,8 +209,8 @@ pub fn partitioned_route(
     assert_eq!(z.len(), n, "one height per cell");
     assert_eq!(outlet.len(), n, "one outlet flag per cell");
     assert_finite("the heights", z);
-    assert!(outlet.iter().any(|&o| o), "a flood needs an outlet");
-    assert!(!grid.is_cube() || grid.w() % tile == 0, "the tiles of a cube grid divide a face edge");
+    assert!((0..n).any(|p| outlet[p] && grid.is_active(p)), "a flood needs an outlet on the grid");
+    assert!(!grid.is_cube() || grid.w().is_multiple_of(tile), "the tiles of a cube grid divide a face edge");
     let (_, _, tiles) = rects(grid, tile);
     let mut stats = PartStats { tiles: tiles.len(), ..PartStats::default() };
 
@@ -239,7 +239,8 @@ pub fn partitioned_route(
         let mut changed = false;
         for (t, &r) in tiles.iter().enumerate() {
             let ext = offers(grid, r, &filled);
-            let has_outlet = (r.y0..r.y0 + r.h).any(|y| (r.x0..r.x0 + r.w).any(|x| outlet[y * grid.w() + x]));
+            let has_outlet =
+                (r.y0..r.y0 + r.h).any(|y| (r.x0..r.x0 + r.w).any(|x| outlet[y * grid.w() + x] && grid.is_active(y * grid.w() + x)));
             if ext.is_empty() && !has_outlet {
                 continue;
             }
@@ -284,6 +285,13 @@ pub fn partitioned_route(
     }
     assert!((0..n).all(|p| !grid.is_active(p) || filled[p].is_finite()), "a cell is not reached by the flood: no outlet on its component");
 
+    // The cells off the grid hold what the resident flood leaves there: their height if flagged as outlets, 0.0 otherwise.
+    for p in 0..n {
+        if !grid.is_active(p) {
+            filled[p] = if outlet[p] { z[p] } else { 0.0 };
+        }
+    }
+
     // ---- receivers, per tile
     let mut receiver = vec![NONE; n];
     for r in &tiles {
@@ -308,7 +316,7 @@ pub fn partitioned_route(
     // The direction in which `p` reaches `q`, given that `q` reaches `p` in `d`: the opposite one on a plane; across a cube edge the faces are turned, so it is looked up.
     let cube = grid.is_cube();
     let slot = |p: usize, q: usize, d: usize| -> usize {
-        if cube {
+        if cube && p / (grid.w() * grid.w()) != q / (grid.w() * grid.w()) {
             (0..8).find(|&e| grid.neighbour(p, e) == Some(q)).expect("a neighbour reaches back")
         } else {
             OPPOSITE[d]

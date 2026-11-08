@@ -2,6 +2,7 @@
 //! across the edges; the resident route, the partitioned route and the round solver run on it and agree bit for bit. Small cubes; no store read.
 
 use planet_generators::bake::carve::{carve, CarveParams};
+use planet_generators::bake::flood::priority_flood_with;
 use planet_generators::bake::partition::{partitioned_route, PartCache};
 use planet_generators::bake::round::solve_rounds;
 use planet_generators::bake::route::{route_rules, RoundRules, NONE};
@@ -39,7 +40,7 @@ fn the_cube_grid_joins_the_faces_symmetrically_and_covers_the_sphere() {
             let back = (0..4).filter_map(|e| g.neighbour(q, e)).any(|x| x == p);
             assert!(back, "the axis neighbour of {p} in {d} ({q}) does not point back");
             let (a, b) = (g.distance_at(p, d), (0..4).find(|&e| g.neighbour(q, e) == Some(p)).map(|e| g.distance_at(q, e)).unwrap());
-            assert!((a - b).abs() <= 1e-9 * a, "the distance {p} to {q} is not symmetric: {a} against {b}");
+            assert_eq!(a.to_bits(), b.to_bits(), "the distance {p} to {q} is not symmetric: {a} against {b}");
         }
         for d in 4..8 {
             if let Some(q) = g.neighbour(p, d) {
@@ -66,9 +67,11 @@ fn a_catchment_crosses_the_cube_edges_and_the_area_is_conserved() {
         // Every cell drains to an outlet; with the clip the outlet holds its members' areas, so the outlets hold the sphere.
         let held: f64 = (0..g.len()).filter(|&p| outlet[p]).map(|p| r.area[p]).sum();
         let sphere = 4.0 * core::f64::consts::PI * R * R;
-        if rules.clip_mfd != planet_generators::bake::route::MfdClip::Off {
-            assert!((held - sphere).abs() <= 1e-9 * sphere, "A_d at the outlets {held} against the sphere {sphere}");
-        }
+        assert!(
+            (held - sphere).abs() <= 1e-9 * sphere,
+            "A_d at the outlets {held} against the sphere {sphere} (clip {:?})",
+            rules.clip_mfd
+        );
     }
 }
 
@@ -116,6 +119,11 @@ fn a_landmass_of_the_cube_is_routed_alone_with_its_coast_as_outlets() {
     assert!((held - cells).abs() <= 1e-9 * cells, "the outlets hold the area of the active cells: {held} against {cells}");
     for tile in [6usize, 8, 12] {
         let got = partitioned_route(&g, &z, &outlet, EPS, 5, tile, RoundRules::ROUND, &mut PartCache::default());
+        let all = priority_flood_with(&g, &z, &outlet, EPS, true);
+        assert!(
+            (0..z.len()).all(|p| got.filled[p].to_bits() == all[p].to_bits()),
+            "the filled surface, inactive cells included (tile {tile})"
+        );
         for p in (0..z.len()).filter(|&p| active[p]) {
             assert_eq!(got.routing.receiver[p], want.receiver[p], "receiver {p} (tile {tile})");
             assert_eq!(got.routing.area[p].to_bits(), want.area[p].to_bits(), "A_d {p} (tile {tile})");
@@ -170,4 +178,25 @@ fn a_cache_is_not_shared_between_a_plane_and_a_cube_of_the_same_size() {
         assert_eq!(got.routing.receiver, want.receiver);
         assert!(got.routing.area.iter().zip(&want.area).all(|(a, b)| a.to_bits() == b.to_bits()));
     }
+}
+
+// spec: GEN-144
+#[test]
+fn outlets_off_the_grid_cost_no_flood_and_a_masked_plane_is_the_resident_route() {
+    // A plane with a mask: the cells right of column 9 do not exist; the sea flag stays set on some of them (outlets off the grid).
+    let (w, h) = (16usize, 12usize);
+    let active: Vec<bool> = (0..w * h).map(|p| p % w < 10).collect();
+    let g = Grid::new(w, h, 800.0).with_active(active.clone());
+    let z: Vec<f64> = (0..w * h).map(|p| 30.0 + 7.0 * ((p % w) as f64) - 2.0 * ((p / w) as f64) + (p % 5) as f64).collect();
+    let outlet: Vec<bool> = (0..w * h).map(|p| (p % w == 0) || p % w == 12).collect();
+    let want = route_rules(&g, &z, &outlet, EPS, 5, 0.0, None, RoundRules::ROUND);
+    let got = partitioned_route(&g, &z, &outlet, EPS, 5, 4, RoundRules::ROUND, &mut PartCache::default());
+    assert_eq!(got.routing.receiver, want.receiver);
+    assert!(got.routing.area.iter().zip(&want.area).all(|(a, b)| a.to_bits() == b.to_bits()));
+    assert!(got.filled.iter().zip(&priority_flood_with(&g, &z, &outlet, EPS, true)).all(|(a, b)| a.to_bits() == b.to_bits()));
+    // The outlets off the grid change nothing: the same route and the same floods as with the flags cleared.
+    let on_grid: Vec<bool> = (0..w * h).map(|p| outlet[p] && active[p]).collect();
+    let clean = partitioned_route(&g, &z, &on_grid, EPS, 5, 4, RoundRules::ROUND, &mut PartCache::default());
+    assert_eq!(got.stats.floods, clean.stats.floods, "no tile is flooded for an outlet off the grid");
+    assert_eq!(got.routing.receiver, clean.routing.receiver);
 }
