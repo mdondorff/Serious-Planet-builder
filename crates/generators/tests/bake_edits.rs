@@ -347,7 +347,7 @@ fn a_basin_resolves_after_the_losses_upstream_of_it_and_q_w_closes() {
     let (up2, low2) = (find(&dry, 22), find(&dry, 10));
     assert_eq!(dry.basins[up2].class, BasinClass::Endorheic);
     assert_eq!(dry.basins[up2].q_out, 0.0);
-    assert!((dry.basins[up2].q_in - wet.basins[up].q_in).abs() <= 1e-12 * wet.basins[up].q_in, "the upper basin sees the same inflow");
+    assert_eq!(dry.basins[up2].q_in.to_bits(), wet.basins[up].q_in.to_bits(), "the upper basin sees the same inflow");
     let want = wet.basins[low].q_in - dry.basins[up2].q_in;
     assert!(
         (dry.basins[low2].q_in - want).abs() <= 1e-9 * want,
@@ -369,7 +369,7 @@ fn a_basin_resolves_after_the_losses_upstream_of_it_and_q_w_closes() {
     let l = find(&lake, 10);
     assert_eq!(lake.basins[l].class, BasinClass::Lake);
     let a = lake.basins[l].area_m2[15];
-    assert!((lake.basins[l].q_out - (lake.basins[l].q_in - a * 1.0e-9)).abs() <= 1e-9 * lake.basins[l].q_in);
+    assert!((lake.basins[l].q_out - (lake.basins[l].q_in - a * f64::from(1.0e-9f32))).abs() <= 1e-12 * lake.basins[l].q_in);
     let v = verify(&g, &lake, &routing, &filled, &outlet, Some(&runoff), None);
     assert!(v.qw_closure_error <= 1e-9 && v.qw_confluence_error <= 1e-9, "{v:?}");
 }
@@ -463,4 +463,47 @@ fn a_negative_open_water_evaporation_is_refused() {
     let mut evap = vec![0.0f32; 24 * 24];
     evap[100] = -1.0e-9;
     hydrology_with(&g, &z, &filled, &routing, &outlet, Some(&runoff), Some(&evap), None, &HydroParams::default());
+}
+
+// spec: GEN-146
+#[test]
+fn the_taper_follows_the_uplift_field_when_the_uniform_ratio_is_zero_and_a_cache_serves_other_parameters() {
+    let f = fields();
+    for (name, g) in grids() {
+        let z0 = terrain(8, true);
+        let outlet = g.outlets(&z0, 0.0);
+        let p0 = CarveParams { u_over_k: 0.0, ..params(2) };
+        let dr = Drivers { uplift: Some(&f.uplift), ..Drivers::default() };
+        let rock = Rock { par: &1usize, k: None, uplift: Some(&f.uplift), runoff: None };
+        let mut want = z0.clone();
+        carve_rock(&g, &mut want, &outlet, &p0, None, &rock, 3);
+        let mut got = z0.clone();
+        solve_rounds_with(&g, &mut got, &outlet, &p0, 2, &1usize, 3, &dr);
+        assert_eq!(bits(&got), bits(&want), "an uplift field with u_over_k 0 ({name})");
+        // One cache, three definitions of the carve: a changed k_dt and a height-scaled breach are other keys, never stale entries.
+        let mut cache = RoundCache::default();
+        for p in [
+            params(2),
+            CarveParams { k_dt: 0.03, ..params(2) },
+            CarveParams { breach_height_scale_m: 300.0, breach_max_m: 300.0, ..params(2) },
+            params(2),
+        ] {
+            let mut memo = z0.clone();
+            solve_rounds_memo(&g, &mut memo, &outlet, &p, 2, &2usize, 3, &Drivers::default(), 12, &mut cache);
+            assert_eq!(bits(&memo), bits(&fresh(&g, &z0, &outlet, &p, &Drivers::default(), 2)), "G-EQ across parameters ({name})");
+        }
+    }
+}
+
+// spec: GEN-146
+#[test]
+#[should_panic(expected = "does not stand above its receiver")]
+fn the_cascade_refuses_a_surface_that_is_not_the_one_the_routing_was_made_on() {
+    use planet_generators::bake::hydro::{hydrology_with, HydroParams};
+    let g = Grid::new(24, 24, 800.0);
+    let z: Vec<f64> = (0..24 * 24).map(|p| 100.0 + (p % 24) as f64 * 5.0).collect();
+    let outlet = g.outlets(&z, 0.0);
+    let routing = route_rules(&g, &z, &outlet, EPS, 3, 0.0, None, RoundRules::ROUND);
+    let flat = vec![50.0f64; 24 * 24];
+    hydrology_with(&g, &z, &flat, &routing, &outlet, None, None, None, &HydroParams::default());
 }

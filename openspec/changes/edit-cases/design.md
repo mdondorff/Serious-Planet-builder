@@ -40,6 +40,10 @@ Every case: **G-EQ 0 cells differ** against the fresh solve, the H1 result from 
 - E4: the trunk (8390, 958) with `A_d` 87,261 km^2 drains to the outlet (8370, 1110) (`A_d` 170,342 km^2, `Q` 1,619 m^3/s). A 500 m block 120 cells upstream on the main stem dams it: `Q` at the trunk falls from 829 to 3 m^3/s, at the outlet from 1,619 to 786 m^3/s (the same outlet, `A_d` 82,654 km^2); a 50 % rise of the rainfall of the block gives 1,619 to 1,634 m^3/s. 187 tile floods and 45 catchments for the dam, 52 and 14 for the rainfall.
 - E7: the second landmass is a 90-cell island near (8450, 1108): the bridge changes 156 cells; the channel and basin counts do not change.
 
+## Open
+- The caches grow without bound: the memo of catchment rounds keeps the carved heights of every definition it saw (about 8 bytes a cell a round), and `PartCache` keeps one `(filled, receiver, area)` copy per round slot (about 20 bytes a cell each). At the prototype size this is small; at a face of 1.6e8 cells it is not. An eviction rule (keep what the last solve hit or inserted) is needed before production.
+- A memo hit is checked against the member count only; a 128-bit collision of equal size would return the heights of another catchment.
+
 ## Earth-specific values (ADR 0108 point 4)
 | Value | Earth (example) | Unit, source | Parameter |
 |---|---|---|---|

@@ -8,7 +8,7 @@
 //! - **Segments.** A segment runs from a head (an initiated cell with no channel donor) or a confluence (two or more channel donors) downstream to the next confluence or the mouth. Its end cell is the start of
 //!   the next segment (a confluence) or the mouth, which belongs to no segment. `segment_id = hash(body, downstream end cell, upstream end cell)`.
 //! - **Basins.** A basin is a connected set (8 neighbours) of cells whose filled surface stands more than `pit_min_m` above the ground. Floor, spill point and level come from the filled surface of the routing
-//!   (the minimax spill level plus the flood's epsilon ramp), the area curve has 16 level steps between the floor and the spill, and the class and the water level follow section 5.5 from the inflow and the net
+//!   (the minimax spill level plus the flood's epsilon ramp), the area curve has 16 level steps between the floor and the spill, and the class and the water level follow section 5.5 from the inflow and the open-water
 //!   evaporation. `basin_id = hash(body, canonical cell)`, the canonical cell the lowest cell of the basin, ties by the global cell id.
 //!
 //! All sums run in fixed orders (CON-14); nothing here reads a thread count.
@@ -145,7 +145,7 @@ pub fn id_hash(body: u64, a: u64, b: u64) -> u64 {
 }
 
 /// H1 on a routing. `filled` is the filled surface it came from; `runoff` the runoff of each cell (m/s, the local term is `a r`; `None`: 1, so `Q` is a true area); `open_evap` the open-water
-/// evaporation in excess of the land's, `E_open = PET - (P - r)` of each cell in m/s (A3 section 5.5; never negative, `None`: 0, so every kept basin overflows).
+/// evaporation in excess of the land's, `E_open = PET - (P - r)` of each cell in m/s (A3 section 5.5; never negative, `None`: 0, so every kept basin that receives water overflows).
 #[allow(clippy::too_many_arguments)]
 pub fn hydrology(
     grid: &Grid,
@@ -204,6 +204,14 @@ pub fn hydrology_with(
     assert!(open_evap.is_none_or(|e| e.iter().all(|v| *v >= 0.0 && v.is_finite())), "E_open = PET - (P - r) is finite and not negative");
     assert!(intentional.is_none_or(|f| f.len() == n), "one intentional flag per cell");
     let (receiver, area) = (&routing.receiver, &routing.area);
+    for c in 0..n {
+        if grid.is_active(c) && !outlet[c] && receiver[c] != NONE {
+            assert!(
+                filled[receiver[c] as usize] < filled[c],
+                "cell {c} does not stand above its receiver on `filled`: it is not the filled surface this routing was made on"
+            );
+        }
+    }
     let local = |p: usize| if grid.is_active(p) && !outlet[p] { grid.cell_area(p) * runoff.map_or(1.0, |r| f64::from(r[p])) } else { 0.0 };
 
     // ---- Q: the potential discharge, the local term then the donors, leaves first

@@ -111,10 +111,19 @@ pub fn cut_in(grid: Option<&Grid>, r: &Routing) -> Catchments {
     Catchments { members, local }
 }
 
-/// The inputs of catchment `k` read from the region's state, without drivers.
+/// The inputs of catchment `k` read from the region's state, without drivers (`p` gives the uniform uplift of a step).
 #[allow(clippy::too_many_arguments)]
-pub fn gather(grid: &Grid, z: &[f64], outlet: &[bool], r: &Routing, cuts: &Catchments, taper: &[f32], k: usize) -> CatchmentInputs {
-    gather_with(grid, z, outlet, r, cuts, taper, &Drivers::default(), &CarveParams::default(), k)
+pub fn gather(
+    grid: &Grid,
+    z: &[f64],
+    outlet: &[bool],
+    r: &Routing,
+    cuts: &Catchments,
+    taper: &[f32],
+    p: &CarveParams,
+    k: usize,
+) -> CatchmentInputs {
+    gather_with(grid, z, outlet, r, cuts, taper, &Drivers::default(), p, k)
 }
 
 /// The inputs of catchment `k` with the drivers (`p` gives the uniform uplift `u_over_k k_dt` of a cell without an uplift field).
@@ -344,7 +353,7 @@ pub fn solve_rounds_memo(
             let k = queue[q];
             let mut inp = gather_with(grid, zr, outlet, &r, &cuts, &taper, drivers, p, k);
             let key = catchment_key(grid, &cuts.members[k], &inp, p);
-            match held.get(&key) {
+            match held.get(&key).filter(|v| v.len() == inp.z.len()) {
                 Some(v) => (key, Arc::clone(v), true),
                 None => {
                     catchment_round(&mut inp, p, p.reroute_every);
