@@ -8,4 +8,4 @@ A3 (docs/design/terrain-target.md) section 5.2 to 5.5 and inbox #99: hydrology H
 
 ## Impact
 - Code: `generators::bake::hydro` (new), `examples/hydro_landmass`. No call site in any pass of the bake; nothing in today's output moves.
-- Not in this change: the edit cases E1-E6; the continuity map; storing segments or basins; the basin spill graph of `bake/spill.rs` (the filled surface of the routing gives the same levels at the working resolution); the lake's contribution to the water field.
+- Not in this change: the edit cases E1-E6; the continuity map; storing segments or basins; the basin spill graph of `bake/spill.rs` (the filled surface of the routing is the minimax level plus the epsilon ramp by its construction); the lake's contribution to the water field.

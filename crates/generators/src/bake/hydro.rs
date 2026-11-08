@@ -8,7 +8,7 @@
 //! - **Segments.** A segment runs from a head (an initiated cell with no channel donor) or a confluence (two or more channel donors) downstream to the next confluence or the mouth. Its end cell is the start of
 //!   the next segment (a confluence) or the mouth, which belongs to no segment. `segment_id = hash(body, downstream end cell, upstream end cell)`.
 //! - **Basins.** A basin is a connected set (8 neighbours) of cells whose filled surface stands more than `pit_min_m` above the ground. Floor, spill point and level come from the filled surface of the routing
-//!   (which is the spill graph's level at the working resolution), the area curve has 16 level steps between the floor and the spill, and the class and the water level follow section 5.5 from the inflow and the net
+//!   (the minimax spill level plus the flood's epsilon ramp), the area curve has 16 level steps between the floor and the spill, and the class and the water level follow section 5.5 from the inflow and the net
 //!   evaporation. `basin_id = hash(body, canonical cell)`, the canonical cell the lowest cell of the basin, ties by the global cell id.
 //!
 //! All sums run in fixed orders (CON-14); nothing here reads a thread count.

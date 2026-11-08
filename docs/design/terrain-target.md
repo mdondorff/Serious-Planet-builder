@@ -36,7 +36,7 @@ Dependency direction follows the list; §6 defines the one feedback loop (K5, K6
 | K3 | Base field | base elevation on the store's lattice | K1, K2, height items below erosion (§7.1) | **X** | field bake (ADR 0026), C1 read (GEN-107) |
 | K4 | H0 coarse hydrology | planet-wide drainage regions at the coarse grid across cube edges | K3 | **N** | F6's probe; the coupled run of ADR 0077 was a predecessor |
 | K5 | Regional geomorphology | per domain: the erosion carve at the regional grid (§6) | K2, K3, K4, K6 of the previous round | **X** | pass 1 (ADR 0088, 0099, 0102-0104); the kernels stay |
-| K6 | H1 regional hydrology | the channel graph, the diffuse-area field, basins, lakes (§5) | the K5 surface | **N** (graph, lakes); **X** (basins from the spill graph) | GEN-110, GEN-121, ADR 0101 |
+| K6 | H1 regional hydrology | the channel graph, the diffuse-area field, basins, lakes (§5) | the K5 surface | **N** (graph, lakes); **X** (basins from the filled surface of the routing) | GEN-110, GEN-145, ADR 0101 (GEN-121: the tile-seam minimax only) |
 | K7 | Local refinement | per tile, the local grid: breach, incise, thermal, deposition, channels burned in (§3.3) | K3, K5, K6 | **X** | pass 2 (GEN-101) |
 | K8 | Authoritative surface | the composition and the sampler (§3) | K3, K5, K7, creases | **X** | runtime field (GEN-099, 112) |
 | K9 | Dependencies and versions | keys, reach along the graph, transactions (§7) | all | **X** | keys (ADR 0006, 0066), stale pre-emption (ADR 0072) |
@@ -152,7 +152,7 @@ Three quantities, kept apart:
 
 ### 5.3 Basins
 
-A basin is a connected set of cells (8-neighbour) below the routing surface's spill level of more than `pit_min_m` (0.5 m), found on the filled surface of the round's routing (GEN-145: the canonical flood's level is the minimax spill level plus the epsilon ramp; `bake/spill.rs` is the tile-seam minimax and gives no spill points or basin objects). **X** Stored as one object per basin above a size threshold, on the regional grid:
+A basin is a connected set of cells (8-neighbour) below the routing surface's spill level of more than `pit_min_m` (0.5 m), found on the filled surface of the round's routing (GEN-145). **X** Stored as one object per basin above a size threshold, on the regional grid:
 
 | Field | Meaning |
 |---|---|
@@ -173,6 +173,7 @@ A basin is a connected set of cells (8-neighbour) below the routing surface's sp
 | intentional | named by an item (§5.6) or a driver (caldera, karst later) | kept whatever its size |
 
 - Thresholds are preset parameters; a basin's class is a pure function of the surface and the drivers.
+- The canonical flood's level is the minimax spill level plus the epsilon ramp, by its construction (GEN-141); `bake/spill.rs` is the tile-seam minimax and gives no spill points or basin objects, so it is not used for basins. The equality of the two levels is not tested.
 - A component whose depth from floor to rim is under `pit_min_m` is the epsilon ramp of a flat, not a basin (it is counted, not kept).
 - **Touching basins are one component.** Two basins with different spill levels that touch are one basin with one floor and one spill (the lowest rim); nested basins are not separated (GEN-145). Separating them needs the spill graph's hierarchy and is open.
 - **`Q` and basins.** The channel discharge `Q` (section 5.2) is the potential discharge before basin losses, so that the sum at the outlets is the sum of `a r`. A basin's `q_out` is the discharge that continues below its spill point: `Q_in - A(spill) E_net` for a lake, 0 for an endorheic basin. The channel graph carries `Q`; a consumer that needs the lake-adjusted discharge below a basin reads `q_out` and the basin's spill point.
@@ -200,7 +201,7 @@ Identities are **pure functions of the current surface**, so a from-scratch buil
 ### 5.5 Lakes
 
 - A lake is a basin with a water level. Producer of the water field W (ADR 0041 point 7's retrofit path). **X**
-- **Water level (steady balance):** the basin's inflow `Q_in` is the discharge reaching it (§5.2) and its net evaporation is `E_net = max(PET - P, 0)` of the basin's cells (PET of GEN-117, ADR 0108 preset). The level `h` solves `A(h) E_net = Q_in` on the area curve, clamped to [floor, spill]. If `A(spill) E_net < Q_in`, the basin overflows: `h` = spill level, the active outlet is the spill point, and the downstream channel continues with `Q_in - A(spill) E_net`. Otherwise the basin is endorheic and passes nothing downstream. A pure function of the surface and the drivers; no time stepping.
+- **Water level (steady balance):** the basin's inflow `Q_in` is the discharge reaching it (§5.2) and its net evaporation is `E_net = max(PET - P, 0)` of the basin's cells (PET of GEN-117, ADR 0108 preset). The level `h` solves `A(h) E_net = Q_in` on the area curve, clamped to [floor, spill]. If `A(spill) E_net < Q_in`, the basin overflows: `h` = spill level, the active outlet is the spill point, and the downstream channel continues with `Q_in - A(spill) E_net` (the basin's `q_out`, §5.3; the channel graph's `Q` stays the discharge before the basin's losses). Otherwise the basin is endorheic and passes nothing downstream. A pure function of the surface and the drivers; no time stepping.
 - The fill depth stops being a surface term (§3.1) and a stored channel; it is the basin's water level minus the ground, derived from the basin object at the local grid.
 - Water surfaces render through ADR 0041's path; a basin's area curve answers "what is flooded at level x" without a raster.
 

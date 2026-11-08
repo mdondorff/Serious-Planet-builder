@@ -207,6 +207,12 @@ fn a_basin_has_floor_spill_curve_class_and_an_identity_of_its_lowest_cell() {
         let filled = priority_flood_with(&g, z, &outlet, EPS, true);
         hydrology(&g, z, &filled, &routing, &outlet, None, None, p)
     };
+    // The depth arm: a one-cell dent 5 m under its rim is over the depth limit and is kept.
+    let mut deep = bowl_land();
+    deep[30 * w + 30] = 785.0;
+    deep[30 * w + 29] = 790.0;
+    let deep = kept(&deep, &HydroParams::default());
+    assert_eq!((deep.basins.len(), deep.stats.artefacts), (2, 0), "a small basin deeper than the limit is kept: {:?}", deep.stats);
     let lenient = kept(&dent, &HydroParams { min_cells: 1, ..HydroParams::default() });
     assert_eq!((lenient.basins.len(), lenient.stats.artefacts), (2, 0), "a limit of one cell keeps the dent");
     // Five cells a metre under a ridge of their own, over a downhill land: a shallow basin of five cells.
@@ -223,6 +229,8 @@ fn a_basin_has_floor_spill_curve_class_and_an_identity_of_its_lowest_cell() {
     }
     let five = kept(&wide, &HydroParams::default());
     assert_eq!((five.basins.len(), five.stats.artefacts), (2, 0), "five cells are over the default limit of four: {:?}", five.stats);
+    let edge = kept(&wide, &HydroParams { min_cells: 5, ..HydroParams::default() });
+    assert_eq!((edge.basins.len(), edge.stats.artefacts), (2, 0), "five cells are not under a limit of five");
     let strict = kept(&wide, &HydroParams { min_cells: 6, ..HydroParams::default() });
     assert_eq!((strict.basins.len(), strict.stats.artefacts), (1, 1), "five cells are under a limit of six: {:?}", strict.stats);
 }

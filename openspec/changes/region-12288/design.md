@@ -23,7 +23,7 @@
 | 2,400 | 7,592,546 | 534,879 (7.0 %) | 18.7 | 35.8 | 485 (463, 22) | 123 | 8 |
 | 4,000 | 14,482,501 | 990,077 (6.8 %) | 17.5 | 33.4 | 989 (936, 53) | 284 | 16 |
 - At the erosion grid 7 % of land cells are channel cells (39.5 % at 3,072 cells, where T was 7 cells): the 3,072-cell share was a grid effect.
-- The artefact criterion (below 1 km^2 and shallower than 2 m) is live at this grid (22 to 29 % of the basins found), unlike at 3,072 cells.
+- The artefact criterion of these runs (below 1 km^2 and shallower than 2 m) is live at this grid (22 to 29 % of the basins found), unlike at 3,072 cells. The numbers above are under that area limit; the h1-corrections change replaced it with 4 cells and 2 m (margin 200: 18 artefacts of 96 basins found).
 - The largest mouth in the 4,000-margin window carries 9,376 m^3/s.
 
 ## Peak memory (`mem` mode; 4 rounds then the H1 pass; the H1 pass stays under the rounds' peak)
@@ -50,4 +50,4 @@
 | Tile | 256 cells | the example's `tile` argument |
 | Margins | 200 to 4,000 cells | the example's `margin` argument |
 | Radius, seed | 6,371,000 m, 14 | the planet's, the world's |
-| Initiation, pit limit, artefact limits | 75 km^2, 0.5 m, 1 km^2 and 2 m | `HydroParams` defaults (GEN-145) |
+| Initiation, pit limit, artefact limits | 75 km^2, 0.5 m, 1 km^2 and 2 m (these runs; now 4 cells and 2 m) | `HydroParams` defaults (GEN-145) |
