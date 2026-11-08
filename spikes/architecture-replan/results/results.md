@@ -229,3 +229,89 @@ Readings:
 - A and B share the target T1-T5; they differ in order and in whether the old chain is amended in place (A) or replaced beside itself (B). The vertical prototype of the review (R12) is the experiment that decides between them: if the prototype's hydrology and regional solver can be fed by today's drivers and kernels with small changes, A's steps (3)-(5) are cheap; if not, B is the honest route.
 
 Phase 2 (planner's next entry): costs and risks per option, the vertical-prototype plan, feasibility checks by coder agents, the recommendation and the owner decisions.
+
+# Phase 2 (inbox #97, 2026-11-08)
+
+## 5. The options in depth: effort, risks, what stays, the effect on M9
+
+All efforts are **estimates in lane-days** (one agent lane, one working day), ranged; none is measured. Lanes: explorer (bake, stores), crusader (runtime, shaders, editor), spikes (measurement, prototypes). Basis for the ranges: comparable past changes (the M9 drivers took about 1-3 lane-days each, the keep-pits seams change 3-4, the chunk stage about 15 over M8) and the size of the step.
+
+Two lessons from history bound every option:
+- **Routing must be global or bounded by drainage divides** (SPIKE-68: per-tile routing left 134-172 m seams; SPIKE-70: a global face carve then a capped local carve has none). A regional solve is seamless only if its domain border is a drainage divide (no flow crosses it) or its border conditions come from a global solve.
+- **Regional solves must never run on the frame's critical path** (ADR 0086: the chunk stage failed the no-degradation gate with held-back tiles and slow chunk frames). A re-solve is a background job whose result is stored and swapped in by key (ADR 0072), with a valid older version always drawn (CON-22).
+
+### 5.1 Option A: evolve step by step
+
+| Step | What | Lane | Effort | Depends on |
+|---|---|---|---|---|
+| A1 | Surface identity: pass-2 breach (SPIKE-104 D-A), pass 2 on the store's lattice (D-B), C1 default (#1137) | explorer | 3-5 | - |
+| A2 | Turned-lattice noise for the bands and creases (D-C), re-tune of the band factors | crusader | 3-5 | - |
+| A3 | A target-architecture document and its ADRs (hydrology representation, layer order, domains, reach, preview levels) | planner, spikes | 3-5 | - |
+| A4 | Hydrology stage v1: a stored drainage graph from pass 1's final routing (receivers, area), basins from the spill graph (`bake/spill.rs`) with floor, spill level, outlet, type, area curve; river segments above a runoff-weighted area threshold; debug views | explorer | 10-16 | A1, A3 |
+| A5 | Lakes: basins as producers of the water field (ADR 0041 point 7's retrofit path); the fill-depth add-back retired | crusader | 5-8 | A4 |
+| A6 | Rivers at runtime: channel geometry from segments in the runtime field and a river water surface | crusader | 8-14 | A4 |
+| A7 | Edits below erosion: a new layer order (height and driver items as inputs of the field bake and the erosion); ADRs 0007 and 0066 amended | explorer, crusader | 6-10 | A3 |
+| A8 | Regional erosion on watershed domains: the erosion of a set of catchments with outlet levels from the graph, the same kernels; the first world build runs the same domains, so a re-solve equals a from-scratch run by construction | explorer | 12-20 | A4, A7 |
+| A9 | Invalidation along the graph (downstream reach, basin merge and split upstream) on top of the stage keys | explorer | 6-10 | A4, A8 |
+| A10 | Preview levels per edit kind (overlay field, coarse re-route in seconds, regional re-solve in minutes) | crusader | 6-10 | A8, A9 |
+| A11 | Scale as a parameter: per-body cell sizes (ADR 0045 point 2), SPIKE-103's Earth values lifted | spikes, lanes | 6-10 | - |
+| | **Total** | | **68-113** | |
+
+- Calendar at three lanes in parallel: about 5-8 weeks after A3 (the critical path is A1 -> A4 -> A8 -> A9 -> A10, about 37-61 lane-days on one lane, shortened by splitting A4 and A8).
+- **Keeps from main:** everything below `generators` (`core`, `world-def`, `cache`, `streaming`, `frame`, `render`, `editor`, `app`); the drivers (ADRs 0089, 0102-0104, 0108); the kernels in `bake/` (carve, flood, spill, route, thermal, deposition); keys and versions; the field bake. About 90 % of main's code stays useful unchanged; the rest is amended in place.
+- **Retires:** the per-face pass 1 as the only erosion unit (A8 replaces it with catchment domains; a face run can stay as the initial build if it is bit-equal, which needs one domain definition for both); the fill-depth add-back (A5); ADR 0109's infill and the pass-1 deposition draft (#1223).
+
+| Risk | Kind | How it is retired |
+|---|---|---|
+| A8: catchment domains change when an edit moves a divide, so the domain set is a function of the edited surface; two runs with different domain sets differ | technical | domains come from the coarse graph of the **edited** surface, a pure function of the definition; the vertical prototype (§7) checks re-solve = from-scratch on one edit |
+| A8: large catchments (Amazon-size, millions of km^2) are domains far larger than the editor's 4 GB | technical | nested domains: a large catchment is cut at confluences with the trunk's level from the graph as the boundary (a "sub-catchment with a fixed outlet"); prototype measures the error at the cut |
+| A4 + A6: river geometry at runtime costs frame time and VRAM | technical | a measured budget line (BUDG) before A6; rivers are tile data like the channels, not per-frame work |
+| Patchwork: A7-A10 amend ADR 0007, ADR 0066, CON-08's reading one by one | patchwork | A3 first: the target and its ADRs are written before any of A7-A10 starts; each step is checked against the target by spec-guardian |
+| Schedule: the M9 bake slips by the length of A1-A5 at least | schedule | the owner decides which steps must precede the bake (§9); A1-A2 fit the current M9.1 window |
+
+### 5.2 Option B: a new terrain core beside the current one
+
+| Step | What | Lane | Effort | Depends on |
+|---|---|---|---|---|
+| B1 | Target architecture and data-model ADRs (as A3, deeper: module boundaries, interfaces, numeric representations) | planner, spikes | 5-8 | - |
+| B2 | Vertical prototype of the new core on one 500 x 500 km region (§7), behind its own implementation id | spikes, explorer | 15-25 | B1 |
+| B3 | Planet state and terrain state per region (base, displacement, sediment with version links); the `TerrainSampler`-like interface the runtime reads | explorer | 10-15 | B2 |
+| B4 | Hydrology subsystem planet-wide (graph, watersheds, basins, rivers, lakes) | explorer | 12-20 | B3 |
+| B5 | Geomorphology on watershed domains (today's kernels re-housed) | explorer | 10-16 | B4 |
+| B6 | Simulation layer: dependency graph, dirty regions, snapshots, preview and full quality | crusader | 10-16 | B3 |
+| B7 | Runtime integration: the new sampler under streaming and render; rivers, lakes, materials from the new data | crusader | 10-16 | B3, B4 |
+| B8 | Editor integration: items as commands on the new state, previews | crusader | 6-10 | B6, B7 |
+| B9 | Scale as a parameter, built in (A11's content) | spikes | 4-8 | B3 |
+| B10 | Switch-over: drivers, look and scorecard re-tuned on the new core; goldens; the old pipeline retired | all | 10-15 | B4-B8 |
+| | **Total** | | **92-149** | |
+
+- Calendar at three lanes: about 7-11 weeks (critical path B1 -> B2 -> B3 -> B4 -> B5 -> B10, about 62-99 lane-days on one lane, shortened by B6-B9 running beside it).
+- **Keeps from main:** the same crates below `generators` as A, the drivers as library code, the kernels as building blocks; about 70-80 % of main's code stays useful (the bake orchestration, layer store formats and runtime layer read are replaced).
+- **Retires:** the two-pass erosion bake as the architecture (ADRs 0088, 0099, 0100, 0101, 0105, 0109 superseded), kind 13 and the fill-depth channel, the M9 planet bake, the M9.1 items that serve only the two-pass bake.
+
+| Risk | Kind | How it is retired |
+|---|---|---|
+| Nothing reaches the owner's view for 4-6 weeks (B2 is the first visible result) | schedule | B2's prototype is viewable in the viewer from its first week (one region, its own id), so the owner sees progress |
+| Two pipelines in one repository for weeks (CI time, keys, goldens) | technical | the new core is a field implementation like any other (CON-07); the old one is frozen, not developed, while B runs |
+| The tuning done on the old bake (drivers, class amplitudes, scorecard) moves | schedule | the drivers are analytic and reused unchanged; only the amplitudes are re-tuned (B10) |
+| Patchwork risk | patchwork | lowest of the three: one design, written first (B1) |
+
+### 5.3 Option C: requirement cuts
+
+| Cut | Effect on A or B | Effort saved (estimate) | Risk it adds |
+|---|---|---|---|
+| C-a: erosion fixed at the seed; edits re-route water only | removes A8, most of A10 (or B5's edit path); keeps A4-A6 | 15-25 lane-days | the owner's stated purpose of R1a ("editing bugs go unnoticed") is not met for erosion; a later add needs A8 anyway |
+| C-b: hydrology and erosion respond only to a face re-bake | removes A8-A10's regional path; keeps the per-face pass 1 | 20-30 | a 20-min per-face wait and 10 GB: not inside the editor (X7) |
+| C-c: driver edits only before the first build | removes driver invalidation from A9 | 3-5 | regional climate and rock edits come later with a re-key of the drivers |
+| C-d: rivers derived at runtime, no persistent river objects | removes river segments from A4, simplifies A6 | 4-8 | R4d (authored rivers) needs the objects later |
+| C-e: Earth-only engine scale for the MVP | removes A11 / B9 from the MVP | 6-10 | the Earth assumptions harden (SPIKE-103 found 35 rows already) |
+| C-f: pass 2 at about 200 m | store: kind 13 shrinks about 4x (about 24 -> 8 GB) | 0 (a parameter), store +16 GB of room | detail 100-200 m from creases only; R6 judged on the look |
+
+### 5.4 The effect on M9
+
+| | A | B | C (with A) |
+|---|---|---|---|
+| M9 planet bake (I6) | after A1 + A4 at least (a bake with one surface and a stored graph); about 2026-12-01 to 12-10 (estimate) | after B10; about 2027-01 (estimate) | after A1; a bake on today's design with C-a/C-b's cuts, about 2026-11-22 to 11-29 (estimate) |
+| M9.1 gate | redefined: T1 + T2 shown on the preview, connectivity measures (X14) beside the Earth comparisons | replaced by B2's prototype pass/fail (§7) and then B10 | as planned, plus A1 |
+| M9.1 items | D2 (pass-1 deposition) dropped; D3, D4 (coastal, glacial) after A4; C3 (constants) folds into A11 | D2-D4 re-housed in B5; C3 into B9 | as planned |
+| Work done on M9 so far | kept: drivers, kernels, store, runtime read; the tuning stays valid | drivers and kernels kept; tuning redone | kept |
