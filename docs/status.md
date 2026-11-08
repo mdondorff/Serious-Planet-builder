@@ -25,9 +25,9 @@ Dormant (no near trigger; not asked now):
 | # | Step | Lane |
 |---|---|---|
 | NR | Real-GPU window checks NOT RUN on a locked desktop (TEST-073) | crusader |
-| Re-plan week 1 | A12 true cell metric (GEN-138), H0 across cube edges (GEN-139) | explorer |
-| Target | A3 target document and contracts, then region search and fixtures E1-E6 | spikes |
-| Ground | I8a 2b PR 4d; turned-lattice noise behind a switch (GEN-140); #1137 waits for the owner | crusader |
+| Prototype | `docs/briefings/terrain-prototype.md`: items 8-11, 14 | explorer |
+| Prototype checks | ADR review pass; independent gate measurement; second region and seed | spikes |
+| Ground | Disk guardrails (BUILD-038/039); runtime items after the hydrology and local pass are on main; #1137 waits for the owner | crusader |
 | Perf | Machine ready again (preflight OK 2026-11-07, parallel 74-76k us of 112k): REND-052 verdicts, ground-detail cost, channel-read cost; no store opens on main since GLOBAL_VERSION 9: a current store first (MESH_VERSION 11) | planner |
 | Store | All stores on disk refused by keys since #1218/#1225 (read-only references); in-memory `--world` runs only until a new store | all |
 
