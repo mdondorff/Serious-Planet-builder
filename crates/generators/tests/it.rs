@@ -6,6 +6,8 @@ mod bake_face;
 mod bake_fillgeom;
 #[path = "bake_kernels.rs"]
 mod bake_kernels;
+#[path = "bake_metric.rs"]
+mod bake_metric;
 #[path = "bake_rock.rs"]
 mod bake_rock;
 #[path = "bake_runoff.rs"]

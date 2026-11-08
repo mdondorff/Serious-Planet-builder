@@ -64,6 +64,10 @@ impl LayerSpec {
         b.extend(c.max_area.to_bits().to_le_bytes());
         b.push(u8::from(c.incise_only));
         b.push(u8::from(c.keep_pits));
+        // The physical cell metric (GEN-138) enters the key only when on: a layer of the uniform metric keeps its key.
+        if c.cell_metric {
+            b.push(0xC3);
+        }
         b.extend((c.steps as u64).to_le_bytes());
         b.extend((c.reroute_every as u64).to_le_bytes());
         b.extend(self.inputs_id.to_le_bytes());
@@ -269,6 +273,7 @@ mod tests {
             CarveParams { breach_height_scale_m: 2000.0, ..base.carve },
             CarveParams { breach_slope: 2e-3, ..base.carve },
             CarveParams { keep_pits: false, ..base.carve },
+            CarveParams { cell_metric: true, ..base.carve },
         ] {
             assert_ne!(LayerSpec { carve, ..base }.bytes(), key, "a breach parameter is missing from the key: {carve:?}");
         }

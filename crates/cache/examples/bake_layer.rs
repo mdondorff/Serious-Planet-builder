@@ -10,7 +10,7 @@ use std::time::Instant;
 use planet_cache::global_store::{FieldSource, GlobalWorld};
 use planet_cache::layer_manifest::LayerManifest;
 use planet_cache::layer_store::{load_face_change, run_pass1_rock};
-use planet_cache::layer_tiles::{bake_specs, drop_pass1, face_change_reader, load_tile, run_pass2, BakeShape, Pass2Inputs};
+use planet_cache::layer_tiles::{drop_pass1, face_change_reader, load_tile, run_pass2, BakeShape, Pass2Inputs};
 use planet_cache::pack::TileStore;
 use planet_core::{Face, Vec3};
 use planet_generators::bake::face::FaceChange;
@@ -38,6 +38,7 @@ struct Opts {
     threads: usize,
     region: Option<PathBuf>,
     keep_pass1: bool,
+    cell_metric: bool,
     /// `--global-dir DIR`: the stored field bake whose recorded source the layer follows; `--global-res` its cells a face edge.
     global_dir: Option<PathBuf>,
     global_res: u32,
@@ -134,7 +135,8 @@ fn main() {
     };
     // The specs of both passes come from the one derivation the viewer also uses (`bake_specs`), so a record's key cannot drift between the command and the reader.
     let shape = BakeShape { seed: o.seed, radius_m: RADIUS_M, face_res: o.face_res, planet_res: o.planet_res, tile: o.tile, halo: o.halo };
-    let (layer, spec) = bake_specs(&world, &shape).unwrap_or_else(|e| fail(&e));
+    let carve = planet_generators::bake::carve::CarveParams { cell_metric: o.cell_metric, ..Default::default() };
+    let (layer, spec) = planet_cache::layer_tiles::bake_specs_with(&world, &shape, carve).unwrap_or_else(|e| fail(&e));
     let face_halo = layer.halo;
     let (face_dir, tile_dir) = (out.join("layer"), o.tile_dir.clone().unwrap_or_else(|| out.join("tiles")));
     let face_bake_res = o.face_res as u32;
@@ -356,6 +358,7 @@ fn parse() -> Opts {
         threads: 0,
         region: None,
         keep_pass1: false,
+        cell_metric: false,
         global_dir: None,
         global_res: 16_384,
         class_source: false,
@@ -381,6 +384,7 @@ fn parse() -> Opts {
             "--region" => o.region = Some(PathBuf::from(value())),
             "--image-step" => o.image_step = Some(number("--image-step")),
             "--keep-pass1" => o.keep_pass1 = true,
+            "--cell-metric" => o.cell_metric = true,
             "--global-dir" => o.global_dir = Some(PathBuf::from(value())),
             "--global-res" => o.global_res = number("--global-res") as u32,
             "--class-source" => o.class_source = true,

@@ -196,6 +196,13 @@ pub fn pass1_face_rock(
     let factors: Option<Vec<f64>> = factor.map(|f| sample_grid(spec, f, threads));
     let mut z = z0.clone();
     let params = CarveParams { sea_level: spec.sea_level, ..*params };
+    // The physical metric (GEN-138) when asked for: cell 0 of the grid is the plane cell `-halo`.
+    let grid = if params.cell_metric {
+        let off = -(spec.halo as i64);
+        grid.clone().with_metric(super::metric::Metric::cube_face(spec.cells, spec.radius_m, (off, off), grid.w(), grid.h()))
+    } else {
+        grid
+    };
     let (m, h) = (spec.grid_cells(), spec.halo as i64);
     let fill = |u: &(dyn Fn(Vec3) -> f64 + Sync)| -> Vec<f32> {
         let par: &dyn Par = &threads;
@@ -224,6 +231,7 @@ pub fn pass1_face_rock(
     let routing = carve_rock(&grid, &mut z, &outlet, &params, factors.as_deref(), &carve_rock_in, spec.stream());
     drop((uplift, runoff));
     let (m, h, cell_m2) = (spec.cells + 2 * spec.halo, spec.halo, spec.dx() * spec.dx());
+    // GEN-110: the code is the drainage area in units of `dx^2` (with the metric on the area is the true one: the same physical scale everywhere on the face).
     let mut area = Vec::with_capacity(spec.cells * spec.cells);
     for j in 0..spec.cells {
         for i in 0..spec.cells {

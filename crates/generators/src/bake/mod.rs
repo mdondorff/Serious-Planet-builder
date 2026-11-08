@@ -18,18 +18,21 @@ pub mod fillgeom;
 pub mod flood;
 pub mod inputs;
 pub mod map;
+pub mod metric;
 pub mod route;
 pub mod spill;
 pub mod thermal;
 pub mod tile;
 
 /// A `w x h` grid of cells `dx` metres apart, row-major (`p = j w + i`), 8-connected, not wrapping, whose cell `(0, 0)` is the global cell `(origin.0, origin.1)`.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Grid {
     w: usize,
     h: usize,
     dx: f64,
     origin: (u32, u32),
+    /// The physical cell metric (GEN-138); `None` is the uniform metric: every cell `dx^2`, neighbours `dx` and `sqrt 2 dx` apart.
+    metric: Option<metric::Metric>,
 }
 
 /// The 8 neighbours as `(di, dj)`: the four axis neighbours first, then the diagonals.
@@ -40,13 +43,43 @@ impl Grid {
         assert!(w >= 3 && h >= 3, "a grid is at least 3 x 3 cells, not {w} x {h}");
         assert!(dx.is_finite() && dx > 0.0, "the cell size is finite and positive, not {dx}");
         assert!(w.checked_mul(h).is_some_and(|n| n < u32::MAX as usize), "the cell index is a u32: {w} x {h} cells are too many");
-        Grid { w, h, dx, origin: (0, 0) }
+        Grid { w, h, dx, origin: (0, 0), metric: None }
     }
 
     /// The same grid with its cell `(0, 0)` at the global cell `origin` (a window of a larger grid: the jitter of a cell follows its global position).
     pub fn with_origin(mut self, origin: (u32, u32)) -> Grid {
         self.origin = origin;
         self
+    }
+
+    /// The same grid with a physical cell metric (GEN-138): [`Grid::cell_area`] and [`Grid::distance_at`] follow it.
+    pub fn with_metric(mut self, metric: metric::Metric) -> Grid {
+        self.metric = Some(metric);
+        self
+    }
+
+    /// Whether the grid carries a physical metric.
+    pub fn has_metric(&self) -> bool {
+        self.metric.is_some()
+    }
+
+    /// The area of cell `p` in square metres: `dx^2` on the uniform metric.
+    pub fn cell_area(&self, p: usize) -> f64 {
+        match &self.metric {
+            Some(m) => m.area(p % self.w, p / self.w),
+            None => self.dx * self.dx,
+        }
+    }
+
+    /// The distance from cell `p` to its neighbour `d`: [`Grid::distance`] on the uniform metric.
+    pub fn distance_at(&self, p: usize, d: usize) -> f64 {
+        match &self.metric {
+            Some(m) => {
+                let q = self.neighbour(p, d).expect("a distance to a neighbour on the grid");
+                m.distance(p % self.w, p / self.w, q % self.w, q / self.w)
+            }
+            None => self.distance(d),
+        }
     }
 
     pub fn w(&self) -> usize {

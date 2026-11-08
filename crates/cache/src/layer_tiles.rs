@@ -332,6 +332,15 @@ impl BakeShape {
 /// The specs of pass 1 and pass 2 of a bake of `shape`, derived once for the command and the viewer so that they cannot drift: the key of every tile record follows them (an error from
 /// [`TileGrid::check`] when the geometry does not fit).
 pub fn bake_specs(world: &GlobalWorld, shape: &BakeShape) -> Result<(LayerSpec, TileLayerSpec), String> {
+    bake_specs_with(world, shape, planet_generators::bake::carve::CarveParams::default())
+}
+
+/// [`bake_specs`] with the carve parameters of pass 1 given (a preview of another setting, such as the physical cell metric `cell_metric`, GEN-138): they enter the keys.
+pub fn bake_specs_with(
+    world: &GlobalWorld,
+    shape: &BakeShape,
+    carve: planet_generators::bake::carve::CarveParams,
+) -> Result<(LayerSpec, TileLayerSpec), String> {
     let tile = shape.tile.unwrap_or(shape.planet_res.min(3072));
     let halo = shape.halo.unwrap_or(tile / 24);
     let grid = TileGrid { cells: shape.planet_res, tile, halo, radius_m: shape.radius_m };
@@ -345,7 +354,7 @@ pub fn bake_specs(world: &GlobalWorld, shape: &BakeShape) -> Result<(LayerSpec, 
         radius_m: shape.radius_m,
         sea_level: 0.0,
         seed: shape.seed,
-        carve: planet_generators::bake::carve::CarveParams::default(),
+        carve,
         inputs_id: planet_generators::bake::inputs::BakeInputs::id(),
         uses_factor: true,
         rock: 15,
