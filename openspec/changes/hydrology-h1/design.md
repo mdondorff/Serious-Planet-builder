@@ -13,7 +13,7 @@
 9. `q_in` is the sum of `Q` over the basin's exit cells, except an exit whose flow re-enters the basin within 256 cells (over a shallow margin or an island under the water): that exit is inside the next exit's `Q`. It includes the runoff of the basin's own cells; the net evaporation `max(PET - P, 0)` already nets the rain, so the balance is approximate. A net evaporation needs a runoff field in m/s.
 10. The pit limit and the flood epsilon couple: a flat of 500 cells drained over the epsilon ramp (1 mm a cell) stands 0.5 m above the ground and counts as a pit. A component whose depth from floor to rim is under the pit limit is a ramp, counted in `ramps` and not kept. The curve at the spill leaves out the shallow margin cells (flooded, not pit cells) and members at or above the spill level.
 11. Segment and basin ids carry a kind word, so they never collide.
-12. Presets used (ADR 0108): `T` 75 km^2 (A3 range 50 to 100), `pit_min_m` 0.5, `min_area` 1 km^2, `min_depth` 2 m. At the prototype's 10.6 km^2 cell the artefact criterion (below 1 km^2 and shallower than 2 m) cannot be met: no basin is an artefact (0 of 202,360). A preset in cells or in the scale of the grid is open for the planner.
+12. Presets used (ADR 0108): `T` 75 km^2 (A3 range 50 to 100), `pit_min_m` 0.5, `min_area` 1 km^2, `min_depth` 2 m. At the prototype's 10.6 km^2 cell the artefact criterion (below 1 km^2 and shallower than 2 m) cannot be met: no basin is an artefact (0 of 202,360). Corrected in the h1-corrections change: the limit is `min_cells` (4) and `min_depth_m` (2 m).
 
 ## Measurements (`examples/hydro_landmass`, release, 8 threads, the prototype landmass of GEN-144: 9,308,154 land cells, runoff of the orographic climate, seed 14)
 | Value | Result |
@@ -45,7 +45,7 @@
 |---|---|---|
 | Initiation `T` | 75 km^2 of runoff-weighted area | `HydroParams::initiation_m2` |
 | Pit limit | 0.5 m | `HydroParams::pit_min_m` (A3 section 5.3) |
-| Artefact limits | 1 km^2, 2 m | `HydroParams::min_area_m2`, `min_depth_m` |
+| Artefact limits | 4 cells, 2 m | `HydroParams::min_cells`, `min_depth_m` |
 | Reference runoff | 300 mm a year (weight 1) | `runoff::RUNOFF_REF_MM` (Earth's mean continental runoff) |
 | Flood epsilon | 1 mm | `CarveParams::epsilon` (calibration; couples to the pit limit) |
 | Body word | 0 | `HydroParams::body` |

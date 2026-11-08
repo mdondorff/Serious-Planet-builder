@@ -29,8 +29,8 @@ pub struct HydroParams {
     pub initiation_m2: f64,
     /// A basin is the cells whose filled surface stands more than this many metres above the ground (A3 section 5.3: 0.5 m).
     pub pit_min_m: f64,
-    /// A basin below this area and shallower than `min_depth_m` is an artefact: no object.
-    pub min_area_m2: f64,
+    /// A basin of fewer cells than this and shallower than `min_depth_m` is an artefact: no object. In cells, so that the limit scales with the grid (a square-kilometre limit is never met by a 3 km cell).
+    pub min_cells: u32,
     pub min_depth_m: f64,
     /// The body's word in every identity.
     pub body: u64,
@@ -38,7 +38,7 @@ pub struct HydroParams {
 
 impl Default for HydroParams {
     fn default() -> HydroParams {
-        HydroParams { initiation_m2: 75.0e6, pit_min_m: 0.5, min_area_m2: 1.0e6, min_depth_m: 2.0, body: 0 }
+        HydroParams { initiation_m2: 75.0e6, pit_min_m: 0.5, min_cells: 4, min_depth_m: 2.0, body: 0 }
     }
 }
 
@@ -277,11 +277,9 @@ pub fn hydrology(
         // The spill point: the rim cell of the lowest filled level, ties by the cell id.
         let mut spill: Option<usize> = None;
         let mut exits: Vec<usize> = Vec::new();
-        let mut area_m2 = 0.0;
         let mut evap = 0.0;
         for &c in &members {
             let c = c as usize;
-            area_m2 += grid.cell_area(c);
             evap += net_evap.map_or(0.0, |e| f64::from(e[c]));
             if !pit(receiver[c] as usize) {
                 exits.push(c);
@@ -315,7 +313,7 @@ pub fn hydrology(
             stats.ramps += 1;
             continue;
         }
-        if area_m2 < params.min_area_m2 && spill_m - floor_m < params.min_depth_m {
+        if (members.len() as u32) < params.min_cells && spill_m - floor_m < params.min_depth_m {
             stats.artefacts += 1;
             continue;
         }

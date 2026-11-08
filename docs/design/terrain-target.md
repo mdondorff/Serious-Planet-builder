@@ -148,18 +148,18 @@ Three quantities, kept apart:
 - **`Q` is conserved.** Confluence rule: `Q` is the sum of its donors plus the local term, so it is non-decreasing along a segment by construction and the sum of `Q` at all outlets equals the sum of `a r` over land (G-CON). The running maximum of `A_d` used in the earlier draft is dropped.
 - `A_d` and `Q` differ by design: MFD spreads diffuse flow, D8 keeps a river as one line. The carve keeps `A_d`; rivers report `Q`.
 - **River initiation:** `T` is a preset parameter (default 50-100 km^2 of runoff-weighted true area, D5). Because `A_d` is runoff-weighted, a rainfall edit moves initiation with no height change (E5).
-- A channel's heads are initiated cells with no channel donor. Confluences have two or more channel donors. A channel ends at the sea, at the terminal cell of an endorheic basin, or at an active outlet of a basin, where it continues (§5.3).
+- A channel's heads are initiated cells with no channel donor. Confluences have two or more channel donors. A channel ends at an outlet of the routing (the sea, the mouth); it passes through a basin and continues below its spill point, and the basin's `q_out` says how much of `Q` the basin lets through (§5.3).
 
 ### 5.3 Basins
 
-A basin is a connected set of cells (8-neighbour) below the routing surface's spill level of more than `pit_min_m` (0.5 m), found by the spill graph (`bake/spill.rs`, GEN-121). **X** Stored as one object per basin above a size threshold, on the regional grid:
+A basin is a connected set of cells (8-neighbour) below the routing surface's spill level of more than `pit_min_m` (0.5 m), found on the filled surface of the round's routing (GEN-145: the canonical flood's level is the minimax spill level plus the epsilon ramp; `bake/spill.rs` is the tile-seam minimax and gives no spill points or basin objects). **X** Stored as one object per basin above a size threshold, on the regional grid:
 
 | Field | Meaning |
 |---|---|
 | id | canonical identity (§5.4) |
 | floor level | lowest cell height (canonical form, §9) |
-| spill level | the spill graph's level |
-| spill point | the topographic spill cell of the basin; exists for every basin |
+| spill level | the filled level at the spill point |
+| spill point | the rim cell of the lowest filled level (ties by cell id); exists for every basin |
 | active outlet | the spill point when the water reaches the spill level (§5.5), else none |
 | area curve | surface area and volume at 16 fixed level steps between floor and spill |
 | type | one of the classes below |
@@ -167,12 +167,15 @@ A basin is a connected set of cells (8-neighbour) below the routing surface's sp
 
 | Class | Rule (presets, ADR 0108) | Behaviour |
 |---|---|---|
-| artefact | below `min_area_km2` and shallower than `min_depth_m` | breached in K5/K7 (no object) |
+| artefact | fewer than `min_cells` cells and shallower than `min_depth_m` (in cells, so that it scales with the grid) | breached in K5/K7 (no object) |
 | lake | deeper or larger, with an active outlet by §5.5 | kept; lake at the spill level |
 | endorheic | no active outlet by §5.5 (ADR 0105 point 2) | kept; sink for water and sediment; water level from §5.5; playa if the level is at the floor |
 | intentional | named by an item (§5.6) or a driver (caldera, karst later) | kept whatever its size |
 
 - Thresholds are preset parameters; a basin's class is a pure function of the surface and the drivers.
+- A component whose depth from floor to rim is under `pit_min_m` is the epsilon ramp of a flat, not a basin (it is counted, not kept).
+- **Touching basins are one component.** Two basins with different spill levels that touch are one basin with one floor and one spill (the lowest rim); nested basins are not separated (GEN-145). Separating them needs the spill graph's hierarchy and is open.
+- **`Q` and basins.** The channel discharge `Q` (section 5.2) is the potential discharge before basin losses, so that the sum at the outlets is the sum of `a r`. A basin's `q_out` is the discharge that continues below its spill point: `Q_in - A(spill) E_net` for a lake, 0 for an endorheic basin. The channel graph carries `Q`; a consumer that needs the lake-adjusted discharge below a basin reads `q_out` and the basin's spill point.
 
 ### 5.4 Identity under change
 
