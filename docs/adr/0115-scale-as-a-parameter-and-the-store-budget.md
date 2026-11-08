@@ -15,7 +15,8 @@ Source: `docs/design/terrain-target.md` §4, §10, §12; SPIKE-105 §3 (X11-X13)
 4. The 40 GB limit is a hard gate at Earth on real serialized data, including indexes, keys, graph metadata and edit overrides; peak temporary storage is reported separately.
 5. Field narrowing comes first; a coarser local grid (about 200 m) is a fallback only.
 6. Larger planets take coarser cells at the same counts (2x Earth at `k` = 14, 204 m), unless given a store budget of their own.
+7. A world build has its own memory budget, separate from CON-21's runtime 8 GB: 12 GB peak on the reference machine (proposed; a resident routing and round of the largest landmass needs about 10 GB, F8), or a partitioned route.
 
 ## Consequences
 - ADR 0045 point 2 becomes normative. Gate G-STORE, G-SCALE.
-- The world-build memory budget is stated by G-SCALE; CON-21's 8 GB is a runtime rule.
+- Point 7 is a new budget; the owner decides it with this ADR.

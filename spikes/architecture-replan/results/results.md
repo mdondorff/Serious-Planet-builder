@@ -1006,3 +1006,20 @@ Question: what share of 256-cell tiles changes in level, receiver or area after 
 Tiles plus border graph reproduce the whole-window flood exactly (0 cells differ, four surfaces). The 144 tile floods take 0.22 s (4 threads), one whole-window flood 1.0 s.
 
 - **Answer:** the changed set of a divide-moving edit is about 3 % of tiles and is found by flooding only the changed tiles and solving the graph. A larger edit (E4) can touch more tiles downstream along the river; G-INC reports it.
+
+## 17. Close of phase 4
+
+**Is A3 the prototype's binding contract?** Yes, with the three amendments made (incremental routing, H1 memory, channel semantics) and the tightening table folded in. It stays `proposed`; ADRs 0110-0115 stay proposed until the owner accepts them. The prototype builds against it, reusing kernels and infrastructure where they fit, and does not bend it to the old stage model.
+
+**What remains open for the production decision at the A/B gate:**
+| Open | Where it is decided |
+|---|---|
+| The two kernel changes in practice: clipped MFD and the canonical flood (look, flat-area cost) | G-LOCAL, G-ROUND, G-SCALE |
+| Incremental equality through memoised tiles and catchment keys, on E1-E6 | G-EQ, G-INC |
+| A partitioned route equal to a resident one, including cross-tile accumulation | G-PART |
+| Memory of a resident round of a landmass (about 10 GB is an estimate), and the 12 GB world-build budget | G-SCALE; ADR 0115 point 7, the owner |
+| The real store against 40 GB | G-STORE |
+| Connectivity and discharge conservation under the canonical forms | G-CON, G-EQ |
+| Divide migration across an H0 split, if that fallback is ever used | G-SCALE |
+
+**Another external round before the prototype?** No. The third review asks for no broad redesign, and the three amendments are specific. Further value lies in code and numbers, so the next round belongs at the A/B gate, with the kernels attached (they were named in the brief but not supplied) and the gate tables.
