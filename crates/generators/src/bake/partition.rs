@@ -41,11 +41,20 @@ pub struct PartRoute {
     pub stats: PartStats,
 }
 
+impl PartCache {
+    /// Compares the next results with the last of slot `k`: a series of routings of one surface in rounds uses a slot a round, so that "the tiles changed" reads against the same round of the previous solve.
+    pub fn use_slot(&mut self, k: usize) {
+        self.slot = k;
+    }
+}
+
 /// What a series of calls keeps: the memo of tile floods by their inputs and the previous result (for the change counts).
 #[derive(Default)]
 pub struct PartCache {
     floods: HashMap<(u64, u64), Arc<Vec<f64>>>,
-    previous: Option<Previous>,
+    /// The last result of each slot (slot 0 unless [`PartCache::use_slot`] says otherwise).
+    previous: Vec<Option<Previous>>,
+    slot: usize,
 }
 
 /// The last result of a cache: the tile size, the filled surface, the receivers and the area.
@@ -68,17 +77,17 @@ struct Rect {
 
 /// A 128-bit hash of a word stream (two independent 64-bit mixes): the memo key.
 #[derive(Clone, Copy)]
-struct Hash(u64, u64);
+pub(super) struct Hash(u64, u64);
 
 impl Hash {
-    fn new() -> Hash {
+    pub(super) fn new() -> Hash {
         Hash(0xcbf2_9ce4_8422_2325, 0x9e37_79b9_7f4a_7c15)
     }
-    fn word(&mut self, v: u64) {
+    pub(super) fn word(&mut self, v: u64) {
         self.0 = (self.0 ^ v).wrapping_mul(0x100_0000_01b3);
         self.1 = (self.1.rotate_left(23) ^ v.wrapping_mul(0xff51_afd7_ed55_8ccd)).wrapping_mul(0xc4ce_b9fe_1a85_ec53);
     }
-    fn key(self) -> (u64, u64) {
+    pub(super) fn key(self) -> (u64, u64) {
         (self.0, self.1)
     }
 }
@@ -199,7 +208,28 @@ pub fn partitioned_route(
     rules: RoundRules,
     cache: &mut PartCache,
 ) -> PartRoute {
+    partitioned_route_weighted(grid, z, outlet, epsilon, seed, tile, rules, None, cache)
+}
+
+/// [`partitioned_route`] with the runoff weight of each cell (GEN-129, GEN-146): every cell starts with the area `w dA`, as in `route_rules` with weights. The weights enter the area only, so
+/// the tile floods and their memo do not read them.
+#[allow(clippy::too_many_arguments)]
+pub fn partitioned_route_weighted(
+    grid: &Grid,
+    z: &[f64],
+    outlet: &[bool],
+    epsilon: f64,
+    seed: u64,
+    tile: usize,
+    rules: RoundRules,
+    weights: Option<&[f32]>,
+    cache: &mut PartCache,
+) -> PartRoute {
     let n = grid.len();
+    if let Some(w) = weights {
+        assert_eq!(w.len(), n, "one runoff weight per cell");
+        assert!(w.iter().all(|v| v.is_finite() && *v > 0.0), "the runoff weights are finite and positive");
+    }
     assert!(
         rules.canonical_flood && rules.clip_mfd != MfdClip::ToReceiver,
         "the partitioned route runs the round rules (canonical flood; clip off or local)"
@@ -373,7 +403,10 @@ pub fn partitioned_route(
                     }
                 }
                 donors.sort_unstable_by(|a, b| filled[b.0].total_cmp(&filled[a.0]).then(a.0.cmp(&b.0)));
-                let mut a = grid.cell_area(q);
+                let mut a = match weights {
+                    Some(w) => grid.cell_area(q) * f64::from(w[q]),
+                    None => grid.cell_area(q),
+                };
                 for &(p, w) in &donors {
                     a += area[p] * w / sum[p];
                 }
@@ -397,7 +430,7 @@ pub fn partitioned_route(
     }
 
     // ---- what changed against the previous call
-    if let Some(Previous { tile: tl, size, cube, filled: pf, receiver: pr, area: pa }) = &cache.previous {
+    if let Some(Some(Previous { tile: tl, size, cube, filled: pf, receiver: pr, area: pa })) = cache.previous.get(cache.slot) {
         if *tl == tile && *size == (grid.w(), grid.h()) && *cube == grid.is_cube() {
             for r in &tiles {
                 let (mut f, mut rc, mut ar) = (false, false, false);
@@ -415,7 +448,7 @@ pub fn partitioned_route(
             }
         }
     }
-    cache.previous = Some(Previous {
+    let last = Some(Previous {
         tile,
         size: (grid.w(), grid.h()),
         cube: grid.is_cube(),
@@ -423,5 +456,9 @@ pub fn partitioned_route(
         receiver: receiver.clone(),
         area: area.clone(),
     });
+    if cache.previous.len() <= cache.slot {
+        cache.previous.resize_with(cache.slot + 1, || None);
+    }
+    cache.previous[cache.slot] = last;
     PartRoute { routing: Routing { receiver, order, area }, filled, stats }
 }

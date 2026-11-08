@@ -134,7 +134,7 @@ fn main() {
                     let ro = runoff_mm(pm, tc);
                     w[c] = discharge_weight(ro) as f32;
                     r[c] = (ro / 1000.0 / SECONDS_PER_YEAR) as f32;
-                    e[c] = ((pet_mm(tc) - pm).max(0.0) / 1000.0 / SECONDS_PER_YEAR) as f32;
+                    e[c] = ((pet_mm(tc) - (pm - ro)).max(0.0) / 1000.0 / SECONDS_PER_YEAR) as f32;
                 }
             });
         }

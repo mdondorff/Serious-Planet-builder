@@ -112,6 +112,7 @@ fn rivers_cross_the_cube_edges_and_the_area_is_conserved() {
     let params = HydroParams { initiation_m2: 30.0 * g.cell_area(0), ..HydroParams::default() };
     let h = hydrology(&g, &z, &filled, &routing, &outlet, None, None, &params);
     let v = verify(&g, &h, &routing, &filled, &outlet, None, None);
+    assert!(v.qw_closure_error <= 1e-9 && v.qw_confluence_error <= 1e-9, "Q_w across the cube edges: {v:?}");
     let crossing = (0..g.len())
         .filter(|&p| h.channel[p] && routing.receiver[p] != NONE && p / (n * n) != routing.receiver[p] as usize / (n * n))
         .count();
@@ -334,5 +335,6 @@ fn h1_runs_on_a_landmass_of_the_cube() {
     assert!(h.stats.segments > 0);
     assert_eq!((v.disconnected_segments, v.broken_channel_cells, v.miscovered_cells), (0, 0, 0));
     assert!(v.max_confluence_error <= 1e-9 && v.q_outlets_error <= 1e-9 && v.area_outlets_error <= 1e-9, "{v:?}");
+    assert!(v.qw_closure_error <= 1e-9 && v.qw_confluence_error <= 1e-9, "Q_w on a landmass of the cube: {v:?}");
     assert!((0..z.len()).all(|p| active[p] || !h.channel[p]), "no channel off the grid");
 }

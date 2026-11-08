@@ -85,7 +85,8 @@ fn a_catchment_round_reads_only_its_key_inputs() {
     for (name, g) in grids() {
         let z0 = terrain(5, true);
         let outlet = g.outlets(&z0, 0.0);
-        let p = params(1);
+        // Parameters other than the defaults: the uplift of a step is read from the carve parameters given to `gather`.
+        let p = CarveParams { u_over_k: 7.0, k_dt: 0.03, ..params(1) };
         let r = route_rules(&g, &z0, &outlet, p.epsilon, 5, 0.0, None, RoundRules::ROUND);
         let cuts = cut(&r);
         let taper: Vec<f32> = z0.iter().map(|h| planet_core::smoothstep(0.0, p.uplift_taper_m, h - p.sea_level) as f32).collect();
@@ -99,10 +100,10 @@ fn a_catchment_round_reads_only_its_key_inputs() {
             let mut own = vec![false; z0.len()];
             cuts.members[k].iter().for_each(|&c| own[c as usize] = true);
             let poisoned: Vec<f64> = z0.iter().enumerate().map(|(c, &v)| if own[c] { v } else { v * -7.5 + 1234.5 }).collect();
-            let mut inp = gather(&g, &poisoned, &outlet, &r, &cuts, &taper, k);
+            let mut inp = gather(&g, &poisoned, &outlet, &r, &cuts, &taper, &p, k);
             assert_eq!(
                 inp,
-                gather(&g, &z0, &outlet, &r, &cuts, &taper, k),
+                gather(&g, &z0, &outlet, &r, &cuts, &taper, &p, k),
                 "the inputs of catchment {k} hold nothing outside its members ({name})"
             );
             catchment_round(&mut inp, &p, 5);

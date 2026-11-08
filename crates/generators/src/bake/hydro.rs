@@ -8,7 +8,7 @@
 //! - **Segments.** A segment runs from a head (an initiated cell with no channel donor) or a confluence (two or more channel donors) downstream to the next confluence or the mouth. Its end cell is the start of
 //!   the next segment (a confluence) or the mouth, which belongs to no segment. `segment_id = hash(body, downstream end cell, upstream end cell)`.
 //! - **Basins.** A basin is a connected set (8 neighbours) of cells whose filled surface stands more than `pit_min_m` above the ground. Floor, spill point and level come from the filled surface of the routing
-//!   (the minimax spill level plus the flood's epsilon ramp), the area curve has 16 level steps between the floor and the spill, and the class and the water level follow section 5.5 from the inflow and the net
+//!   (the minimax spill level plus the flood's epsilon ramp), the area curve has 16 level steps between the floor and the spill, and the class and the water level follow section 5.5 from the inflow and the open-water
 //!   evaporation. `basin_id = hash(body, canonical cell)`, the canonical cell the lowest cell of the basin, ties by the global cell id.
 //!
 //! All sums run in fixed orders (CON-14); nothing here reads a thread count.
@@ -64,6 +64,8 @@ pub enum BasinClass {
     Lake,
     /// No active outlet: a sink for water and sediment.
     Endorheic,
+    /// Named by an item or a driver (A3 section 5.3): kept whatever its size; `Basin::overflows` says whether it has an active outlet.
+    Intentional,
 }
 
 /// A kept basin.
@@ -81,6 +83,8 @@ pub struct Basin {
     /// The discharge reaching the basin.
     pub q_in: f64,
     pub class: BasinClass,
+    /// Whether the steady balance of section 5.5 overflows: the spill point is the active outlet.
+    pub overflows: bool,
     pub water_level_m: f64,
     /// The discharge the downstream channel continues with (zero for an endorheic basin).
     pub q_out: f64,
@@ -102,11 +106,15 @@ pub struct HydroStats {
 
 /// H1's result.
 pub struct Hydro {
-    /// `Q` per cell (zero off the grid).
+    /// The potential discharge `Q` per cell (zero off the grid): the local terms accumulated along the D8 tree, before the losses of basins.
     pub q: Vec<f64>,
+    /// The routed discharge `Q_w` per cell (A3 section 5.5): `Q` with the basins' losses; the segments store it.
+    pub qw: Vec<f64>,
     pub channel: Vec<bool>,
     pub segments: Vec<Segment>,
     pub basins: Vec<Basin>,
+    /// The index in `basins` of the basin each cell belongs to, `NONE` for a cell in none (the continuity map reads it).
+    pub label: Vec<u32>,
     pub stats: HydroStats,
 }
 
@@ -136,8 +144,8 @@ pub fn id_hash(body: u64, a: u64, b: u64) -> u64 {
     h
 }
 
-/// H1 on a routing. `filled` is the filled surface it came from; `runoff` the runoff of each cell (m/s, the local term is `a r`; `None`: 1, so `Q` is a true area); `net_evap` the net evaporation
-/// `max(PET - P, 0)` of each cell in m/s (`None`: 0, so every kept basin overflows).
+/// H1 on a routing. `filled` is the filled surface it came from; `runoff` the runoff of each cell (m/s, the local term is `a r`; `None`: 1, so `Q` is a true area); `open_evap` the open-water
+/// evaporation in excess of the land's, `E_open = PET - (P - r)` of each cell in m/s (A3 section 5.5; never negative, `None`: 0, so every kept basin that receives water overflows).
 #[allow(clippy::too_many_arguments)]
 pub fn hydrology(
     grid: &Grid,
@@ -146,23 +154,70 @@ pub fn hydrology(
     routing: &Routing,
     outlet: &[bool],
     runoff: Option<&[f32]>,
-    net_evap: Option<&[f32]>,
+    open_evap: Option<&[f32]>,
+    params: &HydroParams,
+) -> Hydro {
+    hydrology_with(grid, z, filled, routing, outlet, runoff, open_evap, None, params)
+}
+
+/// A basin found, before its inflow is known.
+struct Found {
+    members: Vec<u32>,
+    floor: usize,
+    spill: usize,
+    floor_m: f64,
+    spill_m: f64,
+    curve_a: [f64; CURVE_STEPS],
+    curve_v: [f64; CURVE_STEPS],
+    e_open: f64,
+    named: bool,
+}
+
+/// [`hydrology`] with the cells of intentional basins (GEN-146): a basin that holds a flagged cell is of class `Intentional` and kept whatever its size and depth.
+///
+/// `filled` must be an epsilon-filled surface (the canonical flood): the cascade relies on the cells of a basin standing strictly above its spill cell.
+///
+/// The routed discharge `Q_w` (A3 section 5.5) is the cascade over the cells in descending filled level (ties by the cell id): a cell passes its `Q_w` to its receiver, except an exit cell of a kept
+/// basin (a member whose receiver is outside it), whose flow stops there and is the basin's inflow `Q_in`; the basin's `q_out` enters at its spill cell. A basin's cells stand above its spill level, so a
+/// basin is resolved before anything below it and a chain of basins resolves in one pass.
+#[allow(clippy::too_many_arguments)]
+pub fn hydrology_with(
+    grid: &Grid,
+    z: &[f64],
+    filled: &[f64],
+    routing: &Routing,
+    outlet: &[bool],
+    runoff: Option<&[f32]>,
+    open_evap: Option<&[f32]>,
+    intentional: Option<&[bool]>,
     params: &HydroParams,
 ) -> Hydro {
     let n = grid.len();
     assert!(z.len() == n && filled.len() == n && outlet.len() == n && routing.receiver.len() == n, "one value per cell");
     assert!(params.initiation_m2 > 0.0 && params.pit_min_m >= 0.0, "initiation is positive, the pit limit not negative");
     assert!(routing.area.len() == n, "one area per cell");
-    assert!(runoff.is_none_or(|r| r.len() == n) && net_evap.is_none_or(|e| e.len() == n), "one runoff and one net evaporation per cell");
-    assert!(net_evap.is_none() || runoff.is_some(), "a net evaporation (m/s) needs the runoff in m/s: without it Q is an area");
+    assert!(
+        runoff.is_none_or(|r| r.len() == n) && open_evap.is_none_or(|e| e.len() == n),
+        "one runoff and one open-water evaporation per cell"
+    );
+    assert!(open_evap.is_none() || runoff.is_some(), "an evaporation (m/s) needs the runoff in m/s: without it Q is an area");
+    assert!(open_evap.is_none_or(|e| e.iter().all(|v| *v >= 0.0 && v.is_finite())), "E_open = PET - (P - r) is finite and not negative");
+    assert!(intentional.is_none_or(|f| f.len() == n), "one intentional flag per cell");
     let (receiver, area) = (&routing.receiver, &routing.area);
+    for c in 0..n {
+        if grid.is_active(c) && !outlet[c] && receiver[c] != NONE {
+            assert!(
+                filled[receiver[c] as usize] < filled[c],
+                "cell {c} does not stand above its receiver on `filled`: it is not the filled surface this routing was made on"
+            );
+        }
+    }
+    let local = |p: usize| if grid.is_active(p) && !outlet[p] { grid.cell_area(p) * runoff.map_or(1.0, |r| f64::from(r[p])) } else { 0.0 };
 
-    // ---- Q: the local term, then the donors, leaves first
+    // ---- Q: the potential discharge, the local term then the donors, leaves first
     let mut q = vec![0.0f64; n];
     for p in 0..n {
-        if grid.is_active(p) && !outlet[p] {
-            q[p] = grid.cell_area(p) * runoff.map_or(1.0, |r| f64::from(r[p]));
-        }
+        q[p] = local(p);
     }
     for &c in routing.order.iter().rev() {
         let c = c as usize;
@@ -208,7 +263,146 @@ pub fn hydrology(
             starts.push(p as u32);
         }
     }
-    // A confluence at the mouth cell itself starts no segment (the mouth belongs to none).
+
+    // ---- basins: the components of the cells under the filled surface
+    let mut seen = vec![false; n];
+    let pit = |p: usize| grid.is_active(p) && !outlet[p] && filled[p] - z[p] > params.pit_min_m;
+    let mut found: Vec<Found> = Vec::new();
+    let mut label = vec![NONE; n];
+    let mut stack: Vec<u32> = Vec::new();
+    for p0 in 0..n {
+        if seen[p0] || !pit(p0) {
+            continue;
+        }
+        let mut members: Vec<u32> = Vec::new();
+        stack.clear();
+        seen[p0] = true;
+        stack.push(p0 as u32);
+        while let Some(c) = stack.pop() {
+            members.push(c);
+            for d in 0..8 {
+                if let Some(q2) = grid.neighbour(c as usize, d) {
+                    if !seen[q2] && pit(q2) {
+                        seen[q2] = true;
+                        stack.push(q2 as u32);
+                    }
+                }
+            }
+        }
+        members.sort_unstable();
+        stats.basin_cells += members.len();
+        // The floor: the lowest cell, ties by the cell index (the members are in index order, which is the global id order of a window).
+        let mut floor = members[0] as usize;
+        for &c in &members {
+            if z[c as usize] < z[floor] {
+                floor = c as usize;
+            }
+        }
+        // The spill point: the rim cell of the lowest filled level, ties by the cell id.
+        let mut spill: Option<usize> = None;
+        let mut evap = 0.0;
+        for &c in &members {
+            let c = c as usize;
+            evap += open_evap.map_or(0.0, |e| f64::from(e[c]));
+            for d in 0..8 {
+                if let Some(r) = grid.neighbour(c, d) {
+                    if !pit(r) && spill.is_none_or(|s| (filled[r], r) < (filled[s], s)) {
+                        spill = Some(r);
+                    }
+                }
+            }
+        }
+        let spill = spill.expect("a basin has a rim");
+        let (floor_m, spill_m) = (z[floor], filled[spill].max(z[floor]));
+        let named = intentional.is_some_and(|f| members.iter().any(|&c| f[c as usize]));
+        if !named && spill_m - floor_m < params.pit_min_m {
+            stats.ramps += 1;
+            continue;
+        }
+        if !named && (members.len() as u32) < params.min_cells && spill_m - floor_m < params.min_depth_m {
+            stats.artefacts += 1;
+            continue;
+        }
+        let mut curve_a = [0.0f64; CURVE_STEPS];
+        let mut curve_v = [0.0f64; CURVE_STEPS];
+        for (k, (ca, cv)) in curve_a.iter_mut().zip(curve_v.iter_mut()).enumerate() {
+            let h = floor_m + (spill_m - floor_m) * (k + 1) as f64 / CURVE_STEPS as f64;
+            for &c in &members {
+                let zc = z[c as usize];
+                if zc < h {
+                    let a = grid.cell_area(c as usize);
+                    *ca += a;
+                    *cv += a * (h - zc);
+                }
+            }
+        }
+        for &c in &members {
+            label[c as usize] = found.len() as u32;
+        }
+        let e_open = evap / members.len() as f64;
+        found.push(Found { members, floor, spill, floor_m, spill_m, curve_a, curve_v, e_open, named });
+    }
+
+    // ---- Q_w: the cascade in descending filled level; a basin is resolved when its spill cell is reached
+    let mut order: Vec<u32> = (0..n as u32).filter(|&p| grid.is_active(p as usize)).collect();
+    order.sort_unstable_by(|&a, &b| filled[b as usize].total_cmp(&filled[a as usize]).then(a.cmp(&b)));
+    let mut qw = vec![0.0f64; n];
+    for p in 0..n {
+        qw[p] = local(p);
+    }
+    let mut spill_of: HashMap<u32, Vec<usize>> = HashMap::new();
+    for (b, f) in found.iter().enumerate() {
+        spill_of.entry(f.spill as u32).or_default().push(b);
+    }
+    let mut q_in = vec![0.0f64; found.len()];
+    let mut left: Vec<usize> = found.iter().map(|f| f.members.len()).collect();
+    let mut solved: Vec<Option<(BasinClass, bool, f64, f64)>> = vec![None; found.len()];
+    for &c in &order {
+        let c = c as usize;
+        if let Some(bs) = spill_of.get(&(c as u32)) {
+            for &b in bs {
+                assert_eq!(left[b], 0, "the cells of a basin stand above its spill cell");
+                let f = &found[b];
+                let (class, overflows, level, q_out) = balance(f, q_in[b]);
+                solved[b] = Some((class, overflows, level, q_out));
+                qw[c] += q_out;
+            }
+        }
+        let r = receiver[c];
+        if label[c] != NONE {
+            let b = label[c] as usize;
+            left[b] -= 1;
+            if r != NONE && label[r as usize] == label[c] {
+                qw[r as usize] += qw[c];
+            } else {
+                q_in[b] += qw[c];
+            }
+        } else if r != NONE {
+            qw[r as usize] += qw[c];
+        }
+    }
+    let mut basins: Vec<Basin> = Vec::with_capacity(found.len());
+    for (b, f) in found.iter().enumerate() {
+        let (class, overflows, level, q_out) = solved[b].expect("every spill cell is reached");
+        basins.push(Basin {
+            id: basin_id(params.body, grid.global_id(f.floor)),
+            floor_cell: f.floor as u32,
+            floor_m: f.floor_m,
+            spill_cell: f.spill as u32,
+            spill_m: f.spill_m,
+            cells: f.members.len() as u32,
+            area_m2: f.curve_a,
+            volume_m3: f.curve_v,
+            q_in: q_in[b],
+            class: if f.named { BasinClass::Intentional } else { class },
+            overflows,
+            water_level_m: level,
+            q_out,
+        });
+    }
+    stats.basins = basins.len();
+
+    // ---- segments, with the routed discharge
     let mut index: HashMap<u32, u32> = HashMap::with_capacity(starts.len());
     for (k, &s) in starts.iter().enumerate() {
         index.insert(s, k as u32);
@@ -230,8 +424,8 @@ pub fn hydrology(
             up: s,
             down: cur as u32,
             cells,
-            q_up: q[s as usize],
-            q_down: q[cur],
+            q_up: qw[s as usize],
+            q_down: qw[cur],
             downstream: NONE,
         });
     }
@@ -239,136 +433,51 @@ pub fn hydrology(
         sg.downstream = index.get(&sg.down).copied().unwrap_or(NONE);
     }
     stats.segments = segments.len();
+    Hydro { q, qw, channel, segments, basins, label, stats }
+}
 
-    // ---- basins: the components of the cells under the filled surface
-    let mut seen = vec![false; n];
-    let pit = |p: usize| grid.is_active(p) && !outlet[p] && filled[p] - z[p] > params.pit_min_m;
-    let mut basins: Vec<Basin> = Vec::new();
-    let mut stack: Vec<u32> = Vec::new();
-    let mut members: Vec<u32> = Vec::new();
-    for p0 in 0..n {
-        if seen[p0] || !pit(p0) {
-            continue;
-        }
-        members.clear();
-        stack.clear();
-        seen[p0] = true;
-        stack.push(p0 as u32);
-        while let Some(c) = stack.pop() {
-            members.push(c);
-            for d in 0..8 {
-                if let Some(q2) = grid.neighbour(c as usize, d) {
-                    if !seen[q2] && pit(q2) {
-                        seen[q2] = true;
-                        stack.push(q2 as u32);
-                    }
-                }
-            }
-        }
-        members.sort_unstable();
-        stats.basin_cells += members.len();
-        // The floor: the lowest cell, ties by the global cell id (the members are in id order).
-        let mut floor = members[0] as usize;
-        for &c in &members {
-            if z[c as usize] < z[floor] {
-                floor = c as usize;
-            }
-        }
-        // The spill point: the rim cell of the lowest filled level, ties by the cell id.
-        let mut spill: Option<usize> = None;
-        let mut exits: Vec<usize> = Vec::new();
-        let mut evap = 0.0;
-        for &c in &members {
-            let c = c as usize;
-            evap += net_evap.map_or(0.0, |e| f64::from(e[c]));
-            if !pit(receiver[c] as usize) {
-                exits.push(c);
-            }
-            for d in 0..8 {
-                if let Some(r) = grid.neighbour(c, d) {
-                    if !pit(r) && spill.is_none_or(|s| (filled[r], r) < (filled[s], s)) {
-                        spill = Some(r);
-                    }
-                }
-            }
-        }
-        let spill = spill.expect("a basin has a rim");
-        // The inflow: `Q` of the exits, but an exit whose flow comes back into the basin a few cells on (over a shallow margin or an island under the water) is inside the next exit's `Q`.
-        let mut q_in = 0.0;
-        'exits: for &e in &exits {
-            let mut r = receiver[e];
-            for _ in 0..256 {
-                if r == NONE {
-                    break;
-                }
-                if members.binary_search(&r).is_ok() {
-                    continue 'exits;
-                }
-                r = receiver[r as usize];
-            }
-            q_in += q[e];
-        }
-        let (floor_m, spill_m) = (z[floor], filled[spill].max(z[floor]));
-        if spill_m - floor_m < params.pit_min_m {
-            stats.ramps += 1;
-            continue;
-        }
-        if (members.len() as u32) < params.min_cells && spill_m - floor_m < params.min_depth_m {
-            stats.artefacts += 1;
-            continue;
-        }
-        let mut curve_a = [0.0f64; CURVE_STEPS];
-        let mut curve_v = [0.0f64; CURVE_STEPS];
-        for (k, (ca, cv)) in curve_a.iter_mut().zip(curve_v.iter_mut()).enumerate() {
-            let h = floor_m + (spill_m - floor_m) * (k + 1) as f64 / CURVE_STEPS as f64;
-            for &c in &members {
-                let zc = z[c as usize];
-                if zc < h {
-                    let a = grid.cell_area(c as usize);
-                    *ca += a;
-                    *cv += a * (h - zc);
-                }
-            }
-        }
-        // Section 5.5: the steady balance A(h) E = Q_in on the curve.
-        let e_net = evap / members.len() as f64;
-        let (class, level, q_out) = if curve_a[CURVE_STEPS - 1] * e_net < q_in {
-            (BasinClass::Lake, spill_m, q_in - curve_a[CURVE_STEPS - 1] * e_net)
-        } else {
-            let mut level = floor_m;
-            let mut prev = (floor_m, 0.0);
-            for k in 0..CURVE_STEPS {
-                if q_in <= 0.0 {
-                    break;
-                }
-                let h = floor_m + (spill_m - floor_m) * (k + 1) as f64 / CURVE_STEPS as f64;
-                let w = curve_a[k] * e_net;
-                if w >= q_in {
-                    let t = if w > prev.1 { (q_in - prev.1) / (w - prev.1) } else { 1.0 };
-                    level = prev.0 + t * (h - prev.0);
-                    break;
-                }
-                prev = (h, w);
-            }
-            (BasinClass::Endorheic, level, 0.0)
-        };
-        basins.push(Basin {
-            id: basin_id(params.body, grid.global_id(floor)),
-            floor_cell: floor as u32,
-            floor_m,
-            spill_cell: spill as u32,
-            spill_m,
-            cells: members.len() as u32,
-            area_m2: curve_a,
-            volume_m3: curve_v,
-            q_in,
-            class,
-            water_level_m: level,
-            q_out,
-        });
+/// The steady balance of section 5.5 for a basin with the inflow `q_in`: `Q_in = A(h) E_open + q_out(h)`. Returns the class (lake or endorheic), whether it overflows, the water level and `q_out`.
+fn balance(f: &Found, q_in: f64) -> (BasinClass, bool, f64, f64) {
+    let a_spill = f.curve_a[CURVE_STEPS - 1];
+    if q_in > a_spill * f.e_open {
+        return (BasinClass::Lake, true, f.spill_m, q_in - a_spill * f.e_open);
     }
-    stats.basins = basins.len();
-    Hydro { q, channel, segments, basins, stats }
+    let mut level = f.floor_m;
+    let mut prev = (f.floor_m, 0.0);
+    for k in 0..CURVE_STEPS {
+        if q_in <= 0.0 {
+            break;
+        }
+        let h = f.floor_m + (f.spill_m - f.floor_m) * (k + 1) as f64 / CURVE_STEPS as f64;
+        let w = f.curve_a[k] * f.e_open;
+        if w >= q_in {
+            let t = if w > prev.1 { (q_in - prev.1) / (w - prev.1) } else { 1.0 };
+            level = prev.0 + t * (h - prev.0);
+            break;
+        }
+        prev = (h, w);
+    }
+    (BasinClass::Endorheic, false, level, 0.0)
+}
+
+/// The continuity map of an edit (A3 section 5.4): for each basin of `old`, the basins of `new` that share cells with it, as `(id, shared cells)` by shared cells descending, then id. It is computed at
+/// the commit of an edit and is not an input of any stage. Both results are on the same grid.
+pub fn basin_continuity(old: &Hydro, new: &Hydro) -> Vec<(u64, Vec<(u64, u32)>)> {
+    assert_eq!(old.label.len(), new.label.len(), "both results are on one grid");
+    let mut shared: HashMap<(u32, u32), u32> = HashMap::new();
+    for (a, b) in old.label.iter().zip(&new.label) {
+        if *a != NONE && *b != NONE {
+            *shared.entry((*a, *b)).or_insert(0) += 1;
+        }
+    }
+    let mut out: Vec<(u64, Vec<(u64, u32)>)> = old.basins.iter().map(|b| (b.id, Vec::new())).collect();
+    for ((a, b), c) in shared {
+        out[a as usize].1.push((new.basins[b as usize].id, c));
+    }
+    for (_, v) in &mut out {
+        v.sort_by(|x, y| y.1.cmp(&x.1).then(x.0.cmp(&y.0)));
+    }
+    out
 }
 
 /// The numbers of the gate G-CON and of the conservation check (A3 section 12.1).
@@ -384,6 +493,10 @@ pub struct Verify {
     pub max_confluence_error: f64,
     /// Relative error of the sum of `Q` at the outlets against the sum of the local terms.
     pub q_outlets_error: f64,
+    /// The closure of `Q_w`: the sum at the outlets plus, over the basins, `Q_in - q_out`, against the sum of the local terms.
+    pub qw_closure_error: f64,
+    /// The largest relative error of `Q_w(c)` against its local term plus its donors' (an exit cell of a kept basin passes nothing; `q_out` enters at the spill cell), over the channel cells.
+    pub qw_confluence_error: f64,
     /// Relative error of the sum of `A_d` at the outlets against the sum of the (weighted) true cell areas of the cells that drain to them (every active cell).
     pub area_outlets_error: f64,
 }
@@ -449,7 +562,26 @@ pub fn verify(
         let err = (sum - h.q[c]).abs() / h.q[c].abs().max(1e-300);
         v.max_confluence_error = v.max_confluence_error.max(err);
     }
-    let (mut q_out, mut a_local, mut ad_out, mut ad_cells) = (0.0, 0.0, 0.0, 0.0);
+    // Q_w at every channel cell against its local term, its donors and the q_out entering at it.
+    let mut spill_q: HashMap<u32, f64> = HashMap::new();
+    for b in &h.basins {
+        *spill_q.entry(b.spill_cell).or_insert(0.0) += b.q_out;
+    }
+    for c in 0..n {
+        if !h.channel[c] {
+            continue;
+        }
+        let mut sum = local(c) + spill_q.get(&(c as u32)).copied().unwrap_or(0.0);
+        for d in 0..8 {
+            if let Some(p) = grid.neighbour(c, d) {
+                if receiver[p] == c as u32 && !(h.label[p] != NONE && h.label[p] != h.label[c]) {
+                    sum += h.qw[p];
+                }
+            }
+        }
+        v.qw_confluence_error = v.qw_confluence_error.max((sum - h.qw[c]).abs() / h.qw[c].abs().max(1e-300));
+    }
+    let (mut q_out, mut qw_out, mut a_local, mut ad_out, mut ad_cells) = (0.0, 0.0, 0.0, 0.0, 0.0);
     for p in 0..n {
         if !grid.is_active(p) {
             continue;
@@ -458,9 +590,12 @@ pub fn verify(
         ad_cells += grid.cell_area(p) * weights.map_or(1.0, |w| f64::from(w[p]));
         if receiver[p] == NONE {
             q_out += h.q[p];
+            qw_out += h.qw[p];
             ad_out += routing.area[p];
         }
     }
+    let lost: f64 = h.basins.iter().map(|b| b.q_in - b.q_out).sum();
+    v.qw_closure_error = (qw_out + lost - a_local).abs() / a_local.max(1e-300);
     v.q_outlets_error = (q_out - a_local).abs() / a_local.max(1e-300);
     v.area_outlets_error = (ad_out - ad_cells).abs() / ad_cells.max(1e-300);
     v
