@@ -1,18 +1,18 @@
 //! The edit cases E1-E6 of the prototype region (spikes/prototype-region/results/results.md) at the erosion grid (12,288 cells, 814 m), GEN-146: for each edit the memoised re-solve (G-INC: the tile
 //! floods, the catchments carved, the tiles changed) against the solve of the edited definition without a cache (G-EQ, bit equality), and the structural gates after the edit (G-PART, G-CON, the
-//! conservation of `Q` and `A_d`) with the case's own checks (basin ids and the continuity map for E3, the discharge and the dirty set at the mouth for E4, initiation for E5).
-//! The window is the region plus `margin` cells (its border an outlet). Usage: edit_cases [margin_cells] [threads] [tile] [only]  (`only`: a case name such as E3b)
+//! conservation of `Q` and `A_d`) with the case's own checks (basin ids and the continuity map for E3, the discharge at the outlet for E4, initiation for E5).
+//! The window is the region plus `margin` cells (its border an outlet). Usage: edit_cases [margin_cells] [threads] [tile] [only]  (`only`: a case name prefix such as E3)
 #![allow(clippy::needless_range_loop)]
 use planet_core::{Face, Vec3};
 use planet_generators::bake::carve::CarveParams;
 use planet_generators::bake::face::FaceSpec;
 use planet_generators::bake::flood::priority_flood_with;
-use planet_generators::bake::hydro::{basin_continuity, basin_id, hydrology_with, verify, BasinClass, Hydro, HydroParams};
+use planet_generators::bake::hydro::{basin_continuity, hydrology_with, verify, BasinClass, Hydro, HydroParams, Verify};
 use planet_generators::bake::inputs::BakeInputs;
 use planet_generators::bake::metric::Metric;
 use planet_generators::bake::partition::{partitioned_route_weighted, PartCache};
 use planet_generators::bake::round::{solve_rounds_memo, solve_rounds_with, Drivers, RoundCache, RoundWork};
-use planet_generators::bake::route::{route_rules, RoundRules, NONE};
+use planet_generators::bake::route::{route_rules, RoundRules, Routing, NONE};
 use planet_generators::bake::Grid;
 use planet_generators::runoff::{discharge_weight, pet_mm, runoff_mm};
 use std::time::Instant;
@@ -22,7 +22,7 @@ const R: f64 = 6_371_000.0;
 const SECONDS_PER_YEAR: f64 = 31_557_600.0;
 const REGION: (usize, usize, usize, usize) = (2014 * 4, 2168 * 4 + 3, 190 * 4, 344 * 4 + 3);
 
-/// The state one solve reads: the surface, the climate (precipitation mm a year, temperature) and the rock.
+/// The state one solve reads: the surface, the climate (precipitation mm a year, temperature), the rock and the cells named by items.
 #[derive(Clone)]
 struct World {
     z: Vec<f64>,
@@ -74,6 +74,9 @@ impl Ctx<'_> {
     fn cell_of(&self, c: usize) -> (usize, usize) {
         (self.i0 + c % self.w, self.j0 + c / self.w)
     }
+    fn inside(&self, i: usize, j: usize) -> bool {
+        i >= self.i0 && j >= self.j0 && i < self.i0 + self.w && j < self.j0 + self.grid.h()
+    }
 }
 
 fn drivers<'a>(w: &'a World, d: &'a Derived) -> Drivers<'a> {
@@ -91,8 +94,7 @@ fn raise_block(c: &Ctx, z: &mut [f64], (i0, i1, j0, j1): (usize, usize, usize, u
         for i in i0.saturating_sub(8)..=(i1 + 8).min(c.i0 + c.w - 1) {
             let dx = (i0 as f64 - i as f64).max(i as f64 - i1 as f64).max(0.0);
             let dy = (j0 as f64 - j as f64).max(j as f64 - j1 as f64).max(0.0);
-            let d = (dx * dx + dy * dy).sqrt();
-            z[c.at(i, j)] += m * (1.0 - smooth(d / edge));
+            z[c.at(i, j)] += m * (1.0 - smooth((dx * dx + dy * dy).sqrt() / edge));
         }
     }
 }
@@ -126,22 +128,17 @@ fn stats_line(label: &str, work: &[RoundWork], base: &[RoundWork]) {
     }
 }
 
-fn h1(
-    c: &Ctx,
-    w: &World,
-    d: &Derived,
-    z: &[f64],
-) -> (Hydro, Vec<f64>, planet_generators::bake::route::Routing, planet_generators::bake::hydro::Verify) {
+fn h1(c: &Ctx, w: &World, d: &Derived, z: &[f64]) -> (Hydro, Routing, Verify) {
     let routing = route_rules(c.grid, z, c.outlet, 1e-3, c.stream, 0.0, Some(&d.weight), RoundRules::ROUND);
     let filled = priority_flood_with(c.grid, z, c.outlet, 1e-3, true);
     let hy =
         hydrology_with(c.grid, z, &filled, &routing, c.outlet, Some(&d.runoff), Some(&d.evap), Some(&w.flags), &HydroParams::default());
     let v = verify(c.grid, &hy, &routing, &filled, c.outlet, Some(&d.runoff), Some(&d.weight));
-    (hy, filled, routing, v)
+    (hy, routing, v)
 }
 
 /// The structural gates of the world after an edit: G-PART on its surface, G-CON and the conservation on the solved surface.
-fn gates(c: &Ctx, w: &World, d: &Derived, solved: &[f64]) -> Hydro {
+fn gates(c: &Ctx, w: &World, d: &Derived, solved: &[f64]) -> (Hydro, Routing) {
     let want = route_rules(c.grid, &w.z, c.outlet, 1e-3, c.stream, 0.0, Some(&d.weight), RoundRules::ROUND);
     let got = partitioned_route_weighted(
         c.grid,
@@ -156,12 +153,12 @@ fn gates(c: &Ctx, w: &World, d: &Derived, solved: &[f64]) -> Hydro {
     );
     let dr = got.routing.receiver.iter().zip(&want.receiver).filter(|(a, b)| a != b).count();
     let da = got.routing.area.iter().zip(&want.area).filter(|(a, b)| a.to_bits() != b.to_bits()).count();
-    let (hy, _, _, v) = h1(c, w, d, solved);
+    let (hy, routing, v) = h1(c, w, d, solved);
     println!(
         "  G-PART {dr} receivers, {da} A_d differ; G-CON {} disconnected, {} broken, {} miscovered; Q confluences {:.1e}, outlets {:.1e}; A_d outlets {:.1e}; channel cells {} ({} heads), basins {}",
         v.disconnected_segments, v.broken_channel_cells, v.miscovered_cells, v.max_confluence_error, v.q_outlets_error, v.area_outlets_error, hy.stats.channel_cells, hy.stats.heads, hy.stats.basins
     );
-    hy
+    (hy, routing)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -173,7 +170,7 @@ fn run_edit(
     base_work: &[RoundWork],
     cache: &mut RoundCache,
     edited: &World,
-) -> (Vec<f64>, Vec<RoundWork>, Hydro) {
+) -> (Vec<f64>, Hydro, Routing) {
     let t = Instant::now();
     // The base definition through the cache again, so that the change counts read against it.
     let d0 = derive(base_w);
@@ -191,16 +188,16 @@ fn run_edit(
     let changed = z.iter().zip(base_z).filter(|(a, b)| a.to_bits() != b.to_bits()).count();
     println!("{name}: G-EQ {differ} cells differ (memoised {memo_s:.1} s incl. the base pass, fresh solve {fresh_s:.1} s); {changed} cells differ from the base result");
     stats_line(name, &work, base_work);
-    let hy = gates(c, edited, &d, &z);
-    (z, work, hy)
+    let (hy, routing) = gates(c, edited, &d, &z);
+    (z, hy, routing)
 }
 
 fn find_basin(hy: &Hydro, c: &Ctx, i: usize, j: usize) -> Option<usize> {
-    for r in 0..=8usize {
-        for dj in -(r as i64)..=(r as i64) {
-            for di in -(r as i64)..=(r as i64) {
+    for r in 0..=8i64 {
+        for dj in -r..=r {
+            for di in -r..=r {
                 let (x, y) = ((i as i64 + di) as usize, (j as i64 + dj) as usize);
-                if x < c.i0 || y < c.j0 || x >= c.i0 + c.w || y >= c.j0 + c.grid.h() {
+                if !c.inside(x, y) {
                     continue;
                 }
                 let l = hy.label[c.at(x, y)];
@@ -221,6 +218,14 @@ fn describe(hy: &Hydro, k: usize, c: &Ctx) -> String {
         "id {:016x}, floor {:.0} m at ({fi}, {fj}), spill {:.0} m at ({si}, {sj}), {} cells, {:?}, level {:.0} m, q_in {:.2} m3/s, q_out {:.2}",
         b.id, b.floor_m, b.spill_m, b.cells, b.class, b.water_level_m, b.q_in, b.q_out
     )
+}
+
+fn outlet_of(r: &Routing, from: usize) -> usize {
+    let mut m = from;
+    while r.receiver[m] != NONE {
+        m = r.receiver[m] as usize;
+    }
+    m
 }
 
 fn main() {
@@ -266,14 +271,39 @@ fn main() {
     let outlet = grid.outlets(&base.z, 0.0);
     let p = CarveParams { steps: 20, reroute_every: 5, round_rules: RoundRules::ROUND, cell_metric: true, ..CarveParams::default() };
     let c = Ctx { grid: &grid, outlet: &outlet, p: &p, stream: spec.stream(), threads, tile, i0, j0, w };
-    // E3d: a basin named by an item at the 3,072-grid cell (2155, 205).
-    for j in 818..=826 {
-        for i in 8618..=8626 {
-            base.flags[c.at(i, j)] = true;
-        }
-    }
+    let run = |name: &str| only.as_ref().is_none_or(|o| name.starts_with(o.as_str()));
 
-    // ---- the base solve and the base basins (on the unsolved surface, where the E3 fixtures were found)
+    // E3d: the basin of the fixture's lowest cell (2155, 205) of the 3,072 grid, named by an item: its floor cell is flagged, on the unsolved surface where the fixtures were found.
+    let d_base = derive(&base);
+    let (hy0, _, _) = h1(&c, &base, &d_base, &base.z);
+    let (fix_i, fix_j) = (2155 * 4 + 2, 205 * 4 + 2);
+    let named_id = match find_basin(&hy0, &c, fix_i, fix_j) {
+        Some(k) => {
+            base.flags[hy0.basins[k].floor_cell as usize] = true;
+            println!("E3d the basin named by an item: {}", describe(&hy0, k, &c));
+            Some(hy0.basins[k].id)
+        }
+        None => {
+            println!("E3d: no basin within 8 cells of the fixture's lowest cell ({fix_i}, {fix_j}) at this grid; not exercised");
+            None
+        }
+    };
+    let named = |tag: &str, w: &World| {
+        let Some(id) = named_id else { return };
+        let (hy, _, _) = h1(&c, w, &derive(w), &w.z);
+        match hy.basins.iter().find(|b| b.id == id) {
+            Some(b) => println!(
+                "  E3d after {tag}: the named basin is kept (id {id:016x}), class {:?}, {} cells, floor {:.0} m",
+                b.class, b.cells, b.floor_m
+            ),
+            None => println!(
+                "  E3d after {tag}: the named basin is GONE ({} intentional basin(s) now)",
+                hy.basins.iter().filter(|b| b.class == BasinClass::Intentional).count()
+            ),
+        }
+    };
+
+    // ---- the base solve
     let mut cache = RoundCache::default();
     let d_base = derive(&base);
     let mut z_base = base.z.clone();
@@ -281,20 +311,15 @@ fn main() {
     let (_, work_base) =
         solve_rounds_memo(&grid, &mut z_base, &outlet, &p, 4, &threads, c.stream, &drivers(&base, &d_base), tile, &mut cache);
     println!("base solve (memoised, 4 rounds): {:.1} s; {} catchment rounds held", t.elapsed().as_secs_f64(), cache.len());
-    let hy_base = gates(&c, &base, &d_base, &z_base);
-    let (hy0, _, _, _) = h1(&c, &base, &d_base, &base.z);
-    let run = |name: &str| only.as_ref().is_none_or(|o| name.starts_with(o.as_str()));
+    let (hy_base, r_base) = gates(&c, &base, &d_base, &z_base);
+    named("the base", &base);
 
     // ---- E1: raise a range
-    let mut e1 = base.clone();
     if run("E1") {
+        let mut e1 = base.clone();
         raise_block(&c, &mut e1.z, (8612, 8675, 780, 843), 1000.0, 8.0);
-        let (_, _, hy) = run_edit(&c, "E1 raise a range by 1,000 m", &base, &z_base, &work_base, &mut cache, &e1);
-        let named = hy.basins.iter().filter(|b| b.class == BasinClass::Intentional).count();
-        println!(
-            "  E3d: {named} intentional basin(s) kept through E1 (base: {})",
-            hy_base.basins.iter().filter(|b| b.class == BasinClass::Intentional).count()
-        );
+        run_edit(&c, "E1 raise a range by 1,000 m", &base, &z_base, &work_base, &mut cache, &e1);
+        named("E1", &e1);
     }
     // ---- E2: move a divide
     if run("E2") {
@@ -305,6 +330,7 @@ fn main() {
             }
         }
         run_edit(&c, "E2a lower the pass by 100 m", &base, &z_base, &work_base, &mut cache, &e2);
+        named("E2a", &e2);
         let mut e2 = base.clone();
         let (x0, y0, x1, y1) = (8048i64, 1192i64, 8148i64, 1264i64);
         for s in 0..=100 {
@@ -316,6 +342,7 @@ fn main() {
             }
         }
         run_edit(&c, "E2b raise a ridge line by 200 m", &base, &z_base, &work_base, &mut cache, &e2);
+        named("E2b", &e2);
     }
     // ---- E3: basins (on the surfaces of the world, before erosion)
     if run("E3") {
@@ -325,6 +352,7 @@ fn main() {
                 println!("E3 basins at the base surface:\n  A {}\n  B {}", describe(&hy0, ka, &c), describe(&hy0, kb, &c));
                 let (fa, fb) = (c.cell_of(hy0.basins[ka].floor_cell as usize), c.cell_of(hy0.basins[kb].floor_cell as usize));
                 let (sa, ss) = (hy0.basins[ka].spill_cell as usize, hy0.basins[ka].spill_m);
+                let id_a = hy0.basins[ka].id;
                 // E3a: cut 25 m at the spill of A.
                 let mut e3a = base.clone();
                 let (si, sj) = c.cell_of(sa);
@@ -333,20 +361,20 @@ fn main() {
                         e3a.z[c.at(i, j)] -= 25.0;
                     }
                 }
-                let (hy3a, _, _, _) = h1(&c, &e3a, &derive(&e3a), &e3a.z);
-                let ka2 = find_basin(&hy3a, &c, fa.0, fa.1);
+                let (hy3a, _, _) = h1(&c, &e3a, &derive(&e3a), &e3a.z);
                 println!("E3a cut 25 m at the spill ({si}, {sj}, spill level {ss:.0} m):");
-                match ka2 {
+                match find_basin(&hy3a, &c, fa.0, fa.1) {
                     Some(k) => println!(
                         "  A after: {}; id {}; class {:?} -> {:?}",
                         describe(&hy3a, k, &c),
-                        if hy3a.basins[k].id == hy0.basins[ka].id { "stays" } else { "CHANGED" },
+                        if hy3a.basins[k].id == id_a { "stays" } else { "CHANGED" },
                         hy0.basins[ka].class,
                         hy3a.basins[k].class
                     ),
                     None => println!("  A is no longer a basin (the cut drained it)"),
                 }
                 run_edit(&c, "E3a (rounds)", &base, &z_base, &work_base, &mut cache, &e3a);
+                named("E3a", &e3a);
                 // E3b: a trench joins A and B.
                 let mut e3b = base.clone();
                 let target = hy0.basins[ka].floor_m.max(hy0.basins[kb].floor_m) + 2.0;
@@ -361,72 +389,76 @@ fn main() {
                         }
                     }
                 }
-                let d3b = derive(&e3b);
-                let (hy3b, _, _, _) = h1(&c, &e3b, &d3b, &e3b.z);
-                let km = find_basin(&hy3b, &c, fa.0, fa.1);
-                println!("E3b trench between the floors ({} cells long):", steps);
-                if let Some(k) = km {
-                    println!("  merged: {}", describe(&hy3b, k, &c));
-                    let map = basin_continuity(&hy0, &hy3b);
-                    for (old, news) in map.iter().filter(|(id, _)| *id == hy0.basins[ka].id || *id == hy0.basins[kb].id) {
+                let (hy3b, _, _) = h1(&c, &e3b, &derive(&e3b), &e3b.z);
+                println!("E3b a trench between the floors ({steps} steps):");
+                match find_basin(&hy3b, &c, fa.0, fa.1) {
+                    Some(k) => {
+                        println!("  merged: {}", describe(&hy3b, k, &c));
+                        for (old, news) in basin_continuity(&hy0, &hy3b).iter().filter(|(id, _)| *id == id_a || *id == hy0.basins[kb].id) {
+                            println!(
+                                "  continuity: {old:016x} -> {:?}",
+                                news.iter().take(3).map(|(id, c)| format!("{id:016x} ({c} cells)")).collect::<Vec<_>>()
+                            );
+                        }
+                        let (ba, bb) = (&hy0.basins[ka], &hy0.basins[kb]);
+                        let expect = if (ba.floor_m, ba.floor_cell) <= (bb.floor_m, bb.floor_cell) { ba.id } else { bb.id };
                         println!(
-                            "  continuity: {old:016x} -> {:?}",
-                            news.iter().take(3).map(|(id, c)| format!("{id:016x} ({c} cells)")).collect::<Vec<_>>()
+                            "  the merged id is the id of the basin with the lower floor (ties by the cell id): {}",
+                            hy3b.basins[k].id == expect
                         );
                     }
-                    let deeper = if hy0.basins[ka].floor_m <= hy0.basins[kb].floor_m { ka } else { kb };
-                    println!("  the merged id is the deeper basin's id: {}", hy3b.basins[k].id == hy0.basins[deeper].id);
-                    // E3c: raise a sill across the middle of the trench: the reverse.
-                    let mut e3c = e3b.clone();
-                    for s in steps * 2 / 5..=steps * 3 / 5 {
-                        let x = fa.0 as i64 + (fb.0 as i64 - fa.0 as i64) * s / steps;
-                        let y = fa.1 as i64 + (fb.1 as i64 - fa.1 as i64) * s / steps;
-                        for dj in -3..=3 {
-                            for di in -3..=3 {
-                                let idx = c.at((x + di) as usize, (y + dj) as usize);
-                                e3c.z[idx] = e3c.z[idx].max(base.z[idx] + 30.0);
-                            }
-                        }
-                    }
-                    let (hy3c, _, _, _) = h1(&c, &e3c, &derive(&e3c), &e3c.z);
-                    let (pa, pb) = (find_basin(&hy3c, &c, fa.0, fa.1), find_basin(&hy3c, &c, fb.0, fb.1));
-                    println!("E3c a sill across the merged basin:");
-                    for (lab, kk, old) in [("A", pa, ka), ("B", pb, kb)] {
-                        match kk {
-                            Some(k) => println!(
-                                "  {lab}: {}; old id {}",
-                                describe(&hy3c, k, &c),
-                                if hy3c.basins[k].id == hy0.basins[old].id { "kept" } else { "NEW" }
-                            ),
-                            None => println!("  {lab}: no basin"),
-                        }
-                    }
-                    for (old, news) in basin_continuity(&hy3b, &hy3c) {
-                        println!(
-                            "  continuity of the merged basin {old:016x} -> {:?}",
-                            news.iter().take(3).map(|(id, c)| format!("{id:016x} ({c} cells)")).collect::<Vec<_>>()
-                        );
-                    }
-                    run_edit(&c, "E3b (rounds)", &base, &z_base, &work_base, &mut cache, &e3b);
-                    run_edit(&c, "E3c (rounds)", &base, &z_base, &work_base, &mut cache, &e3c);
-                } else {
-                    println!("  the trench left no basin at A's floor");
+                    None => println!("  the trench left no basin at A's floor"),
                 }
+                run_edit(&c, "E3b (rounds)", &base, &z_base, &work_base, &mut cache, &e3b);
+                named("E3b", &e3b);
+                // E3c: the reverse of a merge: a ridge across basin A, above its spill level, splits it. The part with the old floor keeps the id; the other part is new.
+                let mut e3c = base.clone();
+                let (mut bi0, mut bi1, mut bj0, mut bj1) = (usize::MAX, 0usize, usize::MAX, 0usize);
+                for (cell, &l) in hy0.label.iter().enumerate() {
+                    if l as usize == ka {
+                        let (x, y) = c.cell_of(cell);
+                        (bi0, bi1, bj0, bj1) = (bi0.min(x), bi1.max(x), bj0.min(y), bj1.max(y));
+                    }
+                }
+                let cut = if bi1 > fa.0 + 10 { (fa.0 + bi1) / 2 } else { (fa.0 + bi0) / 2 };
+                for y in bj0.saturating_sub(2)..=(bj1 + 2).min(c.j0 + h - 1) {
+                    for x in cut - 1..=cut + 1 {
+                        let idx = c.at(x, y);
+                        e3c.z[idx] = e3c.z[idx].max(hy0.basins[ka].spill_m + 20.0);
+                    }
+                }
+                let (hy3c, _, _) = h1(&c, &e3c, &derive(&e3c), &e3c.z);
+                println!("E3c a ridge across A at i = {cut} (A spans i {bi0}-{bi1}, j {bj0}-{bj1}):");
+                match find_basin(&hy3c, &c, fa.0, fa.1) {
+                    Some(k) => println!(
+                        "  the part with A's floor: {}; old id {}",
+                        describe(&hy3c, k, &c),
+                        if hy3c.basins[k].id == id_a { "kept" } else { "NEW" }
+                    ),
+                    None => println!("  no basin at A's floor"),
+                }
+                for (old, news) in basin_continuity(&hy0, &hy3c).iter().filter(|(id, _)| *id == id_a) {
+                    println!(
+                        "  continuity of A {old:016x} -> {:?}",
+                        news.iter().take(4).map(|(id, c)| format!("{id:016x} ({c} cells)")).collect::<Vec<_>>()
+                    );
+                }
+                run_edit(&c, "E3c (rounds)", &base, &z_base, &work_base, &mut cache, &e3c);
+                named("E3c", &e3c);
             }
             (a, b) => println!("E3: the fixture basins are not both present at this grid (A {a:?}, B {b:?}); skipped"),
         }
     }
     // ---- E4: far downstream
     if run("E4") {
-        let (_, _, routing, _) = h1(&c, &base, &d_base, &z_base);
         let trunk = c.at(2097 * 4 + 2, 239 * 4 + 2);
-        let mouth = c.at(2095 * 4 + 2, 271 * 4 + 2);
+        let mouth = outlet_of(&r_base, trunk);
         let mut up = trunk;
         for _ in 0..120 {
             let mut best: Option<usize> = None;
             for d in 0..8 {
                 if let Some(q) = grid.neighbour(up, d) {
-                    if routing.receiver[q] == up as u32 && best.is_none_or(|b| routing.area[q] > routing.area[b]) {
+                    if r_base.receiver[q] == up as u32 && best.is_none_or(|b| r_base.area[q] > r_base.area[b]) {
                         best = Some(q);
                     }
                 }
@@ -438,26 +470,33 @@ fn main() {
         }
         let (ui, uj) = c.cell_of(up);
         println!(
-            "E4 trunk ({}, {}) A_d {:.0} km2; the block is 120 cells upstream at ({ui}, {uj}); the mouth cell ({}, {}) A_d {:.0} km2",
+            "E4 trunk ({}, {}) A_d {:.0} km2; the block is 120 cells upstream at ({ui}, {uj}); the outlet its water reaches ({}, {}) holds A_d {:.0} km2, Q {:.0} m3/s",
             c.cell_of(trunk).0,
             c.cell_of(trunk).1,
-            routing.area[trunk] / 1e6,
+            r_base.area[trunk] / 1e6,
             c.cell_of(mouth).0,
             c.cell_of(mouth).1,
-            routing.area[mouth] / 1e6
+            r_base.area[mouth] / 1e6,
+            hy_base.q[mouth]
         );
-        let (_, _, _, _) = (0, 0, 0, 0);
-        let (hy_b, _, _, _) = h1(&c, &base, &d_base, &z_base);
         let mut e4 = base.clone();
         raise_block(&c, &mut e4.z, (ui - 30, ui + 30, uj - 30, uj + 30), 500.0, 8.0);
-        let (z4, _, hy4) = run_edit(&c, "E4a raise a 50 km block upstream by 500 m", &base, &z_base, &work_base, &mut cache, &e4);
-        let d4 = derive(&e4);
-        let (_, _, r4, _) = h1(&c, &e4, &d4, &z4);
+        let (_, hy4, r4) = run_edit(&c, "E4a raise a 50 km block upstream by 500 m", &base, &z_base, &work_base, &mut cache, &e4);
+        let m4 = outlet_of(&r4, trunk);
         println!(
-            "  Q at the trunk cell {:.0} -> {:.0} m3/s; at the mouth cell {:.0} -> {:.0} m3/s",
-            hy_b.q[trunk], hy4.q[trunk], hy_b.q[mouth], hy4.q[mouth]
+            "  Q at the trunk cell {:.0} -> {:.0} m3/s; the outlet of the trunk cell ({}, {}) -> ({}, {}); Q there {:.0} -> {:.0} m3/s, A_d {:.0} -> {:.0} km2",
+            hy_base.q[trunk],
+            hy4.q[trunk],
+            c.cell_of(mouth).0,
+            c.cell_of(mouth).1,
+            c.cell_of(m4).0,
+            c.cell_of(m4).1,
+            hy_base.q[mouth],
+            hy4.q[m4],
+            r_base.area[mouth] / 1e6,
+            r4.area[m4] / 1e6
         );
-        let _ = r4;
+        named("E4a", &e4);
         let mut e4b = base.clone();
         for j in uj - 30..=uj + 30 {
             for i in ui - 30..=ui + 30 {
@@ -465,10 +504,16 @@ fn main() {
                 e4b.pm[k] *= 1.5;
             }
         }
-        let (_, _, hy4b) = run_edit(&c, "E4b raise the rainfall of the block by 50 %", &base, &z_base, &work_base, &mut cache, &e4b);
+        let (_, hy4b, r4b) = run_edit(&c, "E4b raise the rainfall of the block by 50 %", &base, &z_base, &work_base, &mut cache, &e4b);
+        let m4b = outlet_of(&r4b, trunk);
         println!(
-            "  Q at the trunk cell {:.0} -> {:.0} m3/s; at the mouth cell {:.0} -> {:.0} m3/s",
-            hy_b.q[trunk], hy4b.q[trunk], hy_b.q[mouth], hy4b.q[mouth]
+            "  Q at the trunk cell {:.0} -> {:.0} m3/s; at the outlet ({}, {}) {:.0} -> {:.0} m3/s",
+            hy_base.q[trunk],
+            hy4b.q[trunk],
+            c.cell_of(m4b).0,
+            c.cell_of(m4b).1,
+            hy_base.q[mouth],
+            hy4b.q[m4b]
         );
     }
     // ---- E5: rainfall only
@@ -480,7 +525,8 @@ fn main() {
                 e5.pm[k] *= 2.0;
             }
         }
-        let (_, _, hy) = run_edit(&c, "E5 double the rainfall of a window (no height change)", &base, &z_base, &work_base, &mut cache, &e5);
+        let (_, hy, _) = run_edit(&c, "E5 double the rainfall of a window (no height change)", &base, &z_base, &work_base, &mut cache, &e5);
+        named("E5", &e5);
         println!(
             "  initiation: channel cells {} -> {}, heads {} -> {}, segments {} -> {}",
             hy_base.stats.channel_cells,
@@ -510,5 +556,4 @@ fn main() {
         }
         run_edit(&c, "E6b uplift x 2 over a block", &base, &z_base, &work_base, &mut cache, &e6);
     }
-    let _ = basin_id;
 }
