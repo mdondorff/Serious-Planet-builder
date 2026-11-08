@@ -1,0 +1,55 @@
+BakeInputs::new 9.0 s
+  face 0 base 106.4 s
+  face 1 base 208.3 s
+  face 2 base 301.1 s
+  face 3 base 374.1 s
+  face 4 base 445.2 s
+  face 5 base 536.9 s
+land 29.5 %
+coarse fields 540.6 s (stride 6 = 19.5 km)
+flood 14.1 s, unreached 0
+routed, ordered 56623104 of 56623104; 557.6 s
+basins (depth > 50 m, >= 500 km2): 5811
+mouths with >= 3000 km2: 3500
+windows meeting the land/river/tributary rule: 3784; meeting every rule: 94
+
+TOP 5 windows (500 km = 154 cells at 3.26 km)
+#1 face 1 i 2014..2168 j 190..344 centre lat -36.0 lon -163.7 | land 70% mt+high 26% plateau 12% chan cells 5760 | river 591555 km2 tribs 17 | basins 14 (best 1) | score 7.16
+#2 face 5 i 228..382 j 532..686 centre lat -48.3 lon 144.8 | land 77% mt+high 17% plateau 12% chan cells 6424 | river 78107 km2 tribs 11 | basins 7 (best 2) | score 7.07
+#3 face 1 i 1824..1978 j 304..458 centre lat -33.4 lon -169.3 | land 74% mt+high 23% plateau 6% chan cells 5304 | river 115112 km2 tribs 19 | basins 8 (best 2) | score 6.98
+#4 face 5 i 2584..2738 j 950..1104 centre lat -55.0 lon 22.3 | land 78% mt+high 27% plateau 35% chan cells 6213 | river 30383 km2 tribs 9 | basins 6 (best 1) | score 6.87
+#5 face 1 i 342..496 j 1216..1370 centre lat -6.0 lon 147.3 | land 72% mt+high 22% plateau 16% chan cells 6126 | river 38067 km2 tribs 10 | basins 13 (best 2) | score 6.47
+passing windows with an arid (P/PET < 0.3) basin inside: 0
+best tropical: face 1 i 342..496 j 1216..1370 lat -6.0 | land 72% mt+high 22% plateau 16% | river 38067 km2 tribs 10 basins 13 arid false | score 6.47
+
+CHOSEN: face 1 i 2014..2168 j 190..344, centre face 1 cell (2091,267) lat -36.04 lon -163.73
+E1: block face 1 i 2153..2168 j 195..210 (49 km), mean elevation 1370 m, mountains+high weight 1.00; centre face 1 cell (2160,202) lat -37.62 lon -161.70
+E2: divide between catchments 41696 km2 (mouth face 1 cell (2048,322) lat -34.62 lon -164.99) and 11833 km2 (mouth face 1 cell (2041,332) lat -34.35 lon -165.19); 42 boundary pairs (~137 km)
+    mid-divide cell face 1 cell (2024,307) lat -35.14 lon -165.69 z 602 m; sill (lowest pass) face 1 cell (2031,311) lat -35.00 lon -165.48 z 526 m; highest divide cell z 742 m
+    ridge line of 100 km (31 cells) along the divide: from (2012,298) to (2037,316) on face 1 (direction 36 deg from +i towards +j)
+E3 candidate 1: 851 cells (9031 km2), depth 615 m, mean aridity 1.24, max z 565 m
+    lowest face 1 cell (2082,216) lat -37.56 lon -163.99 z 1 m; spill face 1 cell (2086,221) lat -37.40 lon -163.87 level 616 m; cell beyond the spill face 1 cell (2087,222) lat -37.36 lon -163.84 z 591 m
+E3 candidate 2: 133 cells (1411 km2), depth 578 m, mean aridity 1.11, max z 523 m
+    lowest face 1 cell (2148,241) lat -36.55 lon -162.06 z 1 m; spill face 1 cell (2141,245) lat -36.46 lon -162.26 level 579 m; cell beyond the spill face 1 cell (2140,246) lat -36.44 lon -162.29 z 493 m
+E3 candidate 3: 101 cells (1072 km2), depth 730 m, mean aridity 2.29, max z 1127 m
+    lowest face 1 cell (2155,205) lat -37.56 lon -161.85 z 457 m; spill face 1 cell (2145,211) lat -37.43 lon -162.14 level 1187 m; cell beyond the spill face 1 cell (2145,212) lat -37.40 lon -162.14 z 831 m
+    nearest other basin to merge: 50 km away, 60 cells depth 517 m, lowest face 1 cell (2095,224) lat -37.27 lon -163.61 z 1 m, spill level 518 m
+    smallest outlet: cut the spill cell from 616 m to the cell beyond (591 m): 25 m cut at the spill (spill level over beyond cell)
+E4: main river mouth face 1 cell (2097,275) lat -35.79 lon -163.55 area 591555 km2, stem length in cells 364 (1474 km), tribs in window 17
+    upstream trunk cell face 1 cell (2097,239) lat -36.83 lon -163.55 at 164 km from the mouth, area 480666 km2, z 390 m
+    near-mouth cell face 1 cell (2095,271) lat -35.91 lon -163.61 at 18 km, area 590748 km2, z 5 m
+PRECIP window land (coarse 19.5 km reads of orography().precipitation_mm): p50 716 p95 1445 max 1705 mm/yr; share over 4500: 0.0 %
+E5: tributary joining at face 1 cell (2086,263) lat -36.18 lon -163.87 (area at the join of the tributary 1942 km2 at face 1 cell (2085,263) lat -36.18 lon -163.90); head (area >= 50 km2) face 1 cell (2051,261) lat -36.37 lon -164.90 z 643 m, 117 km above the join
+    rain window 31x31 cells (101 km) centred on the head: face 1 i 2036..2067 j 246..277; head precipitation 448 mm/yr, window mean 632 mm/yr, mean aridity 0.98
+E6: block face 1 i 2136..2167 j 210..241 (101 km), mean mountains+high 0.99, mean z 856 m; centre face 1 cell (2151,225) lat -37.00 lon -161.97; uplift_at 24.252, hardness 0.29
+
+CUBE-EDGE crossings of rivers >= 3000 km2 (land on both sides): 357
+largest:
+  area 909799 km2: upstream side face 5 cell (0,1553) lat -45.01 lon -179.49 (z 1309 m, area 909799); downstream side face 1 cell (1554,0) lat -44.98 lon -179.46 (z 1505 m, area 925579); window 100 km: face 5 i 0..16 j 1538..1569 and face 1 i 1539..1570 j 0..16; distance of crossing to chosen window 1659 km
+  area 653712 km2: upstream side face 5 cell (1712,0) lat -44.90 lon 84.83 (z 6 m, area 653712); downstream side face 2 cell (1360,0) lat -44.87 lon 84.86 (z 6 m, area 653722); window 100 km: face 5 i 1697..1728 j 0..16 and face 2 i 1345..1376 j 0..16; distance of crossing to chosen window 8687 km
+  area 651292 km2: upstream side face 2 cell (1355,0) lat -44.86 lon 84.71 (z 5 m, area 651292); downstream side face 5 cell (1715,0) lat -44.89 lon 84.74 (z 6 m, area 651568); window 100 km: face 2 i 1340..1371 j 0..16 and face 5 i 1700..1731 j 0..16; distance of crossing to chosen window 8696 km
+nearest to the chosen window (area <= 60,000 km2):
+  area 6675 km2: upstream side face 1 cell (2214,0) lat -43.23 lon -160.12 (z 1679 m, area 6675); downstream side face 5 cell (0,2213) lat -43.26 lon -160.14 (z 1570 m, area 6718); window 100 km: face 1 i 2199..2230 j 0..16 and face 5 i 0..16 j 2198..2229; distance of crossing to chosen window 856 km
+  area 8012 km2: upstream side face 1 cell (2101,0) lat -43.77 lon -163.43 (z 752 m, area 8012); downstream side face 5 cell (0,2100) lat -43.80 lon -163.45 (z 762 m, area 8023); window 100 km: face 1 i 2086..2117 j 0..16 and face 5 i 0..16 j 2085..2116; distance of crossing to chosen window 860 km
+  area 5094 km2: upstream side face 1 cell (2228,0) lat -43.15 lon -159.71 (z 2636 m, area 5094); downstream side face 5 cell (0,2227) lat -43.18 lon -159.73 (z 2162 m, area 5136); window 100 km: face 1 i 2213..2244 j 0..16 and face 5 i 0..16 j 2212..2243; distance of crossing to chosen window 862 km
+total 564.1 s

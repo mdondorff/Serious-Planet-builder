@@ -251,7 +251,7 @@ Result: for any set of catchments closed under the routing, its round depends on
 - **The re-solve is memoisation by that key:** a catchment-round whose key exists is read back; one whose key is new is computed. An edit changes keys only where its inputs changed.
 - Each round's surface is kept as a bake record (§10), so a clean catchment's start-of-round state is readable.
 - Divide movement enlarges the set by itself: a cell that joins another catchment changes that catchment's inputs at the next round. The closure grows only where the routing actually changes **[gate G-INC]**.
-- A round's region-wide routing is the cost that remains (F7: 85-90 %). In a re-solve it runs only over the union of the dirty catchments (closed under drainage), which equals the region-wide routing there by §6.3 **[gate G-LOCAL]**. A level-2 job's memory is that union's, at about 64 bytes a cell: the largest catchment (5.9e6 km^2, F6) is about 0.6 GB.
+- A round's region-wide routing is the cost that remains (F7: 85-90 %). In a re-solve it runs only over the union of the dirty catchments (closed under drainage), which equals the region-wide routing there by §6.3 **[gate G-LOCAL]**. A level-2 job's memory is that union's, at about 64 bytes a cell: the largest catchment (at most 5.9e6 km^2 in F6, on an older store; the current base has 9.1e5 km^2 at a cube-edge crossing) is about 0.6 GB at most.
 - **The equality that matters:** a re-solve equals a from-scratch build of the edited definition, because both are the same memoised function.
 
 ### 6.6 Downstream regions and K7
