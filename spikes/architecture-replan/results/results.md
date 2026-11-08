@@ -1,6 +1,7 @@
 # SPIKE-105: architecture re-plan of terrain and hydrology (phase 1)
 
 Opened: 2026-11-08 (planner inbox #96; owner go for phase 1 only). Run on Opus.
+Status: closed 2026-11-08 (phase 2, inbox #97 and #98). Answer: option A, prototype first, no requirement cut; owner decisions D1-D8 in §9.1.
 Question: how far are today's ADRs, constitution and M9 bake from the owner's firm requirements of 2026-11-07, and which of three routes closes the gap with the least patchwork: (A) evolve step by step, (B) fork or re-implement the core, (C) cut requirements?
 Why it matters: the erosion and basin chain was amended five times without a whole-chain design (SPIKE-104), and an external review recommends a hydrology-first, editable, hierarchical architecture. The planet bake (M9.2) would freeze the current design.
 Time box: phase 1 is one night, docs only (no sub-agents, no probes, no builds). Phase 2 (costs, risks, the vertical prototype, recommendation) starts on the planner's next entry.
