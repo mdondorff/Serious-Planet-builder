@@ -1,7 +1,7 @@
 # SPIKE-105: architecture re-plan of terrain and hydrology (phase 1)
 
 Opened: 2026-11-08 (planner inbox #96; owner go for phase 1 only). Run on Opus.
-Status: closed 2026-11-08 (phase 2, inbox #97 and #98). Answer: option A, prototype first, no requirement cut; owner decisions D1-D8 in §9.1.
+Status: closed 2026-11-08 (phases 2 and 3, inbox #97 to #99). Answer: option A, conditional, prototype first against a written target with switch-to-B criteria (§13.1); owner decisions D1-D10 in §13.5 supersede §9.1.
 Question: how far are today's ADRs, constitution and M9 bake from the owner's firm requirements of 2026-11-07, and which of three routes closes the gap with the least patchwork: (A) evolve step by step, (B) fork or re-implement the core, (C) cut requirements?
 Why it matters: the erosion and basin chain was amended five times without a whole-chain design (SPIKE-104), and an external review recommends a hydrology-first, editable, hierarchical architecture. The planet bake (M9.2) would freeze the current design.
 Time box: phase 1 is one night, docs only (no sub-agents, no probes, no builds). Phase 2 (costs, risks, the vertical prototype, recommendation) starts on the planner's next entry.
@@ -630,3 +630,302 @@ Reasons:
 
 - Owner attention in these two weeks: the D1-D8 decisions once, ADR acceptance for A3 (architecture ADRs stay with the owner), and nothing else unless a gate fails. Everything else runs on numeric gates judged by the planner.
 - After week 2: weeks 3-4 finish the prototype (the edit and its propagation, undo, latency, determinism), then the owner's one review, then A4-A10 planet-wide (§5.1).
+
+# Phase 3 (inbox #99, 2026-11-08): the external review of this spike
+
+Input: an external review of phases 1 and 2 (owner refs, 2026-11-08, outside git; called "the second review" below). The owner confirmed D1 = evolve (A) as the direction, the same verdict as this review. The reviewer knows neither our ADRs, specs nor code in detail, so each point below is checked against them.
+
+## 11. Verdict on each point
+
+Verdict: **adopt**, **adopt with change**, **already covered**, **reject**.
+
+| # | Point | Verdict | Reason, references |
+|---|---|---|---|
+| 1 | F2 does not justify A; the erosion operator does not decompose into watershed domains; the outer iteration is unvalidated | **adopt** | §8 F2 measured exactly this and §9 still recommended A on the strength of cost, which F2 does not address. D3 becomes a hypothesis (§13); A8 is not approved for production before the prototype passes. The five questions (what is iterated, stopping rule, non-convergence, moving borders, what a border guarantees) are answered in the A3 contract (§13.4) and measured by F4 (§12) |
+| 2 | F1 is not planet-wide; cross-face routing and stored-field sampling are not shown | **adopt** | F1 used one face with the edge as an outlet and the analytic base (§8). §8's wording "routing is cheap" is too strong. F6 (§12) measures both |
+| 3 | Physical cell areas and distances belong in H0 and H1 from the start | **adopt** | `route.rs:125` uses `dx^2` for every cell and `Grid::distance` one `dx` (`bake/mod.rs`); §2.1 called this "under 1.5x, uniform per face", which understated it: area feeds river thresholds and erosion rates. Today's bake has the bias too. F5 (§12) sizes it. `route_weighted` already takes per-cell weights, so areas are a small change; distances need a per-cell metric in `Grid` |
+| 4a | Separate the channel graph from diffuse drainage | **adopt** | the two already exist in code and are conflated only in §6's K6 row: jittered D8 receivers for the carve and MFD area for accumulation (ADR 0099 point 2). A3 assigns the roles: the channel graph (one receiver per channel cell, segments, confluences) and the diffuse field (MFD area, a raster) (§13.4) |
+| 4b | Stable segment identity; basin identity under merge, split, breach, outlet migration | **adopt** | not defined in §6. A3 defines ids by a canonical rule (§13.4) and the prototype tests each case |
+| 5 | Propagation cannot stop on "quantised to zero"; small changes have structural consequences | **adopt with change** | the mechanism in §6.3 is wrong as worded. It should not be a tolerance test but **exact equality of a domain's input key set** (the quantised interface values at its border and its drivers). Equal inputs give equal outputs bit for bit by construction (ADR 0006), so stopping is safe; a threshold crossing or spill inside a domain is handled because that domain's inputs changed and it is recomputed. Structural cascades (a moved divide) come from H0, which is re-routed in full on each edit. The review's concern remains for the interface precision: too coarse a quantisation of the outflow accumulates error downstream, so it is a parameter measured in the prototype. More edit cases: adopted (§13.3) |
+| 5b | Reproducibility is not correctness: both can share the same domain-border error | **adopt** | the correctness measures (border flux, divide migration, connectivity) are separate gates from equality (§13.3) |
+| 6 | 40 GB as a hard measured gate, including pack layout, graph metadata, indexes, versions, edit overrides; peak temporary storage separately; 200 m a fallback only | **adopt** | §6.6 and F3 are estimates; ADR 0045 point 6 is the only measured item. Adopted as a gate (§13.3) |
+| 7 | 90 % of code is not 90 % of architecture; A is conditional; define switch criteria | **adopt** | §5.1 and §9 used the code share as an argument. The layer order, simulation unit, hydrology, invalidation and regional simulation all change. Switch criteria in §13.1 |
+| 8 | Stronger prototype criteria | **adopt** | in §13.3 |
+| 9A | The sampler's composition (order, interpolation, quantisation); channel geometry must not be a second elevation source | **adopt with change** | §6.1 K8 listed channel geometry as a separate term, which invites exactly that. Channel geometry is **burned into the local change at the bake** (K7 carves along the segment), so the surface has one elevation source. The runtime adds nothing above the 102 m grid. Below it, a bank profile may lower the ground only, inside a declared bound, as creases do (GEN-109) (§13.4) |
+| 9B | Simulation time independent of editor time | **adopt with change** | partly there: `K dt`, steps and uplift are bake parameters in the keys (GEN-100, ADR 0088 point 7), so an edit never advances erosion by "some time". Missing is the named concept. A `SimulationProfile` in the WorldDefinition (duration as steps x `K dt`, the quality level) is added; every solve restarts from the definition, not from a previous result (§13.4) |
+| 9C | Determinism hard: platforms, thread counts, edit replay, graph topology; f64 in flood and spill; no GPU feedback | **already covered**, with one addition | CON-07, CON-14, ADR 0010 and ADR 0035 hold all of it for Windows and Linux x86_64; f64 comparisons with no fast-math and ties by cell index (GEN-100) are deterministic there. ARM and macOS are untested and not supported targets (CON-26). Addition: results that later stages read must be read in their **canonical stored form**, not an unquantised f64 copy: `bake/tile.rs:322` stores f32 heights for the post-pass while the carve works in f64. A re-solve reading stored outputs and a from-scratch run reading in-memory f64 can then differ at a divide. The contract names the canonical form of every interface value (§13.4); edit-replay tests are added (§13.3) |
+| 9D | Larger planets tested beyond H0; no cell-count-defines-resolution | **adopt** | design-level scaling table for terrain, hydrology, storage and climate in A3 (§13.4); the growth tests of the first review (S9.4) join the gates |
+| 10 | Positions on D1-D8; next steps | **adopt** | D1 conditional, D3 a hypothesis, D5 configurable threshold and network validation, D6 subject to measurement, D8 with failures of architectural gates returning to the owner (§13.5). Next steps match §13.2 |
+
+## 12. Feasibility checks of phase 3
+
+Sonnet sub-agents, seed 14, release builds, 4 threads, shared machine: **timings are indicative**. Probe code on `spike/terrain-pipeline-review` (`f4_outer_iteration.rs`, `f5_cell_areas.rs`, `f6_cross_face_h0.rs`; never merged).
+
+### F4: the outer iteration (route, cut domains, carve, repeat)
+Question: on F2's window (1,228 x 1,228 cells at 814 m, 20 steps), how close does the outer iteration get to the whole-window carve R, is it stable, and what happens at the borders?
+Method:
+- Domains are D8 catchments of a routing of the current surface; every domain is carved alone (outside cells are outlets raised 1e5 m) and the results are assembled.
+- Variants: **C** (continued surface, R rounds of 20/R steps) and **F** (fresh restart from the base each round, domains from the previous round).
+
+| Variant | rms against R | max | Cells over 1 m | 3.3 km relief p50 (R 396.0 m) |
+|---|---|---|---|---|
+| C, 1 round | 18.3 m | 1,074 m | 19.4 % | 397.3 |
+| C, 2 rounds | 15.2 | 1,158 | 18.0 % | 396.7 |
+| C, 4 rounds | **12.8** | 966 | 17.5 % | 396.6 |
+| C, 10 rounds | 57.5 | 1,485 | 78.9 % | 420.0 |
+| F, round 1 / 2 / 3 / 4 | 18.3 / 17.7 / 18.1 / 18.4 | up to 1,413 | 19-22 % | |
+| C, 4 rounds, domains from a 3.26 km grid (4x coarser) | 105 | 2,382 | 53 % | 393.1 |
+
+Controls (the noise floor of R itself):
+
+| Control against R | rms | Cells over 1 m | Relief p50 |
+|---|---|---|---|
+| R with another jitter seed (two seeds) | **72.4, 73.1 m** | 82 % | 396.4, 397.3 |
+| Base + 1 cm per-cell noise | 1.11 m (max 327 m) | 0.5 % | 396.0 |
+| Base + 1 m per-cell noise | 13.7 m | 29.8 % | 396.0 |
+| R with re-route every 2 steps (not 5) | 56.5 m | 77 % | 420.5 |
+| C 4 rounds against R, seed for seed (3 seeds) | 12.4-13.3 m | 17-18 % | within 1 m of each R |
+
+| Border and sink measures (final surface) | R | C, 4 rounds | F, round 4 |
+|---|---|---|---|
+| Height step, pairs across a domain border, p50 / p99 | 20.0 / 476 m (same pairs) | 18.9 / 454 m | 26.2 / 479 m |
+| Land in pits; depth p50 / p95 | 4.86 %; 141 / 603 m | 4.36 %; 170 / 615 m | 4.33 %; 171 / 615 m |
+| Land cells draining across the frozen border, last round | - | 3.3 % | 27-34 % (F's label measure) |
+
+Round-to-round change for F: 21.3, 11.7, 7.3 m rms (rounds 2, 3, 4); the change falls, but the distance to R does not.
+
+- **Answer:**
+  - **R is chaotic, so pointwise equality with R is the wrong test.** A different jitter seed moves it by 72 m rms, a 1 m base noise by 14 m. An outer iteration at 4 rounds (12.8 m) is inside that floor and well below the seed noise. It leaves no visible step at domain borders and adds no sinks.
+  - F does not get better than one round, so **C is the form to use**: continued surface, the rounds being the carve's re-routes.
+  - C with 10 rounds is **not** a domain failure: the whole-window carve with the same re-route rhythm gives the same 57 m and the same relief gain. Re-route frequency is itself an erosion parameter.
+  - **A coarse domain cut is not acceptable as it stands:** 105 m rms and a slight seam (border p99 609 m against 524). The domains must come from a routing of the erosion grid, with H0 only selecting regions.
+
+### F5: physical cell areas
+Question: how much bias does a uniform `dx^2` put into catchments and river selection?
+Method: exact spherical quad area per cell (sum over the face equals the face area to 3e-14); `route_weighted` with weights = area/dx^2 against none, face 2, 3,072 cells.
+
+| Quantity | Value |
+|---|---|
+| Cell area / dx^2 (dx = R pi/2 / N) | min 0.707, max 1.000, mean 0.849 (a max/min ratio of 1.41) |
+| Uniform-area total against the true total | +17.9 % (the mean cell is smaller than dx^2 by 8/(3 pi)) |
+| Channel cells (true area >= 50 km^2): unweighted/true - 1 | p50 +17.8 %, p95 +35 %, max +41 % |
+| Ten largest catchments, uniform against true | +0.9 % to +29.7 % |
+| Channel cells added by the uniform area, share of true channel cells | T = 10 km^2: 14.0 %; 50: 7.3 %; 100: 7.7 %; concentrated in the outer half of the face |
+| Weighted outlets total against the sum of true areas | relative error 1.5e-11 |
+| Distances, neighbour-to-neighbour against dx (analytic) | centre 1.00; corner axis 0.94, diagonal 0.67; edge middle along the edge 0.71 (slope and `f` biased up to 1.5x) |
+
+- **Answer:** yes, the bias changes which rivers exist (7-14 % of channel cells) and the largest catchments' areas by up to 30 %. It is in **today's bake** too. Receivers did not move; only accumulation did.
+
+### F6: cross-face H0 from the stored field
+Question: what does a planet-wide route across cube edges cost when heights come from the stored field bake, and do catchments span faces as one drainage?
+Method: elevation read by C1 from `global16384-m9c14` (read only, blocks decoded with the key from the store's index; the production open path refused the store because its key has changed since the store was baked), 3,072 cells a face, one index over the six faces with neighbours across cube edges, one priority flood from the sea, D8 receivers, area.
+
+| Quantity | Value |
+|---|---|
+| Store read of all faces (decoding 1,536 blocks, 4 threads) | 130.8 s (20-27 s a face) |
+| Flood / receivers / accumulation (planet-wide) | 5.3 s / 1.2 s / 0.6 s |
+| Peak memory | 2.2 GB (about 1.0 GB read cache) |
+| Land cells / cells unreached | 16.7e6 / 0 |
+| Catchments / spanning two or more faces | 264,345 / 896, holding 26.6 % of land |
+| Largest catchment | 5.88e6 km^2 (faces 0 and 3; F1's single-face truncated largest was 1.12e6) |
+| Connectivity of the largest cross-edge catchment | 20,533 sampled cells, all reach its one outlet |
+
+- **Answer:** a planet-wide cross-face route takes about 7 s at 3 km once heights are in memory. The largest catchment is 5.9e6 km^2. At 814 m that is about 8.9e6 cells, about 0.6 GB at pass 1's 64 bytes a cell: still a domain that fits a background job.
+- L1 preview: heights stay resident, so re-routing is about 7 s (the read is paid once, and the 131 s is decode-bound, not an edit cost).
+
+## 13. The revised plan
+
+### 13.1 Option A, conditional
+
+**A is the preferred route for the prototype, not yet the approved route for production.** A means: evolve the application and replace the terrain architecture where the target needs it, not preserve the existing stage model. The prototype is built against the target (A3), reusing kernels and infrastructure where they fit, and it does not bend the target to the old stage model.
+
+Criteria to switch to B (any one, measured at the A/B gate; B keeps the prototype as its v0):
+| # | Criterion | Measured by |
+|---|---|---|
+| S1 | The domain solver fails a correctness gate of §13.3 (border seam, conservation, connectivity, divide flux) in every outer-iteration setting tried | prototype |
+| S2 | The target cannot be expressed through stage keys (ADR 0006): a second, separate dependency or version scheme is needed beside the keys | prototype; a review of A3 |
+| S3 | Graph, domain or edit data cannot live in the pack store (ADR 0019), or the store gate fails with field narrowing done | prototype |
+| S4 | The authoritative sampler cannot be `HeightField` with its bound and batch rules (GEN-020, GEN-102): the runtime needs another field interface | prototype |
+| S5 | The re-estimate at the gate puts A's remaining work at or above B's remaining work | gate review |
+
+Evidence on 90 % of the code: the claim is withdrawn as an argument. Kept is the infrastructure (crates below `generators`, keys, store, render, editor, kernels). Replaced in any case: the layer order, the simulation unit, the hydrology representation, invalidation.
+
+### 13.2 Revised steps and effort (estimates, lane-days)
+
+| Step | What | Lane | Effort | Note |
+|---|---|---|---|---|
+| Freeze | The M9 planet bake frozen; no tuning on the old bake; old code and stores stay as the reference | planner | - | D2 |
+| A3 | Target architecture and data contracts (§13.4) | planner, spikes | 5-8 | before any stage-model change; external review round (§14) |
+| A2 | Turned-lattice noise (bands and creases) | crusader | 3-5 | unchanged; independent of the stage model |
+| A12 | Physical cell metric: per-cell area and neighbour distance in `Grid`, route, carve, H0, H1 | explorer | 3-5 | new (F5) |
+| P | Prototype v2 (§13.3), including surface identity (was A1), H0 cross-face, domains, hydrology, the edit cases | all | 30-45 | was 20-34 |
+| Gate | The A/B gate against §13.1 and §13.3 | planner, owner | 1-2 | failures of architecture gates go to the owner |
+| A4-A10 planet-wide | Under A, after the gate (the prototype covers part of each) | all | 40-70 | re-estimated at the gate |
+| A11 | Scale as a parameter | spikes, lanes | 6-10 | unchanged |
+| | **Total A** | | **88-145** | was 68-113; the ranges of A and B overlap and neither is measured |
+
+- After the gate, B's remaining work (B3-B10 with the prototype as v0) is about 60-100 lane-days (estimate): the difference between A and B at the gate is small, so the gate decides on correctness and fit, not on cost.
+- Dates (estimates): A3 and the prototype end about mid-December; the planet-wide work and a new M9 bake about late January 2027.
+
+### 13.3 Prototype v2
+
+**Scope:** §7.1 unchanged (500 x 500 km region, cube-edge window) and:
+- H0 planet-wide across cube edges, from the stored field (F6's route), with true cell areas (A12);
+- domains cut by a routing of the erosion grid within H0's regions (F4: a 3 km cut alone is not good enough);
+- the outer iteration as continued rounds (C), 4 rounds of 5 steps, the round count a parameter of the `SimulationProfile`;
+- the channel graph and the diffuse field kept apart; basin and segment identity by rule (§13.4);
+- sediment carried across domain borders.
+
+**Edit cases** (all as items below erosion, then undo):
+| # | Edit | Tests |
+|---|---|---|
+| E1 | Raise a 50 x 50 km part of the range by 1,000 m | the base case |
+| E2 | Raise a ridge across a major divide so that two catchments trade area | divide movement, domain re-cut |
+| E3 | Lower a dam or sill so two basins merge or a basin gains an outlet; and the reverse (a split) | basin identity, spill |
+| E4 | An upstream edit that changes a major river's discharge far downstream | downstream propagation |
+| E5 | A rainfall edit with no height change that moves river initiation | driver path, thresholds |
+| E6 | A lithology or uplift region | driver path into the carve |
+
+**Pass and fail** (numbers proposed; the Earth comparisons of §7.3 stay as reported values):
+| Area | Measure | Pass |
+|---|---|---|
+| Surface | runtime minus bake surface at lattice nodes | 0 before quantisation, at most 0.25 m after |
+| Domains | border step: p99 of height differences across domain-border pairs, against the whole-window carve at the same pairs | at most 1.1x |
+| Domains | flow crossing frozen borders in the last round (share of land in an unconstrained routing of the final surface) | at most 5 % |
+| Domains | distance to the whole-window carve | within its noise floor: rms at most the 1 m-noise control (about 14 m on F4's window), relief p50 within 2 % |
+| Iteration | rounds 1, 2, 3, 4, 6 | the rms against R and the round-to-round change fall or stabilise; oscillation over 10 % fails. A plateau inside the noise floor passes |
+| Connectivity | segments and channel cells | 0 disconnected segments at every sampling; every channel cell has a downhill path to its segment's outlet |
+| Conservation | drainage area at the outlets against the sum of true cell areas, also across cube edges | relative error at most 1e-9 |
+| Sinks | unclassified sinks | at most 1 % of land (reported beside the connectivity, no longer the main measure) |
+| Basins | E3 | merge, split, spill and outlet migration give the ids and parents the rule says |
+| Sediment | per domain and across borders | eroded = deposited + exported to 1e-9 relative |
+| Incremental | E1 to E6 | incremental equals a from-scratch build of the edited definition, bit for bit; undo returns the original key set |
+| Correctness beside equality | E1 to E6 | the connectivity, conservation and border gates hold after each edit (equal runs can share an error) |
+| Latency | L1 with resident heights | about 10 s (F6: 7 s planet-wide at 3 km); L2 of a domain set: report, target 10 min on terrain's share |
+| Store | actual serialized data of the region (packs, indexes, graph, ids, versions, edit overrides), extrapolated | at most 35 GB at Earth, hard limit 40 GB; peak temporary storage during an L2 and a planet-wide re-bake reported separately |
+| Runtime | flight in the region | no held-back tiles; frame within BUDG-001/002 |
+| Determinism | 1 and 8 threads, Windows and Linux, edit replay | bit-equal |
+| Scale | the design table of A3; one 2x-radius H0 | H0 cost and memory as F6 x 4 (within 1.5x); area conservation |
+
+Effort: 30-45 lane-days, three lanes, about 3.5-5 weeks. Carry-over as §7.4.
+
+### 13.4 The target-architecture document (A3): table of contents and data contracts
+
+| § | Content |
+|---|---|
+| 1 | Requirements R1-R8 and non-goals (from §1) |
+| 2 | Components K1-K11 (§6.1), with the corrections below |
+| 3 | **The authoritative surface:** the sampler's composition in order (base read, regional change, local change, coast fade, creases), interpolation at each step, quantisation at each boundary, the base-identity key each layer carries |
+| 4 | **Grids and metrics:** per-cell area and neighbour distance from the mapping; scale as target cell sizes; the design-level scaling table (terrain, hydrology, storage, climate) for moon, Earth, 2x Earth |
+| 5 | **Hydrology model:** the channel graph (one receiver per channel cell, segments, confluences) against the diffuse field (MFD area raster); river initiation; lakes; segment and basin identity |
+| 6 | **The domain solver:** H0 regions, domain cut, outer iteration, boundary conditions, what a border guarantees |
+| 7 | **Edits and dependencies:** the layer order (below or above erosion), keys and reach along the graph, what ends propagation, transactions per domain |
+| 8 | **Simulation profile:** duration, rounds, parameters, quality level; every solve restarts from the definition |
+| 9 | **Determinism and canonical forms:** supported platforms, canonical stored forms of interface values, f64 versus integer decisions, thread independence, edit replay, no GPU feedback |
+| 10 | **Store and budget:** record kinds, keys, the 40 GB gate, temporary storage |
+| 11 | **Runtime and previews:** preview levels per edit kind, frame safety |
+| 12 | **Validation suite:** the fixtures and gates of §13.3 |
+| 13 | ADR list: new ADRs and amendments (0007, 0066, 0088, 0099-0101, 0105, 0109; CON-08 reading) |
+
+Draft contracts, the questions the reviewers asked:
+- **What is iterated:** a continued surface. Each round routes the current surface, cuts domains, carves `n` steps per domain, assembles; the round is the carve's re-route (F4).
+- **Stopping rule:** a fixed round count in the `SimulationProfile`, part of the keys. No convergence test inside the build, because a test would make the result depend on a threshold and the carve is chaotic (F4). Convergence is checked by the prototype and the scorecard.
+- **Without stabilisation:** the count is chosen from the measured plateau. A failure of the correctness gates at every count is S1.
+- **What a border guarantees:** no flow crosses it inside a round; the walls move between rounds. It is not a physical divide but a numerical partition. The gates measure its error.
+- **Channel geometry:** an input of the local refinement (K7 carves along the segment), so the surface has one elevation source. Below 102 m, a declared bound lowers the ground only (like creases, GEN-109).
+- **Basin identity:** a basin's id is derived from a canonical cell of the basin (its lowest cell, ties by cell id). A merged basin keeps the id of the deeper part and records the other as a parent; a split produces new ids with the old id as parent; an outlet migration keeps the id and updates the outlet.
+- **Segment identity:** a segment's id is derived from its downstream confluence cell and its upstream head cell; a changed confluence yields new segments with parent links. Stable ids at river scale need the prototype's evidence (E2, E3).
+- **Propagation end:** a domain is recomputed when its input key changes; the interface values (outlet level, inflow area, inflow sediment) are quantised to a stated precision that the prototype measures. A threshold crossing or a spill inside a domain is a change of its own output; a structural change at H0 re-cuts the domains.
+- **Canonical stored forms:** every value a later stage reads has a canonical stored form (f32 heights, i16 changes, ...); from-scratch runs read it, not an in-memory f64 (determinism of re-solves).
+
+### 13.5 Owner decisions, revised
+
+**D1. Route (changed).**
+- Context: §13.1; the second review; the owner's direction: evolve.
+- Options:
+  - a. A, conditional: prototype against the target, with the switch criteria S1-S5 at the A/B gate.
+  - b. A unconditional.
+  - c. B now.
+- Trade-off: a keeps the option to change course at the cost of the gate; b commits before the domain solver is shown; c spends the parallel core before any evidence that it is needed.
+- **Recommendation: a.**
+
+**D2. The M9 planet bake (changed: firmer).**
+- Options:
+  - a. Freeze the bake and all tuning on the old representation; old code and stores stay as a reference; D2/D3/D4 of M9.1 wait for the gate.
+  - b. Delay only.
+  - c. Bake now.
+- Trade-off: a saves wasted rounds and gives up a whole-planet look for now.
+- **Recommendation: a.** Surface identity moves into the prototype (no polish of the old bake).
+
+**D3. Watershed domains as the erosion unit (changed: a hypothesis to test).**
+- Context: F2, F4, the second review. The carve is chaotic (a jitter seed moves it by 72 m rms), so the test is structural: border step, border flux, conservation, connectivity, the noise floor.
+- Options:
+  - a. Test continued rounds (4 x 5 steps) with domains from the erosion-grid routing in the prototype; a production decision only at the gate.
+  - b. Accept domains now.
+  - c. Drop domains and stay with a per-face carve.
+- Trade-off: a costs nothing extra; b is premature; c has no regional re-solve.
+- **Recommendation: a.**
+
+**D4. Edits below erosion (unchanged).** The second review agrees.
+
+**D5. Persistent rivers (changed: configurable).**
+- Options:
+  - a. Persistent segments with a configurable threshold (default 50-100 km^2 of true area), vertices on the regional graph, validated by connectivity gates.
+  - b. Derived only.
+- **Recommendation: a.** The threshold and its area are in true area (F5).
+
+**D6. Store (changed: a hard measured gate).**
+- Options:
+  - a. Narrow the field bake first; the 40 GB limit is a measured gate on real serialized data, including indexes and versions; temporary storage measured separately; 200 m pass 2 a fallback only.
+  - b. Take 200 m now.
+- **Recommendation: a.**
+
+**D7. Scale now (changed: broader).** Options: a. per-body cell sizes, the preset, and a design-level scaling table (terrain, hydrology, storage, climate) in A3, one 2x-radius H0 in the prototype; b. Earth only. **Recommendation: a.**
+
+**D8. Owner attention (changed).**
+- Options:
+  - a. The planner judges numeric gates; failures of **architecture or requirement** gates, and the A/B gate, come to the owner, who reviews the prototype once.
+  - b. Owner at every step.
+- **Recommendation: a.**
+
+**D9. Physical cell metric (new).**
+- Context: F5. A uniform cell area overstates drainage area by 18 % on average and up to 30 % for the largest catchments, and changes 7-14 % of channel cells. The bias sits in today's bake.
+- Options:
+  - a. True area and distance in the routing, the carve, H0 and H1 from the prototype on, in the kernels (A12).
+  - b. In the new hydrology only, leaving the carve uniform.
+  - c. Defer.
+- Trade-off: a re-tunes erosion constants (the areas shrink by about 15 %, so `K dt` moves); b keeps tuning but carves and routes on different metrics; c builds on the bias.
+- **Recommendation: a.**
+
+**D10. What "correct" means for a chaotic carve (new).**
+- Context: F4. Pointwise comparison with a reference carve is meaningless beyond its noise floor.
+- Options:
+  - a. Correctness is structural (seam, flux, conservation, connectivity, relief within the noise floor) plus bit equality for reproducibility.
+  - b. Require closeness to a single reference run.
+- Trade-off: b would fail every design, including the whole-window carve against itself with another seed.
+- **Recommendation: a.**
+
+### 13.6 The next two weeks (if D1-D10 go as recommended)
+
+| Week | Explorer | Crusader | Spikes |
+|---|---|---|---|
+| 1 | A12: true cell metric in `Grid`, routing and carve (with a tuning note); H0 across cube edges on the stored field | A2: turned-lattice noise; #1137 (C1 default) | A3 with the planner: target and contracts (§13.4), ready for the external round; the region search and the validation fixtures |
+| 2 | prototype: domains from an erosion-grid routing within H0 regions, continued rounds, border gates | prototype: sampler composition (K8), lakes on the water field | measuring the gates as they land; edit-case fixtures E1-E6 |
+
+Owner attention: D1-D10 once; the A3 ADRs; nothing else unless an architecture gate fails.
+
+## 14. Another external review round?
+
+**Recommendation: yes, one more round, on the A3 target document, before the prototype is built against it. A further round only if the A/B gate is close.**
+
+| Round | Value | Cost | Advice |
+|---|---|---|---|
+| On A3 (the target and data contracts) | high: both reviews found design gaps that the code mapping did not (the F2 reading, basin identity, channel geometry as a second elevation source). A3 is where such gaps are cheapest to fix, before lanes build on it | the owner forwards one document and pastes one answer; the planner folds it in; about half a day, no lane stops | **do it** |
+| On the prototype results at the A/B gate | moderate: the gates are numeric and the reviewer lacks the code; useful if the result sits on a switch criterion | as above, plus the measurement tables | **only if close** |
+| Now, on this phase 3 | low: the same points would return; nothing new is built yet | | **no** |
+
+What to give the reviewer for A3: the A3 document itself; §8 and §12 of this file (the measurements, with the noise-floor controls); the current code of `bake/carve.rs` and `bake/route.rs` as excerpts, so the review of the solver can be checked against the real kernels (the two reviews so far did not see code). Questions to ask:
+1. Is the outer iteration's contract (continued rounds, fixed count, a wall between domains) sound for a chaotic carve, or is another domain strategy better?
+2. Are the basin and segment identity rules stable enough for gameplay references and for undo?
+3. Are the gates of §13.3 sufficient to distinguish a sound domain solver from a reproducible but wrong one?
+4. Is anything in the sampler's composition or the canonical forms inconsistent with deterministic re-solves?
