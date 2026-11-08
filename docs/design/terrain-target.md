@@ -213,7 +213,7 @@ The reviewers asked for the outer iteration's contract. Evidence: S105 F2 and F4
 
 | Unit | Definition | Lifetime |
 |---|---|---|
-| **Region** | a connected landmass with its sea outlets, from H0. Border = the sea: no artificial cut. A landmass larger than the solver's memory is split at H0 divides, as a fallback **[gate G-SCALE]** | the world build's scope of one routing |
+| **Region** | a connected landmass with its sea outlets, from H0. Border = the sea: no artificial cut. A landmass is routed whole; it need not be resident (§6.6) | the world build's scope of one routing |
 | **Round** | one routing of the region's surface and the carve steps that follow on it; today's re-route interval (5 steps) | a fixed part of the `SimulationProfile` (§8) |
 | **Catchment** | one D8 tree of the round's routing (all cells that drain through one outlet) | one round |
 
@@ -254,19 +254,57 @@ Both change the bake's output slightly and carry a kernel version bump:
 1. MFD clipped to the D8 catchment (`route.rs`).
 2. Flood tie rule by (level, global cell id) (`flood.rs`), replacing the FIFO order; the cost on flats is measured **[gate G-SCALE]**.
 
-Result: for any set of catchments closed under the routing, its round depends only on its own cells' surface at the round start and its drivers. **[gate G-LOCAL]** verifies it.
+Result: a catchment's round depends only on the inputs of its key (§6.5). **[gate G-LOCAL]** verifies it on the new kernels; F7 tested the decomposition with shared routing, not these rules.
 
 ### 6.5 Re-solve of an edit (the incremental path)
 
-- The world build and an edit re-solve run the same rounds; the difference is memoisation.
-- Each catchment-round is a pure function: `result = f(catchment's cells at round start, drivers on them, profile, kernel versions)`. Its key is a hash of those inputs.
-- **The re-solve is memoisation by that key:** a catchment-round whose key exists is read back; one whose key is new is computed. An edit changes keys only where its inputs changed.
-- Each round's surface is kept as a bake record (§10), so a clean catchment's start-of-round state is readable.
-- Divide movement enlarges the set by itself: a cell that joins another catchment changes that catchment's inputs at the next round. The closure grows only where the routing actually changes **[gate G-INC]**.
-- A round's region-wide routing is the cost that remains (F7: 85-90 %). In a re-solve it runs only over the union of the dirty catchments (closed under drainage), which equals the region-wide routing there by §6.3 **[gate G-LOCAL]**. A level-2 job's memory is that union's, at about 64 bytes a cell: the largest catchment (at most 5.9e6 km^2 in F6, on an older store; the current base has 9.1e5 km^2 at a cube-edge crossing) is about 0.6 GB at most.
-- **The equality that matters:** a re-solve equals a from-scratch build of the edited definition, because both are the same memoised function.
+The problem: the new catchments are not known before a routing, yet routing is 85-90 % of a round. Four approaches:
 
-### 6.6 Downstream regions and K7
+| Approach | What it needs | Verdict |
+|---|---|---|
+| 1. Re-route the whole region after an edit | nothing beyond the round | correct and simple; F8 (largest landmass, 1.49e8 cells at H1): flood 55 s, receivers 6.5 s, MFD 77 s a routing, 4.5 GiB resident. Acceptable for level 3; not for level 2 inside the editor |
+| 2. Re-route a conservatively expanded dirty region | a proven border and expansion rule | rejected: no rule is available that guarantees water does not cross the border after the edit, without already having routed |
+| 3. Incrementally update the routing graph (dynamic flood, depression hierarchy) | considerably more algorithm | later optimisation only |
+| 4. Re-route the old dirty catchments only | that all divide changes are discoverable from the old routing | rejected: divide movement is exactly what the old routing cannot show (reviewer's circularity) |
+
+**Chosen: approach 1's semantics, executed as a partitioned route with memoised tiles.** The re-solve's result is by definition a full region re-route; only the work is memoised, so correctness has no extra assumption:
+
+1. The region is cut into fixed tiles of the regional grid (256 cells at Earth: 208 km).
+2. A tile's flood is a pure function of the tile's heights (`bake/spill.rs`, `flood_labelled`: from outlets and all border cells). Only tiles whose round-start surface changed are re-flooded. The round's changed tiles are known without routing: round 1, the edit's footprint; later rounds, the cells of the previous round's recomputed catchments.
+3. The border graph (`SpillGraph`) is solved for the whole region, every time. It discovers the new divides and levels: there is nothing to predict. F9: 146,881 nodes, 17 ms for 3,072^2 cells; about 0.3 s for the largest landmass (estimate).
+4. Receivers and `A_d` are recomputed on tiles whose inputs changed: levels, or the area flowing in across a tile border. Propagation downstream ends where a tile's outgoing border values are bit-equal to the stored ones.
+5. Catchments are read from the receivers; a catchment-round is recomputed if its key (below) is new; otherwise its stored round result is used.
+
+F9 (E2-type edit on 144 tiles): the flood output differs in exactly the tiles whose heights changed (2, then 4 after one round); levels, receivers and area change in 2 to 4 tiles (2.8 %, under 0.25 % of cells), and tiles plus graph reproduce the whole-window flood exactly (0 cells differ). The work per round is therefore of the order of the changed tiles and one graph solve, with no prediction of the dirty set. **[gate G-INC, on E2]**
+
+**The catchment-round key** is the hash, in canonical order, of:
+- the member cell ids;
+- the outlet cell, and its base level (sea or basin spill);
+- the receiver of every member, and `A_d` at every member (the routing topology and magnitude, §6.3);
+- every member's round-start surface in canonical form (§9);
+- the drivers at the members (erodibility by height, uplift, runoff, vegetation, taper);
+- the `SimulationProfile` and the kernel versions.
+
+With clipped MFD and the canonical flood a catchment has no other border conditions: the key holds everything its round reads.
+
+- Equality with a fresh build follows: a fresh build is the same function with no memo hits.
+- Divide movement needs no separate rule: it shows up as changed membership, hence a new key.
+
+### 6.6 Memory model
+
+| Use | What is resident | Measured or bounded |
+|---|---|---|
+| One routing of the largest landmass, resident (the simplest, used by the prototype and the first world build) | z f32, filled f64, receiver u32, order u32, area f64, id map u32: 32 bytes a cell | F8: 1.49e8 cells at H1 (a landmass of 8.4e7 km^2), 4.5 GiB, 5.1 GiB peak |
+| One round of that landmass, resident | routing plus the carve's arrays | about 10 GB by pass 1's 64 bytes a cell (F2 measured the route inside that figure; not measured on a landmass) |
+| Partitioned route | one tile's arrays at a time, the border graph (estimate: about 2e6 nodes, 200 MB for the largest landmass) and per-tile border summaries | F9 |
+| Level-2 re-solve in the editor | the changed tiles and the catchments dirty in that round, within terrain's 4 GB (BUDG-005) | gate G-INC |
+
+- A landmass routing does **not** have to be resident. The partitioned route produces the same result (F9: levels equal, 0 cells differ); the tile flood and border graph exist (`bake/spill.rs`, GEN-121). Accumulation is a topological sweep across tiles with border values, also partitioned.
+- The world build may run resident or partitioned; both give the same bits (gate G-PART). Editor jobs are partitioned.
+- World-build memory is a separate budget from CON-21 (a runtime rule): proposed in ADR 0115 and stated by G-SCALE.
+- **H0-region split at artificial borders** (the earlier fallback) is kept only as a tested fallback for a landmass over the budget even partitioned; G-SCALE measures its divide migration across the split. The design no longer relies on it.
+
+### 6.7 Downstream regions and K7
 
 - K6 (H1) reads the final round's routing of the region. K7's tile refinement reads K5 and K6 of its region and is keyed per tile as today.
 - K7 stays per tile with its halo (GEN-101): it does not route globally; it reads the channel levels as boundary conditions (§3.3).
@@ -323,7 +361,7 @@ A `SimulationProfile` belongs to K1 and is part of every derived key. It is the 
 
 ## 9. Determinism and canonical forms
 
-Hard constraints (CON-07, CON-14, ADR 0010): same authoritative output across runs, thread counts, Windows and Linux on x86_64. ARM and macOS are not supported targets until they are added to CI (CON-26). No GPU result enters any authoritative value. `libm`, integer hashing and fixed-order reductions as today.
+Hard constraints (CON-07, CON-14, ADR 0010): same authoritative output across runs, thread counts, Windows and Linux on x86_64. Supported platforms: **Windows and Linux on x86-64**. ARM and macOS are excluded until they are added to CI (CON-26). No GPU result enters any authoritative value. `libm`, integer hashing and fixed-order reductions as today.
 
 | Contract | Rule |
 |---|---|
@@ -358,8 +396,9 @@ R7: about 40 GB at most at Earth. **Hard gate G-STORE:** measured on real serial
 | H0 | - | under 0.1 GB | |
 | Channel graph | - | 0.8-1.1 GB at a 50-100 km^2 threshold, vertices on the regional grid (F3, extrapolated) | to measure |
 | Basins, lakes | - | under 0.1 GB | |
-| Catchment-round key table | - | to measure | |
-| Edit overrides | - | to measure | |
+| Catchment-round key table and per-tile border summaries | - | to measure (a measured item of G-STORE) | |
+| Edit overrides and continuity maps | - | to measure (a measured item of G-STORE) | |
+| Temporary re-bake space | - | to measure separately from steady state | |
 | **Total** | about 36 GB | about 26-38 GB with the round records; about 22-34 GB without | gate |
 
 Fallback if the gate fails with field narrowing done: the local grid at about 200 m (C-f). It is not an assumption of this design.
@@ -378,9 +417,9 @@ Fallback if the gate fails with field narrowing done: the local grid at about 20
 | Edit kind | L0 | L1 | L2 scope | L3 when |
 |---|---|---|---|---|
 | Height, landform stamp | the item over the surface | H0 re-route | dirty catchments | continental edits |
-| Lithology or uplift region | the driver map (GEN-122, GEN-125) | none | catchments under the region | as above |
+| Lithology or uplift region | the driver map (GEN-122, GEN-125) | a coarse carve: one round at the H0 grid over the edit's region, with the new driver, shown as an overlay (no routing change, a response preview) | catchments under the region | as above |
 | Rainfall or temperature region | the climate map (GEN-130) | H0 with the runoff change | catchments whose runoff changed | climate reach beyond the region |
-| Class paint | weights preview | none | as height edit | as above |
+| Class paint | weights preview | coarse carve as above | as height edit | as above |
 | Lake, river (post-MVP) | the object | H0 with the constraint | conditioned solves | - |
 
 ### 11.2 What the runtime reads
