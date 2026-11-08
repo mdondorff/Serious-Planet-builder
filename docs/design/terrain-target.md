@@ -124,7 +124,7 @@ Two levels and two representations. The levels are H0 (planet-wide, coarse) and 
 ### 5.1 H0: the coarse planet-wide route (K4) **N**
 
 - Grid: H0 cells (3.26 km at Earth), all six faces as one graph, neighbours across cube edges (§4.2), one priority flood from the sea, D8 receivers, area over true cell areas. F6: 7 s with heights in memory, 2.2 GB.
-- Output: **regions** (§6.1), the planet's catchment structure at this grid, and trunk connectivity for the level-1 preview (§11).
+- Output, exactly: (a) **regions** (§6.1), the landmass partition; (b) trunk connectivity for the level-1 preview (§11). H0 constrains H1 in nothing else: H1 routes its own surface.
 - H0 does **not** cut erosion domains (F4: 105 m rms and a seam).
 
 ### 5.2 H1: the channel graph and the diffuse field (K6)
@@ -132,13 +132,23 @@ Two levels and two representations. The levels are H0 (planet-wide, coarse) and 
 | Representation | What | Grid | Stored | Mark |
 |---|---|---|---|---|
 | **Diffuse field** | accumulated area by MFD (Freeman, exponent 1.1), weighted by the true cell area and runoff; the magnitude at every land cell | regional grid | one byte a cell (GEN-110's code) | **X** |
-| **Channel graph** | one D8 receiver per channel cell (the routing of the filled surface, jitter from the global cell id); channel cells are those whose diffuse value reaches the initiation threshold (below) | regional grid | as segments only (§5.4) | **N** |
+| **Channel graph** | one D8 receiver per channel cell (the routing of the filled surface, jitter from the global cell id); channel cells are defined below | regional grid | as segments only (§5.4), each vertex with its discharge `Q` | **N** |
 | Receivers elsewhere (hillslopes) | scratch of a solve | regional grid | not stored; recomputed by a re-solve | - |
 
 Rules:
-- **Connectivity comes from D8; magnitude comes from MFD.** A segment's discharge at a node is the diffuse value at the node. Downstream of a confluence the graph's connectivity is authoritative: the diffuse value is made non-decreasing along each segment by a running maximum, so a discharge cannot fall downstream where MFD diverges.
-- **River initiation:** a channel cell has `A_true,runoff >= T`, with `T` a preset parameter (default 50-100 km^2, D5). Because the area is runoff-weighted, a rainfall edit moves initiation with no height change (E5).
-- A channel's heads are cells whose donors are all below `T`. Confluences have two or more channel donors. Outlets are sea cells, region border cells (§6.1) or basin spills (§5.3).
+Three quantities, kept apart:
+
+| Quantity | Definition | Used for |
+|---|---|---|
+| **Diffuse area** `A_d` | MFD accumulation (clipped to the catchment, §6.3) of true cell area times the runoff weight (GEN-129's `discharge_weight`) | the carve's erosion (ADR 0099), materials, initiation |
+| **Initiation** | a cell where `A_d >= T` | starts a channel |
+| **Channel discharge** `Q` | accumulated along the D8 tree: `Q(c) = a(c) r(c) + sum of Q over all D8 donors of c`, `a` the true cell area, `r` the runoff in m/s from the unclamped runoff (GEN-129's `runoff_mm`) | rivers, widths, lakes' inflow |
+
+- **Connectivity comes from D8.** A channel cell is an initiated cell, or the D8 receiver of a channel cell: once started, a channel **continues downstream** to its outlet even where `A_d` falls below `T`; there is no restart.
+- **`Q` is conserved.** Confluence rule: `Q` is the sum of its donors plus the local term, so it is non-decreasing along a segment by construction and the sum of `Q` at all outlets equals the sum of `a r` over land (G-CON). The running maximum of `A_d` used in the earlier draft is dropped.
+- `A_d` and `Q` differ by design: MFD spreads diffuse flow, D8 keeps a river as one line. The carve keeps `A_d`; rivers report `Q`.
+- **River initiation:** `T` is a preset parameter (default 50-100 km^2 of runoff-weighted true area, D5). Because `A_d` is runoff-weighted, a rainfall edit moves initiation with no height change (E5).
+- A channel's heads are initiated cells with no channel donor. Confluences have two or more channel donors. A channel ends at the sea, at the terminal cell of an endorheic basin, or at an active outlet of a basin, where it continues (§5.3).
 
 ### 5.3 Basins
 
@@ -149,7 +159,8 @@ A basin is a connected set of cells (8-neighbour) below the routing surface's sp
 | id | canonical identity (§5.4) |
 | floor level | lowest cell height (canonical form, §9) |
 | spill level | the spill graph's level |
-| outlet | the cell through which it drains, or none (endorheic) |
+| spill point | the topographic spill cell of the basin; exists for every basin |
+| active outlet | the spill point when the water reaches the spill level (§5.5), else none |
 | area curve | surface area and volume at 16 fixed level steps between floor and spill |
 | type | one of the classes below |
 | water level | the lake's state (§5.5) |
@@ -157,8 +168,8 @@ A basin is a connected set of cells (8-neighbour) below the routing surface's sp
 | Class | Rule (presets, ADR 0108) | Behaviour |
 |---|---|---|
 | artefact | below `min_area_km2` and shallower than `min_depth_m` | breached in K5/K7 (no object) |
-| lake | deeper or larger, with an outlet | kept; lake at the spill level |
-| endorheic | aridity under the threshold (ADR 0105 point 2) | kept; no outlet; sink for water and sediment; water level from the water balance; playa if dry |
+| lake | deeper or larger, with an active outlet by §5.5 | kept; lake at the spill level |
+| endorheic | no active outlet by §5.5 (ADR 0105 point 2) | kept; sink for water and sediment; water level from §5.5; playa if the level is at the floor |
 | intentional | named by an item (§5.6) or a driver (caldera, karst later) | kept whatever its size |
 
 - Thresholds are preset parameters; a basin's class is a pure function of the surface and the drivers.
@@ -185,8 +196,9 @@ Identities are **pure functions of the current surface**, so a from-scratch buil
 
 ### 5.5 Lakes
 
-- A lake is a basin with a water level. Producer of the water field W (ADR 0041 point 7's retrofit path): level = spill level for class lake, from the water balance for endorheic. **X**
-- The fill depth stops being a surface term (§3.1) and no longer a stored channel; it is the basin's spill level minus the ground, derived from the basin object at the local grid.
+- A lake is a basin with a water level. Producer of the water field W (ADR 0041 point 7's retrofit path). **X**
+- **Water level (steady balance):** the basin's inflow `Q_in` is the discharge reaching it (§5.2) and its net evaporation is `E_net = max(PET - P, 0)` of the basin's cells (PET of GEN-117, ADR 0108 preset). The level `h` solves `A(h) E_net = Q_in` on the area curve, clamped to [floor, spill]. If `A(spill) E_net < Q_in`, the basin overflows: `h` = spill level, the active outlet is the spill point, and the downstream channel continues with `Q_in - A(spill) E_net`. Otherwise the basin is endorheic and passes nothing downstream. A pure function of the surface and the drivers; no time stepping.
+- The fill depth stops being a surface term (§3.1) and a stored channel; it is the basin's water level minus the ground, derived from the basin object at the local grid.
 - Water surfaces render through ADR 0041's path; a basin's area curve answers "what is flooded at level x" without a raster.
 
 ### 5.6 Authoring rivers and lakes (post-MVP; not blocked)
