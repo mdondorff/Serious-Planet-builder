@@ -124,3 +124,22 @@ fn the_read_is_continuous_along_a_walk_across_face_edges_and_corners() {
     // The distance is 1-Lipschitz (a km per km) plus the bilinear's own slope: a 64 m step moves it by far under 0.5 km.
     assert!(worst < 0.5, "a 64 m step changes the distance by {worst} km");
 }
+
+// spec: GEN-136
+#[test]
+fn class_sources_of_one_world_share_the_lattice_and_another_shelf_does_not() {
+    use planet_generators::classes::ClassSource;
+    use planet_generators::shelf::ShelfProfile;
+    let read = |s: &ClassSource| (0..300).map(|i| s.coast_read(fib(i, 300))).map(|(d, a)| (d.to_bits(), a.to_bits())).collect::<Vec<_>>();
+    // The same seed on other thread counts is served the one lattice (the lattice is a function of the world, not of the threads; the thread independence of the build is tested above).
+    let (a, b) = (ClassSource::new(3).with_coast_threads(2), ClassSource::new(3).with_coast_threads(8));
+    assert!(a.shares_coast_lattice_with(&b));
+    assert_eq!(read(&a), read(&b));
+    // Another shelf profile (a coarser lattice) is another lattice, not the shared one.
+    let coarse = ShelfProfile { coast_lattice_cells: 128, ..ShelfProfile::earth() };
+    let c = ClassSource::new(3).with_shelf(coarse);
+    assert!(!a.shares_coast_lattice_with(&c));
+    assert_ne!(read(&a), read(&c));
+    // Another seed is another lattice.
+    assert!(!a.shares_coast_lattice_with(&ClassSource::new(4)));
+}
