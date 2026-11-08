@@ -1,0 +1,1 @@
+- 2026-11-08 rounds-prototype: the round solver (one region routing per round, every catchment's breach and sweeps from its key inputs) behind a switch, G-ROUND and G-DET exact on the prototype region (GEN-142, PR pending).
