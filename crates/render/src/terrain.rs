@@ -61,7 +61,7 @@ pub(crate) fn measure_source(source: String, variant: MeasureVariant) -> String 
     out = out.replace("fn ground_detail(node_index: u32,", "fn ground_detail_full(node_index: u32,");
     out.push_str(
         "
-fn ground_detail(node_index: u32, local: vec3<f32>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32, drv: vec3<f32>) -> GroundDetail {
+fn ground_detail(node_index: u32, local: vec3<f32>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32, drv: vec3<f32>, chn: vec2<f32>) -> GroundDetail {
     var out: GroundDetail;
     out.mul = vec3<f32>(1.0);
     out.normal = normal;
@@ -89,9 +89,9 @@ struct Globals {
     // (snow_c_full, snow_c_none, snow_cos_none, snow_cos_full) and (beach_height, beach_fade, shore_blend, 0).
     albedo: array<vec4<f32>, 10>,
     // Lit path only: x = the strength of the ground detail (LOOK-009; 0 off), y = the base reflectance f0 of the specular term (LOOK-010); then the response curves of the ground materials (LOOK-008): per
-    // material four vec4s of two (lo, hi) pairs each, one pair per input.
+    // material five vec4s of two (lo, hi) pairs each, one pair per input.
     detail: vec4<f32>,
-    materials: array<vec4<f32>, 24>,
+    materials: array<vec4<f32>, 30>,
     // The specular term of the ground (LOOK-010): the roughness of the first four materials, of scree and wet ground (and two zeros), then two roughness modifiers (input, lo, hi, factor).
     gloss: array<vec4<f32>, 4>,
     // The coefficients of the detail octaves per material (LOOK-013): per octave (16 m, 2 m, 25 cm, 3 cm, then 64 m and 8 m, REND-057) the albedo of rock, sand, - and soil, the colour of grass, and the tilts of
@@ -353,22 +353,24 @@ fn gd_plane(base: vec3<i32>, q: vec3<f32>, k: u32, axis: u32) -> vec4<f32> {
     return vec4<f32>(grad, value);
 }
 
-// The material weights (LOOK-008, `MaterialParams::weights`): the product over the eight inputs of the smoothstep response of each (lo, hi) pair of
-// the look's curve table (`g.materials`: per material four vec4s of two pairs each), normalised to sum to 1; a pair with lo == hi leaves the input
-// out, a material with no pair is off. The inputs are two vec4s (`ia`: slope cosine, height, temperature, precipitation; `ib`: surface type and the
-// three driver slots). The smoothstep is written out because a falling pair (lo > hi) is not defined for the built-in. Every index is a constant
+// The material weights (LOOK-008, `MaterialParams::weights`): the product over the ten inputs of the smoothstep response of each (lo, hi) pair of
+// the look's curve table (`g.materials`: per material five vec4s of two pairs each), normalised to sum to 1; a pair with lo == hi leaves the input
+// out, a material with no pair is off. The inputs are two vec4s and a vec2 (`ia`: slope cosine, height, temperature, precipitation; `ib`: surface type and the
+// three driver slots; `ic`: the fill depth and the erosion depth of the channel block). The smoothstep is written out because a falling pair (lo > hi) is not defined for the built-in. Every index is a constant
 // and the pairs go two at a time as vec2s, so no array is indexed by a loop counter (G2c: that was +1 ms of GPU time at 1440p).
-fn material_weight(first: u32, ia: vec4<f32>, ib: vec4<f32>) -> f32 {
+fn material_weight(first: u32, ia: vec4<f32>, ib: vec4<f32>, ic: vec2<f32>) -> f32 {
     let v0 = g.materials[first];
     let v1 = g.materials[first + 1u];
     let v2 = g.materials[first + 2u];
     let v3 = g.materials[first + 3u];
+    let v4 = g.materials[first + 4u];
     // A word with no interval in either pair is skipped (the table is a uniform: the branch costs nothing, and the default curves use few inputs).
     let on0 = any(v0.xz != v0.yw);
     let on1 = any(v1.xz != v1.yw);
     let on2 = any(v2.xz != v2.yw);
     let on3 = any(v3.xz != v3.yw);
-    if (!(on0 || on1 || on2 || on3)) {
+    let on4 = any(v4.xz != v4.yw);
+    if (!(on0 || on1 || on2 || on3 || on4)) {
         return 0.0;
     }
     var prod = 1.0;
@@ -388,6 +390,10 @@ fn material_weight(first: u32, ia: vec4<f32>, ib: vec4<f32>) -> f32 {
         let r = pair_response(v3, ib.zw);
         prod = prod * r.x * r.y;
     }
+    if (on4) {
+        let r = pair_response(v4, ic);
+        prod = prod * r.x * r.y;
+    }
     return prod;
 }
 
@@ -405,9 +411,9 @@ struct MaterialW {
     b: vec2<f32>,
 };
 
-fn material_weights(ia: vec4<f32>, ib: vec4<f32>) -> MaterialW {
-    let w = vec4<f32>(material_weight(0u, ia, ib), material_weight(4u, ia, ib), material_weight(8u, ia, ib), material_weight(12u, ia, ib));
-    let w2 = vec2<f32>(material_weight(16u, ia, ib), material_weight(20u, ia, ib));
+fn material_weights(ia: vec4<f32>, ib: vec4<f32>, ic: vec2<f32>) -> MaterialW {
+    let w = vec4<f32>(material_weight(0u, ia, ib, ic), material_weight(5u, ia, ib, ic), material_weight(10u, ia, ib, ic), material_weight(15u, ia, ib, ic));
+    let w2 = vec2<f32>(material_weight(20u, ia, ib, ic), material_weight(25u, ia, ib, ic));
     let sum = w.x + w.y + w.z + w.w + w2.x + w2.y;
     if (sum > 0.0) {
         return MaterialW(w / sum, w2 / sum);
@@ -467,7 +473,7 @@ struct GroundDetail {
 // SEAM for the photo layer (owner, 2026-10-21): per material the procedural term below is one source of `mul` and the gradient `g`. A texture
 // source for a material (CC0 sets from the asset cache, close range only) returns the same two things from the node's decade phases and is
 // blended in by a distance weight before the weights combine them; neither the weights function nor the node record changes.
-fn ground_detail(node_index: u32, local: vec3<f32>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32, drv: vec3<f32>) -> GroundDetail {
+fn ground_detail(node_index: u32, local: vec3<f32>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32, drv: vec3<f32>, chn: vec2<f32>) -> GroundDetail {
     var out: GroundDetail;
     out.mul = vec3<f32>(1.0);
     // Off, the normal goes through as it came (not normalised again), so the picture is what it was bit for bit.
@@ -506,7 +512,8 @@ fn ground_detail(node_index: u32, local: vec3<f32>, normal: vec3<f32>, up: vec3<
     let ia = vec4<f32>(cs_w, h, t, p);
     // The surface type is 0 outside regions; the three driver slots (LOOK-008) are the tile's blended soil depth, moisture and insolation.
     let ib = vec4<f32>(0.0, drv.x, drv.y, drv.z);
-    let mw = material_weights(ia, ib);
+    // The channel slots (the channel block, GEN-126): the fill depth and the erosion depth in metres, 0 where the tile has no bake.
+    let mw = material_weights(ia, ib, chn);
     let w = mw.a;
     let w2 = mw.b;
     if (w.x + w.y + w.z + w.w + w2.x + w2.y <= 0.0) {
@@ -568,7 +575,7 @@ fn ground_detail(node_index: u32, local: vec3<f32>, normal: vec3<f32>, up: vec3<
         let m = g.gloss[j];
         if (m.y != m.z) {
             let c = u32(m.x);
-            let x = select(ia[c & 3u], ib[c & 3u], c >= 4u);
+            let x = select(select(ia[c & 3u], ib[c & 3u], c >= 4u), chn[c & 1u], c >= 8u);
             let s = clamp((x - m.y) / (m.z - m.y), 0.0, 1.0);
             rough = rough * mix(1.0, m.w, s * s * (3.0 - 2.0 * s));
         }
@@ -681,7 +688,13 @@ fn climate_colour(view: u32, t: f32, p: f32) -> vec3<f32> {
 
 // The false colour of a driver (the debug views of GEN-071, `ShadeView::SoilDepth` = 6, `Moisture` = 7, `Insolation` = 8): `driver_view_colour` of the CPU
 // mirror. `drv` is the soil depth in metres, the moisture and the insolation.
-fn driver_colour(view: u32, drv: vec3<f32>) -> vec3<f32> {
+fn driver_colour(view: u32, drv: vec3<f32>, chn: vec2<f32>) -> vec3<f32> {
+    if (view == 9u) {
+        return mix(vec3<f32>(0.90, 0.88, 0.80), vec3<f32>(0.05, 0.35, 0.45), sqrt(clamp(chn.x / 64.0, 0.0, 1.0)));
+    }
+    if (view == 10u) {
+        return mix(vec3<f32>(0.90, 0.88, 0.80), vec3<f32>(0.45, 0.10, 0.05), sqrt(clamp(chn.y / 64.0, 0.0, 1.0)));
+    }
     if (view == 6u) {
         return mix(vec3<f32>(0.85, 0.80, 0.70), vec3<f32>(0.25, 0.15, 0.08), sqrt(clamp(drv.x / 8.0, 0.0, 1.0)));
     }
@@ -692,7 +705,7 @@ fn driver_colour(view: u32, drv: vec3<f32>) -> vec3<f32> {
 }
 
 // The lit terrain's radiance before the pre-exposure (ADR 0039 point 4, REND-026): Lambert diffuse `albedo * max(n . sun, 0) / pi`
-// for the sun's illuminance of one unit, in the view `view` (0 lit, 1 albedo, 2 lighting, 3 temperature, 4 precipitation, 5 shadow, 6 soil depth, 7 moisture, 8 insolation). `up` is
+// for the sun's illuminance of one unit, in the view `view` (0 lit, 1 albedo, 2 lighting, 3 temperature, 4 precipitation, 5 shadow, 6 soil depth, 7 moisture, 8 insolation, 9 fill depth, 10 erosion depth). `up` is
 // the unit up vector at the point; the climate comes from the tile's field. No ambient, no shadows, no specular.
 fn terrain_radiance(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32, ramp_min: f32, sun: vec3<f32>) -> vec3<f32> {
     let n = normalize(normal);
@@ -748,7 +761,8 @@ fn fs_lit_view(in: VsOut) -> LitOut {
     let up = up_at(nodes[in.node_index].up, in.local);
     let climate = tile_climate(in);
     let drv = tile_drivers(in);
-    let gd = ground_detail(in.node_index, in.local, in.normal, up, climate.x, climate.y, in.height - g.extra.x, drv);
+    let chn = tile_channels(in);
+    let gd = ground_detail(in.node_index, in.local, in.normal, up, climate.x, climate.y, in.height - g.extra.x, drv, chn);
     // The direct sun term is unshadowed here: the shadow of the march applies to `sun-direct` in the shadow-apply pass (REND-051).
     var rgb = shade_lit(g.mode.x, g.albedo, gd.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), sun, g.range.z) * detail_mul(gd, g.mode.x, g.albedo, climate.x, climate.y, clamp(dot(normalize(gd.normal), up), 0.0, 1.0), in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)));
     // The sum is clamped like the rest of the lit radiance: the scene target is f16.
@@ -760,7 +774,7 @@ fn fs_lit_view(in: VsOut) -> LitOut {
         sunlit = false;
     }
     if (g.mode.x >= 6u) {
-        rgb = clamp(driver_colour(g.mode.x, drv) * 0.31830988618 * g.range.z, vec3<f32>(0.0), vec3<f32>(60000.0));
+        rgb = clamp(driver_colour(g.mode.x, drv, chn) * 0.31830988618 * g.range.z, vec3<f32>(0.0), vec3<f32>(60000.0));
         sunlit = false;
     }
     if (g.extra.y > 3.5) {

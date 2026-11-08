@@ -13,7 +13,7 @@
 //! requires it by name).
 
 use crate::terrain::{SHADER_HEAD, SHADER_TAIL};
-use planet_generators::compact::{NORMAL_SCALE, SLOT_CLIMATE_OFFSET, SLOT_DRIVER_OFFSET, SLOT_TEXEL_OFFSET};
+use planet_generators::compact::{NORMAL_SCALE, SLOT_CHANNEL_OFFSET, SLOT_CLIMATE_OFFSET, SLOT_DRIVER_OFFSET, SLOT_TEXEL_OFFSET};
 
 /// Bytes of one tile reference: the slot's first texel in its block, reserved, slot index, reserved.
 pub const REF_BYTES: u64 = 16;
@@ -34,6 +34,7 @@ pub(crate) fn slot_access_wgsl(cells: u32) -> String {
         .replace("{CELLS}", &cells.to_string())
         .replace("{CLIMATE_WORD}", &(SLOT_CLIMATE_OFFSET / 4).to_string())
         .replace("{DRIVER_WORD}", &(SLOT_DRIVER_OFFSET / 4).to_string())
+        .replace("{CHANNEL_WORD}", &(SLOT_CHANNEL_OFFSET / 4).to_string())
         .replace("{TEXEL_WORD}", &(SLOT_TEXEL_OFFSET / 4).to_string())
         .replace("{NORMAL_SCALE}", &format!("{NORMAL_SCALE:?}"))
 }
@@ -48,6 +49,7 @@ const CELLS: i32 = {CELLS};
 // Word offsets inside the slot (GEN-025: climate block at byte 128, driver block at byte 452, channel block at byte 776, texels at byte 1,100).
 const CLIMATE_WORD: u32 = {CLIMATE_WORD}u;
 const DRIVER_WORD: u32 = {DRIVER_WORD}u;
+const CHANNEL_WORD: u32 = {CHANNEL_WORD}u;
 const TEXEL_WORD: u32 = {TEXEL_WORD}u;
 const NORMAL_SCALE: f32 = {NORMAL_SCALE};
 
@@ -465,6 +467,28 @@ fn tile_drivers(in: VsOut) -> vec3<f32> {
     let d = mix(mix(driver_texel(base, i00), driver_texel(base, i00 + 1), wx), mix(driver_texel(base, i00 + 9), driver_texel(base, i00 + 10), wx), wy);
     let fade_w = 1.0;
     return vec3<f32>(1.0 + fade_w * (d.x - 1.0), 0.5 + fade_w * (d.y - 0.5), d.w + fade_w * (d.z - d.w));
+}
+
+// The channels at a fragment of a compact tile (GEN-126, presentation data): the bilinear interpolation of the tile's 9 x 9 channel block at the fragment's tile
+// coordinates, as (fill depth, erosion depth) in metres. The codes are square-root coded over 0 to 64 m (`drivers::decode_depth`); a tile with no bake holds 0, so
+// the neutral value is 0. Every read is a u32 word of the block.
+fn channel_texel(base: u32, idx: i32) -> vec2<f32> {
+    let word = block[base + CHANNEL_WORD + u32(idx)];
+    let f = f32(word & 255u) / 255.0;
+    let e = f32((word >> 8u) & 255u) / 255.0;
+    return vec2<f32>(f * f * 64.0, e * e * 64.0);
+}
+
+fn tile_channels(in: VsOut) -> vec2<f32> {
+    let base = tile_refs[in.node_index].x;
+    let x = clamp(in.aux.x, 0.0, 1.0) * 8.0;
+    let y = clamp(in.aux.y, 0.0, 1.0) * 8.0;
+    let a = min(i32(x), 7);
+    let b = min(i32(y), 7);
+    let wx = x - f32(a);
+    let wy = y - f32(b);
+    let i00 = b * 9 + a;
+    return mix(mix(channel_texel(base, i00), channel_texel(base, i00 + 1), wx), mix(channel_texel(base, i00 + 9), channel_texel(base, i00 + 10), wx), wy);
 }
 
 "#;

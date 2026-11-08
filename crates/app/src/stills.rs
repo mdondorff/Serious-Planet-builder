@@ -95,8 +95,7 @@ impl LookOverride {
 }
 
 fn parse_look(root: &toml::Table) -> Result<LookOverride, String> {
-    const INPUTS: [&str; 8] =
-        ["slope_cos", "height", "temperature", "precipitation", "surface_type", "soil_depth", "moisture", "insolation"];
+    use planet_frame::look::materials::INPUT_NAMES as INPUTS;
     let Some(look) = root.get("look") else { return Ok(LookOverride::default()) };
     let look = look.as_table().ok_or("the poses file: [look] must be a table")?;
     let ground_detail = number(look, "ground_detail", "[look]")?;

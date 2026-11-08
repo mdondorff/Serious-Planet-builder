@@ -1,0 +1,1 @@
+- 2026-11-08 channel-inputs: the terrain shaders read the channel block (fill depth, erosion depth) as two material inputs (INPUTS 10, 30-word curve table, look schema 10), with fill and erosion debug views; the default look is neutral to both, no golden moves (2b PR 4c).
