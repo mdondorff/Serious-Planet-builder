@@ -604,8 +604,9 @@ fn main() {
         let mut by_size: Vec<usize> = (0..sizes.len()).collect();
         by_size.sort_by_key(|&k| std::cmp::Reverse(sizes[k].0));
         let big = by_size[0] as u32;
-        match by_size.iter().skip(1).find(|&&k| sizes[k].0 >= 300) {
-            None => println!("E7: no second landmass of 300 cells in this window; skipped"),
+        println!("E7 land components of the window (cells): {:?}", by_size.iter().take(6).map(|&k| sizes[k].0).collect::<Vec<_>>());
+        match by_size.iter().skip(1).find(|&&k| sizes[k].0 >= 30) {
+            None => println!("E7: no second landmass of 30 cells in this window; skipped"),
             Some(&k) => {
                 let target = k as u32;
                 // The shortest crossing from the large landmass to the other one, through the sea.
