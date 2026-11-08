@@ -1,0 +1,1 @@
+- 2026-11-08 look-d1-channels: the sample ground look gets curves on the fill and erosion depth (soil and grass fall with both; a kept pit goes to wet ground), synthetic-channel stills sheet for the owner; default look untouched (I8a slice 2b step 4d)
