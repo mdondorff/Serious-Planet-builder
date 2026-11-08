@@ -46,7 +46,7 @@ impl Metric {
         }
     }
 
-    /// The area of cell `(i, j)` of the window in square metres. The four-term difference loses digits to cancellation: a relative error of about 1e-11 at 257 cells an edge and about 3e-9 at the 12,288 cells of pass 1, far under any use of an area.
+    /// The area of cell `(i, j)` of the window in square metres. The four-term difference loses digits to cancellation: a relative error of about 1e-11 at 257 cells an edge and about 3e-8 at the 12,288 cells of pass 1 (measured), far under any use of an area.
     pub fn area(&self, i: usize, j: usize) -> f64 {
         let (x0, x1, y0, y1) = (self.edge_x[i], self.edge_x[i + 1], self.edge_y[j], self.edge_y[j + 1]);
         self.radius_m * self.radius_m * (patch(x1, y1) - patch(x0, y1) - patch(x1, y0) + patch(x0, y0))
@@ -59,7 +59,8 @@ impl Metric {
             [x * s, y * s, s]
         };
         let (a, b) = (unit(self.centre_x[i], self.centre_y[j]), unit(self.centre_x[k], self.centre_y[l]));
-        let chord = libm::sqrt((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2));
+        let (dx, dy, dz) = (a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+        let chord = libm::sqrt(dx * dx + dy * dy + dz * dz);
         self.radius_m * 2.0 * libm::asin((0.5 * chord).min(1.0))
     }
 }

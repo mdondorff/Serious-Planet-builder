@@ -291,6 +291,7 @@ pub fn pass2_tile_rock(
     let outlet = grid.outlets(&z0, p.sea_level);
     let stream = face_stream(p.seed, id.face);
     let mut z = z0.clone();
+    assert!(!p.carve.cell_metric, "pass 2 does not take the physical cell metric yet (GEN-138): its local carve would run on the uniform metric under a key that says otherwise");
     let local = CarveParams { max_area: p.local_area_cells * g.dx() * g.dx(), ..p.carve };
     let (w, i0, j0) = (g.window(), i64::from(id.ti) * g.tile as i64 - g.halo as i64, i64::from(id.tj) * g.tile as i64 - g.halo as i64);
     let kf = rock.k.map(|k| move |c: usize, zc: f64| k(g.direction(id.face, i0 + (c % w) as i64, j0 + (c / w) as i64), zc));

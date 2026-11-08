@@ -9,7 +9,7 @@
 4. Default off, key byte only when on: nothing moves until the prototype turns it on (reversible). The kernel version is not bumped for that reason; turning the switch on as a default is its own version bump.
 5. Not in this PR: pass 2 (a tile window is a patch of one face at 102 m: the same metric applies, `Metric::cube_face` at the pass-2 resolution with the tile's offset; held until pass 1's effect is read), the deposition sweep and thermal relaxation of pass 2 (`deposit.rs`, `thermal.rs`, which keep `dx^2`), H0 across cube edges (GEN-139).
 
-6. Area codes (GEN-110): the stored area channel divides the routed area by the cell's own area when the metric is on, so a code still counts cells of drainage.
+6. Area codes (GEN-110): the stored area channel keeps dividing by the constant `dx^2`; with the metric on a code is the true catchment area in units of `dx^2`, the same physical scale everywhere on the face (a per-cell divisor would put the corner bias back). Readers of the channel see codes about 1.8 lower on average (8 steps per octave of 0.85) than with the uniform metric.
 
 ## Tuning note for `K dt` (areas shrink about 15 %)
 - The stream-power number is `f = k_dt K sqrt(Q) / d`. With the metric `sqrt(Q)` falls by about `sqrt(0.849) = 0.92` on average (0.84 in the corners) and `d` falls by 0.94 at the corners, so the mean `f` falls by about 8 % at the centre and little at the corners.

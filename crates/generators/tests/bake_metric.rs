@@ -26,7 +26,7 @@ fn the_cells_of_a_face_sum_to_a_sixth_of_the_sphere_and_the_faces_that_meet_at_a
         // The equiangular map is symmetric: the cells along the west edge and along the east edge are the same size, so the faces that meet there agree on the edge cells.
         for j in 0..n {
             let (a, b) = (g.cell_area(j * n), g.cell_area(j * n + n - 1));
-            assert!(((a - b) / a).abs() < 1e-9, "n {n} row {j}: the edge cells differ ({a} and {b})");
+            assert!(((a - b) / a).abs() < 1e-11, "n {n} row {j}: the edge cells differ ({a} and {b})");
         }
         let (centre, corner) = (g.cell_area((n / 2) * n + n / 2), g.cell_area(0));
         assert!(corner < centre, "a corner cell ({corner}) is not smaller than a centre cell ({centre})");
@@ -45,14 +45,14 @@ fn the_neighbour_distances_follow_the_sphere_not_the_grid() {
     assert!((at(n / 2, n / 2, 7) - core::f64::consts::SQRT_2).abs() < 2e-3, "centre diagonal {}", at(n / 2, n / 2, 7));
     // F5: at a corner the axis neighbours are about 0.94 dx and the diagonal neighbours about 0.67 sqrt 2 dx.
     assert!((at(1, 1, 1) - 0.94).abs() < 0.02, "corner axis {}", at(1, 1, 1));
-    assert!((at(1, 1, 7) - 0.67 * core::f64::consts::SQRT_2).abs() < 0.12, "corner diagonal {}", at(1, 1, 7));
+    assert!((at(1, 1, 7) - 0.95).abs() < 0.01, "corner diagonal {}", at(1, 1, 7));
     // Symmetry: the distance a to b is the distance b to a.
     for (i, j) in [(3usize, 5usize), (100, 20), (200, 200)] {
         let p = j * n + i;
         for d in 0..8 {
             let q = g.neighbour(p, d).unwrap();
             let back = (0..8).find(|&e| g.neighbour(q, e) == Some(p)).unwrap();
-            assert!((g.distance_at(p, d) - g.distance_at(q, back)).abs() < 1e-6, "cell {p} direction {d}");
+            assert_eq!(g.distance_at(p, d), g.distance_at(q, back), "cell {p} direction {d}");
         }
     }
 }
