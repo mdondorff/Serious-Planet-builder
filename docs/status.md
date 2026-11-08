@@ -6,11 +6,9 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 - **For M9 planning** (after the away week): owner test 2026-10-27 groups E (edits on top as default, erosion keeping mass), F and G scope, the 1 m / 500 m exception (`docs/milestones/M8/owner-test-2026-10-27/README.md`); where edits sit relative to M9's erosion (D3, owner 2026-10-26: under the erosion by default).
 - **Sunset shadow look** (ADR 0095 draft, crusader): the sky ambient as a hemisphere average is physically consistent and dark at a 7° sun; options: sky light plus a lift (planner's pick), sky light as is, or the old term. Every lit and sky golden moves with it. SPIKE-96 (sky visibility) follows the choice.
 - **Perf machine state** (2026-11-03): all-core preflight 128-145k us (limit 112k). No restart before Sat 2026-11-07 (owner): no perf windows until then; bake timings as single-thread CPU-s per tile or same-session ratios; local tier C is not evidence.
-- **Integrated preview before the bake** (M9 I4b, owner 2026-11-04): through the viewer's path (class-source base, erosion layer, fine creases, ground detail), mountains incl. the owner's circled wall (face 2, layer cell 38206, 31520), hills, plains, coast, 2 km to 1.8 m; poses in SPIKE-102 results section 7. After the M9 driver items.
-- **M9.1 gate before the bake** (owner, 2026-11-06; `docs/briefings/m9-plan.md`): M9.1 bake-ready (drivers ADR 0101-0107, scorecard and off-Earth presets, full-face run, I4b, closure review) ends with the owner's go for the bake, about 11-20 to 11-25; M9.2 the baked world. Decided: D1-D3, D5 (volcanoes after M9), D6 (ADR 0107), ADR 0108 (Earth preset); isostasy dropped; older stores need not stay compatible.
+- **Architecture re-plan** (owner, 2026-11-08; SPIKE-104, SPIKE-105 `spikes/architecture-replan/results/results.md`): D1 = option A, conditional on a prototype and a switch-to-B gate (S1-S5). The planet bake and tuning on the old representation are frozen; decisions D2-D10 (section 13.5) are working assumptions until the owner confirms them, before A3's ADRs are accepted. Replaces the M9.1 gate; dates are estimates: prototype mid-December, bake late January 2027. One more external review on the A3 target document.
 - **Smooth base as default** (GEN-107, `cpu-erosion-v2` on main): removes the 611 m "pyramid" facets; draft #1137 switches the default (no golden moves; two count pins and the water-cut range re-pinned with reasons). Decide with the erosion preview.
 - **World-build share values** (ADR 0097, BUDG-014): terrain 40 %, future content 40 %, margin 20 % of a 24 h day, proposed; confirm or change.
-- **Root-search hook** (learning 2026-11-03): a hook refusing `find /`; the owner's call.
 - **Ocean square at orbit** (owner test 2026-11-03, `docs/dev_screenshots/2026-11-03-ocean-square-*.jpg`): press F9 when it shows again; the bundle lets crusader replay it (Tracked).
 - **Cliffs** (SPIKE-94, #1082): asset library or procedural only; the Alps' 4.3 % of area above 45° as the v1 coverage; a coarse collision proxy for now. Trigger: after M9's generator rounds.
 - **Optional, when convenient:** the M6 retest list (`docs/archive/M6/briefings/m6-owner-test-plan.md`, "Retest"); a live check of the flickers (Tracked); excluding the repo's `target` folders from Windows Search indexing.
@@ -27,13 +25,15 @@ Dormant (no near trigger; not asked now):
 | # | Step | Lane |
 |---|---|---|
 | NR | Real-GPU window checks NOT RUN on a locked desktop (TEST-073) | crusader |
-| M9 bake | runoff (GEN-129), deposition, arid sinks, coastal process, glacial gate; a full-face run with every driver (peak memory, time, a cube edge) and one all-driver preview store opened by the viewer, then the integrated preview (I4b); no planet bake before the owner's go | explorer |
-| Ground | Arid class rules (#1215), shelf profile (GEN-118, before the coastal process), ice history (GEN-134); then I8a 2b PR 4b-4d | crusader |
-| Perf | After Sat 2026-11-07: REND-052 verdicts, ground-detail cost (REND-034, `shadow-cost --look`), channel-read cost; a writable re-prefilled perf store first (MESH_VERSION 11) | planner |
-| Store | `global16384-m9r2` and `global16384` read-only; preview store `global16384-m9c14` stale (re-run after the plan items) | all |
+| Re-plan week 1 | A12 true cell metric (GEN-138), H0 across cube edges (GEN-139) | explorer |
+| Target | A3 target document and contracts, then region search and fixtures E1-E6 | spikes |
+| Ground | I8a 2b PR 4d; turned-lattice noise behind a switch (GEN-140); #1137 waits for the owner | crusader |
+| Perf | Machine ready again (preflight OK 2026-11-07, parallel 74-76k us of 112k): REND-052 verdicts, ground-detail cost, channel-read cost; no store opens on main since GLOBAL_VERSION 9: a current store first (MESH_VERSION 11) | planner |
+| Store | All stores on disk refused by keys since #1218/#1225 (read-only references); in-memory `--world` runs only until a new store | all |
 
 ## Tracked
 - **Rock K residual** (#1216, seed 14 face 2): mountain 3 km relief p50 483 against 534 m (the band edge is 2/3 of it), elevation p50 +170-225 m from the K spread (f/(1+f) is concave), not the K mean; tune in the preview round. The carve adds about 1.55 GB at 12,288 cells: measure the peak against 8 GB (CON-21) on the next pass-1 run.
+- **Flaky stream smoke** (`oracle_stream_smoke`, main after #1229): `load_running_max` 1, at least 2 expected, once on Windows WARP; re-run passed. A concurrency assertion on a loaded runner; tighten its precondition, never weaken.
 - **Fill depth across a mountain cube edge** (keep-pits-seams, #1201): the seam gate passed on a tile seam; no mountain cube edge was in the stored faces. Blocks the planet bake (I6); run with the integrated-preview re-run.
 - **`test fast` 220-330 s** (BUILD-014, #1202, 2026-11-05): loaded machine; re-measure after the Saturday restart.
 - **Ocean square at orbit** (owner, viewer main 2fdfeb23 over m9r2, 2026-11-03): at 12,767 km over 20 N 30 E after 240 s of flight, a light square in a ring of dark blotches on the sea; not reproduced headless. Hypotheses: the clipmap shadow on water (sea-floor receivers; `--no-shadow-march`, J view), the water-node cut or the never-evicted WaterBook, the shadow's temporal history. Needs the owner's F9 bundle; replay with `cargo xtask repro`.
