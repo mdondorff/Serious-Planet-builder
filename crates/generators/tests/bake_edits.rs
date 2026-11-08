@@ -287,3 +287,155 @@ fn basins_merge_split_and_stay_intentional_with_their_identity_and_a_continuity_
         assert_eq!(b.class, BasinClass::Intentional);
     }
 }
+
+fn same_hydro(a: &planet_generators::bake::hydro::Hydro, b: &planet_generators::bake::hydro::Hydro) -> bool {
+    bits(&a.q) == bits(&b.q)
+        && bits(&a.qw) == bits(&b.qw)
+        && a.channel == b.channel
+        && a.segments == b.segments
+        && a.basins == b.basins
+        && a.label == b.label
+        && a.stats == b.stats
+}
+
+// spec: GEN-146
+#[test]
+fn a_basin_resolves_after_the_losses_upstream_of_it_and_q_w_closes() {
+    use planet_generators::bake::hydro::{hydrology_with, verify, HydroParams};
+    let w = 40;
+    let g = Grid::new(w, w, 800.0);
+    // Two bowls in series on a slope falling west: the upper one (i 22..28) drains into the lower one (i 10..16).
+    let mut z: Vec<f64> = (0..w * w).map(|p| 500.0 + 10.0 * (p % w) as f64).collect();
+    for (i0, floor) in [(10usize, 280.0), (22, 270.0)] {
+        for j in 10..16 {
+            for i in i0..i0 + 6 {
+                z[j * w + i] = 300.0;
+            }
+        }
+        z[12 * w + i0 + 2] = floor;
+    }
+    let outlet = g.outlets(&z, 0.0);
+    let routing = route_rules(&g, &z, &outlet, EPS, 3, 0.0, None, RoundRules::ROUND);
+    let filled = priority_flood_with(&g, &z, &outlet, EPS, true);
+    let runoff = vec![1.0e-8f32; w * w];
+    let run = |evap: Option<&[f32]>| hydrology_with(&g, &z, &filled, &routing, &outlet, Some(&runoff), evap, None, &HydroParams::default());
+    let wet = run(None);
+    assert_eq!(wet.basins.len(), 2);
+    let find = |h: &planet_generators::bake::hydro::Hydro, i: usize| {
+        h.basins.iter().position(|b| (b.floor_cell as usize % w) >= i && (b.floor_cell as usize % w) < i + 6).unwrap()
+    };
+    let (up, low) = (find(&wet, 22), find(&wet, 10));
+    // Without evaporation both overflow and the lower basin receives everything above it.
+    assert!(wet.basins[low].q_in > wet.basins[up].q_in, "the lower basin receives what the upper one passes on");
+    // Strong evaporation over the upper basin only: it is endorheic and passes nothing; the lower one loses its inflow.
+    let mut evap = vec![0.0f32; w * w];
+    for j in 10..16 {
+        for i in 22..28 {
+            evap[j * w + i] = 1.0e-5;
+        }
+    }
+    let dry = run(Some(&evap));
+    let (up2, low2) = (find(&dry, 22), find(&dry, 10));
+    assert_eq!(dry.basins[up2].class, BasinClass::Endorheic);
+    assert_eq!(dry.basins[up2].q_out, 0.0);
+    assert!((dry.basins[up2].q_in - wet.basins[up].q_in).abs() <= 1e-12 * wet.basins[up].q_in, "the upper basin sees the same inflow");
+    let want = wet.basins[low].q_in - dry.basins[up2].q_in;
+    assert!(
+        (dry.basins[low2].q_in - want).abs() <= 1e-9 * want,
+        "inflow {} against the wet inflow less the upper loss {want}",
+        dry.basins[low2].q_in
+    );
+    for h in [&wet, &dry] {
+        let v = verify(&g, h, &routing, &filled, &outlet, Some(&runoff), None);
+        assert!(v.qw_closure_error <= 1e-9 && v.qw_confluence_error <= 1e-9 && v.q_outlets_error <= 1e-9, "{v:?}");
+    }
+    // A lake in the chain passes `Q_in - A(spill) E_open` on.
+    let mut some = vec![0.0f32; w * w];
+    for j in 10..16 {
+        for i in 10..16 {
+            some[j * w + i] = 1.0e-9;
+        }
+    }
+    let lake = run(Some(&some));
+    let l = find(&lake, 10);
+    assert_eq!(lake.basins[l].class, BasinClass::Lake);
+    let a = lake.basins[l].area_m2[15];
+    assert!((lake.basins[l].q_out - (lake.basins[l].q_in - a * 1.0e-9)).abs() <= 1e-9 * lake.basins[l].q_in);
+    let v = verify(&g, &lake, &routing, &filled, &outlet, Some(&runoff), None);
+    assert!(v.qw_closure_error <= 1e-9 && v.qw_confluence_error <= 1e-9, "{v:?}");
+}
+
+/// Two islands in a sea, a strait between them.
+fn islands() -> Vec<f64> {
+    let mut z: Vec<f64> = vec![-10.0; N * N];
+    for j in 0..N {
+        for i in 0..N {
+            for (ci, cj) in [(18.0f64, 36.0f64), (54.0, 36.0)] {
+                let (dx, dy) = (i as f64 - ci, j as f64 - cj);
+                let d = libm::sqrt(dx * dx + dy * dy);
+                if d < 13.0 {
+                    let v = 600.0 * (1.0 - d / 13.0) + 3.0 * planet_generators::bake::route::jitter(9, (j * N + i) as u64, 0) + 2.0;
+                    z[j * N + i] = z[j * N + i].max(v);
+                }
+            }
+        }
+    }
+    z
+}
+
+// spec: GEN-146
+#[test]
+fn a_bridge_joins_two_landmasses_and_taking_it_away_gives_the_first_result_back() {
+    use planet_generators::bake::hydro::{hydrology_with, HydroParams};
+    let f = fields();
+    for (name, g) in grids() {
+        let z0 = islands();
+        let outlet = g.outlets(&z0, 0.0);
+        let p = params(4);
+        let dr = Drivers { k_scale: Some(&f.k), uplift: Some(&f.uplift), runoff: Some(&f.runoff) };
+        let tile = 12;
+        let mut cache = RoundCache::default();
+        let mut base = z0.clone();
+        let (_, w0) = solve_rounds_memo(&g, &mut base, &outlet, &p, 4, &1usize, 3, &dr, tile, &mut cache);
+        // A bridge of land across the strait: 3 cells wide, 25 m above the sea.
+        let mut bridged = z0.clone();
+        for i in 28..44 {
+            for j in 35..38 {
+                bridged[j * N + i] = 25.0;
+            }
+        }
+        let outlet2 = g.outlets(&bridged, 0.0);
+        let mut joined = bridged.clone();
+        let (_, w1) = solve_rounds_memo(&g, &mut joined, &outlet2, &p, 4, &1usize, 3, &dr, tile, &mut cache);
+        let mut fresh_joined = bridged.clone();
+        solve_rounds_with(&g, &mut fresh_joined, &outlet2, &p, 4, &1usize, 3, &dr);
+        assert_eq!(bits(&joined), bits(&fresh_joined), "G-EQ with the bridge ({name})");
+        assert!(w1.iter().map(|w| w.carved).sum::<usize>() > 0);
+        // The bridge taken away: the first result, with no work at all.
+        let mut back = z0.clone();
+        let (_, w2) = solve_rounds_memo(&g, &mut back, &outlet, &p, 4, &1usize, 3, &dr, tile, &mut cache);
+        assert_eq!(bits(&back), bits(&base), "separating them gives the first result bit for bit ({name})");
+        assert!(w2.iter().all(|w| w.carved == 0 && w.tile_floods == 0), "the memo answers all of it ({name}): {w2:?}");
+        assert!(w0.iter().all(|w| w.carved > 0));
+        // The complete result: H1 on the memoised partitioned routing equals H1 on the resident routing, before and after.
+        for (surface, flags) in [(&base, &outlet), (&joined, &outlet2)] {
+            let resident = route_rules(&g, surface, flags, EPS, 3, 0.0, Some(&f.runoff), RoundRules::ROUND);
+            let filled = priority_flood_with(&g, surface, flags, EPS, true);
+            let part = partitioned_route_weighted(&g, surface, flags, EPS, 3, tile, RoundRules::ROUND, Some(&f.runoff), &mut cache.part);
+            let evap = vec![2.0e-9f32; N * N];
+            let a = hydrology_with(&g, surface, &filled, &resident, flags, Some(&f.runoff), Some(&evap), None, &HydroParams::default());
+            let b = hydrology_with(
+                &g,
+                surface,
+                &part.filled,
+                &part.routing,
+                flags,
+                Some(&f.runoff),
+                Some(&evap),
+                None,
+                &HydroParams::default(),
+            );
+            assert!(same_hydro(&a, &b), "the complete H1 result is the same from the partitioned and the resident routing ({name})");
+        }
+    }
+}

@@ -185,7 +185,7 @@ fn h1(grid: &Grid, z: &[f64], outlet: &[bool], spec: &FaceSpec, inputs: &BakeInp
                     let ro = runoff_mm(pm, tc);
                     wc[c] = discharge_weight(ro) as f32;
                     rc[c] = (ro / 1000.0 / SECONDS_PER_YEAR) as f32;
-                    ec[c] = ((pet_mm(tc) - pm).max(0.0) / 1000.0 / SECONDS_PER_YEAR) as f32;
+                    ec[c] = ((pet_mm(tc) - (pm - ro)).max(0.0) / 1000.0 / SECONDS_PER_YEAR) as f32;
                 }
             });
         }

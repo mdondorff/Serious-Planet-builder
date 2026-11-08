@@ -50,11 +50,12 @@ fn derive(w: &World) -> Derived {
         let ro = runoff_mm(pm, tc);
         weight[p] = discharge_weight(ro) as f32;
         runoff[p] = (ro / 1000.0 / SECONDS_PER_YEAR) as f32;
-        evap[p] = ((pet_mm(tc) - pm).max(0.0) / 1000.0 / SECONDS_PER_YEAR) as f32;
+        evap[p] = ((pet_mm(tc) - (pm - ro)).max(0.0) / 1000.0 / SECONDS_PER_YEAR) as f32;
     }
     Derived { weight, runoff, evap }
 }
 
+#[derive(Clone, Copy)]
 struct Ctx<'a> {
     grid: &'a Grid,
     outlet: &'a [bool],
@@ -154,6 +155,38 @@ fn gates(c: &Ctx, w: &World, d: &Derived, solved: &[f64]) -> (Hydro, Routing) {
     let dr = got.routing.receiver.iter().zip(&want.receiver).filter(|(a, b)| a != b).count();
     let da = got.routing.area.iter().zip(&want.area).filter(|(a, b)| a.to_bits() != b.to_bits()).count();
     let (hy, routing, v) = h1(c, w, d, solved);
+    // G-EQ on the complete result: H1 from the partitioned route of the solved surface against H1 from the resident one.
+    let part = partitioned_route_weighted(
+        c.grid,
+        solved,
+        c.outlet,
+        1e-3,
+        c.stream,
+        c.tile,
+        RoundRules::ROUND,
+        Some(&d.weight),
+        &mut PartCache::default(),
+    );
+    let hp = hydrology_with(
+        c.grid,
+        solved,
+        &part.filled,
+        &part.routing,
+        c.outlet,
+        Some(&d.runoff),
+        Some(&d.evap),
+        Some(&w.flags),
+        &HydroParams::default(),
+    );
+    let bits = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+    let whole = usize::from(bits(&hp.q) != bits(&hy.q))
+        + usize::from(bits(&hp.qw) != bits(&hy.qw))
+        + usize::from(hp.channel != hy.channel)
+        + usize::from(hp.segments != hy.segments)
+        + usize::from(hp.basins != hy.basins)
+        + usize::from(hp.label != hy.label);
+    println!("  G-EQ whole result (rounds above; H1 channels, Q, Q_w, segments, basins and levels from the partitioned route): {whole} of 6 parts differ");
+    println!("  Q_w closure {:.1e}, Q_w at confluences {:.1e}", v.qw_closure_error, v.qw_confluence_error);
     println!(
         "  G-PART {dr} receivers, {da} A_d differ; G-CON {} disconnected, {} broken, {} miscovered; Q confluences {:.1e}, outlets {:.1e}; A_d outlets {:.1e}; channel cells {} ({} heads), basins {}",
         v.disconnected_segments, v.broken_channel_cells, v.miscovered_cells, v.max_confluence_error, v.q_outlets_error, v.area_outlets_error, hy.stats.channel_cells, hy.stats.heads, hy.stats.basins
@@ -170,12 +203,16 @@ fn run_edit(
     base_work: &[RoundWork],
     cache: &mut RoundCache,
     edited: &World,
+    edited_outlet: &[bool],
 ) -> (Vec<f64>, Hydro, Routing) {
+    let base_outlet = c.outlet;
+    let ce = Ctx { outlet: edited_outlet, ..*c };
+    let c = &ce;
     let t = Instant::now();
     // The base definition through the cache again, so that the change counts read against it.
     let d0 = derive(base_w);
     let mut z = base_w.z.clone();
-    solve_rounds_memo(c.grid, &mut z, c.outlet, c.p, 4, &c.threads, c.stream, &drivers(base_w, &d0), c.tile, cache);
+    solve_rounds_memo(c.grid, &mut z, base_outlet, c.p, 4, &c.threads, c.stream, &drivers(base_w, &d0), c.tile, cache);
     let d = derive(edited);
     let mut z = edited.z.clone();
     let (_, work) = solve_rounds_memo(c.grid, &mut z, c.outlet, c.p, 4, &c.threads, c.stream, &drivers(edited, &d), c.tile, cache);
@@ -318,7 +355,7 @@ fn main() {
     if run("E1") {
         let mut e1 = base.clone();
         raise_block(&c, &mut e1.z, (8612, 8675, 780, 843), 1000.0, 8.0);
-        run_edit(&c, "E1 raise a range by 1,000 m", &base, &z_base, &work_base, &mut cache, &e1);
+        run_edit(&c, "E1 raise a range by 1,000 m", &base, &z_base, &work_base, &mut cache, &e1, c.outlet);
         named("E1", &e1);
     }
     // ---- E2: move a divide
@@ -329,7 +366,7 @@ fn main() {
                 e2.z[c.at(i, j)] -= 100.0;
             }
         }
-        run_edit(&c, "E2a lower the pass by 100 m", &base, &z_base, &work_base, &mut cache, &e2);
+        run_edit(&c, "E2a lower the pass by 100 m", &base, &z_base, &work_base, &mut cache, &e2, c.outlet);
         named("E2a", &e2);
         let mut e2 = base.clone();
         let (x0, y0, x1, y1) = (8048i64, 1192i64, 8148i64, 1264i64);
@@ -341,7 +378,7 @@ fn main() {
                 }
             }
         }
-        run_edit(&c, "E2b raise a ridge line by 200 m", &base, &z_base, &work_base, &mut cache, &e2);
+        run_edit(&c, "E2b raise a ridge line by 200 m", &base, &z_base, &work_base, &mut cache, &e2, c.outlet);
         named("E2b", &e2);
     }
     // ---- E3: basins (on the surfaces of the world, before erosion)
@@ -373,7 +410,7 @@ fn main() {
                     ),
                     None => println!("  A is no longer a basin (the cut drained it)"),
                 }
-                run_edit(&c, "E3a (rounds)", &base, &z_base, &work_base, &mut cache, &e3a);
+                run_edit(&c, "E3a (rounds)", &base, &z_base, &work_base, &mut cache, &e3a, c.outlet);
                 named("E3a", &e3a);
                 // E3b: a trench joins A and B.
                 let mut e3b = base.clone();
@@ -409,7 +446,7 @@ fn main() {
                     }
                     None => println!("  the trench left no basin at A's floor"),
                 }
-                run_edit(&c, "E3b (rounds)", &base, &z_base, &work_base, &mut cache, &e3b);
+                run_edit(&c, "E3b (rounds)", &base, &z_base, &work_base, &mut cache, &e3b, c.outlet);
                 named("E3b", &e3b);
                 // E3c: the reverse of a merge: a ridge across basin A, above its spill level, splits it. The part with the old floor keeps the id; the other part is new.
                 let mut e3c = base.clone();
@@ -443,7 +480,7 @@ fn main() {
                         news.iter().take(4).map(|(id, c)| format!("{id:016x} ({c} cells)")).collect::<Vec<_>>()
                     );
                 }
-                run_edit(&c, "E3c (rounds)", &base, &z_base, &work_base, &mut cache, &e3c);
+                run_edit(&c, "E3c (rounds)", &base, &z_base, &work_base, &mut cache, &e3c, c.outlet);
                 named("E3c", &e3c);
             }
             (a, b) => println!("E3: the fixture basins are not both present at this grid (A {a:?}, B {b:?}); skipped"),
@@ -481,7 +518,7 @@ fn main() {
         );
         let mut e4 = base.clone();
         raise_block(&c, &mut e4.z, (ui - 30, ui + 30, uj - 30, uj + 30), 500.0, 8.0);
-        let (_, hy4, r4) = run_edit(&c, "E4a raise a 50 km block upstream by 500 m", &base, &z_base, &work_base, &mut cache, &e4);
+        let (_, hy4, r4) = run_edit(&c, "E4a raise a 50 km block upstream by 500 m", &base, &z_base, &work_base, &mut cache, &e4, c.outlet);
         let m4 = outlet_of(&r4, trunk);
         println!(
             "  Q at the trunk cell {:.0} -> {:.0} m3/s; the outlet of the trunk cell ({}, {}) -> ({}, {}); Q there {:.0} -> {:.0} m3/s, A_d {:.0} -> {:.0} km2",
@@ -504,7 +541,8 @@ fn main() {
                 e4b.pm[k] *= 1.5;
             }
         }
-        let (_, hy4b, r4b) = run_edit(&c, "E4b raise the rainfall of the block by 50 %", &base, &z_base, &work_base, &mut cache, &e4b);
+        let (_, hy4b, r4b) =
+            run_edit(&c, "E4b raise the rainfall of the block by 50 %", &base, &z_base, &work_base, &mut cache, &e4b, c.outlet);
         let m4b = outlet_of(&r4b, trunk);
         println!(
             "  Q at the trunk cell {:.0} -> {:.0} m3/s; at the outlet ({}, {}) {:.0} -> {:.0} m3/s",
@@ -525,7 +563,8 @@ fn main() {
                 e5.pm[k] *= 2.0;
             }
         }
-        let (_, hy, _) = run_edit(&c, "E5 double the rainfall of a window (no height change)", &base, &z_base, &work_base, &mut cache, &e5);
+        let (_, hy, _) =
+            run_edit(&c, "E5 double the rainfall of a window (no height change)", &base, &z_base, &work_base, &mut cache, &e5, c.outlet);
         named("E5", &e5);
         println!(
             "  initiation: channel cells {} -> {}, heads {} -> {}, segments {} -> {}",
@@ -537,6 +576,95 @@ fn main() {
             hy.stats.segments
         );
     }
+    // ---- E7: a land bridge between two landmasses, then taken away again
+    if run("E7") {
+        let mut comp = vec![u32::MAX; n];
+        let mut sizes: Vec<(usize, usize)> = Vec::new();
+        for s0 in 0..n {
+            if comp[s0] != u32::MAX || base.z[s0] <= 0.0 {
+                continue;
+            }
+            let id = sizes.len() as u32;
+            let mut stack = vec![s0];
+            comp[s0] = id;
+            let mut size = 0;
+            while let Some(p) = stack.pop() {
+                size += 1;
+                for d in 0..8 {
+                    if let Some(q) = grid.neighbour(p, d) {
+                        if comp[q] == u32::MAX && base.z[q] > 0.0 {
+                            comp[q] = id;
+                            stack.push(q);
+                        }
+                    }
+                }
+            }
+            sizes.push((size, s0));
+        }
+        let mut by_size: Vec<usize> = (0..sizes.len()).collect();
+        by_size.sort_by_key(|&k| std::cmp::Reverse(sizes[k].0));
+        let big = by_size[0] as u32;
+        match by_size.iter().skip(1).find(|&&k| sizes[k].0 >= 300) {
+            None => println!("E7: no second landmass of 300 cells in this window; skipped"),
+            Some(&k) => {
+                let target = k as u32;
+                // The shortest crossing from the large landmass to the other one, through the sea.
+                let mut parent = vec![usize::MAX; n];
+                let mut frontier: Vec<usize> = (0..n).filter(|&p| comp[p] == big).collect();
+                let mut seen = vec![false; n];
+                frontier.iter().for_each(|&p| seen[p] = true);
+                let mut hit = None;
+                'bfs: while !frontier.is_empty() {
+                    let mut next = Vec::new();
+                    for &p in &frontier {
+                        for d in 0..8 {
+                            if let Some(q) = grid.neighbour(p, d) {
+                                if !seen[q] {
+                                    seen[q] = true;
+                                    parent[q] = p;
+                                    if comp[q] == target {
+                                        hit = Some(q);
+                                        break 'bfs;
+                                    }
+                                    next.push(q);
+                                }
+                            }
+                        }
+                    }
+                    frontier = next;
+                }
+                let mut e7 = base.clone();
+                let mut bridge = 0;
+                let mut p = hit.expect("the second landmass is reachable");
+                while comp[p] != big {
+                    if base.z[p] <= 0.0 {
+                        bridge += 1;
+                        for d in 0..4 {
+                            if let Some(q) = grid.neighbour(p, d) {
+                                if e7.z[q] <= 0.0 {
+                                    e7.z[q] = 25.0;
+                                }
+                            }
+                        }
+                        e7.z[p] = 25.0;
+                    }
+                    p = parent[p];
+                }
+                let (i, j) = c.cell_of(sizes[k].1);
+                println!(
+                    "E7 the second landmass ({} cells, near ({i}, {j})) and the large one ({} cells): a bridge of {bridge} sea cells, 3 wide, raised to 25 m",
+                    sizes[k].0, sizes[big as usize].0
+                );
+                let outlet2 = grid.outlets(&e7.z, 0.0);
+                let (_, hy7, _) = run_edit(&c, "E7a join the landmasses", &base, &z_base, &work_base, &mut cache, &e7, &outlet2);
+                println!(
+                    "  channel cells {} -> {}, basins {} -> {}",
+                    hy_base.stats.channel_cells, hy7.stats.channel_cells, hy_base.stats.basins, hy7.stats.basins
+                );
+                let _ = run_edit(&c, "E7b take the bridge away again", &base, &z_base, &work_base, &mut cache, &base, c.outlet);
+            }
+        }
+    }
     // ---- E6: rock and uplift
     if run("E6") {
         let mut e6 = base.clone();
@@ -546,7 +674,7 @@ fn main() {
                 e6.k[k] *= 0.29 / 0.1;
             }
         }
-        run_edit(&c, "E6a a softer lithology (hardness 0.29 -> 0.1) over a block", &base, &z_base, &work_base, &mut cache, &e6);
+        run_edit(&c, "E6a a softer lithology (hardness 0.29 -> 0.1) over a block", &base, &z_base, &work_base, &mut cache, &e6, c.outlet);
         let mut e6 = base.clone();
         for j in 840..=967 {
             for i in 8544..=8671 {
@@ -554,6 +682,6 @@ fn main() {
                 e6.up[k] *= 2.0;
             }
         }
-        run_edit(&c, "E6b uplift x 2 over a block", &base, &z_base, &work_base, &mut cache, &e6);
+        run_edit(&c, "E6b uplift x 2 over a block", &base, &z_base, &work_base, &mut cache, &e6, c.outlet);
     }
 }
