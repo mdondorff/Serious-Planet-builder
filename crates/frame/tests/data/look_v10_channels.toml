@@ -1,0 +1,13 @@
+# A hand-written look file, schema version 10 (the version that added the `fill_depth` and `erosion_depth` curves of every material of the `ground` table, GEN-126): comments, key order and spacing never matter.
+# Body 1 gives wet ground a curve on the fill depth and rock one on the erosion depth; every key it leaves out is the Earth default (the two inputs left out).
+schema_version = 10
+kind = "look"
+
+[body.1.ground]
+detail = 0.6
+
+[body.1.ground.wet]
+fill_depth = [0.2, 1.0]
+
+[body.1.ground.rock]
+erosion_depth = [0.21, 2.0]

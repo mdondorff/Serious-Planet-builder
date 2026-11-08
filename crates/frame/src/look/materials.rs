@@ -22,10 +22,20 @@ pub const MATERIALS: usize = 6;
 /// The names of the material slots, in order.
 pub const MATERIAL_NAMES: [&str; MATERIALS] = ["rock", "sand", "grass", "soil", "scree", "wet"];
 /// The inputs of the weight function.
-pub const INPUTS: usize = 8;
+pub const INPUTS: usize = 10;
 /// The names of the inputs in the order of [`Input`], as the look file and the poses file write them.
-pub const INPUT_NAMES: [&str; INPUTS] =
-    ["slope_cos", "height", "temperature", "precipitation", "surface_type", "soil_depth", "moisture", "insolation"];
+pub const INPUT_NAMES: [&str; INPUTS] = [
+    "slope_cos",
+    "height",
+    "temperature",
+    "precipitation",
+    "surface_type",
+    "soil_depth",
+    "moisture",
+    "insolation",
+    "fill_depth",
+    "erosion_depth",
+];
 /// Number of `vec4<f32>` words the curve table occupies: per material, four words of two `(lo, hi)` pairs each.
 pub const MATERIAL_VEC4S: usize = MATERIALS * INPUTS / 2;
 
@@ -48,10 +58,24 @@ pub enum Input {
     Moisture = 6,
     /// Reserved for a driver map: insolation.
     Insolation = 7,
+    /// The depth of the basin fill of the keep-pits bake in metres (the channel block, GEN-126; 0 where there is none).
+    FillDepth = 8,
+    /// The erosion depth of the bake in metres (the channel block, GEN-126; 0 where there is none).
+    ErosionDepth = 9,
 }
 
 /// The inputs of one ground point, in the order of [`Input`].
 pub type MaterialInputs = [f64; INPUTS];
+
+/// The neutral channel inputs, in the order fill depth (m), erosion depth (m): what every tile's channel block holds (GEN-126).
+pub const NEUTRAL_CHANNELS: [f64; 2] = [0.0, 0.0];
+
+/// `inputs` with the two channel slots set to `channels` (fill depth, erosion depth, metres).
+pub fn with_channels(mut inputs: MaterialInputs, channels: [f64; 2]) -> MaterialInputs {
+    inputs[Input::FillDepth as usize] = channels[0];
+    inputs[Input::ErosionDepth as usize] = channels[1];
+    inputs
+}
 
 /// The neutral driver inputs at a latitude, in the order soil depth (m), moisture, insolation: what every tile's driver block holds (GEN-071).
 pub fn neutral_drivers(lat_rad: f64) -> [f64; 3] {

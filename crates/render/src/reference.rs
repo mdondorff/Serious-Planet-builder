@@ -57,6 +57,11 @@ fn tile_drivers(in: VsOut) -> vec3<f32> {
     return vec3<f32>(1.0, 0.5, 0.8);
 }
 
+// ... and no channel block: no fill and no erosion.
+fn tile_channels(in: VsOut) -> vec2<f32> {
+    return vec2<f32>(0.0);
+}
+
 "#;
 
 /// The reference renderer's WGSL module (for the validation and scan tests).

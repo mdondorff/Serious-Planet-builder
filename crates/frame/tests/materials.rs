@@ -52,7 +52,7 @@ fn the_weights_are_monotone_in_the_inputs_an_input_left_out_changes_nothing_and_
     // The reserved inputs read 0 and are left out by the default curves: setting them changes nothing.
     let base = m.weights(&at(0.9, 600.0));
     let mut with_drivers = at(0.9, 600.0);
-    for slot in [Input::SoilDepth, Input::Moisture, Input::Insolation] {
+    for slot in [Input::SoilDepth, Input::Moisture, Input::Insolation, Input::FillDepth, Input::ErosionDepth] {
         with_drivers[slot as usize] = 123.0;
     }
     assert_eq!(m.weights(&with_drivers), base);
@@ -162,7 +162,7 @@ fn the_gloss_enters_the_plans_text_only_when_not_the_default_round_trips_is_refu
     // curve that differs below f32 only.
     let mut bad = [GlossParams::EARTH; 6];
     bad[0].roughness[1] = 0.0;
-    bad[1].modifiers[0][0] = 9.0;
+    bad[1].modifiers[0][0] = 10.0;
     bad[2].modifiers[1][3] = 0.0;
     bad[3].f0 = 1.5;
     bad[4].modifiers[1][1] = 5.0;
@@ -219,7 +219,7 @@ fn the_default_look_gives_the_same_weights_for_any_driver_values() {
     }
     // The default look gives no curve to the three reserved inputs.
     for material in 0..MATERIALS {
-        for slot in [Input::SoilDepth, Input::Moisture, Input::Insolation] {
+        for slot in [Input::SoilDepth, Input::Moisture, Input::Insolation, Input::FillDepth, Input::ErosionDepth] {
             let [lo, hi] = m.curves[material][slot as usize];
             assert_eq!(lo, hi, "material {material} has a curve on {slot:?}");
         }
@@ -243,7 +243,7 @@ fn a_look_with_a_curve_on_the_moisture_gives_soil_to_the_wet_hollow_and_not_to_t
 #[test]
 fn the_six_weights_sum_to_one_with_a_new_slot_on_and_the_words_lay_the_new_slots_where_the_shader_reads_them() {
     use planet_frame::look::materials::{DetailCoefficients, GlossParams, COEF_VEC4S, GLOSS_VEC4S, MATERIAL_VEC4S};
-    assert_eq!((MATERIALS, MATERIAL_VEC4S, GLOSS_VEC4S, COEF_VEC4S), (6, 24, 4, 25));
+    assert_eq!((MATERIALS, MATERIAL_VEC4S, GLOSS_VEC4S, COEF_VEC4S), (6, 30, 4, 25));
     let mut m = MaterialParams::EARTH;
     assert!(!m.is_on(4) && !m.is_on(5));
     let before = m.weights(&at(0.7, 500.0));

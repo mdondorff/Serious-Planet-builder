@@ -815,3 +815,99 @@ fn the_patch_break_up_is_inert_when_off_and_moves_the_material_boundary_when_on(
         "the patch acts with the detail off"
     );
 }
+
+/// A pool whose every tile of `p` holds the channel block `words`.
+fn channel_renderer(ctx: &GpuContext, p: &TerrainPlan, words: Option<[u32; planet_generators::drivers::DRIVER_TEXELS]>) -> TerrainRenderer {
+    let mut r = TerrainRenderer::with_pools(ctx, SIZE, CELLS, compact_pool());
+    r.enable_lit(ctx);
+    for n in &p.nodes {
+        if r.slot_of(n.tile).is_none() {
+            let mut tile = compact_tile_field(&Reference(1), &TangentWarp, n.tile, CELLS, R);
+            if let Some(w) = words {
+                tile.channel_words = w;
+            }
+            r.upload_tile(ctx, &tile).unwrap();
+        }
+    }
+    r
+}
+
+// spec: GEN-126, CON-18
+#[test]
+fn the_channel_views_show_the_fill_and_erosion_depth_of_the_tiles_channel_block() {
+    use planet_frame::look::shading::channel_view_colour;
+    use planet_generators::drivers::{decode_depth, pack_channel_word, DRIVER_TEXELS};
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let (p, _) = plan(3);
+    // Every texel holds fill code 120 and erosion code 40.
+    let codes = [120u8, 40];
+    let mut r = channel_renderer(&ctx, &p, Some([pack_channel_word(codes[0], codes[1]); DRIVER_TEXELS]));
+    let (fill, erosion) = (decode_depth(codes[0]), decode_depth(codes[1]));
+    for view in [ShadeView::FillDepth, ShadeView::ErosionDepth] {
+        let hdr = hdr_of(&mut r, &ctx, &p, view_plan(view));
+        let want = channel_view_colour(view, fill, erosion);
+        let (mut n, mut worst) = (0usize, 0.0f64);
+        for px in hdr.iter().filter(|px| px[3] > 0.0) {
+            let got = colour_of(px);
+            worst = worst.max((0..3).map(|c| (got[c] - want[c]).abs()).fold(0.0, f64::max));
+            n += 1;
+        }
+        assert!(n > 300, "{view:?}: the planet covers {n} pixels");
+        assert!(worst < 0.003, "{view:?}: the colour is {worst} off the CPU's {want:?}");
+    }
+    // A neutral block shows no fill and no erosion, and the two views differ from each other.
+    let mut neutral = channel_renderer(&ctx, &p, None);
+    let a = hdr_of(&mut neutral, &ctx, &p, view_plan(ShadeView::FillDepth));
+    let b = hdr_of(&mut r, &ctx, &p, view_plan(ShadeView::FillDepth));
+    assert_ne!(a, b);
+    let want = channel_view_colour(ShadeView::FillDepth, 0.0, 0.0);
+    let got = colour_of(a.iter().find(|px| px[3] > 0.0).unwrap());
+    assert!((0..3).all(|c| (got[c] - want[c]).abs() < 0.003), "neutral: {got:?} against {want:?}");
+}
+
+// spec: GEN-126, GEN-073
+#[test]
+fn the_default_look_draws_the_same_pixels_whatever_the_channel_block_holds_and_a_curve_on_the_fill_depth_moves_the_picture() {
+    use planet_frame::look::materials::{Input, MaterialParams, INPUTS, MATERIALS};
+    use planet_generators::drivers::{pack_channel_word, DRIVER_TEXELS};
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let uniform = [pack_channel_word(200, 120); DRIVER_TEXELS];
+    let mut ramp = [0u32; DRIVER_TEXELS];
+    for b in 0..9 {
+        for a in 0..9 {
+            ramp[b * 9 + a] = pack_channel_word((a * 28) as u8, (b * 28) as u8);
+        }
+    }
+    let bits = |img: Vec<[f32; 4]>| -> Vec<[u32; 4]> { img.iter().map(|px| px.map(f32::to_bits)).collect() };
+    for (index, strength) in [(3usize, 0.0), (6, 1.0)] {
+        let (p, _) = plan(index);
+        let draw = |words| {
+            let mut r = channel_renderer(&ctx, &p, words);
+            [ShadeView::Lit, ShadeView::Albedo].map(|v| bits(hdr_of(&mut r, &ctx, &p, detail_plan(v, strength))))
+        };
+        let neutral = draw(None);
+        for (name, words) in [("uniform", uniform), ("ramp", ramp)] {
+            assert!(
+                draw(Some(words)) == neutral,
+                "view {index}, detail {strength}: the {name} channel block changed the default look's pixels"
+            );
+        }
+    }
+    // A look that makes wet ground the only material where the fill is deep (and rock elsewhere) draws differently over a deep-fill block than over a neutral one.
+    let (p, _) = plan(6);
+    let mut curves = [[[0.0, 0.0]; INPUTS]; MATERIALS];
+    curves[0][Input::FillDepth as usize] = [30.0, 0.0];
+    curves[5][Input::FillDepth as usize] = [0.0, 30.0];
+    let mut look = detail_plan(ShadeView::Lit, 1.0);
+    look.materials = MaterialParams { curves };
+    let deep = [pack_channel_word(255, 0); DRIVER_TEXELS];
+    let (mut a, mut b) = (channel_renderer(&ctx, &p, None), channel_renderer(&ctx, &p, Some(deep)));
+    let (shallow_img, deep_img) = (hdr_of(&mut a, &ctx, &p, look), hdr_of(&mut b, &ctx, &p, look));
+    let covered = shallow_img.iter().filter(|px| px[3] > 0.0).count();
+    let apart = shallow_img
+        .iter()
+        .zip(&deep_img)
+        .filter(|(x, y)| x[3] > 0.0 && (luminance(x) - luminance(y)).abs() > 0.02 * luminance(x).max(1e-6))
+        .count();
+    assert!(apart * 5 > covered, "a deep fill changed {apart} of {covered} pixels only");
+}

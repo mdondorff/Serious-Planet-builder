@@ -401,10 +401,14 @@ pub enum ShadeView {
     Moisture,
     /// The annual-mean insolation of the driver block in false colour (0 to 1).
     Insolation,
+    /// The fill depth of the channel block in false colour (0 to 64 m, square-root scale; GEN-126).
+    FillDepth,
+    /// The erosion depth of the channel block in false colour (0 to 64 m, square-root scale; GEN-126).
+    ErosionDepth,
 }
 
 impl ShadeView {
-    pub const ALL: [ShadeView; 9] = [
+    pub const ALL: [ShadeView; 11] = [
         ShadeView::Lit,
         ShadeView::Albedo,
         ShadeView::Lighting,
@@ -414,6 +418,8 @@ impl ShadeView {
         ShadeView::SoilDepth,
         ShadeView::Moisture,
         ShadeView::Insolation,
+        ShadeView::FillDepth,
+        ShadeView::ErosionDepth,
     ];
 
     pub fn name(self) -> &'static str {
@@ -427,6 +433,8 @@ impl ShadeView {
             ShadeView::SoilDepth => "soil",
             ShadeView::Moisture => "moisture",
             ShadeView::Insolation => "insolation",
+            ShadeView::FillDepth => "fill",
+            ShadeView::ErosionDepth => "erosion",
         }
     }
 
@@ -470,6 +478,16 @@ pub fn driver_view_colour(view: ShadeView, soil_depth_m: f64, moisture: f64, ins
         ShadeView::SoilDepth => mix3([0.85, 0.80, 0.70], [0.25, 0.15, 0.08], libm::sqrt((soil_depth_m / 8.0).clamp(0.0, 1.0))),
         ShadeView::Moisture => mix3([0.95, 0.90, 0.75], [0.05, 0.20, 0.60], moisture.clamp(0.0, 1.0)),
         ShadeView::Insolation => mix3([0.10, 0.10, 0.35], [1.00, 0.90, 0.40], insolation.clamp(0.0, 1.0)),
+        _ => [0.0; 3],
+    }
+}
+
+/// The false colour of a channel value (the debug views of GEN-126, CON-18): the fill depth (0 to 64 m, square-root scale) from pale sand to deep teal, the erosion depth from pale sand to
+/// dark red; written as the radiance of a surface facing the sun (`/ pi`).
+pub fn channel_view_colour(view: ShadeView, fill_m: f64, erosion_m: f64) -> [f64; 3] {
+    match view {
+        ShadeView::FillDepth => mix3([0.90, 0.88, 0.80], [0.05, 0.35, 0.45], libm::sqrt((fill_m / 64.0).clamp(0.0, 1.0))),
+        ShadeView::ErosionDepth => mix3([0.90, 0.88, 0.80], [0.45, 0.10, 0.05], libm::sqrt((erosion_m / 64.0).clamp(0.0, 1.0))),
         _ => [0.0; 3],
     }
 }
@@ -523,6 +541,8 @@ pub fn terrain_radiance_with_ramp(
         ShadeView::Shadow => [1.0 / pi; 3],
         // The driver views read the tile's driver block; this reference has none, so it shows the neutral drivers (soil 1 m, moisture 0.5, insolation 0.8).
         ShadeView::SoilDepth | ShadeView::Moisture | ShadeView::Insolation => driver_view_colour(view, 1.0, 0.5, 0.8).map(|c| c / pi),
+        // ... and the channel views the neutral channels (no fill, no erosion).
+        ShadeView::FillDepth | ShadeView::ErosionDepth => channel_view_colour(view, 0.0, 0.0).map(|c| c / pi),
     }
 }
 
