@@ -9,6 +9,8 @@
 //!
 //! The arrays are resident (this change gates the equality, not the memory); the tiles bound what each step touches.
 
+#![allow(clippy::needless_range_loop)]
+
 use super::route::{catchment_roots, receiver_of, topological_order, MfdClip, RoundRules, Routing, MFD_EXPONENT, NONE};
 use super::{assert_finite, Grid};
 use std::cmp::Reverse;
@@ -44,7 +46,15 @@ pub struct PartRoute {
 #[derive(Default)]
 pub struct PartCache {
     floods: HashMap<(u64, u64), Arc<Vec<f64>>>,
-    previous: Option<(usize, Vec<f64>, Vec<u32>, Vec<f64>)>,
+    previous: Option<Previous>,
+}
+
+/// The last result of a cache: the tile size, the filled surface, the receivers and the area.
+struct Previous {
+    tile: usize,
+    filled: Vec<f64>,
+    receiver: Vec<u32>,
+    area: Vec<f64>,
 }
 
 #[derive(Clone, Copy)]
@@ -361,7 +371,7 @@ pub fn partitioned_route(
     }
 
     // ---- what changed against the previous call
-    if let Some((tl, pf, pr, pa)) = &cache.previous {
+    if let Some(Previous { tile: tl, filled: pf, receiver: pr, area: pa }) = &cache.previous {
         if *tl == tile {
             for r in &tiles {
                 let (mut f, mut rc, mut ar) = (false, false, false);
@@ -379,6 +389,6 @@ pub fn partitioned_route(
             }
         }
     }
-    cache.previous = Some((tile, filled.clone(), receiver.clone(), area.clone()));
+    cache.previous = Some(Previous { tile, filled: filled.clone(), receiver: receiver.clone(), area: area.clone() });
     PartRoute { routing: Routing { receiver, order, area }, filled, stats }
 }
