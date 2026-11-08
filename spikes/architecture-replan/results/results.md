@@ -536,3 +536,96 @@ Method:
 | Rivers in the store (§6.6) | 0.5-2 GB | 0.8-1.1 GB at a 50-100 km^2 threshold, vertices at 814 m |
 | Domain equality (§5.1 A8 risk, §7.2 Q2) | open | a domain carve is not a window carve. Domains must be the definition; divide steps at domain borders and an outer iteration are new prototype criteria |
 | H0 across cube edges (§6.2) | implied | required: about 30 % of large catchments reach a face edge |
+
+## 9. Recommendation
+
+**Option A, prototype first: evolve the application towards the target T1-T5, with the vertical prototype built as A's own steps on one region before they go planet-wide; no requirement cut is needed.**
+
+Reasons:
+1. The checks remove B's main argument. The kernels already run on a watershed domain at about 1 s for 500 km (F2). A coarse planet routing costs seconds (F1). A river network fits the store at about 1 GB (F3). Today's code can carry the new structure; what is missing is the structure, not the machinery.
+2. A keeps about 90 % of main unchanged and ships visible results within weeks (T1 and the noise fix in week 1). B shows nothing new for 4-6 weeks.
+3. A's patchwork risk is the one that matters (§5.1). A3 retires it: the target document and its ADRs are written and accepted **before** any step that amends the stage model (A7-A10). Each later step is checked against the target, not against the previous patch.
+4. The decision stays reversible. If the prototype fails Q1 or Q5 (§7.2), its code becomes B's v0.
+5. No requirement cut is needed. C-f (pass 2 at 200 m) stays an option if the store goes over budget; C-e is not recommended (§9.1, D7).
+
+### 9.1 Owner decisions
+
+**D1. Route: A, B or cuts**
+- Context: §4-§5; the checks in §8.
+- Options:
+  - a. A, prototype first: about 68-113 lane-days, visible results from week 1.
+  - b. B, a new core beside the old: about 92-149 lane-days, first result after 4-6 weeks, lowest patchwork risk.
+  - c. Today's design with cuts C-a + C-b: about 35-55 lane-days saved, but R1a's purpose is not met.
+- Trade-off: A is fastest to visible results and keeps the tuning; B is the cleanest design; c is the cheapest and misses a firm requirement.
+- **Recommendation: a.**
+
+**D2. The M9 planet bake**
+- Context: the bake would freeze a seed-only design with implicit hydrology (X16); old stores need not stay compatible.
+- Options:
+  - a. Delay the bake until the prototype passes and A4 has gone planet-wide (about early December, estimate).
+  - b. Bake now on today's design with SPIKE-104's fixes as a stopgap, and re-bake later.
+  - c. Bake now unchanged.
+- Trade-off: b gives a look at the whole planet sooner, at the cost of about one day of compute plus tuning rounds spent on a representation that A replaces; c also carries the 13 % pit share.
+- **Recommendation: a.** The M9.1 gate is redefined as the prototype's §7.3 criteria plus T1 planet-wide.
+
+**D3. Watershed domains become the erosion unit and the definition**
+- Context: F2. A domain carve differs from a window carve (rms about 5 m, max about 430 m) because divides move. Equality between an edit's re-solve and a from-scratch build therefore needs the domains to be the authoritative unit for every build.
+- Options:
+  - a. Domains from H0 as the unit, with a fixed outer iteration (H0 -> domains -> carve, 2-3 rounds).
+  - b. Keep the cube face as the unit for the first build and use domains only for edits; then a re-solve differs from a fresh build (X5 broken).
+  - c. Overlapping domains with blended results.
+- Trade-off: a gives equality and edit locality, but its results differ from today's face carve and divides are frozen per round. b breaks determinism of edited worlds. c gives approximate equality and seams.
+- **Recommendation: a.** The prototype measures the divide steps and the round count.
+
+**D4. Which edits sit below erosion**
+- Context: X1. Today every item sits above the base and the erosion.
+- Options:
+  - a. Height edits (sculpt, raise, lower, stamps meant as landforms) and driver edits (lithology, uplift, climate, class paint) go below erosion. Constructed features (roads, plots, flattened sites, objects) stay above, as ADR 0089 point 11's final override stage.
+  - b. All height items go below erosion.
+  - c. Only driver edits go below.
+- Trade-off: a matches R1a and keeps built features exact; b erodes roads and plots; c leaves sculpting without erosion.
+- **Recommendation: a.**
+
+**D5. Rivers as persistent objects**
+- Context: R4a, R4d; F3.
+- Options:
+  - a. Persistent river segments above a runoff-weighted threshold of 50-100 km^2, vertices on the 814 m graph (0.8-1.1 GB), finer channels derived at runtime.
+  - b. Rivers derived at runtime only (C-d).
+  - c. Persistent at 10 km^2 (about 2.4 GB).
+- Trade-off: a gives stable ids for gameplay and later authoring within budget; b is cheaper but leaves no stable rivers; c costs store room.
+- **Recommendation: a.**
+
+**D6. Store room (R7)**
+- Context: §6.6; about 23-35 GB in the target.
+- Options:
+  - a. Narrow the field bake's channels (ADR 0045 point 4) and keep pass 2 at 102 m.
+  - b. Pass 2 at about 200 m (C-f).
+  - c. Both.
+- Trade-off: a costs a spike and a re-bake of the field; b loses 100-200 m detail from the bake.
+- **Recommendation: a.** b only if the prototype's extrapolation exceeds 35 GB.
+
+**D7. Scale in the MVP**
+- Context: R5a; X11, X12.
+- Options:
+  - a. Per-body cell sizes and the lifted Earth preset as part of A (A11), with one 2x-radius run of H0 in the prototype.
+  - b. Earth-only for the MVP (C-e).
+- Trade-off: a costs 6-10 lane-days and keeps scale honest while the design is being set; b saves them and lets Earth assumptions harden.
+- **Recommendation: a.**
+
+**D8. Owner attention (R8)**
+- Context: X15.
+- Options:
+  - a. The planner judges the prototype and each A step against numeric criteria (§7.3 and the step gates). The owner decides D1-D7 once, then sees the prototype's stills and flight at the end (one review) and blesses only first-of-class goldens (ADR 0017).
+  - b. Owner reviews at every step.
+- Trade-off: a is quicker and keeps the owner's time for real decisions; b gives tighter control.
+- **Recommendation: a.**
+
+### 9.2 The first two weeks (if D1-D8 go as recommended)
+
+| Week | Explorer | Crusader | Spikes |
+|---|---|---|---|
+| 1 | A1: pass-2 breach and pass 2 on the store lattice (SPIKE-104 D-A, D-B), gated by SPIKE-104's probe numbers on 3 tiles; then H0 v0: planet-wide routing at about 3 km on the stored field bake, faces joined by the spill graph's edges | A2: turned-lattice noise for the bands and creases, re-tuned on the scorecard's band numbers; #1137 (C1 default) merged | region search for the prototype (§7.1) and the cube-edge window; the validation suite as fixtures (review P11) with connectivity measures (unintended sinks, disconnected segments, area conservation); then A3 with the planner: target document and ADR drafts (hydrology representation, layer order, domains, reach, preview levels) |
+| 2 | prototype K4-K5: watershed domains from H0, domain carve with outer iteration, divide-step measure; K6 v0: basins from the spill graph, river segments at 50-100 km^2 | prototype K8 and K11: channel geometry term in the runtime field from segments (synthetic first), the lake on the water field (ADR 0041 point 7), a budget line for river drawing | measure §7.3 as pieces land (surface identity, connectivity, relief, store); D3's divide experiment (rounds 1-3); A11 groundwork: SPIKE-103's lifts that the prototype touches |
+
+- Owner attention in these two weeks: the D1-D8 decisions once, ADR acceptance for A3 (architecture ADRs stay with the owner), and nothing else unless a gate fails. Everything else runs on numeric gates judged by the planner.
+- After week 2: weeks 3-4 finish the prototype (the edit and its propagation, undo, latency, determinism), then the owner's one review, then A4-A10 planet-wide (§5.1).
