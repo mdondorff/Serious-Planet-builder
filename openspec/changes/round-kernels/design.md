@@ -8,6 +8,8 @@
 4. G-ROUND is `Schedule::Catchments`: the breach and the sweeps visit the cells grouped by catchment (stable within the region order), catchments ascending or descending by outlet id. Bit-equal to `Schedule::Region` on smooth and terraced lands, under today's rules and the round rules (tests). This is the exactness of F7 on the new kernels; threads are step 2.
 5. G-LOCAL is the round as a pure function of its key inputs. A catchment routed alone does not equal its part of the region on flats, for the measured flood rules (below); routing locality is G-PART.
 
+6. Memory, not measured at face scale: with the clip on, the filled surface (8 bytes a cell) stays alive until the area is done, and `Schedule::Catchments` holds a grouped order (4 bytes a cell) for the round. Estimated +4 to +8 bytes a cell over today's route peak. The prototype region and the resident round of step 2 measure it; the face bake does not use the rules.
+
 ## Measurements (`examples/round_probe`; four 96 x 96 lands, about 820 catchments over 8 cells)
 A catchment routed alone: the grid masked to its members, its outlet the only outlet, the same jitter; compared with its cells in the region routing.
 | Rules | smooth: areas differ | terraced: areas differ | terraced: receivers differ |

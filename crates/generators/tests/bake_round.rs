@@ -38,6 +38,18 @@ fn the_default_rules_are_todays_kernels() {
     let a = route_weighted(&g, &z, &outlet, 1e-3, 2, 0.0, None);
     let b = route_rules(&g, &z, &outlet, 1e-3, 2, 0.0, None, RoundRules::default());
     assert_eq!(a, b);
+    // A digest of the routing and a 20-step carve of this land, taken on the kernels before GEN-141 (origin/main at 70743083): the default path is bit for bit what it was.
+    let mut d: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut mix = |v: u64| d = (d ^ v).wrapping_mul(0x100_0000_01b3);
+    for p in 0..N * N {
+        mix(u64::from(a.receiver[p]));
+        mix(u64::from(a.order[p]));
+        mix(a.area[p].to_bits());
+    }
+    let mut zz = z.clone();
+    carve(&g, &mut zz, &outlet, &CarveParams { steps: 20, ..CarveParams::default() }, None, 2);
+    zz.iter().for_each(|v| mix(v.to_bits()));
+    assert_eq!(d, 0xbbde_6e85_47d2_338a, "the default kernels moved: digest {d:016x}");
     assert_eq!(priority_flood(&g, &z, &outlet, 1e-3), priority_flood_with(&g, &z, &outlet, 1e-3, false));
     assert!(RoundRules::default().is_default() && !RoundRules::ROUND.is_default());
     assert_eq!(CarveParams::default().schedule, Schedule::Region);
