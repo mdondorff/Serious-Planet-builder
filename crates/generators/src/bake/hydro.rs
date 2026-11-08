@@ -64,6 +64,8 @@ pub enum BasinClass {
     Lake,
     /// No active outlet: a sink for water and sediment.
     Endorheic,
+    /// Named by an item or a driver (A3 section 5.3): kept whatever its size; `Basin::overflows` says whether it has an active outlet.
+    Intentional,
 }
 
 /// A kept basin.
@@ -81,6 +83,8 @@ pub struct Basin {
     /// The discharge reaching the basin.
     pub q_in: f64,
     pub class: BasinClass,
+    /// Whether the steady balance of section 5.5 overflows: the spill point is the active outlet.
+    pub overflows: bool,
     pub water_level_m: f64,
     /// The discharge the downstream channel continues with (zero for an endorheic basin).
     pub q_out: f64,
@@ -107,6 +111,8 @@ pub struct Hydro {
     pub channel: Vec<bool>,
     pub segments: Vec<Segment>,
     pub basins: Vec<Basin>,
+    /// The index in `basins` of the basin each cell belongs to, `NONE` for a cell in none (the continuity map reads it).
+    pub label: Vec<u32>,
     pub stats: HydroStats,
 }
 
@@ -147,6 +153,22 @@ pub fn hydrology(
     outlet: &[bool],
     runoff: Option<&[f32]>,
     net_evap: Option<&[f32]>,
+    params: &HydroParams,
+) -> Hydro {
+    hydrology_with(grid, z, filled, routing, outlet, runoff, net_evap, None, params)
+}
+
+/// [`hydrology`] with the cells of intentional basins (GEN-146): a basin that holds a flagged cell is of class `Intentional` and kept whatever its size and depth.
+#[allow(clippy::too_many_arguments)]
+pub fn hydrology_with(
+    grid: &Grid,
+    z: &[f64],
+    filled: &[f64],
+    routing: &Routing,
+    outlet: &[bool],
+    runoff: Option<&[f32]>,
+    net_evap: Option<&[f32]>,
+    intentional: Option<&[bool]>,
     params: &HydroParams,
 ) -> Hydro {
     let n = grid.len();
@@ -244,6 +266,8 @@ pub fn hydrology(
     let mut seen = vec![false; n];
     let pit = |p: usize| grid.is_active(p) && !outlet[p] && filled[p] - z[p] > params.pit_min_m;
     let mut basins: Vec<Basin> = Vec::new();
+    let mut label = vec![NONE; n];
+    assert!(intentional.is_none_or(|f| f.len() == n), "one intentional flag per cell");
     let mut stack: Vec<u32> = Vec::new();
     let mut members: Vec<u32> = Vec::new();
     for p0 in 0..n {
@@ -309,11 +333,12 @@ pub fn hydrology(
             q_in += q[e];
         }
         let (floor_m, spill_m) = (z[floor], filled[spill].max(z[floor]));
-        if spill_m - floor_m < params.pit_min_m {
+        let named = intentional.is_some_and(|f| members.iter().any(|&c| f[c as usize]));
+        if !named && spill_m - floor_m < params.pit_min_m {
             stats.ramps += 1;
             continue;
         }
-        if (members.len() as u32) < params.min_cells && spill_m - floor_m < params.min_depth_m {
+        if !named && (members.len() as u32) < params.min_cells && spill_m - floor_m < params.min_depth_m {
             stats.artefacts += 1;
             continue;
         }
@@ -352,6 +377,10 @@ pub fn hydrology(
             }
             (BasinClass::Endorheic, level, 0.0)
         };
+        for &c in &members {
+            label[c as usize] = basins.len() as u32;
+        }
+        let overflows = class == BasinClass::Lake;
         basins.push(Basin {
             id: basin_id(params.body, grid.global_id(floor)),
             floor_cell: floor as u32,
@@ -362,13 +391,34 @@ pub fn hydrology(
             area_m2: curve_a,
             volume_m3: curve_v,
             q_in,
-            class,
+            class: if named { BasinClass::Intentional } else { class },
+            overflows,
             water_level_m: level,
             q_out,
         });
     }
     stats.basins = basins.len();
-    Hydro { q, channel, segments, basins, stats }
+    Hydro { q, channel, segments, basins, label, stats }
+}
+
+/// The continuity map of an edit (A3 section 5.4): for each basin of `old`, the basins of `new` that share cells with it, as `(id, shared cells)` by shared cells descending, then id. It is computed at
+/// the commit of an edit and is not an input of any stage. Both results are on the same grid.
+pub fn basin_continuity(old: &Hydro, new: &Hydro) -> Vec<(u64, Vec<(u64, u32)>)> {
+    assert_eq!(old.label.len(), new.label.len(), "both results are on one grid");
+    let mut shared: HashMap<(u32, u32), u32> = HashMap::new();
+    for (a, b) in old.label.iter().zip(&new.label) {
+        if *a != NONE && *b != NONE {
+            *shared.entry((*a, *b)).or_insert(0) += 1;
+        }
+    }
+    let mut out: Vec<(u64, Vec<(u64, u32)>)> = old.basins.iter().map(|b| (b.id, Vec::new())).collect();
+    for ((a, b), c) in shared {
+        out[a as usize].1.push((new.basins[b as usize].id, c));
+    }
+    for (_, v) in &mut out {
+        v.sort_by(|x, y| y.1.cmp(&x.1).then(x.0.cmp(&y.0)));
+    }
+    out
 }
 
 /// The numbers of the gate G-CON and of the conservation check (A3 section 12.1).
