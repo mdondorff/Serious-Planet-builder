@@ -25,6 +25,14 @@ fn terrain(n: usize, salt: u64, terraced: bool) -> Vec<f64> {
 }
 
 fn main() {
+    if std::env::args().any(|a| a == "cost") {
+        cost(3072);
+        return;
+    }
+    if std::env::args().any(|a| a == "b") {
+        probe_b();
+        return;
+    }
     if std::env::args().any(|a| a == "diag") {
         diag();
         return;
@@ -125,5 +133,109 @@ pub fn diag() {
                 }
             }
         }
+    }
+}
+
+/// Probe (b): a cell the flood raised takes its flooder (the lowest-visited lower neighbour) as receiver; the others keep the steepest jittered one. Counts the members of the catchments of this
+/// receiver set whose filled level or receiver differs when the catchment is flooded and routed alone.
+fn flooder_receivers(g: &Grid, z: &[f64], outlet: &[bool], filled: &[f64], base: &[u32]) -> Vec<u32> {
+    let mut rec = base.to_vec();
+    for p in 0..z.len() {
+        if outlet[p] || !g.is_active(p) || filled[p] <= z[p] {
+            continue;
+        }
+        let mut best: Option<(u64, usize)> = None;
+        for d in 0..8 {
+            if let Some(q) = g.neighbour(p, d) {
+                if filled[q] < filled[p] {
+                    let k = (filled[q].to_bits(), q);
+                    if best.is_none_or(|b| k < b) {
+                        best = Some(k);
+                    }
+                }
+            }
+        }
+        rec[p] = best.expect("a raised cell has a lower neighbour").1 as u32;
+    }
+    rec
+}
+
+pub fn probe_b() {
+    use planet_generators::bake::flood::priority_flood_with;
+    let n = 96;
+    let (mut cells, mut bad, mut catch) = (0usize, 0usize, 0usize);
+    for terraced in [false, true] {
+        for salt in 1..=4u64 {
+            let g = Grid::new(n, n, 800.0);
+            let z = terrain(n, salt, terraced);
+            let outlet = g.outlets(&z, 0.0);
+            let r = route_rules(&g, &z, &outlet, 1e-3, salt, 0.0, None, RoundRules::ROUND);
+            let fr = priority_flood_with(&g, &z, &outlet, 1e-3, true);
+            let rec = flooder_receivers(&g, &z, &outlet, &fr, &r.receiver);
+            let mut order: Vec<u32> = (0..(n * n) as u32).collect();
+            // Roots by walking the chain (the receivers are acyclic: a flooder is lower).
+            let root: Vec<u32> = order
+                .drain(..)
+                .map(|mut c| {
+                    while rec[c as usize] != u32::MAX {
+                        c = rec[c as usize];
+                    }
+                    c
+                })
+                .collect();
+            let mut roots = root.clone();
+            roots.sort_unstable();
+            roots.dedup();
+            for &rt in &roots {
+                let active: Vec<bool> = root.iter().map(|&x| x == rt).collect();
+                if active.iter().filter(|&&a| a).count() <= 8 {
+                    continue;
+                }
+                let ga = g.clone().with_active(active.clone());
+                let mut out = vec![false; n * n];
+                out[rt as usize] = true;
+                let a = route_rules(&ga, &z, &out, 1e-3, salt, 0.0, None, RoundRules::ROUND);
+                let fa = priority_flood_with(&ga, &z, &out, 1e-3, true);
+                let reca = flooder_receivers(&ga, &z, &out, &fa, &a.receiver);
+                catch += 1;
+                for p in 0..n * n {
+                    if active[p] {
+                        cells += 1;
+                        bad += usize::from(fa[p] != fr[p] || reca[p] != rec[p]);
+                    }
+                }
+            }
+        }
+    }
+    println!("probe b (flooder receivers on raised cells): catchments {catch} cells {cells} filled or receiver differ {bad}");
+}
+
+/// Flood cost, today's FIFO flats against the canonical heap, on a land and on a land of broad flats (terraces and basins), at `n` cells a side, release build.
+pub fn cost(n: usize) {
+    use planet_generators::bake::flood::priority_flood_with;
+    for (name, terraced) in [("land", false), ("terraced (broad flats)", true)] {
+        let g = Grid::new(n, n, 800.0);
+        let mut z = vec![0.0; n * n];
+        for j in 0..n {
+            for i in 0..n {
+                let (x, y) = (i as f64, j as f64);
+                let edge = (i.min(j).min(n - 1 - i).min(n - 1 - j) as f64 / 40.0).min(1.0);
+                let v =
+                    (350.0 + 500.0 * libm::sin(x * 0.013) * libm::cos(y * 0.011) + 250.0 * libm::sin(0.037 * x + 0.021 * y)) * edge + 2.0;
+                z[j * n + i] = if terraced { libm::floor(v / 120.0) * 120.0 + 2.0 } else { v };
+            }
+        }
+        let outlet = g.outlets(&z, 0.0);
+        let t = std::time::Instant::now();
+        let a = priority_flood_with(&g, &z, &outlet, 1e-3, false);
+        let t_fifo = t.elapsed().as_secs_f64();
+        let t = std::time::Instant::now();
+        let b = priority_flood_with(&g, &z, &outlet, 1e-3, true);
+        let t_canon = t.elapsed().as_secs_f64();
+        let differ = a.iter().zip(&b).filter(|(x, y)| x != y).count();
+        println!(
+            "flood {name:<24} n {n}: fifo {t_fifo:.2} s, canonical {t_canon:.2} s ({:.2}x), {differ} filled cells differ",
+            t_canon / t_fifo
+        );
     }
 }

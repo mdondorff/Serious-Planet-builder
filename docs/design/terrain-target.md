@@ -244,8 +244,8 @@ F7 measured what couples catchments in a routing, and the contract removes each 
 
 | Coupling | Measured (F7, catchment alone against the window routing) | Contract |
 |---|---|---|
-| **MFD area crosses D8 borders** (a cell shares its area with a lower neighbour in another catchment) | 24k-52k cells of a catchment differ in area, max ratio up to 20 and more | clipped: a catchment's MFD shares only among its own cells; a share towards a lower neighbour in another catchment goes to the cell's own receiver. A small change to the kernel (§6.4). Catchments become closed for area |
-| **The flood's tie order** (FIFO `flat` queue, global heap order on equal levels) | after round 1: 3 to 182 cells of different receivers, up to 3,191 filled cells differing, by up to 0.245 m | canonical: the flood orders its visits by (level, global cell id), so a catchment's flood does not depend on other catchments' cells **[gate G-LOCAL]** |
+| **MFD area crosses D8 borders** (a cell shares its area with a lower neighbour in another catchment) | 24k-52k cells of a catchment differ in area, max ratio up to 20 and more | clipped (local form, GEN-141): lower neighbours in another catchment are dropped from a cell's weights and from their sum; the cell shares among its own catchment's lower neighbours (its receiver is one). A small change to the kernel (§6.4). Catchments become closed for area: the area at an outlet is the sum of its members' true areas. The first wording (the share goes to the cell's own receiver) kept the foreign levels in the denominator and was not closed in this sense; measured below |
+| **The flood's tie order** (FIFO `flat` queue, global heap order on equal levels) | after round 1: 3 to 182 cells of different receivers, up to 3,191 filled cells differing, by up to 0.245 m | canonical: the flood orders its visits by (level, global cell id), with no FIFO queue (GEN-141). The result is a pure function of the heights. It does **not** make a catchment's flood independent of its neighbours: a cell on a flat can be first reached from a neighbour in another catchment (measured below). Routing locality is gated as the tile-partitioned route against the whole-region route **[gate G-PART]** |
 | **Region border** | none for a landmass (the border is the sea) | fallback only (§6.1) |
 
 ### 6.4 The two kernel changes
@@ -254,7 +254,21 @@ Both change the bake's output slightly and carry a kernel version bump:
 1. MFD clipped to the D8 catchment (`route.rs`).
 2. Flood tie rule by (level, global cell id) (`flood.rs`), replacing the FIFO order; the cost on flats is measured **[gate G-SCALE]**.
 
-Result: a catchment's round depends only on the inputs of its key (§6.5). **[gate G-LOCAL]** verifies it on the new kernels; F7 tested the decomposition with shared routing, not these rules.
+Result: a catchment's round depends only on the inputs of its key (§6.5): its members, receivers, `A_d`, surface and drivers. **[gate G-LOCAL]** verifies that on the new kernels (the round is a pure function of its key inputs; G-ROUND is the exactness test). Both rules are behind switches (`RoundRules`, default off; a key byte only when on).
+
+Measured (GEN-141, `examples/round_probe`, four 96 x 96 lands, about 820 catchments of more than 8 cells; a catchment **routed alone** is the grid masked to its members with its outlet the only outlet, against its cells inside the region route):
+
+| Rules | Smooth land: member areas differing | Terraced land (flats): areas differing | Terraced: receivers differing |
+|---|---|---|---|
+| today's kernels | 26,041 of 26,265 | 27,090 of 27,942 | 0 |
+| canonical flood only | 26,041 | 27,090 | 1 |
+| MFD share to the cell's own receiver (first wording) + canonical | 23,939 | 25,043 | 1 |
+| local clip only | 0 | 45 | 0 |
+| local clip + canonical flood | 0 | 7 | 1 |
+
+The remaining difference is the flood: a member on a near-sea-level flat is first reached from a lower neighbour in another catchment (level 2.1660 m + epsilon in the region, 2.1674 m alone), its filled level moves by 0.4 mm, a neighbouring receiver flips and the area of 7 cells downstream follows. So the first wording of G-LOCAL (a catchment routed alone equals its part of the region) cannot hold for any flood rule that takes a cell's level from its lowest neighbour. It is **corrected, not dropped**: since the incremental path of §6.5 takes receivers and `A_d` from the region re-route (run as tiles) and a catchment's round reads them as key inputs, routing one catchment alone is not part of the contract. The routing's locality is G-PART (tile-partitioned against whole-region, 0 cells differ). A probe (not in the kernels): a raised cell takes its flooder as receiver, the others keep the steepest jittered one; then 0 of 54,207 member cells differ in filled level or receiver when catchments of that receiver set are routed alone. It stays an option if the alone form is ever needed.
+
+The flood rule costs time on flats (3,072 cells a side, one thread): a land 1.30 s FIFO, 1.37 s canonical (1.05x); a land of broad terraces 0.29 s, 0.99 s (3.5x, 7.5e6 of 9.4e6 filled levels differ by sub-millimetre amounts). **[gate G-SCALE]** reports it on the largest landmass.
 
 ### 6.5 Re-solve of an edit (the incremental path)
 
@@ -442,7 +456,7 @@ These are S105 §13.3's table, renamed, with the changes the round solver brings
 |---|---|---|
 | G-SURF | runtime minus bake surface at lattice nodes | 0 before quantisation; at most 0.25 m after |
 | G-CON | channels and conservation at every sampling: every channel cell's D8 receiver is a channel cell or an outlet (a channel never ends mid-course); `Q` at a confluence equals the sum of its donors plus the local term; sum of `Q` at the outlets against the sum of `a r`; `A_d` at outlets against the sum of true cell areas, across cube edges | 0 disconnected segments; relative error at most 1e-9 for both sums |
-| G-LOCAL | on the new kernels (clipped MFD, canonical flood): a catchment routed and carved alone against its round inside the region, and a tile-partitioned route against a whole-region route | 0 cells differ |
+| G-LOCAL | on the new kernels (clipped MFD, canonical flood): the round is a pure function of its key inputs: a catchment carved from the key inputs alone, in any order, against its part of the region round (corrected from "routed and carved alone", §6.4 for the numbers) | 0 cells differ |
 | G-ROUND | the round solver against a whole-region carve **with the same new kernel rules** in the reference | 0 cells differ |
 | G-EQ | a re-solve against a fresh build of the edited definition, E1-E6: bit equality. The canonical forms (f32 rounds, 0.25 m `L`) against an f64 run: relief, **and flood topology and initiation** (catchment membership, channel cells, basin count and classes) | bit-equal; relief within 2 %; membership and channel-cell status changed on at most 1 % of land and channel cells respectively; no connectivity change |
 | G-INC | on E2 and each edit: the routing work (tiles re-flooded, graph solve, tiles of receivers and area recomputed) against a full region routing; the dirty catchment set found per round; the catchment keys recomputed | work reported per round; E2 at most 10 % of a full routing (F9: about 3 % of tiles); the level-2 job within §11.3 |
@@ -453,7 +467,7 @@ These are S105 §13.3's table, renamed, with the changes the round solver brings
 | G-SCALE | a resident routing and round of the largest landmass (memory, time, flat-area cost); a partitioned route of it; the H0-split fallback, measuring divide migration and flow across its artificial borders; H0 at 2x radius | resident within the world-build budget (ADR 0115); partitioned equals resident (G-PART); the split measured; F6 x 4 within 1.5x |
 | G-RT | the region's flight | no held-back tiles; frame within BUDG-001/002 |
 | G-DET | 1 and 8 threads; Windows and Linux; edit replay | bit-equal |
-| G-PART | a partitioned route (tiles, border graph, cross-tile accumulation) against a resident route of the same region | bit-equal, also on the edited surfaces |
+| G-PART | a partitioned route (tiles, border graph, cross-tile accumulation) against a resident route of the same region; this is where routing locality is gated (receivers, filled levels, `A_d`) | bit-equal, also on the edited surfaces |
 
 - Correctness is structural (D10): connectivity, conservation, seams, locality, relief. Closeness to one reference run is not a criterion (F4).
 - **Every structural gate runs after each edit E1-E6 as well as on the fresh build.** A gate passed only on a generated world is not passed.
