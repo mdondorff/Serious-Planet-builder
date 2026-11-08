@@ -20,4 +20,4 @@ Source: `docs/design/terrain-target.md` §4, §10, §12; SPIKE-105 §3 (X11-X13)
 ## Consequences
 - ADR 0045 point 2 becomes normative. Gates G-STORE, G-SCALE (one large and one small body).
 - Point 7 is a new budget; the owner decides it with this ADR.
-- The resident round of the largest landmass is an estimate (11-13.5 GB, A3 §6.6), with no margin against 12 GB; the partitioned route's non-resident form is not built.
+- The resident rounds of the largest landmass are measured (7.7 GiB, 55 bytes a cell, on a compact grid of the landmass, A3 §6.6); the H1 pass is extrapolated above 12 GB (87 bytes a cell at a quarter of the cells); the partitioned route's non-resident form is not built.

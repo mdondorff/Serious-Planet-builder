@@ -87,6 +87,11 @@ impl Grid {
         g
     }
 
+    /// Whether this is a compact grid ([`Grid::compact_cube`]): `w` is the number of cells and `h` is 1, not a rectangle.
+    pub fn is_compact(&self) -> bool {
+        self.compact.is_some()
+    }
+
     /// The compact index of the cube cell `g` on a compact grid, if it is one of its cells.
     pub fn compact_index_of(&self, g: usize) -> Option<usize> {
         self.compact.as_ref().expect("a compact grid").rank(g)

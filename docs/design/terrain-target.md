@@ -144,7 +144,7 @@ One free integer per body, `k`, sets every grid (counts per cube-face edge). Ear
 | Regional cells on land | `land_share x 6 x (3 x 2^(k-2))^2` |
 | Local cells on land | `land_share x 6 x (6 x 2^k)^2` |
 | Store | `store(k) = store(14) x 4^(k-14)` x `land_share / 0.29`, at the same channels |
-| Build memory, largest landmass | bytes a cell (about 90 resident, §6.6) x the largest landmass's regional cells |
+| Build memory, largest landmass | bytes a cell (55 for the resident rounds on the compact landmass, §6.6) x the largest landmass's regional cells |
 | Local cell size | `2 pi R / (4 x 6 x 2^k)` (nominal) |
 
 - Climate at scale: orography lattice counts follow the same `k` rule; the preset's winds and tilt (S105 X12).
@@ -364,11 +364,11 @@ With clipped MFD and the canonical flood a catchment has no other border conditi
 | Use | What is resident | Measured or bounded |
 |---|---|---|
 | One routing of the largest landmass, resident (the simplest, used by the prototype and the first world build) | z f32, filled f64, receiver u32, order u32, area f64, id map u32: 32 bytes a cell | F8: 1.49e8 cells at H1 (a landmass of 8.4e7 km^2), 4.5 GiB, 5.1 GiB peak |
-| One round of that landmass, resident | routing plus the carve's arrays | an estimate: about 11 to 13.5 GB (next list), not measured on a landmass. No margin against the 12 GB |
+| One round of that landmass, resident | routing plus the carve's arrays | measured on the compact landmass at 12,288 cells: 4 rounds peak at 7,858 MiB (55 bytes a cell); the H1 pass is not measured at that size (87 bytes a cell at 37e6 cells: 12.1 GiB extrapolated) |
 | Partitioned route | one tile's arrays at a time and the offers across tile borders. **Not built:** GEN-143 keeps the arrays resident and proves equality only | GEN-143; memory unmeasured |
 | Level-2 re-solve in the editor | the changed tiles and the catchments dirty in that round, within terrain's 4 GB (BUDG-005) | gate G-INC |
 
-- **Measured on the whole prototype landmass at 12,288 cells** (`examples/landmass_scale`, GEN-147, a compact grid of its 149.3e6 cells): 4 resident rounds peak at 7,858 MiB (55 bytes a cell; 62 at 37e6 cells, 85 at 9e6) in 1,716 s on 8 threads; the H1 pass costs 87 bytes a cell as built (3,121 MiB at 37e6 cells), 12.1 GiB at this landmass: the rounds fit the budget, the H1 pass does not yet.
+- **Measured on the whole prototype landmass at 12,288 cells** (`examples/landmass_scale`, GEN-147, a compact grid of its 149.3e6 cells): 4 resident rounds peak at 7,858 MiB (55 bytes a cell; 62 at 37e6 cells, 85 at 9e6) in 1,716 s on 8 threads; the H1 pass costs 87 bytes a cell as built (3,121 MiB at 37e6 cells; not run at 12,288 cells, 12.1 GiB extrapolated). The rounds fit the budget; the H1 pass, extrapolated, does not yet. The partitioned rounds at landmass scale are not measured and stay open.
 - Measured at the erosion grid (12,288 cells, `examples/region_scale`, windows of the prototype region of 1.0e6 to 44e6 cells): the resident rounds peak at about 90 bytes a cell (74 without the example's height copies) and about 2 microseconds a cell on 8 threads; the whole prototype landmass (about 150e6 cells) is measured below (the bound of 11 to 13.5 GB was an extrapolation). The 2.98 GiB and the 39.5 % channel share of the GEN-144 and GEN-145 runs are at 3,072 cells (3.26 km); at 12,288 cells 7 % of land cells are channel cells.
 - A landmass routing does **not** have to be resident. The partitioned route produces the same result (F9: levels equal, 0 cells differ); the tile flood is swept to a fixed point from the neighbours' offers and the accumulation is a topological sweep across tiles with border shares (`bake/partition.rs`, GEN-143).
 - The world build may run resident or partitioned; both give the same bits (gate G-PART). Editor jobs are partitioned.

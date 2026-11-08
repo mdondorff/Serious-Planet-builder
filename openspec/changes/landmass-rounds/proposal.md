@@ -8,4 +8,4 @@ Inbox #101 and briefing item 9 (A3 section 6.6, G-SCALE): the rounds on the whol
 
 ## Impact
 - Code: `generators::bake::{compact (new), mod}`, `examples/landmass_scale`. No call site in a pass of the bake; nothing in today's output moves.
-- Not in this change: a non-resident partitioned route at landmass scale (the resident route fits the budget on this landmass, so it is not needed to meet it); cache eviction (the run uses the resident solver, which has no cache); the tile-partitioned route on a compact grid (the partitioned route needs the rectangles of a face).
+- Not in this change, and open in briefing item 9: the partitioned rounds at landmass scale (the partitioned route needs the rectangles of a face and refuses a compact grid), with the round's per-catchment arrays bounded; H1 at 12,288 cells; the whole build's peak. Cache eviction is not added: the run uses the resident solver, which has no cache. The partitioned route stays the normal path for large landmasses (owner, 2026-11-08); this change measures the threshold up to which the resident route is an optimisation.
