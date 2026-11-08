@@ -38,6 +38,7 @@ pub const NONE: u32 = u32::MAX;
 impl GlobalGrid {
     pub fn new(n: usize, radius_m: f64) -> GlobalGrid {
         assert!(n >= 2, "a face has at least 2 cells an edge");
+        assert!(6 * n * n < u32::MAX as usize, "{n} cells a face edge give more cells than a u32 id holds (at most 26,754)");
         let tan_c =
             (0..n).map(|k| planet_core::cube::FaceMapping::face_to_plane(&TangentWarp, 2.0 * (k as f64 + 0.5) / n as f64 - 1.0)).collect();
         // The face frame from the mapping itself: the direction at the plane point (0, 0) is the normal `n`, and at `x = 1` (resp. `y = 1`) it is `(n + u) / sqrt 2` (resp. `v`).
@@ -166,6 +167,12 @@ impl GlobalGrid {
         assert!(z.len() == n && outlet.len() == n, "one height and one outlet flag per cell");
         assert!(z.iter().all(|v| v.is_finite()), "the heights are finite");
         assert!(outlet.iter().any(|o| *o), "a planet needs an outlet");
+        assert!(epsilon.is_finite() && epsilon > 0.0, "the flood epsilon is finite and positive, not {epsilon}");
+        let top = z.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        assert!(
+            top + epsilon > top,
+            "the flood epsilon {epsilon} is under half an ulp of the highest height {top}: the flood could not slope over a flat"
+        );
         let key = |v: f64| {
             let b = v.to_bits();
             if b & (1 << 63) != 0 {

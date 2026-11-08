@@ -9,6 +9,7 @@
 4. The area is the true area (GEN-138's `Metric` per face), so the area at the outlets is the area of the sphere (tested to 1e-9).
 5. Not in this PR: reading the stored field into the heights (a lattice read, SPIKE-105 F6's 130 s decode), multiple-flow-direction accumulation (H0 stays D8: 3 km cells and trunk rivers), joining kept pits across tiles (the spill graph of GEN-121 at H0's scale), watershed domains (prototype step).
 6. Cost, measured (`examples/h0_cost`, release, one thread, synthetic surface): 1.4 s at 1,024 cells a face edge and 16.2 s at 3,072 (6.0 s and an extrapolated 55 s before the speed-up; F6's prototype: 7 s). The speed-up: directions from per-axis tangent tables and per-face frames (no trigonometry per call), neighbour ids without distances in the flood, and the distance only for lower neighbours in the receiver pass. A cached neighbour table (24 bytes a cell) is the next step if H0 is re-routed on every edit (L1 target 10 s).
+7. Limits: ids are `u32`, so at most 26,754 cells a face edge (refused above); the route arrays are about 29 bytes a cell plus the heights, so 3,072 cells a face edge (5.7e7 cells, about 2 GB) is the target and 12,288 (9e8 cells, about 26 GB) is out of reach. The flood epsilon must be finite, positive and above half an ulp of the highest height (refused otherwise).
 
 ## Earth-specific values (ADR 0108 point 4)
 | Name | Value | Unit | Kind | Parameter |

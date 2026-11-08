@@ -107,3 +107,53 @@ fn only_the_boundary_cells_reach_across_an_edge_each_by_one_neighbour_per_crosse
         );
     }
 }
+
+#[test]
+fn the_cross_edge_pairing_is_symmetric_at_production_sizes_and_keeps_the_along_edge_index() {
+    // spec: GEN-139
+    for n in [3072usize, 12288] {
+        let g = GlobalGrid::new(n, R);
+        for f in 0..6u8 {
+            for k in 0..n {
+                for (i, j) in [(0, k), (n - 1, k), (k, 0), (k, n - 1)] {
+                    let c = g.id(f, i, j);
+                    let mut ids = [0u32; 8];
+                    let cnt = g.neighbour_ids(c, &mut ids);
+                    for &q in ids[..cnt].iter().filter(|q| g.split(**q).0 != f) {
+                        let mut back = [0u32; 8];
+                        let bc = g.neighbour_ids(q, &mut back);
+                        assert!(back[..bc].contains(&c), "n {n}: {c} -> {q} has no way back");
+                        // The along-edge index of the neighbour is k or n - 1 - k.
+                        let (_, qi, qj) = g.split(q);
+                        assert!(
+                            [k, n - 1 - k].iter().any(|a| *a == qi || *a == qj),
+                            "n {n}: ({f},{i},{j}) -> {:?} does not keep the along-edge index",
+                            g.split(q)
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn bad_input_is_refused_and_a_flat_with_a_valid_epsilon_routes() {
+    // spec: GEN-139
+    let g = GlobalGrid::new(6, R);
+    let (z, outlet) = cap_planet(&g, 30.0);
+    let refused =
+        |z: Vec<f64>, outlet: Vec<bool>, eps: f64| std::panic::catch_unwind(|| GlobalGrid::new(6, R).route(&z, &outlet, eps)).is_err();
+    assert!(refused(z.clone(), outlet.clone(), 0.0), "epsilon 0 was taken");
+    assert!(refused(z.clone(), outlet.clone(), -1e-3), "a negative epsilon was taken");
+    assert!(refused(z.clone(), outlet.clone(), f64::NAN), "a NaN epsilon was taken");
+    let mut bad = z.clone();
+    bad[3] = f64::NAN;
+    assert!(refused(bad, outlet.clone(), 1e-3), "a NaN height was taken");
+    assert!(refused(z.clone(), vec![false; z.len()], 1e-3), "a planet without an outlet was routed");
+    assert!(std::panic::catch_unwind(|| GlobalGrid::new(26_755, R)).is_err(), "more cells than a u32 id holds were taken");
+    // A flat planet at 100 m with a sea cap routes: every cell drains.
+    let flat = vec![100.0; z.len()];
+    let r = g.route(&flat, &outlet, 1e-3);
+    assert!(r.outlet_of.iter().all(|o| *o != NONE));
+}
