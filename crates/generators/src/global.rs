@@ -19,7 +19,7 @@ use std::sync::Mutex;
 
 use planet_world_def::{BodyId, GenContext, MissingNode, ReadRecord};
 
-use crate::height::layer_noise;
+use crate::height::{layer_noise, layer_noise_t};
 
 /// Bump whenever any output of this module changes (ADR 0006). History: 2 = the climate's pole axis moved to COORD's +z (3);
 /// 4 = the global stage gains the ocean-connectivity channel (`crate::ocean`, ADR 0041 point 2); the four sample channels are
@@ -341,9 +341,14 @@ fn hill_band(seed: u64, t: &Terrain, ridge: f64) -> f64 {
 
 /// The three octaves of the hill band, in `[0, 1]` (the shape of GEN-064's band before its amplitude and the coast ramp; GEN-098 gives it another amplitude).
 pub(crate) fn hill_octaves(seed: u64, t: &Terrain) -> f64 {
+    hill_octaves_with(seed, t, false)
+}
+
+/// [`hill_octaves`] on the lattices turned per octave when `turned` (GEN-140).
+pub(crate) fn hill_octaves_with(seed: u64, t: &Terrain, turned: bool) -> f64 {
     let (mut sum, mut amp, mut norm, mut freq) = (0.0, 1.0, 0.0, HILL_BAND_FREQ);
     for o in 0..HILL_BAND_OCTAVES {
-        let n = layer_noise(seed, LAYER_HILL, o, t.warped * freq);
+        let n = layer_noise_t(turned, seed, LAYER_HILL, o, t.warped * freq);
         let r = 1.0 - libm::fabs(n);
         sum += amp * r * r;
         norm += amp;
@@ -351,6 +356,11 @@ pub(crate) fn hill_octaves(seed: u64, t: &Terrain) -> f64 {
         freq *= 2.0;
     }
     sum / norm
+}
+
+/// The hill band's noise in `[0, 1]` at the unit direction `d`, on the lattices turned per octave when `turned` (GEN-140).
+pub fn hill_octaves_at(seed: u64, d: Vec3, turned: bool) -> f64 {
+    hill_octaves_with(seed, &terrain(seed, d), turned)
 }
 
 /// The hill band in metres at the unit direction `d` (GEN-064): what the bake adds to the elevation for wavelengths of 2 to 8 km.
