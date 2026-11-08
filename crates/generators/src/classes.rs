@@ -181,7 +181,9 @@ pub struct ClassPoint {
 const COAST_MEMO_CAP: usize = 4;
 
 /// The key is everything the lattice depends on: the seed (the plates and the field follow from it), the radius and the whole shelf profile; a new input of the lattice must join it.
-static COAST_MEMO: std::sync::OnceLock<std::sync::Mutex<Vec<(String, std::sync::Arc<CoastLattice>)>>> = std::sync::OnceLock::new();
+type CoastMemo = Vec<(String, std::sync::Arc<CoastLattice>)>;
+
+static COAST_MEMO: std::sync::OnceLock<std::sync::Mutex<CoastMemo>> = std::sync::OnceLock::new();
 
 /// The default class source of one seed (GEN-094, GEN-095): the plates, and the land share of each for the back-arc.
 pub struct ClassSource {
@@ -259,7 +261,7 @@ impl ClassSource {
             // The lattice is a pure function of the seed, the radius and the shelf profile (the plates follow from the seed): a process that opens the same world again shares it.
             let key = format!("{}|{:x}|{:?}", self.seed, self.radius_m.to_bits(), self.shelf);
             let memo = COAST_MEMO.get_or_init(|| std::sync::Mutex::new(Vec::new()));
-            let hit = |memo: &Vec<(String, std::sync::Arc<CoastLattice>)>| memo.iter().find(|(k, _)| *k == key).map(|(_, l)| l.clone());
+            let hit = |memo: &CoastMemo| memo.iter().find(|(k, _)| *k == key).map(|(_, l)| l.clone());
             if let Some(lattice) = hit(&memo.lock().unwrap_or_else(|e| e.into_inner())) {
                 return lattice;
             }
