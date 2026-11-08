@@ -32,17 +32,19 @@ fn crease_sum(turned: bool, d: Vec3) -> f64 {
     sum / norm
 }
 
+type NoiseFn = fn(bool, Vec3) -> f64;
+
+fn hill_noise(turned: bool, d: Vec3) -> f64 {
+    hill_octaves_at(SEED, d, turned)
+}
+
 fn main() {
     let (lat, lon) = (7.437f64.to_radians(), (-29.627f64).to_radians());
     let up = Vec3::new(libm::cos(lat) * libm::cos(lon), libm::cos(lat) * libm::sin(lon), libm::sin(lat));
     let east = Vec3::new(0.0, 0.0, 1.0).cross(up).normalized();
     let north = up.cross(east).normalized();
     assert!(!turned_noise());
-    let rows: [(f64, f64, Box<dyn Fn(bool, Vec3) -> f64>); 3] = [
-        (1600.0, 900.0, Box::new(|t, d| crease_sum(t, d))),
-        (300.0, 900.0, Box::new(|t, d| crease_sum(t, d))),
-        (6000.0, 200.0, Box::new(|t, d| hill_octaves_at(SEED, d, t))),
-    ];
+    let rows: [(f64, f64, NoiseFn); 3] = [(1600.0, 900.0, crease_sum), (300.0, 900.0, crease_sum), (6000.0, 200.0, hill_noise)];
     let (w, h) = (2 * PX, 3 * PX);
     let mut img = vec![0u8; w * h];
     for (r, (size_m, relief_m, f)) in rows.iter().enumerate() {
