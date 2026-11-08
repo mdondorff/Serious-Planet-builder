@@ -196,6 +196,13 @@ pub fn pass1_face_rock(
     let factors: Option<Vec<f64>> = factor.map(|f| sample_grid(spec, f, threads));
     let mut z = z0.clone();
     let params = CarveParams { sea_level: spec.sea_level, ..*params };
+    // The physical metric (GEN-138) when asked for: cell 0 of the grid is the plane cell `-halo`.
+    let grid = if params.cell_metric {
+        let off = -(spec.halo as i64);
+        grid.clone().with_metric(super::metric::Metric::cube_face(spec.cells, spec.radius_m, (off, off), grid.w(), grid.h()))
+    } else {
+        grid
+    };
     let (m, h) = (spec.grid_cells(), spec.halo as i64);
     let fill = |u: &(dyn Fn(Vec3) -> f64 + Sync)| -> Vec<f32> {
         let par: &dyn Par = &threads;

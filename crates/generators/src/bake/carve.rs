@@ -36,6 +36,8 @@ pub struct CarveParams {
     /// Keep the pits (GEN-120): the route runs over the filled copy, but a cell that stands below its receiver (a pit of the unfilled surface) is not raised to it; it only gains its uplift,
     /// so the donors above it carve toward its floor and the basin keeps the relief the fill would have eaten. An incise-only carve never raises, so it ignores the flag.
     pub keep_pits: bool,
+    /// The physical cell metric of the face grid (GEN-138, SPIKE-105 F5): true cell areas and neighbour distances instead of the uniform `dx^2`; off (today's metric) by default.
+    pub cell_metric: bool,
 }
 
 /// The breach limit of a cell at the sea level when the limit scales with height (the former default).
@@ -57,6 +59,7 @@ impl Default for CarveParams {
             incise_only: false,
             uplift_taper_m: 60.0,
             keep_pits: true,
+            cell_metric: false,
         }
     }
 }
@@ -233,6 +236,11 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
 
 /// The distance between two neighbouring cells.
 fn distance(grid: &Grid, a: usize, b: usize) -> f64 {
+    if grid.has_metric() {
+        if let Some(d) = (0..8).find(|&d| grid.neighbour(a, d) == Some(b)) {
+            return grid.distance_at(a, d);
+        }
+    }
     let (ai, aj, bi, bj) = (a % grid.w(), a / grid.w(), b % grid.w(), b / grid.w());
     if ai == bi || aj == bj {
         grid.dx()

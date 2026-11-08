@@ -98,7 +98,7 @@ fn receivers(grid: &Grid, filled: &[f64], outlet: &[bool], seed: u64) -> Vec<u32
         let mut best = (0.0f64, NONE);
         for d in 0..8 {
             let Some(q) = grid.neighbour(p, d) else { continue };
-            let mut s = (filled[p] - filled[q]) / grid.distance(d);
+            let mut s = (filled[p] - filled[q]) / grid.distance_at(p, d);
             if s > 0.0 {
                 s *= 1.0 + 0.5 * jitter(seed, grid.global_id(p), d);
             }
@@ -122,10 +122,9 @@ fn mfd_area(grid: &Grid, filled: &[f64], outlet: &[bool], weights: Option<&[f32]
     let n = grid.len();
     let mut by_height: Vec<u32> = (0..n as u32).collect();
     by_height.sort_unstable_by(|&a, &b| filled[b as usize].total_cmp(&filled[a as usize]).then(a.cmp(&b)));
-    let cell = grid.dx() * grid.dx();
     let mut area: Vec<f64> = match weights {
-        Some(w) => w.iter().map(|v| cell * f64::from(*v)).collect(),
-        None => vec![cell; n],
+        Some(w) => w.iter().enumerate().map(|(p, v)| grid.cell_area(p) * f64::from(*v)).collect(),
+        None => (0..n).map(|p| grid.cell_area(p)).collect(),
     };
     for &p in &by_height {
         let p = p as usize;
@@ -136,7 +135,7 @@ fn mfd_area(grid: &Grid, filled: &[f64], outlet: &[bool], weights: Option<&[f32]
         let mut sum = 0.0;
         for (d, w) in weight.iter_mut().enumerate() {
             if let Some(q) = grid.neighbour(p, d) {
-                let slope = (filled[p] - filled[q]) / grid.distance(d);
+                let slope = (filled[p] - filled[q]) / grid.distance_at(p, d);
                 if slope > 0.0 {
                     *w = libm::pow(slope, MFD_EXPONENT);
                     sum += *w;
