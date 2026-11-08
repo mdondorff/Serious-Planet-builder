@@ -441,20 +441,22 @@ These are S105 §13.3's table, renamed, with the changes the round solver brings
 | Gate | Measure | Pass |
 |---|---|---|
 | G-SURF | runtime minus bake surface at lattice nodes | 0 before quantisation; at most 0.25 m after |
-| G-CON | segments and channel cells at every sampling; drainage area at the outlets against the sum of true cell areas, across cube edges | 0 disconnected; every channel cell has a downhill path; relative error at most 1e-9 |
-| G-LOCAL | a catchment's round alone against its round inside the region, with clipped MFD and the canonical flood | 0 cells differ |
-| G-ROUND | the round solver against a whole-region carve | 0 cells differ (the exactness of F7, kept under §6.4) |
-| G-EQ | a re-solve against a fresh build of the edited definition, E1-E6; the f32 round form against a run in f64 | bit-equal; effect on relief within 2 % |
-| G-INC | the dirty set of each edit | grows only through the routing; report sizes, target a level-2 job within §11.3 |
+| G-CON | channels and conservation at every sampling: every channel cell's D8 receiver is a channel cell or an outlet (a channel never ends mid-course); `Q` at a confluence equals the sum of its donors plus the local term; sum of `Q` at the outlets against the sum of `a r`; `A_d` at outlets against the sum of true cell areas, across cube edges | 0 disconnected segments; relative error at most 1e-9 for both sums |
+| G-LOCAL | on the new kernels (clipped MFD, canonical flood): a catchment routed and carved alone against its round inside the region, and a tile-partitioned route against a whole-region route | 0 cells differ |
+| G-ROUND | the round solver against a whole-region carve **with the same new kernel rules** in the reference | 0 cells differ |
+| G-EQ | a re-solve against a fresh build of the edited definition, E1-E6: bit equality. The canonical forms (f32 rounds, 0.25 m `L`) against an f64 run: relief, **and flood topology and initiation** (catchment membership, channel cells, basin count and classes) | bit-equal; relief within 2 %; membership and channel-cell status changed on at most 1 % of land and channel cells respectively; no connectivity change |
+| G-INC | on E2 and each edit: the routing work (tiles re-flooded, graph solve, tiles of receivers and area recomputed) against a full region routing; the dirty catchment set found per round; the catchment keys recomputed | work reported per round; E2 at most 10 % of a full routing (F9: about 3 % of tiles); the level-2 job within §11.3 |
 | G-BASIN | E3's merge, split, spill and outlet migration | ids and continuity maps follow §5.4 |
 | G-SED | per catchment and per round | eroded = deposited + exported to 1e-9 relative |
 | G-LAND | relief p50 and hypsometry against the whole-region carve; sinks | within the seed noise floor; unclassified sinks at most 1 % of land (reported, not the main gate) |
-| G-STORE | §10 | 35 GB target, 40 GB hard |
-| G-SCALE | a landmass as one region: memory and time; flat-area cost of the flood; H0 at 2x radius | fits a world build within budget (CON-21 applies to runtime; the bake budget is proposed in ADR 0115); F6 x 4 within 1.5x |
+| G-STORE | §10: real serialized data, including packs, indexes, keys, catchment-round key table, border summaries, edit overrides and continuity maps; temporary re-bake space separately | 35 GB target, 40 GB hard, steady state; temporary reported |
+| G-SCALE | a resident routing and round of the largest landmass (memory, time, flat-area cost); a partitioned route of it; the H0-split fallback, measuring divide migration and flow across its artificial borders; H0 at 2x radius | resident within the world-build budget (ADR 0115); partitioned equals resident (G-PART); the split measured; F6 x 4 within 1.5x |
 | G-RT | the region's flight | no held-back tiles; frame within BUDG-001/002 |
 | G-DET | 1 and 8 threads; Windows and Linux; edit replay | bit-equal |
+| G-PART | a partitioned route (tiles, border graph, cross-tile accumulation) against a resident route of the same region | bit-equal, also on the edited surfaces |
 
 - Correctness is structural (D10): connectivity, conservation, seams, locality, relief. Closeness to one reference run is not a criterion (F4).
+- **Every structural gate runs after each edit E1-E6 as well as on the fresh build.** A gate passed only on a generated world is not passed.
 - The Earth comparisons (SPIKE-102, SPIKE-104) stay reported values, not gates (R6).
 
 ### 12.2 Fixtures

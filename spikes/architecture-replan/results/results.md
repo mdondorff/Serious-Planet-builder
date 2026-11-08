@@ -974,3 +974,35 @@ Input: a third external review (owner refs, 2026-11-08, outside git; "the third 
 | G-INC: routing work and dirty-set discovery | **adopt** | A3 §12, on E2 |
 | G-SCALE: landmass memory and the split test | **adopt** | A3 §12 |
 | All structural checks after the edits | **adopt** | A3 §12: stated as a hard rule |
+
+## 16. Probes of phase 4
+
+Sonnet sub-agents, seed 14 on the current base, 4 threads, shared machine (timings indicative). Probe code on `spike/terrain-pipeline-review` (never merged).
+
+### F8: a landmass route at H1
+Question: memory and time of one resident routing of the largest landmass at the regional grid. Method: `f8_landmass_route.rs`; one index over the landmass cells across cube edges, real `BakeInputs::base`, the arrays of `route.rs` at 32 bytes a cell.
+
+| Quantity | Value |
+|---|---|
+| Largest landmass | 9.3e6 cells at 3.26 km, 8.42e7 km^2 true area, 1.49e8 cells at 814 m (four faces) |
+| Peak memory, route | 5.1 GiB (32 bytes a cell + index 1.1 bytes) |
+| Flood / receivers / MFD | 55 s / 6.5 s / 77 s, single-threaded |
+| Base evaluation (not needed in production) | 783 s |
+
+Reading: a resident routing of a landmass fits the 16 GB machine but not the editor's 4 GB terrain share. A round adds the carve's arrays; pass 1's measured 64 bytes a cell already includes the routing, so a round is about 10 GB (the probe's 14 GB estimate double-counts), about today's pass 1.
+
+### F9: dirty tiles after an E2-type edit
+Question: what share of 256-cell tiles changes in level, receiver or area after a divide-moving edit? Method: `f9_dirty_tiles.rs`, face 1, 3,072 x 3,072 cells at 814 m, a ridge line raised by 200 m along E2's divide (`spikes/prototype-region/results/`); whole-window routing before and after, diffed per tile; `flood_labelled` and `SpillGraph` run per tile.
+
+| Change against before | First routing, tiles (of 144) | After one carve round, tiles | Cells |
+|---|---|---|---|
+| Level | 2 | 4 | 0.02 %, 0.23 % |
+| Receiver | 2 | 4 | 0.01 %, 0.02 % |
+| Area (relative over 1e-9) | 4 | 4 | 0.09 %, 0.20 % |
+| Catchments with changed membership | 2 of 20,045 | 7 of 19,486 | |
+| Tile flood output | 2 | 4 | |
+| Border graph | 146,881 nodes, 17 ms | same | |
+
+Tiles plus border graph reproduce the whole-window flood exactly (0 cells differ, four surfaces). The 144 tile floods take 0.22 s (4 threads), one whole-window flood 1.0 s.
+
+- **Answer:** the changed set of a divide-moving edit is about 3 % of tiles and is found by flooding only the changed tiles and solving the graph. A larger edit (E4) can touch more tiles downstream along the river; G-INC reports it.
