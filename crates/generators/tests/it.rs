@@ -1,5 +1,7 @@
 #[path = "arid.rs"]
 mod arid;
+#[path = "bake_cube.rs"]
+mod bake_cube;
 #[path = "bake_face.rs"]
 mod bake_face;
 #[path = "bake_fillgeom.rs"]

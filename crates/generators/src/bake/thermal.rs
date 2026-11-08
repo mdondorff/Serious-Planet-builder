@@ -162,10 +162,18 @@ fn run(grid: &Grid, z: &mut [f64], params: &ThermalParams, threads: usize, all_c
 /// Thermal stabilisation of `z` in place on active cells (see the module): at most `params.passes` passes, fewer when nothing moves. `z` must be finite. Refused: a critical angle
 /// outside (0, 90) degrees, a perturbation of 1 or more, a share `k` over 1/8 or not positive, a negative minimum excess.
 pub fn thermal(grid: &Grid, z: &mut [f64], params: &ThermalParams, threads: usize) -> ThermalReport {
+    assert!(
+        !grid.is_cube(),
+        "thermal erosion assume a plane grid (uniform cell size, row and column neighbours): not for a cube grid yet (GEN-144)"
+    );
     run(grid, z, params, threads, false)
 }
 
 /// The same as [`thermal`] over every cell every pass: the reference the active-cell run is tested against.
 pub fn thermal_all_cells(grid: &Grid, z: &mut [f64], params: &ThermalParams, threads: usize) -> ThermalReport {
+    assert!(
+        !grid.is_cube(),
+        "thermal erosion assume a plane grid (uniform cell size, row and column neighbours): not for a cube grid yet (GEN-144)"
+    );
     run(grid, z, params, threads, true)
 }

@@ -12,6 +12,7 @@ pub const BAKE_KERNEL_VERSION: u32 = 5;
 pub const PASS2_KERNEL_VERSION: u32 = 5;
 
 pub mod carve;
+pub mod cube;
 pub mod deposit;
 pub mod face;
 pub mod fillgeom;
@@ -38,6 +39,8 @@ pub struct Grid {
     metric: Option<metric::Metric>,
     /// The cells that exist (GEN-141): a cell outside the mask has no neighbours and is no one's neighbour, so the kernels see only the masked cells. `None`: every cell.
     active: Option<std::sync::Arc<[bool]>>,
+    /// The six cube faces as one grid (GEN-144): the neighbours across the cube edges, the sphere's areas and distances.
+    cube: Option<std::sync::Arc<cube::Cube>>,
 }
 
 /// The 8 neighbours as `(di, dj)`: the four axis neighbours first, then the diagonals.
@@ -48,17 +51,32 @@ impl Grid {
         assert!(w >= 3 && h >= 3, "a grid is at least 3 x 3 cells, not {w} x {h}");
         assert!(dx.is_finite() && dx > 0.0, "the cell size is finite and positive, not {dx}");
         assert!(w.checked_mul(h).is_some_and(|n| n < u32::MAX as usize), "the cell index is a u32: {w} x {h} cells are too many");
-        Grid { w, h, dx, origin: (0, 0), metric: None, active: None }
+        Grid { w, h, dx, origin: (0, 0), metric: None, active: None, cube: None }
     }
 
     /// The same grid with its cell `(0, 0)` at the global cell `origin` (a window of a larger grid: the jitter of a cell follows its global position).
     pub fn with_origin(mut self, origin: (u32, u32)) -> Grid {
+        assert!(self.cube.is_none(), "a cube grid has its own cell ids: no origin");
         self.origin = origin;
         self
     }
 
+    /// The six faces of a cube sphere of `n` cells an edge as one `n x 6n` grid (GEN-144): cell `(face, i, j)` is `face n^2 + j n + i`, the neighbours join across the cube edges as in H0
+    /// (GEN-139), the areas and distances are the sphere's. There is no border: every cell has neighbours, the outlets are the sea.
+    pub fn cube(n: usize, radius_m: f64) -> Grid {
+        let mut g = Grid::new(n, 6 * n, radius_m * core::f64::consts::FRAC_PI_2 / n as f64);
+        g.cube = Some(std::sync::Arc::new(cube::Cube::new(n, radius_m)));
+        g
+    }
+
+    /// Whether this is the cube grid of [`Grid::cube`].
+    pub fn is_cube(&self) -> bool {
+        self.cube.is_some()
+    }
+
     /// The same grid with a physical cell metric (GEN-138): [`Grid::cell_area`] and [`Grid::distance_at`] follow it.
     pub fn with_metric(mut self, metric: metric::Metric) -> Grid {
+        assert!(self.cube.is_none(), "a cube grid has the sphere's metric: no plane metric");
         self.metric = Some(metric);
         self
     }
@@ -75,13 +93,16 @@ impl Grid {
         self.active.as_ref().is_none_or(|a| a[p])
     }
 
-    /// Whether the grid carries a physical metric.
+    /// Whether the grid has the sphere's metric: the cube metric of GEN-138 or the cube grid of GEN-144.
     pub fn has_metric(&self) -> bool {
-        self.metric.is_some()
+        self.metric.is_some() || self.cube.is_some()
     }
 
     /// The area of cell `p` in square metres: `dx^2` on the uniform metric.
     pub fn cell_area(&self, p: usize) -> f64 {
+        if let Some(c) = &self.cube {
+            return c.area(p);
+        }
         match &self.metric {
             Some(m) => m.area(p % self.w, p / self.w),
             None => self.dx * self.dx,
@@ -90,6 +111,9 @@ impl Grid {
 
     /// The distance from cell `p` to its neighbour `d`: [`Grid::distance`] on the uniform metric.
     pub fn distance_at(&self, p: usize, d: usize) -> f64 {
+        if let Some(c) = &self.cube {
+            return c.distance(p, self.neighbour(p, d).expect("a distance to a neighbour on the grid"));
+        }
         match &self.metric {
             Some(m) => {
                 let q = self.neighbour(p, d).expect("a distance to a neighbour on the grid");
@@ -126,6 +150,13 @@ impl Grid {
 
     /// The neighbour `d` of cell `p`, if it is on the grid.
     pub fn neighbour(&self, p: usize, d: usize) -> Option<usize> {
+        if let Some(c) = &self.cube {
+            let q = c.neighbour(p, d)?;
+            return match &self.active {
+                Some(a) if !a[p] || !a[q] => None,
+                _ => Some(q),
+            };
+        }
         let (i, j) = ((p % self.w) as i64 + NEIGHBOURS[d].0, (p / self.w) as i64 + NEIGHBOURS[d].1);
         let q = (i >= 0 && j >= 0 && i < self.w as i64 && j < self.h as i64).then(|| j as usize * self.w + i as usize)?;
         match &self.active {
@@ -145,6 +176,9 @@ impl Grid {
 
     /// Whether `p` lies on the border of the grid.
     pub fn is_edge(&self, p: usize) -> bool {
+        if self.cube.is_some() {
+            return false;
+        }
         let (i, j) = (p % self.w, p / self.w);
         i == 0 || j == 0 || i == self.w - 1 || j == self.h - 1
     }

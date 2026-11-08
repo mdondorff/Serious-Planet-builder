@@ -16,7 +16,7 @@ use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
 use std::sync::Arc;
 
-/// The opposite of each neighbour direction (`NEIGHBOURS`).
+/// The opposite of each neighbour direction (`NEIGHBOURS`) on a plane grid.
 const OPPOSITE: [usize; 8] = [1, 0, 3, 2, 7, 6, 5, 4];
 
 /// What the partitioned route did.
@@ -52,6 +52,7 @@ pub struct PartCache {
 struct Previous {
     tile: usize,
     size: (usize, usize),
+    cube: bool,
     filled: Vec<f64>,
     receiver: Vec<u32>,
     area: Vec<f64>,
@@ -117,7 +118,7 @@ fn flood_tile(grid: &Grid, r: Rect, z: &[f64], outlet: &[bool], ext: &[(usize, f
     let mut heap: BinaryHeap<Reverse<(u64, u32)>> = BinaryHeap::new();
     for l in 0..dist.len() {
         let p = global(l);
-        if outlet[p] {
+        if outlet[p] && grid.is_active(p) {
             dist[l] = z[p];
             heap.push(Reverse((key(z[p]), l as u32)));
         }
@@ -208,8 +209,8 @@ pub fn partitioned_route(
     assert_eq!(z.len(), n, "one height per cell");
     assert_eq!(outlet.len(), n, "one outlet flag per cell");
     assert_finite("the heights", z);
-    assert!(outlet.iter().any(|&o| o), "a flood needs an outlet");
-    assert!((0..n).all(|p| grid.is_active(p)), "the partitioned route takes no mask");
+    assert!((0..n).any(|p| outlet[p] && grid.is_active(p)), "a flood needs an outlet on the grid");
+    assert!(!grid.is_cube() || grid.w().is_multiple_of(tile), "the tiles of a cube grid divide a face edge");
     let (_, _, tiles) = rects(grid, tile);
     let mut stats = PartStats { tiles: tiles.len(), ..PartStats::default() };
 
@@ -221,14 +222,14 @@ pub fn partitioned_route(
             for x in r.x0..r.x0 + r.w {
                 let p = y * grid.w() + x;
                 h.word(z[p].to_bits());
-                h.word(u64::from(outlet[p]));
+                h.word(u64::from(outlet[p]) | (u64::from(grid.is_active(p)) << 1));
             }
         }
         z_hash.push(h);
     }
     let mut filled = vec![f64::INFINITY; n];
     for p in 0..n {
-        if outlet[p] {
+        if outlet[p] && grid.is_active(p) {
             filled[p] = z[p];
         }
     }
@@ -238,11 +239,14 @@ pub fn partitioned_route(
         let mut changed = false;
         for (t, &r) in tiles.iter().enumerate() {
             let ext = offers(grid, r, &filled);
-            let has_outlet = (r.y0..r.y0 + r.h).any(|y| (r.x0..r.x0 + r.w).any(|x| outlet[y * grid.w() + x]));
+            let has_outlet =
+                (r.y0..r.y0 + r.h).any(|y| (r.x0..r.x0 + r.w).any(|x| outlet[y * grid.w() + x] && grid.is_active(y * grid.w() + x)));
             if ext.is_empty() && !has_outlet {
                 continue;
             }
             let mut h = z_hash[t];
+            h.word(u64::from(grid.is_cube()));
+            h.word(grid.cell_area(0).to_bits());
             h.word(epsilon.to_bits());
             for v in [grid.w(), grid.h(), r.x0, r.y0, r.w, r.h] {
                 h.word(v as u64);
@@ -279,7 +283,14 @@ pub fn partitioned_route(
             break;
         }
     }
-    assert!(filled.iter().all(|v| v.is_finite()), "a cell is not reached by the flood: no outlet on its component");
+    assert!((0..n).all(|p| !grid.is_active(p) || filled[p].is_finite()), "a cell is not reached by the flood: no outlet on its component");
+
+    // The cells off the grid hold what the resident flood leaves there: their height if flagged as outlets, 0.0 otherwise.
+    for p in 0..n {
+        if !grid.is_active(p) {
+            filled[p] = if outlet[p] { z[p] } else { 0.0 };
+        }
+    }
 
     // ---- receivers, per tile
     let mut receiver = vec![NONE; n];
@@ -287,7 +298,7 @@ pub fn partitioned_route(
         for y in r.y0..r.y0 + r.h {
             for x in r.x0..r.x0 + r.w {
                 let p = y * grid.w() + x;
-                if !outlet[p] {
+                if !outlet[p] && grid.is_active(p) {
                     receiver[p] = receiver_of(grid, &filled, p, seed);
                 }
             }
@@ -301,6 +312,15 @@ pub fn partitioned_route(
     let passes = |p: usize, d: usize, q: usize| -> Option<f64> {
         let slope = (filled[p] - filled[q]) / grid.distance_at(p, d);
         (slope > 0.0 && !(clip && root[q] != root[p])).then(|| libm::pow(slope, MFD_EXPONENT))
+    };
+    // The direction in which `p` reaches `q`, given that `q` reaches `p` in `d`: the opposite one on a plane; across a cube edge the faces are turned, so it is looked up.
+    let cube = grid.is_cube();
+    let slot = |p: usize, q: usize, d: usize| -> usize {
+        if cube && p / (grid.w() * grid.w()) != q / (grid.w() * grid.w()) {
+            (0..8).find(|&e| grid.neighbour(p, e) == Some(q)).expect("a neighbour reaches back")
+        } else {
+            OPPOSITE[d]
+        }
     };
     let mut sum = vec![0.0f64; n];
     for p in 0..n {
@@ -321,7 +341,7 @@ pub fn partitioned_route(
     for q in 0..n {
         for d in 0..8 {
             if let Some(p) = grid.neighbour(q, d) {
-                if !outlet[p] && sum[p] > 0.0 && passes(p, OPPOSITE[d], q).is_some() {
+                if !outlet[p] && sum[p] > 0.0 && passes(p, slot(p, q, d), q).is_some() {
                     pending[q] += 1;
                 }
             }
@@ -346,7 +366,7 @@ pub fn partitioned_route(
                 for d in 0..8 {
                     if let Some(p) = grid.neighbour(q, d) {
                         if !outlet[p] && sum[p] > 0.0 {
-                            if let Some(w) = passes(p, OPPOSITE[d], q) {
+                            if let Some(w) = passes(p, slot(p, q, d), q) {
                                 donors.push((p, w));
                             }
                         }
@@ -377,8 +397,8 @@ pub fn partitioned_route(
     }
 
     // ---- what changed against the previous call
-    if let Some(Previous { tile: tl, size, filled: pf, receiver: pr, area: pa }) = &cache.previous {
-        if *tl == tile && *size == (grid.w(), grid.h()) {
+    if let Some(Previous { tile: tl, size, cube, filled: pf, receiver: pr, area: pa }) = &cache.previous {
+        if *tl == tile && *size == (grid.w(), grid.h()) && *cube == grid.is_cube() {
             for r in &tiles {
                 let (mut f, mut rc, mut ar) = (false, false, false);
                 for y in r.y0..r.y0 + r.h {
@@ -395,7 +415,13 @@ pub fn partitioned_route(
             }
         }
     }
-    cache.previous =
-        Some(Previous { tile, size: (grid.w(), grid.h()), filled: filled.clone(), receiver: receiver.clone(), area: area.clone() });
+    cache.previous = Some(Previous {
+        tile,
+        size: (grid.w(), grid.h()),
+        cube: grid.is_cube(),
+        filled: filled.clone(),
+        receiver: receiver.clone(),
+        area: area.clone(),
+    });
     PartRoute { routing: Routing { receiver, order, area }, filled, stats }
 }

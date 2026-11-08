@@ -68,12 +68,20 @@ pub struct Catchments {
 
 /// Cuts a routing into catchments (one per outlet, in the order the outlets appear in the region order).
 pub fn cut(r: &Routing) -> Catchments {
+    cut_in(None, r)
+}
+
+/// [`cut`] over the cells that exist on `grid` (a masked grid, a landmass of the cube: the cells outside the mask are in no catchment).
+pub fn cut_in(grid: Option<&Grid>, r: &Routing) -> Catchments {
     let root = catchment_roots(&r.receiver, &r.order);
     let mut idx = vec![u32::MAX; r.receiver.len()];
     let mut members: Vec<Vec<u32>> = Vec::new();
     let mut local = vec![0u32; r.receiver.len()];
     for &c in &r.order {
         let c = c as usize;
+        if grid.is_some_and(|g| !g.is_active(c)) {
+            continue;
+        }
         if r.receiver[c] == NONE {
             idx[c] = members.len() as u32;
             members.push(Vec::new());
@@ -153,7 +161,7 @@ pub fn solve_rounds(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams
     let mut report = RoundReport::default();
     for _ in 0..rounds {
         let r = route_rules(grid, z, outlet, p.epsilon, seed, p.max_area, None, p.round_rules);
-        let cuts = cut(&r);
+        let cuts = cut_in(Some(grid), &r);
         // A lone outlet keeps its height, so it is not queued.
         let mut queue: Vec<usize> = (0..cuts.members.len()).filter(|&k| cuts.members[k].len() > 1).collect();
         queue.sort_by_key(|&k| (std::cmp::Reverse(cuts.members[k].len()), k));
