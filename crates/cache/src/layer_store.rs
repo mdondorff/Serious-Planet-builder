@@ -68,6 +68,10 @@ impl LayerSpec {
         if c.cell_metric {
             b.push(0xC3);
         }
+        // The round kernels (GEN-141) likewise: a byte for the MFD clip and one for the flood rule, only when one is on.
+        if !c.round_rules.is_default() {
+            b.extend([0xC4, c.round_rules.clip_mfd as u8, u8::from(c.round_rules.canonical_flood)]);
+        }
         b.extend((c.steps as u64).to_le_bytes());
         b.extend((c.reroute_every as u64).to_le_bytes());
         b.extend(self.inputs_id.to_le_bytes());
@@ -274,6 +278,11 @@ mod tests {
             CarveParams { breach_slope: 2e-3, ..base.carve },
             CarveParams { keep_pits: false, ..base.carve },
             CarveParams { cell_metric: true, ..base.carve },
+            CarveParams { round_rules: planet_generators::bake::route::RoundRules::ROUND, ..base.carve },
+            CarveParams {
+                round_rules: planet_generators::bake::route::RoundRules { canonical_flood: true, ..Default::default() },
+                ..base.carve
+            },
         ] {
             assert_ne!(LayerSpec { carve, ..base }.bytes(), key, "a breach parameter is missing from the key: {carve:?}");
         }

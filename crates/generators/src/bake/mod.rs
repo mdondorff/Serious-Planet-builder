@@ -34,6 +34,8 @@ pub struct Grid {
     origin: (u32, u32),
     /// The physical cell metric (GEN-138); `None` is the uniform metric: every cell `dx^2`, neighbours `dx` and `sqrt 2 dx` apart.
     metric: Option<metric::Metric>,
+    /// The cells that exist (GEN-141): a cell outside the mask has no neighbours and is no one's neighbour, so the kernels see only the masked cells. `None`: every cell.
+    active: Option<std::sync::Arc<[bool]>>,
 }
 
 /// The 8 neighbours as `(di, dj)`: the four axis neighbours first, then the diagonals.
@@ -44,7 +46,7 @@ impl Grid {
         assert!(w >= 3 && h >= 3, "a grid is at least 3 x 3 cells, not {w} x {h}");
         assert!(dx.is_finite() && dx > 0.0, "the cell size is finite and positive, not {dx}");
         assert!(w.checked_mul(h).is_some_and(|n| n < u32::MAX as usize), "the cell index is a u32: {w} x {h} cells are too many");
-        Grid { w, h, dx, origin: (0, 0), metric: None }
+        Grid { w, h, dx, origin: (0, 0), metric: None, active: None }
     }
 
     /// The same grid with its cell `(0, 0)` at the global cell `origin` (a window of a larger grid: the jitter of a cell follows its global position).
@@ -57,6 +59,18 @@ impl Grid {
     pub fn with_metric(mut self, metric: metric::Metric) -> Grid {
         self.metric = Some(metric);
         self
+    }
+
+    /// The same grid restricted to the `active` cells (one flag per cell): the others do not exist for the kernels. Used to route a catchment alone (G-LOCAL).
+    pub fn with_active(mut self, active: Vec<bool>) -> Grid {
+        assert_eq!(active.len(), self.len(), "one flag per cell");
+        self.active = Some(active.into());
+        self
+    }
+
+    /// Whether cell `p` exists on this grid.
+    pub fn is_active(&self, p: usize) -> bool {
+        self.active.as_ref().is_none_or(|a| a[p])
     }
 
     /// Whether the grid carries a physical metric.
@@ -111,7 +125,11 @@ impl Grid {
     /// The neighbour `d` of cell `p`, if it is on the grid.
     pub fn neighbour(&self, p: usize, d: usize) -> Option<usize> {
         let (i, j) = ((p % self.w) as i64 + NEIGHBOURS[d].0, (p / self.w) as i64 + NEIGHBOURS[d].1);
-        (i >= 0 && j >= 0 && i < self.w as i64 && j < self.h as i64).then(|| j as usize * self.w + i as usize)
+        let q = (i >= 0 && j >= 0 && i < self.w as i64 && j < self.h as i64).then(|| j as usize * self.w + i as usize)?;
+        match &self.active {
+            Some(a) if !a[p] || !a[q] => None,
+            _ => Some(q),
+        }
     }
 
     /// The distance from a cell to its neighbour `d`.
