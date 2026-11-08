@@ -10,6 +10,8 @@ mod bake_h0;
 mod bake_kernels;
 #[path = "bake_metric.rs"]
 mod bake_metric;
+#[path = "bake_partition.rs"]
+mod bake_partition;
 #[path = "bake_rock.rs"]
 mod bake_rock;
 #[path = "bake_round.rs"]

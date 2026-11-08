@@ -132,7 +132,7 @@ pub fn catchment_roots(receiver: &[u32], order: &[u32]) -> Vec<u32> {
 }
 
 /// The cells in a fixed topological order: each cell after its receiver (a depth-first walk of the donors from the roots in index order).
-fn topological_order(receiver: &[u32]) -> Vec<u32> {
+pub(super) fn topological_order(receiver: &[u32]) -> Vec<u32> {
     let n = receiver.len();
     // The donors in compressed form, then the stack from the roots: each cell comes after its receiver.
     let mut order = Vec::with_capacity(n);
@@ -173,24 +173,29 @@ fn receivers(grid: &Grid, filled: &[f64], outlet: &[bool], seed: u64) -> Vec<u32
         if outlet[p] || !grid.is_active(p) {
             continue;
         }
-        let mut best = (0.0f64, NONE);
-        for d in 0..8 {
-            let Some(q) = grid.neighbour(p, d) else { continue };
-            let mut s = (filled[p] - filled[q]) / grid.distance_at(p, d);
-            if s > 0.0 {
-                s *= 1.0 + 0.5 * jitter(seed, grid.global_id(p), d);
-            }
-            if s > best.0 {
-                best = (s, q as u32);
-            }
-        }
-        assert!(
-            best.1 != NONE,
-            "cell {p} is not an outlet and has no lower neighbour after the flood (the heights are too flat for the epsilon)"
-        );
-        receiver[p] = best.1;
+        receiver[p] = receiver_of(grid, filled, p, seed);
     }
     receiver
+}
+
+/// The receiver of the non-outlet cell `p`: the neighbour of the steepest jittered slope on the filled surface (it reads `p` and its 8 neighbours only).
+pub(super) fn receiver_of(grid: &Grid, filled: &[f64], p: usize, seed: u64) -> u32 {
+    let mut best = (0.0f64, NONE);
+    for d in 0..8 {
+        let Some(q) = grid.neighbour(p, d) else { continue };
+        let mut s = (filled[p] - filled[q]) / grid.distance_at(p, d);
+        if s > 0.0 {
+            s *= 1.0 + 0.5 * jitter(seed, grid.global_id(p), d);
+        }
+        if s > best.0 {
+            best = (s, q as u32);
+        }
+    }
+    assert!(
+        best.1 != NONE,
+        "cell {p} is not an outlet and has no lower neighbour after the flood (the heights are too flat for the epsilon)"
+    );
+    best.1
 }
 
 /// Freeman's multiple flow direction (exponent [`MFD_EXPONENT`]): every cell starts with its own area and, from the highest cell down (ties by the cell index), shares what it holds

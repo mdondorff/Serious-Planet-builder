@@ -283,7 +283,7 @@ The problem: the new catchments are not known before a routing, yet routing is 8
 
 1. The region is cut into fixed tiles of the regional grid (256 cells at Earth: 208 km).
 2. A tile's flood is a pure function of the tile's heights (`bake/spill.rs`, `flood_labelled`: from outlets and all border cells). Only tiles whose round-start surface changed are re-flooded. The round's changed tiles are known without routing: round 1, the edit's footprint; later rounds, the cells of the previous round's recomputed catchments.
-3. The border graph (`SpillGraph`) is solved for the whole region, every time. It discovers the new divides and levels: there is nothing to predict. F9: 146,881 nodes, 17 ms for 3,072^2 cells; about 0.3 s for the largest landmass (estimate).
+3. The borders are solved for the whole region, every time: the tiles are swept, each flooded from the values its neighbours offer, until no offer changes (GEN-143; 5 sweeps, 65 tile floods for 35 tiles on the prototype window). It discovers the new divides and levels: there is nothing to predict. The minimax border graph of F9 (`SpillGraph`: 146,881 nodes, 17 ms for 3,072^2 cells) gives the spill level but not the epsilon-filled surface: epsilon steps do not compose across a tile in floating point, so the graph does not reproduce the resident bits.
 4. Receivers and `A_d` are recomputed on tiles whose inputs changed: levels, or the area flowing in across a tile border. Propagation downstream ends where a tile's outgoing border values are bit-equal to the stored ones.
 5. Catchments are read from the receivers; a catchment-round is recomputed if its key (below) is new; otherwise its stored round result is used.
 
