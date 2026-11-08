@@ -180,6 +180,7 @@ pub struct ClassPoint {
 /// How many coast lattices a process keeps (a lattice of the default size is about 8 MB): the worlds a viewer or a test opens in turn.
 const COAST_MEMO_CAP: usize = 4;
 
+/// The key is everything the lattice depends on: the seed (the plates and the field follow from it), the radius and the whole shelf profile; a new input of the lattice must join it.
 static COAST_MEMO: std::sync::OnceLock<std::sync::Mutex<Vec<(String, std::sync::Arc<CoastLattice>)>>> = std::sync::OnceLock::new();
 
 /// The default class source of one seed (GEN-094, GEN-095): the plates, and the land share of each for the back-arc.
@@ -242,6 +243,11 @@ impl ClassSource {
         self
     }
 
+    /// Whether both sources read the same coast lattice (the process-wide memo served one to both).
+    pub fn shares_coast_lattice_with(&self, other: &ClassSource) -> bool {
+        std::ptr::eq(self.coast_lattice(), other.coast_lattice())
+    }
+
     pub fn shelf(&self) -> &ShelfProfile {
         &self.shelf
     }
@@ -252,11 +258,17 @@ impl ClassSource {
         self.coast.get_or_init(|| {
             // The lattice is a pure function of the seed, the radius and the shelf profile (the plates follow from the seed): a process that opens the same world again shares it.
             let key = format!("{}|{:x}|{:?}", self.seed, self.radius_m.to_bits(), self.shelf);
-            let mut memo = COAST_MEMO.get_or_init(|| std::sync::Mutex::new(Vec::new())).lock().expect("the coast lattice memo");
-            if let Some((_, lattice)) = memo.iter().find(|(k, _)| *k == key) {
-                return lattice.clone();
+            let memo = COAST_MEMO.get_or_init(|| std::sync::Mutex::new(Vec::new()));
+            let hit = |memo: &Vec<(String, std::sync::Arc<CoastLattice>)>| memo.iter().find(|(k, _)| *k == key).map(|(_, l)| l.clone());
+            if let Some(lattice) = hit(&memo.lock().unwrap_or_else(|e| e.into_inner())) {
+                return lattice;
             }
+            // Built outside the lock: two worlds build side by side, and a duplicate build of one world gives the same bytes.
             let lattice = std::sync::Arc::new(self.build_coast_lattice());
+            let mut memo = memo.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(shared) = hit(&memo) {
+                return shared;
+            }
             if memo.len() == COAST_MEMO_CAP {
                 memo.remove(0);
             }
@@ -266,11 +278,8 @@ impl ClassSource {
     }
 
     fn build_coast_lattice(&self) -> CoastLattice {
-        let threads = if self.coast_threads > 0 {
-            self.coast_threads
-        } else {
-            std::thread::available_parallelism().map_or(1, |n| n.get()).min(16)
-        };
+        let threads =
+            if self.coast_threads > 0 { self.coast_threads } else { std::thread::available_parallelism().map_or(1, |n| n.get()).min(16) };
         let cap_km = self.shelf.passive_width_km.max(self.shelf.active_width_km) + self.shelf.slope_width_km;
         CoastLattice::build(
             &|d| crate::global::continent_land_depth(self.seed, d),
