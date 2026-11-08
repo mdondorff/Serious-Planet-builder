@@ -1,6 +1,6 @@
 # Terrain and hydrology: target architecture and data contracts (A3)
 
-Status: proposed (spikes session for opus-planner, 2026-11-08; inbox #100). D1 = option A, conditional (owner, 2026-11-08). D2 to D10 of SPIKE-105 §13.5 are working assumptions at their recommended options. This document goes to one external review round before the prototype builds on it (SPIKE-105 §14).
+Status: proposed (spikes session for opus-planner, 2026-11-08; inbox #100). D1 = option A, conditional (owner, 2026-11-08). D2 to D10 of SPIKE-105 §13.5 are working assumptions at their recommended options. Amended after the external reviews of A3 (S105 §15) and of ADRs 0110-0115 (S105 §18, §19). The prototype's binding contract; production approval follows the gates of §12 (the A/B gate).
 Source: `spikes/architecture-replan/results/results.md` (SPIKE-105; "§" numbers below without a file name are of this document, "S105 §" of that file). Evidence: S105 §8 and §12 (F1-F6), SPIKE-104.
 Scope: the terrain and hydrology from the world definition to the runtime surface. Rendering, streaming, keys and the store format stay unless a section says otherwise.
 Reading rule: every element is marked **E** (exists as needed), **X** (exists, extended) or **N** (new). A statement that the prototype must confirm is marked **[gate]** with the gate of §12.
@@ -55,18 +55,30 @@ The surface at a direction `d` is one function, evaluated in this order. Every c
 |---|---|---|---|---|
 | 1 | `B(d)` | the base: the store lattice's C1 read (GEN-107), clamped as today | `read_elevation_c1`, pure in `d` | stored f32 per lattice node |
 | 2 | `L(d)` | the local change: what the bake added against `B` at the local grid, faded at the coast | C1 read of kind 13, clamped to the four cells (GEN-112), times `coast_fade(B)` (GEN-113) | stored i16 in steps of 0.25 m (`QUANT_STEP_M`) |
-| 3 | `C(d)` | the creases: octaves below the local grid (GEN-109) | analytic | none (CPU f64) |
+| 3 | `C(d)` | the creases: octaves below the local grid (GEN-109) | evaluated at read time on the CPU; stores nothing of its own. Analytic octaves; with the relief switch on, the amplitude reads the baked driver `k` (GEN-099) | none (CPU f64) |
 | 4 | `A(d)` | items above erosion (§7.1): constructed features | item stages (ADR 0066) | as today |
 
 - Surface: `S = B + L + C + A`, composed in f64, rounded to f32 only at the mesh (CON-13).
-- **One elevation source:** nothing else adds height. The regional change, the channels and the fill depth are inputs of the bake, not runtime terms (§3.3).
-- Step 2 replaces today's `change + fill depth` (GEN-112, ADR 0101 point 3): the runtime no longer adds the fill depth back. A basin shows its floor and the water field draws its lake (§5.5).
+- **One elevation source:** nothing else adds height. `L` is the only baked elevation term the runtime reads (`k` is an amplitude, not a height). The regional change, the channels and the fill depth are inputs of the bake, not runtime terms (§3.3).
+- Step 2 replaces today's `change + fill depth` (GEN-112, ADR 0101 point 3): the runtime no longer adds the fill depth back. A basin shows its floor and the water field draws its lake (§5.5). The switch to this form waits for G-BASIN and the lake producer (K11), since until then a basin would show a dry hole.
 - Presentation data (ground detail, normals) follows CON-14 and adds no height.
 
 ### 3.2 Identity
 
-- The base lattice is one object per body: `base_id` = its bake key (ADR 0006). The bake reads `B` through the same read as the runtime: pass 2's stride-4 window (`sample_window_coarse`) is retired (SPIKE-104 D-B).
-- Every derived layer (K5, K6, K7, channels) folds `base_id` into its key, so a layer can only be read against the base it was taken on. **X** (GEN-114 folds the bake key today; the base's read becomes part of the identity).
+- The base lattice is one object per body. The bake reads `B` through the same read as the runtime: pass 2's stride-4 window (`sample_window_coarse`) is retired (SPIKE-104 D-B).
+- `base_id` is the hash of everything that fixes `B`'s value at a direction:
+
+| Input | Why |
+|---|---|
+| the lattice's bake key (ADR 0006), its source and version | the stored values |
+| the C1 read's version and parameters (GEN-107), clamp included | the same nodes read differently are another surface |
+| the mapping, radius and `k` (§4) | direction to node |
+| the sea level | the coast fade (GEN-113), outlets, the land mask |
+| the below-erosion height items whose footprint meets the tile, in canonical order (§7.1), by their canonical stored form | `B` includes them at read time |
+| the stored form of the lattice node (f32) and of each read (f64) | §9 |
+
+- Every derived layer (K5, K6, K7, channels) folds `base_id` into its key, so a layer can only be read against the base it was taken on. **X** (GEN-114 folds the bake key today; the base's read and the item list become part of the identity).
+- The surface's identity adds `C`'s band, parameters and version, the `k` channel's hash (GEN-099, GEN-109), and the items above erosion.
 - A mismatch is refused, naming both keys (STRM-065 behaviour). No silent application.
 
 ### 3.3 What the bake passes to the runtime
@@ -80,6 +92,7 @@ The surface at a direction `d` is one function, evaluated in this order. Every c
 
 - **Burn-in rule (K7):** K7 starts from `B + C1(ΔR)` (the regional change read C1). It lowers cells along each channel segment to the segment's level profile (rasterised, 8-connected, along the segment's D8 path at the local grid), then runs the breach (SPIKE-104 D-A: pass 1's rule at the local grid), the incising carve, thermal and deposition. It only lowers. Channels are thus part of `L`, not a separate term.
 - **The hand-over rule:** a C1 read must not be used to transfer a channel network between grids: it re-dams diagonal links (SPIKE-104 §3, 13.3 % of land). Burn-in plus breach is the transfer **[gate G-CON]**.
+- **The channel after the sampler:** a channel correct on the local grid must stay correct through the composition `S`. Along every segment, at the local grid's nodes: no rise above one quantisation step (0.25 m), continuous across tile borders, and a confluence's floors meet. Between nodes a C1 read lifts a diagonal link toward its off-diagonal neighbours, by design; that rise is reported, not gated, as is the rise from `C` **[gate G-PROFILE]**.
 - **Below the local grid:** a bank profile may be added later as a lower-only term with a declared bound, in the place of creases (GEN-109); not in the MVP.
 
 ## 4. Grids, metrics and scale
@@ -108,12 +121,32 @@ One free integer per body, `k`, sets every grid (counts per cube-face edge). Ear
 
 | Body | Radius | `k` | Local cell | Land share (assumed) | `B + L + hydrology` store | H0 (F6 scaled) | Notes |
 |---|---|---|---|---|---|---|---|
-| Moon | 1,737 km | 12 | about 111 m | no runoff | `B` + stamps only | skipped | no sea, no runoff: K4 to K7 skip (R5b) |
+| Moon | 1,737 km | 12 | about 111 m | no runoff | `B` + stamps only | skipped | hydrology off: K4 to K7 skip (R5b) |
 | Earth | 6,371 km | 14 | 102 m | 29 % | see §10 | about 7 s | target |
 | 2x Earth | 12,742 km | 14 | 204 m | 29 % | as Earth (same counts) | as Earth | the larger planet takes coarser cells so the store stays inside R7; the local detail comes from creases |
 | 2x Earth at 102 m | 12,742 km | 15 | 102 m | 29 % | about 4x Earth: over R7 | about 4x | allowed only with a store budget of its own |
 
-- The preset holds what scale does not: gravity, rotation, tilt, atmosphere, K, U, thresholds (ADR 0108); a radius alone sets no geology.
+- Three owners, all named parameters of the world definition (ADR 0108), with Earth as the default values:
+
+| Owner | Holds |
+|---|---|
+| Body | radius, gravity, rotation, tilt, atmosphere, sea level, the hydrology switch |
+| Geology preset | K, U, lithology distributions, class rules, thresholds |
+| Hydrology and climate | precipitation, runoff model, PET, initiation `T` |
+
+- A preset supplies defaults; the body remains the owner of its physical parameters. A radius alone sets no geology; it does set the cell metric and the grids.
+- **Hydrology switch.** K5 to K7 run when the body's hydrology is on, whether or not it has a sea. A body with hydrology off has `B` and items only, and K4 to K7 skip. Hydrology on needs at least one outlet of the flood: in the MVP the sea. A body with runoff and no sea is refused with an error (its closed basins as outlets are post-MVP; §5.6). A body with a sea and no runoff switches hydrology off.
+- **The three scale levers are different choices:** a larger body at the same `k` (coarser cells, same store); `k` + 1 (the same cell size, 4x store); fewer features (a body-specific budget).
+- **Scaling model (design-level; G-SCALE checks it at two bodies):**
+
+| Quantity | Formula |
+|---|---|
+| Regional cells on land | `land_share x 6 x (3 x 2^(k-2))^2` |
+| Local cells on land | `land_share x 6 x (6 x 2^k)^2` |
+| Store | `store(k) = store(14) x 4^(k-14)` x `land_share / 0.29`, at the same channels |
+| Build memory, largest landmass | bytes a cell (about 90 resident, §6.6) x the largest landmass's regional cells |
+| Local cell size | `2 pi R / (4 x 6 x 2^k)` (nominal) |
+
 - Climate at scale: orography lattice counts follow the same `k` rule; the preset's winds and tilt (S105 X12).
 - Terrain, hydrology and store for the 2x case are checked as a design table here and one 2x H0 run in the prototype (S105 §13.3).
 
@@ -124,31 +157,35 @@ Two levels and two representations. The levels are H0 (planet-wide, coarse) and 
 ### 5.1 H0: the coarse planet-wide route (K4) **N**
 
 - Grid: H0 cells (3.26 km at Earth), all six faces as one graph, neighbours across cube edges (§4.2), one priority flood from the sea, D8 receivers, area over true cell areas. F6: 7 s with heights in memory, 2.2 GB.
-- Output, exactly: (a) **regions** (§6.1), the landmass partition; (b) trunk connectivity for the level-1 preview (§11). H0 constrains H1 in nothing else: H1 routes its own surface.
+- Output, exactly: trunk connectivity and watersheds for the level-1 preview (§11), and a coarse estimate of the landmass partition for planning work. H0 constrains H1 in nothing: H1 determines the authoritative drainage and channel topology from its own surface, and the regions from its own land mask (§6.1). An isthmus or strait under the H0 cell exists at H1 only.
 - H0 does **not** cut erosion domains (F4: 105 m rms and a seam).
 
 ### 5.2 H1: the channel graph and the diffuse field (K6)
 
 | Representation | What | Grid | Stored | Mark |
 |---|---|---|---|---|
-| **Diffuse field** | accumulated area by MFD (Freeman, exponent 1.1), weighted by the true cell area and runoff; the magnitude at every land cell | regional grid | one byte a cell (GEN-110's code) | **X** |
+| **Diffuse field** | `A_d`, the effective area accumulated by MFD (Freeman, exponent 1.1); the magnitude at every land cell | regional grid | f64 scratch of a round; a one-way byte for materials (below) | **X** |
 | **Channel graph** | one D8 receiver per channel cell (the routing of the filled surface, jitter from the global cell id); channel cells are defined below | regional grid | as segments only (§5.4), each vertex with its discharge `Q` | **N** |
 | Receivers elsewhere (hillslopes) | scratch of a solve | regional grid | not stored; recomputed by a re-solve | - |
 
-Rules:
-Three quantities, kept apart:
+Rules. The quantities, kept apart (`a` the true cell area in m^2):
 
-| Quantity | Definition | Used for |
-|---|---|---|
-| **Diffuse area** `A_d` | MFD accumulation (clipped to the catchment, §6.3) of true cell area times the runoff weight (GEN-129's `discharge_weight`) | the carve's erosion (ADR 0099), materials, initiation |
-| **Initiation** | a cell where `A_d >= T` | starts a channel |
-| **Channel discharge** `Q` | accumulated along the D8 tree: `Q(c) = a(c) r(c) + sum of Q over all D8 donors of c`, `a` the true cell area, `r` the runoff in m/s from the unclamped runoff (GEN-129's `runoff_mm`) | rivers, widths, lakes' inflow |
+| Quantity | Definition | Unit | Used for |
+|---|---|---|---|
+| **Geometric area** `A_g` | the sum of `a` over the members of a D8 tree, at an outlet or a tree node | m^2 | catchment size, classification; `A_d`'s closure when `w` = 1 |
+| **Effective area** `A_d` | MFD accumulation (clipped to the catchment, §6.3) of `a w`; `w` the dimensionless `discharge_weight` (GEN-129: the runoff over the reference 300 mm a year, clamped to 0.02 to 8) | m^2 of reference runoff | the carve's erosion (ADR 0099), initiation, materials |
+| **Initiation** | a cell where `A_d >= T` | - | starts a channel |
+| **Potential discharge** `Q` | accumulated along the D8 tree: `Q(c) = a(c) r(c) + sum of Q over all D8 donors of c`, over **every** land cell, channel or not; `r` the runoff in m/s (GEN-129's `runoff_mm`, not weight-clamped, non-negative) | m^3/s | the conservation check |
+| **Routed discharge** `Q_w` | `Q` with the basins' losses applied (§5.5) | m^3/s | rivers, widths, lakes' inflow |
 
+- **`A_d` closes on its own quantity.** At an outlet `A_d` equals the sum of `a w` over the catchment's members (to the floating-point error of the sum; G-CON), and equals `A_g` only where `w` = 1.
+- **Runoff reaches the channel along D8.** Every cell has a D8 receiver in the routing; a hillslope cell's runoff follows its D8 path and enters the channel graph at the first channel cell it reaches. The hillslope receivers are scratch of the solve.
 - **Connectivity comes from D8.** A channel cell is an initiated cell, or the D8 receiver of a channel cell: once started, a channel **continues downstream** to its outlet even where `A_d` falls below `T`; there is no restart.
-- **`Q` is conserved.** Confluence rule: `Q` is the sum of its donors plus the local term, so it is non-decreasing along a segment by construction and the sum of `Q` at all outlets equals the sum of `a r` over land (G-CON). The running maximum of `A_d` used in the earlier draft is dropped.
-- `A_d` and `Q` differ by design: MFD spreads diffuse flow, D8 keeps a river as one line. The carve keeps `A_d`; rivers report `Q`.
-- **River initiation:** `T` is a preset parameter (default 50-100 km^2 of runoff-weighted true area, D5). Because `A_d` is runoff-weighted, a rainfall edit moves initiation with no height change (E5).
-- A channel's heads are initiated cells with no channel donor. Confluences have two or more channel donors. A channel ends at an outlet of the routing (the sea, the mouth); it passes through a basin and continues below its spill point, and the basin's `q_out` says how much of `Q` the basin lets through (§5.3).
+- **`Q` is conserved.** Confluence rule: `Q` is the sum of its donors plus the local term, so it is non-decreasing along a segment by construction (`r >= 0`) and the sum of `Q` at all outlets equals the sum of `a r` over land (G-CON). The running maximum of `A_d` used in the earlier draft is dropped.
+- `A_d` and `Q` differ by design: MFD spreads diffuse flow, D8 keeps a river as one line; `w` is clamped, `r` is not. The carve keeps `A_d`; rivers report `Q_w`.
+- **The stored byte.** `round(8 log2(A_d / a_n))`, `a_n` the body's mean regional cell area: code 0 is one reference cell or less, one step is 9 %, 255 is 2^31.9 cells and saturates. It is one-way, for materials and detail (GEN-110, GEN-119). No simulation stage reads it: the carve, the initiation and the key read the routing's f64.
+- **River initiation:** `T` is a preset parameter in m^2 of effective area (default 50-100 km^2, D5), calibrated with the runoff model, not a universal constant. Because `A_d` is runoff-weighted, a rainfall edit moves initiation with no height change (E5).
+- A channel's heads are initiated cells with no channel donor. Confluences have two or more channel donors. A channel ends at an outlet of the routing (the sea, the mouth); it passes through a basin and continues below its spill point. Inside a lake it is a line under water; below an endorheic basin it continues with `Q_w` = 0, a dry valley that K7 still burns in and K11 does not draw as water.
 
 ### 5.3 Basins
 
@@ -167,7 +204,7 @@ A basin is a connected set of cells (8-neighbour) below the routing surface's sp
 
 | Class | Rule (presets, ADR 0108) | Behaviour |
 |---|---|---|
-| artefact | fewer than `min_cells` cells and shallower than `min_depth_m` (in cells, so that it scales with the grid) | breached in K5/K7 (no object) |
+| artefact | fewer than `min_cells` cells and shallower than `min_depth_m` (in cells, so that it scales with the grid) | no object and no water; the pit stays in the surface unless K5's or K7's breach removes it (the breach does not read classes); counted by G-LAND |
 | lake | deeper or larger, with an active outlet by §5.5 | kept; lake at the spill level |
 | endorheic | no active outlet by §5.5 (ADR 0105 point 2) | kept; sink for water and sediment; water level from §5.5; playa if the level is at the floor |
 | intentional | named by an item (§5.6) or a driver (caldera, karst later) | kept whatever its size |
@@ -176,7 +213,7 @@ A basin is a connected set of cells (8-neighbour) below the routing surface's sp
 - The canonical flood's level is the minimax spill level plus the epsilon ramp, by its construction (GEN-141); `bake/spill.rs` is the tile-seam minimax and gives no spill points or basin objects, so it is not used for basins. The equality of the two levels is not tested.
 - A component whose depth from floor to rim is under `pit_min_m` is the epsilon ramp of a flat, not a basin (it is counted, not kept).
 - **Touching basins are one component.** Two basins with different spill levels that touch are one basin with one floor and one spill (the lowest rim); nested basins are not separated (GEN-145). Separating them needs the spill graph's hierarchy and is open.
-- **`Q` and basins.** The channel discharge `Q` (section 5.2) is the potential discharge before basin losses, so that the sum at the outlets is the sum of `a r`. A basin's `q_out` is the discharge that continues below its spill point: `Q_in - A(spill) E_net` for a lake, 0 for an endorheic basin. The channel graph carries `Q`; a consumer that needs the lake-adjusted discharge below a basin reads `q_out` and the basin's spill point.
+- A class is computed once, from the final round's surface (K6). A basin exists if the final surface has it: a depression a breach has opened is no longer a basin and has no object; the id of §5.4 is what continues. An artefact and a natural endorheic basin differ by size and depth, and by the balance of §5.5. Protecting an intentional basin from the breach (a mask read by K5) is open, with §5.6.
 
 ### 5.4 Identity under change
 
@@ -201,7 +238,22 @@ Identities are **pure functions of the current surface**, so a from-scratch buil
 ### 5.5 Lakes
 
 - A lake is a basin with a water level. Producer of the water field W (ADR 0041 point 7's retrofit path). **X**
-- **Water level (steady balance):** the basin's inflow `Q_in` is the discharge reaching it (§5.2) and its net evaporation is `E_net = max(PET - P, 0)` of the basin's cells (PET of GEN-117, ADR 0108 preset). The level `h` solves `A(h) E_net = Q_in` on the area curve, clamped to [floor, spill]. If `A(spill) E_net < Q_in`, the basin overflows: `h` = spill level, the active outlet is the spill point, and the downstream channel continues with `Q_in - A(spill) E_net` (the basin's `q_out`, §5.3; the channel graph's `Q` stays the discharge before the basin's losses). Otherwise the basin is endorheic and passes nothing downstream. A pure function of the surface and the drivers; no time stepping.
+- **Balance (steady state, no time stepping; a pure function of the surface and the drivers).** `Q_in = A(h) E_open + q_out(h)`:
+  - `Q_in`: the routed discharge `Q_w` of the basin's exit cells (those whose receiver lies outside the basin and whose flow does not re-enter it). It includes the local runoff of the basin's cells.
+  - `E_open = PET - (P - r)`, the mean over the basin's cells (PET of GEN-117): open-water evaporation in excess of the land's, charged only where the ground is flooded. Never negative: Budyko's land evaporation `P - r` is at most PET.
+  - `A(h)`: the area curve (§5.3), linear between its steps, non-decreasing.
+  - `q_out(h)`: 0 below the spill level.
+
+| Case | Level `h` | Class | `q_out` |
+|---|---|---|---|
+| `Q_in` <= `A(spill) E_open`, `Q_in` > 0 | the lowest `h` with `A(h) E_open = Q_in` | endorheic | 0 |
+| `Q_in` > `A(spill) E_open` (also every `E_open` = 0 with inflow) | the spill level; the active outlet is the spill point | lake | `Q_in - A(spill) E_open` |
+| `Q_in` = 0 | the floor | endorheic (playa) | 0 |
+
+- A finite level below the spill exists exactly when evaporation can balance the inflow; otherwise the basin overflows, which is not a failure.
+- **The cascade (`Q_w`).** Computed like `Q`, cells in descending filled level (ties by the global id), with one change at a kept basin: the flow of its exit cells stops there, and `q_out` enters at its spill cell. A basin's cells all stand above its spill level, so a basin is resolved before anything below it, and a chain of basins resolves in one pass.
+- **Closure:** the sum of `Q_w` at the outlets plus the sum over basins of `Q_in - q_out` equals the sum of `a r` (G-CON).
+- **Open:** nested basins are not separated (§5.3): a basin below its spill uses one water surface over its sub-basins. The carve's `A_d` runs through every basin to the sea (ADR 0105 point 2 is not in the round solver), so `A_d` below an endorheic basin is overstated; reported at G-LAND. A fix would read the previous round's classes.
 - The fill depth stops being a surface term (§3.1) and a stored channel; it is the basin's water level minus the ground, derived from the basin object at the local grid.
 - Water surfaces render through ADR 0041's path; a basin's area curve answers "what is flooded at level x" without a raster.
 
@@ -217,7 +269,7 @@ The reviewers asked for the outer iteration's contract. Evidence: S105 F2 and F4
 
 | Unit | Definition | Lifetime |
 |---|---|---|
-| **Region** | a connected landmass with its sea outlets, from H0. Border = the sea: no artificial cut. A landmass is routed whole; it need not be resident (§6.6) | the world build's scope of one routing |
+| **Region** | a connected component of the land mask at the regional grid (8 neighbours, cube edges joined), with its sea outlets. Border = the sea: no artificial cut. A landmass is routed whole; it need not be resident (§6.6). Re-derived from the mask at every commit (§7.2) | the scope of one routing |
 | **Round** | one routing of the region's surface and the carve steps that follow on it; today's re-route interval (5 steps) | a fixed part of the `SimulationProfile` (§8) |
 | **Catchment** | one D8 tree of the round's routing (all cells that drain through one outlet) | one round |
 
@@ -248,7 +300,7 @@ F7 measured what couples catchments in a routing, and the contract removes each 
 
 | Coupling | Measured (F7, catchment alone against the window routing) | Contract |
 |---|---|---|
-| **MFD area crosses D8 borders** (a cell shares its area with a lower neighbour in another catchment) | 24k-52k cells of a catchment differ in area, max ratio up to 20 and more | clipped (local form, GEN-141): lower neighbours in another catchment are dropped from a cell's weights and from their sum; the cell shares among its own catchment's lower neighbours (its receiver is one). A small change to the kernel (§6.4). Catchments become closed for area: the area at an outlet is the sum of its members' true areas. A form that sends the foreign share to the cell's own receiver keeps the foreign levels in the denominator and is not closed in this sense (measured below) |
+| **MFD area crosses D8 borders** (a cell shares its area with a lower neighbour in another catchment) | 24k-52k cells of a catchment differ in area, max ratio up to 20 and more | clipped (local form, GEN-141): lower neighbours in another catchment are dropped from a cell's weights and from their sum; the cell shares among its own catchment's lower neighbours. Its D8 receiver is always one of them (strictly lower on the filled surface, `receiver_of`, and in its catchment by definition), so a non-outlet cell always has a positive weight and needs no fallback. A small change to the kernel (§6.4). Catchments become closed for `A_d`: at an outlet it is the sum of `a w` over the members (§5.2). A form that sends the foreign share to the cell's own receiver keeps the foreign levels in the denominator and is not closed in this sense (measured below) |
 | **The flood's tie order** (FIFO `flat` queue, global heap order on equal levels) | after round 1: 3 to 182 cells of different receivers, up to 3,191 filled cells differing, by up to 0.245 m | canonical: the flood orders its visits by (level, global cell id), with no FIFO queue (GEN-141). The result is a pure function of the heights. It does **not** make a catchment's flood independent of its neighbours: a cell on a flat can be first reached from a neighbour in another catchment (measured below). Routing locality is gated as the tile-partitioned route against the whole-region route **[gate G-PART]** |
 | **Region border** | none for a landmass (the border is the sea) | fallback only (§6.1) |
 
@@ -286,22 +338,23 @@ The problem: the new catchments are not known before a routing, yet routing is 8
 **Chosen: approach 1's semantics, executed as a partitioned route with memoised tiles.** The re-solve's result is by definition a full region re-route; only the work is memoised, so correctness has no extra assumption:
 
 1. The region is cut into fixed tiles of the regional grid (256 cells at Earth: 208 km).
-2. A tile's flood is a pure function of the tile's heights (`bake/spill.rs`, `flood_labelled`: from outlets and all border cells). Only tiles whose round-start surface changed are re-flooded. The round's changed tiles are known without routing: round 1, the edit's footprint; later rounds, the cells of the previous round's recomputed catchments.
+2. A tile's flood is a pure function of its inputs: the tile's heights, its outlet and activity flags, the offers from its neighbours and the grid's parameters (`partition.rs`, the memo key). A tile is re-flooded when any of them changed: **a tile whose surface did not change re-floods if an offer did**.
 3. The borders are solved for the whole region, every time: the tiles are swept, each flooded from the values its neighbours offer, until no offer changes (GEN-143; 5 sweeps, 65 tile floods for 35 tiles on the prototype window). It discovers the new divides and levels: there is nothing to predict. The minimax border graph of F9 (`SpillGraph`: 146,881 nodes, 17 ms for 3,072^2 cells) gives the spill level but not the epsilon-filled surface: epsilon steps do not compose across a tile in floating point, so the graph does not reproduce the resident bits.
-4. Receivers and `A_d` are recomputed on tiles whose inputs changed: levels, or the area flowing in across a tile border. Propagation downstream ends where a tile's outgoing border values are bit-equal to the stored ones.
+4. Receivers and `A_d` follow the dependencies of §6.8. Today they are recomputed whole (GEN-143); their memo is an optimisation, to be justified by G-INC.
 5. Catchments are read from the receivers; a catchment-round is recomputed if its key (below) is new; otherwise its stored round result is used.
 
 F9 (E2-type edit on 144 tiles): the flood output differs in exactly the tiles whose heights changed (2, then 4 after one round); levels, receivers and area change in 2 to 4 tiles (2.8 %, under 0.25 % of cells), and tiles plus graph reproduce the whole-window flood exactly (0 cells differ). The work per round is therefore of the order of the changed tiles and the tile sweeps, with no prediction of the dirty set. GEN-143 measures the tile floods only (E2: 3 of 65, 4.6 %); the offers, receivers, roots, order and area sweep are recomputed whole (1.58 s an edit against 0.71 s for the resident route on 1.6e6 cells). **[gate G-INC, on E2]**
 
-**The catchment-round key** is the hash, in canonical order, of:
+**The catchment-round key.** The rule: every value the catchment-round function reads is in its key, directly or through an immutable upstream key, in its canonical form (§9). Today's read set is `CatchmentInputs`; G-LOCAL enforces the rule by computing a round from the key's inputs alone. The hash, in canonical order, of:
 - the member cell ids;
 - the outlet cell, and its base level (sea or basin spill);
-- the receiver of every member, and `A_d` at every member (the routing topology and magnitude, §6.3);
+- the receiver of every member, whether it is an outlet of the region, and `A_d` at every member (the routing topology and magnitude, §6.3);
+- every member's distance to its receiver (the metric, or the mapping's identity);
 - every member's round-start surface in canonical form (§9);
 - the drivers at the members (erodibility by height, uplift, runoff, vegetation, taper);
 - the `SimulationProfile` and the kernel versions.
 
-With clipped MFD and the canonical flood a catchment has no other border conditions: the key holds everything its round reads.
+With clipped MFD and the canonical flood a catchment has no other border conditions: the key holds everything its round reads. The jitter seed enters through the receivers; `base_id` and the routing's inputs enter through the surface and `A_d`, and are not read again.
 
 - Equality with a fresh build follows: a fresh build is the same function with no memo hits.
 - Divide movement needs no separate rule: it shows up as changed membership, hence a new key.
@@ -311,14 +364,14 @@ With clipped MFD and the canonical flood a catchment has no other border conditi
 | Use | What is resident | Measured or bounded |
 |---|---|---|
 | One routing of the largest landmass, resident (the simplest, used by the prototype and the first world build) | z f32, filled f64, receiver u32, order u32, area f64, id map u32: 32 bytes a cell | F8: 1.49e8 cells at H1 (a landmass of 8.4e7 km^2), 4.5 GiB, 5.1 GiB peak |
-| One round of that landmass, resident | routing plus the carve's arrays | about 10 GB by pass 1's 64 bytes a cell (F2 measured the route inside that figure; not measured on a landmass) |
-| Partitioned route | one tile's arrays at a time and the offers across tile borders (the bound is not measured: GEN-143 keeps the arrays resident and proves equality only) | GEN-143 |
+| One round of that landmass, resident | routing plus the carve's arrays | an estimate: about 11 to 13.5 GB (next list), not measured on a landmass. No margin against the 12 GB |
+| Partitioned route | one tile's arrays at a time and the offers across tile borders. **Not built:** GEN-143 keeps the arrays resident and proves equality only | GEN-143; memory unmeasured |
 | Level-2 re-solve in the editor | the changed tiles and the catchments dirty in that round, within terrain's 4 GB (BUDG-005) | gate G-INC |
 
 - Measured at the erosion grid (12,288 cells, `examples/region_scale`, windows of the prototype region of 1.0e6 to 44e6 cells): the resident rounds peak at about 90 bytes a cell (74 without the example's height copies) and about 2 microseconds a cell on 8 threads; the whole prototype landmass (about 150e6 cells) is bounded at 11 to 13.5 GB, not measured. The 2.98 GiB and the 39.5 % channel share of the GEN-144 and GEN-145 runs are at 3,072 cells (3.26 km); at 12,288 cells 7 % of land cells are channel cells.
 - A landmass routing does **not** have to be resident. The partitioned route produces the same result (F9: levels equal, 0 cells differ); the tile flood is swept to a fixed point from the neighbours' offers and the accumulation is a topological sweep across tiles with border shares (`bake/partition.rs`, GEN-143).
 - The world build may run resident or partitioned; both give the same bits (gate G-PART). Editor jobs are partitioned.
-- World-build memory is a separate budget from CON-21 (a runtime rule): 12 GB (owner, 2026-11-08; ADR 0115 point 7, the ADR otherwise proposed), stated by G-SCALE.
+- World-build memory is a separate budget from CON-21 (a runtime rule): 12 GB (owner, 2026-11-08; ADR 0115 point 7, the ADR otherwise proposed), measured by G-SCALE as the process's peak on the reference machine, with inputs and drivers, flood and routing arrays, accumulation, erosion state, tile-border state, temporary allocations, parallel overhead and the allocator. An estimate is not a pass.
 - **The partitioned route is the normal path for large landmasses; the resident route is an optimisation for a landmass that fits the budget.** The threshold at which the resident route is chosen is measured by G-SCALE (cells and bytes a cell against 12 GB); no compact resident layout is built unless the measurement asks for it.
 - **H0-region split at artificial borders** (the earlier fallback) is kept only as a tested fallback for a landmass over the budget even partitioned; G-SCALE measures its divide migration across the split. The design no longer relies on it.
 
@@ -326,6 +379,38 @@ With clipped MFD and the canonical flood a catchment has no other border conditi
 
 - K6 (H1) reads the final round's routing of the region. K7's tile refinement reads K5 and K6 of its region and is keyed per tile as today.
 - K7 stays per tile with its halo (GEN-101): it does not route globally; it reads the channel levels as boundary conditions (§3.3).
+- **What is catchment-local.** The breach, the implicit sweeps and D8-routed sediment: inside a round a catchment reads and writes only its members, and its sediment leaves only at its outlet. Across rounds it couples through the surface.
+- **What is not.** Thermal and one-cell pit spreading read 8 neighbours and cross divides. They are not catchment-round steps: they run per tile with a halo, keyed per tile, after the last round (as K7 does today) **[gate G-SED, G-SURF]**.
+- "Independent catchments" is a statement about today's solver, not a limit on later sediment models: a later process that couples catchments is added to §6.3's table with its contract.
+
+### 6.8 The reference computation and the dependency contract
+
+The bit-equal claim of §6.6 has one normative reference, and it is a definition, not an algorithm: resident routing and partitioned routing are two ways of computing it. Heights are the round's canonical form, widened to f64 (§9).
+
+| Result | Definition |
+|---|---|
+| Filled surface `F` | the unique solution of `F(c) = z(c)` for an outlet, else `F(c) = max(z(c), min over neighbours q of F(q) + eps)`, computed in f64 |
+| Receiver of `c` | `receiver_of`: the steepest jittered drop on `F` over `c`'s neighbours, jitter a pure function of the seed, the global id and the direction |
+| `A_d(c)` | `a(c) w(c)` plus the donors' shares, added in the order (donor's `F` descending, global id) |
+| `Q(c)`, `Q_w(c)` | the local term plus the donors, in the order of the D8 topological sort (a pure function of the receivers) |
+
+- **Why a fixed point is enough.** `x -> max(z, x + eps)` is monotone under IEEE rounding and strictly raises `x` (`x + eps > x`, asserted in both floods), so the fixed point is unique (generalised Dijkstra). The visiting order changes nothing: equal offers give equal candidates. The (level, id) tie order is what makes the **heap** reach it; the FIFO flat queue of the old flood does not (§6.3).
+- **Offers.** A cross-tile offer is a pair (border cell, the lowest `F` of its neighbours outside the tile). The representation is f64 bits.
+- **Termination.** Offers only fall within a solve: a tile's flood is monotone in its offers. After sweep `n`, every cell whose flood path crosses at most `n` tile borders is final. Sweeps are bounded by one plus the most border crossings of any flood path, at most the count of border cells; a repeated offer change is a fall.
+- **Equivalence guaranteed:** bit equality of `F`, the receivers, `A_d`, `Q` and `Q_w` for any tile size, any sweep order and either route. A 128-bit memo collision is the only excluded case. **[gate G-PART]** on adversarial fixtures: depressions and divides across tile borders, a spiral flood path across tiles (the worst case for sweeps), tiles at cube corners.
+
+**The dependency contract.** Correctness never rests on the memo: a full region recomputation is the fallback, and always allowed. Each step is reused only if all its inputs are bit-equal:
+
+| Step | Inputs (a change in any one recomputes it) | Today |
+|---|---|---|
+| Tile flood | the tile's heights, outlet and active flags, its incoming offers, grid, `eps` | memoised (GEN-143) |
+| Offers | `F` of the border rings | from the flood's result |
+| Receivers of a tile | `F` of the tile and of its neighbour ring, the seed | recomputed whole |
+| `A_d` of a tile | its `F`, its receivers (for the clip: membership), `w`, and the shares across its border, by tile and sweep in the topological order | recomputed whole |
+| Catchment membership | the receivers | recomputed whole |
+| Catchment round | its key (§6.5) | memoised by design |
+
+- A region where these propagate widely is still correct; it is simply a slower edit, and §11's levels take it. G-INC reports the work. On the prototype window GEN-143's edit took 1.58 s against 0.71 s for the resident route, so the memo has not yet paid at that size.
 
 ## 7. Edits, order and dependencies
 
@@ -347,14 +432,17 @@ With clipped MFD and the canonical flood a catchment has no other border conditi
   - a K7 tile key folding the local inputs of its window.
 - **Reach follows the routing, not a radius:** the dirty set of an edit is what §6.5 finds by keys. ADR 0066 point 1's radius bound applies to above-erosion items only.
 - Invalidation of the runtime tiles: K7 tiles whose window intersects a changed catchment, and K8 tiles above them (ADR 0072's refresh path).
+- **Landmass topology.** An edit can change the land mask: a land bridge joins two regions, a coast cuts an island off, a basin reaches the sea. Regions are re-derived from the mask at every commit; a changed partition is a new set of regions. Tile and catchment keys hold no region id, so what did not change is still reused. All K5 and K6 state of an affected region is re-derived through those keys. A merged region that exceeds the job limits of §7.5 goes to level 3. A change of the sea level changes every outlet and is a full rebuild.
 
 ### 7.3 Propagation end
 
-A catchment-round is recomputed exactly when its key changes. There is no tolerance test ("quantised to zero" is not a stopping rule). The inputs are the canonical stored forms (§9). A threshold crossing or a spill inside a catchment is a change of its output and flows into the next round's keys. Downstream catchments are affected through their inputs only (divide movement, and the routing's area via §6.3's clipped MFD).
+A catchment-round is recomputed exactly when its key changes. There is no tolerance test ("quantised to zero" is not a stopping rule). "Exact" means bit equality of the canonical stored forms (§9), not of in-memory values. A threshold crossing or a spill inside a catchment is a change of its output and flows into the next round's keys. Downstream catchments are affected through their inputs only (divide movement, and the routing's area via §6.3's clipped MFD).
 
 ### 7.4 Transactions
 
-- A commit is a set of keys: the K5 rounds, K6, K7 and materials of the dirty set. The runtime keeps drawing the previous commit until the new one's tiles are ready (CON-22, ADR 0072).
+- A commit is a set of keys under one `commit_id`: the K5 rounds, K6 (channels, basins, water levels), K7, materials and the regions of the dirty set. **N**
+- **Coherent reads.** A frame reads one commit, for surface, channels and water together. The runtime keeps drawing the previous commit until the new one's drawn tiles are ready, then swaps the commit (CON-22). New terrain with old channels, or new channels with old water levels, cannot be drawn.
+- This is new against ADR 0072, which refreshes tile by tile. Per-tile refresh stays for items above erosion, where no hydrology depends on them.
 - A background result for a superseded commit is dropped by key (ADR 0072 point 3).
 
 ### 7.5 Limits
@@ -373,13 +461,30 @@ A `SimulationProfile` belongs to K1 and is part of every derived key. It is the 
 | `k_dt` | stream-power `K dt` per step | 0.05 |
 | `quality` | the level of a run: `preview` (the H0 route and overlays, §11) or `full` | full |
 | process parameters | breach limits, thermal, deposition, thresholds | presets (ADR 0108) |
+| routing parameters | the flood's `eps`, the MFD exponent, the clip rule, the flood's tie rule (`RoundRules`) | today's |
+| seed policy | the jitter's stream: a pure function of the world seed and the global cell id | today's |
+| quantisation | `QUANT_STEP_M` (§3.1), the canonical forms of §9, the area code | today's |
 
+- The profile is immutable for the duration of a solve, and holds everything that can change a result. The tile size of the partitioned route is deliberately not in it: it cannot change a bit (G-PART).
 - Simulated duration is `rounds x steps_per_round x k_dt` in carve units, not years and not editor time.
 - **Every solve starts from the definition.** An edit or a re-run never advances a previous surface. A different duration is a different profile, hence different keys; two histories are compared by running two profiles.
 
 ## 9. Determinism and canonical forms
 
-Hard constraints (CON-07, CON-14, ADR 0010): same authoritative output across runs, thread counts, Windows and Linux on x86_64. Supported platforms: **Windows and Linux on x86-64**. ARM and macOS are excluded until they are added to CI (CON-26). No GPU result enters any authoritative value. `libm`, integer hashing and fixed-order reductions as today.
+Hard constraints (CON-07, CON-14, ADR 0010). The contract: given the same world definition, seed, profile and edit history, and the same kernel versions, a supported build on 1 or 8 threads produces identical canonical serialized results. Supported builds: **Windows (MSVC) and Linux on x86-64**. ARM and macOS are excluded until they are added to CI (CON-26). No GPU result enters any authoritative value. Bit equality must be shown by the actual builds, not inferred: **[gate G-DET]**.
+
+| Source of divergence | Control | State |
+|---|---|---|
+| Platform maths | `libm`; `f64::sin`, `powf`, `mul_add` and the rest banned by clippy `disallowed-methods` (COORD-009) | enforced |
+| Fused multiply-add | Rust does not contract `a * b + c`; `mul_add` banned | enforced |
+| x87 excess precision | x86-64 uses SSE2 | by target |
+| SIMD against scalar | the authoritative kernels are scalar (no `std::arch`, `target_feature` in `bake`, `erosion`). A SIMD kernel must equal the scalar one bit for bit, by test | true today |
+| Reduction order, task order | fixed order; `par::map` returns in index order; tested on 1, 3 and 8 threads (`bake_rounds.rs`) | enforced |
+| Denormals, rounding mode | the default control word on bake threads; nothing sets FTZ, DAZ or the rounding mode | by convention |
+| NaN payloads | outputs asserted finite (ADR 0010) | enforced |
+| `HashMap` order | used for lookups only (the memo), never iterated into a result | by review |
+| Compiler version | CI uses `@stable`, no `rust-toolchain` file | **open:** a toolchain pin before the world build (proposal for the owner) |
+| The test | CI's determinism manifest (`generate --manifest`, ADR 0010) covers tile hashes | **open:** the round solver and H1 are not in it; G-DET adds them |
 
 | Contract | Rule |
 |---|---|
@@ -389,16 +494,22 @@ Hard constraints (CON-07, CON-14, ADR 0010): same authoritative output across ru
 | Reproducibility against correctness | bit equality of a re-solve and a fresh build is a test of determinism, not of correctness; correctness has its own gates (§12) |
 | Edit replay | the same item list and the same order give the same key set on any run (ADR 0007, §7) |
 
-| Interface value | Canonical form | Read by |
-|---|---|---|
-| Base `B` | f32 lattice node, C1 read to f64 | all |
-| Round surface (a stage output) | f32 height on the regional grid (0.25 m steps would flatten plains' slopes of 1e-4 at 814 m into false flats) | the next round, K6, K7 |
-| Regional change into K7 | last round minus `B`, read C1 | K7 |
-| Local change `L` | i16 in steps of 0.25 m (kind 13) | K8 |
-| Channel levels, basin levels | f32 metres | K7, K11 |
-| Diffuse area | u8 code (GEN-110) for consumers; the routing's f64 is scratch within a round | materials, K6 |
+Three representations, kept apart: the **canonical persistent form** (what is stored and reproduces a result), the **stage computation** (a kernel's working precision), and the **runtime composition** (f64, §3.1). Conversions happen only at the points named. A widening (f32 to f64) is exact; a narrowing rounds to nearest.
 
-- A round reads the previous round's **stored** form (f32), not an in-memory f64. Today's bake holds the carve in f64 and stores f32 heights for the post-pass only (`bake/tile.rs:322`); under this contract a fresh build and a re-solve pass through the same form.
+| Value | Canonical persistent form | Stage computation | Conversion point | Read by |
+|---|---|---|---|---|
+| Base `B` | f32 lattice node | f64 | the C1 read widens | all |
+| Round surface (a stage output) | f32 height on the regional grid (0.25 m steps would flatten plains' slopes of 1e-4 at 814 m into false flats) | f64 inside the round; the routing and sweeps read it widened | narrowed once, at the end of a round | the next round, K6, K7 |
+| Regional change into K7 | none: derived | f64: last round (widened) minus `B` at the regional node, then read C1 | at K7's read | K7 |
+| K7's surface | none: scratch of the tile | f64 | narrowed to `L` | - |
+| Local change `L` | i16 in steps of 0.25 m (kind 13) | f64 after the read | quantised at K7's end | K8 |
+| Channel levels, basin levels, `Q_w` | f32 | f64 in K6 | narrowed at K6's end | K7, K11 |
+| Filled surface, receivers, `A_d` | none: scratch of a round | f64, u32 | - | the round, K6 |
+| Diffuse area code | u8 (§5.2) | - | one-way, at K6's end | materials only |
+| Surface `S` | none | f64 (runtime composition) | to f32 at the mesh (CON-13) | K11 |
+
+- Fresh builds and re-solves read the same canonical inputs at every stage.
+- A round reads the previous round's **stored** form (f32), not an in-memory f64. Today's bake holds the carve in f64 and stores f32 heights for the post-pass only (`bake/tile.rs:322`); `solve_rounds` carries f64 across rounds. Under this contract a fresh build and a re-solve pass through the same form.
 - The effect of the f32 form on the carve against a run in f64 is measured **[gate G-EQ]**.
 
 ## 10. Store and budget
@@ -416,7 +527,7 @@ R7: about 40 GB at most at Earth. **Hard gate G-STORE:** measured on real serial
 | Basins, lakes | - | under 0.1 GB | |
 | Catchment-round key table and per-tile border summaries | - | to measure (a measured item of G-STORE) | |
 | Edit overrides and continuity maps | - | to measure (a measured item of G-STORE) | |
-| Temporary re-bake space | - | to measure separately from steady state | |
+| Temporary re-bake space; extra space while a replacement version is committed; versions retained for undo | - | to measure, each separately from steady state | |
 | **Total** | about 36 GB | about 26-38 GB with the round records; about 22-34 GB without | gate |
 
 Fallback if the gate fails with field narrowing done: the local grid at about 200 m (C-f). It is not an assumption of this design.
@@ -459,22 +570,23 @@ These are S105 §13.3's table, renamed, with the changes the round solver brings
 | Gate | Measure | Pass |
 |---|---|---|
 | G-SURF | runtime minus bake surface at lattice nodes | 0 before quantisation; at most 0.25 m after |
-| G-CON | channels and conservation at every sampling: every channel cell's D8 receiver is a channel cell or an outlet (a channel never ends mid-course); `Q` at a confluence equals the sum of its donors plus the local term; sum of `Q` at the outlets against the sum of `a r`; `A_d` at outlets against the sum of true cell areas, across cube edges | 0 disconnected segments; relative error at most 1e-9 for both sums |
+| G-CON | channels and conservation at every sampling: every channel cell's D8 receiver is a channel cell or an outlet (a channel never ends mid-course, also where `A_d` falls below `T` and through a basin); `Q` at a confluence equals the sum of its donors plus the local term; sum of `Q` at the outlets against the sum of `a r`; sum of `Q_w` at the outlets plus the basins' losses against the sum of `a r`; `A_d` at outlets against the sum of `a w`, and `A_g` against the sum of `a`, across cube edges | 0 disconnected segments; relative error at most 1e-9 for every sum |
+| G-PROFILE | §3.3: along every segment through the complete read `S` at the local grid's nodes, with `C` off and with `C` on; tile borders; confluences | with `C` off: no rise over 0.25 m, tile-border step at most 0.25 m. Rises between nodes and with `C` on are reported |
 | G-LOCAL | on the new kernels (clipped MFD, canonical flood): the round is a pure function of its key inputs: a catchment carved from the key inputs alone, in any order, against its part of the region round (§6.4 for why a catchment routed alone is not the test) | 0 cells differ |
 | G-ROUND | the round solver against a whole-region carve **with the same new kernel rules** in the reference | 0 cells differ |
-| G-EQ | a re-solve against a fresh build of the edited definition, E1-E6: bit equality. The canonical forms (f32 rounds, 0.25 m `L`) against an f64 run: relief, **and flood topology and initiation** (catchment membership, channel cells, basin count and classes) | bit-equal; relief within 2 %; membership and channel-cell status changed on at most 1 % of land and channel cells respectively; no connectivity change |
+| G-EQ | a re-solve against a fresh build of the edited definition, E1-E7, on the **complete** result: the rounds, K6 (channels, `Q_w`, basins, levels), K7 and the sampled surface: bit equality. The canonical forms (f32 rounds, 0.25 m `L`) against an f64 run: relief, **and flood topology and initiation** (catchment membership, channel cells, basin count and classes) | bit-equal; relief within 2 %; membership and channel-cell status changed on at most 1 % of land and channel cells respectively; no connectivity change |
 | G-INC | on E2 and each edit: the routing work (tiles re-flooded, graph solve, tiles of receivers and area recomputed) against a full region routing; the dirty catchment set found per round; the catchment keys recomputed | work reported per round; E2 at most 10 % of a full routing (F9: about 3 % of tiles); the level-2 job within §11.3 |
-| G-BASIN | E3's merge, split, spill and outlet migration | ids and continuity maps follow §5.4 |
+| G-BASIN | E3's merge, split, spill and outlet migration; a chain of basins; each row of §5.5's cases, with fixtures for high and zero `E_open` | ids and continuity maps follow §5.4; the levels and `q_out` of §5.5 to 1e-9 relative |
 | G-SED | per catchment and per round | eroded = deposited + exported to 1e-9 relative |
 | G-LAND | relief p50 and hypsometry against the whole-region carve; sinks | within the seed noise floor; unclassified sinks at most 1 % of land (reported, not the main gate) |
-| G-STORE | §10: real serialized data, including packs, indexes, keys, catchment-round key table, border summaries, edit overrides and continuity maps; temporary re-bake space separately | 35 GB target, 40 GB hard, steady state; temporary reported |
-| G-SCALE | a resident routing and round of the largest landmass (memory, time, flat-area cost); a partitioned route of it; the H0-split fallback, measuring divide migration and flow across its artificial borders; H0 at 2x radius | resident within the world-build budget (ADR 0115); partitioned equals resident (G-PART); the split measured; F6 x 4 within 1.5x |
+| G-STORE | §10: real serialized data, including packs, indexes, keys, catchment-round key table, border summaries, edit overrides and continuity maps; temporary re-bake space, replacement-commit space and retained versions separately | 35 GB target, 40 GB hard, steady state; the others reported |
+| G-SCALE | a resident routing and round of the largest landmass (process peak, §6.6; time; flat-area cost); a partitioned route of it; the H0-split fallback, measuring divide migration and flow across its artificial borders; H0 at 2x radius; one large and one small body against §4.3's scaling model; the runtime's memory separately (BUDG-005) | resident or partitioned within the world-build budget (ADR 0115), measured; partitioned equals resident (G-PART); the split measured; F6 x 4 within 1.5x; the model within 1.5x |
 | G-RT | the region's flight | no held-back tiles; frame within BUDG-001/002 |
-| G-DET | 1 and 8 threads; Windows and Linux; edit replay | bit-equal |
-| G-PART | a partitioned route (tile floods from the neighbours' offers, cross-tile accumulation) against a resident route of the same region; this is where routing locality is gated (receivers, filled levels, `A_d`) | bit-equal, also on the edited surfaces |
+| G-DET | 1 and 8 threads; Windows and Linux builds; resident and partitioned; edit replay; a fixture of the round solver and H1 in CI's determinism manifest | identical canonical serialized results |
+| G-PART | §6.8's definitions: a partitioned route (tile floods from the neighbours' offers, cross-tile accumulation) against a resident route of the same region, **with runoff weights**; adversarial fixtures of §6.8; this is where routing locality is gated (receivers, filled levels, `A_d`) | bit-equal, also on the edited surfaces |
 
 - Correctness is structural (D10): connectivity, conservation, seams, locality, relief. Closeness to one reference run is not a criterion (F4).
-- **Every structural gate runs after each edit E1-E6 as well as on the fresh build.** A gate passed only on a generated world is not passed.
+- **Every structural gate runs after each edit E1-E7 as well as on the fresh build.** A gate passed only on a generated world is not passed. **E7:** connect two landmasses by a bridge crossing the sea level, then separate them again.
 - The Earth comparisons (SPIKE-102, SPIKE-104) stay reported values, not gates (R6).
 
 ### 12.2 Fixtures
@@ -503,3 +615,7 @@ Open items for the review:
 2. The cost of the canonical flood on large flats.
 3. Whether a landmass as a region fits a world build; the split fallback's error.
 4. The f32 canonical form of round surfaces against a run in f64.
+5. Nested basins (§5.3) and basin losses in the carve's `A_d` (§5.5).
+6. Protecting an intentional basin from the breach (§5.3).
+7. A toolchain pin (§9).
+8. The non-resident form of the partitioned route (§6.6).
