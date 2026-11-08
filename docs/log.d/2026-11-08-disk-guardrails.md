@@ -1,0 +1,1 @@
+- 2026-11-08 disk-guardrails: test scratch under target/test-tmp cleared per run, `cargo xtask worktrees [--prune]`, a disk gate (20/50 GB) in prepush, store and bake (BUILD-038, BUILD-039)
