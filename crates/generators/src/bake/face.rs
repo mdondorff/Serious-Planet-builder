@@ -231,10 +231,12 @@ pub fn pass1_face_rock(
     let routing = carve_rock(&grid, &mut z, &outlet, &params, factors.as_deref(), &carve_rock_in, spec.stream());
     drop((uplift, runoff));
     let (m, h, cell_m2) = (spec.cells + 2 * spec.halo, spec.halo, spec.dx() * spec.dx());
+    // GEN-110: the code is the drainage area in cells; with the metric a cell is its own true area.
     let mut area = Vec::with_capacity(spec.cells * spec.cells);
     for j in 0..spec.cells {
         for i in 0..spec.cells {
-            area.push(area_code(routing.area[(j + h) * m + i + h], cell_m2));
+            let c = (j + h) * m + i + h;
+            area.push(area_code(routing.area[c], if grid.has_metric() { grid.cell_area(c) } else { cell_m2 }));
         }
     }
     (

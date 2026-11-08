@@ -78,10 +78,6 @@ impl TileLayerSpec {
         }
         b.push(u8::from(p.carve.incise_only));
         b.push(u8::from(p.carve.keep_pits));
-        // The physical cell metric (GEN-138) enters the key only when on: a layer of the uniform metric keeps its key.
-        if p.carve.cell_metric {
-            b.push(0xC3);
-        }
         b.extend((p.carve.steps as u64).to_le_bytes());
         b.extend((p.carve.reroute_every as u64).to_le_bytes());
         let t = &p.thermal;

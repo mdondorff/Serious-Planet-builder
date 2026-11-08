@@ -273,6 +273,7 @@ mod tests {
             CarveParams { breach_height_scale_m: 2000.0, ..base.carve },
             CarveParams { breach_slope: 2e-3, ..base.carve },
             CarveParams { keep_pits: false, ..base.carve },
+            CarveParams { cell_metric: true, ..base.carve },
         ] {
             assert_ne!(LayerSpec { carve, ..base }.bytes(), key, "a breach parameter is missing from the key: {carve:?}");
         }

@@ -43,7 +43,7 @@ fn the_neighbour_distances_follow_the_sphere_not_the_grid() {
     // Centre: one dx on the axes and sqrt 2 dx on the diagonals.
     assert!((at(n / 2, n / 2, 1) - 1.0).abs() < 1e-3, "centre axis {}", at(n / 2, n / 2, 1));
     assert!((at(n / 2, n / 2, 7) - core::f64::consts::SQRT_2).abs() < 2e-3, "centre diagonal {}", at(n / 2, n / 2, 7));
-    // F5: at a corner the axis neighbours are about 0.94 dx and the diagonal about 0.67 dx * sqrt 2 / sqrt 2, that is 0.67 dx; along the middle of an edge 0.71 dx towards the edge.
+    // F5: at a corner the axis neighbours are about 0.94 dx and the diagonal neighbours about 0.67 sqrt 2 dx.
     assert!((at(1, 1, 1) - 0.94).abs() < 0.02, "corner axis {}", at(1, 1, 1));
     assert!((at(1, 1, 7) - 0.67 * core::f64::consts::SQRT_2).abs() < 0.12, "corner diagonal {}", at(1, 1, 7));
     // Symmetry: the distance a to b is the distance b to a.
@@ -86,7 +86,7 @@ fn the_routing_conserves_the_true_area_and_the_carve_is_the_same_bits_on_every_r
         zz.iter().map(|v| v.to_bits()).collect::<Vec<u64>>()
     };
     assert_eq!(run(&g), run(&g), "two runs differ");
-    // The metric moves the result (areas shrink) but not the shape: every cell stays finite and above the sea.
+    // The metric moves the result: the areas shrink, so the carve differs from the uniform one.
     let uniform = Grid::new(m, m, g.dx());
     assert_ne!(run(&g), run(&uniform), "the metric changed nothing");
 }
