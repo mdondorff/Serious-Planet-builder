@@ -656,3 +656,79 @@ Verdict: **adopt**, **adopt with change**, **already covered**, **reject**.
 | 9C | Determinism hard: platforms, thread counts, edit replay, graph topology; f64 in flood and spill; no GPU feedback | **already covered**, with one addition | CON-07, CON-14, ADR 0010 and ADR 0035 hold all of it for Windows and Linux x86_64; f64 comparisons with no fast-math and ties by cell index (GEN-100) are deterministic there. ARM and macOS are untested and not supported targets (CON-26). Addition: results that later stages read must be read in their **canonical stored form**, not an unquantised f64 copy: `bake/tile.rs:322` stores f32 heights for the post-pass while the carve works in f64. A re-solve reading stored outputs and a from-scratch run reading in-memory f64 can then differ at a divide. The contract names the canonical form of every interface value (§13.4); edit-replay tests are added (§13.3) |
 | 9D | Larger planets tested beyond H0; no cell-count-defines-resolution | **adopt** | design-level scaling table for terrain, hydrology, storage and climate in A3 (§13.4); the growth tests of the first review (S9.4) join the gates |
 | 10 | Positions on D1-D8; next steps | **adopt** | D1 conditional, D3 a hypothesis, D5 configurable threshold and network validation, D6 subject to measurement, D8 with failures of architectural gates returning to the owner (§13.5). Next steps match §13.2 |
+
+## 12. Feasibility checks of phase 3
+
+Sonnet sub-agents, seed 14, release builds, 4 threads, shared machine: **timings are indicative**. Probe code on `spike/terrain-pipeline-review` (`f4_outer_iteration.rs`, `f5_cell_areas.rs`, `f6_cross_face_h0.rs`; never merged).
+
+### F4: the outer iteration (route, cut domains, carve, repeat)
+Question: on F2's window (1,228 x 1,228 cells at 814 m, 20 steps), how close does the outer iteration get to the whole-window carve R, is it stable, and what happens at the borders?
+Method:
+- Domains are D8 catchments of a routing of the current surface; every domain is carved alone (outside cells are outlets raised 1e5 m) and the results are assembled.
+- Variants: **C** (continued surface, R rounds of 20/R steps) and **F** (fresh restart from the base each round, domains from the previous round).
+
+| Variant | rms against R | max | Cells over 1 m | 3.3 km relief p50 (R 396.0 m) |
+|---|---|---|---|---|
+| C, 1 round | 18.3 m | 1,074 m | 19.4 % | 397.3 |
+| C, 2 rounds | 15.2 | 1,158 | 18.0 % | 396.7 |
+| C, 4 rounds | **12.8** | 966 | 17.5 % | 396.6 |
+| C, 10 rounds | 57.5 | 1,485 | 78.9 % | 420.0 |
+| F, round 1 / 2 / 3 / 4 | 18.3 / 17.7 / 18.1 / 18.4 | up to 1,413 | 19-22 % | |
+| C, 4 rounds, domains from a 3.26 km grid (4x coarser) | 105 | 2,382 | 53 % | 393.1 |
+
+Controls (the noise floor of R itself):
+
+| Control against R | rms | Cells over 1 m | Relief p50 |
+|---|---|---|---|
+| R with another jitter seed (two seeds) | **72.4, 73.1 m** | 82 % | 396.4, 397.3 |
+| Base + 1 cm per-cell noise | 1.11 m (max 327 m) | 0.5 % | 396.0 |
+| Base + 1 m per-cell noise | 13.7 m | 29.8 % | 396.0 |
+| R with re-route every 2 steps (not 5) | 56.5 m | 77 % | 420.5 |
+| C 4 rounds against R, seed for seed (3 seeds) | 12.4-13.3 m | 17-18 % | within 1 m of each R |
+
+| Border and sink measures (final surface) | R | C, 4 rounds | F, round 4 |
+|---|---|---|---|
+| Height step, pairs across a domain border, p50 / p99 | 20.0 / 476 m (same pairs) | 18.9 / 454 m | 26.2 / 479 m |
+| Land in pits; depth p50 / p95 | 4.86 %; 141 / 603 m | 4.36 %; 170 / 615 m | 4.33 %; 171 / 615 m |
+| Land cells draining across the frozen border, last round | - | 3.3 % | 27-34 % (F's label measure) |
+
+Round-to-round change for F: 21.3, 11.7, 7.3 m rms (rounds 2, 3, 4); the change falls, but the distance to R does not.
+
+- **Answer:**
+  - **R is chaotic, so pointwise equality with R is the wrong test.** A different jitter seed moves it by 72 m rms, a 1 m base noise by 14 m. An outer iteration at 4 rounds (12.8 m) is inside that floor and well below the seed noise. It leaves no visible step at domain borders and adds no sinks.
+  - F does not get better than one round, so **C is the form to use**: continued surface, the rounds being the carve's re-routes.
+  - C with 10 rounds is **not** a domain failure: the whole-window carve with the same re-route rhythm gives the same 57 m and the same relief gain. Re-route frequency is itself an erosion parameter.
+  - **A coarse domain cut is not acceptable as it stands:** 105 m rms and a slight seam (border p99 609 m against 524). The domains must come from a routing of the erosion grid, with H0 only selecting regions.
+
+### F5: physical cell areas
+Question: how much bias does a uniform `dx^2` put into catchments and river selection?
+Method: exact spherical quad area per cell (sum over the face equals the face area to 3e-14); `route_weighted` with weights = area/dx^2 against none, face 2, 3,072 cells.
+
+| Quantity | Value |
+|---|---|
+| Cell area / dx^2 (dx = R pi/2 / N) | min 0.707, max 1.000, mean 0.849 (a max/min ratio of 1.41) |
+| Uniform-area total against the true total | +17.9 % (the mean cell is smaller than dx^2 by 8/(3 pi)) |
+| Channel cells (true area >= 50 km^2): unweighted/true - 1 | p50 +17.8 %, p95 +35 %, max +41 % |
+| Ten largest catchments, uniform against true | +0.9 % to +29.7 % |
+| Channel cells added by the uniform area, share of true channel cells | T = 10 km^2: 14.0 %; 50: 7.3 %; 100: 7.7 %; concentrated in the outer half of the face |
+| Weighted outlets total against the sum of true areas | relative error 1.5e-11 |
+| Distances, neighbour-to-neighbour against dx (analytic) | centre 1.00; corner axis 0.94, diagonal 0.67; edge middle along the edge 0.71 (slope and `f` biased up to 1.5x) |
+
+- **Answer:** yes, the bias changes which rivers exist (7-14 % of channel cells) and the largest catchments' areas by up to 30 %. It is in **today's bake** too. Receivers did not move; only accumulation did.
+
+### F6: cross-face H0 from the stored field
+Question: what does a planet-wide route across cube edges cost when heights come from the stored field bake, and do catchments span faces as one drainage?
+Method: elevation read by C1 from `global16384-m9c14` (read only, blocks decoded with the key from the store's index; the production open path refused the store because its key has changed since the store was baked), 3,072 cells a face, one index over the six faces with neighbours across cube edges, one priority flood from the sea, D8 receivers, area.
+
+| Quantity | Value |
+|---|---|
+| Store read of all faces (decoding 1,536 blocks, 4 threads) | 130.8 s (20-27 s a face) |
+| Flood / receivers / accumulation (planet-wide) | 5.3 s / 1.2 s / 0.6 s |
+| Peak memory | 2.2 GB (about 1.0 GB read cache) |
+| Land cells / cells unreached | 16.7e6 / 0 |
+| Catchments / spanning two or more faces | 264,345 / 896, holding 26.6 % of land |
+| Largest catchment | 5.88e6 km^2 (faces 0 and 3; F1's single-face truncated largest was 1.12e6) |
+| Connectivity of the largest cross-edge catchment | 20,533 sampled cells, all reach its one outlet |
+
+- **Answer:** a planet-wide cross-face route takes about 7 s at 3 km once heights are in memory. The largest catchment is 5.9e6 km^2. At 814 m that is about 8.9e6 cells, about 0.6 GB at pass 1's 64 bytes a cell: still a domain that fits a background job.
+- L1 preview: heights stay resident, so re-routing is about 7 s (the read is paid once, and the 131 s is decode-bound, not an edit cost).
