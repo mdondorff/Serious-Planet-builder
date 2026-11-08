@@ -1,0 +1,13 @@
+seed 14: 19314 windows scanned, 900 hills-and-plains candidates; best 12 by land p95 near 450 m (face, i0, j0 of the window start at 12,288 cells; land, z p50, p95, max; precipitation p50):
+  face 0 i 1136 j 7152 | land 84 % | z p50 32 p95 450 max 474 | P p50 2346
+  face 0 i 1648 j 752 | land 88 % | z p50 35 p95 450 max 492 | P p50 766
+  face 3 i 6512 j 11248 | land 86 % | z p50 333 p95 450 max 484 | P p50 662
+  face 1 i 7536 j 8432 | land 86 % | z p50 52 p95 450 max 649 | P p50 1097
+  face 5 i 9328 j 9072 | land 90 % | z p50 29 p95 449 max 567 | P p50 788
+  face 4 i 880 j 240 | land 92 % | z p50 359 p95 452 max 510 | P p50 781
+  face 0 i 4208 j 9968 | land 84 % | z p50 29 p95 452 max 1216 | P p50 657
+  face 2 i 3824 j 3312 | land 86 % | z p50 27 p95 448 max 763 | P p50 800
+  face 4 i 2672 j 10480 | land 80 % | z p50 202 p95 453 max 488 | P p50 720
+  face 5 i 6512 j 368 | land 80 % | z p50 29 p95 455 max 796 | P p50 677
+  face 4 i 1520 j 1648 | land 90 % | z p50 195 p95 443 max 503 | P p50 858
+  face 1 i 3056 j 10992 | land 72 % | z p50 23 p95 458 max 498 | P p50 721
