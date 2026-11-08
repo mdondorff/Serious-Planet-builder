@@ -93,3 +93,30 @@ fn the_partitioned_route_and_the_round_solver_run_on_the_cube() {
         assert!(a.iter().zip(&b).all(|(x, y)| x.to_bits() == y.to_bits()), "G-ROUND on the cube ({threads} threads)");
     }
 }
+
+// spec: GEN-144
+#[test]
+fn a_landmass_of_the_cube_is_routed_alone_with_its_coast_as_outlets() {
+    let full = Grid::cube(N, R);
+    let z = globe(&full);
+    // The landmass: the land cells and the sea cells that touch them (the coast ring); the open sea is not on the grid.
+    let land: Vec<bool> = z.iter().map(|&v| v > 0.0).collect();
+    let active: Vec<bool> = (0..z.len()).map(|p| land[p] || (0..8).filter_map(|d| full.neighbour(p, d)).any(|q| land[q])).collect();
+    assert!(active.iter().any(|&a| !a) && land.iter().any(|&l| l), "a landmass with open sea around it");
+    let g = Grid::cube(N, R).with_active(active.clone());
+    let outlet: Vec<bool> = (0..z.len()).map(|p| active[p] && z[p] <= 0.0).collect();
+    let want = route_rules(&g, &z, &outlet, EPS, 5, 0.0, None, RoundRules::ROUND);
+    for tile in [6usize, 12] {
+        let got = partitioned_route(&g, &z, &outlet, EPS, 5, tile, RoundRules::ROUND, &mut PartCache::default());
+        for p in (0..z.len()).filter(|&p| active[p]) {
+            assert_eq!(got.routing.receiver[p], want.receiver[p], "receiver {p} (tile {tile})");
+            assert_eq!(got.routing.area[p].to_bits(), want.area[p].to_bits(), "A_d {p} (tile {tile})");
+        }
+    }
+    let p = CarveParams { steps: 10, reroute_every: 5, round_rules: RoundRules::ROUND, ..CarveParams::default() };
+    let mut a = z.clone();
+    carve(&g, &mut a, &outlet, &p, None, 5);
+    let mut b = z.clone();
+    solve_rounds(&g, &mut b, &outlet, &p, 2, &3usize, 5);
+    assert!((0..z.len()).all(|c| a[c].to_bits() == b[c].to_bits()), "G-ROUND on a masked cube");
+}

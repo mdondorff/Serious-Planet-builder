@@ -14,7 +14,7 @@ Source: `docs/design/terrain-target.md` §6; SPIKE-105 F2, F4, F7; ADR 0088 poin
 1. The scope of one routing is a **region**: a connected landmass, bounded by the sea. It is routed whole, resident or partitioned (tiles flooded from the neighbours' offers, cross-tile accumulation), with the same bits. A split at H0 divides is a tested fallback only.
 2. A **round** is one region-wide routing and the steps that follow; rounds continue the surface. The round count is fixed in the `SimulationProfile`.
 3. A **catchment** is a D8 tree of a round's routing. The breach and sweeps run per catchment, any order, on the shared routing.
-4. MFD is clipped to the catchment (a share towards another catchment goes to the receiver); the flood orders visits by (level, global cell id).
+4. MFD is clipped to the catchment (a lower neighbour in another catchment is dropped from the weights and from their sum: the area at an outlet is the sum of its members' true areas, A3 section 6.4); the flood orders visits by (level, global cell id).
 5. A re-solve is a full region re-route executed with memoised work: only tiles whose round-start surface changed are re-flooded, the tile borders are solved for the whole region (sweeps to a fixed point), and receivers and area are recomputed where their inputs changed. No dirty region is predicted (F9).
 6. A catchment-round is keyed by its member cells, outlet and base level, the receivers and diffuse area on its members, their round-start surface, drivers, the profile and the kernel versions; the same function makes a fresh build.
 

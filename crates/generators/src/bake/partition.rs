@@ -209,7 +209,7 @@ pub fn partitioned_route(
     assert_eq!(outlet.len(), n, "one outlet flag per cell");
     assert_finite("the heights", z);
     assert!(outlet.iter().any(|&o| o), "a flood needs an outlet");
-    assert!((0..n).all(|p| grid.is_active(p)), "the partitioned route takes no mask");
+    assert!(!grid.is_cube() || grid.w() % tile == 0, "the tiles of a cube grid divide a face edge");
     let (_, _, tiles) = rects(grid, tile);
     let mut stats = PartStats { tiles: tiles.len(), ..PartStats::default() };
 
@@ -221,14 +221,14 @@ pub fn partitioned_route(
             for x in r.x0..r.x0 + r.w {
                 let p = y * grid.w() + x;
                 h.word(z[p].to_bits());
-                h.word(u64::from(outlet[p]));
+                h.word(u64::from(outlet[p]) | (u64::from(grid.is_active(p)) << 1));
             }
         }
         z_hash.push(h);
     }
     let mut filled = vec![f64::INFINITY; n];
     for p in 0..n {
-        if outlet[p] {
+        if outlet[p] && grid.is_active(p) {
             filled[p] = z[p];
         }
     }
@@ -279,7 +279,7 @@ pub fn partitioned_route(
             break;
         }
     }
-    assert!(filled.iter().all(|v| v.is_finite()), "a cell is not reached by the flood: no outlet on its component");
+    assert!((0..n).all(|p| !grid.is_active(p) || filled[p].is_finite()), "a cell is not reached by the flood: no outlet on its component");
 
     // ---- receivers, per tile
     let mut receiver = vec![NONE; n];
@@ -287,7 +287,7 @@ pub fn partitioned_route(
         for y in r.y0..r.y0 + r.h {
             for x in r.x0..r.x0 + r.w {
                 let p = y * grid.w() + x;
-                if !outlet[p] {
+                if !outlet[p] && grid.is_active(p) {
                     receiver[p] = receiver_of(grid, &filled, p, seed);
                 }
             }
