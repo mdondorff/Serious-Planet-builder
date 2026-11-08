@@ -464,3 +464,75 @@ Decision rule: if Q1, Q2 and Q5 pass with changes confined to new stages plus th
 | **Total** | **20-34** | three lanes, about 2.5-4 weeks | under A almost all of it is production code of A4-A9 for one region | under B it is the core's v0 |
 
 - Under A the prototype is not throwaway: it is A4-A9 run on one region. That makes the decision cheap to reverse: if Q1 or Q5 fails half way, the region's code becomes B's v0.
+
+## 8. Feasibility checks
+
+Three checks by Sonnet sub-agents (owner go, inbox #98), each one question with a time box. All ran on seed 14, face 2, release builds, 4 threads, on a shared machine: **timings are indicative**. Peak memory is the process's PeakWorkingSet64, polled every 200 ms. Probe code: `spike/terrain-pipeline-review` (`crates/cache/examples/f1_coarse_routing.rs`, `f2_domain_carve.rs`, `f3_river_store.rs`; never merged).
+
+### F1: planet-wide coarse routing (H0)
+Question: what does one routing at about 3 km cost, and how large are the catchments?
+Method: base sampled per cell with `BakeInputs::base`, then `route_weighted` (flood, jittered D8, MFD area) on the face with a 4-cell halo; outlets are the sea and the grid edge.
+
+| | 3,072 cells (3.26 km) | 6,144 cells (1.63 km) |
+|---|---|---|
+| Cells | 9.49e6 | 3.78e7 |
+| Base sampling (analytic) | 62.9 s | 205.3 s |
+| Priority flood alone | 0.70 s | 1.88 s |
+| Routing (flood, receivers, MFD area) | 3.40 s | 7.89 s |
+| Peak memory (whole process) | 348 MB | 1,242 MB |
+| Outlets draining land | 50,369 (48,928 sea) | 103,989 |
+| Catchments over 1e5 km^2 | 42, holding 32.1 % of land | 31, holding 23.0 % |
+| Largest catchment | 1.12e6 km^2 | 1.02e6 km^2 |
+
+- Extrapolated to six faces: routing about 20 s, plus base sampling about 6.3 min with the analytic base. The production H0 would read the stored field bake instead, so sampling becomes a lattice read.
+- Extrapolated to twice Earth's radius at the same cell size: routing about 1.4 min, about 1.4 GB per face.
+- Caveat: catchments that end at the face edge are truncated (3 of the 10 largest). H0 must join faces, for example with the spill graph's cross-face edges (`bake/spill.rs`).
+
+### F2: carving a watershed domain alone
+Question: does the implicit carve on one catchment equal the same carve inside a larger window, and what does a domain solve cost?
+Method:
+- 1,228 x 1,228 cells at 814 m (82 % land), default `CarveParams`, carved whole.
+- Its largest interior catchment D (117,486 cells, 77,925 km^2), found on the original routing, carved alone. Cells outside D were treated either as outlets at base height or as walls (outlets raised by 1e5 m).
+
+| Measure | Result |
+|---|---|
+| Whole-window carve (1,228^2, 814 m) | 4.0 s (base sampling excluded), 188 MB peak |
+| Divide migration in the whole-window carve | 276 cells of D drain out of D, 247 outside cells drain into D |
+| D alone, outside as outlets | max abs difference 458.6 m, rms 5.7 m; 115,691 of 117,486 cells differ; 500 cells leak out |
+| D alone, outside as walls | max 428.1 m, rms 4.8 m; 114,647 cells differ; no leaks |
+| Domain carve 614^2 at 814 m (500 km) | 0.9 s, 169 MB peak |
+| Carve 2,048^2 at 101.8 m (208 km) | 16.9 s, 200 MB peak |
+
+- **Answer: no.** A domain carve does not reproduce the window carve inside the domain. The carve moves divides and trades drainage area across them, so a domain with a frozen border sees a different problem.
+- Consequences for the target (§6):
+  - The domain decomposition must itself be the authoritative definition, also for the first world build (equality by construction, X5). It cannot reproduce today's face carve.
+  - Domain borders freeze divides for one solve. The prototype must measure the step across a domain border, and test an outer iteration: H0 on the carved surface, re-cut the domains, carve again, 2-3 rounds, a fixed count.
+  - Cost is not the issue: a 500 km domain takes about 1 s at 814 m.
+
+### F3: size of a persistent river network
+Question: how large is a vector river network for an Earth-size planet, by channel threshold?
+Method:
+- Face 2's pass-1 drainage-area channel (GEN-110, the explorer's n0 store, read only), masked to land (28.6 % of the face).
+- River length = channel cells x 814.4 m x 1.1.
+- 24 bytes a vertex (position, elevation, width, depth, discharge) plus 32 bytes a segment.
+- Extrapolated by planet land over face-2 land (x 6.09).
+
+| Threshold | Channel length, face 2 | Planet length (extrapolated) | Planet store, vertex every 814 m | Every 102 m |
+|---|---|---|---|---|
+| 1 km^2 | 26.9e6 km | 163e6 km | 5.5 GB | 39 GB |
+| 10 km^2 | 11.0e6 km | 66.8e6 km | 2.4 GB | 16 GB |
+| 50 km^2 | 5.0e6 km | 30.5e6 km | 1.1 GB | 7.4 GB |
+| 100 km^2 | 3.6e6 km | 21.8e6 km | 0.78 GB | 5.3 GB |
+| 1,000 km^2 | 1.2e6 km | 7.6e6 km | 0.26 GB | 1.8 GB |
+
+- Heads and confluences are noisy (area codes are 1/8-octave steps and tie often). Segments are under 3 % of the bytes, so the totals are solid.
+- **Answer:** a river network at a 50-100 km^2 threshold with vertices on the 814 m graph is 0.8-1.1 GB. Finer channels are derived at runtime from the area channel and refined between the vertices.
+
+### What the checks change in §6
+| Item | Before | After the checks |
+|---|---|---|
+| Memory of a level-2 job (§6.7) | estimated from pass 1's 64 bytes a cell | a 78,000 km^2 domain solves in under 200 MB, a 500 km domain in 169 MB. The largest catchment (about 1e6 km^2, 1.7e6 cells at 814 m) is about 110 MB at 64 bytes a cell. X7's memory block dissolves once the unit is a domain, not a face |
+| L1 preview (§6.4) | at most 10 s | routing alone is 3.4 s per face at 3 km. L1 for an edit's continent fits 10 s if the base is read from the store, not evaluated analytically |
+| Rivers in the store (§6.6) | 0.5-2 GB | 0.8-1.1 GB at a 50-100 km^2 threshold, vertices at 814 m |
+| Domain equality (§5.1 A8 risk, §7.2 Q2) | open | a domain carve is not a window carve. Domains must be the definition; divide steps at domain borders and an outer iteration are new prototype criteria |
+| H0 across cube edges (§6.2) | implied | required: about 30 % of large catchments reach a face edge |
