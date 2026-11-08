@@ -265,7 +265,7 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
 }
 
 /// The distance between two neighbouring cells.
-fn distance(grid: &Grid, a: usize, b: usize) -> f64 {
+pub(super) fn distance(grid: &Grid, a: usize, b: usize) -> f64 {
     if grid.has_metric() {
         let d = (0..8).find(|&d| grid.neighbour(a, d) == Some(b)).expect("a receiver is a neighbour");
         return grid.distance_at(a, d);

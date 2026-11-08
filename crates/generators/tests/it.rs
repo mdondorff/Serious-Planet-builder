@@ -14,6 +14,8 @@ mod bake_metric;
 mod bake_rock;
 #[path = "bake_round.rs"]
 mod bake_round;
+#[path = "bake_rounds.rs"]
+mod bake_rounds;
 #[path = "bake_runoff.rs"]
 mod bake_runoff;
 #[path = "bake_spill.rs"]
