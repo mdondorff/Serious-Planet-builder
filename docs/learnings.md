@@ -181,3 +181,9 @@ Scope: project (GEN-120, STRM-075)
 What happened: the stored change (kind 13) keeps the pits and the runtime adds kind 17 back, so `removed_depth_m` on the stored change counts a pit as erosion; `erosion_depth_m` adds the pit depth first.
 Assumption it changes: that kind 13 is the change the viewer draws.
 Obsolete when: lake water replaces the filled look.
+
+## 2026-11-08 A catchment routed alone does not equal its part of the region on flats
+Scope: project (GEN-141, A3 §6.3, G-LOCAL)
+What happened: with the MFD clip and the canonical flood a catchment routed alone (grid masked to its members) differs from the region routing in 7 of 27,942 member areas and 1 receiver on terraced land, 0 on a land without flats: a cell on a near-sea-level flat is first reached from a lower neighbour in another catchment (level moved 0.4 mm). The same holds for the FIFO flood.
+Assumption it changes: that a canonical flood order makes a catchment's routing independent of its neighbours; only the round (given receivers and `A_d`) is.
+Obsolete when: the receivers of raised cells are defined as their flooder (probe: 0 of 54,207 cells differ).
