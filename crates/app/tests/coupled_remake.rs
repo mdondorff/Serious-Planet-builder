@@ -21,7 +21,8 @@ fn a_re_made_run_is_written_under_target_and_never_into_the_store_it_reads() {
     assert!(err.contains("into the store it reads"), "{err}");
 
     // A directory outside any `target` is refused, and a directory under target/ is made and returned.
-    let outside = std::env::temp_dir().join("coupled-remake-outside-target-check");
+    // Not `temp_dir`: xtask puts that under `target/` (BUILD-038).
+    let outside = Path::new(env!("CARGO_MANIFEST_DIR")).join("coupled-remake-outside-target-check");
     let err = remake_target(&store, &outside).unwrap_err();
     assert!(err.contains("under a `target` directory"), "{err}");
     let _ = std::fs::remove_dir_all(&outside);

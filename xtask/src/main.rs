@@ -5,6 +5,7 @@ mod bakecmd;
 mod blesscmd;
 mod cistats;
 mod detdiff;
+mod disk;
 mod gate;
 mod heavy;
 mod layering;
@@ -16,6 +17,7 @@ mod prepush;
 mod preview;
 mod repocheck;
 mod retired;
+mod scratch;
 mod speclint;
 mod storecmd;
 mod terrainscore;
@@ -23,6 +25,7 @@ mod testcmd;
 mod testlog;
 mod threadscan;
 mod util;
+mod worktrees;
 
 use std::process::ExitCode;
 
@@ -65,6 +68,7 @@ const USAGE: &str = "cargo xtask <command>
   bake layer [--face-res N] [--planet-res N] [--tile N] [--halo N] [--region FILE] [--keep-pass1] [--seed N] [--out DIR] [--threads N] [--map-width W]   (m9-bake PR 5, GEN-101) pass 1 then pass 2 of the erosion layer: every land tile of the --planet-res grid (default 3072 cells a face edge, tiles of 3072) or the tiles of a region file (`face tile_i tile_j` a line, at most 64), checkpointed per face and per tile (a killed run resumes), the maps and tiles.txt in DIR; pass 1 is dropped after a complete planet pass unless --keep-pass1; above 12,288 only with a region
   bake pass1 [--planet-res N] [--seed N] [--out DIR] [--threads N] [--faces LIST] [--map-width W]   (m9-bake, GEN-100) pass 1 of the erosion layer at a reduced resolution (default 768 cells per face edge; above 4096 refused: a full bake needs the planner's go), one face at a time into a layer store in DIR/layer (a killed run resumes), then the maps of the carved base; prints the wall time and the peak memory of each face
   terrain-score [--store DIR] [--dem DIR] [--sites FILE] [--out DIR] [--maps]   the terrain scorecard (TEST-079, BUILD-029): seven descriptors on nine GLO-30 tiles and the generator's two matched sites each (world.field() of the store, read only), distances and a phone-readable report.md and report.json in target/review/terrain-score/<date>/ with the Copernicus notice; CPU only, about 1 minute; --maps adds one 512 px PNG per descriptor per raster
+  worktrees [--prune] [--no-size]   every git worktree with size, branch, uncommitted count, last commit and merged PR (BUILD-039); --prune removes with `git worktree remove` (never --force) only the clean ones whose PR is merged or that are detached at an ancestor of origin/main, never the current one or the root; prepush warns above 12 worktrees; prepush, store and bake refuse below 20 GB free on the drive and warn below 50 GB
   quiet on|off|status   the owner's flag file: while it is up every heavy command (test, prepush, perf, capture, accept, store, heavy) waits (BUILD-026)
   det-diff <a> <b>    compare two determinism manifests (GEN-003; CI diffs Windows against Linux)
   golden-review [--proposal <file>] [--extra <dir>]... [--tests <junit.xml>]... [--apply]   classify golden candidates under ADR 0017, and ADR 0037 for first goldens of M5 classes (auto-bless or escalate)
@@ -76,22 +80,31 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let root = util::repo_root();
     let result = match args.first().map(String::as_str) {
-        Some("test") => heavy::with(&format!("test {}", args[1..].join(" ")), || testcmd::test(&root, &args[1..])),
+        Some("test") => {
+            heavy::with(&format!("test {}", args[1..].join(" ")), || scratch::begin(&root).and_then(|_| testcmd::test(&root, &args[1..])))
+        }
         Some("check") => testcmd::check(&root),
-        Some("prepush") => heavy::with("prepush", || prepush::run(&root)),
+        Some("prepush") => {
+            heavy::with("prepush", || disk::check(&root, "prepush").and_then(|_| scratch::begin(&root)).and_then(|_| prepush::run(&root)))
+        }
         Some("gate") => heavy::with(&format!("gate {}", args[1..].join(" ")), || gate::run_gate(&root, &args[1..])),
         Some("layering") => layering::run(&root),
         Some("spec-lint") => speclint::run(&root),
         Some("log") => logcmd::run(&root, &args[1..]),
-        Some("accept") => heavy::with(&format!("accept {}", args[1..].join(" ")), || accept::run(&root, &args[1..])),
+        Some("accept") => {
+            heavy::with(&format!("accept {}", args[1..].join(" ")), || scratch::begin(&root).and_then(|_| accept::run(&root, &args[1..])))
+        }
         Some("repro") => testcmd::repro(&root, &args[1..]),
-        Some("store") => heavy::with("store", || storecmd::run_store(&root, &args[1..])),
+        Some("store") => heavy::with("store", || disk::check(&root, "store").and_then(|_| storecmd::run_store(&root, &args[1..]))),
         Some("perf") => heavy::with(&format!("perf {}", args[1..].join(" ")), || testcmd::perf(&root, &args[1..])),
         Some("capture") => heavy::with(&format!("capture {}", args[1..].join(" ")), || testcmd::capture_cmd(&root, &args[1..])),
         Some("package") => heavy::with(&format!("package {}", args[1..].join(" ")), || package::run(&root, &args[1..])),
         Some("preview") => heavy::with(&format!("preview {}", args[1..].join(" ")), || preview::run_cmd(&root, &args[1..])),
-        Some("bake") => heavy::with(&format!("bake {}", args[1..].join(" ")), || bakecmd::run_cmd(&root, &args[1..])),
+        Some("bake") => heavy::with(&format!("bake {}", args[1..].join(" ")), || {
+            disk::check(&root, "bake").and_then(|_| bakecmd::run_cmd(&root, &args[1..]))
+        }),
         Some("terrain-score") => heavy::with("terrain-score", || terrainscore::run_cmd(&root, &args[1..])),
+        Some("worktrees") => worktrees::run(&root, &args[1..]),
         Some("heavy") => heavy::run_wrapped(&root, &args[1..]),
         Some("quiet") => heavy::quiet(&args[1..]),
         Some("cache-verify") => testcmd::cache_verify(&root, &args[1..]),
