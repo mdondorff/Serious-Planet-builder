@@ -60,6 +60,91 @@ pub(crate) fn layer_noise(seed: u64, layer: u64, octave: u32, p: Vec3) -> f64 {
     lerp(lerp(x00, x10, ty), lerp(x01, x11, ty), tz)
 }
 
+/// Whether the noise of the bands and creases turns its lattice per octave (GEN-140): off by default; the prototype turns it on. Read by the hill and mountain bands of the class source and by the crease noise of the erosion field.
+static TURNED_NOISE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Switches the turned lattices (GEN-140) on or off for the process (a run sets it once at its start, before any field is read).
+pub fn set_turned_noise(on: bool) {
+    TURNED_NOISE.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether the turned lattices (GEN-140) are on.
+pub fn turned_noise() -> bool {
+    TURNED_NOISE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The fold of the switch into an identity word: unchanged while the switch is off (so no key moves), mixed with a constant while it is on.
+pub fn turned_noise_word(identity: u64) -> u64 {
+    if turned_noise() {
+        planet_core::hash::mix64(identity ^ TURN_VERSION_WORD)
+    } else {
+        identity
+    }
+}
+
+/// Names the turn of GEN-140 in an identity word; bump with the rotations below.
+const TURN_VERSION_WORD: u64 = 0x7475_726e_0001;
+
+/// The rotation of the lattice of octave `octave` (GEN-140): about an axis and by an angle that differ for every octave, from `libm` sines (CON-14), so the planes of one octave are never planes of another.
+fn turn_matrix(octave: u32) -> [[f64; 3]; 3] {
+    let o = f64::from(octave);
+    let axis = Vec3::new(libm::sin(1.3 * o + 0.4), libm::cos(2.1 * o + 1.1), libm::sin(0.7 * o + 2.3) + 1.5).normalized();
+    let angle = 0.7297 * (o + 1.0) + 0.35;
+    let (s, c) = (libm::sin(angle), libm::cos(angle));
+    let k = 1.0 - c;
+    let (x, y, z) = (axis.x, axis.y, axis.z);
+    [
+        [c + x * x * k, x * y * k - z * s, x * z * k + y * s],
+        [y * x * k + z * s, c + y * y * k, y * z * k - x * s],
+        [z * x * k - y * s, z * y * k + x * s, c + z * z * k],
+    ]
+}
+
+/// `p` in the turned frame of the lattice of octave `octave` (a rotation, so lengths and angles are kept).
+pub fn turn(octave: u32, p: Vec3) -> Vec3 {
+    static TABLE: std::sync::OnceLock<Vec<[[f64; 3]; 3]>> = std::sync::OnceLock::new();
+    let table = TABLE.get_or_init(|| (0..32).map(turn_matrix).collect());
+    let m = table.get(octave as usize).copied().unwrap_or_else(|| turn_matrix(octave));
+    Vec3::new(
+        m[0][0] * p.x + m[0][1] * p.y + m[0][2] * p.z,
+        m[1][0] * p.x + m[1][1] * p.y + m[1][2] * p.z,
+        m[2][0] * p.x + m[2][1] * p.y + m[2][2] * p.z,
+    )
+}
+
+/// [`layer_noise`] on the lattice of octave `octave` turned by [`turn`] (GEN-140).
+pub fn layer_noise_turned(seed: u64, layer: u64, octave: u32, p: Vec3) -> f64 {
+    layer_noise(seed, layer, octave, turn(octave, p))
+}
+
+/// [`layer_noise`] for callers outside the crate (tests, probes of GEN-140).
+pub fn layer_noise_untouched(seed: u64, layer: u64, octave: u32, p: Vec3) -> f64 {
+    layer_noise(seed, layer, octave, p)
+}
+
+/// [`layer_noise`] when `turned` is false, [`layer_noise_turned`] when it is true.
+pub fn layer_noise_t(turned: bool, seed: u64, layer: u64, octave: u32, p: Vec3) -> f64 {
+    if turned {
+        layer_noise_turned(seed, layer, octave, p)
+    } else {
+        layer_noise(seed, layer, octave, p)
+    }
+}
+
+/// [`layer_noise_bounds`] of the turned lattice: the same caps in the turned frame (a rotation keeps the angle of the cap), so the bounds are as sound as the untouched ones.
+pub fn layer_noise_bounds_turned(seed: u64, layer: u64, octave: u32, centre: Vec3, theta: f64, freq: f64) -> (f64, f64) {
+    layer_noise_bounds(seed, layer, octave, turn(octave, centre), theta, freq)
+}
+
+/// [`layer_noise_bounds`] when `turned` is false, [`layer_noise_bounds_turned`] when it is true.
+pub(crate) fn layer_noise_bounds_t(turned: bool, seed: u64, layer: u64, octave: u32, centre: Vec3, theta: f64, freq: f64) -> (f64, f64) {
+    if turned {
+        layer_noise_bounds_turned(seed, layer, octave, centre, theta, freq)
+    } else {
+        layer_noise_bounds(seed, layer, octave, centre, theta, freq)
+    }
+}
+
 /// Largest gradient magnitude of [`layer_noise`] per unit of its argument: each partial derivative is a lattice
 /// difference (at most 2) times the derivative of `smooth` (at most 1.5), so at most 3, and three axes give 3 sqrt(3).
 pub(crate) const NOISE_GRADIENT_BOUND: f64 = 5.196_152_422_706_632;
