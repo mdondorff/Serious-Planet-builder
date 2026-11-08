@@ -3,11 +3,16 @@
 The round solver SHALL take the drivers of the carve (a class carve factor, an uplift per cell, the runoff weights) and equal `carve_rock` with the same drivers bit for bit (G-ROUND).
 - A memoised solve (the partitioned route with memoised tile floods, and a memo of catchment rounds keyed by the member cells and the key inputs) SHALL equal the solve of the same definition without a cache bit for bit (G-EQ), for an edit of the surface, of the runoff weights and of the drivers.
 - A solve of an unchanged definition SHALL flood no tile and carve no catchment; an edit SHALL carve fewer catchments and flood fewer tiles than a fresh build, and a change of the runoff alone SHALL flood no tile in round 1 (G-INC).
-- The routed discharge `Q_w` SHALL be the cascade over the cells in descending filled level (ties by the cell id): a cell passes its `Q_w` to its receiver, except an exit cell of a kept basin, whose flow is the basin's inflow and stops there, and the basin's `q_out` SHALL enter at its spill cell; the sum of `Q_w` at the outlets plus the sum over basins of `Q_in - q_out` SHALL equal the sum of the local terms (relative error at most 1e-9), and a basin SHALL receive no flow that an upstream basin lost.
-- The open-water evaporation of a basin SHALL be the mean over its cells of `E_open = PET - (P - r)` (an input, finite and not negative); rain on flooded cells SHALL NOT be counted twice.
-- The result of an edit SHALL be complete: the rounds, the channels, `Q`, `Q_w`, the segments, the basins and their levels from the partitioned route SHALL equal those from the resident route bit for bit (G-EQ on the whole result).
+- The routed discharge `Q_w` SHALL be the cascade over the cells in descending filled level (ties by the cell id; the filled surface is epsilon-strict, as the canonical flood makes it).
+- In the cascade a cell SHALL pass its `Q_w` to its receiver, except an exit cell of a kept basin, whose flow is the inflow of the basin and stops there.
+- The `q_out` of a basin SHALL enter at its spill cell, and a basin SHALL receive no flow that an upstream basin lost.
+- The sum of `Q_w` at the outlets plus the sum over basins of `Q_in - q_out` SHALL equal the sum of the local terms (relative error at most 1e-9), also across cube edges.
+- The open-water evaporation of a basin SHALL be the mean over its cells of `E_open = PET - (P - r)`, an input that SHALL be finite and not negative (a negative value is refused); the caller forms it so that rain on flooded cells is not counted twice.
+- The result of an edit SHALL be complete (G-EQ on the whole result, f64 with f64; the canonical forms, K7 and the sampled surface are not built): the rounds SHALL equal the fresh solve, and the channels, `Q`, `Q_w`, the segments, the basins and their levels from the partitioned route SHALL equal those from the resident route, bit for bit.
 - Joining two landmasses by a bridge across the sea SHALL give the solve of the joined surface, and taking the bridge away again SHALL give the first result bit for bit with no tile flooded and no catchment carved (E7).
-- A basin SHALL keep its id across an edit while its lowest cell is the same; two basins joined SHALL take the deeper floor's id and a basin split SHALL give its parts their lowest cells' ids; the continuity map SHALL list the new basins by shared cells; a basin that holds a flagged cell SHALL be intentional and kept whatever its size.
+- A basin SHALL keep its id across an edit while its lowest cell is the same.
+- Two basins joined SHALL take the id of the lower floor (equal floors: the lower cell id), and a basin split SHALL give its parts the ids of their lowest cells.
+- the continuity map SHALL list the new basins by shared cells; a basin that holds a flagged cell SHALL be intentional and kept whatever its size.
 
 Verify: A
 Status: planned
@@ -16,4 +21,4 @@ Source: A3 sections 5.4, 6.5 and 12.1 (G-EQ, G-INC, G-BASIN), inbox #100 step 3,
 
 #### Scenario: edits
 - **WHEN** lands are solved for 4 rounds with a cache, then re-solved after a raised block and a lowered pass, doubled runoff over a window, and a softer rock and doubled uplift over a block; and two bowls are joined by a trench, split again, and one dent is flagged
-- **THEN** each re-solve equals the fresh solve bit for bit, the edits carve fewer catchments and flood fewer tiles than the base solve, the runoff edit floods no tile in round 1, the joined bowls take the deeper floor's id and the split ones their own, the continuity map lists the parts by shared cells, and the flagged dent is intentional through a raise of the land
+- **THEN** each re-solve equals the fresh solve bit for bit, `Q_w` closes with two basins in series (an endorheic upper basin and a lake below it) and on a sphere, two landmasses joined by a bridge give the fresh solve and separated again give the first result with no work, the edits carve fewer catchments and flood fewer tiles than the base solve, the runoff edit floods no tile in round 1, the joined bowls take the deeper floor's id and the split ones their own, the continuity map lists the parts by shared cells, and the flagged dent is intentional through a raise of the land

@@ -381,5 +381,6 @@ pub fn solve_rounds_memo(
             in_large: cuts.members.iter().filter(|m| m.len() >= 1000).map(Vec::len).sum(),
         });
     }
+    cache.part.use_slot(0);
     (report, work)
 }

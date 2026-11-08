@@ -1,5 +1,5 @@
 ## Why
-Inbox #100 step 3 (A3 sections 6.5 and 12): the edit cases E1-E6 of the prototype region (spikes/prototype-region/results/results.md): a re-solve of an edit is the solve of the edited definition (G-EQ) with the work of what changed (G-INC), and the structural gates hold after every edit.
+Inbox #100 step 3 (A3 sections 6.5 and 12): the edit cases E1-E7 of the prototype region (spikes/prototype-region/results/results.md): a re-solve of an edit is the solve of the edited definition (G-EQ) with the work of what changed (G-INC), and the structural gates hold after every edit.
 
 ## What Changes
 - `bake::round`: `Drivers` (class carve factor, uplift per cell, runoff weights), `solve_rounds_with`, and `solve_rounds_memo` with a `RoundCache`: the partitioned route with memoised tile floods per round and a memo of catchment rounds by their key inputs; `RoundWork` reports the work per round.
@@ -10,4 +10,4 @@ Inbox #100 step 3 (A3 sections 6.5 and 12): the edit cases E1-E6 of the prototyp
 
 ## Impact
 - Code: `generators::bake::{round, partition, hydro}`, `examples/edit_cases`. No call site in any pass of the bake; nothing in today's output moves.
-- Not in this change: the canonical forms of A3 section 9 (f32 rounds, 0.25 m levels) against an f64 run (the prototype compares f64 with f64); storing the memo; the partitioned rounds at landmass scale (next).
+- Not in this change: the canonical forms of A3 section 9 (f32 rounds, 0.25 m levels) against an f64 run (the prototype compares f64 with f64); K7 and the sampled surface in G-EQ (they do not exist); the CI determinism manifest fixture; the adversarial G-PART fixtures; storing the memo; the partitioned rounds at landmass scale (next); a tier-A test of the 10 % bound of G-INC (the 6.5 % and 9.8 % of E2 are measurements of the example, and the tier-A tests assert fewer tile floods and catchments than a fresh build).

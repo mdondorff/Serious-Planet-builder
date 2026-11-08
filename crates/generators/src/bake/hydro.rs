@@ -175,6 +175,8 @@ struct Found {
 
 /// [`hydrology`] with the cells of intentional basins (GEN-146): a basin that holds a flagged cell is of class `Intentional` and kept whatever its size and depth.
 ///
+/// `filled` must be an epsilon-filled surface (the canonical flood): the cascade relies on the cells of a basin standing strictly above its spill cell.
+///
 /// The routed discharge `Q_w` (A3 section 5.5) is the cascade over the cells in descending filled level (ties by the cell id): a cell passes its `Q_w` to its receiver, except an exit cell of a kept
 /// basin (a member whose receiver is outside it), whose flow stops there and is the basin's inflow `Q_in`; the basin's `q_out` enters at its spill cell. A basin's cells stand above its spill level, so a
 /// basin is resolved before anything below it and a chain of basins resolves in one pass.
@@ -281,7 +283,7 @@ pub fn hydrology_with(
         }
         members.sort_unstable();
         stats.basin_cells += members.len();
-        // The floor: the lowest cell, ties by the global cell id (the members are in id order).
+        // The floor: the lowest cell, ties by the cell index (the members are in index order, which is the global id order of a window).
         let mut floor = members[0] as usize;
         for &c in &members {
             if z[c as usize] < z[floor] {

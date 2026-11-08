@@ -162,6 +162,15 @@ fn a_memoised_re_solve_is_the_solve_of_the_edited_definition_with_the_work_of_th
         assert_eq!(bits(&got), bits(&fresh(&g, &edited, &outlet, &p, &base_dr, 4)), "G-EQ after a surface edit ({name})");
         let carved: usize = w2.iter().map(|w| w.carved).sum();
         assert!(
+            w2[0].tiles_filled_changed >= 1 && w2[0].tiles_filled_changed < w2[0].tiles,
+            "the change counts read against the same round of the previous solve ({name}): {:?}",
+            w2[0]
+        );
+        assert!(
+            w1.iter().all(|w| w.tiles_filled_changed + w.tiles_receiver_changed + w.tiles_area_changed == 0),
+            "no tile changed on an unchanged definition ({name})"
+        );
+        assert!(
             carved > 0 && carved < total_carved,
             "the edit carves fewer catchments than a fresh build ({carved} of {total_carved}, {name})"
         );
@@ -438,4 +447,20 @@ fn a_bridge_joins_two_landmasses_and_taking_it_away_gives_the_first_result_back(
             assert!(same_hydro(&a, &b), "the complete H1 result is the same from the partitioned and the resident routing ({name})");
         }
     }
+}
+
+// spec: GEN-146
+#[test]
+#[should_panic(expected = "not negative")]
+fn a_negative_open_water_evaporation_is_refused() {
+    use planet_generators::bake::hydro::{hydrology_with, HydroParams};
+    let g = Grid::new(24, 24, 800.0);
+    let z: Vec<f64> = (0..24 * 24).map(|p| 100.0 + (p % 24) as f64 * 5.0).collect();
+    let outlet = g.outlets(&z, 0.0);
+    let routing = route_rules(&g, &z, &outlet, EPS, 3, 0.0, None, RoundRules::ROUND);
+    let filled = priority_flood_with(&g, &z, &outlet, EPS, true);
+    let runoff = vec![1.0e-8f32; 24 * 24];
+    let mut evap = vec![0.0f32; 24 * 24];
+    evap[100] = -1.0e-9;
+    hydrology_with(&g, &z, &filled, &routing, &outlet, Some(&runoff), Some(&evap), None, &HydroParams::default());
 }
