@@ -140,6 +140,12 @@ fn the_strength_of_the_ground_detail_enters_the_plans_text_only_when_set_round_t
         let err = LitPlan { ground_detail: bad, ..plan }.validate().unwrap_err();
         assert!(err.contains("ground_detail"), "{err}");
     }
+    // A plan text from before the channel inputs holds 8 numbers a pair-row (96 values) in its `materials` token: it is refused, not read short (older plans need not stay readable).
+    let at = refs.iter().position(|t| *t == "materials").expect("a materials token");
+    let mut old: Vec<&str> = refs[..at + 1].to_vec();
+    old.extend(refs[at + 1..at + 1 + 6 * 8 * 2].iter().copied());
+    old.extend(refs[at + 1 + 6 * 10 * 2..].iter().copied());
+    assert!(LitPlan::from_tokens(&old[1..]).is_err(), "a materials token of 96 values was read");
 }
 
 // spec: LOOK-010

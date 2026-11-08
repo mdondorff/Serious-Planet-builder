@@ -353,10 +353,10 @@ fn gd_plane(base: vec3<i32>, q: vec3<f32>, k: u32, axis: u32) -> vec4<f32> {
     return vec4<f32>(grad, value);
 }
 
-// The material weights (LOOK-008, `MaterialParams::weights`): the product over the eight inputs of the smoothstep response of each (lo, hi) pair of
-// the look's curve table (`g.materials`: per material four vec4s of two pairs each), normalised to sum to 1; a pair with lo == hi leaves the input
-// out, a material with no pair is off. The inputs are two vec4s (`ia`: slope cosine, height, temperature, precipitation; `ib`: surface type and the
-// three driver slots). The smoothstep is written out because a falling pair (lo > hi) is not defined for the built-in. Every index is a constant
+// The material weights (LOOK-008, `MaterialParams::weights`): the product over the ten inputs of the smoothstep response of each (lo, hi) pair of
+// the look's curve table (`g.materials`: per material five vec4s of two pairs each), normalised to sum to 1; a pair with lo == hi leaves the input
+// out, a material with no pair is off. The inputs are two vec4s and a vec2 (`ia`: slope cosine, height, temperature, precipitation; `ib`: surface type and the
+// three driver slots; `ic`: the fill depth and the erosion depth of the channel block). The smoothstep is written out because a falling pair (lo > hi) is not defined for the built-in. Every index is a constant
 // and the pairs go two at a time as vec2s, so no array is indexed by a loop counter (G2c: that was +1 ms of GPU time at 1440p).
 fn material_weight(first: u32, ia: vec4<f32>, ib: vec4<f32>, ic: vec2<f32>) -> f32 {
     let v0 = g.materials[first];
@@ -575,7 +575,7 @@ fn ground_detail(node_index: u32, local: vec3<f32>, normal: vec3<f32>, up: vec3<
         let m = g.gloss[j];
         if (m.y != m.z) {
             let c = u32(m.x);
-            let x = select(ia[c & 3u], ib[c & 3u], c >= 4u);
+            let x = select(select(ia[c & 3u], ib[c & 3u], c >= 4u), chn[c & 1u], c >= 8u);
             let s = clamp((x - m.y) / (m.z - m.y), 0.0, 1.0);
             rough = rough * mix(1.0, m.w, s * s * (3.0 - 2.0 * s));
         }

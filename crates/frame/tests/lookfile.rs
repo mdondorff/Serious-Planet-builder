@@ -795,7 +795,7 @@ tilt = [0.1, 0.1, 0.1, 0.1]
     }
 }
 
-// spec: LOOK-002
+// spec: LOOK-002, LOOK-011
 #[test]
 fn the_channel_curves_are_read_written_and_a_version_9_file_reads_with_them_off() {
     use planet_frame::look::materials::{Input, MaterialParams, INPUTS, INPUT_NAMES};

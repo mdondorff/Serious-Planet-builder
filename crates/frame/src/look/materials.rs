@@ -36,8 +36,9 @@ pub const INPUT_NAMES: [&str; INPUTS] = [
     "fill_depth",
     "erosion_depth",
 ];
-/// Number of `vec4<f32>` words the curve table occupies: per material, four words of two `(lo, hi)` pairs each.
+/// Number of `vec4<f32>` words the curve table occupies: per material, five words of two `(lo, hi)` pairs each (the shader's stride; the inputs are an even number).
 pub const MATERIAL_VEC4S: usize = MATERIALS * INPUTS / 2;
+const _: () = assert!(INPUTS == 10, "the shader's material stride is five words: change terrain.rs `material_weights` with the inputs");
 
 /// The slots of the input vector.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
