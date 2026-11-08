@@ -1073,3 +1073,44 @@ Input: a fourth external review (owner refs, 2026-11-08, outside git; "the ADR r
 | N4 | "Artefact: breached in K5/K7" is not a rule of the code: the breach is class-blind and classes exist only after the final round; an artefact keeps its pit without an object | `round.rs`, `hydro.rs` | A3 §5.3: no object, no fill; sinks are counted by G-LAND. Protecting an intentional basin from the breach is open |
 | N5 | The carve's `A_d` runs through every basin to the sea: ADR 0105 point 2 (arid basins as sinks) is not in the round solver, so `A_d` below an endorheic basin is overstated | `round.rs` | Named in A3 §5.5 as open, reported at G-LAND; a fix would read the previous round's classes |
 | N6 | Inflow counts an exit whose flow re-enters only within 256 steps (a magic bound; beyond it water is counted twice) | `hydro.rs` | Replace by a linear next-basin sweep (§21) |
+
+## 20. Recommendation per ADR
+
+"Prototype contract" is acceptance as what the prototype builds against. Production approval is the A/B gate for all six: acceptance of an ADR does not assert its gates.
+
+| ADR | Review's position | Recommendation now | Blocks acceptance as the prototype's contract | Production waits for |
+|---|---|---|---|---|
+| 0110 Surface | accept after minor clarifications | **acceptable** | the owner's D2-D10 pass only | G-SURF, G-PROFILE, G-BASIN (for point 5) |
+| 0111 Hydrology | revise | **acceptable** after this revision | the owner's pass; the code must follow point 7 (§21 items 3 and 4), which does not block the contract | G-CON, G-BASIN; nested basins and basin losses in `A_d` decided |
+| 0112 Solver | accept as the prototype's architecture, conditional | **acceptable as the prototype's architecture** | the owner's pass | G-LOCAL, G-ROUND, G-PART, G-EQ, G-INC on the actual kernels |
+| 0113 Edits | accept after topology and CON-08 | **blocked by the owner's decisions only** | the CON-08 reading; the changes to accepted ADRs 0007 and 0066 | G-EQ, G-INC on E1-E7; the coherent commit built (items 15, 16) |
+| 0114 Profile, forms | revise | **acceptable** after this revision | the owner's pass | G-EQ (the f32 form), G-DET on both builds; the toolchain pin decided |
+| 0115 Scale, store | accept the direction, hard gates | **acceptable** | the owner's pass; the 12 GB budget is set by the owner | G-STORE, G-SCALE measured |
+
+No accepted ADR or constitution text is changed. Proposals for the owner: the CON-08 reading (0113 point 7); the amendments of ADR 0007 and 0066 (0113); a toolchain pin (0114 point 6).
+
+## 21. Effect on explorer's running work
+
+For the planner; explorer has not been messaged. Nothing invalidates merged work: every change below is additive or behind `RoundRules`. Items 1 to 5 touch prototype item 8 (GEN-146).
+
+| # | Effect | Prototype item | Why |
+|---|---|---|---|
+| 1 | `solve_rounds` needs the runoff weight (and later rock and class factors) | 8 | `route_rules(..., None, ...)`: without it E5, a rainfall-only edit, cannot change the surface |
+| 2 | `partitioned_route` needs the runoff weight; G-PART re-run with `w` | 8, 9 | it adds `grid.cell_area(q)`: G-PART today holds for `w` = 1 |
+| 3 | H1: `Q_w`, the cascade in descending filled level, segments store `Q_w`; `q_out` enters at the spill cell | 8 (E3, E4) | §19 N1. E4 checks downstream discharge, and E3 changes outlets |
+| 4 | H1: `E_open = PET - (P - r)`; the caller's `max(PET - P, 0)` goes; a linear next-basin sweep replaces the 256-step window | 8 | §19 N2, N6 |
+| 5 | G-EQ compares the complete result (rounds, channels, `Q_w`, basins, levels; K7 and the sampled surface when item 11 exists); E7 added | 8 | the review's §9. E7 needs a fixture with a strait or a bridge |
+| 6 | Rounds pass through the f32 form, narrowed once per round | 8 or 9 | A3 §9: `solve_rounds` carries f64 across rounds; G-EQ's f32-against-f64 measure has nothing to compare until it does |
+| 7 | G-PART's adversarial fixtures: depressions and divides across tile borders, a spiral flood path, cube corners | 9 | A3 §6.8. Cheap; report sweeps against the bound |
+| 8 | Thermal and one-cell pit spreading are per-tile steps with a halo after the last round, not catchment-round steps | 10 | they read 8 neighbours across divides, which would fail G-LOCAL. Deposition along D8 stays in the catchment |
+| 9 | The partitioned route's non-resident form is the normal path for large landmasses | 9 | the resident bound (11-13.5 GB) has no margin against 12 GB |
+| 10 | CI's determinism manifest adds a fixture of the rounds and H1 | any | G-DET; today it covers tile hashes only |
+| 11 | No change: the region at the working resolution (GEN-144's example); A3 §6.1 now says so | - | - |
+
+Crusader (no action now): the coherent `commit_id` (A3 §7.4) is new for items 15 and 16. Spikes: item 13's second region should include one lake-rich and one arid case for §5.5.
+
+## 22. Another external round before the A/B gate?
+
+No, for the same reason as §17. The review asks for targeted contracts and reopens no architectural choice; they are now written. Its own conclusion puts the next review on whether the promised properties hold, and that depends on numbers that do not yet exist (G-LOCAL, G-PART with weights, G-EQ on E1-E7, G-SCALE, G-STORE, G-DET).
+
+The next round belongs at the A/B gate, with the kernels attached (`flood.rs`, `route.rs`, `partition.rs`, `round.rs`, `hydro.rs`) and the gate results. This round's reviewer saw neither A3 nor the code; four of its P0 points were answered by reading them.
