@@ -11,4 +11,4 @@
 ## Evidence
 - Tier A: GEN-136, `class_sources_of_one_world_share_the_lattice_and_another_shelf_does_not` (two thread counts read the same bits; another shelf is another lattice).
 - Full local `cargo xtask test fast`: 1965 passed, no timeout.
-- `class_source_store` alone: 5 tests, 11-26 s before; builds per test process 1, 1, 2, 2, 3 reduced to one per distinct seed.
+- `class_source_store` (5 tests in parallel): coast lattice builds 8 -> 5 (one per distinct seed and test process); wall time 26 s -> 24 s, so the gain is the removed duplicate work under contention, not a faster single build.
