@@ -78,3 +78,32 @@ fn h0_is_the_same_bits_on_every_run() {
     let b = g.route(&z, &outlet, 1e-3);
     assert_eq!(a, b);
 }
+
+#[test]
+fn only_the_boundary_cells_reach_across_an_edge_each_by_one_neighbour_per_crossed_edge_and_the_directions_agree_with_the_mapping() {
+    // spec: GEN-139
+    use planet_core::cube::{face_to_direction, TangentWarp};
+    use planet_core::Face;
+    let n = 17usize;
+    let g = GlobalGrid::new(n, R);
+    for c in 0..g.len() as u32 {
+        let (f, i, j) = g.split(c);
+        let crossed = |axis_edges: usize| axis_edges;
+        let edges = usize::from(i == 0) + usize::from(i == n - 1) + usize::from(j == 0) + usize::from(j == n - 1);
+        let other: Vec<u32> = g.neighbours(c).into_iter().map(|(q, _)| q).filter(|q| g.split(*q).0 != f).collect();
+        assert_eq!(
+            other.len(),
+            crossed(edges),
+            "cell {c} ({f},{i},{j}) has {} neighbours across and {edges} edges on its boundary",
+            other.len()
+        );
+        // The direction from the tables and frames is the mapping's.
+        let s = |k: usize| 2.0 * (k as f64 + 0.5) / n as f64 - 1.0;
+        let want = face_to_direction(&TangentWarp, Face(f), s(i), s(j));
+        let have = g.direction(c);
+        assert!(
+            (want.x - have.x).abs() + (want.y - have.y).abs() + (want.z - have.z).abs() < 1e-14,
+            "cell {c}: the direction differs from the mapping's"
+        );
+    }
+}

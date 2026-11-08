@@ -15,4 +15,5 @@
 |---|---|---|---|---|
 | planet radius | caller's | m | planet state | `GlobalGrid::new(n, radius_m)` |
 | flood epsilon | caller's (1e-3 in tests) | m | numeric | `route(.., epsilon)` |
-No calibration constant is introduced.
+| `PAST` | 1e-6 | plane units | numeric tolerance (how far past an edge the neighbour probe lands; far under a cell at any supported n) | `h0::axis_neighbour` |
+No calibration constant is introduced. The cost figures are indicative (a synthetic surface, not a perf-window measurement).

@@ -8,5 +8,5 @@ SPIKE-105 §12 F6 and §13.6 (owner D1 = A, conditional; inbox #97 item 2): the 
 - Stacked on `change/cell-metric` (GEN-138).
 
 ## Impact
-- Code: `generators::bake::h0` only; nothing in the bake's output moves (no caller yet).
+- Code: `generators::bake::h0` and the cost probe `examples/h0_cost`; nothing in the bake's output moves (no caller yet).
 - The read of the stored field into the heights (F6 read 130 s for six faces at 3,072 cells, decode-bound) and the join with the spill graph for kept pits are the next steps; this PR takes heights as an input array.
