@@ -36,7 +36,7 @@ Dependency direction follows the list; §6 defines the one feedback loop (K5, K6
 | K3 | Base field | base elevation on the store's lattice | K1, K2, height items below erosion (§7.1) | **X** | field bake (ADR 0026), C1 read (GEN-107) |
 | K4 | H0 coarse hydrology | planet-wide drainage regions at the coarse grid across cube edges | K3 | **N** | F6's probe; the coupled run of ADR 0077 was a predecessor |
 | K5 | Regional geomorphology | per domain: the erosion carve at the regional grid (§6) | K2, K3, K4, K6 of the previous round | **X** | pass 1 (ADR 0088, 0099, 0102-0104); the kernels stay |
-| K6 | H1 regional hydrology | the channel graph, the diffuse-area field, basins, lakes (§5) | the K5 surface | **N** (graph, lakes); **X** (basins from the spill graph) | GEN-110, GEN-121, ADR 0101 |
+| K6 | H1 regional hydrology | the channel graph, the diffuse-area field, basins, lakes (§5) | the K5 surface | **N** (graph, lakes); **X** (basins from the filled surface of the routing) | GEN-110, GEN-145, ADR 0101 (GEN-121: the tile-seam minimax only) |
 | K7 | Local refinement | per tile, the local grid: breach, incise, thermal, deposition, channels burned in (§3.3) | K3, K5, K6 | **X** | pass 2 (GEN-101) |
 | K8 | Authoritative surface | the composition and the sampler (§3) | K3, K5, K7, creases | **X** | runtime field (GEN-099, 112) |
 | K9 | Dependencies and versions | keys, reach along the graph, transactions (§7) | all | **X** | keys (ADR 0006, 0066), stale pre-emption (ADR 0072) |
@@ -148,18 +148,18 @@ Three quantities, kept apart:
 - **`Q` is conserved.** Confluence rule: `Q` is the sum of its donors plus the local term, so it is non-decreasing along a segment by construction and the sum of `Q` at all outlets equals the sum of `a r` over land (G-CON). The running maximum of `A_d` used in the earlier draft is dropped.
 - `A_d` and `Q` differ by design: MFD spreads diffuse flow, D8 keeps a river as one line. The carve keeps `A_d`; rivers report `Q`.
 - **River initiation:** `T` is a preset parameter (default 50-100 km^2 of runoff-weighted true area, D5). Because `A_d` is runoff-weighted, a rainfall edit moves initiation with no height change (E5).
-- A channel's heads are initiated cells with no channel donor. Confluences have two or more channel donors. A channel ends at the sea, at the terminal cell of an endorheic basin, or at an active outlet of a basin, where it continues (§5.3).
+- A channel's heads are initiated cells with no channel donor. Confluences have two or more channel donors. A channel ends at an outlet of the routing (the sea, the mouth); it passes through a basin and continues below its spill point, and the basin's `q_out` says how much of `Q` the basin lets through (§5.3).
 
 ### 5.3 Basins
 
-A basin is a connected set of cells (8-neighbour) below the routing surface's spill level of more than `pit_min_m` (0.5 m), found by the spill graph (`bake/spill.rs`, GEN-121). **X** Stored as one object per basin above a size threshold, on the regional grid:
+A basin is a connected set of cells (8-neighbour) below the routing surface's spill level of more than `pit_min_m` (0.5 m), found on the filled surface of the round's routing (GEN-145). **X** Stored as one object per basin above a size threshold, on the regional grid:
 
 | Field | Meaning |
 |---|---|
 | id | canonical identity (§5.4) |
 | floor level | lowest cell height (canonical form, §9) |
-| spill level | the spill graph's level |
-| spill point | the topographic spill cell of the basin; exists for every basin |
+| spill level | the filled level at the spill point |
+| spill point | the rim cell of the lowest filled level (ties by cell id); exists for every basin |
 | active outlet | the spill point when the water reaches the spill level (§5.5), else none |
 | area curve | surface area and volume at 16 fixed level steps between floor and spill |
 | type | one of the classes below |
@@ -167,12 +167,16 @@ A basin is a connected set of cells (8-neighbour) below the routing surface's sp
 
 | Class | Rule (presets, ADR 0108) | Behaviour |
 |---|---|---|
-| artefact | below `min_area_km2` and shallower than `min_depth_m` | breached in K5/K7 (no object) |
+| artefact | fewer than `min_cells` cells and shallower than `min_depth_m` (in cells, so that it scales with the grid) | breached in K5/K7 (no object) |
 | lake | deeper or larger, with an active outlet by §5.5 | kept; lake at the spill level |
 | endorheic | no active outlet by §5.5 (ADR 0105 point 2) | kept; sink for water and sediment; water level from §5.5; playa if the level is at the floor |
 | intentional | named by an item (§5.6) or a driver (caldera, karst later) | kept whatever its size |
 
 - Thresholds are preset parameters; a basin's class is a pure function of the surface and the drivers.
+- The canonical flood's level is the minimax spill level plus the epsilon ramp, by its construction (GEN-141); `bake/spill.rs` is the tile-seam minimax and gives no spill points or basin objects, so it is not used for basins. The equality of the two levels is not tested.
+- A component whose depth from floor to rim is under `pit_min_m` is the epsilon ramp of a flat, not a basin (it is counted, not kept).
+- **Touching basins are one component.** Two basins with different spill levels that touch are one basin with one floor and one spill (the lowest rim); nested basins are not separated (GEN-145). Separating them needs the spill graph's hierarchy and is open.
+- **`Q` and basins.** The channel discharge `Q` (section 5.2) is the potential discharge before basin losses, so that the sum at the outlets is the sum of `a r`. A basin's `q_out` is the discharge that continues below its spill point: `Q_in - A(spill) E_net` for a lake, 0 for an endorheic basin. The channel graph carries `Q`; a consumer that needs the lake-adjusted discharge below a basin reads `q_out` and the basin's spill point.
 
 ### 5.4 Identity under change
 
@@ -197,7 +201,7 @@ Identities are **pure functions of the current surface**, so a from-scratch buil
 ### 5.5 Lakes
 
 - A lake is a basin with a water level. Producer of the water field W (ADR 0041 point 7's retrofit path). **X**
-- **Water level (steady balance):** the basin's inflow `Q_in` is the discharge reaching it (§5.2) and its net evaporation is `E_net = max(PET - P, 0)` of the basin's cells (PET of GEN-117, ADR 0108 preset). The level `h` solves `A(h) E_net = Q_in` on the area curve, clamped to [floor, spill]. If `A(spill) E_net < Q_in`, the basin overflows: `h` = spill level, the active outlet is the spill point, and the downstream channel continues with `Q_in - A(spill) E_net`. Otherwise the basin is endorheic and passes nothing downstream. A pure function of the surface and the drivers; no time stepping.
+- **Water level (steady balance):** the basin's inflow `Q_in` is the discharge reaching it (§5.2) and its net evaporation is `E_net = max(PET - P, 0)` of the basin's cells (PET of GEN-117, ADR 0108 preset). The level `h` solves `A(h) E_net = Q_in` on the area curve, clamped to [floor, spill]. If `A(spill) E_net < Q_in`, the basin overflows: `h` = spill level, the active outlet is the spill point, and the downstream channel continues with `Q_in - A(spill) E_net` (the basin's `q_out`, §5.3; the channel graph's `Q` stays the discharge before the basin's losses). Otherwise the basin is endorheic and passes nothing downstream. A pure function of the surface and the drivers; no time stepping.
 - The fill depth stops being a surface term (§3.1) and a stored channel; it is the basin's water level minus the ground, derived from the basin object at the local grid.
 - Water surfaces render through ADR 0041's path; a basin's area curve answers "what is flooded at level x" without a raster.
 
@@ -314,7 +318,8 @@ With clipped MFD and the canonical flood a catchment has no other border conditi
 - Measured at the erosion grid (12,288 cells, `examples/region_scale`, windows of the prototype region of 1.0e6 to 44e6 cells): the resident rounds peak at about 90 bytes a cell (74 without the example's height copies) and about 2 microseconds a cell on 8 threads; the whole prototype landmass (about 150e6 cells) is bounded at 11 to 13.5 GB, not measured. The 2.98 GiB and the 39.5 % channel share of the GEN-144 and GEN-145 runs are at 3,072 cells (3.26 km); at 12,288 cells 7 % of land cells are channel cells.
 - A landmass routing does **not** have to be resident. The partitioned route produces the same result (F9: levels equal, 0 cells differ); the tile flood is swept to a fixed point from the neighbours' offers and the accumulation is a topological sweep across tiles with border shares (`bake/partition.rs`, GEN-143).
 - The world build may run resident or partitioned; both give the same bits (gate G-PART). Editor jobs are partitioned.
-- World-build memory is a separate budget from CON-21 (a runtime rule): proposed in ADR 0115 and stated by G-SCALE.
+- World-build memory is a separate budget from CON-21 (a runtime rule): 12 GB (owner, 2026-11-08; ADR 0115 point 7, the ADR otherwise proposed), stated by G-SCALE.
+- **The partitioned route is the normal path for large landmasses; the resident route is an optimisation for a landmass that fits the budget.** The threshold at which the resident route is chosen is measured by G-SCALE (cells and bytes a cell against 12 GB); no compact resident layout is built unless the measurement asks for it.
 - **H0-region split at artificial borders** (the earlier fallback) is kept only as a tested fallback for a landmass over the budget even partitioned; G-SCALE measures its divide migration across the split. The design no longer relies on it.
 
 ### 6.7 Downstream regions and K7

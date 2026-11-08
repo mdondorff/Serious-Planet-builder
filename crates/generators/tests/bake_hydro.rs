@@ -195,12 +195,44 @@ fn a_basin_has_floor_spill_curve_class_and_an_identity_of_its_lowest_cell() {
     assert_ne!(m.basins[0].id, b.id);
     assert_eq!(m.basins[0].id, basin_id(0, g.global_id(11 * w + 11)));
     assert_ne!(basin_id(0, 5), segment_id(0, 5, 0), "the kinds of identity are apart");
-    // A one-cell dent of a metre is an artefact: no object, counted.
+    // A one-cell dent of a metre is an artefact: no object, counted. The limit is in cells: a 5-cell dent of the same depth is kept, and with a limit of 1 cell the one-cell dent is kept too.
     let mut dent = bowl_land();
     dent[30 * w + 30] = 789.0;
     let a = run(&dent, None);
     assert_eq!(a.basins.len(), 1);
     assert!(a.stats.artefacts >= 1, "the dent is an artefact");
+    let kept = |z: &[f64], p: &HydroParams| {
+        let outlet = g.outlets(z, 0.0);
+        let routing = route_rules(&g, z, &outlet, EPS, 3, 0.0, None, RoundRules::ROUND);
+        let filled = priority_flood_with(&g, z, &outlet, EPS, true);
+        hydrology(&g, z, &filled, &routing, &outlet, None, None, p)
+    };
+    // The depth arm: a one-cell dent 5 m under its rim is over the depth limit and is kept.
+    let mut deep = bowl_land();
+    deep[30 * w + 30] = 785.0;
+    deep[30 * w + 29] = 790.0;
+    let deep = kept(&deep, &HydroParams::default());
+    assert_eq!((deep.basins.len(), deep.stats.artefacts), (2, 0), "a small basin deeper than the limit is kept: {:?}", deep.stats);
+    let lenient = kept(&dent, &HydroParams { min_cells: 1, ..HydroParams::default() });
+    assert_eq!((lenient.basins.len(), lenient.stats.artefacts), (2, 0), "a limit of one cell keeps the dent");
+    // Five cells a metre under a ridge of their own, over a downhill land: a shallow basin of five cells.
+    let mut wide = bowl_land();
+    for i in 27..=33 {
+        for j in [29usize, 31] {
+            wide[j * w + i] = wide[j * w + i].max(790.0);
+        }
+    }
+    wide[30 * w + 27] = wide[30 * w + 27].max(790.0);
+    wide[30 * w + 33] = wide[30 * w + 33].max(790.0);
+    for i in 28..=32 {
+        wide[30 * w + i] = 789.0;
+    }
+    let five = kept(&wide, &HydroParams::default());
+    assert_eq!((five.basins.len(), five.stats.artefacts), (2, 0), "five cells are over the default limit of four: {:?}", five.stats);
+    let edge = kept(&wide, &HydroParams { min_cells: 5, ..HydroParams::default() });
+    assert_eq!((edge.basins.len(), edge.stats.artefacts), (2, 0), "five cells are not under a limit of five");
+    let strict = kept(&wide, &HydroParams { min_cells: 6, ..HydroParams::default() });
+    assert_eq!((strict.basins.len(), strict.stats.artefacts), (1, 1), "five cells are under a limit of six: {:?}", strict.stats);
 }
 
 /// The inflow of a basin by its definition: the local terms of every cell whose D8 path reaches the basin.

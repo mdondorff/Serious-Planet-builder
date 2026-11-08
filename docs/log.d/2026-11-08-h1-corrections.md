@@ -1,0 +1,1 @@
+- 2026-11-08 h1-corrections: A3 5.2/5.3 and ADR 0111 corrected (basins from the filled surface, touching basins one component, Q before basin losses vs Basin.q_out); the artefact limit in cells and depth (GEN-145, inbox #100 step 2).
