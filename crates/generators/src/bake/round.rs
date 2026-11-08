@@ -331,7 +331,8 @@ pub fn solve_rounds_memo(
     assert!(p.round_rules.canonical_flood, "the memoised solve routes in tiles: the canonical flood is required");
     let taper = taper_of(z, p, drivers);
     let (mut report, mut work) = (RoundReport::default(), Vec::new());
-    for _ in 0..rounds {
+    for round in 0..rounds {
+        cache.part.use_slot(round);
         let route = partitioned_route_weighted(grid, z, outlet, p.epsilon, seed, tile, p.round_rules, drivers.runoff, &mut cache.part);
         let (r, ps) = (route.routing, route.stats);
         let cuts = cut_in(Some(grid), &r);

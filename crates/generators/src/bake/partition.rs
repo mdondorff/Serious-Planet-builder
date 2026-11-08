@@ -41,11 +41,20 @@ pub struct PartRoute {
     pub stats: PartStats,
 }
 
+impl PartCache {
+    /// Compares the next results with the last of slot `k`: a series of routings of one surface in rounds uses a slot a round, so that "the tiles changed" reads against the same round of the previous solve.
+    pub fn use_slot(&mut self, k: usize) {
+        self.slot = k;
+    }
+}
+
 /// What a series of calls keeps: the memo of tile floods by their inputs and the previous result (for the change counts).
 #[derive(Default)]
 pub struct PartCache {
     floods: HashMap<(u64, u64), Arc<Vec<f64>>>,
-    previous: Option<Previous>,
+    /// The last result of each slot (slot 0 unless [`PartCache::use_slot`] says otherwise).
+    previous: Vec<Option<Previous>>,
+    slot: usize,
 }
 
 /// The last result of a cache: the tile size, the filled surface, the receivers and the area.
@@ -421,7 +430,7 @@ pub fn partitioned_route_weighted(
     }
 
     // ---- what changed against the previous call
-    if let Some(Previous { tile: tl, size, cube, filled: pf, receiver: pr, area: pa }) = &cache.previous {
+    if let Some(Some(Previous { tile: tl, size, cube, filled: pf, receiver: pr, area: pa })) = cache.previous.get(cache.slot) {
         if *tl == tile && *size == (grid.w(), grid.h()) && *cube == grid.is_cube() {
             for r in &tiles {
                 let (mut f, mut rc, mut ar) = (false, false, false);
@@ -439,7 +448,7 @@ pub fn partitioned_route_weighted(
             }
         }
     }
-    cache.previous = Some(Previous {
+    let last = Some(Previous {
         tile,
         size: (grid.w(), grid.h()),
         cube: grid.is_cube(),
@@ -447,5 +456,9 @@ pub fn partitioned_route_weighted(
         receiver: receiver.clone(),
         area: area.clone(),
     });
+    if cache.previous.len() <= cache.slot {
+        cache.previous.resize_with(cache.slot + 1, || None);
+    }
+    cache.previous[cache.slot] = last;
     PartRoute { routing: Routing { receiver, order, area }, filled, stats }
 }
