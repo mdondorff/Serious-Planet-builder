@@ -110,7 +110,14 @@ fn main() {
         let deposited = 2.5 * floor + 0.9 * feet(da, 90.0).max(feet(db, 220.0));
         // The drainage area as log2 of cells: 7 (moisture 0.7) on the crater floor, 3 (0.3) on the plain around it, 0.5 elsewhere.
         let log2 = 0.5 + 6.5 * floor + 2.5 * (1.0 - ramp(dc, 80.0, 400.0));
-        ChannelSample { soil_m: Some(deposited as f32), area_log2_cells: Some(log2 as f32), ..Default::default() }
+        // The depths of the channel block (GEN-126, step 4d): a kept pit of 1.5 m in the crater floor, 2.5 m of erosion on the first hill's flank (the steep ring between 0.3 and 0.9 of its reach).
+        let flank = ramp(da, 20.0, 45.0) * (1.0 - ramp(da, 70.0, 100.0));
+        ChannelSample {
+            soil_m: Some(deposited as f32),
+            area_log2_cells: Some(log2 as f32),
+            fill_m: Some((1.5 * floor) as f32),
+            erosion_m: Some((2.5 * flank) as f32),
+        }
     };
     let d1_look =
         parse_look(include_str!("../../../docs/looks/ground-channels-d1.look.toml")).expect("the sample look").body(BodyId::PLANET).ground;
@@ -155,6 +162,7 @@ fn main() {
                     })
                     .collect();
                 apply_channels(&mut tile.driver_words, &samples);
+                planet_generators::drivers::apply_depths(&mut tile.channel_words, &samples);
                 r.upload_tile(&ctx, &tile).expect("upload");
             }
         }

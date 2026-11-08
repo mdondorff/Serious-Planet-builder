@@ -8,8 +8,10 @@
 # inputs and the weights are normalised over the materials. A material or input left out keeps its Earth curve (sand: dry flat ground; grass keeps its precipitation).
 #
 # Degrees to cosines: 5 = 0.996, 15 = 0.966, 20 = 0.940, 25 = 0.906, 28 = 0.883, 32 = 0.848, 38 = 0.788, 42 = 0.743.
-# Not in the table of SPIKE-100 D1, because no input carries it yet: rock "where the erosion depth exceeds 2 m" (the depth removed is derived from kind 13 and kind 15, not in the driver block).
-schema_version = 9
+# The channel block (GEN-126, slice 2b step 4d) adds `fill_depth` (keep-pits, metres) and `erosion_depth` (metres removed), both 0 on a tile without channels. A weight is a product over the inputs, so a curve can only
+# remove a material where its input is large (falling) or require the input (rising); the SPIKE-100 D1 clause "rock over 28 degrees where erosion exceeds 2 m" is an OR with the slope rule and is not expressible,
+# so rock keeps its slope rule and the stripped ground loses its soil and grass instead (soil and grass falling with the erosion depth); the filled pits lose them too and so go to wet ground.
+schema_version = 10
 kind = "look"
 
 [body.0.ground]
@@ -34,11 +36,17 @@ moisture = [0.60, 0.25]
 slope_cos = [0.78, 0.90]
 moisture = [0.60, 0.15]
 precipitation = [100.0, 600.0]
+# Stripped or filled ground has no soil: erosion over 0.5 to 2 m, a kept pit deeper than 0.25 to 1 m (a lake bed).
+erosion_depth = [2.0, 0.5]
+fill_depth = [1.0, 0.25]
 
 # Grass: gentle ground (cosine rising 0.84 to 0.92) below the channel threshold (moisture falling 0.80 to 0.30), where the climate is wet enough (the Earth precipitation curve stays).
 [body.0.ground.grass]
 slope_cos = [0.84, 0.92]
 moisture = [0.80, 0.30]
+# No meadow where the erosion stripped 0.5 to 2 m or in a kept pit deeper than 0.25 to 1 m.
+erosion_depth = [2.0, 0.5]
+fill_depth = [1.0, 0.25]
 
 # Wet ground: a large drainage area (moisture rising 0.10 to 0.40, about 1 to 10 km2 and up) on ground under 5 degrees (cosine rising 0.97 to 0.995): floodplains and hollows; dark and glossy.
 [body.0.ground.wet]

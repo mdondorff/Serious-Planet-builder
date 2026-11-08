@@ -71,3 +71,31 @@ fn the_sample_look_changes_nothing_but_the_ground_table_and_is_not_the_default()
     // A body the file does not name has the Earth default, and the look is a look file only: the default ground look is untouched.
     assert_eq!(file.body(BodyId(7)), default);
 }
+
+// spec: LOOK-008
+#[test]
+fn the_sample_look_strips_soil_and_grass_where_the_erosion_removed_metres_and_gives_a_kept_pit_to_wet_ground() {
+    use planet_frame::look::materials::with_channels;
+    let m = parse_look(LOOK).unwrap().body(BodyId(0)).ground.materials;
+    let at = |slope_cos: f64, moisture: f64, channels: [f64; 2]| {
+        let mut i = [0.0; INPUTS];
+        i[Input::SlopeCos as usize] = slope_cos;
+        i[Input::SoilDepth as usize] = 1.0;
+        i[Input::Moisture as usize] = moisture;
+        i[Input::Precipitation as usize] = 1200.0;
+        let w = m.weights(&with_channels(i, channels));
+        MATERIAL_NAMES.iter().map(|n| n.to_string()).zip(w).collect::<Vec<_>>()
+    };
+    // A gentle flank without erosion is soil and grass; the same flank stripped by 2.5 m has neither (scree takes it).
+    let kept = at(0.93, 0.05, [0.0, 0.0]);
+    assert!(of(&kept, "soil") + of(&kept, "grass") > 0.8, "{kept:?}");
+    let stripped = at(0.93, 0.05, [0.0, 2.5]);
+    assert!(of(&stripped, "soil") + of(&stripped, "grass") < 0.1, "{stripped:?}");
+    // A flat hollow with a large drainage area: meadow without a pit, wet ground in a 1.5 m kept pit.
+    let dry = at(0.998, 0.35, [0.0, 0.0]);
+    let pit = at(0.998, 0.35, [1.5, 0.0]);
+    assert!(of(&pit, "wet") > 0.9 && of(&pit, "wet") > of(&dry, "wet"), "{dry:?} {pit:?}");
+    // The neutral channels (a tile without a channel block) change nothing: the weights equal those of the file without the two curves' effect at zero.
+    let zero = at(0.95, 0.05, [0.0, 0.0]);
+    assert!((zero.iter().map(|(_, v)| v).sum::<f64>() - 1.0).abs() < 1e-9);
+}
