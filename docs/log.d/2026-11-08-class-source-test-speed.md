@@ -1,0 +1,1 @@
+- 2026-11-08 class-source-test-speed: the class source's coast lattice is memoised per process under seed, radius and shelf profile (cap 4), so the class-source tests build one lattice per world and no longer time out in a full local run; no field, version or golden change.

@@ -177,6 +177,11 @@ pub struct ClassPoint {
     pub weights: [f64; CLASS_COUNT],
 }
 
+/// How many coast lattices a process keeps (a lattice of the default size is about 8 MB): the worlds a viewer or a test opens in turn.
+const COAST_MEMO_CAP: usize = 4;
+
+static COAST_MEMO: std::sync::OnceLock<std::sync::Mutex<Vec<(String, std::sync::Arc<CoastLattice>)>>> = std::sync::OnceLock::new();
+
 /// The default class source of one seed (GEN-094, GEN-095): the plates, and the land share of each for the back-arc.
 pub struct ClassSource {
     seed: u64,
@@ -188,7 +193,7 @@ pub struct ClassSource {
     /// The shelf profile of the ocean floor (GEN-118): Earth's by default.
     shelf: ShelfProfile,
     /// The distance to the coast of the field on a lattice (GEN-136), built on the first read of a sea point.
-    coast: std::sync::OnceLock<CoastLattice>,
+    coast: std::sync::OnceLock<std::sync::Arc<CoastLattice>>,
     /// The threads the coast lattice is built on (0: the machine's, at most 16); the bytes do not depend on it.
     coast_threads: usize,
 }
@@ -245,21 +250,36 @@ impl ClassSource {
     /// the first read on the machine's threads (the bytes do not depend on the count) within the widest shelf plus the slope.
     fn coast_lattice(&self) -> &CoastLattice {
         self.coast.get_or_init(|| {
-            let threads = if self.coast_threads > 0 {
-                self.coast_threads
-            } else {
-                std::thread::available_parallelism().map_or(1, |n| n.get()).min(16)
-            };
-            let cap_km = self.shelf.passive_width_km.max(self.shelf.active_width_km) + self.shelf.slope_width_km;
-            CoastLattice::build(
-                &|d| crate::global::continent_land_depth(self.seed, d),
-                &|d| self.margin_activity(d),
-                self.shelf.coast_lattice_cells,
-                cap_km,
-                self.radius_m / 1000.0,
-                threads,
-            )
+            // The lattice is a pure function of the seed, the radius and the shelf profile (the plates follow from the seed): a process that opens the same world again shares it.
+            let key = format!("{}|{:x}|{:?}", self.seed, self.radius_m.to_bits(), self.shelf);
+            let mut memo = COAST_MEMO.get_or_init(|| std::sync::Mutex::new(Vec::new())).lock().expect("the coast lattice memo");
+            if let Some((_, lattice)) = memo.iter().find(|(k, _)| *k == key) {
+                return lattice.clone();
+            }
+            let lattice = std::sync::Arc::new(self.build_coast_lattice());
+            if memo.len() == COAST_MEMO_CAP {
+                memo.remove(0);
+            }
+            memo.push((key, lattice.clone()));
+            lattice
         })
+    }
+
+    fn build_coast_lattice(&self) -> CoastLattice {
+        let threads = if self.coast_threads > 0 {
+            self.coast_threads
+        } else {
+            std::thread::available_parallelism().map_or(1, |n| n.get()).min(16)
+        };
+        let cap_km = self.shelf.passive_width_km.max(self.shelf.active_width_km) + self.shelf.slope_width_km;
+        CoastLattice::build(
+            &|d| crate::global::continent_land_depth(self.seed, d),
+            &|d| self.margin_activity(d),
+            self.shelf.coast_lattice_cells,
+            cap_km,
+            self.radius_m / 1000.0,
+            threads,
+        )
     }
 
     /// The signed distance in km from `d` to the nearest coast of the field (positive in the sea, negative on land, at most the cap in size) and the margin activity in `[0, 1]` at that coast (GEN-136).
