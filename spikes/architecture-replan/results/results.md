@@ -661,6 +661,21 @@ Verdict: **adopt**, **adopt with change**, **already covered**, **reject**.
 
 Sonnet sub-agents, seed 14, release builds, 4 threads, shared machine: **timings are indicative**. Probe code on `spike/terrain-pipeline-review` (`f4_outer_iteration.rs`, `f5_cell_areas.rs`, `f6_cross_face_h0.rs`; never merged).
 
+### F7: exact decomposition within a round (added for A3, inbox #100)
+Question: if a round routes the whole window once and runs the breach and sweeps per catchment on that shared routing, does it equal the whole-window carve?
+Method: `f7_exact_domains.rs`, F2's window; catchments are D8 trees of one window routing per round; forward, reverse and 4-thread catchment orders.
+
+| Case | Cells differing from the whole-window carve |
+|---|---|
+| Copy of the loops on the whole window (control) | 0 |
+| Per catchment, forward | 0 |
+| Per catchment, reverse | 0 |
+| Per catchment, 4 threads | 0 |
+
+Routing locality (a catchment routed alone against the window routing, 5 largest non-border catchments): the first routing has 0 receiver and 0 filled differences, but 24k-52k cells of area differences (MFD shares cross D8 catchment borders, ratio up to 20); after round 1, 3-182 receiver differences and up to 3,191 cells of filled differences (up to 0.245 m, the flood's FIFO tie order). A round's cost is about 85-90 % routing, 10-15 % catchment work.
+
+- **Answer:** with a shared routing the per-round decomposition is bit-exact. The error measured in F4 comes from routing each catchment alone. This changes the domain contract: see `docs/design/terrain-target.md` §6 (MFD clipped to the catchment; a canonical flood tie rule).
+
 ### F4: the outer iteration (route, cut domains, carve, repeat)
 Question: on F2's window (1,228 x 1,228 cells at 814 m, 20 steps), how close does the outer iteration get to the whole-window carve R, is it stable, and what happens at the borders?
 Method:
@@ -730,6 +745,7 @@ Method: elevation read by C1 from `global16384-m9c14` (read only, blocks decoded
 | Largest catchment | 5.88e6 km^2 (faces 0 and 3; F1's single-face truncated largest was 1.12e6) |
 | Connectivity of the largest cross-edge catchment | 20,533 sampled cells, all reach its one outlet |
 
+- Correction (2026-11-08): the store is older than the code (its base differs by a mean of 1,688 m), so F6's routing cost stands but its catchment sizes are not the current base's. On the current base the largest cross-edge river is about 9.1e5 km^2 (`spikes/prototype-region/results/`); 5.9e6 km^2 stays as a conservative upper bound.
 - **Answer:** a planet-wide cross-face route takes about 7 s at 3 km once heights are in memory. The largest catchment is 5.9e6 km^2. At 814 m that is about 8.9e6 cells, about 0.6 GB at pass 1's 64 bytes a cell: still a domain that fits a background job.
 - L1 preview: heights stay resident, so re-routing is about 7 s (the read is paid once, and the 131 s is decode-bound, not an edit cost).
 
