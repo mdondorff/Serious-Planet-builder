@@ -14,7 +14,10 @@ fn main() {
     }
     let c = (n as f64 - 1.0) / 2.0;
     let mut z: Vec<f64> = (0..n * n)
-        .map(|p| (3000.0 * (1.0 - libm::hypot((p % n) as f64 - c, (p / n) as f64 - c) / c)).max(0.0) + 5.0 * libm::sin(0.37 * (p % n) as f64) * libm::cos(0.23 * (p / n) as f64))
+        .map(|p| {
+            (3000.0 * (1.0 - libm::hypot((p % n) as f64 - c, (p / n) as f64 - c) / c)).max(0.0)
+                + 5.0 * libm::sin(0.37 * (p % n) as f64) * libm::cos(0.23 * (p / n) as f64)
+        })
         .collect();
     let outlet = grid.outlets(&z, -1.0);
     let t = std::time::Instant::now();
