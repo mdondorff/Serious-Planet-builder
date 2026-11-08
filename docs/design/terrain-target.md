@@ -45,4 +45,76 @@ Dependency direction follows the list; §6 defines the one feedback loop (K5, K6
 
 Domains and regions are simulation units, not render units: render LOD and tiles never select or drive a simulation (ADR 0014, ADR 0086).
 
+## 3. The authoritative surface
+
+### 3.1 Composition
+
+The surface at a direction `d` is one function, evaluated in this order. Every consumer (K4, K5, K7, tiles, collision, picking) uses it or a defined earlier term of it.
+
+| Step | Term | Definition | Read | Quantisation |
+|---|---|---|---|---|
+| 1 | `B(d)` | the base: the store lattice's C1 read (GEN-107), clamped as today | `read_elevation_c1`, pure in `d` | stored f32 per lattice node |
+| 2 | `L(d)` | the local change: what the bake added against `B` at the local grid, faded at the coast | C1 read of kind 13, clamped to the four cells (GEN-112), times `coast_fade(B)` (GEN-113) | stored i16 in steps of 0.25 m (`QUANT_STEP_M`) |
+| 3 | `C(d)` | the creases: octaves below the local grid (GEN-109) | analytic | none (CPU f64) |
+| 4 | `A(d)` | items above erosion (§7.1): constructed features | item stages (ADR 0066) | as today |
+
+- Surface: `S = B + L + C + A`, composed in f64, rounded to f32 only at the mesh (CON-13).
+- **One elevation source:** nothing else adds height. The regional change, the channels and the fill depth are inputs of the bake, not runtime terms (§3.3).
+- Step 2 replaces today's `change + fill depth` (GEN-112, ADR 0101 point 3): the runtime no longer adds the fill depth back. A basin shows its floor and the water field draws its lake (§5.5).
+- Presentation data (ground detail, normals) follows CON-14 and adds no height.
+
+### 3.2 Identity
+
+- The base lattice is one object per body: `base_id` = its bake key (ADR 0006). The bake reads `B` through the same read as the runtime: pass 2's stride-4 window (`sample_window_coarse`) is retired (SPIKE-104 D-B).
+- Every derived layer (K5, K6, K7, channels) folds `base_id` into its key, so a layer can only be read against the base it was taken on. **X** (GEN-114 folds the bake key today; the base's read becomes part of the identity).
+- A mismatch is refused, naming both keys (STRM-065 behaviour). No silent application.
+
+### 3.3 What the bake passes to the runtime
+
+| Bake product | Runtime term? | Use |
+|---|---|---|
+| K5's regional change | no | input of K7 (and of re-solves); a bake record (§10) |
+| K6's channel centrelines and levels | no | input of K7: burned in (below); drawn as rivers by K11 |
+| K7's total change against `B` | yes: `L` | the surface |
+| Fill depth | no | retired as a surface term; the basin object replaces it (§5.3) |
+
+- **Burn-in rule (K7):** K7 starts from `B + C1(ΔR)` (the regional change read C1). It lowers cells along each channel segment to the segment's level profile (rasterised, 8-connected, along the segment's D8 path at the local grid), then runs the breach (SPIKE-104 D-A: pass 1's rule at the local grid), the incising carve, thermal and deposition. It only lowers. Channels are thus part of `L`, not a separate term.
+- **The hand-over rule:** a C1 read must not be used to transfer a channel network between grids: it re-dams diagonal links (SPIKE-104 §3, 13.3 % of land). Burn-in plus breach is the transfer **[gate G-CON]**.
+- **Below the local grid:** a bank profile may be added later as a lower-only term with a declared bound, in the place of creases (GEN-109); not in the MVP.
+
+## 4. Grids, metrics and scale
+
+### 4.1 Grids
+
+One free integer per body, `k`, sets every grid (counts per cube-face edge). Earth at `k` = 14 is today's set.
+
+| Grid | Count | Earth cell | Role |
+|---|---|---|---|
+| Base lattice | `2^k` | 611 m | `B` |
+| Local grid | `6 x 2^k` | 102 m | K7, `L` |
+| Regional grid | `3 x 2^(k-2)` | 814 m | K5, K6 |
+| H0 grid | `3 x 2^(k-4)` | 3.26 km | K4 |
+
+- `k` follows from the body's target local cell size: the largest `k` whose local cell is at least the target (ADR 0045 point 2 made normative). The grid counts are never constants of the code (X11 of S105 §3).
+- Nesting: the base lattice's nodes are every 6th local cell corner; a regional cell is 8 local cells; an H0 cell is 4 regional cells.
+
+### 4.2 The cell metric
+
+- Every grid exposes `area(i, j)` and `distance(i, j, dir)` from the mapping (tangent warp, ADR 0003): area by the exact spherical quad (S105 F5: the sum matches the face area to 3e-14), distance by the great-circle between cell centres. **N** (`Grid` today has one `dx`).
+- Routing, MFD area, slopes, `f = K dt sqrt(A) / d`, river thresholds and basin areas read the metric. The uniform `dx` is retired. Effect today: areas are overstated by about 18 % on average (F5), so `K dt` and the area-based constants are re-tuned once.
+- Cross-face neighbours come from one function over directions (F6), the same everywhere; it is symmetric, including at cube corners, by rule: a cell's neighbours are computed once and the relation is symmetrised by canonical pairs **[gate G-CON]**.
+
+### 4.3 Scale (design-level)
+
+| Body | Radius | `k` | Local cell | Land share (assumed) | `B + L + hydrology` store | H0 (F6 scaled) | Notes |
+|---|---|---|---|---|---|---|---|
+| Moon | 1,737 km | 12 | about 111 m | no runoff | `B` + stamps only | skipped | no sea, no runoff: K4 to K7 skip (R5b) |
+| Earth | 6,371 km | 14 | 102 m | 29 % | see §10 | about 7 s | target |
+| 2x Earth | 12,742 km | 14 | 204 m | 29 % | as Earth (same counts) | as Earth | the larger planet takes coarser cells so the store stays inside R7; the local detail comes from creases |
+| 2x Earth at 102 m | 12,742 km | 15 | 102 m | 29 % | about 4x Earth: over R7 | about 4x | allowed only with a store budget of its own |
+
+- The preset holds what scale does not: gravity, rotation, tilt, atmosphere, K, U, thresholds (ADR 0108); a radius alone sets no geology.
+- Climate at scale: orography lattice counts follow the same `k` rule; the preset's winds and tilt (S105 X12).
+- Terrain, hydrology and store for the 2x case are checked as a design table here and one 2x H0 run in the prototype (S105 §13.3).
+
 <!-- next -->
